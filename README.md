@@ -2,16 +2,16 @@
 
 **Firmware de Control Seguro para Vehículo Eléctrico Inteligente**
 
-[![Platform](https://img.shields.io/badge/Platform-STM32G474RE-blue.svg)](https://www.st.com/en/microcontrollers-microprocessors/stm32g474re.html)
+[![Platform](https://img.shields.io/badge/Platform-STM32G431KB-blue.svg)](https://www.st.com/en/microcontrollers-microprocessors/stm32g431kb.html)
 [![CAN Bus](https://img.shields.io/badge/CAN-500%20kbps-green.svg)](https://www.iso.org/standard/63648.html)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-In%20Development-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Ready%20for%20Review-green.svg)]()
 
 ---
 
 ## 🎯 Descripción del Proyecto
 
-Este repositorio contiene el **firmware de control seguro** basado en **STM32G474RE** para un vehículo eléctrico de 4 ruedas con dirección Ackermann. El sistema gestiona:
+Este repositorio contiene el **firmware de control seguro** basado en **STM32G431KB** para un vehículo eléctrico de 4 ruedas con dirección Ackermann. El sistema gestiona:
 
 - ✅ **Control de motores:** 4 motores de tracción independientes + motor de dirección
 - ✅ **Sistemas de seguridad:** ABS, TCS, protección térmica, watchdog
@@ -24,7 +24,7 @@ Este repositorio contiene el **firmware de control seguro** basado en **STM32G47
 
 ```
 ┌─────────────────────────┐         CAN Bus        ┌──────────────────────────┐
-│     ESP32-S3 (HMI)      │◄────── 500 kbps ──────►│   STM32G474RE (Control)  │
+│     ESP32-S3 (HMI)      │◄────── 500 kbps ──────►│   STM32G431KB (Control)  │
 │                         │      TJA1051T/3        │                          │
 │ - Display TFT + Touch   │                        │ - Motores tracción (4×)  │
 │ - Audio DFPlayer        │     Comandos HMI       │ - Motor dirección        │
@@ -39,25 +39,25 @@ Este repositorio contiene el **firmware de control seguro** basado en **STM32G47
 
 **Separación de responsabilidades:**
 - **ESP32-S3 (HMI):** Interfaz de usuario, visualización, feedback audible/visual
-- **STM32G474RE (Control):** Control de tiempo real, seguridad funcional, decisión final
+- **STM32G431KB (Control):** Control de tiempo real, seguridad funcional, decisión final
 
 ---
 
 ## ✨ Características Principales
 
-### Hardware STM32G474RE
+### Hardware STM32G431KB
 
 | Especificación | Valor |
 |----------------|-------|
 | **MCU** | ARM Cortex-M4F @ 170 MHz |
-| **Flash** | 512 KB |
-| **RAM** | 128 KB |
+| **Flash** | 128 KB |
+| **RAM** | 32 KB |
 | **FPU** | ✅ Sí (cálculos punto flotante) |
-| **FDCAN** | 3 instancias (usamos FDCAN1) |
-| **ADC** | 5× 12-bit, hasta 4 MSPS |
-| **Timers** | 11 (TIM1/TIM8 avanzados para PWM) |
-| **I²C** | 4 instancias @ 400 kHz |
-| **GPIO** | 51 pines I/O |
+| **FDCAN** | 1 instancia (FDCAN1) |
+| **ADC** | 2× 12-bit, hasta 4 MSPS |
+| **Timers** | 9 (TIM1/TIM8 avanzados para PWM) |
+| **I²C** | 3 instancias @ 400 kHz |
+| **GPIO** | 26 pines I/O |
 
 ### Periféricos Conectados
 
@@ -90,7 +90,7 @@ Este repositorio contiene el **firmware de control seguro** basado en **STM32G47
 - [ST-Link Utility](https://www.st.com/en/development-tools/stsw-link004.html) (opcional)
 
 **Hardware:**
-- NUCLEO-G474RE o placa compatible
+- NUCLEO-G431KB o placa compatible con STM32G431KB
 - Transreceptor CAN TJA1051T/3
 - 2× Resistencias 120Ω (terminación CAN)
 - Cable USB para programación
@@ -125,7 +125,7 @@ make all
 |-----------|-------------|------|
 | **HARDWARE.md** | 📌 Especificación completa de hardware | [docs/HARDWARE.md](docs/HARDWARE.md) |
 | **CAN_PROTOCOL.md** | 📡 Protocolo CAN ESP32↔STM32 | [docs/CAN_PROTOCOL.md](docs/CAN_PROTOCOL.md) |
-| **PINOUT.md** | 🔧 Pinout definitivo STM32G474RE | [docs/PINOUT.md](docs/PINOUT.md) |
+| **PINOUT.md** | 🔧 Pinout definitivo STM32G431KB | [docs/PINOUT.md](docs/PINOUT.md) |
 | **MOTOR_CONTROL.md** | ⚙️ Control de motores y PWM | [docs/MOTOR_CONTROL.md](docs/MOTOR_CONTROL.md) |
 | **SAFETY_SYSTEMS.md** | 🛡️ ABS/TCS y seguridad funcional | [docs/SAFETY_SYSTEMS.md](docs/SAFETY_SYSTEMS.md) |
 | **BUILD_GUIDE.md** | 🔨 Guía de compilación y deploy | [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) |
@@ -229,9 +229,11 @@ Ver [docs/CAN_PROTOCOL.md](docs/CAN_PROTOCOL.md) para formato detallado de cada 
 - ✅ **Pinout:** Congelado y validado
 - ✅ **Protocolo CAN:** Especificado completo
 - ✅ **Documentación:** Completa
-- ⏳ **Firmware base:** En desarrollo (20%)
-- ⏳ **Integración CAN:** Pendiente
-- ⏳ **Pruebas hardware:** Pendiente
+- ✅ **Firmware base:** Implementado (100%)
+- ✅ **Header files:** Todos los archivos .h creados
+- ✅ **Source files:** Todos los archivos .c creados
+- ✅ **Integración CAN:** Implementada
+- ⏳ **Pruebas hardware:** Pendiente (requiere hardware físico)
 
 ---
 
