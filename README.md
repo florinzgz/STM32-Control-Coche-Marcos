@@ -1,5 +1,11 @@
 # STM32G474RE Control Car - Marcos
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![STM32](https://img.shields.io/badge/STM32-G474RE-blue.svg)](https://www.st.com/en/microcontrollers-microprocessors/stm32g474re.html)
+[![CAN](https://img.shields.io/badge/CAN-500kbps-green.svg)](docs/CAN_PROTOCOL.md)
+
+**🚀 Quick Start**: See [Quick Start Guide](docs/QUICK_START.md) for first-time setup.
+
 ## Project Overview
 STM32G474RE-based vehicle control system with 4-wheel independent traction, steering motor control, and comprehensive sensor integration for electric vehicle applications. This firmware works in conjunction with an ESP32-S3 HMI system via CAN bus communication.
 
@@ -150,6 +156,8 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 
 ## Build Instructions
 
+**🚀 NEW USERS**: See [Quick Start Guide](docs/QUICK_START.md) for a step-by-step setup tutorial.
+
 ### Prerequisites
 - STM32CubeIDE (latest version)
 - STM32CubeMX (for hardware configuration)
@@ -212,6 +220,40 @@ STM32-Control-Coche-Marcos/
 ✅ Overcurrent and overtemperature protection
 ✅ Independent watchdog
 ✅ Configurable 4x2/4x4 drive modes
+
+## System Architecture
+
+This firmware is part of a **dual-microcontroller architecture**:
+
+```
+┌──────────────────┐                            ┌──────────────────┐
+│   ESP32-S3       │    CAN Bus @ 500 kbps      │  STM32G474RE     │
+│   (HMI)          │ ◄────────────────────────► │  (Control)       │
+│                  │    TJA1051T/3 × 2          │  (THIS REPO)     │
+└──────────────────┘                            └──────────────────┘
+```
+
+### Component Responsibilities
+
+| Component | Repository | Responsibilities |
+|-----------|------------|------------------|
+| **ESP32-S3** | [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos) | • Display TFT 480×320<br>• Touch interface<br>• Audio feedback<br>• LED indicators<br>• User menus and diagnostics |
+| **STM32G474RE** | **This repository** | • Motor control (traction + steering)<br>• Critical sensors<br>• Safety systems (ABS/TCS)<br>• Power relays<br>• Final authority on all actions |
+
+### Why Two Microcontrollers?
+
+- **Separation of concerns**: HMI (Human-Machine Interface) vs Critical Control
+- **Safety**: STM32 has final authority on all power and movement
+- **Deterministic control**: Real-time control loop not affected by display rendering
+- **Modularity**: Each system can be developed and tested independently
+
+See [docs/ESP32_STM32_CAN_CONNECTION.md](docs/ESP32_STM32_CAN_CONNECTION.md) for CAN connection details.
+
+## Related Repositories
+
+- **ESP32-S3 HMI Firmware**: [florinzgz/FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos)
+  - User interface, display, touch, audio, LEDs
+  - Communicates with this STM32 firmware via CAN bus
 
 ## Author
 **Florin Zgureanu** (@florinzgz)
