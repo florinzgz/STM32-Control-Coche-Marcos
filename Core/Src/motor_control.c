@@ -335,7 +335,11 @@ float PID_Update(PID_Controller_t *pid, float measured_value)
   float i_term = pid->Ki * pid->integral;
 
   /* Derivative term */
-  float derivative = (error - pid->prev_error) / pid->dt;
+  float derivative = 0.0f;
+  if (pid->dt > 0.0f)
+  {
+    derivative = (error - pid->prev_error) / pid->dt;
+  }
   float d_term = pid->Kd * derivative;
 
   /* Calculate output */
