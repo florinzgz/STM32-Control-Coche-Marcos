@@ -1,28 +1,38 @@
-#ifndef __MOTOR_CONTROL_H
-#define __MOTOR_CONTROL_H
+// motor_control.h
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#ifndef MOTOR_CONTROL_H
+#define MOTOR_CONTROL_H
 
-#include "main.h"
 #include <stdint.h>
 
-/* Motor control functions */
-void Motor_Init(void);
-void Traction_SetThrottle(int8_t throttle);
-void Traction_SetSpeed_FL(int8_t speed);
-void Traction_SetSpeed_FR(int8_t speed);
-void Traction_SetSpeed_RL(int8_t speed);
-void Traction_SetSpeed_RR(int8_t speed);
-void Traction_EmergencyStop(void);
-void Steering_SetAngle(float angle_deg);
-void Steering_ControlLoop(void);
-float Steering_GetCurrentAngle(void);
-void Ackermann_ApplySteering(float angle_rad, int8_t throttle);
+// Constants for Ackermann geometry
+#define WHEELBASE 0.95 // in meters
+#define TRACK 0.70 // in meters
 
-#ifdef __cplusplus
-}
-#endif
+// Structure for individual wheel state
+typedef struct {
+    uint8_t demandPct;  // Desired percentage demand for the motor
+    float currentA;     // Current in Amperes
+    float tempC;        // Temperature in Celsius
+    float speedKmh;     // Speed in km/h
+    uint8_t pwm;        // PWM value
+    uint8_t reverse;     // Reverse flag (0 = forward, 1 = reverse)
+} WheelState;
 
-#endif
+// Structure for traction state with mode support
+typedef struct {
+    WheelState wheels[4]; // Array of wheel states for 4 vehicles
+    uint8_t mode;          // 0 = 4x4 mode, 1 = 4x2 mode
+} TractionState;
+
+// Function prototypes for motor control
+void Traction_Init(void);
+void Traction_Update(float steering_angle);
+void Steering_Init(void);
+float Steering_GetAngle(void);
+
+// Safety functions
+void Safety_Check(void);
+void Safety_Engage(void);
+
+#endif // MOTOR_CONTROL_H
