@@ -64,7 +64,7 @@
 | 35  | PC5  | EN_FL     | Habilitación Motor FL |
 | 36  | PC6  | EN_FR     | Habilitación Motor FR |
 | 37  | PC7  | EN_RL     | Habilitación Motor RL |
-| 39  | PC8  | EN_RR     | Habilitación Motor RR |
+| 38  | PD2  | EN_RR     | Habilitación Motor RR |
 | 40  | PC9  | EN_STEER  | Habilitación Motor Dirección |
 
 ### Relay Control (GPIO Output - Active HIGH)
@@ -96,9 +96,9 @@
 | Pin | GPIO  | Function      | Description |
 |-----|-------|---------------|-------------|
 | 57  | PB5   | WHEEL_FL_SENS | Sensor velocidad rueda FL (6 tornillos) |
-| 58  | PB6   | WHEEL_FR_SENS | Sensor velocidad rueda FR (6 tornillos) |
-| 59  | PB7   | WHEEL_RL_SENS | Sensor velocidad rueda RL (6 tornillos) |
-| 60  | PB8   | WHEEL_RR_SENS | Sensor velocidad rueda RR (6 tornillos) |
+| 21  | PB10  | WHEEL_FR_SENS | Sensor velocidad rueda FR (6 tornillos) |
+| 22  | PB11  | WHEEL_RL_SENS | Sensor velocidad rueda RL (6 tornillos) |
+| 25  | PB12  | WHEEL_RR_SENS | Sensor velocidad rueda RR (6 tornillos) |
 | 56  | PB4   | ENC_Z         | Sensor índice encoder (reutilizado arriba) |
 
 **Especificación LJ12A3-4-Z/BX:**
@@ -130,8 +130,8 @@
 ### Sensores INA226 (I2C1 via TCA9548A)
 | Pin | GPIO | I2C     | Function | Description |
 |-----|------|---------|----------|-------------|
-| 61  | PB9  | I2C1_SDA | SDA     | Datos I2C |
-| 62  | PB8  | I2C1_SCL | SCL     | Clock I2C |
+| 58  | PB6  | I2C1_SCL | SCL     | Clock I2C |
+| 59  | PB7  | I2C1_SDA | SDA     | Datos I2C |
 
 **Configuración I2C:**
 - Velocidad: 400 kHz (Fast Mode)
@@ -205,9 +205,8 @@ Pedal_% = ((Voltage_ADC - 0.33) / (2.97 - 0.33)) × 100%
 | 21  | PB0   | OneWire  | (Usado para DS18B20) |
 | 22  | PB1   | GPIO     | Libre/Expansión |
 | 23  | PB2   | GPIO     | Libre/Expansión |
-| 29  | PB10  | GPIO     | Libre/Expansión |
-| 30  | PB11  | GPIO     | Libre/Expansión |
-| 31  | PB12  | GPIO     | Libre/Expansión |
+| 60  | PB8   | GPIO     | Libre/Expansión |
+| 61  | PB9   | GPIO     | Libre/Expansión |
 | 47  | PB13  | GPIO     | Libre/Expansión |
 | 48  | PB14  | GPIO     | Libre/Expansión |
 | 49  | PB15  | GPIO     | Libre/Expansión |
