@@ -410,8 +410,19 @@ void Ackermann_CalculateWheelSpeeds(float steering_angle, float base_speed,
   /* Convert angle to radians */
   float angle_rad = steering_angle * (M_PI / 180.0f);
 
+  /* Ensure angle is not too small to avoid numerical issues */
+  float tan_angle = tanf(fabsf(angle_rad));
+  if (tan_angle < 0.01f)  /* Minimum tangent value for numerical stability */
+  {
+    *fl_speed = base_speed;
+    *fr_speed = base_speed;
+    *rl_speed = base_speed;
+    *rr_speed = base_speed;
+    return;
+  }
+
   /* Calculate turn radius */
-  float turn_radius = ackermann.wheelbase / tanf(fabsf(angle_rad));
+  float turn_radius = ackermann.wheelbase / tan_angle;
 
   /* Calculate speed ratios for each wheel */
   float inner_radius = turn_radius - (ackermann.track_width / 2.0f);

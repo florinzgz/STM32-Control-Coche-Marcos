@@ -440,7 +440,7 @@ void Sensors_PeriodicUpdate(void)
 float Sensors_CalculateRPM(uint32_t pulse_count, uint32_t time_delta_ms,
                             uint16_t pulses_per_rev)
 {
-  if (time_delta_ms == 0 || pulses_per_rev == 0)
+  if (time_delta_ms < 10 || pulses_per_rev == 0)  /* Minimum 10ms for stability */
     return 0.0f;
 
   float revolutions = (float)pulse_count / (float)pulses_per_rev;
