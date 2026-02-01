@@ -415,7 +415,7 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 | 1 | STM32G474RE (NUCLEO) | NUCLEO-G474RE | €20 |
 | 5 | Driver BTS7960 | BTS7960 H-Bridge | €15 (5×) |
 | 5 | Motor DC 24V 250W | - | €100 (5×) |
-| 1 | Encoder E6B2-CWZ6C | E6B2-CWZ6C-360P/R | €40 |
+| 1 | Encoder E6B2-CWZ6C | E6B2-CWZ6C-1200P/R | €40 |
 | 6 | INA226 breakout | INA226 | €12 (6×) |
 | 1 | TCA9548A multiplexor | TCA9548A | €3 |
 | 5 | DS18B20 temperatura | DS18B20 | €5 (5×) |
