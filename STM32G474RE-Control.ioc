@@ -1,0 +1,41 @@
+# STM32G474RE Configuration File
+
+<configuration>
+    <device>STM32G474RE</device>
+    <peripherals>
+        <FDCAN1>
+            <enabled>true</enabled>
+        </FDCAN1>
+        <I2C1>
+            <enabled>true</enabled>
+        </I2C1>
+        <TIM1>
+            <enabled>true</enabled>
+        </TIM1>
+        <TIM2>
+            <enabled>true</enabled>
+        </TIM2>
+        <TIM8>
+            <enabled>true</enabled>
+        </TIM8>
+        <ADC>
+            <enabled>true</enabled>
+        </ADC>
+        <IWDG>
+            <enabled>true</enabled>
+        </IWDG>
+    </peripherals>
+    <GPIO>
+        <motor_control>
+            <pin>GPIO_PIN_1</pin>
+            <pin>GPIO_PIN_2</pin>
+        </motor_control>
+        <sensor>
+            <pin>GPIO_PIN_3</pin>
+            <pin>GPIO_PIN_4</pin>
+        </sensor>
+        <peripheral>
+            <pin>GPIO_PIN_5</pin>
+        </peripheral>
+    </GPIO>
+</configuration>
