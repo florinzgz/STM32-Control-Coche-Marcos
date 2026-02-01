@@ -277,16 +277,18 @@ ShifterState_t Sensors_ReadShifter(void)
   uint8_t neu = HAL_GPIO_ReadPin(SHIFTER_NEU_GPIO_Port, SHIFTER_NEU_Pin);
   uint8_t rev = HAL_GPIO_ReadPin(SHIFTER_REV_GPIO_Port, SHIFTER_REV_Pin);
   
-  /* Check for exactly one active signal */
-  uint8_t active_count = fwd + neu + rev;
+  /* Check for exactly one active signal (active HIGH) */
+  uint8_t active_count = (fwd == GPIO_PIN_SET ? 1 : 0) + 
+                         (neu == GPIO_PIN_SET ? 1 : 0) + 
+                         (rev == GPIO_PIN_SET ? 1 : 0);
   
   if (active_count != 1) {
     return SHIFTER_ERROR;
   }
   
-  if (fwd) return SHIFTER_FORWARD;
-  if (neu) return SHIFTER_NEUTRAL;
-  if (rev) return SHIFTER_REVERSE;
+  if (fwd == GPIO_PIN_SET) return SHIFTER_FORWARD;
+  if (neu == GPIO_PIN_SET) return SHIFTER_NEUTRAL;
+  if (rev == GPIO_PIN_SET) return SHIFTER_REVERSE;
   
   return SHIFTER_ERROR;
 }
