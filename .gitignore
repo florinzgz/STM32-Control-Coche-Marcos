@@ -1,55 +1,125 @@
-# Prerequisites
-*.d
+# ===========================
+# STM32CubeIDE / Eclipse
+# ===========================
+.metadata/
+.settings/
+.cproject
+.project
+.classpath
+*.launch
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
 
-# Object files
+# Debug y Release builds
+Debug/
+Release/
+*/Debug/
+*/Release/
+
+# ===========================
+# Archivos de compilación
+# ===========================
 *.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
 *.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
 *.su
-*.idb
-*.pdb
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.axf
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# ===========================
+# STM32 específicos
+# ===========================
+*.ioc.bak
+Drivers/CMSIS/
+Drivers/STM32G4xx_HAL_Driver/
 
-# debug information files
-*.dwo
+# ===========================
+# Logs y temporales
+# ===========================
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# ===========================
+# IDEs alternativos
+# ===========================
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# CLion / IntelliJ
+.idea/
+cmake-build-*/
+
+# Keil uVision
+*.uvguix.*
+*.uvoptx
+*.uvprojx
+
+# IAR Embedded Workbench
+Debug/
+Release/
+*.ewp
+*.eww
+*.ewd
+*.dni
+
+# ===========================
+# Herramientas de análisis
+# ===========================
+*.gcda
+*.gcno
+*.gcov
+cov-int/
+*.sarif
+
+# ===========================
+# Python (para tools/)
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+
+# ===========================
+# Node.js (si se usa)
+# ===========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===========================
+# Documentación generada
+# ===========================
+doxygen/
+html/
+latex/
+
+# ===========================
+# Archivos específicos del usuario
+# ===========================
+*.user
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+
+# Pero mantener archivos esenciales
+!.gitignore
+!README.md
+!LICENSE
