@@ -45,6 +45,14 @@ Este repositorio contiene el **firmware de control seguro** basado en **STM32G47
 
 ## ✨ Características Principales
 
+### ⚡ Control de Motores (PWM Directo)
+
+- **TIM1** (4 canales) - Motores de tracción FL/FR/RL/RR @ 20 kHz
+- **TIM8** (1 canal) - Motor de dirección @ 20 kHz
+- **Frecuencia PWM:** 20 kHz (inaudible, baja vibración)
+- **Resolución:** ~13 bits (8500 pasos)
+- **NO se usa PCA9685** - Control directo desde STM32 para mínima latencia
+
 ### Hardware STM32G474RE
 
 | Especificación | Valor |
@@ -62,15 +70,13 @@ Este repositorio contiene el **firmware de control seguro** basado en **STM32G47
 ### Periféricos Conectados
 
 #### Motores y Actuadores
-- **4× BTS7960** - Drivers H-Bridge para motores de tracción
-- **1× BTS7960** - Driver para motor de dirección
-- **3× Relés** - Main Power, Tracción, Dirección
+- **5× BTS7960** - Drivers H-Bridge: 4 motores tracción + 1 motor dirección (control PWM DIRECTO, NO PCA9685)
+- **3× Relés** - Main Power, Tracción, Dirección (fail-safe LOW)
 
 #### Sensores
-- **Encoder E6B2-CWZ6C** - 360 PPR (1440 conteos/revolución en modo cuadratura)
-- **4× Sensores de rueda** - Detección de velocidad (ABS/TCS)
-- **6× INA226** - Monitoreo de corriente (vía I²C + TCA9548A)
-- **4× DS18B20** - Sensores de temperatura (OneWire)
+- **5× Sensores de rueda** - 4 sensores rueda + 1 encoder dirección E6B2-CWZ6C (360 PPR, 1440 conteos/rev)
+- **6× INA226** - Monitoreo de corriente: 4 motores tracción + 1 motor dirección + 1 batería (vía I²C + TCA9548A)
+- **5× DS18B20** - Sensores de temperatura: 4 motores + 1 ambiente (OneWire)
 - **Pedal Hall** - Sensor analógico sin contacto
 - **Shifter F/N/R** - Selector de marcha mecánico
 
@@ -153,10 +159,10 @@ PWM_STEER: PC8   DIR_STEER: PC9   EN_STEER: PC10
 // Encoder Dirección (TIM2 - Modo Quadrature)
 ENC_A: PA15 (TIM2_CH1)   ENC_B: PB3 (TIM2_CH2)   ENC_Z: PB4 (EXTI4)
 
-// Sensores Rueda (GPIO + EXTI)
+// Sensores Rueda (4 sensores GPIO + EXTI, el 5to sensor es el encoder de dirección)
 WHEEL_FL: PB0   WHEEL_FR: PB1   WHEEL_RL: PB2   WHEEL_RR: PB10
 
-// I²C (INA226 × 6 vía TCA9548A)
+// I²C (INA226 × 6: 4 tracción + 1 dirección + 1 batería, vía TCA9548A)
 I2C_SCL: PB6   I2C_SDA: PB7
 
 // CAN Bus (FDCAN1 @ 500 kbps)
@@ -171,7 +177,7 @@ FWD: PB12   NEU: PB13   REV: PB14
 // Relés (GPIO Output, default LOW)
 RELAY_MAIN: PC11   RELAY_TRAC: PC12   RELAY_DIR: PD2
 
-// Temperatura (OneWire - DS18B20 × 4)
+// Temperatura (OneWire - DS18B20 × 5: 4 motores + 1 ambiente)
 TEMP: PB5 (GPIO open-drain, pull-up 4.7kΩ)
 ```
 
@@ -226,12 +232,14 @@ Ver [docs/CAN_PROTOCOL.md](docs/CAN_PROTOCOL.md) para formato detallado de cada 
 ## 📊 Estado del Proyecto
 
 - ✅ **Arquitectura:** Definida y documentada
-- ✅ **Pinout:** Congelado y validado
+- ✅ **Pinout:** Congelado y validado (5 ruedas, 5 temps, 6 corrientes)
 - ✅ **Protocolo CAN:** Especificado completo
-- ✅ **Documentación:** Completa
-- ⏳ **Firmware base:** En desarrollo (20%)
-- ⏳ **Integración CAN:** Pendiente
-- ⏳ **Pruebas hardware:** Pendiente
+- ✅ **Documentación:** Completa (6 documentos)
+- ✅ **Firmware base:** Completado (100%) - main.c, motor_control.c, can_handler.c, sensor_manager.c, safety_system.c
+- ✅ **Headers:** Completados (6 archivos .h)
+- ✅ **Control PWM:** Implementado (directo TIM1/TIM8, NO PCA9685)
+- ⏳ **Integración hardware:** Pendiente pruebas físicas
+- ⏳ **Calibración sensores:** Pendiente (ROM DS18B20, INA226)
 
 ---
 
