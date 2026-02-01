@@ -22,6 +22,7 @@ Release/
 # ===========================
 # Archivos de compilación
 # ===========================
+build/
 *.o
 *.a
 *.su
@@ -37,8 +38,10 @@ Release/
 # STM32 específicos
 # ===========================
 *.ioc.bak
-Drivers/CMSIS/
-Drivers/STM32G4xx_HAL_Driver/
+# HAL Drivers (download via STM32CubeMX)
+Drivers/
+# But keep the directory structure marker
+!Drivers/.gitkeep
 
 # ===========================
 # Logs y temporales

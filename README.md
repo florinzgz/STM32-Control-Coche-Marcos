@@ -1,14 +1,15 @@
-# STM32G431KB Control Car - Marcos
+# STM32G474RE Control Car - Marcos
 
 ## Project Overview
-STM32G431KB-based vehicle control system with 4-wheel independent traction, steering motor control, and comprehensive sensor integration for electric vehicle applications.
+STM32G474RE-based vehicle control system with 4-wheel independent traction, steering motor control, and comprehensive sensor integration for electric vehicle applications. This firmware works in conjunction with an ESP32-S3 HMI system via CAN bus communication.
 
 ## Hardware Specifications
 
 ### Microcontroller
-- **MCU**: STM32G431KB (ARM Cortex-M4, 170 MHz)
-- **Memory**: 32KB RAM, 128KB Flash
-- **Package**: LQFP32
+- **MCU**: STM32G474RE (ARM Cortex-M4, 170 MHz)
+- **Memory**: 128KB RAM, 512KB Flash
+- **Package**: LQFP64
+- **Board**: NUCLEO-G474RE recommended
 
 ### Motor System
 - **Traction Motors**: 4x independent (FL, FR, RL, RR)
@@ -77,11 +78,13 @@ STM32G431KB-based vehicle control system with 4-wheel independent traction, stee
 ### Communication
 | Pin | Function | Protocol |
 |-----|----------|----------|
-| PA12 | FDCAN1_TX | CAN |
-| PA11 | FDCAN1_RX | CAN |
+| PB9 | FDCAN1_TX | CAN |
+| PB8 | FDCAN1_RX | CAN |
 | PB6 | I2C1_SCL | I2C |
 | PB7 | I2C1_SDA | I2C |
 | PB0 | OneWire | DS18B20 |
+
+**Note:** CAN bus connects to ESP32-S3 HMI via TJA1051T/3 transceivers. See [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos) for ESP32 side implementation.
 
 ### Analog Input
 | Pin | Function |
@@ -154,11 +157,26 @@ STM32G431KB-based vehicle control system with 4-wheel independent traction, stee
 
 ### Steps
 1. Clone the repository
-2. Open project in STM32CubeIDE
-3. Build the project (Ctrl+B)
-4. Connect ST-Link to STM32G431KB
-5. Flash the firmware (F11)
-6. Monitor via Serial Wire Debug (SWD)
+2. Install STM32 HAL drivers (see below)
+3. Open project in STM32CubeIDE or use Makefile
+4. Build the project (Ctrl+B or `make`)
+5. Connect ST-Link to STM32G474RE
+6. Flash the firmware (F11 or `make flash`)
+7. Monitor via Serial Wire Debug (SWD)
+
+### Installing HAL Drivers
+The STM32 HAL drivers are not included in this repository to keep it lightweight. You can obtain them in one of these ways:
+
+1. **STM32CubeMX** (Recommended):
+   - Open the `.ioc` file in STM32CubeMX
+   - Click "Generate Code" to automatically download and install the HAL drivers
+
+2. **Manual Download**:
+   - Download [STM32CubeG4](https://www.st.com/en/embedded-software/stm32cubeg4.html) from ST
+   - Extract to `Drivers/` directory in the project root
+
+3. **Build System**:
+   - The Makefile will guide you if HAL drivers are missing
 
 ## Project Structure
 ```
