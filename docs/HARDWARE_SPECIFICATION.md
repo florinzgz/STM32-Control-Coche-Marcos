@@ -99,7 +99,7 @@ PC7 (EN_RL)   → R_EN + L_EN
 STM32           BTS7960_RR
 PA11 (PWM_RR) → RPWM/LPWM según DIR_RR
 PC3 (DIR_RR)  → Control dirección
-PC8 (EN_RR)   → R_EN + L_EN
+PD2 (EN_RR)   → R_EN + L_EN
 ```
 
 #### Motor de Dirección (STEER)
@@ -247,7 +247,7 @@ Cada DS18B20:
 
 ### Configuración I2C con Multiplexor TCA9548A
 
-**Bus I2C1**: PB8 (SCL), PB9 (SDA)  
+**Bus I2C1**: PB6 (SCL), PB7 (SDA)  
 **Multiplexor**: TCA9548A @ 0x70  
 **Velocidad**: 400 kHz (Fast Mode)
 
@@ -384,10 +384,10 @@ Cada rueda tiene:
 
 | Rueda | Pin GPIO | EXTI | Tornillos | Diámetro |
 |-------|----------|------|-----------|----------|
-| FL    | PB5      | EXTI5 | 6 | 50cm |
-| FR    | PB6      | EXTI6 | 6 | 50cm |
-| RL    | PB7      | EXTI7 | 6 | 50cm |
-| RR    | PB8      | EXTI8 | 6 | 50cm |
+| FL    | PB5      | EXTI5  | 6 | 50cm |
+| FR    | PB10     | EXTI10 | 6 | 50cm |
+| RL    | PB11     | EXTI11 | 6 | 50cm |
+| RR    | PB12     | EXTI12 | 6 | 50cm |
 
 **Circuito por sensor:**
 ```
