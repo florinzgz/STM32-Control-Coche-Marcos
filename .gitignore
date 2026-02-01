@@ -40,8 +40,9 @@ build/
 *.ioc.bak
 # HAL Drivers (download via STM32CubeMX)
 Drivers/
-# But keep the directory structure marker
+# But keep the directory structure marker and documentation
 !Drivers/.gitkeep
+!Drivers/README.md
 
 # ===========================
 # Logs y temporales
