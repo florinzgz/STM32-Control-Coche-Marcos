@@ -110,8 +110,9 @@ Los **5 sensores de rueda** incluyen:
 ### E6B2-CWZ6C - Encoder Incremental
 
 **Especificaciones:**
-- **Resolución:** 360 PPR (Pulses Per Revolution)
-- **Modo Quadrature:** 1440 conteos/revolución (360 × 4)
+- **Resolución:** 1200 PPR (Pulses Per Revolution)
+- **Modo Quadrature:** 4800 conteos/revolución (1200 × 4)
+- **Resolución angular:** 0.075° por count (360° / 4800)
 - **Canales:** A, B (quadrature) + Z (índice/home)
 - **Timer:** TIM2 en modo Encoder
 

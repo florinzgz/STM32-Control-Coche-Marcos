@@ -136,9 +136,10 @@ Sensor → Pull-up 10kΩ a 3.3V → STM32 GPIO
 | Especificación | Valor |
 |----------------|-------|
 | **Modelo** | Omron E6B2-CWZ6C |
-| **Resolución** | 360 PPR (Pulses Per Revolution) |
+| **Resolución** | 1200 PPR (Pulses Per Revolution) |
 | **Modo** | Incremental cuadratura (A/B/Z) |
-| **Conteos/rev** | 1440 (360 × 4 en quadrature) |
+| **Conteos/rev** | 4800 (1200 × 4 en quadrature) |
+| **Resolución angular** | 0.075° por count (360° / 4800) |
 | **Tensión** | 5V - 12V |
 | **Salida** | Line driver (compatible 3.3V) |
 | **Pines STM32** | PA15 (A), PB3 (B), PB4 (Z) |
