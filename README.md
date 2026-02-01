@@ -147,18 +147,28 @@ STM32G431KB-based vehicle control system with 4-wheel independent traction, stee
 
 ## Build Instructions
 
-### Prerequisites
-- STM32CubeIDE (latest version)
-- STM32CubeMX (for hardware configuration)
-- ST-Link debugger/programmer
+### ⚠️ IMPORTANT: First-Time Setup
 
-### Steps
-1. Clone the repository
-2. Open project in STM32CubeIDE
-3. Build the project (Ctrl+B)
-4. Connect ST-Link to STM32G431KB
-5. Flash the firmware (F11)
-6. Monitor via Serial Wire Debug (SWD)
+Before building, you **MUST** generate the STM32 HAL drivers using STM32CubeMX:
+
+1. Install [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html)
+2. Open the project file: `STM32-Control-Coche-Marcos.ioc`
+3. Click **Project → Generate Code**
+4. The HAL drivers will be automatically downloaded to the `Drivers/` folder
+
+📖 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
+
+### Quick Build (after setup)
+
+```bash
+# Using STM32CubeIDE
+1. Open project in STM32CubeIDE
+2. Project → Build Project (Ctrl+B)
+3. Run → Debug (F11) to flash
+
+# Using command line (requires arm-none-eabi-gcc)
+make clean && make all
+```
 
 ## Project Structure
 ```

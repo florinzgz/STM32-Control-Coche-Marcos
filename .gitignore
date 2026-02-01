@@ -3,9 +3,6 @@
 # ===========================
 .metadata/
 .settings/
-.cproject
-.project
-.classpath
 *.launch
 *.tmp
 *.bak
@@ -18,6 +15,7 @@ Debug/
 Release/
 */Debug/
 */Release/
+build/
 
 # ===========================
 # Archivos de compilación
