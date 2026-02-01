@@ -1,52 +1,41 @@
-# Sensor Manager Header
-
 #ifndef SENSOR_MANAGER_H
 #define SENSOR_MANAGER_H
 
-#include <stdint.h>
+// Prototypes for sensor management functions
+void Sensor_Init(void);
 
-// Structures for Wheel Sensors
-typedef struct {
-    uint8_t id;
-    float speed;
-    float distance;
-} WheelSensor;
+// Interrupt handler prototypes for the wheels
+void Wheel_FL_IRQHandler(void);
+void Wheel_FR_IRQHandler(void);
+void Wheel_RL_IRQHandler(void);
+void Wheel_RR_IRQHandler(void);
 
-#define NUM_WHEEL_SENSORS 4
-WheelSensor wheelSensors[NUM_WHEEL_SENSORS];
+// Wheel speed retrieval prototypes
+float Wheel_GetSpeed_FL(void);
+float Wheel_GetSpeed_FR(void);
+float Wheel_GetSpeed_RL(void);
+float Wheel_GetSpeed_RR(void);
 
-// Structures for DS18B20 Temperature Sensors
-typedef struct {
-    uint8_t id;
-    float temperature;
-} DS18B20Sensor;
+// RPM retrieval prototypes
+float Wheel_GetRPM_FL(void);
 
-#define NUM_DS18B20_SENSORS 5
-DS18B20Sensor ds18B20Sensors[NUM_DS18B20_SENSORS];
+// Pedal management prototypes
+void Pedal_Update(void);
+float Pedal_GetValue(void);
+float Pedal_GetPercent(void);
 
-// Structures for INA226 Current Sensors
-typedef struct {
-    uint8_t id;
-    float current;
-    float voltage;
-} INA226Sensor;
+// Temperature management prototypes
+void Temperature_ReadAll(void);
+float Temperature_Get(void);
 
-#define NUM_INA226_SENSORS 6
-INA226Sensor ina226Sensors[NUM_INA226_SENSORS];
+// Current management prototypes
+void Current_ReadAll(void);
+float Current_Get(void);
 
-// ADC Pedal Sensor
-typedef struct {
-    uint8_t id;
-    uint16_t value;
-} ADCPedalSensor;
+// Voltage management prototype
+float Voltage_Get(void);
 
-ADCPedalSensor pedalSensor;
-
-// Function Declarations
-void initSensors();
-void readWheelSensors();
-void readDS18B20Sensors();
-void readINA226Sensors();
-void readPedalSensor();
+// Power management prototype
+float Power_Get(void);
 
 #endif // SENSOR_MANAGER_H
