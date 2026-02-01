@@ -404,7 +404,7 @@ void Ackermann_CalculateWheelSpeeds(float steering_angle, float base_speed,
   }
 
   /* Convert angle to radians */
-  float angle_rad = steering_angle * (3.14159f / 180.0f);
+  float angle_rad = steering_angle * (M_PI / 180.0f);
 
   /* Calculate turn radius */
   float turn_radius = ackermann.wheelbase / tanf(fabsf(angle_rad));

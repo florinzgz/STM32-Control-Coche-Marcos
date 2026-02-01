@@ -458,7 +458,7 @@ float Sensors_CalculateRPM(uint32_t pulse_count, uint32_t time_delta_ms,
 float Sensors_RPMtoKMH(float rpm, float wheel_diameter_mm)
 {
   /* Circumference in meters */
-  float circumference_m = (wheel_diameter_mm / 1000.0f) * 3.14159f;
+  float circumference_m = (wheel_diameter_mm / 1000.0f) * M_PI;
 
   /* Distance per minute in meters */
   float distance_per_min = rpm * circumference_m;

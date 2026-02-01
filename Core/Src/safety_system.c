@@ -165,7 +165,14 @@ bool ABS_CheckWheelLock(uint8_t wheel_index)
       count++;
     }
   }
-  avg_speed /= count;
+  if (count > 0)
+    avg_speed /= count;
+  else
+    return false;
+
+  /* Avoid division by zero */
+  if (avg_speed < 0.1f)
+    return false;
 
   /* Check if this wheel is significantly slower (indicating lock) */
   float slip = ((avg_speed - wheel_speed) / avg_speed) * 100.0f;
@@ -644,7 +651,10 @@ static float CalculateWheelSlip(uint8_t wheel_index)
   }
   if (count > 0)
     avg_speed /= count;
+  else
+    return 0.0f;
 
+  /* Avoid division by zero */
   if (avg_speed < 0.1f)
     return 0.0f;
 
