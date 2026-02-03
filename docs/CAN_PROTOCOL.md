@@ -322,9 +322,9 @@ ID: 0x203  DLC: 4  Data: [0x08, 0x00, 0x12, 0xC5]
 **Frecuencia:** 100 ms (10 Hz)
 
 **Conversión:**
-- 1 conteo = 0.25° (encoder 360 PPR × 4 = 1440 conteos/rev)
+- 1 conteo = 0.075° (encoder E6B2-CWZ6C 1200 PPR × 4 = 4800 conteos/rev)
 - Centro = 0 conteos (calibrado en inicio)
-- Límites físicos: ±45° = ±180 conteos
+- Límites físicos: ±54° = ±720 conteos (máximo ángulo Ackermann)
 
 **Ejemplo:**
 ```

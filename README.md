@@ -1,14 +1,14 @@
-# STM32G431KB Control Car - Marcos
+# STM32G474RE Control Car - Marcos
 
 ## Project Overview
-STM32G431KB-based vehicle control system with 4-wheel independent traction, steering motor control, and comprehensive sensor integration for electric vehicle applications.
+STM32G474RE-based vehicle control system with 4-wheel independent traction, steering motor control, and comprehensive sensor integration for electric vehicle applications.
 
 ## Hardware Specifications
 
 ### Microcontroller
-- **MCU**: STM32G431KB (ARM Cortex-M4, 170 MHz)
-- **Memory**: 32KB RAM, 128KB Flash
-- **Package**: LQFP32
+- **MCU**: STM32G474RE (ARM Cortex-M4F, 170 MHz)
+- **Memory**: 128KB RAM, 512KB Flash
+- **Package**: LQFP64
 
 ### Motor System
 - **Traction Motors**: 4x independent (FL, FR, RL, RR)
@@ -68,11 +68,11 @@ STM32G431KB-based vehicle control system with 4-wheel independent traction, stee
 | PC12 | RELAY_DIR |
 
 ### Encoder Interface
-| Pin | Function | Type |
-|-----|----------|------|
-| PA0 | ENC_A | TIM2_CH1 |
-| PA1 | ENC_B | TIM2_CH2 |
-| PA4 | ENC_Z | EXTI4 |
+| Pin | Function | Type | Specification |
+|-----|----------|------|---------------|
+| PA15 | ENC_A | TIM2_CH1 | E6B2-CWZ6C 1200 PPR |
+| PB3  | ENC_B | TIM2_CH2 | Quadrature 4800 counts/rev |
+| PB4  | ENC_Z | EXTI4 | Index pulse (LJ12A3-4-Z/BX) |
 
 ### Communication
 | Pin | Function | Protocol |

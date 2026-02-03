@@ -64,7 +64,7 @@ STM32-Control-Coche-Marcos/
 
 #### 2. Sensores 🔍
 - [x] 4 sensores rueda (EXTI interrupts, cálculo velocidad)
-- [x] 1 encoder dirección TIM2 Quadrature (360 PPR × 4 = 1440 cnt/rev)
+- [x] 1 encoder dirección TIM2 Quadrature (E6B2-CWZ6C 1200 PPR × 4 = 4800 cnt/rev, 0.075°/cnt)
 - [x] 5 DS18B20 OneWire (temperaturas, ROM addressing)
 - [x] 6 INA226 I²C (corrientes/voltajes, vía TCA9548A)
 - [x] Pedal Hall ADC1 (0-3.3V → 0-100% throttle)

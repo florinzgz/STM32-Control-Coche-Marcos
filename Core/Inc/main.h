@@ -1,7 +1,9 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-// Updated Encoder Specifications
+// ENCODER DE DIRECCIÓN (E6B2-CWZ6C - 1200 PPR - TIM2 Quadrature)
+// Quadrature mode: 1200 PPR × 4 = 4800 counts/revolution
+// Resolution: 360° / 4800 = 0.075° per count
 #define ENCODER_PPR 1200   // Pulses per Revolution for the encoder
 
 // GPIO Pin Definitions

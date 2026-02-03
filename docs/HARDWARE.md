@@ -136,9 +136,10 @@ Sensor → Pull-up 10kΩ a 3.3V → STM32 GPIO
 | Especificación | Valor |
 |----------------|-------|
 | **Modelo** | Omron E6B2-CWZ6C |
-| **Resolución** | 360 PPR (Pulses Per Revolution) |
+| **Resolución** | 1200 PPR (Pulses Per Revolution) |
 | **Modo** | Incremental cuadratura (A/B/Z) |
-| **Conteos/rev** | 1440 (360 × 4 en quadrature) |
+| **Conteos/rev** | 4800 (1200 × 4 en quadrature) |
+| **Resolución angular** | 0.075° por count (360° / 4800) |
 | **Tensión** | 5V - 12V |
 | **Salida** | Line driver (compatible 3.3V) |
 | **Pines STM32** | PA15 (A), PB3 (B), PB4 (Z) |
@@ -414,7 +415,7 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 | 1 | STM32G474RE (NUCLEO) | NUCLEO-G474RE | €20 |
 | 5 | Driver BTS7960 | BTS7960 H-Bridge | €15 (5×) |
 | 5 | Motor DC 24V 250W | - | €100 (5×) |
-| 1 | Encoder E6B2-CWZ6C | E6B2-CWZ6C-360P/R | €40 |
+| 1 | Encoder E6B2-CWZ6C | E6B2-CWZ6C-1200P/R | €40 |
 | 6 | INA226 breakout | INA226 | €12 (6×) |
 | 1 | TCA9548A multiplexor | TCA9548A | €3 |
 | 5 | DS18B20 temperatura | DS18B20 | €5 (5×) |
