@@ -110,7 +110,7 @@ Motor_SetDutyCycle(MOTOR_FL, 50);  // 50% duty cycle
 
 **Test CAN Transmission**:
 ```c
-CAN_SendHeartbeat();  // Send manual heartbeat
+CAN_SendHeartbeat();  // Sends heartbeat to CAN ID 0x001
 ```
 
 **Read Sensors**:

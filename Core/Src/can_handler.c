@@ -20,10 +20,25 @@ static uint32_t last_tx_heartbeat = 0;
 static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
     FDCAN_TxHeaderTypeDef tx_hdr = {0};
     
+    /* Map byte count to FDCAN DLC code */
+    uint32_t dlc_code;
+    switch (len) {
+        case 0:  dlc_code = FDCAN_DLC_BYTES_0; break;
+        case 1:  dlc_code = FDCAN_DLC_BYTES_1; break;
+        case 2:  dlc_code = FDCAN_DLC_BYTES_2; break;
+        case 3:  dlc_code = FDCAN_DLC_BYTES_3; break;
+        case 4:  dlc_code = FDCAN_DLC_BYTES_4; break;
+        case 5:  dlc_code = FDCAN_DLC_BYTES_5; break;
+        case 6:  dlc_code = FDCAN_DLC_BYTES_6; break;
+        case 7:  dlc_code = FDCAN_DLC_BYTES_7; break;
+        case 8:  dlc_code = FDCAN_DLC_BYTES_8; break;
+        default: dlc_code = FDCAN_DLC_BYTES_8; break; /* Clamp to max */
+    }
+    
     tx_hdr.Identifier = msg_id;
     tx_hdr.IdType = FDCAN_STANDARD_ID;
     tx_hdr.TxFrameType = FDCAN_DATA_FRAME;
-    tx_hdr.DataLength = (len << 16); /* Convert to FDCAN length code */
+    tx_hdr.DataLength = dlc_code;
     tx_hdr.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     tx_hdr.BitRateSwitch = FDCAN_BRS_OFF;
     tx_hdr.FDFormat = FDCAN_CLASSIC_CAN;
@@ -146,6 +161,22 @@ void CAN_SendError(uint8_t error_code, uint8_t subsystem) {
     TransmitFrame(CAN_ID_DIAG_ERROR, error_data, 2);
 }
 
+/* Helper to extract byte count from FDCAN DLC */
+static uint8_t ExtractDLC(uint32_t dlc_code) {
+    switch (dlc_code) {
+        case FDCAN_DLC_BYTES_0:  return 0;
+        case FDCAN_DLC_BYTES_1:  return 1;
+        case FDCAN_DLC_BYTES_2:  return 2;
+        case FDCAN_DLC_BYTES_3:  return 3;
+        case FDCAN_DLC_BYTES_4:  return 4;
+        case FDCAN_DLC_BYTES_5:  return 5;
+        case FDCAN_DLC_BYTES_6:  return 6;
+        case FDCAN_DLC_BYTES_7:  return 7;
+        case FDCAN_DLC_BYTES_8:  return 8;
+        default: return 0;
+    }
+}
+
 void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
@@ -158,6 +189,7 @@ void CAN_ProcessMessages(void) {
         }
         
         can_stats.rx_count++;
+        uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);
         
         /* Parse received messages based on ID */
         switch (rx_hdr.Identifier) {
@@ -166,23 +198,28 @@ void CAN_ProcessMessages(void) {
                 break;
                 
             case CAN_ID_CMD_THROTTLE:
-                if ((rx_hdr.DataLength >> 16) >= 1) {
-                    uint8_t throttle_percent = rx_payload[0];
-                    Traction_SetThrottle(throttle_percent);
+                if (msg_len >= 1) {
+                    float throttle_percent = (float)rx_payload[0];
+                    Traction_SetDemand(throttle_percent);
                 }
                 break;
                 
             case CAN_ID_CMD_STEERING:
-                if ((rx_hdr.DataLength >> 16) >= 2) {
-                    int16_t target_angle = (int16_t)(rx_payload[0] | (rx_payload[1] << 8));
-                    Steering_SetTarget(target_angle);
+                if (msg_len >= 2) {
+                    int16_t angle_raw = (int16_t)(rx_payload[0] | (rx_payload[1] << 8));
+                    float angle_deg = (float)angle_raw / 10.0f;  /* Convert from decidegrees */
+                    Steering_SetAngle(angle_deg);
                 }
                 break;
                 
             case CAN_ID_CMD_MODE:
-                if ((rx_hdr.DataLength >> 16) >= 1) {
-                    uint8_t drive_mode = rx_payload[0];
-                    Traction_SetMode(drive_mode);
+                if (msg_len >= 1) {
+                    uint8_t mode_flags = rx_payload[0];
+                    /* Bit 0: 4x4 enable, Bit 1: Tank turn, Bits 2-7: Reserved for future use */
+                    bool enable_4x4 = (mode_flags & 0x01) != 0;
+                    bool tank_turn = (mode_flags & 0x02) != 0;
+                    Traction_SetMode4x4(enable_4x4);
+                    Traction_SetAxisRotation(tank_turn);
                 }
                 break;
                 
