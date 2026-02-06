@@ -57,7 +57,7 @@ Este repositorio implementa el **firmware STM32 de control**.
 | Estadísticas TX/RX | tx_count, rx_count, tx_errors, rx_errors | N/A |
 | Timeout 250 ms → modo seguro | Safety_CheckCANTimeout() en loop 10 ms | Regla autoridad §6.3 |
 
-### 3. Sensores (`sensor_manager.c/h`) — COMPLETO ✅ (con nota DS18B20)
+### 3. Sensores (`sensor_manager.c/h`) — COMPLETO ✅
 
 | Funcionalidad | Detalles | Equivalente FULL-FIRMWARE |
 |---|---|---|
@@ -65,7 +65,7 @@ Este repositorio implementa el **firmware STM32 de control**.
 | 1× encoder dirección TIM2 Quadrature | E6B2-CWZ6C 1200 PPR × 4 = 4800 counts/rev, 0.075°/count | `src/input/steering.cpp` |
 | 6× INA226 I²C vía TCA9548A | Lectura shunt voltage + bus voltage, multiplexado canal a canal | `src/sensors/current.cpp` |
 | 1× Pedal ADC (PA3, ADC1_IN4) | Conversión simple polling, 12-bit, 0-3.3V → 0-100% | `src/input/pedal.cpp` |
-| 5× DS18B20 OneWire (PB0) | ⚠️ **Parcial:** OneWire bit-bang completo (reset, write/read byte), pero solo Skip ROM → lee 1 sensor. Falta ROM search (0xF0) para direccionar los 5 individualmente | `src/sensors/temperature.cpp` |
+| 5× DS18B20 OneWire (PB0) | OneWire bit-bang completo + Search ROM (0xF0) con algoritmo Maxim AN187 + Match ROM (0x55) para lectura individual + CRC8 en ROM y scratchpad. Fallback a Skip ROM si no se descubren sensores | `src/sensors/temperature.cpp` |
 
 ### 4. Sistema de Seguridad (`safety_system.c/h`) — COMPLETO ✅
 
@@ -124,7 +124,7 @@ Configuración de pines Alternate Function para cada periférico:
 - **Makefile** corregido con todos los archivos fuente reales + drivers HAL
 - **Linker script** (STM32G474RETX_FLASH.ld): 512KB Flash + 128KB RAM
 - **Startup assembly** (startup_stm32g474retx.s)
-- **STM32CubeMX .ioc** (placeholder para regenerar configuración)
+- **STM32CubeMX .ioc** completo: 36 pines configurados (PA0-PA3, PB0/PB3/PB6-PB9/PB15, PC0-PC13), ADC1_IN4 (PA3), EXTI IRQs, FDCAN/I2C/IWDG params, RCC PLL 170 MHz
 - **Scripts de setup** (setup_drivers.sh, setup_drivers.bat)
 
 ### 9. Documentación — 12 archivos ✅
