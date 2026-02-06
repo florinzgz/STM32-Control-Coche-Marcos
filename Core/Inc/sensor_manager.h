@@ -1,41 +1,46 @@
 #ifndef SENSOR_MANAGER_H
 #define SENSOR_MANAGER_H
 
-// Prototypes for sensor management functions
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "main.h"
+#include <stdint.h>
+#include <stdbool.h>
+
+/* ---- Initialization ---- */
 void Sensor_Init(void);
 
-// Interrupt handler prototypes for the wheels
+/* ---- Wheel speed (EXTI interrupt-driven) ---- */
 void Wheel_FL_IRQHandler(void);
 void Wheel_FR_IRQHandler(void);
 void Wheel_RL_IRQHandler(void);
 void Wheel_RR_IRQHandler(void);
 
-// Wheel speed retrieval prototypes
 float Wheel_GetSpeed_FL(void);
 float Wheel_GetSpeed_FR(void);
 float Wheel_GetSpeed_RL(void);
 float Wheel_GetSpeed_RR(void);
-
-// RPM retrieval prototypes
 float Wheel_GetRPM_FL(void);
 
-// Pedal management prototypes
+/* ---- Pedal (ADC) ---- */
 void Pedal_Update(void);
 float Pedal_GetValue(void);
 float Pedal_GetPercent(void);
 
-// Temperature management prototypes
+/* ---- DS18B20 Temperature (OneWire) ---- */
+void Temperature_StartConversion(void);
 void Temperature_ReadAll(void);
-float Temperature_Get(void);
+float Temperature_Get(uint8_t index);
 
-// Current management prototypes
+/* ---- INA226 Current (I2C via TCA9548A) ---- */
 void Current_ReadAll(void);
-float Current_Get(void);
+float Current_GetAmps(uint8_t index);
+float Voltage_GetBus(uint8_t index);
 
-// Voltage management prototype
-float Voltage_Get(void);
+#ifdef __cplusplus
+}
+#endif
 
-// Power management prototype
-float Power_Get(void);
-
-#endif // SENSOR_MANAGER_H
+#endif /* SENSOR_MANAGER_H */

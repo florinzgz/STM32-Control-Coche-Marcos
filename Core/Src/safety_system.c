@@ -1,1 +1,200 @@
-#include "safety_system.h"\n#include "main.h"\n#include "sensor_manager.h"\n#include "motor_control.h"\n\n#define ABS_SLIP_THRESHOLD 20\n#define TCS_SLIP_THRESHOLD 15\n#define MAX_CURRENT_MA 25000\n#define MAX_TEMP_C 90.0f\n#define CAN_TIMEOUT_MS 250\n\ntypedef struct {\n    uint8_t abs_active;\n    uint8_t tcs_active;\n    uint8_t overcurrent;\n    uint8_t overtemp;\n    uint8_t can_timeout;\n    uint8_t emergency_stop;\n} SafetyFlags_t;\n\nSafetyFlags_t safety_flags = {0};\nuint32_t last_can_rx_time = 0;\n\nvoid Safety_Init(void) {\n    safety_flags.abs_active = 0;\n    safety_flags.tcs_active = 0;\n    last_can_rx_time = HAL_GetTick();\n}\n\nvoid ABS_Update(void) {\n    uint16_t speed_fl = Wheel_GetSpeed_FL();\n    uint16_t speed_fr = Wheel_GetSpeed_FR();\n    uint16_t speed_rl = Wheel_GetSpeed_RL();\n    uint16_t speed_rr = Wheel_GetSpeed_RR();\n    uint16_t avg = (speed_fl + speed_fr + speed_rl + speed_rr) / 4;\n    if (avg < 100) { safety_flags.abs_active = 0; return; }\n    int32_t slip = ((avg - speed_fl) * 100) / avg;\n    if (slip > ABS_SLIP_THRESHOLD) { safety_flags.abs_active = 1; Traction_SetThrottle(0); }\n}\n\nvoid TCS_Update(void) {\n    uint16_t speed_fl = Wheel_GetSpeed_FL();\n    uint16_t avg = (speed_fl + Wheel_GetSpeed_FR() + Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4;\n    if (avg < 50) { safety_flags.tcs_active = 0; return; }\n    int32_t slip = ((speed_fl - avg) * 100) / avg;\n    if (slip > TCS_SLIP_THRESHOLD) { safety_flags.tcs_active = 1; Traction_SetThrottle(Pedal_GetPercent() / 2); }\n}\n\nvoid Safety_CheckCurrent(void) {\n    uint16_t max = 0;\n    for (uint8_t i = 0; i < 6; i++) { uint16_t c = Current_Get(i); if (c > max) max = c; }\n    if (max > MAX_CURRENT_MA) { safety_flags.emergency_stop = 1; Traction_EmergencyStop(); }\n}\n\nvoid Safety_CheckTemperature(void) {\n    float max = 0.0f;\n    for (uint8_t i = 0; i < 5; i++) { float t = Temperature_Get(i); if (t > max) max = t; }\n    if (max > MAX_TEMP_C) { safety_flags.emergency_stop = 1; Traction_EmergencyStop(); }\n}\n\nvoid Safety_CheckCANTimeout(void) {\n    if ((HAL_GetTick() - last_can_rx_time) > CAN_TIMEOUT_MS) { safety_flags.can_timeout = 1; Traction_EmergencyStop(); }\n}\n\nvoid Safety_UpdateCANRxTime(void) { last_can_rx_time = HAL_GetTick(); }\nuint8_t Safety_IsABSActive(void) { return safety_flags.abs_active; }\nuint8_t Safety_IsTCSActive(void) { return safety_flags.tcs_active; }\nuint8_t Safety_IsEmergencyStop(void) { return safety_flags.emergency_stop; }
+/**
+  ****************************************************************************
+  * @file    safety_system.c
+  * @brief   Safety: ABS, TCS, overcurrent, overtemp, CAN timeout, fail-safe
+  ****************************************************************************
+  */
+
+#include "safety_system.h"
+#include "main.h"
+#include "sensor_manager.h"
+#include "motor_control.h"
+
+/* ---- Thresholds ---- */
+#define ABS_SLIP_THRESHOLD   20   /* % wheel slip to trigger ABS */
+#define TCS_SLIP_THRESHOLD   15   /* % wheel slip to trigger TCS */
+#define MAX_CURRENT_A        25.0f
+#define MAX_TEMP_C           90.0f
+#define CAN_TIMEOUT_MS       250
+
+/* ---- Module state ---- */
+SafetyStatus_t safety_status = {0};
+Safety_Error_t safety_error  = SAFETY_ERROR_NONE;
+
+static uint32_t last_can_rx_time = 0;
+static uint8_t  emergency_stopped = 0;
+
+/* ================================================================== */
+
+void Safety_Init(void)
+{
+    safety_status.abs_active = false;
+    safety_status.tcs_active = false;
+    safety_status.abs_wheel_mask = 0;
+    safety_status.tcs_wheel_mask = 0;
+    safety_status.abs_activation_count = 0;
+    safety_status.tcs_activation_count = 0;
+    safety_error     = SAFETY_ERROR_NONE;
+    emergency_stopped = 0;
+    last_can_rx_time = HAL_GetTick();
+}
+
+/* ---- ABS --------------------------------------------------------- */
+
+void ABS_Update(void)
+{
+    float spd[4];
+    spd[0] = Wheel_GetSpeed_FL();
+    spd[1] = Wheel_GetSpeed_FR();
+    spd[2] = Wheel_GetSpeed_RL();
+    spd[3] = Wheel_GetSpeed_RR();
+
+    float avg = (spd[0] + spd[1] + spd[2] + spd[3]) / 4.0f;
+    if (avg < 2.0f) {          /* Below 2 km/h – ABS meaningless */
+        safety_status.abs_active = false;
+        safety_status.abs_wheel_mask = 0;
+        return;
+    }
+
+    uint8_t mask = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        float slip = ((avg - spd[i]) * 100.0f) / avg;
+        if (slip > (float)ABS_SLIP_THRESHOLD) {
+            mask |= (1U << i);
+        }
+    }
+
+    if (mask) {
+        safety_status.abs_active = true;
+        safety_status.abs_wheel_mask = mask;
+        safety_status.abs_activation_count++;
+        Traction_SetDemand(0);  /* Cut throttle during ABS */
+    } else {
+        safety_status.abs_active = false;
+        safety_status.abs_wheel_mask = 0;
+    }
+}
+
+bool ABS_IsActive(void)  { return safety_status.abs_active; }
+void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_wheel_mask = 0; }
+
+/* ---- TCS --------------------------------------------------------- */
+
+void TCS_Update(void)
+{
+    float spd[4];
+    spd[0] = Wheel_GetSpeed_FL();
+    spd[1] = Wheel_GetSpeed_FR();
+    spd[2] = Wheel_GetSpeed_RL();
+    spd[3] = Wheel_GetSpeed_RR();
+
+    float avg = (spd[0] + spd[1] + spd[2] + spd[3]) / 4.0f;
+    if (avg < 1.0f) {
+        safety_status.tcs_active = false;
+        safety_status.tcs_wheel_mask = 0;
+        return;
+    }
+
+    uint8_t mask = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        float slip = ((spd[i] - avg) * 100.0f) / avg;
+        if (slip > (float)TCS_SLIP_THRESHOLD) {
+            mask |= (1U << i);
+        }
+    }
+
+    if (mask) {
+        safety_status.tcs_active = true;
+        safety_status.tcs_wheel_mask = mask;
+        safety_status.tcs_activation_count++;
+        Traction_SetDemand(Pedal_GetPercent() / 2.0f);
+    } else {
+        safety_status.tcs_active = false;
+        safety_status.tcs_wheel_mask = 0;
+    }
+}
+
+bool TCS_IsActive(void) { return safety_status.tcs_active; }
+void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wheel_mask = 0; }
+
+/* ---- Overcurrent ------------------------------------------------- */
+
+void Safety_CheckCurrent(void)
+{
+    for (uint8_t i = 0; i < NUM_INA226; i++) {
+        float amps = Current_GetAmps(i);
+        if (amps > MAX_CURRENT_A) {
+            Safety_SetError(SAFETY_ERROR_OVERCURRENT);
+            Safety_EmergencyStop();
+            return;
+        }
+    }
+}
+
+/* ---- Overtemperature ---------------------------------------------- */
+
+void Safety_CheckTemperature(void)
+{
+    for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+        float t = Temperature_Get(i);
+        if (t > MAX_TEMP_C) {
+            Safety_SetError(SAFETY_ERROR_OVERTEMP);
+            Safety_EmergencyStop();
+            return;
+        }
+    }
+}
+
+/* ---- CAN Heartbeat Timeout --------------------------------------- */
+
+void Safety_CheckCANTimeout(void)
+{
+    if ((HAL_GetTick() - last_can_rx_time) > CAN_TIMEOUT_MS) {
+        Safety_SetError(SAFETY_ERROR_CAN_TIMEOUT);
+        Safety_EmergencyStop();
+    }
+}
+
+/* Called by CAN RX handler to refresh watchdog */
+void Safety_UpdateCANRxTime(void)
+{
+    last_can_rx_time = HAL_GetTick();
+}
+
+/* ---- Sensor plausibility (stub for future extension) ------------- */
+
+void Safety_CheckSensors(void)
+{
+    /* TODO: Verify sensor readings are within plausible range */
+}
+
+/* ---- Emergency actions ------------------------------------------- */
+
+void Safety_EmergencyStop(void)
+{
+    emergency_stopped = 1;
+    Traction_EmergencyStop();
+}
+
+void Safety_FailSafe(void)
+{
+    Safety_EmergencyStop();
+    /* Center steering */
+    Steering_SetAngle(0.0f);
+}
+
+void Safety_PowerDown(void)
+{
+    Safety_EmergencyStop();
+    /* De-energize relays */
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
+}
+
+/* ---- Error tracking ---------------------------------------------- */
+
+void Safety_SetError(Safety_Error_t error)   { safety_error = error; }
+void Safety_ClearError(Safety_Error_t error) { if (safety_error == error) safety_error = SAFETY_ERROR_NONE; }
+Safety_Error_t Safety_GetError(void)         { return safety_error; }
+bool Safety_IsError(void)                    { return (safety_error != SAFETY_ERROR_NONE); }

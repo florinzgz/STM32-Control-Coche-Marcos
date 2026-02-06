@@ -1,7 +1,163 @@
-# ✅ Proyecto STM32-Control-Coche-Marcos - COMPLETADO
+# Estado del Proyecto: STM32-Control-Coche-Marcos
 
-**Fecha de finalización:** 2026-02-01  
-**Estado:** Estructura completa creada y lista para compilación
+**Fecha de actualización:** 2026-02-06  
+**MCU:** STM32G474RE (ARM Cortex-M4F, 170 MHz)  
+**Referencia:** [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos) (ESP32-S3)
+
+---
+
+## 📐 Arquitectura
+
+Según el [Plan de Separación](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos/blob/main/docs/PLAN_SEPARACION_STM32_CAN.md), el sistema completo se divide en:
+
+- **ESP32-S3 (HMI):** Display, touch, audio, LEDs, menús, detección obstáculos
+- **STM32G474RE (Control):** Motores, sensores críticos, seguridad, relés, CAN
+
+Este repositorio implementa el **firmware STM32 de control**.
+
+---
+
+## ✅ Módulos Implementados (vs. FULL-FIRMWARE)
+
+### 1. Control de Motores (`motor_control.c/h`) ✅
+| Funcionalidad | Estado | Equivalente FULL-FIRMWARE |
+|---|---|---|
+| TIM1 PWM @ 20 kHz (4 motores tracción) | ✅ Completo | `src/control/traction.cpp` |
+| TIM8 PWM @ 20 kHz (motor dirección) | ✅ Completo | `src/control/steering_motor.cpp` |
+| PID dirección con encoder TIM2 | ✅ Completo | `src/control/steering_motor.cpp` |
+| Ackermann geometry | ✅ Completo | `src/control/steering_model.cpp` |
+| Modos 4x4 / 4x2 | ✅ Completo | `Traction::setMode4x4()` |
+| Tank turn (giro sobre eje) | ✅ Completo | `Traction::setAxisRotation()` |
+| Emergency stop | ✅ Completo | `Traction::emergencyStop()` |
+| Control individual por rueda | ✅ Completo | `Traction::WheelState` |
+| Per-wheel PWM wrappers | ✅ Completo | N/A (usa PCA9685 en ESP32) |
+
+### 2. Comunicación CAN (`can_handler.c/h`) ✅
+| Funcionalidad | Estado | Equivalente FULL-FIRMWARE |
+|---|---|---|
+| FDCAN1 @ 500 kbps (CAN 2.0A, 11-bit) | ✅ Completo | Planificado en `PLAN_SEPARACION` |
+| Heartbeat bidireccional (100 ms) | ✅ Completo | Heartbeat mutuo |
+| Comandos: throttle, steering, mode | ✅ Completo | Contrato CAN sección 6.2 |
+| Estado: speed, current, temp, safety, steering | ✅ Completo | Contrato CAN sección 6.2 |
+| Diagnóstico: error codes | ✅ Completo | Contrato CAN errores/faults |
+| Timeout 250 ms → modo seguro | ✅ Completo | Regla de autoridad 6.3 |
+| Estadísticas TX/RX | ✅ Completo | N/A |
+
+### 3. Sensores (`sensor_manager.c/h`) ✅
+| Funcionalidad | Estado | Equivalente FULL-FIRMWARE |
+|---|---|---|
+| 4× sensores rueda (EXTI pulsos → km/h) | ✅ Completo | `src/sensors/wheels.cpp` |
+| 1× encoder dirección TIM2 Quadrature | ✅ Completo | `src/input/steering.cpp` |
+| 6× INA226 I²C (vía TCA9548A) | ✅ Completo | `src/sensors/current.cpp` |
+| 1× Pedal ADC (0-3.3V → 0-100%) | ✅ Completo | `src/input/pedal.cpp` |
+| 5× DS18B20 OneWire (temperaturas) | ⚠️ Parcial | `src/sensors/temperature.cpp` |
+
+> **Nota DS18B20:** OneWire bit-bang implementado con Skip ROM (lee 1 sensor). Falta ROM search para direccionamiento individual de los 5 sensores. Ver TODO en sensor_manager.c.
+
+### 4. Seguridad (`safety_system.c/h`) ✅
+| Funcionalidad | Estado | Equivalente FULL-FIRMWARE |
+|---|---|---|
+| ABS (slip > 20% → corte throttle) | ✅ Completo | `src/safety/abs_system.cpp` |
+| TCS (slip > 15% → reducción 50%) | ✅ Completo | `src/control/tcs_system.cpp` |
+| Protección sobrecorriente (25A) | ✅ Completo | `SafetyManager` |
+| Protección sobretemperatura (90°C) | ✅ Completo | `SafetyManager` |
+| Timeout CAN → emergency stop | ✅ Completo | Regla autoridad 6.3 |
+| Watchdog IWDG (500 ms) | ✅ Completo | `src/system/watchdog.cpp` |
+| Emergency stop + fail-safe | ✅ Completo | `SafetyManager` |
+| Power down (relés) | ✅ Completo | `src/system/power_mgmt.cpp` |
+| Error tracking (enum + set/clear) | ✅ Completo | `include/error_codes.h` |
+
+### 5. Interrupciones (`stm32g4xx_it.c/h`) ✅
+| Funcionalidad | Estado |
+|---|---|
+| EXTI0/1/2 + EXTI15_10 (sensores rueda) | ✅ Conectados a `Wheel_XX_IRQHandler()` |
+| FDCAN1_IT0/IT1 | ✅ Conectados a `HAL_FDCAN_IRQHandler()` |
+| TIM1/TIM2 | ✅ Conectados a `HAL_TIM_IRQHandler()` |
+| I2C1 EV/ER | ✅ Conectados a `HAL_I2C_XX_IRQHandler()` |
+| SysTick | ✅ `HAL_IncTick()` |
+| FDCAN RX callback → Safety_UpdateCANRxTime | ✅ Completo |
+
+### 6. Main Loop (`main.c`) ✅
+| Funcionalidad | Estado |
+|---|---|
+| Inicialización periféricos | ✅ Completo |
+| Inicialización módulos | ✅ Completo |
+| Loop 10ms: safety + steering PID + traction | ✅ Completo |
+| Loop 50ms: sensores + pedal | ✅ Completo |
+| Loop 100ms: CAN heartbeat + estado | ✅ Completo |
+| Loop 1000ms: temperaturas CAN | ✅ Completo |
+| Watchdog refresh | ✅ Completo |
+
+### 7. Documentación ✅
+| Documento | Estado |
+|---|---|
+| `README.md` – Visión general y pinout | ✅ Completo |
+| `docs/PINOUT.md` – Pinout STM32G474RE | ✅ Completo |
+| `docs/CAN_PROTOCOL.md` – Protocolo CAN | ✅ Completo |
+| `docs/MOTOR_CONTROL.md` – Control PWM | ✅ Completo |
+| `docs/SAFETY_SYSTEMS.md` – ABS/TCS | ✅ Completo |
+| `docs/BUILD_GUIDE.md` – Compilación | ✅ Completo |
+| `docs/HARDWARE.md` – BOM y hardware | ✅ Completo |
+| `docs/ESP32_STM32_CAN_CONNECTION.md` – Cableado CAN | ✅ Completo |
+| `docs/QUICK_START.md` – Inicio rápido | ✅ Completo |
+| `SETUP.md` – Guía de setup inicial | ✅ Completo |
+
+---
+
+## ❌ Funcionalidades del FULL-FIRMWARE que NO corresponden al STM32
+
+Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separación:
+
+| Módulo FULL-FIRMWARE | Razón de exclusión |
+|---|---|
+| `src/hud/` – Display TFT ST7796S 480×320 | HMI: pantalla vía SPI |
+| `src/menu/` – Menús interactivos | HMI: interacción usuario |
+| `src/audio/` – DFPlayer Mini | HMI: feedback auditivo |
+| `src/lighting/` – LEDs WS2812B (28+16) | HMI: indicadores visuales |
+| `src/hud/render_engine.cpp` – Motor render sprites | HMI: renderizado gráfico |
+| `include/touch_calibration.h` – Calibración touch | HMI: pantalla táctil |
+| `src/sensors/obstacle_detection.cpp` – TOFSense LiDAR | HMI: detección obstáculos (envía alertas CAN) |
+| `src/safety/obstacle_safety.cpp` – Safety de obstáculos | HMI→CAN: aviso al STM32 |
+| `src/logging/` – Sistema de logs | HMI: diagnóstico visual |
+| `src/managers/` – Config/EEPROM managers | HMI: persistencia configuración |
+| `src/utils/` – Utilidades generales | HMI: helpers internos |
+| `src/test/` – Tests funcionales | HMI: validación en pantalla |
+
+---
+
+## ⚠️ Pendiente de Implementar / Mejorar
+
+### Prioridad Alta
+- [ ] **DS18B20 ROM Search:** Implementar búsqueda ROM para direccionar individualmente los 5 sensores DS18B20 (actualmente solo lee 1 con Skip ROM)
+- [ ] **Generar .ioc en STM32CubeMX:** El archivo `.ioc` actual es placeholder; necesita regenerarse con la configuración real de pines
+- [ ] **HAL MSP completo:** `stm32g4xx_hal_msp.c` necesita revisión para coincidir con el pinout definitivo
+
+### Prioridad Media
+- [ ] **Frenado regenerativo:** El FULL-FIRMWARE tiene `src/safety/regen_ai.cpp` con frenado regenerativo inteligente; podría portarse al STM32
+- [ ] **Limp mode:** El FULL-FIRMWARE tiene `src/system/limp_mode.cpp` para modo degradado; podría añadirse al safety_system
+- [ ] **Adaptive cruise:** `src/control/adaptive_cruise.cpp` del FULL-FIRMWARE; requiere datos de obstáculos vía CAN
+- [ ] **CRC8 checksum:** Documentado en protocolo CAN pero no implementado (CAN tiene CRC propio, pero añade capa extra)
+- [ ] **Relay control module:** Actualmente los relés se controlan directamente con GPIO; podría abstraerse como en `src/control/relays.cpp`
+
+### Prioridad Baja
+- [ ] **Power management avanzado:** Secuencia de encendido/apagado como en `src/system/power_mgmt.cpp`
+- [ ] **Sensor plausibility checks:** `Safety_CheckSensors()` es stub; añadir validación de rango de sensores
+- [ ] **I2C recovery:** El FULL-FIRMWARE tiene `include/i2c_recovery.h`; útil si el bus I2C se bloquea
+- [ ] **Watchdog window mode:** Usar WWDG además de IWDG para detección más rápida
+- [ ] **SystemClock_Config:** Actualmente es stub; necesita configuración PLL real para 170 MHz
+
+---
+
+## 📊 Métricas del Código
+
+| Métrica | Valor |
+|---------|-------|
+| **Archivos fuente (.c)** | 6 |
+| **Archivos header (.h)** | 6 |
+| **Líneas de código (aprox.)** | ~2,500 |
+| **Funciones implementadas** | ~65 |
+| **Funciones declaradas sin implementar** | 0 |
+| **Documentación (archivos .md)** | 12 |
 
 ---
 
@@ -10,187 +166,58 @@
 ```
 STM32-Control-Coche-Marcos/
 ├── Core/
-│   ├── Inc/                    # Headers (6 archivos, 35 KB)
-│   │   ├── main.h              # Definiciones principales y pines
-│   │   ├── motor_control.h     # Control directo PWM
-│   │   ├── can_handler.h       # Protocolo CAN
-│   │   ├── sensor_manager.h    # Gestión de sensores
-│   │   ├── safety_system.h     # ABS/TCS y seguridad
-│   │   └── stm32g4xx_it.h      # Interrupciones
-│   │
-│   └── Src/                    # Source (6 archivos, 3135 líneas)
-│       ├── main.c              # Programa principal (720 líneas)
-│       ├── motor_control.c     # Control motores (411 líneas)
-│       ├── can_handler.c       # CAN @ 500 kbps (451 líneas)
-│       ├── sensor_manager.c    # Lectura sensores (600 líneas)
-│       ├── safety_system.c     # Sistemas seguridad (555 líneas)
-│       └── stm32g4xx_it.c      # ISRs (398 líneas)
-│
-├── docs/                       # Documentación (6 archivos, 97 KB)
-│   ├── PINOUT.md              # Pinout completo STM32G474RE
-│   ├── CAN_PROTOCOL.md        # Protocolo CAN ESP32↔STM32
-│   ├── MOTOR_CONTROL.md       # Control PWM directo
-│   ├── SAFETY_SYSTEMS.md      # ABS/TCS y seguridad
-│   ├── BUILD_GUIDE.md         # Guía de compilación
-│   └── HARDWARE.md            # Especificación hardware
-│
-├── .gitignore                 # Configuración Git
-├── LICENSE                    # Licencia MIT
-├── README.md                  # Documentación principal
-└── PROJECT_STATUS.md          # Este archivo
+│   ├── Inc/
+│   │   ├── main.h              # Definiciones pines, HAL handles, constantes
+│   │   ├── motor_control.h     # Control motores + Ackermann + steering
+│   │   ├── can_handler.h       # Protocolo CAN ESP32↔STM32
+│   │   ├── sensor_manager.h    # Sensores: ruedas, temp, corriente, pedal
+│   │   ├── safety_system.h     # ABS/TCS + protecciones + fail-safe
+│   │   ├── stm32g4xx_it.h      # Prototipos ISR
+│   │   └── stm32g4xx_hal_conf.h# Configuración HAL
+│   └── Src/
+│       ├── main.c              # Inicialización + main loop temporizado
+│       ├── motor_control.c     # PWM, PID, Ackermann, 4x4/4x2, tank turn
+│       ├── can_handler.c       # CAN TX/RX completo con estadísticas
+│       ├── sensor_manager.c    # Lectura sensores real (EXTI, I2C, ADC, OneWire)
+│       ├── safety_system.c     # ABS/TCS por rueda, overcurrent, overtemp
+│       ├── stm32g4xx_it.c      # ISR conectados a handlers de módulos
+│       ├── stm32g4xx_hal_msp.c # MSP init (pines AF para periféricos)
+│       └── system_stm32g4xx.c  # Configuración reloj sistema
+├── docs/                       # 12 documentos técnicos
+├── Makefile                    # Build con arm-none-eabi-gcc
+├── STM32G474RETX_FLASH.ld     # Linker script
+├── startup_stm32g474retx.s    # Startup assembly
+└── README.md                   # Documentación principal
 ```
 
 ---
 
-## ✨ Especificaciones Implementadas
+## 🔗 Correspondencia Módulos STM32 ↔ FULL-FIRMWARE
 
-### Hardware Corregido (vs. Especificación Original)
-
-| Componente | Cantidad | Especificación CORRECTA |
-|------------|----------|-------------------------|
-| **Sensores de rueda** | **5** | 4 ruedas + 1 encoder dirección E6B2-CWZ6C |
-| **Sensores temperatura** | **5** | 4 motores + 1 ambiente (DS18B20 OneWire) |
-| **Sensores corriente** | **6** | 4 tracción + 1 dirección + 1 batería (INA226 I²C) |
-| **Control motores** | **PWM Directo** | TIM1/TIM8 @ 20 kHz (NO PCA9685) |
-
-### Funcionalidades Implementadas
-
-#### 1. Control de Motores ⚙️
-- [x] TIM1 PWM @ 20 kHz (4 motores tracción)
-- [x] TIM8 PWM @ 20 kHz (motor dirección)
-- [x] Control individual por rueda (torque vectoring)
-- [x] PID para dirección con encoder (Kp=2.0, Ki=0.1, Kd=0.5)
-- [x] Frenado eléctrico (PWM=0% + EN=1)
-
-#### 2. Sensores 🔍
-- [x] 4 sensores rueda (EXTI interrupts, cálculo velocidad)
-- [x] 1 encoder dirección TIM2 Quadrature (E6B2-CWZ6C 1200 PPR × 4 = 4800 cnt/rev, 0.075°/cnt)
-- [x] 5 DS18B20 OneWire (temperaturas, ROM addressing)
-- [x] 6 INA226 I²C (corrientes/voltajes, vía TCA9548A)
-- [x] Pedal Hall ADC1 (0-3.3V → 0-100% throttle)
-- [x] Shifter F/N/R (GPIO pull-up, activo bajo)
-
-#### 3. Comunicación CAN 📡
-- [x] FDCAN1 @ 500 kbps (CAN 2.0A, 11-bit IDs)
-- [x] Heartbeat mutuo STM32↔ESP32 (100 ms)
-- [x] Comandos control (throttle, steering, mode)
-- [x] Mensajes estado (speed, current, temp, safety, steering)
-- [x] Diagnóstico (error codes, subsystems)
-- [x] CRC8 checksum para integridad
-- [x] Timeout 250 ms → modo seguro
-
-#### 4. Seguridad 🛡️
-- [x] ABS (20% slip threshold, reducción potencia)
-- [x] TCS (15% slip threshold, control tracción)
-- [x] Protección térmica (60°C warning, 80°C critical)
-- [x] Protección corriente (20A cont., 30A peak, 35A critical)
-- [x] Protección batería (20V low, 18V critical)
-- [x] Watchdog IWDG (500 ms timeout)
-- [x] Modo seguro (detención gradual, centrado dirección)
-- [x] Rate limiter (50%/s máx aceleración)
-
-#### 5. Interrupciones ⚡
-- [x] EXTI0-2, EXTI15_10 (sensores rueda)
-- [x] EXTI4 (encoder Z pulse)
-- [x] FDCAN1_IT0 (recepción CAN)
-- [x] TIM2 (encoder overflow)
-- [x] HardFault handler (debug info completa)
-
----
-
-## 📊 Métricas del Código
-
-| Métrica | Valor |
-|---------|-------|
-| **Total líneas código** | 3,135 |
-| **Archivos .c** | 6 |
-| **Archivos .h** | 6 |
-| **Funciones totales** | ~119 |
-| **Documentación (MD)** | 6 archivos, 97 KB |
-| **Tamaño total fuentes** | ~100 KB |
-
----
-
-## 🚀 Próximos Pasos
-
-### 1. Compilación
-```bash
-# Importar en STM32CubeIDE
-File → Open Projects from File System → Seleccionar carpeta
-
-# Compilar
-Project → Build Project (Ctrl+B)
 ```
+STM32 Repository                    FULL-FIRMWARE (ESP32-S3)
+────────────────                    ─────────────────────────
+motor_control.c  ←────────────────→ src/control/traction.cpp
+                                    src/control/steering_motor.cpp
+                                    src/control/steering_model.cpp
 
-### 2. Configuración Inicial
-- [ ] Generar archivo .ioc en STM32CubeMX con pinout de docs/PINOUT.md
-- [ ] Ajustar configuración de relojes (170 MHz)
-- [ ] Configurar HAL_Timebase (TIM6/TIM7, no SysTick)
+can_handler.c    ←────────────────→ (nuevo: protocolo CAN definido en
+                                    docs/PLAN_SEPARACION_STM32_CAN.md)
 
-### 3. Calibración Hardware
-- [ ] Determinar ROM addresses de 5× DS18B20
-- [ ] Calibrar shunt resistors INA226 (0.001Ω)
-- [ ] Ajustar constantes de rueda (circunferencia, PPR)
-- [ ] Calibrar encoder dirección (pulso Z, centro)
-- [ ] Verificar direcciones I²C TCA9548A/INA226
+sensor_manager.c ←────────────────→ src/sensors/wheels.cpp
+                                    src/sensors/current.cpp
+                                    src/sensors/temperature.cpp
+                                    src/input/pedal.cpp
+                                    src/input/steering.cpp
 
-### 4. Testing
-- [ ] Test PWM motores (sin carga)
-- [ ] Test CAN loopback
-- [ ] Test sensores individuales
-- [ ] Test ABS/TCS en banco
-- [ ] Test integración completa
+safety_system.c  ←────────────────→ src/safety/abs_system.cpp
+                                    src/control/tcs_system.cpp
+                                    SafetyManager (src/system/)
 
----
-
-## 🔧 Configuración Recomendada STM32CubeMX
-
-### System Core
-- **SYS:** Serial Wire (SWD)
-- **RCC:** HSI, PLL to 170 MHz
-- **IWDG:** 500 ms timeout
-
-### Timers
-- **TIM1:** Internal Clock, PWM Gen CH1-4, 20 kHz
-- **TIM8:** Internal Clock, PWM Gen CH3, 20 kHz
-- **TIM2:** Encoder Mode, Both edges, 16-bit
-
-### Connectivity
-- **FDCAN1:** 500 kbps, Classic CAN 2.0A
-- **I2C1:** Fast Mode 400 kHz
-- **ADC1:** 12-bit, Single-ended
-
-### GPIOs
-- Ver docs/PINOUT.md para configuración completa
-
----
-
-## 📖 Referencias Rápidas
-
-| Documento | Descripción |
-|-----------|-------------|
-| [docs/PINOUT.md](docs/PINOUT.md) | Configuración completa de pines |
-| [docs/CAN_PROTOCOL.md](docs/CAN_PROTOCOL.md) | Protocolo CAN detallado |
-| [docs/MOTOR_CONTROL.md](docs/MOTOR_CONTROL.md) | Control PWM y PID |
-| [docs/SAFETY_SYSTEMS.md](docs/SAFETY_SYSTEMS.md) | ABS/TCS y protecciones |
-| [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) | Compilación y debugging |
-| [docs/HARDWARE.md](docs/HARDWARE.md) | BOM y especificaciones |
-
----
-
-## ✅ Criterios de Aceptación
-
-- [x] Todos los archivos de documentación creados y correctos
-- [x] Código fuente completo (ready to compile*)
-- [x] Pinout coincide con hardware real (5 ruedas, 5 temps, 6 corrientes)
-- [x] Control de motores es DIRECTO (sin PCA9685)
-- [x] Estructura de proyecto lista para STM32CubeIDE
-- [x] README.md actualizado con especificaciones correctas
-
-\* *Nota: Requiere archivo .ioc generado en STM32CubeMX y HAL drivers*
+main.c           ←────────────────→ src/main.cpp (control loop)
+```
 
 ---
 
 **Desarrollado por:** florinzgz  
-**Proyecto:** Control vehicular seguro y determinístico  
 **Licencia:** MIT

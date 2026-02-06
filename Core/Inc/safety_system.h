@@ -57,6 +57,7 @@ void Safety_SetError(Safety_Error_t error);
 void Safety_ClearError(Safety_Error_t error);
 Safety_Error_t Safety_GetError(void);
 bool Safety_IsError(void);
+void Safety_UpdateCANRxTime(void);
 
 extern SafetyStatus_t safety_status;
 extern Safety_Error_t safety_error;

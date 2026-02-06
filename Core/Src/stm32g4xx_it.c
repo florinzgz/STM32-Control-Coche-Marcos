@@ -5,62 +5,115 @@
 
 #include "stm32g4xx_it.h"
 #include "main.h"
-#include "Safety.h"
+#include "sensor_manager.h"
+#include "safety_system.h"
 
-void NMI_Handler(void) {
-    // Handle Non-Maskable Interrupt
+extern FDCAN_HandleTypeDef hfdcan1;
+extern TIM_HandleTypeDef htim1, htim2;
+extern I2C_HandleTypeDef hi2c1;
+
+/* ---- Cortex-M4 core exceptions ---- */
+
+void NMI_Handler(void)
+{
 }
 
-void HardFault_Handler(void) {
-    // Handle Hard Fault
-    while (1) {}
+void HardFault_Handler(void)
+{
+    while (1) { }
 }
 
-void SysTick_Handler(void) {
-    // Handle SysTick interrupt
+void MemManage_Handler(void)
+{
+    while (1) { }
+}
+
+void BusFault_Handler(void)
+{
+    while (1) { }
+}
+
+void UsageFault_Handler(void)
+{
+    while (1) { }
+}
+
+void SVC_Handler(void)
+{
+}
+
+void DebugMon_Handler(void)
+{
+}
+
+void PendSV_Handler(void)
+{
+}
+
+void SysTick_Handler(void)
+{
     HAL_IncTick();
 }
 
-void FDCAN1_IT0_IRQHandler(void) {
-    // Handle FDCAN1 Interrupt 0
+/* ---- Peripheral interrupts ---- */
+
+void FDCAN1_IT0_IRQHandler(void)
+{
+    HAL_FDCAN_IRQHandler(&hfdcan1);
 }
 
-void FDCAN1_IT1_IRQHandler(void) {
-    // Handle FDCAN1 Interrupt 1
+void FDCAN1_IT1_IRQHandler(void)
+{
+    HAL_FDCAN_IRQHandler(&hfdcan1);
 }
 
-void EXTI0_IRQHandler(void) {
-    // Handle external interrupt for wheel FL sensor
+void EXTI0_IRQHandler(void)
+{
+    HAL_GPIO_EXTI_IRQHandler(PIN_WHEEL_FL);
+    Wheel_FL_IRQHandler();
 }
 
-void EXTI1_IRQHandler(void) {
-    // Handle external interrupt for wheel FR sensor
+void EXTI1_IRQHandler(void)
+{
+    HAL_GPIO_EXTI_IRQHandler(PIN_WHEEL_FR);
+    Wheel_FR_IRQHandler();
 }
 
-void EXTI2_IRQHandler(void) {
-    // Handle external interrupt for wheel RL sensor
+void EXTI2_IRQHandler(void)
+{
+    HAL_GPIO_EXTI_IRQHandler(PIN_WHEEL_RL);
+    Wheel_RL_IRQHandler();
 }
 
-void EXTI3_IRQHandler(void) {
-    // Handle external interrupt for wheel RR sensor
+void EXTI15_10_IRQHandler(void)
+{
+    HAL_GPIO_EXTI_IRQHandler(PIN_WHEEL_RR);
+    Wheel_RR_IRQHandler();
 }
 
-void TIM1_UP_TIM16_IRQHandler(void) {
-    // Handle TIM1 Update and TIM16 interrupt
+void TIM1_UP_TIM16_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim1);
 }
 
-void TIM2_IRQHandler(void) {
-    // Handle TIM2 interrupt for encoder
+void TIM2_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim2);
 }
 
-void I2C1_EV_IRQHandler(void) {
-    // Handle I2C1 event interrupt
+void I2C1_EV_IRQHandler(void)
+{
+    HAL_I2C_EV_IRQHandler(&hi2c1);
 }
 
-void I2C1_ER_IRQHandler(void) {
-    // Handle I2C1 error interrupt
+void I2C1_ER_IRQHandler(void)
+{
+    HAL_I2C_ER_IRQHandler(&hi2c1);
 }
 
-void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan) {
+/* ---- HAL Callbacks ---- */
+
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan)
+{
     Safety_UpdateCANRxTime();
 }

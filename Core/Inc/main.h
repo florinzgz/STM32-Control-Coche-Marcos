@@ -1,32 +1,93 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-// ENCODER DE DIRECCIÓN (E6B2-CWZ6C - 1200 PPR - TIM2 Quadrature)
-// Quadrature mode: 1200 PPR × 4 = 4800 counts/revolution
-// Resolution: 360° / 4800 = 0.075° per count
-#define ENCODER_PPR 1200   // Pulses per Revolution for the encoder
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// GPIO Pin Definitions
-// Direct Motor Control via TIM1/TIM8
-#define MOTOR1_PWM_PIN      GPIO_PIN_0   // Example pin for Motor 1
-#define MOTOR2_PWM_PIN      GPIO_PIN_1   // Example pin for Motor 2
-#define MOTOR3_PWM_PIN      GPIO_PIN_2   // Example pin for Motor 3
-#define MOTOR4_PWM_PIN      GPIO_PIN_3   // Example pin for Motor 4
+#include "stm32g4xx_hal.h"
 
-// DS18B20 Temperature Sensors (4 motors + 1 steering wheel)
-#define TEMP_SENSOR1_PIN    GPIO_PIN_4   // Sensor for Motor 1
-#define TEMP_SENSOR2_PIN    GPIO_PIN_5   // Sensor for Motor 2
-#define TEMP_SENSOR3_PIN    GPIO_PIN_6   // Sensor for Motor 3
-#define TEMP_SENSOR4_PIN    GPIO_PIN_7   // Sensor for Motor 4
-#define STEERING_WHEEL_TEMP_PIN GPIO_PIN_8 // Sensor for Steering Wheel
+/* ---- ENCODER DE DIRECCIÓN (E6B2-CWZ6C - 1200 PPR - TIM2 Quadrature) ---- */
+/* Quadrature mode: 1200 PPR × 4 = 4800 counts/revolution                    */
+/* Resolution: 360° / 4800 = 0.075° per count                                */
+#define ENCODER_PPR        1200
+#define ENCODER_CPR        (ENCODER_PPR * 4)  /* 4800 counts/rev */
 
-// LJ12A3-4-Z/BX Sensors (4 wheels + 1 encoder Z)
-#define WHEEL_SENSOR1_PIN   GPIO_PIN_9   // Sensor for Wheel 1
-#define WHEEL_SENSOR2_PIN   GPIO_PIN_10  // Sensor for Wheel 2
-#define WHEEL_SENSOR3_PIN   GPIO_PIN_11  // Sensor for Wheel 3
-#define WHEEL_SENSOR4_PIN   GPIO_PIN_12  // Sensor for Wheel 4
-#define ENCODER_Z_SENSOR_PIN GPIO_PIN_13  // Encoder Z Sensor
+/* ---- PWM Motor Pins (TIM1 CH1-CH4: PA8-PA11, TIM8 CH3: PC8) ---- */
+#define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 */
+#define PIN_PWM_FR         GPIO_PIN_9   /* PA9  - TIM1_CH2 */
+#define PIN_PWM_RL         GPIO_PIN_10  /* PA10 - TIM1_CH3 */
+#define PIN_PWM_RR         GPIO_PIN_11  /* PA11 - TIM1_CH4 */
+#define PIN_PWM_STEER      GPIO_PIN_8   /* PC8  - TIM8_CH3 */
 
-// Additional GPIO configurations can be added here as needed.
+/* ---- Direction Control (GPIOC) ---- */
+#define PIN_DIR_FL         GPIO_PIN_0   /* PC0 */
+#define PIN_DIR_FR         GPIO_PIN_1   /* PC1 (also EN_FL in original layout) */
+#define PIN_DIR_RL         GPIO_PIN_2   /* PC2 */
+#define PIN_DIR_RR         GPIO_PIN_3   /* PC3 */
+#define PIN_DIR_STEER      GPIO_PIN_4   /* PC4 */
 
-#endif // MAIN_H
+/* ---- Enable Signals (GPIOC) ---- */
+#define PIN_EN_FL          GPIO_PIN_5   /* PC5 */
+#define PIN_EN_FR          GPIO_PIN_6   /* PC6 */
+#define PIN_EN_RL          GPIO_PIN_7   /* PC7 */
+#define PIN_EN_RR          GPIO_PIN_13  /* PC13 */
+#define PIN_EN_STEER       GPIO_PIN_9   /* PC9 */
+
+/* ---- Relay Control (GPIOC) ---- */
+#define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
+#define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 */
+#define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 */
+
+/* ---- Wheel Speed Sensors (EXTI) ---- */
+#define PIN_WHEEL_FL       GPIO_PIN_0   /* PA0 - EXTI0 */
+#define PIN_WHEEL_FR       GPIO_PIN_1   /* PA1 - EXTI1 */
+#define PIN_WHEEL_RL       GPIO_PIN_2   /* PA2 - EXTI2 */
+#define PIN_WHEEL_RR       GPIO_PIN_15  /* PB15 - EXTI15 */
+
+/* ---- Steering Encoder (TIM2 Quadrature) ---- */
+#define PIN_ENC_A          GPIO_PIN_15  /* PA15 - TIM2_CH1 */
+#define PIN_ENC_B          GPIO_PIN_3   /* PB3  - TIM2_CH2 */
+#define PIN_ENC_Z          GPIO_PIN_4   /* PB4  - EXTI4 (index pulse) */
+
+/* ---- I2C Bus (INA226 via TCA9548A, DS18B20) ---- */
+#define PIN_I2C_SCL        GPIO_PIN_6   /* PB6 - I2C1_SCL */
+#define PIN_I2C_SDA        GPIO_PIN_7   /* PB7 - I2C1_SDA */
+
+/* ---- OneWire Bus (DS18B20 temperatures) ---- */
+#define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
+
+/* ---- ADC Pedal ---- */
+#define PIN_PEDAL          GPIO_PIN_3   /* PA3 - ADC1_IN4 */
+
+/* ---- CAN Bus (FDCAN1) ---- */
+#define PIN_CAN_TX         GPIO_PIN_12  /* PA12 - FDCAN1_TX */
+#define PIN_CAN_RX         GPIO_PIN_11  /* PA11 - FDCAN1_RX */
+
+/* ---- I2C Addresses ---- */
+#define I2C_ADDR_TCA9548A  0x70
+#define I2C_ADDR_INA226    0x40
+#define NUM_INA226         6
+#define NUM_DS18B20        5
+#define NUM_WHEELS         4
+#define WHEEL_PULSES_REV   6   /* 6 bolts per wheel revolution */
+
+/* ---- Sensor Constants ---- */
+#define INA226_SHUNT_MOHM  1   /* 1 mΩ shunt resistor */
+#define WHEEL_CIRCUMF_M    1.2f /* Wheel circumference in meters */
+
+/* ---- Global HAL handles ---- */
+extern FDCAN_HandleTypeDef hfdcan1;
+extern I2C_HandleTypeDef hi2c1;
+extern TIM_HandleTypeDef htim1, htim2, htim8;
+extern ADC_HandleTypeDef hadc1;
+extern IWDG_HandleTypeDef hiwdg;
+
+void Error_Handler(void);
+void SystemClock_Config(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MAIN_H */
