@@ -257,12 +257,13 @@ void Temperature_StartConversion(void)
 void Temperature_ReadAll(void)
 {
     /*
-     * Simplified: with Skip ROM we can only read one sensor.
-     * Full implementation should use Search ROM to enumerate all sensors
-     * and read each by its 64-bit ROM address.  For now, read the first
-     * sensor found and store in index 0.
+     * Simplified: with Skip ROM (0xCC) we read one shared bus value.
+     * Full implementation needs DS18B20 Search ROM (0xF0) to enumerate
+     * all 5 sensors' unique 64-bit ROM addresses, then Match ROM (0x55)
+     * to address each one individually and store in temperatures[0..4].
      *
-     * TODO: Implement ROM search for individual addressing of 5 sensors.
+     * TODO: Implement ROM search (0xF0) + Match ROM (0x55) for
+     *       individual addressing of 5× DS18B20 sensors.
      */
     if (!OW_Reset()) return;
     OW_WriteByte(0xCC);  /* Skip ROM */

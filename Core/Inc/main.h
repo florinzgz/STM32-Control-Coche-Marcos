@@ -22,7 +22,7 @@ extern "C" {
 
 /* ---- Direction Control (GPIOC) ---- */
 #define PIN_DIR_FL         GPIO_PIN_0   /* PC0 */
-#define PIN_DIR_FR         GPIO_PIN_1   /* PC1 (also EN_FL in original layout) */
+#define PIN_DIR_FR         GPIO_PIN_1   /* PC1 */
 #define PIN_DIR_RL         GPIO_PIN_2   /* PC2 */
 #define PIN_DIR_RR         GPIO_PIN_3   /* PC3 */
 #define PIN_DIR_STEER      GPIO_PIN_4   /* PC4 */
@@ -60,9 +60,9 @@ extern "C" {
 /* ---- ADC Pedal ---- */
 #define PIN_PEDAL          GPIO_PIN_3   /* PA3 - ADC1_IN4 */
 
-/* ---- CAN Bus (FDCAN1) ---- */
-#define PIN_CAN_TX         GPIO_PIN_12  /* PA12 - FDCAN1_TX */
-#define PIN_CAN_RX         GPIO_PIN_11  /* PA11 - FDCAN1_RX */
+/* ---- CAN Bus (FDCAN1 on PB8/PB9 per HAL MSP) ---- */
+#define PIN_CAN_TX         GPIO_PIN_9   /* PB9 - FDCAN1_TX (AF9) */
+#define PIN_CAN_RX         GPIO_PIN_8   /* PB8 - FDCAN1_RX (AF9) */
 
 /* ---- I2C Addresses ---- */
 #define I2C_ADDR_TCA9548A  0x70
