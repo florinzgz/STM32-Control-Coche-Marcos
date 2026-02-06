@@ -157,6 +157,10 @@ float Voltage_GetBus(uint8_t index) {
 
 static float temperatures[NUM_DS18B20] = {0};
 
+/* DS18B20 64-bit ROM addresses discovered by Search ROM */
+static uint8_t  ds18b20_rom[NUM_DS18B20][8];
+static uint8_t  ds18b20_count = 0;
+
 /*
  * OneWire bit-bang helpers (simplified – production code should use a
  * dedicated OneWire library or DMA-based UART trick).
@@ -247,6 +251,154 @@ static uint8_t OW_ReadByte(void)
     return byte;
 }
 
+/* -------------------------------------------------------------------------
+ *  DS18B20 ROM Search algorithm (per Maxim/Dallas AN187)
+ *
+ *  Discovers up to NUM_DS18B20 unique 64-bit ROM codes on the bus.
+ *  Must be called once at init (from Sensor_Init) before first read.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief  CRC-8/MAXIM (poly 0x31, init 0x00, reflect I/O).
+ *         Used to verify DS18B20 ROM codes and scratchpad data.
+ */
+static uint8_t OW_CRC8(const uint8_t *data, uint8_t len)
+{
+    uint8_t crc = 0;
+    for (uint8_t i = 0; i < len; i++) {
+        uint8_t byte = data[i];
+        for (uint8_t j = 0; j < 8; j++) {
+            uint8_t mix = (crc ^ byte) & 0x01;
+            crc >>= 1;
+            if (mix) crc ^= 0x8C;
+            byte >>= 1;
+        }
+    }
+    return crc;
+}
+
+/**
+ * @brief  Perform one pass of the OneWire Search ROM algorithm.
+ *
+ * @param  rom          8-byte buffer to store discovered ROM code.
+ * @param  last_discrepancy  Set to 0 for first call; updated each pass.
+ * @retval  Next discrepancy marker (0 = search complete, no more devices).
+ */
+static int OW_SearchROM_Next(uint8_t rom[8], int last_discrepancy)
+{
+    if (!OW_Reset()) return -1;            /* No presence pulse → no devices */
+
+    OW_WriteByte(0xF0);                    /* Search ROM command */
+
+    int discrepancy_marker = 0;
+
+    for (int bit_idx = 1; bit_idx <= 64; bit_idx++) {
+        uint8_t id_bit      = OW_ReadBit();
+        uint8_t id_bit_comp = OW_ReadBit();
+
+        if (id_bit && id_bit_comp) {
+            /* No devices responding – abort */
+            return -1;
+        }
+
+        uint8_t direction;
+        if (id_bit != id_bit_comp) {
+            /* All remaining devices agree on this bit */
+            direction = id_bit;
+        } else {
+            /* Discrepancy: devices with 0 and 1 both present */
+            if (bit_idx == last_discrepancy) {
+                direction = 1;             /* Take the 1-branch this time */
+            } else if (bit_idx > last_discrepancy) {
+                direction = 0;             /* Default: take 0-branch first */
+            } else {
+                /* Reproduce the path from the previous search */
+                uint8_t byte_idx = (uint8_t)((bit_idx - 1) / 8);
+                uint8_t bit_mask = (uint8_t)(1U << ((bit_idx - 1) % 8));
+                direction = (rom[byte_idx] & bit_mask) ? 1 : 0;
+            }
+            if (direction == 0) {
+                discrepancy_marker = bit_idx;
+            }
+        }
+
+        /* Write chosen direction back to bus */
+        OW_WriteBit(direction);
+
+        /* Store bit in ROM buffer */
+        {
+            uint8_t byte_idx = (uint8_t)((bit_idx - 1) / 8);
+            uint8_t bit_mask = (uint8_t)(1U << ((bit_idx - 1) % 8));
+            if (direction) {
+                rom[byte_idx] |= bit_mask;
+            } else {
+                rom[byte_idx] &= (uint8_t)~bit_mask;
+            }
+        }
+    }
+
+    return discrepancy_marker;
+}
+
+/**
+ * @brief  Enumerate all DS18B20 devices on the bus.
+ *         Populates ds18b20_rom[] and sets ds18b20_count.
+ */
+static void OW_SearchAll(void)
+{
+    uint8_t rom[8] = {0};
+    int last_discrepancy = 0;
+
+    ds18b20_count = 0;
+
+    do {
+        int next = OW_SearchROM_Next(rom, last_discrepancy);
+        if (next < 0) break;                  /* Error or no device */
+
+        /* Validate CRC of discovered ROM */
+        if (OW_CRC8(rom, 7) != rom[7]) break; /* Bad CRC – stop */
+
+        /* Accept only DS18B20 family code (0x28) */
+        if (rom[0] == 0x28 && ds18b20_count < NUM_DS18B20) {
+            for (uint8_t j = 0; j < 8; j++) {
+                ds18b20_rom[ds18b20_count][j] = rom[j];
+            }
+            ds18b20_count++;
+        }
+
+        last_discrepancy = next;
+    } while (last_discrepancy != 0);
+}
+
+/**
+ * @brief  Read scratchpad from one specific DS18B20 using Match ROM (0x55).
+ * @param  idx  Index into ds18b20_rom[].
+ * @retval Temperature in °C, or 0.0f on failure.
+ */
+static float OW_ReadTemperature(uint8_t idx)
+{
+    if (idx >= ds18b20_count) return 0.0f;
+
+    if (!OW_Reset()) return 0.0f;
+
+    OW_WriteByte(0x55);                      /* Match ROM */
+    for (uint8_t i = 0; i < 8; i++) {
+        OW_WriteByte(ds18b20_rom[idx][i]);
+    }
+    OW_WriteByte(0xBE);                      /* Read Scratchpad */
+
+    uint8_t scratch[9];
+    for (uint8_t i = 0; i < 9; i++) {
+        scratch[i] = OW_ReadByte();
+    }
+
+    /* CRC check on scratchpad */
+    if (OW_CRC8(scratch, 8) != scratch[8]) return 0.0f;
+
+    int16_t raw = (int16_t)((scratch[1] << 8) | scratch[0]);
+    return (float)raw / 16.0f;
+}
+
 void Temperature_StartConversion(void)
 {
     if (!OW_Reset()) return;
@@ -256,23 +408,24 @@ void Temperature_StartConversion(void)
 
 void Temperature_ReadAll(void)
 {
-    /*
-     * Simplified: with Skip ROM (0xCC) we read one shared bus value.
-     * Full implementation needs DS18B20 Search ROM (0xF0) to enumerate
-     * all 5 sensors' unique 64-bit ROM addresses, then Match ROM (0x55)
-     * to address each one individually and store in temperatures[0..4].
-     *
-     * TODO: Implement ROM search (0xF0) + Match ROM (0x55) for
-     *       individual addressing of 5× DS18B20 sensors.
-     */
-    if (!OW_Reset()) return;
-    OW_WriteByte(0xCC);  /* Skip ROM */
-    OW_WriteByte(0xBE);  /* Read Scratchpad */
+    if (ds18b20_count == 0) {
+        /* No sensors discovered yet – fall back to Skip ROM single read
+         * so temperatures[0] still provides a value during early boot.  */
+        if (!OW_Reset()) return;
+        OW_WriteByte(0xCC);  /* Skip ROM */
+        OW_WriteByte(0xBE);  /* Read Scratchpad */
 
-    uint8_t lsb = OW_ReadByte();
-    uint8_t msb = OW_ReadByte();
-    int16_t raw = (int16_t)((msb << 8) | lsb);
-    temperatures[0] = (float)raw / 16.0f;
+        uint8_t lsb = OW_ReadByte();
+        uint8_t msb = OW_ReadByte();
+        int16_t raw = (int16_t)((msb << 8) | lsb);
+        temperatures[0] = (float)raw / 16.0f;
+        return;
+    }
+
+    /* Read each discovered sensor individually via Match ROM */
+    for (uint8_t i = 0; i < ds18b20_count; i++) {
+        temperatures[i] = OW_ReadTemperature(i);
+    }
 }
 
 float Temperature_Get(uint8_t index)
@@ -306,4 +459,8 @@ void Sensor_Init(void)
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         temperatures[i] = 0.0f;
     }
+
+    /* Discover all DS18B20 sensors on the OneWire bus.
+     * This populates ds18b20_rom[] with their 64-bit addresses. */
+    OW_SearchAll();
 }

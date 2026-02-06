@@ -171,13 +171,13 @@ Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separaci
 
 ## ⚠️ Lo que falta por implementar
 
-### 🔴 Prioridad Alta (necesario para funcionar en hardware)
+### 🔴 Prioridad Alta — ✅ COMPLETADO
 
-| Tarea | Descripción | Complejidad |
+| Tarea | Estado | Descripción |
 |---|---|---|
-| **SystemClock_Config real** | Actualmente es un stub vacío. Sin él, el MCU corre a 16 MHz (HSI) en vez de 170 MHz. Todos los timings (PWM 20 kHz, CAN 500 kbps, I2C 400 kHz) serán ~10× más lentos. Debe generarse con STM32CubeMX: HSI→PLL→SYSCLK=170 MHz | Media |
-| **DS18B20 ROM Search** | Actualmente lee 1 sensor con Skip ROM (0xCC). Falta implementar Search ROM (0xF0) para enumerar las 5 direcciones de 64 bits, y luego Match ROM (0x55) para leer cada sensor individualmente | Media |
-| **Regenerar .ioc en STM32CubeMX** | El archivo `.ioc` actual es placeholder. Necesita regenerarse con la configuración real de todos los pines, periféricos y reloj para que CubeMX genere correctamente SystemClock_Config y los drivers HAL | Media |
+| **SystemClock_Config** | ✅ Implementado | HSI 16 MHz → PLL (PLLM=/4, PLLN=85, PLLR=/2) → 170 MHz SYSCLK. Voltage scaling BOOST, Flash 8 wait states. |
+| **DS18B20 ROM Search** | ✅ Implementado | Search ROM (0xF0) con algoritmo Maxim AN187 para descubrir hasta 5 sensores. Match ROM (0x55) + CRC8 para lectura individual. Fallback a Skip ROM si no se descubren sensores. |
+| **Actualizar .ioc** | ✅ Implementado | Todos los 36 pines configurados (PA0-PA3 wheel/pedal, PB0 OneWire, PB15 wheel RR, PC0-PC13 dir/en/relay). ADC corregido a IN4 (PA3). EXTI IRQs añadidos. FDCAN/I2C/IWDG params incluidos. |
 
 ### 🟡 Prioridad Media (mejoras funcionales del FULL-FIRMWARE)
 
