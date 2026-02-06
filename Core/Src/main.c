@@ -63,6 +63,9 @@ int main(void)
     Safety_Init();
     CAN_Init();
 
+    /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
+    Safety_SetState(SYS_STATE_STANDBY);
+
     /* Timing counters */
     uint32_t tick_10ms   = 0;
     uint32_t tick_50ms   = 0;
@@ -82,6 +85,7 @@ int main(void)
             Safety_CheckCurrent();
             Safety_CheckTemperature();
             Safety_CheckCANTimeout();
+            Safety_CheckSensors();
             Steering_ControlLoop();
             Traction_Update();
         }
@@ -95,9 +99,14 @@ int main(void)
             Temperature_StartConversion();
             Temperature_ReadAll();
 
-            /* Feed pedal demand into traction if no safety override */
-            if (!Safety_IsError()) {
-                Traction_SetDemand(Pedal_GetPercent());
+            /* Feed pedal demand into traction only when STM32 is in
+             * ACTIVE state — the safety authority decides whether
+             * actuator commands are permitted.                          */
+            if (Safety_IsCommandAllowed()) {
+                float validated = Safety_ValidateThrottle(Pedal_GetPercent());
+                Traction_SetDemand(validated);
+            } else {
+                Traction_SetDemand(0.0f);
             }
         }
 

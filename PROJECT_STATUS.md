@@ -61,11 +61,18 @@ Este repositorio implementa el **firmware STM32 de control**.
 | TCS (slip > 15% → reducción 50%) | ✅ Completo | `src/control/tcs_system.cpp` |
 | Protección sobrecorriente (25A) | ✅ Completo | `SafetyManager` |
 | Protección sobretemperatura (90°C) | ✅ Completo | `SafetyManager` |
-| Timeout CAN → emergency stop | ✅ Completo | Regla autoridad 6.3 |
+| Timeout CAN → modo seguro | ✅ Completo | Regla autoridad 6.3 |
 | Watchdog IWDG (500 ms) | ✅ Completo | `src/system/watchdog.cpp` |
 | Emergency stop + fail-safe | ✅ Completo | `SafetyManager` |
 | Power down (relés) | ✅ Completo | `src/system/power_mgmt.cpp` |
 | Error tracking (enum + set/clear) | ✅ Completo | `include/error_codes.h` |
+| **Máquina de estados (BOOT→STANDBY→ACTIVE→SAFE→ERROR)** | ✅ Completo | Plan Separación §6.3 |
+| **Validación de comandos ESP32 (throttle, steering, mode)** | ✅ Completo | Plan Separación §6.1 "STM32 decide" |
+| **Rate-limiting de dirección (200°/s)** | ✅ Completo | Seguridad funcional |
+| **Filtros CAN RX (solo IDs ESP32 válidos)** | ✅ Completo | Plan Separación §6.3 arbitraje |
+| **Secuenciación de relés (power-up/power-down)** | ✅ Completo | `src/system/power_mgmt.cpp` |
+| **Plausibilidad de sensores (rango, coherencia)** | ✅ Completo | Safety §3.1 |
+| **Heartbeat enriquecido (counter, state, fault flags)** | ✅ Completo | Protocolo CAN 0x001 |
 
 ### 5. Interrupciones (`stm32g4xx_it.c/h`) ✅
 | Funcionalidad | Estado |
@@ -137,14 +144,19 @@ Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separaci
 - [ ] **Limp mode:** El FULL-FIRMWARE tiene `src/system/limp_mode.cpp` para modo degradado; podría añadirse al safety_system
 - [ ] **Adaptive cruise:** `src/control/adaptive_cruise.cpp` del FULL-FIRMWARE; requiere datos de obstáculos vía CAN
 - [ ] **CRC8 checksum:** Documentado en protocolo CAN pero no implementado (CAN tiene CRC propio, pero añade capa extra)
-- [ ] **Relay control module:** Actualmente los relés se controlan directamente con GPIO; podría abstraerse como en `src/control/relays.cpp`
 
 ### Prioridad Baja
-- [ ] **Power management avanzado:** Secuencia de encendido/apagado como en `src/system/power_mgmt.cpp`
-- [ ] **Sensor plausibility checks:** `Safety_CheckSensors()` es stub; añadir validación de rango de sensores
 - [ ] **I2C recovery:** El FULL-FIRMWARE tiene `include/i2c_recovery.h`; útil si el bus I2C se bloquea
 - [ ] **Watchdog window mode:** Usar WWDG además de IWDG para detección más rápida
 - [ ] **SystemClock_Config:** Actualmente es stub; necesita configuración PLL real para 170 MHz
+
+### ✅ Recientemente Completado
+- [x] **Máquina de estados del sistema** (BOOT→STANDBY→ACTIVE→SAFE→ERROR)
+- [x] **Validación de comandos ESP32** (throttle clamp, steering rate-limit, mode-change speed gate)
+- [x] **Filtros CAN RX** (solo acepta IDs ESP32 válidos: 0x011, 0x100-0x102)
+- [x] **Secuenciación de relés** (Relay_PowerUp/PowerDown con orden y delays)
+- [x] **Plausibilidad de sensores** (validación de rango para temperatura, corriente, velocidad)
+- [x] **Heartbeat enriquecido** (alive_counter, system_state, fault_flags)
 
 ---
 
