@@ -134,7 +134,7 @@ void CAN_SendHeartbeat(void) {
     /* Send every 100ms */
     if ((current_time - last_tx_heartbeat) >= 100) {
         /* Per CAN protocol doc (0x001):
-         *   Byte 0: alive_counter  (uint8, cyclic 0-255)
+         *   Byte 0: alive_counter  (uint8, cyclic 0-255, rollover is intentional)
          *   Byte 1: system_state   (uint8, 0=Boot..4=Error)
          *   Byte 2: fault_flags    (bitmask)
          *   Byte 3: reserved       */

@@ -15,7 +15,6 @@
 #include "main.h"
 #include "sensor_manager.h"
 #include "motor_control.h"
-#include <math.h>
 
 /* ---- Thresholds ---- */
 #define ABS_SLIP_THRESHOLD   20   /* % wheel slip to trigger ABS */
@@ -29,9 +28,12 @@
 #define THROTTLE_MAX         100.0f
 #define STEERING_MAX_DEG     45.0f
 #define STEERING_RATE_MAX_DEG_PER_S  200.0f  /* max steering rate          */
+#define STEERING_RATE_MIN_DT_S       0.001f /* ignore dt below 1 ms       */
 #define MODE_CHANGE_MAX_SPEED_KMH 1.0f       /* speed below which mode OK  */
 
-/* Sensor plausibility */
+/* Relay power sequencing delays (milliseconds) */
+#define RELAY_MAIN_SETTLE_MS     50   /* inrush current settling time      */
+#define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
 #define SENSOR_CURRENT_MAX_A 50.0f    /* anything above this is a fault */
@@ -104,7 +106,7 @@ uint8_t Safety_GetFaultFlags(void)
     if (safety_error == SAFETY_ERROR_CAN_TIMEOUT)  flags |= FAULT_CAN_TIMEOUT;
     if (safety_error == SAFETY_ERROR_OVERTEMP)      flags |= FAULT_TEMP_OVERLOAD;
     if (safety_error == SAFETY_ERROR_OVERCURRENT)   flags |= FAULT_CURRENT_OVERLOAD;
-    if (safety_error == SAFETY_ERROR_SENSOR_FAULT)  flags |= FAULT_ENCODER_ERROR;
+    if (safety_error == SAFETY_ERROR_SENSOR_FAULT)  flags |= FAULT_ENCODER_ERROR | FAULT_WHEEL_SENSOR;
     if (safety_status.abs_active)                   flags |= FAULT_ABS_ACTIVE;
     if (safety_status.tcs_active)                   flags |= FAULT_TCS_ACTIVE;
     return flags;
@@ -117,11 +119,11 @@ uint8_t Safety_GetFaultFlags(void)
 void Relay_PowerUp(void)
 {
     /* Sequence: Main → wait → Traction → Direction
-     * This prevents inrush current spikes.                              */
+     * Delays prevent inrush current spikes on the power bus.            */
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_SET);
-    HAL_Delay(50);
+    HAL_Delay(RELAY_MAIN_SETTLE_MS);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
-    HAL_Delay(20);
+    HAL_Delay(RELAY_TRACTION_SETTLE_MS);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_SET);
 }
 
@@ -165,7 +167,7 @@ float Safety_ValidateSteering(float requested_deg)
     /* Rate-limit to prevent violent movements */
     uint32_t now = HAL_GetTick();
     float dt = (float)(now - last_steering_tick) / 1000.0f;
-    if (dt > 0.001f) {
+    if (dt > STEERING_RATE_MIN_DT_S) {
         float max_delta = STEERING_RATE_MAX_DEG_PER_S * dt;
         float delta = requested_deg - last_steering_cmd;
         if (delta >  max_delta) requested_deg = last_steering_cmd + max_delta;
@@ -386,13 +388,16 @@ void Safety_EmergencyStop(void)
 {
     emergency_stopped = 1;
     Traction_EmergencyStop();
-    Safety_SetState(SYS_STATE_ERROR);
+    /* Transition to ERROR which calls Safety_PowerDown → Relay_PowerDown.
+     * Safety_PowerDown is safe to call after Traction_EmergencyStop
+     * (actuators are already inhibited; relays are de-energised).       */
+    system_state = SYS_STATE_ERROR;
+    Relay_PowerDown();
 }
 
 void Safety_FailSafe(void)
 {
     Traction_EmergencyStop();
-    /* Center steering */
     Steering_SetAngle(0.0f);
 }
 
