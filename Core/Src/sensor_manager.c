@@ -258,8 +258,10 @@ static uint8_t OW_ReadByte(void)
  *  Must be called once at init (from Sensor_Init) before first read.
  * ------------------------------------------------------------------------- */
 
+#define OW_SEARCH_ERROR  (-1)
+
 /**
- * @brief  CRC-8/MAXIM (poly 0x31, init 0x00, reflect I/O).
+ * @brief  CRC-8/MAXIM (poly 0x31, reflected as 0x8C, init 0x00).
  *         Used to verify DS18B20 ROM codes and scratchpad data.
  */
 static uint8_t OW_CRC8(const uint8_t *data, uint8_t len)
@@ -282,11 +284,12 @@ static uint8_t OW_CRC8(const uint8_t *data, uint8_t len)
  *
  * @param  rom          8-byte buffer to store discovered ROM code.
  * @param  last_discrepancy  Set to 0 for first call; updated each pass.
- * @retval  Next discrepancy marker (0 = search complete, no more devices).
+ * @retval Next discrepancy bit position (1-64), 0 when search completes
+ *         successfully, or OW_SEARCH_ERROR on error/no devices.
  */
 static int OW_SearchROM_Next(uint8_t rom[8], int last_discrepancy)
 {
-    if (!OW_Reset()) return -1;            /* No presence pulse → no devices */
+    if (!OW_Reset()) return OW_SEARCH_ERROR; /* No presence pulse → no devices */
 
     OW_WriteByte(0xF0);                    /* Search ROM command */
 
@@ -298,7 +301,7 @@ static int OW_SearchROM_Next(uint8_t rom[8], int last_discrepancy)
 
         if (id_bit && id_bit_comp) {
             /* No devices responding – abort */
-            return -1;
+            return OW_SEARCH_ERROR;
         }
 
         uint8_t direction;
@@ -353,7 +356,7 @@ static void OW_SearchAll(void)
 
     do {
         int next = OW_SearchROM_Next(rom, last_discrepancy);
-        if (next < 0) break;                  /* Error or no device */
+        if (next == OW_SEARCH_ERROR) break;   /* Error or no device */
 
         /* Validate CRC of discovered ROM */
         if (OW_CRC8(rom, 7) != rom[7]) break; /* Bad CRC – stop */

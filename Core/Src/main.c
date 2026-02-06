@@ -171,7 +171,9 @@ void SystemClock_Config(void)
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
     /* Configure the main internal regulator output voltage */
-    HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
+    if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST) != HAL_OK) {
+        Error_Handler();
+    }
 
     /* Initialise HSI and PLL */
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
