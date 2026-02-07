@@ -26,7 +26,7 @@ The STM32 decides what is allowed. The ESP32 requests; the STM32 disposes.
 |-----------|-------|--------|
 | Standard | CAN 2.0A (classic CAN) | `FDCAN_FRAME_CLASSIC`, `FDCAN_CLASSIC_CAN` in `can_handler.c` |
 | Identifier type | Standard 11-bit | `FDCAN_STANDARD_ID` in `can_handler.c` |
-| Bitrate | 500 kbps | `MX_FDCAN1_Init` in `main.c`: 170 MHz / (17 × (1 + 14 + 5)) = 500 000 bps |
+| Bitrate | 500 kbps | `MX_FDCAN1_Init` in `main.c`: 170 MHz / (17 × (1 + 14 + 5)) = 500,000 bps |
 | Prescaler | 17 | `NominalPrescaler = 17` |
 | Time Seg 1 | 14 TQ | `NominalTimeSeg1 = 14` |
 | Time Seg 2 | 5 TQ | `NominalTimeSeg2 = 5` |
@@ -363,7 +363,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | ESP32 heartbeat lost | > 250 ms | `Safety_CheckCANTimeout()` |
 | Motor overcurrent | > 25 A on any channel | `Safety_CheckCurrent()` |
 | Motor overtemperature | > 90 °C on any sensor | `Safety_CheckTemperature()` |
-| Temperature out of range | < −40 °C or > 125 °C | `Safety_CheckSensors()` |
+| Temperature out of range | < -40 °C or > 125 °C | `Safety_CheckSensors()` |
 | Current out of range | < 0 A or > 50 A | `Safety_CheckSensors()` |
 | Wheel speed out of range | < 0 or > 60 km/h | `Safety_CheckSensors()` |
 
