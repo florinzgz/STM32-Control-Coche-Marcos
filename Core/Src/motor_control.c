@@ -212,6 +212,14 @@ void Steering_ControlLoop(void)
 {
     static uint32_t last_time = 0;
     uint32_t now = HAL_GetTick();
+
+    /* On first call (or if last_time was never set), seed the timestamp
+     * and skip the PID iteration to avoid a huge dt spike.              */
+    if (last_time == 0) {
+        last_time = now;
+        return;
+    }
+
     float dt = (float)(now - last_time) / 1000.0f;
     if (dt < 0.001f) return;
 

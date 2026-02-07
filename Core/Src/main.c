@@ -383,5 +383,9 @@ static void MX_IWDG_Init(void)
 void Error_Handler(void)
 {
     __disable_irq();
+    /* Safe the hardware: drive all GPIOC outputs LOW (relays off, motors disabled).
+     * Uses direct register access because HAL may be in an inconsistent state.    */
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+                  | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     while (1) { }
 }

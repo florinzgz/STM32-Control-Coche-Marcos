@@ -43,9 +43,9 @@
 SafetyStatus_t safety_status = {0};
 Safety_Error_t safety_error  = SAFETY_ERROR_NONE;
 
-static SystemState_t system_state   = SYS_STATE_BOOT;
-static uint32_t last_can_rx_time    = 0;
-static uint8_t  emergency_stopped   = 0;
+static SystemState_t system_state       = SYS_STATE_BOOT;
+static volatile uint32_t last_can_rx_time = 0;  /* Written from ISR (FDCAN RxFifo0Callback) */
+static uint8_t  emergency_stopped       = 0;
 static float    last_steering_cmd   = 0.0f;
 static uint32_t last_steering_tick  = 0;
 
@@ -355,6 +355,7 @@ void Safety_CheckSensors(void)
         float t = Temperature_Get(i);
         if (t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+            Safety_SetState(SYS_STATE_SAFE);
             return;
         }
     }
@@ -364,6 +365,7 @@ void Safety_CheckSensors(void)
         float a = Current_GetAmps(i);
         if (a < 0.0f || a > SENSOR_CURRENT_MAX_A) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+            Safety_SetState(SYS_STATE_SAFE);
             return;
         }
     }
@@ -377,6 +379,7 @@ void Safety_CheckSensors(void)
     for (uint8_t i = 0; i < 4; i++) {
         if (spd[i] < 0.0f || spd[i] > SENSOR_SPEED_MAX_KMH) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+            Safety_SetState(SYS_STATE_SAFE);
             return;
         }
     }
