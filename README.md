@@ -77,8 +77,8 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 ### Communication
 | Pin | Function | Protocol |
 |-----|----------|----------|
-| PA12 | FDCAN1_TX | CAN |
-| PA11 | FDCAN1_RX | CAN |
+| PB9 | FDCAN1_TX | CAN (AF9) |
+| PB8 | FDCAN1_RX | CAN (AF9) |
 | PB6 | I2C1_SCL | I2C |
 | PB7 | I2C1_SDA | I2C |
 | PB0 | OneWire | DS18B20 |

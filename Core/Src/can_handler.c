@@ -2,6 +2,11 @@
   ****************************************************************************
   * @file    can_handler.c
   * @brief   CAN communication implementation for ESP32-STM32 link
+  *
+  *          The STM32 is the safety authority on the CAN bus:
+  *            – RX filters accept only valid ESP32 message IDs
+  *            – All received commands pass through Safety_Validate*()
+  *            – Heartbeat includes system state and fault flags
   ****************************************************************************
   */
 
@@ -15,6 +20,7 @@ CAN_Stats_t can_stats = {0};
 
 /* Internal state */
 static uint32_t last_tx_heartbeat = 0;
+static uint8_t  heartbeat_counter = 0;
 
 /* Internal helper to send a CAN frame */
 static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
@@ -56,6 +62,49 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     return result;
 }
 
+/* ================================================================== */
+/*  CAN RX Filter Configuration                                       */
+/* ================================================================== */
+
+/**
+ * @brief  Configure FDCAN RX filters to only accept valid ESP32 IDs.
+ *
+ * This enforces CAN-bus authority: the STM32 only processes messages
+ * from the known ESP32 command ID range and rejects everything else.
+ */
+static void CAN_ConfigureFilters(void)
+{
+    FDCAN_FilterTypeDef filter = {0};
+
+    /* Filter 0: Accept ESP32 heartbeat (0x011) */
+    filter.IdType       = FDCAN_STANDARD_ID;
+    filter.FilterIndex  = 0;
+    filter.FilterType   = FDCAN_FILTER_DUAL;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1    = CAN_ID_HEARTBEAT_ESP32;
+    filter.FilterID2    = CAN_ID_HEARTBEAT_ESP32;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+
+    /* Filter 1: Accept ESP32 commands (0x100–0x102) */
+    filter.FilterIndex  = 1;
+    filter.FilterType   = FDCAN_FILTER_RANGE;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1    = CAN_ID_CMD_THROTTLE;
+    filter.FilterID2    = CAN_ID_CMD_MODE;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+
+    /* Reject all non-matching standard IDs */
+    HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
+                                  FDCAN_REJECT,   /* non-matching std */
+                                  FDCAN_REJECT,   /* non-matching ext */
+                                  FDCAN_REJECT_REMOTE,
+                                  FDCAN_REJECT_REMOTE);
+}
+
+/* ================================================================== */
+/*  Public API                                                         */
+/* ================================================================== */
+
 void CAN_Init(void) {
     /* Reset statistics */
     can_stats.tx_count = 0;
@@ -63,7 +112,11 @@ void CAN_Init(void) {
     can_stats.tx_errors = 0;
     can_stats.rx_errors = 0;
     can_stats.last_heartbeat_esp32 = HAL_GetTick();
+    heartbeat_counter = 0;
     
+    /* Configure RX acceptance filters */
+    CAN_ConfigureFilters();
+
     /* Enable RX FIFO0 new message notifications */
     if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
         Error_Handler();
@@ -80,8 +133,18 @@ void CAN_SendHeartbeat(void) {
     
     /* Send every 100ms */
     if ((current_time - last_tx_heartbeat) >= 100) {
-        uint8_t heartbeat_payload[1] = {0x01};
-        TransmitFrame(CAN_ID_HEARTBEAT_STM32, heartbeat_payload, 1);
+        /* Per CAN protocol doc (0x001):
+         *   Byte 0: alive_counter  (uint8, cyclic 0-255, rollover is intentional)
+         *   Byte 1: system_state   (uint8, 0=Boot..4=Error)
+         *   Byte 2: fault_flags    (bitmask)
+         *   Byte 3: reserved       */
+        uint8_t payload[4];
+        payload[0] = heartbeat_counter++;
+        payload[1] = (uint8_t)Safety_GetState();
+        payload[2] = Safety_GetFaultFlags();
+        payload[3] = 0x00;
+
+        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 4);
         last_tx_heartbeat = current_time;
     }
 }
@@ -191,40 +254,50 @@ void CAN_ProcessMessages(void) {
         can_stats.rx_count++;
         uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);
         
-        /* Parse received messages based on ID */
+        /* Parse received messages based on ID.
+         *
+         * All actuator commands are validated through the safety layer
+         * before being applied.  The STM32 enforces physical reality:
+         * it may clamp, rate-limit, or reject any ESP32 request.       */
         switch (rx_hdr.Identifier) {
             case CAN_ID_HEARTBEAT_ESP32:
                 can_stats.last_heartbeat_esp32 = HAL_GetTick();
+                Safety_UpdateCANRxTime();
                 break;
                 
             case CAN_ID_CMD_THROTTLE:
                 if (msg_len >= 1) {
-                    float throttle_percent = (float)rx_payload[0];
-                    Traction_SetDemand(throttle_percent);
+                    float requested_pct = (float)rx_payload[0];
+                    float validated_pct = Safety_ValidateThrottle(requested_pct);
+                    Traction_SetDemand(validated_pct);
                 }
                 break;
                 
             case CAN_ID_CMD_STEERING:
                 if (msg_len >= 2) {
                     int16_t angle_raw = (int16_t)(rx_payload[0] | (rx_payload[1] << 8));
-                    float angle_deg = (float)angle_raw / 10.0f;  /* Convert from decidegrees */
-                    Steering_SetAngle(angle_deg);
+                    float requested_deg = (float)angle_raw / 10.0f;
+                    float validated_deg = Safety_ValidateSteering(requested_deg);
+                    Steering_SetAngle(validated_deg);
                 }
                 break;
                 
             case CAN_ID_CMD_MODE:
                 if (msg_len >= 1) {
                     uint8_t mode_flags = rx_payload[0];
-                    /* Bit 0: 4x4 enable, Bit 1: Tank turn, Bits 2-7: Reserved for future use */
                     bool enable_4x4 = (mode_flags & 0x01) != 0;
-                    bool tank_turn = (mode_flags & 0x02) != 0;
-                    Traction_SetMode4x4(enable_4x4);
-                    Traction_SetAxisRotation(tank_turn);
+                    bool tank_turn  = (mode_flags & 0x02) != 0;
+                    /* STM32 decides: mode change only allowed at low speed */
+                    if (Safety_ValidateModeChange(enable_4x4, tank_turn)) {
+                        Traction_SetMode4x4(enable_4x4);
+                        Traction_SetAxisRotation(tank_turn);
+                    }
                 }
                 break;
                 
             default:
-                /* Unknown message ID - ignore */
+                /* Unknown message ID – filtered out by hardware,
+                 * should never reach here.                        */
                 break;
         }
     }
