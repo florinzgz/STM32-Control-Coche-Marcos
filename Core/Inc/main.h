@@ -51,6 +51,11 @@ extern "C" {
 #define PIN_ENC_B          GPIO_PIN_3   /* PB3  - TIM2_CH2 */
 #define PIN_ENC_Z          GPIO_PIN_4   /* PB4  - EXTI4 (index pulse) */
 
+/* ---- Steering Center Inductive Sensor ---- */
+/* LJ12A3-type inductive proximity sensor detecting a physical screw
+ * placed at the mechanical center of the steering rack.               */
+#define PIN_STEER_CENTER   GPIO_PIN_5   /* PB5 - EXTI5 */
+
 /* ---- I2C Bus (INA226 via TCA9548A, DS18B20) ---- */
 #define PIN_I2C_SCL        GPIO_PIN_6   /* PB6 - I2C1_SCL */
 #define PIN_I2C_SDA        GPIO_PIN_7   /* PB7 - I2C1_SDA */

@@ -15,6 +15,7 @@ C_SOURCES = \
   $(CORE_SRC)/sensor_manager.c \
   $(CORE_SRC)/safety_system.c \
   $(CORE_SRC)/ackermann.c \
+  $(CORE_SRC)/steering_centering.c \
   $(CORE_SRC)/stm32g4xx_it.c \
   $(CORE_SRC)/stm32g4xx_hal_msp.c \
   $(CORE_SRC)/system_stm32g4xx.c

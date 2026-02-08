@@ -25,7 +25,8 @@ typedef enum {
     SAFETY_ERROR_SENSOR_FAULT = 4,
     SAFETY_ERROR_MOTOR_STALL = 5,
     SAFETY_ERROR_EMERGENCY_STOP = 6,
-    SAFETY_ERROR_WATCHDOG = 7
+    SAFETY_ERROR_WATCHDOG = 7,
+    SAFETY_ERROR_CENTERING = 8  /* Steering centering failed */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states
@@ -56,6 +57,7 @@ typedef enum {
 #define FAULT_WHEEL_SENSOR      (1U << 4)
 #define FAULT_ABS_ACTIVE        (1U << 5)
 #define FAULT_TCS_ACTIVE        (1U << 6)
+#define FAULT_CENTERING         (1U << 7)
 
 /* ABS/TCS status */
 typedef struct {

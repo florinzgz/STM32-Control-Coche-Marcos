@@ -100,6 +100,12 @@ void EXTI15_10_IRQHandler(void)
     Wheel_RR_IRQHandler();
 }
 
+void EXTI9_5_IRQHandler(void)
+{
+    HAL_GPIO_EXTI_IRQHandler(PIN_STEER_CENTER);
+    SteeringCenter_IRQHandler();
+}
+
 void TIM1_UP_TIM16_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
