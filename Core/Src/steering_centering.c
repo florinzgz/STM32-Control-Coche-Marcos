@@ -48,7 +48,7 @@
 
 /* ---- Centering constants ----
  *
- * CENTERING_PWM: ~10 % of PWM_PERIOD (8499).  Intentionally LOW to
+ * CENTERING_PWM: ~10 % of full PWM scale (8499 at 20 kHz).  Intentionally LOW to
  * avoid forcing the rack.  Positioning only, not power.
  *
  * STALL_TIMEOUT_MS: If the encoder does not change for this duration
@@ -86,6 +86,18 @@ static void Centering_Abort(void)
     centering_state = CENTERING_FAULT;
     Safety_SetError(SAFETY_ERROR_CENTERING);
     Safety_SetState(SYS_STATE_SAFE);
+}
+
+/**
+ * @brief  Complete centering: stop motor, zero encoder, mark calibrated.
+ */
+static void Centering_Complete(void)
+{
+    Steering_Neutralize();
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+    Steering_SetCalibrated();
+    SteeringCenter_ClearFlag();
+    centering_state = CENTERING_DONE;
 }
 
 /**
@@ -163,12 +175,7 @@ void SteeringCentering_Step(void)
     case CENTERING_SWEEP_LEFT:
         /* 1. Center detected? */
         if (SteeringCenter_Detected()) {
-            Motor_SetPWM_Steering(0, false);
-            Steering_Neutralize();
-            __HAL_TIM_SET_COUNTER(&htim2, 0);
-            Steering_SetCalibrated();
-            SteeringCenter_ClearFlag();
-            centering_state = CENTERING_DONE;
+            Centering_Complete();
             return;
         }
 
@@ -198,12 +205,7 @@ void SteeringCentering_Step(void)
     case CENTERING_SWEEP_RIGHT:
         /* 1. Center detected? */
         if (SteeringCenter_Detected()) {
-            Motor_SetPWM_Steering(0, false);
-            Steering_Neutralize();
-            __HAL_TIM_SET_COUNTER(&htim2, 0);
-            Steering_SetCalibrated();
-            SteeringCenter_ClearFlag();
-            centering_state = CENTERING_DONE;
+            Centering_Complete();
             return;
         }
 

@@ -249,7 +249,7 @@ static void MX_GPIO_Init(void)
     gpio.Pin  = PIN_WHEEL_RR;
     HAL_GPIO_Init(GPIOB, &gpio);
 
-    /* Steering center inductive sensor (PB5 / EXTI5) – same
+    /* Steering center inductive sensor (PB5 / EXTI5) - same
      * configuration as the wheel speed sensors (rising-edge trigger). */
     gpio.Pin  = PIN_STEER_CENTER;
     gpio.Mode = GPIO_MODE_IT_RISING;
