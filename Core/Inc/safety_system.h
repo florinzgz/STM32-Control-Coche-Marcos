@@ -29,24 +29,34 @@ typedef enum {
     SAFETY_ERROR_CENTERING = 8  /* Steering centering failed */
 } Safety_Error_t;
 
-/* System operational state – the STM32 progresses through these states
- * and only accepts actuator commands when in STATE_ACTIVE.
+/* System operational state – the STM32 progresses through these states.
+ * Commands are accepted in ACTIVE and DEGRADED (with limits).
  *
- *  BOOT → STANDBY → ACTIVE ⇄ SAFE → ERROR
+ *  BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR
  *
- * Transitions:
- *   BOOT→STANDBY  : peripheral init complete
- *   STANDBY→ACTIVE: ESP32 heartbeat received, sensors plausible
- *   ACTIVE→SAFE   : fault detected (CAN timeout, overcurrent, overtemp…)
- *   SAFE→ACTIVE   : fault cleared AND ESP32 heartbeat restored
- *   any→ERROR     : unrecoverable fault (watchdog, emergency stop)
+ * Transitions (traced to base firmware limp_mode.cpp):
+ *   BOOT→STANDBY     : peripheral init complete
+ *   STANDBY→ACTIVE   : ESP32 heartbeat received, sensors plausible
+ *   ACTIVE→DEGRADED  : non-critical fault (sensor glitch, temp warning,
+ *                       centering fail, single overcurrent)
+ *   DEGRADED→ACTIVE  : fault cleared (recovery — "drive home" philosophy)
+ *   DEGRADED→SAFE    : critical fault while already degraded, or
+ *                       persistent fault (consecutive error count ≥ 3)
+ *   ACTIVE→SAFE      : CAN timeout, emergency stop
+ *   SAFE→ACTIVE      : fault cleared AND ESP32 heartbeat restored
+ *   any→ERROR        : unrecoverable fault (watchdog, emergency stop)
  */
 typedef enum {
-    SYS_STATE_BOOT    = 0,  /* Power-on, peripherals initialising        */
-    SYS_STATE_STANDBY = 1,  /* Ready, waiting for ESP32 heartbeat        */
-    SYS_STATE_ACTIVE  = 2,  /* Normal operation – commands accepted       */
-    SYS_STATE_SAFE    = 3,  /* Fault detected – actuators inhibited       */
-    SYS_STATE_ERROR   = 4   /* Unrecoverable fault – power-down required  */
+    SYS_STATE_BOOT     = 0,  /* Power-on, peripherals initialising        */
+    SYS_STATE_STANDBY  = 1,  /* Ready, waiting for ESP32 heartbeat        */
+    SYS_STATE_ACTIVE   = 2,  /* Normal operation – commands accepted       */
+    SYS_STATE_DEGRADED = 3,  /* Limp / degraded – commands accepted with
+                              * reduced power/speed limits.  The vehicle
+                              * can still "drive home".  Traced to base
+                              * firmware limp_mode.cpp states DEGRADED /
+                              * LIMP / CRITICAL.                           */
+    SYS_STATE_SAFE     = 4,  /* Severe fault – actuators inhibited         */
+    SYS_STATE_ERROR    = 5   /* Unrecoverable fault – power-down required  */
 } SystemState_t;
 
 /* Fault-flag bitmask transmitted in the heartbeat (byte 2) */
@@ -68,6 +78,20 @@ typedef struct {
     uint32_t abs_activation_count;
     uint32_t tcs_activation_count;
 } SafetyStatus_t;
+
+/* Degraded-mode power / speed limits
+ * Traced to base firmware limp_mode.cpp Limits namespace:
+ *   DEGRADED → 70 % power, 80 % speed
+ *   LIMP     → 40 % power, 50 % speed
+ * The STM32 collapses these into a single DEGRADED state that applies
+ * the LIMP (more conservative) limits so the vehicle can always
+ * "drive home" safely.                                                  */
+#define DEGRADED_POWER_LIMIT_PCT    40.0f   /* limp_mode.cpp POWER_LIMP */
+#define DEGRADED_SPEED_LIMIT_PCT    50.0f   /* limp_mode.cpp SPEED_LIMP */
+
+/* Consecutive-error threshold before escalating DEGRADED → SAFE.
+ * Traced to base firmware relays.cpp (consecutiveErrors >= 3).          */
+#define CONSECUTIVE_ERROR_THRESHOLD  3
 
 /* Function prototypes */
 void Safety_Init(void);
@@ -95,7 +119,11 @@ void Safety_UpdateCANRxTime(void);
 SystemState_t Safety_GetState(void);
 void          Safety_SetState(SystemState_t state);
 bool          Safety_IsCommandAllowed(void);
+bool          Safety_IsDegraded(void);
 uint8_t       Safety_GetFaultFlags(void);
+
+/* Degraded-mode throttle limit (returns multiplier 0.0–1.0) */
+float         Safety_GetPowerLimitFactor(void);
 
 /* Relay power sequencing */
 void Relay_PowerUp(void);
