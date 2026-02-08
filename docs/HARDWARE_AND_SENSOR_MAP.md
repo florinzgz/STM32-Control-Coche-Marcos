@@ -492,7 +492,7 @@ Complete module registry with classification, mapped hardware, and CAN bitmask p
 
 ## 5. Cross-Check vs Base Firmware
 
-Reference: [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos)
+Reference: [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos) at commit `c52beec`
 
 ### 5.1 Components Present in Both STM32 and Base Firmware
 
@@ -530,7 +530,7 @@ Reference: [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWA
 
 | Component | Base Firmware File(s) | Status |
 |-----------|----------------------|--------|
-| **Shifter (F/N/R)** | `src/input/shifter.cpp` | **Not ported.** No GPIO pins (PB12/PB13/PB14) initialized in STM32 `MX_GPIO_Init()`. Drive direction is controlled via `CMD_MODE` (0x102) bit flags from ESP32. The physical shifter, if present, must be read by ESP32 and translated to CAN commands. |
+| **Shifter (F/N/R)** | `src/input/shifter.cpp` | **Not ported.** No GPIO pins (PB12/PB13/PB14) initialized in STM32 `MX_GPIO_Init()`. Drive direction is controlled via `CMD_MODE` (0x102) bit flags from ESP32. The physical shifter hardware is read by the ESP32 and translated to CAN commands; it is not connected to the STM32. |
 | NVS persistence | `src/system/limp_mode.cpp` (`reset()`) | Not ported. STM32 has no EEPROM. Service mode flags reset on every power cycle. |
 | Power management | `src/system/power_mgmt.cpp` | Partially ported — relay sequencing exists in `safety_system.c` but battery SOC monitoring is not present. |
 
