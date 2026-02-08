@@ -14,6 +14,7 @@ C_SOURCES = \
   $(CORE_SRC)/can_handler.c \
   $(CORE_SRC)/sensor_manager.c \
   $(CORE_SRC)/safety_system.c \
+  $(CORE_SRC)/service_mode.c \
   $(CORE_SRC)/ackermann.c \
   $(CORE_SRC)/steering_centering.c \
   $(CORE_SRC)/stm32g4xx_it.c \

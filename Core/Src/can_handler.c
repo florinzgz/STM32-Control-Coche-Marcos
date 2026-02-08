@@ -13,6 +13,7 @@
 #include "can_handler.h"
 #include "motor_control.h"
 #include "safety_system.h"
+#include "service_mode.h"
 
 /* Global variables */
 extern FDCAN_HandleTypeDef hfdcan1;
@@ -91,6 +92,14 @@ static void CAN_ConfigureFilters(void)
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
     filter.FilterID1    = CAN_ID_CMD_THROTTLE;
     filter.FilterID2    = CAN_ID_CMD_MODE;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+
+    /* Filter 2: Accept ESP32 service commands (0x110) */
+    filter.FilterIndex  = 2;
+    filter.FilterType   = FDCAN_FILTER_DUAL;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1    = CAN_ID_SERVICE_CMD;
+    filter.FilterID2    = CAN_ID_SERVICE_CMD;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 
     /* Reject all non-matching standard IDs */
@@ -224,6 +233,45 @@ void CAN_SendError(uint8_t error_code, uint8_t subsystem) {
     TransmitFrame(CAN_ID_DIAG_ERROR, error_data, 2);
 }
 
+/**
+ * @brief  Send service mode status to ESP32.
+ *
+ * Transmits three frames:
+ *   0x301 — fault bitmask   (4 bytes, little-endian uint32)
+ *   0x302 — enabled bitmask (4 bytes, little-endian uint32)
+ *   0x303 — disabled bitmask(4 bytes, little-endian uint32)
+ *
+ * ESP32 uses these to populate the service/diagnostic menu.
+ */
+void CAN_SendServiceStatus(void) {
+    uint8_t data[4];
+    uint32_t val;
+
+    /* Fault bitmask */
+    val = ServiceMode_GetFaultMask();
+    data[0] = (uint8_t)(val & 0xFF);
+    data[1] = (uint8_t)((val >> 8) & 0xFF);
+    data[2] = (uint8_t)((val >> 16) & 0xFF);
+    data[3] = (uint8_t)((val >> 24) & 0xFF);
+    TransmitFrame(CAN_ID_SERVICE_FAULTS, data, 4);
+
+    /* Enabled bitmask */
+    val = ServiceMode_GetEnabledMask();
+    data[0] = (uint8_t)(val & 0xFF);
+    data[1] = (uint8_t)((val >> 8) & 0xFF);
+    data[2] = (uint8_t)((val >> 16) & 0xFF);
+    data[3] = (uint8_t)((val >> 24) & 0xFF);
+    TransmitFrame(CAN_ID_SERVICE_ENABLED, data, 4);
+
+    /* Disabled bitmask */
+    val = ServiceMode_GetDisabledMask();
+    data[0] = (uint8_t)(val & 0xFF);
+    data[1] = (uint8_t)((val >> 8) & 0xFF);
+    data[2] = (uint8_t)((val >> 16) & 0xFF);
+    data[3] = (uint8_t)((val >> 24) & 0xFF);
+    TransmitFrame(CAN_ID_SERVICE_DISABLED, data, 4);
+}
+
 /* Helper to extract byte count from FDCAN DLC */
 static uint8_t ExtractDLC(uint32_t dlc_code) {
     switch (dlc_code) {
@@ -291,6 +339,31 @@ void CAN_ProcessMessages(void) {
                     if (Safety_ValidateModeChange(enable_4x4, tank_turn)) {
                         Traction_SetMode4x4(enable_4x4);
                         Traction_SetAxisRotation(tank_turn);
+                    }
+                }
+                break;
+
+            case CAN_ID_SERVICE_CMD:
+                /* Service mode commands from ESP32:
+                 *   Byte 0: command (0=disable, 1=enable, 0xFF=factory restore)
+                 *   Byte 1: module_id (only for disable/enable)
+                 *
+                 * Critical modules cannot be disabled — ServiceMode_DisableModule
+                 * will reject the request.  This is a safety constraint. */
+                if (msg_len >= 1) {
+                    uint8_t cmd = rx_payload[0];
+                    if (cmd == 0xFF) {
+                        /* Factory restore — re-enable all modules */
+                        ServiceMode_FactoryRestore();
+                    } else if (msg_len >= 2) {
+                        uint8_t mod_id = rx_payload[1];
+                        if (mod_id < MODULE_COUNT) {
+                            if (cmd == 0) {
+                                ServiceMode_DisableModule((ModuleID_t)mod_id);
+                            } else if (cmd == 1) {
+                                ServiceMode_EnableModule((ModuleID_t)mod_id);
+                            }
+                        }
                     }
                 }
                 break;
