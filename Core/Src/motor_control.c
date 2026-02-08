@@ -37,7 +37,11 @@ typedef struct {
 
 /* Global variables */
 static Motor_t motor_fl, motor_fr, motor_rl, motor_rr, motor_steer;
-static PID_t steering_pid = {2.0f, 0.1f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f};
+/* steering_motor.cpp: kp = 1.2 in degree-space.
+ * STM32 PID operates in encoder-count-space (4800 CPR).
+ * Equivalent kp: 1.2 / (4800/360) = 0.09.
+ * Base firmware uses P-only control (no I or D terms). */
+static PID_t steering_pid = {0.09f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static TractionState_t traction_state = {0};
 static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_M;
@@ -244,9 +248,10 @@ const TractionState_t* Traction_GetState(void)
 
 void Steering_SetAngle(float angle_deg)
 {
-    if (angle_deg < -45.0f) angle_deg = -45.0f;
-    if (angle_deg >  45.0f) angle_deg =  45.0f;
-    /* Convert degrees to encoder counts: ±45° maps to ±(4800/2) = ±2400 counts */
+    /* constants.h: MAX_STEER_DEG = 54.0f */
+    if (angle_deg < -54.0f) angle_deg = -54.0f;
+    if (angle_deg >  54.0f) angle_deg =  54.0f;
+    /* Convert degrees to encoder counts */
     steering_pid.setpoint = angle_deg * (float)ENCODER_CPR / 360.0f;
 }
 
@@ -275,6 +280,18 @@ void Steering_ControlLoop(void)
 
     int16_t encoder_count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
     float measured = (float)encoder_count;
+
+    /* steering_motor.cpp: kDeadbandDeg = 0.5f
+     * Convert 0.5° deadband to encoder counts: 0.5 * 4800/360 ≈ 6.67 */
+    float error = steering_pid.setpoint - measured;
+    float absError = (error >= 0.0f) ? error : -error;
+    if (absError < (0.5f * (float)ENCODER_CPR / 360.0f)) {
+        Motor_SetPWM(&motor_steer, 0);
+        Motor_Enable(&motor_steer, 0);
+        last_time = now;
+        return;
+    }
+
     float output   = PID_Compute(&steering_pid, measured, dt);
 
     if (output < -100.0f) output = -100.0f;

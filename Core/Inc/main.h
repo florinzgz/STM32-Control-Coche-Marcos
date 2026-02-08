@@ -74,7 +74,8 @@ extern "C" {
 
 /* ---- Sensor Constants ---- */
 #define INA226_SHUNT_MOHM  1   /* 1 mΩ shunt resistor */
-#define WHEEL_CIRCUMF_M    1.2f /* Wheel circumference in meters */
+#define WHEEL_DIAMETER_MM  1100.0f /* constants.h: WHEEL_DIAMETER_MM */
+#define WHEEL_CIRCUMF_M    (WHEEL_DIAMETER_MM * 3.14159265f / 1000.0f) /* ≈ 3.456 m */
 
 /* ---- Global HAL handles ---- */
 extern FDCAN_HandleTypeDef hfdcan1;
