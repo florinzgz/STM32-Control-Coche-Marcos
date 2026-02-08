@@ -20,7 +20,6 @@
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
 #define TCS_SLIP_THRESHOLD   15   /* tcs_system.cpp: slipThreshold = 15.0f */
 #define MAX_CURRENT_A        25.0f
-#define MAX_TEMP_C           80.0f /* relays.cpp: MOTOR_OVERTEMP_LIMIT_C = 80.0f */
 #define CAN_TIMEOUT_MS       250
 
 /* Command-validation constants */
@@ -48,6 +47,20 @@ static uint8_t  emergency_stopped       = 0;
 static float    last_steering_cmd   = 0.0f;
 static uint32_t last_steering_tick  = 0;
 
+/* Consecutive-error counter for DEGRADED → SAFE escalation.
+ * Traced to base firmware relays.cpp: consecutiveErrors.
+ * Only modified from the main-loop safety checks (never from ISR).    */
+static uint8_t  consecutive_errors      = 0;
+static uint32_t last_error_tick         = 0;
+
+/* Recovery debounce: require RECOVERY_HOLD_MS of clean operation
+ * before transitioning DEGRADED → ACTIVE.  Prevents rapid state
+ * oscillation when a sensor value fluctuates near a threshold.
+ * Traced to limp_mode.cpp: STATE_HYSTERESIS_MS = 500.                 */
+#define RECOVERY_HOLD_MS  500
+static uint32_t recovery_clean_since    = 0;
+static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
+
 /* ================================================================== */
 /*  State Machine                                                      */
 /* ================================================================== */
@@ -58,7 +71,8 @@ void Safety_SetState(SystemState_t state)
 {
     if (state == system_state) return;
 
-    /* Only allow forward transitions and SAFE→ACTIVE recovery */
+    /* Only allow forward transitions and recovery transitions:
+     *   SAFE→ACTIVE, DEGRADED→ACTIVE                                   */
     switch (state) {
         case SYS_STATE_STANDBY:
             if (system_state == SYS_STATE_BOOT)
@@ -67,18 +81,34 @@ void Safety_SetState(SystemState_t state)
 
         case SYS_STATE_ACTIVE:
             if (system_state == SYS_STATE_STANDBY ||
-                system_state == SYS_STATE_SAFE) {
+                system_state == SYS_STATE_SAFE    ||
+                system_state == SYS_STATE_DEGRADED) {
                 /* Require no active faults to enter ACTIVE */
                 if (safety_error == SAFETY_ERROR_NONE) {
                     system_state = SYS_STATE_ACTIVE;
+                    consecutive_errors = 0;
                     Relay_PowerUp();
                 }
             }
             break;
 
-        case SYS_STATE_SAFE:
+        /* DEGRADED: limp / reduced-power mode.  Vehicle can still
+         * "drive home".  Traced to base firmware limp_mode.cpp.
+         * Unlike SAFE, relays stay ON and commands are accepted
+         * (with power/speed limits applied by Safety_ValidateThrottle). */
+        case SYS_STATE_DEGRADED:
             if (system_state == SYS_STATE_ACTIVE ||
                 system_state == SYS_STATE_STANDBY) {
+                system_state = SYS_STATE_DEGRADED;
+                /* Do NOT call Safety_FailSafe() — keep relays on.
+                 * Traction demand is limited via Safety_ValidateThrottle(). */
+            }
+            break;
+
+        case SYS_STATE_SAFE:
+            if (system_state == SYS_STATE_ACTIVE  ||
+                system_state == SYS_STATE_STANDBY  ||
+                system_state == SYS_STATE_DEGRADED) {
                 system_state = SYS_STATE_SAFE;
                 Safety_FailSafe();
             }
@@ -96,7 +126,25 @@ void Safety_SetState(SystemState_t state)
 
 bool Safety_IsCommandAllowed(void)
 {
-    return (system_state == SYS_STATE_ACTIVE);
+    return (system_state == SYS_STATE_ACTIVE ||
+            system_state == SYS_STATE_DEGRADED);
+}
+
+bool Safety_IsDegraded(void)
+{
+    return (system_state == SYS_STATE_DEGRADED);
+}
+
+/* Return power-limit multiplier for the current state.
+ * ACTIVE  → 1.0 (100 %)
+ * DEGRADED → DEGRADED_POWER_LIMIT_PCT / 100 (40 % — traced to
+ *            limp_mode.cpp POWER_LIMP)
+ * Others  → 0.0 (commands rejected upstream)                          */
+float Safety_GetPowerLimitFactor(void)
+{
+    if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
+    if (system_state == SYS_STATE_DEGRADED) return DEGRADED_POWER_LIMIT_PCT / 100.0f;
+    return 0.0f;
 }
 
 uint8_t Safety_GetFaultFlags(void)
@@ -141,7 +189,7 @@ void Relay_PowerDown(void)
 
 float Safety_ValidateThrottle(float requested_pct)
 {
-    /* Reject commands when not ACTIVE */
+    /* Reject commands when not ACTIVE or DEGRADED */
     if (!Safety_IsCommandAllowed()) return 0.0f;
 
     /* Clamp to valid range */
@@ -152,12 +200,14 @@ float Safety_ValidateThrottle(float requested_pct)
     if (safety_status.abs_active) return 0.0f;
     if (safety_status.tcs_active) return requested_pct * 0.5f;
 
-    return requested_pct;
+    /* Degraded-mode power limit (limp_mode.cpp: POWER_LIMP = 0.4) */
+    float limit = Safety_GetPowerLimitFactor();
+    return requested_pct * limit;
 }
 
 float Safety_ValidateSteering(float requested_deg)
 {
-    /* Reject commands when not ACTIVE */
+    /* Reject commands when not ACTIVE or DEGRADED */
     if (!Safety_IsCommandAllowed()) return Steering_GetCurrentAngle();
 
     /* Clamp to mechanical limits */
@@ -181,7 +231,7 @@ float Safety_ValidateSteering(float requested_deg)
 
 bool Safety_ValidateModeChange(bool enable_4x4, bool tank_turn)
 {
-    /* Reject commands when not ACTIVE */
+    /* Reject commands when not ACTIVE or DEGRADED */
     if (!Safety_IsCommandAllowed()) return false;
 
     /* Mode change only allowed at very low speed */
@@ -209,6 +259,10 @@ void Safety_Init(void)
     last_can_rx_time  = HAL_GetTick();
     last_steering_cmd = 0.0f;
     last_steering_tick = HAL_GetTick();
+    consecutive_errors = 0;
+    last_error_tick    = 0;
+    recovery_clean_since = 0;
+    recovery_pending     = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -298,22 +352,73 @@ void Safety_CheckCurrent(void)
         float amps = Current_GetAmps(i);
         if (amps > MAX_CURRENT_A) {
             Safety_SetError(SAFETY_ERROR_OVERCURRENT);
-            Safety_SetState(SYS_STATE_SAFE);
+            /* Count consecutive errors — escalate to SAFE only after
+             * CONSECUTIVE_ERROR_THRESHOLD (traced to relays.cpp:
+             * consecutiveErrors >= 3).  Single overcurrent events
+             * enter DEGRADED to allow "drive home".                   */
+            if (consecutive_errors < 255) consecutive_errors++;
+            last_error_tick = HAL_GetTick();
+            if (consecutive_errors >= CONSECUTIVE_ERROR_THRESHOLD) {
+                Safety_SetState(SYS_STATE_SAFE);
+            } else {
+                Safety_SetState(SYS_STATE_DEGRADED);
+            }
             return;
         }
+    }
+    /* No overcurrent — decay consecutive error counter after 1 s of
+     * clean operation (traced to relays.cpp: lastErrorMs > 1000).     */
+    if ((HAL_GetTick() - last_error_tick) > 1000 && consecutive_errors > 0) {
+        consecutive_errors = 0;
+    }
+    /* Clear overcurrent error once current is back to normal,
+     * allowing DEGRADED → ACTIVE recovery.                            */
+    if (safety_error == SAFETY_ERROR_OVERCURRENT &&
+        system_state == SYS_STATE_DEGRADED &&
+        consecutive_errors == 0) {
+        Safety_ClearError(SAFETY_ERROR_OVERCURRENT);
     }
 }
 
 /* ---- Overtemperature ---------------------------------------------- */
 
+/* Temperature warning threshold — enter DEGRADED, not SAFE.
+ * Traced to limp_mode.cpp: Thresholds::TEMP_WARNING = 80.0f            */
+#define TEMP_WARNING_C    80.0f
+/* Temperature critical threshold — enter SAFE (actuators off).
+ * Traced to limp_mode.cpp: Thresholds::TEMP_CRITICAL = 90.0f           */
+#define TEMP_CRITICAL_C   90.0f
+
 void Safety_CheckTemperature(void)
 {
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         float t = Temperature_Get(i);
-        if (t > MAX_TEMP_C) {
+        if (t > TEMP_CRITICAL_C) {
             Safety_SetError(SAFETY_ERROR_OVERTEMP);
             Safety_SetState(SYS_STATE_SAFE);
             return;
+        }
+        if (t > TEMP_WARNING_C) {
+            Safety_SetError(SAFETY_ERROR_OVERTEMP);
+            Safety_SetState(SYS_STATE_DEGRADED);
+            return;
+        }
+    }
+    /* All temperatures OK — clear overtemp error if it was set,
+     * allowing DEGRADED → ACTIVE recovery via Safety_CheckCANTimeout.
+     * Apply 5 °C hysteresis below TEMP_WARNING_C to prevent
+     * oscillation when a motor temp hovers near the threshold.        */
+    if (safety_error == SAFETY_ERROR_OVERTEMP &&
+        system_state == SYS_STATE_DEGRADED) {
+        bool all_below_hysteresis = true;
+        for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+            if (Temperature_Get(i) > (TEMP_WARNING_C - 5.0f)) {
+                all_below_hysteresis = false;
+                break;
+            }
+        }
+        if (all_below_hysteresis) {
+            Safety_ClearError(SAFETY_ERROR_OVERTEMP);
         }
     }
 }
@@ -339,6 +444,23 @@ void Safety_CheckCANTimeout(void)
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
             Safety_SetState(SYS_STATE_ACTIVE);
         }
+        /* DEGRADED recovery: if fault has been cleared while in DEGRADED,
+         * attempt to return to ACTIVE after a debounce period.
+         * Traced to limp_mode.cpp: STATE_HYSTERESIS_MS = 500.
+         * The debounce prevents rapid state oscillation when sensor
+         * values fluctuate near thresholds.                              */
+        if (system_state == SYS_STATE_DEGRADED &&
+            safety_error == SAFETY_ERROR_NONE) {
+            if (!recovery_pending) {
+                recovery_pending   = 1;
+                recovery_clean_since = HAL_GetTick();
+            } else if ((HAL_GetTick() - recovery_clean_since) >= RECOVERY_HOLD_MS) {
+                recovery_pending = 0;
+                Safety_SetState(SYS_STATE_ACTIVE);
+            }
+        } else {
+            recovery_pending = 0;  /* Reset debounce if fault reappears */
+        }
     }
 }
 
@@ -352,27 +474,34 @@ void Safety_UpdateCANRxTime(void)
 
 void Safety_CheckSensors(void)
 {
-    /* Temperature plausibility: values must be within DS18B20 range */
+    /* Temperature plausibility: values must be within DS18B20 range.
+     * Non-critical sensor fault → DEGRADED (not SAFE) to allow
+     * "drive home".  Traced to base firmware system.cpp selfTest:
+     * temperature sensors are OPTIONAL and use MODE_DEGRADED.           */
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         float t = Temperature_Get(i);
         if (t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            Safety_SetState(SYS_STATE_SAFE);
+            Safety_SetState(SYS_STATE_DEGRADED);
             return;
         }
     }
 
-    /* Current plausibility: negative or extremely high = fault */
+    /* Current plausibility: negative or extremely high = fault.
+     * Traced to base firmware system.cpp selfTest: current sensors
+     * are OPTIONAL and use MODE_DEGRADED.                               */
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         float a = Current_GetAmps(i);
         if (a < 0.0f || a > SENSOR_CURRENT_MAX_A) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            Safety_SetState(SYS_STATE_SAFE);
+            Safety_SetState(SYS_STATE_DEGRADED);
             return;
         }
     }
 
-    /* Wheel speed plausibility: no single wheel wildly different */
+    /* Wheel speed plausibility: no single wheel wildly out of range.
+     * Traced to base firmware system.cpp selfTest: wheel sensors are
+     * OPTIONAL and use MODE_DEGRADED.                                   */
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
@@ -381,9 +510,16 @@ void Safety_CheckSensors(void)
     for (uint8_t i = 0; i < 4; i++) {
         if (spd[i] < 0.0f || spd[i] > SENSOR_SPEED_MAX_KMH) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            Safety_SetState(SYS_STATE_SAFE);
+            Safety_SetState(SYS_STATE_DEGRADED);
             return;
         }
+    }
+
+    /* All sensor checks passed — if currently DEGRADED due to a sensor
+     * fault, clear the error so CAN timeout handler can recover to ACTIVE. */
+    if (system_state == SYS_STATE_DEGRADED &&
+        safety_error == SAFETY_ERROR_SENSOR_FAULT) {
+        Safety_ClearError(SAFETY_ERROR_SENSOR_FAULT);
     }
 }
 
@@ -395,8 +531,12 @@ void Safety_CheckSensors(void)
  * Delegates the actual detection to Encoder_CheckHealth() in
  * motor_control.c (which monitors range, jumps and frozen values).
  * If a fault is detected, raise SAFETY_ERROR_SENSOR_FAULT and
- * transition to SAFE state so that Safety_FailSafe() neutralises
- * the steering motor.
+ * transition to DEGRADED state.  Steering is neutralised (no PID
+ * without encoder feedback), but traction remains operational at
+ * reduced power so the vehicle can "drive home".
+ *
+ * Traced to base firmware limp_mode.cpp: steering not centered →
+ * LimpState::LIMP (40 % power, 50 % speed).
  */
 void Safety_CheckEncoder(void)
 {
@@ -408,7 +548,10 @@ void Safety_CheckEncoder(void)
         if (safety_error == SAFETY_ERROR_NONE) {
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         }
-        Safety_SetState(SYS_STATE_SAFE);
+        /* Neutralise steering (no PID without encoder) but keep
+         * traction alive in DEGRADED mode for "drive home".         */
+        Steering_Neutralize();
+        Safety_SetState(SYS_STATE_DEGRADED);
     }
 }
 

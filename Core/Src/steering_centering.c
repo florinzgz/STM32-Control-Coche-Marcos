@@ -78,14 +78,19 @@ extern TIM_HandleTypeDef htim2;
 /* ---- Private helpers ---- */
 
 /**
- * @brief  Abort centering: stop motor, latch fault, enter SAFE state.
+ * @brief  Abort centering: stop motor, latch fault, enter DEGRADED.
+ *
+ * Centering failure enters DEGRADED (not SAFE) to preserve the base
+ * firmware's "drive-home" philosophy.  The vehicle can still operate
+ * at reduced power with steering neutralised.  Traced to
+ * limp_mode.cpp: !steeringCentered → LimpState::LIMP.
  */
 static void Centering_Abort(void)
 {
     Steering_Neutralize();
     centering_state = CENTERING_FAULT;
     Safety_SetError(SAFETY_ERROR_CENTERING);
-    Safety_SetState(SYS_STATE_SAFE);
+    Safety_SetState(SYS_STATE_DEGRADED);
 }
 
 /**

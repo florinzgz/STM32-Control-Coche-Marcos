@@ -135,14 +135,14 @@ void CAN_SendHeartbeat(void) {
     if ((current_time - last_tx_heartbeat) >= 100) {
         /* Per CAN protocol doc (0x001):
          *   Byte 0: alive_counter  (uint8, cyclic 0-255, rollover is intentional)
-         *   Byte 1: system_state   (uint8, 0=Boot..4=Error)
+         *   Byte 1: system_state   (uint8, 0=Boot..5=Error; 3=Degraded is new)
          *   Byte 2: fault_flags    (bitmask)
-         *   Byte 3: reserved       */
+         *   Byte 3: error_code     (Safety_Error_t, specific fault ID for HMI) */
         uint8_t payload[4];
         payload[0] = heartbeat_counter++;
         payload[1] = (uint8_t)Safety_GetState();
         payload[2] = Safety_GetFaultFlags();
-        payload[3] = 0x00;
+        payload[3] = (uint8_t)Safety_GetError();
 
         TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 4);
         last_tx_heartbeat = current_time;
