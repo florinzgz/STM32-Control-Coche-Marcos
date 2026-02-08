@@ -48,9 +48,18 @@ static float    last_steering_cmd   = 0.0f;
 static uint32_t last_steering_tick  = 0;
 
 /* Consecutive-error counter for DEGRADED → SAFE escalation.
- * Traced to base firmware relays.cpp: consecutiveErrors.              */
+ * Traced to base firmware relays.cpp: consecutiveErrors.
+ * Only modified from the main-loop safety checks (never from ISR).    */
 static uint8_t  consecutive_errors      = 0;
 static uint32_t last_error_tick         = 0;
+
+/* Recovery debounce: require RECOVERY_HOLD_MS of clean operation
+ * before transitioning DEGRADED → ACTIVE.  Prevents rapid state
+ * oscillation when a sensor value fluctuates near a threshold.
+ * Traced to limp_mode.cpp: STATE_HYSTERESIS_MS = 500.                 */
+#define RECOVERY_HOLD_MS  500
+static uint32_t recovery_clean_since    = 0;
+static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
 
 /* ================================================================== */
 /*  State Machine                                                      */
@@ -252,6 +261,8 @@ void Safety_Init(void)
     last_steering_tick = HAL_GetTick();
     consecutive_errors = 0;
     last_error_tick    = 0;
+    recovery_clean_since = 0;
+    recovery_pending     = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -345,7 +356,7 @@ void Safety_CheckCurrent(void)
              * CONSECUTIVE_ERROR_THRESHOLD (traced to relays.cpp:
              * consecutiveErrors >= 3).  Single overcurrent events
              * enter DEGRADED to allow "drive home".                   */
-            consecutive_errors++;
+            if (consecutive_errors < 255) consecutive_errors++;
             last_error_tick = HAL_GetTick();
             if (consecutive_errors >= CONSECUTIVE_ERROR_THRESHOLD) {
                 Safety_SetState(SYS_STATE_SAFE);
@@ -394,10 +405,21 @@ void Safety_CheckTemperature(void)
         }
     }
     /* All temperatures OK — clear overtemp error if it was set,
-     * allowing DEGRADED → ACTIVE recovery via Safety_CheckCANTimeout. */
+     * allowing DEGRADED → ACTIVE recovery via Safety_CheckCANTimeout.
+     * Apply 5 °C hysteresis below TEMP_WARNING_C to prevent
+     * oscillation when a motor temp hovers near the threshold.        */
     if (safety_error == SAFETY_ERROR_OVERTEMP &&
         system_state == SYS_STATE_DEGRADED) {
-        Safety_ClearError(SAFETY_ERROR_OVERTEMP);
+        bool all_below_hysteresis = true;
+        for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+            if (Temperature_Get(i) > (TEMP_WARNING_C - 5.0f)) {
+                all_below_hysteresis = false;
+                break;
+            }
+        }
+        if (all_below_hysteresis) {
+            Safety_ClearError(SAFETY_ERROR_OVERTEMP);
+        }
     }
 }
 
@@ -423,11 +445,21 @@ void Safety_CheckCANTimeout(void)
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* DEGRADED recovery: if fault has been cleared while in DEGRADED,
-         * attempt to return to ACTIVE (traced to limp_mode.cpp:
-         * evaluateConditions returning NORMAL when all OK).              */
+         * attempt to return to ACTIVE after a debounce period.
+         * Traced to limp_mode.cpp: STATE_HYSTERESIS_MS = 500.
+         * The debounce prevents rapid state oscillation when sensor
+         * values fluctuate near thresholds.                              */
         if (system_state == SYS_STATE_DEGRADED &&
             safety_error == SAFETY_ERROR_NONE) {
-            Safety_SetState(SYS_STATE_ACTIVE);
+            if (!recovery_pending) {
+                recovery_pending   = 1;
+                recovery_clean_since = HAL_GetTick();
+            } else if ((HAL_GetTick() - recovery_clean_since) >= RECOVERY_HOLD_MS) {
+                recovery_pending = 0;
+                Safety_SetState(SYS_STATE_ACTIVE);
+            }
+        } else {
+            recovery_pending = 0;  /* Reset debounce if fault reappears */
         }
     }
 }
