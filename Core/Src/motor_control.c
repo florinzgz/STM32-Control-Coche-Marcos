@@ -43,6 +43,43 @@ static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_M;
 static float ackermann_max_inner = MAX_INNER_ANGLE;
 static uint8_t steering_calibrated = 0;
+
+/* ---- Encoder fault detection state ----
+ * The E6B2-CWZ6C encoder Z-index pulse (PB4/EXTI4) is intentionally NOT used:
+ *   1. No EXTI4 hardware initialisation exists in MX_GPIO_Init().
+ *   2. Steering uses relative positioning zeroed at Steering_Init(); an
+ *      absolute index reference would require a known mechanical alignment
+ *      that is not guaranteed by the chassis design.
+ *   3. Fault detection is achieved through range, jump and frozen-value
+ *      checks on the A/B quadrature channels, which are sufficient for
+ *      safety without the Z pulse.
+ */
+
+/* Encoder fault thresholds */
+#define STEERING_WHEEL_MAX_DEG 350.0f
+        /* The encoder measures STEERING WHEEL rotation, not road-wheel
+         * angle.  The steering wheel has ~±350° of mechanical travel
+         * (~700° lock-to-lock).  The ±45° limit in Steering_SetAngle()
+         * applies to the road-wheel angle after the steering reduction
+         * and Ackermann geometry — it does NOT constrain the encoder.    */
+#define ENC_MAX_COUNTS       ((int16_t)((STEERING_WHEEL_MAX_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
+        /* ±370° of steering wheel travel (350° + 20° margin) → ±4933
+         * counts.  Any reading beyond this is mechanically impossible.   */
+#define ENC_MAX_JUMP         100
+        /* Maximum plausible count change per 10 ms control cycle.
+         * At 200 °/s steering rate: 200/360*4800*0.01 ≈ 27 counts.
+         * 100 counts/cycle ≈ 750 °/s — well beyond any physical rate.   */
+#define ENC_FROZEN_TIMEOUT_MS 200
+        /* If the motor is driving above ENC_MOTOR_ACTIVE_PCT and the
+         * encoder has not changed for this long, declare frozen fault.   */
+#define ENC_MOTOR_ACTIVE_PCT  10.0f
+        /* Minimum |PID output| (%) to consider the motor actively
+         * driving.  Below this the motor may legitimately be at rest.    */
+
+static int16_t  enc_prev_count       = 0;
+static uint32_t enc_last_change_tick = 0;
+static uint8_t  enc_fault            = 0;   /* 0 = healthy, 1 = faulted */
+
 extern TIM_HandleTypeDef htim1, htim2, htim8;
 
 /* Private function prototypes */
@@ -105,6 +142,11 @@ void Steering_Init(void)
     steering_pid.output     = 0.0f;
     __HAL_TIM_SET_COUNTER(&htim2, 0);  /* Zero encoder at current position */
     steering_calibrated = 1;
+
+    /* Initialise encoder health tracking */
+    enc_prev_count       = 0;
+    enc_last_change_tick = HAL_GetTick();
+    enc_fault            = 0;
 }
 
 /* ==================================================================
@@ -210,6 +252,14 @@ void Steering_SetAngle(float angle_deg)
 
 void Steering_ControlLoop(void)
 {
+    /* If the encoder is faulted, do not run PID — we have no reliable
+     * position feedback.  Neutralise the motor to prevent uncontrolled
+     * steering.  The safety system handles the state transition.       */
+    if (enc_fault) {
+        Steering_Neutralize();
+        return;
+    }
+
     static uint32_t last_time = 0;
     uint32_t now = HAL_GetTick();
 
@@ -248,6 +298,89 @@ float Steering_GetCurrentAngle(void)
 bool Steering_IsCalibrated(void)
 {
     return (steering_calibrated != 0);
+}
+
+/* ==================================================================
+ *  Encoder Health Monitoring
+ *
+ *  Detects three classes of encoder fault:
+ *    1. Out-of-range  – counter exceeds mechanical travel (±50°)
+ *    2. Implausible jump – large count change between reads
+ *    3. Frozen value  – no change while motor is actively driving
+ *
+ *  On any fault enc_fault is latched; the safety system must handle
+ *  the transition to SAFE state and steering neutralisation.
+ * ================================================================== */
+
+void Encoder_CheckHealth(void)
+{
+    /* Fault is latched intentionally: in a safety-critical steering
+     * system, transient encoder faults (noise, loose connector) must
+     * not auto-recover.  The vehicle must come to a stop and be
+     * inspected.  Only a full system reset clears the latch.          */
+    if (enc_fault) return;
+
+    int16_t count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+    uint32_t now  = HAL_GetTick();
+
+    /* --- 1. Out-of-range check ---
+     * If the counter is outside the mechanically possible range the
+     * encoder signal is corrupt or disconnected (counter wrapped).    */
+    if (count > ENC_MAX_COUNTS || count < -ENC_MAX_COUNTS) {
+        enc_fault = 1;
+        return;
+    }
+
+    /* --- 2. Implausible jump check ---
+     * A sudden large delta between consecutive reads indicates noise,
+     * wiring fault, or encoder disconnect/reconnect.                  */
+    int16_t delta = count - enc_prev_count;
+    if (delta < 0) delta = (int16_t)(-delta);  /* abs — overflow-safe because
+                                                 * both values are bounded by
+                                                 * ENC_MAX_COUNTS (667).      */
+    if (delta > ENC_MAX_JUMP) {
+        enc_fault = 1;
+        return;
+    }
+
+    /* --- 3. Frozen value check ---
+     * If the PID is commanding significant motor output but the
+     * encoder count has not changed, the sensor is likely
+     * disconnected or mechanically decoupled.                         */
+    if (count != enc_prev_count) {
+        enc_last_change_tick = now;
+    } else {
+        float motor_pct = fabsf(steering_pid.output);
+        if (motor_pct > ENC_MOTOR_ACTIVE_PCT) {
+            if ((now - enc_last_change_tick) > ENC_FROZEN_TIMEOUT_MS) {
+                enc_fault = 1;
+                return;
+            }
+        }
+    }
+
+    enc_prev_count = count;
+}
+
+bool Encoder_HasFault(void)
+{
+    return (enc_fault != 0);
+}
+
+/**
+ * @brief  Safely disable steering motor output.
+ *
+ * Used when the encoder is faulted: we must NOT drive the motor
+ * toward any position because we have no reliable feedback.
+ * Instead, cut PWM and disable the H-bridge enable pin.
+ */
+void Steering_Neutralize(void)
+{
+    Motor_SetPWM(&motor_steer, 0);
+    Motor_Enable(&motor_steer, 0);
+    steering_pid.integral   = 0.0f;
+    steering_pid.prev_error = 0.0f;
+    steering_pid.output     = 0.0f;
 }
 
 /* ==================================================================

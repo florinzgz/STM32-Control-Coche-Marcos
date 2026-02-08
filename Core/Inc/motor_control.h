@@ -61,6 +61,11 @@ void Steering_SetAngle(float angle_deg);
 void Steering_ControlLoop(void);
 float Steering_GetCurrentAngle(void);
 bool Steering_IsCalibrated(void);
+void Steering_Neutralize(void);
+
+/* Encoder Health */
+void  Encoder_CheckHealth(void);
+bool  Encoder_HasFault(void);
 
 /* Ackermann Geometry (ported from ESP32 steering_model.cpp) */
 AckermannResult_t Ackermann_Compute(float wheelAngleDeg);
