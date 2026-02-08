@@ -106,6 +106,7 @@ uint8_t Safety_GetFaultFlags(void)
     if (safety_error == SAFETY_ERROR_OVERTEMP)      flags |= FAULT_TEMP_OVERLOAD;
     if (safety_error == SAFETY_ERROR_OVERCURRENT)   flags |= FAULT_CURRENT_OVERLOAD;
     if (safety_error == SAFETY_ERROR_SENSOR_FAULT)  flags |= FAULT_ENCODER_ERROR | FAULT_WHEEL_SENSOR;
+    if (safety_error == SAFETY_ERROR_CENTERING)     flags |= FAULT_CENTERING;
     if (safety_status.abs_active)                   flags |= FAULT_ABS_ACTIVE;
     if (safety_status.tcs_active)                   flags |= FAULT_TCS_ACTIVE;
     return flags;
@@ -325,9 +326,11 @@ void Safety_CheckCANTimeout(void)
         Safety_SetError(SAFETY_ERROR_CAN_TIMEOUT);
         Safety_SetState(SYS_STATE_SAFE);
     } else {
-        /* ESP32 alive – if we were in STANDBY, transition to ACTIVE */
+        /* ESP32 alive – if we were in STANDBY, transition to ACTIVE
+         * only when steering centering has completed successfully.       */
         if (system_state == SYS_STATE_STANDBY &&
-            safety_error == SAFETY_ERROR_NONE) {
+            safety_error == SAFETY_ERROR_NONE &&
+            Steering_IsCalibrated()) {
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* If in SAFE due to CAN timeout and heartbeat restored, try recovery */

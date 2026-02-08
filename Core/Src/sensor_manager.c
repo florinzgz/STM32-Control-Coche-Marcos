@@ -30,6 +30,22 @@ void Wheel_FR_IRQHandler(void) { wheel_pulse[1]++; }
 void Wheel_RL_IRQHandler(void) { wheel_pulse[2]++; }
 void Wheel_RR_IRQHandler(void) { wheel_pulse[3]++; }
 
+/* =========================================================================
+ *  Steering Center Inductive Sensor – EXTI pulse detection
+ *
+ *  An LJ12A3-type inductive proximity sensor detects a physical screw
+ *  at the mechanical center of the steering rack.  A single rising edge
+ *  on PIN_STEER_CENTER (PB5 / EXTI5) indicates the rack is at center.
+ * ========================================================================= */
+
+static volatile uint8_t steer_center_flag = 0;
+
+void SteeringCenter_IRQHandler(void) { steer_center_flag = 1; }
+
+bool SteeringCenter_Detected(void) { return (steer_center_flag != 0); }
+
+void SteeringCenter_ClearFlag(void) { steer_center_flag = 0; }
+
 /**
  * @brief  Compute speed for one wheel from accumulated pulses.
  * @param  idx   Wheel index 0-3 (FL,FR,RL,RR).

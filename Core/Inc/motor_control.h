@@ -56,6 +56,7 @@ void Steering_SetAngle(float angle_deg);
 void Steering_ControlLoop(void);
 float Steering_GetCurrentAngle(void);
 bool Steering_IsCalibrated(void);
+void Steering_SetCalibrated(void);
 void Steering_Neutralize(void);
 void Steering_GetWheelAngles(float *out_fl_deg, float *out_fr_deg);
 

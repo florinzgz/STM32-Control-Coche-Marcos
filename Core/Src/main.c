@@ -19,6 +19,7 @@
 #include "can_handler.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
+#include "steering_centering.h"
 
 /* ---- HAL handle instances ---- */
 FDCAN_HandleTypeDef hfdcan1;
@@ -62,6 +63,7 @@ int main(void)
     Sensor_Init();
     Safety_Init();
     CAN_Init();
+    SteeringCentering_Init();
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
@@ -87,6 +89,17 @@ int main(void)
             Safety_CheckCANTimeout();
             Safety_CheckSensors();
             Safety_CheckEncoder();
+
+            /* Run automatic centering during BOOT / STANDBY.
+             * Once complete, Steering_ControlLoop() takes over. */
+            if (!SteeringCentering_IsComplete() &&
+                !SteeringCentering_HasFault()) {
+                SystemState_t st = Safety_GetState();
+                if (st == SYS_STATE_BOOT || st == SYS_STATE_STANDBY) {
+                    SteeringCentering_Step();
+                }
+            }
+
             Steering_ControlLoop();
             Traction_Update();
         }
@@ -236,6 +249,13 @@ static void MX_GPIO_Init(void)
     gpio.Pin  = PIN_WHEEL_RR;
     HAL_GPIO_Init(GPIOB, &gpio);
 
+    /* Steering center inductive sensor (PB5 / EXTI5) – same
+     * configuration as the wheel speed sensors (rising-edge trigger). */
+    gpio.Pin  = PIN_STEER_CENTER;
+    gpio.Mode = GPIO_MODE_IT_RISING;
+    gpio.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
     /* EXTI IRQs */
     HAL_NVIC_SetPriority(EXTI0_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI0_IRQn);
@@ -243,6 +263,8 @@ static void MX_GPIO_Init(void)
     HAL_NVIC_EnableIRQ(EXTI1_IRQn);
     HAL_NVIC_SetPriority(EXTI2_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);   /* PB5 center sensor */
+    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
     HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }

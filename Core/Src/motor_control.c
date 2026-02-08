@@ -174,7 +174,11 @@ void Steering_Init(void)
     steering_pid.setpoint   = 0.0f;
     steering_pid.output     = 0.0f;
     __HAL_TIM_SET_COUNTER(&htim2, 0);  /* Zero encoder at current position */
-    steering_calibrated = 1;
+    /* Calibration flag is intentionally NOT set here.
+     * The automatic centering module (steering_centering.c) must detect
+     * the physical center reference before the encoder zero is valid.
+     * Until centering completes, steering commands are rejected.         */
+    steering_calibrated = 0;
 
     /* Initialise encoder health tracking */
     enc_prev_count       = 0;
@@ -407,6 +411,19 @@ float Steering_GetCurrentAngle(void)
 bool Steering_IsCalibrated(void)
 {
     return (steering_calibrated != 0);
+}
+
+/**
+ * @brief  Mark the steering system as calibrated.
+ *
+ * Called by the automatic centering module (steering_centering.c) once
+ * the physical center reference has been detected and the encoder has
+ * been zeroed at that position.  After this call, Steering_SetAngle()
+ * and Steering_ControlLoop() will accept commands.
+ */
+void Steering_SetCalibrated(void)
+{
+    steering_calibrated = 1;
 }
 
 void Steering_GetWheelAngles(float *out_fl_deg, float *out_fr_deg)

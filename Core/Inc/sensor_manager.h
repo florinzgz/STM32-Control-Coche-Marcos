@@ -24,6 +24,11 @@ float Wheel_GetSpeed_RL(void);
 float Wheel_GetSpeed_RR(void);
 float Wheel_GetRPM_FL(void);
 
+/* ---- Steering center inductive sensor (EXTI) ---- */
+void SteeringCenter_IRQHandler(void);
+bool SteeringCenter_Detected(void);
+void SteeringCenter_ClearFlag(void);
+
 /* ---- Pedal (ADC) ---- */
 void Pedal_Update(void);
 float Pedal_GetValue(void);
