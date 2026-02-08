@@ -56,9 +56,15 @@ static uint8_t steering_calibrated = 0;
  */
 
 /* Encoder fault thresholds */
-#define ENC_MAX_COUNTS       ((int16_t)(50.0f * (float)ENCODER_CPR / 360.0f))
-        /* ±50 deg (45° limit + 5° margin) → ±667 counts.
-         * Any reading beyond this is mechanically impossible.            */
+#define STEERING_WHEEL_MAX_DEG 350.0f
+        /* The encoder measures STEERING WHEEL rotation, not road-wheel
+         * angle.  The steering wheel has ~±350° of mechanical travel
+         * (~700° lock-to-lock).  The ±45° limit in Steering_SetAngle()
+         * applies to the road-wheel angle after the steering reduction
+         * and Ackermann geometry — it does NOT constrain the encoder.    */
+#define ENC_MAX_COUNTS       ((int16_t)((STEERING_WHEEL_MAX_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
+        /* ±370° of steering wheel travel (350° + 20° margin) → ±4933
+         * counts.  Any reading beyond this is mechanically impossible.   */
 #define ENC_MAX_JUMP         100
         /* Maximum plausible count change per 10 ms control cycle.
          * At 200 °/s steering rate: 200/360*4800*0.01 ≈ 27 counts.
