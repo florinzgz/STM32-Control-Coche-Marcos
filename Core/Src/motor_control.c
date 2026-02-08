@@ -59,7 +59,9 @@ static uint8_t steering_calibrated = 0;
  *      safety without the Z pulse.
  */
 
-/* Encoder fault thresholds */
+/* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
+ * 0.5° × 4800 counts/360° ≈ 6.67 counts */
+#define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
 #define STEERING_WHEEL_MAX_DEG 350.0f
         /* The encoder measures STEERING WHEEL rotation, not road-wheel
          * angle.  The steering wheel has ~±350° of mechanical travel
@@ -281,11 +283,10 @@ void Steering_ControlLoop(void)
     int16_t encoder_count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
     float measured = (float)encoder_count;
 
-    /* steering_motor.cpp: kDeadbandDeg = 0.5f
-     * Convert 0.5° deadband to encoder counts: 0.5 * 4800/360 ≈ 6.67 */
+    /* steering_motor.cpp: kDeadbandDeg = 0.5f */
     float error = steering_pid.setpoint - measured;
-    float absError = (error >= 0.0f) ? error : -error;
-    if (absError < (0.5f * (float)ENCODER_CPR / 360.0f)) {
+    float absError = fabsf(error);
+    if (absError < STEERING_DEADBAND_COUNTS) {
         Motor_SetPWM(&motor_steer, 0);
         Motor_Enable(&motor_steer, 0);
         last_time = now;
