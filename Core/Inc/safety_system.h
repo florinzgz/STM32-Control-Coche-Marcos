@@ -79,6 +79,7 @@ void Safety_CheckCurrent(void);
 void Safety_CheckTemperature(void);
 void Safety_CheckCANTimeout(void);
 void Safety_CheckSensors(void);
+void Safety_CheckEncoder(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);
 void Safety_PowerDown(void);

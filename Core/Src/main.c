@@ -86,6 +86,7 @@ int main(void)
             Safety_CheckTemperature();
             Safety_CheckCANTimeout();
             Safety_CheckSensors();
+            Safety_CheckEncoder();
             Steering_ControlLoop();
             Traction_Update();
         }

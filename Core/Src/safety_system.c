@@ -385,6 +385,31 @@ void Safety_CheckSensors(void)
     }
 }
 
+/* ---- Steering encoder health ----------------------------------------- */
+
+/**
+ * @brief  Check the steering encoder for faults.
+ *
+ * Delegates the actual detection to Encoder_CheckHealth() in
+ * motor_control.c (which monitors range, jumps and frozen values).
+ * If a fault is detected, raise SAFETY_ERROR_SENSOR_FAULT and
+ * transition to SAFE state so that Safety_FailSafe() neutralises
+ * the steering motor.
+ */
+void Safety_CheckEncoder(void)
+{
+    Encoder_CheckHealth();
+
+    if (Encoder_HasFault()) {
+        /* Only set the error once to avoid overwriting a different
+         * existing fault code.                                      */
+        if (safety_error == SAFETY_ERROR_NONE) {
+            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        }
+        Safety_SetState(SYS_STATE_SAFE);
+    }
+}
+
 /* ---- Emergency actions ------------------------------------------- */
 
 void Safety_EmergencyStop(void)
@@ -401,7 +426,18 @@ void Safety_EmergencyStop(void)
 void Safety_FailSafe(void)
 {
     Traction_EmergencyStop();
-    Steering_SetAngle(0.0f);
+
+    /* When the encoder is healthy, command the steering motor toward
+     * centre (0°) so the vehicle tracks straight under inertia.
+     * When the encoder is faulted, we have no reliable position
+     * feedback — driving the motor blind could make things worse.
+     * Instead, neutralise the motor (cut PWM + disable H-bridge)
+     * and let mechanical return springs / friction slow the rack.    */
+    if (Encoder_HasFault()) {
+        Steering_Neutralize();
+    } else {
+        Steering_SetAngle(0.0f);
+    }
 }
 
 void Safety_PowerDown(void)
