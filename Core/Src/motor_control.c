@@ -285,13 +285,15 @@ void Traction_Update(void)
         Motor_SetPWM(&motor_rr, 0);   Motor_Enable(&motor_rr, 0);
     }
 
-    /* Enable/disable motors */
+    /* Enable/disable motors.  Do NOT disable based on wheel_scale:
+     * ABS sets scale=0.0 but the motor must stay enabled so the
+     * H-bridge can actively brake (coast mode would lose control).    */
     uint8_t active = (fabs(demand) > 0.5f) ? 1 : 0;
-    Motor_Enable(&motor_fl, active && (safety_status.wheel_scale[MOTOR_FL] > 0.01f));
-    Motor_Enable(&motor_fr, active && (safety_status.wheel_scale[MOTOR_FR] > 0.01f));
+    Motor_Enable(&motor_fl, active);
+    Motor_Enable(&motor_fr, active);
     if (traction_state.mode4x4 || traction_state.axisRotation) {
-        Motor_Enable(&motor_rl, active && (safety_status.wheel_scale[MOTOR_RL] > 0.01f));
-        Motor_Enable(&motor_rr, active && (safety_status.wheel_scale[MOTOR_RR] > 0.01f));
+        Motor_Enable(&motor_rl, active);
+        Motor_Enable(&motor_rr, active);
     }
 
     /* Update state with sensor readings */

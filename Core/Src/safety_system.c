@@ -62,6 +62,12 @@ static uint32_t last_error_tick         = 0;
 static uint32_t recovery_clean_since    = 0;
 static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
 
+/* Per-wheel TCS reduction accumulator (persistent across calls).
+ * Mirrors tcs_system.cpp WheelTCSState::powerReduction.
+ * Declared here (module state section) so Safety_Init can reset them. */
+static float tcs_reduction[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+static uint32_t tcs_last_tick = 0;
+
 /* ================================================================== */
 /*  State Machine                                                      */
 /* ================================================================== */
@@ -271,7 +277,9 @@ void Safety_Init(void)
     safety_status.tcs_activation_count = 0;
     for (uint8_t i = 0; i < 4; i++) {
         safety_status.wheel_scale[i] = 1.0f;
+        tcs_reduction[i] = 0.0f;
     }
+    tcs_last_tick    = HAL_GetTick();
     safety_error     = SAFETY_ERROR_NONE;
     emergency_stopped = 0;
     last_can_rx_time  = HAL_GetTick();
@@ -307,8 +315,6 @@ void ABS_Update(void)
     if (!ServiceMode_IsEnabled(MODULE_ABS)) {
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
-        for (uint8_t i = 0; i < 4; i++)
-            safety_status.wheel_scale[i] = 1.0f;
         return;
     }
 
@@ -322,11 +328,9 @@ void ABS_Update(void)
     if (avg < 10.0f) {         /* abs_system.cpp: minSpeedKmh = 10.0f */
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
-        /* Restore all wheel scales (ABS inactive) — only touch wheels
-         * that were previously ABS-limited to avoid overwriting TCS.  */
-        for (uint8_t i = 0; i < 4; i++) {
-            safety_status.wheel_scale[i] = 1.0f;
-        }
+        /* Do NOT reset wheel_scale here — TCS_Update may have active
+         * reductions that must not be overwritten.  ABS-specific
+         * scales are restored in the per-wheel loop below.            */
         return;
     }
 
@@ -381,11 +385,6 @@ void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_w
 #define TCS_SMOOTH_REDUCTION    0.05f   /* 5 % additional per cycle     */
 #define TCS_MAX_REDUCTION       0.80f   /* Maximum 80 % power cut       */
 #define TCS_RECOVERY_RATE_PER_S 0.25f   /* 25 %/s recovery rate         */
-
-/* Per-wheel TCS reduction accumulator (persistent across calls).
- * Mirrors tcs_system.cpp WheelTCSState::powerReduction.              */
-static float tcs_reduction[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-static uint32_t tcs_last_tick = 0;
 
 void TCS_Update(void)
 {
