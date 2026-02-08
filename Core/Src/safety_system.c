@@ -16,17 +16,17 @@
 #include "sensor_manager.h"
 #include "motor_control.h"
 
-/* ---- Thresholds ---- */
-#define ABS_SLIP_THRESHOLD   20   /* % wheel slip to trigger ABS */
-#define TCS_SLIP_THRESHOLD   15   /* % wheel slip to trigger TCS */
+/* ---- Thresholds (from base firmware) ---- */
+#define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
+#define TCS_SLIP_THRESHOLD   15   /* tcs_system.cpp: slipThreshold = 15.0f */
 #define MAX_CURRENT_A        25.0f
-#define MAX_TEMP_C           90.0f
+#define MAX_TEMP_C           80.0f /* relays.cpp: MOTOR_OVERTEMP_LIMIT_C = 80.0f */
 #define CAN_TIMEOUT_MS       250
 
 /* Command-validation constants */
 #define THROTTLE_MIN         0.0f
 #define THROTTLE_MAX         100.0f
-#define STEERING_MAX_DEG     45.0f
+#define STEERING_MAX_DEG     54.0f  /* constants.h: MAX_STEER_DEG = 54.0f */
 #define STEERING_RATE_MAX_DEG_PER_S  200.0f  /* max steering rate          */
 #define STEERING_RATE_MIN_DT_S       0.001f /* ignore dt below 1 ms       */
 #define MODE_CHANGE_MAX_SPEED_KMH 1.0f       /* speed below which mode OK  */
@@ -223,7 +223,7 @@ void ABS_Update(void)
     spd[3] = Wheel_GetSpeed_RR();
 
     float avg = (spd[0] + spd[1] + spd[2] + spd[3]) / 4.0f;
-    if (avg < 2.0f) {          /* Below 2 km/h – ABS meaningless */
+    if (avg < 10.0f) {         /* abs_system.cpp: minSpeedKmh = 10.0f */
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
         return;
@@ -262,7 +262,7 @@ void TCS_Update(void)
     spd[3] = Wheel_GetSpeed_RR();
 
     float avg = (spd[0] + spd[1] + spd[2] + spd[3]) / 4.0f;
-    if (avg < 1.0f) {
+    if (avg < 3.0f) {          /* tcs_system.cpp: minSpeedKmh = 3.0f */
         safety_status.tcs_active = false;
         safety_status.tcs_wheel_mask = 0;
         return;

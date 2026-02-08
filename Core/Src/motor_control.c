@@ -37,7 +37,11 @@ typedef struct {
 
 /* Global variables */
 static Motor_t motor_fl, motor_fr, motor_rl, motor_rr, motor_steer;
-static PID_t steering_pid = {2.0f, 0.1f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f};
+/* steering_motor.cpp: kp = 1.2 in degree-space.
+ * STM32 PID operates in encoder-count-space (4800 CPR).
+ * Equivalent kp: 1.2 / (4800/360) = 0.09.
+ * Base firmware uses P-only control (no I or D terms). */
+static PID_t steering_pid = {0.09f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static TractionState_t traction_state = {0};
 static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_M;
@@ -55,7 +59,9 @@ static uint8_t steering_calibrated = 0;
  *      safety without the Z pulse.
  */
 
-/* Encoder fault thresholds */
+/* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
+ * 0.5° × 4800 counts/360° ≈ 6.67 counts */
+#define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
 #define STEERING_WHEEL_MAX_DEG 350.0f
         /* The encoder measures STEERING WHEEL rotation, not road-wheel
          * angle.  The steering wheel has ~±350° of mechanical travel
@@ -244,9 +250,10 @@ const TractionState_t* Traction_GetState(void)
 
 void Steering_SetAngle(float angle_deg)
 {
-    if (angle_deg < -45.0f) angle_deg = -45.0f;
-    if (angle_deg >  45.0f) angle_deg =  45.0f;
-    /* Convert degrees to encoder counts: ±45° maps to ±(4800/2) = ±2400 counts */
+    /* constants.h: MAX_STEER_DEG = 54.0f */
+    if (angle_deg < -54.0f) angle_deg = -54.0f;
+    if (angle_deg >  54.0f) angle_deg =  54.0f;
+    /* Convert degrees to encoder counts */
     steering_pid.setpoint = angle_deg * (float)ENCODER_CPR / 360.0f;
 }
 
@@ -275,6 +282,17 @@ void Steering_ControlLoop(void)
 
     int16_t encoder_count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
     float measured = (float)encoder_count;
+
+    /* steering_motor.cpp: kDeadbandDeg = 0.5f */
+    float error = steering_pid.setpoint - measured;
+    float absError = fabsf(error);
+    if (absError < STEERING_DEADBAND_COUNTS) {
+        Motor_SetPWM(&motor_steer, 0);
+        Motor_Enable(&motor_steer, 0);
+        last_time = now;
+        return;
+    }
+
     float output   = PID_Compute(&steering_pid, measured, dt);
 
     if (output < -100.0f) output = -100.0f;
