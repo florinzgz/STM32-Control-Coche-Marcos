@@ -6,6 +6,7 @@
   */
 
 #include "motor_control.h"
+#include "ackermann.h"
 #include "main.h"
 #include "sensor_manager.h"
 #include <math.h>
@@ -47,6 +48,11 @@ static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_WIDTH_M;
 static float ackermann_max_inner = MAX_STEER_DEG;
 static uint8_t steering_calibrated = 0;
+
+/* Ackermann-computed individual wheel angle setpoints (degrees).
+ * Updated every time Steering_SetAngle() is called.               */
+static float steer_fl_deg = 0.0f;
+static float steer_fr_deg = 0.0f;
 
 /* ---- Encoder fault detection state ----
  * The E6B2-CWZ6C encoder Z-index pulse (PB4/EXTI4) is intentionally NOT used:
@@ -246,7 +252,18 @@ void Steering_SetAngle(float angle_deg)
 {
     if (angle_deg < -MAX_STEER_DEG) angle_deg = -MAX_STEER_DEG;
     if (angle_deg >  MAX_STEER_DEG) angle_deg =  MAX_STEER_DEG;
-    /* Convert degrees to encoder counts */
+
+    /* --- Ackermann integration ---
+     * After clamping the road angle, compute individual front-left and
+     * front-right wheel angles using the pure Ackermann module.
+     * steer_fl_deg / steer_fr_deg are the per-wheel setpoints.
+     *
+     * The single steering motor PID targets the road angle because the
+     * encoder measures the steering column position; the mechanical
+     * linkage translates it into the Ackermann FL/FR geometry.         */
+    Ackermann_ComputeWheelAngles(angle_deg, &steer_fl_deg, &steer_fr_deg);
+
+    /* Convert road angle to encoder counts for steering motor PID */
     steering_pid.setpoint = angle_deg * (float)ENCODER_CPR / 360.0f;
 }
 
@@ -309,6 +326,12 @@ float Steering_GetCurrentAngle(void)
 bool Steering_IsCalibrated(void)
 {
     return (steering_calibrated != 0);
+}
+
+void Steering_GetWheelAngles(float *out_fl_deg, float *out_fr_deg)
+{
+    if (out_fl_deg) *out_fl_deg = steer_fl_deg;
+    if (out_fr_deg) *out_fr_deg = steer_fr_deg;
 }
 
 /* ==================================================================
