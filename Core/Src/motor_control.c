@@ -44,8 +44,8 @@ static Motor_t motor_fl, motor_fr, motor_rl, motor_rr, motor_steer;
 static PID_t steering_pid = {0.09f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static TractionState_t traction_state = {0};
 static float ackermann_wheelbase = WHEELBASE_M;
-static float ackermann_track     = TRACK_M;
-static float ackermann_max_inner = MAX_INNER_ANGLE;
+static float ackermann_track     = TRACK_WIDTH_M;
+static float ackermann_max_inner = MAX_STEER_DEG;
 static uint8_t steering_calibrated = 0;
 
 /* ---- Encoder fault detection state ----
@@ -62,12 +62,6 @@ static uint8_t steering_calibrated = 0;
 /* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
  * 0.5° × 4800 counts/360° ≈ 6.67 counts */
 #define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
-#define STEERING_WHEEL_MAX_DEG 350.0f
-        /* The encoder measures STEERING WHEEL rotation, not road-wheel
-         * angle.  The steering wheel has ~±350° of mechanical travel
-         * (~700° lock-to-lock).  The ±45° limit in Steering_SetAngle()
-         * applies to the road-wheel angle after the steering reduction
-         * and Ackermann geometry — it does NOT constrain the encoder.    */
 #define ENC_MAX_COUNTS       ((int16_t)((STEERING_WHEEL_MAX_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
         /* ±370° of steering wheel travel (350° + 20° margin) → ±4933
          * counts.  Any reading beyond this is mechanically impossible.   */
@@ -250,9 +244,8 @@ const TractionState_t* Traction_GetState(void)
 
 void Steering_SetAngle(float angle_deg)
 {
-    /* constants.h: MAX_STEER_DEG = 54.0f */
-    if (angle_deg < -54.0f) angle_deg = -54.0f;
-    if (angle_deg >  54.0f) angle_deg =  54.0f;
+    if (angle_deg < -MAX_STEER_DEG) angle_deg = -MAX_STEER_DEG;
+    if (angle_deg >  MAX_STEER_DEG) angle_deg =  MAX_STEER_DEG;
     /* Convert degrees to encoder counts */
     steering_pid.setpoint = angle_deg * (float)ENCODER_CPR / 360.0f;
 }

@@ -9,11 +9,6 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-// Ackermann geometry constants (from ESP32 steering_model.cpp)
-#define WHEELBASE_M        0.95f   // Distance between axles
-#define TRACK_M            0.70f   // Distance between wheels
-#define MAX_INNER_ANGLE    54.0f   // Maximum inner wheel angle (degrees)
-
 // Motor indices
 #define MOTOR_FL  0  // Front Left
 #define MOTOR_FR  1  // Front Right
