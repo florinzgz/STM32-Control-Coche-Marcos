@@ -77,6 +77,13 @@ typedef struct {
     uint8_t tcs_wheel_mask;
     uint32_t abs_activation_count;
     uint32_t tcs_activation_count;
+    /* Per-wheel torque scale factor (0.0–1.0).
+     * 1.0 = full power, 0.0 = wheel fully inhibited.
+     * Set by ABS_Update / TCS_Update per-wheel; consumed by
+     * Traction_Update to modulate individual motor PWM.
+     * Aligned with base firmware: abs_system.cpp modulateBrake()
+     * and tcs_system.cpp modulatePower() per-wheel approach.        */
+    float wheel_scale[4];
 } SafetyStatus_t;
 
 /* Degraded-mode power / speed limits

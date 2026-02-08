@@ -8,6 +8,7 @@
 #include "motor_control.h"
 #include "ackermann.h"
 #include "main.h"
+#include "safety_system.h"
 #include "sensor_manager.h"
 #include <math.h>
 
@@ -247,36 +248,50 @@ void Traction_SetAxisRotation(bool enable)
 void Traction_Update(void)
 {
     float demand = traction_state.demandPct;
-    uint16_t pwm = (uint16_t)(fabs(demand) * PWM_PERIOD / 100.0f);
+    uint16_t base_pwm = (uint16_t)(fabs(demand) * PWM_PERIOD / 100.0f);
     int8_t dir   = (demand >= 0) ? 1 : -1;
 
     if (traction_state.axisRotation) {
-        /* Tank turn: left wheels reverse, right wheels forward (or vice versa) */
-        Motor_SetPWM(&motor_fl, pwm); Motor_SetDirection(&motor_fl, (int8_t)-dir);
-        Motor_SetPWM(&motor_fr, pwm); Motor_SetDirection(&motor_fr, dir);
-        Motor_SetPWM(&motor_rl, pwm); Motor_SetDirection(&motor_rl, (int8_t)-dir);
-        Motor_SetPWM(&motor_rr, pwm); Motor_SetDirection(&motor_rr, dir);
+        /* Tank turn: left wheels reverse, right wheels forward (or vice versa).
+         * Per-wheel scale still applies for safety (slip on one side).        */
+        for (uint8_t i = 0; i < 4; i++) {
+            uint16_t pwm = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
+            int8_t d = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
+            Motor_t *m = (i == MOTOR_FL) ? &motor_fl :
+                         (i == MOTOR_FR) ? &motor_fr :
+                         (i == MOTOR_RL) ? &motor_rl : &motor_rr;
+            Motor_SetPWM(m, pwm);
+            Motor_SetDirection(m, d);
+        }
     } else if (traction_state.mode4x4) {
-        /* 4x4: All wheels same demand */
-        Motor_SetPWM(&motor_fl, pwm); Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, pwm); Motor_SetDirection(&motor_fr, dir);
-        Motor_SetPWM(&motor_rl, pwm); Motor_SetDirection(&motor_rl, dir);
-        Motor_SetPWM(&motor_rr, pwm); Motor_SetDirection(&motor_rr, dir);
+        /* 4x4: All wheels same base demand, modulated per-wheel by
+         * safety_status.wheel_scale[].  Aligned with base firmware
+         * traction.cpp per-wheel demandPct + modulatePower().         */
+        Motor_SetPWM(&motor_fl, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FL]));
+        Motor_SetDirection(&motor_fl, dir);
+        Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FR]));
+        Motor_SetDirection(&motor_fr, dir);
+        Motor_SetPWM(&motor_rl, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_RL]));
+        Motor_SetDirection(&motor_rl, dir);
+        Motor_SetPWM(&motor_rr, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_RR]));
+        Motor_SetDirection(&motor_rr, dir);
     } else {
-        /* 4x2: Front wheels only */
-        Motor_SetPWM(&motor_fl, pwm); Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, pwm); Motor_SetDirection(&motor_fr, dir);
+        /* 4x2: Front wheels only, per-wheel scale applied */
+        Motor_SetPWM(&motor_fl, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FL]));
+        Motor_SetDirection(&motor_fl, dir);
+        Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FR]));
+        Motor_SetDirection(&motor_fr, dir);
         Motor_SetPWM(&motor_rl, 0);   Motor_Enable(&motor_rl, 0);
         Motor_SetPWM(&motor_rr, 0);   Motor_Enable(&motor_rr, 0);
     }
 
     /* Enable/disable motors */
     uint8_t active = (fabs(demand) > 0.5f) ? 1 : 0;
-    Motor_Enable(&motor_fl, active);
-    Motor_Enable(&motor_fr, active);
+    Motor_Enable(&motor_fl, active && (safety_status.wheel_scale[MOTOR_FL] > 0.01f));
+    Motor_Enable(&motor_fr, active && (safety_status.wheel_scale[MOTOR_FR] > 0.01f));
     if (traction_state.mode4x4 || traction_state.axisRotation) {
-        Motor_Enable(&motor_rl, active);
-        Motor_Enable(&motor_rr, active);
+        Motor_Enable(&motor_rl, active && (safety_status.wheel_scale[MOTOR_RL] > 0.01f));
+        Motor_Enable(&motor_rr, active && (safety_status.wheel_scale[MOTOR_RR] > 0.01f));
     }
 
     /* Update state with sensor readings */
@@ -287,7 +302,7 @@ void Traction_Update(void)
     for (uint8_t i = 0; i < 4; i++) {
         traction_state.wheels[i].currentA = Current_GetAmps(i);
         traction_state.wheels[i].tempC    = Temperature_Get(i);
-        traction_state.wheels[i].pwm      = pwm;
+        traction_state.wheels[i].pwm      = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
         traction_state.wheels[i].reverse  = (dir < 0);
     }
 }

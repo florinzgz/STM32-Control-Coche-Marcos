@@ -207,9 +207,13 @@ float Safety_ValidateThrottle(float requested_pct)
     if (requested_pct < THROTTLE_MIN) requested_pct = THROTTLE_MIN;
     if (requested_pct > THROTTLE_MAX) requested_pct = THROTTLE_MAX;
 
-    /* ABS/TCS override: if active, safety system has already limited demand */
-    if (safety_status.abs_active) return 0.0f;
-    if (safety_status.tcs_active) return requested_pct * 0.5f;
+    /* Per-wheel ABS/TCS modulation is now handled in Traction_Update()
+     * via safety_status.wheel_scale[].  No global override here.
+     * Aligned with base firmware: abs_system.cpp modulateBrake() and
+     * tcs_system.cpp modulatePower() operate per-wheel, not globally.
+     *
+     * Global fallback (all 4 wheels slipping) is handled directly in
+     * ABS_Update / TCS_Update via Traction_SetDemand().               */
 
     /* Degraded-mode power limit (limp_mode.cpp: POWER_LIMP = 0.4) */
     float limit = Safety_GetPowerLimitFactor();
@@ -265,6 +269,9 @@ void Safety_Init(void)
     safety_status.tcs_wheel_mask = 0;
     safety_status.abs_activation_count = 0;
     safety_status.tcs_activation_count = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        safety_status.wheel_scale[i] = 1.0f;
+    }
     safety_error     = SAFETY_ERROR_NONE;
     emergency_stopped = 0;
     last_can_rx_time  = HAL_GetTick();
@@ -279,12 +286,29 @@ void Safety_Init(void)
 
 /* ---- ABS --------------------------------------------------------- */
 
+/* Per-wheel ABS scale: cut traction on the locking wheel only.
+ * Aligned with base firmware abs_system.cpp modulateBrake():
+ *   pressureReduction = 0.3 → 30 % reduction during pulse phase.
+ * On the STM32 the motor IS the brake, so we reduce motor torque
+ * on the locked wheel to let it recover grip.
+ * Non-slipping wheels keep wheel_scale = 1.0 (unchanged).          */
+
+/* ABS scale applied to the locking wheel.
+ * Base firmware uses 0.3 pressure reduction (70 % remaining).
+ * For motor-braking on STM32, full cut (0.0) is more appropriate
+ * because the motor cannot "pulse" brake pressure — it can only
+ * reduce torque.  This matches the original Traction_SetDemand(0)
+ * intent but applies it per-wheel only.                             */
+#define ABS_WHEEL_SCALE_ACTIVE  0.0f
+
 void ABS_Update(void)
 {
     /* Skip if ABS module is disabled (service mode) */
     if (!ServiceMode_IsEnabled(MODULE_ABS)) {
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
+        for (uint8_t i = 0; i < 4; i++)
+            safety_status.wheel_scale[i] = 1.0f;
         return;
     }
 
@@ -298,6 +322,11 @@ void ABS_Update(void)
     if (avg < 10.0f) {         /* abs_system.cpp: minSpeedKmh = 10.0f */
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
+        /* Restore all wheel scales (ABS inactive) — only touch wheels
+         * that were previously ABS-limited to avoid overwriting TCS.  */
+        for (uint8_t i = 0; i < 4; i++) {
+            safety_status.wheel_scale[i] = 1.0f;
+        }
         return;
     }
 
@@ -306,6 +335,14 @@ void ABS_Update(void)
         float slip = ((avg - spd[i]) * 100.0f) / avg;
         if (slip > (float)ABS_SLIP_THRESHOLD) {
             mask |= (1U << i);
+            /* Per-wheel intervention: reduce ONLY the locking wheel.
+             * Aligned with abs_system.cpp per-wheel active flag.      */
+            safety_status.wheel_scale[i] = ABS_WHEEL_SCALE_ACTIVE;
+        } else {
+            /* Wheel not locking — restore full power.
+             * TCS_Update runs after ABS_Update and may further reduce
+             * this value if the wheel is spinning (TCS takes the min). */
+            safety_status.wheel_scale[i] = 1.0f;
         }
     }
 
@@ -313,7 +350,13 @@ void ABS_Update(void)
         safety_status.abs_active = true;
         safety_status.abs_wheel_mask = mask;
         safety_status.abs_activation_count++;
-        Traction_SetDemand(0);  /* Cut throttle during ABS */
+        /* Global fallback: if ALL wheels lock, apply global throttle
+         * cut as a last-resort safety measure (vehicle is on ice or
+         * sensors are unreliable).                                    */
+        if (mask == 0x0F) {
+            Traction_SetDemand(0);
+        }
+        /* Otherwise: per-wheel scale is applied in Traction_Update(). */
     } else {
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
@@ -321,9 +364,28 @@ void ABS_Update(void)
 }
 
 bool ABS_IsActive(void)  { return safety_status.abs_active; }
-void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_wheel_mask = 0; }
+void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_wheel_mask = 0; for (uint8_t i = 0; i < 4; i++) safety_status.wheel_scale[i] = 1.0f; }
 
 /* ---- TCS --------------------------------------------------------- */
+
+/* Per-wheel TCS power reduction, aligned with base firmware
+ * tcs_system.cpp:
+ *   aggressiveReduction = 40.0f  → initial 40 % cut (scale = 0.6)
+ *   smoothReduction     =  5.0f  → +5 % per cycle while still slipping
+ *   max reduction       = 80.0f  → floor scale = 0.2
+ *   recoveryRatePerSec  = 25.0f  → 25 %/s recovery when slip clears
+ *
+ * These are NOT new thresholds — they are taken directly from the
+ * base firmware TCSSystem::Config defaults.                          */
+#define TCS_INITIAL_REDUCTION   0.40f   /* 40 % power cut on activation */
+#define TCS_SMOOTH_REDUCTION    0.05f   /* 5 % additional per cycle     */
+#define TCS_MAX_REDUCTION       0.80f   /* Maximum 80 % power cut       */
+#define TCS_RECOVERY_RATE_PER_S 0.25f   /* 25 %/s recovery rate         */
+
+/* Per-wheel TCS reduction accumulator (persistent across calls).
+ * Mirrors tcs_system.cpp WheelTCSState::powerReduction.              */
+static float tcs_reduction[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+static uint32_t tcs_last_tick = 0;
 
 void TCS_Update(void)
 {
@@ -331,6 +393,8 @@ void TCS_Update(void)
     if (!ServiceMode_IsEnabled(MODULE_TCS)) {
         safety_status.tcs_active = false;
         safety_status.tcs_wheel_mask = 0;
+        for (uint8_t i = 0; i < 4; i++)
+            tcs_reduction[i] = 0.0f;
         return;
     }
 
@@ -344,22 +408,63 @@ void TCS_Update(void)
     if (avg < 3.0f) {          /* tcs_system.cpp: minSpeedKmh = 3.0f */
         safety_status.tcs_active = false;
         safety_status.tcs_wheel_mask = 0;
+        for (uint8_t i = 0; i < 4; i++)
+            tcs_reduction[i] = 0.0f;
         return;
     }
+
+    /* Delta time for recovery ramp (tcs_system.cpp uses millis delta) */
+    uint32_t now = HAL_GetTick();
+    float dt = (float)(now - tcs_last_tick) / 1000.0f;
+    if (dt <= 0.0f || dt > 1.0f) dt = 0.01f;  /* Guard, same as base */
+    tcs_last_tick = now;
 
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 4; i++) {
         float slip = ((spd[i] - avg) * 100.0f) / avg;
         if (slip > (float)TCS_SLIP_THRESHOLD) {
             mask |= (1U << i);
+
+            if (tcs_reduction[i] < 0.01f) {
+                /* First activation — aggressive initial cut.
+                 * tcs_system.cpp: aggressiveReduction = 40.0f          */
+                tcs_reduction[i] = TCS_INITIAL_REDUCTION;
+            } else {
+                /* Already active — smooth progressive reduction.
+                 * tcs_system.cpp: smoothReduction = 5.0f               */
+                tcs_reduction[i] += TCS_SMOOTH_REDUCTION;
+            }
+            /* Clamp to maximum reduction (tcs_system.cpp: 80 %).       */
+            if (tcs_reduction[i] > TCS_MAX_REDUCTION)
+                tcs_reduction[i] = TCS_MAX_REDUCTION;
+        } else {
+            /* Slip under control — gradually recover power.
+             * tcs_system.cpp: recoveryRatePerSec = 25.0f               */
+            if (tcs_reduction[i] > 0.0f) {
+                tcs_reduction[i] -= TCS_RECOVERY_RATE_PER_S * dt;
+                if (tcs_reduction[i] < 0.0f)
+                    tcs_reduction[i] = 0.0f;
+            }
         }
+
+        /* Compute per-wheel scale.  ABS_Update runs first and may have
+         * already set wheel_scale[i] < 1.0.  Take the minimum of ABS
+         * and TCS so the most restrictive intervention wins.           */
+        float tcs_scale = 1.0f - tcs_reduction[i];
+        if (tcs_scale < safety_status.wheel_scale[i])
+            safety_status.wheel_scale[i] = tcs_scale;
     }
 
     if (mask) {
         safety_status.tcs_active = true;
         safety_status.tcs_wheel_mask = mask;
         safety_status.tcs_activation_count++;
-        Traction_SetDemand(Pedal_GetPercent() / 2.0f);
+        /* Global fallback: if ALL wheels spin, apply global limit as
+         * last-resort safety (all traction lost).                     */
+        if (mask == 0x0F) {
+            Traction_SetDemand(Pedal_GetPercent() * (1.0f - TCS_MAX_REDUCTION));
+        }
+        /* Otherwise: per-wheel scale is applied in Traction_Update(). */
     } else {
         safety_status.tcs_active = false;
         safety_status.tcs_wheel_mask = 0;
@@ -367,7 +472,7 @@ void TCS_Update(void)
 }
 
 bool TCS_IsActive(void) { return safety_status.tcs_active; }
-void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wheel_mask = 0; }
+void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wheel_mask = 0; for (uint8_t i = 0; i < 4; i++) tcs_reduction[i] = 0.0f; }
 
 /* ---- Overcurrent ------------------------------------------------- */
 
