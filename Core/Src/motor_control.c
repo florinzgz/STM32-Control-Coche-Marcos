@@ -308,7 +308,11 @@ bool Steering_IsCalibrated(void)
 
 void Encoder_CheckHealth(void)
 {
-    if (enc_fault) return;  /* Already faulted — nothing to re-check */
+    /* Fault is latched intentionally: in a safety-critical steering
+     * system, transient encoder faults (noise, loose connector) must
+     * not auto-recover.  The vehicle must come to a stop and be
+     * inspected.  Only a full system reset clears the latch.          */
+    if (enc_fault) return;
 
     int16_t count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
     uint32_t now  = HAL_GetTick();
@@ -325,7 +329,9 @@ void Encoder_CheckHealth(void)
      * A sudden large delta between consecutive reads indicates noise,
      * wiring fault, or encoder disconnect/reconnect.                  */
     int16_t delta = count - enc_prev_count;
-    if (delta < 0) delta = -delta;  /* abs(delta) */
+    if (delta < 0) delta = (int16_t)(-delta);  /* abs — overflow-safe because
+                                                 * both values are bounded by
+                                                 * ENC_MAX_COUNTS (667).      */
     if (delta > ENC_MAX_JUMP) {
         enc_fault = 1;
         return;
@@ -338,8 +344,7 @@ void Encoder_CheckHealth(void)
     if (count != enc_prev_count) {
         enc_last_change_tick = now;
     } else {
-        float motor_pct = steering_pid.output;
-        if (motor_pct < 0.0f) motor_pct = -motor_pct;  /* fabs */
+        float motor_pct = fabsf(steering_pid.output);
         if (motor_pct > ENC_MOTOR_ACTIVE_PCT) {
             if ((now - enc_last_change_tick) > ENC_FROZEN_TIMEOUT_MS) {
                 enc_fault = 1;
