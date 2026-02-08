@@ -250,6 +250,11 @@ const TractionState_t* Traction_GetState(void)
 
 void Steering_SetAngle(float angle_deg)
 {
+    /* Reject commands until Steering_Init() has established the relative
+     * zero reference.  Without calibration the encoder position is
+     * undefined and driving to any setpoint would be unsafe.            */
+    if (!steering_calibrated) return;
+
     if (angle_deg < -MAX_STEER_DEG) angle_deg = -MAX_STEER_DEG;
     if (angle_deg >  MAX_STEER_DEG) angle_deg =  MAX_STEER_DEG;
 
@@ -269,6 +274,13 @@ void Steering_SetAngle(float angle_deg)
 
 void Steering_ControlLoop(void)
 {
+    /* Steering_Init() has not been called yet — no encoder reference.
+     * Keep the motor safely off until calibration is established.      */
+    if (!steering_calibrated) {
+        Steering_Neutralize();
+        return;
+    }
+
     /* If the encoder is faulted, do not run PID — we have no reliable
      * position feedback.  Neutralise the motor to prevent uncontrolled
      * steering.  The safety system handles the state transition.       */
