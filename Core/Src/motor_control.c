@@ -15,6 +15,22 @@
 #define PWM_PERIOD     8499
 #define PWM_FREQUENCY  20000
 
+/* ---- Pedal signal conditioning ----
+ *
+ * A) EMA noise filter
+ *    Coefficient from reference firmware (pedal.cpp: EMA_ALPHA = 0.15f).
+ *    At the 20 Hz update rate used by main.c the –3 dB cutoff is ≈ 0.5 Hz,
+ *    which rejects ADC / EMI noise while keeping pedal feel responsive.
+ *
+ * B) Ramp rate limiter
+ *    MOTOR_CONTROL.md documents MAX_ACCEL_RATE = 50 %/s.
+ *    Deceleration (ramp-down) uses 2× the rate (100 %/s) so the driver
+ *    can lift off the pedal quickly.
+ *    dt is computed from HAL_GetTick() exactly as Steering_ControlLoop does. */
+#define PEDAL_EMA_ALPHA        0.15f     /* EMA coefficient (reference repo) */
+#define PEDAL_RAMP_UP_PCT_S    50.0f     /* Max rise   rate (%/s) */
+#define PEDAL_RAMP_DOWN_PCT_S  100.0f    /* Max fall   rate (%/s) */
+
 /* Motor structures */
 typedef struct {
     TIM_HandleTypeDef *timer;
@@ -48,6 +64,12 @@ static float ackermann_wheelbase = WHEELBASE_M;
 static float ackermann_track     = TRACK_WIDTH_M;
 static float ackermann_max_inner = MAX_STEER_DEG;
 static uint8_t steering_calibrated = 0;
+
+/* ---- Pedal filter / ramp state ---- */
+static float    pedal_ema         = 0.0f;   /* EMA-filtered pedal value      */
+static float    pedal_ramped      = 0.0f;   /* Output after ramp limiting    */
+static uint8_t  pedal_filter_init = 0;      /* 0 = first sample pending      */
+static uint32_t pedal_last_tick   = 0;
 
 /* Ackermann-computed individual wheel angle setpoints (degrees).
  * Updated every time Steering_SetAngle() is called.               */
@@ -138,6 +160,11 @@ void Traction_Init(void)
         traction_state.wheels[i].pwm       = 0;
         traction_state.wheels[i].reverse   = false;
     }
+
+    /* Reset pedal filter / ramp state */
+    pedal_ema         = 0.0f;
+    pedal_ramped      = 0.0f;
+    pedal_filter_init = 0;
 }
 
 void Steering_Init(void)
@@ -161,9 +188,46 @@ void Steering_Init(void)
 
 void Traction_SetDemand(float throttlePct)
 {
+    /* Clamp raw input to the existing ±100 % range (unchanged) */
     if (throttlePct < -100.0f) throttlePct = -100.0f;
     if (throttlePct >  100.0f) throttlePct =  100.0f;
-    traction_state.demandPct = throttlePct;
+
+    /* ---- A) EMA noise filter ---- */
+    if (!pedal_filter_init) {
+        pedal_ema       = throttlePct;
+        pedal_ramped    = throttlePct;
+        pedal_last_tick = HAL_GetTick();
+        pedal_filter_init = 1;
+    } else {
+        pedal_ema = PEDAL_EMA_ALPHA * throttlePct
+                  + (1.0f - PEDAL_EMA_ALPHA) * pedal_ema;
+    }
+
+    /* ---- B) Ramp rate limiter (applied after EMA) ---- */
+    uint32_t now = HAL_GetTick();
+    float dt = (float)(now - pedal_last_tick) / 1000.0f;
+    if (dt < 0.001f) dt = 0.001f;   /* guard against zero / tiny dt */
+    pedal_last_tick = now;
+
+    float target = pedal_ema;
+    float diff   = target - pedal_ramped;
+
+    if (diff > 0.0f) {
+        /* Accelerating: slower ramp */
+        float max_up = PEDAL_RAMP_UP_PCT_S * dt;
+        if (diff > max_up) diff = max_up;
+    } else {
+        /* Decelerating: faster ramp */
+        float max_down = PEDAL_RAMP_DOWN_PCT_S * dt;
+        if (diff < -max_down) diff = -max_down;
+    }
+    pedal_ramped += diff;
+
+    /* Final clamp — never exceed 0–100 % (or ±100 % for reverse) */
+    if (pedal_ramped < -100.0f) pedal_ramped = -100.0f;
+    if (pedal_ramped >  100.0f) pedal_ramped =  100.0f;
+
+    traction_state.demandPct = pedal_ramped;
 }
 
 void Traction_SetMode4x4(bool enable)
@@ -237,6 +301,11 @@ void Traction_EmergencyStop(void)
     Motor_SetPWM(&motor_rr, 0);
     Motor_SetPWM(&motor_steer, 0);
     traction_state.demandPct = 0.0f;
+
+    /* Reset pedal filter so emergency stop is immediate */
+    pedal_ema         = 0.0f;
+    pedal_ramped      = 0.0f;
+    pedal_filter_init = 0;
 }
 
 const TractionState_t* Traction_GetState(void)
