@@ -15,6 +15,7 @@
 #include "main.h"
 #include "sensor_manager.h"
 #include "motor_control.h"
+#include "service_mode.h"
 
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
@@ -153,8 +154,18 @@ uint8_t Safety_GetFaultFlags(void)
     if (safety_error == SAFETY_ERROR_CAN_TIMEOUT)  flags |= FAULT_CAN_TIMEOUT;
     if (safety_error == SAFETY_ERROR_OVERTEMP)      flags |= FAULT_TEMP_OVERLOAD;
     if (safety_error == SAFETY_ERROR_OVERCURRENT)   flags |= FAULT_CURRENT_OVERLOAD;
-    if (safety_error == SAFETY_ERROR_SENSOR_FAULT)  flags |= FAULT_ENCODER_ERROR | FAULT_WHEEL_SENSOR;
     if (safety_error == SAFETY_ERROR_CENTERING)     flags |= FAULT_CENTERING;
+
+    /* Use service mode per-module fault tracking for more granular
+     * fault flags (encoder vs wheel speed differentiation) */
+    if (ServiceMode_GetFault(MODULE_STEER_ENCODER) != MODULE_FAULT_NONE)
+        flags |= FAULT_ENCODER_ERROR;
+    for (uint8_t i = 0; i < 4; i++) {
+        if (ServiceMode_GetFault((ModuleID_t)(MODULE_WHEEL_SPEED_FL + i)) != MODULE_FAULT_NONE) {
+            flags |= FAULT_WHEEL_SENSOR;
+            break;
+        }
+    }
     if (safety_status.abs_active)                   flags |= FAULT_ABS_ACTIVE;
     if (safety_status.tcs_active)                   flags |= FAULT_TCS_ACTIVE;
     return flags;
@@ -270,6 +281,13 @@ void Safety_Init(void)
 
 void ABS_Update(void)
 {
+    /* Skip if ABS module is disabled (service mode) */
+    if (!ServiceMode_IsEnabled(MODULE_ABS)) {
+        safety_status.abs_active = false;
+        safety_status.abs_wheel_mask = 0;
+        return;
+    }
+
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
@@ -309,6 +327,13 @@ void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_w
 
 void TCS_Update(void)
 {
+    /* Skip if TCS module is disabled (service mode) */
+    if (!ServiceMode_IsEnabled(MODULE_TCS)) {
+        safety_status.tcs_active = false;
+        safety_status.tcs_wheel_mask = 0;
+        return;
+    }
+
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
@@ -349,8 +374,15 @@ void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wh
 void Safety_CheckCurrent(void)
 {
     for (uint8_t i = 0; i < NUM_INA226; i++) {
+        /* Skip disabled current sensors (service mode).
+         * Traced to base firmware car_sensors.cpp:
+         *   if (!cfg.currentSensorsEnabled) { return 0.0f; }         */
+        ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
+
         float amps = Current_GetAmps(i);
         if (amps > MAX_CURRENT_A) {
+            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERCURRENT);
             /* Count consecutive errors — escalate to SAFE only after
              * CONSECUTIVE_ERROR_THRESHOLD (traced to relays.cpp:
@@ -364,6 +396,8 @@ void Safety_CheckCurrent(void)
                 Safety_SetState(SYS_STATE_DEGRADED);
             }
             return;
+        } else {
+            ServiceMode_ClearFault(mod);
         }
     }
     /* No overcurrent — decay consecutive error counter after 1 s of
@@ -392,17 +426,27 @@ void Safety_CheckCurrent(void)
 void Safety_CheckTemperature(void)
 {
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+        /* Skip disabled temperature sensors (service mode).
+         * Traced to base firmware car_sensors.cpp:
+         *   if (!cfg.tempSensorsEnabled) { return 0.0f; }
+         * and temperature.cpp: sensorOk[] per-sensor tracking         */
+        ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
+
         float t = Temperature_Get(i);
         if (t > TEMP_CRITICAL_C) {
+            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERTEMP);
             Safety_SetState(SYS_STATE_SAFE);
             return;
         }
         if (t > TEMP_WARNING_C) {
+            ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
             Safety_SetError(SAFETY_ERROR_OVERTEMP);
             Safety_SetState(SYS_STATE_DEGRADED);
             return;
         }
+        ServiceMode_ClearFault(mod);
     }
     /* All temperatures OK — clear overtemp error if it was set,
      * allowing DEGRADED → ACTIVE recovery via Safety_CheckCANTimeout.
@@ -412,6 +456,8 @@ void Safety_CheckTemperature(void)
         system_state == SYS_STATE_DEGRADED) {
         bool all_below_hysteresis = true;
         for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+            ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+            if (!ServiceMode_IsEnabled(mod)) continue;
             if (Temperature_Get(i) > (TEMP_WARNING_C - 5.0f)) {
                 all_below_hysteresis = false;
                 break;
@@ -428,9 +474,11 @@ void Safety_CheckTemperature(void)
 void Safety_CheckCANTimeout(void)
 {
     if ((HAL_GetTick() - last_can_rx_time) > CAN_TIMEOUT_MS) {
+        ServiceMode_SetFault(MODULE_CAN_TIMEOUT, MODULE_FAULT_ERROR);
         Safety_SetError(SAFETY_ERROR_CAN_TIMEOUT);
         Safety_SetState(SYS_STATE_SAFE);
     } else {
+        ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
         /* ESP32 alive – if we were in STANDBY, transition to ACTIVE
          * only when steering centering has completed successfully.       */
         if (system_state == SYS_STATE_STANDBY &&
@@ -478,12 +526,14 @@ void Safety_CheckSensors(void)
      * Non-critical sensor fault → DEGRADED (not SAFE) to allow
      * "drive home".  Traced to base firmware system.cpp selfTest:
      * temperature sensors are OPTIONAL and use MODE_DEGRADED.           */
+    uint8_t fault_count = 0;
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
         float t = Temperature_Get(i);
         if (t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
-            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            Safety_SetState(SYS_STATE_DEGRADED);
-            return;
+            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
+            fault_count++;
         }
     }
 
@@ -491,11 +541,12 @@ void Safety_CheckSensors(void)
      * Traced to base firmware system.cpp selfTest: current sensors
      * are OPTIONAL and use MODE_DEGRADED.                               */
     for (uint8_t i = 0; i < NUM_INA226; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
         float a = Current_GetAmps(i);
         if (a < 0.0f || a > SENSOR_CURRENT_MAX_A) {
-            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            Safety_SetState(SYS_STATE_DEGRADED);
-            return;
+            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
+            fault_count++;
         }
     }
 
@@ -508,11 +559,19 @@ void Safety_CheckSensors(void)
     spd[2] = Wheel_GetSpeed_RL();
     spd[3] = Wheel_GetSpeed_RR();
     for (uint8_t i = 0; i < 4; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
         if (spd[i] < 0.0f || spd[i] > SENSOR_SPEED_MAX_KMH) {
-            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            Safety_SetState(SYS_STATE_DEGRADED);
-            return;
+            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
+            fault_count++;
         }
+    }
+
+    /* If any enabled sensor has a plausibility fault, enter DEGRADED */
+    if (fault_count > 0) {
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        Safety_SetState(SYS_STATE_DEGRADED);
+        return;
     }
 
     /* All sensor checks passed — if currently DEGRADED due to a sensor
@@ -540,9 +599,15 @@ void Safety_CheckSensors(void)
  */
 void Safety_CheckEncoder(void)
 {
+    /* Skip if steering encoder module is disabled (service mode).
+     * The user has acknowledged the fault and wants to drive without
+     * encoder-based steering assist. */
+    if (!ServiceMode_IsEnabled(MODULE_STEER_ENCODER)) return;
+
     Encoder_CheckHealth();
 
     if (Encoder_HasFault()) {
+        ServiceMode_SetFault(MODULE_STEER_ENCODER, MODULE_FAULT_ERROR);
         /* Only set the error once to avoid overwriting a different
          * existing fault code.                                      */
         if (safety_error == SAFETY_ERROR_NONE) {
@@ -552,6 +617,8 @@ void Safety_CheckEncoder(void)
          * traction alive in DEGRADED mode for "drive home".         */
         Steering_Neutralize();
         Safety_SetState(SYS_STATE_DEGRADED);
+    } else {
+        ServiceMode_ClearFault(MODULE_STEER_ENCODER);
     }
 }
 

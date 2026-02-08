@@ -20,6 +20,7 @@
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "steering_centering.h"
+#include "service_mode.h"
 
 /* ---- HAL handle instances ---- */
 FDCAN_HandleTypeDef hfdcan1;
@@ -62,6 +63,7 @@ int main(void)
     Steering_Init();
     Sensor_Init();
     Safety_Init();
+    ServiceMode_Init();
     CAN_Init();
     SteeringCentering_Init();
 
@@ -147,7 +149,7 @@ int main(void)
                 Steering_IsCalibrated());
         }
 
-        /* ---- 1000 ms tasks (1 Hz): temperatures ---- */
+        /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */
         if ((now - tick_1000ms) >= 1000) {
             tick_1000ms = now;
 
@@ -157,6 +159,10 @@ int main(void)
                 (int8_t)Temperature_Get(2),
                 (int8_t)Temperature_Get(3),
                 (int8_t)Temperature_Get(4));
+
+            /* Service mode: send module fault/enable/disable bitmasks
+             * to ESP32 for the diagnostic/service menu.               */
+            CAN_SendServiceStatus();
         }
 
         /* Process incoming CAN commands from ESP32 */
