@@ -26,7 +26,6 @@
 /* Command-validation constants */
 #define THROTTLE_MIN         0.0f
 #define THROTTLE_MAX         100.0f
-#define STEERING_MAX_DEG     54.0f  /* constants.h: MAX_STEER_DEG = 54.0f */
 #define STEERING_RATE_MAX_DEG_PER_S  200.0f  /* max steering rate          */
 #define STEERING_RATE_MIN_DT_S       0.001f /* ignore dt below 1 ms       */
 #define MODE_CHANGE_MAX_SPEED_KMH 1.0f       /* speed below which mode OK  */
@@ -161,8 +160,8 @@ float Safety_ValidateSteering(float requested_deg)
     if (!Safety_IsCommandAllowed()) return Steering_GetCurrentAngle();
 
     /* Clamp to mechanical limits */
-    if (requested_deg < -STEERING_MAX_DEG) requested_deg = -STEERING_MAX_DEG;
-    if (requested_deg >  STEERING_MAX_DEG) requested_deg =  STEERING_MAX_DEG;
+    if (requested_deg < -MAX_STEER_DEG) requested_deg = -MAX_STEER_DEG;
+    if (requested_deg >  MAX_STEER_DEG) requested_deg =  MAX_STEER_DEG;
 
     /* Rate-limit to prevent violent movements */
     uint32_t now = HAL_GetTick();

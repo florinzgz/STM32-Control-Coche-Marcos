@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "stm32g4xx_hal.h"
+#include "vehicle_physics.h"
 
 /* ---- ENCODER DE DIRECCIÓN (E6B2-CWZ6C - 1200 PPR - TIM2 Quadrature) ---- */
 /* Quadrature mode: 1200 PPR × 4 = 4800 counts/revolution                    */
@@ -74,8 +75,6 @@ extern "C" {
 
 /* ---- Sensor Constants ---- */
 #define INA226_SHUNT_MOHM  1   /* 1 mΩ shunt resistor */
-#define WHEEL_CIRCUM_MM    1100.0f /* Measured real circumference (110 cm) */
-#define WHEEL_CIRCUMF_M    (WHEEL_CIRCUM_MM / 1000.0f) /* 1.1 m */
 
 /* ---- Global HAL handles ---- */
 extern FDCAN_HandleTypeDef hfdcan1;
