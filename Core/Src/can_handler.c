@@ -13,6 +13,7 @@
 #include "can_handler.h"
 #include "motor_control.h"
 #include "safety_system.h"
+#include "sensor_manager.h"
 #include "service_mode.h"
 
 /* Global variables */
@@ -222,6 +223,61 @@ void CAN_SendStatusSteering(int16_t angle, bool calibrated) {
     steering_data[2] = calibrated ? 1 : 0;
     
     TransmitFrame(CAN_ID_STATUS_STEERING, steering_data, 3);
+}
+
+/**
+ * @brief  Send per-wheel traction scale to ESP32.
+ *
+ * Exposes the ABS/TCS per-wheel scale factor already computed by the
+ * safety system (safety_status.wheel_scale[0..3]).  Each value is
+ * converted from float 0.0–1.0 to uint8 0–100 (percent).
+ *
+ *   Byte 0: FL traction %  (0 = fully inhibited, 100 = full power)
+ *   Byte 1: FR traction %
+ *   Byte 2: RL traction %
+ *   Byte 3: RR traction %
+ *
+ * CAN ID: 0x205   DLC: 4   Rate: 100 ms (10 Hz)
+ */
+void CAN_SendStatusTraction(void) {
+    uint8_t data[4];
+
+    data[0] = (uint8_t)(safety_status.wheel_scale[MOTOR_FL] * 100.0f);
+    data[1] = (uint8_t)(safety_status.wheel_scale[MOTOR_FR] * 100.0f);
+    data[2] = (uint8_t)(safety_status.wheel_scale[MOTOR_RL] * 100.0f);
+    data[3] = (uint8_t)(safety_status.wheel_scale[MOTOR_RR] * 100.0f);
+
+    TransmitFrame(CAN_ID_STATUS_TRACTION, data, 4);
+}
+
+/**
+ * @brief  Send explicit temperature sensor mapping to ESP32.
+ *
+ * Uses the same DS18B20 readings already acquired by Temperature_ReadAll().
+ * The payload assigns an unambiguous meaning to each byte:
+ *
+ *   Byte 0: Motor FL temperature (°C, int8_t)
+ *   Byte 1: Motor FR temperature (°C, int8_t)
+ *   Byte 2: Motor RL temperature (°C, int8_t)
+ *   Byte 3: Motor RR temperature (°C, int8_t)
+ *   Byte 4: Ambient temperature  (°C, int8_t)
+ *
+ * Sensor index mapping: 0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient.
+ * Values are not filtered or recalculated — raw DS18B20 readings.
+ * If a sensor is disabled in Service Mode the value is still reported.
+ *
+ * CAN ID: 0x206   DLC: 5   Rate: 1000 ms (1 Hz)
+ */
+void CAN_SendStatusTempMap(void) {
+    uint8_t data[5];
+
+    data[0] = (uint8_t)((int8_t)Temperature_Get(0));  /* FL  */
+    data[1] = (uint8_t)((int8_t)Temperature_Get(1));  /* FR  */
+    data[2] = (uint8_t)((int8_t)Temperature_Get(2));  /* RL  */
+    data[3] = (uint8_t)((int8_t)Temperature_Get(3));  /* RR  */
+    data[4] = (uint8_t)((int8_t)Temperature_Get(4));  /* AMB */
+
+    TransmitFrame(CAN_ID_STATUS_TEMP_MAP, data, 5);
 }
 
 void CAN_SendError(uint8_t error_code, uint8_t subsystem) {

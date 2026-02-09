@@ -77,6 +77,8 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x202 | STATUS_TEMP | 5 | 1000 ms | Five temperature sensors | `can_handler.c`, `main.c` |
 | 0x203 | STATUS_SAFETY | 3 | 100 ms | ABS/TCS active flags and error code | `can_handler.c`, `main.c` |
 | 0x204 | STATUS_STEERING | 3 | 100 ms | Actual steering angle and calibration flag | `can_handler.c`, `main.c` |
+| 0x205 | STATUS_TRACTION | 4 | 100 ms | Per-wheel traction scale (ABS/TCS) | `can_handler.c`, `main.c` |
+| 0x206 | STATUS_TEMP_MAP | 5 | 1000 ms | Explicit temperature sensor mapping (FL/FR/RL/RR/AMB) | `can_handler.c`, `main.c` |
 
 ### 3.3 Bidirectional (Diagnostic)
 
@@ -204,7 +206,52 @@ Encoding at source: `(int16_t)(Steering_GetCurrentAngle() * 10)`
 
 Source: `CAN_SendStatusSteering()` in `can_handler.c`, called from `main.c`
 
-### 4.11 DIAG_ERROR (0x300) — Both Directions
+### 4.11 STATUS_TRACTION (0x205) — STM32 → ESP32
+
+| Byte | Field | Type | Unit | Range | Description |
+|------|-------|------|------|-------|-------------|
+| 0 | traction_FL | uint8 | % | 0–100 | Front-left wheel traction scale |
+| 1 | traction_FR | uint8 | % | 0–100 | Front-right wheel traction scale |
+| 2 | traction_RL | uint8 | % | 0–100 | Rear-left wheel traction scale |
+| 3 | traction_RR | uint8 | % | 0–100 | Rear-right wheel traction scale |
+
+Encoding: `(uint8_t)(safety_status.wheel_scale[i] * 100.0f)`
+
+- 100 = full power available (no ABS/TCS intervention on this wheel)
+- 0 = wheel fully inhibited (ABS has cut this wheel)
+- Intermediate values = TCS is progressively limiting this wheel
+
+The values are the same `wheel_scale[4]` array used by `Traction_Update()` to modulate per-wheel PWM. No recalculation is performed; the ESP32 receives exactly what the STM32 applies.
+
+Source: `CAN_SendStatusTraction()` in `can_handler.c`, called from `main.c`
+
+### 4.12 STATUS_TEMP_MAP (0x206) — STM32 → ESP32
+
+| Byte | Field | Type | Unit | Range | Description |
+|------|-------|------|------|-------|-------------|
+| 0 | temp_motor_FL | int8 | °C | −128 to +127 | Motor FL temperature (DS18B20 sensor index 0) |
+| 1 | temp_motor_FR | int8 | °C | −128 to +127 | Motor FR temperature (DS18B20 sensor index 1) |
+| 2 | temp_motor_RL | int8 | °C | −128 to +127 | Motor RL temperature (DS18B20 sensor index 2) |
+| 3 | temp_motor_RR | int8 | °C | −128 to +127 | Motor RR temperature (DS18B20 sensor index 3) |
+| 4 | temp_ambient | int8 | °C | −128 to +127 | Ambient temperature (DS18B20 sensor index 4) |
+
+Sensor index mapping:
+
+| Byte | Sensor index | Physical location |
+|------|-------------|-------------------|
+| 0 | `Temperature_Get(0)` | Motor front-left |
+| 1 | `Temperature_Get(1)` | Motor front-right |
+| 2 | `Temperature_Get(2)` | Motor rear-left |
+| 3 | `Temperature_Get(3)` | Motor rear-right |
+| 4 | `Temperature_Get(4)` | Ambient |
+
+Values are the same DS18B20 readings used by `Safety_CheckTemperature()`. No filtering or recalculation is performed. If a sensor is disabled in Service Mode, the last read value is still reported (the safety system handles threshold checks independently).
+
+The existing STATUS_TEMP (0x202) message is unchanged and continues to transmit at the same rate. This message provides an explicit byte-to-sensor mapping for unambiguous HMI display.
+
+Source: `CAN_SendStatusTempMap()` in `can_handler.c`, called from `main.c`
+
+### 4.13 DIAG_ERROR (0x300) — Both Directions
 
 | Byte | Field | Type | Description |
 |------|-------|------|-------------|

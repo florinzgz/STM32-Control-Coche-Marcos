@@ -334,6 +334,70 @@ ID: 0x204  DLC: 4  Data: [0xB4, 0xFF, 0xE7, 0x4A]
 
 ---
 
+### 0x205 - STATUS_TRACTION
+
+**Propósito:** Nivel de tracción disponible por rueda (escala ABS/TCS).
+
+| Byte | Campo | Tipo | Rango | Unidad | Notas |
+|------|-------|------|-------|--------|-------|
+| 0 | `traction_FL` | uint8_t | 0-100 | % | Tracción disponible rueda FL |
+| 1 | `traction_FR` | uint8_t | 0-100 | % | Tracción disponible rueda FR |
+| 2 | `traction_RL` | uint8_t | 0-100 | % | Tracción disponible rueda RL |
+| 3 | `traction_RR` | uint8_t | 0-100 | % | Tracción disponible rueda RR |
+
+**Frecuencia:** 100 ms (10 Hz)
+
+**Escala:**
+- 100 % = potencia completa (sin intervención ABS/TCS en esta rueda)
+- 0 % = rueda completamente inhibida (ABS ha cortado esta rueda)
+- Valores intermedios = TCS está limitando progresivamente esta rueda
+
+**Codificación:** `(uint8_t)(safety_status.wheel_scale[i] * 100.0f)`
+
+**Ejemplo:**
+```
+ID: 0x205  DLC: 4  Data: [0x64, 0x64, 0x00, 0x4B]
+// FL=100% (OK), FR=100% (OK), RL=0% (ABS activo), RR=75% (TCS limitando)
+```
+
+---
+
+### 0x206 - STATUS_TEMP_MAP
+
+**Propósito:** Mapa explícito de temperaturas por sensor DS18B20.
+
+| Byte | Campo | Tipo | Rango | Unidad | Notas |
+|------|-------|------|-------|--------|-------|
+| 0 | `temp_motor_FL` | int8_t | -128 a +127 | °C | Temperatura motor FL (sensor índice 0) |
+| 1 | `temp_motor_FR` | int8_t | -128 a +127 | °C | Temperatura motor FR (sensor índice 1) |
+| 2 | `temp_motor_RL` | int8_t | -128 a +127 | °C | Temperatura motor RL (sensor índice 2) |
+| 3 | `temp_motor_RR` | int8_t | -128 a +127 | °C | Temperatura motor RR (sensor índice 3) |
+| 4 | `temp_ambient` | int8_t | -128 a +127 | °C | Temperatura ambiente (sensor índice 4) |
+
+**Frecuencia:** 1000 ms (1 Hz)
+
+**Correspondencia de sensores:**
+
+| Byte | Índice sensor | Ubicación física |
+|------|--------------|------------------|
+| 0 | `Temperature_Get(0)` | Motor delantero izquierdo (FL) |
+| 1 | `Temperature_Get(1)` | Motor delantero derecho (FR) |
+| 2 | `Temperature_Get(2)` | Motor trasero izquierdo (RL) |
+| 3 | `Temperature_Get(3)` | Motor trasero derecho (RR) |
+| 4 | `Temperature_Get(4)` | Ambiente |
+
+**Relación con Service Mode:** Si un sensor está deshabilitado en Service Mode, el valor se sigue reportando (el último valor leído). El sistema de seguridad maneja los umbrales de forma independiente.
+
+**Relación con STATUS_TEMP (0x202):** El mensaje existente 0x202 se mantiene sin cambios. Este mensaje proporciona la misma información con un mapeo byte-a-sensor explícito e inequívoco para el HMI.
+
+**Ejemplo:**
+```
+ID: 0x206  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
+// Motor FL=55°C, Motor FR=57°C, Motor RL=56°C, Motor RR=54°C, Ambiente=25°C
+```
+
+---
+
 ## 🔔 Mensajes de Heartbeat
 
 ### Lógica de Heartbeat Mutuo
@@ -453,6 +517,8 @@ filter1.FilterConfig = FDCAN_FILTER_REJECT;
 | STATUS_SPEED | 10 Hz | 100 ms | Baja | 1280 bps |
 | STATUS_CURRENT | 10 Hz | 100 ms | Baja | 1280 bps |
 | STATUS_TEMP | 1 Hz | 1000 ms | Baja | 128 bps |
+| STATUS_TRACTION | 10 Hz | 100 ms | Baja | 640 bps |
+| STATUS_TEMP_MAP | 1 Hz | 1000 ms | Baja | 128 bps |
 | STATUS_SAFETY | 10 Hz | 100 ms | Baja | 640 bps |
 | STATUS_STEERING | 10 Hz | 100 ms | Baja | 640 bps |
 | DIAG_ERROR | On-demand | - | Alta | <500 bps |

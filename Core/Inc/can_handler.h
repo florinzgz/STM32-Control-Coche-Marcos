@@ -28,6 +28,8 @@ extern "C" {
 #define CAN_ID_STATUS_TEMP        0x202  // STM32 → ESP32 (1000ms)
 #define CAN_ID_STATUS_SAFETY      0x203  // STM32 → ESP32 (100ms)
 #define CAN_ID_STATUS_STEERING    0x204  // STM32 → ESP32 (100ms)
+#define CAN_ID_STATUS_TRACTION    0x205  // STM32 → ESP32 (100ms) per-wheel traction scale
+#define CAN_ID_STATUS_TEMP_MAP    0x206  // STM32 → ESP32 (1000ms) explicit temp sensor map
 #define CAN_ID_DIAG_ERROR         0x300  // Both directions (on-demand)
 #define CAN_ID_SERVICE_FAULTS     0x301  // STM32 → ESP32 (1000ms) fault bitmask
 #define CAN_ID_SERVICE_ENABLED    0x302  // STM32 → ESP32 (1000ms) enabled bitmask
@@ -54,6 +56,8 @@ void CAN_SendStatusCurrent(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
 void CAN_SendStatusTemp(int8_t t1, int8_t t2, int8_t t3, int8_t t4, int8_t t5);
 void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code);
 void CAN_SendStatusSteering(int16_t angle, bool calibrated);
+void CAN_SendStatusTraction(void);
+void CAN_SendStatusTempMap(void);
 void CAN_SendError(uint8_t error_code, uint8_t subsystem);
 void CAN_SendServiceStatus(void);
 void CAN_ProcessMessages(void);
