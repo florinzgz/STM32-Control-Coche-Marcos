@@ -1,5 +1,5 @@
 // =============================================================================
-// ESP32-S3 HMI Firmware — Main Entry Point
+// ESP32-S3 HMI Firmware — CAN Bring-Up
 //
 // Framework:  Arduino (C++17)
 // Board:      ESP32-S3-DevKitC-1
@@ -7,25 +7,58 @@
 // =============================================================================
 
 #include <Arduino.h>
+#include <ESP32-TWAI-CAN.hpp>
+#include "can_ids.h"
+
+// CAN transceiver pins (TJA1051 — see platformio.ini header)
+static constexpr int CAN_TX_PIN = 4;
+static constexpr int CAN_RX_PIN = 5;
+
+static uint8_t  heartbeatCounter = 0;
+static unsigned long lastHeartbeatMs  = 0;
+static unsigned long lastSerialMs     = 0;
 
 // ---------------------------------------------------------------------------
 // setup() — called once at power-on
 // ---------------------------------------------------------------------------
 void setup() {
     Serial.begin(115200);
-    while (!Serial) {
-        delay(10);
+    delay(500);
+    Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
+
+    ESP32Can.setPins(CAN_TX_PIN, CAN_RX_PIN);
+    ESP32Can.setRxQueueSize(5);
+    ESP32Can.setTxQueueSize(5);
+
+    if (ESP32Can.begin(ESP32Can.convertSpeed(500))) {
+        Serial.println("[CAN] Initialized at 500 kbps");
+    } else {
+        Serial.println("[CAN] Initialization FAILED");
     }
-    Serial.println("[HMI] ESP32-S3 HMI firmware starting...");
-    Serial.println("[HMI] Framework: Arduino");
-    Serial.println("[HMI] Role: HMI (intent sender) — STM32 is safety authority");
 }
 
 // ---------------------------------------------------------------------------
 // loop() — called repeatedly
 // ---------------------------------------------------------------------------
 void loop() {
-    // Placeholder — CAN communication and HMI logic will be added
-    // in subsequent development phases.
-    delay(1000);
+    unsigned long now = millis();
+
+    // Send heartbeat 0x011 every 100 ms
+    if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
+        lastHeartbeatMs = now;
+
+        CanFrame frame = {};
+        frame.identifier       = can::HEARTBEAT_ESP32;
+        frame.extd             = 0;
+        frame.data_length_code = 1;
+        frame.data[0]          = heartbeatCounter++;
+
+        ESP32Can.writeFrame(frame);
+    }
+
+    // Serial heartbeat every ~1 second
+    if (now - lastSerialMs >= 1000) {
+        lastSerialMs = now;
+        Serial.println("[HMI] heartbeat");
+    }
 }
