@@ -1,10 +1,10 @@
 # ESP32-S3 HMI Firmware — Design Document
 
-**Revision:** 1.0  
+**Revision:** 1.1  
 **Status:** Pending validation  
 **Date:** 2026-02-09  
 **Scope:** Architecture and technology decisions for the ESP32-S3 HMI firmware  
-**References:** `docs/CAN_CONTRACT_FINAL.md` rev 1.0, `docs/HMI_STATE_MODEL.md` rev 1.0
+**References:** `docs/CAN_CONTRACT_FINAL.md` rev 1.0, `docs/HMI_STATE_MODEL.md` rev 1.0, `docs/SERVICE_MODE.md`
 
 ---
 
@@ -92,9 +92,45 @@ STM32-Control-Coche-Marcos/          ← Repository root
 
 ---
 
-## 3. ESP32 Firmware Architecture (High Level)
+## 3. Concepts Derived from Base Firmware
 
-### 3.1 Module Overview
+The original base firmware ([FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos)) is treated as a **read-only reference**. No code has been copied from it. The following concepts have been extracted and will be **cleanly reimplemented** in the ESP32 HMI:
+
+### 3.1 What Was Extracted (Concept Only)
+
+| Concept | Base Firmware Source | How It Applies to ESP32 HMI |
+|---------|----------------------|-----------------------------|
+| **Menu hierarchy** | Multi-screen UI with drive, settings, diagnostics pages | Screen-per-state architecture: Boot, Standby, Drive, Safe, Error (mapped 1:1 to STM32 `system_state`) |
+| **Hidden / engineering menu** | Hidden diagnostic screens accessible under specific conditions | Engineering menu accessible only in STANDBY or ERROR, with multi-step entry gesture, vehicle stopped, no CAN timeout (see `HMI_STATE_MODEL.md` §6) |
+| **Fault visualization philosophy** | Visual icons and banners for ABS, TCS, temperature, current faults | Fault overlays driven by `fault_flags` (byte 2 of 0x001) and `error_code` (byte 2 of 0x203) — displayed as colored banners and icons on top of the active screen |
+| **Icon semantics** | ABS indicator, TCS indicator, temperature warning, current warning | ABS/TCS as steady informational icons (bits 5–6 of `fault_flags`); temperature/current as amber warning icons (bits 1–2); encoder/wheel as fault markers (bits 3–4) |
+| **Startup / shutdown behavior** | Boot splash → ready → active progression | HMI starts at Boot screen, transitions to Standby on first heartbeat, then follows `system_state` exclusively |
+| **"Degraded but driveable" concept** | `limp_mode.cpp`: NORMAL → DEGRADED → LIMP → CRITICAL states | ESP32 displays degraded status when non-critical modules are faulted/disabled. Power is limited by STM32 (40% power, 50% speed). The ESP32 only shows the state — it never computes it. |
+| **Service mode / module viewer** | `car_sensors.cpp`: per-subsystem enable flags; `temperature.cpp`: `sensorOk[]` | Service viewer screen shows per-module status from CAN IDs 0x301–0x303 and allows enable/disable via 0x110. All safety decisions remain on STM32. |
+
+### 3.2 What Was NOT Taken
+
+| Base Feature | Reason Excluded |
+|-------------|-----------------|
+| Safety computation logic (ABS, TCS, current/temperature limits) | ESP32 is HMI only — STM32 is the sole safety authority |
+| Sensor reading code | ESP32 has no vehicle sensors — all data arrives via CAN |
+| Motor control / PWM logic | Actuator control is exclusively STM32 domain |
+| FreeRTOS task architecture | ESP32 Arduino firmware uses cooperative `loop()` — no RTOS tasks |
+| NVS/persistent storage of settings | Not required for HMI; settings reset on power cycle |
+| Direct CAN driver code (TWAI) | ESP32 uses Arduino-compatible CAN library abstraction only |
+
+### 3.3 Explicit Confirmations
+
+- ✅ **No code was copied** from the base firmware — all behavior is reimplemented from concept descriptions
+- ✅ **STM32 firmware is the sole safety authority** — the ESP32 never computes, overrides, or bypasses safety decisions
+- ✅ **All vehicle data comes from CAN messages** — the ESP32 assumes no sensors that are not explicitly sent over CAN
+- ✅ **The base repo is known to have a reboot loop** — this ESP32 firmware is independent and not affected
+
+---
+
+## 4. ESP32 Firmware Architecture (High Level)
+
+### 4.1 Module Overview
 
 | Module | Directory | Responsibility |
 |--------|-----------|----------------|
@@ -108,9 +144,9 @@ STM32-Control-Coche-Marcos/          ← Repository root
 | **Input** | `src/input.*` | Reads touch panel, physical buttons, or encoder knob. Debounces inputs. Passes events to the active screen. |
 | **Engineering Menu** | `src/engineering_menu.*` | Hidden diagnostic menu. Shows CAN stats, raw hex, firmware info. Entry conditions enforced per HMI_STATE_MODEL.md §6. Read-only — never sends actuator commands. |
 
-### 3.2 CAN Messages Consumed (STM32 → ESP32)
+### 4.2 CAN Messages Consumed (STM32 → ESP32)
 
-These are the messages the ESP32 will **receive and parse**. All IDs and payloads are defined in `CAN_CONTRACT_FINAL.md` rev 1.0.
+These are the messages the ESP32 will **receive and parse**. IDs 0x001–0x300 are defined in `CAN_CONTRACT_FINAL.md` rev 1.0. IDs 0x301–0x303 are defined in `docs/SERVICE_MODE.md` and implemented in `Core/Inc/can_handler.h`.
 
 | CAN ID | Name | Data Used By HMI | Rate |
 |--------|------|-------------------|------|
@@ -127,9 +163,9 @@ These are the messages the ESP32 will **receive and parse**. All IDs and payload
 | 0x302 | SERVICE_ENABLED | 32-bit enabled bitmask | 1000 ms |
 | 0x303 | SERVICE_DISABLED | 32-bit disabled bitmask | 1000 ms |
 
-### 3.3 CAN Messages Sent (ESP32 → STM32)
+### 4.3 CAN Messages Sent (ESP32 → STM32)
 
-These are the messages the ESP32 will **transmit**. All are defined in `CAN_CONTRACT_FINAL.md` rev 1.0.
+These are the messages the ESP32 will **transmit**. IDs 0x011–0x102 are defined in `CAN_CONTRACT_FINAL.md` rev 1.0. ID 0x110 is defined in `docs/SERVICE_MODE.md` and accepted by STM32 RX filter 2 (`Core/Src/can_handler.c`).
 
 | CAN ID | Name | Payload | Condition | Rate |
 |--------|------|---------|-----------|------|
@@ -139,7 +175,7 @@ These are the messages the ESP32 will **transmit**. All are defined in `CAN_CONT
 | 0x102 | CMD_MODE | uint8 mode_flags (bit 0: 4×4, bit 1: tank turn) | **Only when `system_state == ACTIVE (2)`** | On-demand |
 | 0x110 | SERVICE_CMD | Module ID + action (enable/disable) | **Only from engineering menu** | On-demand |
 
-### 3.4 Data Flow Diagram
+### 4.4 Data Flow Diagram
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -174,7 +210,7 @@ These are the messages the ESP32 will **transmit**. All are defined in `CAN_CONT
 
 ---
 
-## 4. Strict Rules — Compliance Matrix
+## 5. Strict Rules — Compliance Matrix
 
 | Rule | Status | How Enforced |
 |------|--------|--------------|
@@ -190,7 +226,7 @@ These are the messages the ESP32 will **transmit**. All are defined in `CAN_CONT
 
 ---
 
-## 5. Summary
+## 6. Summary
 
 | Item | Decision |
 |------|----------|
@@ -199,9 +235,10 @@ These are the messages the ESP32 will **transmit**. All are defined in `CAN_CONT
 | **ESP-IDF** | Not used in any form |
 | **Project location** | `esp32/` subdirectory, independent from STM32 root |
 | **STM32 impact** | None — no files modified, no build changes |
-| **CAN contract** | `CAN_CONTRACT_FINAL.md` rev 1.0 (FROZEN) |
+| **CAN contract** | `CAN_CONTRACT_FINAL.md` rev 1.0 (FROZEN) + `SERVICE_MODE.md` (service IDs) |
 | **HMI behavior** | `HMI_STATE_MODEL.md` rev 1.0 |
 | **Safety authority** | STM32 only — ESP32 is HMI / intent sender |
+| **Base repo concepts** | Menu hierarchy, hidden menus, fault icons, startup sequence, degraded mode — all reimplemented from scratch (no code copied) |
 
 ---
 

@@ -47,6 +47,14 @@ inline constexpr uint32_t STATUS_TEMP_MAP       = 0x206;    // DLC 5, 1000 ms
 inline constexpr uint32_t DIAG_ERROR            = 0x300;    // DLC 2, on-demand
 
 // -------------------------------------------------------------------------
+// Service Mode (docs/SERVICE_MODE.md, Core/Inc/can_handler.h)
+// -------------------------------------------------------------------------
+inline constexpr uint32_t SERVICE_FAULTS         = 0x301;   // STM32→ESP32, DLC 4, 1000 ms
+inline constexpr uint32_t SERVICE_ENABLED        = 0x302;   // STM32→ESP32, DLC 4, 1000 ms
+inline constexpr uint32_t SERVICE_DISABLED       = 0x303;   // STM32→ESP32, DLC 4, 1000 ms
+inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
+
+// -------------------------------------------------------------------------
 // System States — HEARTBEAT_STM32 byte 1 (§6)
 // -------------------------------------------------------------------------
 enum class SystemState : uint8_t {
@@ -109,6 +117,13 @@ inline constexpr uint32_t STATUS_SLOW_RATE_MS   = 1000;  // Temperature
 // -------------------------------------------------------------------------
 inline constexpr uint8_t MODE_FLAG_4X4       = 0x01;   // Bit 0: 1 = 4×4, 0 = 4×2
 inline constexpr uint8_t MODE_FLAG_TANK_TURN = 0x02;   // Bit 1: 1 = tank turn enabled
+
+// -------------------------------------------------------------------------
+// Service Commands — SERVICE_CMD byte 0 (docs/SERVICE_MODE.md)
+// -------------------------------------------------------------------------
+inline constexpr uint8_t SERVICE_ACTION_DISABLE        = 0x00;
+inline constexpr uint8_t SERVICE_ACTION_ENABLE         = 0x01;
+inline constexpr uint8_t SERVICE_ACTION_FACTORY_RESTORE = 0xFF;
 
 } // namespace can
 
