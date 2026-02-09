@@ -173,7 +173,7 @@ make clean && make all
 ## Project Structure
 ```
 STM32-Control-Coche-Marcos/
-├── Core/
+├── Core/                            ← STM32 firmware (C)
 │   ├── Inc/
 │   │   ├── main.h
 │   │   ├── motor_control.h
@@ -191,8 +191,21 @@ STM32-Control-Coche-Marcos/
 ├── Drivers/
 │   ├── STM32G4xx_HAL_Driver/
 │   └── CMSIS/
+├── esp32/                           ← ESP32-S3 HMI firmware (C++)
+│   ├── platformio.ini
+│   ├── src/
+│   └── include/
+├── docs/
+│   ├── CAN_CONTRACT_FINAL.md
+│   ├── HMI_STATE_MODEL.md
+│   ├── ESP32_FIRMWARE_DESIGN.md
+│   └── ...
 └── README.md
 ```
+
+### ESP32-S3 HMI Firmware
+
+The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communicates with the STM32 via CAN bus. It is built with **PlatformIO** using the **Arduino framework** (C++17). See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the full architecture.
 
 ## Features
 ✅ 4-wheel independent traction control
