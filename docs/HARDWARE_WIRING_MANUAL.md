@@ -42,7 +42,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 - Control de 3 relés de potencia (MAIN, TRACCIÓN, DIRECCIÓN)
 - Comunicación CAN con el ESP32 (FDCAN1, 500 kbps)
 - Sistemas de seguridad: ABS, TCS, límites de corriente/temperatura
-- Watchdog independiente (IWDG, ~500 ms)
+- Watchdog independiente (IWDG, ~4 s)
 
 ### Qué NO controla el STM32 (depende del ESP32)
 
@@ -155,7 +155,7 @@ Definida en `main.c` (función `MX_FDCAN1_Init`):
 | TimeSeg2 | 5 |
 | IDs | 11 bits (CAN 2.0A estándar) |
 
-Cálculo: 170 MHz ÷ 17 ÷ (1 + 14 + 5) = 500 kbps.
+Cálculo: 170 MHz ÷ 17 ÷ (1 + 14 + 5) = 500 kbps, donde (1 + 14 + 5) = SyncSeg + TimeSeg1 + TimeSeg2 = 20 time quanta por bit.
 
 ### Resistencias de terminación (120 Ω)
 
@@ -228,7 +228,7 @@ Cada BTS7960 de tracción recibe 3 señales del STM32:
 | Frecuencia | **20 kHz** | `motor_control.c`: `PWM_FREQUENCY = 20000` |
 | Periodo | 8499 | `motor_control.c`: `PWM_PERIOD = 8499` |
 | Prescaler | 0 | `main.c`: `MX_TIM1_Init` |
-| Reloj | 170 MHz | 170 MHz ÷ (0+1) ÷ (8499+1) = 20 kHz |
+| Reloj timer (APB2) | 170 MHz | 170 MHz ÷ (0+1) ÷ (8499+1) = 20 kHz |
 | Canales activos | CH1, CH2, CH3, CH4 | `stm32g4xx_hal_msp.c` |
 
 ### Conexión STM32 → BTS7960 (por motor de tracción)
@@ -601,7 +601,7 @@ Configuradas en `stm32g4xx_hal_msp.c`:
 | Prescaler | 32 |
 | Reloj | 32 kHz (LSI) ÷ 32 = 1 kHz |
 | Reload | 4095 |
-| Timeout | **~4 segundos** |
+| Timeout | **~4 s** (el comentario en `main.c` dice "~500 ms" pero el cálculo real con prescaler 32, reload 4095 y LSI 32 kHz da ≈4,1 s) |
 
 Si el firmware no refresca el watchdog dentro de este periodo, el MCU se reinicia
 automáticamente.
