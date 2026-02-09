@@ -37,7 +37,7 @@
 | **Frecuencia** | 100 ms (10 Hz) — bloque `tick_100ms` en `main.c:139-143` |
 | **Estado** | ✅ **ENVIADO — suficiente para HMI** |
 
-**Nota:** Se envían los sensores INA226 índices 0-3 (FL, FR, RL, RR). Los sensores #4 (batería) y #5 (dirección) **NO se envían** en este mensaje. Sin embargo, la información de corriente de batería y dirección está disponible internamente pero no tiene un CAN ID dedicado. Véase sección 1.3.
+**Nota:** Se envían los sensores INA226 índices 0-3 (FL, FR, RL, RR). Los sensores #4 (batería) y #5 (dirección) **NO se envían** en este mensaje. Sin embargo, la información de corriente de batería y dirección está disponible internamente pero no tiene un CAN ID dedicado. Véase tabla de información no enviada en sección 1.3.
 
 **Referencia código:**  
 - `main.c:139-143` — `Current_GetAmps(0..3) * 100`  
@@ -176,7 +176,7 @@ Adicionalmente, el **estado detallado del centrado** se puede inferir de:
 | **Corriente dirección (INA226 #5)** | ❌ NO | (c) Mismo caso que batería. `Current_GetAmps(5)` existe pero no se transmite por CAN. |
 | **Voltaje bus por sensor** | ❌ NO | (c) `Voltage_GetBus(i)` existe internamente pero no tiene mensaje CAN asignado. |
 | **RPM por rueda** | ❌ NO | (b) Por diseño. `Wheel_GetRPM_FL()` existe solo para FL y no se envía. Las velocidades en km/h son suficientes para la HMI. |
-| **Estado detallado del centrado** | ⚠️ PARCIAL | El estado (IDLE/SWEEP_LEFT/SWEEP_RIGHT/DONE/FAULT) de `CenteringState_t` no se envía directamente. Solo se puede inferir del heartbeat (system_state + fault_flags). La HMI no puede saber si está barriendo a izquierda o a derecha. |
+| **Estado detallado del centrado** | ⚠️ PARCIAL | El estado (IDLE/SWEEP_LEFT/SWEEP_RIGHT/DONE/FAULT) de `CenteringState_t` no se envía directamente. Solo se puede inferir del heartbeat (system_state + fault_flags). La HMI no puede saber si está barriendo a izquierda o a derecha. **Limitación aceptable:** el centrado dura ~10s durante boot y la HMI solo necesita saber "calibrando" vs "listo" vs "fallo", lo cual SÍ está disponible via heartbeat. |
 | **Ángulos Ackermann individuales FL/FR** | ❌ NO | (b) Por diseño. Se calculan internamente (`steer_fl_deg`, `steer_fr_deg` en `motor_control.c:77-78`) pero el CAN solo envía el ángulo del volante (columna). La geometría Ackermann es transparente para la HMI. |
 | **Contadores ABS/TCS (activation count)** | ❌ NO | (c) `safety_status.abs_activation_count` y `tcs_activation_count` existen pero no se transmiten. |
 | **Demand pedal filtrado** | ❌ NO | (b) Por diseño. La HMI envía el comando, el STM32 lo filtra y aplica. No hay retroalimentación del valor filtrado final. |
