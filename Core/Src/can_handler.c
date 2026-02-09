@@ -271,11 +271,11 @@ void CAN_SendStatusTraction(void) {
 void CAN_SendStatusTempMap(void) {
     uint8_t data[5];
 
-    data[0] = (uint8_t)((int8_t)Temperature_Get(0));  /* FL  */
-    data[1] = (uint8_t)((int8_t)Temperature_Get(1));  /* FR  */
-    data[2] = (uint8_t)((int8_t)Temperature_Get(2));  /* RL  */
-    data[3] = (uint8_t)((int8_t)Temperature_Get(3));  /* RR  */
-    data[4] = (uint8_t)((int8_t)Temperature_Get(4));  /* AMB */
+    data[0] = (uint8_t)(int8_t)Temperature_Get(0);  /* FL  */
+    data[1] = (uint8_t)(int8_t)Temperature_Get(1);  /* FR  */
+    data[2] = (uint8_t)(int8_t)Temperature_Get(2);  /* RL  */
+    data[3] = (uint8_t)(int8_t)Temperature_Get(3);  /* RR  */
+    data[4] = (uint8_t)(int8_t)Temperature_Get(4);  /* AMB */
 
     TransmitFrame(CAN_ID_STATUS_TEMP_MAP, data, 5);
 }
