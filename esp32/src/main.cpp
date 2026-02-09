@@ -11,12 +11,14 @@
 #include "can_ids.h"
 #include "can_rx.h"
 #include "vehicle_data.h"
+#include "screen_manager.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
 
 static vehicle::VehicleData vehicleData;
+static ScreenManager screenManager;
 
 static uint8_t  heartbeatCounter = 0;
 static unsigned long lastHeartbeatMs  = 0;
@@ -49,6 +51,9 @@ void loop() {
 
     // Poll CAN RX and decode incoming frames
     can_rx::poll(vehicleData);
+
+    // Update HMI screen based on current vehicle state
+    screenManager.update(vehicleData);
 
     // Send heartbeat 0x011 every 100 ms
     if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
