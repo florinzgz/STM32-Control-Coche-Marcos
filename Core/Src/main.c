@@ -147,6 +147,7 @@ int main(void)
             CAN_SendStatusSteering(
                 (int16_t)(Steering_GetCurrentAngle() * 10),
                 Steering_IsCalibrated());
+            CAN_SendStatusTraction();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */
@@ -159,6 +160,7 @@ int main(void)
                 (int8_t)Temperature_Get(2),
                 (int8_t)Temperature_Get(3),
                 (int8_t)Temperature_Get(4));
+            CAN_SendStatusTempMap();
 
             /* Service mode: send module fault/enable/disable bitmasks
              * to ESP32 for the diagnostic/service menu.               */
