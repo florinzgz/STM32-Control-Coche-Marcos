@@ -9,10 +9,14 @@
 #include <Arduino.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include "can_ids.h"
+#include "can_rx.h"
+#include "vehicle_data.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
+
+static vehicle::VehicleData vehicleData;
 
 static uint8_t  heartbeatCounter = 0;
 static unsigned long lastHeartbeatMs  = 0;
@@ -42,6 +46,9 @@ void setup() {
 // ---------------------------------------------------------------------------
 void loop() {
     unsigned long now = millis();
+
+    // Poll CAN RX and decode incoming frames
+    can_rx::poll(vehicleData);
 
     // Send heartbeat 0x011 every 100 ms
     if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
