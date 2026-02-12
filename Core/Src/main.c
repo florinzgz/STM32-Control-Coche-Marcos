@@ -136,6 +136,8 @@ int main(void)
         if ((now - tick_100ms) >= 100) {
             tick_100ms = now;
 
+            Safety_CheckBatteryVoltage();
+
             CAN_SendHeartbeat();
             CAN_SendStatusSpeed(
                 (uint16_t)(Wheel_GetSpeed_FL() * 10),

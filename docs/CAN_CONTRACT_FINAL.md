@@ -314,9 +314,18 @@ Source: `SystemState_t` in `safety_system.h`
 | 4 | 0x10 | FAULT_WHEEL_SENSOR | Sensor fault (includes wheel speed) |
 | 5 | 0x20 | FAULT_ABS_ACTIVE | ABS is currently intervening |
 | 6 | 0x40 | FAULT_TCS_ACTIVE | TCS is currently intervening |
-| 7 | 0x80 | (unused) | Reserved |
+| 7 | 0x80 | FAULT_CENTERING | Steering centering failed |
 
 Note: Bits 3 and 4 are both set when `SAFETY_ERROR_SENSOR_FAULT` is the active error. They are not independently assignable in the current implementation.
+
+**Extended fault flags (internal, not transmitted in byte 2):**
+
+Battery undervoltage fault flags are defined at bits 8–9 in `safety_system.h` for internal tracking. They are NOT transmitted in the CAN heartbeat byte 2 (which is limited to 8 bits). The battery undervoltage condition is reported to the ESP32 via the `error_code` field in STATUS_SAFETY (0x203 byte 2), using codes 9 (warning) and 10 (critical).
+
+| Bit | Define | Meaning |
+|-----|--------|---------|
+| 8 | FAULT_BATT_UV_WARN | Battery bus voltage < 20.0 V (warning → DEGRADED) |
+| 9 | FAULT_BATT_UV_CRIT | Battery bus voltage < 18.0 V (critical → SAFE) |
 
 Source: `Safety_GetFaultFlags()` in `safety_system.c`, fault flag defines in `safety_system.h`
 
@@ -359,6 +368,9 @@ Source: `Safety_CheckCANTimeout()` in `safety_system.c`
 | 5 | SAFETY_ERROR_MOTOR_STALL | Reserved (not implemented in current firmware) |
 | 6 | SAFETY_ERROR_EMERGENCY_STOP | Emergency stop triggered |
 | 7 | SAFETY_ERROR_WATCHDOG | Independent watchdog timeout (IWDG, 500 ms period) |
+| 8 | SAFETY_ERROR_CENTERING | Steering centering failed during boot |
+| 9 | SAFETY_ERROR_BATTERY_UV_WARNING | Battery bus voltage < 20.0 V → DEGRADED (40 % power limit). Recovery requires > 20.5 V (0.5 V hysteresis). |
+| 10 | SAFETY_ERROR_BATTERY_UV_CRITICAL | Battery bus voltage < 18.0 V or sensor failure → SAFE (actuators inhibited). No auto-recovery; operator must recharge and reset. |
 
 Source: `Safety_Error_t` in `safety_system.h`, threshold defines in `safety_system.c`
 
@@ -413,6 +425,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | Temperature out of range | < -40 °C or > 125 °C | `Safety_CheckSensors()` |
 | Current out of range | < 0 A or > 50 A | `Safety_CheckSensors()` |
 | Wheel speed out of range | < 0 or > 60 km/h | `Safety_CheckSensors()` |
+| Battery critical undervoltage | < 18.0 V or sensor failure | `Safety_CheckBatteryVoltage()` |
 
 ### Conditions That Force ERROR State (Unrecoverable)
 
