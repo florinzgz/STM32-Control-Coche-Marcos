@@ -117,10 +117,16 @@ int main(void)
 
             /* Feed pedal demand into traction only when STM32 is in
              * ACTIVE state — the safety authority decides whether
-             * actuator commands are permitted.                          */
+             * actuator commands are permitted.
+             * In Park or Neutral gear, throttle is suppressed.         */
             if (Safety_IsCommandAllowed()) {
-                float validated = Safety_ValidateThrottle(Pedal_GetPercent());
-                Traction_SetDemand(validated);
+                GearPosition_t gear = Traction_GetGear();
+                if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
+                    Traction_SetDemand(0.0f);
+                } else {
+                    float validated = Safety_ValidateThrottle(Pedal_GetPercent());
+                    Traction_SetDemand(validated);
+                }
             } else {
                 Traction_SetDemand(0.0f);
             }

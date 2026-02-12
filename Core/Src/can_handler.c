@@ -424,6 +424,24 @@ void CAN_ProcessMessages(void) {
                         Traction_SetMode4x4(enable_4x4);
                         Traction_SetAxisRotation(tank_turn);
                     }
+
+                    /* Byte 1 (optional): gear position (P/R/N/D).
+                     * Backward compatible: if only 1 byte is sent, gear
+                     * remains unchanged (defaults to FORWARD on init).
+                     * Gear changes are only accepted at very low speed
+                     * (same constraint as mode changes).                  */
+                    if (msg_len >= 2) {
+                        uint8_t gear_raw = rx_payload[1];
+                        if (gear_raw <= (uint8_t)GEAR_FORWARD) {
+                            GearPosition_t requested = (GearPosition_t)gear_raw;
+                            /* Gear change only allowed near standstill */
+                            float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                                             Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+                            if (avg_spd <= 1.0f) {
+                                Traction_SetGear(requested);
+                            }
+                        }
+                    }
                 }
                 break;
 

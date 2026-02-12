@@ -32,6 +32,41 @@
 #define PEDAL_RAMP_UP_PCT_S    50.0f     /* Max rise   rate (%/s) */
 #define PEDAL_RAMP_DOWN_PCT_S  100.0f    /* Max fall   rate (%/s) */
 
+/* ---- Dynamic braking configuration ----
+ *
+ * When the driver releases the throttle rapidly, the vehicle decelerates
+ * smoothly via H-bridge active braking (short-brake mode) instead of
+ * coasting.  This is dynamic braking only — no energy is fed back to the
+ * battery (the H-bridge dissipates it as heat in the motor windings).
+ *
+ * The brake effort is proportional to the throttle decrease rate:
+ *   brake_pct = |throttle_rate| * DYNBRAKE_FACTOR
+ * clamped to DYNBRAKE_MAX_PCT.
+ *
+ * The brake is disabled:
+ *   - Below DYNBRAKE_MIN_SPEED_KMH (wheels nearly stationary)
+ *   - In SYS_STATE_SAFE, SYS_STATE_ERROR, emergency stop, CAN timeout
+ *   - When ABS is active (any wheel_scale < 1.0)
+ * The brake is reduced in DEGRADED mode (scaled by power limit factor).  */
+#define DYNBRAKE_FACTOR          0.5f    /* Brake %  per  throttle-%/s     */
+#define DYNBRAKE_MAX_PCT         60.0f   /* Maximum dynamic brake (%)      */
+#define DYNBRAKE_MIN_SPEED_KMH   3.0f    /* Disable below this speed       */
+#define DYNBRAKE_RAMP_DOWN_PCT_S 80.0f   /* Max brake release rate (%/s)   */
+
+/* ---- Park hold configuration ----
+ *
+ * In gear P the STM32 applies a controlled active motor brake to
+ * simulate a parking lock.  The H-bridge shorts the motor terminals
+ * (brake mode), producing a holding torque proportional to PWM duty.
+ *
+ * Current and temperature are monitored; braking is progressively
+ * reduced or disabled to protect the motors during long-duration hold. */
+#define PARK_HOLD_PWM_PCT        30.0f   /* Default hold duty (%)          */
+#define PARK_HOLD_CURRENT_WARN_A 15.0f   /* Reduce braking above this (A)  */
+#define PARK_HOLD_CURRENT_MAX_A  20.0f   /* Disable braking above this (A) */
+#define PARK_HOLD_TEMP_WARN_C    70.0f   /* Reduce braking above (°C)      */
+#define PARK_HOLD_TEMP_CRIT_C    85.0f   /* Disable braking above (°C)     */
+
 /* Motor structures */
 typedef struct {
     TIM_HandleTypeDef *timer;
@@ -71,6 +106,14 @@ static float    pedal_ema         = 0.0f;   /* EMA-filtered pedal value      */
 static float    pedal_ramped      = 0.0f;   /* Output after ramp limiting    */
 static uint8_t  pedal_filter_init = 0;      /* 0 = first sample pending      */
 static uint32_t pedal_last_tick   = 0;
+
+/* ---- Dynamic braking state ---- */
+static float    dynbrake_pct      = 0.0f;   /* Current dynamic brake effort  */
+static float    prev_demand_pct   = 0.0f;   /* Previous demand for rate calc */
+static uint32_t dynbrake_last_tick = 0;
+
+/* ---- Gear position state ---- */
+static GearPosition_t current_gear = GEAR_FORWARD;
 
 /* Ackermann-computed individual wheel angle setpoints (degrees).
  * Updated every time Steering_SetAngle() is called.               */
@@ -166,6 +209,14 @@ void Traction_Init(void)
     pedal_ema         = 0.0f;
     pedal_ramped      = 0.0f;
     pedal_filter_init = 0;
+
+    /* Reset dynamic braking state */
+    dynbrake_pct       = 0.0f;
+    prev_demand_pct    = 0.0f;
+    dynbrake_last_tick = 0;
+
+    /* Default gear to FORWARD */
+    current_gear = GEAR_FORWARD;
 }
 
 void Steering_Init(void)
@@ -245,11 +296,208 @@ void Traction_SetAxisRotation(bool enable)
     traction_state.axisRotation = enable;
 }
 
+void Traction_SetGear(GearPosition_t gear)
+{
+    current_gear = gear;
+}
+
+GearPosition_t Traction_GetGear(void)
+{
+    return current_gear;
+}
+
 void Traction_Update(void)
 {
+    /* --- Gear P: Park Hold ---
+     * Apply controlled active brake via H-bridge to simulate a parking
+     * lock.  No throttle demand is accepted.  Current and temperature
+     * are monitored to prevent overheating during long-duration hold.
+     * Park hold is released in SAFE/ERROR states (safety override).    */
+    if (current_gear == GEAR_PARK) {
+        SystemState_t st = Safety_GetState();
+        if (st == SYS_STATE_SAFE || st == SYS_STATE_ERROR) {
+            /* Safety override — release park hold */
+            Motor_SetPWM(&motor_fl, 0); Motor_Enable(&motor_fl, 0);
+            Motor_SetPWM(&motor_fr, 0); Motor_Enable(&motor_fr, 0);
+            Motor_SetPWM(&motor_rl, 0); Motor_Enable(&motor_rl, 0);
+            Motor_SetPWM(&motor_rr, 0); Motor_Enable(&motor_rr, 0);
+        } else {
+            /* Compute park hold PWM with current/temp derating */
+            float hold_pct = PARK_HOLD_PWM_PCT;
+
+            /* Check per-motor current and temperature; use worst case */
+            float max_current = 0.0f;
+            float max_temp    = 0.0f;
+            for (uint8_t i = 0; i < 4; i++) {
+                float a = Current_GetAmps(i);
+                float t = Temperature_Get(i);
+                if (a > max_current) max_current = a;
+                if (t > max_temp)    max_temp    = t;
+            }
+
+            /* Current derating */
+            if (max_current > PARK_HOLD_CURRENT_MAX_A) {
+                hold_pct = 0.0f;   /* Disable braking entirely */
+            } else if (max_current > PARK_HOLD_CURRENT_WARN_A) {
+                float ratio = (PARK_HOLD_CURRENT_MAX_A - max_current)
+                            / (PARK_HOLD_CURRENT_MAX_A - PARK_HOLD_CURRENT_WARN_A);
+                hold_pct *= ratio;
+            }
+
+            /* Temperature derating */
+            if (max_temp > PARK_HOLD_TEMP_CRIT_C) {
+                hold_pct = 0.0f;   /* Disable braking entirely */
+            } else if (max_temp > PARK_HOLD_TEMP_WARN_C) {
+                float ratio = (PARK_HOLD_TEMP_CRIT_C - max_temp)
+                            / (PARK_HOLD_TEMP_CRIT_C - PARK_HOLD_TEMP_WARN_C);
+                hold_pct *= ratio;
+            }
+
+            uint16_t hold_pwm = (uint16_t)(hold_pct * PWM_PERIOD / 100.0f);
+
+            /* Apply hold brake to all four motors.
+             * Direction is set to forward; the H-bridge "brake" effect
+             * comes from driving all motors at low duty with enable ON.
+             * This dissipates energy as heat — no regeneration.         */
+            Motor_SetPWM(&motor_fl, hold_pwm);
+            Motor_SetPWM(&motor_fr, hold_pwm);
+            Motor_SetPWM(&motor_rl, hold_pwm);
+            Motor_SetPWM(&motor_rr, hold_pwm);
+            Motor_SetDirection(&motor_fl, 1);
+            Motor_SetDirection(&motor_fr, 1);
+            Motor_SetDirection(&motor_rl, 1);
+            Motor_SetDirection(&motor_rr, 1);
+            Motor_Enable(&motor_fl, (hold_pwm > 0) ? 1 : 0);
+            Motor_Enable(&motor_fr, (hold_pwm > 0) ? 1 : 0);
+            Motor_Enable(&motor_rl, (hold_pwm > 0) ? 1 : 0);
+            Motor_Enable(&motor_rr, (hold_pwm > 0) ? 1 : 0);
+        }
+
+        /* Update sensor readings even in park */
+        traction_state.wheels[0].speedKmh = Wheel_GetSpeed_FL();
+        traction_state.wheels[1].speedKmh = Wheel_GetSpeed_FR();
+        traction_state.wheels[2].speedKmh = Wheel_GetSpeed_RL();
+        traction_state.wheels[3].speedKmh = Wheel_GetSpeed_RR();
+        for (uint8_t i = 0; i < 4; i++) {
+            traction_state.wheels[i].currentA = Current_GetAmps(i);
+            traction_state.wheels[i].tempC    = Temperature_Get(i);
+        }
+        return;
+    }
+
+    /* --- Gear N: Neutral / Coast ---
+     * All motors enter full coast mode: PWM = 0, H-bridge disabled.
+     * No active braking, no holding torque — wheels spin freely.
+     * Dynamic braking is also disabled in Neutral.                     */
+    if (current_gear == GEAR_NEUTRAL) {
+        Motor_SetPWM(&motor_fl, 0); Motor_Enable(&motor_fl, 0);
+        Motor_SetPWM(&motor_fr, 0); Motor_Enable(&motor_fr, 0);
+        Motor_SetPWM(&motor_rl, 0); Motor_Enable(&motor_rl, 0);
+        Motor_SetPWM(&motor_rr, 0); Motor_Enable(&motor_rr, 0);
+
+        /* Reset dynamic braking state so it doesn't spike on gear change */
+        dynbrake_pct    = 0.0f;
+        prev_demand_pct = 0.0f;
+
+        /* Update sensor readings */
+        traction_state.wheels[0].speedKmh = Wheel_GetSpeed_FL();
+        traction_state.wheels[1].speedKmh = Wheel_GetSpeed_FR();
+        traction_state.wheels[2].speedKmh = Wheel_GetSpeed_RL();
+        traction_state.wheels[3].speedKmh = Wheel_GetSpeed_RR();
+        for (uint8_t i = 0; i < 4; i++) {
+            traction_state.wheels[i].currentA = Current_GetAmps(i);
+            traction_state.wheels[i].tempC    = Temperature_Get(i);
+            traction_state.wheels[i].pwm      = 0;
+            traction_state.wheels[i].reverse  = false;
+        }
+        return;
+    }
+
+    /* --- Gear D / R: Normal traction with dynamic braking ---          */
     float demand = traction_state.demandPct;
-    uint16_t base_pwm = (uint16_t)(fabs(demand) * PWM_PERIOD / 100.0f);
-    int8_t dir   = (demand >= 0) ? 1 : -1;
+
+    /* ---- Dynamic braking computation ----
+     * Detect throttle decrease rate and generate proportional braking.
+     * The brake effort ramps progressively and respects existing limits. */
+    uint32_t now_db = HAL_GetTick();
+    float dt_db = (float)(now_db - dynbrake_last_tick) / 1000.0f;
+    if (dt_db < 0.001f) dt_db = 0.001f;
+    dynbrake_last_tick = now_db;
+
+    float demand_rate = (demand - prev_demand_pct) / dt_db;  /* %/s */
+    prev_demand_pct = demand;
+
+    /* Determine if dynamic braking should be active */
+    bool dynbrake_allowed = true;
+    SystemState_t sys_st = Safety_GetState();
+
+    /* Disable in non-driveable states */
+    if (sys_st == SYS_STATE_SAFE  || sys_st == SYS_STATE_ERROR ||
+        sys_st == SYS_STATE_BOOT  || sys_st == SYS_STATE_STANDBY) {
+        dynbrake_allowed = false;
+    }
+
+    /* Disable if ABS is active on any wheel (wheel_scale < 1.0) */
+    if (dynbrake_allowed) {
+        for (uint8_t i = 0; i < 4; i++) {
+            if (safety_status.wheel_scale[i] < 1.0f) {
+                dynbrake_allowed = false;
+                break;
+            }
+        }
+    }
+
+    /* Disable below minimum speed */
+    if (dynbrake_allowed) {
+        float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                           Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        if (avg_speed < DYNBRAKE_MIN_SPEED_KMH) {
+            dynbrake_allowed = false;
+        }
+    }
+
+    if (dynbrake_allowed && demand_rate < 0.0f) {
+        /* Throttle decreasing — apply proportional brake */
+        float target_brake = fabsf(demand_rate) * DYNBRAKE_FACTOR;
+        if (target_brake > DYNBRAKE_MAX_PCT) target_brake = DYNBRAKE_MAX_PCT;
+
+        /* Limit in DEGRADED mode */
+        if (sys_st == SYS_STATE_DEGRADED) {
+            target_brake *= (DEGRADED_POWER_LIMIT_PCT / 100.0f);
+        }
+
+        /* Progressive ramp toward target (never jump instantly) */
+        if (target_brake > dynbrake_pct) {
+            float brake_ramp = PEDAL_RAMP_DOWN_PCT_S * dt_db;
+            float diff_b = target_brake - dynbrake_pct;
+            if (diff_b > brake_ramp) diff_b = brake_ramp;
+            dynbrake_pct += diff_b;
+        } else {
+            dynbrake_pct = target_brake;
+        }
+    } else {
+        /* No braking needed — ramp down smoothly */
+        if (dynbrake_pct > 0.0f) {
+            float release = DYNBRAKE_RAMP_DOWN_PCT_S * dt_db;
+            dynbrake_pct -= release;
+            if (dynbrake_pct < 0.0f) dynbrake_pct = 0.0f;
+        }
+    }
+
+    /* When dynamic braking is active and throttle demand is near zero,
+     * the brake PWM is applied with the motor direction reversed relative
+     * to the travel direction.  This creates an opposing torque that
+     * decelerates the vehicle.  Energy is dissipated as heat in the motor
+     * windings — the battery is NOT charged.                             */
+    float effective_demand = demand;
+
+    if (dynbrake_pct > 0.5f && fabsf(demand) < 1.0f) {
+        /* Use dynamic braking — set negative demand (opposing torque) */
+        effective_demand = -dynbrake_pct;
+    }
+
+    uint16_t base_pwm = (uint16_t)(fabs(effective_demand) * PWM_PERIOD / 100.0f);
+    int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 
     if (traction_state.axisRotation) {
         /* Tank turn: left wheels reverse, right wheels forward (or vice versa).
@@ -288,7 +536,7 @@ void Traction_Update(void)
     /* Enable/disable motors.  Do NOT disable based on wheel_scale:
      * ABS sets scale=0.0 but the motor must stay enabled so the
      * H-bridge can actively brake (coast mode would lose control).    */
-    uint8_t active = (fabs(demand) > 0.5f) ? 1 : 0;
+    uint8_t active = (fabs(effective_demand) > 0.5f) ? 1 : 0;
     Motor_Enable(&motor_fl, active);
     Motor_Enable(&motor_fr, active);
     if (traction_state.mode4x4 || traction_state.axisRotation) {
@@ -327,6 +575,10 @@ void Traction_EmergencyStop(void)
     pedal_ema         = 0.0f;
     pedal_ramped      = 0.0f;
     pedal_filter_init = 0;
+
+    /* Reset dynamic braking */
+    dynbrake_pct    = 0.0f;
+    prev_demand_pct = 0.0f;
 }
 
 const TractionState_t* Traction_GetState(void)
