@@ -25,12 +25,11 @@ static uint32_t wheel_last_tick[NUM_WHEELS]       = {0};
 static float    wheel_speed_kmh[NUM_WHEELS]       = {0};
 static float    wheel_rpm[NUM_WHEELS]             = {0};
 
-/* Software debounce: minimum interval between accepted pulses (µs).
+/* Software debounce: minimum interval between accepted pulses.
  * At 60 km/h with 1.1 m circumference and 6 pulses/rev:
  *   freq = (60/3.6)/1.1 × 6 ≈ 91 Hz → period ≈ 11 ms.
- * A 200 µs blanking window rejects contact bounce without affecting
- * valid pulses at any realistic speed.                                */
-#define WHEEL_DEBOUNCE_US  200U
+ * A 1 ms blanking window (HAL_GetTick resolution) rejects contact
+ * bounce without affecting valid pulses at any realistic speed.       */
 static volatile uint32_t wheel_last_pulse_tick[NUM_WHEELS] = {0};
 
 static inline void Wheel_IRQDebounced(uint8_t idx)
