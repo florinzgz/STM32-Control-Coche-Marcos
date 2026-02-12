@@ -432,7 +432,7 @@ void CAN_ProcessMessages(void) {
                      * (same constraint as mode changes).                  */
                     if (msg_len >= 2) {
                         uint8_t gear_raw = rx_payload[1];
-                        if (gear_raw <= (uint8_t)GEAR_FORWARD) {
+                        if (gear_raw <= (uint8_t)GEAR_FORWARD_D2) {
                             GearPosition_t requested = (GearPosition_t)gear_raw;
                             /* Gear change only allowed near standstill */
                             float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +

@@ -23,7 +23,8 @@ typedef enum {
     GEAR_PARK    = 0,
     GEAR_REVERSE = 1,
     GEAR_NEUTRAL = 2,
-    GEAR_FORWARD = 3
+    GEAR_FORWARD = 3,
+    GEAR_FORWARD_D2 = 4   /* Full power (100 %) forward mode */
 } GearPosition_t;
 
 // Wheel state structure (per wheel)

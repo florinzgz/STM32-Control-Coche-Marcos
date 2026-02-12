@@ -67,6 +67,22 @@
 #define PARK_HOLD_TEMP_WARN_C    70.0f   /* Reduce braking above (°C)      */
 #define PARK_HOLD_TEMP_CRIT_C    85.0f   /* Disable braking above (°C)     */
 
+/* ---- Gear-based power scaling ----
+ *
+ * Gear determines direction; power mode sets the max power fraction.
+ * Applied once at the final demand stage in Traction_Update() so it
+ * does NOT interact with ABS/TCS wheel_scale[] or the ramp limiter.
+ *
+ *   GEAR_FORWARD  (D1) = 60 % max power — default forward mode
+ *   GEAR_FORWARD_D2    = 100 % max power — full performance
+ *   GEAR_REVERSE       = 60 % max power
+ *
+ * Safety_GetPowerLimitFactor() is applied separately upstream and
+ * is NOT modified by this scaling.                                     */
+#define GEAR_POWER_FORWARD_PCT   60.0f   /* D1: 60 % max power            */
+#define GEAR_POWER_FORWARD_D2_PCT 100.0f /* D2: 100 % max power           */
+#define GEAR_POWER_REVERSE_PCT   60.0f   /* R:  60 % max power            */
+
 /* Motor structures */
 typedef struct {
     TIM_HandleTypeDef *timer;
@@ -134,9 +150,10 @@ static float steer_fr_deg = 0.0f;
 /* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
  * 0.5° × 4800 counts/360° ≈ 6.67 counts */
 #define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
-#define ENC_MAX_COUNTS       ((int32_t)((STEERING_WHEEL_MAX_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
-        /* ±370° of steering wheel travel (350° + 20° margin) → ±4933
-         * counts.  Any reading beyond this is mechanically impossible.   */
+#define ENC_MAX_COUNTS       ((int32_t)((MAX_STEER_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
+        /* Encoder is 1:1 on the steering output shaft.
+         * ±74° (54° max road-wheel + 20° margin) → ±987 counts.
+         * Any reading beyond this is mechanically impossible.            */
 #define ENC_MAX_JUMP         100
         /* Maximum plausible count change per 10 ms control cycle.
          * At 200 °/s steering rate: 200/360*4800*0.01 ≈ 27 counts.
@@ -413,7 +430,7 @@ void Traction_Update(void)
         return;
     }
 
-    /* --- Gear D / R: Normal traction with dynamic braking ---          */
+    /* --- Gear F/D1/D2/R: Normal traction with dynamic braking ---       */
     float demand = traction_state.demandPct;
 
     /* ---- Dynamic braking computation ----
@@ -496,8 +513,32 @@ void Traction_Update(void)
         effective_demand = -dynbrake_pct;
     }
 
+    /* ---- Gear-based power scaling (applied once at final demand) ----
+     * Scale the positive traction demand by the gear power fraction.
+     * Dynamic braking demand is NOT scaled (braking effort is
+     * independent of power mode).  ABS/TCS wheel_scale[] is applied
+     * separately per-wheel below and is not affected.                   */
+    if (effective_demand > 0.0f) {
+        float gear_scale;
+        if (current_gear == GEAR_FORWARD_D2) {
+            gear_scale = GEAR_POWER_FORWARD_D2_PCT / 100.0f;
+        } else if (current_gear == GEAR_REVERSE) {
+            gear_scale = GEAR_POWER_REVERSE_PCT / 100.0f;
+        } else {
+            gear_scale = GEAR_POWER_FORWARD_PCT / 100.0f;
+        }
+        effective_demand *= gear_scale;
+    }
+
     uint16_t base_pwm = (uint16_t)(fabs(effective_demand) * PWM_PERIOD / 100.0f);
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
+
+    /* GEAR_REVERSE: invert motor direction for reverse travel.
+     * Dynamic braking direction (negative effective_demand) is already
+     * handled by the sign above, so this only affects positive demand.  */
+    if (current_gear == GEAR_REVERSE && effective_demand > 0.0f) {
+        dir = -1;
+    }
 
     if (traction_state.axisRotation) {
         /* Tank turn: left wheels reverse, right wheels forward (or vice versa).
