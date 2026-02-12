@@ -40,6 +40,7 @@ inline constexpr uint32_t STATUS_SAFETY         = 0x203;    // DLC 3, 100 ms
 inline constexpr uint32_t STATUS_STEERING       = 0x204;    // DLC 3, 100 ms
 inline constexpr uint32_t STATUS_TRACTION       = 0x205;    // DLC 4, 100 ms
 inline constexpr uint32_t STATUS_TEMP_MAP       = 0x206;    // DLC 5, 1000 ms
+inline constexpr uint32_t STATUS_BATTERY        = 0x207;    // DLC 4, 100 ms  battery 24V bus current + voltage
 
 // -------------------------------------------------------------------------
 // Bidirectional  Diagnostic (§3.3)

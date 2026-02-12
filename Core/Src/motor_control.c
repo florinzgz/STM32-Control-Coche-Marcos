@@ -91,7 +91,7 @@ static float steer_fr_deg = 0.0f;
 /* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
  * 0.5° × 4800 counts/360° ≈ 6.67 counts */
 #define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
-#define ENC_MAX_COUNTS       ((int16_t)((STEERING_WHEEL_MAX_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
+#define ENC_MAX_COUNTS       ((int32_t)((STEERING_WHEEL_MAX_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
         /* ±370° of steering wheel travel (350° + 20° margin) → ±4933
          * counts.  Any reading beyond this is mechanically impossible.   */
 #define ENC_MAX_JUMP         100
@@ -105,7 +105,7 @@ static float steer_fr_deg = 0.0f;
         /* Minimum |PID output| (%) to consider the motor actively
          * driving.  Below this the motor may legitimately be at rest.    */
 
-static int16_t  enc_prev_count       = 0;
+static int32_t  enc_prev_count       = 0;
 static uint32_t enc_last_change_tick = 0;
 static uint8_t  enc_fault            = 0;   /* 0 = healthy, 1 = faulted */
 
@@ -392,7 +392,7 @@ void Steering_ControlLoop(void)
     float dt = (float)(now - last_time) / 1000.0f;
     if (dt < 0.001f) return;
 
-    int16_t encoder_count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+    int32_t encoder_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     float measured = (float)encoder_count;
 
     /* steering_motor.cpp: kDeadbandDeg = 0.5f */
@@ -421,7 +421,7 @@ void Steering_ControlLoop(void)
 
 float Steering_GetCurrentAngle(void)
 {
-    int16_t cnt = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+    int32_t cnt = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     return (float)cnt * 360.0f / (float)ENCODER_CPR;
 }
 
@@ -469,7 +469,7 @@ void Encoder_CheckHealth(void)
      * inspected.  Only a full system reset clears the latch.          */
     if (enc_fault) return;
 
-    int16_t count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+    int32_t count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     uint32_t now  = HAL_GetTick();
 
     /* --- 1. Out-of-range check ---
@@ -483,10 +483,8 @@ void Encoder_CheckHealth(void)
     /* --- 2. Implausible jump check ---
      * A sudden large delta between consecutive reads indicates noise,
      * wiring fault, or encoder disconnect/reconnect.                  */
-    int16_t delta = count - enc_prev_count;
-    if (delta < 0) delta = (int16_t)(-delta);  /* abs — overflow-safe because
-                                                 * both values are bounded by
-                                                 * ENC_MAX_COUNTS (667).      */
+    int32_t delta = count - enc_prev_count;
+    if (delta < 0) delta = -delta;
     if (delta > ENC_MAX_JUMP) {
         enc_fault = 1;
         return;

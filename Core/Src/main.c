@@ -148,6 +148,7 @@ int main(void)
                 (int16_t)(Steering_GetCurrentAngle() * 10),
                 Steering_IsCalibrated());
             CAN_SendStatusTraction();
+            CAN_SendStatusBattery();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */
@@ -338,7 +339,9 @@ static void MX_TIM2_Init(void)
     htim2.Instance               = TIM2;
     htim2.Init.Prescaler         = 0;
     htim2.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim2.Init.Period            = 65535;
+    htim2.Init.Period            = 0xFFFFFFFF; /* TIM2 is 32-bit — use full range to
+                                               * prevent counter wrap at ±350° travel
+                                               * (±4667 counts at 4800 CPR).          */
     htim2.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
     htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 
@@ -347,11 +350,15 @@ static void MX_TIM2_Init(void)
     enc.IC1Polarity  = TIM_ICPOLARITY_RISING;
     enc.IC1Selection = TIM_ICSELECTION_DIRECTTI;
     enc.IC1Prescaler = TIM_ICPSC_DIV1;
-    enc.IC1Filter    = 0;
+    enc.IC1Filter    = 6;  /* Digital filter: 6 × fDTS rejects noise from
+                            * NPN open-collector outputs (E6B2-CWZ6C).
+                            * At 170 MHz ≈ 35 ns per sample → ~210 ns
+                            * glitch rejection.  Sufficient for 1200 PPR
+                            * at typical steering rates.                */
     enc.IC2Polarity  = TIM_ICPOLARITY_RISING;
     enc.IC2Selection = TIM_ICSELECTION_DIRECTTI;
     enc.IC2Prescaler = TIM_ICPSC_DIV1;
-    enc.IC2Filter    = 0;
+    enc.IC2Filter    = 6;  /* Same digital filter as IC1 for symmetry   */
     if (HAL_TIM_Encoder_Init(&htim2, &enc) != HAL_OK) {
         Error_Handler();
     }

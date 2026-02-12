@@ -79,7 +79,13 @@ extern "C" {
 #define WHEEL_PULSES_REV   6   /* 6 bolts per wheel revolution */
 
 /* ---- Sensor Constants ---- */
-#define INA226_SHUNT_MOHM  1   /* 1 mΩ shunt resistor */
+/* INA226 shunt resistors (mΩ) — values per hardware BOM:
+ * Channels 0-3 (motor wheels): 50A sensors with 1 mΩ shunt
+ * Channel 4 (battery 24V):     100A sensor with 0.5 mΩ shunt
+ * Channel 5 (steering motor):  50A sensor with 1 mΩ shunt       */
+#define INA226_SHUNT_MOHM_MOTOR    1    /* 1 mΩ for 50A sensors  */
+#define INA226_SHUNT_MOHM_BATTERY  0.5f /* 0.5 mΩ for 100A sensor */
+#define INA226_CHANNEL_BATTERY     4    /* TCA9548A channel index  */
 
 /* ---- Global HAL handles ---- */
 extern FDCAN_HandleTypeDef hfdcan1;

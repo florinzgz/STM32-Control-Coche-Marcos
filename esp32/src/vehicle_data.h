@@ -113,6 +113,16 @@ struct ServiceData {
     unsigned long disabledTimestampMs = 0;
 };
 
+// -------------------------------------------------------------------------
+// Battery bus data (0x207) — 24V main battery via INA226 100A shunt
+// Displayed in the upper-right corner of the drive screen.
+// -------------------------------------------------------------------------
+struct BatteryData {
+    uint16_t currentRaw = 0;   // 0.01 A units
+    uint16_t voltageRaw = 0;   // 0.01 V units
+    unsigned long timestampMs = 0;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -128,6 +138,7 @@ public:
     void setTraction(const TractionData& d)    { traction_ = d; }
     void setTempMap(const TempMapData& d)      { tempMap_ = d; }
     void setDiag(const DiagData& d)            { diag_ = d; }
+    void setBattery(const BatteryData& d)      { battery_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -143,6 +154,7 @@ public:
     const TractionData&  traction()  const { return traction_; }
     const TempMapData&   tempMap()   const { return tempMap_; }
     const DiagData&      diag()      const { return diag_; }
+    const BatteryData&   battery()   const { return battery_; }
     const ServiceData&   service()   const { return service_; }
 
 private:
@@ -155,6 +167,7 @@ private:
     TractionData  traction_;
     TempMapData   tempMap_;
     DiagData      diag_;
+    BatteryData   battery_;
     ServiceData   service_;
 };
 
