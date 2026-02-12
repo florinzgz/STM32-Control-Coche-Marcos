@@ -468,9 +468,9 @@ void Traction_Update(void)
 
         /* Progressive ramp toward target (never jump instantly) */
         if (target_brake > dynbrake_pct) {
-            float max_up = PEDAL_RAMP_DOWN_PCT_S * dt_db;  /* Use decel rate */
+            float brake_ramp = PEDAL_RAMP_DOWN_PCT_S * dt_db;
             float diff_b = target_brake - dynbrake_pct;
-            if (diff_b > max_up) diff_b = max_up;
+            if (diff_b > brake_ramp) diff_b = brake_ramp;
             dynbrake_pct += diff_b;
         } else {
             dynbrake_pct = target_brake;

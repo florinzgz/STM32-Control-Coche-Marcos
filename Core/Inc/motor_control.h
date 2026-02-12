@@ -15,7 +15,7 @@ extern "C" {
 #define MOTOR_RL  2  // Rear Left
 #define MOTOR_RR  3  // Rear Right
 
-/* Gear position — received from ESP32 via CAN_ID_CMD_MODE byte 0.
+/* Gear position — received from ESP32 via CAN_ID_CMD_MODE byte 1.
  * Traced to CAN_PROTOCOL.md: 0=PARK, 1=REVERSE, 2=NEUTRAL, 3=FORWARD.
  * Park (P) was implicit in the base firmware; it is now handled
  * explicitly as an active hold brake on the STM32 side.               */
