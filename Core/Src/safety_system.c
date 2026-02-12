@@ -36,7 +36,9 @@
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
 #define SENSOR_CURRENT_MAX_A 50.0f    /* anything above this is a fault */
-#define SENSOR_SPEED_MAX_KMH 60.0f    /* this vehicle cannot exceed 60 */
+#define SENSOR_SPEED_MAX_KMH 25.0f    /* RS775 20000RPM / 1:75 gear → ~266 wheel RPM
+                                        * × 1.1m circumf → ~17.6 km/h max.
+                                        * 25 km/h gives ~40 % plausibility margin. */
 
 /* ---- Module state ---- */
 SafetyStatus_t safety_status = {0};
