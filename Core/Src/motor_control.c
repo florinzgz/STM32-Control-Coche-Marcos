@@ -79,9 +79,9 @@
  *
  * Safety_GetPowerLimitFactor() is applied separately upstream and
  * is NOT modified by this scaling.                                     */
-#define GEAR_POWER_FORWARD_PCT   60.0f   /* D1: 60 % max power            */
-#define GEAR_POWER_FORWARD_D2_PCT 100.0f /* D2: 100 % max power           */
-#define GEAR_POWER_REVERSE_PCT   60.0f   /* R:  60 % max power            */
+#define GEAR_POWER_FORWARD_PCT   0.60f   /* D1: 60 % max power            */
+#define GEAR_POWER_FORWARD_D2_PCT 1.00f /* D2: 100 % max power           */
+#define GEAR_POWER_REVERSE_PCT   0.60f  /* R:  60 % max power            */
 
 /* Motor structures */
 typedef struct {
@@ -521,11 +521,11 @@ void Traction_Update(void)
     if (effective_demand > 0.0f) {
         float gear_scale;
         if (current_gear == GEAR_FORWARD_D2) {
-            gear_scale = GEAR_POWER_FORWARD_D2_PCT / 100.0f;
+            gear_scale = GEAR_POWER_FORWARD_D2_PCT;
         } else if (current_gear == GEAR_REVERSE) {
-            gear_scale = GEAR_POWER_REVERSE_PCT / 100.0f;
+            gear_scale = GEAR_POWER_REVERSE_PCT;
         } else {
-            gear_scale = GEAR_POWER_FORWARD_PCT / 100.0f;
+            gear_scale = GEAR_POWER_FORWARD_PCT;
         }
         effective_demand *= gear_scale;
     }
@@ -534,10 +534,12 @@ void Traction_Update(void)
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 
     /* GEAR_REVERSE: invert motor direction for reverse travel.
-     * Dynamic braking direction (negative effective_demand) is already
-     * handled by the sign above, so this only affects positive demand.  */
-    if (current_gear == GEAR_REVERSE && effective_demand > 0.0f) {
-        dir = -1;
+     * This flips both traction (positive demand → backward travel)
+     * and dynamic braking (negative demand → forward opposing torque
+     * becomes backward opposing torque, correct for a vehicle
+     * decelerating while traveling in reverse).                         */
+    if (current_gear == GEAR_REVERSE) {
+        dir = -dir;
     }
 
     if (traction_state.axisRotation) {
