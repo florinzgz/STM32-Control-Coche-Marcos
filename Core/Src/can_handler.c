@@ -280,6 +280,34 @@ void CAN_SendStatusTempMap(void) {
     TransmitFrame(CAN_ID_STATUS_TEMP_MAP, data, 5);
 }
 
+/**
+ * @brief  Send battery bus current and voltage to ESP32.
+ *
+ * Reads the INA226 on channel INA226_CHANNEL_BATTERY (100A shunt on
+ * 24V bus) and transmits current and voltage so the ESP32 HMI can
+ * display battery current in the upper-right corner of the screen.
+ *
+ *   Byte 0-1: Battery current (0.01 A units, uint16 little-endian)
+ *   Byte 2-3: Battery voltage (0.01 V units, uint16 little-endian)
+ *
+ * CAN ID: 0x207   DLC: 4   Rate: 100 ms (10 Hz)
+ */
+void CAN_SendStatusBattery(void) {
+    uint8_t data[4];
+
+    float amps = Current_GetAmps(INA226_CHANNEL_BATTERY);
+    float volts = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+    uint16_t amps_raw = (uint16_t)(amps * 100.0f);
+    uint16_t volts_raw = (uint16_t)(volts * 100.0f);
+
+    data[0] = (uint8_t)(amps_raw & 0xFF);
+    data[1] = (uint8_t)((amps_raw >> 8) & 0xFF);
+    data[2] = (uint8_t)(volts_raw & 0xFF);
+    data[3] = (uint8_t)((volts_raw >> 8) & 0xFF);
+
+    TransmitFrame(CAN_ID_STATUS_BATTERY, data, 4);
+}
+
 void CAN_SendError(uint8_t error_code, uint8_t subsystem) {
     uint8_t error_data[2];
     

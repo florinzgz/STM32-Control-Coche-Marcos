@@ -69,9 +69,9 @@
 /* ---- Module state ---- */
 static CenteringState_t centering_state = CENTERING_IDLE;
 static uint32_t centering_start_tick    = 0;   /* Tick when centering began   */
-static int16_t  stall_prev_count        = 0;   /* Last encoder reading        */
+static int32_t  stall_prev_count        = 0;   /* Last encoder reading        */
 static uint32_t stall_last_change_tick  = 0;   /* Tick when encoder last moved*/
-static int16_t  sweep_origin_count      = 0;   /* Encoder at sweep start      */
+static int32_t  sweep_origin_count      = 0;   /* Encoder at sweep start      */
 
 extern TIM_HandleTypeDef htim2;
 
@@ -111,7 +111,7 @@ static void Centering_Complete(void)
  */
 static bool Centering_IsStalled(void)
 {
-    int16_t count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+    int32_t count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
     uint32_t now  = HAL_GetTick();
 
     if (count != stall_prev_count) {
@@ -129,9 +129,9 @@ static bool Centering_IsStalled(void)
  */
 static bool Centering_RangeExceeded(void)
 {
-    int16_t count = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
-    int16_t delta = count - sweep_origin_count;
-    if (delta < 0) delta = (int16_t)(-delta);
+    int32_t count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+    int32_t delta = count - sweep_origin_count;
+    if (delta < 0) delta = -delta;
     return (delta > MAX_CENTERING_COUNTS);
 }
 
@@ -167,7 +167,7 @@ void SteeringCentering_Step(void)
     case CENTERING_IDLE:
         SteeringCenter_ClearFlag();
         centering_start_tick   = now;
-        stall_prev_count       = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+        stall_prev_count       = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
         stall_last_change_tick = now;
         sweep_origin_count     = stall_prev_count;
 
@@ -198,7 +198,7 @@ void SteeringCentering_Step(void)
 
         /* 4. End-of-travel stall? → reverse to sweep right */
         if (Centering_IsStalled()) {
-            sweep_origin_count     = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+            sweep_origin_count     = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
             stall_prev_count       = sweep_origin_count;
             stall_last_change_tick = now;
             Motor_SetPWM_Steering(CENTERING_PWM, false);

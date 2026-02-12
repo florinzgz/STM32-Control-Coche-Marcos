@@ -146,6 +146,15 @@ static void decodeServiceDisabled(const CanFrame& f, vehicle::VehicleData& data)
     data.setServiceDisabled(readU32LE(&f.data[0]), millis());
 }
 
+static void decodeBattery(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 4) return;
+    vehicle::BatteryData bd;
+    bd.currentRaw  = readU16LE(&f.data[0]);   // 0.01 A units
+    bd.voltageRaw  = readU16LE(&f.data[2]);   // 0.01 V units
+    bd.timestampMs = millis();
+    data.setBattery(bd);
+}
+
 // -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
@@ -162,6 +171,7 @@ void poll(vehicle::VehicleData& data) {
             case can::STATUS_STEERING:  decodeSteering(frame, data);       break;
             case can::STATUS_TRACTION:  decodeTraction(frame, data);       break;
             case can::STATUS_TEMP_MAP:  decodeTempMap(frame, data);        break;
+            case can::STATUS_BATTERY:   decodeBattery(frame, data);        break;
             case can::DIAG_ERROR:       decodeDiagError(frame, data);      break;
             case can::SERVICE_FAULTS:   decodeServiceFaults(frame, data);  break;
             case can::SERVICE_ENABLED:  decodeServiceEnabled(frame, data); break;

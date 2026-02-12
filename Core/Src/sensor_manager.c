@@ -25,10 +25,29 @@ static uint32_t wheel_last_tick[NUM_WHEELS]       = {0};
 static float    wheel_speed_kmh[NUM_WHEELS]       = {0};
 static float    wheel_rpm[NUM_WHEELS]             = {0};
 
-void Wheel_FL_IRQHandler(void) { wheel_pulse[0]++; }
-void Wheel_FR_IRQHandler(void) { wheel_pulse[1]++; }
-void Wheel_RL_IRQHandler(void) { wheel_pulse[2]++; }
-void Wheel_RR_IRQHandler(void) { wheel_pulse[3]++; }
+/* Software debounce: minimum interval between accepted pulses.
+ * At 60 km/h with 1.1 m circumference and 6 pulses/rev:
+ *   freq = (60/3.6)/1.1 × 6 ≈ 91 Hz → period ≈ 11 ms.
+ * A 1 ms blanking window (HAL_GetTick resolution) rejects contact
+ * bounce without affecting valid pulses at any realistic speed.       */
+static volatile uint32_t wheel_last_pulse_tick[NUM_WHEELS] = {0};
+
+static inline void Wheel_IRQDebounced(uint8_t idx)
+{
+    uint32_t now = HAL_GetTick();
+    /* HAL_GetTick() has 1 ms resolution; accept pulse only if at least
+     * 1 ms has elapsed since the last accepted pulse.  This provides
+     * effective debounce for mechanical contact bounce.               */
+    if ((now - wheel_last_pulse_tick[idx]) >= 1U) {
+        wheel_pulse[idx]++;
+        wheel_last_pulse_tick[idx] = now;
+    }
+}
+
+void Wheel_FL_IRQHandler(void) { Wheel_IRQDebounced(0); }
+void Wheel_FR_IRQHandler(void) { Wheel_IRQDebounced(1); }
+void Wheel_RL_IRQHandler(void) { Wheel_IRQDebounced(2); }
+void Wheel_RR_IRQHandler(void) { Wheel_IRQDebounced(3); }
 
 /* =========================================================================
  *  Steering Center Inductive Sensor – EXTI pulse detection
@@ -145,10 +164,16 @@ void Current_ReadAll(void)
             continue;
         }
 
-        /* Shunt voltage → current:  I = V_shunt / R_shunt */
+        /* Shunt voltage → current:  I = V_shunt / R_shunt
+         * Use correct shunt resistance per channel:
+         *   Channel 4 (battery): 0.5 mΩ (100A sensor)
+         *   All others:          1.0 mΩ (50A sensors)             */
         int16_t shunt_raw = INA226_ReadReg(INA226_REG_SHUNT_VOLTAGE);
         float shunt_uv    = (float)shunt_raw * INA226_SHUNT_LSB_UV;
-        current_amps[i]   = shunt_uv / (float)(INA226_SHUNT_MOHM);  /* µV / mΩ = mA → ÷1000 later if needed */
+        float shunt_mohm  = (i == INA226_CHANNEL_BATTERY)
+                          ? (float)INA226_SHUNT_MOHM_BATTERY
+                          : (float)INA226_SHUNT_MOHM_MOTOR;
+        current_amps[i]   = shunt_uv / shunt_mohm;  /* µV / mΩ = mA */
         current_amps[i]  /= 1000.0f;  /* Convert mA to A */
 
         /* Bus voltage */
@@ -460,11 +485,12 @@ float Temperature_Get(uint8_t index)
 void Sensor_Init(void)
 {
     for (uint8_t i = 0; i < NUM_WHEELS; i++) {
-        wheel_pulse[i]      = 0;
-        wheel_pulse_prev[i] = 0;
-        wheel_last_tick[i]  = HAL_GetTick();
-        wheel_speed_kmh[i]  = 0.0f;
-        wheel_rpm[i]        = 0.0f;
+        wheel_pulse[i]           = 0;
+        wheel_pulse_prev[i]      = 0;
+        wheel_last_tick[i]       = HAL_GetTick();
+        wheel_speed_kmh[i]       = 0.0f;
+        wheel_rpm[i]             = 0.0f;
+        wheel_last_pulse_tick[i] = 0;
     }
 
     pedal_raw = 0;
