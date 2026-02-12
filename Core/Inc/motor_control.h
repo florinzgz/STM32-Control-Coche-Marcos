@@ -15,6 +15,17 @@ extern "C" {
 #define MOTOR_RL  2  // Rear Left
 #define MOTOR_RR  3  // Rear Right
 
+/* Gear position — received from ESP32 via CAN_ID_CMD_MODE byte 0.
+ * Traced to CAN_PROTOCOL.md: 0=PARK, 1=REVERSE, 2=NEUTRAL, 3=FORWARD.
+ * Park (P) was implicit in the base firmware; it is now handled
+ * explicitly as an active hold brake on the STM32 side.               */
+typedef enum {
+    GEAR_PARK    = 0,
+    GEAR_REVERSE = 1,
+    GEAR_NEUTRAL = 2,
+    GEAR_FORWARD = 3
+} GearPosition_t;
+
 // Wheel state structure (per wheel)
 typedef struct {
     float demandPct;      // Desired power 0-100%
@@ -46,6 +57,8 @@ void Traction_Init(void);
 void Traction_SetDemand(float throttlePct);
 void Traction_SetMode4x4(bool enable);
 void Traction_SetAxisRotation(bool enable);
+void Traction_SetGear(GearPosition_t gear);
+GearPosition_t Traction_GetGear(void);
 void Traction_Update(void);
 void Traction_EmergencyStop(void);
 const TractionState_t* Traction_GetState(void);
