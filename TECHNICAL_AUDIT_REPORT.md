@@ -35,7 +35,7 @@ Se leyó cada archivo `.c`, `.cpp` y `.h` del repositorio actual y se comparó l
 | 5 | Undervoltage battery | `power_mgmt.cpp` (battery monitoring) | `safety_system.c` Safety_CheckBatteryVoltage() — INA226 ch4, warning 20V→DEGRADED, critical 18V→SAFE, hysteresis 0.5V, sensor failure → fail-safe | ✅ COMPLETAMENTE IMPLEMENTADO | 100% |
 | 6 | Encoder health | No existía como módulo dedicado en referencia | `motor_control.c` Encoder_CheckHealth() — 3 checks: out-of-range, implausible jump, frozen value; latching fault | ✅ COMPLETAMENTE IMPLEMENTADO | 100% |
 | 7 | CAN timeout | `car_sensors.cpp` / heartbeat watchdog | `safety_system.c` Safety_CheckCANTimeout() — 250 ms timeout, auto-recovery when heartbeat restored | ✅ COMPLETAMENTE IMPLEMENTADO | 100% |
-| 8 | Traction pipeline completo | `traction.cpp` (27 KB: per-wheel demand via PCA9685, 4x2/4x4 50/50 split, tank turn, Ackermann traction correction, NaN/Inf validation, demand anomaly detection, emergency temp shutdown 130°C) | `motor_control.c` Traction_Update() — per-wheel ABS/TCS scale, obstacle scale, 4x2/4x4 (**no 50/50 split**), tank turn (**inverted direction convention**), gear-based power scaling. **Missing:** Ackermann traction correction, NaN validation, demand anomaly detection, per-motor emergency temp cutoff | 🟡 PARCIALMENTE IMPLEMENTADO | 80% |
+| 8 | Traction pipeline completo | `traction.cpp` (27 KB: per-wheel demand via PCA9685, 4x2/4x4 50/50 split, tank turn, Ackermann traction correction, NaN/Inf validation, demand anomaly detection, emergency temp shutdown 130°C) | `motor_control.c` Traction_Update() — per-wheel ABS/TCS scale, obstacle scale, 4x2/4x4 50/50 split, tank turn, gear-based power scaling, NaN/Inf validation, per-motor emergency temp cutoff (130°C/115°C), Ackermann differential torque correction, demand anomaly detection (step-rate 15%/10ms, range validation, frozen pedal 5s) | ✅ COMPLETAMENTE IMPLEMENTADO | 97% |
 | 9 | Steering control + centering | `steering_motor.cpp` (PID, deadband 0.5°) + `steering_model.cpp` (Ackermann) | `motor_control.c` Steering_ControlLoop() (PID P=0.09 count-space, deadband) + `ackermann.c` + `steering_centering.c` (auto sweep left/right, inductive sensor, stall/timeout/range detection) | ✅ COMPLETAMENTE IMPLEMENTADO | 100% |
 | 10 | Service mode completo | `car_sensors.cpp` (cfg.tempSensorsEnabled, cfg.currentSensorsEnabled, cfg.wheelSensorsEnabled) | `service_mode.c` — 25 modules, CRITICAL/NON_CRITICAL classification, enable/disable, fault tracking, CAN bitmasks (0x301-0x303), factory restore | ✅ COMPLETAMENTE IMPLEMENTADO | 100% |
 | 11 | Gestión de relés | `relays.cpp` (non-blocking state machine: SEQ_EN_ENABLE_MAIN→TRAC→DIR, 50ms steps, debounce 50ms, timeout 5s, overcurrent/overtemp monitoring, consecutive errors) | `safety_system.c` Relay_PowerUp/PowerDown() — Main→Traction→Direction with HAL_Delay (**blocking**), settle delays (50/20 ms), reverse order shutdown. **Missing:** non-blocking sequencing, debounce, timeout protection | 🟡 PARCIALMENTE IMPLEMENTADO | 70% |
@@ -403,3 +403,38 @@ Priorizado por **impacto en seguridad** primero, luego **arquitectura**, luego *
 > Necesita ajustes puntuales: validación NaN, split 4×4, y modulación ABS para alcanzar paridad funcional.  
 > El ESP32 (HMI) necesita trabajo significativo en pantallas y transmisión de comandos  
 > para completar el sistema dual-MCU como fue diseñado.
+
+---
+
+## Security Summary — Phase 9: Demand Anomaly Detection
+
+**Date:** 2026-02-13  
+**Scope:** Throttle demand plausibility checks in traction pipeline
+
+### Changes Applied
+
+| Check | Location | Trigger | Response |
+|-------|----------|---------|----------|
+| Throttle step-rate | `Traction_SetDemand()` | Raw demand jump > 15%/10ms | Clamp to allowed rate, SENSOR_FAULT, DEGRADED |
+| Negative/out-of-range | `Traction_Update()` | `effective_demand` > 100% or < 0% (without dynbrake) | Force to 0, SENSOR_FAULT, DEGRADED |
+| Frozen pedal | `Traction_SetDemand()` | Pedal unchanged 5s + speed Δ > 3 km/h | SENSOR_FAULT, DEGRADED |
+
+### Risk Assessment
+
+| Risk | Severity | Status |
+|------|----------|--------|
+| R1: NaN/Inf propagation | HIGH | ✅ Mitigated (Phase 1 — `sanitize_float()`) |
+| R2: Unrealistic demand jumps | MEDIUM | ✅ Mitigated (Phase 9 — step-rate validation) |
+| R3: Out-of-range demand | MEDIUM | ✅ Mitigated (Phase 9 — range clamping) |
+| R4: Stuck pedal sensor | LOW | ✅ Mitigated (Phase 9 — frozen pedal detection) |
+
+### Architectural Constraints Respected
+
+- No CAN ID changes
+- No CAN payload changes
+- No new global architecture
+- No blocking delays
+- No state machine modifications
+- Coexists with Ackermann, ABS/TCS, obstacle limiter, 4×4 split, degraded limiter
+- All float outputs pass through `sanitize_float()`
+- Reuses `SAFETY_ERROR_SENSOR_FAULT` — no new CAN-visible error codes

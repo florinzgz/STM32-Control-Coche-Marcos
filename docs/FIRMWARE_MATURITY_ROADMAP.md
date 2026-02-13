@@ -65,7 +65,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Safety System** | FULL | Multi-layer protection: overcurrent, overtemperature, CAN timeout, encoder fault, relay sequencing. Consecutive error counting with escalation thresholds. |
 | **ABS (Anti-Lock Braking)** | FULL | Per-wheel slip detection (15% threshold), per-wheel pulse modulation (30% reduction, 80 ms cycle, 60% ON ratio), global fallback for all-wheel lockup, minimum speed gate (10 km/h). ABS modulation upgraded from full cut to pulse reduction *(2026-02-13)*. |
 | **TCS (Traction Control)** | FULL | Per-wheel slip detection (15% threshold), progressive reduction (40% initial → 80% max), recovery rate 25%/s, minimum speed gate (3 km/h), global fallback. |
-| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. Per-motor emergency temperature cutoff (130°C/115°C hysteresis). Ackermann differential torque correction (max ±15%, 2° deadband). *(Security Hardening Phases 1 & 2, Phase 8)* |
+| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. Per-motor emergency temperature cutoff (130°C/115°C hysteresis). Ackermann differential torque correction (max ±15%, 2° deadband). Demand anomaly detection: throttle step-rate validation (15%/10ms), negative/out-of-range clamping, frozen pedal detection (5s timeout + speed divergence). *(Security Hardening Phases 1 & 2, Phase 8, Phase 9)* |
 | **Ackermann Steering** | FULL | Geometric computation of FL/FR wheel angles from road angle, ±54° per-wheel clamp, correct sign convention (positive = left turn). Separate module (ackermann.c). |
 | **Gear Logic (D1/D2/N/R/P)** | FULL | 5-gear system via CAN command (0x102). Park includes active brake hold with current/temperature derating. Gear changes restricted below 1 km/h. |
 | **Dynamic Braking** | FULL | Proportional to throttle release rate (scale factor 0.5), max 60%, disabled below 3 km/h, disabled during ABS/SAFE/ERROR. Ramp-down at 80%/s. |
@@ -686,6 +686,44 @@ outside_mult = min(1.0 + correction, 1.0)          (outside wheels, capped)
 - Dynamic braking: Not modified
 - Gear-based power scaling: Not modified — applied upstream
 
+### Phase 9 — Demand Anomaly Detection (Security Hardening)
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Traction pipeline (motor_control.c) | 95% | 97% | +2% — Throttle step-rate validation, negative/out-of-range clamping, frozen pedal detection |
+| Safety system (safety_system.c) | 93% | 93% | No change — reuses existing `SAFETY_ERROR_SENSOR_FAULT` and `Safety_SetState()` |
+| CAN contract | 1.2 | 1.2 | No change — no CAN messages added or modified |
+| **Overall STM32 firmware** | **~97%** | **~98%** | +1% — Demand anomaly detection |
+
+**Files modified:**
+- `Core/Src/motor_control.c` — ~65 lines added (constants, state variables, 3 detection algorithms)
+- `docs/SAFETY_SYSTEMS.md` — Demand anomaly detection section added
+- `docs/FIRMWARE_MATURITY_ROADMAP.md` — Phase 9 section, updated implementation %, checklist
+- `TECHNICAL_AUDIT_REPORT.md` — Security summary updated
+
+**Risk mitigated:**
+- Sensor fault / CAN injection causing unrealistic demand jumps (0→100% in <10ms)
+- Out-of-range demand values bypassing validation and reaching PWM registers
+- Stuck pedal sensor continuing to apply fixed demand while vehicle dynamics change
+
+**Regression analysis:**
+- Valid throttle inputs (gradual acceleration/deceleration): step-rate check not triggered — `allowed_step` at 50ms intervals = 75% (well above normal use)
+- Dynamic braking: negative `effective_demand` NOT flagged when `dynbrake_pct > 0.5` — braking behavior unchanged
+- Park gear: `Traction_SetDemand(0.0f)` called — frozen pedal detection does not trigger (0.0 is constant but speed is 0)
+- Neutral gear: Same as Park — no traction demand
+- ABS/TCS: Not affected — anomaly checks are upstream of per-wheel `wheel_scale[]`
+- Obstacle scale: Not affected — applied downstream
+- Ackermann differential: Not affected — applied downstream
+- 4×4 split: Not affected — applied downstream
+- EMA filter / ramp: Anomaly checks applied BEFORE EMA — ramp limiter still operates normally
+- Emergency stop: Not affected — `Traction_EmergencyStop()` not modified
+- Steering: Not affected — no changes to steering path
+- No CAN IDs added, modified, or removed
+- No new CAN-visible error codes
+- No blocking delays — all timestamp-based via `HAL_GetTick()`
+- No state machine changes — uses existing `Safety_SetState(SYS_STATE_DEGRADED)` path
+- No new global architecture — 6 static variables added (module-local)
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
@@ -697,7 +735,7 @@ outside_mult = min(1.0 + correction, 1.0)          (outside wheels, capped)
 
 **Medium priority (functional parity):**
 - ~~Ackermann traction correction (differential speed adjustment)~~ ✅ Implemented *(2026-02-13 — Phase 8)*
-- Demand anomaly detection
+- ~~Demand anomaly detection~~ ✅ Implemented *(2026-02-13 — Phase 9)*
 - Granular limp mode (multi-level degradation)
 - Boot validation sequence
 
@@ -717,3 +755,4 @@ outside_mult = min(1.0 + correction, 1.0)          (outside wheels, capped)
 *Updated: 2026-02-13 — Phase 4: Steering assist degradation in DEGRADED state (40% reduction)*
 *Updated: 2026-02-13 — Phase 6: CAN bus-off detection and non-blocking recovery*
 *Updated: 2026-02-13 — Phase 8: Ackermann differential torque correction (max ±15%, 2° deadband)*
+*Updated: 2026-02-13 — Phase 9: Demand anomaly detection (step-rate, range, frozen pedal)*
