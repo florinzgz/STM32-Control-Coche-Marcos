@@ -291,9 +291,9 @@ Note: The gear change in byte 1 has its own independent speed check (≤ 1.0 km/
 
 ### Inconsistencies Found
 
-1. **ESP32 `can_ids.h` does not define gear byte in CMD_MODE**: The ESP32 `can_ids.h` (`esp32/include/can_ids.h` line 30) documents `CMD_MODE` as DLC 1 (`// DLC 1, on-demand`), but the STM32 implementation accepts DLC ≥ 2 for gear (byte 1). The DLC comment in the ESP32 header is stale — it was written before gear support was added to byte 1.
+1. **~~ESP32 `can_ids.h` does not define gear byte in CMD_MODE~~**: **RESOLVED.** The ESP32 `can_ids.h` CMD_MODE DLC comment has been updated from "DLC 1" to "DLC 2 (byte0=mode flags, byte1=gear)" to match the STM32 implementation.
 
-2. **ESP32 `can_ids.h` SystemState enum values differ from STM32**: The ESP32 defines `SAFE = 3, ERROR = 4` (`can_ids.h` lines 64–65), but the STM32 defines `DEGRADED = 3, SAFE = 4, ERROR = 5` (`safety_system.h` lines 56–62). The DEGRADED state (value 3) was added to the STM32 after the ESP32 contract was frozen. This means the ESP32 would interpret DEGRADED (3) as SAFE, SAFE (4) as ERROR, and ERROR (5) as an unknown value.
+2. **~~ESP32 `can_ids.h` SystemState enum values differ from STM32~~**: **RESOLVED.** The ESP32 SystemState enum has been updated to match the STM32 exactly: BOOT=0, STANDBY=1, ACTIVE=2, DEGRADED=3, SAFE=4, ERROR=5. The screen_manager.cpp switch-case now includes a DEGRADED case.
 
 3. **ABS/TCS wheel_scale computation in 4x2 mode covers rear wheels**: ABS/TCS compute `wheel_scale[RL]` and `wheel_scale[RR]` even in 4x2 mode, but these values have no effect on rear motor output (rear motors are unconditionally off). This is a design tradeoff, not a bug: the rear `wheel_scale[]` values are transmitted via CAN `0x205` (`CAN_SendStatusTraction()`), providing the ESP32 HMI with full per-wheel traction visibility regardless of drive mode. The computation is harmless and incurs negligible overhead.
 
@@ -301,7 +301,7 @@ Note: The gear change in byte 1 has its own independent speed check (≤ 1.0 km/
 
 The traction mode system (4x4/4x2), intelligent traction (ABS/TCS with per-wheel `wheel_scale[]`), gear system (P/R/N/D1/D2), and shifter ownership (CAN-only, ESP32 reads hardware) are **fully implemented and internally consistent** within the STM32 firmware.
 
-The one notable cross-system inconsistency is the **ESP32 SystemState enum mismatch** (item 2 above), where the addition of `SYS_STATE_DEGRADED = 3` shifted SAFE and ERROR values relative to the frozen ESP32 CAN contract. This does not affect STM32 internal logic but would cause the ESP32 HMI to misinterpret system states when the STM32 is in DEGRADED, SAFE, or ERROR states.
+The previously identified cross-system inconsistencies (ESP32 SystemState enum mismatch and CMD_MODE DLC comment) have been **resolved** by aligning the ESP32 definitions to match the STM32 exactly.
 
 ---
 

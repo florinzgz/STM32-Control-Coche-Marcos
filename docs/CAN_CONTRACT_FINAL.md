@@ -65,7 +65,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x011 | HEARTBEAT_ESP32 | — | 100 ms | ESP32 alive signal. Payload is not parsed by STM32; only message arrival is checked. | `can_handler.c` |
 | 0x100 | CMD_THROTTLE | 1 | 50 ms | Throttle request (percent) | `can_handler.c` |
 | 0x101 | CMD_STEERING | 2 | 50 ms | Steering angle request (raw units) | `can_handler.c` |
-| 0x102 | CMD_MODE | 1 | On-demand | Drive mode request | `can_handler.c` |
+| 0x102 | CMD_MODE | 2 | On-demand | Drive mode + gear request (byte0=mode flags, byte1=gear) | `can_handler.c` |
 
 ### 3.2 STM32 → ESP32 (Status / Heartbeat)
 
@@ -136,8 +136,9 @@ Source: `CAN_ProcessMessages()` and `Safety_ValidateSteering()` in `safety_syste
 | Byte | Field | Type | Description |
 |------|-------|------|-------------|
 | 0 | mode_flags | uint8 | Bit 0: enable 4×4 (1 = 4×4, 0 = 4×2). Bit 1: tank turn (1 = enabled). Bits 2–7: reserved. |
+| 1 | gear | uint8 | Gear position: 0=PARK, 1=REVERSE, 2=NEUTRAL, 3=FORWARD(D1), 4=FORWARD_D2. Optional — if DLC < 2, gear remains unchanged. |
 
-The STM32 rejects the mode change unless in ACTIVE state and average wheel speed is below 1.0 km/h.
+The STM32 rejects the mode change unless in ACTIVE or DEGRADED state and average wheel speed is below 1.0 km/h. Gear changes are only accepted at ≤ 1.0 km/h.
 
 Source: `CAN_ProcessMessages()` and `Safety_ValidateModeChange()` in `safety_system.c`
 
@@ -298,8 +299,9 @@ The ESP32 must never assume that a requested value has been applied. It must rea
 | 0 | BOOT | Power-on, peripherals initializing. No commands accepted. |
 | 1 | STANDBY | Ready, waiting for ESP32 heartbeat. No commands accepted. |
 | 2 | ACTIVE | Normal operation. Commands are accepted and validated. |
-| 3 | SAFE | Fault detected. Actuators inhibited. Traction stopped, steering centered. |
-| 4 | ERROR | Unrecoverable fault. Relays de-energized. Manual reset required. |
+| 3 | DEGRADED | Limp / degraded mode. Commands accepted with reduced power/speed limits (40% power, 50% speed). |
+| 4 | SAFE | Fault detected. Actuators inhibited. Traction stopped, steering centered. |
+| 5 | ERROR | Unrecoverable fault. Relays de-energized. Manual reset required. |
 
 Source: `SystemState_t` in `safety_system.h`
 
@@ -412,8 +414,8 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 - Any CAN ID not in the set {0x011, 0x100, 0x101, 0x102} is hardware-filtered and never reaches the STM32 application.
 - A `CMD_THROTTLE` (0x100) with DLC < 1 is silently dropped.
 - A `CMD_STEERING` (0x101) with DLC < 2 is silently dropped.
-- A `CMD_MODE` (0x102) with DLC < 1 is silently dropped.
-- All commands received while `system_state != ACTIVE` are rejected. Throttle returns 0; steering holds the current position; mode changes return false.
+- A `CMD_MODE` (0x102) with DLC < 1 is silently dropped. If DLC < 2, only byte 0 (mode flags) is processed; gear remains unchanged.
+- All commands received while `system_state` is not ACTIVE or DEGRADED are rejected. Throttle returns 0; steering holds the current position; mode changes return false.
 
 ### Conditions That Force SAFE State
 
