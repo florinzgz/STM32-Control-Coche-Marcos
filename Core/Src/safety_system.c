@@ -294,11 +294,15 @@ uint32_t         Safety_GetDegradedTelemetryCount(void)  { return degraded_telem
 void Safety_SetDegradedLevel(DegradedLevel_t level, DegradedReason_t reason)
 {
     /* Only escalate — never reduce level while still in DEGRADED.
-     * Recovery to ACTIVE resets the level via Safety_SetState().        */
+     * Recovery to ACTIVE resets the level via Safety_SetState().
+     * Telemetry counter increments only on initial entry (NONE→Lx),
+     * not on intra-degraded escalation (L1→L2).                        */
     if (level > degraded_level) {
+        if (degraded_level == DEGRADED_LEVEL_NONE) {
+            degraded_telemetry_count++;
+        }
         degraded_level  = level;
         degraded_reason = reason;
-        degraded_telemetry_count++;
     }
 }
 
