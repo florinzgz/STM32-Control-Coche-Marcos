@@ -1,7 +1,7 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN Bus ID and Protocol Definitions
 //
-// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.2
+// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.3
 // Status:          FROZEN — do not modify without a new contract revision
 //
 // These values are mirrored from the CAN contract document.

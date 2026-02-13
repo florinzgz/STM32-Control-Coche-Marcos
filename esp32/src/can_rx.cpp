@@ -1,11 +1,11 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN RX Module (implementation)
 //
-// Decodes CAN frames EXACTLY as specified in CAN_CONTRACT_FINAL.md rev 1.0.
+// Decodes CAN frames EXACTLY as specified in CAN_CONTRACT_FINAL.md rev 1.3.
 // Pushes decoded values into the VehicleData store.
 // Unknown CAN IDs are silently ignored.
 //
-// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.0
+// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.3
 //            docs/SERVICE_MODE.md (0x301–0x303)
 // =============================================================================
 

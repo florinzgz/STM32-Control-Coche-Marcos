@@ -14,6 +14,7 @@
 6. [Protecciones de Corriente](#-protecciones-de-corriente)
 7. [Gestión de Fallos](#-gestión-de-fallos)
 8. [Boot Validation Sequence](#-boot-validation-sequence)
+9. [Command Acknowledgment Layer](#-command-acknowledgment-layer)
 
 ---
 
@@ -1136,6 +1137,72 @@ BOOT ──────────► STANDBY ───────────
 - **Watchdog timing**: Unaffected — no blocking delays added
 - **State machine transitions**: Unmodified — only the STANDBY → ACTIVE condition adds a boot validation gate
 - **Fail-safe**: If validation fails, system remains in STANDBY (not forced to SAFE)
+
+---
+
+## 🔄 Command Acknowledgment Layer
+
+### Overview (Phase 13)
+
+The command acknowledgment layer ensures closed-loop confirmation of discrete ESP32 commands (mode changes, gear changes, service commands). The STM32 sends a CMD_ACK (0x103) frame after safety validation, informing the ESP32 whether the command was accepted or rejected.
+
+### Design Principles
+
+1. **Post-validation ACK** — ACK is sent only after the safety system has validated the command and the STM32 has made an accept/reject decision. No premature acknowledgment.
+2. **Non-blocking** — ACK transmission uses the existing `TransmitFrame()` helper. No blocking delays on either side.
+3. **Bounded timeout** — ESP32 waits at most 200 ms (`ACK_TIMEOUT_MS`) for ACK. No infinite retry loops.
+4. **Selective acknowledgment** — Only on-demand commands (CMD_MODE 0x102, SERVICE_CMD 0x110) are acknowledged. High-frequency commands (throttle at 50 ms, steering at 50 ms) are confirmed implicitly via status messages.
+5. **Float sanitization** — All float computations in the ACK path (e.g. average speed for gear validation) pass through `sanitize_float()`.
+
+### ACK Result Codes
+
+| Code | Name | Trigger |
+|------|------|---------|
+| 0 | ACK_OK | Command accepted and applied |
+| 1 | ACK_REJECTED | Command rejected — speed too high, mode not allowed |
+| 2 | ACK_INVALID | Payload malformed — bad DLC, out-of-range parameter |
+| 3 | ACK_BLOCKED_BY_SAFETY | System state not ACTIVE or DEGRADED |
+
+### ACK Flow
+
+```
+ESP32 → STM32:  CMD_MODE (0x102) or SERVICE_CMD (0x110)
+    ↓
+STM32: Safety_IsCommandAllowed() check
+    ↓ (blocked)                    ↓ (allowed)
+    ACK_BLOCKED_BY_SAFETY          Validate parameters
+                                       ↓ (invalid)      ↓ (valid)
+                                       ACK_INVALID       Execute command
+                                                              ↓ (rejected)  ↓ (accepted)
+                                                              ACK_REJECTED   ACK_OK
+    ↓
+STM32 → ESP32:  CMD_ACK (0x103) — 3 bytes: cmd_id_low, result, system_state
+```
+
+### ESP32 Behavior
+
+- Before sending a mode/gear/service command, the ESP32 registers an ACK wait via `ackBeginWait(cmdIdLow)`.
+- The `ackCheck()` function is called every loop iteration (non-blocking).
+- If ACK arrives with matching `cmd_id_low`, the pending wait is cleared and the result is available for UI update.
+- If `ACK_TIMEOUT_MS` (200 ms) expires, the ESP32 marks the ACK as timed out and logs the event. No automatic retry — the operator can re-issue the command manually.
+
+### Safety Impact
+
+- **CAN contract**: New message CMD_ACK (0x103) added. No existing IDs or payloads changed.
+- **Heartbeat format**: Unchanged — 4 bytes, same structure.
+- **SystemState enum**: Unchanged — 6 states.
+- **State machine transitions**: Unmodified — ACK does not alter any safety state transition.
+- **Watchdog timing**: Unaffected — no blocking delays added.
+- **Attack surface**: No new attack vector — ACK is output-only from STM32, no new input path. All enums are uint8_t.
+
+### Source Files
+
+- **`Core/Inc/can_handler.h`** — `CAN_ID_CMD_ACK`, `CAN_AckResult_t` enum, `CAN_SendCommandAck()` prototype
+- **`Core/Src/can_handler.c`** — `CAN_SendCommandAck()` implementation, ACK integration in CMD_MODE and SERVICE_CMD handlers
+- **`esp32/include/can_ids.h`** — `CMD_ACK`, `AckResult` enum, `ACK_TIMEOUT_MS`
+- **`esp32/src/vehicle_data.h`** — `AckData` struct
+- **`esp32/src/can_rx.cpp`** — `decodeCommandAck()` decoder
+- **`esp32/src/main.cpp`** — `ackBeginWait()`, `ackCheck()` non-blocking ACK tracking
 
 ---
 
