@@ -23,6 +23,28 @@
 #define MAX_CURRENT_A        25.0f
 #define CAN_TIMEOUT_MS       250
 
+/* Battery undervoltage thresholds (24 V system).
+ *
+ * Rationale for chosen voltages:
+ *   24 V nominal → six 18650 cells in 6S configuration (25.2 V full, 18.0 V empty).
+ *   20.0 V warning ≈ 3.33 V/cell — cells are nearly depleted, reduce load to
+ *       prolong remaining capacity and prevent deep-discharge damage.
+ *   18.0 V critical ≈ 3.00 V/cell — absolute minimum safe cell voltage.
+ *       Below this, cell chemistry degrades irreversibly and motor controller
+ *       behaviour becomes unpredictable (brown-out risk).
+ *
+ * Hysteresis (0.5 V) prevents oscillation when voltage sags under load
+ * then recovers during coast.  This is a common pattern in automotive BMS.
+ *
+ * Recovery from SAFE is intentionally blocked (non-auto-recovery):
+ *   A critically depleted battery cannot reliably power actuators.
+ *   Operator must recharge and reset the system to clear the fault.
+ *   This follows the fail-safe philosophy used for CAN timeout and
+ *   emergency stop in the existing safety architecture.                  */
+#define BATTERY_UV_WARNING_V    20.0f   /* Enter DEGRADED below this      */
+#define BATTERY_UV_CRITICAL_V   18.0f   /* Enter SAFE below this          */
+#define BATTERY_UV_HYST_V       0.5f    /* Hysteresis band for recovery   */
+
 /* Command-validation constants */
 #define THROTTLE_MIN         0.0f
 #define THROTTLE_MAX         100.0f
@@ -725,6 +747,76 @@ void Safety_CheckEncoder(void)
         Safety_SetState(SYS_STATE_DEGRADED);
     } else {
         ServiceMode_ClearFault(MODULE_STEER_ENCODER);
+    }
+}
+
+/* ---- Battery undervoltage protection ----------------------------- */
+
+/**
+ * @brief  Check battery bus voltage and enforce undervoltage protection.
+ *
+ * Reads the INA226 on channel INA226_CHANNEL_BATTERY (24 V bus).
+ * Voltage_GetBus() returns the last value sampled by Current_ReadAll()
+ * in the 50 ms tier.  This function runs in the 100 ms tier.
+ *
+ * Warning (< 20.0 V):
+ *   - Transition to SYS_STATE_DEGRADED
+ *   - Power limited via DEGRADED_POWER_LIMIT_PCT (40 %)
+ *   - Dynamic braking, park hold, and traction demand are reduced
+ *     through the existing degraded-mode power limiter.
+ *   - Recovery: voltage must exceed 20.5 V (0.5 V hysteresis).
+ *
+ * Critical (< 18.0 V or sensor failure):
+ *   - Transition to SYS_STATE_SAFE
+ *   - All traction outputs disabled (Safety_FailSafe)
+ *   - Dynamic braking and park hold disabled (SAFE state inhibits)
+ *   - Steering centering preserved if encoder is healthy
+ *   - NO auto-recovery: operator must recharge and reset
+ *
+ * Sensor failure (0.0 V reading indicates I2C / multiplexer fault):
+ *   - Treated as CRITICAL (fail-safe default)
+ *
+ * Works alongside overcurrent / overtemperature / CAN timeout:
+ *   - Does not interfere with existing fault escalation
+ *   - Only sets error if no higher-priority fault is active
+ */
+void Safety_CheckBatteryVoltage(void)
+{
+    float voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+
+    /* Sensor failure: 0.0 V means TCA9548A channel select failed or
+     * INA226 returned zero — treat as critical (fail-safe).           */
+    if (voltage <= 0.0f) {
+        Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
+        Safety_SetState(SYS_STATE_SAFE);
+        return;
+    }
+
+    /* Critical undervoltage — SAFE state, no auto-recovery */
+    if (voltage < BATTERY_UV_CRITICAL_V) {
+        Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
+        Safety_SetState(SYS_STATE_SAFE);
+        return;
+    }
+
+    /* Warning undervoltage — DEGRADED state with power limiting */
+    if (voltage < BATTERY_UV_WARNING_V) {
+        Safety_SetError(SAFETY_ERROR_BATTERY_UV_WARNING);
+        Safety_SetState(SYS_STATE_DEGRADED);
+        return;
+    }
+
+    /* Voltage OK — attempt recovery from DEGRADED if hysteresis met.
+     * Recovery from DEGRADED requires voltage > WARNING + HYSTERESIS
+     * (20.5 V) to prevent oscillation under load transients.
+     *
+     * Recovery from SAFE is intentionally NOT attempted here:
+     * a critically depleted battery cannot reliably power actuators.
+     * The operator must recharge and reset the system.                 */
+    if (system_state == SYS_STATE_DEGRADED &&
+        safety_error == SAFETY_ERROR_BATTERY_UV_WARNING &&
+        voltage > (BATTERY_UV_WARNING_V + BATTERY_UV_HYST_V)) {
+        Safety_ClearError(SAFETY_ERROR_BATTERY_UV_WARNING);
     }
 }
 

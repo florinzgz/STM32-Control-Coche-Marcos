@@ -26,7 +26,9 @@ typedef enum {
     SAFETY_ERROR_MOTOR_STALL = 5,
     SAFETY_ERROR_EMERGENCY_STOP = 6,
     SAFETY_ERROR_WATCHDOG = 7,
-    SAFETY_ERROR_CENTERING = 8  /* Steering centering failed */
+    SAFETY_ERROR_CENTERING = 8,             /* Steering centering failed */
+    SAFETY_ERROR_BATTERY_UV_WARNING = 9,    /* Battery voltage < 20.0 V */
+    SAFETY_ERROR_BATTERY_UV_CRITICAL = 10   /* Battery voltage < 18.0 V */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.
@@ -68,6 +70,14 @@ typedef enum {
 #define FAULT_ABS_ACTIVE        (1U << 5)
 #define FAULT_TCS_ACTIVE        (1U << 6)
 #define FAULT_CENTERING         (1U << 7)
+
+/* Extended fault flags (bits 8+).
+ * These are NOT transmitted in the CAN heartbeat byte 2 (uint8_t)
+ * but are tracked internally and reported via the safety error code
+ * (STATUS_SAFETY 0x203 byte 2).  Document here for future CAN
+ * contract extensions.                                              */
+#define FAULT_BATT_UV_WARN      (1U << 8)   /* Battery < 20.0 V */
+#define FAULT_BATT_UV_CRIT      (1U << 9)   /* Battery < 18.0 V */
 
 /* ABS/TCS status */
 typedef struct {
@@ -113,6 +123,7 @@ void Safety_CheckTemperature(void);
 void Safety_CheckCANTimeout(void);
 void Safety_CheckSensors(void);
 void Safety_CheckEncoder(void);
+void Safety_CheckBatteryVoltage(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);
 void Safety_PowerDown(void);
