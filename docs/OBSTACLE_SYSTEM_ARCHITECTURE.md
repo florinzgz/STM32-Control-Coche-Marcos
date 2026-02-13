@@ -177,7 +177,7 @@ The obstacle detection module (`MODULE_OBSTACLE_DETECT`, ID 24) can be disabled 
 ### Final PWM calculation with obstacle integration:
 
 ```
-FinalPWM[i] = base_pwm × obstacle_scale × wheel_scale[i]
+FinalPWM[i] = base_pwm × obstacle_scale × ackermann_diff[i] × wheel_scale[i]
 
 Where:
   raw_pedal       = ADC_ReadPedal()                         (STM32 ADC)
@@ -205,13 +205,20 @@ Where:
     CAN timeout         → 0.0 + SAFE state
     sensor unhealthy    → 0.0 + SAFE state
 
+  --- Ackermann Differential (per-wheel, based on steering angle) ---
+  ackermann_diff[i] = compute_ackermann_differential(steering_angle):
+    |angle| < 2°   → 1.0 (no correction)
+    |angle| ≥ 2°   → inside wheels: 1.0 - min(track/(2R), 0.15)
+                      outside wheels: min(1.0 + track/(2R), 1.0)
+    R = wheelbase / tan(|angle|)
+
   --- Per-Wheel Safety Scale ---
   wheel_scale[i]  = min(ABS_scale[i], TCS_scale[i])
     ABS_scale[i]  = 0.0 (locking) or 1.0 (normal)
     TCS_scale[i]  = 1.0 → progressive reduction (max 0.2)
 
   --- Final ---
-  FinalPWM[i]     = base_pwm × obstacle_scale × wheel_scale[i]
+  FinalPWM[i]     = base_pwm × obstacle_scale × ackermann_diff[i] × wheel_scale[i]
 ```
 
 ### Integration point in code
@@ -278,7 +285,8 @@ base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);  // ← NEW
 │          │                                         │
 │  ┌───────▼─────────────────────────────────────┐  │
 │  │ Traction_Update() — 10 ms cycle              │  │
-│  │ • base_pwm × obstacle_scale × wheel_scale[i]│  │
+│  │ • base_pwm × obstacle_scale                 │  │
+│  │   × ackermann_diff[i] × wheel_scale[i]     │  │
 │  │ • ABS/TCS modulation (independent)           │  │
 │  │ • Dynamic braking (independent)              │  │
 │  └─────────────────────────────────────────────┘  │

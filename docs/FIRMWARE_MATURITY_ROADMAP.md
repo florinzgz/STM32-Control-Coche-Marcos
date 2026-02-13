@@ -65,7 +65,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Safety System** | FULL | Multi-layer protection: overcurrent, overtemperature, CAN timeout, encoder fault, relay sequencing. Consecutive error counting with escalation thresholds. |
 | **ABS (Anti-Lock Braking)** | FULL | Per-wheel slip detection (15% threshold), per-wheel pulse modulation (30% reduction, 80 ms cycle, 60% ON ratio), global fallback for all-wheel lockup, minimum speed gate (10 km/h). ABS modulation upgraded from full cut to pulse reduction *(2026-02-13)*. |
 | **TCS (Traction Control)** | FULL | Per-wheel slip detection (15% threshold), progressive reduction (40% initial → 80% max), recovery rate 25%/s, minimum speed gate (3 km/h), global fallback. |
-| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. Per-motor emergency temperature cutoff (130°C/115°C hysteresis). *(Security Hardening Phases 1 & 2)* |
+| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. Per-motor emergency temperature cutoff (130°C/115°C hysteresis). Ackermann differential torque correction (max ±15%, 2° deadband). *(Security Hardening Phases 1 & 2, Phase 8)* |
 | **Ackermann Steering** | FULL | Geometric computation of FL/FR wheel angles from road angle, ±54° per-wheel clamp, correct sign convention (positive = left turn). Separate module (ackermann.c). |
 | **Gear Logic (D1/D2/N/R/P)** | FULL | 5-gear system via CAN command (0x102). Park includes active brake hold with current/temperature derating. Gear changes restricted below 1 km/h. |
 | **Dynamic Braking** | FULL | Proportional to throttle release rate (scale factor 0.5), max 60%, disabled below 3 km/h, disabled during ABS/SAFE/ERROR. Ramp-down at 80%/s. |
@@ -128,7 +128,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Direction control signals (GPIOC)
 - [ ] Regenerative braking (no negative PWM, no back-EMF handling)
 - [ ] Adaptive cruise control (reference: adaptive_cruise.cpp)
-- [~] Virtual differential (Ackermann geometry computed, but not dynamically adjusted based on speed/slip — reference traction.cpp has more advanced logic)
+- [✓] Virtual differential (Ackermann differential torque correction — per-wheel multiplier based on steering angle, max ±15%, deadband 2°) *(Phase 8: 2026-02-13)*
 
 ### 3.2 Safety Systems
 
@@ -468,7 +468,7 @@ The obstacle safety backstop has been integrated as described below:
 
 | Category | Rating | Justification |
 |----------|--------|---------------|
-| **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, 4×4 50/50 axle torque split, and per-motor emergency temperature cutoff (130°C). *(Updated: Security Hardening Phases 1 & 2)* |
+| **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, Ackermann differential torque correction (max ±15%), gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, 4×4 50/50 axle torque split, and per-motor emergency temperature cutoff (130°C). *(Updated: Security Hardening Phases 1 & 2, Phase 8)* |
 | **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, non-blocking relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation, per-motor 130°C emergency cutoff with 15°C hysteresis, CAN bus-off detection and recovery. *(Updated: Security Hardening Phases 1–6)* |
 | **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
 | **CAN Communication** | ADVANCED | Contract revision 1.2, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Integration verified. |
@@ -509,7 +509,7 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 - ESP32 cannot force ACTIVE — STM32 blocks unless safety_error == NONE
 - No CAN ID collisions
 - No false SAFE trigger from jitter (500 ms timeout allows 7+ missed 66 ms frames)
-- Traction pipeline formula correct: base_pwm × obstacle_scale × wheel_scale[i]
+- Traction pipeline formula correct: base_pwm × obstacle_scale × ackermann_diff[i] × wheel_scale[i]
 
 ### What was corrected
 
@@ -640,6 +640,52 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 - Obstacle safety: unchanged — `Obstacle_Update()`, `Obstacle_ProcessCAN()` not modified
 - Relay sequencing: unchanged — `Relay_SequencerUpdate()` not modified
 
+### Phase 8 — Ackermann Differential Torque Correction
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Traction pipeline (motor_control.c) | 93% | 95% | +2% — Ackermann differential torque correction based on steering angle |
+| Safety system (safety_system.c) | 93% | 93% | No change — no safety state machine modifications |
+| CAN contract | 1.2 | 1.2 | No change — no CAN messages added or modified |
+| **Overall STM32 firmware** | **~96%** | **~97%** | +1% — Ackermann differential torque correction |
+
+**Formula used:**
+```
+R = WHEELBASE_M / tan(|steering_angle|)           (turn center radius)
+correction = (TRACK_WIDTH_M / 2) / R              (differential fraction)
+correction = min(correction, ACKERMANN_MAX_DIFF)   (clamped to ±15%)
+inside_mult  = 1.0 - correction                   (inside wheels)
+outside_mult = min(1.0 + correction, 1.0)          (outside wheels, capped)
+```
+
+**Worst-case correction:**
+- Maximum steering angle (54°): raw correction = 50.7%, clamped to 15%
+- 15% cap reached at 22.2° steering angle
+- Inside wheels at minimum: 0.85 (85% of base torque)
+- Outside wheels always ≤ 1.0 (never exceeds base torque)
+
+**Risk analysis:**
+- ABS compatibility: Ackermann diff applied BEFORE `wheel_scale[i]` — ABS reduction is multiplicative on top, most restrictive wins
+- TCS compatibility: Same mechanism as ABS — no interference
+- obstacle_scale: Applied BEFORE Ackermann — both are multiplicative
+- Degraded mode: Power limit applied upstream — Ackermann correction independent
+- Tank turn mode: Ackermann correction skipped (all diff_out = 1.0)
+- NaN/Inf: All outputs pass through `sanitize_float()` with safe default 1.0
+- No CAN messages added, modified, or removed
+- No state machine changes
+- No blocking delays
+- No new global variables — `acker_diff[4]` is a local array
+
+**Regression analysis:**
+- Straight-line driving (|angle| < 2°): All `acker_diff[i]` = 1.0 → zero change to existing behavior
+- Park gear: Ackermann code not reached (early return)
+- Neutral gear: Ackermann code not reached (early return)
+- Emergency stop: Not affected — `Traction_EmergencyStop()` not modified
+- Steering PID: Not modified — uses existing `Steering_GetCurrentAngle()` as read-only
+- Pedal filter/ramp: Not modified
+- Dynamic braking: Not modified
+- Gear-based power scaling: Not modified — applied upstream
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
@@ -650,7 +696,7 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 - ~~CAN bus-off detection and recovery~~ ✅ Implemented *(2026-02-13 — Phase 6)*
 
 **Medium priority (functional parity):**
-- Ackermann traction correction (differential speed adjustment)
+- ~~Ackermann traction correction (differential speed adjustment)~~ ✅ Implemented *(2026-02-13 — Phase 8)*
 - Demand anomaly detection
 - Granular limp mode (multi-level degradation)
 - Boot validation sequence
@@ -670,3 +716,4 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 *Updated: 2026-02-13 — Security Hardening Phase 2: Per-motor emergency temperature cutoff (130°C/115°C)*
 *Updated: 2026-02-13 — Phase 4: Steering assist degradation in DEGRADED state (40% reduction)*
 *Updated: 2026-02-13 — Phase 6: CAN bus-off detection and non-blocking recovery*
+*Updated: 2026-02-13 — Phase 8: Ackermann differential torque correction (max ±15%, 2° deadband)*

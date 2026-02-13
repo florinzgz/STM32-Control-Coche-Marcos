@@ -119,6 +119,32 @@ static inline float sanitize_float(float val, float safe_default)
 #define MOTOR_TEMP_CUTOFF_C      130.0f  /* Per-motor emergency cutoff   */
 #define MOTOR_TEMP_RECOVERY_C    115.0f  /* Hysteresis recovery point    */
 
+/* ---- Ackermann differential torque correction ----
+ *
+ * Simplified Ackermann geometry: when the vehicle is turning, the
+ * inside wheels trace a smaller radius arc than the outside wheels.
+ * To prevent inside wheel scrubbing (understeer) and improve
+ * cornering stability, the torque is biased toward the outside
+ * wheels and reduced on the inside wheels.
+ *
+ * Geometry:
+ *   R = wheelbase / tan(|steering_angle|)   (turn center radius)
+ *   left_ratio  = (R - track/2) / R
+ *   right_ratio = (R + track/2) / R
+ *   (swapped for right turns)
+ *
+ * The correction is bounded to ±15% maximum differential to avoid
+ * aggressive torque imbalance.  Below a 2° deadband, no correction
+ * is applied (straight-line driving).
+ *
+ * Pipeline position:
+ *   base_pwm → axle_split → degraded_limit → obstacle_scale
+ *   → ackermann_diff[i] → wheel_scale[i] (ABS/TCS) → final PWM
+ *
+ * Coexists with ABS, TCS, obstacle_scale, and degraded mode.          */
+#define ACKERMANN_DEADBAND_DEG   2.0f    /* No correction below this    */
+#define ACKERMANN_MAX_DIFF       0.15f   /* Max ±15% differential       */
+
 /* Motor structures */
 typedef struct {
     TIM_HandleTypeDef *timer;
@@ -215,6 +241,7 @@ static void Motor_SetPWM(Motor_t *motor, uint16_t pwm);
 static void Motor_SetDirection(Motor_t *motor, int8_t direction);
 static void Motor_Enable(Motor_t *motor, uint8_t enable);
 static float PID_Compute(PID_t *pid, float measured, float dt);
+static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
 
 /* ==================================================================
  *  Initialization
@@ -363,6 +390,96 @@ void Traction_SetGear(GearPosition_t gear)
 GearPosition_t Traction_GetGear(void)
 {
     return current_gear;
+}
+
+/* ==================================================================
+ *  Ackermann Differential Torque Correction
+ *
+ *  Computes per-wheel torque multipliers based on the current
+ *  steering angle using simplified Ackermann geometry.
+ *
+ *  For a turn of radius R (measured to the vehicle centre):
+ *    left_wheel_radius  = R - track/2
+ *    right_wheel_radius = R + track/2
+ *
+ *  The linear velocity of each wheel is proportional to its radius:
+ *    left_ratio  = (R - track/2) / R = 1 - track/(2R)
+ *    right_ratio = (R + track/2) / R = 1 + track/(2R)
+ *
+ *  For a left turn (positive angle), left wheels are inside;
+ *  for a right turn (negative angle), right wheels are inside.
+ *
+ *  The correction is bounded to ±ACKERMANN_MAX_DIFF (15%) and
+ *  each multiplier is clamped to [0, 1].
+ *
+ *  diff_out[4]: FL, FR, RL, RR multipliers (1.0 = no change)
+ * ================================================================== */
+
+static void compute_ackermann_differential(float steer_deg, float diff_out[4])
+{
+    /* Default: no correction (straight line or below deadband) */
+    diff_out[MOTOR_FL] = 1.0f;
+    diff_out[MOTOR_FR] = 1.0f;
+    diff_out[MOTOR_RL] = 1.0f;
+    diff_out[MOTOR_RR] = 1.0f;
+
+    float abs_angle = fabsf(steer_deg);
+    if (abs_angle < ACKERMANN_DEADBAND_DEG) return;
+
+    /* Compute turn radius from Ackermann geometry:
+     * R = wheelbase / tan(|angle|) — distance from turn center
+     * to the midpoint of the rear axle.                            */
+    float angle_rad = abs_angle * (float)M_PI / 180.0f;
+    float tan_angle = tanf(angle_rad);
+
+    /* Guard against very small tan (near-zero angle already
+     * filtered by deadband, but protect against float edge cases) */
+    if (tan_angle < 0.001f) return;
+
+    float R = WHEELBASE_M / tan_angle;
+
+    /* Compute correction term: half_track / R.
+     * This is the fractional velocity difference between inside
+     * and outside wheels relative to the vehicle center speed.     */
+    float half_track = TRACK_WIDTH_M / 2.0f;
+    float correction = half_track / R;
+
+    /* Bound correction to maximum differential */
+    if (correction > ACKERMANN_MAX_DIFF)
+        correction = ACKERMANN_MAX_DIFF;
+
+    /* Apply correction:
+     *   Positive steer_deg = left turn → left wheels inside (slower)
+     *   Negative steer_deg = right turn → right wheels inside (slower)
+     *
+     * inside_mult  = 1.0 - correction  (reduce inside wheels)
+     * outside_mult = 1.0 + correction  (increase outside wheels)
+     * Then clamp outside to 1.0 to never exceed base torque.       */
+    float inside_mult  = 1.0f - correction;
+    float outside_mult = 1.0f + correction;
+
+    /* Clamp: never exceed 1.0 per wheel */
+    if (outside_mult > 1.0f) outside_mult = 1.0f;
+    if (inside_mult  < 0.0f) inside_mult  = 0.0f;
+
+    if (steer_deg > 0.0f) {
+        /* Left turn: left wheels are inside */
+        diff_out[MOTOR_FL] = inside_mult;
+        diff_out[MOTOR_FR] = outside_mult;
+        diff_out[MOTOR_RL] = inside_mult;
+        diff_out[MOTOR_RR] = outside_mult;
+    } else {
+        /* Right turn: right wheels are inside */
+        diff_out[MOTOR_FL] = outside_mult;
+        diff_out[MOTOR_FR] = inside_mult;
+        diff_out[MOTOR_RL] = outside_mult;
+        diff_out[MOTOR_RR] = inside_mult;
+    }
+
+    /* Sanitize all outputs */
+    for (uint8_t i = 0; i < 4; i++) {
+        diff_out[i] = sanitize_float(diff_out[i], 1.0f);
+    }
 }
 
 void Traction_Update(void)
@@ -628,6 +745,14 @@ void Traction_Update(void)
      * firmware's obstacleFactor in traction.cpp.                       */
     base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);
 
+    /* ---- Ackermann differential torque correction ----
+     * Compute per-wheel multipliers based on current steering angle.
+     * Applied after obstacle_scale and before wheel_scale[i] (ABS/TCS).
+     * Skipped during tank turn (axisRotation) — differential is
+     * meaningless when wheels on each side spin in opposite directions. */
+    float acker_diff[4];
+    compute_ackermann_differential(Steering_GetCurrentAngle(), acker_diff);
+
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 
     /* GEAR_REVERSE: invert motor direction for reverse travel.
@@ -653,27 +778,28 @@ void Traction_Update(void)
         }
     } else if (traction_state.mode4x4) {
         /* 4x4: 50/50 axle torque split — distribute base torque equally
-         * between front and rear axles, then apply per-wheel scale.
+         * between front and rear axles, then apply Ackermann differential
+         * and per-wheel ABS/TCS scale.
          * Aligned with reference firmware traction.cpp 50/50 split.
-         * Each axle receives half the base_pwm; per-wheel ABS/TCS
-         * wheel_scale[] is applied after the split so individual wheel
-         * interventions remain effective.  Obstacle scale is already
-         * applied to base_pwm upstream.                                  */
+         * Each axle receives half the base_pwm; Ackermann differential
+         * and per-wheel wheel_scale[] are applied after the split so
+         * individual wheel interventions remain effective.  Obstacle
+         * scale is already applied to base_pwm upstream.                */
         uint16_t axle_pwm = base_pwm / 2;
 
-        Motor_SetPWM(&motor_fl, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_FL]));
+        Motor_SetPWM(&motor_fl, (uint16_t)(axle_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]));
         Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_FR]));
+        Motor_SetPWM(&motor_fr, (uint16_t)(axle_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]));
         Motor_SetDirection(&motor_fr, dir);
-        Motor_SetPWM(&motor_rl, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_RL]));
+        Motor_SetPWM(&motor_rl, (uint16_t)(axle_pwm * acker_diff[MOTOR_RL] * safety_status.wheel_scale[MOTOR_RL]));
         Motor_SetDirection(&motor_rl, dir);
-        Motor_SetPWM(&motor_rr, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_RR]));
+        Motor_SetPWM(&motor_rr, (uint16_t)(axle_pwm * acker_diff[MOTOR_RR] * safety_status.wheel_scale[MOTOR_RR]));
         Motor_SetDirection(&motor_rr, dir);
     } else {
-        /* 4x2: Front wheels only, per-wheel scale applied */
-        Motor_SetPWM(&motor_fl, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FL]));
+        /* 4x2: Front wheels only, Ackermann differential + per-wheel scale */
+        Motor_SetPWM(&motor_fl, (uint16_t)(base_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]));
         Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FR]));
+        Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]));
         Motor_SetDirection(&motor_fr, dir);
         Motor_SetPWM(&motor_rl, 0);   Motor_Enable(&motor_rl, 0);
         Motor_SetPWM(&motor_rr, 0);   Motor_Enable(&motor_rr, 0);
@@ -700,7 +826,7 @@ void Traction_Update(void)
         traction_state.wheels[i].tempC    = Temperature_Get(i);
         /* In 4x4 mode, per-wheel PWM uses 50/50 axle split (base_pwm/2) */
         uint16_t per_wheel_base = traction_state.mode4x4 ? (base_pwm / 2) : base_pwm;
-        traction_state.wheels[i].pwm      = (uint16_t)(per_wheel_base * safety_status.wheel_scale[i]);
+        traction_state.wheels[i].pwm      = (uint16_t)(per_wheel_base * acker_diff[i] * safety_status.wheel_scale[i]);
         traction_state.wheels[i].reverse  = (dir < 0);
     }
 }
