@@ -12,6 +12,26 @@
 #include "sensor_manager.h"
 #include <math.h>
 
+/* ---- NaN / Inf float validation ----
+ *
+ * Security hardening: NaN and Inf float values bypass normal C float
+ * comparisons (NaN != NaN, NaN < x is always false, etc.) and can
+ * propagate through the traction pipeline into PWM registers.
+ *
+ * This helper forces any non-finite value to a safe default (0.0f)
+ * and raises SAFETY_ERROR_SENSOR_FAULT so the safety state machine
+ * can react.  Called on every float input that affects torque/PWM.
+ *
+ * Reference: TECHNICAL_AUDIT_REPORT.md risk R1.                       */
+static inline float sanitize_float(float val, float safe_default)
+{
+    if (isnan(val) || isinf(val)) {
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        return safe_default;
+    }
+    return val;
+}
+
 /* Constants */
 #define PWM_PERIOD     8499
 #define PWM_FREQUENCY  20000
@@ -261,6 +281,9 @@ void Steering_Init(void)
 
 void Traction_SetDemand(float throttlePct)
 {
+    /* NaN/Inf guard — reject corrupt throttle demand (security hardening) */
+    throttlePct = sanitize_float(throttlePct, 0.0f);
+
     /* Clamp raw input to the existing ±100 % range (unchanged) */
     if (throttlePct < -100.0f) throttlePct = -100.0f;
     if (throttlePct >  100.0f) throttlePct =  100.0f;
@@ -532,6 +555,20 @@ void Traction_Update(void)
 
     uint16_t base_pwm = (uint16_t)(fabs(effective_demand) * PWM_PERIOD / 100.0f);
 
+    /* ---- NaN/Inf validation (security hardening) ----
+     * Validate all float inputs that affect PWM before they reach the
+     * hardware.  NaN bypasses C float comparisons and would propagate
+     * into Motor_SetPWM() producing unpredictable duty cycles.
+     * Reference: TECHNICAL_AUDIT_REPORT.md risk R1.                    */
+    effective_demand = sanitize_float(effective_demand, 0.0f);
+    safety_status.obstacle_scale = sanitize_float(safety_status.obstacle_scale, 0.0f);
+    for (uint8_t i = 0; i < 4; i++) {
+        safety_status.wheel_scale[i] = sanitize_float(safety_status.wheel_scale[i], 0.0f);
+    }
+
+    /* Recompute base_pwm after sanitization */
+    base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
+
     /* Apply obstacle scale uniformly to all wheels.  This multiplier
      * is set by Obstacle_Update() from CAN-received distance data.
      * Applied before per-wheel ABS/TCS wheel_scale[] so that obstacle
@@ -564,16 +601,22 @@ void Traction_Update(void)
             Motor_SetDirection(m, d);
         }
     } else if (traction_state.mode4x4) {
-        /* 4x4: All wheels same base demand, modulated per-wheel by
-         * safety_status.wheel_scale[].  Aligned with base firmware
-         * traction.cpp per-wheel demandPct + modulatePower().         */
-        Motor_SetPWM(&motor_fl, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FL]));
+        /* 4x4: 50/50 axle torque split — distribute base torque equally
+         * between front and rear axles, then apply per-wheel scale.
+         * Aligned with reference firmware traction.cpp 50/50 split.
+         * Each axle receives half the base_pwm; per-wheel ABS/TCS
+         * wheel_scale[] is applied after the split so individual wheel
+         * interventions remain effective.  Obstacle scale is already
+         * applied to base_pwm upstream.                                  */
+        uint16_t axle_pwm = base_pwm / 2;
+
+        Motor_SetPWM(&motor_fl, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_FL]));
         Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_FR]));
+        Motor_SetPWM(&motor_fr, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_FR]));
         Motor_SetDirection(&motor_fr, dir);
-        Motor_SetPWM(&motor_rl, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_RL]));
+        Motor_SetPWM(&motor_rl, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_RL]));
         Motor_SetDirection(&motor_rl, dir);
-        Motor_SetPWM(&motor_rr, (uint16_t)(base_pwm * safety_status.wheel_scale[MOTOR_RR]));
+        Motor_SetPWM(&motor_rr, (uint16_t)(axle_pwm * safety_status.wheel_scale[MOTOR_RR]));
         Motor_SetDirection(&motor_rr, dir);
     } else {
         /* 4x2: Front wheels only, per-wheel scale applied */
@@ -604,7 +647,9 @@ void Traction_Update(void)
     for (uint8_t i = 0; i < 4; i++) {
         traction_state.wheels[i].currentA = Current_GetAmps(i);
         traction_state.wheels[i].tempC    = Temperature_Get(i);
-        traction_state.wheels[i].pwm      = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
+        /* In 4x4 mode, per-wheel PWM uses 50/50 axle split (base_pwm/2) */
+        uint16_t per_wheel_base = traction_state.mode4x4 ? (base_pwm / 2) : base_pwm;
+        traction_state.wheels[i].pwm      = (uint16_t)(per_wheel_base * safety_status.wheel_scale[i]);
         traction_state.wheels[i].reverse  = (dir < 0);
     }
 }
@@ -648,6 +693,9 @@ void Steering_SetAngle(float angle_deg)
      * zero reference.  Without calibration the encoder position is
      * undefined and driving to any setpoint would be unsafe.            */
     if (!steering_calibrated) return;
+
+    /* NaN/Inf guard — reject corrupt steering angle (security hardening) */
+    angle_deg = sanitize_float(angle_deg, 0.0f);
 
     if (angle_deg < -MAX_STEER_DEG) angle_deg = -MAX_STEER_DEG;
     if (angle_deg >  MAX_STEER_DEG) angle_deg =  MAX_STEER_DEG;
