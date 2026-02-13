@@ -89,6 +89,7 @@ int main(void)
             Safety_CheckCurrent();
             Safety_CheckTemperature();
             Safety_CheckCANTimeout();
+            CAN_CheckBusOff();
             Safety_CheckSensors();
             Safety_CheckEncoder();
 
