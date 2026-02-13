@@ -83,7 +83,8 @@ enum class FaultFlag : uint8_t {
     ENCODER_ERROR     = 0x08,   // Bit 3: Encoder / sensor fault
     WHEEL_SENSOR      = 0x10,   // Bit 4: Wheel speed sensor fault
     ABS_ACTIVE        = 0x20,   // Bit 5: ABS intervening
-    TCS_ACTIVE        = 0x40    // Bit 6: TCS intervening
+    TCS_ACTIVE        = 0x40,   // Bit 6: TCS intervening
+    CENTERING         = 0x80    // Bit 7: Steering centering failed
 };
 
 // -------------------------------------------------------------------------
