@@ -32,7 +32,7 @@ The TOFSense-M S LiDAR sensor connects to the ESP32-S3 via **UART0** (native UAR
 | UART Peripheral | UART0 | `obstacle_config.h`: `UART_NUM = 0` |
 | Frame Format | 8N1 (`SERIAL_8N1`) | `obstacle_detection.cpp`: `TOFSerial->begin()` |
 
-The sensor is TX-only (unidirectional). GPIO 43 is configured in the `begin()` call for bidirectional capability but is set to -1, meaning the Arduino framework treats it as RX-only. The `HardwareSerial` object is allocated lazily via `new (std::nothrow)` in `init()` (v2.17.4 bootloop fix) rather than as a global constructor.
+The sensor is TX-only (unidirectional). The code passes `PIN_TOFSENSE_TX` (which is defined as `-1`) to the `TOFSerial->begin()` call. When the Arduino framework receives `-1` as the TX pin parameter, it disables the TX function entirely, resulting in RX-only operation. GPIO 43 is listed in `pins.h` comments as the physical TX pin for reference, but it is not actually configured or used by the UART peripheral. The `HardwareSerial` object is allocated lazily via `new (std::nothrow)` in `init()` (v2.17.4 bootloop fix) rather than as a global constructor.
 
 ### 2) Where Parsing Occurred
 
@@ -86,7 +86,7 @@ In `traction.cpp` → `Traction::update()`:
 6. Per-wheel demand is calculated as: `w[i].demandPct = front × ackermann_factor × combinedFactor`
 7. The `combinedFactor` is validated for NaN/Inf and clamped to `[0.0, 1.0]`.
 
-The obstacle factor is applied **uniformly** to all 4 wheels. ABS/TCS `wheel_scale[]` is **not** used by the obstacle system in the reference — it uses its own separate scaling path.
+The obstacle factor is applied **uniformly** to all 4 wheels. In the reference ESP32, ABS/TCS operates through separate modules (`ABSSystem::update()`, `TCSSystem::update()`) called via `SafetyManager::update()`. These modules independently modulate individual wheel PWM outputs by directly adjusting the PCA9685 channels — they do NOT feed into the traction demand pipeline shown above via a `wheel_scale[]` array. The obstacle factor and ACC factor are the only external multipliers applied within the `Traction::update()` demand calculation itself.
 
 ### 6) SAFE State vs. Torque Scaling
 
@@ -173,7 +173,7 @@ pwmTicks = round(outPWM × 4095 / 255)                  [PCA9685 12-bit]
 applyHardwareControl(i, pwmTicks, reverse)              [PCA9685 + MCP23017]
 ```
 
-**Note:** ABS/TCS in the reference ESP32 operates via `ABSSystem::update()` and `TCSSystem::update()` in a separate `SafetyManager`, but the per-wheel scaling from ABS/TCS is NOT applied through `wheel_scale[]` in the traction path shown above — it is applied independently. The obstacle factor and ACC factor are the only external multipliers in the traction demand pipeline.
+**Note:** ABS/TCS in the reference ESP32 operates via `ABSSystem::update()` and `TCSSystem::update()` in a separate `SafetyManager`. These modules independently modulate per-wheel PWM outputs by directly adjusting PCA9685 channels outside the traction demand pipeline. They do NOT feed into the demand calculation above via a `wheel_scale[]` array. In contrast, the STM32 split architecture integrates ABS/TCS via the `wheel_scale[]` array within the traction formula (see Proposed Split section below). The obstacle factor and ACC factor are the only external multipliers in the ESP32's `Traction::update()` demand calculation.
 
 ---
 
@@ -382,7 +382,7 @@ Proposed obstacle_scale values (STM32 backstop):
 | Gear scaling | Not in formula (handled elsewhere) | Explicit `gear_scale` multiplier |
 | Dynamic braking | Not in obstacle path | Integrated into `effective_demand` |
 | Obstacle factor | Applied as global multiplier in traction | Applied via per-wheel `wheel_scale[]` |
-| ABS/TCS | Separate module, not in traction formula | Integrated into `wheel_scale[]` (multiplicative) |
+| ABS/TCS | Separate modules, independently modulate per-wheel PWM via PCA9685 (not in traction demand formula) | Integrated into `wheel_scale[]` in traction formula (multiplicative with obstacle_scale) |
 | ACC factor | Multiplied with obstacle factor | Not present on STM32 (ESP32-only) |
 | Safety override | PWM-to-zero in traction.cpp | SAFE state → relay open + PWM = 0 |
 | PWM resolution | 12-bit PCA9685 (0–4095) | Timer PWM (configurable period) |
