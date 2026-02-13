@@ -800,6 +800,105 @@ verification checklist required by the safety audit process.
 | CAN contract | 1.2 | 1.2 | No change |
 | **Overall STM32 firmware** | **~98%** | **~98%** | 0% — documentation-only phase |
 
+### Phase 12 — Granular Limp Mode (Multi-Level Degradation)
+
+Phase 12 replaces the binary DEGRADED mode with internal multi-level
+degradation.  The external CAN representation remains `SYS_STATE_DEGRADED`
+for all levels — **no CAN contract changes, no state machine changes, no
+watchdog changes**.
+
+**Problem:** A single DEGRADED state applies the same restrictive limits
+(40% power, 60% steering, 50% speed) regardless of whether the fault is a
+minor sensor glitch or a persistent thermal warning.
+
+**Solution:** Three internal degradation levels with graduated scaling:
+
+| Level | Power | Steering | Traction | Triggered by |
+|-------|-------|----------|----------|-------------|
+| L1 | 70% | 85% | 80% | Minor sensor fault, single overcurrent, centering fail, demand anomaly, encoder fault |
+| L2 | 50% | 70% | 60% | Thermal warning (>80°C), battery undervoltage (<20V) |
+| L3 | 40% | 60% | 50% | Persistent anomaly (≥2 consecutive errors, ≥3 sensor faults) |
+
+**Key design decisions:**
+
+1. **Escalation only** — `Safety_SetDegradedLevel()` never reduces the level
+   while in DEGRADED.  Recovery to ACTIVE resets to `DEGRADED_LEVEL_NONE`.
+2. **Backward-compatible worst-case** — L3 matches the original fixed limits
+   (`DEGRADED_POWER_LIMIT_PCT = 40%`, `DEGRADED_SPEED_LIMIT_PCT = 50%`).
+3. **No CAN changes** — `Safety_GetState()` still returns `SYS_STATE_DEGRADED`
+   (= 3) for all levels.  CAN heartbeat byte 1 is unchanged.
+4. **No new files** — all changes are in existing source files.
+
+**New types:**
+- `DegradedLevel_t` — `DEGRADED_LEVEL_NONE`, `DEGRADED_L1`, `DEGRADED_L2`, `DEGRADED_L3`
+- `DegradedReason_t` — 8 reason codes for diagnostic telemetry
+
+**New functions:**
+- `Safety_GetSteeringLimitFactor()` — returns 0.0–1.0 per level
+- `Safety_GetTractionCapFactor()` — returns 0.0–1.0 per level
+- `Safety_GetDegradedLevel()` — returns current internal level
+- `Safety_GetDegradedReason()` — returns reason for current level
+- `Safety_GetDegradedTelemetryCount()` — total entries into degraded
+- `Safety_SetDegradedLevel()` — set/escalate level (only upward)
+
+**Modified functions:**
+- `Safety_GetPowerLimitFactor()` — now returns per-level scaling
+- `Safety_SetState()` — clears degradation level on ACTIVE/SAFE/ERROR
+- `Safety_CheckCurrent()` — sets L1 (single) or L3 (consecutive ≥2)
+- `Safety_CheckTemperature()` — sets L2 for thermal warning
+- `Safety_CheckSensors()` — sets L1 (few faults) or L3 (≥3 faults)
+- `Safety_CheckEncoder()` — sets L1 for encoder fault
+- `Safety_CheckBatteryVoltage()` — sets L2 for UV warning
+- `Steering_ControlLoop()` — uses `Safety_GetSteeringLimitFactor()`
+- `Traction_Update()` — applies traction cap via `Safety_GetTractionCapFactor()`
+- `Traction_SetDemand()` — sets L1 for demand anomalies
+- `Centering_Abort()` — sets L1 for centering failure
+
+**Files modified:**
+
+| File | Lines added | Lines removed | Description |
+|------|------------|---------------|-------------|
+| `Core/Inc/safety_system.h` | ~65 | 0 | `DegradedLevel_t`, `DegradedReason_t` enums, per-level constants, function prototypes |
+| `Core/Src/safety_system.c` | ~95 | 4 | Internal state, per-level factor functions, level mapping in safety checks |
+| `Core/Src/motor_control.c` | ~25 | 5 | Traction cap, per-level steering, degradation level calls |
+| `Core/Src/steering_centering.c` | 2 | 0 | Degradation level call in `Centering_Abort()` |
+| `docs/SAFETY_SYSTEMS.md` | ~85 | 10 | Granular limp mode documentation section |
+| `docs/FIRMWARE_MATURITY_ROADMAP.md` | ~80 | 1 | Phase 12 section, updated percentages |
+
+**CAN behaviour confirmation:**
+- No CAN message IDs added, modified, or removed
+- No CAN payload formats changed
+- Heartbeat timing unchanged (100 ms)
+- CAN contract version: 1.2 (unchanged)
+
+**Watchdog confirmation:**
+- IWDG 500 ms timeout: unchanged
+- No blocking delays added
+- All new code is O(1) switch/if statements
+
+**Regression analysis:**
+- ACTIVE state: `Safety_GetPowerLimitFactor()` returns 1.0 — unchanged
+- SAFE state: degradation level cleared — failsafe path unchanged
+- ERROR state: degradation level cleared — powerdown path unchanged
+- ABS/TCS: not modified — per-wheel `wheel_scale[]` independent
+- Obstacle scale: not modified — applied upstream
+- Ackermann: not modified — applied downstream
+- Dynamic braking: uses `Safety_GetPowerLimitFactor()` (already did, now per-level)
+- Park gear: demand = 0 — degradation factors multiply zero, no change
+- Emergency stop: `Traction_EmergencyStop()` not modified
+- Boot validation: not modified — STANDBY→ACTIVE gate unchanged
+- Relay sequencing: not modified — non-blocking state machine unchanged
+- CAN bus-off recovery: not modified — independent recovery logic
+
+**Updated implementation percentage:**
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Safety system (safety_system.c) | 93% | 96% | +3% — Multi-level degradation, per-level scaling |
+| Traction pipeline (motor_control.c) | 97% | 98% | +1% — Traction cap, per-level steering/braking |
+| CAN contract | 1.2 | 1.2 | No change |
+| **Overall STM32 firmware** | **~98%** | **~99%** | +1% — Granular limp mode (Phase 12) |
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
@@ -812,7 +911,7 @@ verification checklist required by the safety audit process.
 **Medium priority (functional parity):**
 - ~~Ackermann traction correction (differential speed adjustment)~~ ✅ Implemented *(2026-02-13 — Phase 8)*
 - ~~Demand anomaly detection~~ ✅ Implemented *(2026-02-13 — Phase 9)*
-- Granular limp mode (multi-level degradation)
+- ~~Granular limp mode (multi-level degradation)~~ ✅ Implemented *(2026-02-13 — Phase 12)*
 - ~~Boot validation sequence~~ ✅ Implemented *(2026-02-13 — Phase 11)*
 
 **Low priority (features):**
@@ -833,3 +932,4 @@ verification checklist required by the safety audit process.
 *Updated: 2026-02-13 — Phase 8: Ackermann differential torque correction (max ±15%, 2° deadband)*
 *Updated: 2026-02-13 — Phase 9: Demand anomaly detection (step-rate, range, frozen pedal)*
 *Updated: 2026-02-13 — Phase 10: Non-blocking relay sequencing refactor documentation*
+*Updated: 2026-02-13 — Phase 12: Granular limp mode (multi-level degradation)*
