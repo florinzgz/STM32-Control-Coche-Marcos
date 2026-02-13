@@ -469,7 +469,7 @@ The obstacle safety backstop has been integrated as described below:
 | Category | Rating | Justification |
 |----------|--------|---------------|
 | **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, 4×4 50/50 axle torque split, and per-motor emergency temperature cutoff (130°C). *(Updated: Security Hardening Phases 1 & 2)* |
-| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation, per-motor 130°C emergency cutoff with 15°C hysteresis. *(Updated: Security Hardening Phases 1 & 2)* |
+| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, non-blocking relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation, per-motor 130°C emergency cutoff with 15°C hysteresis. *(Updated: Security Hardening Phases 1–5)* |
 | **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
 | **CAN Communication** | ADVANCED | Contract revision 1.2, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Integration verified. |
 | **HMI** | EARLY | Architecture defined, CAN decoding functional, screen state machine implemented. Display rendering is stub-only. |
@@ -587,13 +587,33 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 - No blocking delays added
 - `sanitize_float()` guards the degraded output against NaN/Inf
 
+### Phase 5 — Non-Blocking Relay Sequencing
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Safety system (safety_system.c) | 90% | 92% | +2% — Non-blocking relay state machine replaces HAL_Delay blocking |
+| Main loop (main.c) | — | — | Added Relay_SequencerUpdate() call in 10 ms safety loop |
+| CAN contract | 1.2 | 1.2 | No change — no CAN messages added or modified |
+| **Overall STM32 firmware** | **~94%** | **~95%** | +1% — Non-blocking relay sequencing |
+
+**Risk analysis:**
+- Relay activation order: unchanged — Main → Traction → Direction
+- Relay deactivation: unchanged — Direction → Traction → Main (immediate)
+- Timing preserved: RELAY_MAIN_SETTLE_MS = 50 ms, RELAY_TRACTION_SETTLE_MS = 20 ms
+- SAFE/ERROR states: Relay_PowerDown() immediately cancels any in-progress sequence
+- Safety checks during power-up: now active (previously blocked for ~70 ms)
+- Watchdog safety: IWDG refresh continues during relay sequence (no blocking)
+- Re-entry safety: calling Relay_PowerUp() twice is a safe no-op
+- No new blocking calls introduced in safety path
+- CAN contract: unchanged — no messages added, modified, or removed
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
 - ~~ABS pulse modulation (30% reduction instead of full cut)~~ ✅ Implemented *(2026-02-13)*
 - ~~Per-motor emergency temperature cutoff at 130°C in traction loop~~ ✅ Implemented *(2026-02-13)*
 - ~~Steering assist degradation in DEGRADED state~~ ✅ Implemented *(2026-02-13)*
-- Non-blocking relay sequencing (replace HAL_Delay)
+- ~~Non-blocking relay sequencing (replace HAL_Delay)~~ ✅ Implemented *(2026-02-13)*
 
 **Medium priority (functional parity):**
 - Ackermann traction correction (differential speed adjustment)

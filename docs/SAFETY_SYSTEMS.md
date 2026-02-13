@@ -720,6 +720,73 @@ void Safety_Task(void) {
 
 ---
 
+## 🔌 Secuenciación No-Bloqueante de Relés
+
+### Máquina de Estados del Secuenciador de Relés
+
+La secuenciación de relés utiliza una máquina de estados interna no-bloqueante
+que se ejecuta desde el bucle de seguridad de 10 ms. Esto elimina el uso de
+`HAL_Delay()` en la ruta de seguridad, permitiendo que las comprobaciones de
+seguridad, CAN y watchdog continúen durante la secuencia de encendido.
+
+```
+                  Relay_PowerUp()
+     ┌──────────┐  ────────────►  ┌──────────────┐
+     │   IDLE   │                 │   MAIN_ON    │
+     │ (relays  │  ◄────────────  │ Main relay   │
+     │  off)    │  Relay_PowerDown│ energised    │
+     └──────────┘                 └──────┬───────┘
+          ▲                              │ 50 ms elapsed
+          │ Relay_PowerDown()            ▼
+          │                       ┌──────────────┐
+          │                       │ TRACTION_ON  │
+          ├───────────────────────│ Traction     │
+          │                       │ relay ON     │
+          │                       └──────┬───────┘
+          │                              │ 20 ms elapsed
+          │ Relay_PowerDown()            ▼
+          │                       ┌──────────────┐
+          └───────────────────────│  COMPLETE    │
+                                  │ All relays   │
+                                  │ ON           │
+                                  └──────────────┘
+```
+
+### Comportamiento No-Bloqueante
+
+| Aspecto | Antes (blocking) | Después (non-blocking) |
+|---------|-------------------|------------------------|
+| Mecanismo de temporización | `HAL_Delay()` | `HAL_GetTick()` + timestamps |
+| Bloqueo del bucle principal | ~70 ms bloqueado | 0 ms bloqueado |
+| Safety checks durante power-up | Suspendidas | Activas |
+| Watchdog durante power-up | No refrescado | Refrescado normalmente |
+| CAN processing durante power-up | Suspendido | Activo |
+
+### Garantías de Temporización
+
+- **Main → Traction:** ≥ 50 ms (RELAY_MAIN_SETTLE_MS)
+- **Traction → Direction:** ≥ 20 ms (RELAY_TRACTION_SETTLE_MS)
+- Resolución de temporización: 10 ms (período del bucle de seguridad)
+- Peor caso de latencia adicional: +10 ms por etapa (resolución del tick)
+
+### Seguridad de Re-entrada
+
+- Llamar `Relay_PowerUp()` durante una secuencia en progreso es un no-op
+- Llamar `Relay_PowerUp()` cuando ya está en COMPLETE es un no-op
+- `Relay_PowerDown()` cancela inmediatamente cualquier secuencia en progreso
+  y desactiva todos los relés en orden inverso
+
+### Integración con Estados del Sistema
+
+| Estado del Sistema | Acción sobre relés |
+|--------------------|-------------------|
+| STANDBY → ACTIVE | `Relay_PowerUp()` inicia secuencia |
+| ACTIVE / DEGRADED | Relés encendidos (COMPLETE) |
+| → SAFE | `Relay_PowerDown()` inmediato (vía `Safety_FailSafe()`) |
+| → ERROR | `Relay_PowerDown()` inmediato (vía `Safety_PowerDown()`) |
+
+---
+
 ## 📖 Referencias
 
 - [ISO 26262 - Functional Safety](https://www.iso.org/standard/68383.html)
