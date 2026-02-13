@@ -553,8 +553,6 @@ void Traction_Update(void)
         effective_demand *= gear_scale;
     }
 
-    uint16_t base_pwm = (uint16_t)(fabs(effective_demand) * PWM_PERIOD / 100.0f);
-
     /* ---- NaN/Inf validation (security hardening) ----
      * Validate all float inputs that affect PWM before they reach the
      * hardware.  NaN bypasses C float comparisons and would propagate
@@ -566,8 +564,7 @@ void Traction_Update(void)
         safety_status.wheel_scale[i] = sanitize_float(safety_status.wheel_scale[i], 0.0f);
     }
 
-    /* Recompute base_pwm after sanitization */
-    base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
+    uint16_t base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
 
     /* Apply obstacle scale uniformly to all wheels.  This multiplier
      * is set by Obstacle_Update() from CAN-received distance data.
