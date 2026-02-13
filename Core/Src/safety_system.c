@@ -260,12 +260,8 @@ void Relay_PowerUp(void)
      * The actual relay transitions are driven by Relay_SequencerUpdate()
      * called from the 10 ms safety loop.
      * Re-entry safe: if already sequencing or complete, do nothing.     */
-    if (relay_seq_state != RELAY_SEQ_IDLE &&
-        relay_seq_state != RELAY_SEQ_COMPLETE) {
-        return;  /* Sequence already in progress */
-    }
-    if (relay_seq_state == RELAY_SEQ_COMPLETE) {
-        return;  /* Already fully powered up */
+    if (relay_seq_state != RELAY_SEQ_IDLE) {
+        return;  /* Sequence already in progress or complete */
     }
 
     /* Step 1: Energise main relay and record timestamp */
