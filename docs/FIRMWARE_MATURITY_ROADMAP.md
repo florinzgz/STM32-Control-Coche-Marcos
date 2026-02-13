@@ -65,7 +65,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Safety System** | FULL | Multi-layer protection: overcurrent, overtemperature, CAN timeout, encoder fault, relay sequencing. Consecutive error counting with escalation thresholds. |
 | **ABS (Anti-Lock Braking)** | FULL | Per-wheel slip detection (15% threshold), per-wheel scale modulation, global fallback for all-wheel lockup, minimum speed gate (10 km/h). |
 | **TCS (Traction Control)** | FULL | Per-wheel slip detection (15% threshold), progressive reduction (40% initial → 80% max), recovery rate 25%/s, minimum speed gate (3 km/h), global fallback. |
-| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). |
+| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. *(Security Hardening Phase 1)* |
 | **Ackermann Steering** | FULL | Geometric computation of FL/FR wheel angles from road angle, ±54° per-wheel clamp, correct sign convention (positive = left turn). Separate module (ackermann.c). |
 | **Gear Logic (D1/D2/N/R/P)** | FULL | 5-gear system via CAN command (0x102). Park includes active brake hold with current/temperature derating. Gear changes restricted below 1 km/h. |
 | **Dynamic Braking** | FULL | Proportional to throttle release rate (scale factor 0.5), max 60%, disabled below 3 km/h, disabled during ABS/SAFE/ERROR. Ramp-down at 80%/s. |
@@ -122,7 +122,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Dynamic braking (throttle release proportional, max 60%)
 - [✓] Park hold with current/temperature derating
 - [✓] Ackermann geometry (separate module, ±54° clamp)
-- [✓] 4×4 / 4×2 mode support (via CAN command 0x102)
+- [✓] 4×4 / 4×2 mode support (via CAN command 0x102) — 4×4 uses 50/50 axle torque split *(Security Hardening Phase 1)*
 - [✓] Tank turn mode support
 - [✓] Motor enable/disable signals (GPIOC)
 - [✓] Direction control signals (GPIOC)
@@ -148,7 +148,8 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Consecutive error counting with escalation (≥3 → DEGRADED→SAFE)
 - [~] Degraded/limp mode (basic 40% power limit exists; lacks granular per-subsystem limiting as in reference limp_mode.cpp with NORMAL/DEGRADED/LIMP/CRITICAL states)
 - [✓] Obstacle collision avoidance — STM32 backstop limiter (3-tier distance→scale, CAN timeout, stale-data detection, SAFE state for emergencies). Full 5-zone logic remains ESP32-side. *(Implemented 2026-02-13)*
-- [ ] Battery undervoltage cutoff (reference: limp_mode.cpp checks batteryUndervoltage)
+- [✓] Battery undervoltage protection (20.0 V warning → DEGRADED, 18.0 V critical → SAFE, 0.5 V hysteresis, no auto-recovery from SAFE) *(Already implemented in Safety_CheckBatteryVoltage)*
+- [✓] NaN/Inf float validation in traction pipeline — `sanitize_float()` guards on all float inputs affecting PWM. Forces 0.0f + SAFETY_ERROR_SENSOR_FAULT on corrupt values. *(Security Hardening Phase 1)*
 - [ ] Sensor plausibility cross-validation (reference: SensorManagerEnhanced.cpp)
 - [ ] Redundant safety checks (reference: SafetyManagerEnhanced.cpp)
 
@@ -467,10 +468,10 @@ The obstacle safety backstop has been integrated as described below:
 
 | Category | Rating | Justification |
 |----------|--------|---------------|
-| **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, and park hold. |
-| **Safety Systems** | STABLE | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery. Obstacle safety backstop implemented *(2026-02-13)*. One HIGH-risk gap remaining (battery cutoff) prevents ADVANCED rating. |
+| **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, and 4×4 50/50 axle torque split. *(Updated: Security Hardening Phase 1)* |
+| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation. *(Updated: Security Hardening Phase 1)* |
 | **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
-| **CAN Communication** | ADVANCED | Contract revision 1.1 *(updated 2026-02-13)*, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Obstacle CAN messages (0x208, 0x209) added. |
+| **CAN Communication** | ADVANCED | Contract revision 1.2, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Integration verified. |
 | **HMI** | EARLY | Architecture defined, CAN decoding functional, screen state machine implemented. Display rendering is stub-only. |
 | **System Infrastructure** | STABLE | Clean build system, correct clock/peripheral configuration, multi-rate loop. Missing config persistence and structured logging. |
 | **Advanced Features** | EARLY | Obstacle safety backstop implemented on STM32 *(2026-02-13)*. Full obstacle detection stack (5-zone, ACC) remains ESP32-side only. AI regen, audio, and lighting features not implemented. Intentional — these are development targets, not regressions. |
@@ -479,12 +480,14 @@ The obstacle safety backstop has been integrated as described below:
 
 The firmware provides a **safe, functional, and well-architected** vehicle control layer. Core motor control and safety systems are production-quality for a controlled environment. The split architecture (STM32 + ESP32 over CAN) is superior to the monolithic reference design for safety-critical applications.
 
-**One action is recommended before considering the firmware production-ready:**
+**Previously recommended critical actions — all completed:**
 1. ~~Implement I2C bus recovery (Phase 1.1) — eliminates the highest-risk safety gap~~ ✅ DONE
 2. ~~Implement battery undervoltage cutoff (Phase 1.2) — prevents deep discharge hazard~~ ✅ DONE *(Safety_CheckBatteryVoltage in safety_system.c)*
 3. ~~Implement obstacle safety backstop (Phase 5.4) — adds spatial awareness to safety authority~~ ✅ DONE *(2026-02-13)*
+4. ~~NaN/Inf float validation in traction pipeline~~ ✅ DONE *(Security Hardening Phase 1)*
+5. ~~4×4 50/50 axle torque split~~ ✅ DONE *(Security Hardening Phase 1)*
 
-With all three critical items addressed, the safety subsystem has achieved ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
+With all critical items addressed, the safety subsystem has achieved ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
 
 ---
 
@@ -536,6 +539,52 @@ With all three critical items addressed, the safety subsystem has achieved ADVAN
 
 ---
 
+## Security Hardening Phase 1
+
+**Date:** 2026-02-13
+**Scope:** NaN/Inf float validation, 4×4 axle torque split, ESP32↔STM32 integration re-verification
+
+### What Was Fixed
+
+| Item | Description | Files Changed | Risk Mitigated |
+|------|-------------|---------------|----------------|
+| **NaN/Inf float validation** | Added `sanitize_float()` guard on all float inputs affecting torque/PWM: throttle demand, effective_demand, obstacle_scale, wheel_scale[], steering angle. Invalid values forced to 0.0f with `SAFETY_ERROR_SENSOR_FAULT` raised. | `Core/Src/motor_control.c` | NaN/Inf values bypassing C float comparisons and propagating into PWM registers (TECHNICAL_AUDIT_REPORT.md risk R1) |
+| **4×4 50/50 axle torque split** | In `Traction_Update()` 4×4 branch, base_pwm is now split 50/50 between front and rear axles (`axle_pwm = base_pwm / 2`) before applying per-wheel `wheel_scale[i]`. Matches reference firmware traction.cpp behavior. | `Core/Src/motor_control.c` | Previous implementation applied 100% base torque to all 4 wheels, potentially doubling total electrical demand (TECHNICAL_AUDIT_REPORT.md finding F6) |
+| **ESP32↔STM32 integration verification** | Re-verified all 10 integration points: heartbeat byte alignment, fault flags, system states, safety error codes, CAN IDs, STATUS_BATTERY, gear enum, service masks, obstacle data, timeout constants. | None (all consistent) | Contract revision 1.2 integrity confirmed — no mismatches found |
+
+### Implementation Percentage Update
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Traction pipeline (motor_control.c) | 80% | 90% | +10% — NaN/Inf validation, 50/50 axle split |
+| Safety system (safety_system.c) | 85% | 85% | No change — NaN/Inf errors routed through existing SAFETY_ERROR_SENSOR_FAULT |
+| ESP32↔STM32 integration | 100% | 100% | Verified — all 10 checks passed |
+| **Overall STM32 firmware** | **~88%** | **~90%** | +2% — security hardening without architectural change |
+
+### What Remains for 100%
+
+**High priority (security/safety):**
+- ABS pulse modulation (30% reduction instead of full cut)
+- Per-motor emergency temperature cutoff at 130°C in traction loop
+- Steering assist degradation in DEGRADED state
+- Non-blocking relay sequencing (replace HAL_Delay)
+
+**Medium priority (functional parity):**
+- Ackermann traction correction (differential speed adjustment)
+- Demand anomaly detection
+- Granular limp mode (multi-level degradation)
+- Boot validation sequence
+- CAN bus-off recovery
+
+**Low priority (features):**
+- Regenerative braking
+- ESP32 HMI screen rendering
+- ESP32 TX commands (0x100, 0x101, 0x102)
+- Config persistence / EEPROM
+- Audio/LED systems
+
+---
+
 *Document generated: 2026-02-12*
 *Updated: 2026-02-13 — Obstacle safety integration implemented, integration audit completed*
-*This is an analysis and documentation deliverable. No code was modified.*
+*Updated: 2026-02-13 — Security Hardening Phase 1: NaN/Inf validation, 4×4 50/50 axle split*
