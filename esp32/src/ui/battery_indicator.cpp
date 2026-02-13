@@ -52,10 +52,10 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
         tft.fillRect(BAT_X + 2, BAT_Y + 2, fillW, BAT_H - 4, col);
     }
 
-    // Percentage text centered in battery
+    // Percentage text centered in battery — use black text for contrast
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%u%%", pct);
-    tft.setTextColor(COL_WHITE, col);
+    tft.setTextColor(COL_BLACK, col);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(buf, BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2);

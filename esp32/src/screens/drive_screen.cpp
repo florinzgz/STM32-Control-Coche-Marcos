@@ -65,6 +65,8 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     curSteeringRaw_ = data.steering().angleRaw;
 
     // Average speed (all 4 wheels, raw 0.1 km/h units)
+    // Max sum: 4 × 65535 = 262140, fits in uint32_t
+    // Max average: 65535, fits in uint16_t
     uint32_t sum = 0;
     for (uint8_t i = 0; i < 4; ++i) {
         sum += data.speed().raw[i];
