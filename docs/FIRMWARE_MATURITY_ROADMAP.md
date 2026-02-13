@@ -78,7 +78,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **CAN Protocol** | FULL | Contract revision 1.1 *(Updated 2026-02-13)*. 500 kbps, 11-bit IDs. Hardware RX white-list filters (4 filter banks). 12 TX message types (0x001, 0x200–0x207, 0x301–0x303). 6 RX message types (0x011, 0x100–0x102, 0x110, 0x208–0x209). TX/RX statistics tracking. Obstacle CAN messages added in rev 1.1. |
 | **HMI Integration Model** | FULL | ESP32-S3 connected via CAN. Screen states (Boot/Standby/Drive/Safe/Error) driven by STM32 system state. Stub screen implementations ready for TFT graphics library. CAN contract frozen. |
 | **Service Mode** | FULL | 25 modules classified as CRITICAL (4) or NON-CRITICAL (21). Per-module fault tracking (NONE/WARNING/ERROR/DISABLED). CAN commands (0x110) for enable/disable/factory-restore. Status broadcast (0x301–0x303). |
-| **Degraded / Limp Mode** | PARTIAL | DEGRADED state exists with 40% power limit. Basic concept implemented. Missing: granular power/steering/speed limiting per degradation level, drive-home prioritization logic, diagnostic struct as in reference LimpMode. |
+| **Degraded / Limp Mode** | PARTIAL | DEGRADED state exists with 40% power limit and 40% steering assist reduction. Basic concept implemented. Missing: granular speed limiting per degradation level, drive-home prioritization logic, diagnostic struct as in reference LimpMode. |
 | **Fault Reporting** | FULL | Error codes via CAN (0x203 safety status, 0x300–0x303 diagnostics/service). Per-module fault bitmasks. Heartbeat includes fault flags and error code. |
 | **Steering Calibration** | FULL | Automatic centering via inductive sensor (PB5). Sweep left/right at low PWM (10%), stall detection (300 ms), total timeout (10 s), range limit (6000 counts). State machine: IDLE → SWEEP_LEFT → SWEEP_RIGHT → DONE/FAULT. |
 | **Obstacle Detection** | STM32: BACKSTOP / ESP32: FULL *(Updated 2026-02-13)* | STM32 receives distance via CAN (0x208) and applies 3-tier backstop limiter (0/200/500/1000mm → scale 0.0/0.3/0.7/1.0). CAN timeout (500ms) and stale-data detection trigger SAFE state. Full 5-zone detection with UART sensor parsing, child reaction, ACC remains ESP32-side only. See `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`. |
@@ -146,7 +146,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Gear change speed gate (below 1 km/h)
 - [✓] Mode change speed gate (below 1 km/h)
 - [✓] Consecutive error counting with escalation (≥3 → DEGRADED→SAFE)
-- [~] Degraded/limp mode (basic 40% power limit exists; lacks granular per-subsystem limiting as in reference limp_mode.cpp with NORMAL/DEGRADED/LIMP/CRITICAL states)
+- [~] Degraded/limp mode (basic 40% power limit and 40% steering assist reduction exists; lacks granular per-subsystem speed limiting as in reference limp_mode.cpp with NORMAL/DEGRADED/LIMP/CRITICAL states)
 - [✓] Obstacle collision avoidance — STM32 backstop limiter (3-tier distance→scale, CAN timeout, stale-data detection, SAFE state for emergencies). Full 5-zone logic remains ESP32-side. *(Implemented 2026-02-13)*
 - [✓] Battery undervoltage protection (20.0 V warning → DEGRADED, 18.0 V critical → SAFE, 0.5 V hysteresis, no auto-recovery from SAFE) *(Already implemented in Safety_CheckBatteryVoltage)*
 - [✓] NaN/Inf float validation in traction pipeline — `sanitize_float()` guards on all float inputs affecting PWM. Forces 0.0f + SAFETY_ERROR_SENSOR_FAULT on corrupt values. *(Security Hardening Phase 1)*
@@ -264,7 +264,7 @@ This section identifies safety mechanisms present in the reference firmware that
 | **I2C bus recovery** | i2c_recovery.cpp: clock cycling (9+ pulses on SCL), bus reset, automatic retry | **Implemented** — SCL clock cycling (16 pulses), STOP condition, 2-attempt recovery, SAFE state fallback via SAFETY_ERROR_I2C_FAILURE | Gap closed |
 | **Sensor cross-validation** | SensorManagerEnhanced.cpp: compares sensor readings against each other for plausibility | Not implemented — each sensor read independently, no cross-checks | A single faulty sensor could provide wildly incorrect data without detection (e.g., temperature sensor reading −55°C) |
 | **Boot guard / pre-flight** | boot_guard.cpp: validates hardware state before enabling control | Not implemented — system transitions BOOT → STANDBY based on timing only | Could allow operation with misconfigured or failed peripherals |
-| **Granular limp mode** | limp_mode.cpp: 4-level system (NORMAL/DEGRADED/LIMP/CRITICAL) with separate power, steering, and speed multipliers | Simplified — single DEGRADED state with flat 40% power limit | Does not differentiate between minor sensor warning and major system failure. Cannot apply asymmetric limits (e.g., reduce speed but maintain steering) |
+| **Granular limp mode** | limp_mode.cpp: 4-level system (NORMAL/DEGRADED/LIMP/CRITICAL) with separate power, steering, and speed multipliers | Partially implemented — single DEGRADED state with 40% power limit and 40% steering assist reduction. Missing: granular speed limiting, multi-level degradation. | Steering and power are degraded symmetrically (both 40% reduction). Speed limiting and multi-level fault differentiation not yet implemented. |
 | **Emergency stop via obstacle** | obstacle_safety.cpp: triggerEmergencyStop() with immediate motor cut + relay open | **Implemented** *(2026-02-13)*: Distance < 200 mm → obstacle_scale = 0.0, SAFE state (motors stopped, steering centered). CAN timeout and sensor failure also trigger SAFE state. Recovery with hysteresis (>500 mm for >1 s). | Gap closed for STM32 backstop layer. |
 
 ### 4.2 Simplified Safety Mechanisms
@@ -569,12 +569,30 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 | Safety system (safety_system.c) | 90% | 90% | No change — existing Safety_CheckTemperature() preserved |
 | **Overall STM32 firmware** | **~91%** | **~93%** | +2% — Per-motor emergency temperature cutoff |
 
+### Phase 4 — Steering Assist Degradation in DEGRADED State
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Steering control (motor_control.c) | 93% | 94% | +1% — Steering PID output × 0.6 in DEGRADED state |
+| Safety system (safety_system.c) | 90% | 90% | No change — existing Safety_IsDegraded() used, no state machine modifications |
+| CAN contract | 1.2 | 1.2 | No change — no CAN messages added or modified |
+| **Overall STM32 firmware** | **~93%** | **~94%** | +1% — Steering assist degradation |
+
+**Risk analysis:**
+- ACTIVE mode behavior: unchanged — `Safety_IsDegraded()` returns false, multiplier not applied
+- SAFE mode behavior: unchanged — `Steering_Neutralize()` is called before PID runs
+- Encoder fault: unchanged — `enc_fault` check returns before PID runs
+- CAN contract: unchanged — no messages added, modified, or removed
+- No new global variables introduced
+- No blocking delays added
+- `sanitize_float()` guards the degraded output against NaN/Inf
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
 - ~~ABS pulse modulation (30% reduction instead of full cut)~~ ✅ Implemented *(2026-02-13)*
 - ~~Per-motor emergency temperature cutoff at 130°C in traction loop~~ ✅ Implemented *(2026-02-13)*
-- Steering assist degradation in DEGRADED state
+- ~~Steering assist degradation in DEGRADED state~~ ✅ Implemented *(2026-02-13)*
 - Non-blocking relay sequencing (replace HAL_Delay)
 
 **Medium priority (functional parity):**
@@ -597,3 +615,4 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 *Updated: 2026-02-13 — Obstacle safety integration implemented, integration audit completed*
 *Updated: 2026-02-13 — Security Hardening Phase 1: NaN/Inf validation, 4×4 50/50 axle split*
 *Updated: 2026-02-13 — Security Hardening Phase 2: Per-motor emergency temperature cutoff (130°C/115°C)*
+*Updated: 2026-02-13 — Phase 4: Steering assist degradation in DEGRADED state (40% reduction)*

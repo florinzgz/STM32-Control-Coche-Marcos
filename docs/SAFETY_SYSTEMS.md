@@ -452,6 +452,43 @@ for (uint8_t i = 0; i < 4; i++) {
 - La fórmula final sigue siendo: `FinalPWM = base_pwm × obstacle_scale × wheel_scale[i]`
 - La protección global de 90°C (`Safety_CheckTemperature() → SAFE`) sigue activa
 
+### Degradación de Asistencia de Dirección en Modo DEGRADED
+
+Cuando el sistema entra en estado `SYS_STATE_DEGRADED`, la asistencia de
+dirección se reduce automáticamente en un **40%** (multiplicador 0.6) para
+disminuir la agresividad del motor de dirección y mejorar la seguridad en
+modo limp/drive-home.
+
+**Comportamiento:**
+
+- La reducción se aplica **dentro de `Steering_ControlLoop()`** únicamente,
+  después del cálculo PID y antes de la conversión a PWM.
+- La salida PID se multiplica por `0.6f` cuando `Safety_IsDegraded()` es
+  `true`.
+- El resultado pasa por `sanitize_float()` antes de cualquier uso.
+- Los límites mecánicos (±45°), la validación de encoder, la neutralización
+  en estado SAFE, y el rate limiter **NO se modifican**.
+- `Steering_SetAngle()` **NO se modifica** — la reducción es exclusivamente
+  en la etapa de control.
+
+```c
+// Dentro de Steering_ControlLoop(), después de PID_Compute y clamp:
+if (Safety_IsDegraded()) {
+    output *= 0.6f;   // 40% reducción de torque de dirección
+}
+output = sanitize_float(output, 0.0f);
+```
+
+**Interacción con otros estados:**
+
+| Estado | Comportamiento de dirección |
+|--------|-----------------------------|
+| ACTIVE | PID output al 100% (sin reducción) |
+| DEGRADED | PID output × 0.6 (40% reducción) |
+| SAFE | Motor neutralizado (`Steering_Neutralize()`) |
+
+**No se modifica:** contrato CAN, máquina de estados de seguridad, ABS/TCS.
+
 ---
 
 ## ⚡ Protecciones de Corriente

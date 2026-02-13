@@ -813,6 +813,14 @@ void Steering_ControlLoop(void)
     if (output < -100.0f) output = -100.0f;
     if (output >  100.0f) output =  100.0f;
 
+    /* Reduce steering aggressiveness in DEGRADED state (40% reduction).
+     * Traced to limp_mode.cpp drive-home philosophy: lower steering
+     * torque reduces risk while preserving controllability.             */
+    if (Safety_IsDegraded()) {
+        output *= 0.6f;
+    }
+    output = sanitize_float(output, 0.0f);
+
     uint16_t pwm = (uint16_t)(fabs(output) * PWM_PERIOD / 100.0f);
     int8_t direction = (output >= 0) ? 1 : -1;
 
