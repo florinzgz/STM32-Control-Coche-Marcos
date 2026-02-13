@@ -1,7 +1,7 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN Bus ID and Protocol Definitions
 //
-// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.0
+// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.2
 // Status:          FROZEN — do not modify without a new contract revision
 //
 // These values are mirrored from the CAN contract document.
@@ -83,7 +83,8 @@ enum class FaultFlag : uint8_t {
     ENCODER_ERROR     = 0x08,   // Bit 3: Encoder / sensor fault
     WHEEL_SENSOR      = 0x10,   // Bit 4: Wheel speed sensor fault
     ABS_ACTIVE        = 0x20,   // Bit 5: ABS intervening
-    TCS_ACTIVE        = 0x40    // Bit 6: TCS intervening
+    TCS_ACTIVE        = 0x40,   // Bit 6: TCS intervening
+    CENTERING         = 0x80    // Bit 7: Steering centering failed
 };
 
 // -------------------------------------------------------------------------
@@ -106,7 +107,7 @@ enum class SafetyError : uint8_t {
 };
 
 // -------------------------------------------------------------------------
-// Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.13)
+// Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.14)
 // -------------------------------------------------------------------------
 enum class DiagSubsystem : uint8_t {
     GLOBAL  = 0,

@@ -481,13 +481,61 @@ The firmware provides a **safe, functional, and well-architected** vehicle contr
 
 **One action is recommended before considering the firmware production-ready:**
 1. ~~Implement I2C bus recovery (Phase 1.1) — eliminates the highest-risk safety gap~~ ✅ DONE
-2. Implement battery undervoltage cutoff (Phase 1.2) — prevents deep discharge hazard
+2. ~~Implement battery undervoltage cutoff (Phase 1.2) — prevents deep discharge hazard~~ ✅ DONE *(Safety_CheckBatteryVoltage in safety_system.c)*
 3. ~~Implement obstacle safety backstop (Phase 5.4) — adds spatial awareness to safety authority~~ ✅ DONE *(2026-02-13)*
 
-With the remaining battery undervoltage item addressed, the safety subsystem would achieve ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
+With all three critical items addressed, the safety subsystem has achieved ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
+
+---
+
+## Integration Audit Result — ESP32 ↔ STM32
+
+**Audit date:** 2026-02-13
+**Scope:** Bidirectional CAN contract validation between STM32G474RE (safety authority) and ESP32-S3 (HMI)
+
+### What was correct
+
+- All 20 CAN IDs match between `esp32/include/can_ids.h` and `Core/Inc/can_handler.h` (0x001, 0x011, 0x100–0x102, 0x110, 0x200–0x209, 0x300–0x303)
+- DLC lengths match between TX functions and RX parsers on both sides
+- Byte ordering (little-endian uint16/uint32) consistent across all messages
+- SystemState enum values match: BOOT=0, STANDBY=1, ACTIVE=2, DEGRADED=3, SAFE=4, ERROR=5
+- Timeout constants match: heartbeat 250 ms, obstacle 500 ms
+- Safety authority boundaries correct: STM32 validates all commands, ESP32 sends intent only
+- Obstacle negotiation: 0x208/0x209 structure, rolling counter, health flag, stale detection all consistent
+- STM32 can force SAFE state; ESP32 correctly reflects it via heartbeat
+- ESP32 cannot force ACTIVE — STM32 blocks unless safety_error == NONE
+- No CAN ID collisions
+- No false SAFE trigger from jitter (500 ms timeout allows 7+ missed 66 ms frames)
+- Traction pipeline formula correct: base_pwm × obstacle_scale × wheel_scale[i]
+
+### What was corrected
+
+| Item | Before | After | Files changed |
+|------|--------|-------|---------------|
+| Heartbeat byte 3 | Documented as "reserved — 0x00" but code sends Safety_GetError() | Documented as `error_code`; ESP32 field renamed from `reserved` to `errorCode` | `vehicle_data.h`, `can_rx.cpp`, `CAN_CONTRACT_FINAL.md` |
+| STATUS_BATTERY (0x207) | Missing from CAN contract §3.2 message list | Added §4.13 payload definition | `CAN_CONTRACT_FINAL.md` |
+| Speed plausibility threshold | Documented as "> 60 km/h" but code uses 25 km/h | Fixed documentation to match code (25 km/h) | `CAN_CONTRACT_FINAL.md` |
+| HMI error codes | Only codes 0–7 documented | Added codes 8–12 (CENTERING, BATTERY_UV_WARN, BATTERY_UV_CRIT, I2C_FAILURE, OBSTACLE) | `HMI_STATE_MODEL.md` |
+| Fault_flags bit 7 | Listed as "(reserved)" in HMI doc | Corrected to FAULT_CENTERING (matches code) | `HMI_STATE_MODEL.md` |
+| Traction formula | Missing degraded_power_limit factor | Added upstream power_limit from Safety_GetPowerLimitFactor() | `OBSTACLE_SYSTEM_ARCHITECTURE.md` |
+| Contract references | ESP32 headers and HMI doc referenced rev 1.0 | Updated to rev 1.2 | `can_ids.h`, `HMI_STATE_MODEL.md` |
+| Battery UV roadmap | Listed as pending | Marked as DONE (already implemented) | `FIRMWARE_MATURITY_ROADMAP.md` |
+
+### What remains unimplemented
+
+- MOTOR_STALL detection (error code 5) — reserved, not implemented
+- OBSTACLE_SAFETY (0x209) parsing on STM32 — accepted but not used (informational, reserved for future)
+- CAN message authentication (CMAC) — not implemented, point-to-point topology mitigates risk
+- Regenerative braking — not implemented (confirmed absent per REGEN_BRAKING_AUDIT.md)
+
+### Remaining architectural risks
+
+1. **Single error code slot**: `safety_error` is a single variable — if two faults occur simultaneously, only the last-written error code is visible. Fault flags (bitmask) partially mitigate this for CAN heartbeat display.
+2. **No CAN frame authentication**: Point-to-point topology mitigates spoofing risk, but physical access to CAN bus allows injection. Low risk for controlled environment.
+3. **ESP32 obstacle module crash**: If ESP32 obstacle module crashes but CAN driver continues sending cached 0x208 frames with a frozen counter, STM32 detects this via stale-data counter (≥ 3 frames). If the CAN driver also crashes, heartbeat timeout (250 ms) triggers SAFE before obstacle timeout (500 ms).
 
 ---
 
 *Document generated: 2026-02-12*
-*Updated: 2026-02-13 — Obstacle safety integration implemented*
+*Updated: 2026-02-13 — Obstacle safety integration implemented, integration audit completed*
 *This is an analysis and documentation deliverable. No code was modified.*

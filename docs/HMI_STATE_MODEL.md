@@ -1,7 +1,7 @@
 # HMI State Model
 
-**Revision:** 1.0
-**Status:** Normative — Derived from `v1.0-stm32-safety-baseline`
+**Revision:** 1.1
+**Status:** Normative — Updated for integration audit (CAN contract rev 1.2)
 **Date:** 2026-02-07
 **Scope:** HMI behavior on the ESP32-S3, governed exclusively by STM32 system states and CAN signals defined in `docs/CAN_CONTRACT_FINAL.md`
 
@@ -139,7 +139,7 @@ Each bit in `fault_flags` maps to a visual indicator that is overlaid on the cur
 | 4 | 0x10 | FAULT_WHEEL_SENSOR | 🔧 "WHEEL SENSOR FAULT" — speed gauge(s) marked invalid |
 | 5 | 0x20 | FAULT_ABS_ACTIVE | ABS indicator illuminated (informational, not a fault) |
 | 6 | 0x40 | FAULT_TCS_ACTIVE | TCS indicator illuminated (informational, not a fault) |
-| 7 | 0x80 | (reserved) | No display. Ignore. |
+| 7 | 0x80 | FAULT_CENTERING | 🔧 "CENTERING FAULT" — steering indicator marked invalid |
 
 #### Rules
 
@@ -162,6 +162,11 @@ The `error_code` field in STATUS_SAFETY provides finer fault classification. If 
 | 5 | SAFETY_ERROR_MOTOR_STALL | "Motor stall (reserved)" |
 | 6 | SAFETY_ERROR_EMERGENCY_STOP | "EMERGENCY STOP ACTIVE" |
 | 7 | SAFETY_ERROR_WATCHDOG | "Watchdog reset occurred" |
+| 8 | SAFETY_ERROR_CENTERING | "Steering centering failed" |
+| 9 | SAFETY_ERROR_BATTERY_UV_WARNING | "Battery undervoltage warning" |
+| 10 | SAFETY_ERROR_BATTERY_UV_CRITICAL | "Battery undervoltage critical" |
+| 11 | SAFETY_ERROR_I2C_FAILURE | "I2C bus failure" |
+| 12 | SAFETY_ERROR_OBSTACLE | "Obstacle emergency detected" |
 
 #### Rules
 
@@ -282,7 +287,7 @@ The following rules are absolute and apply regardless of software version, confi
 
 8. **The HMI must not provide engineering menu access when `system_state` is ACTIVE (2), DEGRADED (3), or SAFE (4).** Refer to §6.3.
 
-9. **The HMI must not modify, reinterpret, or extend the CAN message definitions.** All CAN IDs, payloads, and timing are governed by `docs/CAN_CONTRACT_FINAL.md` revision 1.0. Any change requires a new contract revision.
+9. **The HMI must not modify, reinterpret, or extend the CAN message definitions.** All CAN IDs, payloads, and timing are governed by `docs/CAN_CONTRACT_FINAL.md` revision 1.2. Any change requires a new contract revision.
 
 10. **The HMI must not store or cache `system_state` across power cycles.** On every boot, the HMI must start in the BOOT screen and wait for the first valid 0x001 frame before transitioning.
 
@@ -292,7 +297,7 @@ The following rules are absolute and apply regardless of software version, confi
 
 | Document | Relevance |
 |----------|-----------|
-| `docs/CAN_CONTRACT_FINAL.md` rev 1.0 | Authoritative CAN message definitions, payloads, timing, and validation rules |
+| `docs/CAN_CONTRACT_FINAL.md` rev 1.2 | Authoritative CAN message definitions, payloads, timing, and validation rules |
 | `docs/SAFETY_SYSTEMS.md` | ABS/TCS algorithms, thermal/current protection, watchdog, fault management |
 | `docs/CAN_PROTOCOL.md` | CAN bus parameters, timing, and filter configuration |
 | `docs/ESP32_STM32_CAN_CONNECTION.md` | Physical layer and hardware wiring |

@@ -29,7 +29,7 @@ struct HeartbeatData {
     uint8_t           aliveCounter = 0;
     can::SystemState  systemState  = can::SystemState::BOOT;
     uint8_t           faultFlags   = 0;
-    uint8_t           reserved     = 0;
+    uint8_t           errorCode    = 0;
     unsigned long     timestampMs  = 0;
 };
 

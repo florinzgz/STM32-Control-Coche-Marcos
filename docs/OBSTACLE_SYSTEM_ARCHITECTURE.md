@@ -183,11 +183,15 @@ Where:
   raw_pedal       = ADC_ReadPedal()                         (STM32 ADC)
   filtered_pedal  = EMA(raw_pedal, α=0.15)                  (noise filter)
   ramped_pedal    = ramp_limit(filtered, 50%/s↑, 100%/s↓)   (rate limit)
+  power_limit     = Safety_GetPowerLimitFactor():
+    ACTIVE   → 1.0 (100 %)
+    DEGRADED → 0.4 (40 %, traced to limp_mode.cpp POWER_LIMP)
+  validated_pedal = ramped_pedal × power_limit              (upstream in Safety_ValidateThrottle)
   gear_scale      = 0.6 (D1), 1.0 (D2), 0.6 (R)            (gear power)
 
   --- Dynamic Braking (if throttle dropping) ---
   dynamic_brake   = |throttle_rate| × 0.5                    (max 60%)
-  effective_demand = ramped_pedal - dynamic_brake             (can go negative)
+  effective_demand = validated_pedal - dynamic_brake          (can go negative)
 
   --- Base PWM ---
   base_pwm        = |effective_demand| × (PWM_PERIOD / 100) × gear_scale

@@ -1,7 +1,7 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.1
-**Status:** ACTIVE — Updated for obstacle safety integration
+**Revision:** 1.2
+**Status:** ACTIVE — Updated for integration audit corrections
 **Date:** 2026-02-13
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
@@ -10,6 +10,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 **Change log:**
 - **1.0** (2025-06-15): Initial frozen contract. Baseline safety system.
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
+- **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
 
 ---
 
@@ -88,6 +89,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x204 | STATUS_STEERING | 3 | 100 ms | Actual steering angle and calibration flag | `can_handler.c`, `main.c` |
 | 0x205 | STATUS_TRACTION | 4 | 100 ms | Per-wheel traction scale (ABS/TCS) | `can_handler.c`, `main.c` |
 | 0x206 | STATUS_TEMP_MAP | 5 | 1000 ms | Explicit temperature sensor mapping (FL/FR/RL/RR/AMB) | `can_handler.c`, `main.c` |
+| 0x207 | STATUS_BATTERY | 4 | 100 ms | Battery bus current and voltage (INA226, 24 V bus) | `can_handler.c`, `main.c` |
 
 ### 3.3 Bidirectional (Diagnostic)
 
@@ -106,7 +108,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0 | alive_counter | uint8 | Incrementing counter, 0–255, intentional rollover |
 | 1 | system_state | uint8 | Current system state (see section 6) |
 | 2 | fault_flags | uint8 | Bitmask of active faults (see section 6) |
-| 3 | reserved | uint8 | Always 0x00 in current firmware |
+| 3 | error_code | uint8 | Current safety error code (Safety_Error_t, 0–12; see section 7) |
 
 Source: `CAN_SendHeartbeat()` in `can_handler.c`
 
@@ -261,7 +263,18 @@ The existing STATUS_TEMP (0x202) message is unchanged and continues to transmit 
 
 Source: `CAN_SendStatusTempMap()` in `can_handler.c`, called from `main.c`
 
-### 4.13 DIAG_ERROR (0x300) — Both Directions
+### 4.13 STATUS_BATTERY (0x207) — STM32 → ESP32
+
+| Bytes | Field | Type | Unit | Description |
+|-------|-------|------|------|-------------|
+| 0–1 | battery_current | uint16 LE | 0.01 A | Battery bus current (INA226, 100 A shunt) |
+| 2–3 | battery_voltage | uint16 LE | 0.01 V | Battery bus voltage (24 V nominal) |
+
+Encoding at source: `(uint16_t)(Current_GetAmps(INA226_CHANNEL_BATTERY) * 100)` and `(uint16_t)(Voltage_GetBus(INA226_CHANNEL_BATTERY) * 100)`.
+
+Source: `CAN_SendStatusBattery()` in `can_handler.c`, called from `main.c`
+
+### 4.14 DIAG_ERROR (0x300) — Both Directions
 
 | Byte | Field | Type | Description |
 |------|-------|------|-------------|
@@ -270,7 +283,7 @@ Source: `CAN_SendStatusTempMap()` in `can_handler.c`, called from `main.c`
 
 Source: `CAN_SendError()` in `can_handler.c`
 
-### 4.14 OBSTACLE_DISTANCE (0x208) — ESP32 → STM32
+### 4.15 OBSTACLE_DISTANCE (0x208) — ESP32 → STM32
 
 | Byte | Field | Type | Unit | Range | Description |
 |------|-------|------|------|-------|-------------|
@@ -300,7 +313,7 @@ The rolling counter is checked for stale-data detection. If the counter does not
 
 Source: `CAN_ProcessMessages()` and `Obstacle_ProcessCAN()` in `safety_system.c`
 
-### 4.15 OBSTACLE_SAFETY (0x209) — ESP32 → STM32
+### 4.16 OBSTACLE_SAFETY (0x209) — ESP32 → STM32
 
 | Byte | Field | Type | Description |
 |------|-------|------|-------------|
@@ -344,7 +357,7 @@ The ESP32 must never assume that a requested value has been applied. It must rea
 | Byte 0 | alive_counter — cyclic 0–255, intentional rollover |
 | Byte 1 | system_state — see table below |
 | Byte 2 | fault_flags — see bitmask table below |
-| Byte 3 | reserved — 0x00 |
+| Byte 3 | error_code — current `Safety_Error_t` value (0–12; see §7) for HMI fault display |
 
 **System states (byte 1):**
 
@@ -420,7 +433,7 @@ Source: `Safety_CheckCANTimeout()` in `safety_system.c`
 | 1 | SAFETY_ERROR_OVERCURRENT | Any motor current > 25 A |
 | 2 | SAFETY_ERROR_OVERTEMP | Any motor temperature > 90 °C |
 | 3 | SAFETY_ERROR_CAN_TIMEOUT | No ESP32 heartbeat for > 250 ms |
-| 4 | SAFETY_ERROR_SENSOR_FAULT | Sensor plausibility check failed (temperature outside −40 to 125 °C, current negative or > 50 A, speed negative or > 60 km/h) |
+| 4 | SAFETY_ERROR_SENSOR_FAULT | Sensor plausibility check failed (temperature outside −40 to 125 °C, current negative or > 50 A, speed negative or > 25 km/h) |
 | 5 | SAFETY_ERROR_MOTOR_STALL | Reserved (not implemented in current firmware) |
 | 6 | SAFETY_ERROR_EMERGENCY_STOP | Emergency stop triggered |
 | 7 | SAFETY_ERROR_WATCHDOG | Independent watchdog timeout (IWDG, 500 ms period) |
@@ -482,7 +495,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | Motor overtemperature | > 90 °C on any sensor | `Safety_CheckTemperature()` |
 | Temperature out of range | < -40 °C or > 125 °C | `Safety_CheckSensors()` |
 | Current out of range | < 0 A or > 50 A | `Safety_CheckSensors()` |
-| Wheel speed out of range | < 0 or > 60 km/h | `Safety_CheckSensors()` |
+| Wheel speed out of range | < 0 or > 25 km/h | `Safety_CheckSensors()` |
 | Battery critical undervoltage | < 18.0 V or sensor failure | `Safety_CheckBatteryVoltage()` |
 | Obstacle emergency distance | < 200 mm reported via CAN 0x208 | `Obstacle_Update()` |
 | Obstacle CAN timeout | > 500 ms without 0x208 message (after first reception) | `Obstacle_Update()` |
@@ -524,11 +537,11 @@ This document describes the CAN protocol as implemented in the current firmware.
 
 | Property | Value |
 |----------|-------|
-| Contract revision | 1.1 |
-| Previous revision | 1.0 (`v1.0-stm32-safety-baseline`) |
+| Contract revision | 1.2 |
+| Previous revision | 1.1 |
 | Contract status | ACTIVE |
 | Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
-| Backward compatibility | Revision 1.1 is backward-compatible with 1.0. All 1.0 messages are unchanged. New obstacle messages (0x208, 0x209) are additive. The STM32 operates normally without obstacle messages until the first 0x208 is received. |
+| Backward compatibility | Revision 1.2 is backward-compatible with 1.1 and 1.0. No CAN IDs, payload layouts, or timing changed. Documentation corrected to match existing code behavior. |
 
 The source files that define this contract are:
 
@@ -540,3 +553,5 @@ The source files that define this contract are:
 | `Core/Src/safety_system.c` | Safety logic, thresholds, command validation, fail-safe actions |
 | `Core/Src/main.c` | Main loop timing, status message encoding and transmission |
 | `Core/Inc/main.h` | Hardware pin definitions, sensor counts |
+| `esp32/include/can_ids.h` | ESP32-side CAN ID definitions, timing constants, state/fault enums |
+| `esp32/src/can_rx.cpp` | ESP32-side CAN RX decoding |
