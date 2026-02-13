@@ -153,6 +153,7 @@ float         Safety_GetPowerLimitFactor(void);
 /* Relay power sequencing */
 void Relay_PowerUp(void);
 void Relay_PowerDown(void);
+void Relay_SequencerUpdate(void);
 
 /* Command validation – returns clamped/safe value */
 float   Safety_ValidateThrottle(float requested_pct);

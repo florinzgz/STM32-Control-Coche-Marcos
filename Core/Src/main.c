@@ -97,6 +97,11 @@ int main(void)
              * emergency distance or CAN timeout is detected.          */
             Obstacle_Update();
 
+            /* Non-blocking relay sequencer — progresses the power-up
+             * sequence (Main → Traction → Direction) using timestamps
+             * instead of blocking HAL_Delay calls.                     */
+            Relay_SequencerUpdate();
+
             /* Run automatic centering during BOOT / STANDBY.
              * Once complete, Steering_ControlLoop() takes over. */
             if (!SteeringCentering_IsComplete() &&
