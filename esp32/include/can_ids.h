@@ -27,7 +27,7 @@ inline constexpr uint8_t  CAN_MAX_PAYLOAD      = 8;        // Classic CAN
 inline constexpr uint32_t HEARTBEAT_ESP32       = 0x011;    // DLC —, 100 ms
 inline constexpr uint32_t CMD_THROTTLE          = 0x100;    // DLC 1, 50 ms
 inline constexpr uint32_t CMD_STEERING          = 0x101;    // DLC 2, 50 ms
-inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 1, on-demand
+inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 2 (byte0=mode flags, byte1=gear), on-demand
 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  Status / Heartbeat (§3.2)
@@ -59,11 +59,12 @@ inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DL
 // System States — HEARTBEAT_STM32 byte 1 (§6)
 // -------------------------------------------------------------------------
 enum class SystemState : uint8_t {
-    BOOT    = 0,    // Power-on, peripherals initializing
-    STANDBY = 1,    // Ready, waiting for ESP32 heartbeat
-    ACTIVE  = 2,    // Normal operation, commands accepted
-    SAFE    = 3,    // Fault detected, actuators inhibited
-    ERROR   = 4     // Unrecoverable fault, manual reset required
+    BOOT     = 0,    // Power-on, peripherals initializing
+    STANDBY  = 1,    // Ready, waiting for ESP32 heartbeat
+    ACTIVE   = 2,    // Normal operation, commands accepted
+    DEGRADED = 3,    // Limp / degraded — commands accepted with reduced limits
+    SAFE     = 4,    // Fault detected, actuators inhibited
+    ERROR    = 5     // Unrecoverable fault, manual reset required
 };
 
 // -------------------------------------------------------------------------

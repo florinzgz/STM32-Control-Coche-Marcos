@@ -18,13 +18,14 @@ The STM32 reports its `system_state` in byte 1 of the heartbeat message (0x001).
 | BOOT | 0 | **Boot / Splash** | Static brand splash. No interactive elements. |
 | STANDBY | 1 | **Standby / Ready** | System ready indicator. Waiting for ACTIVE transition. |
 | ACTIVE | 2 | **Drive Dashboard** | Full operational display with live telemetry. |
-| SAFE | 3 | **Safe-Mode Alert** | Prominent safety warning. Limited telemetry visible. |
-| ERROR | 4 | **Error / Shutdown** | Unrecoverable-fault screen. No controls available. |
+| DEGRADED | 3 | **Drive Dashboard (degraded)** | Degraded / limp mode. Drive dashboard with reduced-power indicator. Commands accepted with limits (40% power, 50% speed). |
+| SAFE | 4 | **Safe-Mode Alert** | Prominent safety warning. Limited telemetry visible. |
+| ERROR | 5 | **Error / Shutdown** | Unrecoverable-fault screen. No controls available. |
 
 ### Transition Rules
 
 - The HMI must change screens within **one heartbeat cycle (≤ 100 ms)** of receiving a new `system_state` value.
-- If `system_state` is outside the range 0–4, the HMI must treat it as equivalent to ERROR (4) and display the Error / Shutdown screen.
+- If `system_state` is outside the range 0–5, the HMI must treat it as equivalent to ERROR (5) and display the Error / Shutdown screen.
 - Screen transitions are **one-way followers** of the STM32 state. The HMI never requests or influences a state change.
 
 ---
@@ -69,7 +70,15 @@ The STM32 reports its `system_state` in byte 1 of the heartbeat message (0x001).
 | Steering request widget | Yes | Sends 0x101 |
 | Mode request widget | Yes | Sends 0x102 |
 
-### 2.4 SAFE (system_state = 3)
+### 2.4 DEGRADED (system_state = 3)
+
+| Element | Visible | Source |
+|---------|---------|--------|
+| All ACTIVE elements | Yes | Same as ACTIVE (§2.3) |
+| **"DEGRADED MODE" indicator** | Yes — amber overlay | State value |
+| Power limit indicator (40%) | Yes | Informational — STM32 enforces |
+
+### 2.5 SAFE (system_state = 4)
 
 | Element | Visible | Source |
 |---------|---------|--------|
@@ -82,7 +91,7 @@ The STM32 reports its `system_state` in byte 1 of the heartbeat message (0x001).
 | Steering angle | Yes (read-only) | 0x204 |
 | Throttle / steering / mode controls | **Disabled** | — |
 
-### 2.5 ERROR (system_state = 4)
+### 2.6 ERROR (system_state = 5)
 
 | Element | Visible | Source |
 |---------|---------|--------|
@@ -98,19 +107,19 @@ The STM32 reports its `system_state` in byte 1 of the heartbeat message (0x001).
 
 ## 3. User Actions — Allowed vs. Blocked
 
-| Action | BOOT | STANDBY | ACTIVE | SAFE | ERROR |
-|--------|------|---------|--------|------|-------|
-| View telemetry | ✗ | Partial | ✓ | ✓ (read-only) | Frozen |
-| Send throttle (0x100) | ✗ | ✗ | ✓ | **✗** | **✗** |
-| Send steering (0x101) | ✗ | ✗ | ✓ | **✗** | **✗** |
-| Send mode change (0x102) | ✗ | ✗ | ✓ | **✗** | **✗** |
-| Acknowledge fault overlay | ✗ | ✗ | ✗ | ✓ (dismiss banner, not fault) | ✗ |
-| Access engineering menu | ✗ | ✓ (see §6) | **✗** | ✗ | ✓ (see §6) |
-| Scroll / navigate screens | ✗ | ✓ | ✓ | Limited | ✗ |
+| Action | BOOT | STANDBY | ACTIVE | DEGRADED | SAFE | ERROR |
+|--------|------|---------|--------|----------|------|-------|
+| View telemetry | ✗ | Partial | ✓ | ✓ | ✓ (read-only) | Frozen |
+| Send throttle (0x100) | ✗ | ✗ | ✓ | ✓ (limited) | **✗** | **✗** |
+| Send steering (0x101) | ✗ | ✗ | ✓ | ✓ (limited) | **✗** | **✗** |
+| Send mode change (0x102) | ✗ | ✗ | ✓ | ✓ (limited) | **✗** | **✗** |
+| Acknowledge fault overlay | ✗ | ✗ | ✗ | ✓ (dismiss banner, not fault) | ✓ (dismiss banner, not fault) | ✗ |
+| Access engineering menu | ✗ | ✓ (see §6) | **✗** | **✗** | ✗ | ✓ (see §6) |
+| Scroll / navigate screens | ✗ | ✓ | ✓ | ✓ | Limited | ✗ |
 
 ### Blocking Enforcement
 
-- When a control is blocked, the HMI must **not transmit** the corresponding CAN command. Greying-out a widget is insufficient by itself; the CAN TX path must be gated on `system_state == 2`.
+- When a control is blocked, the HMI must **not transmit** the corresponding CAN command. Greying-out a widget is insufficient by itself; the CAN TX path must be gated on `system_state == 2` (ACTIVE) or `system_state == 3` (DEGRADED).
 - The STM32 will independently reject commands received outside ACTIVE state, but the HMI must not rely on this as the sole guard.
 
 ---
@@ -200,7 +209,7 @@ The HMI monitors arrival of the STM32 heartbeat (CAN ID 0x001). If no frame with
   1. Clear the "HEARTBEAT LOST" overlay.
   2. Resume reading `system_state` from the newly received heartbeat.
   3. Transition to the screen dictated by the current `system_state` (§1).
-  4. Re-enable CAN command transmission **only if** `system_state == ACTIVE (2)`.
+  4. Re-enable CAN command transmission **only if** `system_state == ACTIVE (2)` or `system_state == DEGRADED (3)`.
   5. Unfreeze telemetry gauges and remove stale markers.
 
 ---
@@ -215,7 +224,7 @@ An engineering menu provides diagnostic data, CAN bus statistics, raw register v
 
 | Condition | Required |
 |-----------|----------|
-| `system_state` must be STANDBY (1) **or** ERROR (4) | **Yes** |
+| `system_state` must be STANDBY (1) **or** ERROR (5) | **Yes** |
 | A specific multi-step gesture or key sequence must be performed | **Yes** |
 | Vehicle wheel speed must be 0 on all four channels (0x200 all zeros) | **Yes** |
 | No FAULT_CAN_TIMEOUT (bit 0 of fault_flags) active | **Yes** |
@@ -229,8 +238,9 @@ All four conditions must be satisfied simultaneously. If any condition ceases to
 | BOOT (0) | **Forbidden** — system not yet initialized |
 | STANDBY (1) | Allowed (if all entry conditions met) |
 | ACTIVE (2) | **Forbidden** — vehicle may be in motion; no engineering access permitted |
-| SAFE (3) | **Forbidden** — active fault must be resolved first |
-| ERROR (4) | Allowed (if all entry conditions met) — for post-mortem diagnostics |
+| DEGRADED (3) | **Forbidden** — vehicle is in degraded drive mode; no engineering access permitted |
+| SAFE (4) | **Forbidden** — active fault must be resolved first |
+| ERROR (5) | Allowed (if all entry conditions met) — for post-mortem diagnostics |
 
 ### 6.4 Engineering Menu Contents
 
@@ -248,7 +258,7 @@ The engineering menu may display the following read-only data:
 - The engineering menu must **never** transmit any CAN command (0x100, 0x101, 0x102).
 - The engineering menu must **never** allow modification of safety parameters, CAN filter settings, or calibration values.
 - The engineering menu must **never** allow the operator to override, mask, or dismiss active faults.
-- If `system_state` transitions to ACTIVE (2) while the engineering menu is open, the menu must close within one heartbeat cycle.
+- If `system_state` transitions to ACTIVE (2) or DEGRADED (3) while the engineering menu is open, the menu must close within one heartbeat cycle.
 
 ---
 
@@ -256,7 +266,7 @@ The engineering menu may display the following read-only data:
 
 The following rules are absolute and apply regardless of software version, configuration, or operator action.
 
-1. **The HMI must not send throttle (0x100), steering (0x101), or mode (0x102) commands when `system_state` is anything other than ACTIVE (2).**
+1. **The HMI must not send throttle (0x100), steering (0x101), or mode (0x102) commands when `system_state` is anything other than ACTIVE (2) or DEGRADED (3).**
 
 2. **The HMI must not suppress, delay, or visually minimize fault overlays derived from `fault_flags` or `error_code`.**
 
@@ -266,11 +276,11 @@ The following rules are absolute and apply regardless of software version, confi
 
 5. **The HMI must not stop sending its heartbeat (0x011).** Heartbeat transmission at 100 ms must continue in every system state, including during fault conditions and heartbeat-loss scenarios.
 
-6. **The HMI must treat any `system_state` value outside the defined range (0–4) as ERROR (4).**
+6. **The HMI must treat any `system_state` value outside the defined range (0–5) as ERROR (5).**
 
 7. **The HMI must disable all actuator commands within one display frame of detecting STM32 heartbeat loss (> 250 ms without 0x001).** Refer to §5.
 
-8. **The HMI must not provide engineering menu access when `system_state` is ACTIVE (2) or SAFE (3).** Refer to §6.3.
+8. **The HMI must not provide engineering menu access when `system_state` is ACTIVE (2), DEGRADED (3), or SAFE (4).** Refer to §6.3.
 
 9. **The HMI must not modify, reinterpret, or extend the CAN message definitions.** All CAN IDs, payloads, and timing are governed by `docs/CAN_CONTRACT_FINAL.md` revision 1.0. Any change requires a new contract revision.
 
