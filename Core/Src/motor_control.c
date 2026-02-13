@@ -594,7 +594,7 @@ void Traction_Update(void)
             safety_status.wheel_scale[i] = 0.0f;
             motor_overtemp_cutoff[i] = true;
             ServiceMode_SetFault(temp_mod, MODULE_FAULT_ERROR);
-            if (safety_error != SAFETY_ERROR_OVERTEMP) {
+            if (Safety_GetError() != SAFETY_ERROR_OVERTEMP) {
                 Safety_SetError(SAFETY_ERROR_OVERTEMP);
             }
         } else if (motor_overtemp_cutoff[i] && motor_temp < MOTOR_TEMP_RECOVERY_C) {
