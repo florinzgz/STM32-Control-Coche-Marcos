@@ -598,6 +598,79 @@ int8_t rate_limit(int8_t current, int8_t target, float dt) {
 
 ---
 
+## 🔄 Corrección Diferencial Ackermann
+
+### Geometría Ackermann para Distribución de Par
+
+Cuando el vehículo gira, las ruedas interiores recorren un arco más corto que
+las exteriores. Sin compensación, las ruedas interiores recibirían más par del
+necesario, provocando subviraje y desgaste desigual de neumáticos.
+
+El sistema utiliza la geometría Ackermann simplificada para ajustar
+automáticamente el par de cada rueda durante los giros.
+
+### Fórmulas
+
+```
+R = wheelbase / tan(|steering_angle|)      Radio de giro (centro del eje trasero)
+
+correction = (track_width / 2) / R         Diferencia fraccional de velocidad
+
+inside_mult  = 1.0 - correction            Ruedas interiores (reducidas)
+outside_mult = 1.0 + correction            Ruedas exteriores (limitado a 1.0)
+```
+
+Donde:
+- `wheelbase` = 0.95 m (distancia entre ejes)
+- `track_width` = 0.70 m (distancia entre ruedas)
+- `steering_angle` = ángulo actual de dirección (de `Steering_GetCurrentAngle()`)
+
+### Parámetros
+
+| Parámetro | Valor | Descripción |
+|-----------|-------|-------------|
+| **Zona muerta** | ±2° | Sin corrección para conducción recta |
+| **Diferencial máximo** | ±15% | Límite de desbalance de par |
+| **Límite por rueda** | ≤ 1.0 | Nunca excede el par base |
+
+### Posición en el Pipeline de Par
+
+```
+base_pwm
+→ axle_split (4x4 50/50)
+→ degraded_limit
+→ obstacle_scale
+→ ackermann_diff[i]          ← NUEVO
+→ wheel_scale[i] (ABS/TCS)
+→ final PWM
+```
+
+### Comportamiento por Ángulo de Dirección
+
+| Ángulo | Corrección | Rueda interior | Rueda exterior |
+|--------|-----------|----------------|----------------|
+| 0° – 2° | 0% | 1.000 | 1.000 |
+| 10° | 6.5% | 0.935 | 1.000 |
+| 20° | 13.4% | 0.866 | 1.000 |
+| ≥ 22.2° | 15% (capped) | 0.850 | 1.000 |
+| 54° (max) | 15% (capped) | 0.850 | 1.000 |
+
+### Convención de Signos
+
+- **Giro izquierdo** (ángulo positivo): ruedas izquierdas = interiores
+- **Giro derecho** (ángulo negativo): ruedas derechas = interiores
+
+### Compatibilidad
+
+- ✅ **ABS**: `wheel_scale[i]` se aplica DESPUÉS de `ackermann_diff[i]` — ambos son multiplicativos
+- ✅ **TCS**: Mismo mecanismo que ABS — corrección Ackermann no interfiere
+- ✅ **obstacle_scale**: Aplicado ANTES de Ackermann — se acumulan multiplicativamente
+- ✅ **Modo degradado**: Power limit se aplica upstream — no afecta la corrección
+- ✅ **Giro sobre eje (tank turn)**: Corrección Ackermann desactivada
+- ✅ **NaN/Inf**: Todos los valores pasan por `sanitize_float()` (default: 1.0)
+
+---
+
 ## 📖 Referencias
 
 - [BTS7960 Datasheet](https://www.infineon.com/dgdl/Infineon-BTS7960-DS-v01_00-EN.pdf?fileId=db3a30433fa9412f013fbe32289b7c17)
@@ -606,6 +679,6 @@ int8_t rate_limit(int8_t current, int8_t target, float dt) {
 
 ---
 
-**Última actualización:** 2026-02-01  
+**Última actualización:** 2026-02-13  
 **Autor:** florinzgz  
 **Proyecto:** STM32-Control-Coche-Marcos

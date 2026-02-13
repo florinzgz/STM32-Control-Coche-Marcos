@@ -449,7 +449,7 @@ for (uint8_t i = 0; i < 4; i++) {
 
 - Coexiste con ABS/TCS (el valor más restrictivo gana)
 - Se aplica **antes** de `sanitize_float()` y **antes** del cálculo de PWM
-- La fórmula final sigue siendo: `FinalPWM = base_pwm × obstacle_scale × wheel_scale[i]`
+- La fórmula final es: `FinalPWM = base_pwm × obstacle_scale × ackermann_diff[i] × wheel_scale[i]`
 - La protección global de 90°C (`Safety_CheckTemperature() → SAFE`) sigue activa
 
 ### Degradación de Asistencia de Dirección en Modo DEGRADED
