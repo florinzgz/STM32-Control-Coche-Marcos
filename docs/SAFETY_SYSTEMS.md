@@ -398,6 +398,60 @@ int8_t apply_thermal_limit(int8_t requested_power) {
 }
 ```
 
+### Protección Térmica de Emergencia Por Motor (130°C)
+
+**Capa de protección hardware adicional** implementada directamente dentro de
+`Traction_Update()` en `motor_control.c`. Es independiente de
+`Safety_CheckTemperature()` y del estado global del sistema.
+
+Trazabilidad: referencia firmware `traction.cpp` →
+`TEMP_EMERGENCY_SHUTDOWN = 130°C` (corte inmediato por motor).
+
+| Nivel | Umbral | Acción | Ámbito |
+|-------|--------|--------|--------|
+| **Emergency Cutoff** | ≥ 130°C | `wheel_scale[i] = 0.0` (motor individual) | Per-motor |
+| **Recovery** | < 115°C | Restaurar `wheel_scale[i]` normal | Per-motor |
+
+**Comportamiento:**
+
+- Si la temperatura del motor `i` alcanza 130°C:
+  - `wheel_scale[i]` se fuerza a `0.0f` → PWM = 0 para ese motor
+  - Los demás motores **NO se ven afectados**
+  - **NO** se fuerza estado SAFE global
+  - **NO** se modifica la demanda global
+  - Se registra fallo ServiceMode (`MODULE_FAULT_ERROR`) para el sensor
+  - Se activa `SAFETY_ERROR_OVERTEMP` si no estaba ya activo
+
+- Cuando la temperatura cae por debajo de 115°C (histéresis de 15°C):
+  - Se permite que `wheel_scale[i]` vuelva al valor normal
+  - Se limpia el fallo del módulo
+  - **NO** se limpia automáticamente el estado SAFE si fue activado por otro motivo
+
+```c
+#define MOTOR_TEMP_CUTOFF_C    130.0f  /* Per-motor emergency cutoff    */
+#define MOTOR_TEMP_RECOVERY_C  115.0f  /* Hysteresis recovery (15°C)    */
+
+// Dentro de Traction_Update():
+for (uint8_t i = 0; i < 4; i++) {
+    float motor_temp = Temperature_Get(i);
+    if (motor_temp >= MOTOR_TEMP_CUTOFF_C) {
+        wheel_scale[i] = 0.0f;          // Corte inmediato
+        motor_overtemp_cutoff[i] = true;
+        ServiceMode_SetFault(temp_mod, MODULE_FAULT_ERROR);
+    } else if (motor_overtemp_cutoff[i] && motor_temp < MOTOR_TEMP_RECOVERY_C) {
+        motor_overtemp_cutoff[i] = false;  // Recuperación por histéresis
+        ServiceMode_ClearFault(temp_mod);
+    }
+}
+```
+
+**Interacción con otras capas de seguridad:**
+
+- Coexiste con ABS/TCS (el valor más restrictivo gana)
+- Se aplica **antes** de `sanitize_float()` y **antes** del cálculo de PWM
+- La fórmula final sigue siendo: `FinalPWM = base_pwm × obstacle_scale × wheel_scale[i]`
+- La protección global de 90°C (`Safety_CheckTemperature() → SAFE`) sigue activa
+
 ---
 
 ## ⚡ Protecciones de Corriente
