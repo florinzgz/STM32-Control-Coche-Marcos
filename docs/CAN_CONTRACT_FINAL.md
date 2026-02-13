@@ -1,11 +1,15 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.0
-**Status:** FROZEN — Locked to release `v1.0-stm32-safety-baseline`
-**Date:** 2025-06-15
+**Revision:** 1.1
+**Status:** ACTIVE — Updated for obstacle safety integration
+**Date:** 2026-02-13
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
 Any change to this contract requires a new numbered revision and a corresponding firmware release.
+
+**Change log:**
+- **1.0** (2025-06-15): Initial frozen contract. Baseline safety system.
+- **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
 
 ---
 
@@ -48,6 +52,8 @@ The STM32 accepts only white-listed CAN IDs. All other messages are rejected at 
 |--------|------|-------------|-------------|
 | 0 | Dual (exact match) | 0x011 (ESP32 heartbeat) | RXFIFO0 |
 | 1 | Range | 0x100 – 0x102 (ESP32 commands) | RXFIFO0 |
+| 2 | Dual (exact match) | 0x110 (ESP32 service commands) | RXFIFO0 |
+| 3 | Range | 0x208 – 0x209 (ESP32 obstacle data) | RXFIFO0 |
 | Global | Reject | Everything else | Discarded |
 
 Remote frames are rejected. Extended-ID frames are rejected.
@@ -66,6 +72,9 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x100 | CMD_THROTTLE | 1 | 50 ms | Throttle request (percent) | `can_handler.c` |
 | 0x101 | CMD_STEERING | 2 | 50 ms | Steering angle request (raw units) | `can_handler.c` |
 | 0x102 | CMD_MODE | 2 | On-demand | Drive mode + gear request (byte0=mode flags, byte1=gear) | `can_handler.c` |
+| 0x110 | SERVICE_CMD | 2 | On-demand | Service mode module control command | `can_handler.c` |
+| 0x208 | OBSTACLE_DISTANCE | 5 | 66 ms | Obstacle distance + zone + sensor health + rolling counter | `can_handler.c` |
+| 0x209 | OBSTACLE_SAFETY | 8 | 100 ms | Obstacle safety state (informational, reserved) | `can_handler.c` |
 
 ### 3.2 STM32 → ESP32 (Status / Heartbeat)
 
@@ -261,6 +270,51 @@ Source: `CAN_SendStatusTempMap()` in `can_handler.c`, called from `main.c`
 
 Source: `CAN_SendError()` in `can_handler.c`
 
+### 4.14 OBSTACLE_DISTANCE (0x208) — ESP32 → STM32
+
+| Byte | Field | Type | Unit | Range | Description |
+|------|-------|------|------|-------|-------------|
+| 0 | distance_LSB | uint8 | — | — | Low byte of minimum obstacle distance |
+| 1 | distance_MSB | uint8 | — | — | High byte of minimum obstacle distance |
+| 2 | zone | uint8 | — | 0–5 | Obstacle proximity zone (0=none, 5=emergency) |
+| 3 | sensor_health | uint8 | — | 0–1 | 0 = sensor unhealthy, 1 = sensor healthy |
+| 4 | counter | uint8 | — | 0–255 | Rolling counter, must increment each frame |
+
+Decoding: `uint16_t distance_mm = byte[0] | (byte[1] << 8)`
+
+The STM32 uses distance_mm to compute an independent `obstacle_scale` factor (0.0–1.0):
+- distance < 200 mm → scale = 0.0, transitions to SAFE state
+- distance 200–500 mm → scale = 0.3
+- distance 500–1000 mm → scale = 0.7
+- distance > 1000 mm → scale = 1.0
+
+The rolling counter is checked for stale-data detection. If the counter does not change for 3 consecutive frames, the data is considered frozen and the STM32 triggers SAFE state (obstacle_scale = 0.0).
+
+**Timeout behavior:** If no 0x208 message is received for > 500 ms, the STM32 applies obstacle_scale = 0.0 and transitions to SAFE state. Recovery requires 3+ valid frames with incrementing counter.
+
+**Validation rules:**
+- DLC must be ≥ 5 (messages with DLC < 5 are silently dropped)
+- Zone must be 0–5 (values > 5 are clamped to 0)
+- Counter must increment between frames (frozen counter = stale data)
+- Sensor health = 0 triggers SAFE state regardless of distance
+
+Source: `CAN_ProcessMessages()` and `Obstacle_ProcessCAN()` in `safety_system.c`
+
+### 4.15 OBSTACLE_SAFETY (0x209) — ESP32 → STM32
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | speedReductionFactor | uint8 | ESP32-computed factor × 100 (0–100). Informational only. |
+| 1 | emergencyBrakeApplied | uint8 | 1 = ESP32 has applied emergency brake logic |
+| 2 | collisionImminent | uint8 | 1 = ESP32 detects collision risk |
+| 3 | obstacleZone | uint8 | ESP32-computed zone (0–5) |
+| 4 | childReactionDetected | uint8 | 1 = child reaction detected by ESP32 |
+| 5–7 | reserved | uint8 | Always 0x00 |
+
+This message is **informational only** — the STM32 does NOT use these values for safety decisions. The STM32 computes its own `obstacle_scale` independently from the raw distance data in 0x208. This message is accepted by the CAN filter but not parsed, reserved for future ESP32→STM32 coordination.
+
+Source: `CAN_ProcessMessages()` in `can_handler.c`
+
 ---
 
 ## 5. Requested vs. Actual Signals
@@ -373,6 +427,8 @@ Source: `Safety_CheckCANTimeout()` in `safety_system.c`
 | 8 | SAFETY_ERROR_CENTERING | Steering centering failed during boot |
 | 9 | SAFETY_ERROR_BATTERY_UV_WARNING | Battery bus voltage < 20.0 V → DEGRADED (40 % power limit). Recovery requires > 20.5 V (0.5 V hysteresis). |
 | 10 | SAFETY_ERROR_BATTERY_UV_CRITICAL | Battery bus voltage < 18.0 V or sensor failure → SAFE (actuators inhibited). No auto-recovery; operator must recharge and reset. |
+| 11 | SAFETY_ERROR_I2C_FAILURE | I2C bus locked / unrecoverable |
+| 12 | SAFETY_ERROR_OBSTACLE | Obstacle emergency (distance < 200 mm), obstacle CAN timeout (> 500 ms), sensor unhealthy, or stale data detected → SAFE (actuators inhibited). Auto-recovery when distance > 500 mm for > 1 s with healthy sensor. |
 
 Source: `Safety_Error_t` in `safety_system.h`, threshold defines in `safety_system.c`
 
@@ -411,7 +467,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ### Messages That Are Ignored
 
-- Any CAN ID not in the set {0x011, 0x100, 0x101, 0x102} is hardware-filtered and never reaches the STM32 application.
+- Any CAN ID not in the set {0x011, 0x100, 0x101, 0x102, 0x110, 0x208, 0x209} is hardware-filtered and never reaches the STM32 application.
 - A `CMD_THROTTLE` (0x100) with DLC < 1 is silently dropped.
 - A `CMD_STEERING` (0x101) with DLC < 2 is silently dropped.
 - A `CMD_MODE` (0x102) with DLC < 1 is silently dropped. If DLC < 2, only byte 0 (mode flags) is processed; gear remains unchanged.
@@ -428,6 +484,10 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | Current out of range | < 0 A or > 50 A | `Safety_CheckSensors()` |
 | Wheel speed out of range | < 0 or > 60 km/h | `Safety_CheckSensors()` |
 | Battery critical undervoltage | < 18.0 V or sensor failure | `Safety_CheckBatteryVoltage()` |
+| Obstacle emergency distance | < 200 mm reported via CAN 0x208 | `Obstacle_Update()` |
+| Obstacle CAN timeout | > 500 ms without 0x208 message (after first reception) | `Obstacle_Update()` |
+| Obstacle sensor unhealthy | Sensor health = 0 in CAN 0x208 | `Obstacle_Update()` |
+| Obstacle stale data | Rolling counter frozen for ≥ 3 frames | `Obstacle_Update()` |
 
 ### Conditions That Force ERROR State (Unrecoverable)
 
@@ -460,15 +520,15 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the firmware tagged `v1.0-stm32-safety-baseline`.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.1 adds obstacle safety CAN messages (0x208, 0x209) while maintaining backward compatibility with revision 1.0 — existing messages are unchanged.
 
 | Property | Value |
 |----------|-------|
-| Contract revision | 1.0 |
-| Firmware tag | `v1.0-stm32-safety-baseline` |
-| Contract status | FROZEN |
-| Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a new firmware release tag. |
-| Backward compatibility | Not guaranteed across revisions. Each revision is self-contained. |
+| Contract revision | 1.1 |
+| Previous revision | 1.0 (`v1.0-stm32-safety-baseline`) |
+| Contract status | ACTIVE |
+| Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
+| Backward compatibility | Revision 1.1 is backward-compatible with 1.0. All 1.0 messages are unchanged. New obstacle messages (0x208, 0x209) are additive. The STM32 operates normally without obstacle messages until the first 0x208 is received. |
 
 The source files that define this contract are:
 

@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Date** | 2026-02-12 |
+| **Document Version** | 1.1 |
+| **Date** | 2026-02-13 |
 | **Current Repository** | STM32-Control-Coche-Marcos (STM32G474RE + ESP32-S3 HMI) |
 | **Reference Repository** | FULL-FIRMWARE-Coche-Marcos (ESP32-S3 monolithic, v2.17.1 PHASE 14) |
 | **Scope** | Analysis & Documentation only — no code changes |
@@ -34,7 +34,8 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 ### Key Findings
 
 - **Core motor control, safety state machine, ABS/TCS, CAN protocol, and sensor management** are fully implemented and functional in the current STM32 firmware.
-- **Regenerative braking, obstacle detection/avoidance, AI regen logic, advanced limp mode, power management sequencing, and HMI graphics** are not yet implemented — these existed only in the monolithic ESP32 reference firmware.
+- **Obstacle safety integration** is implemented as a CAN-based backstop limiter on the STM32. The ESP32 runs the full 5-zone obstacle detection stack and transmits distance data via CAN (0x208). The STM32 applies a simplified 3-tier safety limiter through the torque pipeline. *(Updated 2026-02-13)*
+- **Regenerative braking, AI regen logic, advanced limp mode, power management sequencing, and HMI graphics** are not yet implemented — these existed only in the monolithic ESP32 reference firmware.
 - **The split architecture (STM32 + ESP32) is fundamentally sound** and superior to the monolithic approach for safety-critical applications. The STM32G474RE provides deterministic real-time control that the ESP32 cannot guarantee.
 - **No core design flaws were detected.** The current architecture is scalable and supports incremental feature addition without refactoring.
 - **Overall maturity: STABLE** — the firmware provides a safe, functional vehicle control layer with room for feature expansion.
@@ -74,14 +75,14 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Battery Protection** | FULL | Battery bus current/voltage monitored via INA226 (channel 4, 0.5 mΩ shunt). CAN message 0x207 reports values. Undervoltage protection: warning at 20.0 V (DEGRADED, 40% power limit), critical at 18.0 V (SAFE, actuators inhibited). 0.5 V hysteresis. No auto-recovery from SAFE. Sensor failure treated as critical. No SOC estimation, no charge protection logic. |
 | **Encoder Handling** | FULL | E6B2-CWZ6C quadrature encoder via TIM2 (4800 CPR). Range check (±987 counts = ±74°), jump detection (>100 counts/cycle), frozen detection (>200 ms with motor active >10%). |
 | **Wheel Speed Processing** | FULL | 4× LJ12A3 inductive sensors via EXTI interrupts, 1 ms debounce, speed = (pulses/CPR) × circumference × 3.6. 6 pulses/rev, 1.1 m circumference. |
-| **CAN Protocol** | FULL | Frozen contract v1.0. 500 kbps, 11-bit IDs. Hardware RX white-list filters. 12 TX message types (0x001, 0x200–0x207, 0x301–0x303). 4 RX message types (0x011, 0x100–0x102, 0x110). TX/RX statistics tracking. |
+| **CAN Protocol** | FULL | Contract revision 1.1 *(Updated 2026-02-13)*. 500 kbps, 11-bit IDs. Hardware RX white-list filters (4 filter banks). 12 TX message types (0x001, 0x200–0x207, 0x301–0x303). 6 RX message types (0x011, 0x100–0x102, 0x110, 0x208–0x209). TX/RX statistics tracking. Obstacle CAN messages added in rev 1.1. |
 | **HMI Integration Model** | FULL | ESP32-S3 connected via CAN. Screen states (Boot/Standby/Drive/Safe/Error) driven by STM32 system state. Stub screen implementations ready for TFT graphics library. CAN contract frozen. |
 | **Service Mode** | FULL | 25 modules classified as CRITICAL (4) or NON-CRITICAL (21). Per-module fault tracking (NONE/WARNING/ERROR/DISABLED). CAN commands (0x110) for enable/disable/factory-restore. Status broadcast (0x301–0x303). |
 | **Degraded / Limp Mode** | PARTIAL | DEGRADED state exists with 40% power limit. Basic concept implemented. Missing: granular power/steering/speed limiting per degradation level, drive-home prioritization logic, diagnostic struct as in reference LimpMode. |
 | **Fault Reporting** | FULL | Error codes via CAN (0x203 safety status, 0x300–0x303 diagnostics/service). Per-module fault bitmasks. Heartbeat includes fault flags and error code. |
 | **Steering Calibration** | FULL | Automatic centering via inductive sensor (PB5). Sweep left/right at low PWM (10%), stall detection (300 ms), total timeout (10 s), range limit (6000 counts). State machine: IDLE → SWEEP_LEFT → SWEEP_RIGHT → DONE/FAULT. |
-| **Obstacle Detection** | NONE | Not implemented. Reference has TOFSense-M S LiDAR sensor (UART), proximity levels (SAFE/CAUTION/WARNING/CRITICAL), distance zones, fail-safe behavior. |
-| **Obstacle Safety / Avoidance** | NONE | Not implemented. Reference has parking assist, collision avoidance, emergency stop, speed reduction factor, blind spot (reserved), adaptive cruise coordination. |
+| **Obstacle Detection** | STM32: BACKSTOP / ESP32: FULL *(Updated 2026-02-13)* | STM32 receives distance via CAN (0x208) and applies 3-tier backstop limiter (0/200/500/1000mm → scale 0.0/0.3/0.7/1.0). CAN timeout (500ms) and stale-data detection trigger SAFE state. Full 5-zone detection with UART sensor parsing, child reaction, ACC remains ESP32-side only. See `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`. |
+| **Obstacle Safety / Avoidance** | STM32: BACKSTOP / ESP32: FULL *(Updated 2026-02-13)* | STM32 safety backstop: obstacle_scale applied in torque pipeline, SAFE state for emergency distances. ESP32-side only: 5-zone speedReductionFactor, child reaction detection, parking assist, adaptive cruise coordination, audio alerts. |
 | **AI Regen Logic** | NONE | Not implemented. Reference has lookup-table-based AI model with speed/acceleration/SOC/temperature/slope inputs, energy recovery tracking, confidence scoring. |
 | **Energy Recovery Tracking** | NONE | Not implemented. No Wh counters, no regen cycle counting. |
 | **SOC Estimation** | NONE | Not implemented. Battery voltage/current monitored but no state-of-charge algorithm. |
@@ -146,7 +147,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Mode change speed gate (below 1 km/h)
 - [✓] Consecutive error counting with escalation (≥3 → DEGRADED→SAFE)
 - [~] Degraded/limp mode (basic 40% power limit exists; lacks granular per-subsystem limiting as in reference limp_mode.cpp with NORMAL/DEGRADED/LIMP/CRITICAL states)
-- [ ] Obstacle collision avoidance (reference: obstacle_safety.cpp — parking assist, emergency stop, speed reduction)
+- [✓] Obstacle collision avoidance — STM32 backstop limiter (3-tier distance→scale, CAN timeout, stale-data detection, SAFE state for emergencies). Full 5-zone logic remains ESP32-side. *(Implemented 2026-02-13)*
 - [ ] Battery undervoltage cutoff (reference: limp_mode.cpp checks batteryUndervoltage)
 - [ ] Sensor plausibility cross-validation (reference: SensorManagerEnhanced.cpp)
 - [ ] Redundant safety checks (reference: SafetyManagerEnhanced.cpp)
@@ -160,14 +161,14 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] 6× INA226 current sensors (I2C via TCA9548A multiplexer)
 - [✓] 5× DS18B20 temperature sensors (OneWire bit-bang, CRC-8 validation)
 - [✓] Battery bus current/voltage (INA226 channel 4)
-- [ ] Obstacle detection sensors (reference: TOFSense-M S LiDAR via UART)
+- [ ] Obstacle detection sensors (reference: TOFSense-M S LiDAR via UART) — Sensor remains ESP32-side. STM32 receives processed data via CAN 0x208. *(Architecture defined 2026-02-13)*
 - [✓] I2C bus recovery mechanism (SCL clock cycling, STOP condition, safe-state fallback — NXP AN10216)
 - [~] Sensor data filtering (pedal has EMA; wheel speed and current use raw values — reference has dedicated filters.cpp module with multiple filter types)
 
 ### 3.4 CAN Communication
 
 - [✓] FDCAN1 at 500 kbps (classic CAN 2.0A mode)
-- [✓] Hardware RX white-list filters (3 filter banks)
+- [✓] Hardware RX white-list filters (4 filter banks — updated for obstacle messages) *(Updated 2026-02-13)*
 - [✓] Heartbeat TX (0x001, 100 ms) with counter, state, fault flags
 - [✓] Heartbeat RX (0x011) with timeout monitoring
 - [✓] Throttle command RX (0x100) with safety validation
@@ -184,6 +185,8 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Battery status TX (0x207, current + voltage)
 - [✓] Service status TX (0x301–0x303, fault/enabled/disabled masks)
 - [✓] TX/RX statistics tracking
+- [✓] Obstacle distance RX (0x208, 66 ms) — CAN-based backstop limiter *(Added 2026-02-13)*
+- [✓] Obstacle safety RX (0x209, 100 ms) — informational, reserved *(Added 2026-02-13)*
 - [~] CAN error handling (basic — could add CAN bus-off recovery, error frame counting)
 
 ### 3.5 HMI (ESP32-S3)
@@ -226,8 +229,9 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [ ] Regen AI logic (reference: regen_ai.cpp — lookup-table model, feature extraction, confidence scoring)
 - [ ] Energy recovery tracking (reference: RegenAI::State.energyRecovered in Wh)
 - [ ] SOC estimation (reference: RegenAI::Features.batterySOC)
-- [ ] Obstacle avoidance logic (reference: obstacle_safety.cpp — 5-zone distance system, emergency braking)
-- [ ] Obstacle detection (reference: obstacle_detection.cpp — TOFSense-M S LiDAR, UART protocol parser)
+- [✓] Obstacle avoidance logic (STM32 backstop) — 3-tier distance→scale mapping, CAN timeout detection, stale-data detection, SAFE state for emergencies. *(Implemented 2026-02-13)*
+- [ ] Obstacle detection (reference: obstacle_detection.cpp — TOFSense-M S LiDAR, UART protocol parser) — Remains ESP32-side. STM32 receives processed data via CAN 0x208.
+- [ ] Obstacle avoidance logic (ESP32 full stack) — 5-zone logic, child reaction, ACC coordination remain ESP32-side only.
 - [ ] Hidden engineering menu (reference: menu_hidden.cpp — 45 KB, comprehensive diagnostic tool)
 - [ ] Module enable/disable system via HMI (reference: menu_sensor_config.cpp — touch-based toggling)
 - [ ] Advanced diagnostics (reference: boot_sequence_test.h, functional_tests.h, hardware_failure_tests.h, memory_stress_test.h)
@@ -255,12 +259,12 @@ This section identifies safety mechanisms present in the reference firmware that
 | Safety Feature | Reference Implementation | Current Status | Impact |
 |---------------|-------------------------|----------------|--------|
 | **Battery undervoltage cutoff** | limp_mode.cpp checks `batteryUndervoltage` flag, reduces power progressively | Not implemented — voltage is read (INA226 ch4) but no cutoff logic exists | Could allow motor operation below safe battery voltage, risking deep discharge or controller brownout |
-| **Obstacle collision avoidance** | obstacle_safety.cpp: 5-zone distance system, emergency braking, speed reduction factor (0.0–1.0) | Not implemented — no distance sensors, no collision logic | Vehicle has no forward/rear obstacle awareness. Acceptable if operated in controlled environment only |
+| **Obstacle collision avoidance** | obstacle_safety.cpp: 5-zone distance system, emergency braking, speed reduction factor (0.0–1.0) | **STM32 backstop implemented** *(2026-02-13)*: CAN-based 3-tier limiter (obstacle_scale), SAFE state for emergencies, CAN timeout, stale-data detection. Full 5-zone logic remains ESP32-side. | STM32 provides independent safety backstop. Gap reduced from NONE to PARTIAL — full 5-zone logic and child reaction remain ESP32-side only. |
 | **I2C bus recovery** | i2c_recovery.cpp: clock cycling (9+ pulses on SCL), bus reset, automatic retry | **Implemented** — SCL clock cycling (16 pulses), STOP condition, 2-attempt recovery, SAFE state fallback via SAFETY_ERROR_I2C_FAILURE | Gap closed |
 | **Sensor cross-validation** | SensorManagerEnhanced.cpp: compares sensor readings against each other for plausibility | Not implemented — each sensor read independently, no cross-checks | A single faulty sensor could provide wildly incorrect data without detection (e.g., temperature sensor reading −55°C) |
 | **Boot guard / pre-flight** | boot_guard.cpp: validates hardware state before enabling control | Not implemented — system transitions BOOT → STANDBY based on timing only | Could allow operation with misconfigured or failed peripherals |
 | **Granular limp mode** | limp_mode.cpp: 4-level system (NORMAL/DEGRADED/LIMP/CRITICAL) with separate power, steering, and speed multipliers | Simplified — single DEGRADED state with flat 40% power limit | Does not differentiate between minor sensor warning and major system failure. Cannot apply asymmetric limits (e.g., reduce speed but maintain steering) |
-| **Emergency stop via obstacle** | obstacle_safety.cpp: triggerEmergencyStop() with immediate motor cut + relay open | Not implemented — emergency stop only via state machine transition to SAFE/ERROR | No distance-based emergency braking capability |
+| **Emergency stop via obstacle** | obstacle_safety.cpp: triggerEmergencyStop() with immediate motor cut + relay open | **Implemented** *(2026-02-13)*: Distance < 200 mm → obstacle_scale = 0.0, SAFE state (motors stopped, steering centered). CAN timeout and sensor failure also trigger SAFE state. Recovery with hysteresis (>500 mm for >1 s). | Gap closed for STM32 backstop layer. |
 
 ### 4.2 Simplified Safety Mechanisms
 
@@ -359,7 +363,7 @@ This section identifies safety mechanisms present in the reference firmware that
 | 5.1 | **AI-based regen optimization** — Implement lookup-table model for optimal regen power based on speed, battery voltage, temperature, and estimated slope. Use offline-generated tables (not runtime ML). | Medium |
 | 5.2 | **Predictive thermal management** — Use temperature trend data to predict time-to-overheat. Proactively reduce power before thermal limits are reached. | Medium |
 | 5.3 | **Adaptive pedal mapping** — Adjust pedal response curve based on driving pattern (detect aggressive vs. gentle driving). Store preferences per session. | Low |
-| 5.4 | **Obstacle detection integration** — If ultrasonic or LiDAR sensor is added to hardware, implement distance reading via UART or I2C on STM32. Add proximity-based speed limiting. Integrate with safety state machine. | High |
+| 5.4 | **Obstacle detection integration** — ✅ STM32 BACKSTOP IMPLEMENTED *(2026-02-13)*. CAN-based backstop limiter receives distance from ESP32 via 0x208, applies 3-tier scale mapping, enforces SAFE state for emergencies. See `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`. Remaining: ESP32-side sensor driver + 5-zone logic integration. | High |
 | 5.5 | **Telemetry data logging** — Log timestamped telemetry snapshots to STM32 Flash or SD card (if SPI available). Enable post-drive analysis. | Medium |
 
 ---
@@ -392,13 +396,16 @@ This section identifies safety mechanisms present in the reference firmware that
 
 ### 6.4 Would Adding an Obstacle Safety Layer Be Clean or Invasive?
 
-**Clean, with caveats.**
-- A new obstacle detection module can be added as `obstacle_sensor.c` (UART-based sensor reading)
-- Distance thresholds can be checked in the 50 ms tier (sensor read) and 10 ms tier (safety response)
-- Speed reduction can be applied via the existing `wheel_scale[]` array in safety_system.c
-- Emergency stop can use the existing `Safety_TransitionState(STATE_SAFE)` mechanism
-- **Caveat:** If the obstacle sensor uses UART, a UART peripheral must be configured (currently unused on STM32G474RE — USART1/2/3 are available). This is a peripheral configuration change, not an architectural one.
-- **Caveat:** CAN messages for obstacle data would need new IDs (must be added to the frozen CAN contract — requires coordinated update on both STM32 and ESP32).
+**Clean — and implemented.** *(Updated 2026-02-13)*
+
+The obstacle safety backstop has been integrated as described below:
+- `Obstacle_ProcessCAN()` and `Obstacle_Update()` functions added to `safety_system.c` (~150 lines of new C code).
+- `obstacle_scale` field added to `SafetyStatus_t` and applied in `Traction_Update()` (1 line multiplication).
+- CAN RX filter bank 3 added for IDs 0x208–0x209.
+- CAN message handler added in `CAN_ProcessMessages()`.
+- `Obstacle_Update()` called in the 10 ms main loop tier.
+- No existing modules were refactored. All changes are additive.
+- CAN contract updated to revision 1.1 (backward-compatible with 1.0).
 
 ### 6.5 Would Future Regen Implementation Require Structural Changes?
 
@@ -445,7 +452,7 @@ This section identifies safety mechanisms present in the reference firmware that
 | Runtime self-test | MEDIUM | Adds confidence in sensor health. Current boot-time checks and continuous monitoring partially cover this. |
 | Boot validation sequence | MEDIUM | Prevents operation with failed peripherals. Current architecture transitions to STANDBY on timing only. IWDG provides partial protection. |
 | Graceful power-down | MEDIUM | Prevents relay state inconsistency. Current reverse-order shutdown is functional but could be more robust. |
-| Obstacle detection | MEDIUM | Adds spatial awareness. Vehicle can operate safely without it in controlled environments. Becomes HIGH in public/shared spaces. |
+| Obstacle detection | ~~MEDIUM~~ LOW *(Updated 2026-02-13)* | STM32 backstop limiter implemented. Full 5-zone logic on ESP32 provides primary protection; STM32 provides independent safety backstop with CAN timeout and stale-data detection. Remaining risk: ESP32-side logic not yet integrated (sensor parsing, 5-zone, ACC). |
 | Granular limp mode | MEDIUM | Improves drive-home capability. Current flat 40% limit is safe but suboptimal — could be too aggressive for minor faults or insufficient for major ones. |
 | Sensor plausibility checks | MEDIUM | Detects faulty sensor data before it affects control decisions. Current per-sensor fault detection covers most cases. |
 | I2C bus recovery | ~~HIGH~~ RESOLVED | Implemented: SCL clock cycling, STOP condition, 2-attempt recovery, SAFE state fallback. INA226 and TCA9548A communication protected against bus lock-up. |
@@ -461,12 +468,12 @@ This section identifies safety mechanisms present in the reference firmware that
 | Category | Rating | Justification |
 |----------|--------|---------------|
 | **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, and park hold. |
-| **Safety Systems** | STABLE | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery. One HIGH-risk gap remaining (battery cutoff) prevents ADVANCED rating. |
+| **Safety Systems** | STABLE | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery. Obstacle safety backstop implemented *(2026-02-13)*. One HIGH-risk gap remaining (battery cutoff) prevents ADVANCED rating. |
 | **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
-| **CAN Communication** | ADVANCED | Frozen contract fully implemented, hardware-filtered, well-documented. Both STM32 and ESP32 sides aligned. |
+| **CAN Communication** | ADVANCED | Contract revision 1.1 *(updated 2026-02-13)*, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Obstacle CAN messages (0x208, 0x209) added. |
 | **HMI** | EARLY | Architecture defined, CAN decoding functional, screen state machine implemented. Display rendering is stub-only. |
 | **System Infrastructure** | STABLE | Clean build system, correct clock/peripheral configuration, multi-rate loop. Missing config persistence and structured logging. |
-| **Advanced Features** | EARLY | None of the reference's AI, obstacle, regen, audio, or lighting features are implemented. Intentional — these are development targets, not regressions. |
+| **Advanced Features** | EARLY | Obstacle safety backstop implemented on STM32 *(2026-02-13)*. Full obstacle detection stack (5-zone, ACC) remains ESP32-side only. AI regen, audio, and lighting features not implemented. Intentional — these are development targets, not regressions. |
 
 ### Overall Rating: **STABLE**
 
@@ -475,10 +482,12 @@ The firmware provides a **safe, functional, and well-architected** vehicle contr
 **One action is recommended before considering the firmware production-ready:**
 1. ~~Implement I2C bus recovery (Phase 1.1) — eliminates the highest-risk safety gap~~ ✅ DONE
 2. Implement battery undervoltage cutoff (Phase 1.2) — prevents deep discharge hazard
+3. ~~Implement obstacle safety backstop (Phase 5.4) — adds spatial awareness to safety authority~~ ✅ DONE *(2026-02-13)*
 
-With this remaining item addressed, the safety subsystem would achieve ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
+With the remaining battery undervoltage item addressed, the safety subsystem would achieve ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
 
 ---
 
 *Document generated: 2026-02-12*
+*Updated: 2026-02-13 — Obstacle safety integration implemented*
 *This is an analysis and documentation deliverable. No code was modified.*
