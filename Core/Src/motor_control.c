@@ -74,6 +74,8 @@ static inline float sanitize_float(float val, float safe_default)
 #define MAX_THROTTLE_STEP_PER_10MS  15.0f  /* Max allowed raw jump (%/10ms)  */
 #define FROZEN_PEDAL_TIMEOUT_MS     5000   /* Frozen pedal timeout (ms)      */
 #define FROZEN_PEDAL_SPEED_DELTA_KMH 3.0f  /* Speed change threshold (km/h)  */
+#define FROZEN_PEDAL_TOLERANCE_PCT   0.5f  /* Pedal movement tolerance (%)   */
+#define DYNBRAKE_ACTIVE_THRESHOLD    0.5f  /* dynbrake_pct above = active    */
 
 /* ---- Dynamic braking configuration ----
  *
@@ -412,7 +414,7 @@ void Traction_SetDemand(float throttlePct)
      * If pedal value remains identical for > FROZEN_PEDAL_TIMEOUT_MS
      * while vehicle speed changes significantly, raise warning.
      * Non-blocking, timestamp-based.                                    */
-    if (fabsf(throttlePct - frozen_pedal_value) > 0.5f) {
+    if (fabsf(throttlePct - frozen_pedal_value) > FROZEN_PEDAL_TOLERANCE_PCT) {
         /* Pedal moved — reset frozen tracking */
         frozen_pedal_value = throttlePct;
         frozen_pedal_tick  = now_anom;
@@ -767,7 +769,7 @@ void Traction_Update(void)
      * windings — the battery is NOT charged.                             */
     float effective_demand = demand;
 
-    if (dynbrake_pct > 0.5f && fabsf(demand) < 1.0f) {
+    if (dynbrake_pct > DYNBRAKE_ACTIVE_THRESHOLD && fabsf(demand) < 1.0f) {
         /* Use dynamic braking — set negative demand (opposing torque) */
         effective_demand = -dynbrake_pct;
     }
@@ -801,7 +803,7 @@ void Traction_Update(void)
         if (Safety_GetState() == SYS_STATE_ACTIVE) {
             Safety_SetState(SYS_STATE_DEGRADED);
         }
-    } else if (effective_demand < 0.0f && dynbrake_pct < 0.5f) {
+    } else if (effective_demand < 0.0f && dynbrake_pct < DYNBRAKE_ACTIVE_THRESHOLD) {
         /* Negative demand without dynamic braking → anomaly */
         effective_demand = 0.0f;
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
