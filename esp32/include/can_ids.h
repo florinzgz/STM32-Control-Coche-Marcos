@@ -1,7 +1,7 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN Bus ID and Protocol Definitions
 //
-// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.0
+// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.2
 // Status:          FROZEN — do not modify without a new contract revision
 //
 // These values are mirrored from the CAN contract document.
@@ -106,7 +106,7 @@ enum class SafetyError : uint8_t {
 };
 
 // -------------------------------------------------------------------------
-// Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.13)
+// Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.14)
 // -------------------------------------------------------------------------
 enum class DiagSubsystem : uint8_t {
     GLOBAL  = 0,

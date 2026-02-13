@@ -45,7 +45,7 @@ static void decodeHeartbeat(const CanFrame& f, vehicle::VehicleData& data) {
     hb.aliveCounter = f.data[0];
     hb.systemState  = static_cast<can::SystemState>(f.data[1]);
     hb.faultFlags   = f.data[2];
-    hb.reserved     = f.data[3];
+    hb.errorCode    = f.data[3];
     hb.timestampMs  = millis();
     data.setHeartbeat(hb);
 }
