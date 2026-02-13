@@ -433,7 +433,8 @@ void ABS_Update(void)
     }
 
     uint32_t now = HAL_GetTick();
-    uint32_t on_duration = (uint32_t)(ABS_PULSE_PERIOD_MS * ABS_PULSE_ON_RATIO);
+    uint32_t on_duration  = (uint32_t)(ABS_PULSE_PERIOD_MS * ABS_PULSE_ON_RATIO);
+    uint32_t off_duration = (uint32_t)(ABS_PULSE_PERIOD_MS) - on_duration;
 
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 4; i++) {
@@ -453,7 +454,7 @@ void ABS_Update(void)
                 }
             } else {
                 /* Currently in OFF (recovery) phase */
-                if (elapsed >= (uint32_t)(ABS_PULSE_PERIOD_MS - on_duration)) {
+                if (elapsed >= off_duration) {
                     abs_pulse_phase[i] = 1U;
                     abs_pulse_timer[i] = now;
                 }
@@ -492,7 +493,16 @@ void ABS_Update(void)
 }
 
 bool ABS_IsActive(void)  { return safety_status.abs_active; }
-void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_wheel_mask = 0; for (uint8_t i = 0; i < 4; i++) { safety_status.wheel_scale[i] = 1.0f; abs_pulse_timer[i] = HAL_GetTick(); abs_pulse_phase[i] = 0U; } }
+void ABS_Reset(void)
+{
+    safety_status.abs_active = false;
+    safety_status.abs_wheel_mask = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        safety_status.wheel_scale[i] = 1.0f;
+        abs_pulse_timer[i] = HAL_GetTick();
+        abs_pulse_phase[i] = 0U;
+    }
+}
 
 /* ---- TCS --------------------------------------------------------- */
 
