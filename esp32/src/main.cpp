@@ -3,7 +3,7 @@
 //
 // Framework:  Arduino (C++17)
 // Board:      ESP32-S3-DevKitC-1
-// Reference:  docs/CAN_CONTRACT_FINAL.md rev 1.0
+// Reference:  docs/CAN_CONTRACT_FINAL.md rev 1.3
 // =============================================================================
 
 #include <Arduino.h>
@@ -23,6 +23,49 @@ static ScreenManager screenManager;
 static uint8_t  heartbeatCounter = 0;
 static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
+
+// ---- Command ACK tracking (Phase 13) ----
+// Non-blocking: records when a command was sent and checks for ACK arrival.
+// UI state is only updated once ACK is received or timeout expires.
+
+static bool     ackPending     = false;   // true while waiting for ACK
+static uint8_t  ackExpectedCmd = 0;       // low byte of the command CAN ID we sent
+static unsigned long ackSentMs = 0;       // timestamp when the command was sent
+static bool     ackTimedOut    = false;   // set true if ACK_TIMEOUT_MS elapsed
+static constexpr uint8_t ACK_MAX_RETRIES = 0;  // no retry — bounded, no infinite loop
+
+/// Call before sending a command that expects ACK (CMD_MODE, SERVICE_CMD).
+static void ackBeginWait(uint8_t cmdIdLow) {
+    ackPending     = true;
+    ackExpectedCmd = cmdIdLow;
+    ackSentMs      = millis();
+    ackTimedOut    = false;
+}
+
+/// Call from loop() after can_rx::poll() to check for ACK arrival or timeout.
+static void ackCheck(const vehicle::VehicleData& data) {
+    if (!ackPending) return;
+
+    // Check if matching ACK arrived
+    const auto& ad = data.ack();
+    if (ad.timestampMs >= ackSentMs && ad.cmdIdLow == ackExpectedCmd) {
+        ackPending  = false;
+        ackTimedOut = false;
+        if (ad.result != can::AckResult::OK) {
+            Serial.printf("[ACK] cmd 0x%02X result=%u state=%u\n",
+                          ad.cmdIdLow, static_cast<uint8_t>(ad.result),
+                          static_cast<uint8_t>(ad.systemState));
+        }
+        return;
+    }
+
+    // Check timeout (bounded, no retry loop)
+    if (millis() - ackSentMs >= can::ACK_TIMEOUT_MS) {
+        ackPending  = false;
+        ackTimedOut = true;
+        Serial.printf("[ACK] TIMEOUT waiting for cmd 0x%02X\n", ackExpectedCmd);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // setup() — called once at power-on
@@ -51,6 +94,9 @@ void loop() {
 
     // Poll CAN RX and decode incoming frames
     can_rx::poll(vehicleData);
+
+    // Check for pending ACK (non-blocking)
+    ackCheck(vehicleData);
 
     // Update HMI screen based on current vehicle state
     screenManager.update(vehicleData);

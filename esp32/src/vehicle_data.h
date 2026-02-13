@@ -123,6 +123,16 @@ struct BatteryData {
     unsigned long timestampMs = 0;
 };
 
+// -------------------------------------------------------------------------
+// Command ACK (0x103) — STM32 acknowledgment of ESP32 command
+// -------------------------------------------------------------------------
+struct AckData {
+    uint8_t           cmdIdLow    = 0;     // Low byte of acknowledged CAN ID
+    can::AckResult    result      = can::AckResult::OK;
+    can::SystemState  systemState = can::SystemState::BOOT;
+    unsigned long     timestampMs = 0;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -139,6 +149,7 @@ public:
     void setTempMap(const TempMapData& d)      { tempMap_ = d; }
     void setDiag(const DiagData& d)            { diag_ = d; }
     void setBattery(const BatteryData& d)      { battery_ = d; }
+    void setAck(const AckData& d)              { ack_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -156,6 +167,7 @@ public:
     const DiagData&      diag()      const { return diag_; }
     const BatteryData&   battery()   const { return battery_; }
     const ServiceData&   service()   const { return service_; }
+    const AckData&       ack()       const { return ack_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -169,6 +181,7 @@ private:
     DiagData      diag_;
     BatteryData   battery_;
     ServiceData   service_;
+    AckData       ack_;
 };
 
 } // namespace vehicle

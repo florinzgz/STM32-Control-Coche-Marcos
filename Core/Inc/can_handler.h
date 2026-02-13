@@ -38,6 +38,15 @@ extern "C" {
 #define CAN_ID_SERVICE_ENABLED    0x302  // STM32 → ESP32 (1000ms) enabled bitmask
 #define CAN_ID_SERVICE_DISABLED   0x303  // STM32 → ESP32 (1000ms) disabled bitmask
 #define CAN_ID_SERVICE_CMD        0x110  // ESP32 → STM32 (on-demand) module control
+#define CAN_ID_CMD_ACK            0x103  // STM32 → ESP32 (on-demand) command acknowledgment
+
+/* Command ACK result codes (uint8_t) */
+typedef enum {
+    ACK_OK                  = 0,   /* Command accepted and applied           */
+    ACK_REJECTED            = 1,   /* Command rejected (speed too high, etc) */
+    ACK_INVALID             = 2,   /* Command payload invalid / malformed    */
+    ACK_BLOCKED_BY_SAFETY   = 3    /* Command blocked by safety system state */
+} CAN_AckResult_t;
 
 /* Timeouts */
 #define CAN_TIMEOUT_HEARTBEAT_MS  250    // Heartbeat timeout
@@ -69,6 +78,7 @@ void CAN_SendStatusTraction(void);
 void CAN_SendStatusTempMap(void);
 void CAN_SendStatusBattery(void);
 void CAN_SendError(uint8_t error_code, uint8_t subsystem);
+void CAN_SendCommandAck(uint8_t cmd_id_low, CAN_AckResult_t result);
 void CAN_SendServiceStatus(void);
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
