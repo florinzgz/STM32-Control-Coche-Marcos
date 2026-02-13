@@ -341,6 +341,8 @@ void Safety_Init(void)
     for (uint8_t i = 0; i < 4; i++) {
         safety_status.wheel_scale[i] = 1.0f;
         tcs_reduction[i] = 0.0f;
+        abs_pulse_timer[i] = HAL_GetTick();
+        abs_pulse_phase[i] = 0U;
     }
     tcs_last_tick    = HAL_GetTick();
     safety_error     = SAFETY_ERROR_NONE;
@@ -366,20 +368,44 @@ void Safety_Init(void)
 
 /* ---- ABS --------------------------------------------------------- */
 
-/* Per-wheel ABS scale: cut traction on the locking wheel only.
- * Aligned with base firmware abs_system.cpp modulateBrake():
- *   pressureReduction = 0.3 → 30 % reduction during pulse phase.
- * On the STM32 the motor IS the brake, so we reduce motor torque
- * on the locked wheel to let it recover grip.
- * Non-slipping wheels keep wheel_scale = 1.0 (unchanged).          */
+/* ---- ABS Pulse Modulation ----------------------------------------
+ *
+ * Previous behaviour: wheel_scale = 0.0 (full torque cut) whenever
+ * slip exceeded the threshold.  This was too aggressive — a 100 %
+ * cut removes all motor torque instantly, preventing the tyre from
+ * recovering traction smoothly.  On real vehicles ABS works by
+ * rapidly cycling brake pressure (pulse modulation) so the wheel
+ * alternates between a reduced-torque phase and a recovery phase,
+ * maintaining directional control and shortening stopping distance.
+ *
+ * New behaviour (aligned with reference firmware abs_system.cpp):
+ *   pressureReduction = 0.30 → 30 % reduction during the ON phase.
+ *   Pulse period       = 80 ms  (square-wave cycle).
+ *   ON ratio           = 60 %   → 48 ms reduced, 32 ms recovery.
+ *
+ * During the ON phase wheel_scale = 0.70 (1.0 − 0.30), allowing
+ * the motor to provide 70 % torque.  During the OFF phase
+ * wheel_scale = 1.0 (full torque) so the wheel can spin back up.
+ * The rapid cycling improves grip recovery compared to a sustained
+ * full cut while still limiting lock-up torque.
+ *
+ * 30 % reduction was chosen because:
+ *   1. It matches the reference firmware abs_system.cpp value.
+ *   2. It is aggressive enough to break the lock-up cycle.
+ *   3. It is mild enough to preserve steering authority.
+ *
+ * Implementation uses HAL_GetTick() for non-blocking timing.
+ * Per-wheel state (abs_pulse_timer[], abs_pulse_phase[]) ensures
+ * independent modulation on each corner.
+ * ----------------------------------------------------------------- */
 
-/* ABS scale applied to the locking wheel.
- * Base firmware uses 0.3 pressure reduction (70 % remaining).
- * For motor-braking on STM32, full cut (0.0) is more appropriate
- * because the motor cannot "pulse" brake pressure — it can only
- * reduce torque.  This matches the original Traction_SetDemand(0)
- * intent but applies it per-wheel only.                             */
-#define ABS_WHEEL_SCALE_ACTIVE  0.0f
+#define ABS_BASE_REDUCTION      0.30f   /* 30 % reduction (ref firmware)  */
+#define ABS_PULSE_PERIOD_MS     80      /* total pulse cycle in ms        */
+#define ABS_PULSE_ON_RATIO      0.6f    /* 60 % of period = reduced phase */
+
+/* Per-wheel pulse state (non-blocking, timestamp-based) */
+static uint32_t abs_pulse_timer[4];     /* HAL_GetTick() at phase start   */
+static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 
 void ABS_Update(void)
 {
@@ -406,19 +432,46 @@ void ABS_Update(void)
         return;
     }
 
+    uint32_t now = HAL_GetTick();
+    uint32_t on_duration  = (uint32_t)(ABS_PULSE_PERIOD_MS * ABS_PULSE_ON_RATIO);
+    uint32_t off_duration = (uint32_t)(ABS_PULSE_PERIOD_MS) - on_duration;
+
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 4; i++) {
         float slip = ((avg - spd[i]) * 100.0f) / avg;
         if (slip > (float)ABS_SLIP_THRESHOLD) {
             mask |= (1U << i);
-            /* Per-wheel intervention: reduce ONLY the locking wheel.
-             * Aligned with abs_system.cpp per-wheel active flag.      */
-            safety_status.wheel_scale[i] = ABS_WHEEL_SCALE_ACTIVE;
+
+            /* Advance pulse state machine (non-blocking square-wave).
+             * ON phase  → wheel_scale = 1.0 − ABS_BASE_REDUCTION (70 %)
+             * OFF phase → wheel_scale = 1.0 (full torque recovery)      */
+            uint32_t elapsed = now - abs_pulse_timer[i];
+            if (abs_pulse_phase[i]) {
+                /* Currently in ON (reduced) phase */
+                if (elapsed >= on_duration) {
+                    abs_pulse_phase[i] = 0U;
+                    abs_pulse_timer[i] = now;
+                }
+            } else {
+                /* Currently in OFF (recovery) phase */
+                if (elapsed >= off_duration) {
+                    abs_pulse_phase[i] = 1U;
+                    abs_pulse_timer[i] = now;
+                }
+            }
+
+            if (abs_pulse_phase[i]) {
+                safety_status.wheel_scale[i] = 1.0f - ABS_BASE_REDUCTION;
+            } else {
+                safety_status.wheel_scale[i] = 1.0f;
+            }
         } else {
-            /* Wheel not locking — restore full power.
+            /* Wheel not locking — restore full power and reset pulse.
              * TCS_Update runs after ABS_Update and may further reduce
              * this value if the wheel is spinning (TCS takes the min). */
             safety_status.wheel_scale[i] = 1.0f;
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
         }
     }
 
@@ -440,7 +493,16 @@ void ABS_Update(void)
 }
 
 bool ABS_IsActive(void)  { return safety_status.abs_active; }
-void ABS_Reset(void)     { safety_status.abs_active = false; safety_status.abs_wheel_mask = 0; for (uint8_t i = 0; i < 4; i++) safety_status.wheel_scale[i] = 1.0f; }
+void ABS_Reset(void)
+{
+    safety_status.abs_active = false;
+    safety_status.abs_wheel_mask = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        safety_status.wheel_scale[i] = 1.0f;
+        abs_pulse_timer[i] = HAL_GetTick();
+        abs_pulse_phase[i] = 0U;
+    }
+}
 
 /* ---- TCS --------------------------------------------------------- */
 

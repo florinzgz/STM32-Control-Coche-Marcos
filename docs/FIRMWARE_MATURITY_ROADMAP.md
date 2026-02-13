@@ -63,7 +63,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 |-----------|--------|-------|
 | **System State Machine** | FULL | BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR. Complete with fault escalation and transition rules. |
 | **Safety System** | FULL | Multi-layer protection: overcurrent, overtemperature, CAN timeout, encoder fault, relay sequencing. Consecutive error counting with escalation thresholds. |
-| **ABS (Anti-Lock Braking)** | FULL | Per-wheel slip detection (15% threshold), per-wheel scale modulation, global fallback for all-wheel lockup, minimum speed gate (10 km/h). |
+| **ABS (Anti-Lock Braking)** | FULL | Per-wheel slip detection (15% threshold), per-wheel pulse modulation (30% reduction, 80 ms cycle, 60% ON ratio), global fallback for all-wheel lockup, minimum speed gate (10 km/h). ABS modulation upgraded from full cut to pulse reduction *(2026-02-13)*. |
 | **TCS (Traction Control)** | FULL | Per-wheel slip detection (15% threshold), progressive reduction (40% initial → 80% max), recovery rate 25%/s, minimum speed gate (3 km/h), global fallback. |
 | **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. *(Security Hardening Phase 1)* |
 | **Ackermann Steering** | FULL | Geometric computation of FL/FR wheel angles from road angle, ±54° per-wheel clamp, correct sign convention (positive = left turn). Separate module (ackermann.c). |
@@ -133,7 +133,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 ### 3.2 Safety Systems
 
 - [✓] System state machine (BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR)
-- [✓] ABS per-wheel modulation (15% slip threshold, 10 km/h min)
+- [✓] ABS per-wheel pulse modulation (15% slip threshold, 10 km/h min, 30% reduction, 80 ms pulse cycle)
 - [✓] TCS per-wheel modulation (15% slip, progressive 40%→80% reduction)
 - [✓] ABS/TCS global fallback (all-wheel lockup/spin)
 - [✓] Overcurrent protection (25A per motor, fault escalation)
@@ -557,14 +557,14 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 | Component | Before | After | Change |
 |-----------|--------|-------|--------|
 | Traction pipeline (motor_control.c) | 80% | 90% | +10% — NaN/Inf validation, 50/50 axle split |
-| Safety system (safety_system.c) | 85% | 85% | No change — NaN/Inf errors routed through existing SAFETY_ERROR_SENSOR_FAULT |
+| Safety system (safety_system.c) | 85% | 90% | +5% — ABS pulse modulation (30% reduction, aligned with reference firmware) |
 | ESP32↔STM32 integration | 100% | 100% | Verified — all 10 checks passed |
-| **Overall STM32 firmware** | **~88%** | **~90%** | +2% — security hardening without architectural change |
+| **Overall STM32 firmware** | **~88%** | **~91%** | +3% — ABS pulse modulation + security hardening |
 
 ### What Remains for 100%
 
 **High priority (security/safety):**
-- ABS pulse modulation (30% reduction instead of full cut)
+- ~~ABS pulse modulation (30% reduction instead of full cut)~~ ✅ Implemented *(2026-02-13)*
 - Per-motor emergency temperature cutoff at 130°C in traction loop
 - Steering assist degradation in DEGRADED state
 - Non-blocking relay sequencing (replace HAL_Delay)

@@ -51,75 +51,62 @@ Prevenir el **bloqueo de ruedas** durante frenado, manteniendo la capacidad de d
 ### Detección de Bloqueo
 
 ```c
-#define ABS_THRESHOLD_PERCENT  20  // 20% de deslizamiento = activar ABS
+#define ABS_SLIP_THRESHOLD  15  // 15% de deslizamiento = activar ABS
 
-typedef struct {
-    uint16_t speed_FL;  // mm/s
-    uint16_t speed_FR;
-    uint16_t speed_RL;
-    uint16_t speed_RR;
-    uint16_t speed_avg;
-    uint8_t  abs_active[4];  // Flags ABS por rueda
-} WheelSpeed_t;
-
-WheelSpeed_t wheel_speed;
-
-/**
- * @brief Calcula el promedio de velocidad de las ruedas
- */
-void ABS_UpdateAverageSpeed(void) {
-    wheel_speed.speed_avg = (wheel_speed.speed_FL + 
-                             wheel_speed.speed_FR + 
-                             wheel_speed.speed_RL + 
-                             wheel_speed.speed_RR) / 4;
-}
-
-/**
- * @brief Detecta si una rueda está bloqueada
- * @param wheel_speed: Velocidad de la rueda (mm/s)
- * @param avg_speed: Velocidad promedio del vehículo (mm/s)
- * @return 1 si detecta bloqueo, 0 si no
- */
-uint8_t ABS_DetectLock(uint16_t wheel_speed, uint16_t avg_speed) {
-    if (avg_speed < 500) return 0;  // Velocidad muy baja, ignorar
-    
-    // Calcular deslizamiento
-    int16_t slip = avg_speed - wheel_speed;
-    uint8_t slip_percent = (slip * 100) / avg_speed;
-    
-    return (slip_percent > ABS_THRESHOLD_PERCENT);
-}
+// Calcular deslizamiento por rueda
+float slip = ((avg_speed - wheel_speed) * 100.0f) / avg_speed;
+// Si slip > ABS_SLIP_THRESHOLD → rueda bloqueada
 ```
+
+### Modulación por Pulsos (Pulse Modulation)
+
+**ABS modulation upgraded from full cut to pulse reduction.**
+
+El sistema ABS utiliza modulación por pulsos (onda cuadrada) en lugar de un
+corte completo de par. Esto está alineado con el firmware de referencia
+(`abs_system.cpp pressureReduction = 0.30`).
+
+```c
+#define ABS_BASE_REDUCTION   0.30f  // 30% reducción durante fase ON
+#define ABS_PULSE_PERIOD_MS  80     // ciclo completo del pulso (ms)
+#define ABS_PULSE_ON_RATIO   0.6f   // 60% del período = fase reducida
+
+// Fase ON  (48 ms): wheel_scale = 0.70 → motor al 70%
+// Fase OFF (32 ms): wheel_scale = 1.00 → motor al 100% (recuperación)
+```
+
+**¿Por qué pulsos en vez de corte completo?**
+- Un corte del 100% (`wheel_scale = 0.0`) era demasiado agresivo
+- La rueda perdía toda tracción instantáneamente, impidiendo recuperar agarre
+- Los pulsos permiten que la rueda alterne entre reducción y recuperación
+- Mejora el control direccional y reduce distancia de frenado
+- La reducción del 30% es suficiente para romper el ciclo de bloqueo
 
 ### Algoritmo ABS
 
 ```c
-/**
- * @brief Ejecuta el control ABS
- * @note Llamar a 100 Hz (cada 10 ms)
- */
 void ABS_Update(void) {
-    ABS_UpdateAverageSpeed();
-    
-    // Verificar cada rueda
-    wheel_speed.abs_active[0] = ABS_DetectLock(wheel_speed.speed_FL, wheel_speed.speed_avg);
-    wheel_speed.abs_active[1] = ABS_DetectLock(wheel_speed.speed_FR, wheel_speed.speed_avg);
-    wheel_speed.abs_active[2] = ABS_DetectLock(wheel_speed.speed_RL, wheel_speed.speed_avg);
-    wheel_speed.abs_active[3] = ABS_DetectLock(wheel_speed.speed_RR, wheel_speed.speed_avg);
-    
-    // Aplicar corrección
-    if (wheel_speed.abs_active[0]) {
-        // FL bloqueada → Reducir potencia de frenado
-        Motor_SetPower(&motor_FL, motor_FL.power_pct * 0.5f);
+    // 1. Puerta de velocidad mínima (10 km/h)
+    if (avg_speed < 10.0f) return;
+
+    // 2. Por cada rueda:
+    for (uint8_t i = 0; i < 4; i++) {
+        float slip = ((avg - spd[i]) * 100.0f) / avg;
+        if (slip > ABS_SLIP_THRESHOLD) {
+            // Rueda bloqueada → activar pulso
+            // Máquina de estados por rueda (abs_pulse_phase[i])
+            // Fase ON:  wheel_scale[i] = 1.0 - 0.30 = 0.70
+            // Fase OFF: wheel_scale[i] = 1.0
+        } else {
+            // Sin bloqueo → restaurar potencia completa
+            wheel_scale[i] = 1.0f;
+            // Reiniciar estado del pulso
+        }
     }
-    if (wheel_speed.abs_active[1]) {
-        Motor_SetPower(&motor_FR, motor_FR.power_pct * 0.5f);
-    }
-    if (wheel_speed.abs_active[2]) {
-        Motor_SetPower(&motor_RL, motor_RL.power_pct * 0.5f);
-    }
-    if (wheel_speed.abs_active[3]) {
-        Motor_SetPower(&motor_RR, motor_RR.power_pct * 0.5f);
+
+    // 3. Fallback global: si TODAS las ruedas bloquean → cortar tracción
+    if (mask == 0x0F) {
+        Traction_SetDemand(0);
     }
 }
 ```
@@ -650,6 +637,6 @@ void Safety_Task(void) {
 
 ---
 
-**Última actualización:** 2026-02-01  
+**Última actualización:** 2026-02-13  
 **Autor:** florinzgz  
 **Proyecto:** STM32-Control-Coche-Marcos
