@@ -1,7 +1,7 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN Bus ID and Protocol Definitions
 //
-// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.2
+// Source of truth: docs/CAN_CONTRACT_FINAL.md rev 1.3
 // Status:          FROZEN — do not modify without a new contract revision
 //
 // These values are mirrored from the CAN contract document.
@@ -28,6 +28,11 @@ inline constexpr uint32_t HEARTBEAT_ESP32       = 0x011;    // DLC —, 100 ms
 inline constexpr uint32_t CMD_THROTTLE          = 0x100;    // DLC 1, 50 ms
 inline constexpr uint32_t CMD_STEERING          = 0x101;    // DLC 2, 50 ms
 inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 2 (byte0=mode flags, byte1=gear), on-demand
+
+// -------------------------------------------------------------------------
+// STM32 → ESP32  Command Acknowledgment (§3.5)
+// -------------------------------------------------------------------------
+inline constexpr uint32_t CMD_ACK               = 0x103;    // DLC 3, on-demand (after CMD_MODE / SERVICE_CMD)
 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  Status / Heartbeat (§3.2)
@@ -107,6 +112,16 @@ enum class SafetyError : uint8_t {
 };
 
 // -------------------------------------------------------------------------
+// Command ACK Result Codes — CMD_ACK byte 1 (§4.17)
+// -------------------------------------------------------------------------
+enum class AckResult : uint8_t {
+    OK                  = 0,   // Command accepted and applied
+    REJECTED            = 1,   // Command rejected (speed too high, etc.)
+    INVALID             = 2,   // Command payload invalid / malformed
+    BLOCKED_BY_SAFETY   = 3    // Command blocked by safety system state
+};
+
+// -------------------------------------------------------------------------
 // Diagnostic Subsystem IDs — DIAG_ERROR byte 1 (§4.14)
 // -------------------------------------------------------------------------
 enum class DiagSubsystem : uint8_t {
@@ -127,6 +142,7 @@ inline constexpr uint32_t STATUS_FAST_RATE_MS   = 100;   // Speed, current, safe
 inline constexpr uint32_t STATUS_SLOW_RATE_MS   = 1000;  // Temperature
 inline constexpr uint32_t OBSTACLE_RATE_MS      = 66;    // Obstacle distance (15 Hz)
 inline constexpr uint32_t OBSTACLE_TIMEOUT_MS   = 500;   // STM32 obstacle CAN timeout (fail-safe)
+inline constexpr uint32_t ACK_TIMEOUT_MS        = 200;   // ESP32 command ACK timeout (UI update)
 
 // -------------------------------------------------------------------------
 // Drive Mode Flags — CMD_MODE byte 0 (§4.5)

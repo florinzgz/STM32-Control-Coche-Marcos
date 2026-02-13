@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.1 |
+| **Document Version** | 1.2 |
 | **Date** | 2026-02-13 |
 | **Current Repository** | STM32-Control-Coche-Marcos (STM32G474RE + ESP32-S3 HMI) |
 | **Reference Repository** | FULL-FIRMWARE-Coche-Marcos (ESP32-S3 monolithic, v2.17.1 PHASE 14) |
@@ -75,7 +75,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Battery Protection** | FULL | Battery bus current/voltage monitored via INA226 (channel 4, 0.5 mΩ shunt). CAN message 0x207 reports values. Undervoltage protection: warning at 20.0 V (DEGRADED, 40% power limit), critical at 18.0 V (SAFE, actuators inhibited). 0.5 V hysteresis. No auto-recovery from SAFE. Sensor failure treated as critical. No SOC estimation, no charge protection logic. |
 | **Encoder Handling** | FULL | E6B2-CWZ6C quadrature encoder via TIM2 (4800 CPR). Range check (±987 counts = ±74°), jump detection (>100 counts/cycle), frozen detection (>200 ms with motor active >10%). |
 | **Wheel Speed Processing** | FULL | 4× LJ12A3 inductive sensors via EXTI interrupts, 1 ms debounce, speed = (pulses/CPR) × circumference × 3.6. 6 pulses/rev, 1.1 m circumference. |
-| **CAN Protocol** | FULL | Contract revision 1.1 *(Updated 2026-02-13)*. 500 kbps, 11-bit IDs. Hardware RX white-list filters (4 filter banks). 12 TX message types (0x001, 0x200–0x207, 0x301–0x303). 6 RX message types (0x011, 0x100–0x102, 0x110, 0x208–0x209). TX/RX statistics tracking. Obstacle CAN messages added in rev 1.1. |
+| **CAN Protocol** | FULL | Contract revision 1.3 *(Updated 2026-02-13)*. 500 kbps, 11-bit IDs. Hardware RX white-list filters (4 filter banks). 13 TX message types (0x001, 0x103, 0x200–0x207, 0x301–0x303). 6 RX message types (0x011, 0x100–0x102, 0x110, 0x208–0x209). TX/RX statistics tracking. Obstacle CAN messages added in rev 1.1. Command ACK (0x103) added in rev 1.3 *(Phase 13)*. |
 | **HMI Integration Model** | FULL | ESP32-S3 connected via CAN. Screen states (Boot/Standby/Drive/Safe/Error) driven by STM32 system state. Stub screen implementations ready for TFT graphics library. CAN contract frozen. |
 | **Service Mode** | FULL | 25 modules classified as CRITICAL (4) or NON-CRITICAL (21). Per-module fault tracking (NONE/WARNING/ERROR/DISABLED). CAN commands (0x110) for enable/disable/factory-restore. Status broadcast (0x301–0x303). |
 | **Degraded / Limp Mode** | PARTIAL | DEGRADED state exists with 40% power limit and 40% steering assist reduction. Basic concept implemented. Missing: granular speed limiting per degradation level, drive-home prioritization logic, diagnostic struct as in reference LimpMode. |
@@ -899,6 +899,81 @@ minor sensor glitch or a persistent thermal warning.
 | CAN contract | 1.2 | 1.2 | No change |
 | **Overall STM32 firmware** | **~98%** | **~99%** | +1% — Granular limp mode (Phase 12) |
 
+### Phase 13 — CAN Command Acknowledgment Layer
+
+Phase 13 adds a command acknowledgment mechanism so the ESP32 HMI receives
+explicit confirmation (or rejection) when it sends on-demand commands
+(mode change, gear change, service commands) to the STM32.
+
+**Problem solved:**
+Previously, CMD_MODE (0x102) and SERVICE_CMD (0x110) were fire-and-forget.
+The ESP32 had no way to know whether the STM32 accepted, rejected, or even
+received the command. This forced the ESP32 to guess UI state from indirect
+signals (heartbeat state, status messages) — which could lag or be ambiguous.
+
+**Implementation:**
+
+| Component | Change |
+|-----------|--------|
+| **STM32** | New `CAN_ID_CMD_ACK (0x103)`, `CAN_AckResult_t` enum (4 codes), `CAN_SendCommandAck()` function. CMD_MODE and SERVICE_CMD handlers now send ACK after safety validation. |
+| **ESP32** | New `CMD_ACK` CAN ID, `AckResult` enum, `AckData` struct, `decodeCommandAck()` decoder, non-blocking `ackBeginWait()`/`ackCheck()` with 200 ms bounded timeout. |
+| **CAN contract** | Updated to revision 1.3. New §3.5 and §4.17. No existing IDs or payloads changed. |
+
+**ACK result codes:**
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | ACK_OK | Command accepted and applied |
+| 1 | ACK_REJECTED | Command rejected (speed too high, etc.) |
+| 2 | ACK_INVALID | Payload malformed (bad DLC, out-of-range parameter) |
+| 3 | ACK_BLOCKED_BY_SAFETY | System not in ACTIVE or DEGRADED state |
+
+**Files modified:**
+
+| File | Lines changed | Functions added | Description |
+|------|------------|---------------|-------------|
+| `Core/Inc/can_handler.h` | ~12 | 0 | `CAN_ID_CMD_ACK`, `CAN_AckResult_t` enum, prototype |
+| `Core/Src/can_handler.c` | ~80 | 1 | `CAN_SendCommandAck()`, ACK in CMD_MODE/SERVICE_CMD, `sanitize_float()` local |
+| `esp32/include/can_ids.h` | ~12 | 0 | `CMD_ACK`, `AckResult` enum, `ACK_TIMEOUT_MS` |
+| `esp32/src/vehicle_data.h` | ~12 | 0 | `AckData` struct, setter/getter |
+| `esp32/src/can_rx.cpp` | ~10 | 1 | `decodeCommandAck()` decoder |
+| `esp32/src/main.cpp` | ~40 | 2 | `ackBeginWait()`, `ackCheck()` non-blocking ACK tracking |
+| `docs/CAN_CONTRACT_FINAL.md` | ~50 | — | Rev 1.3, §3.5, §4.17, updated §5 and §9 |
+| `docs/SAFETY_SYSTEMS.md` | ~55 | — | New "Command Acknowledgment Layer" section |
+| `docs/FIRMWARE_MATURITY_ROADMAP.md` | ~60 | — | Phase 13 section, updated percentages |
+
+**Security constraints met:**
+- No new attack surface — ACK is output-only from STM32 (no new RX path)
+- No infinite retry loops — ESP32 has `ACK_MAX_RETRIES = 0`
+- Bounded ACK timeout — 200 ms hard limit
+- All new enums are `uint8_t`
+- `sanitize_float()` applied to average speed calculation in gear validation
+
+**Regression analysis:**
+
+| Subsystem | Impact |
+|-----------|--------|
+| Heartbeat format | Unchanged — 4 bytes, same structure |
+| SystemState enum | Unchanged — 6 states |
+| Safety state transitions | Unmodified — ACK does not alter transitions |
+| Throttle command (0x100) | Unchanged — no ACK added (high-frequency) |
+| Steering command (0x101) | Unchanged — no ACK added (high-frequency) |
+| Mode command (0x102) | Enhanced — now sends ACK after validation |
+| Service command (0x110) | Enhanced — now sends ACK after processing |
+| CAN RX filters | Unchanged — ACK is TX-only from STM32 |
+| Obstacle system | Unchanged — independent path |
+| ABS/TCS | Unchanged — independent path |
+| Watchdog | Unaffected — no blocking delays |
+| Bus-off recovery | Unchanged — independent logic |
+
+**Updated implementation percentage:**
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| CAN protocol layer | 98% | 99% | +1% — Command acknowledgment |
+| CAN contract | 1.2 | 1.3 | New §3.5, §4.17 |
+| **Overall STM32 firmware** | **~99%** | **~99%** | Phase 13 feature addition |
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
@@ -913,6 +988,7 @@ minor sensor glitch or a persistent thermal warning.
 - ~~Demand anomaly detection~~ ✅ Implemented *(2026-02-13 — Phase 9)*
 - ~~Granular limp mode (multi-level degradation)~~ ✅ Implemented *(2026-02-13 — Phase 12)*
 - ~~Boot validation sequence~~ ✅ Implemented *(2026-02-13 — Phase 11)*
+- ~~CAN command acknowledgment~~ ✅ Implemented *(2026-02-13 — Phase 13)*
 
 **Low priority (features):**
 - Regenerative braking
@@ -933,3 +1009,4 @@ minor sensor glitch or a persistent thermal warning.
 *Updated: 2026-02-13 — Phase 9: Demand anomaly detection (step-rate, range, frozen pedal)*
 *Updated: 2026-02-13 — Phase 10: Non-blocking relay sequencing refactor documentation*
 *Updated: 2026-02-13 — Phase 12: Granular limp mode (multi-level degradation)*
+*Updated: 2026-02-13 — Phase 13: CAN command acknowledgment layer (CMD_ACK 0x103, CAN contract rev 1.3)*

@@ -15,6 +15,20 @@
 #include "safety_system.h"
 #include "sensor_manager.h"
 #include "service_mode.h"
+#include <math.h>
+
+/* NaN/Inf sanitization — mirrors motor_control.c helper.
+ * Returns safe_default if val is NaN or Inf.             */
+static inline float sanitize_float(float val, float safe_default)
+{
+    if (isnan(val) || isinf(val)) {
+        return safe_default;
+    }
+    return val;
+}
+
+/* Safe-default for speed when NaN/Inf detected — ensures gear change is rejected */
+#define SANITIZE_SPEED_DEFAULT  99.0f
 
 /* Global variables */
 extern FDCAN_HandleTypeDef hfdcan1;
@@ -337,6 +351,30 @@ void CAN_SendError(uint8_t error_code, uint8_t subsystem) {
 }
 
 /**
+ * @brief  Send command acknowledgment to ESP32.
+ *
+ * Transmits a 3-byte ACK frame after the STM32 has validated
+ * and accepted or rejected an ESP32 command.
+ *
+ *   Byte 0: cmd_id_low — low byte of the original command CAN ID
+ *                         (e.g. 0x02 for CMD_MODE 0x102)
+ *   Byte 1: result     — CAN_AckResult_t (0=OK, 1=REJECTED, 2=INVALID,
+ *                         3=BLOCKED_BY_SAFETY)
+ *   Byte 2: system_state — current SystemState_t for context
+ *
+ * CAN ID: 0x103   DLC: 3   Rate: on-demand (after each command)
+ */
+void CAN_SendCommandAck(uint8_t cmd_id_low, CAN_AckResult_t result) {
+    uint8_t ack_data[3];
+
+    ack_data[0] = cmd_id_low;
+    ack_data[1] = (uint8_t)result;
+    ack_data[2] = (uint8_t)Safety_GetState();
+
+    TransmitFrame(CAN_ID_CMD_ACK, ack_data, 3);
+}
+
+/**
  * @brief  Send service mode status to ESP32.
  *
  * Transmits three frames:
@@ -434,14 +472,24 @@ void CAN_ProcessMessages(void) {
                 break;
                 
             case CAN_ID_CMD_MODE:
-                if (msg_len >= 1) {
+                if (msg_len < 1) {
+                    CAN_SendCommandAck(0x02, ACK_INVALID);
+                    break;
+                }
+                if (!Safety_IsCommandAllowed()) {
+                    CAN_SendCommandAck(0x02, ACK_BLOCKED_BY_SAFETY);
+                    break;
+                }
+                {
                     uint8_t mode_flags = rx_payload[0];
                     bool enable_4x4 = (mode_flags & 0x01) != 0;
                     bool tank_turn  = (mode_flags & 0x02) != 0;
+                    bool mode_ok = false;
                     /* STM32 decides: mode change only allowed at low speed */
                     if (Safety_ValidateModeChange(enable_4x4, tank_turn)) {
                         Traction_SetMode4x4(enable_4x4);
                         Traction_SetAxisRotation(tank_turn);
+                        mode_ok = true;
                     }
 
                     /* Byte 1 (optional): gear position (P/R/N/D).
@@ -449,6 +497,7 @@ void CAN_ProcessMessages(void) {
                      * remains unchanged (defaults to FORWARD on init).
                      * Gear changes are only accepted at very low speed
                      * (same constraint as mode changes).                  */
+                    bool gear_ok = true;
                     if (msg_len >= 2) {
                         uint8_t gear_raw = rx_payload[1];
                         if (gear_raw <= (uint8_t)GEAR_FORWARD_D2) {
@@ -456,10 +505,21 @@ void CAN_ProcessMessages(void) {
                             /* Gear change only allowed near standstill */
                             float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
                                              Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+                            avg_spd = sanitize_float(avg_spd, SANITIZE_SPEED_DEFAULT);
                             if (avg_spd <= 1.0f) {
                                 Traction_SetGear(requested);
+                            } else {
+                                gear_ok = false;
                             }
+                        } else {
+                            gear_ok = false;
                         }
+                    }
+
+                    if (mode_ok && gear_ok) {
+                        CAN_SendCommandAck(0x02, ACK_OK);
+                    } else {
+                        CAN_SendCommandAck(0x02, ACK_REJECTED);
                     }
                 }
                 break;
@@ -471,20 +531,33 @@ void CAN_ProcessMessages(void) {
                  *
                  * Critical modules cannot be disabled — ServiceMode_DisableModule
                  * will reject the request.  This is a safety constraint. */
-                if (msg_len >= 1) {
+                if (msg_len < 1) {
+                    CAN_SendCommandAck(0x10, ACK_INVALID);
+                    break;
+                }
+                {
                     uint8_t cmd = rx_payload[0];
                     if (cmd == 0xFF) {
                         /* Factory restore — re-enable all modules */
                         ServiceMode_FactoryRestore();
+                        CAN_SendCommandAck(0x10, ACK_OK);
                     } else if (msg_len >= 2) {
                         uint8_t mod_id = rx_payload[1];
                         if (mod_id < MODULE_COUNT) {
                             if (cmd == 0) {
                                 ServiceMode_DisableModule((ModuleID_t)mod_id);
+                                CAN_SendCommandAck(0x10, ACK_OK);
                             } else if (cmd == 1) {
                                 ServiceMode_EnableModule((ModuleID_t)mod_id);
+                                CAN_SendCommandAck(0x10, ACK_OK);
+                            } else {
+                                CAN_SendCommandAck(0x10, ACK_INVALID);
                             }
+                        } else {
+                            CAN_SendCommandAck(0x10, ACK_INVALID);
                         }
+                    } else {
+                        CAN_SendCommandAck(0x10, ACK_INVALID);
                     }
                 }
                 break;

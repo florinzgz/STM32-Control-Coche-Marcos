@@ -1,7 +1,7 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.2
-**Status:** ACTIVE — Updated for integration audit corrections
+**Revision:** 1.3
+**Status:** ACTIVE — Added command acknowledgment layer (Phase 13)
 **Date:** 2026-02-13
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
@@ -11,6 +11,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.0** (2025-06-15): Initial frozen contract. Baseline safety system.
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
 - **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
+- **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
 
 ---
 
@@ -96,6 +97,23 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | CAN ID | Name | DLC | Rate | Description | Source file |
 |--------|------|-----|------|-------------|-------------|
 | 0x300 | DIAG_ERROR | 2 | On-demand | Error code and subsystem identifier | `can_handler.c` |
+
+### 3.4 Obstacle Data (ESP32 → STM32)
+
+See messages 0x208 and 0x209 in §3.1.
+
+### 3.5 Command Acknowledgment (STM32 → ESP32)
+
+| CAN ID | Name | DLC | Rate | Description | Source file |
+|--------|------|-----|------|-------------|-------------|
+| 0x103 | CMD_ACK | 3 | On-demand | Command acknowledgment after safety validation | `can_handler.c` |
+
+The STM32 sends an ACK frame after processing on-demand commands (CMD_MODE 0x102, SERVICE_CMD 0x110). High-frequency commands (CMD_THROTTLE 0x100, CMD_STEERING 0x101) are NOT acknowledged individually — the ESP32 monitors status messages (0x200–0x207) for implicit confirmation.
+
+ACK is sent only after:
+1. Safety state validation (`Safety_IsCommandAllowed()`)
+2. Command-specific validation (speed check, parameter range check)
+3. Command acceptance or rejection decision
 
 ---
 
@@ -328,6 +346,45 @@ This message is **informational only** — the STM32 does NOT use these values f
 
 Source: `CAN_ProcessMessages()` in `can_handler.c`
 
+### 4.17 CMD_ACK (0x103) — STM32 → ESP32
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | cmd_id_low | uint8 | Low byte of the acknowledged command CAN ID (e.g. 0x02 for CMD_MODE 0x102, 0x10 for SERVICE_CMD 0x110) |
+| 1 | result | uint8 | ACK result code (see table below) |
+| 2 | system_state | uint8 | Current system state at time of ACK (see §6) |
+
+**ACK result codes (byte 1):**
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | ACK_OK | Command accepted and applied |
+| 1 | ACK_REJECTED | Command rejected (e.g. speed too high for mode/gear change) |
+| 2 | ACK_INVALID | Command payload invalid or malformed (bad DLC, out-of-range parameter) |
+| 3 | ACK_BLOCKED_BY_SAFETY | Command blocked because system is not in ACTIVE or DEGRADED state |
+
+**Acknowledged commands:**
+
+| Command | cmd_id_low | When ACK is sent |
+|---------|-----------|-----------------|
+| CMD_MODE (0x102) | 0x02 | After mode/gear validation and acceptance or rejection |
+| SERVICE_CMD (0x110) | 0x10 | After service command processing |
+
+**Not acknowledged (high-frequency):**
+
+| Command | Reason |
+|---------|--------|
+| CMD_THROTTLE (0x100) | Continuous at 50 ms — implicit confirmation via status messages |
+| CMD_STEERING (0x101) | Continuous at 50 ms — implicit confirmation via STATUS_STEERING (0x204) |
+
+**ESP32 behavior:**
+- Wait for ACK before updating UI state for mode/gear/service changes
+- Timeout after `ACK_TIMEOUT_MS` (200 ms) — bounded, no infinite retry
+- Display error state if ACK not received or result ≠ OK
+- No blocking delays — ACK check is polled in the main loop
+
+Source: `CAN_SendCommandAck()` in `can_handler.c`, `CAN_AckResult_t` in `can_handler.h`
+
 ---
 
 ## 5. Requested vs. Actual Signals
@@ -336,13 +393,15 @@ Source: `CAN_ProcessMessages()` in `can_handler.c`
 |--------|---------------------------|------------------------|
 | Throttle | 0x100 byte 0: requested % (0–100) | No direct actual throttle message. The STM32 applies the validated value internally. |
 | Steering angle | 0x101 bytes 0–1: requested angle (°/10) | 0x204 bytes 0–1: actual measured angle (°/10) |
-| Drive mode | 0x102 byte 0: requested mode flags | No direct actual mode message. Mode change is applied or silently rejected. |
+| Drive mode | 0x102 byte 0: requested mode flags | 0x103 CMD_ACK: explicit acceptance or rejection with result code |
+| Gear change | 0x102 byte 1: requested gear | 0x103 CMD_ACK: explicit acceptance or rejection with result code |
+| Service command | 0x110: module enable/disable/restore | 0x103 CMD_ACK: explicit acceptance or rejection with result code |
 | Wheel speed | Not applicable | 0x200: actual measured speeds |
 | Motor current | Not applicable | 0x201: actual measured currents |
 | Temperature | Not applicable | 0x202: actual measured temperatures |
 | ABS/TCS state | Not applicable | 0x203: actual safety flags |
 
-The ESP32 must never assume that a requested value has been applied. It must read the actual values from the status messages to confirm system state.
+The ESP32 must never assume that a requested value has been applied. For on-demand commands (mode, gear, service), the ESP32 must wait for a CMD_ACK (0x103) before updating UI state. For continuous commands (throttle, steering), the ESP32 must read status messages for implicit confirmation.
 
 ---
 
@@ -512,36 +571,38 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ### What the ESP32 Must Not Assume
 
-- A sent command does not imply it was executed. Always verify via status messages.
+- A sent command does not imply it was executed. Always verify via status messages or ACK.
 - The throttle value received by the STM32 may be clamped (0–100%), zeroed (ABS active), or halved (TCS active).
 - The steering angle may be clamped (±45°) or rate-limited (200°/s max).
-- A mode change may be silently rejected if speed > 1 km/h.
+- A mode change may be rejected — the ESP32 must wait for CMD_ACK (0x103) before updating UI.
 - The STM32 may transition to SAFE at any time without prior warning.
 - ABS and TCS interventions happen without ESP32 consent and override the requested throttle.
+- ACK timeout (200 ms) does not imply command failure — it may indicate CAN bus congestion. The ESP32 must not retry indefinitely.
 
 ---
 
 ## 9. Command Validation Summary
 
-| Command | Validation | Limits | Source |
-|---------|------------|--------|--------|
-| Throttle (0x100) | Clamped to 0–100%. Zeroed if ABS active. Halved if TCS active. Rejected if not ACTIVE. | 0.0–100.0 % | `Safety_ValidateThrottle()` |
-| Steering (0x101) | Clamped to ±45°. Rate-limited to 200°/s. Returns current angle if not ACTIVE. | ±45.0°, 200°/s max rate | `Safety_ValidateSteering()` |
-| Mode (0x102) | Rejected if not ACTIVE or if average wheel speed > 1 km/h. | Speed < 1.0 km/h | `Safety_ValidateModeChange()` |
+| Command | Validation | Limits | ACK | Source |
+|---------|------------|--------|-----|--------|
+| Throttle (0x100) | Clamped to 0–100%. Zeroed if ABS active. Halved if TCS active. Rejected if not ACTIVE. | 0.0–100.0 % | No (implicit via status) | `Safety_ValidateThrottle()` |
+| Steering (0x101) | Clamped to ±45°. Rate-limited to 200°/s. Returns current angle if not ACTIVE. | ±45.0°, 200°/s max rate | No (implicit via 0x204) | `Safety_ValidateSteering()` |
+| Mode (0x102) | Rejected if not ACTIVE or if average wheel speed > 1 km/h. | Speed < 1.0 km/h | Yes (0x103) | `Safety_ValidateModeChange()` |
+| Service (0x110) | Module enable/disable/factory restore. Critical modules cannot be disabled. | Module ID < MODULE_COUNT | Yes (0x103) | `ServiceMode_*()` |
 
 ---
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the current firmware. Revision 1.1 adds obstacle safety CAN messages (0x208, 0x209) while maintaining backward compatibility with revision 1.0 — existing messages are unchanged.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged.
 
 | Property | Value |
 |----------|-------|
-| Contract revision | 1.2 |
-| Previous revision | 1.1 |
+| Contract revision | 1.3 |
+| Previous revision | 1.2 |
 | Contract status | ACTIVE |
 | Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
-| Backward compatibility | Revision 1.2 is backward-compatible with 1.1 and 1.0. No CAN IDs, payload layouts, or timing changed. Documentation corrected to match existing code behavior. |
+| Backward compatibility | Revision 1.3 is backward-compatible with 1.2, 1.1, and 1.0. No existing CAN IDs, payload layouts, or timing changed. New CMD_ACK (0x103) is additive only — ESP32 firmware without ACK support will silently ignore the new message. |
 
 The source files that define this contract are:
 
