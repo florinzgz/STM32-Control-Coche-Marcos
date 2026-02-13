@@ -46,9 +46,11 @@ static BootValidationStatus boot_status = {0};
 static bool check_temperature_plausible(void)
 {
     uint8_t zero_count = 0;
+    uint8_t enabled_count = 0;
     for (uint8_t i = 0; i < BOOT_NUM_TEMP_SENSORS; i++) {
         if (!ServiceMode_IsEnabled(MODULE_TEMP_SENSOR_0 + i))
             continue;   /* Disabled sensors are excluded from check */
+        enabled_count++;
         float t = Temperature_Get(i);
         if (t < BOOT_TEMP_MIN_C || t > BOOT_TEMP_MAX_C)
             return false;
@@ -56,7 +58,7 @@ static bool check_temperature_plausible(void)
             zero_count++;
     }
     /* If every enabled sensor reads exactly 0.0 °C → likely uninit */
-    if (zero_count == BOOT_NUM_TEMP_SENSORS)
+    if (enabled_count > 0 && zero_count == enabled_count)
         return false;
     return true;
 }
@@ -161,12 +163,27 @@ void BootValidation_Run(void)
 
     /* Log failed checks via ServiceMode if validation fails.
      * This does NOT force SAFE — the system stays in STANDBY
-     * until all checks pass.                                      */
+     * until all checks pass.  Per-sensor faults are logged
+     * to identify the exact failing sensor.                       */
     if (!boot_status.validated && boot_status.checks_failed != 0) {
-        if (boot_status.checks_failed & BOOT_CHECK_TEMP_PLAUSIBLE)
-            ServiceMode_SetFault(MODULE_TEMP_SENSOR_0, MODULE_FAULT_WARNING);
-        if (boot_status.checks_failed & BOOT_CHECK_CURRENT_PLAUSIBLE)
-            ServiceMode_SetFault(MODULE_CURRENT_SENSOR_0, MODULE_FAULT_WARNING);
+        if (boot_status.checks_failed & BOOT_CHECK_TEMP_PLAUSIBLE) {
+            for (uint8_t i = 0; i < BOOT_NUM_TEMP_SENSORS; i++) {
+                if (!ServiceMode_IsEnabled(MODULE_TEMP_SENSOR_0 + i))
+                    continue;
+                float t = Temperature_Get(i);
+                if (t < BOOT_TEMP_MIN_C || t > BOOT_TEMP_MAX_C)
+                    ServiceMode_SetFault(MODULE_TEMP_SENSOR_0 + i, MODULE_FAULT_WARNING);
+            }
+        }
+        if (boot_status.checks_failed & BOOT_CHECK_CURRENT_PLAUSIBLE) {
+            for (uint8_t i = 0; i < BOOT_NUM_CURRENT_SENSORS; i++) {
+                if (!ServiceMode_IsEnabled(MODULE_CURRENT_SENSOR_0 + i))
+                    continue;
+                float c = Current_GetAmps(i);
+                if (c < BOOT_CURRENT_MIN_A || c > BOOT_CURRENT_MAX_A)
+                    ServiceMode_SetFault(MODULE_CURRENT_SENSOR_0 + i, MODULE_FAULT_WARNING);
+            }
+        }
         if (boot_status.checks_failed & BOOT_CHECK_ENCODER_HEALTHY)
             ServiceMode_SetFault(MODULE_STEER_ENCODER, MODULE_FAULT_WARNING);
     }
