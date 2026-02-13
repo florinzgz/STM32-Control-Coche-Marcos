@@ -91,6 +91,8 @@ static void Centering_Abort(void)
     centering_state = CENTERING_FAULT;
     Safety_SetError(SAFETY_ERROR_CENTERING);
     Safety_SetState(SYS_STATE_DEGRADED);
+    Safety_SetDegradedLevel(DEGRADED_L1,
+                            DEGRADED_REASON_CENTERING_FAIL);
 }
 
 /**

@@ -114,6 +114,57 @@ typedef struct {
 #define DEGRADED_POWER_LIMIT_PCT    40.0f   /* limp_mode.cpp POWER_LIMP */
 #define DEGRADED_SPEED_LIMIT_PCT    50.0f   /* limp_mode.cpp SPEED_LIMP */
 
+/* ---- Granular Degradation (Phase 12) ----
+ * Internal degradation levels that refine the single SYS_STATE_DEGRADED
+ * state into three severity tiers.  All levels still report
+ * SYS_STATE_DEGRADED over CAN — no CAN contract changes.
+ *
+ * Traced to base firmware limp_mode.cpp multi-level approach:
+ *   DEGRADED (L1) → minor fault, conservative limits
+ *   LIMP     (L2) → thermal or moderate fault
+ *   CRITICAL (L3) → persistent anomaly, most restrictive             */
+typedef enum {
+    DEGRADED_LEVEL_NONE = 0,   /* Not in degraded mode                 */
+    DEGRADED_L1         = 1,   /* Minor sensor fault — least restrictive */
+    DEGRADED_L2         = 2,   /* Thermal warning — moderate            */
+    DEGRADED_L3         = 3    /* Persistent anomaly — most restrictive  */
+} DegradedLevel_t;
+
+/* Reason for entering a degraded level (diagnostic / telemetry) */
+typedef enum {
+    DEGRADED_REASON_NONE            = 0,
+    DEGRADED_REASON_SENSOR_FAULT    = 1,  /* Single sensor implausibility  */
+    DEGRADED_REASON_THERMAL_WARN    = 2,  /* Temperature > warning thresh  */
+    DEGRADED_REASON_OVERCURRENT     = 3,  /* Single overcurrent event      */
+    DEGRADED_REASON_CENTERING_FAIL  = 4,  /* Steering centering failed     */
+    DEGRADED_REASON_BATTERY_UV      = 5,  /* Battery undervoltage warning  */
+    DEGRADED_REASON_DEMAND_ANOMALY  = 6,  /* Throttle demand anomaly       */
+    DEGRADED_REASON_ENCODER_FAULT   = 7,  /* Steering encoder fault        */
+    DEGRADED_REASON_PERSISTENT      = 8   /* Multiple faults accumulated   */
+} DegradedReason_t;
+
+/* Per-level scaling factors (power, steering assist, traction cap).
+ *
+ *   Level | Power  | Steering | Traction cap | Description
+ *   ------|--------|----------|--------------|----------------------------
+ *   L1    | 70 %   | 85 %     | 80 %         | Minor: gentle limiting
+ *   L2    | 50 %   | 70 %     | 60 %         | Thermal: moderate limits
+ *   L3    | 40 %   | 60 %     | 50 %         | Persistent: most cautious
+ *
+ * DEGRADED_POWER_LIMIT_PCT (40 %) is preserved as the L3 floor to
+ * maintain backward-compatible worst-case behaviour.                    */
+#define DEGRADED_L1_POWER_PCT      70.0f
+#define DEGRADED_L1_STEERING_PCT   85.0f
+#define DEGRADED_L1_TRACTION_PCT   80.0f
+
+#define DEGRADED_L2_POWER_PCT      50.0f
+#define DEGRADED_L2_STEERING_PCT   70.0f
+#define DEGRADED_L2_TRACTION_PCT   60.0f
+
+#define DEGRADED_L3_POWER_PCT      40.0f   /* == DEGRADED_POWER_LIMIT_PCT */
+#define DEGRADED_L3_STEERING_PCT   60.0f
+#define DEGRADED_L3_TRACTION_PCT   50.0f   /* == DEGRADED_SPEED_LIMIT_PCT */
+
 /* Consecutive-error threshold before escalating DEGRADED → SAFE.
  * Traced to base firmware relays.cpp (consecutiveErrors >= 3).          */
 #define CONSECUTIVE_ERROR_THRESHOLD  3
@@ -150,6 +201,15 @@ uint8_t       Safety_GetFaultFlags(void);
 
 /* Degraded-mode throttle limit (returns multiplier 0.0–1.0) */
 float         Safety_GetPowerLimitFactor(void);
+
+/* Granular degradation (Phase 12) — per-level scaling factors */
+float           Safety_GetSteeringLimitFactor(void);
+float           Safety_GetTractionCapFactor(void);
+DegradedLevel_t Safety_GetDegradedLevel(void);
+DegradedReason_t Safety_GetDegradedReason(void);
+uint32_t        Safety_GetDegradedTelemetryCount(void);
+void            Safety_SetDegradedLevel(DegradedLevel_t level,
+                                        DegradedReason_t reason);
 
 /* Relay power sequencing */
 void Relay_PowerUp(void);
