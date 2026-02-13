@@ -404,6 +404,8 @@ void Traction_SetDemand(float throttlePct)
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
             if (Safety_GetState() == SYS_STATE_ACTIVE) {
                 Safety_SetState(SYS_STATE_DEGRADED);
+                Safety_SetDegradedLevel(DEGRADED_L1,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
             }
         }
         prev_raw_demand      = throttlePct;
@@ -429,6 +431,8 @@ void Traction_SetDemand(float throttlePct)
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
             if (Safety_GetState() == SYS_STATE_ACTIVE) {
                 Safety_SetState(SYS_STATE_DEGRADED);
+                Safety_SetDegradedLevel(DEGRADED_L1,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
             }
             /* Reset tick to avoid re-triggering every cycle */
             frozen_pedal_tick = now_anom;
@@ -739,9 +743,9 @@ void Traction_Update(void)
         float target_brake = fabsf(demand_rate) * DYNBRAKE_FACTOR;
         if (target_brake > DYNBRAKE_MAX_PCT) target_brake = DYNBRAKE_MAX_PCT;
 
-        /* Limit in DEGRADED mode */
+        /* Limit in DEGRADED mode — uses per-level power limit (Phase 12) */
         if (sys_st == SYS_STATE_DEGRADED) {
-            target_brake *= (DEGRADED_POWER_LIMIT_PCT / 100.0f);
+            target_brake *= Safety_GetPowerLimitFactor();
         }
 
         /* Progressive ramp toward target (never jump instantly) */
@@ -802,6 +806,8 @@ void Traction_Update(void)
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         if (Safety_GetState() == SYS_STATE_ACTIVE) {
             Safety_SetState(SYS_STATE_DEGRADED);
+            Safety_SetDegradedLevel(DEGRADED_L1,
+                                    DEGRADED_REASON_DEMAND_ANOMALY);
         }
     } else if (effective_demand < 0.0f && dynbrake_pct < DYNBRAKE_ACTIVE_THRESHOLD) {
         /* Negative demand without dynamic braking → anomaly */
@@ -809,6 +815,8 @@ void Traction_Update(void)
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         if (Safety_GetState() == SYS_STATE_ACTIVE) {
             Safety_SetState(SYS_STATE_DEGRADED);
+            Safety_SetDegradedLevel(DEGRADED_L1,
+                                    DEGRADED_REASON_DEMAND_ANOMALY);
         }
     }
 
@@ -867,6 +875,18 @@ void Traction_Update(void)
      * restrictive wins).  Same approach as the reference monolithic
      * firmware's obstacleFactor in traction.cpp.                       */
     base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);
+
+    /* ---- Traction cap (Phase 12) ----
+     * Apply per-level traction cap in DEGRADED mode.  This limits
+     * maximum PWM output independently of the power limit applied
+     * to the demand upstream.  Acts as a defence-in-depth speed cap.
+     * 1.0 in ACTIVE, L1=80%, L2=60%, L3=50% in DEGRADED.             */
+    {
+        float traction_cap = Safety_GetTractionCapFactor();
+        if (traction_cap < 1.0f) {
+            base_pwm = (uint16_t)(base_pwm * traction_cap);
+        }
+    }
 
     /* ---- Ackermann differential torque correction ----
      * Compute per-wheel multipliers based on current steering angle.
@@ -1062,11 +1082,13 @@ void Steering_ControlLoop(void)
     if (output < -100.0f) output = -100.0f;
     if (output >  100.0f) output =  100.0f;
 
-    /* Reduce steering aggressiveness in DEGRADED state (40% reduction).
+    /* Reduce steering aggressiveness in DEGRADED state.
+     * Phase 12: per-level scaling via Safety_GetSteeringLimitFactor().
+     * L1=85%, L2=70%, L3=60% (legacy was fixed 60%).
      * Traced to limp_mode.cpp drive-home philosophy: lower steering
      * torque reduces risk while preserving controllability.             */
     if (Safety_IsDegraded()) {
-        output *= 0.6f;
+        output *= Safety_GetSteeringLimitFactor();
     }
     output = sanitize_float(output, 0.0f);
 

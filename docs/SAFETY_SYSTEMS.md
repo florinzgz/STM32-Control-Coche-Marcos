@@ -456,16 +456,16 @@ for (uint8_t i = 0; i < 4; i++) {
 ### Degradación de Asistencia de Dirección en Modo DEGRADED
 
 Cuando el sistema entra en estado `SYS_STATE_DEGRADED`, la asistencia de
-dirección se reduce automáticamente en un **40%** (multiplicador 0.6) para
-disminuir la agresividad del motor de dirección y mejorar la seguridad en
-modo limp/drive-home.
+dirección se reduce automáticamente según el **nivel de degradación interno**
+(Phase 12) para disminuir la agresividad del motor de dirección y mejorar la
+seguridad en modo limp/drive-home.
 
 **Comportamiento:**
 
 - La reducción se aplica **dentro de `Steering_ControlLoop()`** únicamente,
   después del cálculo PID y antes de la conversión a PWM.
-- La salida PID se multiplica por `0.6f` cuando `Safety_IsDegraded()` es
-  `true`.
+- La salida PID se multiplica por `Safety_GetSteeringLimitFactor()` cuando
+  `Safety_IsDegraded()` es `true`.
 - El resultado pasa por `sanitize_float()` antes de cualquier uso.
 - Los límites mecánicos (±45°), la validación de encoder, la neutralización
   en estado SAFE, y el rate limiter **NO se modifican**.
@@ -475,7 +475,7 @@ modo limp/drive-home.
 ```c
 // Dentro de Steering_ControlLoop(), después de PID_Compute y clamp:
 if (Safety_IsDegraded()) {
-    output *= 0.6f;   // 40% reducción de torque de dirección
+    output *= Safety_GetSteeringLimitFactor();
 }
 output = sanitize_float(output, 0.0f);
 ```
@@ -485,10 +485,78 @@ output = sanitize_float(output, 0.0f);
 | Estado | Comportamiento de dirección |
 |--------|-----------------------------|
 | ACTIVE | PID output al 100% (sin reducción) |
-| DEGRADED | PID output × 0.6 (40% reducción) |
+| DEGRADED L1 | PID output × 0.85 (15% reducción) |
+| DEGRADED L2 | PID output × 0.70 (30% reducción) |
+| DEGRADED L3 | PID output × 0.60 (40% reducción) |
 | SAFE | Motor neutralizado (`Steering_Neutralize()`) |
 
 **No se modifica:** contrato CAN, máquina de estados de seguridad, ABS/TCS.
+
+### Degradación Granular — Modo Limp Multi-Nivel (Phase 12)
+
+El modo DEGRADED se refina internamente en tres niveles de severidad,
+manteniendo `SYS_STATE_DEGRADED` como estado visible externamente por CAN.
+No se modifican IDs de mensaje CAN, la máquina de estados, ni el watchdog.
+
+#### Niveles de Degradación Internos
+
+| Nivel | Potencia | Dirección | Tracción | Descripción |
+|-------|----------|-----------|----------|-------------|
+| **L1** | 70% | 85% | 80% | Fallo menor de sensor — limitación suave |
+| **L2** | 50% | 70% | 60% | Advertencia térmica — limitación moderada |
+| **L3** | 40% | 60% | 50% | Anomalía persistente — limitación máxima |
+
+#### Razones de Degradación (`DegradedReason_t`)
+
+| Razón | Valor | Nivel típico | Descripción |
+|-------|-------|-------------|-------------|
+| `DEGRADED_REASON_SENSOR_FAULT` | 1 | L1 | Fallo de plausibilidad de sensor individual |
+| `DEGRADED_REASON_THERMAL_WARN` | 2 | L2 | Temperatura > umbral de advertencia (80°C) |
+| `DEGRADED_REASON_OVERCURRENT` | 3 | L1 | Evento único de sobrecorriente |
+| `DEGRADED_REASON_CENTERING_FAIL` | 4 | L1 | Fallo de centrado de dirección |
+| `DEGRADED_REASON_BATTERY_UV` | 5 | L2 | Subtensión de batería (< 20.0 V) |
+| `DEGRADED_REASON_DEMAND_ANOMALY` | 6 | L1 | Anomalía de demanda de acelerador |
+| `DEGRADED_REASON_ENCODER_FAULT` | 7 | L1 | Fallo del encoder de dirección |
+| `DEGRADED_REASON_PERSISTENT` | 8 | L3 | Múltiples fallos acumulados |
+
+#### Pipeline de Escalación
+
+```
+Fallo detectado → Safety_SetDegradedLevel(nivel, razón)
+                ↓
+    Solo escalación (nunca reducción dentro de DEGRADED)
+                ↓
+    Nivel actual determina factores de escala:
+        Safety_GetPowerLimitFactor()      → potencia
+        Safety_GetSteeringLimitFactor()   → dirección
+        Safety_GetTractionCapFactor()     → tracción
+                ↓
+    Recuperación a ACTIVE → nivel reset a DEGRADED_LEVEL_NONE
+```
+
+#### Mapeo a CAN
+
+Todos los niveles internos reportan `SYS_STATE_DEGRADED` (= 3) en el
+heartbeat CAN (0x001 byte 1).  No se añaden nuevos IDs de mensaje CAN.
+
+```c
+// can_handler.c — SIN CAMBIOS
+payload[1] = (uint8_t)Safety_GetState();  // Siempre 3 para cualquier nivel
+```
+
+#### Contador de Telemetría
+
+`Safety_GetDegradedTelemetryCount()` devuelve el número total de entradas
+en modo degradado desde el último arranque.  Disponible para diagnóstico
+interno; no se transmite por CAN (sin cambios de contrato).
+
+#### Compatibilidad con Sistemas Existentes
+
+- **ABS/TCS**: Sin cambios — operan independientemente por rueda
+- **Obstacle scale**: Sin cambios — se aplica upstream
+- **Ackermann**: Sin cambios — se aplica downstream
+- **Watchdog**: Sin cambios — IWDG 500 ms sin bloqueo
+- **Relays**: Sin cambios — secuenciación no-bloqueante preservada
 
 ---
 

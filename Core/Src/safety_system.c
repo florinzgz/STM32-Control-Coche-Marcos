@@ -98,6 +98,14 @@ static uint32_t        relay_seq_timestamp = 0;
 static uint32_t recovery_clean_since    = 0;
 static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
 
+/* ---- Granular degradation internal state (Phase 12) ----
+ * These variables track the current degradation level and reason
+ * internally.  The external CAN representation remains SYS_STATE_DEGRADED
+ * for all levels — no CAN contract changes.                              */
+static DegradedLevel_t  degraded_level   = DEGRADED_LEVEL_NONE;
+static DegradedReason_t degraded_reason  = DEGRADED_REASON_NONE;
+static uint32_t         degraded_telemetry_count = 0;  /* Total entries into degraded */
+
 /* Per-wheel TCS reduction accumulator (persistent across calls).
  * Mirrors tcs_system.cpp WheelTCSState::powerReduction.
  * Declared here (module state section) so Safety_Init can reset them. */
@@ -168,6 +176,9 @@ void Safety_SetState(SystemState_t state)
                 if (safety_error == SAFETY_ERROR_NONE) {
                     system_state = SYS_STATE_ACTIVE;
                     consecutive_errors = 0;
+                    /* Clear internal degradation level on recovery */
+                    degraded_level  = DEGRADED_LEVEL_NONE;
+                    degraded_reason = DEGRADED_REASON_NONE;
                     Relay_PowerUp();
                 }
             }
@@ -191,12 +202,16 @@ void Safety_SetState(SystemState_t state)
                 system_state == SYS_STATE_STANDBY  ||
                 system_state == SYS_STATE_DEGRADED) {
                 system_state = SYS_STATE_SAFE;
+                degraded_level  = DEGRADED_LEVEL_NONE;
+                degraded_reason = DEGRADED_REASON_NONE;
                 Safety_FailSafe();
             }
             break;
 
         case SYS_STATE_ERROR:
             system_state = SYS_STATE_ERROR;
+            degraded_level  = DEGRADED_LEVEL_NONE;
+            degraded_reason = DEGRADED_REASON_NONE;
             Safety_PowerDown();
             break;
 
@@ -217,15 +232,78 @@ bool Safety_IsDegraded(void)
 }
 
 /* Return power-limit multiplier for the current state.
- * ACTIVE  → 1.0 (100 %)
- * DEGRADED → DEGRADED_POWER_LIMIT_PCT / 100 (40 % — traced to
- *            limp_mode.cpp POWER_LIMP)
- * Others  → 0.0 (commands rejected upstream)                          */
+ * ACTIVE   → 1.0 (100 %)
+ * DEGRADED → per-level scaling (L1=70%, L2=50%, L3=40%)
+ *            Falls back to DEGRADED_POWER_LIMIT_PCT if level not set.
+ * Others   → 0.0 (commands rejected upstream)                          */
 float Safety_GetPowerLimitFactor(void)
 {
     if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
-    if (system_state == SYS_STATE_DEGRADED) return DEGRADED_POWER_LIMIT_PCT / 100.0f;
+    if (system_state == SYS_STATE_DEGRADED) {
+        switch (degraded_level) {
+            case DEGRADED_L1: return DEGRADED_L1_POWER_PCT / 100.0f;
+            case DEGRADED_L2: return DEGRADED_L2_POWER_PCT / 100.0f;
+            case DEGRADED_L3: return DEGRADED_L3_POWER_PCT / 100.0f;
+            default:          return DEGRADED_POWER_LIMIT_PCT / 100.0f;
+        }
+    }
     return 0.0f;
+}
+
+/* Return steering-assist multiplier for the current state (Phase 12).
+ * ACTIVE   → 1.0 (100 %)
+ * DEGRADED → per-level scaling (L1=85%, L2=70%, L3=60%)
+ * Others   → 0.0                                                       */
+float Safety_GetSteeringLimitFactor(void)
+{
+    if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
+    if (system_state == SYS_STATE_DEGRADED) {
+        switch (degraded_level) {
+            case DEGRADED_L1: return DEGRADED_L1_STEERING_PCT / 100.0f;
+            case DEGRADED_L2: return DEGRADED_L2_STEERING_PCT / 100.0f;
+            case DEGRADED_L3: return DEGRADED_L3_STEERING_PCT / 100.0f;
+            default:          return 0.6f;  /* Legacy 40% reduction */
+        }
+    }
+    return 0.0f;
+}
+
+/* Return traction-cap multiplier for the current state (Phase 12).
+ * ACTIVE   → 1.0 (100 %)
+ * DEGRADED → per-level scaling (L1=80%, L2=60%, L3=50%)
+ * Others   → 0.0                                                       */
+float Safety_GetTractionCapFactor(void)
+{
+    if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
+    if (system_state == SYS_STATE_DEGRADED) {
+        switch (degraded_level) {
+            case DEGRADED_L1: return DEGRADED_L1_TRACTION_PCT / 100.0f;
+            case DEGRADED_L2: return DEGRADED_L2_TRACTION_PCT / 100.0f;
+            case DEGRADED_L3: return DEGRADED_L3_TRACTION_PCT / 100.0f;
+            default:          return DEGRADED_SPEED_LIMIT_PCT / 100.0f;
+        }
+    }
+    return 0.0f;
+}
+
+/* Granular degradation accessors (Phase 12) */
+DegradedLevel_t  Safety_GetDegradedLevel(void)          { return degraded_level;  }
+DegradedReason_t Safety_GetDegradedReason(void)         { return degraded_reason; }
+uint32_t         Safety_GetDegradedTelemetryCount(void)  { return degraded_telemetry_count; }
+
+void Safety_SetDegradedLevel(DegradedLevel_t level, DegradedReason_t reason)
+{
+    /* Only escalate — never reduce level while still in DEGRADED.
+     * Recovery to ACTIVE resets the level via Safety_SetState().
+     * Telemetry counter increments only on initial entry (NONE→Lx),
+     * not on intra-degraded escalation (L1→L2).                        */
+    if (level > degraded_level) {
+        if (degraded_level == DEGRADED_LEVEL_NONE) {
+            degraded_telemetry_count++;
+        }
+        degraded_level  = level;
+        degraded_reason = reason;
+    }
 }
 
 uint8_t Safety_GetFaultFlags(void)
@@ -682,6 +760,15 @@ void Safety_CheckCurrent(void)
                 Safety_SetState(SYS_STATE_SAFE);
             } else {
                 Safety_SetState(SYS_STATE_DEGRADED);
+                /* Phase 12: escalate degradation level with each
+                 * consecutive overcurrent event.                      */
+                if (consecutive_errors >= 2) {
+                    Safety_SetDegradedLevel(DEGRADED_L3,
+                                            DEGRADED_REASON_PERSISTENT);
+                } else {
+                    Safety_SetDegradedLevel(DEGRADED_L1,
+                                            DEGRADED_REASON_OVERCURRENT);
+                }
             }
             return;
         } else {
@@ -732,6 +819,8 @@ void Safety_CheckTemperature(void)
             ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
             Safety_SetError(SAFETY_ERROR_OVERTEMP);
             Safety_SetState(SYS_STATE_DEGRADED);
+            Safety_SetDegradedLevel(DEGRADED_L2,
+                                    DEGRADED_REASON_THERMAL_WARN);
             return;
         }
         ServiceMode_ClearFault(mod);
@@ -861,6 +950,14 @@ void Safety_CheckSensors(void)
     if (fault_count > 0) {
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         Safety_SetState(SYS_STATE_DEGRADED);
+        /* Phase 12: multiple sensor faults → higher degradation level */
+        if (fault_count >= 3) {
+            Safety_SetDegradedLevel(DEGRADED_L3,
+                                    DEGRADED_REASON_PERSISTENT);
+        } else {
+            Safety_SetDegradedLevel(DEGRADED_L1,
+                                    DEGRADED_REASON_SENSOR_FAULT);
+        }
         return;
     }
 
@@ -907,6 +1004,8 @@ void Safety_CheckEncoder(void)
          * traction alive in DEGRADED mode for "drive home".         */
         Steering_Neutralize();
         Safety_SetState(SYS_STATE_DEGRADED);
+        Safety_SetDegradedLevel(DEGRADED_L1,
+                                DEGRADED_REASON_ENCODER_FAULT);
     } else {
         ServiceMode_ClearFault(MODULE_STEER_ENCODER);
     }
@@ -965,6 +1064,8 @@ void Safety_CheckBatteryVoltage(void)
     if (voltage < BATTERY_UV_WARNING_V) {
         Safety_SetError(SAFETY_ERROR_BATTERY_UV_WARNING);
         Safety_SetState(SYS_STATE_DEGRADED);
+        Safety_SetDegradedLevel(DEGRADED_L2,
+                                DEGRADED_REASON_BATTERY_UV);
         return;
     }
 
