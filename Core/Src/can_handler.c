@@ -137,11 +137,11 @@ void CAN_Init(void) {
     can_stats.last_heartbeat_esp32 = HAL_GetTick();
     can_stats.busoff_count = 0;
     heartbeat_counter = 0;
-    
+
     /* Reset bus-off recovery state */
-    busoff_active      = 0;
+    busoff_active       = 0;
     busoff_last_attempt = 0;
-    busoff_retry_count = 0;
+    busoff_retry_count  = 0;
     
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
