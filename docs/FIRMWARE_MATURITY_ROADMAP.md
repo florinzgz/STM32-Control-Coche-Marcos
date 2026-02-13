@@ -724,6 +724,82 @@ outside_mult = min(1.0 + correction, 1.0)          (outside wheels, capped)
 - No state machine changes — uses existing `Safety_SetState(SYS_STATE_DEGRADED)` path
 - No new global architecture — 6 static variables added (module-local)
 
+### Phase 10 — Non-Blocking Relay Sequencing Refactor (Documentation)
+
+Phase 10 consolidates the relay sequencing refactor documentation.  The
+non-blocking implementation was completed in Phase 5; Phase 10 adds the
+detailed safety rationale, before/after analysis, and regression
+verification checklist required by the safety audit process.
+
+**Files changed:**
+
+| File | Lines added | Lines removed | Description |
+|------|------------|---------------|-------------|
+| docs/SAFETY_SYSTEMS.md | ~55 | 0 | Added blocking-delay hazard analysis and regression table |
+| docs/FIRMWARE_MATURITY_ROADMAP.md | ~80 | 0 | Phase 10 section with before/after, safety impact, regression checklist |
+
+**Before / After comparison:**
+
+| Aspect | Before (blocking) | After (non-blocking) |
+|--------|-------------------|----------------------|
+| `Relay_PowerUp()` | `HAL_Delay(50)` + `HAL_Delay(20)` inside function body — 70 ms total blocking | Sets main relay GPIO + records `HAL_GetTick()` timestamp, returns immediately |
+| `Relay_PowerDown()` | Inline GPIO resets (already non-blocking) | Unchanged — immediate GPIO resets in reverse order |
+| State machine | None | `RelaySeqState_t` enum: IDLE → MAIN_ON → TRACTION_ON → COMPLETE |
+| Sequencer driver | N/A | `Relay_SequencerUpdate()` called every 10 ms from main loop |
+| Timing mechanism | `HAL_Delay()` busy-wait | `HAL_GetTick()` timestamp comparison |
+| Main loop blocking | ~70 ms per power-up call | 0 ms (returns within microseconds) |
+| Safety checks during power-up | Suspended for 70 ms | Active — all checks run every 10 ms |
+| Watchdog during power-up | Not refreshed for 70 ms | Refreshed every main-loop iteration |
+| CAN processing during power-up | Suspended (FIFO overflow risk) | Active — frames processed normally |
+| Re-entry safety | Undefined (double-call could extend delays) | Safe no-op — guard on `relay_seq_state != RELAY_SEQ_IDLE` |
+
+**CAN behaviour confirmation:**
+- No CAN message IDs added, modified, or removed
+- No CAN payload formats changed
+- Heartbeat timing unchanged (100 ms)
+- CAN contract version: 1.2 (unchanged)
+
+**SAFE state relay powerdown confirmation:**
+- `Safety_SetState(SYS_STATE_SAFE)` → `Safety_FailSafe()` → `Traction_EmergencyStop()` + steering centre
+- `Safety_SetState(SYS_STATE_ERROR)` → `Safety_PowerDown()` → `Relay_PowerDown()` (immediate)
+- `Relay_PowerDown()` resets `relay_seq_state = RELAY_SEQ_IDLE` and de-energises all three relay GPIOs in reverse order (DIR → TRAC → MAIN)
+- Any in-progress power-up sequence is cancelled immediately
+
+**Safety impact analysis:**
+- Watchdog starvation risk: eliminated (no blocking during relay sequence)
+- Safety check blackout: eliminated (checks run every 10 ms)
+- CAN FIFO overflow: eliminated (messages processed continuously)
+- Determinism: preserved (10 ms loop period maintained)
+- Deadlock: impossible (state machine has no blocking transitions)
+- Re-entry: safe (guarded by state check)
+
+**Regression verification checklist:**
+- [x] Relay activation order preserved: Main → Traction → Direction
+- [x] Relay deactivation order preserved: Direction → Traction → Main
+- [x] `RELAY_MAIN_SETTLE_MS` = 50 ms — unchanged
+- [x] `RELAY_TRACTION_SETTLE_MS` = 20 ms — unchanged
+- [x] GPIO pins: `PIN_RELAY_MAIN`, `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` on GPIOC — unchanged
+- [x] `Safety_SetState()` logic: not modified
+- [x] CAN contract: no messages added, modified, or removed
+- [x] Watchdog timing: IWDG 500 ms timeout — not modified
+- [x] ABS/TCS: not modified
+- [x] Obstacle safety: not modified
+- [x] Ackermann correction: not modified
+- [x] Demand anomaly detection: not modified
+- [x] Steering PID: not modified
+- [x] No RTOS introduced
+- [x] No blocking loops or busy-waits
+- [x] No new modules created
+
+**Updated implementation percentage:**
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Safety system (safety_system.c) | 93% | 93% | 0% — code unchanged (Phase 5 implementation verified) |
+| Main loop (main.c) | — | — | No change — `Relay_SequencerUpdate()` already in 10 ms loop |
+| CAN contract | 1.2 | 1.2 | No change |
+| **Overall STM32 firmware** | **~98%** | **~98%** | 0% — documentation-only phase |
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
@@ -756,3 +832,4 @@ outside_mult = min(1.0 + correction, 1.0)          (outside wheels, capped)
 *Updated: 2026-02-13 — Phase 6: CAN bus-off detection and non-blocking recovery*
 *Updated: 2026-02-13 — Phase 8: Ackermann differential torque correction (max ±15%, 2° deadband)*
 *Updated: 2026-02-13 — Phase 9: Demand anomaly detection (step-rate, range, frozen pedal)*
+*Updated: 2026-02-13 — Phase 10: Non-blocking relay sequencing refactor documentation*

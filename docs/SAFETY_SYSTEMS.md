@@ -785,6 +785,62 @@ seguridad, CAN y watchdog continúen durante la secuencia de encendido.
 | → SAFE | `Relay_PowerDown()` inmediato (vía `Safety_FailSafe()`) |
 | → ERROR | `Relay_PowerDown()` inmediato (vía `Safety_PowerDown()`) |
 
+### Por Qué los Delays Bloqueantes Son Peligrosos en Firmware de Seguridad
+
+In a safety-critical embedded control loop, calling `HAL_Delay()` inside
+relay sequencing creates the following hazards:
+
+1. **Watchdog starvation** — The IWDG (500 ms timeout) is refreshed only
+   from the main loop.  A 70 ms blocking delay reduces the available
+   margin and, if combined with other latencies, can trigger an
+   unintended watchdog reset.
+
+2. **Safety check blackout** — While the CPU spins inside `HAL_Delay()`,
+   no overcurrent, overtemperature, CAN timeout, or sensor plausibility
+   checks execute.  A fault arising during relay power-up would go
+   undetected for the full duration of the delay.
+
+3. **CAN message loss** — Incoming CAN frames from the ESP32 accumulate
+   in the FDCAN FIFO during the blocking window.  If the FIFO
+   overflows, heartbeat or command frames are silently dropped,
+   potentially triggering a false CAN timeout after the delay ends.
+
+4. **Determinism violation** — The 10 ms safety loop period is the
+   foundation of all timing guarantees (ABS pulse modulation, TCS
+   recovery ramp, steering PID).  Injecting a variable-length blocking
+   call breaks the deterministic scheduling contract.
+
+5. **Deadlock risk** — If a fault triggers `Relay_PowerDown()` from an
+   ISR or higher-priority context while `Relay_PowerUp()` is still
+   blocking, the power-down action is deferred until the delay
+   completes — exactly the opposite of fail-safe behaviour.
+
+The non-blocking state machine (`RelaySeqState_t`) resolves all five
+hazards by returning control to the main loop within microseconds on
+every call.  The relay transitions progress by comparing elapsed ticks,
+ensuring that every 10 ms iteration also runs safety checks, refreshes
+the watchdog, and processes CAN traffic.
+
+### Análisis de Regresión — Secuenciación de Relés
+
+| Aspecto | Verificación |
+|---------|-------------|
+| Orden de activación | Main → Traction → Direction — sin cambios |
+| Orden de desactivación | Direction → Traction → Main — sin cambios |
+| Temporización Main → Traction | ≥ 50 ms (`RELAY_MAIN_SETTLE_MS`) — preservado |
+| Temporización Traction → Dir | ≥ 20 ms (`RELAY_TRACTION_SETTLE_MS`) — preservado |
+| Pines GPIO utilizados | `PIN_RELAY_MAIN`, `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` en GPIOC — sin cambios |
+| Contrato CAN | Ningún mensaje añadido, modificado o eliminado |
+| Máquina de estados del sistema | `Safety_SetState()` no modificada |
+| Watchdog durante power-up | IWDG se refresca normalmente (no bloqueado) |
+| Safety checks durante power-up | Todas activas (overcurrent, overtemp, CAN timeout, sensores) |
+| Re-entrada segura | `Relay_PowerUp()` doble = no-op; `Relay_PowerDown()` cancela secuencia en progreso |
+| Transición SAFE | `Safety_FailSafe()` fuerza parada de actuadores inmediata |
+| Transición ERROR | `Safety_PowerDown()` → `Relay_PowerDown()` inmediato |
+| ABS/TCS | No modificados — operan independientemente de la secuencia de relés |
+| Obstacle safety | No modificado — `Obstacle_Update()` no afectado |
+| Ackermann correction | No modificada — opera en pipeline de tracción |
+
 ---
 
 ## 🔧 CAN Bus-Off Detection and Recovery
