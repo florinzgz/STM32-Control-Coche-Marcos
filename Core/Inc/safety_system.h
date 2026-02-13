@@ -28,7 +28,8 @@ typedef enum {
     SAFETY_ERROR_WATCHDOG = 7,
     SAFETY_ERROR_CENTERING = 8,             /* Steering centering failed */
     SAFETY_ERROR_BATTERY_UV_WARNING = 9,    /* Battery voltage < 20.0 V */
-    SAFETY_ERROR_BATTERY_UV_CRITICAL = 10   /* Battery voltage < 18.0 V */
+    SAFETY_ERROR_BATTERY_UV_CRITICAL = 10,  /* Battery voltage < 18.0 V */
+    SAFETY_ERROR_I2C_FAILURE = 11           /* I2C bus locked / unrecoverable */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.
