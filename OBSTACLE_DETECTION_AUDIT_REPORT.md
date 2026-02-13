@@ -335,7 +335,7 @@ FULL-FIRMWARE-Coche-Marcos/
 │   ├── obstacle_config.h         ← Hardware constants, frame format, thresholds
 │   ├── obstacle_safety.h         ← Safety structs, zone control API
 │   ├── adaptive_cruise.h         ← ACC structs, PID API
-│   └── pins.h                    ← Pin assignments (GPIO 44 RX, GPIO 43/-1 TX)
+│   └── pins.h                    ← Pin assignments (GPIO 44 RX, GPIO -1 TX — not connected)
 ├── src/
 │   ├── sensors/
 │   │   └── obstacle_detection.cpp ← UART driver, frame parser, sensor state
