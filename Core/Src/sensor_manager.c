@@ -8,10 +8,15 @@
   *   - 5× DS18B20 temperature sensors (OneWire on PB0)
   *   - 6× INA226 current/voltage sensors (I2C via TCA9548A multiplexer)
   *   - 1× Hall-effect pedal (ADC1)
+  *
+  * I2C Bus Recovery Mechanism
+  * Protects against SDA held low by slave device
+  * Based on NXP AN10216
   ****************************************************************************
   */
 
 #include "sensor_manager.h"
+#include "safety_system.h"
 #include "main.h"
 
 /* =========================================================================
@@ -129,6 +134,80 @@ static float voltage_bus[NUM_INA226]   = {0};
 
 extern I2C_HandleTypeDef hi2c1;
 
+/* ---- I2C failure tracking ---- */
+#define I2C_FAIL_THRESHOLD       3   /* consecutive failures before recovery */
+#define I2C_RECOVERY_MAX_ATTEMPTS 2  /* max recovery tries before safe-state */
+
+static uint8_t i2c_fail_count       = 0;
+static uint8_t i2c_recovery_attempts = 0;
+
+/**
+ * @brief  I2C bus recovery via manual SCL clock cycling.
+ *
+ * Procedure (per NXP AN10216):
+ *   1. Deinitialize I2C peripheral
+ *   2. Reconfigure SCL (PB6) as GPIO push-pull output
+ *   3. Toggle SCL 16 times while monitoring SDA
+ *   4. Generate STOP condition (SDA low→high while SCL high)
+ *   5. Reinitialize I2C peripheral
+ *   6. Reset failure counter
+ *
+ * Execution time: ~16 × 10 µs = ~160 µs (well under 5 ms limit).
+ */
+static void I2C_BusRecovery(void)
+{
+    /* Step 1: Deinitialize I2C peripheral */
+    HAL_I2C_DeInit(&hi2c1);
+
+    /* Step 2: Configure SCL (PB6) as GPIO output, SDA (PB7) as input */
+    GPIO_InitTypeDef gpio = {0};
+    gpio.Pin   = PIN_I2C_SCL;
+    gpio.Mode  = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull  = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    gpio.Pin   = PIN_I2C_SDA;
+    gpio.Mode  = GPIO_MODE_INPUT;
+    gpio.Pull  = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    /* Step 3: Toggle SCL 16 times to release stuck slave */
+    for (uint8_t i = 0; i < 16; i++) {
+        HAL_GPIO_WritePin(GPIOB, PIN_I2C_SCL, GPIO_PIN_RESET);
+        /* ~5 µs low — short busy-wait (170 MHz, ~850 cycles) */
+        for (volatile uint32_t d = 0; d < 210; d++) { __NOP(); }
+
+        HAL_GPIO_WritePin(GPIOB, PIN_I2C_SCL, GPIO_PIN_SET);
+        /* ~5 µs high */
+        for (volatile uint32_t d = 0; d < 210; d++) { __NOP(); }
+
+        /* If SDA released, slave is unstuck */
+        if (HAL_GPIO_ReadPin(GPIOB, PIN_I2C_SDA) == GPIO_PIN_SET) {
+            break;
+        }
+    }
+
+    /* Step 4: Generate STOP condition (SDA low→high while SCL high) */
+    gpio.Pin  = PIN_I2C_SDA;
+    gpio.Mode = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    HAL_GPIO_WritePin(GPIOB, PIN_I2C_SDA, GPIO_PIN_RESET);
+    for (volatile uint32_t d = 0; d < 210; d++) { __NOP(); }
+    HAL_GPIO_WritePin(GPIOB, PIN_I2C_SCL, GPIO_PIN_SET);
+    for (volatile uint32_t d = 0; d < 210; d++) { __NOP(); }
+    HAL_GPIO_WritePin(GPIOB, PIN_I2C_SDA, GPIO_PIN_SET);
+    for (volatile uint32_t d = 0; d < 210; d++) { __NOP(); }
+
+    /* Step 5: Reinitialize I2C peripheral */
+    HAL_I2C_Init(&hi2c1);
+
+    /* Step 6: Reset failure counter */
+    i2c_fail_count = 0;
+}
+
 #define INA226_REG_SHUNT_VOLTAGE   0x01
 #define INA226_REG_BUS_VOLTAGE     0x02
 #define INA226_SHUNT_LSB_UV        2.5f   /* 2.5 µV per LSB */
@@ -141,22 +220,34 @@ static HAL_StatusTypeDef TCA9548A_SelectChannel(uint8_t channel)
 {
     if (channel > 7) return HAL_ERROR;
     uint8_t data = (uint8_t)(1U << channel);
-    return HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_TCA9548A << 1), &data, 1, 50);
+    HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_TCA9548A << 1), &data, 1, 50);
+    if (status != HAL_OK) {
+        i2c_fail_count++;
+    }
+    return status;
 }
 
 /**
  * @brief  Read a 16-bit register from INA226 on the currently selected channel.
+ * @retval Register value, or 0 on I2C failure (failure counted).
  */
 static int16_t INA226_ReadReg(uint8_t reg)
 {
     uint8_t buf[2] = {0};
-    HAL_I2C_Mem_Read(&hi2c1, (I2C_ADDR_INA226 << 1), reg, I2C_MEMADD_SIZE_8BIT,
-                     buf, 2, 50);
+    HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c1, (I2C_ADDR_INA226 << 1), reg,
+                                                 I2C_MEMADD_SIZE_8BIT, buf, 2, 50);
+    if (status != HAL_OK) {
+        i2c_fail_count++;
+        return 0;
+    }
     return (int16_t)((buf[0] << 8) | buf[1]);
 }
 
 void Current_ReadAll(void)
 {
+    /* Reset per-cycle failure counter */
+    i2c_fail_count = 0;
+
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         if (TCA9548A_SelectChannel(i) != HAL_OK) {
             current_amps[i] = 0.0f;
@@ -179,6 +270,21 @@ void Current_ReadAll(void)
         /* Bus voltage */
         int16_t bus_raw   = INA226_ReadReg(INA226_REG_BUS_VOLTAGE);
         voltage_bus[i]    = (float)bus_raw * INA226_BUS_LSB_MV / 1000.0f;  /* Convert mV to V */
+    }
+
+    /* I2C failure detection and recovery */
+    if (i2c_fail_count >= I2C_FAIL_THRESHOLD) {
+        if (i2c_recovery_attempts < I2C_RECOVERY_MAX_ATTEMPTS) {
+            I2C_BusRecovery();
+            i2c_recovery_attempts++;
+        } else {
+            /* Recovery exhausted — enter safe state */
+            Safety_SetError(SAFETY_ERROR_I2C_FAILURE);
+            Safety_SetState(SYS_STATE_SAFE);
+        }
+    } else {
+        /* Successful cycle — reset recovery attempt counter */
+        i2c_recovery_attempts = 0;
     }
 }
 
@@ -500,6 +606,9 @@ void Sensor_Init(void)
         current_amps[i] = 0.0f;
         voltage_bus[i]  = 0.0f;
     }
+
+    i2c_fail_count        = 0;
+    i2c_recovery_attempts = 0;
 
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         temperatures[i] = 0.0f;

@@ -90,7 +90,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **LED Lighting System** | NONE | Not implemented. Reference has WS2812B controller (28 front + 16 rear LEDs), LED control menus, state-dependent lighting. |
 | **Audio System** | NONE | Not implemented. Reference has DFPlayer Mini integration, alert sounds, audio queue, shutdown audio. |
 | **Touch Display** | NONE | ESP32 screen classes are stubs. Reference has ST7796S TFT 480×320, XPT2046 touch, touch calibration, full HUD compositor, gauges, icons, dirty-rect rendering. |
-| **I2C Recovery** | NONE | Not implemented. Reference has I2C bus recovery mechanism (clock cycling, bus reset). Current firmware uses I2C for INA226/TCA9548A but has no recovery on bus lockup. |
+| **I2C Recovery** | COMPLETE | Implemented. SCL clock cycling (up to 16 pulses) with STOP condition generation, automatic retry (2 attempts), safe-state fallback on failure. Protects INA226 and TCA9548A. Based on NXP AN10216. |
 | **EEPROM / Config Persistence** | NONE | Not implemented. Reference has EEPROM persistence with checksum validation, config manager, storage abstraction. Current firmware uses hardcoded constants only. |
 | **Advanced Diagnostics** | PARTIAL | CAN diagnostic messages (0x300–0x303) exist. Missing: runtime self-test, memory stress test, boot sequence validation, functional tests as in reference. |
 | **MCP23017 GPIO Expander** | INTENTIONALLY REMOVED | Not needed. STM32G474RE has sufficient GPIO pins (LQFP64, 51 I/O). Reference used MCP23017 I2C expander due to ESP32-S3 pin limitations. |
@@ -161,7 +161,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] 5× DS18B20 temperature sensors (OneWire bit-bang, CRC-8 validation)
 - [✓] Battery bus current/voltage (INA226 channel 4)
 - [ ] Obstacle detection sensors (reference: TOFSense-M S LiDAR via UART)
-- [ ] I2C bus recovery mechanism (reference: i2c_recovery.cpp — clock cycling, bus reset)
+- [✓] I2C bus recovery mechanism (SCL clock cycling, STOP condition, safe-state fallback — NXP AN10216)
 - [~] Sensor data filtering (pedal has EMA; wheel speed and current use raw values — reference has dedicated filters.cpp module with multiple filter types)
 
 ### 3.4 CAN Communication
@@ -242,7 +242,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [ ] LED lighting control (reference: led_controller.cpp — WS2812B 28+16 LEDs)
 - [ ] Touch calibration system (reference: touch_calibration.cpp)
 - [ ] Telemetry logging (reference: telemetry.cpp)
-- [ ] I2C recovery mechanism (reference: i2c_recovery.cpp)
+- [✓] I2C recovery mechanism (implemented in sensor_manager.c)
 
 ---
 
@@ -256,7 +256,7 @@ This section identifies safety mechanisms present in the reference firmware that
 |---------------|-------------------------|----------------|--------|
 | **Battery undervoltage cutoff** | limp_mode.cpp checks `batteryUndervoltage` flag, reduces power progressively | Not implemented — voltage is read (INA226 ch4) but no cutoff logic exists | Could allow motor operation below safe battery voltage, risking deep discharge or controller brownout |
 | **Obstacle collision avoidance** | obstacle_safety.cpp: 5-zone distance system, emergency braking, speed reduction factor (0.0–1.0) | Not implemented — no distance sensors, no collision logic | Vehicle has no forward/rear obstacle awareness. Acceptable if operated in controlled environment only |
-| **I2C bus recovery** | i2c_recovery.cpp: clock cycling (9+ pulses on SCL), bus reset, automatic retry | Not implemented — I2C failure on TCA9548A or INA226 would leave sensors unreadable | A stuck I2C bus would prevent current/temperature readings. Could mask overcurrent/overtemperature conditions |
+| **I2C bus recovery** | i2c_recovery.cpp: clock cycling (9+ pulses on SCL), bus reset, automatic retry | **Implemented** — SCL clock cycling (16 pulses), STOP condition, 2-attempt recovery, SAFE state fallback via SAFETY_ERROR_I2C_FAILURE | Gap closed |
 | **Sensor cross-validation** | SensorManagerEnhanced.cpp: compares sensor readings against each other for plausibility | Not implemented — each sensor read independently, no cross-checks | A single faulty sensor could provide wildly incorrect data without detection (e.g., temperature sensor reading −55°C) |
 | **Boot guard / pre-flight** | boot_guard.cpp: validates hardware state before enabling control | Not implemented — system transitions BOOT → STANDBY based on timing only | Could allow operation with misconfigured or failed peripherals |
 | **Granular limp mode** | limp_mode.cpp: 4-level system (NORMAL/DEGRADED/LIMP/CRITICAL) with separate power, steering, and speed multipliers | Simplified — single DEGRADED state with flat 40% power limit | Does not differentiate between minor sensor warning and major system failure. Cannot apply asymmetric limits (e.g., reduce speed but maintain steering) |
@@ -292,7 +292,7 @@ This section identifies safety mechanisms present in the reference firmware that
 
 | Item | Description | Effort |
 |------|-------------|--------|
-| 1.1 | **I2C recovery mechanism** — Implement clock cycling (9+ SCL pulses) and bus reset on I2C failure. Protects INA226 and TCA9548A communication. | Medium |
+| 1.1 | **I2C recovery mechanism** — ✅ COMPLETE. SCL clock cycling (16 pulses) and bus reset on I2C failure. Protects INA226 and TCA9548A communication. Safe-state fallback after 2 failed recovery attempts. | Medium |
 | 1.2 | **Battery undervoltage protection** — Add voltage threshold check on INA226 ch4 bus voltage. Below threshold → DEGRADED (reduced power), below critical → SAFE (actuators off). | Low |
 | 1.3 | **CAN bus-off recovery** — Monitor FDCAN error state register. On bus-off, attempt automatic recovery after configurable delay. Log bus-off events. | Low |
 | 1.4 | **Sensor plausibility checks** — Cross-validate temperature readings (reject if any sensor deviates >30°C from median). Validate wheel speed consistency (if 3 wheels agree and 1 disagrees, flag the outlier). | Medium |
@@ -448,7 +448,7 @@ This section identifies safety mechanisms present in the reference firmware that
 | Obstacle detection | MEDIUM | Adds spatial awareness. Vehicle can operate safely without it in controlled environments. Becomes HIGH in public/shared spaces. |
 | Granular limp mode | MEDIUM | Improves drive-home capability. Current flat 40% limit is safe but suboptimal — could be too aggressive for minor faults or insufficient for major ones. |
 | Sensor plausibility checks | MEDIUM | Detects faulty sensor data before it affects control decisions. Current per-sensor fault detection covers most cases. |
-| I2C bus recovery | HIGH | A locked I2C bus silently disables all current and temperature sensing (6× INA226 + TCA9548A multiplexer). Without these readings, overcurrent and overtemperature protection are blind. This is the highest-priority missing safety feature. |
+| I2C bus recovery | ~~HIGH~~ RESOLVED | Implemented: SCL clock cycling, STOP condition, 2-attempt recovery, SAFE state fallback. INA226 and TCA9548A communication protected against bus lock-up. |
 | Battery undervoltage cutoff | HIGH | Deep battery discharge can damage cells and cause controller brownout. Voltage is monitored but no cutoff logic exists. Operating motors on a depleted battery risks uncontrolled shutdown. |
 | Sensor cross-validation | MEDIUM | Important for detecting stuck or drifting sensors, but each sensor has independent fault detection. Becomes HIGH if safety-critical decisions rely on single sensor readings. |
 
@@ -461,8 +461,8 @@ This section identifies safety mechanisms present in the reference firmware that
 | Category | Rating | Justification |
 |----------|--------|---------------|
 | **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, and park hold. |
-| **Safety Systems** | STABLE | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing. Two HIGH-risk gaps (I2C recovery, battery cutoff) prevent ADVANCED rating. |
-| **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). Missing I2C recovery and cross-validation. |
+| **Safety Systems** | STABLE | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery. One HIGH-risk gap remaining (battery cutoff) prevents ADVANCED rating. |
+| **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
 | **CAN Communication** | ADVANCED | Frozen contract fully implemented, hardware-filtered, well-documented. Both STM32 and ESP32 sides aligned. |
 | **HMI** | EARLY | Architecture defined, CAN decoding functional, screen state machine implemented. Display rendering is stub-only. |
 | **System Infrastructure** | STABLE | Clean build system, correct clock/peripheral configuration, multi-rate loop. Missing config persistence and structured logging. |
@@ -472,8 +472,8 @@ This section identifies safety mechanisms present in the reference firmware that
 
 The firmware provides a **safe, functional, and well-architected** vehicle control layer. Core motor control and safety systems are production-quality for a controlled environment. The split architecture (STM32 + ESP32 over CAN) is superior to the monolithic reference design for safety-critical applications.
 
-**Two actions are recommended before considering the firmware production-ready:**
-1. Implement I2C bus recovery (Phase 1.1) — eliminates the highest-risk safety gap
+**One action is recommended before considering the firmware production-ready:**
+1. ~~Implement I2C bus recovery (Phase 1.1) — eliminates the highest-risk safety gap~~ ✅ DONE
 2. Implement battery undervoltage cutoff (Phase 1.2) — prevents deep discharge hazard
 
 With these two items addressed, the safety subsystem would achieve ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
