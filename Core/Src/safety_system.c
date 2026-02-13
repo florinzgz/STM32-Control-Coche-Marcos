@@ -78,6 +78,17 @@ static uint32_t last_steering_tick  = 0;
 static uint8_t  consecutive_errors      = 0;
 static uint32_t last_error_tick         = 0;
 
+/* ---- Non-blocking relay sequencer state machine ---- */
+typedef enum {
+    RELAY_SEQ_IDLE = 0,     /* All relays off, no sequence in progress   */
+    RELAY_SEQ_MAIN_ON,      /* Main relay energised, waiting settle      */
+    RELAY_SEQ_TRACTION_ON,  /* Traction relay energised, waiting settle  */
+    RELAY_SEQ_COMPLETE       /* All relays on, sequence finished          */
+} RelaySeqState_t;
+
+static RelaySeqState_t relay_seq_state     = RELAY_SEQ_IDLE;
+static uint32_t        relay_seq_timestamp = 0;
+
 /* Recovery debounce: require RECOVERY_HOLD_MS of clean operation
  * before transitioning DEGRADED → ACTIVE.  Prevents rapid state
  * oscillation when a sensor value fluctuates near a threshold.
@@ -245,18 +256,60 @@ uint8_t Safety_GetFaultFlags(void)
 
 void Relay_PowerUp(void)
 {
-    /* Sequence: Main → wait → Traction → Direction
-     * Delays prevent inrush current spikes on the power bus.            */
+    /* Initiate non-blocking power-up sequence.
+     * The actual relay transitions are driven by Relay_SequencerUpdate()
+     * called from the 10 ms safety loop.
+     * Re-entry safe: if already sequencing or complete, do nothing.     */
+    if (relay_seq_state != RELAY_SEQ_IDLE &&
+        relay_seq_state != RELAY_SEQ_COMPLETE) {
+        return;  /* Sequence already in progress */
+    }
+    if (relay_seq_state == RELAY_SEQ_COMPLETE) {
+        return;  /* Already fully powered up */
+    }
+
+    /* Step 1: Energise main relay and record timestamp */
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_SET);
-    HAL_Delay(RELAY_MAIN_SETTLE_MS);
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
-    HAL_Delay(RELAY_TRACTION_SETTLE_MS);
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_SET);
+    relay_seq_state     = RELAY_SEQ_MAIN_ON;
+    relay_seq_timestamp = HAL_GetTick();
+}
+
+void Relay_SequencerUpdate(void)
+{
+    /* Non-blocking relay sequencer — call from the 10 ms safety loop.
+     * Progresses through the power-up sequence using timestamps:
+     *   MAIN_ON  →  (50 ms)  →  TRACTION_ON  →  (20 ms)  →  COMPLETE
+     * IDLE and COMPLETE are no-ops.                                     */
+    uint32_t now = HAL_GetTick();
+
+    switch (relay_seq_state) {
+        case RELAY_SEQ_MAIN_ON:
+            if ((now - relay_seq_timestamp) >= RELAY_MAIN_SETTLE_MS) {
+                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
+                relay_seq_state     = RELAY_SEQ_TRACTION_ON;
+                relay_seq_timestamp = now;
+            }
+            break;
+
+        case RELAY_SEQ_TRACTION_ON:
+            if ((now - relay_seq_timestamp) >= RELAY_TRACTION_SETTLE_MS) {
+                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR, GPIO_PIN_SET);
+                relay_seq_state = RELAY_SEQ_COMPLETE;
+            }
+            break;
+
+        case RELAY_SEQ_IDLE:
+        case RELAY_SEQ_COMPLETE:
+        default:
+            break;
+    }
 }
 
 void Relay_PowerDown(void)
 {
-    /* Reverse order: Direction → Traction → Main */
+    /* Reverse order: Direction → Traction → Main.
+     * Cancels any in-progress power-up sequence immediately.            */
+    relay_seq_state = RELAY_SEQ_IDLE;
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);
