@@ -531,6 +531,15 @@ void Traction_Update(void)
     }
 
     uint16_t base_pwm = (uint16_t)(fabs(effective_demand) * PWM_PERIOD / 100.0f);
+
+    /* Apply obstacle scale uniformly to all wheels.  This multiplier
+     * is set by Obstacle_Update() from CAN-received distance data.
+     * Applied before per-wheel ABS/TCS wheel_scale[] so that obstacle
+     * reduction and ABS/TCS modulation are multiplicative (most
+     * restrictive wins).  Same approach as the reference monolithic
+     * firmware's obstacleFactor in traction.cpp.                       */
+    base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);
+
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 
     /* GEAR_REVERSE: invert motor direction for reverse travel.

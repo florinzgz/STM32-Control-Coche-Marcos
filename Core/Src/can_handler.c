@@ -103,6 +103,14 @@ static void CAN_ConfigureFilters(void)
     filter.FilterID2    = CAN_ID_SERVICE_CMD;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 
+    /* Filter 3: Accept ESP32 obstacle data (0x208–0x209) */
+    filter.FilterIndex  = 3;
+    filter.FilterType   = FDCAN_FILTER_RANGE;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1    = CAN_ID_OBSTACLE_DISTANCE;
+    filter.FilterID2    = CAN_ID_OBSTACLE_SAFETY;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+
     /* Reject all non-matching standard IDs */
     HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
                                   FDCAN_REJECT,   /* non-matching std */
@@ -468,6 +476,29 @@ void CAN_ProcessMessages(void) {
                         }
                     }
                 }
+                break;
+
+            case CAN_ID_OBSTACLE_DISTANCE:
+                /* Obstacle distance from ESP32 (0x208):
+                 *   Byte 0-1: minimum distance (mm, uint16 LE)
+                 *   Byte 2:   zone level (0–5, uint8)
+                 *   Byte 3:   sensor health (0=unhealthy, 1=healthy)
+                 *   Byte 4:   rolling counter (uint8, 0–255)
+                 *
+                 * Processed by Obstacle_ProcessCAN() in safety_system.c.
+                 * The STM32 applies a simplified backstop limiter
+                 * independently of the ESP32's 5-zone logic.            */
+                if (msg_len >= 5) {
+                    Obstacle_ProcessCAN(rx_payload, msg_len);
+                }
+                break;
+
+            case CAN_ID_OBSTACLE_SAFETY:
+                /* Obstacle safety state from ESP32 (0x209):
+                 *   Informational only — STM32 computes its own
+                 *   obstacle_scale from the raw distance in 0x208.
+                 *   This message is accepted but not parsed (reserved
+                 *   for future ESP32 HMI → STM32 coordination).         */
                 break;
                 
             default:

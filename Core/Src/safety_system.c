@@ -92,6 +92,44 @@ static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
 static float tcs_reduction[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 static uint32_t tcs_last_tick = 0;
 
+/* ---- Obstacle CAN receiver state -------------------------------- */
+
+/* Obstacle distance thresholds for the STM32 backstop limiter.
+ * These are simplified 3-tier thresholds — the ESP32 runs the full
+ * 5-zone logic with linear interpolation and child reaction detection.
+ * The STM32 backstop is a defence-in-depth layer that operates
+ * independently of the ESP32's obstacle safety logic.
+ *
+ * Traced to OBSTACLE_SYSTEM_STRATEGY.md Part 3, proposed values.    */
+#define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0, SAFE   */
+#define OBSTACLE_CRITICAL_MM        500     /* 200–500 mm → scale = 0.3       */
+#define OBSTACLE_WARNING_MM         1000    /* 500–1000 mm → scale = 0.7      */
+/* > 1000 mm → scale = 1.0 (no reduction)                                     */
+
+/* Recovery hysteresis: after emergency stop, require distance > 500 mm
+ * for > 1 second before allowing auto-recovery.  Prevents oscillation
+ * when obstacle is near the 200 mm boundary.                          */
+#define OBSTACLE_RECOVERY_MM        500
+#define OBSTACLE_RECOVERY_MS        1000
+
+/* CAN timeout for obstacle messages (0x208).  If no message is
+ * received within this window, the STM32 assumes obstacle sensor
+ * failure and applies fail-safe (obstacle_scale = 0.0, SAFE state).
+ * This is longer than the heartbeat timeout (250 ms) because obstacle
+ * messages are sent at 66 ms (15 Hz) and we allow 7+ missed frames
+ * before declaring timeout.                                           */
+#define OBSTACLE_CAN_TIMEOUT_MS     500
+
+static uint32_t obstacle_last_rx_tick   = 0;   /* Last 0x208 reception time   */
+static uint16_t obstacle_distance_mm    = 0xFFFF; /* Last reported distance   */
+static uint8_t  obstacle_zone           = 0;   /* Last reported zone (0–5)    */
+static uint8_t  obstacle_sensor_healthy = 0;   /* Sensor health from ESP32    */
+static uint8_t  obstacle_last_counter   = 0;   /* Rolling counter for stale   */
+static uint8_t  obstacle_stale_count    = 0;   /* Consecutive stale frames    */
+static uint8_t  obstacle_data_valid     = 0;   /* 1 = at least one msg rcvd   */
+static uint32_t obstacle_recovery_tick  = 0;   /* Recovery debounce start     */
+static uint8_t  obstacle_in_emergency   = 0;   /* Currently in emergency stop */
+
 /* ================================================================== */
 /*  State Machine                                                      */
 /* ================================================================== */
@@ -299,6 +337,7 @@ void Safety_Init(void)
     safety_status.tcs_wheel_mask = 0;
     safety_status.abs_activation_count = 0;
     safety_status.tcs_activation_count = 0;
+    safety_status.obstacle_scale = 1.0f;
     for (uint8_t i = 0; i < 4; i++) {
         safety_status.wheel_scale[i] = 1.0f;
         tcs_reduction[i] = 0.0f;
@@ -313,6 +352,15 @@ void Safety_Init(void)
     last_error_tick    = 0;
     recovery_clean_since = 0;
     recovery_pending     = 0;
+    obstacle_last_rx_tick   = 0;
+    obstacle_distance_mm    = 0xFFFF;
+    obstacle_zone           = 0;
+    obstacle_sensor_healthy = 0;
+    obstacle_last_counter   = 0;
+    obstacle_stale_count    = 0;
+    obstacle_data_valid     = 0;
+    obstacle_recovery_tick  = 0;
+    obstacle_in_emergency   = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -862,3 +910,197 @@ void Safety_SetError(Safety_Error_t error)   { safety_error = error; }
 void Safety_ClearError(Safety_Error_t error) { if (safety_error == error) safety_error = SAFETY_ERROR_NONE; }
 Safety_Error_t Safety_GetError(void)         { return safety_error; }
 bool Safety_IsError(void)                    { return (safety_error != SAFETY_ERROR_NONE); }
+
+/* ================================================================== */
+/*  Obstacle Safety (CAN-received from ESP32)                          */
+/* ================================================================== */
+
+/**
+ * @brief  Process a CAN obstacle distance message (0x208) from ESP32.
+ *
+ * Called from CAN_ProcessMessages() when a frame with ID 0x208 arrives.
+ * Stores the received values and updates the reception timestamp.
+ * Stale-data detection compares the rolling counter — if the counter
+ * has not changed for 3 consecutive receptions, the data is considered
+ * frozen (ESP32 obstacle module may have crashed while the CAN driver
+ * continues sending cached values).
+ *
+ * Payload (DLC ≥ 5):
+ *   Byte 0-1: minimum distance (mm, uint16 little-endian)
+ *   Byte 2:   zone level (0 = no obstacle, 1–5 = proximity zones)
+ *   Byte 3:   sensor health (0 = unhealthy, 1 = healthy)
+ *   Byte 4:   rolling counter (uint8, 0–255, must increment)
+ */
+void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
+{
+    if (len < 5) return;
+
+    /* Skip if obstacle detection module is disabled (service mode) */
+    if (!ServiceMode_IsEnabled(MODULE_OBSTACLE_DETECT)) return;
+
+    uint16_t dist = (uint16_t)(data[0] | (data[1] << 8));
+    uint8_t  zone = data[2];
+    uint8_t  health = data[3];
+    uint8_t  counter = data[4];
+
+    /* Stale-data detection: counter must change between frames.
+     * If the counter is identical for 3 consecutive receptions,
+     * treat the data as frozen / stale.                               */
+    if (obstacle_data_valid && counter == obstacle_last_counter) {
+        if (obstacle_stale_count < 255) obstacle_stale_count++;
+    } else {
+        obstacle_stale_count = 0;
+    }
+    obstacle_last_counter = counter;
+
+    /* Zone plausibility: clamp to valid range */
+    if (zone > 5) zone = 0;
+
+    obstacle_distance_mm    = dist;
+    obstacle_zone           = zone;
+    obstacle_sensor_healthy = health;
+    obstacle_last_rx_tick   = HAL_GetTick();
+    obstacle_data_valid     = 1;
+}
+
+/**
+ * @brief  Periodic obstacle safety check — called every 10 ms.
+ *
+ * Computes obstacle_scale from the last CAN-received distance and
+ * applies timeout / stale-data detection.  This is the STM32's
+ * independent backstop limiter — it does NOT replicate the ESP32's
+ * full 5-zone logic.  The 3-tier mapping provides defence-in-depth.
+ *
+ * Safety actions:
+ *   - Distance < 200 mm → obstacle_scale = 0.0, SAFE state
+ *   - Distance 200–500 mm → obstacle_scale = 0.3
+ *   - Distance 500–1000 mm → obstacle_scale = 0.7
+ *   - Distance > 1000 mm → obstacle_scale = 1.0
+ *   - CAN timeout (> 500 ms) → obstacle_scale = 0.0, SAFE state
+ *   - Sensor unhealthy → obstacle_scale = 0.0, SAFE state
+ *   - Stale data (counter frozen ≥ 3) → obstacle_scale = 0.0, SAFE
+ *
+ * Recovery from emergency:
+ *   - Distance must exceed 500 mm for > 1 second
+ *   - Sensor must be healthy
+ *   - CAN messages must be arriving
+ */
+void Obstacle_Update(void)
+{
+    /* Skip if obstacle detection module is disabled (service mode) */
+    if (!ServiceMode_IsEnabled(MODULE_OBSTACLE_DETECT)) {
+        safety_status.obstacle_scale = 1.0f;
+        return;
+    }
+
+    uint32_t now = HAL_GetTick();
+
+    /* ---- Check for CAN timeout ---- */
+    if (obstacle_data_valid &&
+        (now - obstacle_last_rx_tick) > OBSTACLE_CAN_TIMEOUT_MS) {
+        /* No obstacle data for > 500 ms — assume sensor failure */
+        safety_status.obstacle_scale = 0.0f;
+        obstacle_in_emergency = 1;
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_ERROR);
+        Safety_SetError(SAFETY_ERROR_OBSTACLE);
+        Safety_SetState(SYS_STATE_SAFE);
+        return;
+    }
+
+    /* ---- No data ever received — not yet initialised ---- */
+    if (!obstacle_data_valid) {
+        /* Before first obstacle message, allow normal operation.
+         * The ESP32 may not have booted its obstacle module yet.
+         * The heartbeat timeout (250 ms) provides protection.         */
+        safety_status.obstacle_scale = 1.0f;
+        return;
+    }
+
+    /* ---- Stale-data detection ---- */
+    if (obstacle_stale_count >= 3) {
+        /* Counter has not changed for 3+ frames — data is frozen */
+        safety_status.obstacle_scale = 0.0f;
+        obstacle_in_emergency = 1;
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_ERROR);
+        Safety_SetError(SAFETY_ERROR_OBSTACLE);
+        Safety_SetState(SYS_STATE_SAFE);
+        return;
+    }
+
+    /* ---- Sensor health check ---- */
+    if (!obstacle_sensor_healthy) {
+        /* ESP32 reports sensor failure — fail-safe */
+        safety_status.obstacle_scale = 0.0f;
+        obstacle_in_emergency = 1;
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_ERROR);
+        Safety_SetError(SAFETY_ERROR_OBSTACLE);
+        Safety_SetState(SYS_STATE_SAFE);
+        return;
+    }
+
+    /* ---- 3-tier distance → scale mapping ---- */
+    float scale;
+    if (obstacle_distance_mm < OBSTACLE_EMERGENCY_MM) {
+        /* Zone 5 equivalent: full stop + SAFE state */
+        scale = 0.0f;
+        obstacle_in_emergency = 1;
+        Safety_SetError(SAFETY_ERROR_OBSTACLE);
+        Safety_SetState(SYS_STATE_SAFE);
+    } else if (obstacle_distance_mm < OBSTACLE_CRITICAL_MM) {
+        /* Zone 4 equivalent: heavy braking */
+        scale = 0.3f;
+        obstacle_in_emergency = 0;
+        obstacle_recovery_tick = 0;
+    } else if (obstacle_distance_mm < OBSTACLE_WARNING_MM) {
+        /* Zone 3 equivalent: moderate reduction */
+        scale = 0.7f;
+        obstacle_in_emergency = 0;
+        obstacle_recovery_tick = 0;
+    } else {
+        /* Zone 1-2 / no obstacle: full power */
+        scale = 1.0f;
+        obstacle_in_emergency = 0;
+        obstacle_recovery_tick = 0;
+    }
+
+    /* ---- Emergency recovery with hysteresis ---- */
+    if (obstacle_in_emergency &&
+        obstacle_distance_mm >= OBSTACLE_RECOVERY_MM &&
+        obstacle_sensor_healthy &&
+        obstacle_stale_count == 0) {
+        /* Distance has cleared — start recovery debounce */
+        if (obstacle_recovery_tick == 0) {
+            obstacle_recovery_tick = now;
+        } else if ((now - obstacle_recovery_tick) >= OBSTACLE_RECOVERY_MS) {
+            /* Sustained clearance — recover from emergency */
+            obstacle_in_emergency = 0;
+            obstacle_recovery_tick = 0;
+            ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
+            Safety_ClearError(SAFETY_ERROR_OBSTACLE);
+            /* Scale will be recomputed on next iteration */
+            scale = 1.0f;
+        }
+    } else if (obstacle_in_emergency) {
+        /* Still in danger zone — reset recovery timer */
+        obstacle_recovery_tick = 0;
+    }
+
+    /* ---- Clear fault when operating normally ---- */
+    if (!obstacle_in_emergency && scale >= 1.0f) {
+        ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
+        if (safety_error == SAFETY_ERROR_OBSTACLE) {
+            Safety_ClearError(SAFETY_ERROR_OBSTACLE);
+        }
+    }
+
+    safety_status.obstacle_scale = scale;
+}
+
+/**
+ * @brief  Get the current obstacle torque scale factor.
+ * @return 0.0–1.0 (0.0 = full stop, 1.0 = no obstacle reduction)
+ */
+float Obstacle_GetScale(void)
+{
+    return safety_status.obstacle_scale;
+}

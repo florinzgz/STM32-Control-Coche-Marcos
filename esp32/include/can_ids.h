@@ -43,6 +43,12 @@ inline constexpr uint32_t STATUS_TEMP_MAP       = 0x206;    // DLC 5, 1000 ms
 inline constexpr uint32_t STATUS_BATTERY        = 0x207;    // DLC 4, 100 ms  battery 24V bus current + voltage
 
 // -------------------------------------------------------------------------
+// ESP32 → STM32  Obstacle Data (CAN_CONTRACT_FINAL.md §3.4)
+// -------------------------------------------------------------------------
+inline constexpr uint32_t OBSTACLE_DISTANCE      = 0x208;    // DLC 5, 66 ms  obstacle distance + zone + health + counter
+inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 8, 100 ms obstacle safety state (informational)
+
+// -------------------------------------------------------------------------
 // Bidirectional  Diagnostic (§3.3)
 // -------------------------------------------------------------------------
 inline constexpr uint32_t DIAG_ERROR            = 0x300;    // DLC 2, on-demand
@@ -91,7 +97,12 @@ enum class SafetyError : uint8_t {
     SENSOR_FAULT     = 4,
     MOTOR_STALL      = 5,   // Reserved — not implemented in current firmware
     EMERGENCY_STOP   = 6,
-    WATCHDOG         = 7
+    WATCHDOG         = 7,
+    CENTERING        = 8,       // Steering centering failed
+    BATTERY_UV_WARN  = 9,       // Battery voltage < 20.0 V
+    BATTERY_UV_CRIT  = 10,      // Battery voltage < 18.0 V
+    I2C_FAILURE      = 11,      // I2C bus locked / unrecoverable
+    OBSTACLE         = 12       // Obstacle emergency or CAN timeout
 };
 
 // -------------------------------------------------------------------------
@@ -113,6 +124,8 @@ inline constexpr uint32_t CMD_THROTTLE_RATE_MS  = 50;
 inline constexpr uint32_t CMD_STEERING_RATE_MS  = 50;
 inline constexpr uint32_t STATUS_FAST_RATE_MS   = 100;   // Speed, current, safety, steering, traction
 inline constexpr uint32_t STATUS_SLOW_RATE_MS   = 1000;  // Temperature
+inline constexpr uint32_t OBSTACLE_RATE_MS      = 66;    // Obstacle distance (15 Hz)
+inline constexpr uint32_t OBSTACLE_TIMEOUT_MS   = 500;   // STM32 obstacle CAN timeout (fail-safe)
 
 // -------------------------------------------------------------------------
 // Drive Mode Flags — CMD_MODE byte 0 (§4.5)
