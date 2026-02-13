@@ -285,8 +285,8 @@ base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);  // ← NEW
 │          │                                         │
 │  ┌───────▼─────────────────────────────────────┐  │
 │  │ Traction_Update() — 10 ms cycle              │  │
-│  │ • base_pwm × obstacle_scale × acker_diff[i] │  │
-│  │   × wheel_scale[i]                          │  │
+│  │ • base_pwm × obstacle_scale                 │  │
+│  │   × ackermann_diff[i] × wheel_scale[i]     │  │
 │  │ • ABS/TCS modulation (independent)           │  │
 │  │ • Dynamic braking (independent)              │  │
 │  └─────────────────────────────────────────────┘  │
