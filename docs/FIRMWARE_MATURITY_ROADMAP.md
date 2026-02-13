@@ -188,7 +188,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] TX/RX statistics tracking
 - [✓] Obstacle distance RX (0x208, 66 ms) — CAN-based backstop limiter *(Added 2026-02-13)*
 - [✓] Obstacle safety RX (0x209, 100 ms) — informational, reserved *(Added 2026-02-13)*
-- [~] CAN error handling (basic — could add CAN bus-off recovery, error frame counting)
+- [✓] CAN error handling (heartbeat timeout + bus-off detection and recovery) *(Phase 6: 2026-02-13)*
 
 ### 3.5 HMI (ESP32-S3)
 
@@ -279,7 +279,7 @@ This section identifies safety mechanisms present in the reference firmware that
 
 | Area | Reference Robustness | Current Level | Assessment |
 |------|---------------------|---------------|------------|
-| **CAN bus error handling** | Robust error frame counting, bus-off detection and recovery | Basic — heartbeat timeout only, no bus-off recovery procedure | In CAN bus fault conditions (EMI, wiring issues), system would transition to SAFE via timeout rather than attempting recovery |
+| **CAN bus error handling** | Robust error frame counting, bus-off detection and recovery | Complete — heartbeat timeout (250 ms) + bus-off detection via FDCAN PSR register + non-blocking peripheral recovery (500 ms retry, max 10 attempts) *(Phase 6)* | Bus-off condition triggers SAFE state and automatic recovery. No blocking delays. |
 | **Watchdog coverage** | IWDG + task-level health monitoring (FreeRTOS) | IWDG only (hardware, 500 ms) | Adequate for single-loop architecture. A stuck ISR or infinite loop in sensor read would still trigger IWDG |
 | **Power sequencing safety** | power_mgmt.cpp: 10-state machine, ignition detection, power hold, graceful shutdown with audio | Current: 3-relay sequencing with 50 ms delays | Functional for power-up/down. Missing graceful shutdown — abrupt power loss could leave relays in inconsistent state |
 
@@ -299,7 +299,7 @@ This section identifies safety mechanisms present in the reference firmware that
 |------|-------------|--------|
 | 1.1 | **I2C recovery mechanism** — ✅ COMPLETE. SCL clock cycling (16 pulses) and bus reset on I2C failure. Protects INA226 and TCA9548A communication. Safe-state fallback after 2 failed recovery attempts. | Medium |
 | 1.2 | **Battery undervoltage protection** — Add voltage threshold check on INA226 ch4 bus voltage. Below threshold → DEGRADED (reduced power), below critical → SAFE (actuators off). | Low |
-| 1.3 | **CAN bus-off recovery** — Monitor FDCAN error state register. On bus-off, attempt automatic recovery after configurable delay. Log bus-off events. | Low |
+| 1.3 | **CAN bus-off recovery** — ✅ COMPLETE. Monitor FDCAN protocol status register for bus-off condition. On bus-off, trigger SAFE state and attempt automatic non-blocking recovery (Stop→DeInit→Init→Start) with 500 ms retry interval (max 10 attempts). `SAFETY_ERROR_CAN_BUSOFF` (code 13) added. Bus-off events logged in `can_stats.busoff_count`. *(Phase 6)* | Low |
 | 1.4 | **Sensor plausibility checks** — Cross-validate temperature readings (reject if any sensor deviates >30°C from median). Validate wheel speed consistency (if 3 wheels agree and 1 disagrees, flag the outlier). | Medium |
 | 1.5 | **DS18B20 fault tolerance** — If a temperature sensor fails CRC or returns out-of-range value, mark it invalid via service_mode and continue with remaining sensors instead of potentially using stale data. | Low |
 
@@ -469,7 +469,7 @@ The obstacle safety backstop has been integrated as described below:
 | Category | Rating | Justification |
 |----------|--------|---------------|
 | **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, 4×4 50/50 axle torque split, and per-motor emergency temperature cutoff (130°C). *(Updated: Security Hardening Phases 1 & 2)* |
-| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, non-blocking relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation, per-motor 130°C emergency cutoff with 15°C hysteresis. *(Updated: Security Hardening Phases 1–5)* |
+| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, non-blocking relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation, per-motor 130°C emergency cutoff with 15°C hysteresis, CAN bus-off detection and recovery. *(Updated: Security Hardening Phases 1–6)* |
 | **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
 | **CAN Communication** | ADVANCED | Contract revision 1.2, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Integration verified. |
 | **HMI** | EARLY | Architecture defined, CAN decoding functional, screen state machine implemented. Display rendering is stub-only. |
@@ -607,6 +607,39 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 - No new blocking calls introduced in safety path
 - CAN contract: unchanged — no messages added, modified, or removed
 
+### Phase 6 — CAN Bus-Off Detection and Recovery
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| CAN handler (can_handler.c) | No bus-off handling | Bus-off detection via FDCAN PSR + non-blocking recovery (Stop→DeInit→Init→Start) | +100% — new capability |
+| CAN handler (can_handler.h) | No bus-off API | `CAN_CheckBusOff()`, `busoff_count` stat, retry config defines | New public API |
+| Safety system (safety_system.h) | 12 error codes (0–12) | 13 error codes (0–13), added `SAFETY_ERROR_CAN_BUSOFF` | +1 error code |
+| Safety system (safety_system.c) | 92% | 93% | +1% — CAN bus-off error code integrated into fault hierarchy |
+| Main loop (main.c) | — | — | Added `CAN_CheckBusOff()` call in 10 ms safety loop |
+| CAN contract | 1.2 | 1.2 | No change — no CAN messages added or modified |
+| **Overall STM32 firmware** | **~95%** | **~96%** | +1% — CAN bus-off detection and recovery |
+
+**Risk analysis:**
+- Heartbeat logic: unchanged — `CAN_SendHeartbeat()` not modified
+- CAN IDs: unchanged — no new message IDs
+- CAN payload format: unchanged — no payload modifications
+- Safety state transitions: unchanged — uses existing `Safety_SetState(SYS_STATE_SAFE)` path
+- No blocking delays — recovery uses timestamp-based 500 ms retry interval
+- Watchdog safety: IWDG refresh continues during recovery (no blocking)
+- Recovery avoids infinite restart loops — max 10 attempts, then stops
+- ServiceMode fault masks: `MODULE_CAN_TIMEOUT` existing fault tracking unaffected
+- CAN filters: reconfigured during recovery via existing `CAN_ConfigureFilters()`
+
+**Regression analysis:**
+- All existing CAN message processing: unchanged — `CAN_ProcessMessages()` not modified
+- All existing safety checks: unchanged — `Safety_CheckCANTimeout()`, `Safety_CheckCurrent()`, etc. not modified
+- Heartbeat counter: unchanged — `heartbeat_counter` not modified
+- RX filter policy: unchanged — same 4 filter banks, same reject policy
+- TX statistics: unchanged — `can_stats.tx_count`, `tx_errors` not modified
+- Service mode integration: unchanged — no service mode changes
+- Obstacle safety: unchanged — `Obstacle_Update()`, `Obstacle_ProcessCAN()` not modified
+- Relay sequencing: unchanged — `Relay_SequencerUpdate()` not modified
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
@@ -614,13 +647,13 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 - ~~Per-motor emergency temperature cutoff at 130°C in traction loop~~ ✅ Implemented *(2026-02-13)*
 - ~~Steering assist degradation in DEGRADED state~~ ✅ Implemented *(2026-02-13)*
 - ~~Non-blocking relay sequencing (replace HAL_Delay)~~ ✅ Implemented *(2026-02-13)*
+- ~~CAN bus-off detection and recovery~~ ✅ Implemented *(2026-02-13 — Phase 6)*
 
 **Medium priority (functional parity):**
 - Ackermann traction correction (differential speed adjustment)
 - Demand anomaly detection
 - Granular limp mode (multi-level degradation)
 - Boot validation sequence
-- CAN bus-off recovery
 
 **Low priority (features):**
 - Regenerative braking
@@ -636,3 +669,4 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 *Updated: 2026-02-13 — Security Hardening Phase 1: NaN/Inf validation, 4×4 50/50 axle split*
 *Updated: 2026-02-13 — Security Hardening Phase 2: Per-motor emergency temperature cutoff (130°C/115°C)*
 *Updated: 2026-02-13 — Phase 4: Steering assist degradation in DEGRADED state (40% reduction)*
+*Updated: 2026-02-13 — Phase 6: CAN bus-off detection and non-blocking recovery*

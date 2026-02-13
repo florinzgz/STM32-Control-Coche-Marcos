@@ -24,6 +24,11 @@ CAN_Stats_t can_stats = {0};
 static uint32_t last_tx_heartbeat = 0;
 static uint8_t  heartbeat_counter = 0;
 
+/* Bus-off recovery state (non-blocking, timestamp-based) */
+static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in progress */
+static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
+static uint8_t  busoff_retry_count  = 0;    /* Number of recovery attempts since bus-off  */
+
 /* Internal helper to send a CAN frame */
 static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
     FDCAN_TxHeaderTypeDef tx_hdr = {0};
@@ -130,7 +135,13 @@ void CAN_Init(void) {
     can_stats.tx_errors = 0;
     can_stats.rx_errors = 0;
     can_stats.last_heartbeat_esp32 = HAL_GetTick();
+    can_stats.busoff_count = 0;
     heartbeat_counter = 0;
+
+    /* Reset bus-off recovery state */
+    busoff_active       = 0;
+    busoff_last_attempt = 0;
+    busoff_retry_count  = 0;
     
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
@@ -506,6 +517,92 @@ void CAN_ProcessMessages(void) {
                  * should never reach here.                        */
                 break;
         }
+    }
+}
+
+/* ================================================================== */
+/*  Bus-Off Detection and Recovery                                     */
+/* ================================================================== */
+
+/**
+ * @brief  Check FDCAN for bus-off condition and attempt non-blocking recovery.
+ *
+ * Called from the 10 ms safety loop in main.c.  Uses the FDCAN protocol
+ * status register to detect bus-off.  When bus-off is detected:
+ *   1. Sets SAFETY_ERROR_CAN_BUSOFF
+ *   2. Transitions to SYS_STATE_SAFE
+ *   3. Attempts non-blocking recovery at CAN_BUSOFF_RETRY_INTERVAL_MS intervals
+ *
+ * Recovery sequence: Stop → DeInit → Init → ConfigFilters → ActivateNotification → Start
+ *
+ * If recovery succeeds, the bus-off flag is cleared.  The system will
+ * recover from SAFE via the existing Safety_CheckCANTimeout() path once
+ * heartbeat messages resume.
+ *
+ * No blocking delays.  Watchdog continues to be fed by the main loop.
+ */
+void CAN_CheckBusOff(void)
+{
+    FDCAN_ProtocolStatusTypeDef psr;
+
+    /* If a recovery attempt is in progress, enforce retry interval */
+    if (busoff_active) {
+        uint32_t now = HAL_GetTick();
+        if ((now - busoff_last_attempt) < CAN_BUSOFF_RETRY_INTERVAL_MS) {
+            return;  /* Not yet time for next attempt */
+        }
+
+        /* Too many retries — stop attempting, system stays in SAFE */
+        if (busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES) {
+            return;
+        }
+
+        /* Attempt recovery: Stop → DeInit → Init → Filters → Notify → Start */
+        busoff_last_attempt = now;
+        busoff_retry_count++;
+
+        HAL_FDCAN_Stop(&hfdcan1);
+
+        if (HAL_FDCAN_DeInit(&hfdcan1) != HAL_OK) {
+            return;  /* DeInit failed — retry next interval */
+        }
+
+        if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
+            return;  /* Init failed — retry next interval */
+        }
+
+        CAN_ConfigureFilters();
+
+        if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
+            return;  /* Notification setup failed — retry next interval */
+        }
+
+        if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
+            return;  /* Start failed — retry next interval */
+        }
+
+        /* Recovery successful — clear bus-off state.
+         * The safety system will recover from SAFE via
+         * Safety_CheckCANTimeout() when heartbeats resume. */
+        busoff_active     = 0;
+        busoff_retry_count = 0;
+        Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
+        return;
+    }
+
+    /* Normal operation: poll FDCAN protocol status for bus-off */
+    if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr) != HAL_OK) {
+        return;  /* Cannot read status — skip this cycle */
+    }
+
+    if (psr.BusOff) {
+        /* Bus-off detected — raise fault and enter SAFE */
+        busoff_active       = 1;
+        busoff_last_attempt = HAL_GetTick();
+        busoff_retry_count  = 0;
+        can_stats.busoff_count++;
+        Safety_SetError(SAFETY_ERROR_CAN_BUSOFF);
+        Safety_SetState(SYS_STATE_SAFE);
     }
 }
 

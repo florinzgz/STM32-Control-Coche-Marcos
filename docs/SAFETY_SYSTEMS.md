@@ -787,6 +787,101 @@ seguridad, CAN y watchdog continúen durante la secuencia de encendido.
 
 ---
 
+## 🔧 CAN Bus-Off Detection and Recovery
+
+### CAN Fault Hierarchy
+
+The STM32 safety system distinguishes between two independent CAN fault
+conditions.  Each has its own detection mechanism, error code, and recovery
+path.  Both can occur simultaneously; the safety state machine handles them
+independently.
+
+```
+                          CAN Fault Hierarchy
+┌──────────────────────────────────────────────────────────┐
+│                                                          │
+│  ┌──────────────────────┐    ┌─────────────────────────┐ │
+│  │ Heartbeat Timeout    │    │ Bus-Off Condition       │ │
+│  │ (Application Layer)  │    │ (Physical/Data-Link)    │ │
+│  ├──────────────────────┤    ├─────────────────────────┤ │
+│  │ Cause: ESP32 stops   │    │ Cause: Excessive CAN    │ │
+│  │ sending 0x011 msgs   │    │ errors (EMI, wiring,    │ │
+│  │ for > 250 ms         │    │ short circuit, bad      │ │
+│  │                      │    │ termination)            │ │
+│  ├──────────────────────┤    ├─────────────────────────┤ │
+│  │ Detection: Software  │    │ Detection: FDCAN PSR    │ │
+│  │ timestamp comparison │    │ register BusOff flag    │ │
+│  │ in Safety_Check-     │    │ polled every 10 ms      │ │
+│  │ CANTimeout()         │    │ in CAN_CheckBusOff()    │ │
+│  ├──────────────────────┤    ├─────────────────────────┤ │
+│  │ Error code: 3        │    │ Error code: 13          │ │
+│  │ SAFETY_ERROR_CAN_    │    │ SAFETY_ERROR_CAN_       │ │
+│  │ TIMEOUT              │    │ BUSOFF                  │ │
+│  ├──────────────────────┤    ├─────────────────────────┤ │
+│  │ Action: → SAFE state │    │ Action: → SAFE state    │ │
+│  │ Traction stopped     │    │ Traction stopped        │ │
+│  │ Steering centered    │    │ Steering centered       │ │
+│  ├──────────────────────┤    ├─────────────────────────┤ │
+│  │ Recovery: Automatic  │    │ Recovery: Automatic     │ │
+│  │ when heartbeat 0x011 │    │ peripheral reinit       │ │
+│  │ resumes              │    │ (Stop→DeInit→Init→      │ │
+│  │                      │    │ Start), then heartbeat  │ │
+│  │                      │    │ timeout handles         │ │
+│  │                      │    │ SAFE→ACTIVE             │ │
+│  └──────────────────────┘    └─────────────────────────┘ │
+│                                                          │
+│  Both faults → SYS_STATE_SAFE (actuators inhibited)      │
+│  Neither blocks the main loop or watchdog                │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Heartbeat Timeout vs. Bus-Off
+
+| Aspect | Heartbeat Timeout | Bus-Off |
+|--------|-------------------|---------|
+| **Layer** | Application (CAN message arrival) | Data-link (FDCAN hardware error state) |
+| **Root cause** | ESP32 crash, software hang, power loss | Excessive TX/RX errors: EMI, wiring fault, missing termination resistor, short circuit |
+| **Detection** | `Safety_CheckCANTimeout()` — software timestamp comparison in 10 ms loop | `CAN_CheckBusOff()` — polls `HAL_FDCAN_GetProtocolStatus()` BusOff flag in 10 ms loop |
+| **Threshold** | No heartbeat for > 250 ms | CAN standard: TX error counter ≥ 256 |
+| **Error code** | `SAFETY_ERROR_CAN_TIMEOUT` (3) | `SAFETY_ERROR_CAN_BUSOFF` (13) |
+| **State transition** | → SAFE | → SAFE |
+| **Recovery** | Automatic when heartbeat resumes | Peripheral reinit (non-blocking, 500 ms retry interval, max 10 attempts), then heartbeat timeout handles SAFE→ACTIVE |
+| **Typical scenario** | ESP32 reboot, CAN connector momentarily disconnected | CAN bus wiring degradation, missing 120 Ω termination, EMI from motor driver |
+
+### Bus-Off Recovery Behavior
+
+When the FDCAN hardware enters bus-off state:
+
+1. **Immediate actions:**
+   - `SAFETY_ERROR_CAN_BUSOFF` is set
+   - System transitions to `SYS_STATE_SAFE` (traction stopped, steering centered)
+   - `busoff_count` in CAN statistics is incremented
+
+2. **Recovery sequence (non-blocking):**
+   - First attempt starts immediately upon detection
+   - Subsequent retries are spaced by 500 ms (`CAN_BUSOFF_RETRY_INTERVAL_MS`)
+   - Maximum 10 recovery attempts (`CAN_BUSOFF_MAX_RETRIES`)
+   - Each attempt executes: `HAL_FDCAN_Stop()` → `HAL_FDCAN_DeInit()` → `HAL_FDCAN_Init()` → `CAN_ConfigureFilters()` → `HAL_FDCAN_ActivateNotification()` → `HAL_FDCAN_Start()`
+   - If any step fails, the attempt is abandoned and retried at the next interval
+
+3. **After successful recovery:**
+   - Bus-off flag is cleared
+   - `SAFETY_ERROR_CAN_BUSOFF` is cleared
+   - System remains in SAFE state until ESP32 heartbeat resumes
+   - `Safety_CheckCANTimeout()` handles SAFE → ACTIVE transition when heartbeat arrives
+
+4. **If recovery fails after 10 attempts:**
+   - System remains in SAFE state permanently
+   - No further recovery attempts (prevents infinite restart loops)
+   - Operator intervention required (power cycle)
+
+5. **Watchdog safety:**
+   - The main loop continues running during all recovery attempts
+   - `HAL_IWDG_Refresh()` is called every iteration — no watchdog timeout risk
+   - No blocking delays in the recovery path
+
+---
+
 ## 📖 Referencias
 
 - [ISO 26262 - Functional Safety](https://www.iso.org/standard/68383.html)

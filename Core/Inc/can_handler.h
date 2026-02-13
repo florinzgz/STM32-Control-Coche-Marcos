@@ -43,6 +43,10 @@ extern "C" {
 #define CAN_TIMEOUT_HEARTBEAT_MS  250    // Heartbeat timeout
 #define CAN_TIMEOUT_OBSTACLE_MS   500    // Obstacle data timeout (fail-safe)
 
+/* CAN bus-off recovery configuration */
+#define CAN_BUSOFF_RETRY_INTERVAL_MS  500   /* Non-blocking retry interval      */
+#define CAN_BUSOFF_MAX_RETRIES        10    /* Max recovery attempts before ERROR */
+
 /* CAN Statistics */
 typedef struct {
     uint32_t tx_count;
@@ -50,6 +54,7 @@ typedef struct {
     uint32_t tx_errors;
     uint32_t rx_errors;
     uint32_t last_heartbeat_esp32;
+    uint32_t busoff_count;                  /* Total bus-off events detected     */
 } CAN_Stats_t;
 
 /* Function prototypes */
@@ -67,6 +72,7 @@ void CAN_SendError(uint8_t error_code, uint8_t subsystem);
 void CAN_SendServiceStatus(void);
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
+void CAN_CheckBusOff(void);
 
 extern CAN_Stats_t can_stats;
 extern FDCAN_HandleTypeDef hfdcan1;
