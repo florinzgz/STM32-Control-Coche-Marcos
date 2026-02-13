@@ -10,6 +10,7 @@
 #include "main.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
+#include "service_mode.h"
 #include <math.h>
 
 /* ---- NaN / Inf float validation ----
@@ -103,6 +104,21 @@ static inline float sanitize_float(float val, float safe_default)
 #define GEAR_POWER_FORWARD_D2_PCT 1.00f /* D2: 100 % max power           */
 #define GEAR_POWER_REVERSE_PCT   0.60f  /* R:  60 % max power            */
 
+/* ---- Per-motor emergency temperature cutoff ----
+ *
+ * Hardware protection layer independent from Safety_CheckTemperature().
+ * Traced to reference firmware traction.cpp:
+ *   TEMP_EMERGENCY_SHUTDOWN = 130°C → immediate per-motor stop
+ *
+ * When a motor reaches 130°C, wheel_scale[i] is forced to 0.0 for
+ * that motor ONLY.  Other motors are NOT affected.  This does NOT
+ * trigger global SAFE state — it coexists with the existing 90°C
+ * SAFE trigger in safety_system.c.
+ *
+ * 15°C hysteresis: motor re-enabled below 115°C.                      */
+#define MOTOR_TEMP_CUTOFF_C      130.0f  /* Per-motor emergency cutoff   */
+#define MOTOR_TEMP_RECOVERY_C    115.0f  /* Hysteresis recovery point    */
+
 /* Motor structures */
 typedef struct {
     TIM_HandleTypeDef *timer;
@@ -150,6 +166,9 @@ static uint32_t dynbrake_last_tick = 0;
 
 /* ---- Gear position state ---- */
 static GearPosition_t current_gear = GEAR_FORWARD;
+
+/* ---- Per-motor overtemp cutoff state ---- */
+static bool motor_overtemp_cutoff[4] = {false, false, false, false};
 
 /* Ackermann-computed individual wheel angle setpoints (degrees).
  * Updated every time Steering_SetAngle() is called.               */
@@ -551,6 +570,41 @@ void Traction_Update(void)
             gear_scale = GEAR_POWER_FORWARD_PCT;
         }
         effective_demand *= gear_scale;
+    }
+
+    /* ---- Per-motor emergency temperature cutoff ----
+     * Hardware protection layer independent from Safety_CheckTemperature().
+     * Traced to reference firmware traction.cpp:
+     *   TEMP_EMERGENCY_SHUTDOWN = 130°C per-motor immediate stop.
+     *
+     * For each traction motor (FL, FR, RL, RR):
+     *   >= 130°C → force wheel_scale[i] = 0.0 (that motor only)
+     *   <  115°C → allow wheel_scale[i] to return to normal (15°C hysteresis)
+     *
+     * Does NOT force global SAFE state.
+     * Does NOT modify global demand.
+     * Does NOT affect other wheels.
+     * Coexists with ABS/TCS modulation (most restrictive wins).           */
+    for (uint8_t i = 0; i < 4; i++) {
+        float motor_temp = Temperature_Get(i);
+        ModuleID_t temp_mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+
+        if (motor_temp >= MOTOR_TEMP_CUTOFF_C) {
+            /* Emergency cutoff — force this motor off */
+            safety_status.wheel_scale[i] = 0.0f;
+            motor_overtemp_cutoff[i] = true;
+            ServiceMode_SetFault(temp_mod, MODULE_FAULT_ERROR);
+            if (Safety_GetError() != SAFETY_ERROR_OVERTEMP) {
+                Safety_SetError(SAFETY_ERROR_OVERTEMP);
+            }
+        } else if (motor_overtemp_cutoff[i] && motor_temp < MOTOR_TEMP_RECOVERY_C) {
+            /* Hysteresis recovery — allow normal operation */
+            motor_overtemp_cutoff[i] = false;
+            ServiceMode_ClearFault(temp_mod);
+        } else if (motor_overtemp_cutoff[i]) {
+            /* Still in cutoff band (115–130°C) — maintain cutoff */
+            safety_status.wheel_scale[i] = 0.0f;
+        }
     }
 
     /* ---- NaN/Inf validation (security hardening) ----

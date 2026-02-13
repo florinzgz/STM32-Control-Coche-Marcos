@@ -65,13 +65,13 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Safety System** | FULL | Multi-layer protection: overcurrent, overtemperature, CAN timeout, encoder fault, relay sequencing. Consecutive error counting with escalation thresholds. |
 | **ABS (Anti-Lock Braking)** | FULL | Per-wheel slip detection (15% threshold), per-wheel pulse modulation (30% reduction, 80 ms cycle, 60% ON ratio), global fallback for all-wheel lockup, minimum speed gate (10 km/h). ABS modulation upgraded from full cut to pulse reduction *(2026-02-13)*. |
 | **TCS (Traction Control)** | FULL | Per-wheel slip detection (15% threshold), progressive reduction (40% initial → 80% max), recovery rate 25%/s, minimum speed gate (3 km/h), global fallback. |
-| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. *(Security Hardening Phase 1)* |
+| **Traction Control Logic** | FULL | Per-wheel PWM via TIM1 channels, gear-based power scaling (D1: 60%, D2: 100%, R: 60%), EMA pedal filter (α=0.15), ramp rate limiting (50%/s up, 100%/s down). 4×4 mode uses 50/50 axle split. NaN/Inf validation on all float inputs. Per-motor emergency temperature cutoff (130°C/115°C hysteresis). *(Security Hardening Phases 1 & 2)* |
 | **Ackermann Steering** | FULL | Geometric computation of FL/FR wheel angles from road angle, ±54° per-wheel clamp, correct sign convention (positive = left turn). Separate module (ackermann.c). |
 | **Gear Logic (D1/D2/N/R/P)** | FULL | 5-gear system via CAN command (0x102). Park includes active brake hold with current/temperature derating. Gear changes restricted below 1 km/h. |
 | **Dynamic Braking** | FULL | Proportional to throttle release rate (scale factor 0.5), max 60%, disabled below 3 km/h, disabled during ABS/SAFE/ERROR. Ramp-down at 80%/s. |
 | **Regenerative Braking** | NONE | Not implemented. No negative PWM logic, no H-bridge back-EMF handling, no bidirectional current management. Confirmed absent by line-by-line audit (REGEN_BRAKING_AUDIT.md). |
 | **Current Limiting** | FULL | Per-motor 25A max via INA226 sensors (6 channels through TCA9548A multiplexer). Overcurrent triggers DEGRADED state; consecutive errors (≥3) escalate to SAFE. Park hold PWM derated above 15A/20A. |
-| **Temperature Protection** | FULL | 5× DS18B20 OneWire sensors with CRC-8 validation. Warning at 80°C, critical at 90°C. Park hold PWM derated above 70°C/85°C. Temperature triggers state escalation. |
+| **Temperature Protection** | FULL | 5× DS18B20 OneWire sensors with CRC-8 validation. Warning at 80°C, critical at 90°C. Park hold PWM derated above 70°C/85°C. Temperature triggers state escalation. Per-motor emergency cutoff at 130°C with 15°C hysteresis (115°C recovery) in traction loop — independent hardware protection layer. *(Security Hardening Phase 2)* |
 | **Battery Protection** | FULL | Battery bus current/voltage monitored via INA226 (channel 4, 0.5 mΩ shunt). CAN message 0x207 reports values. Undervoltage protection: warning at 20.0 V (DEGRADED, 40% power limit), critical at 18.0 V (SAFE, actuators inhibited). 0.5 V hysteresis. No auto-recovery from SAFE. Sensor failure treated as critical. No SOC estimation, no charge protection logic. |
 | **Encoder Handling** | FULL | E6B2-CWZ6C quadrature encoder via TIM2 (4800 CPR). Range check (±987 counts = ±74°), jump detection (>100 counts/cycle), frozen detection (>200 ms with motor active >10%). |
 | **Wheel Speed Processing** | FULL | 4× LJ12A3 inductive sensors via EXTI interrupts, 1 ms debounce, speed = (pulses/CPR) × circumference × 3.6. 6 pulses/rev, 1.1 m circumference. |
@@ -468,8 +468,8 @@ The obstacle safety backstop has been integrated as described below:
 
 | Category | Rating | Justification |
 |----------|--------|---------------|
-| **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, and 4×4 50/50 axle torque split. *(Updated: Security Hardening Phase 1)* |
-| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation. *(Updated: Security Hardening Phase 1)* |
+| **Motor Control** | ADVANCED | Complete per-wheel PWM with Ackermann geometry, gear logic, dynamic braking, pedal conditioning, park hold, NaN/Inf validation, 4×4 50/50 axle torque split, and per-motor emergency temperature cutoff (130°C). *(Updated: Security Hardening Phases 1 & 2)* |
+| **Safety Systems** | ADVANCED | Comprehensive state machine, ABS/TCS, overcurrent/overtemperature protection, watchdog, relay sequencing, I2C bus recovery, battery undervoltage protection, obstacle safety backstop, NaN/Inf float validation, per-motor 130°C emergency cutoff with 15°C hysteresis. *(Updated: Security Hardening Phases 1 & 2)* |
 | **Sensor Management** | STABLE | All physical sensors correctly interfaced with hardware-appropriate protocols (EXTI, quadrature, I2C, OneWire, ADC). I2C bus recovery implemented. Missing cross-validation. |
 | **CAN Communication** | ADVANCED | Contract revision 1.2, hardware-filtered (4 filter banks), well-documented. Both STM32 and ESP32 sides aligned. Integration verified. |
 | **HMI** | EARLY | Architecture defined, CAN decoding functional, screen state machine implemented. Display rendering is stub-only. |
@@ -561,11 +561,19 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 | ESP32↔STM32 integration | 100% | 100% | Verified — all 10 checks passed |
 | **Overall STM32 firmware** | **~88%** | **~91%** | +3% — ABS pulse modulation + security hardening |
 
+### Security Hardening Phase 2 — Per-Motor Emergency Temperature Cutoff
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| Traction pipeline (motor_control.c) | 90% | 93% | +3% — Per-motor 130°C emergency cutoff with 15°C hysteresis |
+| Safety system (safety_system.c) | 90% | 90% | No change — existing Safety_CheckTemperature() preserved |
+| **Overall STM32 firmware** | **~91%** | **~93%** | +2% — Per-motor emergency temperature cutoff |
+
 ### What Remains for 100%
 
 **High priority (security/safety):**
 - ~~ABS pulse modulation (30% reduction instead of full cut)~~ ✅ Implemented *(2026-02-13)*
-- Per-motor emergency temperature cutoff at 130°C in traction loop
+- ~~Per-motor emergency temperature cutoff at 130°C in traction loop~~ ✅ Implemented *(2026-02-13)*
 - Steering assist degradation in DEGRADED state
 - Non-blocking relay sequencing (replace HAL_Delay)
 
@@ -588,3 +596,4 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 *Document generated: 2026-02-12*
 *Updated: 2026-02-13 — Obstacle safety integration implemented, integration audit completed*
 *Updated: 2026-02-13 — Security Hardening Phase 1: NaN/Inf validation, 4×4 50/50 axle split*
+*Updated: 2026-02-13 — Security Hardening Phase 2: Per-motor emergency temperature cutoff (130°C/115°C)*
