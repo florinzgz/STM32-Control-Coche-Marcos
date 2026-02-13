@@ -1,5 +1,11 @@
 // =============================================================================
-// ESP32-S3 HMI — Boot Screen (stub)
+// ESP32-S3 HMI — Boot Screen
+//
+// Static splash screen shown during system_state = BOOT (0).
+// Displays firmware name and CAN link status.
+// No interactive elements. No heap allocation.
+//
+// Reference: docs/HMI_STATE_MODEL.md §2.1
 // =============================================================================
 
 #ifndef BOOT_SCREEN_H
@@ -13,6 +19,11 @@ public:
     void onExit()  override;
     void update(const vehicle::VehicleData& data) override;
     void draw()    override;
+
+private:
+    bool needsRedraw_ = true;
+    bool canLinked_    = false;
+    bool prevCanLinked_ = false;
 };
 
 #endif // BOOT_SCREEN_H

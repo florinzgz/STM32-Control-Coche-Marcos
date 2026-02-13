@@ -1,5 +1,10 @@
 // =============================================================================
 // ESP32-S3 HMI — Screen Manager Implementation
+//
+// Frame-limited rendering: update() runs every loop iteration,
+// but draw() only runs when the frame limiter allows (20 FPS).
+// On screen transitions, the frame limiter is forced to allow
+// immediate redraw.
 // =============================================================================
 
 #include "screen_manager.h"
@@ -7,6 +12,7 @@
 ScreenManager::ScreenManager()
     : currentScreen_(&bootScreen_)
     , currentState_(can::SystemState::BOOT)
+    , frameLimiter_()
 {
     currentScreen_->onEnter();
 }
@@ -19,10 +25,16 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
         currentState_  = newState;
         currentScreen_ = screenForState(newState);
         currentScreen_->onEnter();
+        frameLimiter_.forceNextFrame();  // Immediate redraw on transition
     }
 
+    // Always update data (fast, no rendering)
     currentScreen_->update(data);
-    currentScreen_->draw();
+
+    // Only draw at frame-limited rate
+    if (frameLimiter_.shouldDraw()) {
+        currentScreen_->draw();
+    }
 }
 
 Screen* ScreenManager::screenForState(can::SystemState state) {

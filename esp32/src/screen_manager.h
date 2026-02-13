@@ -4,7 +4,11 @@
 // State machine that selects the active Screen based on
 // vehicleData.heartbeat().systemState (byte 1 of CAN 0x001).
 //
+// Integrates frame limiter: update() is called every loop,
+// but draw() only executes at the target frame rate (20 FPS).
+//
 // Reference: docs/HMI_STATE_MODEL.md
+//            docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
 
 #ifndef SCREEN_MANAGER_H
@@ -18,6 +22,7 @@
 #include "screens/drive_screen.h"
 #include "screens/safe_screen.h"
 #include "screens/error_screen.h"
+#include "ui/frame_limiter.h"
 
 class ScreenManager {
 public:
@@ -25,6 +30,7 @@ public:
 
     /// Call once per loop after can_rx::poll().
     /// Detects state changes and forwards data to the active screen.
+    /// draw() is only called at the frame-limited rate.
     void update(const vehicle::VehicleData& data);
 
 private:
@@ -38,6 +44,7 @@ private:
 
     Screen*           currentScreen_;
     can::SystemState  currentState_;
+    ui::FrameLimiter  frameLimiter_;
 };
 
 #endif // SCREEN_MANAGER_H
