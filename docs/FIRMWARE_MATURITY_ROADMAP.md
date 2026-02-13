@@ -476,7 +476,7 @@ The firmware provides a **safe, functional, and well-architected** vehicle contr
 1. ~~Implement I2C bus recovery (Phase 1.1) — eliminates the highest-risk safety gap~~ ✅ DONE
 2. Implement battery undervoltage cutoff (Phase 1.2) — prevents deep discharge hazard
 
-With these two items addressed, the safety subsystem would achieve ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
+With this remaining item addressed, the safety subsystem would achieve ADVANCED maturity. Full PRODUCTION-READY status requires completing Phases 1 and 2 of the roadmap.
 
 ---
 
