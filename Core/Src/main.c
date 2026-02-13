@@ -92,6 +92,11 @@ int main(void)
             Safety_CheckSensors();
             Safety_CheckEncoder();
 
+            /* Obstacle safety — check CAN-received distance data.
+             * Computes obstacle_scale and triggers SAFE state if
+             * emergency distance or CAN timeout is detected.          */
+            Obstacle_Update();
+
             /* Run automatic centering during BOOT / STANDBY.
              * Once complete, Steering_ControlLoop() takes over. */
             if (!SteeringCentering_IsComplete() &&

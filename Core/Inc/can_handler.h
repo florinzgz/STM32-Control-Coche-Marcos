@@ -31,6 +31,8 @@ extern "C" {
 #define CAN_ID_STATUS_TRACTION    0x205  // STM32 → ESP32 (100ms) per-wheel traction scale
 #define CAN_ID_STATUS_TEMP_MAP    0x206  // STM32 → ESP32 (1000ms) explicit temp sensor map
 #define CAN_ID_STATUS_BATTERY     0x207  // STM32 → ESP32 (100ms) battery 24V bus current + voltage
+#define CAN_ID_OBSTACLE_DISTANCE  0x208  // ESP32 → STM32 (66ms) obstacle distance + zone + health
+#define CAN_ID_OBSTACLE_SAFETY    0x209  // ESP32 → STM32 (100ms) obstacle safety state
 #define CAN_ID_DIAG_ERROR         0x300  // Both directions (on-demand)
 #define CAN_ID_SERVICE_FAULTS     0x301  // STM32 → ESP32 (1000ms) fault bitmask
 #define CAN_ID_SERVICE_ENABLED    0x302  // STM32 → ESP32 (1000ms) enabled bitmask
@@ -39,6 +41,7 @@ extern "C" {
 
 /* Timeouts */
 #define CAN_TIMEOUT_HEARTBEAT_MS  250    // Heartbeat timeout
+#define CAN_TIMEOUT_OBSTACLE_MS   500    // Obstacle data timeout (fail-safe)
 
 /* CAN Statistics */
 typedef struct {

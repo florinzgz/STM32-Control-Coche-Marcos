@@ -29,7 +29,8 @@ typedef enum {
     SAFETY_ERROR_CENTERING = 8,             /* Steering centering failed */
     SAFETY_ERROR_BATTERY_UV_WARNING = 9,    /* Battery voltage < 20.0 V */
     SAFETY_ERROR_BATTERY_UV_CRITICAL = 10,  /* Battery voltage < 18.0 V */
-    SAFETY_ERROR_I2C_FAILURE = 11           /* I2C bus locked / unrecoverable */
+    SAFETY_ERROR_I2C_FAILURE = 11,          /* I2C bus locked / unrecoverable */
+    SAFETY_ERROR_OBSTACLE = 12              /* Obstacle emergency or CAN timeout */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.
@@ -95,6 +96,11 @@ typedef struct {
      * Aligned with base firmware: abs_system.cpp modulateBrake()
      * and tcs_system.cpp modulatePower() per-wheel approach.        */
     float wheel_scale[4];
+    /* Obstacle torque scale factor (0.0–1.0).
+     * 1.0 = no obstacle reduction, 0.0 = full stop.
+     * Set by Obstacle_Update() from CAN-received distance data.
+     * Applied uniformly to all wheels in Traction_Update().          */
+    float obstacle_scale;
 } SafetyStatus_t;
 
 /* Degraded-mode power / speed limits
@@ -152,6 +158,11 @@ void Relay_PowerDown(void);
 float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);
 bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
+
+/* Obstacle safety (CAN-received from ESP32) */
+void    Obstacle_Update(void);
+void    Obstacle_ProcessCAN(const uint8_t *data, uint8_t len);
+float   Obstacle_GetScale(void);
 
 extern SafetyStatus_t safety_status;
 extern Safety_Error_t safety_error;
