@@ -13,6 +13,7 @@
 5. [Protecciones Térmicas](#-protecciones-térmicas)
 6. [Protecciones de Corriente](#-protecciones-de-corriente)
 7. [Gestión de Fallos](#-gestión-de-fallos)
+8. [Boot Validation Sequence](#-boot-validation-sequence)
 
 ---
 
@@ -1004,6 +1005,69 @@ Demand anomaly detection operates upstream of:
 
 It does NOT modify any CAN IDs, payloads, or the system state machine.
 It reuses `SAFETY_ERROR_SENSOR_FAULT` — no new CAN-visible error codes.
+
+---
+
+## 🚀 Boot Validation Sequence
+
+### Overview
+
+A deterministic boot validation checklist is executed during STANDBY before
+the system is allowed to transition to ACTIVE. This ensures all critical
+sensor subsystems are in a plausible state before actuator commands are
+accepted.
+
+### Boot Sequence Diagram
+
+```
+BOOT ──────────► STANDBY ─────────────────────► ACTIVE
+ │                  │                              ▲
+ │  Peripheral      │  Boot Validation             │
+ │  Init Complete   │  Checklist (10 ms loop)      │
+ │                  │                              │
+ │                  ├─ Temperature plausible? ─────┤
+ │                  ├─ Current plausible? ─────────┤
+ │                  ├─ Encoder healthy? ───────────┤
+ │                  ├─ Battery ≥ 20.0 V? ──────────┤
+ │                  ├─ No SAFETY_ERROR? ───────────┤
+ │                  ├─ CAN not bus-off? ───────────┤
+ │                  ├─ Steering calibrated? ───────┤
+ │                  └─ ESP32 heartbeat alive? ─────┘
+ │
+ │  If ANY check fails → remain in STANDBY
+ │  (no SAFE transition unless critical fault)
+```
+
+### Validation Checks
+
+| # | Check | Source | Threshold | Failure Action |
+|---|-------|--------|-----------|----------------|
+| 1 | Temperature plausible | `Temperature_Get(0..4)` | -40 °C to +125 °C | Remain STANDBY, log WARNING on temp sensor |
+| 2 | Current plausible | `Current_GetAmps(0..3)` | -1.0 A to 50.0 A | Remain STANDBY, log WARNING on current sensor |
+| 3 | Encoder healthy | `Encoder_HasFault()` | No active fault | Remain STANDBY, log WARNING on encoder |
+| 4 | Battery voltage OK | `Voltage_GetBus(4)` | ≥ 20.0 V | Remain STANDBY |
+| 5 | No safety error | `Safety_GetError()` | `== SAFETY_ERROR_NONE` | Remain STANDBY |
+| 6 | CAN not bus-off | `CAN_IsBusOff()` | `== false` | Remain STANDBY |
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `Core/Inc/boot_validation.h` | `BootValidationStatus` struct and public API |
+| `Core/Src/boot_validation.c` | `BootValidation_Run()` and `BootValidation_IsPassed()` |
+
+### Integration Points
+
+- **`main.c`** — `BootValidation_Run()` called in the 10 ms task loop during STANDBY
+- **`safety_system.c`** — STANDBY → ACTIVE transition gated by `BootValidation_IsPassed()`
+- **`can_handler.c`** — `CAN_IsBusOff()` accessor added (exposes existing `busoff_active`)
+
+### Safety Impact
+
+- **CAN contract**: Unchanged — no new message IDs, no heartbeat changes
+- **Watchdog timing**: Unaffected — no blocking delays added
+- **State machine transitions**: Unmodified — only the STANDBY → ACTIVE condition adds a boot validation gate
+- **Fail-safe**: If validation fails, system remains in STANDBY (not forced to SAFE)
 
 ---
 

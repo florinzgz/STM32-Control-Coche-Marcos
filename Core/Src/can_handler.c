@@ -525,6 +525,15 @@ void CAN_ProcessMessages(void) {
 /* ================================================================== */
 
 /**
+ * @brief  Query whether the CAN bus is currently in bus-off state.
+ * @return true if bus-off is active, false otherwise.
+ */
+bool CAN_IsBusOff(void)
+{
+    return (busoff_active != 0);
+}
+
+/**
  * @brief  Check FDCAN for bus-off condition and attempt non-blocking recovery.
  *
  * Called from the 10 ms safety loop in main.c.  Uses the FDCAN protocol

@@ -73,6 +73,7 @@ void CAN_SendServiceStatus(void);
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
 void CAN_CheckBusOff(void);
+bool CAN_IsBusOff(void);
 
 extern CAN_Stats_t can_stats;
 extern FDCAN_HandleTypeDef hfdcan1;

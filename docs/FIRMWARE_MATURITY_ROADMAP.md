@@ -93,7 +93,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Touch Display** | NONE | ESP32 screen classes are stubs. Reference has ST7796S TFT 480×320, XPT2046 touch, touch calibration, full HUD compositor, gauges, icons, dirty-rect rendering. |
 | **I2C Recovery** | COMPLETE | Implemented. SCL clock cycling (up to 16 pulses) with STOP condition generation, automatic retry (2 attempts), safe-state fallback on failure. Protects INA226 and TCA9548A. Based on NXP AN10216. |
 | **EEPROM / Config Persistence** | NONE | Not implemented. Reference has EEPROM persistence with checksum validation, config manager, storage abstraction. Current firmware uses hardcoded constants only. |
-| **Advanced Diagnostics** | PARTIAL | CAN diagnostic messages (0x300–0x303) exist. Missing: runtime self-test, memory stress test, boot sequence validation, functional tests as in reference. |
+| **Advanced Diagnostics** | PARTIAL | CAN diagnostic messages (0x300–0x303) exist. Boot validation sequence implemented (Phase 11): 6-point checklist (temp/current plausibility, encoder health, battery voltage, safety error, CAN bus-off) gates STANDBY → ACTIVE. Missing: runtime self-test, memory stress test, functional tests as in reference. |
 | **MCP23017 GPIO Expander** | INTENTIONALLY REMOVED | Not needed. STM32G474RE has sufficient GPIO pins (LQFP64, 51 I/O). Reference used MCP23017 I2C expander due to ESP32-S3 pin limitations. |
 | **PCA9685 PWM Driver** | INTENTIONALLY REMOVED | Not needed. STM32 uses native hardware TIM1/TIM8 PWM at 20 kHz. Reference initially used PCA9685 I2C PWM driver (250 Hz), later migrated away. |
 | **WiFi / OTA** | INTENTIONALLY REMOVED | Removed in reference v2.11.0 for security (standalone-only). Not applicable to STM32 firmware. CAN is the sole communication channel. |
@@ -219,7 +219,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] Makefile build system
 - [ ] Config persistence / EEPROM (reference: eeprom_persistence.cpp, config_storage.cpp, storage.cpp)
 - [ ] Structured logging (reference: logger.cpp)
-- [ ] Boot guard / pre-flight validation (reference: boot_guard.cpp)
+- [✓] Boot guard / pre-flight validation — 6-point boot validation checklist gates STANDBY → ACTIVE (temp/current plausibility, encoder health, battery voltage, safety error, CAN bus-off). *(Phase 11: 2026-02-13)*
 - [-] WiFi/OTA (intentionally excluded — security; CAN only)
 - [-] RTOS (intentionally excluded — bare-metal for determinism)
 - [-] MCP23017 GPIO expander (intentionally excluded — STM32 has sufficient GPIO)
@@ -314,7 +314,7 @@ This section identifies safety mechanisms present in the reference firmware that
 | Item | Description | Effort |
 |------|-------------|--------|
 | 2.1 | **Granular limp mode** — Extend DEGRADED state into a multi-level system (DEGRADED_MINOR / DEGRADED_MAJOR / LIMP) with separate power, steering, and speed multipliers. Maintain drive-home philosophy. | Medium |
-| 2.2 | **Boot validation sequence** — Before transitioning BOOT → STANDBY, verify: I2C bus accessible, INA226 responds on all channels, DS18B20 search finds expected count, TIM1/TIM8 PWM outputs confirmed, encoder counter advancing. Report failures via CAN. | Medium |
+| 2.2 | **Boot validation sequence** — ✅ **IMPLEMENTED (Phase 11)**. Deterministic 6-point checklist (temperature plausibility, current plausibility, encoder health, battery voltage, safety error, CAN bus-off) gates STANDBY → ACTIVE. Executed in 10 ms loop during STANDBY. No blocking delays. | Medium |
 | 2.3 | **Temperature rate-of-change monitoring** — Track temperature delta per second. If rate exceeds threshold (e.g., >5°C/s), trigger early warning before absolute threshold is reached. | Low |
 | 2.4 | **Fault escalation with time windows** — Replace simple consecutive counter with time-windowed error counting (e.g., 5 errors within 10 seconds = escalate, but 3 errors spread over 60 seconds = clear). Prevents false escalation from transient noise. | Medium |
 | 2.5 | **Graceful power-down sequence** — On transition to SAFE/ERROR, implement timed relay shutdown: disable traction motors → wait 100 ms → disable steering → wait 100 ms → disable main relay. Prevents inductive kickback. | Low |
@@ -451,7 +451,7 @@ The obstacle safety backstop has been integrated as described below:
 | Fault escalation timing | MEDIUM | Reduces false escalation from transient noise. Current simple counter is conservative (safe but potentially annoying). |
 | ESP32 engineering menu | MEDIUM | Improves diagnostic capability. Service mode exists via CAN but is harder to use without GUI. |
 | Runtime self-test | MEDIUM | Adds confidence in sensor health. Current boot-time checks and continuous monitoring partially cover this. |
-| Boot validation sequence | MEDIUM | Prevents operation with failed peripherals. Current architecture transitions to STANDBY on timing only. IWDG provides partial protection. |
+| Boot validation sequence | ~~MEDIUM~~ LOW *(Implemented Phase 11: 2026-02-13)* | 6-point deterministic checklist gates STANDBY → ACTIVE. Sensor plausibility (temp, current), encoder health, battery voltage, safety error state, and CAN bus-off are validated. Remaining: peripheral-level hardware self-test (I2C probe, TIM output confirm). |
 | Graceful power-down | MEDIUM | Prevents relay state inconsistency. Current reverse-order shutdown is functional but could be more robust. |
 | Obstacle detection | ~~MEDIUM~~ LOW *(Updated 2026-02-13)* | STM32 backstop limiter implemented. Full 5-zone logic on ESP32 provides primary protection; STM32 provides independent safety backstop with CAN timeout and stale-data detection. Remaining risk: ESP32-side logic not yet integrated (sensor parsing, 5-zone, ACC). |
 | Granular limp mode | MEDIUM | Improves drive-home capability. Current flat 40% limit is safe but suboptimal — could be too aggressive for minor faults or insufficient for major ones. |
@@ -813,7 +813,7 @@ verification checklist required by the safety audit process.
 - ~~Ackermann traction correction (differential speed adjustment)~~ ✅ Implemented *(2026-02-13 — Phase 8)*
 - ~~Demand anomaly detection~~ ✅ Implemented *(2026-02-13 — Phase 9)*
 - Granular limp mode (multi-level degradation)
-- Boot validation sequence
+- ~~Boot validation sequence~~ ✅ Implemented *(2026-02-13 — Phase 11)*
 
 **Low priority (features):**
 - Regenerative braking

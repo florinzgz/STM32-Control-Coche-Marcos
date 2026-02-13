@@ -16,6 +16,7 @@
 #include "sensor_manager.h"
 #include "motor_control.h"
 #include "service_mode.h"
+#include "boot_validation.h"
 
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
@@ -767,10 +768,12 @@ void Safety_CheckCANTimeout(void)
     } else {
         ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
         /* ESP32 alive – if we were in STANDBY, transition to ACTIVE
-         * only when steering centering has completed successfully.       */
+         * only when steering centering has completed successfully
+         * AND the boot validation checklist has passed.                 */
         if (system_state == SYS_STATE_STANDBY &&
             safety_error == SAFETY_ERROR_NONE &&
-            Steering_IsCalibrated()) {
+            Steering_IsCalibrated() &&
+            BootValidation_IsPassed()) {
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* If in SAFE due to CAN timeout and heartbeat restored, try recovery */

@@ -21,6 +21,7 @@
 #include "safety_system.h"
 #include "steering_centering.h"
 #include "service_mode.h"
+#include "boot_validation.h"
 
 /* ---- HAL handle instances ---- */
 FDCAN_HandleTypeDef hfdcan1;
@@ -92,6 +93,13 @@ int main(void)
             CAN_CheckBusOff();
             Safety_CheckSensors();
             Safety_CheckEncoder();
+
+            /* Boot validation checklist — run during STANDBY to
+             * evaluate sensor plausibility before allowing ACTIVE.
+             * Non-blocking; results queried by Safety_CheckCANTimeout(). */
+            if (Safety_GetState() == SYS_STATE_STANDBY) {
+                BootValidation_Run();
+            }
 
             /* Obstacle safety — check CAN-received distance data.
              * Computes obstacle_scale and triggers SAFE state if
