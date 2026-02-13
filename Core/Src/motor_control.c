@@ -53,6 +53,28 @@ static inline float sanitize_float(float val, float safe_default)
 #define PEDAL_RAMP_UP_PCT_S    50.0f     /* Max rise   rate (%/s) */
 #define PEDAL_RAMP_DOWN_PCT_S  100.0f    /* Max fall   rate (%/s) */
 
+/* ---- Demand anomaly detection (Security Hardening Phase 2) ----
+ *
+ * Defence-in-depth layer that detects implausible throttle demand
+ * patterns that could indicate sensor faults, CAN corruption, or
+ * injection attacks.  Traced to reference firmware traction.cpp
+ * demand anomaly detection.
+ *
+ * Three independent checks:
+ *   1) Step-rate:  raw demand jump > MAX_THROTTLE_STEP_PER_10MS
+ *                  → clamp to allowed rate, DEGRADED
+ *   2) Range:      effective_demand outside [0, 100] after pipeline
+ *                  → force to 0, DEGRADED
+ *   3) Frozen:     pedal value identical for > FROZEN_PEDAL_TIMEOUT_MS
+ *                  while vehicle speed changes significantly
+ *                  → raise warning, DEGRADED
+ *
+ * All checks are non-blocking (timestamp-based, no HAL_Delay).
+ * Reuses SAFETY_ERROR_SENSOR_FAULT — no new CAN error codes.        */
+#define MAX_THROTTLE_STEP_PER_10MS  15.0f  /* Max allowed raw jump (%/10ms)  */
+#define FROZEN_PEDAL_TIMEOUT_MS     5000   /* Frozen pedal timeout (ms)      */
+#define FROZEN_PEDAL_SPEED_DELTA_KMH 3.0f  /* Speed change threshold (km/h)  */
+
 /* ---- Dynamic braking configuration ----
  *
  * When the driver releases the throttle rapidly, the vehicle decelerates
@@ -185,6 +207,14 @@ static float    pedal_ramped      = 0.0f;   /* Output after ramp limiting    */
 static uint8_t  pedal_filter_init = 0;      /* 0 = first sample pending      */
 static uint32_t pedal_last_tick   = 0;
 
+/* ---- Demand anomaly detection state ---- */
+static float    prev_raw_demand      = 0.0f;   /* Previous raw throttle input   */
+static uint32_t prev_raw_demand_tick = 0;       /* Timestamp of previous input   */
+static float    frozen_pedal_value   = 0.0f;   /* Last distinct pedal value      */
+static uint32_t frozen_pedal_tick    = 0;       /* When pedal last changed        */
+static float    frozen_pedal_speed   = 0.0f;   /* Vehicle speed when pedal froze */
+static uint8_t  anomaly_init         = 0;       /* 0 = first sample pending       */
+
 /* ---- Dynamic braking state ---- */
 static float    dynbrake_pct      = 0.0f;   /* Current dynamic brake effort  */
 static float    prev_demand_pct   = 0.0f;   /* Previous demand for rate calc */
@@ -298,6 +328,14 @@ void Traction_Init(void)
     prev_demand_pct    = 0.0f;
     dynbrake_last_tick = 0;
 
+    /* Reset demand anomaly detection state */
+    prev_raw_demand      = 0.0f;
+    prev_raw_demand_tick = 0;
+    frozen_pedal_value   = 0.0f;
+    frozen_pedal_tick    = 0;
+    frozen_pedal_speed   = 0.0f;
+    anomaly_init         = 0;
+
     /* Default gear to FORWARD */
     current_gear = GEAR_FORWARD;
 }
@@ -333,6 +371,68 @@ void Traction_SetDemand(float throttlePct)
     /* Clamp raw input to the existing ±100 % range (unchanged) */
     if (throttlePct < -100.0f) throttlePct = -100.0f;
     if (throttlePct >  100.0f) throttlePct =  100.0f;
+
+    /* ---- Demand anomaly: throttle step-rate validation ----
+     * Detect unrealistic demand jumps (e.g. 0% → 100% in < 10ms)
+     * that could indicate sensor fault or CAN injection.
+     * Applied to the RAW input before EMA/ramp filtering.
+     * Clamp to allowed rate and raise DEGRADED (not SAFE).             */
+    uint32_t now_anom = HAL_GetTick();
+    if (!anomaly_init) {
+        prev_raw_demand      = throttlePct;
+        prev_raw_demand_tick = now_anom;
+        frozen_pedal_value   = throttlePct;
+        frozen_pedal_tick    = now_anom;
+        frozen_pedal_speed   = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                                Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        anomaly_init         = 1;
+    } else {
+        float dt_anom = (float)(now_anom - prev_raw_demand_tick);
+        if (dt_anom < 1.0f) dt_anom = 1.0f;  /* minimum 1 ms */
+        float allowed_step = MAX_THROTTLE_STEP_PER_10MS * (dt_anom / 10.0f);
+        float raw_diff = throttlePct - prev_raw_demand;
+
+        if (fabsf(raw_diff) > allowed_step) {
+            /* Anomalous jump detected — clamp to max allowed step */
+            if (raw_diff > 0.0f) {
+                throttlePct = prev_raw_demand + allowed_step;
+            } else {
+                throttlePct = prev_raw_demand - allowed_step;
+            }
+            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+            if (Safety_GetState() == SYS_STATE_ACTIVE) {
+                Safety_SetState(SYS_STATE_DEGRADED);
+            }
+        }
+        prev_raw_demand      = throttlePct;
+        prev_raw_demand_tick = now_anom;
+    }
+
+    /* ---- Demand anomaly: frozen pedal detection ----
+     * If pedal value remains identical for > FROZEN_PEDAL_TIMEOUT_MS
+     * while vehicle speed changes significantly, raise warning.
+     * Non-blocking, timestamp-based.                                    */
+    if (fabsf(throttlePct - frozen_pedal_value) > 0.5f) {
+        /* Pedal moved — reset frozen tracking */
+        frozen_pedal_value = throttlePct;
+        frozen_pedal_tick  = now_anom;
+        frozen_pedal_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                              Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+    } else if ((now_anom - frozen_pedal_tick) > FROZEN_PEDAL_TIMEOUT_MS) {
+        /* Pedal has been frozen — check speed divergence */
+        float current_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                               Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        if (fabsf(current_speed - frozen_pedal_speed) > FROZEN_PEDAL_SPEED_DELTA_KMH) {
+            /* Speed changed significantly while pedal frozen → anomaly */
+            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+            if (Safety_GetState() == SYS_STATE_ACTIVE) {
+                Safety_SetState(SYS_STATE_DEGRADED);
+            }
+            /* Reset tick to avoid re-triggering every cycle */
+            frozen_pedal_tick = now_anom;
+            frozen_pedal_speed = current_speed;
+        }
+    }
 
     /* ---- A) EMA noise filter ---- */
     if (!pedal_filter_init) {
@@ -687,6 +787,27 @@ void Traction_Update(void)
             gear_scale = GEAR_POWER_FORWARD_PCT;
         }
         effective_demand *= gear_scale;
+    }
+
+    /* ---- Demand anomaly: negative / out-of-range validation ----
+     * After gear scaling (positive demands only), effective_demand
+     * should be in [–dynbrake_max, 100].  If it falls outside [0, 100]
+     * when positive traction is expected (not dynamic braking), force
+     * to 0 and raise DEGRADED.  Dynamic braking legitimately produces
+     * negative effective_demand — do not flag that.                     */
+    if (effective_demand > 100.0f) {
+        effective_demand = 0.0f;
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        if (Safety_GetState() == SYS_STATE_ACTIVE) {
+            Safety_SetState(SYS_STATE_DEGRADED);
+        }
+    } else if (effective_demand < 0.0f && dynbrake_pct < 0.5f) {
+        /* Negative demand without dynamic braking → anomaly */
+        effective_demand = 0.0f;
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        if (Safety_GetState() == SYS_STATE_ACTIVE) {
+            Safety_SetState(SYS_STATE_DEGRADED);
+        }
     }
 
     /* ---- Per-motor emergency temperature cutoff ----

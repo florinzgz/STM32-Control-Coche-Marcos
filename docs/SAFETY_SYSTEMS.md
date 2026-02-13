@@ -882,6 +882,75 @@ When the FDCAN hardware enters bus-off state:
 
 ---
 
+## 🔍 Demand Anomaly Detection (Security Hardening Phase 2)
+
+Defence-in-depth layer in the traction pipeline that detects implausible
+throttle demand patterns.  Traced to reference firmware `traction.cpp`
+demand anomaly detection.
+
+### Throttle Step-Rate Validation
+
+Detects unrealistic demand jumps (e.g. 0% → 100% within < 10 ms) that
+could indicate sensor faults, CAN corruption, or injection attacks.
+
+```c
+#define MAX_THROTTLE_STEP_PER_10MS  15.0f  // Max allowed raw jump (%/10ms)
+
+// Applied to RAW input in Traction_SetDemand(), before EMA/ramp filtering.
+// If exceeded:
+//   1. Clamp throttle to maximum allowed step
+//   2. Raise SAFETY_ERROR_SENSOR_FAULT
+//   3. Transition ACTIVE → DEGRADED (NOT SAFE)
+```
+
+### Negative / Out-of-Range Demand Validation
+
+After gear-based power scaling in `Traction_Update()`, if `effective_demand`
+is > 100 % or < 0 % without dynamic braking active:
+
+- Force demand to 0
+- Raise `SAFETY_ERROR_SENSOR_FAULT`
+- Transition ACTIVE → DEGRADED
+
+Dynamic braking legitimately produces negative `effective_demand` and is
+not flagged.
+
+### Frozen Pedal Detection
+
+If the pedal value remains identical (within 0.5 % tolerance) for more
+than 5 seconds while vehicle speed changes by more than 3 km/h, a
+stuck-pedal anomaly is raised.
+
+```c
+#define FROZEN_PEDAL_TIMEOUT_MS      5000   // Detection timeout (ms)
+#define FROZEN_PEDAL_SPEED_DELTA_KMH 3.0f   // Speed divergence threshold
+
+// Non-blocking, timestamp-based.
+// Raises SAFETY_ERROR_SENSOR_FAULT → DEGRADED (not SAFE).
+// Resets tracking after detection to prevent re-triggering every cycle.
+```
+
+### Time-Based Plausibility
+
+All anomaly detection logic stores previous demand values and timestamps.
+All checks are non-blocking — no `HAL_Delay`, no busy loops.  The
+implementation uses `HAL_GetTick()` for timestamping, consistent with
+existing pedal ramp and steering rate-limit logic.
+
+### Coexistence
+
+Demand anomaly detection operates upstream of:
+- Ackermann differential torque correction
+- ABS/TCS per-wheel modulation
+- Obstacle scale limiter
+- 4×4 axle split
+- Degraded power limiter
+
+It does NOT modify any CAN IDs, payloads, or the system state machine.
+It reuses `SAFETY_ERROR_SENSOR_FAULT` — no new CAN-visible error codes.
+
+---
+
 ## 📖 Referencias
 
 - [ISO 26262 - Functional Safety](https://www.iso.org/standard/68383.html)
