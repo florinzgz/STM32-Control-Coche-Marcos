@@ -27,6 +27,9 @@ static inline float sanitize_float(float val, float safe_default)
     return val;
 }
 
+/* Safe-default for speed when NaN/Inf detected — ensures gear change is rejected */
+#define SANITIZE_SPEED_DEFAULT  99.0f
+
 /* Global variables */
 extern FDCAN_HandleTypeDef hfdcan1;
 CAN_Stats_t can_stats = {0};
@@ -502,7 +505,7 @@ void CAN_ProcessMessages(void) {
                             /* Gear change only allowed near standstill */
                             float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
                                              Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
-                            avg_spd = sanitize_float(avg_spd, 99.0f);
+                            avg_spd = sanitize_float(avg_spd, SANITIZE_SPEED_DEFAULT);
                             if (avg_spd <= 1.0f) {
                                 Traction_SetGear(requested);
                             } else {

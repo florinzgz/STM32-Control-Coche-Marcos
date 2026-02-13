@@ -27,12 +27,12 @@ static unsigned long lastSerialMs     = 0;
 // ---- Command ACK tracking (Phase 13) ----
 // Non-blocking: records when a command was sent and checks for ACK arrival.
 // UI state is only updated once ACK is received or timeout expires.
+// Design: no automatic retry — bounded timeout only, no infinite loops.
 
 static bool     ackPending     = false;   // true while waiting for ACK
 static uint8_t  ackExpectedCmd = 0;       // low byte of the command CAN ID we sent
 static unsigned long ackSentMs = 0;       // timestamp when the command was sent
 static bool     ackTimedOut    = false;   // set true if ACK_TIMEOUT_MS elapsed
-static constexpr uint8_t ACK_MAX_RETRIES = 0;  // no retry — bounded, no infinite loop
 
 /// Call before sending a command that expects ACK (CMD_MODE, SERVICE_CMD).
 static void ackBeginWait(uint8_t cmdIdLow) {
