@@ -5,6 +5,15 @@
 // Uses partial redraw: only elements that changed since the previous
 // frame are redrawn, keeping render time <5 ms.
 //
+// Layout zones (320×480):
+//   Top bar (0–50):      [4x4] [4x2] [360°]        [BAT XX%]
+//   Sensor (52–90):      frontal obstacle distance + proximity bar
+//   Center (90–270):     car body + 4 wheels (torque/temp) + steering gauge
+//   Speed (280–330):     large centered speed (km/h)
+//   Pedal (330–400):     pedal bar 0–100% with gradient
+//   Gears (400–450):     [P] [R] [N] [D1] [D2] — flat text
+//   Steering (450–480):  angle text + left/right indicator
+//
 // No String class. No heap allocation. No recursion.
 // All format buffers are fixed-size stack arrays with snprintf().
 //
@@ -17,6 +26,8 @@
 #include "ui/gear_display.h"
 #include "ui/battery_indicator.h"
 #include "ui/mode_icons.h"
+#include "ui/obstacle_sensor.h"
+#include "ui/steering_display.h"
 #include <cstdio>
 #include <cstring>
 
@@ -38,6 +49,7 @@ void DriveScreen::onEnter() {
     prevPedalPct_    = 0;
     prevGear_        = ui::Gear::P;
     prevMode_        = {};
+    prevObstacleCm_  = 0;
 }
 
 // -------------------------------------------------------------------------
@@ -94,6 +106,9 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     // Mode flags
     curMode_.is4x4 = false;
     curMode_.isTankTurn = false;
+
+    // Obstacle sensor
+    curObstacleCm_ = data.obstacle().distanceCm;
 }
 
 // -------------------------------------------------------------------------
@@ -106,18 +121,27 @@ void DriveScreen::draw() {
         // Clear entire screen
         tft.fillScreen(ui::COL_BG);
 
-        // Draw all static elements
+        // Draw all static elements (in layout order top→bottom)
         ui::ModeIcons::drawStatic(tft);
         ui::BatteryIndicator::drawStatic(tft);
+        ui::ObstacleSensor::drawStatic(tft);
         ui::CarRenderer::drawStatic(tft);
-        ui::GearDisplay::drawStatic(tft);
         ui::PedalBar::drawStatic(tft);
+        ui::GearDisplay::drawStatic(tft);
+        ui::SteeringDisplay::drawStatic(tft);
 
-        // Speed label
+        // Speed label (below speed value)
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TC_DATUM);
-        tft.drawString("km/h", ui::SCREEN_W / 2, ui::SPEED_Y + 22);
+        tft.drawString("km/h", ui::SCREEN_W / 2, ui::SPEED_Y + 26);
+        tft.setTextDatum(TL_DATUM);
+
+        // 360° icon label above steering gauge
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(TC_DATUM);
+        tft.drawString("360", ui::STEER_CX, ui::STEER_CY - ui::STEER_RADIUS - 12);
         tft.setTextDatum(TL_DATUM);
 
         // Force draw of all dynamic elements
@@ -126,6 +150,7 @@ void DriveScreen::draw() {
         prevPedalPct_    = curPedalPct_ + 1;
         prevGear_        = (curGear_ == ui::Gear::P) ? ui::Gear::N : ui::Gear::P;
         prevSteeringRaw_ = curSteeringRaw_ + 10;
+        prevObstacleCm_  = curObstacleCm_ + 1;
         for (uint8_t i = 0; i < 4; ++i) {
             prevTraction_[i] = curTraction_[i] + 1;
             prevTemp_[i]     = curTemp_[i] + 1;
@@ -136,8 +161,11 @@ void DriveScreen::draw() {
 
     // Partial redraw: only changed elements
 
-    // Speed
+    // Speed (in its own zone, 280–330px)
     drawSpeed();
+
+    // Obstacle sensor (52–90px)
+    ui::ObstacleSensor::draw(tft, curObstacleCm_, prevObstacleCm_);
 
     // Wheels (torque + temperature)
     ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
@@ -146,8 +174,11 @@ void DriveScreen::draw() {
         {curTemp_[0], curTemp_[1], curTemp_[2], curTemp_[3], 0}, 0},
         prevTraction_, prevTemp_);
 
-    // Steering
+    // Steering circular gauge (right side)
     ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_);
+
+    // Steering text display (450–480px)
+    ui::SteeringDisplay::draw(tft, curSteeringRaw_, prevSteeringRaw_);
 
     // Battery
     ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_);
@@ -170,10 +201,11 @@ void DriveScreen::draw() {
     prevPedalPct_    = curPedalPct_;
     prevGear_        = curGear_;
     prevMode_        = curMode_;
+    prevObstacleCm_  = curObstacleCm_;
 }
 
 // -------------------------------------------------------------------------
-// Speed display helper
+// Speed display helper — in its own zone (280–330px), NOT inside car
 // -------------------------------------------------------------------------
 void DriveScreen::drawSpeed() {
     if (curSpeedAvgRaw_ == prevSpeedAvgRaw_) return;
@@ -186,11 +218,11 @@ void DriveScreen::drawSpeed() {
     snprintf(buf, sizeof(buf), "%u.%u", intPart, fracPart);
 
     // Clear speed area
-    tft.fillRect(0, ui::SPEED_Y, ui::SCREEN_W, 20, ui::COL_BG);
+    tft.fillRect(0, ui::SPEED_Y, ui::SCREEN_W, 24, ui::COL_BG);
 
-    // Draw speed value
+    // Draw speed value — large centered text
     tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-    tft.setTextSize(2);
+    tft.setTextSize(3);
     tft.setTextDatum(TC_DATUM);
     tft.drawString(buf, ui::SCREEN_W / 2, ui::SPEED_Y);
     tft.setTextDatum(TL_DATUM);

@@ -133,6 +133,14 @@ struct AckData {
     unsigned long     timestampMs = 0;
 };
 
+// -------------------------------------------------------------------------
+// Front obstacle sensor (0x208) — ultrasonic / ToF distance in cm
+// -------------------------------------------------------------------------
+struct ObstacleData {
+    uint16_t distanceCm  = 0;   // 0 = no reading, max ~400 cm
+    unsigned long timestampMs = 0;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -150,6 +158,7 @@ public:
     void setDiag(const DiagData& d)            { diag_ = d; }
     void setBattery(const BatteryData& d)      { battery_ = d; }
     void setAck(const AckData& d)              { ack_ = d; }
+    void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -168,6 +177,7 @@ public:
     const BatteryData&   battery()   const { return battery_; }
     const ServiceData&   service()   const { return service_; }
     const AckData&       ack()       const { return ack_; }
+    const ObstacleData&  obstacle()  const { return obstacle_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -182,6 +192,7 @@ private:
     BatteryData   battery_;
     ServiceData   service_;
     AckData       ack_;
+    ObstacleData  obstacle_;
 };
 
 } // namespace vehicle

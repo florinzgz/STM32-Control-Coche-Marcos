@@ -4,7 +4,8 @@
 // Draws top-view vehicle outline with 4 wheels.
 // Each wheel displays torque percentage, motor temperature, and
 // color-coded fill based on torque level.
-// Steering angle shown once at center with rotation indicator.
+// Car body is clean — no numbers or text overlaid on the body.
+// Steering angle shown as circular gauge on the right side.
 //
 // All drawing uses direct TFT calls — no sprites, no heap allocation.
 //
