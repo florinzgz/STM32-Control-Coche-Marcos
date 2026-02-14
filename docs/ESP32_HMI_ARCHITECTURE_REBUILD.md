@@ -355,7 +355,7 @@ The diagnostics menu is accessible **only** when ALL of the following are true:
 
 | Condition | Check |
 |-----------|-------|
-| System state is STANDBY (1) or ERROR (5) | `vehicle_data.system_state == 1 or 5` |
+| System state is STANDBY (1) or ERROR (5) | `vehicle_data.system_state == 1 OR 5` |
 | All wheel speeds are zero | `vehicle_data.wheel_speed[0..3] == 0` |
 | No CAN timeout active | `heartbeat.stm32_alive == true` |
 | Multi-step gesture completed | 3 taps on specific screen region within 2 seconds |
@@ -662,7 +662,7 @@ loop()
 | `screen_mgr_draw()` (full redraw) | 3.0 ms | Direct TFT, 320×480, partial |
 | `overlay_draw()` | 0.5 ms | Single rect + text |
 | `diag_menu_draw()` | 2.0 ms | Text-heavy, no graphics |
-| **Total worst-case tick** | **6.35 ms** | **788× margin vs 5 s WDT** |
+| **Total worst-case tick** | **6.35 ms** | **787× margin vs 5 s WDT** |
 
 #### Watchdog Safety Verdict
 
@@ -671,7 +671,7 @@ loop()
 | Normal frame (partial redraw) | 50 ms (20 FPS) | ~4 ms | 12.5× |
 | Full screen transition | 50 ms (20 FPS) | ~6.35 ms | 7.9× |
 | CAN burst (30 frames) | 50 ms (20 FPS) | ~8 ms | 6.25× |
-| Task WDT timeout | 5,000 ms | ~6.35 ms | 788× |
+| Task WDT timeout | 5,000 ms | ~6.35 ms | 787× |
 | **Verdict** | | | **SAFE** |
 
 ### 4.5 Render Pipeline Diagram
@@ -799,7 +799,7 @@ loop()
 | **Heap fragmentation** | HIGH — Dynamic allocation in `loop()`, String usage | ZERO — All allocations are static/permanent | Eliminates risk |
 | **Sprite exhaustion** | HIGH — 300 KB+ per sprite, multiple sprites | ZERO — No sprites used | Eliminates risk |
 | **Static init order** | CRITICAL — 7+ global singletons with cross-dependencies | SAFE — Zero global objects with constructors | Eliminates risk |
-| **Watchdog starvation** | HIGH — 15+ seconds of blocking delays possible | SAFE — Max 6.35 ms per tick, 788× margin | 788× improvement |
+| **Watchdog starvation** | HIGH — 15+ seconds of blocking delays possible | SAFE — Max 6.35 ms per tick, 787× margin | 787× improvement |
 | **Stack overflow** | MEDIUM — 6+ call levels in render chain | LOW — Max 4 call levels, ~640 bytes peak | 3× stack margin improvement |
 | **Multi-core races** | HIGH — 5 FreeRTOS tasks across 2 cores with shared data | NONE — Single-core, single-task execution | Eliminates risk |
 | **Render pipeline depth** | 6 levels (Manager→Compositor→Layer→Engine→SafeDraw→TFT) | 3 levels (ScreenMgr→ScreenDraw→TFT) | 50% reduction |
