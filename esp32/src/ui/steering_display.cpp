@@ -30,7 +30,12 @@ void SteeringDisplay::draw(TFT_eSPI& tft, int16_t angleRaw,
     int16_t fracPart = (angleRaw < 0) ? (-(angleRaw % 10)) : (angleRaw % 10);
 
     char buf[FMT_BUF_MED];
-    snprintf(buf, sizeof(buf), "%d.%u", intPart, static_cast<unsigned>(fracPart));
+    if (angleRaw < 0 && intPart == 0) {
+        // Handle -0.X case: intPart is 0 but value is negative
+        snprintf(buf, sizeof(buf), "-%d.%u", intPart, static_cast<unsigned>(fracPart));
+    } else {
+        snprintf(buf, sizeof(buf), "%d.%u", intPart, static_cast<unsigned>(fracPart));
+    }
 
     // Clear value area
     tft.fillRect(80, STEER_TEXT_Y, 120, 14, COL_BG);

@@ -50,21 +50,24 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
 
     // Proximity bar fill
     int16_t barY = SENSOR_Y + 24;
-    uint16_t col = proximityColor(distanceCm);
-
-    // Map distance to bar width (400 cm = empty, 0 cm = full)
-    uint16_t clampDist = (distanceCm > 400) ? 400 : distanceCm;
-    int16_t fillW = static_cast<int16_t>(
-        (static_cast<int32_t>(400 - clampDist) * (SENSOR_BAR_W - 4)) / 400);
 
     // Clear bar interior
     tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
                  SENSOR_BAR_W - 4, SENSOR_BAR_H - 4, COL_BG);
 
-    // Draw filled portion
-    if (fillW > 0 && distanceCm > 0) {
-        tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
-                     fillW, SENSOR_BAR_H - 4, col);
+    // Only draw fill when sensor has a valid reading
+    if (distanceCm > 0) {
+        uint16_t col = proximityColor(distanceCm);
+
+        // Map distance to bar width (400 cm = empty, 0 cm = full)
+        uint16_t clampDist = (distanceCm > 400) ? 400 : distanceCm;
+        int16_t fillW = static_cast<int16_t>(
+            (static_cast<int32_t>(400 - clampDist) * (SENSOR_BAR_W - 4)) / 400);
+
+        if (fillW > 0) {
+            tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
+                         fillW, SENSOR_BAR_H - 4, col);
+        }
     }
 }
 

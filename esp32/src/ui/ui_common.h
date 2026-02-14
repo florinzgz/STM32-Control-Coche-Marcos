@@ -161,8 +161,9 @@ inline uint16_t torqueColor(uint8_t pct) {
 // Helper: obstacle distance to color (proximity indicator)
 // -------------------------------------------------------------------------
 inline uint16_t proximityColor(uint16_t distanceCm) {
-    if (distanceCm > 150) return COL_GREEN;    // > 1.5 m: safe
-    if (distanceCm > 50)  return COL_YELLOW;   // 0.5–1.5 m: caution
+    if (distanceCm == 0)   return COL_GRAY;    // no reading
+    if (distanceCm > 150)  return COL_GREEN;   // > 1.5 m: safe
+    if (distanceCm > 50)   return COL_YELLOW;  // 0.5–1.5 m: caution
     return COL_RED;                             // < 0.5 m: danger
 }
 
