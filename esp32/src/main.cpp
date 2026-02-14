@@ -3,7 +3,7 @@
 //
 // Framework:  Arduino (C++17)
 // Board:      ESP32-S3-DevKitC-1
-// Display:    320×480 TFT via TFT_eSPI (ST7796)
+// Display:    480×320 TFT via TFT_eSPI (ST7796, landscape rotation 1)
 // Reference:  docs/CAN_CONTRACT_FINAL.md rev 1.3
 //             docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
@@ -83,11 +83,11 @@ void setup() {
 
     // Initialize TFT display
     tft.init();
-    tft.setRotation(0);  // Portrait mode
+    tft.setRotation(1);  // Landscape mode (480×320)
     tft.fillScreen(0x2104);  // Dark gray background
     tft.setTextColor(0xFFFF, 0x2104);
     tft.setTextSize(1);
-    Serial.println("[TFT] Display initialized (320x480)");
+    Serial.println("[TFT] Display initialized (480x320 landscape)");
 
     ESP32Can.setPins(CAN_TX_PIN, CAN_RX_PIN);
     ESP32Can.setRxQueueSize(5);

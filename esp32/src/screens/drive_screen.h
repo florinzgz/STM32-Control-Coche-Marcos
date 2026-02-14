@@ -4,15 +4,15 @@
 // Full operational display with live telemetry.
 // Drawn when system_state is ACTIVE (2) or DEGRADED (3).
 //
-// Layout (320×480 portrait):
-//   Top bar (0–50):    mode icons (4x4, 4x2, 360°) + battery percentage
-//   Sensor (52–90):    frontal obstacle distance + proximity bar
-//   Center (90–270):   car top-view with 4 wheels (torque %, temp, color)
+// Layout (480×320 landscape):
+//   Top bar (0–40):    mode icons (4x4, 4x2, 360°) + battery percentage
+//   Sensor (40–85):    frontal obstacle distance + proximity bar
+//   Center (85–230):   car top-view with 4 wheels (torque %, temp, color)
 //                      steering circular gauge (right side)
-//   Speed (280–330):   large speed value centered
-//   Pedal (330–400):   pedal bar (0-100%, gradient, arrow, percentage text)
-//   Gears (400–450):   gear display (P, R, N, D1, D2) — flat text
-//   Steering (450–480): steering angle text + direction indicator
+//                      "360°" label above steering gauge
+//   Speed (230–270):   large speed value centered
+//   Pedal (270–300):   pedal bar (0-100%, gradient, percentage text)
+//   Gears (300–320):   gear display (P, R, N, D1, D2) — flat text
 //
 // No heap allocation in update()/draw(). All formatting on stack.
 // Partial redraw only — dirty flags track which elements changed.

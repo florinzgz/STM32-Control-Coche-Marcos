@@ -8,17 +8,17 @@
 namespace ui {
 
 // -------------------------------------------------------------------------
-// Static label
+// Static label — centered horizontally on 480px-wide screen
 // -------------------------------------------------------------------------
 void ObstacleSensor::drawStatic(TFT_eSPI& tft) {
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
-    tft.drawString("SENSOR FRONTAL", SCREEN_W / 2, SENSOR_Y);
+    tft.drawString("SENSOR FRONTAL", SCREEN_W / 2, SENSOR_Y + 2);
     tft.setTextDatum(TL_DATUM);
 
-    // Proximity bar outline
-    int16_t barY = SENSOR_Y + 24;
+    // Proximity bar outline — centered horizontally
+    int16_t barY = SENSOR_Y + 28;
     tft.drawRect(SENSOR_BAR_X, barY, SENSOR_BAR_W, SENSOR_BAR_H, COL_GRAY);
 }
 
@@ -39,8 +39,8 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
         snprintf(buf, sizeof(buf), "%u.%02u m", meters, cents);
     }
 
-    // Clear text area and redraw
-    int16_t textY = SENSOR_Y + 10;
+    // Clear text area and redraw — centered horizontally
+    int16_t textY = SENSOR_Y + 14;
     tft.fillRect(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(1);
@@ -49,7 +49,7 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
     tft.setTextDatum(TL_DATUM);
 
     // Proximity bar fill
-    int16_t barY = SENSOR_Y + 24;
+    int16_t barY = SENSOR_Y + 28;
 
     // Clear bar interior
     tft.fillRect(SENSOR_BAR_X + 2, barY + 2,

@@ -1,8 +1,9 @@
 // =============================================================================
 // ESP32-S3 HMI — Steering Text Display
 //
-// Shows steering angle in degrees with left/right direction indicator.
-// Drawn at the bottom of the screen (450–480px).
+// In landscape layout (480×320), the steering angle is shown via the
+// circular gauge in the car area. This module provides no-op stubs
+// for API compatibility.
 //
 // Reference: docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
