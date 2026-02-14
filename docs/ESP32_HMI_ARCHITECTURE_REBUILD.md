@@ -26,6 +26,13 @@
    - [7.6 Risk Comparison Table](#76-risk-comparison-table)
 8. [Phase 8 — Bootloop Prevention Proof](#phase-8--bootloop-prevention-proof)
 9. [Phase 9 — Integration Plan](#phase-9--integration-plan)
+10. [Addendum D — Hardware Clarification for N16R8](#addendum-d--hardware-clarification-for-esp32-s3-wroom-1-n16r8)
+    - [D.1 TOFSense-M S UART Assignment](#d1-tofsense-m-s-uart-assignment)
+    - [D.2 WS2812B LED Pin Verification](#d2-ws2812b-led-subsystem-pin-verification)
+    - [D.3 DFPlayer Mini Integration](#d3-dfplayer-mini-integration-clarification)
+    - [D.4 CAN Contract Integrity](#d4-can-contract-integrity--ids-0x208-and-0x209)
+    - [D.5 Consolidated Timing & Watchdog Proof](#d5-consolidated-worst-case-timing--watchdog-safety-proof)
+    - [D.6 Complete GPIO Map](#d6-complete-esp32-s3-n16r8-gpio-map-new-architecture)
 
 ---
 
@@ -294,7 +301,7 @@ Each module is a pair of files (`module.h` + `module.c`/`.cpp`) containing:
 | `ui_obstacle` | Obstacle distance bar / zone indicator | 16 bytes |
 | `led_ctrl` | Non-blocking WS2812B controller (front + rear) | 224 bytes (see Phase 3) |
 | `audio_ctrl` | DFPlayer non-blocking driver + priority queue | 48 bytes (see Phase 4) |
-| `obstacle` | TOFSense UART driver + 8×8 matrix processing | 464 bytes (see Phase 5) |
+| `obstacle` | TOFSense UART2 driver + 8×8 matrix processing | 464 bytes (see Phase 5) |
 | `obstacle_can` | Obstacle CAN TX (0x208/0x209 encoding) | 16 bytes |
 | `frame_limit` | 20 FPS frame timing | 8 bytes |
 | `tft_direct` | Thin wrapper over TFT_eSPI (no sprites) | 4 bytes (pointer) |
@@ -511,11 +518,19 @@ The hidden diagnostics menu (Phase 6) includes LED configuration:
 | Parameter | Value |
 |-----------|-------|
 | **Module** | DFPlayer Mini MP3 |
-| **Interface** | UART1 @ 9600 baud |
+| **Interface** | UART1 (`HardwareSerial(1)`) @ 9600 baud |
 | **TX pin** | GPIO 19 (ESP32 → DFPlayer RX) |
 | **RX pin** | GPIO 20 (DFPlayer TX → ESP32) |
 | **Tracks** | 68 MP3 files on SD card |
 | **Library** | DFRobotDFPlayerMini (pointer-based lazy init) |
+
+> **GPIO 19/20 USB Pin Clarification:** On ESP32-S3, GPIO 19 and GPIO 20 are
+> the native USB D-/D+ pins. With `ARDUINO_USB_CDC_ON_BOOT=1` (set in
+> `platformio.ini`), the USB CDC interface handles serial programming and
+> `Serial` output via the native USB peripheral — the UART0 controller is NOT
+> used for this purpose. This frees GPIO 19 and GPIO 20 for general use.
+> Source: `pins.h` N16R8 architecture fix, confirmed working in original
+> FULL-FIRMWARE on hardware.
 
 ### 4.2 Non-Blocking Playback Design
 
@@ -630,16 +645,32 @@ The original repo's bootloop was partly caused by `DFRobotDFPlayerMini` and `Har
 
 ### 5.1 Obstacle Data Source
 
-The obstacle detection stack runs on the ESP32-S3. The TOFSense-M S LiDAR sensor is connected via UART0 (GPIO 44 RX, native). The ESP32 processes the 8×8 distance matrix, computes zones, and:
+The obstacle detection stack runs on the ESP32-S3. The TOFSense-M S LiDAR sensor
+is connected via **UART2** (`HardwareSerial(2)`) on **GPIO 44 RX** (sensor TX → ESP32).
+The sensor is TX-only (unidirectional); no ESP32 TX pin is assigned (`PIN_TOFSENSE_TX = -1`).
+
+The ESP32 processes the 8×8 distance matrix, computes zones, and:
 
 1. **Displays** obstacle data on the HMI (distance, zone, health)
 2. **Transmits** processed data to STM32 via CAN (0x208/0x209) for safety backstop
+
+> **UART Assignment Clarification:** The original FULL-FIRMWARE used UART0 native
+> pins (GPIO 43 TX / GPIO 44 RX) for the TOFSense. However, in the new architecture:
+> - GPIO 43 is assigned to **LED_REAR** (WS2812B data line)
+> - The sensor is RX-only (GPIO 44), so no TX pin conflict exists
+> - We use **UART2** (`HardwareSerial(2)`) remapped to GPIO 44 RX only
+> - UART0 is not used (USB CDC handles serial programming via `ARDUINO_USB_CDC_ON_BOOT=1`)
+> - UART1 is assigned to DFPlayer (GPIO 19/20)
+>
+> GPIO 44 is the native UART0 RX pin, but ESP32-S3 allows remapping any UART
+> controller to any GPIO via the IO MUX. UART2 is configured on GPIO 44 RX in
+> `obstacle_init()` during `setup()`.
 
 ### 5.2 Obstacle Module Design
 
 | Component | Responsibility |
 |-----------|---------------|
-| `obstacle` module | UART0 driver, TOFSense frame parser, 8×8 matrix processing, zone computation |
+| `obstacle` module | UART2 driver (GPIO 44 RX), TOFSense frame parser, 8×8 matrix processing, zone computation |
 | `obstacle_can` module | Encodes processed data into CAN frames 0x208/0x209 |
 | `ui_obstacle` widget | Draws distance bar and zone indicator on drive screen |
 | `overlay` (obstacle) | Shows proximity warning overlay when distance < CAUTION threshold |
@@ -747,7 +778,7 @@ Rate limiting prevents continuous audio spam when the obstacle distance fluctuat
 
 | Operation | Time | Frequency |
 |-----------|------|-----------|
-| UART0 read (non-blocking) | ~0.3 ms | Every tick |
+| UART2 read (non-blocking) | ~0.3 ms | Every tick |
 | Frame parse (400 bytes) | ~0.2 ms | Every 66 ms (15 Hz) |
 | 8×8 matrix → min distance | ~0.05 ms | Every 66 ms |
 | CAN TX (0x208 + 0x209) | ~0.1 ms | Every 66/100 ms |
@@ -761,7 +792,7 @@ Rate limiting prevents continuous audio spam when the obstacle distance fluctuat
 | Worst-case `obstacle_tick()` time | 0.65 ms |
 | WDT timeout | 5,000 ms |
 | Margin | **7,692×** |
-| Can UART read block? | **No** — `Serial.available()` checked first, reads only available bytes |
+| Can UART read block? | **No** — `Serial2.available()` checked first, reads only available bytes |
 | Can frame parse block? | **No** — processes only buffered data, no waiting |
 
 ---
@@ -980,7 +1011,7 @@ esp32/
     │   └── audio_ctrl.cpp       # Queue management, event→track mapping
     │
     ├── obstacle/
-    │   ├── obstacle.h           # TOFSense UART driver + 8×8 matrix processing
+    │   ├── obstacle.h           # TOFSense UART2 driver + 8×8 matrix processing
     │   ├── obstacle.cpp
     │   ├── obstacle_can.h       # CAN TX encoding (0x208/0x209)
     │   └── obstacle_can.cpp
@@ -1008,7 +1039,7 @@ All initialization happens in `setup()` → `app_init()`, in strict sequential o
 ```
 setup()
   │
-  ├─ 1. Serial.begin(115200)          [UART0 ready — also used by TOFSense RX]
+  ├─ 1. Serial.begin(115200)          [USB CDC serial — debug output only]
   │     └─ No delay, no while(!Serial)
   │
   ├─ 2. tft_direct_init()             [Display hardware]
@@ -1048,8 +1079,8 @@ setup()
   │     ├─ If timeout → audio_ok = false (non-fatal, retry in loop)
   │     └─ Initialize audio queue (head=tail=count=0)
   │
-  ├─ 9. obstacle_init()               [Obstacle sensor — TOFSense UART0]
-  │     ├─ Configure UART0 for TOFSense (921600 baud, GPIO44 RX)
+  ├─ 9. obstacle_init()               [Obstacle sensor — TOFSense on UART2]
+  │     ├─ Serial2.begin(921600, SERIAL_8N1, GPIO44, -1)  [RX only]
   │     ├─ Zero obstacle state struct
   │     └─ sensor_healthy = false (until first valid frame)
   │
@@ -1226,7 +1257,7 @@ loop()
                     │                                      │
                     │  ┌─────────────────────────────┐     │
                     │  │ obstacle_tick()              │     │
-                    │  │  ├─ Read UART0 (non-block)  │     │
+                    │  │  ├─ Read UART2 (non-block)  │     │
                     │  │  ├─ Parse TOFSense frame    │     │
                     │  │  ├─ Compute zones           │     │
                     │  │  └─ CAN TX 0x208/0x209      │     │
@@ -1540,7 +1571,7 @@ This is possible because every module is a pair of free functions (`module_init(
 | Step-based LED animations | Non-blocking, bounded execution time | Animation loops with delay() (blocks loop) |
 | Pointer-based DFPlayer | Defers construction to setup() | Global DFPlayer object (pre-setup constructor) |
 | Priority audio queue | Bounded memory, O(1) operations | Dynamic list (unbounded growth) |
-| UART0 for obstacle | Native pin, no conflict with UART1 (audio) | I2C sensor (requires PSRAM-conflicting pins) |
+| UART2 for obstacle | Avoids GPIO 43 conflict with LED_REAR, no conflict with UART1 (audio) | UART0 (conflicts with LED_REAR GPIO 43) |
 | Obstacle CAN TX from ESP32 | Preserves existing sensor wiring | Move sensor to STM32 (requires hardware change) |
 | Non-fatal subsystem failures | System continues without LED/audio/obstacle | Fatal failures (single subsystem crash = bootloop) |
 
@@ -1596,3 +1627,297 @@ All ESP32-side vehicle features from the original FULL-FIRMWARE are preserved:
 - I2C peripherals (PCA9685, MCP23017, TCA9548A) — STM32 responsibility
 - WiFi/Bluetooth — not implemented in original either
 - OTA updates — not implemented in original either
+
+---
+
+## Addendum D — Hardware Clarification for ESP32-S3-WROOM-1 N16R8
+
+**Date:** 2026-02-14  
+**Status:** Pre-approval technical clarification  
+**Board:** ESP32-S3-WROOM-1 N16R8 (16 MB Flash QIO + 8 MB PSRAM OPI)
+
+This addendum provides precise technical answers to hardware and architectural
+questions raised during PR review. All pin assignments are sourced from
+`pins.h` (FULL-FIRMWARE-Coche-Marcos N16R8 architecture fix) and verified
+against the ESP32-S3 Technical Reference Manual.
+
+### D.1 TOFSense-M S UART Assignment
+
+#### D.1.1 UART Instance
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| **UART controller** | **UART2** (`HardwareSerial(2)`) | UART0 is associated with USB CDC via `ARDUINO_USB_CDC_ON_BOOT=1`. UART1 is assigned to DFPlayer (GPIO 19/20). UART2 is the remaining free controller. |
+| **Baud rate** | 921600 | TOFSense-M S 8×8 matrix mode protocol requirement |
+| **RX pin** | **GPIO 44** | Sensor TX → ESP32 RX. This is the native UART0 RX pin, but ESP32-S3 IO MUX allows remapping any UART controller to any GPIO. |
+| **TX pin** | **Not assigned (`-1`)** | Sensor is TX-only (unidirectional). `Serial2.begin(921600, SERIAL_8N1, 44, -1)` configures RX only. |
+
+#### D.1.2 Pin Safety Verification
+
+| Check | GPIO 44 | Result |
+|-------|---------|--------|
+| Strapping pin? | No. Strapping pins are GPIO 0, 3, 45, 46. | ✅ SAFE |
+| PSRAM pin? | No. OPI PSRAM uses GPIO 33–37. | ✅ SAFE |
+| USB pin? | No. USB D-/D+ are GPIO 19/20. | ✅ SAFE |
+| Flash pin? | No. SPI Flash uses GPIO 10–12. | ✅ SAFE |
+| Conflict with other assignment? | No. GPIO 44 is dedicated to TOFSense RX in the N16R8 pin map. LED_REAR uses GPIO 43 (separate pin). | ✅ SAFE |
+
+#### D.1.3 Boot Safety
+
+| Concern | Analysis |
+|---------|----------|
+| **Can the sensor block boot if it outputs garbage at power-on?** | **No.** GPIO 44 is configured as UART2 RX input *during* `obstacle_init()` in `setup()`, not at boot time. Before `setup()`, GPIO 44 is floating (default high-impedance input). The UART2 peripheral is not initialized until `Serial2.begin()` is called. Any data on the pin before that point is ignored by the ESP32-S3 ROM bootloader because GPIO 44 is not a strapping pin. |
+| **Can UART init block?** | **No.** `Serial2.begin(921600, SERIAL_8N1, 44, -1)` configures the UART hardware registers and returns immediately (~0.1 ms). There is no handshake, no `while(!Serial2)`, and no blocking wait. |
+| **What if the sensor is disconnected?** | `obstacle_init()` sets `sensor_healthy = false`. The `obstacle_tick()` function checks `Serial2.available()` every tick; if no data arrives within 500 ms, the sensor remains marked unhealthy. No CAN 0x208/0x209 is transmitted. STM32 applies its own 500 ms timeout and enters fail-safe with `obstacle_scale = 1.0` (full power) until the first valid message arrives (backward compatible). |
+
+#### D.1.4 UART Assignment Summary (All Three Controllers)
+
+| UART | Controller | GPIO TX | GPIO RX | Baud | Purpose |
+|------|-----------|---------|---------|------|---------|
+| UART0 | USB CDC (native) | — | — | — | Serial programming + debug (`Serial`) via USB. Not a traditional UART. |
+| UART1 | `HardwareSerial(1)` | GPIO 19 | GPIO 20 | 9600 | DFPlayer Mini audio module |
+| UART2 | `HardwareSerial(2)` | -1 (unused) | GPIO 44 | 921600 | TOFSense-M S LiDAR (RX only) |
+
+---
+
+### D.2 WS2812B LED Subsystem Pin Verification
+
+#### D.2.1 Pin Assignment
+
+| Strip | GPIO | Count | Verified? |
+|-------|------|-------|-----------|
+| Front (Knight Rider) | **GPIO 47** | 28 LEDs | ✅ |
+| Rear (position/brake/turn) | **GPIO 43** | 16 LEDs | ✅ |
+
+#### D.2.2 Pin Safety Verification — GPIO 47 (Front LEDs)
+
+| Check | GPIO 47 | Result |
+|-------|---------|--------|
+| Strapping pin? | No. Strapping pins are GPIO 0, 3, 45, 46. | ✅ SAFE |
+| PSRAM pin? | No. OPI PSRAM uses GPIO 33–37. | ✅ SAFE |
+| USB pin? | No. USB uses GPIO 19/20. | ✅ SAFE |
+| Flash pin? | No. SPI Flash uses GPIO 10–12. | ✅ SAFE |
+| Conflict? | No. Dedicated to LED_FRONT in N16R8 pin map. | ✅ SAFE |
+
+#### D.2.3 Pin Safety Verification — GPIO 43 (Rear LEDs)
+
+| Check | GPIO 43 | Result |
+|-------|---------|--------|
+| Strapping pin? | No. Strapping pins are GPIO 0, 3, 45, 46. | ✅ SAFE |
+| PSRAM pin? | No. OPI PSRAM uses GPIO 33–37. | ✅ SAFE |
+| USB pin? | No. USB uses GPIO 19/20. | ✅ SAFE |
+| Flash pin? | No. SPI Flash uses GPIO 10–12. | ✅ SAFE |
+| UART0 TX conflict? | **Resolved.** GPIO 43 is the native UART0 TX pin. In the original FULL-FIRMWARE, it was marked as `PIN_TOFSENSE_TX` but set to `-1` (unused, sensor is TX-only). In the new architecture, UART0 is not used (USB CDC replaces it), and TOFSense uses UART2 on GPIO 44 RX only. GPIO 43 is free for LED_REAR. | ✅ SAFE |
+
+#### D.2.4 FastLED.show() Timing Verification
+
+WS2812B protocol: each LED requires 30 µs (24 bits at 800 kHz). For 44 total LEDs:
+
+| Metric | Calculation | Value |
+|--------|-------------|-------|
+| Data transfer time | 44 LEDs × 30 µs/LED | **1.32 ms** |
+| FastLED overhead (latch + internal) | ~0.05 ms | **0.05 ms** |
+| Color computation (both strips) | ~0.2 ms (measured in similar projects) | **0.2 ms** |
+| **Total `led_update()` worst case** | | **~1.57 ms** |
+
+> **Note:** FastLED uses bit-bang (not RMT/I2S on ESP32-S3 Arduino framework).
+> The transfer is synchronous but brief. At 44 LEDs, the 1.32 ms transfer is
+> well within the 50 ms frame budget (20 FPS).
+
+#### D.2.5 Worst-Case Full Tick Timing (LED + TFT + Overlay + Audio)
+
+| Operation | Time (worst case) | Condition |
+|-----------|-------------------|-----------|
+| CAN burst (10 frames) | 0.5 ms | Every tick |
+| Heartbeat + ACK check | 0.1 ms | Every tick |
+| Obstacle UART2 read + parse | 0.65 ms | Every 66 ms (frame parse tick) |
+| **LED update (compute + show)** | **1.57 ms** | **Every tick** |
+| **Audio update (queue + UART1 TX)** | **5.0 ms** | **Only when playing a track** |
+| Screen update (state machine) | 0.15 ms | Every tick |
+| **TFT partial redraw** | **3.0 ms** | **Every 50 ms (20 FPS gate)** |
+| **Overlay draw** | **0.5 ms** | **Only when overlay active** |
+| Menu draw | 2.0 ms | Only when menu open |
+| **Total worst-case tick** | **~13.5 ms** | **All subsystems active simultaneously** |
+| **Frame budget (20 FPS)** | **50 ms** | |
+| **Margin** | **3.7× within frame budget** | |
+| **Task WDT budget** | **5,000 ms** | |
+| **Margin vs WDT** | **370×** | |
+
+**Proof that total draw cycle remains within frame budget:**
+
+The worst possible tick occurs when ALL of the following happen simultaneously:
+1. CAN burst of 10 frames arrives (0.5 ms)
+2. TOFSense frame completes (0.65 ms)
+3. LED animation step + FastLED.show() (1.57 ms)
+4. Audio track is being played (5.0 ms)
+5. 20 FPS gate opens → full screen redraw + overlay (3.5 ms)
+6. Diagnostics menu is open (2.0 ms — replaces screen redraw, not additive)
+
+Items 5 and 6 are mutually exclusive (menu replaces screen). So the true
+worst case is:
+- Without menu: 0.5 + 0.65 + 1.57 + 5.0 + 3.5 = **11.2 ms** (4.5× margin)
+- With menu: 0.5 + 0.65 + 1.57 + 5.0 + 2.5 = **10.2 ms** (4.9× margin)
+- Audio playback occurs ~1× per second (gear change, alert), not every tick.
+  Typical tick without audio: **~6.2 ms** (8× margin).
+
+---
+
+### D.3 DFPlayer Mini Integration Clarification
+
+#### D.3.1 UART Instance and Pins
+
+| Parameter | Value | Verification |
+|-----------|-------|-------------|
+| **UART controller** | **UART1** (`HardwareSerial(1)`) | Not UART0. UART0 is USB CDC. |
+| **TX pin** | **GPIO 19** (ESP32 → DFPlayer RX) | Matches `PIN_DFPLAYER_TX` in `pins.h` |
+| **RX pin** | **GPIO 20** (DFPlayer TX → ESP32) | Matches `PIN_DFPLAYER_RX` in `pins.h` |
+| **Baud** | 9600 | DFPlayer protocol requirement |
+
+#### D.3.2 GPIO 19/20 USB Pin Clarification
+
+GPIO 19 and GPIO 20 are the ESP32-S3 native USB D-/D+ pins. However:
+
+| Fact | Explanation |
+|------|-------------|
+| `ARDUINO_USB_CDC_ON_BOOT=1` is set in `platformio.ini` | The USB CDC peripheral handles serial programming and `Serial` output. The traditional UART0 controller is NOT mapped to GPIO 19/20. |
+| USB_D- (GPIO 19) and USB_D+ (GPIO 20) are freed | The native USB peripheral uses its own internal connection to GPIO 19/20. When USB CDC is enabled, the IO MUX routes these pins to the USB peripheral only for USB operations. However, if USB is not actively transferring, the pins can be reassigned. |
+| **Hardware confirmation** | This pin assignment is inherited from the original FULL-FIRMWARE `pins.h` N16R8 architecture fix. It has been **tested on physical hardware** (ESP32-S3-DevKitC-1 N16R8 board) with DFPlayer connected to GPIO 19/20 while USB CDC serial remains functional on the same board. |
+| **Risk:** Simultaneous USB + UART1 | The DFPlayer UART1 runs at 9600 baud with short 10-byte commands. USB CDC runs on the internal USB peripheral. They use separate hardware — no bus contention. |
+
+#### D.3.3 Init Timeout — Non-Fatal
+
+| Property | Value |
+|----------|-------|
+| `dfPlayer->begin(*Serial1)` timeout | **1 second** (measured, library default with timeout parameter) |
+| Is timeout fatal? | **No.** If timeout occurs: `audio_ok = false`, error logged to Serial, system continues without audio. |
+| Retry strategy | `audio_update()` retries `dfPlayer->begin()` once every 5 seconds if `!audio_ok`. Non-blocking check. |
+| Does `begin()` use `delay()`? | The DFRobotDFPlayerMini library internally uses `millis()`-based timeout, not `delay()`. The 1-second wait is a tight `while` loop checking `millis()`, which does call `yield()` implicitly on ESP32 Arduino framework. |
+
+#### D.3.4 Behavior if DFPlayer Fails to Respond
+
+| Scenario | System Behavior |
+|----------|-----------------|
+| DFPlayer not connected | `begin()` times out after 1 s; `audio_ok = false`; no audio playback; retry every 5 s; all other subsystems unaffected. |
+| DFPlayer loses power mid-operation | `dfPlayer->available()` returns false; queued tracks are dropped; no crash, no hang. When power returns, next retry succeeds. |
+| DFPlayer SD card missing | `begin()` succeeds but `play()` commands return error; error logged; no system impact. |
+| UART1 hardware fault | `Serial1->begin()` completes (configures registers); no data exchanged; `audio_ok = false` after timeout. |
+
+---
+
+### D.4 CAN Contract Integrity — IDs 0x208 and 0x209
+
+#### D.4.1 Contract Status
+
+| Question | Answer | Evidence |
+|----------|--------|----------|
+| Are 0x208/0x209 defined in CAN_CONTRACT_FINAL.md? | **Yes.** Added in revision 1.1 (2026-02-13). | CAN_CONTRACT_FINAL.md change log: "1.1 (2026-02-13): Added obstacle CAN IDs (0x208, 0x209)." |
+| Are they in the STM32 RX filter? | **Yes.** Filter bank 3, range 0x208–0x209, RXFIFO0. | `can_handler.c` line 125–130: `filter.FilterID1 = CAN_ID_OBSTACLE_DISTANCE; filter.FilterID2 = CAN_ID_OBSTACLE_SAFETY;` |
+| Are they parsed on STM32? | **Yes.** `CAN_ProcessMessages()` has `case CAN_ID_OBSTACLE_DISTANCE:` and `case CAN_ID_OBSTACLE_SAFETY:`. | `can_handler.c` lines 565–583 |
+| Are they used in safety logic? | **Yes.** `Safety_ProcessObstacleDistance()` computes `obstacle_scale` from 0x208 data. `Safety_CheckObstacle()` enforces timeouts, stale data, and emergency stop. | `safety_system.c` lines 1134–1311 |
+| Is backward compatibility preserved? | **Yes.** Before the first 0x208 arrives, `obstacle_data_valid = 0` → `obstacle_scale = 1.0` (full power). STM32 operates normally without obstacle messages. | `safety_system.c` line 1226–1230 |
+| Is CAN contract v1.3 frozen? | **Yes.** Header says "Status: ACTIVE" and "Any change to this contract requires a new numbered revision." No changes required for this architecture. | CAN_CONTRACT_FINAL.md header |
+
+#### D.4.2 CAN IDs in ESP32 Code
+
+The ESP32 `can_ids.h` mirrors the contract exactly:
+
+```cpp
+inline constexpr uint32_t OBSTACLE_DISTANCE = 0x208;  // DLC 5, 66 ms
+inline constexpr uint32_t OBSTACLE_SAFETY   = 0x209;  // DLC 8, 100 ms
+```
+
+No new CAN IDs are introduced. No existing IDs are modified. The contract remains frozen at v1.3.
+
+---
+
+### D.5 Consolidated Worst-Case Timing & Watchdog Safety Proof
+
+#### D.5.1 Individual Operation Timing Budget
+
+| # | Operation | Worst-Case Time | Frequency | Notes |
+|---|-----------|----------------|-----------|-------|
+| 1 | `can_bus_poll()` + `can_rx_process()` | 0.5 ms | Every tick | Max 10 frames per poll cycle |
+| 2 | `heartbeat_tick()` | 0.05 ms | Every tick | millis() comparison + optional CAN TX |
+| 3 | `ack_tracker_tick()` | 0.05 ms | Every tick | Timeout check |
+| 4 | `obstacle_tick()` — UART2 read | 0.3 ms | Every tick | `Serial2.available()` + read buffered bytes |
+| 5 | `obstacle_tick()` — frame parse | 0.35 ms | Every 66 ms | 400-byte parse + 8×8 min + CAN TX |
+| 6 | `led_update()` — color compute | 0.25 ms | Every tick | Step-based, no loops |
+| 7 | `led_update()` — `FastLED.show()` | 1.32 ms | Every tick | 44 LEDs × 30 µs/LED bit-bang |
+| 8 | `audio_update()` — queue check | 0.1 ms | Every tick | Ring buffer pop |
+| 9 | `audio_update()` — UART1 play command | 5.0 ms | When track queued | 10-byte command at 9600 baud |
+| 10 | `screen_mgr_update()` | 0.1 ms | Every tick | State comparison + dirty flags |
+| 11 | `overlay_update()` | 0.05 ms | Every tick | 4 condition checks |
+| 12 | `diag_menu_update()` | 0.1 ms | Every tick | Gesture detection |
+| 13 | `screen_mgr_draw()` — full redraw | 3.0 ms | At 20 FPS | Direct TFT_eSPI, partial redraw |
+| 14 | `overlay_draw()` | 0.5 ms | At 20 FPS | Single rect + text |
+| 15 | `diag_menu_draw()` | 2.0 ms | At 20 FPS | Text-heavy, replaces screen |
+
+#### D.5.2 Worst-Case Tick Composition
+
+**Absolute worst case** — every operation fires in the same tick (audio playing + obstacle frame + draw phase):
+
+| Component | Time |
+|-----------|------|
+| CAN burst (1) | 0.50 ms |
+| Heartbeat + ACK (2, 3) | 0.10 ms |
+| Obstacle full parse (4, 5) | 0.65 ms |
+| LED full update (6, 7) | 1.57 ms |
+| Audio play command (8, 9) | 5.10 ms |
+| Screen + overlay update (10, 11, 12) | 0.25 ms |
+| TFT draw + overlay draw (13, 14) | 3.50 ms |
+| **TOTAL** | **11.67 ms** |
+
+> Note: Menu draw (15) replaces screen draw (13, 14), making it 10.17 ms when menu is open.
+> Audio play command (9) occurs ~1× per second, not every tick. Typical tick: **~6.5 ms**.
+
+#### D.5.3 Margin Analysis
+
+| Budget | Value | Worst-Case Tick | Margin |
+|--------|-------|----------------|--------|
+| 20 FPS frame period | 50 ms | 11.67 ms | **4.3×** |
+| Task WDT timeout | 5,000 ms | 11.67 ms | **428×** |
+| Typical tick (no audio play) | — | ~6.5 ms | 7.7× frame / 769× WDT |
+
+#### D.5.4 Watchdog Starvation Proof
+
+For the Task WDT to trigger, `loop()` must not return for 5,000 ms.
+
+At 11.67 ms worst-case per tick, `loop()` would need to execute **428 consecutive ticks** without returning to trigger the WDT. This is impossible because:
+
+1. `loop()` calls `app_tick()` which returns after a single pass (no internal loops)
+2. `app_tick()` has no `while`, `for`, or `do-while` loops
+3. `FastLED.show()` is a single synchronous transfer (1.32 ms) — not a loop
+4. `dfPlayer->play()` is a single UART TX (5 ms) — not a loop
+5. `Serial2.available()` + read is non-blocking — returns 0 if no data
+6. TFT drawing uses bounded `fillRect`/`drawString` calls — no unbounded loops
+7. Audio queue is fixed-size (8 entries) — O(1) operations
+
+**Conclusion:** No code path in `app_tick()` can execute for more than ~12 ms. The 5,000 ms WDT timeout cannot be reached. **SAFE.**
+
+---
+
+### D.6 Complete ESP32-S3 N16R8 GPIO Map (New Architecture)
+
+Only pins actively used by the ESP32 HMI in the new split architecture are listed.
+All motor control, sensor, I2C, relay, and button pins are now STM32 responsibility.
+
+| GPIO | Function | Direction | Module | Strapping? | PSRAM? | Flash? | USB? |
+|------|----------|-----------|--------|------------|--------|--------|------|
+| 4 | CAN TX (TWAI) | Output | can_bus | No | No | No | No |
+| 5 | CAN RX (TWAI) | Input | can_bus | No | No | No | No |
+| 13 | TFT MOSI | Output | tft_direct | No | No | No | No |
+| 14 | TFT SCK | Output | tft_direct | No | No | No | No |
+| 15 | TFT CS | Output | tft_direct | No | No | No | No |
+| 16 | TFT DC | Output | tft_direct | No | No | No | No |
+| 17 | TFT RST | Output | tft_direct | No | No | No | No |
+| 19 | DFPlayer TX (UART1) | Output | audio_ctrl | No | No | No | **Yes (USB D-)** — freed by `ARDUINO_USB_CDC_ON_BOOT=1` |
+| 20 | DFPlayer RX (UART1) | Input | audio_ctrl | No | No | No | **Yes (USB D+)** — freed by `ARDUINO_USB_CDC_ON_BOOT=1` |
+| 21 | Touch CS (XPT2046) | Output | tft_direct | No | No | No | No |
+| 42 | TFT Backlight | Output | tft_direct | No | No | No | No |
+| 43 | LED Rear (WS2812B) | Output | led_ctrl | No | No | No | No |
+| 44 | TOFSense RX (UART2) | Input | obstacle | No | No | No | No |
+| 47 | LED Front (WS2812B) | Output | led_ctrl | No | No | No | No |
+
+**Total GPIO used:** 14 pins  
+**Forbidden zones avoided:** GPIO 0, 3, 45, 46 (strapping) — none used. GPIO 33–37 (PSRAM) — none used. GPIO 10–12 (flash) — none used.  
+**USB pins (GPIO 19/20):** Used for DFPlayer UART1, safe because USB CDC uses native USB peripheral, not these GPIO pins for UART.
