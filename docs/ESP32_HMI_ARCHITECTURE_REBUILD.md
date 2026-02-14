@@ -1210,31 +1210,33 @@ loop()
 
 | Operation | Time (worst case) | Notes |
 |-----------|-------------------|-------|
-| `can_bus_poll()` + `can_rx_process()` | 0.5 ms | Max 10 frames per poll |
+| `can_bus_poll()` + `can_rx_process()` | 0.50 ms | Max 10 frames per poll |
 | `heartbeat_tick()` | 0.05 ms | Simple timestamp comparison |
 | `ack_tracker_tick()` | 0.05 ms | Simple timeout check |
-| `obstacle_tick()` (UART read + parse) | 0.65 ms | 400-byte frame parse at 15 Hz |
-| `led_update()` (compute + FastLED.show) | 1.5 ms | 44 LEDs, bit-bang SPI |
-| `audio_update()` (queue + UART TX) | 5.0 ms | 9600 baud command (worst case) |
-| `screen_mgr_update()` | 0.1 ms | State comparison + dirty flags |
+| `obstacle_tick()` (UART2 read + parse) | 0.65 ms | 400-byte frame parse at 15 Hz |
+| `led_update()` (compute + FastLED.show) | 1.57 ms | 44 LEDs × 30 µs + compute |
+| `audio_update()` (queue + UART1 TX) | 5.10 ms | 9600 baud command (worst case) |
+| `screen_mgr_update()` | 0.10 ms | State comparison + dirty flags |
 | `overlay_update()` | 0.05 ms | Heartbeat + obstacle timeout check |
-| `diag_menu_update()` | 0.1 ms | Gesture detection |
-| `screen_mgr_draw()` (full redraw) | 3.0 ms | Direct TFT, 320×480, partial |
-| `overlay_draw()` | 0.5 ms | Single rect + text |
-| `diag_menu_draw()` | 2.0 ms | Text-heavy, no graphics |
-| **Total worst-case tick** | **~13.5 ms** | **370× margin vs 5 s WDT** |
+| `diag_menu_update()` | 0.10 ms | Gesture detection |
+| `screen_mgr_draw()` (full redraw) | 3.00 ms | Direct TFT, 320×480, partial |
+| `overlay_draw()` | 0.50 ms | Single rect + text |
+| `diag_menu_draw()` | 2.00 ms | Text-heavy, replaces screen draw |
+| **Total worst-case tick** | **~11.7 ms** | **428× margin vs 5 s WDT** |
 
-> **Note:** The audio UART TX (5 ms) occurs only when a track is being played,
-> not every tick. Typical tick without audio playback is ~8.5 ms.
+> **Note:** `screen_mgr_draw()` and `diag_menu_draw()` are mutually exclusive
+> (menu replaces screen). The 11.7 ms figure uses screen + overlay (3.5 ms).
+> With menu instead: 10.2 ms. Audio UART TX (5.1 ms) occurs only when a track
+> is being played, not every tick. Typical tick without audio: ~6.5 ms.
 
 #### Watchdog Safety Verdict
 
 | Scenario | Time Budget | Actual Time | Margin |
 |----------|-------------|-------------|--------|
 | Normal frame (partial redraw, no audio) | 50 ms (20 FPS) | ~6.5 ms | 7.7× |
-| Full screen transition + audio + LED | 50 ms (20 FPS) | ~13.5 ms | 3.7× |
+| Full screen transition + audio + LED | 50 ms (20 FPS) | ~11.7 ms | 4.3× |
 | CAN burst (30 frames) + obstacle parse | 50 ms (20 FPS) | ~10 ms | 5× |
-| Task WDT timeout | 5,000 ms | ~13.5 ms | 370× |
+| Task WDT timeout | 5,000 ms | ~11.7 ms | 428× |
 | **Verdict** | | | **SAFE** |
 
 ### 7.5 Render Pipeline Diagram
@@ -1431,7 +1433,7 @@ loop()
 | **Heap fragmentation** | HIGH — Dynamic allocation in `loop()`, String usage | ZERO — All allocations are static/permanent (except 2 init-time `new`) | Eliminates risk |
 | **Sprite exhaustion** | HIGH — 300 KB+ per sprite, multiple sprites | ZERO — No sprites used | Eliminates risk |
 | **Static init order** | CRITICAL — 7+ global singletons with cross-dependencies | SAFE — Zero global objects with constructors | Eliminates risk |
-| **Watchdog starvation** | HIGH — 15+ seconds of blocking delays possible | SAFE — Max 13.5 ms per tick, 370× margin | 370× improvement |
+| **Watchdog starvation** | HIGH — 15+ seconds of blocking delays possible | SAFE — Max 11.7 ms per tick, 428× margin | 428× improvement |
 | **Stack overflow** | MEDIUM — 6+ call levels in render chain | LOW — Max 4 call levels, ~736 bytes peak | 3× stack margin improvement |
 | **Multi-core races** | HIGH — 5 FreeRTOS tasks across 2 cores with shared data | NONE — Single-core, single-task execution | Eliminates risk |
 | **Render pipeline depth** | 6 levels (Manager→Compositor→Layer→Engine→SafeDraw→TFT) | 3 levels (ScreenMgr→ScreenDraw→TFT) | 50% reduction |
@@ -1737,28 +1739,30 @@ WS2812B protocol: each LED requires 30 µs (24 bits at 800 kHz). For 44 total LE
 | **TFT partial redraw** | **3.0 ms** | **Every 50 ms (20 FPS gate)** |
 | **Overlay draw** | **0.5 ms** | **Only when overlay active** |
 | Menu draw | 2.0 ms | Only when menu open |
-| **Total worst-case tick** | **~13.5 ms** | **All subsystems active simultaneously** |
+| **Total worst-case tick** | **~11.7 ms** | **All subsystems active simultaneously** |
 | **Frame budget (20 FPS)** | **50 ms** | |
-| **Margin** | **3.7× within frame budget** | |
+| **Margin** | **4.3× within frame budget** | |
 | **Task WDT budget** | **5,000 ms** | |
-| **Margin vs WDT** | **370×** | |
+| **Margin vs WDT** | **428×** | |
 
 **Proof that total draw cycle remains within frame budget:**
 
 The worst possible tick occurs when ALL of the following happen simultaneously:
-1. CAN burst of 10 frames arrives (0.5 ms)
-2. TOFSense frame completes (0.65 ms)
-3. LED animation step + FastLED.show() (1.57 ms)
-4. Audio track is being played (5.0 ms)
-5. 20 FPS gate opens → full screen redraw + overlay (3.5 ms)
-6. Diagnostics menu is open (2.0 ms — replaces screen redraw, not additive)
+1. CAN burst of 10 frames arrives (0.50 ms)
+2. Heartbeat + ACK (0.10 ms)
+3. TOFSense frame completes (0.65 ms)
+4. LED animation step + FastLED.show() (1.57 ms)
+5. Audio track is being played (5.10 ms)
+6. Screen state + overlay + menu update (0.25 ms)
+7. 20 FPS gate opens → full screen redraw + overlay (3.50 ms)
+8. Diagnostics menu is open (2.00 ms — replaces screen redraw, not additive)
 
-Items 5 and 6 are mutually exclusive (menu replaces screen). So the true
+Items 7 and 8 are mutually exclusive (menu replaces screen). So the true
 worst case is:
-- Without menu: 0.5 + 0.65 + 1.57 + 5.0 + 3.5 = **11.2 ms** (4.5× margin)
-- With menu: 0.5 + 0.65 + 1.57 + 5.0 + 2.5 = **10.2 ms** (4.9× margin)
+- Without menu: 0.50 + 0.10 + 0.65 + 1.57 + 5.10 + 0.25 + 3.50 = **11.67 ms** (4.3× margin)
+- With menu:    0.50 + 0.10 + 0.65 + 1.57 + 5.10 + 0.25 + 2.00 = **10.17 ms** (4.9× margin)
 - Audio playback occurs ~1× per second (gear change, alert), not every tick.
-  Typical tick without audio: **~6.2 ms** (8× margin).
+  Typical tick without audio: **~6.6 ms** (7.6× margin).
 
 ---
 
