@@ -1,13 +1,16 @@
 // =============================================================================
-// ESP32-S3 HMI Firmware — CAN Bring-Up
+// ESP32-S3 HMI Firmware — CAN Bring-Up + TFT Display
 //
 // Framework:  Arduino (C++17)
 // Board:      ESP32-S3-DevKitC-1
+// Display:    320×480 TFT via TFT_eSPI (ST7796)
 // Reference:  docs/CAN_CONTRACT_FINAL.md rev 1.3
+//             docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
 
 #include <Arduino.h>
 #include <ESP32-TWAI-CAN.hpp>
+#include <TFT_eSPI.h>
 #include "can_ids.h"
 #include "can_rx.h"
 #include "vehicle_data.h"
@@ -16,6 +19,9 @@
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
+
+// Global TFT instance — used by all screens via extern
+TFT_eSPI tft = TFT_eSPI();
 
 static vehicle::VehicleData vehicleData;
 static ScreenManager screenManager;
@@ -74,6 +80,14 @@ void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
+
+    // Initialize TFT display
+    tft.init();
+    tft.setRotation(0);  // Portrait mode
+    tft.fillScreen(0x2104);  // Dark gray background
+    tft.setTextColor(0xFFFF, 0x2104);
+    tft.setTextSize(1);
+    Serial.println("[TFT] Display initialized (320x480)");
 
     ESP32Can.setPins(CAN_TX_PIN, CAN_RX_PIN);
     ESP32Can.setRxQueueSize(5);
