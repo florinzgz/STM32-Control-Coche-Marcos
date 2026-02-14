@@ -135,7 +135,6 @@ inline constexpr int16_t PEDAL_BAR_X    = 10;
 inline constexpr int16_t PEDAL_BAR_W    = 380;
 inline constexpr int16_t PEDAL_BAR_H    = 16;
 inline constexpr int16_t PEDAL_TEXT_X   = 400;
-inline constexpr int16_t PEDAL_ARROW_X  = 450;
 
 // -------------------------------------------------------------------------
 // Format buffer sizes (all on stack, no heap)
