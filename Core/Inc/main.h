@@ -96,6 +96,7 @@ extern IWDG_HandleTypeDef hiwdg;
 
 void Error_Handler(void);
 void SystemClock_Config(void);
+uint8_t Boot_GetResetCause(void);
 
 #ifdef __cplusplus
 }

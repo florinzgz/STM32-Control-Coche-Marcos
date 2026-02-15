@@ -9,6 +9,7 @@
 // =============================================================================
 
 #include <Arduino.h>
+#include <esp_system.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <TFT_eSPI.h>
 #include "can_ids.h"
@@ -84,6 +85,20 @@ static void ackCheck(const vehicle::VehicleData& data) {
 void setup() {
     Serial.begin(115200);
     delay(500);
+
+    // Reset cause reporting
+    Serial.printf("[HMI] Reset reason: %s\n",
+        esp_reset_reason() == ESP_RST_POWERON  ? "PowerOn" :
+        esp_reset_reason() == ESP_RST_SW       ? "Software" :
+        esp_reset_reason() == ESP_RST_PANIC    ? "Panic" :
+        esp_reset_reason() == ESP_RST_INT_WDT  ? "Watchdog(INT)" :
+        esp_reset_reason() == ESP_RST_TASK_WDT ? "Watchdog(TASK)" :
+        esp_reset_reason() == ESP_RST_WDT      ? "Watchdog(OTHER)" :
+        esp_reset_reason() == ESP_RST_BROWNOUT ? "Brownout" :
+        esp_reset_reason() == ESP_RST_SDIO     ? "SDIO" :
+        esp_reset_reason() == ESP_RST_DEEPSLEEP ? "DeepSleep" :
+                                                  "Unknown");
+
     Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
 
     // Initialize TFT display

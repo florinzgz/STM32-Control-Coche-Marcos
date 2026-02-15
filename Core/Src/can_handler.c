@@ -156,18 +156,24 @@ void CAN_Init(void) {
     busoff_active       = 0;
     busoff_last_attempt = 0;
     busoff_retry_count  = 0;
+
+    /* Skip hardware activation if FDCAN peripheral init failed.
+     * System continues without CAN — Safety_CheckCANTimeout() will
+     * detect the missing heartbeat and keep the system in STANDBY.  */
+    extern bool fdcan_init_ok;
+    if (!fdcan_init_ok) return;
     
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
 
     /* Enable RX FIFO0 new message notifications */
     if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
-        Error_Handler();
+        return;  /* Non-fatal: CAN disabled, safety timeout will engage */
     }
     
     /* Start FDCAN peripheral */
     if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
-        Error_Handler();
+        return;  /* Non-fatal: CAN disabled, safety timeout will engage */
     }
 }
 

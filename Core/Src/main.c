@@ -30,6 +30,45 @@ TIM_HandleTypeDef   htim1, htim2, htim8;
 ADC_HandleTypeDef   hadc1;
 IWDG_HandleTypeDef  hiwdg;
 
+/* ---- Reset cause (read once at boot, before IWDG clears flags) ---- */
+static uint8_t reset_cause = 0;
+#define RESET_CAUSE_POWERON   (1U << 0)
+#define RESET_CAUSE_SOFTWARE  (1U << 1)
+#define RESET_CAUSE_IWDG      (1U << 2)
+#define RESET_CAUSE_WWDG      (1U << 3)
+#define RESET_CAUSE_BROWNOUT   (1U << 4)
+#define RESET_CAUSE_PIN        (1U << 5)
+
+/**
+ * @brief  Read RCC_CSR reset flags and clear them.
+ *         Must be called before MX_IWDG_Init() (IWDG start clears some flags).
+ */
+static void Boot_ReadResetCause(void)
+{
+    uint32_t csr = RCC->CSR;
+
+    reset_cause = 0;
+    if (csr & RCC_CSR_LPWRRSTF)  reset_cause |= RESET_CAUSE_BROWNOUT;
+    if (csr & RCC_CSR_WWDGRSTF)  reset_cause |= RESET_CAUSE_WWDG;
+    if (csr & RCC_CSR_IWDGRSTF)  reset_cause |= RESET_CAUSE_IWDG;
+    if (csr & RCC_CSR_SFTRSTF)   reset_cause |= RESET_CAUSE_SOFTWARE;
+    if (csr & RCC_CSR_BORRSTF)   reset_cause |= RESET_CAUSE_BROWNOUT;
+    if (csr & RCC_CSR_PINRSTF)   reset_cause |= RESET_CAUSE_PIN;
+
+    /* If only PIN reset flag is set → power-on reset */
+    if (reset_cause == RESET_CAUSE_PIN)
+        reset_cause = RESET_CAUSE_POWERON;
+
+    /* Clear all reset flags */
+    __HAL_RCC_CLEAR_RESET_FLAGS();
+}
+
+uint8_t Boot_GetResetCause(void) { return reset_cause; }
+
+/* ---- Peripheral init status flags ---- */
+bool fdcan_init_ok = false;
+bool i2c_init_ok   = false;
+
 /* ---- Private prototypes ---- */
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -46,6 +85,10 @@ static void MX_IWDG_Init(void);
 int main(void)
 {
     HAL_Init();
+
+    /* Read reset cause before IWDG start (which clears some flags) */
+    Boot_ReadResetCause();
+
     SystemClock_Config();
 
     /* Peripheral initialisation */
@@ -319,8 +362,10 @@ static void MX_FDCAN1_Init(void)
     hfdcan1.Init.TransmitPause        = DISABLE;
     hfdcan1.Init.ProtocolException    = DISABLE;
     if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
-        Error_Handler();
+        fdcan_init_ok = false;
+        return;  /* Non-fatal: system continues without CAN */
     }
+    fdcan_init_ok = true;
 }
 
 static void MX_I2C1_Init(void)
@@ -333,8 +378,10 @@ static void MX_I2C1_Init(void)
     hi2c1.Init.GeneralCallMode  = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode    = I2C_NOSTRETCH_DISABLE;
     if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
-        Error_Handler();
+        i2c_init_ok = false;
+        return;  /* Non-fatal: sensors unavailable, system continues */
     }
+    i2c_init_ok = true;
 }
 
 static void MX_TIM1_Init(void)
