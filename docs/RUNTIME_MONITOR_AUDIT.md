@@ -102,8 +102,8 @@ Therefore: overlay drawing is **not counted** in frame timing and **cannot affec
 
 - Dirty flag (battery): `curBattVoltRaw_ != prevBattVoltRaw_` → `drive_screen.cpp:198`
 - RTMON: `RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR)` → `drive_screen.cpp:199`
-- Dirty flag (mode icons): `curMode_.is4x4 != prevMode_.is4x4 || curMode_.isTankTurn != prevMode_.isTankTurn` → `drive_screen.cpp:218`
-- RTMON: `RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR)` → `drive_screen.cpp:219`
+- Dirty flag (mode icons): `curMode_.is4x4 != prevMode_.is4x4 || curMode_.isTankTurn != prevMode_.isTankTurn` → `drive_screen.cpp:216`
+- RTMON: `RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR)` → `drive_screen.cpp:217`
 
 ### obstacle
 
@@ -151,9 +151,9 @@ Therefore: overlay drawing is **not counted** in frame timing and **cannot affec
 
 ### Previous BUG (now fixed)
 
-ModeIcons at `drive_screen.cpp:216` (original line) could redraw when `curMode_ != prevMode_` without `RTMON_ZONE_REDRAW(TOP_BAR)`.
+ModeIcons at `drive_screen.cpp:219` (original line 216 before fix) could redraw when `curMode_ != prevMode_` without `RTMON_ZONE_REDRAW(TOP_BAR)`.
 
-**Fix applied:** Added dirty check + `RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR)` before `ModeIcons::draw()` at `drive_screen.cpp:218-219`.
+**Fix applied:** Added dirty check + `RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR)` before `ModeIcons::draw()` at `drive_screen.cpp:216-217`.
 
 No remaining uncounted redraws. ✔
 
