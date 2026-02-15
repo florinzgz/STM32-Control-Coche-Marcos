@@ -75,12 +75,8 @@ Reset → setup()
 | LSI frequency | ~32 kHz | |
 | Prescaler | 32 | |
 | Reload | 4095 | |
-| **Timeout** | **~500 ms** | 4095 × 32 / 32000 = 4.095 s? No: 4095 / (32000/32) = **4.095 s** |
+| **Timeout** | **~4.1 s** | 4095 / (32000/32) ≈ 4095 ms |
 | Kick location | Main loop, every iteration | `HAL_IWDG_Refresh(&hiwdg)` at line 245 |
-
-> **Correction**: At prescaler 32 and reload 4095, the actual timeout is:
-> `4095 / (32000 / 32) = 4095 / 1000 ≈ 4.1 seconds`
-> This provides generous margin for the ~10 ms worst-case loop iteration.
 
 ### Worst-Case Loop Time Analysis
 

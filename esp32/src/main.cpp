@@ -87,17 +87,18 @@ void setup() {
     delay(500);
 
     // Reset cause reporting
+    esp_reset_reason_t reason = esp_reset_reason();
     Serial.printf("[HMI] Reset reason: %s\n",
-        esp_reset_reason() == ESP_RST_POWERON  ? "PowerOn" :
-        esp_reset_reason() == ESP_RST_SW       ? "Software" :
-        esp_reset_reason() == ESP_RST_PANIC    ? "Panic" :
-        esp_reset_reason() == ESP_RST_INT_WDT  ? "Watchdog(INT)" :
-        esp_reset_reason() == ESP_RST_TASK_WDT ? "Watchdog(TASK)" :
-        esp_reset_reason() == ESP_RST_WDT      ? "Watchdog(OTHER)" :
-        esp_reset_reason() == ESP_RST_BROWNOUT ? "Brownout" :
-        esp_reset_reason() == ESP_RST_SDIO     ? "SDIO" :
-        esp_reset_reason() == ESP_RST_DEEPSLEEP ? "DeepSleep" :
-                                                  "Unknown");
+        reason == ESP_RST_POWERON  ? "PowerOn" :
+        reason == ESP_RST_SW       ? "Software" :
+        reason == ESP_RST_PANIC    ? "Panic" :
+        reason == ESP_RST_INT_WDT  ? "Watchdog(INT)" :
+        reason == ESP_RST_TASK_WDT ? "Watchdog(TASK)" :
+        reason == ESP_RST_WDT      ? "Watchdog(OTHER)" :
+        reason == ESP_RST_BROWNOUT ? "Brownout" :
+        reason == ESP_RST_SDIO     ? "SDIO" :
+        reason == ESP_RST_DEEPSLEEP ? "DeepSleep" :
+                                      "Unknown");
 
     Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
 

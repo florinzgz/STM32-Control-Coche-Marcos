@@ -48,6 +48,9 @@ static void Boot_ReadResetCause(void)
     uint32_t csr = RCC->CSR;
 
     reset_cause = 0;
+    /* LPWRSTF and BORRSTF are both mapped to BROWNOUT intentionally:
+     * both indicate power-supply issues and require the same diagnostic
+     * response.  Separate flags would not change the recovery action.   */
     if (csr & RCC_CSR_LPWRRSTF)  reset_cause |= RESET_CAUSE_BROWNOUT;
     if (csr & RCC_CSR_WWDGRSTF)  reset_cause |= RESET_CAUSE_WWDG;
     if (csr & RCC_CSR_IWDGRSTF)  reset_cause |= RESET_CAUSE_IWDG;
