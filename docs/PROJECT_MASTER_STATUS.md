@@ -52,6 +52,7 @@ The STM32 is the **safety authority** and sole actuator controller. All actuator
 | Demand anomaly detection (step-rate, frozen pedal) | Logic in `Traction_SetDemand()` | `Core/Src/motor_control.c` |
 | NaN/Inf float sanitization | `sanitize_float()` | `Core/Src/motor_control.c`, `Core/Src/can_handler.c` |
 | Ackermann differential torque correction | `compute_ackermann_differential()` | `Core/Src/motor_control.c` |
+| Encoder read-only interface (hardware integrated, not used for control) | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
 
 ### ESP32-S3 Responsibilities
 
@@ -189,6 +190,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Status TX: speed, current, temp, safety, steering, traction, temp map, battery | `CAN_SendStatus*()` family | `Core/Src/can_handler.c` |
 | Command ACK TX (0x103, result + system state) | `CAN_SendCommandAck()` | `Core/Src/can_handler.c` |
 | Service status TX (fault/enabled/disabled bitmasks, 0x301–0x303) | `CAN_SendServiceStatus()` | `Core/Src/can_handler.c` |
+| Encoder diagnostic TX (0x300, tag 0x10, raw count + delta, 1 Hz) | `CAN_SendDiagnosticEncoder()` | `Core/Src/can_handler.c` |
 | RX message processing (throttle, steering, mode/gear, service, obstacle) | `CAN_ProcessMessages()` switch-case | `Core/Src/can_handler.c` |
 | Bus-off statistics tracking | `can_stats.busoff_count` | `Core/Src/can_handler.c` |
 | ESP32 CAN RX decoding (all STM32 status IDs) | `can_rx::poll()` | `esp32/src/can_rx.cpp` |
@@ -222,6 +224,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | 5× DS18B20 temperature via OneWire (bit-bang, ROM search, CRC-8) | `OW_SearchAll()`, `OW_ReadTemperature()`, `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` |
 | I2C bus recovery (NXP AN10216, SCL cycling, 16 toggles) | `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` |
 | I2C failure escalation (3 fails → recovery, 2 recoveries → SAFE) | `i2c_fail_count`, `i2c_recovery_attempts` logic | `Core/Src/sensor_manager.c` |
+| E6B2-CWZ6C encoder read-only interface (hardware integrated, not used for control) | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_Reset()` | `Core/Src/encoder_reader.c` |
+| Encoder raw count CAN diagnostic (0x300, 1 Hz, tag 0x10) | `Encoder_SendDiagnostic()` → `CAN_SendDiagnosticEncoder()` | `Core/Src/encoder_reader.c`, `Core/Src/can_handler.c` |
 
 ### Audio
 
@@ -277,6 +281,7 @@ NOT IMPLEMENTED — no lighting hardware or software exists in the codebase.
 | **I2C bus recovery uses busy-wait delays** — ~160 µs total, but blocking | NOP loops in `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` lines 177–203 |
 | **ESP32 obstacle source not yet implemented** — STM32 accepts obstacle data (0x208) but ESP32 source code does not contain obstacle sensor driver or ultrasonic sensor reading | No obstacle sensor reading code in `esp32/src/` | `esp32/src/` directory |
 | **Service mode state is RAM-only** — module enable/disable settings lost on power cycle | `module_enabled[]` is static array, no NVM storage | `Core/Src/service_mode.c` |
+| **Encoder reader module is observation-only** — `encoder_reader.c` provides raw count access and CAN diagnostics but is not connected to any control, odometry, speed, traction, braking, or steering logic | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
 
 ---
 

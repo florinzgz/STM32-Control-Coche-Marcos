@@ -357,6 +357,32 @@ void CAN_SendError(uint8_t error_code, uint8_t subsystem) {
 }
 
 /**
+ * @brief  Send raw encoder diagnostic data over CAN.
+ *
+ * Uses CAN_ID_DIAG_ERROR (0x300) with a dedicated subsystem tag
+ * (0x10) to distinguish from regular error reports.  Diagnostic
+ * only — not part of any control path.
+ *
+ *   Byte 0:    0x10 (encoder diagnostic tag)
+ *   Byte 1:    reserved (0)
+ *   Byte 2-5:  raw_count (int32_t, little-endian)
+ *   Byte 6-7:  delta     (int16_t, little-endian)
+ */
+void CAN_SendDiagnosticEncoder(int32_t raw_count, int16_t delta) {
+    uint8_t data[8];
+    data[0] = 0x10;  /* Encoder diagnostic subsystem tag */
+    data[1] = 0;
+    data[2] = (uint8_t)( raw_count        & 0xFF);
+    data[3] = (uint8_t)((raw_count >>  8) & 0xFF);
+    data[4] = (uint8_t)((raw_count >> 16) & 0xFF);
+    data[5] = (uint8_t)((raw_count >> 24) & 0xFF);
+    data[6] = (uint8_t)( delta       & 0xFF);
+    data[7] = (uint8_t)((delta >> 8) & 0xFF);
+
+    TransmitFrame(CAN_ID_DIAG_ERROR, data, 8);
+}
+
+/**
  * @brief  Send command acknowledgment to ESP32.
  *
  * Transmits a 3-byte ACK frame after the STM32 has validated
