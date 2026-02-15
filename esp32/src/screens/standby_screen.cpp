@@ -59,7 +59,7 @@ void StandbyScreen::draw() {
         // Fault flags header
         tft.setTextDatum(MC_DATUM);
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("FAULT FLAGS", ui::SCREEN_W / 2, 310);
+        tft.drawString("FAULT FLAGS", ui::SCREEN_W / 2, 290);
 
         tft.setTextDatum(TL_DATUM);
 
@@ -86,19 +86,19 @@ void StandbyScreen::draw() {
     if (faultFlags_ != prevFaultFlags_) {
         prevFaultFlags_ = faultFlags_;
 
-        tft.fillRect(40, 330, 240, 20, ui::COL_BG);
+        tft.fillRect(40, 300, 240, 20, ui::COL_BG);
 
         tft.setTextDatum(MC_DATUM);
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.setTextSize(1);
-            tft.drawString("NO FAULTS", ui::SCREEN_W / 2, 340);
+            tft.drawString("NO FAULTS", ui::SCREEN_W / 2, 308);
         } else {
             char buf[ui::FMT_BUF_MED];
             snprintf(buf, sizeof(buf), "FLAGS: 0x%02X", faultFlags_);
             tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
             tft.setTextSize(1);
-            tft.drawString(buf, ui::SCREEN_W / 2, 340);
+            tft.drawString(buf, ui::SCREEN_W / 2, 308);
         }
         tft.setTextDatum(TL_DATUM);
     }

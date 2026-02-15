@@ -8,6 +8,7 @@
 // =============================================================================
 
 #include "screen_manager.h"
+#include "ui/runtime_monitor.h"
 
 ScreenManager::ScreenManager()
     : currentScreen_(&bootScreen_)
@@ -33,7 +34,11 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 
     // Only draw at frame-limited rate
     if (frameLimiter_.shouldDraw()) {
+        RTMON_FRAME_BEGIN();
+        RTMON_RENDER_BEGIN();
         currentScreen_->draw();
+        RTMON_RENDER_END();
+        RTMON_FRAME_END();
     }
 }
 

@@ -40,18 +40,17 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(3);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString("SYSTEM", ui::SCREEN_W / 2, 60);
-        tft.drawString("ERROR", ui::SCREEN_W / 2, 100);
+        tft.drawString("SYSTEM ERROR", ui::SCREEN_W / 2, 40);
 
         // Manual reset instruction
         tft.setTextSize(1);
-        tft.drawString("Manual reset required", ui::SCREEN_W / 2, 160);
+        tft.drawString("Manual reset required", ui::SCREEN_W / 2, 80);
 
         // Labels
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
-        tft.drawString("FAULT FLAGS", ui::SCREEN_W / 2, 220);
-        tft.drawString("SAFETY ERROR", ui::SCREEN_W / 2, 300);
-        tft.drawString("DIAGNOSTIC", ui::SCREEN_W / 2, 380);
+        tft.drawString("FAULT FLAGS", ui::SCREEN_W / 2, 110);
+        tft.drawString("SAFETY ERROR", ui::SCREEN_W / 2, 170);
+        tft.drawString("DIAGNOSTIC", ui::SCREEN_W / 2, 230);
 
         tft.setTextDatum(TL_DATUM);
 
@@ -67,11 +66,11 @@ void ErrorScreen::draw() {
         char buf[ui::FMT_BUF_MED];
         snprintf(buf, sizeof(buf), "0x%02X", faultFlags_);
 
-        tft.fillRect(60, 240, 200, 30, ui::COL_RED);
+        tft.fillRect(60, 125, 200, 30, ui::COL_RED);
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString(buf, ui::SCREEN_W / 2, 255);
+        tft.drawString(buf, ui::SCREEN_W / 2, 140);
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
     }
@@ -83,11 +82,11 @@ void ErrorScreen::draw() {
         char buf[ui::FMT_BUF_MED];
         snprintf(buf, sizeof(buf), "Code: %u", errorCode_);
 
-        tft.fillRect(60, 320, 200, 30, ui::COL_RED);
+        tft.fillRect(60, 185, 200, 30, ui::COL_RED);
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString(buf, ui::SCREEN_W / 2, 335);
+        tft.drawString(buf, ui::SCREEN_W / 2, 200);
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
     }
@@ -99,11 +98,11 @@ void ErrorScreen::draw() {
         char buf[ui::FMT_BUF_LARGE];
         snprintf(buf, sizeof(buf), "E:%u S:%u", diagCode_, diagSubsystem_);
 
-        tft.fillRect(60, 400, 200, 30, ui::COL_RED);
+        tft.fillRect(60, 245, 200, 30, ui::COL_RED);
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString(buf, ui::SCREEN_W / 2, 415);
+        tft.drawString(buf, ui::SCREEN_W / 2, 260);
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
     }

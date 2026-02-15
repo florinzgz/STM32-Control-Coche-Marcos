@@ -3,7 +3,7 @@
 //
 // Framework:  Arduino (C++17)
 // Board:      ESP32-S3-DevKitC-1
-// Display:    320×480 TFT via TFT_eSPI (ST7796)
+// Display:    480×320 TFT via TFT_eSPI (ST7796, landscape rotation 1)
 // Reference:  docs/CAN_CONTRACT_FINAL.md rev 1.3
 //             docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
@@ -15,6 +15,8 @@
 #include "can_rx.h"
 #include "vehicle_data.h"
 #include "screen_manager.h"
+#include "ui/runtime_monitor.h"
+#include "ui/debug_overlay.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -29,6 +31,9 @@ static ScreenManager screenManager;
 static uint8_t  heartbeatCounter = 0;
 static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
+#if RUNTIME_MONITOR
+static unsigned long lastRtMonMs      = 0;
+#endif
 
 // ---- Command ACK tracking (Phase 13) ----
 // Non-blocking: records when a command was sent and checks for ACK arrival.
@@ -83,11 +88,11 @@ void setup() {
 
     // Initialize TFT display
     tft.init();
-    tft.setRotation(0);  // Portrait mode
+    tft.setRotation(1);  // Landscape mode (480×320)
     tft.fillScreen(0x2104);  // Dark gray background
     tft.setTextColor(0xFFFF, 0x2104);
     tft.setTextSize(1);
-    Serial.println("[TFT] Display initialized (320x480)");
+    Serial.println("[TFT] Display initialized (480x320 landscape)");
 
     ESP32Can.setPins(CAN_TX_PIN, CAN_RX_PIN);
     ESP32Can.setRxQueueSize(5);
@@ -107,13 +112,24 @@ void loop() {
     unsigned long now = millis();
 
     // Poll CAN RX and decode incoming frames
+    RTMON_CAN_BEGIN();
     can_rx::poll(vehicleData);
+    RTMON_CAN_END();
 
     // Check for pending ACK (non-blocking)
     ackCheck(vehicleData);
 
     // Update HMI screen based on current vehicle state
+    RTMON_UI_BEGIN();
     screenManager.update(vehicleData);
+    RTMON_UI_END();
+
+#if RUNTIME_MONITOR
+    // Debug overlay — detect long touch (3 seconds) to toggle
+    bool touched = tft.getTouch(nullptr, nullptr);
+    RTMON_OVERLAY_UPDATE(touched);
+    RTMON_OVERLAY_DRAW(tft);
+#endif
 
     // Send heartbeat 0x011 every 100 ms
     if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
@@ -133,4 +149,12 @@ void loop() {
         lastSerialMs = now;
         Serial.println("[HMI] heartbeat");
     }
+
+#if RUNTIME_MONITOR
+    // Runtime monitor serial log every LOG_INTERVAL_MS
+    if (now - lastRtMonMs >= rtmon::LOG_INTERVAL_MS) {
+        lastRtMonMs = now;
+        RTMON_LOG();
+    }
+#endif
 }

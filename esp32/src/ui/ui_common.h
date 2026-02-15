@@ -4,7 +4,7 @@
 // Layout constants, color palette, and static helpers for all UI elements.
 // All values are compile-time constants. No dynamic allocation.
 //
-// Target display: 320×480 TFT (portrait orientation)
+// Target display: 480×320 TFT (landscape orientation, rotation 1)
 // Reference: docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
 
@@ -16,10 +16,10 @@
 namespace ui {
 
 // -------------------------------------------------------------------------
-// Screen dimensions (ST7796 in portrait mode)
+// Screen dimensions (ST7796 in landscape mode — rotation 1)
 // -------------------------------------------------------------------------
-inline constexpr int16_t SCREEN_W = 320;
-inline constexpr int16_t SCREEN_H = 480;
+inline constexpr int16_t SCREEN_W = 480;
+inline constexpr int16_t SCREEN_H = 320;
 
 // -------------------------------------------------------------------------
 // Color palette (RGB565)
@@ -37,71 +37,82 @@ inline constexpr uint16_t COL_ORANGE      = 0xFD20;
 inline constexpr uint16_t COL_AMBER       = 0xFBE0;
 
 // -------------------------------------------------------------------------
-// Layout zones (Y coordinates)
+// Layout zones (Y coordinates, 480×320 landscape)
 // -------------------------------------------------------------------------
 
-// Top bar: mode icons + battery
+// Top bar: mode icons (4x4, 4x2, 360°) + battery  (Y: 0–40)
 inline constexpr int16_t TOP_BAR_Y      = 0;
-inline constexpr int16_t TOP_BAR_H      = 38;
+inline constexpr int16_t TOP_BAR_H      = 40;
 
-// Speed display
-inline constexpr int16_t SPEED_Y        = 40;
-inline constexpr int16_t SPEED_H        = 32;
+// Obstacle sensor zone (frontal)                   (Y: 40–85)
+inline constexpr int16_t SENSOR_Y       = 40;
+inline constexpr int16_t SENSOR_H       = 45;
 
-// Car rendering area
-inline constexpr int16_t CAR_AREA_Y     = 78;
-inline constexpr int16_t CAR_AREA_H     = 295;
+// Car rendering area (wheels + body)                (Y: 85–230)
+inline constexpr int16_t CAR_AREA_Y     = 85;
+inline constexpr int16_t CAR_AREA_H     = 145;
 
-// Gear display
-inline constexpr int16_t GEAR_Y         = 378;
-inline constexpr int16_t GEAR_H         = 30;
+// Speed display (large, centered)                   (Y: 230–270)
+inline constexpr int16_t SPEED_Y        = 232;
+inline constexpr int16_t SPEED_H        = 38;
 
-// Pedal bar
-inline constexpr int16_t PEDAL_Y        = 415;
-inline constexpr int16_t PEDAL_H        = 58;
+// Pedal bar                                         (Y: 270–300)
+inline constexpr int16_t PEDAL_Y        = 272;
+inline constexpr int16_t PEDAL_H        = 28;
+
+// Gear display                                      (Y: 300–320)
+inline constexpr int16_t GEAR_Y         = 300;
+inline constexpr int16_t GEAR_H         = 20;
 
 // -------------------------------------------------------------------------
-// Car body geometry (centered on screen)
+// Car body geometry (centered horizontally, within CAR_AREA)
 // -------------------------------------------------------------------------
-inline constexpr int16_t CAR_BODY_X     = 100;
-inline constexpr int16_t CAR_BODY_Y     = 148;
-inline constexpr int16_t CAR_BODY_W     = 120;
-inline constexpr int16_t CAR_BODY_H     = 160;
+inline constexpr int16_t CAR_BODY_X     = 190;
+inline constexpr int16_t CAR_BODY_Y     = 105;
+inline constexpr int16_t CAR_BODY_W     = 100;
+inline constexpr int16_t CAR_BODY_H     = 110;
 
 // Wheel positions relative to screen
 inline constexpr int16_t WHEEL_W        = 44;
-inline constexpr int16_t WHEEL_H        = 60;
+inline constexpr int16_t WHEEL_H        = 44;
 
 // Front left
-inline constexpr int16_t WHL_FL_X       = 46;
-inline constexpr int16_t WHL_FL_Y       = 110;
+inline constexpr int16_t WHL_FL_X       = 130;
+inline constexpr int16_t WHL_FL_Y       = 95;
 // Front right
-inline constexpr int16_t WHL_FR_X       = 230;
-inline constexpr int16_t WHL_FR_Y       = 110;
+inline constexpr int16_t WHL_FR_X       = 306;
+inline constexpr int16_t WHL_FR_Y       = 95;
 // Rear left
-inline constexpr int16_t WHL_RL_X       = 46;
-inline constexpr int16_t WHL_RL_Y       = 280;
+inline constexpr int16_t WHL_RL_X       = 130;
+inline constexpr int16_t WHL_RL_Y       = 180;
 // Rear right
-inline constexpr int16_t WHL_RR_X       = 230;
-inline constexpr int16_t WHL_RR_Y       = 280;
+inline constexpr int16_t WHL_RR_X       = 306;
+inline constexpr int16_t WHL_RR_Y       = 180;
 
-// Steering indicator center
-inline constexpr int16_t STEER_CX       = 160;
-inline constexpr int16_t STEER_CY       = 228;
-inline constexpr int16_t STEER_RADIUS   = 20;
+// Steering indicator (circular gauge, right side of car area)
+inline constexpr int16_t STEER_CX       = 410;
+inline constexpr int16_t STEER_CY       = 160;
+inline constexpr int16_t STEER_RADIUS   = 24;
 
 // -------------------------------------------------------------------------
-// Battery indicator position (top-right)
+// Obstacle sensor (frontal) layout — centered in 480px width
 // -------------------------------------------------------------------------
-inline constexpr int16_t BAT_X          = 250;
-inline constexpr int16_t BAT_Y          = 5;
+inline constexpr int16_t SENSOR_BAR_X   = 140;
+inline constexpr int16_t SENSOR_BAR_W   = 200;
+inline constexpr int16_t SENSOR_BAR_H   = 12;
+
+// -------------------------------------------------------------------------
+// Battery indicator position (top-right, within top bar)
+// -------------------------------------------------------------------------
+inline constexpr int16_t BAT_X          = 405;
+inline constexpr int16_t BAT_Y          = 6;
 inline constexpr int16_t BAT_W          = 65;
 inline constexpr int16_t BAT_H          = 28;
 
 // -------------------------------------------------------------------------
-// Mode icons position (top-left area)
+// Mode icons position (top-left area, within top bar 0–40px)
 // -------------------------------------------------------------------------
-inline constexpr int16_t ICON_Y         = 5;
+inline constexpr int16_t ICON_Y         = 6;
 inline constexpr int16_t ICON_W         = 50;
 inline constexpr int16_t ICON_H         = 28;
 inline constexpr int16_t ICON_SPACING   = 8;
@@ -110,21 +121,20 @@ inline constexpr int16_t ICON_4X2_X     = 68;
 inline constexpr int16_t ICON_360_X     = 126;
 
 // -------------------------------------------------------------------------
-// Gear display layout
+// Gear display layout (Y: 300–320, evenly spaced across 480px)
 // -------------------------------------------------------------------------
-inline constexpr int16_t GEAR_LABEL_W   = 44;
-inline constexpr int16_t GEAR_LABEL_H   = 24;
-inline constexpr int16_t GEAR_START_X   = 28;
-inline constexpr int16_t GEAR_SPACING   = 56;
+inline constexpr int16_t GEAR_LABEL_W   = 52;
+inline constexpr int16_t GEAR_LABEL_H   = 18;
+inline constexpr int16_t GEAR_START_X   = 50;
+inline constexpr int16_t GEAR_SPACING   = 80;
 
 // -------------------------------------------------------------------------
-// Pedal bar layout
+// Pedal bar layout (Y: 270–300)
 // -------------------------------------------------------------------------
 inline constexpr int16_t PEDAL_BAR_X    = 10;
-inline constexpr int16_t PEDAL_BAR_W    = 230;
-inline constexpr int16_t PEDAL_BAR_H    = 30;
-inline constexpr int16_t PEDAL_TEXT_X   = 248;
-inline constexpr int16_t PEDAL_ARROW_X  = 295;
+inline constexpr int16_t PEDAL_BAR_W    = 380;
+inline constexpr int16_t PEDAL_BAR_H    = 16;
+inline constexpr int16_t PEDAL_TEXT_X   = 400;
 
 // -------------------------------------------------------------------------
 // Format buffer sizes (all on stack, no heap)
@@ -140,6 +150,16 @@ inline uint16_t torqueColor(uint8_t pct) {
     if (pct <= 50)  return COL_GREEN;
     if (pct <= 80)  return COL_YELLOW;
     return COL_RED;
+}
+
+// -------------------------------------------------------------------------
+// Helper: obstacle distance to color (proximity indicator)
+// -------------------------------------------------------------------------
+inline uint16_t proximityColor(uint16_t distanceCm) {
+    if (distanceCm == 0)   return COL_GRAY;    // no reading
+    if (distanceCm > 150)  return COL_GREEN;   // > 1.5 m: safe
+    if (distanceCm > 50)   return COL_YELLOW;  // 0.5–1.5 m: caution
+    return COL_RED;                             // < 0.5 m: danger
 }
 
 } // namespace ui

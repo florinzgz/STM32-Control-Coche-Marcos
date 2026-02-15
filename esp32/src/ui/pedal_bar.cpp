@@ -18,7 +18,7 @@ void PedalBar::drawStatic(TFT_eSPI& tft) {
     tft.drawString("PEDAL", PEDAL_BAR_X, PEDAL_Y);
 
     // Bar outline
-    int16_t barY = PEDAL_Y + 14;
+    int16_t barY = PEDAL_Y + 12;
     tft.drawRect(PEDAL_BAR_X, barY, PEDAL_BAR_W, PEDAL_BAR_H, COL_WHITE);
 }
 
@@ -28,7 +28,7 @@ void PedalBar::drawStatic(TFT_eSPI& tft) {
 void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     if (pedalPct == prevPct) return;
 
-    int16_t barY = PEDAL_Y + 14;
+    int16_t barY = PEDAL_Y + 12;
 
     // Clamp to 100
     uint8_t pct = (pedalPct > 100) ? 100 : pedalPct;
@@ -64,20 +64,8 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     tft.setTextSize(2);
     tft.setTextDatum(ML_DATUM);
     // Clear old text area
-    tft.fillRect(PEDAL_TEXT_X, barY, 50, PEDAL_BAR_H, COL_BG);
+    tft.fillRect(PEDAL_TEXT_X, barY, 70, PEDAL_BAR_H, COL_BG);
     tft.drawString(buf, PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2);
-
-    // Arrow indicator at fill edge
-    int16_t arrowX = PEDAL_BAR_X + 2 + fillW;
-    int16_t arrowY = barY + PEDAL_BAR_H + 4;
-    // Clear previous arrow area
-    tft.fillRect(PEDAL_BAR_X, arrowY, PEDAL_BAR_W, 10, COL_BG);
-    // Draw small triangle pointing up
-    if (fillW > 0) {
-        tft.fillTriangle(arrowX - 4, arrowY + 8,
-                         arrowX + 4, arrowY + 8,
-                         arrowX, arrowY, COL_WHITE);
-    }
 
     tft.setTextDatum(TL_DATUM);  // Reset
     tft.setTextSize(1);
