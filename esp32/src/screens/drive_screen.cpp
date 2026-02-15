@@ -26,6 +26,7 @@
 #include "ui/battery_indicator.h"
 #include "ui/mode_icons.h"
 #include "ui/obstacle_sensor.h"
+#include "ui/runtime_monitor.h"
 #include <cstdio>
 #include <cstring>
 
@@ -115,6 +116,7 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
 void DriveScreen::draw() {
     if (needsFullRedraw_) {
         needsFullRedraw_ = false;
+        RTMON_FULL_REDRAW();
 
         // Clear entire screen
         tft.fillScreen(ui::COL_BG);
@@ -159,12 +161,30 @@ void DriveScreen::draw() {
     // Partial redraw: only changed elements
 
     // Speed (in its own zone, 230–270px)
+    if (curSpeedAvgRaw_ != prevSpeedAvgRaw_) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::SPEED);
+    }
     drawSpeed();
 
     // Obstacle sensor (40–85px)
+    if (curObstacleCm_ != prevObstacleCm_) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::OBSTACLE);
+    }
     ui::ObstacleSensor::draw(tft, curObstacleCm_, prevObstacleCm_);
 
     // Wheels (torque + temperature)
+    {
+        bool carDirty = false;
+        for (uint8_t i = 0; i < 4; ++i) {
+            if (curTraction_[i] != prevTraction_[i] || curTemp_[i] != prevTemp_[i]) {
+                carDirty = true;
+                break;
+            }
+        }
+        if (carDirty || curSteeringRaw_ != prevSteeringRaw_) {
+            RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
+        }
+    }
     ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
         {curTraction_[0], curTraction_[1], curTraction_[2], curTraction_[3]}, 0},
         vehicle::TempMapData{
@@ -174,16 +194,25 @@ void DriveScreen::draw() {
     // Steering circular gauge (right side)
     ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_);
 
-    // Battery
+    // Battery (part of top bar zone)
+    if (curBattVoltRaw_ != prevBattVoltRaw_) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+    }
     ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_);
 
     // Gear
+    if (curGear_ != prevGear_) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::GEAR);
+    }
     ui::GearDisplay::draw(tft, curGear_, prevGear_);
 
     // Pedal bar
+    if (curPedalPct_ != prevPedalPct_) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::PEDAL);
+    }
     ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_);
 
-    // Mode icons
+    // Mode icons (part of top bar zone)
     ui::ModeIcons::draw(tft, curMode_, prevMode_);
 
     // Copy current values to previous for next frame
