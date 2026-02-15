@@ -29,7 +29,10 @@ int32_t Encoder_GetRawCount(void);
 
 /**
  * @brief  Return the change in raw count since the last call.
- *         First call after reset returns 0.
+ *
+ *         Must be called from a single context only (main loop).
+ *         Not reentrant — shares internal state with
+ *         Encoder_SendDiagnostic().
  */
 int32_t Encoder_GetDelta(void);
 

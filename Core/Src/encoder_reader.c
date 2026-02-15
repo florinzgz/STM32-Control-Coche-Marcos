@@ -20,7 +20,11 @@
 #include "main.h"
 #include "can_handler.h"
 
-/* ---- Internal state for delta tracking ---- */
+/* ---- Internal state for delta tracking ----
+ * Initialised to 0, matching the TIM2 counter state after
+ * Steering_Init() zeros it.  All public functions in this module
+ * must be called from a single context (main loop) — they are
+ * not reentrant and share enc_reader_prev without locking.      */
 static int32_t enc_reader_prev = 0;
 
 /* ==================================================================
