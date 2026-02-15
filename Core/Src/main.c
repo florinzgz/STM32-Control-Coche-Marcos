@@ -22,6 +22,7 @@
 #include "steering_centering.h"
 #include "service_mode.h"
 #include "boot_validation.h"
+#include "encoder_reader.h"
 
 /* ---- HAL handle instances ---- */
 FDCAN_HandleTypeDef hfdcan1;
@@ -239,6 +240,10 @@ int main(void)
             /* Service mode: send module fault/enable/disable bitmasks
              * to ESP32 for the diagnostic/service menu.               */
             CAN_SendServiceStatus();
+
+            /* Encoder diagnostic: raw count + delta for hardware validation.
+             * Diagnostic only — not used by any control path.             */
+            Encoder_SendDiagnostic();
         }
 
         /* Process incoming CAN commands from ESP32 */

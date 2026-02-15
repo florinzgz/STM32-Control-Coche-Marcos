@@ -78,6 +78,7 @@ void CAN_SendStatusTraction(void);
 void CAN_SendStatusTempMap(void);
 void CAN_SendStatusBattery(void);
 void CAN_SendError(uint8_t error_code, uint8_t subsystem);
+void CAN_SendDiagnosticEncoder(int32_t raw_count, int16_t delta);
 void CAN_SendCommandAck(uint8_t cmd_id_low, CAN_AckResult_t result);
 void CAN_SendServiceStatus(void);
 void CAN_ProcessMessages(void);
