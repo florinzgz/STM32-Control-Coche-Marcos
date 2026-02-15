@@ -678,7 +678,7 @@
 1. With the system in ACTIVE on the Drive screen:
 2. Apply throttle — verify pedal bar fills proportionally.
 3. Turn steering — verify steering gauge moves correspondingly.
-4. Observe battery indicator — verify it shows a reasonable percentage (24 V ≈ ~80–100 %).
+4. Observe battery indicator — verify it shows a reasonable percentage (24 V ≈ 80–100 %).
 5. Verify temperature values update (may take up to 1 s since temperatures are sent at 1000 ms intervals).
 
 | Condition | Observable Evidence | PASS/FAIL |
