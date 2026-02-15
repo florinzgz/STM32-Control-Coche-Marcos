@@ -43,6 +43,11 @@ inline constexpr uint8_t RING_SIZE = 120;
 inline constexpr uint32_t BLOCKING_THRESHOLD_US = 4000;  // 4 ms
 
 // -------------------------------------------------------------------------
+// Serial logging interval
+// -------------------------------------------------------------------------
+inline constexpr uint32_t LOG_INTERVAL_MS = 5000;  // 5 seconds
+
+// -------------------------------------------------------------------------
 // Zone identifiers for redraw tracking
 // -------------------------------------------------------------------------
 enum class Zone : uint8_t {

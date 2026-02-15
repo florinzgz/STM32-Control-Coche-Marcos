@@ -151,8 +151,8 @@ void loop() {
     }
 
 #if RUNTIME_MONITOR
-    // Runtime monitor serial log every 5 seconds
-    if (now - lastRtMonMs >= 5000) {
+    // Runtime monitor serial log every LOG_INTERVAL_MS
+    if (now - lastRtMonMs >= rtmon::LOG_INTERVAL_MS) {
         lastRtMonMs = now;
         RTMON_LOG();
     }

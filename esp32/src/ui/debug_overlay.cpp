@@ -107,7 +107,7 @@ void DebugOverlay::draw(TFT_eSPI& tft) {
     y += LINE_H;
 
     snprintf(buf, sizeof(buf), "Full redraws: %u", s.fullRedraws);
-    tft.setTextColor(s.fullRedraws > 1 ? ui::COL_AMBER : ui::COL_WHITE,
+    tft.setTextColor(s.fullRedraws > FULL_REDRAW_WARN ? ui::COL_AMBER : ui::COL_WHITE,
                      ui::COL_BLACK);
     tft.drawString(buf, x, y);
     y += LINE_H;

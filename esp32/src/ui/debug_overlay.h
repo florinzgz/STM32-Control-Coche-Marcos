@@ -51,6 +51,7 @@ private:
 
     static constexpr uint32_t HOLD_THRESHOLD_MS = 3000;  // 3 seconds
     static constexpr uint32_t REFRESH_MS        = 500;   // Update every 500 ms
+    static constexpr uint16_t FULL_REDRAW_WARN  = 1;     // Warn if full redraws exceed this
 };
 
 } // namespace rtmon
