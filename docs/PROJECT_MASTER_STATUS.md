@@ -427,3 +427,53 @@ NOT IMPLEMENTED — no lighting hardware or software exists in the codebase.
 5. **It introduces hardcoded constants without documenting them** — any new `#define` or magic number that affects actuator behavior, safety thresholds, or timing must be listed with its rationale, either in code comments or in section 3.
 
 6. **It modifies CAN protocol without updating section 1** — adding, removing, or changing CAN message IDs, payload formats, or timing must be reflected in the CAN data flow table.
+
+---
+
+## 7) DOCUMENT MAINTENANCE PROTOCOL (MANDATORY)
+
+This section defines the enforcement rules that make `docs/PROJECT_MASTER_STATUS.md` a mandatory update gate for every Pull Request in this repository.
+
+### 7.1 — Evaluation requirement
+
+Every PR **MUST** evaluate whether it changes any of the following:
+
+- **Architecture** (section 1) — module responsibilities, data flows, peripheral assignments, CAN topology
+- **Completed Features** (section 2) — new executable logic, new subsystem entries, modified behavior
+- **Known Limitations** (section 3) — new hardcoded constants, new placeholder logic, removed workarounds
+- **Pending Features** (section 4) — items resolved, new backlog entries implied by code changes
+- **Phase status** (section 5) — exit criteria met, phase transitions, scope changes
+
+### 7.2 — Mandatory update rule
+
+If any of the categories listed in 7.1 changed as a result of the PR, the PR **MUST** update this document in the same commit set. The update must be included before the PR is marked as ready for review.
+
+### 7.3 — Behavioral changes require document updates
+
+A PR that introduces new behavior (new functions, new modules, new CAN messages, new safety checks, new UI elements, new sensor readings, modified thresholds, or changed state transitions) but does **not** update this document is **invalid** and must be rejected by reviewers.
+
+### 7.4 — Phase ordering enforcement
+
+A PR **cannot** implement a feature from a future phase unless the phase order itself is explicitly modified and justified in the PR description. Phase ordering in section 5 is the official execution sequence. Skipping phases requires updating section 5 with the rationale.
+
+### 7.5 — Reality over plans
+
+This document always reflects **REALITY** — what is provably implemented in code — never plans, intentions, or aspirations. If a feature is listed in section 2 (Completed Features), executable logic for it **must** exist in the repository. If it does not, the entry must be moved to section 4 (Pending Features) or removed.
+
+### 7.6 — Refactor exemption with explicit declaration
+
+Refactors that do **not** change observable behavior (e.g., code style, internal renaming, build system cleanup, comment updates) are exempt from updating this document. However, the PR description **must** explicitly state:
+
+> "No PROJECT_MASTER_STATUS.md changes required — this PR does not alter architecture, features, limitations, backlog, or phase status."
+
+If this declaration is absent from a refactor PR, reviewers must request it before approving.
+
+### 7.7 — Reviewer enforcement obligation
+
+Reviewers **must** reject a PR if this protocol is not followed. Specifically, reviewers must verify:
+
+1. The PR author evaluated whether sections 1–5 are affected.
+2. If affected, the corresponding sections have been updated in the same commit set.
+3. If not affected, the PR description contains the explicit exemption declaration from rule 7.6.
+4. No section 2 entry exists without corresponding executable code in the repository.
+5. No phase skip occurred without justification in section 5.
