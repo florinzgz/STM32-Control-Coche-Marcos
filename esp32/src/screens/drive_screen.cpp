@@ -213,6 +213,9 @@ void DriveScreen::draw() {
     ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_);
 
     // Mode icons (part of top bar zone)
+    if (curMode_.is4x4 != prevMode_.is4x4 || curMode_.isTankTurn != prevMode_.isTankTurn) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+    }
     ui::ModeIcons::draw(tft, curMode_, prevMode_);
 
     // Copy current values to previous for next frame
