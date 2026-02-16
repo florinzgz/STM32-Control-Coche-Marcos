@@ -181,9 +181,16 @@ ESP32-S3                   DFPlayer Mini
 └──────────┘              └──────────────┘
 ```
 
-**Pines UART disponibles en el ESP32 actual:**
+**Pines UART para DFPlayer en el ESP32 actual:**
 
-El `platformio.ini` del ESP32 actual usa GPIO4 (CAN_TX) y GPIO5 (CAN_RX) para CAN, y GPIO13–17/21/42 para el display. Los pines libres del ESP32-S3 para UART del DFPlayer se elegirán en Phase 5 (el repo original usaba GPIO 19 TX / GPIO 20 RX, pero hay que verificar que estén libres en la placa actual).
+El ESP32-S3 actual usa los siguientes GPIOs (ver `esp32/platformio.ini` y `esp32/src/main.cpp`):
+- GPIO 4: CAN_TX (TWAI)
+- GPIO 5: CAN_RX (TWAI)
+- GPIO 13/14/15/16/17: TFT SPI (MOSI/SCLK/CS/DC/RST)
+- GPIO 21: TOUCH_CS
+- GPIO 42: TFT Backlight
+
+**✅ GPIO 19 (TX) y GPIO 20 (RX) están LIBRES** — son los mismos pines que usaba el repo original para el DFPlayer. Se pueden asignar directamente en Phase 5 usando UART1 del ESP32-S3.
 
 ### Los 68 tracks de audio
 
