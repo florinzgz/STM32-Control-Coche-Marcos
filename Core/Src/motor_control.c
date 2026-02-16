@@ -76,6 +76,7 @@ static inline float sanitize_float(float val, float safe_default)
 #define FROZEN_PEDAL_SPEED_DELTA_KMH 3.0f  /* Speed change threshold (km/h)  */
 #define FROZEN_PEDAL_TOLERANCE_PCT   0.5f  /* Pedal movement tolerance (%)   */
 #define DYNBRAKE_ACTIVE_THRESHOLD    0.5f  /* dynbrake_pct above = active    */
+#define TRACTION_ZERO_DEMAND_PCT     0.5f  /* Demand below this = zero (%)   */
 
 /* ---- Dynamic braking configuration ----
  *
@@ -977,15 +978,17 @@ void Traction_Update(void)
      * during ABS intervention (wheel_scale < 1.0 — ABS needs to
      * modulate braking per-wheel independently).
      *
-     * Motors that are actively driving (demand > 0.5 %) keep their
-     * computed PWM values unchanged.                                   */
-    if (fabs(effective_demand) <= 0.5f) {
+     * Motors that are actively driving (demand > TRACTION_ZERO_DEMAND_PCT)
+     * keep their computed PWM values unchanged.                        */
+    bool rear_active = traction_state.mode4x4 || traction_state.axisRotation;
+
+    if (fabs(effective_demand) <= TRACTION_ZERO_DEMAND_PCT) {
         /* Zero demand — apply BTS7960 active brake to hold vehicle */
         Motor_SetPWM(&motor_fl, BTS7960_BRAKE_PWM);
         Motor_SetPWM(&motor_fr, BTS7960_BRAKE_PWM);
         Motor_Enable(&motor_fl, 1);
         Motor_Enable(&motor_fr, 1);
-        if (traction_state.mode4x4 || traction_state.axisRotation) {
+        if (rear_active) {
             Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM);
             Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM);
             Motor_Enable(&motor_rl, 1);
@@ -998,7 +1001,7 @@ void Traction_Update(void)
          * actively brake (coast mode would lose control).             */
         Motor_Enable(&motor_fl, 1);
         Motor_Enable(&motor_fr, 1);
-        if (traction_state.mode4x4 || traction_state.axisRotation) {
+        if (rear_active) {
             Motor_Enable(&motor_rl, 1);
             Motor_Enable(&motor_rr, 1);
         }
