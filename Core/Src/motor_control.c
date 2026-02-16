@@ -98,6 +98,21 @@ static inline float sanitize_float(float val, float safe_default)
 #define DYNBRAKE_MIN_SPEED_KMH   3.0f    /* Disable below this speed       */
 #define DYNBRAKE_RAMP_DOWN_PCT_S 80.0f   /* Max brake release rate (%/s)   */
 
+/* ---- BTS7960 active brake ----
+ *
+ * Chinese BTS7960 modules have a known design defect: when EN=HIGH
+ * and PWM=0, the motor is not braked — it floats.  This causes
+ * unintended rolling on slopes and steering drift.
+ *
+ * Active brake on the BTS7960 is achieved by driving PWM to 100 %
+ * (full duty, both FETs ON) which shorts the motor terminals through
+ * the H-bridge, producing electromagnetic braking torque.
+ *
+ * This constant is used wherever the firmware needs a motor to hold
+ * position rather than coast.  It replaces the previous PWM=0 + EN=0
+ * pattern that left motors floating.                                  */
+#define BTS7960_BRAKE_PWM        PWM_PERIOD   /* 100 % duty = active brake */
+
 /* ---- Park hold configuration ----
  *
  * In gear P the STM32 applies a controlled active motor brake to
@@ -944,19 +959,49 @@ void Traction_Update(void)
         Motor_SetDirection(&motor_fl, dir);
         Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]));
         Motor_SetDirection(&motor_fr, dir);
-        Motor_SetPWM(&motor_rl, 0);   Motor_Enable(&motor_rl, 0);
-        Motor_SetPWM(&motor_rr, 0);   Motor_Enable(&motor_rr, 0);
+        /* 4x2: rear motors not driven — apply BTS7960 active brake
+         * to prevent free-rolling on slopes.  Chinese BTS7960 modules
+         * float the motor when EN=HIGH + PWM=0, so we must use full
+         * duty to engage the brake FETs.                              */
+        Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM);  Motor_Enable(&motor_rl, 1);
+        Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM);  Motor_Enable(&motor_rr, 1);
     }
 
-    /* Enable/disable motors.  Do NOT disable based on wheel_scale:
-     * ABS sets scale=0.0 but the motor must stay enabled so the
-     * H-bridge can actively brake (coast mode would lose control).    */
-    uint8_t active = (fabs(effective_demand) > 0.5f) ? 1 : 0;
-    Motor_Enable(&motor_fl, active);
-    Motor_Enable(&motor_fr, active);
-    if (traction_state.mode4x4 || traction_state.axisRotation) {
-        Motor_Enable(&motor_rl, active);
-        Motor_Enable(&motor_rr, active);
+    /* ---- BTS7960 active brake when demand is zero ----
+     *
+     * Chinese BTS7960 modules float the motor when EN=HIGH and PWM=0.
+     * When demand drops to zero, we must apply active brake (PWM=100 %,
+     * EN=HIGH) to prevent the vehicle from rolling on slopes.
+     *
+     * Active brake is NOT applied in Neutral gear (handled above) or
+     * during ABS intervention (wheel_scale < 1.0 — ABS needs to
+     * modulate braking per-wheel independently).
+     *
+     * Motors that are actively driving (demand > 0.5 %) keep their
+     * computed PWM values unchanged.                                   */
+    if (fabs(effective_demand) <= 0.5f) {
+        /* Zero demand — apply BTS7960 active brake to hold vehicle */
+        Motor_SetPWM(&motor_fl, BTS7960_BRAKE_PWM);
+        Motor_SetPWM(&motor_fr, BTS7960_BRAKE_PWM);
+        Motor_Enable(&motor_fl, 1);
+        Motor_Enable(&motor_fr, 1);
+        if (traction_state.mode4x4 || traction_state.axisRotation) {
+            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM);
+            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM);
+            Motor_Enable(&motor_rl, 1);
+            Motor_Enable(&motor_rr, 1);
+        }
+    } else {
+        /* Non-zero demand — enable motors normally.
+         * Do NOT disable based on wheel_scale: ABS sets scale=0.0
+         * but the motor must stay enabled so the H-bridge can
+         * actively brake (coast mode would lose control).             */
+        Motor_Enable(&motor_fl, 1);
+        Motor_Enable(&motor_fr, 1);
+        if (traction_state.mode4x4 || traction_state.axisRotation) {
+            Motor_Enable(&motor_rl, 1);
+            Motor_Enable(&motor_rr, 1);
+        }
     }
 
     /* Update state with sensor readings */
@@ -976,6 +1021,15 @@ void Traction_Update(void)
 
 void Traction_EmergencyStop(void)
 {
+    /* Emergency stop — cut all power immediately.
+     *
+     * We intentionally use EN=0 (coast) rather than BTS7960 active
+     * brake here because in an emergency (overcurrent, overtemp,
+     * short circuit) we must completely de-energise the H-bridges.
+     * Active brake would keep the FETs conducting, which is unsafe
+     * when the fault condition involves the power stage itself.
+     * The relay shutdown sequence (safety_system.c) will also
+     * physically disconnect motor power.                              */
     Motor_Enable(&motor_fl, 0);
     Motor_Enable(&motor_fr, 0);
     Motor_Enable(&motor_rl, 0);
@@ -1071,8 +1125,12 @@ void Steering_ControlLoop(void)
     float error = steering_pid.setpoint - measured;
     float absError = fabsf(error);
     if (absError < STEERING_DEADBAND_COUNTS) {
-        Motor_SetPWM(&motor_steer, 0);
-        Motor_Enable(&motor_steer, 0);
+        /* Position within deadband — apply BTS7960 active brake to
+         * hold the steering in place.  Chinese BTS7960 modules float
+         * the motor when EN=HIGH + PWM=0, so PWM must be set to 100 %
+         * to engage the brake FETs and prevent steering drift.        */
+        Motor_SetPWM(&motor_steer, BTS7960_BRAKE_PWM);
+        Motor_Enable(&motor_steer, 1);
         last_time = now;
         return;
     }
@@ -1197,16 +1255,19 @@ bool Encoder_HasFault(void)
 }
 
 /**
- * @brief  Safely disable steering motor output.
+ * @brief  Safely stop steering motor and apply active brake.
  *
- * Used when the encoder is faulted: we must NOT drive the motor
- * toward any position because we have no reliable feedback.
- * Instead, cut PWM and disable the H-bridge enable pin.
+ * Used when the encoder is faulted or calibration is not yet done:
+ * we must NOT drive the motor toward any position because we have
+ * no reliable feedback.  Apply BTS7960 active brake (PWM=100 %,
+ * EN=HIGH) to hold the steering in place and prevent drift.
+ * Chinese BTS7960 modules float the motor when PWM=0 + EN=HIGH,
+ * so PWM must be at full duty to engage the brake FETs.
  */
 void Steering_Neutralize(void)
 {
-    Motor_SetPWM(&motor_steer, 0);
-    Motor_Enable(&motor_steer, 0);
+    Motor_SetPWM(&motor_steer, BTS7960_BRAKE_PWM);
+    Motor_Enable(&motor_steer, 1);
     steering_pid.integral   = 0.0f;
     steering_pid.prev_error = 0.0f;
     steering_pid.output     = 0.0f;

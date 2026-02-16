@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-02-15
+> Last updated: 2026-02-16
 
 ---
 
@@ -46,6 +46,7 @@ The STM32 is the **safety authority** and sole actuator controller. All actuator
 | Independent watchdog (IWDG, ~500 ms) | `MX_IWDG_Init()`, `HAL_IWDG_Refresh()` | `Core/Src/main.c` |
 | Granular 3-level degradation (L1/L2/L3 with per-level scaling) | `Safety_SetDegradedLevel()` | `Core/Src/safety_system.c` |
 | Dynamic braking (H-bridge active brake on throttle release) | Logic in `Traction_Update()` | `Core/Src/motor_control.c` |
+| BTS7960 active brake (PWM=100 % hold when demand=0) | `BTS7960_BRAKE_PWM` in `Traction_Update()`, `Steering_ControlLoop()`, `Steering_Neutralize()` | `Core/Src/motor_control.c` |
 | Park hold (active brake in gear P with current/temp derating) | Logic in `Traction_Update()` | `Core/Src/motor_control.c` |
 | Gear system (P/R/N/D1/D2, speed-gated changes) | `Traction_SetGear()` | `Core/Src/motor_control.c` |
 | Pedal EMA filter + ramp rate limiter | Logic in `Traction_SetDemand()` | `Core/Src/motor_control.c` |
@@ -134,7 +135,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Steering encoder quadrature decoding (TIM2, 32-bit, 4800 CPR) | `MX_TIM2_Init()` encoder mode | `Core/Src/main.c` |
 | Steering deadband (0.5°) | `STEERING_DEADBAND_COUNTS` in `Steering_ControlLoop()` | `Core/Src/motor_control.c` |
 | Steering rate limiting (200 °/s max) | `Safety_ValidateSteering()` | `Core/Src/safety_system.c` |
-| Steering neutralization (PWM=0, disable H-bridge) | `Steering_Neutralize()` | `Core/Src/motor_control.c` |
+| Steering neutralization (BTS7960 active brake hold) | `Steering_Neutralize()` | `Core/Src/motor_control.c` |
 | Steering display (circular gauge on drive screen) | `CarRenderer::drawSteeringGauge()` | `esp32/src/ui/car_renderer.cpp` |
 | Degraded-mode steering assist reduction (L1=85%, L2=70%, L3=60%) | `Safety_GetSteeringLimitFactor()` applied in `Steering_ControlLoop()` | `Core/Src/motor_control.c`, `Core/Src/safety_system.c` |
 
@@ -144,11 +145,12 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 |---|---|---|
 | 4× traction motor PWM (TIM1 CH1-4, 20 kHz, 8500 steps) | `Motor_Init()`, `Motor_SetPWM()` | `Core/Src/motor_control.c` |
 | 4×4 mode (50/50 axle torque split) | `Traction_Update()` mode4x4 branch | `Core/Src/motor_control.c` |
-| 4×2 mode (front wheels only) | `Traction_Update()` else branch, rear PWM=0 | `Core/Src/motor_control.c` |
+| 4×2 mode (front wheels only, rear active brake) | `Traction_Update()` else branch, rear `BTS7960_BRAKE_PWM` | `Core/Src/motor_control.c` |
 | Tank turn (left reverse, right forward) | `Traction_Update()` axisRotation branch | `Core/Src/motor_control.c` |
 | Gear system: P (active hold brake), R, N (coast), D1 (60%), D2 (100%) | `Traction_SetGear()`, `Traction_Update()` gear branches | `Core/Src/motor_control.c` |
 | Park hold with current/temp derating | `PARK_HOLD_*` constants, logic in `Traction_Update()` | `Core/Src/motor_control.c` |
 | Dynamic braking (proportional to throttle decrease rate) | `DYNBRAKE_*` constants, logic in `Traction_Update()` | `Core/Src/motor_control.c` |
+| BTS7960 active brake on zero demand (PWM=100 %, EN=HIGH) | `BTS7960_BRAKE_PWM`, logic in `Traction_Update()` | `Core/Src/motor_control.c` |
 | Pedal EMA noise filter (alpha=0.15) | `PEDAL_EMA_ALPHA`, logic in `Traction_SetDemand()` | `Core/Src/motor_control.c` |
 | Pedal ramp rate limiter (50 %/s up, 100 %/s down) | `PEDAL_RAMP_*_PCT_S`, logic in `Traction_SetDemand()` | `Core/Src/motor_control.c` |
 | Demand anomaly detection (step-rate, frozen pedal) | `MAX_THROTTLE_STEP_PER_10MS`, frozen pedal logic | `Core/Src/motor_control.c` |
