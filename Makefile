@@ -40,7 +40,10 @@ HAL_SOURCES = \
   $(HAL_SRC)/stm32g4xx_hal_fdcan.c \
   $(HAL_SRC)/stm32g4xx_hal_i2c.c \
   $(HAL_SRC)/stm32g4xx_hal_i2c_ex.c \
-  $(HAL_SRC)/stm32g4xx_hal_iwdg.c
+  $(HAL_SRC)/stm32g4xx_hal_iwdg.c \
+  $(HAL_SRC)/stm32g4xx_hal_dma.c \
+  $(HAL_SRC)/stm32g4xx_hal_dma_ex.c \
+  $(HAL_SRC)/stm32g4xx_hal_exti.c
 
 # ASM startup
 ASM_SOURCES = startup_stm32g474retx.s

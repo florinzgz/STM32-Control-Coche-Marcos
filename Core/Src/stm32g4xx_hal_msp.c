@@ -31,8 +31,8 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   if(htim_base->Instance==TIM1)
   {
     __HAL_RCC_TIM1_CLK_ENABLE();
-    HAL_NVIC_SetPriority(TIM1_UP_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
+    HAL_NVIC_SetPriority(TIM1_UP_TIM16_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
   }
   else if(htim_base->Instance==TIM2)
   {

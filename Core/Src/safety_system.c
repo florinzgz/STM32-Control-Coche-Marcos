@@ -112,6 +112,11 @@ static uint32_t         degraded_telemetry_count = 0;  /* Total entries into deg
 static float tcs_reduction[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 static uint32_t tcs_last_tick = 0;
 
+/* Per-wheel ABS pulse state (non-blocking, timestamp-based).
+ * Declared here so Safety_Init can reset them. */
+static uint32_t abs_pulse_timer[4];     /* HAL_GetTick() at phase start   */
+static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
+
 /* ---- Obstacle CAN receiver state -------------------------------- */
 
 /* Obstacle distance thresholds for the STM32 backstop limiter.
@@ -530,10 +535,6 @@ void Safety_Init(void)
 #define ABS_BASE_REDUCTION      0.30f   /* 30 % reduction (ref firmware)  */
 #define ABS_PULSE_PERIOD_MS     80      /* total pulse cycle in ms        */
 #define ABS_PULSE_ON_RATIO      0.6f    /* 60 % of period = reduced phase */
-
-/* Per-wheel pulse state (non-blocking, timestamp-based) */
-static uint32_t abs_pulse_timer[4];     /* HAL_GetTick() at phase start   */
-static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 
 void ABS_Update(void)
 {
