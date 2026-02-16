@@ -229,7 +229,7 @@ Si CUALQUIER Manager::init() falla → `handleCriticalError()` → retry 3 veces
 
 | Subsistema | Archivo original | Razón de no portar | Prioridad |
 |-----------|-----------------|-------------------|-----------|
-| **Audio (DFPlayer)** | `audio/dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | No hay hardware de audio en el sistema actual | BAJA — no es safety-critical |
+| **Audio (DFPlayer)** | `audio/dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | No hay hardware de audio en el sistema actual | BAJA — Phase 5, ver `PENDING_FEATURES_SCHEDULE.md` §3 |
 | **LED WS2812B** | `lighting/led_controller.cpp` | No hay hardware de iluminación en el sistema actual | BAJA — no es safety-critical |
 | **Touch screen** | `hud/touch_calibration.cpp`, `touch_map.cpp` | ESP32 actual no usa touch, solo display pasivo | MEDIA — futuro HMI |
 | **Menú oculto (debug)** | `hud/menu_hidden.cpp` (46 KB) | Display actual no tiene menús interactivos | BAJA |
