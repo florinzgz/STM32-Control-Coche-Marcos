@@ -48,7 +48,8 @@
 #endif /* LSE_STARTUP_TIMEOUT */
 
 #if !defined  (EXTERNAL_CLOCK_VALUE)
-  #define EXTERNAL_CLOCK_VALUE    12288000U /*!< Value of the External clock in Hz*/
+  #define EXTERNAL_CLOCK_VALUE    12288000U /*!< Value of the External clock in Hz
+                                                (I2S/SAI — not used, STM32CubeMX default) */
 #endif /* EXTERNAL_CLOCK_VALUE */
 
 #if !defined (HSI48_VALUE)
