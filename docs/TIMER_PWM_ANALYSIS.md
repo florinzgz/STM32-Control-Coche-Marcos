@@ -53,8 +53,9 @@ htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 **Cálculo de frecuencia (center-aligned):**
 ```
 f_timer = SYSCLK / (PSC + 1) = 170 MHz / 1 = 170 MHz
-f_pwm   = f_timer / (2 × (ARR + 1)) = 170 MHz / (2 × 4250) = 20.000 kHz ✓
+f_pwm   = f_timer / (2 × (ARR + 1)) = 170 MHz / (2 × (4249 + 1)) = 170 MHz / 8500 = 20.000 kHz ✓
 ```
+Counter counts: 0 → 1 → … → 4249 → 4248 → … → 1 → 0 (total 2 × 4250 = 8500 ticks per PWM period)
 
 **Resolución PWM:** 4250 pasos (0–4249), equivalente a ~12.05 bits efectivos.
 
@@ -119,7 +120,7 @@ motor_rr.timer = &htim1;  motor_rr.channel = TIM_CHANNEL_4;   /* PA11 */
 ```
 
 Los 4 canales (CH1–CH4) de TIM1 comparten:
-- El **mismo contador CNT** que cuenta de 0 a 4249 (up) y de 4249 a 0 (down)
+- El **mismo contador CNT** que cuenta 0 → 4249 (up), luego 4248 → 0 (down)
 - El **mismo prescaler** (PSC = 0)
 - El **mismo periodo** (ARR = 4249)
 - El **mismo modo de conteo** (center-aligned mode 1)
@@ -339,8 +340,8 @@ PWM TIMER TREE (Center-aligned)
 
 **Cálculo de frecuencia verificado:**
 ```
-Edge-aligned (antes):  f = 170 MHz / (1 × 8500)     = 20.000 kHz ✓
-Center-aligned (ahora): f = 170 MHz / (2 × 4250)     = 20.000 kHz ✓
+Edge-aligned (antes):  f = 170 MHz / (8499 + 1)          = 20.000 kHz ✓
+Center-aligned (ahora): f = 170 MHz / (2 × (4249 + 1))   = 20.000 kHz ✓
 Duty 100%:              CCR = ARR = 4249              → 100% ✓
 Duty 10% centering:     CCR = 425 / 4249              ≈ 10.0% ✓
 ```
