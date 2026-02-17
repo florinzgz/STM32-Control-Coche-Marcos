@@ -1,7 +1,7 @@
 # Análisis de Uso de Timers Hardware — PWM Motores
 
 **Fecha:** 2026-02-17  
-**Versión:** 2.0 — Center-aligned PWM  
+**Versión:** 2.1 — Center-aligned PWM + OC preload  
 **Fuentes:** `Core/Src/main.c`, `Core/Inc/main.h`, `Core/Src/motor_control.c`, `Core/Src/stm32g4xx_hal_msp.c`
 
 ---
@@ -46,7 +46,10 @@ htim1.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
 htim1.Init.RepetitionCounter = 0;
 htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 
-/* OC mode PWM1, polarity HIGH, pulse initial = 0 */
+/* OC config: PWM1, polarity HIGH, OC preload enabled */
+oc.OCMode     = TIM_OCMODE_PWM1;
+oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+oc.OCPreload  = TIM_OCPRELOAD_ENABLE;   /* CCR buffered — applied at update event */
 /* Channels: CH1 (PA8/FL), CH2 (PA9/FR), CH3 (PA10/RL), CH4 (PA11/RR) */
 ```
 
@@ -83,7 +86,8 @@ htim8.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
 htim8.Init.RepetitionCounter = 0;
 htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 
-/* OC mode PWM1, polarity HIGH, pulse initial = 0 */
+/* OC config: PWM1, polarity HIGH, OC preload enabled */
+oc.OCPreload  = TIM_OCPRELOAD_ENABLE;   /* CCR buffered — same as TIM1 */
 /* Only CH3 (PC8) is used */
 ```
 
@@ -232,9 +236,29 @@ CNT:  0────────ARR────────0
 
 Con `TIM_COUNTERMODE_CENTERALIGNED1`:
 - **Update events** se generan solo en el down-counting (cuando CNT llega a 0)
-- **CCR preload** (`AutoReloadPreload = ENABLE`) asegura que los nuevos valores de duty se aplican atómicamente en el siguiente update event
+- **ARR preload** (`AutoReloadPreload = ENABLE`) asegura que cambios al periodo se aplican en el update event
+- **OC preload** (`OCPreload = TIM_OCPRELOAD_ENABLE`) asegura que los nuevos valores de CCR (duty cycle) escritos por `__HAL_TIM_SET_COMPARE()` se almacenan en un registro shadow y se transfieren al registro activo únicamente en el update event
 - Los 4 canales de TIM1 se actualizan en el **mismo update event** → sincronización preservada
 - La frecuencia de update events es **1× f_pwm = 20 kHz** (igual que antes)
+
+> **¿Por qué es crítico el OC preload en center-aligned mode?**
+>
+> Sin OC preload, un `__HAL_TIM_SET_COMPARE()` ejecutado durante la fase de subida del
+> contador modifica el CCR inmediatamente. En la fase de bajada, el comparador usa el
+> nuevo valor, pero en la fase de subida ya usó el valor anterior. Resultado: un pulso
+> PWM asimétrico donde una mitad del triángulo tiene un duty y la otra mitad tiene otro.
+> Esto produce torque jitter a frecuencia f_pwm.
+>
+> Con OC preload, la escritura se almacena en un buffer y se transfiere al CCR activo
+> **solo** cuando CNT = 0 (update event en center-aligned mode 1). Ambas rampas del
+> triángulo usan el mismo CCR → pulso perfectamente simétrico.
+
+> **¿`HAL_TIM_PWM_Start()` habilita OC preload?**
+>
+> **No.** `HAL_TIM_PWM_Start()` solo habilita el counter (`TIMx->CR1 |= CEN`) y el
+> output enable (`TIMx->CCER |= CCxE`). No modifica `TIMx->CCMR1/CCMR2` donde
+> reside el bit OCxPE (preload enable). El OC preload **debe** configurarse
+> explícitamente via `HAL_TIM_PWM_ConfigChannel()` con `oc.OCPreload = TIM_OCPRELOAD_ENABLE`.
 
 > **Center-aligned mode 1 vs 2 vs 3:**
 > - Mode 1 (`CENTERALIGNED1`): interrupt flag set solo durante down-counting
@@ -332,11 +356,37 @@ PWM TIMER TREE (Center-aligned)
 
 | Archivo | Cambio |
 |---------|--------|
-| `Core/Src/main.c` — `MX_TIM1_Init()` | `CounterMode` → `TIM_COUNTERMODE_CENTERALIGNED1`, `Period` → 4249 |
-| `Core/Src/main.c` — `MX_TIM8_Init()` | `CounterMode` → `TIM_COUNTERMODE_CENTERALIGNED1`, `Period` → 4249 |
+| `Core/Src/main.c` — `MX_TIM1_Init()` | `CounterMode` → `TIM_COUNTERMODE_CENTERALIGNED1`, `Period` → 4249, **`oc.OCPreload` → `TIM_OCPRELOAD_ENABLE`** |
+| `Core/Src/main.c` — `MX_TIM8_Init()` | `CounterMode` → `TIM_COUNTERMODE_CENTERALIGNED1`, `Period` → 4249, **`oc.OCPreload` → `TIM_OCPRELOAD_ENABLE`** |
 | `Core/Src/motor_control.c` | `PWM_PERIOD` → 4249 |
 | `Core/Src/steering_centering.c` | `CENTERING_PWM` → 425 (mantiene ~10%) |
 | `Core/Inc/motor_control.h` | Comentario del rango PWM actualizado |
+
+### 8.1 Verificación de preload — Checklist
+
+| Registro | Preload habilitado | Mecanismo | Resultado |
+|----------|-------------------|-----------|-----------|
+| **ARR** (Auto-Reload) | ✅ `TIM_AUTORELOAD_PRELOAD_ENABLE` | `TIMx->CR1 ARPE bit` | Cambios al periodo se aplican en update event |
+| **CCR1** (TIM1 CH1 — FL) | ✅ `TIM_OCPRELOAD_ENABLE` | `TIM1->CCMR1 OC1PE bit` | Duty FL buffered |
+| **CCR2** (TIM1 CH2 — FR) | ✅ `TIM_OCPRELOAD_ENABLE` | `TIM1->CCMR1 OC2PE bit` | Duty FR buffered |
+| **CCR3** (TIM1 CH3 — RL) | ✅ `TIM_OCPRELOAD_ENABLE` | `TIM1->CCMR2 OC3PE bit` | Duty RL buffered |
+| **CCR4** (TIM1 CH4 — RR) | ✅ `TIM_OCPRELOAD_ENABLE` | `TIM1->CCMR2 OC4PE bit` | Duty RR buffered |
+| **CCR3** (TIM8 CH3 — Steer) | ✅ `TIM_OCPRELOAD_ENABLE` | `TIM8->CCMR2 OC3PE bit` | Duty steering buffered |
+
+**Garantía de actualización simultánea:**
+
+```
+Firmware writes                  Hardware transfer
+─────────────────                ─────────────────────────
+Motor_SetPWM(FL, duty_fl)  ───→  TIM1->CCR1 shadow register
+Motor_SetPWM(FR, duty_fr)  ───→  TIM1->CCR2 shadow register   ── All transferred
+Motor_SetPWM(RL, duty_rl)  ───→  TIM1->CCR3 shadow register      simultaneously at
+Motor_SetPWM(RR, duty_rr)  ───→  TIM1->CCR4 shadow register      next CNT=0 event
+```
+
+Las 4 escrituras de `Traction_Update()` se ejecutan en el mismo ciclo de 10 ms.
+Con OC preload, las 4 se transfieren al hardware al mismo instante (update event,
+CNT=0), garantizando cero torque jitter entre ruedas.
 
 **Cálculo de frecuencia verificado:**
 ```

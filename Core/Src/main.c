@@ -410,6 +410,10 @@ static void MX_TIM1_Init(void)
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
+    oc.OCPreload  = TIM_OCPRELOAD_ENABLE;  /* Buffer CCR — update at period boundary
+                                            * only, preventing mid-cycle duty changes
+                                            * that cause asymmetric pulses in
+                                            * center-aligned mode.                   */
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_1);
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_2);
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_3);
@@ -464,6 +468,7 @@ static void MX_TIM8_Init(void)
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
+    oc.OCPreload  = TIM_OCPRELOAD_ENABLE;  /* Buffer CCR — same as TIM1 */
     HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3);
 }
 
