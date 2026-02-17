@@ -164,23 +164,15 @@ void Pedal_Update(void)
         return;
     }
 
-    /* Wait for conversion (128 SPS → ~8 ms max).
-     * Poll the OS bit (bit 15) in the config register.            */
-    uint8_t poll[2] = {0};
-    uint8_t reg = ADS1115_REG_CONFIG;
-    for (uint8_t tries = 0; tries < 12; tries++) {
-        HAL_Delay(1);
-        if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
-                                     &reg, 1, 5) != HAL_OK)
-            continue;
-        if (HAL_I2C_Master_Receive(&hi2c1, (I2C_ADDR_ADS1115 << 1),
-                                    poll, 2, 5) != HAL_OK)
-            continue;
-        if (poll[0] & 0x80) break;  /* OS bit set = conversion done */
-    }
+    /* Wait for conversion to complete.
+     * At 128 SPS the conversion takes ~8 ms.  A single HAL_Delay(8)
+     * is used instead of a polling loop to keep worst-case blocking
+     * deterministic and avoid multiple I2C transactions.
+     * This runs inside the 50 ms task slot, so 8 ms is acceptable. */
+    HAL_Delay(8);
 
     /* Read conversion result */
-    reg = ADS1115_REG_CONVERSION;
+    uint8_t reg = ADS1115_REG_CONVERSION;
     uint8_t result[2] = {0};
     if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
                                  &reg, 1, 5) != HAL_OK) {
@@ -192,7 +184,9 @@ void Pedal_Update(void)
     }
 
     int16_t raw_signed = (int16_t)((result[0] << 8) | result[1]);
-    /* Single-ended: result is always positive (0–32767 for 0–6.144V) */
+    /* ADS1115 returns a signed 16-bit value.  In single-ended mode the
+     * result should always be 0–32767, but noise near 0 V or a wiring
+     * fault could produce a negative code.  Clamp to zero defensively. */
     uint16_t raw = (raw_signed < 0) ? 0U : (uint16_t)raw_signed;
     pedal_raw = raw;
 
