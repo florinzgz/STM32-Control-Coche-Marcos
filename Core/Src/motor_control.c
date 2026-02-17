@@ -34,7 +34,7 @@ static inline float sanitize_float(float val, float safe_default)
 }
 
 /* Constants */
-#define PWM_PERIOD     8499
+#define PWM_PERIOD     4249   /* Center-aligned ARR: 170 MHz / (2 × 4250) = 20 kHz */
 #define PWM_FREQUENCY  20000
 
 /* ---- Pedal signal conditioning ----

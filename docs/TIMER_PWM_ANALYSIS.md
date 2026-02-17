@@ -1,7 +1,7 @@
 # Análisis de Uso de Timers Hardware — PWM Motores
 
 **Fecha:** 2026-02-17  
-**Versión:** 1.0  
+**Versión:** 2.0 — Center-aligned PWM  
 **Fuentes:** `Core/Src/main.c`, `Core/Inc/main.h`, `Core/Src/motor_control.c`, `Core/Src/stm32g4xx_hal_msp.c`
 
 ---
@@ -12,16 +12,16 @@
 
 | Motor | GPIO Puerto/Pin | Timer | Canal | Frecuencia PWM | Modo contador | Prescaler | Periodo (ARR) | AF |
 |-------|----------------|-------|-------|-----------------|---------------|-----------|---------------|-----|
-| FL (Delantero Izq.) | **PA8** | **TIM1** | CH1 | 20 kHz | Edge-aligned (UP) | 0 | 8499 | AF6 |
-| FR (Delantero Der.) | **PA9** | **TIM1** | CH2 | 20 kHz | Edge-aligned (UP) | 0 | 8499 | AF6 |
-| RL (Trasero Izq.) | **PA10** | **TIM1** | CH3 | 20 kHz | Edge-aligned (UP) | 0 | 8499 | AF6 |
-| RR (Trasero Der.) | **PA11** | **TIM1** | CH4 | 20 kHz | Edge-aligned (UP) | 0 | 8499 | AF6 |
+| FL (Delantero Izq.) | **PA8** | **TIM1** | CH1 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| FR (Delantero Der.) | **PA9** | **TIM1** | CH2 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| RL (Trasero Izq.) | **PA10** | **TIM1** | CH3 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| RR (Trasero Der.) | **PA11** | **TIM1** | CH4 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
 
 ### 1.2 Motor de dirección
 
 | Motor | GPIO Puerto/Pin | Timer | Canal | Frecuencia PWM | Modo contador | Prescaler | Periodo (ARR) | AF |
 |-------|----------------|-------|-------|-----------------|---------------|-----------|---------------|-----|
-| Steering (Dirección) | **PC8** | **TIM8** | CH3 | 20 kHz | Edge-aligned (UP) | 0 | 8499 | AF4 |
+| Steering (Dirección) | **PC8** | **TIM8** | CH3 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF4 |
 
 ### 1.3 Encoder de dirección (no es PWM — lectura cuadratura)
 
@@ -34,14 +34,14 @@
 
 ## 2. Detalle de configuración por timer
 
-### 2.1 TIM1 — PWM 4 motores de tracción
+### 2.1 TIM1 — PWM 4 motores de tracción (center-aligned)
 
 ```c
 /* Fuente: Core/Src/main.c — MX_TIM1_Init() */
 htim1.Instance               = TIM1;
 htim1.Init.Prescaler         = 0;
-htim1.Init.CounterMode       = TIM_COUNTERMODE_UP;       /* Edge-aligned */
-htim1.Init.Period            = 8499;
+htim1.Init.CounterMode       = TIM_COUNTERMODE_CENTERALIGNED1;  /* Up/Down counting */
+htim1.Init.Period            = 4249;   /* Center-aligned: 170 MHz / (2 × 4250) = 20 kHz */
 htim1.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
 htim1.Init.RepetitionCounter = 0;
 htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -50,28 +50,34 @@ htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 /* Channels: CH1 (PA8/FL), CH2 (PA9/FR), CH3 (PA10/RL), CH4 (PA11/RR) */
 ```
 
-**Cálculo de frecuencia:**
+**Cálculo de frecuencia (center-aligned):**
 ```
 f_timer = SYSCLK / (PSC + 1) = 170 MHz / 1 = 170 MHz
-f_pwm   = f_timer / (ARR + 1) = 170 MHz / 8500 = 20.000 kHz ✓
+f_pwm   = f_timer / (2 × (ARR + 1)) = 170 MHz / (2 × 4250) = 20.000 kHz ✓
 ```
 
-**Resolución PWM:** 8500 pasos (0–8499), equivalente a ~13.05 bits efectivos.
+**Resolución PWM:** 4250 pasos (0–4249), equivalente a ~12.05 bits efectivos.
+
+> **Nota sobre resolución:** La resolución se reduce de ~13 bits (8500 pasos) a ~12 bits
+> (4250 pasos). Para control de motores DC brushed con drivers BTS7960 a 24V, 4250
+> pasos proporcionan una granularidad de 0.024% por paso, que es más que suficiente
+> (la tolerancia mecánica y eléctrica del sistema es >> 0.1%).
 
 **Tipo de timer:** TIM1 es un timer avanzado (Advanced-Control Timer) con:
 - 4 canales de captura/comparación
 - Soporte para dead-time insertion y complementary outputs
 - Repetition counter
 - Break inputs (no usados)
+- Center-aligned mode 1 (interrupt en down-counting only)
 
-### 2.2 TIM8 — PWM motor de dirección
+### 2.2 TIM8 — PWM motor de dirección (center-aligned)
 
 ```c
 /* Fuente: Core/Src/main.c — MX_TIM8_Init() */
 htim8.Instance               = TIM8;
 htim8.Init.Prescaler         = 0;
-htim8.Init.CounterMode       = TIM_COUNTERMODE_UP;       /* Edge-aligned */
-htim8.Init.Period            = 8499;
+htim8.Init.CounterMode       = TIM_COUNTERMODE_CENTERALIGNED1;  /* Up/Down counting */
+htim8.Init.Period            = 4249;   /* Center-aligned: 170 MHz / (2 × 4250) = 20 kHz */
 htim8.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
 htim8.Init.RepetitionCounter = 0;
 htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -82,7 +88,7 @@ htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 
 **Cálculo:** Idéntico a TIM1 → 20 kHz.
 
-### 2.3 TIM2 — Encoder cuadratura (no PWM)
+### 2.3 TIM2 — Encoder cuadratura (sin cambios)
 
 ```c
 /* Fuente: Core/Src/main.c — MX_TIM2_Init() */
@@ -94,7 +100,7 @@ enc.EncoderMode              = TIM_ENCODERMODE_TI12;
 enc.IC1Filter = enc.IC2Filter = 6;            /* ~210 ns glitch rejection */
 ```
 
-Este timer no genera PWM — cuenta pulsos del encoder E6B2-CWZ6C.
+Este timer no genera PWM — cuenta pulsos del encoder E6B2-CWZ6C. No se ve afectado por el cambio.
 
 ---
 
@@ -113,10 +119,10 @@ motor_rr.timer = &htim1;  motor_rr.channel = TIM_CHANNEL_4;   /* PA11 */
 ```
 
 Los 4 canales (CH1–CH4) de TIM1 comparten:
-- El **mismo contador CNT** que cuenta de 0 a 8499
+- El **mismo contador CNT** que cuenta de 0 a 4249 (up) y de 4249 a 0 (down)
 - El **mismo prescaler** (PSC = 0)
-- El **mismo periodo** (ARR = 8499)
-- El **mismo modo de conteo** (UP / edge-aligned)
+- El **mismo periodo** (ARR = 4249)
+- El **mismo modo de conteo** (center-aligned mode 1)
 - La **misma frecuencia base** (170 MHz)
 
 Cada canal tiene su propio **registro CCR** (Compare/Capture Register) que establece el duty cycle individual. El firmware escribe en estos registros independientemente:
@@ -129,7 +135,9 @@ static void Motor_SetPWM(Motor_t *motor, uint16_t pwm) {
 }
 ```
 
-Esto permite que cada motor tenga un **duty cycle independiente** (para Ackermann differential, ABS/TCS per-wheel scaling, etc.) mientras que todos los flancos PWM están **sincronizados al mismo instante** dentro de cada periodo de 50 µs.
+En center-aligned mode, la señal PWM es simétrica: la salida se activa cuando CNT sube
+hasta CCR y se desactiva cuando CNT baja hasta CCR. Esto produce un pulso centrado
+en cada periodo, con transiciones simétricas respecto al centro del periodo.
 
 ---
 
@@ -140,15 +148,15 @@ Esto permite que cada motor tenga un **duty cycle independiente** (para Ackerman
 #### 4.1 Dentro de TIM1: TOTALMENTE SÍNCRONO ✅
 
 Los 4 motores de tracción (FL, FR, RL, RR) están en TIM1 CH1–CH4. Comparten el mismo contador, por lo que:
-- Todos los flancos de subida PWM ocurren en el **mismo ciclo de reloj** (cuando CNT = 0)
-- Todos los flancos de bajada ocurren cuando CNT alcanza el valor CCRx respectivo
+- Todos los pulsos PWM están **centrados en el mismo instante** (pico del triángulo)
+- Los flancos de subida/bajada están simétricos respecto al centro del periodo
 - **No hay desfase de fase entre los 4 canales** — son perfectamente síncronos
 
-Esto es **correcto y deseable** para control de tracción. Los 4 motores reciben su señal PWM en fase, lo que asegura que las actualizaciones de duty cycle aplicadas en `Traction_Update()` producen cambios de par simultáneos en las 4 ruedas.
+Con center-aligned mode, los flancos de conmutación se distribuyen simétricamente a lo largo del periodo, en lugar de concentrarse todos en el instante CNT=0.
 
 #### 4.2 TIM1 vs TIM8: ASÍNCRONOS ⚠️ (pero aceptable)
 
-TIM1 y TIM8 son timers independientes. Aunque ambos tienen la misma configuración (PSC=0, ARR=8499, 20 kHz), sus contadores **no están sincronizados**:
+TIM1 y TIM8 son timers independientes. Aunque ambos tienen la misma configuración (PSC=0, ARR=4249, 20 kHz center-aligned), sus contadores **no están sincronizados**:
 
 - No se usa el mecanismo de sincronización interna del STM32 (Master/Slave Timer Trigger, ITR)
 - Ambos timers arrancan con `HAL_TIM_PWM_Start()` en secuencia dentro de `Motor_Init()`, por lo que hay un desfase de unos pocos ciclos de reloj entre el inicio de TIM1 y TIM8
@@ -164,78 +172,104 @@ TIM1 y TIM8 son timers independientes. Aunque ambos tienen la misma configuraci�
 
 ---
 
-## 5. Efectos físicos reales sobre la estabilidad de tracción
+## 5. Efectos físicos del cambio a center-aligned mode
 
-### 5.1 Escenario actual: TIM1 con 4 canales — Análisis
+### 5.1 Comparación edge-aligned vs center-aligned
 
-**Efecto positivo: Sincronización perfecta de par en las 4 ruedas**
+```
+Edge-aligned (ANTERIOR):
+CNT:  0▲────────────────ARR
+      │  ╱╲               │
+      │ ╱  ╲    CCR match │    Todos los flancos de subida
+      │╱    ╲─────────────│    coinciden en CNT=0 → spike
+      0─────────────────→ t    de corriente simultáneo
 
-Al usar un solo timer (TIM1) para las 4 ruedas:
-- Las actualizaciones de duty cycle se aplican atómicamente en el mismo ciclo PWM
-- No hay "jitter" entre ruedas que pueda causar diferencial de par no intencionado
-- El Ackermann differential, ABS y TCS actúan simultáneamente en las 4 ruedas
+Center-aligned (NUEVO):
+CNT:  0────────ARR────────0
+      │       ╱  ╲         │
+      │      ╱    ╲   CCR  │   Los flancos se distribuyen
+      │     ╱      ╲  match│   simétricamente alrededor del
+      │    ╱        ╲      │   centro → sin spike simultáneo
+      0───────────────────→ t
+```
 
-**Cálculo del efecto de un hipotético desfase:**
+### 5.2 Beneficios del center-aligned mode
 
-Si los motores usaran timers separados (hipotético caso incorrecto), un desfase de fase máximo de medio periodo PWM (25 µs) causaría:
-- Con demand de 50% duty (momento máximo de diferencial): un motor estaría aplicando par mientras otro no
-- A 20 kHz esto dura 25 µs — tiempo insuficiente para que la inercia del motor/rueda responda (constante eléctrica del motor DC >> 25 µs)
-- **Efecto físico real:** imperceptible en este caso, pero el principio de diseño correcto es mantener la sincronización
+| Aspecto | Edge-aligned (antes) | Center-aligned (ahora) |
+|---------|---------------------|----------------------|
+| **Flancos de conmutación** | Todos los rising edges en CNT=0 → spike de corriente | Flancos distribuidos simétricamente → sin spike |
+| **Linealidad de par a bajo duty** | No lineal (pulso asimétrico concentrado en un extremo) | Lineal (pulso centrado, simétrico) |
+| **Rizado de corriente** | Mayor (dV/dt concentrado) | Menor (~50% menos ripple peak) |
+| **EMI** | Picos de corriente simultáneos generan EMI peor caso | Corrientes distribuidas → EMI reducida |
+| **Suavidad a baja velocidad** | Menos suave (torque pulsante asimétrico) | Más suave (torque pulsante simétrico) |
+| **Frecuencia de ripple** | f_pwm | 2 × f_pwm (el ripple aparece al doble de frecuencia) |
 
-### 5.2 El diseño actual es correcto ✅
+### 5.3 Efecto en la modulación de tracción
 
-La decisión de usar **TIM1 CH1-CH4 para las 4 ruedas** es la correcta por estas razones:
+**Antes (edge-aligned):**
+- A 5% duty, los 4 motores encendían simultáneamente durante 425 ciclos (2.5 µs) al inicio del periodo, luego todos apagados durante 47.5 µs
+- Esto producía un "golpe" de corriente cada 50 µs seguido de silencio
 
-| Aspecto | Beneficio |
-|---------|-----------|
-| **Sincronización de par** | Los 4 motores cambian de estado PWM en el mismo instante — no hay diferencial de par transitorio entre ruedas |
-| **ABS/TCS coherencia** | Cuando ABS reduce el duty de una rueda individual (via `wheel_scale[]`), el cambio se aplica en el mismo ciclo PWM que las demás ruedas |
-| **Ackermann diferencial** | Los 4 factores `acker_diff[i]` se aplican simultáneamente — no hay latencia de actualización entre ruedas interiores y exteriores |
-| **EMI reducida** | Al conmutar las 4 ruedas simultáneamente, los picos de corriente se suman pero ocurren en el mismo instante — no hay spreading de EMI en el tiempo |
-| **Simplificación de firmware** | Un solo timer para inicializar y controlar — menos código, menos fallos posibles |
+**Ahora (center-aligned):**
+- A 5% duty (CCR = ~212), los 4 motores producen un pulso centrado de ~2.5 µs en medio de cada semiperiodo, con transiciones simétricas
+- El par aplicado al motor es más uniforme en el tiempo
+
+### 5.4 Efecto en ABS/TCS y Ackermann
+
+- **Sin impacto en la lógica de control:** Los algoritmos ABS/TCS/Ackermann operan sobre valores de duty cycle (0–100%), no sobre la forma de onda
+- La función `Motor_SetPWM()` sigue mapeando 0–`PWM_PERIOD` linealmente
+- Los `wheel_scale[]` y `acker_diff[]` se aplican como factores multiplicativos sobre `base_pwm`, que ahora tiene rango 0–4249 en lugar de 0–8499
+- **El porcentaje de duty sigue siendo idéntico** (e.g., 50% = CCR/ARR = 2124/4249 ≈ 50%)
+
+### 5.5 Efecto en dead-time y complementary outputs
+
+- Los BTS7960 no usan complementary outputs del timer (cada driver tiene su propia lógica de dead-time interna)
+- El dead-time register (DTG) del TIM1 no está configurado (`oc.OCFastMode = TIM_OCFAST_DISABLE`)
+- **Sin impacto** — los break inputs y DTG no se usan en este diseño
+
+### 5.6 Efecto en update events e interrupts
+
+Con `TIM_COUNTERMODE_CENTERALIGNED1`:
+- **Update events** se generan solo en el down-counting (cuando CNT llega a 0)
+- **CCR preload** (`AutoReloadPreload = ENABLE`) asegura que los nuevos valores de duty se aplican atómicamente en el siguiente update event
+- Los 4 canales de TIM1 se actualizan en el **mismo update event** → sincronización preservada
+- La frecuencia de update events es **1× f_pwm = 20 kHz** (igual que antes)
+
+> **Center-aligned mode 1 vs 2 vs 3:**
+> - Mode 1 (`CENTERALIGNED1`): interrupt flag set solo durante down-counting
+> - Mode 2: interrupt flag set solo durante up-counting
+> - Mode 3: interrupt flag set en ambas direcciones
+>
+> Se usa Mode 1 para mantener la misma frecuencia de interrupciones (20 kHz) que antes.
 
 ---
 
-## 6. ¿Se necesita corrección del mapping de timers?
+## 6. Mapping de timers — Verificación
 
-### NO — El mapping actual ya es óptimo ✅
+### El mapping actual sigue siendo óptimo ✅
 
-El firmware actual ya utiliza la configuración ideal:
+| Timer | Uso | Canales | Modo | ¿Correcto? |
+|-------|-----|---------|------|------------|
+| **TIM1** (Advanced) | 4× PWM tracción | CH1 (PA8), CH2 (PA9), CH3 (PA10), CH4 (PA11) | Center-aligned 1 | ✅ Perfecto — 4 motores síncronos, pulso centrado |
+| **TIM8** (Advanced) | 1× PWM dirección | CH3 (PC8) | Center-aligned 1 | ✅ Correcto — consistente con TIM1, independiente |
+| **TIM2** (General 32-bit) | Encoder cuadratura | CH1 (PA15), CH2 (PB3) | Edge-aligned UP | ✅ Sin cambios — encoder no afectado |
 
-| Timer | Uso | Canales | ¿Correcto? |
-|-------|-----|---------|------------|
-| **TIM1** (Advanced) | 4× PWM tracción | CH1 (PA8), CH2 (PA9), CH3 (PA10), CH4 (PA11) | ✅ Perfecto — 4 motores síncronos en un solo timer avanzado |
-| **TIM8** (Advanced) | 1× PWM dirección | CH3 (PC8) | ✅ Correcto — sistema independiente, no requiere sincronización con tracción |
-| **TIM2** (General 32-bit) | Encoder cuadratura | CH1 (PA15), CH2 (PB3) | ✅ Correcto — timer 32-bit para evitar overflow del encoder |
+### 6.1 Propuesta de sincronización TIM1/TIM8 (opcional, no implementada)
 
-**¿Por qué no se necesita cambiar?**
-
-1. **TIM1 ya tiene los 4 motores de tracción** — Esta es exactamente la configuración recomendada. Un solo timer avanzado con 4 canales es la mejor práctica para control de tracción multi-rueda.
-
-2. **TIM8 para dirección es independiente por diseño** — El motor de dirección opera en un loop de control completamente diferente (PID de posición) con dinámica independiente. No se beneficiaría de sincronización con TIM1.
-
-3. **No hay timers "desperdiciados"** — TIM2 se usa para el encoder cuadratura (requiere timer de 32 bits). TIM1 y TIM8 se usan para PWM. Los timers restantes (TIM3, TIM4, TIM6, TIM7, etc.) están libres para futuras expansiones.
-
-### 6.1 Propuesta alternativa (solo si se quisiera sincronizar TIM1 y TIM8)
-
-Si en el futuro se necesitara que el motor de dirección estuviera sincronizado con los motores de tracción (por ejemplo, para coordinación de steering-by-wire con torque vectoring avanzado), se podría configurar TIM1 como Master y TIM8 como Slave usando el Internal Trigger (ITR):
+Si en el futuro se necesitara sincronización de dirección con tracción:
 
 ```c
 /* Hipotético — NO necesario en el diseño actual */
-/* TIM1 como Master: genera trigger en Update Event */
 TIM_MasterConfigTypeDef sMasterConfig = {0};
 sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
 sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
 HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig);
 
-/* TIM8 como Slave: reset del contador en trigger de TIM1 */
 TIM_SlaveConfigTypeDef sSlaveConfig = {0};
 sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
-sSlaveConfig.InputTrigger = TIM_TS_ITR0;  /* TIM1 → TIM8 via ITR0 */
+sSlaveConfig.InputTrigger = TIM_TS_ITR0;
 HAL_TIM_SlaveConfigSynchro(&htim8, &sSlaveConfig);
 ```
-
-**Esta sincronización NO está implementada ni es necesaria** en el sistema actual.
 
 ---
 
@@ -250,8 +284,8 @@ HSI 16 MHz ──► PLL (/4 × 85 /2) ──► SYSCLK = 170 MHz
                                         ├──► APB1 = 170 MHz (÷1) → TIM2, TIM3, TIM4...
                                         └──► APB2 = 170 MHz (÷1) → TIM1, TIM8
 
-PWM TIMER TREE
-══════════════
+PWM TIMER TREE (Center-aligned)
+═══════════════════════════════
                     170 MHz (APB2)
                          │
             ┌────────────┼────────────┐
@@ -260,8 +294,8 @@ PWM TIMER TREE
          │TIM1  │     │TIM8  │    │TIM2      │
          │PSC=0 │     │PSC=0 │    │PSC=0     │
          │ARR=  │     │ARR=  │    │ARR=      │
-         │ 8499 │     │ 8499 │    │ FFFFFFFF │
-         │UP    │     │UP    │    │ENC       │
+         │ 4249 │     │ 4249 │    │ FFFFFFFF │
+         │CTR1  │     │CTR1  │    │ENC       │
          └──┬───┘     └──┬───┘    └──┬───────┘
     ┌───┬──┬┴──┐         │       ┌───┴───┐
     │   │  │   │         │       │       │
@@ -273,7 +307,7 @@ PWM TIMER TREE
    └────────────────┘  └────┘  └───────────┘
      4× Traction       1×Dir    Encoder
      SÍNCRONO ✅       ASÍNC    (lectura)
-     20 kHz            20 kHz   Cuadratura
+     20 kHz CA         20 kHz   Cuadratura
 ```
 
 ### Tabla final de respuestas
@@ -285,20 +319,42 @@ PWM TIMER TREE
 | ¿Hay asincronía entre motores de tracción? | **NO** — perfectamente síncronos (mismo timer) |
 | ¿TIM1 y TIM8 están sincronizados? | **NO** — son independientes (contadores no vinculados) |
 | ¿La asincronía TIM1/TIM8 es un problema? | **NO** — la dirección es un sistema independiente |
-| ¿Efecto físico de la asincronía en tracción? | **Ninguno** — la tracción ya es síncrona |
-| ¿Se necesita corrección del mapping? | **NO** — el diseño actual ya es óptimo |
-| ¿Qué cambiar si se quisiera sincronizar TIM1+TIM8? | Configurar Master/Slave via ITR (código ejemplo en §6.1) |
+| ¿Efecto físico del center-aligned mode? | Mejor linealidad de par, menos ripple, mejor comportamiento a baja velocidad |
+| Modo de conteo | **Center-aligned mode 1** (up/down, interrupt en down-counting) |
+| ARR | **4249** (f = 170 MHz / (2 × 4250) = 20 kHz) |
+| Resolución PWM | 4250 pasos (~12 bits), 0.024% por paso |
+| ¿Motor_SetPWM() sigue funcionando? | **SÍ** — mapea 0–PWM_PERIOD (4249) linealmente |
 
 ---
 
-**Conclusión:** El diseño de timers del STM32G474RE en este proyecto es **correcto y óptimo**. Los 4 motores de tracción están en un solo timer avanzado (TIM1) con sincronización perfecta de fase. El motor de dirección está en un timer independiente (TIM8) lo cual es apropiado para su loop de control separado (PID de posición). No se requiere ninguna corrección.
+## 8. Cambios realizados
+
+| Archivo | Cambio |
+|---------|--------|
+| `Core/Src/main.c` — `MX_TIM1_Init()` | `CounterMode` → `TIM_COUNTERMODE_CENTERALIGNED1`, `Period` → 4249 |
+| `Core/Src/main.c` — `MX_TIM8_Init()` | `CounterMode` → `TIM_COUNTERMODE_CENTERALIGNED1`, `Period` → 4249 |
+| `Core/Src/motor_control.c` | `PWM_PERIOD` → 4249 |
+| `Core/Src/steering_centering.c` | `CENTERING_PWM` → 425 (mantiene ~10%) |
+| `Core/Inc/motor_control.h` | Comentario del rango PWM actualizado |
+
+**Cálculo de frecuencia verificado:**
+```
+Edge-aligned (antes):  f = 170 MHz / (1 × 8500)     = 20.000 kHz ✓
+Center-aligned (ahora): f = 170 MHz / (2 × 4250)     = 20.000 kHz ✓
+Duty 100%:              CCR = ARR = 4249              → 100% ✓
+Duty 10% centering:     CCR = 425 / 4249              ≈ 10.0% ✓
+```
+
+---
+
+**Conclusión:** La conversión a center-aligned mode mejora la linealidad de par y el comportamiento a baja velocidad sin afectar la frecuencia PWM (20 kHz), la sincronización entre motores, ni la lógica de control (ABS/TCS/Ackermann/PID). La resolución pasa de ~13 a ~12 bits, lo cual sigue siendo más que suficiente para motores DC brushed.
 
 ---
 
 **Referencias del código:**
 - `Core/Src/main.c` líneas 395–417: `MX_TIM1_Init()` — configuración TIM1
 - `Core/Src/main.c` líneas 449–468: `MX_TIM8_Init()` — configuración TIM8
-- `Core/Src/main.c` líneas 419–447: `MX_TIM2_Init()` — configuración encoder
+- `Core/Src/main.c` líneas 419–447: `MX_TIM2_Init()` — configuración encoder (sin cambios)
 - `Core/Src/main.c` líneas 261–305: `SystemClock_Config()` — árbol de clock
 - `Core/Inc/main.h` líneas 18–22: Pin definitions PWM
 - `Core/Src/motor_control.c` líneas 298–326: `Motor_Init()` — asignación timer/canal

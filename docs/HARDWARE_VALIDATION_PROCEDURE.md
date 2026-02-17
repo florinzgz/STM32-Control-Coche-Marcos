@@ -281,7 +281,7 @@
 
 ### Test 4.2 — Centering Procedure
 
-**Background:** `SteeringCentering_Step()` runs a non-blocking state machine: sweep left at 10 % PWM (850/8499), if center sensor (PB5 inductive) not found, sweep right. When the inductive sensor triggers (EXTI5), the encoder is zeroed and steering is calibrated. Total timeout: 10 seconds. Stall timeout: 300 ms.
+**Background:** `SteeringCentering_Step()` runs a non-blocking state machine: sweep left at 10 % PWM (425/4249), if center sensor (PB5 inductive) not found, sweep right. When the inductive sensor triggers (EXTI5), the encoder is zeroed and steering is calibrated. Total timeout: 10 seconds. Stall timeout: 300 ms.
 
 **Procedure:**
 

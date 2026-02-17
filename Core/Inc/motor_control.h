@@ -33,7 +33,7 @@ typedef struct {
     float currentA;       // Measured current (Amperes)
     float tempC;          // Temperature (Celsius)
     float speedKmh;       // Wheel speed (km/h)
-    uint16_t pwm;         // PWM duty cycle (0-8499 for TIM1 @ 20kHz)
+    uint16_t pwm;         // PWM duty cycle (0-4249 for TIM1 @ 20kHz center-aligned)
     bool reverse;         // Direction flag
     float effortPct;      // Motor effort percentage
 } WheelState_t;
