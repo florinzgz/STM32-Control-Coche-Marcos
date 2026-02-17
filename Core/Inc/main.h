@@ -63,8 +63,18 @@ extern "C" {
 /* ---- OneWire Bus (DS18B20 temperatures) ---- */
 #define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
 
-/* ---- ADC Pedal ---- */
+/* ---- Pedal Accelerator (dual-channel redundant reading) ---- */
+/* Primary: internal ADC1 on PA3 via voltage divider (5V→3.3V)
+ * Plausibility: ADS1115 16-bit I2C ADC reading full 5V range   */
 #define PIN_PEDAL          GPIO_PIN_3   /* PA3 - ADC1_IN4 */
+
+/* ---- ADS1115 Pedal ADC (I2C plausibility channel) ---- */
+/* The Hall-effect pedal (SS1324LUA-T) operates at 5V (0.3V–4.8V output).
+ * A voltage divider (10 kΩ + 6.8 kΩ) scales the signal to 0–3.3V for
+ * the STM32 internal ADC (primary/fast channel).  The ADS1115 reads
+ * the unscaled 5V signal as a plausibility cross-check.
+ * ADS1115 ADDR pin → GND gives I2C address 0x48.                       */
+#define I2C_ADDR_ADS1115   0x48
 
 /* ---- CAN Bus (FDCAN1 on PB8/PB9 per HAL MSP) ---- */
 #define PIN_CAN_TX         GPIO_PIN_9   /* PB9 - FDCAN1_TX (AF9) */
@@ -88,10 +98,10 @@ extern "C" {
 #define INA226_CHANNEL_BATTERY     4    /* TCA9548A channel index  */
 
 /* ---- Global HAL handles ---- */
+extern ADC_HandleTypeDef hadc1;
 extern FDCAN_HandleTypeDef hfdcan1;
 extern I2C_HandleTypeDef hi2c1;
 extern TIM_HandleTypeDef htim1, htim2, htim8;
-extern ADC_HandleTypeDef hadc1;
 extern IWDG_HandleTypeDef hiwdg;
 
 void Error_Handler(void);

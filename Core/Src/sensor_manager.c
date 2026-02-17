@@ -1,13 +1,15 @@
 /**
   ****************************************************************************
   * @file    sensor_manager.c
-  * @brief   Sensor acquisition: wheel speed, DS18B20, INA226, pedal ADC
+  * @brief   Sensor acquisition: wheel speed, DS18B20, INA226, pedal (dual-ch)
   *
   * Hardware managed by this module:
   *   - 4× LJ12A3 inductive wheel speed sensors (EXTI interrupts)
   *   - 5× DS18B20 temperature sensors (OneWire on PB0)
   *   - 6× INA226 current/voltage sensors (I2C via TCA9548A multiplexer)
-  *   - 1× Hall-effect pedal (ADC1)
+  *   - 1× Hall-effect pedal: dual-channel redundant reading
+  *         Primary:      internal ADC1 on PA3 (via voltage divider)
+  *         Plausibility: ADS1115 16-bit I2C ADC (full 5V range)
   *
   * I2C Bus Recovery Mechanism
   * Protects against SDA held low by slave device
@@ -104,26 +106,183 @@ float Wheel_GetSpeed_RR(void) { Wheel_ComputeSpeed(3); return wheel_speed_kmh[3]
 float Wheel_GetRPM_FL(void)   { return wheel_rpm[0]; }
 
 /* =========================================================================
- *  Pedal – ADC single conversion
+ *  Pedal – Dual-channel redundant reading (automotive-grade architecture)
+ *
+ *  PRIMARY channel: Internal ADC1 on PA3 (fast, ~1 µs conversion)
+ *    The 5V pedal signal is scaled to 0–3.3V via a voltage divider
+ *    (10 kΩ series + 6.8 kΩ to GND → Vout/Vin = 6.8/(10+6.8) = 0.4048).
+ *    With pedal range 0.3V–4.8V → divider output 0.121V–1.943V.
+ *    ADC 12-bit (3.3V): 0.121V → ~150 counts, 1.943V → ~2413 counts.
+ *
+ *  PLAUSIBILITY channel: ADS1115 16-bit I2C ADC (slow, ~8 ms)
+ *    Reads the unscaled 5V signal on A0 for cross-validation.
+ *    Used to verify the primary channel is not stuck or shorted.
+ *
+ *  Cross-validation: both channels must agree within ±5% pedal range.
+ *  If they diverge for >200 ms, a pedal plausibility fault is raised.
+ *  If ADS1115 I2C fails, the primary channel continues operating but
+ *  a sensor degraded warning is set (single-channel mode).
  * ========================================================================= */
 
-static uint16_t pedal_raw   = 0;
-static float    pedal_pct   = 0.0f;
+static uint16_t pedal_raw_adc  = 0;     /* Primary: internal ADC raw (12-bit) */
+static uint16_t pedal_raw_ads  = 0;     /* Plausibility: ADS1115 raw (16-bit) */
+static float    pedal_pct      = 0.0f;  /* Control output: 0–100% from primary */
+static float    pedal_pct_ads  = 0.0f;  /* Plausibility: 0–100% from ADS1115  */
+static bool     pedal_plausible = true; /* Cross-validation result             */
+static bool     pedal_ads_ever_read = false; /* First successful ADS1115 read? */
+static uint32_t pedal_ads_last_ok_tick = 0;  /* Last successful ADS1115 read   */
+static uint32_t pedal_diverge_start    = 0;  /* When channels started diverging */
 
 extern ADC_HandleTypeDef hadc1;
+extern I2C_HandleTypeDef hi2c1;
+
+/* ADS1115 register addresses */
+#define ADS1115_REG_CONVERSION  0x00
+#define ADS1115_REG_CONFIG      0x01
+
+/* ADS1115 config: single-shot, AIN0, ±6.144V, 128 SPS = 0xC183 */
+#define ADS1115_CONFIG_PEDAL    0xC183U
+
+/* Primary ADC calibration (voltage divider 10kΩ + 6.8kΩ, 12-bit, 3.3V ref)
+ * Divider ratio: 6.8/(10+6.8) = 0.4048
+ * Pedal 0.3V released → 0.3 × 0.4048 = 0.121V → 0.121/3.3 × 4095 ≈ 150
+ * Pedal 4.8V pressed  → 4.8 × 0.4048 = 1.943V → 1.943/3.3 × 4095 ≈ 2413 */
+#define PEDAL_ADC_MIN   150U     /* ~0.3V (pedal released), after divider */
+#define PEDAL_ADC_MAX   2413U    /* ~4.8V (pedal fully pressed), after divider */
+
+/* ADS1115 calibration (PGA ±6.144V, LSB = 187.5 µV)
+ * Pedal 0.3V → 0.3/0.0001875 = 1600 counts
+ * Pedal 4.8V → 4.8/0.0001875 = 25600 counts */
+#define PEDAL_ADS_MIN   1600U
+#define PEDAL_ADS_MAX   25600U
+
+/* Cross-validation tolerance: 5% of full pedal range */
+#define PEDAL_PLAUSIBILITY_PCT  5.0f
+/* Time before divergence becomes a fault (ms) */
+#define PEDAL_DIVERGE_TIMEOUT_MS 200U
+/* ADS1115 stale data timeout (ms) — if I2C fails this long, warn */
+#define PEDAL_ADS_STALE_TIMEOUT_MS 500U
+
+/**
+ * @brief  Read primary pedal channel via internal ADC (fast, ~1 µs).
+ */
+static void Pedal_ReadADC(void)
+{
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 2) == HAL_OK) {
+        pedal_raw_adc = (uint16_t)HAL_ADC_GetValue(&hadc1);
+    }
+    HAL_ADC_Stop(&hadc1);
+
+    /* Map calibrated range to 0–100% */
+    if (pedal_raw_adc <= PEDAL_ADC_MIN) {
+        pedal_pct = 0.0f;
+    } else if (pedal_raw_adc >= PEDAL_ADC_MAX) {
+        pedal_pct = 100.0f;
+    } else {
+        pedal_pct = (float)(pedal_raw_adc - PEDAL_ADC_MIN) * 100.0f
+                  / (float)(PEDAL_ADC_MAX - PEDAL_ADC_MIN);
+    }
+}
+
+/**
+ * @brief  Read plausibility channel via ADS1115 I2C ADC (slow, ~8 ms).
+ * @retval true if I2C read succeeded, false on I2C failure.
+ */
+static bool Pedal_ReadADS1115(void)
+{
+    /* Start single-shot conversion */
+    uint8_t cfg[3];
+    cfg[0] = ADS1115_REG_CONFIG;
+    cfg[1] = (uint8_t)(ADS1115_CONFIG_PEDAL >> 8);
+    cfg[2] = (uint8_t)(ADS1115_CONFIG_PEDAL & 0xFF);
+
+    if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                 cfg, 3, 10) != HAL_OK) {
+        return false;
+    }
+
+    /* Wait for conversion (128 SPS → ~8 ms) */
+    HAL_Delay(8);
+
+    /* Read conversion result */
+    uint8_t reg = ADS1115_REG_CONVERSION;
+    uint8_t result[2] = {0};
+    if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                 &reg, 1, 5) != HAL_OK) {
+        return false;
+    }
+    if (HAL_I2C_Master_Receive(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                result, 2, 5) != HAL_OK) {
+        return false;
+    }
+
+    int16_t raw_signed = (int16_t)((result[0] << 8) | result[1]);
+    uint16_t raw = (raw_signed < 0) ? 0U : (uint16_t)raw_signed;
+    pedal_raw_ads = raw;
+
+    /* Map calibrated range to 0–100% */
+    if (raw <= PEDAL_ADS_MIN) {
+        pedal_pct_ads = 0.0f;
+    } else if (raw >= PEDAL_ADS_MAX) {
+        pedal_pct_ads = 100.0f;
+    } else {
+        pedal_pct_ads = (float)(raw - PEDAL_ADS_MIN) * 100.0f
+                      / (float)(PEDAL_ADS_MAX - PEDAL_ADS_MIN);
+    }
+
+    pedal_ads_last_ok_tick = HAL_GetTick();
+    pedal_ads_ever_read = true;
+    return true;
+}
 
 void Pedal_Update(void)
 {
-    HAL_ADC_Start(&hadc1);
-    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
-        pedal_raw = (uint16_t)HAL_ADC_GetValue(&hadc1);
+    uint32_t now = HAL_GetTick();
+
+    /* 1. Always read primary channel first (fast, ~1 µs) */
+    Pedal_ReadADC();
+
+    /* 2. Read plausibility channel (slow, ~8 ms — still fits in 50 ms slot) */
+    bool ads_ok = Pedal_ReadADS1115();
+
+    /* 3. Cross-validate both channels */
+    if (ads_ok) {
+        float diff = pedal_pct - pedal_pct_ads;
+        if (diff < 0.0f) diff = -diff;
+
+        if (diff > PEDAL_PLAUSIBILITY_PCT) {
+            /* Channels disagree — start / continue divergence timer */
+            if (pedal_diverge_start == 0) {
+                pedal_diverge_start = now;
+            }
+            if ((now - pedal_diverge_start) >= PEDAL_DIVERGE_TIMEOUT_MS) {
+                /* Sustained divergence → plausibility fault */
+                pedal_plausible = false;
+            }
+        } else {
+            /* Channels agree — reset divergence timer */
+            pedal_diverge_start = 0;
+            pedal_plausible = true;
+        }
+    } else {
+        /* ADS1115 I2C failed — check stale timeout (only after first
+         * successful read, to avoid false alarm during boot) */
+        if (pedal_ads_ever_read &&
+            (now - pedal_ads_last_ok_tick) >= PEDAL_ADS_STALE_TIMEOUT_MS) {
+            /* ADS1115 has been offline too long — flag as degraded but
+             * continue using primary ADC (single-channel fallback).
+             * Reset divergence timer so recovery starts fresh. */
+            pedal_plausible = false;
+            pedal_diverge_start = 0;
+        }
     }
-    HAL_ADC_Stop(&hadc1);
-    pedal_pct = (float)pedal_raw * 100.0f / 4095.0f;
 }
 
-float Pedal_GetValue(void)   { return (float)pedal_raw; }
-float Pedal_GetPercent(void) { return pedal_pct; }
+float Pedal_GetValue(void)       { return (float)pedal_raw_adc; }
+float Pedal_GetPercent(void)     { return pedal_pct; }
+bool  Pedal_IsPlausible(void)    { return pedal_plausible; }
+float Pedal_GetADSPercent(void)  { return pedal_pct_ads; }
 
 /* =========================================================================
  *  INA226 Current Sensors via TCA9548A I2C multiplexer
@@ -599,8 +758,14 @@ void Sensor_Init(void)
         wheel_last_pulse_tick[i] = 0;
     }
 
-    pedal_raw = 0;
-    pedal_pct = 0.0f;
+    pedal_raw_adc = 0;
+    pedal_raw_ads = 0;
+    pedal_pct     = 0.0f;
+    pedal_pct_ads = 0.0f;
+    pedal_plausible        = true;
+    pedal_ads_ever_read    = false;
+    pedal_ads_last_ok_tick = 0;
+    pedal_diverge_start    = 0;
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         current_amps[i] = 0.0f;

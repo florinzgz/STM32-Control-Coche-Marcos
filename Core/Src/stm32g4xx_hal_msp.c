@@ -31,8 +31,8 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   if(htim_base->Instance==TIM1)
   {
     __HAL_RCC_TIM1_CLK_ENABLE();
-    HAL_NVIC_SetPriority(TIM1_UP_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
+    HAL_NVIC_SetPriority(TIM1_UP_TIM16_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
   }
   else if(htim_base->Instance==TIM2)
   {
@@ -99,6 +99,8 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
   }
 }
 
+/* ADC MSP init — primary pedal channel on PA3 (ADC1_IN4)
+ * Voltage divider (10 kΩ + 6.8 kΩ) scales 5V pedal to 0–3.3V range. */
 void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -106,8 +108,8 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
   {
     __HAL_RCC_ADC12_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    
-    GPIO_InitStruct.Pin = GPIO_PIN_3;  /* PA3 = ADC1_IN4 (pedal) */
+
+    GPIO_InitStruct.Pin = GPIO_PIN_3;     /* PA3 = ADC1_IN4 */
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);

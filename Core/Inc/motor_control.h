@@ -78,10 +78,6 @@ void Steering_GetWheelAngles(float *out_fl_deg, float *out_fr_deg);
 void  Encoder_CheckHealth(void);
 bool  Encoder_HasFault(void);
 
-/* Ackermann Geometry (ported from ESP32 steering_model.cpp) */
-AckermannResult_t Ackermann_Compute(float wheelAngleDeg);
-void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg);
-
 /* Low-level PWM control (TIM1/TIM8 direct) */
 void Motor_SetPWM_FL(uint16_t pwm, bool reverse);
 void Motor_SetPWM_FR(uint16_t pwm, bool reverse);

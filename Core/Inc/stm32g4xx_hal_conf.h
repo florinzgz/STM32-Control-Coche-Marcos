@@ -47,6 +47,15 @@
   #define LSE_STARTUP_TIMEOUT    5000U   /*!< Time out for LSE start up, in ms */
 #endif /* LSE_STARTUP_TIMEOUT */
 
+#if !defined  (EXTERNAL_CLOCK_VALUE)
+  #define EXTERNAL_CLOCK_VALUE    12288000U /*!< Value of the External clock in Hz
+                                                (I2S/SAI — not used, STM32CubeMX default) */
+#endif /* EXTERNAL_CLOCK_VALUE */
+
+#if !defined (HSI48_VALUE)
+  #define HSI48_VALUE              48000000U /*!< Value of the HSI48 oscillator in Hz */
+#endif /* HSI48_VALUE */
+
 /* System Configuration */
 #define  VDD_VALUE                    3300U /*!< Value of VDD in mv */
 #define  TICK_INT_PRIORITY            0U    /*!< tick interrupt priority */

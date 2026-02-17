@@ -112,6 +112,11 @@ static uint32_t         degraded_telemetry_count = 0;  /* Total entries into deg
 static float tcs_reduction[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 static uint32_t tcs_last_tick = 0;
 
+/* Per-wheel ABS pulse state (non-blocking, timestamp-based).
+ * Declared here so Safety_Init can reset them. */
+static uint32_t abs_pulse_timer[4];     /* HAL_GetTick() at phase start   */
+static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
+
 /* ---- Obstacle CAN receiver state -------------------------------- */
 
 /* Obstacle distance thresholds for the STM32 backstop limiter.
@@ -531,10 +536,6 @@ void Safety_Init(void)
 #define ABS_PULSE_PERIOD_MS     80      /* total pulse cycle in ms        */
 #define ABS_PULSE_ON_RATIO      0.6f    /* 60 % of period = reduced phase */
 
-/* Per-wheel pulse state (non-blocking, timestamp-based) */
-static uint32_t abs_pulse_timer[4];     /* HAL_GetTick() at phase start   */
-static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
-
 void ABS_Update(void)
 {
     /* Skip if ABS module is disabled (service mode) */
@@ -944,6 +945,16 @@ void Safety_CheckSensors(void)
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
+    }
+
+    /* Pedal plausibility: dual-channel cross-validation.
+     * If the primary (ADC) and plausibility (ADS1115) channels diverge,
+     * Pedal_IsPlausible() returns false.  This is safety-critical —
+     * a stuck pedal means the car could cause unintended acceleration.
+     * On plausibility failure: force throttle to zero AND enter DEGRADED. */
+    if (!Pedal_IsPlausible()) {
+        Traction_SetDemand(0.0f);
+        fault_count++;
     }
 
     /* If any enabled sensor has a plausibility fault, enter DEGRADED */

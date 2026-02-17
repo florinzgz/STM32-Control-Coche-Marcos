@@ -128,7 +128,8 @@ void I2C1_ER_IRQHandler(void)
 
 /* ---- HAL Callbacks ---- */
 
-void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan)
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
+    (void)RxFifo0ITs;
     Safety_UpdateCANRxTime();
 }
