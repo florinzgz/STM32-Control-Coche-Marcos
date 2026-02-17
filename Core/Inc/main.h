@@ -63,40 +63,17 @@ extern "C" {
 /* ---- OneWire Bus (DS18B20 temperatures) ---- */
 #define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
 
-/* ---- Pedal Accelerator ---- */
+/* ---- Pedal Accelerator (dual-channel redundant reading) ---- */
+/* Primary: internal ADC1 on PA3 via voltage divider (5V→3.3V)
+ * Plausibility: ADS1115 16-bit I2C ADC reading full 5V range   */
 #define PIN_PEDAL          GPIO_PIN_3   /* PA3 - ADC1_IN4 */
 
-/* ---- Pedal Sensor Configuration ----
- *
- * Select ONE sensor type to match your physical hardware.
- *
- * PEDAL_SENSOR_SS1324  (default)
- *   Allegro SS1324LUA-T / A1324LUA-T — VCC = 5V (min 4.5V)
- *   Output 0.3 V – 4.8 V.
- *   ⚠ Cannot run at 3.3V (below minimum operating voltage).
- *   Requires voltage divider (10 kΩ + 6.8 kΩ) on PA3.
- *   Requires ADS1115 I2C ADC for plausibility cross-check.
- *   Components: sensor + 2 resistors + ADS1115 module + bypass cap.
- *
- * PEDAL_SENSOR_DRV5055  (recommended plug-and-play)
- *   TI DRV5055A3QDBZR — VCC = 3.3 V (min 3.0 V, max 5.5 V)
- *   Output 0.2 V – 3.1 V at 3.3 V supply (ratiometric).
- *   Direct connection to PA3: NO voltage divider needed.
- *   ADS1115 optional (firmware detects presence automatically).
- *   Components: sensor + 100 nF bypass capacitor only.
- *   3 wires: VCC (3.3 V) — GND — OUT → PA3.
- */
-#define PEDAL_SENSOR_SS1324    0
-#define PEDAL_SENSOR_DRV5055   1
-
-/* ▸▸▸ Change this line to match your hardware ◂◂◂ */
-#define PEDAL_SENSOR_TYPE      PEDAL_SENSOR_DRV5055
-
-/* ---- ADS1115 Pedal ADC (I2C plausibility channel — optional) ---- */
-/* ADDR pin → GND gives I2C address 0x48.
- * When connected: provides dual-channel cross-validation (automotive-grade).
- * When absent: firmware auto-detects after 3 failed reads and continues
- * in single-channel mode with wire-fault detection on the ADC channel. */
+/* ---- ADS1115 Pedal ADC (I2C plausibility channel) ---- */
+/* The Hall-effect pedal (SS1324LUA-T) operates at 5V (0.3V–4.8V output).
+ * A voltage divider (10 kΩ + 6.8 kΩ) scales the signal to 0–3.3V for
+ * the STM32 internal ADC (primary/fast channel).  The ADS1115 reads
+ * the unscaled 5V signal as a plausibility cross-check.
+ * ADS1115 ADDR pin → GND gives I2C address 0x48.                       */
 #define I2C_ADDR_ADS1115   0x48
 
 /* ---- CAN Bus (FDCAN1 on PB8/PB9 per HAL MSP) ---- */
