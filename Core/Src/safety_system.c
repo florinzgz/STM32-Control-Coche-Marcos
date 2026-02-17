@@ -947,6 +947,16 @@ void Safety_CheckSensors(void)
         }
     }
 
+    /* Pedal plausibility: dual-channel cross-validation.
+     * If the primary (ADC) and plausibility (ADS1115) channels diverge,
+     * Pedal_IsPlausible() returns false.  This is safety-critical —
+     * a stuck pedal means the car could accelerate unintended.
+     * On plausibility failure: force throttle to zero AND enter DEGRADED. */
+    if (!Pedal_IsPlausible()) {
+        Traction_SetDemand(0.0f);
+        fault_count++;
+    }
+
     /* If any enabled sensor has a plausibility fault, enter DEGRADED */
     if (fault_count > 0) {
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);

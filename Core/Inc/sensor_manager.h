@@ -29,10 +29,12 @@ void SteeringCenter_IRQHandler(void);
 bool SteeringCenter_Detected(void);
 void SteeringCenter_ClearFlag(void);
 
-/* ---- Pedal (ADC) ---- */
-void Pedal_Update(void);
-float Pedal_GetValue(void);
-float Pedal_GetPercent(void);
+/* ---- Pedal (dual-channel: ADC primary + ADS1115 plausibility) ---- */
+void  Pedal_Update(void);
+float Pedal_GetValue(void);       /* Primary ADC raw value */
+float Pedal_GetPercent(void);     /* Primary ADC 0–100% (used for control) */
+bool  Pedal_IsPlausible(void);    /* Cross-validation: both channels agree */
+float Pedal_GetADSPercent(void);  /* ADS1115 plausibility channel 0–100% */
 
 /* ---- DS18B20 Temperature (OneWire) ---- */
 void Temperature_StartConversion(void);

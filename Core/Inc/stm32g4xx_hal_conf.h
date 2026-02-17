@@ -9,7 +9,7 @@
 
 /* Module Selection */
 #define HAL_MODULE_ENABLED
-/* #define HAL_ADC_MODULE_ENABLED  -- removed: pedal uses ADS1115 via I2C */
+#define HAL_ADC_MODULE_ENABLED
 #define HAL_CORTEX_MODULE_ENABLED
 #define HAL_DMA_MODULE_ENABLED
 #define HAL_EXTI_MODULE_ENABLED
