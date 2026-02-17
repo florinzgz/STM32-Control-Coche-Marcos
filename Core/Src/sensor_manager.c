@@ -110,7 +110,7 @@ float Wheel_GetRPM_FL(void)   { return wheel_rpm[0]; }
  *
  *  PRIMARY channel: Internal ADC1 on PA3 (fast, ~1 µs conversion)
  *    The 5V pedal signal is scaled to 0–3.3V via a voltage divider
- *    (10 kΩ series + 6.8 kΩ to GND → ratio = 6.8/(10+6.8) = 0.4048).
+ *    (10 kΩ series + 6.8 kΩ to GND → Vout/Vin = 6.8/(10+6.8) = 0.4048).
  *    With pedal range 0.3V–4.8V → divider output 0.121V–1.943V.
  *    ADC 12-bit (3.3V): 0.121V → ~150 counts, 1.943V → ~2413 counts.
  *
@@ -129,6 +129,7 @@ static uint16_t pedal_raw_ads  = 0;     /* Plausibility: ADS1115 raw (16-bit) */
 static float    pedal_pct      = 0.0f;  /* Control output: 0–100% from primary */
 static float    pedal_pct_ads  = 0.0f;  /* Plausibility: 0–100% from ADS1115  */
 static bool     pedal_plausible = true; /* Cross-validation result             */
+static bool     pedal_ads_ever_read = false; /* First successful ADS1115 read? */
 static uint32_t pedal_ads_last_ok_tick = 0;  /* Last successful ADS1115 read   */
 static uint32_t pedal_diverge_start    = 0;  /* When channels started diverging */
 
@@ -231,6 +232,7 @@ static bool Pedal_ReadADS1115(void)
     }
 
     pedal_ads_last_ok_tick = HAL_GetTick();
+    pedal_ads_ever_read = true;
     return true;
 }
 
@@ -264,11 +266,15 @@ void Pedal_Update(void)
             pedal_plausible = true;
         }
     } else {
-        /* ADS1115 I2C failed — check stale timeout */
-        if ((now - pedal_ads_last_ok_tick) >= PEDAL_ADS_STALE_TIMEOUT_MS) {
+        /* ADS1115 I2C failed — check stale timeout (only after first
+         * successful read, to avoid false alarm during boot) */
+        if (pedal_ads_ever_read &&
+            (now - pedal_ads_last_ok_tick) >= PEDAL_ADS_STALE_TIMEOUT_MS) {
             /* ADS1115 has been offline too long — flag as degraded but
-             * continue using primary ADC (single-channel fallback) */
+             * continue using primary ADC (single-channel fallback).
+             * Reset divergence timer so recovery starts fresh. */
             pedal_plausible = false;
+            pedal_diverge_start = 0;
         }
     }
 }
@@ -756,8 +762,9 @@ void Sensor_Init(void)
     pedal_raw_ads = 0;
     pedal_pct     = 0.0f;
     pedal_pct_ads = 0.0f;
-    pedal_plausible       = true;
-    pedal_ads_last_ok_tick = HAL_GetTick();
+    pedal_plausible        = true;
+    pedal_ads_ever_read    = false;
+    pedal_ads_last_ok_tick = 0;
     pedal_diverge_start    = 0;
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
