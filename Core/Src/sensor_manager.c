@@ -1,15 +1,17 @@
 /**
   ****************************************************************************
   * @file    sensor_manager.c
-  * @brief   Sensor acquisition: wheel speed, DS18B20, INA226, pedal (dual-ch)
+  * @brief   Sensor acquisition: wheel speed, DS18B20, INA226, pedal
   *
   * Hardware managed by this module:
   *   - 4× LJ12A3 inductive wheel speed sensors (EXTI interrupts)
   *   - 5× DS18B20 temperature sensors (OneWire on PB0)
   *   - 6× INA226 current/voltage sensors (I2C via TCA9548A multiplexer)
-  *   - 1× Hall-effect pedal: dual-channel redundant reading
-  *         Primary:      internal ADC1 on PA3 (via voltage divider)
-  *         Plausibility: ADS1115 16-bit I2C ADC (full 5V range)
+  *   - 1× Hall-effect pedal accelerator:
+  *         Sensor type selected in main.h (PEDAL_SENSOR_TYPE):
+  *           DRV5055: 3.3V direct → PA3 (plug-and-play, no divider)
+  *           SS1324:  5V + voltage divider + ADS1115 plausibility
+  *         ADS1115 auto-detected: present → dual-channel, absent → single
   *
   * I2C Bus Recovery Mechanism
   * Protects against SDA held low by slave device
@@ -106,22 +108,22 @@ float Wheel_GetSpeed_RR(void) { Wheel_ComputeSpeed(3); return wheel_speed_kmh[3]
 float Wheel_GetRPM_FL(void)   { return wheel_rpm[0]; }
 
 /* =========================================================================
- *  Pedal – Dual-channel redundant reading (automotive-grade architecture)
+ *  Pedal – Configurable sensor support with optional ADS1115 plausibility
  *
- *  PRIMARY channel: Internal ADC1 on PA3 (fast, ~1 µs conversion)
- *    The 5V pedal signal is scaled to 0–3.3V via a voltage divider
- *    (10 kΩ series + 6.8 kΩ to GND → Vout/Vin = 6.8/(10+6.8) = 0.4048).
- *    With pedal range 0.3V–4.8V → divider output 0.121V–1.943V.
- *    ADC 12-bit (3.3V): 0.121V → ~150 counts, 1.943V → ~2413 counts.
+ *  Supports two sensor configurations (selected in main.h):
  *
- *  PLAUSIBILITY channel: ADS1115 16-bit I2C ADC (slow, ~8 ms)
- *    Reads the unscaled 5V signal on A0 for cross-validation.
- *    Used to verify the primary channel is not stuck or shorted.
+ *  ► PEDAL_SENSOR_DRV5055  (plug-and-play, recommended)
+ *    TI DRV5055A3 powered at 3.3V → output 0.2V–3.1V → PA3 direct.
+ *    No voltage divider needed.  ADS1115 auto-detected as optional.
  *
- *  Cross-validation: both channels must agree within ±5% pedal range.
- *  If they diverge for >200 ms, a pedal plausibility fault is raised.
- *  If ADS1115 I2C fails, the primary channel continues operating but
- *  a sensor degraded warning is set (single-channel mode).
+ *  ► PEDAL_SENSOR_SS1324   (original, requires external components)
+ *    Allegro SS1324 at 5V → voltage divider → PA3 (0.12V–1.94V).
+ *    ADS1115 reads unscaled 5V for cross-validation.
+ *
+ *  When ADS1115 is present: dual-channel cross-validation (automotive-grade).
+ *  When ADS1115 is absent:  single-channel with wire-fault detection.
+ *  Auto-detect: if 3 consecutive I2C reads fail at boot, ADS1115 is
+ *  considered not connected and single-channel mode activates cleanly.
  * ========================================================================= */
 
 static uint16_t pedal_raw_adc  = 0;     /* Primary: internal ADC raw (12-bit) */
@@ -132,6 +134,8 @@ static bool     pedal_plausible = true; /* Cross-validation result             *
 static bool     pedal_ads_ever_read = false; /* First successful ADS1115 read? */
 static uint32_t pedal_ads_last_ok_tick = 0;  /* Last successful ADS1115 read   */
 static uint32_t pedal_diverge_start    = 0;  /* When channels started diverging */
+static uint8_t  pedal_ads_boot_fails   = 0;  /* Consecutive boot-time failures */
+static bool     pedal_ads_present      = true; /* ADS1115 detected on I2C bus  */
 
 extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c1;
@@ -143,18 +147,43 @@ extern I2C_HandleTypeDef hi2c1;
 /* ADS1115 config: single-shot, AIN0, ±6.144V, 128 SPS = 0xC183 */
 #define ADS1115_CONFIG_PEDAL    0xC183U
 
-/* Primary ADC calibration (voltage divider 10kΩ + 6.8kΩ, 12-bit, 3.3V ref)
- * Divider ratio: 6.8/(10+6.8) = 0.4048
- * Pedal 0.3V released → 0.3 × 0.4048 = 0.121V → 0.121/3.3 × 4095 ≈ 150
- * Pedal 4.8V pressed  → 4.8 × 0.4048 = 1.943V → 1.943/3.3 × 4095 ≈ 2413 */
-#define PEDAL_ADC_MIN   150U     /* ~0.3V (pedal released), after divider */
-#define PEDAL_ADC_MAX   2413U    /* ~4.8V (pedal fully pressed), after divider */
+/* ---- Sensor-specific ADC calibration ---- */
+#if (PEDAL_SENSOR_TYPE == PEDAL_SENSOR_DRV5055)
+  /* DRV5055A3 at 3.3V — direct to PA3, no voltage divider.
+   * Ratiometric output: Vq = VCC/2 = 1.65V at zero field.
+   * With typical pedal magnet travel:
+   *   Released ≈ 0.2V → 0.2/3.3 × 4095 ≈ 248 counts
+   *   Pressed  ≈ 3.1V → 3.1/3.3 × 4095 ≈ 3848 counts
+   * NOTE: Calibrate these to YOUR pedal by reading raw ADC at both ends. */
+  #define PEDAL_ADC_MIN       248U
+  #define PEDAL_ADC_MAX       3848U
+  /* Wire-fault detection thresholds (single-channel safety):
+   * Below FAULT_LOW  → open wire / sensor disconnected (< 40 mV)
+   * Above FAULT_HIGH → shorted to VCC / rail fault (> 3.27V)         */
+  #define PEDAL_FAULT_LOW     50U      /* < ~40 mV  = wire break    */
+  #define PEDAL_FAULT_HIGH    4060U    /* > ~3.27V  = short to VCC  */
+#else /* PEDAL_SENSOR_SS1324 */
+  /* SS1324LUA-T at 5V via voltage divider (10 kΩ + 6.8 kΩ)
+   * Divider ratio: 6.8/(10+6.8) = 0.4048
+   * Pedal 0.3V released → 0.121V → ~150 counts
+   * Pedal 4.8V pressed  → 1.943V → ~2413 counts */
+  #define PEDAL_ADC_MIN       150U
+  #define PEDAL_ADC_MAX       2413U
+  #define PEDAL_FAULT_LOW     30U      /* < ~24 mV  = wire break    */
+  #define PEDAL_FAULT_HIGH    2800U    /* > ~2.25V  = short to VCC  */
+#endif
 
-/* ADS1115 calibration (PGA ±6.144V, LSB = 187.5 µV)
- * Pedal 0.3V → 0.3/0.0001875 = 1600 counts
- * Pedal 4.8V → 4.8/0.0001875 = 25600 counts */
-#define PEDAL_ADS_MIN   1600U
-#define PEDAL_ADS_MAX   25600U
+/* ADS1115 calibration (PGA ±6.144V, LSB = 187.5 µV) — used when ADS present
+ * These values work for both sensor types (read before any divider). */
+#if (PEDAL_SENSOR_TYPE == PEDAL_SENSOR_DRV5055)
+  /* DRV5055 at 3.3V: output 0.2V–3.1V on ADS1115 A0 */
+  #define PEDAL_ADS_MIN   1067U    /* 0.2V / 0.0001875 */
+  #define PEDAL_ADS_MAX   16533U   /* 3.1V / 0.0001875 */
+#else
+  /* SS1324 at 5V: output 0.3V–4.8V on ADS1115 A0 (unscaled) */
+  #define PEDAL_ADS_MIN   1600U    /* 0.3V / 0.0001875 */
+  #define PEDAL_ADS_MAX   25600U   /* 4.8V / 0.0001875 */
+#endif
 
 /* Cross-validation tolerance: 5% of full pedal range */
 #define PEDAL_PLAUSIBILITY_PCT  5.0f
@@ -162,6 +191,8 @@ extern I2C_HandleTypeDef hi2c1;
 #define PEDAL_DIVERGE_TIMEOUT_MS 200U
 /* ADS1115 stale data timeout (ms) — if I2C fails this long, warn */
 #define PEDAL_ADS_STALE_TIMEOUT_MS 500U
+/* Consecutive I2C failures at boot before declaring ADS1115 absent */
+#define PEDAL_ADS_BOOT_FAIL_MAX 3U
 
 /**
  * @brief  Read primary pedal channel via internal ADC (fast, ~1 µs).
@@ -243,10 +274,38 @@ void Pedal_Update(void)
     /* 1. Always read primary channel first (fast, ~1 µs) */
     Pedal_ReadADC();
 
-    /* 2. Read plausibility channel (slow, ~8 ms — still fits in 50 ms slot) */
+    /* 2. Wire-fault detection on primary ADC (works for both sensor types) */
+    if (pedal_raw_adc < PEDAL_FAULT_LOW || pedal_raw_adc > PEDAL_FAULT_HIGH) {
+        /* ADC reading is at rail extremes → wire break or short */
+        pedal_plausible = false;
+        pedal_pct = 0.0f;  /* Safety: force zero throttle on wire fault */
+        return;
+    }
+
+    /* 3. ADS1115 plausibility channel (if present) */
+    if (!pedal_ads_present) {
+        /* ADS1115 not connected — single-channel mode.
+         * Plausibility is based only on wire-fault check above. */
+        pedal_plausible = true;
+        return;
+    }
+
+    /* Read plausibility channel (slow, ~8 ms — still fits in 50 ms slot) */
     bool ads_ok = Pedal_ReadADS1115();
 
-    /* 3. Cross-validate both channels */
+    /* 4. Auto-detect ADS1115 presence at boot */
+    if (!pedal_ads_ever_read && !ads_ok) {
+        pedal_ads_boot_fails++;
+        if (pedal_ads_boot_fails >= PEDAL_ADS_BOOT_FAIL_MAX) {
+            /* ADS1115 not found after 3 attempts — disable permanently.
+             * This avoids 8 ms I2C delay every cycle when not connected. */
+            pedal_ads_present = false;
+            pedal_plausible = true;
+        }
+        return;
+    }
+
+    /* 5. Cross-validate both channels */
     if (ads_ok) {
         float diff = pedal_pct - pedal_pct_ads;
         if (diff < 0.0f) diff = -diff;
@@ -766,6 +825,8 @@ void Sensor_Init(void)
     pedal_ads_ever_read    = false;
     pedal_ads_last_ok_tick = 0;
     pedal_diverge_start    = 0;
+    pedal_ads_boot_fails   = 0;
+    pedal_ads_present      = true;  /* Assume present until proven absent */
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         current_amps[i] = 0.0f;

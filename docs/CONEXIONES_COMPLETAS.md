@@ -19,15 +19,15 @@
   │  GPIO out ──► 5× DIR + 5× EN + 3× RELAY                       │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z     │
   │  I2C1 ──► TCA9548A ──► 6× INA226                              │
-  │  I2C1 ──► ADS1115 ◄── Pedal (plausibilidad, A0, 5V)            │
-  │  ADC1 ◄── Divisor ◄── Pedal (primario, PA3, 5V→3.3V)          │
+  │  I2C1 ──► ADS1115 ◄── Pedal (plausibilidad, opcional)          │
+  │  ADC1 ◄── Pedal Hall (PA3, directo DRV5055 o vía divisor)     │
   │  OneWire ──► 5× DS18B20 (PB0)                                  │
   │  FDCAN1 ──► TJA1051 ──► CAN Bus ──► TJA1051 ──► ESP32-S3      │
   └─────────────────────────────────────────────────────────────────┘
 ```
 
 **Total cables del STM32:** 32 GPIO + alimentación + I2C + CAN
-**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 ADS1115 + 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051
+**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 pedal Hall (DRV5055 o SS1324), ADS1115 (opcional), 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051
 
 ---
 
@@ -149,77 +149,129 @@ Cada motor de tracción tiene **3 cables** del STM32 al BTS7960:
 
 ---
 
-## 6) PEDAL ACELERADOR — Doble canal redundante (ADC interno + ADS1115)
+## 6) PEDAL ACELERADOR — Configuración seleccionable (DRV5055 o SS1324)
 
-El sensor Hall SS1324LUA-T opera a 5V y produce una señal de 0.3V (reposo) a 4.8V (pisado a fondo). Se usa una arquitectura de **doble canal redundante** (como en automoción real):
+El firmware soporta **dos tipos de sensor Hall** para el pedal, seleccionable en `main.h` (constante `PEDAL_SENSOR_TYPE`). El ADS1115 se auto-detecta: si está conectado activa doble canal, si no, funciona en canal único con detección de fallo de cable.
 
-- **Canal primario (rápido):** ADC interno del STM32 en PA3, a través de un divisor de tensión resistivo (5V → 3.3V). Lectura en ~1 µs.
-- **Canal de plausibilidad (preciso):** ADS1115 16-bit I2C ADC, lee la señal original de 5V sin escalar. Lectura en ~8 ms.
+---
 
-El firmware compara ambos canales: si divergen más del 5% durante más de 200 ms, se activa una falta de plausibilidad que fuerza el acelerador a 0%.
+### OPCIÓN A — DRV5055A3 (RECOMENDADA — Plug & Play)
 
-### Canal primario: Divisor de tensión → PA3 (ADC1_IN4)
+**Sensor:** Texas Instruments DRV5055A3QDBZR
+- VCC: **3.3V** (rango soportado 3.0V–5.5V, grado automoción)
+- Salida: 0.2V–3.1V a 3.3V (ratiométrico, Vq = VCC/2 = 1.65V sin campo)
+- **Conexión directa a PA3** — NO necesita divisor de tensión ni ADS1115
+
+**Ventajas:**
+- 3 cables solamente: VCC (3.3V), GND, OUT→PA3
+- Sin componentes intermedios
+- Lectura ADC en ~1 µs (instantánea)
+- Ratiométrico con la referencia del ADC → inmune a fluctuaciones de alimentación
+- Sin dependencia de I2C para el pedal
+
+```
+  DRV5055A3
+  ┌─────────┐
+  │  VCC ───┤──► 3.3V (del STM32 o regulador)
+  │  GND ───┤──► GND
+  │  OUT ───┤──► PA3 (ADC1_IN4) directamente
+  └─────────┘
+  (+ 100nF entre VCC y GND, pegado al sensor)
+```
+
+| Cable | De | A | Función |
+|-------|-----|---|---------|
+| 24a | DRV5055 VCC | **3.3V** | Alimentación sensor |
+| 24b | DRV5055 GND | **GND** | GND común |
+| 24c | DRV5055 OUT | **PA3** (STM32) | Señal directa 0.2V–3.1V |
+| — | 100 nF | VCC↔GND (junto al sensor) | Bypass/desacoplo |
+
+**Calibración firmware (sensor_manager.c):**
+- PEDAL_ADC_MIN = 248 (~0.2V, pedal suelto)
+- PEDAL_ADC_MAX = 3848 (~3.1V, pedal a fondo)
+- PEDAL_FAULT_LOW = 50 (< 40 mV = cable roto)
+- PEDAL_FAULT_HIGH = 4060 (> 3.27V = corto a VCC)
+
+> **NOTA:** Los valores 248/3848 son teóricos. Tras montar el sensor en el pedal, **calibrar leyendo el ADC en las posiciones extremas** y ajustar las constantes.
+
+**Para activar en firmware:**
+```c
+/* En Core/Inc/main.h, línea: */
+#define PEDAL_SENSOR_TYPE  PEDAL_SENSOR_DRV5055  /* ← ya es el valor por defecto */
+```
+
+---
+
+### OPCIÓN B — SS1324LUA-T (con divisor + ADS1115)
+
+**Sensor:** Allegro SS1324LUA-T / A1324LUA-T
+- VCC: **5V** (mínimo 4.5V — NO funciona a 3.3V de forma fiable)
+- Salida: 0.3V–4.8V
+- Requiere divisor de tensión (10 kΩ + 6.8 kΩ) para PA3
+- ADS1115 recomendado para validación cruzada
 
 ```
 Pedal señal (0.3V–4.8V)
         │
-       [R1 = 10 kΩ]
+       [R1 = 10 kΩ, 1%]
         │
         ├──────► PA3 (ADC1_IN4, STM32)
         │
-       [R2 = 6.8 kΩ]
+       [R2 = 6.8 kΩ, 1%]
         │
        GND
 ```
 
 **Cálculo del divisor:**
 - Ratio = 6.8 / (10 + 6.8) = **0.4048**
-- Pedal 0.3V → 0.3 × 0.4048 = **0.121V** → ADC: ~150 counts (12-bit, 3.3V ref)
-- Pedal 4.8V → 4.8 × 0.4048 = **1.943V** → ADC: ~2413 counts
-- Máximo posible: 5.0V × 0.4048 = 2.024V → **bien por debajo de 3.3V** ✅
+- Pedal 0.3V → 0.121V → ADC: ~150 counts
+- Pedal 4.8V → 1.943V → ADC: ~2413 counts
+- Máximo: 5.0V × 0.4048 = 2.024V → seguro para 3.3V ✅
 
 | Cable | De | A | Función |
 |-------|-----|---|---------|
-| 24f | Pedal Pin 3 (Señal) | R1 (10 kΩ) entrada | Señal 5V del sensor |
-| 24g | R1/R2 nodo medio | **PA3** (STM32) | Señal dividida ~0–2V |
+| 24a | Pedal VCC | **5V** | Alimentación sensor |
+| 24b | Pedal GND | **GND** | GND común |
+| 24c | Pedal Señal | R1 (10 kΩ) | Señal 5V del sensor |
+| 24d | R1/R2 nodo medio | **PA3** (STM32) | Señal dividida ~0–2V |
 | — | R2 otro extremo | **GND** | Referencia |
 
-> ⚠️ **USAR RESISTENCIAS DE PRECISIÓN** — Tolerancia 1% o mejor. Resistencias de 5% pueden introducir error de calibración de hasta ±3% del rango del pedal.
+**Canal de plausibilidad ADS1115 (opcional pero recomendado):**
 
-> ⚠️ **UBICAR CERCA DEL STM32** — El divisor debe estar físicamente cerca del pin PA3 para minimizar captación de ruido PWM del motor.
+| Cable | De | A | Función |
+|-------|-----|---|---------|
+| 24e | Pedal Señal | **A0** (ADS1115) | Señal sin dividir 0.3V–4.8V |
+| — | ADS1115 VDD | **5V** | Alimentación módulo |
+| — | ADS1115 GND | **GND** | GND común |
+| 24f | ADS1115 SCL | **PB6** (I2C1) | Reloj I2C compartido |
+| 24g | ADS1115 SDA | **PB7** (I2C1) | Datos I2C compartidos |
+| — | ADS1115 ADDR | **GND** | Dirección I2C = 0x48 |
 
-### Canal de plausibilidad: ADS1115 (I2C)
+**Para activar en firmware:**
+```c
+/* En Core/Inc/main.h, cambiar: */
+#define PEDAL_SENSOR_TYPE  PEDAL_SENSOR_SS1324
+```
 
-| Cable | De (Pedal) | A (ADS1115) | Función |
-|-------|-----------|-------------|---------|
-| 24a | Pin 1 (VCC) | **VDD** | Alimentación 5V del sensor |
-| 24b | Pin 2 (GND) | **GND** | GND común |
-| 24c | Pin 3 (Señal) | **A0** | Señal analógica 0.3V–4.8V (sin dividir) |
+---
 
-### Conexión del ADS1115 al bus I2C
+### Auto-detección del ADS1115 (ambas opciones)
 
-| Cable | De (ADS1115) | A (STM32/Bus I2C) | Función |
-|-------|-------------|-------------------|---------|
-| — | VDD | **5V** | Alimentación módulo ADS1115 |
-| — | GND | **GND** | GND común |
-| 24d | SCL | **PB6** (bus I2C1) | Reloj I2C compartido |
-| 24e | SDA | **PB7** (bus I2C1) | Datos I2C compartidos |
-| — | ADDR | **GND** | Dirección I2C = 0x48 |
+El ADS1115 se auto-detecta independientemente de la opción de sensor elegida:
 
-**Especificaciones del doble canal:**
-- **Canal primario (ADC):** 12-bit, ~1 µs de lectura, PEDAL_ADC_MIN=150, PEDAL_ADC_MAX=2413
-- **Canal plausibilidad (ADS1115):** 16-bit, PGA ±6.144V, 128 SPS, PEDAL_ADS_MIN=1600, PEDAL_ADS_MAX=25600
-- **Validación cruzada:** ambos canales deben coincidir ±5% del rango total
-- **Timeout de divergencia:** 200 ms antes de declarar fallo
-- **Timeout de datos ADS1115:** si I2C falla >500 ms, modo degradado
-- Muestreo cada 50 ms en el loop del STM32
+- **Si ADS1115 está conectado:** Lectura doble canal + validación cruzada (±5%, 200 ms timeout)
+- **Si ADS1115 NO está conectado:** Tras 3 intentos I2C fallidos al arrancar, el firmware desactiva las lecturas I2C del ADS1115 permanentemente y opera en canal único con detección de fallo de cable
+- **Si ADS1115 falla después de arrancar:** Timeout de 500 ms → modo degradado
+
+**Especificaciones comunes:**
+- Muestreo cada 50 ms en el loop principal
+- Detección de cable roto (lectura < PEDAL_FAULT_LOW)
+- Detección de corto a VCC (lectura > PEDAL_FAULT_HIGH)
 - Filtro EMA (α=0.15) + rampa máxima 50%/s (en motor_control.c)
 
-> ⚠️ **IMPORTANTE:** El ADS1115 comparte el bus I2C1 con el TCA9548A/INA226, pero tiene dirección diferente (0x48 vs 0x70/0x40), por lo que NO necesita ir a través del multiplexor.
+> ⚠️ **SOBRE EL SS1324 A 3.3V:** El datasheet de Allegro especifica VCC mínimo = 4.5V. A 3.3V el sensor puede funcionar de forma intermitente pero con lecturas erráticas, no lineales, y con drift de temperatura. **NO es fiable para control de acelerador.** Si quieres 3.3V directo, usa el DRV5055.
 
-> ⚠️ **IMPORTANTE:** El bus I2C usa pull-ups a 3.3V (en PB6/PB7). El ADS1115 alimentado a 5V acepta niveles I2C de 3.3V (VIH = 0.7 × VDD = 3.5V, compatible con 3.3V).
-
-> ⚠️ **NOTA:** PA3 ahora se usa como ADC1_IN4 (canal primario del pedal). La señal pasa por el divisor de tensión, por lo que NUNCA supera 2.1V en el pin.
+> ⚠️ **IMPORTANTE:** Si usas ADS1115, comparte el bus I2C1 con TCA9548A/INA226 pero tiene dirección diferente (0x48 vs 0x70/0x40), por lo que NO necesita ir a través del multiplexor.
 
 ---
 
@@ -390,7 +442,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | 1 | **PA0** | GPIOA | Input | EXTI0 | Sensor velocidad rueda FL | Pull-up, flanco subida |
 | 2 | **PA1** | GPIOA | Input | EXTI1 | Sensor velocidad rueda FR | Pull-up, flanco subida |
 | 3 | **PA2** | GPIOA | Input | EXTI2 | Sensor velocidad rueda RL | Pull-up, flanco subida |
-| 4 | **PA3** | GPIOA | Analog | ADC1_IN4 | Pedal (divisor) | Canal primario, señal dividida 0–2V |
+| 4 | **PA3** | GPIOA | Analog | ADC1_IN4 | Pedal Hall sensor | DRV5055: directo 0–3.1V / SS1324: vía divisor 0–2V |
 | 5 | **PA8** | GPIOA | AF6 | TIM1_CH1 | BTS7960 FL → RPWM/LPWM | PWM 20 kHz |
 | 6 | **PA9** | GPIOA | AF6 | TIM1_CH2 | BTS7960 FR → RPWM/LPWM | PWM 20 kHz |
 | 7 | **PA10** | GPIOA | AF6 | TIM1_CH3 | BTS7960 RL → RPWM/LPWM | PWM 20 kHz |
@@ -400,8 +452,8 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | 11 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Adaptador 5V→3.3V |
 | 12 | **PB4** | GPIOB | Input | EXTI4 | Encoder E6B2 índice Z | 1 pulso/vuelta |
 | 13 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
-| 14 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A + ADS1115 | Pull-up 4.7kΩ, 400 kHz |
-| 15 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A + ADS1115 | Pull-up 4.7kΩ, 400 kHz |
+| 14 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A (+ ADS1115 si hay) | Pull-up 4.7kΩ, 400 kHz |
+| 15 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (+ ADS1115 si hay) | Pull-up 4.7kΩ, 400 kHz |
 | 16 | **PB8** | GPIOB | AF9 | FDCAN1_RX | TJA1051 #1 → RXD | ⚠️ Vía transceiver, NO directo |
 | 17 | **PB9** | GPIOB | AF9 | FDCAN1_TX | TJA1051 #1 → TXD | ⚠️ Vía transceiver, NO directo |
 | 18 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
@@ -435,10 +487,12 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | 4 | Motor DC 24V | Motores tracción | Brushed DC |
 | 1 | Motor DC 12V | Motor dirección | Brushed DC |
 | 1 | Encoder E6B2-CWZ6C | Encoder dirección | 1200 PPR, 5V, open-collector |
-| 1 | Sensor Hall SS1324LUA-T | Pedal acelerador | Salida 0.3–4.8V (5V supply) |
-| 1 | ADS1115 módulo | ADC I2C para pedal | 16-bit, I2C addr 0x48, canal plausibilidad |
-| 1 | Resistencia 10 kΩ (1%) | Divisor pedal R1 | Canal primario ADC, ¼W |
-| 1 | Resistencia 6.8 kΩ (1%) | Divisor pedal R2 | Canal primario ADC, ¼W |
+| 1 | Sensor Hall **DRV5055A3** | Pedal acelerador | 3.3V, directo a PA3, RECOMENDADO |
+| 1 | *Alt: Sensor Hall SS1324LUA-T* | *Pedal acelerador* | *5V, necesita divisor + ADS1115* |
+| 1 | *ADS1115 módulo (opcional)* | *ADC I2C para pedal* | *16-bit, I2C addr 0x48, plausibilidad* |
+| 1 | *Resistencia 10 kΩ 1% (solo SS1324)* | *Divisor pedal R1* | *Solo si usas SS1324* |
+| 1 | *Resistencia 6.8 kΩ 1% (solo SS1324)* | *Divisor pedal R2* | *Solo si usas SS1324* |
+| 1 | Condensador 100 nF | Bypass pedal | Junto al sensor Hall, cerámico |
 | 5 | Sensor inductivo LJ12A3 | 4× velocidad rueda + 1× centrado | NPN, NO |
 | 6 | INA226 módulo | Sensores corriente | Breakout boards |
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
@@ -471,7 +525,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 ### ⚠️ ANTES DE ENCENDER
 
 1. **Verificar GND común** — STM32, ESP32, BTS7960, fuentes de alimentación, y sensores deben compartir el mismo GND
-2. **Verificar tensiones** — PA15/PB3 (encoder) ≤ 3.3V, PA3 (pedal divisor) ≤ 2.1V. El pedal 5V va al ADS1115 y al divisor resistivo, NO directamente al STM32
+2. **Verificar tensiones** — PA15/PB3 (encoder) ≤ 3.3V. Con DRV5055: PA3 ≤ 3.1V directo. Con SS1324: PA3 ≤ 2.1V (vía divisor), pedal 5V va al divisor y opcionalmente al ADS1115
 3. **No conectar motores todavía** — Para Phase 1, se puede probar sin motores conectados (solo verificar señales PWM con osciloscopio o LED)
 4. **Conectar CAN con transceivers** — NUNCA conectar PB8/PB9 directo a cables CAN
 5. **Poner resistencias pull-up** — I2C (PB6, PB7) y OneWire (PB0) no funcionan sin pull-ups
@@ -484,7 +538,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 4. Conectar sensores OneWire (DS18B20)
 5. Conectar sensores de velocidad de rueda
 6. Conectar encoder de dirección
-7. Conectar pedal (divisor resistivo → PA3 + ADS1115)
+7. Conectar pedal Hall (DRV5055 directo a PA3, o SS1324 con divisor + ADS1115)
 8. **ÚLTIMO:** Conectar alimentación de motores (24V/12V vía relés)
 
 ### ⚠️ QUÉ OBSERVAR EN PHASE 1

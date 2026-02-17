@@ -29,7 +29,7 @@ void SteeringCenter_IRQHandler(void);
 bool SteeringCenter_Detected(void);
 void SteeringCenter_ClearFlag(void);
 
-/* ---- Pedal (dual-channel: ADC primary + ADS1115 plausibility) ---- */
+/* ---- Pedal (ADC primary, ADS1115 auto-detected as optional plausibility) ---- */
 void  Pedal_Update(void);
 float Pedal_GetValue(void);       /* Primary ADC raw value */
 float Pedal_GetPercent(void);     /* Primary ADC 0–100% (used for control) */
