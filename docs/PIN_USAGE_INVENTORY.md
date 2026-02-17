@@ -276,10 +276,9 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | **Placa** | ESP32-S3-DevKitC-1 |
 | **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO26–GPIO48) |
 | **Pines disponibles en DevKitC** | ~36 (algunos reservados por flash/PSRAM) |
-| **Pines usados por el proyecto** | 9 |
-| **Pines reservados (USB CDC)** | 2 (GPIO19/GPIO20) |
+| **Pines usados por el proyecto** | 14 |
 | **Pines reservados (Flash/PSRAM interno)** | ~9 (GPIO26–GPIO32, GPIO33–GPIO37 en módulos con Octal PSRAM) |
-| **Pines libres para expansión** | **~25** |
+| **Pines libres para expansión** | **~13** |
 
 ### Distribución de pines usados por categoría
 
@@ -288,10 +287,12 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | Display TFT SPI (ST7796) | 6 | 16.7% |
 | Touch panel SPI | 1 | 2.8% |
 | CAN bus (TWAI vía TJA1051) | 2 | 5.6% |
-| **TOTAL USADOS** | **9** | **25.0%** |
-| Reservados USB CDC | 2 | 5.6% |
+| Sensor de obstáculos TOFSense (UART2) | 1 | 2.8% |
+| DFPlayer Mini audio (UART1) | 2 | 5.6% |
+| LEDs WS2812B (front + rear) | 2 | 5.6% |
+| **TOTAL USADOS** | **14** | **38.9%** |
 | Reservados Flash/PSRAM | ~9 | 25.0% |
-| **LIBRES** | **~25** | **~44.4%** |
+| **LIBRES** | **~13** | **~36.1%** |
 
 ---
 
@@ -335,15 +336,54 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 - Biblioteca: ESP32-TWAI-CAN v1.0.1
 - Terminación 120Ω en el lado ESP32
 
-### 5.4 USB CDC Serial — Reservados (2 pines)
+### 5.4 Sensor de obstáculos — TOFSense-M S LiDAR vía UART2 (1 pin)
 
-| Señal | GPIO | Función |
-|-------|------|---------|
-| USB D− | **GPIO19** | USB CDC serial (debug/consola) |
-| USB D+ | **GPIO20** | USB CDC serial (debug/consola) |
-| | **Subtotal:** | **2 pines** (reservados) |
+| Señal | GPIO | Función | Velocidad |
+|-------|------|---------|-----------|
+| UART2 RX | **GPIO44** | Recepción datos TOFSense (solo RX) | 921600 baud |
+| | | **Subtotal:** | **1 pin** |
 
-- Habilitado con `ARDUINO_USB_CDC_ON_BOOT=1`
+- Sensor: TOFSense-M S LiDAR (sensor de distancia 0–5000 mm)
+- Protocolo: UART unidireccional (solo sensor TX → ESP32 RX)
+- TX del ESP32 no se usa (PIN_TOFSENSE_TX = −1)
+- Tramas de 8 bytes cada 66 ms (15 Hz)
+- Procesamiento: Parser UART + matriz 8×8 + lógica 5 zonas
+- Datos enviados al STM32 vía CAN ID 0x208 (distancia, zona, salud, contador)
+- Referencia: `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`
+
+### 5.5 DFPlayer Mini — Audio MP3 vía UART1 (2 pines)
+
+| Señal | GPIO | Función | Velocidad |
+|-------|------|---------|-----------|
+| UART1 TX | **GPIO19** | Comandos al DFPlayer (ESP32 → DFPlayer RX) | 9600 baud |
+| UART1 RX | **GPIO20** | Respuestas del DFPlayer (DFPlayer TX → ESP32) | 9600 baud |
+| | | **Subtotal:** | **2 pines** |
+
+- Módulo: DFPlayer Mini (reproductor MP3 con DAC + amplificador 3W)
+- Tarjeta SD: FAT32, 68 archivos MP3 (0001.mp3–0068.mp3)
+- Altavoz: 3W 8Ω conectado a las salidas DAC_R/DAC_L del DFPlayer
+- Biblioteca: DFRobotDFPlayerMini (inicialización lazy, no bloqueante)
+- Estado: **Planificado Phase 5** — hardware no conectado todavía
+- Referencia: `docs/PENDING_FEATURES_SCHEDULE.md` §3
+
+> **Nota sobre GPIO 19/20:** En el ESP32-S3, estos son los pines nativos USB D−/D+. Con `ARDUINO_USB_CDC_ON_BOOT=1` (configurado en `platformio.ini`), el USB CDC serial usa el periférico USB nativo internamente, liberando GPIO 19 y GPIO 20 para uso general como UART1.
+
+### 5.6 LEDs WS2812B — Iluminación front/rear (2 pines)
+
+| Señal | GPIO | Función | Protocolo |
+|-------|------|---------|-----------|
+| LED Front Data | **GPIO47** | Tira frontal 28× WS2812B | FastLED / RMT 800 kHz |
+| LED Rear Data | **GPIO43** | Tira trasera 16× WS2812B | FastLED / RMT 800 kHz |
+| | | **Subtotal:** | **2 pines** |
+
+- LEDs: WS2812B (RGB, orden GRB, 800 kHz)
+- Frontal: 28 LEDs — efecto Knight Rider, colores reactivos al acelerador
+- Trasero: 16 LEDs — luces de posición, freno, intermitentes
+- Periférico: RMT del ESP32-S3 (hardware, sin bloquear CPU ni interrupciones)
+- Tiempo de transferencia: 44 LEDs × 30 µs = 1.32 ms
+- Biblioteca: FastLED (uso del periférico RMT, no bit-bang)
+- Estado: **Planificado Phase 3** — hardware no conectado todavía
+- Referencia: `docs/ESP32_HMI_ARCHITECTURE_REBUILD.md` §3, Addendum D.2
 
 ### Tabla resumen ESP32-S3 — Todos los pines usados
 
@@ -356,8 +396,13 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 5 | GPIO15 | Display TFT | SPI CS (chip select display) |
 | 6 | GPIO16 | Display TFT | DC (Data/Command) |
 | 7 | GPIO17 | Display TFT | RST (Reset display) |
-| 8 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
-| 9 | GPIO42 | Display TFT | BL (Backlight) |
+| 8 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
+| 9 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
+| 10 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
+| 11 | GPIO42 | Display TFT | BL (Backlight) |
+| 12 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
+| 13 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
+| 14 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
 
 ---
 
@@ -378,21 +423,18 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 9 | GPIO10 | GPIO, SPI | **LIBRE** |
 | 10 | GPIO11 | GPIO, SPI | **LIBRE** |
 | 11 | GPIO12 | GPIO, SPI | **LIBRE** |
-| 12 | GPIO18 | GPIO, USB | **LIBRE** |
+| 12 | GPIO18 | GPIO | **LIBRE** |
 | 13 | GPIO38 | GPIO | **LIBRE** |
 | 14 | GPIO39 | GPIO | **LIBRE** |
 | 15 | GPIO40 | GPIO | **LIBRE** |
 | 16 | GPIO41 | GPIO | **LIBRE** |
-| 17 | GPIO43 | UART0_TX (por defecto) | **LIBRE** |
-| 18 | GPIO44 | UART0_RX (por defecto) | **LIBRE** |
-| 19 | GPIO45 | GPIO | **LIBRE** (⚠️ boot strapping) |
-| 20 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
-| 21 | GPIO47 | GPIO | **LIBRE** |
-| 22 | GPIO48 | GPIO | **LIBRE** |
+| 17 | GPIO45 | GPIO | **LIBRE** (⚠️ boot strapping) |
+| 18 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
+| 19 | GPIO48 | GPIO | **LIBRE** |
 
-> **Nota:** GPIO26–GPIO37 están reservados para Flash/PSRAM interno en el módulo ESP32-S3-WROOM y **NO están accesibles** en la placa DevKitC-1. GPIO19/GPIO20 están usados por USB CDC.
+> **Nota:** GPIO26–GPIO37 están reservados para Flash/PSRAM interno en el módulo ESP32-S3-WROOM y **NO están accesibles** en la placa DevKitC-1. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales.
 
-> **Resumen: ~22 pines libres de forma segura** (evitando pines de boot strapping).
+> **Resumen: ~15 pines libres de forma segura** (evitando pines de boot strapping).
 
 ### Posibles usos de los pines libres
 
@@ -402,8 +444,6 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | LEDs de estado (CAN ok, error, etc.) | GPIO9, GPIO10 | 2 |
 | SD Card (SPI) | GPIO6 (MISO), GPIO7 (MOSI), GPIO8 (SCK), GPIO9 (CS) | 4 |
 | Buzzer / alarma sonora | GPIO38 | 1 |
-| Sensores ultrasónicos de obstáculo | GPIO39-GPIO41, GPIO47, GPIO48 | 2-5 |
-| Segundo UART (GPS, Bluetooth HC-05, etc.) | GPIO43 (TX), GPIO44 (RX) | 2 |
 | ADC adicional (batería, sensor luz) | GPIO1, GPIO2, GPIO3 | 1-3 |
 | I2C adicional (sensor ambiental) | GPIO38 (SCL), GPIO39 (SDA) | 2 |
 
@@ -604,13 +644,15 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 | MCU | Pines necesarios | Pines disponibles | Pines usados | Pines libres | ¿Suficiente? |
 |-----|-----------------|-------------------|-------------|-------------|--------------|
 | **STM32G474RE** | 32 | 47 GPIO | 32 (68.1%) | 13 libres + 2 SWD | ✅ **SÍ** — sobran 13 pines |
-| **ESP32-S3** | 9 | ~36 accesibles | 9 (25.0%) | ~25 libres | ✅ **SÍ** — sobran ~25 pines |
+| **ESP32-S3** | 14 | ~36 accesibles | 14 (38.9%) | ~15 libres | ✅ **SÍ** — sobran ~15 pines |
 
-Ambos microcontroladores tienen **margen amplio** para expansiones futuras (sensores de obstáculos, UART debug, botones físicos, LEDs de estado, SD card, etc.).
+Ambos microcontroladores tienen **margen amplio** para expansiones futuras (botones físicos, LEDs de estado, SD card, buzzer, etc.).
+
+> **Nota sobre phases:** De los 14 pines del ESP32-S3, 9 están actualmente en uso (display, touch, CAN). Los otros 5 pines (GPIO19/20 para DFPlayer, GPIO43/47 para LEDs WS2812B, GPIO44 para sensor TOFSense) están asignados y documentados pero el hardware aún no está conectado — se implementarán en Phase 3 (obstáculos/LEDs) y Phase 5 (audio).
 
 ---
 
 **Documento creado:** 2026-02-17  
-**Versión:** 1.0  
+**Versión:** 1.1  
 **Autor:** Sistema de Control Coche Marcos  
-**Referencias:** `Core/Inc/main.h`, `esp32/platformio.ini`, `esp32/src/main.cpp`, `docs/CONEXIONES_COMPLETAS.md`, `docs/PEDAL_SENSOR_FINAL_SUMMARY.md`
+**Referencias:** `Core/Inc/main.h`, `esp32/platformio.ini`, `esp32/src/main.cpp`, `docs/CONEXIONES_COMPLETAS.md`, `docs/PEDAL_SENSOR_FINAL_SUMMARY.md`, `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`, `docs/ESP32_HMI_ARCHITECTURE_REBUILD.md` (Appendix D.6), `docs/PENDING_FEATURES_SCHEDULE.md`
