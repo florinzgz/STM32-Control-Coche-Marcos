@@ -5,11 +5,10 @@
   *
   *  Peripherals initialised:
   *    FDCAN1  – CAN bus @ 500 kbps (ESP32-S3 link)
-  *    I2C1    – INA226 / TCA9548A sensors
+  *    I2C1    – INA226 / TCA9548A sensors + ADS1115 pedal ADC
   *    TIM1    – PWM for 4 traction motors (20 kHz)
   *    TIM2    – Quadrature encoder (steering)
   *    TIM8    – PWM for steering motor (20 kHz)
-  *    ADC1    – Pedal analogue input
   *    IWDG    – Independent watchdog (500 ms)
   ****************************************************************************
   */
@@ -28,7 +27,6 @@
 FDCAN_HandleTypeDef hfdcan1;
 I2C_HandleTypeDef   hi2c1;
 TIM_HandleTypeDef   htim1, htim2, htim8;
-ADC_HandleTypeDef   hadc1;
 IWDG_HandleTypeDef  hiwdg;
 
 /* ---- Reset cause (read once at boot, before IWDG clears flags) ---- */
@@ -81,7 +79,6 @@ static void MX_I2C1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM8_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_IWDG_Init(void);
 
 /* ================================================================== */
@@ -102,7 +99,6 @@ int main(void)
     MX_TIM1_Init();
     MX_TIM2_Init();
     MX_TIM8_Init();
-    MX_ADC1_Init();
     MX_IWDG_Init();
 
     /* Module initialisation */
@@ -465,28 +461,6 @@ static void MX_TIM8_Init(void)
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
     HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3);
-}
-
-static void MX_ADC1_Init(void)
-{
-    hadc1.Instance                   = ADC1;
-    hadc1.Init.ClockPrescaler        = ADC_CLOCK_ASYNC_DIV4;
-    hadc1.Init.Resolution            = ADC_RESOLUTION_12B;
-    hadc1.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-    hadc1.Init.ScanConvMode          = ADC_SCAN_DISABLE;
-    hadc1.Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
-    hadc1.Init.ContinuousConvMode    = DISABLE;
-    hadc1.Init.NbrOfConversion       = 1;
-    hadc1.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
-    if (HAL_ADC_Init(&hadc1) != HAL_OK) {
-        Error_Handler();
-    }
-
-    ADC_ChannelConfTypeDef ch = {0};
-    ch.Channel      = ADC_CHANNEL_4;    /* PA3 = ADC1_IN4 */
-    ch.Rank         = ADC_REGULAR_RANK_1;
-    ch.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
-    HAL_ADC_ConfigChannel(&hadc1, &ch);
 }
 
 static void MX_IWDG_Init(void)

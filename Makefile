@@ -35,8 +35,6 @@ HAL_SOURCES = \
   $(HAL_SRC)/stm32g4xx_hal_pwr_ex.c \
   $(HAL_SRC)/stm32g4xx_hal_tim.c \
   $(HAL_SRC)/stm32g4xx_hal_tim_ex.c \
-  $(HAL_SRC)/stm32g4xx_hal_adc.c \
-  $(HAL_SRC)/stm32g4xx_hal_adc_ex.c \
   $(HAL_SRC)/stm32g4xx_hal_fdcan.c \
   $(HAL_SRC)/stm32g4xx_hal_i2c.c \
   $(HAL_SRC)/stm32g4xx_hal_i2c_ex.c \

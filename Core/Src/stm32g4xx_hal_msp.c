@@ -99,20 +99,8 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
   }
 }
 
-void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  if(hadc->Instance==ADC1)
-  {
-    __HAL_RCC_ADC12_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    
-    GPIO_InitStruct.Pin = GPIO_PIN_3;  /* PA3 = ADC1_IN4 (pedal) */
-    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  }
-}
+/* ADC no longer used — pedal reads via ADS1115 on I2C bus.
+ * PA3 is freed for future use (e.g. additional analog sensor). */
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
 {

@@ -1,13 +1,13 @@
 /**
   ****************************************************************************
   * @file    sensor_manager.c
-  * @brief   Sensor acquisition: wheel speed, DS18B20, INA226, pedal ADC
+  * @brief   Sensor acquisition: wheel speed, DS18B20, INA226, ADS1115 pedal
   *
   * Hardware managed by this module:
   *   - 4× LJ12A3 inductive wheel speed sensors (EXTI interrupts)
   *   - 5× DS18B20 temperature sensors (OneWire on PB0)
   *   - 6× INA226 current/voltage sensors (I2C via TCA9548A multiplexer)
-  *   - 1× Hall-effect pedal (ADC1)
+  *   - 1× Hall-effect pedal via ADS1115 16-bit I2C ADC
   *
   * I2C Bus Recovery Mechanism
   * Protects against SDA held low by slave device
@@ -104,22 +104,107 @@ float Wheel_GetSpeed_RR(void) { Wheel_ComputeSpeed(3); return wheel_speed_kmh[3]
 float Wheel_GetRPM_FL(void)   { return wheel_rpm[0]; }
 
 /* =========================================================================
- *  Pedal – ADC single conversion
+ *  Pedal – ADS1115 16-bit I2C ADC (replaces internal ADC)
+ *
+ *  The Hall-effect pedal (SS1324LUA-T) requires 5V supply and outputs
+ *  0.3 V (released) to 4.8 V (fully pressed).  This exceeds the STM32
+ *  GPIO absolute maximum of 3.6 V, so an ADS1115 module (VDD = 5V,
+ *  I2C 3.3V-tolerant) reads the pedal signal on its A0 input.
+ *
+ *  ADS1115 configuration:
+ *    - Single-ended AIN0 (MUX = 100)
+ *    - PGA = ±6.144 V (gain 2/3) — allows 0–5 V input range
+ *    - Data rate = 128 SPS (default, sufficient for 20 Hz pedal update)
+ *    - Single-shot conversion mode
+ *
+ *  With PGA ±6.144 V the LSB = 6.144 / 32768 = 187.5 µV.
+ *  Pedal range: 0.3 V → 1600 LSB, 4.8 V → 25600 LSB.
  * ========================================================================= */
 
 static uint16_t pedal_raw   = 0;
 static float    pedal_pct   = 0.0f;
 
-extern ADC_HandleTypeDef hadc1;
+extern I2C_HandleTypeDef hi2c1;
+
+/* ADS1115 register addresses */
+#define ADS1115_REG_CONVERSION  0x00
+#define ADS1115_REG_CONFIG      0x01
+
+/* ADS1115 config register value for single-shot, AIN0, ±6.144V, 128 SPS:
+ *  Bit 15   : OS   = 1      (start single conversion)
+ *  Bit 14-12: MUX  = 100    (AIN0 vs GND, single-ended)
+ *  Bit 11-9 : PGA  = 000    (±6.144 V full-scale)
+ *  Bit 8    : MODE = 1      (single-shot)
+ *  Bit 7-5  : DR   = 100    (128 SPS)
+ *  Bit 4    : COMP_MODE = 0
+ *  Bit 3    : COMP_POL  = 0
+ *  Bit 2    : COMP_LAT  = 0
+ *  Bit 1-0  : COMP_QUE  = 11 (disable comparator)
+ *  = 0xC183                                                      */
+#define ADS1115_CONFIG_PEDAL    0xC183U
+
+/* Pedal calibration: measured voltage range of SS1324LUA-T sensor.
+ * With PGA ±6.144 V, LSB = 187.5 µV, so:
+ *   0.3 V released ≈ 0.3 / 0.0001875 = 1600 counts
+ *   4.8 V pressed   ≈ 4.8 / 0.0001875 = 25600 counts              */
+#define PEDAL_ADC_MIN   1600U    /* ~0.3 V (pedal released) */
+#define PEDAL_ADC_MAX   25600U   /* ~4.8 V (pedal fully pressed) */
 
 void Pedal_Update(void)
 {
-    HAL_ADC_Start(&hadc1);
-    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
-        pedal_raw = (uint16_t)HAL_ADC_GetValue(&hadc1);
+    /* Start single-shot conversion on ADS1115 */
+    uint8_t cfg[3];
+    cfg[0] = ADS1115_REG_CONFIG;
+    cfg[1] = (uint8_t)(ADS1115_CONFIG_PEDAL >> 8);
+    cfg[2] = (uint8_t)(ADS1115_CONFIG_PEDAL & 0xFF);
+
+    if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                 cfg, 3, 10) != HAL_OK) {
+        /* I2C write failed — keep previous reading */
+        return;
     }
-    HAL_ADC_Stop(&hadc1);
-    pedal_pct = (float)pedal_raw * 100.0f / 4095.0f;
+
+    /* Wait for conversion (128 SPS → ~8 ms max).
+     * Poll the OS bit (bit 15) in the config register.            */
+    uint8_t poll[2] = {0};
+    uint8_t reg = ADS1115_REG_CONFIG;
+    for (uint8_t tries = 0; tries < 12; tries++) {
+        HAL_Delay(1);
+        if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                     &reg, 1, 5) != HAL_OK)
+            continue;
+        if (HAL_I2C_Master_Receive(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                    poll, 2, 5) != HAL_OK)
+            continue;
+        if (poll[0] & 0x80) break;  /* OS bit set = conversion done */
+    }
+
+    /* Read conversion result */
+    reg = ADS1115_REG_CONVERSION;
+    uint8_t result[2] = {0};
+    if (HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                 &reg, 1, 5) != HAL_OK) {
+        return;
+    }
+    if (HAL_I2C_Master_Receive(&hi2c1, (I2C_ADDR_ADS1115 << 1),
+                                result, 2, 5) != HAL_OK) {
+        return;
+    }
+
+    int16_t raw_signed = (int16_t)((result[0] << 8) | result[1]);
+    /* Single-ended: result is always positive (0–32767 for 0–6.144V) */
+    uint16_t raw = (raw_signed < 0) ? 0U : (uint16_t)raw_signed;
+    pedal_raw = raw;
+
+    /* Map calibrated range to 0–100% */
+    if (raw <= PEDAL_ADC_MIN) {
+        pedal_pct = 0.0f;
+    } else if (raw >= PEDAL_ADC_MAX) {
+        pedal_pct = 100.0f;
+    } else {
+        pedal_pct = (float)(raw - PEDAL_ADC_MIN) * 100.0f
+                  / (float)(PEDAL_ADC_MAX - PEDAL_ADC_MIN);
+    }
 }
 
 float Pedal_GetValue(void)   { return (float)pedal_raw; }

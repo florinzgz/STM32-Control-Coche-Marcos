@@ -63,8 +63,14 @@ extern "C" {
 /* ---- OneWire Bus (DS18B20 temperatures) ---- */
 #define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
 
-/* ---- ADC Pedal ---- */
-#define PIN_PEDAL          GPIO_PIN_3   /* PA3 - ADC1_IN4 */
+/* ---- ADS1115 Pedal ADC (I2C, replaces internal ADC) ---- */
+/* The Hall-effect pedal (SS1324LUA-T) operates at 5V (0.3V–4.8V output).
+ * The STM32 GPIO absolute max is 3.6V, so an ADS1115 16-bit I2C ADC is
+ * used as level-safe analog front-end.  The ADS1115 VDD = 5V, and its
+ * I2C lines are 3.3V tolerant (VIH = 0.7×VDD = 3.5V with external 3.3V
+ * pull-ups on the STM32 I2C bus).
+ * ADS1115 ADDR pin → GND gives I2C address 0x48.                       */
+#define I2C_ADDR_ADS1115   0x48
 
 /* ---- CAN Bus (FDCAN1 on PB8/PB9 per HAL MSP) ---- */
 #define PIN_CAN_TX         GPIO_PIN_9   /* PB9 - FDCAN1_TX (AF9) */
@@ -91,7 +97,6 @@ extern "C" {
 extern FDCAN_HandleTypeDef hfdcan1;
 extern I2C_HandleTypeDef hi2c1;
 extern TIM_HandleTypeDef htim1, htim2, htim8;
-extern ADC_HandleTypeDef hadc1;
 extern IWDG_HandleTypeDef hiwdg;
 
 void Error_Handler(void);

@@ -17,16 +17,16 @@
   │  TIM8 (20kHz) ──► 1× PWM motor dirección (PC8)                 │
   │  TIM2 (encoder) ◄── Encoder dirección (PA15/PB3)               │
   │  GPIO out ──► 5× DIR + 5× EN + 3× RELAY                       │
-  │  ADC1 ◄── Pedal acelerador (PA3)                               │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z     │
   │  I2C1 ──► TCA9548A ──► 6× INA226                              │
+  │  I2C1 ──► ADS1115 ◄── Pedal acelerador (A0, 5V)               │
   │  OneWire ──► 5× DS18B20 (PB0)                                  │
   │  FDCAN1 ──► TJA1051 ──► CAN Bus ──► TJA1051 ──► ESP32-S3      │
   └─────────────────────────────────────────────────────────────────┘
 ```
 
 **Total cables del STM32:** 32 GPIO + alimentación + I2C + CAN
-**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051
+**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 ADS1115 + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051
 
 ---
 
@@ -148,20 +148,41 @@ Cada motor de tracción tiene **3 cables** del STM32 al BTS7960:
 
 ---
 
-## 6) PEDAL ACELERADOR — Sensor Hall Lineal
+## 6) PEDAL ACELERADOR — ADS1115 + Sensor Hall SS1324LUA-T (5V)
 
-| Cable | De (Pedal) | A (STM32) | Función |
-|-------|-----------|-----------|---------|
-| 24 | Cable señal (analógico) | **PA3** | ADC1_IN4, lectura 0–3.3V → 0–100% |
-| — | Cable + | 3.3V | Alimentación (NO 5V si la salida es directa) |
-| — | Cable - | GND | GND común |
+El sensor Hall SS1324LUA-T opera a 5V y produce una señal de 0.3V (reposo) a 4.8V (pisado a fondo). **No se puede conectar directamente al STM32** (máximo absoluto GPIO = 3.6V). Se usa un módulo ADS1115 como ADC externo I2C.
+
+### Conexión del Pedal al ADS1115
+
+| Cable | De (Pedal) | A (ADS1115) | Función |
+|-------|-----------|-------------|---------|
+| 24a | Pin 1 (VCC) | **VDD** | Alimentación 5V del sensor |
+| 24b | Pin 2 (GND) | **GND** | GND común |
+| 24c | Pin 3 (Señal) | **A0** | Señal analógica 0.3V–4.8V |
+
+### Conexión del ADS1115 al STM32
+
+| Cable | De (ADS1115) | A (STM32/Bus I2C) | Función |
+|-------|-------------|-------------------|---------|
+| — | VDD | **5V** | Alimentación módulo ADS1115 |
+| — | GND | **GND** | GND común |
+| 24d | SCL | **PB6** (bus I2C1) | Reloj I2C compartido |
+| 24e | SDA | **PB7** (bus I2C1) | Datos I2C compartidos |
+| — | ADDR | **GND** | Dirección I2C = 0x48 |
 
 **Especificaciones:**
-- ADC de 12 bits (0–4095)
+- ADS1115 es un ADC de 16 bits con I2C (dirección 0x48 con ADDR→GND)
+- PGA configurado a ±6.144V (permite leer señales de 0–5V sin problema)
+- LSB = 187.5 µV; rango del pedal: 1600–25600 cuentas
 - Muestreo cada 50 ms en el loop del STM32
-- Filtro EMA (α=0.15) + rampa máxima 50%/s
+- Filtro EMA (α=0.15) + rampa máxima 50%/s (en motor_control.c)
+- Calibración en firmware: PEDAL_ADC_MIN=1600 (~0.3V), PEDAL_ADC_MAX=25600 (~4.8V)
 
-> ⚠️ Verificar que el rango de salida del sensor Hall sea 0–3.3V. Si es 0–5V, necesita un divisor de tensión (por ejemplo 10kΩ + 6.8kΩ para escalar 5V a ~3.3V).
+> ⚠️ **IMPORTANTE:** El ADS1115 comparte el bus I2C1 con el TCA9548A/INA226, pero tiene dirección diferente (0x48 vs 0x70/0x40), por lo que NO necesita ir a través del multiplexor.
+
+> ⚠️ **IMPORTANTE:** El bus I2C usa pull-ups a 3.3V (en PB6/PB7). El ADS1115 alimentado a 5V acepta niveles I2C de 3.3V (VIH = 0.7 × VDD = 3.5V, compatible con 3.3V). Los pull-ups de 4.7kΩ ya existentes en el bus son suficientes.
+
+> ⚠️ **PA3 queda libre** — ya no se usa como ADC. Disponible para futuros sensores analógicos si se habilita de nuevo el ADC interno.
 
 ---
 
@@ -332,7 +353,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | 1 | **PA0** | GPIOA | Input | EXTI0 | Sensor velocidad rueda FL | Pull-up, flanco subida |
 | 2 | **PA1** | GPIOA | Input | EXTI1 | Sensor velocidad rueda FR | Pull-up, flanco subida |
 | 3 | **PA2** | GPIOA | Input | EXTI2 | Sensor velocidad rueda RL | Pull-up, flanco subida |
-| 4 | **PA3** | GPIOA | Analog | ADC1_CH4 | Pedal acelerador (0–3.3V) | 12-bit, 50ms polling |
+| 4 | **PA3** | GPIOA | — | (libre) | — No conectar — | Disponible para futuros sensores |
 | 5 | **PA8** | GPIOA | AF6 | TIM1_CH1 | BTS7960 FL → RPWM/LPWM | PWM 20 kHz |
 | 6 | **PA9** | GPIOA | AF6 | TIM1_CH2 | BTS7960 FR → RPWM/LPWM | PWM 20 kHz |
 | 7 | **PA10** | GPIOA | AF6 | TIM1_CH3 | BTS7960 RL → RPWM/LPWM | PWM 20 kHz |
@@ -342,8 +363,8 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | 11 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Adaptador 5V→3.3V |
 | 12 | **PB4** | GPIOB | Input | EXTI4 | Encoder E6B2 índice Z | 1 pulso/vuelta |
 | 13 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
-| 14 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A → 6× INA226 | Pull-up 4.7kΩ, 400 kHz |
-| 15 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A → 6× INA226 | Pull-up 4.7kΩ, 400 kHz |
+| 14 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A + ADS1115 | Pull-up 4.7kΩ, 400 kHz |
+| 15 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A + ADS1115 | Pull-up 4.7kΩ, 400 kHz |
 | 16 | **PB8** | GPIOB | AF9 | FDCAN1_RX | TJA1051 #1 → RXD | ⚠️ Vía transceiver, NO directo |
 | 17 | **PB9** | GPIOB | AF9 | FDCAN1_TX | TJA1051 #1 → TXD | ⚠️ Vía transceiver, NO directo |
 | 18 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
@@ -377,7 +398,8 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | 4 | Motor DC 24V | Motores tracción | Brushed DC |
 | 1 | Motor DC 12V | Motor dirección | Brushed DC |
 | 1 | Encoder E6B2-CWZ6C | Encoder dirección | 1200 PPR, 5V, open-collector |
-| 1 | Sensor Hall lineal | Pedal acelerador | Salida 0–3.3V |
+| 1 | Sensor Hall SS1324LUA-T | Pedal acelerador | Salida 0.3–4.8V (5V supply) |
+| 1 | ADS1115 módulo | ADC I2C para pedal | 16-bit, I2C addr 0x48 |
 | 5 | Sensor inductivo LJ12A3 | 4× velocidad rueda + 1× centrado | NPN, NO |
 | 6 | INA226 módulo | Sensores corriente | Breakout boards |
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
@@ -410,7 +432,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 ### ⚠️ ANTES DE ENCENDER
 
 1. **Verificar GND común** — STM32, ESP32, BTS7960, fuentes de alimentación, y sensores deben compartir el mismo GND
-2. **Verificar tensiones** — PA3 (pedal) ≤ 3.3V, PA15/PB3 (encoder) ≤ 3.3V, todos los sensores ≤ 3.3V en su señal
+2. **Verificar tensiones** — PA15/PB3 (encoder) ≤ 3.3V, todos los sensores ≤ 3.3V en su señal. El pedal 5V va al ADS1115, NO directamente al STM32
 3. **No conectar motores todavía** — Para Phase 1, se puede probar sin motores conectados (solo verificar señales PWM con osciloscopio o LED)
 4. **Conectar CAN con transceivers** — NUNCA conectar PB8/PB9 directo a cables CAN
 5. **Poner resistencias pull-up** — I2C (PB6, PB7) y OneWire (PB0) no funcionan sin pull-ups
@@ -423,7 +445,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 4. Conectar sensores OneWire (DS18B20)
 5. Conectar sensores de velocidad de rueda
 6. Conectar encoder de dirección
-7. Conectar pedal
+7. Conectar pedal (vía ADS1115)
 8. **ÚLTIMO:** Conectar alimentación de motores (24V/12V vía relés)
 
 ### ⚠️ QUÉ OBSERVAR EN PHASE 1
