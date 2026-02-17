@@ -26,29 +26,29 @@
 | **Package** | LQFP64 (64 pines físicos) |
 | **Pines totales del chip** | 64 |
 | **Pines de alimentación/tierra/reset/cristal** | 13 (VBAT, VDDA, VSSA, 3×VDD, 4×VSS, NRST, PH0, PH1) |
-| **Pines GPIO disponibles** | 51 |
+| **Pines GPIO disponibles** | 47 (PA0–PA15, PB0–PB15, PC0–PC13, PD2) |
 | **Pines usados por el proyecto** | 32 |
 | **Pines reservados (SWD debug)** | 2 (PA13/SWDIO, PA14/SWCLK) |
-| **Pines libres para expansión** | **17** |
+| **Pines libres para expansión** | **13** |
 
 ### Distribución de pines usados por categoría
 
 | Categoría | Pines usados | Porcentaje |
 |-----------|-------------|------------|
-| PWM motores (TIM1 + TIM8) | 5 | 9.8% |
-| Dirección motores (GPIO out) | 5 | 9.8% |
-| Habilitación motores (GPIO out) | 5 | 9.8% |
-| Relés (GPIO out) | 3 | 5.9% |
-| Sensores velocidad rueda (EXTI) | 4 | 7.8% |
-| Encoder dirección (TIM2 + EXTI) | 3 | 5.9% |
-| Sensor centrado dirección (EXTI) | 1 | 2.0% |
-| Pedal acelerador (ADC) | 1 | 2.0% |
-| Bus I2C (INA226/TCA9548A/ADS1115) | 2 | 3.9% |
-| Bus OneWire (DS18B20) | 1 | 2.0% |
-| Bus CAN (FDCAN1) | 2 | 3.9% |
-| **TOTAL USADOS** | **32** | **62.7%** |
-| Reservados SWD | 2 | 3.9% |
-| **LIBRES** | **17** | **33.3%** |
+| PWM motores (TIM1 + TIM8) | 5 | 10.6% |
+| Dirección motores (GPIO out) | 5 | 10.6% |
+| Habilitación motores (GPIO out) | 5 | 10.6% |
+| Relés (GPIO out) | 3 | 6.4% |
+| Sensores velocidad rueda (EXTI) | 4 | 8.5% |
+| Encoder dirección (TIM2 + EXTI) | 3 | 6.4% |
+| Sensor centrado dirección (EXTI) | 1 | 2.1% |
+| Pedal acelerador (ADC) | 1 | 2.1% |
+| Bus I2C (INA226/TCA9548A/ADS1115) | 2 | 4.3% |
+| Bus OneWire (DS18B20) | 1 | 2.1% |
+| Bus CAN (FDCAN1) | 2 | 4.3% |
+| **TOTAL USADOS** | **32** | **68.1%** |
+| Reservados SWD | 2 | 4.3% |
+| **LIBRES** | **13** | **27.7%** |
 
 ---
 
@@ -603,7 +603,7 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 
 | MCU | Pines necesarios | Pines disponibles | Pines usados | Pines libres | ¿Suficiente? |
 |-----|-----------------|-------------------|-------------|-------------|--------------|
-| **STM32G474RE** | 32 | 51 GPIO | 32 (62.7%) | 17 libres + 2 SWD | ✅ **SÍ** — sobran 17 pines |
+| **STM32G474RE** | 32 | 47 GPIO | 32 (68.1%) | 13 libres + 2 SWD | ✅ **SÍ** — sobran 13 pines |
 | **ESP32-S3** | 9 | ~36 accesibles | 9 (25.0%) | ~25 libres | ✅ **SÍ** — sobran ~25 pines |
 
 Ambos microcontroladores tienen **margen amplio** para expansiones futuras (sensores de obstáculos, UART debug, botones físicos, LEDs de estado, SD card, etc.).
