@@ -278,7 +278,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | **Pines disponibles en DevKitC** | ~36 (algunos reservados por flash/PSRAM) |
 | **Pines usados por el proyecto** | 14 |
 | **Pines reservados (Flash/PSRAM interno)** | ~9 (GPIO26–GPIO32, GPIO33–GPIO37 en módulos con Octal PSRAM) |
-| **Pines libres para expansión** | **~13** |
+| **Pines libres para expansión** | **~15** |
 
 ### Distribución de pines usados por categoría
 
@@ -292,7 +292,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | LEDs WS2812B (front + rear) | 2 | 5.6% |
 | **TOTAL USADOS** | **14** | **38.9%** |
 | Reservados Flash/PSRAM | ~9 | 25.0% |
-| **LIBRES** | **~13** | **~36.1%** |
+| **LIBRES** | **~15** | **~41.7%** |
 
 ---
 
