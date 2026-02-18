@@ -7,6 +7,7 @@
 
 #include "motor_control.h"
 #include "ackermann.h"
+#include "eps_params.h"
 #include "main.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
@@ -219,6 +220,13 @@ static float ackermann_track     = TRACK_WIDTH_M;
 static float ackermann_max_inner = MAX_STEER_DEG;
 static uint8_t steering_calibrated = 0;
 
+/* ---- EPS torque-assist state ---- */
+static float   eps_omega_filt     = 0.0f;   /* EMA-filtered angular velocity  */
+static float   eps_prev_angle_deg = 0.0f;   /* Previous angle for derivative  */
+static int16_t eps_prev_pwm_raw   = 0;      /* Previous PWM for slew-rate     */
+static float   eps_motor_effort   = 0.0f;   /* Current motor output (%) for
+                                              * encoder health frozen check    */
+
 /* ---- Pedal filter / ramp state ---- */
 static float    pedal_ema         = 0.0f;   /* EMA-filtered pedal value      */
 static float    pedal_ramped      = 0.0f;   /* Output after ramp limiting    */
@@ -370,6 +378,13 @@ void Steering_Init(void)
      * the physical center reference before the encoder zero is valid.
      * Until centering completes, steering commands are rejected.         */
     steering_calibrated = 0;
+
+    /* Initialise EPS torque-assist state */
+    eps_omega_filt     = 0.0f;
+    eps_prev_angle_deg = 0.0f;
+    eps_prev_pwm_raw   = 0;
+    eps_motor_effort   = 0.0f;
+    EPS_Params_Init();
 
     /* Initialise encoder health tracking */
     enc_prev_count       = 0;
@@ -1061,105 +1076,181 @@ const TractionState_t* Traction_GetState(void)
 }
 
 /* ==================================================================
- *  Steering Control (PID + Encoder)
+ *  Steering Control — EPS Torque-Assist
+ *
+ *  Replaces the former position-PID approach.  The motor NEVER applies
+ *  active brake near center.  Close to center → coast (EN=LOW).
+ *
+ *  Torque equation (all gains from eps_params_t):
+ *    τ = + λ(ω) · assist_strength · g(v) · ω_filt          (assist)
+ *        − (1−λ(ω)) · center_strength · h(v) · θ           (return)
+ *        − damping · ω_filt                                 (damp)
+ *        + friction_comp · sign_when_stopped(θ,ω)           (friction)
+ *
+ *  λ(ω) = smoothstep(|ω|, 2°/s → 12°/s)   (driver intent)
+ *  g(v)  = 1 / (1 + v / assist_vs_speed)    (speed-dep assist)
+ *  h(v)  = 0.3 + v / return_vs_speed        (speed-dep return)
  * ================================================================== */
 
 void Steering_SetAngle(float angle_deg)
 {
-    /* Reject commands until Steering_Init() has established the relative
-     * zero reference.  Without calibration the encoder position is
-     * undefined and driving to any setpoint would be unsafe.            */
+    /* In EPS torque-assist mode Steering_SetAngle is kept for Ackermann
+     * wheel-angle computation only.  There is no position setpoint.    */
     if (!steering_calibrated) return;
 
-    /* NaN/Inf guard — reject corrupt steering angle (security hardening) */
     angle_deg = sanitize_float(angle_deg, 0.0f);
-
     if (angle_deg < -MAX_STEER_DEG) angle_deg = -MAX_STEER_DEG;
     if (angle_deg >  MAX_STEER_DEG) angle_deg =  MAX_STEER_DEG;
 
-    /* --- Ackermann integration ---
-     * After clamping the road angle, compute individual front-left and
-     * front-right wheel angles using the pure Ackermann module.
-     * steer_fl_deg / steer_fr_deg are the per-wheel setpoints.
-     *
-     * The single steering motor PID targets the road angle because the
-     * encoder measures the steering column position; the mechanical
-     * linkage translates it into the Ackermann FL/FR geometry.         */
     Ackermann_ComputeWheelAngles(angle_deg, &steer_fl_deg, &steer_fr_deg);
-
-    /* Convert road angle to encoder counts for steering motor PID */
-    steering_pid.setpoint = angle_deg * (float)ENCODER_CPR / 360.0f;
 }
 
 void Steering_ControlLoop(void)
 {
-    /* Steering_Init() has not been called yet — no encoder reference.
-     * Keep the motor safely off until calibration is established.      */
+    /* ---- Guard: not calibrated → coast ---- */
     if (!steering_calibrated) {
         Steering_Neutralize();
         return;
     }
 
-    /* If the encoder is faulted, do not run PID — we have no reliable
-     * position feedback.  Neutralise the motor to prevent uncontrolled
-     * steering.  The safety system handles the state transition.       */
+    /* ---- Guard: encoder fault → disable motor ---- */
     if (enc_fault) {
-        Steering_Neutralize();
+        Motor_SetPWM(&motor_steer, 0);
+        Motor_Enable(&motor_steer, 0);
+        eps_motor_effort = 0.0f;
         return;
     }
 
+    /* ---- Guard: SAFE / ERROR → coast immediately ---- */
+    {
+        SystemState_t st = Safety_GetState();
+        if (st == SYS_STATE_SAFE || st == SYS_STATE_ERROR) {
+            Steering_Neutralize();
+            return;
+        }
+    }
+
+    /* ---- Time delta ---- */
     static uint32_t last_time = 0;
     uint32_t now = HAL_GetTick();
 
-    /* On first call (or if last_time was never set), seed the timestamp
-     * and skip the PID iteration to avoid a huge dt spike.              */
     if (last_time == 0) {
         last_time = now;
+        eps_prev_angle_deg = Steering_GetCurrentAngle();
         return;
     }
 
     float dt = (float)(now - last_time) / 1000.0f;
     if (dt < 0.001f) return;
+    last_time = now;
 
+    /* ---- Read encoder: angle θ (degrees) ---- */
     int32_t encoder_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
-    float measured = (float)encoder_count;
+    float theta = (float)encoder_count * 360.0f / (float)ENCODER_CPR;
+    theta = sanitize_float(theta, 0.0f);
 
-    /* steering_motor.cpp: kDeadbandDeg = 0.5f */
-    float error = steering_pid.setpoint - measured;
-    float absError = fabsf(error);
-    if (absError < STEERING_DEADBAND_COUNTS) {
-        /* Position within deadband — apply BTS7960 active brake to
-         * hold the steering in place.  Chinese BTS7960 modules float
-         * the motor when EN=HIGH + PWM=0, so PWM must be set to 100 %
-         * to engage the brake FETs and prevent steering drift.        */
-        Motor_SetPWM(&motor_steer, BTS7960_BRAKE_PWM);
-        Motor_Enable(&motor_steer, 1);
-        last_time = now;
+    /* ---- Angular velocity ω (°/s) ---- */
+    float omega_raw = (theta - eps_prev_angle_deg) / dt;
+    omega_raw = sanitize_float(omega_raw, 0.0f);
+    eps_prev_angle_deg = theta;
+
+    /* EMA filter: α = 0.3 */
+    eps_omega_filt = eps_omega_filt + 0.3f * (omega_raw - eps_omega_filt);
+
+    /* ---- Load calibration parameters ---- */
+    const eps_params_t *p = EPS_Params_Get();
+
+    /* ---- Vehicle speed (average of 4 wheels, km/h) ---- */
+    float v_kmh = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                   Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+    v_kmh = sanitize_float(v_kmh, 0.0f);
+    if (v_kmh < 0.0f) v_kmh = 0.0f;
+
+    /* ---- Smoothstep: driver intention λ(ω) ---- */
+    float abs_omega = fabsf(eps_omega_filt);
+    float lambda;
+    {
+        /* smoothstep mapping |ω| from [2, 12] → [0, 1] */
+        float lo = 2.0f, hi = 12.0f;
+        if (abs_omega <= lo)      lambda = 0.0f;
+        else if (abs_omega >= hi) lambda = 1.0f;
+        else {
+            float t = (abs_omega - lo) / (hi - lo);
+            lambda = t * t * (3.0f - 2.0f * t);
+        }
+    }
+
+    /* ---- Speed-dependent gains ---- */
+    float g_v = 1.0f / (1.0f + v_kmh / p->assist_vs_speed);
+    float h_v = 0.3f + v_kmh / p->return_vs_speed;
+
+    /* ---- Friction compensation sign ----
+     * Helps overcome static friction when the wheel is displaced and
+     * nearly stopped (return-to-center scenario).                     */
+    float fric_sign = 0.0f;
+    if (abs_omega < 2.0f && fabsf(theta) > 1.0f) {
+        fric_sign = (theta > 0.0f) ? -1.0f : 1.0f;
+    }
+
+    /* ---- Torque equation ---- */
+    float tau = 0.0f;
+    tau += lambda * p->assist_strength * g_v * eps_omega_filt;       /* assist  */
+    tau -= (1.0f - lambda) * p->center_strength * h_v * theta;       /* return  */
+    tau -= p->damping * eps_omega_filt;                               /* damp    */
+    tau += p->friction_comp * fric_sign;                              /* friction*/
+
+    /* ---- High-speed safety: reduce assist above 25 km/h by 50% ---- */
+    if (v_kmh > 25.0f) {
+        tau *= 0.5f;
+    }
+
+    /* ---- Degraded-mode scaling ---- */
+    if (Safety_IsDegraded()) {
+        tau *= Safety_GetSteeringLimitFactor();
+    }
+    tau = sanitize_float(tau, 0.0f);
+
+    /* ---- Torque → PWM% (clamp ±60%) ---- */
+    float pwm_pct = tau;
+    if (pwm_pct >  60.0f) pwm_pct =  60.0f;
+    if (pwm_pct < -60.0f) pwm_pct = -60.0f;
+
+    /* ---- Dead-zone compensation: jump to min_drive_pct ---- */
+    float abs_pct = fabsf(pwm_pct);
+    if (abs_pct > 0.01f && abs_pct < p->min_drive_pct) {
+        pwm_pct = (pwm_pct > 0.0f) ? p->min_drive_pct : -p->min_drive_pct;
+        abs_pct = p->min_drive_pct;
+    }
+
+    /* ---- Coast band: below coast_band_pct → motor off (EN=LOW) ---- */
+    if (abs_pct < p->coast_band_pct) {
+        Motor_SetPWM(&motor_steer, 0);
+        Motor_Enable(&motor_steer, 0);
+        eps_prev_pwm_raw = 0;
+        eps_motor_effort  = 0.0f;
         return;
     }
 
-    float output   = PID_Compute(&steering_pid, measured, dt);
+    /* ---- Convert to PWM counts ---- */
+    int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);
 
-    if (output < -100.0f) output = -100.0f;
-    if (output >  100.0f) output =  100.0f;
+    /* ---- Slew-rate limit: ±250 counts per cycle ---- */
+    int16_t delta_pwm = pwm_raw - eps_prev_pwm_raw;
+    if (delta_pwm >  250) pwm_raw = eps_prev_pwm_raw + 250;
+    if (delta_pwm < -250) pwm_raw = eps_prev_pwm_raw - 250;
+    eps_prev_pwm_raw = pwm_raw;
 
-    /* Reduce steering aggressiveness in DEGRADED state.
-     * Phase 12: per-level scaling via Safety_GetSteeringLimitFactor().
-     * L1=85%, L2=70%, L3=60% (legacy was fixed 60%).
-     * Traced to limp_mode.cpp drive-home philosophy: lower steering
-     * torque reduces risk while preserving controllability.             */
-    if (Safety_IsDegraded()) {
-        output *= Safety_GetSteeringLimitFactor();
-    }
-    output = sanitize_float(output, 0.0f);
+    /* ---- Direction + absolute PWM ---- */
+    int8_t  direction = (pwm_raw >= 0) ? 1 : -1;
+    uint16_t pwm_abs  = (uint16_t)((pwm_raw >= 0) ? pwm_raw : -pwm_raw);
 
-    uint16_t pwm = (uint16_t)(fabs(output) * PWM_PERIOD / 100.0f);
-    int8_t direction = (output >= 0) ? 1 : -1;
+    /* Store motor effort for encoder health monitoring */
+    eps_motor_effort = (float)pwm_abs * 100.0f / (float)PWM_PERIOD;
 
-    Motor_SetPWM(&motor_steer, pwm);
+    /* ---- Apply to motor hardware ---- */
+    Motor_SetPWM(&motor_steer, pwm_abs);
     Motor_SetDirection(&motor_steer, direction);
-    Motor_Enable(&motor_steer, (fabs(output) > 1.0f));
-    last_time = now;
+    Motor_Enable(&motor_steer, 1);
 }
 
 float Steering_GetCurrentAngle(void)
@@ -1234,13 +1325,13 @@ void Encoder_CheckHealth(void)
     }
 
     /* --- 3. Frozen value check ---
-     * If the PID is commanding significant motor output but the
+     * If the EPS is commanding significant motor output but the
      * encoder count has not changed, the sensor is likely
      * disconnected or mechanically decoupled.                         */
     if (count != enc_prev_count) {
         enc_last_change_tick = now;
     } else {
-        float motor_pct = fabsf(steering_pid.output);
+        float motor_pct = fabsf(eps_motor_effort);
         if (motor_pct > ENC_MOTOR_ACTIVE_PCT) {
             if ((now - enc_last_change_tick) > ENC_FROZEN_TIMEOUT_MS) {
                 enc_fault = 1;
@@ -1258,19 +1349,20 @@ bool Encoder_HasFault(void)
 }
 
 /**
- * @brief  Safely stop steering motor and apply active brake.
+ * @brief  Safely stop steering motor — coast mode (EN=LOW, PWM=0).
  *
- * Used when the encoder is faulted or calibration is not yet done:
- * we must NOT drive the motor toward any position because we have
- * no reliable feedback.  Apply BTS7960 active brake (PWM=100 %,
- * EN=HIGH) to hold the steering in place and prevent drift.
- * Chinese BTS7960 modules float the motor when PWM=0 + EN=HIGH,
- * so PWM must be at full duty to engage the brake FETs.
+ * EPS philosophy: the motor NEVER applies active brake near center.
+ * Coast mode lets the steering float freely, avoiding vibration and
+ * fighting the driver.  Used on encoder fault, pre-calibration, and
+ * SAFE/ERROR state transitions.
  */
 void Steering_Neutralize(void)
 {
-    Motor_SetPWM(&motor_steer, BTS7960_BRAKE_PWM);
-    Motor_Enable(&motor_steer, 1);
+    Motor_SetPWM(&motor_steer, 0);
+    Motor_Enable(&motor_steer, 0);
+    eps_omega_filt   = 0.0f;
+    eps_prev_pwm_raw = 0;
+    eps_motor_effort = 0.0f;
     steering_pid.integral   = 0.0f;
     steering_pid.prev_error = 0.0f;
     steering_pid.output     = 0.0f;
