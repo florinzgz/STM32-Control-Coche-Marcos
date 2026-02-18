@@ -26,7 +26,7 @@
   *      c) Transition system to SAFE state.
   *
   * Safety limits:
-  *   - CENTERING_PWM           ~850  (10 % of 8499 full scale)
+  *   - CENTERING_PWM           ~425  (10 % of 4249 full scale)
   *   - STALL_TIMEOUT_MS        300   (encoder frozen while driving)
   *   - TOTAL_TIMEOUT_MS        10000 (absolute deadline)
   *   - MAX_CENTERING_COUNTS    6000  (guard against runaway travel)
@@ -48,8 +48,8 @@
 
 /* ---- Centering constants ----
  *
- * CENTERING_PWM: ~10 % of full PWM scale (8499 at 20 kHz).  Intentionally LOW to
- * avoid forcing the rack.  Positioning only, not power.
+ * CENTERING_PWM: ~10 % of full PWM scale (4249 at 20 kHz center-aligned).
+ * Intentionally LOW to avoid forcing the rack.  Positioning only, not power.
  *
  * STALL_TIMEOUT_MS: If the encoder does not change for this duration
  * while the motor is being driven, we infer end-of-travel (no
@@ -61,7 +61,7 @@
  * MAX_CENTERING_COUNTS: Maximum encoder travel in one direction before
  * we conclude the center sensor is not going to be found (guard).      */
 
-#define CENTERING_PWM              850U    /* ~10 % of 8499             */
+#define CENTERING_PWM              425U    /* ~10 % of 4249             */
 #define STALL_TIMEOUT_MS           300U    /* End-of-travel stall (ms)  */
 #define TOTAL_TIMEOUT_MS           10000U  /* Absolute deadline (ms)    */
 #define MAX_CENTERING_COUNTS       6000    /* Safety range limit        */
