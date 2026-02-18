@@ -237,6 +237,14 @@ static inline float sanitize_float(float val, float safe_default)
 #define ACKERMANN_DEADBAND_DEG   2.0f    /* No correction below this    */
 #define ACKERMANN_MAX_DIFF       0.15f   /* Max ±15% differential       */
 
+/* ---- EPS high-speed assist fade ----
+ * Steering assist is gradually reduced at higher speeds for safety.
+ * Linear fade from 100% at EPS_HS_FADE_START_KMH to
+ * EPS_HS_FADE_MIN_FACTOR at EPS_HS_FADE_END_KMH.                     */
+#define EPS_HS_FADE_START_KMH    20.0f   /* Begin assist fade (km/h)    */
+#define EPS_HS_FADE_END_KMH      30.0f   /* Full fade reached (km/h)    */
+#define EPS_HS_FADE_MIN_FACTOR   0.5f    /* Minimum assist fraction      */
+
 /* Motor structures */
 typedef struct {
     TIM_HandleTypeDef *timer;
@@ -1444,9 +1452,11 @@ void Steering_ControlLoop(void)
      * driver would feel the wheel suddenly stiffen at exactly 25 km/h.
      * Replaced with a linear fade from 100% at 20 km/h to 50% at
      * 30 km/h for a smooth, progressive weight-up (P3 fix).           */
-    if (v_kmh > 20.0f) {
-        float hs_fade = 1.0f - 0.5f * (v_kmh - 20.0f) / 10.0f;
-        if (hs_fade < 0.5f) hs_fade = 0.5f;
+    if (v_kmh > EPS_HS_FADE_START_KMH) {
+        float hs_range = EPS_HS_FADE_END_KMH - EPS_HS_FADE_START_KMH;
+        float hs_fade = 1.0f - (1.0f - EPS_HS_FADE_MIN_FACTOR)
+                       * (v_kmh - EPS_HS_FADE_START_KMH) / hs_range;
+        if (hs_fade < EPS_HS_FADE_MIN_FACTOR) hs_fade = EPS_HS_FADE_MIN_FACTOR;
         tau *= hs_fade;
     }
 
