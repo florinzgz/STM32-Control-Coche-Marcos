@@ -10,7 +10,7 @@
 
 ---
 
-## 1. Low-Throttle Behavior (−5 % to +5 % Demand)
+## 1. Low-Throttle Behavior (–5 % to +5 % Demand)
 
 ### 1.1 Demand Pipeline Summary
 
@@ -64,7 +64,7 @@ At the threshold boundary the motor output jumps between two extreme states:
 | State | PWM register value | Electrical effect |
 |-------|--------------------|-------------------|
 | `|demand| ≤ 0.5 %` | **4249** (100 % duty) | H-bridge shorts motor terminals → full electromagnetic brake |
-| `|demand| = 0.6 %` | **~25** (0.6 % of 4249) | ~0.14 V average applied to motor (at 24 V bus) |
+| `|demand| = 0.6 %` | **~25** (0.6 % × 4249 ≈ 25.5 counts) | ~0.14 V average applied to motor (0.6 % × 24 V) |
 
 The transition is:
 ```
@@ -82,9 +82,10 @@ a torque impulse that is felt as a mechanical jerk.
 
 The EMA filter with α=0.15 at 20 Hz update rate has a −3 dB cutoff at
 approximately 0.5 Hz. ADC noise on the 12-bit pedal channel (±1–2 LSB)
-maps to approximately ±0.05 % of pedal range. After EMA filtering, the
-residual noise is approximately ±0.01 %. This alone is unlikely to cross
-the 0.5 % threshold cyclically.
+maps to approximately ±0.024–0.049 % of full-scale ADC range (1 LSB =
+1/4096 ≈ 0.024 %). After EMA filtering, the residual noise is
+approximately ±0.005–0.01 %. This alone is unlikely to cross the 0.5 %
+threshold cyclically.
 
 **However**, the ramp limiter introduces a different oscillation mechanism.
 When the driver's foot is at a true pedal position of ~0.3–0.8 %:
@@ -239,12 +240,15 @@ therefore the torque — is strongly coupled to the motor speed. The result:
 |-------|--------------------------|----------|-------------|---------|--------|
 | 0 rpm | 1.2 V | 0 V | 1.2 V | I₀ = 1.2/R | High (stall torque at this V) |
 | 100 rpm | 1.2 V | ~1.0 V | 0.2 V | I = 0.2/R | Very low |
-| 150 rpm | 1.2 V | ~1.5 V | −0.3 V | **Negative** | Motor is braked by back-EMF |
+| 150 rpm | 1.2 V | ~1.5 V | –0.3 V | Negative (regeneration) | Motor decelerates (back-EMF exceeds applied V) |
 
-At 5 % duty the motor can only sustain ~70–100 rpm (exact value depends on
-Kv). Any external disturbance (bump, slope change, wind) that changes the
-speed by ±20 rpm will produce a large change in torque. The vehicle "hunts"
-around its equilibrium speed.
+At 5 % duty the motor can only sustain ~70–100 rpm before back-EMF equals
+the applied voltage (exact value depends on Kv). Above that speed, back-EMF
+exceeds the applied voltage and the motor begins regenerating — current
+reverses through the H-bridge body diodes, producing braking torque. Any
+external disturbance (bump, slope change, wind) that changes the speed by
+±20 rpm will produce a large change in torque. The vehicle "hunts" around
+its equilibrium speed.
 
 #### B. No disturbance rejection
 
@@ -324,9 +328,10 @@ The jerkiness at low throttle is caused by:
 
 A PCA9685 would add:
 - **Lower PWM frequency** (max 1526 Hz vs. 20 kHz): At 200 Hz, each PWM
-  cycle is 5 ms. A 1 % duty pulse is 50 µs. The motor sees discrete
-  current pulses at 200 Hz (audible), producing torque ripple at 200 Hz.
-  At 20 kHz the current ripple is smoothed by motor inductance (L/R time
+  cycle is 5 ms. A 1 % duty pulse has an ON-time of 50 µs per cycle
+  (1 % × 5 ms), repeating at 200 Hz. The motor sees discrete current
+  pulses at 200 Hz (audible), producing torque ripple at 200 Hz. At
+  20 kHz the current ripple is smoothed by motor inductance (L/R time
   constant typically 0.5–2 ms), making individual pulses invisible to the
   motor mechanics.
 - **I2C update latency** (~1 ms per channel, ~5 ms for all 5 motors):
@@ -483,8 +488,10 @@ range to the motor's useful range:
 ```
 if demand ≤ deadband_start (e.g. 1 %):
     effective_demand = 0 (or coast)
-elif demand ≤ deadband_end (e.g. 8 %):
-    effective_demand = linear_map(demand, deadband_start, deadband_end, motor_min_duty, 8 %)
+elif demand ≤ remap_upper (e.g. 8 %):
+    effective_demand = linear_map(demand, deadband_start, remap_upper,
+                                  motor_min_duty, remap_upper)
+    // Maps [1%, 8%] → [motor_min_duty, 8%], skipping the dead zone
 else:
     effective_demand = demand   (unchanged)
 ```
@@ -517,16 +524,21 @@ characteristic at low speed.
 **Strategy**: Estimate motor current from the known electrical model:
 
 ```
-I_estimated = (duty × V_bus - Kv × ω_measured) / R_winding
+I_estimated [A] = (duty × V_bus [V] - Ke × ω_measured [rad/s]) / R_winding [Ω]
 ```
 
-Where:
-- `duty` is known (firmware command)
-- `V_bus` is measured by INA226 channel 4 (battery voltage) — slow but
+Where (all SI units):
+- `duty` is the fractional duty cycle (0.0–1.0), known from firmware command
+- `V_bus` [V] is measured by INA226 channel 4 (battery voltage) — slow but
   stable (voltage changes on ~seconds timescale)
-- `Kv` is a motor constant (measured once during characterization)
-- `ω_measured` is derived from wheel speed sensors (EXTI interrupts)
-- `R_winding` is a motor constant (measured once)
+- `Ke` [V·s/rad] is the motor back-EMF constant (measured once during
+  characterization; related to the motor's Kv rating by Ke = 1/Kv when
+  Kv is in rad/s/V)
+- `ω_measured` [rad/s] is derived from wheel speed sensors (EXTI interrupts);
+  converted from km/h via ω = v / wheel_radius, or from RPM via ω = RPM × 2π/60
+- `R_winding` [Ω] is the motor winding resistance (measured once at ambient
+  temperature; temperature compensation via R(T) = R₀ × (1 + α_Cu × ΔT)
+  where α_Cu ≈ 0.00393 /°C)
 
 This estimate can be computed at 100 Hz (the control loop rate) with no
 additional I2C overhead. It provides a synthetic current signal that can be
