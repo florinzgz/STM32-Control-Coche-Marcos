@@ -1140,83 +1140,75 @@ void Traction_Update(void)
     /* Apply phase to hardware */
     Motor_t *motors[4] = {&motor_fl, &motor_fr, &motor_rl, &motor_rr};
 
+    /* Compute desired per-motor PWM into an intermediate array so the
+     * jerk limiter can compare desired vs previous before writing.     */
+    uint16_t desired_pwm[4] = {0, 0, 0, 0};
+    int8_t   desired_dir[4] = {dir, dir, dir, dir};
+    uint8_t  desired_en[4]  = {0, 0, 0, 0};
+
     if (is_dynbrake) {
         /* Dynamic braking — apply opposing torque via normal motor path.
          * Phase state machine does not override dynamic braking.        */
         for (uint8_t i = 0; i < 4; i++) {
             bool is_active_motor = (i <= MOTOR_FR) || rear_active;
-            if (!is_active_motor) continue;
-            uint16_t pwm = (uint16_t)(base_pwm * acker_diff[i] * safety_status.wheel_scale[i]);
-            Motor_SetPWM(motors[i], pwm);
-            Motor_SetDirection(motors[i], dir);
-            Motor_Enable(motors[i], 1);
-        }
-        /* Non-driven rear wheels in 4x2: keep brake */
-        if (!rear_active) {
-            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
-            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+            if (is_active_motor) {
+                desired_pwm[i] = (uint16_t)(base_pwm * acker_diff[i] * safety_status.wheel_scale[i]);
+                desired_dir[i] = dir;
+                desired_en[i]  = 1;
+            } else {
+                /* Non-driven rear wheels in 4x2: keep brake */
+                desired_pwm[i] = BTS7960_BRAKE_PWM;
+                desired_en[i]  = 1;
+            }
         }
     } else if (trac_phase == TRAC_PHASE_BRAKE) {
-        /* Hold brake — BTS7960 active brake on all active motors */
-        Motor_SetPWM(&motor_fl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_fl, 1);
-        Motor_SetPWM(&motor_fr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_fr, 1);
-        if (rear_active) {
-            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
-            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
-        } else {
-            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
-            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+        /* Hold brake — BTS7960 active brake on all motors */
+        for (uint8_t i = 0; i < 4; i++) {
+            desired_pwm[i] = BTS7960_BRAKE_PWM;
+            desired_en[i]  = 1;
         }
     } else if (trac_phase == TRAC_PHASE_COAST) {
-        /* Coast — motors disabled, vehicle rolls freely */
-        Motor_SetPWM(&motor_fl, 0); Motor_Enable(&motor_fl, 0);
-        Motor_SetPWM(&motor_fr, 0); Motor_Enable(&motor_fr, 0);
+        /* Coast — front motors disabled, vehicle rolls freely */
+        desired_pwm[MOTOR_FL] = 0; desired_en[MOTOR_FL] = 0;
+        desired_pwm[MOTOR_FR] = 0; desired_en[MOTOR_FR] = 0;
         if (rear_active) {
-            Motor_SetPWM(&motor_rl, 0); Motor_Enable(&motor_rl, 0);
-            Motor_SetPWM(&motor_rr, 0); Motor_Enable(&motor_rr, 0);
+            desired_pwm[MOTOR_RL] = 0; desired_en[MOTOR_RL] = 0;
+            desired_pwm[MOTOR_RR] = 0; desired_en[MOTOR_RR] = 0;
         } else {
             /* 4x2: rear still braked even in coast */
-            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
-            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+            desired_pwm[MOTOR_RL] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RL] = 1;
+            desired_pwm[MOTOR_RR] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RR] = 1;
         }
     } else {
         /* DRIVE phase — normal traction with smooth driving features */
         if (traction_state.axisRotation) {
             for (uint8_t i = 0; i < 4; i++) {
-                uint16_t pwm = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
-                int8_t d = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
-                Motor_SetPWM(motors[i], pwm);
-                Motor_SetDirection(motors[i], d);
-                Motor_Enable(motors[i], 1);
+                desired_pwm[i] = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
+                desired_dir[i] = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
+                desired_en[i]  = 1;
             }
         } else if (traction_state.mode4x4) {
             uint16_t axle_pwm = base_pwm / 2;
             for (uint8_t i = 0; i < 4; i++) {
-                uint16_t pwm = (uint16_t)(axle_pwm * acker_diff[i] * safety_status.wheel_scale[i]);
-                Motor_SetPWM(motors[i], pwm);
-                Motor_SetDirection(motors[i], dir);
-                Motor_Enable(motors[i], 1);
+                desired_pwm[i] = (uint16_t)(axle_pwm * acker_diff[i] * safety_status.wheel_scale[i]);
+                desired_en[i]  = 1;
             }
         } else {
             /* 4x2: front wheels driven */
-            uint16_t pwm_fl = (uint16_t)(base_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]);
-            uint16_t pwm_fr = (uint16_t)(base_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]);
-            Motor_SetPWM(&motor_fl, pwm_fl);
-            Motor_SetDirection(&motor_fl, dir);
-            Motor_Enable(&motor_fl, 1);
-            Motor_SetPWM(&motor_fr, pwm_fr);
-            Motor_SetDirection(&motor_fr, dir);
-            Motor_Enable(&motor_fr, 1);
+            desired_pwm[MOTOR_FL] = (uint16_t)(base_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]);
+            desired_pwm[MOTOR_FR] = (uint16_t)(base_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]);
+            desired_en[MOTOR_FL]  = 1;
+            desired_en[MOTOR_FR]  = 1;
             /* Rear: brake */
-            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
-            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+            desired_pwm[MOTOR_RL] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RL] = 1;
+            desired_pwm[MOTOR_RR] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RR] = 1;
         }
     }
 
     /* ---- E) Jerk limiter ----
      * Limit the per-cycle PWM change on each motor to prevent mechanical
-     * jerk in the drivetrain.  Applied as a post-filter on the final
-     * PWM value written to each motor timer register.
+     * jerk in the drivetrain.  Compares the desired PWM against the
+     * previous cycle's output and clamps the step to ±MAX_PWM_DELTA.
      *
      * This does NOT affect emergency stop (Traction_EmergencyStop resets
      * prev_output_pwm[]) or safety overrides (handled upstream).
@@ -1225,26 +1217,28 @@ void Traction_Update(void)
      * either BTS7960_BRAKE_PWM or 0, which must be applied immediately).*/
     if (trac_phase == TRAC_PHASE_DRIVE || is_dynbrake) {
         for (uint8_t i = 0; i < 4; i++) {
-            uint16_t current_pwm = __HAL_TIM_GET_COMPARE(motors[i]->timer,
-                                                          motors[i]->channel);
-            int32_t delta_j = (int32_t)current_pwm - (int32_t)prev_output_pwm[i];
+            int32_t delta_j = (int32_t)desired_pwm[i] - (int32_t)prev_output_pwm[i];
             if (delta_j > (int32_t)MAX_PWM_DELTA_PER_CYCLE) {
-                current_pwm = prev_output_pwm[i] + MAX_PWM_DELTA_PER_CYCLE;
-                Motor_SetPWM(motors[i], current_pwm);
+                desired_pwm[i] = prev_output_pwm[i] + MAX_PWM_DELTA_PER_CYCLE;
             } else if (delta_j < -(int32_t)MAX_PWM_DELTA_PER_CYCLE) {
-                current_pwm = (prev_output_pwm[i] > MAX_PWM_DELTA_PER_CYCLE)
-                            ? prev_output_pwm[i] - MAX_PWM_DELTA_PER_CYCLE
-                            : 0;
-                Motor_SetPWM(motors[i], current_pwm);
+                desired_pwm[i] = (prev_output_pwm[i] > MAX_PWM_DELTA_PER_CYCLE)
+                               ? prev_output_pwm[i] - MAX_PWM_DELTA_PER_CYCLE
+                               : 0;
             }
-            prev_output_pwm[i] = current_pwm;
+            prev_output_pwm[i] = desired_pwm[i];
         }
     } else {
-        /* In brake/coast, track current values for seamless transition */
+        /* In brake/coast, track desired values for seamless transition */
         for (uint8_t i = 0; i < 4; i++) {
-            prev_output_pwm[i] = __HAL_TIM_GET_COMPARE(motors[i]->timer,
-                                                        motors[i]->channel);
+            prev_output_pwm[i] = desired_pwm[i];
         }
+    }
+
+    /* Write final PWM, direction, and enable to hardware */
+    for (uint8_t i = 0; i < 4; i++) {
+        Motor_SetPWM(motors[i], desired_pwm[i]);
+        Motor_SetDirection(motors[i], desired_dir[i]);
+        Motor_Enable(motors[i], desired_en[i]);
     }
 
     /* Update state with sensor readings */
