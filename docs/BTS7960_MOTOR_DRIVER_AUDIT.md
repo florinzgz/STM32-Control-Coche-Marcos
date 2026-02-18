@@ -43,6 +43,7 @@ All motor current measurement is performed by **external INA226 high-side curren
 | 3                | Motor RR current     | 1 mΩ (50 A)   |
 | 4                | Battery 24 V bus     | 0.5 mΩ (100 A)|
 | 5                | Steering motor       | 1 mΩ (50 A)   |
+| 6–7              | *Unused / unassigned in firmware* | —   |
 
 ---
 
@@ -235,7 +236,7 @@ All motor enable pins and all relay control pins are driven LOW via direct regis
 
 **Key observations**:
 1. The firmware uses a **DIR + single PWM** scheme, not dual-PWM (separate RPWM/LPWM from the MCU).
-2. R_EN and L_EN are driven by a **single** MCU GPIO pin per motor (assumed tied together on the IBT-2 board).
+2. R_EN and L_EN are driven by a **single** MCU GPIO pin per motor. The firmware treats them as one enable signal; the IBT-2 board wiring should be verified against the hardware schematic to confirm that R_EN and L_EN are tied together.
 3. The BTS7960's built-in current-sense outputs (R_IS, L_IS) are **not used**; external INA226 ICs provide current measurement.
 4. Active braking uses **PWM=100 %** (not PWM=0) due to Chinese BTS7960 module behavior where PWM=0+EN=HIGH results in motor float rather than brake.
 5. Emergency stop uses **EN=LOW** (coast/disconnect) to fully de-energize the H-bridge power stage.
