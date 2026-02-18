@@ -23,6 +23,7 @@
 #include "service_mode.h"
 #include "boot_validation.h"
 #include "encoder_reader.h"
+#include <math.h>
 
 /* ---- HAL handle instances ---- */
 ADC_HandleTypeDef   hadc1;
@@ -74,7 +75,7 @@ uint8_t Boot_GetResetCause(void) { return reset_cause; }
  * preventing unsigned integer wrap-around in CAN telemetry.      */
 static inline uint16_t float_to_u16(float val)
 {
-    if (val < 0.0f || val != val) return 0U;  /* NaN: val != val */
+    if (val < 0.0f || isnan(val) || isinf(val)) return 0U;
     if (val > 65535.0f) return 65535U;
     return (uint16_t)val;
 }
