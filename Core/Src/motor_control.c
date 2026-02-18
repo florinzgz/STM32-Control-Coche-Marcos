@@ -79,6 +79,57 @@ static inline float sanitize_float(float val, float safe_default)
 #define DYNBRAKE_ACTIVE_THRESHOLD    0.5f  /* dynbrake_pct above = active    */
 #define TRACTION_ZERO_DEMAND_PCT     0.5f  /* Demand below this = zero (%)   */
 
+/* ---- Smooth Driving Parameters (Tuning Section) ----
+ *
+ * These constants control the smooth-driving strategy for jerk-free,
+ * vibration-free low-speed operation.  They do NOT affect the safety
+ * architecture, CAN protocol, or hardware.
+ *
+ * A) Start/Stop Hysteresis
+ *    DRIVE_ENTER_PCT: pedal must exceed this to transition from brake to drive.
+ *    DRIVE_EXIT_PCT:  pedal must drop below this to return from drive to brake.
+ *    The gap prevents rapid toggling at the brake/drive boundary.
+ *
+ * B) Motor Dead-Zone Compensation (Creep)
+ *    MOTOR_DEADZONE_PCT: minimum PWM% output when drive is active.
+ *    The motor has a physical dead zone below which it stalls.  When
+ *    throttle demand is above DRIVE_ENTER_PCT, PWM jumps directly to
+ *    MOTOR_DEADZONE_PCT and then maps linearly from there to 100%.
+ *    This ensures the motor always receives enough torque to move.
+ *
+ * C) Brake→Drive Transition Ramp
+ *    BRAKE_RELEASE_RAMP_PCT_S: max PWM rise rate when transitioning
+ *    from brake (BTS7960 hold) to drive.  Prevents the abrupt jump
+ *    from 100% brake duty to low drive duty.
+ *
+ * D) Coast vs Hold
+ *    COAST_SPEED_THRESHOLD_KMH: above this speed, releasing the pedal
+ *    enters coast (motors disabled, free-rolling) instead of immediate
+ *    hold brake.  Below this speed, hold brake engages for hill hold.
+ *    COAST_TIMEOUT_MS: maximum coast duration before hold brake engages.
+ *
+ * E) Jerk Limiter
+ *    MAX_PWM_DELTA_PER_CYCLE: maximum absolute change in PWM counts
+ *    per 10 ms control cycle.  This is a second-order rate limiter
+ *    (limits acceleration of the demand ramp) to prevent mechanical
+ *    jerk in the drivetrain.
+ *
+ * F) Low-Speed Stability
+ *    CREEP_DEMAND_SMOOTHING_ALPHA: additional EMA coefficient applied
+ *    only when demand is below CREEP_ZONE_PCT.  Smooths out ADC noise
+ *    and ramp quantisation that cause micro-accelerations at creep speed.
+ *    CREEP_ZONE_PCT: demand threshold below which extra smoothing applies.
+ */
+#define DRIVE_ENTER_PCT              3.0f   /* Pedal% to enter drive mode     */
+#define DRIVE_EXIT_PCT               1.0f   /* Pedal% to return to brake/coast*/
+#define MOTOR_DEADZONE_PCT           8.0f   /* Min PWM% when driving (creep)  */
+#define BRAKE_RELEASE_RAMP_PCT_S     40.0f  /* Brake→drive transition rate    */
+#define COAST_SPEED_THRESHOLD_KMH    2.0f   /* Coast above this speed (km/h)  */
+#define COAST_TIMEOUT_MS             3000U  /* Max coast duration (ms)        */
+#define MAX_PWM_DELTA_PER_CYCLE      80U    /* Max PWM change per 10 ms cycle */
+#define CREEP_DEMAND_SMOOTHING_ALPHA 0.08f  /* Extra EMA below creep zone     */
+#define CREEP_ZONE_PCT               15.0f  /* Demand% threshold for creep    */
+
 /* ---- Dynamic braking configuration ----
  *
  * When the driver releases the throttle rapidly, the vehicle decelerates
@@ -246,6 +297,21 @@ static float    dynbrake_pct      = 0.0f;   /* Current dynamic brake effort  */
 static float    prev_demand_pct   = 0.0f;   /* Previous demand for rate calc */
 static uint32_t dynbrake_last_tick = 0;
 
+/* ---- Smooth driving state ---- */
+typedef enum {
+    TRAC_PHASE_BRAKE,   /* BTS7960 active brake — motors holding           */
+    TRAC_PHASE_COAST,   /* Motors disabled — vehicle rolling freely         */
+    TRAC_PHASE_DRIVE    /* Throttle active — motors driving                 */
+} TractionPhase_t;
+
+static TractionPhase_t trac_phase        = TRAC_PHASE_BRAKE;
+static uint32_t        coast_start_tick  = 0;     /* When coast phase began */
+static uint16_t        prev_output_pwm[4] = {0};  /* Previous PWM per motor
+                                                    * for jerk limiting      */
+static float           brake_release_pct = 0.0f;  /* Ramp during brake→drive */
+static float           creep_smooth_pct  = 0.0f;  /* Extra EMA for creep zone*/
+static uint8_t         creep_smooth_init = 0;      /* First sample flag       */
+
 /* ---- Gear position state ---- */
 static GearPosition_t current_gear = GEAR_FORWARD;
 
@@ -353,6 +419,16 @@ void Traction_Init(void)
     dynbrake_pct       = 0.0f;
     prev_demand_pct    = 0.0f;
     dynbrake_last_tick = 0;
+
+    /* Reset smooth driving state */
+    trac_phase        = TRAC_PHASE_BRAKE;
+    coast_start_tick  = 0;
+    brake_release_pct = 0.0f;
+    creep_smooth_pct  = 0.0f;
+    creep_smooth_init = 0;
+    for (uint8_t j = 0; j < 4; j++) {
+        prev_output_pwm[j] = 0;
+    }
 
     /* Reset demand anomaly detection state */
     prev_raw_demand      = 0.0f;
@@ -712,6 +788,12 @@ void Traction_Update(void)
         dynbrake_pct    = 0.0f;
         prev_demand_pct = 0.0f;
 
+        /* Reset smooth driving state so phase doesn't carry over */
+        trac_phase        = TRAC_PHASE_BRAKE;
+        brake_release_pct = 0.0f;
+        creep_smooth_init = 0;
+        for (uint8_t j = 0; j < 4; j++) prev_output_pwm[j] = 0;
+
         /* Update sensor readings */
         traction_state.wheels[0].speedKmh = Wheel_GetSpeed_FL();
         traction_state.wheels[1].speedKmh = Wheel_GetSpeed_FR();
@@ -897,7 +979,41 @@ void Traction_Update(void)
         safety_status.wheel_scale[i] = sanitize_float(safety_status.wheel_scale[i], 0.0f);
     }
 
-    uint16_t base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
+    uint16_t base_pwm;
+
+    /* ---- B) Motor dead-zone compensation (creep) ----
+     * When positive traction demand is above the drive-enter threshold,
+     * remap it so the motor jumps over its physical dead zone.
+     * Linear mapping: [0, 100] → [MOTOR_DEADZONE_PCT, 100].
+     * Dynamic braking (negative demand) is not remapped.               */
+    if (effective_demand > 0.0f) {
+        float mapped = MOTOR_DEADZONE_PCT
+                     + effective_demand * (100.0f - MOTOR_DEADZONE_PCT) / 100.0f;
+        base_pwm = (uint16_t)(mapped * PWM_PERIOD / 100.0f);
+    } else {
+        base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
+    }
+
+    /* ---- F) Low-speed stability: extra smoothing in creep zone ----
+     * When demand is low, ADC quantisation and ramp stepping cause
+     * periodic micro-accelerations.  An additional heavy EMA smooths
+     * the base_pwm value only below CREEP_ZONE_PCT to eliminate
+     * these oscillations without slowing normal throttle response.     */
+    if (effective_demand > 0.0f && effective_demand < CREEP_ZONE_PCT) {
+        float pwm_f = (float)base_pwm;
+        if (!creep_smooth_init) {
+            creep_smooth_pct = pwm_f;
+            creep_smooth_init = 1;
+        } else {
+            creep_smooth_pct = CREEP_DEMAND_SMOOTHING_ALPHA * pwm_f
+                             + (1.0f - CREEP_DEMAND_SMOOTHING_ALPHA) * creep_smooth_pct;
+        }
+        base_pwm = (uint16_t)(creep_smooth_pct + 0.5f);
+    } else {
+        /* Outside creep zone — track current value so re-entry is seamless */
+        creep_smooth_pct  = (float)base_pwm;
+        creep_smooth_init = 1;
+    }
 
     /* Apply obstacle scale uniformly to all wheels.  This multiplier
      * is set by Obstacle_Update() from CAN-received distance data.
@@ -938,87 +1054,196 @@ void Traction_Update(void)
         dir = -dir;
     }
 
-    if (traction_state.axisRotation) {
-        /* Tank turn: left wheels reverse, right wheels forward (or vice versa).
-         * Per-wheel scale still applies for safety (slip on one side).        */
-        for (uint8_t i = 0; i < 4; i++) {
-            uint16_t pwm = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
-            int8_t d = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
-            Motor_t *m = (i == MOTOR_FL) ? &motor_fl :
-                         (i == MOTOR_FR) ? &motor_fr :
-                         (i == MOTOR_RL) ? &motor_rl : &motor_rr;
-            Motor_SetPWM(m, pwm);
-            Motor_SetDirection(m, d);
-        }
-    } else if (traction_state.mode4x4) {
-        /* 4x4: 50/50 axle torque split — distribute base torque equally
-         * between front and rear axles, then apply Ackermann differential
-         * and per-wheel ABS/TCS scale.
-         * Aligned with reference firmware traction.cpp 50/50 split.
-         * Each axle receives half the base_pwm; Ackermann differential
-         * and per-wheel wheel_scale[] are applied after the split so
-         * individual wheel interventions remain effective.  Obstacle
-         * scale is already applied to base_pwm upstream.                */
-        uint16_t axle_pwm = base_pwm / 2;
+    /* ---- A/C/D) Traction phase state machine (BRAKE ↔ COAST ↔ DRIVE) ----
+     *
+     * Replaces the previous binary zero-demand check with a three-phase
+     * state machine that eliminates the abrupt 100%→low-duty PWM jump:
+     *
+     *   BRAKE: BTS7960 active brake (PWM=100%, EN=1).  Vehicle held.
+     *          Transition to DRIVE when effective_demand > DRIVE_ENTER_PCT.
+     *
+     *   DRIVE: Motors driven at base_pwm.
+     *          Transition to COAST when effective_demand < DRIVE_EXIT_PCT
+     *          and vehicle speed > COAST_SPEED_THRESHOLD_KMH.
+     *          Transition to BRAKE when effective_demand < DRIVE_EXIT_PCT
+     *          and vehicle speed <= COAST_SPEED_THRESHOLD_KMH.
+     *
+     *   COAST: Motors disabled (EN=0, PWM=0).  Vehicle rolls freely.
+     *          Transition to DRIVE when effective_demand > DRIVE_ENTER_PCT.
+     *          Transition to BRAKE after COAST_TIMEOUT_MS or when speed
+     *          drops below COAST_SPEED_THRESHOLD_KMH.
+     *
+     * Dynamic braking (negative effective_demand) bypasses this state
+     * machine and directly commands motors — it has its own ramp logic.
+     *
+     * Safety override: SAFE/ERROR states handled upstream (early return).
+     * ABS intervention (wheel_scale < 1.0): motors stay enabled so the
+     * H-bridge can modulate braking per-wheel.                           */
+    bool rear_active = traction_state.mode4x4 || traction_state.axisRotation;
+    bool is_dynbrake = (effective_demand < 0.0f &&
+                        dynbrake_pct > DYNBRAKE_ACTIVE_THRESHOLD);
 
-        Motor_SetPWM(&motor_fl, (uint16_t)(axle_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]));
-        Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, (uint16_t)(axle_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]));
-        Motor_SetDirection(&motor_fr, dir);
-        Motor_SetPWM(&motor_rl, (uint16_t)(axle_pwm * acker_diff[MOTOR_RL] * safety_status.wheel_scale[MOTOR_RL]));
-        Motor_SetDirection(&motor_rl, dir);
-        Motor_SetPWM(&motor_rr, (uint16_t)(axle_pwm * acker_diff[MOTOR_RR] * safety_status.wheel_scale[MOTOR_RR]));
-        Motor_SetDirection(&motor_rr, dir);
-    } else {
-        /* 4x2: Front wheels only, Ackermann differential + per-wheel scale */
-        Motor_SetPWM(&motor_fl, (uint16_t)(base_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]));
-        Motor_SetDirection(&motor_fl, dir);
-        Motor_SetPWM(&motor_fr, (uint16_t)(base_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]));
-        Motor_SetDirection(&motor_fr, dir);
-        /* 4x2: rear motors not driven — apply BTS7960 active brake
-         * to prevent free-rolling on slopes.  Chinese BTS7960 modules
-         * float the motor when EN=HIGH + PWM=0, so we must use full
-         * duty to engage the brake FETs.                              */
-        Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM);  Motor_Enable(&motor_rl, 1);
-        Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM);  Motor_Enable(&motor_rr, 1);
+    float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                       Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+    avg_speed = sanitize_float(avg_speed, 0.0f);
+    if (avg_speed < 0.0f) avg_speed = 0.0f;
+
+    /* Phase transitions */
+    switch (trac_phase) {
+    case TRAC_PHASE_BRAKE:
+        if (is_dynbrake) {
+            /* Dynamic braking uses motor directly — stay in brake concept */
+        } else if (effective_demand > DRIVE_ENTER_PCT) {
+            trac_phase = TRAC_PHASE_DRIVE;
+            brake_release_pct = 0.0f;  /* Start brake→drive ramp from 0 */
+        }
+        break;
+
+    case TRAC_PHASE_DRIVE:
+        if (is_dynbrake) {
+            /* Dynamic braking takes over — allow it */
+        } else if (effective_demand <= DRIVE_EXIT_PCT) {
+            if (avg_speed > COAST_SPEED_THRESHOLD_KMH) {
+                trac_phase = TRAC_PHASE_COAST;
+                coast_start_tick = HAL_GetTick();
+            } else {
+                trac_phase = TRAC_PHASE_BRAKE;
+            }
+        }
+        break;
+
+    case TRAC_PHASE_COAST:
+        if (effective_demand > DRIVE_ENTER_PCT) {
+            trac_phase = TRAC_PHASE_DRIVE;
+            brake_release_pct = 0.0f;
+        } else if (avg_speed <= COAST_SPEED_THRESHOLD_KMH) {
+            trac_phase = TRAC_PHASE_BRAKE;
+        } else if ((HAL_GetTick() - coast_start_tick) >= COAST_TIMEOUT_MS) {
+            trac_phase = TRAC_PHASE_BRAKE;
+        }
+        break;
     }
 
-    /* ---- BTS7960 active brake when demand is zero ----
-     *
-     * Chinese BTS7960 modules float the motor when EN=HIGH and PWM=0.
-     * When demand drops to zero, we must apply active brake (PWM=100 %,
-     * EN=HIGH) to prevent the vehicle from rolling on slopes.
-     *
-     * Active brake is NOT applied in Neutral gear (handled above) or
-     * during ABS intervention (wheel_scale < 1.0 — ABS needs to
-     * modulate braking per-wheel independently).
-     *
-     * Motors that are actively driving (demand > TRACTION_ZERO_DEMAND_PCT)
-     * keep their computed PWM values unchanged.                        */
-    bool rear_active = traction_state.mode4x4 || traction_state.axisRotation;
+    /* ---- C) Brake→Drive transition ramp ----
+     * When transitioning from brake to drive, ramp up the PWM gradually
+     * instead of jumping from 100% brake to a low drive duty.  This
+     * eliminates the mechanical jerk at the brake/drive boundary.       */
+    if (trac_phase == TRAC_PHASE_DRIVE && !is_dynbrake) {
+        if (brake_release_pct < 100.0f) {
+            brake_release_pct += BRAKE_RELEASE_RAMP_PCT_S * dt_db;
+            if (brake_release_pct > 100.0f) brake_release_pct = 100.0f;
+            /* Scale base_pwm by the ramp progress */
+            base_pwm = (uint16_t)((float)base_pwm * brake_release_pct / 100.0f);
+        }
+    }
 
-    if (fabs(effective_demand) <= TRACTION_ZERO_DEMAND_PCT) {
-        /* Zero demand — apply BTS7960 active brake to hold vehicle */
-        Motor_SetPWM(&motor_fl, BTS7960_BRAKE_PWM);
-        Motor_SetPWM(&motor_fr, BTS7960_BRAKE_PWM);
-        Motor_Enable(&motor_fl, 1);
-        Motor_Enable(&motor_fr, 1);
+    /* Apply phase to hardware */
+    Motor_t *motors[4] = {&motor_fl, &motor_fr, &motor_rl, &motor_rr};
+
+    if (is_dynbrake) {
+        /* Dynamic braking — apply opposing torque via normal motor path.
+         * Phase state machine does not override dynamic braking.        */
+        for (uint8_t i = 0; i < 4; i++) {
+            bool is_active_motor = (i <= MOTOR_FR) || rear_active;
+            if (!is_active_motor) continue;
+            uint16_t pwm = (uint16_t)(base_pwm * acker_diff[i] * safety_status.wheel_scale[i]);
+            Motor_SetPWM(motors[i], pwm);
+            Motor_SetDirection(motors[i], dir);
+            Motor_Enable(motors[i], 1);
+        }
+        /* Non-driven rear wheels in 4x2: keep brake */
+        if (!rear_active) {
+            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
+            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+        }
+    } else if (trac_phase == TRAC_PHASE_BRAKE) {
+        /* Hold brake — BTS7960 active brake on all active motors */
+        Motor_SetPWM(&motor_fl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_fl, 1);
+        Motor_SetPWM(&motor_fr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_fr, 1);
         if (rear_active) {
-            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM);
-            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM);
-            Motor_Enable(&motor_rl, 1);
-            Motor_Enable(&motor_rr, 1);
+            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
+            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+        } else {
+            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
+            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+        }
+    } else if (trac_phase == TRAC_PHASE_COAST) {
+        /* Coast — motors disabled, vehicle rolls freely */
+        Motor_SetPWM(&motor_fl, 0); Motor_Enable(&motor_fl, 0);
+        Motor_SetPWM(&motor_fr, 0); Motor_Enable(&motor_fr, 0);
+        if (rear_active) {
+            Motor_SetPWM(&motor_rl, 0); Motor_Enable(&motor_rl, 0);
+            Motor_SetPWM(&motor_rr, 0); Motor_Enable(&motor_rr, 0);
+        } else {
+            /* 4x2: rear still braked even in coast */
+            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
+            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
         }
     } else {
-        /* Non-zero demand — enable motors normally.
-         * Do NOT disable based on wheel_scale: ABS sets scale=0.0
-         * but the motor must stay enabled so the H-bridge can
-         * actively brake (coast mode would lose control).             */
-        Motor_Enable(&motor_fl, 1);
-        Motor_Enable(&motor_fr, 1);
-        if (rear_active) {
-            Motor_Enable(&motor_rl, 1);
-            Motor_Enable(&motor_rr, 1);
+        /* DRIVE phase — normal traction with smooth driving features */
+        if (traction_state.axisRotation) {
+            for (uint8_t i = 0; i < 4; i++) {
+                uint16_t pwm = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
+                int8_t d = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
+                Motor_SetPWM(motors[i], pwm);
+                Motor_SetDirection(motors[i], d);
+                Motor_Enable(motors[i], 1);
+            }
+        } else if (traction_state.mode4x4) {
+            uint16_t axle_pwm = base_pwm / 2;
+            for (uint8_t i = 0; i < 4; i++) {
+                uint16_t pwm = (uint16_t)(axle_pwm * acker_diff[i] * safety_status.wheel_scale[i]);
+                Motor_SetPWM(motors[i], pwm);
+                Motor_SetDirection(motors[i], dir);
+                Motor_Enable(motors[i], 1);
+            }
+        } else {
+            /* 4x2: front wheels driven */
+            uint16_t pwm_fl = (uint16_t)(base_pwm * acker_diff[MOTOR_FL] * safety_status.wheel_scale[MOTOR_FL]);
+            uint16_t pwm_fr = (uint16_t)(base_pwm * acker_diff[MOTOR_FR] * safety_status.wheel_scale[MOTOR_FR]);
+            Motor_SetPWM(&motor_fl, pwm_fl);
+            Motor_SetDirection(&motor_fl, dir);
+            Motor_Enable(&motor_fl, 1);
+            Motor_SetPWM(&motor_fr, pwm_fr);
+            Motor_SetDirection(&motor_fr, dir);
+            Motor_Enable(&motor_fr, 1);
+            /* Rear: brake */
+            Motor_SetPWM(&motor_rl, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rl, 1);
+            Motor_SetPWM(&motor_rr, BTS7960_BRAKE_PWM); Motor_Enable(&motor_rr, 1);
+        }
+    }
+
+    /* ---- E) Jerk limiter ----
+     * Limit the per-cycle PWM change on each motor to prevent mechanical
+     * jerk in the drivetrain.  Applied as a post-filter on the final
+     * PWM value written to each motor timer register.
+     *
+     * This does NOT affect emergency stop (Traction_EmergencyStop resets
+     * prev_output_pwm[]) or safety overrides (handled upstream).
+     *
+     * Skip jerk limiting during brake and coast phases (PWM values are
+     * either BTS7960_BRAKE_PWM or 0, which must be applied immediately).*/
+    if (trac_phase == TRAC_PHASE_DRIVE || is_dynbrake) {
+        for (uint8_t i = 0; i < 4; i++) {
+            uint16_t current_pwm = __HAL_TIM_GET_COMPARE(motors[i]->timer,
+                                                          motors[i]->channel);
+            int32_t delta_j = (int32_t)current_pwm - (int32_t)prev_output_pwm[i];
+            if (delta_j > (int32_t)MAX_PWM_DELTA_PER_CYCLE) {
+                current_pwm = prev_output_pwm[i] + MAX_PWM_DELTA_PER_CYCLE;
+                Motor_SetPWM(motors[i], current_pwm);
+            } else if (delta_j < -(int32_t)MAX_PWM_DELTA_PER_CYCLE) {
+                current_pwm = (prev_output_pwm[i] > MAX_PWM_DELTA_PER_CYCLE)
+                            ? prev_output_pwm[i] - MAX_PWM_DELTA_PER_CYCLE
+                            : 0;
+                Motor_SetPWM(motors[i], current_pwm);
+            }
+            prev_output_pwm[i] = current_pwm;
+        }
+    } else {
+        /* In brake/coast, track current values for seamless transition */
+        for (uint8_t i = 0; i < 4; i++) {
+            prev_output_pwm[i] = __HAL_TIM_GET_COMPARE(motors[i]->timer,
+                                                        motors[i]->channel);
         }
     }
 
@@ -1068,6 +1293,17 @@ void Traction_EmergencyStop(void)
     /* Reset dynamic braking */
     dynbrake_pct    = 0.0f;
     prev_demand_pct = 0.0f;
+
+    /* Reset smooth driving state — emergency stop is immediate,
+     * no ramp, no coast, no jerk limit.  Motors are de-energised. */
+    trac_phase        = TRAC_PHASE_BRAKE;
+    coast_start_tick  = 0;
+    brake_release_pct = 0.0f;
+    creep_smooth_pct  = 0.0f;
+    creep_smooth_init = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        prev_output_pwm[i] = 0;
+    }
 }
 
 const TractionState_t* Traction_GetState(void)
