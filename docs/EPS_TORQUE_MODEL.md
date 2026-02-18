@@ -90,10 +90,10 @@ para un conductor humano.
 ### 3.2 Ecuación completa
 
 ```
-τ_motor(t) = λ(ω) × K_assist × g(v) × ω_filt
-            + [1 − λ(ω)] × K_center × h(v) × θ
-            + K_damp × ω_filt
-            + K_friction × σ(θ, ω)
+τ_motor(t) = + λ(ω) × K_assist × g(v) × ω_filt
+             − [1 − λ(ω)] × K_center × h(v) × θ
+             − K_damp × ω_filt
+             + K_friction × σ(θ, ω)
 ```
 
 Donde:
@@ -195,7 +195,7 @@ activa asistencia completa. Vibraciones y ruido (< 7°/s) no la activan.
 ### 4.2 Par de Autocentrado Virtual — τ_center
 
 ```
-τ_center = [1 − λ(ω)] × K_center × h(v) × θ
+τ_center = −K_center × h(v) × θ × [1 − λ(ω)]
 ```
 
 #### Qué hace
@@ -242,7 +242,7 @@ El motor aplica 5 % de duty hacia el centro. Suave, sin violencia.
 ### 4.3 Par de Amortiguación — τ_damp
 
 ```
-τ_damp = K_damp × ω_filt
+τ_damp = −K_damp × ω_filt
 ```
 
 #### Qué hace
@@ -266,44 +266,10 @@ estabilización dinámica. Sin ella:
 
 #### Signo
 
-El signo del par de amortiguación es **igual** al de la velocidad angular,
-lo que significa que el motor empuja en la dirección del movimiento...
-¿Por qué?
+El signo negativo `−K_damp × ω` significa que la amortiguación siempre
+se **opone** al movimiento:
 
-**Porque la amortiguación física ya existe en el mecanismo** (fricción
-de cremallera, juntas, columna). El término K_damp es *pequeño* y
-actúa como ajuste fino. El efecto neto es:
-
-- **Durante asistencia**: τ_damp se suma a τ_assist → ligero incremento
-  de ayuda. Imperceptible por ser K_damp << K_assist.
-- **Durante autocentrado**: τ_damp se opone a τ_center (porque ω tiene
-  signo opuesto a θ cuando el volante retorna al centro). Esto es
-  exactamente el amortiguamiento deseado: el muelle empuja hacia centro,
-  la amortiguación frena el retorno para que sea progresivo.
-
-En la práctica, durante el retorno al centro:
-```
-θ = +20° (girado a derecha)
-ω = −30°/s (volviendo hacia centro, movimiento hacia izquierda)
-τ_center = K_center × (+20) = positivo... NO: el muelle empuja hacia izquierda = NEGATIVO
-τ_damp   = K_damp × (−30) = negativo (frena el retorno)
-```
-
-Corrección: el signo del autocentrado ya apunta hacia el centro. El
-damping con el mismo signo que ω efectivamente FRENA el retorno.
-Veamos el caso completo:
-
-```
-θ > 0 (girado derecha), queremos que τ_center → negativo (empuje a izquierda):
-τ_center = −K_center × θ  (el signo negativo está en la dirección: DIR pin)
-
-En la implementación:
-τ_total se calcula como escalar, y sign(τ_total) determina DIR.
-θ = +20° → τ_center = K_center × θ = +6 → DIR positivo...
-```
-
-**Aclaración de convención de signos**: En este modelo, el par se
-define como valor con signo donde:
+**Convención de signos** del modelo:
 - τ > 0 → motor empuja en dirección de θ creciente (hacia la derecha)
 - τ < 0 → motor empuja en dirección de θ decreciente (hacia la izquierda)
 
@@ -312,18 +278,17 @@ Para el autocentrado:
 τ_center = −K_center × θ
 ```
 Si θ = +20° → τ_center = −K_center × 20 → negativo → empuja a izquierda ✓
-Si θ = −15° → τ_center = −K_center × (−15) = +K_center × 15 → empuja a derecha ✓
+Si θ = −15° → τ_center = +K_center × 15 → empuja a derecha ✓
 
 Para la amortiguación:
 ```
 τ_damp = −K_damp × ω
 ```
 Si ω = −30°/s (retornando al centro desde derecha):
-τ_damp = −K_damp × (−30) = +K_damp × 30 → positivo → frena el retorno ✓
+τ_damp = +K_damp × 30 → positivo → frena el retorno ✓
 
 Si ω = +50°/s (conductor girando a derecha):
 τ_damp = −K_damp × 50 → negativo → opone resistencia al giro ✓
-```
 
 **El amortiguador siempre se opone al movimiento.** Aporta sensación
 de peso al volante y evita oscilaciones en el retorno al centro.
