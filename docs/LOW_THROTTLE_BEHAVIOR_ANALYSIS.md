@@ -1,0 +1,664 @@
+# Low-Throttle Behavior & Smoothness Analysis
+
+> **Scope**: Analysis-only — no code or hardware changes proposed.
+> **Source files**: `Core/Src/motor_control.c`, `Core/Inc/motor_control.h`,
+> `Core/Src/main.c`, `Core/Inc/main.h`, `Core/Inc/vehicle_physics.h`,
+> `Core/Inc/safety_system.h`, `Core/Inc/sensor_manager.h`,
+> `Core/Src/stm32g4xx_hal_msp.c`.
+> **Related docs**: `docs/BTS7960_MOTOR_DRIVER_AUDIT.md`,
+> `docs/TIMER_PWM_ANALYSIS.md`, `docs/MOTOR_CONTROL.md`.
+
+---
+
+## 1. Low-Throttle Behavior (–5 % to +5 % Demand)
+
+### 1.1 Demand Pipeline Summary
+
+Before analyzing the low-throttle region, it is necessary to trace the
+complete demand path from pedal to PWM register:
+
+```
+Pedal ADC (PA3, 12-bit)
+  → Pedal_GetPercent()              [0–100 %]
+  → Safety_ValidateThrottle()       [clamp, plausibility]
+  → Traction_SetDemand()
+      ├─ anomaly step-rate filter   [≤15 %/10 ms]
+      ├─ EMA noise filter           [α=0.15, fc≈0.5 Hz @ 20 Hz]
+      └─ ramp limiter               [+50 %/s up, −100 %/s down]
+      → traction_state.demandPct
+  → Traction_Update()               [called at 100 Hz]
+      ├─ dynamic braking logic
+      ├─ gear power scaling          [D1=60%, D2=100%, R=60%]
+      ├─ effective_demand → base_pwm [float → uint16_t]
+      ├─ obstacle_scale              [0.0–1.0 multiplier]
+      ├─ traction_cap (DEGRADED)     [0.5–1.0 multiplier]
+      ├─ ackermann_diff[i]           [0.85–1.0 per wheel]
+      ├─ wheel_scale[i] (ABS/TCS)   [0.0–1.0 per wheel]
+      ├─ zero-demand brake decision  [≤ 0.5% → BTS7960_BRAKE_PWM]
+      └─ Motor_SetPWM()             [writes TIMx CCR register]
+```
+
+### 1.2 Will Torque Oscillations or Micro-Jerks Occur?
+
+**Yes. The current firmware has a structural discontinuity at ±0.5 % demand
+that will produce perceptible torque jerks.**
+
+The root cause is the binary transition in `Traction_Update()` at
+`TRACTION_ZERO_DEMAND_PCT = 0.5 %`:
+
+```c
+/* motor_control.c lines 985–1008 */
+if (fabs(effective_demand) <= TRACTION_ZERO_DEMAND_PCT) {
+    /* Zero demand — apply BTS7960 active brake to hold vehicle */
+    Motor_SetPWM(&motor_fl, BTS7960_BRAKE_PWM);   /* = 4249 = 100% */
+    /* ... */
+} else {
+    /* Non-zero demand — enable motors normally */
+    Motor_Enable(&motor_fl, 1);
+    /* ... */
+}
+```
+
+At the threshold boundary the motor output jumps between two extreme states:
+
+| State | PWM register value | Electrical effect |
+|-------|--------------------|-------------------|
+| `|demand| ≤ 0.5 %` | **4249** (100 % duty) | H-bridge shorts motor terminals → full electromagnetic brake |
+| `|demand| = 0.6 %` | **~25** (0.6 % × 4249 ≈ 25.5 counts) | ~0.14 V average applied to motor (0.6 % × 24 V) |
+
+The transition is:
+```
+PWM: 4249 → 25    (instant jump of 4224 counts)
+Electrical: full brake → near-zero drive voltage
+```
+
+**This is a step discontinuity of ~99.4 % of the PWM range.** The motor
+experiences a sudden release from full electromagnetic hold into a tiny
+driving voltage, then — if the pedal oscillates around 0.5 % due to ADC
+noise or EMA filter ripple — back into full brake. Each transition produces
+a torque impulse that is felt as a mechanical jerk.
+
+#### Quantitative analysis of oscillation likelihood
+
+The EMA filter with α=0.15 at 20 Hz update rate has a −3 dB cutoff at
+approximately 0.5 Hz. ADC noise on the 12-bit pedal channel (±1–2 LSB)
+maps to approximately ±0.024–0.049 % of full-scale ADC range (1 LSB =
+1/4096 ≈ 0.024 %). After EMA filtering, the residual noise is
+approximately ±0.005–0.01 %. This alone is unlikely to cross the 0.5 %
+threshold cyclically.
+
+**However**, the ramp limiter introduces a different oscillation mechanism.
+When the driver's foot is at a true pedal position of ~0.3–0.8 %:
+
+1. The ramp limiter smoothly approaches the pedal target.
+2. `pedal_ramped` crosses 0.5 % → motor switches from brake to drive.
+3. The motor produces a tiny forward force, vehicle lurches slightly.
+4. Driver's foot adjusts slightly, or EMA output shifts by 0.1 %.
+5. `pedal_ramped` drops below 0.5 % → motor snaps back to full brake.
+6. Repeat.
+
+The cycle period depends on the ramp rate (50 %/s up) and the amount of
+demand above/below the threshold. For demand hovering at 0.5 %:
+```
+Time to ramp from 0.0 % to 0.5 %: 0.5 / 50 = 10 ms (1 control cycle)
+Time to ramp from 0.5 % to 0.0 %: 0.5 / 100 = 5 ms (< 1 cycle)
+```
+
+This means the oscillation can occur at up to ~50–100 Hz, superimposed on
+the control loop rate. At the mechanical level (heavy vehicle, tire
+compliance), the first few harmonics (< 10 Hz) will produce perceptible
+vibration and audible H-bridge switching noise, even though the 20 kHz
+PWM itself is inaudible.
+
+### 1.3 Will the Vehicle "Stick Then Release"?
+
+**Yes. This is a direct consequence of the brake-to-drive step function.**
+
+The BTS7960 active brake at 100 % duty creates significant electromagnetic
+holding torque. The motor winding resistance shorts through the H-bridge,
+and any back-EMF generated by wheel motion is dissipated as current through
+the windings. This produces a holding force proportional to the square of
+the motor's Kv and inversely proportional to winding resistance.
+
+When the driver applies a very small throttle (e.g. 1 %):
+1. `effective_demand` crosses above 0.5 % → brake released, PWM drops to ~42 counts.
+2. Applied voltage: 1 % × 24 V = 0.24 V.
+3. This voltage must overcome:
+   - Motor static friction (brush/commutator contact, bearing preload)
+   - Drivetrain static friction (gearbox, differential, tire-road)
+   - Vehicle rolling resistance
+4. 0.24 V is almost certainly **below the motor's no-load start voltage**.
+   Typical 24 V brushed motors need 1–3 V to begin rotating.
+5. Motor stays stalled → no back-EMF → full 0.24 V appears across winding
+   resistance → small current flows → negligible torque.
+6. Driver pushes pedal harder → demand rises through ramp limiter → eventually
+   the applied voltage exceeds the static friction threshold.
+7. Motor begins rotating → back-EMF develops → net current drops → torque
+   drops below the static friction level → motor stops.
+8. No back-EMF → current rises again → motor lurches forward.
+
+This stick-slip cycle continues until the demand is high enough to maintain
+continuous rotation. The critical threshold depends on motor parameters, but
+for typical 24 V brushed DC motors it is typically **3–8 % of full duty**
+(0.7–1.9 V).
+
+### 1.4 Does Active Braking at Throttle=0 Create Control Instability?
+
+**It does not create classical control instability (divergent oscillation),
+but it does create a limit-cycle that produces perceptible judder.**
+
+The system is open-loop for traction (no speed or torque feedback in the
+traction control path — only the pedal demand drives PWM). There is no
+feedback that could cause divergent instability. However, the combination
+of:
+
+1. Binary brake/drive threshold (0.5 %)
+2. Ramp limiter (finite slew rate through the threshold)
+3. EMA filter (phase lag causing overshoot/undershoot around threshold)
+4. Mechanical stiction (motor + drivetrain)
+
+...creates a **stable limit cycle** in the ±0.5 % band. The physical
+manifestation is:
+- Audible: clicking/buzzing from H-bridge relay-like switching at ~10–50 Hz
+- Tactile: mild vibration through the chassis and steering
+- Visual: slight jerky motion when creeping at very low speed
+
+The steering motor is **not affected** by this issue because the steering
+uses closed-loop PID with encoder feedback and has its own deadband logic
+(0.5° → ~6.67 encoder counts) that smoothly transitions between active
+brake hold and PID-driven motion.
+
+---
+
+## 2. Voltage-Mode vs. Torque/Current-Mode Control
+
+### 2.1 Is the Current Architecture Voltage-Mode?
+
+**Yes. The traction control is pure open-loop voltage-mode control.**
+
+Evidence from the code:
+
+1. **No current feedback in the traction control path.**
+   `Current_GetAmps(i)` is called only for:
+   - Safety monitoring (`Safety_CheckCurrent()`) — overcurrent protection
+   - Telemetry (`CAN_SendStatusCurrent()`) — reporting to ESP32
+   - Park hold derating — reducing hold brake at high current
+   - State recording (`traction_state.wheels[i].currentA`) — logging
+
+   The current reading is **never** used to modulate the PWM duty cycle
+   in `Traction_Update()`. The pipeline is:
+   ```
+   pedal → demand% → base_pwm → scale factors → Motor_SetPWM()
+   ```
+   There is no `current_error = target_current - measured_current` anywhere.
+
+2. **No speed feedback in the traction control path.**
+   `Wheel_GetSpeed_XX()` is used for:
+   - ABS/TCS slip ratio computation
+   - Dynamic braking speed threshold (disable below 3 km/h)
+   - Frozen pedal anomaly detection
+
+   Speed is **not** used in a speed-control loop for traction. The driver
+   directly commands voltage (via duty cycle), not speed or torque.
+
+3. **INA226 current sensors exist but are read via I2C at 20 Hz.**
+   The `Current_ReadAll()` function is called in the 50 ms task. The I2C
+   read through the TCA9548A multiplexer introduces:
+   - 6 sequential I2C transactions (one per INA226)
+   - ~1–2 ms per transaction at 400 kHz Fast Mode
+   - Total: ~6–12 ms for a full current update cycle
+   - Effective bandwidth: < 10 Hz per channel
+
+   Even if a current control loop were added, the 20 Hz sample rate and
+   ~10 ms latency would limit the closed-loop bandwidth to approximately
+   1–2 Hz — far too slow for torque control of a brushed DC motor
+   (electrical time constant < 1 ms).
+
+### 2.2 Consequences on Smoothness at Low Speed
+
+Voltage-mode control has several well-known consequences that directly
+affect low-speed smoothness:
+
+#### A. Torque is not proportional to demand
+
+In voltage-mode, the motor current (and therefore torque) is:
+```
+I = (V_applied - V_back_emf) / R_winding
+  = (duty × V_bus - Kv × ω) / R_winding
+```
+
+At zero or very low speed (ω ≈ 0), back-EMF is negligible:
+```
+I ≈ duty × V_bus / R_winding
+```
+
+This is approximately linear in duty, **but only for steady-state current
+at a fixed speed**. During transients (speed changes), the current — and
+therefore the torque — is strongly coupled to the motor speed. The result:
+
+| Speed | Applied 5% duty (24V bus) | Back-EMF | Net voltage | Current | Torque |
+|-------|--------------------------|----------|-------------|---------|--------|
+| 0 rpm | 1.2 V | 0 V | 1.2 V | I₀ = 1.2/R | High (stall torque at this V) |
+| 100 rpm | 1.2 V | ~1.0 V | 0.2 V | I = 0.2/R | Very low |
+| 150 rpm | 1.2 V | ~1.5 V | –0.3 V | Negative (regeneration) | Motor decelerates (back-EMF exceeds applied V) |
+
+At 5 % duty the motor can only sustain ~70–100 rpm before back-EMF equals
+the applied voltage (exact value depends on Kv). Above that speed, back-EMF
+exceeds the applied voltage and the motor begins regenerating — current
+reverses through the H-bridge body diodes, producing braking torque. Any
+external disturbance (bump, slope change, wind) that changes the speed by
+±20 rpm will produce a large change in torque. The vehicle "hunts" around
+its equilibrium speed.
+
+#### B. No disturbance rejection
+
+In a torque/current-mode system, the inner current loop maintains constant
+motor current regardless of speed changes. In voltage-mode, there is no
+such rejection:
+
+- Uphill → speed decreases → back-EMF drops → current increases → vehicle
+  accelerates back (mild self-correction)
+- Downhill → speed increases → back-EMF rises → current decreases → vehicle
+  decelerates back (mild self-correction)
+
+This inherent voltage-mode self-regulation provides *some* speed
+stability, but is heavily damped by winding resistance and much weaker than
+a proper current loop. At very low speeds where the operating point is near
+the brake/drive threshold, the self-regulation is insufficient and the
+stick-slip behavior dominates.
+
+#### C. Minimum effective duty cycle
+
+Every brushed DC motor has a minimum voltage below which it cannot produce
+enough torque to overcome static friction and begin rotating. In
+voltage-mode control, this maps directly to a minimum effective duty cycle:
+
+```
+duty_min = V_start / V_bus
+```
+
+For typical 24 V motors with V_start ≈ 1.5 V:
+```
+duty_min = 1.5 / 24 = 6.25 %    → CCR = 266 counts
+```
+
+Any demand below 6.25 % produces current but no rotation — wasted energy
+as heat in the windings. Between 0 % and 6.25 % the vehicle is either
+fully braked (≤ 0.5 %) or drawing current with no useful motion
+(0.5 % – 6.25 %). This is the "dead zone" of the voltage-mode traction.
+
+#### D. PWM resolution is not the bottleneck
+
+At 4250 steps (center-aligned ARR=4249), each PWM step represents:
+```
+ΔV = 24 V / 4250 = 0.00565 V per step = 5.6 mV
+```
+
+This resolution is far finer than the motor's minimum start voltage
+(~1.5 V). The quantization granularity is not a smoothness limiter.
+**The problem is the control topology (voltage-mode without deadband
+shaping), not the PWM resolution.**
+
+---
+
+## 3. PCA9685 External PWM Generator Evaluation
+
+### 3.1 PCA9685 Specifications (relevant to this analysis)
+
+| Parameter | PCA9685 | STM32 TIM1 (current) |
+|-----------|---------|---------------------|
+| PWM frequency | 24 Hz – 1526 Hz (default 200 Hz) | 20 kHz (center-aligned) |
+| PWM resolution | 12-bit (4096 steps) | ~12-bit (4250 steps, center-aligned) |
+| Update latency | I2C write: ~0.5–1 ms per channel (400 kHz) | Direct register: < 10 ns |
+| Update jitter | I2C bus arbitration, clock stretching | Hardware timer — zero jitter |
+| Channels | 16 (only 5 needed) | 5 (TIM1 CH1-4 + TIM8 CH3) |
+| Synchronization | All channels share one oscillator, BUT I2C writes are sequential | TIM1 channels perfectly synchronous |
+
+### 3.2 Would a PCA9685 Reduce Jerkiness?
+
+**No. A PCA9685 would make jerkiness worse, not better.**
+
+The jerkiness at low throttle is caused by:
+1. The binary brake-to-drive threshold at 0.5 % — this is a firmware
+   decision that exists regardless of PWM source.
+2. The motor's static friction dead zone (~6 %) — this is a motor/drivetrain
+   property independent of PWM source.
+3. Voltage-mode control topology — this is an algorithm issue, not a
+   PWM hardware issue.
+
+A PCA9685 would add:
+- **Lower PWM frequency** (max 1526 Hz vs. 20 kHz): At 200 Hz, each PWM
+  cycle is 5 ms. A 1 % duty pulse has an ON-time of 50 µs per cycle
+  (1 % × 5 ms), repeating at 200 Hz. The motor sees discrete current
+  pulses at 200 Hz (audible), producing torque ripple at 200 Hz. At
+  20 kHz the current ripple is smoothed by motor inductance (L/R time
+  constant typically 0.5–2 ms), making individual pulses invisible to the
+  motor mechanics.
+- **I2C update latency** (~1 ms per channel, ~5 ms for all 5 motors):
+  This adds 5 ms of latency to the control loop on top of the existing
+  10 ms control period. At low speed where the brake/drive threshold
+  oscillation is already problematic, adding latency makes the oscillation
+  worse (phase margin reduction).
+- **I2C jitter**: Bus arbitration with the INA226 and ADS1115 sensors on
+  the same I2C1 bus introduces variable latency. The PWM update timing
+  becomes non-deterministic.
+
+### 3.3 Would a PCA9685 Improve Torque Linearity?
+
+**No. Torque linearity is limited by the motor physics and control
+topology, not by the PWM source.**
+
+The PCA9685 has 4096 steps vs. the STM32's 4250 steps — **less** resolution.
+Even if resolution were the issue (it is not — see Section 2.2D), the
+PCA9685 would be worse.
+
+Torque linearity at low speed is governed by:
+1. Motor V-I curve (winding resistance, inductance)
+2. Back-EMF vs. speed relationship (Kv constant)
+3. Static and Coulomb friction in the drivetrain
+4. Control loop topology (open-loop voltage vs. closed-loop current)
+
+None of these are affected by replacing the PWM source.
+
+### 3.4 Summary: PCA9685 Impact
+
+| Metric | PCA9685 effect | Reasoning |
+|--------|---------------|-----------|
+| Jerkiness at 0.5 % threshold | **No change** | Threshold is firmware logic, not PWM hardware |
+| Stick-slip at 1–5 % | **No change** | Motor physics, not PWM source |
+| Torque linearity | **Slightly worse** | Lower resolution (4096 vs. 4250) |
+| Torque ripple | **Much worse** | Max 1526 Hz vs. 20 kHz — motor inductance cannot smooth 1526 Hz ripple as effectively |
+| Control latency | **Much worse** | +5 ms I2C overhead per update cycle |
+| Update jitter | **Much worse** | I2C bus shared with sensors |
+| EMI | **Worse** | Sub-audible PWM frequency → larger current spikes |
+| Audible noise | **Much worse** | 200–1526 Hz PWM frequency is in the audible range |
+| Reliability | **Worse** | Additional I2C device, single point of failure for all 5 motors |
+| CPU load | **Slightly worse** | I2C DMA or polling overhead |
+
+**Conclusion: Adding a PCA9685 provides no benefit and degrades
+performance in every measurable dimension. The current STM32 hardware
+timer implementation is strictly superior.**
+
+---
+
+## 4. Firmware-Level Improvement Strategies (Without Hardware Changes)
+
+The following strategies address the identified low-throttle behavior
+issues using only firmware modifications. Each is analyzed for
+feasibility, expected impact, and interaction with existing safety systems.
+
+### 4.1 Zero-Torque Region (Coast Band)
+
+**Problem**: The 0.5 % threshold creates a binary transition between full
+brake (PWM=100 %) and near-zero drive (~0.5 % PWM).
+
+**Strategy**: Replace the binary threshold with a three-state region:
+
+```
+demand < coast_low (e.g. 0.3 %)    → active brake (PWM=100 %, EN=HIGH)
+coast_low ≤ demand ≤ coast_high    → coast mode (PWM=0, EN=LOW)
+demand > coast_high (e.g. 1.5 %)   → drive mode (PWM = f(demand))
+```
+
+A "coast band" between 0.3 % and 1.5 % would set EN=LOW (H-bridge
+disabled, motor floats). This eliminates the abrupt brake-to-drive
+transition by inserting a neutral zone where neither braking nor driving
+force is applied.
+
+**Expected impact**: Eliminates the 100 %→0.5 % PWM step at the threshold.
+The vehicle would coast briefly before drive engages, providing smoother
+departure from standstill.
+
+**Safety interaction**: Coast mode (EN=LOW) on slopes would allow the
+vehicle to roll. This must be balanced against the current behavior where
+the BTS7960 brake prevents rolling. A speed-dependent coast band (disabled
+above a threshold speed or on slopes) could mitigate this.
+
+### 4.2 Coast vs. Brake State Separation
+
+**Problem**: The current firmware conflates "no demand" with "hold brake".
+Any time throttle is near zero, the H-bridge actively brakes. This is
+correct for preventing rolling on slopes but produces poor behavior on
+flat ground.
+
+**Strategy**: Make the zero-demand behavior configurable by vehicle state:
+
+| Condition | Zero-demand action |
+|-----------|--------------------|
+| Speed > 3 km/h, throttle decreasing | Dynamic brake (already implemented) |
+| Speed > 3 km/h, throttle stable at 0 | Coast (EN=LOW) — vehicle decelerates naturally |
+| Speed ≤ 3 km/h, flat ground | Coast with timeout → brake after 2 s |
+| Speed ≤ 3 km/h, slope detected (via accelerometer or speed drift) | Active brake (current behavior) |
+| GEAR_PARK | Active brake (current behavior) |
+
+This separates the "I lifted off the throttle to coast" scenario from the
+"I'm stopped and want to hold position" scenario. Currently both get the
+same treatment (full electromagnetic brake), which is unnecessarily
+aggressive for coasting.
+
+**Expected impact**: Smoother deceleration feel. Eliminates the "wall of
+braking" sensation when throttle drops below 0.5 %.
+
+**Feasibility**: High — the speed data from wheel sensors and the dynamic
+braking state machine already provide the necessary context.
+
+### 4.3 Ramp Limiting (Already Partially Implemented)
+
+**Current state**: The firmware implements ramp limiting at 50 %/s up and
+100 %/s down. This successfully prevents gross demand jumps.
+
+**Problem**: The ramp limiter operates on the `pedal_ramped` value, which
+feeds into `traction_state.demandPct`. The ramp smooths the demand
+signal, but the downstream zero-demand threshold still creates a step
+function. The ramp limiter does not know about — and cannot prevent — the
+PWM discontinuity at the 0.5 % threshold.
+
+**Strategy**: Apply an additional ramp limiter *after* the brake/drive
+decision, directly on the PWM value written to the timer:
+
+```
+if transitioning from brake to drive:
+    ramp PWM from BTS7960_BRAKE_PWM down to target drive PWM
+    over ~50–100 ms (10–20 control cycles)
+if transitioning from drive to brake:
+    ramp PWM from current drive PWM up to BTS7960_BRAKE_PWM
+    over ~30–50 ms (5–10 control cycles)
+```
+
+This would smooth the 4249→25 PWM jump into a gradual transition,
+eliminating the torque impulse at the threshold.
+
+**Expected impact**: Significant reduction in threshold jerk. The motor
+would smoothly decelerate into brake hold rather than snapping.
+
+**Safety interaction**: The ramp must be fast enough to not delay braking
+in safety-critical scenarios. 50 ms is adequate — the existing relay
+power-down sequence is ~200 ms, so a 50 ms PWM ramp is well within safety
+margins.
+
+### 4.4 Deadband Shaping
+
+**Problem**: The motor's physical dead zone (0 % – ~6 % duty = no useful
+rotation) means that 6 % of the pedal travel produces no motion but draws
+current and heats the motor.
+
+**Strategy**: Apply a deadband compensation curve that maps the pedal
+range to the motor's useful range:
+
+```
+if demand ≤ deadband_start (e.g. 1 %):
+    effective_demand = 0 (or coast)
+elif demand ≤ remap_upper (e.g. 8 %):
+    effective_demand = linear_map(demand, deadband_start, remap_upper,
+                                  motor_min_duty, remap_upper)
+    // Maps [1%, 8%] → [motor_min_duty, 8%], skipping the dead zone
+else:
+    effective_demand = demand   (unchanged)
+```
+
+Where `motor_min_duty` is the empirically determined minimum duty cycle
+for the motor to begin rotating under load (~5–8 % for typical 24 V
+motors).
+
+This "jumps over" the dead zone: when the driver presses the pedal past
+1 %, the motor immediately receives enough voltage to start rotating,
+rather than spending 1–6 % of pedal travel applying voltage that produces
+no useful motion.
+
+**Expected impact**: Eliminates the "dead pedal" feel at low throttle.
+The vehicle begins moving as soon as the driver intends to move, rather
+than after a significant additional pedal push.
+
+**Calibration**: Requires empirical measurement of the motor's actual
+start voltage under load. Different load conditions (uphill, passengers)
+may require different minimum duties. A conservative value that works in
+worst-case (uphill, full load) would be safe in all conditions.
+
+### 4.5 Current Estimation (Software Sensorless)
+
+**Problem**: The INA226 current sensors exist but are read at 20 Hz via
+I2C — too slow for closed-loop torque control. Without current feedback,
+the system cannot compensate for the motor's nonlinear torque-speed
+characteristic at low speed.
+
+**Strategy**: Estimate motor current from the known electrical model:
+
+```
+I_estimated [A] = (duty × V_bus [V] - Ke × ω_measured [rad/s]) / R_winding [Ω]
+```
+
+Where (all SI units):
+- `duty` is the fractional duty cycle (0.0–1.0), known from firmware command
+- `V_bus` [V] is measured by INA226 channel 4 (battery voltage) — slow but
+  stable (voltage changes on ~seconds timescale)
+- `Ke` [V·s/rad] is the motor back-EMF constant (measured once during
+  characterization; related to the motor's Kv rating by Ke = 1/Kv when
+  Kv is in rad/s/V)
+- `ω_measured` [rad/s] is derived from wheel speed sensors (EXTI interrupts);
+  converted from km/h via ω = v / wheel_radius, or from RPM via ω = RPM × 2π/60
+- `R_winding` [Ω] is the motor winding resistance (measured once at ambient
+  temperature; temperature compensation via R(T) = R₀ × (1 + α_Cu × ΔT)
+  where α_Cu ≈ 0.00393 /°C)
+
+This estimate can be computed at 100 Hz (the control loop rate) with no
+additional I2C overhead. It provides a synthetic current signal that can be
+used for:
+
+1. **Current limiting at the control level** — instead of waiting for the
+   INA226 to report overcurrent at 20 Hz, the estimate detects overcurrent
+   within 10 ms.
+2. **Soft torque shaping** — using the estimated current to detect when
+   the motor is stalled (I >> normal) and reducing duty to prevent winding
+   overheating.
+3. **Dead-zone compensation** — the estimate shows when current flows
+   but speed is zero (stalled), allowing the firmware to either increase
+   duty (if the driver is demanding motion) or reduce to zero (if the
+   motor is stuck).
+
+**Limitations**:
+- Accuracy depends on knowing R_winding and Kv, which vary with temperature.
+  The DS18B20 temperature sensors (read at 1 Hz) can provide first-order
+  compensation.
+- The wheel speed sensors have limited resolution at very low speed
+  (6 pulses/rev, minimum speed ~0.5 km/h for detectable pulse rate).
+  Below this speed, ω must be assumed zero.
+
+**Expected impact**: Moderate improvement in torque predictability at low
+speed. Does not fully replace a hardware current loop but provides useful
+information at the firmware level.
+
+### 4.6 Brake-to-Drive Transition Shaping
+
+**Problem**: The transition from BTS7960_BRAKE_PWM (100 %) to drive PWM
+is instantaneous. Even with a demand ramp, the actual PWM written to
+the timer jumps from 4249 to a small value in one control cycle.
+
+**Strategy**: When the zero-demand condition clears (demand rises above
+0.5 %), do not immediately write the target drive PWM. Instead, ramp the
+PWM value from 4249 down to the target over several control cycles:
+
+```
+if was_braking and now_driving:
+    transition_pwm = BTS7960_BRAKE_PWM
+    target_pwm = computed_drive_pwm
+    ramp transition_pwm toward target_pwm at rate MAX_BRAKE_RELEASE_RATE
+    Motor_SetPWM(motor, transition_pwm)
+```
+
+This can be implemented with a per-motor state variable tracking whether
+the motor was in brake mode in the previous cycle.
+
+**Expected impact**: Eliminates the mechanical "clunk" felt when departing
+from standstill. The motor smoothly releases from brake into low-speed
+drive.
+
+### 4.7 Hysteresis on the Zero-Demand Threshold
+
+**Problem**: A fixed threshold at 0.5 % means that demand oscillating
+between 0.4 % and 0.6 % causes repeated brake/drive transitions.
+
+**Strategy**: Apply hysteresis to the threshold:
+
+```
+if currently_braking:
+    switch to drive only if demand > 1.5 %    (upper threshold)
+else:  /* currently driving */
+    switch to brake only if demand < 0.3 %    (lower threshold)
+```
+
+The 1.2 % hysteresis band prevents oscillation around the threshold. The
+pedal must be deliberately pressed past 1.5 % to start driving, and
+deliberately released below 0.3 % to engage the brake.
+
+**Expected impact**: Eliminates the rapid brake/drive oscillation at the
+threshold. Simple to implement (one additional state variable).
+
+**Interaction**: Works well in combination with deadband shaping (4.4) —
+the deadband ensures that when drive does engage, it starts at a useful
+motor voltage rather than in the dead zone.
+
+### 4.8 Strategy Summary Table
+
+| Strategy | Complexity | Impact on Jerkiness | Impact on Smoothness | Safety Risk | Interactions |
+|----------|-----------|--------------------|--------------------|------------|--------------|
+| 4.1 Zero-torque coast band | Low | High — eliminates brake/drive step | High | Medium — rolling on slopes | Needs slope detection or speed check |
+| 4.2 Coast vs brake separation | Medium | High | High | Low — context-aware | Uses existing wheel speed data |
+| 4.3 PWM ramp at threshold | Low | Very high — directly addresses the jerk | High | Very low — 50 ms ramp | Compatible with all existing systems |
+| 4.4 Deadband shaping | Low | Medium — eliminates dead zone | Very high | Very low | Requires motor characterization |
+| 4.5 Current estimation | Medium | Low–Medium | Medium | Very low — estimation only | Uses existing sensors differently |
+| 4.6 Brake-to-drive transition | Low | Very high | High | Very low | Subset of 4.3 |
+| 4.7 Hysteresis on threshold | Very low | High — eliminates threshold oscillation | Medium | Very low | Combines well with all others |
+
+### 4.9 Recommended Priority (if implemented)
+
+Based on impact/complexity ratio, without hardware changes:
+
+1. **4.7 Hysteresis** — simplest change, eliminates oscillation
+2. **4.6 Brake-to-drive ramp** — small code change, large physical improvement
+3. **4.4 Deadband shaping** — removes dead pedal, requires calibration
+4. **4.1 Coast band** — most significant architectural improvement
+5. **4.2 Coast/brake separation** — context-aware, builds on 4.1
+6. **4.5 Current estimation** — useful for diagnostics and future torque control
+7. **4.3 Full PWM ramp** — generalization of 4.6, marginal additional benefit
+
+---
+
+## 5. Key Numerical Constants (Reference)
+
+| Constant | Value | Source |
+|----------|-------|--------|
+| PWM_PERIOD (ARR) | 4249 | `motor_control.c` line 37 |
+| PWM frequency | 20 kHz | `main.c` TIM1/TIM8 init |
+| PWM mode | Center-aligned mode 1 | `main.c` TIM1/TIM8 init |
+| BTS7960_BRAKE_PWM | 4249 (100 %) | `motor_control.c` line 115 |
+| TRACTION_ZERO_DEMAND_PCT | 0.5 % | `motor_control.c` line 79 |
+| DYNBRAKE_MIN_SPEED_KMH | 3.0 km/h | `motor_control.c` line 99 |
+| PEDAL_EMA_ALPHA | 0.15 | `motor_control.c` line 52 |
+| PEDAL_RAMP_UP_PCT_S | 50 %/s | `motor_control.c` line 53 |
+| PEDAL_RAMP_DOWN_PCT_S | 100 %/s | `motor_control.c` line 54 |
+| GEAR_POWER_FORWARD_PCT | 0.60 (60 %) | `motor_control.c` line 143 |
+| V_bus (nominal) | 24 V | Hardware specification |
+| Wheel speed sensor resolution | 6 pulses/rev | `main.h` line 89 |
+| Current sensor update rate | 20 Hz (50 ms task) | `main.c` line 176 |
+| Control loop rate | 100 Hz (10 ms task) | `main.c` line 132 |
+| PWM step size | 0.024 % = 5.6 mV at 24 V | Derived from ARR=4249 |
