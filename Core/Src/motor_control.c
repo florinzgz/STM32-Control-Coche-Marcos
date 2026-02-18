@@ -550,7 +550,11 @@ void Traction_SetDemand(float throttlePct)
     /* ---- A) EMA noise filter ---- */
     if (!pedal_filter_init) {
         pedal_ema       = throttlePct;
-        pedal_ramped    = throttlePct;
+        /* Seed ramp to 0 (not to throttlePct) so the ramp limiter
+         * smoothly brings up demand after emergency stop / recovery.
+         * Without this, a driver holding the pedal during SAFE→ACTIVE
+         * recovery would cause an instant torque spike (P1 fix).      */
+        pedal_ramped    = 0.0f;
         pedal_last_tick = HAL_GetTick();
         pedal_filter_init = 1;
     } else {
@@ -1228,9 +1232,14 @@ void Traction_Update(void)
             prev_output_pwm[i] = desired_pwm[i];
         }
     } else {
-        /* In brake/coast, track desired values for seamless transition */
+        /* In brake/coast, reset prev_output_pwm to 0 so the jerk
+         * limiter sees a smooth transition from "stopped" to "driving"
+         * when entering DRIVE phase.  Without this, prev_output_pwm
+         * would track BTS7960_BRAKE_PWM (4249), and the jerk limiter
+         * would fight the brake_release_pct ramp by keeping PWM locked
+         * near full brake for ~530ms (P2 fix).                         */
         for (uint8_t i = 0; i < 4; i++) {
-            prev_output_pwm[i] = desired_pwm[i];
+            prev_output_pwm[i] = 0;
         }
     }
 
@@ -1429,9 +1438,16 @@ void Steering_ControlLoop(void)
     tau -= p->damping * eps_omega_filt;                               /* damp    */
     tau += p->friction_comp * fric_sign;                              /* friction*/
 
-    /* ---- High-speed safety: reduce assist above 25 km/h by 50% ---- */
-    if (v_kmh > 25.0f) {
-        tau *= 0.5f;
+    /* ---- High-speed safety: gradually reduce assist above 20 km/h ----
+     * Previous implementation used a hard step at 25 km/h (tau *= 0.5),
+     * which created an abrupt discontinuity in steering feel — the
+     * driver would feel the wheel suddenly stiffen at exactly 25 km/h.
+     * Replaced with a linear fade from 100% at 20 km/h to 50% at
+     * 30 km/h for a smooth, progressive weight-up (P3 fix).           */
+    if (v_kmh > 20.0f) {
+        float hs_fade = 1.0f - 0.5f * (v_kmh - 20.0f) / 10.0f;
+        if (hs_fade < 0.5f) hs_fade = 0.5f;
+        tau *= hs_fade;
     }
 
     /* ---- Degraded-mode scaling ---- */
