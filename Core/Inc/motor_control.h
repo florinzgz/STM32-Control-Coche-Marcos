@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "main.h"
+#include "eps_params.h"
 #include <stdint.h>
 #include <stdbool.h>
 

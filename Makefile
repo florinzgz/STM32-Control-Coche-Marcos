@@ -19,6 +19,7 @@ C_SOURCES = \
   $(CORE_SRC)/steering_centering.c \
   $(CORE_SRC)/boot_validation.c \
   $(CORE_SRC)/encoder_reader.c \
+  $(CORE_SRC)/eps_params.c \
   $(CORE_SRC)/stm32g4xx_it.c \
   $(CORE_SRC)/stm32g4xx_hal_msp.c \
   $(CORE_SRC)/system_stm32g4xx.c
@@ -43,7 +44,9 @@ HAL_SOURCES = \
   $(HAL_SRC)/stm32g4xx_hal_iwdg.c \
   $(HAL_SRC)/stm32g4xx_hal_dma.c \
   $(HAL_SRC)/stm32g4xx_hal_dma_ex.c \
-  $(HAL_SRC)/stm32g4xx_hal_exti.c
+  $(HAL_SRC)/stm32g4xx_hal_exti.c \
+  $(HAL_SRC)/stm32g4xx_hal_flash.c \
+  $(HAL_SRC)/stm32g4xx_hal_flash_ex.c
 
 # ASM startup
 ASM_SOURCES = startup_stm32g474retx.s
