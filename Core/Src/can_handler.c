@@ -581,8 +581,8 @@ void CAN_ProcessMessages(void) {
                         uint8_t mod_id = rx_payload[1];
                         if (mod_id < MODULE_COUNT) {
                             if (cmd == 0) {
-                                ServiceMode_DisableModule((ModuleID_t)mod_id);
-                                CAN_SendCommandAck(0x10, ACK_OK);
+                                bool ok = ServiceMode_DisableModule((ModuleID_t)mod_id);
+                                CAN_SendCommandAck(0x10, ok ? ACK_OK : ACK_REJECTED);
                             } else if (cmd == 1) {
                                 ServiceMode_EnableModule((ModuleID_t)mod_id);
                                 CAN_SendCommandAck(0x10, ACK_OK);
