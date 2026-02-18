@@ -124,7 +124,7 @@ const eps_params_t *EPS_Params_Get(void)
 
 bool EPS_Params_Set(eps_param_id_t id, float value)
 {
-    if ((int)id < 0 || id >= EPS_PARAM_COUNT) return false;
+    if (id >= EPS_PARAM_COUNT) return false;
 
     float *fields = (float *)&eps_active;
     fields[id] = value;
@@ -138,17 +138,34 @@ void EPS_Params_ResetDefaults(void)
 
 bool EPS_Params_Save(void)
 {
-    /* Build the slot in RAM */
+    /* Read the previous slot from flash before erasing (if valid).
+     * After page erase, both slots are lost, so we must rewrite
+     * the backup slot to maintain double-buffer safety.             */
+    eps_flash_slot_t prev_slot;
+    bool has_prev = false;
+    uint32_t prev_addr;
+
     eps_sequence++;
+
+    /* The "other" slot is the one we are NOT writing this time */
+    uint32_t target_addr = (eps_sequence & 1U) ? EPS_SLOT_A_ADDR
+                                                : EPS_SLOT_B_ADDR;
+    prev_addr = (eps_sequence & 1U) ? EPS_SLOT_B_ADDR
+                                     : EPS_SLOT_A_ADDR;
+
+    /* Copy the backup slot from flash into RAM before erasing */
+    const eps_flash_slot_t *prev_flash = (const eps_flash_slot_t *)prev_addr;
+    if (eps_slot_valid(prev_flash)) {
+        memcpy(&prev_slot, prev_flash, sizeof(eps_flash_slot_t));
+        has_prev = true;
+    }
+
+    /* Build the new slot in RAM */
     eps_flash_slot_t slot;
     slot.magic    = EPS_MAGIC;
     slot.sequence = eps_sequence;
     memcpy(&slot.params, &eps_active, sizeof(eps_params_t));
     slot.checksum = eps_crc32(&slot, offsetof(eps_flash_slot_t, checksum));
-
-    /* Determine target slot (alternate A/B based on sequence parity) */
-    uint32_t target_addr = (eps_sequence & 1U) ? EPS_SLOT_A_ADDR
-                                                : EPS_SLOT_B_ADDR;
 
     /* Unlock flash */
     HAL_StatusTypeDef status = HAL_FLASH_Unlock();
@@ -169,14 +186,13 @@ bool EPS_Params_Save(void)
         return false;
     }
 
-    /* Write the target slot (double-word aligned writes).
-     * STM32G4 flash requires 64-bit (double-word) writes.
-     * Pad slot to multiple of 8 bytes.                     */
-    uint32_t slot_size = sizeof(eps_flash_slot_t);
-    uint32_t words     = (slot_size + 7U) / 8U;
-    const uint64_t *src = (const uint64_t *)&slot;
+    /* Write the new slot (double-word aligned writes).
+     * STM32G4 flash requires 64-bit (double-word) writes.          */
+    uint32_t slot_size    = sizeof(eps_flash_slot_t);
+    uint32_t dword_count  = (slot_size + 7U) / 8U;
+    const uint64_t *src   = (const uint64_t *)&slot;
 
-    for (uint32_t i = 0; i < words; i++) {
+    for (uint32_t i = 0; i < dword_count; i++) {
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
                                    target_addr + (i * 8U), src[i]);
         if (status != HAL_OK) {
@@ -185,12 +201,20 @@ bool EPS_Params_Save(void)
         }
     }
 
-    /* If the other slot was valid from a previous save, rewrite it too
-     * so it survives the page erase.  Read it from RAM (we loaded at
-     * init) — actually, after erase both slots are gone.  We only need
-     * to write the current one.  The double-buffer safety comes from
-     * alternating which slot gets the latest sequence number.  After
-     * an erase, only one slot is valid, which is fine.               */
+    /* Rewrite the backup slot so the double-buffer survives the
+     * page erase.  If a power loss occurs between the erase and
+     * this write, the backup is lost but the new slot is valid.    */
+    if (has_prev) {
+        const uint64_t *prev_src = (const uint64_t *)&prev_slot;
+        for (uint32_t i = 0; i < dword_count; i++) {
+            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+                                       prev_addr + (i * 8U), prev_src[i]);
+            if (status != HAL_OK) {
+                /* Backup write failed — new slot is still valid */
+                break;
+            }
+        }
+    }
 
     HAL_FLASH_Lock();
     return true;

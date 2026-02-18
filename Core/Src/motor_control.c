@@ -1224,10 +1224,7 @@ void Steering_ControlLoop(void)
 
     /* ---- Coast band: below coast_band_pct → motor off (EN=LOW) ---- */
     if (abs_pct < p->coast_band_pct) {
-        Motor_SetPWM(&motor_steer, 0);
-        Motor_Enable(&motor_steer, 0);
-        eps_prev_pwm_raw = 0;
-        eps_motor_effort  = 0.0f;
+        Steering_Neutralize();
         return;
     }
 
@@ -1363,9 +1360,6 @@ void Steering_Neutralize(void)
     eps_omega_filt   = 0.0f;
     eps_prev_pwm_raw = 0;
     eps_motor_effort = 0.0f;
-    steering_pid.integral   = 0.0f;
-    steering_pid.prev_error = 0.0f;
-    steering_pid.output     = 0.0f;
 }
 
 /* ==================================================================
