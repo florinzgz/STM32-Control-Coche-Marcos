@@ -26,7 +26,7 @@
 | PWM timer | TIM1 CH1–4, center-aligned, ARR = 4249, 20 kHz |
 | Wheel speed | 4× Hall sensors, 6 pulses/rev (EXTI), min detectable ≈ 0.5 km/h |
 | Current sense | INA226 via I2C/TCA9548A, 20 Hz sample rate |
-| Bus voltage | INA226 ch 4 (battery), 20 Hz |
+| Bus voltage | INA226 on TCA9548A channel 4 (battery bus, `INA226_CHANNEL_BATTERY`), 20 Hz |
 | Temperature | DS18B20 OneWire, ~1 Hz per sensor |
 | Control loop | 100 Hz (10 ms period, `Traction_Update()`) |
 | Pedal update | 20 Hz (50 ms period, `Pedal_Update()` → `Traction_SetDemand()`) |
@@ -313,10 +313,11 @@ This state is unchanged from the current `Traction_EmergencyStop()`.
 | `DYNBRAKE_MIN_SPEED_KMH` | 3.0 | km/h | Existing constant — no dynamic braking below |
 | `BRAKE_RELEASE_RAMP_MS` | 80 | ms | Time to ramp PWM from brake (4249) to 0 |
 | `CREEP_RAMP_UP_MS` | 150 | ms | Time to ramp PWM from 0 to `CREEP_PWM_MIN` |
-| `CREEP_PWM_MIN` | 340 | counts | ~8 % duty = 1.9 V at 24 V bus (motor start threshold) |
-| `CREEP_PWM_MAX` | 510 | counts | ~12 % duty = 2.9 V → walking speed (~5 km/h) |
+| `CREEP_PWM_MIN` | 340 | counts | ~8 % duty = ~1.9 V at nominal 24 V bus (motor start threshold). Voltage-proportional: actual V = duty × V_bus_measured. See Section 6 for calibration. |
+| `CREEP_PWM_MAX` | 510 | counts | ~12 % duty = ~2.9 V at nominal 24 V bus → walking speed (~5 km/h). Same voltage-proportional note applies. |
 | `STALL_DETECT_MS` | 300 | ms | Time at CREEP with no speed → stall detected |
 | `SPEED_ZERO_THRESHOLD_KMH` | 0.5 | km/h | Below this = "stopped" (sensor resolution limit) |
+| `DYNBRAKE_ACTIVE_THRESHOLD` | 0.5 | % | Existing constant (`motor_control.c` line 78) — dynbrake_pct above this = active braking |
 
 ---
 
@@ -391,6 +392,12 @@ PWM:      0     0   CREEP_MIN  DRIVE_MIN       PWM_PERIOD
 ```c
 uint16_t pedal_to_pwm(float pedal_pct)
 {
+    /* Input invariant: pedal_pct is expected in [0, 100] after upstream
+     * EMA filter, ramp limiter, and sanitize_float() processing.
+     * Clamp defensively in case of float rounding or pipeline edge cases. */
+    if (pedal_pct < 0.0f) pedal_pct = 0.0f;
+    if (pedal_pct > 100.0f) pedal_pct = 100.0f;
+
     if (pedal_pct < COAST_ENTER_PEDAL_PCT)      /* < 1.0 % */
         return 0;
     if (pedal_pct < CREEP_ENTER_PEDAL_PCT)      /* 1.0 – 3.0 % */
@@ -671,8 +678,10 @@ A software current estimate at 100 Hz supplements the 20 Hz INA226 reading:
 ```c
 float estimate_motor_current(float duty_frac, float speed_kmh, float v_bus)
 {
-    /* Motor parameters (determined during commissioning) */
-    const float R_winding = 0.35f;   /* Ω — measured at ambient temperature */
+    /* Motor parameters — placeholder values, must be measured during
+     * commissioning (see Section 6: Calibration Requirements).
+     * These should be stored as configurable constants, not magic numbers. */
+    const float R_winding = 0.35f;   /* Ω — measured at ambient 20°C */
     const float Ke = 0.033f;         /* V·s/rad — back-EMF constant */
 
     /* Convert speed to angular velocity */
@@ -767,7 +776,9 @@ void LowSpeed_Update(float demand_pct, float avg_speed_kmh, float dt)
         return;
     }
 
-    /* ---- Update cached bus voltage (from 20 Hz INA226 read) ---- */
+    /* ---- Update cached bus voltage (from 20 Hz INA226 read) ----
+     * sanitize_float() is the existing NaN/Inf guard defined in
+     * motor_control.c (line 27); returns safe_default on invalid input. */
     ls_v_bus = sanitize_float(Voltage_GetBus(INA226_CHANNEL_BATTERY), 24.0f);
     if (ls_v_bus < 12.0f) ls_v_bus = 24.0f;  /* Implausible — use nominal */
 
@@ -845,7 +856,12 @@ void LowSpeed_Update(float demand_pct, float avg_speed_kmh, float dt)
                     ls_stall_tick = now;  /* Reset timer for next boost step */
                 }
 
-                /* Safety: check estimated current */
+                /* Safety: check estimated current.
+                 * Uses PARK_HOLD_CURRENT_WARN_A (15 A) as the creep stall
+                 * current limit — same physical threshold (motor thermal
+                 * budget) applies whether the motor is holding in park or
+                 * stalled during creep.  A dedicated CREEP_CURRENT_LIMIT_A
+                 * constant could be defined if different limits are needed. */
                 float i_est = estimate_motor_current(
                     (float)(target_pwm + ls_creep_boost) / PWM_PERIOD,
                     avg_speed_kmh, ls_v_bus);
@@ -1019,7 +1035,9 @@ static void set_all_motors_pwm(uint16_t pwm, bool en)
 static void set_all_motors_drive(uint16_t pwm)
 {
     /* Set drive PWM with direction from current gear.
-     * EN=HIGH, DIR set by gear. */
+     * EN=HIGH, DIR set by gear.
+     * current_gear is the existing module-static variable in motor_control.c
+     * (line 242), set by Traction_SetGear() from the CAN gear command. */
     int8_t dir = (current_gear == GEAR_REVERSE) ? -1 : 1;
     bool rear_active = traction_state.mode4x4 || traction_state.axisRotation;
     Motor_SetPWM(&motor_fl, pwm);  Motor_SetDirection(&motor_fl, dir);  Motor_Enable(&motor_fl, 1);
