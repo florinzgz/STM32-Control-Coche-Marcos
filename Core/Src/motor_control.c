@@ -426,7 +426,7 @@ void Traction_Init(void)
     /* Reset dynamic braking state */
     dynbrake_pct       = 0.0f;
     prev_demand_pct    = 0.0f;
-    dynbrake_last_tick = 0;
+    dynbrake_last_tick = HAL_GetTick();
 
     /* Reset smooth driving state */
     trac_phase        = TRAC_PHASE_BRAKE;
@@ -1381,7 +1381,9 @@ void Steering_ControlLoop(void)
     static uint32_t last_time = 0;
     uint32_t now = HAL_GetTick();
 
-    if (last_time == 0) {
+    if (last_time == 0 || (now - last_time) > 500) {
+        /* First call or returning from SAFE/ERROR — re-seed to avoid
+         * a huge dt that would spike the angular velocity estimate.   */
         last_time = now;
         eps_prev_angle_deg = Steering_GetCurrentAngle();
         return;
@@ -1625,14 +1627,14 @@ void Steering_Neutralize(void)
 AckermannResult_t Ackermann_Compute(float wheelAngleDeg)
 {
     AckermannResult_t result = {0};
-    if (fabs(wheelAngleDeg) < 0.01f) {
+    if (fabsf(wheelAngleDeg) < 0.01f) {
         result.innerDeg = 0.0f;
         result.outerDeg = 0.0f;
         return result;
     }
 
     float angle_rad = wheelAngleDeg * (float)M_PI / 180.0f;
-    float turn_radius = ackermann_wheelbase / tanf(fabs(angle_rad));
+    float turn_radius = ackermann_wheelbase / tanf(fabsf(angle_rad));
 
     float inner_radius = turn_radius - ackermann_track / 2.0f;
     float outer_radius = turn_radius + ackermann_track / 2.0f;

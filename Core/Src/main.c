@@ -23,6 +23,7 @@
 #include "service_mode.h"
 #include "boot_validation.h"
 #include "encoder_reader.h"
+#include <math.h>
 
 /* ---- HAL handle instances ---- */
 ADC_HandleTypeDef   hadc1;
@@ -68,6 +69,16 @@ static void Boot_ReadResetCause(void)
 }
 
 uint8_t Boot_GetResetCause(void) { return reset_cause; }
+
+/* ---- Float-to-uint16 safe conversion ----
+ * Clamps negative/NaN/Inf float values to 0 before uint16 cast,
+ * preventing unsigned integer wrap-around in CAN telemetry.      */
+static inline uint16_t float_to_u16(float val)
+{
+    if (val < 0.0f || isnan(val) || isinf(val)) return 0U;
+    if (val > 65535.0f) return 65535U;
+    return (uint16_t)val;
+}
 
 /* ---- Peripheral init status flags ---- */
 bool fdcan_init_ok = false;
@@ -206,15 +217,15 @@ int main(void)
 
             CAN_SendHeartbeat();
             CAN_SendStatusSpeed(
-                (uint16_t)(Wheel_GetSpeed_FL() * 10),
-                (uint16_t)(Wheel_GetSpeed_FR() * 10),
-                (uint16_t)(Wheel_GetSpeed_RL() * 10),
-                (uint16_t)(Wheel_GetSpeed_RR() * 10));
+                float_to_u16(Wheel_GetSpeed_FL() * 10),
+                float_to_u16(Wheel_GetSpeed_FR() * 10),
+                float_to_u16(Wheel_GetSpeed_RL() * 10),
+                float_to_u16(Wheel_GetSpeed_RR() * 10));
             CAN_SendStatusCurrent(
-                (uint16_t)(Current_GetAmps(0) * 100),
-                (uint16_t)(Current_GetAmps(1) * 100),
-                (uint16_t)(Current_GetAmps(2) * 100),
-                (uint16_t)(Current_GetAmps(3) * 100));
+                float_to_u16(Current_GetAmps(0) * 100),
+                float_to_u16(Current_GetAmps(1) * 100),
+                float_to_u16(Current_GetAmps(2) * 100),
+                float_to_u16(Current_GetAmps(3) * 100));
             CAN_SendStatusSafety(
                 ABS_IsActive(), TCS_IsActive(),
                 (uint8_t)Safety_GetError());

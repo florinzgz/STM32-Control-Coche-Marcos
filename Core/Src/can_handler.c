@@ -281,10 +281,12 @@ void CAN_SendStatusSteering(int16_t angle, bool calibrated) {
 void CAN_SendStatusTraction(void) {
     uint8_t data[4];
 
-    data[0] = (uint8_t)(safety_status.wheel_scale[MOTOR_FL] * 100.0f);
-    data[1] = (uint8_t)(safety_status.wheel_scale[MOTOR_FR] * 100.0f);
-    data[2] = (uint8_t)(safety_status.wheel_scale[MOTOR_RL] * 100.0f);
-    data[3] = (uint8_t)(safety_status.wheel_scale[MOTOR_RR] * 100.0f);
+    for (uint8_t i = 0; i < 4; i++) {
+        float s = sanitize_float(safety_status.wheel_scale[i], 0.0f);
+        if (s < 0.0f) s = 0.0f;
+        if (s > 1.0f) s = 1.0f;
+        data[i] = (uint8_t)(s * 100.0f);
+    }
 
     TransmitFrame(CAN_ID_STATUS_TRACTION, data, 4);
 }
@@ -334,8 +336,10 @@ void CAN_SendStatusTempMap(void) {
 void CAN_SendStatusBattery(void) {
     uint8_t data[4];
 
-    float amps = Current_GetAmps(INA226_CHANNEL_BATTERY);
-    float volts = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+    float amps = sanitize_float(Current_GetAmps(INA226_CHANNEL_BATTERY), 0.0f);
+    float volts = sanitize_float(Voltage_GetBus(INA226_CHANNEL_BATTERY), 0.0f);
+    if (amps < 0.0f) amps = 0.0f;
+    if (volts < 0.0f) volts = 0.0f;
     uint16_t amps_raw = (uint16_t)(amps * 100.0f);
     uint16_t volts_raw = (uint16_t)(volts * 100.0f);
 
@@ -577,8 +581,8 @@ void CAN_ProcessMessages(void) {
                         uint8_t mod_id = rx_payload[1];
                         if (mod_id < MODULE_COUNT) {
                             if (cmd == 0) {
-                                ServiceMode_DisableModule((ModuleID_t)mod_id);
-                                CAN_SendCommandAck(0x10, ACK_OK);
+                                bool ok = ServiceMode_DisableModule((ModuleID_t)mod_id);
+                                CAN_SendCommandAck(0x10, ok ? ACK_OK : ACK_REJECTED);
                             } else if (cmd == 1) {
                                 ServiceMode_EnableModule((ModuleID_t)mod_id);
                                 CAN_SendCommandAck(0x10, ACK_OK);

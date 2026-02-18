@@ -917,14 +917,16 @@ void Safety_CheckSensors(void)
         }
     }
 
-    /* Current plausibility: negative or extremely high = fault.
+    /* Current plausibility: significantly negative or extremely high = fault.
+     * A small negative reading (> −1 A) is expected due to INA226 offset
+     * and inductive motor flyback during deceleration — not a fault.
      * Traced to base firmware system.cpp selfTest: current sensors
      * are OPTIONAL and use MODE_DEGRADED.                               */
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         float a = Current_GetAmps(i);
-        if (a < 0.0f || a > SENSOR_CURRENT_MAX_A) {
+        if (a < -1.0f || a > SENSOR_CURRENT_MAX_A) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
