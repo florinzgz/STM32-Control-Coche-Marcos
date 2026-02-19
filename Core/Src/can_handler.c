@@ -15,17 +15,8 @@
 #include "safety_system.h"
 #include "sensor_manager.h"
 #include "service_mode.h"
+#include "math_safety.h"
 #include <math.h>
-
-/* NaN/Inf sanitization — mirrors motor_control.c helper.
- * Returns safe_default if val is NaN or Inf.             */
-static inline float sanitize_float(float val, float safe_default)
-{
-    if (isnan(val) || isinf(val)) {
-        return safe_default;
-    }
-    return val;
-}
 
 /* Safe-default for speed when NaN/Inf detected — ensures gear change is rejected */
 #define SANITIZE_SPEED_DEFAULT  99.0f
@@ -340,8 +331,8 @@ void CAN_SendStatusBattery(void) {
     float volts = sanitize_float(Voltage_GetBus(INA226_CHANNEL_BATTERY), 0.0f);
     if (amps < 0.0f) amps = 0.0f;
     if (volts < 0.0f) volts = 0.0f;
-    uint16_t amps_raw = (uint16_t)(amps * 100.0f);
-    uint16_t volts_raw = (uint16_t)(volts * 100.0f);
+    uint16_t amps_raw = float_to_u16_clamped(amps * 100.0f);
+    uint16_t volts_raw = float_to_u16_clamped(volts * 100.0f);
 
     data[0] = (uint8_t)(amps_raw & 0xFF);
     data[1] = (uint8_t)((amps_raw >> 8) & 0xFF);

@@ -34,26 +34,28 @@ float sanitize_float(float v, float def);
 uint16_t float_to_u16_clamped(float v);
 
 /**
- * @brief  Multiply a float by @p scale, then convert to uint16_t with
- *         saturation.  NaN / Inf / negative → 0.
+ * @brief  Multiply a float by @p scale, then clamp to [0, 65535].
+ *         NaN / Inf in v or scale → 0.  Negative product → 0.
  * @param  v      Input value.
- * @param  scale  Multiplicative scale factor applied before conversion.
+ * @param  scale  Multiplicative scale factor (negative allowed).
  * @retval Clamped uint16_t.
  */
 uint16_t float_scaled_to_u16(float v, float scale);
 
 /**
  * @brief  Convert a float to uint8_t, clamped to [0, @p max].
- *         NaN / Inf / negative → 0.
+ *         max sanitized (NaN/Inf → 0, clamped to [0, 255]).
+ *         v sanitized (NaN/Inf → 0) then clamped to [0, max].
  * @param  v    Input value.
- * @param  max  Upper bound (inclusive), clamped to 255 internally.
+ * @param  max  Upper bound (inclusive), clamped to [0, 255] internally.
  * @retval Clamped uint8_t.
  */
 uint8_t float_to_u8_clamped(float v, float max);
 
 /**
  * @brief  Clamp a float to [@p lo, @p hi].
- *         NaN / Inf → @p lo (safe side).
+ *         Bounds sanitized (NaN/Inf → 0) then swapped if inverted.
+ *         NaN / Inf v → lo (safe side).
  * @param  v   Input value.
  * @param  lo  Lower bound.
  * @param  hi  Upper bound.
