@@ -7,8 +7,8 @@
 // Reference: docs/ESP32_FIRMWARE_DESIGN.md rev 1.1
 // =============================================================================
 
-#ifndef SCREEN_H
-#define SCREEN_H
+#ifndef SCREEN_BASE_H
+#define SCREEN_BASE_H
 
 #include "vehicle_data.h"
 
@@ -29,4 +29,4 @@ public:
     virtual void draw() = 0;
 };
 
-#endif // SCREEN_H
+#endif // SCREEN_BASE_H
