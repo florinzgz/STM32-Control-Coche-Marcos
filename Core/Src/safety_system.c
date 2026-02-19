@@ -1315,10 +1315,12 @@ void Obstacle_Update(void)
         (now - obstacle_last_rx_tick) > OBSTACLE_CAN_TIMEOUT_MS) {
         /* No obstacle data for > 500 ms — sensor data stale.
          * In the autonomous design, this does NOT trigger SAFE.
-         * The LIMP_HOME speed limit (5 km/h walking speed) provides
-         * the safety net when obstacle data is unavailable.
-         * Apply conservative scale but keep vehicle mobile.            */
-        safety_status.obstacle_scale = 1.0f;
+         * Apply conservative scale (0.3 = heavy reduction) so that
+         * if the system is still in ACTIVE/DEGRADED before the CAN
+         * heartbeat timeout triggers LIMP_HOME, obstacle protection
+         * is maintained.  In LIMP_HOME the speed cap provides an
+         * additional safety net.                                       */
+        safety_status.obstacle_scale = 0.3f;
         obstacle_forward_blocked = 0;
         ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
         /* Do NOT set SAFETY_ERROR_OBSTACLE or enter SAFE.

@@ -215,10 +215,12 @@ int main(void)
                     Traction_SetDemand(0.0f);
                 } else {
                     float pedal = Pedal_GetPercent();
-                    /* Hard clamp: 20% max torque in LIMP_HOME */
+                    /* Hard clamp: 20% max torque in LIMP_HOME.
+                     * pedal is 0–100%, factor is 0.20 → max demand = 20%. */
                     float clamped = pedal * LIMP_HOME_TORQUE_LIMIT_FACTOR;
-                    if (clamped > (LIMP_HOME_TORQUE_LIMIT_FACTOR * 100.0f))
-                        clamped = LIMP_HOME_TORQUE_LIMIT_FACTOR * 100.0f;
+                    if (clamped < 0.0f)  clamped = 0.0f;
+                    if (clamped > 100.0f * LIMP_HOME_TORQUE_LIMIT_FACTOR)
+                        clamped = 100.0f * LIMP_HOME_TORQUE_LIMIT_FACTOR;
                     Traction_SetDemand(clamped);
                 }
             } else {
