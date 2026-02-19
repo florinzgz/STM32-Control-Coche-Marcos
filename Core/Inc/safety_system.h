@@ -253,11 +253,26 @@ float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);
 bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
 
-/* Obstacle safety (CAN-received from ESP32, autonomous backstop) */
-void    Obstacle_Update(void);
-void    Obstacle_ProcessCAN(const uint8_t *data, uint8_t len);
-float   Obstacle_GetScale(void);
-bool    Obstacle_IsForwardBlocked(void);
+/* ---- Local obstacle state machine (STM32 is primary safety authority) ----
+ * CAN obstacle frames from ESP32 are advisory only — never mandatory
+ * for motion.  The STM32 runs a full autonomous obstacle safety module
+ * with plausibility validation, stuck-sensor detection, speed-dependent
+ * stopping distance, and temporal hysteresis.                              */
+typedef enum {
+    OBS_STATE_NO_SENSOR = 0,   /* No CAN data ever received — full motion    */
+    OBS_STATE_NORMAL,          /* Sensor valid, no obstacle in range          */
+    OBS_STATE_CONFIRMING,      /* Potential obstacle, temporal confirmation   */
+    OBS_STATE_ACTIVE,          /* Confirmed obstacle, torque reduction active */
+    OBS_STATE_CLEARING,        /* Obstacle receding, confirming clearance     */
+    OBS_STATE_SENSOR_FAULT     /* Sensor data implausible — conservative mode */
+} ObstacleState_t;
+
+/* Obstacle safety (STM32 primary — CAN advisory from ESP32) */
+void             Obstacle_Update(void);
+void             Obstacle_ProcessCAN(const uint8_t *data, uint8_t len);
+float            Obstacle_GetScale(void);
+bool             Obstacle_IsForwardBlocked(void);
+ObstacleState_t  Obstacle_GetState(void);
 
 extern SafetyStatus_t safety_status;
 extern Safety_Error_t safety_error;

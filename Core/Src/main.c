@@ -150,11 +150,13 @@ int main(void)
                 BootValidation_Run();
             }
 
-            /* Obstacle safety — autonomous backstop limiter.
-             * Computes obstacle_scale from CAN-received distance data.
-             * In LIMP_HOME, obstacle CAN timeout does NOT trigger SAFE;
-             * walking-speed limit provides the safety net.
-             * Reverse escape is allowed when forward is blocked.        */
+            /* Obstacle safety — STM32 primary safety controller.
+             * CAN obstacle data from ESP32 is advisory only.
+             * Local state machine with plausibility validation,
+             * stuck-sensor detection, speed-dependent thresholds,
+             * and temporal hysteresis.  CAN loss → scale 1.0
+             * (LIMP_HOME speed cap provides safety net).
+             * Reverse escape is allowed when forward is blocked.   */
             Obstacle_Update();
 
             /* Non-blocking relay sequencer — progresses the power-up
