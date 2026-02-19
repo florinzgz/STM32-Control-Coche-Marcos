@@ -105,10 +105,14 @@ void setup() {
 
     // Initialize PSRAM
     if (psramInit()) {
+        // Give system a moment to complete PSRAM initialization
+        delay(10);
         Serial.printf("[PSRAM] Initialized — total: %u bytes, free: %u bytes\n",
                       ESP.getPsramSize(), ESP.getFreePsram());
     } else {
-        Serial.println("[PSRAM] Initialization FAILED — check board_build.arduino.memory_type");
+        Serial.println("[PSRAM] CRITICAL: Initialization FAILED — check board_build.arduino.memory_type");
+        // Consider halting or entering degraded mode if PSRAM is required
+        // while(1) { delay(1000); }
     }
 
     // Initialize TFT display
