@@ -47,6 +47,7 @@ static unsigned long ackSentMs = 0;       // timestamp when the command was sent
 static bool     ackTimedOut    = false;   // set true if ACK_TIMEOUT_MS elapsed
 
 /// Call before sending a command that expects ACK (CMD_MODE, SERVICE_CMD).
+__attribute__((unused))
 static void ackBeginWait(uint8_t cmdIdLow) {
     ackPending     = true;
     ackExpectedCmd = cmdIdLow;
