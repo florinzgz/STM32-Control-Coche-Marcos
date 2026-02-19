@@ -175,7 +175,7 @@ void CAN_SendHeartbeat(void) {
     if ((current_time - last_tx_heartbeat) >= 100) {
         /* Per CAN protocol doc (0x001):
          *   Byte 0: alive_counter  (uint8, cyclic 0-255, rollover is intentional)
-         *   Byte 1: system_state   (uint8, 0=Boot..5=Error; 3=Degraded is new)
+         *   Byte 1: system_state   (uint8, 0=Boot..6=LimpHome)
          *   Byte 2: fault_flags    (bitmask)
          *   Byte 3: error_code     (Safety_Error_t, specific fault ID for HMI) */
         uint8_t payload[4];
@@ -705,13 +705,15 @@ void CAN_CheckBusOff(void)
     }
 
     if (psr.BusOff) {
-        /* Bus-off detected — raise fault and enter SAFE */
+        /* Bus-off detected — raise fault and enter LIMP_HOME.
+         * CAN bus-off is a communication failure, not a hardware
+         * danger.  Vehicle remains mobile at walking speed.            */
         busoff_active       = 1;
         busoff_last_attempt = HAL_GetTick();
         busoff_retry_count  = 0;
         can_stats.busoff_count++;
         Safety_SetError(SAFETY_ERROR_CAN_BUSOFF);
-        Safety_SetState(SYS_STATE_SAFE);
+        Safety_SetState(SYS_STATE_LIMP_HOME);
     }
 }
 

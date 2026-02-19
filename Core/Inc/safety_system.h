@@ -35,33 +35,46 @@ typedef enum {
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.
- * Commands are accepted in ACTIVE and DEGRADED (with limits).
+ * CAN commands are accepted in ACTIVE and DEGRADED (with limits).
+ * Local pedal control is accepted in LIMP_HOME (walking speed only).
  *
  *  BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR
+ *                 ↘ LIMP_HOME ↗
  *
- * Transitions (traced to base firmware limp_mode.cpp):
+ * Transitions:
  *   BOOT→STANDBY     : peripheral init complete
  *   STANDBY→ACTIVE   : ESP32 heartbeat received, sensors plausible
+ *   STANDBY→LIMP_HOME: boot validation passed but no CAN heartbeat
  *   ACTIVE→DEGRADED  : non-critical fault (sensor glitch, temp warning,
  *                       centering fail, single overcurrent)
+ *   ACTIVE→LIMP_HOME : CAN timeout (communication loss is NOT a hazard)
  *   DEGRADED→ACTIVE  : fault cleared (recovery — "drive home" philosophy)
+ *   DEGRADED→LIMP_HOME: CAN timeout while already degraded
  *   DEGRADED→SAFE    : critical fault while already degraded, or
  *                       persistent fault (consecutive error count ≥ 3)
- *   ACTIVE→SAFE      : CAN timeout, emergency stop
+ *   LIMP_HOME→ACTIVE : CAN heartbeat restored AND system healthy
+ *   ACTIVE→SAFE      : overcurrent, overtemp, inverter fault, watchdog,
+ *                       electrical hazard, sensor incoherence
  *   SAFE→ACTIVE      : fault cleared AND ESP32 heartbeat restored
  *   any→ERROR        : unrecoverable fault (watchdog, emergency stop)
+ *
+ * SAFE is reserved for real hardware danger — never triggered by
+ * missing CAN frames.  Communication loss enters LIMP_HOME instead.
  */
 typedef enum {
-    SYS_STATE_BOOT     = 0,  /* Power-on, peripherals initialising        */
-    SYS_STATE_STANDBY  = 1,  /* Ready, waiting for ESP32 heartbeat        */
-    SYS_STATE_ACTIVE   = 2,  /* Normal operation – commands accepted       */
-    SYS_STATE_DEGRADED = 3,  /* Limp / degraded – commands accepted with
-                              * reduced power/speed limits.  The vehicle
-                              * can still "drive home".  Traced to base
-                              * firmware limp_mode.cpp states DEGRADED /
-                              * LIMP / CRITICAL.                           */
-    SYS_STATE_SAFE     = 4,  /* Severe fault – actuators inhibited         */
-    SYS_STATE_ERROR    = 5   /* Unrecoverable fault – power-down required  */
+    SYS_STATE_BOOT      = 0,  /* Power-on, peripherals initialising        */
+    SYS_STATE_STANDBY   = 1,  /* Ready, waiting for ESP32 heartbeat        */
+    SYS_STATE_ACTIVE    = 2,  /* Normal operation – CAN commands accepted   */
+    SYS_STATE_DEGRADED  = 3,  /* Limp / degraded – CAN commands accepted
+                               * with reduced power/speed limits.           */
+    SYS_STATE_SAFE      = 4,  /* Hardware danger – actuators inhibited.
+                               * Only for overcurrent, inverter fault,
+                               * watchdog, electrical hazard.               */
+    SYS_STATE_ERROR     = 5,  /* Unrecoverable fault – power-down required  */
+    SYS_STATE_LIMP_HOME = 6   /* CAN-loss degraded – minimal drivable mode.
+                               * Local pedal control, walking speed cap,
+                               * steering operational, no torque vectoring.
+                               * Vehicle remains mobile without CAN/ESP32.  */
 } SystemState_t;
 
 /* Fault-flag bitmask transmitted in the heartbeat (byte 2) */
@@ -165,6 +178,23 @@ typedef enum {
 #define DEGRADED_L3_STEERING_PCT   60.0f
 #define DEGRADED_L3_TRACTION_PCT   50.0f   /* == DEGRADED_SPEED_LIMIT_PCT */
 
+/* ---- LIMP_HOME mode parameters — minimal mobility without CAN ----
+ * When CAN is lost, the vehicle enters LIMP_HOME instead of SAFE.
+ * Communication loss is NOT a hazard.  The vehicle can still move
+ * at walking speed using the local pedal sensor.
+ *
+ * Safety is maintained by:
+ *   - 20% torque limit (strong clamp on pedal input)
+ *   - 5 km/h speed cap (walking pace)
+ *   - 10 %/s ramp rate (very slow acceleration)
+ *   - No torque vectoring (Ackermann differential disabled)
+ *   - Each motor operates independently
+ *   - Limited regen braking
+ *   - Obstacle scale still applied when CAN data is available        */
+#define LIMP_HOME_TORQUE_LIMIT_FACTOR  0.20f   /* 20% max torque       */
+#define LIMP_HOME_SPEED_LIMIT_KMH      5.0f    /* Walking speed cap    */
+#define LIMP_HOME_RAMP_RATE_PCT_PER_S  10.0f   /* Very slow accel ramp */
+
 /* Consecutive-error threshold before escalating DEGRADED → SAFE.
  * Traced to base firmware relays.cpp (consecutiveErrors >= 3).          */
 #define CONSECUTIVE_ERROR_THRESHOLD  3
@@ -196,7 +226,9 @@ void Safety_UpdateCANRxTime(void);
 SystemState_t Safety_GetState(void);
 void          Safety_SetState(SystemState_t state);
 bool          Safety_IsCommandAllowed(void);
+bool          Safety_IsMotionAllowed(void);
 bool          Safety_IsDegraded(void);
+bool          Safety_IsLimpHome(void);
 uint8_t       Safety_GetFaultFlags(void);
 
 /* Degraded-mode throttle limit (returns multiplier 0.0–1.0) */
@@ -221,10 +253,11 @@ float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);
 bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
 
-/* Obstacle safety (CAN-received from ESP32) */
+/* Obstacle safety (CAN-received from ESP32, autonomous backstop) */
 void    Obstacle_Update(void);
 void    Obstacle_ProcessCAN(const uint8_t *data, uint8_t len);
 float   Obstacle_GetScale(void);
+bool    Obstacle_IsForwardBlocked(void);
 
 extern SafetyStatus_t safety_status;
 extern Safety_Error_t safety_error;

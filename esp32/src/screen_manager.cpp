@@ -44,12 +44,13 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 
 Screen* ScreenManager::screenForState(can::SystemState state) {
     switch (state) {
-        case can::SystemState::BOOT:     return &bootScreen_;
-        case can::SystemState::STANDBY:  return &standbyScreen_;
-        case can::SystemState::ACTIVE:   return &driveScreen_;
-        case can::SystemState::DEGRADED: return &driveScreen_;
-        case can::SystemState::SAFE:     return &safeScreen_;
-        case can::SystemState::ERROR:    return &errorScreen_;
-        default:                         return &errorScreen_;
+        case can::SystemState::BOOT:      return &bootScreen_;
+        case can::SystemState::STANDBY:   return &standbyScreen_;
+        case can::SystemState::ACTIVE:    return &driveScreen_;
+        case can::SystemState::DEGRADED:  return &driveScreen_;
+        case can::SystemState::LIMP_HOME: return &driveScreen_;
+        case can::SystemState::SAFE:      return &safeScreen_;
+        case can::SystemState::ERROR:     return &errorScreen_;
+        default:                          return &errorScreen_;
     }
 }

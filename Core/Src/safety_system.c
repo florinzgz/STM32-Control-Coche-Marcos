@@ -154,6 +154,7 @@ static uint8_t  obstacle_stale_count    = 0;   /* Consecutive stale frames    */
 static uint8_t  obstacle_data_valid     = 0;   /* 1 = at least one msg rcvd   */
 static uint32_t obstacle_recovery_tick  = 0;   /* Recovery debounce start     */
 static uint8_t  obstacle_in_emergency   = 0;   /* Currently in emergency stop */
+static uint8_t  obstacle_forward_blocked = 0;  /* Forward motion blocked, reverse escape allowed */
 
 /* ================================================================== */
 /*  State Machine                                                      */
@@ -166,7 +167,7 @@ void Safety_SetState(SystemState_t state)
     if (state == system_state) return;
 
     /* Only allow forward transitions and recovery transitions:
-     *   SAFE→ACTIVE, DEGRADED→ACTIVE                                   */
+     *   SAFE→ACTIVE, DEGRADED→ACTIVE, LIMP_HOME→ACTIVE               */
     switch (state) {
         case SYS_STATE_STANDBY:
             if (system_state == SYS_STATE_BOOT)
@@ -176,7 +177,8 @@ void Safety_SetState(SystemState_t state)
         case SYS_STATE_ACTIVE:
             if (system_state == SYS_STATE_STANDBY ||
                 system_state == SYS_STATE_SAFE    ||
-                system_state == SYS_STATE_DEGRADED) {
+                system_state == SYS_STATE_DEGRADED ||
+                system_state == SYS_STATE_LIMP_HOME) {
                 /* Require no active faults to enter ACTIVE */
                 if (safety_error == SAFETY_ERROR_NONE) {
                     system_state = SYS_STATE_ACTIVE;
@@ -205,7 +207,8 @@ void Safety_SetState(SystemState_t state)
         case SYS_STATE_SAFE:
             if (system_state == SYS_STATE_ACTIVE  ||
                 system_state == SYS_STATE_STANDBY  ||
-                system_state == SYS_STATE_DEGRADED) {
+                system_state == SYS_STATE_DEGRADED ||
+                system_state == SYS_STATE_LIMP_HOME) {
                 system_state = SYS_STATE_SAFE;
                 degraded_level  = DEGRADED_LEVEL_NONE;
                 degraded_reason = DEGRADED_REASON_NONE;
@@ -220,6 +223,22 @@ void Safety_SetState(SystemState_t state)
             Safety_PowerDown();
             break;
 
+        /* LIMP_HOME: CAN-loss degraded mode — minimal drivable.
+         * Relays stay ON.  Local pedal input accepted with strong
+         * clamps.  Vehicle remains mobile without CAN/ESP32.
+         * Communication loss is NOT a hazard.                          */
+        case SYS_STATE_LIMP_HOME:
+            if (system_state == SYS_STATE_STANDBY  ||
+                system_state == SYS_STATE_ACTIVE   ||
+                system_state == SYS_STATE_DEGRADED) {
+                system_state = SYS_STATE_LIMP_HOME;
+                degraded_level  = DEGRADED_LEVEL_NONE;
+                degraded_reason = DEGRADED_REASON_NONE;
+                /* Keep relays on — vehicle must remain drivable */
+                Relay_PowerUp();
+            }
+            break;
+
         default:
             break;
     }
@@ -231,19 +250,36 @@ bool Safety_IsCommandAllowed(void)
             system_state == SYS_STATE_DEGRADED);
 }
 
+/* Motion is allowed in ACTIVE, DEGRADED, and LIMP_HOME.
+ * In LIMP_HOME, only local pedal input drives the motors —
+ * CAN commands are rejected (Safety_IsCommandAllowed returns false).   */
+bool Safety_IsMotionAllowed(void)
+{
+    return (system_state == SYS_STATE_ACTIVE   ||
+            system_state == SYS_STATE_DEGRADED ||
+            system_state == SYS_STATE_LIMP_HOME);
+}
+
 bool Safety_IsDegraded(void)
 {
     return (system_state == SYS_STATE_DEGRADED);
 }
 
+bool Safety_IsLimpHome(void)
+{
+    return (system_state == SYS_STATE_LIMP_HOME);
+}
+
 /* Return power-limit multiplier for the current state.
- * ACTIVE   → 1.0 (100 %)
- * DEGRADED → per-level scaling (L1=70%, L2=50%, L3=40%)
- *            Falls back to DEGRADED_POWER_LIMIT_PCT if level not set.
- * Others   → 0.0 (commands rejected upstream)                          */
+ * ACTIVE    → 1.0 (100 %)
+ * DEGRADED  → per-level scaling (L1=70%, L2=50%, L3=40%)
+ *             Falls back to DEGRADED_POWER_LIMIT_PCT if level not set.
+ * LIMP_HOME → 0.20 (20 %) — strong clamp for walking-speed safety
+ * Others    → 0.0 (commands rejected upstream)                          */
 float Safety_GetPowerLimitFactor(void)
 {
-    if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
+    if (system_state == SYS_STATE_ACTIVE)    return 1.0f;
+    if (system_state == SYS_STATE_LIMP_HOME) return LIMP_HOME_TORQUE_LIMIT_FACTOR;
     if (system_state == SYS_STATE_DEGRADED) {
         switch (degraded_level) {
             case DEGRADED_L1: return DEGRADED_L1_POWER_PCT / 100.0f;
@@ -256,12 +292,14 @@ float Safety_GetPowerLimitFactor(void)
 }
 
 /* Return steering-assist multiplier for the current state (Phase 12).
- * ACTIVE   → 1.0 (100 %)
- * DEGRADED → per-level scaling (L1=85%, L2=70%, L3=60%)
- * Others   → 0.0                                                       */
+ * ACTIVE    → 1.0 (100 %)
+ * DEGRADED  → per-level scaling (L1=85%, L2=70%, L3=60%)
+ * LIMP_HOME → 1.0 (steering fully operational — critical for safety)
+ * Others    → 0.0                                                       */
 float Safety_GetSteeringLimitFactor(void)
 {
-    if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
+    if (system_state == SYS_STATE_ACTIVE)    return 1.0f;
+    if (system_state == SYS_STATE_LIMP_HOME) return 1.0f;
     if (system_state == SYS_STATE_DEGRADED) {
         switch (degraded_level) {
             case DEGRADED_L1: return DEGRADED_L1_STEERING_PCT / 100.0f;
@@ -274,12 +312,14 @@ float Safety_GetSteeringLimitFactor(void)
 }
 
 /* Return traction-cap multiplier for the current state (Phase 12).
- * ACTIVE   → 1.0 (100 %)
- * DEGRADED → per-level scaling (L1=80%, L2=60%, L3=50%)
- * Others   → 0.0                                                       */
+ * ACTIVE    → 1.0 (100 %)
+ * DEGRADED  → per-level scaling (L1=80%, L2=60%, L3=50%)
+ * LIMP_HOME → 0.20 (20 %) — matches power limit for walking speed
+ * Others    → 0.0                                                       */
 float Safety_GetTractionCapFactor(void)
 {
-    if (system_state == SYS_STATE_ACTIVE)   return 1.0f;
+    if (system_state == SYS_STATE_ACTIVE)    return 1.0f;
+    if (system_state == SYS_STATE_LIMP_HOME) return LIMP_HOME_TORQUE_LIMIT_FACTOR;
     if (system_state == SYS_STATE_DEGRADED) {
         switch (degraded_level) {
             case DEGRADED_L1: return DEGRADED_L1_TRACTION_PCT / 100.0f;
@@ -496,6 +536,7 @@ void Safety_Init(void)
     obstacle_data_valid     = 0;
     obstacle_recovery_tick  = 0;
     obstacle_in_emergency   = 0;
+    obstacle_forward_blocked = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -854,7 +895,26 @@ void Safety_CheckCANTimeout(void)
     if ((HAL_GetTick() - last_can_rx_time) > CAN_TIMEOUT_MS) {
         ServiceMode_SetFault(MODULE_CAN_TIMEOUT, MODULE_FAULT_ERROR);
         Safety_SetError(SAFETY_ERROR_CAN_TIMEOUT);
-        Safety_SetState(SYS_STATE_SAFE);
+
+        /* CAN loss → LIMP_HOME (not SAFE).
+         * Communication loss is NOT a hazard — the vehicle can still
+         * operate at reduced capability with local pedal input.
+         * SAFE is reserved for real hardware danger (overcurrent,
+         * inverter fault, watchdog, electrical hazard).                 */
+        if (system_state == SYS_STATE_ACTIVE ||
+            system_state == SYS_STATE_DEGRADED) {
+            Safety_SetState(SYS_STATE_LIMP_HOME);
+        }
+
+        /* STANDBY → LIMP_HOME if boot validation passed.
+         * Vehicle must always be capable of moving at low speed
+         * without CAN or ESP32.  Loss of communication must never
+         * immobilize the vehicle.                                      */
+        if (system_state == SYS_STATE_STANDBY &&
+            Steering_IsCalibrated() &&
+            BootValidation_IsPassed()) {
+            Safety_SetState(SYS_STATE_LIMP_HOME);
+        }
     } else {
         ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
         /* ESP32 alive – if we were in STANDBY, transition to ACTIVE
@@ -866,7 +926,16 @@ void Safety_CheckCANTimeout(void)
             BootValidation_IsPassed()) {
             Safety_SetState(SYS_STATE_ACTIVE);
         }
-        /* If in SAFE due to CAN timeout and heartbeat restored, try recovery */
+        /* CAN restored from LIMP_HOME → attempt ACTIVE.
+         * Heartbeat has appeared and system is healthy.                */
+        if (system_state == SYS_STATE_LIMP_HOME) {
+            Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
+            Safety_SetState(SYS_STATE_ACTIVE);
+        }
+        /* If in SAFE due to CAN timeout and heartbeat restored, try recovery.
+         * NOTE: SAFE should no longer be triggered by CAN timeout alone,
+         * but this path remains for backward-compatible recovery from
+         * earlier firmware versions or manual SAFE entry.               */
         if (system_state == SYS_STATE_SAFE &&
             safety_error == SAFETY_ERROR_CAN_TIMEOUT) {
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
@@ -1199,14 +1268,31 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
  * independent backstop limiter — it does NOT replicate the ESP32's
  * full 5-zone logic.  The 3-tier mapping provides defence-in-depth.
  *
+ * Autonomous design: works without CAN.
+ *   - When CAN data is available: apply 3-tier distance → scale mapping
+ *   - When CAN data times out: do NOT enter SAFE.  Instead, rely on
+ *     LIMP_HOME speed limits (walking speed) for safety.
+ *   - When no CAN data ever received: allow normal operation (scale 1.0)
+ *     with LIMP_HOME speed limits providing the safety net.
+ *   - Cannot be bypassed by HMI — STM32 backstop is always active.
+ *
+ * Reverse escape: when obstacle emergency blocks forward motion,
+ *   reverse travel is still allowed (obstacle_forward_blocked flag).
+ *   This prevents the vehicle from being immobilized when an obstacle
+ *   appears directly in front.
+ *
  * Safety actions:
- *   - Distance < 200 mm → obstacle_scale = 0.0, SAFE state
+ *   - Distance < 200 mm → obstacle_scale = 0.0, forward blocked,
+ *     reverse escape allowed
  *   - Distance 200–500 mm → obstacle_scale = 0.3
  *   - Distance 500–1000 mm → obstacle_scale = 0.7
  *   - Distance > 1000 mm → obstacle_scale = 1.0
- *   - CAN timeout (> 500 ms) → obstacle_scale = 0.0, SAFE state
- *   - Sensor unhealthy → obstacle_scale = 0.0, SAFE state
- *   - Stale data (counter frozen ≥ 3) → obstacle_scale = 0.0, SAFE
+ *   - CAN timeout (> 500 ms) → obstacle_scale = 1.0 (rely on
+ *     LIMP_HOME speed limits, NOT SAFE state)
+ *   - Sensor unhealthy → obstacle_scale = 0.3 (conservative limit,
+ *     NOT SAFE state — vehicle remains mobile)
+ *   - Stale data (counter frozen ≥ 3) → obstacle_scale = 0.3
+ *     (conservative, NOT SAFE)
  *
  * Recovery from emergency:
  *   - Distance must exceed 500 mm for > 1 second
@@ -1218,6 +1304,7 @@ void Obstacle_Update(void)
     /* Skip if obstacle detection module is disabled (service mode) */
     if (!ServiceMode_IsEnabled(MODULE_OBSTACLE_DETECT)) {
         safety_status.obstacle_scale = 1.0f;
+        obstacle_forward_blocked = 0;
         return;
     }
 
@@ -1226,68 +1313,85 @@ void Obstacle_Update(void)
     /* ---- Check for CAN timeout ---- */
     if (obstacle_data_valid &&
         (now - obstacle_last_rx_tick) > OBSTACLE_CAN_TIMEOUT_MS) {
-        /* No obstacle data for > 500 ms — assume sensor failure */
-        safety_status.obstacle_scale = 0.0f;
-        obstacle_in_emergency = 1;
-        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_ERROR);
-        Safety_SetError(SAFETY_ERROR_OBSTACLE);
-        Safety_SetState(SYS_STATE_SAFE);
+        /* No obstacle data for > 500 ms — sensor data stale.
+         * In the autonomous design, this does NOT trigger SAFE.
+         * Apply conservative scale (0.3 = heavy reduction) so that
+         * if the system is still in ACTIVE/DEGRADED before the CAN
+         * heartbeat timeout triggers LIMP_HOME, obstacle protection
+         * is maintained.  In LIMP_HOME the speed cap provides an
+         * additional safety net.                                       */
+        safety_status.obstacle_scale = 0.3f;
+        obstacle_forward_blocked = 0;
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
+        /* Do NOT set SAFETY_ERROR_OBSTACLE or enter SAFE.
+         * Obstacle CAN loss is handled by the overall CAN timeout
+         * → LIMP_HOME policy.                                          */
         return;
     }
 
     /* ---- No data ever received — not yet initialised ---- */
     if (!obstacle_data_valid) {
         /* Before first obstacle message, allow normal operation.
-         * The ESP32 may not have booted its obstacle module yet.
-         * The heartbeat timeout (250 ms) provides protection.         */
+         * The ESP32 may not have booted its obstacle module yet,
+         * or CAN may never be available (LIMP_HOME operation).
+         * The LIMP_HOME speed limit provides safety.                  */
         safety_status.obstacle_scale = 1.0f;
+        obstacle_forward_blocked = 0;
         return;
     }
 
     /* ---- Stale-data detection ---- */
     if (obstacle_stale_count >= 3) {
-        /* Counter has not changed for 3+ frames — data is frozen */
-        safety_status.obstacle_scale = 0.0f;
-        obstacle_in_emergency = 1;
-        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_ERROR);
-        Safety_SetError(SAFETY_ERROR_OBSTACLE);
-        Safety_SetState(SYS_STATE_SAFE);
+        /* Counter has not changed for 3+ frames — data is frozen.
+         * Apply conservative scale but do NOT enter SAFE.
+         * Vehicle remains mobile at reduced power.                    */
+        safety_status.obstacle_scale = 0.3f;
+        obstacle_forward_blocked = 0;
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
         return;
     }
 
     /* ---- Sensor health check ---- */
     if (!obstacle_sensor_healthy) {
-        /* ESP32 reports sensor failure — fail-safe */
-        safety_status.obstacle_scale = 0.0f;
-        obstacle_in_emergency = 1;
-        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_ERROR);
-        Safety_SetError(SAFETY_ERROR_OBSTACLE);
-        Safety_SetState(SYS_STATE_SAFE);
+        /* ESP32 reports sensor failure — apply conservative limit.
+         * Do NOT enter SAFE — vehicle remains mobile at reduced power.
+         * In LIMP_HOME, speed is already capped at walking pace.      */
+        safety_status.obstacle_scale = 0.3f;
+        obstacle_forward_blocked = 0;
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
         return;
     }
 
     /* ---- 3-tier distance → scale mapping ---- */
     float scale;
     if (obstacle_distance_mm < OBSTACLE_EMERGENCY_MM) {
-        /* Zone 5 equivalent: full stop + SAFE state */
+        /* Zone 5 equivalent: hard stop for forward motion.
+         * Reverse escape is allowed — obstacle is in front.
+         * Do NOT enter SAFE — keep relays on so reverse works.        */
         scale = 0.0f;
         obstacle_in_emergency = 1;
+        obstacle_forward_blocked = 1;
         Safety_SetError(SAFETY_ERROR_OBSTACLE);
-        Safety_SetState(SYS_STATE_SAFE);
+        /* NOTE: We do NOT call Safety_SetState(SYS_STATE_SAFE).
+         * The obstacle_scale = 0.0 blocks forward motion via the
+         * traction pipeline.  Reverse escape remains available.       */
     } else if (obstacle_distance_mm < OBSTACLE_CRITICAL_MM) {
         /* Zone 4 equivalent: heavy braking */
         scale = 0.3f;
         obstacle_in_emergency = 0;
+        obstacle_forward_blocked = 0;
         obstacle_recovery_tick = 0;
     } else if (obstacle_distance_mm < OBSTACLE_WARNING_MM) {
         /* Zone 3 equivalent: moderate reduction */
         scale = 0.7f;
         obstacle_in_emergency = 0;
+        obstacle_forward_blocked = 0;
         obstacle_recovery_tick = 0;
     } else {
         /* Zone 1-2 / no obstacle: full power */
         scale = 1.0f;
         obstacle_in_emergency = 0;
+        obstacle_forward_blocked = 0;
         obstacle_recovery_tick = 0;
     }
 
@@ -1302,6 +1406,7 @@ void Obstacle_Update(void)
         } else if ((now - obstacle_recovery_tick) >= OBSTACLE_RECOVERY_MS) {
             /* Sustained clearance — recover from emergency */
             obstacle_in_emergency = 0;
+            obstacle_forward_blocked = 0;
             obstacle_recovery_tick = 0;
             ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
             Safety_ClearError(SAFETY_ERROR_OBSTACLE);
@@ -1331,4 +1436,18 @@ void Obstacle_Update(void)
 float Obstacle_GetScale(void)
 {
     return safety_status.obstacle_scale;
+}
+
+/**
+ * @brief  Query whether forward motion is blocked by an obstacle.
+ *
+ * When true, obstacle_scale = 0.0 for forward direction but reverse
+ * travel is still allowed (reverse escape).  This prevents the vehicle
+ * from being immobilized when an obstacle appears directly in front.
+ *
+ * @return true if forward blocked (reverse escape available), false otherwise.
+ */
+bool Obstacle_IsForwardBlocked(void)
+{
+    return (obstacle_forward_blocked != 0);
 }

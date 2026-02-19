@@ -844,6 +844,9 @@ void Traction_Update(void)
         dynbrake_allowed = false;
     }
 
+    /* In LIMP_HOME: limited regen braking (reduced effort) */
+    bool limp_home_braking = (sys_st == SYS_STATE_LIMP_HOME);
+
     /* Disable if ABS is active on any wheel (wheel_scale < 1.0) */
     if (dynbrake_allowed) {
         for (uint8_t i = 0; i < 4; i++) {
@@ -871,6 +874,11 @@ void Traction_Update(void)
         /* Limit in DEGRADED mode — uses per-level power limit (Phase 12) */
         if (sys_st == SYS_STATE_DEGRADED) {
             target_brake *= Safety_GetPowerLimitFactor();
+        }
+
+        /* Limited regen braking in LIMP_HOME — cap at LIMP_HOME limit */
+        if (limp_home_braking) {
+            target_brake *= LIMP_HOME_TORQUE_LIMIT_FACTOR;
         }
 
         /* Progressive ramp toward target (never jump instantly) */
@@ -918,6 +926,26 @@ void Traction_Update(void)
             gear_scale = GEAR_POWER_FORWARD_PCT;
         }
         effective_demand *= gear_scale;
+    }
+
+    /* ---- LIMP_HOME speed cap enforcement ----
+     * Hard speed limit at walking pace.  When current speed exceeds
+     * LIMP_HOME_SPEED_LIMIT_KMH, reduce demand toward zero to prevent
+     * further acceleration.  This is a defence-in-depth layer on top
+     * of the 20% torque limit applied upstream.                        */
+    if (sys_st == SYS_STATE_LIMP_HOME && effective_demand > 0.0f) {
+        float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                         Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        if (avg_spd > LIMP_HOME_SPEED_LIMIT_KMH) {
+            effective_demand = 0.0f;
+        } else if (avg_spd > (LIMP_HOME_SPEED_LIMIT_KMH * 0.8f)) {
+            /* Progressive reduction as speed approaches limit */
+            float headroom = (LIMP_HOME_SPEED_LIMIT_KMH - avg_spd)
+                           / (LIMP_HOME_SPEED_LIMIT_KMH * 0.2f);
+            if (headroom < 0.0f) headroom = 0.0f;
+            if (headroom > 1.0f) headroom = 1.0f;
+            effective_demand *= headroom;
+        }
     }
 
     /* ---- Demand anomaly: negative / out-of-range validation ----
@@ -1027,13 +1055,27 @@ void Traction_Update(void)
         creep_smooth_init = 1;
     }
 
-    /* Apply obstacle scale uniformly to all wheels.  This multiplier
+    /* Apply obstacle scale to all wheels.  This multiplier
      * is set by Obstacle_Update() from CAN-received distance data.
      * Applied before per-wheel ABS/TCS wheel_scale[] so that obstacle
      * reduction and ABS/TCS modulation are multiplicative (most
      * restrictive wins).  Same approach as the reference monolithic
-     * firmware's obstacleFactor in traction.cpp.                       */
-    base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);
+     * firmware's obstacleFactor in traction.cpp.
+     *
+     * Reverse escape: when obstacle_forward_blocked is set (obstacle
+     * < 200 mm in front), forward motion is blocked (scale = 0.0)
+     * but reverse travel is allowed.  This prevents the vehicle from
+     * being immobilized when an obstacle appears directly in front.   */
+    {
+        float effective_obstacle = safety_status.obstacle_scale;
+        if (effective_obstacle < 0.01f &&
+            current_gear == GEAR_REVERSE &&
+            Obstacle_IsForwardBlocked()) {
+            /* Reverse escape: obstacle blocks forward, allow reverse */
+            effective_obstacle = 1.0f;
+        }
+        base_pwm = (uint16_t)(base_pwm * effective_obstacle);
+    }
 
     /* ---- Traction cap (Phase 12) ----
      * Apply per-level traction cap in DEGRADED mode.  This limits
@@ -1051,9 +1093,19 @@ void Traction_Update(void)
      * Compute per-wheel multipliers based on current steering angle.
      * Applied after obstacle_scale and before wheel_scale[i] (ABS/TCS).
      * Skipped during tank turn (axisRotation) — differential is
-     * meaningless when wheels on each side spin in opposite directions. */
+     * meaningless when wheels on each side spin in opposite directions.
+     * Also skipped in LIMP_HOME — no torque vectoring in degraded
+     * autonomous mode.  Each motor operates independently.             */
     float acker_diff[4];
-    compute_ackermann_differential(Steering_GetCurrentAngle(), acker_diff);
+    if (sys_st == SYS_STATE_LIMP_HOME) {
+        /* LIMP_HOME: no torque vectoring — all wheels equal */
+        acker_diff[0] = 1.0f;
+        acker_diff[1] = 1.0f;
+        acker_diff[2] = 1.0f;
+        acker_diff[3] = 1.0f;
+    } else {
+        compute_ackermann_differential(Steering_GetCurrentAngle(), acker_diff);
+    }
 
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
 

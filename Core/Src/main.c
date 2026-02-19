@@ -150,9 +150,11 @@ int main(void)
                 BootValidation_Run();
             }
 
-            /* Obstacle safety — check CAN-received distance data.
-             * Computes obstacle_scale and triggers SAFE state if
-             * emergency distance or CAN timeout is detected.          */
+            /* Obstacle safety — autonomous backstop limiter.
+             * Computes obstacle_scale from CAN-received distance data.
+             * In LIMP_HOME, obstacle CAN timeout does NOT trigger SAFE;
+             * walking-speed limit provides the safety net.
+             * Reverse escape is allowed when forward is blocked.        */
             Obstacle_Update();
 
             /* Non-blocking relay sequencer — progresses the power-up
@@ -183,10 +185,17 @@ int main(void)
             Temperature_StartConversion();
             Temperature_ReadAll();
 
-            /* Feed pedal demand into traction only when STM32 is in
-             * ACTIVE state — the safety authority decides whether
-             * actuator commands are permitted.
-             * In Park or Neutral gear, throttle is suppressed.         */
+            /* Feed pedal demand into traction.
+             *
+             * Three modes of operation:
+             * 1. ACTIVE/DEGRADED: CAN commands accepted, pedal validated
+             *    through Safety_ValidateThrottle() pipeline.
+             * 2. LIMP_HOME: Local pedal only, strong clamp (20% torque),
+             *    CAN throttle commands ignored.  Vehicle remains mobile
+             *    at walking speed without CAN/ESP32.
+             * 3. All other states: throttle suppressed.
+             *
+             * In Park or Neutral gear, throttle is always suppressed.    */
             if (Safety_IsCommandAllowed()) {
                 GearPosition_t gear = Traction_GetGear();
                 if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
@@ -194,6 +203,25 @@ int main(void)
                 } else {
                     float validated = Safety_ValidateThrottle(Pedal_GetPercent());
                     Traction_SetDemand(validated);
+                }
+            } else if (Safety_IsLimpHome()) {
+                /* LIMP_HOME: local pedal drives traction directly.
+                 * Ignore all CAN throttle commands.
+                 * Apply LIMP_HOME torque limit (20%) as hard clamp.
+                 * The traction pipeline applies additional speed cap
+                 * and ramp limiting via Safety_GetTractionCapFactor(). */
+                GearPosition_t gear = Traction_GetGear();
+                if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
+                    Traction_SetDemand(0.0f);
+                } else {
+                    float pedal = Pedal_GetPercent();
+                    /* Hard clamp: 20% max torque in LIMP_HOME.
+                     * pedal is 0–100%, factor is 0.20 → max demand = 20%. */
+                    float clamped = pedal * LIMP_HOME_TORQUE_LIMIT_FACTOR;
+                    if (clamped < 0.0f)  clamped = 0.0f;
+                    if (clamped > 100.0f * LIMP_HOME_TORQUE_LIMIT_FACTOR)
+                        clamped = 100.0f * LIMP_HOME_TORQUE_LIMIT_FACTOR;
+                    Traction_SetDemand(clamped);
                 }
             } else {
                 Traction_SetDemand(0.0f);
