@@ -168,6 +168,16 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 /* Sensor-fault conservative scale — vehicle remains mobile.           */
 #define OBSTACLE_FAULT_SCALE        0.3f
 
+/* Preemptive scale floor during CONFIRMING / CLEARING states.
+ * Limits reduction to at most 0.7 (gentle) while temporal
+ * confirmation is still pending.                                      */
+#define OBSTACLE_PREEMPTIVE_FLOOR   0.7f
+static inline float obstacle_preemptive_scale(float target)
+{
+    return (target < OBSTACLE_PREEMPTIVE_FLOOR) ? OBSTACLE_PREEMPTIVE_FLOOR
+                                                 : target;
+}
+
 /* ---- CAN advisory state ---- */
 static uint32_t obstacle_last_rx_tick    = 0;      /* Last 0x208 reception     */
 static uint16_t obstacle_distance_mm     = 0xFFFF; /* Last reported distance   */
@@ -1510,8 +1520,7 @@ void Obstacle_Update(void)
             obstacle_confirm_tick = now;
             /* During confirmation, start reducing gently (0.7)
              * to avoid sudden full-speed into obstacle.                */
-            safety_status.obstacle_scale = (target_scale < 0.7f) ? 0.7f
-                                                                  : target_scale;
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
             obstacle_forward_blocked = 0;
         } else {
             safety_status.obstacle_scale = 1.0f;
@@ -1540,8 +1549,7 @@ void Obstacle_Update(void)
             }
         } else {
             /* Still confirming — apply gentle preemptive reduction */
-            safety_status.obstacle_scale = (target_scale < 0.7f) ? 0.7f
-                                                                  : target_scale;
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
             obstacle_forward_blocked = 0;
         }
         break;
@@ -1572,7 +1580,7 @@ void Obstacle_Update(void)
         break;
 
     case OBS_STATE_CLEARING:
-        if (target_scale < 1.0f && target_scale <= 0.3f) {
+        if (target_scale <= 0.3f) {
             /* Obstacle returned close — back to ACTIVE immediately */
             obstacle_state = OBS_STATE_ACTIVE;
             obstacle_clear_tick = 0;
@@ -1588,8 +1596,7 @@ void Obstacle_Update(void)
             Safety_ClearError(SAFETY_ERROR_OBSTACLE);
         } else {
             /* Still confirming clearance — keep moderate reduction */
-            safety_status.obstacle_scale = (target_scale < 0.7f) ? 0.7f
-                                                                  : target_scale;
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
             obstacle_forward_blocked = 0;
         }
         break;
