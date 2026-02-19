@@ -139,8 +139,8 @@ inline constexpr int16_t PEDAL_TEXT_X   = 400;
 // -------------------------------------------------------------------------
 // Format buffer sizes (all on stack, no heap)
 // -------------------------------------------------------------------------
-inline constexpr int FMT_BUF_SMALL  = 8;    // "100%"
-inline constexpr int FMT_BUF_MED    = 16;   // "25.5 km/h"
+inline constexpr int FMT_BUF_SMALL  = 16;   // "100%"
+inline constexpr int FMT_BUF_MED    = 24;   // "25.5 km/h"
 inline constexpr int FMT_BUF_LARGE  = 32;   // Longer labels
 
 // -------------------------------------------------------------------------

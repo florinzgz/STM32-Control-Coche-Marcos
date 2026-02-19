@@ -8,8 +8,8 @@
 // Reference: docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
 
-#ifndef PEDAL_BAR_H
-#define PEDAL_BAR_H
+#ifndef UI_PEDAL_BAR_H
+#define UI_PEDAL_BAR_H
 
 #include <TFT_eSPI.h>
 #include "ui_common.h"
@@ -27,4 +27,4 @@ public:
 
 } // namespace ui
 
-#endif // PEDAL_BAR_H
+#endif // UI_PEDAL_BAR_H
