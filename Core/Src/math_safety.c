@@ -39,14 +39,17 @@ uint16_t float_to_u16_clamped(float v)
 
 uint16_t float_scaled_to_u16(float v, float scale)
 {
-    if (isnan(v) || isinf(v) || v < 0.0f) {
+    if (isnan(v) || isinf(v)) {
         return 0U;
     }
-    if (isnan(scale) || isinf(scale) || scale < 0.0f) {
+    if (isnan(scale) || isinf(scale)) {
         return 0U;
     }
     float product = v * scale;
     if (isnan(product) || isinf(product)) {
+        return 0U;
+    }
+    if (product < 0.0f) {
         return 0U;
     }
     if (product > 65535.0f) {
@@ -59,22 +62,25 @@ uint16_t float_scaled_to_u16(float v, float scale)
 
 uint8_t float_to_u8_clamped(float v, float max)
 {
-    if (isnan(v) || isinf(v) || v < 0.0f) {
-        return 0U;
-    }
-    /* Sanitize max: NaN/Inf → 0 (safe side) */
+    /* Sanitize max: NaN/Inf → 0, then clamp to [0, 255] */
     if (isnan(max) || isinf(max)) {
-        return 0U;
+        max = 0.0f;
     }
-    /* Ensure ceiling does not exceed uint8_t range */
     if (max > 255.0f) {
         max = 255.0f;
     }
     if (max < 0.0f) {
         max = 0.0f;
     }
+    /* Sanitize v: NaN/Inf → 0, then clamp to [0, max] */
+    if (isnan(v) || isinf(v)) {
+        v = 0.0f;
+    }
+    if (v < 0.0f) {
+        v = 0.0f;
+    }
     if (v > max) {
-        return (uint8_t)max;
+        v = max;
     }
     return (uint8_t)v;
 }
@@ -89,6 +95,12 @@ float clampf(float v, float lo, float hi)
     }
     if (isnan(hi) || isinf(hi)) {
         hi = 0.0f;
+    }
+    /* Guarantee lo <= hi: swap if inverted */
+    if (lo > hi) {
+        float tmp = lo;
+        lo = hi;
+        hi = tmp;
     }
     if (isnan(v) || isinf(v)) {
         return lo;
