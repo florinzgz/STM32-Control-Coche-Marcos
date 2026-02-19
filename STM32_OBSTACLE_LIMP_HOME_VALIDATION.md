@@ -113,11 +113,11 @@ This dropped obstacle protection regardless of whether an obstacle was being tra
 ### 4.3 Pedal Held at 100%, Only One Wheel Has Traction, CAN Dies
 
 1. **LIMP_HOME torque limit:** 100% pedal → clamped to 20% demand
-2. **Speed cap:** If traction wheel at 5 km/h but other 3 at 0 → avg = 1.25 km/h → cap NOT engaged
+2. **Speed cap gap:** If traction wheel at 5 km/h but other 3 at 0 → avg = 1.25 km/h → below 5 km/h threshold → speed cap does NOT engage. This demonstrates a gap in the speed-cap-only approach.
 3. **Before CAN timeout:** `obstacle_scale = 0.3` (obstacle at 400 mm)
 4. **CAN timeout:** Scale held at 0.3 (ACTIVE state was preserved)
 5. **Traction_Update():** 20% × 0.3 = 6% effective demand for all wheels
-6. **Result:** Even with speed cap gap, obstacle_scale limits power ✅
+6. **Result:** Obstacle_scale compensates for the speed cap gap ✅
 
 ### 4.4 No Obstacle Active, CAN Dies, Vehicle in LIMP_HOME
 

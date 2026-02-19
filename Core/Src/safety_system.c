@@ -1447,7 +1447,7 @@ void Obstacle_Update(void)
      * Scenarios that rely on this:
      *   - Obstacle closer than stopping distance when CAN fails
      *   - Vehicle rolling downhill (speed cap limits demand, not gravity)
-     *   - Pedal pressed continuously at 20 % torque limit
+     *   - Pedal pressed continuously at 20% torque limit
      *   - Single-wheel traction understating average speed
      *
      * Policy: retain the last known obstacle_scale (or a conservative
