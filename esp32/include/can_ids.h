@@ -70,12 +70,13 @@ inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DL
 // System States — HEARTBEAT_STM32 byte 1 (§6)
 // -------------------------------------------------------------------------
 enum class SystemState : uint8_t {
-    BOOT     = 0,    // Power-on, peripherals initializing
-    STANDBY  = 1,    // Ready, waiting for ESP32 heartbeat
-    ACTIVE   = 2,    // Normal operation, commands accepted
-    DEGRADED = 3,    // Limp / degraded — commands accepted with reduced limits
-    SAFE     = 4,    // Fault detected, actuators inhibited
-    ERROR    = 5     // Unrecoverable fault, manual reset required
+    BOOT      = 0,    // Power-on, peripherals initializing
+    STANDBY   = 1,    // Ready, waiting for ESP32 heartbeat
+    ACTIVE    = 2,    // Normal operation, commands accepted
+    DEGRADED  = 3,    // Limp / degraded — commands accepted with reduced limits
+    SAFE      = 4,    // Hardware danger, actuators inhibited
+    ERROR     = 5,    // Unrecoverable fault, manual reset required
+    LIMP_HOME = 6     // CAN-loss degraded — local pedal, walking speed, steering OK
 };
 
 // -------------------------------------------------------------------------

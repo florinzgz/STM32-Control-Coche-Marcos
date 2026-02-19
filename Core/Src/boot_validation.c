@@ -98,18 +98,31 @@ static bool check_battery_ok(void)
 
 /**
  * @brief  Check that no persistent safety error is present.
+ *         CAN timeout is excluded because it is handled separately
+ *         by the LIMP_HOME transition — communication loss is NOT
+ *         a hazard that should block boot validation.
  */
 static bool check_no_safety_error(void)
 {
-    return (Safety_GetError() == SAFETY_ERROR_NONE);
+    Safety_Error_t err = Safety_GetError();
+    return (err == SAFETY_ERROR_NONE ||
+            err == SAFETY_ERROR_CAN_TIMEOUT ||
+            err == SAFETY_ERROR_CAN_BUSOFF);
 }
 
 /**
  * @brief  Check that the CAN bus is not in bus-off state.
+ *         In the new architecture, CAN bus-off is NOT a validation
+ *         blocker because the system can operate in LIMP_HOME without
+ *         CAN.  This check always passes — retained for diagnostic
+ *         logging only.
  */
 static bool check_can_not_busoff(void)
 {
-    return !CAN_IsBusOff();
+    /* CAN bus-off is no longer a boot blocker.
+     * The LIMP_HOME state handles CAN-absent operation.
+     * Return true always so boot validation can pass without CAN.     */
+    return true;
 }
 
 /* ================================================================== */
