@@ -103,6 +103,14 @@ void setup() {
 
     Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
 
+    // Initialize PSRAM
+    if (psramInit()) {
+        Serial.printf("[PSRAM] Initialized — total: %u bytes, free: %u bytes\n",
+                      ESP.getPsramSize(), ESP.getFreePsram());
+    } else {
+        Serial.println("[PSRAM] Initialization FAILED — check board_build.arduino.memory_type");
+    }
+
     // Initialize TFT display
     tft.init();
     tft.setRotation(1);  // Landscape mode (480×320)
