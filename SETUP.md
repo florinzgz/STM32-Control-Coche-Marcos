@@ -115,6 +115,16 @@ STM32-Control-Coche-Marcos/
 ### Build errors after cloning
 - **Solution**: Always run STM32CubeMX to generate code first before building
 
+### ESP32-S3: "Could not open COMx" / PermissionError
+- **Cause**: The serial port is in use by another program, or the board is not in download mode.
+- **Solution**:
+  1. Close any serial monitor or terminal that is connected to the ESP32 port.
+  2. Enter download mode: hold **BOOT**, press **RESET**, release **BOOT**.
+  3. Run `pio run -t upload` from the `esp32/` directory.
+  4. If the port is wrong, set `upload_port` in `esp32/platformio.ini`.
+  5. On Linux, add your user to the `dialout` group: `sudo usermod -aG dialout $USER`
+  - See [`esp32/README.md`](esp32/README.md) for detailed troubleshooting.
+
 ## Next Steps
 
 1. ✅ Generate HAL drivers with CubeMX
