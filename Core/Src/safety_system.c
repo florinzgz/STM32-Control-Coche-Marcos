@@ -144,8 +144,11 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 #define OBSTACLE_CLEAR_MS           1000    /* Confirm clearance before reset  */
 #define OBSTACLE_RECOVERY_MM        500     /* Min distance to start clearing  */
 
-/* CAN timeout — advisory.  When exceeded, scale → 1.0 (rely on
- * LIMP_HOME speed limits).  CAN loss is NOT a hazard.                 */
+/* CAN timeout — advisory.  When exceeded:
+ *   - If obstacle was active: hold last scale (≤ OBSTACLE_FAULT_SCALE)
+ *   - If no obstacle was active: scale → 1.0 (LIMP_HOME speed cap)
+ * CAN loss alone is NOT a hazard, but an active obstacle must not be
+ * forgotten just because CAN frames stopped arriving.                 */
 #define OBSTACLE_CAN_TIMEOUT_MS     500
 
 /* Physical plausibility: max approach rate between sensor and vehicle.
@@ -1414,10 +1417,12 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
  *   CLEARING  → (obstacle returned) → ACTIVE
  *   any       → (sensor fault) → SENSOR_FAULT
  *   SENSOR_FAULT → (valid data resumes) → NORMAL
- *   any       → (CAN timeout) → NO_SENSOR (scale = 1.0)
+ *   any       → (CAN timeout, no obstacle) → NO_SENSOR (scale = 1.0)
+ *   ACTIVE/CONFIRMING → (CAN timeout) → SENSOR_FAULT (hold scale)
  *
  * Speed-dependent stopping distance adjusts thresholds dynamically.
- * CAN loss → scale 1.0 (LIMP_HOME speed cap provides safety).
+ * CAN loss with no active obstacle → scale 1.0 (LIMP_HOME cap provides safety).
+ * CAN loss with active obstacle → hold last scale (obstacle < stopping distance safe).
  * No motion immobilization — only controlled slowdown.
  * Reverse escape preserved when forward is blocked.
  */
@@ -1433,16 +1438,41 @@ void Obstacle_Update(void)
 
     uint32_t now = HAL_GetTick();
 
-    /* ---- CAN timeout: advisory data lost → allow full motion ---- */
+    /* ---- CAN timeout: advisory data lost ----
+     * CAN frames are advisory only.  When lost, LIMP_HOME speed limits
+     * provide a baseline safety net.
+     *
+     * However, if an obstacle was actively detected (ACTIVE or CONFIRMING
+     * state) when CAN died, we must NOT instantly drop protection to 1.0.
+     * Scenarios that rely on this:
+     *   - Obstacle closer than stopping distance when CAN fails
+     *   - Vehicle rolling downhill (speed cap limits demand, not gravity)
+     *   - Pedal pressed continuously at 20 % torque limit
+     *   - Single-wheel traction understating average speed
+     *
+     * Policy: retain the last known obstacle_scale (or a conservative
+     * OBSTACLE_FAULT_SCALE) when an obstacle was being tracked.
+     * If no obstacle was active, allow scale = 1.0.                    */
     if (obstacle_data_valid &&
         (now - obstacle_last_rx_tick) > OBSTACLE_CAN_TIMEOUT_MS) {
-        /* CAN frames are advisory only.  When lost, rely on LIMP_HOME
-         * speed limits (walking speed) for safety.  Do NOT restrict
-         * motion — CAN loss is handled by overall CAN timeout →
-         * LIMP_HOME transition.                                        */
-        safety_status.obstacle_scale = 1.0f;
-        obstacle_forward_blocked = 0;
-        obstacle_state = OBS_STATE_NO_SENSOR;
+
+        if (obstacle_state == OBS_STATE_ACTIVE ||
+            obstacle_state == OBS_STATE_CONFIRMING) {
+            /* Obstacle was being tracked — hold last scale or fall back
+             * to conservative limit.  Never weaker than FAULT_SCALE.   */
+            if (safety_status.obstacle_scale > OBSTACLE_FAULT_SCALE) {
+                safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
+            }
+            /* Keep forward_blocked if it was already set */
+            obstacle_state = OBS_STATE_SENSOR_FAULT;
+        } else {
+            /* No active obstacle threat when CAN died — allow motion.
+             * LIMP_HOME speed cap provides the safety net.             */
+            safety_status.obstacle_scale = 1.0f;
+            obstacle_forward_blocked = 0;
+            obstacle_state = OBS_STATE_NO_SENSOR;
+        }
+
         ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
         return;
     }
