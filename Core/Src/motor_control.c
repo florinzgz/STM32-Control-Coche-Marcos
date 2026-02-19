@@ -1302,8 +1302,18 @@ void Traction_EmergencyStop(void)
     pedal_filter_init = 0;
 
     /* Reset dynamic braking */
-    dynbrake_pct    = 0.0f;
-    prev_demand_pct = 0.0f;
+    dynbrake_pct       = 0.0f;
+    prev_demand_pct    = 0.0f;
+    dynbrake_last_tick = HAL_GetTick();
+
+    /* Reset demand anomaly detection — prevent stale state from
+     * causing false anomaly triggers after SAFE → ACTIVE recovery. */
+    prev_raw_demand      = 0.0f;
+    prev_raw_demand_tick = 0;
+    frozen_pedal_value   = 0.0f;
+    frozen_pedal_tick    = 0;
+    frozen_pedal_speed   = 0.0f;
+    anomaly_init         = 0;
 
     /* Reset smooth driving state — emergency stop is immediate,
      * no ramp, no coast, no jerk limit.  Motors are de-energised. */
