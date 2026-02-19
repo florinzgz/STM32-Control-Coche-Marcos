@@ -108,7 +108,7 @@ void setup() {
         Serial.printf("[PSRAM] Initialized — total: %u bytes, free: %u bytes\n",
                       ESP.getPsramSize(), ESP.getFreePsram());
     } else {
-        Serial.println("[PSRAM] Initialization FAILED or not available");
+        Serial.println("[PSRAM] Initialization FAILED — check board_build.arduino.memory_type");
     }
 
     // Initialize TFT display
