@@ -205,7 +205,20 @@ STM32-Control-Coche-Marcos/
 
 ### ESP32-S3 HMI Firmware
 
-The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communicates with the STM32 via CAN bus. It is built with **PlatformIO** using the **Arduino framework** (C++17). See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the full architecture.
+The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communicates with the STM32 via CAN bus. It is built with **PlatformIO** using the **Arduino framework** (C++17). 
+
+#### ESP32-S3 Hardware Documentation
+
+📋 **Complete pin connection guides available:**
+- **[ESP32 Pin Documentation Index](docs/ESP32_PIN_DOCUMENTATION_INDEX.md)** - Start here for all ESP32 connection docs
+- **[Display & CAN-Bus Connections](docs/ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md)** - Detailed guide (Spanish)
+- **[Visual Pin Diagrams](docs/DIAGRAMA_PINES_VISUAL.md)** - ASCII diagrams for wiring
+- **[Quick Reference](docs/CONEXIONES_RAPIDAS_ESP32.md)** - Fast lookup tables
+
+**Display:** TFT ST7796 480×320 (GPIO 13-17, 21, 42)  
+**CAN-Bus:** TJA1051 transceiver (GPIO 4, 5)
+
+See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the full firmware architecture.
 
 ## Features
 ✅ 4-wheel independent traction control
