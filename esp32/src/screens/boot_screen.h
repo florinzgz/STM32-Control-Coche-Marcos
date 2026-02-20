@@ -12,6 +12,7 @@
 #define BOOT_SCREEN_H
 
 #include "screen.h"
+#include "../sensors/obstacle_sensor.h"
 
 class BootScreen : public Screen {
 public:
@@ -24,6 +25,8 @@ private:
     bool needsRedraw_ = true;
     bool canLinked_    = false;
     bool prevCanLinked_ = false;
+    obstacle_sensor::SensorStatus sensorStatus_     = obstacle_sensor::SensorStatus::WAITING;
+    obstacle_sensor::SensorStatus prevSensorStatus_  = obstacle_sensor::SensorStatus::WAITING;
 };
 
 #endif // BOOT_SCREEN_H

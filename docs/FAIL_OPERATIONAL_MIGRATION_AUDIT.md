@@ -1051,3 +1051,72 @@ It does **not** re-activate during normal runtime state transitions (e.g. ACTIVE
 | B | Release pedal, then press again | Normal driving behavior resumes after 400 ms pedal-rest window. | `startup_inhibit` cleared; all subsequent demand paths unaffected. |
 | C | Reset while driving (watchdog/brownout) | Vehicle stops producing torque immediately. No motion until pedal released for 400 ms. | MCU reset reinitialises `startup_inhibit = true`. |
 | D | Reset while stopped (pedal not pressed) | No creep. Inhibit clears after 400 ms of confirmed pedal rest. | Timer starts immediately if pedal < 3 %; clears after 400 ms. |
+
+---
+
+## Obstacle Sensor Data Integrity Justification
+
+### Overview
+
+Migration Step 5 implements the obstacle sensor driver on the ESP32, providing the STM32 safety state machine with real environment data via CAN frame 0x208 (OBSTACLE_DISTANCE).  Previously the vehicle operated with `OBS_STATE_NO_SENSOR` (scale = 1.0) because no sensor data was ever transmitted.
+
+### Implementation Summary
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Sensor driver | `esp32/src/sensors/obstacle_sensor.cpp` | HC-SR04 ultrasonic reading at ≥ 20 Hz, range validation, stuck detection, warmup |
+| CAN TX | `esp32/src/can/can_obstacle.cpp` | Transmits 0x208 at 66 ms interval matching frozen CAN contract rev 1.3 |
+| HMI indicator | `esp32/src/hmi/obstacle_indicator.cpp` | Boot screen status display: WAITING / INVALID / VALID |
+
+### CAN 0x208 Payload (DLC 5, 66 ms period)
+
+| Byte(s) | Field | Type | Description |
+|---------|-------|------|-------------|
+| 0–1 | distance_mm | uint16 LE | Measured distance in millimeters |
+| 2 | zone | uint8 (0–3) | 0=far (>1 m), 1=warn (0.5–1 m), 2=critical (0.2–0.5 m), 3=emergency (<0.2 m) |
+| 3 | sensor_health | uint8 | 1=healthy, 0=unhealthy (stuck, timeout, or invalid) |
+| 4 | rolling_counter | uint8 | Increments each frame (0–255 wraparound); used by STM32 for stale-data detection |
+
+### Data Integrity Measures
+
+1. **Physical range validation:** Readings below 20 mm or above 4000 mm are rejected as out-of-range.  These thresholds correspond to the physical limits of the HC-SR04 sensor.
+
+2. **Sensor timeout:** If no echo pulse is received within 100 ms the reading is marked invalid.  The STM32 independently applies a 500 ms CAN timeout (`OBSTACLE_CAN_TIMEOUT_MS`) as a second layer of protection.
+
+3. **Warmup filtering:** For 1000 ms after sensor initialization, all readings are suppressed (status = WAITING) and no CAN frames are transmitted.  This prevents spurious early measurements from reaching the STM32 state machine.
+
+4. **Stuck-sensor detection:** If distance remains within ±10 mm for ≥ 1000 ms while vehicle speed exceeds 1 km/h, the sensor is flagged as STUCK and `sensor_health` is set to 0.  The STM32 `Obstacle_ProcessCAN()` independently performs its own stuck detection as a defense-in-depth measure.
+
+5. **Rolling counter:** A monotonically incrementing counter (mod 256) is included in every frame.  The STM32 uses this to detect frozen or replayed data.
+
+6. **Fail-safe by absence:** If the ESP32 crashes or the sensor becomes permanently unavailable, CAN 0x208 transmission stops entirely.  The STM32 detects the absence via its 500 ms CAN timeout and transitions according to its existing state machine rules (hold last scale if obstacle was active, else scale = 1.0).
+
+### Zone Mapping Consistency
+
+The ESP32 zone field matches the STM32 distance tiers defined in `safety_system.c`:
+
+| Zone | Distance | STM32 Scale | STM32 State |
+|------|----------|-------------|-------------|
+| 0 | > 1000 mm | 1.0 | NORMAL |
+| 1 | 500–1000 mm | 0.7 | CONFIRMING → ACTIVE |
+| 2 | 200–500 mm | 0.3 | ACTIVE |
+| 3 | < 200 mm | 0.0 | ACTIVE (emergency) |
+
+Note: The STM32 re-derives the zone from `distance_mm` internally; the zone byte is informational and used for logging only.
+
+### No STM32 Changes
+
+This implementation adds ESP32-side code only.  No changes are made to:
+- STM32 obstacle thresholds (`OBSTACLE_EMERGENCY_MM`, `OBSTACLE_CRITICAL_MM`, etc.)
+- CAN IDs or payload format (frozen contract rev 1.3)
+- Safety states or state machine transitions
+- STM32 plausibility checks or timeout values
+
+### Verification Test Matrix
+
+| ID | Scenario | Expected Behavior | Mechanism |
+|----|----------|-------------------|-----------|
+| A | Power on with sensor disconnected | STM32 remains in OBS_STATE_NO_SENSOR (scale=1.0); no 0x208 frames on bus. | ESP32 sensor timeout → no CAN TX; STM32 CAN timeout → NO_SENSOR. |
+| B | Valid obstacle at 50 cm | STM32 receives distance_mm=500, zone=2, health=1. Braking triggered (scale=0.3). | Sensor reads 500 mm, frame transmitted, STM32 CONFIRMING→ACTIVE. |
+| C | Constant value while moving | Stuck flag set after 1 s; sensor_health=0 in frame. | ESP32 stuck detection; STM32 independent stuck detection confirms. |
+| D | ESP32 reset while moving | 0x208 stops; STM32 CAN timeout (500 ms) applies safety response. | ESP32 reboot suppresses frames during warmup; STM32 timeout path. |
