@@ -117,44 +117,93 @@ static uint32_t tcs_last_tick = 0;
 static uint32_t abs_pulse_timer[4];     /* HAL_GetTick() at phase start   */
 static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 
-/* ---- Obstacle CAN receiver state -------------------------------- */
-
-/* Obstacle distance thresholds for the STM32 backstop limiter.
- * These are simplified 3-tier thresholds — the ESP32 runs the full
- * 5-zone logic with linear interpolation and child reaction detection.
- * The STM32 backstop is a defence-in-depth layer that operates
- * independently of the ESP32's obstacle safety logic.
+/* ---- Obstacle safety — STM32 primary safety controller ---------- */
+/* CAN obstacle frames from ESP32 are advisory only — never mandatory
+ * for motion.  The STM32 implements a full autonomous obstacle safety
+ * module with:
+ *   - Physical plausibility validation (speed-based change limits)
+ *   - Stuck sensor detection (distance static while vehicle moves)
+ *   - Speed-dependent stopping distance (thresholds ∝ v²)
+ *   - Temporal hysteresis (confirm presence and clearance over time)
+ *   - Local state machine independent of CAN availability
+ *   - Reverse escape preserved
+ *   - Conservative fallback when sensor is invalid
  *
- * Traced to OBSTACLE_SYSTEM_STRATEGY.md Part 3, proposed values.    */
-#define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0, SAFE   */
+ * The vehicle remains safely drivable if ESP32, CAN bus, or HMI
+ * completely disappear.  No motion immobilization — only controlled
+ * slowdown.                                                            */
+
+/* Fixed distance thresholds (floor values — dynamic thresholds may
+ * be larger at higher speeds due to stopping-distance calculation).   */
+#define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0         */
 #define OBSTACLE_CRITICAL_MM        500     /* 200–500 mm → scale = 0.3       */
 #define OBSTACLE_WARNING_MM         1000    /* 500–1000 mm → scale = 0.7      */
-/* > 1000 mm → scale = 1.0 (no reduction)                                     */
 
-/* Recovery hysteresis: after emergency stop, require distance > 500 mm
- * for > 1 second before allowing auto-recovery.  Prevents oscillation
- * when obstacle is near the 200 mm boundary.                          */
-#define OBSTACLE_RECOVERY_MM        500
-#define OBSTACLE_RECOVERY_MS        1000
+/* Temporal hysteresis */
+#define OBSTACLE_CONFIRM_MS         200     /* Confirm obstacle before acting  */
+#define OBSTACLE_CLEAR_MS           1000    /* Confirm clearance before reset  */
+#define OBSTACLE_RECOVERY_MM        500     /* Min distance to start clearing  */
 
-/* CAN timeout for obstacle messages (0x208).  If no message is
- * received within this window, the STM32 assumes obstacle sensor
- * failure and applies fail-safe (obstacle_scale = 0.0, SAFE state).
- * This is longer than the heartbeat timeout (250 ms) because obstacle
- * messages are sent at 66 ms (15 Hz) and we allow 7+ missed frames
- * before declaring timeout.                                           */
+/* CAN timeout — advisory.  When exceeded:
+ *   - If obstacle was active: hold last scale (≤ OBSTACLE_FAULT_SCALE)
+ *   - If no obstacle was active: scale → 1.0 (LIMP_HOME speed cap)
+ * CAN loss alone is NOT a hazard, but an active obstacle must not be
+ * forgotten just because CAN frames stopped arriving.                 */
 #define OBSTACLE_CAN_TIMEOUT_MS     500
 
-static uint32_t obstacle_last_rx_tick   = 0;   /* Last 0x208 reception time   */
-static uint16_t obstacle_distance_mm    = 0xFFFF; /* Last reported distance   */
-static uint8_t  obstacle_zone           = 0;   /* Last reported zone (0–5)    */
-static uint8_t  obstacle_sensor_healthy = 0;   /* Sensor health from ESP32    */
-static uint8_t  obstacle_last_counter   = 0;   /* Rolling counter for stale   */
-static uint8_t  obstacle_stale_count    = 0;   /* Consecutive stale frames    */
-static uint8_t  obstacle_data_valid     = 0;   /* 1 = at least one msg rcvd   */
-static uint32_t obstacle_recovery_tick  = 0;   /* Recovery debounce start     */
-static uint8_t  obstacle_in_emergency   = 0;   /* Currently in emergency stop */
-static uint8_t  obstacle_forward_blocked = 0;  /* Forward motion blocked, reverse escape allowed */
+/* Physical plausibility: max approach rate between sensor and vehicle.
+ * vehicle_speed + max_obstacle_speed.  A child + vehicle combined ≈
+ * 8 m/s (29 km/h).  Anything faster is noise or sensor fault.        */
+#define OBSTACLE_MAX_APPROACH_MMS   8000    /* 8 m/s in mm/s                  */
+
+/* Stuck-sensor detection: if vehicle moves > 1 km/h but distance
+ * has not changed by more than STUCK_THRESHOLD for STUCK_DURATION,
+ * the sensor is declared stuck.                                       */
+#define OBSTACLE_STUCK_THRESHOLD_MM 10
+#define OBSTACLE_STUCK_DURATION_MS  1000
+#define OBSTACLE_STUCK_MIN_SPEED_KMH 1.0f
+
+/* Speed-dependent stopping distance: d = v² / (2·a) + margin.
+ * Assumed deceleration 3 m/s² (gentle for child vehicle).             */
+#define OBSTACLE_STOP_DECEL_MMS2    3000.0f /* 3 m/s² in mm/s²               */
+#define OBSTACLE_STOP_MARGIN_MM     200     /* Safety margin added            */
+
+/* Sensor-fault conservative scale — vehicle remains mobile.           */
+#define OBSTACLE_FAULT_SCALE        0.3f
+
+/* Preemptive scale floor during CONFIRMING / CLEARING states.
+ * Limits reduction to at most 0.7 (gentle) while temporal
+ * confirmation is still pending.                                      */
+#define OBSTACLE_PREEMPTIVE_FLOOR   0.7f
+static inline float obstacle_preemptive_scale(float target)
+{
+    return (target < OBSTACLE_PREEMPTIVE_FLOOR) ? OBSTACLE_PREEMPTIVE_FLOOR
+                                                 : target;
+}
+
+/* ---- CAN advisory state ---- */
+static uint32_t obstacle_last_rx_tick    = 0;      /* Last 0x208 reception     */
+static uint16_t obstacle_distance_mm     = 0xFFFF; /* Last reported distance   */
+static uint8_t  obstacle_zone            = 0;      /* Last zone (0–5)          */
+static uint8_t  obstacle_sensor_healthy  = 0;      /* Health flag from ESP32   */
+static uint8_t  obstacle_last_counter    = 0;      /* Rolling counter          */
+static uint8_t  obstacle_stale_count     = 0;      /* Consecutive stale frames */
+static uint8_t  obstacle_data_valid      = 0;      /* 1 = ≥1 msg received      */
+
+/* ---- Local state machine (independent of CAN) ---- */
+static ObstacleState_t obstacle_state    = OBS_STATE_NO_SENSOR;
+static uint32_t obstacle_confirm_tick    = 0;      /* Confirmation start time  */
+static uint32_t obstacle_clear_tick      = 0;      /* Clearance start time     */
+static uint8_t  obstacle_forward_blocked = 0;      /* Forward blocked flag     */
+
+/* ---- Plausibility & stuck detection ---- */
+static uint16_t obstacle_prev_distance   = 0xFFFF; /* Previous valid distance  */
+static uint32_t obstacle_prev_dist_tick  = 0;      /* Time of prev distance    */
+static uint32_t obstacle_stuck_since     = 0;      /* When distance froze      */
+static uint8_t  obstacle_plausible       = 1;      /* Current data plausible   */
+
+/* ---- Validated distance used by state machine ---- */
+static uint16_t obstacle_validated_mm    = 0xFFFF; /* After plausibility check */
 
 /* ================================================================== */
 /*  State Machine                                                      */
@@ -527,16 +576,22 @@ void Safety_Init(void)
     last_error_tick    = 0;
     recovery_clean_since = 0;
     recovery_pending     = 0;
-    obstacle_last_rx_tick   = 0;
-    obstacle_distance_mm    = 0xFFFF;
-    obstacle_zone           = 0;
-    obstacle_sensor_healthy = 0;
-    obstacle_last_counter   = 0;
-    obstacle_stale_count    = 0;
-    obstacle_data_valid     = 0;
-    obstacle_recovery_tick  = 0;
-    obstacle_in_emergency   = 0;
+    obstacle_last_rx_tick    = 0;
+    obstacle_distance_mm     = 0xFFFF;
+    obstacle_zone            = 0;
+    obstacle_sensor_healthy  = 0;
+    obstacle_last_counter    = 0;
+    obstacle_stale_count     = 0;
+    obstacle_data_valid      = 0;
+    obstacle_state           = OBS_STATE_NO_SENSOR;
+    obstacle_confirm_tick    = 0;
+    obstacle_clear_tick      = 0;
     obstacle_forward_blocked = 0;
+    obstacle_prev_distance   = 0xFFFF;
+    obstacle_prev_dist_tick  = 0;
+    obstacle_stuck_since     = 0;
+    obstacle_plausible       = 1;
+    obstacle_validated_mm    = 0xFFFF;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -1209,40 +1264,69 @@ Safety_Error_t Safety_GetError(void)         { return safety_error; }
 bool Safety_IsError(void)                    { return (safety_error != SAFETY_ERROR_NONE); }
 
 /* ================================================================== */
-/*  Obstacle Safety (CAN-received from ESP32)                          */
+/*  Obstacle Safety — STM32 Primary Safety Controller                  */
+/*  CAN frames from ESP32 are advisory only, never mandatory.          */
 /* ================================================================== */
+
+/**
+ * @brief  Helper: compute average vehicle speed from wheel sensors.
+ * @return Vehicle speed in km/h (average of all four wheels).
+ */
+static float Obstacle_GetVehicleSpeed(void)
+{
+    float avg = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                 Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+    if (avg < 0.0f) avg = 0.0f;
+    return avg;
+}
+
+/**
+ * @brief  Helper: compute speed-dependent stopping distance.
+ *
+ * d_stop = v² / (2·a) + margin
+ * Returns the dynamic emergency threshold in mm.  The result is
+ * at least OBSTACLE_EMERGENCY_MM so the fixed floor always applies.
+ *
+ * @param speed_kmh  Vehicle speed in km/h.
+ * @return Dynamic emergency threshold in mm.
+ */
+static uint16_t Obstacle_StoppingDistance(float speed_kmh)
+{
+    float v_ms = speed_kmh / 3.6f;                         /* km/h → m/s   */
+    float v_mms = v_ms * 1000.0f;                          /* m/s → mm/s   */
+    float d_mm = (v_mms * v_mms) / (2.0f * OBSTACLE_STOP_DECEL_MMS2)
+                 + (float)OBSTACLE_STOP_MARGIN_MM;
+    if (d_mm < (float)OBSTACLE_EMERGENCY_MM) d_mm = (float)OBSTACLE_EMERGENCY_MM;
+    if (d_mm > 4000.0f) d_mm = 4000.0f;                   /* clamp to 4 m */
+    return (uint16_t)d_mm;
+}
 
 /**
  * @brief  Process a CAN obstacle distance message (0x208) from ESP32.
  *
- * Called from CAN_ProcessMessages() when a frame with ID 0x208 arrives.
- * Stores the received values and updates the reception timestamp.
- * Stale-data detection compares the rolling counter — if the counter
- * has not changed for 3 consecutive receptions, the data is considered
- * frozen (ESP32 obstacle module may have crashed while the CAN driver
- * continues sending cached values).
+ * Called from CAN_ProcessMessages().  CAN data is advisory — the local
+ * state machine decides whether to trust it.  Physical plausibility and
+ * stuck-sensor detection are applied before the distance is accepted.
  *
  * Payload (DLC ≥ 5):
- *   Byte 0-1: minimum distance (mm, uint16 little-endian)
- *   Byte 2:   zone level (0 = no obstacle, 1–5 = proximity zones)
- *   Byte 3:   sensor health (0 = unhealthy, 1 = healthy)
- *   Byte 4:   rolling counter (uint8, 0–255, must increment)
+ *   Byte 0-1: minimum distance (mm, uint16 LE)
+ *   Byte 2:   zone level (0–5)
+ *   Byte 3:   sensor health (0/1)
+ *   Byte 4:   rolling counter
  */
 void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
 {
     if (len < 5) return;
 
-    /* Skip if obstacle detection module is disabled (service mode) */
+    /* Skip if disabled via service mode */
     if (!ServiceMode_IsEnabled(MODULE_OBSTACLE_DETECT)) return;
 
-    uint16_t dist = (uint16_t)(data[0] | (data[1] << 8));
-    uint8_t  zone = data[2];
-    uint8_t  health = data[3];
+    uint16_t dist    = (uint16_t)(data[0] | (data[1] << 8));
+    uint8_t  zone    = data[2];
+    uint8_t  health  = data[3];
     uint8_t  counter = data[4];
 
-    /* Stale-data detection: counter must change between frames.
-     * If the counter is identical for 3 consecutive receptions,
-     * treat the data as frozen / stale.                               */
+    /* ---- Stale-data detection (rolling counter) ---- */
     if (obstacle_data_valid && counter == obstacle_last_counter) {
         if (obstacle_stale_count < 255) obstacle_stale_count++;
     } else {
@@ -1253,180 +1337,313 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
     /* Zone plausibility: clamp to valid range */
     if (zone > 5) zone = 0;
 
+    uint32_t now = HAL_GetTick();
+
+    /* ---- Physical plausibility validation ---- */
+    if (obstacle_data_valid && obstacle_prev_dist_tick > 0) {
+        uint32_t dt_ms = now - obstacle_prev_dist_tick;
+        if (dt_ms > 0 && dt_ms < 5000) {
+            /* Max plausible change = (max_approach_rate) × dt */
+            float max_change_mm = ((float)OBSTACLE_MAX_APPROACH_MMS *
+                                   (float)dt_ms) / 1000.0f;
+            int32_t actual_change = (int32_t)obstacle_prev_distance -
+                                    (int32_t)dist;
+            /* Only check approach (distance decreasing = positive change).
+             * Rapid distance increase (object moved away) is benign.      */
+            if (actual_change > (int32_t)max_change_mm &&
+                max_change_mm > 0.0f) {
+                /* Implausible jump — reject this reading */
+                obstacle_plausible = 0;
+                ServiceMode_SetFault(MODULE_OBSTACLE_DETECT,
+                                     MODULE_FAULT_WARNING);
+                /* Keep previous validated distance; don't update */
+                obstacle_last_rx_tick = now;
+                return;
+            }
+        }
+    }
+    obstacle_plausible = 1;
+
+    /* ---- Stuck-sensor detection ---- */
+    if (obstacle_data_valid && obstacle_prev_distance != 0xFFFF) {
+        int32_t delta = (int32_t)dist - (int32_t)obstacle_prev_distance;
+        if (delta < 0) delta = -delta;
+        float speed = Obstacle_GetVehicleSpeed();
+
+        if (speed > OBSTACLE_STUCK_MIN_SPEED_KMH &&
+            delta <= OBSTACLE_STUCK_THRESHOLD_MM) {
+            /* Distance hasn't changed while vehicle is moving */
+            if (obstacle_stuck_since == 0) {
+                obstacle_stuck_since = now;
+            } else if ((now - obstacle_stuck_since) >=
+                       OBSTACLE_STUCK_DURATION_MS) {
+                /* Sensor declared stuck */
+                obstacle_plausible = 0;
+                ServiceMode_SetFault(MODULE_OBSTACLE_DETECT,
+                                     MODULE_FAULT_WARNING);
+            }
+        } else {
+            obstacle_stuck_since = 0;
+        }
+    }
+
+    /* Store raw CAN values */
+    obstacle_prev_distance  = obstacle_distance_mm;
+    obstacle_prev_dist_tick = now;
     obstacle_distance_mm    = dist;
     obstacle_zone           = zone;
     obstacle_sensor_healthy = health;
-    obstacle_last_rx_tick   = HAL_GetTick();
+    obstacle_last_rx_tick   = now;
     obstacle_data_valid     = 1;
+
+    /* Update validated distance only if plausible */
+    if (obstacle_plausible && obstacle_stale_count < 3 &&
+        obstacle_sensor_healthy) {
+        obstacle_validated_mm = dist;
+    }
 }
 
 /**
- * @brief  Periodic obstacle safety check — called every 10 ms.
+ * @brief  Periodic obstacle safety update — called every 10 ms.
  *
- * Computes obstacle_scale from the last CAN-received distance and
- * applies timeout / stale-data detection.  This is the STM32's
- * independent backstop limiter — it does NOT replicate the ESP32's
- * full 5-zone logic.  The 3-tier mapping provides defence-in-depth.
+ * Implements a local state machine that is independent of CAN:
  *
- * Autonomous design: works without CAN.
- *   - When CAN data is available: apply 3-tier distance → scale mapping
- *   - When CAN data times out: do NOT enter SAFE.  Instead, rely on
- *     LIMP_HOME speed limits (walking speed) for safety.
- *   - When no CAN data ever received: allow normal operation (scale 1.0)
- *     with LIMP_HOME speed limits providing the safety net.
- *   - Cannot be bypassed by HMI — STM32 backstop is always active.
+ *   NO_SENSOR → (first valid CAN frame) → NORMAL
+ *   NORMAL    → (obstacle in range confirmed) → CONFIRMING
+ *   CONFIRMING→ (sustained for CONFIRM_MS) → ACTIVE
+ *   CONFIRMING→ (obstacle disappeared) → NORMAL
+ *   ACTIVE    → (obstacle receded) → CLEARING
+ *   CLEARING  → (sustained for CLEAR_MS) → NORMAL
+ *   CLEARING  → (obstacle returned) → ACTIVE
+ *   any       → (sensor fault) → SENSOR_FAULT
+ *   SENSOR_FAULT → (valid data resumes) → NORMAL
+ *   any       → (CAN timeout, no obstacle) → NO_SENSOR (scale = 1.0)
+ *   ACTIVE/CONFIRMING → (CAN timeout) → SENSOR_FAULT (hold scale)
  *
- * Reverse escape: when obstacle emergency blocks forward motion,
- *   reverse travel is still allowed (obstacle_forward_blocked flag).
- *   This prevents the vehicle from being immobilized when an obstacle
- *   appears directly in front.
- *
- * Safety actions:
- *   - Distance < 200 mm → obstacle_scale = 0.0, forward blocked,
- *     reverse escape allowed
- *   - Distance 200–500 mm → obstacle_scale = 0.3
- *   - Distance 500–1000 mm → obstacle_scale = 0.7
- *   - Distance > 1000 mm → obstacle_scale = 1.0
- *   - CAN timeout (> 500 ms) → obstacle_scale = 1.0 (rely on
- *     LIMP_HOME speed limits, NOT SAFE state)
- *   - Sensor unhealthy → obstacle_scale = 0.3 (conservative limit,
- *     NOT SAFE state — vehicle remains mobile)
- *   - Stale data (counter frozen ≥ 3) → obstacle_scale = 0.3
- *     (conservative, NOT SAFE)
- *
- * Recovery from emergency:
- *   - Distance must exceed 500 mm for > 1 second
- *   - Sensor must be healthy
- *   - CAN messages must be arriving
+ * Speed-dependent stopping distance adjusts thresholds dynamically.
+ * CAN loss with no active obstacle → scale 1.0 (LIMP_HOME cap provides safety).
+ * CAN loss with active obstacle → hold last scale (obstacle < stopping distance safe).
+ * No motion immobilization — only controlled slowdown.
+ * Reverse escape preserved when forward is blocked.
  */
 void Obstacle_Update(void)
 {
-    /* Skip if obstacle detection module is disabled (service mode) */
+    /* Skip if disabled via service mode */
     if (!ServiceMode_IsEnabled(MODULE_OBSTACLE_DETECT)) {
         safety_status.obstacle_scale = 1.0f;
         obstacle_forward_blocked = 0;
+        obstacle_state = OBS_STATE_NO_SENSOR;
         return;
     }
 
     uint32_t now = HAL_GetTick();
 
-    /* ---- Check for CAN timeout ---- */
+    /* ---- CAN timeout: advisory data lost ----
+     * CAN frames are advisory only.  When lost, LIMP_HOME speed limits
+     * provide a baseline safety net.
+     *
+     * However, if an obstacle was actively detected (ACTIVE or CONFIRMING
+     * state) when CAN died, we must NOT instantly drop protection to 1.0.
+     * Scenarios that rely on this:
+     *   - Obstacle closer than stopping distance when CAN fails
+     *   - Vehicle rolling downhill (speed cap limits demand, not gravity)
+     *   - Pedal pressed continuously at 20% torque limit
+     *   - Single-wheel traction understating average speed
+     *
+     * Policy: retain the last known obstacle_scale (or a conservative
+     * OBSTACLE_FAULT_SCALE) when an obstacle was being tracked.
+     * If no obstacle was active, allow scale = 1.0.                    */
     if (obstacle_data_valid &&
         (now - obstacle_last_rx_tick) > OBSTACLE_CAN_TIMEOUT_MS) {
-        /* No obstacle data for > 500 ms — sensor data stale.
-         * In the autonomous design, this does NOT trigger SAFE.
-         * Apply conservative scale (0.3 = heavy reduction) so that
-         * if the system is still in ACTIVE/DEGRADED before the CAN
-         * heartbeat timeout triggers LIMP_HOME, obstacle protection
-         * is maintained.  In LIMP_HOME the speed cap provides an
-         * additional safety net.                                       */
-        safety_status.obstacle_scale = 0.3f;
-        obstacle_forward_blocked = 0;
+
+        if (obstacle_state == OBS_STATE_ACTIVE ||
+            obstacle_state == OBS_STATE_CONFIRMING) {
+            /* Obstacle was being tracked — hold last scale or fall back
+             * to conservative limit.  Never weaker than FAULT_SCALE.   */
+            if (safety_status.obstacle_scale > OBSTACLE_FAULT_SCALE) {
+                safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
+            }
+            /* Keep forward_blocked if it was already set */
+            obstacle_state = OBS_STATE_SENSOR_FAULT;
+        } else {
+            /* No active obstacle threat when CAN died — allow motion.
+             * LIMP_HOME speed cap provides the safety net.             */
+            safety_status.obstacle_scale = 1.0f;
+            obstacle_forward_blocked = 0;
+            obstacle_state = OBS_STATE_NO_SENSOR;
+        }
+
         ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
-        /* Do NOT set SAFETY_ERROR_OBSTACLE or enter SAFE.
-         * Obstacle CAN loss is handled by the overall CAN timeout
-         * → LIMP_HOME policy.                                          */
         return;
     }
 
-    /* ---- No data ever received — not yet initialised ---- */
+    /* ---- No CAN data ever received ---- */
     if (!obstacle_data_valid) {
-        /* Before first obstacle message, allow normal operation.
-         * The ESP32 may not have booted its obstacle module yet,
-         * or CAN may never be available (LIMP_HOME operation).
-         * The LIMP_HOME speed limit provides safety.                  */
         safety_status.obstacle_scale = 1.0f;
         obstacle_forward_blocked = 0;
+        obstacle_state = OBS_STATE_NO_SENSOR;
         return;
     }
 
-    /* ---- Stale-data detection ---- */
-    if (obstacle_stale_count >= 3) {
-        /* Counter has not changed for 3+ frames — data is frozen.
-         * Apply conservative scale but do NOT enter SAFE.
-         * Vehicle remains mobile at reduced power.                    */
-        safety_status.obstacle_scale = 0.3f;
+    /* ---- Sensor fault detection ---- */
+    uint8_t sensor_fault = 0;
+    if (obstacle_stale_count >= 3)     sensor_fault = 1; /* Frozen counter */
+    if (!obstacle_sensor_healthy)      sensor_fault = 1; /* ESP32 reports  */
+    if (!obstacle_plausible)           sensor_fault = 1; /* Implausible    */
+
+    if (sensor_fault) {
+        /* Conservative fallback: vehicle remains mobile at reduced power.
+         * No immobilization.  LIMP_HOME speed cap is additional net.    */
+        safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
         obstacle_forward_blocked = 0;
+        obstacle_state = OBS_STATE_SENSOR_FAULT;
         ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
         return;
     }
 
-    /* ---- Sensor health check ---- */
-    if (!obstacle_sensor_healthy) {
-        /* ESP32 reports sensor failure — apply conservative limit.
-         * Do NOT enter SAFE — vehicle remains mobile at reduced power.
-         * In LIMP_HOME, speed is already capped at walking pace.      */
-        safety_status.obstacle_scale = 0.3f;
-        obstacle_forward_blocked = 0;
-        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
-        return;
-    }
+    /* ---- Compute speed-dependent thresholds ---- */
+    float speed_kmh = Obstacle_GetVehicleSpeed();
+    uint16_t dyn_emergency  = Obstacle_StoppingDistance(speed_kmh);
+    /* Critical and warning thresholds scale proportionally but keep
+     * a minimum floor from the static defines.                         */
+    uint16_t dyn_critical = dyn_emergency + (OBSTACLE_CRITICAL_MM -
+                                              OBSTACLE_EMERGENCY_MM);
+    uint16_t dyn_warning  = dyn_critical  + (OBSTACLE_WARNING_MM -
+                                              OBSTACLE_CRITICAL_MM);
+    if (dyn_critical < OBSTACLE_CRITICAL_MM) dyn_critical = OBSTACLE_CRITICAL_MM;
+    if (dyn_warning  < OBSTACLE_WARNING_MM)  dyn_warning  = OBSTACLE_WARNING_MM;
 
-    /* ---- 3-tier distance → scale mapping ---- */
-    float scale;
-    if (obstacle_distance_mm < OBSTACLE_EMERGENCY_MM) {
-        /* Zone 5 equivalent: hard stop for forward motion.
-         * Reverse escape is allowed — obstacle is in front.
-         * Do NOT enter SAFE — keep relays on so reverse works.        */
-        scale = 0.0f;
-        obstacle_in_emergency = 1;
-        obstacle_forward_blocked = 1;
-        Safety_SetError(SAFETY_ERROR_OBSTACLE);
-        /* NOTE: We do NOT call Safety_SetState(SYS_STATE_SAFE).
-         * The obstacle_scale = 0.0 blocks forward motion via the
-         * traction pipeline.  Reverse escape remains available.       */
-    } else if (obstacle_distance_mm < OBSTACLE_CRITICAL_MM) {
-        /* Zone 4 equivalent: heavy braking */
-        scale = 0.3f;
-        obstacle_in_emergency = 0;
-        obstacle_forward_blocked = 0;
-        obstacle_recovery_tick = 0;
-    } else if (obstacle_distance_mm < OBSTACLE_WARNING_MM) {
-        /* Zone 3 equivalent: moderate reduction */
-        scale = 0.7f;
-        obstacle_in_emergency = 0;
-        obstacle_forward_blocked = 0;
-        obstacle_recovery_tick = 0;
+    /* Use the validated (plausibility-checked) distance */
+    uint16_t dist = obstacle_validated_mm;
+
+    /* ---- Determine raw target scale from distance ---- */
+    float target_scale;
+    uint8_t target_blocked = 0;
+
+    if (dist < dyn_emergency) {
+        target_scale   = 0.0f;
+        target_blocked = 1;
+    } else if (dist < dyn_critical) {
+        target_scale = 0.3f;
+    } else if (dist < dyn_warning) {
+        target_scale = 0.7f;
     } else {
-        /* Zone 1-2 / no obstacle: full power */
-        scale = 1.0f;
-        obstacle_in_emergency = 0;
+        target_scale = 1.0f;
+    }
+
+    /* ---- State machine with temporal hysteresis ---- */
+    switch (obstacle_state) {
+
+    case OBS_STATE_NO_SENSOR:
+        /* First valid data arrived — transition to NORMAL */
+        obstacle_state = OBS_STATE_NORMAL;
+        obstacle_confirm_tick = 0;
+        obstacle_clear_tick   = 0;
+        safety_status.obstacle_scale = 1.0f;
         obstacle_forward_blocked = 0;
-        obstacle_recovery_tick = 0;
-    }
+        break;
 
-    /* ---- Emergency recovery with hysteresis ---- */
-    if (obstacle_in_emergency &&
-        obstacle_distance_mm >= OBSTACLE_RECOVERY_MM &&
-        obstacle_sensor_healthy &&
-        obstacle_stale_count == 0) {
-        /* Distance has cleared — start recovery debounce */
-        if (obstacle_recovery_tick == 0) {
-            obstacle_recovery_tick = now;
-        } else if ((now - obstacle_recovery_tick) >= OBSTACLE_RECOVERY_MS) {
-            /* Sustained clearance — recover from emergency */
-            obstacle_in_emergency = 0;
+    case OBS_STATE_NORMAL:
+        if (target_scale < 1.0f) {
+            /* Potential obstacle — start temporal confirmation */
+            obstacle_state = OBS_STATE_CONFIRMING;
+            obstacle_confirm_tick = now;
+            /* During confirmation, start reducing gently (0.7)
+             * to avoid sudden full-speed into obstacle.                */
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
             obstacle_forward_blocked = 0;
-            obstacle_recovery_tick = 0;
-            ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
-            Safety_ClearError(SAFETY_ERROR_OBSTACLE);
-            /* Scale will be recomputed on next iteration */
-            scale = 1.0f;
+        } else {
+            safety_status.obstacle_scale = 1.0f;
+            obstacle_forward_blocked = 0;
         }
-    } else if (obstacle_in_emergency) {
-        /* Still in danger zone — reset recovery timer */
-        obstacle_recovery_tick = 0;
-    }
-
-    /* ---- Clear fault when operating normally ---- */
-    if (!obstacle_in_emergency && scale >= 1.0f) {
         ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
         if (safety_error == SAFETY_ERROR_OBSTACLE) {
             Safety_ClearError(SAFETY_ERROR_OBSTACLE);
         }
-    }
+        break;
 
-    safety_status.obstacle_scale = scale;
+    case OBS_STATE_CONFIRMING:
+        if (target_scale >= 1.0f) {
+            /* Obstacle disappeared before confirmation — back to NORMAL */
+            obstacle_state = OBS_STATE_NORMAL;
+            safety_status.obstacle_scale = 1.0f;
+            obstacle_forward_blocked = 0;
+            obstacle_confirm_tick = 0;
+        } else if ((now - obstacle_confirm_tick) >= OBSTACLE_CONFIRM_MS) {
+            /* Obstacle confirmed — apply full reduction */
+            obstacle_state = OBS_STATE_ACTIVE;
+            safety_status.obstacle_scale = target_scale;
+            obstacle_forward_blocked = target_blocked;
+            if (target_blocked) {
+                Safety_SetError(SAFETY_ERROR_OBSTACLE);
+            }
+        } else {
+            /* Still confirming — apply gentle preemptive reduction */
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
+            obstacle_forward_blocked = 0;
+        }
+        break;
+
+    case OBS_STATE_ACTIVE:
+        if (target_scale >= 1.0f) {
+            /* Obstacle receded — start clearance timer */
+            obstacle_state = OBS_STATE_CLEARING;
+            obstacle_clear_tick = now;
+            /* Keep current restriction during clearance confirmation */
+            obstacle_forward_blocked = 0;
+            safety_status.obstacle_scale = 0.7f;
+        } else if (dist >= OBSTACLE_RECOVERY_MM && target_blocked == 0) {
+            /* Obstacle moved past emergency but still in range —
+             * start clearance check from reduced level             */
+            obstacle_state = OBS_STATE_CLEARING;
+            obstacle_clear_tick = now;
+            safety_status.obstacle_scale = target_scale;
+            obstacle_forward_blocked = 0;
+        } else {
+            /* Still active — apply target scale */
+            safety_status.obstacle_scale = target_scale;
+            obstacle_forward_blocked = target_blocked;
+            if (target_blocked) {
+                Safety_SetError(SAFETY_ERROR_OBSTACLE);
+            }
+        }
+        break;
+
+    case OBS_STATE_CLEARING:
+        if (target_scale <= 0.3f) {
+            /* Obstacle returned close — back to ACTIVE immediately */
+            obstacle_state = OBS_STATE_ACTIVE;
+            obstacle_clear_tick = 0;
+            safety_status.obstacle_scale = target_scale;
+            obstacle_forward_blocked = target_blocked;
+        } else if ((now - obstacle_clear_tick) >= OBSTACLE_CLEAR_MS) {
+            /* Sustained clearance — return to NORMAL */
+            obstacle_state = OBS_STATE_NORMAL;
+            obstacle_clear_tick = 0;
+            safety_status.obstacle_scale = 1.0f;
+            obstacle_forward_blocked = 0;
+            ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
+            Safety_ClearError(SAFETY_ERROR_OBSTACLE);
+        } else {
+            /* Still confirming clearance — keep moderate reduction */
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
+            obstacle_forward_blocked = 0;
+        }
+        break;
+
+    case OBS_STATE_SENSOR_FAULT:
+        /* Handled above — should not reach here.  Fallback: */
+        safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
+        obstacle_forward_blocked = 0;
+        break;
+
+    default:
+        /* Unknown state — reset to safe default */
+        obstacle_state = OBS_STATE_NO_SENSOR;
+        safety_status.obstacle_scale = 1.0f;
+        obstacle_forward_blocked = 0;
+        break;
+    }
 }
 
 /**
@@ -1440,14 +1657,18 @@ float Obstacle_GetScale(void)
 
 /**
  * @brief  Query whether forward motion is blocked by an obstacle.
- *
- * When true, obstacle_scale = 0.0 for forward direction but reverse
- * travel is still allowed (reverse escape).  This prevents the vehicle
- * from being immobilized when an obstacle appears directly in front.
- *
- * @return true if forward blocked (reverse escape available), false otherwise.
+ * @return true if forward blocked (reverse escape available).
  */
 bool Obstacle_IsForwardBlocked(void)
 {
     return (obstacle_forward_blocked != 0);
+}
+
+/**
+ * @brief  Get the current obstacle state machine state.
+ * @return Current ObstacleState_t value.
+ */
+ObstacleState_t Obstacle_GetState(void)
+{
+    return obstacle_state;
 }

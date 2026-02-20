@@ -1055,17 +1055,17 @@ void Traction_Update(void)
         creep_smooth_init = 1;
     }
 
-    /* Apply obstacle scale to all wheels.  This multiplier
-     * is set by Obstacle_Update() from CAN-received distance data.
+    /* Apply obstacle scale to all wheels.  This multiplier is set by
+     * Obstacle_Update() — STM32 primary safety controller.  CAN data
+     * from ESP32 is advisory; the local state machine with plausibility
+     * validation, stuck-sensor detection, speed-dependent thresholds,
+     * and temporal hysteresis determines the actual scale.
      * Applied before per-wheel ABS/TCS wheel_scale[] so that obstacle
      * reduction and ABS/TCS modulation are multiplicative (most
-     * restrictive wins).  Same approach as the reference monolithic
-     * firmware's obstacleFactor in traction.cpp.
+     * restrictive wins).
      *
-     * Reverse escape: when obstacle_forward_blocked is set (obstacle
-     * < 200 mm in front), forward motion is blocked (scale = 0.0)
-     * but reverse travel is allowed.  This prevents the vehicle from
-     * being immobilized when an obstacle appears directly in front.   */
+     * Reverse escape: when obstacle_forward_blocked is set, forward
+     * motion is blocked (scale = 0.0) but reverse is allowed.         */
     {
         float effective_obstacle = safety_status.obstacle_scale;
         if (effective_obstacle < 0.01f &&
