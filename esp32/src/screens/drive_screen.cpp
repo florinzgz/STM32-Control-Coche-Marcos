@@ -95,12 +95,9 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     }
     curPedalPct_ = static_cast<uint8_t>(tractionSum / 4);
 
-    // Gear — derived from heartbeat flags (byte 1 of CMD_MODE)
-    // For now, map system state to gear display:
-    // Gear is tracked separately via mode commands; default to N if unknown
-    // The gear value is encoded as the second byte of CMD_MODE (0x102)
-    // Since we receive the heartbeat state, we default to D1 when active
-    curGear_ = ui::Gear::D1;
+    // Gear — the STM32 does not echo gear back via CAN; CMD_MODE is ESP32→STM32
+    // only. Default to N (neutral/unknown) since no gear has been commanded yet.
+    curGear_ = ui::Gear::N;
 
     // Mode flags
     curMode_.is4x4 = false;

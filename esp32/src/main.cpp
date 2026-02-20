@@ -155,7 +155,8 @@ void loop() {
 
 #if RUNTIME_MONITOR
     // Debug overlay — detect long touch (3 seconds) to toggle
-    bool touched = tft.getTouch(nullptr, nullptr);
+    uint16_t touchX = 0, touchY = 0;
+    bool touched = tft.getTouch(&touchX, &touchY);
     RTMON_OVERLAY_UPDATE(touched);
     RTMON_OVERLAY_DRAW(tft);
 #endif

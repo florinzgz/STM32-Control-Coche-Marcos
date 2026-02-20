@@ -1,10 +1,11 @@
 # ESP32-S3 HMI Firmware — Design Document
 
-**Revision:** 1.1  
-**Status:** Pending validation  
-**Date:** 2026-02-09  
+**Revision:** 1.2  
+**Status:** Implemented — see `esp32/src/` for all source files  
+**Date:** 2026-02-20  
 **Scope:** Architecture and technology decisions for the ESP32-S3 HMI firmware  
-**References:** `docs/CAN_CONTRACT_FINAL.md` rev 1.0, `docs/HMI_STATE_MODEL.md` rev 1.0, `docs/SERVICE_MODE.md`
+**References:** `docs/CAN_CONTRACT_FINAL.md` rev 1.3, `docs/HMI_STATE_MODEL.md` rev 1.0, `docs/SERVICE_MODE.md`  
+**Bring-up guide:** `docs/ESP32_HMI_BRING_UP.md`
 
 ---
 
