@@ -4,6 +4,8 @@
 
 #include "boot_screen.h"
 #include "ui/ui_common.h"
+#include "hmi/obstacle_indicator.h"
+#include "sensors/obstacle_sensor.h"
 #include <TFT_eSPI.h>
 
 extern TFT_eSPI tft;
@@ -12,6 +14,8 @@ void BootScreen::onEnter() {
     needsRedraw_ = true;
     canLinked_    = false;
     prevCanLinked_ = false;
+    sensorStatus_     = obstacle_sensor::SensorStatus::WAITING;
+    prevSensorStatus_ = obstacle_sensor::SensorStatus::WAITING;
 }
 
 void BootScreen::onExit() {}
@@ -21,6 +25,9 @@ void BootScreen::update(const vehicle::VehicleData& data) {
     unsigned long now = millis();
     canLinked_ = (data.heartbeat().timestampMs > 0 &&
                   (now - data.heartbeat().timestampMs) < 500);
+
+    // Obstacle sensor status
+    sensorStatus_ = obstacle_sensor::getReading().status;
 }
 
 void BootScreen::draw() {
@@ -42,6 +49,9 @@ void BootScreen::draw() {
         tft.drawString("HMI v1.0", ui::SCREEN_W / 2, ui::SCREEN_H / 2 + 40);
 
         prevCanLinked_ = !canLinked_;  // Force status redraw
+        prevSensorStatus_ = (sensorStatus_ == obstacle_sensor::SensorStatus::WAITING)
+                            ? obstacle_sensor::SensorStatus::VALID
+                            : obstacle_sensor::SensorStatus::WAITING;  // Force redraw
     }
 
     // CAN link status (partial redraw)
@@ -62,4 +72,8 @@ void BootScreen::draw() {
         }
         tft.setTextDatum(TL_DATUM);
     }
+
+    // Obstacle sensor status (partial redraw)
+    hmi::ObstacleIndicator::draw(tft, sensorStatus_, prevSensorStatus_);
+    prevSensorStatus_ = sensorStatus_;
 }

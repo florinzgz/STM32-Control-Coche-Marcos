@@ -18,6 +18,8 @@
 #include "screen_manager.h"
 #include "ui/runtime_monitor.h"
 #include "ui/debug_overlay.h"
+#include "sensors/obstacle_sensor.h"
+#include "can/can_obstacle.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -132,6 +134,12 @@ void setup() {
     } else {
         Serial.println("[CAN] Initialization FAILED");
     }
+
+    // Initialize obstacle sensor driver (HC-SR04 on GPIO 6/7)
+    obstacle_sensor::init();
+
+    // Initialize CAN TX for obstacle distance frame (0x208)
+    can_obstacle::init();
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +155,25 @@ void loop() {
 
     // Check for pending ACK (non-blocking)
     ackCheck(vehicleData);
+
+    // Update obstacle sensor and transmit CAN 0x208
+    {
+        // Compute average vehicle speed (0.1 km/h units → km/h)
+        uint32_t speedSum = 0;
+        for (uint8_t i = 0; i < 4; ++i) {
+            speedSum += vehicleData.speed().raw[i];
+        }
+        float speedKmh = static_cast<float>(speedSum) / 4.0f * 0.1f;
+        obstacle_sensor::update(speedKmh);
+        can_obstacle::update();
+
+        // Update VehicleData with latest sensor reading for HMI display
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        vehicle::ObstacleData od;
+        od.distanceCm  = rd.distance_mm / 10;
+        od.timestampMs  = millis();
+        vehicleData.setObstacle(od);
+    }
 
     // Update HMI screen based on current vehicle state
     RTMON_UI_BEGIN();
