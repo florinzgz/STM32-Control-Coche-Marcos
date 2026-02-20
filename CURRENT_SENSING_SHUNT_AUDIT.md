@@ -222,3 +222,43 @@ From the code logic, the system assumes:
 - **D) Battery BMS-style monitoring:** ❌ **No.** There is no State of Charge (SoC), cell balancing, or coulomb counting. The battery channel provides simple undervoltage protection (threshold-based) and current telemetry. This is a basic voltage watchdog, not a Battery Management System.
 
 **Summary: The architecture is "per-driver overcurrent protection + battery undervoltage watchdog + telemetry". Current is never used for closed-loop motor control or torque estimation.**
+
+---
+
+## SECTION 5 — Firmware Code Verification
+
+> **Question:** Does the firmware need code logic changes for the corrected shunt placement
+> (battery before relay, motors before drivers)?
+>
+> **Answer: NO.** The firmware code is already correctly implemented. Only documentation/comments
+> needed updating (done in the previous commits). The C code logic was always designed for the
+> correct placement.
+
+### 5.1 Verification of each firmware module
+
+| Module | Function | Correct for shunt placement? | Explanation |
+|--------|----------|------------------------------|-------------|
+| `sensor_manager.c` | `Current_ReadAll()` | ✅ Yes | Reads all 6 INA226 via TCA9548A. Uses 0.5 mΩ for battery (ch4) and 1.0 mΩ for motors. No placement dependency in the reading logic. |
+| `safety_system.c` | `Safety_CheckBatteryVoltage()` | ✅ Yes | Treats `Voltage_GetBus(4) == 0.0V` as sensor failure → SAFE. With battery shunt BEFORE relay, 0V truly means I2C/sensor failure (relay-off does NOT cause 0V). This is the correct interpretation. |
+| `safety_system.c` | `Safety_CheckCurrent()` | ✅ Yes | Triggers on `amps > 25A`. During STANDBY (relays off), motor channels read 0A → no false overcurrent. |
+| `safety_system.c` | `Safety_CheckSensors()` | ✅ Yes | Plausibility range `−1A to 50A`. Motor channels reading 0A during relay-off is within this range → no false sensor faults. |
+| `boot_validation.c` | `check_battery_ok()` | ✅ Yes | Reads `Voltage_GetBus(4)` during STANDBY (relays off). With shunt BEFORE relay, reads actual battery voltage. Requires ≥ 20.0V → correctly gates transition to ACTIVE. |
+| `boot_validation.c` | `check_current_plausible()` | ✅ Yes | Checks channels 0–3 against `−1A to 50A`. During STANDBY (relays off), motor channels read 0A → passes plausibility. |
+| `main.c` | Main loop | ✅ Yes | `Current_ReadAll()` runs at 50 ms, `Safety_CheckBatteryVoltage()` at 100 ms, `BootValidation_Run()` at 10 ms during STANDBY. Sensor data is always fresh before checks run. |
+| `can_handler.c` | `CAN_SendStatusBattery()` | ✅ Yes | Always sends battery current+voltage to ESP32 via CAN 0x207. With shunt before relay, battery voltage is always available for the HMI display. |
+| `safety_system.c` | `Relay_PowerUp()` | ✅ Yes | Activates relays only when transitioning to ACTIVE (after boot validation passes). Battery voltage is readable before and after relay activation. |
+| ESP32 `can_rx.cpp` | `decodeBattery()` | ✅ Yes | Passive CAN decoder — stores battery data from STM32. No shunt-placement-dependent logic. |
+
+### 5.2 Edge case analysis
+
+| Scenario | Expected behavior | Verified? |
+|----------|-------------------|-----------|
+| STANDBY: relays OFF, battery shunt reads | Battery voltage always readable (shunt before relay) → boot validation passes when battery ≥ 20V | ✅ |
+| STANDBY: relays OFF, motor shunts read | Motor channels read 0A/0V (shunts between relay and driver, relay is off) → within plausibility range | ✅ |
+| ACTIVE→SAFE transition: relays OFF | Battery voltage still readable → no false UV fault. Motor channels return to 0A → overcurrent check harmless | ✅ |
+| I2C failure during any state | All INA226 channels return 0A/0V. Battery 0V triggers `SAFETY_ERROR_BATTERY_UV_CRITICAL` → SAFE state (correct fail-safe) | ✅ |
+| ESP32 HMI displays battery voltage while relay OFF | `CAN_SendStatusBattery()` sends actual battery voltage (shunt before relay) → HMI always shows real battery state | ✅ |
+
+### 5.3 Conclusion
+
+**The firmware code requires NO modifications.** All safety checks, sensor readings, boot validation, relay sequencing, CAN telemetry, and edge case handling are correctly implemented for the documented shunt placement (battery shunt before relay, motor shunts before drivers).
