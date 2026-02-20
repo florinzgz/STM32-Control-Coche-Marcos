@@ -218,9 +218,8 @@ int main(void)
                  * ADS1115 unavailable (not contradictory) → primary
                  * ADC still used with LIMP_HOME torque clamp.          */
                 GearPosition_t gear = Traction_GetGear();
-                if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
-                    Traction_SetDemand(0.0f);
-                } else if (Pedal_IsContradictory()) {
+                if (gear == GEAR_PARK || gear == GEAR_NEUTRAL ||
+                    Pedal_IsContradictory()) {
                     Traction_SetDemand(0.0f);
                 } else {
                     float pedal = Pedal_GetPercent();

@@ -634,7 +634,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 
 #### Before / After State Transition Table
 
-| Scenario | State before | BEFORE (old behavior) | AFTER (new behavior) |
+| Scenario | State Before | BEFORE (old behavior) | AFTER (new behavior) |
 |----------|-------------|----------------------|---------------------|
 | ADS1115 I2C fails, stale > 500 ms | ACTIVE | DEGRADED + demand=0 every 10 ms (immobilized) | LIMP_HOME — primary ADC at 20 % torque cap |
 | ADS1115 I2C fails, stale > 500 ms | STANDBY | DEGRADED + demand=0 (cannot reach ACTIVE) | LIMP_HOME if boot validation passed |
