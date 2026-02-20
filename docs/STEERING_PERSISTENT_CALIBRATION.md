@@ -45,8 +45,10 @@ At startup, before the main loop begins:
 3. **Compare** — `|current_encoder − stored_center| ≤ 100 counts`
    (~7.5° of encoder shaft).
 4. **Center sensor check** — read PB5 (GPIO pin level).  The
-   inductive sensor pulls the line LOW when the screw is detected.
-   Pin must read LOW (`GPIO_PIN_RESET`).
+   LJ12A3 NPN open-collector sensor pulls the line LOW
+   (`GPIO_PIN_RESET`) when it detects the screw at center.
+   With the internal pull-up, the line rests HIGH when no metal
+   is detected.  Pin must read LOW for validation to pass.
 
 ### Decision Table
 

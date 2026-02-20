@@ -269,9 +269,11 @@ void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
 {
     /* Apply the stored center value: set the TIM2 counter so that
      * the encoder reference frame matches the original calibration.
-     * Since centering zeroes the counter at center, and the stored
-     * value should be 0 (or very close), we set the counter to the
-     * stored value to maintain consistency.                          */
+     * TIM2 is a 32-bit counter; casting int32_t → uint32_t preserves
+     * the bit pattern (two's complement), which is correct for
+     * quadrature mode where the counter can wrap in both directions.
+     * In practice, centering zeroes the counter, so the stored value
+     * is typically 0.                                                */
     __HAL_TIM_SET_COUNTER(&htim2, (uint32_t)stored_center);
     Steering_SetCalibrated();
     centering_state = CENTERING_DONE;
