@@ -1080,13 +1080,44 @@ void Safety_CheckSensors(void)
     }
 
     /* Pedal plausibility: dual-channel cross-validation.
-     * If the primary (ADC) and plausibility (ADS1115) channels diverge,
-     * Pedal_IsPlausible() returns false.  This is safety-critical —
-     * a stuck pedal means the car could cause unintended acceleration.
-     * On plausibility failure: force throttle to zero AND enter DEGRADED. */
+     * ACTIVE state requires fully valid pedal plausibility — any
+     * plausibility failure exits ACTIVE immediately.
+     *
+     * Two distinct failure modes:
+     *   1. Contradictory: both channels read OK but disagree.
+     *      → No torque allowed (stuck/shorted pedal risk).
+     *      → Demand forced to zero in ALL states.
+     *   2. Unavailable: ADS1115 I2C lost, primary ADC still functional.
+     *      → Cross-validation impossible, but ADC may be valid.
+     *      → LIMP_HOME allows limited throttle via primary ADC
+     *        with 20 % torque cap and 5 km/h speed limit.
+     *
+     * In both cases: ACTIVE → LIMP_HOME (fail-operational).
+     * Recovery to ACTIVE requires full pedal plausibility restored.    */
     if (!Pedal_IsPlausible()) {
-        Traction_SetDemand(0.0f);
-        fault_count++;
+        /* Safety invariant: contradictory channels → zero torque always.
+         * When not contradictory (ADS1115 lost) and already in LIMP_HOME,
+         * main.c provides limited throttle from primary ADC + clamp.     */
+        if (Pedal_IsContradictory()) {
+            Traction_SetDemand(0.0f);
+        } else if (system_state != SYS_STATE_LIMP_HOME) {
+            /* Safe transition: zero torque until LIMP_HOME is reached */
+            Traction_SetDemand(0.0f);
+        }
+
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+
+        /* Pedal fault: ACTIVE/DEGRADED → LIMP_HOME (not SAFE).
+         * STANDBY → LIMP_HOME if boot validation passed.
+         * Already in LIMP_HOME → stay (no state change needed).         */
+        if (system_state == SYS_STATE_ACTIVE ||
+            system_state == SYS_STATE_DEGRADED) {
+            Safety_SetState(SYS_STATE_LIMP_HOME);
+        } else if (system_state == SYS_STATE_STANDBY &&
+                   BootValidation_IsPassed()) {
+            Safety_SetState(SYS_STATE_LIMP_HOME);
+        }
+        return;
     }
 
     /* If any enabled sensor has a plausibility fault, enter DEGRADED */
@@ -1104,10 +1135,14 @@ void Safety_CheckSensors(void)
         return;
     }
 
-    /* All sensor checks passed — if currently DEGRADED due to a sensor
-     * fault, clear the error so CAN timeout handler can recover to ACTIVE. */
-    if (system_state == SYS_STATE_DEGRADED &&
-        safety_error == SAFETY_ERROR_SENSOR_FAULT) {
+    /* All sensor checks passed (including pedal plausibility) —
+     * clear sensor fault to allow recovery.
+     * DEGRADED: CAN timeout handler can recover to ACTIVE.
+     * LIMP_HOME: pedal plausibility restored → allow ACTIVE recovery
+     * via Safety_CheckCANTimeout() when CAN is alive.                   */
+    if (safety_error == SAFETY_ERROR_SENSOR_FAULT &&
+        (system_state == SYS_STATE_DEGRADED ||
+         system_state == SYS_STATE_LIMP_HOME)) {
         Safety_ClearError(SAFETY_ERROR_SENSOR_FAULT);
     }
 }

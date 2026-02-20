@@ -98,16 +98,24 @@ static bool check_battery_ok(void)
 
 /**
  * @brief  Check that no persistent safety error is present.
- *         CAN timeout is excluded because it is handled separately
- *         by the LIMP_HOME transition — communication loss is NOT
- *         a hazard that should block boot validation.
+ *         CAN timeout and CAN bus-off are excluded because they are
+ *         handled separately by the LIMP_HOME transition —
+ *         communication loss is NOT a hazard that should block boot
+ *         validation.
+ *         Sensor fault is excluded because pedal plausibility loss
+ *         transitions to LIMP_HOME (fail-operational) — it must not
+ *         block boot validation or the STANDBY → LIMP_HOME path.
+ *         ACTIVE still requires SAFETY_ERROR_NONE (enforced in
+ *         Safety_SetState), so allowing SENSOR_FAULT here does NOT
+ *         weaken the STANDBY → ACTIVE gate.
  */
 static bool check_no_safety_error(void)
 {
     Safety_Error_t err = Safety_GetError();
     return (err == SAFETY_ERROR_NONE ||
             err == SAFETY_ERROR_CAN_TIMEOUT ||
-            err == SAFETY_ERROR_CAN_BUSOFF);
+            err == SAFETY_ERROR_CAN_BUSOFF ||
+            err == SAFETY_ERROR_SENSOR_FAULT);
 }
 
 /**

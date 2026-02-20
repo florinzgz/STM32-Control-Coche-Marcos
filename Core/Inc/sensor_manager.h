@@ -34,6 +34,7 @@ void  Pedal_Update(void);
 float Pedal_GetValue(void);       /* Primary ADC raw value */
 float Pedal_GetPercent(void);     /* Primary ADC 0–100% (used for control) */
 bool  Pedal_IsPlausible(void);    /* Cross-validation: both channels agree */
+bool  Pedal_IsContradictory(void); /* Both channels active but disagree    */
 float Pedal_GetADSPercent(void);  /* ADS1115 plausibility channel 0–100% */
 
 /* ---- DS18B20 Temperature (OneWire) ---- */

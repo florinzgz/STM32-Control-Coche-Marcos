@@ -129,6 +129,7 @@ static uint16_t pedal_raw_ads  = 0;     /* Plausibility: ADS1115 raw (16-bit) */
 static float    pedal_pct      = 0.0f;  /* Control output: 0–100% from primary */
 static float    pedal_pct_ads  = 0.0f;  /* Plausibility: 0–100% from ADS1115  */
 static bool     pedal_plausible = true; /* Cross-validation result             */
+static bool     pedal_channels_contradict = false; /* Both channels active but disagree */
 static bool     pedal_ads_ever_read = false; /* First successful ADS1115 read? */
 static uint32_t pedal_ads_last_ok_tick = 0;  /* Last successful ADS1115 read   */
 static uint32_t pedal_diverge_start    = 0;  /* When channels started diverging */
@@ -257,13 +258,17 @@ void Pedal_Update(void)
                 pedal_diverge_start = now;
             }
             if ((now - pedal_diverge_start) >= PEDAL_DIVERGE_TIMEOUT_MS) {
-                /* Sustained divergence → plausibility fault */
+                /* Sustained divergence → plausibility fault.
+                 * Both channels are active but contradict each other —
+                 * this is the dangerous case (stuck / shorted pedal). */
                 pedal_plausible = false;
+                pedal_channels_contradict = true;
             }
         } else {
             /* Channels agree — reset divergence timer */
             pedal_diverge_start = 0;
             pedal_plausible = true;
+            pedal_channels_contradict = false;
         }
     } else {
         /* ADS1115 I2C failed — check stale timeout (only after first
@@ -272,8 +277,10 @@ void Pedal_Update(void)
             (now - pedal_ads_last_ok_tick) >= PEDAL_ADS_STALE_TIMEOUT_MS) {
             /* ADS1115 has been offline too long — flag as degraded but
              * continue using primary ADC (single-channel fallback).
+             * NOT contradictory: the ADS1115 is simply unavailable.
              * Reset divergence timer so recovery starts fresh. */
             pedal_plausible = false;
+            pedal_channels_contradict = false;
             pedal_diverge_start = 0;
         }
     }
@@ -282,6 +289,7 @@ void Pedal_Update(void)
 float Pedal_GetValue(void)       { return (float)pedal_raw_adc; }
 float Pedal_GetPercent(void)     { return pedal_pct; }
 bool  Pedal_IsPlausible(void)    { return pedal_plausible; }
+bool  Pedal_IsContradictory(void) { return pedal_channels_contradict; }
 float Pedal_GetADSPercent(void)  { return pedal_pct_ads; }
 
 /* =========================================================================
@@ -763,6 +771,7 @@ void Sensor_Init(void)
     pedal_pct     = 0.0f;
     pedal_pct_ads = 0.0f;
     pedal_plausible        = true;
+    pedal_channels_contradict = false;
     pedal_ads_ever_read    = false;
     pedal_ads_last_ok_tick = 0;
     pedal_diverge_start    = 0;

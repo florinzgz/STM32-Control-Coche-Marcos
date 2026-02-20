@@ -211,9 +211,16 @@ int main(void)
                  * Ignore all CAN throttle commands.
                  * Apply LIMP_HOME torque limit (20%) as hard clamp.
                  * The traction pipeline applies additional speed cap
-                 * and ramp limiting via Safety_GetTractionCapFactor(). */
+                 * and ramp limiting via Safety_GetTractionCapFactor().
+                 *
+                 * Safety invariant: contradictory pedal channels
+                 * (both active but disagreeing) → zero demand.
+                 * ADS1115 unavailable (not contradictory) → primary
+                 * ADC still used with LIMP_HOME torque clamp.          */
                 GearPosition_t gear = Traction_GetGear();
                 if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
+                    Traction_SetDemand(0.0f);
+                } else if (Pedal_IsContradictory()) {
                     Traction_SetDemand(0.0f);
                 } else {
                     float pedal = Pedal_GetPercent();
