@@ -964,9 +964,12 @@ void Safety_CheckCANTimeout(void)
         /* STANDBY → LIMP_HOME if boot validation passed.
          * Vehicle must always be capable of moving at low speed
          * without CAN or ESP32.  Loss of communication must never
-         * immobilize the vehicle.                                      */
+         * immobilize the vehicle.
+         * Steering calibration is NOT required for LIMP_HOME —
+         * uncalibrated steering means no assisted steering, but
+         * the vehicle can still move at walking speed.  The fault
+         * is still reported via SAFETY_ERROR_CENTERING / FAULT_CENTERING. */
         if (system_state == SYS_STATE_STANDBY &&
-            Steering_IsCalibrated() &&
             BootValidation_IsPassed()) {
             Safety_SetState(SYS_STATE_LIMP_HOME);
         }
@@ -982,8 +985,11 @@ void Safety_CheckCANTimeout(void)
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* CAN restored from LIMP_HOME → attempt ACTIVE.
-         * Heartbeat has appeared and system is healthy.                */
-        if (system_state == SYS_STATE_LIMP_HOME) {
+         * Heartbeat has appeared and system is healthy.
+         * ACTIVE still requires steering calibration — if centering
+         * never completed, the vehicle stays in LIMP_HOME.            */
+        if (system_state == SYS_STATE_LIMP_HOME &&
+            Steering_IsCalibrated()) {
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
             Safety_SetState(SYS_STATE_ACTIVE);
         }
