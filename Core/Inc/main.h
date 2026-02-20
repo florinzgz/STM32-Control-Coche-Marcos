@@ -7,6 +7,7 @@ extern "C" {
 
 #include "stm32g4xx_hal.h"
 #include "vehicle_physics.h"
+#include <stdbool.h>
 
 /* ---- ENCODER DE DIRECCIÓN (E6B2-CWZ6C - 1200 PPR - TIM2 Quadrature) ---- */
 /* Quadrature mode: 1200 PPR × 4 = 4800 counts/revolution                    */
@@ -111,6 +112,7 @@ extern IWDG_HandleTypeDef hiwdg;
 void Error_Handler(void);
 void SystemClock_Config(void);
 uint8_t Boot_GetResetCause(void);
+bool    Startup_IsInhibited(void);
 
 #ifdef __cplusplus
 }

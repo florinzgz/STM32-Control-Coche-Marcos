@@ -983,3 +983,71 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 | R9 — ADS1115 fallback unknown | LOW-MEDIUM | Requires code verification | Step 4 |
 
 **Zero-regression requirement:** Steps 1–4 address existing bugs/risks with no functional regression. Steps 5–7 add new capabilities. Each step is independently reversible via single `git revert`.
+
+---
+
+## Power-On Movement Prevention — Safety Guarantee
+
+**Date:** 2026-02-20  
+**Scope:** Prevent unintended vehicle motion after any MCU reset when the accelerator pedal is already pressed.
+
+### Problem Statement
+
+If the system restarts (power loss, watchdog reset, brownout, or MCU reset) while the driver's foot is on the accelerator pedal, the firmware must not produce torque until the driver demonstrates intentional release-and-press behavior. Without this safeguard, residual pedal position at boot could cause unexpected motion.
+
+### Implementation
+
+A global startup latch (`startup_inhibit`) is initialized to `true` at every MCU reset. The latch is implemented in `main.c` at the same control loop layer as the existing LIMP_HOME degraded-pedal arming latch but is fully independent from it.
+
+**Constants:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `STARTUP_PEDAL_REST_PCT` | 3.0 % | Same rest threshold as LIMP_HOME arming; below ADC noise floor |
+| `STARTUP_PEDAL_CLEAR_MS` | 400 ms | 100 ms longer than LIMP_HOME arming (300 ms) to reject brief contact bounces |
+
+**Clearing condition:** The inhibit clears only when `Pedal_GetPercent() < 3.0 %` is observed continuously for 400 ms. Any reading ≥ 3.0 % resets the timer. Once cleared, the latch never re-activates during the same power cycle.
+
+**Enforcement:** While `startup_inhibit` is true, `Traction_SetDemand(0.0f)` is called unconditionally before any other traction demand logic is evaluated. This applies in STANDBY, ACTIVE, DEGRADED, and LIMP_HOME. The SAFE state already independently forces zero torque.
+
+**CAN debug:** Heartbeat byte 4, bit 0 reports `STARTUP_INHIBIT` active status.
+
+### Re-activation Guarantees
+
+The `startup_inhibit` variable is a C static-storage `bool` initialized to `true`. It is not stored in NVM. Therefore it automatically re-activates on:
+
+- **Power-on reset** — variable reinitialised by C runtime startup
+- **Watchdog reset (IWDG/WWDG)** — full MCU reset, C runtime reinitialises
+- **Brownout reset** — full MCU reset, C runtime reinitialises
+- **Software reset** — full MCU reset, C runtime reinitialises
+- **Pin reset** — full MCU reset, C runtime reinitialises
+
+It does **not** re-activate during normal runtime state transitions (e.g. ACTIVE → LIMP_HOME → ACTIVE).
+
+### Non-interference Analysis
+
+| Concern | Analysis |
+|---------|----------|
+| State machine | Not modified. `Safety_SetState()`, `Safety_GetState()` unchanged. |
+| Traction pipeline | `Traction_SetDemand()`, `Traction_Update()`, PID controller unchanged. |
+| Pedal plausibility | `Pedal_IsPlausible()`, `Pedal_IsContradictory()` unchanged. |
+| LIMP_HOME arming latch | Separate variables, separate constants, separate timer. |
+| Safety errors | No `Safety_SetError()` call made from startup inhibit logic. |
+| CAN faults | No fault reported. Only informational heartbeat bit added. |
+
+### Why Unintended Torque Is Impossible
+
+1. **At boot:** `startup_inhibit = true` by C initialisation. No code path sets it to `false` until pedal rest is confirmed for 400 ms.
+2. **While inhibited:** The `if (startup_inhibit)` branch executes `Traction_SetDemand(0.0f)` before any other demand branch is reached. All other traction demand paths are in `else if` / `else` branches and cannot execute.
+3. **Pedal pressed at boot:** `Pedal_GetPercent() >= 3.0 %` keeps `startup_pedal_rest_since` at 0 — the 400 ms timer never starts, so `startup_inhibit` remains `true` indefinitely until pedal is released.
+4. **Noise/bounce:** Any single 50 ms sample with pedal ≥ 3.0 % resets the timer. The 400 ms continuous window is 8 consecutive 50 ms samples, all below threshold.
+5. **After clearing:** Normal traction demand logic resumes. All existing safety layers (plausibility, LIMP_HOME arming, gear checks, obstacle scaling, ABS/TCS) remain active and unmodified.
+
+### Verification Scenarios
+
+| ID | Scenario | Expected Behavior | Mechanism |
+|----|----------|-------------------|-----------|
+| A | Power on with pedal pressed | No motion. Demand = 0.0 until pedal fully released for 400 ms. | `startup_inhibit = true` at boot; timer never starts while pedal ≥ 3 %. |
+| B | Release pedal, then press again | Normal driving behavior resumes after 400 ms pedal-rest window. | `startup_inhibit` cleared; all subsequent demand paths unaffected. |
+| C | Reset while driving (watchdog/brownout) | Vehicle stops producing torque immediately. No motion until pedal released for 400 ms. | MCU reset reinitialises `startup_inhibit = true`. |
+| D | Reset while stopped (pedal not pressed) | No creep. Inhibit clears after 400 ms of confirmed pedal rest. | Timer starts immediately if pedal < 3 %; clears after 400 ms. |

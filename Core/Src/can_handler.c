@@ -177,14 +177,17 @@ void CAN_SendHeartbeat(void) {
          *   Byte 0: alive_counter  (uint8, cyclic 0-255, rollover is intentional)
          *   Byte 1: system_state   (uint8, 0=Boot..6=LimpHome)
          *   Byte 2: fault_flags    (bitmask)
-         *   Byte 3: error_code     (Safety_Error_t, specific fault ID for HMI) */
-        uint8_t payload[4];
+         *   Byte 3: error_code     (Safety_Error_t, specific fault ID for HMI)
+         *   Byte 4: status_flags   (bitmask)
+         *            bit 0: STARTUP_INHIBIT active (Power-On Movement Prevention) */
+        uint8_t payload[5];
         payload[0] = heartbeat_counter++;
         payload[1] = (uint8_t)Safety_GetState();
         payload[2] = Safety_GetFaultFlags();
         payload[3] = (uint8_t)Safety_GetError();
+        payload[4] = Startup_IsInhibited() ? 0x01U : 0x00U;
 
-        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 4);
+        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 5);
         last_tx_heartbeat = current_time;
     }
 }
