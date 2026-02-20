@@ -37,6 +37,16 @@ IWDG_HandleTypeDef  hiwdg;
 #define LIMP_PEDAL_REST_PCT   3.0f   /* Pedal % below which "at rest"  */
 #define LIMP_PEDAL_ARM_MS     300U   /* Continuous rest time to arm     */
 
+/* ---- Power-On Movement Prevention constants ----
+ * Prevents unintended torque after any reboot (power loss, watchdog,
+ * brownout, MCU reset) while accelerator pedal is pressed.
+ * The inhibit clears only when the driver releases the pedal
+ * (< 3 %) continuously for 400 ms.  Independent of LIMP_HOME latch
+ * and pedal plausibility logic.  Applies in STANDBY, LIMP_HOME,
+ * DEGRADED, and ACTIVE — SAFE already forces zero torque.           */
+#define STARTUP_PEDAL_REST_PCT   3.0f   /* Pedal % below which "at rest"  */
+#define STARTUP_PEDAL_CLEAR_MS   400U   /* Continuous rest time to clear   */
+
 /* ---- Reset cause (read once at boot, before IWDG clears flags) ---- */
 static uint8_t reset_cause = 0;
 #define RESET_CAUSE_POWERON   (1U << 0)
@@ -74,6 +84,15 @@ static void Boot_ReadResetCause(void)
 }
 
 uint8_t Boot_GetResetCause(void) { return reset_cause; }
+
+/* ---- Power-On Movement Prevention latch ----
+ * Starts true; cleared only after pedal held below rest threshold
+ * for STARTUP_PEDAL_CLEAR_MS.  Re-activates on every MCU reset
+ * (the variable reinitialises to true because it is not in NVM).   */
+static bool     startup_inhibit           = true;
+static uint32_t startup_pedal_rest_since  = 0;
+
+bool Startup_IsInhibited(void) { return startup_inhibit; }
 
 /* ---- Peripheral init status flags ---- */
 bool fdcan_init_ok = false;
@@ -202,6 +221,23 @@ int main(void)
             Temperature_StartConversion();
             Temperature_ReadAll();
 
+            /* ---- Power-On Movement Prevention latch update ----
+             * While startup_inhibit is active, monitor pedal %.
+             * Clear only when pedal is held below rest threshold
+             * for STARTUP_PEDAL_CLEAR_MS continuously.
+             * Any reading above the threshold resets the timer.
+             * Once cleared, never re-activates until next MCU reset. */
+            if (startup_inhibit) {
+                if (Pedal_GetPercent() < STARTUP_PEDAL_REST_PCT) {
+                    if (startup_pedal_rest_since == 0)
+                        startup_pedal_rest_since = now;
+                    else if ((now - startup_pedal_rest_since) >= STARTUP_PEDAL_CLEAR_MS)
+                        startup_inhibit = false;
+                } else {
+                    startup_pedal_rest_since = 0;
+                }
+            }
+
             /* ---- LIMP_HOME degraded-pedal arming latch update ----
              * Reset on any transition into or out of LIMP_HOME.
              * While in LIMP_HOME: arm when pedal held below rest
@@ -239,8 +275,14 @@ int main(void)
              *    at walking speed without CAN/ESP32.
              * 3. All other states: throttle suppressed.
              *
+             * Power-On Movement Prevention: while startup_inhibit is
+             * active, force zero demand regardless of state.  SAFE
+             * already forces zero torque independently.
+             *
              * In Park or Neutral gear, throttle is always suppressed.    */
-            if (Safety_IsCommandAllowed()) {
+            if (startup_inhibit) {
+                Traction_SetDemand(0.0f);
+            } else if (Safety_IsCommandAllowed()) {
                 GearPosition_t gear = Traction_GetGear();
                 if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
                     Traction_SetDemand(0.0f);
