@@ -616,17 +616,107 @@ if (system_state == SYS_STATE_STANDBY &&
 
 ---
 
-### Step 4 — Verify pedal plausibility fallback when ADS1115 unavailable
+### Step 4 — Pedal plausibility fail-operational migration
 
-**Context:** Risk R9.  
-**What files are touched:** `Core/Src/sensor_manager.c` — audit `Pedal_IsPlausible()` return value when I2C unavailable.  
-**What behavior changes:** If `i2c_init_ok == false` or ADS1115 read fails, `Pedal_IsPlausible()` must return `true` (graceful degradation) rather than blocking motion. If current behavior is already correct, this step is documentation-only.  
-**Physical test:**  
-1. Disable I2C at init (simulate by shorting SDA to GND with resistor after init).  
-2. Verify traction still responds to pedal (system does not freeze throttle).  
-3. Verify fault is logged in service mode.  
-**Expected CAN:** 0x001 byte 2 = `FAULT_WHEEL_SENSOR` or `FAULT_ENCODER_ERROR` (sensor fault logged). 0x001 byte 1 = 0x03 (DEGRADED) if fallback result is false.  
-**Rollback:** Revert `sensor_manager.c` change only.
+**Context:** Risk R9 — pedal sensor failure must not immobilize vehicle.  
+**What files are touched:**  
+- `Core/Src/sensor_manager.c` — add `pedal_channels_contradict` flag, `Pedal_IsContradictory()` getter.  
+- `Core/Inc/sensor_manager.h` — declare `Pedal_IsContradictory()`.  
+- `Core/Src/safety_system.c` — `Safety_CheckSensors()` pedal fault → LIMP_HOME (fail-operational).  
+- `Core/Src/boot_validation.c` — allow `SAFETY_ERROR_SENSOR_FAULT` through boot gate.  
+- `Core/Src/main.c` — LIMP_HOME: enforce zero demand for contradictory pedals.  
+
+**What behavior changes:** Pedal plausibility failure no longer immobilizes the vehicle.  Two failure modes are distinguished:  
+1. **Contradictory** (both ADC and ADS1115 read OK but diverge > 5 % for > 200 ms): demand forced to zero in ALL states — no uncontrolled acceleration possible.  
+2. **Unavailable** (ADS1115 I2C lost, primary ADC still functional): LIMP_HOME allows limited throttle from primary ADC with 20 % torque cap, 5 km/h speed limit, and 10 %/s ramp rate.  
+
+In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires full pedal plausibility restored (`Pedal_IsPlausible() == true`).  
+
+#### Before / After State Transition Table
+
+| Scenario | State Before | BEFORE (old behavior) | AFTER (new behavior) |
+|----------|-------------|----------------------|---------------------|
+| ADS1115 I2C fails, stale > 500 ms | ACTIVE | DEGRADED + demand=0 every 10 ms (immobilized) | LIMP_HOME — primary ADC at 20 % torque cap |
+| ADS1115 I2C fails, stale > 500 ms | STANDBY | DEGRADED + demand=0 (cannot reach ACTIVE) | LIMP_HOME if boot validation passed |
+| ADC vs ADS1115 diverge > 5 % for > 200 ms | ACTIVE | DEGRADED + demand=0 every 10 ms | LIMP_HOME + demand=0 (contradictory → zero torque) |
+| ADC vs ADS1115 diverge > 5 % for > 200 ms | LIMP_HOME | demand=0 every 10 ms (immobilized) | demand=0 (contradictory → zero torque, same effect but explicit) |
+| ADS1115 unavailable | LIMP_HOME | demand=0 every 10 ms (immobilized) | Primary ADC accepted with 20 % torque clamp |
+| Pedal plausibility restored | LIMP_HOME | Stayed in DEGRADED, demand=0 cleared | SENSOR_FAULT cleared → ACTIVE via CAN timeout recovery |
+| Pedal plausibility restored | DEGRADED | SENSOR_FAULT cleared → ACTIVE | Unchanged (non-pedal sensor faults still → DEGRADED) |
+| Boot validation with SENSOR_FAULT | STANDBY | Boot validation fails (blocks LIMP_HOME) | Boot validation passes (SENSOR_FAULT allowed) |
+
+#### Unintended Torque Impossibility Analysis
+
+1. **Contradictory channels (both active, values disagree):** `Pedal_IsContradictory()` returns `true` → `Traction_SetDemand(0.0f)` in EVERY code path:  
+   - `Safety_CheckSensors()` (10 ms): forces demand=0.  
+   - `main.c` LIMP_HOME (50 ms): checks `Pedal_IsContradictory()` → demand=0.  
+   Result: demand is forced to zero at both 10 ms and 50 ms rates.  No torque possible.  
+
+2. **ADS1115 unavailable (I2C failure):** Primary ADC still physically connected.  
+   - In ACTIVE: `Safety_CheckSensors()` forces demand=0 AND transitions to LIMP_HOME.  One-shot zero before LIMP_HOME takes effect.  
+   - In LIMP_HOME: `main.c` reads primary ADC, applies `× 0.20` hard clamp + `max(20%)` ceiling.  The traction pipeline then applies `Safety_GetTractionCapFactor()` = 0.20 (another 20 % clamp) and the 5 km/h speed cap.  Even if ADC reads 100 %, effective demand = 20 % × 20 % = 4 % of full torque — walking speed only.  
+
+3. **ACTIVE entry guard:** `Safety_SetState(SYS_STATE_ACTIVE)` requires `safety_error == SAFETY_ERROR_NONE`.  Pedal fault sets `SAFETY_ERROR_SENSOR_FAULT`.  ACTIVE is impossible until `Safety_CheckSensors()` clears the error (which only happens when `Pedal_IsPlausible() == true` AND all other sensors pass).  
+
+4. **Boot validation gate:** `SAFETY_ERROR_SENSOR_FAULT` is now allowed through `check_no_safety_error()`, but ACTIVE still requires `error == NONE` in `Safety_SetState()`.  Allowing SENSOR_FAULT in boot validation only enables STANDBY → LIMP_HOME — never STANDBY → ACTIVE.  
+
+5. **CAN protocol:** No changes to CAN message IDs, formats, or rates.  LIMP_HOME is already reported as state=6 in heartbeat byte 1.  
+
+#### Physical Test Procedure
+
+1. **ADS1115 unavailable test:**  
+   a. Short SDA to GND via 1 kΩ resistor after init (simulates I2C bus failure).  
+   b. Wait > 500 ms (stale timeout).  
+   c. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME), byte 2 has sensor fault flag.  
+   d. Press pedal.  Verify vehicle moves at walking speed (≤ 5 km/h).  
+   e. Release pedal.  Verify vehicle stops (demand returns to 0).  
+   f. Remove SDA short.  Wait > 500 ms.  Verify `Pedal_IsPlausible()` returns true.  
+   g. If CAN heartbeat present: verify transition to ACTIVE (byte 1 = 0x02).  
+
+2. **Contradictory channels test:**  
+   a. Apply fixed 2.5 V to ADS1115 A0 pin (simulates stuck at 50 %).  
+   b. Move pedal to 0 % (released).  Wait > 200 ms (divergence timeout).  
+   c. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME).  
+   d. Press pedal.  Verify vehicle does NOT move (demand = 0).  
+   e. Remove fixed voltage, reconnect pedal to ADS1115.  
+   f. Verify channels agree → transition to ACTIVE.  
+
+3. **STANDBY pedal fault test:**  
+   a. Disconnect ADS1115 I2C before boot.  
+   b. Power on.  Wait for boot validation to pass (> 500 ms).  
+   c. Do NOT send ESP32 CAN heartbeat (force CAN timeout).  
+   d. Verify system reaches LIMP_HOME (not stuck in STANDBY).  
+   e. Verify pedal controls traction at walking speed.  
+
+4. **Recovery test:**  
+   a. From LIMP_HOME (pedal fault), reconnect ADS1115.  
+   b. Verify plausibility restored within 500 ms.  
+   c. Send ESP32 CAN heartbeat.  
+   d. Verify transition to ACTIVE within RECOVERY_HOLD_MS (500 ms debounce).  
+
+#### Regression Checklist
+
+- [ ] ABS unchanged: 10 km/h min, 15 % slip, 80 ms pulse — no code touched  
+- [ ] TCS unchanged: 3 km/h min, 15 % slip, progressive reduction — no code touched  
+- [ ] Ackermann differential unchanged: ±15 % correction — no code touched  
+- [ ] Thermal protection unchanged: 80°C warning→DEGRADED, 90°C→SAFE — no code touched  
+- [ ] Overcurrent unchanged: single > 25 A→DEGRADED, ≥3 consecutive→SAFE — no code touched  
+- [ ] Battery UV unchanged: < 20 V→DEGRADED, < 18 V→SAFE — no code touched  
+- [ ] CAN timeout → LIMP_HOME transition: unchanged (already fail-operational)  
+- [ ] Steering centering fault: unchanged (DEGRADED, not affected by pedal changes)  
+- [ ] Encoder fault: unchanged (DEGRADED, not affected by pedal changes)  
+- [ ] Obstacle safety: unchanged (CAN advisory, local state machine, no code touched)  
+- [ ] Relay sequencing: unchanged (SAFE keeps relays ON, only ERROR cuts power)  
+- [ ] ACTIVE entry guard: `safety_error == SAFETY_ERROR_NONE` requirement preserved  
+- [ ] Emergency stop: unchanged (→ ERROR → power down)  
+- [ ] Watchdog: unchanged (IWDG 500 ms)  
+- [ ] CAN message format: unchanged (no contract changes)  
+- [ ] Smooth-driving state machine: unchanged (brake/coast/drive phases)  
+- [ ] Speed cap in LIMP_HOME: 5 km/h unchanged  
+- [ ] Torque limit in LIMP_HOME: 20 % unchanged  
+- [ ] Ramp rate in LIMP_HOME: 10 %/s unchanged  
+
+**Rollback:** Revert changes to `sensor_manager.c`, `sensor_manager.h`, `safety_system.c`, `boot_validation.c`, `main.c`.  No CAN contract, flash layout, or HAL configuration changes — clean revert.
 
 ---
 
