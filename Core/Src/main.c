@@ -33,6 +33,10 @@ I2C_HandleTypeDef   hi2c1;
 TIM_HandleTypeDef   htim1, htim2, htim8;
 IWDG_HandleTypeDef  hiwdg;
 
+/* ---- LIMP_HOME degraded-pedal arming constants ---- */
+#define LIMP_PEDAL_REST_PCT   3.0f   /* Pedal % below which "at rest"  */
+#define LIMP_PEDAL_ARM_MS     300U   /* Continuous rest time to arm     */
+
 /* ---- Reset cause (read once at boot, before IWDG clears flags) ---- */
 static uint8_t reset_cause = 0;
 #define RESET_CAUSE_POWERON   (1U << 0)
@@ -136,9 +140,6 @@ int main(void)
     bool     limp_home_pedal_armed = false;
     uint32_t limp_pedal_rest_since = 0;
     SystemState_t prev_state_for_arm = SYS_STATE_BOOT;
-
-#define LIMP_PEDAL_REST_PCT   3.0f   /* Pedal % below which "at rest"  */
-#define LIMP_PEDAL_ARM_MS     300U   /* Continuous rest time to arm     */
 
     /* ---- Main control loop ---- */
     while (1) {
