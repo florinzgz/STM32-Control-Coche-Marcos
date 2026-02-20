@@ -36,10 +36,14 @@ static bool          initialized_      = false;
 //   500–1000  → zone 1 (warning,   scale=0.7)
 //   > 1000    → zone 0 (normal,    scale=1.0)
 // -------------------------------------------------------------------------
+static constexpr uint16_t ZONE_EMERGENCY_MM = 200;
+static constexpr uint16_t ZONE_CRITICAL_MM  = 500;
+static constexpr uint16_t ZONE_WARNING_MM   = 1000;
+
 static uint8_t distanceToZone(uint16_t mm) {
-    if (mm < 200)  return 3;
-    if (mm < 500)  return 2;
-    if (mm < 1000) return 1;
+    if (mm < ZONE_EMERGENCY_MM) return 3;
+    if (mm < ZONE_CRITICAL_MM)  return 2;
+    if (mm < ZONE_WARNING_MM)   return 1;
     return 0;
 }
 
@@ -66,7 +70,9 @@ static uint16_t measureOnce() {
     // Speed of sound: ~343 m/s at 20°C → 0.343 mm/µs
     // Round-trip: distance_mm = durationUs * 0.343 / 2 = durationUs * 0.1715
     // Integer approximation: distance_mm = durationUs * 1715 / 10000
-    uint32_t distMm = (static_cast<uint32_t>(durationUs) * 1715UL) / 10000UL;
+    static constexpr uint32_t SOUND_SPEED_NUM = 1715;   // 0.1715 mm/µs × 10000
+    static constexpr uint32_t SOUND_SPEED_DEN = 10000;
+    uint32_t distMm = (static_cast<uint32_t>(durationUs) * SOUND_SPEED_NUM) / SOUND_SPEED_DEN;
 
     if (distMm > 0xFFFF) return 0xFFFF;
     return static_cast<uint16_t>(distMm);

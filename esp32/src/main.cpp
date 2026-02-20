@@ -163,7 +163,7 @@ void loop() {
         for (uint8_t i = 0; i < 4; ++i) {
             speedSum += vehicleData.speed().raw[i];
         }
-        float speedKmh = static_cast<float>(speedSum / 4) * 0.1f;
+        float speedKmh = static_cast<float>(speedSum) / 4.0f * 0.1f;
         obstacle_sensor::update(speedKmh);
         can_obstacle::update();
 
