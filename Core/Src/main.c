@@ -24,6 +24,7 @@
 #include "boot_validation.h"
 #include "encoder_reader.h"
 #include "math_safety.h"
+#include "steering_cal_store.h"
 #include <math.h>
 
 /* ---- HAL handle instances ---- */
@@ -139,6 +140,19 @@ int main(void)
     ServiceMode_Init();
     CAN_Init();
     SteeringCentering_Init();
+
+    /* ---- Persistent steering calibration ----
+     * Attempt to restore the last known center position from flash.
+     * If the stored value is valid AND the center sensor currently
+     * confirms the steering is at center, skip the centering sweep.
+     * Otherwise, the normal centering sequence runs as usual.
+     * Safety: flash alone NEVER authorises ACTIVE — the physical
+     * center sensor must agree.                                      */
+    SteeringCal_Init();
+    if (SteeringCal_ValidateAtBoot()) {
+        SteeringCentering_MarkRestoredFromFlash(
+            SteeringCal_GetStoredCenter());
+    }
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
