@@ -91,8 +91,12 @@ extern "C" {
 /* ---- Sensor Constants ---- */
 /* INA226 shunt resistors (mΩ) — values per hardware BOM:
  * Channels 0-3 (motor wheels): 50A sensors with 1 mΩ shunt
+ *   → placed BEFORE each BTS7960 driver (between relay output and B+ input)
  * Channel 4 (battery 24V):     100A sensor with 0.5 mΩ shunt
- * Channel 5 (steering motor):  50A sensor with 1 mΩ shunt       */
+ *   → placed BEFORE the main relay (between battery + terminal and relay input)
+ *     so that Voltage_GetBus() always reads battery voltage even when relay is open
+ * Channel 5 (steering motor):  50A sensor with 1 mΩ shunt
+ *   → placed BEFORE the steering BTS7960 driver (between relay output and B+ input) */
 #define INA226_SHUNT_MOHM_MOTOR    1      /* 1 mΩ for 50A sensors    */
 #define INA226_SHUNT_MOHM_BATTERY  0.5f  /* 0.5 mΩ for 100A sensor  */
 #define INA226_CHANNEL_BATTERY     4    /* TCA9548A channel index  */

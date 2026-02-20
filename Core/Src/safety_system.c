@@ -1173,6 +1173,9 @@ void Safety_CheckEncoder(void)
  *
  * Sensor failure (0.0 V reading indicates I2C / multiplexer fault):
  *   - Treated as CRITICAL (fail-safe default)
+ *   - The battery INA226 is placed BEFORE the main relay (directly at the
+ *     battery terminal), so relay-off states do NOT cause 0 V readings.
+ *     A 0 V reading truly means the sensor/I2C bus has failed.
  *
  * Works alongside overcurrent / overtemperature / CAN timeout:
  *   - Does not interfere with existing fault escalation
