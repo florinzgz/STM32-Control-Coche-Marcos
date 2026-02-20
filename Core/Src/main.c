@@ -126,6 +126,20 @@ int main(void)
     uint32_t tick_100ms  = 0;
     uint32_t tick_1000ms = 0;
 
+    /* ---- LIMP_HOME degraded-pedal arming latch ----
+     * Prevents unintended creep torque from ADC offset/noise when
+     * entering LIMP_HOME with degraded (single-channel) pedal input.
+     * Torque is only allowed after the driver confirms intent by
+     * releasing the pedal (< 3 %) for at least 300 ms continuously.
+     * Any noise spike above the threshold resets the timer.
+     * The latch is reset on every entry to or exit from LIMP_HOME.   */
+    bool     limp_home_pedal_armed = false;
+    uint32_t limp_pedal_rest_since = 0;
+    SystemState_t prev_state_for_arm = SYS_STATE_BOOT;
+
+#define LIMP_PEDAL_REST_PCT   3.0f   /* Pedal % below which "at rest"  */
+#define LIMP_PEDAL_ARM_MS     300U   /* Continuous rest time to arm     */
+
     /* ---- Main control loop ---- */
     while (1) {
         uint32_t now = HAL_GetTick();
@@ -187,6 +201,33 @@ int main(void)
             Temperature_StartConversion();
             Temperature_ReadAll();
 
+            /* ---- LIMP_HOME degraded-pedal arming latch update ----
+             * Reset on any transition into or out of LIMP_HOME.
+             * While in LIMP_HOME: arm when pedal held below rest
+             * threshold for LIMP_PEDAL_ARM_MS.  Any reading above
+             * the threshold resets the timer (noise rejection).      */
+            {
+                SystemState_t cur_st = Safety_GetState();
+                if (cur_st != prev_state_for_arm) {
+                    if (cur_st == SYS_STATE_LIMP_HOME ||
+                        prev_state_for_arm == SYS_STATE_LIMP_HOME) {
+                        limp_home_pedal_armed = false;
+                        limp_pedal_rest_since = 0;
+                    }
+                    prev_state_for_arm = cur_st;
+                }
+                if (cur_st == SYS_STATE_LIMP_HOME && !limp_home_pedal_armed) {
+                    if (Pedal_GetPercent() < LIMP_PEDAL_REST_PCT) {
+                        if (limp_pedal_rest_since == 0)
+                            limp_pedal_rest_since = now;
+                        else if ((now - limp_pedal_rest_since) >= LIMP_PEDAL_ARM_MS)
+                            limp_home_pedal_armed = true;
+                    } else {
+                        limp_pedal_rest_since = 0;
+                    }
+                }
+            }
+
             /* Feed pedal demand into traction.
              *
              * Three modes of operation:
@@ -220,6 +261,12 @@ int main(void)
                 GearPosition_t gear = Traction_GetGear();
                 if (gear == GEAR_PARK || gear == GEAR_NEUTRAL ||
                     Pedal_IsContradictory()) {
+                    Traction_SetDemand(0.0f);
+                } else if (!Pedal_IsPlausible() && !limp_home_pedal_armed) {
+                    /* Degraded pedal (ADS1115 lost): suppress torque until
+                     * driver confirms intent by releasing pedal to rest.
+                     * Prevents ADC offset/noise from causing creep torque
+                     * when cross-validation is unavailable.               */
                     Traction_SetDemand(0.0f);
                 } else {
                     float pedal = Pedal_GetPercent();
