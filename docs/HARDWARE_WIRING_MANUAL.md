@@ -427,14 +427,25 @@ antes de cada lectura.
 
 **Índices de los INA226:**
 
-| Índice | Canal TCA9548A | Uso probable |
-|--------|----------------|--------------|
-| 0 | CH0 | Motor FL |
-| 1 | CH1 | Motor FR |
-| 2 | CH2 | Motor RL |
-| 3 | CH3 | Motor RR |
-| 4 | CH4 | Motor dirección |
-| 5 | CH5 | Bus principal (24 V) u otro |
+| Índice | Canal TCA9548A | Uso (por firmware) | Colocación del shunt |
+|--------|----------------|---------------------|----------------------|
+| 0 | CH0 | Motor FL | ANTES del BTS7960 FL (entre relé TRAC y B+ del driver) |
+| 1 | CH1 | Motor FR | ANTES del BTS7960 FR (entre relé TRAC y B+ del driver) |
+| 2 | CH2 | Motor RL | ANTES del BTS7960 RL (entre relé TRAC y B+ del driver) |
+| 3 | CH3 | Motor RR | ANTES del BTS7960 RR (entre relé TRAC y B+ del driver) |
+| 4 | CH4 | Batería 24V (corriente+tensión) | **ANTES del relé MAIN** (entre borne + batería y COM del relé) |
+| 5 | CH5 | Motor dirección | ANTES del BTS7960 STEER (entre relé DIR y B+ del driver) |
+
+> **IMPORTANTE — Colocación del shunt de batería (índice 4):** El INA226 de batería debe
+> estar **ANTES del relé principal** (entre el borne + de la batería y la entrada del relé
+> MAIN). Esto garantiza que `Voltage_GetBus()` pueda leer el voltaje de la batería en todo
+> momento, incluso cuando el relé está abierto. Si se colocara después del relé, al abrir
+> el relé se leería 0 V y el firmware lo trataría como fallo crítico de subtensión.
+>
+> **Colocación de los shunts de motor (índices 0–3, 5):** Los INA226 de motor van **ANTES
+> de cada driver BTS7960**, en el cable positivo de alimentación entre la salida del relé
+> y la entrada B+ del BTS7960. Esto mide la corriente de alimentación que entra al driver,
+> que es igual a la corriente del motor (menos pequeñas pérdidas del driver).
 
 > **NO DEDUCIBLE SOLO DESDE EL CÓDIGO**: la asignación exacta de cada índice INA226 a un
 > motor específico depende del cableado físico del multiplexor. El firmware solo itera

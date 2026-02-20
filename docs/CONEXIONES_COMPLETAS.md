@@ -246,8 +246,8 @@ Pedal señal (0.3V–4.8V)
 | CH1 | INA226 #1 | Corriente Motor FR | 1 mΩ (50A max) | 0x40 |
 | CH2 | INA226 #2 | Corriente Motor RL | 1 mΩ (50A max) | 0x40 |
 | CH3 | INA226 #3 | Corriente Motor RR | 1 mΩ (50A max) | 0x40 |
-| CH4 | INA226 #4 | Corriente Motor STEER | 1 mΩ (50A max) | 0x40 |
-| CH5 | INA226 #5 | Corriente/Tensión Batería 24V | 0.5 mΩ (100A max) | 0x40 |
+| CH4 | INA226 #4 | Corriente/Tensión Batería 24V | 0.5 mΩ (100A max) | 0x40 |
+| CH5 | INA226 #5 | Corriente Motor STEER | 1 mΩ (50A max) | 0x40 |
 
 **Cada INA226 necesita:**
 | Cable | De | A (INA226) | Notas |
@@ -256,11 +256,13 @@ Pedal señal (0.3V–4.8V)
 | — | TCA9548A CH_SCL | SCL | I2C reloj (a través del mux) |
 | — | 3.3V | VCC | Alimentación sensor |
 | — | GND | GND | GND común |
-| — | Cable motor (+) | IN+ | ANTES del shunt |
-| — | Cable motor (+) | IN- | DESPUÉS del shunt (al motor) |
+| — | Cable alimentación (+) | IN+ | ANTES del shunt (lado fuente/relé) |
+| — | Cable alimentación (+) | IN- | DESPUÉS del shunt (lado driver BTS7960) |
 | — | GND | A0, A1 | Dirección = 0x40 (ambos a GND) |
 
-> **Nota:** Los INA226 se conectan en SERIE con el cable de potencia del motor. La resistencia shunt va en el cable positivo entre la fuente y el motor.
+> **Nota:** Los INA226 de motor (CH0-CH3) y dirección (CH5) se conectan en SERIE con el cable de potencia **ANTES del driver BTS7960** (entre la salida del relé y la entrada B+ del BTS7960). La resistencia shunt va en el cable positivo entre el relé y el driver.
+>
+> **Nota IMPORTANTE — INA226 batería (CH4):** El INA226 de batería se conecta **ANTES del relé principal** (entre el borne + de la batería y la entrada COM del relé MAIN). Esto permite leer el voltaje de la batería en todo momento, incluso cuando el relé está abierto (sistema apagado). Si el shunt de batería se colocara después del relé, al abrir el relé se leería 0V y el firmware lo interpretaría como fallo crítico.
 
 ---
 
@@ -358,10 +360,11 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 **Conexiones de potencia del relé:**
 | Cable | De | A | Notas |
 |-------|-----|---|-------|
-| — | Batería 24V+ | Relé MAIN (COM) | Cable grueso ≥4 mm² |
+| — | Batería 24V+ | **INA226 #4 (shunt batería)** | Cable grueso ≥4 mm², shunt ANTES del relé |
+| — | INA226 #4 (salida shunt) | Relé MAIN (COM) | Cable grueso ≥4 mm² |
 | — | Relé MAIN (NO) | Relé TRAC (COM) + Relé DIR (COM) | Se bifurca |
-| — | Relé TRAC (NO) | BTS7960 tracción VCC (×4) | Alimentación motores 24V |
-| — | Relé DIR (NO) | BTS7960 dirección VCC | Alimentación motor 12V (con conversor si aplica) |
+| — | Relé TRAC (NO) | **INA226 #0-#3 (shunts motor)** → BTS7960 tracción VCC (×4) | Shunts ANTES de los drivers |
+| — | Relé DIR (NO) | **INA226 #5 (shunt dirección)** → BTS7960 dirección VCC | Shunt ANTES del driver (con conversor si aplica) |
 
 > **Nota:** Los relés deben usar módulos con optoacoplador (tipo HY-M158 o similar) para aislar la lógica 3.3V del STM32 de los contactos de potencia. La señal HIGH (3.3V) del STM32 activa el optoacoplador que a su vez activa la bobina del relé.
 

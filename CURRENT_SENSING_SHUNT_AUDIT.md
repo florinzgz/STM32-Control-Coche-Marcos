@@ -83,9 +83,13 @@ Evidence:
 - `Safety_CheckCurrent()` iterates per channel and raises per-sensor faults via `ServiceMode_SetFault(MODULE_CURRENT_SENSOR_0 + i, ...)` (`safety_system.c:843–848`).
 - Each INA226 sits behind a separate TCA9548A channel (0..3), and all share the same I2C address 0x40 — physically separate devices, one per motor.
 
-**Placement:** Each shunt **MUST** be placed in series with its respective motor's power supply line — between the BTS7960 H-bridge driver output and the motor winding (or between the battery and the BTS7960 input, as long as the shunt measures only that single motor's current).
+**Placement:** Each shunt **MUST** be placed in series with its respective motor's power supply line — **between the relay output and the BTS7960 H-bridge driver input** (i.e. before the driver, on the power supply side). This ensures the INA226 measures only that single motor's current.
 
-**Upstream vs. downstream of driver:** The firmware does not distinguish between high-side and low-side sensing. The INA226 supports both. However, the code comment says "50A sensors with 1 mΩ shunt" (`main.h:93–95`), and the bus voltage register is also read for each channel (`sensor_manager.c:430–431`). The bus voltage on the motor channels is not used in any control or safety decision — only `current_amps[i]` is consumed. The shunt could be on either side of the BTS7960 driver, but the most common and practical placement is **between the BTS7960 driver output and the motor** (low-side or high-side of the driver, measuring motor current).
+**Before the driver (not after):** The INA226 shunts go between the relay/power distribution and the BTS7960 input (B+ pin). Placing them before the driver means:
+- The INA226 measures the current entering each BTS7960, which equals the motor current (minus small driver losses).
+- The INA226's `Voltage_GetBus()` reads the supply rail voltage upstream of the driver — a meaningful reference for diagnostics.
+- During PWM off-time the BTS7960 recirculates motor current internally; the shunt before the driver sees the average DC supply current, which the INA226's 1.1 ms conversion time integrates naturally.
+- The firmware's plausibility range of −1.0 A to 50.0 A (`safety_system.c:1045–1046`) accounts for small negative transients due to inductive flyback reaching the supply rail.
 
 ### 2.2 Channel 4 (battery bus)
 
@@ -97,7 +101,11 @@ Evidence:
 - `CAN_SendStatusBattery()` labels it "24V main battery" and transmits both current and voltage (`can_handler.c:317–343`; `vehicle_data.h:117`).
 - The 100 A rating (vs. 50 A per motor) and the 0.5 mΩ shunt (half the motor shunt resistance) confirm this is sized for aggregate system current.
 
-**Placement:** The shunt **MUST** be in series with the main battery positive line — between the battery positive terminal and the main power distribution bus (after the main relay `PIN_RELAY_MAIN`). The INA226 bus voltage pin must be connected to the 24 V bus so that `Voltage_GetBus()` returns the actual supply rail voltage.
+**Placement:** The shunt **MUST** be in series with the main battery positive line — **between the battery positive terminal and the main relay `PIN_RELAY_MAIN`** (i.e. before the relay, directly at the battery). This is critical because:
+- `Safety_CheckBatteryVoltage()` must read battery voltage **at all times**, including when the relay is open (system in STANDBY, SAFE, or ERROR state).
+- If the shunt were placed after the relay, opening the relay would disconnect the INA226 from the battery, causing `Voltage_GetBus()` to return 0.0 V, which the firmware treats as a sensor failure / critical undervoltage (`safety_system.c:1185–1190`).
+- The ESP32 HMI displays battery voltage via CAN ID 0x207 — this must remain visible even when the system is powered down (relays off).
+- The INA226 bus voltage pin reads the actual battery terminal voltage, providing an always-available voltage reference regardless of relay state.
 
 ### 2.3 Channel 5 (steering motor)
 
@@ -109,7 +117,7 @@ Evidence:
 - It is included in the `Safety_CheckCurrent()` overcurrent loop and `Safety_CheckSensors()` plausibility loop alongside all other channels.
 - It is NOT transmitted in the per-wheel current CAN message (0x201) — confirming it is a separate subsystem.
 
-**Placement:** The shunt **MUST** be in series with the steering motor power line — between the BTS7960 H-bridge driver (controlled via TIM8_CH3 / PC8 PWM and PC4 direction / PC9 enable) and the steering motor, or between the steering relay (`PIN_RELAY_DIR`) and the steering BTS7960 input.
+**Placement:** The shunt **MUST** be in series with the steering motor power line — **between the steering relay (`PIN_RELAY_DIR`) and the steering BTS7960 input** (i.e. before the driver, on the power supply side). This is consistent with the motor channel placement: shunts go between the relay output and the BTS7960 B+ input pin.
 
 ---
 
@@ -123,33 +131,41 @@ The firmware's safety system uses current readings in three independent safety p
 2. **Sensor plausibility** (`Safety_CheckSensors()`, 10 ms loop): flags readings < −1.0 A or > 50.0 A as sensor faults.
 3. **Battery undervoltage** (`Safety_CheckBatteryVoltage()`, 100 ms loop): reads `Voltage_GetBus(4)` for bus voltage monitoring.
 
-### 3.2 Scenario: Shunt placed BEFORE motor driver (between battery/relay and BTS7960 input)
+### 3.2 Correct placement: Shunts BEFORE drivers, battery shunt BEFORE relay
 
-- **Motor channels 0–3:** The INA226 would measure the current entering the BTS7960 driver. The BTS7960 is a full H-bridge; input current approximately equals output current (minus driver losses). The firmware's `Safety_CheckCurrent()` compares against `MAX_CURRENT_A` = 25 A — this threshold is designed for motor current. Placing the shunt before the driver would still measure approximately the correct motor current, so:
-  - **Overcurrent detection:** Would still function correctly (current into driver ≈ current through motor).
-  - **Park-hold derating:** Would still read correct current (motor current flows through driver from battery side).
-  - **Minor inaccuracy:** During PWM off-time, the BTS7960 recirculates motor current internally; the shunt before the driver would see pulsed current (average equals motor current at duty cycle), while a shunt after the driver would see continuous motor current. The INA226's 1.1 ms default conversion time averages this, so practical difference is small.
+This is the intended placement per the firmware architecture:
 
-- **Battery channel 4:** This channel is already expected to be before all motor drivers (at the battery). Placing it "before the driver" is its intended position.
+- **Motor channels 0–3:** INA226 shunts between relay output and BTS7960 input (B+ pin). The INA226 measures current entering each driver. BTS7960 input current approximately equals motor current (minus small driver losses). The firmware's `Safety_CheckCurrent()` compares against `MAX_CURRENT_A` = 25 A — this works correctly with before-driver placement since input current tracks motor current.
+  - **Overcurrent detection:** Functions correctly (current into driver ≈ current through motor).
+  - **Park-hold derating:** Reads correct current (motor current flows through driver from battery side).
+  - **PWM averaging:** During PWM off-time, the BTS7960 recirculates motor current internally; the shunt before the driver sees pulsed current, but the INA226's 1.1 ms default conversion time averages this naturally.
 
-- **What would break:** Nothing catastrophic. Minor measurement noise during dynamic braking due to recirculation current paths.
+- **Battery channel 4:** INA226 shunt between battery positive terminal and main relay input. The INA226 reads battery voltage at all times, even when the relay is open. This is critical for:
+  - `Safety_CheckBatteryVoltage()` — always reads true battery voltage.
+  - `CAN_SendStatusBattery()` — ESP32 HMI can always display battery voltage.
+  - `check_battery_ok()` — boot validation reads true battery voltage.
 
-### 3.3 Scenario: Shunt placed AFTER motor driver (between BTS7960 output and motor)
+- **What would break:** Nothing. This is the correct topology.
 
-- **Motor channels 0–3:** This is the most natural placement. The INA226 measures actual motor winding current including regenerative/flyback current. The firmware's threshold of 25 A and plausibility range of −1.0 A to 50.0 A account for small negative readings: "A small negative reading (> −1 A) is expected due to INA226 offset and inductive motor flyback during deceleration" (`safety_system.c:1045–1046`).
-  - **Overcurrent detection:** Works correctly — measures actual motor current.
-  - **Park-hold derating:** Works correctly — `Current_GetAmps(i)` returns actual motor current.
-  - **Dynamic braking:** Works correctly — motor_control.c limits dynamic braking based on motor current.
+### 3.3 Scenario: Battery shunt placed AFTER the main relay (incorrect)
 
-- **Battery channel 4:** Placing the battery shunt after a motor driver would only measure one motor's current instead of total system current. **This would break:**
-  - `Safety_CheckBatteryVoltage()` — bus voltage would read motor terminal voltage, not battery voltage.
-  - `CAN_SendStatusBattery()` — reported current/voltage would not represent battery state.
-  - `check_battery_ok()` — boot validation would see motor voltage, not battery voltage.
-  - **Conclusion: Battery shunt MUST NOT be placed after any motor driver.**
+- **When relay is closed:** Works normally — battery voltage and current are readable.
+- **When relay is open (SAFE, ERROR, STANDBY, or power-down):** The INA226 is disconnected from the battery. `Voltage_GetBus()` returns 0.0 V, which the firmware interprets as a sensor failure / critical undervoltage (`safety_system.c:1185–1190`), triggering `SAFETY_ERROR_BATTERY_UV_CRITICAL` and `SYS_STATE_SAFE`. **This creates a false-positive fault loop.**
+- **ESP32 HMI:** Cannot display battery voltage when the relay is off — the user sees 0.0 V instead of the actual battery state.
+- **Conclusion: Battery shunt MUST be placed BEFORE the relay.**
 
-- **Steering channel 5:** Placing it after the steering BTS7960 works identically to the motor channels — measures actual steering motor current.
+### 3.4 Scenario: Motor shunts placed AFTER motor driver (between BTS7960 output and motor)
 
-### 3.4 Scenario: Shunt placed AT battery (main bus only, no per-motor shunts)
+- **Motor channels 0–3:** The INA226 would measure actual motor winding current including regenerative/flyback current. The firmware's threshold of 25 A and plausibility range of −1.0 A to 50.0 A account for small negative readings: "A small negative reading (> −1 A) is expected due to INA226 offset and inductive motor flyback during deceleration" (`safety_system.c:1045–1046`).
+  - **Overcurrent detection:** Would work, but sees regenerative current spikes that don't represent supply-side danger.
+  - **Park-hold derating:** Would work, but reads motor winding current instead of supply current.
+  - **Dynamic braking:** Would work — motor_control.c limits dynamic braking based on motor current.
+
+- **Battery channel 4:** Placing the battery shunt after a motor driver would only measure one motor's current instead of total system current. **This would break** all battery monitoring (see 3.3 above).
+
+- **Steering channel 5:** After-driver placement would function but is inconsistent with the before-driver topology used for motor channels.
+
+### 3.5 Scenario: Shunt placed AT battery (main bus only, no per-motor shunts)
 
 If only a single shunt were placed at the battery instead of per-motor shunts:
 
@@ -188,6 +204,8 @@ If only a single shunt were placed at the battery instead of per-motor shunts:
 |-----------|------------|-----------|
 | Per-motor shunt placement (not shared) | **High** — inferred from per-index usage: `Current_GetAmps(i)` stored in `traction_state.wheels[i].currentA`, per-sensor faults, per-wheel CAN telemetry | Code treats each index as an independent motor's current |
 | Battery shunt is at system bus (not per-motor) | **High** — inferred from 100 A rating (vs. 50 A per motor), `Voltage_GetBus()` used for battery voltage, and "24V main battery" labeling | Different shunt resistance + dedicated voltage monitoring |
+| Battery shunt BEFORE main relay (not after) | **High** — `Safety_CheckBatteryVoltage()` treats 0.0 V as sensor failure → SAFE state. If shunt were after the relay, opening the relay would always trigger a false critical UV fault. The firmware expects voltage to be always readable. | `safety_system.c:1185–1190`: 0 V → `SAFETY_ERROR_BATTERY_UV_CRITICAL` |
+| Motor/steering shunts BEFORE BTS7960 drivers | **High** — firmware does not need to distinguish between supply-side and motor-side current (no torque computation). Placing shunts before drivers measures supply current entering each driver, which equals motor current minus small driver losses. | Consistent with overcurrent protection intent (protecting the driver/wiring) |
 | Shunts measure driver current, not torque | **High** — firmware never converts current to torque (no motor torque constant `Kt` or `torque_from_current()` anywhere in code). Current is used only for overcurrent protection and telemetry | No torque computation exists in the codebase |
 | No per-wheel torque sensing architecture | **High** — ABS/TCS use `wheel_scale[]` (speed-based slip detection), not current-based torque estimation. `wheel_scale` is set by speed comparison algorithms, never by current values | Traction control is speed-based, not current-based |
 
