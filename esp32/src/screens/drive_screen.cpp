@@ -25,6 +25,7 @@
 #include "ui/gear_display.h"
 #include "ui/battery_indicator.h"
 #include "ui/mode_icons.h"
+#include "ui/led_toggle.h"
 #include "ui/obstacle_sensor.h"
 #include "ui/runtime_monitor.h"
 #include <cstdio>
@@ -49,6 +50,7 @@ void DriveScreen::onEnter() {
     prevGear_        = ui::Gear::P;
     prevMode_        = {};
     prevObstacleCm_  = 0;
+    prevLedOn_       = false;
 }
 
 // -------------------------------------------------------------------------
@@ -105,6 +107,9 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
 
     // Obstacle sensor
     curObstacleCm_ = data.obstacle().distanceCm;
+
+    // LED relay state from STM32
+    curLedOn_ = data.lights().relayOn;
 }
 
 // -------------------------------------------------------------------------
@@ -120,6 +125,7 @@ void DriveScreen::draw() {
 
         // Draw all static elements (in layout order top→bottom)
         ui::ModeIcons::drawStatic(tft);
+        ui::LedToggle::drawStatic(tft);
         ui::BatteryIndicator::drawStatic(tft);
         ui::ObstacleSensor::drawStatic(tft);
         ui::CarRenderer::drawStatic(tft);
@@ -153,6 +159,7 @@ void DriveScreen::draw() {
         }
         prevMode_.is4x4     = !curMode_.is4x4;
         prevMode_.isTankTurn = !curMode_.isTankTurn;
+        prevLedOn_          = !curLedOn_;
     }
 
     // Partial redraw: only changed elements
@@ -215,6 +222,12 @@ void DriveScreen::draw() {
     }
     ui::ModeIcons::draw(tft, curMode_, prevMode_);
 
+    // LED toggle button (part of top bar zone)
+    if (curLedOn_ != prevLedOn_) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+    }
+    ui::LedToggle::draw(tft, curLedOn_, prevLedOn_);
+
     // Copy current values to previous for next frame
     memcpy(prevTraction_, curTraction_, sizeof(prevTraction_));
     memcpy(prevTemp_, curTemp_, sizeof(prevTemp_));
@@ -225,6 +238,7 @@ void DriveScreen::draw() {
     prevGear_        = curGear_;
     prevMode_        = curMode_;
     prevObstacleCm_  = curObstacleCm_;
+    prevLedOn_       = curLedOn_;
 }
 
 // -------------------------------------------------------------------------

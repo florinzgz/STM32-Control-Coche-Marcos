@@ -165,6 +165,14 @@ static void decodeCommandAck(const CanFrame& f, vehicle::VehicleData& data) {
     data.setAck(ad);
 }
 
+static void decodeLights(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 2) return;
+    vehicle::LightsData ld;
+    ld.relayOn     = (f.data[0] != 0);
+    ld.timestampMs = millis();
+    data.setLights(ld);
+}
+
 // -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
@@ -184,6 +192,7 @@ void poll(vehicle::VehicleData& data) {
             case can::STATUS_BATTERY:   decodeBattery(frame, data);        break;
             case can::CMD_ACK:          decodeCommandAck(frame, data);     break;
             case can::DIAG_ERROR:       decodeDiagError(frame, data);      break;
+            case can::STATUS_LIGHTS:    decodeLights(frame, data);         break;
             case can::SERVICE_FAULTS:   decodeServiceFaults(frame, data);  break;
             case can::SERVICE_ENABLED:  decodeServiceEnabled(frame, data); break;
             case can::SERVICE_DISABLED: decodeServiceDisabled(frame, data);break;
