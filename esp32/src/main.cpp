@@ -20,6 +20,7 @@
 #include "ui/debug_overlay.h"
 #include "sensors/obstacle_sensor.h"
 #include "can/can_obstacle.h"
+#include "can/can_tx.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -140,6 +141,10 @@ void setup() {
 
     // Initialize CAN TX for obstacle distance frame (0x208)
     can_obstacle::init();
+
+    // Initialize CAN TX for control commands (0x100, 0x101, 0x102)
+    // Control Contract: continuous 20 ms TX with ACTIVE gate and throttle ramp
+    can_tx::init();
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +179,9 @@ void loop() {
         od.timestampMs  = millis();
         vehicleData.setObstacle(od);
     }
+
+    // Update control command TX (Control Contract — §1 continuous 20 ms)
+    can_tx::update(vehicleData.heartbeat().systemState);
 
     // Update HMI screen based on current vehicle state
     RTMON_UI_BEGIN();

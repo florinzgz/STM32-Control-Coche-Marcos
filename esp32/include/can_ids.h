@@ -138,8 +138,8 @@ enum class DiagSubsystem : uint8_t {
 // -------------------------------------------------------------------------
 inline constexpr uint32_t HEARTBEAT_INTERVAL_MS = 100;   // Both directions
 inline constexpr uint32_t HEARTBEAT_TIMEOUT_MS  = 250;   // STM32 watchdog
-inline constexpr uint32_t CMD_THROTTLE_RATE_MS  = 50;
-inline constexpr uint32_t CMD_STEERING_RATE_MS  = 50;
+inline constexpr uint32_t CMD_THROTTLE_RATE_MS  = 20;    // Control Contract §4: 20 ms continuous
+inline constexpr uint32_t CMD_STEERING_RATE_MS  = 20;    // Control Contract §4: 20 ms continuous
 inline constexpr uint32_t STATUS_FAST_RATE_MS   = 100;   // Speed, current, safety, steering, traction
 inline constexpr uint32_t STATUS_SLOW_RATE_MS   = 1000;  // Temperature
 inline constexpr uint32_t OBSTACLE_RATE_MS      = 66;    // Obstacle distance (15 Hz)
