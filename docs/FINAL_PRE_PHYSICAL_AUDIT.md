@@ -112,7 +112,7 @@ La transición limpia `SAFETY_ERROR_CAN_TIMEOUT` y llama a `Safety_SetState(SYS_
 - ❌ **NO envía** CMD_MODE (0x102) — no hay implementación de transmisión
 - ❌ **NO envía** SERVICE_CMD (0x110) — no hay implementación de transmisión
 
-**Consecuencia:** El ESP32 es **solo HMI de visualización + sensor de obstáculos**. No puede controlar el vehículo remotamente. El vehículo solo puede conducirse con el pedal local (LIMP_HOME) o mediante otro dispositivo CAN externo.
+**Consecuencia:** El ESP32 es **solo HMI de visualización + sensor de obstáculos**. No puede controlar el vehículo remotamente. El vehículo solo puede controlarse con el pedal local (LIMP_HOME) o mediante otro dispositivo CAN externo.
 
 **Nota técnica:** Esto NO es un fallo de seguridad. El STM32 procesa los mensajes correctamente si llegarán. La ausencia está en el lado ESP32 (HMI).
 
