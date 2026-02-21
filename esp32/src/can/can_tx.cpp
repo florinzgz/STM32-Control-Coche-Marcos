@@ -102,15 +102,13 @@ static void applyThrottleRamp() {
         return;
     }
 
-    // Ramp down: compute step size per 20ms tick to reach 0 in RAMP_DOWN_MS
-    // steps = RAMP_DOWN_MS / RAMP_STEP_MS = 150 / 20 ≈ 7 steps
-    // step_size = outputThrottle_at_release / steps
-    // But we use a fixed linear ramp from current to target:
+    // Ramp down: each 20 ms tick, reduce by ceiling(remaining_diff / steps).
+    // This produces a smooth monotonic decrease that reaches the target
+    // within RAMP_DOWN_MS regardless of the starting value.
     uint8_t diff = outputThrottle_ - targetThrottle_;
-    uint8_t steps = RAMP_DOWN_MS / RAMP_STEP_MS;  // 7
-    if (steps == 0) steps = 1;
-    uint8_t step = (diff + steps - 1) / steps;    // Ceiling division
-    if (step == 0) step = 1;
+    constexpr uint8_t steps = RAMP_DOWN_MS / RAMP_STEP_MS;  // 7
+    uint8_t step = (diff + steps - 1) / steps;               // Ceiling division
+    // step is always >= 1 here because diff >= 1 (guarded above) and steps = 7
 
     if (outputThrottle_ > targetThrottle_ + step) {
         outputThrottle_ -= step;
