@@ -46,7 +46,7 @@ El documento afirma que las pantallas "no tienen handlers de touch". Esto es **c
 | Paso | Código verificado | Evidencia exacta | ¿Real? |
 |------|-------------------|-------------------|--------|
 | **Paso 2** — STANDBY→LIMP_HOME sin centering | `safety_system.c` L964-975 | `if (system_state == SYS_STATE_STANDBY && BootValidation_IsPassed())` — sin `Steering_IsCalibrated()` | ✅ |
-| **Paso 3** — Bypass centering para ACTIVE | `safety_system.c` L990-994 | `(Steering_IsCalibrated() \|\| !ServiceMode_IsEnabled(MODULE_STEER_CENTER))` | ✅ |
+| **Paso 3** — Bypass centering para ACTIVE | `safety_system.c` L990-994 | `(Steering_IsCalibrated() || !ServiceMode_IsEnabled(MODULE_STEER_CENTER))` | ✅ |
 | **Paso 4** — Pedal plausibility fail-op | `sensor_manager.c` L291-292 | `Pedal_IsPlausible()`, `Pedal_IsContradictory()` definidas; ADS1115 cross-validation L193-287 | ✅ |
 | **Paso 5** — Driver obstáculo ESP32 | `esp32/src/sensors/obstacle_sensor.cpp` + `can/can_obstacle.cpp` | HC-SR04 driver, CAN 0x208 TX cada 66ms con zone/health/counter | ✅ |
 | **Paso 6** — Persistencia flash calibración | `Core/Src/steering_cal_store.c` | `SteeringCal_Save()` L147-198, `SteeringCal_ValidateAtBoot()` L96-135, CRC32 L52-66 | ✅ |
