@@ -18,8 +18,12 @@
 #include "screen_manager.h"
 #include "ui/runtime_monitor.h"
 #include "ui/debug_overlay.h"
+#include "ui/led_toggle.h"
 #include "sensors/obstacle_sensor.h"
 #include "can/can_obstacle.h"
+#include "led_controller.h"
+#include "power_manager.h"
+#include "audio_manager.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -37,6 +41,15 @@ static unsigned long lastSerialMs     = 0;
 #if RUNTIME_MONITOR
 static unsigned long lastRtMonMs      = 0;
 #endif
+
+// ---- LED toggle touch tracking ----
+static bool     ledLocalState     = false;   // local desired state (sent to STM32)
+static unsigned long lastLedTouchMs = 0;     // debounce for touch
+static constexpr unsigned long LED_TOUCH_DEBOUNCE_MS = 300;
+
+// ---- Power/Audio state tracking ----
+static bool     welcomePlayed     = false;
+static bool     farewellPlayed    = false;
 
 // ---- Command ACK tracking (Phase 13) ----
 // Non-blocking: records when a command was sent and checks for ACK arrival.
@@ -80,6 +93,18 @@ static void ackCheck(const vehicle::VehicleData& data) {
         ackTimedOut = true;
         Serial.printf("[ACK] TIMEOUT waiting for cmd 0x%02X\n", ackExpectedCmd);
     }
+}
+
+/// Send LED relay command to STM32 via CAN 0x120.
+/// @param on  true = turn on, false = turn off
+static void sendLedCommand(bool on) {
+    CanFrame frame = {};
+    frame.identifier       = can::CMD_LED;
+    frame.extd             = 0;
+    frame.data_length_code = 1;
+    frame.data[0]          = on ? 1 : 0;
+    ESP32Can.writeFrame(frame);
+    ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +165,15 @@ void setup() {
 
     // Initialize CAN TX for obstacle distance frame (0x208)
     can_obstacle::init();
+
+    // Initialize WS2812B LED controller (GPIO 38, 44 LEDs)
+    led_ctrl::init();
+
+    // Initialize power manager (ignition key on GPIO 40/41)
+    power_mgr::init();
+
+    // Initialize DFPlayer audio (UART2 on GPIO 43/44)
+    audio::init();
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +213,61 @@ void loop() {
     RTMON_UI_BEGIN();
     screenManager.update(vehicleData);
     RTMON_UI_END();
+
+    // ---- Touch handling for LED toggle ----
+    // Read touch outside of runtime monitor (not part of render timing)
+    {
+        uint16_t tx = 0, ty = 0;
+        bool isTouched = tft.getTouch(&tx, &ty);
+        if (isTouched && ui::LedToggle::hitTest(static_cast<int16_t>(tx),
+                                                  static_cast<int16_t>(ty))) {
+            unsigned long now2 = millis();
+            if ((now2 - lastLedTouchMs) >= LED_TOUCH_DEBOUNCE_MS) {
+                lastLedTouchMs = now2;
+                ledLocalState = !ledLocalState;
+                sendLedCommand(ledLocalState);
+                Serial.printf("[LED] Toggle → %s\n", ledLocalState ? "ON" : "OFF");
+            }
+        }
+    }
+
+    // ---- Power management ----
+    power_mgr::update();
+
+    // Welcome audio on startup
+    if (power_mgr::isRunning() && !welcomePlayed) {
+        audio::play(audio::Sound::WELCOME, audio::Priority::HIGH);
+        welcomePlayed  = true;
+        farewellPlayed = false;
+    }
+
+    // Farewell audio on shutdown
+    if (power_mgr::getState() == power_mgr::PowerState::SHUTTING_DOWN &&
+        !farewellPlayed) {
+        audio::play(audio::Sound::FAREWELL, audio::Priority::HIGH);
+        farewellPlayed = true;
+        welcomePlayed  = false;
+        // Turn off LEDs during shutdown
+        if (ledLocalState) {
+            ledLocalState = false;
+            sendLedCommand(false);
+        }
+    }
+
+    // ---- Audio update ----
+    audio::update();
+
+    // ---- WS2812B LED update ----
+    {
+        auto st = vehicleData.heartbeat().systemState;
+        // Braking and reverse detection require gear echo from STM32 (not
+        // yet implemented in CAN protocol — tracked in audit Step 1).
+        // Until then, rear LEDs show default tail light pattern.
+        bool braking = false;
+        bool reverse = false;
+        bool ledEnabled = vehicleData.lights().relayOn;
+        led_ctrl::update(static_cast<uint8_t>(st), braking, reverse, ledEnabled);
+    }
 
 #if RUNTIME_MONITOR
     // Debug overlay — detect long touch (3 seconds) to toggle
