@@ -73,6 +73,21 @@ bool SteeringCentering_HasFault(void);
  */
 CenteringState_t SteeringCentering_GetState(void);
 
+/**
+ * @brief  Mark centering as complete using a stored flash calibration.
+ *
+ *         Called at boot when SteeringCal_ValidateAtBoot() passes.
+ *         Sets the TIM2 counter to the stored center value and marks
+ *         steering as calibrated, skipping the physical sweep.
+ *
+ *         Safety: this function is only called AFTER the center sensor
+ *         has confirmed physical plausibility.  Flash alone never
+ *         authorises this transition.
+ *
+ * @param  stored_center  The encoder count at center, read from flash.
+ */
+void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center);
+
 #ifdef __cplusplus
 }
 #endif

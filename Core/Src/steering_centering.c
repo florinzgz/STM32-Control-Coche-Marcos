@@ -43,6 +43,7 @@
 #include "motor_control.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
+#include "steering_cal_store.h"
 #include "main.h"
 #include <math.h>
 
@@ -97,6 +98,7 @@ static void Centering_Abort(void)
 
 /**
  * @brief  Complete centering: stop motor, zero encoder, mark calibrated.
+ *         Persists the calibration to flash for fast startup next boot.
  */
 static void Centering_Complete(void)
 {
@@ -105,6 +107,15 @@ static void Centering_Complete(void)
     Steering_SetCalibrated();
     SteeringCenter_ClearFlag();
     centering_state = CENTERING_DONE;
+
+    /* Persist calibration to flash.
+     * Conditions: centering just succeeded, vehicle is in BOOT/STANDBY
+     * (speed must be 0), and no safety errors at this point.
+     * Failure to save is non-critical — next boot will just re-sweep.  */
+    if (Safety_GetError() == SAFETY_ERROR_NONE) {
+        int32_t center = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+        (void)SteeringCal_Save(center);
+    }
 }
 
 /**
@@ -252,4 +263,18 @@ bool SteeringCentering_HasFault(void)
 CenteringState_t SteeringCentering_GetState(void)
 {
     return centering_state;
+}
+
+void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
+{
+    /* Apply the stored center value: set the TIM2 counter so that
+     * the encoder reference frame matches the original calibration.
+     * TIM2 is a 32-bit counter; casting int32_t → uint32_t preserves
+     * the bit pattern (two's complement), which is correct for
+     * quadrature mode where the counter can wrap in both directions.
+     * In practice, centering zeroes the counter, so the stored value
+     * is typically 0.                                                */
+    __HAL_TIM_SET_COUNTER(&htim2, (uint32_t)stored_center);
+    Steering_SetCalibrated();
+    centering_state = CENTERING_DONE;
 }
