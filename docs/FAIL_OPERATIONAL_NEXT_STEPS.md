@@ -15,7 +15,7 @@
 |------|--------|--------|
 | 1 | Documentar decisión relay-en-SAFE | ⚠️ PENDIENTE (parcial) |
 | 2 | STANDBY→LIMP_HOME sin centering | ✅ COMPLETADO |
-| 3 | Bypass servicio centering para ACTIVE | ❌ PENDIENTE |
+| 3 | Bypass servicio centering para ACTIVE | ✅ COMPLETADO |
 | 4 | Pedal plausibility fail-operational | ✅ COMPLETADO |
 | 5 | Driver sensor obstáculo ESP32 | ✅ COMPLETADO |
 | 6 | Persistencia flash calibración dirección | ✅ COMPLETADO |
@@ -27,6 +27,7 @@
 - **Paso 4:** `Core/Src/sensor_manager.c` — `Pedal_IsContradictory()` (línea 292) implementada; `Core/Src/boot_validation.c` — `SAFETY_ERROR_SENSOR_FAULT` permitido en validación de arranque; `Core/Src/safety_system.c` — LIMP_HOME con pedal primario degradado.
 - **Paso 5:** `esp32/src/sensors/obstacle_sensor.cpp` — Driver HC-SR04 con warmup, stuck-detection, rango 20-4000mm; `esp32/src/can/can_obstacle.cpp` — TX CAN 0x208 a 66ms.
 - **Paso 6:** `Core/Src/steering_cal_store.c` — Persistencia flash en página 126 (0x0807E000) con CRC32; `SteeringCal_Save()` con HAL_FLASH_Program; `SteeringCal_ValidateAtBoot()` valida contra sensor inductivo físico.
+- **Paso 3:** `Core/Src/safety_system.c` — `Safety_CheckCANTimeout()` guardas STANDBY→ACTIVE (línea 992) y LIMP_HOME→ACTIVE (línea 1003) modificadas: `(Steering_IsCalibrated() || !ServiceMode_IsEnabled(MODULE_STEER_CENTER))`. Si MODULE_STEER_CENTER (ID 19) está deshabilitado via CAN 0x110, el requisito de centering se omite. Comportamiento por defecto (módulo habilitado) no cambia.
 
 ---
 
@@ -198,7 +199,7 @@ Paso 1 → Paso 3 → Paso 7 (condicional)
 | Riesgo | Severidad | Paso Mitigador | Estado |
 |--------|-----------|----------------|--------|
 | R1 — SAFE no corta relés | ALTA | Paso 1 (decisión) + Paso 7 (implementación) | Documentado, pendiente decisión |
-| R3 — Centering bloquea ACTIVE | MEDIA | Paso 2 (✅) + Paso 3 (pendiente) | Parcialmente mitigado (LIMP_HOME disponible) |
+| R3 — Centering bloquea ACTIVE | MEDIA | Paso 2 (✅) + Paso 3 (✅) | Mitigado — bypass servicio disponible via CAN 0x110 |
 | R2 — Sin persistencia NVM calibración | MEDIA | Paso 6 (✅) | Mitigado |
 | R6 — Sin sensor obstáculo ESP32 | MEDIA | Paso 5 (✅) | Mitigado |
 | R9 — ADS1115 fallback pedal | BAJA-MEDIA | Paso 4 (✅) | Mitigado |

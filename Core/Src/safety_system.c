@@ -977,19 +977,30 @@ void Safety_CheckCANTimeout(void)
         ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
         /* ESP32 alive – if we were in STANDBY, transition to ACTIVE
          * only when steering centering has completed successfully
-         * AND the boot validation checklist has passed.                 */
+         * AND the boot validation checklist has passed.
+         *
+         * Service bypass (Step 3, fail-operational migration):
+         * If MODULE_STEER_CENTER is disabled via CAN 0x110, the
+         * centering requirement is waived.  This restores the original
+         * firmware's manual-calibration fallback when the inductive
+         * center sensor is damaged or disconnected.  Steering PID
+         * operates relative to an unknown zero — acceptable for
+         * "drive home" scenarios.  Default behavior (centering
+         * required) is unchanged when MODULE_STEER_CENTER is enabled. */
         if (system_state == SYS_STATE_STANDBY &&
             safety_error == SAFETY_ERROR_NONE &&
-            Steering_IsCalibrated() &&
+            (Steering_IsCalibrated() || !ServiceMode_IsEnabled(MODULE_STEER_CENTER)) &&
             BootValidation_IsPassed()) {
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* CAN restored from LIMP_HOME → attempt ACTIVE.
          * Heartbeat has appeared and system is healthy.
          * ACTIVE still requires steering calibration — if centering
-         * never completed, the vehicle stays in LIMP_HOME.            */
+         * never completed, the vehicle stays in LIMP_HOME.
+         * Service bypass: same MODULE_STEER_CENTER waiver as
+         * STANDBY→ACTIVE (see comment above).                          */
         if (system_state == SYS_STATE_LIMP_HOME &&
-            Steering_IsCalibrated()) {
+            (Steering_IsCalibrated() || !ServiceMode_IsEnabled(MODULE_STEER_CENTER))) {
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
             Safety_SetState(SYS_STATE_ACTIVE);
         }
