@@ -108,7 +108,7 @@
 | Pantallas estado (boot/standby/drive/safe/error) | ✅ ESP32 | Equivalente | `esp32/src/screens/`: 5 pantallas con transiciones por estado CAN |
 | Telemetría por rueda | ✅ ESP32 | Equivalente | `esp32/src/ui/car_renderer.cpp`: torque %, temperatura por rueda |
 | Indicadores estado (ABS, TCS, temp) | ✅ ESP32 | Equivalente | `esp32/src/screens/drive_screen.cpp`: indicadores en HUD |
-| Entrada táctil para interacción | ❌ | Falta | `platformio.ini` configura XPT2046 (CS=GPIO21, freq 2.5 MHz) pero NO hay código que lea touch. `mode_icons.cpp` tiene `hitTest()` definido pero nunca llamado desde main loop |
+| Entrada táctil para interacción | ❌ | Falta | `platformio.ini` configura XPT2046 (CS=GPIO21, frequency 2.5 MHz) pero NO hay código que lea touch. `mode_icons.cpp` tiene `hitTest()` definido pero nunca llamado desde main loop |
 | Menú oculto de ingeniería | ❌ | Falta | Original: código secreto 8989 → calibración pedal/encoder, enable/disable módulos, factory restore, visor de errores. No existe código equivalente |
 
 ### I. ILUMINACIÓN LED — 0% ❌
@@ -440,7 +440,7 @@ Ordenados por dependencia y prioridad para alcanzar equivalencia funcional.
 - `Core/Src/can_handler.c` — Añadir comando CAN para solicitar log
 - `esp32/src/screens/engineering_screen.cpp` — Mostrar log de errores recibido vía CAN
 
-**Dependencias:** Paso 8 completado (menú de ingeniería para visualización). Flash page disponible en STM32 (páginas 124-125 libres, 126 = steering cal, 127 = EPS).
+**Dependencias:** Paso 8 completado (menú de ingeniería para visualización). Flash page disponible en STM32 (páginas 124-125 libres, 126 = steering calibration, 127 = EPS).
 
 **Verificación:**
 1. Provocar error de sobrecorriente → verificar que se registra en flash
