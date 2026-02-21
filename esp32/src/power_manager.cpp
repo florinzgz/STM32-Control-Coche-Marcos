@@ -50,6 +50,9 @@ static bool readKeyDebounced() {
 // -------------------------------------------------------------------------
 
 void init() {
+    // Hardware assumption: ignition signal is active-high.
+    // GPIO 40 reads HIGH when key is in ON position, LOW when OFF.
+    // Internal pull-down ensures LOW when disconnected (safe default = OFF).
     pinMode(PIN_IGNITION_SENSE, INPUT_PULLDOWN);
     pinMode(PIN_POWER_HOLD, OUTPUT);
     digitalWrite(PIN_POWER_HOLD, LOW);

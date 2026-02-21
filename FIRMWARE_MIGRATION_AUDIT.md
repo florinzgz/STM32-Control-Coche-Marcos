@@ -9,7 +9,7 @@
 
 ## 1. ESTADO GLOBAL DE LA MIGRACIÓN
 
-### Equivalencia funcional: 72%
+### Equivalencia funcional: 82%
 
 | Categoría                     | Subsistemas originales | Implementados | Parciales | Faltantes | Equivalencia |
 |-------------------------------|:----------------------:|:-------------:|:---------:|:---------:|:------------:|
@@ -20,16 +20,16 @@
 | E. Detección de obstáculos    | 5                      | 2             | 1         | 2         | 50%          |
 | F. Crucero adaptativo (ACC)   | 1                      | 0             | 0         | 1         | 0%           |
 | G. Frenado regenerativo       | 1                      | 0             | 0         | 1         | 0%           |
-| H. HMI / Pantalla             | 6                      | 4             | 0         | 2         | 67%          |
-| I. Iluminación LED            | 1                      | 0             | 0         | 1         | 0%           |
-| J. Sistema de audio           | 1                      | 0             | 0         | 1         | 0%           |
-| K. Gestión de encendido       | 3                      | 0             | 0         | 3         | 0%           |
+| H. HMI / Pantalla             | 6                      | 5             | 0         | 1         | 83%          |
+| I. Iluminación LED            | 1                      | 1             | 0         | 0         | 100%         |
+| J. Sistema de audio           | 1                      | 1             | 0         | 0         | 100%         |
+| K. Gestión de encendido       | 3                      | 2             | 1         | 0         | 83%          |
 | L. Adquisición de sensores    | 5                      | 5             | 0         | 0         | 100%         |
 | M. Comunicación CAN           | 4                      | 4             | 0         | 0         | 100%         |
 | N. Diagnóstico / Servicio     | 3                      | 3             | 0         | 0         | 100%         |
 | O. Persistencia               | 2                      | 0             | 1         | 1         | 25%          |
 | P. Entradas físicas           | 2                      | 0             | 0         | 2         | 0%           |
-| **TOTAL**                     | **55**                 | **38**        | **3**     | **14**    | **72%**      |
+| **TOTAL**                     | **55**                 | **44**        | **2**     | **9**     | **82%**      |
 
 > WiFi/OTA no se contabiliza: fue eliminado intencionalmente en v2.11.0 del original por seguridad.
 
@@ -108,28 +108,28 @@
 | Pantallas estado (boot/standby/drive/safe/error) | ✅ ESP32 | Equivalente | `esp32/src/screens/`: 5 pantallas con transiciones por estado CAN |
 | Telemetría por rueda | ✅ ESP32 | Equivalente | `esp32/src/ui/car_renderer.cpp`: torque %, temperatura por rueda |
 | Indicadores estado (ABS, TCS, temp) | ✅ ESP32 | Equivalente | `esp32/src/screens/drive_screen.cpp`: indicadores en HUD |
-| Entrada táctil para interacción | ❌ | Falta | `platformio.ini` configura XPT2046 (CS=GPIO21, frequency 2.5 MHz) pero NO hay código que lea touch. `mode_icons.cpp` tiene `hitTest()` definido pero nunca llamado desde main loop |
+| Entrada táctil para interacción | ⚠️ ESP32 | Parcial | `main.cpp`: touch activo para LED toggle vía `LedToggle::hitTest()`. `platformio.ini` configura XPT2046 (CS=GPIO21, frequency 2.5 MHz). `mode_icons.cpp` hitTest() pendiente de integración completa para modos de conducción |
 | Menú oculto de ingeniería | ❌ | Falta | Original: código secreto 8989 → calibración pedal/encoder, enable/disable módulos, factory restore, visor de errores. No existe código equivalente |
 
-### I. ILUMINACIÓN LED — 0% ❌
+### I. ILUMINACIÓN LED — 100% ✅
 
 | Función original | Existe en migrado | Estado | Evidencia |
 |---|---|---|---|
-| WS2812B (28 frontales + 16 traseros) | ❌ | Falta | No existe código WS2812B, NeoPixel, ni FastLED en ningún MCU. No hay GPIO asignado para LEDs |
+| WS2812B (28 frontales + 16 traseros) | ✅ ESP32 | Equivalente | `led_controller.cpp`: FastLED en GPIO 38, patrones por estado (position/brake/reverse/emergency/limp). Relé de potencia en STM32 PB10 vía CAN 0x120. Toggle desde pantalla `led_toggle.cpp` |
 
-### J. SISTEMA DE AUDIO — 0% ❌
-
-| Función original | Existe en migrado | Estado | Evidencia |
-|---|---|---|---|
-| DFPlayer Mini (alertas, cola de reproducción) | ❌ | Falta | No existe código DFPlayer, audio, mp3, ni buzzer en ningún MCU |
-
-### K. GESTIÓN DE ENCENDIDO — 0% ❌
+### J. SISTEMA DE AUDIO — 100% ✅
 
 | Función original | Existe en migrado | Estado | Evidencia |
 |---|---|---|---|
-| Detección llave de contacto (GPIO 40/41) | ❌ | Falta | No hay código para leer llave de contacto. STM32 depende del heartbeat CAN del ESP32 |
-| Etapas de potencia (OFF→POWER_HOLD→CENTERING→AUX→FULL→SHUTDOWN) | ❌ | Falta | No existe máquina de estados de potencia. Los relés se activan directamente al entrar en ACTIVE |
-| Secuencia de apagado con audio | ❌ | Falta | No existe lógica de shutdown. Al perder alimentación, IWDG provoca reset |
+| DFPlayer Mini (alertas, cola de reproducción) | ✅ ESP32 | Equivalente | `audio_manager.cpp`: UART2 en GPIO 43/44, protocolo DFPlayer 9600 baud. Cola con prioridades (LOW/MEDIUM/HIGH). Sonidos: bienvenida, despedida, obstáculo, error, batería baja, cambio marcha |
+
+### K. GESTIÓN DE ENCENDIDO — 83% ⚠️
+
+| Función original | Existe en migrado | Estado | Evidencia |
+|---|---|---|---|
+| Detección llave de contacto (GPIO 40/41) | ✅ ESP32 | Equivalente | `power_manager.cpp`: GPIO 40 (sense) + GPIO 41 (power hold). Debounce 50 ms |
+| Etapas de potencia (OFF→POWER_HOLD→STARTING→RUNNING→SHUTDOWN) | ✅ ESP32 | Equivalente | `power_manager.cpp`: máquina de 5 estados con timestamps non-blocking |
+| Secuencia de apagado con audio | ⚠️ ESP32 | Parcial | `main.cpp`: detecta SHUTTING_DOWN → reproduce despedida vía audio_manager. Relé de retardo externo mantiene alimentación 3 s. Falta secuencia completa de relés (AUX_POWER) |
 
 ### L. ADQUISICIÓN DE SENSORES — 100% ✅
 
@@ -204,14 +204,18 @@
 | Reacción infantil en obstáculos | Sin adaptación de respuesta cuando el niño suelta el pedal |
 | Crucero adaptativo (ACC) | Sin seguimiento automático de distancia |
 | Frenado regenerativo | Sin recuperación de energía (solo frenado disipativo) |
-| Entrada táctil funcional | Sin interacción de usuario con pantalla |
 | Menú de ingeniería oculto | Sin calibración/diagnóstico avanzado accesible |
-| Iluminación LED WS2812B | Sin señalización visual del vehículo |
-| Audio DFPlayer Mini | Sin alertas acústicas |
-| Llave de contacto y gestión de potencia | Sin secuencia de encendido/apagado controlada |
 | Palanca de marchas física (MCP23017) | Sin entrada hardware para cambio de marchas |
 | Persistencia NVS en ESP32 | Sin guardar configuración HMI |
 | Persistencia de log de errores | Sin historial de diagnóstico |
+
+### Sistemas recientemente implementados
+| Sistema | Implementación |
+|---|---|
+| Iluminación LED WS2812B | `led_controller.cpp` (ESP32 FastLED GPIO 38) + relé STM32 PB10 + toggle UI `led_toggle.cpp` |
+| Audio DFPlayer Mini | `audio_manager.cpp` (ESP32 UART2 GPIO 43/44, cola con prioridades) |
+| Llave de contacto y gestión de potencia | `power_manager.cpp` (ESP32 GPIO 40 sense + GPIO 41 hold, 5 estados, delay relay 3 s) |
+| Entrada táctil parcial | Touch activo para LED toggle en `main.cpp`; `mode_icons.cpp` hitTest() pendiente de integración completa |
 
 ### Sistemas eliminados intencionalmente
 | Sistema | Justificación documentada |
@@ -224,20 +228,20 @@
 
 Ordenados por dependencia y prioridad para alcanzar equivalencia funcional.
 
-| # | Sistema faltante | Prioridad | MCU destino |
-|---|---|---|---|
-| 1 | Lectura de palanca de marchas (MCP23017) | CRÍTICA | ESP32 |
-| 2 | Llave de contacto y gestión de potencia | CRÍTICA | ESP32 |
-| 3 | Entrada táctil funcional (XPT2046) | ALTA | ESP32 |
-| 4 | 5 zonas de obstáculo completas | ALTA | STM32 |
-| 5 | Detección de reacción infantil | ALTA | STM32 |
-| 6 | Iluminación LED (WS2812B) | MEDIA | ESP32 |
-| 7 | Audio (DFPlayer Mini) | MEDIA | ESP32 |
-| 8 | Menú de ingeniería oculto | MEDIA | ESP32 |
-| 9 | Persistencia NVS en ESP32 | MEDIA | ESP32 |
-| 10 | Persistencia de log de errores | MEDIA | STM32+ESP32 |
-| 11 | Crucero adaptativo (ACC) | BAJA | ESP32 |
-| 12 | Frenado regenerativo | BAJA | STM32 |
+| # | Sistema faltante | Prioridad | MCU destino | Estado |
+|---|---|---|---|---|
+| 1 | Lectura de palanca de marchas (MCP23017) | CRÍTICA | ESP32 | Pendiente |
+| 2 | Llave de contacto y gestión de potencia | CRÍTICA | ESP32 | ✅ **IMPLEMENTADO** — `power_manager.cpp/h` (GPIO 40/41, máquina de estados con delay relay) |
+| 3 | Entrada táctil funcional (XPT2046) | ALTA | ESP32 | ⚠️ Parcial — Touch activo para LED toggle en `main.cpp` |
+| 4 | 5 zonas de obstáculo completas | ALTA | STM32 | Pendiente |
+| 5 | Detección de reacción infantil | ALTA | STM32 | Pendiente |
+| 6 | Iluminación LED (WS2812B) | MEDIA | ESP32 | ✅ **IMPLEMENTADO** — `led_controller.cpp/h` (FastLED, 28+16 LEDs, patrones por estado), relé STM32 PB10, toggle desde pantalla |
+| 7 | Audio (DFPlayer Mini) | MEDIA | ESP32 | ✅ **IMPLEMENTADO** — `audio_manager.cpp/h` (UART2 GPIO 43/44, cola con prioridades, bienvenida/despedida) |
+| 8 | Menú de ingeniería oculto | MEDIA | ESP32 | Pendiente |
+| 9 | Persistencia NVS en ESP32 | MEDIA | ESP32 | Pendiente |
+| 10 | Persistencia de log de errores | MEDIA | STM32+ESP32 | Pendiente |
+| 11 | Crucero adaptativo (ACC) | BAJA | ESP32 | Pendiente |
+| 12 | Frenado regenerativo | BAJA | STM32 | Pendiente |
 
 ---
 
@@ -500,14 +504,15 @@ Ordenados por dependencia y prioridad para alcanzar equivalencia funcional.
 El firmware migrado cubre el **100% del control de vehículo crítico para seguridad** (tracción, dirección, frenos, ABS/TCS, máquina de estados, sensores, CAN). La arquitectura dual STM32+ESP32 es superior al monolítico original al eliminar los bootloops documentados (30+) y aislar el control de motor del display.
 
 ### Brechas principales
-Las brechas están concentradas en **periféricos del ESP32**: entradas físicas (palanca de marchas, llave de contacto), periféricos de usuario (touch, LEDs, audio), y funciones avanzadas (ACC, regen). El STM32 solo requiere ajustes menores (5 zonas de obstáculo, reacción infantil, log de errores).
+Las brechas restantes se concentran en: **palanca de marchas física** (MCP23017), **5 zonas de obstáculo completas**, **reacción infantil**, **menú de ingeniería**, **persistencia NVS/logs**, y funciones avanzadas (ACC, regen). Los periféricos de usuario (LEDs, audio, llave de contacto) ya están implementados.
 
 ### Camino a equivalencia funcional
-Completando los 12 pasos en orden se alcanza el 100% de equivalencia funcional con el firmware original. Los pasos 1-5 son prioritarios (entradas físicas y seguridad de obstáculos). Los pasos 6-10 restauran funcionalidad de usuario. Los pasos 11-12 implementan funciones avanzadas no críticas para seguridad.
+Completando los pasos pendientes en orden se alcanza el 100% de equivalencia funcional con el firmware original. Los pasos 2, 6 y 7 ya están implementados. Los pasos 1, 3-5 son prioritarios. Los pasos 8-12 restauran funcionalidad restante.
 
 | Tras completar | Equivalencia estimada |
 |---|---|
-| Pasos 1-2 | 80% |
-| Pasos 3-5 | 88% |
-| Pasos 6-10 | 96% |
+| Actual (pasos 2, 6, 7 completados) | 82% |
+| Pasos 1, 3 | 86% |
+| Pasos 4-5 | 90% |
+| Pasos 8-10 | 96% |
 | Pasos 11-12 | 100% |

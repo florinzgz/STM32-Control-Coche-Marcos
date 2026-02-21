@@ -104,7 +104,7 @@ static void sendLedCommand(bool on) {
     frame.data_length_code = 1;
     frame.data[0]          = on ? 1 : 0;
     ESP32Can.writeFrame(frame);
-    ackBeginWait(0x20);  // Low byte of 0x120
+    ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
 }
 
 // ---------------------------------------------------------------------------
@@ -260,8 +260,11 @@ void loop() {
     // ---- WS2812B LED update ----
     {
         auto st = vehicleData.heartbeat().systemState;
-        bool braking = false;  // TODO: detect throttle decrease for brake lights
-        bool reverse = false;  // TODO: read gear from CAN for reverse detection
+        // Braking and reverse detection require gear echo from STM32 (not
+        // yet implemented in CAN protocol — tracked in audit Step 1).
+        // Until then, rear LEDs show default tail light pattern.
+        bool braking = false;
+        bool reverse = false;
         bool ledEnabled = vehicleData.lights().relayOn;
         led_ctrl::update(static_cast<uint8_t>(st), braking, reverse, ledEnabled);
     }

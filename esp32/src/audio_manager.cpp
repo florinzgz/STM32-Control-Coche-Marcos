@@ -4,8 +4,11 @@
 // DFPlayer Mini communication protocol: 10-byte serial commands at 9600 baud.
 // Frame format: 0x7E FF 06 CMD 00 PARAM1 PARAM2 CHKLO CHKHI 0xEF
 //
-// Non-blocking: commands are sent via UART, no delay() calls.
+// Non-blocking: commands are sent via UART, no delay() calls in update().
+// Note: init() uses short blocking delays (DFPlayer hardware requirement)
+// and must be called from setup() before the main loop begins.
 // Minimum command interval: 100 ms (DFPlayer processing time).
+// Maximum assumed playback duration: 5 s per sound (configurable).
 // =============================================================================
 
 #include "audio_manager.h"

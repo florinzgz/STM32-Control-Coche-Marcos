@@ -36,8 +36,8 @@ void init() {
 void update(uint8_t systemState, bool braking, bool reverse, bool enabled) {
     if (!initialized) return;
 
-    // If LED relay is OFF or system is in BOOT/STANDBY, keep all dark
-    if (!enabled || systemState <= 1) {
+    // If LED relay is OFF or system is in BOOT (0) / STANDBY (1), keep all dark
+    if (!enabled || systemState <= static_cast<uint8_t>(1)) {
         FastLED.clear(true);
         return;
     }

@@ -108,7 +108,9 @@ static void CAN_ConfigureFilters(void)
     filter.FilterID2    = CAN_ID_CMD_MODE;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 
-    /* Filter 2: Accept ESP32 service commands (0x110) and LED command (0x120) */
+    /* Filter 2: Accept ESP32 service commands (0x110) and LED command (0x120).
+     * Range filter accepts all IDs 0x110–0x120.  Intermediate IDs (0x111–0x11F)
+     * are not used by any module and are silently ignored by CAN_ProcessMessages(). */
     filter.FilterIndex  = 2;
     filter.FilterType   = FDCAN_FILTER_RANGE;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
@@ -662,9 +664,9 @@ void CAN_ProcessMessages(void) {
                  * the new state.                                        */
                 if (msg_len >= 1) {
                     LED_Relay_Set(rx_payload[0] != 0);
-                    CAN_SendCommandAck(0x20, ACK_OK);
+                    CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_OK);
                 } else {
-                    CAN_SendCommandAck(0x20, ACK_INVALID);
+                    CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
                 }
                 break;
                 
