@@ -162,7 +162,7 @@ This is a safety feature — calibration always reflects actual hardware state, 
 
 The LED toggle icon on the drive screen controls the WS2812B LED strip power relay on the STM32:
 
-```
+```text
 [Touch screen icon] → LedToggle::hitTest() → sendLedCommand()
     → CAN 0x120 (1 byte: ON/OFF) → STM32 CAN_ProcessMessages()
     → LED_Relay_Set(on/off) → GPIO PB10 → 5V power relay
@@ -315,7 +315,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 |---|---|---|
 | WS2812B LED strip (28 front + 16 rear = 44 LEDs, GPIO 38, FastLED) | `led_ctrl::init()`, `led_ctrl::update()` | `esp32/src/led_controller.cpp` |
 | State-based LED patterns (SystemState → color/animation) | `led_ctrl::update(state, braking, reverse, enabled)` | `esp32/src/led_controller.cpp` |
-| LED relay toggle via CAN 0x120 (screen icon → CAN → STM32 relay PB10 → 5V power → WS2812B) | `sendLedCommand()` + `ui::LedToggle::hitTest()` + `LED_Relay_Set()` | `esp32/src/main.cpp`, `esp32/src/ui/led_toggle.cpp`, `Core/Src/can_handler.c` |
+| LED relay toggle via CAN 0x120 (icon → relay → WS2812B power) | `sendLedCommand()` + `ui::LedToggle::hitTest()` + `LED_Relay_Set()` | `esp32/src/main.cpp`, `esp32/src/ui/led_toggle.cpp`, `Core/Src/can_handler.c` |
 | LED relay state confirmation via CAN 0x20A (STM32 → ESP32, 1 Hz) | `CAN_SendLightStatus()` | `Core/Src/can_handler.c` |
 | LED state persistence across reboots (NVS) | `config_store::setLedEnabled()` restored on boot | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 
@@ -354,7 +354,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **Drive screen mode flags are not CAN-driven** — mode flags (4×4/360°) in DriveScreen are set locally via touch, not from STM32 CAN echo | Mode state tracked in `main.cpp` `currentModeFlags`, not from `VehicleData` | `esp32/src/main.cpp` |
 | **Hardcoded vehicle physics constants** — wheelbase (0.95 m), track width (0.70 m), wheel circumference (1.1 m), max steer (54°) are compile-time `#define` | `vehicle_physics.h` | `Core/Inc/vehicle_physics.h` |
 | **Hardcoded INA226 shunt resistances** — 1 mΩ motor, 0.5 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/main.h` |
-| **STM32 calibration is runtime-only (by design)** — steering centering, encoder zero, sensor offsets are recomputed every power cycle. All user-facing persistence is handled by the ESP32-S3 via NVS (`config_store.cpp`). STM32 has no NVM storage requirement because it recomputes physical calibration from sensors on each boot. | No flash write in STM32; ESP32 NVS handles all user config persistence | STM32: all source files; ESP32: `config_store.cpp` |
+| **STM32 calibration is runtime-only (by design)** — steering centering, encoder zero, sensor offsets are recomputed every power cycle from hardware sensors | No flash write in STM32; calibration always reflects actual hardware state | All STM32 source files |
+| **ESP32-S3 is the single persistence authority** — all user config (mode, brightness, LED state, volume) persisted via NVS with CRC32 validation | `config_store.cpp` with dirty flag + periodic flush | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 | **CAN bus-off recovery limited to 5 retries then stops** — `CAN_BUSOFF_MAX_RETRIES` | `busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES` in `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
 | **Obstacle message 0x209 is informational-only** — STM32 parses ESP32 obstacle safety state for cross-validation and diagnostic logging, but does not use it for torque reduction | `Obstacle_ProcessSafetyCAN()` stores zone/status/stuck for diagnostics | `Core/Src/safety_system.c` |
 | **Encoder Z-index pulse not used** — PB4/EXTI4 not initialized; only A/B quadrature channels used | Comment block + no EXTI4 in `MX_GPIO_Init()` | `Core/Src/motor_control.c` lines 236–245, `Core/Src/main.c` |
