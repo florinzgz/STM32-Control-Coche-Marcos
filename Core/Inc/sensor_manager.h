@@ -42,6 +42,7 @@ void Temperature_StartConversion(void);
 void Temperature_ReadAll(void);
 void Temperature_PeriodicRescan(void);
 float Temperature_Get(uint8_t index);
+uint8_t Temperature_GetCount(void);
 
 /* ---- INA226 Current (I2C via TCA9548A) ---- */
 void Current_ReadAll(void);

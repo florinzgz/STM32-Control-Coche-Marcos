@@ -184,13 +184,23 @@ void CAN_SendHeartbeat(void) {
          *   Byte 2: fault_flags    (bitmask)
          *   Byte 3: error_code     (Safety_Error_t, specific fault ID for HMI)
          *   Byte 4: status_flags   (bitmask)
-         *            bit 0: STARTUP_INHIBIT active (Power-On Movement Prevention) */
+         *            bit 0: STARTUP_INHIBIT active (Power-On Movement Prevention)
+         *            bit 1: 4x4 mode active  (echo of mode applied by STM32)
+         *            bit 2: Tank turn active  (echo of mode applied by STM32)
+         *            bit 3-5: DS18B20 sensor count (0-5)                       */
+        const TractionState_t *ts = Traction_GetState();
+        uint8_t status_flags = 0;
+        if (Startup_IsInhibited()) status_flags |= 0x01U;
+        if (ts->mode4x4)          status_flags |= 0x02U;
+        if (ts->axisRotation)     status_flags |= 0x04U;
+        status_flags |= (uint8_t)((Temperature_GetCount() & 0x07U) << 3);
+
         uint8_t payload[5];
         payload[0] = heartbeat_counter++;
         payload[1] = (uint8_t)Safety_GetState();
         payload[2] = Safety_GetFaultFlags();
         payload[3] = (uint8_t)Safety_GetError();
-        payload[4] = Startup_IsInhibited() ? 0x01U : 0x00U;
+        payload[4] = status_flags;
 
         TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 5);
         last_tx_heartbeat = current_time;
