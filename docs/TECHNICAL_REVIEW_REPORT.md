@@ -196,7 +196,7 @@ Two-level LED control:
    - LIMP_HOME: Dim yellow/red (reduced power indication)
 
 **Why this design:**
-- The hardware relay on the STM32provides a physical safety cutoff — even if the ESP32 crashes with LEDs stuck in a bright pattern, the STM32 can kill power to prevent drain or fire risk.
+- The hardware relay on the STM32 provides a physical safety cutoff — even if the ESP32 crashes with LEDs stuck in a bright pattern, the STM32 can kill power to prevent drain or fire risk.
 - Brake/reverse detection is computed from CAN telemetry (traction + speed + gear), not from physical brake/reverse switches that don't exist on this platform.
 - Non-blocking flash patterns avoid any delay() calls that would disrupt the 20 FPS render loop.
 
