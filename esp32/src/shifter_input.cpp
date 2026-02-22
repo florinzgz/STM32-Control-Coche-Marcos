@@ -117,10 +117,12 @@ void update() {
 }
 
 Gear getGear() {
+    if (!initialized_) return Gear::NEUTRAL;
     return currentGear_;
 }
 
 uint8_t getGearRaw() {
+    if (!initialized_) return static_cast<uint8_t>(Gear::NEUTRAL);
     return static_cast<uint8_t>(currentGear_);
 }
 

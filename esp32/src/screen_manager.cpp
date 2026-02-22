@@ -17,8 +17,8 @@
 // Secret code timeout — code resets if taps are too slow
 static constexpr unsigned long SECRET_CODE_TIMEOUT_MS = 2000;
 
-// Expected tap sequence: left(8), right(9), left(8), right(9)
-// Left = x < SCREEN_W/2, Right = x >= SCREEN_W/2
+// Expected tap sequence: alternating left-right-left-right (4 taps)
+// Represents "8989" where left half = 8, right half = 9
 static constexpr bool SECRET_SEQUENCE[4] = { true, false, true, false }; // true=left, false=right
 
 ScreenManager::ScreenManager()

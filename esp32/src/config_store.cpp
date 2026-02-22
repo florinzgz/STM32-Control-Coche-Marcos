@@ -113,12 +113,12 @@ const Config& get() {
 }
 
 void setDriveMode(uint8_t mode) {
-    currentCfg_.driveMode = mode;
+    currentCfg_.driveMode = mode & 0x03;  // Only bits 0-1 are valid
     save(currentCfg_);
 }
 
 void setBrightness(uint8_t brightness) {
-    currentCfg_.brightness = brightness;
+    currentCfg_.brightness = brightness;  // Full 0-255 range valid
     save(currentCfg_);
 }
 

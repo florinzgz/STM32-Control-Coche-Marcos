@@ -73,7 +73,7 @@ void update(bool isTouched, int16_t rawX, int16_t rawY) {
                 lastTapMs_    = now;
             }
         }
-        // Always emit release
+        // Always emit release if no other event was generated
         if (pendingEvent_.type == EventType::NONE) {
             pendingEvent_ = { EventType::RELEASE, curX_, curY_ };
         }

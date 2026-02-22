@@ -213,6 +213,7 @@ static uint16_t obstacle_validated_mm    = 0xFFFF; /* After plausibility check *
  * the obstacle safety factors in warning/caution zones are tightened.
  * This detects an instinctive reaction to a perceived obstacle.           */
 #define CHILD_REACTION_THRESHOLD    10.0f   /* Pedal drop > 10% triggers    */
+#define CHILD_REACTION_MIN_PEDAL    10.0f   /* Min pedal % before detection */
 #define CHILD_REACTION_WINDOW_MS    500     /* Detection window (ms)        */
 #define CHILD_REACTION_BOOST_MS     2000    /* How long tighter factors last */
 #define CHILD_REACTION_WARNING_SCALE  0.5f  /* Warning zone during reaction */
@@ -1618,7 +1619,7 @@ void Obstacle_Update(void)
         if ((now - child_pedal_sample_tick) >= CHILD_REACTION_WINDOW_MS) {
             float drop = child_prev_pedal_pct - pedal_now;
             if (drop >= CHILD_REACTION_THRESHOLD &&
-                child_prev_pedal_pct > CHILD_REACTION_THRESHOLD) {
+                child_prev_pedal_pct > CHILD_REACTION_MIN_PEDAL) {
                 child_reaction_active = 1;
                 child_reaction_start  = now;
             }
@@ -1632,12 +1633,13 @@ void Obstacle_Update(void)
             child_reaction_active = 0;
         }
 
-        /* Apply tighter factors to warning/caution zones when active */
+        /* Apply tighter factors to warning/caution zones when active.
+         * Use distance thresholds (not float scale) for robust matching. */
         if (child_reaction_active) {
-            if (target_scale >= 0.7f && target_scale < 0.85f) {
+            if (dist >= dyn_warning && dist < dyn_caution) {
                 /* Warning zone: tighten from 0.7 → 0.5 */
                 target_scale = CHILD_REACTION_WARNING_SCALE;
-            } else if (target_scale >= 0.85f && target_scale < 0.95f) {
+            } else if (dist >= dyn_caution && dist < dyn_alert) {
                 /* Caution zone: tighten from 0.85 → 0.7 */
                 target_scale = CHILD_REACTION_CAUTION_SCALE;
             }
