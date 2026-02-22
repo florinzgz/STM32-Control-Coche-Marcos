@@ -649,10 +649,17 @@ void CAN_ProcessMessages(void) {
 
             case CAN_ID_OBSTACLE_SAFETY:
                 /* Obstacle safety state from ESP32 (0x209):
-                 *   Informational only — STM32 computes its own
-                 *   obstacle_scale from the raw distance in 0x208.
-                 *   This message is accepted but not parsed (reserved
-                 *   for future ESP32 HMI → STM32 coordination).         */
+                 *   Byte 0: zone (0–4)
+                 *   Byte 1: sensor status (0=WAITING, 1=INVALID, 2=VALID)
+                 *   Byte 2: stuck flag (0=OK, 1=stuck)
+                 *   Byte 3: reserved
+                 *
+                 * Informational: STM32 computes its own obstacle_scale
+                 * from raw distance in 0x208.  This frame is used for
+                 * cross-validation and diagnostic logging only.             */
+                if (msg_len >= 3) {
+                    Obstacle_ProcessSafetyCAN(rx_payload, msg_len);
+                }
                 break;
 
             case CAN_ID_CMD_LED:

@@ -2,6 +2,9 @@
 // ESP32-S3 — CAN Obstacle TX Module (implementation)
 //
 // Transmits CAN 0x208 (OBSTACLE_DISTANCE) matching the frozen protocol.
+// Also transmits CAN 0x209 (OBSTACLE_SAFETY) at 100 ms interval with
+// the ESP32's computed obstacle safety state (informational).
+//
 // Stops transmitting when sensor is in WAITING state (warmup) or
 // completely unavailable — STM32 timeout path handles fail-safe.
 //
@@ -19,18 +22,23 @@ namespace can_obstacle {
 // -------------------------------------------------------------------------
 // Module state
 // -------------------------------------------------------------------------
-static unsigned long lastTxMs_  = 0;
-static uint8_t       counter_   = 0;
-static bool          initialized_ = false;
+static unsigned long lastTxMs_      = 0;
+static unsigned long lastSafetyMs_  = 0;
+static uint8_t       counter_       = 0;
+static bool          initialized_   = false;
+
+// 0x209 transmit rate (100 ms, matching can_ids.h comment)
+static constexpr unsigned long SAFETY_RATE_MS = 100;
 
 // -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
 
 void init() {
-    lastTxMs_    = 0;
-    counter_     = 0;
-    initialized_ = true;
+    lastTxMs_     = 0;
+    lastSafetyMs_ = 0;
+    counter_      = 0;
+    initialized_  = true;
     Serial.println("[CAN_OBS] Obstacle TX initialized");
 }
 
@@ -38,37 +46,62 @@ void update() {
     if (!initialized_) return;
 
     unsigned long now = millis();
-    if (now - lastTxMs_ < can::OBSTACLE_RATE_MS) return;
-    lastTxMs_ = now;
-
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
 
-    // Failsafe: do not send frame if sensor is in warmup or uninitialized.
+    // Failsafe: do not send frames if sensor is in warmup or uninitialized.
     // STM32 will naturally enter its 500 ms CAN timeout path.
     if (rd.status == obstacle_sensor::SensorStatus::WAITING) {
         return;
     }
 
-    // Build CAN frame matching frozen protocol
-    CanFrame frame = {};
-    frame.identifier       = can::OBSTACLE_DISTANCE;  // 0x208
-    frame.extd             = 0;
-    frame.data_length_code = 5;
+    // ---- 0x208: Obstacle Distance (66 ms) ----
+    if (now - lastTxMs_ >= can::OBSTACLE_RATE_MS) {
+        lastTxMs_ = now;
 
-    // Bytes 0-1: distance_mm (uint16 LE)
-    frame.data[0] = static_cast<uint8_t>(rd.distance_mm & 0xFF);
-    frame.data[1] = static_cast<uint8_t>((rd.distance_mm >> 8) & 0xFF);
+        CanFrame frame = {};
+        frame.identifier       = can::OBSTACLE_DISTANCE;  // 0x208
+        frame.extd             = 0;
+        frame.data_length_code = 5;
 
-    // Byte 2: zone (0–3)
-    frame.data[2] = rd.zone;
+        // Bytes 0-1: distance_mm (uint16 LE)
+        frame.data[0] = static_cast<uint8_t>(rd.distance_mm & 0xFF);
+        frame.data[1] = static_cast<uint8_t>((rd.distance_mm >> 8) & 0xFF);
 
-    // Byte 3: sensor_health (0=unhealthy/stuck, 1=healthy)
-    frame.data[3] = (rd.healthy && !rd.stuck) ? 1 : 0;
+        // Byte 2: zone (0–4)
+        frame.data[2] = rd.zone;
 
-    // Byte 4: rolling counter (0–255)
-    frame.data[4] = counter_++;
+        // Byte 3: sensor_health (0=unhealthy/stuck, 1=healthy)
+        frame.data[3] = (rd.healthy && !rd.stuck) ? 1 : 0;
 
-    ESP32Can.writeFrame(frame);
+        // Byte 4: rolling counter (0–255)
+        frame.data[4] = counter_++;
+
+        ESP32Can.writeFrame(frame);
+    }
+
+    // ---- 0x209: Obstacle Safety State (100 ms) ----
+    if (now - lastSafetyMs_ >= SAFETY_RATE_MS) {
+        lastSafetyMs_ = now;
+
+        CanFrame frame = {};
+        frame.identifier       = can::OBSTACLE_SAFETY;  // 0x209
+        frame.extd             = 0;
+        frame.data_length_code = 4;
+
+        // Byte 0: zone (0–4)
+        frame.data[0] = rd.zone;
+
+        // Byte 1: sensor status (0=WAITING, 1=INVALID, 2=VALID)
+        frame.data[1] = static_cast<uint8_t>(rd.status);
+
+        // Byte 2: stuck flag (0=OK, 1=stuck)
+        frame.data[2] = rd.stuck ? 1 : 0;
+
+        // Byte 3: reserved
+        frame.data[3] = 0;
+
+        ESP32Can.writeFrame(frame);
+    }
 }
 
 } // namespace can_obstacle

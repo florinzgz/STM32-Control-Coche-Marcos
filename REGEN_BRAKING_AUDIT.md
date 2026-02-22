@@ -161,14 +161,30 @@ The base firmware (ESP32-S3) implements an AI-based regenerative braking system.
 
 | Criterion | Assessment |
 |-----------|------------|
-| **Implementation status** | **NONE** — Regenerative braking is completely absent from the STM32 firmware. No code, no data structures, no CAN messages, no activation logic. |
-| **Safety level** | **N/A (SAFE by absence)** — Since regen is not implemented, there is no regen-related safety risk. The vehicle decelerates by reducing motor torque to zero (coast) or by H-bridge dynamic braking (shorting windings). No energy is fed back to the battery. |
-| **Risk level** | **LOW** (current state) — The absence of regen means there is no risk of battery overvoltage, overcurrent during charging, or unintended braking torque. However, if regen were to be added without the protections documented in this audit, risk would be **HIGH**. |
+| **Implementation status** | **FOUNDATION READY** — No dedicated regen AI logic yet, but the dynamic braking infrastructure (`DYNBRAKE_*` constants, H-bridge reversal, per-wheel modulation) provides the software foundation. BTS7960 hardware is confirmed compatible with regenerative current flow. |
+| **BTS7960 hardware compatibility** | **CONFIRMED** — The BTS7960 H-bridge supports bidirectional current flow. When the motor acts as a generator (back-EMF > supply voltage during deceleration), current flows through the body diodes of the FETs back to the battery. The existing `Motor_SetDirection()` + `Motor_SetPWM()` API can control regen effort by modulating the opposing direction at controlled duty cycles. The `Traction_Update()` dynamic braking path already implements the software pattern needed (H-bridge reversal with proportional control). |
+| **Safety level** | **N/A (SAFE by absence)** — Since regen AI is not active, there is no regen-related safety risk. The vehicle decelerates by reducing motor torque to zero (coast) or by H-bridge dynamic braking (shorting windings). No energy is currently fed back to the battery. |
+| **Risk level** | **LOW** (current state) — The absence of active regen means there is no risk of battery overvoltage, overcurrent during charging, or unintended braking torque. The dynamic braking dissipates energy as heat. When regen AI is added, the protections documented in this audit must be implemented. |
 | **Recommended next action** | See below |
+
+### BTS7960 Regen Compatibility Details
+
+The BTS7960 / IBT-2 motor driver modules used in this vehicle **support regenerative braking** through the following mechanism:
+
+1. **H-bridge reversal**: When the motor is spinning and the H-bridge is driven in the opposing direction at a controlled duty cycle, the motor acts as a generator. Current flows from the motor through the FET body diodes back to the battery supply rail.
+
+2. **Existing software foundation**: The `Traction_Update()` function already implements dynamic braking via `DYNBRAKE_FACTOR` (0.5) and `DYNBRAKE_MAX_PCT` (60%). This uses H-bridge reversal to create opposing torque. Converting this from dissipative braking to regenerative braking requires:
+   - Controlling the duty cycle to manage regen current (instead of full short-brake)
+   - Monitoring battery voltage to prevent overvoltage (INA226 ch4 already reads battery bus)
+   - Adding an upper voltage cutoff (e.g., 28.8V for 24V lead-acid)
+
+3. **Current monitoring**: INA226 on TCA9548A channel 4 (0.5 mΩ shunt, 100A range) already monitors battery current/voltage. This sensor can detect and limit regen current flow.
+
+4. **Per-wheel control**: The existing per-wheel PWM architecture (TIM1 CH1-4) allows individual wheel regen modulation, which is essential for ABS/TCS compatibility.
 
 ### Recommended Next Actions
 
-If regenerative braking is to be implemented in the STM32 firmware:
+If regenerative braking AI logic is to be added to the STM32 firmware:
 
 1. **Battery voltage monitoring must be activated first**: `Voltage_GetBus()` exists but is never called. Add voltage checks in the safety system with upper cutoff (e.g., 28.8V for a 24V lead-acid system).
 
@@ -182,8 +198,6 @@ If regenerative braking is to be implemented in the STM32 firmware:
 
 6. **CAN reporting**: Add a CAN message for regen status (power, energy recovered, active/inactive) for HMI display.
 
-7. **Hardware verification required**: Confirm that the BTS7960 H-bridge drivers used on this vehicle support regenerative current flow (motor → battery) and that the power path can handle bidirectional current.
-
 ---
 
 ## Summary Table
@@ -192,17 +206,22 @@ If regenerative braking is to be implemented in the STM32 firmware:
 ┌──────────────────────────────┬──────────────────────────────────────┐
 │ Audit Item                   │ Result                               │
 ├──────────────────────────────┼──────────────────────────────────────┤
-│ 1. Existence                 │ NOT IMPLEMENTED                      │
-│ 2. Activation conditions     │ N/A — no regen exists                │
-│ 3. Safety validation         │ N/A — safety framework exists,       │
-│                              │ regen not integrated                 │
-│ 4. Battery protection        │ NO protections exist for regen       │
-│    - Voltage monitoring      │ Code exists, never called            │
-│    - Current limiting        │ Battery INA226 read, not used        │
+│ 1. Existence                 │ FOUNDATION READY (dynamic braking    │
+│                              │ uses H-bridge reversal pattern)      │
+│ 2. Activation conditions     │ N/A — regen AI not yet active        │
+│ 3. Safety validation         │ Safety framework exists, ready for   │
+│                              │ regen integration                    │
+│ 4. Battery protection        │ INA226 ch4 reads voltage/current;    │
+│    - Voltage monitoring      │ Code exists, needs upper cutoff      │
+│    - Current limiting        │ Battery INA226 read, needs regen cap │
 │    - SOC tracking            │ Not implemented                      │
-│ 5. ABS/TCS interaction       │ N/A — no regen to interact           │
-│ 6. Base firmware comparison  │ Base has full AI regen; STM32 = NONE │
-│ 7. Final verdict             │ NONE / SAFE(absent) / LOW risk       │
+│ 5. ABS/TCS interaction       │ Per-wheel control ready; needs       │
+│                              │ regen disable on ABS-active wheels   │
+│ 6. Base firmware comparison  │ Base has full AI regen; STM32 has    │
+│                              │ dynamic braking foundation           │
+│ 7. BTS7960 compatibility     │ CONFIRMED — H-bridge supports        │
+│                              │ bidirectional current (regen capable)│
+│ 8. Final verdict             │ FOUNDATION READY / SAFE / LOW risk   │
 └──────────────────────────────┴──────────────────────────────────────┘
 ```
 

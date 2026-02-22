@@ -23,6 +23,7 @@ static constexpr const char* KEY_CRC       = "crc";
 static Preferences prefs_;
 static Config      currentCfg_;
 static bool        initialized_ = false;
+static bool        dirty_       = false;     // Unsaved changes pending
 
 // -------------------------------------------------------------------------
 // CRC32 computation (standard CRC-32/ISO-HDLC)
@@ -114,23 +115,33 @@ const Config& get() {
 
 void setDriveMode(uint8_t mode) {
     currentCfg_.driveMode = mode & 0x03;  // Only bits 0-1 are valid
-    save(currentCfg_);
+    dirty_ = true;
 }
 
 void setBrightness(uint8_t brightness) {
     currentCfg_.brightness = brightness;  // Full 0-255 range valid
-    save(currentCfg_);
+    dirty_ = true;
 }
 
 void setLedEnabled(bool enabled) {
     currentCfg_.ledEnabled = enabled;
-    save(currentCfg_);
+    dirty_ = true;
 }
 
 void setAudioVolume(uint8_t volume) {
     if (volume > 30) volume = 30;
     currentCfg_.audioVolume = volume;
+    dirty_ = true;
+}
+
+void flush() {
+    if (!dirty_) return;
     save(currentCfg_);
+    dirty_ = false;
+}
+
+bool isDirty() {
+    return dirty_;
 }
 
 void factoryReset() {

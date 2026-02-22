@@ -63,6 +63,10 @@ static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, b
 static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
 
+// ---- NVS flush interval ----
+static unsigned long lastNvsFlushMs = 0;
+static constexpr unsigned long NVS_FLUSH_INTERVAL_MS = 10000;  // 10 seconds
+
 // ---- Command ACK tracking (Phase 13) ----
 // Non-blocking: records when a command was sent and checks for ACK arrival.
 // UI state is only updated once ACK is received or timeout expires.
@@ -126,7 +130,7 @@ static void sendGearCommand(uint8_t gear) {
     frame.identifier       = can::CMD_MODE;
     frame.extd             = 0;
     frame.data_length_code = 2;
-    frame.data[0]          = 0;     // mode flags (no change)
+    frame.data[0]          = currentModeFlags;  // Include current mode flags
     frame.data[1]          = gear;
     ESP32Can.writeFrame(frame);
     ackBeginWait(can::CMD_MODE & 0xFF);  // Low byte of 0x102 = 0x02
@@ -337,6 +341,7 @@ void loop() {
     // Farewell audio on shutdown
     if (power_mgr::getState() == power_mgr::PowerState::SHUTTING_DOWN &&
         !farewellPlayed) {
+        config_store::flush();  // Persist any unsaved changes before shutdown
         audio::play(audio::Sound::FAREWELL, audio::Priority::HIGH);
         farewellPlayed = true;
         welcomePlayed  = false;
@@ -349,6 +354,12 @@ void loop() {
 
     // ---- Audio update ----
     audio::update();
+
+    // ---- Periodic NVS flush (mitigate write wear) ----
+    if ((now - lastNvsFlushMs) >= NVS_FLUSH_INTERVAL_MS) {
+        lastNvsFlushMs = now;
+        config_store::flush();
+    }
 
     // ---- WS2812B LED update ----
     {
