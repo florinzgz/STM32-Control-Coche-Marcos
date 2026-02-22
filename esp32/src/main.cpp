@@ -101,7 +101,7 @@ static void ackBeginWait(uint8_t cmdIdLow) {
 }
 
 /// Call from loop() after can_rx::poll() to check for ACK arrival or timeout.
-static void ackCheck(const vehicle::VehicleData& data) {
+static void ackCheck(vehicle::VehicleData& data) {
     if (!ackPending) return;
 
     // Check if matching ACK arrived
@@ -121,6 +121,7 @@ static void ackCheck(const vehicle::VehicleData& data) {
     if (millis() - ackSentMs >= can::ACK_TIMEOUT_MS) {
         ackPending  = false;
         ackTimedOut = true;
+        data.setAckTimeout(millis());
         Serial.printf("[ACK] TIMEOUT waiting for cmd 0x%02X\n", ackExpectedCmd);
     }
 }

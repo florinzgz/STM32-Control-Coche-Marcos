@@ -186,7 +186,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 | ESP32 mode confirmation sync | ✅ | `esp32/src/main.cpp` L271 | Heartbeat echo → local state |
 | Gear display P/R/N/D1/D2 | ✅ | `esp32/src/ui/gear_display.*` | From MCP23017 shifter |
 | NVS config persistence | ✅ | `esp32/src/config_store.cpp` | CRC32, dirty flag, 10s flush |
-| ACK visual feedback | ⏳ | — | ACK decoded, no visual indication yet |
+| ACK visual feedback | ✅ | `esp32/src/screens/drive_screen.cpp` | OK/REJECTED/TIMEOUT in top bar, 1.5s auto-clear |
 
 ### Phase 5 — Experience Features (~75%)
 
@@ -208,9 +208,9 @@ Todos los CAN IDs son únicos entre ambos MCU:
 
 ## LO QUE FALTA POR IMPLEMENTAR
 
-### Prioridad ALTA (funcionalidad incompleta)
+### ~~Prioridad ALTA (funcionalidad incompleta)~~
 
-1. **ACK visual feedback en pantalla** — El ESP32 recibe y procesa ACK frames (0x103) pero no muestra indicación visual al conductor (200ms "Accepted"/"Rejected" en DriveScreen). Requiere cambios en `drive_screen.cpp`.
+~~1. **ACK visual feedback en pantalla**~~ ✅ RESUELTO — DriveScreen ahora muestra indicador "OK" (verde), "REJECTED" (rojo) o "TIMEOUT" (amarillo) en la barra superior durante 1.5 s cuando se recibe un ACK o se agota el timeout. Implementado en `drive_screen.cpp` con dirty-flag partial redraw.
 
 ### Prioridad MEDIA (requiere hardware)
 
@@ -228,7 +228,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 
 ## CONCLUSIÓN
 
-Las cuatro funcionalidades principales de Phase 3-5 (DS18B20 hot-plug, mode flags, audio events, LED brake/reverse) están **completamente implementadas** y verificadas sin conflictos de pines ni código. Los cambios realizados en esta revisión cierran los gaps menores identificados (datos stale en hot-plug, echo de mode flags, volumen de audio desde NVS).
+Las funcionalidades de Phase 3-5 (DS18B20 hot-plug con stale data cleanup, mode flags echo en heartbeat, audio volume desde NVS, ACK visual feedback, LED brake/reverse) están **completamente implementadas** y verificadas. Los únicos items pendientes son optimizaciones de baja prioridad (DMA ADC, OneWire DMA, sensor fusion) y el tuning del PID de dirección que requiere hardware real.
 
 No se han encontrado conflictos de:
 - **Pines GPIO** (STM32 ni ESP32)

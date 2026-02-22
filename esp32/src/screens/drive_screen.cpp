@@ -29,6 +29,7 @@
 #include "ui/obstacle_sensor.h"
 #include "ui/runtime_monitor.h"
 #include "shifter_input.h"
+#include <Arduino.h>
 #include <cstdio>
 #include <cstring>
 
@@ -52,6 +53,13 @@ void DriveScreen::onEnter() {
     prevMode_        = {};
     prevObstacleCm_  = 0;
     prevLedOn_       = false;
+
+    // Reset ACK indicator state
+    ackLastShownMs_    = 0;
+    ackTrackedAckMs_   = 0;
+    ackTrackedTmoMs_   = 0;
+    ackDisplayResult_  = 0;
+    ackIndicatorDirty_ = false;
 }
 
 // -------------------------------------------------------------------------
@@ -112,7 +120,7 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
         }
     }
 
-    // Mode flags — read from vehicle data (set locally by touch, eventually from STM32 CAN echo)
+    // Mode flags — read from vehicle data (confirmed by STM32 heartbeat echo)
     {
         uint8_t flags = data.mode().modeFlags;
         curMode_.is4x4     = (flags & 0x01) != 0;
@@ -124,6 +132,35 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
 
     // LED relay state from STM32
     curLedOn_ = data.lights().relayOn;
+
+    // ACK visual feedback: detect new ACK or timeout events
+    {
+        unsigned long now = millis();
+        const auto& ad = data.ack();
+
+        // New ACK received from STM32
+        if (ad.timestampMs > 0 && ad.timestampMs != ackTrackedAckMs_) {
+            ackTrackedAckMs_ = ad.timestampMs;
+            ackDisplayResult_ = (ad.result == can::AckResult::OK) ? 1 : 2;
+            ackLastShownMs_   = now;
+            ackIndicatorDirty_ = true;
+        }
+
+        // New ACK timeout detected
+        unsigned long tmo = data.ackTimeoutMs();
+        if (tmo > 0 && tmo != ackTrackedTmoMs_) {
+            ackTrackedTmoMs_  = tmo;
+            ackDisplayResult_ = 3;
+            ackLastShownMs_   = now;
+            ackIndicatorDirty_ = true;
+        }
+
+        // Auto-clear after 1.5 seconds
+        if (ackDisplayResult_ != 0 && (now - ackLastShownMs_) >= 1500) {
+            ackDisplayResult_ = 0;
+            ackIndicatorDirty_ = true;
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -242,6 +279,9 @@ void DriveScreen::draw() {
     }
     ui::LedToggle::draw(tft, curLedOn_, prevLedOn_);
 
+    // ACK visual feedback indicator (brief text near top bar)
+    drawAckIndicator();
+
     // Copy current values to previous for next frame
     memcpy(prevTraction_, curTraction_, sizeof(prevTraction_));
     memcpy(prevTemp_, curTemp_, sizeof(prevTemp_));
@@ -278,4 +318,37 @@ void DriveScreen::drawSpeed() {
     tft.drawString(buf, ui::SCREEN_W / 2, ui::SPEED_Y);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
+}
+
+// -------------------------------------------------------------------------
+// ACK visual feedback — brief indicator in top bar after mode/gear command
+// -------------------------------------------------------------------------
+static constexpr int16_t ACK_X = 200;   // Centered in top bar
+static constexpr int16_t ACK_Y = 2;
+static constexpr int16_t ACK_W = 80;
+static constexpr int16_t ACK_H = 16;
+
+void DriveScreen::drawAckIndicator() {
+    if (!ackIndicatorDirty_) return;
+    ackIndicatorDirty_ = false;
+
+    // Clear indicator area
+    tft.fillRect(ACK_X, ACK_Y, ACK_W, ACK_H, ui::COL_BG);
+
+    if (ackDisplayResult_ == 0) return;  // Nothing to show
+
+    const char* text;
+    uint16_t color;
+    switch (ackDisplayResult_) {
+        case 1:  text = "OK";       color = ui::COL_GREEN;  break;
+        case 2:  text = "REJECTED"; color = ui::COL_RED;    break;
+        case 3:  text = "TIMEOUT";  color = ui::COL_YELLOW; break;
+        default: return;
+    }
+
+    tft.setTextColor(color, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.setTextDatum(TC_DATUM);
+    tft.drawString(text, ACK_X + ACK_W / 2, ACK_Y + 2);
+    tft.setTextDatum(TL_DATUM);
 }
