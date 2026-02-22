@@ -40,7 +40,7 @@ The STM32 is the **safety authority** and sole actuator controller. All actuator
 | Pedal ADC reading (ADC1, 12-bit, PA3) | `Pedal_Update()` | `Core/Src/sensor_manager.c` |
 | 4× wheel speed (EXTI pulse counting with debounce) | `Wheel_FL_IRQHandler()` etc., `Wheel_ComputeSpeed()` | `Core/Src/sensor_manager.c` |
 | 6× INA226 current/voltage via TCA9548A I2C mux | `Current_ReadAll()`, `Voltage_GetBus()` | `Core/Src/sensor_manager.c` |
-| 5× DS18B20 temperature (OneWire bit-bang, ROM search) | `Temperature_ReadAll()`, `OW_SearchAll()` | `Core/Src/sensor_manager.c` |
+| 5× DS18B20 temperature (OneWire bit-bang, ROM search + periodic hot-plug rescan) | `Temperature_ReadAll()`, `OW_SearchAll()`, `Temperature_PeriodicRescan()` | `Core/Src/sensor_manager.c` |
 | I2C bus recovery (NXP AN10216 SCL clock cycling) | `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` |
 | Boot validation checklist (6 pre-ACTIVE checks) | `BootValidation_Run()` | `Core/Src/boot_validation.c` |
 | Service mode (module enable/disable/fault tracking) | `ServiceMode_Init()`, `ServiceMode_DisableModule()` | `Core/Src/service_mode.c` |
@@ -63,7 +63,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | Responsibility | Module / Class | File |
 |---|---|---|
 | CAN bus polling and frame decoding | `can_rx::poll()`, static decoders per CAN ID | `esp32/src/can_rx.cpp` |
-| Vehicle data storage (passive container) | `VehicleData` class | `esp32/src/vehicle_data.cpp` |
+| Vehicle data storage (passive container + local mode state) | `VehicleData` class | `esp32/src/vehicle_data.cpp` |
 | Screen state machine (BOOT/STANDBY/DRIVE/SAFE/ERROR) | `ScreenManager` class | `esp32/src/screen_manager.cpp` |
 | Boot screen (title + CAN link status) | `BootScreen` | `esp32/src/screens/boot_screen.cpp` |
 | Standby screen (temperatures + fault flags) | `StandbyScreen` | `esp32/src/screens/standby_screen.cpp` |
@@ -275,6 +275,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | LED toggle button (top bar, CAN 0x120 command) | `ui::LedToggle::hitTest()` | `esp32/src/ui/led_toggle.cpp` |
 | Obstacle proximity 5-zone color coding (GRAY/GREEN/CYAN/YELLOW/ORANGE/RED) | `proximityColor()` | `esp32/src/ui/ui_common.h` |
 | Drive screen gear display from physical shifter (MCP23017 → GearDisplay) | `shifter::getGearRaw()` mapping | `esp32/src/screens/drive_screen.cpp` |
+| Drive screen mode flags from VehicleData (4×4/360° icons highlight correctly) | `data.mode().modeFlags` in `DriveScreen::update()` | `esp32/src/screens/drive_screen.cpp`, `esp32/src/vehicle_data.h` |
 
 ### ESP32 Input & Persistence
 
@@ -295,6 +296,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | 6× INA226 current/voltage via TCA9548A I2C multiplexer | `Current_ReadAll()`, `TCA9548A_SelectChannel()`, `INA226_ReadReg()` | `Core/Src/sensor_manager.c` |
 | Per-channel shunt resistance (1 mΩ motor, 0.5 mΩ battery) | `INA226_SHUNT_MOHM_*` constants in channel selection logic | `Core/Src/sensor_manager.c` |
 | 5× DS18B20 temperature via OneWire (bit-bang, ROM search, CRC-8) | `OW_SearchAll()`, `OW_ReadTemperature()`, `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` |
+| DS18B20 hot-plug detection (periodic ROM re-enumeration every 10 s) | `Temperature_PeriodicRescan()` called from 1000 ms tier | `Core/Src/sensor_manager.c`, `Core/Src/main.c` |
 | I2C bus recovery (NXP AN10216, SCL cycling, 16 toggles) | `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` |
 | I2C failure escalation (3 fails → recovery, 2 recoveries → SAFE) | `i2c_fail_count`, `i2c_recovery_attempts` logic | `Core/Src/sensor_manager.c` |
 | E6B2-CWZ6C encoder read-only interface (hardware integrated, not used for control) | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_Reset()` | `Core/Src/encoder_reader.c` |
@@ -308,6 +310,10 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Priority-based sound queue (LOW/MEDIUM/HIGH) | `audio::Priority` enum | `esp32/src/audio_manager.h` |
 | Sound catalog (WELCOME, FAREWELL, OBSTACLE_WARN, ERROR_ALERT, BATTERY_LOW, GEAR_CHANGE) | `audio::Sound` enum | `esp32/src/audio_manager.h` |
 | Welcome/farewell audio on power state transitions | Logic in `loop()` | `esp32/src/main.cpp` |
+| Gear change audio confirmation (on shifter change) | `audio::play(GEAR_CHANGE)` in shifter update block | `esp32/src/main.cpp` |
+| Obstacle proximity warning (zone ≥ 3, 2 s debounce) | `audio::play(OBSTACLE_WARN)` in CAN-triggered audio block | `esp32/src/main.cpp` |
+| Battery low warning (<20 V, one-shot with recovery reset) | `audio::play(BATTERY_LOW)` in CAN-triggered audio block | `esp32/src/main.cpp` |
+| Error/Safe state alert (on transition to SAFE or ERROR) | `audio::play(ERROR_ALERT)` in CAN-triggered audio block | `esp32/src/main.cpp` |
 
 ### Lighting
 
@@ -315,6 +321,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 |---|---|---|
 | WS2812B LED strip (28 front + 16 rear = 44 LEDs, GPIO 38, FastLED) | `led_ctrl::init()`, `led_ctrl::update()` | `esp32/src/led_controller.cpp` |
 | State-based LED patterns (SystemState → color/animation) | `led_ctrl::update(state, braking, reverse, enabled)` | `esp32/src/led_controller.cpp` |
+| Brake light detection (traction avg ≤ 5% while speed > 0 → rear bright red) | Braking logic in LED update block | `esp32/src/main.cpp` |
+| Reverse light detection (shifter gear = Reverse → rear white backup) | `shifter::getGearRaw() == 1` in LED update block | `esp32/src/main.cpp` |
 | LED relay toggle via CAN 0x120 (icon → relay → WS2812B power) | `sendLedCommand()` + `ui::LedToggle::hitTest()` + `LED_Relay_Set()` | `esp32/src/main.cpp`, `esp32/src/ui/led_toggle.cpp`, `Core/Src/can_handler.c` |
 | LED relay state confirmation via CAN 0x20A (STM32 → ESP32, 1 Hz) | `CAN_SendLightStatus()` | `Core/Src/can_handler.c` |
 | LED state persistence across reboots (NVS) | `config_store::setLedEnabled()` restored on boot | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
@@ -349,9 +357,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **Steering PID is P-only** (kp=0.09, ki=0.0, kd=0.0) — no integral or derivative terms | `steering_pid = {0.09f, 0.0f, 0.0f, ...}` | `Core/Src/motor_control.c` line 199 |
 | **Pedal is single-channel ADC** — no redundant sensor or cross-check | Only `hadc1` on `ADC_CHANNEL_4` | `Core/Src/main.c`, `Core/Src/sensor_manager.c` |
 | **OneWire bit-bang timing is approximate** — busy-wait loop calibrated for 170 MHz | `OW_DelayUs()` uses NOP loop: `us * 42` | `Core/Src/sensor_manager.c` line 341 |
-| **DS18B20 ROM search runs only once at init** — hot-plug sensors not detected | `OW_SearchAll()` called only from `Sensor_Init()` | `Core/Src/sensor_manager.c` line 619 |
+| **DS18B20 hot-plug rescan is blocking** — `Temperature_PeriodicRescan()` calls `OW_SearchAll()` which uses busy-wait OneWire timing; rescan every 10 s adds ~5 ms blocking time | `Temperature_PeriodicRescan()` with `OW_RESCAN_INTERVAL_MS = 10000` | `Core/Src/sensor_manager.c` |
 | **Fallback single-sensor read when no ROMs discovered** — `Temperature_ReadAll()` reads only `temperatures[0]` via Skip ROM | Fallback branch in `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` lines 561–573 |
-| **Drive screen mode flags are not CAN-driven** — mode flags (4×4/360°) in DriveScreen are set locally via touch, not from STM32 CAN echo | Mode state tracked in `main.cpp` `currentModeFlags`, not from `VehicleData` | `esp32/src/main.cpp` |
+| **Drive screen mode flags are ESP32-local** — mode flags (4×4/360°) are stored in `VehicleData.ModeData` from local ESP32 touch input, not from STM32 CAN echo; display is correct but not confirmed by STM32 | Mode set via `vehicleData.setMode()` in `main.cpp`; no STM32 mode echo CAN message exists | `esp32/src/main.cpp`, `esp32/src/vehicle_data.h` |
 | **Hardcoded vehicle physics constants** — wheelbase (0.95 m), track width (0.70 m), wheel circumference (1.1 m), max steer (54°) are compile-time `#define` | `vehicle_physics.h` | `Core/Inc/vehicle_physics.h` |
 | **Hardcoded INA226 shunt resistances** — 1 mΩ motor, 0.5 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/main.h` |
 | **STM32 calibration is runtime-only (by design)** — steering centering, encoder zero, sensor offsets are recomputed every power cycle from hardware sensors | No flash write in STM32; calibration always reflects actual hardware state | All STM32 source files |
@@ -381,8 +389,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | ~~4~~ | ~~**Calibration persistence (STM32)**~~ | ~~Steering / Sensors~~ | ~~STM32 flash or EEPROM driver~~ | ~~`Steering_Init()`, `SteeringCentering_Complete()`~~ | ✅ NOT NEEDED — by design, STM32 recomputes calibration from hardware sensors on each boot; all user-facing persistence is handled by ESP32-S3 NVS |
 | ~~5~~ | ~~**Service mode persistence (STM32)**~~ | ~~Service Mode~~ | ~~STM32 flash or EEPROM driver~~ | ~~`ServiceMode_Init()`~~ | ✅ NOT NEEDED — service mode defaults to all-enabled on boot (safe default); ESP32-S3 NVS is the single persistence authority for user configuration |
 | 6 | **Redundant pedal sensor** — single ADC channel with no cross-check; code structure accepts only one value | Sensors / Safety | Second ADC channel or hall sensor hardware | `Pedal_Update()` in `sensor_manager.c` | ❌ PENDING |
-| ~~7~~ | ~~**ESP32 mode/gear CAN feedback to DriveScreen**~~ | ~~Display / UI~~ | ~~—~~ | ~~—~~ | ⚠️ PARTIAL — Gear now from physical shifter; mode flags still local |
-| 8 | **Hot-plug DS18B20 detection** — ROM search runs only at init; adding/removing sensors at runtime is not detected | Sensors | Periodic `OW_SearchAll()` or change-detection mechanism | `Sensor_Init()` in `sensor_manager.c` | ❌ PENDING |
+| ~~7~~ | ~~**ESP32 mode/gear CAN feedback to DriveScreen**~~ | ~~Display / UI~~ | ~~—~~ | ~~—~~ | ✅ RESOLVED — Gear from physical shifter (`shifter::getGearRaw()`); mode flags from `VehicleData.ModeData` (set locally, CAN echo pending) |
+| ~~8~~ | ~~**Hot-plug DS18B20 detection**~~ | ~~Sensors~~ | ~~—~~ | ~~`Sensor_Init()` in `sensor_manager.c`~~ | ✅ RESOLVED — `Temperature_PeriodicRescan()` every 10 s in 1000 ms tier |
 | ~~9~~ | ~~**Engineering screen exit mechanism**~~ | ~~Display / UI~~ | ~~—~~ | ~~`screen_manager.cpp`~~ | ✅ RESOLVED — EXIT button on main menu, `exitRequested_` flag resets `engineeringActive_` |
 | ~~10~~ | ~~**NVS write wear mitigation**~~ | ~~ESP32 / Persistence~~ | ~~—~~ | ~~`config_store.cpp`~~ | ✅ RESOLVED — dirty flag + periodic `flush()` every 10 s + shutdown flush |
 
@@ -444,11 +452,11 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 ### PHASE 3 — Feedback & Sensors
 
 **Goals:**
-- Add ESP32 obstacle sensor driver to populate CAN ID 0x208
-- Implement CAN ID 0x209 parsing on STM32
+- ~~Add ESP32 obstacle sensor driver to populate CAN ID 0x208~~ ✅ DONE
+- ~~Implement CAN ID 0x209 parsing on STM32~~ ✅ DONE
 - Evaluate and implement redundant pedal sensor path
 - Evaluate PID I-term and D-term for steering
-- Add periodic DS18B20 ROM search for hot-plug detection
+- ~~Add periodic DS18B20 ROM search for hot-plug detection~~ ✅ DONE
 
 **What must NOT be touched yet:**
 - ESP32 UI screen layout
@@ -457,17 +465,17 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 - CAN heartbeat format or timing
 
 **Exit criteria:**
-- ESP32 sends valid obstacle distance frames (0x208) with incrementing rolling counter
-- STM32 obstacle backstop limiter correctly applies 3-tier torque scaling from live sensor data
+- ~~ESP32 sends valid obstacle distance frames (0x208) with incrementing rolling counter~~ ✅ DONE
+- ~~STM32 obstacle backstop limiter correctly applies 5-zone torque scaling from live sensor data~~ ✅ DONE
 - Steering PID overshoot is ≤ 5 % of setpoint under step input (if I/D terms added)
-- DS18B20 hot-plug: adding a sensor mid-operation is detected within 10 s
+- ~~DS18B20 hot-plug: adding a sensor mid-operation is detected within 10 s~~ ✅ DONE (`Temperature_PeriodicRescan()` every 10 s)
 
 ---
 
 ### PHASE 4 — Driver Interaction
 
 **Goals:**
-- Wire ESP32 CAN mode/gear state into DriveScreen UI
+- ~~Wire ESP32 CAN mode/gear state into DriveScreen UI~~ ✅ DONE (gear from shifter, mode from VehicleData.ModeData)
 - Improve ESP32 ACK feedback to driver for mode/gear changes
 
 **Architecture note:** All user-facing persistence is handled by the ESP32-S3 via NVS (`config_store.cpp`). The STM32 deliberately recomputes calibration from hardware sensors (inductive centering, encoder quadrature, INA226, DS18B20) on each boot — this is a safety feature ensuring calibration always reflects actual hardware state. No STM32 flash persistence is needed.
@@ -478,7 +486,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 - CAN protocol message formats (add new IDs only, do not modify existing)
 
 **Exit criteria:**
-- DriveScreen shows current gear (P/R/N/D1/D2) received from STM32 via CAN
+- ~~DriveScreen shows current gear (P/R/N/D1/D2) from physical shifter~~ ✅ DONE
 - Mode change ACK is visually indicated on DriveScreen within 200 ms
 
 ---
@@ -486,8 +494,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 ### PHASE 5 — Experience Features
 
 **Goals:**
-- Implement audio feedback (if hardware added)
-- Implement lighting control (if hardware added)
+- ~~Implement audio feedback~~ ✅ DONE (gear change, obstacle warning, battery low, error alert)
+- ~~Implement lighting control~~ ✅ DONE (brake lights via traction/speed, reverse lights via shifter)
 - Add sensor fusion (e.g., wheel speed + current for improved traction estimation)
 - Optimize OneWire timing (DMA-based UART or hardware timer)
 - Convert blocking ADC pedal read to DMA or interrupt-driven
@@ -509,9 +517,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 > Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
 > Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
 
-### Overall Migration Percentage: **86%**
+### Overall Migration Percentage: **89%**
 
-The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **86% complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. The ESP32-S3 is the single persistence authority via NVS — STM32 recomputes calibration from hardware sensors on each boot (by design). BTS7960 motor drivers support regenerative braking via H-bridge reversal; the dynamic braking foundation is already in place. Remaining work concentrates on advanced AI algorithms and hardware-dependent features.
+The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **89% complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. Audio events (gear change, obstacle warning, battery low, error alert) are now CAN-triggered. LED brake/reverse lights are driven from real vehicle state (shifter + traction data). The ESP32-S3 is the single persistence authority via NVS — STM32 recomputes calibration from hardware sensors on each boot (by design). BTS7960 motor drivers support regenerative braking via H-bridge reversal; the dynamic braking foundation is already in place. Remaining work concentrates on advanced AI algorithms and hardware-dependent features.
 
 ### Calculation Methodology
 
@@ -530,10 +538,10 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | **Gear System** | HIGH | `shifter.cpp` via MCP23017 | P/R/N/D1/D2 speed-gated + ESP32 MCP23017 shifter | ✅ Improved | 100% |
 | **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | HC-SR04 on ESP32 + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100% |
 | **Service Mode** | MEDIUM | Did not exist | 25 modules, CAN commands, factory restore | ✅ New | 100% |
-| **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS | ✅ Reimplemented | 90% |
+| **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS, gear + mode display | ✅ Reimplemented | 95% |
 | **Hidden Engineering Menu** | LOW | `menu_hidden.cpp` (46 KB) | Engineering screen (code 8989, 5 submenus, EXIT) | ✅ Reimplemented | 85% |
-| **Audio System** | LOW | `dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | `audio_manager.cpp` (DFPlayer, priority queue, 6 sounds) | ✅ Reimplemented | 70% |
-| **LED Lighting** | LOW | `led_controller.cpp` (WS2812B) | `led_controller.cpp` (28+16 LEDs, state patterns) | ✅ Reimplemented | 80% |
+| **Audio System** | LOW | `dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | `audio_manager.cpp` (DFPlayer, priority queue, 6 sounds, CAN-triggered events) | ✅ Reimplemented | 90% |
+| **LED Lighting** | LOW | `led_controller.cpp` (WS2812B) | `led_controller.cpp` (28+16 LEDs, state patterns, brake/reverse lights) | ✅ Reimplemented | 95% |
 | **Touch Input** | MEDIUM | `touch_calibration.cpp`, `touch_map.cpp` | `touch_handler.cpp` (TAP/LONG_PRESS, debounce) | ✅ Reimplemented | 90% |
 | **Config Persistence** | MEDIUM | `eeprom_persistence.cpp`, `config_storage.cpp` | ESP32-S3 NVS `config_store.cpp` (CRC32, dirty flag) — single persistence authority for all user config; STM32 recomputes calibration from sensors (no NVM needed) | ✅ Complete | 100% |
 | **Power Management** | MEDIUM | `power_mgmt.cpp` (10-state machine) | ESP32: `power_manager.cpp` (ignition key) / STM32: relay sequencing | ⚠️ Partial | 70% |
@@ -564,9 +572,9 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 |-------|-------------|--------|------------|
 | **Phase 1** | Stability Foundation (hardware validation, CAN reliability, centering, boot, I2C) | ⚠️ Awaiting hardware validation | ~90% code complete |
 | **Phase 2** | Control Reliability (traction pipeline, ABS/TCS, dynamic brake, park hold, gears) | ⚠️ Awaiting hardware validation | ~90% code complete |
-| **Phase 3** | Feedback & Sensors (obstacle 0x208/0x209, PID tuning, DS18B20 hot-plug, redundant pedal) | ⚠️ In progress | ~70% |
-| **Phase 4** | Driver Interaction (CAN gear display, ACK feedback) | ⚠️ In progress | ~60% |
-| **Phase 5** | Experience Features (audio integration, lighting logic, sensor fusion, DMA ADC) | ⚠️ Partial | ~30% |
+| **Phase 3** | Feedback & Sensors (obstacle 0x208/0x209, PID tuning, DS18B20 hot-plug, redundant pedal) | ⚠️ In progress | ~85% (PID tuning + redundant pedal need hardware) |
+| **Phase 4** | Driver Interaction (CAN gear display, mode display, ACK feedback) | ⚠️ In progress | ~80% (ACK visual feedback pending) |
+| **Phase 5** | Experience Features (audio integration, lighting logic, sensor fusion, DMA ADC) | ⚠️ In progress | ~55% (audio events + brake/reverse lights done) |
 
 ### What Remains (Pending Items by Priority)
 
@@ -575,18 +583,15 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | # | Item | Phase | Effort | Notes |
 |---|------|-------|--------|-------|
 | 1 | **Steering PID tuning (I/D terms)** | 3 | Medium | ki=0.0, kd=0.0 — requires hardware testing with actual steering load |
-| 2 | **DriveScreen mode flags from CAN echo** | 4 | Low | Mode flags (4×4/360°) still set locally, not from STM32 CAN status |
-| 3 | **DS18B20 hot-plug detection** | 3 | Low | ROM search runs only at init; periodic OW_SearchAll() needed |
-| 4 | **Redundant pedal sensor** | 3 | Medium | Single ADC channel PA3; requires second ADC or hall sensor hardware |
+| 2 | **Redundant pedal sensor** | 3 | Medium | Single ADC channel PA3; requires second ADC or hall sensor hardware |
+| 3 | **Mode change ACK visual feedback** | 4 | Low | Show accepted/rejected state on DriveScreen within 200 ms of CAN 0x103 ACK |
 
 #### 🟡 MEDIUM PRIORITY — Phase 5 items
 
 | # | Item | Phase | Effort | Notes |
 |---|------|-------|--------|-------|
-| 7 | **Audio event integration** | 5 | Medium | AudioManager exists but only WELCOME/FAREWELL sounds wired; need CAN-triggered alerts for gear, temp, obstacle, battery |
-| 8 | **LED brake/reverse logic** | 5 | Low | LED strip works but no brake light or reverse light detection (requires gear echo from STM32) |
-| 9 | **ADC pedal DMA conversion** | 5 | Low | Currently blocking HAL_ADC_PollForConversion; needs DMA or interrupt |
-| 10 | **OneWire timing optimization** | 5 | Medium | Busy-wait NOP loop calibrated for 170 MHz; DMA-based UART or hardware timer preferred |
+| 4 | **ADC pedal DMA conversion** | 5 | Low | Currently blocking HAL_ADC_PollForConversion; needs DMA or interrupt |
+| 5 | **OneWire timing optimization** | 5 | Medium | Busy-wait NOP loop calibrated for 170 MHz; DMA-based UART or hardware timer preferred |
 
 #### 🟢 LOW PRIORITY — Advanced / Future items
 
