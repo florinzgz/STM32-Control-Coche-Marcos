@@ -36,6 +36,13 @@
 // External TFT instance (initialized in main.cpp)
 extern TFT_eSPI tft;
 
+// ACK visual feedback constants
+static constexpr int16_t ACK_X = 200;   // Centered in top bar
+static constexpr int16_t ACK_Y = 2;
+static constexpr int16_t ACK_W = 80;
+static constexpr int16_t ACK_H = 16;
+static constexpr unsigned long ACK_DISPLAY_DURATION_MS = 1500;
+
 // -------------------------------------------------------------------------
 // onEnter — called when transitioning to this screen
 // -------------------------------------------------------------------------
@@ -139,7 +146,7 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
         const auto& ad = data.ack();
 
         // New ACK received from STM32
-        if (ad.timestampMs > 0 && ad.timestampMs != ackTrackedAckMs_) {
+        if (ad.timestampMs > 0 && ad.timestampMs > ackTrackedAckMs_) {
             ackTrackedAckMs_ = ad.timestampMs;
             ackDisplayResult_ = (ad.result == can::AckResult::OK) ? 1 : 2;
             ackLastShownMs_   = now;
@@ -148,15 +155,15 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
 
         // New ACK timeout detected
         unsigned long tmo = data.ackTimeoutMs();
-        if (tmo > 0 && tmo != ackTrackedTmoMs_) {
+        if (tmo > 0 && tmo > ackTrackedTmoMs_) {
             ackTrackedTmoMs_  = tmo;
             ackDisplayResult_ = 3;
             ackLastShownMs_   = now;
             ackIndicatorDirty_ = true;
         }
 
-        // Auto-clear after 1.5 seconds
-        if (ackDisplayResult_ != 0 && (now - ackLastShownMs_) >= 1500) {
+        // Auto-clear after display duration
+        if (ackDisplayResult_ != 0 && (now - ackLastShownMs_) >= ACK_DISPLAY_DURATION_MS) {
             ackDisplayResult_ = 0;
             ackIndicatorDirty_ = true;
         }
@@ -323,11 +330,6 @@ void DriveScreen::drawSpeed() {
 // -------------------------------------------------------------------------
 // ACK visual feedback — brief indicator in top bar after mode/gear command
 // -------------------------------------------------------------------------
-static constexpr int16_t ACK_X = 200;   // Centered in top bar
-static constexpr int16_t ACK_Y = 2;
-static constexpr int16_t ACK_W = 80;
-static constexpr int16_t ACK_H = 16;
-
 void DriveScreen::drawAckIndicator() {
     if (!ackIndicatorDirty_) return;
     ackIndicatorDirty_ = false;
