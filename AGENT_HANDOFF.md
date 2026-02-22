@@ -329,6 +329,6 @@ Después        → Paso 10: Error logger (STM32 flash + CAN command)
 
 1. **`led_controller.cpp` línea 40:** `braking` y `reverse` están hardcodeados a `false` en `main.cpp` línea 265-266. Se resolverá cuando MCP23017 (Paso 1) proporcione la marcha real y se detecte frenado.
 2. **`drive_screen.cpp` línea 100:** `curGear_ = ui::Gear::N` hardcodeado. Se resolverá con MCP23017.
-3. **`drive_screen.cpp` líneas 102-104:** `curMode_.is4x4` y `curMode_.isTankTurn` siempre `false`. Se resolverá cuando STM32 eche los mode flags por CAN (o el ESP32 trackee su propio estado tras ACK de CMD_MODE).
+3. **`drive_screen.cpp` líneas 102-104:** `curMode_.is4x4` y `curMode_.isTankTurn` siempre `false`. Se resolverá cuando STM32 envíe los mode flags por CAN (o el ESP32 trackee su propio estado tras ACK de CMD_MODE).
 4. **Power manager (`power_manager.cpp`):** Falta secuencia completa de relés AUX_POWER en la etapa STARTING. Actualmente salta directo de POWER_HOLD a STARTING sin activar relés del STM32.
 5. **Filtro CAN STM32:** Filter 2 es RANGE 0x110–0x120 (acepta 17 IDs). IDs intermedios 0x111-0x11F se ignoran silenciosamente en `CAN_ProcessMessages()` → no es un bug, pero documentar si se añaden IDs en ese rango.
