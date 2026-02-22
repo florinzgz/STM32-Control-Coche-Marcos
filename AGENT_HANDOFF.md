@@ -2,333 +2,370 @@
 
 > **Fecha:** 2026-02-22
 > **Repositorio:** `florinzgz/STM32-Control-Coche-Marcos`
-> **Branch activo:** `copilot/audit-firmware-comparison`
-> **Última equivalencia funcional:** 82% (objetivo: 100%)
+> **Branch activo:** `copilot/update-firmware-comparison`
+> **Último commit:** `c72c1cb` — Address code review feedback
+> **Estado del tree:** limpio (nothing to commit)
+> **Documento maestro:** `docs/PROJECT_MASTER_STATUS.md` ← TODA PR debe actualizar este archivo
 
 ---
 
 ## 1. QUÉ ES ESTE PROYECTO
 
 Firmware de control de un coche eléctrico infantil con arquitectura dual:
-- **STM32G474RE**: Controlador de motores, seguridad, sensores (es la autoridad de seguridad)
-- **ESP32-S3**: HMI (pantalla táctil 480×320), audio, LEDs, lectura de periféricos de usuario
+- **STM32G474RE** (170 MHz, Cortex-M4 FPU): Controlador de motores, autoridad de seguridad, sensores
+- **ESP32-S3** (240 MHz, PSRAM 8MB): HMI (pantalla táctil 480×320 TFT ST7796), audio DFPlayer, LEDs WS2812B, lectura de periféricos de usuario (palanca marchas MCP23017, sensor obstáculo HC-SR04)
 
-Ambos MCUs se comunican exclusivamente por **CAN bus a 500 kbps** (CAN 2.0A, 11-bit IDs).
+Comunicación exclusiva por **CAN bus a 500 kbps** (CAN 2.0A, 11-bit IDs, TJA1051 transceiver).
 
 ---
 
-## 2. ESTADO ACTUAL DEL CÓDIGO — QUÉ FUNCIONA
+## 2. ARQUITECTURA DE DIRECTORIOS
+
+```
+/
+├── Core/Inc/           ← Headers STM32 (16 archivos .h)
+├── Core/Src/           ← Fuentes STM32 (18 archivos .c, incluye 2 tests)
+├── Drivers/            ← HAL STM32G4xx + CMSIS (generado por CubeMX)
+├── esp32/
+│   ├── include/        ← can_ids.h (contrato CAN frozen rev 1.3)
+│   └── src/
+│       ├── screens/    ← 7 pantallas (boot, standby, drive, safe, error, engineering)
+│       ├── ui/         ← 11 widgets UI (car, pedal, gear, battery, mode, obstacle, led, debug)
+│       ├── sensors/    ← obstacle_sensor.cpp/h (HC-SR04 driver)
+│       ├── can/        ← can_obstacle.cpp/h (TX frame 0x208)
+│       ├── hmi/        ← obstacle_indicator.cpp/h (indicador estado sensor en boot)
+│       └── *.cpp/h     ← main, can_rx, vehicle_data, screen_manager, led_controller,
+│                         power_manager, audio_manager, shifter_input, touch_handler, config_store
+├── docs/               ← 57 archivos .md de documentación
+├── Makefile            ← Build STM32 con arm-none-eabi-gcc
+└── platformio.ini      ← Build ESP32 con PlatformIO (Arduino C++17)
+```
+
+---
+
+## 3. ESTADO ACTUAL COMPLETO DEL CÓDIGO — QUÉ FUNCIONA
 
 ### STM32 (directorio `Core/`)
+
 | Módulo | Archivo(s) | Estado |
 |--------|-----------|--------|
-| Control PWM motores (4 ruedas + dirección) | `motor_control.c/h` | ✅ Completo |
-| Ackermann geometría dirección | `ackermann.c/h` | ✅ Completo |
-| EPS torque-assist dirección | `motor_control.c`, `eps_params.c/h` | ✅ Completo |
-| Calibración centro dirección | `steering_centering.c/h`, `steering_cal_store.c/h` | ✅ Completo |
-| Encoder dirección (TIM2 quadratura) | `encoder_reader.c/h` | ✅ Completo |
-| Máquina de estados seguridad (7 estados) | `safety_system.c/h` | ✅ Completo |
-| ABS/TCS por rueda | `safety_system.c` | ✅ Completo |
-| Protección corriente/temperatura/batería | `safety_system.c` | ✅ Completo |
-| Detección obstáculos (3 zonas) | `safety_system.c` (Obstacle_*) | ⚠️ Parcial (faltan 2 zonas) |
-| Sensores (INA226, DS18B20, pedal, velocidad) | `sensor_manager.c/h` | ✅ Completo |
-| Modo servicio (25 módulos) | `service_mode.c/h` | ✅ Completo |
-| Validación de arranque | `boot_validation.c/h` | ✅ Completo |
-| Matemáticas seguras (NaN/Inf) | `math_safety.c/h` | ✅ Completo (con tests) |
-| CAN handler completo | `can_handler.c/h` | ✅ Completo |
+| Control PWM 4 motores tracción (TIM1, 20 kHz) | `motor_control.c/h` | ✅ Completo |
+| Control PWM motor dirección (TIM8, PID P-only) | `motor_control.c/h` | ✅ Completo |
+| Ackermann geometría + corrección diferencial torque | `ackermann.c/h`, `motor_control.c` | ✅ Completo |
+| EPS torque-assist dirección (smoothstep, speed-dep) | `motor_control.c`, `eps_params.c/h` | ✅ Completo |
+| Calibración centro dirección (sensor inductivo PB5) | `steering_centering.c/h`, `steering_cal_store.c/h` | ✅ Completo |
+| Encoder dirección (TIM2 quadratura, E6B2-CWZ6C 4800 CPR) | `encoder_reader.c/h` | ✅ Completo |
+| Máquina de estados (7 estados: BOOT→STANDBY→ACTIVE⇄DEGRADED→SAFE→ERROR + LIMP_HOME) | `safety_system.c/h` | ✅ Completo |
+| 3 niveles degradación (L1=70%, L2=50%, L3=40% potencia) | `safety_system.c/h` | ✅ Completo |
+| ABS por rueda (modulación pulso 80ms) | `safety_system.c` | ✅ Completo |
+| TCS por rueda (reducción progresiva + recuperación) | `safety_system.c` | ✅ Completo |
+| Protección sobrecorriente (25A, escalación a SAFE) | `safety_system.c` | ✅ Completo |
+| Protección sobretemperatura (80°C warn, 90°C crit, 130°C/motor) | `safety_system.c`, `motor_control.c` | ✅ Completo |
+| Protección batería (20V warn, 18V crit) | `safety_system.c` | ✅ Completo |
+| **Detección obstáculos (5 zonas)** | `safety_system.c/h` | ✅ Completo |
+| **Detección reacción infantil (pedal drop → zonas más estrictas)** | `safety_system.c` | ✅ Completo |
+| Plausibilidad sensor obstáculo (stuck, stale, implausible) | `safety_system.c` | ✅ Completo |
+| Sensores (6×INA226, 5×DS18B20, pedal ADC, 4×velocidad rueda) | `sensor_manager.c/h` | ✅ Completo |
+| Modo servicio (25 módulos, enable/disable, factory restore) | `service_mode.c/h` | ✅ Completo |
+| Validación arranque (6 checks pre-ACTIVE) | `boot_validation.c/h` | ✅ Completo |
+| Matemáticas seguras (NaN/Inf sanitization) | `math_safety.c/h` + test | ✅ Completo |
+| CAN handler (RX decode, TX status, ACK, bus-off recovery) | `can_handler.c/h` | ✅ Completo |
+| Sistema marchas (P/R/N/D1/D2, speed-gated) | `motor_control.c` | ✅ Completo |
+| Frenado dinámico + Park hold + BTS7960 brake | `motor_control.c` | ✅ Completo |
 | Relé LED en PB10 | `can_handler.c`, `main.c` | ✅ Completo |
-| Main loop (10/50/100/1000 ms tareas) | `main.c` | ✅ Completo |
+| Secuencia relés (Main→Traction→Direction, non-blocking) | `safety_system.c` | ✅ Completo |
+| Main loop (10/50/100/1000 ms tareas) + watchdog (500ms) | `main.c` | ✅ Completo |
 
 ### ESP32 (directorio `esp32/`)
+
 | Módulo | Archivo(s) | Estado |
 |--------|-----------|--------|
-| CAN RX/TX completo | `can_rx.cpp/h`, `can_ids.h` | ✅ Completo |
-| VehicleData store | `vehicle_data.h/cpp` | ✅ Completo |
-| Screen Manager (5 pantallas) | `screen_manager.cpp/h` | ✅ Completo |
+| CAN RX decode (todos los IDs STM32) | `can_rx.cpp/h` | ✅ Completo |
+| CAN IDs contrato (frozen rev 1.3) | `include/can_ids.h` | ✅ Completo |
+| VehicleData store (12 structs + service) | `vehicle_data.h/cpp` | ✅ Completo |
+| Screen Manager (6 pantallas + frame limiter 20 FPS) | `screen_manager.cpp/h` | ✅ Completo |
 | Boot Screen | `screens/boot_screen.cpp/h` | ✅ Completo |
-| Standby Screen | `screens/standby_screen.cpp/h` | ✅ Completo |
-| Drive Screen (telemetría completa) | `screens/drive_screen.cpp/h` | ✅ Completo |
+| Standby Screen (temps + fault flags) | `screens/standby_screen.cpp/h` | ✅ Completo |
+| Drive Screen (telemetría completa, partial redraw) | `screens/drive_screen.cpp/h` | ✅ Completo |
 | Safe Screen | `screens/safe_screen.cpp/h` | ✅ Completo |
 | Error Screen | `screens/error_screen.cpp/h` | ✅ Completo |
-| UI Components (car, pedal, gear, battery, steering, obstacle, mode icons) | `ui/*.cpp/h` | ✅ Completo |
-| LED toggle UI (botón en top bar) | `ui/led_toggle.cpp/h` | ✅ Completo |
-| WS2812B LED controller (FastLED, 44 LEDs) | `led_controller.cpp/h` | ✅ Completo |
+| **Engineering Screen (menú oculto código 8989)** | `screens/engineering_screen.cpp/h` | ✅ Completo |
+| UI Components (car, pedal, gear, battery, steering, obstacle, mode, led, debug) | `ui/*.cpp/h` | ✅ Completo |
+| WS2812B LED controller (FastLED, 28 front + 16 rear) | `led_controller.cpp/h` | ✅ Completo |
 | Power Manager (llave contacto GPIO 40/41) | `power_manager.cpp/h` | ✅ Completo |
 | Audio Manager (DFPlayer UART2 GPIO 43/44) | `audio_manager.cpp/h` | ✅ Completo |
-| Sensor obstáculo HC-SR04 | `sensors/obstacle_sensor.cpp/h` | ✅ Completo |
-| CAN TX obstáculo (0x208) | `can/can_obstacle.cpp/h` | ✅ Completo |
+| Sensor obstáculo HC-SR04 (GPIO 6/7, 25 Hz, 5 zonas) | `sensors/obstacle_sensor.cpp/h` | ✅ Completo |
+| CAN TX obstáculo (0x208, DLC 5, 66ms) | `can/can_obstacle.cpp/h` | ✅ Completo |
+| Indicador obstáculo en boot | `hmi/obstacle_indicator.cpp/h` | ✅ Completo |
+| **Palanca marchas MCP23017 I2C (GPIO 8/9)** | `shifter_input.cpp/h` | ✅ Completo |
+| **Touch handler centralizado (debounce, tap/long-press)** | `touch_handler.cpp/h` | ✅ Completo |
+| **Config store NVS (CRC32, mode/brightness/led/volume)** | `config_store.cpp/h` | ✅ Completo |
 | Heartbeat ESP32 (0x011 cada 100ms) | `main.cpp` | ✅ Completo |
-| ACK tracking (non-blocking) | `main.cpp` | ✅ Completo |
+| ACK tracking (non-blocking, 200ms timeout) | `main.cpp` | ✅ Completo |
+| Envío CAN 0x102 gear + mode flags | `main.cpp` | ✅ Completo |
 | Runtime monitor / debug overlay | `ui/runtime_monitor.cpp/h`, `ui/debug_overlay.cpp/h` | ✅ Completo |
 
 ---
 
-## 3. QUÉ FALTA POR IMPLEMENTAR (9 sistemas pendientes, en orden)
+## 4. IMPLEMENTACIONES RECIENTES (COMMIT e570505 → c72c1cb)
 
-### Paso 1 — Palanca de marchas física (MCP23017) — PRIORIDAD CRÍTICA
-**Qué hace:** Lee la posición física del selector de marchas (P/R/N/D1/D2) vía I2C MCP23017.
-**Por qué es crítico:** Sin esto, no se envía CAN 0x102 byte 1 con la marcha real. Actualmente `drive_screen.cpp` tiene `curGear_ = ui::Gear::N` hardcodeado (línea 100).
-**Archivos a crear:**
-- `esp32/src/shifter_input.cpp` — Driver MCP23017 I2C
-- `esp32/src/shifter_input.h` — Interfaz
-**Archivos a modificar:**
-- `esp32/src/main.cpp` — Llamar `shifter::update()` en loop, enviar CAN 0x102 con marcha actual
-- `esp32/platformio.ini` — Puede necesitar lib_dep para MCP23017
-**CAN existente:** CMD_MODE (0x102) byte 1 ya acepta gear 0-4 en STM32. El STM32 ya valida velocidad ≤1 km/h para cambio.
-**GPIOs ESP32 disponibles:** Los pines I2C del ESP32 deben definirse (no hay I2C configurado aún en el ESP32; solo está CAN en GPIO 4/5, TFT en GPIO 13-17/42, touch en GPIO 21, LED en GPIO 38, power en GPIO 40/41, audio en GPIO 43/44, obstacle en GPIO 6/7).
-**Enum existente en STM32:** `GearPosition_t` en `motor_control.h`: GEAR_PARK=0, GEAR_REVERSE=1, GEAR_NEUTRAL=2, GEAR_FORWARD=3, GEAR_FORWARD_D2=4
+Las siguientes funcionalidades fueron añadidas por el agente anterior y **todavía NO están reflejadas en `docs/PROJECT_MASTER_STATUS.md`**. El siguiente agente DEBE actualizar ese documento.
 
-### Paso 3 — Entrada táctil completa (XPT2046) — PRIORIDAD ALTA
-**Qué hay:** Touch ya funciona para LED toggle en `main.cpp` líneas 217-232 (`tft.getTouch()`). `mode_icons.cpp` ya tiene `hitTest()` implementado (devuelve 1=4x4, 2=4x2, 3=360°).
-**Qué falta:** Conectar `ModeIcons::hitTest()` al touch loop para enviar CMD_MODE (0x102) al tocar iconos de modo. También falta touch para cambio de pantallas y base para el menú de ingeniería.
-**Archivos a crear:**
-- `esp32/src/touch_handler.cpp/h` — Lectura centralizada de touch con debounce y dispatch
-**Archivos a modificar:**
-- `esp32/src/main.cpp` — Reemplazar touch directo por `touch_handler`, dispatch a screen activa
-- `esp32/src/screen_manager.cpp/h` — Pasar eventos touch a la pantalla activa
-**CAN existente:** CMD_MODE (0x102) byte 0 bits: 0x01=4x4, 0x02=tank_turn. ACK vía 0x103.
-**Patrón existente:** Ver `sendLedCommand()` en `main.cpp` y `ackBeginWait()` para cómo enviar comandos con ACK.
+### 4.1 — Detección obstáculos ampliada a 5 zonas (STM32)
+**Archivos modificados:** `Core/Src/safety_system.c`, `Core/Inc/safety_system.h`
+**Qué cambió:**
+- Se añadieron 2 zonas nuevas al sistema de 3 zonas original:
+  - `OBSTACLE_CAUTION_MM = 1500` → scale = 0.85 (línea 142)
+  - `OBSTACLE_ALERT_MM = 4000` → scale = 0.95 (línea 143)
+- `Obstacle_Update()` ahora computa `dyn_caution` y `dyn_alert` con speed-dependent thresholds (líneas 1580-1587)
+- La cadena if/else en target_scale tiene 5 niveles (líneas 1591-1604)
+- Defines públicos en header: `OBSTACLE_CAUTION_MM_PUB`, `OBSTACLE_ALERT_MM_PUB`
 
-### Paso 4 — 5 zonas de obstáculo completas — PRIORIDAD ALTA
-**Qué hay:** STM32 `safety_system.c` tiene 3 zonas: EMERGENCY <200mm (scale=0.0), CRITICAL 200-500mm, WARNING 500-1000mm.
-**Qué falta:** Añadir zona Caution (1000-1500mm) y zona Alert (1500-4000mm) con factores del original.
-**Archivos a modificar:**
-- `Core/Src/safety_system.c` — Ampliar `Obstacle_Update()` de 3 a 5 zonas
-- `Core/Inc/safety_system.h` — Añadir constantes OBSTACLE_CAUTION_MM=1500, OBSTACLE_ALERT_MM=4000
-- `esp32/src/sensors/obstacle_sensor.cpp` — Actualizar mapeo de zonas
-- `esp32/src/ui/obstacle_sensor.cpp` — Actualizar display
-**No toca CAN:** La infraestructura CAN 0x208 ya tiene campo zone (byte 2, uint8) y obstacle_scale ya existe.
+### 4.2 — Detección reacción infantil (STM32)
+**Archivos modificados:** `Core/Src/safety_system.c`, `Core/Inc/safety_system.h`
+**Qué cambió:**
+- Nuevo bloque de código en `Obstacle_Update()` (líneas 1611-1646)
+- Monitorea si el niño suelta el pedal rápido (>10% drop en 500ms)
+- Durante 2 segundos tras detección, tightens warning zone (0.7→0.5) y caution zone (0.85→0.7)
+- 6 nuevos `#define`: `CHILD_REACTION_THRESHOLD`, `CHILD_REACTION_MIN_PEDAL`, `CHILD_REACTION_WINDOW_MS`, `CHILD_REACTION_BOOST_MS`, `CHILD_REACTION_WARNING_SCALE`, `CHILD_REACTION_CAUTION_SCALE`
+- 4 nuevas variables static: `child_prev_pedal_pct`, `child_pedal_sample_tick`, `child_reaction_active`, `child_reaction_start`
+- Inicializadas en `Safety_Init()` (líneas 613-616)
 
-### Paso 5 — Detección de reacción infantil — PRIORIDAD ALTA
-**Qué hace:** Cuando el niño suelta el pedal (reducción >10% en 500ms), modifica factores en zonas 2-3.
-**Archivos a modificar:**
-- `Core/Src/safety_system.c` — Lógica de detección de soltar pedal rápido
-- `Core/Inc/safety_system.h` — Constantes CHILD_REACTION_THRESHOLD=10%, CHILD_REACTION_WINDOW_MS=500
-**Depende de:** Paso 4 (5 zonas). `Pedal_GetPercent()` ya existe en `sensor_manager.c`.
+### 4.3 — Palanca marchas MCP23017 (ESP32)
+**Archivos creados:** `esp32/src/shifter_input.cpp`, `esp32/src/shifter_input.h`
+**Archivos modificados:** `esp32/src/main.cpp`, `esp32/src/screens/drive_screen.cpp`
+**Qué hace:**
+- Driver I2C para MCP23017 en GPIO 8 (SDA) / GPIO 9 (SCL), dirección 0x20, 400 kHz
+- Lee Puerto A pins GPA0-GPA4 (active-low, pull-ups internos, one-hot encoding)
+- GPA0=Park, GPA1=Reverse, GPA2=Neutral, GPA3=Forward, GPA4=Forward_D2
+- Validación: `__builtin_popcount(active) != 1` → default Neutral
+- Poll cada 50ms, API: `shifter::init()`, `shifter::update()`, `shifter::getGear()`, `shifter::getGearRaw()`
+- `main.cpp`: envía CAN 0x102 con gear actual cuando cambia (100ms debounce)
+- `drive_screen.cpp`: lee `shifter::getGearRaw()` en vez de hardcode `Gear::N` (líneas 101-113)
 
-### Paso 8 — Menú de ingeniería oculto — PRIORIDAD MEDIA
-**Qué hace:** Código secreto 8989 en pantalla → submenús: calibración pedal/encoder, enable/disable módulos, factory restore, visor de errores.
-**Archivos a crear:**
-- `esp32/src/screens/engineering_screen.cpp/h` — Pantalla con submenús
-**Archivos a modificar:**
-- `esp32/src/screen_manager.cpp/h` — Añadir transición por código secreto
-- Necesita touch_handler (Paso 3)
-**CAN existente:** SERVICE_CMD (0x110) ya soporta enable/disable/factory-restore. SERVICE_FAULTS/ENABLED/DISABLED (0x301-0x303) ya decodificados en `can_rx.cpp`.
+### 4.4 — Touch handler centralizado (ESP32)
+**Archivos creados:** `esp32/src/touch_handler.cpp`, `esp32/src/touch_handler.h`
+**Archivos modificados:** `esp32/src/main.cpp`
+**Qué hace:**
+- Reemplaza el touch directo de `tft.getTouch()` por sistema centralizado
+- Detecta TAP (200ms debounce), LONG_PRESS (3s), RELEASE
+- `main.cpp` loop: llama `touch::update()`, consume `touch::getEvent()`, despacha a:
+  - `screenManager.onTouch(x,y)` para código secreto / engineering screen
+  - `ui::LedToggle::hitTest()` para toggle LED relay
+  - `ui::ModeIcons::hitTest()` para cambiar modo 4x4/4x2/360° → envía CAN 0x102
+- Persiste cambios de LED y modo en NVS vía `config_store`
 
-### Paso 9 — Persistencia NVS en ESP32 — PRIORIDAD MEDIA
-**Qué hace:** Guarda configuración HMI (modo preferido, brillo, calibraciones) en NVS del ESP32.
-**Archivos a crear:**
-- `esp32/src/config_store.cpp/h` — Wrapper NVS con validación CRC
-**No necesita librería externa:** ESP32 tiene NVS nativo (`<Preferences.h>` o `<nvs_flash.h>`).
+### 4.5 — Engineering Screen (ESP32)
+**Archivos creados:** `esp32/src/screens/engineering_screen.cpp`, `esp32/src/screens/engineering_screen.h`
+**Archivos modificados:** `esp32/src/screen_manager.cpp`, `esp32/src/screen_manager.h`
+**Qué hace:**
+- Menú oculto activado por código secreto "8989" (4 taps alternando izquierda-derecha en <2s)
+- `screen_manager.cpp` detecta el patrón en `checkSecretCode()` y transiciona a engineering screen
+- 5 submenús: Fault Viewer, Module Enable/Disable, Pedal Calibration, Encoder Calibration, Factory Restore
+- Fault Viewer: muestra `ServiceData.faultMask/enabledMask/disabledMask` en hex
+- Factory Restore: envía `SERVICE_CMD (0x110)` con action `0xFF` al STM32
+- Botón BACK en cada submenú, touch dispatch via `handleTouch(x,y)`
 
-### Paso 10 — Persistencia de log de errores — PRIORIDAD MEDIA
-**Qué hace:** Guarda últimos N errores en flash del STM32 (buffer circular con CRC).
-**Archivos a crear:**
-- `Core/Src/error_logger.c/h` — Buffer circular en flash páginas 124-125 (126=steering cal, 127=EPS)
-**Archivos a modificar:**
-- `Core/Src/safety_system.c` — Llamar a error_logger en cada cambio de estado de error
-- `Core/Src/can_handler.c` — Añadir comando CAN para solicitar log
+### 4.6 — Config Store NVS (ESP32)
+**Archivos creados:** `esp32/src/config_store.cpp`, `esp32/src/config_store.h`
+**Archivos modificados:** `esp32/src/main.cpp`
+**Qué hace:**
+- Persistencia en NVS ESP32 usando `Preferences` (nativo, sin librería externa)
+- Struct Config: driveMode (uint8, masked 0x03), brightness (uint8), ledEnabled (bool), audioVolume (uint8, max 30)
+- CRC32 (ISO-HDLC) sobre campos de datos (excluyendo crc32 field)
+- `init()` → `load()` → valida CRC → usa defaults si falla
+- Setters individuales con bounds checking: `setDriveMode()` (& 0x03), `setAudioVolume()` (clamp ≤30)
+- `factoryReset()` → clear NVS → reinitialize defaults
+- `main.cpp` `setup()`: carga config, aplica `currentModeFlags` y `ledLocalState`
+- `main.cpp` `loop()`: persiste cambios de LED y modo al tocar iconos
 
-### Paso 11 — Crucero adaptativo (ACC) — PRIORIDAD BAJA
-**Qué hace:** PID (Kp=0.3, Ki=0.05, Kd=0.15) mantiene 500mm de distancia al obstáculo frontal.
-**Archivos a crear:**
-- `esp32/src/adaptive_cruise.cpp/h`
-**Depende de:** Paso 4 (5 zonas). Usa CMD_THROTTLE (0x100) existente.
-
-### Paso 12 — Frenado regenerativo — PRIORIDAD BAJA
-**Qué hace:** Lookup tables velocidad/aceleración/SOC/temperatura → corriente regen en motores.
-**Archivos a crear:**
-- `Core/Src/regen_braking.c/h` — Lógica regen con tablas
-**Archivos a modificar:**
-- `Core/Src/motor_control.c` — Integrar regen en pipeline de frenado
-- `Core/Inc/safety_system.h` — Umbrales protección batería para regen
-
----
-
-## 4. MAPA DE GPIO — NO MOVER NADA
-
-### STM32G474RE — Pines asignados (en `Core/Inc/main.h`)
-```
-PA0  = Wheel FL (EXTI0)          PA8  = PWM FL (TIM1_CH1)
-PA1  = Wheel FR (EXTI1)          PA9  = PWM FR (TIM1_CH2)
-PA2  = Wheel RL (EXTI2)          PA10 = PWM RL (TIM1_CH3)
-PA3  = Pedal ADC (ADC1_IN4)      PA11 = PWM RR (TIM1_CH4)
-PA15 = Encoder A (TIM2_CH1)
-
-PB0  = OneWire (DS18B20)         PB6  = I2C SCL
-PB3  = Encoder B (TIM2_CH2)      PB7  = I2C SDA
-PB4  = Encoder Z (EXTI4)         PB8  = CAN RX (FDCAN1)
-PB5  = Steer Center (EXTI5)      PB9  = CAN TX (FDCAN1)
-PB10 = Relé LED                  PB15 = Wheel RR (EXTI15)
-
-PC0-4   = DIR (FL/FR/RL/RR/Steer)
-PC5-7,9 = EN (FL/FR/RL/Steer)    PC8  = PWM Steer (TIM8_CH3)
-PC10-12 = Relés (Main/Trac/Dir)   PC13 = EN RR
-```
-
-### ESP32-S3 — Pines asignados (en `platformio.ini` y módulos)
-```
-GPIO 4  = CAN TX (TJA1051)       GPIO 5  = CAN RX (TJA1051)
-GPIO 6  = HC-SR04 TRIG            GPIO 7  = HC-SR04 ECHO
-GPIO 13 = TFT MOSI (SPI)          GPIO 14 = TFT SCLK (SPI)
-GPIO 15 = TFT CS                   GPIO 16 = TFT DC
-GPIO 17 = TFT RST                  GPIO 21 = Touch CS (XPT2046)
-GPIO 38 = WS2812B data (FastLED)   GPIO 40 = Ignition key sense
-GPIO 41 = Power hold output        GPIO 42 = TFT backlight
-GPIO 43 = DFPlayer TX (UART2)      GPIO 44 = DFPlayer RX (UART2)
-```
-**Libres para MCP23017 I2C:** GPIO 1/2 o GPIO 8/9 u otro par disponible.
+### 4.7 — Zona obstáculo actualizada (ESP32 UI)
+**Archivos modificados:** `esp32/src/sensors/obstacle_sensor.cpp`, `esp32/src/sensors/obstacle_sensor.h`, `esp32/src/ui/ui_common.h`
+**Qué cambió:**
+- `distanceToZone()` ahora retorna 0-4 (era 0-3): zone 1 = caution (1000-1500mm)
+- `Reading.zone` comment actualizado a "0-4"
+- `proximityColor()` en `ui_common.h` tiene 5 bandas de color:
+  - 0cm → GRAY, >150cm → GREEN, >100cm → CYAN, >50cm → YELLOW, >20cm → ORANGE, <20cm → RED
 
 ---
 
-## 5. PROTOCOLO CAN — NO CAMBIAR IDs EXISTENTES
+## 5. QUÉ FALTA POR HACER (PENDIENTE)
+
+### 5.1 — Actualizar `docs/PROJECT_MASTER_STATUS.md` — PRIORIDAD MÁXIMA
+El documento maestro NO refleja las implementaciones 4.1-4.7. Según las reglas del proyecto (§7), toda PR es inválida si no actualiza este documento. Hay que:
+- **Sección 1**: Añadir shifter_input, touch_handler, config_store, engineering_screen a la tabla de responsabilidades ESP32
+- **Sección 2**: Añadir 5-zone obstacle, child reaction, shifter, touch, engineering, NVS como features completadas
+- **Sección 3**: Actualizar la limitación "Detección obstáculos (3 zonas)" → ya son 5 zonas
+- **Sección 3**: Actualizar "Drive screen gear display is not CAN-driven" → ahora lee de shifter_input
+- **Sección 3**: Eliminar "ESP32 obstacle source not yet implemented" → ya existe obstacle_sensor + can_obstacle
+- **Sección 4**: Marcar como resueltos: #1 (ESP32 obstacle sensor driver), #7 (ESP32 mode/gear feedback)
+
+### 5.2 — Funcionalidades pendientes del código (ordenadas por fase del PROJECT_MASTER_STATUS)
+
+| # | Feature | Fase | Estado | Notas |
+|---|---------|------|--------|-------|
+| 1 | CAN ID 0x209 parsing en STM32 | Phase 3 | ❌ Pendiente | `case CAN_ID_OBSTACLE_SAFETY: break;` — solo tiene break vacío |
+| 2 | PID steering tuning (I/D terms) | Phase 3 | ❌ Pendiente | ki=0.0, kd=0.0 hardcoded |
+| 3 | Calibración persistente STM32 (encoder zero, sensor offsets) | Phase 4 | ❌ Pendiente | No hay flash/EEPROM write en STM32 |
+| 4 | Service mode persistente STM32 | Phase 4 | ❌ Pendiente | RAM-only, se pierde al reiniciar |
+| 5 | Sensor pedal redundante | Phase 3 | ❌ Pendiente | Single ADC channel PA3 |
+| 6 | Hot-plug DS18B20 | Phase 3 | ❌ Pendiente | ROM search solo en init |
+| 7 | DriveScreen mode flags from CAN | Phase 4 | ⚠️ Parcial | Gear ahora viene de shifter, pero mode flags (4x4/360°) siguen locales |
+| 8 | Audio feedback integrado | Phase 5 | ⚠️ Parcial | AudioManager existe pero solo welcome/farewell implementados |
+| 9 | Lighting control | Phase 5 | ⚠️ Parcial | LED strip funciona, pero no hay lógica de luces de freno/reversa real |
+
+### 5.3 — Problemas detectados no resueltos
+1. **Engineering screen no tiene salida** — una vez activada, `engineeringActive_ = true` no tiene mecanismo para volver a `false`. Falta un "exit engineering mode" trigger (ej: otro código secreto, o timeout, o botón EXIT).
+2. **sendGearCommand() y sendModeCommand() pueden conflictar** — ambos envían CAN 0x102 pero con diferente contenido de byte 0. Si se llaman en el mismo frame podría haber colisión.
+3. **config_store::save() en cada touch** — cada cambio de LED o modo escribe NVS, lo cual tiene wear limitado (~100K cycles). Considerar dirty flag con save periódico.
+4. **Steering PID es P-only** — kp=0.09, ki=0.0, kd=0.0. Funcional pero sin integral/derivativo.
+
+---
+
+## 6. PROTOCOLO CAN COMPLETO (500 kbps, 11-bit IDs)
 
 ### ESP32 → STM32
-| ID | Nombre | DLC | Tasa | Descripción |
-|----|--------|-----|------|-------------|
-| 0x011 | HEARTBEAT_ESP32 | 1 | 100ms | Alive counter |
-| 0x100 | CMD_THROTTLE | 1 | 50ms | Porcentaje acelerador (0-100) |
-| 0x101 | CMD_STEERING | 2 | 50ms | Ángulo dirección (int16 LE, 0.1°) |
-| 0x102 | CMD_MODE | 2 | on-demand | byte0: flags (bit0=4x4, bit1=tank), byte1: gear (0-4) |
-| 0x110 | SERVICE_CMD | 2 | on-demand | byte0: acción (0=disable, 1=enable, 0xFF=factory), byte1: module_id |
-| 0x120 | CMD_LED | 1 | on-demand | byte0: 0=OFF 1=ON |
-| 0x208 | OBSTACLE_DISTANCE | 5 | 66ms | byte0-1: dist_mm (u16 LE), byte2: zone, byte3: health, byte4: counter |
-| 0x209 | OBSTACLE_SAFETY | 8 | 100ms | Informacional (reservado) |
+| CAN ID | DLC | Rate | Contenido |
+|--------|-----|------|-----------|
+| 0x011 | 1 | 100 ms | Heartbeat: alive counter |
+| 0x100 | 1 | 50 ms | Throttle: demand 0-100% |
+| 0x101 | 2 | 50 ms | Steering: angle (0.1° units) |
+| 0x102 | 2 | On-demand | Mode/Gear: byte0=mode_flags (bit0=4x4, bit1=tank), byte1=gear (0-4) |
+| 0x110 | 2 | On-demand | Service CMD: byte0=action (0=disable, 1=enable, 0xFF=factory), byte1=module_id |
+| 0x120 | 1 | On-demand | LED relay: byte0 (0=OFF, 1=ON) |
+| 0x208 | 5 | ~66 ms | Obstacle: distance_mm (LE u16), zone (u8), health (u8), rolling_counter (u8) |
+| 0x209 | — | Reserved | Obstacle safety state (accepted but not parsed by STM32) |
 
 ### STM32 → ESP32
-| ID | Nombre | DLC | Tasa | Descripción |
-|----|--------|-----|------|-------------|
-| 0x001 | HEARTBEAT_STM32 | 5 | 100ms | byte0: counter, byte1: state, byte2: fault_flags, byte3: error_code, byte4: status_flags |
-| 0x103 | CMD_ACK | 3 | on-demand | byte0: cmd_id_low, byte1: result, byte2: system_state |
-| 0x200 | STATUS_SPEED | 8 | 100ms | 4× u16 LE (0.1 km/h) |
-| 0x201 | STATUS_CURRENT | 8 | 100ms | 4× u16 LE (0.01 A) |
-| 0x202 | STATUS_TEMP | 5 | 1000ms | 5× int8 (°C) |
-| 0x203 | STATUS_SAFETY | 3 | 100ms | byte0: ABS, byte1: TCS, byte2: error_code |
-| 0x204 | STATUS_STEERING | 3 | 100ms | byte0-1: angle (s16 LE, 0.1°), byte2: calibrated |
-| 0x205 | STATUS_TRACTION | 4 | 100ms | 4× u8 (0-100%) wheel scale |
-| 0x206 | STATUS_TEMP_MAP | 5 | 1000ms | 5× int8 (FL/FR/RL/RR/Amb °C) |
-| 0x207 | STATUS_BATTERY | 4 | 100ms | byte0-1: current (u16 LE, 0.01A), byte2-3: voltage (u16 LE, 0.01V) |
-| 0x20A | STATUS_LIGHTS | 2 | 1000ms | byte0: relay_on, byte1: reserved |
-| 0x300 | DIAG_ERROR | 2-8 | on-demand | byte0: error/tag, byte1: subsystem |
-| 0x301 | SERVICE_FAULTS | 4 | 1000ms | u32 LE bitmask |
-| 0x302 | SERVICE_ENABLED | 4 | 1000ms | u32 LE bitmask |
-| 0x303 | SERVICE_DISABLED | 4 | 1000ms | u32 LE bitmask |
+| CAN ID | DLC | Rate | Contenido |
+|--------|-----|------|-----------|
+| 0x001 | 4 | 100 ms | Heartbeat: counter, system_state, fault_flags, error_code |
+| 0x103 | 3 | On-demand | CMD ACK: cmd_id_low, result (0=OK/1=REJECTED/2=INVALID/3=BLOCKED), system_state |
+| 0x200 | 8 | 100 ms | Speed: 4× wheel speed (u16 LE, 0.1 km/h units) |
+| 0x201 | 8 | 100 ms | Current: 4× motor current (u16 LE, 0.01 A units) |
+| 0x202 | 5 | 1000 ms | Temp: 5× temperature (s8 °C) |
+| 0x203 | 3 | 100 ms | Safety: ABS active, TCS active, error code |
+| 0x204 | 3 | 100 ms | Steering: angle (s16 LE, 0.1° units), calibrated flag |
+| 0x205 | 4 | 100 ms | Traction: 4× per-wheel scale (u8, 0-100%) |
+| 0x206 | 5 | 1000 ms | Temp Map: 5× mapped temperatures (FL/FR/RL/RR/AMB) |
+| 0x207 | 4 | 100 ms | Battery: current (u16 LE, 0.01 A), voltage (u16 LE, 0.01 V) |
+| 0x20A | 2 | 1000 ms | Lights: relay state + reserved |
+| 0x300 | 2 | On-demand | Diagnostic: error code + subsystem |
+| 0x301 | 4 | 1000 ms | Service Faults: 32-bit bitmask |
+| 0x302 | 4 | 1000 ms | Service Enabled: 32-bit bitmask |
+| 0x303 | 4 | 1000 ms | Service Disabled: 32-bit bitmask |
 
 ---
 
-## 6. ARQUITECTURA DE PANTALLAS ESP32
+## 7. PRINCIPALES INVARIANTES DE SEGURIDAD (NO ROMPER)
 
-```
-ScreenManager (screen_manager.cpp)
-├── BootScreen     → state == BOOT
-├── StandbyScreen  → state == STANDBY
-├── DriveScreen    → state == ACTIVE | DEGRADED | LIMP_HOME
-├── SafeScreen     → state == SAFE
-└── ErrorScreen    → state == ERROR
-```
-
-**Frame rate:** 20 FPS (FrameLimiter en `ui/frame_limiter.h`)
-**Partial redraw:** Cada screen guarda `prev_` y `cur_` valores, solo redibuja lo que cambió.
-**UI Components (en `esp32/src/ui/`):** `car_renderer`, `pedal_bar`, `gear_display`, `battery_indicator`, `mode_icons`, `led_toggle`, `obstacle_sensor`, `steering_display`, `runtime_monitor`, `debug_overlay`
-
-Para añadir una nueva pantalla (ej: engineering_screen):
-1. Crear `screens/engineering_screen.cpp/h` heredando de `Screen` (ver `screens/screen.h`)
-2. Añadir instancia en `screen_manager.h`
-3. Añadir case en `screenForState()` o lógica especial de transición
+1. **STM32 es la autoridad de seguridad** — todos los comandos ESP32 pasan por `Safety_Validate*()` gates
+2. **CAN loss → LIMP_HOME** (20% torque, 5 km/h cap) — el vehículo permanece conducible
+3. **Obstacle scale se computa localmente en STM32** — datos CAN son solo advisory
+4. **No immobilization** — solo slowdown controlado, nunca parada total inmediata
+5. **Reverse escape preserved** — cuando forward está bloqueado por obstáculo, reverse sigue permitido
+6. **Critical modules (CAN timeout, emergency stop, watchdog, relay main) nunca deshabilitables** vía service mode
+7. **Factory restore NO elimina faults reales** — solo re-habilita módulos, faults reaparecen en siguiente check
+8. **Emergency stop es irrecuperable** — requiere reset del MCU
+9. **Watchdog (IWDG ~500ms)** — resetea MCU si main loop se bloquea
+10. **Gear changes speed-gated** — cambio solo permitido a ≤1 km/h
 
 ---
 
-## 7. PATRONES DE CÓDIGO — CÓMO HACER CAMBIOS SIN ROMPER
+## 8. CÓMO COMPILAR
 
-### Para añadir un nuevo módulo ESP32:
-1. Crear `esp32/src/mi_modulo.cpp` y `esp32/src/mi_modulo.h` con namespace propio
-2. `init()` se llama en `setup()` de `main.cpp`
-3. `update()` se llama en `loop()` de `main.cpp`
-4. Si necesita datos CAN → leer de `vehicleData` (singleton en main.cpp)
-5. Si envía CAN → construir `CanFrame` y usar `ESP32Can.writeFrame(frame)`
-6. Si necesita ACK → llamar `ackBeginWait(cmdIdLow)` después de enviar
-
-### Para añadir un nuevo CAN ID:
-1. **ESP32:** Añadir constante en `esp32/include/can_ids.h`
-2. **STM32:** Añadir `#define` en `Core/Inc/can_handler.h`
-3. **STM32 RX:** Añadir case en `CAN_ProcessMessages()` en `can_handler.c`
-4. **STM32 RX filter:** Actualizar `CAN_ConfigureFilters()` si el ID no cae en un rango existente
-5. **ESP32 RX:** Añadir decoder en `can_rx.cpp` + struct en `vehicle_data.h`
-
-### Para añadir datos a VehicleData:
-1. Crear struct en `vehicle_data.h` (igual que `LightsData`, `ObstacleData`, etc.)
-2. Añadir miembro privado + setter + getter en clase `VehicleData`
-3. Añadir decoder en `can_rx.cpp`
-
-### Para modificar safety_system.c (STM32):
-- **NUNCA** cambiar el comportamiento de `Safety_SetState()` sin entender las transiciones
-- Los estados SAFE y ERROR son los más restrictivos — no bajar su nivel de protección
-- `Obstacle_Update()` es no-bloqueante y usa timestamps, no `HAL_Delay()`
-- Toda lógica de seguridad está en el loop de 10ms (`tick_10ms` en `main.c`)
-
----
-
-## 8. CÓMO COMPILAR Y PROBAR
-
-### STM32 (ARM cross-compile)
+### STM32
 ```bash
-cd /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos
-make clean && make all    # Necesita arm-none-eabi-gcc
+# Requiere arm-none-eabi-gcc en PATH
+cd /repo
+make
+# Output: STM32G474RE.elf, STM32G474RE.bin
 ```
 
-### Tests unitarios existentes (host, no necesitan ARM)
+### ESP32
 ```bash
-cd Core/Src
-# Math safety tests (54 tests)
-gcc -std=c11 -I../Inc -O2 -lm math_safety.c test_math_safety.c -o /tmp/test_math && /tmp/test_math
-# Steering cal store tests
-gcc -std=c11 -I../Inc -O2 test_steering_cal_store.c -o /tmp/test_cal && /tmp/test_cal
+# Requiere PlatformIO
+cd /repo/esp32
+pio run -e esp32s3
+# Output: .pio/build/esp32s3/firmware.bin
 ```
 
-### ESP32 (PlatformIO)
-```bash
-cd esp32
-pio run                   # Compila
-pio run -t upload         # Flashea
-pio device monitor        # Monitor serial
-```
+**Nota:** Las herramientas de cross-compile NO están instaladas en el sandbox. Solo se puede verificar sintaxis con gcc/g++ del host y stubs.
 
 ---
 
-## 9. REGLAS QUE EL SIGUIENTE AGENTE DEBE SEGUIR
+## 9. TESTS EXISTENTES
 
-1. **El documento de referencia único es `FIRMWARE_MIGRATION_AUDIT.md`** — contiene la comparación completa y el plan de implementación.
-2. **No inventar funcionalidades.** Solo implementar lo que está documentado en la auditoría.
-3. **No rediseñar.** Usar los patrones existentes (namespaces, VehicleData, CAN dispatch, screen system).
-4. **No mover GPIOs.** Las asignaciones de pines están fijadas por hardware.
-5. **No cambiar CAN IDs existentes.** Solo añadir nuevos si es necesario.
-6. **Partial redraw siempre.** Las pantallas usan dirty-flags, nunca `fillScreen()` en update.
-7. **Non-blocking siempre.** No usar `delay()` en `loop()`. Usar timestamps y máquinas de estado.
-8. **STM32 es la autoridad de seguridad.** El ESP32 propone, el STM32 valida y aplica.
-9. **Después de cada cambio, verificar que los tests existentes siguen pasando.**
-10. **Actualizar `FIRMWARE_MIGRATION_AUDIT.md`** al completar cada paso (marcar como ✅ IMPLEMENTADO y actualizar porcentaje).
+Solo 2 test files en C (no hay framework formal):
+- `Core/Src/test_math_safety.c` — Tests para `math_safety.c` (NaN/Inf handling)
+- `Core/Src/test_steering_cal_store.c` — Tests para `steering_cal_store.c`
+
+No hay tests para ESP32. No hay CI/CD configurado (no `.github/workflows/`).
 
 ---
 
-## 10. ORDEN RECOMENDADO DE IMPLEMENTACIÓN
+## 10. GPIO MAP RESUMIDO
 
-```
-Siguiente paso → Paso 1: MCP23017 shifter (es el más crítico, desbloquea marchas reales)
-Después        → Paso 3: Touch completo (desbloquea modos 4x4/tank + base para menú)
-Después        → Paso 4: 5 zonas obstáculo (STM32 only, sin dependencias)
-Después        → Paso 5: Reacción infantil (depende de Paso 4)
-Después        → Paso 8: Menú ingeniería (depende de Paso 3)
-Después        → Paso 9: NVS persistencia (depende de Paso 8)
-Después        → Paso 10: Error logger (STM32 flash + CAN command)
-Últimos        → Paso 11: ACC, Paso 12: Regen (funcionalidad avanzada)
-```
+### STM32G474RE
+| Función | Pin(es) | Periférico |
+|---------|---------|-----------|
+| PWM Tracción FL/FR/RL/RR | PA8/PA9/PA10/PA11 | TIM1 CH1-4 |
+| PWM Dirección | PC8 | TIM8 CH3 |
+| Dirección motores | PC0-PC4 | GPIO output |
+| Enable motores | PC5-PC7, PC13, PC9 | GPIO output |
+| Relé principal | PC10 | GPIO output |
+| Relé tracción | PC11 | GPIO output |
+| Relé dirección | PC12 | GPIO output |
+| Relé LED | PB10 | GPIO output |
+| Encoder A/B | PA15/PB3 | TIM2 encoder mode |
+| Sensor centro | PB5 | GPIO input (EXTI) |
+| Velocidad ruedas | PA0-PA2, PB15 | GPIO input (EXTI) |
+| OneWire DS18B20 | PB0 | GPIO bitbang |
+| Pedal ADC | PA3 | ADC1 CH4 |
+| CAN TX/RX | PB8/PB9 | FDCAN1 |
+| I2C SDA/SCL | PB6/PB7 | I2C1 (INA226, TCA9548A, ADS1115) |
+
+### ESP32-S3
+| Función | Pin(es) |
+|---------|---------|
+| CAN TX/RX | GPIO 4/5 |
+| Obstacle TRIG/ECHO | GPIO 6/7 |
+| Shifter I2C SDA/SCL | GPIO 8/9 |
+| TFT MOSI/SCLK/CS/DC/RST | GPIO 13/14/15/16/17 |
+| Touch CS | GPIO 21 |
+| WS2812B data | GPIO 38 |
+| Power sense/hold | GPIO 40/41 |
+| TFT backlight | GPIO 42 |
+| Audio TX/RX | GPIO 43/44 |
 
 ---
 
-## 11. DEUDA TÉCNICA CONOCIDA (no bloquea, pero documentar)
+## 11. REGLAS OBLIGATORIAS PARA CONTRIBUIR
 
-1. **`led_controller.cpp` línea 40:** `braking` y `reverse` están hardcodeados a `false` en `main.cpp` línea 265-266. Se resolverá cuando MCP23017 (Paso 1) proporcione la marcha real y se detecte frenado.
-2. **`drive_screen.cpp` línea 100:** `curGear_ = ui::Gear::N` hardcodeado. Se resolverá con MCP23017.
-3. **`drive_screen.cpp` líneas 102-104:** `curMode_.is4x4` y `curMode_.isTankTurn` siempre `false`. Se resolverá cuando STM32 envíe los mode flags por CAN (o el ESP32 trackee su propio estado tras ACK de CMD_MODE).
-4. **Power manager (`power_manager.cpp`):** Falta secuencia completa de relés AUX_POWER en la etapa STARTING. Actualmente salta directo de POWER_HOLD a STARTING sin activar relés del STM32.
-5. **Filtro CAN STM32:** Filter 2 es RANGE 0x110–0x120 (acepta 17 IDs). IDs intermedios 0x111-0x11F se ignoran silenciosamente en `CAN_ProcessMessages()` → no es un bug, pero documentar si se añaden IDs en ese rango.
+1. **Toda PR debe actualizar `docs/PROJECT_MASTER_STATUS.md`** si cambia arquitectura, features, limitaciones, backlog o estado de fases
+2. **No implementar features de fases futuras** sin que la fase actual esté completada (ver §5 del PROJECT_MASTER_STATUS)
+3. **No eliminar safety checks** sin justificación técnica
+4. **No modificar CAN IDs existentes** — solo añadir nuevos
+5. **Zero heap allocation en ESP32 UI** — solo buffers stack fijos con snprintf
+6. **No usar `String` class** en ESP32
+7. **Float sanitization** — toda operación PWM-affecting debe pasar por `sanitize_float()`
+8. **Parcial redraw** — UI solo redibuja elementos que cambiaron
+
+---
+
+## 12. ARCHIVOS CLAVE PARA ENTENDER EL SISTEMA RÁPIDO
+
+Si tienes poco tiempo, lee estos archivos en este orden:
+1. `docs/PROJECT_MASTER_STATUS.md` — Estado maestro obligatorio
+2. `esp32/include/can_ids.h` — Contrato CAN completo (IDs, enums, timing)
+3. `Core/Inc/safety_system.h` — State machine, error types, obstacle states
+4. `esp32/src/main.cpp` — Loop principal ESP32, integración de todos los módulos
+5. `Core/Src/main.c` — Loop principal STM32, scheduling de tareas
+6. `esp32/src/screen_manager.cpp` — Routing de pantallas + código secreto engineering
+7. `Core/Src/safety_system.c` — 5-zone obstacle + child reaction (líneas 1550-1650)
+
+---
+
+## 13. SIGUIENTE PASO RECOMENDADO
+
+**Actualizar `docs/PROJECT_MASTER_STATUS.md`** para reflejar todas las implementaciones de la sección 4 de este documento. Esto es OBLIGATORIO antes de cualquier otra implementación nueva. Luego, continuar con las features pendientes de la sección 5.2 siguiendo el orden de fases del proyecto.

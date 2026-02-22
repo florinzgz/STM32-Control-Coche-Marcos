@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-02-16
+> Last updated: 2026-02-22
 
 ---
 
@@ -33,7 +33,8 @@ The STM32 is the **safety authority** and sole actuator controller. All actuator
 | Encoder fault detection (range, jump, frozen) | `Encoder_CheckHealth()` | `Core/Src/motor_control.c` |
 | CAN heartbeat timeout (250 ms) | `Safety_CheckCANTimeout()` | `Core/Src/safety_system.c` |
 | CAN bus-off detection and recovery | `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
-| Obstacle backstop limiter (3-tier distance mapping) | `Obstacle_Update()`, `Obstacle_ProcessCAN()` | `Core/Src/safety_system.c` |
+| Obstacle backstop limiter (5-zone distance mapping with speed-dependent thresholds) | `Obstacle_Update()`, `Obstacle_ProcessCAN()` | `Core/Src/safety_system.c` |
+| Child reaction detection (pedal-release tightens obstacle zones) | Logic in `Obstacle_Update()` | `Core/Src/safety_system.c` |
 | Relay power sequencing (Main → Traction → Direction) | `Relay_PowerUp()`, `Relay_SequencerUpdate()` | `Core/Src/safety_system.c` |
 | Command validation gate (throttle, steering, mode) | `Safety_ValidateThrottle()`, `Safety_ValidateSteering()`, `Safety_ValidateModeChange()` | `Core/Src/safety_system.c` |
 | Pedal ADC reading (ADC1, 12-bit, PA3) | `Pedal_Update()` | `Core/Src/sensor_manager.c` |
@@ -80,6 +81,18 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
 | ESP32 heartbeat transmission (0x011 every 100 ms) | Logic in `loop()` | `esp32/src/main.cpp` |
 | Command ACK tracking (non-blocking, 200 ms timeout) | `ackBeginWait()`, `ackCheck()` | `esp32/src/main.cpp` |
+| Obstacle sensor driver (HC-SR04, GPIO 6/7, 25 Hz, 5-zone mapping) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle CAN TX (0x208 at 66 ms, DLC 5 with rolling counter) | `can_obstacle` namespace | `esp32/src/can/can_obstacle.cpp` |
+| Obstacle boot indicator (WAITING/VALID/INVALID status) | `ObstacleIndicator` | `esp32/src/hmi/obstacle_indicator.cpp` |
+| Gear shifter input (MCP23017 I2C, GPIO 8/9, P/R/N/D1/D2) | `shifter` namespace | `esp32/src/shifter_input.cpp` |
+| Centralized touch handler (TAP/LONG_PRESS/RELEASE events) | `touch` namespace | `esp32/src/touch_handler.cpp` |
+| NVS config persistence (CRC32, mode/brightness/LED/volume) | `config_store` namespace | `esp32/src/config_store.cpp` |
+| Engineering screen (hidden menu via code "8989", fault viewer, factory restore) | `EngineeringScreen` | `esp32/src/screens/engineering_screen.cpp` |
+| LED toggle (CAN 0x120 on/off command) | `ui::LedToggle` | `esp32/src/ui/led_toggle.cpp` |
+| WS2812B LED strip (28 front + 16 rear, FastLED) | `led_ctrl` namespace | `esp32/src/led_controller.cpp` |
+| Power manager (ignition key GPIO 40/41, state machine) | `power_mgr` namespace | `esp32/src/power_manager.cpp` |
+| Audio manager (DFPlayer Mini, UART2 GPIO 43/44, priority queue) | `audio` namespace | `esp32/src/audio_manager.cpp` |
+| Gear/mode CAN TX (0x102, on gear change or mode icon tap) | `sendGearCommand()`, `sendModeCommand()` | `esp32/src/main.cpp` |
 
 ### CAN Communication
 
@@ -113,7 +126,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 
 ### Safety Architecture
 
-The STM32 is the sole safety authority. All incoming ESP32 commands pass through `Safety_Validate*()` gates. The state machine enforces which transitions are legal. The independent watchdog (IWDG, ~500 ms) resets the MCU if the main loop stalls. CAN timeout (250 ms) transitions to SAFE. Bus-off detection and recovery is non-blocking with retry limits. Obstacle backstop limiter runs independently of ESP32 logic.
+The STM32 is the sole safety authority. All incoming ESP32 commands pass through `Safety_Validate*()` gates. The state machine enforces which transitions are legal. The independent watchdog (IWDG, ~500 ms) resets the MCU if the main loop stalls. CAN timeout (250 ms) transitions to SAFE. Bus-off detection and recovery is non-blocking with retry limits. Obstacle backstop limiter (5-zone with child reaction detection) runs independently of ESP32 logic.
 
 ### UI Architecture
 
@@ -174,7 +187,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | CAN bus-off detection and recovery (non-blocking, retry-limited) | `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
 | Sensor plausibility (temperature range, current range, wheel speed range) | `Safety_CheckSensors()` | `Core/Src/safety_system.c` |
 | Encoder health (range, jump, frozen-value detection) | `Encoder_CheckHealth()` | `Core/Src/motor_control.c` |
-| Obstacle backstop limiter (3-tier: <200mm→SAFE, 200–500→30%, 500–1000→70%) | `Obstacle_Update()` | `Core/Src/safety_system.c` |
+| Obstacle backstop limiter (5-zone: <200mm→0%, 200–500→30%, 500–1000→70%, 1000–1500→85%, 1500–4000→95%) | `Obstacle_Update()` | `Core/Src/safety_system.c` |
+| Child reaction detection (>10% pedal drop in 500ms tightens warning→0.5, caution→0.7 for 2s) | `Obstacle_Update()` child reaction block | `Core/Src/safety_system.c` |
 | Obstacle stale-data detection (rolling counter, 3-frame freeze) | `Obstacle_ProcessCAN()` stale counter logic | `Core/Src/safety_system.c` |
 | Obstacle recovery hysteresis (>500 mm for >1 s) | Recovery logic in `Obstacle_Update()` | `Core/Src/safety_system.c` |
 | Non-blocking relay power sequencing (Main 50 ms → Traction 20 ms → Direction) | `Relay_SequencerUpdate()` state machine | `Core/Src/safety_system.c` |
@@ -213,8 +227,21 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Pedal bar (0–100 % fill + color gradient) | `PedalBar::draw()` | `esp32/src/ui/pedal_bar.cpp` |
 | Frame limiter (20 FPS cap) | `FrameLimiter::shouldDraw()` | `esp32/src/ui/frame_limiter.h` |
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
+| Engineering screen (hidden menu via "8989" tap sequence, 5 submenus) | `EngineeringScreen::handleTouch()` | `esp32/src/screens/engineering_screen.cpp` |
+| LED toggle button (top bar, CAN 0x120 command) | `ui::LedToggle::hitTest()` | `esp32/src/ui/led_toggle.cpp` |
+| Obstacle proximity 5-zone color coding (GRAY/GREEN/CYAN/YELLOW/ORANGE/RED) | `proximityColor()` | `esp32/src/ui/ui_common.h` |
+| Drive screen gear display from physical shifter (MCP23017 → GearDisplay) | `shifter::getGearRaw()` mapping | `esp32/src/screens/drive_screen.cpp` |
 
-### Sensors
+### ESP32 Input & Persistence
+
+| Feature | Evidence | Files |
+|---|---|---|
+| Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-4 one-hot, P/R/N/D1/D2) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
+| Centralized touch handler (TAP/LONG_PRESS/RELEASE, 200 ms debounce) | `touch::init()`, `touch::update()`, `touch::getEvent()` | `esp32/src/touch_handler.cpp` |
+| NVS config store (CRC32 validated, driveMode/brightness/LED/volume) | `config_store::init()`, `config_store::save()`, `config_store::get()` | `esp32/src/config_store.cpp` |
+| HC-SR04 obstacle sensor (GPIO 6/7, 25 Hz, 5-zone mapping, stuck detection) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle CAN TX (0x208, DLC 5, 66 ms interval, rolling counter) | `can_obstacle::init()`, `can_obstacle::update()` | `esp32/src/can/can_obstacle.cpp` |
+| Power manager (ignition key GPIO 40/41, OFF→RUNNING→SHUTTING_DOWN) | `power_mgr::init()`, `power_mgr::update()` | `esp32/src/power_manager.cpp` |
 
 | Feature | Evidence | Files |
 |---|---|---|
@@ -231,11 +258,20 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 ### Audio
 
-NOT IMPLEMENTED — no audio hardware or software exists in the codebase.
+| Feature | Evidence | Files |
+|---|---|---|
+| DFPlayer Mini audio manager (UART2 GPIO 43/44, 9600 baud) | `audio::init()`, `audio::play()`, `audio::update()` | `esp32/src/audio_manager.cpp` |
+| Priority-based sound queue (LOW/MEDIUM/HIGH) | `audio::Priority` enum | `esp32/src/audio_manager.h` |
+| Sound catalog (WELCOME, FAREWELL, OBSTACLE_WARN, ERROR_ALERT, BATTERY_LOW, GEAR_CHANGE) | `audio::Sound` enum | `esp32/src/audio_manager.h` |
+| Welcome/farewell audio on power state transitions | Logic in `loop()` | `esp32/src/main.cpp` |
 
 ### Lighting
 
-NOT IMPLEMENTED — no lighting hardware or software exists in the codebase.
+| Feature | Evidence | Files |
+|---|---|---|
+| WS2812B LED strip (28 front + 16 rear = 44 LEDs, GPIO 38, FastLED) | `led_ctrl::init()`, `led_ctrl::update()` | `esp32/src/led_controller.cpp` |
+| State-based LED patterns (SystemState → color/animation) | `led_ctrl::update(state, braking, reverse, enabled)` | `esp32/src/led_controller.cpp` |
+| LED relay toggle via CAN 0x120 | `sendLedCommand()` + `ui::LedToggle::hitTest()` | `esp32/src/main.cpp`, `esp32/src/ui/led_toggle.cpp` |
 
 ### Service Mode
 
@@ -269,7 +305,7 @@ NOT IMPLEMENTED — no lighting hardware or software exists in the codebase.
 | **OneWire bit-bang timing is approximate** — busy-wait loop calibrated for 170 MHz | `OW_DelayUs()` uses NOP loop: `us * 42` | `Core/Src/sensor_manager.c` line 341 |
 | **DS18B20 ROM search runs only once at init** — hot-plug sensors not detected | `OW_SearchAll()` called only from `Sensor_Init()` | `Core/Src/sensor_manager.c` line 619 |
 | **Fallback single-sensor read when no ROMs discovered** — `Temperature_ReadAll()` reads only `temperatures[0]` via Skip ROM | Fallback branch in `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` lines 561–573 |
-| **Drive screen gear display is not CAN-driven** — mode flags (4×4/360°) in DriveScreen are not populated from CAN data | Gear and mode flags set locally, not from `VehicleData` CAN fields | `esp32/src/screens/drive_screen.cpp` |
+| **Drive screen mode flags are not CAN-driven** — mode flags (4×4/360°) in DriveScreen are set locally via touch, not from STM32 CAN echo | Mode state tracked in `main.cpp` `currentModeFlags`, not from `VehicleData` | `esp32/src/main.cpp` |
 | **Hardcoded vehicle physics constants** — wheelbase (0.95 m), track width (0.70 m), wheel circumference (1.1 m), max steer (54°) are compile-time `#define` | `vehicle_physics.h` | `Core/Inc/vehicle_physics.h` |
 | **Hardcoded INA226 shunt resistances** — 1 mΩ motor, 0.5 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/main.h` |
 | **No calibration persistence** — steering centering, encoder zero, sensor offsets are not saved to flash/EEPROM | No flash write or EEPROM API calls anywhere | All STM32 source files |
@@ -281,7 +317,8 @@ NOT IMPLEMENTED — no lighting hardware or software exists in the codebase.
 | **Float-only arithmetic** — no fixed-point fallback; dependent on Cortex-M4 FPU | All computations use `float` | All STM32 source files |
 | **Emergency stop is non-recoverable** — `emergency_stopped` flag set, system enters ERROR | `Safety_EmergencyStop()` sets `SYS_STATE_ERROR` | `Core/Src/safety_system.c` |
 | **I2C bus recovery uses busy-wait delays** — ~160 µs total, but blocking | NOP loops in `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` lines 177–203 |
-| **ESP32 obstacle source not yet implemented** — STM32 accepts obstacle data (0x208) but ESP32 source code does not contain obstacle sensor driver or ultrasonic sensor reading | No obstacle sensor reading code in `esp32/src/` | `esp32/src/` directory |
+| **Engineering screen has no exit mechanism** — once activated via "8989", `engineeringActive_` stays true with no way to return to normal screens | `screen_manager.cpp` `engineeringActive_` flag never reset | `esp32/src/screen_manager.cpp` |
+| **NVS writes on every touch change** — `config_store::save()` called on each LED/mode toggle, NVS has ~100K write cycle limit | `setLedEnabled()`, `setDriveMode()` called from touch handler | `esp32/src/main.cpp` |
 | **Service mode state is RAM-only** — module enable/disable settings lost on power cycle | `module_enabled[]` is static array, no NVM storage | `Core/Src/service_mode.c` |
 | **Encoder reader module is observation-only** — `encoder_reader.c` provides raw count access and CAN diagnostics but is not connected to any control, odometry, speed, traction, braking, or steering logic | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
 
@@ -289,16 +326,18 @@ NOT IMPLEMENTED — no lighting hardware or software exists in the codebase.
 
 ## 4) PENDING FEATURES (ENGINEERING BACKLOG)
 
-| # | Description | Subsystem | Dependencies | Blocking Modules |
-|---|---|---|---|---|
-| 1 | **ESP32 obstacle sensor driver** — STM32 accepts obstacle CAN data (0x208) and processes it, but ESP32 has no ultrasonic/ToF sensor reading code to generate this data | Sensors / Safety | Ultrasonic or ToF sensor hardware, ESP32 GPIO/I2C driver | `Obstacle_ProcessCAN()`, `Obstacle_Update()` in `safety_system.c` |
-| 2 | **CAN ID 0x209 parsing** — filter and case exist for `CAN_ID_OBSTACLE_SAFETY` but body is empty (`break;` only) | CAN / Safety | Obstacle sensor driver (#1) | `CAN_ProcessMessages()` in `can_handler.c` |
-| 3 | **Steering PID tuning (I and D terms)** — PID structure supports ki/kd but both are 0.0; code path exists in `PID_Compute()` | Steering | Hardware testing with actual steering load | `steering_pid` in `motor_control.c` |
-| 4 | **Calibration persistence** — encoder zero and sensor offsets recomputed every power cycle; no NVM/flash write path exists | Steering / Sensors | STM32 flash or EEPROM driver | `Steering_Init()`, `SteeringCentering_Complete()` |
-| 5 | **Service mode persistence** — module enable/disable states lost on reboot; no NVM path exists | Service Mode | STM32 flash or EEPROM driver | `ServiceMode_Init()` |
-| 6 | **Redundant pedal sensor** — single ADC channel with no cross-check; code structure accepts only one value | Sensors / Safety | Second ADC channel or hall sensor hardware | `Pedal_Update()` in `sensor_manager.c` |
-| 7 | **ESP32 mode/gear CAN feedback to DriveScreen** — DriveScreen does not read mode/gear from `VehicleData`; UI state is locally tracked | Display / UI | CAN data population in `can_rx.cpp` for mode/gear state | `DriveScreen` in `drive_screen.cpp` |
-| 8 | **Hot-plug DS18B20 detection** — ROM search runs only at init; adding/removing sensors at runtime is not detected | Sensors | Periodic `OW_SearchAll()` or change-detection mechanism | `Sensor_Init()` in `sensor_manager.c` |
+| # | Description | Subsystem | Dependencies | Blocking Modules | Status |
+|---|---|---|---|---|---|
+| ~~1~~ | ~~**ESP32 obstacle sensor driver**~~ | ~~Sensors / Safety~~ | ~~—~~ | ~~—~~ | ✅ RESOLVED — `esp32/src/sensors/obstacle_sensor.cpp` + `esp32/src/can/can_obstacle.cpp` |
+| 2 | **CAN ID 0x209 parsing** — filter and case exist for `CAN_ID_OBSTACLE_SAFETY` but body is empty (`break;` only) | CAN / Safety | — | `CAN_ProcessMessages()` in `can_handler.c` | ❌ PENDING |
+| 3 | **Steering PID tuning (I and D terms)** — PID structure supports ki/kd but both are 0.0; code path exists in `PID_Compute()` | Steering | Hardware testing with actual steering load | `steering_pid` in `motor_control.c` | ❌ PENDING |
+| 4 | **Calibration persistence (STM32)** — encoder zero and sensor offsets recomputed every power cycle; no NVM/flash write path exists | Steering / Sensors | STM32 flash or EEPROM driver | `Steering_Init()`, `SteeringCentering_Complete()` | ❌ PENDING |
+| 5 | **Service mode persistence (STM32)** — module enable/disable states lost on reboot; no NVM path exists | Service Mode | STM32 flash or EEPROM driver | `ServiceMode_Init()` | ❌ PENDING |
+| 6 | **Redundant pedal sensor** — single ADC channel with no cross-check; code structure accepts only one value | Sensors / Safety | Second ADC channel or hall sensor hardware | `Pedal_Update()` in `sensor_manager.c` | ❌ PENDING |
+| ~~7~~ | ~~**ESP32 mode/gear CAN feedback to DriveScreen**~~ | ~~Display / UI~~ | ~~—~~ | ~~—~~ | ⚠️ PARTIAL — Gear now from physical shifter; mode flags still local |
+| 8 | **Hot-plug DS18B20 detection** — ROM search runs only at init; adding/removing sensors at runtime is not detected | Sensors | Periodic `OW_SearchAll()` or change-detection mechanism | `Sensor_Init()` in `sensor_manager.c` | ❌ PENDING |
+| 9 | **Engineering screen exit mechanism** — once activated, no way to return to normal screens | Display / UI | — | `screen_manager.cpp` | ❌ NEW |
+| 10 | **NVS write wear mitigation** — config_store saves on every touch; needs dirty flag + periodic flush | ESP32 / Persistence | — | `config_store.cpp` | ❌ NEW |
 
 ---
 
