@@ -31,19 +31,22 @@ static bool          initialized_      = false;
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
-//   < 200 mm  → zone 3 (emergency, scale=0.0)
-//   200–500   → zone 2 (critical,  scale=0.3)
-//   500–1000  → zone 1 (warning,   scale=0.7)
-//   > 1000    → zone 0 (normal,    scale=1.0)
+//   < 200 mm  → zone 4 (emergency, scale=0.0)
+//   200–500   → zone 3 (critical,  scale=0.3)
+//   500–1000  → zone 2 (warning,   scale=0.7)
+//   1000–1500 → zone 1 (caution,   scale=0.85)
+//   > 1500    → zone 0 (normal,    scale=1.0)
 // -------------------------------------------------------------------------
 static constexpr uint16_t ZONE_EMERGENCY_MM = 200;
 static constexpr uint16_t ZONE_CRITICAL_MM  = 500;
 static constexpr uint16_t ZONE_WARNING_MM   = 1000;
+static constexpr uint16_t ZONE_CAUTION_MM   = 1500;
 
 static uint8_t distanceToZone(uint16_t mm) {
-    if (mm < ZONE_EMERGENCY_MM) return 3;
-    if (mm < ZONE_CRITICAL_MM)  return 2;
-    if (mm < ZONE_WARNING_MM)   return 1;
+    if (mm < ZONE_EMERGENCY_MM) return 4;
+    if (mm < ZONE_CRITICAL_MM)  return 3;
+    if (mm < ZONE_WARNING_MM)   return 2;
+    if (mm < ZONE_CAUTION_MM)   return 1;
     return 0;
 }
 

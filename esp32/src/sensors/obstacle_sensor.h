@@ -33,7 +33,7 @@ enum class SensorStatus : uint8_t {
 // -------------------------------------------------------------------------
 struct Reading {
     uint16_t     distance_mm  = 0;      // Measured distance (mm), 0 = no reading
-    uint8_t      zone         = 0;      // Distance zone (0–3): 0=far, 1=warn, 2=crit, 3=emergency
+    uint8_t      zone         = 0;      // Distance zone (0–4): 0=far, 1=caution, 2=warn, 3=crit, 4=emergency
     bool         healthy      = false;  // true if reading is valid and plausible
     bool         stuck        = false;  // true if stuck-sensor condition detected
     SensorStatus status       = SensorStatus::WAITING;

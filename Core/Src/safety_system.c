@@ -134,10 +134,13 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
  * slowdown.                                                            */
 
 /* Fixed distance thresholds (floor values — dynamic thresholds may
- * be larger at higher speeds due to stopping-distance calculation).   */
+ * be larger at higher speeds due to stopping-distance calculation).
+ * 5 zones: emergency, critical, warning, caution, alert.              */
 #define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0         */
 #define OBSTACLE_CRITICAL_MM        500     /* 200–500 mm → scale = 0.3       */
 #define OBSTACLE_WARNING_MM         1000    /* 500–1000 mm → scale = 0.7      */
+#define OBSTACLE_CAUTION_MM         1500    /* 1000–1500 mm → scale = 0.85    */
+#define OBSTACLE_ALERT_MM           4000    /* 1500–4000 mm → scale = 0.95    */
 
 /* Temporal hysteresis */
 #define OBSTACLE_CONFIRM_MS         200     /* Confirm obstacle before acting  */
@@ -204,6 +207,22 @@ static uint8_t  obstacle_plausible       = 1;      /* Current data plausible   *
 
 /* ---- Validated distance used by state machine ---- */
 static uint16_t obstacle_validated_mm    = 0xFFFF; /* After plausibility check */
+
+/* ---- Child reaction detection ----
+ * When the child rapidly releases the pedal (drop > THRESHOLD in WINDOW),
+ * the obstacle safety factors in warning/caution zones are tightened.
+ * This detects an instinctive reaction to a perceived obstacle.           */
+#define CHILD_REACTION_THRESHOLD    10.0f   /* Pedal drop > 10% triggers    */
+#define CHILD_REACTION_MIN_PEDAL    10.0f   /* Min pedal % before detection */
+#define CHILD_REACTION_WINDOW_MS    500     /* Detection window (ms)        */
+#define CHILD_REACTION_BOOST_MS     2000    /* How long tighter factors last */
+#define CHILD_REACTION_WARNING_SCALE  0.5f  /* Warning zone during reaction */
+#define CHILD_REACTION_CAUTION_SCALE  0.7f  /* Caution zone during reaction */
+
+static float    child_prev_pedal_pct     = 0.0f;  /* Pedal % at window start */
+static uint32_t child_pedal_sample_tick  = 0;      /* When sample was taken   */
+static uint8_t  child_reaction_active    = 0;      /* 1 = reaction detected   */
+static uint32_t child_reaction_start     = 0;      /* When reaction started   */
 
 /* ================================================================== */
 /*  State Machine                                                      */
@@ -592,6 +611,10 @@ void Safety_Init(void)
     obstacle_stuck_since     = 0;
     obstacle_plausible       = 1;
     obstacle_validated_mm    = 0xFFFF;
+    child_prev_pedal_pct     = 0.0f;
+    child_pedal_sample_tick  = 0;
+    child_reaction_active    = 0;
+    child_reaction_start     = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -1548,19 +1571,25 @@ void Obstacle_Update(void)
     /* ---- Compute speed-dependent thresholds ---- */
     float speed_kmh = Obstacle_GetVehicleSpeed();
     uint16_t dyn_emergency  = Obstacle_StoppingDistance(speed_kmh);
-    /* Critical and warning thresholds scale proportionally but keep
-     * a minimum floor from the static defines.                         */
+    /* Critical, warning, caution, alert thresholds scale proportionally
+     * but keep a minimum floor from the static defines.                */
     uint16_t dyn_critical = dyn_emergency + (OBSTACLE_CRITICAL_MM -
                                               OBSTACLE_EMERGENCY_MM);
     uint16_t dyn_warning  = dyn_critical  + (OBSTACLE_WARNING_MM -
                                               OBSTACLE_CRITICAL_MM);
+    uint16_t dyn_caution  = dyn_warning   + (OBSTACLE_CAUTION_MM -
+                                              OBSTACLE_WARNING_MM);
+    uint16_t dyn_alert    = dyn_caution   + (OBSTACLE_ALERT_MM -
+                                              OBSTACLE_CAUTION_MM);
     if (dyn_critical < OBSTACLE_CRITICAL_MM) dyn_critical = OBSTACLE_CRITICAL_MM;
     if (dyn_warning  < OBSTACLE_WARNING_MM)  dyn_warning  = OBSTACLE_WARNING_MM;
+    if (dyn_caution  < OBSTACLE_CAUTION_MM)  dyn_caution  = OBSTACLE_CAUTION_MM;
+    if (dyn_alert    < OBSTACLE_ALERT_MM)    dyn_alert    = OBSTACLE_ALERT_MM;
 
     /* Use the validated (plausibility-checked) distance */
     uint16_t dist = obstacle_validated_mm;
 
-    /* ---- Determine raw target scale from distance ---- */
+    /* ---- Determine raw target scale from distance (5 zones) ---- */
     float target_scale;
     uint8_t target_blocked = 0;
 
@@ -1571,8 +1600,50 @@ void Obstacle_Update(void)
         target_scale = 0.3f;
     } else if (dist < dyn_warning) {
         target_scale = 0.7f;
+    } else if (dist < dyn_caution) {
+        target_scale = 0.85f;
+    } else if (dist < dyn_alert) {
+        target_scale = 0.95f;
     } else {
         target_scale = 1.0f;
+    }
+
+    /* ---- Child reaction detection ----
+     * Sample pedal at regular intervals.  If pedal drops by more than
+     * CHILD_REACTION_THRESHOLD within CHILD_REACTION_WINDOW_MS, the
+     * child is reacting to a perceived obstacle → tighten warning and
+     * caution zone factors for CHILD_REACTION_BOOST_MS.                 */
+    {
+        float pedal_now = Pedal_GetPercent();
+
+        if ((now - child_pedal_sample_tick) >= CHILD_REACTION_WINDOW_MS) {
+            float drop = child_prev_pedal_pct - pedal_now;
+            if (drop >= CHILD_REACTION_THRESHOLD &&
+                child_prev_pedal_pct > CHILD_REACTION_MIN_PEDAL) {
+                child_reaction_active = 1;
+                child_reaction_start  = now;
+            }
+            child_prev_pedal_pct    = pedal_now;
+            child_pedal_sample_tick = now;
+        }
+
+        /* Expire reaction boost after duration */
+        if (child_reaction_active &&
+            (now - child_reaction_start) >= CHILD_REACTION_BOOST_MS) {
+            child_reaction_active = 0;
+        }
+
+        /* Apply tighter factors to warning/caution zones when active.
+         * Use distance thresholds (not float scale) for robust matching. */
+        if (child_reaction_active) {
+            if (dist >= dyn_warning && dist < dyn_caution) {
+                /* Warning zone: tighten from 0.7 → 0.5 */
+                target_scale = CHILD_REACTION_WARNING_SCALE;
+            } else if (dist >= dyn_caution && dist < dyn_alert) {
+                /* Caution zone: tighten from 0.85 → 0.7 */
+                target_scale = CHILD_REACTION_CAUTION_SCALE;
+            }
+        }
     }
 
     /* ---- State machine with temporal hysteresis ---- */
