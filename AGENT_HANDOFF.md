@@ -3,8 +3,7 @@
 > **Fecha:** 2026-02-22
 > **Repositorio:** `florinzgz/STM32-Control-Coche-Marcos`
 > **Branch activo:** `copilot/update-firmware-comparison`
-> **Último commit:** `c72c1cb` — Address code review feedback
-> **Estado del tree:** limpio (nothing to commit)
+> **Último commit conocido:** `c72c1cb` (verificar con `git log --oneline -1` al iniciar)
 > **Documento maestro:** `docs/PROJECT_MASTER_STATUS.md` ← TODA PR debe actualizar este archivo
 
 ---
@@ -215,7 +214,7 @@ El documento maestro NO refleja las implementaciones 4.1-4.7. Según las reglas 
 | 9 | Lighting control | Phase 5 | ⚠️ Parcial | LED strip funciona, pero no hay lógica de luces de freno/reversa real |
 
 ### 5.3 — Problemas detectados no resueltos
-1. **Engineering screen no tiene salida** — una vez activada, `engineeringActive_ = true` no tiene mecanismo para volver a `false`. Falta un "exit engineering mode" trigger (ej: otro código secreto, o timeout, o botón EXIT).
+1. **Engineering screen no tiene salida al modo normal** — una vez activada, `engineeringActive_ = true` no tiene mecanismo para volver a `false`. Los botones BACK dentro del engineering screen solo navegan entre submenús, pero no hay forma de volver a las pantallas normales (drive/standby/etc). Falta un "exit engineering mode" trigger (ej: otro código secreto, o timeout, o botón EXIT en el menú principal).
 2. **sendGearCommand() y sendModeCommand() pueden conflictar** — ambos envían CAN 0x102 pero con diferente contenido de byte 0. Si se llaman en el mismo frame podría haber colisión.
 3. **config_store::save() en cada touch** — cada cambio de LED o modo escribe NVS, lo cual tiene wear limitado (~100K cycles). Considerar dirty flag con save periódico.
 4. **Steering PID es P-only** — kp=0.09, ki=0.0, kd=0.0. Funcional pero sin integral/derivativo.
