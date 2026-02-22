@@ -465,9 +465,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 > Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
 > Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
 
-### Overall Migration Percentage: **82 %**
+### Overall Migration Percentage: **82%**
 
-The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **82 % complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. Remaining work concentrates on experience features, advanced algorithms, and hardware-dependent functionality that requires physical components not yet connected.
+The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **82% complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. Remaining work concentrates on experience features, advanced algorithms, and hardware-dependent functionality that requires physical components not yet connected.
 
 ### Calculation Methodology
 
@@ -477,29 +477,29 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 
 | Subsystem | Weight | Original (ESP32 mono) | Current (STM32 + ESP32) | Status | % |
 |-----------|--------|----------------------|------------------------|--------|---|
-| **Motor Control & Traction** | HIGH | `traction.cpp`, `steering_motor.cpp`, PCA9685 I2C | TIM1/TIM8 direct PWM, PID, Ackermann differential | ✅ Improved | 100 % |
-| **Safety State Machine** | CRITICAL | Dispersed across managers | Formal 7-state machine with transition rules | ✅ Improved | 100 % |
-| **ABS / TCS** | CRITICAL | `abs_system.cpp`, `tcs_system.cpp` | Per-wheel pulse modulation + progressive reduction | ✅ Improved | 100 % |
-| **Overcurrent / Overtemp / Battery** | CRITICAL | `SafetyManager` | 3-tier protection with escalation | ✅ Improved | 100 % |
-| **Sensor Management** | HIGH | `current.cpp`, `temperature.cpp`, `wheels.cpp`, `pedal.cpp` | INA226×6, DS18B20×5, wheel×4, pedal ADC, encoder | ✅ Reimplemented | 100 % |
-| **CAN Communication** | CRITICAL | Did not exist (monolithic) | Full protocol (24 message types, frozen contract v1.3) | ✅ New | 100 % |
-| **Gear System** | HIGH | `shifter.cpp` via MCP23017 | P/R/N/D1/D2 speed-gated + ESP32 MCP23017 shifter | ✅ Improved | 100 % |
-| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | HC-SR04 on ESP32 + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100 % |
-| **Service Mode** | MEDIUM | Did not exist | 25 modules, CAN commands, factory restore | ✅ New | 100 % |
-| **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS | ✅ Reimplemented | 90 % |
-| **Hidden Engineering Menu** | LOW | `menu_hidden.cpp` (46 KB) | Engineering screen (code 8989, 5 submenus, EXIT) | ✅ Reimplemented | 85 % |
-| **Audio System** | LOW | `dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | `audio_manager.cpp` (DFPlayer, priority queue, 6 sounds) | ✅ Reimplemented | 70 % |
-| **LED Lighting** | LOW | `led_controller.cpp` (WS2812B) | `led_controller.cpp` (28+16 LEDs, state patterns) | ✅ Reimplemented | 80 % |
-| **Touch Input** | MEDIUM | `touch_calibration.cpp`, `touch_map.cpp` | `touch_handler.cpp` (TAP/LONG_PRESS, debounce) | ✅ Reimplemented | 90 % |
-| **Config Persistence** | MEDIUM | `eeprom_persistence.cpp`, `config_storage.cpp` | ESP32: NVS `config_store.cpp` (CRC32, dirty flag) / STM32: ❌ None | ⚠️ Partial | 50 % |
-| **Power Management** | MEDIUM | `power_mgmt.cpp` (10-state machine) | ESP32: `power_manager.cpp` (ignition key) / STM32: relay sequencing | ⚠️ Partial | 70 % |
-| **Degraded / Limp Mode** | HIGH | `limp_mode.cpp` (4 levels) | 3-level degradation (L1/L2/L3) + LIMP_HOME | ✅ Improved | 100 % |
-| **Boot Validation** | HIGH | `boot_guard.cpp` (NVS counter) | 6-point pre-ACTIVE checklist | ✅ Improved | 100 % |
-| **Regenerative Braking** | LOW | `regen_ai.cpp` (AI lookup table) | Not implemented | ❌ Missing | 0 % |
-| **Adaptive Cruise** | LOW | `adaptive_cruise.cpp` | Not implemented | ❌ Missing | 0 % |
-| **SOC Estimation** | LOW | Battery SOC in `regen_ai.cpp` | Not implemented | ❌ Missing | 0 % |
-| **Sensor Cross-Validation** | MEDIUM | `SensorManagerEnhanced.cpp` | Not implemented | ❌ Missing | 0 % |
-| **Structured Logging** | LOW | `logger.cpp`, `telemetry.cpp` | Serial debug only (no structured logging) | ❌ Missing | 0 % |
+| **Motor Control & Traction** | HIGH | `traction.cpp`, `steering_motor.cpp`, PCA9685 I2C | TIM1/TIM8 direct PWM, PID, Ackermann differential | ✅ Improved | 100% |
+| **Safety State Machine** | CRITICAL | Dispersed across managers | Formal 7-state machine with transition rules | ✅ Improved | 100% |
+| **ABS / TCS** | CRITICAL | `abs_system.cpp`, `tcs_system.cpp` | Per-wheel pulse modulation + progressive reduction | ✅ Improved | 100% |
+| **Overcurrent / Overtemp / Battery** | CRITICAL | `SafetyManager` | 3-tier protection with escalation | ✅ Improved | 100% |
+| **Sensor Management** | HIGH | `current.cpp`, `temperature.cpp`, `wheels.cpp`, `pedal.cpp` | INA226×6, DS18B20×5, wheel×4, pedal ADC, encoder | ✅ Reimplemented | 100% |
+| **CAN Communication** | CRITICAL | Did not exist (monolithic) | Full protocol (24 message types, frozen contract v1.3) | ✅ New | 100% |
+| **Gear System** | HIGH | `shifter.cpp` via MCP23017 | P/R/N/D1/D2 speed-gated + ESP32 MCP23017 shifter | ✅ Improved | 100% |
+| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | HC-SR04 on ESP32 + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100% |
+| **Service Mode** | MEDIUM | Did not exist | 25 modules, CAN commands, factory restore | ✅ New | 100% |
+| **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS | ✅ Reimplemented | 90% |
+| **Hidden Engineering Menu** | LOW | `menu_hidden.cpp` (46 KB) | Engineering screen (code 8989, 5 submenus, EXIT) | ✅ Reimplemented | 85% |
+| **Audio System** | LOW | `dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | `audio_manager.cpp` (DFPlayer, priority queue, 6 sounds) | ✅ Reimplemented | 70% |
+| **LED Lighting** | LOW | `led_controller.cpp` (WS2812B) | `led_controller.cpp` (28+16 LEDs, state patterns) | ✅ Reimplemented | 80% |
+| **Touch Input** | MEDIUM | `touch_calibration.cpp`, `touch_map.cpp` | `touch_handler.cpp` (TAP/LONG_PRESS, debounce) | ✅ Reimplemented | 90% |
+| **Config Persistence** | MEDIUM | `eeprom_persistence.cpp`, `config_storage.cpp` | ESP32: NVS `config_store.cpp` (CRC32, dirty flag) / STM32: ❌ None | ⚠️ Partial | 50% |
+| **Power Management** | MEDIUM | `power_mgmt.cpp` (10-state machine) | ESP32: `power_manager.cpp` (ignition key) / STM32: relay sequencing | ⚠️ Partial | 70% |
+| **Degraded / Limp Mode** | HIGH | `limp_mode.cpp` (4 levels) | 3-level degradation (L1/L2/L3) + LIMP_HOME | ✅ Improved | 100% |
+| **Boot Validation** | HIGH | `boot_guard.cpp` (NVS counter) | 6-point pre-ACTIVE checklist | ✅ Improved | 100% |
+| **Regenerative Braking** | LOW | `regen_ai.cpp` (AI lookup table) | Not implemented | ❌ Missing | 0% |
+| **Adaptive Cruise** | LOW | `adaptive_cruise.cpp` | Not implemented | ❌ Missing | 0% |
+| **SOC Estimation** | LOW | Battery SOC in `regen_ai.cpp` | Not implemented | ❌ Missing | 0% |
+| **Sensor Cross-Validation** | MEDIUM | `SensorManagerEnhanced.cpp` | Not implemented | ❌ Missing | 0% |
+| **Structured Logging** | LOW | `logger.cpp`, `telemetry.cpp` | Serial debug only (no structured logging) | ❌ Missing | 0% |
 
 ### Summary by Category
 
@@ -518,11 +518,11 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 
 | Phase | Description | Status | Completion |
 |-------|-------------|--------|------------|
-| **Phase 1** | Stability Foundation (hardware validation, CAN reliability, centering, boot, I2C) | ⚠️ Awaiting hardware validation | ~90 % code complete |
-| **Phase 2** | Control Reliability (traction pipeline, ABS/TCS, dynamic brake, park hold, gears) | ⚠️ Awaiting hardware validation | ~90 % code complete |
-| **Phase 3** | Feedback & Sensors (obstacle 0x208/0x209, PID tuning, DS18B20 hot-plug, redundant pedal) | ⚠️ In progress | ~70 % |
-| **Phase 4** | Driver Interaction (CAN gear display, STM32 flash persistence, ACK feedback) | ⚠️ In progress | ~40 % |
-| **Phase 5** | Experience Features (audio integration, lighting logic, sensor fusion, DMA ADC) | ⚠️ Partial | ~30 % |
+| **Phase 1** | Stability Foundation (hardware validation, CAN reliability, centering, boot, I2C) | ⚠️ Awaiting hardware validation | ~90% code complete |
+| **Phase 2** | Control Reliability (traction pipeline, ABS/TCS, dynamic brake, park hold, gears) | ⚠️ Awaiting hardware validation | ~90% code complete |
+| **Phase 3** | Feedback & Sensors (obstacle 0x208/0x209, PID tuning, DS18B20 hot-plug, redundant pedal) | ⚠️ In progress | ~70% |
+| **Phase 4** | Driver Interaction (CAN gear display, STM32 flash persistence, ACK feedback) | ⚠️ In progress | ~40% |
+| **Phase 5** | Experience Features (audio integration, lighting logic, sensor fusion, DMA ADC) | ⚠️ Partial | ~30% |
 
 ### What Remains (Pending Items by Priority)
 
