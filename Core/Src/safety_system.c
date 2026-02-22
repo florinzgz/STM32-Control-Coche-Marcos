@@ -134,10 +134,13 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
  * slowdown.                                                            */
 
 /* Fixed distance thresholds (floor values — dynamic thresholds may
- * be larger at higher speeds due to stopping-distance calculation).   */
+ * be larger at higher speeds due to stopping-distance calculation).
+ * 5 zones: emergency, critical, warning, caution, alert.              */
 #define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0         */
 #define OBSTACLE_CRITICAL_MM        500     /* 200–500 mm → scale = 0.3       */
 #define OBSTACLE_WARNING_MM         1000    /* 500–1000 mm → scale = 0.7      */
+#define OBSTACLE_CAUTION_MM         1500    /* 1000–1500 mm → scale = 0.85    */
+#define OBSTACLE_ALERT_MM           4000    /* 1500–4000 mm → scale = 0.95    */
 
 /* Temporal hysteresis */
 #define OBSTACLE_CONFIRM_MS         200     /* Confirm obstacle before acting  */
@@ -1548,19 +1551,25 @@ void Obstacle_Update(void)
     /* ---- Compute speed-dependent thresholds ---- */
     float speed_kmh = Obstacle_GetVehicleSpeed();
     uint16_t dyn_emergency  = Obstacle_StoppingDistance(speed_kmh);
-    /* Critical and warning thresholds scale proportionally but keep
-     * a minimum floor from the static defines.                         */
+    /* Critical, warning, caution, alert thresholds scale proportionally
+     * but keep a minimum floor from the static defines.                */
     uint16_t dyn_critical = dyn_emergency + (OBSTACLE_CRITICAL_MM -
                                               OBSTACLE_EMERGENCY_MM);
     uint16_t dyn_warning  = dyn_critical  + (OBSTACLE_WARNING_MM -
                                               OBSTACLE_CRITICAL_MM);
+    uint16_t dyn_caution  = dyn_warning   + (OBSTACLE_CAUTION_MM -
+                                              OBSTACLE_WARNING_MM);
+    uint16_t dyn_alert    = dyn_caution   + (OBSTACLE_ALERT_MM -
+                                              OBSTACLE_CAUTION_MM);
     if (dyn_critical < OBSTACLE_CRITICAL_MM) dyn_critical = OBSTACLE_CRITICAL_MM;
     if (dyn_warning  < OBSTACLE_WARNING_MM)  dyn_warning  = OBSTACLE_WARNING_MM;
+    if (dyn_caution  < OBSTACLE_CAUTION_MM)  dyn_caution  = OBSTACLE_CAUTION_MM;
+    if (dyn_alert    < OBSTACLE_ALERT_MM)    dyn_alert    = OBSTACLE_ALERT_MM;
 
     /* Use the validated (plausibility-checked) distance */
     uint16_t dist = obstacle_validated_mm;
 
-    /* ---- Determine raw target scale from distance ---- */
+    /* ---- Determine raw target scale from distance (5 zones) ---- */
     float target_scale;
     uint8_t target_blocked = 0;
 
@@ -1571,6 +1580,10 @@ void Obstacle_Update(void)
         target_scale = 0.3f;
     } else if (dist < dyn_warning) {
         target_scale = 0.7f;
+    } else if (dist < dyn_caution) {
+        target_scale = 0.85f;
+    } else if (dist < dyn_alert) {
+        target_scale = 0.95f;
     } else {
         target_scale = 1.0f;
     }

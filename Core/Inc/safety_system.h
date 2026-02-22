@@ -258,6 +258,11 @@ bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
  * for motion.  The STM32 runs a full autonomous obstacle safety module
  * with plausibility validation, stuck-sensor detection, speed-dependent
  * stopping distance, and temporal hysteresis.                              */
+
+/* Obstacle distance zone thresholds (mm) — 5 zones */
+#define OBSTACLE_CAUTION_MM_PUB     1500    /* 1000–1500 mm → scale = 0.85    */
+#define OBSTACLE_ALERT_MM_PUB       4000    /* 1500–4000 mm → scale = 0.95    */
+
 typedef enum {
     OBS_STATE_NO_SENSOR = 0,   /* No CAN data ever received — full motion    */
     OBS_STATE_NORMAL,          /* Sensor valid, no obstacle in range          */
