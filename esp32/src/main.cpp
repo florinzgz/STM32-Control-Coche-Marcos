@@ -280,6 +280,9 @@ void loop() {
 
         touch::TouchEvent evt = touch::getEvent();
         if (evt.type == touch::EventType::TAP) {
+            // Forward to screen manager for secret code / engineering screen
+            screenManager.onTouch(evt.x, evt.y);
+
             // LED toggle
             if (ui::LedToggle::hitTest(evt.x, evt.y)) {
                 ledLocalState = !ledLocalState;
