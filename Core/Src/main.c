@@ -390,6 +390,11 @@ int main(void)
             /* Encoder diagnostic: raw count + delta for hardware validation.
              * Diagnostic only — not used by any control path.             */
             Encoder_SendDiagnostic();
+
+            /* DS18B20 hot-plug detection: re-enumerates the OneWire bus
+             * every OW_RESCAN_INTERVAL_MS to detect sensors added or
+             * removed at runtime (guarded internally by timestamp).       */
+            Temperature_PeriodicRescan();
         }
 
         /* Process incoming CAN commands from ESP32 */

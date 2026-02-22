@@ -55,6 +55,7 @@ static constexpr unsigned long LED_TOUCH_DEBOUNCE_MS = 300;
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
 static unsigned long lastGearSendMs = 0;     // debounce for gear CAN sends
 static constexpr unsigned long GEAR_SEND_DEBOUNCE_MS = 100;
+static constexpr uint8_t GEAR_REVERSE = 1;   // shifter raw value for Reverse
 
 // ---- Mode state tracking ----
 static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, bit 1=tank)
@@ -62,6 +63,19 @@ static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, b
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
+
+// ---- Audio event tracking ----
+static uint8_t  lastAudioSystemState = 0;     // detect state transitions for error alert
+static bool     batteryLowPlayed  = false;     // one-shot for battery warning
+static constexpr uint16_t BATTERY_LOW_THRESHOLD_RAW = 2000; // 20.00 V in 0.01 V units
+static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beeps
+static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
+
+// ---- LED brake/reverse detection thresholds ----
+// Speed sum threshold: 4 wheels × 0.5 km/h × 10 (0.1 km/h units) = 20
+static constexpr uint32_t LED_SPEED_SUM_THRESHOLD = 20;
+// Traction average below which we consider braking (0–100% scale)
+static constexpr uint8_t LED_TRACTION_BRAKING_THRESHOLD = 5;
 
 // ---- NVS flush interval ----
 static unsigned long lastNvsFlushMs = 0;
@@ -231,6 +245,12 @@ void setup() {
         const auto& cfg = config_store::get();
         currentModeFlags = cfg.driveMode;
         ledLocalState    = cfg.ledEnabled;
+
+        // Populate vehicleData with initial mode flags
+        vehicle::ModeData md;
+        md.modeFlags   = currentModeFlags;
+        md.timestampMs = millis();
+        vehicleData.setMode(md);
     }
 }
 
@@ -282,6 +302,7 @@ void loop() {
             lastSentGear   = gear;
             lastGearSendMs = now;
             sendGearCommand(gear);
+            audio::play(audio::Sound::GEAR_CHANGE, audio::Priority::LOW);
             Serial.printf("[SHIFTER] Gear → %u\n", gear);
         }
     }
@@ -323,6 +344,12 @@ void loop() {
                 }
                 sendModeCommand(currentModeFlags);
                 config_store::setDriveMode(currentModeFlags);
+                {
+                    vehicle::ModeData md;
+                    md.modeFlags   = currentModeFlags;
+                    md.timestampMs = millis();
+                    vehicleData.setMode(md);
+                }
                 Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
             }
         }
@@ -352,6 +379,36 @@ void loop() {
         }
     }
 
+    // ---- CAN-triggered audio events ----
+    {
+        auto st = static_cast<uint8_t>(vehicleData.heartbeat().systemState);
+
+        // Error / Safe state alert — play once on transition
+        if ((st == 4 || st == 5) && lastAudioSystemState != st) {
+            audio::play(audio::Sound::ERROR_ALERT, audio::Priority::HIGH);
+        }
+        lastAudioSystemState = st;
+
+        // Battery low warning — play once when voltage drops below threshold
+        uint16_t battVoltRaw = vehicleData.battery().voltageRaw;
+        if (battVoltRaw > 0 && battVoltRaw < BATTERY_LOW_THRESHOLD_RAW) {
+            if (!batteryLowPlayed) {
+                audio::play(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
+                batteryLowPlayed = true;
+            }
+        } else {
+            batteryLowPlayed = false;  // reset when voltage recovers
+        }
+
+        // Obstacle proximity warning — beep when zone ≥ 3 (critical/emergency)
+        obstacle_sensor::Reading obsRd = obstacle_sensor::getReading();
+        if (obsRd.healthy && obsRd.zone >= 3 &&
+            (now - lastObstacleWarnMs) >= OBSTACLE_WARN_INTERVAL_MS) {
+            audio::play(audio::Sound::OBSTACLE_WARN, audio::Priority::MEDIUM);
+            lastObstacleWarnMs = now;
+        }
+    }
+
     // ---- Audio update ----
     audio::update();
 
@@ -364,11 +421,27 @@ void loop() {
     // ---- WS2812B LED update ----
     {
         auto st = vehicleData.heartbeat().systemState;
-        // Braking and reverse detection require gear echo from STM32 (not
-        // yet implemented in CAN protocol — tracked in audit Step 1).
-        // Until then, rear LEDs show default tail light pattern.
+
+        // Reverse detection from physical shifter
+        bool reverse = (shifter::getGearRaw() == GEAR_REVERSE);
+
+        // Braking detection: traction average near zero while speed > 0
+        // indicates dynamic braking or throttle release at speed.
         bool braking = false;
-        bool reverse = false;
+        {
+            uint32_t trSum = 0;
+            for (uint8_t i = 0; i < 4; ++i) {
+                trSum += vehicleData.traction().scale[i];
+            }
+            uint8_t trAvg = static_cast<uint8_t>(trSum / 4);
+
+            uint32_t spSum = 0;
+            for (uint8_t i = 0; i < 4; ++i) {
+                spSum += vehicleData.speed().raw[i];
+            }
+            braking = (spSum > LED_SPEED_SUM_THRESHOLD && trAvg <= LED_TRACTION_BRAKING_THRESHOLD);
+        }
+
         bool ledEnabled = vehicleData.lights().relayOn;
         led_ctrl::update(static_cast<uint8_t>(st), braking, reverse, ledEnabled);
     }

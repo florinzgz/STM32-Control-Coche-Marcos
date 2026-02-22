@@ -40,6 +40,7 @@ float Pedal_GetADSPercent(void);  /* ADS1115 plausibility channel 0–100% */
 /* ---- DS18B20 Temperature (OneWire) ---- */
 void Temperature_StartConversion(void);
 void Temperature_ReadAll(void);
+void Temperature_PeriodicRescan(void);
 float Temperature_Get(uint8_t index);
 
 /* ---- INA226 Current (I2C via TCA9548A) ---- */
