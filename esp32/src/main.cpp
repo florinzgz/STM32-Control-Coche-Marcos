@@ -275,16 +275,19 @@ void loop() {
     // The STM32 echoes the active mode flags in the heartbeat status_flags
     // (bits 1-2).  This allows the ESP32 to confirm the STM32 actually
     // applied the requested mode, even if the ACK was lost.
+    // Guard: only sync after first valid heartbeat has been received
+    // (timestampMs is 0 until the first CAN heartbeat is decoded).
     {
-        uint8_t sf = vehicleData.heartbeat().statusFlags;
-        uint8_t confirmedFlags = (sf >> 1) & 0x03;  // bits 1-2 → mode flags
-        if (confirmedFlags != currentModeFlags &&
-            vehicleData.heartbeat().timestampMs > 0) {
-            currentModeFlags = confirmedFlags;
-            vehicle::ModeData md;
-            md.modeFlags   = currentModeFlags;
-            md.timestampMs = millis();
-            vehicleData.setMode(md);
+        const auto& hb = vehicleData.heartbeat();
+        if (hb.timestampMs > 0) {
+            uint8_t confirmedFlags = (hb.statusFlags >> 1) & 0x03;
+            if (confirmedFlags != currentModeFlags) {
+                currentModeFlags = confirmedFlags;
+                vehicle::ModeData md;
+                md.modeFlags   = currentModeFlags;
+                md.timestampMs = millis();
+                vehicleData.setMode(md);
+            }
         }
     }
 

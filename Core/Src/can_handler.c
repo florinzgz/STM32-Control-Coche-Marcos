@@ -29,6 +29,13 @@ CAN_Stats_t can_stats = {0};
 static uint32_t last_tx_heartbeat = 0;
 static uint8_t  heartbeat_counter = 0;
 
+/* Heartbeat status_flags bitmasks (byte 4 of 0x001) */
+#define STATUS_FLAG_STARTUP_INHIBIT  0x01U   /* Bit 0 */
+#define STATUS_FLAG_MODE_4X4         0x02U   /* Bit 1 */
+#define STATUS_FLAG_TANK_TURN        0x04U   /* Bit 2 */
+#define STATUS_FLAG_TEMP_COUNT_SHIFT 3       /* Bits 3-5: DS18B20 count */
+#define STATUS_FLAG_TEMP_COUNT_MASK  0x07U   /* 3-bit mask (0-7) */
+
 /* LED relay state (PB10) — defaults OFF for safe power-on */
 static bool led_relay_on = false;
 
@@ -190,10 +197,11 @@ void CAN_SendHeartbeat(void) {
          *            bit 3-5: DS18B20 sensor count (0-5)                       */
         const TractionState_t *ts = Traction_GetState();
         uint8_t status_flags = 0;
-        if (Startup_IsInhibited()) status_flags |= 0x01U;
-        if (ts->mode4x4)          status_flags |= 0x02U;
-        if (ts->axisRotation)     status_flags |= 0x04U;
-        status_flags |= (uint8_t)((Temperature_GetCount() & 0x07U) << 3);
+        if (Startup_IsInhibited()) status_flags |= STATUS_FLAG_STARTUP_INHIBIT;
+        if (ts->mode4x4)          status_flags |= STATUS_FLAG_MODE_4X4;
+        if (ts->axisRotation)     status_flags |= STATUS_FLAG_TANK_TURN;
+        status_flags |= (uint8_t)((Temperature_GetCount() & STATUS_FLAG_TEMP_COUNT_MASK)
+                                  << STATUS_FLAG_TEMP_COUNT_SHIFT);
 
         uint8_t payload[5];
         payload[0] = heartbeat_counter++;
