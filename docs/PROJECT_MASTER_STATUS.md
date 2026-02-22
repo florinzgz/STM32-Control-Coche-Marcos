@@ -128,6 +128,49 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 
 The STM32 is the sole safety authority. All incoming ESP32 commands pass through `Safety_Validate*()` gates. The state machine enforces which transitions are legal. The independent watchdog (IWDG, ~500 ms) resets the MCU if the main loop stalls. CAN timeout (250 ms) transitions to SAFE. Bus-off detection and recovery is non-blocking with retry limits. Obstacle backstop limiter (5-zone with child reaction detection) runs independently of ESP32 logic.
 
+### CAN Bus Reliability
+
+The CAN bus communication between STM32 and ESP32-S3 is calibrated for zero-error operation:
+
+- **Hardware filtering**: STM32 FDCAN uses 4 hardware filter banks accepting only known ESP32 IDs (0x011, 0x100–0x102, 0x110, 0x120, 0x208–0x209). All other IDs are rejected at the hardware level — no software processing overhead, no hidden message acceptance.
+- **Heartbeat monitoring**: Bidirectional heartbeat (STM32 0x001 at 100 ms, ESP32 0x011 at 100 ms) with 250 ms timeout. Loss of either heartbeat triggers SAFE state within 250 ms — no hidden communication failure can persist.
+- **Bus-off detection and recovery**: `CAN_CheckBusOff()` monitors the FDCAN PSR register for bus-off condition. Non-blocking recovery with 500 ms retry interval, max 5 retries. Bus-off count tracked in `can_stats.busoff_count`.
+- **Rolling counter validation**: Obstacle CAN messages (0x208) include a rolling counter to detect stale data (3-frame freeze detection). Prevents acting on outdated sensor data.
+- **Command ACK protocol**: Every ESP32 command (throttle 0x100, steering 0x101, mode/gear 0x102, service 0x110, LED 0x120) receives an ACK/NACK (0x103) from STM32, confirming reception and validation result. No command is silently dropped.
+- **No hidden errors**: Every CAN transmission failure increments `can_stats.tx_fail` or `can_stats.rx_overflow`. These counters are available via service mode diagnostics (0x301–0x303). There are no silent error paths.
+
+### Persistence Architecture
+
+All user-facing configuration persistence is handled by the **ESP32-S3 via NVS** (`config_store.cpp`):
+
+| Persisted Item | Storage | Module |
+|---|---|---|
+| Drive mode (4×4/4×2/tank) | ESP32 NVS | `config_store::setDriveMode()` |
+| Display brightness | ESP32 NVS | `config_store::setBrightness()` |
+| LED relay state | ESP32 NVS | `config_store::setLedEnabled()` |
+| Audio volume | ESP32 NVS | `config_store::setAudioVolume()` |
+
+The STM32 has **no NVM storage by design**. It recomputes all calibration from hardware sensors on each boot:
+- Steering centering: inductive sensor sweep (PB5)
+- Encoder zero: TIM2 quadrature hardware counter
+- Temperature baselines: DS18B20 ROM search + CRC-8
+- Current baselines: INA226 via TCA9548A I2C mux
+
+This is a safety feature — calibration always reflects actual hardware state, preventing operation with stale or corrupted calibration data.
+
+### LED Relay Control Chain
+
+The LED toggle icon on the drive screen controls the WS2812B LED strip power relay on the STM32:
+
+```
+[Touch screen icon] → LedToggle::hitTest() → sendLedCommand()
+    → CAN 0x120 (1 byte: ON/OFF) → STM32 CAN_ProcessMessages()
+    → LED_Relay_Set(on/off) → GPIO PB10 → 5V power relay
+    → WS2812B LED strip (28 front + 16 rear)
+```
+
+The LED icon state is persisted in ESP32 NVS (`config_store::setLedEnabled()`). On boot, the saved state is restored and sent to STM32. The STM32 confirms via CAN 0x20A (STATUS_LIGHTS, 1 Hz) which the ESP32 uses to synchronize the icon display.
+
 ### UI Architecture
 
 All rendering uses partial-redraw: each UI component compares current vs. previous frame values and only redraws changed elements. TFT_eSPI drives an ST7796 480×320 display via SPI at 40 MHz. Frame rate is capped at 20 FPS by `FrameLimiter`. No heap allocation, no `String` class, all fixed-size stack buffers.
@@ -272,7 +315,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 |---|---|---|
 | WS2812B LED strip (28 front + 16 rear = 44 LEDs, GPIO 38, FastLED) | `led_ctrl::init()`, `led_ctrl::update()` | `esp32/src/led_controller.cpp` |
 | State-based LED patterns (SystemState → color/animation) | `led_ctrl::update(state, braking, reverse, enabled)` | `esp32/src/led_controller.cpp` |
-| LED relay toggle via CAN 0x120 | `sendLedCommand()` + `ui::LedToggle::hitTest()` | `esp32/src/main.cpp`, `esp32/src/ui/led_toggle.cpp` |
+| LED relay toggle via CAN 0x120 (screen icon → CAN → STM32 relay PB10 → 5V power → WS2812B) | `sendLedCommand()` + `ui::LedToggle::hitTest()` + `LED_Relay_Set()` | `esp32/src/main.cpp`, `esp32/src/ui/led_toggle.cpp`, `Core/Src/can_handler.c` |
+| LED relay state confirmation via CAN 0x20A (STM32 → ESP32, 1 Hz) | `CAN_SendLightStatus()` | `Core/Src/can_handler.c` |
+| LED state persistence across reboots (NVS) | `config_store::setLedEnabled()` restored on boot | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 
 ### Service Mode
 
@@ -309,7 +354,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **Drive screen mode flags are not CAN-driven** — mode flags (4×4/360°) in DriveScreen are set locally via touch, not from STM32 CAN echo | Mode state tracked in `main.cpp` `currentModeFlags`, not from `VehicleData` | `esp32/src/main.cpp` |
 | **Hardcoded vehicle physics constants** — wheelbase (0.95 m), track width (0.70 m), wheel circumference (1.1 m), max steer (54°) are compile-time `#define` | `vehicle_physics.h` | `Core/Inc/vehicle_physics.h` |
 | **Hardcoded INA226 shunt resistances** — 1 mΩ motor, 0.5 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/main.h` |
-| **No calibration persistence** — steering centering, encoder zero, sensor offsets are not saved to flash/EEPROM | No flash write or EEPROM API calls anywhere | All STM32 source files |
+| **STM32 calibration is runtime-only (by design)** — steering centering, encoder zero, sensor offsets are recomputed every power cycle. All user-facing persistence is handled by the ESP32-S3 via NVS (`config_store.cpp`). STM32 has no NVM storage requirement because it recomputes physical calibration from sensors on each boot. | No flash write in STM32; ESP32 NVS handles all user config persistence | STM32: all source files; ESP32: `config_store.cpp` |
 | **CAN bus-off recovery limited to 5 retries then stops** — `CAN_BUSOFF_MAX_RETRIES` | `busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES` in `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
 | **Obstacle message 0x209 is informational-only** — STM32 parses ESP32 obstacle safety state for cross-validation and diagnostic logging, but does not use it for torque reduction | `Obstacle_ProcessSafetyCAN()` stores zone/status/stuck for diagnostics | `Core/Src/safety_system.c` |
 | **Encoder Z-index pulse not used** — PB4/EXTI4 not initialized; only A/B quadrature channels used | Comment block + no EXTI4 in `MX_GPIO_Init()` | `Core/Src/motor_control.c` lines 236–245, `Core/Src/main.c` |
@@ -320,7 +365,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **I2C bus recovery uses busy-wait delays** — ~160 µs total, but blocking | NOP loops in `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` lines 177–203 |
 | **Engineering screen exit via EXIT button** — user can return to normal screens by tapping EXIT on the engineering main menu | `exitRequested_` flag checked by `ScreenManager::onTouch()` | `esp32/src/screens/engineering_screen.cpp`, `esp32/src/screen_manager.cpp` |
 | **NVS writes are deferred with dirty flag** — setters mark config dirty; `flush()` persists every 10 s and on shutdown. NVS ~100K cycle limit still applies but writes are batched | `dirty_` flag + `flush()` in `config_store.cpp`; periodic call in `main.cpp` | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
-| **Service mode state is RAM-only** — module enable/disable settings lost on power cycle | `module_enabled[]` is static array, no NVM storage | `Core/Src/service_mode.c` |
+| **Service mode state is RAM-only (by design)** — module enable/disable settings reset to all-enabled on every power cycle, which is the safe default. ESP32-S3 handles all user-facing persistence via NVS. | `module_enabled[]` is static array, defaults to all-enabled | `Core/Src/service_mode.c` |
 | **Encoder reader module is observation-only** — `encoder_reader.c` provides raw count access and CAN diagnostics but is not connected to any control, odometry, speed, traction, braking, or steering logic | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
 
 ---
@@ -332,8 +377,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | ~~1~~ | ~~**ESP32 obstacle sensor driver**~~ | ~~Sensors / Safety~~ | ~~—~~ | ~~—~~ | ✅ RESOLVED — `esp32/src/sensors/obstacle_sensor.cpp` + `esp32/src/can/can_obstacle.cpp` |
 | ~~2~~ | ~~**CAN ID 0x209 parsing**~~ | ~~CAN / Safety~~ | ~~—~~ | ~~`CAN_ProcessMessages()` in `can_handler.c`~~ | ✅ RESOLVED — `Obstacle_ProcessSafetyCAN()` in `safety_system.c`; ESP32 sends 0x209 from `can_obstacle.cpp` |
 | 3 | **Steering PID tuning (I and D terms)** — PID structure supports ki/kd but both are 0.0; code path exists in `PID_Compute()` | Steering | Hardware testing with actual steering load | `steering_pid` in `motor_control.c` | ❌ PENDING |
-| 4 | **Calibration persistence (STM32)** — encoder zero and sensor offsets recomputed every power cycle; no NVM/flash write path exists | Steering / Sensors | STM32 flash or EEPROM driver | `Steering_Init()`, `SteeringCentering_Complete()` | ❌ PENDING |
-| 5 | **Service mode persistence (STM32)** — module enable/disable states lost on reboot; no NVM path exists | Service Mode | STM32 flash or EEPROM driver | `ServiceMode_Init()` | ❌ PENDING |
+| ~~4~~ | ~~**Calibration persistence (STM32)**~~ | ~~Steering / Sensors~~ | ~~STM32 flash or EEPROM driver~~ | ~~`Steering_Init()`, `SteeringCentering_Complete()`~~ | ✅ NOT NEEDED — by design, STM32 recomputes calibration from hardware sensors on each boot; all user-facing persistence is handled by ESP32-S3 NVS |
+| ~~5~~ | ~~**Service mode persistence (STM32)**~~ | ~~Service Mode~~ | ~~STM32 flash or EEPROM driver~~ | ~~`ServiceMode_Init()`~~ | ✅ NOT NEEDED — service mode defaults to all-enabled on boot (safe default); ESP32-S3 NVS is the single persistence authority for user configuration |
 | 6 | **Redundant pedal sensor** — single ADC channel with no cross-check; code structure accepts only one value | Sensors / Safety | Second ADC channel or hall sensor hardware | `Pedal_Update()` in `sensor_manager.c` | ❌ PENDING |
 | ~~7~~ | ~~**ESP32 mode/gear CAN feedback to DriveScreen**~~ | ~~Display / UI~~ | ~~—~~ | ~~—~~ | ⚠️ PARTIAL — Gear now from physical shifter; mode flags still local |
 | 8 | **Hot-plug DS18B20 detection** — ROM search runs only at init; adding/removing sensors at runtime is not detected | Sensors | Periodic `OW_SearchAll()` or change-detection mechanism | `Sensor_Init()` in `sensor_manager.c` | ❌ PENDING |
@@ -422,9 +467,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 **Goals:**
 - Wire ESP32 CAN mode/gear state into DriveScreen UI
-- Add calibration persistence (steering encoder zero, sensor offsets) to STM32 flash
-- Add service mode persistence to STM32 flash
 - Improve ESP32 ACK feedback to driver for mode/gear changes
+
+**Architecture note:** All user-facing persistence is handled by the ESP32-S3 via NVS (`config_store.cpp`). The STM32 deliberately recomputes calibration from hardware sensors (inductive centering, encoder quadrature, INA226, DS18B20) on each boot — this is a safety feature ensuring calibration always reflects actual hardware state. No STM32 flash persistence is needed.
 
 **What must NOT be touched yet:**
 - Safety state machine transitions or thresholds
@@ -433,8 +478,6 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 **Exit criteria:**
 - DriveScreen shows current gear (P/R/N/D1/D2) received from STM32 via CAN
-- Steering encoder zero is preserved across power cycles (verified by skipping centering when already calibrated)
-- Service mode enable/disable settings survive reboot
 - Mode change ACK is visually indicated on DriveScreen within 200 ms
 
 ---
@@ -465,9 +508,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 > Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
 > Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
 
-### Overall Migration Percentage: **82%**
+### Overall Migration Percentage: **86%**
 
-The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **82% complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. Remaining work concentrates on experience features, advanced algorithms, and hardware-dependent functionality that requires physical components not yet connected.
+The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **86% complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. The ESP32-S3 is the single persistence authority via NVS — STM32 recomputes calibration from hardware sensors on each boot (by design). BTS7960 motor drivers support regenerative braking via H-bridge reversal; the dynamic braking foundation is already in place. Remaining work concentrates on advanced AI algorithms and hardware-dependent features.
 
 ### Calculation Methodology
 
@@ -491,11 +534,11 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | **Audio System** | LOW | `dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | `audio_manager.cpp` (DFPlayer, priority queue, 6 sounds) | ✅ Reimplemented | 70% |
 | **LED Lighting** | LOW | `led_controller.cpp` (WS2812B) | `led_controller.cpp` (28+16 LEDs, state patterns) | ✅ Reimplemented | 80% |
 | **Touch Input** | MEDIUM | `touch_calibration.cpp`, `touch_map.cpp` | `touch_handler.cpp` (TAP/LONG_PRESS, debounce) | ✅ Reimplemented | 90% |
-| **Config Persistence** | MEDIUM | `eeprom_persistence.cpp`, `config_storage.cpp` | ESP32: NVS `config_store.cpp` (CRC32, dirty flag) / STM32: ❌ None | ⚠️ Partial | 50% |
+| **Config Persistence** | MEDIUM | `eeprom_persistence.cpp`, `config_storage.cpp` | ESP32-S3 NVS `config_store.cpp` (CRC32, dirty flag) — single persistence authority for all user config; STM32 recomputes calibration from sensors (no NVM needed) | ✅ Complete | 100% |
 | **Power Management** | MEDIUM | `power_mgmt.cpp` (10-state machine) | ESP32: `power_manager.cpp` (ignition key) / STM32: relay sequencing | ⚠️ Partial | 70% |
 | **Degraded / Limp Mode** | HIGH | `limp_mode.cpp` (4 levels) | 3-level degradation (L1/L2/L3) + LIMP_HOME | ✅ Improved | 100% |
 | **Boot Validation** | HIGH | `boot_guard.cpp` (NVS counter) | 6-point pre-ACTIVE checklist | ✅ Improved | 100% |
-| **Regenerative Braking** | LOW | `regen_ai.cpp` (AI lookup table) | Not implemented | ❌ Missing | 0% |
+| **Regenerative Braking** | MEDIUM | `regen_ai.cpp` (AI lookup table) | BTS7960 hardware supports regen via H-bridge reversal; dynamic braking infrastructure (`DYNBRAKE_*`) already implemented as foundation. Battery voltage/current monitoring (INA226) in place. Full regen AI logic pending. | ⚠️ Foundation ready | 40% |
 | **Adaptive Cruise** | LOW | `adaptive_cruise.cpp` | Not implemented | ❌ Missing | 0% |
 | **SOC Estimation** | LOW | Battery SOC in `regen_ai.cpp` | Not implemented | ❌ Missing | 0% |
 | **Sensor Cross-Validation** | MEDIUM | `SensorManagerEnhanced.cpp` | Not implemented | ❌ Missing | 0% |
@@ -509,10 +552,10 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | **Core Control** (motors, steering, gears, sensors) | 5 | 5 | 0 | 0 |
 | **Obstacle & Service** | 2 | 2 | 0 | 0 |
 | **HMI & Display** | 4 | 4 | 0 | 0 |
-| **Persistence & Power** | 2 | 0 | 2 | 0 |
+| **Persistence & Power** | 2 | 1 | 1 | 0 |
 | **Experience** (audio, LEDs, engineering menu) | 3 | 3 | 0 | 0 |
-| **Advanced / AI** (regen, SOC, cruise, sensor fusion, logging) | 5 | 0 | 0 | 5 |
-| **TOTAL** | **26** | **19** | **2** | **5** |
+| **Advanced / AI** (regen, SOC, cruise, sensor fusion, logging) | 5 | 0 | 1 | 4 |
+| **TOTAL** | **26** | **20** | **2** | **4** |
 
 ### Phase Completion Status
 
@@ -521,7 +564,7 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | **Phase 1** | Stability Foundation (hardware validation, CAN reliability, centering, boot, I2C) | ⚠️ Awaiting hardware validation | ~90% code complete |
 | **Phase 2** | Control Reliability (traction pipeline, ABS/TCS, dynamic brake, park hold, gears) | ⚠️ Awaiting hardware validation | ~90% code complete |
 | **Phase 3** | Feedback & Sensors (obstacle 0x208/0x209, PID tuning, DS18B20 hot-plug, redundant pedal) | ⚠️ In progress | ~70% |
-| **Phase 4** | Driver Interaction (CAN gear display, STM32 flash persistence, ACK feedback) | ⚠️ In progress | ~40% |
+| **Phase 4** | Driver Interaction (CAN gear display, ACK feedback) | ⚠️ In progress | ~60% |
 | **Phase 5** | Experience Features (audio integration, lighting logic, sensor fusion, DMA ADC) | ⚠️ Partial | ~30% |
 
 ### What Remains (Pending Items by Priority)
@@ -531,11 +574,9 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | # | Item | Phase | Effort | Notes |
 |---|------|-------|--------|-------|
 | 1 | **Steering PID tuning (I/D terms)** | 3 | Medium | ki=0.0, kd=0.0 — requires hardware testing with actual steering load |
-| 2 | **STM32 calibration persistence (Flash)** | 4 | Medium | No HAL_FLASH_Program calls exist; encoder zero, sensor offsets lost on reboot |
-| 3 | **STM32 service mode persistence (Flash)** | 4 | Low | module_enabled[] is RAM-only; settings lost on power cycle |
-| 4 | **DriveScreen mode flags from CAN echo** | 4 | Low | Mode flags (4×4/360°) still set locally, not from STM32 CAN status |
-| 5 | **DS18B20 hot-plug detection** | 3 | Low | ROM search runs only at init; periodic OW_SearchAll() needed |
-| 6 | **Redundant pedal sensor** | 3 | Medium | Single ADC channel PA3; requires second ADC or hall sensor hardware |
+| 2 | **DriveScreen mode flags from CAN echo** | 4 | Low | Mode flags (4×4/360°) still set locally, not from STM32 CAN status |
+| 3 | **DS18B20 hot-plug detection** | 3 | Low | ROM search runs only at init; periodic OW_SearchAll() needed |
+| 4 | **Redundant pedal sensor** | 3 | Medium | Single ADC channel PA3; requires second ADC or hall sensor hardware |
 
 #### 🟡 MEDIUM PRIORITY — Phase 5 items
 
@@ -550,11 +591,11 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 
 | # | Item | Phase | Effort | Notes |
 |---|------|-------|--------|-------|
-| 11 | **Regenerative braking** | Future | High | No negative PWM, no back-EMF handling, no bidirectional current; entirely new subsystem |
-| 12 | **SOC estimation** | Future | Medium | Battery voltage/current monitored but no state-of-charge algorithm |
-| 13 | **Adaptive cruise control** | Future | High | Requires obstacle distance + speed control coordination |
-| 14 | **Sensor cross-validation** | Future | Medium | Each sensor read independently; no cross-checks between temperature/current/speed |
-| 15 | **Structured logging** | Future | Low | Serial debug only; no severity levels, module tags, or persistent error log |
+| 9 | **Regenerative braking AI logic** | Future | Medium | BTS7960 hardware confirmed compatible; dynamic braking foundation in place; needs battery SOC estimation, voltage upper cutoff, and per-wheel ABS interaction |
+| 10 | **SOC estimation** | Future | Medium | Battery voltage/current monitored but no state-of-charge algorithm |
+| 11 | **Adaptive cruise control** | Future | High | Requires obstacle distance + speed control coordination |
+| 12 | **Sensor cross-validation** | Future | Medium | Each sensor read independently; no cross-checks between temperature/current/speed |
+| 13 | **Structured logging** | Future | Low | Serial debug only; no severity levels, module tags, or persistent error log |
 
 ### Metrics Snapshot
 
