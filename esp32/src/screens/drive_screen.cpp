@@ -28,6 +28,7 @@
 #include "ui/led_toggle.h"
 #include "ui/obstacle_sensor.h"
 #include "ui/runtime_monitor.h"
+#include "shifter_input.h"
 #include <cstdio>
 #include <cstring>
 
@@ -97,9 +98,19 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     }
     curPedalPct_ = static_cast<uint8_t>(tractionSum / 4);
 
-    // Gear — the STM32 does not echo gear back via CAN; CMD_MODE is ESP32→STM32
-    // only. Default to N (neutral/unknown) since no gear has been commanded yet.
-    curGear_ = ui::Gear::N;
+    // Gear — read from physical shifter via MCP23017
+    {
+        uint8_t raw = shifter::getGearRaw();
+        // Map shifter::Gear (0-4) to ui::Gear enum
+        switch (raw) {
+            case 0: curGear_ = ui::Gear::P;  break;
+            case 1: curGear_ = ui::Gear::R;  break;
+            case 2: curGear_ = ui::Gear::N;  break;
+            case 3: curGear_ = ui::Gear::D1; break;
+            case 4: curGear_ = ui::Gear::D2; break;
+            default: curGear_ = ui::Gear::N; break;
+        }
+    }
 
     // Mode flags
     curMode_.is4x4 = false;

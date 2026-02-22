@@ -24,6 +24,7 @@
 #include "led_controller.h"
 #include "power_manager.h"
 #include "audio_manager.h"
+#include "shifter_input.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -46,6 +47,11 @@ static unsigned long lastRtMonMs      = 0;
 static bool     ledLocalState     = false;   // local desired state (sent to STM32)
 static unsigned long lastLedTouchMs = 0;     // debounce for touch
 static constexpr unsigned long LED_TOUCH_DEBOUNCE_MS = 300;
+
+// ---- Shifter gear tracking ----
+static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
+static unsigned long lastGearSendMs = 0;     // debounce for gear CAN sends
+static constexpr unsigned long GEAR_SEND_DEBOUNCE_MS = 100;
 
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
@@ -105,6 +111,19 @@ static void sendLedCommand(bool on) {
     frame.data[0]          = on ? 1 : 0;
     ESP32Can.writeFrame(frame);
     ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
+}
+
+/// Send gear change command to STM32 via CAN 0x102 (CMD_MODE).
+/// @param gear  Gear value (0=P, 1=R, 2=N, 3=D1, 4=D2)
+static void sendGearCommand(uint8_t gear) {
+    CanFrame frame = {};
+    frame.identifier       = can::CMD_MODE;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+    frame.data[0]          = 0;     // mode flags (no change)
+    frame.data[1]          = gear;
+    ESP32Can.writeFrame(frame);
+    ackBeginWait(can::CMD_MODE & 0xFF);  // Low byte of 0x102 = 0x02
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +193,9 @@ void setup() {
 
     // Initialize DFPlayer audio (UART2 on GPIO 43/44)
     audio::init();
+
+    // Initialize MCP23017 shifter input (I2C on GPIO 8/9)
+    shifter::init();
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +235,20 @@ void loop() {
     RTMON_UI_BEGIN();
     screenManager.update(vehicleData);
     RTMON_UI_END();
+
+    // ---- Shifter gear update ----
+    // Poll MCP23017, send CAN 0x102 on gear change
+    {
+        shifter::update();
+        uint8_t gear = shifter::getGearRaw();
+        if (gear != lastSentGear &&
+            (now - lastGearSendMs) >= GEAR_SEND_DEBOUNCE_MS) {
+            lastSentGear   = gear;
+            lastGearSendMs = now;
+            sendGearCommand(gear);
+            Serial.printf("[SHIFTER] Gear → %u\n", gear);
+        }
+    }
 
     // ---- Touch handling for LED toggle ----
     // Read touch outside of runtime monitor (not part of render timing)
