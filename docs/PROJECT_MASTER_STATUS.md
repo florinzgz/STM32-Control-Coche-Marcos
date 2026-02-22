@@ -122,7 +122,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | ESP32 → STM32 | 0x102 | On-demand | Mode/gear command |
 | ESP32 → STM32 | 0x110 | On-demand | Service command |
 | ESP32 → STM32 | 0x208 | ~66 ms | Obstacle distance (mm, zone, health, counter) |
-| ESP32 → STM32 | 0x209 | Reserved | Obstacle safety state (accepted but not parsed) |
+| ESP32 → STM32 | 0x209 | 100 ms | Obstacle safety state (zone, sensor status, stuck flag — informational) |
 
 ### Safety Architecture
 
@@ -207,7 +207,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Command ACK TX (0x103, result + system state) | `CAN_SendCommandAck()` | `Core/Src/can_handler.c` |
 | Service status TX (fault/enabled/disabled bitmasks, 0x301–0x303) | `CAN_SendServiceStatus()` | `Core/Src/can_handler.c` |
 | Encoder diagnostic TX (0x300, tag 0x10, raw count + delta, 1 Hz) | `CAN_SendDiagnosticEncoder()` | `Core/Src/can_handler.c` |
-| RX message processing (throttle, steering, mode/gear, service, obstacle) | `CAN_ProcessMessages()` switch-case | `Core/Src/can_handler.c` |
+| RX message processing (throttle, steering, mode/gear, service, obstacle, obstacle safety) | `CAN_ProcessMessages()` switch-case | `Core/Src/can_handler.c` |
+| Obstacle safety state RX (0x209, cross-validation with ESP32 zone/status/stuck) | `Obstacle_ProcessSafetyCAN()` | `Core/Src/safety_system.c` |
 | Bus-off statistics tracking | `can_stats.busoff_count` | `Core/Src/can_handler.c` |
 | ESP32 CAN RX decoding (all STM32 status IDs) | `can_rx::poll()` | `esp32/src/can_rx.cpp` |
 | ESP32 heartbeat TX (0x011, every 100 ms) | Logic in `loop()` | `esp32/src/main.cpp` |
@@ -227,7 +228,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Pedal bar (0–100 % fill + color gradient) | `PedalBar::draw()` | `esp32/src/ui/pedal_bar.cpp` |
 | Frame limiter (20 FPS cap) | `FrameLimiter::shouldDraw()` | `esp32/src/ui/frame_limiter.h` |
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
-| Engineering screen (hidden menu via "8989" tap sequence, 5 submenus) | `EngineeringScreen::handleTouch()` | `esp32/src/screens/engineering_screen.cpp` |
+| Engineering screen (hidden menu via "8989" tap sequence, 5 submenus, EXIT button) | `EngineeringScreen::handleTouch()`, `exitRequested()` | `esp32/src/screens/engineering_screen.cpp` |
 | LED toggle button (top bar, CAN 0x120 command) | `ui::LedToggle::hitTest()` | `esp32/src/ui/led_toggle.cpp` |
 | Obstacle proximity 5-zone color coding (GRAY/GREEN/CYAN/YELLOW/ORANGE/RED) | `proximityColor()` | `esp32/src/ui/ui_common.h` |
 | Drive screen gear display from physical shifter (MCP23017 → GearDisplay) | `shifter::getGearRaw()` mapping | `esp32/src/screens/drive_screen.cpp` |
@@ -238,9 +239,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 |---|---|---|
 | Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-4 one-hot, P/R/N/D1/D2) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
 | Centralized touch handler (TAP/LONG_PRESS/RELEASE, 200 ms debounce) | `touch::init()`, `touch::update()`, `touch::getEvent()` | `esp32/src/touch_handler.cpp` |
-| NVS config store (CRC32 validated, driveMode/brightness/LED/volume) | `config_store::init()`, `config_store::save()`, `config_store::get()` | `esp32/src/config_store.cpp` |
+| NVS config store (CRC32 validated, driveMode/brightness/LED/volume, dirty-flag deferred writes) | `config_store::init()`, `config_store::save()`, `config_store::flush()` | `esp32/src/config_store.cpp` |
 | HC-SR04 obstacle sensor (GPIO 6/7, 25 Hz, 5-zone mapping, stuck detection) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
-| Obstacle CAN TX (0x208, DLC 5, 66 ms interval, rolling counter) | `can_obstacle::init()`, `can_obstacle::update()` | `esp32/src/can/can_obstacle.cpp` |
+| Obstacle CAN TX (0x208 DLC 5 at 66 ms + 0x209 DLC 4 at 100 ms) | `can_obstacle::init()`, `can_obstacle::update()` | `esp32/src/can/can_obstacle.cpp` |
 | Power manager (ignition key GPIO 40/41, OFF→RUNNING→SHUTTING_DOWN) | `power_mgr::init()`, `power_mgr::update()` | `esp32/src/power_manager.cpp` |
 
 | Feature | Evidence | Files |
@@ -310,15 +311,15 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **Hardcoded INA226 shunt resistances** — 1 mΩ motor, 0.5 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/main.h` |
 | **No calibration persistence** — steering centering, encoder zero, sensor offsets are not saved to flash/EEPROM | No flash write or EEPROM API calls anywhere | All STM32 source files |
 | **CAN bus-off recovery limited to 5 retries then stops** — `CAN_BUSOFF_MAX_RETRIES` | `busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES` in `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
-| **Obstacle message 0x209 accepted but not parsed** — reserved for future ESP32↔STM32 coordination | `case CAN_ID_OBSTACLE_SAFETY: break;` | `Core/Src/can_handler.c` line 586 |
+| **Obstacle message 0x209 is informational-only** — STM32 parses ESP32 obstacle safety state for cross-validation and diagnostic logging, but does not use it for torque reduction | `Obstacle_ProcessSafetyCAN()` stores zone/status/stuck for diagnostics | `Core/Src/safety_system.c` |
 | **Encoder Z-index pulse not used** — PB4/EXTI4 not initialized; only A/B quadrature channels used | Comment block + no EXTI4 in `MX_GPIO_Init()` | `Core/Src/motor_control.c` lines 236–245, `Core/Src/main.c` |
 | **No sensor fusion** — wheel speed, current, and temperature data are used independently | No cross-sensor correlation or Kalman filtering | All STM32 source files |
 | **ADC pedal conversion is blocking** — `HAL_ADC_PollForConversion()` with 10 ms timeout | `Pedal_Update()` blocking poll | `Core/Src/sensor_manager.c` line 118 |
 | **Float-only arithmetic** — no fixed-point fallback; dependent on Cortex-M4 FPU | All computations use `float` | All STM32 source files |
 | **Emergency stop is non-recoverable** — `emergency_stopped` flag set, system enters ERROR | `Safety_EmergencyStop()` sets `SYS_STATE_ERROR` | `Core/Src/safety_system.c` |
 | **I2C bus recovery uses busy-wait delays** — ~160 µs total, but blocking | NOP loops in `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` lines 177–203 |
-| **Engineering screen has no exit mechanism** — once activated via "8989", `engineeringActive_` stays true with no way to return to normal screens | `screen_manager.cpp` `engineeringActive_` flag never reset | `esp32/src/screen_manager.cpp` |
-| **NVS writes on every touch change** — `config_store::save()` called on each LED/mode toggle, NVS has ~100K write cycle limit | `setLedEnabled()`, `setDriveMode()` called from touch handler | `esp32/src/main.cpp` |
+| **Engineering screen exit via EXIT button** — user can return to normal screens by tapping EXIT on the engineering main menu | `exitRequested_` flag checked by `ScreenManager::onTouch()` | `esp32/src/screens/engineering_screen.cpp`, `esp32/src/screen_manager.cpp` |
+| **NVS writes are deferred with dirty flag** — setters mark config dirty; `flush()` persists every 10 s and on shutdown. NVS ~100K cycle limit still applies but writes are batched | `dirty_` flag + `flush()` in `config_store.cpp`; periodic call in `main.cpp` | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 | **Service mode state is RAM-only** — module enable/disable settings lost on power cycle | `module_enabled[]` is static array, no NVM storage | `Core/Src/service_mode.c` |
 | **Encoder reader module is observation-only** — `encoder_reader.c` provides raw count access and CAN diagnostics but is not connected to any control, odometry, speed, traction, braking, or steering logic | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
 
@@ -329,15 +330,15 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | # | Description | Subsystem | Dependencies | Blocking Modules | Status |
 |---|---|---|---|---|---|
 | ~~1~~ | ~~**ESP32 obstacle sensor driver**~~ | ~~Sensors / Safety~~ | ~~—~~ | ~~—~~ | ✅ RESOLVED — `esp32/src/sensors/obstacle_sensor.cpp` + `esp32/src/can/can_obstacle.cpp` |
-| 2 | **CAN ID 0x209 parsing** — filter and case exist for `CAN_ID_OBSTACLE_SAFETY` but body is empty (`break;` only) | CAN / Safety | — | `CAN_ProcessMessages()` in `can_handler.c` | ❌ PENDING |
+| ~~2~~ | ~~**CAN ID 0x209 parsing**~~ | ~~CAN / Safety~~ | ~~—~~ | ~~`CAN_ProcessMessages()` in `can_handler.c`~~ | ✅ RESOLVED — `Obstacle_ProcessSafetyCAN()` in `safety_system.c`; ESP32 sends 0x209 from `can_obstacle.cpp` |
 | 3 | **Steering PID tuning (I and D terms)** — PID structure supports ki/kd but both are 0.0; code path exists in `PID_Compute()` | Steering | Hardware testing with actual steering load | `steering_pid` in `motor_control.c` | ❌ PENDING |
 | 4 | **Calibration persistence (STM32)** — encoder zero and sensor offsets recomputed every power cycle; no NVM/flash write path exists | Steering / Sensors | STM32 flash or EEPROM driver | `Steering_Init()`, `SteeringCentering_Complete()` | ❌ PENDING |
 | 5 | **Service mode persistence (STM32)** — module enable/disable states lost on reboot; no NVM path exists | Service Mode | STM32 flash or EEPROM driver | `ServiceMode_Init()` | ❌ PENDING |
 | 6 | **Redundant pedal sensor** — single ADC channel with no cross-check; code structure accepts only one value | Sensors / Safety | Second ADC channel or hall sensor hardware | `Pedal_Update()` in `sensor_manager.c` | ❌ PENDING |
 | ~~7~~ | ~~**ESP32 mode/gear CAN feedback to DriveScreen**~~ | ~~Display / UI~~ | ~~—~~ | ~~—~~ | ⚠️ PARTIAL — Gear now from physical shifter; mode flags still local |
 | 8 | **Hot-plug DS18B20 detection** — ROM search runs only at init; adding/removing sensors at runtime is not detected | Sensors | Periodic `OW_SearchAll()` or change-detection mechanism | `Sensor_Init()` in `sensor_manager.c` | ❌ PENDING |
-| 9 | **Engineering screen exit mechanism** — once activated, no way to return to normal screens | Display / UI | — | `screen_manager.cpp` | ❌ NEW |
-| 10 | **NVS write wear mitigation** — config_store saves on every touch; needs dirty flag + periodic flush | ESP32 / Persistence | — | `config_store.cpp` | ❌ NEW |
+| ~~9~~ | ~~**Engineering screen exit mechanism**~~ | ~~Display / UI~~ | ~~—~~ | ~~`screen_manager.cpp`~~ | ✅ RESOLVED — EXIT button on main menu, `exitRequested_` flag resets `engineeringActive_` |
+| ~~10~~ | ~~**NVS write wear mitigation**~~ | ~~ESP32 / Persistence~~ | ~~—~~ | ~~`config_store.cpp`~~ | ✅ RESOLVED — dirty flag + periodic `flush()` every 10 s + shutdown flush |
 
 ---
 
