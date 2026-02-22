@@ -45,11 +45,17 @@ bool save(const Config& cfg);
 /// Get the currently loaded config (read-only).
 const Config& get();
 
-/// Update and save a specific field.
+/// Update a specific field (marks config dirty; call flush() to persist).
 void setDriveMode(uint8_t mode);
 void setBrightness(uint8_t brightness);
 void setLedEnabled(bool enabled);
 void setAudioVolume(uint8_t volume);
+
+/// Flush pending changes to NVS if dirty.  Call periodically from loop().
+void flush();
+
+/// Returns true if there are unsaved changes.
+bool isDirty();
 
 /// Reset config to factory defaults and save.
 void factoryReset();

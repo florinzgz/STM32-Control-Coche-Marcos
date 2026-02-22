@@ -42,6 +42,7 @@ static constexpr int16_t BACK_H = 30;
 // -------------------------------------------------------------------------
 void EngineeringScreen::onEnter() {
     needsRedraw_ = true;
+    exitRequested_ = false;
     currentMenu_ = SubMenu::MAIN;
     prevFaultBits_    = 0xFFFFFFFF;
     prevEnabledBits_  = 0xFFFFFFFF;
@@ -108,14 +109,17 @@ void EngineeringScreen::draw() {
 // Touch handling
 // -------------------------------------------------------------------------
 bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
-    // Back button (all submenus)
-    if (currentMenu_ != SubMenu::MAIN) {
-        if (x >= BACK_X && x <= BACK_X + BACK_W &&
-            y >= BACK_Y && y <= BACK_Y + BACK_H) {
+    // Back button (submenus → main) or Exit button (main → normal screens)
+    if (x >= BACK_X && x <= BACK_X + BACK_W &&
+        y >= BACK_Y && y <= BACK_Y + BACK_H) {
+        if (currentMenu_ != SubMenu::MAIN) {
             currentMenu_ = SubMenu::MAIN;
             needsRedraw_ = true;
-            return true;
+        } else {
+            // EXIT from engineering mode
+            exitRequested_ = true;
         }
+        return true;
     }
 
     // Main menu item selection
@@ -178,6 +182,14 @@ void EngineeringScreen::drawMainMenu() {
         tft.drawString(mainLabels[i], MENU_X + MENU_W / 2,
                         btnY + MENU_BTN_H / 2);
     }
+    tft.setTextDatum(TL_DATUM);
+
+    // EXIT button (bottom-left — returns to normal screens)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("EXIT", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     tft.setTextDatum(TL_DATUM);
 }
 

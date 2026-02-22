@@ -72,8 +72,17 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 void ScreenManager::onTouch(int16_t x, int16_t y) {
     // If engineering screen is active, dispatch touch to it
     if (engineeringActive_) {
-        bool consumed = engineeringScreen_.handleTouch(x, y);
-        (void)consumed;
+        engineeringScreen_.handleTouch(x, y);
+        // Check if user requested exit from engineering mode
+        if (engineeringScreen_.exitRequested()) {
+            engineeringScreen_.clearExitRequest();
+            engineeringActive_ = false;
+            currentScreen_->onExit();
+            currentScreen_ = screenForState(currentState_);
+            currentScreen_->onEnter();
+            frameLimiter_.forceNextFrame();
+            Serial.println("[ENG] Engineering menu deactivated");
+        }
         return;
     }
 

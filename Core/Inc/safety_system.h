@@ -280,6 +280,7 @@ typedef enum {
 /* Obstacle safety (STM32 primary — CAN advisory from ESP32) */
 void             Obstacle_Update(void);
 void             Obstacle_ProcessCAN(const uint8_t *data, uint8_t len);
+void             Obstacle_ProcessSafetyCAN(const uint8_t *data, uint8_t len);
 float            Obstacle_GetScale(void);
 bool             Obstacle_IsForwardBlocked(void);
 ObstacleState_t  Obstacle_GetState(void);

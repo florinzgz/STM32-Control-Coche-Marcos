@@ -30,6 +30,12 @@ public:
     /// Process a touch tap event.  Returns true if consumed.
     bool handleTouch(int16_t x, int16_t y);
 
+    /// Returns true if the user requested to exit engineering mode.
+    bool exitRequested() const { return exitRequested_; }
+
+    /// Clear the exit-requested flag (called by ScreenManager after handling).
+    void clearExitRequest() { exitRequested_ = false; }
+
 private:
     enum class SubMenu : uint8_t {
         MAIN = 0,
@@ -45,6 +51,7 @@ private:
     void drawCalibration(const char* title);
 
     bool        needsRedraw_ = true;
+    bool        exitRequested_ = false;
     SubMenu     currentMenu_ = SubMenu::MAIN;
 
     // Cached data for fault viewer

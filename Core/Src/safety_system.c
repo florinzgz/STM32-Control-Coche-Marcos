@@ -208,6 +208,12 @@ static uint8_t  obstacle_plausible       = 1;      /* Current data plausible   *
 /* ---- Validated distance used by state machine ---- */
 static uint16_t obstacle_validated_mm    = 0xFFFF; /* After plausibility check */
 
+/* ---- ESP32 obstacle safety state (0x209, cross-validation) ---- */
+static uint8_t  esp32_obs_zone           = 0;      /* Zone reported by ESP32   */
+static uint8_t  esp32_obs_sensor_status  = 0;      /* 0=WAIT, 1=INVALID, 2=OK */
+static uint8_t  esp32_obs_stuck          = 0;      /* ESP32 stuck flag         */
+static uint32_t esp32_obs_last_rx_tick   = 0;      /* Last 0x209 reception     */
+
 /* ---- Child reaction detection ----
  * When the child rapidly releases the pedal (drop > THRESHOLD in WINDOW),
  * the obstacle safety factors in warning/caution zones are tightened.
@@ -611,6 +617,10 @@ void Safety_Init(void)
     obstacle_stuck_since     = 0;
     obstacle_plausible       = 1;
     obstacle_validated_mm    = 0xFFFF;
+    esp32_obs_zone           = 0;
+    esp32_obs_sensor_status  = 0;
+    esp32_obs_stuck          = 0;
+    esp32_obs_last_rx_tick   = 0;
     child_prev_pedal_pct     = 0.0f;
     child_pedal_sample_tick  = 0;
     child_reaction_active    = 0;
@@ -1467,6 +1477,45 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
     if (obstacle_plausible && obstacle_stale_count < 3 &&
         obstacle_sensor_healthy) {
         obstacle_validated_mm = dist;
+    }
+}
+
+/**
+ * @brief  Process CAN 0x209 (Obstacle Safety State) from ESP32.
+ *
+ * Informational only — the STM32 computes its own obstacle_scale from
+ * the raw distance in 0x208.  This frame provides the ESP32's view of
+ * the obstacle situation for cross-validation and diagnostic logging.
+ *
+ * If the ESP32 reports its sensor as stuck (byte 2 = 1) and the STM32's
+ * own plausibility checks have not flagged an issue, a service-mode
+ * warning is raised to indicate a potential sensor disagreement.
+ *
+ * Payload (DLC ≥ 3):
+ *   Byte 0: zone (0–4)
+ *   Byte 1: sensor_status (0=WAITING, 1=INVALID, 2=VALID)
+ *   Byte 2: stuck flag (0=OK, 1=stuck)
+ *   Byte 3: reserved
+ */
+void Obstacle_ProcessSafetyCAN(const uint8_t *data, uint8_t len)
+{
+    if (len < 3) return;
+
+    /* Skip if disabled via service mode */
+    if (!ServiceMode_IsEnabled(MODULE_OBSTACLE_DETECT)) return;
+
+    esp32_obs_zone          = data[0];
+    esp32_obs_sensor_status = data[1];
+    esp32_obs_stuck         = data[2];
+    esp32_obs_last_rx_tick  = HAL_GetTick();
+
+    /* Clamp zone to valid range */
+    if (esp32_obs_zone > 5) esp32_obs_zone = 0;
+
+    /* Cross-validation: if ESP32 reports stuck but STM32 sees plausible
+     * data, flag a diagnostic warning — sensors may disagree.           */
+    if (esp32_obs_stuck && obstacle_plausible && obstacle_data_valid) {
+        ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
     }
 }
 
