@@ -1509,8 +1509,8 @@ void Obstacle_ProcessSafetyCAN(const uint8_t *data, uint8_t len)
     esp32_obs_stuck         = data[2];
     esp32_obs_last_rx_tick  = HAL_GetTick();
 
-    /* Clamp zone to valid range */
-    if (esp32_obs_zone > 5) esp32_obs_zone = 0;
+    /* Clamp zone to valid range (0–4) */
+    if (esp32_obs_zone > 4) esp32_obs_zone = 0;
 
     /* Cross-validation: if ESP32 reports stuck but STM32 sees plausible
      * data, flag a diagnostic warning — sensors may disagree.           */

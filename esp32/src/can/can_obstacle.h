@@ -9,7 +9,7 @@
 //
 // Payload 0x208 (DLC 5):
 //   Bytes 0-1: distance_mm (uint16 LE)
-//   Byte  2:   zone (0–3)
+//   Byte  2:   zone (0–4)
 //   Byte  3:   sensor_health (0=unhealthy, 1=healthy)
 //   Byte  4:   rolling_counter (0–255, increments each frame)
 //
