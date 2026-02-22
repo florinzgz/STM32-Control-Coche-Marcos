@@ -751,6 +751,23 @@ float Temperature_Get(uint8_t index)
     return temperatures[index];
 }
 
+/* ---- DS18B20 hot-plug detection ----
+ * Periodically re-enumerates the OneWire bus to detect sensors
+ * added or removed at runtime.  Called from the 1000 ms tier
+ * in main.c; actual rescan executes once every OW_RESCAN_INTERVAL_MS. */
+#define OW_RESCAN_INTERVAL_MS  10000   /* 10 seconds between rescans */
+
+static uint32_t ow_rescan_tick = 0;
+
+void Temperature_PeriodicRescan(void)
+{
+    uint32_t now = HAL_GetTick();
+    if ((now - ow_rescan_tick) < OW_RESCAN_INTERVAL_MS) return;
+    ow_rescan_tick = now;
+
+    OW_SearchAll();
+}
+
 /* =========================================================================
  *  Initialization
  * ========================================================================= */

@@ -149,6 +149,14 @@ struct LightsData {
     unsigned long timestampMs = 0;
 };
 
+// -------------------------------------------------------------------------
+// Active drive mode — set locally by ESP32 touch (eventually from STM32 CAN echo)
+// -------------------------------------------------------------------------
+struct ModeData {
+    uint8_t modeFlags       = 0;       // bit 0 = 4x4, bit 1 = tank turn
+    unsigned long timestampMs = 0;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -168,6 +176,7 @@ public:
     void setAck(const AckData& d)              { ack_ = d; }
     void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
     void setLights(const LightsData& d)        { lights_ = d; }
+    void setMode(const ModeData& d)            { mode_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -188,6 +197,7 @@ public:
     const AckData&       ack()       const { return ack_; }
     const ObstacleData&  obstacle()  const { return obstacle_; }
     const LightsData&    lights()    const { return lights_; }
+    const ModeData&      mode()      const { return mode_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -204,6 +214,7 @@ private:
     AckData       ack_;
     ObstacleData  obstacle_;
     LightsData    lights_;
+    ModeData      mode_;
 };
 
 } // namespace vehicle

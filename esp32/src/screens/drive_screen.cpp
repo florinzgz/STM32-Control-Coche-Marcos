@@ -112,9 +112,12 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
         }
     }
 
-    // Mode flags
-    curMode_.is4x4 = false;
-    curMode_.isTankTurn = false;
+    // Mode flags — read from vehicle data (set locally by touch, eventually from STM32 CAN echo)
+    {
+        uint8_t flags = data.mode().modeFlags;
+        curMode_.is4x4     = (flags & 0x01) != 0;
+        curMode_.isTankTurn = (flags & 0x02) != 0;
+    }
 
     // Obstacle sensor
     curObstacleCm_ = data.obstacle().distanceCm;

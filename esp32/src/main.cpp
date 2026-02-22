@@ -63,6 +63,13 @@ static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, b
 static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
 
+// ---- Audio event tracking ----
+static uint8_t  lastAudioSystemState = 0;     // detect state transitions for error alert
+static bool     batteryLowPlayed  = false;     // one-shot for battery warning
+static constexpr uint16_t BATTERY_LOW_THRESHOLD_RAW = 2000; // 20.00 V in 0.01 V units
+static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beeps
+static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
+
 // ---- NVS flush interval ----
 static unsigned long lastNvsFlushMs = 0;
 static constexpr unsigned long NVS_FLUSH_INTERVAL_MS = 10000;  // 10 seconds
@@ -231,6 +238,12 @@ void setup() {
         const auto& cfg = config_store::get();
         currentModeFlags = cfg.driveMode;
         ledLocalState    = cfg.ledEnabled;
+
+        // Populate vehicleData with initial mode flags
+        vehicle::ModeData md;
+        md.modeFlags   = currentModeFlags;
+        md.timestampMs = millis();
+        vehicleData.setMode(md);
     }
 }
 
@@ -282,6 +295,7 @@ void loop() {
             lastSentGear   = gear;
             lastGearSendMs = now;
             sendGearCommand(gear);
+            audio::play(audio::Sound::GEAR_CHANGE, audio::Priority::LOW);
             Serial.printf("[SHIFTER] Gear → %u\n", gear);
         }
     }
@@ -323,6 +337,12 @@ void loop() {
                 }
                 sendModeCommand(currentModeFlags);
                 config_store::setDriveMode(currentModeFlags);
+                {
+                    vehicle::ModeData md;
+                    md.modeFlags   = currentModeFlags;
+                    md.timestampMs = millis();
+                    vehicleData.setMode(md);
+                }
                 Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
             }
         }
@@ -352,6 +372,36 @@ void loop() {
         }
     }
 
+    // ---- CAN-triggered audio events ----
+    {
+        auto st = static_cast<uint8_t>(vehicleData.heartbeat().systemState);
+
+        // Error / Safe state alert — play once on transition
+        if ((st == 4 || st == 5) && lastAudioSystemState != st) {
+            audio::play(audio::Sound::ERROR_ALERT, audio::Priority::HIGH);
+        }
+        lastAudioSystemState = st;
+
+        // Battery low warning — play once when voltage drops below threshold
+        uint16_t battVoltRaw = vehicleData.battery().voltageRaw;
+        if (battVoltRaw > 0 && battVoltRaw < BATTERY_LOW_THRESHOLD_RAW) {
+            if (!batteryLowPlayed) {
+                audio::play(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
+                batteryLowPlayed = true;
+            }
+        } else {
+            batteryLowPlayed = false;  // reset when voltage recovers
+        }
+
+        // Obstacle proximity warning — beep when zone ≥ 3 (critical/emergency)
+        obstacle_sensor::Reading obsRd = obstacle_sensor::getReading();
+        if (obsRd.healthy && obsRd.zone >= 3 &&
+            (now - lastObstacleWarnMs) >= OBSTACLE_WARN_INTERVAL_MS) {
+            audio::play(audio::Sound::OBSTACLE_WARN, audio::Priority::MEDIUM);
+            lastObstacleWarnMs = now;
+        }
+    }
+
     // ---- Audio update ----
     audio::update();
 
@@ -364,11 +414,29 @@ void loop() {
     // ---- WS2812B LED update ----
     {
         auto st = vehicleData.heartbeat().systemState;
-        // Braking and reverse detection require gear echo from STM32 (not
-        // yet implemented in CAN protocol — tracked in audit Step 1).
-        // Until then, rear LEDs show default tail light pattern.
+
+        // Reverse detection from physical shifter (gear 1 = Reverse)
+        bool reverse = (shifter::getGearRaw() == 1);
+
+        // Braking detection: traction average near zero while speed > 0
+        // indicates dynamic braking or throttle release at speed.
         bool braking = false;
-        bool reverse = false;
+        {
+            uint32_t trSum = 0;
+            for (uint8_t i = 0; i < 4; ++i) {
+                trSum += vehicleData.traction().scale[i];
+            }
+            uint8_t trAvg = static_cast<uint8_t>(trSum / 4);
+
+            uint32_t spSum = 0;
+            for (uint8_t i = 0; i < 4; ++i) {
+                spSum += vehicleData.speed().raw[i];
+            }
+            // speed > 0.5 km/h (raw in 0.1 km/h units, so > 5)
+            // and traction average ≤ 5% → braking
+            braking = (spSum > 20 && trAvg <= 5);
+        }
+
         bool ledEnabled = vehicleData.lights().relayOn;
         led_ctrl::update(static_cast<uint8_t>(st), braking, reverse, ledEnabled);
     }
