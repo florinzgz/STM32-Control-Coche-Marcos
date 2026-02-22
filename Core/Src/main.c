@@ -383,6 +383,10 @@ int main(void)
              * to ESP32 for the diagnostic/service menu.               */
             CAN_SendServiceStatus();
 
+            /* LED/lights status: send current relay state to ESP32
+             * for HMI synchronisation.                                */
+            CAN_SendStatusLights();
+
             /* Encoder diagnostic: raw count + delta for hardware validation.
              * Diagnostic only — not used by any control path.             */
             Encoder_SendDiagnostic();
@@ -468,6 +472,11 @@ static void MX_GPIO_Init(void)
     /* Relay outputs (GPIOC) */
     gpio.Pin = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
     HAL_GPIO_Init(GPIOC, &gpio);
+
+    /* LED power relay (PB10) — starts OFF (safe default) */
+    gpio.Pin = PIN_RELAY_LED;
+    HAL_GPIO_Init(GPIOB, &gpio);
+    HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED, GPIO_PIN_RESET);
 
     /* Wheel speed EXTI inputs */
     gpio.Pin  = PIN_WHEEL_FL | PIN_WHEEL_FR | PIN_WHEEL_RL;
@@ -670,5 +679,7 @@ void Error_Handler(void)
      * Uses direct register access because HAL may be in an inconsistent state.    */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+    /* LED power relay on GPIOB — also force OFF */
+    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED) << 16U;
     while (1) { }
 }

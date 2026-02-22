@@ -27,6 +27,7 @@
 #include "ui/ui_common.h"
 #include "ui/gear_display.h"
 #include "ui/mode_icons.h"
+#include "ui/led_toggle.h"
 #include <cstdint>
 
 class DriveScreen : public Screen {
@@ -47,6 +48,7 @@ private:
     ui::Gear prevGear_           = ui::Gear::P;
     ui::ModeState prevMode_      = {};
     uint16_t prevObstacleCm_     = 0;
+    bool     prevLedOn_          = false;
 
     // Current frame values (populated in update, used in draw)
     uint8_t  curTraction_[4]     = {};
@@ -58,6 +60,7 @@ private:
     ui::Gear curGear_            = ui::Gear::P;
     ui::ModeState curMode_       = {};
     uint16_t curObstacleCm_      = 0;
+    bool     curLedOn_           = false;
 
     bool     needsFullRedraw_    = true;
 

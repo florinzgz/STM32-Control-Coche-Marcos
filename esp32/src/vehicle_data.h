@@ -141,6 +141,14 @@ struct ObstacleData {
     unsigned long timestampMs = 0;
 };
 
+// -------------------------------------------------------------------------
+// LED / Lights status (0x20A) — relay state from STM32
+// -------------------------------------------------------------------------
+struct LightsData {
+    bool relayOn            = false;   // true = LED power relay active
+    unsigned long timestampMs = 0;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -159,6 +167,7 @@ public:
     void setBattery(const BatteryData& d)      { battery_ = d; }
     void setAck(const AckData& d)              { ack_ = d; }
     void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
+    void setLights(const LightsData& d)        { lights_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -178,6 +187,7 @@ public:
     const ServiceData&   service()   const { return service_; }
     const AckData&       ack()       const { return ack_; }
     const ObstacleData&  obstacle()  const { return obstacle_; }
+    const LightsData&    lights()    const { return lights_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -193,6 +203,7 @@ private:
     ServiceData   service_;
     AckData       ack_;
     ObstacleData  obstacle_;
+    LightsData    lights_;
 };
 
 } // namespace vehicle

@@ -29,6 +29,9 @@ CAN_Stats_t can_stats = {0};
 static uint32_t last_tx_heartbeat = 0;
 static uint8_t  heartbeat_counter = 0;
 
+/* LED relay state (PB10) — defaults OFF for safe power-on */
+static bool led_relay_on = false;
+
 /* Bus-off recovery state (non-blocking, timestamp-based) */
 static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in progress */
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
@@ -105,12 +108,14 @@ static void CAN_ConfigureFilters(void)
     filter.FilterID2    = CAN_ID_CMD_MODE;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 
-    /* Filter 2: Accept ESP32 service commands (0x110) */
+    /* Filter 2: Accept ESP32 service commands (0x110) and LED command (0x120).
+     * Range filter accepts all IDs 0x110–0x120.  Intermediate IDs (0x111–0x11F)
+     * are not used by any module and are silently ignored by CAN_ProcessMessages(). */
     filter.FilterIndex  = 2;
-    filter.FilterType   = FDCAN_FILTER_DUAL;
+    filter.FilterType   = FDCAN_FILTER_RANGE;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
     filter.FilterID1    = CAN_ID_SERVICE_CMD;
-    filter.FilterID2    = CAN_ID_SERVICE_CMD;
+    filter.FilterID2    = CAN_ID_CMD_LED;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 
     /* Filter 3: Accept ESP32 obstacle data (0x208–0x209) */
@@ -443,6 +448,41 @@ void CAN_SendServiceStatus(void) {
     TransmitFrame(CAN_ID_SERVICE_DISABLED, data, 4);
 }
 
+/**
+ * @brief  Set LED power relay state (PB10).
+ * @param  on  true = relay ON (LEDs powered), false = relay OFF
+ *
+ * The relay controls 5V supply to WS2812B LED strips.  The ESP32
+ * drives the WS2812B data line for patterns; the STM32 controls
+ * the power relay as a safety cutoff.
+ */
+void LED_Relay_Set(bool on) {
+    led_relay_on = on;
+    HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED,
+                      on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+bool LED_Relay_Get(void) {
+    return led_relay_on;
+}
+
+/**
+ * @brief  Send LED/light status to ESP32.
+ *
+ *   Byte 0: led_relay_on (0 = OFF, 1 = ON)
+ *   Byte 1: reserved (0)
+ *
+ * CAN ID: 0x20A   DLC: 2   Rate: 1000 ms (1 Hz)
+ */
+void CAN_SendStatusLights(void) {
+    uint8_t data[2];
+
+    data[0] = led_relay_on ? 1 : 0;
+    data[1] = 0;  /* Reserved for future pattern/mode byte */
+
+    TransmitFrame(CAN_ID_STATUS_LIGHTS, data, 2);
+}
+
 /* Helper to extract byte count from FDCAN DLC */
 static uint8_t ExtractDLC(uint32_t dlc_code) {
     switch (dlc_code) {
@@ -613,6 +653,21 @@ void CAN_ProcessMessages(void) {
                  *   obstacle_scale from the raw distance in 0x208.
                  *   This message is accepted but not parsed (reserved
                  *   for future ESP32 HMI → STM32 coordination).         */
+                break;
+
+            case CAN_ID_CMD_LED:
+                /* LED relay control from ESP32 (0x120):
+                 *   Byte 0: 0 = OFF, 1 = ON
+                 *
+                 * Controls the 5V power relay for WS2812B LED strips.
+                 * Always accepted (not safety-critical).  ACK confirms
+                 * the new state.                                        */
+                if (msg_len >= 1) {
+                    LED_Relay_Set(rx_payload[0] != 0);
+                    CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_OK);
+                } else {
+                    CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
+                }
                 break;
                 
             default:
