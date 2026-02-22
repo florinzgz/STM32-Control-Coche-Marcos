@@ -27,6 +27,7 @@
 #include "audio_manager.h"
 #include "shifter_input.h"
 #include "touch_handler.h"
+#include "config_store.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -167,6 +168,9 @@ void setup() {
 
     Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
 
+    // Initialize NVS config store
+    config_store::init();
+
     // Initialize PSRAM
     if (psramInit()) {
         // Give system a moment to complete PSRAM initialization
@@ -217,6 +221,13 @@ void setup() {
 
     // Initialize centralized touch handler
     touch::init();
+
+    // Apply saved configuration
+    {
+        const auto& cfg = config_store::get();
+        currentModeFlags = cfg.driveMode;
+        ledLocalState    = cfg.ledEnabled;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +298,7 @@ void loop() {
             if (ui::LedToggle::hitTest(evt.x, evt.y)) {
                 ledLocalState = !ledLocalState;
                 sendLedCommand(ledLocalState);
+                config_store::setLedEnabled(ledLocalState);
                 Serial.printf("[LED] Toggle → %s\n",
                               ledLocalState ? "ON" : "OFF");
             }
@@ -306,6 +318,7 @@ void loop() {
                         break;
                 }
                 sendModeCommand(currentModeFlags);
+                config_store::setDriveMode(currentModeFlags);
                 Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
             }
         }
