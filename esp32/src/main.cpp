@@ -19,12 +19,14 @@
 #include "ui/runtime_monitor.h"
 #include "ui/debug_overlay.h"
 #include "ui/led_toggle.h"
+#include "ui/mode_icons.h"
 #include "sensors/obstacle_sensor.h"
 #include "can/can_obstacle.h"
 #include "led_controller.h"
 #include "power_manager.h"
 #include "audio_manager.h"
 #include "shifter_input.h"
+#include "touch_handler.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -52,6 +54,9 @@ static constexpr unsigned long LED_TOUCH_DEBOUNCE_MS = 300;
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
 static unsigned long lastGearSendMs = 0;     // debounce for gear CAN sends
 static constexpr unsigned long GEAR_SEND_DEBOUNCE_MS = 100;
+
+// ---- Mode state tracking ----
+static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, bit 1=tank)
 
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
@@ -126,6 +131,19 @@ static void sendGearCommand(uint8_t gear) {
     ackBeginWait(can::CMD_MODE & 0xFF);  // Low byte of 0x102 = 0x02
 }
 
+/// Send drive mode command to STM32 via CAN 0x102 (CMD_MODE).
+/// @param modeFlags  Mode flags byte (bit 0 = 4x4, bit 1 = tank turn)
+static void sendModeCommand(uint8_t modeFlags) {
+    CanFrame frame = {};
+    frame.identifier       = can::CMD_MODE;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+    frame.data[0]          = modeFlags;
+    frame.data[1]          = shifter::getGearRaw();  // Include current gear
+    ESP32Can.writeFrame(frame);
+    ackBeginWait(can::CMD_MODE & 0xFF);
+}
+
 // ---------------------------------------------------------------------------
 // setup() — called once at power-on
 // ---------------------------------------------------------------------------
@@ -196,6 +214,9 @@ void setup() {
 
     // Initialize MCP23017 shifter input (I2C on GPIO 8/9)
     shifter::init();
+
+    // Initialize centralized touch handler
+    touch::init();
 }
 
 // ---------------------------------------------------------------------------
@@ -250,19 +271,39 @@ void loop() {
         }
     }
 
-    // ---- Touch handling for LED toggle ----
-    // Read touch outside of runtime monitor (not part of render timing)
+    // ---- Centralized touch handling ----
     {
         uint16_t tx = 0, ty = 0;
         bool isTouched = tft.getTouch(&tx, &ty);
-        if (isTouched && ui::LedToggle::hitTest(static_cast<int16_t>(tx),
-                                                  static_cast<int16_t>(ty))) {
-            unsigned long now2 = millis();
-            if ((now2 - lastLedTouchMs) >= LED_TOUCH_DEBOUNCE_MS) {
-                lastLedTouchMs = now2;
+        touch::update(isTouched, static_cast<int16_t>(tx),
+                      static_cast<int16_t>(ty));
+
+        touch::TouchEvent evt = touch::getEvent();
+        if (evt.type == touch::EventType::TAP) {
+            // LED toggle
+            if (ui::LedToggle::hitTest(evt.x, evt.y)) {
                 ledLocalState = !ledLocalState;
                 sendLedCommand(ledLocalState);
-                Serial.printf("[LED] Toggle → %s\n", ledLocalState ? "ON" : "OFF");
+                Serial.printf("[LED] Toggle → %s\n",
+                              ledLocalState ? "ON" : "OFF");
+            }
+
+            // Mode icons (4x4 / 4x2 / 360°)
+            uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
+            if (modeHit > 0) {
+                switch (modeHit) {
+                    case 1:  // 4x4 → set 4x4 flag, clear tank
+                        currentModeFlags = can::MODE_FLAG_4X4;
+                        break;
+                    case 2:  // 4x2 → clear both flags
+                        currentModeFlags = 0;
+                        break;
+                    case 3:  // 360° → set tank turn flag
+                        currentModeFlags = can::MODE_FLAG_TANK_TURN;
+                        break;
+                }
+                sendModeCommand(currentModeFlags);
+                Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
             }
         }
     }
