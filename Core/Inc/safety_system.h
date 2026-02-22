@@ -263,6 +263,11 @@ bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
 #define OBSTACLE_CAUTION_MM_PUB     1500    /* 1000–1500 mm → scale = 0.85    */
 #define OBSTACLE_ALERT_MM_PUB       4000    /* 1500–4000 mm → scale = 0.95    */
 
+/* Child reaction detection — tighten obstacle factors when child
+ * releases pedal rapidly (instinctive reaction to obstacle).               */
+#define CHILD_REACTION_THRESHOLD_PUB   10.0f  /* Pedal drop threshold (%)     */
+#define CHILD_REACTION_WINDOW_MS_PUB   500    /* Detection window (ms)        */
+
 typedef enum {
     OBS_STATE_NO_SENSOR = 0,   /* No CAN data ever received — full motion    */
     OBS_STATE_NORMAL,          /* Sensor valid, no obstacle in range          */

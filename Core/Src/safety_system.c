@@ -208,6 +208,21 @@ static uint8_t  obstacle_plausible       = 1;      /* Current data plausible   *
 /* ---- Validated distance used by state machine ---- */
 static uint16_t obstacle_validated_mm    = 0xFFFF; /* After plausibility check */
 
+/* ---- Child reaction detection ----
+ * When the child rapidly releases the pedal (drop > THRESHOLD in WINDOW),
+ * the obstacle safety factors in warning/caution zones are tightened.
+ * This detects an instinctive reaction to a perceived obstacle.           */
+#define CHILD_REACTION_THRESHOLD    10.0f   /* Pedal drop > 10% triggers    */
+#define CHILD_REACTION_WINDOW_MS    500     /* Detection window (ms)        */
+#define CHILD_REACTION_BOOST_MS     2000    /* How long tighter factors last */
+#define CHILD_REACTION_WARNING_SCALE  0.5f  /* Warning zone during reaction */
+#define CHILD_REACTION_CAUTION_SCALE  0.7f  /* Caution zone during reaction */
+
+static float    child_prev_pedal_pct     = 0.0f;  /* Pedal % at window start */
+static uint32_t child_pedal_sample_tick  = 0;      /* When sample was taken   */
+static uint8_t  child_reaction_active    = 0;      /* 1 = reaction detected   */
+static uint32_t child_reaction_start     = 0;      /* When reaction started   */
+
 /* ================================================================== */
 /*  State Machine                                                      */
 /* ================================================================== */
@@ -595,6 +610,10 @@ void Safety_Init(void)
     obstacle_stuck_since     = 0;
     obstacle_plausible       = 1;
     obstacle_validated_mm    = 0xFFFF;
+    child_prev_pedal_pct     = 0.0f;
+    child_pedal_sample_tick  = 0;
+    child_reaction_active    = 0;
+    child_reaction_start     = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -1586,6 +1605,43 @@ void Obstacle_Update(void)
         target_scale = 0.95f;
     } else {
         target_scale = 1.0f;
+    }
+
+    /* ---- Child reaction detection ----
+     * Sample pedal at regular intervals.  If pedal drops by more than
+     * CHILD_REACTION_THRESHOLD within CHILD_REACTION_WINDOW_MS, the
+     * child is reacting to a perceived obstacle → tighten warning and
+     * caution zone factors for CHILD_REACTION_BOOST_MS.                 */
+    {
+        float pedal_now = Pedal_GetPercent();
+
+        if ((now - child_pedal_sample_tick) >= CHILD_REACTION_WINDOW_MS) {
+            float drop = child_prev_pedal_pct - pedal_now;
+            if (drop >= CHILD_REACTION_THRESHOLD &&
+                child_prev_pedal_pct > CHILD_REACTION_THRESHOLD) {
+                child_reaction_active = 1;
+                child_reaction_start  = now;
+            }
+            child_prev_pedal_pct    = pedal_now;
+            child_pedal_sample_tick = now;
+        }
+
+        /* Expire reaction boost after duration */
+        if (child_reaction_active &&
+            (now - child_reaction_start) >= CHILD_REACTION_BOOST_MS) {
+            child_reaction_active = 0;
+        }
+
+        /* Apply tighter factors to warning/caution zones when active */
+        if (child_reaction_active) {
+            if (target_scale >= 0.7f && target_scale < 0.85f) {
+                /* Warning zone: tighten from 0.7 → 0.5 */
+                target_scale = CHILD_REACTION_WARNING_SCALE;
+            } else if (target_scale >= 0.85f && target_scale < 0.95f) {
+                /* Caution zone: tighten from 0.85 → 0.7 */
+                target_scale = CHILD_REACTION_CAUTION_SCALE;
+            }
+        }
     }
 
     /* ---- State machine with temporal hysteresis ---- */
