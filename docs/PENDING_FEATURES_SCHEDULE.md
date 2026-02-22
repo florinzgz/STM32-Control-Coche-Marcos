@@ -1,18 +1,38 @@
-# Funcionalidades Pendientes: Audio, Menú Oculto y Persistencia EEPROM
+# Funcionalidades Pendientes: Audio, Menú Oculto y Persistencia
 
-**Fecha:** 2026-02-16
+**Fecha:** 2026-02-22
 **Referencia:** `docs/PROJECT_MASTER_STATUS.md` §4–§5, `docs/FIRMWARE_MATURITY_ROADMAP.md` §5, `FULL-FIRMWARE-Coche-Marcos` (repo original)
 
 ---
 
 ## RESUMEN
 
-| Funcionalidad | ¿Cuándo se implementa? | Phase | Depende de |
-|--------------|------------------------|-------|------------|
-| **Persistencia de calibración (EEPROM/Flash)** | **Phase 4 — Driver Interaction** | Después de Phases 1, 2 y 3 | STM32 Flash driver |
-| **Persistencia de Service Mode (EEPROM/Flash)** | **Phase 4 — Driver Interaction** | Después de Phases 1, 2 y 3 | STM32 Flash driver |
-| **Menú oculto de ingeniería (ESP32)** | **Phase 5 — Experience Features** | Después de Phases 1, 2, 3 y 4 | Persistencia implementada, UI funcional |
-| **Audio (DFPlayer Mini)** | **Phase 5 — Experience Features** | Después de Phases 1, 2, 3 y 4 | Hardware DFPlayer conectado, ESP32 UART libre |
+| Funcionalidad | Estado | Phase | Notas |
+|--------------|--------|-------|-------|
+| **Persistencia de configuración (ESP32-S3 NVS)** | ✅ IMPLEMENTADA | — | `config_store.cpp` con CRC32, dirty flag, flush periódico |
+| ~~**Persistencia de calibración (STM32 Flash)**~~ | ✅ NO NECESARIA | — | STM32 recalibra desde sensores hardware en cada arranque (diseño de seguridad) |
+| ~~**Persistencia de Service Mode (STM32 Flash)**~~ | ✅ NO NECESARIA | — | Service mode arranca con todos los módulos habilitados (default seguro) |
+| **Menú oculto de ingeniería (ESP32)** | ✅ IMPLEMENTADO | — | `engineering_screen.cpp`, código secreto 8989, 5 submenús, botón EXIT |
+| **Audio (DFPlayer Mini)** | ✅ IMPLEMENTADO | — | `audio_manager.cpp`, cola con prioridades, 6 sonidos, GPIO 43/44 |
+
+### Decisión de arquitectura: Persistencia centralizada en ESP32-S3
+
+Toda la persistencia de configuración de usuario se maneja en la **ESP32-S3 mediante NVS** (`config_store.cpp`):
+
+- Modo de conducción (4×4/4×2/tank)
+- Brillo de pantalla
+- Estado del relé LED
+- Volumen de audio
+- Validación CRC32 para integridad de datos
+- Escrituras diferidas con dirty flag + flush cada 10 s
+
+El STM32 **NO tiene almacenamiento no volátil por diseño**. Esto es una característica de seguridad:
+- La calibración de dirección se recalcula desde el sensor inductivo en cada arranque
+- El encoder zero se obtiene de TIM2 hardware quadrature
+- Las temperaturas base se obtienen de DS18B20 con ROM search + CRC-8
+- Los módulos de service mode arrancan todos habilitados (default seguro)
+
+Esto garantiza que la calibración siempre refleja el estado real del hardware, evitando operar con datos de calibración obsoletos o corruptos.
 
 ---
 
@@ -20,44 +40,33 @@
 
 ### Estado actual
 
-El STM32G474RE **NO tiene EEPROM dedicada**, pero sí tiene **Flash interna** con páginas de usuario que se pueden usar como almacenamiento no volátil. Actualmente:
+## 1) PERSISTENCIA — DECISIÓN FINAL
 
-- **Calibración de dirección** (encoder zero, offset de centrado) → se recalcula cada vez que se enciende (`Steering_Init()`, `SteeringCentering_Complete()`)
-- **Service Mode** (módulos habilitados/deshabilitados) → se pierde al apagar (`module_enabled[]` es un array estático en RAM, `service_mode.c`)
-- **Offsets de sensores** (pedal min/max, etc.) → hardcodeados como constantes
+### ✅ RESUELTO: ESP32-S3 NVS es la autoridad de persistencia
 
-**Evidencia en código:**
-- No hay ninguna llamada a `HAL_FLASH_Program()`, `HAL_FLASH_Erase()` ni API de escritura Flash en ningún archivo STM32
-- No existe ningún driver de EEPROM emulada ni abstracción de almacenamiento
+La persistencia de toda la configuración de usuario se maneja en la ESP32-S3 mediante NVS (`config_store.cpp`). El STM32 recalibra desde sensores hardware en cada arranque. No se necesita Flash storage en STM32.
 
-### Cuándo se implementa
+**Justificación:**
+- La calibración de dirección se recalcula automáticamente desde el sensor inductivo (PB5) en ≤10 s
+- Los defaults de Service Mode (todos habilitados) son los defaults seguros
+- Los offsets de sensores se obtienen de los propios sensores (INA226, DS18B20, encoder)
+- Almacenar calibración stale en Flash sería un riesgo de seguridad si el hardware cambia
 
-**Phase 4 — Driver Interaction** (según `PROJECT_MASTER_STATUS.md` §5):
+**Lo que SÍ se persiste (en ESP32-S3 NVS):**
 
-> **Goals:**
-> - Add calibration persistence (steering encoder zero, sensor offsets) to STM32 flash
-> - Add service mode persistence to STM32 flash
+| Dato | Tamaño | Módulo |
+|------|--------|--------|
+| Drive mode (4×4/4×2/tank) | 1 byte | `config_store::setDriveMode()` |
+| Brightness | 1 byte | `config_store::setBrightness()` |
+| LED relay state | 1 byte | `config_store::setLedEnabled()` |
+| Audio volume | 1 byte | `config_store::setAudioVolume()` |
+| CRC-32 integridad | 4 bytes | `computeCrc32()` |
 
-**Exit criteria:**
-> - Steering encoder zero is preserved across power cycles (verified by skipping centering when already calibrated)
-> - Service mode enable/disable settings survive reboot
-
-### Qué se va a almacenar
-
-| Dato | Tamaño | Módulo afectado |
-|------|--------|----------------|
-| Steering encoder zero offset | 4 bytes (int32_t) | `motor_control.c` → `Steering_Init()` |
-| Steering centering done flag | 1 byte (bool) | `steering_centering.c` |
-| Pedal ADC min/max calibración | 4 bytes (2× uint16_t) | `sensor_manager.c` → `Pedal_Update()` |
-| Service mode enable bitmask | 4 bytes (uint32_t) | `service_mode.c` → `ServiceMode_Init()` |
-| CRC-32 de integridad | 4 bytes | Nuevo |
-| **Total** | **~17 bytes** | — |
-
-### Diseño propuesto (de FIRMWARE_MATURITY_ROADMAP.md §5 item 3.3)
-
-> Store calibration values (steering center offset, pedal min/max, enabled modules) in STM32 Flash user pages. Load on boot, save on service command. Add CRC-32 for data integrity.
-
-**Nota:** El STM32G474RE tiene 512 KB de Flash. Las últimas 2 páginas (2 KB cada una) se pueden reservar para datos de configuración sin afectar al firmware.
+**Protecciones implementadas:**
+- CRC-32 en cada escritura/lectura para detectar corrupción
+- Dirty flag + flush periódico cada 10 s para mitigar desgaste NVS (~100K ciclos)
+- Flush en shutdown para no perder cambios pendientes
+- Factory reset disponible desde menú de ingeniería
 
 ### Por qué NO se hace ahora
 
@@ -77,20 +86,14 @@ La persistencia es **Phase 4**. Primero hay que completar:
 
 ### Estado actual
 
-**NO IMPLEMENTADO** en ninguno de los dos MCU.
+✅ **IMPLEMENTADO** en la ESP32-S3 (`esp32/src/screens/engineering_screen.cpp`).
 
-### Qué tenía el repo original
-
-El repo original (`FULL-FIRMWARE-Coche-Marcos`) tenía un menú oculto completo en `hud/menu_hidden.cpp` (46 KB) con:
-- Código secreto de acceso: **8989**
-- Calibración de pedal (min/max ADC)
-- Calibración de encoder de dirección
-- Habilitación/deshabilitación de módulos
-- Factory restore
-- Visor de log de errores
-- Monitor de INA226 en tiempo real
-- Configuración de sensores
-- Configuración de potencia
+Funcionalidades implementadas:
+- Código secreto de acceso: **8989** (secuencia de taps en zona específica)
+- 5 submenús: fault viewer, module control, factory restore, telemetry, system info
+- Botón EXIT para volver a la pantalla normal
+- Habilitación/deshabilitación de módulos via CAN 0x110
+- Factory restore (CAN 0x110 action=0xFF + NVS factory reset)
 
 ### Cuándo se implementa
 
@@ -137,10 +140,14 @@ Basado en el diseño original y adaptado a la arquitectura actual (dual-MCU):
 
 ### Estado actual
 
-**NO IMPLEMENTADO** — No hay código de audio ni hardware de audio en el repositorio actual.
+✅ **IMPLEMENTADO** — `esp32/src/audio_manager.cpp` con driver DFPlayer Mini.
 
-`docs/PROJECT_MASTER_STATUS.md` §Audio dice textualmente:
-> NOT IMPLEMENTED — no audio hardware or software exists in the codebase.
+Funcionalidades implementadas:
+- Driver DFPlayer Mini (UART2, GPIO 43/44, 9600 baud)
+- Cola de reproducción con prioridades (LOW/MEDIUM/HIGH)
+- 6 sonidos: WELCOME, FAREWELL, OBSTACLE_WARN, ERROR_ALERT, BATTERY_LOW, GEAR_CHANGE
+- Audio de bienvenida/despedida en transiciones de encendido/apagado
+- Volumen persistido en NVS (`config_store::setAudioVolume()`)
 
 ### Qué había en el repo original
 
