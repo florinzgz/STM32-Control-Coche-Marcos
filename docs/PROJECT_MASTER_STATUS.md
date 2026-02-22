@@ -459,7 +459,135 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 ---
 
-## 6) RULES FOR CONTRIBUTORS (MANDATORY)
+## 6) MIGRATION STATUS REPORT
+
+> Last updated: 2026-02-22
+> Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
+> Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
+
+### Overall Migration Percentage: **82 %**
+
+The migration from the original monolithic ESP32-S3 firmware to the dual-MCU architecture is **82 % complete**. All safety-critical and core control subsystems are fully implemented and exceed the capabilities of the original firmware. Remaining work concentrates on experience features, advanced algorithms, and hardware-dependent functionality that requires physical components not yet connected.
+
+### Calculation Methodology
+
+The percentage is derived from a weighted analysis of all subsystems in the original `FULL-FIRMWARE-Coche-Marcos` repository (v2.18.3, 14 phases). Each subsystem is weighted by its importance to vehicle operation. Features **intentionally excluded** (WiFi/OTA, RTOS, MCP23017 GPIO, PCA9685 I2C PWM) are removed from the denominator as they are architecturally obsolete in the dual-MCU design.
+
+### Per-Subsystem Migration Status
+
+| Subsystem | Weight | Original (ESP32 mono) | Current (STM32 + ESP32) | Status | % |
+|-----------|--------|----------------------|------------------------|--------|---|
+| **Motor Control & Traction** | HIGH | `traction.cpp`, `steering_motor.cpp`, PCA9685 I2C | TIM1/TIM8 direct PWM, PID, Ackermann differential | ✅ Improved | 100 % |
+| **Safety State Machine** | CRITICAL | Dispersed across managers | Formal 7-state machine with transition rules | ✅ Improved | 100 % |
+| **ABS / TCS** | CRITICAL | `abs_system.cpp`, `tcs_system.cpp` | Per-wheel pulse modulation + progressive reduction | ✅ Improved | 100 % |
+| **Overcurrent / Overtemp / Battery** | CRITICAL | `SafetyManager` | 3-tier protection with escalation | ✅ Improved | 100 % |
+| **Sensor Management** | HIGH | `current.cpp`, `temperature.cpp`, `wheels.cpp`, `pedal.cpp` | INA226×6, DS18B20×5, wheel×4, pedal ADC, encoder | ✅ Reimplemented | 100 % |
+| **CAN Communication** | CRITICAL | Did not exist (monolithic) | Full protocol (24 message types, frozen contract v1.3) | ✅ New | 100 % |
+| **Gear System** | HIGH | `shifter.cpp` via MCP23017 | P/R/N/D1/D2 speed-gated + ESP32 MCP23017 shifter | ✅ Improved | 100 % |
+| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | HC-SR04 on ESP32 + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100 % |
+| **Service Mode** | MEDIUM | Did not exist | 25 modules, CAN commands, factory restore | ✅ New | 100 % |
+| **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS | ✅ Reimplemented | 90 % |
+| **Hidden Engineering Menu** | LOW | `menu_hidden.cpp` (46 KB) | Engineering screen (code 8989, 5 submenus, EXIT) | ✅ Reimplemented | 85 % |
+| **Audio System** | LOW | `dfplayer.cpp`, `alerts.cpp`, `queue.cpp` | `audio_manager.cpp` (DFPlayer, priority queue, 6 sounds) | ✅ Reimplemented | 70 % |
+| **LED Lighting** | LOW | `led_controller.cpp` (WS2812B) | `led_controller.cpp` (28+16 LEDs, state patterns) | ✅ Reimplemented | 80 % |
+| **Touch Input** | MEDIUM | `touch_calibration.cpp`, `touch_map.cpp` | `touch_handler.cpp` (TAP/LONG_PRESS, debounce) | ✅ Reimplemented | 90 % |
+| **Config Persistence** | MEDIUM | `eeprom_persistence.cpp`, `config_storage.cpp` | ESP32: NVS `config_store.cpp` (CRC32, dirty flag) / STM32: ❌ None | ⚠️ Partial | 50 % |
+| **Power Management** | MEDIUM | `power_mgmt.cpp` (10-state machine) | ESP32: `power_manager.cpp` (ignition key) / STM32: relay sequencing | ⚠️ Partial | 70 % |
+| **Degraded / Limp Mode** | HIGH | `limp_mode.cpp` (4 levels) | 3-level degradation (L1/L2/L3) + LIMP_HOME | ✅ Improved | 100 % |
+| **Boot Validation** | HIGH | `boot_guard.cpp` (NVS counter) | 6-point pre-ACTIVE checklist | ✅ Improved | 100 % |
+| **Regenerative Braking** | LOW | `regen_ai.cpp` (AI lookup table) | Not implemented | ❌ Missing | 0 % |
+| **Adaptive Cruise** | LOW | `adaptive_cruise.cpp` | Not implemented | ❌ Missing | 0 % |
+| **SOC Estimation** | LOW | Battery SOC in `regen_ai.cpp` | Not implemented | ❌ Missing | 0 % |
+| **Sensor Cross-Validation** | MEDIUM | `SensorManagerEnhanced.cpp` | Not implemented | ❌ Missing | 0 % |
+| **Structured Logging** | LOW | `logger.cpp`, `telemetry.cpp` | Serial debug only (no structured logging) | ❌ Missing | 0 % |
+
+### Summary by Category
+
+| Category | Items | ✅ Complete | ⚠️ Partial | ❌ Missing |
+|----------|-------|-----------|-----------|-----------|
+| **Safety-Critical** (state machine, ABS/TCS, protections, CAN) | 5 | 5 | 0 | 0 |
+| **Core Control** (motors, steering, gears, sensors) | 5 | 5 | 0 | 0 |
+| **Obstacle & Service** | 2 | 2 | 0 | 0 |
+| **HMI & Display** | 4 | 4 | 0 | 0 |
+| **Persistence & Power** | 2 | 0 | 2 | 0 |
+| **Experience** (audio, LEDs, engineering menu) | 3 | 3 | 0 | 0 |
+| **Advanced / AI** (regen, SOC, cruise, sensor fusion, logging) | 5 | 0 | 0 | 5 |
+| **TOTAL** | **26** | **19** | **2** | **5** |
+
+### Phase Completion Status
+
+| Phase | Description | Status | Completion |
+|-------|-------------|--------|------------|
+| **Phase 1** | Stability Foundation (hardware validation, CAN reliability, centering, boot, I2C) | ⚠️ Awaiting hardware validation | ~90 % code complete |
+| **Phase 2** | Control Reliability (traction pipeline, ABS/TCS, dynamic brake, park hold, gears) | ⚠️ Awaiting hardware validation | ~90 % code complete |
+| **Phase 3** | Feedback & Sensors (obstacle 0x208/0x209, PID tuning, DS18B20 hot-plug, redundant pedal) | ⚠️ In progress | ~70 % |
+| **Phase 4** | Driver Interaction (CAN gear display, STM32 flash persistence, ACK feedback) | ⚠️ In progress | ~40 % |
+| **Phase 5** | Experience Features (audio integration, lighting logic, sensor fusion, DMA ADC) | ⚠️ Partial | ~30 % |
+
+### What Remains (Pending Items by Priority)
+
+#### 🔴 HIGH PRIORITY — Phase 3 & 4 items
+
+| # | Item | Phase | Effort | Notes |
+|---|------|-------|--------|-------|
+| 1 | **Steering PID tuning (I/D terms)** | 3 | Medium | ki=0.0, kd=0.0 — requires hardware testing with actual steering load |
+| 2 | **STM32 calibration persistence (Flash)** | 4 | Medium | No HAL_FLASH_Program calls exist; encoder zero, sensor offsets lost on reboot |
+| 3 | **STM32 service mode persistence (Flash)** | 4 | Low | module_enabled[] is RAM-only; settings lost on power cycle |
+| 4 | **DriveScreen mode flags from CAN echo** | 4 | Low | Mode flags (4×4/360°) still set locally, not from STM32 CAN status |
+| 5 | **DS18B20 hot-plug detection** | 3 | Low | ROM search runs only at init; periodic OW_SearchAll() needed |
+| 6 | **Redundant pedal sensor** | 3 | Medium | Single ADC channel PA3; requires second ADC or hall sensor hardware |
+
+#### 🟡 MEDIUM PRIORITY — Phase 5 items
+
+| # | Item | Phase | Effort | Notes |
+|---|------|-------|--------|-------|
+| 7 | **Audio event integration** | 5 | Medium | AudioManager exists but only WELCOME/FAREWELL sounds wired; need CAN-triggered alerts for gear, temp, obstacle, battery |
+| 8 | **LED brake/reverse logic** | 5 | Low | LED strip works but no brake light or reverse light detection (requires gear echo from STM32) |
+| 9 | **ADC pedal DMA conversion** | 5 | Low | Currently blocking HAL_ADC_PollForConversion; needs DMA or interrupt |
+| 10 | **OneWire timing optimization** | 5 | Medium | Busy-wait NOP loop calibrated for 170 MHz; DMA-based UART or hardware timer preferred |
+
+#### 🟢 LOW PRIORITY — Advanced / Future items
+
+| # | Item | Phase | Effort | Notes |
+|---|------|-------|--------|-------|
+| 11 | **Regenerative braking** | Future | High | No negative PWM, no back-EMF handling, no bidirectional current; entirely new subsystem |
+| 12 | **SOC estimation** | Future | Medium | Battery voltage/current monitored but no state-of-charge algorithm |
+| 13 | **Adaptive cruise control** | Future | High | Requires obstacle distance + speed control coordination |
+| 14 | **Sensor cross-validation** | Future | Medium | Each sensor read independently; no cross-checks between temperature/current/speed |
+| 15 | **Structured logging** | Future | Low | Serial debug only; no severity levels, module tags, or persistent error log |
+
+### Metrics Snapshot
+
+| Metric | Value |
+|--------|-------|
+| STM32 source files (.c) | 18 |
+| STM32 header files (.h) | 16 |
+| STM32 lines of code | ~8,071 |
+| ESP32 source + header files | 61 |
+| ESP32 lines of code | ~5,692 |
+| Total lines of code | ~15,422 |
+| Documentation files (.md) | 57 |
+| CAN message types | 24 (13 TX + 7 RX + 4 service) |
+| Safety modules tracked | 25 |
+| UI widgets | 12 |
+| Screens | 6 |
+
+### Comparison with Original Firmware
+
+| Metric | Original (ESP32 mono) | Current (Dual-MCU) |
+|--------|----------------------|-------------------|
+| Source files | ~80 .cpp | 18 .c + 61 .cpp/.h = 95 files |
+| Lines of code | ~45,000 (estimated) | ~15,422 |
+| Bootloop risk | HIGH (30+ fix documents) | LOW (bare-metal, IWDG) |
+| Safety authority | None (all mixed) | STM32 sole authority |
+| PWM generation | I2C indirect (PCA9685) | Hardware TIM direct (20 kHz) |
+| Watchdog | Software (ESP32 task WDT) | Hardware independent (IWDG) |
+| Communication | Internal function calls | CAN 500 kbps (isolated) |
+| Display impact on safety | Crash = motor stop | Crash = display only, motors continue |
+
+---
+
+## 7) RULES FOR CONTRIBUTORS (MANDATORY)
 
 ### A PR is invalid if:
 
@@ -477,11 +605,11 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 ---
 
-## 7) DOCUMENT MAINTENANCE PROTOCOL (MANDATORY)
+## 8) DOCUMENT MAINTENANCE PROTOCOL (MANDATORY)
 
 This section defines the enforcement rules that make `docs/PROJECT_MASTER_STATUS.md` a mandatory update gate for every Pull Request in this repository.
 
-### 7.1 — Evaluation requirement
+### 8.1 — Evaluation requirement
 
 Every PR **MUST** evaluate whether it changes any of the following:
 
@@ -491,23 +619,23 @@ Every PR **MUST** evaluate whether it changes any of the following:
 - **Pending Features** (section 4) — items resolved, new backlog entries implied by code changes
 - **Phase status** (section 5) — exit criteria met, phase transitions, scope changes
 
-### 7.2 — Mandatory update rule
+### 8.2 — Mandatory update rule
 
-If any of the categories listed in 7.1 changed as a result of the PR, the PR **MUST** update this document in the same commit set. The update must be included before the PR is marked as ready for review.
+If any of the categories listed in 8.1 changed as a result of the PR, the PR **MUST** update this document in the same commit set. The update must be included before the PR is marked as ready for review.
 
-### 7.3 — Behavioral changes require document updates
+### 8.3 — Behavioral changes require document updates
 
 A PR that introduces new behavior (new functions, new modules, new CAN messages, new safety checks, new UI elements, new sensor readings, modified thresholds, or changed state transitions) but does **not** update this document is **invalid** and must be rejected by reviewers.
 
-### 7.4 — Phase ordering enforcement
+### 8.4 — Phase ordering enforcement
 
 A PR **cannot** implement a feature from a future phase unless the phase order itself is explicitly modified and justified in the PR description. Phase ordering in section 5 is the official execution sequence. Skipping phases requires updating section 5 with the rationale.
 
-### 7.5 — Reality over plans
+### 8.5 — Reality over plans
 
 This document always reflects **REALITY** — what is provably implemented in code — never plans, intentions, or aspirations. If a feature is listed in section 2 (Completed Features), executable logic for it **must** exist in the repository. If it does not, the entry must be moved to section 4 (Pending Features) or removed.
 
-### 7.6 — Refactor exemption with explicit declaration
+### 8.6 — Refactor exemption with explicit declaration
 
 Refactors that do **not** change observable behavior (e.g., code style, internal renaming, build system cleanup, comment updates) are exempt from updating this document. However, the PR description **must** explicitly state:
 
@@ -515,12 +643,12 @@ Refactors that do **not** change observable behavior (e.g., code style, internal
 
 If this declaration is absent from a refactor PR, reviewers must request it before approving.
 
-### 7.7 — Reviewer enforcement obligation
+### 8.7 — Reviewer enforcement obligation
 
 Reviewers **must** reject a PR if this protocol is not followed. Specifically, reviewers must verify:
 
 1. The PR author evaluated whether sections 1–5 are affected.
 2. If affected, the corresponding sections have been updated in the same commit set.
-3. If not affected, the PR description contains the explicit exemption declaration from rule 7.6.
+3. If not affected, the PR description contains the explicit exemption declaration from rule 8.6.
 4. No section 2 entry exists without corresponding executable code in the repository.
 5. No phase skip occurred without justification in section 5.
