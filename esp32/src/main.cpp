@@ -55,6 +55,7 @@ static constexpr unsigned long LED_TOUCH_DEBOUNCE_MS = 300;
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
 static unsigned long lastGearSendMs = 0;     // debounce for gear CAN sends
 static constexpr unsigned long GEAR_SEND_DEBOUNCE_MS = 100;
+static constexpr uint8_t GEAR_REVERSE = 1;   // shifter raw value for Reverse
 
 // ---- Mode state tracking ----
 static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, bit 1=tank)
@@ -69,6 +70,12 @@ static bool     batteryLowPlayed  = false;     // one-shot for battery warning
 static constexpr uint16_t BATTERY_LOW_THRESHOLD_RAW = 2000; // 20.00 V in 0.01 V units
 static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beeps
 static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
+
+// ---- LED brake/reverse detection thresholds ----
+// Speed sum threshold: 4 wheels × 0.5 km/h × 10 (0.1 km/h units) = 20
+static constexpr uint32_t LED_SPEED_SUM_THRESHOLD = 20;
+// Traction average below which we consider braking (0–100% scale)
+static constexpr uint8_t LED_TRACTION_BRAKING_THRESHOLD = 5;
 
 // ---- NVS flush interval ----
 static unsigned long lastNvsFlushMs = 0;
@@ -415,8 +422,8 @@ void loop() {
     {
         auto st = vehicleData.heartbeat().systemState;
 
-        // Reverse detection from physical shifter (gear 1 = Reverse)
-        bool reverse = (shifter::getGearRaw() == 1);
+        // Reverse detection from physical shifter
+        bool reverse = (shifter::getGearRaw() == GEAR_REVERSE);
 
         // Braking detection: traction average near zero while speed > 0
         // indicates dynamic braking or throttle release at speed.
@@ -432,9 +439,7 @@ void loop() {
             for (uint8_t i = 0; i < 4; ++i) {
                 spSum += vehicleData.speed().raw[i];
             }
-            // speed > 0.5 km/h (raw in 0.1 km/h units, so > 5)
-            // and traction average ≤ 5% → braking
-            braking = (spSum > 20 && trAvg <= 5);
+            braking = (spSum > LED_SPEED_SUM_THRESHOLD && trAvg <= LED_TRACTION_BRAKING_THRESHOLD);
         }
 
         bool ledEnabled = vehicleData.lights().relayOn;

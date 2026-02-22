@@ -475,6 +475,9 @@ static float temperatures[NUM_DS18B20] = {0};
 static uint8_t  ds18b20_rom[NUM_DS18B20][8];
 static uint8_t  ds18b20_count = 0;
 
+/* Hot-plug rescan interval (ms) — re-enumerate OneWire bus periodically */
+#define OW_RESCAN_INTERVAL_MS  10000   /* 10 seconds between rescans */
+
 /*
  * OneWire bit-bang helpers (simplified – production code should use a
  * dedicated OneWire library or DMA-based UART trick).
@@ -755,7 +758,6 @@ float Temperature_Get(uint8_t index)
  * Periodically re-enumerates the OneWire bus to detect sensors
  * added or removed at runtime.  Called from the 1000 ms tier
  * in main.c; actual rescan executes once every OW_RESCAN_INTERVAL_MS. */
-#define OW_RESCAN_INTERVAL_MS  10000   /* 10 seconds between rescans */
 
 static uint32_t ow_rescan_tick = 0;
 
