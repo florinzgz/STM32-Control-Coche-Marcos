@@ -30,6 +30,7 @@ struct HeartbeatData {
     can::SystemState  systemState  = can::SystemState::BOOT;
     uint8_t           faultFlags   = 0;
     uint8_t           errorCode    = 0;
+    uint8_t           statusFlags  = 0;   // bit 0: startup inhibit, bit 1: 4x4, bit 2: tank, bits 3-5: DS18B20 count
     unsigned long     timestampMs  = 0;
 };
 

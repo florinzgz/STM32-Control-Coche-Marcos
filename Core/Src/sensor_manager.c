@@ -669,6 +669,7 @@ static void OW_SearchAll(void)
     uint8_t rom[8] = {0};
     int last_discrepancy = 0;
 
+    uint8_t prev_count = ds18b20_count;
     ds18b20_count = 0;
 
     do {
@@ -688,6 +689,12 @@ static void OW_SearchAll(void)
 
         last_discrepancy = next;
     } while (last_discrepancy != 0);
+
+    /* Hot-plug removal: clear stale temperature data for sensors
+     * that are no longer present after re-enumeration.              */
+    for (uint8_t i = ds18b20_count; i < prev_count && i < NUM_DS18B20; i++) {
+        temperatures[i] = 0.0f;
+    }
 }
 
 /**
@@ -752,6 +759,11 @@ float Temperature_Get(uint8_t index)
 {
     if (index >= NUM_DS18B20) return 0.0f;
     return temperatures[index];
+}
+
+uint8_t Temperature_GetCount(void)
+{
+    return ds18b20_count;
 }
 
 /* ---- DS18B20 hot-plug detection ----

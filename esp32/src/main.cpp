@@ -246,6 +246,9 @@ void setup() {
         currentModeFlags = cfg.driveMode;
         ledLocalState    = cfg.ledEnabled;
 
+        // Apply saved audio volume to DFPlayer
+        audio::setVolume(cfg.audioVolume);
+
         // Populate vehicleData with initial mode flags
         vehicle::ModeData md;
         md.modeFlags   = currentModeFlags;
@@ -267,6 +270,26 @@ void loop() {
 
     // Check for pending ACK (non-blocking)
     ackCheck(vehicleData);
+
+    // ---- Sync mode flags from STM32 heartbeat echo ----
+    // The STM32 echoes the active mode flags in the heartbeat status_flags
+    // (bits 1-2).  This allows the ESP32 to confirm the STM32 actually
+    // applied the requested mode, even if the ACK was lost.
+    // Guard: only sync after first valid heartbeat has been received
+    // (timestampMs is 0 until the first CAN heartbeat is decoded).
+    {
+        const auto& hb = vehicleData.heartbeat();
+        if (hb.timestampMs > 0) {
+            uint8_t confirmedFlags = (hb.statusFlags >> 1) & 0x03;
+            if (confirmedFlags != currentModeFlags) {
+                currentModeFlags = confirmedFlags;
+                vehicle::ModeData md;
+                md.modeFlags   = currentModeFlags;
+                md.timestampMs = millis();
+                vehicleData.setMode(md);
+            }
+        }
+    }
 
     // Update obstacle sensor and transmit CAN 0x208
     {
