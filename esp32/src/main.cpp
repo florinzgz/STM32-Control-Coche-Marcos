@@ -257,10 +257,8 @@ void setup() {
 
     // Apply touch calibration (XPT2046) — values from User_Setup.h
     // Run TFT_eSPI/examples/Generic/Touch_calibrate to get your own values.
-    {
-        uint16_t calData[5] = TOUCH_CALIBRATION;
-        tft.setTouch(calData);
-    }
+    uint16_t calData[5] = TOUCH_CALIBRATION;
+    tft.setTouch(calData);
 
     tft.fillScreen(0x2104);  // Dark gray background
     tft.setTextColor(0xFFFF, 0x2104);
