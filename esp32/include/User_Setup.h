@@ -5,7 +5,14 @@
 // encuentre antes que el User_Setup.h interno de la libreria TFT_eSPI.
 //
 // Pines definidos segun platformio.ini (ESP32-S3-DevKitC-1, SPI estandar)
+//
+// NOTE: platformio.ini uses -include $PROJECT_DIR/include/User_Setup.h
+//       to force-include this file before any translation unit, ensuring
+//       TFT_eSPI (and all libraries) pick up these defines.
 // =============================================================================
+
+#ifndef USER_SETUP_H
+#define USER_SETUP_H
 
 // USER_SETUP_LOADED debe ser el PRIMER #define del archivo.
 // TFT_eSPI lo comprueba para confirmar que el setup ha sido cargado.
@@ -55,3 +62,5 @@
 // Valores por defecto. Ejecutar el ejemplo TFT_eSPI/Touch_calibrate
 // para obtener valores específicos de tu pantalla y sustituirlos aquí.
 #define TOUCH_CALIBRATION  { 256, 3643, 182, 3672, 1 }
+
+#endif // USER_SETUP_H
