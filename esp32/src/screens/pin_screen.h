@@ -45,10 +45,11 @@ public:
     static constexpr uint8_t PIN_LEN       = 4;
     static constexpr uint8_t CORRECT_PIN[PIN_LEN] = {8, 9, 8, 9};
 
-private:
-    // Special key values stored in the key map
+    // Special key values stored in the key map (public for file-scope KEY_MAP)
     static constexpr uint8_t KEY_DELETE = 10;
     static constexpr uint8_t KEY_CANCEL = 11;
+
+private:
 
     uint8_t  digits_[PIN_LEN] = {};
     uint8_t  len_         = 0;

@@ -49,8 +49,6 @@ static unsigned long lastRtMonMs      = 0;
 
 // ---- LED toggle touch tracking ----
 static bool     ledLocalState     = false;   // local desired state (sent to STM32)
-static unsigned long lastLedTouchMs = 0;     // debounce for touch
-static constexpr unsigned long LED_TOUCH_DEBOUNCE_MS = 300;
 
 // ---- Shifter gear tracking ----
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
