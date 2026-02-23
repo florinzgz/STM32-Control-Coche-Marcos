@@ -395,48 +395,58 @@ void loop() {
                       static_cast<int16_t>(ty));
 
         touch::TouchEvent evt = touch::getEvent();
+
+        if (evt.type == touch::EventType::LONG_PRESS) {
+            // Long press on battery icon → open PIN entry screen
+            screenManager.onLongPress(evt.x, evt.y);
+        }
+
         if (evt.type == touch::EventType::TAP) {
-            // Forward to screen manager for secret code / engineering screen
+            // Forward to screen manager (PIN / engineering dispatch)
             screenManager.onTouch(evt.x, evt.y);
 
-            // LED toggle
-            if (ui::LedToggle::hitTest(evt.x, evt.y)) {
-                ledLocalState = !ledLocalState;
-                sendLedCommand(ledLocalState);
-                config_store::setLedEnabled(ledLocalState);
-                audio::play(ledLocalState ? audio::Sound::LIGHTS_ON
-                                          : audio::Sound::LIGHTS_OFF,
-                            audio::Priority::LOW);
-                Serial.printf("[LED] Toggle → %s\n",
-                              ledLocalState ? "ON" : "OFF");
-            }
+            // LED toggle and mode icons are suppressed while PIN/engineering
+            // overlay is active to avoid unintended commands
+            if (!screenManager.isBlockingInput()) {
+                // LED toggle
+                if (ui::LedToggle::hitTest(evt.x, evt.y)) {
+                    ledLocalState = !ledLocalState;
+                    sendLedCommand(ledLocalState);
+                    config_store::setLedEnabled(ledLocalState);
+                    audio::play(ledLocalState ? audio::Sound::LIGHTS_ON
+                                              : audio::Sound::LIGHTS_OFF,
+                                audio::Priority::LOW);
+                    Serial.printf("[LED] Toggle → %s\n",
+                                  ledLocalState ? "ON" : "OFF");
+                }
 
-            // Mode icons (4x4 / 4x2 / 360°)
-            uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
-            if (modeHit > 0) {
-                switch (modeHit) {
-                    case 1:  // 4x4 → set 4x4 flag, clear tank
-                        currentModeFlags = can::MODE_FLAG_4X4;
-                        audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LOW);
-                        break;
-                    case 2:  // 4x2 → clear both flags
-                        currentModeFlags = 0;
-                        audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LOW);
-                        break;
-                    case 3:  // 360° → set tank turn flag
-                        currentModeFlags = can::MODE_FLAG_TANK_TURN;
-                        audio::play(audio::Sound::BEEP, audio::Priority::LOW);
-                        break;
+                // Mode icons (4x4 / 4x2 / 360°)
+                uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
+                if (modeHit > 0) {
+                    switch (modeHit) {
+                        case 1:  // 4x4 → set 4x4 flag, clear tank
+                            currentModeFlags = can::MODE_FLAG_4X4;
+                            audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LOW);
+                            break;
+                        case 2:  // 4x2 → clear both flags
+                            currentModeFlags = 0;
+                            audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LOW);
+                            break;
+                        case 3:  // 360° → set tank turn flag
+                            currentModeFlags = can::MODE_FLAG_TANK_TURN;
+                            audio::play(audio::Sound::BEEP, audio::Priority::LOW);
+                            break;
+                    }
+                    sendModeCommand(currentModeFlags);
+                    config_store::setDriveMode(currentModeFlags);
+                    {
+                        vehicle::ModeData md;
+                        md.modeFlags   = currentModeFlags;
+                        md.timestampMs = millis();
+                        vehicleData.setMode(md);
+                    }
+                    Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
                 }
-                sendModeCommand(currentModeFlags);
-                config_store::setDriveMode(currentModeFlags);
-                {
-                    vehicle::ModeData md;
-                    md.modeFlags   = currentModeFlags;
-                    md.timestampMs = millis();
-                    vehicleData.setMode(md);
-                }
-                Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
             }
         }
     }
