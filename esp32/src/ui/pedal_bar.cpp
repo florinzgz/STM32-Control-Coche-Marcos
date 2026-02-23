@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "pedal_bar.h"
+#include "render_trace.h"
 #include <cstdio>
 
 namespace ui {
@@ -16,10 +17,12 @@ void PedalBar::drawStatic(TFT_eSPI& tft) {
     tft.setTextSize(1);
     tft.setTextDatum(TL_DATUM);
     tft.drawString("PEDAL", PEDAL_BAR_X, PEDAL_Y);
+    RTRACE_TEXT(PEDAL_BAR_X, PEDAL_Y, "PEDAL", COL_WHITE, COL_BG, 1, TL_DATUM);
 
     // Bar outline
     int16_t barY = PEDAL_Y + 12;
     tft.drawRect(PEDAL_BAR_X, barY, PEDAL_BAR_W, PEDAL_BAR_H, COL_WHITE);
+    RTRACE_DRAW_RECT(PEDAL_BAR_X, barY, PEDAL_BAR_W, PEDAL_BAR_H, COL_WHITE);
 }
 
 // -------------------------------------------------------------------------
@@ -50,11 +53,15 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     // Clear entire bar interior
     tft.fillRect(PEDAL_BAR_X + 2, barY + 2,
                  PEDAL_BAR_W - 4, PEDAL_BAR_H - 4, COL_BG);
+    RTRACE_FILL_RECT(PEDAL_BAR_X + 2, barY + 2,
+                     PEDAL_BAR_W - 4, PEDAL_BAR_H - 4, COL_BG);
 
     // Draw filled portion
     if (fillW > 0) {
         tft.fillRect(PEDAL_BAR_X + 2, barY + 2,
                      fillW, PEDAL_BAR_H - 4, fillCol);
+        RTRACE_FILL_RECT(PEDAL_BAR_X + 2, barY + 2,
+                         fillW, PEDAL_BAR_H - 4, fillCol);
     }
 
     // Percentage text (right of bar)
@@ -65,7 +72,10 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     tft.setTextDatum(ML_DATUM);
     // Clear old text area
     tft.fillRect(PEDAL_TEXT_X, barY, 70, PEDAL_BAR_H, COL_BG);
+    RTRACE_FILL_RECT(PEDAL_TEXT_X, barY, 70, PEDAL_BAR_H, COL_BG);
     tft.drawString(buf, PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2);
+    RTRACE_TEXT(PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2, buf,
+                COL_WHITE, COL_BG, 2, ML_DATUM);
 
     tft.setTextDatum(TL_DATUM);  // Reset
     tft.setTextSize(1);

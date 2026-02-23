@@ -9,6 +9,7 @@
 
 #include "obstacle_indicator.h"
 #include "../ui/ui_common.h"
+#include "../ui/render_trace.h"
 
 namespace hmi {
 
@@ -20,6 +21,7 @@ void ObstacleIndicator::draw(TFT_eSPI& tft,
     // Position below CAN status line (boot screen layout)
     int16_t statusY = ui::SCREEN_H / 2 + 90;
     tft.fillRect(0, statusY - 10, ui::SCREEN_W, 20, ui::COL_BG);
+    RTRACE_FILL_RECT(0, statusY - 10, ui::SCREEN_W, 20, ui::COL_BG);
 
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
@@ -28,18 +30,24 @@ void ObstacleIndicator::draw(TFT_eSPI& tft,
         case obstacle_sensor::SensorStatus::WAITING:
             tft.setTextColor(ui::COL_YELLOW, ui::COL_BG);
             tft.drawString("SENSOR: WAITING", ui::SCREEN_W / 2, statusY);
+            RTRACE_TEXT(ui::SCREEN_W / 2, statusY, "SENSOR: WAITING",
+                        ui::COL_YELLOW, ui::COL_BG, 1, MC_DATUM);
             break;
         case obstacle_sensor::SensorStatus::INVALID:
             tft.setTextColor(ui::COL_RED, ui::COL_BG);
             tft.drawString("SENSOR: INVALID", ui::SCREEN_W / 2, statusY);
+            RTRACE_TEXT(ui::SCREEN_W / 2, statusY, "SENSOR: INVALID",
+                        ui::COL_RED, ui::COL_BG, 1, MC_DATUM);
             break;
         case obstacle_sensor::SensorStatus::VALID:
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString("SENSOR: VALID", ui::SCREEN_W / 2, statusY);
+            RTRACE_TEXT(ui::SCREEN_W / 2, statusY, "SENSOR: VALID",
+                        ui::COL_GREEN, ui::COL_BG, 1, MC_DATUM);
             break;
     }
 
     tft.setTextDatum(TL_DATUM);
 }
 
-} // namespace hmi
+}  // namespace hmi

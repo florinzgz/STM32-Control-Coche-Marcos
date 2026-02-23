@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "gear_display.h"
+#include "render_trace.h"
 
 namespace ui {
 
@@ -21,10 +22,15 @@ void GearDisplay::drawStatic(TFT_eSPI& tft) {
 
         tft.fillRect(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
                      GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
+        RTRACE_FILL_RECT(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
+                         GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
         tft.drawRect(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
                      GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
+        RTRACE_DRAW_RECT(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
+                         GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
         tft.setTextColor(COL_GRAY, COL_BG);
         tft.drawString(GEAR_LABELS[i], x, y);
+        RTRACE_TEXT(x, y, GEAR_LABELS[i], COL_GRAY, COL_BG, 2, MC_DATUM);
     }
 
     tft.setTextDatum(TL_DATUM);
@@ -48,9 +54,12 @@ void GearDisplay::draw(TFT_eSPI& tft, Gear current, Gear previous) {
         int16_t cy = GEAR_Y + GEAR_LABEL_H / 2;
 
         tft.fillRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
+        RTRACE_FILL_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
         tft.drawRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
+        RTRACE_DRAW_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
         tft.setTextColor(COL_GRAY, COL_BG);
         tft.drawString(GEAR_LABELS[prevIdx], cx, cy);
+        RTRACE_TEXT(cx, cy, GEAR_LABELS[prevIdx], COL_GRAY, COL_BG, 2, MC_DATUM);
     }
 
     // Highlight current gear
@@ -61,9 +70,12 @@ void GearDisplay::draw(TFT_eSPI& tft, Gear current, Gear previous) {
         int16_t cy = GEAR_Y + GEAR_LABEL_H / 2;
 
         tft.fillRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GREEN);
+        RTRACE_FILL_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GREEN);
         tft.drawRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_WHITE);
+        RTRACE_DRAW_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_WHITE);
         tft.setTextColor(COL_BLACK, COL_GREEN);
         tft.drawString(GEAR_LABELS[curIdx], cx, cy);
+        RTRACE_TEXT(cx, cy, GEAR_LABELS[curIdx], COL_BLACK, COL_GREEN, 2, MC_DATUM);
     }
 
     tft.setTextDatum(TL_DATUM);

@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "obstacle_sensor.h"
+#include "render_trace.h"
 #include <cstdio>
 
 namespace ui {
@@ -15,11 +16,14 @@ void ObstacleSensor::drawStatic(TFT_eSPI& tft) {
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
     tft.drawString("SENSOR FRONTAL", SCREEN_W / 2, SENSOR_Y + 2);
+    RTRACE_TEXT(SCREEN_W / 2, SENSOR_Y + 2, "SENSOR FRONTAL",
+                COL_WHITE, COL_BG, 1, TC_DATUM);
     tft.setTextDatum(TL_DATUM);
 
     // Proximity bar outline — centered horizontally
     int16_t barY = SENSOR_Y + 28;
     tft.drawRect(SENSOR_BAR_X, barY, SENSOR_BAR_W, SENSOR_BAR_H, COL_GRAY);
+    RTRACE_DRAW_RECT(SENSOR_BAR_X, barY, SENSOR_BAR_W, SENSOR_BAR_H, COL_GRAY);
 }
 
 // -------------------------------------------------------------------------
@@ -42,10 +46,12 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
     // Clear text area and redraw — centered horizontally
     int16_t textY = SENSOR_Y + 14;
     tft.fillRect(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
+    RTRACE_FILL_RECT(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
     tft.drawString(buf, SCREEN_W / 2, textY);
+    RTRACE_TEXT(SCREEN_W / 2, textY, buf, COL_WHITE, COL_BG, 1, TC_DATUM);
     tft.setTextDatum(TL_DATUM);
 
     // Proximity bar fill
@@ -54,6 +60,8 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
     // Clear bar interior
     tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
                  SENSOR_BAR_W - 4, SENSOR_BAR_H - 4, COL_BG);
+    RTRACE_FILL_RECT(SENSOR_BAR_X + 2, barY + 2,
+                     SENSOR_BAR_W - 4, SENSOR_BAR_H - 4, COL_BG);
 
     // Only draw fill when sensor has a valid reading
     if (distanceCm > 0) {
@@ -67,6 +75,8 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
         if (fillW > 0) {
             tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
                          fillW, SENSOR_BAR_H - 4, col);
+            RTRACE_FILL_RECT(SENSOR_BAR_X + 2, barY + 2,
+                             fillW, SENSOR_BAR_H - 4, col);
         }
     }
 }

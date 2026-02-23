@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "mode_icons.h"
+#include "render_trace.h"
 
 namespace ui {
 
@@ -62,12 +63,16 @@ void ModeIcons::drawIcon(TFT_eSPI& tft, int16_t x, const char* label,
     uint16_t bordCol = active ? COL_WHITE : COL_GRAY;
 
     tft.fillRect(x, ICON_Y, ICON_W, ICON_H, bgCol);
+    RTRACE_FILL_RECT(x, ICON_Y, ICON_W, ICON_H, bgCol);
     tft.drawRect(x, ICON_Y, ICON_W, ICON_H, bordCol);
+    RTRACE_DRAW_RECT(x, ICON_Y, ICON_W, ICON_H, bordCol);
 
     tft.setTextColor(txtCol, bgCol);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(label, x + ICON_W / 2, ICON_Y + ICON_H / 2);
+    RTRACE_TEXT(x + ICON_W / 2, ICON_Y + ICON_H / 2, label,
+                txtCol, bgCol, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 

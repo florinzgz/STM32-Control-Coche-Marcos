@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "car_renderer.h"
+#include "render_trace.h"
 #include <cstdio>
 #include <cmath>
 
@@ -14,34 +15,51 @@ namespace ui {
 void CarRenderer::drawStatic(TFT_eSPI& tft) {
     // Car body rectangle
     tft.drawRect(CAR_BODY_X, CAR_BODY_Y, CAR_BODY_W, CAR_BODY_H, COL_WHITE);
+    RTRACE_DRAW_RECT(CAR_BODY_X, CAR_BODY_Y, CAR_BODY_W, CAR_BODY_H, COL_WHITE);
     tft.drawRect(CAR_BODY_X + 1, CAR_BODY_Y + 1,
                  CAR_BODY_W - 2, CAR_BODY_H - 2, COL_WHITE);
+    RTRACE_DRAW_RECT(CAR_BODY_X + 1, CAR_BODY_Y + 1,
+                     CAR_BODY_W - 2, CAR_BODY_H - 2, COL_WHITE);
 
     // Windshield (top of car body)
     int16_t wsY = CAR_BODY_Y + 15;
     tft.drawLine(CAR_BODY_X + 10, wsY,
                  CAR_BODY_X + CAR_BODY_W - 10, wsY, COL_GRAY);
+    RTRACE_LINE(CAR_BODY_X + 10, wsY,
+                CAR_BODY_X + CAR_BODY_W - 10, wsY, COL_GRAY);
     tft.drawLine(CAR_BODY_X + 10, wsY + 1,
                  CAR_BODY_X + CAR_BODY_W - 10, wsY + 1, COL_GRAY);
+    RTRACE_LINE(CAR_BODY_X + 10, wsY + 1,
+                CAR_BODY_X + CAR_BODY_W - 10, wsY + 1, COL_GRAY);
 
     // Rear window (bottom of car body)
     int16_t rwY = CAR_BODY_Y + CAR_BODY_H - 18;
     tft.drawLine(CAR_BODY_X + 10, rwY,
                  CAR_BODY_X + CAR_BODY_W - 10, rwY, COL_GRAY);
+    RTRACE_LINE(CAR_BODY_X + 10, rwY,
+                CAR_BODY_X + CAR_BODY_W - 10, rwY, COL_GRAY);
     tft.drawLine(CAR_BODY_X + 10, rwY + 1,
                  CAR_BODY_X + CAR_BODY_W - 10, rwY + 1, COL_GRAY);
+    RTRACE_LINE(CAR_BODY_X + 10, rwY + 1,
+                CAR_BODY_X + CAR_BODY_W - 10, rwY + 1, COL_GRAY);
 
     // Axle lines connecting wheels
     // Front axle
     tft.drawLine(WHL_FL_X + WHEEL_W, WHL_FL_Y + WHEEL_H / 2,
                  WHL_FR_X, WHL_FR_Y + WHEEL_H / 2, COL_DARK_GRAY);
+    RTRACE_LINE(WHL_FL_X + WHEEL_W, WHL_FL_Y + WHEEL_H / 2,
+                WHL_FR_X, WHL_FR_Y + WHEEL_H / 2, COL_DARK_GRAY);
     // Rear axle
     tft.drawLine(WHL_RL_X + WHEEL_W, WHL_RL_Y + WHEEL_H / 2,
                  WHL_RR_X, WHL_RR_Y + WHEEL_H / 2, COL_DARK_GRAY);
+    RTRACE_LINE(WHL_RL_X + WHEEL_W, WHL_RL_Y + WHEEL_H / 2,
+                WHL_RR_X, WHL_RR_Y + WHEEL_H / 2, COL_DARK_GRAY);
 
     // Steering circle outline
     tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
+    RTRACE_CIRCLE(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
     tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS + 1, COL_GRAY);
+    RTRACE_CIRCLE(STEER_CX, STEER_CY, STEER_RADIUS + 1, COL_GRAY);
 }
 
 // -------------------------------------------------------------------------
@@ -73,12 +91,15 @@ void CarRenderer::drawWheel(TFT_eSPI& tft,
 
     // Clear wheel area
     tft.fillRect(x, y, WHEEL_W, WHEEL_H, COL_BG);
+    RTRACE_FILL_RECT(x, y, WHEEL_W, WHEEL_H, COL_BG);
 
     // Fill with torque color (inner area)
     tft.fillRect(x + 2, y + 2, WHEEL_W - 4, WHEEL_H - 4, fillCol);
+    RTRACE_FILL_RECT(x + 2, y + 2, WHEEL_W - 4, WHEEL_H - 4, fillCol);
 
     // Draw outline
     tft.drawRect(x, y, WHEEL_W, WHEEL_H, COL_WHITE);
+    RTRACE_DRAW_RECT(x, y, WHEEL_W, WHEEL_H, COL_WHITE);
 
     // Torque percentage text (centered in wheel)
     char buf[FMT_BUF_SMALL];
@@ -87,10 +108,14 @@ void CarRenderer::drawWheel(TFT_eSPI& tft,
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(buf, x + WHEEL_W / 2, y + WHEEL_H / 2 - 8);
+    RTRACE_TEXT(x + WHEEL_W / 2, y + WHEEL_H / 2 - 8, buf,
+                COL_BLACK, fillCol, 1, MC_DATUM);
 
     // Temperature text (below torque)
     snprintf(buf, sizeof(buf), "%dC", tempC);
     tft.drawString(buf, x + WHEEL_W / 2, y + WHEEL_H / 2 + 8);
+    RTRACE_TEXT(x + WHEEL_W / 2, y + WHEEL_H / 2 + 8, buf,
+                COL_BLACK, fillCol, 1, MC_DATUM);
 
     tft.setTextDatum(TL_DATUM);  // Reset datum
 }
@@ -111,6 +136,7 @@ void CarRenderer::drawSteering(TFT_eSPI& tft,
 
     // Small center dot
     tft.fillCircle(STEER_CX, STEER_CY, 3, COL_WHITE);
+    RTRACE_FILL_CIRCLE(STEER_CX, STEER_CY, 3, COL_WHITE);
 }
 
 // -------------------------------------------------------------------------
@@ -135,10 +161,12 @@ void CarRenderer::drawSteerLine(TFT_eSPI& tft,
                  static_cast<float>(STEER_RADIUS - 2));
 
     tft.drawLine(STEER_CX, STEER_CY, ex, ey, color);
+    RTRACE_LINE(STEER_CX, STEER_CY, ex, ey, color);
 
     // Redraw circle outline to fix any erasure artifacts
     if (color == COL_BG) {
         tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
+        RTRACE_CIRCLE(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
     }
 }
 

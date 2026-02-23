@@ -27,6 +27,7 @@
 #include "ui/mode_icons.h"
 #include "ui/led_toggle.h"
 #include "ui/obstacle_sensor.h"
+#include "ui/render_trace.h"
 #include "ui/runtime_monitor.h"
 #include "shifter_input.h"
 #include <Arduino.h>
@@ -47,6 +48,7 @@ static constexpr unsigned long ACK_DISPLAY_DURATION_MS = 1500;
 // onEnter — called when transitioning to this screen
 // -------------------------------------------------------------------------
 void DriveScreen::onEnter() {
+    RTRACE_BEGIN_SCREEN("drive");
     needsFullRedraw_ = true;
 
     // Zero out previous values to force full redraw
@@ -179,7 +181,11 @@ void DriveScreen::draw() {
         RTMON_FULL_REDRAW();
 
         // Clear entire screen
+        RTRACE_SET_LAYER(0);
         tft.fillScreen(ui::COL_BG);
+        RTRACE_FILL_SCREEN(ui::COL_BG);
+
+        RTRACE_SET_LAYER(1);
 
         // Draw all static elements (in layout order top→bottom)
         ui::ModeIcons::drawStatic(tft);
@@ -195,6 +201,8 @@ void DriveScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TC_DATUM);
         tft.drawString("km/h", ui::SCREEN_W / 2, ui::SPEED_Y + 26);
+        RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y + 26, "km/h",
+                    ui::COL_GRAY, ui::COL_BG, 1, TC_DATUM);
         tft.setTextDatum(TL_DATUM);
 
         // "360°" label centered above steering gauge
@@ -202,6 +210,8 @@ void DriveScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TC_DATUM);
         tft.drawString("360", ui::STEER_CX, ui::STEER_CY - ui::STEER_RADIUS - 12);
+        RTRACE_TEXT(ui::STEER_CX, ui::STEER_CY - ui::STEER_RADIUS - 12, "360",
+                    ui::COL_CYAN, ui::COL_BG, 1, TC_DATUM);
         tft.setTextDatum(TL_DATUM);
 
         // Force draw of all dynamic elements
@@ -221,6 +231,7 @@ void DriveScreen::draw() {
     }
 
     // Partial redraw: only changed elements
+    RTRACE_SET_LAYER(2);
 
     // Speed (in its own zone, 230–270px)
     if (curSpeedAvgRaw_ != prevSpeedAvgRaw_) {
@@ -300,6 +311,8 @@ void DriveScreen::draw() {
     prevMode_        = curMode_;
     prevObstacleCm_  = curObstacleCm_;
     prevLedOn_       = curLedOn_;
+
+    RTRACE_DUMP_IF_PENDING();
 }
 
 // -------------------------------------------------------------------------
@@ -317,12 +330,15 @@ void DriveScreen::drawSpeed() {
 
     // Clear speed area
     tft.fillRect(0, ui::SPEED_Y, ui::SCREEN_W, 24, ui::COL_BG);
+    RTRACE_FILL_RECT(0, ui::SPEED_Y, ui::SCREEN_W, 24, ui::COL_BG);
 
     // Draw speed value — large centered text
     tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
     tft.setTextSize(3);
     tft.setTextDatum(TC_DATUM);
     tft.drawString(buf, ui::SCREEN_W / 2, ui::SPEED_Y);
+    RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y, buf,
+                ui::COL_WHITE, ui::COL_BG, 3, TC_DATUM);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 }
@@ -336,6 +352,7 @@ void DriveScreen::drawAckIndicator() {
 
     // Clear indicator area
     tft.fillRect(ACK_X, ACK_Y, ACK_W, ACK_H, ui::COL_BG);
+    RTRACE_FILL_RECT(ACK_X, ACK_Y, ACK_W, ACK_H, ui::COL_BG);
 
     if (ackDisplayResult_ == 0) return;  // Nothing to show
 
@@ -352,5 +369,7 @@ void DriveScreen::drawAckIndicator() {
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
     tft.drawString(text, ACK_X + ACK_W / 2, ACK_Y + 2);
+    RTRACE_TEXT(ACK_X + ACK_W / 2, ACK_Y + 2, text,
+                color, ui::COL_BG, 1, TC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
