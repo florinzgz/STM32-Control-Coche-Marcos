@@ -7,6 +7,7 @@
 
 #include "engineering_screen.h"
 #include "ui/ui_common.h"
+#include "ui/render_trace.h"
 #include "can_ids.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
@@ -41,6 +42,7 @@ static constexpr int16_t BACK_H = 30;
 // Lifecycle
 // -------------------------------------------------------------------------
 void EngineeringScreen::onEnter() {
+    RTRACE_BEGIN_SCREEN("engineering");
     needsRedraw_ = true;
     exitRequested_ = false;
     currentMenu_ = SubMenu::MAIN;
@@ -64,6 +66,9 @@ void EngineeringScreen::update(const vehicle::VehicleData& data) {
 void EngineeringScreen::draw() {
     if (needsRedraw_) {
         needsRedraw_ = false;
+        // Actual TFT clear. Each submenu helper calls RTRACE_BEGIN_SCREEN()
+        // which resets the trace buffer and then records its own fillScreen
+        // as the first entry — so the draw order remains correct.
         tft.fillScreen(ui::COL_BG);
 
         switch (currentMenu_) {
@@ -86,23 +91,37 @@ void EngineeringScreen::draw() {
 
             char buf[ui::FMT_BUF_LARGE];
 
+            RTRACE_SET_LAYER(2);
+
             tft.fillRect(200, 100, 240, 16, ui::COL_BG);
+            RTRACE_FILL_RECT(200, 100, 240, 16, ui::COL_BG);
             snprintf(buf, sizeof(buf), "0x%08lX", (unsigned long)faultBits_);
             tft.setTextColor(faultBits_ ? ui::COL_RED : ui::COL_GREEN, ui::COL_BG);
             tft.setTextSize(1);
             tft.drawString(buf, 200, 100);
+            RTRACE_TEXT(200, 100, buf,
+                        faultBits_ ? ui::COL_RED : ui::COL_GREEN, ui::COL_BG,
+                        1, TL_DATUM);
 
             tft.fillRect(200, 130, 240, 16, ui::COL_BG);
+            RTRACE_FILL_RECT(200, 130, 240, 16, ui::COL_BG);
             snprintf(buf, sizeof(buf), "0x%08lX", (unsigned long)enabledBits_);
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString(buf, 200, 130);
+            RTRACE_TEXT(200, 130, buf,
+                        ui::COL_GREEN, ui::COL_BG, 1, TL_DATUM);
 
             tft.fillRect(200, 160, 240, 16, ui::COL_BG);
+            RTRACE_FILL_RECT(200, 160, 240, 16, ui::COL_BG);
             snprintf(buf, sizeof(buf), "0x%08lX", (unsigned long)disabledBits_);
             tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
             tft.drawString(buf, 200, 160);
+            RTRACE_TEXT(200, 160, buf,
+                        ui::COL_AMBER, ui::COL_BG, 1, TL_DATUM);
         }
     }
+
+    RTRACE_DUMP_IF_PENDING();
 }
 
 // -------------------------------------------------------------------------
@@ -160,11 +179,19 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 // Draw helpers
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawMainMenu() {
+    // Begin a dedicated trace for the engineering main menu
+    RTRACE_BEGIN_SCREEN("eng_main");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
     // Header
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("ENGINEERING", ui::SCREEN_W / 2, 25);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 25, "ENGINEERING",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 
     // Menu buttons
@@ -174,89 +201,145 @@ void EngineeringScreen::drawMainMenu() {
         uint16_t txtCol = ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
+        RTRACE_FILL_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
         tft.drawRect(MENU_X, btnY, MENU_W, MENU_BTN_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, ui::COL_GRAY);
 
         tft.setTextColor(txtCol, bgCol);
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
         tft.drawString(mainLabels[i], MENU_X + MENU_W / 2,
                         btnY + MENU_BTN_H / 2);
+        RTRACE_TEXT(MENU_X + MENU_W / 2, btnY + MENU_BTN_H / 2, mainLabels[i],
+                    txtCol, bgCol, 1, MC_DATUM);
     }
     tft.setTextDatum(TL_DATUM);
 
     // EXIT button (bottom-left — returns to normal screens)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
     tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("EXIT", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "EXIT",
+                ui::COL_AMBER, ui::COL_DARK_GRAY, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 
 void EngineeringScreen::drawFaultViewer() {
+    RTRACE_BEGIN_SCREEN("eng_fault_viewer");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("FAULT VIEWER", ui::SCREEN_W / 2, 25);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 25, "FAULT VIEWER",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
     // Labels
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.drawString("Fault Bits:", 40, 100);
+    RTRACE_TEXT(40, 100, "Fault Bits:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
     tft.drawString("Enabled Bits:", 40, 130);
+    RTRACE_TEXT(40, 130, "Enabled Bits:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
     tft.drawString("Disabled Bits:", 40, 160);
+    RTRACE_TEXT(40, 160, "Disabled Bits:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
 
     // Force redraw of values
     prevFaultBits_ = faultBits_ + 1;
 
     // Back button
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
     tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 
 void EngineeringScreen::drawModuleControl() {
+    RTRACE_BEGIN_SCREEN("eng_module_ctrl");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("MODULE CONTROL", ui::SCREEN_W / 2, 25);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 25, "MODULE CONTROL",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.drawString("Use SERVICE_CMD 0x110 to enable/disable modules.", 40, 80);
+    RTRACE_TEXT(40, 80, "Use SERVICE_CMD 0x110 to enable/disable modules.",
+                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
     tft.drawString("Module IDs: 0-24 (see service_mode.h)", 40, 100);
+    RTRACE_TEXT(40, 100, "Module IDs: 0-24 (see service_mode.h)",
+                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
 
     // Back button
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
     tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 
 void EngineeringScreen::drawCalibration(const char* title) {
+    // Select trace screen name based on title prefix (PEDAL vs ENCODER).
+    // Use strncmp for robustness against future title changes.
+    const char* traceName = (strncmp(title, "PEDAL", 5) == 0)
+                            ? "eng_pedal_cal" : "eng_encoder_cal";
+    RTRACE_BEGIN_SCREEN(traceName);
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(title, ui::SCREEN_W / 2, 25);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 25, title,
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.drawString("Calibration interface placeholder.", 40, 80);
+    RTRACE_TEXT(40, 80, "Calibration interface placeholder.",
+                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
     tft.drawString("Connect engineering tool for full calibration.", 40, 100);
+    RTRACE_TEXT(40, 100, "Connect engineering tool for full calibration.",
+                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
 
     // Back button
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
     tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }

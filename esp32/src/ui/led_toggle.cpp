@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "led_toggle.h"
+#include "render_trace.h"
 
 namespace ui {
 
@@ -41,13 +42,17 @@ void LedToggle::drawButton(TFT_eSPI& tft, bool active) {
     uint16_t bordCol = active ? COL_WHITE  : COL_GRAY;
 
     tft.fillRect(LED_ICON_X, LED_ICON_Y, LED_ICON_W, LED_ICON_H, bgCol);
+    RTRACE_FILL_RECT(LED_ICON_X, LED_ICON_Y, LED_ICON_W, LED_ICON_H, bgCol);
     tft.drawRect(LED_ICON_X, LED_ICON_Y, LED_ICON_W, LED_ICON_H, bordCol);
+    RTRACE_DRAW_RECT(LED_ICON_X, LED_ICON_Y, LED_ICON_W, LED_ICON_H, bordCol);
 
     tft.setTextColor(txtCol, bgCol);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("LED", LED_ICON_X + LED_ICON_W / 2,
                           LED_ICON_Y + LED_ICON_H / 2);
+    RTRACE_TEXT(LED_ICON_X + LED_ICON_W / 2, LED_ICON_Y + LED_ICON_H / 2,
+                "LED", txtCol, bgCol, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 

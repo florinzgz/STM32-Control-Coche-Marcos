@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "battery_indicator.h"
+#include "render_trace.h"
 #include <cstdio>
 
 namespace ui {
@@ -17,8 +18,10 @@ static constexpr uint16_t BATT_MAX_RAW = 2520;   // 25.20 V in 0.01V units
 void BatteryIndicator::drawStatic(TFT_eSPI& tft) {
     // Battery icon outline
     tft.drawRect(BAT_X, BAT_Y, BAT_W - 6, BAT_H, COL_WHITE);
+    RTRACE_DRAW_RECT(BAT_X, BAT_Y, BAT_W - 6, BAT_H, COL_WHITE);
     // Battery terminal nub
     tft.fillRect(BAT_X + BAT_W - 6, BAT_Y + 8, 6, 12, COL_WHITE);
+    RTRACE_FILL_RECT(BAT_X + BAT_W - 6, BAT_Y + 8, 6, 12, COL_WHITE);
 }
 
 // -------------------------------------------------------------------------
@@ -48,8 +51,10 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
         (static_cast<int32_t>(pct) * (innerW - 4)) / 100);
 
     tft.fillRect(BAT_X + 2, BAT_Y + 2, innerW - 4, BAT_H - 4, COL_BG);
+    RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, innerW - 4, BAT_H - 4, COL_BG);
     if (fillW > 0) {
         tft.fillRect(BAT_X + 2, BAT_Y + 2, fillW, BAT_H - 4, col);
+        RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, fillW, BAT_H - 4, col);
     }
 
     // Percentage text centered in battery — use black text for contrast
@@ -59,6 +64,8 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(buf, BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2);
+    RTRACE_TEXT(BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2, buf,
+                COL_BLACK, col, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 
