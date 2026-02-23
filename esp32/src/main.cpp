@@ -668,9 +668,10 @@ void loop() {
         // Reverse detection from physical shifter
         bool reverse = (shifter::getGearRaw() == GEAR_REVERSE);
 
-        // Braking detection: traction average near zero while speed > 0
+        // Braking & throttle detection: traction average near zero while
+        // speed > 0 indicates dynamic braking or throttle release at speed.
         bool braking = false;
-        float throttlePct = 0.0f;
+        float throttlePct;
         {
             uint32_t trSum = 0;
             for (uint8_t i = 0; i < 4; ++i) {

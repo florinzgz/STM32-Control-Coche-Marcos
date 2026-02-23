@@ -292,7 +292,7 @@ void update() {
     if (now - lastUpdateMs < UPDATE_RATE_MS) return;
     lastUpdateMs = now;
 
-    animationStep = (animationStep + 1) % 65535u;
+    animationStep++;  // natural uint16_t wrap at 65536
 
     // Turn-signal blink timer (500 ms half-period)
     if (now - lastBlinkMs >= TURN_SIGNAL_BLINK_MS) {
