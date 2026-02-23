@@ -9,6 +9,8 @@
 // and must be called from setup() before the main loop begins.
 // Minimum command interval: 100 ms (DFPlayer processing time).
 // Maximum assumed playback duration: 5 s per sound (configurable).
+//
+// Per-sound cooldown prevents the same alert from repeating too quickly.
 // =============================================================================
 
 #include "audio_manager.h"
@@ -36,6 +38,12 @@ static Priority pendingPri    = Priority::LOW;
 // Maximum assumed playback duration (ms) — DFPlayer doesn't report end reliably
 static constexpr unsigned long MAX_PLAY_DURATION_MS = 5000;
 static unsigned long playStartMs = 0;
+
+// Per-sound cooldown: prevents rapid repetition of the same sound.
+// Tracks with index 1..68 → use index directly into array.
+static constexpr uint8_t MAX_TRACK = 68;
+static constexpr unsigned long SOUND_COOLDOWN_MS = 4000;  // 4 s minimum between same sound
+static unsigned long lastPlayedMs[MAX_TRACK + 1] = {};    // [0] unused, [1..68]
 
 // -------------------------------------------------------------------------
 // DFPlayer serial command builder
@@ -88,7 +96,12 @@ void init() {
     playing     = false;
     currentPri  = Priority::LOW;
 
-    Serial.println("[AUDIO] DFPlayer initialized (UART2, 9600 baud)");
+    // Initialize cooldown timestamps to 0
+    for (uint8_t i = 0; i <= MAX_TRACK; ++i) {
+        lastPlayedMs[i] = 0;
+    }
+
+    Serial.println("[AUDIO] DFPlayer initialized (UART2, 9600 baud, 68 tracks)");
 }
 
 void update() {
@@ -104,17 +117,34 @@ void update() {
 
     // Process pending sound if interval has elapsed
     if (pendingValid && (now - lastCmdMs) >= CMD_INTERVAL_MS) {
-        // Send play command
-        sendCommand(DF_CMD_PLAY_TRACK, 0, static_cast<uint8_t>(pendingSound));
+        uint8_t trackNum = static_cast<uint8_t>(pendingSound);
+        sendCommand(DF_CMD_PLAY_TRACK, 0, trackNum);
         playing      = true;
         currentPri   = pendingPri;
         playStartMs  = now;
         pendingValid = false;
+
+        // Record the time this specific sound was played
+        if (trackNum <= MAX_TRACK) {
+            lastPlayedMs[trackNum] = now;
+        }
     }
 }
 
 void play(Sound sound, Priority priority) {
     if (!initialized) return;
+
+    uint8_t trackNum = static_cast<uint8_t>(sound);
+    unsigned long now = millis();
+
+    // Per-sound cooldown: skip if same sound was played recently
+    // Exception: HIGH priority sounds (errors, emergency) always play
+    if (trackNum <= MAX_TRACK && priority != Priority::HIGH) {
+        if (lastPlayedMs[trackNum] != 0 &&
+            (now - lastPlayedMs[trackNum]) < SOUND_COOLDOWN_MS) {
+            return;  // Cooldown active, skip
+        }
+    }
 
     // If higher or equal priority than current, queue it
     if (!playing || static_cast<uint8_t>(priority) >= static_cast<uint8_t>(currentPri)) {

@@ -9,6 +9,7 @@
 // =============================================================================
 
 #include <Arduino.h>
+#include <climits>
 #include <esp_system.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <TFT_eSPI.h>
@@ -67,9 +68,35 @@ static bool     farewellPlayed    = false;
 // ---- Audio event tracking ----
 static uint8_t  lastAudioSystemState = 0;     // detect state transitions for error alert
 static bool     batteryLowPlayed  = false;     // one-shot for battery warning
-static constexpr uint16_t BATTERY_LOW_THRESHOLD_RAW = 2000; // 20.00 V in 0.01 V units
+static bool     batteryCritPlayed = false;     // one-shot for battery critical
+static constexpr uint16_t BATTERY_LOW_THRESHOLD_RAW = 2000;  // 20.00 V in 0.01 V units
+static constexpr uint16_t BATTERY_CRIT_THRESHOLD_RAW = 1800; // 18.00 V in 0.01 V units
 static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beeps
 static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
+
+// ---- Temperature audio tracking ----
+static bool     tempHighPlayed = false;        // one-shot for temp high warning
+static constexpr int8_t TEMP_HIGH_THRESHOLD = 85;  // °C — play alert above this
+static constexpr int8_t TEMP_HIGH_HYSTERESIS = 5;  // °C — hysteresis to prevent oscillation
+
+// ---- ABS/TCS audio tracking ----
+static uint8_t  lastAbsActive = 0;
+static uint8_t  lastTcsActive = 0;
+
+// ---- Overcurrent audio tracking ----
+static uint8_t  lastSafetyError = 0;           // last SafetyError code for transition detect
+
+// ---- Lights audio tracking ----
+static bool     lastLightsRelayOn = false;
+static bool     lightsAudioInit   = false;     // skip first transition on startup
+
+// ---- Multi-error collapse ----
+// When >1 error/warning fires within the burst window, play AUDIO_ERROR_GENERAL
+// instead of stacking individual alerts.
+static uint8_t  errorBurstCount = 0;
+static unsigned long errorBurstStartMs = 0;
+static constexpr unsigned long ERROR_BURST_WINDOW_MS = 2000;  // 2 s window
+static constexpr uint8_t ERROR_BURST_THRESHOLD = 2;           // >1 error = general
 
 // ---- LED brake/reverse detection thresholds ----
 // Speed sum threshold: 4 wheels × 0.5 km/h × 10 (0.1 km/h units) = 20
@@ -326,7 +353,14 @@ void loop() {
             lastSentGear   = gear;
             lastGearSendMs = now;
             sendGearCommand(gear);
-            audio::play(audio::Sound::GEAR_CHANGE, audio::Priority::LOW);
+            // Play specific gear announcement
+            switch (static_cast<shifter::Gear>(gear)) {
+                case shifter::Gear::PARK:       audio::play(audio::Sound::GEAR_PARK,    audio::Priority::LOW); break;
+                case shifter::Gear::REVERSE:    audio::play(audio::Sound::GEAR_REVERSE, audio::Priority::LOW); break;
+                case shifter::Gear::NEUTRAL:    audio::play(audio::Sound::GEAR_NEUTRAL, audio::Priority::LOW); break;
+                case shifter::Gear::FORWARD:    audio::play(audio::Sound::GEAR_D1,      audio::Priority::LOW); break;
+                case shifter::Gear::FORWARD_D2: audio::play(audio::Sound::GEAR_D2,      audio::Priority::LOW); break;
+            }
             Serial.printf("[SHIFTER] Gear → %u\n", gear);
         }
     }
@@ -348,6 +382,9 @@ void loop() {
                 ledLocalState = !ledLocalState;
                 sendLedCommand(ledLocalState);
                 config_store::setLedEnabled(ledLocalState);
+                audio::play(ledLocalState ? audio::Sound::LIGHTS_ON
+                                          : audio::Sound::LIGHTS_OFF,
+                            audio::Priority::LOW);
                 Serial.printf("[LED] Toggle → %s\n",
                               ledLocalState ? "ON" : "OFF");
             }
@@ -358,12 +395,15 @@ void loop() {
                 switch (modeHit) {
                     case 1:  // 4x4 → set 4x4 flag, clear tank
                         currentModeFlags = can::MODE_FLAG_4X4;
+                        audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LOW);
                         break;
                     case 2:  // 4x2 → clear both flags
                         currentModeFlags = 0;
+                        audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LOW);
                         break;
                     case 3:  // 360° → set tank turn flag
                         currentModeFlags = can::MODE_FLAG_TANK_TURN;
+                        audio::play(audio::Sound::BEEP, audio::Priority::LOW);
                         break;
                 }
                 sendModeCommand(currentModeFlags);
@@ -404,27 +444,153 @@ void loop() {
     }
 
     // ---- CAN-triggered audio events ----
+    // Multi-error burst detection: if multiple error/warning events fire
+    // within ERROR_BURST_WINDOW_MS, play ERROR_GENERAL instead of stacking.
     {
         auto st = static_cast<uint8_t>(vehicleData.heartbeat().systemState);
 
-        // Error / Safe state alert — play once on transition
-        if ((st == 4 || st == 5) && lastAudioSystemState != st) {
-            audio::play(audio::Sound::ERROR_ALERT, audio::Priority::HIGH);
-        }
-        lastAudioSystemState = st;
+        // --- Helper lambda: queue an error/warning sound with burst detection ---
+        auto playWarning = [&](audio::Sound sound, audio::Priority pri) {
+            // Track burst window
+            if (errorBurstCount == 0) {
+                errorBurstStartMs = now;
+            }
+            ++errorBurstCount;
 
-        // Battery low warning — play once when voltage drops below threshold
+            if ((now - errorBurstStartMs) < ERROR_BURST_WINDOW_MS &&
+                errorBurstCount >= ERROR_BURST_THRESHOLD) {
+                // Multiple errors in short window → play general error instead
+                audio::play(audio::Sound::ERROR_GENERAL, audio::Priority::HIGH);
+            } else {
+                audio::play(sound, pri);
+            }
+        };
+
+        // Reset burst counter when window expires
+        if (errorBurstCount > 0 &&
+            (now - errorBurstStartMs) >= ERROR_BURST_WINDOW_MS) {
+            errorBurstCount = 0;
+        }
+
+        // --- System state transitions ---
+        if (st != lastAudioSystemState) {
+            // Emergency / safe state
+            if (st == static_cast<uint8_t>(can::SystemState::SAFE) ||
+                st == static_cast<uint8_t>(can::SystemState::ERROR)) {
+                playWarning(audio::Sound::EMERGENCY, audio::Priority::HIGH);
+            }
+            // Degraded / limp-home
+            else if (st == static_cast<uint8_t>(can::SystemState::DEGRADED) ||
+                     st == static_cast<uint8_t>(can::SystemState::LIMP_HOME)) {
+                playWarning(audio::Sound::ERROR_GENERAL, audio::Priority::HIGH);
+            }
+            // Recovery to ACTIVE from error state
+            else if (st == static_cast<uint8_t>(can::SystemState::ACTIVE) &&
+                     (lastAudioSystemState == static_cast<uint8_t>(can::SystemState::SAFE) ||
+                      lastAudioSystemState == static_cast<uint8_t>(can::SystemState::ERROR))) {
+                audio::play(audio::Sound::SAFETY_RESET, audio::Priority::MEDIUM);
+            }
+            lastAudioSystemState = st;
+        }
+
+        // --- Battery warnings (with separate low and critical thresholds) ---
         uint16_t battVoltRaw = vehicleData.battery().voltageRaw;
-        if (battVoltRaw > 0 && battVoltRaw < BATTERY_LOW_THRESHOLD_RAW) {
+        if (battVoltRaw > 0 && battVoltRaw < BATTERY_CRIT_THRESHOLD_RAW) {
+            if (!batteryCritPlayed) {
+                playWarning(audio::Sound::BATTERY_CRITICAL, audio::Priority::HIGH);
+                batteryCritPlayed = true;
+                batteryLowPlayed  = true;  // skip low if critical already played
+            }
+        } else if (battVoltRaw > 0 && battVoltRaw < BATTERY_LOW_THRESHOLD_RAW) {
             if (!batteryLowPlayed) {
-                audio::play(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
+                playWarning(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
                 batteryLowPlayed = true;
             }
         } else {
-            batteryLowPlayed = false;  // reset when voltage recovers
+            batteryLowPlayed  = false;  // reset when voltage recovers
+            batteryCritPlayed = false;
         }
 
-        // Obstacle proximity warning — beep when zone ≥ 3 (critical/emergency)
+        // --- Temperature warnings ---
+        {
+            int8_t maxTemp = INT8_MIN;
+            for (uint8_t i = 0; i < vehicle::NUM_TEMP_SENSORS; ++i) {
+                int8_t t = vehicleData.temp().temps[i];
+                if (t > maxTemp) maxTemp = t;
+            }
+            if (maxTemp > TEMP_HIGH_THRESHOLD) {
+                if (!tempHighPlayed) {
+                    playWarning(audio::Sound::TEMP_HIGH, audio::Priority::MEDIUM);
+                    tempHighPlayed = true;
+                }
+            } else if (tempHighPlayed && maxTemp < (TEMP_HIGH_THRESHOLD - TEMP_HIGH_HYSTERESIS)) {
+                audio::play(audio::Sound::TEMP_NORMAL, audio::Priority::LOW);
+                tempHighPlayed = false;
+            }
+        }
+
+        // --- ABS / TCS activation announcements ---
+        {
+            uint8_t absNow = vehicleData.safety().absActive;
+            uint8_t tcsNow = vehicleData.safety().tcsActive;
+            if (absNow != lastAbsActive) {
+                audio::play(absNow ? audio::Sound::ABS_ON : audio::Sound::ABS_OFF,
+                            audio::Priority::LOW);
+                lastAbsActive = absNow;
+            }
+            if (tcsNow != lastTcsActive) {
+                audio::play(tcsNow ? audio::Sound::TCS_ON : audio::Sound::TCS_OFF,
+                            audio::Priority::LOW);
+                lastTcsActive = tcsNow;
+            }
+        }
+
+        // --- Overcurrent / sensor fault from safety error code ---
+        {
+            uint8_t safeErr = vehicleData.safety().errorCode;
+            if (safeErr != lastSafetyError && safeErr != 0) {
+                auto se = static_cast<can::SafetyError>(safeErr);
+                switch (se) {
+                    case can::SafetyError::OVERCURRENT:
+                        playWarning(audio::Sound::OVERCURRENT, audio::Priority::HIGH);
+                        break;
+                    case can::SafetyError::OVERTEMP:
+                        playWarning(audio::Sound::SENSOR_TEMP_ERROR, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::SENSOR_FAULT:
+                        playWarning(audio::Sound::SENSOR_SPEED_ERROR, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::CENTERING:
+                        playWarning(audio::Sound::ENCODER_ERROR, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::I2C_FAILURE:
+                        playWarning(audio::Sound::SENSOR_CURRENT_ERROR, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::OBSTACLE:
+                        playWarning(audio::Sound::OBSTACLE_WARN, audio::Priority::MEDIUM);
+                        break;
+                    default:
+                        break;
+                }
+                lastSafetyError = safeErr;
+            } else if (safeErr == 0) {
+                lastSafetyError = 0;
+            }
+        }
+
+        // --- Lights status from STM32 CAN echo ---
+        {
+            bool lightsNow = vehicleData.lights().relayOn;
+            if (lightsAudioInit && lightsNow != lastLightsRelayOn) {
+                audio::play(lightsNow ? audio::Sound::LIGHTS_ON
+                                      : audio::Sound::LIGHTS_OFF,
+                            audio::Priority::LOW);
+            }
+            lastLightsRelayOn = lightsNow;
+            lightsAudioInit = true;
+        }
+
+        // --- Obstacle proximity warning — beep when zone ≥ 3 (critical/emergency) ---
         obstacle_sensor::Reading obsRd = obstacle_sensor::getReading();
         if (obsRd.healthy && obsRd.zone >= 3 &&
             (now - lastObstacleWarnMs) >= OBSTACLE_WARN_INTERVAL_MS) {
