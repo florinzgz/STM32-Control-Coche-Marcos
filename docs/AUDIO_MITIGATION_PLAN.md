@@ -61,8 +61,9 @@ Ordenados de mayor a menor riesgo **operacional real para el conductor** (no por
 
 | MCU | Fases que la tocan | Tipo de cambio |
 |-----|-------------------|----------------|
-| **ESP32 solamente** | Phase 1, 2, 4, 5, 6, 7, 8 | Lógica de audio en `main.cpp`, constantes en `main.cpp` |
-| **STM32 + ESP32** | Phase 3, posiblemente Phase 2 y 8 | CAN heartbeat flags en `can_handler.c`, constantes de error en `safety_system.c` |
+| **ESP32 solamente** | Phase 1, 4, 5, 6, 7, 9, 10 | Lógica de audio en `main.cpp`, constantes en `main.cpp` |
+| **ESP32 + posiblemente STM32** | Phase 2, 8 | ESP32: mapping de error codes. STM32: posible adición de fault flags en heartbeat CAN si los actuales son insuficientes. |
+| **STM32 + ESP32** | Phase 3 | CAN heartbeat flags en `can_handler.c` + lógica de audio en `main.cpp` |
 
 ---
 
