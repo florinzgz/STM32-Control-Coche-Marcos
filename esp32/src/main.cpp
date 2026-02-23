@@ -279,7 +279,7 @@ void setup() {
     // Initialize CAN TX for obstacle distance frame (0x208)
     can_obstacle::init();
 
-    // Initialize WS2812B LED controller (GPIO 38, 44 LEDs)
+    // Initialize WS2812B LED controller (GPIO 48, 44 LEDs)
     led_ctrl::init();
 
     // Initialize power manager (ignition key on GPIO 40/41)

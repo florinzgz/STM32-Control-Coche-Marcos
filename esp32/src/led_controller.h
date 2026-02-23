@@ -5,7 +5,7 @@
 // Patterns change automatically based on vehicle state (via VehicleData).
 // Power relay on STM32 (PB10) must be ON for LEDs to light.
 //
-// GPIO 38: WS2812B data output (chosen for no alternate-function conflicts)
+// GPIO 48: WS2812B data output (GPIO 38 reassigned to TFT_RST)
 //
 // Reference: FIRMWARE_MIGRATION_AUDIT.md Step 6
 // =============================================================================
@@ -19,7 +19,7 @@
 namespace led_ctrl {
 
 /// LED strip configuration
-inline constexpr int LED_DATA_PIN    = 38;
+inline constexpr int LED_DATA_PIN    = 48;
 inline constexpr int NUM_LEDS_FRONT  = 28;
 inline constexpr int NUM_LEDS_REAR   = 16;
 inline constexpr int NUM_LEDS_TOTAL  = NUM_LEDS_FRONT + NUM_LEDS_REAR;
