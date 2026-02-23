@@ -143,10 +143,11 @@ enum class Sound : uint8_t {
 };
 
 /// Priority levels (higher number = higher priority, preempts lower)
+/// Note: names LO/HI avoid conflict with Arduino macros HIGH and LOW.
 enum class Priority : uint8_t {
-    LOW     = 0,   // Gear clicks, info beeps, mode changes
+    LO      = 0,   // Gear clicks, info beeps, mode changes
     MEDIUM  = 1,   // Obstacle warnings, battery alerts, temperature
-    HIGH    = 2    // Errors, emergency, welcome, farewell
+    HI      = 2    // Errors, emergency, welcome, farewell
 };
 
 /// Initialize UART and DFPlayer module

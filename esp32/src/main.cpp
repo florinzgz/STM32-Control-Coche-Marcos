@@ -99,7 +99,7 @@ static unsigned long errorBurstStartMs = 0;
 static constexpr unsigned long ERROR_BURST_WINDOW_MS = 2000;  // 2 s window
 static constexpr uint8_t ERROR_BURST_THRESHOLD = 2;           // >=2 errors = burst
 static audio::Sound    burstDominantSound = audio::Sound::ERROR_GENERAL;
-static audio::Priority burstDominantPri   = audio::Priority::HIGH;
+static audio::Priority burstDominantPri   = audio::Priority::HI;
 
 /// Burst severity ranking — higher value = more important for the driver.
 /// Determines which sound wins when multiple errors fire within the burst window.
@@ -377,11 +377,11 @@ void loop() {
             sendGearCommand(gear);
             // Play specific gear announcement
             switch (static_cast<shifter::Gear>(gear)) {
-                case shifter::Gear::PARK:       audio::play(audio::Sound::GEAR_PARK,    audio::Priority::LOW); break;
-                case shifter::Gear::REVERSE:    audio::play(audio::Sound::GEAR_REVERSE, audio::Priority::LOW); break;
-                case shifter::Gear::NEUTRAL:    audio::play(audio::Sound::GEAR_NEUTRAL, audio::Priority::LOW); break;
-                case shifter::Gear::FORWARD:    audio::play(audio::Sound::GEAR_D1,      audio::Priority::LOW); break;
-                case shifter::Gear::FORWARD_D2: audio::play(audio::Sound::GEAR_D2,      audio::Priority::LOW); break;
+                case shifter::Gear::PARK:       audio::play(audio::Sound::GEAR_PARK,    audio::Priority::LO); break;
+                case shifter::Gear::REVERSE:    audio::play(audio::Sound::GEAR_REVERSE, audio::Priority::LO); break;
+                case shifter::Gear::NEUTRAL:    audio::play(audio::Sound::GEAR_NEUTRAL, audio::Priority::LO); break;
+                case shifter::Gear::FORWARD:    audio::play(audio::Sound::GEAR_D1,      audio::Priority::LO); break;
+                case shifter::Gear::FORWARD_D2: audio::play(audio::Sound::GEAR_D2,      audio::Priority::LO); break;
             }
             Serial.printf("[SHIFTER] Gear → %u\n", gear);
         }
@@ -415,7 +415,7 @@ void loop() {
                     config_store::setLedEnabled(ledLocalState);
                     audio::play(ledLocalState ? audio::Sound::LIGHTS_ON
                                               : audio::Sound::LIGHTS_OFF,
-                                audio::Priority::LOW);
+                                audio::Priority::LO);
                     Serial.printf("[LED] Toggle → %s\n",
                                   ledLocalState ? "ON" : "OFF");
                 }
@@ -426,15 +426,15 @@ void loop() {
                     switch (modeHit) {
                         case 1:  // 4x4 → set 4x4 flag, clear tank
                             currentModeFlags = can::MODE_FLAG_4X4;
-                            audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LOW);
+                            audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
                             break;
                         case 2:  // 4x2 → clear both flags
                             currentModeFlags = 0;
-                            audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LOW);
+                            audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
                             break;
                         case 3:  // 360° → set tank turn flag
                             currentModeFlags = can::MODE_FLAG_TANK_TURN;
-                            audio::play(audio::Sound::BEEP, audio::Priority::LOW);
+                            audio::play(audio::Sound::BEEP, audio::Priority::LO);
                             break;
                     }
                     sendModeCommand(currentModeFlags);
@@ -456,7 +456,7 @@ void loop() {
 
     // Welcome audio on startup
     if (power_mgr::isRunning() && !welcomePlayed) {
-        audio::play(audio::Sound::WELCOME, audio::Priority::HIGH);
+        audio::play(audio::Sound::WELCOME, audio::Priority::HI);
         welcomePlayed  = true;
         farewellPlayed = false;
     }
@@ -465,7 +465,7 @@ void loop() {
     if (power_mgr::getState() == power_mgr::PowerState::SHUTTING_DOWN &&
         !farewellPlayed) {
         config_store::flush();  // Persist any unsaved changes before shutdown
-        audio::play(audio::Sound::FAREWELL, audio::Priority::HIGH);
+        audio::play(audio::Sound::FAREWELL, audio::Priority::HI);
         farewellPlayed = true;
         welcomePlayed  = false;
         // Turn off LEDs during shutdown
@@ -518,12 +518,12 @@ void loop() {
             // Emergency / safe state
             if (st == static_cast<uint8_t>(can::SystemState::SAFE) ||
                 st == static_cast<uint8_t>(can::SystemState::ERROR)) {
-                playWarning(audio::Sound::EMERGENCY, audio::Priority::HIGH);
+                playWarning(audio::Sound::EMERGENCY, audio::Priority::HI);
             }
             // Degraded / limp-home
             else if (st == static_cast<uint8_t>(can::SystemState::DEGRADED) ||
                      st == static_cast<uint8_t>(can::SystemState::LIMP_HOME)) {
-                playWarning(audio::Sound::ERROR_GENERAL, audio::Priority::HIGH);
+                playWarning(audio::Sound::ERROR_GENERAL, audio::Priority::HI);
             }
             // Recovery to ACTIVE from error state
             else if (st == static_cast<uint8_t>(can::SystemState::ACTIVE) &&
@@ -538,7 +538,7 @@ void loop() {
         uint16_t battVoltRaw = vehicleData.battery().voltageRaw;
         if (battVoltRaw > 0 && battVoltRaw < BATTERY_CRIT_THRESHOLD_RAW) {
             if (!batteryCritPlayed) {
-                playWarning(audio::Sound::BATTERY_CRITICAL, audio::Priority::HIGH);
+                playWarning(audio::Sound::BATTERY_CRITICAL, audio::Priority::HI);
                 batteryCritPlayed = true;
                 batteryLowPlayed  = true;  // skip low if critical already played
             }
@@ -565,7 +565,7 @@ void loop() {
                     tempHighPlayed = true;
                 }
             } else if (tempHighPlayed && maxTemp < (TEMP_HIGH_THRESHOLD - TEMP_HIGH_HYSTERESIS)) {
-                audio::play(audio::Sound::TEMP_NORMAL, audio::Priority::LOW);
+                audio::play(audio::Sound::TEMP_NORMAL, audio::Priority::LO);
                 tempHighPlayed = false;
             }
         }
@@ -576,12 +576,12 @@ void loop() {
             uint8_t tcsNow = vehicleData.safety().tcsActive;
             if (absNow != lastAbsActive) {
                 audio::play(absNow ? audio::Sound::ABS_ON : audio::Sound::ABS_OFF,
-                            audio::Priority::LOW);
+                            audio::Priority::LO);
                 lastAbsActive = absNow;
             }
             if (tcsNow != lastTcsActive) {
                 audio::play(tcsNow ? audio::Sound::TCS_ON : audio::Sound::TCS_OFF,
-                            audio::Priority::LOW);
+                            audio::Priority::LO);
                 lastTcsActive = tcsNow;
             }
         }
@@ -593,7 +593,7 @@ void loop() {
                 auto se = static_cast<can::SafetyError>(safeErr);
                 switch (se) {
                     case can::SafetyError::OVERCURRENT:
-                        playWarning(audio::Sound::OVERCURRENT, audio::Priority::HIGH);
+                        playWarning(audio::Sound::OVERCURRENT, audio::Priority::HI);
                         break;
                     case can::SafetyError::OVERTEMP:
                         playWarning(audio::Sound::SENSOR_TEMP_ERROR, audio::Priority::MEDIUM);
@@ -625,7 +625,7 @@ void loop() {
             if (lightsAudioInit && lightsNow != lastLightsRelayOn) {
                 audio::play(lightsNow ? audio::Sound::LIGHTS_ON
                                       : audio::Sound::LIGHTS_OFF,
-                            audio::Priority::LOW);
+                            audio::Priority::LO);
             }
             lastLightsRelayOn = lightsNow;
             lightsAudioInit = true;
