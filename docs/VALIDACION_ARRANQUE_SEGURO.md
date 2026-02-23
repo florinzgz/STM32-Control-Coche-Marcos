@@ -86,7 +86,7 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 
 | # | Condición | Mecanismo | Gravedad |
 |---|---|---|---|
-| D1 | Centrado activo con manos en volante | Motor de dirección gira a 10% PWM durante sweep | **MEDIA** |
+| D1 | Centrado activo con manos en volante | Motor de dirección gira a 10% PWM durante sweep automático al encender. Comportamiento normal del centering, pero las manos NO deben estar en el volante durante el arranque. Advertir al ocupante. | **MEDIA** |
 | D2 | Fallo de sensor central | Centering no encuentra centro, sigue girando | **ALTA** |
 | D3 | Encoder desconectado durante centering | Sin feedback, motor gira hasta stall timeout (300 ms) | **ALTA** |
 | D4 | Comando CAN 0x101 con ángulo extremo | Dirección salta a ±45° instantáneamente | **MEDIA** |
@@ -329,7 +329,25 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 |---|---|---|
 | 0x300 | DIAG_ERROR | Código de error + subsistema afectado |
 | 0x001 byte 2 | FAULT_FLAGS | Bitmask de fallos activos |
-| 0x001 byte 3 | ERROR_CODE | 0=OK, 1=OVERCURRENT, 2=OVERTEMP, 3=CAN_TIMEOUT, 4=SENSOR_FAULT, 5=MOTOR_STALL, 6=EMERGENCY_STOP, 7=WATCHDOG, 8=CENTERING, 9=BATTERY_UV_WARNING, 10=BATTERY_UV_CRITICAL, 11=I2C_FAILURE, 12=OBSTACLE |
+| 0x001 byte 3 | ERROR_CODE | Código de error activo (ver tabla §5.3) |
+
+### 5.3 Tabla de Códigos de Error (CAN 0x001 byte 3)
+
+| Código | Nombre | Descripción |
+|---|---|---|
+| 0 | OK | Sin error |
+| 1 | OVERCURRENT | Corriente >25 A |
+| 2 | OVERTEMP | Temperatura >90 °C |
+| 3 | CAN_TIMEOUT | Heartbeat ESP32 ausente >250 ms |
+| 4 | SENSOR_FAULT | Sensor implausible |
+| 5 | MOTOR_STALL | Motor bloqueado |
+| 6 | EMERGENCY_STOP | Seta de emergencia activada |
+| 7 | WATCHDOG | Reset por watchdog |
+| 8 | CENTERING | Fallo en centrado de dirección |
+| 9 | BATTERY_UV_WARNING | Batería <20 V |
+| 10 | BATTERY_UV_CRITICAL | Batería <18 V |
+| 11 | I2C_FAILURE | Fallo bus I2C (INA226/ADS1115) |
+| 12 | OBSTACLE | Obstáculo detectado |
 
 ### 5.2 Configuración del Analizador CAN
 
