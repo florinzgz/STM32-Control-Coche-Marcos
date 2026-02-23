@@ -9,6 +9,7 @@
 // =============================================================================
 
 #include <Arduino.h>
+#include <climits>
 #include <esp_system.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <TFT_eSPI.h>
@@ -75,7 +76,8 @@ static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
 
 // ---- Temperature audio tracking ----
 static bool     tempHighPlayed = false;        // one-shot for temp high warning
-static constexpr int8_t TEMP_HIGH_THRESHOLD = 85; // °C — play alert above this
+static constexpr int8_t TEMP_HIGH_THRESHOLD = 85;  // °C — play alert above this
+static constexpr int8_t TEMP_HIGH_HYSTERESIS = 5;  // °C — hysteresis to prevent oscillation
 
 // ---- ABS/TCS audio tracking ----
 static uint8_t  lastAbsActive = 0;
@@ -401,7 +403,7 @@ void loop() {
                         break;
                     case 3:  // 360° → set tank turn flag
                         currentModeFlags = can::MODE_FLAG_TANK_TURN;
-                        audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LOW);
+                        audio::play(audio::Sound::BEEP, audio::Priority::LOW);
                         break;
                 }
                 sendModeCommand(currentModeFlags);
@@ -511,7 +513,7 @@ void loop() {
 
         // --- Temperature warnings ---
         {
-            int8_t maxTemp = -128;
+            int8_t maxTemp = INT8_MIN;
             for (uint8_t i = 0; i < vehicle::NUM_TEMP_SENSORS; ++i) {
                 int8_t t = vehicleData.temp().temps[i];
                 if (t > maxTemp) maxTemp = t;
@@ -521,7 +523,7 @@ void loop() {
                     playWarning(audio::Sound::TEMP_HIGH, audio::Priority::MEDIUM);
                     tempHighPlayed = true;
                 }
-            } else if (tempHighPlayed && maxTemp < (TEMP_HIGH_THRESHOLD - 5)) {
+            } else if (tempHighPlayed && maxTemp < (TEMP_HIGH_THRESHOLD - TEMP_HIGH_HYSTERESIS)) {
                 audio::play(audio::Sound::TEMP_NORMAL, audio::Priority::LOW);
                 tempHighPlayed = false;
             }
