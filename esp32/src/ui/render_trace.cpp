@@ -43,6 +43,8 @@ char      RenderTrace::screen_[TRACE_SCREEN_LEN] = "unknown";
 // -------------------------------------------------------------------------
 void RenderTrace::beginScreen(const char* name) {
     cnt_         = 0;
+    // Start at layer 1 (static). Callers use setLayer(0) before fillScreen
+    // and setLayer(2) before dynamic partial-update sections.
     layer_       = 1;
     dumpPending_ = true;
     strncpy(screen_, name ? name : "unknown", TRACE_SCREEN_LEN - 1);
@@ -287,8 +289,10 @@ void RenderTrace::dumpJSON() {
         Serial.print(",\"refresh_ms\":");   Serial.print(e.refresh_rate_ms);
         Serial.print('}');
 
-        // Periodically yield to watchdog / USB CDC drain
-        if ((i & 0x0F) == 0x0F) {
+        // Yield every 16 entries to drain the USB-CDC Serial buffer
+        // and prevent watchdog resets during long dumps.
+        static constexpr uint16_t YIELD_INTERVAL_MASK = 0x0F;
+        if ((i & YIELD_INTERVAL_MASK) == YIELD_INTERVAL_MASK) {
             Serial.flush();
             yield();
         }

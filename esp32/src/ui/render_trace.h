@@ -75,6 +75,8 @@ enum class DrawType : uint8_t {
 // -------------------------------------------------------------------------
 inline constexpr uint8_t  TRACE_TEXT_LEN   = 32;   // max text string length
 inline constexpr uint8_t  TRACE_SCREEN_LEN = 24;   // max screen name length
+// 200 entries × ~75 bytes = ~15 KB — well within ESP32-S3 SRAM (520 KB).
+// Covers the most complex screen (drive: ~90 draw calls per full frame).
 inline constexpr uint16_t TRACE_MAX        = 200;  // max draw calls per screen
 
 struct DrawEntry {
@@ -136,7 +138,9 @@ public:
                                uint16_t color);
 
     /// tft.drawString(text, x, y) with active font/datum at time of call.
-    /// @param font   textSize value (1–3) active when drawString was called
+    /// @param font   textSize value (1–3) active when drawString was called.
+    ///              Values outside 1–3 are stored as-is; TFT_eSPI silently
+    ///              clamps them when rendering.
     /// @param datum  TFT datum constant active when drawString was called
     static void recText(int16_t x, int16_t y, const char* text,
                         uint16_t color, uint16_t bgColor,

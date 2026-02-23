@@ -66,7 +66,9 @@ void EngineeringScreen::update(const vehicle::VehicleData& data) {
 void EngineeringScreen::draw() {
     if (needsRedraw_) {
         needsRedraw_ = false;
-        // Actual TFT clear (trace handled inside each submenu helper)
+        // Actual TFT clear. Each submenu helper calls RTRACE_BEGIN_SCREEN()
+        // which resets the trace buffer and then records its own fillScreen
+        // as the first entry — so the draw order remains correct.
         tft.fillScreen(ui::COL_BG);
 
         switch (currentMenu_) {
@@ -303,8 +305,10 @@ void EngineeringScreen::drawModuleControl() {
 }
 
 void EngineeringScreen::drawCalibration(const char* title) {
-    // Use title to distinguish pedal vs encoder calibration in the trace
-    const char* traceName = (title[0] == 'P') ? "eng_pedal_cal" : "eng_encoder_cal";
+    // Select trace screen name based on title prefix (PEDAL vs ENCODER).
+    // Use strncmp for robustness against future title changes.
+    const char* traceName = (strncmp(title, "PEDAL", 5) == 0)
+                            ? "eng_pedal_cal" : "eng_encoder_cal";
     RTRACE_BEGIN_SCREEN(traceName);
     RTRACE_SET_LAYER(0);
     RTRACE_FILL_SCREEN(ui::COL_BG);
