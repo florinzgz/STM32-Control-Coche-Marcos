@@ -715,20 +715,37 @@ void loop() {
         }
 
         // ---- Turn-signal derivation from steering angle (0.1° units) ----
-        // When the steering wheel is turned >30° left or right, the
-        // corresponding rear indicator blinks.  SAFE/ERROR states
-        // override with hazard flash.
+        // Activate at 15° to signal the beginning of a turn.
+        // Deactivate at 10° (5° hysteresis) to avoid flickering when the
+        // wheel hovers around the threshold.
+        // SAFE/ERROR states override with hazard flash.
         {
-            static constexpr int16_t TURN_THRESHOLD_RAW = 300; // 30.0°
+            static constexpr int16_t TURN_ON_RAW  = 150;  // 15.0° — activate
+            static constexpr int16_t TURN_OFF_RAW = 100;  // 10.0° — deactivate (hysteresis)
+
             int16_t angle = vehicleData.steering().angleRaw;
+            static led_ctrl::TurnSignal prevTurn = led_ctrl::TurnSignal::OFF;
+
+            led_ctrl::TurnSignal turn = prevTurn;  // start from last state
+
             if (st == can::SystemState::SAFE || st == can::SystemState::ERROR) {
-                led_ctrl::setTurnSignal(led_ctrl::TurnSignal::HAZARD);
-            } else if (angle < -TURN_THRESHOLD_RAW) {
-                led_ctrl::setTurnSignal(led_ctrl::TurnSignal::LEFT);
-            } else if (angle > TURN_THRESHOLD_RAW) {
-                led_ctrl::setTurnSignal(led_ctrl::TurnSignal::RIGHT);
+                turn = led_ctrl::TurnSignal::HAZARD;
+                // Don't persist HAZARD into prevTurn — reset to OFF so that
+                // when the system recovers, the hysteresis starts clean.
+                prevTurn = led_ctrl::TurnSignal::OFF;
+                led_ctrl::setTurnSignal(turn);
             } else {
-                led_ctrl::setTurnSignal(led_ctrl::TurnSignal::OFF);
+                if (angle < -TURN_ON_RAW) {
+                    turn = led_ctrl::TurnSignal::LEFT;
+                } else if (angle > TURN_ON_RAW) {
+                    turn = led_ctrl::TurnSignal::RIGHT;
+                } else if (angle > -TURN_OFF_RAW && angle < TURN_OFF_RAW) {
+                    turn = led_ctrl::TurnSignal::OFF;
+                }
+                // Between OFF_RAW and ON_RAW: keep previous state (hysteresis band)
+
+                prevTurn = turn;
+                led_ctrl::setTurnSignal(turn);
             }
         }
 
