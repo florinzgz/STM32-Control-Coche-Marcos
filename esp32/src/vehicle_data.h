@@ -175,6 +175,7 @@ public:
     void setDiag(const DiagData& d)            { diag_ = d; }
     void setBattery(const BatteryData& d)      { battery_ = d; }
     void setAck(const AckData& d)              { ack_ = d; }
+    void setAckTimeout(unsigned long ts)       { ackTimeoutMs_ = ts; }
     void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
     void setLights(const LightsData& d)        { lights_ = d; }
     void setMode(const ModeData& d)            { mode_ = d; }
@@ -196,6 +197,7 @@ public:
     const BatteryData&   battery()   const { return battery_; }
     const ServiceData&   service()   const { return service_; }
     const AckData&       ack()       const { return ack_; }
+    unsigned long        ackTimeoutMs() const { return ackTimeoutMs_; }
     const ObstacleData&  obstacle()  const { return obstacle_; }
     const LightsData&    lights()    const { return lights_; }
     const ModeData&      mode()      const { return mode_; }
@@ -213,6 +215,7 @@ private:
     BatteryData   battery_;
     ServiceData   service_;
     AckData       ack_;
+    unsigned long ackTimeoutMs_ = 0;
     ObstacleData  obstacle_;
     LightsData    lights_;
     ModeData      mode_;
