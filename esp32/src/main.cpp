@@ -279,7 +279,7 @@ void setup() {
     // Initialize CAN TX for obstacle distance frame (0x208)
     can_obstacle::init();
 
-    // Initialize WS2812B LED controller (GPIO 38, 44 LEDs)
+    // Initialize WS2812B LED controller (front GPIO 47 + rear GPIO 48)
     led_ctrl::init();
 
     // Initialize power manager (ignition key on GPIO 40/41)
@@ -656,19 +656,29 @@ void loop() {
     // ---- WS2812B LED update ----
     {
         auto st = vehicleData.heartbeat().systemState;
+        bool ledEnabled = vehicleData.lights().relayOn;
+
+        // Enable/disable LED system based on relay and system state
+        if (!ledEnabled || st == can::SystemState::BOOT || st == can::SystemState::STANDBY) {
+            led_ctrl::setEnabled(false);
+        } else {
+            led_ctrl::setEnabled(true);
+        }
 
         // Reverse detection from physical shifter
         bool reverse = (shifter::getGearRaw() == GEAR_REVERSE);
 
-        // Braking detection: traction average near zero while speed > 0
-        // indicates dynamic braking or throttle release at speed.
+        // Braking & throttle detection: traction average near zero while
+        // speed > 0 indicates dynamic braking or throttle release at speed.
         bool braking = false;
+        float throttlePct;
         {
             uint32_t trSum = 0;
             for (uint8_t i = 0; i < 4; ++i) {
                 trSum += vehicleData.traction().scale[i];
             }
             uint8_t trAvg = static_cast<uint8_t>(trSum / 4);
+            throttlePct = static_cast<float>(trAvg);
 
             uint32_t spSum = 0;
             for (uint8_t i = 0; i < 4; ++i) {
@@ -677,8 +687,70 @@ void loop() {
             braking = (spSum > LED_SPEED_SUM_THRESHOLD && trAvg <= LED_TRACTION_BRAKING_THRESHOLD);
         }
 
-        bool ledEnabled = vehicleData.lights().relayOn;
-        led_ctrl::update(static_cast<uint8_t>(st), braking, reverse, ledEnabled);
+        // ---- Front LED mode from vehicle state ----
+        if (st == can::SystemState::SAFE || st == can::SystemState::ERROR) {
+            led_ctrl::startEmergencyFlash(5);
+        } else if (st == can::SystemState::LIMP_HOME) {
+            led_ctrl::setFrontMode(led_ctrl::FrontMode::KITT_IDLE);
+        } else if (vehicleData.safety().absActive) {
+            led_ctrl::setFrontMode(led_ctrl::FrontMode::ABS_ALERT);
+        } else if (vehicleData.safety().tcsActive) {
+            led_ctrl::setFrontMode(led_ctrl::FrontMode::TCS_ALERT);
+        } else if (reverse) {
+            led_ctrl::setFrontMode(led_ctrl::FrontMode::REVERSE);
+        } else {
+            // Throttle-reactive front patterns
+            led_ctrl::setFrontFromThrottle(throttlePct);
+        }
+
+        // ---- Rear LED mode from driving state ----
+        if (st == can::SystemState::SAFE || st == can::SystemState::ERROR) {
+            led_ctrl::setRearMode(led_ctrl::RearMode::BRAKE_EMERGENCY);
+        } else if (reverse) {
+            led_ctrl::setRearMode(led_ctrl::RearMode::REVERSE);
+        } else if (braking) {
+            led_ctrl::setRearMode(led_ctrl::RearMode::BRAKE);
+        } else {
+            led_ctrl::setRearMode(led_ctrl::RearMode::POSITION);
+        }
+
+        // ---- Turn-signal derivation from steering angle (0.1° units) ----
+        // Activate at 15° to signal the beginning of a turn.
+        // Deactivate at 10° (5° hysteresis) to avoid flickering when the
+        // wheel hovers around the threshold.
+        // SAFE/ERROR states override with hazard flash.
+        {
+            static constexpr int16_t TURN_ON_RAW  = 150;  // 15.0° — activate
+            static constexpr int16_t TURN_OFF_RAW = 100;  // 10.0° — deactivate (hysteresis)
+
+            int16_t angle = vehicleData.steering().angleRaw;
+            static led_ctrl::TurnSignal prevTurn = led_ctrl::TurnSignal::OFF;
+
+            led_ctrl::TurnSignal turn = prevTurn;  // start from last state
+
+            if (st == can::SystemState::SAFE || st == can::SystemState::ERROR) {
+                turn = led_ctrl::TurnSignal::HAZARD;
+                // Don't persist HAZARD into prevTurn — reset to OFF so that
+                // when the system recovers, the hysteresis starts clean.
+                prevTurn = led_ctrl::TurnSignal::OFF;
+                led_ctrl::setTurnSignal(turn);
+            } else {
+                if (angle < -TURN_ON_RAW) {
+                    turn = led_ctrl::TurnSignal::LEFT;
+                } else if (angle > TURN_ON_RAW) {
+                    turn = led_ctrl::TurnSignal::RIGHT;
+                } else if (angle > -TURN_OFF_RAW && angle < TURN_OFF_RAW) {
+                    turn = led_ctrl::TurnSignal::OFF;
+                }
+                // Between OFF_RAW and ON_RAW: keep previous state (hysteresis band)
+
+                prevTurn = turn;
+                led_ctrl::setTurnSignal(turn);
+            }
+        }
+
+        // Single update call drives all animation + FastLED.show()
+        led_ctrl::update();
     }
 
 #if RUNTIME_MONITOR
