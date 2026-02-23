@@ -44,11 +44,11 @@ La pantalla tiene los siguientes pines según tu descripción:
 | **DC/RS** | Data/Command | GPIO16 | 16 | HIGH=data, LOW=command |
 | **SDI (MOSI)** | Master Out Slave In | GPIO13 | 13 | Datos SPI del ESP32 al display |
 | **SCK** | SPI Clock | GPIO14 | 14 | Reloj SPI |
-| **SDO (MISO)** | Master In Slave Out | *No conectado* | -1 | No usado en este proyecto |
+| **SDO (MISO)** | Master In Slave Out | GPIO12 | 12 | Compartido con T_DO (necesario para touch) |
 | **T_CLK** | Touch Clock | GPIO14 | 14 | Compartido con SCK del display |
 | **T_CS** | Touch Chip Select | GPIO21 | 21 | Selección touch panel |
 | **T_DIN** | Touch Data In | GPIO13 | 13 | Compartido con SDI (MOSI) |
-| **T_DO** | Touch Data Out | *No usado* | — | No configurado en platformio.ini |
+| **T_DO** | Touch Data Out | GPIO12 | 12 | Compartido con SDO (MISO) — XPT2046 data out |
 | **T_IRQ** | Touch Interrupt | *No usado* | — | Polling mode en lugar de interrupciones |
 
 ### 1.3 Diagrama de Conexión - Display
@@ -61,6 +61,7 @@ La pantalla tiene los siguientes pines según tu descripción:
 │  3.3V ─────────────────────────────────────────► VCC (Display)  │
 │  GND  ─────────────────────────────────────────► GND (Display)  │
 │                                                                  │
+│  GPIO12 (SPI MISO) ─────────────────────────────► SDO (MISO)    │
 │  GPIO13 (SPI MOSI) ─────────────────────────────► SDI (MOSI)    │
 │  GPIO14 (SPI SCK)  ─────────────────────────────► SCK           │
 │  GPIO15 (SPI CS)   ─────────────────────────────► CS            │
@@ -68,6 +69,7 @@ La pantalla tiene los siguientes pines según tu descripción:
 │  GPIO17 (RESET)    ─────────────────────────────► RESET         │
 │  GPIO42 (Backlight)─────────────────────────────► LED           │
 │                                                                  │
+│  GPIO12 (compartido)─────────────────────────────► T_DO         │
 │  GPIO13 (compartido)─────────────────────────────► T_DIN        │
 │  GPIO14 (compartido)─────────────────────────────► T_CLK        │
 │  GPIO21 (Touch CS) ──────────────────────────────► T_CS         │
@@ -88,25 +90,25 @@ La pantalla tiene los siguientes pines según tu descripción:
 
 ### 1.5 Configuración en Código
 
-Las siguientes definiciones están en `esp32/platformio.ini`:
+Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 
-```ini
--DUSER_SETUP_LOADED=1
--DST7796_DRIVER=1
--DTFT_WIDTH=320
--DTFT_HEIGHT=480
--DTFT_MISO=-1
--DTFT_MOSI=13
--DTFT_SCLK=14
--DTFT_CS=15
--DTFT_DC=16
--DTFT_RST=17
--DTFT_BL=42
--DTFT_BACKLIGHT_ON=1
--DSPI_FREQUENCY=40000000
--DSPI_READ_FREQUENCY=20000000
--DTOUCH_CS=21
--DSPI_TOUCH_FREQUENCY=2500000
+```cpp
+#define USER_SETUP_LOADED 1
+#define ST7796_DRIVER
+#define TFT_WIDTH  320
+#define TFT_HEIGHT 480
+#define TFT_MISO 12    // GPIO12 — compartido con T_DO del XPT2046
+#define TFT_MOSI 13
+#define TFT_SCLK 14
+#define TFT_CS   15
+#define TFT_DC   16
+#define TFT_RST  17
+#define TFT_BL            42
+#define TFT_BACKLIGHT_ON  HIGH
+#define SPI_FREQUENCY       40000000
+#define SPI_READ_FREQUENCY  20000000
+#define TOUCH_CS 21
+#define SPI_TOUCH_FREQUENCY  2500000
 ```
 
 ---
@@ -270,9 +272,9 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 
 2. **Conectar Display TFT:**
    - Comenzar con VCC y GND del display
-   - Conectar pines SPI: MOSI (13), SCK (14), CS (15)
+   - Conectar pines SPI: MISO (12), MOSI (13), SCK (14), CS (15)
    - Conectar pines de control: DC (16), RESET (17), LED (42)
-   - Conectar Touch: T_CS (21), T_DIN y T_CLK compartidos
+   - Conectar Touch: T_CS (21), T_DO (12), T_DIN (13) y T_CLK (14) compartidos
 
 3. **Probar Display:**
    - Cargar firmware de prueba
@@ -318,7 +320,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | Pantalla negra | Sin alimentación o backlight apagado | Verificar VCC=3.3V, GPIO42=HIGH |
 | Display blanco | Reset no funcionando | Verificar GPIO17, agregar delay después de reset |
 | Imagen invertida/rotada | Rotación incorrecta | Cambiar `tft.setRotation(1)` en código |
-| Touch no responde | T_CS no conectado | Verificar GPIO21 a T_CS del display |
+| Touch no responde | T_CS o T_DO no conectado | Verificar GPIO21 a T_CS y GPIO12 a T_DO del display |
 | Líneas horizontales | Interferencia SPI | Cables más cortos, agregar capacitor 100nF en VCC del display |
 
 ### 5.2 Problemas de CAN Bus

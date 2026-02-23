@@ -17,7 +17,7 @@
 | SDI (MOSI) | → | GPIO 13 | Datos SPI |
 | SCK | → | GPIO 14 | Reloj SPI |
 | LED | → | GPIO 42 | Backlight |
-| SDO (MISO) | → | No conectar | — |
+| SDO (MISO) | → | GPIO 12 | Datos SPI (touch data out) |
 
 ### Touch Panel
 
@@ -26,7 +26,7 @@
 | T_CS | → | GPIO 21 | Touch Chip Select |
 | T_DIN | → | GPIO 13 | Compartido con MOSI |
 | T_CLK | → | GPIO 14 | Compartido con SCK |
-| T_DO | → | No conectar | No usado |
+| T_DO | → | GPIO 12 | Compartido con MISO |
 | T_IRQ | → | No conectar | No usado |
 
 ---
@@ -87,7 +87,7 @@
 ### Display
 
 - **Pantalla negra** → Verificar GPIO 42 = HIGH (backlight)
-- **No responde touch** → Verificar GPIO 21 conectado a T_CS
+- **No responde touch** → Verificar GPIO 21 a T_CS y GPIO 12 a T_DO
 - **Líneas en pantalla** → Cables SPI muy largos, agregar capacitor 100nF
 
 ### CAN Bus
@@ -104,6 +104,7 @@
 ┌─────────────┐
 │  ESP32-S3   │
 │             │
+│  GPIO 12 ◄──┼─── Display MISO + Touch DO
 │  GPIO 13 ───┼──→ Display MOSI + Touch DIN
 │  GPIO 14 ───┼──→ Display SCK + Touch CLK
 │  GPIO 15 ───┼──→ Display CS
@@ -129,7 +130,7 @@
 - `DIAGRAMA_PINES_VISUAL.md` (diagramas visuales)
 
 **Configuración firmware:**
-- `esp32/platformio.ini` (definiciones de pines)
+- `esp32/include/User_Setup.h` (definiciones de pines TFT_eSPI)
 - `esp32/src/main.cpp` (código principal)
 
 ---

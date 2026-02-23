@@ -19,7 +19,7 @@
 #define TFT_HEIGHT 480
 
 // --- Pines SPI ---
-#define TFT_MISO -1     // No conectado
+#define TFT_MISO 12     // Compartido con T_DO del XPT2046 (necesario para touch)
 #define TFT_MOSI 13
 #define TFT_SCLK 14
 #define TFT_CS   15
