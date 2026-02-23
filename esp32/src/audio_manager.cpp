@@ -24,7 +24,7 @@ static HardwareSerial dfSerial(2);
 
 static bool     initialized   = false;
 static bool     playing       = false;
-static Priority currentPri    = Priority::LOW;
+static Priority currentPri    = Priority::LO;
 static unsigned long lastCmdMs = 0;
 
 // Minimum interval between DFPlayer commands
@@ -33,7 +33,7 @@ static constexpr unsigned long CMD_INTERVAL_MS = 100;
 // Pending sound (simple single-slot queue)
 static bool     pendingValid  = false;
 static Sound    pendingSound  = Sound::WELCOME;
-static Priority pendingPri    = Priority::LOW;
+static Priority pendingPri    = Priority::LO;
 
 // Maximum assumed playback duration (ms) — DFPlayer doesn't report end reliably
 static constexpr unsigned long MAX_PLAY_DURATION_MS = 5000;
@@ -94,9 +94,7 @@ void init() {
 
     initialized = true;
     playing     = false;
-    currentPri  = Priority::LOW;
-
-    // Initialize cooldown timestamps to 0
+    currentPri  = Priority::LO;
     for (uint8_t i = 0; i <= MAX_TRACK; ++i) {
         lastPlayedMs[i] = 0;
     }
@@ -112,7 +110,7 @@ void update() {
     // Check if current playback has timed out
     if (playing && (now - playStartMs) >= MAX_PLAY_DURATION_MS) {
         playing    = false;
-        currentPri = Priority::LOW;
+        currentPri = Priority::LO;
     }
 
     // Process pending sound if interval has elapsed
@@ -139,7 +137,7 @@ void play(Sound sound, Priority priority) {
 
     // Per-sound cooldown: skip if same sound was played recently
     // Exception: HIGH priority sounds (errors, emergency) always play
-    if (trackNum <= MAX_TRACK && priority != Priority::HIGH) {
+    if (trackNum <= MAX_TRACK && priority != Priority::HI) {
         if (lastPlayedMs[trackNum] != 0 &&
             (now - lastPlayedMs[trackNum]) < SOUND_COOLDOWN_MS) {
             return;  // Cooldown active, skip

@@ -51,11 +51,11 @@
    │  6  │ SDI     │ MOSI (Datos SPI)             │
    │  7  │ SCK     │ Reloj SPI                    │
    │  8  │ LED     │ Backlight (retroiluminación) │
-   │  9  │ SDO     │ MISO (no usado)              │
+   │  9  │ SDO     │ MISO (compartido con T_DO)   │
    │ 10  │ T_CLK   │ Touch Clock                  │
    │ 11  │ T_CS    │ Touch Chip Select            │
    │ 12  │ T_DIN   │ Touch Data In                │
-   │ 13  │ T_DO    │ Touch Data Out (no usado)    │
+   │ 13  │ T_DO    │ Touch Data Out (→ GPIO 12)   │
    │ 14  │ T_IRQ   │ Touch Interrupt (no usado)   │
    └─────┴─────────┴──────────────────────────────┘
 ```
@@ -75,12 +75,12 @@
 │   SDI (MOSI) │ Datos SPI    │   GPIO 13    │ Master Out Slave In      │
 │   SCK        │ Reloj SPI    │   GPIO 14    │ Clock de sincronización  │
 │   LED        │ Backlight    │   GPIO 42    │ Control de brillo        │
-│   SDO (MISO) │ Lectura SPI  │    -1 (NC)   │ No conectado             │
+│   SDO (MISO) │ Lectura SPI  │   GPIO 12    │ Compartido con T_DO      │
 ├──────────────┼──────────────┼──────────────┼──────────────────────────┤
 │   T_CLK      │ Touch Clock  │   GPIO 14    │ Compartido con SCK       │
 │   T_CS       │ Touch CS     │   GPIO 21    │ Selección Touch Panel    │
 │   T_DIN      │ Touch Data   │   GPIO 13    │ Compartido con MOSI      │
-│   T_DO       │ Touch Out    │    NC        │ No usado (polling)       │
+│   T_DO       │ Touch Out    │   GPIO 12    │ Compartido con MISO      │
 │   T_IRQ      │ Touch IRQ    │    NC        │ No usado (polling)       │
 └──────────────┴──────────────┴──────────────┴──────────────────────────┘
 ```
@@ -94,6 +94,7 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 │      3.3V  ─────┼──────────────────────────┼───► VCC         │
 │      GND   ─────┼──────────────────────────┼───► GND         │
 │                 │                          │                 │
+│   GPIO 12  ◄────┼──────────────────────────┼───◄ SDO (MISO)  │
 │   GPIO 13  ─────┼──────────────────────────┼───► SDI (MOSI)  │
 │   GPIO 14  ─────┼──────────────────────────┼───► SCK         │
 │   GPIO 15  ─────┼──────────────────────────┼───► CS          │
@@ -101,21 +102,21 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 │   GPIO 17  ─────┼──────────────────────────┼───► RESET       │
 │   GPIO 42  ─────┼──────────────────────────┼───► LED         │
 │                 │                          │                 │
+│   GPIO 12  ◄────┼──────────────────────────┼───◄ T_DO        │
 │   GPIO 13  ─────┼──────────┬───────────────┼───► T_DIN       │
 │   (shared) │                          │                 │
 │   GPIO 14  ─────┼──────────┼───────────────┼───► T_CLK       │
 │   (shared) │                          │                 │
 │   GPIO 21  ─────┼──────────────────────────┼───► T_CS        │
 │                 │                          │                 │
-│      SDO   ◄────┼──────────────────────────┼◄─── SDO (NC)    │
-│    (not used)   │                          │    (no conectado)│
 │                 │                          │                 │
 └─────────────────┘                          └─────────────────┘
 
 NOTAS:
+• GPIO12 es compartido entre Display MISO (SDO) y Touch Data Out (T_DO)
 • GPIO13 y GPIO14 son compartidos entre Display SPI y Touch Panel
 • LED (GPIO42) controla la retroiluminación: HIGH=encendido, LOW=apagado
-• MISO no se usa porque el display solo recibe comandos y datos
+• MISO (GPIO12) es necesario para que el XPT2046 envíe coordenadas touch
 • Touch panel usa polling en lugar de interrupciones (T_IRQ no conectado)
 ```
 

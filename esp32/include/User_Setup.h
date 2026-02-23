@@ -19,7 +19,7 @@
 #define TFT_HEIGHT 480
 
 // --- Pines SPI ---
-#define TFT_MISO -1     // No conectado
+#define TFT_MISO 12     // Compartido con T_DO del XPT2046 (necesario para touch)
 #define TFT_MOSI 13
 #define TFT_SCLK 14
 #define TFT_CS   15
@@ -42,7 +42,16 @@
 #define LOAD_GLCD    // Fuente Adafruit GLCD (5×7 px)
 #define LOAD_FONT2   // Fuente smooth 8 pt
 #define LOAD_FONT4   // Fuente smooth 26 pt
+#define LOAD_FONT6   // Fuente dígitos 48 px (solo dígitos 0-9)
+#define LOAD_FONT7   // Fuente 7-segmentos 48 px (solo dígitos 0-9)
+#define LOAD_FONT8   // Fuente 75 px (solo dígitos 0-9)
+#define LOAD_GFXFF   // FreeFonts — fuentes proporcionales de Adafruit GFX
 #define SMOOTH_FONT  // Activa soporte VLW smooth fonts
 
 // --- Rotación por defecto (0=portrait, 1=landscape) ---
 #define TFT_ROTATION 1
+
+// --- Calibración del touch XPT2046 ---
+// Valores por defecto. Ejecutar el ejemplo TFT_eSPI/Touch_calibrate
+// para obtener valores específicos de tu pantalla y sustituirlos aquí.
+#define TOUCH_CALIBRATION  { 256, 3643, 182, 3672, 1 }

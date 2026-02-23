@@ -298,21 +298,22 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 ## 5. ESP32-S3 — Detalle por módulo
 
-### 5.1 Display TFT — ST7796 480×320 vía SPI (6 pines)
+### 5.1 Display TFT — ST7796 480×320 vía SPI (7 pines)
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
+| MISO (SDO) | **GPIO12** | Datos SPI desde display/touch | 20 MHz |
 | MOSI (SDA) | **GPIO13** | Datos SPI al display | 40 MHz |
 | SCLK (SCL) | **GPIO14** | Reloj SPI | 40 MHz |
 | CS | **GPIO15** | Chip Select display | — |
 | DC (A0) | **GPIO16** | Data/Command select | — |
 | RST | **GPIO17** | Reset hardware del display | — |
 | BL | **GPIO42** | Backlight (HIGH = encendido) | — |
-| | | **Subtotal:** | **6 pines** |
+| | | **Subtotal:** | **7 pines** |
 
 - Driver: ST7796, resolución 480×320 en modo landscape (rotación 1)
 - Biblioteca: TFT_eSPI v2.5.43
-- MISO: no conectado (−1), solo escritura
+- MISO (GPIO 12): compartido con T_DO del XPT2046 (necesario para touch)
 
 ### 5.2 Panel táctil — SPI (1 pin)
 
@@ -321,8 +322,8 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | TOUCH_CS | **GPIO21** | Chip Select del panel táctil | 2.5 MHz |
 | | | **Subtotal:** | **1 pin** |
 
-- Comparte MOSI (GPIO13) y SCLK (GPIO14) con el display
-- Pero solo TOUCH_CS cuenta como pin adicional
+- Comparte MOSI (GPIO13), SCLK (GPIO14) y MISO (GPIO12) con el display
+- TOUCH_CS cuenta como pin adicional; MISO (T_DO) se comparte con el bus SPI
 
 ### 5.3 CAN bus — TWAI vía TJA1051 (2 pines)
 
