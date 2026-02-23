@@ -7,6 +7,11 @@
 // Integrates frame limiter: update() is called every loop,
 // but draw() only executes at the target frame rate (20 FPS).
 //
+// Engineering menu access:
+//   1. Long-press (3 s) on the battery icon → PIN entry screen.
+//   2. Enter the correct 4-digit PIN (8989) on the keypad.
+//   3. On success → EngineeringScreen.
+//
 // Reference: docs/HMI_STATE_MODEL.md
 //            docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
@@ -23,6 +28,7 @@
 #include "screens/safe_screen.h"
 #include "screens/error_screen.h"
 #include "screens/engineering_screen.h"
+#include "screens/pin_screen.h"
 #include "ui/frame_limiter.h"
 
 class ScreenManager {
@@ -34,13 +40,19 @@ public:
     /// draw() is only called at the frame-limited rate.
     void update(const vehicle::VehicleData& data);
 
-    /// Feed a touch tap coordinate for secret code detection.
-    /// Call from main loop when a TAP event occurs.
+    /// Forward a TAP event.  Routes to PIN / engineering screen when active.
     void onTouch(int16_t x, int16_t y);
+
+    /// Forward a LONG_PRESS event.  Activates PIN screen if battery icon pressed.
+    void onLongPress(int16_t x, int16_t y);
+
+    /// Returns true while PIN entry or engineering screen is showing.
+    /// Use to suppress normal top-bar touch handling in main loop.
+    bool isBlockingInput() const { return pinActive_ || engineeringActive_; }
 
 private:
     Screen* screenForState(can::SystemState state);
-    void    checkSecretCode(int16_t x);
+    void    activatePinScreen();
 
     BootScreen         bootScreen_;
     StandbyScreen      standbyScreen_;
@@ -48,17 +60,14 @@ private:
     SafeScreen         safeScreen_;
     ErrorScreen        errorScreen_;
     EngineeringScreen  engineeringScreen_;
+    PinScreen          pinScreen_;
 
     Screen*           currentScreen_;
     can::SystemState  currentState_;
     ui::FrameLimiter  frameLimiter_;
 
-    // Secret code "8989" detection (4 taps: left-right-left-right)
-    // Left = x < SCREEN_W/2, Right = x >= SCREEN_W/2
-    static constexpr uint8_t SECRET_CODE_LEN = 4;
-    uint8_t secretCodePos_    = 0;       // Current position in code sequence
-    unsigned long secretLastMs_ = 0;     // Timestamp of last tap
-    bool    engineeringActive_ = false;  // true when eng screen is shown
+    bool pinActive_         = false;  // true while PIN screen is shown
+    bool engineeringActive_ = false;  // true while engineering screen is shown
 };
 
 #endif // SCREEN_MANAGER_H
