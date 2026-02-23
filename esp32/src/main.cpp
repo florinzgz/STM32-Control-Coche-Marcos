@@ -90,13 +90,35 @@ static uint8_t  lastSafetyError = 0;           // last SafetyError code for tran
 static bool     lastLightsRelayOn = false;
 static bool     lightsAudioInit   = false;     // skip first transition on startup
 
-// ---- Multi-error collapse ----
-// When >1 error/warning fires within the burst window, play AUDIO_ERROR_GENERAL
-// instead of stacking individual alerts.
+// ---- Multi-error burst arbitration ----
+// When >1 error/warning fires within the burst window, play the highest-severity
+// sound instead of collapsing to ERROR_GENERAL (Phase 1 AUDIO_MITIGATION_PLAN).
+// Severity order: EMERGENCY > OVERCURRENT > BATTERY_CRITICAL > SENSOR errors > ERROR_GENERAL
 static uint8_t  errorBurstCount = 0;
 static unsigned long errorBurstStartMs = 0;
 static constexpr unsigned long ERROR_BURST_WINDOW_MS = 2000;  // 2 s window
-static constexpr uint8_t ERROR_BURST_THRESHOLD = 2;           // >1 error = general
+static constexpr uint8_t ERROR_BURST_THRESHOLD = 2;           // >=2 errors = burst
+static audio::Sound    burstDominantSound = audio::Sound::ERROR_GENERAL;
+static audio::Priority burstDominantPri   = audio::Priority::HIGH;
+
+/// Burst severity ranking — higher value = more important for the driver.
+/// Determines which sound wins when multiple errors fire within the burst window.
+static uint8_t burstSeverity(audio::Sound s) {
+    switch (s) {
+        case audio::Sound::EMERGENCY:            return 6;
+        case audio::Sound::OVERCURRENT:          return 5;
+        case audio::Sound::BATTERY_CRITICAL:     return 4;
+        case audio::Sound::SENSOR_TEMP_ERROR:    return 3;
+        case audio::Sound::SENSOR_CURRENT_ERROR: return 3;
+        case audio::Sound::SENSOR_SPEED_ERROR:   return 3;
+        case audio::Sound::ENCODER_ERROR:        return 3;
+        case audio::Sound::TEMP_HIGH:            return 3;
+        case audio::Sound::BATTERY_LOW:          return 2;
+        case audio::Sound::OBSTACLE_WARN:        return 2;
+        case audio::Sound::ERROR_GENERAL:        return 1;
+        default:                                 return 0;
+    }
+}
 
 // ---- LED brake/reverse detection thresholds ----
 // Speed sum threshold: 4 wheels × 0.5 km/h × 10 (0.1 km/h units) = 20
@@ -444,23 +466,32 @@ void loop() {
     }
 
     // ---- CAN-triggered audio events ----
-    // Multi-error burst detection: if multiple error/warning events fire
-    // within ERROR_BURST_WINDOW_MS, play ERROR_GENERAL instead of stacking.
+    // Multi-error burst arbitration: when multiple errors fire within the
+    // burst window, play the highest-severity sound (dominant fault) instead
+    // of collapsing to ERROR_GENERAL.  (Phase 1 AUDIO_MITIGATION_PLAN)
     {
         auto st = static_cast<uint8_t>(vehicleData.heartbeat().systemState);
 
-        // --- Helper lambda: queue an error/warning sound with burst detection ---
+        // --- Helper lambda: queue an error/warning sound with burst arbitration ---
         auto playWarning = [&](audio::Sound sound, audio::Priority pri) {
             // Track burst window
             if (errorBurstCount == 0) {
                 errorBurstStartMs = now;
+                burstDominantSound = sound;
+                burstDominantPri   = pri;
             }
             ++errorBurstCount;
 
+            // Track highest-severity sound in burst
+            if (burstSeverity(sound) > burstSeverity(burstDominantSound)) {
+                burstDominantSound = sound;
+                burstDominantPri   = pri;
+            }
+
             if ((now - errorBurstStartMs) < ERROR_BURST_WINDOW_MS &&
                 errorBurstCount >= ERROR_BURST_THRESHOLD) {
-                // Multiple errors in short window → play general error instead
-                audio::play(audio::Sound::ERROR_GENERAL, audio::Priority::HIGH);
+                // Multiple errors in short window → play dominant fault
+                audio::play(burstDominantSound, burstDominantPri);
             } else {
                 audio::play(sound, pri);
             }
