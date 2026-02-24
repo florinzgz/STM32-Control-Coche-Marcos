@@ -1,9 +1,12 @@
 // =============================================================================
-// ESP32-S3 HMI — LED Toggle Button
+// ESP32-S3 HMI — Light Control Buttons
 //
-// Touch-responsive toggle for WS2812B LED strip (power relay on STM32).
-// Drawn in the top bar area, between mode icons and battery indicator.
-// Sends CAN CMD_LED (0x120) on toggle, reflects STM32 STATUS_LIGHTS (0x20A).
+// Two independent touch-responsive toggle buttons for LED relay strips:
+//   Front lights: headlight / low-beam icon (left button)
+//   Rear  lights: brake/tail light icon    (right button)
+//
+// Each button sends CAN CMD_LED (0x120) byte0=front, byte1=rear on toggle.
+// State reflects STM32 STATUS_LIGHTS (0x20A) byte0/byte1.
 //
 // Reference: FIRMWARE_MIGRATION_AUDIT.md Step 6
 // =============================================================================
@@ -18,26 +21,43 @@ namespace ui {
 
 class LedToggle {
 public:
-    /// Draw the toggle button (call once on screen enter)
+    /// Draw both light buttons in their default (OFF) state.
     static void drawStatic(TFT_eSPI& tft);
 
-    /// Update highlight based on LED relay state.
+    /// Update button highlights based on relay states.
     /// Only redraws when state changes.
-    static void draw(TFT_eSPI& tft, bool currentOn, bool previousOn);
+    static void draw(TFT_eSPI& tft,
+                     bool curFront, bool prevFront,
+                     bool curRear,  bool prevRear);
 
-    /// Check if a touch point hits the LED toggle.
-    /// Returns true if the toggle was tapped.
-    static bool hitTest(int16_t touchX, int16_t touchY);
+    /// Check if a touch point hits the front light button.
+    static bool hitTestFront(int16_t touchX, int16_t touchY);
+
+    /// Check if a touch point hits the rear light button.
+    static bool hitTestRear(int16_t touchX, int16_t touchY);
 
 private:
-    static void drawButton(TFT_eSPI& tft, bool active);
+    static void drawFrontButton(TFT_eSPI& tft, bool active);
+    static void drawRearButton(TFT_eSPI& tft, bool active);
 };
 
-// LED toggle position — right of mode icons, left of battery
-inline constexpr int16_t LED_ICON_X  = 200;
-inline constexpr int16_t LED_ICON_Y  = ICON_Y;
-inline constexpr int16_t LED_ICON_W  = 50;
-inline constexpr int16_t LED_ICON_H  = ICON_H;
+// ---- Front light button (low-beam icon) — just right of mode icons ----
+inline constexpr int16_t LED_FRONT_X  = 185;
+inline constexpr int16_t LED_FRONT_Y  = ICON_Y;
+inline constexpr int16_t LED_FRONT_W  = 46;
+inline constexpr int16_t LED_FRONT_H  = ICON_H;
+
+// ---- Rear light button (brake-light icon) — next to front button ----
+inline constexpr int16_t LED_REAR_X   = 237;
+inline constexpr int16_t LED_REAR_Y   = ICON_Y;
+inline constexpr int16_t LED_REAR_W   = 46;
+inline constexpr int16_t LED_REAR_H   = ICON_H;
+
+// Keep legacy alias so existing hitTest callers compile (maps to front)
+inline constexpr int16_t LED_ICON_X  = LED_FRONT_X;
+inline constexpr int16_t LED_ICON_Y  = LED_FRONT_Y;
+inline constexpr int16_t LED_ICON_W  = LED_FRONT_W;
+inline constexpr int16_t LED_ICON_H  = LED_FRONT_H;
 
 } // namespace ui
 

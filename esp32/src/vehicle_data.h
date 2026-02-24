@@ -143,10 +143,13 @@ struct ObstacleData {
 };
 
 // -------------------------------------------------------------------------
-// LED / Lights status (0x20A) — relay state from STM32
+// LED / Lights status (0x20A) — relay states from STM32
+//   Byte 0: front relay (headlights / front LED strip)
+//   Byte 1: rear relay  (tail / brake LED strip)
 // -------------------------------------------------------------------------
 struct LightsData {
-    bool relayOn            = false;   // true = LED power relay active
+    bool frontRelayOn       = false;   // true = front LED relay active
+    bool rearRelayOn        = false;   // true = rear LED relay active
     unsigned long timestampMs = 0;
 };
 

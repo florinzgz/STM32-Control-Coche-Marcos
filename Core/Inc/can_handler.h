@@ -89,9 +89,11 @@ bool CAN_IsESP32Alive(void);
 void CAN_CheckBusOff(void);
 bool CAN_IsBusOff(void);
 
-/* LED relay state (PB10) — toggled via CAN 0x120 from ESP32 */
-void LED_Relay_Set(bool on);
-bool LED_Relay_Get(void);
+/* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
+void LED_Relay_Set(bool on);          /* front relay */
+bool LED_Relay_Get(void);             /* front relay state */
+void LED_Relay_Rear_Set(bool on);     /* rear relay */
+bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t can_stats;
 extern FDCAN_HandleTypeDef hfdcan1;

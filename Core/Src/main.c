@@ -478,10 +478,10 @@ static void MX_GPIO_Init(void)
     gpio.Pin = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* LED power relay (PB10) — starts OFF (safe default) */
-    gpio.Pin = PIN_RELAY_LED;
+    /* LED power relays (PB10 front, PB11 rear) — both start OFF (safe default) */
+    gpio.Pin = PIN_RELAY_LED | PIN_RELAY_LED_REAR;
     HAL_GPIO_Init(GPIOB, &gpio);
-    HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED | PIN_RELAY_LED_REAR, GPIO_PIN_RESET);
 
     /* Wheel speed EXTI inputs */
     gpio.Pin  = PIN_WHEEL_FL | PIN_WHEEL_FR | PIN_WHEEL_RL;
@@ -684,7 +684,7 @@ void Error_Handler(void)
      * Uses direct register access because HAL may be in an inconsistent state.    */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
-    /* LED power relay on GPIOB — also force OFF */
-    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED) << 16U;
+    /* LED power relays on GPIOB — also force OFF (both front and rear) */
+    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     while (1) { }
 }
