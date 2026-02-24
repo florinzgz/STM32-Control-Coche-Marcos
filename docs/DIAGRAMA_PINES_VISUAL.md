@@ -69,18 +69,18 @@
 │   VCC        │ Alimentación │    3.3V      │ Fuente regulada 3.3V     │
 │   GND        │ Tierra       │    GND       │ Común con ESP32          │
 ├──────────────┼──────────────┼──────────────┼──────────────────────────┤
-│   CS         │ Chip Select  │   GPIO 34    │ Selección Display        │
+│   CS         │ Chip Select  │   GPIO 10    │ Selección Display        │
 │   RESET      │ Reset        │   GPIO 38    │ Reset hardware           │
 │   DC/RS      │ Data/Command │   GPIO 33    │ Modo datos/comandos      │
-│   SDI (MOSI) │ Datos SPI    │   GPIO 35    │ Master Out Slave In      │
-│   SCK        │ Reloj SPI    │   GPIO 36    │ Clock de sincronización  │
+│   SDI (MOSI) │ Datos SPI    │   GPIO 13    │ Master Out Slave In      │
+│   SCK        │ Reloj SPI    │   GPIO 14    │ Clock de sincronización  │
 │   LED        │ Backlight    │   GPIO 45    │ Control de brillo        │
-│   SDO (MISO) │ Lectura SPI  │   GPIO 37    │ Compartido con T_DO      │
+│   SDO (MISO) │ Lectura SPI  │   GPIO 12    │ Compartido con T_DO      │
 ├──────────────┼──────────────┼──────────────┼──────────────────────────┤
-│   T_CLK      │ Touch Clock  │   GPIO 36    │ Compartido con SCK       │
+│   T_CLK      │ Touch Clock  │   GPIO 14    │ Compartido con SCK       │
 │   T_CS       │ Touch CS     │   GPIO 21    │ Selección Touch Panel    │
-│   T_DIN      │ Touch Data   │   GPIO 35    │ Compartido con MOSI      │
-│   T_DO       │ Touch Out    │   GPIO 37    │ Compartido con MISO      │
+│   T_DIN      │ Touch Data   │   GPIO 13    │ Compartido con MOSI      │
+│   T_DO       │ Touch Out    │   GPIO 12    │ Compartido con MISO      │
 │   T_IRQ      │ Touch IRQ    │    NC        │ No usado (polling)       │
 └──────────────┴──────────────┴──────────────┴──────────────────────────┘
 ```
@@ -94,18 +94,18 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 │      3.3V  ─────┼──────────────────────────┼───► VCC         │
 │      GND   ─────┼──────────────────────────┼───► GND         │
 │                 │                          │                 │
-│   GPIO 37  ◄────┼──────────────────────────┼───◄ SDO (MISO)  │
-│   GPIO 35  ─────┼──────────────────────────┼───► SDI (MOSI)  │
-│   GPIO 36  ─────┼──────────────────────────┼───► SCK         │
-│   GPIO 34  ─────┼──────────────────────────┼───► CS          │
+│   GPIO 12  ◄────┼──────────────────────────┼───◄ SDO (MISO)  │
+│   GPIO 13  ─────┼──────────────────────────┼───► SDI (MOSI)  │
+│   GPIO 14  ─────┼──────────────────────────┼───► SCK         │
+│   GPIO 10  ─────┼──────────────────────────┼───► CS          │
 │   GPIO 33  ─────┼──────────────────────────┼───► DC/RS       │
 │   GPIO 38  ─────┼──────────────────────────┼───► RESET       │
 │   GPIO 45  ─────┼──────────────────────────┼───► LED         │
 │                 │                          │                 │
-│   GPIO 37  ◄────┼──────────────────────────┼───◄ T_DO        │
-│   GPIO 35  ─────┼──────────┬───────────────┼───► T_DIN       │
+│   GPIO 12  ◄────┼──────────────────────────┼───◄ T_DO        │
+│   GPIO 13  ─────┼──────────┬───────────────┼───► T_DIN       │
 │   (shared) │                          │                 │
-│   GPIO 36  ─────┼──────────┼───────────────┼───► T_CLK       │
+│   GPIO 14  ─────┼──────────┼───────────────┼───► T_CLK       │
 │   (shared) │                          │                 │
 │   GPIO 21  ─────┼──────────────────────────┼───► T_CS        │
 │                 │                          │                 │
@@ -113,10 +113,10 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 └─────────────────┘                          └─────────────────┘
 
 NOTAS:
-• GPIO37 es compartido entre Display MISO (SDO) y Touch Data Out (T_DO)
-• GPIO35 y GPIO36 son compartidos entre Display SPI y Touch Panel
+• GPIO12 es compartido entre Display MISO (SDO) y Touch Data Out (T_DO)
+• GPIO13 y GPIO14 son compartidos entre Display SPI y Touch Panel
 • LED (GPIO45) controla la retroiluminación: HIGH=encendido, LOW=apagado
-• MISO (GPIO37) es necesario para que el XPT2046 envíe coordenadas touch
+• MISO (GPIO12) es necesario para que el XPT2046 envíe coordenadas touch
 • Touch panel usa polling en lugar de interrupciones (T_IRQ no conectado)
 ```
 
@@ -236,11 +236,11 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │    4     │  CAN TX      │ TJA1051 pin 1 (TXD)                        │
 │    5     │  CAN RX      │ TJA1051 pin 4 (RXD)                        │
 ├──────────┼──────────────┼────────────────────────────────────────────┤
+│   10     │  SPI CS      │ Display CS (Chip Select)                   │
+│   12     │  SPI MISO    │ Display SDO + Touch T_DO (compartido)      │
+│   13     │  SPI MOSI    │ Display SDI + Touch T_DIN (compartido)     │
+│   14     │  SPI SCK     │ Display SCK + Touch T_CLK (compartido)     │
 │   33     │  DC/RS       │ Display DC/RS (Data/Command)               │
-│   34     │  SPI CS      │ Display CS (Chip Select)                   │
-│   35     │  SPI MOSI    │ Display SDI + Touch T_DIN (compartido)     │
-│   36     │  SPI SCK     │ Display SCK + Touch T_CLK (compartido)     │
-│   37     │  SPI MISO    │ Display SDO + Touch T_DO (compartido)      │
 │   38     │  RESET       │ Display RESET                              │
 │   21     │  Touch CS    │ Touch Panel T_CS                           │
 │   45     │  Backlight   │ Display LED (retroiluminación)             │
@@ -266,19 +266,17 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
     │  5 ◄──CAN RX                   G2       │
     │  6                             G3       │
     │  7                             G8       │
-    │  15                            G9       │
-    │  16                            G10      │
-    │  17                            G11      │
-    │  18                            G12      │
-    │  8                             G13      │
-    │  19                            G14      │
-    │  20                            G33 ─►DC/RS
-    │  21 ◄─Touch CS                 G34 ─►CS
-    │  47                            G35 ─►MOSI
-    │  48                            G36 ─►SCK
-    │  45 ◄─Display BL               G37◄─MISO
-    │  GND                           G38 ─►RST│
-    │  5V                            G40      │
+    │  8                             G9       │
+    │  9                             G10 ─►CS │
+    │  10 ─►TFT CS                   G11      │
+    │  19                            G12◄─MISO│
+    │  20                            G13 ─►MOSI
+    │  21 ◄─Touch CS                 G14 ─►SCK│
+    │  47                            G33 ─►DC/RS
+    │  48                            G38 ─►RST│
+    │  45 ◄─Display BL               G40      │
+    │  GND                           G41      │
+    │  5V                            G42      │
     │                                         │
     └─────────────────────────────────────────┘
     
@@ -286,6 +284,8 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
     ● = Pines de alimentación y tierra
     ◄ = Pin de salida del ESP32 (output)
     ─► = Pin de entrada al ESP32 (input)
+    GPIO 26–32 no están en los headers (reservados para Flash/PSRAM)
+    GPIO 34–37 NO EXISTEN en la ESP32-S3
 ```
 
 ---

@@ -94,12 +94,12 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 ### Display TFT ST7796 (480×320)
 | Pin Display | GPIO ESP32 | Función |
 |-------------|------------|---------|
-| CS | 34 | Chip Select |
+| CS | 10 | Chip Select |
 | RESET | 38 | Reset |
 | DC/RS | 33 | Data/Command |
-| MOSI (SDI) | 35 | Datos SPI |
-| SCK | 36 | Reloj SPI |
-| MISO (SDO) | 37 | Datos SPI / Touch DO |
+| MOSI (SDI) | 13 | Datos SPI |
+| SCK | 14 | Reloj SPI |
+| MISO (SDO) | 12 | Datos SPI / Touch DO |
 | LED | 45 | Backlight |
 | T_CS | 21 | Touch CS |
 

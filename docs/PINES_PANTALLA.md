@@ -14,17 +14,17 @@
 |--------------------|----------------------------------------|---------------|-------|
 | **VCC**            | Alimentación 3.3 V                     | 3.3 V (pin regulador) | Conectar a la salida 3.3 V del DevKitC-1 |
 | **GND**            | Tierra común                           | GND           | GND compartido con ESP32 |
-| **CS**             | Chip Select del display (activo bajo)  | **GPIO 34**   | `TFT_CS` en User_Setup.h |
+| **CS**             | Chip Select del display (activo bajo)  | **GPIO 10**   | `TFT_CS` en User_Setup.h |
 | **RESET**          | Reset hardware del display (activo bajo) | **GPIO 38** | `TFT_RST` en User_Setup.h |
 | **DC / RS**        | Selección Dato / Comando               | **GPIO 33**   | `TFT_DC`; HIGH = dato, LOW = comando |
-| **SDI / MOSI**     | Datos SPI del ESP32 al display         | **GPIO 35**   | `TFT_MOSI`; SPI HSPI (SPI3_HOST) |
-| **SCK / SCLK**     | Reloj SPI                              | **GPIO 36**   | `TFT_SCLK`; SPI HSPI (SPI3_HOST) |
-| **SDO / MISO**     | Datos SPI del display al ESP32         | **GPIO 37**   | `TFT_MISO`; compartido con T_DO del XPT2046 |
+| **SDI / MOSI**     | Datos SPI del ESP32 al display         | **GPIO 13**   | `TFT_MOSI`; SPI HSPI (SPI3_HOST) |
+| **SCK / SCLK**     | Reloj SPI                              | **GPIO 14**   | `TFT_SCLK`; SPI HSPI (SPI3_HOST) |
+| **SDO / MISO**     | Datos SPI del display al ESP32         | **GPIO 12**   | `TFT_MISO`; compartido con T_DO del XPT2046 |
 | **LED / BL**       | Retroiluminación (backlight)           | **GPIO 45**   | `TFT_BL`; HIGH = encendido, LOW = apagado |
 | **T_CS**           | Chip Select del touch (activo bajo)    | **GPIO 21**   | `TOUCH_CS` en User_Setup.h |
-| **T_DIN**          | Datos SPI al controlador touch         | **GPIO 35**   | Compartido con SDI / MOSI del display |
-| **T_CLK**          | Reloj SPI del touch                    | **GPIO 36**   | Compartido con SCK del display |
-| **T_DO**           | Datos SPI del controlador touch        | **GPIO 37**   | Compartido con SDO / MISO del display |
+| **T_DIN**          | Datos SPI al controlador touch         | **GPIO 13**   | Compartido con SDI / MOSI del display |
+| **T_CLK**          | Reloj SPI del touch                    | **GPIO 14**   | Compartido con SCK del display |
+| **T_DO**           | Datos SPI del controlador touch        | **GPIO 12**   | Compartido con SDO / MISO del display |
 | **T_IRQ**          | Interrupción del touch                 | **No conectar** | El firmware usa polling; no se usa interrupción |
 
 ---
@@ -33,11 +33,11 @@
 
 | GPIO ESP32-S3 | Pin en la Pantalla | Descripción |
 |---------------|--------------------|-------------|
+| GPIO 10       | CS                 | Chip Select display — selecciona el display en el bus |
+| GPIO 12       | SDO (MISO) + T_DO  | Línea de datos SPI (display y touch → ESP32) |
+| GPIO 13       | SDI (MOSI) + T_DIN | Línea de datos SPI (ESP32 → display y touch) |
+| GPIO 14       | SCK + T_CLK        | Reloj SPI compartido display y touch |
 | GPIO 33       | DC / RS            | Data/Command — selecciona modo del bus SPI |
-| GPIO 34       | CS                 | Chip Select display — selecciona el display en el bus |
-| GPIO 35       | SDI (MOSI) + T_DIN | Línea de datos SPI (ESP32 → display y touch) |
-| GPIO 36       | SCK + T_CLK        | Reloj SPI compartido display y touch |
-| GPIO 37       | SDO (MISO) + T_DO  | Línea de datos SPI (display y touch → ESP32) |
 | GPIO 38       | RESET              | Reset hardware del controlador ST7796 |
 | GPIO 21       | T_CS               | Chip Select touch — selecciona el XPT2046 en el bus |
 | GPIO 45       | LED / BL           | Control de retroiluminación |
@@ -55,23 +55,23 @@ ESP32-S3 DevKitC-1                       Display TFT ST7796 + Touch XPT2046
 │  3.3 V  ────────────┼──────────────────┼──► VCC                    │
 │  GND    ────────────┼──────────────────┼──► GND                    │
 │                     │                  │                           │
-│  GPIO 34 (CS)  ─────┼──────────────────┼──► CS    (display)        │
+│  GPIO 10 (CS)  ─────┼──────────────────┼──► CS    (display)        │
 │  GPIO 38 (RST) ─────┼──────────────────┼──► RESET (display)        │
 │  GPIO 33 (DC)  ─────┼──────────────────┼──► DC/RS (display)        │
-│  GPIO 35 (MOSI)─────┼──────────────────┼──► SDI   (display)        │
-│  GPIO 36 (SCK) ─────┼──────────────────┼──► SCK   (display)        │
+│  GPIO 13 (MOSI)─────┼──────────────────┼──► SDI   (display)        │
+│  GPIO 14 (SCK) ─────┼──────────────────┼──► SCK   (display)        │
 │  GPIO 45 (BL)  ─────┼──────────────────┼──► LED   (retroilum.)     │
-│  GPIO 37 (MISO)◄────┼──────────────────┼─── SDO   (display)        │
+│  GPIO 12 (MISO)◄────┼──────────────────┼─── SDO   (display)        │
 │                     │                  │                           │
 │  GPIO 21 (T_CS)─────┼──────────────────┼──► T_CS  (touch)          │
-│  GPIO 35 (MOSI)─────┼──────────────────┼──► T_DIN (touch, compart.)│
-│  GPIO 36 (SCK) ─────┼──────────────────┼──► T_CLK (touch, compart.)│
-│  GPIO 37 (MISO)◄────┼──────────────────┼─── T_DO  (touch, compart.)│
+│  GPIO 13 (MOSI)─────┼──────────────────┼──► T_DIN (touch, compart.)│
+│  GPIO 14 (SCK) ─────┼──────────────────┼──► T_CLK (touch, compart.)│
+│  GPIO 12 (MISO)◄────┼──────────────────┼─── T_DO  (touch, compart.)│
 │                     │                  │  T_IRQ — no conectar      │
 └─────────────────────┘                  └───────────────────────────┘
 
-Nota: GPIO 35, 36 y 37 son compartidos entre display y touch.
-      Se selecciona el periférico activo mediante CS (GPIO 34) o T_CS (GPIO 21).
+Nota: GPIO 12, 13 y 14 son compartidos entre display y touch.
+      Se selecciona el periférico activo mediante CS (GPIO 10) o T_CS (GPIO 21).
 ```
 
 ---
@@ -99,10 +99,10 @@ Nota: GPIO 35, 36 y 37 son compartidos entre display y touch.
 
 #define USE_HSPI_PORT          // SPI3_HOST (HSPI), independiente del SPI por defecto
 
-#define TFT_MOSI 35            // GPIO 35 — datos SPI al display
-#define TFT_MISO 37            // GPIO 37 — datos SPI del display / T_DO del touch
-#define TFT_SCLK 36            // GPIO 36 — reloj SPI
-#define TFT_CS   34            // GPIO 34 — Chip Select display
+#define TFT_MOSI 13            // GPIO 13 — datos SPI al display
+#define TFT_MISO 12            // GPIO 12 — datos SPI del display / T_DO del touch
+#define TFT_SCLK 14            // GPIO 14 — reloj SPI
+#define TFT_CS   10            // GPIO 10 — Chip Select display
 #define TFT_DC   33            // GPIO 33 — Data / Command
 #define TFT_RST  38            // GPIO 38 — Reset display
 
@@ -120,17 +120,21 @@ Nota: GPIO 35, 36 y 37 son compartidos entre display y touch.
 
 ## 6. PINES QUE **NO** SE DEBEN USAR PARA EL DISPLAY
 
-Los GPIOs que aparecen en documentación antigua son **incorrectos y peligrosos**:
+Pines que **no existen o son peligrosos** en la ESP32-S3-DevKitC-1:
 
-| GPIO antiguo | Razón por la que NO se debe usar |
+| GPIO | Razón por la que NO se debe usar |
 |---|---|
-| GPIO 12 | Input-limited, no fiable como MISO |
-| GPIO 13 | Sin conflicto propio, pero ya reemplazado por GPIO 35 |
-| GPIO 14 | Sin conflicto propio, pero ya reemplazado por GPIO 36 |
-| GPIO 15 | **Reservado para flash/PSRAM — causó el crash original** |
-| GPIO 16 | Líneas internas de RAM/Flash en algunos módulos |
-| GPIO 17 | Líneas internas de RAM/Flash en algunos módulos |
-| GPIO 42 | Reemplazado por GPIO 45 para el backlight |
+| GPIO 26 | **Reservado — bus interno Flash CS0** |
+| GPIO 27 | **Reservado — bus interno Flash/PSRAM CLK** |
+| GPIO 28 | **Reservado — bus interno Flash SD0** |
+| GPIO 29 | **Reservado — bus interno Flash SD1** |
+| GPIO 30 | **Reservado — bus interno Flash SD2** |
+| GPIO 31 | **Reservado — bus interno Flash SD3** |
+| GPIO 32 | **Reservado — bus interno PSRAM CS** |
+| GPIO 34 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
+| GPIO 35 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
+| GPIO 36 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
+| GPIO 37 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
 
 ---
 
@@ -140,7 +144,7 @@ Los GPIOs que aparecen en documentación antigua son **incorrectos y peligrosos*
 |----------------------------|----------------|-----------|
 | VCC del display → GND      | 3.30 V ± 0.1 V | < 3.0 V o > 3.5 V |
 | GPIO 45 → GND (encendido)  | 3.3 V (HIGH)   | 0 V → backlight apagado |
-| GPIO 34 → GND (inactivo)   | 3.3 V (HIGH)   | CS debe estar en HIGH cuando no se usa |
+| GPIO 10 → GND (inactivo)   | 3.3 V (HIGH)   | CS debe estar en HIGH cuando no se usa |
 | GPIO 21 → GND (inactivo)   | 3.3 V (HIGH)   | T_CS debe estar en HIGH cuando no se usa |
 
 ---
@@ -150,10 +154,10 @@ Los GPIOs que aparecen en documentación antigua son **incorrectos y peligrosos*
 | Síntoma                 | Causa probable                          | Solución |
 |-------------------------|-----------------------------------------|----------|
 | Pantalla completamente negra | Backlight apagado o sin alimentación | Verificar VCC = 3.3 V y GPIO 45 = HIGH |
-| Pantalla blanca / sin imagen | Reset incorrecto o CS incorrecto      | Verificar GPIO 38 (RST) y GPIO 34 (CS) |
+| Pantalla blanca / sin imagen | Reset incorrecto o CS incorrecto      | Verificar GPIO 38 (RST) y GPIO 10 (CS) |
 | Imagen corrupta / ruido  | Interferencia en el bus SPI            | Cables SPI < 20 cm; capacitor 100 nF en VCC del display |
-| Touch no responde        | T_CS o MISO no conectados              | Verificar GPIO 21 → T_CS y GPIO 37 → T_DO |
-| Crash al iniciar el SPI  | GPIO 15 / 16 / 17 en uso              | **Usar únicamente los GPIOs de este documento** |
+| Touch no responde        | T_CS o MISO no conectados              | Verificar GPIO 21 → T_CS y GPIO 12 → T_DO |
+| Crash al iniciar el SPI  | GPIO 34/35/36/37 en uso (no existen)  | **Usar únicamente los GPIOs de este documento** |
 
 ---
 

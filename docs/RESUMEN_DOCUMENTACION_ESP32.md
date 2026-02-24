@@ -50,17 +50,17 @@ Se ha creado documentación completa sobre las conexiones de pines del ESP32-S3 
 |-------------------|--------------|---------|
 | **vcc** | 3.3V | Alimentación |
 | **gnd** | GND | Tierra |
-| **cs** | GPIO 34 | Chip Select Display |
+| **cs** | GPIO 10 | Chip Select Display |
 | **reset** | GPIO 38 | Reset Display |
 | **dc/rs** | GPIO 33 | Data/Command |
-| **sdi (mosi)** | GPIO 35 | Datos SPI |
-| **sck** | GPIO 36 | Reloj SPI |
+| **sdi (mosi)** | GPIO 13 | Datos SPI |
+| **sck** | GPIO 14 | Reloj SPI |
 | **led** | GPIO 45 | Retroiluminación |
-| **sdo (miso)** | GPIO 37 | Compartido con T_DO (touch) |
+| **sdo (miso)** | GPIO 12 | Compartido con T_DO (touch) |
 | **t_cs** | GPIO 21 | Chip Select Touch |
-| **t_din** | GPIO 35 | Touch Data (compartido con MOSI) |
-| **t_clk** | GPIO 36 | Touch Clock (compartido con SCK) |
-| **t_do** | GPIO 37 | Touch Data Out (compartido con MISO) |
+| **t_din** | GPIO 13 | Touch Data (compartido con MOSI) |
+| **t_clk** | GPIO 14 | Touch Clock (compartido con SCK) |
+| **t_do** | GPIO 12 | Touch Data Out (compartido con MISO) |
 | **t_irq** | No conectar | No usado (modo polling) |
 
 ### CAN-Bus (ESP32-S3 → TJA1051)
@@ -163,10 +163,10 @@ Los pines están definidos en:
 ## ❓ Preguntas Frecuentes
 
 **Q: ¿Por qué T_IRQ no se conecta?**  
-A: El touch panel usa polling en lugar de interrupciones, por lo que T_IRQ no es necesario. Sin embargo, T_DO (Touch Data Out) sí se conecta a GPIO 37 (MISO) porque el XPT2046 necesita enviar las coordenadas touch de vuelta al ESP32.
+A: El touch panel usa polling en lugar de interrupciones, por lo que T_IRQ no es necesario. Sin embargo, T_DO (Touch Data Out) sí se conecta a GPIO 12 (MISO) porque el XPT2046 necesita enviar las coordenadas touch de vuelta al ESP32.
 
 **Q: ¿Puedo usar MISO del display?**  
-A: Sí, MISO (GPIO 37) se comparte entre el display (SDO) y el touch (T_DO). Es necesario para que el XPT2046 envíe las coordenadas de toque.
+A: Sí, MISO (GPIO 12) se comparte entre el display (SDO) y el touch (T_DO). Es necesario para que el XPT2046 envíe las coordenadas de toque.
 
 **Q: ¿Por qué el TJA1051 necesita 5V si el ESP32 es 3.3V?**  
 A: El TJA1051 necesita 5V para alimentación, pero sus pines de entrada/salida son compatibles con 3.3V.

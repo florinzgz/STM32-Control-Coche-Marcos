@@ -39,16 +39,16 @@ La pantalla tiene los siguientes pines según tu descripción:
 | **VCC** | Alimentación 3.3V | 3.3V | — | Fuente de alimentación regulada |
 | **GND** | Tierra | GND | — | Común con ESP32 |
 | **LED** | Backlight (Retroiluminación) | GPIO45 | 45 | Control de brillo (HIGH=encendido) |
-| **CS** | Chip Select Display | GPIO34 | 34 | Selección display (activo bajo) |
+| **CS** | Chip Select Display | GPIO10 | 10 | Selección display (activo bajo) |
 | **RESET** | Reset Display | GPIO38 | 38 | Reset del display (activo bajo) |
 | **DC/RS** | Data/Command | GPIO33 | 33 | HIGH=data, LOW=command |
-| **SDI (MOSI)** | Master Out Slave In | GPIO35 | 35 | Datos SPI del ESP32 al display |
-| **SCK** | SPI Clock | GPIO36 | 36 | Reloj SPI |
-| **SDO (MISO)** | Master In Slave Out | GPIO37 | 37 | Compartido con T_DO (necesario para touch) |
-| **T_CLK** | Touch Clock | GPIO36 | 36 | Compartido con SCK del display |
+| **SDI (MOSI)** | Master Out Slave In | GPIO13 | 13 | Datos SPI del ESP32 al display |
+| **SCK** | SPI Clock | GPIO14 | 14 | Reloj SPI |
+| **SDO (MISO)** | Master In Slave Out | GPIO12 | 12 | Compartido con T_DO (necesario para touch) |
+| **T_CLK** | Touch Clock | GPIO14 | 14 | Compartido con SCK del display |
 | **T_CS** | Touch Chip Select | GPIO21 | 21 | Selección touch panel |
-| **T_DIN** | Touch Data In | GPIO35 | 35 | Compartido con SDI (MOSI) |
-| **T_DO** | Touch Data Out | GPIO37 | 37 | Compartido con SDO (MISO) — XPT2046 data out |
+| **T_DIN** | Touch Data In | GPIO13 | 13 | Compartido con SDI (MOSI) |
+| **T_DO** | Touch Data Out | GPIO12 | 12 | Compartido con SDO (MISO) — XPT2046 data out |
 | **T_IRQ** | Touch Interrupt | *No usado* | — | Polling mode en lugar de interrupciones |
 
 ### 1.3 Diagrama de Conexión - Display
@@ -61,17 +61,17 @@ La pantalla tiene los siguientes pines según tu descripción:
 │  3.3V ─────────────────────────────────────────► VCC (Display)  │
 │  GND  ─────────────────────────────────────────► GND (Display)  │
 │                                                                  │
-│  GPIO37 (SPI MISO) ─────────────────────────────► SDO (MISO)    │
-│  GPIO35 (SPI MOSI) ─────────────────────────────► SDI (MOSI)    │
-│  GPIO36 (SPI SCK)  ─────────────────────────────► SCK           │
-│  GPIO34 (SPI CS)   ─────────────────────────────► CS            │
+│  GPIO12 (SPI MISO) ─────────────────────────────► SDO (MISO)    │
+│  GPIO13 (SPI MOSI) ─────────────────────────────► SDI (MOSI)    │
+│  GPIO14 (SPI SCK)  ─────────────────────────────► SCK           │
+│  GPIO10 (SPI CS)   ─────────────────────────────► CS            │
 │  GPIO33 (DC/RS)    ─────────────────────────────► DC/RS         │
 │  GPIO38 (RESET)    ─────────────────────────────► RESET         │
 │  GPIO45 (Backlight)─────────────────────────────► LED           │
 │                                                                  │
-│  GPIO37 (compartido)─────────────────────────────► T_DO         │
-│  GPIO35 (compartido)─────────────────────────────► T_DIN        │
-│  GPIO36 (compartido)─────────────────────────────► T_CLK        │
+│  GPIO12 (compartido)─────────────────────────────► T_DO         │
+│  GPIO13 (compartido)─────────────────────────────► T_DIN        │
+│  GPIO14 (compartido)─────────────────────────────► T_CLK        │
 │  GPIO21 (Touch CS) ──────────────────────────────► T_CS         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -98,10 +98,10 @@ Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 #define TFT_WIDTH  320
 #define TFT_HEIGHT 480
 #define USE_HSPI_PORT
-#define TFT_MOSI 35    // GPIO35 — datos SPI al display
-#define TFT_MISO 37    // GPIO37 — compartido con T_DO del XPT2046
-#define TFT_SCLK 36    // GPIO36 — reloj SPI
-#define TFT_CS   34    // GPIO34 — Chip Select display
+#define TFT_MOSI 13    // GPIO13 — datos SPI al display
+#define TFT_MISO 12    // GPIO12 — compartido con T_DO del XPT2046
+#define TFT_SCLK 14    // GPIO14 — reloj SPI
+#define TFT_CS   10    // GPIO10 — Chip Select display
 #define TFT_DC   33    // GPIO33 — Data/Command
 #define TFT_RST  38    // GPIO38 — Reset display
 #define TFT_BL            45
@@ -273,9 +273,9 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 
 2. **Conectar Display TFT:**
    - Comenzar con VCC y GND del display
-   - Conectar pines SPI: MISO (37), MOSI (35), SCK (36), CS (34)
+   - Conectar pines SPI: MISO (12), MOSI (13), SCK (14), CS (10)
    - Conectar pines de control: DC (33), RESET (38), LED (45)
-   - Conectar Touch: T_CS (21), T_DO (37), T_DIN (35) y T_CLK (36) compartidos
+   - Conectar Touch: T_CS (21), T_DO (12), T_DIN (13) y T_CLK (14) compartidos
 
 3. **Probar Display:**
    - Cargar firmware de prueba
@@ -321,7 +321,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | Pantalla negra | Sin alimentación o backlight apagado | Verificar VCC=3.3V, GPIO45=HIGH |
 | Display blanco | Reset no funcionando | Verificar GPIO38, agregar delay después de reset |
 | Imagen invertida/rotada | Rotación incorrecta | Cambiar `tft.setRotation(1)` en código |
-| Touch no responde | T_CS o T_DO no conectado | Verificar GPIO21 a T_CS y GPIO37 a T_DO del display |
+| Touch no responde | T_CS o T_DO no conectado | Verificar GPIO21 a T_CS y GPIO12 a T_DO del display |
 | Líneas horizontales | Interferencia SPI | Cables más cortos, agregar capacitor 100nF en VCC del display |
 
 ### 5.2 Problemas de CAN Bus
