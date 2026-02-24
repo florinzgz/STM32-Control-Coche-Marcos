@@ -48,7 +48,8 @@ private:
     ui::Gear prevGear_           = ui::Gear::P;
     ui::ModeState prevMode_      = {};
     uint16_t prevObstacleCm_     = 0;
-    bool     prevLedOn_          = false;
+    bool     prevFrontLedOn_     = false;
+    bool     prevRearLedOn_      = false;
 
     // Current frame values (populated in update, used in draw)
     uint8_t  curTraction_[4]     = {};
@@ -60,7 +61,8 @@ private:
     ui::Gear curGear_            = ui::Gear::P;
     ui::ModeState curMode_       = {};
     uint16_t curObstacleCm_      = 0;
-    bool     curLedOn_           = false;
+    bool     curFrontLedOn_      = false;
+    bool     curRearLedOn_       = false;
 
     bool     needsFullRedraw_    = true;
 

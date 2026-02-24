@@ -36,8 +36,9 @@ static uint8_t  heartbeat_counter = 0;
 #define STATUS_FLAG_TEMP_COUNT_SHIFT 3       /* Bits 3-5: DS18B20 count */
 #define STATUS_FLAG_TEMP_COUNT_MASK  0x07U   /* 3-bit mask (0-7) */
 
-/* LED relay state (PB10) — defaults OFF for safe power-on */
-static bool led_relay_on = false;
+/* LED relay states — front (PB10) and rear (PB11) — default OFF */
+static bool led_relay_front = false;
+static bool led_relay_rear  = false;
 
 /* Bus-off recovery state (non-blocking, timestamp-based) */
 static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in progress */
@@ -467,36 +468,46 @@ void CAN_SendServiceStatus(void) {
 }
 
 /**
- * @brief  Set LED power relay state (PB10).
- * @param  on  true = relay ON (LEDs powered), false = relay OFF
- *
- * The relay controls 5V supply to WS2812B LED strips.  The ESP32
- * drives the WS2812B data line for patterns; the STM32 controls
- * the power relay as a safety cutoff.
+ * @brief  Set front LED power relay state (PB10).
+ * @param  on  true = relay ON (front LEDs powered), false = relay OFF
  */
 void LED_Relay_Set(bool on) {
-    led_relay_on = on;
+    led_relay_front = on;
     HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED,
                       on ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
+/**
+ * @brief  Set rear LED power relay state (PB11).
+ * @param  on  true = relay ON (rear LEDs powered), false = relay OFF
+ */
+void LED_Relay_Rear_Set(bool on) {
+    led_relay_rear = on;
+    HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED_REAR,
+                      on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
 bool LED_Relay_Get(void) {
-    return led_relay_on;
+    return led_relay_front;
+}
+
+bool LED_Relay_Rear_Get(void) {
+    return led_relay_rear;
 }
 
 /**
  * @brief  Send LED/light status to ESP32.
  *
- *   Byte 0: led_relay_on (0 = OFF, 1 = ON)
- *   Byte 1: reserved (0)
+ *   Byte 0: led_relay_front (0 = OFF, 1 = ON)
+ *   Byte 1: led_relay_rear  (0 = OFF, 1 = ON)
  *
  * CAN ID: 0x20A   DLC: 2   Rate: 1000 ms (1 Hz)
  */
 void CAN_SendStatusLights(void) {
     uint8_t data[2];
 
-    data[0] = led_relay_on ? 1 : 0;
-    data[1] = 0;  /* Reserved for future pattern/mode byte */
+    data[0] = led_relay_front ? 1 : 0;
+    data[1] = led_relay_rear  ? 1 : 0;
 
     TransmitFrame(CAN_ID_STATUS_LIGHTS, data, 2);
 }
@@ -682,13 +693,17 @@ void CAN_ProcessMessages(void) {
 
             case CAN_ID_CMD_LED:
                 /* LED relay control from ESP32 (0x120):
-                 *   Byte 0: 0 = OFF, 1 = ON
+                 *   Byte 0: front relay (0 = OFF, 1 = ON)
+                 *   Byte 1: rear  relay (0 = OFF, 1 = ON)
                  *
-                 * Controls the 5V power relay for WS2812B LED strips.
+                 * Controls the 5V power relays for WS2812B LED strips.
                  * Always accepted (not safety-critical).  ACK confirms
                  * the new state.                                        */
                 if (msg_len >= 1) {
                     LED_Relay_Set(rx_payload[0] != 0);
+                    if (msg_len >= 2) {
+                        LED_Relay_Rear_Set(rx_payload[1] != 0);
+                    }
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_OK);
                 } else {
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);

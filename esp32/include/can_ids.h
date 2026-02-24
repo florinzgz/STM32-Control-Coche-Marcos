@@ -28,7 +28,7 @@ inline constexpr uint32_t HEARTBEAT_ESP32       = 0x011;    // DLC —, 100 ms
 inline constexpr uint32_t CMD_THROTTLE          = 0x100;    // DLC 1, 50 ms
 inline constexpr uint32_t CMD_STEERING          = 0x101;    // DLC 2, 50 ms
 inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 2 (byte0=mode flags, byte1=gear), on-demand
-inline constexpr uint32_t CMD_LED               = 0x120;    // DLC 1 (byte0: 0=OFF 1=ON), on-demand
+inline constexpr uint32_t CMD_LED               = 0x120;    // DLC 2 (byte0=front relay, byte1=rear relay), on-demand
 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  Command Acknowledgment (§3.5)
@@ -57,8 +57,13 @@ inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 8, 100 ms o
 // -------------------------------------------------------------------------
 // STM32 → ESP32  LED / Lights Status (Audit Step 6)
 // -------------------------------------------------------------------------
-inline constexpr uint32_t STATUS_LIGHTS          = 0x20A;    // DLC 2, 1000 ms  LED relay state + reserved
+inline constexpr uint32_t STATUS_LIGHTS          = 0x20A;    // DLC 2, 1000 ms  byte0=front relay, byte1=rear relay
 
+// -------------------------------------------------------------------------
+// ESP32 → STM32  LED relay command (§3.1)
+//   Byte 0: front relay (0=OFF, 1=ON)
+//   Byte 1: rear  relay (0=OFF, 1=ON)
+// -------------------------------------------------------------------------
 // -------------------------------------------------------------------------
 // Bidirectional  Diagnostic (§3.3)
 // -------------------------------------------------------------------------

@@ -8,6 +8,8 @@
 //   3. Module enable/disable (via SERVICE_CMD 0x110)
 //   4. Factory restore (via SERVICE_CMD 0x110, action 0xFF)
 //   5. Fault viewer (SERVICE_FAULTS/ENABLED/DISABLED 0x301-0x303)
+//   6. Sensor mapping — assign INA226 channels and DS18B20 sensors
+//      to vehicle positions (FL, FR, RL, RR, Battery, Steering, Ambient)
 //
 // No heap allocation.  All format buffers are fixed-size stack arrays.
 //
@@ -18,6 +20,7 @@
 #define ENGINEERING_SCREEN_H
 
 #include "screen.h"
+#include "config_store.h"
 #include <cstdint>
 
 class EngineeringScreen : public Screen {
@@ -42,13 +45,17 @@ private:
         FAULT_VIEWER,
         MODULE_CONTROL,
         PEDAL_CAL,
-        ENCODER_CAL
+        ENCODER_CAL,
+        SENSOR_MAP_INA,    // INA226 channel-to-position mapping
+        SENSOR_MAP_TEMP    // DS18B20 sensor-to-position mapping
     };
 
     void drawMainMenu();
     void drawFaultViewer();
     void drawModuleControl();
     void drawCalibration(const char* title);
+    void drawSensorMapIna();
+    void drawSensorMapTemp();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -61,6 +68,14 @@ private:
     uint32_t    prevFaultBits_ = 0xFFFFFFFF;
     uint32_t    prevEnabledBits_ = 0xFFFFFFFF;
     uint32_t    prevDisabledBits_ = 0xFFFFFFFF;
+
+    // Sensor mapping edit state
+    // Selected row (0=none selected, 1..N = row index 1-based)
+    uint8_t     inaEditRow_  = 0;
+    uint8_t     tempEditRow_ = 0;
+    // Working copies of mapping arrays (edited in-place, saved on "SAVE")
+    uint8_t     inaMap_[config_store::NUM_INA226_CH]  = {0,1,2,3,4,5};
+    uint8_t     tempMap_[config_store::NUM_TEMP_SENS] = {0,1,2,3,4};
 };
 
 #endif // ENGINEERING_SCREEN_H

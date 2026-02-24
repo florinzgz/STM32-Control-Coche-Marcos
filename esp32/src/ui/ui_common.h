@@ -35,6 +35,7 @@ inline constexpr uint16_t COL_GRAY        = 0x8410;
 inline constexpr uint16_t COL_DARK_GRAY   = 0x4208;
 inline constexpr uint16_t COL_ORANGE      = 0xFD20;
 inline constexpr uint16_t COL_AMBER       = 0xFBE0;
+inline constexpr uint16_t COL_HEADLIGHT   = 0xFE60;  // Warm orange-yellow for headlight housing
 
 // -------------------------------------------------------------------------
 // Layout zones (Y coordinates, 480×320 landscape)

@@ -61,7 +61,8 @@ void DriveScreen::onEnter() {
     prevGear_        = ui::Gear::P;
     prevMode_        = {};
     prevObstacleCm_  = 0;
-    prevLedOn_       = false;
+    prevFrontLedOn_  = false;
+    prevRearLedOn_   = false;
 
     // Reset ACK indicator state
     ackLastShownMs_    = 0;
@@ -139,8 +140,9 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     // Obstacle sensor
     curObstacleCm_ = data.obstacle().distanceCm;
 
-    // LED relay state from STM32
-    curLedOn_ = data.lights().relayOn;
+    // LED relay states from STM32
+    curFrontLedOn_ = data.lights().frontRelayOn;
+    curRearLedOn_  = data.lights().rearRelayOn;
 
     // ACK visual feedback: detect new ACK or timeout events
     {
@@ -227,7 +229,8 @@ void DriveScreen::draw() {
         }
         prevMode_.is4x4     = !curMode_.is4x4;
         prevMode_.isTankTurn = !curMode_.isTankTurn;
-        prevLedOn_          = !curLedOn_;
+        prevFrontLedOn_     = !curFrontLedOn_;
+        prevRearLedOn_      = !curRearLedOn_;
     }
 
     // Partial redraw: only changed elements
@@ -291,11 +294,12 @@ void DriveScreen::draw() {
     }
     ui::ModeIcons::draw(tft, curMode_, prevMode_);
 
-    // LED toggle button (part of top bar zone)
-    if (curLedOn_ != prevLedOn_) {
+    // LED toggle buttons (part of top bar zone)
+    if (curFrontLedOn_ != prevFrontLedOn_ || curRearLedOn_ != prevRearLedOn_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
     }
-    ui::LedToggle::draw(tft, curLedOn_, prevLedOn_);
+    ui::LedToggle::draw(tft, curFrontLedOn_, prevFrontLedOn_,
+                             curRearLedOn_,  prevRearLedOn_);
 
     // ACK visual feedback indicator (brief text near top bar)
     drawAckIndicator();
@@ -310,7 +314,8 @@ void DriveScreen::draw() {
     prevGear_        = curGear_;
     prevMode_        = curMode_;
     prevObstacleCm_  = curObstacleCm_;
-    prevLedOn_       = curLedOn_;
+    prevFrontLedOn_  = curFrontLedOn_;
+    prevRearLedOn_   = curRearLedOn_;
 
     RTRACE_DUMP_IF_PENDING();
 }

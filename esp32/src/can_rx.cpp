@@ -169,10 +169,13 @@ static void decodeCommandAck(const CanFrame& f, vehicle::VehicleData& data) {
 }
 
 static void decodeLights(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 2) return;
+    // DLC >= 1: accept single-byte commands (byte0=front) for backward compatibility.
+    // DLC >= 2: byte1 = rear relay.
+    if (f.data_length_code < 1) return;
     vehicle::LightsData ld;
-    ld.relayOn     = (f.data[0] != 0);
-    ld.timestampMs = millis();
+    ld.frontRelayOn = (f.data[0] != 0);
+    ld.rearRelayOn  = (f.data_length_code >= 2) ? (f.data[1] != 0) : false;
+    ld.timestampMs  = millis();
     data.setLights(ld);
 }
 

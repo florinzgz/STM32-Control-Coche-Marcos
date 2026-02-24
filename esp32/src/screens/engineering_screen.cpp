@@ -9,6 +9,7 @@
 #include "ui/ui_common.h"
 #include "ui/render_trace.h"
 #include "can_ids.h"
+#include "config_store.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <cstdio>
@@ -19,24 +20,54 @@ extern TFT_eSPI tft;
 // ---- Menu button layout ----
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
-static constexpr int16_t MENU_BTN_H   = 40;
-static constexpr int16_t MENU_START_Y = 60;
-static constexpr int16_t MENU_SPACING = 50;
+static constexpr int16_t MENU_BTN_H   = 36;
+static constexpr int16_t MENU_START_Y = 55;
+static constexpr int16_t MENU_SPACING = 42;
 
-static constexpr int     NUM_MAIN_ITEMS = 5;
+static constexpr int     NUM_MAIN_ITEMS = 7;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
     "PEDAL CALIBRATION",
     "ENCODER CALIBRATION",
+    "INA226 SENSOR MAPPING",
+    "TEMP SENSOR MAPPING",
     "FACTORY RESTORE"
 };
 
-// ---- Back button ----
+// ---- Back / Save buttons ----
 static constexpr int16_t BACK_X = 10;
 static constexpr int16_t BACK_Y = 280;
 static constexpr int16_t BACK_W = 80;
 static constexpr int16_t BACK_H = 30;
+
+static constexpr int16_t SAVE_X = 390;
+static constexpr int16_t SAVE_Y = 280;
+static constexpr int16_t SAVE_W = 80;
+static constexpr int16_t SAVE_H = 30;
+
+// ---- Sensor mapping row layout ----
+static constexpr int16_t MAP_ROW_X   = 10;
+static constexpr int16_t MAP_ROW_W   = 460;
+static constexpr int16_t MAP_ROW_H   = 28;
+static constexpr int16_t MAP_ROW_Y0  = 55;
+static constexpr int16_t MAP_ROW_SPC = 32;
+
+// INA226 position labels (channel index → position name)
+static const char* const INA_CHAN_NAMES[config_store::NUM_INA226_CH] = {
+    "Ch0", "Ch1", "Ch2", "Ch3", "Ch4", "Ch5"
+};
+static const char* const INA_POS_NAMES[config_store::NUM_INA226_CH] = {
+    "FL Motor", "FR Motor", "RL Motor", "RR Motor", "Battery", "Steering"
+};
+
+// DS18B20 position labels (sensor index → position name)
+static const char* const TEMP_IDX_NAMES[config_store::NUM_TEMP_SENS] = {
+    "Sens0", "Sens1", "Sens2", "Sens3", "Sens4"
+};
+static const char* const TEMP_POS_NAMES[config_store::NUM_TEMP_SENS] = {
+    "FL Wheel", "FR Wheel", "RL Wheel", "RR Wheel", "Ambient"
+};
 
 // -------------------------------------------------------------------------
 // Lifecycle
@@ -46,9 +77,16 @@ void EngineeringScreen::onEnter() {
     needsRedraw_ = true;
     exitRequested_ = false;
     currentMenu_ = SubMenu::MAIN;
+    inaEditRow_  = 0;
+    tempEditRow_ = 0;
     prevFaultBits_    = 0xFFFFFFFF;
     prevEnabledBits_  = 0xFFFFFFFF;
     prevDisabledBits_ = 0xFFFFFFFF;
+
+    // Load current sensor mappings from config into working copies
+    const auto& cfg = config_store::get();
+    memcpy(inaMap_,  cfg.ina226Map,      config_store::NUM_INA226_CH);
+    memcpy(tempMap_, cfg.tempSensorMap,  config_store::NUM_TEMP_SENS);
 }
 
 void EngineeringScreen::onExit() {}
@@ -66,9 +104,6 @@ void EngineeringScreen::update(const vehicle::VehicleData& data) {
 void EngineeringScreen::draw() {
     if (needsRedraw_) {
         needsRedraw_ = false;
-        // Actual TFT clear. Each submenu helper calls RTRACE_BEGIN_SCREEN()
-        // which resets the trace buffer and then records its own fillScreen
-        // as the first entry — so the draw order remains correct.
         tft.fillScreen(ui::COL_BG);
 
         switch (currentMenu_) {
@@ -77,6 +112,8 @@ void EngineeringScreen::draw() {
             case SubMenu::MODULE_CONTROL: drawModuleControl();     break;
             case SubMenu::PEDAL_CAL:      drawCalibration("PEDAL CALIBRATION"); break;
             case SubMenu::ENCODER_CAL:    drawCalibration("ENCODER CALIBRATION"); break;
+            case SubMenu::SENSOR_MAP_INA: drawSensorMapIna();      break;
+            case SubMenu::SENSOR_MAP_TEMP: drawSensorMapTemp();    break;
         }
     }
 
@@ -135,9 +172,27 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             currentMenu_ = SubMenu::MAIN;
             needsRedraw_ = true;
         } else {
-            // EXIT from engineering mode
             exitRequested_ = true;
         }
+        return true;
+    }
+
+    // Save button (sensor mapping submenus only)
+    if ((currentMenu_ == SubMenu::SENSOR_MAP_INA ||
+         currentMenu_ == SubMenu::SENSOR_MAP_TEMP) &&
+        x >= SAVE_X && x <= SAVE_X + SAVE_W &&
+        y >= SAVE_Y && y <= SAVE_Y + SAVE_H) {
+        if (currentMenu_ == SubMenu::SENSOR_MAP_INA) {
+            config_store::setIna226Map(inaMap_);
+            Serial.println("[ENG] INA226 map saved");
+        } else {
+            config_store::setTempSensorMap(tempMap_);
+            Serial.println("[ENG] Temp sensor map saved");
+        }
+        config_store::flush();
+        // Return to main
+        currentMenu_ = SubMenu::MAIN;
+        needsRedraw_ = true;
         return true;
     }
 
@@ -152,7 +207,21 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                         case 1: currentMenu_ = SubMenu::MODULE_CONTROL; break;
                         case 2: currentMenu_ = SubMenu::PEDAL_CAL;      break;
                         case 3: currentMenu_ = SubMenu::ENCODER_CAL;    break;
-                        case 4: {
+                        case 4:
+                            // Load fresh copy before entering INA mapping
+                            memcpy(inaMap_, config_store::get().ina226Map,
+                                   config_store::NUM_INA226_CH);
+                            inaEditRow_ = 0;
+                            currentMenu_ = SubMenu::SENSOR_MAP_INA;
+                            break;
+                        case 5:
+                            // Load fresh copy before entering temp mapping
+                            memcpy(tempMap_, config_store::get().tempSensorMap,
+                                   config_store::NUM_TEMP_SENS);
+                            tempEditRow_ = 0;
+                            currentMenu_ = SubMenu::SENSOR_MAP_TEMP;
+                            break;
+                        case 6: {
                             // Factory restore — send SERVICE_CMD 0x110
                             CanFrame frame = {};
                             frame.identifier       = can::SERVICE_CMD;
@@ -170,6 +239,37 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 }
             }
         }
+        return false;
+    }
+
+    // INA226 mapping: tap a row to cycle its position assignment
+    if (currentMenu_ == SubMenu::SENSOR_MAP_INA) {
+        for (uint8_t i = 0; i < config_store::NUM_INA226_CH; ++i) {
+            int16_t rowY = MAP_ROW_Y0 + i * MAP_ROW_SPC;
+            if (x >= MAP_ROW_X && x <= MAP_ROW_X + MAP_ROW_W &&
+                y >= rowY && y <= rowY + MAP_ROW_H) {
+                // Cycle position: increment mod NUM_INA226_CH
+                inaMap_[i] = (inaMap_[i] + 1) % config_store::NUM_INA226_CH;
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Temp sensor mapping: tap a row to cycle its position assignment
+    if (currentMenu_ == SubMenu::SENSOR_MAP_TEMP) {
+        for (uint8_t i = 0; i < config_store::NUM_TEMP_SENS; ++i) {
+            int16_t rowY = MAP_ROW_Y0 + i * MAP_ROW_SPC;
+            if (x >= MAP_ROW_X && x <= MAP_ROW_X + MAP_ROW_W &&
+                y >= rowY && y <= rowY + MAP_ROW_H) {
+                // Cycle position: increment mod NUM_TEMP_SENS
+                tempMap_[i] = (tempMap_[i] + 1) % config_store::NUM_TEMP_SENS;
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        return false;
     }
 
     return false;
@@ -179,7 +279,6 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 // Draw helpers
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawMainMenu() {
-    // Begin a dedicated trace for the engineering main menu
     RTRACE_BEGIN_SCREEN("eng_main");
     RTRACE_SET_LAYER(0);
     RTRACE_FILL_SCREEN(ui::COL_BG);
@@ -189,15 +288,15 @@ void EngineeringScreen::drawMainMenu() {
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("ENGINEERING", ui::SCREEN_W / 2, 25);
-    RTRACE_TEXT(ui::SCREEN_W / 2, 25, "ENGINEERING",
+    tft.drawString("ENGINEERING", ui::SCREEN_W / 2, 22);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 22, "ENGINEERING",
                 ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 
     // Menu buttons
     for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
         int16_t btnY = MENU_START_Y + i * MENU_SPACING;
-        uint16_t bgCol = (i == 4) ? ui::COL_RED : ui::COL_DARK_GRAY;
+        uint16_t bgCol = (i == 6) ? ui::COL_RED : ui::COL_DARK_GRAY;
         uint16_t txtCol = ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
@@ -305,8 +404,6 @@ void EngineeringScreen::drawModuleControl() {
 }
 
 void EngineeringScreen::drawCalibration(const char* title) {
-    // Select trace screen name based on title prefix (PEDAL vs ENCODER).
-    // Use strncmp for robustness against future title changes.
     const char* traceName = (strncmp(title, "PEDAL", 5) == 0)
                             ? "eng_pedal_cal" : "eng_encoder_cal";
     RTRACE_BEGIN_SCREEN(traceName);
@@ -341,5 +438,159 @@ void EngineeringScreen::drawCalibration(const char* title) {
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
                 ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawSensorMapIna — INA226 channel-to-position mapping editor
+//
+// Displays a table: each row = one TCA9548A channel (0-5).
+// Column A = channel name (fixed), Column B = assigned position (editable).
+// Tap a row to cycle the position through all 6 options.
+// Tap SAVE to persist. Tap BACK to discard changes.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawSensorMapIna() {
+    RTRACE_BEGIN_SCREEN("eng_ina_map");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("INA226 CHANNEL MAPPING", ui::SCREEN_W / 2, 15);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 15, "INA226 CHANNEL MAPPING",
+                ui::COL_AMBER, ui::COL_BG, 1, MC_DATUM);
+
+    // Column headers
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Channel", MAP_ROW_X + 4, 30);
+    tft.drawString("Assigned Position  (tap to change)", MAP_ROW_X + 90, 30);
+    RTRACE_TEXT(MAP_ROW_X + 4, 30, "Channel", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+
+    char buf[ui::FMT_BUF_LARGE];
+
+    for (uint8_t i = 0; i < config_store::NUM_INA226_CH; ++i) {
+        int16_t rowY = MAP_ROW_Y0 + i * MAP_ROW_SPC;
+
+        // Row background
+        tft.fillRect(MAP_ROW_X, rowY, MAP_ROW_W, MAP_ROW_H, ui::COL_DARK_GRAY);
+        tft.drawRect(MAP_ROW_X, rowY, MAP_ROW_W, MAP_ROW_H, ui::COL_GRAY);
+
+        // Channel name (left column)
+        tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(INA_CHAN_NAMES[i], MAP_ROW_X + 4, rowY + MAP_ROW_H / 2);
+
+        // Assigned position (right column)
+        uint8_t posIdx = inaMap_[i];
+        if (posIdx >= config_store::NUM_INA226_CH) posIdx = 0;
+        snprintf(buf, sizeof(buf), "→ %s", INA_POS_NAMES[posIdx]);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        tft.drawString(buf, MAP_ROW_X + 90, rowY + MAP_ROW_H / 2);
+    }
+
+    tft.setTextDatum(TL_DATUM);
+
+    // Back button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    // Save button
+    tft.fillRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_GREEN);
+    RTRACE_FILL_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_GREEN);
+    tft.drawRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+    RTRACE_DRAW_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+    tft.setTextColor(ui::COL_BLACK, ui::COL_GREEN);
+    tft.drawString("SAVE", SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2);
+    RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, "SAVE",
+                ui::COL_BLACK, ui::COL_GREEN, 1, MC_DATUM);
+
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawSensorMapTemp — DS18B20 sensor-to-position mapping editor
+//
+// Displays a table: each row = one discovered DS18B20 index (0-4).
+// Column A = sensor index (fixed), Column B = assigned position (editable).
+// Tap a row to cycle the position through all 5 options.
+// Tap SAVE to persist. Tap BACK to discard changes.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawSensorMapTemp() {
+    RTRACE_BEGIN_SCREEN("eng_temp_map");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("DS18B20 TEMP SENSOR MAPPING", ui::SCREEN_W / 2, 15);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 15, "DS18B20 TEMP SENSOR MAPPING",
+                ui::COL_AMBER, ui::COL_BG, 1, MC_DATUM);
+
+    // Column headers
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Sensor", MAP_ROW_X + 4, 30);
+    tft.drawString("Assigned Position  (tap to change)", MAP_ROW_X + 90, 30);
+    RTRACE_TEXT(MAP_ROW_X + 4, 30, "Sensor", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+
+    char buf[ui::FMT_BUF_LARGE];
+
+    for (uint8_t i = 0; i < config_store::NUM_TEMP_SENS; ++i) {
+        int16_t rowY = MAP_ROW_Y0 + i * MAP_ROW_SPC;
+
+        // Row background
+        tft.fillRect(MAP_ROW_X, rowY, MAP_ROW_W, MAP_ROW_H, ui::COL_DARK_GRAY);
+        tft.drawRect(MAP_ROW_X, rowY, MAP_ROW_W, MAP_ROW_H, ui::COL_GRAY);
+
+        // Sensor index (left column)
+        tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(TEMP_IDX_NAMES[i], MAP_ROW_X + 4, rowY + MAP_ROW_H / 2);
+
+        // Assigned position (right column)
+        uint8_t posIdx = tempMap_[i];
+        if (posIdx >= config_store::NUM_TEMP_SENS) posIdx = 0;
+        snprintf(buf, sizeof(buf), "→ %s", TEMP_POS_NAMES[posIdx]);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        tft.drawString(buf, MAP_ROW_X + 90, rowY + MAP_ROW_H / 2);
+    }
+
+    tft.setTextDatum(TL_DATUM);
+
+    // Back button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    // Save button
+    tft.fillRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_GREEN);
+    RTRACE_FILL_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_GREEN);
+    tft.drawRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+    RTRACE_DRAW_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+    tft.setTextColor(ui::COL_BLACK, ui::COL_GREEN);
+    tft.drawString("SAVE", SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2);
+    RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, "SAVE",
+                ui::COL_BLACK, ui::COL_GREEN, 1, MC_DATUM);
+
     tft.setTextDatum(TL_DATUM);
 }

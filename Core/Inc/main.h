@@ -41,11 +41,14 @@ extern "C" {
 #define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 */
 #define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 */
 
-/* ---- LED Power Relay (GPIOB) ----
- * Controls 5V supply to WS2812B LED strips (28 front + 16 rear).
- * The ESP32 drives the WS2812B data line; the STM32 controls the
- * power relay for safety cutoff.  Toggled via CAN command 0x120.   */
-#define PIN_RELAY_LED      GPIO_PIN_10  /* PB10 */
+/* ---- LED Power Relays (GPIOB) ----
+ * Front relay (PB10): controls 5V supply to front WS2812B LED strip (28 LEDs).
+ * Rear  relay (PB11): controls 5V supply to rear  WS2812B LED strip (16 LEDs).
+ * The ESP32 drives the WS2812B data lines; the STM32 controls the
+ * power relays for safety cutoff.  Toggled via CAN command 0x120.
+ *   Byte 0 = front relay, Byte 1 = rear relay.                              */
+#define PIN_RELAY_LED       GPIO_PIN_10  /* PB10 — front LED strip relay */
+#define PIN_RELAY_LED_REAR  GPIO_PIN_11  /* PB11 — rear  LED strip relay */
 
 /* ---- Wheel Speed Sensors (EXTI) ---- */
 #define PIN_WHEEL_FL       GPIO_PIN_0   /* PA0 - EXTI0 */

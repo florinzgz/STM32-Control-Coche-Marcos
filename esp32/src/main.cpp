@@ -47,8 +47,9 @@ static unsigned long lastSerialMs     = 0;
 static unsigned long lastRtMonMs      = 0;
 #endif
 
-// ---- LED toggle touch tracking ----
-static bool     ledLocalState     = false;   // local desired state (sent to STM32)
+// ---- LED relay state tracking ----
+static bool     frontLedLocalState = false;  // front LED relay desired state
+static bool     rearLedLocalState  = false;  // rear LED relay desired state
 
 // ---- Shifter gear tracking ----
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
@@ -85,7 +86,8 @@ static uint8_t  lastTcsActive = 0;
 static uint8_t  lastSafetyError = 0;           // last SafetyError code for transition detect
 
 // ---- Lights audio tracking ----
-static bool     lastLightsRelayOn = false;
+static bool     lastFrontRelayOn  = false;
+static bool     lastRearRelayOn   = false;
 static bool     lightsAudioInit   = false;     // skip first transition on startup
 
 // ---- Multi-error burst arbitration ----
@@ -174,13 +176,15 @@ static void ackCheck(vehicle::VehicleData& data) {
 }
 
 /// Send LED relay command to STM32 via CAN 0x120.
-/// @param on  true = turn on, false = turn off
-static void sendLedCommand(bool on) {
+/// @param front  true = turn on front relay, false = turn off
+/// @param rear   true = turn on rear relay,  false = turn off
+static void sendLedCommand(bool front, bool rear) {
     CanFrame frame = {};
     frame.identifier       = can::CMD_LED;
     frame.extd             = 0;
-    frame.data_length_code = 1;
-    frame.data[0]          = on ? 1 : 0;
+    frame.data_length_code = 2;
+    frame.data[0]          = front ? 1 : 0;
+    frame.data[1]          = rear  ? 1 : 0;
     ESP32Can.writeFrame(frame);
     ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
 }
@@ -297,8 +301,9 @@ void setup() {
     // Apply saved configuration
     {
         const auto& cfg = config_store::get();
-        currentModeFlags = cfg.driveMode;
-        ledLocalState    = cfg.ledEnabled;
+        currentModeFlags   = cfg.driveMode;
+        frontLedLocalState = cfg.frontLedEnabled;
+        rearLedLocalState  = cfg.rearLedEnabled;
 
         // Apply saved audio volume to DFPlayer
         audio::setVolume(cfg.audioVolume);
@@ -412,16 +417,28 @@ void loop() {
             // LED toggle and mode icons are suppressed while PIN/engineering
             // overlay is active to avoid unintended commands
             if (!screenManager.isBlockingInput()) {
-                // LED toggle
-                if (ui::LedToggle::hitTest(evt.x, evt.y)) {
-                    ledLocalState = !ledLocalState;
-                    sendLedCommand(ledLocalState);
-                    config_store::setLedEnabled(ledLocalState);
-                    audio::play(ledLocalState ? audio::Sound::LIGHTS_ON
-                                              : audio::Sound::LIGHTS_OFF,
+                // Front LED toggle
+                if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
+                    frontLedLocalState = !frontLedLocalState;
+                    sendLedCommand(frontLedLocalState, rearLedLocalState);
+                    config_store::setFrontLedEnabled(frontLedLocalState);
+                    audio::play(frontLedLocalState ? audio::Sound::LIGHTS_ON
+                                                   : audio::Sound::LIGHTS_OFF,
                                 audio::Priority::LO);
-                    Serial.printf("[LED] Toggle → %s\n",
-                                  ledLocalState ? "ON" : "OFF");
+                    Serial.printf("[LED] Front → %s\n",
+                                  frontLedLocalState ? "ON" : "OFF");
+                }
+
+                // Rear LED toggle
+                if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
+                    rearLedLocalState = !rearLedLocalState;
+                    sendLedCommand(frontLedLocalState, rearLedLocalState);
+                    config_store::setRearLedEnabled(rearLedLocalState);
+                    audio::play(rearLedLocalState ? audio::Sound::LIGHTS_ON
+                                                  : audio::Sound::LIGHTS_OFF,
+                                audio::Priority::LO);
+                    Serial.printf("[LED] Rear → %s\n",
+                                  rearLedLocalState ? "ON" : "OFF");
                 }
 
                 // Mode icons (4x4 / 4x2 / 360°)
@@ -473,9 +490,10 @@ void loop() {
         farewellPlayed = true;
         welcomePlayed  = false;
         // Turn off LEDs during shutdown
-        if (ledLocalState) {
-            ledLocalState = false;
-            sendLedCommand(false);
+        if (frontLedLocalState || rearLedLocalState) {
+            frontLedLocalState = false;
+            rearLedLocalState  = false;
+            sendLedCommand(false, false);
         }
     }
 
@@ -625,14 +643,19 @@ void loop() {
 
         // --- Lights status from STM32 CAN echo ---
         {
-            bool lightsNow = vehicleData.lights().relayOn;
-            if (lightsAudioInit && lightsNow != lastLightsRelayOn) {
-                audio::play(lightsNow ? audio::Sound::LIGHTS_ON
+            bool frontNow = vehicleData.lights().frontRelayOn;
+            bool rearNow  = vehicleData.lights().rearRelayOn;
+            if (lightsAudioInit) {
+                if (frontNow != lastFrontRelayOn || rearNow != lastRearRelayOn) {
+                    bool anyOn = frontNow || rearNow;
+                    audio::play(anyOn ? audio::Sound::LIGHTS_ON
                                       : audio::Sound::LIGHTS_OFF,
-                            audio::Priority::LO);
+                                audio::Priority::LO);
+                }
             }
-            lastLightsRelayOn = lightsNow;
-            lightsAudioInit = true;
+            lastFrontRelayOn = frontNow;
+            lastRearRelayOn  = rearNow;
+            lightsAudioInit  = true;
         }
 
         // --- Obstacle proximity warning — beep when zone ≥ 3 (critical/emergency) ---
@@ -656,10 +679,11 @@ void loop() {
     // ---- WS2812B LED update ----
     {
         auto st = vehicleData.heartbeat().systemState;
-        bool ledEnabled = vehicleData.lights().relayOn;
+        bool frontEnabled = vehicleData.lights().frontRelayOn;
 
-        // Enable/disable LED system based on relay and system state
-        if (!ledEnabled || st == can::SystemState::BOOT || st == can::SystemState::STANDBY) {
+        // Enable/disable LED system based on front relay and system state
+        // (front relay controls the WS2812B power for decorative effects)
+        if (!frontEnabled || st == can::SystemState::BOOT || st == can::SystemState::STANDBY) {
             led_ctrl::setEnabled(false);
         } else {
             led_ctrl::setEnabled(true);
