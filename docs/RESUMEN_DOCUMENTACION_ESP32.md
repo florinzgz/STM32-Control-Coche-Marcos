@@ -52,7 +52,7 @@ Se ha creado documentación completa sobre las conexiones de pines del ESP32-S3 
 | **gnd** | GND | Tierra |
 | **cs** | GPIO 10 | Chip Select Display |
 | **reset** | GPIO 38 | Reset Display |
-| **dc/rs** | GPIO 33 | Data/Command |
+| **dc/rs** | GPIO 39 | Data/Command |
 | **sdi (mosi)** | GPIO 13 | Datos SPI |
 | **sck** | GPIO 14 | Reloj SPI |
 | **led** | GPIO 45 | Retroiluminación |

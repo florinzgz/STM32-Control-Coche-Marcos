@@ -377,7 +377,7 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 | — | **GPIO13** | MOSI (SDA) | Datos SPI |
 | — | **GPIO14** | SCLK (SCL) | Reloj SPI |
 | — | **GPIO10** | CS | Chip Select display |
-| — | **GPIO33** | DC (A0) | Data/Command |
+| — | **GPIO39** | DC (A0) | Data/Command |
 | — | **GPIO38** | RST | Reset display |
 | — | **GPIO45** | BL | Backlight (HIGH=encendido) |
 | — | **GPIO12** | SDO (MISO) / T_DO | Datos SPI desde display/touch |

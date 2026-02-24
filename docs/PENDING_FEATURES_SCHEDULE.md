@@ -197,7 +197,7 @@ El ESP32-S3 actual usa los siguientes GPIOs (ver `esp32/platformio.ini` y `esp32
 - GPIO 12: TFT SPI MISO / Touch T_DO
 - GPIO 13: TFT SPI MOSI
 - GPIO 14: TFT SPI SCLK
-- GPIO 33: TFT DC (Data/Command)
+- GPIO 39: TFT DC (Data/Command)
 - GPIO 38: TFT RST
 - GPIO 21: TOUCH_CS
 - GPIO 45: TFT Backlight

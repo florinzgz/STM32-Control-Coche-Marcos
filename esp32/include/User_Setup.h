@@ -4,15 +4,22 @@
 // Board: ESP32-S3-DevKitC-1 (ESP32-S3-WROOM-1-N16R8)
 //        16 MB Quad Flash + 8 MB Octal PSRAM (qio_opi)
 //
-// GPIO map for the ESP32-S3-DevKitC-1:
-//   Available : GPIO 0–21 and GPIO 33–48
-//   Non-existent (classic ESP32 only): GPIO 34, 35, 36, 37
-//   Reserved (Flash/PSRAM internal bus): GPIO 26, 27, 28, 29, 30, 31, 32
+// GPIO map for the ESP32-S3-WROOM-1-N16R8 module:
+//   Available for external use: GPIO 0–21 and GPIO 38–48
+//     (GPIO 0, GPIO 3 are strapping pins — safe as GPIO but require care at boot)
+//     (GPIO 45, GPIO 46 are strapping pins — safe as GPIO output after boot)
+//   Reserved — QSPI Flash  (internal, not on module pins): GPIO 26–32
+//   Reserved — Octal PSRAM (internal, not on module pins): GPIO 33–37
+//   Do not exist in ESP32-S3: GPIO 22–25
 //
-// IMPORTANT — pins that MUST NOT be used for SPI / TFT:
-//   GPIO 26–32   → connected to internal Flash/PSRAM bus — boot corruption risk
-//   GPIO 34–37   → do NOT exist on the ESP32-S3 (were input-only on classic ESP32)
-//   GPIO 0       → boot strapping pin
+// IMPORTANT — pins that MUST NOT be used for SPI / TFT on this module:
+//   GPIO 26–32   → QSPI Flash bus — boot corruption risk
+//   GPIO 33–37   → Octal PSRAM bus (N16R8) — memory corruption / crash risk
+//   GPIO 0       → strapping pin (boot mode)
+//   GPIO 3       → strapping pin (eFuse download)
+//
+// Reference: Espressif ESP32-S3 Hardware Design Guidelines
+//            ESP32-S3-WROOM-1 datasheet (module pin table)
 //
 // This file is force-included via platformio.ini:
 //   -include $PROJECT_DIR/include/User_Setup.h
@@ -47,13 +54,14 @@
 // MISO   12   GPIO 1–21 range — bidirectional, SPI-capable, shared with T_DO
 // SCLK   14   GPIO 1–21 range — bidirectional, SPI-capable, clock output
 // CS     10   GPIO 1–21 range — bidirectional, SPI-capable, no conflict
-// DC     33   GPIO 33–48 range — output-capable, no conflict
-// RST    38   GPIO 33–48 range — output-capable, no conflict
-// BL     45   GPIO 33–48 range — valid output after boot (VDD_SPI strapping)
+// DC     39   GPIO 38–48 range — output-capable, outside Flash/PSRAM range
+// RST    38   GPIO 38–48 range — output-capable, outside Flash/PSRAM range
+// BL     45   GPIO 38–48 range — valid output after boot (VDD_SPI strapping)
 // T_CS   21   GPIO 1–21 range — bidirectional, no conflict
 //
-// GPIO 34/35/36/37 are NOT used: they do not exist on the ESP32-S3.
-// GPIO 26–32 are NOT used: reserved for internal Flash/PSRAM bus.
+// GPIO 26–32 are NOT used: QSPI Flash interface (boot failure if used).
+// GPIO 33–37 are NOT used: Octal PSRAM interface on N16R8 (crash if used).
+// GPIO 22–25 do NOT exist in the ESP32-S3 SoC.
 //
 // None of these collide with:
 //   CAN 4/5 · obstacle 6/7 · I2C 8/9 · power 40/41 · DFPlayer 43/44
@@ -63,7 +71,7 @@
 #define TFT_MISO 12
 #define TFT_SCLK 14
 #define TFT_CS   10
-#define TFT_DC   33
+#define TFT_DC   39
 #define TFT_RST  38
 
 // --- Backlight ---

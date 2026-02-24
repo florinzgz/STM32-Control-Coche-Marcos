@@ -41,7 +41,7 @@ La pantalla tiene los siguientes pines según tu descripción:
 | **LED** | Backlight (Retroiluminación) | GPIO45 | 45 | Control de brillo (HIGH=encendido) |
 | **CS** | Chip Select Display | GPIO10 | 10 | Selección display (activo bajo) |
 | **RESET** | Reset Display | GPIO38 | 38 | Reset del display (activo bajo) |
-| **DC/RS** | Data/Command | GPIO33 | 33 | HIGH=data, LOW=command |
+| **DC/RS** | Data/Command | GPIO39 | 39 | HIGH=data, LOW=command |
 | **SDI (MOSI)** | Master Out Slave In | GPIO13 | 13 | Datos SPI del ESP32 al display |
 | **SCK** | SPI Clock | GPIO14 | 14 | Reloj SPI |
 | **SDO (MISO)** | Master In Slave Out | GPIO12 | 12 | Compartido con T_DO (necesario para touch) |
@@ -65,7 +65,7 @@ La pantalla tiene los siguientes pines según tu descripción:
 │  GPIO13 (SPI MOSI) ─────────────────────────────► SDI (MOSI)    │
 │  GPIO14 (SPI SCK)  ─────────────────────────────► SCK           │
 │  GPIO10 (SPI CS)   ─────────────────────────────► CS            │
-│  GPIO33 (DC/RS)    ─────────────────────────────► DC/RS         │
+│  GPIO39 (DC/RS)    ─────────────────────────────► DC/RS         │
 │  GPIO38 (RESET)    ─────────────────────────────► RESET         │
 │  GPIO45 (Backlight)─────────────────────────────► LED           │
 │                                                                  │
@@ -102,7 +102,7 @@ Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 #define TFT_MISO 12    // GPIO12 — compartido con T_DO del XPT2046
 #define TFT_SCLK 14    // GPIO14 — reloj SPI
 #define TFT_CS   10    // GPIO10 — Chip Select display
-#define TFT_DC   33    // GPIO33 — Data/Command
+#define TFT_DC   39    // GPIO39 — Data/Command
 #define TFT_RST  38    // GPIO38 — Reset display
 #define TFT_BL            45
 #define TFT_BACKLIGHT_ON  HIGH
@@ -274,7 +274,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 2. **Conectar Display TFT:**
    - Comenzar con VCC y GND del display
    - Conectar pines SPI: MISO (12), MOSI (13), SCK (14), CS (10)
-   - Conectar pines de control: DC (33), RESET (38), LED (45)
+   - Conectar pines de control: DC (39), RESET (38), LED (45)
    - Conectar Touch: T_CS (21), T_DO (12), T_DIN (13) y T_CLK (14) compartidos
 
 3. **Probar Display:**

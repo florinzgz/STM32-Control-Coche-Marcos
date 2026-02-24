@@ -71,7 +71,7 @@
 ├──────────────┼──────────────┼──────────────┼──────────────────────────┤
 │   CS         │ Chip Select  │   GPIO 10    │ Selección Display        │
 │   RESET      │ Reset        │   GPIO 38    │ Reset hardware           │
-│   DC/RS      │ Data/Command │   GPIO 33    │ Modo datos/comandos      │
+│   DC/RS      │ Data/Command │   GPIO 39    │ Modo datos/comandos      │
 │   SDI (MOSI) │ Datos SPI    │   GPIO 13    │ Master Out Slave In      │
 │   SCK        │ Reloj SPI    │   GPIO 14    │ Clock de sincronización  │
 │   LED        │ Backlight    │   GPIO 45    │ Control de brillo        │
@@ -98,7 +98,7 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 │   GPIO 13  ─────┼──────────────────────────┼───► SDI (MOSI)  │
 │   GPIO 14  ─────┼──────────────────────────┼───► SCK         │
 │   GPIO 10  ─────┼──────────────────────────┼───► CS          │
-│   GPIO 33  ─────┼──────────────────────────┼───► DC/RS       │
+│   GPIO 39  ─────┼──────────────────────────┼───► DC/RS       │
 │   GPIO 38  ─────┼──────────────────────────┼───► RESET       │
 │   GPIO 45  ─────┼──────────────────────────┼───► LED         │
 │                 │                          │                 │
@@ -240,7 +240,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │   12     │  SPI MISO    │ Display SDO + Touch T_DO (compartido)      │
 │   13     │  SPI MOSI    │ Display SDI + Touch T_DIN (compartido)     │
 │   14     │  SPI SCK     │ Display SCK + Touch T_CLK (compartido)     │
-│   33     │  DC/RS       │ Display DC/RS (Data/Command)               │
+│   39     │  DC/RS       │ Display DC/RS (Data/Command)               │
 │   38     │  RESET       │ Display RESET                              │
 │   21     │  Touch CS    │ Touch Panel T_CS                           │
 │   45     │  Backlight   │ Display LED (retroiluminación)             │
@@ -272,11 +272,16 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
     │  19                            G12◄─MISO│
     │  20                            G13 ─►MOSI
     │  21 ◄─Touch CS                 G14 ─►SCK│
-    │  47                            G33 ─►DC/RS
-    │  48                            G38 ─►RST│
-    │  45 ◄─Display BL               G40      │
-    │  GND                           G41      │
-    │  5V                            G42      │
+    │  47                            G33 (PSRAM-internal)
+    │  48                            G34 (PSRAM-internal)
+    │  45 ◄─Display BL               G35 (PSRAM-internal)
+    │  GND                           G36 (PSRAM-internal)
+    │  5V                            G37 (PSRAM-internal)
+    │                                G38 ─►RST│
+    │                                G39 ─►DC/RS
+    │                                G40      │
+    │                                G41      │
+    │                                G42      │
     │                                         │
     └─────────────────────────────────────────┘
     
@@ -285,7 +290,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
     ◄ = Pin de salida del ESP32 (output)
     ─► = Pin de entrada al ESP32 (input)
     GPIO 26–32 no están en los headers (reservados para Flash/PSRAM)
-    GPIO 34–37 NO EXISTEN en la ESP32-S3
+    GPIO 33–37 no están accesibles en el módulo WROOM-1-N16R8 (bus interno Octal PSRAM)
 ```
 
 ---

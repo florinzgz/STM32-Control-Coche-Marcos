@@ -274,11 +274,12 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |------|-------|
 | **MCU** | ESP32-S3 (Xtensa LX7 dual-core @ 240 MHz) |
 | **Placa** | ESP32-S3-DevKitC-1 |
-| **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO33–GPIO48; GPIO34–37 no existen) |
+| **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO26–GPIO48; GPIO22–25 no existen en ESP32-S3) |
 | **Pines disponibles en DevKitC** | ~36 (algunos reservados por flash/PSRAM) |
 | **Pines usados por el proyecto** | 15 |
-| **Pines reservados (Flash/PSRAM interno)** | 7 (GPIO26–GPIO32) |
-| **Pines no existentes en ESP32-S3** | 4 (GPIO34–GPIO37) |
+| **Pines reservados — QSPI Flash** | 7 (GPIO26–GPIO32) |
+| **Pines reservados — Octal PSRAM** | 5 (GPIO33–GPIO37, N16R8) |
+| **Pines no existentes en ESP32-S3** | 4 (GPIO22–GPIO25) |
 | **Pines libres para expansión** | **~17** |
 
 ### Distribución de pines usados por categoría
@@ -293,7 +294,9 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | LEDs WS2812B (front + rear) | 2 | 5.6% |
 | **TOTAL USADOS** | **15** | **41.7%** |
 | Reservados Flash/PSRAM | 7 | 19.4% |
-| No existen en ESP32-S3 | 4 (34–37) | — |
+| Reservados QSPI Flash | 7 (GPIO26–32) | — |
+| Reservados Octal PSRAM (N16R8) | 5 (GPIO33–37) | — |
+| No existen en ESP32-S3 | 4 (GPIO22–25) | — |
 | **LIBRES** | **~17** | **~47.2%** |
 
 ---
@@ -308,7 +311,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | MOSI (SDA) | **GPIO13** | Datos SPI al display | 40 MHz |
 | SCLK (SCL) | **GPIO14** | Reloj SPI | 40 MHz |
 | CS | **GPIO10** | Chip Select display | — |
-| DC (A0) | **GPIO33** | Data/Command select | — |
+| DC (A0) | **GPIO39** | Data/Command select | — |
 | RST | **GPIO38** | Reset hardware del display | — |
 | BL | **GPIO45** | Backlight (HIGH = encendido) | — |
 | | | **Subtotal:** | **7 pines** |
@@ -398,7 +401,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 4 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
 | 5 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
 | 6 | GPIO14 | Display TFT | SPI SCLK (reloj) |
-| 7 | GPIO33 | Display TFT | DC (Data/Command) |
+| 7 | GPIO39 | Display TFT | DC (Data/Command) |
 | 8 | GPIO38 | Display TFT | RST (Reset display) |
 | 9 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
 | 10 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
@@ -436,7 +439,7 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 18 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
 | 19 | GPIO48 | GPIO | **LIBRE** |
 
-> **Nota:** GPIO26–GPIO32 están reservados para Flash/PSRAM interno y **NO están accesibles**. GPIO34–GPIO37 **NO EXISTEN** en la ESP32-S3. GPIO10, 12, 13, 14, 33, 38, 45 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales.
+> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash (no accesibles). GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8 (no accesibles). GPIO10, 12, 13, 14, 39, 38, 45 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales. GPIO22–25 no existen en el chip ESP32-S3.
 
 > **Resumen: ~17 pines libres de forma segura** (evitando pines de boot strapping).
 

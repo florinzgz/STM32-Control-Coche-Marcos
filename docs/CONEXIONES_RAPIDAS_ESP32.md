@@ -13,7 +13,7 @@
 | GND | → | GND | Tierra |
 | CS | → | GPIO 10 | Chip Select |
 | RESET | → | GPIO 38 | Reset |
-| DC/RS | → | GPIO 33 | Data/Command |
+| DC/RS | → | GPIO 39 | Data/Command |
 | SDI (MOSI) | → | GPIO 13 | Datos SPI |
 | SCK | → | GPIO 14 | Reloj SPI |
 | LED | → | GPIO 45 | Backlight |
@@ -108,7 +108,7 @@
 │  GPIO 13 ───┼──→ Display MOSI + Touch DIN
 │  GPIO 14 ───┼──→ Display SCK + Touch CLK
 │  GPIO 10 ───┼──→ Display CS
-│  GPIO 33 ───┼──→ Display DC/RS
+│  GPIO 39 ───┼──→ Display DC/RS
 │  GPIO 38 ───┼──→ Display RESET
 │  GPIO 21 ───┼──→ Touch CS
 │  GPIO 45 ───┼──→ Display LED

@@ -330,7 +330,7 @@ No hay tests para ESP32. No hay CI/CD configurado (no `.github/workflows/`).
 | CAN TX/RX | GPIO 4/5 |
 | Obstacle TRIG/ECHO | GPIO 6/7 |
 | Shifter I2C SDA/SCL | GPIO 8/9 |
-| TFT MOSI/SCLK/CS/DC/RST | GPIO 13/14/10/33/38 |
+| TFT MOSI/SCLK/CS/DC/RST | GPIO 13/14/10/39/38 |
 | Touch CS | GPIO 21 |
 | WS2812B data | GPIO 47/48 |
 | Power sense/hold | GPIO 40/41 |

@@ -16,7 +16,7 @@
 | **GND**            | Tierra común                           | GND           | GND compartido con ESP32 |
 | **CS**             | Chip Select del display (activo bajo)  | **GPIO 10**   | `TFT_CS` en User_Setup.h |
 | **RESET**          | Reset hardware del display (activo bajo) | **GPIO 38** | `TFT_RST` en User_Setup.h |
-| **DC / RS**        | Selección Dato / Comando               | **GPIO 33**   | `TFT_DC`; HIGH = dato, LOW = comando |
+| **DC / RS**        | Selección Dato / Comando               | **GPIO 39**   | `TFT_DC`; HIGH = dato, LOW = comando |
 | **SDI / MOSI**     | Datos SPI del ESP32 al display         | **GPIO 13**   | `TFT_MOSI`; SPI HSPI (SPI3_HOST) |
 | **SCK / SCLK**     | Reloj SPI                              | **GPIO 14**   | `TFT_SCLK`; SPI HSPI (SPI3_HOST) |
 | **SDO / MISO**     | Datos SPI del display al ESP32         | **GPIO 12**   | `TFT_MISO`; compartido con T_DO del XPT2046 |
@@ -37,7 +37,7 @@
 | GPIO 12       | SDO (MISO) + T_DO  | Línea de datos SPI (display y touch → ESP32) |
 | GPIO 13       | SDI (MOSI) + T_DIN | Línea de datos SPI (ESP32 → display y touch) |
 | GPIO 14       | SCK + T_CLK        | Reloj SPI compartido display y touch |
-| GPIO 33       | DC / RS            | Data/Command — selecciona modo del bus SPI |
+| GPIO 39       | DC / RS            | Data/Command — selecciona modo del bus SPI |
 | GPIO 38       | RESET              | Reset hardware del controlador ST7796 |
 | GPIO 21       | T_CS               | Chip Select touch — selecciona el XPT2046 en el bus |
 | GPIO 45       | LED / BL           | Control de retroiluminación |
@@ -57,7 +57,7 @@ ESP32-S3 DevKitC-1                       Display TFT ST7796 + Touch XPT2046
 │                     │                  │                           │
 │  GPIO 10 (CS)  ─────┼──────────────────┼──► CS    (display)        │
 │  GPIO 38 (RST) ─────┼──────────────────┼──► RESET (display)        │
-│  GPIO 33 (DC)  ─────┼──────────────────┼──► DC/RS (display)        │
+│  GPIO 39 (DC)  ─────┼──────────────────┼──► DC/RS (display)        │
 │  GPIO 13 (MOSI)─────┼──────────────────┼──► SDI   (display)        │
 │  GPIO 14 (SCK) ─────┼──────────────────┼──► SCK   (display)        │
 │  GPIO 45 (BL)  ─────┼──────────────────┼──► LED   (retroilum.)     │
@@ -103,7 +103,7 @@ Nota: GPIO 12, 13 y 14 son compartidos entre display y touch.
 #define TFT_MISO 12            // GPIO 12 — datos SPI del display / T_DO del touch
 #define TFT_SCLK 14            // GPIO 14 — reloj SPI
 #define TFT_CS   10            // GPIO 10 — Chip Select display
-#define TFT_DC   33            // GPIO 33 — Data / Command
+#define TFT_DC   39            // GPIO 39 — Data / Command
 #define TFT_RST  38            // GPIO 38 — Reset display
 
 #define TFT_BL           45   // GPIO 45 — backlight
@@ -120,21 +120,24 @@ Nota: GPIO 12, 13 y 14 son compartidos entre display y touch.
 
 ## 6. PINES QUE **NO** SE DEBEN USAR PARA EL DISPLAY
 
-Pines que **no existen o son peligrosos** en la ESP32-S3-DevKitC-1:
+Pines **peligrosos** en la ESP32-S3-WROOM-1-N16R8 — todos conectados internamente al bus de Flash o PSRAM:
 
 | GPIO | Razón por la que NO se debe usar |
 |---|---|
-| GPIO 26 | **Reservado — bus interno Flash CS0** |
-| GPIO 27 | **Reservado — bus interno Flash/PSRAM CLK** |
-| GPIO 28 | **Reservado — bus interno Flash SD0** |
-| GPIO 29 | **Reservado — bus interno Flash SD1** |
-| GPIO 30 | **Reservado — bus interno Flash SD2** |
-| GPIO 31 | **Reservado — bus interno Flash SD3** |
-| GPIO 32 | **Reservado — bus interno PSRAM CS** |
-| GPIO 34 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
-| GPIO 35 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
-| GPIO 36 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
-| GPIO 37 | **NO EXISTE en la ESP32-S3** (era input-only en la ESP32 clásica) |
+| GPIO 26 | **Reservado — bus QSPI Flash CLK** |
+| GPIO 27 | **Reservado — bus QSPI Flash DATA0** |
+| GPIO 28 | **Reservado — bus QSPI Flash DATA1** |
+| GPIO 29 | **Reservado — bus QSPI Flash DATA2** |
+| GPIO 30 | **Reservado — bus QSPI Flash DATA3** |
+| GPIO 31 | **Reservado — bus QSPI Flash CS** |
+| GPIO 32 | **Reservado — bus QSPI Flash (adicional)** |
+| GPIO 33 | **Reservado — bus Octal PSRAM (N16R8)** — el pin existe en la ESP32-S3 pero está conectado internamente a la PSRAM en el módulo WROOM-1-N16R8 |
+| GPIO 34 | **Reservado — bus Octal PSRAM (N16R8)** |
+| GPIO 35 | **Reservado — bus Octal PSRAM (N16R8)** |
+| GPIO 36 | **Reservado — bus Octal PSRAM (N16R8)** |
+| GPIO 37 | **Reservado — bus Octal PSRAM (N16R8)** |
+
+> **Nota:** GPIO 33–37 SÍ existen en el chip ESP32-S3, pero en el módulo WROOM-1-N16R8 están conectados internamente al bus Octal PSRAM y no tienen salida a los pines físicos del módulo. Fuente: *Espressif ESP32-S3 Hardware Design Guidelines*.
 
 ---
 
@@ -157,7 +160,7 @@ Pines que **no existen o son peligrosos** en la ESP32-S3-DevKitC-1:
 | Pantalla blanca / sin imagen | Reset incorrecto o CS incorrecto      | Verificar GPIO 38 (RST) y GPIO 10 (CS) |
 | Imagen corrupta / ruido  | Interferencia en el bus SPI            | Cables SPI < 20 cm; capacitor 100 nF en VCC del display |
 | Touch no responde        | T_CS o MISO no conectados              | Verificar GPIO 21 → T_CS y GPIO 12 → T_DO |
-| Crash al iniciar el SPI  | GPIO 34/35/36/37 en uso (no existen)  | **Usar únicamente los GPIOs de este documento** |
+| Crash al iniciar el SPI  | GPIO 26–37 en uso (Flash/PSRAM internos) | **Usar únicamente los GPIOs de este documento** |
 
 ---
 

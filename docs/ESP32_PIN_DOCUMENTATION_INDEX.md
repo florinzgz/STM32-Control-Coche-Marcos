@@ -96,7 +96,7 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 |-------------|------------|---------|
 | CS | 10 | Chip Select |
 | RESET | 38 | Reset |
-| DC/RS | 33 | Data/Command |
+| DC/RS | 39 | Data/Command |
 | MOSI (SDI) | 13 | Datos SPI |
 | SCK | 14 | Reloj SPI |
 | MISO (SDO) | 12 | Datos SPI / Touch DO |
