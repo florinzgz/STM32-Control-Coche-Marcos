@@ -4,6 +4,23 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 
 ## 📄 Documentos Disponibles
 
+### 0. **PINES_PANTALLA.md** 📌 LISTADO DETALLADO DE PINES DEL DISPLAY
+**Listado definitivo y detallado** de todos los pines de la pantalla TFT y touch.
+
+**Contenido:**
+- ✅ Tabla completa de conexiones display + touch (pines verificados con User_Setup.h)
+- ✅ Resumen rápido por GPIO
+- ✅ Diagrama de conexión física ASCII
+- ✅ Configuración SPI completa
+- ✅ Definiciones exactas del firmware
+- ✅ Aviso sobre pines PELIGROSOS de documentación antigua
+- ✅ Verificación con multímetro
+- ✅ Solución de problemas específica del display
+
+**Ideal para:** Primera consulta de pines, referencia definitiva, montaje del display
+
+---
+
 ### 1. **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** ⭐ DOCUMENTO PRINCIPAL
 **Guía completa y detallada** de todas las conexiones ESP32-S3.
 
@@ -56,9 +73,10 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 ## 🎯 ¿Qué Documento Usar?
 
 ### Para Montar desde Cero
-1. Leer **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** (completo)
-2. Seguir **DIAGRAMA_PINES_VISUAL.md** (paso a paso con diagramas)
-3. Tener **CONEXIONES_RAPIDAS_ESP32.md** a mano (referencia rápida)
+1. Consultar **PINES_PANTALLA.md** (listado definitivo de pines del display)
+2. Leer **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** (completo, incluye CAN)
+3. Seguir **DIAGRAMA_PINES_VISUAL.md** (paso a paso con diagramas)
+4. Tener **CONEXIONES_RAPIDAS_ESP32.md** a mano (referencia rápida)
 
 ### Para Verificar Conexiones
 - Usar **CONEXIONES_RAPIDAS_ESP32.md** (tablas de pines y valores)
@@ -76,12 +94,13 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 ### Display TFT ST7796 (480×320)
 | Pin Display | GPIO ESP32 | Función |
 |-------------|------------|---------|
-| CS | 15 | Chip Select |
-| RESET | 17 | Reset |
-| DC/RS | 16 | Data/Command |
+| CS | 10 | Chip Select |
+| RESET | 38 | Reset |
+| DC/RS | 39 | Data/Command |
 | MOSI (SDI) | 13 | Datos SPI |
 | SCK | 14 | Reloj SPI |
-| LED | 42 | Backlight |
+| MISO (SDO) | 12 | Datos SPI / Touch DO |
+| LED | 45 | Backlight |
 | T_CS | 21 | Touch CS |
 
 ### CAN-Bus TJA1051

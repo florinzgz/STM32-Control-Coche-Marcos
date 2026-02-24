@@ -50,12 +50,12 @@ Se ha creado documentación completa sobre las conexiones de pines del ESP32-S3 
 |-------------------|--------------|---------|
 | **vcc** | 3.3V | Alimentación |
 | **gnd** | GND | Tierra |
-| **cs** | GPIO 15 | Chip Select Display |
-| **reset** | GPIO 17 | Reset Display |
-| **dc/rs** | GPIO 16 | Data/Command |
+| **cs** | GPIO 10 | Chip Select Display |
+| **reset** | GPIO 38 | Reset Display |
+| **dc/rs** | GPIO 39 | Data/Command |
 | **sdi (mosi)** | GPIO 13 | Datos SPI |
 | **sck** | GPIO 14 | Reloj SPI |
-| **led** | GPIO 42 | Retroiluminación |
+| **led** | GPIO 45 | Retroiluminación |
 | **sdo (miso)** | GPIO 12 | Compartido con T_DO (touch) |
 | **t_cs** | GPIO 21 | Chip Select Touch |
 | **t_din** | GPIO 13 | Touch Data (compartido con MOSI) |

@@ -274,11 +274,13 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |------|-------|
 | **MCU** | ESP32-S3 (Xtensa LX7 dual-core @ 240 MHz) |
 | **Placa** | ESP32-S3-DevKitC-1 |
-| **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO26–GPIO48) |
+| **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO26–GPIO48; GPIO22–25 no existen en ESP32-S3) |
 | **Pines disponibles en DevKitC** | ~36 (algunos reservados por flash/PSRAM) |
-| **Pines usados por el proyecto** | 14 |
-| **Pines reservados (Flash/PSRAM interno)** | ~9 (GPIO26–GPIO32, GPIO33–GPIO37 en módulos con Octal PSRAM) |
-| **Pines libres para expansión** | **~15** |
+| **Pines usados por el proyecto** | 15 |
+| **Pines reservados — QSPI Flash** | 7 (GPIO26–GPIO32) |
+| **Pines reservados — Octal PSRAM** | 5 (GPIO33–GPIO37, N16R8) |
+| **Pines no existentes en ESP32-S3** | 4 (GPIO22–GPIO25) |
+| **Pines libres para expansión** | **~17** |
 
 ### Distribución de pines usados por categoría
 
@@ -290,9 +292,12 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | Sensor de obstáculos TOFSense (UART2) | 1 | 2.8% |
 | DFPlayer Mini audio (UART1) | 2 | 5.6% |
 | LEDs WS2812B (front + rear) | 2 | 5.6% |
-| **TOTAL USADOS** | **14** | **38.9%** |
-| Reservados Flash/PSRAM | ~9 | 25.0% |
-| **LIBRES** | **~15** | **~41.7%** |
+| **TOTAL USADOS** | **15** | **41.7%** |
+| Reservados Flash/PSRAM | 7 | 19.4% |
+| Reservados QSPI Flash | 7 (GPIO26–32) | — |
+| Reservados Octal PSRAM (N16R8) | 5 (GPIO33–37) | — |
+| No existen en ESP32-S3 | 4 (GPIO22–25) | — |
+| **LIBRES** | **~17** | **~47.2%** |
 
 ---
 
@@ -305,10 +310,10 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | MISO (SDO) | **GPIO12** | Datos SPI desde display/touch | 20 MHz |
 | MOSI (SDA) | **GPIO13** | Datos SPI al display | 40 MHz |
 | SCLK (SCL) | **GPIO14** | Reloj SPI | 40 MHz |
-| CS | **GPIO15** | Chip Select display | — |
-| DC (A0) | **GPIO16** | Data/Command select | — |
-| RST | **GPIO17** | Reset hardware del display | — |
-| BL | **GPIO42** | Backlight (HIGH = encendido) | — |
+| CS | **GPIO10** | Chip Select display | — |
+| DC (A0) | **GPIO39** | Data/Command select | — |
+| RST | **GPIO38** | Reset hardware del display | — |
+| BL | **GPIO45** | Backlight (HIGH = encendido) | — |
 | | | **Subtotal:** | **7 pines** |
 
 - Driver: ST7796, resolución 480×320 en modo landscape (rotación 1)
@@ -392,18 +397,19 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |---|------|--------|---------|
 | 1 | GPIO4 | CAN bus | TWAI TX → TJA1051 TXD |
 | 2 | GPIO5 | CAN bus | TWAI RX → TJA1051 RXD |
-| 3 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
-| 4 | GPIO14 | Display TFT | SPI SCLK (reloj) |
-| 5 | GPIO15 | Display TFT | SPI CS (chip select display) |
-| 6 | GPIO16 | Display TFT | DC (Data/Command) |
-| 7 | GPIO17 | Display TFT | RST (Reset display) |
-| 8 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
-| 9 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
-| 10 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
-| 11 | GPIO42 | Display TFT | BL (Backlight) |
-| 12 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
-| 13 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
-| 14 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
+| 3 | GPIO10 | Display TFT | SPI CS (chip select display) |
+| 4 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
+| 5 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
+| 6 | GPIO14 | Display TFT | SPI SCLK (reloj) |
+| 7 | GPIO39 | Display TFT | DC (Data/Command) |
+| 8 | GPIO38 | Display TFT | RST (Reset display) |
+| 9 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
+| 10 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
+| 11 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
+| 12 | GPIO45 | Display TFT | BL (Backlight) |
+| 13 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
+| 14 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
+| 15 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
 
 ---
 
@@ -421,32 +427,32 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 6 | GPIO7 | GPIO, SPI | **LIBRE** |
 | 7 | GPIO8 | GPIO, SPI | **LIBRE** |
 | 8 | GPIO9 | GPIO | **LIBRE** |
-| 9 | GPIO10 | GPIO, SPI | **LIBRE** |
-| 10 | GPIO11 | GPIO, SPI | **LIBRE** |
-| 11 | GPIO12 | GPIO, SPI | **LIBRE** |
-| 12 | GPIO18 | GPIO | **LIBRE** |
-| 13 | GPIO38 | GPIO | **LIBRE** |
+| 9 | GPIO11 | GPIO, SPI | **LIBRE** |
+| 10 | GPIO15 | GPIO | **LIBRE** |
+| 11 | GPIO16 | GPIO | **LIBRE** |
+| 12 | GPIO17 | GPIO | **LIBRE** |
+| 13 | GPIO18 | GPIO | **LIBRE** |
 | 14 | GPIO39 | GPIO | **LIBRE** |
 | 15 | GPIO40 | GPIO | **LIBRE** |
 | 16 | GPIO41 | GPIO | **LIBRE** |
-| 17 | GPIO45 | GPIO | **LIBRE** (⚠️ boot strapping) |
+| 17 | GPIO42 | GPIO | **LIBRE** |
 | 18 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
 | 19 | GPIO48 | GPIO | **LIBRE** |
 
-> **Nota:** GPIO26–GPIO37 están reservados para Flash/PSRAM interno en el módulo ESP32-S3-WROOM y **NO están accesibles** en la placa DevKitC-1. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales.
+> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash (no accesibles). GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8 (no accesibles). GPIO10, 12, 13, 14, 39, 38, 45 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales. GPIO22–25 no existen en el chip ESP32-S3.
 
-> **Resumen: ~15 pines libres de forma segura** (evitando pines de boot strapping).
+> **Resumen: ~17 pines libres de forma segura** (evitando pines de boot strapping).
 
 ### Posibles usos de los pines libres
 
 | Posible expansión | GPIOs sugeridos | Nº pines |
 |-------------------|-----------------|----------|
 | Botones físicos (menú, modo, emergencia) | GPIO6, GPIO7, GPIO8 | 3 |
-| LEDs de estado (CAN ok, error, etc.) | GPIO9, GPIO10 | 2 |
-| SD Card (SPI) | GPIO6 (MISO), GPIO7 (MOSI), GPIO8 (SCK), GPIO9 (CS) | 4 |
-| Buzzer / alarma sonora | GPIO38 | 1 |
+| LEDs de estado (CAN ok, error, etc.) | GPIO9, GPIO11 | 2 |
+| SD Card (SPI) | GPIO15 (MISO), GPIO16 (MOSI), GPIO17 (SCK), GPIO18 (CS) | 4 |
+| Buzzer / alarma sonora | GPIO39 | 1 |
 | ADC adicional (batería, sensor luz) | GPIO1, GPIO2, GPIO3 | 1-3 |
-| I2C adicional (sensor ambiental) | GPIO38 (SCL), GPIO39 (SDA) | 2 |
+| I2C adicional (sensor ambiental) | GPIO39 (SCL), GPIO40 (SDA) | 2 |
 
 ---
 

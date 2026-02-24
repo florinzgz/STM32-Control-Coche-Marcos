@@ -11,12 +11,12 @@
 |-------------|---|---------------|---------|
 | VCC | → | 3.3V | Alimentación |
 | GND | → | GND | Tierra |
-| CS | → | GPIO 15 | Chip Select |
-| RESET | → | GPIO 17 | Reset |
-| DC/RS | → | GPIO 16 | Data/Command |
+| CS | → | GPIO 10 | Chip Select |
+| RESET | → | GPIO 38 | Reset |
+| DC/RS | → | GPIO 39 | Data/Command |
 | SDI (MOSI) | → | GPIO 13 | Datos SPI |
 | SCK | → | GPIO 14 | Reloj SPI |
-| LED | → | GPIO 42 | Backlight |
+| LED | → | GPIO 45 | Backlight |
 | SDO (MISO) | → | GPIO 12 | Datos SPI (touch data out) |
 
 ### Touch Panel
@@ -84,9 +84,9 @@
 
 ## SOLUCIÓN RÁPIDA DE PROBLEMAS
 
-### Display
+### Solución de Problemas
 
-- **Pantalla negra** → Verificar GPIO 42 = HIGH (backlight)
+- **Pantalla negra** → Verificar GPIO 45 = HIGH (backlight)
 - **No responde touch** → Verificar GPIO 21 a T_CS y GPIO 12 a T_DO
 - **Líneas en pantalla** → Cables SPI muy largos, agregar capacitor 100nF
 
@@ -107,11 +107,11 @@
 │  GPIO 12 ◄──┼─── Display MISO + Touch DO
 │  GPIO 13 ───┼──→ Display MOSI + Touch DIN
 │  GPIO 14 ───┼──→ Display SCK + Touch CLK
-│  GPIO 15 ───┼──→ Display CS
-│  GPIO 16 ───┼──→ Display DC/RS
-│  GPIO 17 ───┼──→ Display RESET
+│  GPIO 10 ───┼──→ Display CS
+│  GPIO 39 ───┼──→ Display DC/RS
+│  GPIO 38 ───┼──→ Display RESET
 │  GPIO 21 ───┼──→ Touch CS
-│  GPIO 42 ───┼──→ Display LED
+│  GPIO 45 ───┼──→ Display LED
 │             │
 │  GPIO 4  ───┼──→ CAN TX (a TJA1051)
 │  GPIO 5  ◄──┼─── CAN RX (de TJA1051)

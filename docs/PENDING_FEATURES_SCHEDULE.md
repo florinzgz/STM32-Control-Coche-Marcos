@@ -193,9 +193,14 @@ ESP32-S3                   DFPlayer Mini
 El ESP32-S3 actual usa los siguientes GPIOs (ver `esp32/platformio.ini` y `esp32/src/main.cpp`):
 - GPIO 4: CAN_TX (TWAI)
 - GPIO 5: CAN_RX (TWAI)
-- GPIO 13/14/15/16/17: TFT SPI (MOSI/SCLK/CS/DC/RST)
+- GPIO 10: TFT CS (Chip Select)
+- GPIO 12: TFT SPI MISO / Touch T_DO
+- GPIO 13: TFT SPI MOSI
+- GPIO 14: TFT SPI SCLK
+- GPIO 39: TFT DC (Data/Command)
+- GPIO 38: TFT RST
 - GPIO 21: TOUCH_CS
-- GPIO 42: TFT Backlight
+- GPIO 45: TFT Backlight
 
 **✅ GPIO 19 (TX) y GPIO 20 (RX) están LIBRES** — son los mismos pines que usaba el repo original para el DFPlayer. Se pueden asignar directamente en Phase 5 usando UART1 del ESP32-S3.
 

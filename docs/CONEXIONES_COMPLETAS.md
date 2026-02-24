@@ -376,10 +376,11 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 |-------|-----------|-----------------|---------|
 | — | **GPIO13** | MOSI (SDA) | Datos SPI |
 | — | **GPIO14** | SCLK (SCL) | Reloj SPI |
-| — | **GPIO15** | CS | Chip Select display |
-| — | **GPIO16** | DC (A0) | Data/Command |
-| — | **GPIO17** | RST | Reset display |
-| — | **GPIO42** | BL | Backlight (HIGH=encendido) |
+| — | **GPIO10** | CS | Chip Select display |
+| — | **GPIO39** | DC (A0) | Data/Command |
+| — | **GPIO38** | RST | Reset display |
+| — | **GPIO45** | BL | Backlight (HIGH=encendido) |
+| — | **GPIO12** | SDO (MISO) / T_DO | Datos SPI desde display/touch |
 | — | **GPIO21** | TOUCH_CS | Touch panel chip select |
 | — | 3.3V | VCC | Alimentación display |
 | — | GND | GND | GND común |

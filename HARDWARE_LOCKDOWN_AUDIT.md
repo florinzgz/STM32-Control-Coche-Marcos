@@ -24,7 +24,8 @@
 | **Data lines**     | 8 (octal)                        | ESP32-S3R8 SoC specification              |
 | **Transfer mode**  | DTR (Double Transfer Rate) only  | ESP-IDF SPI Flash/PSRAM Config Guide      |
 | **Max frequency**  | 80 MHz                           | Espressif documentation                   |
-| **Pins consumed**  | GPIO33–GPIO37 (internal to module, not exposed) | ESP32-S3 datasheet |
+| **Flash pins consumed**  | GPIO26–GPIO32 (not exposed on module) | ESP32-S3-WROOM-1 datasheet |
+| **PSRAM pins consumed**  | GPIO33–GPIO37 (not exposed on module, N16R8) | Espressif Hardware Design Guidelines |
 
 ### Conclusion
 
@@ -32,7 +33,8 @@ The N16R8 module uses **OPI (Octal) PSRAM**, NOT QSPI PSRAM. This is confirmed b
 
 1. The "R8" suffix in ESP32-S3R8 indicates 8 MB octal PSRAM embedded in the SoC
 2. Espressif's official module datasheet states Octal SPI for PSRAM
-3. GPIO33–37 are consumed internally by the octal PSRAM interface and are NOT available on module pins
+3. GPIO26–32 are consumed internally by the QSPI Flash interface — NOT available on module pins
+4. GPIO33–37 are consumed internally by the Octal PSRAM interface — NOT available on module pins (N16R8)
 
 ---
 
@@ -113,25 +115,33 @@ The missing settings have the following practical impact:
 
 | Category                  | GPIO Range       | Notes                                        |
 |---------------------------|------------------|----------------------------------------------|
-| **Internal Flash**        | GPIO26–GPIO32    | Used by SPI0/1 for flash, NOT available       |
-| **Octal PSRAM (N16R8)**   | GPIO33–GPIO37    | Used internally, NOT available on WROOM-1     |
+| **QSPI Flash (internal)** | GPIO26–GPIO32    | QSPI Flash bus — NOT available on WROOM-1 module pins |
+| **Octal PSRAM (internal)**| GPIO33–GPIO37    | Octal PSRAM bus (N16R8) — NOT available on WROOM-1 module pins |
+| **Non-existent in ESP32-S3** | GPIO22–GPIO25 | These GPIO numbers do not exist in the ESP32-S3 SoC |
 | **Strapping pins**        | GPIO0, 3, 45, 46 | Sampled at boot for mode selection            |
 | **USB-JTAG**              | GPIO19, GPIO20   | Default USB-JTAG, re-usable if not needed     |
-| **Safe GPIOs**            | GPIO1–2, 4–18, 21, 38–42, 43–48 (varies) | General purpose |
+| **Safe GPIOs**            | GPIO1–21, GPIO38–48 | Available for external peripherals on N16R8 |
 
 ### Pin-by-Pin Validation
 
-| GPIO   | Function  | Internal Flash? | PSRAM? | Strapping? | USB/JTAG? | Boot Restricted? | **VERDICT**   |
-|--------|-----------|-----------------|--------|------------|-----------|-------------------|---------------|
-| GPIO13 | TFT_MOSI  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO14 | TFT_SCLK  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO15 | TFT_CS    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO16 | TFT_DC    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO17 | TFT_RST   | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO42 | TFT_BL    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ⚠️ Note¹          | ✅ **SAFE**   |
-| GPIO21 | TOUCH_CS  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO   | Function  | Flash/PSRAM internal? | Strapping? | USB/JTAG? | Boot Restricted? | **VERDICT**   |
+|--------|-----------|----------------------|------------|-----------|-------------------|---------------|
+| GPIO10 | TFT_CS    | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO12 | TFT_MISO  | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO13 | TFT_MOSI  | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO14 | TFT_SCLK  | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO39 | TFT_DC    | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO38 | TFT_RST   | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO45 | TFT_BL    | ❌ No                | ⚠️ Note¹   | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO21 | TOUCH_CS  | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
 
-**Note¹ on GPIO42:** GPIO42 may show a brief logic level change during boot reset on some ESP32-S3 boards (shared with JTAG boundary scan). This is NOT a strapping pin and does NOT affect boot mode. For backlight control, this is completely acceptable — a brief flicker during boot reset is normal and inconsequential. GPIO42 is **SAFE** for TFT backlight.
+**Note¹ on GPIO45:** GPIO45 is a strapping pin (VDD_SPI voltage reference) sampled only at reset. After boot it operates as a normal GPIO output. For backlight control it is **SAFE**.
+
+**GPIO26–32 are NOT used:** These are connected to the QSPI Flash bus. Using them as GPIO causes boot failures or flash corruption.
+
+**GPIO33–37 are NOT used:** On the N16R8 module these are connected to the Octal PSRAM bus. They DO exist in the ESP32-S3 SoC but are unavailable as external GPIOs on the WROOM-1-N16R8 module. Using them as GPIO causes PSRAM corruption or crashes.
+
+**GPIO22–25 do NOT exist** in the ESP32-S3 SoC (unlike classic ESP32 where GPIO34–39 were input-only).
 
 ### Additional ESP32 Pins in Use
 
@@ -146,15 +156,15 @@ The missing settings have the following practical impact:
 |------------|---------------------------------|
 | GPIO0      | Strapping pin — correctly avoided |
 | GPIO3      | Strapping pin — correctly avoided |
-| GPIO10–12  | Internal flash SPI — correctly avoided |
 | GPIO19–20  | USB-JTAG — avoided (USB CDC used for serial) |
-| GPIO26–32  | Internal flash — correctly avoided |
-| GPIO33–37  | Octal PSRAM (N16R8) — correctly avoided |
+| GPIO22–25  | Do not exist in ESP32-S3 SoC |
+| GPIO26–32  | QSPI Flash bus — correctly avoided |
+| GPIO33–37  | Octal PSRAM bus (N16R8) — correctly avoided |
 | GPIO45–46  | Strapping pins — correctly avoided |
 
 ### Final Pin Safety Verdict
 
-**ALL 7 TFT pins are SAFE. No conflicts detected.**
+**ALL 8 TFT pins are SAFE. No conflicts detected.**
 
 No corrected SPI mapping is needed. The current pin assignments avoid all restricted GPIOs.
 
@@ -192,7 +202,7 @@ ESP32 GPIO5 (RX) ← TJA1051 #1 RXD ← CANH/CANL bus ← TJA1051 #2 TXD ← STM
 ```
 
 **Key isolation facts:**
-1. The ESP32 SPI pins (GPIO13–17, 42, 21) have **NO electrical connection** to the STM32
+1. The ESP32 SPI pins (GPIO10, 12, 13, 14, 39, 38, 45, 21) have **NO electrical connection** to the STM32
 2. The TJA1051 transceivers provide **galvanic isolation** between MCU GPIO pins and the CAN differential bus
 3. ESP32 GPIO4/5 connect to TJA1051 #1 (ESP32 side only)
 4. STM32 PB8/PB9 connect to TJA1051 #2 (STM32 side only)
@@ -234,18 +244,20 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
 | 4 | `platformio.ini` board selection              | ✅ Correct    | `esp32-s3-devkitc-1` is appropriate                  |
 | 5 | `platformio.ini` memory_type                  | ⚠️ Missing   | Not set, but PSRAM not used — no runtime impact      |
 | 6 | `platformio.ini` flash_size                   | ⚠️ Missing   | Defaults to 8MB, firmware fits — no runtime impact   |
-| 7 | GPIO13 (TFT_MOSI)                             | ✅ SAFE       | Not restricted                                       |
-| 8 | GPIO14 (TFT_SCLK)                             | ✅ SAFE       | Not restricted                                       |
-| 9 | GPIO15 (TFT_CS)                               | ✅ SAFE       | Not restricted                                       |
-| 10| GPIO16 (TFT_DC)                               | ✅ SAFE       | Not restricted                                       |
-| 11| GPIO17 (TFT_RST)                              | ✅ SAFE       | Not restricted                                       |
-| 12| GPIO42 (TFT_BL)                               | ✅ SAFE       | Minor boot-time level change, inconsequential for BL |
-| 13| GPIO21 (TOUCH_CS)                              | ✅ SAFE       | Not restricted                                       |
-| 14| GPIO4 (CAN_TX)                                 | ✅ SAFE       | Not restricted                                       |
-| 15| GPIO5 (CAN_RX)                                 | ✅ SAFE       | Not restricted                                       |
-| 16| No ESP32-STM32 SPI/I2C conflict               | ✅ Confirmed  | No shared buses                                      |
-| 17| No dual-driving on any signal                  | ✅ Confirmed  | CAN isolated via transceivers                        |
-| 18| Restricted pins avoided (0, 3, 10–12, 19–20, 26–37, 45–46) | ✅ Confirmed | None used |
+| 7 | GPIO39 (TFT_DC)                               | ✅ SAFE       | Not restricted — outside Flash/PSRAM range           |
+| 8 | GPIO10 (TFT_CS)                               | ✅ SAFE       | Not restricted                                       |
+| 9 | GPIO13 (TFT_MOSI)                             | ✅ SAFE       | Not restricted                                       |
+| 10| GPIO14 (TFT_SCLK)                             | ✅ SAFE       | Not restricted                                       |
+| 11| GPIO12 (TFT_MISO)                             | ✅ SAFE       | Not restricted                                       |
+| 12| GPIO38 (TFT_RST)                              | ✅ SAFE       | Not restricted                                       |
+| 13| GPIO45 (TFT_BL)                               | ✅ SAFE       | Strapping pin — safe post-boot as GPIO output        |
+| 14| GPIO21 (TOUCH_CS)                              | ✅ SAFE       | Not restricted                                       |
+| 15| GPIO4 (CAN_TX)                                 | ✅ SAFE       | Not restricted                                       |
+| 16| GPIO5 (CAN_RX)                                 | ✅ SAFE       | Not restricted                                       |
+| 17| No ESP32-STM32 SPI/I2C conflict               | ✅ Confirmed  | No shared buses                                      |
+| 18| No dual-driving on any signal                  | ✅ Confirmed  | CAN isolated via transceivers                        |
+| 19| GPIO33–37 avoided (Octal PSRAM, N16R8)        | ✅ Confirmed  | Not used for any function                            |
+| 20| GPIO26–32 avoided (QSPI Flash bus)            | ✅ Confirmed  | Not used for any function                            |
 
 ### Decision
 
@@ -253,7 +265,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
 
 **Justification:**
 
-1. All TFT SPI pins (GPIO13, 14, 15, 16, 17, 42, 21) are confirmed SAFE — none conflict with flash, PSRAM, strapping pins, USB, or JTAG
+1. All TFT SPI pins (GPIO10, 12, 13, 14, 39, 38, 45, 21) are confirmed SAFE — none conflict with flash, PSRAM, strapping pins, USB, or JTAG
 2. CAN pins (GPIO4, 5) are confirmed SAFE
 3. No electrical conflict exists between ESP32 and STM32 subsystems
 4. The firmware compiles and all pin assignments are valid for the ESP32-S3-WROOM-1 N16R8 module
@@ -269,7 +281,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
    ```
    These are NOT required for the current firmware but should be added if PSRAM allocation is ever introduced.
 
-2. **GPIO42 backlight note:** A brief flicker may occur during ESP32 reset. This is cosmetic only and does not affect functionality. No action needed.
+2. **GPIO45 backlight note:** GPIO45 is sampled as a strapping pin (VDD_SPI) only at reset. After boot it operates as a normal GPIO output. A brief LOW level at power-on may occur; this is cosmetic and does not affect functionality.
 
 ---
 
