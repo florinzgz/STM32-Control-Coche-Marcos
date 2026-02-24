@@ -302,18 +302,18 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
-| MISO (SDO) | **GPIO12** | Datos SPI desde display/touch | 20 MHz |
-| MOSI (SDA) | **GPIO13** | Datos SPI al display | 40 MHz |
-| SCLK (SCL) | **GPIO14** | Reloj SPI | 40 MHz |
-| CS | **GPIO15** | Chip Select display | — |
-| DC (A0) | **GPIO16** | Data/Command select | — |
-| RST | **GPIO17** | Reset hardware del display | — |
-| BL | **GPIO42** | Backlight (HIGH = encendido) | — |
+| MISO (SDO) | **GPIO37** | Datos SPI desde display/touch | 20 MHz |
+| MOSI (SDA) | **GPIO35** | Datos SPI al display | 40 MHz |
+| SCLK (SCL) | **GPIO36** | Reloj SPI | 40 MHz |
+| CS | **GPIO34** | Chip Select display | — |
+| DC (A0) | **GPIO33** | Data/Command select | — |
+| RST | **GPIO38** | Reset hardware del display | — |
+| BL | **GPIO45** | Backlight (HIGH = encendido) | — |
 | | | **Subtotal:** | **7 pines** |
 
 - Driver: ST7796, resolución 480×320 en modo landscape (rotación 1)
 - Biblioteca: TFT_eSPI v2.5.43
-- MISO (GPIO 12): compartido con T_DO del XPT2046 (necesario para touch)
+- MISO (GPIO 37): compartido con T_DO del XPT2046 (necesario para touch)
 
 ### 5.2 Panel táctil — SPI (1 pin)
 
@@ -322,7 +322,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | TOUCH_CS | **GPIO21** | Chip Select del panel táctil | 2.5 MHz |
 | | | **Subtotal:** | **1 pin** |
 
-- Comparte MOSI (GPIO13), SCLK (GPIO14) y MISO (GPIO12) con el display
+- Comparte MOSI (GPIO35), SCLK (GPIO36) y MISO (GPIO37) con el display
 - TOUCH_CS cuenta como pin adicional; MISO (T_DO) se comparte con el bus SPI
 
 ### 5.3 CAN bus — TWAI vía TJA1051 (2 pines)
@@ -392,18 +392,19 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |---|------|--------|---------|
 | 1 | GPIO4 | CAN bus | TWAI TX → TJA1051 TXD |
 | 2 | GPIO5 | CAN bus | TWAI RX → TJA1051 RXD |
-| 3 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
-| 4 | GPIO14 | Display TFT | SPI SCLK (reloj) |
-| 5 | GPIO15 | Display TFT | SPI CS (chip select display) |
-| 6 | GPIO16 | Display TFT | DC (Data/Command) |
-| 7 | GPIO17 | Display TFT | RST (Reset display) |
-| 8 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
-| 9 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
-| 10 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
-| 11 | GPIO42 | Display TFT | BL (Backlight) |
-| 12 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
-| 13 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
-| 14 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
+| 3 | GPIO33 | Display TFT | DC (Data/Command) |
+| 4 | GPIO34 | Display TFT | SPI CS (chip select display) |
+| 5 | GPIO35 | Display TFT | SPI MOSI (datos al display) |
+| 6 | GPIO36 | Display TFT | SPI SCLK (reloj) |
+| 7 | GPIO37 | Display TFT | SPI MISO (datos desde display/touch) |
+| 8 | GPIO38 | Display TFT | RST (Reset display) |
+| 9 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
+| 10 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
+| 11 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
+| 12 | GPIO45 | Display TFT | BL (Backlight) |
+| 13 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
+| 14 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
+| 15 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
 
 ---
 
@@ -425,15 +426,13 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 10 | GPIO11 | GPIO, SPI | **LIBRE** |
 | 11 | GPIO12 | GPIO, SPI | **LIBRE** |
 | 12 | GPIO18 | GPIO | **LIBRE** |
-| 13 | GPIO38 | GPIO | **LIBRE** |
-| 14 | GPIO39 | GPIO | **LIBRE** |
-| 15 | GPIO40 | GPIO | **LIBRE** |
-| 16 | GPIO41 | GPIO | **LIBRE** |
-| 17 | GPIO45 | GPIO | **LIBRE** (⚠️ boot strapping) |
-| 18 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
-| 19 | GPIO48 | GPIO | **LIBRE** |
+| 13 | GPIO39 | GPIO | **LIBRE** |
+| 14 | GPIO40 | GPIO | **LIBRE** |
+| 15 | GPIO41 | GPIO | **LIBRE** |
+| 16 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
+| 17 | GPIO48 | GPIO | **LIBRE** |
 
-> **Nota:** GPIO26–GPIO37 están reservados para Flash/PSRAM interno en el módulo ESP32-S3-WROOM y **NO están accesibles** en la placa DevKitC-1. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales.
+> **Nota:** GPIO26–GPIO32 están reservados para Flash/PSRAM interno en el módulo ESP32-S3-WROOM y **NO están accesibles** en la placa DevKitC-1. GPIO33–GPIO38 y GPIO45 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales.
 
 > **Resumen: ~15 pines libres de forma segura** (evitando pines de boot strapping).
 
@@ -444,9 +443,9 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | Botones físicos (menú, modo, emergencia) | GPIO6, GPIO7, GPIO8 | 3 |
 | LEDs de estado (CAN ok, error, etc.) | GPIO9, GPIO10 | 2 |
 | SD Card (SPI) | GPIO6 (MISO), GPIO7 (MOSI), GPIO8 (SCK), GPIO9 (CS) | 4 |
-| Buzzer / alarma sonora | GPIO38 | 1 |
+| Buzzer / alarma sonora | GPIO39 | 1 |
 | ADC adicional (batería, sensor luz) | GPIO1, GPIO2, GPIO3 | 1-3 |
-| I2C adicional (sensor ambiental) | GPIO38 (SCL), GPIO39 (SDA) | 2 |
+| I2C adicional (sensor ambiental) | GPIO39 (SCL), GPIO40 (SDA) | 2 |
 
 ---
 

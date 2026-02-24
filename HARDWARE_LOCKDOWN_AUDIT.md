@@ -123,15 +123,16 @@ The missing settings have the following practical impact:
 
 | GPIO   | Function  | Internal Flash? | PSRAM? | Strapping? | USB/JTAG? | Boot Restricted? | **VERDICT**   |
 |--------|-----------|-----------------|--------|------------|-----------|-------------------|---------------|
-| GPIO13 | TFT_MOSI  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO14 | TFT_SCLK  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO15 | TFT_CS    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO16 | TFT_DC    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO17 | TFT_RST   | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO42 | TFT_BL    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ⚠️ Note¹          | ✅ **SAFE**   |
+| GPIO33 | TFT_DC    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO34 | TFT_CS    | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO35 | TFT_MOSI  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO36 | TFT_SCLK  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO37 | TFT_MISO  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO38 | TFT_RST   | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO45 | TFT_BL    | ❌ No           | ❌ No  | ⚠️ Note¹   | ❌ No     | ❌ No             | ✅ **SAFE**   |
 | GPIO21 | TOUCH_CS  | ❌ No           | ❌ No  | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
 
-**Note¹ on GPIO42:** GPIO42 may show a brief logic level change during boot reset on some ESP32-S3 boards (shared with JTAG boundary scan). This is NOT a strapping pin and does NOT affect boot mode. For backlight control, this is completely acceptable — a brief flicker during boot reset is normal and inconsequential. GPIO42 is **SAFE** for TFT backlight.
+**Note¹ on GPIO45:** GPIO45 is a strapping pin (VDD_SPI voltage reference) sampled only at reset. After boot it operates as a normal GPIO output. For backlight control it is **SAFE** — the brief strapping sample does not affect the TFT backlight. GPIOs 15, 16, 17 from prior documentation were found to conflict with internal flash/PSRAM on the N16R8 module and must NOT be used for TFT.
 
 ### Additional ESP32 Pins in Use
 
@@ -192,7 +193,7 @@ ESP32 GPIO5 (RX) ← TJA1051 #1 RXD ← CANH/CANL bus ← TJA1051 #2 TXD ← STM
 ```
 
 **Key isolation facts:**
-1. The ESP32 SPI pins (GPIO13–17, 42, 21) have **NO electrical connection** to the STM32
+1. The ESP32 SPI pins (GPIO33–38, 45, 21) have **NO electrical connection** to the STM32
 2. The TJA1051 transceivers provide **galvanic isolation** between MCU GPIO pins and the CAN differential bus
 3. ESP32 GPIO4/5 connect to TJA1051 #1 (ESP32 side only)
 4. STM32 PB8/PB9 connect to TJA1051 #2 (STM32 side only)
@@ -234,18 +235,19 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
 | 4 | `platformio.ini` board selection              | ✅ Correct    | `esp32-s3-devkitc-1` is appropriate                  |
 | 5 | `platformio.ini` memory_type                  | ⚠️ Missing   | Not set, but PSRAM not used — no runtime impact      |
 | 6 | `platformio.ini` flash_size                   | ⚠️ Missing   | Defaults to 8MB, firmware fits — no runtime impact   |
-| 7 | GPIO13 (TFT_MOSI)                             | ✅ SAFE       | Not restricted                                       |
-| 8 | GPIO14 (TFT_SCLK)                             | ✅ SAFE       | Not restricted                                       |
-| 9 | GPIO15 (TFT_CS)                               | ✅ SAFE       | Not restricted                                       |
-| 10| GPIO16 (TFT_DC)                               | ✅ SAFE       | Not restricted                                       |
-| 11| GPIO17 (TFT_RST)                              | ✅ SAFE       | Not restricted                                       |
-| 12| GPIO42 (TFT_BL)                               | ✅ SAFE       | Minor boot-time level change, inconsequential for BL |
-| 13| GPIO21 (TOUCH_CS)                              | ✅ SAFE       | Not restricted                                       |
-| 14| GPIO4 (CAN_TX)                                 | ✅ SAFE       | Not restricted                                       |
-| 15| GPIO5 (CAN_RX)                                 | ✅ SAFE       | Not restricted                                       |
-| 16| No ESP32-STM32 SPI/I2C conflict               | ✅ Confirmed  | No shared buses                                      |
-| 17| No dual-driving on any signal                  | ✅ Confirmed  | CAN isolated via transceivers                        |
-| 18| Restricted pins avoided (0, 3, 10–12, 19–20, 26–37, 45–46) | ✅ Confirmed | None used |
+| 7 | GPIO33 (TFT_DC)                               | ✅ SAFE       | Not restricted                                       |
+| 8 | GPIO34 (TFT_CS)                               | ✅ SAFE       | Not restricted                                       |
+| 9 | GPIO35 (TFT_MOSI)                             | ✅ SAFE       | Not restricted                                       |
+| 10| GPIO36 (TFT_SCLK)                             | ✅ SAFE       | Not restricted                                       |
+| 11| GPIO37 (TFT_MISO)                             | ✅ SAFE       | Not restricted                                       |
+| 12| GPIO38 (TFT_RST)                              | ✅ SAFE       | Not restricted                                       |
+| 13| GPIO45 (TFT_BL)                               | ✅ SAFE       | Strapping pin — safe post-boot as GPIO output        |
+| 14| GPIO21 (TOUCH_CS)                              | ✅ SAFE       | Not restricted                                       |
+| 15| GPIO4 (CAN_TX)                                 | ✅ SAFE       | Not restricted                                       |
+| 16| GPIO5 (CAN_RX)                                 | ✅ SAFE       | Not restricted                                       |
+| 17| No ESP32-STM32 SPI/I2C conflict               | ✅ Confirmed  | No shared buses                                      |
+| 18| No dual-driving on any signal                  | ✅ Confirmed  | CAN isolated via transceivers                        |
+| 19| Restricted pins avoided (0, 3, 10–12, 15–17, 19–20, 26–32, 42, 46) | ✅ Confirmed | None used for TFT |
 
 ### Decision
 
@@ -253,7 +255,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
 
 **Justification:**
 
-1. All TFT SPI pins (GPIO13, 14, 15, 16, 17, 42, 21) are confirmed SAFE — none conflict with flash, PSRAM, strapping pins, USB, or JTAG
+1. All TFT SPI pins (GPIO33, 34, 35, 36, 37, 38, 45, 21) are confirmed SAFE — none conflict with flash, PSRAM, strapping pins, USB, or JTAG
 2. CAN pins (GPIO4, 5) are confirmed SAFE
 3. No electrical conflict exists between ESP32 and STM32 subsystems
 4. The firmware compiles and all pin assignments are valid for the ESP32-S3-WROOM-1 N16R8 module
@@ -269,7 +271,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
    ```
    These are NOT required for the current firmware but should be added if PSRAM allocation is ever introduced.
 
-2. **GPIO42 backlight note:** A brief flicker may occur during ESP32 reset. This is cosmetic only and does not affect functionality. No action needed.
+2. **GPIO45 backlight note:** GPIO45 is sampled as a strapping pin (VDD_SPI) only at reset. After boot it operates as a normal GPIO output. A brief LOW level at power-on may occur; this is cosmetic and does not affect functionality.
 
 ---
 

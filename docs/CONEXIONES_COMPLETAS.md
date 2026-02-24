@@ -374,12 +374,13 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 
 | Cable | De (ESP32) | A (Display TFT) | Función |
 |-------|-----------|-----------------|---------|
-| — | **GPIO13** | MOSI (SDA) | Datos SPI |
-| — | **GPIO14** | SCLK (SCL) | Reloj SPI |
-| — | **GPIO15** | CS | Chip Select display |
-| — | **GPIO16** | DC (A0) | Data/Command |
-| — | **GPIO17** | RST | Reset display |
-| — | **GPIO42** | BL | Backlight (HIGH=encendido) |
+| — | **GPIO35** | MOSI (SDA) | Datos SPI |
+| — | **GPIO36** | SCLK (SCL) | Reloj SPI |
+| — | **GPIO34** | CS | Chip Select display |
+| — | **GPIO33** | DC (A0) | Data/Command |
+| — | **GPIO38** | RST | Reset display |
+| — | **GPIO45** | BL | Backlight (HIGH=encendido) |
+| — | **GPIO37** | SDO (MISO) / T_DO | Datos SPI desde display/touch |
 | — | **GPIO21** | TOUCH_CS | Touch panel chip select |
 | — | 3.3V | VCC | Alimentación display |
 | — | GND | GND | GND común |
