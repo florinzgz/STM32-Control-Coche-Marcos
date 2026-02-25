@@ -1,7 +1,7 @@
 # INFORME DE REVISIÓN TÉCNICA — Módulo relay_audio
 ## Seguridad Funcional y Estabilidad del Sistema
 
-**Versión revisada:** commit `c2a21a2` + parches de esta revisión  
+**Versión revisada:** commit `f0db14a` + test suite  
 **Entorno:** ESP32-S3-DevKitC-1 (N16R8), Arduino/PlatformIO  
 **Fecha:** 2026-02-25  
 **Resultado final:** ✅ APTO para despliegue en vehículo real
@@ -293,6 +293,44 @@ Características de seguridad confirmadas:
 - ✅ Temporización correcta: 0 clicks, 0 solapamientos, 0 doble activación
 - ✅ Backward-compatible: funciona sin relé físico conectado
 - ✅ Jerarquía de prioridades de audio preservada en todo momento
+
+---
+
+## 11. Evidencia de Pruebas Automatizadas
+
+Se ha creado un test unitario compilable en el host que valida directamente el código fuente
+del módulo sin hardware real:
+
+**Fichero:** `esp32/src/test_relay_audio.cpp`  
+**Stub Arduino:** `esp32/test_stubs/Arduino.h`
+
+**Compilar y ejecutar:**
+```bash
+cd esp32/src
+g++ -std=c++17 -I. -I../test_stubs \
+    relay_audio.cpp test_relay_audio.cpp \
+    -o /tmp/test_relay_audio && /tmp/test_relay_audio
+```
+
+**Resultado:** 71 pruebas ejecutadas, 0 fallos
+
+| Test | Requisito verificado |
+|------|---------------------|
+| `test_init_forces_relay_off` | init() fuerza GPIO HIGH en reboot/brownout |
+| `test_normal_activation` | IDLE→ACTIVATING→ACTIVE en 20 ms exactos |
+| `test_normal_release` | ACTIVE→RELEASING→IDLE en 150 ms exactos |
+| `test_consecutive_sounds` | RELEASING→ACTIVE sin re-establecimiento |
+| `test_idempotent_request_on` | requestOn() no produce double-activación |
+| `test_release_on_idle_is_noop` | release() en IDLE es no-op |
+| `test_force_off_from_active` | forceOff() desde ACTIVE → IDLE inmediato |
+| `test_force_off_from_releasing` | forceOff() desde RELEASING → IDLE inmediato |
+| `test_watchdog_fires` | Watchdog dispara exactamente en RELAY_MAX_ON_MS |
+| `test_millis_overflow` | Aritmética sin signo correcta en overflow de millis() |
+| `test_watchdog_overflow` | Watchdog correcto cuando activación cruza overflow |
+| `test_release_during_activating` | release() en ACTIVATING → RELEASING correcto |
+| `test_gpio_polarity` | Relé OFF=HIGH, Relé ON=LOW |
+| `test_dfplayer_no_response` | Fallo DFPlayer: relay liberado tras timeout 5s+150ms |
+| `test_not_ready_during_activating` | isReady()=false durante ventana de 20 ms |
 
 ---
 
