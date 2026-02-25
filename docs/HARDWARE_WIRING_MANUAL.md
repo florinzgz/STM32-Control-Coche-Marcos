@@ -21,7 +21,7 @@
 7. [Relés](#7-relés)
 8. [Tabla final de pinout](#8-tabla-final-de-pinout)
 9. [Cosas que NO existen en el STM32](#9-cosas-que-no-existen-en-el-stm32)
-10. [Circuito de adaptación BTS7960: PWM+DIR → RPWM/LPWM](#10-circuito-de-adaptación-bts7960-pwmdir--rpwmlpwm)
+10. [Conexión directa BTS7960 — RPWM/LPWM desde STM32 (sin lógica externa)](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógica-externa)
 11. [Circuito completo de driver de relé con optoacoplador](#11-circuito-completo-de-driver-de-relé-con-optoacoplador)
 12. [Protección anti-reinicios y anti-sobretensiones](#12-protección-anti-reinicios-y-anti-sobretensiones)
 
@@ -261,22 +261,21 @@ Cada BTS7960 de tracción recibe 3 señales del STM32:
 
 ### Conexión STM32 → BTS7960 (por motor de tracción)
 
-El firmware usa **un pin PWM** y **un pin DIR** por motor. El BTS7960 tiene dos
-entradas PWM independientes: RPWM (avance) y LPWM (retroceso). Es **obligatorio**
-un circuito de adaptación lógica entre el STM32 y el BTS7960.
+El firmware genera **dos señales PWM independientes** por motor: RPWM y LPWM, directamente
+desde los timers hardware (TIM1, TIM3, TIM8). **No se necesita circuito de adaptación externo.**
 
-Ver [Sección 10](#10-circuito-de-adaptación-bts7960-pwmdir--rpwmlpwm) para el esquema completo.
+Ver [Sección 10](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógica-externa) para la tabla completa de asignación de pines.
 
-**Resumen de conexiones con el circuito de adaptación instalado:**
+**Resumen de conexiones directas (sin lógica 74HC):**
 
 ```
-STM32                  Lógica 74HC08+74HC04            BTS7960 (por motor)
-──────────────         ────────────────────            ──────────────────
-PA8 (PWM_FL) ──────► AND gate A1 ──────────────────► RPWM  (avance)
-PA8 (PWM_FL) ──────► AND gate A2 ──────────────────► LPWM  (retroceso)
-PC0 (DIR_FL) ──────► AND gate A1 entrada B (directo)
-                  └─► NOT gate → AND gate A2 entrada B
-PC5 (EN_FL)  ─────────────────────────────────────► R_EN + L_EN (ambos)
+STM32                                               BTS7960 (por motor)
+──────────────                                      ──────────────────
+PA8  (TIM1_CH1 — RPWM_FL) ───────────────────────► RPWM  (avance)
+PC6  (TIM8_CH1 — LPWM_FL) ───────────────────────► LPWM  (retroceso)
+PC5  (GPIO EN_FL)          ───────────────────────► R_EN ─┐
+                                                           ├─ (unir)
+                                                    L_EN ─┘
                                                     VCC ← 5 V lógica
                                                     B+  ← 24 V (vía relé TRAC + shunt INA226)
                                                     B-  ← GND potencia
@@ -673,137 +672,128 @@ automáticamente.
 
 ---
 
-## 10. Circuito de adaptación BTS7960: PWM+DIR → RPWM/LPWM
+## 10. Conexión directa BTS7960 — RPWM/LPWM desde STM32 (sin lógica externa)
 
-### El problema
+> **ACTUALIZACIÓN DE HARDWARE** — Los chips 74HC08 (AND) y 74HC04 (NOT) han sido
+> **eliminados completamente**. El firmware genera RPWM y LPWM directamente desde
+> timers hardware del STM32G474RE. No se necesita ninguna lógica externa.
 
-El firmware genera **una señal PWM** (TIM1/TIM8) y **una señal de dirección GPIO** (DIR) por motor.
-El BTS7960 espera dos entradas PWM separadas: **RPWM** (avance) y **LPWM** (retroceso).
+### Por qué ya no se necesitan los 74HC
 
-**Sin este circuito, el motor solo gira en un sentido** o puede recibir señales incorrectas.
-
-### Lógica requerida
-
-```
-RPWM = PWM  AND  DIR         → avance:   cuando DIR=HIGH, RPWM sigue al PWM
-LPWM = PWM  AND  NOT(DIR)    → retroceso: cuando DIR=LOW,  LPWM sigue al PWM
-```
-
-Verificación:
-
-| DIR (GPIO) | PWM | RPWM | LPWM | Resultado |
-|------------|-----|------|------|-----------|
-| HIGH (avance)   | 50 % | 50 % | 0   | Motor avanza al 50 % |
-| HIGH (avance)   | 0   | 0    | 0   | Motor frenado (ambas entradas LOW) |
-| LOW (retroceso) | 50 % | 0   | 50 % | Motor retrocede al 50 % |
-| LOW (retroceso) | 0   | 0    | 0   | Motor frenado |
-
-### Componentes necesarios
-
-| Componente | Cantidad | Uso |
-|-----------|----------|-----|
-| **SN74HC08N** (quad AND gate, DIP-14) | 3 unidades | 2× para 4 motores tracción + 1× para motor dirección |
-| **SN74HC04N** (hex NOT gate, DIP-14) | 1 unidad | NOT de 5 señales DIR (4 tracción + 1 dirección) |
-| Condensador cerámico 100 nF | 4 unidades | Desacoplo VCC de cada CI lógico |
-
-> Alternativa de un único chip: **SN74HC157N** (quad 2-to-1 mux, DIP-16) — 1 chip por motor,
-> usa el pin DIR como selector. Requiere 5 chips en total.
-
-### Esquema para UN motor (por ejemplo FL: PA8 + PC0)
+El firmware anterior generaba una sola señal PWM + una señal DIR (GPIO), y los 74HC
+convertían esa combinación en RPWM/LPWM. El firmware actualizado usa **dos canales PWM
+independientes por motor**, uno para RPWM y otro para LPWM, generados directamente por
+los timers TIM1, TIM8 y TIM3. La lógica de dirección es interna al microcontrolador:
 
 ```
-3.3V ─────────────────────────────── Vcc (pin 14 del 74HC08)
-                                     │
-                                   [100 nF] (entre Vcc y GND del CI, soldar junto al chip)
-                                     │
-GND ─────────────────────────────── GND (pin 7 del 74HC08)
-
-STM32 PA8 (PWM_FL)  ─────┬─────────► 74HC08: A1 (pin 1) ──► Y1 (pin 3) ──► BTS7960 FL: RPWM
-                          │
-                          └─────────► 74HC08: A2 (pin 4) ──► Y2 (pin 6) ──► BTS7960 FL: LPWM
-
-STM32 PC0 (DIR_FL)  ─────┬─────────► 74HC08: B1 (pin 2)          (entrada directa AND gate 1)
-                          │
-                          └─────────► 74HC04: A (pin 1) ──► Y (pin 2) ──► 74HC08: B2 (pin 5)
-                                       (NOT gate: invierte DIR)             (entrada invertida AND gate 2)
+Motor_SetSigned(motor, +duty)  →  RPWM = duty,  LPWM = 0   (avance)
+Motor_SetSigned(motor, -duty)  →  RPWM = 0,     LPWM = duty (retroceso)
+Motor_SetSigned(motor,  0)     →  RPWM = 0,     LPWM = 0   (freno pasivo / coast)
 ```
 
-**Resultado final en los pines del BTS7960:**
-```
-BTS7960 FL: RPWM ◄── PA8 AND PC0         (HIGH cuando avance y PWM activo)
-BTS7960 FL: LPWM ◄── PA8 AND NOT(PC0)   (HIGH cuando retroceso y PWM activo)
-BTS7960 FL: R_EN ◄── PC5 (EN_FL, directo desde STM32)
-BTS7960 FL: L_EN ◄── PC5 (EN_FL, mismo cable, ambas entradas EN unidas)
-BTS7960 FL: VCC  ◄── 5 V lógica
-BTS7960 FL: GND  ◄── GND común
-BTS7960 FL: B+   ◄── 24 V (desde relé TRAC a través del shunt INA226 #0)
-BTS7960 FL: B-   ◄── GND potencia (GND común)
-BTS7960 FL: M+   ──► Motor FL terminal A
-BTS7960 FL: M-   ──► Motor FL terminal B
-```
+**Garantía hardware**: RPWM y LPWM nunca son simultáneamente no-cero. La función
+`Motor_SetSigned()` limpia el canal inactivo antes de escribir el canal activo. Ambos
+CCR tienen OCPreload habilitado, por lo que el cambio real en el pin solo ocurre en el
+siguiente período del timer (no hay glitch entre transiciones).
 
-### Asignación completa de pines 74HC08 para 4 motores de tracción
+### Tabla de asignación de pines RPWM/LPWM
 
-Se necesitan **2 chips 74HC08** (8 AND gates en total para 4 motores RPWM+LPWM):
+| Motor     | RPWM (avance)          | LPWM (retroceso)        | EN GPIO        |
+|-----------|------------------------|-------------------------|----------------|
+| FL (front-left) | PA8 — TIM1_CH1   | PC6 — TIM8_CH1          | PC5 (GPIO out) |
+| FR (front-right)| PA9 — TIM1_CH2   | PC7 — TIM8_CH2          | 3.3 V en HW    |
+| RL (rear-left)  | PA10 — TIM1_CH3  | PA6 — TIM3_CH1          | 3.3 V en HW    |
+| RR (rear-right) | PA11 — TIM1_CH4  | PA7 — TIM3_CH2          | 3.3 V en HW    |
+| STEER           | PC8 — TIM8_CH3   | PC9 — TIM8_CH4          | 3.3 V en HW    |
 
-**74HC08 Chip #1** (motores FL y FR, RPWM):
+> **Nota EN**: Los motores FL y RR conservan su pin GPIO de enable (PC5, PC13).
+> Los motores FR, RL y STEER tienen R_EN / L_EN del BTS7960 conectados
+> directamente a 3.3 V (siempre habilitados); la dirección se controla exclusivamente
+> por cuál canal PWM está activo.
 
-| Gate | A (PWM) | B (DIR) | Y (salida) | Destino |
-|------|---------|---------|-----------|---------|
-| 1 | PA8 (PWM_FL) | PC0 (DIR_FL) | pin 3 | BTS7960 FL: RPWM |
-| 2 | PA9 (PWM_FR) | PC1 (DIR_FR) | pin 6 | BTS7960 FR: RPWM |
-| 3 | PA10 (PWM_RL) | PC2 (DIR_RL) | pin 8 | BTS7960 RL: RPWM |
-| 4 | PA11 (PWM_RR) | PC3 (DIR_RR) | pin 11 | BTS7960 RR: RPWM |
-
-**74HC08 Chip #2** (motores FL, FR, RL, RR — LPWM, usando DIR invertido):
-
-| Gate | A (PWM) | B (NOT DIR, desde 74HC04) | Y (salida) | Destino |
-|------|---------|--------------------------|-----------|---------|
-| 1 | PA8 (PWM_FL) | NOT(PC0) | pin 3 | BTS7960 FL: LPWM |
-| 2 | PA9 (PWM_FR) | NOT(PC1) | pin 6 | BTS7960 FR: LPWM |
-| 3 | PA10 (PWM_RL) | NOT(PC2) | pin 8 | BTS7960 RL: LPWM |
-| 4 | PA11 (PWM_RR) | NOT(PC3) | pin 11 | BTS7960 RR: LPWM |
-
-**74HC04 Chip** (NOT gates para invertir DIR):
-
-| Gate | Entrada | Salida | Conectar a |
-|------|---------|--------|-----------|
-| 1 | PC0 (DIR_FL) | NOT(DIR_FL) | 74HC08 Chip#2 gate 1 entrada B |
-| 2 | PC1 (DIR_FR) | NOT(DIR_FR) | 74HC08 Chip#2 gate 2 entrada B |
-| 3 | PC2 (DIR_RL) | NOT(DIR_RL) | 74HC08 Chip#2 gate 3 entrada B |
-| 4 | PC3 (DIR_RR) | NOT(DIR_RR) | 74HC08 Chip#2 gate 4 entrada B |
-| 5 | PC4 (DIR_STEER) | NOT(DIR_STEER) | 74HC08 Chip#3 gate 2 entrada B |
-| 6 | — | — | (libre, no conectar) |
-
-**74HC08 Chip #3** (motor de dirección, solo 2 gates):
-
-| Gate | A | B | Y | Destino |
-|------|---|---|---|---------|
-| 1 | PC8 (PWM_STEER) | PC4 (DIR_STEER) | pin 3 | BTS7960 STEER: RPWM |
-| 2 | PC8 (PWM_STEER) | NOT(PC4) | pin 6 | BTS7960 STEER: LPWM |
-| 3, 4 | — | — | — | (libres, entradas a GND para evitar oscilación) |
-
-> **IMPORTANTE**: Conectar las entradas no usadas de los CI lógicos a GND (no dejar flotantes).
-> Conectar 100 nF entre VCC y GND de cada CI, lo más cerca posible de los pines de alimentación.
-> Usar cables cortos (< 15 cm) entre los CI lógicos y el STM32, y entre los CI y los BTS7960.
-
-### Snubber anti-EMI en terminales del motor
-
-Para reducir el ruido RF que generan las escobillas del motor y que afecta al bus I2C y al ADC:
+### Conexión directa — motor FL (ejemplo)
 
 ```
-Motor terminal M+ ─── [100 nF cerámico 50 V] ─── Motor terminal M-
-                       (soldar directamente en los bornes del motor)
+STM32 PA8  (TIM1_CH1) ─────────────────────────────► BTS7960 FL: RPWM
+STM32 PC6  (TIM8_CH1) ─────────────────────────────► BTS7960 FL: LPWM
+STM32 PC5  (GPIO EN)  ─────────────────────────────► BTS7960 FL: R_EN  ─┐
+                                                                          ├─ (cable corto)
+                                                      BTS7960 FL: L_EN  ─┘
+                                                      BTS7960 FL: VCC  ◄── 5 V lógica
+                                                      BTS7960 FL: GND  ◄── GND común
+                                                      BTS7960 FL: B+   ◄── 24 V (relé TRAC → shunt INA226 #0)
+                                                      BTS7960 FL: B-   ◄── GND potencia
+                                                      BTS7960 FL: M+   ──► Motor FL terminal A
+                                                      BTS7960 FL: M-   ──► Motor FL terminal B
 ```
 
-Adicionalmente, en el cable de potencia del motor (entre M+ y M-), un **diodo rectificador
-1N5408** en anti-paralelo con el motor amortigua picos de CEMF al frenar:
+### Conexión directa — motor FR (ejemplo, EN a 3.3 V)
 
 ```
-Motor M+ ──────────────────────► 1N5408 cátodo
-Motor M- ◄──────────────────── 1N5408 ánodo
-(diodo en anti-paralelo, uno por motor, junto al conector del motor)
+STM32 PA9  (TIM1_CH2) ─────────────────────────────► BTS7960 FR: RPWM
+STM32 PC7  (TIM8_CH2) ─────────────────────────────► BTS7960 FR: LPWM
+3.3 V ────────────────────────────────────────────► BTS7960 FR: R_EN  ─┐
+                                                                          ├─ (unir con cable corto)
+                                                      BTS7960 FR: L_EN  ─┘
 ```
+
+> Lo mismo aplica para RL (PA10/PA6), RR (PA11/PA7, con PC13 como EN GPIO) y STEER (PC8/PC9).
+
+### Tabla de funcionamiento RPWM/LPWM
+
+| Estado        | RPWM        | LPWM        | Motor              |
+|---------------|-------------|-------------|--------------------|
+| Avance 50 %   | 50 % duty   | 0           | Avanza al 50 %     |
+| Retroceso 50 %| 0           | 50 % duty   | Retrocede al 50 %  |
+| Freno pasivo  | 0           | 0           | Freno (ambas LOW)  |
+
+### Pines PC0–PC4 liberados (DIR, ya no se usan)
+
+| Pin antiguo | Uso anterior  | Estado nuevo             |
+|-------------|---------------|--------------------------|
+| PC0         | DIR_FL GPIO   | Libre — no conectar      |
+| PC1         | DIR_FR GPIO   | Libre — no conectar      |
+| PC2         | DIR_RL GPIO   | Libre — no conectar      |
+| PC3         | DIR_RR GPIO   | Libre — no conectar      |
+| PC4         | DIR_STEER GPIO| Libre — no conectar      |
+
+### Componentes que se eliminan del BOM
+
+| Componente eliminado              | Cantidad | Motivo |
+|-----------------------------------|----------|--------|
+| SN74HC08N (quad AND gate, DIP-14) | 3        | PWM/DIR combinados externamente — ya no necesario |
+| SN74HC04N (hex NOT gate, DIP-14)  | 1        | Inversión de DIR — ya no necesario |
+| Condensadores 100 nF desacoplo    | 4        | Para los CI lógicos eliminados |
+
+> Los condensadores de snubber en los bornes del motor (100 nF entre M+ y M-)
+> y los diodos 1N5408 anti-paralelo **se mantienen** — no tienen relación con la
+> lógica de control y siguen siendo necesarios para protección anti-EMI.
+
+### Frecuencia y modo PWM (sin cambios)
+
+Todos los timers (TIM1, TIM3, TIM8) operan en modo **Center-Aligned PWM1** a **20 kHz**:
+- Prescaler = 0, ARR = 4249, Prescaler = 0
+- 170 MHz / (2 × 4250) = **20 kHz**
+- Rango de duty: 0–4249 (igual que antes)
+- OCPreload habilitado en todos los canales
+
+### Nota sobre los módulos PCA9685 disponibles
+
+Los módulos AZDelivery PCA9685 (I2C, 16 canales, 12 bit) **no son adecuados** para
+el control de motores BTS7960 en este proyecto:
+
+- La comunicación I2C a 400 kHz añade **20–40 µs de latencia** por actualización de canal.
+  Actualizar 10 canales (5 motores × 2) en cada ciclo de 10 ms consumiría ~400 µs = 4 % del ciclo.
+- El PCA9685 tiene su propio oscilador interno de 25 MHz (±1 %); la frecuencia de PWM
+  no está sincronizada con los timers del STM32 ni con el ciclo de control.
+- Introduce un punto de fallo externo en el bucle de seguridad: si el I2C falla,
+  los PWM se "congelan" en su último valor, sin que la state machine de seguridad pueda
+  reaccionar inmediatamente.
+- Los timers hardware del STM32 tienen latencia **cero** (el CCR se actualiza en
+  el siguiente período sin intervención de CPU), son síncronos con el reloj del sistema,
+  y están integrados en el mismo dominio de seguridad que el IWDG y la SAFE state machine.
+
+**Conclusión**: usar los timers internos del STM32 es la solución correcta.
 
 ---
 
