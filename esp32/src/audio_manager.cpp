@@ -14,6 +14,7 @@
 // =============================================================================
 
 #include "audio_manager.h"
+#include "relay_audio.h"
 #include <Arduino.h>
 #include <HardwareSerial.h>
 
@@ -82,6 +83,8 @@ static constexpr uint8_t DF_CMD_RESET       = 0x0C;  // Reset module
 // -------------------------------------------------------------------------
 
 void init() {
+    relay_audio::init();  // Configure relay GPIO before DFPlayer initialisation
+
     dfSerial.begin(9600, SERIAL_8N1, PIN_DFPLAYER_RX, PIN_DFPLAYER_TX);
     delay(100);  // Allow UART to stabilize
 
@@ -107,24 +110,35 @@ void update() {
 
     unsigned long now = millis();
 
+    // Tick the relay state machine first (non-blocking)
+    relay_audio::update();
+
     // Check if current playback has timed out
     if (playing && (now - playStartMs) >= MAX_PLAY_DURATION_MS) {
         playing    = false;
         currentPri = Priority::LO;
+        relay_audio::release();  // Begin relay deactivation cooldown
     }
 
-    // Process pending sound if interval has elapsed
-    if (pendingValid && (now - lastCmdMs) >= CMD_INTERVAL_MS) {
-        uint8_t trackNum = static_cast<uint8_t>(pendingSound);
-        sendCommand(DF_CMD_PLAY_TRACK, 0, trackNum);
-        playing      = true;
-        currentPri   = pendingPri;
-        playStartMs  = now;
-        pendingValid = false;
+    // Process pending sound:
+    //   1. Request relay activation (idempotent — safe to call every iteration)
+    //   2. Wait until relay contact is established (isReady())
+    //   3. Send DFPlayer play command only after relay is ready
+    if (pendingValid) {
+        relay_audio::requestOn();
 
-        // Record the time this specific sound was played
-        if (trackNum <= MAX_TRACK) {
-            lastPlayedMs[trackNum] = now;
+        if (relay_audio::isReady() && (now - lastCmdMs) >= CMD_INTERVAL_MS) {
+            uint8_t trackNum = static_cast<uint8_t>(pendingSound);
+            sendCommand(DF_CMD_PLAY_TRACK, 0, trackNum);
+            playing      = true;
+            currentPri   = pendingPri;
+            playStartMs  = now;
+            pendingValid = false;
+
+            // Record the time this specific sound was played
+            if (trackNum <= MAX_TRACK) {
+                lastPlayedMs[trackNum] = now;
+            }
         }
     }
 }
@@ -144,8 +158,20 @@ void play(Sound sound, Priority priority) {
         }
     }
 
-    // If higher or equal priority than current, queue it
-    if (!playing || static_cast<uint8_t>(priority) >= static_cast<uint8_t>(currentPri)) {
+    // Queue decision:
+    //   (a) playing=false, no pending sound yet → always queue
+    //   (b) playing=false, pending sound exists → only queue if new priority
+    //       >= pending priority (prevents lower-priority sounds from overwriting
+    //       a higher-priority sound queued during the relay establishment window)
+    //   (c) playing=true → queue only if new priority >= currentPri (preempt)
+    bool canQueue;
+    if (!playing) {
+        canQueue = !pendingValid ||
+                   static_cast<uint8_t>(priority) >= static_cast<uint8_t>(pendingPri);
+    } else {
+        canQueue = static_cast<uint8_t>(priority) >= static_cast<uint8_t>(currentPri);
+    }
+    if (canQueue) {
         pendingSound = sound;
         pendingPri   = priority;
         pendingValid = true;
