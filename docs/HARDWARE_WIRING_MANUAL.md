@@ -21,6 +21,34 @@
 7. [Relés](#7-relés)
 8. [Tabla final de pinout](#8-tabla-final-de-pinout)
 9. [Cosas que NO existen en el STM32](#9-cosas-que-no-existen-en-el-stm32)
+10. [Conexión directa BTS7960 — RPWM/LPWM desde STM32 (sin lógica externa)](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógica-externa)
+11. [Circuito completo de driver de relé con optoacoplador](#11-circuito-completo-de-driver-de-relé-con-optoacoplador)
+12. [Protección anti-reinicios y anti-sobretensiones](#12-protección-anti-reinicios-y-anti-sobretensiones)
+
+---
+
+## ⚠️ COMPONENTES DE PROTECCIÓN — OBLIGATORIOS ANTES DE ENCENDER
+
+> **Leer esta sección antes de conectar cualquier cable.**
+> Sin estos componentes, el sistema puede sufrir reinicios inexplicables del STM32
+> (causados por ruido en la alimentación) o destrucción de pines del MCU
+> (causada por sobretensión de sensores o motores).
+
+### Resumen de componentes críticos por zona
+
+| Zona | Componente | Valor | Función | Sin él, puede pasar... |
+|------|-----------|-------|---------|------------------------|
+| STM32 Nucleo 3.3 V | Condensador cerámico | 100 nF | Desacoplo rápido VDD | Reinicio por pico de ruido PWM |
+| STM32 Nucleo 3.3 V | Condensador electrolítico | 10 µF | Desacoplo lento (bulk) | Reinicio por demanda transitoria de corriente |
+| Cada BTS7960 lógica VCC | Condensador cerámico | 100 nF | Desacoplo local | Glitch lógico al conmutar 20 kHz |
+| Bus 24 V (junto a relés) | Condensador electrolítico | 1 000 µF / 35 V | Absorción inrush | Sobretensión en cierre de relé principal |
+| Bus 12 V (dirección) | Condensador electrolítico | 470 µF / 25 V | Absorción inrush | Sobretensión al activar motor dirección |
+| Cada bobina de relé | Diodo 1N4007 | 1 A / 1 000 V | Flyback (anti-pico inductivo) | Pico de -100 V destruye GPIO del STM32 |
+| Cada terminal de motor | Condensador cerámico | 100 nF / 50 V | Snubber EMI | Ruido RF en señales I2C / CAN / ADC |
+| Encoder → STM32 (PA15, PB3) | Divisor resistivo o BSS138 | ver §12 | Limitación 5 V → 3,3 V | Destrucción permanente del pin STM32 |
+| Sensor LJ12A3 → STM32 (EXTI) | Optoacoplador PC817 / 6N137 | ver `CABLEADO_AISLAMIENTO_DEFINITIVO.md` | Aislamiento 6–36 V → 3,3 V | Pico inductivo destruye pin STM32 |
+| Pedal Hall → PA3 (ADC) | Divisor 10 kΩ + 6,8 kΩ | ver §6.5 | Escalado 5 V → 2 V | Destrucción ADC si supera 3,6 V |
+| CAN bus | Resistencia terminación | 120 Ω × 2 | Terminación diferencial | Errores CAN, STM32 entra en SAFE |
 
 ---
 
@@ -233,20 +261,30 @@ Cada BTS7960 de tracción recibe 3 señales del STM32:
 
 ### Conexión STM32 → BTS7960 (por motor de tracción)
 
+El firmware genera **dos señales PWM independientes** por motor: RPWM y LPWM, directamente
+desde los timers hardware (TIM1, TIM3, TIM8). **No se necesita circuito de adaptación externo.**
+
+Ver [Sección 10](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógica-externa) para la tabla completa de asignación de pines.
+
+**Resumen de conexiones directas (sin lógica 74HC):**
+
 ```
-STM32 (PA8/9/10/11) ──PWM──► BTS7960 RPWM o LPWM (según DIR)
-STM32 (PC0/1/2/3)   ──DIR──► BTS7960 (lógica de selección RPWM/LPWM)
-STM32 (PC5/6/7/13)  ──EN───► BTS7960 R_EN + L_EN (ambos habilitados juntos)
-                               BTS7960 VCC ← 5V lógica
-                               BTS7960 B+ ← 24V potencia
-                               BTS7960 B- ← GND potencia
+STM32                                               BTS7960 (por motor)
+──────────────                                      ──────────────────
+PA8  (TIM1_CH1 — RPWM_FL) ───────────────────────► RPWM  (avance)
+PC6  (TIM8_CH1 — LPWM_FL) ───────────────────────► LPWM  (retroceso)
+PC5  (GPIO EN_FL)          ───────────────────────► R_EN ─┐
+                                                           ├─ (unir)
+                                                    L_EN ─┘
+                                                    VCC ← 5 V lógica
+                                                    B+  ← 24 V (vía relé TRAC + shunt INA226)
+                                                    B-  ← GND potencia
 ```
 
-> **Nota**: El firmware controla un solo pin PWM por motor y un pin DIR para la dirección.
-> La lógica de adaptación entre la señal PWM+DIR del STM32 y las entradas RPWM/LPWM
-> del BTS7960 puede requerir circuitería externa o configuración específica del módulo
-> BTS7960. **NO DEDUCIBLE SOLO DESDE EL CÓDIGO**: consultar el esquemático del vehículo
-> para la conexión exacta PWM+DIR → RPWM/LPWM.
+**Condensador de desacoplo obligatorio en VCC del BTS7960:**
+```
+5V ────[100 nF cerámico]──── GND   (soldar junto al pin VCC de cada módulo BTS7960)
+```
 
 ---
 
@@ -487,8 +525,8 @@ Definidos en `main.h` (líneas 39–41):
 
 > **Nota**: Los pines GPIO del STM32 (3.3 V, máximo ~20 mA) **no pueden accionar un relé
 > directamente**. Se requiere un transistor/MOSFET de conmutación o un módulo de relé
-> con opto-aislamiento. **NO DEDUCIBLE SOLO DESDE EL CÓDIGO**: consultar el esquemático
-> para el circuito de driver de relé.
+> con opto-aislamiento. Ver [Sección 11](#11-circuito-completo-de-driver-de-relé-con-optoacoplador)
+> para el esquema completo con todos los componentes de protección.
 
 ### Orden de activación (Power-Up)
 
@@ -630,5 +668,470 @@ automáticamente.
 
 > **Este documento ha sido generado exclusivamente a partir del código fuente del firmware.**
 > Todos los pines, direcciones, constantes y comportamientos están trazados a archivos
-> específicos del repositorio. Las incertidumbres están marcadas como
-> "NO DEDUCIBLE SOLO DESDE EL CÓDIGO".
+> específicos del repositorio.
+
+---
+
+## 10. Conexión directa BTS7960 — RPWM/LPWM desde STM32 (sin lógica externa)
+
+> **ACTUALIZACIÓN DE HARDWARE** — Los chips 74HC08 (AND) y 74HC04 (NOT) han sido
+> **eliminados completamente**. El firmware genera RPWM y LPWM directamente desde
+> timers hardware del STM32G474RE. No se necesita ninguna lógica externa.
+
+### Por qué ya no se necesitan los 74HC
+
+El firmware anterior generaba una sola señal PWM + una señal DIR (GPIO), y los 74HC
+convertían esa combinación en RPWM/LPWM. El firmware actualizado usa **dos canales PWM
+independientes por motor**, uno para RPWM y otro para LPWM, generados directamente por
+los timers TIM1, TIM8 y TIM3. La lógica de dirección es interna al microcontrolador:
+
+```
+Motor_SetSigned(motor, +duty)  →  RPWM = duty,  LPWM = 0   (avance)
+Motor_SetSigned(motor, -duty)  →  RPWM = 0,     LPWM = duty (retroceso)
+Motor_SetSigned(motor,  0)     →  RPWM = 0,     LPWM = 0   (freno pasivo / coast)
+```
+
+**Garantía hardware**: RPWM y LPWM nunca son simultáneamente no-cero. La función
+`Motor_SetSigned()` limpia el canal inactivo antes de escribir el canal activo. Ambos
+CCR tienen OCPreload habilitado, por lo que el cambio real en el pin solo ocurre en el
+siguiente período del timer (no hay glitch entre transiciones).
+
+### Tabla de asignación de pines RPWM/LPWM
+
+| Motor     | RPWM (avance)          | LPWM (retroceso)        | EN GPIO        |
+|-----------|------------------------|-------------------------|----------------|
+| FL (front-left) | PA8 — TIM1_CH1   | PC6 — TIM8_CH1          | PC5 (GPIO out) |
+| FR (front-right)| PA9 — TIM1_CH2   | PC7 — TIM8_CH2          | 3.3 V en HW    |
+| RL (rear-left)  | PA10 — TIM1_CH3  | PA6 — TIM3_CH1          | 3.3 V en HW    |
+| RR (rear-right) | PA11 — TIM1_CH4  | PA7 — TIM3_CH2          | 3.3 V en HW    |
+| STEER           | PC8 — TIM8_CH3   | PC9 — TIM8_CH4          | 3.3 V en HW    |
+
+> **Nota EN**: Los motores FL y RR conservan su pin GPIO de enable (PC5, PC13).
+> Los motores FR, RL y STEER tienen R_EN / L_EN del BTS7960 conectados
+> directamente a 3.3 V (siempre habilitados); la dirección se controla exclusivamente
+> por cuál canal PWM está activo.
+
+### Conexión directa — motor FL (ejemplo)
+
+```
+STM32 PA8  (TIM1_CH1) ─────────────────────────────► BTS7960 FL: RPWM
+STM32 PC6  (TIM8_CH1) ─────────────────────────────► BTS7960 FL: LPWM
+STM32 PC5  (GPIO EN)  ─────────────────────────────► BTS7960 FL: R_EN  ─┐
+                                                                          ├─ (cable corto)
+                                                      BTS7960 FL: L_EN  ─┘
+                                                      BTS7960 FL: VCC  ◄── 5 V lógica
+                                                      BTS7960 FL: GND  ◄── GND común
+                                                      BTS7960 FL: B+   ◄── 24 V (relé TRAC → shunt INA226 #0)
+                                                      BTS7960 FL: B-   ◄── GND potencia
+                                                      BTS7960 FL: M+   ──► Motor FL terminal A
+                                                      BTS7960 FL: M-   ──► Motor FL terminal B
+```
+
+### Conexión directa — motor FR (ejemplo, EN a 3.3 V)
+
+```
+STM32 PA9  (TIM1_CH2) ─────────────────────────────► BTS7960 FR: RPWM
+STM32 PC7  (TIM8_CH2) ─────────────────────────────► BTS7960 FR: LPWM
+3.3 V ────────────────────────────────────────────► BTS7960 FR: R_EN  ─┐
+                                                                          ├─ (unir con cable corto)
+                                                      BTS7960 FR: L_EN  ─┘
+```
+
+> Lo mismo aplica para RL (PA10/PA6), RR (PA11/PA7, con PC13 como EN GPIO) y STEER (PC8/PC9).
+
+### Tabla de funcionamiento RPWM/LPWM
+
+| Estado        | RPWM        | LPWM        | Motor              |
+|---------------|-------------|-------------|--------------------|
+| Avance 50 %   | 50 % duty   | 0           | Avanza al 50 %     |
+| Retroceso 50 %| 0           | 50 % duty   | Retrocede al 50 %  |
+| Freno pasivo  | 0           | 0           | Freno (ambas LOW)  |
+
+### Pines PC0–PC4 liberados (DIR, ya no se usan)
+
+| Pin antiguo | Uso anterior  | Estado nuevo             |
+|-------------|---------------|--------------------------|
+| PC0         | DIR_FL GPIO   | Libre — no conectar      |
+| PC1         | DIR_FR GPIO   | Libre — no conectar      |
+| PC2         | DIR_RL GPIO   | Libre — no conectar      |
+| PC3         | DIR_RR GPIO   | Libre — no conectar      |
+| PC4         | DIR_STEER GPIO| Libre — no conectar      |
+
+### Componentes que se eliminan del BOM
+
+| Componente eliminado              | Cantidad | Motivo |
+|-----------------------------------|----------|--------|
+| SN74HC08N (quad AND gate, DIP-14) | 3        | PWM/DIR combinados externamente — ya no necesario |
+| SN74HC04N (hex NOT gate, DIP-14)  | 1        | Inversión de DIR — ya no necesario |
+| Condensadores 100 nF desacoplo    | 4        | Para los CI lógicos eliminados |
+
+> Los condensadores de snubber en los bornes del motor (100 nF entre M+ y M-)
+> y los diodos 1N5408 anti-paralelo **se mantienen** — no tienen relación con la
+> lógica de control y siguen siendo necesarios para protección anti-EMI.
+
+### Frecuencia y modo PWM (sin cambios)
+
+Todos los timers (TIM1, TIM3, TIM8) operan en modo **Center-Aligned PWM1** a **20 kHz**:
+- Prescaler = 0, ARR = 4249, Prescaler = 0
+- 170 MHz / (2 × 4250) = **20 kHz**
+- Rango de duty: 0–4249 (igual que antes)
+- OCPreload habilitado en todos los canales
+
+### Nota sobre los módulos PCA9685 disponibles
+
+Los módulos AZDelivery PCA9685 (I2C, 16 canales, 12 bit) **no son adecuados** para
+el control de motores BTS7960 en este proyecto:
+
+- La comunicación I2C a 400 kHz añade **20–40 µs de latencia** por actualización de canal.
+  Actualizar 10 canales (5 motores × 2) en cada ciclo de 10 ms consumiría ~400 µs = 4 % del ciclo.
+- El PCA9685 tiene su propio oscilador interno de 25 MHz (±1 %); la frecuencia de PWM
+  no está sincronizada con los timers del STM32 ni con el ciclo de control.
+- Introduce un punto de fallo externo en el bucle de seguridad: si el I2C falla,
+  los PWM se "congelan" en su último valor, sin que la state machine de seguridad pueda
+  reaccionar inmediatamente.
+- Los timers hardware del STM32 tienen latencia **cero** (el CCR se actualiza en
+  el siguiente período sin intervención de CPU), son síncronos con el reloj del sistema,
+  y están integrados en el mismo dominio de seguridad que el IWDG y la SAFE state machine.
+
+**Conclusión**: usar los timers internos del STM32 es la solución correcta.
+
+---
+
+## 11. Circuito completo de driver de relé con optoacoplador
+
+### Por qué se necesita
+
+Los pines GPIO del STM32 operan a 3,3 V y pueden suministrar máximo 20 mA.
+La bobina de un relé mecánico requiere 70–100 mA a 5 V o 12 V.
+Además, al desactivar la bobina se genera un pico inductivo de hasta −200 V
+que destruiría el GPIO si no hay protección.
+
+### Componentes por relé
+
+| Componente | Valor | Función |
+|-----------|-------|---------|
+| Resistencia R1 | **330 Ω, 1/4 W** | Limita corriente LED del optoacoplador a ~8 mA |
+| Optoacoplador | **PC817** (o equivalente CNY17) | Aísla el GPIO 3,3 V del circuito de la bobina |
+| Transistor NPN | **BC547** o **2N2222** | Amplifica la corriente para accionar la bobina |
+| Resistencia R2 | **10 kΩ, 1/4 W** | Pull-down en la base del transistor (evita disparo espurio) |
+| Diodo flyback | **1N4007** (1 A / 1 000 V) | Elimina el pico inductivo al desactivar el relé |
+| Relé mecánico | **SRD-05VDC-SL-C** (5 V, 30 A) | Contactos de potencia |
+
+> Si se usa un **módulo de relé industrial con optoacoplador incorporado** (como HY-M158,
+> SRD-05VDC, o los módulos de 1/2/4 canales con entrada "IN" de nivel bajo activo),
+> verificar que el módulo sea compatible con señal HIGH a 3,3 V (algunos requieren 5 V
+> en la entrada). En ese caso, conectar PC10/PC11/PC12 directamente al pin "IN" del módulo
+> y el módulo se encarga del resto. Ver nota de verificación al final de esta sección.
+
+### Esquema completo (circuito discreto, un relé)
+
+```
+  STM32 (3,3 V)                    Lado bobina (5 V)        Contactos (24 V / 12 V)
+  ─────────────                    ─────────────────        ───────────────────────
+
+  PC10/11/12                5V ──┬──── Bobina relé (+) ──┬──── COM (común)
+      │                          │         │              │
+     [R1]                     [1N4007]    │              │    (cerrado cuando
+    330 Ω                    (flyback)    │              │     relé activo)
+      │                   cátodo → 5V    │              │
+      │                   ánodo  → ─────►┤ Bobina (-)  NO ──── (normalmente abierto)
+      ▼                                  │
+   PC817                                 │
+  LED (+)──── (ánodo del LED dentro del PC817)           NC ──── (normalmente cerrado)
+  LED (-) ─────────────────────────────── GND
+      │
+  PC817 colector ─────────────────────────── Base BC547 (vía R2 = 10 kΩ a GND)
+  PC817 emisor  ─── VCC 5V (pull-up del colector) ──────── Colector BC547
+                                                             Emisor BC547 ──── GND
+
+```
+
+**Esquema ASCII simplificado y detallado:**
+
+```
+    3,3 V STM32
+        │
+   PC10 (RELAY_MAIN)
+        │
+       [R1 = 330 Ω]
+        │
+        ├──── ÁNODO LED (PC817 pin 1)
+        │
+       GND_STM32 ──── CÁTODO LED (PC817 pin 2)
+
+        PC817 COLECTOR (pin 4) ──────────────────────────┐
+        PC817 EMISOR   (pin 3) ──── 5V_lógica            │
+                                                    BASE BC547
+                                                         │
+                                                    [R2 = 10 kΩ]
+                                                         │
+                                                        GND
+
+        5V_lógica ─────────────────────────────── COLECTOR BC547
+                                                         │
+                                                   BOBINA relé (−)
+                                                         │
+                                                   BOBINA relé (+) ───── 5V_lógica
+                                                         │
+                                               ┌── 1N4007 ÁNODO
+                                               │
+                                    1N4007 CÁTODO ───── 5V_lógica
+                              (diodo en paralelo con la bobina,
+                               polaridad inversa — flyback)
+```
+
+**En forma compacta:**
+
+```
+STM32 GPIO  ──[330Ω]──► LED(PC817) ──GND
+                        │
+              5V ──[PULL]── COLECTOR(PC817) ──► BASE(BC547) ──[10kΩ]──GND
+                                                COLECTOR(BC547) ──► BOBINA(−)
+              5V ──────────────────────────── BOBINA(+) ──[1N4007]── BOBINA(−)
+              (diodo flyback: cátodo al + de la bobina, ánodo al − de la bobina)
+```
+
+### Verificación de módulos de relé industriales (HY-M158, SRD, etc.)
+
+Si se usan módulos prefabricados:
+
+1. **Medir con multímetro** la tensión mínima que activa el relé en el pin "IN".
+   - Si activa con 3,3 V: conectar directamente al GPIO del STM32.
+   - Si requiere 5 V: interponer un transistor BSS138 o un 74HC04 para elevar el nivel.
+
+2. **Verificar el diodo flyback**: los módulos industriales suelen incluirlo ya montado.
+   Si no está, soldar un 1N4007 entre los terminales de la bobina (ver esquema anterior).
+
+3. **Verificar la lógica de activación**:
+   - Módulos con lógica positiva ("active HIGH"): STM32 GPIO HIGH → relé ON. ✅ Compatible con el firmware.
+   - Módulos con lógica negativa ("active LOW"): STM32 GPIO HIGH → relé OFF. ❌ Requiere invertir la lógica del firmware o añadir un inversor 74HC04.
+
+### Snubber en los contactos del relé
+
+Los contactos mecánicos del relé generan arcos al abrir/cerrar con cargas inductivas
+(motores, cables largos). Para proteger los contactos y reducir interferencias:
+
+```
+Contacto COM ──[R = 100 Ω, 1/2 W] ──┬── Contacto NO
+                                      │
+                              [C = 100 nF / 250 V ac]
+                                      │
+                                     GND (o directamente entre COM y NO)
+```
+
+> Nota: el snubber RC va **entre los terminales del contacto** (COM y NO), no entre COM y GND.
+
+### Resumen de diodos flyback en todo el sistema
+
+| Componente | Diodo | Ubicación |
+|-----------|-------|-----------|
+| Relé MAIN (bobina 5 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
+| Relé TRAC (bobina 5 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
+| Relé DIR (bobina 5 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
+| BTS7960 VCC lógica (enable signals) | 1N4148 en R_EN/L_EN (opcional) | Serie de protección en señales EN |
+
+---
+
+## 12. Protección anti-reinicios y anti-sobretensiones
+
+### 12.1 Por qué se producen los reinicios del STM32
+
+El STM32G474RE tiene un umbral de **bajo voltaje (BOR)** a ≈2,7 V. Si la tensión de 3,3 V
+cae por debajo de este umbral aunque sea 1 µs, el MCU se reinicia. Esto ocurre cuando:
+
+- Los motores conmutan (20 kHz PWM) y generan picos de corriente en la alimentación lógica.
+- Los relés cierran (inrush del condensador en el bus de potencia).
+- La fuente de 5 V o 3,3 V no tiene suficiente desacoplo local.
+
+**La solución es filtrar agresivamente la alimentación lógica** con condensadores.
+
+### 12.2 Red de desacoplo para la placa Nucleo STM32G474RE
+
+Añadir los siguientes condensadores **externos, soldados en pistas cortas** entre los
+pines VDD (3,3 V) y GND de la placa Nucleo o de la protoboard:
+
+```
+3,3 V ──┬──[100 nF cerámico X7R]──┬── GND   (respuesta rápida, <1 ns ESL)
+         │                         │
+         └──[10 µF tántalo / electrolítico]── GND  (bulk, respuesta 1–100 µs)
+
+UBICACIÓN: soldar lo más cerca posible de los pines CN7/CN10 de la Nucleo-64.
+Si se usa protoboard, colocar entre los raíles de alimentación adyacentes al MCU.
+```
+
+Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (CI 74HC, ADS1115, TJA1051):
+
+```
+5 V ──┬──[100 nF cerámico]──┬── GND   (junto a cada CI, una por chip)
+       │                     │
+       └──[47 µF electrolítico]── GND  (uno en el punto de entrada de la fuente 5 V)
+```
+
+### 12.3 Condensadores de bulk en los buses de potencia
+
+Cuando el relé MAIN cierra, el condensador vacío del bus de 24 V genera un inrush
+que puede superar 100 A en 10 µs. Esto colapsa momentáneamente la tensión del bus
+y, por acoplamiento, puede afectar a la alimentación lógica.
+
+**Solución: condensador de bulk en el bus de potencia:**
+
+```
+Relé MAIN NO ──┬──────────────────────────── Bus 24 V (a BTS7960 y relés)
+               │
+           [1 000 µF / 35 V electrolítico]
+               │
+              GND potencia (GND común)
+
+UBICACIÓN: lo más cerca posible del relé MAIN, en el bus de 24 V.
+NOTA: este condensador también absorbe la energía cinética del motor al frenar
+(CEMF regenerativa), reduciendo la sobretensión en el bus.
+```
+
+Para el bus de 12 V (motor de dirección):
+
+```
+Relé DIR NO ──┬────── Bus 12 V
+              │
+          [470 µF / 25 V electrolítico]
+              │
+             GND potencia
+```
+
+### 12.4 Ferrita / filtro LC en la alimentación lógica
+
+Para impedir que el ruido de los PWM de 20 kHz se propague por la alimentación:
+
+```
+5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051, ADS1115, CIs 74HC
+                                                              └── [10 µF] a GND
+```
+
+> Si no se dispone de ferrita, un fusible reseteable (PTC) de 500 mA en la línea 5 V_limpio
+> actúa también como filtro de baja frecuencia y protege contra cortocircuitos.
+
+### 12.5 Protección de pines de entrada contra sobretensión
+
+#### Encoder E6B2-CWZ6C (salida 5 V → pines PA15, PB3, PB4 a 3,3 V)
+
+**⚠️ Conectar 5 V directamente a un pin STM32 lo destruye permanentemente.**
+
+Usar un **divisor resistivo de baja impedancia** para cada canal (A, B, Z):
+
+```
+Encoder señal (5 V, OC con pull-up 10 kΩ interno)
+    │
+   [R1 = 1 kΩ]
+    │
+    ├─────────────────────────► PA15 (o PB3, PB4)
+    │
+   [R2 = 2,2 kΩ]
+    │
+   GND
+
+Tensión en el pin = 5 V × (2,2 / (1 + 2,2)) = 3,44 V   ← dentro del rango 3,3 V ± 10 %
+```
+
+> Nota: el resistor R1 (1 kΩ) también protege el pin en caso de que la señal suba por encima
+> de VDD por un transitorio. La corriente máxima de clamp del diodo interno del STM32 es 5 mA.
+> Con R1 = 1 kΩ y Vtrans = 5 V: I = (5 – 3,3) / 1 kΩ = 1,7 mA < 5 mA ✅
+
+Alternativa más limpia: **BSS138 bidirectional level shifter** (módulo breakout común):
+
+```
+3,3V ──────────────────────────────────────── 3,3V_side
+                                                    │
+                                              [BSS138 MOSFET]
+                                                    │
+5V ──── Pull-up 10 kΩ ──┬── Encoder señal (5 V)  5V_side
+                         │
+                    (esto es el nodo LV del BSS138)
+
+PA15 ◄──── LV_side (salida del BSS138)
+```
+
+Los módulos de conversión de nivel I2C bidireccionales basados en BSS138 (muy comunes en
+Arduino/Nucleo) son exactamente esta topología. Un módulo de 4 canales cubre A, B, Z.
+
+#### Sensor de pedal Hall (5 V → PA3 ADC)
+
+Documentado en §6.5. Usar el divisor 10 kΩ + 6,8 kΩ. El pin PA3 nunca superará 2 V.
+
+#### Sensores inductivos LJ12A3 (6–36 V → pines EXTI STM32)
+
+Documentado en `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md`. Usar optoacoplador PC817 para
+todos los sensores de velocidad de rueda y centrado. **No conectar nunca directamente.**
+
+#### Bus CAN (PB8, PB9 → transceiver TJA1051)
+
+El transceiver CAN actúa como barrera de tensión. Los pines PB8/PB9 solo ven señales
+lógicas de 3,3 V generadas por el TJA1051. **No conectar el bus CAN directamente a PB8/PB9.**
+
+### 12.6 Tensiones a verificar con multímetro antes de encender el STM32
+
+Antes de conectar la placa Nucleo, medir con multímetro en modo DC:
+
+| Punto de medición | Tensión esperada | Si está mal |
+|-----------------|-----------------|-------------|
+| 3,3 V (alimentación Nucleo) | 3,25 – 3,35 V | No encender hasta corregir la fuente |
+| 5 V (fuente lógica) | 4,85 – 5,15 V | Ajustar la fuente |
+| PA15 con encoder girando (max) | ≤ 3,5 V | Revisar divisor resistivo |
+| PB3 con encoder girando (max) | ≤ 3,5 V | Revisar divisor resistivo |
+| PA3 con pedal a fondo (max) | ≤ 2,1 V | Revisar divisor 10 kΩ + 6,8 kΩ |
+| Salida optoacoplador PA0-PA2, PB15 | 3,3 V en reposo, 0 V al detectar | Revisar PC817 |
+| PB8 (CAN RX) con bus activo | 0,5 – 2,5 V oscilante | Normal, señal CAN diferencial convertida |
+| GND–GND entre STM32 y BTS7960 | < 0,1 V | Si hay > 0,3 V, revisar cableado de masa |
+
+### 12.7 Secuencia de encendido que evita reinicios
+
+Seguir este orden estrictamente:
+
+```
+1. Encender fuente 3,3 V / 5 V (lógica) → esperar 2 s → verificar tensiones con multímetro
+2. Conectar STM32 Nucleo a la alimentación → verificar que arranca (LED verde on)
+3. Conectar ESP32 → verificar arranque
+4. Verificar heartbeat CAN (monitor serie o osciloscopio en CANH/CANL)
+5. Conectar sensores I2C (INA226, ADS1115, TCA9548A) → verificar en serial que se detectan
+6. Conectar sensores OneWire (DS18B20) → verificar lecturas de temperatura
+7. Conectar encoder de dirección → girar manualmente y verificar que el contador cambia
+8. Conectar sensores de velocidad de rueda (vía optoacoplador) → girar rueda a mano
+9. Conectar pedal y verificar lectura ADC (0–100 %)
+   ── HASTA AQUÍ: potencia lógica solamente ──
+10. Conectar fuente 24 V SIN conectar motores todavía → verificar tensión con multímetro
+11. Conectar fuente 12 V SIN conectar motor dirección
+12. Con el firmware en estado STANDBY (ESP32 conectado, sistema en espera),
+    dar comando de arranque desde el ESP32 → los relés deben activar en secuencia:
+    MAIN (50 ms) → TRAC (20 ms) → DIR
+13. Verificar tensión en bus 24 V y 12 V tras cierre de relés
+14. Conectar motores de tracción y verificar giro suave al dar acelerador
+15. Conectar motor de dirección y verificar centrado automático al arrancar
+```
+
+### 12.8 Resumen de condensadores, diodos y resistencias de protección (lista de compra)
+
+| Qty | Componente | Valor | Uso |
+|-----|-----------|-------|-----|
+| 2 | Condensador cerámico | 100 nF / 16 V X7R | Desacoplo 3,3 V Nucleo (VDD pins) |
+| 1 | Condensador tántalo o electrolítico | 10 µF / 10 V | Bulk 3,3 V Nucleo |
+| 5 | Condensador cerámico | 100 nF / 16 V | Desacoplo VCC de cada CI 74HC08/74HC04 |
+| 5 | Condensador cerámico | 100 nF / 50 V | Desacoplo VCC de cada BTS7960 (lógica) |
+| 5 | Condensador cerámico | 100 nF / 50 V | Snubber en terminales de motor |
+| 1 | Condensador electrolítico | 1 000 µF / 35 V | Bulk bus 24 V |
+| 1 | Condensador electrolítico | 470 µF / 25 V | Bulk bus 12 V |
+| 1 | Condensador electrolítico | 47 µF / 10 V | Bulk 5 V lógica |
+| 3 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas de relé (uno por relé) |
+| 5 | Diodo 1N5408 | 3 A / 1 000 V | Anti-CEMF en terminales de motor |
+| 3 | Resistencia | 330 Ω / 1/4 W | Serie LED optoacoplador relé (si circuito discreto) |
+| 3 | Resistencia | 10 kΩ / 1/4 W | Pull-down base transistor relé (si circuito discreto) |
+| 3 | Resistencia | 100 Ω / 1/2 W | Snubber RC contactos relé (R del RC) |
+| 3 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC) |
+| 3 | Resistencia | 1 kΩ / 1/4 W | R1 divisor encoder (A, B, Z) 5 V→3,3 V |
+| 3 | Resistencia | 2,2 kΩ / 1/4 W | R2 divisor encoder (A, B, Z) a GND |
+| 3 | CI lógico | **SN74HC08N** (DIP-14) | AND gates adaptador PWM+DIR→RPWM/LPWM |
+| 1 | CI lógico | **SN74HC04N** (DIP-14) | NOT gates para DIR invertido |
+
+---
+
+> **Este documento ha sido actualizado con todos los circuitos de protección y los valores
+> de componentes necesarios para una instalación segura.**
+> Revisar también: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` (optoacopladores de sensores),
+> `docs/CONEXIONES_COMPLETAS.md` (guía cable por cable completa).

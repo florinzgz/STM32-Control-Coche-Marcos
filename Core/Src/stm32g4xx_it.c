@@ -9,7 +9,7 @@
 #include "safety_system.h"
 
 extern FDCAN_HandleTypeDef hfdcan1;
-extern TIM_HandleTypeDef htim1, htim2;
+extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 extern I2C_HandleTypeDef hi2c1;
 
 /* ---- Cortex-M4 core exceptions ---- */
@@ -20,29 +20,54 @@ void NMI_Handler(void)
 
 void HardFault_Handler(void)
 {
-    /* Safe the hardware: drive all GPIOC outputs LOW (relays off, motors disabled) */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+    /* Option D (A + C): hardware path + software path.
+     *
+     * A) Clear MOE on advanced timers → immediate hardware shutdown of all
+     *    TIM1 (FL, FR) and TIM8 (RL, RR) PWM outputs.  Outputs are driven
+     *    to idle state (LOW) because OSSR=1/OSSI=1 and OCPolarity=HIGH
+     *    with initial Pulse=0.  This happens even if further code below
+     *    is unreachable due to stack corruption.
+     *
+     * C) Zero TIM3 CCRs for STEER (TIM3 has no BREAK input).
+     *    Force EN_FL, EN_RR and all relays LOW via BSRR.                  */
+    TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM1 outputs: RPWM_FL, LPWM_FL, RPWM_FR, LPWM_FR */
+    TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM8 outputs: RPWM_RL, LPWM_RL, RPWM_RR, LPWM_RR */
+    TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 */
+    TIM3->CCR2  = 0U;               /* LPWM_STEER → 0 */
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     while (1) { }
 }
 
 void MemManage_Handler(void)
 {
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
+    TIM3->CCR1  = 0U;
+    TIM3->CCR2  = 0U;
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     while (1) { }
 }
 
 void BusFault_Handler(void)
 {
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
+    TIM3->CCR1  = 0U;
+    TIM3->CCR2  = 0U;
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     while (1) { }
 }
 
 void UsageFault_Handler(void)
 {
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
+    TIM3->CCR1  = 0U;
+    TIM3->CCR2  = 0U;
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     while (1) { }
 }

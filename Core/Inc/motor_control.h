@@ -86,6 +86,15 @@ void Motor_SetPWM_RL(uint16_t pwm, bool reverse);
 void Motor_SetPWM_RR(uint16_t pwm, bool reverse);
 void Motor_SetPWM_Steering(uint16_t pwm, bool reverse);
 
+/* Signed-speed API — positive = forward, negative = reverse, 0 = coast.
+ * Generates RPWM/LPWM directly without external logic.
+ * Guarantees RPWM and LPWM are never simultaneously non-zero.           */
+void Motor_SetSignedPWM_FL(int16_t speed);
+void Motor_SetSignedPWM_FR(int16_t speed);
+void Motor_SetSignedPWM_RL(int16_t speed);
+void Motor_SetSignedPWM_RR(int16_t speed);
+void Motor_SetSignedPWM_Steering(int16_t speed);
+
 #ifdef __cplusplus
 }
 #endif

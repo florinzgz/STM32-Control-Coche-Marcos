@@ -40,6 +40,11 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
     HAL_NVIC_SetPriority(TIM2_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(TIM2_IRQn);
   }
+  else if(htim_base->Instance==TIM3)
+  {
+    __HAL_RCC_TIM3_CLK_ENABLE();
+    /* No interrupt for TIM3 — PWM output only (RPWM_STEER, LPWM_STEER) */
+  }
   else if(htim_base->Instance==TIM8)
   {
     __HAL_RCC_TIM8_CLK_ENABLE();
@@ -56,6 +61,8 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     __HAL_RCC_TIM1_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
+    /* PA8=RPWM_FL (TIM1_CH1), PA9=LPWM_FL (TIM1_CH2),
+     * PA10=RPWM_FR (TIM1_CH3), PA11=LPWM_FR (TIM1_CH4) */
     GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -63,12 +70,27 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   }
+  else if(htim_pwm->Instance==TIM3)
+  {
+    __HAL_RCC_TIM3_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    /* PA6=RPWM_STEER (TIM3_CH1), PA7=LPWM_STEER (TIM3_CH2) */
+    GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  }
   else if(htim_pwm->Instance==TIM8)
   {
     __HAL_RCC_TIM8_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
     
-    GPIO_InitStruct.Pin = GPIO_PIN_8;
+    /* PC6=RPWM_RL (TIM8_CH1), PC7=LPWM_RL (TIM8_CH2),
+     * PC8=RPWM_RR (TIM8_CH3), PC9=LPWM_RR (TIM8_CH4) */
+    GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -130,11 +152,22 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
     GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   }
+  else if(htim->Instance==TIM3)
+  {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  }
   else if(htim->Instance==TIM8)
   {
     __HAL_RCC_GPIOC_CLK_ENABLE();
     
-    GPIO_InitStruct.Pin = GPIO_PIN_8;
+    GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

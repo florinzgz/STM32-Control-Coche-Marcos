@@ -15,26 +15,46 @@ extern "C" {
 #define ENCODER_PPR        1200
 #define ENCODER_CPR        (ENCODER_PPR * 4)  /* 4800 counts/rev */
 
-/* ---- PWM Motor Pins (TIM1 CH1-CH4: PA8-PA11, TIM8 CH3: PC8) ---- */
-#define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 */
-#define PIN_PWM_FR         GPIO_PIN_9   /* PA9  - TIM1_CH2 */
-#define PIN_PWM_RL         GPIO_PIN_10  /* PA10 - TIM1_CH3 */
-#define PIN_PWM_RR         GPIO_PIN_11  /* PA11 - TIM1_CH4 */
-#define PIN_PWM_STEER      GPIO_PIN_8   /* PC8  - TIM8_CH3 */
+/* ---- Motor PWM Pins — TIM1 (advanced): FL motor CH1/CH2, FR motor CH3/CH4 ---- */
+/* RPWM and LPWM of each motor share the SAME timer so both channels update at  */
+/* the same UEV → overlap = 0.  TIM1 BREAK2 is armed to Cortex LOCKUP.         */
+#define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 — RPWM_FL  */
+#define PIN_LPWM_FL        GPIO_PIN_9   /* PA9  - TIM1_CH2 — LPWM_FL  */
+#define PIN_PWM_FR         GPIO_PIN_10  /* PA10 - TIM1_CH3 — RPWM_FR  */
+#define PIN_LPWM_FR        GPIO_PIN_11  /* PA11 - TIM1_CH4 — LPWM_FR  */
 
-/* ---- Direction Control (GPIOC) ---- */
-#define PIN_DIR_FL         GPIO_PIN_0   /* PC0 */
-#define PIN_DIR_FR         GPIO_PIN_1   /* PC1 */
-#define PIN_DIR_RL         GPIO_PIN_2   /* PC2 */
-#define PIN_DIR_RR         GPIO_PIN_3   /* PC3 */
-#define PIN_DIR_STEER      GPIO_PIN_4   /* PC4 */
+/* ---- Motor PWM Pins — TIM8 (advanced): RL motor CH1/CH2, RR motor CH3/CH4 ---- */
+/* Same-timer guarantee and BREAK2/LOCKUP protection as TIM1.                   */
+#define PIN_PWM_RL         GPIO_PIN_6   /* PC6  - TIM8_CH1 — RPWM_RL  */
+#define PIN_LPWM_RL        GPIO_PIN_7   /* PC7  - TIM8_CH2 — LPWM_RL  */
+#define PIN_PWM_RR         GPIO_PIN_8   /* PC8  - TIM8_CH3 — RPWM_RR  */
+#define PIN_LPWM_RR        GPIO_PIN_9   /* PC9  - TIM8_CH4 — LPWM_RR  */
+
+/* ---- Motor PWM Pins — TIM3 (general-purpose): STEER motor CH1/CH2 ---- */
+/* Same-timer guarantee.  TIM3 has no BREAK input; fault handlers zero     */
+/* CCR1/CCR2 via direct register access.                                   */
+#define PIN_PWM_STEER      GPIO_PIN_6   /* PA6  - TIM3_CH1 — RPWM_STEER */
+#define PIN_LPWM_STEER     GPIO_PIN_7   /* PA7  - TIM3_CH2 — LPWM_STEER */
+
+/* ---- Direction Control (GPIOC) — NO LONGER DRIVEN BY FIRMWARE ---- */
+/* PC0-PC4 are freed now that RPWM/LPWM are generated directly by timers. */
+/* Kept as defines for documentation; leave pins unconnected or as GPIO_OUT LOW. */
+#define PIN_DIR_FL         GPIO_PIN_0   /* PC0 — freed */
+#define PIN_DIR_FR         GPIO_PIN_1   /* PC1 — freed */
+#define PIN_DIR_RL         GPIO_PIN_2   /* PC2 — freed */
+#define PIN_DIR_RR         GPIO_PIN_3   /* PC3 — freed */
+#define PIN_DIR_STEER      GPIO_PIN_4   /* PC4 — freed */
 
 /* ---- Enable Signals (GPIOC) ---- */
-#define PIN_EN_FL          GPIO_PIN_5   /* PC5 */
-#define PIN_EN_FR          GPIO_PIN_6   /* PC6 */
-#define PIN_EN_RL          GPIO_PIN_7   /* PC7 */
-#define PIN_EN_RR          GPIO_PIN_13  /* PC13 */
-#define PIN_EN_STEER       GPIO_PIN_9   /* PC9 */
+/* EN_FL (PC5) and EN_RR (PC13) remain as GPIO outputs.                        */
+/* PC6/PC7 are TIM8_CH1/CH2 (RPWM_RL/LPWM_RL); PC8/PC9 are TIM8_CH3/CH4      */
+/* (RPWM_RR/LPWM_RR) — all are timer AF outputs, not GPIO EN pins.             */
+/* Wire the corresponding BTS7960 R_EN/L_EN pins directly to 3.3 V.            */
+#define PIN_EN_FL          GPIO_PIN_5   /* PC5  — GPIO output, active HIGH */
+#define PIN_EN_FR          GPIO_PIN_6   /* PC6  — repurposed: TIM8_CH1 (RPWM_RL)   */
+#define PIN_EN_RL          GPIO_PIN_7   /* PC7  — repurposed: TIM8_CH2 (LPWM_RL)   */
+#define PIN_EN_RR          GPIO_PIN_13  /* PC13 — GPIO output, active HIGH */
+#define PIN_EN_STEER       GPIO_PIN_9   /* PC9  — repurposed: TIM8_CH4 (LPWM_RR)   */
 
 /* ---- Relay Control (GPIOC) ---- */
 #define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
@@ -115,7 +135,7 @@ extern "C" {
 extern ADC_HandleTypeDef hadc1;
 extern FDCAN_HandleTypeDef hfdcan1;
 extern I2C_HandleTypeDef hi2c1;
-extern TIM_HandleTypeDef htim1, htim2, htim8;
+extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 extern IWDG_HandleTypeDef hiwdg;
 
 void Error_Handler(void);

@@ -157,14 +157,15 @@ static inline float sanitize_float(float val, float safe_default)
  * and PWM=0, the motor is not braked — it floats.  This causes
  * unintended rolling on slopes and steering drift.
  *
- * Active brake on the BTS7960 is achieved by driving PWM to 100 %
- * (full duty, both FETs ON) which shorts the motor terminals through
- * the H-bridge, producing electromagnetic braking torque.
+ * With direct RPWM/LPWM generation (no external 74HC logic) the
+ * BTS7960 passive brake state is achieved by setting both RPWM and
+ * LPWM to 0.  The BTS7960 internal logic then holds both motor
+ * terminals at the same potential, producing electromagnetic braking.
  *
- * This constant is used wherever the firmware needs a motor to hold
- * position rather than coast.  It replaces the previous PWM=0 + EN=0
- * pattern that left motors floating.                                  */
-#define BTS7960_BRAKE_PWM        PWM_PERIOD   /* 100 % duty = active brake */
+ * In the previous design (74HC external logic) 100 % PWM + DIR=1 was
+ * used; that is no longer needed because direction is now encoded as
+ * the choice of RPWM vs LPWM channel.                                */
+#define BTS7960_BRAKE_PWM        0U   /* Both RPWM=0, LPWM=0 = passive brake */
 
 /* ---- Park hold configuration ----
  *
@@ -247,13 +248,14 @@ static inline float sanitize_float(float val, float safe_default)
 
 /* Motor structures */
 typedef struct {
-    TIM_HandleTypeDef *timer;
-    uint32_t channel;
-    GPIO_TypeDef *dir_port;
-    uint16_t dir_pin;
-    GPIO_TypeDef *en_port;
-    uint16_t en_pin;
-    int16_t power;
+    TIM_HandleTypeDef *rpwm_timer;   /* Timer for RPWM (forward direction) */
+    uint32_t           rpwm_channel;
+    TIM_HandleTypeDef *lpwm_timer;   /* Timer for LPWM (reverse direction) */
+    uint32_t           lpwm_channel;
+    GPIO_TypeDef      *en_port;      /* Hardware EN GPIO (NULL = tied HIGH in HW) */
+    uint16_t           en_pin;
+    int8_t             direction;    /* Stored direction: 1=forward, -1=reverse  */
+    int16_t            power;        /* Retained for ABI compatibility            */
 } Motor_t;
 
 typedef struct {
@@ -364,12 +366,10 @@ static int32_t  enc_prev_count       = 0;
 static uint32_t enc_last_change_tick = 0;
 static uint8_t  enc_fault            = 0;   /* 0 = healthy, 1 = faulted */
 
-extern TIM_HandleTypeDef htim1, htim2, htim8;
+extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 
 /* Private function prototypes */
-static void Motor_SetPWM(Motor_t *motor, uint16_t pwm);
-static void Motor_SetDirection(Motor_t *motor, int8_t direction);
-static void Motor_Enable(Motor_t *motor, uint8_t enable);
+static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm);
 static float PID_Compute(PID_t *pid, float measured, float dt);
 static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
 
@@ -379,32 +379,68 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
 
 void Motor_Init(void)
 {
-    motor_fl.timer = &htim1;  motor_fl.channel = TIM_CHANNEL_1;
-    motor_fl.dir_port = GPIOC; motor_fl.dir_pin = PIN_DIR_FL;
-    motor_fl.en_port  = GPIOC; motor_fl.en_pin  = PIN_EN_FL;
+    /* ---- motor_fl: RPWM = TIM1_CH1 (PA8), LPWM = TIM1_CH2 (PA9) ---- */
+    /* Both channels on TIM1 → same UEV → overlap = 0                    */
+    motor_fl.rpwm_timer   = &htim1;  motor_fl.rpwm_channel = TIM_CHANNEL_1;
+    motor_fl.lpwm_timer   = &htim1;  motor_fl.lpwm_channel = TIM_CHANNEL_2;
+    motor_fl.en_port      = GPIOC;   motor_fl.en_pin       = PIN_EN_FL;  /* PC5 */
+    motor_fl.direction    = 0;
 
-    motor_fr.timer = &htim1;  motor_fr.channel = TIM_CHANNEL_2;
-    motor_fr.dir_port = GPIOC; motor_fr.dir_pin = PIN_DIR_FR;
-    motor_fr.en_port  = GPIOC; motor_fr.en_pin  = PIN_EN_FR;
+    /* ---- motor_fr: RPWM = TIM1_CH3 (PA10), LPWM = TIM1_CH4 (PA11) ---- */
+    /* Both channels on TIM1 → same UEV → overlap = 0                     */
+    motor_fr.rpwm_timer   = &htim1;  motor_fr.rpwm_channel = TIM_CHANNEL_3;
+    motor_fr.lpwm_timer   = &htim1;  motor_fr.lpwm_channel = TIM_CHANNEL_4;
+    motor_fr.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
+    motor_fr.direction    = 0;
 
-    motor_rl.timer = &htim1;  motor_rl.channel = TIM_CHANNEL_3;
-    motor_rl.dir_port = GPIOC; motor_rl.dir_pin = PIN_DIR_RL;
-    motor_rl.en_port  = GPIOC; motor_rl.en_pin  = PIN_EN_RL;
+    /* ---- motor_rl: RPWM = TIM8_CH1 (PC6), LPWM = TIM8_CH2 (PC7) ---- */
+    /* Both channels on TIM8 → same UEV → overlap = 0                    */
+    motor_rl.rpwm_timer   = &htim8;  motor_rl.rpwm_channel = TIM_CHANNEL_1;
+    motor_rl.lpwm_timer   = &htim8;  motor_rl.lpwm_channel = TIM_CHANNEL_2;
+    motor_rl.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
+    motor_rl.direction    = 0;
 
-    motor_rr.timer = &htim1;  motor_rr.channel = TIM_CHANNEL_4;
-    motor_rr.dir_port = GPIOC; motor_rr.dir_pin = PIN_DIR_RR;
-    motor_rr.en_port  = GPIOC; motor_rr.en_pin  = PIN_EN_RR;
+    /* ---- motor_rr: RPWM = TIM8_CH3 (PC8), LPWM = TIM8_CH4 (PC9) ---- */
+    /* Both channels on TIM8 → same UEV → overlap = 0                    */
+    motor_rr.rpwm_timer   = &htim8;  motor_rr.rpwm_channel = TIM_CHANNEL_3;
+    motor_rr.lpwm_timer   = &htim8;  motor_rr.lpwm_channel = TIM_CHANNEL_4;
+    motor_rr.en_port      = GPIOC;   motor_rr.en_pin       = PIN_EN_RR; /* PC13 */
+    motor_rr.direction    = 0;
 
-    motor_steer.timer = &htim8;  motor_steer.channel = TIM_CHANNEL_3;
-    motor_steer.dir_port = GPIOC; motor_steer.dir_pin = PIN_DIR_STEER;
-    motor_steer.en_port  = GPIOC; motor_steer.en_pin  = PIN_EN_STEER;
+    /* ---- motor_steer: RPWM = TIM3_CH1 (PA6), LPWM = TIM3_CH2 (PA7) ---- */
+    /* Both channels on TIM3 → same UEV → overlap = 0                      */
+    motor_steer.rpwm_timer  = &htim3; motor_steer.rpwm_channel = TIM_CHANNEL_1;
+    motor_steer.lpwm_timer  = &htim3; motor_steer.lpwm_channel = TIM_CHANNEL_2;
+    motor_steer.en_port     = NULL;   /* EN tied to 3.3 V in hardware */
+    motor_steer.direction   = 0;
 
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+    /* ---- Start TIM1 channels: FL (CH1/CH2) and FR (CH3/CH4) ---- */
+    /* HAL_TIM_PWM_Start re-enables MOE (TIM1 is advanced; MOE was cleared
+     * by BREAK2 config with AutomaticOutput=DISABLE).                  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);  /* RPWM_FL  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);  /* LPWM_FL  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  /* RPWM_FR  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);  /* LPWM_FR  */
+
+    /* ---- Start TIM8 channels: RL (CH1/CH2) and RR (CH3/CH4) ---- */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);  /* RPWM_RL  */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);  /* LPWM_RL  */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);  /* RPWM_RR  */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);  /* LPWM_RR  */
+
+    /* ---- Start TIM3 channels: STEER (CH1/CH2) ---- */
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);  /* RPWM_STEER */
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  /* LPWM_STEER */
+
+    /* ---- Quadrature encoder for steering ---- */
     HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+
+    /* ---- Safe initial state: all motors stopped (RPWM=0, LPWM=0) ---- */
+    Motor_SetSigned(&motor_fl,    0);
+    Motor_SetSigned(&motor_fr,    0);
+    Motor_SetSigned(&motor_rl,    0);
+    Motor_SetSigned(&motor_rr,    0);
+    Motor_SetSigned(&motor_steer, 0);
 }
 
 void Traction_Init(void)
@@ -718,10 +754,10 @@ void Traction_Update(void)
         SystemState_t st = Safety_GetState();
         if (st == SYS_STATE_SAFE || st == SYS_STATE_ERROR) {
             /* Safety override — release park hold */
-            Motor_SetPWM(&motor_fl, 0); Motor_Enable(&motor_fl, 0);
-            Motor_SetPWM(&motor_fr, 0); Motor_Enable(&motor_fr, 0);
-            Motor_SetPWM(&motor_rl, 0); Motor_Enable(&motor_rl, 0);
-            Motor_SetPWM(&motor_rr, 0); Motor_Enable(&motor_rr, 0);
+            Motor_SetSigned(&motor_fl, 0);
+            Motor_SetSigned(&motor_fr, 0);
+            Motor_SetSigned(&motor_rl, 0);
+            Motor_SetSigned(&motor_rr, 0);
         } else {
             /* Compute park hold PWM with current/temp derating */
             float hold_pct = PARK_HOLD_PWM_PCT;
@@ -757,21 +793,13 @@ void Traction_Update(void)
             uint16_t hold_pwm = (uint16_t)(hold_pct * PWM_PERIOD / 100.0f);
 
             /* Apply hold brake to all four motors.
-             * Direction is set to forward; the H-bridge "brake" effect
-             * comes from driving all motors at low duty with enable ON.
-             * This dissipates energy as heat — no regeneration.         */
-            Motor_SetPWM(&motor_fl, hold_pwm);
-            Motor_SetPWM(&motor_fr, hold_pwm);
-            Motor_SetPWM(&motor_rl, hold_pwm);
-            Motor_SetPWM(&motor_rr, hold_pwm);
-            Motor_SetDirection(&motor_fl, 1);
-            Motor_SetDirection(&motor_fr, 1);
-            Motor_SetDirection(&motor_rl, 1);
-            Motor_SetDirection(&motor_rr, 1);
-            Motor_Enable(&motor_fl, (hold_pwm > 0) ? 1 : 0);
-            Motor_Enable(&motor_fr, (hold_pwm > 0) ? 1 : 0);
-            Motor_Enable(&motor_rl, (hold_pwm > 0) ? 1 : 0);
-            Motor_Enable(&motor_rr, (hold_pwm > 0) ? 1 : 0);
+             * Positive (forward) torque holds the vehicle against rolling.
+             * Zero hold_pwm disables holding entirely (thermal derating).
+             * RPWM = hold_pwm, LPWM = 0 → forward hold torque.           */
+            Motor_SetSigned(&motor_fl, (int16_t)hold_pwm);
+            Motor_SetSigned(&motor_fr, (int16_t)hold_pwm);
+            Motor_SetSigned(&motor_rl, (int16_t)hold_pwm);
+            Motor_SetSigned(&motor_rr, (int16_t)hold_pwm);
         }
 
         /* Update sensor readings even in park */
@@ -791,10 +819,10 @@ void Traction_Update(void)
      * No active braking, no holding torque — wheels spin freely.
      * Dynamic braking is also disabled in Neutral.                     */
     if (current_gear == GEAR_NEUTRAL) {
-        Motor_SetPWM(&motor_fl, 0); Motor_Enable(&motor_fl, 0);
-        Motor_SetPWM(&motor_fr, 0); Motor_Enable(&motor_fr, 0);
-        Motor_SetPWM(&motor_rl, 0); Motor_Enable(&motor_rl, 0);
-        Motor_SetPWM(&motor_rr, 0); Motor_Enable(&motor_rr, 0);
+        Motor_SetSigned(&motor_fl, 0);
+        Motor_SetSigned(&motor_fr, 0);
+        Motor_SetSigned(&motor_rl, 0);
+        Motor_SetSigned(&motor_rr, 0);
 
         /* Reset dynamic braking state so it doesn't spike on gear change */
         dynbrake_pct    = 0.0f;
@@ -1011,7 +1039,7 @@ void Traction_Update(void)
     /* ---- NaN/Inf validation (security hardening) ----
      * Validate all float inputs that affect PWM before they reach the
      * hardware.  NaN bypasses C float comparisons and would propagate
-     * into Motor_SetPWM() producing unpredictable duty cycles.
+     * into Motor_SetSigned() producing unpredictable duty cycles.
      * Reference: TECHNICAL_AUDIT_REPORT.md risk R1.                    */
     effective_demand = sanitize_float(effective_demand, 0.0f);
     safety_status.obstacle_scale = sanitize_float(safety_status.obstacle_scale, 0.0f);
@@ -1303,11 +1331,19 @@ void Traction_Update(void)
         }
     }
 
-    /* Write final PWM, direction, and enable to hardware */
+    /* Write final RPWM/LPWM to hardware.
+     * Motor_SetSigned guarantees RPWM and LPWM are never simultaneously
+     * non-zero; direction is encoded as the active channel.              */
     for (uint8_t i = 0; i < 4; i++) {
-        Motor_SetPWM(motors[i], desired_pwm[i]);
-        Motor_SetDirection(motors[i], desired_dir[i]);
-        Motor_Enable(motors[i], desired_en[i]);
+        int16_t sp;
+        if (!desired_en[i] || desired_pwm[i] == 0) {
+            sp = 0;
+        } else {
+            /* desired_dir[i] is ±1; desired_pwm[i] ≤ PWM_PERIOD = 4249 which
+             * fits safely in int16_t (max 32767).                         */
+            sp = (int16_t)((int32_t)desired_dir[i] * (int32_t)desired_pwm[i]);
+        }
+        Motor_SetSigned(motors[i], sp);
     }
 
     /* Update state with sensor readings */
@@ -1336,16 +1372,11 @@ void Traction_EmergencyStop(void)
      * when the fault condition involves the power stage itself.
      * The relay shutdown sequence (safety_system.c) will also
      * physically disconnect motor power.                              */
-    Motor_Enable(&motor_fl, 0);
-    Motor_Enable(&motor_fr, 0);
-    Motor_Enable(&motor_rl, 0);
-    Motor_Enable(&motor_rr, 0);
-    Motor_Enable(&motor_steer, 0);
-    Motor_SetPWM(&motor_fl, 0);
-    Motor_SetPWM(&motor_fr, 0);
-    Motor_SetPWM(&motor_rl, 0);
-    Motor_SetPWM(&motor_rr, 0);
-    Motor_SetPWM(&motor_steer, 0);
+    Motor_SetSigned(&motor_fl,    0);
+    Motor_SetSigned(&motor_fr,    0);
+    Motor_SetSigned(&motor_rl,    0);
+    Motor_SetSigned(&motor_rr,    0);
+    Motor_SetSigned(&motor_steer, 0);
     traction_state.demandPct = 0.0f;
 
     /* Reset pedal filter so emergency stop is immediate */
@@ -1424,8 +1455,7 @@ void Steering_ControlLoop(void)
 
     /* ---- Guard: encoder fault → disable motor ---- */
     if (enc_fault) {
-        Motor_SetPWM(&motor_steer, 0);
-        Motor_Enable(&motor_steer, 0);
+        Motor_SetSigned(&motor_steer, 0);
         eps_motor_effort = 0.0f;
         return;
     }
@@ -1565,9 +1595,8 @@ void Steering_ControlLoop(void)
     eps_motor_effort = (float)pwm_abs * 100.0f / (float)PWM_PERIOD;
 
     /* ---- Apply to motor hardware ---- */
-    Motor_SetPWM(&motor_steer, pwm_abs);
-    Motor_SetDirection(&motor_steer, direction);
-    Motor_Enable(&motor_steer, 1);
+    Motor_SetSigned(&motor_steer,
+                    direction > 0 ? (int16_t)pwm_abs : -(int16_t)pwm_abs);
 }
 
 float Steering_GetCurrentAngle(void)
@@ -1675,8 +1704,7 @@ bool Encoder_HasFault(void)
  */
 void Steering_Neutralize(void)
 {
-    Motor_SetPWM(&motor_steer, 0);
-    Motor_Enable(&motor_steer, 0);
+    Motor_SetSigned(&motor_steer, 0);
     eps_omega_filt   = 0.0f;
     eps_prev_pwm_raw = 0;
     eps_motor_effort = 0.0f;
@@ -1724,56 +1752,112 @@ void Ackermann_SetGeometry(float wheelbase_m, float track_m, float maxInnerDeg)
  *  Low-level per-wheel PWM wrappers
  * ================================================================== */
 
+/* ==================================================================
+ *  Low-level per-wheel PWM wrappers  (legacy API — preserved)
+ *  Internally delegate to Motor_SetSigned so RPWM/LPWM is always
+ *  consistent.  pwm=0 maps to coast regardless of reverse flag.
+ * ================================================================== */
+
 void Motor_SetPWM_FL(uint16_t pwm, bool reverse) {
-    Motor_SetPWM(&motor_fl, pwm);
-    Motor_SetDirection(&motor_fl, reverse ? -1 : 1);
-    Motor_Enable(&motor_fl, (pwm > 0));
+    Motor_SetSigned(&motor_fl, reverse ? -(int16_t)pwm : (int16_t)pwm);
 }
 
 void Motor_SetPWM_FR(uint16_t pwm, bool reverse) {
-    Motor_SetPWM(&motor_fr, pwm);
-    Motor_SetDirection(&motor_fr, reverse ? -1 : 1);
-    Motor_Enable(&motor_fr, (pwm > 0));
+    Motor_SetSigned(&motor_fr, reverse ? -(int16_t)pwm : (int16_t)pwm);
 }
 
 void Motor_SetPWM_RL(uint16_t pwm, bool reverse) {
-    Motor_SetPWM(&motor_rl, pwm);
-    Motor_SetDirection(&motor_rl, reverse ? -1 : 1);
-    Motor_Enable(&motor_rl, (pwm > 0));
+    Motor_SetSigned(&motor_rl, reverse ? -(int16_t)pwm : (int16_t)pwm);
 }
 
 void Motor_SetPWM_RR(uint16_t pwm, bool reverse) {
-    Motor_SetPWM(&motor_rr, pwm);
-    Motor_SetDirection(&motor_rr, reverse ? -1 : 1);
-    Motor_Enable(&motor_rr, (pwm > 0));
+    Motor_SetSigned(&motor_rr, reverse ? -(int16_t)pwm : (int16_t)pwm);
 }
 
 void Motor_SetPWM_Steering(uint16_t pwm, bool reverse) {
-    Motor_SetPWM(&motor_steer, pwm);
-    Motor_SetDirection(&motor_steer, reverse ? -1 : 1);
-    Motor_Enable(&motor_steer, (pwm > 0));
+    Motor_SetSigned(&motor_steer, reverse ? -(int16_t)pwm : (int16_t)pwm);
+}
+
+/* ==================================================================
+ *  Signed-speed API  (new — preferred for direct BTS7960 control)
+ *
+ *  speed > 0 → RPWM = |speed|, LPWM = 0   (forward)
+ *  speed < 0 → RPWM = 0,       LPWM = |speed| (reverse)
+ *  speed = 0 → RPWM = 0,       LPWM = 0   (coast / passive brake)
+ *
+ *  Guarantees RPWM and LPWM are never simultaneously non-zero.
+ *  |speed| is clamped to PWM_PERIOD (4249) before writing.
+ * ================================================================== */
+
+void Motor_SetSignedPWM_FL(int16_t speed) {
+    Motor_SetSigned(&motor_fl, speed);
+}
+
+void Motor_SetSignedPWM_FR(int16_t speed) {
+    Motor_SetSigned(&motor_fr, speed);
+}
+
+void Motor_SetSignedPWM_RL(int16_t speed) {
+    Motor_SetSigned(&motor_rl, speed);
+}
+
+void Motor_SetSignedPWM_RR(int16_t speed) {
+    Motor_SetSigned(&motor_rr, speed);
+}
+
+void Motor_SetSignedPWM_Steering(int16_t speed) {
+    Motor_SetSigned(&motor_steer, speed);
 }
 
 /* ==================================================================
  *  Private helpers
  * ================================================================== */
 
-static void Motor_SetPWM(Motor_t *motor, uint16_t pwm)
+/**
+ * @brief  Core RPWM/LPWM driver — the only function that writes to
+ *         hardware timer CCR registers and the optional GPIO EN pin.
+ *
+ *  signed_pwm > 0 → Forward:  RPWM = |signed_pwm|, LPWM = 0
+ *  signed_pwm < 0 → Reverse:  RPWM = 0,            LPWM = |signed_pwm|
+ *  signed_pwm = 0 → Stop:     RPWM = 0,            LPWM = 0
+ *
+ *  LPWM is always written to zero BEFORE RPWM is set (and vice versa)
+ *  to guarantee the two channels are never simultaneously non-zero,
+ *  even during the brief window between two CCR register writes.
+ *  Both CCRs are double-buffered (OCPreload enabled) so the actual
+ *  output only changes at the next timer period boundary, making the
+ *  simultaneous-active risk negligible in hardware.
+ */
+static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
 {
-    if (pwm > PWM_PERIOD) pwm = PWM_PERIOD;
-    __HAL_TIM_SET_COMPARE(motor->timer, motor->channel, pwm);
-}
+    uint16_t duty = (signed_pwm >= 0) ? (uint16_t)signed_pwm
+                                      : (uint16_t)(-signed_pwm);
+    if (duty > PWM_PERIOD) duty = PWM_PERIOD;
 
-static void Motor_SetDirection(Motor_t *motor, int8_t direction)
-{
-    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin,
-                      (direction > 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
+    if (signed_pwm > 0) {
+        /* Forward: clear LPWM first, then set RPWM */
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, duty);
+        motor->direction = 1;
+    } else if (signed_pwm < 0) {
+        /* Reverse: clear RPWM first, then set LPWM */
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, duty);
+        motor->direction = -1;
+    } else {
+        /* Stop / passive brake: both channels to zero */
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        motor->direction = 0;
+    }
 
-static void Motor_Enable(Motor_t *motor, uint8_t enable)
-{
-    HAL_GPIO_WritePin(motor->en_port, motor->en_pin,
-                      enable ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    /* Assert / deassert GPIO EN where the pin exists as a GPIO output.
+     * For motors whose EN pin has been repurposed as a PWM AF output,
+     * en_port is NULL and the BTS7960 EN is tied permanently to 3.3 V. */
+    if (motor->en_port != NULL) {
+        HAL_GPIO_WritePin(motor->en_port, motor->en_pin,
+                          (duty > 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    }
 }
 
 static float PID_Compute(PID_t *pid, float measured, float dt)
