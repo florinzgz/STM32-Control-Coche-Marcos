@@ -31,7 +31,7 @@
 ADC_HandleTypeDef   hadc1;
 FDCAN_HandleTypeDef hfdcan1;
 I2C_HandleTypeDef   hi2c1;
-TIM_HandleTypeDef   htim1, htim2, htim8;
+TIM_HandleTypeDef   htim1, htim2, htim3, htim8;
 IWDG_HandleTypeDef  hiwdg;
 
 /* ---- LIMP_HOME degraded-pedal arming constants ---- */
@@ -107,6 +107,7 @@ static void MX_FDCAN1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_IWDG_Init(void);
 
@@ -128,6 +129,7 @@ int main(void)
     MX_I2C1_Init();
     MX_TIM1_Init();
     MX_TIM2_Init();
+    MX_TIM3_Init();
     MX_TIM8_Init();
     MX_IWDG_Init();
 
@@ -463,15 +465,16 @@ static void MX_GPIO_Init(void)
 
     GPIO_InitTypeDef gpio = {0};
 
-    /* Direction outputs (GPIOC) */
-    gpio.Pin   = PIN_DIR_FL | PIN_DIR_FR | PIN_DIR_RL | PIN_DIR_RR | PIN_DIR_STEER;
+    /* GPIO enable outputs (GPIOC).
+     * EN_FL (PC5) and EN_RR (PC13) remain as GPIO outputs.
+     * EN_FR (PC6), EN_RL (PC7) and EN_STEER (PC9) are repurposed as
+     * TIM8_CH1/CH2/CH4 alternate-function PWM outputs (LPWM channels);
+     * they must NOT be initialised here as GPIO.
+     * Wire the corresponding BTS7960 R_EN / L_EN pins to 3.3 V.         */
+    gpio.Pin   = PIN_EN_FL | PIN_EN_RR;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOC, &gpio);
-
-    /* Enable outputs (GPIOC) */
-    gpio.Pin = PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER;
     HAL_GPIO_Init(GPIOC, &gpio);
 
     /* Relay outputs (GPIOC) */
@@ -606,6 +609,32 @@ static void MX_TIM2_Init(void)
     }
 }
 
+static void MX_TIM3_Init(void)
+{
+    /* TIM3 generates LPWM_RL (CH1 → PA6) and LPWM_RR (CH2 → PA7).
+     * Same 20 kHz center-aligned configuration as TIM1 and TIM8.
+     * TIM3 is on APB1; with APB1 prescaler = 1 its clock = 170 MHz. */
+    htim3.Instance               = TIM3;
+    htim3.Init.Prescaler         = 0;
+    htim3.Init.CounterMode       = TIM_COUNTERMODE_CENTERALIGNED1;
+    htim3.Init.Period            = 4249;   /* 170 MHz / (2 × 4250) = 20 kHz */
+    htim3.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
+    htim3.Init.RepetitionCounter = 0;
+    htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) {
+        Error_Handler();
+    }
+
+    TIM_OC_InitTypeDef oc = {0};
+    oc.OCMode     = TIM_OCMODE_PWM1;
+    oc.Pulse      = 0;
+    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+    oc.OCFastMode = TIM_OCFAST_DISABLE;
+    oc.OCPreload  = TIM_OCPRELOAD_ENABLE;
+    HAL_TIM_PWM_ConfigChannel(&htim3, &oc, TIM_CHANNEL_1);  /* LPWM_RL — PA6 */
+    HAL_TIM_PWM_ConfigChannel(&htim3, &oc, TIM_CHANNEL_2);  /* LPWM_RR — PA7 */
+}
+
 static void MX_TIM8_Init(void)
 {
     htim8.Instance               = TIM8;
@@ -625,7 +654,10 @@ static void MX_TIM8_Init(void)
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
     oc.OCPreload  = TIM_OCPRELOAD_ENABLE;  /* Buffer CCR — same as TIM1 */
-    HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3);
+    HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_1);  /* LPWM_FL  — PC6 */
+    HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_2);  /* LPWM_FR  — PC7 */
+    HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3);  /* RPWM_STEER — PC8 */
+    HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_4);  /* LPWM_STEER — PC9 */
 }
 
 static void MX_ADC1_Init(void)
@@ -680,9 +712,11 @@ static void MX_IWDG_Init(void)
 void Error_Handler(void)
 {
     __disable_irq();
-    /* Safe the hardware: drive all GPIOC outputs LOW (relays off, motors disabled).
-     * Uses direct register access because HAL may be in an inconsistent state.    */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+    /* Safe the hardware: drive GPIO outputs LOW (relays off, motors disabled).
+     * Uses direct register access because HAL may be in an inconsistent state.
+     * PC6/PC7/PC9 are now timer AF outputs (LPWM) — not GPIO EN pins.
+     * Only PC5 (EN_FL) and PC13 (EN_RR) remain as GPIO enable outputs.       */
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     /* LED power relays on GPIOB — also force OFF (both front and rear) */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;

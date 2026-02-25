@@ -247,13 +247,14 @@ static inline float sanitize_float(float val, float safe_default)
 
 /* Motor structures */
 typedef struct {
-    TIM_HandleTypeDef *timer;
-    uint32_t channel;
-    GPIO_TypeDef *dir_port;
-    uint16_t dir_pin;
-    GPIO_TypeDef *en_port;
-    uint16_t en_pin;
-    int16_t power;
+    TIM_HandleTypeDef *rpwm_timer;   /* Timer for RPWM (forward direction) */
+    uint32_t           rpwm_channel;
+    TIM_HandleTypeDef *lpwm_timer;   /* Timer for LPWM (reverse direction) */
+    uint32_t           lpwm_channel;
+    GPIO_TypeDef      *en_port;      /* Hardware EN GPIO (NULL = tied HIGH in HW) */
+    uint16_t           en_pin;
+    int8_t             direction;    /* Stored direction: 1=forward, -1=reverse  */
+    int16_t            power;        /* Retained for ABI compatibility            */
 } Motor_t;
 
 typedef struct {
@@ -364,7 +365,7 @@ static int32_t  enc_prev_count       = 0;
 static uint32_t enc_last_change_tick = 0;
 static uint8_t  enc_fault            = 0;   /* 0 = healthy, 1 = faulted */
 
-extern TIM_HandleTypeDef htim1, htim2, htim8;
+extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 
 /* Private function prototypes */
 static void Motor_SetPWM(Motor_t *motor, uint16_t pwm);
