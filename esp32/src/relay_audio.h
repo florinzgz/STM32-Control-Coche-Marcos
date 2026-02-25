@@ -55,6 +55,21 @@ inline constexpr unsigned long RELAY_ESTABLISH_MS = 20;
 /// Prevents an audible "click" from the relay switching mid-audio tail.
 inline constexpr unsigned long RELAY_RELEASE_MS = 150;
 
+/// Hard safety watchdog (ms): maximum time the relay coil may stay
+/// energised in a single activation cycle before update() forces it OFF.
+///
+/// Calculation: RELAY_ESTABLISH_MS (20) + MAX_PLAY_DURATION_MS (5000) +
+///              RELAY_RELEASE_MS (150) + 1830 ms safety margin = 7000 ms.
+///
+/// This is a defence-in-depth guard: under normal operation the relay
+/// is released by the audio::update() playing timeout well before this
+/// limit is reached.  It catches corner cases where the audio timeout
+/// fails to call release() (e.g. logic error elsewhere in the system).
+/// Note: when consecutive sounds are played back-to-back the relay stays
+/// energised across them; the watchdog is reset on each new sound start
+/// (requestOn() resets activationMs_).
+inline constexpr unsigned long RELAY_MAX_ON_MS = 7000;
+
 // ---- Public API ---------------------------------------------------------
 
 /// Initialise relay GPIO pin and drive it HIGH (relay OFF).
@@ -72,6 +87,13 @@ void requestOn();
 /// Transitions ACTIVE or ACTIVATING → RELEASING.
 /// The relay is kept ON for RELAY_RELEASE_MS before final de-energisation.
 void release();
+
+/// Force relay OFF immediately, bypassing the normal RELEASING cooldown.
+/// Drives GPIO HIGH and resets the state machine to IDLE.
+///
+/// Use from emergency handlers or explicit shutdown sequences where
+/// latency is unacceptable.  A small audible click may result.
+void forceOff();
 
 /// Tick the relay state machine.
 /// Must be called on every audio::update() iteration.

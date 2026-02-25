@@ -158,8 +158,20 @@ void play(Sound sound, Priority priority) {
         }
     }
 
-    // If higher or equal priority than current, queue it
-    if (!playing || static_cast<uint8_t>(priority) >= static_cast<uint8_t>(currentPri)) {
+    // Queue decision:
+    //   (a) playing=false, no pending sound yet → always queue
+    //   (b) playing=false, pending sound exists → only queue if new priority
+    //       >= pending priority (prevents lower-priority sounds from overwriting
+    //       a higher-priority sound queued during the relay establishment window)
+    //   (c) playing=true → queue only if new priority >= currentPri (preempt)
+    bool canQueue;
+    if (!playing) {
+        canQueue = !pendingValid ||
+                   static_cast<uint8_t>(priority) >= static_cast<uint8_t>(pendingPri);
+    } else {
+        canQueue = static_cast<uint8_t>(priority) >= static_cast<uint8_t>(currentPri);
+    }
+    if (canQueue) {
         pendingSound = sound;
         pendingPri   = priority;
         pendingValid = true;

@@ -33,8 +33,9 @@ enum class State : uint8_t {
     RELEASING    // Relay ON  — GPIO LOW, cooldown after audio ends
 };
 
-static State         state_    = State::IDLE;
-static unsigned long stateMs_  = 0;
+static State         state_        = State::IDLE;
+static unsigned long stateMs_      = 0;
+static unsigned long activationMs_ = 0;   // millis() when relay was last energised
 
 // ---------------------------------------------------------------------------
 // Public API implementation
@@ -43,8 +44,9 @@ static unsigned long stateMs_  = 0;
 void init() {
     pinMode(PIN_AUDIO_RELAY, OUTPUT);
     digitalWrite(PIN_AUDIO_RELAY, HIGH);  // Relay OFF (active LOW)
-    state_   = State::IDLE;
-    stateMs_ = 0;
+    state_        = State::IDLE;
+    stateMs_      = 0;
+    activationMs_ = 0;
     Serial.println("[RELAY] Audio relay initialized (GPIO 11, active-LOW, IDLE)");
 }
 
@@ -53,16 +55,19 @@ void requestOn() {
         case State::IDLE:
             // Relay was off — turn it on and start the establishment timer
             digitalWrite(PIN_AUDIO_RELAY, LOW);
-            state_   = State::ACTIVATING;
-            stateMs_ = millis();
+            state_        = State::ACTIVATING;
+            stateMs_      = millis();
+            activationMs_ = stateMs_;  // record when this activation cycle began
             break;
 
         case State::RELEASING:
             // New audio request arrived during the release cooldown.
             // The relay contact is still closed, so no re-establishment is
             // needed — cancel the cooldown and go straight back to ACTIVE.
-            state_   = State::ACTIVE;
-            stateMs_ = millis();
+            // Reset the watchdog so the new sound gets a fresh RELAY_MAX_ON_MS.
+            state_        = State::ACTIVE;
+            stateMs_      = millis();
+            activationMs_ = stateMs_;
             break;
 
         case State::ACTIVATING:
@@ -80,12 +85,37 @@ void release() {
     // IDLE and RELEASING are left unchanged
 }
 
+void forceOff() {
+    digitalWrite(PIN_AUDIO_RELAY, HIGH);  // Relay OFF immediately
+    state_        = State::IDLE;
+    stateMs_      = 0;
+    activationMs_ = 0;
+}
+
 bool isReady() {
     return state_ == State::ACTIVE;
 }
 
 void update() {
     unsigned long now = millis();
+
+    // ---- Safety watchdog ------------------------------------------------
+    // If the relay has been continuously energised (in ACTIVATING or ACTIVE
+    // state) for longer than RELAY_MAX_ON_MS, force it OFF.
+    // This is defence-in-depth: under normal operation the audio::update()
+    // playing-timeout releases the relay well within 5170 ms.
+    // The watchdog fires only if a software error prevents that path from
+    // running (e.g. the playing flag gets corrupted).
+    if ((state_ == State::ACTIVATING || state_ == State::ACTIVE) &&
+        activationMs_ != 0 &&
+        (now - activationMs_) >= RELAY_MAX_ON_MS) {
+        Serial.println("[RELAY] WATCHDOG: forced OFF (max ON time exceeded)");
+        digitalWrite(PIN_AUDIO_RELAY, HIGH);
+        state_        = State::IDLE;
+        stateMs_      = 0;
+        activationMs_ = 0;
+        return;
+    }
 
     switch (state_) {
         case State::IDLE:
@@ -105,7 +135,8 @@ void update() {
             // Keep relay ON during cooldown to absorb any audio tail
             if ((now - stateMs_) >= RELAY_RELEASE_MS) {
                 digitalWrite(PIN_AUDIO_RELAY, HIGH);  // Relay OFF
-                state_ = State::IDLE;
+                state_        = State::IDLE;
+                activationMs_ = 0;
             }
             break;
     }
