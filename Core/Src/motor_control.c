@@ -379,49 +379,58 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
 
 void Motor_Init(void)
 {
-    /* ---- motor_fl: RPWM = TIM1_CH1 (PA8), LPWM = TIM8_CH1 (PC6) ---- */
+    /* ---- motor_fl: RPWM = TIM1_CH1 (PA8), LPWM = TIM1_CH2 (PA9) ---- */
+    /* Both channels on TIM1 → same UEV → overlap = 0                    */
     motor_fl.rpwm_timer   = &htim1;  motor_fl.rpwm_channel = TIM_CHANNEL_1;
-    motor_fl.lpwm_timer   = &htim8;  motor_fl.lpwm_channel = TIM_CHANNEL_1;
+    motor_fl.lpwm_timer   = &htim1;  motor_fl.lpwm_channel = TIM_CHANNEL_2;
     motor_fl.en_port      = GPIOC;   motor_fl.en_pin       = PIN_EN_FL;  /* PC5 */
     motor_fl.direction    = 0;
 
-    /* ---- motor_fr: RPWM = TIM1_CH2 (PA9), LPWM = TIM8_CH2 (PC7) ---- */
-    motor_fr.rpwm_timer   = &htim1;  motor_fr.rpwm_channel = TIM_CHANNEL_2;
-    motor_fr.lpwm_timer   = &htim8;  motor_fr.lpwm_channel = TIM_CHANNEL_2;
+    /* ---- motor_fr: RPWM = TIM1_CH3 (PA10), LPWM = TIM1_CH4 (PA11) ---- */
+    /* Both channels on TIM1 → same UEV → overlap = 0                     */
+    motor_fr.rpwm_timer   = &htim1;  motor_fr.rpwm_channel = TIM_CHANNEL_3;
+    motor_fr.lpwm_timer   = &htim1;  motor_fr.lpwm_channel = TIM_CHANNEL_4;
     motor_fr.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
     motor_fr.direction    = 0;
 
-    /* ---- motor_rl: RPWM = TIM1_CH3 (PA10), LPWM = TIM3_CH1 (PA6) ---- */
-    motor_rl.rpwm_timer   = &htim1;  motor_rl.rpwm_channel = TIM_CHANNEL_3;
-    motor_rl.lpwm_timer   = &htim3;  motor_rl.lpwm_channel = TIM_CHANNEL_1;
+    /* ---- motor_rl: RPWM = TIM8_CH1 (PC6), LPWM = TIM8_CH2 (PC7) ---- */
+    /* Both channels on TIM8 → same UEV → overlap = 0                    */
+    motor_rl.rpwm_timer   = &htim8;  motor_rl.rpwm_channel = TIM_CHANNEL_1;
+    motor_rl.lpwm_timer   = &htim8;  motor_rl.lpwm_channel = TIM_CHANNEL_2;
     motor_rl.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
     motor_rl.direction    = 0;
 
-    /* ---- motor_rr: RPWM = TIM1_CH4 (PA11), LPWM = TIM3_CH2 (PA7) ---- */
-    motor_rr.rpwm_timer   = &htim1;  motor_rr.rpwm_channel = TIM_CHANNEL_4;
-    motor_rr.lpwm_timer   = &htim3;  motor_rr.lpwm_channel = TIM_CHANNEL_2;
+    /* ---- motor_rr: RPWM = TIM8_CH3 (PC8), LPWM = TIM8_CH4 (PC9) ---- */
+    /* Both channels on TIM8 → same UEV → overlap = 0                    */
+    motor_rr.rpwm_timer   = &htim8;  motor_rr.rpwm_channel = TIM_CHANNEL_3;
+    motor_rr.lpwm_timer   = &htim8;  motor_rr.lpwm_channel = TIM_CHANNEL_4;
     motor_rr.en_port      = GPIOC;   motor_rr.en_pin       = PIN_EN_RR; /* PC13 */
     motor_rr.direction    = 0;
 
-    /* ---- motor_steer: RPWM = TIM8_CH3 (PC8), LPWM = TIM8_CH4 (PC9) ---- */
-    motor_steer.rpwm_timer  = &htim8; motor_steer.rpwm_channel = TIM_CHANNEL_3;
-    motor_steer.lpwm_timer  = &htim8; motor_steer.lpwm_channel = TIM_CHANNEL_4;
+    /* ---- motor_steer: RPWM = TIM3_CH1 (PA6), LPWM = TIM3_CH2 (PA7) ---- */
+    /* Both channels on TIM3 → same UEV → overlap = 0                      */
+    motor_steer.rpwm_timer  = &htim3; motor_steer.rpwm_channel = TIM_CHANNEL_1;
+    motor_steer.lpwm_timer  = &htim3; motor_steer.lpwm_channel = TIM_CHANNEL_2;
     motor_steer.en_port     = NULL;   /* EN tied to 3.3 V in hardware */
     motor_steer.direction   = 0;
 
-    /* ---- Start all RPWM channels (TIM1 CH1-4) ---- */
+    /* ---- Start TIM1 channels: FL (CH1/CH2) and FR (CH3/CH4) ---- */
+    /* HAL_TIM_PWM_Start re-enables MOE (TIM1 is advanced; MOE was cleared
+     * by BREAK2 config with AutomaticOutput=DISABLE).                  */
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);  /* RPWM_FL  */
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);  /* RPWM_FR  */
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  /* RPWM_RL  */
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);  /* RPWM_RR  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);  /* LPWM_FL  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  /* RPWM_FR  */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);  /* LPWM_FR  */
 
-    /* ---- Start all LPWM channels ---- */
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);  /* LPWM_FL  */
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);  /* LPWM_FR  */
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);  /* RPWM_STEER */
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);  /* LPWM_STEER */
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);  /* LPWM_RL  */
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  /* LPWM_RR  */
+    /* ---- Start TIM8 channels: RL (CH1/CH2) and RR (CH3/CH4) ---- */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);  /* RPWM_RL  */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);  /* LPWM_RL  */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);  /* RPWM_RR  */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);  /* LPWM_RR  */
+
+    /* ---- Start TIM3 channels: STEER (CH1/CH2) ---- */
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);  /* RPWM_STEER */
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  /* LPWM_STEER */
 
     /* ---- Quadrature encoder for steering ---- */
     HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);

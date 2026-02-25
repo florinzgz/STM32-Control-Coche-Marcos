@@ -43,7 +43,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   else if(htim_base->Instance==TIM3)
   {
     __HAL_RCC_TIM3_CLK_ENABLE();
-    /* No interrupt for TIM3 — PWM output only (LPWM_RL, LPWM_RR) */
+    /* No interrupt for TIM3 — PWM output only (RPWM_STEER, LPWM_STEER) */
   }
   else if(htim_base->Instance==TIM8)
   {
@@ -61,7 +61,8 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     __HAL_RCC_TIM1_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
-    /* PA8=RPWM_FL, PA9=RPWM_FR, PA10=RPWM_RL, PA11=RPWM_RR (TIM1_CH1-4) */
+    /* PA8=RPWM_FL (TIM1_CH1), PA9=LPWM_FL (TIM1_CH2),
+     * PA10=RPWM_FR (TIM1_CH3), PA11=LPWM_FR (TIM1_CH4) */
     GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -74,7 +75,7 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     __HAL_RCC_TIM3_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
-    /* PA6=LPWM_RL (TIM3_CH1), PA7=LPWM_RR (TIM3_CH2) */
+    /* PA6=RPWM_STEER (TIM3_CH1), PA7=LPWM_STEER (TIM3_CH2) */
     GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -87,8 +88,8 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     __HAL_RCC_TIM8_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
     
-    /* PC6=LPWM_FL (TIM8_CH1), PC7=LPWM_FR (TIM8_CH2),
-     * PC8=RPWM_STEER (TIM8_CH3), PC9=LPWM_STEER (TIM8_CH4) */
+    /* PC6=RPWM_RL (TIM8_CH1), PC7=LPWM_RL (TIM8_CH2),
+     * PC8=RPWM_RR (TIM8_CH3), PC9=LPWM_RR (TIM8_CH4) */
     GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;

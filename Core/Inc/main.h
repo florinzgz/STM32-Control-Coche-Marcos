@@ -15,22 +15,26 @@ extern "C" {
 #define ENCODER_PPR        1200
 #define ENCODER_CPR        (ENCODER_PPR * 4)  /* 4800 counts/rev */
 
-/* ---- RPWM Motor Pins — forward-direction PWM (TIM1 CH1-CH4: PA8-PA11, TIM8 CH3: PC8) ---- */
-/* These are the RPWM (forward) inputs of each BTS7960.  No external logic needed. */
+/* ---- Motor PWM Pins — TIM1 (advanced): FL motor CH1/CH2, FR motor CH3/CH4 ---- */
+/* RPWM and LPWM of each motor share the SAME timer so both channels update at  */
+/* the same UEV → overlap = 0.  TIM1 BREAK2 is armed to Cortex LOCKUP.         */
 #define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 — RPWM_FL  */
-#define PIN_PWM_FR         GPIO_PIN_9   /* PA9  - TIM1_CH2 — RPWM_FR  */
-#define PIN_PWM_RL         GPIO_PIN_10  /* PA10 - TIM1_CH3 — RPWM_RL  */
-#define PIN_PWM_RR         GPIO_PIN_11  /* PA11 - TIM1_CH4 — RPWM_RR  */
-#define PIN_PWM_STEER      GPIO_PIN_8   /* PC8  - TIM8_CH3 — RPWM_STEER */
+#define PIN_LPWM_FL        GPIO_PIN_9   /* PA9  - TIM1_CH2 — LPWM_FL  */
+#define PIN_PWM_FR         GPIO_PIN_10  /* PA10 - TIM1_CH3 — RPWM_FR  */
+#define PIN_LPWM_FR        GPIO_PIN_11  /* PA11 - TIM1_CH4 — LPWM_FR  */
 
-/* ---- LPWM Motor Pins — reverse-direction PWM (new direct connections) ---- */
-/* These replace the 74HC08/74HC04 external logic.  Connect directly to the     */
-/* LPWM input of each BTS7960.  Corresponding BTS7960 EN pins tied to 3.3 V.   */
-#define PIN_LPWM_FL        GPIO_PIN_6   /* PC6  - TIM8_CH1 — LPWM_FL   */
-#define PIN_LPWM_FR        GPIO_PIN_7   /* PC7  - TIM8_CH2 — LPWM_FR   */
-#define PIN_LPWM_RL        GPIO_PIN_6   /* PA6  - TIM3_CH1 — LPWM_RL   */
-#define PIN_LPWM_RR        GPIO_PIN_7   /* PA7  - TIM3_CH2 — LPWM_RR   */
-#define PIN_LPWM_STEER     GPIO_PIN_9   /* PC9  - TIM8_CH4 — LPWM_STEER */
+/* ---- Motor PWM Pins — TIM8 (advanced): RL motor CH1/CH2, RR motor CH3/CH4 ---- */
+/* Same-timer guarantee and BREAK2/LOCKUP protection as TIM1.                   */
+#define PIN_PWM_RL         GPIO_PIN_6   /* PC6  - TIM8_CH1 — RPWM_RL  */
+#define PIN_LPWM_RL        GPIO_PIN_7   /* PC7  - TIM8_CH2 — LPWM_RL  */
+#define PIN_PWM_RR         GPIO_PIN_8   /* PC8  - TIM8_CH3 — RPWM_RR  */
+#define PIN_LPWM_RR        GPIO_PIN_9   /* PC9  - TIM8_CH4 — LPWM_RR  */
+
+/* ---- Motor PWM Pins — TIM3 (general-purpose): STEER motor CH1/CH2 ---- */
+/* Same-timer guarantee.  TIM3 has no BREAK input; fault handlers zero     */
+/* CCR1/CCR2 via direct register access.                                   */
+#define PIN_PWM_STEER      GPIO_PIN_6   /* PA6  - TIM3_CH1 — RPWM_STEER */
+#define PIN_LPWM_STEER     GPIO_PIN_7   /* PA7  - TIM3_CH2 — LPWM_STEER */
 
 /* ---- Direction Control (GPIOC) — NO LONGER DRIVEN BY FIRMWARE ---- */
 /* PC0-PC4 are freed now that RPWM/LPWM are generated directly by timers. */
@@ -43,13 +47,14 @@ extern "C" {
 
 /* ---- Enable Signals (GPIOC) ---- */
 /* EN_FL (PC5) and EN_RR (PC13) remain as GPIO outputs.                        */
-/* EN_FR (PC6), EN_RL (PC7), EN_STEER (PC9) are repurposed as LPWM timer AFs;  */
-/* wire the corresponding BTS7960 R_EN/L_EN pins directly to 3.3 V.            */
+/* PC6/PC7 are TIM8_CH1/CH2 (RPWM_RL/LPWM_RL); PC8/PC9 are TIM8_CH3/CH4      */
+/* (RPWM_RR/LPWM_RR) — all are timer AF outputs, not GPIO EN pins.             */
+/* Wire the corresponding BTS7960 R_EN/L_EN pins directly to 3.3 V.            */
 #define PIN_EN_FL          GPIO_PIN_5   /* PC5  — GPIO output, active HIGH */
-#define PIN_EN_FR          GPIO_PIN_6   /* PC6  — repurposed: TIM8_CH1 (LPWM_FL)   */
-#define PIN_EN_RL          GPIO_PIN_7   /* PC7  — repurposed: TIM8_CH2 (LPWM_FR)   */
+#define PIN_EN_FR          GPIO_PIN_6   /* PC6  — repurposed: TIM8_CH1 (RPWM_RL)   */
+#define PIN_EN_RL          GPIO_PIN_7   /* PC7  — repurposed: TIM8_CH2 (LPWM_RL)   */
 #define PIN_EN_RR          GPIO_PIN_13  /* PC13 — GPIO output, active HIGH */
-#define PIN_EN_STEER       GPIO_PIN_9   /* PC9  — repurposed: TIM8_CH4 (LPWM_STEER)*/
+#define PIN_EN_STEER       GPIO_PIN_9   /* PC9  — repurposed: TIM8_CH4 (LPWM_RR)   */
 
 /* ---- Relay Control (GPIOC) ---- */
 #define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
