@@ -29,6 +29,7 @@
 #include "shifter_input.h"
 #include "touch_handler.h"
 #include "config_store.h"
+#include "traction_switch.h"
 
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
@@ -315,13 +316,18 @@ void setup() {
     // Initialize MCP23017 shifter input (I2C on GPIO 8/9)
     shifter::init();
 
+    // Initialize traction switch (DPDT rocker on GPIO 15)
+    traction_sw::init();
+
     // Initialize centralized touch handler
     touch::init();
 
     // Apply saved configuration
     {
         const auto& cfg = config_store::get();
-        currentModeFlags   = cfg.driveMode;
+        // Traction mode is now read from physical switch, not NVS
+        currentModeFlags   = traction_sw::getModeFlag()
+                           | (cfg.driveMode & can::MODE_FLAG_TANK_TURN);
         frontLedLocalState = cfg.frontLedEnabled;
         rearLedLocalState  = cfg.rearLedEnabled;
 
@@ -471,6 +477,46 @@ void loop() {
         }
     }
 
+    // ---- Traction switch update ----
+    // Poll DPDT rocker switch for 2WD/4WD selection.
+    // CAN CMD_MODE is sent only when the switch state changes.
+    // Speed gate is handled internally by traction_sw::update().
+    {
+        // Compute average vehicle speed (0.1 km/h units → km/h)
+        uint32_t swSpeedSum = 0;
+        for (uint8_t i = 0; i < 4; ++i) {
+            swSpeedSum += vehicleData.speed().raw[i];
+        }
+        float swSpeedKmh = static_cast<float>(swSpeedSum) / 4.0f * 0.1f;
+
+        traction_sw::update(swSpeedKmh);
+
+        if (traction_sw::hasChanged() && stm32IsAlive) {
+            // Update mode flags: preserve tank turn bit, set 4x4 from switch
+            uint8_t tractionBit = traction_sw::getModeFlag();
+            currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
+                             | tractionBit;
+            sendModeCommand(currentModeFlags);
+            config_store::setDriveMode(currentModeFlags);
+            {
+                vehicle::ModeData md;
+                md.modeFlags   = currentModeFlags;
+                md.timestampMs = millis();
+                vehicleData.setMode(md);
+            }
+            // Play traction audio feedback
+            if (traction_sw::is4WD()) {
+                audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
+            } else {
+                audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
+            }
+            Serial.printf("[TRACTION] Switch → %s, flags=0x%02X\n",
+                          traction_sw::is4WD() ? "4WD" : "2WD",
+                          currentModeFlags);
+            traction_sw::clearChanged();
+        }
+    }
+
     // ---- Centralized touch handling ----
     {
         uint16_t tx = 0, ty = 0;
@@ -516,24 +562,14 @@ void loop() {
                                   rearLedLocalState ? "ON" : "OFF");
                 }
 
-                // Mode icons (4x4 / 4x2 / 360°)
+                // Mode icons — 360° tank turn only (touch selectable)
+                // 4x4/4x2 traction is now controlled by the physical switch.
                 // SAFETY FIX: Only send mode command when STM32 is alive.
                 uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
-                if (modeHit > 0 && stm32IsAlive) {
-                    switch (modeHit) {
-                        case 1:  // 4x4 → set 4x4 flag, clear tank
-                            currentModeFlags = can::MODE_FLAG_4X4;
-                            audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
-                            break;
-                        case 2:  // 4x2 → clear both flags
-                            currentModeFlags = 0;
-                            audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
-                            break;
-                        case 3:  // 360° → set tank turn flag
-                            currentModeFlags = can::MODE_FLAG_TANK_TURN;
-                            audio::play(audio::Sound::BEEP, audio::Priority::LO);
-                            break;
-                    }
+                if (modeHit == 3 && stm32IsAlive) {
+                    // 360° toggle: flip tank turn bit, preserve 4x4 from switch
+                    currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
+                    audio::play(audio::Sound::BEEP, audio::Priority::LO);
                     sendModeCommand(currentModeFlags);
                     config_store::setDriveMode(currentModeFlags);
                     {
