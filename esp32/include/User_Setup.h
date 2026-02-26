@@ -57,7 +57,7 @@
 // CS     10   GPIO 1–21 range — bidirectional, SPI-capable, no conflict
 // DC     39   GPIO 38–48 range — output-capable, outside Flash/PSRAM range
 // RST    38   GPIO 38–48 range — output-capable, outside Flash/PSRAM range
-// BL     16   GPIO 1–21 range — safe output, no boot strapping restrictions
+// BL     42   GPIO 38–48 range — output-capable, no strapping restrictions
 // T_CS   21   GPIO 1–21 range — bidirectional, no conflict
 //
 // GPIO 26–32 are NOT used: QSPI Flash interface (boot failure if used).
@@ -76,7 +76,7 @@
 #define TFT_RST  38
 
 // --- Backlight ---
-#define TFT_BL            16
+#define TFT_BL            42
 #define TFT_BACKLIGHT_ON  HIGH
 
 // --- SPI frequencies ---

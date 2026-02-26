@@ -86,7 +86,7 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
 | GPIO14 | Display TFT | SPI SCLK (reloj) |
 | GPIO15 | Interruptor tracción | Selector 2WD/4WD (DPDT rocker switch) |
-| GPIO16 | Display TFT | BL (Backlight) |
+| GPIO42 | Display TFT | BL (Backlight) |
 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
@@ -108,9 +108,9 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | **Reservados Flash** (QSPI, crash si se usan) | GPIO26–32 | 7 |
 | **Reservados PSRAM** (Octal, N16R8) | GPIO33–37 | 5 |
 | **Boot strapping** (usar con precaución) | GPIO0, GPIO3, GPIO45, GPIO46 | 4 |
-| **Asignados al proyecto** (ya en uso) | GPIO4, 5, 10, 12–16, 19–21, 38, 39, 43, 44, 47 | 16 |
+| **Asignados al proyecto** (ya en uso) | GPIO4, 5, 10, 12–15, 19–21, 38, 39, 42–44, 47 | 16 |
 | **TOTAL NO DISPONIBLES** | — | **36** |
-| **Pines LIBRES sin restricciones** | GPIO1, 2, 6, 7, 8, 9, 11, 17, 18, 40, 41, 42, 48 | **13** |
+| **Pines LIBRES sin restricciones** | GPIO1, 2, 6, 7, 8, 9, 11, 16, 17, 18, 40, 41, 48 | **13** |
 
 ---
 
@@ -125,11 +125,11 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO8 | GPIO, SPI |
 | GPIO9 | GPIO |
 | GPIO11 | GPIO, SPI |
+| GPIO16 | GPIO |
 | GPIO17 | GPIO |
 | GPIO18 | GPIO |
 | GPIO40 | GPIO |
 | GPIO41 | GPIO |
-| GPIO42 | GPIO |
 | GPIO48 | GPIO |
 
 > **Total: 13 pines libres sin restricciones** para uso inmediato.

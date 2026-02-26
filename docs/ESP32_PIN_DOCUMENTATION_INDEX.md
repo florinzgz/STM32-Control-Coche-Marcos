@@ -100,7 +100,7 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 | MOSI (SDI) | 13 | Datos SPI |
 | SCK | 14 | Reloj SPI |
 | MISO (SDO) | 12 | Datos SPI / Touch DO |
-| LED | 16 | Backlight |
+| LED | 42 | Backlight |
 | T_CS | 21 | Touch CS |
 
 ### CAN-Bus TJA1051

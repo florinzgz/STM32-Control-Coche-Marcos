@@ -38,7 +38,7 @@ La pantalla tiene los siguientes pines según tu descripción:
 |-----------------|---------|--------------|------|-------|
 | **VCC** | Alimentación 3.3V | 3.3V | — | Fuente de alimentación regulada |
 | **GND** | Tierra | GND | — | Común con ESP32 |
-| **LED** | Backlight (Retroiluminación) | GPIO16 | 16 | Control de brillo (HIGH=encendido) |
+| **LED** | Backlight (Retroiluminación) | GPIO42 | 42 | Control de brillo (HIGH=encendido) |
 | **CS** | Chip Select Display | GPIO10 | 10 | Selección display (activo bajo) |
 | **RESET** | Reset Display | GPIO38 | 38 | Reset del display (activo bajo) |
 | **DC/RS** | Data/Command | GPIO39 | 39 | HIGH=data, LOW=command |
@@ -67,7 +67,7 @@ La pantalla tiene los siguientes pines según tu descripción:
 │  GPIO10 (SPI CS)   ─────────────────────────────► CS            │
 │  GPIO39 (DC/RS)    ─────────────────────────────► DC/RS         │
 │  GPIO38 (RESET)    ─────────────────────────────► RESET         │
-│  GPIO16 (Backlight)─────────────────────────────► LED           │
+│  GPIO42 (Backlight)─────────────────────────────► LED           │
 │                                                                  │
 │  GPIO12 (compartido)─────────────────────────────► T_DO         │
 │  GPIO13 (compartido)─────────────────────────────► T_DIN        │
@@ -104,7 +104,7 @@ Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 #define TFT_CS   10    // GPIO10 — Chip Select display
 #define TFT_DC   39    // GPIO39 — Data/Command
 #define TFT_RST  38    // GPIO38 — Reset display
-#define TFT_BL            16
+#define TFT_BL            42
 #define TFT_BACKLIGHT_ON  HIGH
 #define SPI_FREQUENCY       40000000
 #define SPI_READ_FREQUENCY  20000000
@@ -274,7 +274,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 2. **Conectar Display TFT:**
    - Comenzar con VCC y GND del display
    - Conectar pines SPI: MISO (12), MOSI (13), SCK (14), CS (10)
-   - Conectar pines de control: DC (39), RESET (38), LED (16)
+   - Conectar pines de control: DC (39), RESET (38), LED (42)
    - Conectar Touch: T_CS (21), T_DO (12), T_DIN (13) y T_CLK (14) compartidos
 
 3. **Probar Display:**
@@ -318,7 +318,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 
 | Síntoma | Causa Probable | Solución |
 |---------|----------------|----------|
-| Pantalla negra | Sin alimentación o backlight apagado | Verificar VCC=3.3V, GPIO16=HIGH |
+| Pantalla negra | Sin alimentación o backlight apagado | Verificar VCC=3.3V, GPIO42=HIGH |
 | Display blanco | Reset no funcionando | Verificar GPIO38, agregar delay después de reset |
 | Imagen invertida/rotada | Rotación incorrecta | Cambiar `tft.setRotation(1)` en código |
 | Touch no responde | T_CS o T_DO no conectado | Verificar GPIO21 a T_CS y GPIO12 a T_DO del display |
