@@ -130,6 +130,26 @@ static constexpr uint8_t LED_TRACTION_BRAKING_THRESHOLD = 5;
 static unsigned long lastNvsFlushMs = 0;
 static constexpr unsigned long NVS_FLUSH_INTERVAL_MS = 10000;  // 10 seconds
 
+// ---- STM32 heartbeat liveness monitoring (SAFETY FIX) ----
+// Detect whether the STM32 alive counter (heartbeat byte 0) is actually
+// incrementing.  A frozen STM32 (IWDG not kicking, or timer firing without
+// the main loop running) would keep sending the same counter value.
+// After STM32_HB_FREEZE_COUNT consecutive identical counter values the ESP32
+// considers the STM32 non-responsive and inhibits further motion commands.
+static constexpr uint8_t  STM32_HB_FREEZE_COUNT = 5;   // 5 × 100 ms = 500 ms
+static uint8_t  stm32HbLastCounter   = 0xFFU;           // Init to impossible value
+static uint8_t  stm32HbSameCount     = 0;
+static bool     stm32IsAlive         = false;
+
+// ---- Gear re-sync after STM32 restart (SAFETY FIX) ----
+// When the STM32 restarts it re-initialises to GEAR_FORWARD regardless of
+// what gear the ESP32 (or driver) had selected.  The ESP32 detects the restart
+// via the startup_inhibit bit (bit 0 of heartbeat statusFlags) transitioning
+// from 0→1, sets a flag, and re-sends the current physical shifter gear as soon
+// as the inhibit clears and the STM32 enters ACTIVE state.
+static bool     stm32StartupSeen     = false;  // true while startup_inhibit was last 1
+static bool     gearResyncPending    = false;  // true = need to re-send gear on ACTIVE
+
 // ---- Command ACK tracking (Phase 13) ----
 // Non-blocking: records when a command was sent and checks for ACK arrival.
 // UI state is only updated once ACK is received or timeout expires.
@@ -350,6 +370,56 @@ void loop() {
         }
     }
 
+    // ---- STM32 heartbeat liveness monitoring (SAFETY FIX) ----
+    // Verify the STM32 alive counter is incrementing each heartbeat period.
+    // A frozen STM32 (timer ISR alive but main loop stuck) would send the same
+    // counter value indefinitely — treat it as non-responsive after the freeze
+    // threshold and inhibit further motion commands from this node.
+    {
+        const auto& hb = vehicleData.heartbeat();
+        if (hb.timestampMs > 0) {
+            uint8_t counter = hb.aliveCounter;
+            if (counter != stm32HbLastCounter) {
+                stm32HbLastCounter = counter;
+                stm32HbSameCount   = 0;
+                stm32IsAlive       = true;
+            } else {
+                if (stm32HbSameCount < STM32_HB_FREEZE_COUNT) {
+                    stm32HbSameCount++;
+                }
+                stm32IsAlive = (stm32HbSameCount < STM32_HB_FREEZE_COUNT);
+                if (!stm32IsAlive) {
+                    Serial.println("[SAFETY] STM32 heartbeat counter frozen — inhibiting commands");
+                }
+            }
+
+            // ---- Gear re-sync after STM32 restart (SAFETY FIX) ----
+            // Detect startup_inhibit bit (statusFlags bit 0): 0→1 = STM32 just restarted.
+            // When the bit later clears (0) AND state is ACTIVE, re-send the current gear
+            // so the STM32 and shifter are synchronised.  Guards against the default
+            // GEAR_FORWARD mis-match if the driver had previously selected PARK or REVERSE.
+            bool startupInhibitNow = (hb.statusFlags & 0x01u) != 0;
+            if (startupInhibitNow && !stm32StartupSeen) {
+                // Rising edge of startup_inhibit → STM32 just booted/reset
+                stm32StartupSeen  = true;
+                gearResyncPending = true;
+                Serial.println("[SAFETY] STM32 restart detected — gear resync pending");
+            }
+            if (gearResyncPending && !startupInhibitNow &&
+                hb.systemState == can::SystemState::ACTIVE && stm32IsAlive) {
+                // STM32 is now in ACTIVE with no startup inhibit — send current gear
+                uint8_t curGear = shifter::getGearRaw();
+                sendGearCommand(curGear);
+                lastSentGear    = curGear;  // prevent duplicate send from shifter loop
+                gearResyncPending = false;
+                Serial.printf("[SAFETY] Gear resync sent: gear=%u\n", curGear);
+            }
+            if (!startupInhibitNow) {
+                stm32StartupSeen = false;  // inhibit cleared, ready for next detection
+            }
+        }
+    }
+
     // Update obstacle sensor and transmit CAN 0x208
     {
         // Compute average vehicle speed (0.1 km/h units → km/h)
@@ -375,12 +445,17 @@ void loop() {
     RTMON_UI_END();
 
     // ---- Shifter gear update ----
-    // Poll MCP23017, send CAN 0x102 on gear change
+    // Poll MCP23017, send CAN 0x102 on gear change.
+    // SAFETY FIX: Gate gear commands on STM32 liveness.  If the STM32
+    // heartbeat counter is frozen the vehicle controller is not responsive;
+    // sending gear changes to a non-responding node could cause stale
+    // commands to execute when the node recovers.
     {
         shifter::update();
         uint8_t gear = shifter::getGearRaw();
         if (gear != lastSentGear &&
-            (now - lastGearSendMs) >= GEAR_SEND_DEBOUNCE_MS) {
+            (now - lastGearSendMs) >= GEAR_SEND_DEBOUNCE_MS &&
+            stm32IsAlive) {
             lastSentGear   = gear;
             lastGearSendMs = now;
             sendGearCommand(gear);
@@ -442,8 +517,9 @@ void loop() {
                 }
 
                 // Mode icons (4x4 / 4x2 / 360°)
+                // SAFETY FIX: Only send mode command when STM32 is alive.
                 uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
-                if (modeHit > 0) {
+                if (modeHit > 0 && stm32IsAlive) {
                     switch (modeHit) {
                         case 1:  // 4x4 → set 4x4 flag, clear tank
                             currentModeFlags = can::MODE_FLAG_4X4;

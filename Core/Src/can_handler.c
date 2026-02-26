@@ -40,6 +40,17 @@ static uint8_t  heartbeat_counter = 0;
 static bool led_relay_front = false;
 static bool led_relay_rear  = false;
 
+/* SAFETY FIX: ESP32 heartbeat alive-counter freeze detection.
+ * Track the rolling counter sent in byte 0 of the ESP32 heartbeat (0x011).
+ * A "zombie" ESP32 (main task frozen but timer ISR still firing) sends the
+ * same counter value indefinitely.  If the counter does not advance for
+ * HEARTBEAT_COUNTER_FREEZE_COUNT consecutive frames the liveness watchdog
+ * is NOT updated, causing a normal CAN timeout → LIMP_HOME transition.
+ * Recovery: when the counter resumes changing, the freeze is cleared.      */
+#define HEARTBEAT_COUNTER_FREEZE_COUNT  5U  /* 5 × 100 ms = 500 ms frozen  */
+static uint8_t  esp32_hb_last_counter    = 0xFFU; /* Init to impossible value */
+static uint8_t  esp32_hb_same_count      = 0;     /* Consecutive same-counter */
+
 /* Bus-off recovery state (non-blocking, timestamp-based) */
 static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in progress */
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
@@ -160,6 +171,10 @@ void CAN_Init(void) {
     busoff_active       = 0;
     busoff_last_attempt = 0;
     busoff_retry_count  = 0;
+
+    /* SAFETY FIX: Reset ESP32 heartbeat counter tracking state */
+    esp32_hb_last_counter = 0xFFU;
+    esp32_hb_same_count   = 0;
 
     /* Skip hardware activation if FDCAN peripheral init failed.
      * System continues without CAN — Safety_CheckCANTimeout() will
@@ -549,12 +564,57 @@ void CAN_ProcessMessages(void) {
          * it may clamp, rate-limit, or reject any ESP32 request.       */
         switch (rx_hdr.Identifier) {
             case CAN_ID_HEARTBEAT_ESP32:
-                can_stats.last_heartbeat_esp32 = HAL_GetTick();
-                Safety_UpdateCANRxTime();
+                /* SAFETY FIX: Validate alive counter before accepting as liveness proof.
+                 * Only count this heartbeat if the counter has advanced since the last
+                 * frame.  A frozen ESP32 (timer ISR alive but main task stuck) will send
+                 * the same counter indefinitely; after HEARTBEAT_COUNTER_FREEZE_COUNT
+                 * identical frames the CAN timeout is allowed to expire → LIMP_HOME.
+                 * When the counter resumes changing the freeze state is cleared.        */
+                if (msg_len >= 1) {
+                    uint8_t counter = rx_payload[0];
+                    if (counter != esp32_hb_last_counter) {
+                        /* Counter advanced — healthy heartbeat */
+                        esp32_hb_last_counter = counter;
+                        esp32_hb_same_count   = 0;
+                        can_stats.last_heartbeat_esp32 = HAL_GetTick();
+                        Safety_UpdateCANRxTime();
+                    } else {
+                        /* Counter unchanged — track consecutive repeats.
+                         * Increment only while below the threshold so the
+                         * counter saturates rather than wrapping.
+                         * Update liveness only while still below threshold:
+                         *   same_count < FREEZE−1 → increment then still < FREEZE → update
+                         *   same_count = FREEZE−1 → increment reaches FREEZE → no update
+                         *   same_count ≥ FREEZE   → already frozen, no update            */
+                        if (esp32_hb_same_count < HEARTBEAT_COUNTER_FREEZE_COUNT) {
+                            esp32_hb_same_count++;
+                            if (esp32_hb_same_count < HEARTBEAT_COUNTER_FREEZE_COUNT) {
+                                /* Still within tolerance — accept as live */
+                                can_stats.last_heartbeat_esp32 = HAL_GetTick();
+                                Safety_UpdateCANRxTime();
+                            }
+                            /* If the increment just reached the threshold: do NOT call
+                             * Safety_UpdateCANRxTime().  CAN timeout will expire →
+                             * LIMP_HOME as designed.                                    */
+                        }
+                        /* If already at/above threshold: no update, CAN timeout expires */
+                    }
+                } else {
+                    /* DLC=0 heartbeat (legacy / test bench): accept without counter check */
+                    can_stats.last_heartbeat_esp32 = HAL_GetTick();
+                    Safety_UpdateCANRxTime();
+                }
                 break;
                 
             case CAN_ID_CMD_THROTTLE:
-                if (msg_len >= 1) {
+                /* SAFETY FIX: Reject CAN throttle while Power-On Movement Prevention
+                 * latch is active.  Startup_IsInhibited() is true from every MCU reset
+                 * until the operator releases the pedal to rest for STARTUP_PEDAL_CLEAR_MS.
+                 * Without this guard, a CAN throttle arriving in the ACTIVE window before
+                 * the latch clears could bypass the inhibit for up to one 50 ms pedal
+                 * update cycle.  Safety_ValidateThrottle() additionally enforces the
+                 * state-machine gate, so both checks must independently pass.           */
+                if (msg_len >= 1 && !Startup_IsInhibited()) {
                     float requested_pct = (float)rx_payload[0];
                     float validated_pct = Safety_ValidateThrottle(requested_pct);
                     Traction_SetDemand(validated_pct);

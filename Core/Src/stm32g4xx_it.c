@@ -155,6 +155,12 @@ void I2C1_ER_IRQHandler(void)
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
+    (void)hfdcan;
     (void)RxFifo0ITs;
-    Safety_UpdateCANRxTime();
+    /* SAFETY FIX: CAN liveness is now validated per-heartbeat only.
+     * Non-heartbeat frames (obstacle data 0x208/0x209, replayed commands,
+     * stale frames after CAN recovery) must NOT reset the ESP32 liveness
+     * watchdog — only the dedicated heartbeat frame (0x011) counts.
+     * Safety_UpdateCANRxTime() is called exclusively from the
+     * CAN_ID_HEARTBEAT_ESP32 case in CAN_ProcessMessages().              */
 }
