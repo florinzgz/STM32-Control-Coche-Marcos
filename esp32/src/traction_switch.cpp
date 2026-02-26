@@ -58,6 +58,7 @@ void init(const Config& cfg) {
     candidateMode_ = confirmedMode_;
     stableCounter_ = 0;
     changed_       = true;   // Signal initial state for CAN publish on boot
+                               // (STM32 needs to know traction mode at startup)
     lastPollMs_    = millis();
     lastChangeMs_  = 0;
     speedBlocked_  = false;

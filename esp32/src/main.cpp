@@ -497,7 +497,8 @@ void loop() {
             currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
                              | tractionBit;
             sendModeCommand(currentModeFlags);
-            config_store::setDriveMode(currentModeFlags);
+            // Only persist tank turn to NVS; traction comes from physical switch
+            config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
             {
                 vehicle::ModeData md;
                 md.modeFlags   = currentModeFlags;
@@ -571,7 +572,8 @@ void loop() {
                     currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
                     audio::play(audio::Sound::BEEP, audio::Priority::LO);
                     sendModeCommand(currentModeFlags);
-                    config_store::setDriveMode(currentModeFlags);
+                    // Only persist tank turn to NVS; traction comes from physical switch
+                    config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
                     {
                         vehicle::ModeData md;
                         md.modeFlags   = currentModeFlags;
