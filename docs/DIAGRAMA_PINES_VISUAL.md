@@ -74,7 +74,7 @@
 │   DC/RS      │ Data/Command │   GPIO 39    │ Modo datos/comandos      │
 │   SDI (MOSI) │ Datos SPI    │   GPIO 13    │ Master Out Slave In      │
 │   SCK        │ Reloj SPI    │   GPIO 14    │ Clock de sincronización  │
-│   LED        │ Backlight    │   GPIO 45    │ Control de brillo        │
+│   LED        │ Backlight    │   GPIO 42    │ Control de brillo        │
 │   SDO (MISO) │ Lectura SPI  │   GPIO 12    │ Compartido con T_DO      │
 ├──────────────┼──────────────┼──────────────┼──────────────────────────┤
 │   T_CLK      │ Touch Clock  │   GPIO 14    │ Compartido con SCK       │
@@ -100,7 +100,7 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 │   GPIO 10  ─────┼──────────────────────────┼───► CS          │
 │   GPIO 39  ─────┼──────────────────────────┼───► DC/RS       │
 │   GPIO 38  ─────┼──────────────────────────┼───► RESET       │
-│   GPIO 45  ─────┼──────────────────────────┼───► LED         │
+│   GPIO 42  ─────┼──────────────────────────┼───► LED         │
 │                 │                          │                 │
 │   GPIO 12  ◄────┼──────────────────────────┼───◄ T_DO        │
 │   GPIO 13  ─────┼──────────┬───────────────┼───► T_DIN       │
@@ -115,7 +115,7 @@ ESP32-S3 DevKitC-1                           Display TFT ST7796
 NOTAS:
 • GPIO12 es compartido entre Display MISO (SDO) y Touch Data Out (T_DO)
 • GPIO13 y GPIO14 son compartidos entre Display SPI y Touch Panel
-• LED (GPIO45) controla la retroiluminación: HIGH=encendido, LOW=apagado
+• LED (GPIO42) controla la retroiluminación: HIGH=encendido, LOW=apagado
 • MISO (GPIO12) es necesario para que el XPT2046 envíe coordenadas touch
 • Touch panel usa polling en lugar de interrupciones (T_IRQ no conectado)
 ```
@@ -243,7 +243,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │   39     │  DC/RS       │ Display DC/RS (Data/Command)               │
 │   38     │  RESET       │ Display RESET                              │
 │   21     │  Touch CS    │ Touch Panel T_CS                           │
-│   45     │  Backlight   │ Display LED (retroiluminación)             │
+│   42     │  Backlight   │ Display LED (retroiluminación)             │
 ├──────────┼──────────────┼────────────────────────────────────────────┤
 │   3.3V   │ Alimentación │ Display VCC                                │
 │    5V    │ Alimentación │ TJA1051 VCC (pin 3)                        │
@@ -274,7 +274,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
     │  21 ◄─Touch CS                 G14 ─►SCK│
     │  47                            G33 (PSRAM-internal)
     │  48                            G34 (PSRAM-internal)
-    │  45 ◄─Display BL               G35 (PSRAM-internal)
+    │  45 (strapping)              G35 (PSRAM-internal)
     │  GND                           G36 (PSRAM-internal)
     │  5V                            G37 (PSRAM-internal)
     │                                G38 ─►RST│

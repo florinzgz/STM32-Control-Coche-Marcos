@@ -41,13 +41,13 @@ void ModeIcons::draw(TFT_eSPI& tft,
 }
 
 // -------------------------------------------------------------------------
-// Hit test for touch input
+// Hit test for touch input — only 360° icon is touchable.
+// 4x4/4x2 are display-only (controlled by physical traction switch).
 // -------------------------------------------------------------------------
 uint8_t ModeIcons::hitTest(int16_t touchX, int16_t touchY) {
     if (touchY < ICON_Y || touchY > ICON_Y + ICON_H) return 0;
 
-    if (touchX >= ICON_4X4_X && touchX <= ICON_4X4_X + ICON_W) return 1;
-    if (touchX >= ICON_4X2_X && touchX <= ICON_4X2_X + ICON_W) return 2;
+    // Only 360° tank turn is still touch-selectable
     if (touchX >= ICON_360_X && touchX <= ICON_360_X + ICON_W) return 3;
 
     return 0;

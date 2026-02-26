@@ -200,7 +200,7 @@ El ESP32-S3 actual usa los siguientes GPIOs (ver `esp32/platformio.ini` y `esp32
 - GPIO 39: TFT DC (Data/Command)
 - GPIO 38: TFT RST
 - GPIO 21: TOUCH_CS
-- GPIO 45: TFT Backlight
+- GPIO 42: TFT Backlight
 
 **✅ GPIO 19 (TX) y GPIO 20 (RX) están LIBRES** — son los mismos pines que usaba el repo original para el DFPlayer. Se pueden asignar directamente en Phase 5 usando UART1 del ESP32-S3.
 

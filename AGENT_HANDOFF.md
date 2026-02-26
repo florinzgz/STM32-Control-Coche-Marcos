@@ -334,7 +334,7 @@ No hay tests para ESP32. No hay CI/CD configurado (no `.github/workflows/`).
 | Touch CS | GPIO 21 |
 | WS2812B data | GPIO 47/48 |
 | Power sense/hold | GPIO 40/41 |
-| TFT backlight | GPIO 45 |
+| TFT backlight | GPIO 42 |
 | Audio TX/RX | GPIO 19/20 |
 
 ---

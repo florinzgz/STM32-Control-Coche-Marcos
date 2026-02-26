@@ -18,6 +18,7 @@
 #define LOW  0
 #define INPUT    0
 #define OUTPUT   1
+#define INPUT_PULLUP 0x05
 #define INPUT_PULLDOWN 0x09
 #define SERIAL_8N1 0x06
 
@@ -51,7 +52,7 @@ struct FakeSerial_ {
     void println(const char*)  {}
     void println(int)          {}
     template<typename T> void println(T) {}
-    template<typename T, typename U> void printf(T, U) {}
+    template<typename... Args> void printf(Args...) {}
 };
 inline FakeSerial_ Serial;
 

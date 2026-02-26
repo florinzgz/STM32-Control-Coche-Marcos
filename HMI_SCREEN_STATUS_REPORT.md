@@ -25,9 +25,9 @@ submenús incompletos** (Pedal Calibration, Encoder Calibration) que muestran te
 | Orientación | Landscape, rotación 1 |
 | SPI MOSI | GPIO 13 |
 | SPI SCLK | GPIO 14 |
-| TFT_CS | GPIO 15 |
-| TFT_DC | GPIO 16 |
-| TFT_RST | GPIO 17 |
+| TFT_CS | GPIO 10 |
+| TFT_DC | GPIO 39 |
+| TFT_RST | GPIO 38 |
 | TFT_BL (backlight) | GPIO 42 |
 | Touch (XPT2046) | GPIO 21 (TOUCH_CS) |
 | Velocidad SPI display | 40 MHz |

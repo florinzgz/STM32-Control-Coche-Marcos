@@ -1,8 +1,9 @@
 // =============================================================================
 // ESP32-S3 HMI — Mode Icons
 //
-// Touch icons for drive modes: 4x4, 4x2, 360° axis rotation.
-// Drawn as simple bordered rectangles with text labels.
+// Display icons for drive modes: 4x4, 4x2, 360° axis rotation.
+// 4x4/4x2 are display-only (controlled by physical traction switch).
+// 360° tank turn icon remains touch-selectable.
 // Active mode is highlighted with cyan, inactive with gray.
 //
 // Reference: docs/HMI_RENDERING_STRATEGY.md
@@ -34,7 +35,8 @@ public:
                      const ModeState& previous);
 
     /// Check if a touch point hits a mode icon.
-    /// Returns: 0 = no hit, 1 = 4x4, 2 = 4x2, 3 = 360°
+    /// Returns: 0 = no hit, 3 = 360° (only 360° is touch-selectable;
+    /// 4x4/4x2 are display-only, controlled by physical traction switch)
     static uint8_t hitTest(int16_t touchX, int16_t touchY);
 
 private:

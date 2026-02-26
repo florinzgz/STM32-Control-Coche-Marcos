@@ -20,7 +20,7 @@
 | **SDI / MOSI**     | Datos SPI del ESP32 al display         | **GPIO 13**   | `TFT_MOSI`; SPI HSPI (SPI3_HOST) |
 | **SCK / SCLK**     | Reloj SPI                              | **GPIO 14**   | `TFT_SCLK`; SPI HSPI (SPI3_HOST) |
 | **SDO / MISO**     | Datos SPI del display al ESP32         | **GPIO 12**   | `TFT_MISO`; compartido con T_DO del XPT2046 |
-| **LED / BL**       | Retroiluminación (backlight)           | **GPIO 45**   | `TFT_BL`; HIGH = encendido, LOW = apagado |
+| **LED / BL**       | Retroiluminación (backlight)           | **GPIO 42**   | `TFT_BL`; HIGH = encendido, LOW = apagado |
 | **T_CS**           | Chip Select del touch (activo bajo)    | **GPIO 21**   | `TOUCH_CS` en User_Setup.h |
 | **T_DIN**          | Datos SPI al controlador touch         | **GPIO 13**   | Compartido con SDI / MOSI del display |
 | **T_CLK**          | Reloj SPI del touch                    | **GPIO 14**   | Compartido con SCK del display |
@@ -40,7 +40,7 @@
 | GPIO 39       | DC / RS            | Data/Command — selecciona modo del bus SPI |
 | GPIO 38       | RESET              | Reset hardware del controlador ST7796 |
 | GPIO 21       | T_CS               | Chip Select touch — selecciona el XPT2046 en el bus |
-| GPIO 45       | LED / BL           | Control de retroiluminación |
+| GPIO 42       | LED / BL           | Control de retroiluminación |
 | 3.3 V         | VCC                | Alimentación del display y del touch |
 | GND           | GND                | Masa común |
 
@@ -60,7 +60,7 @@ ESP32-S3 DevKitC-1                       Display TFT ST7796 + Touch XPT2046
 │  GPIO 39 (DC)  ─────┼──────────────────┼──► DC/RS (display)        │
 │  GPIO 13 (MOSI)─────┼──────────────────┼──► SDI   (display)        │
 │  GPIO 14 (SCK) ─────┼──────────────────┼──► SCK   (display)        │
-│  GPIO 45 (BL)  ─────┼──────────────────┼──► LED   (retroilum.)     │
+│  GPIO 42 (BL)  ─────┼──────────────────┼──► LED   (retroilum.)     │
 │  GPIO 12 (MISO)◄────┼──────────────────┼─── SDO   (display)        │
 │                     │                  │                           │
 │  GPIO 21 (T_CS)─────┼──────────────────┼──► T_CS  (touch)          │
@@ -106,7 +106,7 @@ Nota: GPIO 12, 13 y 14 son compartidos entre display y touch.
 #define TFT_DC   39            // GPIO 39 — Data / Command
 #define TFT_RST  38            // GPIO 38 — Reset display
 
-#define TFT_BL           45   // GPIO 45 — backlight
+#define TFT_BL           42   // GPIO 42 — backlight
 #define TFT_BACKLIGHT_ON HIGH  // HIGH = retroiluminación encendida
 
 #define SPI_FREQUENCY      40000000   // 40 MHz (escritura)
@@ -146,7 +146,7 @@ Pines **peligrosos** en la ESP32-S3-WROOM-1-N16R8 — todos conectados intername
 | Punto de medición          | Valor esperado | Fallo si… |
 |----------------------------|----------------|-----------|
 | VCC del display → GND      | 3.30 V ± 0.1 V | < 3.0 V o > 3.5 V |
-| GPIO 45 → GND (encendido)  | 3.3 V (HIGH)   | 0 V → backlight apagado |
+| GPIO 42 → GND (encendido)  | 3.3 V (HIGH)   | 0 V → backlight apagado |
 | GPIO 10 → GND (inactivo)   | 3.3 V (HIGH)   | CS debe estar en HIGH cuando no se usa |
 | GPIO 21 → GND (inactivo)   | 3.3 V (HIGH)   | T_CS debe estar en HIGH cuando no se usa |
 
@@ -156,7 +156,7 @@ Pines **peligrosos** en la ESP32-S3-WROOM-1-N16R8 — todos conectados intername
 
 | Síntoma                 | Causa probable                          | Solución |
 |-------------------------|-----------------------------------------|----------|
-| Pantalla completamente negra | Backlight apagado o sin alimentación | Verificar VCC = 3.3 V y GPIO 45 = HIGH |
+| Pantalla completamente negra | Backlight apagado o sin alimentación | Verificar VCC = 3.3 V y GPIO 42 = HIGH |
 | Pantalla blanca / sin imagen | Reset incorrecto o CS incorrecto      | Verificar GPIO 38 (RST) y GPIO 10 (CS) |
 | Imagen corrupta / ruido  | Interferencia en el bus SPI            | Cables SPI < 20 cm; capacitor 100 nF en VCC del display |
 | Touch no responde        | T_CS o MISO no conectados              | Verificar GPIO 21 → T_CS y GPIO 12 → T_DO |

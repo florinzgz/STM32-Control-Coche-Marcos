@@ -132,10 +132,10 @@ The missing settings have the following practical impact:
 | GPIO14 | TFT_SCLK  | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
 | GPIO39 | TFT_DC    | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
 | GPIO38 | TFT_RST   | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
-| GPIO45 | TFT_BL    | ❌ No                | ⚠️ Note¹   | ❌ No     | ❌ No             | ✅ **SAFE**   |
+| GPIO42 | TFT_BL    | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
 | GPIO21 | TOUCH_CS  | ❌ No                | ❌ No      | ❌ No     | ❌ No             | ✅ **SAFE**   |
 
-**Note¹ on GPIO45:** GPIO45 is a strapping pin (VDD_SPI voltage reference) sampled only at reset. After boot it operates as a normal GPIO output. For backlight control it is **SAFE**.
+**Note¹ on GPIO45:** GPIO45 is a strapping pin (VDD_SPI voltage reference). It was previously used for backlight but has been reassigned to GPIO42 to avoid potential boot issues. GPIO45 is now free and should NOT be used for outputs that are HIGH at boot.
 
 **GPIO26–32 are NOT used:** These are connected to the QSPI Flash bus. Using them as GPIO causes boot failures or flash corruption.
 
@@ -250,7 +250,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
 | 10| GPIO14 (TFT_SCLK)                             | ✅ SAFE       | Not restricted                                       |
 | 11| GPIO12 (TFT_MISO)                             | ✅ SAFE       | Not restricted                                       |
 | 12| GPIO38 (TFT_RST)                              | ✅ SAFE       | Not restricted                                       |
-| 13| GPIO45 (TFT_BL)                               | ✅ SAFE       | Strapping pin — safe post-boot as GPIO output        |
+| 13| GPIO42 (TFT_BL)                               | ✅ SAFE       | No strapping restrictions — safe GPIO output         |
 | 14| GPIO21 (TOUCH_CS)                              | ✅ SAFE       | Not restricted                                       |
 | 15| GPIO4 (CAN_TX)                                 | ✅ SAFE       | Not restricted                                       |
 | 16| GPIO5 (CAN_RX)                                 | ✅ SAFE       | Not restricted                                       |
@@ -265,7 +265,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
 
 **Justification:**
 
-1. All TFT SPI pins (GPIO10, 12, 13, 14, 39, 38, 45, 21) are confirmed SAFE — none conflict with flash, PSRAM, strapping pins, USB, or JTAG
+1. All TFT SPI pins (GPIO10, 12, 13, 14, 39, 38, 42, 21) are confirmed SAFE — none conflict with flash, PSRAM, strapping pins, USB, or JTAG
 2. CAN pins (GPIO4, 5) are confirmed SAFE
 3. No electrical conflict exists between ESP32 and STM32 subsystems
 4. The firmware compiles and all pin assignments are valid for the ESP32-S3-WROOM-1 N16R8 module
@@ -281,7 +281,7 @@ The only shared electrical bus is CAN, which is properly isolated through indepe
    ```
    These are NOT required for the current firmware but should be added if PSRAM allocation is ever introduced.
 
-2. **GPIO45 backlight note:** GPIO45 is sampled as a strapping pin (VDD_SPI) only at reset. After boot it operates as a normal GPIO output. A brief LOW level at power-on may occur; this is cosmetic and does not affect functionality.
+2. **GPIO45 strapping pin note:** GPIO45 was previously used for backlight but has been reassigned to GPIO42 to avoid VDD_SPI strapping interference at boot. GPIO45 (VDD_SPI) is sampled at reset — driving it HIGH during boot selects 1.8V VDD_SPI, which can cause random restarts with 3.3V flash/PSRAM.
 
 ---
 
