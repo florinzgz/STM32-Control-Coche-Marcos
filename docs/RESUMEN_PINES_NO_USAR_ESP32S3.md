@@ -66,9 +66,10 @@ Estos pines tienen funciones especiales durante el arranque (boot). Se pueden us
 |------|-------------|
 | GPIO0 | **Boot strapping** — nivel durante boot selecciona modo (no cargar con pull-down fuerte) |
 | GPIO3 | **Boot strapping** — JTAG signal source |
+| GPIO45 | **Boot strapping** — VDD_SPI voltage select (si se pone HIGH al boot, selecciona 1.8V y puede causar reinicios aleatorios) |
 | GPIO46 | **Boot strapping** — solo funciona como **input** (no se puede usar como output) |
 
-> **Total: 3 pines con restricciones de boot**
+> **Total: 4 pines con restricciones de boot**
 
 ---
 
@@ -85,6 +86,7 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
 | GPIO14 | Display TFT | SPI SCLK (reloj) |
 | GPIO15 | Interruptor tracción | Selector 2WD/4WD (DPDT rocker switch) |
+| GPIO16 | Display TFT | BL (Backlight) |
 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
@@ -92,7 +94,6 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO39 | Display TFT | DC (Data/Command) |
 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
-| GPIO45 | Display TFT | BL (Backlight) |
 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
 
 > **Total: 16 pines asignados por el proyecto**
@@ -106,10 +107,10 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | **No existen** en ESP32-S3 | GPIO22–25 | 4 |
 | **Reservados Flash** (QSPI, crash si se usan) | GPIO26–32 | 7 |
 | **Reservados PSRAM** (Octal, N16R8) | GPIO33–37 | 5 |
-| **Boot strapping** (usar con precaución) | GPIO0, GPIO3, GPIO46 | 3 |
-| **Asignados al proyecto** (ya en uso) | GPIO4, 5, 10, 12–15, 19–21, 38, 39, 43–45, 47 | 16 |
-| **TOTAL NO DISPONIBLES** | — | **35** |
-| **Pines LIBRES sin restricciones** | GPIO1, 2, 6, 7, 8, 9, 11, 16, 17, 18, 40, 41, 42, 48 | **14** |
+| **Boot strapping** (usar con precaución) | GPIO0, GPIO3, GPIO45, GPIO46 | 4 |
+| **Asignados al proyecto** (ya en uso) | GPIO4, 5, 10, 12–16, 19–21, 38, 39, 43, 44, 47 | 16 |
+| **TOTAL NO DISPONIBLES** | — | **36** |
+| **Pines LIBRES sin restricciones** | GPIO1, 2, 6, 7, 8, 9, 11, 17, 18, 40, 41, 42, 48 | **13** |
 
 ---
 
@@ -124,7 +125,6 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO8 | GPIO, SPI |
 | GPIO9 | GPIO |
 | GPIO11 | GPIO, SPI |
-| GPIO16 | GPIO |
 | GPIO17 | GPIO |
 | GPIO18 | GPIO |
 | GPIO40 | GPIO |
@@ -132,7 +132,7 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO42 | GPIO |
 | GPIO48 | GPIO |
 
-> **Total: 14 pines libres sin restricciones** para uso inmediato.
+> **Total: 13 pines libres sin restricciones** para uso inmediato.
 
 ---
 

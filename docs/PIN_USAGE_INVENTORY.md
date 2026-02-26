@@ -313,7 +313,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | CS | **GPIO10** | Chip Select display | — |
 | DC (A0) | **GPIO39** | Data/Command select | — |
 | RST | **GPIO38** | Reset hardware del display | — |
-| BL | **GPIO45** | Backlight (HIGH = encendido) | — |
+| BL | **GPIO16** | Backlight (HIGH = encendido) | — |
 | | | **Subtotal:** | **7 pines** |
 
 - Driver: ST7796, resolución 480×320 en modo landscape (rotación 1)
@@ -406,7 +406,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 9 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
 | 10 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
 | 11 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
-| 12 | GPIO45 | Display TFT | BL (Backlight) |
+| 12 | GPIO16 | Display TFT | BL (Backlight) |
 | 13 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
 | 14 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
 | 15 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
@@ -429,7 +429,7 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 8 | GPIO9 | GPIO | **LIBRE** |
 | 9 | GPIO11 | GPIO, SPI | **LIBRE** |
 | 10 | GPIO15 | GPIO | **LIBRE** |
-| 11 | GPIO16 | GPIO | **LIBRE** |
+| 11 | GPIO16 | GPIO | **ASIGNADO** — Display TFT BL (Backlight) |
 | 12 | GPIO17 | GPIO | **LIBRE** |
 | 13 | GPIO18 | GPIO | **LIBRE** |
 | 14 | GPIO39 | GPIO | **LIBRE** |
@@ -439,7 +439,7 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 18 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
 | 19 | GPIO48 | GPIO | **LIBRE** |
 
-> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash (no accesibles). GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8 (no accesibles). GPIO10, 12, 13, 14, 39, 38, 45 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales. GPIO22–25 no existen en el chip ESP32-S3.
+> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash (no accesibles). GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8 (no accesibles). GPIO10, 12, 13, 14, 16, 39, 38 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales. GPIO22–25 no existen en el chip ESP32-S3. GPIO45 es un strapping pin (VDD_SPI) y se ha liberado para evitar reinicios aleatorios.
 
 > **Resumen: ~17 pines libres de forma segura** (evitando pines de boot strapping).
 

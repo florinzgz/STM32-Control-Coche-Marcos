@@ -34,7 +34,7 @@ Integrar un relé de audio de 2 canales (5 V optoacoplado) que conmuta la salida
 | 41   | Power hold     | ❌ |
 | 43   | UART2 TX (DFPlayer) | ❌ |
 | 44   | UART2 RX (DFPlayer) | ❌ |
-| 45   | Display BL     | ❌ |
+| 16   | Display BL     | ❌ |
 | 47   | WS2812B front LEDs | ❌ |
 | 48   | WS2812B rear LEDs  | ❌ |
 

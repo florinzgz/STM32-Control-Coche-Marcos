@@ -7,7 +7,8 @@
 // GPIO map for the ESP32-S3-WROOM-1-N16R8 module:
 //   Available for external use: GPIO 0–21 and GPIO 38–48
 //     (GPIO 0, GPIO 3 are strapping pins — safe as GPIO but require care at boot)
-//     (GPIO 45, GPIO 46 are strapping pins — safe as GPIO output after boot)
+//     (GPIO 45, GPIO 46 are strapping pins — avoid for outputs that must be
+//     HIGH at boot; GPIO 45 controls VDD_SPI voltage selection)
 //   Reserved — QSPI Flash  (internal, not on module pins): GPIO 26–32
 //   Reserved — Octal PSRAM (internal, not on module pins): GPIO 33–37
 //   Do not exist in ESP32-S3: GPIO 22–25
@@ -56,7 +57,7 @@
 // CS     10   GPIO 1–21 range — bidirectional, SPI-capable, no conflict
 // DC     39   GPIO 38–48 range — output-capable, outside Flash/PSRAM range
 // RST    38   GPIO 38–48 range — output-capable, outside Flash/PSRAM range
-// BL     45   GPIO 38–48 range — valid output after boot (VDD_SPI strapping)
+// BL     16   GPIO 1–21 range — safe output, no boot strapping restrictions
 // T_CS   21   GPIO 1–21 range — bidirectional, no conflict
 //
 // GPIO 26–32 are NOT used: QSPI Flash interface (boot failure if used).
@@ -75,7 +76,7 @@
 #define TFT_RST  38
 
 // --- Backlight ---
-#define TFT_BL            45
+#define TFT_BL            16
 #define TFT_BACKLIGHT_ON  HIGH
 
 // --- SPI frequencies ---

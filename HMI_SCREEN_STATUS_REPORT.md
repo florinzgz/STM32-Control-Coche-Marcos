@@ -28,7 +28,7 @@ submenús incompletos** (Pedal Calibration, Encoder Calibration) que muestran te
 | TFT_CS | GPIO 15 |
 | TFT_DC | GPIO 16 |
 | TFT_RST | GPIO 17 |
-| TFT_BL (backlight) | GPIO 42 |
+| TFT_BL (backlight) | GPIO 16 |
 | Touch (XPT2046) | GPIO 21 (TOUCH_CS) |
 | Velocidad SPI display | 40 MHz |
 | Velocidad SPI touch | 2.5 MHz |

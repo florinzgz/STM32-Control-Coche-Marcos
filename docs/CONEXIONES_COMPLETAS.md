@@ -434,7 +434,7 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 | — | **GPIO10** | CS | Chip Select display |
 | — | **GPIO39** | DC (A0) | Data/Command |
 | — | **GPIO38** | RST | Reset display |
-| — | **GPIO45** | BL | Backlight (HIGH=encendido) |
+| — | **GPIO16** | BL | Backlight (HIGH=encendido) |
 | — | **GPIO12** | SDO (MISO) / T_DO | Datos SPI desde display/touch |
 | — | **GPIO21** | TOUCH_CS | Touch panel chip select |
 | — | 3.3V | VCC | Alimentación display |
