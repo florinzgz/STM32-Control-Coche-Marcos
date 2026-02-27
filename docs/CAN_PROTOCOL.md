@@ -301,45 +301,54 @@ ID: 0x001  DLC: 5  Data: [0x7F, 0x02, 0x20, 0x00, 0x02]
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0-1 | `speed_FL` | uint16_t | 0-65535 | mm/s | Velocidad rueda FL (LSB first) |
-| 2-3 | `speed_FR` | uint16_t | 0-65535 | mm/s | Velocidad rueda FR |
-| 4-5 | `speed_RL` | uint16_t | 0-65535 | mm/s | Velocidad rueda RL |
-| 6-7 | `speed_RR` | uint16_t | 0-65535 | mm/s | Velocidad rueda RR |
+| 0-1 | `speed_FL` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda FL |
+| 2-3 | `speed_FR` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda FR |
+| 4-5 | `speed_RL` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda RL |
+| 6-7 | `speed_RR` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda RR |
+
+**DLC:** 8
 
 **Frecuencia:** 100 ms (10 Hz)
 
-**Conversión:**
-- Velocidad lineal (mm/s) = `(pulsos/segundo × perímetro_rueda_mm) / pulsos_por_rev`
-- Ejemplo: 300 mm rueda, 2 PPR → 1 pulso/s = 471 mm/s
+**Codificación STM32:**
+```c
+float_to_u16_clamped(Wheel_GetSpeed_FL() * 10)  // km/h × 10 → 0.1 km/h units
+```
 
 **Ejemplo:**
 ```
 ID: 0x200  DLC: 8  Data: [0x2C, 0x01, 0x30, 0x01, 0x28, 0x01, 0x2A, 0x01]
-// FL=300 mm/s, FR=304, RL=296, RR=298 (uniforme)
+// FL=30.0 km/h, FR=30.4, RL=29.6, RR=29.8
 ```
 
 ---
 
 ### 0x201 - STATUS_CURRENT
 
-**Propósito:** Corrientes de los 5 motores + batería principal.
+**Propósito:** Corrientes de los 4 motores de tracción.
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0 | `current_FL` | uint8_t | 0-255 | 0.1A | Motor FL (0-25.5A) |
-| 1 | `current_FR` | uint8_t | 0-255 | 0.1A | Motor FR |
-| 2 | `current_RL` | uint8_t | 0-255 | 0.1A | Motor RL |
-| 3 | `current_RR` | uint8_t | 0-255 | 0.1A | Motor RR |
-| 4 | `current_STEER` | uint8_t | 0-255 | 0.1A | Motor dirección |
-| 5 | `current_BATT` | uint8_t | 0-255 | 0.1A | Batería principal (suma) |
-| 6-7 | `reserved` | - | - | - | Reservado |
+| 0-1 | `current_FL` | uint16_t LE | 0-65535 | 0.01 A | Motor FL |
+| 2-3 | `current_FR` | uint16_t LE | 0-65535 | 0.01 A | Motor FR |
+| 4-5 | `current_RL` | uint16_t LE | 0-65535 | 0.01 A | Motor RL |
+| 6-7 | `current_RR` | uint16_t LE | 0-65535 | 0.01 A | Motor RR |
+
+**DLC:** 8
 
 **Frecuencia:** 100 ms (10 Hz)
 
+**Codificación STM32:**
+```c
+float_to_u16_clamped(Current_GetAmps(0) * 100)  // Amps × 100 → 0.01 A units
+```
+
+**Nota:** Corriente de dirección y batería se envían en 0x207 (STATUS_BATTERY).
+
 **Ejemplo:**
 ```
-ID: 0x201  DLC: 8  Data: [0x1E, 0x1F, 0x1D, 0x1E, 0x05, 0x7D, 0x00, 0x00]
-// FL=3.0A, FR=3.1A, RL=2.9A, RR=3.0A, STEER=0.5A, BATT=12.5A
+ID: 0x201  DLC: 8  Data: [0x2C, 0x01, 0x2E, 0x01, 0x2A, 0x01, 0x2C, 0x01]
+// FL=3.00A, FR=3.02A, RL=2.98A, RR=3.00A
 ```
 
 ---
