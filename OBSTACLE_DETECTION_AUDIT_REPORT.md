@@ -46,37 +46,44 @@
 
 #### Frame Format (400 bytes — `obstacle_config.h`)
 
+> **Note:** The frame format documented below was corrected to match the official
+> TOFSense-M User Manual V3.0 and the Nooploop reference implementation
+> (`nlink_tofsensem_frame0.c`). The original reference firmware
+> (`obstacle_detection.cpp`) contained parsing offsets and distance unit
+> conversions that did not match the official protocol specification.
+
 | Byte Position | Length | Field | Description |
 |---------------|--------|-------|-------------|
-| `[0-3]` | 4 B | Header | `0x57 0x01 0xFF 0x00` (constant) |
-| `[4]` | 1 B | ID | Sensor ID (`0x01`) |
-| `[5-6]` | 2 B | Length | `0x0190` = 400 (little-endian) |
-| `[7-10]` | 4 B | System Time | Milliseconds (little-endian) |
-| `[11-394]` | 384 B | Matrix Data | 64 pixels × 6 bytes each |
-| `[395]` | 1 B | Checksum | Sum of bytes `[0..394]` mod 256 |
-| `[396-399]` | 4 B | Reserved | Unused |
+| `[0]` | 1 B | frame_header | `0x57` (constant) |
+| `[1]` | 1 B | function_mark | `0x01` (Frame0) |
+| `[2]` | 1 B | reserved | Reserved |
+| `[3]` | 1 B | id | Sensor ID |
+| `[4-7]` | 4 B | system_time | Milliseconds (little-endian) |
+| `[8]` | 1 B | pixel_count | Number of pixels (64 for 8×8, 16 for 4×4) |
+| `[9-392]` | 384 B | pixel_data | 64 pixels × 6 bytes each |
+| `[393-398]` | 6 B | reserved1 | Reserved |
+| `[399]` | 1 B | checksum | Sum of bytes `[0..398]` mod 256 |
 
-#### Per-Pixel Data (6 bytes each — `obstacle_detection.cpp`)
+#### Per-Pixel Data (6 bytes each — per official Nooploop `ntsm_frame0_pixel_raw_t`)
 
 | Byte | Field | Format |
 |------|-------|--------|
-| `[0-2]` | Distance | 3 bytes, little-endian signed, value/256 = mm |
-| `[3]` | Signal Strength | 0-255 (clamped to 0-100 for confidence) |
-| `[4]` | Status | Pixel measurement status |
-| `[5]` | Reserved | Unused |
+| `[0-2]` | dis (Distance) | 3 bytes, little-endian signed int24, value / 1000 = mm |
+| `[3]` | dis_status | Pixel measurement status (0 = valid) |
+| `[4-5]` | signal_strength | 2 bytes, uint16 little-endian |
 
 #### CRC / Checksum Usage
 
-- **Algorithm:** Simple 8-bit sum of all preceding bytes (bytes 0 through 394)
+- **Algorithm:** Simple 8-bit sum of all preceding bytes (bytes 0 through 398)
 - **Location:** `obstacle_detection.cpp` → `calculateChecksum()` function
-- **Validation:** `parseFrame()` compares calculated vs received checksum at position 395
+- **Validation:** `parseFrame()` compares calculated vs received checksum at position 399
 - **On failure:** Logs warning, increments `errorCount`, calls `System::logError(ERROR_CODE_CHECKSUM=810)`
 
 #### Parsing Logic Location
 
 - **Frame accumulation:** `obstacle_detection.cpp` → `update()` function — byte-by-byte UART read with header synchronization
-- **Header validation:** `validateFrameHeader()` — matches 4-byte header sequence
-- **Pixel parsing:** `parsePixelDistance()` — extracts 3-byte LE signed distance, sign-extends, converts to mm
+- **Header validation:** `validateFrameHeader()` — matches header byte `0x57` and function mark `0x01`
+- **Pixel parsing:** `parsePixelDistance()` — extracts 3-byte LE signed distance, sign-extends, converts to mm by dividing by 1000
 - **Full frame parsing:** `parseFrame()` — validates header, checksum, iterates 64 pixels, updates sensor state
 - **Buffer overflow protection:** `bufferIndex > FRAME_LENGTH` check with error logging
 - **Read iteration limit:** `MAX_BYTES_PER_UPDATE = FRAME_LENGTH * 2 = 800 bytes` per update cycle

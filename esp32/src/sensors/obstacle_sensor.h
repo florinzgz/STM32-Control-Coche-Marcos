@@ -6,6 +6,11 @@
 // Provides validated readings with stuck-sensor detection,
 // warmup filtering, and physical-range validation.
 //
+// Per-pixel layout (6 bytes each, per Nooploop reference):
+//   [0-2]  dis:              3-byte signed int24 LE, unit = µm (/1000 = mm)
+//   [3]    dis_status:       0 = valid measurement
+//   [4-5]  signal_strength:  uint16 LE
+//
 // Sensor output rate: ~10 Hz (active mode).
 // Output: distance_mm, zone, health flag, stuck flag, sensor status.
 //
@@ -13,6 +18,7 @@
 //   VCC (3.3 V or 5 V), GND, RX (not used), TX → ESP32 RX (GPIO 18)
 //
 // Reference: TOFSense-M User Manual V3.0
+//            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
 //            docs/CAN_CONTRACT_FINAL.md rev 1.3 (0x208 payload)
 // =============================================================================
 

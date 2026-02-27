@@ -38,11 +38,15 @@ The sensor is TX-only (unidirectional). The code passes `PIN_TOFSENSE_TX` (which
 
 All parsing occurs in **`obstacle_detection.cpp`** within the `ObstacleDetection` namespace:
 
-- **Frame accumulation:** `update()` — byte-by-byte UART read with 4-byte header synchronization (`0x57 0x01 0xFF 0x00`), limited to `MAX_BYTES_PER_UPDATE = 800 bytes` per cycle to prevent infinite loops on corrupted data.
-- **Header validation:** `validateFrameHeader()` — matches the 4-byte constant header sequence.
-- **Pixel distance extraction:** `parsePixelDistance()` — reads 3-byte little-endian signed value, sign-extends from 24-bit to 32-bit, divides by 256 to get millimeters.
-- **Full frame parsing:** `parseFrame()` — validates header and checksum (8-bit sum of bytes 0–394), iterates all 64 pixels (8×8 matrix), updates `ObstacleSensor` state with `minDistance` and `proximityLevel`.
+> **Note:** The frame format described below was corrected to match the official
+> TOFSense-M User Manual V3.0 and the Nooploop reference implementation.
+
+- **Frame accumulation:** `update()` — byte-by-byte UART read with header synchronization (byte 0 = `0x57`, byte 1 = `0x01`), limited to `MAX_BYTES_PER_UPDATE = 800 bytes` per cycle to prevent infinite loops on corrupted data.
+- **Header validation:** `validateFrameHeader()` — matches `frame_header` (0x57) and `function_mark` (0x01).
+- **Pixel distance extraction:** `parsePixelDistance()` — reads 3-byte little-endian signed value, sign-extends from 24-bit to 32-bit, divides by 1000 to get millimeters (raw unit = µm).
+- **Full frame parsing:** `parseFrame()` — validates header and checksum (8-bit sum of bytes 0–398), iterates all 64 pixels (8×8 matrix, starting at byte offset 9), updates `ObstacleSensor` state with `minDistance` and `proximityLevel`.
 - **Checksum calculation:** `calculateChecksum()` — simple 8-bit sum of all preceding bytes.
+- **Per-pixel layout (6 bytes):** `dis` (3 bytes int24 LE), `dis_status` (1 byte), `signal_strength` (2 bytes uint16 LE).
 
 The 400-byte frame buffer (`frameBuffer[FRAME_LENGTH]`) is statically allocated. Buffer overflow protection exists at `bufferIndex > FRAME_LENGTH`.
 

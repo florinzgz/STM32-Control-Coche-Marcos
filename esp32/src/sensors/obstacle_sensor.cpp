@@ -21,23 +21,28 @@ namespace obstacle_sensor {
 
 // -------------------------------------------------------------------------
 // NLink_TOFSense_M_Frame0 protocol constants
+// Reference: TOFSense-M User Manual V3.0 (Nooploop)
+//            https://github.com/nooploop-dev/autorobo_a — nlink_tofsensem_frame0.c
 // -------------------------------------------------------------------------
 static constexpr uint8_t  FRAME_HEADER      = 0x57;
-static constexpr uint16_t FRAME_LENGTH      = 400;    // Total frame size (bytes)
+static constexpr uint8_t  FUNCTION_MARK     = 0x01;   // Frame0 function mark
+static constexpr uint16_t FRAME_LENGTH      = 400;    // Total frame size (bytes) for 8×8 mode
 static constexpr uint8_t  PIXEL_COUNT_8X8   = 64;     // 8×8 matrix
-static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (signal) + 1 (status) + 1 (reserved)
-// NLink protocol distance unit: 1/256 mm per LSB
-static constexpr int32_t DISTANCE_UNITS_PER_MM = 256;
+static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (dis_status) + 2 (signal_strength)
+// NLink protocol distance unit: 1 µm per LSB (divide by 1000 for mm)
+static constexpr int32_t DISTANCE_UNITS_PER_MM = 1000;
 
-// Frame offsets
+// Frame offsets (per official Nooploop struct ntsm_frame0_raw_t)
 static constexpr uint16_t OFF_HEADER        = 0;      // 0x57
-static constexpr uint16_t OFF_FUNCTION_MARK = 1;      // Function mark
-static constexpr uint16_t OFF_RESERVED1     = 2;      // Reserved
+static constexpr uint16_t OFF_FUNCTION_MARK = 1;      // 0x01 (Frame0)
+static constexpr uint16_t OFF_RESERVED      = 2;      // Reserved
 static constexpr uint16_t OFF_ID            = 3;      // Sensor ID
 static constexpr uint16_t OFF_SYSTEM_TIME   = 4;      // System time (4 bytes, LE)
-static constexpr uint16_t OFF_PIXEL_DATA    = 8;      // Start of pixel data
-// Pixel data: 64 pixels × 6 bytes = 384 bytes (offset 8..391)
-// Checksum at offset 392 (8-bit sum mod 256 of bytes 0..391)
+static constexpr uint16_t OFF_PIXEL_COUNT   = 8;      // Pixel count (64 for 8×8)
+static constexpr uint16_t OFF_PIXEL_DATA    = 9;      // Start of pixel data
+// Pixel data: 64 pixels × 6 bytes = 384 bytes (offset 9..392)
+// Reserved1: 6 bytes (offset 393..398)
+// Checksum at offset 399 (8-bit sum mod 256 of bytes 0..398)
 
 // -------------------------------------------------------------------------
 // Module state
@@ -82,10 +87,16 @@ static uint8_t distanceToZone(uint16_t mm) {
 // -------------------------------------------------------------------------
 // Parse a complete NLink_TOFSense_M_Frame0 and extract minimum distance
 // Returns distance in mm, or 0 on parse failure.
+//
+// Per-pixel layout (6 bytes, per official Nooploop struct):
+//   [0-2]  dis:              3-byte signed int24 LE, unit = µm (/1000 = mm)
+//   [3]    dis_status:       0 = valid measurement
+//   [4-5]  signal_strength:  uint16 LE
 // -------------------------------------------------------------------------
 static uint16_t parseFrame(const uint8_t* buf, uint16_t len) {
     if (len < FRAME_LENGTH) return 0;
     if (buf[OFF_HEADER] != FRAME_HEADER) return 0;
+    if (buf[OFF_FUNCTION_MARK] != FUNCTION_MARK) return 0;
 
     // Verify checksum: 8-bit sum of all bytes except the checksum byte itself
     uint8_t checksum = 0;
@@ -95,10 +106,9 @@ static uint16_t parseFrame(const uint8_t* buf, uint16_t len) {
     if (checksum != buf[FRAME_LENGTH - 1]) return 0;
 
     // Extract minimum valid distance across all 64 pixels.
-    // Each pixel: 3 bytes distance (signed int24 LE, unit = 1/256 mm),
-    //             1 byte signal strength,
-    //             1 byte status (0 = valid),
-    //             1 byte reserved.
+    // Each pixel: 3 bytes distance (signed int24 LE, unit = µm),
+    //             1 byte dis_status (0 = valid),
+    //             2 bytes signal_strength (uint16 LE).
     uint32_t minDistMm = 0xFFFFFFFF;
     bool anyValid = false;
 
@@ -106,10 +116,10 @@ static uint16_t parseFrame(const uint8_t* buf, uint16_t len) {
         uint16_t base = OFF_PIXEL_DATA + (uint16_t)(px * BYTES_PER_PIXEL);
         if (base + BYTES_PER_PIXEL > FRAME_LENGTH) break;
 
-        uint8_t status = buf[base + 4];
+        uint8_t status = buf[base + 3];
         if (status != 0) continue;  // Skip invalid pixels
 
-        // Distance: 3-byte signed little-endian, unit = 1/256 mm per LSB
+        // Distance: 3-byte signed little-endian, unit = µm per LSB
         int32_t raw = (int32_t)buf[base]
                     | ((int32_t)buf[base + 1] << 8)
                     | ((int32_t)buf[base + 2] << 16);
