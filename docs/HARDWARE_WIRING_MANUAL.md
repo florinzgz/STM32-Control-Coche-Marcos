@@ -234,12 +234,17 @@ Cada BTS7960 de tracción recibe 3 señales del STM32:
 
 ### Tabla por rueda
 
-| Rueda | PWM (Pin) | Timer/Canal | DIR (Pin) | EN (Pin) | Sensor velocidad | INA226 (índice) | DS18B20 (índice) |
-|-------|-----------|-------------|-----------|----------|------------------|-----------------|-------------------|
-| **FL** (Frontal izq.) | PA8 | TIM1_CH1 | PC0 | PC5 | PA0 (EXTI0) | 0 | 0 |
-| **FR** (Frontal der.) | PA9 | TIM1_CH2 | PC1 | PC6 | PA1 (EXTI1) | 1 | 1 |
-| **RL** (Trasera izq.) | PA10 | TIM1_CH3 | PC2 | PC7 | PA2 (EXTI2) | 2 | 2 |
-| **RR** (Trasera der.) | PA11 | TIM1_CH4 | PC3 | PC13 | PB15 (EXTI15) | 3 | 3 |
+| Rueda | RPWM (Pin) | Timer/Canal | LPWM (Pin) | Timer/Canal | DIR (Pin) | EN (Pin) | Sensor velocidad | INA226 (índice) | DS18B20 (índice) |
+|-------|------------|-------------|------------|-------------|-----------|----------|------------------|-----------------|-------------------|
+| **FL** (Frontal izq.) | PA8 | TIM1_CH1 | PA9 | TIM1_CH2 | PC0 (freed) | PC5 (GPIO) | PA0 (EXTI0) | 0 | 0 |
+| **FR** (Frontal der.) | PA10 | TIM1_CH3 | PA11 | TIM1_CH4 | PC1 (freed) | 3.3V fijo | PA1 (EXTI1) | 1 | 1 |
+| **RL** (Trasera izq.) | PC6 | TIM8_CH1 | PC7 | TIM8_CH2 | PC2 (freed) | 3.3V fijo | PA2 (EXTI2) | 2 | 2 |
+| **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | PC3 (freed) | PC13 (GPIO) | PB15 (EXTI15) | 3 | 3 |
+
+> **Nota**: DIR pins (PC0-PC4) ya no son controlados por el firmware — la dirección se
+> determina por la elección de RPWM vs LPWM. EN pins: solo FL (PC5) y RR (PC13) son
+> GPIO outputs; los demás motores tienen R_EN/L_EN del BTS7960 conectados directamente
+> a 3.3 V. PC6/PC7/PC9 fueron reasignados como salidas PWM (TIM8).
 
 > **Nota sobre índices INA226 y DS18B20**: El firmware usa indexación 0–5 para INA226
 > (6 sensores) y 0–4 para DS18B20 (5 sensores). El código de seguridad
