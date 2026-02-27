@@ -599,19 +599,24 @@ contador, el ESP32 se considera congelado → transición a LIMP_HOME.
 
 **Frecuencia:** On-demand (solo cuando ocurre error)
 
-**Códigos de Error:**
+**Códigos de Error (Safety_Error_t):**
 
 | Código | Nombre | Descripción |
 |--------|--------|-------------|
-| 0x01 | `ERR_TIMEOUT_CAN` | Pérdida de heartbeat CAN |
-| 0x02 | `ERR_TEMP_CRITICAL` | Temperatura >80°C |
-| 0x03 | `ERR_CURRENT_OVERLOAD` | Corriente excesiva |
-| 0x04 | `ERR_ENCODER_FAULT` | Encoder desconectado/inválido |
-| 0x05 | `ERR_WHEEL_SENSOR` | Sensor de rueda fallo |
-| 0x10 | `ERR_WATCHDOG_RESET` | Reset por watchdog |
-| 0x20 | `ERR_I2C_TIMEOUT` | Timeout I2C (INA226) |
-| 0x21 | `ERR_ONEWIRE_TIMEOUT` | Timeout OneWire (DS18B20) |
-| 0xFF | `ERR_UNKNOWN` | Error desconocido |
+| 0 | `NONE` | Sin error |
+| 1 | `OVERCURRENT` | Corriente excesiva (>25 A) |
+| 2 | `OVERTEMP` | Temperatura ≥80°C |
+| 3 | `CAN_TIMEOUT` | Pérdida de heartbeat CAN |
+| 4 | `SENSOR_FAULT` | Fallo de sensor / NaN |
+| 5 | `MOTOR_STALL` | Motor bloqueado (reservado) |
+| 6 | `EMERGENCY_STOP` | Parada de emergencia |
+| 7 | `WATCHDOG` | Reset por watchdog |
+| 8 | `CENTERING` | Fallo de centrado de dirección |
+| 9 | `BATTERY_UV_WARN` | Batería < 20.0 V |
+| 10 | `BATTERY_UV_CRIT` | Batería < 18.0 V |
+| 11 | `I2C_FAILURE` | Bus I2C bloqueado |
+| 12 | `OBSTACLE` | Emergencia por obstáculo o timeout CAN obstáculo |
+| 13 | `CAN_BUSOFF` | Condición bus-off FDCAN |
 
 **Ejemplo:**
 ```

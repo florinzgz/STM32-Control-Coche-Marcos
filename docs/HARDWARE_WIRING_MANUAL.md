@@ -242,7 +242,8 @@ Cada BTS7960 de tracción recibe 3 señales del STM32:
 | **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | PC3 (freed) | PC13 (GPIO) | PB15 (EXTI15) | 3 | 3 |
 
 > **Nota**: DIR pins (PC0-PC4) ya no son controlados por el firmware — la dirección se
-> determina por la elección de RPWM vs LPWM. EN pins: solo FL (PC5) y RR (PC13) son
+> determina por la elección de RPWM vs LPWM. Estos pines deben dejarse desconectados
+> o configurados como GPIO output LOW. EN pins: solo FL (PC5) y RR (PC13) son
 > GPIO outputs; los demás motores tienen R_EN/L_EN del BTS7960 conectados directamente
 > a 3.3 V. PC6/PC7/PC9 fueron reasignados como salidas PWM (TIM8).
 
