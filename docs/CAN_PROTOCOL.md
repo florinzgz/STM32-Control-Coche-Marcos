@@ -75,7 +75,7 @@ hfdcan1.NominalSyncJumpWidth = 1;                // 1 TQ
 **Principios de Diseño:**
 1. **ESP32 sugiere, STM32 decide:** El ESP32 envía comandos de usuario, pero el STM32 tiene autoridad final sobre actuadores.
 2. **Heartbeat mutuo:** Ambos nodos deben enviar señales de vida cada 100 ms.
-3. **Timeout de seguridad:** Si un nodo no responde en 250 ms, el otro entra en modo seguro.
+3. **Timeout de seguridad:** Si el ESP32 no responde en 250 ms, el STM32 entra en LIMP_HOME (no SAFE). Si el STM32 no responde, el ESP32 muestra alerta crítica.
 4. **Validación de comandos:** El STM32 valida todos los comandos antes de ejecutarlos.
 
 ---
@@ -166,7 +166,7 @@ ID: 0x101  DLC: 2  Data: [0x06, 0xFF]  // 0xFF06 = -250 → -25.0°
 | 0 | `mode_flags` | uint8_t | Bitmask | bit0=4×4, bit1=tank_turn |
 | 1 | `gear` | uint8_t | 0-4 | 0=Park, 1=Reverse, 2=Neutral, 3=Forward, 4=Forward_D2 (opcional) |
 
-**DLC:** 2 (byte 1 opcional — si solo 1 byte, marcha no cambia)
+**DLC:** 1 o 2 (byte 1 es opcional — si se omite, la marcha no cambia)
 
 **Frecuencia:** On-demand (solo cuando cambia shifter o interruptor 2WD/4WD)
 
