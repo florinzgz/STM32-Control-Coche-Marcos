@@ -59,8 +59,8 @@
 El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. Ejecuta a 170 MHz
 (HSI 16 MHz → PLL ×85 ÷2) y se encarga de:
 
-- Control PWM de los 4 motores de tracción (20 kHz, TIM1)
-- Control PWM del motor de dirección (20 kHz, TIM8)
+- Control PWM de los motores de tracción FL/FR (20 kHz, TIM1) y RL/RR (20 kHz, TIM8)
+- Control PWM del motor de dirección (20 kHz, TIM3)
 - Lectura del encoder de dirección (TIM2, modo cuadratura)
 - Lectura de 4 sensores inductivos de velocidad de rueda (EXTI)
 - Lectura de 6 sensores de corriente INA226 (I2C1 vía TCA9548A)
@@ -70,7 +70,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 - Control de 3 relés de potencia (MAIN, TRACCIÓN, DIRECCIÓN)
 - Comunicación CAN con el ESP32 (FDCAN1, 500 kbps)
 - Sistemas de seguridad: ABS, TCS, límites de corriente/temperatura
-- Watchdog independiente (IWDG, ~4 s)
+- Watchdog independiente (IWDG, ~500 ms)
 
 ### Qué NO controla el STM32 (depende del ESP32)
 
@@ -249,15 +249,25 @@ Cada BTS7960 de tracción recibe 3 señales del STM32:
 > **NO DEDUCIBLE SOLO DESDE EL CÓDIGO**: verificar el cableado físico del multiplexor
 > y el orden de enumeración ROM de los DS18B20.
 
-### Configuración PWM (TIM1)
+### Configuración PWM (TIM1 — tracción FL/FR)
 
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
-| Frecuencia | **20 kHz** | `motor_control.c`: `PWM_FREQUENCY = 20000` |
-| Periodo | 8499 | `motor_control.c`: `PWM_PERIOD = 8499` |
+| Frecuencia | **20 kHz** | `motor_control.c`: `PWM_PERIOD = 4249` |
+| Periodo (ARR) | 4249 | `main.c`: `MX_TIM1_Init` |
 | Prescaler | 0 | `main.c`: `MX_TIM1_Init` |
-| Reloj timer (APB2) | 170 MHz | 170 MHz ÷ (0+1) ÷ (8499+1) = 20 kHz |
-| Canales activos | CH1, CH2, CH3, CH4 | `stm32g4xx_hal_msp.c` |
+| Modo contador | Center-Aligned | 170 MHz ÷ (2 × 4250) = 20 kHz |
+| Canales activos | CH1 (RPWM_FL), CH2 (LPWM_FL), CH3 (RPWM_FR), CH4 (LPWM_FR) | `main.h` |
+| BREAK2 | Cortex LOCKUP | Hardware PWM kill en fallo CPU |
+
+### Configuración PWM (TIM8 — tracción RL/RR)
+
+| Parámetro | Valor | Referencia |
+|-----------|-------|------------|
+| Frecuencia | **20 kHz** | `main.c`: `MX_TIM8_Init` |
+| Periodo (ARR) | 4249 | Center-Aligned: 170 MHz ÷ (2 × 4250) = 20 kHz |
+| Canales activos | CH1 (RPWM_RL), CH2 (LPWM_RL), CH3 (RPWM_RR), CH4 (LPWM_RR) | `main.h` |
+| BREAK2 | Cortex LOCKUP | Hardware PWM kill en fallo CPU |
 
 ### Conexión STM32 → BTS7960 (por motor de tracción)
 
@@ -269,10 +279,10 @@ Ver [Sección 10](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógic
 **Resumen de conexiones directas (sin lógica 74HC):**
 
 ```
-STM32                                               BTS7960 (por motor)
+STM32                                               BTS7960 (motor FL)
 ──────────────                                      ──────────────────
 PA8  (TIM1_CH1 — RPWM_FL) ───────────────────────► RPWM  (avance)
-PC6  (TIM8_CH1 — LPWM_FL) ───────────────────────► LPWM  (retroceso)
+PA9  (TIM1_CH2 — LPWM_FL) ───────────────────────► LPWM  (retroceso)
 PC5  (GPIO EN_FL)          ───────────────────────► R_EN ─┐
                                                            ├─ (unir)
                                                     L_EN ─┘
@@ -280,6 +290,11 @@ PC5  (GPIO EN_FL)          ─────────────────�
                                                     B+  ← 24 V (vía relé TRAC + shunt INA226)
                                                     B-  ← GND potencia
 ```
+
+> **Motor FR**: PA10 (TIM1_CH3 → RPWM), PA11 (TIM1_CH4 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
+> **Motor RL**: PC6 (TIM8_CH1 → RPWM), PC7 (TIM8_CH2 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
+> **Motor RR**: PC8 (TIM8_CH3 → RPWM), PC9 (TIM8_CH4 → LPWM). EN: PC13 GPIO.
+> **Motor STEER**: PA6 (TIM3_CH1 → RPWM), PA7 (TIM3_CH2 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
 
 **Condensador de desacoplo obligatorio en VCC del BTS7960:**
 ```
@@ -302,18 +317,23 @@ PC5  (GPIO EN_FL)          ─────────────────�
 
 | Señal | Pin | Función | Referencia |
 |-------|-----|---------|------------|
-| PWM | **PC8** | TIM8_CH3 (AF4) | `PIN_PWM_STEER` (`main.h:22`) |
-| DIR | **PC4** | GPIO output (GPIOC) | `PIN_DIR_STEER` (`main.h:29`) |
-| EN | **PC9** | GPIO output (GPIOC) | `PIN_EN_STEER` (`main.h:36`) |
+| RPWM | **PA6** | TIM3_CH1 (AF2) | `PIN_PWM_STEER` (`main.h:36`) |
+| LPWM | **PA7** | TIM3_CH2 (AF2) | `PIN_LPWM_STEER` (`main.h:37`) |
 
-### Configuración PWM (TIM8)
+> Los pines DIR (PC4) y EN (PC9) ya **no se usan**. PC9 ha sido reasignado a TIM8_CH4 (LPWM_RR).
+> Conectar R_EN/L_EN del BTS7960 de dirección directamente a 3.3 V.
+
+### Configuración PWM (TIM3)
 
 | Parámetro | Valor |
 |-----------|-------|
 | Frecuencia | **20 kHz** |
-| Periodo | 8499 |
+| Periodo (ARR) | 4249 |
+| Modo contador | Center-Aligned |
 | Prescaler | 0 |
-| Canal | CH3 |
+| Canales | CH1 (RPWM_STEER), CH2 (LPWM_STEER) |
+| BREAK | No disponible (TIM3 es general-purpose) |
+| Protección fallo | Fault handlers escriben CCR1=0, CCR2=0 directamente |
 
 ### Encoder de dirección (E6B2-CWZ6C)
 
@@ -897,14 +917,14 @@ Si se usan módulos prefabricados:
 
 1. **Medir con multímetro** la tensión mínima que activa el relé en el pin "IN".
    - Si activa con 3,3 V: conectar directamente al GPIO del STM32.
-   - Si requiere 5 V: interponer un transistor BSS138 o un 74HC04 para elevar el nivel.
+   - Si requiere 5 V: interponer un transistor BSS138 (level shifter) para elevar el nivel.
 
 2. **Verificar el diodo flyback**: los módulos industriales suelen incluirlo ya montado.
    Si no está, soldar un 1N4007 entre los terminales de la bobina (ver esquema anterior).
 
 3. **Verificar la lógica de activación**:
    - Módulos con lógica positiva ("active HIGH"): STM32 GPIO HIGH → relé ON. ✅ Compatible con el firmware.
-   - Módulos con lógica negativa ("active LOW"): STM32 GPIO HIGH → relé OFF. ❌ Requiere invertir la lógica del firmware o añadir un inversor 74HC04.
+   - Módulos con lógica negativa ("active LOW"): STM32 GPIO HIGH → relé OFF. ❌ Requiere invertir la lógica del firmware o invertir la lógica en el firmware.
 
 ### Snubber en los contactos del relé
 

@@ -43,11 +43,11 @@ hfdcan1.AutoRetransmission = ENABLE;
 hfdcan1.TransmitPause = DISABLE;
 
 // Nominal Bit Timing @ 500 kbps (170 MHz APB1)
-hfdcan1.NominalPrescaler = 20;                   // 170 MHz / 20 = 8.5 MHz
-hfdcan1.NominalTimeSeg1 = 13;                    // 13 TQ
-hfdcan1.NominalTimeSeg2 = 3;                     // 3 TQ
+hfdcan1.NominalPrescaler = 17;                   // 170 MHz / 17 = 10 MHz
+hfdcan1.NominalTimeSeg1 = 14;                    // 14 TQ
+hfdcan1.NominalTimeSeg2 = 5;                     // 5 TQ
 hfdcan1.NominalSyncJumpWidth = 1;                // 1 TQ
-// Total: (1 + 13 + 3) = 17 TQ → 8.5 MHz / 17 = 500 kbps
+// Total: (1 + 14 + 5) = 20 TQ → 10 MHz / 20 = 500 kbps
 ```
 
 ---
@@ -89,16 +89,18 @@ hfdcan1.NominalSyncJumpWidth = 1;                // 1 TQ
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
 | 0 | `alive_counter` | uint8_t | 0-255 | - | Contador cíclico (incrementa cada mensaje) |
-| 1 | `system_state` | uint8_t | 0-3 | - | Estado HMI (0=Boot, 1=Normal, 2=Warning, 3=Error) |
-| 2 | `reserved` | uint8_t | 0 | - | Reservado para futuro uso |
-| 3 | `checksum` | uint8_t | CRC8 | - | CRC8 de bytes 0-2 |
+
+**DLC:** 1
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Ejemplo:**
 ```
-ID: 0x011  DLC: 4  Data: [0x42, 0x01, 0x00, 0xA3]
+ID: 0x011  DLC: 1  Data: [0x42]
 ```
+
+**Detección de freeze:** El STM32 detecta 5 tramas consecutivas con el mismo valor de `alive_counter`
+como ESP32 congelado y entra en modo LIMP_HOME (no SAFE).
 
 ---
 
@@ -109,7 +111,8 @@ ID: 0x011  DLC: 4  Data: [0x42, 0x01, 0x00, 0xA3]
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
 | 0 | `throttle_pct` | uint8_t | 0-100 | % | Porcentaje de aceleración solicitado |
-| 1 | `checksum` | uint8_t | CRC8 | - | CRC8 de byte 0 |
+
+**DLC:** 1
 
 **Frecuencia:** 50 ms (20 Hz) cuando hay cambio, 0 si inactivo
 

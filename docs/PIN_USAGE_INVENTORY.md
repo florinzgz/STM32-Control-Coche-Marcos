@@ -35,10 +35,10 @@
 
 | Categoría | Pines usados | Porcentaje |
 |-----------|-------------|------------|
-| PWM motores (TIM1 + TIM8) | 5 | 10.6% |
-| Dirección motores (GPIO out) | 5 | 10.6% |
-| Habilitación motores (GPIO out) | 5 | 10.6% |
-| Relés (GPIO out) | 3 | 6.4% |
+| PWM motores RPWM/LPWM (TIM1 + TIM3 + TIM8) | 10 | 21.3% |
+| Habilitación motores (GPIO out) | 2 (PC5, PC13) | 4.3% |
+| Relés potencia (GPIO out) | 3 | 6.4% |
+| Relés LED (GPIO out) | 2 (PB10, PB11) | 4.3% |
 | Sensores velocidad rueda (EXTI) | 4 | 8.5% |
 | Encoder dirección (TIM2 + EXTI) | 3 | 6.4% |
 | Sensor centrado dirección (EXTI) | 1 | 2.1% |
@@ -46,48 +46,55 @@
 | Bus I2C (INA226/TCA9548A/ADS1115) | 2 | 4.3% |
 | Bus OneWire (DS18B20) | 1 | 2.1% |
 | Bus CAN (FDCAN1) | 2 | 4.3% |
-| **TOTAL USADOS** | **32** | **68.1%** |
+| **TOTAL USADOS** | **31** | **66.0%** |
 | Reservados SWD | 2 | 4.3% |
-| **LIBRES** | **13** | **27.7%** |
+| Pines DIR liberados (PC0–PC4) | 5 | 10.6% |
+| **LIBRES** | **12** | **25.5%** |
 
 ---
 
 ## 2. STM32G474RE — Detalle por módulo
 
-### 2.1 Motores de tracción — 4× BTS7960 (12 pines)
+### 2.1 Motores de tracción — 4× BTS7960 (10 pines PWM + 2 pines EN = 12 pines)
 
-Cada motor de tracción necesita 3 señales: PWM (velocidad), DIR (dirección de giro) y EN (habilitación).
+Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM). Los pines DIR (PC0–PC3) ya **no se usan** (liberados).
 
-| Motor | Pin PWM | Timer | Pin DIR | Pin EN | Total pines |
-|-------|---------|-------|---------|--------|-------------|
-| FL (Delantero Izq.) | **PA8** | TIM1_CH1 | **PC0** | **PC5** | 3 |
-| FR (Delantero Der.) | **PA9** | TIM1_CH2 | **PC1** | **PC6** | 3 |
-| RL (Trasero Izq.) | **PA10** | TIM1_CH3 | **PC2** | **PC7** | 3 |
-| RR (Trasero Der.) | **PA11** | TIM1_CH4 | **PC3** | **PC13** | 3 |
-| | | | | **Subtotal:** | **12 pines** |
+| Motor | Pin RPWM | Timer | Pin LPWM | Timer | Pin EN | Total pines |
+|-------|----------|-------|----------|-------|--------|-------------|
+| FL (Delantero Izq.) | **PA8** | TIM1_CH1 | **PA9** | TIM1_CH2 | **PC5** (GPIO) | 3 |
+| FR (Delantero Der.) | **PA10** | TIM1_CH3 | **PA11** | TIM1_CH4 | 3.3V fijo | 2 |
+| RL (Trasero Izq.) | **PC6** | TIM8_CH1 | **PC7** | TIM8_CH2 | 3.3V fijo | 2 |
+| RR (Trasero Der.) | **PC8** | TIM8_CH3 | **PC9** | TIM8_CH4 | **PC13** (GPIO) | 3 |
+| | | | | | **Subtotal:** | **10 PWM + 2 EN = 12 pines** |
 
-- PWM a 20 kHz, resolución 13 bits (ARR = 8499)
-- DIR: HIGH = adelante, LOW = atrás
-- EN: HIGH = motor habilitado
+- PWM a 20 kHz, center-aligned, resolución ~12 bits (ARR = 4249)
+- Solo un canal (RPWM o LPWM) activo por motor a la vez
+- TIM1 y TIM8: BREAK2 armado a Cortex LOCKUP (hardware PWM kill en fallo CPU)
+- EN de FR y RL: no hay pin GPIO; conectar R_EN/L_EN del BTS7960 directo a 3.3 V
 
-### 2.2 Motor de dirección — 1× BTS7960 (3 pines)
+### 2.2 Motor de dirección — 1× BTS7960 (2 pines PWM)
 
-| Motor | Pin PWM | Timer | Pin DIR | Pin EN | Total pines |
-|-------|---------|-------|---------|--------|-------------|
-| STEER (Dirección) | **PC8** | TIM8_CH3 | **PC4** | **PC9** | 3 |
-| | | | | **Subtotal:** | **3 pines** |
+| Motor | Pin RPWM | Timer | Pin LPWM | Timer | Pin EN | Total pines |
+|-------|----------|-------|----------|-------|--------|-------------|
+| STEER (Dirección) | **PA6** | TIM3_CH1 | **PA7** | TIM3_CH2 | 3.3V fijo | 2 |
+| | | | | | **Subtotal:** | **2 pines** |
 
-### 2.3 Relés de potencia (3 pines)
+> DIR (PC4) y EN (PC9) ya **no se usan**. PC9 fue reasignado a TIM8_CH4 (LPWM_RR).
+> TIM3 no tiene entrada BREAK; los fault handlers escriben CCR1=0, CCR2=0 por software.
+
+### 2.3 Relés de potencia (5 pines)
 
 | Relé | Pin | Función |
 |------|-----|---------|
 | RELAY_MAIN | **PC10** | Alimentación general |
 | RELAY_TRAC | **PC11** | Alimentación motores 24V |
 | RELAY_DIR | **PC12** | Alimentación motor dirección 12V |
-| | **Subtotal:** | **3 pines** |
+| RELAY_LED (front) | **PB10** | Alimentación 5V tira LED frontal WS2812B |
+| RELAY_LED_REAR | **PB11** | Alimentación 5V tira LED trasera WS2812B |
+| | **Subtotal:** | **5 pines** |
 
-- Controlados vía optoacopladores (HY-M158)
-- Activo HIGH (3.3V del STM32 activa el optoacoplador)
+- PC10–PC12: controlados vía optoacopladores (HY-M158), activo HIGH
+- PB10/PB11: controlados vía CAN (ID 0x120); el ESP32 genera la señal WS2812B, el STM32 controla el relé de alimentación
 
 ### 2.4 Sensores de velocidad de rueda — 4× inductivos LJ12A3 (4 pines)
 
@@ -194,34 +201,33 @@ Sensores en el bus (un solo pin):
 | 2 | PA1 | GPIOA | Sensor rueda FR | EXTI1, velocidad rueda |
 | 3 | PA2 | GPIOA | Sensor rueda RL | EXTI2, velocidad rueda |
 | 4 | PA3 | GPIOA | Pedal acelerador | ADC1_IN4, canal primario |
-| 5 | PA8 | GPIOA | Motor FL | TIM1_CH1, PWM 20 kHz |
-| 6 | PA9 | GPIOA | Motor FR | TIM1_CH2, PWM 20 kHz |
-| 7 | PA10 | GPIOA | Motor RL | TIM1_CH3, PWM 20 kHz |
-| 8 | PA11 | GPIOA | Motor RR | TIM1_CH4, PWM 20 kHz |
-| 9 | PA15 | GPIOA | Encoder dirección | TIM2_CH1, canal A cuadratura |
-| 10 | PB0 | GPIOB | Temperatura (DS18B20) | OneWire bus, 5 sensores |
-| 11 | PB3 | GPIOB | Encoder dirección | TIM2_CH2, canal B cuadratura |
-| 12 | PB4 | GPIOB | Encoder dirección | EXTI4, índice Z |
-| 13 | PB5 | GPIOB | Centrado dirección | EXTI5, sensor inductivo |
-| 14 | PB6 | GPIOB | I2C (corriente/pedal) | I2C1_SCL, 400 kHz |
-| 15 | PB7 | GPIOB | I2C (corriente/pedal) | I2C1_SDA, 400 kHz |
-| 16 | PB8 | GPIOB | CAN bus | FDCAN1_RX, 500 kbps |
-| 17 | PB9 | GPIOB | CAN bus | FDCAN1_TX, 500 kbps |
-| 18 | PB15 | GPIOB | Sensor rueda RR | EXTI15, velocidad rueda |
-| 19 | PC0 | GPIOC | Motor FL | DIR (dirección de giro) |
-| 20 | PC1 | GPIOC | Motor FR | DIR (dirección de giro) |
-| 21 | PC2 | GPIOC | Motor RL | DIR (dirección de giro) |
-| 22 | PC3 | GPIOC | Motor RR | DIR (dirección de giro) |
-| 23 | PC4 | GPIOC | Motor dirección | DIR (dirección de giro) |
-| 24 | PC5 | GPIOC | Motor FL | EN (habilitación) |
-| 25 | PC6 | GPIOC | Motor FR | EN (habilitación) |
-| 26 | PC7 | GPIOC | Motor RL | EN (habilitación) |
-| 27 | PC8 | GPIOC | Motor dirección | TIM8_CH3, PWM 20 kHz |
-| 28 | PC9 | GPIOC | Motor dirección | EN (habilitación) |
-| 29 | PC10 | GPIOC | Relé MAIN | Alimentación general |
-| 30 | PC11 | GPIOC | Relé TRAC | Alimentación motores |
-| 31 | PC12 | GPIOC | Relé DIR | Alimentación dirección |
-| 32 | PC13 | GPIOC | Motor RR | EN (habilitación) |
+| 5 | PA6 | GPIOA | Motor STEER | TIM3_CH1, RPWM_STEER 20 kHz |
+| 6 | PA7 | GPIOA | Motor STEER | TIM3_CH2, LPWM_STEER 20 kHz |
+| 7 | PA8 | GPIOA | Motor FL | TIM1_CH1, RPWM_FL 20 kHz |
+| 8 | PA9 | GPIOA | Motor FL | TIM1_CH2, LPWM_FL 20 kHz |
+| 9 | PA10 | GPIOA | Motor FR | TIM1_CH3, RPWM_FR 20 kHz |
+| 10 | PA11 | GPIOA | Motor FR | TIM1_CH4, LPWM_FR 20 kHz |
+| 11 | PA15 | GPIOA | Encoder dirección | TIM2_CH1, canal A cuadratura |
+| 12 | PB0 | GPIOB | Temperatura (DS18B20) | OneWire bus, 5 sensores |
+| 13 | PB3 | GPIOB | Encoder dirección | TIM2_CH2, canal B cuadratura |
+| 14 | PB4 | GPIOB | Encoder dirección | EXTI4, índice Z |
+| 15 | PB5 | GPIOB | Centrado dirección | EXTI5, sensor inductivo |
+| 16 | PB6 | GPIOB | I2C (corriente/pedal) | I2C1_SCL, 400 kHz |
+| 17 | PB7 | GPIOB | I2C (corriente/pedal) | I2C1_SDA, 400 kHz |
+| 18 | PB8 | GPIOB | CAN bus | FDCAN1_RX, 500 kbps |
+| 19 | PB9 | GPIOB | CAN bus | FDCAN1_TX, 500 kbps |
+| 20 | PB10 | GPIOB | Relé LED frontal | Alimentación 5V tira WS2812B frontal |
+| 21 | PB11 | GPIOB | Relé LED trasero | Alimentación 5V tira WS2812B trasera |
+| 22 | PB15 | GPIOB | Sensor rueda RR | EXTI15, velocidad rueda |
+| 23 | PC5 | GPIOC | Motor FL | EN (habilitación), GPIO active HIGH |
+| 24 | PC6 | GPIOC | Motor RL | TIM8_CH1, RPWM_RL 20 kHz |
+| 25 | PC7 | GPIOC | Motor RL | TIM8_CH2, LPWM_RL 20 kHz |
+| 26 | PC8 | GPIOC | Motor RR | TIM8_CH3, RPWM_RR 20 kHz |
+| 27 | PC9 | GPIOC | Motor RR | TIM8_CH4, LPWM_RR 20 kHz |
+| 28 | PC10 | GPIOC | Relé MAIN | Alimentación general |
+| 29 | PC11 | GPIOC | Relé TRAC | Alimentación motores |
+| 30 | PC12 | GPIOC | Relé DIR | Alimentación dirección |
+| 31 | PC13 | GPIOC | Motor RR | EN (habilitación), GPIO active HIGH |
 
 ---
 
@@ -233,17 +239,18 @@ Los siguientes pines GPIO del STM32G474RE **NO están usados** y están disponib
 |---|-----|--------|--------------------------------------|--------|
 | 1 | PA4 | GPIOA | DAC1_OUT1, SPI1_NSS, ADC2_IN17 | **LIBRE** |
 | 2 | PA5 | GPIOA | DAC1_OUT2, SPI1_SCK, ADC2_IN13 | **LIBRE** |
-| 3 | PA6 | GPIOA | SPI1_MISO, TIM3_CH1, ADC2_IN3 | **LIBRE** |
-| 4 | PA7 | GPIOA | SPI1_MOSI, TIM3_CH2, ADC2_IN4 | **LIBRE** |
-| 5 | PA12 | GPIOA | USB_DP, FDCAN1_TX (alt), TIM1_ETR | **LIBRE** |
-| 6 | PB1 | GPIOB | ADC3_IN1, TIM3_CH4 | **LIBRE** |
-| 7 | PB2 | GPIOB | GPIO general | **LIBRE** |
-| 8 | PB10 | GPIOB | USART3_TX, I2C2_SCL, TIM2_CH3 | **LIBRE** |
-| 9 | PB11 | GPIOB | USART3_RX, I2C2_SDA, TIM2_CH4 | **LIBRE** |
-| 10 | PB12 | GPIOB | SPI2_NSS, I2S2_WS | **LIBRE** |
-| 11 | PB13 | GPIOB | SPI2_SCK, I2S2_CK | **LIBRE** |
-| 12 | PB14 | GPIOB | SPI2_MISO, TIM15_CH1 | **LIBRE** |
-| 13 | PD2 | GPIOD | GPIO general, TIM3_ETR | **LIBRE** |
+| 3 | PA12 | GPIOA | USB_DP, FDCAN1_TX (alt), TIM1_ETR | **LIBRE** |
+| 4 | PB1 | GPIOB | ADC3_IN1, TIM3_CH4 | **LIBRE** |
+| 5 | PB2 | GPIOB | GPIO general | **LIBRE** |
+| 6 | PB12 | GPIOB | SPI2_NSS, I2S2_WS | **LIBRE** |
+| 7 | PB13 | GPIOB | SPI2_SCK, I2S2_CK | **LIBRE** |
+| 8 | PB14 | GPIOB | SPI2_MISO, TIM15_CH1 | **LIBRE** |
+| 9 | PC0 | GPIOC | GPIO, ADC1_IN6 | **LIBRE** (antes DIR_FL, liberado) |
+| 10 | PC1 | GPIOC | GPIO, ADC1_IN7 | **LIBRE** (antes DIR_FR, liberado) |
+| 11 | PC2 | GPIOC | GPIO, ADC1_IN8 | **LIBRE** (antes DIR_RL, liberado) |
+| 12 | PC3 | GPIOC | GPIO, ADC1_IN9 | **LIBRE** (antes DIR_RR, liberado) |
+| 13 | PC4 | GPIOC | GPIO, ADC2_IN5 | **LIBRE** (antes DIR_STEER, liberado) |
+| 14 | PD2 | GPIOD | GPIO general, TIM3_ETR | **LIBRE** |
 
 Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se necesita debugging:
 
@@ -252,18 +259,18 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 14 | PA13 | GPIOA | SWDIO (debug) | ⚠️ NO recomendado liberar |
 | 15 | PA14 | GPIOA | SWCLK (debug) | ⚠️ NO recomendado liberar |
 
-> **Resumen: 13 pines libres para uso inmediato** (15 si se sacrifica debug SWD, no recomendado).
+> **Resumen: 14 pines libres para uso inmediato** (16 si se sacrifica debug SWD, no recomendado).
 
 ### Posibles usos de los pines libres
 
 | Posible expansión | Pines sugeridos | Nº pines |
 |-------------------|-----------------|----------|
-| UART debug serie | PB10 (TX) + PB11 (RX) | 2 |
-| SPI adicional (sensor, SD card) | PA5 (SCK) + PA6 (MISO) + PA7 (MOSI) + PA4 (CS) | 4 |
+| UART debug serie | PC0 (TX) + PC1 (RX) | 2 |
+| SPI adicional (sensor, SD card) | PA5 (SCK) + PC2 (MISO) + PC3 (MOSI) + PA4 (CS) | 4 |
 | ADC adicional (sensor batería, otro sensor) | PB1, PA4, PA5 | 1-3 |
-| Segundo bus I2C | PB10 (SCL) + PB11 (SDA) | 2 |
+| Segundo bus I2C | PC0 (SCL) + PC1 (SDA) | 2 |
 | LEDs de estado / buzzer | PB2, PB12, PB13, PB14 | 1-4 |
-| Sensores de obstáculos (ultrasónicos) | PA6, PA7, PB12, PB13, PB14 | 2-5 |
+| Sensores adicionales | PC2, PC3, PC4, PB12, PB13, PB14 | 2-6 |
 | USB | PA12 (DP) | 1 |
 
 ---
@@ -276,7 +283,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | **Placa** | ESP32-S3-DevKitC-1 |
 | **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO26–GPIO48; GPIO22–25 no existen en ESP32-S3) |
 | **Pines disponibles en DevKitC** | ~36 (algunos reservados por flash/PSRAM) |
-| **Pines usados por el proyecto** | 15 |
+| **Pines usados por el proyecto** | 22 |
 | **Pines reservados — QSPI Flash** | 7 (GPIO26–GPIO32) |
 | **Pines reservados — Octal PSRAM** | 5 (GPIO33–GPIO37, N16R8) |
 | **Pines no existentes en ESP32-S3** | 4 (GPIO22–GPIO25) |
@@ -288,16 +295,19 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |-----------|-------------|------------|
 | Display TFT SPI (ST7796) | 6 | 16.7% |
 | Touch panel SPI | 1 | 2.8% |
+| Display backlight | 1 | 2.8% |
 | CAN bus (TWAI vía TJA1051) | 2 | 5.6% |
-| Sensor de obstáculos TOFSense (UART2) | 1 | 2.8% |
-| DFPlayer Mini audio (UART1) | 2 | 5.6% |
+| Sensor de obstáculos HC-SR04 | 2 (TRIG + ECHO) | 5.6% |
+| DFPlayer Mini audio (UART2) | 2 | 5.6% |
+| Relé audio | 1 | 2.8% |
 | LEDs WS2812B (front + rear) | 2 | 5.6% |
-| **TOTAL USADOS** | **15** | **41.7%** |
-| Reservados Flash/PSRAM | 7 | 19.4% |
-| Reservados QSPI Flash | 7 (GPIO26–32) | — |
-| Reservados Octal PSRAM (N16R8) | 5 (GPIO33–37) | — |
+| Palanca de cambios I2C (MCP23017) | 2 | 5.6% |
+| Interruptor tracción 2WD/4WD | 1 | 2.8% |
+| Ignition sense + Power hold | 2 | 5.6% |
+| **TOTAL USADOS** | **22** | **61.1%** |
+| Reservados Flash/PSRAM | 12 (GPIO26–37) | — |
 | No existen en ESP32-S3 | 4 (GPIO22–25) | — |
-| **LIBRES** | **~17** | **~47.2%** |
+| **LIBRES** | **~10** | **~27.8%** |
 
 ---
 
@@ -342,44 +352,81 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 - Biblioteca: ESP32-TWAI-CAN v1.0.1
 - Terminación 120Ω en el lado ESP32
 
-### 5.4 Sensor de obstáculos — TOFSense-M S LiDAR vía UART2 (1 pin)
+### 5.4 Sensor de obstáculos — HC-SR04 ultrasónico (2 pines)
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
-| UART2 RX | **GPIO44** | Recepción datos TOFSense (solo RX) | 921600 baud |
-| | | **Subtotal:** | **1 pin** |
+| TRIG | **GPIO6** | Trigger (output) | — |
+| ECHO | **GPIO7** | Echo (input) | — |
+| | | **Subtotal:** | **2 pines** |
 
-- Sensor: TOFSense-M S LiDAR (sensor de distancia 0–5000 mm)
-- Protocolo: UART unidireccional (solo sensor TX → ESP32 RX)
-- TX del ESP32 no se usa (PIN_TOFSENSE_TX = −1)
-- Tramas de 8 bytes cada 66 ms (15 Hz)
-- Procesamiento: Parser UART + matriz 8×8 + lógica 5 zonas
+- Sensor: HC-SR04 (ultrasónico, rango 20–4000 mm)
+- Frecuencia de muestreo: ≥20 Hz (40 ms mínimo entre disparos)
 - Datos enviados al STM32 vía CAN ID 0x208 (distancia, zona, salud, contador)
-- Referencia: `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`
 
-### 5.5 DFPlayer Mini — Audio MP3 vía UART1 (2 pines)
+### 5.5 DFPlayer Mini — Audio MP3 vía UART2 (2 pines)
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
-| UART1 TX | **GPIO19** | Comandos al DFPlayer (ESP32 → DFPlayer RX) | 9600 baud |
-| UART1 RX | **GPIO20** | Respuestas del DFPlayer (DFPlayer TX → ESP32) | 9600 baud |
+| UART2 TX | **GPIO43** | Comandos al DFPlayer (ESP32 → DFPlayer RX) | 9600 baud |
+| UART2 RX | **GPIO44** | Respuestas del DFPlayer (DFPlayer TX → ESP32) | 9600 baud |
 | | | **Subtotal:** | **2 pines** |
 
 - Módulo: DFPlayer Mini (reproductor MP3 con DAC + amplificador 3W)
 - Tarjeta SD: FAT32, 68 archivos MP3 (0001.mp3–0068.mp3)
 - Altavoz: 3W 8Ω conectado a las salidas DAC_R/DAC_L del DFPlayer
 - Biblioteca: DFRobotDFPlayerMini (inicialización lazy, no bloqueante)
-- Estado: **Planificado Phase 5** — hardware no conectado todavía
-- Referencia: `docs/PENDING_FEATURES_SCHEDULE.md` §3
 
-> **Nota sobre GPIO 19/20:** En el ESP32-S3, estos son los pines nativos USB D−/D+. Con `ARDUINO_USB_CDC_ON_BOOT=1` (configurado en `platformio.ini`), el USB CDC serial usa el periférico USB nativo internamente, liberando GPIO 19 y GPIO 20 para uso general como UART1.
+### 5.5a Relé de audio (1 pin)
+
+| Señal | GPIO | Función | Lógica |
+|-------|------|---------|--------|
+| Relay Coil | **GPIO11** | Conmuta altavoz entre radio y DFPlayer | Active LOW |
+| | | **Subtotal:** | **1 pin** |
+
+- LOW = DFPlayer conectado al altavoz; HIGH = radio conectada
+- Tiempo de estabilización del relé: 20 ms
+
+### 5.5b Palanca de cambios — MCP23017 vía I2C (2 pines)
+
+| Señal | GPIO | Función | Velocidad |
+|-------|------|---------|-----------|
+| SDA | **GPIO8** | I2C datos | Default (100 kHz) |
+| SCL | **GPIO9** | I2C reloj | Default (100 kHz) |
+| | | **Subtotal:** | **2 pines** |
+
+- IC: MCP23017 (expansor I/O 16-bit I2C) @ dirección 0x20
+- Puerto A lee 5 posiciones: P (0x00), R (0x01), N (0x02), D1 (0x03), D2 (0x04)
+- Marcha enviada por CAN (CMD_MODE 0x102, byte 1)
+
+### 5.5c Interruptor de tracción 2WD/4WD (1 pin)
+
+| Señal | GPIO | Función | Lógica |
+|-------|------|---------|--------|
+| Switch | **GPIO15** | Entrada con pull-up interno | LOW = 4WD, HIGH = 2WD |
+| | | **Subtotal:** | **1 pin** |
+
+- Tipo: DPDT rocker switch (usado como SPDT)
+- Debounce: 50 ms × 3 lecturas estables
+- Gate de velocidad: rechaza cambio si >0.5 km/h
+- Modo enviado por CAN (CMD_MODE 0x102, byte 0, bit 0)
+
+### 5.5d Control de encendido (2 pines)
+
+| Señal | GPIO | Función | Lógica |
+|-------|------|---------|--------|
+| Ignition Sense | **GPIO40** | Llave de contacto (input, PULLDOWN) | HIGH = contacto ON |
+| Power Hold | **GPIO41** | Mantiene alimentación (output) | HIGH = mantener encendido |
+| | | **Subtotal:** | **2 pines** |
+
+- Secuencia: llave ON → Power Hold → arranque sistema → llave OFF → shutdown delay (3 s) → Power Hold OFF
 
 ### 5.6 LEDs WS2812B — Iluminación front/rear (2 pines)
 
 | Señal | GPIO | Función | Protocolo |
 |-------|------|---------|-----------|
 | LED Front Data | **GPIO47** | Tira frontal 28× WS2812B | FastLED / RMT 800 kHz |
-| LED Rear Data | **GPIO43** | Tira trasera 16× WS2812B | FastLED / RMT 800 kHz |
+| LED Rear Data | **GPIO48** | Tira trasera 16× WS2812B | FastLED / RMT 800 kHz |
 | | | **Subtotal:** | **2 pines** |
 
 - LEDs: WS2812B (RGB, orden GRB, 800 kHz)
@@ -397,19 +444,26 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |---|------|--------|---------|
 | 1 | GPIO4 | CAN bus | TWAI TX → TJA1051 TXD |
 | 2 | GPIO5 | CAN bus | TWAI RX → TJA1051 RXD |
-| 3 | GPIO10 | Display TFT | SPI CS (chip select display) |
-| 4 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
-| 5 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
-| 6 | GPIO14 | Display TFT | SPI SCLK (reloj) |
-| 7 | GPIO39 | Display TFT | DC (Data/Command) |
-| 8 | GPIO38 | Display TFT | RST (Reset display) |
-| 9 | GPIO19 | DFPlayer Mini | UART1 TX (comandos audio) — Phase 5 |
-| 10 | GPIO20 | DFPlayer Mini | UART1 RX (respuestas audio) — Phase 5 |
-| 11 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
-| 12 | GPIO42 | Display TFT | BL (Backlight) |
-| 13 | GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
-| 14 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
-| 15 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
+| 3 | GPIO6 | Sensor obstáculos | HC-SR04 TRIG (output) |
+| 4 | GPIO7 | Sensor obstáculos | HC-SR04 ECHO (input) |
+| 5 | GPIO8 | Palanca de cambios | I2C SDA (MCP23017 @ 0x20) |
+| 6 | GPIO9 | Palanca de cambios | I2C SCL (MCP23017 @ 0x20) |
+| 7 | GPIO10 | Display TFT | SPI CS (chip select display) |
+| 8 | GPIO11 | Relé audio | Conmuta altavoz radio/DFPlayer (active LOW) |
+| 9 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
+| 10 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
+| 11 | GPIO14 | Display TFT | SPI SCLK (reloj) |
+| 12 | GPIO15 | Tracción | Interruptor 2WD/4WD (pull-up, LOW=4WD) |
+| 13 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
+| 14 | GPIO38 | Display TFT | RST (Reset display) |
+| 15 | GPIO39 | Display TFT | DC (Data/Command) |
+| 16 | GPIO40 | Encendido | Ignition Key Sense (input, PULLDOWN) |
+| 17 | GPIO41 | Encendido | Power Hold Output (active HIGH) |
+| 18 | GPIO42 | Display TFT | BL (Backlight) |
+| 19 | GPIO43 | DFPlayer Mini | UART2 TX (comandos audio) |
+| 20 | GPIO44 | DFPlayer Mini | UART2 RX (respuestas audio) |
+| 21 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs |
+| 22 | GPIO48 | LEDs WS2812B | Tira trasera 16 LEDs |
 
 ---
 
@@ -423,25 +477,16 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 2 | GPIO1 | ADC1_CH1, GPIO | **LIBRE** |
 | 3 | GPIO2 | ADC1_CH2, GPIO | **LIBRE** |
 | 4 | GPIO3 | ADC1_CH3, GPIO | **LIBRE** (⚠️ boot strapping) |
-| 5 | GPIO6 | GPIO, SPI | **LIBRE** |
-| 6 | GPIO7 | GPIO, SPI | **LIBRE** |
-| 7 | GPIO8 | GPIO, SPI | **LIBRE** |
-| 8 | GPIO9 | GPIO | **LIBRE** |
-| 9 | GPIO11 | GPIO, SPI | **LIBRE** |
-| 10 | GPIO15 | GPIO | **LIBRE** |
-| 11 | GPIO16 | GPIO | **LIBRE** |
-| 12 | GPIO17 | GPIO | **LIBRE** |
-| 13 | GPIO18 | GPIO | **LIBRE** |
-| 14 | GPIO39 | GPIO | **LIBRE** |
-| 15 | GPIO40 | GPIO | **LIBRE** |
-| 16 | GPIO41 | GPIO | **LIBRE** |
-| 17 | GPIO42 | GPIO | **ASIGNADO** — Display TFT BL (Backlight) |
-| 18 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
-| 19 | GPIO48 | GPIO | **LIBRE** |
+| 5 | GPIO16 | GPIO | **LIBRE** |
+| 6 | GPIO17 | GPIO | **LIBRE** |
+| 7 | GPIO18 | GPIO | **LIBRE** |
+| 8 | GPIO19 | GPIO (USB D−) | **LIBRE** (si no se usa USB nativo) |
+| 9 | GPIO20 | GPIO (USB D+) | **LIBRE** (si no se usa USB nativo) |
+| 10 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
 
-> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash (no accesibles). GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8 (no accesibles). GPIO10, 12, 13, 14, 42, 39, 38 están asignados al display TFT. GPIO19/GPIO20 están asignados al DFPlayer (UART1). GPIO43/GPIO44 están asignados a LEDs traseros y sensor de obstáculos. GPIO47 está asignado a LEDs frontales. GPIO22–25 no existen en el chip ESP32-S3. GPIO45 es un strapping pin (VDD_SPI) y se ha liberado para evitar reinicios aleatorios.
+> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash. GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8. GPIO22–25 no existen en el chip ESP32-S3. GPIO45 es un strapping pin (VDD_SPI) y se ha evitado. Los pines GPIO4–15 y GPIO38–48 están asignados según tabla anterior.
 
-> **Resumen: ~17 pines libres de forma segura** (evitando pines de boot strapping).
+> **Resumen: ~10 pines libres de forma segura** (evitando pines de boot strapping).
 
 ### Posibles usos de los pines libres
 
