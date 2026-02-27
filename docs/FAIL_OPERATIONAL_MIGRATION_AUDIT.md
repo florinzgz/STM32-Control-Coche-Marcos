@@ -245,7 +245,7 @@ Validation passes when ALL 6 checks pass simultaneously. If validation fails, th
 
 #### 1.2.9 Obstacle Detection (Original — `obstacle_detection.cpp`, `obstacle_safety.cpp`)
 
-- Ultrasonic sensor on ESP32 (direct GPIO, same MCU as motors).
+- TOFSense-M LiDAR sensor on ESP32 (UART, same MCU as display).
 - Three-tier distance check: CLEAR, WARNING, EMERGENCY.
 - No stuck-sensor detection documented.
 - No speed-dependent stopping distance.
