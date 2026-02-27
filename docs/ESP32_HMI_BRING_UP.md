@@ -128,7 +128,7 @@ The following features must not be coded until the basic screen validation
 | Feature | Why to wait |
 |---------|-------------|
 | Touch input / CMD_THROTTLE / CMD_STEERING | Requires drive-by-wire safety audit on the STM32 side first. A wrong command sent from the ESP32 will move wheels. |
-| Obstacle sensor (ultrasonic / VL53L8CX) | Has its own CAN contract section (0x208, 0x209). Add after the display is confirmed stable. |
+| Obstacle sensor (TOFSense-M / VL53L8CX) | Has its own CAN contract section (0x208, 0x209). Add after the display is confirmed stable. |
 | Service mode UI (0x301–0x303) | Service mode requires validated STM32 service mode firmware. Premature UI can mask STM32-side bugs. |
 | OTA firmware update | Cannot be added without partitioning the 8 MB flash correctly (factory + OTA_0 + OTA_1). Must be planned before first flash. |
 | LVGL or sprite-based rendering | Current direct-TFT rendering is stable and <5 ms/frame. Migrating to LVGL while the display is unvalidated adds risk. |

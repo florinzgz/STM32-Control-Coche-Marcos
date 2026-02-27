@@ -16,8 +16,7 @@ Integrar un relé de audio de 2 canales (5 V optoacoplado) que conmuta la salida
 |------|----------------|-----------|
 | 4    | CAN TX         | ❌ |
 | 5    | CAN RX         | ❌ |
-| 6    | HC-SR04 TRIG   | ❌ |
-| 7    | HC-SR04 ECHO   | ❌ |
+| 18   | TOFSense-M RX (UART1) | ❌ |
 | 8    | I²C SDA (shifter) | ❌ |
 | 9    | I²C SCL (shifter) | ❌ |
 | 10   | SPI CS (display) | ❌ |

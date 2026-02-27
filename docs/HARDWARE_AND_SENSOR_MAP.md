@@ -521,7 +521,7 @@ Reference: [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWA
 | WS2812B LEDs | `src/lighting/` | LED strip is on ESP32-S3 |
 | Menu system | `src/menu/` | Touch UI runs on ESP32-S3 |
 | Logging (Serial) | `src/logging/` | STM32 uses CAN for all diagnostics |
-| Obstacle detection (ultrasonic) | `src/sensors/obstacle_detection.cpp`, `src/safety/obstacle_safety.cpp` | Ultrasonic sensors on ESP32 GPIO; STM32 has `MODULE_OBSTACLE_DETECT` placeholder |
+| Obstacle detection (TOFSense-M LiDAR) | `src/sensors/obstacle_sensor.cpp`, `src/can/can_obstacle.cpp` | TOFSense-M on ESP32 UART1; STM32 receives processed distance via CAN 0x208 |
 | Adaptive cruise | `src/control/adaptive_cruise.cpp` | Higher-level feature, ESP32 domain |
 | Regen AI braking | `src/safety/regen_ai.cpp` | Higher-level feature, ESP32 domain |
 | Button inputs | `src/input/buttons.cpp` | Physical buttons on ESP32 board |

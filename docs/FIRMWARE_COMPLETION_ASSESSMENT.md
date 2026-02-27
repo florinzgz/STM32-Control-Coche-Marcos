@@ -58,7 +58,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 | Screen Manager (máquina estados) | ✅ Completo | 100% | 20 FPS frame limiter, código secreto "8989" |
 | CAN RX (decodificación) | ✅ Completo | 100% | 12 tipos de mensaje decodificados |
 | Shifter MCP23017 (P/R/N/D1/D2) | ✅ Completo | 100% | I2C 400 kHz, one-hot activo bajo, default Neutral |
-| Sensor obstáculos HC-SR04 | ✅ Completo | 100% | 25 Hz, 5 zonas, detección sensor atascado |
+| Sensor obstáculos TOFSense-M | ✅ Completo | 100% | UART1 921600 bps, 5 zonas, detección sensor atascado |
 | CAN TX obstáculos (0x208/0x209) | ✅ Completo | 100% | 66 ms + 100 ms, counter rolling, health status |
 | Audio DFPlayer Mini | ✅ Completo | 100% | 6 sonidos, 3 prioridades, volumen NVS, UART2 9600 |
 | LEDs WS2812B (44 LEDs) | ✅ Completo | 100% | Posición, freno, reversa, emergencia ámbar, limp-home |
@@ -113,7 +113,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 - ⚠️ Submenús calibración en Engineering son placeholder (estructura OK, lógica pendiente)
 
 ### Sensor de Obstáculos — 100% ✅
-- ✅ HC-SR04 a 25 Hz en ESP32
+- ✅ TOFSense-M LiDAR vía UART1 (921600 bps, NLink_TOFSense_M_Frame0) en ESP32
 - ✅ 5 zonas con umbrales dependientes de velocidad
 - ✅ Detección sensor atascado
 - ✅ CAN TX 0x208 (66 ms) + 0x209 (100 ms)

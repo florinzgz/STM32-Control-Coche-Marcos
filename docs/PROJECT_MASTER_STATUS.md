@@ -81,7 +81,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
 | ESP32 heartbeat transmission (0x011 every 100 ms) | Logic in `loop()` | `esp32/src/main.cpp` |
 | Command ACK tracking (non-blocking, 200 ms timeout) | `ackBeginWait()`, `ackCheck()` | `esp32/src/main.cpp` |
-| Obstacle sensor driver (HC-SR04, GPIO 6/7, 25 Hz, 5-zone mapping) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle sensor driver (TOFSense-M LiDAR, GPIO 18 UART1 RX, 921600 bps, 5-zone mapping) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
 | Obstacle CAN TX (0x208 at 66 ms, DLC 5 with rolling counter) | `can_obstacle` namespace | `esp32/src/can/can_obstacle.cpp` |
 | Obstacle boot indicator (WAITING/VALID/INVALID status) | `ObstacleIndicator` | `esp32/src/hmi/obstacle_indicator.cpp` |
 | Gear shifter input (MCP23017 I2C, GPIO 8/9, P/R/N/D1/D2) | `shifter` namespace | `esp32/src/shifter_input.cpp` |
@@ -288,7 +288,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-4 one-hot, P/R/N/D1/D2) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
 | Centralized touch handler (TAP/LONG_PRESS/RELEASE, 200 ms debounce) | `touch::init()`, `touch::update()`, `touch::getEvent()` | `esp32/src/touch_handler.cpp` |
 | NVS config store (CRC32 validated, driveMode/brightness/LED/volume, dirty-flag deferred writes) | `config_store::init()`, `config_store::save()`, `config_store::flush()` | `esp32/src/config_store.cpp` |
-| HC-SR04 obstacle sensor (GPIO 6/7, 25 Hz, 5-zone mapping, stuck detection) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
+| TOFSense-M obstacle sensor (GPIO 18 UART1 RX, 921600 bps, 5-zone mapping, stuck detection) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
 | Obstacle CAN TX (0x208 DLC 5 at 66 ms + 0x209 DLC 4 at 100 ms) | `can_obstacle::init()`, `can_obstacle::update()` | `esp32/src/can/can_obstacle.cpp` |
 | Power manager (ignition key GPIO 40/41, OFF→RUNNING→SHUTTING_DOWN) | `power_mgr::init()`, `power_mgr::update()` | `esp32/src/power_manager.cpp` |
 
@@ -544,7 +544,7 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | **Sensor Management** | HIGH | `current.cpp`, `temperature.cpp`, `wheels.cpp`, `pedal.cpp` | INA226×6, DS18B20×5, wheel×4, pedal ADC, encoder | ✅ Reimplemented | 100% |
 | **CAN Communication** | CRITICAL | Did not exist (monolithic) | Full protocol (24 message types, frozen contract v1.3) | ✅ New | 100% |
 | **Gear System** | HIGH | `shifter.cpp` via MCP23017 | P/R/N/D1/D2 speed-gated + ESP32 MCP23017 shifter | ✅ Improved | 100% |
-| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | HC-SR04 on ESP32 + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100% |
+| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | TOFSense-M LiDAR on ESP32 (UART1) + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100% |
 | **Service Mode** | MEDIUM | Did not exist | 25 modules, CAN commands, factory restore | ✅ New | 100% |
 | **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS, gear + mode display | ✅ Reimplemented | 95% |
 | **Hidden Engineering Menu** | LOW | `menu_hidden.cpp` (46 KB) | Engineering screen (code 8989, 5 submenus, EXIT) | ✅ Reimplemented | 85% |
