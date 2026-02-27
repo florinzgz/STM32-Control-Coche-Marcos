@@ -24,7 +24,7 @@ inline constexpr uint8_t  CAN_MAX_PAYLOAD      = 8;        // Classic CAN
 // -------------------------------------------------------------------------
 // ESP32 → STM32  Commands / Heartbeat (§3.1)
 // -------------------------------------------------------------------------
-inline constexpr uint32_t HEARTBEAT_ESP32       = 0x011;    // DLC —, 100 ms
+inline constexpr uint32_t HEARTBEAT_ESP32       = 0x011;    // DLC 1, 100 ms
 inline constexpr uint32_t CMD_THROTTLE          = 0x100;    // DLC 1, 50 ms
 inline constexpr uint32_t CMD_STEERING          = 0x101;    // DLC 2, 50 ms
 inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 2 (byte0=mode flags, byte1=gear), on-demand
@@ -38,7 +38,7 @@ inline constexpr uint32_t CMD_ACK               = 0x103;    // DLC 3, on-demand 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  Status / Heartbeat (§3.2)
 // -------------------------------------------------------------------------
-inline constexpr uint32_t HEARTBEAT_STM32       = 0x001;    // DLC 4, 100 ms
+inline constexpr uint32_t HEARTBEAT_STM32       = 0x001;    // DLC 5, 100 ms
 inline constexpr uint32_t STATUS_SPEED          = 0x200;    // DLC 8, 100 ms
 inline constexpr uint32_t STATUS_CURRENT        = 0x201;    // DLC 8, 100 ms
 inline constexpr uint32_t STATUS_TEMP           = 0x202;    // DLC 5, 1000 ms
@@ -95,7 +95,7 @@ enum class SystemState : uint8_t {
 // -------------------------------------------------------------------------
 enum class FaultFlag : uint8_t {
     CAN_TIMEOUT       = 0x01,   // Bit 0: ESP32 heartbeat lost > 250 ms
-    TEMP_OVERLOAD     = 0x02,   // Bit 1: Motor temperature > 90 °C
+    TEMP_OVERLOAD     = 0x02,   // Bit 1: Motor temperature ≥ 80 °C (warning or critical)
     CURRENT_OVERLOAD  = 0x04,   // Bit 2: Motor current > 25 A
     ENCODER_ERROR     = 0x08,   // Bit 3: Encoder / sensor fault
     WHEEL_SENSOR      = 0x10,   // Bit 4: Wheel speed sensor fault

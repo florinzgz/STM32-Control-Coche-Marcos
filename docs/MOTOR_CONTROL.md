@@ -32,60 +32,42 @@ El diseño original consideraba el módulo **PCA9685** (16 canales PWM vía I²C
 ✅ **Ventajas del Control Directo STM32:**
 - **PWM @ 20 kHz** (inaudible, reduce vibración)
 - **Latencia <1 µs** (actualización instantánea)
-- **Resolución 13-bit** (8500 pasos de duty cycle)
+- **Resolución ~12-bit** (4250 pasos de duty cycle, center-aligned)
 - **Hardware dedicado** (TIM1/TIM8 sin carga CPU)
 - **Paralelismo total** (5 motores actualizados simultáneamente)
 
 ### Diagrama de Bloques
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                         STM32G474RE                           │
-│                                                                │
-│  ┌─────────────────┐         ┌─────────────────┐             │
-│  │  TIM1 (170 MHz) │         │  TIM8 (170 MHz) │             │
-│  │   PWM @ 20 kHz  │         │   PWM @ 20 kHz  │             │
-│  ├─────┬─────┬─────┤         └────────┬────────┘             │
-│  │ CH1 │ CH2 │ CH3 │ CH4              │ CH3                  │
-│  │ PA8 │ PA9 │PA10 │PA11              │ PC8                  │
-│  └──┬──┴──┬──┴──┬──┴──┬──             └──┬──                 │
-└─────┼─────┼─────┼─────┼─────────────────┼───────────────────┘
-      │     │     │     │                 │
-    ┌─▼───┐ │     │     │                 │
-    │BTS  │ │     │     │                 │
-    │7960 │ │     │     │                 │
-    │ FL  │ │     │     │                 │
-    └──┬──┘ │     │     │                 │
-       │    │     │     │                 │
-    [Motor] │     │     │              [Motor]
-      FL    │     │     │             Steering
-            │     │     │
-          ┌─▼───┐ │     │
-          │BTS  │ │     │
-          │7960 │ │     │
-          │ FR  │ │     │
-          └──┬──┘ │     │
-             │    │     │
-          [Motor] │     │
-            FR    │     │
-                  │     │
-                ┌─▼───┐ │
-                │BTS  │ │
-                │7960 │ │
-                │ RL  │ │
-                └──┬──┘ │
-                   │    │
-                [Motor] │
-                  RL    │
-                        │
-                      ┌─▼───┐
-                      │BTS  │
-                      │7960 │
-                      │ RR  │
-                      └──┬──┘
-                         │
-                      [Motor]
-                        RR
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              STM32G474RE                                     │
+│                                                                              │
+│  ┌──────────────────────┐  ┌──────────────────────┐  ┌────────────────────┐ │
+│  │   TIM1 (advanced)    │  │   TIM8 (advanced)    │  │  TIM3 (general)    │ │
+│  │   Center-aligned     │  │   Center-aligned     │  │  Center-aligned    │ │
+│  │   BREAK2 → LOCKUP    │  │   BREAK2 → LOCKUP    │  │  No BREAK (sw)     │ │
+│  │   ARR = 4249         │  │   ARR = 4249         │  │  ARR = 4249        │ │
+│  │   20 kHz             │  │   20 kHz             │  │  20 kHz            │ │
+│  ├──────┬───────┬───────┤  ├──────┬───────┬───────┤  ├──────┬─────────────┤ │
+│  │ CH1  │  CH2  │ CH3   │  │ CH1  │  CH2  │ CH3   │  │ CH1  │  CH2        │ │
+│  │ PA8  │  PA9  │ PA10  │  │ PC6  │  PC7  │ PC8   │  │ PA6  │  PA7        │ │
+│  │RPWM  │ LPWM  │RPWM   │  │RPWM  │ LPWM  │RPWM   │  │RPWM  │ LPWM       │ │
+│  │ FL   │  FL   │ FR    │  │ RL   │  RL   │ RR    │  │STEER │ STEER       │ │
+│  │      │       │ CH4   │  │      │       │ CH4   │  │      │             │ │
+│  │      │       │ PA11  │  │      │       │ PC9   │  │      │             │ │
+│  │      │       │LPWM   │  │      │       │LPWM   │  │      │             │ │
+│  │      │       │ FR    │  │      │       │ RR    │  │      │             │ │
+│  └──┬───┴──┬────┴──┬────┘  └──┬───┴──┬────┴──┬────┘  └──┬───┴──┬──────────┘ │
+└─────┼──────┼───────┼──────────┼──────┼───────┼──────────┼──────┼────────────┘
+      │      │       │          │      │       │          │      │
+    ┌─▼──┐ ┌─▼──┐  ┌─▼──┐    ┌─▼──┐ ┌─▼──┐  ┌─▼──┐    ┌─▼──┐ ┌─▼──┐
+    │BTS │ │BTS │  │BTS │    │BTS │ │BTS │  │BTS │    │BTS │ │BTS │
+    │7960│ │7960│  │7960│    │7960│ │7960│  │7960│    │7960│ │7960│
+    │RPWM│ │LPWM│  │RPWM│    │RPWM│ │LPWM│  │RPWM│    │RPWM│ │LPWM│
+    └──┬─┘ └──┬─┘  └──┬─┘    └──┬─┘ └──┬─┘  └──┬─┘    └──┬─┘ └──┬─┘
+       └──┬───┘       └──┬───┘    └──┬───┘       └──┬───┘    └──┬───┘
+       [Motor]         [Motor]    [Motor]         [Motor]    [Motor]
+         FL              FR         RL              RR       STEER
 ```
 
 ---
@@ -104,62 +86,69 @@ El diseño original consideraba el módulo **PCA9685** (16 canales PWM vía I²C
 
 ### Señales de Control (por motor)
 
-Cada BTS7960 requiere **3 señales** desde el STM32:
+Cada BTS7960 requiere **2 señales PWM** desde el STM32 (RPWM y LPWM del mismo timer):
 
 | Señal | Tipo | Función | Estado Inactivo |
 |-------|------|---------|-----------------|
-| **PWM** | Salida Timer (0-100%) | Modulación de potencia | 0% |
-| **DIR** | GPIO Output | Dirección de giro (0=CW, 1=CCW) | LOW |
-| **EN** | GPIO Output | Habilitación driver (1=ON, 0=OFF) | LOW |
+| **RPWM** | Salida Timer (0-100%) | Giro hacia adelante | 0% |
+| **LPWM** | Salida Timer (0-100%) | Giro hacia atrás | 0% |
+| **EN** | GPIO Output o 3.3V fijo | Habilitación driver (1=ON, 0=OFF) | Según motor |
 
-### Tabla de Verdad BTS7960
+> **Nota:** Solo PC5 (EN_FL) y PC13 (EN_RR) son GPIO activos. Los demás BTS7960
+> tienen R_EN/L_EN conectados fijo a 3.3 V.
 
-| EN | DIR | PWM | Resultado |
-|----|-----|-----|-----------|
+### Tabla de Verdad BTS7960 (RPWM/LPWM)
+
+| EN | RPWM | LPWM | Resultado |
+|----|------|------|-----------|
 | 0 | X | X | Motor DETENIDO (alta impedancia) |
-| 1 | 0 | 50% | Motor gira CW a 50% potencia |
-| 1 | 1 | 75% | Motor gira CCW a 75% potencia |
-| 1 | X | 0% | Motor FRENADO (cortocircuito eléctrico) |
+| 1 | 50% | 0% | Motor gira CW a 50% potencia |
+| 1 | 0% | 75% | Motor gira CCW a 75% potencia |
+| 1 | 0% | 0% | Motor FRENADO (cortocircuito eléctrico) |
+
+> **Nunca** se generan RPWM y LPWM distintos de cero simultáneamente.
 
 ---
 
 ## ⏱️ Configuración de Timers
 
-### TIM1 - Motores de Tracción (4 canales)
+### TIM1 - Motores de Tracción FL/FR (4 canales: RPWM + LPWM por motor)
 
 ```c
-// Configuración TIM1 @ 20 kHz
+// Configuración TIM1 @ 20 kHz (center-aligned)
 void TIM1_PWM_Init(void) {
-    // 1. Habilitar reloj TIM1
     __HAL_RCC_TIM1_CLK_ENABLE();
     
-    // 2. Configuración base del timer
     TIM_HandleTypeDef htim1;
     htim1.Instance = TIM1;
     htim1.Init.Prescaler = 0;                    // Sin prescaler (170 MHz)
-    htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim1.Init.Period = 8499;                    // ARR: 170 MHz / 8500 = 20 kHz
+    htim1.Init.CounterMode = TIM_COUNTERMODE_CENTERALIGNED1;
+    htim1.Init.Period = 4249;                    // Center-aligned: 170 MHz / (2 × 4250) = 20 kHz
     htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    htim1.Init.RepetitionCounter = 0;            // Sin repetición
+    htim1.Init.RepetitionCounter = 0;
     htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
     HAL_TIM_PWM_Init(&htim1);
     
-    // 3. Configuración de canales PWM (4 canales idénticos)
     TIM_OC_InitTypeDef sConfigOC = {0};
-    sConfigOC.OCMode = TIM_OCMODE_PWM1;          // PWM mode 1
-    sConfigOC.Pulse = 0;                         // Duty cycle inicial = 0%
-    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;  // Activo en alto
-    sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;
+    sConfigOC.Pulse = 0;
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
     sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
     sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-    sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
     
-    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1); // FL
-    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2); // FR
-    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3); // RL
-    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4); // RR
+    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1); // RPWM_FL (PA8)
+    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2); // LPWM_FL (PA9)
+    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3); // RPWM_FR (PA10)
+    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4); // LPWM_FR (PA11)
     
-    // 4. Iniciar PWM en todos los canales
+    // BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
+    TIM_BreakDeadTimeConfigTypeDef sBreakCfg = {0};
+    sBreakCfg.OffStateRunMode = TIM_OSSR_ENABLE;
+    sBreakCfg.OffStateIDLEMode = TIM_OSSI_ENABLE;
+    sBreakCfg.Break2State = TIM_BREAK2_ENABLE;
+    sBreakCfg.Break2Polarity = TIM_BREAK2POLARITY_HIGH;
+    HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakCfg);
+    
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
@@ -167,18 +156,18 @@ void TIM1_PWM_Init(void) {
 }
 ```
 
-### TIM8 - Motor de Dirección (1 canal)
+### TIM8 - Motores de Tracción RL/RR (4 canales: RPWM + LPWM por motor)
 
 ```c
-// Configuración TIM8 @ 20 kHz (solo CH3)
+// Configuración TIM8 @ 20 kHz (center-aligned, BREAK2 → LOCKUP)
 void TIM8_PWM_Init(void) {
     __HAL_RCC_TIM8_CLK_ENABLE();
     
     TIM_HandleTypeDef htim8;
     htim8.Instance = TIM8;
     htim8.Init.Prescaler = 0;
-    htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim8.Init.Period = 8499;                    // 20 kHz
+    htim8.Init.CounterMode = TIM_COUNTERMODE_CENTERALIGNED1;
+    htim8.Init.Period = 4249;                    // 170 MHz / (2 × 4250) = 20 kHz
     htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     htim8.Init.RepetitionCounter = 0;
     htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -190,29 +179,77 @@ void TIM8_PWM_Init(void) {
     sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
     sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
     
-    HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_3);
+    HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_1); // RPWM_RL (PC6)
+    HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_2); // LPWM_RL (PC7)
+    HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_3); // RPWM_RR (PC8)
+    HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_4); // LPWM_RR (PC9)
+    
+    // BREAK2 armed to Cortex LOCKUP
+    TIM_BreakDeadTimeConfigTypeDef sBreakCfg = {0};
+    sBreakCfg.OffStateRunMode = TIM_OSSR_ENABLE;
+    sBreakCfg.OffStateIDLEMode = TIM_OSSI_ENABLE;
+    sBreakCfg.Break2State = TIM_BREAK2_ENABLE;
+    sBreakCfg.Break2Polarity = TIM_BREAK2POLARITY_HIGH;
+    HAL_TIMEx_ConfigBreakDeadTime(&htim8, &sBreakCfg);
+    
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
     HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);
 }
+```
+
+### TIM3 - Motor de Dirección (2 canales: RPWM + LPWM)
+
+```c
+// Configuración TIM3 @ 20 kHz (center-aligned, sin BREAK — protección por software)
+void TIM3_PWM_Init(void) {
+    __HAL_RCC_TIM3_CLK_ENABLE();
+    
+    TIM_HandleTypeDef htim3;
+    htim3.Instance = TIM3;
+    htim3.Init.Prescaler = 0;
+    htim3.Init.CounterMode = TIM_COUNTERMODE_CENTERALIGNED1;
+    htim3.Init.Period = 4249;                    // 20 kHz
+    htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim3.Init.RepetitionCounter = 0;
+    htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    HAL_TIM_PWM_Init(&htim3);
+    
+    TIM_OC_InitTypeDef sConfigOC = {0};
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;
+    sConfigOC.Pulse = 0;
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+    
+    HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1); // RPWM_STEER (PA6)
+    HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2); // LPWM_STEER (PA7)
+    
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+}
+// Note: TIM3 has no BREAK input. Fault handlers (HardFault, BusFault, UsageFault)
+// write TIM3->CCR1 = 0 and TIM3->CCR2 = 0 directly to stop steering on CPU fault.
 ```
 
 ### Cálculo de Duty Cycle
 
-**Fórmula:**
+**Fórmula (center-aligned):**
 ```
-Duty Cycle (%) = (CCR / (ARR + 1)) × 100
+Duty Cycle (%) = (CCR / ARR) × 100
 ```
 
 **Ejemplo:**
-- ARR = 8499 (período)
-- CCR = 4250 → 50.0% duty cycle
+- ARR = 4249 (período center-aligned)
+- CCR = 2125 → 50.0% duty cycle
 - CCR = 0 → 0% (motor detenido)
-- CCR = 8499 → 100% (máxima potencia)
+- CCR = 4249 → 100% (máxima potencia)
 
 **Conversión de porcentaje a CCR:**
 ```c
 uint16_t percent_to_CCR(uint8_t percent) {
     if (percent > 100) percent = 100;
-    return (uint16_t)((percent * 8500UL) / 100);
+    return (uint16_t)((percent * 4249UL) / 100);
 }
 ```
 
@@ -220,26 +257,30 @@ uint16_t percent_to_CCR(uint8_t percent) {
 
 ## 🚗 Control de Motores de Tracción
 
-### Estructura de Datos
+### Arquitectura de Control (RPWM/LPWM directo)
+
+El firmware actual genera **dos señales PWM por motor** (RPWM y LPWM) directamente
+desde los timers hardware. No se usan pines DIR separados. La dirección se codifica
+seleccionando qué canal (RPWM o LPWM) recibe el duty cycle:
 
 ```c
-typedef struct {
-    GPIO_TypeDef *DIR_PORT;
-    uint16_t      DIR_PIN;
-    GPIO_TypeDef *EN_PORT;
-    uint16_t      EN_PIN;
-    TIM_HandleTypeDef *htim;
-    uint32_t      channel;
-    int8_t        power_pct;      // -100 a +100 (negativo = reversa)
-    uint8_t       enabled;
-} Motor_t;
-
-// Instancias de motores de tracción
-Motor_t motor_FL = {GPIOC, GPIO_PIN_0, GPIOC, GPIO_PIN_1, &htim1, TIM_CHANNEL_1, 0, 0};
-Motor_t motor_FR = {GPIOC, GPIO_PIN_2, GPIOC, GPIO_PIN_3, &htim1, TIM_CHANNEL_2, 0, 0};
-Motor_t motor_RL = {GPIOC, GPIO_PIN_4, GPIOC, GPIO_PIN_5, &htim1, TIM_CHANNEL_3, 0, 0};
-Motor_t motor_RR = {GPIOC, GPIO_PIN_6, GPIOC, GPIO_PIN_7, &htim1, TIM_CHANNEL_4, 0, 0};
+// API de control por motor — solo un canal activo a la vez
+void Motor_SetSignedPWM_FL(int16_t speed);   // + = RPWM (avance), - = LPWM (retroceso)
+void Motor_SetSignedPWM_FR(int16_t speed);
+void Motor_SetSignedPWM_RL(int16_t speed);
+void Motor_SetSignedPWM_RR(int16_t speed);
+void Motor_SetSignedPWM_STEER(int16_t speed);
 ```
+
+**Asignación de pines por motor:**
+
+| Motor | RPWM | LPWM | Timer | EN |
+|-------|------|------|-------|----|
+| FL | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 (GPIO) |
+| FR | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | 3.3V fijo |
+| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | 3.3V fijo |
+| RR | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 (GPIO) |
+| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | 3.3V fijo |
 
 ### Función de Control de Motor
 

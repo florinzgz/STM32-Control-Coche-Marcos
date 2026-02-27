@@ -13,8 +13,8 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 ### Motor System
 - **Traction Motors**: 4x independent (FL, FR, RL, RR)
 - **Steering Motor**: 1x with encoder feedback
-- **Motor Drivers**: 5x DRV8825 stepper drivers
-- **Control**: PWM + Direction + Enable signals
+- **Motor Drivers**: 5x BTS7960 H-bridge drivers (RPWM/LPWM direct from timers, no external logic)
+- **Control**: RPWM/LPWM per motor (direction encoded in channel selection) + Enable signals
 
 ### Sensors
 - **Wheel Speed**: 4x Hall effect sensors
@@ -28,37 +28,37 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 - **Protocol**: Custom message set for vehicle control
 
 ### Power Management
-- **Relays**: 3x (Main, Traction, Steering)
-- **Watchdog**: Independent watchdog timer
+- **Relays**: 3x power (Main, Traction, Steering) + 2x LED strip (Front, Rear)
+- **Watchdog**: Independent watchdog timer (~500 ms)
+- **BREAK2**: TIM1/TIM8 BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
 
 ## Pin Configuration
 
-### PWM Outputs
+### Motor PWM Outputs (RPWM/LPWM — no external logic)
 | Pin | Function | Timer | Description |
 |-----|----------|-------|-------------|
-| PA8 | PWM_FL | TIM1_CH1 | Front Left Motor |
-| PA9 | PWM_FR | TIM1_CH2 | Front Right Motor |
-| PA10 | PWM_RL | TIM1_CH3 | Rear Left Motor |
-| PA11 | PWM_RR | TIM1_CH4 | Rear Right Motor |
-| PC8 | PWM_STEER | TIM8_CH3 | Steering Motor |
+| PA8 | RPWM_FL | TIM1_CH1 | Front Left Motor — forward |
+| PA9 | LPWM_FL | TIM1_CH2 | Front Left Motor — reverse |
+| PA10 | RPWM_FR | TIM1_CH3 | Front Right Motor — forward |
+| PA11 | LPWM_FR | TIM1_CH4 | Front Right Motor — reverse |
+| PC6 | RPWM_RL | TIM8_CH1 | Rear Left Motor — forward |
+| PC7 | LPWM_RL | TIM8_CH2 | Rear Left Motor — reverse |
+| PC8 | RPWM_RR | TIM8_CH3 | Rear Right Motor — forward |
+| PC9 | LPWM_RR | TIM8_CH4 | Rear Right Motor — reverse |
+| PA6 | RPWM_STEER | TIM3_CH1 | Steering Motor — forward |
+| PA7 | LPWM_STEER | TIM3_CH2 | Steering Motor — reverse |
 
-### Direction Control
-| Pin | Function |
-|-----|----------|
-| PC0 | DIR_FL |
-| PC1 | DIR_FR |
-| PC2 | DIR_RL |
-| PC3 | DIR_RR |
-| PC4 | DIR_STEER |
+> **Note:** Direction pins (PC0–PC4) are **freed** and no longer used.
+> RPWM/LPWM are generated directly by hardware timers. Only one channel is
+> active at a time — never simultaneous non-zero.
 
 ### Enable Signals
-| Pin | Function |
-|-----|----------|
-| PC5 | EN_FL |
-| PC6 | EN_FR |
-| PC7 | EN_RL |
-| PC8 | EN_RR |
-| PC9 | EN_STEER |
+| Pin | Function | Notes |
+|-----|----------|-------|
+| PC5 | EN_FL | GPIO output, active HIGH |
+| PC13 | EN_RR | GPIO output, active HIGH |
+
+> EN pins for FR, RL and STEER BTS7960 modules: wire R_EN/L_EN directly to 3.3 V.
 
 ### Relays
 | Pin | Function |
@@ -66,6 +66,8 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 | PC10 | RELAY_MAIN |
 | PC11 | RELAY_TRAC |
 | PC12 | RELAY_DIR |
+| PB10 | RELAY_LED (front WS2812B 5 V supply) |
+| PB11 | RELAY_LED_REAR (rear WS2812B 5 V supply) |
 
 ### Encoder Interface
 | Pin | Function | Type | Specification |
@@ -88,11 +90,13 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 |-----|----------|
 | PA3 | ADC1_IN4 (Pedal) |
 
-### External Interrupts
+### Wheel Speed Sensors (EXTI)
 | Pin | Function |
 |-----|----------|
-| PA15 | Key ON |
-| PB10 | Wheel RR |
+| PA0 | EXTI0 — Wheel FL |
+| PA1 | EXTI1 — Wheel FR |
+| PA2 | EXTI2 — Wheel RL |
+| PB15 | EXTI15 — Wheel RR |
 
 ## Software Architecture
 
@@ -107,15 +111,29 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 
 | ID | Direction | Name | Description | Data Format |
 |----|-----------|------|-------------|-------------|
-| 0x100 | STM32→ESP32 | Heartbeat STM32 | Alive signal | [0x01, ...] |
-| 0x101 | ESP32→STM32 | Heartbeat ESP32 | Alive signal | [0x01, ...] |
-| 0x200 | ESP32→STM32 | CMD Throttle | Throttle 0-100% | [throttle%, ...] |
-| 0x201 | ESP32→STM32 | CMD Steering | Steering angle | [LSB, MSB, ...] |
-| 0x300 | STM32→ESP32 | Status Speed | Wheel speeds | [FL_L, FL_H, FR_L, FR_H, ...] |
-| 0x301 | STM32→ESP32 | Status Current | Motor currents | [FL_L, FL_H, ...] |
-| 0x302 | STM32→ESP32 | Status Temp | Temperatures | [T1, T2, T3, T4, T5] |
-| 0x303 | STM32→ESP32 | Status Safety | ABS/TCS/Errors | [abs, tcs, error_code, ...] |
-| 0x304 | STM32→ESP32 | Status Steering | Steering position | [angle_L, angle_H, calibrated, ...] |
+| 0x001 | STM32→ESP32 | Heartbeat STM32 | Alive + fault flags (DLC 5) | [counter, state, faultFlags, errorCode, statusFlags] |
+| 0x011 | ESP32→STM32 | Heartbeat ESP32 | Alive counter | [counter] |
+| 0x100 | ESP32→STM32 | CMD Throttle | Throttle 0-100% | [throttle%] |
+| 0x101 | ESP32→STM32 | CMD Steering | Steering angle | [LSB, MSB] |
+| 0x102 | ESP32→STM32 | CMD Mode | Gear + 4WD flag | [flags, gear] |
+| 0x103 | STM32→ESP32 | CMD ACK | Command ack | [cmdId, result, systemState] |
+| 0x120 | ESP32→STM32 | CMD LED | LED relay toggle | [front, rear] |
+| 0x200 | STM32→ESP32 | Status Speed | Wheel speeds | [FL_L, FL_H, FR_L, FR_H, RL_L, RL_H, RR_L, RR_H] |
+| 0x201 | STM32→ESP32 | Status Current | Motor currents | [FL_L, FL_H, FR_L, FR_H, RL_L, RL_H, RR_L, RR_H] |
+| 0x202 | STM32→ESP32 | Status Temp | Temperatures (°C) | [T1, T2, T3, T4, T5] |
+| 0x203 | STM32→ESP32 | Status Safety | ABS/TCS/Errors | [abs, tcs, error_code] |
+| 0x204 | STM32→ESP32 | Status Steering | Steering position | [angle_L, angle_H, calibrated] |
+| 0x205 | STM32→ESP32 | Status Traction | Per-wheel scale (%) | [FL, FR, RL, RR] |
+| 0x206 | STM32→ESP32 | Status TempMap | Mapped temps (°C) | [FL, FR, RL, RR, Ambient] |
+| 0x207 | STM32→ESP32 | Status Battery | Bus current/voltage | [I_L, I_H, V_L, V_H] |
+| 0x208 | ESP32→STM32 | Obstacle Distance | Distance + zone | [mm_L, mm_H, zone, health, counter] |
+| 0x209 | ESP32→STM32 | Obstacle Safety | Obstacle state | [zone, status, stuck] |
+| 0x20A | STM32→ESP32 | Status Lights | LED relay states | [front, rear] |
+| 0x300 | Both | Diag Error | Diagnostic error | [errorCode, subsystem] |
+| 0x301 | STM32→ESP32 | Service Faults | Fault bitmask | [b0, b1, b2, b3] |
+| 0x302 | STM32→ESP32 | Service Enabled | Enabled bitmask | [b0, b1, b2, b3] |
+| 0x303 | STM32→ESP32 | Service Disabled | Disabled bitmask | [b0, b1, b2, b3] |
+| 0x110 | ESP32→STM32 | Service Cmd | Module control | [action, moduleId] |
 
 ### Control Features
 
@@ -215,8 +233,14 @@ The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communi
 - **[Visual Pin Diagrams](docs/DIAGRAMA_PINES_VISUAL.md)** - ASCII diagrams for wiring
 - **[Quick Reference](docs/CONEXIONES_RAPIDAS_ESP32.md)** - Fast lookup tables
 
-**Display:** TFT ST7796 480×320 (GPIO 13-17, 21, 42)  
-**CAN-Bus:** TJA1051 transceiver (GPIO 4, 5)
+**Display:** TFT ST7796 480×320 (GPIO 10, 12–14, 21, 38, 39, 42)  
+**CAN-Bus:** TJA1051 transceiver (GPIO 4, 5)  
+**Audio:** DFPlayer Mini (GPIO 43 TX, 44 RX) + audio relay (GPIO 11)  
+**Traction switch (2WD/4WD):** GPIO 15  
+**Shifter:** MCP23017 I2C (GPIO 8 SDA, 9 SCL)  
+**LEDs:** WS2812B front (GPIO 47, 28 LEDs), rear (GPIO 48, 16 LEDs)  
+**Power:** Ignition sense (GPIO 40), power hold (GPIO 41)  
+**Obstacle:** HC-SR04 (GPIO 6 TRIG, 7 ECHO)
 
 See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the full firmware architecture.
 

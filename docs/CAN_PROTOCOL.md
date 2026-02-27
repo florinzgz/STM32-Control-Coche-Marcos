@@ -43,11 +43,11 @@ hfdcan1.AutoRetransmission = ENABLE;
 hfdcan1.TransmitPause = DISABLE;
 
 // Nominal Bit Timing @ 500 kbps (170 MHz APB1)
-hfdcan1.NominalPrescaler = 20;                   // 170 MHz / 20 = 8.5 MHz
-hfdcan1.NominalTimeSeg1 = 13;                    // 13 TQ
-hfdcan1.NominalTimeSeg2 = 3;                     // 3 TQ
+hfdcan1.NominalPrescaler = 17;                   // 170 MHz / 17 = 10 MHz
+hfdcan1.NominalTimeSeg1 = 14;                    // 14 TQ
+hfdcan1.NominalTimeSeg2 = 5;                     // 5 TQ
 hfdcan1.NominalSyncJumpWidth = 1;                // 1 TQ
-// Total: (1 + 13 + 3) = 17 TQ → 8.5 MHz / 17 = 500 kbps
+// Total: (1 + 14 + 5) = 20 TQ → 10 MHz / 20 = 500 kbps
 ```
 
 ---
@@ -75,7 +75,7 @@ hfdcan1.NominalSyncJumpWidth = 1;                // 1 TQ
 **Principios de Diseño:**
 1. **ESP32 sugiere, STM32 decide:** El ESP32 envía comandos de usuario, pero el STM32 tiene autoridad final sobre actuadores.
 2. **Heartbeat mutuo:** Ambos nodos deben enviar señales de vida cada 100 ms.
-3. **Timeout de seguridad:** Si un nodo no responde en 250 ms, el otro entra en modo seguro.
+3. **Timeout de seguridad:** Si el ESP32 no responde en 250 ms, el STM32 entra en LIMP_HOME (no SAFE). Si el STM32 no responde, el ESP32 muestra alerta crítica.
 4. **Validación de comandos:** El STM32 valida todos los comandos antes de ejecutarlos.
 
 ---
@@ -89,16 +89,18 @@ hfdcan1.NominalSyncJumpWidth = 1;                // 1 TQ
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
 | 0 | `alive_counter` | uint8_t | 0-255 | - | Contador cíclico (incrementa cada mensaje) |
-| 1 | `system_state` | uint8_t | 0-3 | - | Estado HMI (0=Boot, 1=Normal, 2=Warning, 3=Error) |
-| 2 | `reserved` | uint8_t | 0 | - | Reservado para futuro uso |
-| 3 | `checksum` | uint8_t | CRC8 | - | CRC8 de bytes 0-2 |
+
+**DLC:** 1
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Ejemplo:**
 ```
-ID: 0x011  DLC: 4  Data: [0x42, 0x01, 0x00, 0xA3]
+ID: 0x011  DLC: 1  Data: [0x42]
 ```
+
+**Detección de freeze:** El STM32 detecta 5 tramas consecutivas con el mismo valor de `alive_counter`
+como ESP32 congelado y entra en modo LIMP_HOME (no SAFE).
 
 ---
 
@@ -109,7 +111,8 @@ ID: 0x011  DLC: 4  Data: [0x42, 0x01, 0x00, 0xA3]
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
 | 0 | `throttle_pct` | uint8_t | 0-100 | % | Porcentaje de aceleración solicitado |
-| 1 | `checksum` | uint8_t | CRC8 | - | CRC8 de byte 0 |
+
+**DLC:** 1
 
 **Frecuencia:** 50 ms (20 Hz) cuando hay cambio, 0 si inactivo
 
@@ -120,7 +123,7 @@ ID: 0x011  DLC: 4  Data: [0x42, 0x01, 0x00, 0xA3]
 
 **Ejemplo:**
 ```
-ID: 0x100  DLC: 2  Data: [0x4B, 0xE7]  // 75% throttle
+ID: 0x100  DLC: 1  Data: [0x4B]  // 75% throttle
 ```
 
 ---
@@ -131,15 +134,17 @@ ID: 0x100  DLC: 2  Data: [0x4B, 0xE7]  // 75% throttle
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0 | `steering_angle` | int8_t | -100 a +100 | % | Ángulo solicitado (-100=izq max, +100=der max) |
-| 1 | `checksum` | uint8_t | CRC8 | - | CRC8 de byte 0 |
+| 0-1 | `steering_angle_x10` | int16_t LE | -450 a +450 | 0.1° | Ángulo × 10, little-endian. Ej: -250 = -25.0° |
+
+**DLC:** 2
 
 **Frecuencia:** 50 ms (20 Hz)
 
-**Mapeo:**
-- -100% → Giro completo izquierda (~-45°)
-- 0% → Centro (0°)
-- +100% → Giro completo derecha (~+45°)
+**Decodificación STM32:**
+```c
+int16_t angle_raw = (int16_t)(rx_payload[0] | (rx_payload[1] << 8));
+float requested_deg = (float)angle_raw / 10.0f;  // resolución 0.1°
+```
 
 **Validación STM32:**
 - Verificar límites de encoder (-720 a +720 conteos)
@@ -147,31 +152,79 @@ ID: 0x100  DLC: 2  Data: [0x4B, 0xE7]  // 75% throttle
 
 **Ejemplo:**
 ```
-ID: 0x101  DLC: 2  Data: [0xE7, 0x3C]  // -25% (giro ligero izquierda)
+ID: 0x101  DLC: 2  Data: [0x06, 0xFF]  // 0xFF06 = -250 → -25.0°
 ```
 
 ---
 
 ### 0x102 - CMD_MODE
 
-**Propósito:** Comando de cambio de modo de conducción.
+**Propósito:** Comando de cambio de modo de conducción y marcha.
 
 | Byte | Campo | Tipo | Rango | Notas |
 |------|-------|------|-------|-------|
-| 0 | `drive_mode` | uint8_t | 0-2 | 0=REVERSE, 1=NEUTRAL, 2=FORWARD |
-| 1 | `checksum` | uint8_t | CRC8 | CRC8 de byte 0 |
+| 0 | `mode_flags` | uint8_t | Bitmask | bit0=4×4, bit1=tank_turn |
+| 1 | `gear` | uint8_t | 0-4 | 0=Park, 1=Reverse, 2=Neutral, 3=Forward, 4=Forward_D2 (opcional) |
 
-**Frecuencia:** On-demand (solo cuando cambia shifter)
+**DLC:** 1 o 2 (byte 1 es opcional — si se omite, la marcha no cambia)
+
+**Frecuencia:** On-demand (solo cuando cambia shifter o interruptor 2WD/4WD)
 
 **Validación STM32:**
-- Comparar con shifter físico (PB12/PB13/PB14)
-- Cambio solo permitido si velocidad < 1 km/h
-- Ignora comando si no coincide con shifter hardware
+- Cambio de modo (4x4/tank): solo permitido si velocidad < 0.5 km/h
+- Cambio de marcha: solo permitido si velocidad ≤ 1 km/h
+- Envía CMD_ACK (0x103) con resultado
 
 **Ejemplo:**
 ```
-ID: 0x102  DLC: 1  Data: [0x02]  // Solicitar FORWARD
+ID: 0x102  DLC: 2  Data: [0x01, 0x03]  // 4×4 activo, marcha Forward
 ```
+
+---
+
+### 0x103 - CMD_ACK (STM32→ESP32)
+
+**Propósito:** Confirmación de recepción y resultado de un comando.
+
+| Byte | Campo | Tipo | Rango | Notas |
+|------|-------|------|-------|-------|
+| 0 | `cmd_id_low` | uint8_t | - | Byte bajo del ID del comando confirmado (ej. 0x02 para CMD_MODE) |
+| 1 | `result` | uint8_t | 0-3 | 0=OK, 1=Rejected, 2=Invalid, 3=Blocked_by_safety |
+| 2 | `system_state` | uint8_t | 0-6 | Estado actual del sistema |
+
+**DLC:** 3
+
+**Frecuencia:** On-demand (tras CMD_MODE o SERVICE_CMD)
+
+---
+
+### 0x110 - SERVICE_CMD (ESP32→STM32)
+
+**Propósito:** Comando de Service Mode para habilitar/deshabilitar módulos individuales.
+
+| Byte | Campo | Tipo | Rango | Notas |
+|------|-------|------|-------|-------|
+| 0 | `action` | uint8_t | 0/1/0xFF | 0=Disable, 1=Enable, 0xFF=Factory_Restore |
+| 1 | `module_id` | uint8_t | 0-N | ID del módulo |
+
+**DLC:** 2
+
+**Frecuencia:** On-demand
+
+---
+
+### 0x120 - CMD_LED (ESP32→STM32)
+
+**Propósito:** Control de relés de alimentación LED WS2812B.
+
+| Byte | Campo | Tipo | Rango | Notas |
+|------|-------|------|-------|-------|
+| 0 | `front_relay` | uint8_t | 0/1 | 0=OFF, 1=ON (relé PB10 — tira frontal 28 LEDs) |
+| 1 | `rear_relay` | uint8_t | 0/1 | 0=OFF, 1=ON (relé PB11 — tira trasera 16 LEDs) |
+
+**DLC:** 2
+
+**Frecuencia:** On-demand
 
 ---
 
@@ -184,9 +237,12 @@ ID: 0x102  DLC: 1  Data: [0x02]  // Solicitar FORWARD
 | Byte | Campo | Tipo | Rango | Notas |
 |------|-------|------|-------|-------|
 | 0 | `alive_counter` | uint8_t | 0-255 | Contador cíclico |
-| 1 | `system_state` | uint8_t | 0-4 | 0=Boot, 1=Standby, 2=Active, 3=Safe, 4=Error |
+| 1 | `system_state` | uint8_t | 0-6 | 0=Boot, 1=Standby, 2=Active, 3=Degraded, 4=Safe, 5=Error, 6=LimpHome |
 | 2 | `fault_flags` | uint8_t | Bitmask | Ver tabla de fallos |
-| 3 | `checksum` | uint8_t | CRC8 | CRC8 de bytes 0-2 |
+| 3 | `error_code` | uint8_t | 0-13 | Safety_Error_t — código de fallo específico para HMI |
+| 4 | `status_flags` | uint8_t | Bitmask | bit0=startup_inhibit, bit1=4x4, bit2=tank_turn, bit3-5=DS18B20 count |
+
+**DLC:** 5
 
 **Frecuencia:** 100 ms (10 Hz)
 
@@ -201,12 +257,40 @@ ID: 0x102  DLC: 1  Data: [0x02]  // Solicitar FORWARD
 | 4 | `WHEEL_SENSOR_ERROR` | Sensor de rueda desconectado |
 | 5 | `ABS_ACTIVE` | ABS interviniendo |
 | 6 | `TCS_ACTIVE` | TCS interviniendo |
-| 7 | `RESERVED` | Reservado |
+| 7 | `CENTERING` | Centrado de dirección fallido |
+
+**Error Codes (Byte 3):**
+
+| Valor | Error | Descripción |
+|-------|-------|-------------|
+| 0 | NONE | Sin error |
+| 1 | OVERCURRENT | Sobrecorriente >25 A |
+| 2 | OVERTEMP | Sobretemperatura >80°C |
+| 3 | CAN_TIMEOUT | Timeout CAN ESP32 |
+| 4 | SENSOR_FAULT | Fallo de sensor |
+| 5 | MOTOR_STALL | Reservado (no implementado) |
+| 6 | EMERGENCY_STOP | Parada de emergencia |
+| 7 | WATCHDOG | Reset por watchdog |
+| 8 | CENTERING | Centrado de dirección fallido |
+| 9 | BATTERY_UV_WARN | Batería <20.0 V |
+| 10 | BATTERY_UV_CRIT | Batería <18.0 V |
+| 11 | I2C_FAILURE | Bus I2C bloqueado |
+| 12 | OBSTACLE | Emergencia por obstáculo |
+| 13 | CAN_BUSOFF | Bus-off FDCAN |
+
+**Status Flags (Byte 4):**
+
+| Bit | Flag | Descripción |
+|-----|------|-------------|
+| 0 | `STARTUP_INHIBIT` | Power-On Movement Prevention activa |
+| 1 | `MODE_4X4` | Modo 4×4 activo |
+| 2 | `TANK_TURN` | Tank turn activo |
+| 3-5 | `TEMP_COUNT` | Número de sensores DS18B20 detectados (0-5) |
 
 **Ejemplo:**
 ```
-ID: 0x001  DLC: 4  Data: [0x7F, 0x02, 0x20, 0xB4]
-// Estado: Active, ABS activo (bit 5 = 1)
+ID: 0x001  DLC: 5  Data: [0x7F, 0x02, 0x20, 0x00, 0x02]
+// alive=0x7F, state=Active(2), faultFlags=ABS(0x20), error=NONE(0), status=4x4(0x02)
 ```
 
 ---
@@ -217,45 +301,54 @@ ID: 0x001  DLC: 4  Data: [0x7F, 0x02, 0x20, 0xB4]
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0-1 | `speed_FL` | uint16_t | 0-65535 | mm/s | Velocidad rueda FL (LSB first) |
-| 2-3 | `speed_FR` | uint16_t | 0-65535 | mm/s | Velocidad rueda FR |
-| 4-5 | `speed_RL` | uint16_t | 0-65535 | mm/s | Velocidad rueda RL |
-| 6-7 | `speed_RR` | uint16_t | 0-65535 | mm/s | Velocidad rueda RR |
+| 0-1 | `speed_FL` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda FL |
+| 2-3 | `speed_FR` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda FR |
+| 4-5 | `speed_RL` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda RL |
+| 6-7 | `speed_RR` | uint16_t LE | 0-65535 | 0.1 km/h | Velocidad rueda RR |
+
+**DLC:** 8
 
 **Frecuencia:** 100 ms (10 Hz)
 
-**Conversión:**
-- Velocidad lineal (mm/s) = `(pulsos/segundo × perímetro_rueda_mm) / pulsos_por_rev`
-- Ejemplo: 300 mm rueda, 2 PPR → 1 pulso/s = 471 mm/s
+**Codificación STM32:**
+```c
+float_to_u16_clamped(Wheel_GetSpeed_FL() * 10)  // km/h × 10 → 0.1 km/h units
+```
 
 **Ejemplo:**
 ```
 ID: 0x200  DLC: 8  Data: [0x2C, 0x01, 0x30, 0x01, 0x28, 0x01, 0x2A, 0x01]
-// FL=300 mm/s, FR=304, RL=296, RR=298 (uniforme)
+// FL=30.0 km/h, FR=30.4, RL=29.6, RR=29.8
 ```
 
 ---
 
 ### 0x201 - STATUS_CURRENT
 
-**Propósito:** Corrientes de los 5 motores + batería principal.
+**Propósito:** Corrientes de los 4 motores de tracción.
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0 | `current_FL` | uint8_t | 0-255 | 0.1A | Motor FL (0-25.5A) |
-| 1 | `current_FR` | uint8_t | 0-255 | 0.1A | Motor FR |
-| 2 | `current_RL` | uint8_t | 0-255 | 0.1A | Motor RL |
-| 3 | `current_RR` | uint8_t | 0-255 | 0.1A | Motor RR |
-| 4 | `current_STEER` | uint8_t | 0-255 | 0.1A | Motor dirección |
-| 5 | `current_BATT` | uint8_t | 0-255 | 0.1A | Batería principal (suma) |
-| 6-7 | `reserved` | - | - | - | Reservado |
+| 0-1 | `current_FL` | uint16_t LE | 0-65535 | 0.01 A | Motor FL |
+| 2-3 | `current_FR` | uint16_t LE | 0-65535 | 0.01 A | Motor FR |
+| 4-5 | `current_RL` | uint16_t LE | 0-65535 | 0.01 A | Motor RL |
+| 6-7 | `current_RR` | uint16_t LE | 0-65535 | 0.01 A | Motor RR |
+
+**DLC:** 8
 
 **Frecuencia:** 100 ms (10 Hz)
 
+**Codificación STM32:**
+```c
+float_to_u16_clamped(Current_GetAmps(0) * 100)  // Amps × 100 → 0.01 A units
+```
+
+**Nota:** Corriente de dirección y batería se envían en 0x207 (STATUS_BATTERY).
+
 **Ejemplo:**
 ```
-ID: 0x201  DLC: 8  Data: [0x1E, 0x1F, 0x1D, 0x1E, 0x05, 0x7D, 0x00, 0x00]
-// FL=3.0A, FR=3.1A, RL=2.9A, RR=3.0A, STEER=0.5A, BATT=12.5A
+ID: 0x201  DLC: 8  Data: [0x2C, 0x01, 0x2E, 0x01, 0x2A, 0x01, 0x2C, 0x01]
+// FL=3.00A, FR=3.02A, RL=2.98A, RR=3.00A
 ```
 
 ---
@@ -271,18 +364,20 @@ ID: 0x201  DLC: 8  Data: [0x1E, 0x1F, 0x1D, 0x1E, 0x05, 0x7D, 0x00, 0x00]
 | 2 | `temp_RL` | int8_t | -128 a +127 | °C | Temperatura motor RL |
 | 3 | `temp_RR` | int8_t | -128 a +127 | °C | Temperatura motor RR |
 | 4 | `temp_AMB` | int8_t | -128 a +127 | °C | Temperatura ambiente |
-| 5-7 | `reserved` | - | - | - | Reservado |
 
-**Frecuencia:** 1000 ms (1 Hz) - baja prioridad
+**DLC:** 5
 
-**Umbrales de Protección:**
-- < 60°C → Normal (verde)
-- 60-80°C → Warning (amarillo), reducir potencia al 70%
-- > 80°C → Critical (rojo), limitar a 30% o detener
+**Frecuencia:** 1000 ms (1 Hz)
+
+**Umbrales de Protección (firmware):**
+- < 80°C → Normal
+- ≥ 80°C → DEGRADED (`TEMP_WARNING_C`)
+- ≥ 90°C → SAFE (`TEMP_CRITICAL_C`)
+- ≥ 130°C → Corte individual por motor
 
 **Ejemplo:**
 ```
-ID: 0x202  DLC: 8  Data: [0x37, 0x39, 0x38, 0x36, 0x19, 0x00, 0x00, 0x00]
+ID: 0x202  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 // FL=55°C, FR=57°C, RL=56°C, RR=54°C, AMB=25°C
 ```
 
@@ -294,17 +389,18 @@ ID: 0x202  DLC: 8  Data: [0x37, 0x39, 0x38, 0x36, 0x19, 0x00, 0x00, 0x00]
 
 | Byte | Campo | Tipo | Rango | Notas |
 |------|-------|------|-------|-------|
-| 0 | `abs_flags` | uint8_t | Bitmask | ABS activo por rueda (bit 0=FL, 1=FR, 2=RL, 3=RR) |
-| 1 | `tcs_flags` | uint8_t | Bitmask | TCS activo por rueda (bit 0=FL, 1=FR, 2=RL, 3=RR) |
-| 2 | `slip_max` | uint8_t | 0-100 | % de deslizamiento máximo detectado |
-| 3 | `checksum` | uint8_t | CRC8 | CRC8 de bytes 0-2 |
+| 0 | `abs_active` | uint8_t | 0/1 | 1 = ABS interviniendo |
+| 1 | `tcs_active` | uint8_t | 0/1 | 1 = TCS interviniendo |
+| 2 | `error_code` | uint8_t | 0-13 | Safety_Error_t (mismo que heartbeat byte 3) |
+
+**DLC:** 3
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Ejemplo:**
 ```
-ID: 0x203  DLC: 4  Data: [0x08, 0x00, 0x12, 0xC5]
-// ABS activo en RR (bit 3=1), deslizamiento 18%
+ID: 0x203  DLC: 3  Data: [0x01, 0x00, 0x02]
+// ABS activo, TCS inactivo, error=OVERTEMP(2)
 ```
 
 ---
@@ -315,21 +411,22 @@ ID: 0x203  DLC: 4  Data: [0x08, 0x00, 0x12, 0xC5]
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0-1 | `encoder_position` | int16_t | -720 a +720 | conteos | Posición encoder (LSB first) |
-| 2 | `steering_angle` | int8_t | -100 a +100 | % | Ángulo normalizado |
-| 3 | `checksum` | uint8_t | CRC8 | CRC8 de bytes 0-2 |
+| 0-1 | `angle` | int16_t LE | ±4667 | conteos | Posición encoder, little-endian |
+| 2 | `calibrated` | uint8_t | 0/1 | - | 1 = centrado calibrado |
+
+**DLC:** 3
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Conversión:**
 - 1 conteo = 0.075° (encoder E6B2-CWZ6C 1200 PPR × 4 = 4800 conteos/rev)
 - Centro = 0 conteos (calibrado en inicio)
-- Límites físicos: ±54° = ±720 conteos (máximo ángulo Ackermann)
+- Rango de viaje: ±350° (±4667 conteos)
 
 **Ejemplo:**
 ```
-ID: 0x204  DLC: 4  Data: [0xB4, 0xFF, 0xE7, 0x4A]
-// Posición: -76 conteos = -19° → -42% (giro moderado izquierda)
+ID: 0x204  DLC: 3  Data: [0xB4, 0xFF, 0x01]
+// Posición: -76 conteos = -5.7°, calibrado
 ```
 
 ---
@@ -398,34 +495,91 @@ ID: 0x206  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 
 ---
 
+### 0x207 - STATUS_BATTERY (STM32→ESP32)
+
+**Propósito:** Corriente y tensión del bus de batería 24 V (INA226 canal 4).
+
+| Byte | Campo | Tipo | Rango | Unidad | Notas |
+|------|-------|------|-------|--------|-------|
+| 0-1 | `current_x100` | uint16_t LE | 0-65535 | 0.01 A | Corriente × 100 (ej. 1250 = 12.50 A) |
+| 2-3 | `voltage_x100` | uint16_t LE | 0-65535 | 0.01 V | Tensión × 100 (ej. 2400 = 24.00 V) |
+
+**DLC:** 4
+
+**Frecuencia:** 100 ms (10 Hz)
+
+---
+
+### 0x208 - OBSTACLE_DISTANCE (ESP32→STM32)
+
+**Propósito:** Distancia al obstáculo desde sensor HC-SR04 (GPIO 6/7 del ESP32).
+
+| Byte | Campo | Tipo | Rango | Unidad | Notas |
+|------|-------|------|-------|--------|-------|
+| 0-1 | `distance_mm` | uint16_t LE | 20-4000 | mm | Distancia medida |
+| 2 | `zone` | uint8_t | 0-4 | - | 0=Normal, 1=Caution, 2=Warning, 3=Critical, 4=Emergency |
+| 3 | `health` | uint8_t | 0/1/2 | - | 0=OK, 1=Stuck, 2=NoData |
+| 4 | `counter` | uint8_t | 0-255 | - | Contador cíclico |
+
+**DLC:** 5
+
+**Frecuencia:** 66 ms (15 Hz)
+
+---
+
+### 0x209 - OBSTACLE_SAFETY (ESP32→STM32)
+
+**Propósito:** Estado de seguridad del sensor de obstáculos (informativo, para cross-validation).
+
+**DLC:** 8
+
+**Frecuencia:** 100 ms (10 Hz)
+
+---
+
+### 0x20A - STATUS_LIGHTS (STM32→ESP32)
+
+**Propósito:** Estado actual de los relés de iluminación LED.
+
+| Byte | Campo | Tipo | Rango | Notas |
+|------|-------|------|-------|-------|
+| 0 | `front_relay_state` | uint8_t | 0/1 | Estado relé PB10 (tira frontal) |
+| 1 | `rear_relay_state` | uint8_t | 0/1 | Estado relé PB11 (tira trasera) |
+
+**DLC:** 2
+
+**Frecuencia:** 1000 ms (1 Hz)
+
+---
+
 ## 🔔 Mensajes de Heartbeat
 
 ### Lógica de Heartbeat Mutuo
 
 ```c
 // STM32: Verificación de heartbeat ESP32
-uint32_t last_esp32_heartbeat = HAL_GetTick();
+// CAN timeout → LIMP_HOME (NOT SAFE) — communication loss is not a hazard
+// Vehicle remains mobile at walking speed with local pedal control.
 
-void FDCAN1_IT0_IRQHandler(void) {
-    if (rx_msg.Identifier == 0x011) {
-        last_esp32_heartbeat = HAL_GetTick();
-        // ESP32 está vivo
-    }
-}
-
-void main_loop(void) {
-    if ((HAL_GetTick() - last_esp32_heartbeat) > 250) {
-        // ESP32 no responde → Modo seguro
-        enter_safe_mode();
+void Safety_CheckCANTimeout(void) {
+    if ((HAL_GetTick() - last_esp32_heartbeat) > CAN_TIMEOUT_HEARTBEAT_MS) {
+        // ESP32 no responde → LIMP_HOME (20% torque, 5 km/h cap)
+        Safety_SetState(SYS_STATE_LIMP_HOME);
     }
 }
 ```
+
+### Detección de Freeze (5 tramas iguales)
+
+El STM32 compara el `alive_counter` de cada trama ESP32 con la anterior. Si
+`HEARTBEAT_COUNTER_FREEZE_COUNT` (5) tramas consecutivas llevan el mismo
+contador, el ESP32 se considera congelado → transición a LIMP_HOME.
 
 ### Respuesta ante Pérdida de Heartbeat
 
 | Nodo | Timeout | Acción |
 |------|---------|--------|
-| **STM32** | >250 ms sin ESP32 | 1. Detener motores suavemente<br>2. Abrir relés tracción<br>3. Centrar dirección<br>4. Enviar DIAG_ERROR 0x300 |
+| **STM32** | >250 ms sin ESP32 | LIMP_HOME: 20% torque, 5 km/h, pedal local, sin torque vectoring |
 | **ESP32** | >250 ms sin STM32 | 1. Mostrar alerta crítica<br>2. Audio de advertencia<br>3. Log de evento<br>4. Esperar reconexión |
 
 ---
@@ -434,36 +588,77 @@ void main_loop(void) {
 
 ### 0x300 - DIAG_ERROR
 
-**Propósito:** Reporte detallado de errores críticos.
+**Propósito:** Reporte de errores críticos.
 
 | Byte | Campo | Tipo | Notas |
 |------|-------|------|-------|
-| 0 | `error_code` | uint8_t | Código de error (ver tabla) |
-| 1 | `subsystem` | uint8_t | Subsistema afectado (0=Global, 1=Motor, 2=Sensor, 3=CAN) |
-| 2-3 | `error_data` | uint16_t | Datos específicos del error |
-| 4-7 | `timestamp` | uint32_t | Timestamp del error (ms desde boot) |
+| 0 | `error_code` | uint8_t | Código de error (Safety_Error_t) |
+| 1 | `subsystem` | uint8_t | 0=Global, 1=Motor, 2=Sensor, 3=CAN |
+
+**DLC:** 2
 
 **Frecuencia:** On-demand (solo cuando ocurre error)
 
-**Códigos de Error:**
+**Códigos de Error (Safety_Error_t):**
 
 | Código | Nombre | Descripción |
 |--------|--------|-------------|
-| 0x01 | `ERR_TIMEOUT_CAN` | Pérdida de heartbeat CAN |
-| 0x02 | `ERR_TEMP_CRITICAL` | Temperatura >80°C |
-| 0x03 | `ERR_CURRENT_OVERLOAD` | Corriente excesiva |
-| 0x04 | `ERR_ENCODER_FAULT` | Encoder desconectado/inválido |
-| 0x05 | `ERR_WHEEL_SENSOR` | Sensor de rueda fallo |
-| 0x10 | `ERR_WATCHDOG_RESET` | Reset por watchdog |
-| 0x20 | `ERR_I2C_TIMEOUT` | Timeout I2C (INA226) |
-| 0x21 | `ERR_ONEWIRE_TIMEOUT` | Timeout OneWire (DS18B20) |
-| 0xFF | `ERR_UNKNOWN` | Error desconocido |
+| 0 | `NONE` | Sin error |
+| 1 | `OVERCURRENT` | Corriente excesiva (>25 A) |
+| 2 | `OVERTEMP` | Temperatura ≥80°C |
+| 3 | `CAN_TIMEOUT` | Pérdida de heartbeat CAN |
+| 4 | `SENSOR_FAULT` | Fallo de sensor / NaN |
+| 5 | `MOTOR_STALL` | Motor bloqueado (reservado) |
+| 6 | `EMERGENCY_STOP` | Parada de emergencia |
+| 7 | `WATCHDOG` | Reset por watchdog |
+| 8 | `CENTERING` | Fallo de centrado de dirección |
+| 9 | `BATTERY_UV_WARN` | Batería < 20.0 V |
+| 10 | `BATTERY_UV_CRIT` | Batería < 18.0 V |
+| 11 | `I2C_FAILURE` | Bus I2C bloqueado |
+| 12 | `OBSTACLE` | Emergencia por obstáculo o timeout CAN obstáculo |
+| 13 | `CAN_BUSOFF` | Condición bus-off FDCAN |
 
 **Ejemplo:**
 ```
-ID: 0x300  DLC: 8  Data: [0x02, 0x01, 0x55, 0x00, 0x10, 0x27, 0x00, 0x00]
-// Error: TEMP_CRITICAL, Motor FL, Temp=85°C, Time=10000ms
+ID: 0x300  DLC: 2  Data: [0x02, 0x01]
+// Error: OVERTEMP(2), Subsystem: Motor(1)
 ```
+
+---
+
+### 0x301 - SERVICE_FAULTS (STM32→ESP32)
+
+**Propósito:** Bitmask de módulos con fallo detectado por Service Mode.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0-3 | `fault_bitmask` | uint32_t LE | Bit N = 1 → módulo N tiene fallo |
+
+**DLC:** 4 · **Frecuencia:** 1000 ms
+
+---
+
+### 0x302 - SERVICE_ENABLED (STM32→ESP32)
+
+**Propósito:** Bitmask de módulos habilitados por Service Mode.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0-3 | `enabled_bitmask` | uint32_t LE | Bit N = 1 → módulo N habilitado |
+
+**DLC:** 4 · **Frecuencia:** 1000 ms
+
+---
+
+### 0x303 - SERVICE_DISABLED (STM32→ESP32)
+
+**Propósito:** Bitmask de módulos deshabilitados por Service Mode.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0-3 | `disabled_bitmask` | uint32_t LE | Bit N = 1 → módulo N deshabilitado |
+
+**DLC:** 4 · **Frecuencia:** 1000 ms
 
 ---
 
@@ -477,28 +672,30 @@ ID: 0x300  DLC: 8  Data: [0x02, 0x01, 0x55, 0x00, 0x10, 0x27, 0x00, 0x00]
 | 0x011 | HEARTBEAT_ESP32 | **Alta** | Crítico para seguridad |
 | 0x100 | CMD_THROTTLE | Media | Control tiempo real |
 | 0x101 | CMD_STEERING | Media | Control tiempo real |
-| 0x200-0x204 | STATUS_* | Baja | Telemetría |
+| 0x102 | CMD_MODE | Media | Cambio de marcha/modo |
+| 0x103 | CMD_ACK | Media | Confirmación de comando |
+| 0x110 | SERVICE_CMD | Baja | Diagnóstico |
+| 0x120 | CMD_LED | Baja | Control LED |
+| 0x200-0x207 | STATUS_* | Baja | Telemetría |
+| 0x208-0x209 | OBSTACLE_* | Media | Seguridad obstáculos |
+| 0x20A | STATUS_LIGHTS | Baja | Telemetría LED |
 | 0x300 | DIAG_ERROR | **Alta** | Errores críticos |
+| 0x301-0x303 | SERVICE_* | Baja | Diagnóstico Service Mode |
 
 ### Retransmisión Automática
 
-- **Habilitada** para todos los mensajes
-- Máximo 3 reintentos
-- Si falla después de 3 intentos → `ERR_CAN_BUS_OFF`
+- **Habilitada** (`AutoRetransmission = ENABLE`)
+- Hardware FDCAN retransmite automáticamente hasta que el mensaje es aceptado
+- Si el bus entra en bus-off → recuperación con intervalo de 500 ms, máx. 10 reintentos
 
 ### Filtros CAN (STM32)
 
 ```c
-// Filtro 1: Aceptar solo mensajes de control (0x011, 0x100-0x102)
-FDCAN_FilterTypeDef filter1;
-filter1.IdType = FDCAN_STANDARD_ID;
-filter1.FilterType = FDCAN_FILTER_RANGE;
-filter1.FilterID1 = 0x011;
-filter1.FilterID2 = 0x102;
-filter1.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-
-// Filtro 2: Rechazar todo lo demás
-filter1.FilterConfig = FDCAN_FILTER_REJECT;
+// Filter 0: ESP32 heartbeat (0x011) — FDCAN_FILTER_DUAL
+// Filter 1: ESP32 commands (0x100–0x102) — FDCAN_FILTER_RANGE
+// Filter 2: Service + LED (0x110–0x120) — FDCAN_FILTER_RANGE
+// Filter 3: Obstacle data (0x208–0x209) — FDCAN_FILTER_RANGE
+// Global: Reject all non-matching standard and extended IDs
 ```
 
 ---
@@ -507,21 +704,31 @@ filter1.FilterConfig = FDCAN_FILTER_REJECT;
 
 ### Tabla de Periodicidad
 
-| Mensaje | Frecuencia | Período | Prioridad | Ancho de Banda |
-|---------|------------|---------|-----------|----------------|
-| HEARTBEAT_STM32 | 10 Hz | 100 ms | Alta | 640 bps |
-| HEARTBEAT_ESP32 | 10 Hz | 100 ms | Alta | 640 bps |
-| CMD_THROTTLE | 20 Hz | 50 ms | Media | 640 bps |
-| CMD_STEERING | 20 Hz | 50 ms | Media | 640 bps |
-| CMD_MODE | On-demand | - | Media | <100 bps |
-| STATUS_SPEED | 10 Hz | 100 ms | Baja | 1280 bps |
-| STATUS_CURRENT | 10 Hz | 100 ms | Baja | 1280 bps |
-| STATUS_TEMP | 1 Hz | 1000 ms | Baja | 128 bps |
-| STATUS_TRACTION | 10 Hz | 100 ms | Baja | 640 bps |
-| STATUS_TEMP_MAP | 1 Hz | 1000 ms | Baja | 128 bps |
-| STATUS_SAFETY | 10 Hz | 100 ms | Baja | 640 bps |
-| STATUS_STEERING | 10 Hz | 100 ms | Baja | 640 bps |
-| DIAG_ERROR | On-demand | - | Alta | <500 bps |
+| Mensaje | Frecuencia | Período | Prioridad | Dir |
+|---------|------------|---------|-----------|-----|
+| HEARTBEAT_STM32 (0x001) | 10 Hz | 100 ms | Alta | STM32→ESP32 |
+| HEARTBEAT_ESP32 (0x011) | 10 Hz | 100 ms | Alta | ESP32→STM32 |
+| CMD_THROTTLE (0x100) | 20 Hz | 50 ms | Media | ESP32→STM32 |
+| CMD_STEERING (0x101) | 20 Hz | 50 ms | Media | ESP32→STM32 |
+| CMD_MODE (0x102) | On-demand | - | Media | ESP32→STM32 |
+| CMD_ACK (0x103) | On-demand | - | Media | STM32→ESP32 |
+| SERVICE_CMD (0x110) | On-demand | - | Baja | ESP32→STM32 |
+| CMD_LED (0x120) | On-demand | - | Baja | ESP32→STM32 |
+| STATUS_SPEED (0x200) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
+| STATUS_CURRENT (0x201) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
+| STATUS_TEMP (0x202) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
+| STATUS_SAFETY (0x203) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
+| STATUS_STEERING (0x204) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
+| STATUS_TRACTION (0x205) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
+| STATUS_TEMP_MAP (0x206) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
+| STATUS_BATTERY (0x207) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
+| OBSTACLE_DISTANCE (0x208) | 15 Hz | 66 ms | Media | ESP32→STM32 |
+| OBSTACLE_SAFETY (0x209) | 10 Hz | 100 ms | Media | ESP32→STM32 |
+| STATUS_LIGHTS (0x20A) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
+| DIAG_ERROR (0x300) | On-demand | - | Alta | Both |
+| SERVICE_FAULTS (0x301) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
+| SERVICE_ENABLED (0x302) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
+| SERVICE_DISABLED (0x303) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
 
 **Total (peor caso):** ~6.5 kbps de 500 kbps disponibles (**1.3% de utilización**)
 
