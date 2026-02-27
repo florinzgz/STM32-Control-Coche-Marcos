@@ -123,7 +123,7 @@ como ESP32 congelado y entra en modo LIMP_HOME (no SAFE).
 
 **Ejemplo:**
 ```
-ID: 0x100  DLC: 2  Data: [0x4B, 0xE7]  // 75% throttle
+ID: 0x100  DLC: 1  Data: [0x4B]  // 75% throttle
 ```
 
 ---
@@ -134,15 +134,17 @@ ID: 0x100  DLC: 2  Data: [0x4B, 0xE7]  // 75% throttle
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0 | `steering_angle` | int8_t | -100 a +100 | % | Ángulo solicitado (-100=izq max, +100=der max) |
-| 1 | `checksum` | uint8_t | CRC8 | - | CRC8 de byte 0 |
+| 0-1 | `steering_angle_x10` | int16_t LE | -450 a +450 | 0.1° | Ángulo × 10, little-endian. Ej: -250 = -25.0° |
+
+**DLC:** 2
 
 **Frecuencia:** 50 ms (20 Hz)
 
-**Mapeo:**
-- -100% → Giro completo izquierda (~-45°)
-- 0% → Centro (0°)
-- +100% → Giro completo derecha (~+45°)
+**Decodificación STM32:**
+```c
+int16_t angle_raw = (int16_t)(rx_payload[0] | (rx_payload[1] << 8));
+float requested_deg = (float)angle_raw / 10.0f;  // resolución 0.1°
+```
 
 **Validación STM32:**
 - Verificar límites de encoder (-720 a +720 conteos)
@@ -150,7 +152,7 @@ ID: 0x100  DLC: 2  Data: [0x4B, 0xE7]  // 75% throttle
 
 **Ejemplo:**
 ```
-ID: 0x101  DLC: 2  Data: [0xE7, 0x3C]  // -25% (giro ligero izquierda)
+ID: 0x101  DLC: 2  Data: [0x06, 0xFF]  // 0xFF06 = -250 → -25.0°
 ```
 
 ---
@@ -353,18 +355,20 @@ ID: 0x201  DLC: 8  Data: [0x1E, 0x1F, 0x1D, 0x1E, 0x05, 0x7D, 0x00, 0x00]
 | 2 | `temp_RL` | int8_t | -128 a +127 | °C | Temperatura motor RL |
 | 3 | `temp_RR` | int8_t | -128 a +127 | °C | Temperatura motor RR |
 | 4 | `temp_AMB` | int8_t | -128 a +127 | °C | Temperatura ambiente |
-| 5-7 | `reserved` | - | - | - | Reservado |
 
-**Frecuencia:** 1000 ms (1 Hz) - baja prioridad
+**DLC:** 5
 
-**Umbrales de Protección:**
-- < 60°C → Normal (verde)
-- 60-80°C → Warning (amarillo), reducir potencia al 70%
-- > 80°C → Critical (rojo), limitar a 30% o detener
+**Frecuencia:** 1000 ms (1 Hz)
+
+**Umbrales de Protección (firmware):**
+- < 80°C → Normal
+- ≥ 80°C → DEGRADED (`TEMP_WARNING_C`)
+- ≥ 90°C → SAFE (`TEMP_CRITICAL_C`)
+- ≥ 130°C → Corte individual por motor
 
 **Ejemplo:**
 ```
-ID: 0x202  DLC: 8  Data: [0x37, 0x39, 0x38, 0x36, 0x19, 0x00, 0x00, 0x00]
+ID: 0x202  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 // FL=55°C, FR=57°C, RL=56°C, RR=54°C, AMB=25°C
 ```
 
@@ -376,17 +380,18 @@ ID: 0x202  DLC: 8  Data: [0x37, 0x39, 0x38, 0x36, 0x19, 0x00, 0x00, 0x00]
 
 | Byte | Campo | Tipo | Rango | Notas |
 |------|-------|------|-------|-------|
-| 0 | `abs_flags` | uint8_t | Bitmask | ABS activo por rueda (bit 0=FL, 1=FR, 2=RL, 3=RR) |
-| 1 | `tcs_flags` | uint8_t | Bitmask | TCS activo por rueda (bit 0=FL, 1=FR, 2=RL, 3=RR) |
-| 2 | `slip_max` | uint8_t | 0-100 | % de deslizamiento máximo detectado |
-| 3 | `checksum` | uint8_t | CRC8 | CRC8 de bytes 0-2 |
+| 0 | `abs_active` | uint8_t | 0/1 | 1 = ABS interviniendo |
+| 1 | `tcs_active` | uint8_t | 0/1 | 1 = TCS interviniendo |
+| 2 | `error_code` | uint8_t | 0-13 | Safety_Error_t (mismo que heartbeat byte 3) |
+
+**DLC:** 3
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Ejemplo:**
 ```
-ID: 0x203  DLC: 4  Data: [0x08, 0x00, 0x12, 0xC5]
-// ABS activo en RR (bit 3=1), deslizamiento 18%
+ID: 0x203  DLC: 3  Data: [0x01, 0x00, 0x02]
+// ABS activo, TCS inactivo, error=OVERTEMP(2)
 ```
 
 ---
@@ -397,21 +402,22 @@ ID: 0x203  DLC: 4  Data: [0x08, 0x00, 0x12, 0xC5]
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|
-| 0-1 | `encoder_position` | int16_t | -720 a +720 | conteos | Posición encoder (LSB first) |
-| 2 | `steering_angle` | int8_t | -100 a +100 | % | Ángulo normalizado |
-| 3 | `checksum` | uint8_t | CRC8 | CRC8 de bytes 0-2 |
+| 0-1 | `angle` | int16_t LE | ±4667 | conteos | Posición encoder, little-endian |
+| 2 | `calibrated` | uint8_t | 0/1 | - | 1 = centrado calibrado |
+
+**DLC:** 3
 
 **Frecuencia:** 100 ms (10 Hz)
 
 **Conversión:**
 - 1 conteo = 0.075° (encoder E6B2-CWZ6C 1200 PPR × 4 = 4800 conteos/rev)
 - Centro = 0 conteos (calibrado en inicio)
-- Límites físicos: ±54° = ±720 conteos (máximo ángulo Ackermann)
+- Rango de viaje: ±350° (±4667 conteos)
 
 **Ejemplo:**
 ```
-ID: 0x204  DLC: 4  Data: [0xB4, 0xFF, 0xE7, 0x4A]
-// Posición: -76 conteos = -19° → -42% (giro moderado izquierda)
+ID: 0x204  DLC: 3  Data: [0xB4, 0xFF, 0x01]
+// Posición: -76 conteos = -5.7°, calibrado
 ```
 
 ---
@@ -480,6 +486,48 @@ ID: 0x206  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 
 ---
 
+### 0x207 - STATUS_BATTERY (STM32→ESP32)
+
+**Propósito:** Corriente y tensión del bus de batería 24 V (INA226 canal 4).
+
+| Byte | Campo | Tipo | Rango | Unidad | Notas |
+|------|-------|------|-------|--------|-------|
+| 0-1 | `current_x100` | uint16_t LE | 0-65535 | 0.01 A | Corriente × 100 (ej. 1250 = 12.50 A) |
+| 2-3 | `voltage_x100` | uint16_t LE | 0-65535 | 0.01 V | Tensión × 100 (ej. 2400 = 24.00 V) |
+
+**DLC:** 4
+
+**Frecuencia:** 100 ms (10 Hz)
+
+---
+
+### 0x208 - OBSTACLE_DISTANCE (ESP32→STM32)
+
+**Propósito:** Distancia al obstáculo desde sensor HC-SR04 (GPIO 6/7 del ESP32).
+
+| Byte | Campo | Tipo | Rango | Unidad | Notas |
+|------|-------|------|-------|--------|-------|
+| 0-1 | `distance_mm` | uint16_t LE | 20-4000 | mm | Distancia medida |
+| 2 | `zone` | uint8_t | 0-4 | - | 0=Normal, 1=Caution, 2=Warning, 3=Critical, 4=Emergency |
+| 3 | `health` | uint8_t | 0/1/2 | - | 0=OK, 1=Stuck, 2=NoData |
+| 4 | `counter` | uint8_t | 0-255 | - | Contador cíclico |
+
+**DLC:** 5
+
+**Frecuencia:** 66 ms (15 Hz)
+
+---
+
+### 0x209 - OBSTACLE_SAFETY (ESP32→STM32)
+
+**Propósito:** Estado de seguridad del sensor de obstáculos (informativo, para cross-validation).
+
+**DLC:** 8
+
+**Frecuencia:** 100 ms (10 Hz)
+
+---
+
 ### 0x20A - STATUS_LIGHTS (STM32→ESP32)
 
 **Propósito:** Estado actual de los relés de iluminación LED.
@@ -531,14 +579,14 @@ contador, el ESP32 se considera congelado → transición a LIMP_HOME.
 
 ### 0x300 - DIAG_ERROR
 
-**Propósito:** Reporte detallado de errores críticos.
+**Propósito:** Reporte de errores críticos.
 
 | Byte | Campo | Tipo | Notas |
 |------|-------|------|-------|
-| 0 | `error_code` | uint8_t | Código de error (ver tabla) |
-| 1 | `subsystem` | uint8_t | Subsistema afectado (0=Global, 1=Motor, 2=Sensor, 3=CAN) |
-| 2-3 | `error_data` | uint16_t | Datos específicos del error |
-| 4-7 | `timestamp` | uint32_t | Timestamp del error (ms desde boot) |
+| 0 | `error_code` | uint8_t | Código de error (Safety_Error_t) |
+| 1 | `subsystem` | uint8_t | 0=Global, 1=Motor, 2=Sensor, 3=CAN |
+
+**DLC:** 2
 
 **Frecuencia:** On-demand (solo cuando ocurre error)
 
@@ -558,8 +606,8 @@ contador, el ESP32 se considera congelado → transición a LIMP_HOME.
 
 **Ejemplo:**
 ```
-ID: 0x300  DLC: 8  Data: [0x02, 0x01, 0x55, 0x00, 0x10, 0x27, 0x00, 0x00]
-// Error: TEMP_CRITICAL, Motor FL, Temp=85°C, Time=10000ms
+ID: 0x300  DLC: 2  Data: [0x02, 0x01]
+// Error: OVERTEMP(2), Subsystem: Motor(1)
 ```
 
 ---
