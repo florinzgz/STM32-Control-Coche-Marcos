@@ -443,8 +443,8 @@ Sensores de temperatura monitorizados continuamente con los siguientes umbrales:
 
 | Temperatura | Acción |
 |-------------|--------|
-| < 70 °C | Normal, sin restricciones |
-| 70 – 90 °C | **DEGRADED**, reducción de potencia al 50 % |
+| < 80 °C | Normal, sin restricciones |
+| 80 – 90 °C | **DEGRADED**, reducción de potencia |
 | ≥ 90 °C | **SAFE**, parada completa |
 
 #### Umbral por motor individual
@@ -456,14 +456,14 @@ Sensores de temperatura monitorizados continuamente con los siguientes umbrales:
 
 ### ⚙️ Qué hace
 
-- Entre 70-90 °C: limita la potencia al 50 % para reducir la generación de calor.
+- Entre 80-90 °C: entra en DEGRADED, limita la potencia para reducir la generación de calor.
 - A 90 °C: transiciona a SAFE (parada completa).
 - A 130 °C por motor: corte individual inmediato (`wheel_scale = 0`), independiente del
   estado general del sistema.
 
 ### 🔌 Qué ocurre con los motores
 
-- **DEGRADED (70-90 °C)**: potencia reducida al 50 %, motores operativos.
+- **DEGRADED (80-90 °C)**: potencia reducida, motores operativos.
 - **SAFE (≥ 90 °C)**: PWM a 0 %, MOE borrado. Todos los motores detenidos.
 - **Corte individual (≥ 130 °C)**: solo el motor afectado se detiene (`wheel_scale = 0`),
   los demás continúan.
@@ -476,7 +476,7 @@ Sensores de temperatura monitorizados continuamente con los siguientes umbrales:
 
 ### 🔄 Cómo se recupera
 
-- De DEGRADED: cuando la temperatura baja de 70 °C → ACTIVE.
+- De DEGRADED: cuando todas las temperaturas bajan de 75 °C (histéresis 5 °C) → ACTIVE.
 - De SAFE: cuando la temperatura baja de 90 °C (puede requerir reset).
 - De corte individual: cuando la temperatura del motor baja de 115 °C, se restaura
   `wheel_scale` gradualmente.
@@ -485,9 +485,11 @@ Sensores de temperatura monitorizados continuamente con los siguientes umbrales:
 
 La histéresis (15 °C entre corte a 130 °C y recuperación a 115 °C) evita oscilaciones
 rápidas encendido/apagado que degradan los contactos de los relés y causan estrés
-térmico cíclico en los bobinados. El escalón intermedio a 70 °C permite seguir
+térmico cíclico en los bobinados. El escalón intermedio a 80 °C permite seguir
 operando con potencia reducida, dando tiempo al conductor para detenerse de forma
-controlada antes de alcanzar el corte total a 90 °C.
+controlada antes de alcanzar el corte total a 90 °C. La recuperación de DEGRADED
+requiere que todas las temperaturas bajen de 75 °C (5 °C de histéresis bajo el umbral
+de 80 °C) para evitar ciclos rápidos de entrada/salida en modo degradado.
 
 ---
 
@@ -591,8 +593,8 @@ software pueda desactivar esta protección en tiempo de ejecución.
 
 El nivel de degradación se selecciona automáticamente según la severidad del fallo:
 
-- **L1**: fallo menor (glitch de sensor aislado, temperatura entre 70-80 °C).
-- **L2**: fallo moderado (sobretemperatura 80-90 °C, subtensión 19.5-20.0 V).
+- **L1**: fallo menor (glitch de sensor aislado, anomalía de demanda, fallo de encoder).
+- **L2**: fallo moderado (sobretemperatura ≥80 °C, subtensión 19.5-20.0 V).
 - **L3**: fallo severo pero aún operable (múltiples fallos L1/L2 simultáneos, límite
   inferior antes de SAFE).
 

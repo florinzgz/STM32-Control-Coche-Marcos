@@ -111,7 +111,7 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 
 | ID | Direction | Name | Description | Data Format |
 |----|-----------|------|-------------|-------------|
-| 0x001 | STM32→ESP32 | Heartbeat STM32 | Alive + fault flags | [counter, state, faults, statusFlags] |
+| 0x001 | STM32→ESP32 | Heartbeat STM32 | Alive + fault flags (DLC 5) | [counter, state, faultFlags, errorCode, statusFlags] |
 | 0x011 | ESP32→STM32 | Heartbeat ESP32 | Alive counter | [counter] |
 | 0x100 | ESP32→STM32 | CMD Throttle | Throttle 0-100% | [throttle%] |
 | 0x101 | ESP32→STM32 | CMD Steering | Steering angle | [LSB, MSB] |
@@ -128,7 +128,12 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 | 0x207 | STM32→ESP32 | Status Battery | Bus current/voltage | [I_L, I_H, V_L, V_H] |
 | 0x208 | ESP32→STM32 | Obstacle Distance | Distance + zone | [mm_L, mm_H, zone, health, counter] |
 | 0x209 | ESP32→STM32 | Obstacle Safety | Obstacle state | [zone, status, stuck] |
+| 0x20A | STM32→ESP32 | Status Lights | LED relay states | [front, rear] |
 | 0x300 | Both | Diag Error | Diagnostic error | [errorCode, subsystem] |
+| 0x301 | STM32→ESP32 | Service Faults | Fault bitmask | [b0, b1, b2, b3] |
+| 0x302 | STM32→ESP32 | Service Enabled | Enabled bitmask | [b0, b1, b2, b3] |
+| 0x303 | STM32→ESP32 | Service Disabled | Disabled bitmask | [b0, b1, b2, b3] |
+| 0x110 | ESP32→STM32 | Service Cmd | Module control | [action, moduleId] |
 
 ### Control Features
 

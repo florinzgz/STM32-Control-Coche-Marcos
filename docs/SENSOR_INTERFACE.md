@@ -141,10 +141,11 @@ Cinco sensores Dallas DS18B20 en un único bus OneWire para monitorizar la tempe
 
 | Nivel | Temperatura | Acción |
 |-------|-------------|--------|
-| Advertencia | 70 °C | Alerta en HMI, registro en log |
-| Estado SAFE | 90 °C | Reducción de potencia global |
-| Corte de emergencia por motor | 130 °C | Motor individual deshabilitado |
-| Recuperación | 115 °C | Motor rehabilitado tras enfriar por debajo de 115 °C |
+| Advertencia | 80 °C | DEGRADED, reducción de potencia (`TEMP_WARNING_C` en firmware) |
+| Estado SAFE | 90 °C | Parada completa, MOE borrado (`TEMP_CRITICAL_C` en firmware) |
+| Corte de emergencia por motor | 130 °C | Motor individual deshabilitado (`wheel_scale = 0`) |
+| Recuperación por motor | 115 °C | Motor rehabilitado tras enfriar por debajo de 115 °C |
+| Recuperación DEGRADED→ACTIVE | 75 °C | Todas las temps bajo 75 °C (histéresis 5 °C bajo advertencia) |
 
 ### Qué ocurre si falla
 
