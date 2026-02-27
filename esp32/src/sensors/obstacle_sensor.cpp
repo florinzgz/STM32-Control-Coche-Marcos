@@ -26,6 +26,8 @@ static constexpr uint8_t  FRAME_HEADER      = 0x57;
 static constexpr uint16_t FRAME_LENGTH      = 400;    // Total frame size (bytes)
 static constexpr uint8_t  PIXEL_COUNT_8X8   = 64;     // 8×8 matrix
 static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (signal) + 1 (status) + 1 (reserved)
+// NLink protocol distance unit: 1/256 mm per LSB
+static constexpr int32_t DISTANCE_UNITS_PER_MM = 256;
 
 // Frame offsets
 static constexpr uint16_t OFF_HEADER        = 0;      // 0x57
@@ -107,16 +109,16 @@ static uint16_t parseFrame(const uint8_t* buf, uint16_t len) {
         uint8_t status = buf[base + 4];
         if (status != 0) continue;  // Skip invalid pixels
 
-        // Distance: 3-byte signed little-endian, unit = 1/256 mm
+        // Distance: 3-byte signed little-endian, unit = 1/256 mm per LSB
         int32_t raw = (int32_t)buf[base]
                     | ((int32_t)buf[base + 1] << 8)
                     | ((int32_t)buf[base + 2] << 16);
-        // Sign-extend from 24-bit
+        // Sign-extend 24-bit value to 32-bit: check bit 23 (sign bit)
         if (raw & 0x800000) raw |= (int32_t)0xFF000000;
 
         if (raw <= 0) continue;  // Negative or zero distance — skip
 
-        uint32_t distMm = (uint32_t)(raw / 256);  // Convert to mm
+        uint32_t distMm = (uint32_t)(raw / DISTANCE_UNITS_PER_MM);
         if (distMm < minDistMm) {
             minDistMm = distMm;
             anyValid = true;
