@@ -598,37 +598,40 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 1 | **PA0** | GPIOA | Sensor velocidad FL | Inductivo (LJ12A3) | EXTI0 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_FL` |
 | 2 | **PA1** | GPIOA | Sensor velocidad FR | Inductivo (LJ12A3) | EXTI1 | 3.3 V | `PIN_WHEEL_FR` |
 | 3 | **PA2** | GPIOA | Sensor velocidad RL | Inductivo (LJ12A3) | EXTI2 | 3.3 V | `PIN_WHEEL_RL` |
-| 4 | **PA3** | GPIOA | Pedal acelerador | Potenciómetro/Hall | ADC1_IN4 | 0–3.3 V analógico | `PIN_PEDAL` |
-| 5 | **PA8** | GPIOA | PWM motor FL | BTS7960 FL | TIM1_CH1 (AF6) | 3.3 V PWM | `PIN_PWM_FL` |
-| 6 | **PA9** | GPIOA | PWM motor FR | BTS7960 FR | TIM1_CH2 (AF6) | 3.3 V PWM | `PIN_PWM_FR` |
-| 7 | **PA10** | GPIOA | PWM motor RL | BTS7960 RL | TIM1_CH3 (AF6) | 3.3 V PWM | `PIN_PWM_RL` |
-| 8 | **PA11** | GPIOA | PWM motor RR | BTS7960 RR | TIM1_CH4 (AF6) | 3.3 V PWM | `PIN_PWM_RR` |
-| 9 | **PA15** | GPIOA | Encoder dirección A | E6B2-CWZ6C CH-A | TIM2_CH1 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_A` |
-| 10 | **PB0** | GPIOB | Bus OneWire | DS18B20 (×5) | GPIO bit-bang | 3.3 V (pull-up 4.7 kΩ) | `PIN_ONEWIRE` |
-| 11 | **PB3** | GPIOB | Encoder dirección B | E6B2-CWZ6C CH-B | TIM2_CH2 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_B` |
-| 12 | **PB4** | GPIOB | Encoder índice Z | E6B2-CWZ6C CH-Z | EXTI4 | 3.3 V o 5 V (con adaptación) | `PIN_ENC_Z` |
-| 13 | **PB5** | GPIOB | Sensor centro dirección | LJ12A3 inductivo | EXTI5 | 3.3 V (con adaptación si necesario) | `PIN_STEER_CENTER` |
-| 14 | **PB6** | GPIOB | I2C SCL | TCA9548A + INA226 | I2C1_SCL (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SCL` |
-| 15 | **PB7** | GPIOB | I2C SDA | TCA9548A + INA226 | I2C1_SDA (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SDA` |
-| 16 | **PB8** | GPIOB | CAN RX | Transceiver CAN | FDCAN1_RX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_RX` |
-| 17 | **PB9** | GPIOB | CAN TX | Transceiver CAN | FDCAN1_TX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_TX` |
-| 18 | **PB15** | GPIOB | Sensor velocidad RR | Inductivo (LJ12A3) | EXTI15 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_RR` |
-| 19 | **PC0** | GPIOC | Dirección motor FL | BTS7960 FL (DIR) | GPIO Output | 3.3 V digital | `PIN_DIR_FL` |
-| 20 | **PC1** | GPIOC | Dirección motor FR | BTS7960 FR (DIR) | GPIO Output | 3.3 V digital | `PIN_DIR_FR` |
-| 21 | **PC2** | GPIOC | Dirección motor RL | BTS7960 RL (DIR) | GPIO Output | 3.3 V digital | `PIN_DIR_RL` |
-| 22 | **PC3** | GPIOC | Dirección motor RR | BTS7960 RR (DIR) | GPIO Output | 3.3 V digital | `PIN_DIR_RR` |
-| 23 | **PC4** | GPIOC | Dirección motor STEER | BTS7960 STEER (DIR) | GPIO Output | 3.3 V digital | `PIN_DIR_STEER` |
-| 24 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
-| 25 | **PC6** | GPIOC | Enable motor FR | BTS7960 FR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FR` |
-| 26 | **PC7** | GPIOC | Enable motor RL | BTS7960 RL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RL` |
-| 27 | **PC8** | GPIOC | PWM motor STEER | BTS7960 STEER | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_STEER` |
-| 28 | **PC9** | GPIOC | Enable motor STEER | BTS7960 STEER (EN) | GPIO Output | 3.3 V digital | `PIN_EN_STEER` |
-| 29 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
-| 30 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
-| 31 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
-| 32 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` |
+| 4 | **PA3** | GPIOA | Pedal acelerador | Hall SS1324LUA-T | ADC1_IN4 | 0–3.3 V analógico (div. 10kΩ/6.8kΩ) | `PIN_PEDAL` |
+| 5 | **PA6** | GPIOA | RPWM motor STEER | BTS7960 STEER | TIM3_CH1 (AF2) | 3.3 V PWM | `PIN_PWM_STEER` |
+| 6 | **PA7** | GPIOA | LPWM motor STEER | BTS7960 STEER | TIM3_CH2 (AF2) | 3.3 V PWM | `PIN_LPWM_STEER` |
+| 7 | **PA8** | GPIOA | RPWM motor FL | BTS7960 FL | TIM1_CH1 (AF6) | 3.3 V PWM | `PIN_PWM_FL` |
+| 8 | **PA9** | GPIOA | LPWM motor FL | BTS7960 FL | TIM1_CH2 (AF6) | 3.3 V PWM | `PIN_LPWM_FL` |
+| 9 | **PA10** | GPIOA | RPWM motor FR | BTS7960 FR | TIM1_CH3 (AF6) | 3.3 V PWM | `PIN_PWM_FR` |
+| 10 | **PA11** | GPIOA | LPWM motor FR | BTS7960 FR | TIM1_CH4 (AF6) | 3.3 V PWM | `PIN_LPWM_FR` |
+| 11 | **PA15** | GPIOA | Encoder dirección A | E6B2-CWZ6C CH-A | TIM2_CH1 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_A` |
+| 12 | **PB0** | GPIOB | Bus OneWire | DS18B20 (×5) | GPIO bit-bang | 3.3 V (pull-up 4.7 kΩ) | `PIN_ONEWIRE` |
+| 13 | **PB3** | GPIOB | Encoder dirección B | E6B2-CWZ6C CH-B | TIM2_CH2 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_B` |
+| 14 | **PB4** | GPIOB | Encoder índice Z | E6B2-CWZ6C CH-Z | EXTI4 | 3.3 V o 5 V (con adaptación) | `PIN_ENC_Z` |
+| 15 | **PB5** | GPIOB | Sensor centro dirección | LJ12A3 inductivo | EXTI5 | 3.3 V (con adaptación si necesario) | `PIN_STEER_CENTER` |
+| 16 | **PB6** | GPIOB | I2C SCL | TCA9548A + INA226 | I2C1_SCL (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SCL` |
+| 17 | **PB7** | GPIOB | I2C SDA | TCA9548A + INA226 | I2C1_SDA (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SDA` |
+| 18 | **PB8** | GPIOB | CAN RX | Transceiver CAN | FDCAN1_RX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_RX` |
+| 19 | **PB9** | GPIOB | CAN TX | Transceiver CAN | FDCAN1_TX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_TX` |
+| 20 | **PB10** | GPIOB | Relé LED frontal | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED` |
+| 21 | **PB11** | GPIOB | Relé LED trasero | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED_REAR` |
+| 22 | **PB15** | GPIOB | Sensor velocidad RR | Inductivo (LJ12A3) | EXTI15 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_RR` |
+| 23 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
+| 24 | **PC6** | GPIOC | RPWM motor RL | BTS7960 RL | TIM8_CH1 (AF4) | 3.3 V PWM | `PIN_PWM_RL` |
+| 25 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
+| 26 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
+| 27 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
+| 28 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
+| 29 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
+| 30 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
+| 31 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` |
 
-**Total: 32 pines del STM32 en uso.**
+> **Nota:** Los pines de dirección (PC0–PC4) están **liberados** (ya no se usan).
+> RPWM/LPWM se generan directamente desde los timers hardware.
+> Los BTS7960 de FR, RL y STEER tienen R_EN/L_EN conectados fijo a 3.3 V.
+
+**Total: 31 pines del STM32 en uso.**
 
 ---
 
@@ -718,13 +721,13 @@ siguiente período del timer (no hay glitch entre transiciones).
 
 ### Tabla de asignación de pines RPWM/LPWM
 
-| Motor     | RPWM (avance)          | LPWM (retroceso)        | EN GPIO        |
-|-----------|------------------------|-------------------------|----------------|
-| FL (front-left) | PA8 — TIM1_CH1   | PC6 — TIM8_CH1          | PC5 (GPIO out) |
-| FR (front-right)| PA9 — TIM1_CH2   | PC7 — TIM8_CH2          | 3.3 V en HW    |
-| RL (rear-left)  | PA10 — TIM1_CH3  | PA6 — TIM3_CH1          | 3.3 V en HW    |
-| RR (rear-right) | PA11 — TIM1_CH4  | PA7 — TIM3_CH2          | 3.3 V en HW    |
-| STEER           | PC8 — TIM8_CH3   | PC9 — TIM8_CH4          | 3.3 V en HW    |
+| Motor     | RPWM (avance)           | LPWM (retroceso)         | EN GPIO         |
+|-----------|-------------------------|--------------------------|-----------------|
+| FL (front-left)  | PA8 — TIM1_CH1   | PA9 — TIM1_CH2           | PC5 (GPIO out)  |
+| FR (front-right) | PA10 — TIM1_CH3  | PA11 — TIM1_CH4          | 3.3 V en HW    |
+| RL (rear-left)   | PC6 — TIM8_CH1   | PC7 — TIM8_CH2           | 3.3 V en HW    |
+| RR (rear-right)  | PC8 — TIM8_CH3   | PC9 — TIM8_CH4           | PC13 (GPIO out) |
+| STEER            | PA6 — TIM3_CH1   | PA7 — TIM3_CH2           | 3.3 V en HW    |
 
 > **Nota EN**: Los motores FL y RR conservan su pin GPIO de enable (PC5, PC13).
 > Los motores FR, RL y STEER tienen R_EN / L_EN del BTS7960 conectados
@@ -735,7 +738,7 @@ siguiente período del timer (no hay glitch entre transiciones).
 
 ```
 STM32 PA8  (TIM1_CH1) ─────────────────────────────► BTS7960 FL: RPWM
-STM32 PC6  (TIM8_CH1) ─────────────────────────────► BTS7960 FL: LPWM
+STM32 PA9  (TIM1_CH2) ─────────────────────────────► BTS7960 FL: LPWM
 STM32 PC5  (GPIO EN)  ─────────────────────────────► BTS7960 FL: R_EN  ─┐
                                                                           ├─ (cable corto)
                                                       BTS7960 FL: L_EN  ─┘
@@ -750,14 +753,14 @@ STM32 PC5  (GPIO EN)  ───────────────────�
 ### Conexión directa — motor FR (ejemplo, EN a 3.3 V)
 
 ```
-STM32 PA9  (TIM1_CH2) ─────────────────────────────► BTS7960 FR: RPWM
-STM32 PC7  (TIM8_CH2) ─────────────────────────────► BTS7960 FR: LPWM
+STM32 PA10 (TIM1_CH3) ─────────────────────────────► BTS7960 FR: RPWM
+STM32 PA11 (TIM1_CH4) ─────────────────────────────► BTS7960 FR: LPWM
 3.3 V ────────────────────────────────────────────► BTS7960 FR: R_EN  ─┐
                                                                           ├─ (unir con cable corto)
                                                       BTS7960 FR: L_EN  ─┘
 ```
 
-> Lo mismo aplica para RL (PA10/PA6), RR (PA11/PA7, con PC13 como EN GPIO) y STEER (PC8/PC9).
+> Lo mismo aplica para RL (PC6/PC7), RR (PC8/PC9, con PC13 como EN GPIO) y STEER (PA6/PA7).
 
 ### Tabla de funcionamiento RPWM/LPWM
 
@@ -979,7 +982,7 @@ UBICACIÓN: soldar lo más cerca posible de los pines CN7/CN10 de la Nucleo-64.
 Si se usa protoboard, colocar entre los raíles de alimentación adyacentes al MCU.
 ```
 
-Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (CI 74HC, ADS1115, TJA1051):
+Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (ADS1115, TJA1051, BTS7960 VCC):
 
 ```
 5 V ──┬──[100 nF cerámico]──┬── GND   (junto a cada CI, una por chip)
@@ -1022,7 +1025,7 @@ Relé DIR NO ──┬────── Bus 12 V
 Para impedir que el ruido de los PWM de 20 kHz se propague por la alimentación:
 
 ```
-5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051, ADS1115, CIs 74HC
+5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051, ADS1115, BTS7960 VCC
                                                               └── [10 µF] a GND
 ```
 
@@ -1132,13 +1135,12 @@ Seguir este orden estrictamente:
 |-----|-----------|-------|-----|
 | 2 | Condensador cerámico | 100 nF / 16 V X7R | Desacoplo 3,3 V Nucleo (VDD pins) |
 | 1 | Condensador tántalo o electrolítico | 10 µF / 10 V | Bulk 3,3 V Nucleo |
-| 5 | Condensador cerámico | 100 nF / 16 V | Desacoplo VCC de cada CI 74HC08/74HC04 |
 | 5 | Condensador cerámico | 100 nF / 50 V | Desacoplo VCC de cada BTS7960 (lógica) |
 | 5 | Condensador cerámico | 100 nF / 50 V | Snubber en terminales de motor |
 | 1 | Condensador electrolítico | 1 000 µF / 35 V | Bulk bus 24 V |
 | 1 | Condensador electrolítico | 470 µF / 25 V | Bulk bus 12 V |
 | 1 | Condensador electrolítico | 47 µF / 10 V | Bulk 5 V lógica |
-| 3 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas de relé (uno por relé) |
+| 5 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas de relé (uno por relé, incluye LED relays) |
 | 5 | Diodo 1N5408 | 3 A / 1 000 V | Anti-CEMF en terminales de motor |
 | 3 | Resistencia | 330 Ω / 1/4 W | Serie LED optoacoplador relé (si circuito discreto) |
 | 3 | Resistencia | 10 kΩ / 1/4 W | Pull-down base transistor relé (si circuito discreto) |
@@ -1146,8 +1148,9 @@ Seguir este orden estrictamente:
 | 3 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC) |
 | 3 | Resistencia | 1 kΩ / 1/4 W | R1 divisor encoder (A, B, Z) 5 V→3,3 V |
 | 3 | Resistencia | 2,2 kΩ / 1/4 W | R2 divisor encoder (A, B, Z) a GND |
-| 3 | CI lógico | **SN74HC08N** (DIP-14) | AND gates adaptador PWM+DIR→RPWM/LPWM |
-| 1 | CI lógico | **SN74HC04N** (DIP-14) | NOT gates para DIR invertido |
+
+> **Nota:** Los CI SN74HC08N (AND) y SN74HC04N (NOT) han sido **eliminados del BOM**.
+> El firmware genera RPWM/LPWM directamente desde los timers. Ver [Sección 10](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógica-externa).
 
 ---
 

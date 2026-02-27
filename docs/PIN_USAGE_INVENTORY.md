@@ -27,9 +27,9 @@
 | **Pines totales del chip** | 64 |
 | **Pines de alimentación/tierra/reset/cristal** | 13 (VBAT, VDDA, VSSA, 3×VDD, 4×VSS, NRST, PH0, PH1) |
 | **Pines GPIO disponibles** | 47 (PA0–PA15, PB0–PB15, PC0–PC13, PD2) |
-| **Pines usados por el proyecto** | 32 |
+| **Pines usados por el proyecto** | 31 |
 | **Pines reservados (SWD debug)** | 2 (PA13/SWDIO, PA14/SWCLK) |
-| **Pines libres para expansión** | **13** |
+| **Pines libres para expansión** | **14** (incluye 5 pines DIR liberados: PC0–PC4) |
 
 ### Distribución de pines usados por categoría
 
@@ -695,16 +695,14 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 
 | MCU | Pines necesarios | Pines disponibles | Pines usados | Pines libres | ¿Suficiente? |
 |-----|-----------------|-------------------|-------------|-------------|--------------|
-| **STM32G474RE** | 32 | 47 GPIO | 32 (68.1%) | 13 libres + 2 SWD | ✅ **SÍ** — sobran 13 pines |
-| **ESP32-S3** | 14 | ~36 accesibles | 14 (38.9%) | ~15 libres | ✅ **SÍ** — sobran ~15 pines |
+| **STM32G474RE** | 31 | 47 GPIO | 31 (66.0%) | 14 libres + 2 SWD | ✅ **SÍ** — sobran 14 pines (incluye 5 DIR liberados) |
+| **ESP32-S3** | 22 | ~36 accesibles | 22 (61.1%) | ~10 libres | ✅ **SÍ** — sobran ~10 pines |
 
-Ambos microcontroladores tienen **margen amplio** para expansiones futuras (botones físicos, LEDs de estado, SD card, buzzer, etc.).
-
-> **Nota sobre phases:** De los 14 pines del ESP32-S3, 9 están actualmente en uso (display, touch, CAN). Los otros 5 pines (GPIO19/20 para DFPlayer, GPIO43/47 para LEDs WS2812B, GPIO44 para sensor TOFSense) están asignados y documentados pero el hardware aún no está conectado — se implementarán en Phase 3 (obstáculos/LEDs) y Phase 5 (audio).
+Ambos microcontroladores tienen **margen** para expansiones futuras (botones físicos, SD card, buzzer, etc.).
 
 ---
 
-**Documento creado:** 2026-02-17  
-**Versión:** 1.1  
-**Autor:** Sistema de Control Coche Marcos  
-**Referencias:** `Core/Inc/main.h`, `esp32/platformio.ini`, `esp32/src/main.cpp`, `docs/CONEXIONES_COMPLETAS.md`, `docs/PEDAL_SENSOR_FINAL_SUMMARY.md`, `docs/OBSTACLE_SYSTEM_ARCHITECTURE.md`, `docs/ESP32_HMI_ARCHITECTURE_REBUILD.md` (Appendix D.6), `docs/PENDING_FEATURES_SCHEDULE.md`
+**Documento actualizado:** 2026-02-27
+**Versión:** 2.0
+**Autor:** Sistema de Control Coche Marcos
+**Referencias:** `Core/Inc/main.h`, `esp32/platformio.ini`, `esp32/src/main.cpp`, `esp32/include/can_ids.h`, `esp32/src/traction_switch.cpp`, `esp32/src/shifter_input.cpp`, `esp32/src/audio_manager.cpp`, `esp32/src/led_controller.cpp`, `esp32/src/power_manager.cpp`, `esp32/src/relay_audio.cpp`

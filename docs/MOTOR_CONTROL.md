@@ -32,7 +32,7 @@ El diseño original consideraba el módulo **PCA9685** (16 canales PWM vía I²C
 ✅ **Ventajas del Control Directo STM32:**
 - **PWM @ 20 kHz** (inaudible, reduce vibración)
 - **Latencia <1 µs** (actualización instantánea)
-- **Resolución 13-bit** (8500 pasos de duty cycle)
+- **Resolución ~12-bit** (4250 pasos de duty cycle, center-aligned)
 - **Hardware dedicado** (TIM1/TIM8 sin carga CPU)
 - **Paralelismo total** (5 motores actualizados simultáneamente)
 
