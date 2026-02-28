@@ -600,9 +600,11 @@ void CAN_ProcessMessages(void) {
                         /* If already at/above threshold: no update, CAN timeout expires */
                     }
                 } else {
-                    /* DLC=0 heartbeat (legacy / test bench): accept without counter check */
-                    can_stats.last_heartbeat_esp32 = HAL_GetTick();
-                    Safety_UpdateCANRxTime();
+                    /* DLC=0 heartbeat — no counter available, cannot
+                     * validate liveness.  Reject to prevent bypass of
+                     * the freeze detection mechanism.  CAN timeout will
+                     * naturally expire → LIMP_HOME as designed.          */
+                    can_stats.rx_errors++;
                 }
                 break;
                 
@@ -616,6 +618,17 @@ void CAN_ProcessMessages(void) {
                  * state-machine gate, so both checks must independently pass.           */
                 if (msg_len >= 1 && !Startup_IsInhibited()) {
                     float requested_pct = (float)rx_payload[0];
+                    /* Reject out-of-range values at CAN ingress.
+                     * Valid throttle is 0–100%; values 101–255 from a
+                     * corrupt or injected frame are rejected entirely.
+                     * Using break (not clamp-to-0) avoids creating a
+                     * demand discontinuity that would trigger the
+                     * step-rate anomaly detector in Traction_SetDemand
+                     * and cause a spurious DEGRADED transition.          */
+                    if (requested_pct > 100.0f) {
+                        can_stats.rx_errors++;
+                        break;
+                    }
                     float validated_pct = Safety_ValidateThrottle(requested_pct);
                     Traction_SetDemand(validated_pct);
                 }

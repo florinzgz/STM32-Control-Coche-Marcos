@@ -68,7 +68,7 @@ SafetyStatus_t safety_status = {0};
 Safety_Error_t safety_error  = SAFETY_ERROR_NONE;
 
 static SystemState_t system_state       = SYS_STATE_BOOT;
-static volatile uint32_t last_can_rx_time = 0;  /* Written from ISR (FDCAN RxFifo0Callback) */
+static volatile uint32_t last_can_rx_time = 0;  /* Updated from CAN_ProcessMessages() main loop */
 static uint8_t  emergency_stopped       = 0;
 static float    last_steering_cmd   = 0.0f;
 static uint32_t last_steering_tick  = 0;
