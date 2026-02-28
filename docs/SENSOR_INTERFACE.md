@@ -509,10 +509,13 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 
 | Pin | Señal (modo UART) | Conexión |
 |-----|-------------------|----------|
-| 1 | VCC | 3.3 V o 5 V |
+| 1 | VCC | **5 V** (obligatorio, el sensor no funciona a 3.3 V) |
 | 2 | GND | GND común |
 | 3 | RX | No conectado (recepción unidireccional) |
 | 4 | TX | ESP32 GPIO18 (UART1 RX) |
+
+> **Nota sobre niveles lógicos:** Según el datasheet V3.0, las señales UART del TOFSense-M son TTL 3.3 V, compatibles directamente con el ESP32-S3. No se requiere level shifter para las señales TX/RX.  
+> **Nota sobre alimentación:** El sensor requiere 5 V en VCC. Alimentar a 3.3 V provocará funcionamiento inestable o ausencia de datos (estado INVALID).
 
 ### Parámetros
 
@@ -537,12 +540,14 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 
 ### Resistencias y protección
 
-- **UART RX (GPIO18):** conexión directa. El TOFSense-M soporta niveles lógicos de 3.3 V, compatibles directamente con el ESP32-S3. No se requiere divisor resistivo ni level shifter.
+- **UART RX (GPIO18):** Conexión directa. El TOFSense-M tiene UART TTL 3.3 V (según datasheet V3.0, sección "Typical Specifications"), compatibles directamente con el ESP32-S3. No se requiere divisor resistivo ni level shifter para las señales UART.
 - **Condensador de desacoplo:** 100 nF en VCC del TOFSense-M cerca del sensor.
 
 ### Alimentación
 
-- TOFSense-M: **3.3 V o 5 V** (conector GH1.25, consumo ~200 mA típico).
+- TOFSense-M: **5 V obligatorio** (conector GH1.25 pin 1, consumo ~200 mA típico). El sensor no funciona a 3.3 V — la alimentación insuficiente causa estado INVALID en el firmware.
+
+> **Referencia:** TOFSense-M Datasheet V3.0 (Nooploop): "Power Supply: 5V", "Communication Interface UART and CAN, TTL signal line level 3.3V".
 
 ### Motivo técnico
 
@@ -562,14 +567,14 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 ```
           TOFSense-M (GH1.25)
          ┌──────────────┐
-  3.3V ──┤ VCC (pin 1)  │
+  5V ────┤ VCC (pin 1)  │       ⚠ 5V obligatorio
          │              │
   GND ───┤ GND (pin 2)  │
          │              │
      n/c ┤ RX  (pin 3)  │
          │              │
   ESP32 ─┤ TX  (pin 4)  ├──────── ESP32 GPIO18 (UART1 RX)
-  GPIO18 └──────────────┘
+  GPIO18 └──────────────┘         (3.3V TTL — conexión directa OK)
 
   Desacoplo: 100nF entre VCC y GND del TOFSense-M
 ```

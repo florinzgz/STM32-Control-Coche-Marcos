@@ -15,7 +15,10 @@
 // Output: distance_mm, zone, health flag, stuck flag, sensor status.
 //
 // Hardware: TOFSense-M S (Nooploop) — GH1.25 4-pin connector
-//   VCC (3.3 V or 5 V), GND, RX (not used), TX → ESP32 RX (GPIO 18)
+//   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX (GPIO 18)
+//   VCC must be 5 V (sensor will not work at 3.3 V).
+//   UART IO level is 3.3 V TTL — direct connection to ESP32-S3 is safe,
+//   no level shifter needed for UART signals.
 //
 // Reference: TOFSense-M User Manual V3.0
 //            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
