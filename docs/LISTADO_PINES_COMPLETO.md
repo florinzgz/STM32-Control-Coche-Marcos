@@ -375,7 +375,7 @@
 | R1 | 10 kΩ (1% precisión) | Entre señal pedal (5 V) y nodo PA3 | Divisor de tensión |
 | R2 | 6.8 kΩ (1% precisión) | Entre nodo PA3 y GND | Divisor de tensión |
 
-**Cálculo:** Ratio = 6.8/(10+6.8) = 0.4048 → 4.8 V × 0.4048 = 1.94 V (máximo en PA3, seguro para 3.3 V)
+**Cálculo:** Ratio = 6.8/(10+6.8) = 0.4048 → 5.0 V × 0.4048 = 2.02 V (máximo absoluto en PA3, bien por debajo de 3.3 V)
 
 #### Canal de Plausibilidad: ADS1115 (I2C — 0x48)
 
@@ -579,7 +579,8 @@
 | 2 | 120 Ω ¼W | 5% | Terminación CAN Bus (cada extremo) |
 | 1 | 10 kΩ | 1% | Divisor pedal R1 |
 | 1 | 6.8 kΩ | 1% | Divisor pedal R2 |
-| 3 | 10 kΩ + 20 kΩ | 5% | Divisores 5 V→3.3 V encoder (A, B, Z) |
+| 3 | 10 kΩ | 5% | Divisores 5 V→3.3 V encoder (A, B, Z) — parte alta |
+| 3 | 20 kΩ | 5% | Divisores 5 V→3.3 V encoder (A, B, Z) — parte baja |
 | 5 | 100 Ω ¼W | 5% | Snubber motores |
 | 2 | 330 Ω | 5% | Línea datos WS2812B (frontal, trasera) |
 | 1 | 1 kΩ | 5% | Serie TX DFPlayer |
