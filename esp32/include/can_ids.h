@@ -52,7 +52,7 @@ inline constexpr uint32_t STATUS_BATTERY        = 0x207;    // DLC 4, 100 ms  ba
 // ESP32 → STM32  Obstacle Data (CAN_CONTRACT_FINAL.md §3.4)
 // -------------------------------------------------------------------------
 inline constexpr uint32_t OBSTACLE_DISTANCE      = 0x208;    // DLC 5, 66 ms  obstacle distance + zone + health + counter
-inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 8, 100 ms obstacle safety state (informational)
+inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 4, 100 ms obstacle safety state (informational)
 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  LED / Lights Status (Audit Step 6)
