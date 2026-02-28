@@ -283,11 +283,11 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | **Placa** | ESP32-S3-DevKitC-1 |
 | **Pines GPIO totales del chip** | 45 (GPIO0–GPIO21, GPIO26–GPIO48; GPIO22–25 no existen en ESP32-S3) |
 | **Pines disponibles en DevKitC** | ~36 (algunos reservados por flash/PSRAM) |
-| **Pines usados por el proyecto** | 22 |
+| **Pines usados por el proyecto** | 21 |
 | **Pines reservados — QSPI Flash** | 7 (GPIO26–GPIO32) |
 | **Pines reservados — Octal PSRAM** | 5 (GPIO33–GPIO37, N16R8) |
 | **Pines no existentes en ESP32-S3** | 4 (GPIO22–GPIO25) |
-| **Pines libres para expansión** | **~17** |
+| **Pines libres para expansión** | **~11** |
 
 ### Distribución de pines usados por categoría
 
@@ -297,17 +297,17 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | Touch panel SPI | 1 | 2.8% |
 | Display backlight | 1 | 2.8% |
 | CAN bus (TWAI vía TJA1051) | 2 | 5.6% |
-| Sensor de obstáculos HC-SR04 | 2 (TRIG + ECHO) | 5.6% |
+| Sensor de obstáculos TOFSense-M | 1 (UART RX) | 2.8% |
 | DFPlayer Mini audio (UART2) | 2 | 5.6% |
 | Relé audio | 1 | 2.8% |
 | LEDs WS2812B (front + rear) | 2 | 5.6% |
 | Palanca de cambios I2C (MCP23017) | 2 | 5.6% |
 | Interruptor tracción 2WD/4WD | 1 | 2.8% |
 | Ignition sense + Power hold | 2 | 5.6% |
-| **TOTAL USADOS** | **22** | **61.1%** |
+| **TOTAL USADOS** | **21** | **58.3%** |
 | Reservados Flash/PSRAM | 12 (GPIO26–37) | — |
 | No existen en ESP32-S3 | 4 (GPIO22–25) | — |
-| **LIBRES** | **~10** | **~27.8%** |
+| **LIBRES** | **~11** | **~30.6%** |
 
 ---
 
@@ -352,16 +352,16 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 - Biblioteca: ESP32-TWAI-CAN v1.0.1
 - Terminación 120Ω en el lado ESP32
 
-### 5.4 Sensor de obstáculos — HC-SR04 ultrasónico (2 pines)
+### 5.4 Sensor de obstáculos — TOFSense-M LiDAR (Nooploop) (1 pin)
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
-| TRIG | **GPIO6** | Trigger (output) | — |
-| ECHO | **GPIO7** | Echo (input) | — |
-| | | **Subtotal:** | **2 pines** |
+| UART1 RX | **GPIO18** | Datos del sensor (sensor TX → ESP32 RX) | 921600 bps |
+| | | **Subtotal:** | **1 pin** |
 
-- Sensor: HC-SR04 (ultrasónico, rango 20–4000 mm)
-- Frecuencia de muestreo: ≥20 Hz (40 ms mínimo entre disparos)
+- Sensor: TOFSense-M S (Nooploop), LiDAR 8×8 Time-of-Flight, rango 20–4000 mm
+- Protocolo: NLink_TOFSense_M_Frame0 (400 bytes/trama, ~10 Hz)
+- Comunicación: UART 921600 bps, 8N1, recepción unidireccional
 - Datos enviados al STM32 vía CAN ID 0x208 (distancia, zona, salud, contador)
 
 ### 5.5 DFPlayer Mini — Audio MP3 vía UART2 (2 pines)
@@ -444,26 +444,25 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |---|------|--------|---------|
 | 1 | GPIO4 | CAN bus | TWAI TX → TJA1051 TXD |
 | 2 | GPIO5 | CAN bus | TWAI RX → TJA1051 RXD |
-| 3 | GPIO6 | Sensor obstáculos | HC-SR04 TRIG (output) |
-| 4 | GPIO7 | Sensor obstáculos | HC-SR04 ECHO (input) |
-| 5 | GPIO8 | Palanca de cambios | I2C SDA (MCP23017 @ 0x20) |
-| 6 | GPIO9 | Palanca de cambios | I2C SCL (MCP23017 @ 0x20) |
-| 7 | GPIO10 | Display TFT | SPI CS (chip select display) |
-| 8 | GPIO11 | Relé audio | Conmuta altavoz radio/DFPlayer (active LOW) |
-| 9 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
-| 10 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
-| 11 | GPIO14 | Display TFT | SPI SCLK (reloj) |
-| 12 | GPIO15 | Tracción | Interruptor 2WD/4WD (pull-up, LOW=4WD) |
-| 13 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
-| 14 | GPIO38 | Display TFT | RST (Reset display) |
-| 15 | GPIO39 | Display TFT | DC (Data/Command) |
-| 16 | GPIO40 | Encendido | Ignition Key Sense (input, PULLDOWN) |
-| 17 | GPIO41 | Encendido | Power Hold Output (active HIGH) |
-| 18 | GPIO42 | Display TFT | BL (Backlight) |
-| 19 | GPIO43 | DFPlayer Mini | UART2 TX (comandos audio) |
-| 20 | GPIO44 | DFPlayer Mini | UART2 RX (respuestas audio) |
-| 21 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs |
-| 22 | GPIO48 | LEDs WS2812B | Tira trasera 16 LEDs |
+| 3 | GPIO8 | Palanca de cambios | I2C SDA (MCP23017 @ 0x20) |
+| 4 | GPIO9 | Palanca de cambios | I2C SCL (MCP23017 @ 0x20) |
+| 5 | GPIO10 | Display TFT | SPI CS (chip select display) |
+| 6 | GPIO11 | Relé audio | Conmuta altavoz radio/DFPlayer (active LOW) |
+| 7 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
+| 8 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
+| 9 | GPIO14 | Display TFT | SPI SCLK (reloj) |
+| 10 | GPIO15 | Tracción | Interruptor 2WD/4WD (pull-up, LOW=4WD) |
+| 11 | GPIO18 | Sensor obstáculos | TOFSense-M UART1 RX (921600 bps) |
+| 12 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
+| 13 | GPIO38 | Display TFT | RST (Reset display) |
+| 14 | GPIO39 | Display TFT | DC (Data/Command) |
+| 15 | GPIO40 | Encendido | Ignition Key Sense (input, PULLDOWN) |
+| 16 | GPIO41 | Encendido | Power Hold Output (active HIGH) |
+| 17 | GPIO42 | Display TFT | BL (Backlight) |
+| 18 | GPIO43 | DFPlayer Mini | UART2 TX (comandos audio) |
+| 19 | GPIO44 | DFPlayer Mini | UART2 RX (respuestas audio) |
+| 20 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs |
+| 21 | GPIO48 | LEDs WS2812B | Tira trasera 16 LEDs |
 
 ---
 
@@ -477,27 +476,27 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 | 2 | GPIO1 | ADC1_CH1, GPIO | **LIBRE** |
 | 3 | GPIO2 | ADC1_CH2, GPIO | **LIBRE** |
 | 4 | GPIO3 | ADC1_CH3, GPIO | **LIBRE** (⚠️ boot strapping) |
-| 5 | GPIO16 | GPIO | **LIBRE** |
-| 6 | GPIO17 | GPIO | **LIBRE** |
-| 7 | GPIO18 | GPIO | **LIBRE** |
-| 8 | GPIO19 | GPIO (USB D−) | **LIBRE** (si no se usa USB nativo) |
-| 9 | GPIO20 | GPIO (USB D+) | **LIBRE** (si no se usa USB nativo) |
-| 10 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
+| 5 | GPIO6 | GPIO | **LIBRE** |
+| 6 | GPIO7 | GPIO | **LIBRE** |
+| 7 | GPIO16 | GPIO | **LIBRE** |
+| 8 | GPIO17 | GPIO | **LIBRE** |
+| 9 | GPIO19 | GPIO (USB D−) | **LIBRE** (si no se usa USB nativo) |
+| 10 | GPIO20 | GPIO (USB D+) | **LIBRE** (si no se usa USB nativo) |
+| 11 | GPIO46 | GPIO | **LIBRE** (⚠️ boot strapping, solo input) |
 
-> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash. GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8. GPIO22–25 no existen en el chip ESP32-S3. GPIO45 es un strapping pin (VDD_SPI) y se ha evitado. Los pines GPIO4–15 y GPIO38–48 están asignados según tabla anterior.
+> **Nota:** GPIO26–GPIO32 están reservados para el bus QSPI Flash. GPIO33–GPIO37 están reservados para el bus Octal PSRAM en el módulo N16R8. GPIO22–25 no existen en el chip ESP32-S3. GPIO45 es un strapping pin (VDD_SPI) y se ha evitado. Los pines GPIO4–15, GPIO18 y GPIO38–48 están asignados según tabla anterior.
 
-> **Resumen: ~10 pines libres de forma segura** (evitando pines de boot strapping).
+> **Resumen: ~11 pines libres de forma segura** (evitando pines de boot strapping).
 
 ### Posibles usos de los pines libres
 
 | Posible expansión | GPIOs sugeridos | Nº pines |
 |-------------------|-----------------|----------|
-| Botones físicos (menú, modo, emergencia) | GPIO6, GPIO7, GPIO8 | 3 |
-| LEDs de estado (CAN ok, error, etc.) | GPIO9, GPIO11 | 2 |
-| SD Card (SPI) | GPIO15 (MISO), GPIO16 (MOSI), GPIO17 (SCK), GPIO18 (CS) | 4 |
-| Buzzer / alarma sonora | GPIO39 | 1 |
+| Botones físicos (menú, modo, emergencia) | GPIO6, GPIO7, GPIO16 | 3 |
+| LEDs de estado (CAN ok, error, etc.) | GPIO6, GPIO7 | 2 |
+| SD Card (SPI) | GPIO16 (MOSI), GPIO17 (SCK), GPIO19 (MISO), GPIO20 (CS) | 4 |
+| Buzzer / alarma sonora | GPIO16 | 1 |
 | ADC adicional (batería, sensor luz) | GPIO1, GPIO2, GPIO3 | 1-3 |
-| I2C adicional (sensor ambiental) | GPIO39 (SCL), GPIO40 (SDA) | 2 |
 
 ---
 
@@ -696,7 +695,7 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 | MCU | Pines necesarios | Pines disponibles | Pines usados | Pines libres | ¿Suficiente? |
 |-----|-----------------|-------------------|-------------|-------------|--------------|
 | **STM32G474RE** | 31 | 47 GPIO | 31 (66.0%) | 14 libres + 2 SWD | ✅ **SÍ** — sobran 14 pines (incluye 5 DIR liberados) |
-| **ESP32-S3** | 22 | ~36 accesibles | 22 (61.1%) | ~10 libres | ✅ **SÍ** — sobran ~10 pines |
+| **ESP32-S3** | 21 | ~36 accesibles | 21 (58.3%) | ~11 libres | ✅ **SÍ** — sobran ~11 pines |
 
 Ambos microcontroladores tienen **margen** para expansiones futuras (botones físicos, SD card, buzzer, etc.).
 

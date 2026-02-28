@@ -107,8 +107,7 @@ El ESP32 ahora lee los mode flags confirmados del heartbeat y actualiza `current
 |------|---------|------------|--------|
 | 4 | CAN TX | TWAI | ✅ Único |
 | 5 | CAN RX | TWAI | ✅ Único |
-| 6 | HC-SR04 Trigger | GPIO output | ✅ Único |
-| 7 | HC-SR04 Echo | GPIO input | ✅ Único |
+| 18 | TOFSense-M RX | UART1 RX | ✅ Único |
 | 8 | MCP23017 SDA | I2C | ✅ Único |
 | 9 | MCP23017 SCL | I2C | ✅ Único |
 | 38 | WS2812B data | FastLED | ✅ Único |
@@ -168,7 +167,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 
 | Feature | Estado | Archivo | Notas |
 |---------|--------|---------|-------|
-| HC-SR04 obstacle sensor | ✅ | `esp32/src/sensors/obstacle_sensor.*` | 5 zonas, GPIO 6/7 |
+| TOFSense-M obstacle sensor | ✅ | `esp32/src/sensors/obstacle_sensor.*` | 5 zonas, UART1 GPIO 18, 921600 bps |
 | CAN 0x208 obstacle TX | ✅ | `esp32/src/can/can_obstacle.*` | 66ms rate |
 | CAN 0x209 obstacle safety RX | ✅ | `Core/Src/can_handler.c` L650 | `Obstacle_ProcessSafetyCAN()` |
 | Obstacle backstop limiter | ✅ | `Core/Src/safety_system.c` | 5-zone, speed-dependent |

@@ -512,7 +512,7 @@ ID: 0x206  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 
 ### 0x208 - OBSTACLE_DISTANCE (ESP32→STM32)
 
-**Propósito:** Distancia al obstáculo desde sensor HC-SR04 (GPIO 6/7 del ESP32).
+**Propósito:** Distancia al obstáculo desde sensor TOFSense-M LiDAR (UART1 GPIO 18 del ESP32).
 
 | Byte | Campo | Tipo | Rango | Unidad | Notas |
 |------|-------|------|-------|--------|-------|

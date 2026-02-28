@@ -135,7 +135,7 @@ struct AckData {
 };
 
 // -------------------------------------------------------------------------
-// Front obstacle sensor (0x208) — ultrasonic / ToF distance in cm
+// Front obstacle sensor (0x208) — TOFSense-M LiDAR distance in cm
 // -------------------------------------------------------------------------
 struct ObstacleData {
     uint16_t distanceCm  = 0;   // 0 = no reading, max ~400 cm

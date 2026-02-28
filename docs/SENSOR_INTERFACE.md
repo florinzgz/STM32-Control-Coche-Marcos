@@ -15,7 +15,7 @@
 4. [Pedal Acelerador — Doble Canal Redundante](#4-pedal-acelerador--doble-canal-redundante)
 5. [E6B2-CWZ6C — Encoder de Dirección (Cuadratura)](#5-e6b2-cwz6c--encoder-de-dirección-cuadratura)
 6. [LJ12A3 — Sensor de Centro de Dirección](#6-lj12a3--sensor-de-centro-de-dirección)
-7. [HC-SR04 — Sensor Ultrasónico de Obstáculos](#7-hc-sr04--sensor-ultrasónico-de-obstáculos)
+7. [TOFSense-M — Sensor LiDAR de Obstáculos (Nooploop)](#7-tofsense-m--sensor-lidar-de-obstáculos-nooploop)
 8. [MCP23017 — Selector de Marchas (Shifter)](#8-mcp23017--selector-de-marchas-shifter)
 9. [Interruptor de Tracción 2WD/4WD](#9-interruptor-de-tracción-2wd4wd)
 10. [Sensor de Contacto (Ignition Sense)](#10-sensor-de-contacto-ignition-sense)
@@ -492,25 +492,41 @@ Sensor inductivo que detecta un tornillo de referencia en el centro mecánico de
 
 ---
 
-## 7. HC-SR04 — Sensor Ultrasónico de Obstáculos
+## 7. TOFSense-M — Sensor LiDAR de Obstáculos (Nooploop)
 
-Sensor ultrasónico frontal gestionado por el ESP32-S3 para detección de obstáculos con 5 zonas de distancia.
+Sensor LiDAR frontal 8×8 (Time-of-Flight) gestionado por el ESP32-S3 para detección de obstáculos con 5 zonas de distancia. Comunicación UART a 921600 bps, protocolo NLink_TOFSense_M_Frame0.
+
+Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf)
 
 ### Tabla de pines
 
 | Señal | Pin ESP32-S3 | Dirección | Nota |
 |-------|-------------|-----------|------|
-| TRIG | GPIO6 | Salida | Pulso de disparo 10 µs |
-| ECHO | GPIO7 | Entrada | Ancho de pulso proporcional a distancia |
+| UART1 RX | GPIO18 | Entrada | Sensor TX → ESP32 RX (datos del sensor) |
+| UART1 TX | — | — | No conectado (recepción unidireccional) |
+
+### Conector del sensor (GH1.25 4 pines)
+
+| Pin | Señal (modo UART) | Conexión |
+|-----|-------------------|----------|
+| 1 | VCC | **5 V** (obligatorio, el sensor no funciona a 3.3 V) |
+| 2 | GND | GND común |
+| 3 | RX | No conectado (recepción unidireccional) |
+| 4 | TX | ESP32 GPIO18 (UART1 RX) |
+
+> **Nota sobre niveles lógicos:** Según el datasheet V3.0, las señales UART del TOFSense-M son TTL 3.3 V, compatibles directamente con el ESP32-S3. No se requiere level shifter para las señales TX/RX.  
+> **Nota sobre alimentación:** El sensor requiere 5 V en VCC. Alimentar a 3.3 V provocará funcionamiento inestable o ausencia de datos (estado INVALID).
 
 ### Parámetros
 
 | Parámetro | Valor |
 |-----------|-------|
 | Rango útil | 20 – 4000 mm |
-| Frecuencia de muestreo | ≥20 Hz |
-| Retardo de confirmación | 200 ms (evita falsas alarmas) |
-| Retardo de despeje | 1000 ms (antes de subir nivel de velocidad) |
+| Frecuencia de salida | ~10 Hz (modo activo) |
+| Velocidad UART | 921600 bps, 8N1 |
+| Tamaño de trama | 400 bytes (NLink_TOFSense_M_Frame0) |
+| Píxeles | 64 (8×8 matriz) |
+| Timeout sin tramas | 500 ms → INVALID |
 
 ### Zonas de distancia
 
@@ -524,50 +540,43 @@ Sensor ultrasónico frontal gestionado por el ESP32-S3 para detección de obstá
 
 ### Resistencias y protección
 
-- **TRIG:** sin resistencia adicional; GPIO6 del ESP32-S3 en push-pull 3.3 V. El HC-SR04 acepta TRIG a nivel lógico ≥2.0 V (TTL compatible con 3.3 V).
-- **ECHO:** el HC-SR04 genera un pulso a **5 V**. El ESP32-S3 **no es tolerante a 5 V**. Requiere divisor resistivo:
-  - 10 kΩ (serie desde ECHO) + 20 kΩ (a GND) → ratio 20/(10+20) = 0.667 → 5 V × 0.667 = 3.33 V.
-  - O usar level shifter BSS138.
-- **Condensador de desacoplo:** 100 nF en VCC del HC-SR04 cerca del sensor.
+- **UART RX (GPIO18):** Conexión directa. El TOFSense-M tiene UART TTL 3.3 V (según datasheet V3.0, sección "Typical Specifications"), compatibles directamente con el ESP32-S3. No se requiere divisor resistivo ni level shifter para las señales UART.
+- **Condensador de desacoplo:** 100 nF en VCC del TOFSense-M cerca del sensor.
 
 ### Alimentación
 
-- HC-SR04: **5 V** (consumo ~15 mA activo, ~2 mA standby).
+- TOFSense-M: **5 V obligatorio** (conector GH1.25 pin 1, consumo ~200 mA típico). El sensor no funciona a 3.3 V — la alimentación insuficiente causa estado INVALID en el firmware.
+
+> **Referencia:** TOFSense-M Datasheet V3.0 (Nooploop): "Power Supply: 5V", "Communication Interface UART and CAN, TTL signal line level 3.3V".
 
 ### Motivo técnico
 
-- **HC-SR04:** sensor barato, ampliamente disponible, rango suficiente (hasta 4 m) para un vehículo de baja velocidad (≤25 km/h).
+- **TOFSense-M:** sensor LiDAR 8×8 de alta precisión, mayor rango y fiabilidad que ultrasonido. No afectado por temperatura, viento ni interferencias acústicas.
 - **5 zonas con factores de escala:** reducción progresiva de velocidad en vez de parada binaria, para una conducción más suave.
-- **Confirmación 200 ms / despeje 1000 ms:** histéresis temporal asimétrica — se frena rápido (200 ms) pero se acelera lento (1000 ms) para seguridad.
-- **≥20 Hz de muestreo:** a 25 km/h (6.94 m/s), en 50 ms se recorren 0.35 m; 20 Hz (50 ms) es suficiente para reaccionar dentro de la zona de alerta.
+- **Mínima distancia de 64 píxeles:** se usa el valor mínimo de todos los píxeles válidos como distancia de referencia, proporcionando detección de obstáculos de campo amplio.
+- **UART 921600 bps:** alto throughput necesario para los 400 bytes/trama a ~10 Hz. Compatible con UART1 del ESP32-S3.
 
 ### Qué ocurre si falla
 
-- **Sin eco (sensor desconectado o bloqueado):** se interpreta como obstáculo a distancia desconocida → el sistema aplica factor de escala conservador (0.3, zona Critical).
-- **Eco permanente (sensor defectuoso):** distancia calculada = 0 → zona Emergency (parada). El firmware detecta lecturas estáticas durante >5 s y emite alerta de sensor fallido.
-- **Lecturas erráticas (interferencia ultrasónica):** el retardo de confirmación de 200 ms filtra picos aislados.
+- **Sin tramas UART (sensor desconectado):** tras 500 ms sin tramas válidas, el estado pasa a INVALID. El STM32 aplica factor conservador vía su timeout de CAN 0x208.
+- **Checksum incorrecto:** la trama se descarta silenciosamente. El sensor sigue intentando recibir la siguiente trama.
+- **Lecturas estáticas (sensor obstruido):** detección de sensor atascado — si la distancia no varía más de 10 mm durante 1000 ms mientras el vehículo se mueve, se marca como STUCK.
 
 ### Esquema de conexión
 
 ```
-              HC-SR04
+          TOFSense-M (GH1.25)
          ┌──────────────┐
-  5V ────┤ VCC      TRIG├──────────── ESP32 GPIO6
+  5V ────┤ VCC (pin 1)  │       ⚠ 5V obligatorio
          │              │
-  GND ───┤ GND      ECHO├──┐
-         └──────────────┘  │
-                           │  5V señal
-                        10kΩ
-                           │
-  ESP32 GPIO7 ─────────────┤
-                           │
-                        20kΩ
-                           │
-                          GND
+  GND ───┤ GND (pin 2)  │
+         │              │
+     n/c ┤ RX  (pin 3)  │
+         │              │
+  ESP32 ─┤ TX  (pin 4)  ├──────── ESP32 GPIO18 (UART1 RX)
+  GPIO18 └──────────────┘         (3.3V TTL — conexión directa OK)
 
-  Tensión en GPIO7: 5V × 20k/(10k+20k) = 3.33V ✓
-
-  Desacoplo: 100nF entre VCC y GND del HC-SR04
+  Desacoplo: 100nF entre VCC y GND del TOFSense-M
 ```
 
 ---
@@ -791,8 +800,7 @@ Entrada digital que detecta si la llave de contacto está en posición ON. Gesti
 
 | Pin | Función | Sensor/Periférico |
 |-----|---------|-------------------|
-| GPIO6 | Salida TRIG | HC-SR04 ultrasónico |
-| GPIO7 | Entrada ECHO | HC-SR04 ultrasónico |
+| GPIO18 | UART1 RX | TOFSense-M LiDAR (Nooploop) |
 | GPIO8 | I2C SDA | MCP23017 (shifter) |
 | GPIO9 | I2C SCL | MCP23017 (shifter) |
 | GPIO15 | Entrada pull-up | Interruptor 2WD/4WD |

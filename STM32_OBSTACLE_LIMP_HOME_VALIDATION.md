@@ -149,7 +149,7 @@ This dropped obstacle protection regardless of whether an obstacle was being tra
 | **Baud rate** | 921,600 bps |
 | **RX pin** | ESP32 GPIO44 |
 | **TX pin** | ESP32 GPIO43 |
-| **Protocol** | NLink TOFSense-M frame (400 bytes, 4-byte header 0x57 0x01 0xFF 0x00) |
+| **Protocol** | NLink TOFSense-M Frame0 (400 bytes, header 0x57 + function_mark 0x01) |
 
 ### 5.3 STM32 Obstacle Data Path
 

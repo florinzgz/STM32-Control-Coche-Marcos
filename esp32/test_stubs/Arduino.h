@@ -56,9 +56,11 @@ struct FakeSerial_ {
 };
 inline FakeSerial_ Serial;
 
-/* ---- HardwareSerial stub (used by audio_manager) ----------------------- */
+/* ---- HardwareSerial stub (used by audio_manager, obstacle_sensor) ----- */
 struct HardwareSerial {
     explicit HardwareSerial(int) {}
     void begin(unsigned long, int, int, int) {}
     size_t write(const uint8_t*, size_t n) { return n; }
+    int available() { return 0; }
+    int read() { return -1; }
 };

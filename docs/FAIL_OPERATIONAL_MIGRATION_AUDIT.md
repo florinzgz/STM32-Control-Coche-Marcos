@@ -245,7 +245,7 @@ Validation passes when ALL 6 checks pass simultaneously. If validation fails, th
 
 #### 1.2.9 Obstacle Detection (Original — `obstacle_detection.cpp`, `obstacle_safety.cpp`)
 
-- Ultrasonic sensor on ESP32 (direct GPIO, same MCU as motors).
+- TOFSense-M LiDAR sensor on ESP32 (UART, same MCU as display).
 - Three-tier distance check: CLEAR, WARNING, EMERGENCY.
 - No stuck-sensor detection documented.
 - No speed-dependent stopping distance.
@@ -504,7 +504,7 @@ if (system_state == SYS_STATE_STANDBY &&
 - `CAN_ID_OBSTACLE_DISTANCE = 0x208` filter is configured in `CAN_ConfigureFilters()`.
 - `Obstacle_ProcessCAN()` in `safety_system.c` accepts the decoded frame.
 - ESP32 `can_rx.cpp` decodes 0x208 into `vehicle::ObstacleData`.
-- There is no driver code in the ESP32 firmware that reads a physical ultrasonic or ToF sensor and populates `ObstacleData`.
+- There is no driver code in the ESP32 firmware that reads a physical ToF sensor and populates `ObstacleData`.
 
 **Risk:** The obstacle safety module on STM32 starts in `OBS_STATE_NO_SENSOR`. Without CAN 0x208 frames, the obstacle scale remains 1.0 (full power) indefinitely. If a physical obstacle is in front of the vehicle, the STM32 has no data to act on.
 
@@ -724,7 +724,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 
 **Context:** Risk R6 — obstacle safety module has no sensor data.  
 **What files are touched:** `esp32/src/` — new file `obstacle_sensor_driver.cpp/.h`. No STM32 changes.  
-**What behavior changes:** ESP32 reads physical ultrasonic or VL53L8CX sensor and populates CAN 0x208 at 66 ms rate. STM32 obstacle module transitions from OBS_STATE_NO_SENSOR to NORMAL/CONFIRMING/ACTIVE based on distance data.  
+**What behavior changes:** ESP32 reads TOFSense-M LiDAR sensor via UART1 (921600 bps) and populates CAN 0x208 at 66 ms rate. STM32 obstacle module transitions from OBS_STATE_NO_SENSOR to NORMAL/CONFIRMING/ACTIVE based on distance data.  
 **Physical test:**  
 1. Place obstacle at 30 cm from front sensor.  
 2. Verify CAN 0x208 received by STM32 (verify via CAN analyzer).  
@@ -1064,7 +1064,7 @@ Migration Step 5 implements the obstacle sensor driver on the ESP32, providing t
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Sensor driver | `esp32/src/sensors/obstacle_sensor.cpp` | HC-SR04 ultrasonic reading at ≥ 20 Hz, range validation, stuck detection, warmup |
+| Sensor driver | `esp32/src/sensors/obstacle_sensor.cpp` | TOFSense-M LiDAR reading via UART1 (921600 bps), NLink_TOFSense_M_Frame0 parsing, range validation, stuck detection, warmup |
 | CAN TX | `esp32/src/can/can_obstacle.cpp` | Transmits 0x208 at 66 ms interval matching frozen CAN contract rev 1.3 |
 | HMI indicator | `esp32/src/hmi/obstacle_indicator.cpp` | Boot screen status display: WAITING / INVALID / VALID |
 
@@ -1079,9 +1079,9 @@ Migration Step 5 implements the obstacle sensor driver on the ESP32, providing t
 
 ### Data Integrity Measures
 
-1. **Physical range validation:** Readings below 20 mm or above 4000 mm are rejected as out-of-range.  These thresholds correspond to the physical limits of the HC-SR04 sensor.
+1. **Physical range validation:** Readings below 20 mm or above 4000 mm are rejected as out-of-range.  These thresholds correspond to the useful range of the TOFSense-M sensor.
 
-2. **Sensor timeout:** If no echo pulse is received within 100 ms the reading is marked invalid.  The STM32 independently applies a 500 ms CAN timeout (`OBSTACLE_CAN_TIMEOUT_MS`) as a second layer of protection.
+2. **Sensor timeout:** If no valid UART frame is received within 500 ms the reading is marked invalid.  The STM32 independently applies a 500 ms CAN timeout (`OBSTACLE_CAN_TIMEOUT_MS`) as a second layer of protection.
 
 3. **Warmup filtering:** For 1000 ms after sensor initialization, all readings are suppressed (status = WAITING) and no CAN frames are transmitted.  This prevents spurious early measurements from reaching the STM32 state machine.
 

@@ -240,7 +240,7 @@ The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communi
 **Shifter:** MCP23017 I2C (GPIO 8 SDA, 9 SCL)  
 **LEDs:** WS2812B front (GPIO 47, 28 LEDs), rear (GPIO 48, 16 LEDs)  
 **Power:** Ignition sense (GPIO 40), power hold (GPIO 41)  
-**Obstacle:** HC-SR04 (GPIO 6 TRIG, 7 ECHO)
+**Obstacle:** TOFSense-M LiDAR (GPIO 18 UART1 RX, 921600 bps)
 
 See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the full firmware architecture.
 

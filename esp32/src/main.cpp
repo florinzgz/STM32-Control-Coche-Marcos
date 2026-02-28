@@ -298,7 +298,7 @@ void setup() {
         Serial.println("[CAN] Initialization FAILED");
     }
 
-    // Initialize obstacle sensor driver (HC-SR04 on GPIO 6/7)
+    // Initialize obstacle sensor driver (TOFSense-M on UART1, GPIO 18 RX)
     obstacle_sensor::init();
 
     // Initialize CAN TX for obstacle distance frame (0x208)

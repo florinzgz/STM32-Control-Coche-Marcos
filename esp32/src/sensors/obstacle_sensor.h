@@ -1,14 +1,27 @@
 // =============================================================================
-// ESP32-S3 — Obstacle Sensor Driver
+// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M by Nooploop)
 //
-// Reads distance from ultrasonic sensor (HC-SR04 compatible) connected to
-// ESP32 GPIO.  Provides validated readings with stuck-sensor detection,
+// Reads distance from TOFSense-M 8×8 LiDAR sensor via UART.
+// Parses NLink_TOFSense_M_Frame0 protocol (400-byte frames at 921600 bps).
+// Provides validated readings with stuck-sensor detection,
 // warmup filtering, and physical-range validation.
 //
-// Sampling rate: >= 20 Hz (configurable via SAMPLE_INTERVAL_MS).
+// Per-pixel layout (6 bytes each, per Nooploop reference):
+//   [0-2]  dis:              3-byte signed int24 LE, unit = µm (/1000 = mm)
+//   [3]    dis_status:       0 = valid measurement
+//   [4-5]  signal_strength:  uint16 LE
+//
+// Sensor output rate: ~10 Hz (active mode).
 // Output: distance_mm, zone, health flag, stuck flag, sensor status.
 //
-// Reference: docs/FAIL_OPERATIONAL_MIGRATION_AUDIT.md — Step 5
+// Hardware: TOFSense-M S (Nooploop) — GH1.25 4-pin connector
+//   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX (GPIO 18)
+//   VCC must be 5 V (sensor will not work at 3.3 V).
+//   UART IO level is 3.3 V TTL — direct connection to ESP32-S3 is safe,
+//   no level shifter needed for UART signals.
+//
+// Reference: TOFSense-M User Manual V3.0
+//            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
 //            docs/CAN_CONTRACT_FINAL.md rev 1.3 (0x208 payload)
 // =============================================================================
 
@@ -40,19 +53,19 @@ struct Reading {
 };
 
 // -------------------------------------------------------------------------
-// Configuration — GPIO pins for ultrasonic sensor
+// Configuration — UART for TOFSense-M LiDAR sensor
 // -------------------------------------------------------------------------
 struct Config {
-    int      trigPin            = 6;     // GPIO for TRIG output
-    int      echoPin            = 7;     // GPIO for ECHO input
-    uint32_t sampleIntervalMs   = 40;    // Sampling interval (40 ms = 25 Hz, >= 20 Hz)
-    uint32_t warmupMs           = 1000;  // Warmup period after init (ms)
-    uint16_t minRangeMm         = 20;    // Minimum physical range (mm)
-    uint16_t maxRangeMm         = 4000;  // Maximum physical range (mm)
-    uint32_t sensorTimeoutMs    = 100;   // Max time to wait for echo (ms)
-    uint32_t stuckDurationMs    = 1000;  // Duration for stuck detection (ms)
-    uint16_t stuckThresholdMm   = 10;    // Change threshold for stuck detection (mm)
-    float    minSpeedForStuck   = 1.0f;  // Vehicle speed threshold (km/h) for stuck detection
+    int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
+    int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
+    uint32_t baudRate          = 921600; // TOFSense-M default baud rate
+    uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
+    uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
+    uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)
+    uint32_t frameTimeoutMs    = 500;   // Max time without valid frame before INVALID
+    uint32_t stuckDurationMs   = 1000;  // Duration for stuck detection (ms)
+    uint16_t stuckThresholdMm  = 10;    // Change threshold for stuck detection (mm)
+    float    minSpeedForStuck  = 1.0f;  // Vehicle speed threshold (km/h) for stuck detection
 };
 
 /// Initialize sensor hardware.  Call once from setup().

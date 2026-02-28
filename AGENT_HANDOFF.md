@@ -12,7 +12,7 @@
 
 Firmware de control de un coche eléctrico infantil con arquitectura dual:
 - **STM32G474RE** (170 MHz, Cortex-M4 FPU): Controlador de motores, autoridad de seguridad, sensores
-- **ESP32-S3** (240 MHz, PSRAM 8MB): HMI (pantalla táctil 480×320 TFT ST7796), audio DFPlayer, LEDs WS2812B, lectura de periféricos de usuario (palanca marchas MCP23017, sensor obstáculo HC-SR04)
+- **ESP32-S3** (240 MHz, PSRAM 8MB): HMI (pantalla táctil 480×320 TFT ST7796), audio DFPlayer, LEDs WS2812B, lectura de periféricos de usuario (palanca marchas MCP23017, sensor obstáculo TOFSense-M LiDAR)
 
 Comunicación exclusiva por **CAN bus a 500 kbps** (CAN 2.0A, 11-bit IDs, TJA1051 transceiver).
 
@@ -30,7 +30,7 @@ Comunicación exclusiva por **CAN bus a 500 kbps** (CAN 2.0A, 11-bit IDs, TJA105
 │   └── src/
 │       ├── screens/    ← 7 pantallas (boot, standby, drive, safe, error, engineering)
 │       ├── ui/         ← 11 widgets UI (car, pedal, gear, battery, mode, obstacle, led, debug)
-│       ├── sensors/    ← obstacle_sensor.cpp/h (HC-SR04 driver)
+│       ├── sensors/    ← obstacle_sensor.cpp/h (TOFSense-M LiDAR UART driver)
 │       ├── can/        ← can_obstacle.cpp/h (TX frame 0x208)
 │       ├── hmi/        ← obstacle_indicator.cpp/h (indicador estado sensor en boot)
 │       └── *.cpp/h     ← main, can_rx, vehicle_data, screen_manager, led_controller,
@@ -93,7 +93,7 @@ Comunicación exclusiva por **CAN bus a 500 kbps** (CAN 2.0A, 11-bit IDs, TJA105
 | WS2812B LED controller (FastLED, 28 front + 16 rear) | `led_controller.cpp/h` | ✅ Completo |
 | Power Manager (llave contacto GPIO 40/41) | `power_manager.cpp/h` | ✅ Completo |
 | Audio Manager (DFPlayer UART2 GPIO 43/44) | `audio_manager.cpp/h` | ✅ Completo |
-| Sensor obstáculo HC-SR04 (GPIO 6/7, 25 Hz, 5 zonas) | `sensors/obstacle_sensor.cpp/h` | ✅ Completo |
+| Sensor obstáculo TOFSense-M (GPIO 18 UART1 RX, 921600 bps, 5 zonas) | `sensors/obstacle_sensor.cpp/h` | ✅ Completo |
 | CAN TX obstáculo (0x208, DLC 5, 66ms) | `can/can_obstacle.cpp/h` | ✅ Completo |
 | Indicador obstáculo en boot | `hmi/obstacle_indicator.cpp/h` | ✅ Completo |
 | **Palanca marchas MCP23017 I2C (GPIO 8/9)** | `shifter_input.cpp/h` | ✅ Completo |
@@ -328,7 +328,7 @@ No hay tests para ESP32. No hay CI/CD configurado (no `.github/workflows/`).
 | Función | Pin(es) |
 |---------|---------|
 | CAN TX/RX | GPIO 4/5 |
-| Obstacle TRIG/ECHO | GPIO 6/7 |
+| Obstacle UART1 RX | GPIO 18 |
 | Shifter I2C SDA/SCL | GPIO 8/9 |
 | TFT MOSI/SCLK/CS/DC/RST | GPIO 13/14/10/39/38 |
 | Touch CS | GPIO 21 |

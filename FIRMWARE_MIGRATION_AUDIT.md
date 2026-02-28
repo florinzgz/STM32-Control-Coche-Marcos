@@ -82,7 +82,7 @@
 
 | Función original | Existe en migrado | Estado | Evidencia |
 |---|---|---|---|
-| Driver de sensor (TOFSense-M S LiDAR) | ⚠️ ESP32 | Sustituido | `esp32/src/sensors/obstacle_sensor.cpp`: HC-SR04 ultrasónico (punto único) sustituye LiDAR 8×8 matrix. Funcionalidad reducida pero operativa |
+| Driver de sensor (TOFSense-M S LiDAR) | ✅ ESP32 | Implementado | `esp32/src/sensors/obstacle_sensor.cpp`: TOFSense-M LiDAR 8×8 matrix vía UART1 (921600 bps, NLink_TOFSense_M_Frame0). Distancia mínima de 64 píxeles |
 | 5 zonas de colisión | ⚠️ STM32 | Parcial | `safety_system.c`: solo 3 zonas (EMERGENCY <200mm, CRITICAL 200-500mm, WARNING 500-1000mm). Faltan Zone 2 Caution (1000-1500mm) y Zone 1 Alert (1500-4000mm) |
 | Detección de reacción infantil | ❌ | Falta | Original: reducción de pedal >10% en 500 ms modifica respuesta zonas 2-3. No existe código equivalente |
 | Parada de emergencia (<200 mm) | ✅ STM32 | Equivalente | `safety_system.c`: obstacle_scale=0.0 con histéresis temporal 200 ms |
@@ -183,7 +183,7 @@
 | Máquina estados 4 niveles | Máquina estados 7 niveles | Mejora: LIMP_HOME separado de SAFE, transiciones más granulares |
 | PID posicional de dirección | EPS torque-assist | Mejora: comportamiento más natural con detección de intención del conductor |
 | Monolítico ESP32 | STM32 (control) + ESP32 (HMI) | Mejora: elimina bootloops documentados (30+), aísla motor de display |
-| TOFSense-M S LiDAR | HC-SR04 ultrasónico | Sustitución de hardware: menos resolución pero funcional para distancia frontal |
+| TOFSense-M S LiDAR | TOFSense-M S LiDAR | Mantenido: driver UART con parseo de protocolo NLink_TOFSense_M_Frame0 para sensor de obstáculos |
 
 ### Comportamientos rotos
 | Comportamiento | Descripción | Impacto |

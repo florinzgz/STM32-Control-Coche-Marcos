@@ -54,9 +54,11 @@ The STM32 accepts only white-listed CAN IDs. All other messages are rejected at 
 |--------|------|-------------|-------------|
 | 0 | Dual (exact match) | 0x011 (ESP32 heartbeat) | RXFIFO0 |
 | 1 | Range | 0x100 – 0x102 (ESP32 commands) | RXFIFO0 |
-| 2 | Dual (exact match) | 0x110 (ESP32 service commands) | RXFIFO0 |
+| 2 | Range | 0x110 – 0x120 (service cmd 0x110 + LED cmd 0x120) | RXFIFO0 |
 | 3 | Range | 0x208 – 0x209 (ESP32 obstacle data) | RXFIFO0 |
 | Global | Reject | Everything else | Discarded |
+
+> **Note:** Filter 2 uses a range filter accepting all IDs 0x110–0x120. Intermediate IDs (0x111–0x11F) are not used by any module and are silently ignored by `CAN_ProcessMessages()`.
 
 Remote frames are rejected. Extended-ID frames are rejected.
 
@@ -70,19 +72,20 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 
 | CAN ID | Name | DLC | Rate | Description | Source file |
 |--------|------|-----|------|-------------|-------------|
-| 0x011 | HEARTBEAT_ESP32 | — | 100 ms | ESP32 alive signal. Payload is not parsed by STM32; only message arrival is checked. | `can_handler.c` |
+| 0x011 | HEARTBEAT_ESP32 | 1 | 100 ms | ESP32 alive signal. Byte 0: rolling counter. STM32 validates counter advancement — frozen counter triggers CAN timeout. | `can_handler.c` |
 | 0x100 | CMD_THROTTLE | 1 | 50 ms | Throttle request (percent) | `can_handler.c` |
 | 0x101 | CMD_STEERING | 2 | 50 ms | Steering angle request (raw units) | `can_handler.c` |
 | 0x102 | CMD_MODE | 2 | On-demand | Drive mode + gear request (byte0=mode flags, byte1=gear) | `can_handler.c` |
 | 0x110 | SERVICE_CMD | 2 | On-demand | Service mode module control command | `can_handler.c` |
+| 0x120 | CMD_LED | 2 | On-demand | LED relay control (byte0=front, byte1=rear) | `can_handler.c` |
 | 0x208 | OBSTACLE_DISTANCE | 5 | 66 ms | Obstacle distance + zone + sensor health + rolling counter | `can_handler.c` |
-| 0x209 | OBSTACLE_SAFETY | 8 | 100 ms | Obstacle safety state (informational, reserved) | `can_handler.c` |
+| 0x209 | OBSTACLE_SAFETY | 4 | 100 ms | Obstacle safety state (informational): zone, sensor status, stuck flag, reserved | `can_handler.c` |
 
 ### 3.2 STM32 → ESP32 (Status / Heartbeat)
 
 | CAN ID | Name | DLC | Rate | Description | Source file |
 |--------|------|-----|------|-------------|-------------|
-| 0x001 | HEARTBEAT_STM32 | 4 | 100 ms | System alive, state, and fault flags | `can_handler.c` |
+| 0x001 | HEARTBEAT_STM32 | 5 | 100 ms | System alive, state, fault flags, error code, status flags | `can_handler.c` |
 | 0x200 | STATUS_SPEED | 8 | 100 ms | Four wheel speeds | `can_handler.c`, `main.c` |
 | 0x201 | STATUS_CURRENT | 8 | 100 ms | Four motor currents | `can_handler.c`, `main.c` |
 | 0x202 | STATUS_TEMP | 5 | 1000 ms | Five temperature sensors | `can_handler.c`, `main.c` |
@@ -91,6 +94,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x205 | STATUS_TRACTION | 4 | 100 ms | Per-wheel traction scale (ABS/TCS) | `can_handler.c`, `main.c` |
 | 0x206 | STATUS_TEMP_MAP | 5 | 1000 ms | Explicit temperature sensor mapping (FL/FR/RL/RR/AMB) | `can_handler.c`, `main.c` |
 | 0x207 | STATUS_BATTERY | 4 | 100 ms | Battery bus current and voltage (INA226, 24 V bus) | `can_handler.c`, `main.c` |
+| 0x20A | STATUS_LIGHTS | 2 | 1000 ms | LED relay state (byte0=front, byte1=rear) | `can_handler.c`, `main.c` |
 
 ### 3.3 Bidirectional (Diagnostic)
 

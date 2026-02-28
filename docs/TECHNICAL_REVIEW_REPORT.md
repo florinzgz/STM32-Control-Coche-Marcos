@@ -31,7 +31,7 @@ The system enforces a strict split-authority architecture:
 
 - **STM32G474RE** is the sole safety authority and actuator controller. It runs at 170 MHz on a deterministic Cortex-M4 with hardware FPU, real-time interrupt priorities, and a 500 ms IWDG watchdog. It directly controls 4 traction motors (TIM1, 20 kHz PWM), 1 steering motor (TIM8), 3 power relays, and reads all safety-critical sensors (INA226 current, DS18B20 temperature, wheel speed, steering encoder, pedal ADC).
 
-- **ESP32-S3** is the user interface and peripheral controller. It runs the 480×320 TFT display, DFPlayer audio, WS2812B LEDs, HC-SR04 obstacle sensor, MCP23017 gear shifter, and XPT2046 touch input. It sends commands to the STM32 via CAN bus but has **zero direct actuator authority**.
+- **ESP32-S3** is the user interface and peripheral controller. It runs the 480×320 TFT display, DFPlayer audio, WS2812B LEDs, TOFSense-M obstacle sensor, MCP23017 gear shifter, and XPT2046 touch input. It sends commands to the STM32 via CAN bus but has **zero direct actuator authority**.
 
 **Why this design:**
 - The ESP32 runs a non-deterministic RTOS (FreeRTOS under Arduino). WiFi/BT interrupts, SPI DMA for the TFT, and garbage collection can cause unpredictable jitter — unacceptable for motor PWM control with children present.
@@ -428,7 +428,7 @@ The firmware implements all safety-critical paths and most user-facing features.
 | **DESYNC-01** | ESP32 sends 0x102 mode command but ACK (0x103) is lost on the bus. ESP32 shows pending state until ACK timeout (200ms). Heartbeat echo corrects this at next heartbeat (≤100ms later). | 100–200ms of uncertain mode display. Benign. |
 | **DESYNC-02** | ESP32 sends gear + mode in same 0x102 frame. If STM32 accepts mode but rejects gear (speed too high), the single ACK reports REJECTED even though mode was applied. | ESP32 display may show mode as not applied when it actually was. Heartbeat echo resolves within 100ms. |
 | **DESYNC-03** | STM32 bus-off event during active driving. STM32 enters LIMP_HOME. ESP32 loses heartbeat → detects timeout → shows LIMP_HOME screen. Recovery requires CAN bus electrical fault to clear. | Vehicle slows to walking speed. Both sides correctly reflect LIMP_HOME. Functionally correct. |
-| **DESYNC-04** | ESP32 obstacle sensor (HC-SR04) fails while STM32 has active obstacle restriction. STM32 obstacle timeout (500ms) triggers sensor fault. Scale held at ≤0.3 (conservative). | Vehicle severely speed-restricted until obstacle CAN resumes. LIMP_HOME speed cap (5 km/h) provides additional safety net. Worst case: child must use reverse to escape. |
+| **DESYNC-04** | ESP32 obstacle sensor (TOFSense-M) fails while STM32 has active obstacle restriction. STM32 obstacle timeout (500ms) triggers sensor fault. Scale held at ≤0.3 (conservative). | Vehicle severely speed-restricted until obstacle CAN resumes. LIMP_HOME speed cap (5 km/h) provides additional safety net. Worst case: child must use reverse to escape. |
 
 ### F) Persistence Corruption Risks
 
@@ -512,7 +512,7 @@ However, the absence of automated testing, formal safety analysis, and hardware 
 
 4. **Single-point I2C failure:** The TCA9548A multiplexer is a single point of failure for all 6 INA226 sensors. Its failure means total loss of current and battery monitoring, leaving only temperature as a protection against motor damage.
 
-5. **Obstacle sensor single-point:** One HC-SR04 provides the only distance sensing. If it fails, the system has no obstacle awareness (LIMP_HOME speed cap is the only protection). A dual-sensor approach (e.g., HC-SR04 + VL53L8CX ToF) would provide redundancy.
+5. **Obstacle sensor single-point:** One TOFSense-M provides the only distance sensing. If it fails, the system has no obstacle awareness (LIMP_HOME speed cap is the only protection). A dual-sensor approach (e.g., TOFSense-M + VL53L8CX ToF) would provide redundancy.
 
 ### What Must Be Done Before Real Child Usage
 
