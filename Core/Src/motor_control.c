@@ -553,9 +553,13 @@ void Traction_SetDemand(float throttlePct)
                 throttlePct = prev_raw_demand - allowed_step;
             }
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            if (Safety_GetState() == SYS_STATE_ACTIVE) {
+            SystemState_t st_anom = Safety_GetState();
+            if (st_anom == SYS_STATE_ACTIVE) {
                 Safety_SetState(SYS_STATE_DEGRADED);
                 Safety_SetDegradedLevel(DEGRADED_L1,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
+            } else if (st_anom == SYS_STATE_DEGRADED) {
+                Safety_SetDegradedLevel(DEGRADED_L2,
                                         DEGRADED_REASON_DEMAND_ANOMALY);
             }
         }
@@ -580,9 +584,13 @@ void Traction_SetDemand(float throttlePct)
         if (fabsf(current_speed - frozen_pedal_speed) > FROZEN_PEDAL_SPEED_DELTA_KMH) {
             /* Speed changed significantly while pedal frozen → anomaly */
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-            if (Safety_GetState() == SYS_STATE_ACTIVE) {
+            SystemState_t st_frz = Safety_GetState();
+            if (st_frz == SYS_STATE_ACTIVE) {
                 Safety_SetState(SYS_STATE_DEGRADED);
                 Safety_SetDegradedLevel(DEGRADED_L1,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
+            } else if (st_frz == SYS_STATE_DEGRADED) {
+                Safety_SetDegradedLevel(DEGRADED_L2,
                                         DEGRADED_REASON_DEMAND_ANOMALY);
             }
             /* Reset tick to avoid re-triggering every cycle */
@@ -985,19 +993,31 @@ void Traction_Update(void)
     if (effective_demand > 100.0f) {
         effective_demand = 0.0f;
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-        if (Safety_GetState() == SYS_STATE_ACTIVE) {
-            Safety_SetState(SYS_STATE_DEGRADED);
-            Safety_SetDegradedLevel(DEGRADED_L1,
-                                    DEGRADED_REASON_DEMAND_ANOMALY);
+        {
+            SystemState_t st_rng = Safety_GetState();
+            if (st_rng == SYS_STATE_ACTIVE) {
+                Safety_SetState(SYS_STATE_DEGRADED);
+                Safety_SetDegradedLevel(DEGRADED_L1,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
+            } else if (st_rng == SYS_STATE_DEGRADED) {
+                Safety_SetDegradedLevel(DEGRADED_L2,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
+            }
         }
     } else if (effective_demand < 0.0f && dynbrake_pct < DYNBRAKE_ACTIVE_THRESHOLD) {
         /* Negative demand without dynamic braking → anomaly */
         effective_demand = 0.0f;
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-        if (Safety_GetState() == SYS_STATE_ACTIVE) {
-            Safety_SetState(SYS_STATE_DEGRADED);
-            Safety_SetDegradedLevel(DEGRADED_L1,
-                                    DEGRADED_REASON_DEMAND_ANOMALY);
+        {
+            SystemState_t st_rng = Safety_GetState();
+            if (st_rng == SYS_STATE_ACTIVE) {
+                Safety_SetState(SYS_STATE_DEGRADED);
+                Safety_SetDegradedLevel(DEGRADED_L1,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
+            } else if (st_rng == SYS_STATE_DEGRADED) {
+                Safety_SetDegradedLevel(DEGRADED_L2,
+                                        DEGRADED_REASON_DEMAND_ANOMALY);
+            }
         }
     }
 
