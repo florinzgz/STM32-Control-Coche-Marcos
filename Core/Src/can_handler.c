@@ -620,8 +620,15 @@ void CAN_ProcessMessages(void) {
                     float requested_pct = (float)rx_payload[0];
                     /* Reject out-of-range values at CAN ingress.
                      * Valid throttle is 0–100%; values 101–255 from a
-                     * corrupt or injected frame are forced to zero.      */
-                    if (requested_pct > 100.0f) requested_pct = 0.0f;
+                     * corrupt or injected frame are rejected entirely.
+                     * Using break (not clamp-to-0) avoids creating a
+                     * demand discontinuity that would trigger the
+                     * step-rate anomaly detector in Traction_SetDemand
+                     * and cause a spurious DEGRADED transition.          */
+                    if (requested_pct > 100.0f) {
+                        can_stats.rx_errors++;
+                        break;
+                    }
                     float validated_pct = Safety_ValidateThrottle(requested_pct);
                     Traction_SetDemand(validated_pct);
                 }

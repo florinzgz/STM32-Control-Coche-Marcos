@@ -245,11 +245,190 @@ Se recomienda verificar físicamente:
 
 **Archivo**: `Core/Src/can_handler.c`
 **Riesgo**: El byte de throttle CAN (uint8_t) podía ser 0-255. Valores 101-255 eran aceptados y dependían únicamente de `Safety_ValidateThrottle()` para clamping. Un frame corrupto con valor 200 pasaría parcialmente el pipeline antes de ser clampado.
-**Corrección**: Valor >100 es rechazado a 0 en la capa de ingreso CAN, antes de cualquier pipeline.
+**Corrección inicial**: Valor >100 se clampeaba a 0 en la capa de ingreso CAN.
+**Corrección refinada (validación profunda)**: El clamp a 0 creaba una discontinuidad de demanda que activaba el detector de anomalías step-rate en `Traction_SetDemand()`, forzando una transición espuria a DEGRADED por un solo byte corrupto. Se cambió a **rechazo completo del frame** (`break`) en lugar de clamp a 0, evitando que `Traction_SetDemand()` reciba el dato corrupto.
 
 ---
 
-## 7. Mejoras Recomendadas para Elevar el Nivel
+## 7. Validación Profunda Post-Correcciones
+
+### 7.1. Verificación A: Heartbeat DLC y Counter
+
+**A1: ¿Frames con DLC≥1 pero counter no válido pueden bypassar la detección?**
+
+**Resultado: NO** ✅
+
+Traza del código (`can_handler.c:573-601`):
+- `msg_len >= 1`: requiere al menos 1 byte.
+- `counter != esp32_hb_last_counter`: si el counter avanza → aceptado (liveness actualizada).
+- Si counter no avanza → `esp32_hb_same_count` se incrementa.
+- Tolerancia: 4 frames idénticos aceptados (same_count 0→1→2→3→4, con update).
+- Frame 5: same_count alcanza `HEARTBEAT_COUNTER_FREEZE_COUNT` (5) → NO actualiza liveness.
+- Resultado: timeout CAN expira 250ms después → LIMP_HOME.
+
+Tiempo total desde primer frame frozen: ~650ms (4 frames tolerados × 100ms + 250ms timeout).
+
+**A2: ¿Existe path donde heartbeat válido mantiene ACTIVE sin counter avanzando?**
+
+**Resultado: NO** ✅
+
+La lógica de freeze detection es exhaustiva:
+- Counter avanza → aceptado inmediatamente, same_count reseteado a 0.
+- Counter estático → same_count se incrementa, saturado en `HEARTBEAT_COUNTER_FREEZE_COUNT`.
+- Una vez saturado → ningún `Safety_UpdateCANRxTime()` → timeout natural.
+- Recuperación: counter vuelve a cambiar → same_count reseteado, liveness restaurada.
+
+**A3: ¿El rechazo de throttle >100 genera efecto inesperado?**
+
+**Resultado: Fix corregido** ⚠️→✅
+
+**Vulnerabilidad encontrada en validación**: El clamp original (>100→0) creaba un salto de demanda
+que activaba el detector de anomalías step-rate (`MAX_THROTTLE_STEP_PER_10MS = 15%`):
+- Demanda previa = 50% (del pedal), CAN corrupto envía 200 → clamped a 0%
+- `|0 - 50| = 50 > 15` → anomalía detectada → `SAFETY_ERROR_SENSOR_FAULT` → DEGRADED
+- Un solo byte CAN corrupto causaba transición a DEGRADED — efecto desproporcionado.
+
+**Fix aplicado**: Cambio de clamp-to-0 a frame rejection (`break`). El frame corrupto se descarta
+sin llamar a `Traction_SetDemand()`. La demanda del pedal local continúa operando normalmente.
+Si el ESP32 envía frames corruptos persistentemente, el heartbeat counter freeze lo detectará.
+
+### 7.2. Verificación B: Escalada de Degradación
+
+**B1: ¿La escalada L1→L2 genera oscilaciones de estado?**
+
+**Resultado: NO** ✅
+
+`Safety_SetDegradedLevel()` (`safety_system.c:413-426`) implementa **escalada monotónica**:
+```c
+if (level > degraded_level) { /* Solo escalada, nunca reducción */ }
+```
+- L1→L2: `2 > 1` = true → escala ✅
+- L2→L1: `1 > 2` = false → bloqueado ✅
+- L2→L2: `2 > 2` = false → bloqueado (idempotente) ✅
+
+Reset solo ocurre al transicionar a ACTIVE o SAFE (`Safety_SetState()`).
+Para oscilar L1↔L2 se necesitaría L1→L2→ACTIVE→L1, lo cual requiere:
+- `safety_error == SAFETY_ERROR_NONE` (fault cleared)
+- 500ms de operación limpia (`RECOVERY_HOLD_MS`)
+- Nueva fault independiente
+
+Esto es recuperación legítima seguida de nueva fault, no oscilación.
+
+**B2: ¿DEGRADED puede quedar permanente sin recuperación?**
+
+**Resultado: NO** ✅
+
+Ruta de recuperación (`safety_system.c:1043-1054`):
+1. `Safety_CheckSensors()` clears `SAFETY_ERROR_SENSOR_FAULT` cuando todos los sensores pasan.
+2. `safety_error == SAFETY_ERROR_NONE` → recovery debounce comienza.
+3. 500ms de operación limpia → `Safety_SetState(SYS_STATE_ACTIVE)`.
+4. ACTIVE resetea `degraded_level = DEGRADED_LEVEL_NONE`.
+
+Si la anomalía es **persistente** (e.g., CAN corruption continua), `Safety_SetError()` se
+re-ejecuta cada ciclo de 50ms, reseteando el debounce → DEGRADED se mantiene (correcto).
+
+**B3: ¿Hay doble penalización que fuerce SAFE innecesariamente?**
+
+**Resultado: NO** ✅
+
+Las anomalías de demanda solo ejecutan:
+- `Safety_SetError(SAFETY_ERROR_SENSOR_FAULT)` — error flag
+- `Safety_SetDegradedLevel(L2, DEMAND_ANOMALY)` — nivel de degradación
+
+**SAFE solo se activa por**:
+- Overcurrent ≥3 consecutivos (`Safety_CheckCurrent()`)
+- Overtemp >90°C (`Safety_CheckTemperature()`)
+- Battery <18V (`Safety_CheckBatteryVoltage()`)
+- Emergency stop (`Safety_EmergencyStop()`)
+
+La escalada L1→L2 NO tiene path directo a SAFE. Incluso si múltiples anomalías elevan a L3,
+el sistema permanece en DEGRADED L3 (40% power, 50% traction cap) — no SAFE.
+
+### 7.3. Verificación C: Efectos Secundarios
+
+**C1: Race conditions entre ISR CAN y lógica principal**
+
+**Resultado: Sin riesgo** ✅
+
+El callback ISR (`stm32g4xx_it.c:156-166`) está **vacío**:
+```c
+void HAL_FDCAN_RxFifo0Callback(...) {
+    (void)hfdcan; (void)RxFifo0ITs;
+    /* Safety_UpdateCANRxTime() called from CAN_ProcessMessages() only */
+}
+```
+`CAN_ProcessMessages()` se ejecuta en el main loop (`main.c:403`), no en ISR.
+Todas las variables compartidas se acceden exclusivamente desde el main loop.
+No hay escrituras concurrentes. No hay race conditions.
+
+**Nota**: El comentario en `last_can_rx_time` decía "Written from ISR" — corregido a
+"Updated from CAN_ProcessMessages() main loop" (`safety_system.c:71`).
+El qualifier `volatile` se mantiene por seguridad, aunque técnicamente ya no es necesario.
+
+**C2: Variables no atómicas usadas en validación**
+
+**Resultado: Sin riesgo** ✅
+
+En Cortex-M4, todas las operaciones de store/load de 32-bit alineadas son atómicas:
+- `last_can_rx_time` (uint32_t, volatile) → atómico ✅
+- `safety_error` (enum = 32-bit) → atómico ✅
+- `system_state` (enum = 32-bit) → atómico ✅
+- `esp32_hb_last_counter` (uint8_t) → atómico ✅
+- `esp32_hb_same_count` (uint8_t) → atómico ✅
+
+Adicionalmente, todas estas variables se acceden exclusivamente desde el main loop,
+eliminando cualquier riesgo de tearing incluso si fueran structs multi-word.
+
+**C3: Riesgo de overflow del contador rolling**
+
+**Resultado: Sin riesgo** ✅
+
+ESP32 heartbeat counter es `uint8_t` (0-255). Rollover 255→0:
+- `counter(0) != esp32_hb_last_counter(255)` → counter avanzó → aceptado
+- `esp32_hb_same_count` reseteado a 0
+- STM32 `esp32_hb_last_counter` también es `uint8_t` → misma representación
+
+El rollover es **funcionalmente idéntico** a un incremento normal. No hay pérdida de detección.
+
+**C4: Interacciones con timeout de 250ms**
+
+**Resultado: Correcto** ✅
+
+| Escenario | Tiempo hasta detección | Comportamiento |
+|-----------|:----------------------:|---------------|
+| Pérdida total CAN | 250ms | LIMP_HOME directo |
+| 1 heartbeat perdido | No detectado (100ms gap < 250ms timeout) | Normal |
+| 2 heartbeats perdidos | 300ms gap → timeout | LIMP_HOME |
+| Counter freeze | ~650ms (4 tolerance frames + 250ms timeout) | LIMP_HOME |
+| Bus-off | Inmediato (PSR.BusOff flag) | LIMP_HOME + recovery |
+
+El margin de tolerancia (4 frames × 100ms = 400ms) previene falsos positivos
+por pérdida de paquete individual sin comprometer la seguridad.
+
+### 7.4. Verificación D: Nivel de Seguridad
+
+**D1: ¿El sistema sigue siendo Automotive-light tras los cambios?**
+
+**Sí** ✅ — Los cambios refuerzan todas las capas sin introducir regresiones.
+
+**D2: ¿Sube o baja el nivel real de seguridad?**
+
+**Sube** ⬆️ — Tres mejoras concretas:
+1. DLC=0 bypass eliminado → cierra vector de ataque CAN
+2. Frame rejection para throttle corrupto → previene DEGRADED espurio
+3. Escalada L1→L2 en DEGRADED → restricciones proporcionales a severidad
+
+**D3: ¿Hay nueva vulnerabilidad introducida indirectamente?**
+
+**No** ✅ — Verificado:
+- Frame rejection no crea path donde demanda quede "stuck" (pedal 50ms continúa)
+- L1→L2 monotónico no puede causar SAFE (no existe path L2→SAFE por anomalía)
+- `volatile` mantenido en `last_can_rx_time` por seguridad defensiva
+- ISR vacío → sin race conditions incluso con los cambios
+
+---
+
+## 8. Mejoras Recomendadas para Elevar el Nivel
 
 ### Prioridad ALTA (para equivalencia ASIL-A):
 
@@ -277,7 +456,7 @@ Se recomienda verificar físicamente:
 
 ---
 
-## 8. Resumen Ejecutivo
+## 9. Resumen Ejecutivo
 
 | Categoría | Evaluación |
 |-----------|-----------|
