@@ -53,7 +53,8 @@ private:
     void drawMainMenu();
     void drawFaultViewer();
     void drawModuleControl();
-    void drawCalibration(const char* title);
+    void drawPedalCalibration();
+    void drawEncoderCalibration();
     void drawSensorMapIna();
     void drawSensorMapTemp();
 
@@ -68,6 +69,25 @@ private:
     uint32_t    prevFaultBits_ = 0xFFFFFFFF;
     uint32_t    prevEnabledBits_ = 0xFFFFFFFF;
     uint32_t    prevDisabledBits_ = 0xFFFFFFFF;
+
+    // Cached data for pedal calibration (live telemetry)
+    uint16_t    wheelSpeed_[4]   = {};     // 0.1 km/h units
+    uint16_t    motorCurrent_[4] = {};     // 0.01 A units
+    uint8_t     tractionScale_[4] = {};    // 0–100 %
+    uint16_t    batteryVoltage_  = 0;      // 0.01 V units
+    uint16_t    batteryCurrent_  = 0;      // 0.01 A units
+    uint8_t     absActive_       = 0;
+    uint8_t     tcsActive_       = 0;
+    bool        pedalDataChanged_ = false;
+
+    // Cached data for encoder calibration (live steering)
+    int16_t     steeringAngle_   = 0;      // 0.1° units
+    uint8_t     steeringCal_     = 0;      // 0 = uncalibrated, 1 = calibrated
+    bool        encoderDataChanged_ = false;
+
+    // Module control page state
+    uint8_t     moduleCtrlPage_  = 0;
+    static constexpr uint8_t MODULE_CTRL_PAGES = 3;
 
     // Sensor mapping edit state
     // Selected row (0=none selected, 1..N = row index 1-based)
