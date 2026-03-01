@@ -91,7 +91,7 @@
 
 ---
 
-### 1.5 Sensor de Obstáculos — TOFSense-M (UART1 — 115200 baud)
+### 1.5 Sensor de Obstáculos — TOFSense-M (UART1 — 921600 baud)
 
 | GPIO | Señal | Conecta a | Dirección | Componentes externos |
 |------|-------|-----------|-----------|----------------------|
