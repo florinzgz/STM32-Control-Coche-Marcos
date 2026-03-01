@@ -709,7 +709,21 @@ void CAN_ProcessMessages(void) {
                  *   3. Safety-relevant modules (ABS, TCS, wheel speed, obstacle)
                  *      cannot be disabled while vehicle speed > 0.
                  *   4. Enable and factory-restore are always accepted (restoring
-                 *      modules is inherently safe).                                */
+                 *      modules is inherently safe).
+                 *
+                 * Timing / execution-order notes:
+                 *   - CAN_ProcessMessages() runs in the main loop after the 10 ms
+                 *     safety checks (ABS/TCS/Safety_Check*) and 50 ms sensor reads.
+                 *   - Wheel_GetSpeed_*() calls Wheel_ComputeSpeed() inline, which
+                 *     reads ISR-updated pulse counters and HAL_GetTick() at call
+                 *     time — speed data is always current, never stale.
+                 *   - Safety_IsCommandAllowed() reads system_state, which is a
+                 *     single-word write on Cortex-M4 (atomic).  No ISR can modify
+                 *     it between check and use because CAN processing is not
+                 *     interrupt-driven.
+                 *   - No rolling counter or authentication on SERVICE_CMD.
+                 *     Physical CAN bus access could inject valid frames.
+                 *     Acceptable for closed prototype / educational vehicle.       */
                 if (msg_len < 1) {
                     CAN_SendCommandAck(0x10, ACK_INVALID);
                     break;

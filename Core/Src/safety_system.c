@@ -674,6 +674,12 @@ void ABS_Update(void)
         return;
     }
 
+    /* Implicit dependency: ABS requires wheel speed sensors.
+     * If wheel speed modules are disabled (ServiceMode), GetSpeed returns 0.0,
+     * causing avg < 10.0 → ABS self-deactivates gracefully.
+     * The speed gate in CAN_ID_SERVICE_CMD (can_handler.c) prevents disabling
+     * wheel speed sensors while the vehicle is in motion (avg_spd > 0.5),
+     * so ABS is always available when it matters.                            */
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
@@ -789,6 +795,12 @@ void TCS_Update(void)
         return;
     }
 
+    /* Implicit dependency: TCS requires wheel speed sensors.
+     * If wheel speed modules are disabled (ServiceMode), GetSpeed returns 0.0,
+     * causing avg < 3.0 → TCS self-deactivates gracefully.
+     * The speed gate in CAN_ID_SERVICE_CMD (can_handler.c) prevents disabling
+     * wheel speed sensors while the vehicle is in motion (avg_spd > 0.5),
+     * so TCS is always available when it matters.                            */
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
