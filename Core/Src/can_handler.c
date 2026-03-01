@@ -723,7 +723,10 @@ void CAN_ProcessMessages(void) {
                  *     interrupt-driven.
                  *   - No rolling counter or authentication on SERVICE_CMD.
                  *     Physical CAN bus access could inject valid frames.
-                 *     Acceptable for closed prototype / educational vehicle.       */
+                 *     Acceptable for closed prototype / educational vehicle.
+                 *     SECURITY: For production deployment, SERVICE_CMD would
+                 *     require a rolling counter, session token, or challenge-
+                 *     response mechanism to prevent replay and injection.     */
                 if (msg_len < 1) {
                     CAN_SendCommandAck(0x10, ACK_INVALID);
                     break;

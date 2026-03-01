@@ -11,7 +11,7 @@
   *            - Fault recording works regardless of enabled state
   *            - Bitmask accessors match module state
   *
-  *          Compile with host GCC:
+  *          Compile with host GCC (from Core/Src/ directory):
   *            gcc -std=c11 -I../Inc -O2 \
   *                service_mode.c test_service_mode.c -o test_service_mode
   ****************************************************************************
