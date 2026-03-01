@@ -78,6 +78,9 @@ static constexpr int16_t MOD_ROW_SPC = 24;
 static constexpr uint8_t MOD_ROWS_PER_PAGE = 9;
 static constexpr uint8_t MOD_TOTAL_COUNT   = 25;
 
+// First non-critical module ID (modules 0–3 are CRITICAL and cannot be toggled)
+static constexpr uint8_t FIRST_NON_CRITICAL = 4;
+
 // NEXT/PREV button layout
 static constexpr int16_t PAGE_BTN_X  = 200;
 static constexpr int16_t PAGE_BTN_Y  = 280;
@@ -262,6 +265,7 @@ void EngineeringScreen::draw() {
             tft.fillRect(250, rowY, 80, 16, ui::COL_BG);
             snprintf(buf, sizeof(buf), "%u.%02u A",
                      motorCurrent_[i] / 100, motorCurrent_[i] % 100);
+            // Current color: green < 15A, yellow 15–25A, red > 25A (BTS7960 safe limits)
             uint16_t curCol = (motorCurrent_[i] > 2500) ? ui::COL_RED :
                               (motorCurrent_[i] > 1500) ? ui::COL_YELLOW : ui::COL_GREEN;
             tft.setTextColor(curCol, ui::COL_BG);
@@ -338,7 +342,7 @@ void EngineeringScreen::draw() {
         int16_t clampedAngle = steeringAngle_;
         if (clampedAngle > 450)  clampedAngle = 450;
         if (clampedAngle < -450) clampedAngle = -450;
-        int16_t indicatorX = centerX + (int32_t)clampedAngle * (gaugeW / 2) / 450;
+        int16_t indicatorX = centerX + (int32_t)clampedAngle * gaugeW / 900;
         tft.fillRect(indicatorX - 3, gaugeY + 2, 7, gaugeH - 4, ui::COL_AMBER);
     }
 
@@ -448,8 +452,8 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             int16_t rowY = MOD_ROW_Y0 + rowOff * MOD_ROW_SPC;
             if (x >= MOD_ROW_X && x <= MOD_ROW_X + MOD_ROW_W &&
                 y >= rowY && y <= rowY + MOD_ROW_H) {
-                // Only toggle non-critical modules (IDs >= 4)
-                if (i >= 4) {
+                // Only toggle non-critical modules (IDs >= FIRST_NON_CRITICAL)
+                if (i >= FIRST_NON_CRITICAL) {
                     bool currentlyEnabled = (enabledBits_ >> i) & 1U;
                     uint8_t action = currentlyEnabled
                         ? can::SERVICE_ACTION_DISABLE
@@ -631,7 +635,7 @@ void EngineeringScreen::drawModuleControl() {
         uint8_t rowOff = i - startIdx;
         int16_t rowY = MOD_ROW_Y0 + rowOff * MOD_ROW_SPC;
 
-        bool isCritical = (i < 4);
+        bool isCritical = (i < FIRST_NON_CRITICAL);
         bool isEnabled  = (enabledBits_ >> i) & 1U;
         bool isFaulted  = (faultBits_  >> i) & 1U;
         bool isDisabled = (disabledBits_ >> i) & 1U;
@@ -659,7 +663,7 @@ void EngineeringScreen::drawModuleControl() {
             statusCol  = ui::COL_AMBER;
         } else if (isFaulted && isDisabled) {
             statusText = "FAULT+DIS";
-            statusCol  = ui::COL_RED;
+            statusCol  = ui::COL_ORANGE;
         } else if (isFaulted) {
             statusText = "FAULT";
             statusCol  = ui::COL_RED;
