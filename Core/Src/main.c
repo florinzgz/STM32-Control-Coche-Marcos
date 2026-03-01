@@ -576,14 +576,17 @@ static void MX_TIM1_Init(void)
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    oc.OCPreload  = TIM_OCPRELOAD_ENABLE;  /* Buffer CCR — update at period boundary
-                                            * only, preventing mid-cycle duty changes
-                                            * that cause asymmetric pulses in
-                                            * center-aligned mode.                   */
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_1);  /* RPWM_FL — PA8  */
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_2);  /* LPWM_FL — PA9  */
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_3);  /* RPWM_FR — PA10 */
     HAL_TIM_PWM_ConfigChannel(&htim1, &oc, TIM_CHANNEL_4);  /* LPWM_FR — PA11 */
+
+    /* Buffer CCR — update at period boundary only, preventing mid-cycle
+     * duty changes that cause asymmetric pulses in center-aligned mode. */
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim1, TIM_CHANNEL_1);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim1, TIM_CHANNEL_2);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim1, TIM_CHANNEL_3);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim1, TIM_CHANNEL_4);
 
     /* ---- BREAK2: Cortex-M4 LOCKUP → hardware disables all TIM1 outputs ----
      *
@@ -619,13 +622,9 @@ static void MX_TIM1_Init(void)
         Error_Handler();
     }
 
-    TIM_BreakInputConfigTypeDef bkin = {0};
-    bkin.Source   = TIM_BREAKINPUTSOURCE_LOCKUP;
-    bkin.Enable   = TIM_BREAKINPUTSOURCE_ENABLE;
-    bkin.Polarity = TIM_BREAKINPUTSOURCE_POLARITY_HIGH;
-    if (HAL_TIMEx_ConfigBreakInput(&htim1, TIM_BREAKINPUT_BK2, &bkin) != HAL_OK) {
-        Error_Handler();
-    }
+    /* Route Cortex-M4 LOCKUP signal to TIM1/TIM8 BREAK via SYSCFG.
+     * This is a one-time write that locks the CLL bit in CFGR2. */
+    __HAL_SYSCFG_BREAK_LOCKUP_LOCK();
 }
 
 static void MX_TIM2_Init(void)
@@ -682,9 +681,12 @@ static void MX_TIM3_Init(void)
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    oc.OCPreload  = TIM_OCPRELOAD_ENABLE;
     HAL_TIM_PWM_ConfigChannel(&htim3, &oc, TIM_CHANNEL_1);  /* RPWM_STEER — PA6 */
     HAL_TIM_PWM_ConfigChannel(&htim3, &oc, TIM_CHANNEL_2);  /* LPWM_STEER — PA7 */
+
+    /* Buffer CCR — same rationale as TIM1 */
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim3, TIM_CHANNEL_1);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim3, TIM_CHANNEL_2);
 }
 
 static void MX_TIM8_Init(void)
@@ -708,14 +710,21 @@ static void MX_TIM8_Init(void)
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    oc.OCPreload  = TIM_OCPRELOAD_ENABLE;  /* Buffer CCR — same as TIM1 */
     HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_1);  /* RPWM_RL — PC6 */
     HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_2);  /* LPWM_RL — PC7 */
     HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3);  /* RPWM_RR — PC8 */
     HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_4);  /* LPWM_RR — PC9 */
 
+    /* Buffer CCR — same rationale as TIM1 */
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim8, TIM_CHANNEL_1);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim8, TIM_CHANNEL_2);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim8, TIM_CHANNEL_3);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim8, TIM_CHANNEL_4);
+
     /* BREAK2: Cortex-M4 LOCKUP → hardware disables all TIM8 outputs.
-     * Identical configuration and rationale as MX_TIM1_Init().        */
+     * Identical configuration and rationale as MX_TIM1_Init().
+     * The __HAL_SYSCFG_BREAK_LOCKUP_LOCK() call in MX_TIM1_Init()
+     * already covers both TIM1 and TIM8 (SYSCFG CLL bit is global). */
     TIM_BreakDeadTimeConfigTypeDef bdtr = {0};
     bdtr.OffStateRunMode  = TIM_OSSR_ENABLE;
     bdtr.OffStateIDLEMode = TIM_OSSI_ENABLE;
@@ -729,14 +738,6 @@ static void MX_TIM8_Init(void)
     bdtr.Break2Filter     = 0;
     bdtr.AutomaticOutput  = TIM_AUTOMATICOUTPUT_DISABLE;
     if (HAL_TIMEx_ConfigBreakDeadTime(&htim8, &bdtr) != HAL_OK) {
-        Error_Handler();
-    }
-
-    TIM_BreakInputConfigTypeDef bkin = {0};
-    bkin.Source   = TIM_BREAKINPUTSOURCE_LOCKUP;
-    bkin.Enable   = TIM_BREAKINPUTSOURCE_ENABLE;
-    bkin.Polarity = TIM_BREAKINPUTSOURCE_POLARITY_HIGH;
-    if (HAL_TIMEx_ConfigBreakInput(&htim8, TIM_BREAKINPUT_BK2, &bkin) != HAL_OK) {
         Error_Handler();
     }
 }
