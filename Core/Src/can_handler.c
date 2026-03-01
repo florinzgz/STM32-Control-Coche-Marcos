@@ -750,7 +750,7 @@ void CAN_ProcessMessages(void) {
                                                      Wheel_GetSpeed_RR()) / 4.0f;
                                     avg_spd = sanitize_float(avg_spd,
                                                              SANITIZE_SPEED_DEFAULT);
-                                    if (avg_spd > 0.0f) {
+                                    if (avg_spd > 0.5f) {
                                         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
                                         break;
                                     }

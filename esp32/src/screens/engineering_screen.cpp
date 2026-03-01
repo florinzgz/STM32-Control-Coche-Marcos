@@ -81,6 +81,9 @@ static constexpr uint8_t MOD_TOTAL_COUNT   = 25;
 // First non-critical module ID (modules 0–3 are CRITICAL and cannot be toggled)
 static constexpr uint8_t FIRST_NON_CRITICAL = 4;
 
+// ACK feedback timeout (ms) — how long the status message is shown
+static constexpr uint32_t ACK_FEEDBACK_TIMEOUT_MS = 2000;
+
 // NEXT/PREV button layout
 static constexpr int16_t PAGE_BTN_X  = 200;
 static constexpr int16_t PAGE_BTN_Y  = 280;
@@ -168,7 +171,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data) {
             needsRedraw_ = true;
         }
         // Expire feedback message after 2 seconds
-        if (lastAckResult_ != 0 && (millis() - lastAckMs_) > 2000) {
+        if (lastAckResult_ != 0 && (millis() - lastAckMs_) > ACK_FEEDBACK_TIMEOUT_MS) {
             lastAckResult_ = 0;
             needsRedraw_ = true;
         }

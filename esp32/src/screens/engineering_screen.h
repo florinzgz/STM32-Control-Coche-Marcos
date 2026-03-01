@@ -92,7 +92,7 @@ private:
     // Module control ACK feedback — brief status message after toggle
     uint8_t     lastAckResult_   = 0;      // 0=none, 1=OK, 2=REJECTED, 3=BLOCKED
     uint32_t    lastAckMs_       = 0;      // millis() when ACK was received
-    unsigned long lastAckTracked_ = 0;     // last ack timestamp we processed
+    uint32_t    lastAckTracked_  = 0;      // last ack timestamp we processed
 
     // Sensor mapping edit state
     // Selected row (0=none selected, 1..N = row index 1-based)
