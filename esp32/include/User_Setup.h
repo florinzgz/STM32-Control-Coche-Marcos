@@ -65,7 +65,7 @@
 // GPIO 22–25 do NOT exist in the ESP32-S3 SoC.
 //
 // None of these collide with:
-//   CAN 4/5 · obstacle 6/7 · I2C 8/9 · power 40/41 · DFPlayer 43/44
+//   CAN 4/5 · obstacle 18 · I2C 8/9 · power 40/41 · DFPlayer 43/44
 //   LED strip 47/48
 //
 #define TFT_MOSI 13
