@@ -2,7 +2,7 @@
 // ESP32-S3 HMI — Screen Base Class
 //
 // Abstract interface for all HMI screens.
-// No graphics library, no TFT — pure interface for future implementation.
+// Subclasses implement rendering via TFT_eSPI.
 //
 // Reference: docs/ESP32_FIRMWARE_DESIGN.md rev 1.1
 // =============================================================================
@@ -25,7 +25,7 @@ public:
     /// Called every loop iteration with latest vehicle data
     virtual void update(const vehicle::VehicleData& data) = 0;
 
-    /// Called every loop iteration to render (stub — no TFT yet)
+    /// Called at the frame-limited rate to render the screen via TFT_eSPI
     virtual void draw() = 0;
 };
 
