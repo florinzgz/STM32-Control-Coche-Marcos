@@ -370,7 +370,7 @@ extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 
 /* Private function prototypes */
 static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm);
-static float PID_Compute(PID_t *pid, float measured, float dt);
+static float __attribute__((unused)) PID_Compute(PID_t *pid, float measured, float dt);
 static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
 
 /* ==================================================================
@@ -1880,7 +1880,7 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
     }
 }
 
-static float PID_Compute(PID_t *pid, float measured, float dt)
+static float __attribute__((unused)) PID_Compute(PID_t *pid, float measured, float dt)
 {
     if (dt <= 0.0001f) return pid->output;
     float error = pid->setpoint - measured;
