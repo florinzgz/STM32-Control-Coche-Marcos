@@ -89,6 +89,11 @@ private:
     uint8_t     moduleCtrlPage_  = 0;
     static constexpr uint8_t MODULE_CTRL_PAGES = 3;
 
+    // Module control ACK feedback — brief status message after toggle
+    uint8_t     lastAckResult_   = 0;      // 0=none, 1=OK, 2=REJECTED, 3=BLOCKED
+    uint32_t    lastAckMs_       = 0;      // millis() when ACK was received
+    unsigned long lastAckTracked_ = 0;     // last ack timestamp we processed
+
     // Sensor mapping edit state
     // Selected row (0=none selected, 1..N = row index 1-based)
     uint8_t     inaEditRow_  = 0;

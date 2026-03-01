@@ -132,6 +132,9 @@ void EngineeringScreen::onEnter() {
     prevDisabledBits_ = 0xFFFFFFFF;
     pedalDataChanged_   = false;
     encoderDataChanged_ = false;
+    lastAckResult_      = 0;
+    lastAckMs_          = 0;
+    lastAckTracked_     = 0;
 
     // Load current sensor mappings from config into working copies
     const auto& cfg = config_store::get();
@@ -146,6 +149,30 @@ void EngineeringScreen::update(const vehicle::VehicleData& data) {
     faultBits_    = data.service().faultMask;
     enabledBits_  = data.service().enabledMask;
     disabledBits_ = data.service().disabledMask;
+
+    // Track SERVICE_CMD ACK responses (cmdIdLow = 0x10)
+    if (currentMenu_ == SubMenu::MODULE_CONTROL) {
+        const auto& ad = data.ack();
+        if (ad.cmdIdLow == 0x10 && ad.timestampMs != lastAckTracked_) {
+            lastAckTracked_ = ad.timestampMs;
+            if (ad.result == can::AckResult::OK) {
+                lastAckResult_ = 1;
+            } else if (ad.result == can::AckResult::REJECTED) {
+                lastAckResult_ = 2;
+            } else if (ad.result == can::AckResult::BLOCKED_BY_SAFETY) {
+                lastAckResult_ = 3;
+            } else {
+                lastAckResult_ = 2;  // treat INVALID as rejected
+            }
+            lastAckMs_ = millis();
+            needsRedraw_ = true;
+        }
+        // Expire feedback message after 2 seconds
+        if (lastAckResult_ != 0 && (millis() - lastAckMs_) > 2000) {
+            lastAckResult_ = 0;
+            needsRedraw_ = true;
+        }
+    }
 
     // Cache pedal calibration telemetry
     if (currentMenu_ == SubMenu::PEDAL_CAL) {
@@ -709,6 +736,22 @@ void EngineeringScreen::drawModuleControl() {
     tft.drawString("PAGE >>", PAGE_BTN_X + PAGE_BTN_W / 2, PAGE_BTN_Y + PAGE_BTN_H / 2);
     RTRACE_TEXT(PAGE_BTN_X + PAGE_BTN_W / 2, PAGE_BTN_Y + PAGE_BTN_H / 2, "PAGE >>",
                 ui::COL_CYAN, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    // ACK feedback status bar (shown briefly after toggle attempt)
+    if (lastAckResult_ != 0) {
+        const char* msg;
+        uint16_t msgCol;
+        switch (lastAckResult_) {
+            case 1:  msg = "OK";                          msgCol = ui::COL_GREEN;  break;
+            case 2:  msg = "REJECTED (critical module)";  msgCol = ui::COL_RED;    break;
+            case 3:  msg = "BLOCKED (vehicle in motion or unsafe state)";
+                     msgCol = ui::COL_RED;    break;
+            default: msg = "ERROR";                       msgCol = ui::COL_RED;    break;
+        }
+        tft.fillRect(100, 265, 280, 14, ui::COL_BG);
+        tft.setTextColor(msgCol, ui::COL_BG);
+        tft.drawString(msg, ui::SCREEN_W / 2, 270);
+    }
 
     tft.setTextDatum(TL_DATUM);
 }

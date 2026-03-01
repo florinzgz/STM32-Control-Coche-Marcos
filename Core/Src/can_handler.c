@@ -701,8 +701,15 @@ void CAN_ProcessMessages(void) {
                  *   Byte 0: command (0=disable, 1=enable, 0xFF=factory restore)
                  *   Byte 1: module_id (only for disable/enable)
                  *
-                 * Critical modules cannot be disabled — ServiceMode_DisableModule
-                 * will reject the request.  This is a safety constraint. */
+                 * Safety constraints enforced here (STM32 is safety authority):
+                 *   1. Critical modules cannot be disabled (ServiceMode_DisableModule
+                 *      rejects them).
+                 *   2. Disable commands require ACTIVE or DEGRADED state — rejected
+                 *      in SAFE/ERROR/BOOT/STANDBY/LIMP_HOME.
+                 *   3. Safety-relevant modules (ABS, TCS, wheel speed, obstacle)
+                 *      cannot be disabled while vehicle speed > 0.
+                 *   4. Enable and factory-restore are always accepted (restoring
+                 *      modules is inherently safe).                                */
                 if (msg_len < 1) {
                     CAN_SendCommandAck(0x10, ACK_INVALID);
                     break;
@@ -710,16 +717,50 @@ void CAN_ProcessMessages(void) {
                 {
                     uint8_t cmd = rx_payload[0];
                     if (cmd == 0xFF) {
-                        /* Factory restore — re-enable all modules */
+                        /* Factory restore — re-enable all modules (always safe) */
                         ServiceMode_FactoryRestore();
                         CAN_SendCommandAck(0x10, ACK_OK);
                     } else if (msg_len >= 2) {
                         uint8_t mod_id = rx_payload[1];
                         if (mod_id < MODULE_COUNT) {
                             if (cmd == 0) {
+                                /* ---- DISABLE command ---- */
+
+                                /* Gate 1: system state must allow commands.
+                                 * Matches the CMD_MODE pattern (line 651). */
+                                if (!Safety_IsCommandAllowed()) {
+                                    CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+                                    break;
+                                }
+
+                                /* Gate 2: safety-relevant modules cannot be
+                                 * disabled while the vehicle is in motion.
+                                 * ABS, TCS, wheel speed sensors, and obstacle
+                                 * detection are needed for safe deceleration. */
+                                if (mod_id == MODULE_ABS              ||
+                                    mod_id == MODULE_TCS              ||
+                                    mod_id == MODULE_WHEEL_SPEED_FL   ||
+                                    mod_id == MODULE_WHEEL_SPEED_FR   ||
+                                    mod_id == MODULE_WHEEL_SPEED_RL   ||
+                                    mod_id == MODULE_WHEEL_SPEED_RR   ||
+                                    mod_id == MODULE_OBSTACLE_DETECT) {
+                                    float avg_spd = (Wheel_GetSpeed_FL() +
+                                                     Wheel_GetSpeed_FR() +
+                                                     Wheel_GetSpeed_RL() +
+                                                     Wheel_GetSpeed_RR()) / 4.0f;
+                                    avg_spd = sanitize_float(avg_spd,
+                                                             SANITIZE_SPEED_DEFAULT);
+                                    if (avg_spd > 0.0f) {
+                                        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+                                        break;
+                                    }
+                                }
+
+                                /* Gate 3: critical classification (final guard) */
                                 bool ok = ServiceMode_DisableModule((ModuleID_t)mod_id);
                                 CAN_SendCommandAck(0x10, ok ? ACK_OK : ACK_REJECTED);
                             } else if (cmd == 1) {
+                                /* ENABLE — always accepted (restoring is safe) */
                                 ServiceMode_EnableModule((ModuleID_t)mod_id);
                                 CAN_SendCommandAck(0x10, ACK_OK);
                             } else {
