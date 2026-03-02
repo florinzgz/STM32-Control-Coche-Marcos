@@ -47,7 +47,8 @@ private:
         PEDAL_CAL,
         ENCODER_CAL,
         SENSOR_MAP_INA,    // INA226 channel-to-position mapping
-        SENSOR_MAP_TEMP    // DS18B20 sensor-to-position mapping
+        SENSOR_MAP_TEMP,   // DS18B20 sensor-to-position mapping
+        FACTORY_DEFAULTS   // Individual factory-default reset options
     };
 
     void drawMainMenu();
@@ -57,6 +58,7 @@ private:
     void drawEncoderCalibration();
     void drawSensorMapIna();
     void drawSensorMapTemp();
+    void drawFactoryDefaults();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;

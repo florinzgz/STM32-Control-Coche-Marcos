@@ -170,6 +170,14 @@ inline constexpr uint8_t SERVICE_ACTION_DISABLE        = 0x00;
 inline constexpr uint8_t SERVICE_ACTION_ENABLE         = 0x01;
 inline constexpr uint8_t SERVICE_ACTION_FACTORY_RESTORE = 0xFF;
 
+// Individual factory-default reset commands (byte 0 of SERVICE_CMD)
+// Byte 1 is unused (0x00) for these commands.
+inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_PID   = 0xF0;
+inline constexpr uint8_t SERVICE_ACTION_RESET_WHEEL_SENSORS  = 0xF1;
+inline constexpr uint8_t SERVICE_ACTION_RESET_INA226_SHUNTS  = 0xF2;
+inline constexpr uint8_t SERVICE_ACTION_RESET_TRACTION_FORCE = 0xF3;
+inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_FORCE = 0xF4;
+
 } // namespace can
 
 #endif // CAN_IDS_H

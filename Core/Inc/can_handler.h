@@ -42,6 +42,16 @@ extern "C" {
 #define CAN_ID_SERVICE_CMD        0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_ACK            0x103  // STM32 → ESP32 (on-demand) command acknowledgment
 
+/* Service command action codes (SERVICE_CMD byte 0) */
+#define SERVICE_ACTION_DISABLE             0x00
+#define SERVICE_ACTION_ENABLE              0x01
+#define SERVICE_ACTION_RESET_STEERING_PID  0xF0
+#define SERVICE_ACTION_RESET_WHEEL_SENSORS 0xF1
+#define SERVICE_ACTION_RESET_INA226_SHUNTS 0xF2
+#define SERVICE_ACTION_RESET_TRACTION_FORCE 0xF3
+#define SERVICE_ACTION_RESET_STEERING_FORCE 0xF4
+#define SERVICE_ACTION_FACTORY_RESTORE     0xFF
+
 /* Command ACK result codes (uint8_t) */
 typedef enum {
     ACK_OK                  = 0,   /* Command accepted and applied           */
