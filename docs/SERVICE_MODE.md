@@ -105,10 +105,11 @@ be driven home and repaired later.
 | `0xF2` | Reset INA226/shunts | Ignored (0) | Re-enable all 6 current sensors (INA226), clear faults |
 | `0xF3` | Reset traction motor force | Ignored (0) | Re-enable ABS + TCS modules, clear faults |
 | `0xF4` | Reset steering motor force | Ignored (0) | Re-enable steering + Ackermann modules, clear faults |
+| `0xFE` | Clear error log | Ignored (0) | Erase all persistent error log entries from Flash |
 | `0xFF` | Factory restore (ALL) | Ignored (0) | Re-enable all modules, clear manual disables |
 
 **Safety constraint**: Critical modules (ID 0–3) reject disable commands silently.
-Individual factory reset commands (0xF0–0xF4) are always accepted — restoring defaults is inherently safe.
+Individual factory reset commands (0xF0–0xF4) and log clear (0xFE) are always accepted — restoring defaults is inherently safe.
 
 ### Existing Heartbeat Enhancement
 

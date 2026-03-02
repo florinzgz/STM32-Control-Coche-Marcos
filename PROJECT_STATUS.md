@@ -216,7 +216,8 @@ Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separaci
 | **Actualizar .ioc** | ✅ Implementado | Todos los 36 pines configurados (PA0-PA3 wheel/pedal, PB0 OneWire, PB15 wheel RR, PC0-PC13 dir/en/relay). ADC corregido a IN4 (PA3). EXTI IRQs añadidos. FDCAN/I2C/IWDG params incluidos. |
 | **Service Mode** | ✅ Implementado | 25 módulos con enable/disable, factory restore, bitmask CAN. |
 | **Factory Defaults** | ✅ Implementado | Reset individual por categoría: PID (0xF0), ruedas (0xF1), INA226 (0xF2), tracción (0xF3), dirección (0xF4). |
-| **Error Screen completo** | ✅ Implementado | Nombres legibles de fault flags, error codes, subsistemas, y permanencia (tiempo en error). |
+| **Error Screen completo** | ✅ Implementado | Nombres legibles de fault flags, error codes, subsistemas, y permanencia (tiempo en error). Bug corregido: diagSubsystem_ ahora se rastrea independientemente. |
+| **Persistent Error Log** | ✅ Implementado | Ring buffer en Flash page 125 (0x0807C000), CRC32, 250 entradas max, auto-save en Safety_SetError, CAN header 0x305, clear via SERVICE_CMD 0xFE. |
 
 ### 🟡 Prioridad Media — Funcionalidades del FULL-FIRMWARE aún no portadas
 
@@ -225,9 +226,9 @@ Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separaci
 | **Frenado regenerativo** | Frenado inteligente con IA que ajusta la fuerza de frenado regenerativo según velocidad, batería y superficie | `src/safety/regen_ai.cpp` (7.5 KB) | ⬜ No implementado |
 | **Limp mode avanzado** | Lógica de modos NORMAL/DEGRADED/LIMP/CRITICAL con escalación progresiva | `src/system/limp_mode.cpp` (11.2 KB) | ⬜ Parcial (LIMP_HOME básico existe) |
 | **Adaptive cruise** | Control de crucero adaptativo que ajusta velocidad según obstáculos detectados | `src/control/adaptive_cruise.cpp` (5.5 KB) | ⬜ No implementado |
-| **I2C recovery completo** | Mecanismo de recuperación si el bus I2C se bloquea (SDA queda low). Bit-banging de SCL | `include/i2c_recovery.h` | ⬜ Parcial (detección existe, recovery manual) |
+| **I2C recovery completo** | Mecanismo de recuperación si el bus I2C se bloquea (SDA queda low). Bit-banging de SCL | `include/i2c_recovery.h` | ✅ Implementado (NXP AN10216, sensor_manager.c) |
 | **Audio integración** | Sonidos de error/aviso/confirmación mediante DFPlayer Mini vía UART | `src/audio/` | ⬜ Hardware ESP32 presente, integración CAN pendiente |
-| **Persistencia de errores** | Log de errores en Flash/EEPROM para diagnóstico post-mortem | `src/logging/` | ⬜ No implementado |
+| **Persistencia de errores** | Log de errores en Flash/EEPROM para diagnóstico post-mortem | `src/logging/` | ✅ Implementado (error_log.c, Flash page 125) |
 | **Touch calibration wizard** | Calibración de pantalla táctil con persistencia en NVS | `include/touch_calibration.h` | ⬜ No implementado en ESP32 HMI |
 | **Calibración PID persistente** | Ajuste fino de PID del volante con almacenamiento en Flash | `src/control/steering_motor.cpp` | ⬜ PID hardcoded (Kp=2.0, Ki=0.1, Kd=0.5) |
 | **Calibración fuerza motores** | Ajuste de límites de fuerza/corriente por motor individual | `src/control/traction.cpp` | ⬜ Límites hardcoded (25A max) |
@@ -242,7 +243,6 @@ Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separaci
 | **DMA para I2C** | Las lecturas INA226 bloquean 50 ms por sensor. Con DMA serían asíncronas |
 | **Temperature derating** | Reducir potencia gradualmente entre 60-80°C (actualmente solo actúa a 90°C) |
 | **Power management avanzado** | Secuencia de encendido completa con verificación de voltaje de batería como en `src/system/power_mgmt.cpp` |
-| **Error log persistente** | Guardar errores en Flash para diagnóstico post-mortem |
 
 ---
 
@@ -250,14 +250,14 @@ Estos módulos **permanecen en el ESP32 HMI** según la arquitectura de separaci
 
 | Métrica | Valor |
 |---------|-------|
-| **Archivos fuente (.c) STM32** | 12 |
-| **Archivos header (.h) STM32** | 12 |
+| **Archivos fuente (.c) STM32** | 13 |
+| **Archivos header (.h) STM32** | 13 |
 | **Archivos fuente ESP32 (.cpp/.h)** | ~50 |
-| **Líneas de código C/C++ (aprox.)** | ~5,000+ |
-| **Funciones implementadas** | ~120 |
+| **Líneas de código C/C++ (aprox.)** | ~5,500+ |
+| **Funciones implementadas** | ~130 |
 | **Funciones declaradas sin implementar** | 0 |
 | **Documentación (archivos .md)** | 80+ |
-| **Módulos CAN TX** | 12 tipos de mensaje |
+| **Módulos CAN TX** | 14 tipos de mensaje |
 | **Módulos CAN RX** | 7 tipos de mensaje (filtrado HW) |
 | **Periféricos configurados** | 7 (FDCAN, I2C, TIM1, TIM2, TIM8, ADC1, IWDG) |
 | **Service Mode Modules** | 25 (4 critical, 21 non-critical) |

@@ -325,8 +325,8 @@ All missing components have been successfully implemented. The STM32-Control-Coc
 - ⬜ Persistent INA226 shunt calibration (currently hardcoded 1mΩ/0.5mΩ)
 - ⬜ DFPlayer audio integration for error/warning sounds
 - ⬜ Touch calibration wizard
-- ⬜ I2C bus recovery (NXP AN10216 clock cycling)
-- ⬜ Persistent error log in Flash
+- ✅ ~~I2C bus recovery (NXP AN10216 clock cycling)~~ — Implemented in sensor_manager.c
+- ✅ ~~Persistent error log in Flash~~ — Implemented in error_log.c (page 125, 250 entries, CRC32)
 
 The project follows STM32 best practices and is ready for integration with the ESP32 HMI controller via CAN bus.
 

@@ -112,7 +112,8 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 9. **eps_params.c/h**: Electric power steering torque assist parameters
 10. **boot_validation.c/h**: Safe startup checks (pedal inhibit, reset cause detection)
 11. **encoder_reader.c/h**: Quadrature encoder decoding (E6B2-CWZ6C, 4800 counts/rev)
-12. **main.c**: Main control loop (multi-tier timing: 10ms/50ms/100ms/1000ms)
+12. **error_log.c/h**: Persistent error log in Flash (page 125, ring buffer, CRC32, 250 entries max)
+13. **main.c**: Main control loop (multi-tier timing: 10ms/50ms/100ms/1000ms)
 
 ### CAN Message Protocol (500 kbps)
 
@@ -140,7 +141,9 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 | 0x301 | STM32→ESP32 | Service Faults | Fault bitmask | [b0, b1, b2, b3] |
 | 0x302 | STM32→ESP32 | Service Enabled | Enabled bitmask | [b0, b1, b2, b3] |
 | 0x303 | STM32→ESP32 | Service Disabled | Disabled bitmask | [b0, b1, b2, b3] |
-| 0x110 | ESP32→STM32 | Service Cmd | Module control | [action, moduleId] — action: 0x00=disable, 0x01=enable, 0xF0-F4=reset category, 0xFF=factory restore |
+| 0x304 | STM32→ESP32 | Error Log Entry | Error log entry data | [timestamp_lo, timestamp_hi, error_code, subsystem, state, flags, uptime_lo, uptime_hi] |
+| 0x305 | STM32→ESP32 | Error Log Header | Error log count + total | [count_lo, count_hi, 0, 0, 0, 0, 0, 0] |
+| 0x110 | ESP32→STM32 | Service Cmd | Module control | [action, moduleId] — action: 0x00=disable, 0x01=enable, 0xF0-F4=reset category, 0xFE=clear log, 0xFF=factory restore |
 
 ### Control Features
 
@@ -225,6 +228,7 @@ STM32-Control-Coche-Marcos/
 │   │   ├── eps_params.h
 │   │   ├── boot_validation.h
 │   │   ├── encoder_reader.h
+│   │   ├── error_log.h
 │   │   └── stm32g4xx_it.h
 │   └── Src/
 │       ├── main.c
@@ -239,6 +243,7 @@ STM32-Control-Coche-Marcos/
 │       ├── eps_params.c
 │       ├── boot_validation.c
 │       ├── encoder_reader.c
+│       ├── error_log.c
 │       └── stm32g4xx_it.c
 ├── Drivers/
 │   ├── STM32G4xx_HAL_Driver/
@@ -315,12 +320,12 @@ See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the ful
 ✅ Full error screen with human-readable fault names and permanence timer
 ✅ CAN bus-off detection and non-blocking recovery
 ✅ Dual-channel pedal plausibility (ADC + ADS1115 cross-check)
+✅ Persistent error log in Flash (250 entries, ring buffer, CRC32, post-mortem diagnosis)
+✅ I2C bus recovery (NXP AN10216 clock cycling, auto-recovery on SDA stuck)
 
 ### Features Pending (vs Original Firmware)
 ⬜ Regenerative braking with AI-based optimization
 ⬜ Adaptive cruise control
-⬜ I2C bus recovery with NXP AN10216 clock cycling (partially implemented)
-⬜ PCA9685 PWM expander (replaced by direct timer PWM in STM32)
 ⬜ Touch calibration wizard with persistent storage
 ⬜ DFPlayer audio error/warning sounds (ESP32 audio hardware present, integration pending)
 
