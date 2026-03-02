@@ -96,13 +96,19 @@ be driven home and repaired later.
 
 **Commands:**
 
-| Byte 0 | Action | Byte 1 |
-|---|---|---|
-| `0x00` | Disable module | Module ID (0–24) |
-| `0x01` | Enable module | Module ID (0–24) |
-| `0xFF` | Factory restore | Ignored |
+| Byte 0 | Action | Byte 1 | Description |
+|---|---|---|---|
+| `0x00` | Disable module | Module ID (0–24) | Disable a non-critical module |
+| `0x01` | Enable module | Module ID (0–24) | Re-enable a disabled module |
+| `0xF0` | Reset steering PID | Ignored (0) | Re-enable steering center + encoder modules, clear faults |
+| `0xF1` | Reset wheel sensors | Ignored (0) | Re-enable all 4 wheel speed sensors, clear faults |
+| `0xF2` | Reset INA226/shunts | Ignored (0) | Re-enable all 6 current sensors (INA226), clear faults |
+| `0xF3` | Reset traction motor force | Ignored (0) | Re-enable ABS + TCS modules, clear faults |
+| `0xF4` | Reset steering motor force | Ignored (0) | Re-enable steering + Ackermann modules, clear faults |
+| `0xFF` | Factory restore (ALL) | Ignored (0) | Re-enable all modules, clear manual disables |
 
 **Safety constraint**: Critical modules (ID 0–3) reject disable commands silently.
+Individual factory reset commands (0xF0–0xF4) are always accepted — restoring defaults is inherently safe.
 
 ### Existing Heartbeat Enhancement
 
@@ -121,9 +127,29 @@ The ESP32 firmware should:
 2. **Parse** `0x302` (enabled mask) and `0x303` (disabled mask) to show module states
 3. **Display** a service menu showing each module's name, status, and fault
 4. **Send** `0x110` commands when the user disables/enables a module
-5. **Send** `0x110` with `0xFF` for factory restore
+5. **Send** `0x110` with `0xF0`–`0xF4` for individual category resets
+6. **Send** `0x110` with `0xFF` for full factory restore
 
 The STM32 handles all safety logic. The ESP32 only provides the UI.
+
+### Factory Defaults Submenu (Engineering Screen)
+
+The hidden engineering menu (accessed via code "8989") includes a **FACTORY DEFAULTS** submenu
+with the following options:
+
+| Option | CAN Action | Effect |
+|---|---|---|
+| Reset Steering PID | `0xF0` | Re-enables MODULE_STEER_CENTER + MODULE_STEER_ENCODER, clears faults |
+| Reset Wheel Sensors | `0xF1` | Re-enables all 4 wheel speed modules, clears faults |
+| Reset INA226/Shunts | `0xF2` | Re-enables all 6 current sensor modules, clears faults |
+| Reset Traction Motor Force | `0xF3` | Re-enables MODULE_ABS + MODULE_TCS, clears faults |
+| Reset Steering Motor Force | `0xF4` | Re-enables MODULE_STEER_CENTER + MODULE_STEER_ENCODER + MODULE_ACKERMANN, clears faults |
+| Reset All (Factory Restore) | `0xFF` | Re-enables all modules, clears manual disables |
+
+**Note**: These resets re-enable modules and clear their faults. If the underlying
+hardware fault persists, the fault will reappear on the next sensor check cycle.
+For full recalibration of PID gains or shunt resistor values, a firmware update
+is required (these are currently compile-time constants).
 
 ## Safety Constraints
 
