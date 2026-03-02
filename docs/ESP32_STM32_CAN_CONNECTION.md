@@ -27,7 +27,7 @@ This document describes the hardware setup required to establish CAN communicati
 | PB9 | FDCAN1_TX | Pin 1 (TXD) | Transmit data to transceiver |
 | +5V | Power | Pin 3 (VCC) | Transceiver power supply |
 | GND | Ground | Pin 2 (GND) | Common ground reference |
-| N/C | Silent Mode | Pin 8 (S) | Connect to GND for normal mode |
+| GND | Silent/Normal | Pin 8 (S/SLNT) | **Connect to GND** — enables normal (TX+RX) mode |
 
 ### ESP32-S3 Side
 
@@ -37,7 +37,32 @@ This document describes the hardware setup required to establish CAN communicati
 | GPIO5 | CAN_RX | Pin 4 (RXD) | Receive data from transceiver |
 | +5V | Power | Pin 3 (VCC) | Transceiver power supply |
 | GND | Ground | Pin 2 (GND) | Common ground reference |
-| N/C | Silent Mode | Pin 8 (S) | Connect to GND for normal mode |
+| GND | Silent/Normal | Pin 8 (S/SLNT) | **Connect to GND** — enables normal (TX+RX) mode |
+
+## Pin 8 (S / SLNT / STB) — Silent Mode Pin
+
+The TJA1051T/3 pin 8 controls whether the transceiver can transmit on the bus.
+Different module labels and datasheet revisions use different names for this pin:
+
+| Label on module | NXP datasheet name | Meaning |
+|-----------------|--------------------|---------|
+| S | S (Silent) | TJA1051T/3 official name |
+| SLNT | SLNT (Silent) | Alternative label on some breakout boards |
+| STB | STB (Standby) | Name used on TJA1050 and other TJA105x variants — connect to GND for normal mode |
+
+**For the TJA1051T/3 used in this project:**
+
+| Pin 8 Level | Mode | Effect |
+|-------------|------|--------|
+| LOW (GND) | **Normal mode** ✅ | Both TX and RX active — **use this** |
+| HIGH (VCC) | Silent mode | RX only, TX disabled — bus-off from the MCU perspective |
+| Floating | Undefined | **Do not leave floating** — connect to GND |
+
+**Required action**: Connect pin 8 (S/SLNT) to GND on **both** TJA1051 modules.
+
+> ⚠️ If your module labels the pin "STB" instead of "S" or "SLNT", verify the part number printed
+> on the IC. The TJA1051T/3 (NXP) uses active-LOW normal mode. The TJA1050 also uses active-LOW.
+> Connecting to GND is correct for both parts.
 
 ## CAN Bus Wiring
 
@@ -54,36 +79,42 @@ Connect the two transceivers together using twisted pair wire (recommended):
 
 ### Termination
 
-Install 120Ω resistors at both ends of the bus:
+Install one 120Ω resistor **at each end** of the bus, connecting CANH to CANL locally:
 
 ```
-STM32 Side:              ESP32 Side:
-TJA1051                  TJA1051
-CANH ----[120Ω]---- CANH
-CANL ---------------CANL
+STM32 End:                                    ESP32 End:
+CANH ──┬──────────────────────────────────┬── CANH
+       │                                  │
+     [120Ω]                             [120Ω]
+       │                                  │
+CANL ──┴──────────────────────────────────┴── CANL
 ```
+
+**Important**: Each termination resistor connects CANH to CANL at its own end of the bus.
+The combined parallel resistance (both ends powered) should measure ~60Ω across CANH–CANL.
 
 ## Schematic Diagram
 
 ```
-STM32G474RE                    Twisted Pair (40m max)              ESP32-S3
-   PB9 TX ──→ TJA1051[1]                                    TJA1051[1] ←── GPIO4 TX
-   PB8 RX ←── TJA1051[4]         CANH ==================== TJA1051[7] ──→ GPIO5 RX
-      +5V ──→ TJA1051[3]          |          ||             TJA1051[4]
-      GND ──→ TJA1051[2]         120Ω        ||            TJA1051[3] ←── +5V
-      GND ──→ TJA1051[8] (S)      |          ||            TJA1051[2] ←── GND
-                TJA1051[7] ───────┘    CANL ════════════ TJA1051[6]
-                TJA1051[6] ────────────────────────────── TJA1051[8] ←── GND (S)
-                                                              |
-                                                             120Ω
-                                                              |
-                                                             GND
+STM32G474RE        TJA1051 #1 (STM32 side)    Bus (Twisted Pair)   TJA1051 #2 (ESP32 side)   ESP32-S3
+   PB9 TX ──→  TXD [1]                                                  TXD [1]  ←── GPIO4 TX
+   PB8 RX ←──  RXD [4]  [7] CANH ──┬──────────────────────┬── CANH [7]  RXD [4]  ──→ GPIO5 RX
+      +5V ──→  VCC [3]              │                      │             VCC [3]  ←── +5V
+      GND ──→  GND [2]           [120Ω]                 [120Ω]          GND [2]  ←── GND
+      GND ──→   S  [8]  [6] CANL ──┴──────────────────────┴── CANL [6]   S  [8]  ←── GND
+                          │                                      │
+                        100nF                                  100nF
+                          │                                      │
+                         GND                                    GND
 ```
+
+Note: The 120Ω resistors connect CANH to CANL **locally at each end** of the bus.
+The 100nF decoupling capacitors are placed between VCC and GND, close to each transceiver.
 
 ## Power Supply Considerations
 
 - Both transceivers require regulated 5V supply
-- Ensure common ground between STM32 and ESP32 systems
+- **Common GND is mandatory**: The GND of the ESP32 system, the STM32 system, and both TJA1051 transceivers must all share a common ground reference. Without common GND, the differential CAN signals have no stable reference and communication will fail or be unreliable.
 - Maximum current draw per TJA1051: 70mA @ 5V (typical 5mA standby)
 - Use decoupling capacitors (100nF ceramic) close to VCC pin of each transceiver
 
