@@ -17,6 +17,7 @@
 #include "motor_control.h"
 #include "service_mode.h"
 #include "boot_validation.h"
+#include "error_log.h"
 
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
@@ -1347,7 +1348,17 @@ void Safety_PowerDown(void)
 
 /* ---- Error tracking ---------------------------------------------- */
 
-void Safety_SetError(Safety_Error_t error)   { safety_error = error; }
+void Safety_SetError(Safety_Error_t error)
+{
+    /* Only log transitions to a new error (avoid flooding the log
+     * when the same error is re-asserted every check cycle).      */
+    if (error != SAFETY_ERROR_NONE && error != safety_error) {
+        ErrorLog_Record((uint8_t)error, 0 /* GLOBAL */,
+                        (uint8_t)system_state,
+                        Safety_GetFaultFlags());
+    }
+    safety_error = error;
+}
 void Safety_ClearError(Safety_Error_t error) { if (safety_error == error) safety_error = SAFETY_ERROR_NONE; }
 Safety_Error_t Safety_GetError(void)         { return safety_error; }
 bool Safety_IsError(void)                    { return (safety_error != SAFETY_ERROR_NONE); }

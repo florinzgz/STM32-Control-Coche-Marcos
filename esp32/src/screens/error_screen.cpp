@@ -71,6 +71,7 @@ void ErrorScreen::onEnter() {
     diagSubsystem_ = 0;
     errorEntryMs_  = millis();
     prevElapsedSec_ = 0xFFFFFFFF;
+    prevDiagSubsystem_ = 0xFF;
 }
 
 void ErrorScreen::onExit() {}
@@ -192,8 +193,9 @@ void ErrorScreen::draw() {
     }
 
     // ---- Diagnostic: error code + subsystem name ----
-    if (diagCode_ != prevDiagCode_) {
+    if (diagCode_ != prevDiagCode_ || diagSubsystem_ != prevDiagSubsystem_) {
         prevDiagCode_ = diagCode_;
+        prevDiagSubsystem_ = diagSubsystem_;
 
         tft.fillRect(10, 233, 460, 30, ui::COL_RED);
         RTRACE_FILL_RECT(10, 233, 460, 30, ui::COL_RED);

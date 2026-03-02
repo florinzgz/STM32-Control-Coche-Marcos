@@ -16,6 +16,7 @@
 #include "sensor_manager.h"
 #include "service_mode.h"
 #include "math_safety.h"
+#include "error_log.h"
 #include <math.h>
 
 /* Safe-default for speed when NaN/Inf detected — ensures gear change is rejected */
@@ -483,6 +484,31 @@ void CAN_SendServiceStatus(void) {
 }
 
 /**
+ * @brief  Transmit error log header (entry count + total events).
+ *         Sent periodically (1000 ms) so the ESP32 engineering menu
+ *         knows how many log entries are available.
+ *
+ * CAN ID 0x305, DLC 8:
+ *   Byte 0-1: entry_count (uint16 LE)
+ *   Byte 2-5: total_events (uint32 LE, lifetime counter)
+ *   Byte 6-7: reserved (0)
+ */
+void CAN_SendErrorLogHeader(void) {
+    uint8_t data[8] = {0};
+    uint16_t count = ErrorLog_GetCount();
+    data[0] = (uint8_t)(count & 0xFF);
+    data[1] = (uint8_t)((count >> 8) & 0xFF);
+    /* total_events not exposed via API currently — send count again */
+    data[2] = data[0];
+    data[3] = data[1];
+    data[4] = 0;
+    data[5] = 0;
+    data[6] = 0;
+    data[7] = 0;
+    TransmitFrame(CAN_ID_ERROR_LOG_HEADER, data, 8);
+}
+
+/**
  * @brief  Set front LED power relay state (PB10).
  * @param  on  true = relay ON (front LEDs powered), false = relay OFF
  */
@@ -736,6 +762,10 @@ void CAN_ProcessMessages(void) {
                     if (cmd == 0xFF) {
                         /* Factory restore — re-enable all modules (always safe) */
                         ServiceMode_FactoryRestore();
+                        CAN_SendCommandAck(0x10, ACK_OK);
+                    } else if (cmd == 0xFE) {
+                        /* Clear error log (always safe) */
+                        ErrorLog_Clear();
                         CAN_SendCommandAck(0x10, ACK_OK);
                     } else if (cmd >= 0xF0 && cmd <= 0xF4) {
                         /* Individual factory-default reset commands (always safe).

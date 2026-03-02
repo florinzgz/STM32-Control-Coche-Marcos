@@ -39,6 +39,8 @@ extern "C" {
 #define CAN_ID_SERVICE_FAULTS     0x301  // STM32 → ESP32 (1000ms) fault bitmask
 #define CAN_ID_SERVICE_ENABLED    0x302  // STM32 → ESP32 (1000ms) enabled bitmask
 #define CAN_ID_SERVICE_DISABLED   0x303  // STM32 → ESP32 (1000ms) disabled bitmask
+#define CAN_ID_ERROR_LOG_ENTRY    0x304  // STM32 → ESP32 (on-demand) error log entry
+#define CAN_ID_ERROR_LOG_HEADER   0x305  // STM32 → ESP32 (1000ms) error log count + total
 #define CAN_ID_SERVICE_CMD        0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_ACK            0x103  // STM32 → ESP32 (on-demand) command acknowledgment
 
@@ -50,6 +52,7 @@ extern "C" {
 #define SERVICE_ACTION_RESET_INA226_SHUNTS 0xF2
 #define SERVICE_ACTION_RESET_TRACTION_FORCE 0xF3
 #define SERVICE_ACTION_RESET_STEERING_FORCE 0xF4
+#define SERVICE_ACTION_CLEAR_ERROR_LOG     0xFE
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* Command ACK result codes (uint8_t) */
@@ -94,6 +97,7 @@ void CAN_SendError(uint8_t error_code, uint8_t subsystem);
 void CAN_SendDiagnosticEncoder(int32_t raw_count, int16_t delta);
 void CAN_SendCommandAck(uint8_t cmd_id_low, CAN_AckResult_t result);
 void CAN_SendServiceStatus(void);
+void CAN_SendErrorLogHeader(void);
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
 void CAN_CheckBusOff(void);

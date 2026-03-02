@@ -25,6 +25,7 @@
 #include "encoder_reader.h"
 #include "math_safety.h"
 #include "steering_cal_store.h"
+#include "error_log.h"
 #include <math.h>
 
 /* ---- HAL handle instances ---- */
@@ -142,6 +143,8 @@ int main(void)
     ServiceMode_Init();
     CAN_Init();
     SteeringCentering_Init();
+    ErrorLog_Init();
+    ErrorLog_SetResetCause(reset_cause);
 
     /* ---- Persistent steering calibration ----
      * Attempt to restore the last known center position from flash.
@@ -384,6 +387,9 @@ int main(void)
             /* Service mode: send module fault/enable/disable bitmasks
              * to ESP32 for the diagnostic/service menu.               */
             CAN_SendServiceStatus();
+
+            /* Error log header: send entry count to ESP32 engineering menu */
+            CAN_SendErrorLogHeader();
 
             /* LED/lights status: send current relay state to ESP32
              * for HMI synchronisation.                                */
