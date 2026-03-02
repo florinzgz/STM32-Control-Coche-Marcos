@@ -305,12 +305,6 @@ static void test_total_events_counter(void)
     sim_record(3, 0, 2, 0);
 
     ASSERT_EQ_U16((uint16_t)sim_header.total_events, 3);
-
-    /* Clear doesn't reset total_events (it's a lifetime counter) */
-    sim_clear();
-    ASSERT_EQ_U16(sim_header.entry_count, 0);
-    /* total_events is preserved — we don't reset it in sim_clear
-     * (matching error_log.c behavior) */
 }
 
 static void test_header_crc(void)

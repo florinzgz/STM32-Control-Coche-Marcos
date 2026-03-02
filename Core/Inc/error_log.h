@@ -114,6 +114,13 @@ const error_log_entry_t *ErrorLog_GetEntries(void);
  */
 void ErrorLog_SetResetCause(uint8_t cause);
 
+/**
+ * @brief  Get the lifetime total event count.
+ *         This counter is monotonic and never reset (survives ErrorLog_Clear).
+ * @return Total number of errors ever recorded
+ */
+uint32_t ErrorLog_GetTotalEvents(void);
+
 #ifdef __cplusplus
 }
 #endif

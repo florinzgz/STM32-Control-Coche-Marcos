@@ -496,13 +496,13 @@ void CAN_SendServiceStatus(void) {
 void CAN_SendErrorLogHeader(void) {
     uint8_t data[8] = {0};
     uint16_t count = ErrorLog_GetCount();
+    uint32_t total = ErrorLog_GetTotalEvents();
     data[0] = (uint8_t)(count & 0xFF);
     data[1] = (uint8_t)((count >> 8) & 0xFF);
-    /* total_events not exposed via API currently — send count again */
-    data[2] = data[0];
-    data[3] = data[1];
-    data[4] = 0;
-    data[5] = 0;
+    data[2] = (uint8_t)(total & 0xFF);
+    data[3] = (uint8_t)((total >> 8) & 0xFF);
+    data[4] = (uint8_t)((total >> 16) & 0xFF);
+    data[5] = (uint8_t)((total >> 24) & 0xFF);
     data[6] = 0;
     data[7] = 0;
     TransmitFrame(CAN_ID_ERROR_LOG_HEADER, data, 8);

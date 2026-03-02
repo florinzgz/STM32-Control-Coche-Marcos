@@ -244,3 +244,8 @@ void ErrorLog_SetResetCause(uint8_t cause)
 {
     log_reset_cause = cause;
 }
+
+uint32_t ErrorLog_GetTotalEvents(void)
+{
+    return log_header.total_events;
+}
