@@ -759,7 +759,10 @@ void CAN_ProcessMessages(void) {
                                 ServiceMode_ClearFault(MODULE_WHEEL_SPEED_RL);
                                 ServiceMode_ClearFault(MODULE_WHEEL_SPEED_RR);
                                 break;
-                            case 0xF2: /* Reset INA226 / shunt calibration */
+                            case 0xF2: /* Reset INA226 / shunt calibration.
+                                      * MODULE_CURRENT_SENSOR_0 (9) through
+                                      * MODULE_CURRENT_SENSOR_5 (14) are
+                                      * consecutive in ModuleID_t enum. */
                                 for (uint8_t s = MODULE_CURRENT_SENSOR_0;
                                      s <= MODULE_CURRENT_SENSOR_5; s++) {
                                     ServiceMode_EnableModule((ModuleID_t)s);

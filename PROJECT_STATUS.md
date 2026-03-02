@@ -181,7 +181,6 @@ Configuración de pines Alternate Function para cada periférico:
 | INA226 SENSOR MAPPING | Editor de asignación canal→posición para sensores de corriente |
 | TEMP SENSOR MAPPING | Editor de asignación sensor→posición para DS18B20 |
 | **FACTORY DEFAULTS** | **Reset individual**: PID dirección, sensores de rueda, INA226/shunts, fuerza de tracción, fuerza de dirección, o restauración total |
-| FACTORY RESTORE (ALL) | Reset total de todos los módulos a valores de fábrica |
 
 ---
 

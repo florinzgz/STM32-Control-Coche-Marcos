@@ -24,7 +24,7 @@ static constexpr int16_t MENU_BTN_H   = 36;
 static constexpr int16_t MENU_START_Y = 55;
 static constexpr int16_t MENU_SPACING = 42;
 
-static constexpr int     NUM_MAIN_ITEMS = 8;
+static constexpr int     NUM_MAIN_ITEMS = 7;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -32,8 +32,7 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "ENCODER CALIBRATION",
     "INA226 SENSOR MAPPING",
     "TEMP SENSOR MAPPING",
-    "FACTORY DEFAULTS",
-    "FACTORY RESTORE (ALL)"
+    "FACTORY DEFAULTS"
 };
 
 // ---- Back / Save buttons ----
@@ -468,18 +467,6 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             // Open Factory Defaults submenu
                             currentMenu_ = SubMenu::FACTORY_DEFAULTS;
                             break;
-                        case 7: {
-                            // Factory restore ALL — send SERVICE_CMD 0x110
-                            CanFrame frame = {};
-                            frame.identifier       = can::SERVICE_CMD;
-                            frame.extd             = 0;
-                            frame.data_length_code = 2;
-                            frame.data[0]          = can::SERVICE_ACTION_FACTORY_RESTORE;
-                            frame.data[1]          = 0;
-                            ESP32Can.writeFrame(frame);
-                            Serial.println("[ENG] Factory restore ALL sent");
-                            break;
-                        }
                     }
                     needsRedraw_ = true;
                     return true;
@@ -608,8 +595,7 @@ void EngineeringScreen::drawMainMenu() {
     // Menu buttons
     for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
         int16_t btnY = MENU_START_Y + i * MENU_SPACING;
-        uint16_t bgCol = (i == 7) ? ui::COL_RED :
-                          (i == 6) ? ui::COL_DARK_GRAY : ui::COL_DARK_GRAY;
+        uint16_t bgCol = (i == 6) ? ui::COL_DARK_GRAY : ui::COL_DARK_GRAY;
         uint16_t txtCol = (i == 6) ? ui::COL_AMBER : ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);

@@ -18,8 +18,7 @@ for use during development and maintenance.
 | 4 | ENCODER CALIBRATION | `ENCODER_CAL` | Live steering encoder verification with visual gauge |
 | 5 | INA226 SENSOR MAPPING | `SENSOR_MAP_INA` | Map INA226 I2C channels to vehicle positions (FL/FR/RL/RR/Battery/Steering) |
 | 6 | TEMP SENSOR MAPPING | `SENSOR_MAP_TEMP` | Map DS18B20 sensors to vehicle positions (FL/FR/RL/RR/Ambient) |
-| 7 | FACTORY DEFAULTS | `FACTORY_DEFAULTS` | Individual factory-default reset options (see below) |
-| 8 | FACTORY RESTORE (ALL) | — | Send full factory restore (0xFF) to STM32 |
+| 7 | FACTORY DEFAULTS | `FACTORY_DEFAULTS` | Individual factory-default reset options (see below), includes full factory restore |
 
 ## Submenu Details
 
@@ -91,11 +90,6 @@ Each option sends a SERVICE_CMD (0x110) via CAN to the STM32, which re-enables t
 affected modules and clears their faults.
 
 **Warning text**: "Vehicle must be stationary. Reboot may be required."
-
-### 8. Factory Restore (ALL)
-
-Direct button on the main engineering menu that sends SERVICE_CMD 0xFF to the STM32.
-Re-enables ALL modules and clears all manual disables.
 
 ## Navigation
 
