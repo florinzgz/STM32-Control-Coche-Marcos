@@ -2,8 +2,8 @@
 
 **Fecha:** 2026-02-25
 **Propósito:** Referencia de taller para conectar todo el hardware y validar Phase 1
-**Fuente:** Extraído directamente del firmware (`main.h`, `main.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`, `can_handler.c`, `steering_centering.c`, `platformio.ini`)
-**Actualizado:** PR #120 — arquitectura RPWM/LPWM directo por motor (mismo timer), BREAK2/LOCKUP hardware
+**Fuente:** Extraído directamente del firmware (`main.h`, `main.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`, `can_handler.c`, `steering_centering.c`, `platformio.ini`, `obstacle_sensor.h`)
+**Actualizado:** PR #120 — arquitectura RPWM/LPWM directo por motor (mismo timer), BREAK2/LOCKUP hardware; añadido sensor TOFSense-M S (ESP32-S3, UART1 GPIO18)
 
 ---
 
@@ -26,10 +26,20 @@
   │  OneWire ──► 5× DS18B20 (PB0)                                                │
   │  FDCAN1 ──► TJA1051 ──► CAN Bus ──► TJA1051 ──► ESP32-S3                   │
   └──────────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │                        ESP32-S3 DevKitC-1 (HMI)                              │
+  │                          240 MHz, 3.3V                                       │
+  │                                                                              │
+  │  CAN ──► TJA1051 ──► CAN Bus ──► STM32 (GPIO4 TX, GPIO5 RX)                │
+  │  SPI ──► Display TFT ST7796 480×320 (GPIO10/12/13/14/21/38/39/42)           │
+  │  UART1 RX (GPIO18) ◄── TOFSense-M S (sensor obstáculos, 921600 bps)        │
+  │  UART2 ──► DFPlayer Mini (audio)                                             │
+  └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Total cables del STM32:** GPIO + alimentación + I2C + CAN
-**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 ADS1115 + 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051
+**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 ADS1115 + 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051, 1 TOFSense-M S (en ESP32)
 
 > ⚠️ **CAMBIO ARQUITECTURA (PR #120):** Los motores ya NO usan un pin DIR + un solo PWM. Ahora cada motor recibe **RPWM y LPWM directos** desde el mismo timer. **Eliminar** el cableado DIR (PC0–PC4). Los pines EN_FR, EN_RL y EN_STEER ya no son GPIO; conectar R_EN y L_EN del BTS7960 correspondiente directamente a 3.3 V.
 
@@ -442,7 +452,62 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 
 ---
 
-## 12) TABLA COMPLETA — TODOS LOS CABLES DEL STM32
+## 12) ESP32-S3 — Sensor de Obstáculos TOFSense-M S (UART1)
+
+El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado directamente a la ESP32-S3 vía UART. Proporciona detección de obstáculos con 64 píxeles de distancia a ~10 Hz.
+
+### Conexión TOFSense-M S → ESP32-S3
+
+| Cable | De (TOFSense-M, conector GH1.25) | A (ESP32-S3) | Función |
+|-------|----------------------------------|-------------|---------|
+| — | **Pin 1 (VCC)** | **5V** (regulador o fuente) | Alimentación sensor (⚠️ 5V obligatorio, NO 3.3V) |
+| — | **Pin 2 (GND)** | **GND** | GND común con ESP32 |
+| — | **Pin 3 (RX)** | **No conectado** | Recepción unidireccional — no se envían comandos al sensor |
+| — | **Pin 4 (TX)** | **GPIO18** (UART1 RX) | Sensor TX → ESP32 RX (datos de distancia) |
+
+### Diagrama de conexión
+
+```
+                    TOFSense-M S (GH1.25)
+                   ┌──────────────────────┐
+ 5V (regulador) ───┤ VCC  (pin 1)         │
+                   │                      │     ⚠ VCC = 5V obligatorio
+ GND ──────────────┤ GND  (pin 2)         │     UART = 3.3V TTL
+                   │                      │
+           n/c ────┤ RX   (pin 3)         │     (no se envían comandos)
+                   │                      │
+ ESP32 GPIO18 ─────┤ TX   (pin 4)         │     Sensor TX → ESP32 UART1 RX
+                   └──────────────────────┘
+                         │    │
+                        100nF (desacoplo VCC-GND, recomendado)
+```
+
+### Especificaciones de comunicación
+
+| Parámetro | Valor |
+|-----------|-------|
+| **Interfaz** | UART (modo activo, transmisión continua) |
+| **Baudrate** | 921600 bps |
+| **Formato** | 8N1 (8 data bits, sin paridad, 1 stop bit) |
+| **Nivel lógico UART** | 3.3V TTL (conexión directa a ESP32, sin level shifter) |
+| **Frecuencia de datos** | ~10 Hz (una trama de 400 bytes cada ~100 ms) |
+| **Protocolo** | NLink_TOFSense_M_Frame0 (header 0x57, 64 píxeles × 6 bytes) |
+| **Rango útil** | 20 mm – 4000 mm |
+
+### Referencia en firmware
+
+- `esp32/src/sensors/obstacle_sensor.h` — Configuración: `rxPin = 18`, `txPin = -1`, `baudRate = 921600`
+- `esp32/src/sensors/obstacle_sensor.cpp` — Parser del protocolo NLink, detección de sensor atascado
+- `esp32/src/main.cpp` — Inicialización: `obstacle_sensor::init()` en `setup()`
+- `docs/TOFSENSE_M_WIRING_GUIDE.md` — Guía completa de cableado y troubleshooting
+
+> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. Las señales UART son 3.3V TTL, por lo que la conexión TX→GPIO18 es directa sin divisor de tensión ni level shifter.
+
+> ⚠️ **IMPORTANTE:** Se recomienda un condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector GH1.25, para filtrar ruido de alimentación.
+
+---
+
+## 13) TABLA COMPLETA — TODOS LOS CABLES DEL STM32
 
 > ⚠️ Tabla actualizada tras PR #120. Los pines DIR (PC0–PC4) están liberados. PC6/PC7/PC8/PC9 son ahora salidas PWM TIM8. PA6/PA7 son nuevas salidas PWM TIM3 (STEER).
 
@@ -493,7 +558,7 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 
 ---
 
-## 13) LISTA DE COMPRAS / VERIFICACIÓN
+## 14) LISTA DE COMPRAS / VERIFICACIÓN
 
 ### Componentes principales
 
@@ -515,6 +580,7 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
 | 2 | TJA1051T/3 módulo | Transceivers CAN | 3.3V compatible |
+| 1 | TOFSense-M S (Nooploop) | Sensor obstáculos LiDAR 8×8 | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, conector GH1.25 |
 | 3 | Módulo relé + optoacoplador | Relés potencia | HY-M158 o similar, 3.3V trigger |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
 | 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB6, PB7, PB0 |
@@ -562,7 +628,7 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 
 ---
 
-## 14) AVISOS DE SEGURIDAD PARA PHASE 1
+## 15) AVISOS DE SEGURIDAD PARA PHASE 1
 
 ### ⚠️ ANTES DE ENCENDER
 
@@ -581,8 +647,9 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 5. Conectar sensores de velocidad de rueda
 6. Conectar encoder de dirección
 7. Conectar pedal (divisor resistivo → PA3 + ADS1115)
-8. Verificar que EN_FR, EN_RL y EN_STEER (BTS7960 R_EN/L_EN) están cableados a 3.3V
-9. **ÚLTIMO:** Conectar alimentación de motores (24V/12V vía relés)
+8. Conectar TOFSense-M S al ESP32-S3 (VCC=5V, GND, TX→GPIO18) → verificar `[OBSTACLE] TOFSense-M initialized` en monitor serie
+9. Verificar que EN_FR, EN_RL y EN_STEER (BTS7960 R_EN/L_EN) están cableados a 3.3V
+10. **ÚLTIMO:** Conectar alimentación de motores (24V/12V vía relés)
 
 ### ⚠️ QUÉ OBSERVAR EN PHASE 1
 
@@ -597,6 +664,7 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 | Centrado funciona | Observar al boot | Dirección se centra automáticamente (≤10 s) |
 | IWDG no dispara | Dejar funcionar 60 s | No hay reset inesperado |
 | CAN timeout | Desconectar ESP32 | STM32 pasa a SAFE en ≤250 ms |
+| TOFSense-M lee | Monitor serie ESP32 | `[OBSTACLE] TOFSense-M initialized` + estado VALID tras warmup |
 
 ---
 
@@ -606,6 +674,8 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 - `docs/HARDWARE_WIRING_MANUAL.md` — Manual eléctrico completo
 - `docs/HARDWARE_SPECIFICATION.md` — Especificaciones de componentes
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Conexión CAN detallada
+- `docs/TOFSENSE_M_WIRING_GUIDE.md` — Guía de conexión TOFSense-M S (sensor obstáculos)
 - `docs/HARDWARE_VALIDATION_PROCEDURE.md` — Procedimiento de validación Phase 1
 - `Core/Inc/main.h` — Definiciones de pines en firmware
 - `esp32/platformio.ini` — Pines ESP32 (CAN + Display)
+- `esp32/src/sensors/obstacle_sensor.h` — Configuración UART del TOFSense-M (GPIO18, 921600 bps)

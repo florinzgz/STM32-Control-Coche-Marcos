@@ -62,11 +62,27 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 - ✅ Tablas compactas de pines
 - ✅ Display: pines principales + touch
 - ✅ CAN-Bus: ESP32 ↔ TJA1051
+- ✅ TOFSense-M: sensor obstáculos (GPIO 18, UART1)
 - ✅ Valores de verificación con multímetro
 - ✅ Diagnóstico rápido de problemas
 - ✅ Diagrama simplificado
 
 **Ideal para:** Consulta rápida durante el montaje, verificación con multímetro
+
+---
+
+### 4. **TOFSENSE_M_WIRING_GUIDE.md** 🎯 GUÍA SENSOR OBSTÁCULOS
+**Guía completa de conexión del TOFSense-M S** (Nooploop LiDAR 8×8).
+
+**Contenido:**
+- ✅ Alimentación correcta (5V obligatorio)
+- ✅ Cableado UART (sensor TX → ESP32 GPIO18)
+- ✅ Especificaciones del protocolo NLink_TOFSense_M_Frame0
+- ✅ Diagnóstico de estado INVALID
+- ✅ Diagrama de conexión detallado
+- ✅ Referencias oficiales del fabricante
+
+**Ideal para:** Conexión y troubleshooting del sensor de obstáculos
 
 ---
 
@@ -111,6 +127,13 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 | 5V | Pin 3 (VCC) |
 | GND | Pin 2, 8 (GND, S) |
 
+### TOFSense-M S (Sensor Obstáculos)
+| TOFSense-M | ESP32 |
+|------------|-------|
+| Pin 4 (TX) | GPIO 18 (UART1 RX) |
+| Pin 1 (VCC) | 5V |
+| Pin 2 (GND) | GND |
+
 ---
 
 ## 🔗 Documentos Relacionados
@@ -152,6 +175,7 @@ pandoc CONEXIONES_RAPIDAS_ESP32.md -o referencia_rapida.pdf
 - [x] Conexiones de Touch Panel documentadas
 - [x] Configuración SPI documentada
 - [x] Conexiones CAN-Bus documentadas
+- [x] Conexiones TOFSense-M documentadas
 - [x] Diagramas visuales creados
 - [x] Referencia rápida creada
 - [x] Lista de materiales incluida
