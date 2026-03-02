@@ -76,7 +76,7 @@
 |-----------|---------|-----------|
 | ESP32-S3 + Display | 3.3V | ~500 mA |
 | TJA1051 CAN | 5V | ~70 mA |
-| TOFSense-M S | 5V | ~200 mA |
+| TOFSense-M S | 5V | ~200 mA (según Datasheet V3.0) |
 
 ---
 

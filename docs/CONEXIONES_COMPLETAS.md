@@ -454,7 +454,7 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 
 ## 12) ESP32-S3 — Sensor de Obstáculos TOFSense-M S (UART1)
 
-El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado directamente a la ESP32-S3 vía UART. Proporciona detección de obstáculos con 64 píxeles de distancia a ~10 Hz.
+El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado directamente al ESP32-S3 vía UART. Proporciona detección de obstáculos con 64 píxeles de distancia a ~10 Hz.
 
 ### Conexión TOFSense-M S → ESP32-S3
 
