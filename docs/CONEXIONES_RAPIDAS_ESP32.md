@@ -1,5 +1,5 @@
 # REFERENCIA RÁPIDA - CONEXIONES ESP32-S3
-## Pines de Pantalla y CAN-Bus
+## Pines de Pantalla, CAN-Bus y Sensor TOFSense-M
 
 ---
 
@@ -53,12 +53,30 @@
 
 ---
 
+## SENSOR DE OBSTÁCULOS (TOFSense-M S via UART1)
+
+### Conexiones TOFSense-M S → ESP32-S3
+
+| TOFSense-M (GH1.25) | → | ESP32-S3 / Fuente | Función |
+|----------------------|---|-------------------|---------|
+| Pin 1 (VCC) | → | 5V (regulador) | ⚠️ Alimentación 5V obligatorio |
+| Pin 2 (GND) | → | GND | Tierra común |
+| Pin 3 (RX) | → | No conectar | No se envían comandos |
+| Pin 4 (TX) | → | GPIO 18 | UART1 RX (datos de distancia) |
+
+- **Baudrate:** 921600 bps, 8N1
+- **Nivel lógico UART:** 3.3V TTL (conexión directa, sin level shifter)
+- **Condensador desacoplo:** 100 nF entre VCC y GND del sensor (recomendado)
+
+---
+
 ## ALIMENTACIÓN
 
 | Componente | Voltaje | Corriente |
 |-----------|---------|-----------|
 | ESP32-S3 + Display | 3.3V | ~500 mA |
 | TJA1051 CAN | 5V | ~70 mA |
+| TOFSense-M S | 5V | ~200 mA (según Datasheet V3.0) |
 
 ---
 
@@ -69,16 +87,18 @@
 1. ESP32 3.3V → GND: **3.30V ± 0.1V**
 2. Display VCC → GND: **3.30V ± 0.1V**
 3. TJA1051 VCC → GND: **5.00V ± 0.2V**
-4. CANH → GND (idle): **~2.5V**
-5. CANL → GND (idle): **~2.5V**
-6. CANH ↔ CANL (resistencia): **60Ω** (con terminación)
+4. TOFSense-M VCC → GND: **5.00V ± 0.2V**
+5. CANH → GND (idle): **~2.5V**
+6. CANL → GND (idle): **~2.5V**
+7. CANH ↔ CANL (resistencia): **60Ω** (con terminación)
 
 ### En Monitor Serial
 
 1. ESP32 arranca: `[HMI] ESP32 HMI CAN bring-up booted`
 2. TFT inicializado: `[TFT] Display initialized`
 3. CAN funciona: `[CAN] Initialized at 500 kbps`
-4. Heartbeat: `[HMI] heartbeat` cada 1 segundo
+4. TOFSense-M: `[OBSTACLE] TOFSense-M initialized (UART1, 921600 bps)`
+5. Heartbeat: `[HMI] heartbeat` cada 1 segundo
 
 ---
 
@@ -95,6 +115,12 @@
 - **Sin comunicación** → Verificar resistencias 120Ω en ambos extremos
 - **Errores frecuentes** → Pin S (pin 8) debe ir a GND, no flotar
 - **Bus-off** → Verificar 500 kbps en ambos MCUs
+
+### TOFSense-M
+
+- **Estado INVALID permanente** → Verificar VCC = 5V (no 3.3V)
+- **Sin datos** → Verificar que sensor TX (pin 4) va a GPIO 18
+- **Checksum fallido** → Verificar baudrate 921600 en firmware
 
 ---
 
@@ -116,8 +142,10 @@
 │  GPIO 4  ───┼──→ CAN TX (a TJA1051)
 │  GPIO 5  ◄──┼─── CAN RX (de TJA1051)
 │             │
+│  GPIO 18 ◄──┼─── TOFSense-M TX (UART1 RX, 921600 bps)
+│             │
 │  3.3V ──────┼──→ Display VCC
-│  5V ────────┼──→ TJA1051 VCC
+│  5V ────────┼──→ TJA1051 VCC + TOFSense-M VCC
 │  GND ───────┼──→ Común (todos)
 │             │
 └─────────────┘
@@ -128,6 +156,7 @@
 **Ver documentación completa en:**
 - `ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md` (guía detallada)
 - `DIAGRAMA_PINES_VISUAL.md` (diagramas visuales)
+- `TOFSENSE_M_WIRING_GUIDE.md` (guía de conexión TOFSense-M)
 
 **Configuración firmware:**
 - `esp32/include/User_Setup.h` (definiciones de pines TFT_eSPI)
