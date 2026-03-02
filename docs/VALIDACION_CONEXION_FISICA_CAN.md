@@ -213,7 +213,25 @@ GND ESP32 ───────────────────────�
 
 ---
 
-## 8. Referencias
+## 8. Verificación cruzada con firmware
+
+Todos los valores de pines y configuración de este documento han sido verificados
+directamente contra el código fuente del firmware:
+
+| Parámetro | Valor documentado | Fuente firmware | Estado |
+|-----------|-------------------|-----------------|--------|
+| ESP32-S3 CAN TX pin | GPIO4 | `esp32/src/main.cpp`: `CAN_TX_PIN = 4` | ✅ |
+| ESP32-S3 CAN RX pin | GPIO5 | `esp32/src/main.cpp`: `CAN_RX_PIN = 5` | ✅ |
+| STM32 FDCAN1 TX pin | PB9 (AF9) | `Core/Inc/main.h`: `PIN_CAN_TX = GPIO_PIN_9` + `Core/Src/stm32g4xx_hal_msp.c`: `GPIO_AF9_FDCAN1` | ✅ |
+| STM32 FDCAN1 RX pin | PB8 (AF9) | `Core/Inc/main.h`: `PIN_CAN_RX = GPIO_PIN_8` + `Core/Src/stm32g4xx_hal_msp.c`: `GPIO_AF9_FDCAN1` | ✅ |
+| Velocidad de bus | 500 kbps | `esp32/src/main.cpp`: `convertSpeed(500)` + `Core/Src/main.c`: `170 MHz / (17 × 20) = 500 kbps` | ✅ |
+| Pin S/SLNT (pin 8) | Conectar a GND | Hardware externo — no controlado por firmware | ✅ |
+| Terminación | 120Ω en cada extremo | Hardware externo — no controlado por firmware | ✅ |
+| GND común | Obligatorio | Hardware externo — sin GND común los transceivers no operan correctamente | ✅ |
+
+---
+
+## 9. Referencias
 
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Guía completa de conexión CAN
 - `docs/CAN_BUS_AUDIT_REPORT.md` — Auditoría firmware y protocolo CAN

@@ -231,7 +231,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | **0x301** | SERVICE_FAULTS | 4 | Bitmask de fallos de servicio |
 | **0x302** | SERVICE_ENABLED | 4 | Funciones habilitadas en modo servicio |
 | **0x303** | SERVICE_DISABLED | 4 | Funciones deshabilitadas |
-| **0x501** | CMD_ACK | 3 | Acuse de recibo de comandos |
+| **0x103** | CMD_ACK | 3 | Acuse de recibo de comandos |
 
 ---
 
