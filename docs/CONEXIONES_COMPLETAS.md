@@ -21,8 +21,7 @@
   │  GPIO out ──► 2× EN GPIO (PC5/PC13) + 3× RELAY + EN_FR/RL/STEER→3.3V       │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z                   │
   │  I2C1 ──► TCA9548A ──► 6× INA226                                            │
-  │  I2C1 ──► ADS1115 ◄── Pedal (plausibilidad, A0, 5V)                          │
-  │  ADC1 ◄── Divisor ◄── Pedal (primario, PA3, 5V→3.3V)                        │
+  │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PA3)         │
   │  OneWire ──► 5× DS18B20 (PB0)                                                │
   │  FDCAN1 ──► TJA1051 ──► CAN Bus ──► TJA1051 ──► ESP32-S3                   │
   └──────────────────────────────────────────────────────────────────────────────┘
@@ -39,7 +38,7 @@
 ```
 
 **Total cables del STM32:** GPIO + alimentación + I2C + CAN
-**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 ADS1115 + 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051, 1 TOFSense-M S (en ESP32)
+**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051, 1 TOFSense-M S (en ESP32)
 
 > ⚠️ **CAMBIO ARQUITECTURA (PR #120):** Los motores ya NO usan un pin DIR + un solo PWM. Ahora cada motor recibe **RPWM y LPWM directos** desde el mismo timer. **Eliminar** el cableado DIR (PC0–PC4). Los pines EN_FR, EN_RL y EN_STEER ya no son GPIO; conectar R_EN y L_EN del BTS7960 correspondiente directamente a 3.3 V.
 
@@ -177,14 +176,14 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 
 ---
 
-## 6) PEDAL ACELERADOR — Doble canal redundante (ADC interno + ADS1115)
+## 6) PEDAL ACELERADOR — ADC interno dual-sample + plausibilidad software
 
-El sensor Hall SS1324LUA-T opera a 5V y produce una señal de 0.3V (reposo) a 4.8V (pisado a fondo). Se usa una arquitectura de **doble canal redundante** (como en automoción real):
+El sensor Hall SS1324LUA-T opera a 5V y produce una señal de 0.3V (reposo) a 4.8V (pisado a fondo). Se usa el **ADC interno del STM32** con plausibilidad por software:
 
-- **Canal primario (rápido):** ADC interno del STM32 en PA3, a través de un divisor de tensión resistivo (5V → 3.3V). Lectura en ~1 µs.
-- **Canal de plausibilidad (preciso):** ADS1115 16-bit I2C ADC, lee la señal original de 5V sin escalar. Lectura en ~8 ms.
+- **Canal ADC (rápido):** ADC interno del STM32 en PA3, a través de un divisor de tensión resistivo (5V → 3.3V). Doble lectura en ~2 µs.
+- **Plausibilidad software:** Consistencia dual-sample, filtro EMA (α=0.3), validación de rango, límite de tasa de cambio.
 
-El firmware compara ambos canales: si divergen más del 5% durante más de 200 ms, se activa una falta de plausibilidad que fuerza el acelerador a 0%.
+El firmware verifica plausibilidad por software: si las dos muestras ADC consecutivas divergen, el valor sale de rango, o la tasa de cambio excede el límite físico, se activa una falta de plausibilidad que fuerza el acelerador a 0%.
 
 ### Canal primario: Divisor de tensión → PA3 (ADC1_IN4)
 
@@ -216,36 +215,20 @@ Pedal señal (0.3V–4.8V)
 
 > ⚠️ **UBICAR CERCA DEL STM32** — El divisor debe estar físicamente cerca del pin PA3 para minimizar captación de ruido PWM del motor.
 
-### Canal de plausibilidad: ADS1115 (I2C)
+### Plausibilidad por software (sin ADS1115)
 
-| Cable | De (Pedal) | A (ADS1115) | Función |
-|-------|-----------|-------------|---------|
-| 24a | Pin 1 (VCC) | **VDD** | Alimentación 5V del sensor |
-| 24b | Pin 2 (GND) | **GND** | GND común |
-| 24c | Pin 3 (Señal) | **A0** | Señal analógica 0.3V–4.8V (sin dividir) |
+> ⚠️ **CAMBIO ARQUITECTURA:** El ADS1115 externo ha sido **eliminado** del subsistema del pedal. La plausibilidad se realiza íntegramente por software usando el ADC interno del STM32, que es ~5000× más rápido y completamente determinístico.
 
-### Conexión del ADS1115 al bus I2C
-
-| Cable | De (ADS1115) | A (STM32/Bus I2C) | Función |
-|-------|-------------|-------------------|---------|
-| — | VDD | **5V** | Alimentación módulo ADS1115 |
-| — | GND | **GND** | GND común |
-| 24d | SCL | **PB6** (bus I2C1) | Reloj I2C compartido |
-| 24e | SDA | **PB7** (bus I2C1) | Datos I2C compartidos |
-| — | ADDR | **GND** | Dirección I2C = 0x48 |
-
-**Especificaciones del doble canal:**
-- **Canal primario (ADC):** 12-bit, ~1 µs de lectura, PEDAL_ADC_MIN=150, PEDAL_ADC_MAX=2413
-- **Canal plausibilidad (ADS1115):** 16-bit, PGA ±6.144V, 128 SPS, PEDAL_ADS_MIN=1600, PEDAL_ADS_MAX=25600
-- **Validación cruzada:** ambos canales deben coincidir ±5% del rango total
-- **Timeout de divergencia:** 200 ms antes de declarar fallo
-- **Timeout de datos ADS1115:** si I2C falla >500 ms, modo degradado
+**Especificaciones del canal ADC:**
+- **Resolución:** 12-bit, ~1 µs por muestra × 2 muestras = ~2 µs total
+- **PEDAL_ADC_MIN:** 150 counts (~0.3V pedal suelto, tras divisor)
+- **PEDAL_ADC_MAX:** 2413 counts (~4.8V pedal pisado, tras divisor)
+- **PEDAL_ADC_FAULT_LO:** 30 counts (detección circuito abierto)
+- **PEDAL_ADC_FAULT_HI:** 2800 counts (detección cortocircuito)
+- **PEDAL_SAMPLE_TOLERANCE:** ±30 counts entre muestras consecutivas
+- **PEDAL_MAX_RATE_PCT:** 35%/ciclo (máximo cambio por ciclo de 50 ms)
+- **Filtro EMA:** α=0.3 (~150 ms settling time)
 - Muestreo cada 50 ms en el loop del STM32
-- Filtro EMA (α=0.15) + rampa máxima 50%/s (en motor_control.c)
-
-> ⚠️ **IMPORTANTE:** El ADS1115 comparte el bus I2C1 con el TCA9548A/INA226, pero tiene dirección diferente (0x48 vs 0x70/0x40), por lo que NO necesita ir a través del multiplexor.
-
-> ⚠️ **IMPORTANTE:** El bus I2C usa pull-ups a 3.3V (en PB6/PB7). El ADS1115 alimentado a 5V acepta niveles I2C de 3.3V (VIH = 0.7 × VDD = 3.5V, compatible con 3.3V).
 
 > ⚠️ **NOTA:** PA3 ahora se usa como ADC1_IN4 (canal primario del pedal). La señal pasa por el divisor de tensión, por lo que NUNCA supera 2.1V en el pin.
 
@@ -528,8 +511,8 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | 13 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Adaptador 5V→3.3V |
 | 14 | **PB4** | GPIOB | Input | EXTI4 | Encoder E6B2 índice Z | 1 pulso/vuelta |
 | 15 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
-| 16 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A + ADS1115 | Pull-up 4.7kΩ, 400 kHz |
-| 17 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A + ADS1115 | Pull-up 4.7kΩ, 400 kHz |
+| 16 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
+| 17 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
 | 18 | **PB8** | GPIOB | AF9 | FDCAN1_RX | TJA1051 #1 → RXD | ⚠️ Vía transceiver, NO directo |
 | 19 | **PB9** | GPIOB | AF9 | FDCAN1_TX | TJA1051 #1 → TXD | ⚠️ Vía transceiver, NO directo |
 | 20 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
@@ -572,7 +555,6 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | 1 | Motor DC 12V | Motor dirección | Brushed DC |
 | 1 | Encoder E6B2-CWZ6C | Encoder dirección | 1200 PPR, 5V, open-collector |
 | 1 | Sensor Hall SS1324LUA-T | Pedal acelerador | Salida 0.3–4.8V (5V supply) |
-| 1 | ADS1115 módulo | ADC I2C para pedal | 16-bit, I2C addr 0x48, canal plausibilidad |
 | 1 | Resistencia 10 kΩ (1%) | Divisor pedal R1 | Canal primario ADC, ¼W |
 | 1 | Resistencia 6.8 kΩ (1%) | Divisor pedal R2 | Canal primario ADC, ¼W |
 | 5 | Sensor inductivo LJ12A3 | 4× velocidad rueda + 1× centrado | NPN, NO |
@@ -633,7 +615,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 ### ⚠️ ANTES DE ENCENDER
 
 1. **Verificar GND común** — STM32, ESP32, BTS7960, fuentes de alimentación, y sensores deben compartir el mismo GND
-2. **Verificar tensiones** — PA15/PB3 (encoder) ≤ 3.3V, PA3 (pedal divisor) ≤ 2.1V. PA6/PA7/PA8/PA9/PA10/PA11/PC6/PC7/PC8/PC9 son salidas PWM (NO conectar a señales externas). El pedal 5V va al ADS1115 y al divisor resistivo, NO directamente al STM32
+2. **Verificar tensiones** — PA15/PB3 (encoder) ≤ 3.3V, PA3 (pedal divisor) ≤ 2.1V. PA6/PA7/PA8/PA9/PA10/PA11/PC6/PC7/PC8/PC9 son salidas PWM (NO conectar a señales externas). El pedal 5V va al divisor resistivo, NO directamente al STM32
 3. **No conectar motores todavía** — Para Phase 1, se puede probar sin motores conectados (solo verificar señales RPWM/LPWM con osciloscopio o LED en PA8/PA9/PA10/PA11/PC6/PC7/PC8/PC9/PA6/PA7)
 4. **Conectar CAN con transceivers** — NUNCA conectar PB8/PB9 directo a cables CAN
 5. **Poner resistencias pull-up** — I2C (PB6, PB7) y OneWire (PB0) no funcionan sin pull-ups
@@ -646,7 +628,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 4. Conectar sensores OneWire (DS18B20)
 5. Conectar sensores de velocidad de rueda
 6. Conectar encoder de dirección
-7. Conectar pedal (divisor resistivo → PA3 + ADS1115)
+7. Conectar pedal (divisor resistivo → PA3)
 8. Conectar TOFSense-M S al ESP32-S3 (VCC=5V, GND, TX→GPIO18) → verificar `[OBSTACLE] TOFSense-M initialized` en monitor serie
 9. Verificar que EN_FR, EN_RL y EN_STEER (BTS7960 R_EN/L_EN) están cableados a 3.3V
 10. **ÚLTIMO:** Conectar alimentación de motores (24V/12V vía relés)
