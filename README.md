@@ -325,7 +325,7 @@ See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the ful
 ✅ Hidden engineering menu (code 8989) with diagnostics and calibration
 ✅ Full error screen with human-readable fault names and permanence timer
 ✅ CAN bus-off detection and non-blocking recovery
-✅ Dual-channel pedal plausibility (ADC + ADS1115 cross-check)
+✅ Pedal plausibility (dual-sample ADC + software cross-check: EMA filter, range, rate-of-change)
 ✅ Persistent error log in Flash (250 entries, ring buffer, CRC32, post-mortem diagnosis)
 ✅ I2C bus recovery (NXP AN10216 clock cycling, auto-recovery on SDA stuck)
 
