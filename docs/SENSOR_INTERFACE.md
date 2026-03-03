@@ -288,13 +288,14 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 | PEDAL_MAX_RATE_PCT | 35%/ciclo (50 ms) |
 | Filtro EMA | α=0.3 (~150 ms settling) |
 
-### Validación cruzada
+### Validación de plausibilidad
 
-| Parámetro | Valor |
-|-----------|-------|
-| Tolerancia | ±5 % entre canales (tras normalizar a %) |
-| Timeout de divergencia | 200 ms (si divergen >5 % durante 200 ms → fallo) |
-| Timeout de dato obsoleto | 500 ms (si no se recibe lectura nueva en 500 ms → fallo) |
+| Verificación | Criterio | Acción |
+|-------------|----------|--------|
+| Consistencia dual-sample | Diferencia > ±30 counts entre lecturas consecutivas | `pedal_channels_contradict = true`, skip ciclo |
+| Rango válido | < 30 o > 2800 counts | `pedal_plausible = false` |
+| Tasa de cambio | > 35% por ciclo (50 ms) | `pedal_plausible = false` |
+| Filtro EMA | α=0.3 (~150 ms settling) | Suaviza ruido |
 
 ### Resistencias y protección
 

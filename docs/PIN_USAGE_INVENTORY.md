@@ -154,7 +154,7 @@ Dispositivos en el bus I2C (solo 2 pines para todos):
 | TCA9548A | 0x70 | Multiplexor 8 canales (para 6× INA226) |
 | INA226 ×6 | 0x40 (detrás del mux) | Sensores de corriente (4 motores + batería + dirección) |
 
-> **Nota:** Los 6 sensores INA226 y el multiplexor TCA9548A comparten los mismos 2 pines I2C. Esto permite 7 dispositivos con solo 2 pines GPIO.
+> **Nota:** Los 6 sensores INA226 y el multiplexor TCA9548A comparten los mismos 2 pines I2C (7 dispositivos físicos, 2 direcciones visibles en el bus: 0x70 para TCA9548A y 0x40 para INA226 vía mux).
 
 ### 2.9 Bus OneWire — 5× DS18B20 (1 pin)
 
