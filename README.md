@@ -110,7 +110,7 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 7. **steering_centering.c/h**: Auto-center routine with inductive center sensor
 8. **ackermann.c/h**: Ackermann steering geometry for differential wheel angles
 9. **eps_params.c/h**: Electric power steering torque assist parameters
-10. **boot_validation.c/h**: Safe startup checks (pedal inhibit, reset cause detection)
+10. **boot_validation.c/h**: Pre-ACTIVE gate (sensor plausibility, battery voltage, encoder health checks)
 11. **encoder_reader.c/h**: Quadrature encoder decoding (E6B2-CWZ6C, 4800 counts/rev)
 12. **error_log.c/h**: Persistent error log in Flash (page 125, ring buffer, CRC32, 250 entries max)
 13. **main.c**: Main control loop (multi-tier timing: 10ms/50ms/100ms/1000ms)
@@ -167,10 +167,10 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 - **ABS (Anti-lock Braking)**: Wheel slip detection and mitigation (15% threshold)
 - **TCS (Traction Control)**: Wheel spin prevention (15% threshold)
 - **Overcurrent Protection**: Per-motor monitoring (25A per motor, 50A per sensor) → SAFE
-- **Overtemperature Protection**: Motor 85°C warning → DEGRADED, 95°C fault → SAFE; Battery 50°C/60°C
-- **CAN Timeout**: 250ms without heartbeat → LIMP_HOME (30% max throttle)
+- **Overtemperature Protection**: Motor 80°C warning → DEGRADED, 90°C critical → SAFE
+- **CAN Timeout**: 250ms without heartbeat → LIMP_HOME (20% max torque)
 - **Battery Undervoltage**: Warning @ 20V → DEGRADED, Critical @ 18V → SAFE
-- **Obstacle Avoidance**: 5-zone speed-dependent stopping (200mm emergency to 2000mm safe)
+- **Obstacle Avoidance**: 5-zone speed-dependent stopping (200mm emergency to 4000mm clear)
 - **Watchdog**: Independent watchdog (~500ms), BREAK2 hardware PWM kill on CPU fault
 - **Startup Inhibit**: Blocks torque if pedal pressed at boot
 
@@ -229,6 +229,9 @@ STM32-Control-Coche-Marcos/
 │   │   ├── boot_validation.h
 │   │   ├── encoder_reader.h
 │   │   ├── error_log.h
+│   │   ├── math_safety.h
+│   │   ├── vehicle_physics.h
+│   │   ├── stm32g4xx_hal_conf.h
 │   │   └── stm32g4xx_it.h
 │   └── Src/
 │       ├── main.c
@@ -244,7 +247,10 @@ STM32-Control-Coche-Marcos/
 │       ├── boot_validation.c
 │       ├── encoder_reader.c
 │       ├── error_log.c
-│       └── stm32g4xx_it.c
+│       ├── math_safety.c
+│       ├── stm32g4xx_hal_msp.c
+│       ├── stm32g4xx_it.c
+│       └── system_stm32g4xx.c
 ├── Drivers/
 │   ├── STM32G4xx_HAL_Driver/
 │   └── CMSIS/

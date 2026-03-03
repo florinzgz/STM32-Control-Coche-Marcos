@@ -46,9 +46,9 @@ All previously empty stub functions now fully implemented:
 
 #### MX_TIM1_Init()
 - 4-channel PWM @ 20 kHz
-- Period: 8500-1 (for 170 MHz clock)
-- Channels 1-4 for traction motors (FL, FR, RL, RR)
-- Break/deadtime configuration
+- Period: 4249 (center-aligned: 170 MHz / (2 × 4250) = 20 kHz)
+- Channels 1-4 for front traction motors (FL forward/reverse, FR forward/reverse)
+- BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
 - All channels in PWM mode
 
 #### MX_TIM2_Init()
@@ -59,14 +59,14 @@ All previously empty stub functions now fully implemented:
 - Interrupt enabled
 
 #### MX_TIM8_Init()
-- Single-channel PWM @ 20 kHz
-- Channel 3 for steering motor
-- Break/deadtime configuration
+- 4-channel PWM @ 20 kHz
+- Channels 1-4 for rear traction motors (RL forward/reverse, RR forward/reverse)
+- BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
 - Same period as TIM1 for consistency
 
 #### MX_ADC1_Init()
 - 12-bit resolution
-- Channel 1 (PA0) for pedal position
+- Channel 4 (PA3) for pedal position via voltage divider
 - Software trigger
 - Single conversion mode
 - No DMA (polled mode)

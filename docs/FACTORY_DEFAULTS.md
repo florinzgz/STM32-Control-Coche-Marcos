@@ -134,7 +134,7 @@ factory defaults menu:
 | Steering PID Ki | 0.1 | `motor_control.c` |
 | Steering PID Kd | 0.5 | `motor_control.c` |
 | Max motor current | 25A | `safety_system.c` |
-| Max motor temperature | 85°C warning, 95°C fault | `safety_system.c` |
+| Max motor temperature | 80°C warning, 90°C critical | `safety_system.c` |
 | INA226 shunt resistance | 1mΩ (motor), 0.5mΩ (battery) | `sensor_manager.c` |
 | ABS/TCS slip threshold | 15% | `safety_system.c` |
 
