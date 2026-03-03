@@ -151,7 +151,7 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PA9 | **OCUPADO** | TIM1_CH2 — LPWM FL | AF6 | — |
 | PA10 | **OCUPADO** | TIM1_CH3 — RPWM FR | AF6 | — |
 | PA11 | **OCUPADO** | TIM1_CH4 — LPWM FR | AF6 | — |
-| PA12 | **OCUPADO** | — | — | Puede estar libre en IOC, verificar |
+| PA12 | **LIBRE** | — | AF10: USB_DP, AF6: TIM1_ETR | GPIO disponible (sin asignación en IOC ni código) |
 | PA13 | **RESERVADO** | SWDIO — Debug | — | NO tocar |
 | PA14 | **RESERVADO** | SWCLK — Debug | — | NO tocar |
 | PA15 | **OCUPADO** | TIM2_CH1 — Encoder A | AF1 | — |
@@ -200,7 +200,7 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 
 | Pin | Estado | Función |
 |-----|--------|---------|
-| PD2 | **LIBRE** | GPIO disponible (verificar en LQFP64) |
+| PD2 | **LIBRE** | GPIO disponible (presente en LQFP64 pin 54, sin asignación en IOC ni código) |
 | PH0 | **OCUPADO** | HSE OSC_IN |
 | PH1 | **OCUPADO** | HSE OSC_OUT |
 
@@ -210,8 +210,9 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 |-----|----------------------|-------|
 | **PA4** | USART2_TX o LPUART1_TX | Ideal para UART (GPS, BT, telemetría) |
 | **PA5** | USART2_RX | Par con PA4 para UART completo |
+| **PA12** | GPIO / USB_DP / TIM1_ETR | Pin libre adicional, verificar AF para SPI MOSI |
 | **PB1** | ADC1_IN12 o TIM3_CH4 PWM | Sensor analógico o PWM ventilador |
-| **PB2** | SPI MOSI (si se usa SPI3) | Alternativa SPI |
+| **PB2** | SPI3_MOSI (AF5) | Alternativa MOSI para SPI3 |
 | **PB12** | SPI2_NSS | Chip select SPI |
 | **PB13** | SPI2_SCK | Reloj SPI |
 | **PB14** | SPI2_MISO | Datos SPI entrada |
@@ -424,16 +425,19 @@ Antes de asignar cualquier pin libre:
 
 #### Conexión física
 - **Pines recomendados:** PB13 (SCK), PB14 (MISO), PB12 (NSS/CS)
-- **MOSI:** PB2 (AF5: SPI3_MOSI) — **ATENCIÓN**: verificar AF exacta para SPI2 vs SPI3
-- **Periférico:** SPI2 (si todos los pines soportan SPI2 AF) — consultar tabla AF del datasheet
+- **MOSI:** Requiere verificación de AF en datasheet. En LQFP64, SPI2_MOSI no está disponible en PB2 (PB2 es SPI3_MOSI, AF5). Alternativas:
+  - **Opción A**: Usar SPI3 completo si pines compatibles están libres
+  - **Opción B**: Usar PA12 (libre) si soporta SPI2_MOSI en AF del STM32G474
+  - **Acción**: Consultar tabla AF completa en datasheet DS12288 antes de asignar
+- **Periférico:** Determinar SPI2 o SPI3 según pin MOSI final elegido
 - CS manejado por software (GPIO manual) para máxima flexibilidad
 - Longitud de cable SCK ≤15 cm sin buffer de línea
 
 #### Configuración en firmware
 
 **En `.ioc` (CubeMX):**
-1. Activar SPI2 en modo Full-Duplex Master
-2. Asignar pines SPI2: PB13 (SCK), PB14 (MISO), PB2 (MOSI)
+1. Activar SPI2 o SPI3 en modo Full-Duplex Master (según pin MOSI seleccionado)
+2. Asignar pines SPI: PB13 (SCK), PB14 (MISO), MOSI según opción elegida (ver conexión física)
 3. PB12 como GPIO_Output (CS manual)
 4. Prescaler: empezar con baja velocidad (Fpclk/256) y subir gradualmente
 5. CPOL/CPHA según datasheet del dispositivo esclavo
