@@ -254,13 +254,10 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 |-------|-----------|------------|------|
 | Señal escalada | PA3 | ADC1_IN4 | Divisor resistivo 10 kΩ + 6.8 kΩ |
 
-### Canal de plausibilidad — ADS1115 externo
+### Plausibilidad por software (sin ADS1115)
 
-| Señal | Pin STM32 | Periférico | Nota |
-|-------|-----------|------------|------|
-| SCL | (bus I2C compartido) | I2C | ADS1115 @ 0x48 |
-| SDA | (bus I2C compartido) | I2C | ADDR → GND |
-| Señal sin escalar | — | ADS1115 AIN0 | Lectura directa 0.3–4.8 V |
+> ⚠️ **CAMBIO:** El ADS1115 externo ha sido eliminado. La plausibilidad se realiza por software con el ADC interno:
+> dual-sample consistencia (±30 counts), rango (30–2800 counts), tasa de cambio (35%/50ms), filtro EMA (α=0.3).
 
 ### Parámetros del sensor Hall SS1324LUA-T
 
@@ -280,17 +277,16 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 | Cuentas válidas | 150 – 2413 |
 | Tiempo de muestreo | 47.5 ciclos @ 42.5 MHz (~1.1 µs) |
 
-### Canal de plausibilidad (ADS1115)
+### Plausibilidad por software
 
 | Parámetro | Valor |
 |-----------|-------|
-| Dirección I2C | 0x48 (ADDR a GND) |
-| Entrada | AIN0, señal directa 0.3–4.8 V |
-| PGA | ±6.144 V (cubre rango de 5 V completo) |
-| Resolución | 16 bits |
-| Cuentas válidas | 1600 – 25600 |
-| Modo | Single-shot, 128 SPS |
-| Tiempo de conversión | ~8 ms |
+| Método | Doble lectura ADC consecutiva (~2 µs total) |
+| PEDAL_ADC_FAULT_LO | 30 counts (circuito abierto) |
+| PEDAL_ADC_FAULT_HI | 2800 counts (cortocircuito) |
+| PEDAL_SAMPLE_TOLERANCE | ±30 counts entre muestras |
+| PEDAL_MAX_RATE_PCT | 35%/ciclo (50 ms) |
+| Filtro EMA | α=0.3 (~150 ms settling) |
 
 ### Validación cruzada
 
@@ -304,25 +300,25 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 
 - **Divisor resistivo:** 10 kΩ (serie) + 6.8 kΩ (a GND). Precisión ≥1 % para mantener el ratio calibrado.
 - **Condensador anti-ruido:** 100 nF cerámico en PA3 a GND (filtro RC con 6.8 kΩ → fc ≈ 234 Hz, suficiente para señal de pedal <10 Hz).
-- **ADS1115:** alimentado a 3.3 V; la entrada AIN0 tolera hasta VDD+0.3 V, pero con PGA ±6.144 V la medida es válida hasta 4.8 V sin saturar (la lectura digital escala correctamente aunque VDD=3.3 V, gracias al PGA interno).
+- **Plausibilidad software:** dual-sample ADC consistencia, validación de rango, límite de tasa de cambio, filtro EMA. No requiere hardware adicional.
 
 ### Alimentación
 
 - Sensor Hall SS1324LUA-T: **5 V** regulado.
 - Divisor resistivo: sin alimentación propia (pasivo).
-- ADS1115: **3.3 V** (VDD), entrada analógica recibe señal de 5 V directamente (permitido con PGA ±6.144 V).
+- Sin ADS1115: eliminado. Plausibilidad por software.
 
 ### Motivo técnico
 
 - **Doble canal:** normativa de seguridad funcional (ISO 26262 inspirado); un solo canal de pedal es un punto único de fallo inaceptable.
 - **Divisor 10k+6.8k:** escala la señal de 5 V a <2 V para el ADC de 3.3 V con margen. Valores altos minimizan la corriente drenada del sensor (~0.3 mA).
-- **ADS1115 con PGA ±6.144V:** permite leer la señal completa de 5 V sin divisor, proporcionando una referencia independiente del hardware del canal primario.
+- **Plausibilidad software:** doble lectura ADC consecutiva con 4 capas de validación (consistencia, rango, tasa de cambio, filtro EMA).
 - **47.5 ciclos de muestreo:** compromiso entre velocidad y precisión; la impedancia de fuente (~4 kΩ del divisor) requiere ≥30 ciclos para carga del sample-and-hold.
 
 ### Qué ocurre si falla
 
 - **Canal primario fuera de rango (<150 o >2413 cuentas):** se interpreta como cable roto o cortocircuito → acelerador forzado a 0 %.
-- **ADS1115 sin respuesta I2C:** se pierde la validación cruzada → el sistema reduce potencia máxima al 50 % y emite alerta.
+- **Fallo de plausibilidad software (dual-sample diverge, rango fuera, tasa excesiva):** acelerador forzado a 0 %, modo degradado.
 - **Divergencia >5 % durante >200 ms:** se asume fallo de un canal → acelerador forzado a 0 % hasta que los canales converjan.
 - **Dato obsoleto >500 ms:** el firmware fuerza acelerador a 0 % (pérdida de señal).
 
@@ -331,26 +327,25 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 ```
                Sensor Hall SS1324LUA-T
               ┌────────────────────┐
-   5V ────────┤ VCC            OUT ├───┬──────────────────────┐
-              │                    │   │                      │
-   GND ───────┤ GND                │   │ Señal 0.3–4.8V      │
-              └────────────────────┘   │                      │
-                                       │                      │
-          Canal Primario (STM32)       │   Canal Plausibilidad
-                                       │        (ADS1115)
-                                       │                      │
-                              ┌────────┤                      │
-                              │        │               ┌──────┴──────┐
-                           10kΩ (1%)   │               │  ADS1115    │
-                              │        │               │  (0x48)     │
-  STM32 PA3 (ADC1_IN4) ──────┤        └───────────────┤ AIN0        │
-                              │                        │             │
-                           6.8kΩ (1%)                  │ VDD── 3.3V  │
-                              │                        │ GND── GND   │
-                             GND                       │ SCL── I2C   │
-                                                       │ SDA── I2C   │
-                              │                        │ ADDR── GND  │
-                          100nF (C)                    └─────────────┘
+   5V ────────┤ VCC            OUT ├───┬─────────────────────┐
+              │                    │   │                     │
+   GND ───────┤ GND                │   │ Señal 0.3–4.8V     │
+              └────────────────────┘   │                     │
+                                       │                     │
+          Canal Primario (STM32)       │  Plausibilidad Software
+                                       │  (dual-sample ADC interno)
+                                       │
+                              ┌────────┘
+                              │
+                           10kΩ (1%)
+                              │
+  STM32 PA3 (ADC1_IN4) ──────┤    ← Lectura 1 + Lectura 2 (~2 µs)
+                              │
+                           6.8kΩ (1%)
+                              │
+                             GND
+                              │
+                          100nF (C)
                               │
                              GND
 
@@ -812,5 +807,4 @@ Entrada digital que detecta si la llave de contacto está en posición ON. Gesti
 |-------------|-----------|-----|-----|
 | TCA9548A | 0x70 | I2C1 (PB6/PB7) | STM32 |
 | INA226 (×6) | 0x40 (via mux) | I2C1 (via TCA9548A) | STM32 |
-| ADS1115 | 0x48 | I2C (STM32) | STM32 |
 | MCP23017 | 0x20 | I2C (GPIO8/9) | ESP32-S3 |
