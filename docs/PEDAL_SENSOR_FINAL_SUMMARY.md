@@ -1,9 +1,9 @@
 # ESTADO FINAL DEL SENSOR DE PEDAL — Resumen Visual
 
-> **Fecha:** 2026-02-17
-> **Estado:** ✅ Confirmado y compilado — NO se modifica más
+> **Fecha:** 2026-03-03
+> **Estado:** ✅ Actualizado — ADC interno STM32 con plausibilidad software
 > **Sensor:** SS1324LUA-T (Hall magnético, 5V, salida 0.3V–4.8V)
-> **Arquitectura:** Doble canal redundante (como en automoción real)
+> **Arquitectura:** ADC interno dual-sample + plausibilidad software
 
 ---
 
@@ -16,47 +16,44 @@
                               │                         │
                               │  Pin 1 (VCC) ──► 5V     │
                               │  Pin 2 (GND) ──► GND    │
-                              │  Pin 3 (Señal) ─┬──────►│ Salida: 0.3V – 4.8V
+                              │  Pin 3 (Señal) ────────►│ Salida: 0.3V – 4.8V
                               └─────────────────┼───────┘
                                                 │
-                 ┌──────────────────────────────┤
-                 │                              │
-     ╔═══════════════════════╗       ╔═══════════════════════╗
-     ║   CANAL PRIMARIO      ║       ║  CANAL PLAUSIBILIDAD  ║
-     ║   (rápido, ~1 µs)     ║       ║  (preciso, ~8 ms)     ║
-     ╚═══════════════════════╝       ╚═══════════════════════╝
-                 │                              │
-                 │                              │
-     ┌───────────▼──────────┐        ┌──────────▼──────────┐
-     │  DIVISOR DE TENSIÓN  │        │      ADS1115        │
-     │                      │        │   (I2C, 16-bit)     │
-     │  Señal (5V) ──┐     │        │                     │
-     │               R1     │        │  VDD ──► 5V         │
-     │           10 kΩ (1%) │        │  GND ──► GND        │
-     │               │      │        │  A0  ◄── Señal 5V   │
-     │          NODO ◄──────┼────►   │  ADDR ──► GND       │
-     │               │      │  PA3   │  SCL ──► PB6        │
-     │               R2     │        │  SDA ──► PB7        │
-     │           6.8 kΩ (1%)│        │  (I2C addr: 0x48)   │
-     │               │      │        └─────────────────────┘
-     │              GND     │
-     └──────────────────────┘
-                 │
-                 ▼
-     ┌───────────────────────┐
-     │    STM32G474RE        │
-     │                       │
-     │    PA3 (ADC1_IN4)     │ ◄── Señal dividida: 0.12V – 1.94V
-     │    PB6 (I2C1_SCL)    │ ◄──► Bus I2C (pull-up 4.7kΩ a 3.3V)
-     │    PB7 (I2C1_SDA)    │ ◄──► Bus I2C (pull-up 4.7kΩ a 3.3V)
-     └───────────────────────┘
+                                                │
+                      ┌─────────────────────────┤
+                      │   DIVISOR DE TENSIÓN    │
+                      │                         │
+                      │   Señal (5V) ──┐        │
+                      │                R1       │
+                      │            10 kΩ (1%)   │
+                      │                │        │
+                      │           NODO ◄────────┼───► PA3 (ADC1_IN4)
+                      │                │        │
+                      │                R2       │
+                      │            6.8 kΩ (1%)  │
+                      │                │        │
+                      │               GND       │
+                      └─────────────────────────┘
+                                       │
+                                       ▼
+                      ┌───────────────────────────┐
+                      │    STM32G474RE             │
+                      │                            │
+                      │    PA3 (ADC1_IN4)          │ ◄── Señal dividida: 0.12V – 1.94V
+                      │                            │
+                      │    Plausibilidad software: │
+                      │    · Dual-sample ADC       │
+                      │    · Filtro EMA (α=0.3)    │
+                      │    · Validación de rango   │
+                      │    · Límite tasa de cambio │
+                      └────────────────────────────┘
 ```
 
 ---
 
 ## 2. CABLES — Lista exacta
 
-### Canal primario (divisor → PA3)
+### Canal único (divisor → PA3)
 
 | Nº | De | A | Función |
 |----|-----|---|---------|
@@ -66,18 +63,7 @@
 | 4 | R1 salida / R2 entrada (nodo) | **PA3** (STM32) | Señal dividida ~0.12V–1.94V |
 | 5 | R2 salida | **GND** | Cierre divisor |
 
-### Canal plausibilidad (ADS1115 → I2C)
-
-| Nº | De | A | Función |
-|----|-----|---|---------|
-| 6 | Pedal Pin 3 (Señal) | **ADS1115 A0** | Señal 5V sin dividir |
-| 7 | ADS1115 VDD | **5V** fuente | Alimentación módulo |
-| 8 | ADS1115 GND | **GND** | Masa módulo |
-| 9 | ADS1115 ADDR | **GND** | Fija dirección I2C = 0x48 |
-| 10 | ADS1115 SCL | **PB6** (STM32) | Bus I2C reloj |
-| 11 | ADS1115 SDA | **PB7** (STM32) | Bus I2C datos |
-
-> **Total: 11 cables** (5 para divisor + 6 para ADS1115)
+> **Total: 5 cables** (divisor de tensión solamente — ADS1115 eliminado)
 
 ---
 
@@ -106,32 +92,37 @@ MÁXIMO absoluto en PA3: 5.0 × 0.4048 = 2.024V (muy por debajo de 3.3V)
 ```
 1. Pedal_Update() se ejecuta:
    │
-   ├── Paso 1: Lee canal primario (ADC interno, ~1 µs)
-   │   HAL_ADC_Start → PollForConversion → GetValue → Stop
-   │   pedal_raw_adc = valor 12-bit (150–2413)
-   │   pedal_pct = mapeo lineal a 0–100%
+   ├── Paso 1: Doble lectura ADC interno (~2 µs total)
+   │   Lectura 1: HAL_ADC_Start → PollForConversion → GetValue → Stop
+   │   Lectura 2: HAL_ADC_Start → PollForConversion → GetValue → Stop
+   │   pedal_raw_adc + pedal_raw_adc2 = dos valores 12-bit
    │
-   ├── Paso 2: Lee canal plausibilidad (ADS1115, ~8 ms)
-   │   I2C Transmit config → HAL_Delay(8) → I2C Read resultado
-   │   pedal_raw_ads = valor 16-bit (1600–25600)
-   │   pedal_pct_ads = mapeo lineal a 0–100%
+   ├── Paso 2: Verificación de consistencia dual-sample
+   │   Si |sample1 - sample2| > 30 counts (PEDAL_SAMPLE_TOLERANCE):
+   │   ❌ pedal_channels_contradict = true → fallo transitorio
    │
-   └── Paso 3: Validación cruzada
-       │
-       ├── Si AMBOS canales coinciden (diferencia < 5%):
-       │   ✅ pedal_plausible = true
-       │   El acelerador funciona normal con pedal_pct
-       │
-       ├── Si los canales DIVERGEN > 5% durante > 200 ms:
-       │   ❌ pedal_plausible = false
-       │   Safety_CheckSensors() detecta esto →
-       │     → Fuerza acelerador a 0%
-       │     → Sistema entra en DEGRADED
-       │
-       └── Si ADS1115 I2C FALLA > 500 ms:
-           ⚠️ pedal_plausible = false (modo degradado)
-           El canal primario (ADC) sigue funcionando solo
-           El conductor puede parar con seguridad
+   ├── Paso 3: Media de ambas muestras
+   │   avg_raw = (pedal_raw_adc + pedal_raw_adc2) / 2
+   │
+   ├── Paso 4: Validación de rango
+   │   Si avg_raw < 30 (FAULT_LO) → cable abierto / sensor sin alimentar
+   │   Si avg_raw > 2800 (FAULT_HI) → cortocircuito a alimentación
+   │   ❌ pedal_plausible = false
+   │
+   ├── Paso 5: Conversión a porcentaje (0–100%)
+   │   pedal_pct_raw = mapeo lineal de [150..2413] a [0%..100%]
+   │
+   ├── Paso 6: Filtro EMA (Exponential Moving Average)
+   │   pedal_ema = 0.3 × pedal_pct_raw + 0.7 × pedal_ema_anterior
+   │   Suaviza ruido sin añadir lag significativo (~150 ms settling)
+   │
+   ├── Paso 7: Límite de tasa de cambio
+   │   Si |pedal_pct_raw - valor_anterior| > 35% por ciclo:
+   │   ❌ pedal_plausible = false → salto no físicamente posible
+   │
+   └── Paso 8: Todo OK → actualizar salida
+       ✅ pedal_plausible = true
+       pedal_pct = pedal_ema (valor filtrado para control)
 ```
 
 ### En Safety_CheckSensors() (cada 50 ms también):
@@ -139,8 +130,8 @@ MÁXIMO absoluto en PA3: 5.0 × 0.4048 = 2.024V (muy por debajo de 3.3V)
 ```c
 if (!Pedal_IsPlausible()) {
     Traction_SetDemand(0.0f);        // Fuerza acelerador a 0%
-    Safety_SetError(SAFETY_ERROR_PEDAL);
-    Safety_SetState(SYS_STATE_DEGRADED);
+    Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+    Safety_SetState(SYS_STATE_LIMP_HOME);
 }
 ```
 
@@ -154,11 +145,12 @@ if (!Pedal_IsPlausible()) {
 |-----------|-------|-------------|
 | `PEDAL_ADC_MIN` | 150 | ADC 12-bit para 0.3V (pedal suelto), con divisor |
 | `PEDAL_ADC_MAX` | 2413 | ADC 12-bit para 4.8V (pedal pisado), con divisor |
-| `PEDAL_ADS_MIN` | 1600 | ADS1115 16-bit para 0.3V (pedal suelto) |
-| `PEDAL_ADS_MAX` | 25600 | ADS1115 16-bit para 4.8V (pedal pisado) |
-| `PEDAL_PLAUSIBILITY_PCT` | 5.0% | Tolerancia máxima entre canales |
-| `PEDAL_DIVERGE_TIMEOUT_MS` | 200 ms | Tiempo antes de falta por divergencia |
-| `PEDAL_ADS_STALE_TIMEOUT_MS` | 500 ms | Timeout si I2C ADS1115 no responde |
+| `PEDAL_ADC_FAULT_LO` | 30 | Umbral bajo para detección circuito abierto |
+| `PEDAL_ADC_FAULT_HI` | 2800 | Umbral alto para detección cortocircuito |
+| `PEDAL_SAMPLE_TOLERANCE` | 30 | Tolerancia entre muestras consecutivas (counts) |
+| `PEDAL_MAX_RATE_PCT` | 35.0% | Máximo cambio por ciclo (50 ms) |
+| `PEDAL_EMA_ALPHA` | 0.3 | Coeficiente filtro EMA |
+| `PEDAL_PLAUSIBILITY_PCT` | 5.0% | Tolerancia de plausibilidad |
 
 ---
 
@@ -166,9 +158,10 @@ if (!Pedal_IsPlausible()) {
 
 | Pin STM32 | Función | Periférico | Señal |
 |-----------|---------|------------|-------|
-| **PA3** | ADC1_IN4 | ADC1 | Pedal canal primario (0.12V–1.94V vía divisor) |
-| **PB6** | I2C1_SCL | I2C1 | Bus compartido: ADS1115 + TCA9548A + INA226 |
-| **PB7** | I2C1_SDA | I2C1 | Bus compartido: ADS1115 + TCA9548A + INA226 |
+| **PA3** | ADC1_IN4 | ADC1 | Pedal (0.12V–1.94V vía divisor) |
+
+> **Nota:** PB6/PB7 (I2C1) ya NO se usan para el pedal. El bus I2C
+> queda dedicado exclusivamente a INA226/TCA9548A.
 
 ---
 
@@ -177,14 +170,36 @@ if (!Pedal_IsPlausible()) {
 | Cantidad | Componente | Especificación | Precio aprox. |
 |----------|-----------|----------------|---------------|
 | 1 | SS1324LUA-T | Sensor Hall, alimentar a 5V | (ya lo tienes) |
-| 1 | ADS1115 módulo | 16-bit ADC I2C, con pines | ~2–4 € |
 | 1 | Resistencia 10 kΩ | 1% precisión, ¼W | ~0.05 € |
 | 1 | Resistencia 6.8 kΩ | 1% precisión, ¼W | ~0.05 € |
-| 2 | Pull-up 4.7 kΩ | Para I2C (si no están en el módulo ADS1115) | ~0.10 € |
+
+> **ADS1115 eliminado** — ya no es necesario.
 
 ---
 
-## 8. NOTAS IMPORTANTES
+## 8. JUSTIFICACIÓN TÉCNICA — Por qué se eliminó el ADS1115
+
+### Problemas del ADS1115 para el pedal:
+
+| Aspecto | ADS1115 (I2C) | ADC interno STM32 |
+|---------|---------------|-------------------|
+| **Latencia** | ~10 ms (8 ms conversión + I2C) | ~1 µs × 2 = ~2 µs |
+| **Bloqueo** | HAL_Delay(8) bloquea el bucle | Sin bloqueo |
+| **Frecuencia** | 128 SPS máximo | >100 kSPS (12-bit) |
+| **Bus compartido** | I2C con INA226/TCA9548A → contención | ADC dedicado |
+| **Determinismo** | Variable (I2C arbitración, recovery) | Determinístico |
+| **Componentes** | Módulo externo + 6 cables extra | Ninguno adicional |
+| **Fallos** | I2C puede colgarse → recovery complejo | Solo ADC, fiable |
+
+### Conclusión:
+El ADC interno del STM32G474RE (12-bit, ~1 µs, calibrado) es **5000× más rápido**
+y **completamente determinístico**. La plausibilidad se consigue con técnicas software
+(dual-sample, EMA, rango, tasa de cambio) que son más robustas que depender de un
+bus I2C compartido que puede fallar.
+
+---
+
+## 9. NOTAS IMPORTANTES
 
 ### ⚠️ Lo que NO debes hacer:
 - **NO conectar** la señal de 5V del pedal directamente a PA3 → quemaría el STM32 (máx 3.6V)
@@ -192,32 +207,31 @@ if (!Pedal_IsPlausible()) {
 - **NO usar** resistencias de 5% → pueden dar error de calibración de ±3%
 
 ### ✅ Lo que SÍ está implementado:
-- Lectura primaria instantánea (~1 µs) para control en tiempo real
-- Lectura de verificación precisa (~8 ms) para seguridad
-- Protección contra cable roto, sensor congelado, I2C colgado
+- Doble lectura ADC instantánea (~2 µs) con verificación de consistencia
+- Filtro EMA para rechazo de ruido sin retardo significativo
+- Detección de circuito abierto y cortocircuito por rango
+- Detección de saltos imposibles por tasa de cambio
 - Acelerador se corta a 0% automáticamente ante cualquier falta
-- El bus I2C es compartido con los sensores INA226 sin conflicto (dirección 0x48 ≠ 0x70/0x40)
+- Sin dependencia de bus I2C para control del acelerador
 
 ### 🔧 Ajuste si tu pedal es ligeramente diferente:
 Si al medir con multímetro el rango es distinto de 0.3V–4.8V, ajusta en `sensor_manager.c`:
 ```c
 #define PEDAL_ADC_MIN   xxx    // medida real con pedal suelto
 #define PEDAL_ADC_MAX   xxx    // medida real con pedal pisado a fondo
-#define PEDAL_ADS_MIN   xxx    // ADS1115 con pedal suelto
-#define PEDAL_ADS_MAX   xxx    // ADS1115 con pedal pisado a fondo
 ```
 
 ---
 
-## 9. FICHEROS DEL FIRMWARE QUE IMPLEMENTAN ESTO
+## 10. FICHEROS DEL FIRMWARE QUE IMPLEMENTAN ESTO
 
 | Fichero | Qué hace |
 |---------|----------|
-| `Core/Inc/main.h` | Define PIN_PEDAL (PA3), I2C_ADDR_ADS1115 (0x48), extern hadc1 |
+| `Core/Inc/main.h` | Define PIN_PEDAL (PA3), extern hadc1 |
 | `Core/Src/main.c` | Inicializa ADC1: 12-bit, PA3 canal 4, calibración single-ended |
 | `Core/Src/stm32g4xx_hal_msp.c` | HAL_ADC_MspInit: habilita reloj ADC12, configura PA3 analógico |
 | `Core/Inc/stm32g4xx_hal_conf.h` | HAL_ADC_MODULE_ENABLED (activa driver HAL ADC) |
-| `Core/Src/sensor_manager.c` | Pedal_Update(): doble lectura + validación cruzada |
-| `Core/Inc/sensor_manager.h` | API: Pedal_GetPercent(), Pedal_IsPlausible(), Pedal_GetADSPercent() |
+| `Core/Src/sensor_manager.c` | Pedal_Update(): dual-sample ADC + plausibilidad software |
+| `Core/Inc/sensor_manager.h` | API: Pedal_GetPercent(), Pedal_IsPlausible(), Pedal_GetSecondaryPercent() |
 | `Core/Src/safety_system.c` | Safety_CheckSensors(): fuerza throttle=0% si !Pedal_IsPlausible() |
 | `docs/CONEXIONES_COMPLETAS.md` | Esquema de cableado completo, sección 6 |

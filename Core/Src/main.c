@@ -6,7 +6,7 @@
   *  Peripherals initialised:
   *    ADC1    – Pedal accelerator primary channel (PA3 via voltage divider)
   *    FDCAN1  – CAN bus @ 500 kbps (ESP32-S3 link)
-  *    I2C1    – INA226 / TCA9548A sensors + ADS1115 pedal plausibility
+  *    I2C1    – INA226 / TCA9548A sensors
   *    TIM1    – PWM for 4 traction motors (20 kHz)
   *    TIM2    – Quadrature encoder (steering)
   *    TIM8    – PWM for steering motor (20 kHz)
@@ -316,16 +316,16 @@ int main(void)
                  * The traction pipeline applies additional speed cap
                  * and ramp limiting via Safety_GetTractionCapFactor().
                  *
-                 * Safety invariant: contradictory pedal channels
-                 * (both active but disagreeing) → zero demand.
-                 * ADS1115 unavailable (not contradictory) → primary
+                 * Safety invariant: contradictory pedal samples
+                 * (dual ADC reads disagreeing) → zero demand.
+                 * Pedal implausible (not contradictory) → primary
                  * ADC still used with LIMP_HOME torque clamp.          */
                 GearPosition_t gear = Traction_GetGear();
                 if (gear == GEAR_PARK || gear == GEAR_NEUTRAL ||
                     Pedal_IsContradictory()) {
                     Traction_SetDemand(0.0f);
                 } else if (!Pedal_IsPlausible() && !limp_home_pedal_armed) {
-                    /* Degraded pedal (ADS1115 lost): suppress torque until
+                    /* Degraded pedal (plausibility fault): suppress torque until
                      * driver confirms intent by releasing pedal to rest.
                      * Prevents ADC offset/noise from causing creep torque
                      * when cross-validation is unavailable.               */

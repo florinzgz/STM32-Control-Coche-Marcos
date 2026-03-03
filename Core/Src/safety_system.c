@@ -1130,10 +1130,10 @@ void Safety_CheckSensors(void)
      * plausibility failure exits ACTIVE immediately.
      *
      * Two distinct failure modes:
-     *   1. Contradictory: both channels read OK but disagree.
-     *      → No torque allowed (stuck/shorted pedal risk).
+     *   1. Contradictory: dual ADC samples disagree.
+     *      → No torque allowed (ADC fault / noise risk).
      *      → Demand forced to zero in ALL states.
-     *   2. Unavailable: ADS1115 I2C lost, primary ADC still functional.
+     *   2. Implausible: range or rate-of-change check failed.
      *      → Cross-validation impossible, but ADC may be valid.
      *      → LIMP_HOME allows limited throttle via primary ADC
      *        with 20 % torque cap and 5 km/h speed limit.
@@ -1141,8 +1141,8 @@ void Safety_CheckSensors(void)
      * In both cases: ACTIVE → LIMP_HOME (fail-operational).
      * Recovery to ACTIVE requires full pedal plausibility restored.    */
     if (!Pedal_IsPlausible()) {
-        /* Safety invariant: contradictory channels → zero torque always.
-         * When not contradictory (ADS1115 lost) and already in LIMP_HOME,
+        /* Safety invariant: contradictory samples → zero torque always.
+         * When not contradictory (implausible) and already in LIMP_HOME,
          * main.c provides limited throttle from primary ADC + clamp.     */
         if (Pedal_IsContradictory()) {
             Traction_SetDemand(0.0f);
