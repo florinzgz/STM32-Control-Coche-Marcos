@@ -35,7 +35,7 @@ float Pedal_GetValue(void);       /* ADC raw value                         */
 float Pedal_GetPercent(void);     /* EMA-filtered 0–100% (used for control)*/
 bool  Pedal_IsPlausible(void);    /* Software plausibility checks pass     */
 bool  Pedal_IsContradictory(void); /* Dual samples active but disagree     */
-float Pedal_GetSecondaryPercent(void); /* Second ADC sample 0–100%         */
+float Pedal_GetRawPercent(void);    /* Unfiltered instantaneous 0–100%   */
 
 /* ---- DS18B20 Temperature (OneWire) ---- */
 void Temperature_StartConversion(void);

@@ -232,6 +232,6 @@ Si al medir con multímetro el rango es distinto de 0.3V–4.8V, ajusta en `sens
 | `Core/Src/stm32g4xx_hal_msp.c` | HAL_ADC_MspInit: habilita reloj ADC12, configura PA3 analógico |
 | `Core/Inc/stm32g4xx_hal_conf.h` | HAL_ADC_MODULE_ENABLED (activa driver HAL ADC) |
 | `Core/Src/sensor_manager.c` | Pedal_Update(): dual-sample ADC + plausibilidad software |
-| `Core/Inc/sensor_manager.h` | API: Pedal_GetPercent(), Pedal_IsPlausible(), Pedal_GetSecondaryPercent() |
+| `Core/Inc/sensor_manager.h` | API: Pedal_GetPercent(), Pedal_IsPlausible(), Pedal_GetRawPercent() |
 | `Core/Src/safety_system.c` | Safety_CheckSensors(): fuerza throttle=0% si !Pedal_IsPlausible() |
 | `docs/CONEXIONES_COMPLETAS.md` | Esquema de cableado completo, sección 6 |

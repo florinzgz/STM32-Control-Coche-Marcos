@@ -260,8 +260,7 @@ void Pedal_Update(void)
 
     if (rate > PEDAL_MAX_RATE_PCT) {
         pedal_plausible = false;
-        /* Don't update output — keep last safe value */
-        pedal_pct_prev = pedal_pct_raw;
+        /* Don't update output or history — keep last safe baseline */
         return;
     }
 
@@ -275,7 +274,7 @@ float Pedal_GetValue(void)          { return (float)pedal_raw_adc; }
 float Pedal_GetPercent(void)        { return pedal_pct; }
 bool  Pedal_IsPlausible(void)       { return pedal_plausible; }
 bool  Pedal_IsContradictory(void)   { return pedal_channels_contradict; }
-float Pedal_GetSecondaryPercent(void) { return pedal_pct_raw; }
+float Pedal_GetRawPercent(void)    { return pedal_pct_raw; }
 
 /* =========================================================================
  *  INA226 Current Sensors via TCA9548A I2C multiplexer
