@@ -66,7 +66,7 @@ States (from `safety_system.h`):
 | Battery sensor fail | 0.0 V reading from INA226 | SAFE | No auto-recovery |
 | CAN timeout | No heartbeat from ESP32 for > 250 ms | LIMP_HOME | Auto when heartbeat resumes |
 | Sensor fault | Temperature/current/speed out of range | DEGRADED (L1 or L3) | Auto when sensors return to range |
-| Pedal implausible | ADC vs ADS1115 diverge | Throttle → 0 + DEGRADED | Auto when channels agree |
+| Pedal implausible | Dual-sample ADC diverge o rango/tasa inválido | Throttle → 0 + DEGRADED | Auto when channels agree |
 | Encoder fault | Range exceeded / jump / frozen | DEGRADED (L1), steering neutralised | No auto-recovery on encoder |
 | Steering centering fail | Timeout (10 s) or range (6000 counts) | DEGRADED (L1) | No auto-recovery |
 | Emergency stop | External call | ERROR | Permanent; IWDG reset needed |
@@ -337,7 +337,7 @@ Validation passes when ALL 6 checks pass simultaneously. If validation fails, th
 | INA226 topology | Direct I2C from ESP32 | TCA9548A 8-ch mux, 6 INA226 channels (4 motors + battery + spare) | IMPROVED |
 | DS18B20 topology | OneWire from ESP32 | OneWire bit-bang from STM32 PB0, ROM search, CRC-8 | IMPROVED |
 | Wheel speed sensors | GPIO interrupt on ESP32 | EXTI on STM32 with 1 ms software debounce | IMPROVED |
-| Pedal dual-channel | Single ADC | ADC1 primary + ADS1115 I2C plausibility, cross-validated | IMPROVED |
+| Pedal dual-channel | Single ADC | ADC1 dual-sample + software plausibility | IMPROVED |
 | Pedal failure action | Not documented | Force throttle to 0 + DEGRADED | IMPROVED |
 | DS18B20 hot-plug | Not documented | ROM search only at init (no hot-plug support) | MISSING (non-critical) |
 | Current sensor plausibility | Not documented | < -1 A or > 50 A → fault + DEGRADED | IMPROVED |
@@ -547,18 +547,18 @@ if (system_state == SYS_STATE_STANDBY &&
 
 ---
 
-### R9 — Pedal Dual-Channel Plausibility Requires ADS1115
+### R9 — Pedal Plausibility (Software-Based)
 
-**Risk category:** ESP32 dependency / sensor dependency  
-**Severity:** LOW-MEDIUM
+**Risk category:** Sensor validation  
+**Severity:** LOW
 
 **Code facts:**
-- `Pedal_IsPlausible()` cross-validates ADC1 primary vs ADS1115 I2C secondary channel.
-- If `i2c_init_ok = false` (I2C peripheral failed at boot), ADS1115 is unreachable.
-- The current implementation falls back to `Pedal_IsPlausible()` returning... (requires reading sensor_manager.c pedal section).
-- If ADS1115 is unavailable, the plausibility check behavior depends on the implementation.
+- `Pedal_IsPlausible()` validates ADC1 dual-sample consistency (±30 counts), range (30–2800), and rate-of-change (35%/50ms).
+- No external I2C ADC dependency — plausibility is entirely software-based using the internal STM32 ADC on PA3.
+- EMA filter (α=0.3) smooths readings; consecutive samples must agree within tolerance.
+- If plausibility fails, system enters LIMP_HOME with 20% torque cap.
 
-**Mitigation needed:** Verify that `Pedal_IsPlausible()` returns `true` when ADS1115 is not available (degraded-graceful behavior) rather than blocking motion entirely.
+**Mitigation needed:** Verify that dual-sample tolerance and rate-of-change thresholds are appropriate for the physical pedal assembly under vibration and temperature variation.
 
 ---
 
@@ -627,8 +627,8 @@ if (system_state == SYS_STATE_STANDBY &&
 - `Core/Src/main.c` — LIMP_HOME: enforce zero demand for contradictory pedals.  
 
 **What behavior changes:** Pedal plausibility failure no longer immobilizes the vehicle.  Two failure modes are distinguished:  
-1. **Contradictory** (both ADC and ADS1115 read OK but diverge > 5 % for > 200 ms): demand forced to zero in ALL states — no uncontrolled acceleration possible.  
-2. **Unavailable** (ADS1115 I2C lost, primary ADC still functional): LIMP_HOME allows limited throttle from primary ADC with 20 % torque cap, 5 km/h speed limit, and 10 %/s ramp rate.  
+1. **Contradictory** (dual-sample ADC readings diverge > 30 counts): demand forced to zero in ALL states — no uncontrolled acceleration possible.  
+2. **Plausibility failure** (range/rate-of-change check fails): LIMP_HOME allows limited throttle from ADC with 20 % torque cap, 5 km/h speed limit, and 10 %/s ramp rate.  
 
 In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires full pedal plausibility restored (`Pedal_IsPlausible() == true`).  
 
@@ -636,11 +636,11 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 
 | Scenario | State Before | BEFORE (old behavior) | AFTER (new behavior) |
 |----------|-------------|----------------------|---------------------|
-| ADS1115 I2C fails, stale > 500 ms | ACTIVE | DEGRADED + demand=0 every 10 ms (immobilized) | LIMP_HOME — primary ADC at 20 % torque cap |
-| ADS1115 I2C fails, stale > 500 ms | STANDBY | DEGRADED + demand=0 (cannot reach ACTIVE) | LIMP_HOME if boot validation passed |
-| ADC vs ADS1115 diverge > 5 % for > 200 ms | ACTIVE | DEGRADED + demand=0 every 10 ms | LIMP_HOME + demand=0 (contradictory → zero torque) |
-| ADC vs ADS1115 diverge > 5 % for > 200 ms | LIMP_HOME | demand=0 every 10 ms (immobilized) | demand=0 (contradictory → zero torque, same effect but explicit) |
-| ADS1115 unavailable | LIMP_HOME | demand=0 every 10 ms (immobilized) | Primary ADC accepted with 20 % torque clamp |
+| Plausibility fails (range/rate) | ACTIVE | DEGRADED + demand=0 every 10 ms (immobilized) | LIMP_HOME — ADC at 20 % torque cap |
+| Plausibility fails (range/rate) | STANDBY | DEGRADED + demand=0 (cannot reach ACTIVE) | LIMP_HOME if boot validation passed |
+| Dual-sample diverge > 30 counts | ACTIVE | DEGRADED + demand=0 every 10 ms | LIMP_HOME + demand=0 (contradictory → zero torque) |
+| Dual-sample diverge > 30 counts | LIMP_HOME | demand=0 every 10 ms (immobilized) | demand=0 (contradictory → zero torque, same effect but explicit) |
+| Plausibility unavailable | LIMP_HOME | demand=0 every 10 ms (immobilized) | ADC accepted with 20 % torque clamp |
 | Pedal plausibility restored | LIMP_HOME | Stayed in DEGRADED, demand=0 cleared | SENSOR_FAULT cleared → ACTIVE via CAN timeout recovery |
 | Pedal plausibility restored | DEGRADED | SENSOR_FAULT cleared → ACTIVE | Unchanged (non-pedal sensor faults still → DEGRADED) |
 | Boot validation with SENSOR_FAULT | STANDBY | Boot validation fails (blocks LIMP_HOME) | Boot validation passes (SENSOR_FAULT allowed) |
@@ -652,7 +652,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
    - `main.c` LIMP_HOME (50 ms): checks `Pedal_IsContradictory()` → demand=0.  
    Result: demand is forced to zero at both 10 ms and 50 ms rates.  No torque possible.  
 
-2. **ADS1115 unavailable (I2C failure):** Primary ADC still physically connected.  
+2. **Plausibility failure (range/rate-of-change):** ADC still physically connected.  
    - In ACTIVE: `Safety_CheckSensors()` forces demand=0 AND transitions to LIMP_HOME.  One-shot zero before LIMP_HOME takes effect.  
    - In LIMP_HOME: `main.c` reads primary ADC, applies `× 0.20` hard clamp + `max(20%)` ceiling.  The traction pipeline then applies `Safety_GetTractionCapFactor()` = 0.20 (another 20 % clamp) and the 5 km/h speed cap.  Even if ADC reads 100 %, effective demand = 20 % × 20 % = 4 % of full torque — walking speed only.  
 
@@ -664,32 +664,29 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 
 #### Physical Test Procedure
 
-1. **ADS1115 unavailable test:**  
-   a. Short SDA to GND via 1 kΩ resistor after init (simulates I2C bus failure).  
-   b. Wait > 500 ms (stale timeout).  
-   c. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME), byte 2 has sensor fault flag.  
-   d. Press pedal.  Verify vehicle moves at walking speed (≤ 5 km/h).  
-   e. Release pedal.  Verify vehicle stops (demand returns to 0).  
-   f. Remove SDA short.  Wait > 500 ms.  Verify `Pedal_IsPlausible()` returns true.  
-   g. If CAN heartbeat present: verify transition to ACTIVE (byte 1 = 0x02).  
+1. **Plausibility failure test (out-of-range):**  
+   a. Apply voltage outside valid range (< 30 or > 2800 counts equivalent) to PA3.  
+   b. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME), byte 2 has sensor fault flag.  
+   c. Press pedal.  Verify vehicle does NOT move (demand = 0, signal rejected).  
+   d. Restore normal pedal signal.  Verify `Pedal_IsPlausible()` returns true.  
+   e. If CAN heartbeat present: verify transition to ACTIVE (byte 1 = 0x02).  
 
-2. **Contradictory channels test:**  
-   a. Apply fixed 2.5 V to ADS1115 A0 pin (simulates stuck at 50 %).  
-   b. Move pedal to 0 % (released).  Wait > 200 ms (divergence timeout).  
-   c. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME).  
-   d. Press pedal.  Verify vehicle does NOT move (demand = 0).  
-   e. Remove fixed voltage, reconnect pedal to ADS1115.  
-   f. Verify channels agree → transition to ACTIVE.  
+2. **Dual-sample consistency test:**  
+   a. Inject electrical noise on PA3 (simulates inconsistent consecutive samples > 30 counts).  
+   b. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME).  
+   c. Press pedal.  Verify vehicle does NOT move (demand = 0).  
+   d. Remove noise source, restore clean pedal signal.  
+   e. Verify samples agree → transition to ACTIVE.  
 
 3. **STANDBY pedal fault test:**  
-   a. Disconnect ADS1115 I2C before boot.  
+   a. Force out-of-range pedal signal before boot.  
    b. Power on.  Wait for boot validation to pass (> 500 ms).  
    c. Do NOT send ESP32 CAN heartbeat (force CAN timeout).  
    d. Verify system reaches LIMP_HOME (not stuck in STANDBY).  
-   e. Verify pedal controls traction at walking speed.  
+   e. Verify pedal controls traction at walking speed once signal restored.  
 
 4. **Recovery test:**  
-   a. From LIMP_HOME (pedal fault), reconnect ADS1115.  
+   a. From LIMP_HOME (pedal fault), restore valid pedal signal.  
    b. Verify plausibility restored within 500 ms.  
    c. Send ESP32 CAN heartbeat.  
    d. Verify transition to ACTIVE within RECOVERY_HOLD_MS (500 ms debounce).  
@@ -980,7 +977,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 | R6 — No obstacle sensor | MEDIUM | LIMP_HOME speed cap indirect safety | Step 5 |
 | R7 — ESP32 needed for ACTIVE | LOW | LIMP_HOME by design | Accepted architectural decision |
 | R8 — consecutive_errors not persisted | LOW | MATCH with original | Accepted |
-| R9 — ADS1115 fallback unknown | LOW-MEDIUM | Requires code verification | Step 4 |
+| R9 — Pedal software plausibility | LOW | Requires code verification | Step 4 |
 
 **Zero-regression requirement:** Steps 1–4 address existing bugs/risks with no functional regression. Steps 5–7 add new capabilities. Each step is independently reversible via single `git revert`.
 

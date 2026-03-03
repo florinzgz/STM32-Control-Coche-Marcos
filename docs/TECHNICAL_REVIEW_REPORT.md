@@ -265,7 +265,7 @@ Dirty flag defers writes: config changes are accumulated in RAM, then flushed to
 Hidden diagnostic screen activated by tapping a "8989" secret code (4 alternating left-right taps within 2 seconds) on the drive screen. Provides 5 submenus:
 1. **Fault Viewer:** Live 32-bit fault/enabled/disabled bitmasks from STM32 service mode
 2. **Module Enable/Disable:** Send SERVICE_CMD (0x110) to enable/disable non-critical STM32 modules
-3. **Pedal Calibration:** View live ADC + ADS1115 values for range adjustment
+3. **Pedal Calibration:** View live ADC values for range adjustment
 4. **Encoder Calibration:** View raw encoder count and delta for steering diagnostics
 5. **Factory Restore:** Send factory reset command (0xFF) to STM32, clearing all module disable states
 
@@ -341,7 +341,7 @@ The firmware implements all safety-critical paths and most user-facing features.
 **Strengths:**
 - Triple-layer protection: STM32 safety state machine → actuator validation → hardware watchdog (IWDG 500ms)
 - Overcurrent (25A) and overtemperature (80°C warn, 90°C critical, 130°C/motor emergency cutoff) with hysteresis
-- Dual-channel pedal (internal ADC + ADS1115 I2C cross-validation, ±5%, 200ms fault timeout)
+- Pedal plausibility (internal ADC dual-sample + software validation: consistency, EMA, range, rate-of-change)
 - Obstacle safety is autonomous on STM32 — CAN data is advisory, not authoritative
 - Power-on movement prevention (startup inhibit latch): pedal must be released for 400ms before any torque is allowed after any MCU reset
 - LIMP_HOME on CAN loss preserves mobility at walking speed (20% torque, 5 km/h cap)
@@ -446,7 +446,7 @@ The firmware implements all safety-critical paths and most user-facing features.
 | **LOCK-01** | I2C bus latch-up (SDA stuck low by a slave). I2C bus recovery (16 SCL toggles) attempted twice. If both fail → `SAFETY_ERROR_I2C_FAILURE` → SAFE state. | All motors disabled. Vehicle immobilized until power cycle. Could strand a child mid-crossing. |
 | **LOCK-02** | Battery voltage oscillation around 18V critical threshold with 0.5V hysteresis. Rapid oscillation would cause: SAFE → ... → ACTIVE → SAFE cycling. | The 500ms recovery debounce prevents rapid cycling, but if voltage genuinely oscillates, the child experiences intermittent power loss. |
 | **LOCK-03** | `startup_inhibit` latch requires pedal below 3% for 400ms continuously. A faulty pedal stuck at 4% would prevent clearing the inhibit forever. | Vehicle never produces torque. LIMP_HOME pedal arming has a separate latch (3% for 300ms) but same vulnerability. Power cycle resets both latches. |
-| **MOTION-01** | ADS1115 fails while pedal ADC reads 50%: primary channel is trusted (ADS1115 loss is "degraded" not "contradictory"). System enters LIMP_HOME with 20% torque cap but accepts the phantom 50% → delivers 10% demand. | Vehicle creeps at ~1 km/h with no pedal input. LIMP_HOME arming latch requires pedal release first, which blocks this scenario unless the latch was already armed. |
+| **MOTION-01** | Pedal plausibility fails while ADC reads 50%: range/rate check passes but dual-sample consistency fails. System enters LIMP_HOME with 20% torque cap. Previous valid value is retained. LIMP_HOME arming latch requires pedal release first, which blocks this scenario unless the latch was already armed. | Vehicle creeps at ~1 km/h with no pedal input. LIMP_HOME arming latch requires pedal release first, which blocks this scenario unless the latch was already armed. |
 
 ---
 
@@ -518,7 +518,7 @@ However, the absence of automated testing, formal safety analysis, and hardware 
 
 1. **Complete hardware-in-the-loop testing** of all safety thresholds (ABS slip, obstacle distances, current limits, temperature limits, timing budgets) on the actual vehicle with actual loads.
 2. **Verify steering centering reliability** on the physical rack — confirm the inductive sensor triggers consistently and the 10% PWM is sufficient to overcome static friction.
-3. **Validate pedal cross-check** with the actual pedal assembly — confirm the ±5% tolerance is appropriate for the voltage divider and ADS1115 calibration.
+3. **Validate pedal plausibility** with the actual pedal assembly — confirm ADC dual-sample tolerance (±30 counts), range thresholds (30–2800), and rate-of-change limit (35%/50ms) are appropriate.
 4. **Test CAN bus reliability** under electromagnetic interference from motor PWM — confirm no bus-off events during normal driving.
 5. **Confirm LIMP_HOME drivability** — verify a child can safely operate the vehicle at 20% torque / 5 km/h without ESP32 assistance.
 6. **Add ESP32 hardware watchdog** to prevent undetected ESP32 hangs.

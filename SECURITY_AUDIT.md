@@ -23,7 +23,7 @@
 | ABS/TCS per-wheel | ✅ | safety_system.c:668-866 con pulse modulation independiente |
 | Secuenciación de relés | ✅ | safety_system.c:455-510 non-blocking |
 | Watchdog independiente | ✅ | IWDG a 500 ms — main.c:406 `HAL_IWDG_Refresh` |
-| Pedal dual-channel | ✅ | sensor_manager.c:108-287 ADC1 + ADS1115 |
+| Pedal dual-channel | ✅ | sensor_manager.c:108-277 ADC1 dual-sample + plausibilidad software |
 | Detección obstáculo | ✅ | safety_system.c:120-232 máquina de estados local |
 
 **La ESP32 es prescindible.** Ante su pérdida, la STM32 mantiene movilidad mínima en LIMP_HOME.
@@ -39,7 +39,7 @@
 | Timeout | 250 ms → `SAFETY_ERROR_CAN_TIMEOUT` | safety_system.c:983 |
 | Estado destino | LIMP_HOME (NO SAFE) | safety_system.c:994 |
 | Torque disponible | 20% máximo, 5 km/h cap | safety_system.h:194-196 |
-| Pedal | Lectura local ADC + ADS1115, validación cruzada | main.c:309-339 |
+| Pedal | Lectura local ADC dual-sample, plausibilidad software | main.c:309-339 |
 | Recuperación | CAN restaurado + steering calibrado → ACTIVE | safety_system.c:1024-1028 |
 
 **Resultado**: ✅ Seguro. Movilidad mínima preservada.
@@ -70,8 +70,8 @@
 
 | Aspecto | Comportamiento | Código |
 |---------|---------------|--------|
-| ADC primario + ADS1115 contradictorios | Demanda forzada a cero | safety_system.c:1134-1135 |
-| ADS1115 perdido (I2C fail) | LIMP_HOME, ADC primario con 20% torque | main.c:324-338 |
+| Muestras ADC consecutivas contradictorias | Demanda forzada a cero | safety_system.c:1134-1135 |
+| Plausibilidad fallida (rango/tasa) | LIMP_HOME, ADC con 20% torque | main.c:324-338 |
 | ADC primario fuera de rango | Clamped por calibración [150,2413] counts | sensor_manager.c:179-186 |
 | Ambos perdidos | Sin señal pedal → demanda 0 | main.c:299-300 |
 | Arming latch LIMP_HOME | Pedal debe estar <3% por 300ms antes de aceptar torque | main.c:272-281 |
@@ -176,9 +176,9 @@ Justificación:
 
 | Aspecto | Estado | Detalle |
 |---------|:------:|---------|
-| Redundancia pedal Hall | ✅ | ADC1 (PA3) + ADS1115 (I2C), cross-validation ±5% |
-| Cross-validation ADC+ADS1115 | ✅ | Divergencia >5% por >200ms → fault |
-| Canal ADS1115 falla | ✅ | Single-channel mode, LIMP_HOME, 20% torque |
+| Redundancia pedal Hall | ✅ | ADC1 (PA3) dual-sample, plausibilidad software (±30 counts, rango, tasa) |
+| Consistencia dual-sample | ✅ | Divergencia >30 counts → fault |
+| Plausibilidad falla | ✅ | LIMP_HOME, 20% torque |
 | Canales contradictorios | ✅ | Demanda forzada a 0 en TODOS los estados |
 | Encoder falla | ✅ | Steering neutralizado, DEGRADED, traction operativa |
 | TOFSense deja de transmitir | ✅ | 500ms timeout, mantiene última escala o scale=1.0 |
@@ -196,7 +196,7 @@ Justificación:
 **Condiciones que activan LIMP_HOME:**
 1. CAN timeout >250ms (safety_system.c:983-995)
 2. CAN bus-off detectado (can_handler.c:865-874)
-3. Pedal fault (ADS1115 perdido, no contradictorio) (safety_system.c:1146-1152)
+3. Pedal fault (plausibilidad software falla, no contradictorio) (safety_system.c:1146-1152)
 
 **Estado intermedio inseguro: NO existe.**
 - Transiciones protegidas por `Safety_SetState()` switch (safety_system.c:239-318)

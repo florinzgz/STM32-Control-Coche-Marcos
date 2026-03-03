@@ -322,7 +322,7 @@ No hay tests para ESP32. No hay CI/CD configurado (no `.github/workflows/`).
 | OneWire DS18B20 | PB0 | GPIO bitbang |
 | Pedal ADC | PA3 | ADC1 CH4 |
 | CAN TX/RX | PB8/PB9 | FDCAN1 |
-| I2C SDA/SCL | PB6/PB7 | I2C1 (INA226, TCA9548A, ADS1115) |
+| I2C SDA/SCL | PB6/PB7 | I2C1 (INA226, TCA9548A) |
 
 ### ESP32-S3
 | Función | Pin(es) |
