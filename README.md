@@ -101,11 +101,19 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 ## Software Architecture
 
 ### Core Modules
-1. **motor_control.c/h**: PWM control, PID steering, Ackermann geometry
-2. **can_handler.c/h**: FDCAN communication with ESP32
-3. **sensor_manager.c/h**: All sensor data acquisition
-4. **safety_system.c/h**: ABS, TCS, protection systems
-5. **main.c**: Main control loop and initialization
+1. **motor_control.c/h**: PWM control (20 kHz), PID steering, Ackermann geometry, dead-zone compensation, dynamic braking
+2. **can_handler.c/h**: FDCAN communication with ESP32, command validation, bus-off recovery
+3. **sensor_manager.c/h**: All sensor data acquisition (wheel speed, temperature, current, pedal, encoder)
+4. **safety_system.c/h**: ABS, TCS, overcurrent/overtemperature protection, obstacle avoidance, battery monitoring
+5. **service_mode.c/h**: Module enable/disable system, fault tracking, factory defaults reset
+6. **steering_cal_store.c/h**: Persistent steering calibration in Flash (page 126, CRC32)
+7. **steering_centering.c/h**: Auto-center routine with inductive center sensor
+8. **ackermann.c/h**: Ackermann steering geometry for differential wheel angles
+9. **eps_params.c/h**: Electric power steering torque assist parameters
+10. **boot_validation.c/h**: Pre-ACTIVE gate (sensor plausibility, battery voltage, encoder health checks)
+11. **encoder_reader.c/h**: Quadrature encoder decoding (E6B2-CWZ6C, 4800 counts/rev)
+12. **error_log.c/h**: Persistent error log in Flash (page 125, ring buffer, CRC32, 250 entries max)
+13. **main.c**: Main control loop (multi-tier timing: 10ms/50ms/100ms/1000ms)
 
 ### CAN Message Protocol (500 kbps)
 
@@ -133,28 +141,43 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 | 0x301 | STM32→ESP32 | Service Faults | Fault bitmask | [b0, b1, b2, b3] |
 | 0x302 | STM32→ESP32 | Service Enabled | Enabled bitmask | [b0, b1, b2, b3] |
 | 0x303 | STM32→ESP32 | Service Disabled | Disabled bitmask | [b0, b1, b2, b3] |
-| 0x110 | ESP32→STM32 | Service Cmd | Module control | [action, moduleId] |
+| 0x304 | STM32→ESP32 | Error Log Entry | Error log entry data | [timestamp_lo, timestamp_hi, error_code, subsystem, state, flags, uptime_lo, uptime_hi] |
+| 0x305 | STM32→ESP32 | Error Log Header | Error log count + total | [count_lo, count_hi, 0, 0, 0, 0, 0, 0] |
+| 0x110 | ESP32→STM32 | Service Cmd | Module control | [action, moduleId] — action: 0x00=disable, 0x01=enable, 0xF0-F4=reset category, 0xFE=clear log, 0xFF=factory restore |
 
 ### Control Features
 
 #### Traction Control
 - **Modes**: 4x2 (rear only) or 4x4 (all wheels)
-- **Throttle**: 0-100% control
+- **Throttle**: 0-100% with EMA filter (α=0.15) and ramp rate limiter (50%/s up, 100%/s down)
+- **Dead-zone Compensation**: 8% minimum PWM when active
+- **Dynamic Braking**: Rate-proportional (|throttle_rate| × 0.5, max 60%)
+- **Coast Mode**: Above 2 km/h, coast for 3s before hold-braking
 - **Emergency Stop**: Immediate power cut
 
 #### Steering Control
 - **Type**: Closed-loop PID control
-- **Feedback**: Incremental encoder
+- **Feedback**: Incremental encoder (E6B2-CWZ6C, 1200 PPR, 4800 counts/rev, 0.075°/count)
 - **Ackermann Geometry**: Differential angle calculation for inner/outer wheels
-- **Calibration**: Auto-center on startup
+- **Calibration**: Auto-center on startup with inductive proximity sensor (LJ12A3)
+- **Persistent Calibration**: Stored in Flash page 126 with CRC32 validation
+- **Center Tolerance**: ±100 counts (≈ ±7.5°)
 
 #### Safety Systems
-- **ABS (Anti-lock Braking)**: Wheel slip detection and mitigation
-- **TCS (Traction Control)**: Wheel spin prevention
-- **Overcurrent Protection**: Per-motor current monitoring
-- **Overtemperature Protection**: Thermal shutdown
-- **CAN Timeout**: Emergency stop if ESP32 disconnects
-- **Watchdog**: System hang detection
+- **ABS (Anti-lock Braking)**: Wheel slip detection and mitigation (15% threshold)
+- **TCS (Traction Control)**: Wheel spin prevention (15% threshold)
+- **Overcurrent Protection**: Per-motor monitoring (25A per motor, 50A per sensor) → SAFE
+- **Overtemperature Protection**: Motor 80°C warning → DEGRADED, 90°C critical → SAFE
+- **CAN Timeout**: 250ms without heartbeat → LIMP_HOME (20% max torque)
+- **Battery Undervoltage**: Warning @ 20V → DEGRADED, Critical @ 18V → SAFE
+- **Obstacle Avoidance**: 5-zone speed-dependent stopping (200mm emergency to 4000mm clear)
+- **Watchdog**: Independent watchdog (~500ms), BREAK2 hardware PWM kill on CPU fault
+- **Startup Inhibit**: Blocks torque if pedal pressed at boot
+
+#### Service Mode & Factory Defaults
+- **Module System**: 25 modules (4 critical, 21 non-critical) — individually enableable/disableable
+- **Factory Defaults**: Individual reset for steering PID, wheel sensors, INA226/shunts, traction motor force, steering motor force
+- **Fault Transparency**: Faults always recorded even for disabled modules
 
 ### Timing Configuration
 - **Main Loop**: 100 Hz (10ms period)
@@ -198,6 +221,17 @@ STM32-Control-Coche-Marcos/
 │   │   ├── can_handler.h
 │   │   ├── sensor_manager.h
 │   │   ├── safety_system.h
+│   │   ├── service_mode.h
+│   │   ├── steering_cal_store.h
+│   │   ├── steering_centering.h
+│   │   ├── ackermann.h
+│   │   ├── eps_params.h
+│   │   ├── boot_validation.h
+│   │   ├── encoder_reader.h
+│   │   ├── error_log.h
+│   │   ├── math_safety.h
+│   │   ├── vehicle_physics.h
+│   │   ├── stm32g4xx_hal_conf.h
 │   │   └── stm32g4xx_it.h
 │   └── Src/
 │       ├── main.c
@@ -205,16 +239,45 @@ STM32-Control-Coche-Marcos/
 │       ├── can_handler.c
 │       ├── sensor_manager.c
 │       ├── safety_system.c
-│       └── stm32g4xx_it.c
+│       ├── service_mode.c
+│       ├── steering_cal_store.c
+│       ├── steering_centering.c
+│       ├── ackermann.c
+│       ├── eps_params.c
+│       ├── boot_validation.c
+│       ├── encoder_reader.c
+│       ├── error_log.c
+│       ├── math_safety.c
+│       ├── stm32g4xx_hal_msp.c
+│       ├── stm32g4xx_it.c
+│       └── system_stm32g4xx.c
 ├── Drivers/
 │   ├── STM32G4xx_HAL_Driver/
 │   └── CMSIS/
 ├── esp32/                           ← ESP32-S3 HMI firmware (C++)
 │   ├── platformio.ini
 │   ├── src/
+│   │   ├── main.cpp                 ← HMI orchestrator
+│   │   ├── screens/                 ← Screen state machine
+│   │   │   ├── boot_screen.cpp/h
+│   │   │   ├── standby_screen.cpp/h
+│   │   │   ├── drive_screen.cpp/h
+│   │   │   ├── safe_screen.cpp/h
+│   │   │   ├── error_screen.cpp/h   ← Full error display with fault names & permanence
+│   │   │   ├── engineering_screen.cpp/h ← Hidden menu (code 8989) with factory defaults
+│   │   │   └── pin_screen.cpp/h
+│   │   ├── ui/                      ← UI rendering components
+│   │   ├── hmi/                     ← HMI logic
+│   │   ├── sensors/                 ← Sensor interfaces
+│   │   └── can/                     ← CAN communication
 │   └── include/
+│       ├── can_ids.h                ← CAN protocol definitions (frozen contract)
+│       └── User_Setup.h             ← TFT display configuration
 ├── docs/
 │   ├── CAN_CONTRACT_FINAL.md
+│   ├── SERVICE_MODE.md
+│   ├── ENGINEERING_MENU.md
+│   ├── FACTORY_DEFAULTS.md
 │   ├── HMI_STATE_MODEL.md
 │   ├── ESP32_FIRMWARE_DESIGN.md
 │   └── ...
@@ -245,15 +308,32 @@ The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communi
 See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the full firmware architecture.
 
 ## Features
-✅ 4-wheel independent traction control
-✅ PID-based steering with encoder feedback
+✅ 4-wheel independent traction control (4x2 / 4x4 modes)
+✅ PID-based steering with encoder feedback (E6B2-CWZ6C, 4800 counts/rev)
 ✅ Ackermann steering geometry
-✅ ABS and TCS safety systems
-✅ Multi-sensor integration (temperature, current, speed)
-✅ FDCAN communication with ESP32
+✅ ABS and TCS safety systems (15% slip threshold)
+✅ Multi-sensor integration (5× temperature, 6× current, 4× wheel speed)
+✅ FDCAN communication with ESP32-S3 HMI (500 kbps, 27 message types)
 ✅ Overcurrent and overtemperature protection
-✅ Independent watchdog
+✅ Battery undervoltage monitoring (warning @ 20V, critical @ 18V)
+✅ Obstacle avoidance (5-zone, speed-dependent stopping)
+✅ Independent watchdog + BREAK2 hardware PWM kill
 ✅ Configurable 4x2/4x4 drive modes
+✅ Service mode with 25-module enable/disable system
+✅ Factory defaults reset (per-category: PID, sensors, shunts, motors)
+✅ Persistent steering calibration (Flash + CRC32)
+✅ Hidden engineering menu (code 8989) with diagnostics and calibration
+✅ Full error screen with human-readable fault names and permanence timer
+✅ CAN bus-off detection and non-blocking recovery
+✅ Dual-channel pedal plausibility (ADC + ADS1115 cross-check)
+✅ Persistent error log in Flash (250 entries, ring buffer, CRC32, post-mortem diagnosis)
+✅ I2C bus recovery (NXP AN10216 clock cycling, auto-recovery on SDA stuck)
+
+### Features Pending (vs Original Firmware)
+⬜ Regenerative braking with AI-based optimization
+⬜ Adaptive cruise control
+⬜ Touch calibration wizard with persistent storage
+⬜ DFPlayer audio error/warning sounds (ESP32 audio hardware present, integration pending)
 
 ## Author
 **Florin Zgureanu** (@florinzgz)

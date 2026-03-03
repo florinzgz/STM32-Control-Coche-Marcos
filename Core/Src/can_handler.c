@@ -16,6 +16,7 @@
 #include "sensor_manager.h"
 #include "service_mode.h"
 #include "math_safety.h"
+#include "error_log.h"
 #include <math.h>
 
 /* Safe-default for speed when NaN/Inf detected — ensures gear change is rejected */
@@ -483,6 +484,31 @@ void CAN_SendServiceStatus(void) {
 }
 
 /**
+ * @brief  Transmit error log header (entry count + total events).
+ *         Sent periodically (1000 ms) so the ESP32 engineering menu
+ *         knows how many log entries are available.
+ *
+ * CAN ID 0x305, DLC 8:
+ *   Byte 0-1: entry_count (uint16 LE)
+ *   Byte 2-5: total_events (uint32 LE, lifetime counter)
+ *   Byte 6-7: reserved (0)
+ */
+void CAN_SendErrorLogHeader(void) {
+    uint8_t data[8] = {0};
+    uint16_t count = ErrorLog_GetCount();
+    uint32_t total = ErrorLog_GetTotalEvents();
+    data[0] = (uint8_t)(count & 0xFF);
+    data[1] = (uint8_t)((count >> 8) & 0xFF);
+    data[2] = (uint8_t)(total & 0xFF);
+    data[3] = (uint8_t)((total >> 8) & 0xFF);
+    data[4] = (uint8_t)((total >> 16) & 0xFF);
+    data[5] = (uint8_t)((total >> 24) & 0xFF);
+    data[6] = 0;
+    data[7] = 0;
+    TransmitFrame(CAN_ID_ERROR_LOG_HEADER, data, 8);
+}
+
+/**
  * @brief  Set front LED power relay state (PB10).
  * @param  on  true = relay ON (front LEDs powered), false = relay OFF
  */
@@ -736,6 +762,58 @@ void CAN_ProcessMessages(void) {
                     if (cmd == 0xFF) {
                         /* Factory restore — re-enable all modules (always safe) */
                         ServiceMode_FactoryRestore();
+                        CAN_SendCommandAck(0x10, ACK_OK);
+                    } else if (cmd == 0xFE) {
+                        /* Clear error log (always safe) */
+                        ErrorLog_Clear();
+                        CAN_SendCommandAck(0x10, ACK_OK);
+                    } else if (cmd >= 0xF0 && cmd <= 0xF4) {
+                        /* Individual factory-default reset commands (always safe).
+                         * These reset specific calibration categories to defaults.
+                         * The STM32 re-enables the corresponding modules and clears
+                         * their faults.  A reboot may be needed for full effect. */
+                        switch (cmd) {
+                            case 0xF0: /* Reset steering PID calibration */
+                                ServiceMode_EnableModule(MODULE_STEER_CENTER);
+                                ServiceMode_EnableModule(MODULE_STEER_ENCODER);
+                                ServiceMode_ClearFault(MODULE_STEER_CENTER);
+                                ServiceMode_ClearFault(MODULE_STEER_ENCODER);
+                                break;
+                            case 0xF1: /* Reset wheel speed sensors */
+                                ServiceMode_EnableModule(MODULE_WHEEL_SPEED_FL);
+                                ServiceMode_EnableModule(MODULE_WHEEL_SPEED_FR);
+                                ServiceMode_EnableModule(MODULE_WHEEL_SPEED_RL);
+                                ServiceMode_EnableModule(MODULE_WHEEL_SPEED_RR);
+                                ServiceMode_ClearFault(MODULE_WHEEL_SPEED_FL);
+                                ServiceMode_ClearFault(MODULE_WHEEL_SPEED_FR);
+                                ServiceMode_ClearFault(MODULE_WHEEL_SPEED_RL);
+                                ServiceMode_ClearFault(MODULE_WHEEL_SPEED_RR);
+                                break;
+                            case 0xF2: /* Reset INA226 / shunt calibration.
+                                      * MODULE_CURRENT_SENSOR_0 (9) through
+                                      * MODULE_CURRENT_SENSOR_5 (14) are
+                                      * consecutive in ModuleID_t enum. */
+                                for (uint8_t s = MODULE_CURRENT_SENSOR_0;
+                                     s <= MODULE_CURRENT_SENSOR_5; s++) {
+                                    ServiceMode_EnableModule((ModuleID_t)s);
+                                    ServiceMode_ClearFault((ModuleID_t)s);
+                                }
+                                break;
+                            case 0xF3: /* Reset traction motor force */
+                                ServiceMode_EnableModule(MODULE_ABS);
+                                ServiceMode_EnableModule(MODULE_TCS);
+                                ServiceMode_ClearFault(MODULE_ABS);
+                                ServiceMode_ClearFault(MODULE_TCS);
+                                break;
+                            case 0xF4: /* Reset steering motor force */
+                                ServiceMode_EnableModule(MODULE_STEER_CENTER);
+                                ServiceMode_EnableModule(MODULE_STEER_ENCODER);
+                                ServiceMode_EnableModule(MODULE_ACKERMANN);
+                                ServiceMode_ClearFault(MODULE_STEER_CENTER);
+                                ServiceMode_ClearFault(MODULE_STEER_ENCODER);
+                                ServiceMode_ClearFault(MODULE_ACKERMANN);
+                                break;
+                        }
                         CAN_SendCommandAck(0x10, ACK_OK);
                     } else if (msg_len >= 2) {
                         uint8_t mod_id = rx_payload[1];

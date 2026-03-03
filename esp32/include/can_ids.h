@@ -75,6 +75,8 @@ inline constexpr uint32_t DIAG_ERROR            = 0x300;    // DLC 2, on-demand
 inline constexpr uint32_t SERVICE_FAULTS         = 0x301;   // STM32→ESP32, DLC 4, 1000 ms
 inline constexpr uint32_t SERVICE_ENABLED        = 0x302;   // STM32→ESP32, DLC 4, 1000 ms
 inline constexpr uint32_t SERVICE_DISABLED       = 0x303;   // STM32→ESP32, DLC 4, 1000 ms
+inline constexpr uint32_t ERROR_LOG_ENTRY        = 0x304;   // STM32→ESP32, DLC 8, on-demand
+inline constexpr uint32_t ERROR_LOG_HEADER       = 0x305;   // STM32→ESP32, DLC 8, 1000 ms
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
 
 // -------------------------------------------------------------------------
@@ -169,6 +171,15 @@ inline constexpr uint8_t MODE_FLAG_TANK_TURN = 0x02;   // Bit 1: 1 = tank turn e
 inline constexpr uint8_t SERVICE_ACTION_DISABLE        = 0x00;
 inline constexpr uint8_t SERVICE_ACTION_ENABLE         = 0x01;
 inline constexpr uint8_t SERVICE_ACTION_FACTORY_RESTORE = 0xFF;
+
+// Individual factory-default reset commands (byte 0 of SERVICE_CMD)
+// Byte 1 is unused (0x00) for these commands.
+inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_PID   = 0xF0;
+inline constexpr uint8_t SERVICE_ACTION_RESET_WHEEL_SENSORS  = 0xF1;
+inline constexpr uint8_t SERVICE_ACTION_RESET_INA226_SHUNTS  = 0xF2;
+inline constexpr uint8_t SERVICE_ACTION_RESET_TRACTION_FORCE = 0xF3;
+inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_FORCE = 0xF4;
+inline constexpr uint8_t SERVICE_ACTION_CLEAR_ERROR_LOG      = 0xFE;
 
 } // namespace can
 

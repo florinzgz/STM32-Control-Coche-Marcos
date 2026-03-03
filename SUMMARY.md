@@ -46,9 +46,9 @@ All previously empty stub functions now fully implemented:
 
 #### MX_TIM1_Init()
 - 4-channel PWM @ 20 kHz
-- Period: 8500-1 (for 170 MHz clock)
-- Channels 1-4 for traction motors (FL, FR, RL, RR)
-- Break/deadtime configuration
+- Period: 4249 (center-aligned: 170 MHz / (2 × 4250) = 20 kHz)
+- Channels 1-4 for front traction motors (FL forward/reverse, FR forward/reverse)
+- BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
 - All channels in PWM mode
 
 #### MX_TIM2_Init()
@@ -59,14 +59,14 @@ All previously empty stub functions now fully implemented:
 - Interrupt enabled
 
 #### MX_TIM8_Init()
-- Single-channel PWM @ 20 kHz
-- Channel 3 for steering motor
-- Break/deadtime configuration
+- 4-channel PWM @ 20 kHz
+- Channels 1-4 for rear traction motors (RL forward/reverse, RR forward/reverse)
+- BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
 - Same period as TIM1 for consistency
 
 #### MX_ADC1_Init()
 - 12-bit resolution
-- Channel 1 (PA0) for pedal position
+- Channel 4 (PA3) for pedal position via voltage divider
 - Software trigger
 - Single conversion mode
 - No DMA (polled mode)
@@ -309,19 +309,31 @@ The reference repository (florinzgz/FULL-FIRMWARE-Coche-Marcos) is an **ESP32-S3
 
 All missing components have been successfully implemented. The STM32-Control-Coche-Marcos firmware is now:
 
-- ✅ **Complete** - All peripherals initialized
-- ✅ **Documented** - Comprehensive guides and references
-- ✅ **Buildable** - Multiple build methods supported
+- ✅ **Complete** - All peripherals initialized, service mode, factory defaults
+- ✅ **Documented** - 80+ documentation files covering all subsystems
+- ✅ **Buildable** - Multiple build methods supported (CubeIDE, Make, PlatformIO)
 - ✅ **Testable** - Ready for hardware validation
-- ✅ **Maintainable** - Clean code, good structure
-- ✅ **Professional** - Production-ready quality
+- ✅ **Maintainable** - Clean code, modular structure
+- ✅ **Diagnostic** - Full error screen with fault names, permanence timer, hidden engineering menu
+- ✅ **Calibratable** - Factory defaults reset per category (PID, wheel sensors, INA226, motors)
 
-The project follows STM32 best practices and is ready for integration with the ESP32 main controller via CAN bus.
+### Features Pending (vs FULL-FIRMWARE v2.17.1)
+- ⬜ Regenerative braking with AI-based optimization
+- ⬜ Adaptive cruise control
+- ⬜ Persistent PID tuning (currently hardcoded Kp=2.0, Ki=0.1, Kd=0.5)
+- ⬜ Persistent motor force limits (currently hardcoded 25A max)
+- ⬜ Persistent INA226 shunt calibration (currently hardcoded 1mΩ/0.5mΩ)
+- ⬜ DFPlayer audio integration for error/warning sounds
+- ⬜ Touch calibration wizard
+- ✅ ~~I2C bus recovery (NXP AN10216 clock cycling)~~ — Implemented in sensor_manager.c
+- ✅ ~~Persistent error log in Flash~~ — Implemented in error_log.c (page 125, 250 entries, CRC32)
+
+The project follows STM32 best practices and is ready for integration with the ESP32 HMI controller via CAN bus.
 
 ---
 
-**Implementation Date**: 2026-02-01  
+**Last Updated**: 2026-03-02  
 **Implemented By**: GitHub Copilot Agent  
 **Project**: STM32-Control-Coche-Marcos  
-**Version**: 1.0.0  
+**Version**: 1.1.0  
 **Status**: ✅ **COMPLETE AND READY TO USE**

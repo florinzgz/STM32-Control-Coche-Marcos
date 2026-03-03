@@ -32,7 +32,7 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "ENCODER CALIBRATION",
     "INA226 SENSOR MAPPING",
     "TEMP SENSOR MAPPING",
-    "FACTORY RESTORE"
+    "FACTORY DEFAULTS"
 };
 
 // ---- Back / Save buttons ----
@@ -89,6 +89,26 @@ static constexpr int16_t PAGE_BTN_X  = 200;
 static constexpr int16_t PAGE_BTN_Y  = 280;
 static constexpr int16_t PAGE_BTN_W  = 80;
 static constexpr int16_t PAGE_BTN_H  = 30;
+
+// ---- Factory Defaults submenu ----
+static constexpr int     NUM_FACTORY_ITEMS = 6;
+static const char* const factoryLabels[NUM_FACTORY_ITEMS] = {
+    "RESET STEERING PID",
+    "RESET WHEEL SENSORS",
+    "RESET INA226 / SHUNTS",
+    "RESET TRACTION MOTOR FORCE",
+    "RESET STEERING MOTOR FORCE",
+    "RESET ALL (FACTORY RESTORE)"
+};
+// CAN service action codes matching each factory default option
+static const uint8_t factoryActions[NUM_FACTORY_ITEMS] = {
+    can::SERVICE_ACTION_RESET_STEERING_PID,
+    can::SERVICE_ACTION_RESET_WHEEL_SENSORS,
+    can::SERVICE_ACTION_RESET_INA226_SHUNTS,
+    can::SERVICE_ACTION_RESET_TRACTION_FORCE,
+    can::SERVICE_ACTION_RESET_STEERING_FORCE,
+    can::SERVICE_ACTION_FACTORY_RESTORE
+};
 
 // Module names matching ModuleID_t in service_mode.h
 static const char* const MODULE_NAMES[MOD_TOTAL_COUNT] = {
@@ -219,13 +239,14 @@ void EngineeringScreen::draw() {
         tft.fillScreen(ui::COL_BG);
 
         switch (currentMenu_) {
-            case SubMenu::MAIN:           drawMainMenu();            break;
-            case SubMenu::FAULT_VIEWER:   drawFaultViewer();         break;
-            case SubMenu::MODULE_CONTROL: drawModuleControl();       break;
-            case SubMenu::PEDAL_CAL:      drawPedalCalibration();    break;
-            case SubMenu::ENCODER_CAL:    drawEncoderCalibration();  break;
-            case SubMenu::SENSOR_MAP_INA: drawSensorMapIna();        break;
-            case SubMenu::SENSOR_MAP_TEMP: drawSensorMapTemp();      break;
+            case SubMenu::MAIN:             drawMainMenu();            break;
+            case SubMenu::FAULT_VIEWER:     drawFaultViewer();         break;
+            case SubMenu::MODULE_CONTROL:   drawModuleControl();       break;
+            case SubMenu::PEDAL_CAL:        drawPedalCalibration();    break;
+            case SubMenu::ENCODER_CAL:      drawEncoderCalibration();  break;
+            case SubMenu::SENSOR_MAP_INA:   drawSensorMapIna();        break;
+            case SubMenu::SENSOR_MAP_TEMP:  drawSensorMapTemp();       break;
+            case SubMenu::FACTORY_DEFAULTS: drawFactoryDefaults();     break;
         }
     }
 
@@ -442,18 +463,10 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             tempEditRow_ = 0;
                             currentMenu_ = SubMenu::SENSOR_MAP_TEMP;
                             break;
-                        case 6: {
-                            // Factory restore — send SERVICE_CMD 0x110
-                            CanFrame frame = {};
-                            frame.identifier       = can::SERVICE_CMD;
-                            frame.extd             = 0;
-                            frame.data_length_code = 2;
-                            frame.data[0]          = can::SERVICE_ACTION_FACTORY_RESTORE;
-                            frame.data[1]          = 0;
-                            ESP32Can.writeFrame(frame);
-                            Serial.println("[ENG] Factory restore sent");
+                        case 6:
+                            // Open Factory Defaults submenu
+                            currentMenu_ = SubMenu::FACTORY_DEFAULTS;
                             break;
-                        }
                     }
                     needsRedraw_ = true;
                     return true;
@@ -500,6 +513,29 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                     needsRedraw_ = true;
                 }
                 return true;
+            }
+        }
+        return false;
+    }
+
+    // Factory defaults submenu: tap a row to send the reset command
+    if (currentMenu_ == SubMenu::FACTORY_DEFAULTS) {
+        if (x >= MENU_X && x <= MENU_X + MENU_W) {
+            for (int i = 0; i < NUM_FACTORY_ITEMS; ++i) {
+                int16_t btnY = MENU_START_Y + i * MENU_SPACING;
+                if (y >= btnY && y <= btnY + MENU_BTN_H) {
+                    CanFrame frame = {};
+                    frame.identifier       = can::SERVICE_CMD;
+                    frame.extd             = 0;
+                    frame.data_length_code = 2;
+                    frame.data[0]          = factoryActions[i];
+                    frame.data[1]          = 0;
+                    ESP32Can.writeFrame(frame);
+                    Serial.printf("[ENG] Factory reset cmd 0x%02X sent\n",
+                                  factoryActions[i]);
+                    needsRedraw_ = true;
+                    return true;
+                }
             }
         }
         return false;
@@ -559,8 +595,8 @@ void EngineeringScreen::drawMainMenu() {
     // Menu buttons
     for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
         int16_t btnY = MENU_START_Y + i * MENU_SPACING;
-        uint16_t bgCol = (i == 6) ? ui::COL_RED : ui::COL_DARK_GRAY;
-        uint16_t txtCol = ui::COL_WHITE;
+        uint16_t bgCol = (i == 6) ? ui::COL_DARK_GRAY : ui::COL_DARK_GRAY;
+        uint16_t txtCol = (i == 6) ? ui::COL_AMBER : ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
         RTRACE_FILL_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
@@ -1062,5 +1098,75 @@ void EngineeringScreen::drawSensorMapTemp() {
     RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, "SAVE",
                 ui::COL_BLACK, ui::COL_GREEN, 1, MC_DATUM);
 
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawFactoryDefaults — Individual factory-default reset options
+//
+// Provides granular calibration resets:
+//   - Steering PID calibration
+//   - Wheel speed sensor calibration
+//   - INA226 / shunt calibration
+//   - Traction motor force limits
+//   - Steering motor force limits
+//   - Full factory restore (all of the above)
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawFactoryDefaults() {
+    RTRACE_BEGIN_SCREEN("eng_factory_defaults");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("FACTORY DEFAULTS", ui::SCREEN_W / 2, 22);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 22, "FACTORY DEFAULTS",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+
+    // Menu buttons
+    for (int i = 0; i < NUM_FACTORY_ITEMS; ++i) {
+        int16_t btnY = MENU_START_Y + i * MENU_SPACING;
+        // Last item (RESET ALL) is red, others are dark gray
+        uint16_t bgCol = (i == NUM_FACTORY_ITEMS - 1)
+                         ? ui::COL_RED : ui::COL_DARK_GRAY;
+        uint16_t txtCol = ui::COL_WHITE;
+
+        tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
+        RTRACE_FILL_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
+        tft.drawRect(MENU_X, btnY, MENU_W, MENU_BTN_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, ui::COL_GRAY);
+
+        tft.setTextColor(txtCol, bgCol);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(factoryLabels[i], MENU_X + MENU_W / 2,
+                        btnY + MENU_BTN_H / 2);
+        RTRACE_TEXT(MENU_X + MENU_W / 2, btnY + MENU_BTN_H / 2,
+                    factoryLabels[i], txtCol, bgCol, 1, MC_DATUM);
+    }
+    tft.setTextDatum(TL_DATUM);
+
+    // Warning text
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.drawString("Tap an option to reset that calibration to defaults.",
+                    20, MENU_START_Y + NUM_FACTORY_ITEMS * MENU_SPACING + 8);
+    tft.drawString("Vehicle must be stationary. Reboot may be required.",
+                    20, MENU_START_Y + NUM_FACTORY_ITEMS * MENU_SPACING + 22);
+
+    // Back button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }

@@ -3,17 +3,19 @@
 //
 // Hidden engineering menu, accessed by entering code "8989" on the touch
 // screen.  Provides submenus for:
-//   1. Pedal calibration
-//   2. Encoder calibration
-//   3. Module enable/disable (via SERVICE_CMD 0x110)
-//   4. Factory restore (via SERVICE_CMD 0x110, action 0xFF)
-//   5. Fault viewer (SERVICE_FAULTS/ENABLED/DISABLED 0x301-0x303)
-//   6. Sensor mapping — assign INA226 channels and DS18B20 sensors
-//      to vehicle positions (FL, FR, RL, RR, Battery, Steering, Ambient)
+//   1. Fault viewer (SERVICE_FAULTS/ENABLED/DISABLED 0x301-0x303)
+//   2. Module enable/disable (via SERVICE_CMD 0x110)
+//   3. Pedal calibration (live telemetry verification)
+//   4. Encoder calibration (live steering encoder verification)
+//   5. INA226 sensor mapping — assign channels to vehicle positions
+//   6. DS18B20 temp sensor mapping — assign sensors to positions
+//   7. Factory defaults — individual reset options for PID, wheel sensors,
+//      INA226/shunts, traction motor force, steering motor force,
+//      or full factory restore (SERVICE_CMD 0x110, actions 0xF0-0xFF)
 //
 // No heap allocation.  All format buffers are fixed-size stack arrays.
 //
-// Reference: docs/SERVICE_MODE.md
+// Reference: docs/SERVICE_MODE.md, docs/ENGINEERING_MENU.md
 // =============================================================================
 
 #ifndef ENGINEERING_SCREEN_H
@@ -47,7 +49,8 @@ private:
         PEDAL_CAL,
         ENCODER_CAL,
         SENSOR_MAP_INA,    // INA226 channel-to-position mapping
-        SENSOR_MAP_TEMP    // DS18B20 sensor-to-position mapping
+        SENSOR_MAP_TEMP,   // DS18B20 sensor-to-position mapping
+        FACTORY_DEFAULTS   // Individual factory-default reset options
     };
 
     void drawMainMenu();
@@ -57,6 +60,7 @@ private:
     void drawEncoderCalibration();
     void drawSensorMapIna();
     void drawSensorMapTemp();
+    void drawFactoryDefaults();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
