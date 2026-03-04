@@ -125,7 +125,7 @@
 | INA226 shunt | 1 mΩ (motor) / 0.5 mΩ (bat) | `1` / `0.5f` | `main.h:130-131` | ✅ |
 | TCA9548A dirección | 0x70 | `I2C_ADDR_TCA9548A = 0x70` | `main.h:114` | ✅ |
 | INA226 dirección | 0x40 | `I2C_ADDR_INA226 = 0x40` | `main.h:115` | ✅ |
-| ADS1115 dirección | 0x48 | `I2C_ADDR_ADS1115 = 0x48` | `main.h:107` | ✅ |
+| ADS1115 dirección | — | Eliminado del firmware (plausibilidad por software) | — | ✅ (eliminado) |
 | NUM_INA226 | 6 | `NUM_INA226 = 6` | `main.h:116` | ✅ |
 | NUM_DS18B20 | 5 | `NUM_DS18B20 = 5` | `main.h:117` | ✅ |
 | WHEEL_PULSES_REV | 6 | `WHEEL_PULSES_REV = 6` | `main.h:119` | ✅ |

@@ -27,7 +27,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 | Centrado automático de dirección | ✅ Completo | 100% | Barrido bidireccional + sensor inductivo + persistencia flash |
 | Calibración persistente (flash pág. 126) | ✅ Completo | 100% | CRC32, magic "STC1", validación en boot con sensor físico |
 | Parámetros EPS (flash pág. 127) | ✅ Completo | 100% | Doble buffer A/B con secuencia monotónica |
-| Sensor de pedal doble canal | ✅ Completo | 100% | ADC interno + ADS1115 I2C, cross-validation ±5% |
+| Sensor de pedal con plausibilidad | ✅ Completo | 100% | ADC interno dual-sample + plausibilidad software (EMA, rango, tasa) |
 | Velocidad de ruedas (4× inductivos) | ✅ Completo | 100% | EXTI con debounce 1 ms, 6 pulsos/rev |
 | Temperatura DS18B20 (5 sensores) | ✅ Completo | 100% | OneWire ROM search + hot-plug cada 10 s + limpieza datos stale |
 | Corriente INA226 (6 canales) | ✅ Completo | 100% | TCA9548A mux, recuperación bus I2C (NXP AN10216) |
@@ -77,7 +77,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 | Item | Prioridad | Impacto | Descripción |
 |---|---|---|---|
 | Ajuste PID dirección (I y D) | MEDIA | Precisión dirección | ki=0.0, kd=0.0 hardcoded. Solo P funcional. Necesita pruebas con carga real del volante |
-| Calibración pedal real | MEDIA | Rango pedal | Los rangos ADC/ADS1115 están hardcoded. Menú ingeniería tiene placeholder |
+| Calibración pedal real | MEDIA | Rango pedal | Los rangos ADC están hardcoded. Menú ingeniería tiene placeholder |
 | Calibración encoder real | MEDIA | Precisión dirección | El menú ingeniería tiene placeholder para visualización encoder |
 | Validación umbrales ABS/TCS | MEDIA | Control tracción | Slip 15% es estimación. Necesita medición en superficie real |
 | Validación distancias obstáculo | MEDIA | Seguridad | Zonas (200/500/1000/1500/4000 mm) sin validar en campo |
@@ -134,7 +134,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 - ✅ Centrado dirección automático (inductivo + flash)
 - ✅ Parámetros EPS en flash con doble buffer
 - ✅ NVS en ESP32 (modo, brillo, volumen, LEDs)
-- ✅ Cross-validación pedal dual ADC/ADS1115
+- ✅ Plausibilidad pedal por software (dual-sample ADC, EMA, rango, tasa)
 - ⚠️ PID I/D sin ajustar (hardware-dependent)
 - ⚠️ Rangos pedal hardcoded (no calibrados en campo)
 

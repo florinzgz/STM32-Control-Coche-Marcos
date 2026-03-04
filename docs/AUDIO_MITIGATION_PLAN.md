@@ -127,7 +127,7 @@ Ordenados de mayor a menor riesgo **operacional real para el conductor** (no por
 
 **Prueba física en vehículo:**
 1. Vehículo en parado, pantalla encendida
-2. **Test pedal:** Desconectar el cable I2C del ADS1115 (pedal externo). Esperar a que STM32 detecte plausibility failure.
+2. **Test pedal:** Forzar fallo de plausibilidad (señal fuera de rango). Esperar a que STM32 detecte plausibility failure.
    - **Verificar:** Se oye "Error en el sensor del pedal" (track 5) — **NO** "Sin señal de velocidad"
 3. **Test encoder:** Desconectar el encoder de dirección (E6B2-CWZ6C). Esperar detección de fault.
    - **Verificar:** Se oye "Error en el sensor de dirección" (track 9) — **NO** "Sin señal de velocidad"

@@ -101,7 +101,7 @@ STM32 (Safety Authority)           CAN Bus           ESP32 (HMI / Audio)
 | E28 | Battery < 18.0V (critical) | SAFE | BATTERY_UV_CRIT | `BATTERY_CRITICAL` (13) + `EMERGENCY` (31) | 13+31 | HIGH+HIGH | ⚠️ Doble audio |
 | E29 | Battery sensor failure (0V reading) | SAFE | BATTERY_UV_CRIT | `EMERGENCY` (31) — pero `BATTERY_CRITICAL` NO suena (voltageRaw == 0 falla el guard `battVoltRaw > 0`) | 31 | HIGH | 🔴 Sin audio de batería crítica cuando el sensor falla |
 | E30 | Pedal plausibility failure (contradictory) | LIMP_HOME | SENSOR_FAULT | `SENSOR_SPEED_ERROR` (35) vía errorCode mapping | 35 | MEDIUM | 🔴 Audio incorrecto: dice "sin señal de velocidad" pero es error de pedal |
-| E31 | Pedal plausibility failure (ADS1115 lost) | LIMP_HOME | SENSOR_FAULT | `SENSOR_SPEED_ERROR` (35) vía errorCode mapping | 35 | MEDIUM | 🔴 Audio incorrecto: idem anterior |
+| E31 | Pedal plausibility failure (software check) | LIMP_HOME | SENSOR_FAULT | `SENSOR_SPEED_ERROR` (35) vía errorCode mapping | 35 | MEDIUM | 🔴 Audio incorrecto: dice "sin señal de velocidad" pero es error de pedal |
 | E32 | Wheel speed sensor implausible | DEGRADED | SENSOR_FAULT | `SENSOR_SPEED_ERROR` (35) | 35 | MEDIUM | ✅ Correcto para este caso |
 | E33 | Steering encoder fault | DEGRADED | SENSOR_FAULT | `SENSOR_SPEED_ERROR` (35) | 35 | MEDIUM | 🔴 Audio incorrecto: dice "sin señal de velocidad" pero es error de encoder |
 | E34 | Steering centering failed | DEGRADED | CENTERING | `ENCODER_ERROR` (9) vía errorCode mapping | 9 | MEDIUM | ✅ |
@@ -135,7 +135,7 @@ STM32 (Safety Authority)           CAN Bus           ESP32 (HMI / Audio)
 
 ### 🔴 HALLAZGO-01: Pedal plausibility failure — audio incorrecto
 
-**Evento:** El pedal tiene dos canales (ADC interno + ADS1115 I2C). Si divergen > 5% durante > 200ms, o si ADS1115 se pierde, el STM32 entra en LIMP_HOME con error SENSOR_FAULT.
+**Evento:** El pedal usa doble lectura ADC con plausibilidad software. Si las muestras divergen > 30 counts, el valor sale de rango, o la tasa de cambio excede el límite, el STM32 entra en LIMP_HOME con error SENSOR_FAULT.
 
 **Audio actual:** Se reproduce `SENSOR_SPEED_ERROR` (track 35: "Sin señal de velocidad. Revise sensores de rueda.") porque el ESP32 mapea `SafetyError::SENSOR_FAULT` → `SENSOR_SPEED_ERROR`.
 

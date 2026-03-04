@@ -58,7 +58,7 @@
 | Timeout watchdog | >500 ms | → BOOT (reset MCU) |
 | Batería baja (warning) | <20.0 V | → DEGRADED |
 | Batería baja (crítico) | <18.0 V | → SAFE |
-| Pedal contradictorio | ADC vs ADS1115 >5% rango, >200 ms | → Demand=0 |
+| Pedal contradictorio | Dual-sample divergen >30 counts o rango/tasa inválido | → Demand=0 |
 | Encoder perdido | Sin actualización 100 ms | → SAFE |
 
 ---
@@ -73,7 +73,7 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 |---|---|---|---|
 | T1 | Pedal pulsado al encender | Si `startup_inhibit` falla, el pedal genera demanda inmediata | **CRÍTICA** |
 | T2 | Offset ADC del pedal | Lectura ADC >3% sin pisar → demanda fantasma | **ALTA** |
-| T3 | ADS1115 offline + ADC con offset | Sin canal de plausibilidad, el offset pasa directamente | **ALTA** |
+| T3 | Plausibilidad software falla + ADC con offset | Sin canal de plausibilidad, el offset pasa directamente | **ALTA** |
 | T4 | Transición a LIMP_HOME con pedal pisado | Si `limp_home_pedal_armed` no se resetea correctamente | **ALTA** |
 | T5 | Comando CAN 0x100 espurio | ESP32 envía throttle >0 sin intención del usuario | **MEDIA** |
 | T6 | Cambio de marcha en movimiento | Gear PARK→FORWARD con ruedas girando | **ALTA** |
@@ -174,8 +174,8 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 | 3.3 | Soltar pedal completamente. Esperar 500 ms | `startup_inhibit` debe desactivarse | — | — |
 | 3.4 | Pisar pedal lentamente (~5%) | Ruedas deben girar (si en ACTIVE) | Ruedas giran suavemente | Sin movimiento o movimiento brusco |
 | 3.5 | Soltar pedal completamente | Ruedas se detienen | Ruedas paran en <2 s | Ruedas siguen girando >3 s |
-| 3.6 | Desconectar cable ADS1115 (I2C). Pisar pedal | Pedal debe funcionar en modo single-channel (degraded) | Ruedas giran con advertencia en CAN | Sin movimiento o sin advertencia |
-| 3.7 | Reconectar ADS1115. Pisar pedal al 100% | Corriente por debajo de límite (ruedas en aire = sin carga) | Corriente <10 A por motor | >25 A (fallo de limitación) |
+| 3.6 | Forzar fallo de plausibilidad (señal fuera de rango). Pisar pedal | Pedal debe rechazar señal y forzar 0% | Ruedas giran con advertencia en CAN | Sin movimiento o sin advertencia |
+| 3.7 | Restaurar señal normal. Pisar pedal al 100% | Corriente por debajo de límite (ruedas en aire = sin carga) | Corriente <10 A por motor | >25 A (fallo de limitación) |
 | 3.8 | Verificar rampa de subida: pisar pedal de 0→100% bruscamente | PWM sube gradualmente (50%/s ramp) | Transición suave ≥1 s hasta 100% | Salto instantáneo |
 
 **GATE 3: Todos los pasos 3.1–3.8 deben ser PASS para continuar.**
@@ -346,7 +346,7 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 | 8 | CENTERING | Fallo en centrado de dirección |
 | 9 | BATTERY_UV_WARNING | Batería <20 V |
 | 10 | BATTERY_UV_CRITICAL | Batería <18 V |
-| 11 | I2C_FAILURE | Fallo bus I2C (INA226/ADS1115) |
+| 11 | I2C_FAILURE | Fallo bus I2C (INA226) |
 | 12 | OBSTACLE | Obstáculo detectado |
 
 ### 5.2 Configuración del Analizador CAN

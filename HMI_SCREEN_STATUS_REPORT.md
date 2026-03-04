@@ -280,7 +280,7 @@ Calibration interface placeholder.
 Connect engineering tool for full calibration.
 ```
 
-**Lo que falta completamente:** Lectura de ADC de pedal primario y ADS1115, ajuste de valores
+**Lo que falta completamente:** Lectura de ADC de pedal (dual-sample + plausibilidad software), ajuste de valores
 mínimo/máximo, persistencia de calibración en NVS, envío de parámetros al STM32 vía CAN.
 
 ---
@@ -401,7 +401,7 @@ Se activa con `flush()` al apagado del vehículo (SHUTTING_DOWN) para no perder 
    este comando en `can_handler.c`.
 
 2. **PEDAL CALIBRATION:** Implementar UI para visualizar en tiempo real el valor del pedal
-   (ADC + ADS1115), ajustar min/max, y persistir en NVS.
+   (ADC dual-sample), ajustar min/max, y persistir en NVS.
 
 3. **ENCODER CALIBRATION:** Implementar visualización del ángulo de dirección actual
    (0x204), proceso de centering manual, y guardado de offset.

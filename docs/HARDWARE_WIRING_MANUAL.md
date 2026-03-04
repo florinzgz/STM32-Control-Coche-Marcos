@@ -988,7 +988,7 @@ UBICACIÓN: soldar lo más cerca posible de los pines CN7/CN10 de la Nucleo-64.
 Si se usa protoboard, colocar entre los raíles de alimentación adyacentes al MCU.
 ```
 
-Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (ADS1115, TJA1051, BTS7960 VCC):
+Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (TJA1051, BTS7960 VCC):
 
 ```
 5 V ──┬──[100 nF cerámico]──┬── GND   (junto a cada CI, una por chip)
@@ -1031,7 +1031,7 @@ Relé DIR NO ──┬────── Bus 12 V
 Para impedir que el ruido de los PWM de 20 kHz se propague por la alimentación:
 
 ```
-5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051, ADS1115, BTS7960 VCC
+5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051, BTS7960 VCC
                                                               └── [10 µF] a GND
 ```
 
@@ -1119,7 +1119,7 @@ Seguir este orden estrictamente:
 2. Conectar STM32 Nucleo a la alimentación → verificar que arranca (LED verde on)
 3. Conectar ESP32 → verificar arranque
 4. Verificar heartbeat CAN (monitor serie o osciloscopio en CANH/CANL)
-5. Conectar sensores I2C (INA226, ADS1115, TCA9548A) → verificar en serial que se detectan
+5. Conectar sensores I2C (INA226, TCA9548A) → verificar en serial que se detectan
 6. Conectar sensores OneWire (DS18B20) → verificar lecturas de temperatura
 7. Conectar encoder de dirección → girar manualmente y verificar que el contador cambia
 8. Conectar sensores de velocidad de rueda (vía optoacoplador) → girar rueda a mano

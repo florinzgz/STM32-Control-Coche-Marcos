@@ -14,7 +14,7 @@
 4. [ESP32-S3 — Resumen](#4-esp32-s3--resumen)
 5. [ESP32-S3 — Detalle por módulo](#5-esp32-s3--detalle-por-módulo)
 6. [ESP32-S3 — Pines libres](#6-esp32-s3--pines-libres)
-7. [Conexión del pedal con sensor Hall y ADS1115 — Detalle completo](#7-conexión-del-pedal-con-sensor-hall-y-ads1115--detalle-completo)
+7. [Conexión del pedal con sensor Hall — Detalle completo](#7-conexión-del-pedal-con-sensor-hall--detalle-completo)
 
 ---
 
@@ -43,7 +43,7 @@
 | Encoder dirección (TIM2 + EXTI) | 3 | 6.4% |
 | Sensor centrado dirección (EXTI) | 1 | 2.1% |
 | Pedal acelerador (ADC) | 1 | 2.1% |
-| Bus I2C (INA226/TCA9548A/ADS1115) | 2 | 4.3% |
+| Bus I2C (INA226/TCA9548A) | 2 | 4.3% |
 | Bus OneWire (DS18B20) | 1 | 2.1% |
 | Bus CAN (FDCAN1) | 2 | 4.3% |
 | **TOTAL USADOS** | **31** | **66.0%** |
@@ -137,9 +137,9 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM). Los pines DIR (PC
 
 - Sensor Hall SS1324LUA-T (5V, salida 0.3V–4.8V)
 - Divisor de tensión: R1=10kΩ, R2=6.8kΩ → ratio 0.4048
-- El canal de plausibilidad (ADS1115) usa el bus I2C, no pin adicional
+- La plausibilidad se realiza por software (dual-sample ADC, no requiere hardware adicional)
 
-### 2.8 Bus I2C — TCA9548A + 6× INA226 + ADS1115 (2 pines)
+### 2.8 Bus I2C — TCA9548A + 6× INA226 (2 pines)
 
 | Señal | Pin | Periférico | Función |
 |-------|-----|-----------|---------|
@@ -153,9 +153,8 @@ Dispositivos en el bus I2C (solo 2 pines para todos):
 |-------------|---------------|---------|
 | TCA9548A | 0x70 | Multiplexor 8 canales (para 6× INA226) |
 | INA226 ×6 | 0x40 (detrás del mux) | Sensores de corriente (4 motores + batería + dirección) |
-| ADS1115 | 0x48 | ADC 16-bit pedal plausibilidad (directo, sin mux) |
 
-> **Nota:** Los 6 sensores INA226 y el multiplexor TCA9548A comparten los mismos 2 pines I2C. El ADS1115 también está en el mismo bus pero con dirección diferente (0x48). Esto permite 9 dispositivos con solo 2 pines GPIO.
+> **Nota:** Los 6 sensores INA226 y el multiplexor TCA9548A comparten los mismos 2 pines I2C (7 dispositivos físicos, 2 direcciones visibles en el bus: 0x70 para TCA9548A y 0x40 para INA226 vía mux).
 
 ### 2.9 Bus OneWire — 5× DS18B20 (1 pin)
 
@@ -500,17 +499,15 @@ Los siguientes GPIO del ESP32-S3-DevKitC-1 **NO están usados** y están disponi
 
 ---
 
-## 7. Conexión del pedal con sensor Hall y ADS1115 — Detalle completo
+## 7. Conexión del pedal con sensor Hall — Detalle completo
 
 ### 7.1 Componentes del sistema de pedal
 
 | Componente | Modelo/Valor | Función |
 |------------|-------------|---------|
 | **Sensor Hall** | SS1324LUA-T | Sensor lineal magnético, alimentado a 5V |
-| **ADC externo** | ADS1115 (módulo breakout) | ADC 16-bit I2C, canal de plausibilidad |
 | **Resistencia R1** | 10 kΩ (1% precisión) | Parte superior del divisor de tensión |
 | **Resistencia R2** | 6.8 kΩ (1% precisión) | Parte inferior del divisor de tensión |
-| **Pull-ups I2C** | 2× 4.7 kΩ | En PB6 y PB7 (si no están en el módulo ADS1115) |
 
 ### 7.2 Cómo funciona el sensor Hall SS1324LUA-T
 
@@ -532,7 +529,7 @@ El sensor Hall SS1324LUA-T es un **sensor magnético lineal de efecto Hall**. Se
 
 ### 7.3 Arquitectura de doble canal redundante
 
-La señal del pedal se lee por **dos canales independientes** simultáneamente, como en la industria automotriz real:
+La señal del pedal se lee por **dos muestras ADC consecutivas** con validación por software, como en la industria automotriz real:
 
 ```
                             ┌────────────────────────────────┐
@@ -548,22 +545,22 @@ La señal del pedal se lee por **dos canales independientes** simultáneamente, 
                     │                          │
      ═══════════════════════        ═══════════════════════════
      ║ CANAL 1 — PRIMARIO  ║        ║ CANAL 2 — PLAUSIBILIDAD ║
-     ║ (rápido, ~1 µs)     ║        ║ (preciso, ~8 ms)         ║
+     ║ (rápido, ~1 µs)     ║        ║ (software, ~2 µs)        ║
      ═══════════════════════        ═══════════════════════════
                     │                          │
                     ▼                          ▼
         ┌──────────────────┐        ┌──────────────────────┐
-        │ DIVISOR RESISTIVO│        │      ADS1115         │
-        │                  │        │   (I2C, 16-bit)      │
+        │ DIVISOR RESISTIVO│        │ PLAUSIBILIDAD        │
+        │                  │        │ SOFTWARE             │
         │ Señal 5V ──┐    │        │                      │
-        │            R1    │        │  VDD ──► 5V fuente   │
-        │         10 kΩ    │        │  GND ──► GND común   │
-        │            │     │        │  A0  ◄── Señal 5V    │
-        │       NODO ├─────┼──► PA3 │  ADDR──► GND (=0x48) │
-        │            │     │        │  SCL ──► PB6 (I2C)   │
-        │           R2     │        │  SDA ──► PB7 (I2C)   │
-        │         6.8 kΩ   │        │                      │
+        │            R1    │        │ · Dual-sample ADC    │
+        │         10 kΩ    │        │ · Filtro EMA α=0.3   │
+        │            │     │        │ · Rango [30..2800]   │
+        │       NODO ├─────┼──► PA3 │ · Tasa máx 35%/50ms  │
         │            │     │        └──────────────────────┘
+        │           R2     │
+        │         6.8 kΩ   │
+        │            │     │
         │           GND    │
         └──────────────────┘
                     │
@@ -572,8 +569,8 @@ La señal del pedal se lee por **dos canales independientes** simultáneamente, 
         │     STM32G474RE      │
         │                      │
         │  PA3: ADC1_IN4       │ ◄── 0.12V–1.94V (dividida)
-        │  PB6: I2C1_SCL      │ ◄──► ADS1115 + TCA9548A/INA226
-        │  PB7: I2C1_SDA      │ ◄──► ADS1115 + TCA9548A/INA226
+        │  PB6: I2C1_SCL      │ ◄──► TCA9548A/INA226
+        │  PB7: I2C1_SDA      │ ◄──► TCA9548A/INA226
         └──────────────────────┘
 ```
 
@@ -604,59 +601,39 @@ Máximo absoluto: 5.0V × 0.4048 = 2.024V  (bien debajo de 3.3V) ✅
 
 > ⚠️ **IMPORTANTE:** Sin el divisor de tensión, la señal de 5V del sensor dañaría el pin PA3 (máximo absoluto: 3.6V).
 
-### 7.5 Canal 2 — Plausibilidad (ADS1115, I2C)
+### 7.5 Plausibilidad por Software (sin ADS1115)
 
-**Ruta de la señal:** Sensor → ADS1115 entrada A0 → lectura I2C → STM32
+> **CAMBIO:** El ADS1115 ha sido eliminado. La plausibilidad se realiza por software.
 
-| Parámetro | Valor |
-|-----------|-------|
-| Módulo | ADS1115 (breakout board) |
-| Bus | I2C1 (PB6=SCL, PB7=SDA, 400 kHz) |
-| Dirección I2C | **0x48** (pin ADDR conectado a GND) |
-| Resolución | 16 bits (0–65535, con signo: ±32767) |
-| PGA (ganancia) | ±4.096V (rango más adecuado para señal de 0–5V) |
-| Sample Rate | 128 SPS |
-| Latencia de lectura | ~8 ms |
-| Rango de entrada en A0 | 0.3V – 4.8V (señal directa del sensor, sin dividir) |
-| Cálculo ADS mínimo | 0.3V / 4.096V × 32767 = **~2400** (firmware usa 1600) |
-| Cálculo ADS máximo | 4.8V / 4.096V × 32767 = **~38400** (firmware usa 25600) |
+**Método:** Dos lecturas ADC consecutivas (~2 µs total) con 4 capas de validación:
 
-**Conexiones físicas del ADS1115:**
-
-| Pin ADS1115 | Conectar a | Cable |
-|-------------|-----------|-------|
-| VDD | 5V fuente | Alimentación |
-| GND | GND común | Masa |
-| A0 | Pin 3 del sensor (señal) | Señal analógica directa 5V |
-| ADDR | GND | Fija dirección I2C = 0x48 |
-| SCL | PB6 (STM32) | Bus I2C compartido |
-| SDA | PB7 (STM32) | Bus I2C compartido |
-| A1, A2, A3 | Sin conectar | No usados |
-| ALRT | Sin conectar | No usado |
-
-> **Nota:** El ADS1115 alimentado a 5V es compatible con niveles I2C de 3.3V porque su umbral VIH = 0.7 × VDD ≈ 3.5V, ligeramente por encima de 3.3V. En la práctica funciona de forma fiable. Los módulos breakout comerciales suelen incluir adaptador de nivel I2C integrado.
+| Verificación | Parámetro | Acción si falla |
+|-------------|-----------|-----------------|
+| Consistencia dual-sample | Diferencia > 30 counts | `pedal_channels_contradict = true` |
+| Rango válido | < 30 o > 2800 counts | `pedal_plausible = false` |
+| Tasa de cambio | > 35% por ciclo 50 ms | `pedal_plausible = false` |
+| Filtro EMA | α=0.3 (~150 ms settling) | Suaviza ruido |
 
 ### 7.6 Validación cruzada — Firmware
 
 Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 
-1. **Lee el canal primario** (ADC interno, ~1 µs):
+1. **Lee primera muestra ADC** (ADC interno, ~1 µs):
    - `HAL_ADC_Start()` → `HAL_ADC_PollForConversion()` → `HAL_ADC_GetValue()`
    - Convierte el valor ADC (150–2413) a porcentaje (0–100%)
 
-2. **Lee el canal de plausibilidad** (ADS1115, ~8 ms):
-   - Envía configuración por I2C (`I2C_Transmit` a 0x48)
-   - Espera conversión (~8 ms)
-   - Lee resultado 16 bits por I2C
-   - Convierte el valor ADS (1600–25600) a porcentaje (0–100%)
+2. **Lee segunda muestra ADC** (~1 µs):
+   - Segunda lectura consecutiva del mismo canal PA3
+   - Verifica consistencia con la primera muestra
 
-3. **Compara ambos canales:**
+3. **Valida por software:**
 
 | Condición | Resultado |
 |-----------|-----------|
-| Ambos coinciden ±5% | ✅ `pedal_plausible = true` — acelerador funciona normal |
-| Divergencia > 5% durante > 200 ms | ❌ `pedal_plausible = false` — acelerador cortado a 0% |
-| I2C del ADS1115 no responde > 500 ms | ⚠️ Modo degradado — solo canal primario (ADC) |
+| Ambas muestras coinciden (diferencia < 30 counts) | ✅ `pedal_plausible = true` — acelerador funciona normal |
+| Divergencia entre muestras > 30 counts | ❌ `pedal_channels_contradict = true` — señal sospechosa |
+| Valor fuera de rango [30..2800] | ❌ `pedal_plausible = false` — acelerador cortado a 0% |
+| Tasa de cambio > 35% por ciclo 50 ms | ❌ `pedal_plausible = false` — acelerador cortado a 0% |
 
 ### 7.7 Lista de cables — Pedal completo
 
@@ -667,24 +644,18 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 | 3 | Sensor Pin 3 (Señal) | R1 (10 kΩ) entrada | Señal 5V al divisor | 26 AWG |
 | 4 | Nodo R1/R2 | PA3 (STM32) | Señal dividida ~0–2V | 26 AWG, corto |
 | 5 | R2 otro extremo | GND | Referencia del divisor | 26 AWG |
-| 6 | Sensor Pin 3 (Señal) | ADS1115 A0 | Señal 5V directa al ADS1115 | 26 AWG |
-| 7 | ADS1115 VDD | 5V fuente | Alimentación ADS1115 | 26 AWG |
-| 8 | ADS1115 GND | GND común | Masa ADS1115 | 26 AWG |
-| 9 | ADS1115 ADDR | GND | Fija dirección = 0x48 | 26 AWG |
-| 10 | ADS1115 SCL | PB6 (STM32) | Bus I2C reloj | 28 AWG |
-| 11 | ADS1115 SDA | PB7 (STM32) | Bus I2C datos | 28 AWG |
 
-> **Total: 11 cables** para el sistema completo del pedal (5 para divisor + 6 para ADS1115).
+> **Total: 5 cables** para el sistema completo del pedal (sensor + divisor resistivo).
 
 ### 7.8 Pines GPIO del STM32 usados por el pedal
 
 | Pin | Función | ¿Exclusivo del pedal? |
 |-----|---------|----------------------|
-| **PA3** | ADC1_IN4 (canal primario) | ✅ Sí, exclusivo |
-| **PB6** | I2C1_SCL (ADS1115 + TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
-| **PB7** | I2C1_SDA (ADS1115 + TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
+| **PA3** | ADC1_IN4 (canal primario + plausibilidad dual-sample) | ✅ Sí, exclusivo |
+| **PB6** | I2C1_SCL (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
+| **PB7** | I2C1_SDA (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
 
-> **Resultado: Solo 1 pin GPIO adicional** (PA3) es exclusivo del pedal. El ADS1115 reutiliza el bus I2C existente (PB6/PB7) que ya se usa para los sensores de corriente INA226 y el multiplexor TCA9548A. Esto es posible porque el ADS1115 tiene una dirección I2C diferente (0x48) de los demás dispositivos del bus (0x70, 0x40).
+> **Resultado: Solo 1 pin GPIO adicional** (PA3) es exclusivo del pedal. La plausibilidad se realiza por software (dual-sample ADC) sin necesidad de hardware externo adicional. El bus I2C (PB6/PB7) se usa exclusivamente para los sensores de corriente INA226 y el multiplexor TCA9548A.
 
 ---
 

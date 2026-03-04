@@ -377,24 +377,17 @@
 
 **Cálculo:** Ratio = 6.8/(10+6.8) = 0.4048 → 5.0 V × 0.4048 = 2.02 V (máximo absoluto en PA3, bien por debajo de 3.3 V)
 
-#### Canal de Plausibilidad: ADS1115 (I2C — 0x48)
+#### Plausibilidad por Software (sin ADS1115)
 
-| Conexión | De | A (ADS1115) | Componentes |
-|----------|-----|-------------|-------------|
-| Señal pedal | Sensor pin 3 (señal 5 V) | A0 (entrada analógica) | — (sin divisor, el ADS1115 soporta hasta 6.144 V) |
-| I2C SCL | PB6 (bus I2C1 compartido) | SCL | — (ya tiene pull-up del bus) |
-| I2C SDA | PB7 (bus I2C1 compartido) | SDA | — |
-| Dirección | GND | ADDR | Fija dirección a 0x48 |
-| Alimentación | 5 V | VDD | — |
-| GND | GND | GND | — |
+> **CAMBIO:** El ADS1115 ha sido eliminado. La plausibilidad se realiza por software usando el ADC interno del STM32 con doble lectura consecutiva, filtro EMA, validación de rango y límite de tasa de cambio.
 
 ---
 
-### 2.12 Bus I2C — TCA9548A + 6× INA226 + ADS1115
+### 2.12 Bus I2C — TCA9548A + 6× INA226
 
 | Pin LQFP | GPIO | Periférico | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 58 | PB6 | I2C1_SCL | SCL | Bus I2C compartido (TCA9548A, ADS1115) | Resistencia pull-up 4.7 kΩ a 3.3 V |
+| 58 | PB6 | I2C1_SCL | SCL | Bus I2C compartido (TCA9548A, INA226) | Resistencia pull-up 4.7 kΩ a 3.3 V |
 | 59 | PB7 | I2C1_SDA | SDA | Bus I2C compartido | Resistencia pull-up 4.7 kΩ a 3.3 V |
 
 **Configuración I2C:** 400 kHz (Fast Mode), Open-Drain, AF4
@@ -412,7 +405,6 @@
 | Dispositivo | Dirección I2C | Función |
 |------------|---------------|---------|
 | TCA9548A | 0x70 | Multiplexor I2C (8 canales) |
-| ADS1115 | 0x48 | ADC pedal (plausibilidad) |
 | INA226 ×6 | 0x40 (detrás del mux, canales 0–5) | Medición de corriente/tensión |
 
 **Cada INA226 necesita:**
@@ -619,7 +611,6 @@
 | 2 | TJA1051 | Transceiver CAN (uno por MCU) |
 | 1 | TCA9548A | Multiplexor I2C |
 | 6 | INA226 | Sensores de corriente/tensión |
-| 1 | ADS1115 | ADC externo para plausibilidad del pedal |
 | 1 | MCP23017 | I/O expander para shifter |
 
 ---

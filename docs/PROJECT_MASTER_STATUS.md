@@ -296,14 +296,14 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 |---|---|---|
 | 4× wheel speed via EXTI pulse counting + software debounce (1 ms) | `Wheel_IRQDebounced()`, `Wheel_ComputeSpeed()` | `Core/Src/sensor_manager.c` |
 | Steering center inductive sensor (PB5/EXTI5) | `SteeringCenter_IRQHandler()`, `SteeringCenter_Detected()` | `Core/Src/sensor_manager.c` |
-| Pedal dual-channel (primary ADC1 PA3 12-bit + plausibility ADS1115 I2C 16-bit) | `Pedal_Update()`, `Pedal_ReadADC()`, `Pedal_ReadADS1115()` | `Core/Src/sensor_manager.c` |
+| Pedal (ADC1 PA3 12-bit, dual-sample + software plausibility) | `Pedal_Update()`, `Pedal_ReadDualSample()`, `Pedal_RawToPercent()` | `Core/Src/sensor_manager.c` |
 | 6× INA226 current/voltage via TCA9548A I2C multiplexer | `Current_ReadAll()`, `TCA9548A_SelectChannel()`, `INA226_ReadReg()` | `Core/Src/sensor_manager.c` |
 | Per-channel shunt resistance (1 mΩ motor, 0.5 mΩ battery) | `INA226_SHUNT_MOHM_*` constants in channel selection logic | `Core/Src/sensor_manager.c` |
 | 5× DS18B20 temperature via OneWire (bit-bang, ROM search, CRC-8) | `OW_SearchAll()`, `OW_ReadTemperature()`, `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` |
 | DS18B20 hot-plug detection (periodic ROM re-enumeration every 10 s) | `Temperature_PeriodicRescan()` called from 1000 ms tier | `Core/Src/sensor_manager.c`, `Core/Src/main.c` |
 | DS18B20 stale data cleanup on sensor removal (temperatures zeroed for removed indices) | `OW_SearchAll()` clears `temperatures[i]` for `i >= ds18b20_count` | `Core/Src/sensor_manager.c` |
 | DS18B20 sensor count accessor (`Temperature_GetCount()`) | Exposed in heartbeat status_flags bits 3-5 | `Core/Src/sensor_manager.c`, `Core/Inc/sensor_manager.h` |
-| Dual-channel redundant pedal (internal ADC1 + ADS1115 I2C cross-validation, ±5%, 200 ms fault) | `Pedal_ReadADC()`, `Pedal_ReadADS1115()`, `Pedal_IsPlausible()`, `Pedal_IsContradictory()` | `Core/Src/sensor_manager.c` |
+| Pedal plausibility (internal ADC1 dual-sample + software validation: consistency, EMA, range, rate-of-change) | `Pedal_ReadDualSample()`, `Pedal_RawToPercent()`, `Pedal_IsPlausible()`, `Pedal_IsContradictory()` | `Core/Src/sensor_manager.c` |
 | I2C bus recovery (NXP AN10216, SCL cycling, 16 toggles) | `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` |
 | I2C failure escalation (3 fails → recovery, 2 recoveries → SAFE) | `i2c_fail_count`, `i2c_recovery_attempts` logic | `Core/Src/sensor_manager.c` |
 | E6B2-CWZ6C encoder read-only interface (hardware integrated, not used for control) | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_Reset()` | `Core/Src/encoder_reader.c` |
@@ -363,7 +363,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Limitation | Evidence | File |
 |---|---|---|
 | **Steering PID is P-only** (kp=0.09, ki=0.0, kd=0.0) — no integral or derivative terms | `steering_pid = {0.09f, 0.0f, 0.0f, ...}` | `Core/Src/motor_control.c` line 199 |
-| ~~**Pedal is single-channel ADC**~~ — ~~no redundant sensor or cross-check~~ | ✅ RESOLVED: Dual-channel implemented — primary internal ADC1 (PA3) + plausibility ADS1115 I2C ADC with cross-validation (±5%, 200 ms divergence timeout) | `Core/Src/sensor_manager.c` |
+| ~~**Pedal is single-channel ADC**~~ — ~~no redundant sensor or cross-check~~ | ✅ RESOLVED: Implemented — internal ADC1 (PA3) dual-sample + software plausibility (consistency ±30 counts, EMA α=0.3, range validation, rate-of-change 35%/50ms) | `Core/Src/sensor_manager.c` |
 | **OneWire bit-bang timing is approximate** — busy-wait loop calibrated for 170 MHz | `OW_DelayUs()` uses NOP loop: `us * 42` | `Core/Src/sensor_manager.c` line 341 |
 | **DS18B20 hot-plug rescan is blocking** — `Temperature_PeriodicRescan()` calls `OW_SearchAll()` which uses busy-wait OneWire timing; rescan every 10 s adds ~5 ms blocking time | `Temperature_PeriodicRescan()` with `OW_RESCAN_INTERVAL_MS = 10000` | `Core/Src/sensor_manager.c` |
 | **Fallback single-sensor read when no ROMs discovered** — `Temperature_ReadAll()` reads only `temperatures[0]` via Skip ROM | Fallback branch in `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` lines 561–573 |
@@ -396,7 +396,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | 3 | **Steering PID tuning (I and D terms)** — PID structure supports ki/kd but both are 0.0; code path exists in `PID_Compute()` | Steering | Hardware testing with actual steering load | `steering_pid` in `motor_control.c` | ❌ PENDING |
 | ~~4~~ | ~~**Calibration persistence (STM32)**~~ | ~~Steering / Sensors~~ | ~~STM32 flash or EEPROM driver~~ | ~~`Steering_Init()`, `SteeringCentering_Complete()`~~ | ✅ NOT NEEDED — by design, STM32 recomputes calibration from hardware sensors on each boot; all user-facing persistence is handled by ESP32-S3 NVS |
 | ~~5~~ | ~~**Service mode persistence (STM32)**~~ | ~~Service Mode~~ | ~~STM32 flash or EEPROM driver~~ | ~~`ServiceMode_Init()`~~ | ✅ NOT NEEDED — service mode defaults to all-enabled on boot (safe default); ESP32-S3 NVS is the single persistence authority for user configuration |
-| ~~6~~ | ~~**Redundant pedal sensor**~~ — ~~single ADC channel with no cross-check~~ | ~~Sensors / Safety~~ | ~~Second ADC channel or hall sensor hardware~~ | ~~`Pedal_Update()` in `sensor_manager.c`~~ | ✅ RESOLVED — Dual-channel: internal ADC1 (PA3) + ADS1115 I2C with ±5% cross-validation and 200 ms divergence timeout |
+| ~~6~~ | ~~**Redundant pedal sensor**~~ — ~~single ADC channel with no cross-check~~ | ~~Sensors / Safety~~ | ~~Second ADC channel or hall sensor hardware~~ | ~~`Pedal_Update()` in `sensor_manager.c`~~ | ✅ RESOLVED — Internal ADC1 (PA3) dual-sample + software plausibility (consistency, EMA, range, rate-of-change) |
 | ~~7~~ | ~~**ESP32 mode/gear CAN feedback to DriveScreen**~~ | ~~Display / UI~~ | ~~—~~ | ~~—~~ | ✅ RESOLVED — Gear from physical shifter (`shifter::getGearRaw()`); mode flags confirmed via STM32 heartbeat echo (status_flags bits 1-2) and synced in `main.cpp`; ACK visual feedback on DriveScreen |
 | ~~8~~ | ~~**Hot-plug DS18B20 detection**~~ | ~~Sensors~~ | ~~—~~ | ~~`Sensor_Init()` in `sensor_manager.c`~~ | ✅ RESOLVED — `Temperature_PeriodicRescan()` every 10 s in 1000 ms tier |
 | ~~9~~ | ~~**Engineering screen exit mechanism**~~ | ~~Display / UI~~ | ~~—~~ | ~~`screen_manager.cpp`~~ | ✅ RESOLVED — EXIT button on main menu, `exitRequested_` flag resets `engineeringActive_` |
@@ -462,7 +462,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 **Goals:**
 - ~~Add ESP32 obstacle sensor driver to populate CAN ID 0x208~~ ✅ DONE
 - ~~Implement CAN ID 0x209 parsing on STM32~~ ✅ DONE
-- ~~Evaluate and implement redundant pedal sensor path~~ ✅ DONE (dual-channel: internal ADC1 + ADS1115 I2C with cross-validation)
+- ~~Evaluate and implement redundant pedal sensor path~~ ✅ DONE (internal ADC1 dual-sample + software plausibility)
 - Evaluate PID I-term and D-term for steering
 - ~~Add periodic DS18B20 ROM search for hot-plug detection~~ ✅ DONE
 

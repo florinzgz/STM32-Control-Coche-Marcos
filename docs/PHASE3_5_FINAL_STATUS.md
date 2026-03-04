@@ -153,7 +153,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 | TIM2 | Encoder quadrature | Ninguno |
 | TIM8 CH3 | Steering PWM 20kHz | Ninguno |
 | ADC1 IN4 | Pedal | Ninguno |
-| I2C1 | INA226/TCA9548A/ADS1115 | Ninguno (bus compartido, muxed) |
+| I2C1 | INA226/TCA9548A | Ninguno (bus compartido, muxed) |
 | FDCAN1 | CAN bus | Ninguno |
 | IWDG | Watchdog 500ms | Ninguno |
 
@@ -174,7 +174,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 | DS18B20 hot-plug detection | ✅ | `Core/Src/sensor_manager.c` L776 | 10s rescan + stale cleanup |
 | DS18B20 sensor count accessor | ✅ | `Core/Inc/sensor_manager.h` | `Temperature_GetCount()` |
 | Steering PID I/D tuning | ⏳ | `Core/Src/motor_control.c` | ki=0, kd=0 (necesita hardware) |
-| Redundant pedal sensor | ✅ | `Core/Src/sensor_manager.c` | ADS1115 cross-validation |
+| Redundant pedal sensor | ✅ | `Core/Src/sensor_manager.c` | Dual-sample ADC + plausibilidad software |
 
 ### Phase 4 — Driver Interaction (~90%)
 

@@ -51,7 +51,6 @@ El firmware actual ejecuta 18 módulos C compilados con ARM GCC (`arm-none-eabi-
 |-----------|-------------|---------------|---------|
 | 0x70 | TCA9548A | — | Multiplexor I2C 8 canales |
 | 0x40 | INA226 ×6 | Canales 0–5 | Sensores corriente (1 mΩ/0.5 mΩ shunt) |
-| 0x48 | ADS1115 | Directo | ADC 16-bit pedal plausibilidad |
 
 **Mensajes CAN activos (27 tipos):**
 
@@ -258,7 +257,6 @@ Antes de asignar cualquier pin libre:
 | FDCAN transceiver (TJA1050/1051) | 10 mA | 75 mA | 5 V |
 | TCA9548A | 0.01 mA | 0.1 mA | 3.3 V |
 | INA226 ×6 | 2 mA | 3 mA | 3.3 V |
-| ADS1115 | 0.15 mA | 0.2 mA | 3.3 V |
 | DS18B20 ×5 | 5 mA | 7.5 mA | 3.3 V |
 | Pull-ups I2C (4.7 kΩ ×2) | 1.4 mA | 1.4 mA | 3.3 V |
 | BTS7960 ×5 (lógica) | 25 mA | 50 mA | 5 V |
@@ -636,9 +634,9 @@ Antes de asignar cualquier pin libre:
 
 ### 7.4 Validación de buses compartidos
 
-**I2C1 — bus compartido con TCA9548A, INA226 ×6, ADS1115:**
+**I2C1 — bus compartido con TCA9548A, INA226 ×6:**
 
-1. Medir tiempo total de `Current_ReadAll()` + `Pedal_Update()` (ADS1115)
+1. Medir tiempo total de `Current_ReadAll()` (pedal ya no usa I2C)
 2. Verificar que no excede 5 ms por ciclo de 50 ms (20 Hz)
 3. Cada nuevo dispositivo I2C añade ~0.5–1 ms por transacción
 4. Si >7 dispositivos directos (sin TCA): considerar segundo bus I2C
