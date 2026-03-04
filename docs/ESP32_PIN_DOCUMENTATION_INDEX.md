@@ -86,6 +86,24 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 
 ---
 
+### 5. **LLAVE_CONTACTO_ENCENDIDO_APAGADO.md** 🔑 CIRCUITO LLAVE DE CONTACTO
+**Guía completa del circuito de la llave de contacto** (encendido y apagado del sistema).
+
+**Contenido:**
+- ✅ Conexión física de la llave al ESP32-S3 (GPIO 40/41)
+- ✅ Divisor de tensión para adaptar 12 V → 3.3 V
+- ✅ Circuito de retención de alimentación (delay relay)
+- ✅ Secuencia completa de encendido paso a paso
+- ✅ Secuencia de relés STM32 (MAIN → TRAC → DIR)
+- ✅ Flujo de corriente hasta los motores de tracción
+- ✅ Secuencia completa de apagado
+- ✅ Lista de componentes del circuito de llave
+- ✅ Preguntas frecuentes
+
+**Ideal para:** Entender cómo encender y apagar el sistema, cablear la llave de contacto
+
+---
+
 ## 🎯 ¿Qué Documento Usar?
 
 ### Para Montar desde Cero
@@ -93,6 +111,7 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 2. Leer **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** (completo, incluye CAN)
 3. Seguir **DIAGRAMA_PINES_VISUAL.md** (paso a paso con diagramas)
 4. Tener **CONEXIONES_RAPIDAS_ESP32.md** a mano (referencia rápida)
+5. Leer **LLAVE_CONTACTO_ENCENDIDO_APAGADO.md** para el circuito de la llave
 
 ### Para Verificar Conexiones
 - Usar **CONEXIONES_RAPIDAS_ESP32.md** (tablas de pines y valores)
@@ -181,6 +200,7 @@ pandoc CONEXIONES_RAPIDAS_ESP32.md -o referencia_rapida.pdf
 - [x] Lista de materiales incluida
 - [x] Procedimiento de verificación incluido
 - [x] Troubleshooting incluido
+- [x] Circuito de llave de contacto documentado (encendido/apagado)
 
 ---
 
