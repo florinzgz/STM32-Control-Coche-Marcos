@@ -90,30 +90,32 @@ resistivo** para reducir la señal:
 
 **Si la llave conmuta 12 V:**
 
+> ⚠️ **EJEMPLO INCORRECTO — NO USAR estos valores:**
+
 | Componente | Valor | Función |
 |------------|-------|---------|
 | R1 | 10 kΩ | Resistencia superior del divisor |
 | R2 | 10 kΩ | Resistencia inferior (a GND) + pull-down |
 
-Cálculo: V_GPIO40 = 12 V × 10k / (10k + 10k) = **6 V** → aún supera 3.3 V.
+Cálculo: V_GPIO40 = 12 V × 10k / (10k + 10k) = **6 V** → ❌ **PELIGROSO: supera 3.3 V, destruiría el pin GPIO del ESP32.**
 
-Para señal de 12 V, usar valores que aseguren < 3.3 V:
+> ⚠️ **EJEMPLO INCORRECTO — NO USAR estos valores:**
 
 | Componente | Valor | Función |
 |------------|-------|---------|
 | R1 | 22 kΩ | Resistencia superior del divisor |
 | R2 | 10 kΩ | Resistencia inferior (a GND) |
 
-Cálculo: V_GPIO40 = 12 V × 10k / (22k + 10k) = **3.75 V** → Todavía alto.
+Cálculo: V_GPIO40 = 12 V × 10k / (22k + 10k) = **3.75 V** → ❌ **INSEGURO: sigue superando 3.3 V máximo absoluto del ESP32.**
 
-**Valores recomendados (margen seguro):**
+**✅ Valores recomendados (margen seguro):**
 
 | Componente | Valor | Función |
 |------------|-------|---------|
 | R1 | 33 kΩ | Resistencia superior del divisor |
 | R2 | 10 kΩ | Resistencia inferior (a GND) |
 
-Cálculo: V_GPIO40 = 12 V × 10k / (33k + 10k) = **2.79 V** ✅ (< 3.3 V, > 2.47 V umbral HIGH)
+Cálculo: V_GPIO40 = 12 V × 10k / (33k + 10k) = **2.79 V** ✅ (< 3.3 V máximo absoluto; > 2.48 V umbral HIGH típico del ESP32-S3, ~0.75 × VDD según datasheet)
 
 > **Referencia firmware:** `power_manager.h` línea 10: `PIN_IGNITION_SENSE = 40`  
 > **Referencia docs:** `LISTADO_PINES_COMPLETO.md` líneas 145-153
