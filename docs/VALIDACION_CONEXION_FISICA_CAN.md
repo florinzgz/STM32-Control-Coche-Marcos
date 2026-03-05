@@ -231,7 +231,51 @@ directamente contra el código fuente del firmware:
 
 ---
 
-## 9. Referencias
+## 9. Seguridad de voltaje — TJA1051 estándar vs TJA1051T/3
+
+> ⚠️ **ATENCIÓN:** Si se alimentan ambos transceivers con 5 V, el riesgo de dañar
+> la ESP32 y la STM32 **depende de qué variante del TJA1051 se utilice.**
+
+### TJA1051T/3 (variante con sufijo /3) — SEGURO
+
+La variante TJA1051T**/3** tiene niveles lógicos de E/S de **3.3 V** aunque VCC
+sea 5 V. La salida RXD (pin 4) nunca supera 3.3 V → **no hay riesgo** de dañar
+ni la ESP32 ni la STM32. Este es el transceiver especificado en este proyecto.
+
+### TJA1051 estándar (sin /3) — PELIGRO para la ESP32
+
+Si se usa el TJA1051 **sin** el sufijo /3, la salida RXD será de **5 V**:
+
+| MCU | Pin RX | ¿Tolera 5 V? | Consecuencia sin protección |
+|-----|--------|---------------|----------------------------|
+| **ESP32-S3** | GPIO5 | ❌ No (máx 3.6 V) | **Destrucción del GPIO o del chip** |
+| **STM32G474RE** | PB8 | ✅ Sí (pin FT) | Seguro, pero recomendable proteger |
+
+### Solución si se tiene el TJA1051 estándar
+
+Añadir un **divisor resistivo** (1 kΩ en serie + 2 kΩ a GND) en la línea RXD
+de **cada** transceiver para bajar los 5 V a 3.3 V:
+
+```
+TJA1051 pin 4 (RXD, 5V) ──── [1 kΩ] ──┬──→ GPIO del MCU (3.3 V)
+                                        │
+                                     [2 kΩ]
+                                        │
+                                       GND
+
+    Vout = 5 V × 2 kΩ / (1 kΩ + 2 kΩ) = 3.33 V ✅
+```
+
+La línea TXD (MCU → transceiver) **no necesita divisor** porque 3.3 V es
+suficiente para que el TJA1051 detecte un nivel HIGH (V_IH min = 2.0 V).
+
+> **Recomendación:** Usar siempre la variante **TJA1051T/3**. Si se ha comprado
+> el TJA1051 estándar, añadir los divisores resistivos **antes de alimentar**.
+> Consultar `docs/ESP32_STM32_CAN_CONNECTION.md` para el diagrama completo.
+
+---
+
+## 10. Referencias
 
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Guía completa de conexión CAN
 - `docs/CAN_BUS_AUDIT_REPORT.md` — Auditoría firmware y protocolo CAN
