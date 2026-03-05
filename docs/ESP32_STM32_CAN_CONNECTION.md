@@ -153,8 +153,8 @@ During transmission (use oscilloscope):
 
 ## Voltage Safety — TJA1051 vs TJA1051T/3
 
-> **Pregunta frecuente:** *Si los dos TJA1051 se alimentan con 5 V, ¿existe
-> peligro de quemar la ESP32 y la STM32 por las líneas RX/TX?*
+> **FAQ:** *If both TJA1051 are powered at 5 V, is there a risk of burning
+> the ESP32 and STM32 through the RX/TX lines?*
 
 ### Respuesta corta
 
@@ -230,9 +230,9 @@ Lado STM32 (TJA1051 #2 estándar):
 ```
 
 El TJA1051 acepta 3.3 V en TXD porque su umbral de entrada HIGH es ~2.0 V
-(datasheet NXP: V_IH = 0.7 × VCC = 0.7 × 5 = 3.5 V típico, pero el
-TJA1051 especifica V_IH min = 2.0 V). Un nivel lógico de 3.3 V supera
-el umbral y se detecta correctamente como HIGH.
+(datasheet NXP: V_IH = 0.7 × VCC = 0.7 × 5 = 3.5 V typical, but the
+TJA1051 specifies V_IH min = 2.0 V). A 3.3 V logic level exceeds the
+threshold and is correctly detected as HIGH.
 
 ### Diagrama completo — TJA1051 estándar con divisores resistivos
 
