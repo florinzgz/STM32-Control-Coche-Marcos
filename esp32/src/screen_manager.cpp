@@ -134,6 +134,10 @@ void ScreenManager::activatePinScreen() {
     Serial.println("[PIN] Battery long press → PIN screen");
 }
 
+bool ScreenManager::isInitialScreen() const {
+    return currentState_ == can::SystemState::BOOT;
+}
+
 Screen* ScreenManager::screenForState(can::SystemState state) {
     switch (state) {
         case can::SystemState::BOOT:      return &bootScreen_;

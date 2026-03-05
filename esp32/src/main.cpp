@@ -64,6 +64,23 @@ static void psram_diagnostic() {
     Serial.println("==========================");
 }
 
+// =============================================================================
+// Runtime Overlay — Muestra PSRAM, RAM, FPS y tiempo de render en pantalla
+// =============================================================================
+static void draw_runtime_overlay(TFT_eSPI& tft, uint32_t frameTimeMs) {
+    // Fondo semitransparente
+    tft.fillRect(0, 0, 160, 60, TFT_BLACK);
+
+    // PSRAM y RAM
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawString("PSRAM: " + String(ESP.getFreePsram() / 1024) + " KB", 4, 4);
+    tft.drawString("RAM:   " + String(ESP.getFreeHeap() / 1024) + " KB", 4, 20);
+
+    // FPS y tiempo de render
+    uint32_t fps = frameTimeMs > 0 ? 1000 / frameTimeMs : 0;
+    tft.drawString("FPS: " + String(fps), 4, 36);
+}
+
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
@@ -97,6 +114,10 @@ static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, b
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
+
+// ---- Runtime overlay state ----
+static bool     showOverlay       = true;    // overlay visible on initial screen only
+static uint32_t lastFrameStart    = 0;
 
 // ---- Audio event tracking ----
 static uint8_t  lastAudioSystemState = 0;     // detect state transitions for error alert
@@ -480,9 +501,20 @@ void loop() {
     }
 
     // Update HMI screen based on current vehicle state
+    lastFrameStart = millis();
     RTMON_UI_BEGIN();
     screenManager.update(vehicleData);
     RTMON_UI_END();
+
+    // Mostrar overlay SOLO en la pantalla inicial
+    {
+        uint32_t frameTime = millis() - lastFrameStart;
+        if (showOverlay && screenManager.isInitialScreen()) {
+            draw_runtime_overlay(tft, frameTime);
+        } else if (showOverlay) {
+            showOverlay = false;
+        }
+    }
 
     // ---- Shifter gear update ----
     // Poll MCP23017, send CAN 0x102 on gear change.

@@ -50,6 +50,10 @@ public:
     /// Use to suppress normal top-bar touch handling in main loop.
     bool isBlockingInput() const { return pinActive_ || engineeringActive_; }
 
+    /// Returns true when the current screen is the initial boot screen
+    /// (COCHE MARCOS / HMI v1.0 / CAN: WAITING / SENSOR: WAITING).
+    bool isInitialScreen() const;
+
 private:
     Screen* screenForState(can::SystemState state);
     void    activatePinScreen();
