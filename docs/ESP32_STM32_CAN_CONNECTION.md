@@ -151,6 +151,119 @@ During transmission (use oscilloscope):
 | High error rate | Wire too long | Reduce cable length or lower bitrate |
 | No activity | Silent mode active | Connect TJA1051 pin 8 (S) to GND |
 
+## Voltage Safety — TJA1051 vs TJA1051T/3
+
+> **FAQ:** *If both TJA1051 are powered at 5 V, is there a risk of burning
+> the ESP32 and STM32 through the RX/TX lines?*
+
+### Respuesta corta
+
+Depende de **qué variante** del TJA1051 se utilice:
+
+| Variante | VCC | Nivel lógico RXD/TXD | ¿Seguro para ESP32 (3.3 V)? | ¿Seguro para STM32G474RE? |
+|----------|-----|----------------------|------------------------------|---------------------------|
+| **TJA1051T/3** (con sufijo /3) | 5 V | **3.3 V** | ✅ Sí — sin protección extra | ✅ Sí |
+| **TJA1051** (sin sufijo /3) | 5 V | **5 V** | ❌ **NO** — daña los GPIO | ⚠️ PB8 tolera 5 V (FT), pero PB9 (salida) está bien |
+
+### ¿Por qué la variante /3 es segura?
+
+El sufijo **/3** indica que el transceiver tiene **niveles lógicos de E/S a 3.3 V**
+aunque su alimentación VCC sea de 5 V. Internamente, los buffers de RXD (salida
+hacia el MCU) se limitan a 3.3 V. Los pines GPIO del ESP32-S3 tienen un voltaje
+máximo absoluto de **3.6 V**; un nivel de 3.3 V está dentro del rango seguro.
+
+### ¿Qué pasa si se usa el TJA1051 estándar (sin /3) a 5 V?
+
+La salida RXD del transceiver será de **5 V**, lo que:
+
+- **ESP32-S3**: Los GPIO toleran un máximo de **3.6 V** (valor absoluto del
+  datasheet). Aplicar 5 V en GPIO5 (CAN_RX) **destruirá el pin** o **dañará
+  permanentemente el chip**.
+- **STM32G474RE**: El pin PB8 (FDCAN1_RX) es un pin **FT (Five-volt Tolerant)**,
+  por lo que técnicamente soporta 5 V. Sin embargo, el pin de salida PB9
+  (FDCAN1_TX) es de 3.3 V, lo cual es aceptado por la entrada TXD del TJA1051
+  (umbral bajo ≈ 0.8 V, umbral alto ≈ 2.0 V).
+
+### Solución recomendada
+
+**Usar TJA1051T/3** (variante con /3) es la solución más segura y sencilla.
+No se requiere ningún componente extra.
+
+### Si solo se dispone del TJA1051 estándar (sin /3)
+
+Añadir un **divisor resistivo** en la línea RXD (salida del transceiver → entrada
+del MCU) para reducir los 5 V a 3.3 V. **Solo la línea RXD necesita protección**;
+la línea TXD (MCU → transceiver) ya es de 3.3 V y el transceiver la acepta.
+
+#### Divisor resistivo en RXD — conexiones exactas
+
+```
+Lado ESP32 (TJA1051 #1 estándar):
+
+  TJA1051 pin 4 (RXD) ──── [1 kΩ] ──┬── GPIO5 (CAN_RX) del ESP32
+                                      │
+                                   [2 kΩ]
+                                      │
+                                     GND
+
+  Vout = 5 V × 2 kΩ / (1 kΩ + 2 kΩ) = 3.33 V  ✅ seguro
+
+
+Lado STM32 (TJA1051 #2 estándar):
+
+  TJA1051 pin 4 (RXD) ──── [1 kΩ] ──┬── PB8 (FDCAN1_RX) del STM32
+                                      │
+                                   [2 kΩ]
+                                      │
+                                     GND
+
+  Nota: PB8 del STM32G474RE tolera 5 V (FT), por lo que el divisor
+  es opcional aquí, pero se recomienda añadirlo igualmente para
+  mantener un diseño uniforme y seguro.
+```
+
+#### Línea TXD — NO necesita divisor
+
+```
+  GPIO4 (3.3 V) ──────────────→ TJA1051 pin 1 (TXD)   ← funciona sin cambios
+  PB9   (3.3 V) ──────────────→ TJA1051 pin 1 (TXD)   ← funciona sin cambios
+```
+
+El TJA1051 acepta 3.3 V en TXD porque su umbral de entrada HIGH es ~2.0 V
+(datasheet NXP: V_IH = 0.7 × VCC = 0.7 × 5 = 3.5 V typical, but the
+TJA1051 specifies V_IH min = 2.0 V). A 3.3 V logic level exceeds the
+threshold and is correctly detected as HIGH.
+
+### Diagrama completo — TJA1051 estándar con divisores resistivos
+
+```
+ESP32-S3           TJA1051 #1 (estándar)      Bus CAN              TJA1051 #2 (estándar)         STM32G474RE
+
+GPIO4 (TX) ──────→ TXD [1]                                          TXD [1] ←────── PB9 (TX)
+                   RXD [4]──[1kΩ]──┬──→ GPIO5  [7] CANH ──┬────────────────┬── CANH [7]  RXD [4]──[1kΩ]──┬──→ PB8 (RX)
+     +5V ────────→ VCC [3] [2kΩ]  │            │          │                │             VCC [3]  [2kΩ]  │
+     GND ────────→ GND [2]  │     │         [120Ω]     [120Ω]             │             GND [2]   │     │
+     GND ────────→   S [8]  GND   │  [6] CANL ──┴────────────────┴── CANL [6]   S [8] ←── GND    GND   │
+                      │           │                                           │                         │
+                    100nF ↔ GND   │                                         100nF ↔ GND                │
+                                  │                                                                     │
+                             (3.3 V seguro)                                                   (3.3 V seguro)
+
+GND ESP32 ──────────────────────────────────────────────────────────────────────────────── GND STM32
+                                    (cable GND común — OBLIGATORIO)
+```
+
+### Resumen de qué variante requiere qué componentes
+
+| Variante | Divisor en RXD (ESP32) | Divisor en RXD (STM32) | Componentes extras |
+|----------|------------------------|------------------------|--------------------|
+| **TJA1051T/3** | No necesario | No necesario | Ninguno |
+| **TJA1051 estándar** | **Sí — 1 kΩ + 2 kΩ** | Opcional (PB8 tolera 5 V) pero recomendado | 2× 1 kΩ + 2× 2 kΩ |
+
+> ⚠️ **Recomendación del proyecto:** Usar siempre la variante **TJA1051T/3** para
+> evitar componentes extra y riesgo de daño. Si se ha comprado el TJA1051 estándar
+> por error, añadir los divisores resistivos antes de alimentar el sistema.
+
 ## Safety Notes
 
 ⚠️ **Critical**: This is a safety-critical vehicle control system.
