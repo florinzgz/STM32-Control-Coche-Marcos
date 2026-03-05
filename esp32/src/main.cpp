@@ -31,6 +31,39 @@
 #include "config_store.h"
 #include "traction_switch.h"
 
+// =============================================================================
+// PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
+// =============================================================================
+static void psram_diagnostic() {
+    Serial.println("=== PSRAM DIAGNOSTIC ===");
+
+    if (psramInit()) {
+        Serial.println("PSRAM OK: inicializada correctamente");
+    } else {
+        Serial.println("PSRAM ERROR: no detectada o fallo de inicialización");
+        return;
+    }
+
+    size_t total = ESP.getPsramSize();
+    size_t libre = ESP.getFreePsram();
+
+    Serial.printf("PSRAM total: %d bytes\n", total);
+    Serial.printf("PSRAM libre: %d bytes\n", libre);
+
+    // Reservar la mitad de la PSRAM disponible (seguro para N16R8: 8MB)
+    size_t testSize = total / 2;
+    uint8_t* block = (uint8_t*) ps_malloc(testSize);
+
+    if (block) {
+        Serial.printf("PSRAM TEST: asignación de %d bytes OK\n", testSize);
+        free(block);
+    } else {
+        Serial.printf("PSRAM TEST: fallo asignando %d bytes\n", testSize);
+    }
+
+    Serial.println("==========================");
+}
+
 // CAN transceiver pins (TJA1051 — see platformio.ini header)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
@@ -242,6 +275,7 @@ static void sendModeCommand(uint8_t modeFlags) {
 void setup() {
     Serial.begin(115200);
     delay(500);
+    psram_diagnostic();
 
     // Reset cause reporting
     esp_reset_reason_t reason = esp_reset_reason();
