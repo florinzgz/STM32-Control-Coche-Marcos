@@ -1440,7 +1440,8 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
     uint32_t now = HAL_GetTick();
 
     /* ---- Physical plausibility validation ---- */
-    if (obstacle_data_valid && obstacle_prev_dist_tick > 0) {
+    if (obstacle_data_valid && obstacle_prev_dist_tick > 0 &&
+        obstacle_prev_distance != 0xFFFF) {
         uint32_t dt_ms = now - obstacle_prev_dist_tick;
         if (dt_ms > 0 && dt_ms < 5000) {
             /* Max plausible change = (max_approach_rate) × dt */
