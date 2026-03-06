@@ -125,6 +125,15 @@ latex/
 *.sdf
 *.VC.db
 
+# ===========================
+# Test binaries (host-compiled)
+# ===========================
+test_math_safety
+test_error_log
+test_service_mode
+test_steering_cal_store
+test_eps_params
+
 # Pero mantener archivos esenciales
 !.gitignore
 !README.md
