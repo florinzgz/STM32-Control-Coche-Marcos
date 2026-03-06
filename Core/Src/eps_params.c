@@ -18,6 +18,7 @@
 #include "eps_params.h"
 #include "stm32g4xx_hal.h"
 #include <string.h>
+#include <math.h>
 
 /* ---- Flash layout ----
  * STM32G474RE: 512 KB flash, 128 pages of 4 KB each.
@@ -125,6 +126,10 @@ const eps_params_t *EPS_Params_Get(void)
 bool EPS_Params_Set(eps_param_id_t id, float value)
 {
     if (id >= EPS_PARAM_COUNT) return false;
+
+    /* Reject NaN and Inf for all parameters — corrupt values would
+     * propagate through the EPS control loop into motor torque.     */
+    if (isnan(value) || isinf(value)) return false;
 
     /* Reject zero or negative values for parameters used as divisors
      * in the EPS control loop (motor_control.c Steering_ControlLoop).

@@ -704,10 +704,22 @@ static float OW_ReadTemperature(uint8_t idx)
     }
 
     /* CRC check on scratchpad */
-    if (OW_CRC8(scratch, 8) != scratch[8]) return -999.0f;
+    if (OW_CRC8(scratch, 8) != scratch[8]) {
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        return 0.0f;
+    }
 
     int16_t raw = (int16_t)((scratch[1] << 8) | scratch[0]);
-    return (float)raw / 16.0f;
+    float temp = (float)raw / 16.0f;
+
+    /* DS18B20 operating range: −55 °C to +125 °C.
+     * Values outside this range indicate corrupted data.            */
+    if (temp < -55.0f || temp > 125.0f) {
+        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+        return 0.0f;
+    }
+
+    return temp;
 }
 
 void Temperature_StartConversion(void)
@@ -729,7 +741,17 @@ void Temperature_ReadAll(void)
         uint8_t lsb = OW_ReadByte();
         uint8_t msb = OW_ReadByte();
         int16_t raw = (int16_t)((msb << 8) | lsb);
-        temperatures[0] = (float)raw / 16.0f;
+        float temp = (float)raw / 16.0f;
+
+        /* DS18B20 operating range: −55 °C to +125 °C.
+         * Values outside this range indicate corrupted data.
+         * Must match the validation in OW_ReadTemperature().        */
+        if (temp < -55.0f || temp > 125.0f) {
+            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
+            temperatures[0] = 0.0f;
+        } else {
+            temperatures[0] = temp;
+        }
         return;
     }
 

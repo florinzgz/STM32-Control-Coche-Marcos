@@ -1426,6 +1426,14 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
     uint8_t  health  = data[3];
     uint8_t  counter = data[4];
 
+    /* Reject sentinel value 0xFFFF — means "no data" from the sensor.
+     * Treat as implausible and do not update the validated distance.   */
+    if (dist == 0xFFFF) {
+        obstacle_plausible = 0;
+        obstacle_last_rx_tick = HAL_GetTick();
+        return;
+    }
+
     /* ---- Stale-data detection (rolling counter) ---- */
     if (obstacle_data_valid && counter == obstacle_last_counter) {
         if (obstacle_stale_count < 255) obstacle_stale_count++;
