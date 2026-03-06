@@ -61,7 +61,7 @@
 | Relay power sequencing | 469–500 | ✅ SAFE — Staged with settle delays; tick arithmetic correct |
 | Battery voltage fault detect | 1277–1281 | ✅ SAFE — 0 V correctly treated as sensor failure |
 | Obstacle scale interpolation | 1668–1681 | ✅ SAFE — Discrete classification; no overflow |
-| Stuck-sensor detection (obstacle) | 1468 | ✅ SAFE — Sentinel `0xFFFF` guard present |
+| Stuck-sensor detection (obstacle) | 1469 | ✅ SAFE — Sentinel `0xFFFF` guard already present (unlike the plausibility check at line 1443, which was missing it — see bug 3.1) |
 
 ### 1.5 Sensor Manager (`sensor_manager.c`)
 
