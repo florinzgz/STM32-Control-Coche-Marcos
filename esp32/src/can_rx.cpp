@@ -40,15 +40,13 @@ static inline uint32_t readU32LE(const uint8_t* buf) {
 // -------------------------------------------------------------------------
 
 static void decodeHeartbeat(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 4) return;
+    if (f.data_length_code < 5) return;
     vehicle::HeartbeatData hb;
     hb.aliveCounter = f.data[0];
     hb.systemState  = static_cast<can::SystemState>(f.data[1]);
     hb.faultFlags   = f.data[2];
     hb.errorCode    = f.data[3];
-    if (f.data_length_code >= 5) {
-        hb.statusFlags = f.data[4];
-    }
+    hb.statusFlags  = f.data[4];
     hb.timestampMs  = millis();
     data.setHeartbeat(hb);
 }
@@ -107,10 +105,10 @@ static void decodeSteering(const CanFrame& f, vehicle::VehicleData& data) {
 static void decodeTraction(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code < 4) return;
     vehicle::TractionData td;
-    td.scale[0] = f.data[0];   // FL
-    td.scale[1] = f.data[1];   // FR
-    td.scale[2] = f.data[2];   // RL
-    td.scale[3] = f.data[3];   // RR
+    td.scale[0] = (f.data[0] <= 100) ? f.data[0] : 100;   // FL
+    td.scale[1] = (f.data[1] <= 100) ? f.data[1] : 100;   // FR
+    td.scale[2] = (f.data[2] <= 100) ? f.data[2] : 100;   // RL
+    td.scale[3] = (f.data[3] <= 100) ? f.data[3] : 100;   // RR
     td.timestampMs = millis();
     data.setTraction(td);
 }

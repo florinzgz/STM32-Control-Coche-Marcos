@@ -692,6 +692,9 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4])
     diff_out[MOTOR_RL] = 1.0f;
     diff_out[MOTOR_RR] = 1.0f;
 
+    /* Sanitize input: NaN/Inf would bypass all comparisons below */
+    steer_deg = sanitize_float(steer_deg, 0.0f);
+
     float abs_angle = fabsf(steer_deg);
     if (abs_angle < ACKERMANN_DEADBAND_DEG) return;
 
@@ -1850,6 +1853,10 @@ void Motor_SetSignedPWM_Steering(int16_t speed) {
  */
 static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
 {
+    /* Guard against INT16_MIN: negation of −32768 is undefined behaviour
+     * in two's complement.  Clamp to −32767 which negates safely.       */
+    if (signed_pwm == -32768) signed_pwm = -32767;
+
     uint16_t duty = (signed_pwm >= 0) ? (uint16_t)signed_pwm
                                       : (uint16_t)(-signed_pwm);
     if (duty > PWM_PERIOD) duty = PWM_PERIOD;
