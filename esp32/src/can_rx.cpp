@@ -105,10 +105,9 @@ static void decodeSteering(const CanFrame& f, vehicle::VehicleData& data) {
 static void decodeTraction(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code < 4) return;
     vehicle::TractionData td;
-    td.scale[0] = (f.data[0] <= 100) ? f.data[0] : 100;   // FL
-    td.scale[1] = (f.data[1] <= 100) ? f.data[1] : 100;   // FR
-    td.scale[2] = (f.data[2] <= 100) ? f.data[2] : 100;   // RL
-    td.scale[3] = (f.data[3] <= 100) ? f.data[3] : 100;   // RR
+    for (uint8_t i = 0; i < vehicle::NUM_WHEELS; ++i) {
+        td.scale[i] = (f.data[i] <= 100) ? f.data[i] : 100;
+    }
     td.timestampMs = millis();
     data.setTraction(td);
 }

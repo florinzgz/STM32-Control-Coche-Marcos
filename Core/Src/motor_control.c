@@ -1855,7 +1855,7 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
 {
     /* Guard against INT16_MIN: negation of −32768 is undefined behaviour
      * in two's complement.  Clamp to −32767 which negates safely.       */
-    if (signed_pwm == -32768) signed_pwm = -32767;
+    if (signed_pwm == INT16_MIN) signed_pwm = INT16_MIN + 1;
 
     uint16_t duty = (signed_pwm >= 0) ? (uint16_t)signed_pwm
                                       : (uint16_t)(-signed_pwm);
