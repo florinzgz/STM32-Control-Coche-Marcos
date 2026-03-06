@@ -704,7 +704,7 @@ static float OW_ReadTemperature(uint8_t idx)
     }
 
     /* CRC check on scratchpad */
-    if (OW_CRC8(scratch, 8) != scratch[8]) return 0.0f;
+    if (OW_CRC8(scratch, 8) != scratch[8]) return -999.0f;
 
     int16_t raw = (int16_t)((scratch[1] << 8) | scratch[0]);
     return (float)raw / 16.0f;

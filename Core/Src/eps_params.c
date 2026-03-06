@@ -126,6 +126,16 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
 {
     if (id >= EPS_PARAM_COUNT) return false;
 
+    /* Reject zero or negative values for parameters used as divisors
+     * in the EPS control loop (motor_control.c Steering_ControlLoop).
+     * assist_vs_speed and return_vs_speed appear in denominators:
+     *   g(v) = 1 / (1 + v / assist_vs_speed)
+     *   h(v) = 0.3 + v / return_vs_speed                            */
+    if ((id == EPS_PARAM_ASSIST_VS_SPEED || id == EPS_PARAM_RETURN_VS_SPEED)
+        && value <= 0.0f) {
+        return false;
+    }
+
     float *fields = (float *)&eps_active;
     fields[id] = value;
     return true;
