@@ -192,7 +192,8 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.println("[OBSTACLE] TOFSense-M initialized (UART1, 921600 bps)");
+    Serial.printf("[OBSTACLE] TOFSense-M initialized (UART1, %lu bps)\n",
+                  (unsigned long)cfg_.baudRate);
 }
 
 void update(float vehicleSpeedKmh) {
@@ -301,7 +302,8 @@ void update(float vehicleSpeedKmh) {
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
         } else if (reading_.status != SensorStatus::WAITING) {
-            Serial.println("[OBSTACLE] Diag: no UART data received — check TX wiring");
+            Serial.println("[OBSTACLE] Diag: no UART data received — check TX wiring "
+                           "and verify sensor baud rate matches firmware (default 921600)");
         }
         // Reset counters for next interval
         diagFramesOk_        = 0;
