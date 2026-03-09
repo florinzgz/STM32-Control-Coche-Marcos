@@ -55,6 +55,7 @@ static uint16_t      prevDistanceMm_   = 0;
 static unsigned long stuckSinceMs_     = 0;
 static bool          stuckActive_      = false;
 static bool          initialized_      = false;
+static bool          warmupDone_       = false;
 
 // UART receive buffer
 static uint8_t       rxBuf_[FRAME_LENGTH];
@@ -177,6 +178,7 @@ void init(const Config& cfg) {
     prevDistanceMm_ = 0;
     stuckSinceMs_  = 0;
     stuckActive_   = false;
+    warmupDone_    = false;
     initialized_   = true;
     rxIdx_         = 0;
 
@@ -206,6 +208,19 @@ void update(float vehicleSpeedKmh) {
         return;
     }
 
+    // First call after warmup: flush stale UART data that accumulated
+    // while update() was returning early during the warmup period.
+    // Without this flush, the first post-warmup read contains a partial
+    // frame (buffer overflow during warmup), causing false sync and
+    // cascading checksum failures until re-alignment.
+    if (!warmupDone_) {
+        while (tofSerial.available() > 0) {
+            tofSerial.read();
+        }
+        rxIdx_ = 0;
+        warmupDone_ = true;
+    }
+
     // Read available UART bytes and parse frames
     uint16_t measuredMm = 0;
     bool gotFrame = false;
@@ -217,6 +232,24 @@ void update(float vehicleSpeedKmh) {
         if (rxIdx_ == 0 && byte != FRAME_HEADER) {
             diagBytesDiscarded_++;
             continue;  // Discard until we find the header
+        }
+
+        // Validate function_mark as second sync byte.  The header value
+        // 0x57 can appear naturally inside pixel distance data (~1.5×
+        // per frame).  Checking byte[1]==0x01 immediately avoids locking
+        // onto a false header, which would consume 400 bytes before
+        // parseFrame() rejects it — potentially missing the real frame.
+        if (rxIdx_ == 1 && byte != FUNCTION_MARK) {
+            // Not a valid frame start — reset.
+            // If this byte is itself a header, keep it as byte[0].
+            if (byte == FRAME_HEADER) {
+                rxBuf_[0] = byte;
+                // rxIdx_ stays at 1
+            } else {
+                rxIdx_ = 0;
+                diagBytesDiscarded_++;
+            }
+            continue;
         }
 
         rxBuf_[rxIdx_++] = byte;
