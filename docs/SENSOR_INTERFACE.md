@@ -569,8 +569,15 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
          │              │
      n/c ┤ RX  (pin 3)  │
          │              │
-  ESP32 ─┤ TX  (pin 4)  ├──────── ESP32 GPIO18 (UART1 RX)
-  GPIO18 └──────────────┘         (3.3V TTL — conexión directa OK)
+  ESP32 ─┤ TX  (pin 4)  ├──┐
+  GPIO18 └──────────────┘  │     ⚠ TX medido = 3.5–3.6V
+                           │
+                      ┌────┘
+                      ├── R1=1kΩ ──┬── ESP32 GPIO18 (UART1 RX)
+                      │            │
+                      │       R2=4.7kΩ  (divisor de tensión obligatorio)
+                      │            │
+                      │           GND
 
   Desacoplo: 100nF entre VCC y GND del TOFSense-M
 ```

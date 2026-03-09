@@ -13,9 +13,9 @@
 | Pin 1                | **VCC** | Entrada alimentación | **5 V** (regulador/fuente) | ⚠️ **Obligatorio 5 V**, NO 3.3 V         |
 | Pin 2                | **GND** | Referencia           | **GND** común con ESP32-S3 | Tierra compartida con todo el sistema    |
 | Pin 3                | **RX**  | Entrada al sensor    | **No conectar**            | No se envían comandos al sensor          |
-| Pin 4                | **TX**  | Salida del sensor    | **GPIO 18** del ESP32-S3   | UART1 RX del ESP32-S3 (921600 bps, 8N1) |
+| Pin 4                | **TX**  | Salida del sensor    | **GPIO 18** del ESP32-S3 **a través de divisor de tensión** | UART1 RX del ESP32-S3 (921600 bps, 8N1). ⚠️ Usar divisor R1=1 kΩ + R2=4.7 kΩ |
 
-> **Resumen:** Solo se conectan 3 cables: VCC (5 V), GND y TX del sensor → GPIO 18 del ESP32-S3.  
+> **Resumen:** Se conectan 3 cables (VCC, GND, TX) más un **divisor de tensión obligatorio** (R1=1 kΩ en serie + R2=4.7 kΩ a GND) entre el TX del sensor y GPIO 18 del ESP32-S3.  
 > El pin RX del sensor queda al aire.
 
 ---
@@ -42,9 +42,11 @@
 | Formato            | **8N1** (8 bits, sin paridad, 1 stop bit) |
 | Control de flujo   | Ninguno                       |
 | Modo de transmisión | **Automático** (el sensor transmite continuamente sin necesidad de comandos) |
-| Nivel lógico UART  | **3.3 V TTL**                 |
+| Nivel lógico UART  | **3.5–3.6 V** medido (nominal 3.3 V TTL según datasheet) |
 
-> **No se usa I2C ni CAN para comunicar el sensor con el ESP32.** La comunicación es UART unidireccional (sensor TX → ESP32 RX).
+> **No se usa I2C ni CAN para comunicar el sensor con el ESP32.** La comunicación es UART unidireccional (sensor TX → divisor de tensión → ESP32 RX).
+>
+> ⚠️ **PELIGRO:** El pin TX del sensor emite **3.5–3.6 V** (medido), por encima de los 3.3 V del datasheet. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en GPIO. Se requiere **divisor de tensión obligatorio** (ver sección 4).
 
 ---
 
@@ -52,10 +54,31 @@
 
 | Componente                  | ¿Necesario? | Motivo                                                   |
 |------------------------------|-------------|----------------------------------------------------------|
-| Level shifter (conversor de nivel) | **NO**      | Las señales UART del sensor ya son 3.3 V TTL, igual que el ESP32-S3 |
+| **Divisor de tensión (R1=1 kΩ + R2=4.7 kΩ)** | **SÍ** (obligatorio) | El TX del sensor emite 3.5–3.6 V medidos. El ESP32-S3 tiene máx. absoluto 3.6 V. El divisor reduce a ~2.9 V (seguro) |
+| Level shifter (conversor de nivel) | No necesario | El divisor resistivo es suficiente para esta diferencia de tensión |
 | Resistencias pull-up/pull-down     | **NO**      | UART no requiere pull-ups (a diferencia de I2C)          |
-| Divisor de tensión                 | **NO**      | Niveles lógicos compatibles directamente                 |
 | Condensador de desacoplo 100 nF    | **SÍ** (recomendado) | Entre VCC y GND del sensor, lo más cerca posible del conector, para filtrar ruido de alimentación |
+
+### Divisor de tensión — detalle
+
+```
+  Sensor TX (pin 4)          GPIO 18 (ESP32-S3)
+       │                          │
+       ├──── R1 = 1 kΩ ───────────┤
+       │                          │
+       │                     R2 = 4.7 kΩ
+       │                          │
+       │                         GND
+```
+
+| Parámetro | Valor |
+|-----------|-------|
+| R1 (serie) | **1 kΩ** |
+| R2 (a GND) | **4.7 kΩ** |
+| Vout con 3.6 V entrada | **2.97 V** (seguro, < 3.3 V) |
+| Vout con 3.5 V entrada | **2.88 V** (seguro) |
+| VIH ESP32-S3 | **2.475 V** (umbral HIGH) → todas las salidas OK |
+| Impedancia total | 5.7 kΩ → RC ≈ 85 ns (compatible con 921600 bps) |
 
 ---
 
@@ -85,7 +108,7 @@ Conector GH1.25 (vista frontal del sensor):
   └─────────────────┘
 ```
 
-### Paso 2: Conectar los cables
+### Paso 2: Conectar los cables (con divisor de tensión obligatorio)
 
 ```
   Fuente 5V ──────────────┐
@@ -99,14 +122,25 @@ Conector GH1.25 (vista frontal del sensor):
                  │                       │
   (sin conectar) │ Pin 3 (RX)            │    No conectar
                  │                       │
-  ESP32 GPIO18 ◄─│ Pin 4 (TX)            │    Sensor TX → ESP32 RX
-                 │                       │
-                 └───────────────────────┘
-                       │     │
-                      ┌┤     ├┐
-                      │100 nF│  ← Condensador desacoplo
-                      └┤     ├┘    entre VCC y GND
-                       │     │     (lo más cerca del sensor)
+                 │ Pin 4 (TX) ───────────┼──┐
+                 │                       │  │  Divisor de tensión
+                 └───────────────────────┘  │  OBLIGATORIO
+                       │     │              │
+                      ┌┤     ├┐             │
+                      │100 nF│              │
+                      └┤     ├┘        ┌────┘
+                       │     │         │
+                                  ┌────┴────┐
+                                  │  R1=1kΩ │  (serie)
+                                  └────┬────┘
+                                       │
+                                       ├──── ESP32 GPIO18
+                                       │
+                                  ┌────┴────┐
+                                  │ R2=4.7kΩ│  (a GND)
+                                  └────┬────┘
+                                       │
+                                      GND
 ```
 
 ### Paso 3: Conexión en el ESP32-S3
@@ -116,8 +150,8 @@ Conector GH1.25 (vista frontal del sensor):
                  │     ESP32-S3        │
                  │     DevKitC-1       │
                  │                     │
-  Sensor TX ────►│ GPIO 18 (UART1 RX)  │
-                 │                     │
+  Divisor out ──►│ GPIO 18 (UART1 RX)  │  ← Señal reducida a ~2.9 V
+                 │                     │     (NO conectar TX directo)
   GND común ────►│ GND                 │
                  │                     │
                  │ 5V ─────────────────┼──► Alimentación sensor (si la fuente
@@ -128,17 +162,23 @@ Conector GH1.25 (vista frontal del sensor):
 ### Diagrama completo del sistema
 
 ```
-  ┌──────────────┐         Cable directo           ┌─────────────────────┐
-  │ TOFSense-M S │         (sin intermediarios)     │     ESP32-S3        │
+  ┌──────────────┐                                  ┌─────────────────────┐
+  │ TOFSense-M S │                                  │     ESP32-S3        │
   │              │                                  │                     │
   │ Pin 1 (VCC)  ├────── 5V DC ◄────────────────────┤ 5V (o fuente ext.) │
   │ Pin 2 (GND)  ├────── GND  ◄────────────────────┤ GND                │
   │ Pin 3 (RX)   ├  n/c                            │                     │
-  │ Pin 4 (TX)   ├──────────────────────────────────► GPIO 18 (UART1 RX) │
-  │              │     3.3V TTL, 921600 bps         │                     │
-  └──────┬──┬────┘                                  └─────────────────────┘
-         │  │
-        100nF  ← Condensador de desacoplo VCC-GND
+  │ Pin 4 (TX)   ├──┐                              │                     │
+  │              │  │  Divisor de tensión           │                     │
+  └──────┬──┬────┘  │  (obligatorio)                │                     │
+         │  │       │                               │                     │
+        100nF   R1=1kΩ                              │                     │
+                    │                               │                     │
+                    ├──────── R2=4.7kΩ ── GND       │                     │
+                    │                               │                     │
+                    └──── ~2.9V ────────────────────► GPIO 18 (UART1 RX) │
+                              921600 bps            │                     │
+                                                    └─────────────────────┘
 ```
 
 ---
@@ -149,9 +189,11 @@ Conector GH1.25 (vista frontal del sensor):
 |------|-------------------------------------------|-----------------------------------------------|
 | 1    | Medir VCC del sensor con multímetro       | **5.00 V ± 0.2 V**                            |
 | 2    | Medir GND común sensor-ESP32              | **0 V** (continuidad)                          |
-| 3    | Encender sistema y revisar monitor serial | `[OBSTACLE] TOFSense-M initialized (UART1, 921600 bps)` |
-| 4    | Poner la mano frente al sensor            | La distancia debe cambiar en el display/serial |
-| 5    | Estado del sensor                         | Debe cambiar de `WAITING` → `VALID`           |
+| 3    | Medir TX del sensor sin divisor (pin 4)   | **3.5–3.6 V** (nivel idle)                     |
+| 4    | Medir salida del divisor (punto medio R1-R2) | **2.8–3.0 V** (reducido por divisor)       |
+| 5    | Encender sistema y revisar monitor serial | `[OBSTACLE] TOFSense-M initialized (UART1, 921600 bps)` |
+| 6    | Poner la mano frente al sensor            | La distancia debe cambiar en el display/serial |
+| 7    | Estado del sensor                         | Debe cambiar de `WAITING` → `VALID`           |
 
 ---
 
@@ -164,9 +206,10 @@ Conector GH1.25 (vista frontal del sensor):
 | Comunicación                 | UART unidireccional, 921600 bps, 8N1   |
 | Pin sensor TX → ESP32 RX     | Pin 4 → **GPIO 18**                    |
 | Alimentación sensor          | **5 V DC** (obligatorio)               |
-| Nivel lógico UART            | 3.3 V TTL (directo, sin conversor)     |
-| Level shifter                | No necesario                           |
-| Resistencias                 | No necesarias                          |
+| Nivel lógico UART            | 3.5–3.6 V medido (nominal 3.3 V TTL) — **divisor de tensión obligatorio** |
+| Divisor de tensión           | **Obligatorio:** R1=1 kΩ (serie) + R2=4.7 kΩ (a GND) → ~2.9 V en GPIO |
+| Level shifter                | No necesario (el divisor resistivo es suficiente) |
+| Resistencias                 | R1=1 kΩ + R2=4.7 kΩ (divisor de tensión) |
 | Condensador desacoplo        | 100 nF entre VCC y GND (recomendado)   |
 | Cables necesarios            | 3 (VCC, GND, TX→GPIO18)               |
 

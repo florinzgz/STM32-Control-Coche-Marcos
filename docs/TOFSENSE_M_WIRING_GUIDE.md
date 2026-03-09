@@ -29,10 +29,13 @@
 
 Según el datasheet V3.0: *"Communication Interface UART and CAN, TTL signal line level 3.3V"*
 
-Esto significa:
+Sin embargo, **mediciones reales** del pin TX del sensor muestran **3.5–3.6 V**, por encima de los 3.3 V nominales del datasheet.
+
 - **VCC = 5 V** (alimentación del sensor: láser, procesador interno, etc.)
-- **UART TX/RX = 3.3 V TTL** (las señales de datos operan a 3.3 V lógico)
-- Ambos voltajes son correctos y no hay contradicción: el sensor se alimenta a 5 V internamente pero sus líneas UART son 3.3 V TTL
+- **UART TX (nominal)** = 3.3 V TTL según datasheet
+- **UART TX (medido)** = **3.5–3.6 V** en la práctica
+
+> ⚠️ **PELIGRO:** El ESP32-S3 tiene un voltaje máximo absoluto de **3.6 V** en sus GPIO. Los 3.5–3.6 V medidos están en el **límite absoluto sin ningún margen de seguridad**. Un pico transitorio por encima de 3.6 V **puede dañar permanentemente el pin GPIO 18 o el chip ESP32-S3**. Se requiere un **divisor de tensión obligatorio** (ver sección 2.4).
 
 ---
 
@@ -67,12 +70,24 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
 
 ### 2.4 ¿Se necesitan resistencias, divisor de tensión o level shifter?
 
-**NO.** Según el datasheet V3.0:
-- Las señales UART del TOFSense-M son **TTL 3.3 V**
-- El ESP32-S3 también opera a **3.3 V lógico**
-- La conexión es directa: sensor TX → ESP32 RX, sin componentes intermedios
+**SÍ — se necesita un divisor de tensión obligatorio.** Aunque el datasheet V3.0 indica 3.3 V TTL, las mediciones reales muestran **3.5–3.6 V** en el pin TX del sensor. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en sus GPIO, lo que deja **cero margen** para picos o tolerancias.
 
-**Único componente recomendado:** condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector, para filtrar ruido de alimentación.
+**Divisor de tensión requerido (2 resistencias):**
+
+| Componente | Valor | Conexión |
+|------------|-------|----------|
+| **R1** | **1 kΩ** | En serie entre sensor TX (pin 4) y GPIO 18 |
+| **R2** | **4.7 kΩ** | Entre GPIO 18 y GND |
+| **C1** | **100 nF** | Entre VCC y GND del sensor (desacoplo, recomendado) |
+
+**Cálculo del divisor:**
+- Con 3.6 V de entrada: Vout = 3.6 × 4.7 / (1 + 4.7) = **2.97 V** ✓ (seguro para ESP32-S3)
+- Con 3.5 V de entrada: Vout = 3.5 × 4.7 / (1 + 4.7) = **2.88 V** ✓
+- VIH del ESP32-S3 = 0.75 × 3.3 V = **2.475 V** → todas las salidas están por encima del umbral de HIGH ✓
+- VIL del ESP32-S3 = 0.25 × 3.3 V = **0.825 V** → un LOW de 0 V se mantiene como LOW ✓
+- Impedancia total: 5.7 kΩ → compatible con UART a 921600 bps (RC ≈ 85 ns ≪ bit time 1085 ns)
+
+> ⚠️ **NO conectar sensor TX directamente a GPIO 18 sin divisor de tensión.** Los 3.5–3.6 V medidos están en el límite absoluto del ESP32-S3 y pueden dañar el chip.
 
 ### 2.5 Diagrama de conexión
 
@@ -81,15 +96,31 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
                    ┌──────────────────────┐
   5V (regulador) ──┤ VCC  (pin 1)         │
                    │                      │     ⚠ VCC = 5V obligatorio
-  GND ─────────────┤ GND  (pin 2)         │     UART = 3.3V TTL
+  GND ─────────────┤ GND  (pin 2)         │     ⚠ TX medido = 3.5–3.6V
                    │                      │
            n/c ────┤ RX   (pin 3)         │     (no se envían comandos)
                    │                      │
-  ESP32 GPIO18 ────┤ TX   (pin 4)         │     Sensor TX → ESP32 UART1 RX
-                   └──────────────────────┘
-                         │    │
-                        100nF (desacoplo VCC-GND)
+                   │ TX   (pin 4) ────────┼──┐
+                   └──────────────────────┘  │
+                         │    │              │  Divisor de tensión
+                        100nF (desacoplo)    │  OBLIGATORIO
+                                             │
+                                    ┌────────┘
+                                    │
+                               ┌────┴────┐
+                               │  R1=1kΩ │  (serie)
+                               └────┬────┘
+                                    │
+                                    ├──────────── ESP32 GPIO18 (UART1 RX)
+                                    │
+                               ┌────┴────┐
+                               │ R2=4.7kΩ│  (a GND)
+                               └────┬────┘
+                                    │
+                                   GND
 ```
+
+> El divisor R1 + R2 reduce los 3.5–3.6 V del sensor a ~2.9 V, seguro para el ESP32-S3 (máx. absoluto 3.6 V).
 
 ---
 
@@ -125,7 +156,7 @@ Al alimentar el sensor con 5 V:
 1. **Periodo de inicialización:** ~300–500 ms sin datos (el sensor calibra internamente)
 2. **Inicio de transmisión:** el pin TX comienza a enviar tramas de 400 bytes a 921600 bps
 3. **Señal esperada con osciloscopio:**
-   - Nivel de reposo: **3.3 V** (UART idle = HIGH)
+   - Nivel de reposo: **3.5–3.6 V** (UART idle = HIGH; medido por encima del 3.3 V nominal del datasheet)
    - Primer byte de cada trama: **0x57** (frame_header)
    - Frecuencia de tramas: ~10 Hz (una trama cada ~100 ms)
    - Duración de cada trama: 400 bytes × 10 bits / 921600 bps ≈ **4.3 ms**

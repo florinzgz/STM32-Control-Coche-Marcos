@@ -65,7 +65,8 @@
 | Pin 4 (TX) | → | GPIO 18 | UART1 RX (datos de distancia) |
 
 - **Baudrate:** 921600 bps, 8N1
-- **Nivel lógico UART:** 3.3V TTL (conexión directa, sin level shifter)
+- **Nivel lógico UART:** 3.5–3.6 V medido (nominal 3.3V TTL según datasheet)
+- **⚠️ Divisor de tensión OBLIGATORIO:** R1=1 kΩ (serie, sensor TX → punto medio) + R2=4.7 kΩ (punto medio → GND). Punto medio → GPIO 18. Reduce 3.6 V a ~2.9 V (seguro para ESP32-S3, máx. absoluto 3.6 V)
 - **Condensador desacoplo:** 100 nF entre VCC y GND del sensor (recomendado)
 
 ---
@@ -119,8 +120,9 @@
 ### TOFSense-M
 
 - **Estado INVALID permanente** → Verificar VCC = 5V (no 3.3V)
-- **Sin datos** → Verificar que sensor TX (pin 4) va a GPIO 18
+- **Sin datos** → Verificar que sensor TX (pin 4) pasa por divisor R1=1kΩ+R2=4.7kΩ a GPIO 18
 - **Checksum fallido** → Verificar baudrate 921600 en firmware
+- **⚠️ GPIO 18 dañado** → Si se conectó TX directo sin divisor (3.5–3.6 V), el pin puede estar dañado
 
 ---
 
@@ -142,7 +144,7 @@
 │  GPIO 4  ───┼──→ CAN TX (a TJA1051)
 │  GPIO 5  ◄──┼─── CAN RX (de TJA1051)
 │             │
-│  GPIO 18 ◄──┼─── TOFSense-M TX (UART1 RX, 921600 bps)
+│  GPIO 18 ◄──┼─── R1=1kΩ+R2=4.7kΩ ── TOFSense-M TX (UART1 RX, 921600 bps)
 │             │
 │  3.3V ──────┼──→ Display VCC
 │  5V ────────┼──→ TJA1051 VCC + TOFSense-M VCC

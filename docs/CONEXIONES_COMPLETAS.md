@@ -446,7 +446,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | — | **Pin 1 (VCC)** | **5V** (regulador o fuente) | Alimentación sensor (⚠️ 5V obligatorio, NO 3.3V) |
 | — | **Pin 2 (GND)** | **GND** | GND común con ESP32 |
 | — | **Pin 3 (RX)** | **No conectado** | Recepción unidireccional — no se envían comandos al sensor |
-| — | **Pin 4 (TX)** | **GPIO18** (UART1 RX) | Sensor TX → ESP32 RX (datos de distancia) |
+| — | **Pin 4 (TX)** | **GPIO18** (UART1 RX) via divisor | Sensor TX → divisor R1=1kΩ+R2=4.7kΩ → ESP32 RX. ⚠️ Divisor obligatorio (TX medido = 3.5–3.6V) |
 
 ### Diagrama de conexión
 
@@ -455,14 +455,27 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
                    ┌──────────────────────┐
  5V (regulador) ───┤ VCC  (pin 1)         │
                    │                      │     ⚠ VCC = 5V obligatorio
- GND ──────────────┤ GND  (pin 2)         │     UART = 3.3V TTL
+ GND ──────────────┤ GND  (pin 2)         │     ⚠ TX medido = 3.5–3.6V
                    │                      │
            n/c ────┤ RX   (pin 3)         │     (no se envían comandos)
                    │                      │
- ESP32 GPIO18 ─────┤ TX   (pin 4)         │     Sensor TX → ESP32 UART1 RX
-                   └──────────────────────┘
-                         │    │
-                        100nF (desacoplo VCC-GND, recomendado)
+                   │ TX   (pin 4) ────────┼──┐
+                   └──────────────────────┘  │  Divisor de tensión
+                         │    │              │  OBLIGATORIO
+                        100nF (desacoplo)    │
+                                        ┌────┘
+                                        │
+                                   ┌────┴────┐
+                                   │  R1=1kΩ │ (serie)
+                                   └────┬────┘
+                                        │
+                                        ├──── ESP32 GPIO18 (UART1 RX)
+                                        │
+                                   ┌────┴────┐
+                                   │ R2=4.7kΩ│ (a GND)
+                                   └────┬────┘
+                                        │
+                                       GND
 ```
 
 ### Especificaciones de comunicación
@@ -472,7 +485,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | **Interfaz** | UART (modo activo, transmisión continua) |
 | **Baudrate** | 921600 bps |
 | **Formato** | 8N1 (8 data bits, sin paridad, 1 stop bit) |
-| **Nivel lógico UART** | 3.3V TTL (conexión directa a ESP32, sin level shifter) |
+| **Nivel lógico UART** | 3.5–3.6V medido (nominal 3.3V TTL). Divisor obligatorio: R1=1kΩ + R2=4.7kΩ → ~2.9V en GPIO 18 |
 | **Frecuencia de datos** | ~10 Hz (una trama de 400 bytes cada ~100 ms) |
 | **Protocolo** | NLink_TOFSense_M_Frame0 (header 0x57, 64 píxeles × 6 bytes) |
 | **Rango útil** | 20 mm – 4000 mm |
@@ -484,7 +497,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 - `esp32/src/main.cpp` — Inicialización: `obstacle_sensor::init()` en `setup()`
 - `docs/TOFSENSE_M_WIRING_GUIDE.md` — Guía completa de cableado y troubleshooting
 
-> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. Las señales UART son 3.3V TTL, por lo que la conexión TX→GPIO18 es directa sin divisor de tensión ni level shifter.
+> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. Las señales UART miden **3.5–3.6 V** (por encima del 3.3V nominal del datasheet). Se requiere un **divisor de tensión obligatorio** (R1=1 kΩ serie + R2=4.7 kΩ a GND) entre sensor TX y GPIO18. **NO conectar directamente** — el ESP32-S3 tiene máx. absoluto de 3.6V en GPIO.
 
 > ⚠️ **IMPORTANTE:** Se recomienda un condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector GH1.25, para filtrar ruido de alimentación.
 
