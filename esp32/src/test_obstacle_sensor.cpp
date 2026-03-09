@@ -355,6 +355,24 @@ static void test_init_resets_state() {
     ASSERT_EQ(rd.zone, 0);
 }
 
+// Test 11: Verify Config defaults — baud rate and RX buffer size
+//          Baud rate must be 921600 (TOFSense / TOFSense-M factory default).
+//          RX buffer must be > 400 (one full frame) to prevent overflow.
+static void test_config_defaults() {
+    printf("  test_config_defaults...\n");
+
+    obstacle_sensor::Config cfg{};
+
+    // Baud rate: 921600 — factory default per Nooploop User Manual V3.0
+    ASSERT_EQ(cfg.baudRate, 921600UL);
+
+    // RX buffer: must be larger than a single 400-byte frame
+    ASSERT(cfg.rxBufSize > FRAME_LEN);
+
+    // Default value should be 1024 (2.5 frames, ~11 ms headroom at 921600)
+    ASSERT_EQ(cfg.rxBufSize, 1024);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -370,6 +388,7 @@ int main() {
     test_checksum_position();
     test_two_byte_sync_pattern();
     test_init_resets_state();
+    test_config_defaults();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

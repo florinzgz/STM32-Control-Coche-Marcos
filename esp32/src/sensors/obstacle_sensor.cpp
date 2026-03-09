@@ -170,6 +170,16 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
 void init(const Config& cfg) {
     cfg_ = cfg;
 
+    // Set UART RX ring-buffer size BEFORE begin().
+    // Default ESP32 buffer is 256 bytes — too small for the 400-byte
+    // TOFSense-M frames at 921600 bps.  With a 256-byte buffer the ring
+    // buffer fills in ~2.8 ms; any main-loop cycle longer than that
+    // (display update, CAN processing, etc.) causes bytes to be lost,
+    // corrupting the frame and triggering checksum failures that make
+    // the sensor oscillate between VALID and INVALID.
+    // 1024 bytes ≈ 2.5 full frames → ~11 ms of headroom.
+    tofSerial.setRxBufferSize(cfg_.rxBufSize);
+
     // Initialize UART1 for TOFSense-M
     tofSerial.begin(cfg_.baudRate, SERIAL_8N1, cfg_.rxPin, cfg_.txPin);
 
@@ -192,8 +202,8 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.printf("[OBSTACLE] TOFSense-M initialized (UART1, %lu bps)\n",
-                  (unsigned long)cfg_.baudRate);
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u)\n",
+                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize);
 }
 
 void update(float vehicleSpeedKmh) {
@@ -302,8 +312,10 @@ void update(float vehicleSpeedKmh) {
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
         } else if (reading_.status != SensorStatus::WAITING) {
-            Serial.println("[OBSTACLE] Diag: no UART data received — check TX wiring "
-                           "and verify sensor baud rate matches firmware (default 921600)");
+            Serial.println("[OBSTACLE] Diag: no UART data received — check wiring "
+                           "and baud rate (expected 921600 bps factory default). "
+                           "If sensor was reconfigured with NAssistant, reset it "
+                           "to 921600 or update Config::baudRate to match");
         }
         // Reset counters for next interval
         diagFramesOk_        = 0;
