@@ -364,9 +364,7 @@ El firmware ahora incluye **diagnósticos automáticos** que se imprimen cada 5 
 
 ```
 [OBSTACLE] Diag 5s: OK=2 cksumFail=45 hdrFail=0 noPixels=0 discarded=312
-[OBSTACLE] WARNING: Most frames fail checksum. Check voltage divider resistor
-values — if you measure ~2.1V on GPIO 18, R1 is likely 3.3kohm instead of
-1kohm. Expected ~2.9V with correct R1=1kohm + R2=4.7kohm.
+[OBSTACLE] WARNING: Most frames fail checksum. Check voltage divider resistor values — if you measure ~2.1V on GPIO 18, R1 (series) is likely 3.3kohm instead of 1kohm. Expected ~2.9V with correct R1=1kohm (series) + R2=4.7kohm (to GND). See TOFSENSE_M_WIRING_GUIDE.md section 5
 ```
 
 **Interpretación de los contadores:**
@@ -375,7 +373,7 @@ values — if you measure ~2.1V on GPIO 18, R1 is likely 3.3kohm instead of
 |----------|------------|--------------|-------------------|
 | `OK` | Tramas parseadas correctamente | ~50 en 5s (10 Hz) | 0–5 (pocas tramas pasan) |
 | `cksumFail` | Tramas con checksum incorrecto | 0 | >>OK → **señal marginal** |
-| `hdrFail` | Header 0x57/0x01 incorrecto tras 400 bytes | 0 | >0 → pérdida de sincronización |
+| `hdrFail` | Header 0x57/0x01 incorrecto al validar trama completa (400 bytes) | 0 | >0 → pérdida de sincronización |
 | `noPixels` | Todos los 64 píxeles inválidos | 0 | >0 → sensor obstruido o sin objetivo |
 | `discarded` | Bytes descartados buscando 0x57 | bajo | alto → señal ruidosa o baudrate mal |
 

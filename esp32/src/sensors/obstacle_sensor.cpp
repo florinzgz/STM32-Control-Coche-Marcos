@@ -262,9 +262,10 @@ void update(float vehicleSpeedKmh) {
             if (diagChecksumFail_ > diagFramesOk_ && diagChecksumFail_ > 0) {
                 Serial.println("[OBSTACLE] WARNING: Most frames fail checksum. "
                                "Check voltage divider resistor values — if you "
-                               "measure ~2.1V on GPIO 18, R1 is likely 3.3kohm "
-                               "instead of 1kohm. Expected ~2.9V with correct "
-                               "R1=1kohm + R2=4.7kohm. See TOFSENSE_M_WIRING_GUIDE.md");
+                               "measure ~2.1V on GPIO 18, R1 (series) is likely "
+                               "3.3kohm instead of 1kohm. Expected ~2.9V with "
+                               "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
+                               "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
         } else if (reading_.status != SensorStatus::WAITING) {
             Serial.println("[OBSTACLE] Diag: no UART data received — check TX wiring");
