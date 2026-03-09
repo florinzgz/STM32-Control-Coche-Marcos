@@ -215,6 +215,10 @@ Conector GH1.25 (vista frontal del sensor):
 | 6    | Poner la mano frente al sensor            | La distancia debe cambiar en el display/serial |
 | 7    | Estado del sensor                         | Debe cambiar de `WAITING` → `VALID`           |
 
+> ⚠️ **Si mides ~2.1 V en el paso 4** en vez de ~2.9 V, el resistor R1 es incorrecto (probablemente 3.3 kΩ en vez de 1 kΩ). Ver `docs/TOFSENSE_M_WIRING_GUIDE.md`, sección 5 para diagnóstico detallado con códigos de color y tabla de voltajes.
+>
+> ⚠️ **Si el estado alterna VALID→INVALID rápidamente**, abrir el monitor serie y buscar las líneas `[OBSTACLE] Diag`. Si `cksumFail >> OK`, la señal es marginal — verificar voltaje y resistencias.
+
 ---
 
 ## Resumen rápido

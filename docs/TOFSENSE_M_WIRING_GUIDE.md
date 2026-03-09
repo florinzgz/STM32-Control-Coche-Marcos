@@ -305,6 +305,94 @@ Según el código de referencia oficial de Nooploop (`nlink_tofsensem_frame0.c`)
 | Todos los píxeles inválidos | Sensor en modo CAN | Reconfigurar a modo UART con NAssistant |
 | Lecturas erráticas | Cable largo sin desacoplo | Añadir 100 nF en VCC-GND cerca del sensor |
 | Bootloop ESP32 | HardwareSerial en constructor global | Usar `new (std::nothrow)` en `init()` |
+| **VALID→INVALID intermitente** | **Voltaje ~2.1V en GPIO 18 (resistor R1 incorrecto)** | **Ver sección 5 abajo** |
+
+---
+
+## 5. Diagnóstico: VALID→INVALID intermitente con ~2.1 V en GPIO 18
+
+### 5.1 Síntoma
+
+El usuario conecta el sensor con un divisor de tensión, pero en la pantalla de la ESP32 aparece:
+
+1. `SENSOR: WAITING` (durante 1 segundo, warmup normal)
+2. `SENSOR: VALID` (brevemente, 1–2 segundos)
+3. `SENSOR: INVALID` (permanece la mayor parte del tiempo)
+4. A veces alterna entre VALID e INVALID rápidamente
+
+Al medir con un multímetro en GPIO 18 (con el sensor transmitiendo), se leen **~2.1 V** en lugar de los ~2.9 V esperados.
+
+### 5.2 Causa raíz
+
+**2.1 V está por debajo del umbral VIH del ESP32-S3** (0.75 × 3.3 V = **2.475 V**). Esto significa que el nivel UART "HIGH" (idle) se lee de forma indeterminada:
+
+- A veces se interpreta como HIGH → la trama se recibe correctamente → VALID
+- La mayoría de veces se interpreta mal → bytes corruptos → checksum falla → INVALID
+
+**¿Por qué 2.1 V en vez de 2.9 V?** Porque el resistor R1 tiene un valor incorrecto:
+
+| R1 real | R2 | Vin (TX sensor) | Vout en GPIO 18 | ¿Funciona? |
+|---------|-----|-----------------|------------------|------------|
+| **1 kΩ** (correcto ✓) | 4.7 kΩ | 3.5 V | **2.88 V** | ✅ Sí (> VIH 2.475 V) |
+| **2.2 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **2.38 V** | ❌ No (< VIH) |
+| **3.3 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **2.06 V ≈ 2.1 V** | ❌ No (< VIH) |
+| **4.7 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **1.75 V** | ❌ No (< VIH) |
+| **10 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **1.12 V** | ❌ No (< VIH) |
+
+> **Si mides ~2.1 V, tu R1 es probablemente 3.3 kΩ en vez de 1 kΩ.** Esta confusión es común porque las bandas de color son similares.
+
+### 5.3 Cómo identificar las resistencias correctas
+
+**Código de colores de R1 = 1 kΩ (la que va EN SERIE):**
+
+| Banda 1 | Banda 2 | Banda 3 (multiplicador) | Banda 4 (tolerancia) | Valor |
+|---------|---------|-------------------------|----------------------|-------|
+| **Marrón** | **Negro** | **Rojo** | Dorado (5%) u Oro | **1 kΩ** ✅ |
+| Naranja | Naranja | Rojo | — | 3.3 kΩ ❌ (NO usar) |
+
+**Código de colores de R2 = 4.7 kΩ (la que va a GND):**
+
+| Banda 1 | Banda 2 | Banda 3 (multiplicador) | Banda 4 (tolerancia) | Valor |
+|---------|---------|-------------------------|----------------------|-------|
+| **Amarillo** | **Violeta** | **Rojo** | Dorado (5%) | **4.7 kΩ** ✅ |
+
+> **Consejo:** si no estás seguro del valor, mídelas con un multímetro en modo ohmios antes de soldar.
+
+### 5.4 Cómo verificar con el monitor serie
+
+El firmware ahora incluye **diagnósticos automáticos** que se imprimen cada 5 segundos por el puerto serie (115200 bps). Abre el monitor serie de Arduino IDE o PlatformIO y busca líneas como:
+
+```
+[OBSTACLE] Diag 5s: OK=2 cksumFail=45 hdrFail=0 noPixels=0 discarded=312
+[OBSTACLE] WARNING: Most frames fail checksum. Check voltage divider resistor
+values — if you measure ~2.1V on GPIO 18, R1 is likely 3.3kohm instead of
+1kohm. Expected ~2.9V with correct R1=1kohm + R2=4.7kohm.
+```
+
+**Interpretación de los contadores:**
+
+| Contador | Significado | Valor normal | Valor problemático |
+|----------|------------|--------------|-------------------|
+| `OK` | Tramas parseadas correctamente | ~50 en 5s (10 Hz) | 0–5 (pocas tramas pasan) |
+| `cksumFail` | Tramas con checksum incorrecto | 0 | >>OK → **señal marginal** |
+| `hdrFail` | Header 0x57/0x01 incorrecto tras 400 bytes | 0 | >0 → pérdida de sincronización |
+| `noPixels` | Todos los 64 píxeles inválidos | 0 | >0 → sensor obstruido o sin objetivo |
+| `discarded` | Bytes descartados buscando 0x57 | bajo | alto → señal ruidosa o baudrate mal |
+
+**Si `cksumFail >> OK`:** el problema es la señal eléctrica (voltaje demasiado bajo). Solución: cambiar R1 a 1 kΩ, o usar un level shifter BSS138 (ver sección 2.4, Opción 2).
+
+**Si todo es 0:** no llegan datos UART. Verificar cableado TX→GPIO 18 y que VCC = 5 V.
+
+### 5.5 Solución
+
+1. **Desconectar** el sensor
+2. **Medir** R1 con multímetro — debe ser **1 kΩ** (marrón-negro-rojo)
+3. Si R1 es 3.3 kΩ (naranja-naranja-rojo): **reemplazar por 1 kΩ**
+4. **Reconectar** y verificar que GPIO 18 mide **~2.9 V** con el sensor transmitiendo
+5. Confirmar en el monitor serie: `OK=~50 cksumFail=0` cada 5 segundos
+6. La pantalla debe mostrar `SENSOR: VALID` de forma estable
+
+> **Alternativa:** si no se tienen las resistencias correctas, usar un **level shifter BSS138** (Opción 2, sección 2.4) que no requiere calcular valores de resistencias.
 
 ---
 
