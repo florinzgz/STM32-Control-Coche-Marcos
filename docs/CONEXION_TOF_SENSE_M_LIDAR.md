@@ -54,12 +54,16 @@
 
 | Componente                  | ¿Necesario? | Motivo                                                   |
 |------------------------------|-------------|----------------------------------------------------------|
-| **Divisor de tensión (R1=1 kΩ + R2=4.7 kΩ)** | **SÍ** (obligatorio) | El TX del sensor emite 3.5–3.6 V medidos. El ESP32-S3 tiene máx. absoluto 3.6 V. El divisor reduce a ~2.9 V (seguro) |
-| Level shifter (conversor de nivel) | No necesario | El divisor resistivo es suficiente para esta diferencia de tensión |
+| **Divisor de tensión (R1=1 kΩ + R2=4.7 kΩ)** | **SÍ** — Opción 1 | El TX del sensor emite 3.5–3.6 V medidos. El ESP32-S3 tiene máx. absoluto 3.6 V. El divisor reduce a ~2.9 V (seguro) |
+| **Level shifter BSS138** | **SÍ** — Opción 2 (alternativa al divisor) | Módulo con MOSFET BSS138 convierte 3.5 V → 3.3 V exactos. Señal más limpia que el divisor. Usar módulos tipo SparkFun BOB-12009, Adafruit 757, o genérico "Logic Level Converter 3.3V–5V" |
 | Resistencias pull-up/pull-down     | **NO**      | UART no requiere pull-ups (a diferencia de I2C)          |
 | Condensador de desacoplo 100 nF    | **SÍ** (recomendado) | Entre VCC y GND del sensor, lo más cerca posible del conector, para filtrar ruido de alimentación |
 
-### Divisor de tensión — detalle
+> ⚠️ **NO usar level shifters basados en TXS0108E** — generan oscilaciones a 921600 bps. Usar **solo BSS138** (MOSFET con pull-ups).
+
+> Elegir **una sola opción** (divisor **o** level shifter), nunca ambas a la vez. Ver detalles completos en `docs/TOFSENSE_M_WIRING_GUIDE.md`, sección 2.4.
+
+### Opción 1 — Divisor de tensión (detalle)
 
 ```
   Sensor TX (pin 4)          GPIO 18 (ESP32-S3)
@@ -79,6 +83,22 @@
 | Vout con 3.5 V entrada | **2.88 V** (seguro) |
 | VIH ESP32-S3 | **2.475 V** (umbral HIGH) → todas las salidas OK |
 | Impedancia total | 5.7 kΩ → RC ≈ 85 ns (compatible con 921600 bps) |
+
+### Opción 2 — Level shifter BSS138 (alternativa sin resistencias)
+
+En lugar de las resistencias, se puede usar un **módulo level shifter basado en BSS138**:
+
+| Módulo compatible | Chip | Precio aprox. |
+|-------------------|------|---------------|
+| SparkFun BOB-12009 | BSS138 | ~2 € |
+| Adafruit 757 | BSS138 | ~3 € |
+| Genérico "Logic Level Converter 3.3V–5V" | BSS138 | ~0.50 € |
+
+**Conexión:** HV=5V, LV=3.3V, HV1=sensor TX, LV1=GPIO 18, GND=común.
+
+> ⚠️ **NO usar TXS0108E** — genera oscilaciones a 921600 bps. Solo BSS138.
+>
+> Detalles completos, diagramas y comparativa en `docs/TOFSENSE_M_WIRING_GUIDE.md`, sección 2.4.
 
 ---
 
@@ -206,12 +226,11 @@ Conector GH1.25 (vista frontal del sensor):
 | Comunicación                 | UART unidireccional, 921600 bps, 8N1   |
 | Pin sensor TX → ESP32 RX     | Pin 4 → **GPIO 18**                    |
 | Alimentación sensor          | **5 V DC** (obligatorio)               |
-| Nivel lógico UART            | 3.5–3.6 V medido (nominal 3.3 V TTL) — **divisor de tensión obligatorio** |
-| Divisor de tensión           | **Obligatorio:** R1=1 kΩ (serie) + R2=4.7 kΩ (a GND) → ~2.9 V en GPIO |
-| Level shifter                | No necesario (el divisor resistivo es suficiente) |
-| Resistencias                 | R1=1 kΩ + R2=4.7 kΩ (divisor de tensión) |
+| Nivel lógico UART            | 3.5–3.6 V medido (nominal 3.3 V TTL) — **protección obligatoria** |
+| Protección (elegir una)      | **Opción 1:** Divisor resistivo R1=1 kΩ + R2=4.7 kΩ → ~2.9 V. **Opción 2:** Level shifter BSS138 → 3.3 V exactos |
+| Level shifter recomendado    | BSS138 (SparkFun BOB-12009, Adafruit 757, o genérico). ⚠️ NO usar TXS0108E |
 | Condensador desacoplo        | 100 nF entre VCC y GND (recomendado)   |
-| Cables necesarios            | 3 (VCC, GND, TX→GPIO18)               |
+| Cables necesarios            | 3 (VCC, GND, TX→GPIO18) + protección   |
 
 ---
 

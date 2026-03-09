@@ -485,7 +485,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | **Interfaz** | UART (modo activo, transmisión continua) |
 | **Baudrate** | 921600 bps |
 | **Formato** | 8N1 (8 data bits, sin paridad, 1 stop bit) |
-| **Nivel lógico UART** | 3.5–3.6V medido (nominal 3.3V TTL). Divisor obligatorio: R1=1kΩ + R2=4.7kΩ → ~2.9V en GPIO 18 |
+| **Nivel lógico UART** | 3.5–3.6V medido (nominal 3.3V TTL). Protección obligatoria: **Opción 1** divisor R1=1kΩ+R2=4.7kΩ (~2.9V) o **Opción 2** level shifter BSS138 (3.3V exactos). ⚠️ NO usar TXS0108E |
 | **Frecuencia de datos** | ~10 Hz (una trama de 400 bytes cada ~100 ms) |
 | **Protocolo** | NLink_TOFSense_M_Frame0 (header 0x57, 64 píxeles × 6 bytes) |
 | **Rango útil** | 20 mm – 4000 mm |
@@ -497,7 +497,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 - `esp32/src/main.cpp` — Inicialización: `obstacle_sensor::init()` en `setup()`
 - `docs/TOFSENSE_M_WIRING_GUIDE.md` — Guía completa de cableado y troubleshooting
 
-> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. Las señales UART miden **3.5–3.6 V** (por encima del 3.3V nominal del datasheet). Se requiere un **divisor de tensión obligatorio** (R1=1 kΩ serie + R2=4.7 kΩ a GND) entre sensor TX y GPIO18. **NO conectar directamente** — el ESP32-S3 tiene máx. absoluto de 3.6V en GPIO.
+> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. Las señales UART miden **3.5–3.6 V** (por encima del 3.3V nominal del datasheet). Se requiere **protección obligatoria** entre sensor TX y GPIO18: **Opción 1** divisor de tensión (R1=1 kΩ + R2=4.7 kΩ a GND) o **Opción 2** level shifter BSS138 (SparkFun BOB-12009, Adafruit 757, o genérico). **NO conectar directamente** — el ESP32-S3 tiene máx. absoluto de 3.6V en GPIO. ⚠️ NO usar level shifters TXS0108E (oscilaciones a 921600 bps).
 
 > ⚠️ **IMPORTANTE:** Se recomienda un condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector GH1.25, para filtrar ruido de alimentación.
 

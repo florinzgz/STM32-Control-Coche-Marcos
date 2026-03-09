@@ -70,9 +70,13 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
 
 ### 2.4 ¿Se necesitan resistencias, divisor de tensión o level shifter?
 
-**SÍ — se necesita un divisor de tensión obligatorio.** Aunque el datasheet V3.0 indica 3.3 V TTL, las mediciones reales muestran **3.5–3.6 V** en el pin TX del sensor. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en sus GPIO, lo que deja **cero margen** para picos o tolerancias.
+**SÍ — se necesita protección obligatoria.** Aunque el datasheet V3.0 indica 3.3 V TTL, las mediciones reales muestran **3.5–3.6 V** en el pin TX del sensor. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en sus GPIO, lo que deja **cero margen** para picos o tolerancias.
 
-**Divisor de tensión requerido (2 resistencias):**
+Hay **dos opciones** válidas. Usar **una u otra**, nunca ambas a la vez:
+
+---
+
+#### Opción 1 — Divisor de tensión resistivo (2 resistencias)
 
 | Componente | Valor | Conexión |
 |------------|-------|----------|
@@ -87,9 +91,60 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
 - VIL del ESP32-S3 = 0.25 × 3.3 V = **0.825 V** → un LOW de 0 V se mantiene como LOW ✓
 - Impedancia total: 5.7 kΩ → compatible con UART a 921600 bps (RC ≈ 85 ns ≪ bit time 1085 ns)
 
-> ⚠️ **NO conectar sensor TX directamente a GPIO 18 sin divisor de tensión.** Los 3.5–3.6 V medidos están en el límite absoluto del ESP32-S3 y pueden dañar el chip.
+**Ventajas:** coste mínimo (~0.02 €), sin componentes activos, ocupa muy poco espacio.  
+**Desventajas:** atenúa la señal (de 3.5 V a ~2.9 V), consume corriente estática por R2 (~0.7 mA).
 
-### 2.5 Diagrama de conexión
+---
+
+#### Opción 2 — Level shifter con MOSFET BSS138 (alternativa sin resistencias en línea)
+
+En lugar de las dos resistencias del divisor, se puede usar un **módulo level shifter basado en BSS138** (también llamado "convertidor de nivel lógico bidireccional"). Estos módulos son baratos (~0.50–1 €), vienen premontados en breakout boards de 4 canales, y se consiguen fácilmente en tiendas de electrónica y online.
+
+**Módulos compatibles recomendados:**
+
+| Módulo | Chip | Canales | Velocidad máx. | Precio aprox. |
+|--------|------|---------|-----------------|---------------|
+| **SparkFun BOB-12009** | BSS138 | 4 bidireccionales | >921600 bps ✓ | ~2 € |
+| **Adafruit 757** | BSS138 | 4 bidireccionales | >921600 bps ✓ | ~3 € |
+| Módulo genérico "Logic Level Converter 3.3V–5V" | BSS138 | 4 bidireccionales | >921600 bps ✓ | ~0.50 € |
+
+> ⚠️ **IMPORTANTE:** NO usar level shifters basados en el **TXS0108E** (Texas Instruments). Este chip usa push-pull activo que puede generar oscilaciones y glitches a 921600 bps con señales UART. Tampoco es adecuado para señales unidireccionales sin driver en un lado. **Usar solo módulos basados en BSS138 (MOSFET con pull-ups).**
+
+**Conexión del level shifter BSS138:**
+
+```
+  TOFSense-M                 Level Shifter BSS138              ESP32-S3
+  ┌──────────┐              ┌─────────────────────┐           ┌──────────┐
+  │          │              │   HV          LV    │           │          │
+  │ VCC(5V) ─┼──────────────┤► HV    ┌───┐  LV ◄─┼───────────┤ 3.3V     │
+  │          │              │        │BSS│        │           │          │
+  │ TX(pin4)─┼──────────────┤► HV1        LV1 ──►┼───────────┤ GPIO 18  │
+  │          │              │  (3.5V in)  (3.3V out)          │ (UART RX)│
+  │ GND ─────┼──────┬───────┤► GND           GND◄┼───┬───────┤ GND      │
+  │          │      │       └─────────────────────┘   │       │          │
+  └──────────┘      └─────────────────────────────────┘       └──────────┘
+```
+
+| Pin del level shifter | Conectar a | Notas |
+|------------------------|------------|-------|
+| **HV** (high voltage) | **5 V** (misma fuente del sensor) | Referencia del lado de alta tensión |
+| **LV** (low voltage) | **3.3 V** del ESP32-S3 | Referencia del lado de baja tensión |
+| **HV1** (canal 1, lado HV) | **TX del sensor** (pin 4) | Entrada de 3.5–3.6 V |
+| **LV1** (canal 1, lado LV) | **GPIO 18** del ESP32-S3 | Salida reducida a 3.3 V |
+| **GND** | **GND común** | Tierra compartida sensor + ESP32 |
+
+**Ventajas:** señal limpia a 3.3 V exactos (no atenuada), protección bidireccional, sin consumo estático significativo.  
+**Desventajas:** coste ligeramente mayor, ocupa más espacio que dos resistencias.
+
+**Condensador de desacoplo:** sigue siendo recomendable colocar **100 nF** entre VCC y GND del sensor, independientemente de la opción elegida.
+
+---
+
+> ⚠️ **NO conectar sensor TX directamente a GPIO 18 sin protección (ni divisor de tensión ni level shifter).** Los 3.5–3.6 V medidos están en el límite absoluto del ESP32-S3 y pueden dañar el chip.
+
+### 2.5 Diagramas de conexión
+
+#### Diagrama con divisor de tensión (Opción 1)
 
 ```
                     TOFSense-M S (GH1.25)
@@ -121,6 +176,25 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
 ```
 
 > El divisor R1 + R2 reduce los 3.5–3.6 V del sensor a ~2.9 V, seguro para el ESP32-S3 (máx. absoluto 3.6 V).
+
+#### Diagrama con level shifter BSS138 (Opción 2)
+
+```
+                    TOFSense-M S (GH1.25)
+                   ┌──────────────────────┐
+  5V (regulador) ──┤ VCC  (pin 1) ────────┼──────── Level Shifter HV (5V)
+                   │                      │
+  GND ─────────────┤ GND  (pin 2) ────────┼──┬───── Level Shifter GND
+                   │                      │  │
+           n/c ────┤ RX   (pin 3)         │  │      ESP32 3.3V ──── Level Shifter LV
+                   │                      │  │      ESP32 GND  ──── Level Shifter GND
+                   │ TX   (pin 4) ────────┼──┼───── Level Shifter HV1 (entrada)
+                   └──────────────────────┘  │
+                         │    │              │      Level Shifter LV1 ──── ESP32 GPIO18
+                        100nF (desacoplo)    │                              (UART1 RX)
+```
+
+> El level shifter BSS138 convierte los 3.5–3.6 V del sensor a 3.3 V exactos, protegiendo el GPIO 18.
 
 ---
 

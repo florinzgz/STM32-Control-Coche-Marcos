@@ -66,7 +66,9 @@
 
 - **Baudrate:** 921600 bps, 8N1
 - **Nivel lógico UART:** 3.5–3.6 V medido (nominal 3.3V TTL según datasheet)
-- **⚠️ Divisor de tensión OBLIGATORIO:** R1=1 kΩ (serie, sensor TX → punto medio) + R2=4.7 kΩ (punto medio → GND). Punto medio → GPIO 18. Reduce 3.6 V a ~2.9 V (seguro para ESP32-S3, máx. absoluto 3.6 V)
+- **⚠️ Protección OBLIGATORIA (elegir una):**
+  - **Opción 1 — Divisor de tensión:** R1=1 kΩ (serie) + R2=4.7 kΩ (a GND). Reduce 3.6 V a ~2.9 V
+  - **Opción 2 — Level shifter BSS138:** módulo tipo SparkFun BOB-12009 o genérico "Logic Level Converter 3.3V–5V". Convierte a 3.3 V exactos. ⚠️ NO usar TXS0108E
 - **Condensador desacoplo:** 100 nF entre VCC y GND del sensor (recomendado)
 
 ---
