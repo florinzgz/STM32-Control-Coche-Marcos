@@ -29,10 +29,13 @@
 
 Según el datasheet V3.0: *"Communication Interface UART and CAN, TTL signal line level 3.3V"*
 
-Esto significa:
+Sin embargo, **mediciones reales** del pin TX del sensor muestran **3.5–3.6 V**, por encima de los 3.3 V nominales del datasheet.
+
 - **VCC = 5 V** (alimentación del sensor: láser, procesador interno, etc.)
-- **UART TX/RX = 3.3 V TTL** (las señales de datos operan a 3.3 V lógico)
-- Ambos voltajes son correctos y no hay contradicción: el sensor se alimenta a 5 V internamente pero sus líneas UART son 3.3 V TTL
+- **UART TX (nominal)** = 3.3 V TTL según datasheet
+- **UART TX (medido)** = **3.5–3.6 V** en la práctica
+
+> ⚠️ **PELIGRO:** El ESP32-S3 tiene un voltaje máximo absoluto de **3.6 V** en sus GPIO. Los 3.5–3.6 V medidos están en el **límite absoluto sin ningún margen de seguridad**. Un pico transitorio por encima de 3.6 V **puede dañar permanentemente el pin GPIO 18 o el chip ESP32-S3**. Se requiere un **divisor de tensión obligatorio** (ver sección 2.4).
 
 ---
 
@@ -67,29 +70,131 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
 
 ### 2.4 ¿Se necesitan resistencias, divisor de tensión o level shifter?
 
-**NO.** Según el datasheet V3.0:
-- Las señales UART del TOFSense-M son **TTL 3.3 V**
-- El ESP32-S3 también opera a **3.3 V lógico**
-- La conexión es directa: sensor TX → ESP32 RX, sin componentes intermedios
+**SÍ — se necesita protección obligatoria.** Aunque el datasheet V3.0 indica 3.3 V TTL, las mediciones reales muestran **3.5–3.6 V** en el pin TX del sensor. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en sus GPIO, lo que deja **cero margen** para picos o tolerancias.
 
-**Único componente recomendado:** condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector, para filtrar ruido de alimentación.
+Hay **dos opciones** válidas. Usar **una u otra**, nunca ambas a la vez:
 
-### 2.5 Diagrama de conexión
+---
+
+#### Opción 1 — Divisor de tensión resistivo (2 resistencias)
+
+| Componente | Valor | Conexión |
+|------------|-------|----------|
+| **R1** | **1 kΩ** | En serie entre sensor TX (pin 4) y GPIO 18 |
+| **R2** | **4.7 kΩ** | Entre GPIO 18 y GND |
+| **C1** | **100 nF** | Entre VCC y GND del sensor (desacoplo, recomendado) |
+
+**Cálculo del divisor:**
+- Con 3.6 V de entrada: Vout = 3.6 × 4.7 / (1 + 4.7) = **2.97 V** ✓ (seguro para ESP32-S3)
+- Con 3.5 V de entrada: Vout = 3.5 × 4.7 / (1 + 4.7) = **2.88 V** ✓
+- VIH del ESP32-S3 = 0.75 × 3.3 V = **2.475 V** → todas las salidas están por encima del umbral de HIGH ✓
+- VIL del ESP32-S3 = 0.25 × 3.3 V = **0.825 V** → un LOW de 0 V se mantiene como LOW ✓
+- Impedancia total: 5.7 kΩ → compatible con UART a 921600 bps (RC ≈ 85 ns ≪ bit time 1085 ns)
+
+**Ventajas:** coste mínimo (~0.02 €), sin componentes activos, ocupa muy poco espacio.  
+**Desventajas:** atenúa la señal (de 3.5 V a ~2.9 V), consume corriente estática por R2 (~0.7 mA).
+
+---
+
+#### Opción 2 — Level shifter con MOSFET BSS138 (alternativa sin resistencias en línea)
+
+En lugar de las dos resistencias del divisor, se puede usar un **módulo level shifter basado en BSS138** (también llamado "convertidor de nivel lógico bidireccional"). Estos módulos son baratos (~0.50–1 €), vienen premontados en breakout boards de 4 canales, y se consiguen fácilmente en tiendas de electrónica y online.
+
+**Módulos compatibles recomendados:**
+
+| Módulo | Chip | Canales | Velocidad máx. | Precio aprox. |
+|--------|------|---------|-----------------|---------------|
+| **SparkFun BOB-12009** | BSS138 | 4 bidireccionales | >921600 bps ✓ | ~2 € |
+| **Adafruit 757** | BSS138 | 4 bidireccionales | >921600 bps ✓ | ~3 € |
+| Módulo genérico "Logic Level Converter 3.3V–5V" | BSS138 | 4 bidireccionales | >921600 bps ✓ | ~0.50 € |
+
+> ⚠️ **IMPORTANTE:** NO usar level shifters basados en el **TXS0108E** (Texas Instruments). Este chip usa push-pull activo que puede generar oscilaciones y glitches a 921600 bps con señales UART. Tampoco es adecuado para señales unidireccionales sin driver en un lado. **Usar solo módulos basados en BSS138 (MOSFET con pull-ups).**
+
+**Conexión del level shifter BSS138:**
+
+```
+  TOFSense-M                 Level Shifter BSS138              ESP32-S3
+  ┌──────────┐              ┌─────────────────────┐           ┌──────────┐
+  │          │              │   HV          LV    │           │          │
+  │ VCC(5V) ─┼──────────────┤► HV    ┌───┐  LV ◄─┼───────────┤ 3.3V     │
+  │          │              │        │BSS│        │           │          │
+  │ TX(pin4)─┼──────────────┤► HV1        LV1 ──►┼───────────┤ GPIO 18  │
+  │          │              │  (3.5V in)  (3.3V out)          │ (UART RX)│
+  │ GND ─────┼──────┬───────┤► GND           GND◄┼───┬───────┤ GND      │
+  │          │      │       └─────────────────────┘   │       │          │
+  └──────────┘      └─────────────────────────────────┘       └──────────┘
+```
+
+| Pin del level shifter | Conectar a | Notas |
+|------------------------|------------|-------|
+| **HV** (high voltage) | **5 V** (misma fuente del sensor) | Referencia del lado de alta tensión |
+| **LV** (low voltage) | **3.3 V** del ESP32-S3 | Referencia del lado de baja tensión |
+| **HV1** (canal 1, lado HV) | **TX del sensor** (pin 4) | Entrada de 3.5–3.6 V |
+| **LV1** (canal 1, lado LV) | **GPIO 18** del ESP32-S3 | Salida reducida a 3.3 V |
+| **GND** | **GND común** | Tierra compartida sensor + ESP32 |
+
+**Ventajas:** señal limpia a 3.3 V exactos (no atenuada), protección bidireccional, sin consumo estático significativo.  
+**Desventajas:** coste ligeramente mayor, ocupa más espacio que dos resistencias.
+
+**Condensador de desacoplo:** sigue siendo recomendable colocar **100 nF** entre VCC y GND del sensor, independientemente de la opción elegida.
+
+---
+
+> ⚠️ **NO conectar sensor TX directamente a GPIO 18 sin protección (ni divisor de tensión ni level shifter).** Los 3.5–3.6 V medidos están en el límite absoluto del ESP32-S3 y pueden dañar el chip.
+
+### 2.5 Diagramas de conexión
+
+#### Diagrama con divisor de tensión (Opción 1)
 
 ```
                     TOFSense-M S (GH1.25)
                    ┌──────────────────────┐
   5V (regulador) ──┤ VCC  (pin 1)         │
                    │                      │     ⚠ VCC = 5V obligatorio
-  GND ─────────────┤ GND  (pin 2)         │     UART = 3.3V TTL
+  GND ─────────────┤ GND  (pin 2)         │     ⚠ TX medido = 3.5–3.6V
                    │                      │
            n/c ────┤ RX   (pin 3)         │     (no se envían comandos)
                    │                      │
-  ESP32 GPIO18 ────┤ TX   (pin 4)         │     Sensor TX → ESP32 UART1 RX
-                   └──────────────────────┘
-                         │    │
-                        100nF (desacoplo VCC-GND)
+                   │ TX   (pin 4) ────────┼──┐
+                   └──────────────────────┘  │
+                         │    │              │  Divisor de tensión
+                        100nF (desacoplo)    │  OBLIGATORIO
+                                             │
+                                    ┌────────┘
+                                    │
+                               ┌────┴────┐
+                               │  R1=1kΩ │  (serie)
+                               └────┬────┘
+                                    │
+                                    ├──────────── ESP32 GPIO18 (UART1 RX)
+                                    │
+                               ┌────┴────┐
+                               │ R2=4.7kΩ│  (a GND)
+                               └────┬────┘
+                                    │
+                                   GND
 ```
+
+> El divisor R1 + R2 reduce los 3.5–3.6 V del sensor a ~2.9 V, seguro para el ESP32-S3 (máx. absoluto 3.6 V).
+
+#### Diagrama con level shifter BSS138 (Opción 2)
+
+```
+                    TOFSense-M S (GH1.25)
+                   ┌──────────────────────┐
+  5V (regulador) ──┤ VCC  (pin 1) ────────┼──────── Level Shifter HV (5V)
+                   │                      │
+  GND ─────────────┤ GND  (pin 2) ────────┼──┬───── Level Shifter GND
+                   │                      │  │
+           n/c ────┤ RX   (pin 3)         │  │      ESP32 3.3V ──── Level Shifter LV
+                   │                      │  │      ESP32 GND  ──── Level Shifter GND
+                   │ TX   (pin 4) ────────┼──┼───── Level Shifter HV1 (entrada)
+                   └──────────────────────┘  │
+                         │    │              │      Level Shifter LV1 ──── ESP32 GPIO18
+                        100nF (desacoplo)    │                              (UART1 RX)
+```
+
+> El level shifter BSS138 convierte los 3.5–3.6 V del sensor a 3.3 V exactos, protegiendo el GPIO 18.
 
 ---
 
@@ -125,7 +230,7 @@ Al alimentar el sensor con 5 V:
 1. **Periodo de inicialización:** ~300–500 ms sin datos (el sensor calibra internamente)
 2. **Inicio de transmisión:** el pin TX comienza a enviar tramas de 400 bytes a 921600 bps
 3. **Señal esperada con osciloscopio:**
-   - Nivel de reposo: **3.3 V** (UART idle = HIGH)
+   - Nivel de reposo: **3.5–3.6 V** (UART idle = HIGH; medido por encima del 3.3 V nominal del datasheet)
    - Primer byte de cada trama: **0x57** (frame_header)
    - Frecuencia de tramas: ~10 Hz (una trama cada ~100 ms)
    - Duración de cada trama: 400 bytes × 10 bits / 921600 bps ≈ **4.3 ms**
@@ -200,6 +305,92 @@ Según el código de referencia oficial de Nooploop (`nlink_tofsensem_frame0.c`)
 | Todos los píxeles inválidos | Sensor en modo CAN | Reconfigurar a modo UART con NAssistant |
 | Lecturas erráticas | Cable largo sin desacoplo | Añadir 100 nF en VCC-GND cerca del sensor |
 | Bootloop ESP32 | HardwareSerial en constructor global | Usar `new (std::nothrow)` en `init()` |
+| **VALID→INVALID intermitente** | **Voltaje ~2.1V en GPIO 18 (resistor R1 incorrecto)** | **Ver sección 5 abajo** |
+
+---
+
+## 5. Diagnóstico: VALID→INVALID intermitente con ~2.1 V en GPIO 18
+
+### 5.1 Síntoma
+
+El usuario conecta el sensor con un divisor de tensión, pero en la pantalla de la ESP32 aparece:
+
+1. `SENSOR: WAITING` (durante 1 segundo, warmup normal)
+2. `SENSOR: VALID` (brevemente, 1–2 segundos)
+3. `SENSOR: INVALID` (permanece la mayor parte del tiempo)
+4. A veces alterna entre VALID e INVALID rápidamente
+
+Al medir con un multímetro en GPIO 18 (con el sensor transmitiendo), se leen **~2.1 V** en lugar de los ~2.9 V esperados.
+
+### 5.2 Causa raíz
+
+**2.1 V está por debajo del umbral VIH del ESP32-S3** (0.75 × 3.3 V = **2.475 V**). Esto significa que el nivel UART "HIGH" (idle) se lee de forma indeterminada:
+
+- A veces se interpreta como HIGH → la trama se recibe correctamente → VALID
+- La mayoría de veces se interpreta mal → bytes corruptos → checksum falla → INVALID
+
+**¿Por qué 2.1 V en vez de 2.9 V?** Porque el resistor R1 tiene un valor incorrecto:
+
+| R1 real | R2 | Vin (TX sensor) | Vout en GPIO 18 | ¿Funciona? |
+|---------|-----|-----------------|------------------|------------|
+| **1 kΩ** (correcto ✓) | 4.7 kΩ | 3.5 V | **2.88 V** | ✅ Sí (> VIH 2.475 V) |
+| **2.2 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **2.38 V** | ❌ No (< VIH) |
+| **3.3 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **2.06 V ≈ 2.1 V** | ❌ No (< VIH) |
+| **4.7 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **1.75 V** | ❌ No (< VIH) |
+| **10 kΩ** (error ✗) | 4.7 kΩ | 3.5 V | **1.12 V** | ❌ No (< VIH) |
+
+> **Si mides ~2.1 V, tu R1 es probablemente 3.3 kΩ en vez de 1 kΩ.** Esta confusión es común porque las bandas de color son similares.
+
+### 5.3 Cómo identificar las resistencias correctas
+
+**Código de colores de R1 = 1 kΩ (la que va EN SERIE):**
+
+| Banda 1 | Banda 2 | Banda 3 (multiplicador) | Banda 4 (tolerancia) | Valor |
+|---------|---------|-------------------------|----------------------|-------|
+| **Marrón** | **Negro** | **Rojo** | Dorado (5%) u Oro | **1 kΩ** ✅ |
+| Naranja | Naranja | Rojo | — | 3.3 kΩ ❌ (NO usar) |
+
+**Código de colores de R2 = 4.7 kΩ (la que va a GND):**
+
+| Banda 1 | Banda 2 | Banda 3 (multiplicador) | Banda 4 (tolerancia) | Valor |
+|---------|---------|-------------------------|----------------------|-------|
+| **Amarillo** | **Violeta** | **Rojo** | Dorado (5%) | **4.7 kΩ** ✅ |
+
+> **Consejo:** si no estás seguro del valor, mídelas con un multímetro en modo ohmios antes de soldar.
+
+### 5.4 Cómo verificar con el monitor serie
+
+El firmware ahora incluye **diagnósticos automáticos** que se imprimen cada 5 segundos por el puerto serie (115200 bps). Abre el monitor serie de Arduino IDE o PlatformIO y busca líneas como:
+
+```
+[OBSTACLE] Diag 5s: OK=2 cksumFail=45 hdrFail=0 noPixels=0 discarded=312
+[OBSTACLE] WARNING: Most frames fail checksum. Check voltage divider resistor values — if you measure ~2.1V on GPIO 18, R1 (series) is likely 3.3kohm instead of 1kohm. Expected ~2.9V with correct R1=1kohm (series) + R2=4.7kohm (to GND). See TOFSENSE_M_WIRING_GUIDE.md section 5
+```
+
+**Interpretación de los contadores:**
+
+| Contador | Significado | Valor normal | Valor problemático |
+|----------|------------|--------------|-------------------|
+| `OK` | Tramas parseadas correctamente | ~50 en 5s (10 Hz) | 0–5 (pocas tramas pasan) |
+| `cksumFail` | Tramas con checksum incorrecto | 0 | >>OK → **señal marginal** |
+| `hdrFail` | Header 0x57/0x01 incorrecto al validar trama completa (400 bytes) | 0 | >0 → pérdida de sincronización |
+| `noPixels` | Todos los 64 píxeles inválidos | 0 | >0 → sensor obstruido o sin objetivo |
+| `discarded` | Bytes descartados buscando 0x57 | bajo | alto → señal ruidosa o baudrate mal |
+
+**Si `cksumFail >> OK`:** el problema es la señal eléctrica (voltaje demasiado bajo). Solución: cambiar R1 a 1 kΩ, o usar un level shifter BSS138 (ver sección 2.4, Opción 2).
+
+**Si todo es 0:** no llegan datos UART. Verificar cableado TX→GPIO 18 y que VCC = 5 V.
+
+### 5.5 Solución
+
+1. **Desconectar** el sensor
+2. **Medir** R1 con multímetro — debe ser **1 kΩ** (marrón-negro-rojo)
+3. Si R1 es 3.3 kΩ (naranja-naranja-rojo): **reemplazar por 1 kΩ**
+4. **Reconectar** y verificar que GPIO 18 mide **~2.9 V** con el sensor transmitiendo
+5. Confirmar en el monitor serie: `OK=~50 cksumFail=0` cada 5 segundos
+6. La pantalla debe mostrar `SENSOR: VALID` de forma estable
+
+> **Alternativa:** si no se tienen las resistencias correctas, usar un **level shifter BSS138** (Opción 2, sección 2.4) que no requiere calcular valores de resistencias.
 
 ---
 

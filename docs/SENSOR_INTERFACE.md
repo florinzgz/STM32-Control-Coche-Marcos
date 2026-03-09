@@ -508,9 +508,9 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 | 1 | VCC | **5 V** (obligatorio, el sensor no funciona a 3.3 V) |
 | 2 | GND | GND común |
 | 3 | RX | No conectado (recepción unidireccional) |
-| 4 | TX | ESP32 GPIO18 (UART1 RX) |
+| 4 | TX | ESP32 GPIO18 (UART1 RX) vía divisor de tensión o level shifter BSS138 |
 
-> **Nota sobre niveles lógicos:** Según el datasheet V3.0, las señales UART del TOFSense-M son TTL 3.3 V, compatibles directamente con el ESP32-S3. No se requiere level shifter para las señales TX/RX.  
+> **Nota sobre niveles lógicos:** Aunque el datasheet V3.0 indica UART TTL 3.3 V, las mediciones reales muestran **3.5–3.6 V** en el pin TX. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en GPIO → se requiere **protección obligatoria**: divisor de tensión (R1=1 kΩ + R2=4.7 kΩ) o level shifter BSS138 (ver sección "Resistencias y protección" más abajo).  
 > **Nota sobre alimentación:** El sensor requiere 5 V en VCC. Alimentar a 3.3 V provocará funcionamiento inestable o ausencia de datos (estado INVALID).
 
 ### Parámetros
@@ -536,7 +536,9 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 
 ### Resistencias y protección
 
-- **UART RX (GPIO18):** Conexión directa. El TOFSense-M tiene UART TTL 3.3 V (según datasheet V3.0, sección "Typical Specifications"), compatibles directamente con el ESP32-S3. No se requiere divisor resistivo ni level shifter para las señales UART.
+- **UART RX (GPIO18):** ⚠️ **Protección obligatoria.** El TX del TOFSense-M emite 3.5–3.6 V (medido), por encima del 3.3 V nominal del datasheet. El ESP32-S3 tiene máx. absoluto de 3.6 V en GPIO. Elegir **una** de estas opciones:
+  - **Opción 1 — Divisor de tensión:** R1=1 kΩ (serie) + R2=4.7 kΩ (a GND) → ~2.9 V en GPIO 18.
+  - **Opción 2 — Level shifter BSS138:** módulo tipo SparkFun BOB-12009, Adafruit 757, o genérico "Logic Level Converter 3.3V–5V" → 3.3 V exactos en GPIO 18. ⚠️ NO usar TXS0108E (oscilaciones a 921600 bps).
 - **Condensador de desacoplo:** 100 nF en VCC del TOFSense-M cerca del sensor.
 
 ### Alimentación
@@ -560,6 +562,8 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 
 ### Esquema de conexión
 
+**Opción 1 — Con divisor de tensión:**
+
 ```
           TOFSense-M (GH1.25)
          ┌──────────────┐
@@ -569,10 +573,34 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
          │              │
      n/c ┤ RX  (pin 3)  │
          │              │
-  ESP32 ─┤ TX  (pin 4)  ├──────── ESP32 GPIO18 (UART1 RX)
-  GPIO18 └──────────────┘         (3.3V TTL — conexión directa OK)
+         │ TX  (pin 4)  ├──┐     ⚠ TX medido = 3.5–3.6V
+         └──────────────┘  │
+                      ┌────┘
+                      ├── R1=1kΩ ──┬── ESP32 GPIO18 (UART1 RX)
+                      │            │
+                      │       R2=4.7kΩ  (divisor de tensión)
+                      │            │
+                      │           GND
 
   Desacoplo: 100nF entre VCC y GND del TOFSense-M
+```
+
+**Opción 2 — Con level shifter BSS138 (alternativa sin resistencias):**
+
+```
+          TOFSense-M (GH1.25)         Level Shifter BSS138
+         ┌──────────────┐            ┌──────────────────┐
+  5V ────┤ VCC (pin 1)  ├────────────┤ HV (5V)          │
+         │              │            │                  │
+  GND ───┤ GND (pin 2)  ├────────────┤ GND              │
+         │              │            │                  │    ESP32-S3
+     n/c ┤ RX  (pin 3)  │            │       LV (3.3V) ─┼─── 3.3V
+         │              │            │                  │
+         │ TX  (pin 4)  ├────────────┤ HV1    LV1 ──────┼─── GPIO18
+         └──────────────┘            └──────────────────┘    (UART1 RX)
+
+  Desacoplo: 100nF entre VCC y GND del TOFSense-M
+  ⚠️ Usar solo BSS138 (NO TXS0108E)
 ```
 
 ---

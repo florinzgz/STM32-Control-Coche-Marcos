@@ -64,6 +64,19 @@ static uint16_t      rxIdx_            = 0;
 static HardwareSerial tofSerial(1);
 
 // -------------------------------------------------------------------------
+// Diagnostic counters — logged every DIAG_INTERVAL_MS to Serial for
+// debugging wiring / signal-level problems (e.g. wrong voltage divider
+// resistor values → marginal signal → intermittent checksum failures).
+// -------------------------------------------------------------------------
+static constexpr unsigned long DIAG_INTERVAL_MS = 5000;
+static unsigned long lastDiagMs_      = 0;
+static uint32_t diagFramesOk_        = 0;  // Frames parsed successfully
+static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
+static uint32_t diagHeaderFail_      = 0;  // Wrong header or function mark
+static uint32_t diagAllPixelsInvalid_= 0;  // All 64 dis_status ≠ 0
+static uint32_t diagBytesDiscarded_  = 0;  // Bytes skipped waiting for 0x57
+
+// -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
 //   < 200 mm  → zone 4 (emergency, scale=0.0)
 //   200–500   → zone 3 (critical,  scale=0.3)
@@ -85,30 +98,39 @@ static uint8_t distanceToZone(uint16_t mm) {
 }
 
 // -------------------------------------------------------------------------
+// Parse result — allows update() to distinguish failure modes for diag
+// -------------------------------------------------------------------------
+enum class ParseResult : uint8_t {
+    OK,                // Successful parse
+    TOO_SHORT,         // Buffer too short
+    BAD_HEADER,        // Wrong header or function_mark
+    BAD_CHECKSUM,      // 8-bit sum mismatch
+    NO_VALID_PIXELS    // All 64 pixels have dis_status ≠ 0
+};
+
+// -------------------------------------------------------------------------
 // Parse a complete NLink_TOFSense_M_Frame0 and extract minimum distance
-// Returns distance in mm, or 0 on parse failure.
+// Returns distance in mm via outDistMm, or 0 on failure.
 //
 // Per-pixel layout (6 bytes, per official Nooploop struct):
 //   [0-2]  dis:              3-byte signed int24 LE, unit = µm (/1000 = mm)
 //   [3]    dis_status:       0 = valid measurement
 //   [4-5]  signal_strength:  uint16 LE
 // -------------------------------------------------------------------------
-static uint16_t parseFrame(const uint8_t* buf, uint16_t len) {
-    if (len < FRAME_LENGTH) return 0;
-    if (buf[OFF_HEADER] != FRAME_HEADER) return 0;
-    if (buf[OFF_FUNCTION_MARK] != FUNCTION_MARK) return 0;
+static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDistMm) {
+    outDistMm = 0;
+    if (len < FRAME_LENGTH) return ParseResult::TOO_SHORT;
+    if (buf[OFF_HEADER] != FRAME_HEADER || buf[OFF_FUNCTION_MARK] != FUNCTION_MARK)
+        return ParseResult::BAD_HEADER;
 
     // Verify checksum: 8-bit sum of all bytes except the checksum byte itself
     uint8_t checksum = 0;
     for (uint16_t i = 0; i < FRAME_LENGTH - 1; i++) {
         checksum += buf[i];
     }
-    if (checksum != buf[FRAME_LENGTH - 1]) return 0;
+    if (checksum != buf[FRAME_LENGTH - 1]) return ParseResult::BAD_CHECKSUM;
 
     // Extract minimum valid distance across all 64 pixels.
-    // Each pixel: 3 bytes distance (signed int24 LE, unit = µm),
-    //             1 byte dis_status (0 = valid),
-    //             2 bytes signal_strength (uint16 LE).
     uint32_t minDistMm = 0xFFFFFFFF;
     bool anyValid = false;
 
@@ -135,9 +157,9 @@ static uint16_t parseFrame(const uint8_t* buf, uint16_t len) {
         }
     }
 
-    if (!anyValid) return 0;
-    if (minDistMm > 0xFFFF) return 0xFFFF;
-    return (uint16_t)minDistMm;
+    if (!anyValid) return ParseResult::NO_VALID_PIXELS;
+    outDistMm = (minDistMm > 0xFFFF) ? (uint16_t)0xFFFF : (uint16_t)minDistMm;
+    return ParseResult::OK;
 }
 
 // -------------------------------------------------------------------------
@@ -157,6 +179,14 @@ void init(const Config& cfg) {
     stuckActive_   = false;
     initialized_   = true;
     rxIdx_         = 0;
+
+    // Reset diagnostic counters
+    lastDiagMs_         = millis();
+    diagFramesOk_       = 0;
+    diagChecksumFail_   = 0;
+    diagHeaderFail_     = 0;
+    diagAllPixelsInvalid_ = 0;
+    diagBytesDiscarded_ = 0;
 
     reading_ = Reading{};  // Reset to defaults
 
@@ -185,6 +215,7 @@ void update(float vehicleSpeedKmh) {
 
         // Synchronize on header byte
         if (rxIdx_ == 0 && byte != FRAME_HEADER) {
+            diagBytesDiscarded_++;
             continue;  // Discard until we find the header
         }
 
@@ -192,13 +223,60 @@ void update(float vehicleSpeedKmh) {
 
         // Complete frame received
         if (rxIdx_ >= FRAME_LENGTH) {
-            uint16_t dist = parseFrame(rxBuf_, rxIdx_);
-            if (dist > 0) {
-                measuredMm = dist;
-                gotFrame = true;
+            uint16_t dist = 0;
+            ParseResult pr = parseFrame(rxBuf_, rxIdx_, dist);
+            switch (pr) {
+                case ParseResult::OK:
+                    measuredMm = dist;
+                    gotFrame = true;
+                    diagFramesOk_++;
+                    break;
+                case ParseResult::BAD_HEADER:
+                    diagHeaderFail_++;
+                    break;
+                case ParseResult::BAD_CHECKSUM:
+                    diagChecksumFail_++;
+                    break;
+                case ParseResult::NO_VALID_PIXELS:
+                    diagAllPixelsInvalid_++;
+                    break;
+                default:
+                    break;
             }
             rxIdx_ = 0;  // Reset for next frame
         }
+    }
+
+    // Periodic diagnostic output (every DIAG_INTERVAL_MS)
+    if (now - lastDiagMs_ >= DIAG_INTERVAL_MS) {
+        uint32_t totalFail = diagChecksumFail_ + diagHeaderFail_ + diagAllPixelsInvalid_;
+        if (diagFramesOk_ > 0 || totalFail > 0 || diagBytesDiscarded_ > 0) {
+            Serial.printf("[OBSTACLE] Diag %lus: OK=%lu cksumFail=%lu hdrFail=%lu "
+                          "noPixels=%lu discarded=%lu\n",
+                          (unsigned long)(DIAG_INTERVAL_MS / 1000),
+                          (unsigned long)diagFramesOk_,
+                          (unsigned long)diagChecksumFail_,
+                          (unsigned long)diagHeaderFail_,
+                          (unsigned long)diagAllPixelsInvalid_,
+                          (unsigned long)diagBytesDiscarded_);
+            if (diagChecksumFail_ > diagFramesOk_ && diagChecksumFail_ > 0) {
+                Serial.println("[OBSTACLE] WARNING: Most frames fail checksum. "
+                               "Check voltage divider resistor values — if you "
+                               "measure ~2.1V on GPIO 18, R1 (series) is likely "
+                               "3.3kohm instead of 1kohm. Expected ~2.9V with "
+                               "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
+                               "See TOFSENSE_M_WIRING_GUIDE.md section 5");
+            }
+        } else if (reading_.status != SensorStatus::WAITING) {
+            Serial.println("[OBSTACLE] Diag: no UART data received — check TX wiring");
+        }
+        // Reset counters for next interval
+        diagFramesOk_        = 0;
+        diagChecksumFail_    = 0;
+        diagHeaderFail_      = 0;
+        diagAllPixelsInvalid_= 0;
+        diagBytesDiscarded_  = 0;
+        lastDiagMs_          = now;
     }
 
     if (!gotFrame) {

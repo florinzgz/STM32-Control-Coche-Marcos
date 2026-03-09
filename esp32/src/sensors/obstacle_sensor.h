@@ -17,8 +17,11 @@
 // Hardware: TOFSense-M S (Nooploop) — GH1.25 4-pin connector
 //   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX (GPIO 18)
 //   VCC must be 5 V (sensor will not work at 3.3 V).
-//   UART IO level is 3.3 V TTL — direct connection to ESP32-S3 is safe,
-//   no level shifter needed for UART signals.
+//   UART IO level: datasheet says 3.3 V TTL, but real measurements show
+//   3.5–3.6 V on TX.  ESP32-S3 absolute max is 3.6 V → protection REQUIRED:
+//     Option 1: voltage divider (1 kΩ + 4.7 kΩ to GND) → ~2.9 V
+//     Option 2: BSS138-based level shifter (NOT TXS0108E) → 3.3 V
+//   See docs/TOFSENSE_M_WIRING_GUIDE.md for wiring diagrams.
 //
 // Reference: TOFSense-M User Manual V3.0
 //            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
