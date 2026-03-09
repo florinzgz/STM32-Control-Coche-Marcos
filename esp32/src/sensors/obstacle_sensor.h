@@ -61,7 +61,8 @@ struct Reading {
 struct Config {
     int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
     int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
-    uint32_t baudRate          = 921600; // TOFSense-M default baud rate
+    uint32_t baudRate          = 921600; // TOFSense-M default baud rate (must match sensor config; changeable via NAssistant)
+    uint16_t rxBufSize         = 1024;  // UART RX ring-buffer (must be > 400; default ESP32 256 is too small)
     uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
     uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
     uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)

@@ -55,6 +55,7 @@ static uint16_t      prevDistanceMm_   = 0;
 static unsigned long stuckSinceMs_     = 0;
 static bool          stuckActive_      = false;
 static bool          initialized_      = false;
+static bool          warmupDone_       = false;
 
 // UART receive buffer
 static uint8_t       rxBuf_[FRAME_LENGTH];
@@ -169,6 +170,16 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
 void init(const Config& cfg) {
     cfg_ = cfg;
 
+    // Set UART RX ring-buffer size BEFORE begin().
+    // Default ESP32 buffer is 256 bytes — too small for the 400-byte
+    // TOFSense-M frames at 921600 bps.  With a 256-byte buffer the ring
+    // buffer fills in ~2.8 ms; any main-loop cycle longer than that
+    // (display update, CAN processing, etc.) causes bytes to be lost,
+    // corrupting the frame and triggering checksum failures that make
+    // the sensor oscillate between VALID and INVALID.
+    // 1024 bytes ≈ 2.5 full frames → ~11 ms of headroom.
+    tofSerial.setRxBufferSize(cfg_.rxBufSize);
+
     // Initialize UART1 for TOFSense-M
     tofSerial.begin(cfg_.baudRate, SERIAL_8N1, cfg_.rxPin, cfg_.txPin);
 
@@ -177,6 +188,7 @@ void init(const Config& cfg) {
     prevDistanceMm_ = 0;
     stuckSinceMs_  = 0;
     stuckActive_   = false;
+    warmupDone_    = false;
     initialized_   = true;
     rxIdx_         = 0;
 
@@ -190,7 +202,8 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.println("[OBSTACLE] TOFSense-M initialized (UART1, 921600 bps)");
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u)\n",
+                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize);
 }
 
 void update(float vehicleSpeedKmh) {
@@ -206,6 +219,19 @@ void update(float vehicleSpeedKmh) {
         return;
     }
 
+    // First call after warmup: flush stale UART data that accumulated
+    // while update() was returning early during the warmup period.
+    // Without this flush, the first post-warmup read contains a partial
+    // frame (buffer overflow during warmup), causing false sync and
+    // cascading checksum failures until re-alignment.
+    if (!warmupDone_) {
+        while (tofSerial.available() > 0) {
+            tofSerial.read();
+        }
+        rxIdx_ = 0;
+        warmupDone_ = true;
+    }
+
     // Read available UART bytes and parse frames
     uint16_t measuredMm = 0;
     bool gotFrame = false;
@@ -217,6 +243,24 @@ void update(float vehicleSpeedKmh) {
         if (rxIdx_ == 0 && byte != FRAME_HEADER) {
             diagBytesDiscarded_++;
             continue;  // Discard until we find the header
+        }
+
+        // Validate function_mark as second sync byte.  The header value
+        // 0x57 can appear naturally inside pixel distance data (~1.5×
+        // per frame).  Checking byte[1]==0x01 immediately avoids locking
+        // onto a false header, which would consume 400 bytes before
+        // parseFrame() rejects it — potentially missing the real frame.
+        if (rxIdx_ == 1 && byte != FUNCTION_MARK) {
+            // Not a valid frame start — reset.
+            // If this byte is itself a header, keep it as byte[0].
+            if (byte == FRAME_HEADER) {
+                rxBuf_[0] = byte;
+                // rxIdx_ stays at 1
+            } else {
+                rxIdx_ = 0;
+                diagBytesDiscarded_++;
+            }
+            continue;
         }
 
         rxBuf_[rxIdx_++] = byte;
@@ -268,7 +312,10 @@ void update(float vehicleSpeedKmh) {
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
         } else if (reading_.status != SensorStatus::WAITING) {
-            Serial.println("[OBSTACLE] Diag: no UART data received — check TX wiring");
+            Serial.println("[OBSTACLE] Diag: no UART data received — check wiring "
+                           "and baud rate (expected 921600 bps factory default). "
+                           "If sensor was reconfigured with NAssistant, reset it "
+                           "to 921600 or update Config::baudRate to match");
         }
         // Reset counters for next interval
         diagFramesOk_        = 0;

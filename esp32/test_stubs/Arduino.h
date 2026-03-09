@@ -60,6 +60,7 @@ inline FakeSerial_ Serial;
 struct HardwareSerial {
     explicit HardwareSerial(int) {}
     void begin(unsigned long, int, int, int) {}
+    void setRxBufferSize(size_t) {}
     size_t write(const uint8_t*, size_t n) { return n; }
     int available() { return 0; }
     int read() { return -1; }

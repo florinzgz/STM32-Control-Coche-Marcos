@@ -309,6 +309,70 @@ static void test_checksum_position() {
     ASSERT_EQ(393 + 6 - 1, 398);
 }
 
+// Test 9: Verify two-byte sync pattern (0x57 0x01) distinguishes real headers
+//         from false 0x57 occurrences in pixel distance data.
+//         The update() function now checks both bytes during frame sync.
+static void test_two_byte_sync_pattern() {
+    printf("  test_two_byte_sync_pattern...\n");
+
+    // A false 0x57 inside pixel data must NOT look like a valid header.
+    // The function_mark byte (0x01) serves as the confirmation byte.
+    // Probability of false sync: 1/256 (only 0x57) → 1/65536 (0x57+0x01).
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to a distance where the LSB is 0x57 (87 µm).
+    // This creates a 0x57 inside pixel data at offset 9.
+    setPixel(frame, 0, 87, 0, 100);   // 87 µm, valid, signal=100
+    writeChecksum(frame);
+
+    // The byte at offset 9 (pixel 0, distance LSB) is 0x57 — same as header.
+    ASSERT_EQ(frame[9], 0x57);
+
+    // But the next byte (distance byte 1) is 0x00 — NOT 0x01.
+    // The two-byte sync check rejects this as a false header.
+    ASSERT(frame[10] != 0x01);
+
+    // The real header at offset 0 has the correct two-byte pattern.
+    ASSERT_EQ(frame[0], 0x57);
+    ASSERT_EQ(frame[1], 0x01);
+}
+
+// Test 10: Verify init() resets state correctly for warmup flush
+static void test_init_resets_state() {
+    printf("  test_init_resets_state...\n");
+
+    // After init(), sensor should be in WAITING state
+    obstacle_sensor::init();
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
+    ASSERT_EQ(rd.healthy, false);
+    ASSERT_EQ(rd.stuck, false);
+    ASSERT_EQ(rd.distance_mm, 0);
+    ASSERT_EQ(rd.zone, 0);
+}
+
+// Test 11: Verify Config defaults — baud rate and RX buffer size
+//          Baud rate must be 921600 (TOFSense / TOFSense-M factory default).
+//          RX buffer must be > 400 (one full frame) to prevent overflow.
+static void test_config_defaults() {
+    printf("  test_config_defaults...\n");
+
+    obstacle_sensor::Config cfg{};
+
+    // Baud rate: 921600 — factory default per Nooploop User Manual V3.0
+    ASSERT_EQ(cfg.baudRate, 921600UL);
+
+    // RX buffer: must be larger than a single 400-byte frame
+    ASSERT(cfg.rxBufSize > FRAME_LEN);
+
+    // Default value should be 1024 (2.5 frames, ~11 ms headroom at 921600)
+    ASSERT_EQ(cfg.rxBufSize, 1024);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -322,6 +386,9 @@ int main() {
     test_zone_mapping();
     test_frame_header_bytes();
     test_checksum_position();
+    test_two_byte_sync_pattern();
+    test_init_resets_state();
+    test_config_defaults();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
