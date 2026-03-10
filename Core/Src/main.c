@@ -461,6 +461,18 @@ void SystemClock_Config(void)
     if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_8) != HAL_OK) {
         Error_Handler();
     }
+
+    /* Configure FDCAN kernel clock source.
+     * RCC_CCIPR.FDCANSEL resets to 00 = HSE, which is NOT enabled
+     * (this project uses HSI + PLL).  Select PCLK1 (170 MHz) so the
+     * FDCAN bit-timing registers produce the intended 500 kbps:
+     *   170 MHz / (17 × (1 + 14 + 5)) = 500 kbps                    */
+    RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+    PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;
+    PeriphClkInit.FdcanClockSelection  = RCC_FDCANCLKSOURCE_PCLK1;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK) {
+        Error_Handler();
+    }
 }
 
 static void MX_GPIO_Init(void)
