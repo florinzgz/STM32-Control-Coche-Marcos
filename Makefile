@@ -25,7 +25,9 @@ C_SOURCES = \
   $(CORE_SRC)/math_safety.c \
   $(CORE_SRC)/stm32g4xx_it.c \
   $(CORE_SRC)/stm32g4xx_hal_msp.c \
-  $(CORE_SRC)/system_stm32g4xx.c
+  $(CORE_SRC)/system_stm32g4xx.c \
+  $(CORE_SRC)/syscalls.c \
+  $(CORE_SRC)/sysmem.c
 
 # HAL driver sources (added by STM32CubeMX — generate code before building)
 HAL_SRC = Drivers/STM32G4xx_HAL_Driver/Src
@@ -52,7 +54,7 @@ HAL_SOURCES = \
   $(HAL_SRC)/stm32g4xx_hal_flash_ex.c
 
 # ASM startup
-ASM_SOURCES = startup_stm32g474retx.s
+ASM_SOURCES = Core/Startup/startup_stm32g474retx.s
 
 # Include paths
 C_INCLUDES = \
