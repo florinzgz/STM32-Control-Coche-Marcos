@@ -29,6 +29,36 @@ This document describes the hardware setup required to establish CAN communicati
 | GND | Ground | Pin 2 (GND) | Common ground reference |
 | GND | Silent/Normal | Pin 8 (S/SLNT) | **Connect to GND** — enables normal (TX+RX) mode |
 
+### Ubicación física en la placa Nucleo-64 (MB1367)
+
+Los pines PB8 y PB9 están accesibles en el **conector morpho CN7** (conector izquierdo de la
+placa Nucleo-64, visto con el USB arriba). Consultar **Tabla 16** del manual de usuario
+**UM2505** (STMicroelectronics) para el mapeado completo.
+
+| Señal | Conector Nucleo | Pin del conector | Nombre Arduino | Notas |
+|-------|-----------------|------------------|----------------|-------|
+| PB8 (FDCAN1_RX) | **CN7** | **Pin 3** | D15 | Compartido con I2C1_SCL y BOOT0 (jumper JP7) |
+| PB9 (FDCAN1_TX) | **CN7** | **Pin 5** | D14 | Compartido con I2C1_SDA |
+| GND | **CN7** | **Pin 7** | — | Masa común — usar para GND del TJA1051 |
+| 5V | **CN7** | **Pin 8** | — | 5 V del bus USB (o E5V) — usar para VCC del TJA1051 |
+
+```
+    Conector CN7 (vista frontal, USB arriba, lado izquierdo de la placa)
+
+    Pin 1  [ ][ ]  Pin 2
+    Pin 3  [PB8][ ]  Pin 4       ← FDCAN1_RX  → TJA1051 pin 4 (RXD)
+    Pin 5  [PB9][ ]  Pin 6       ← FDCAN1_TX  → TJA1051 pin 1 (TXD)
+    Pin 7  [GND][ ]  Pin 8 [5V]  ← GND y 5V   → TJA1051 pins 2,3,8
+    Pin 9  [ ][ ]  Pin 10
+      ...
+```
+
+> ⚠️ **Nota JP7 / BOOT0**: El pin PB8 (CN7 pin 3) está compartido con la señal BOOT0 a
+> través del jumper JP7 en la Nucleo-64. Verificar que JP7 esté en la posición **GND**
+> (posición por defecto de fábrica) para que PB8 funcione como GPIO/FDCAN1_RX con
+> normalidad. Si JP7 está en posición VDD, el MCU arrancará desde memoria del sistema
+> en vez de Flash y FDCAN1 no funcionará.
+
 ### ESP32-S3 Side
 
 | ESP32 Pin | Function | TJA1051 Pin | Description |
@@ -280,3 +310,6 @@ GND ESP32 ───────────────────────�
 - ISO 11898 Road vehicles — Controller area network (CAN)
 - STM32G4 FDCAN Configuration: See `CAN_PROTOCOL.md`
 - ESP32-S3 TWAI Configuration: See ESP32 firmware repository
+- **UM2505** — STM32G4 Nucleo-64 boards (MB1367) User Manual, STMicroelectronics.
+  Tabla 16: *«Pin assignment of the ST morpho connectors»* (título original) — mapeo de PB8/PB9 a CN7 pin 3/5.
+  Disponible en: https://www.st.com/resource/en/user_manual/um2505-stm32g4-nucleo64-boards-mb1367-stmicroelectronics.pdf

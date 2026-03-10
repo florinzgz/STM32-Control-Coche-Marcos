@@ -175,14 +175,14 @@ Pedal_% = ((Voltage_ADC - 0.33) / (2.97 - 0.33)) × 100%
 ### CAN Bus (FDCAN1)
 | Pin | GPIO  | Function   | Description |
 |-----|-------|------------|-------------|
-| 44  | PA11  | FDCAN1_RX  | Recepción CAN |
-| 45  | PA12  | FDCAN1_TX  | Transmisión CAN |
+| 61  | PB8   | FDCAN1_RX  | Recepción CAN (Nucleo-64 CN7 pin 3 / D15) |
+| 62  | PB9   | FDCAN1_TX  | Transmisión CAN (Nucleo-64 CN7 pin 5 / D14) |
 
 **Configuración CAN:**
 - Tipo: FDCAN (CAN-FD compatible)
 - Velocidad: 500 kbps
 - Terminación: 120Ω
-- Transceiver: TJA1050 o equivalente
+- Transceiver: TJA1051T/3 (variante con I/O a 3.3 V)
 
 ### UART/USART (Debug/Programming)
 | Pin | GPIO  | UART     | Function | Description |
