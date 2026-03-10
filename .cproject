@@ -63,7 +63,7 @@
 					<sourceEntries>
 						<entry excluding="test_eps_params.c|test_error_log.c|test_math_safety.c|test_service_mode.c|test_steering_cal_store.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core/Src"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core/Inc"/>
-						<entry excluding="STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_msp_template.c|STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_timebase_tim_template.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>
