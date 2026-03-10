@@ -22,35 +22,16 @@ git clone https://github.com/florinzgz/STM32-Control-Coche-Marcos.git
 cd STM32-Control-Coche-Marcos
 ```
 
-### 2. Install STM32 HAL Drivers
+### 2. Import Project into STM32CubeIDE
 
-The STM32 HAL drivers are **NOT** included in the repository to keep it lightweight. You need to add them using one of these methods:
-
-#### Method A: Using STM32CubeMX (Recommended)
-
-1. Open **STM32CubeMX**
-2. Open the project file: `STM32-Control-Coche-Marcos.ioc`
-3. Click **Project → Generate Code**
-4. This will automatically download and install the required HAL drivers in the `Drivers/` folder
-
-#### Method B: Manual Download
-
-1. Download STM32CubeG4 package from [ST website](https://www.st.com/en/embedded-software/stm32cubeg4.html)
-2. Extract the package
-3. Copy the following folders to your project:
-   ```
-   STM32Cube_FW_G4_VX.X.X/Drivers/STM32G4xx_HAL_Driver/ → Drivers/STM32G4xx_HAL_Driver/
-   STM32Cube_FW_G4_VX.X.X/Drivers/CMSIS/ → Drivers/CMSIS/
-   ```
-
-### 3. Import Project into STM32CubeIDE
+The STM32 HAL drivers and CMSIS files are **included** in the repository under the `Drivers/` folder. No additional download is required.
 
 1. Open **STM32CubeIDE**
 2. Go to **File → Open Projects from File System...**
 3. Click **Directory...** and select the repository folder
 4. Click **Finish**
 
-### 4. Build the Project
+### 3. Build the Project
 
 #### Using STM32CubeIDE:
 1. Right-click on project → **Build Project**
@@ -62,7 +43,7 @@ make clean
 make all
 ```
 
-### 5. Flash to STM32
+### 4. Flash to STM32
 
 1. Connect your STM32G474RE board via USB
 2. In STM32CubeIDE: **Run → Debug** (F11)
@@ -87,9 +68,9 @@ STM32-Control-Coche-Marcos/
 │       ├── sensor_manager.c
 │       ├── safety_system.c
 │       └── stm32g4xx_hal_msp.c
-├── Drivers/                       # ⚠️ NOT in repo - Generate with CubeMX
-│   ├── STM32G4xx_HAL_Driver/     # HAL drivers (auto-generated)
-│   └── CMSIS/                     # CMSIS headers (auto-generated)
+├── Drivers/                       # STM32 HAL drivers and CMSIS (included)
+│   ├── STM32G4xx_HAL_Driver/     # HAL drivers
+│   └── CMSIS/                     # CMSIS headers
 ├── docs/                          # Documentation
 ├── Makefile                       # Build script
 ├── STM32-Control-Coche-Marcos.ioc # CubeMX configuration
@@ -101,10 +82,10 @@ STM32-Control-Coche-Marcos/
 ## Troubleshooting
 
 ### "Cannot find HAL headers"
-- **Solution**: Generate the HAL drivers using STM32CubeMX as described in Step 2
+- **Solution**: The HAL drivers are included in the repository under `Drivers/`. If missing, re-clone the repository or verify the `Drivers/` folder is present.
 
 ### "undefined reference to HAL_XXX"
-- **Solution**: Make sure the Drivers folder is properly generated and the project includes it in the build path
+- **Solution**: Make sure the Drivers folder is present and the project includes it in the build path
 
 ### "No ST-Link detected"
 - **Solution**: 
@@ -113,7 +94,7 @@ STM32-Control-Coche-Marcos/
   3. Try a different USB port
 
 ### Build errors after cloning
-- **Solution**: Always run STM32CubeMX to generate code first before building
+- **Solution**: Ensure the `Drivers/` folder was cloned correctly and contains `STM32G4xx_HAL_Driver/` and `CMSIS/`
 
 ### ESP32-S3: "Could not open COMx" / PermissionError
 - **Cause**: The serial port is in use by another program, or the board is not in download mode.
@@ -127,7 +108,7 @@ STM32-Control-Coche-Marcos/
 
 ## Next Steps
 
-1. ✅ Generate HAL drivers with CubeMX
+1. ✅ Import the project into STM32CubeIDE
 2. ✅ Build the project
 3. ✅ Flash to your STM32 board
 4. 📖 Read the documentation in `docs/` folder:

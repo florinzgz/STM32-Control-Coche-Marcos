@@ -29,7 +29,7 @@ chmod +x setup_drivers.sh
 ```
 
 **Option B - Using STM32CubeMX**:
-1. Open `STM32G474RE-Control.ioc` in STM32CubeMX
+1. Open `STM32-Control-Coche-Marcos.ioc` in STM32CubeMX
 2. Click **Project → Generate Code**
 3. Wait for HAL drivers to download (~100MB)
 

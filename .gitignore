@@ -35,8 +35,6 @@ build/
 # STM32 específicos
 # ===========================
 *.ioc.bak
-Drivers/CMSIS/
-Drivers/STM32G4xx_HAL_Driver/
 
 # ===========================
 # Logs y temporales
