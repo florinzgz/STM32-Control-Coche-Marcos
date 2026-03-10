@@ -2,7 +2,8 @@
 # STM32CubeIDE / Eclipse
 # ===========================
 .metadata/
-.settings/
+.settings/*
+!.settings/org.eclipse.core.resources.prefs
 *.launch
 *.tmp
 *.bak
