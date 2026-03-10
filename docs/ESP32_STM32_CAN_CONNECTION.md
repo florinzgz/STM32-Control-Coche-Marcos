@@ -311,5 +311,5 @@ GND ESP32 ───────────────────────�
 - STM32G4 FDCAN Configuration: See `CAN_PROTOCOL.md`
 - ESP32-S3 TWAI Configuration: See ESP32 firmware repository
 - **UM2505** — STM32G4 Nucleo-64 boards (MB1367) User Manual, STMicroelectronics.
-  Tabla 16: *Pin assignment of the ST morpho connectors* — mapeo de PB8/PB9 a CN7 pin 3/5.
+  Tabla 16: *«Pin assignment of the ST morpho connectors»* (título original) — mapeo de PB8/PB9 a CN7 pin 3/5.
   Disponible en: https://www.st.com/resource/en/user_manual/um2505-stm32g4-nucleo64-boards-mb1367-stmicroelectronics.pdf
