@@ -92,9 +92,9 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
 | GPIO38 | Display TFT | RST (Reset display) |
 | GPIO39 | Display TFT | DC (Data/Command) |
-| GPIO43 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
 | GPIO44 | Sensor obstáculos | TOFSense UART2 RX — Phase 3 |
 | GPIO47 | LEDs WS2812B | Tira frontal 28 LEDs — Phase 3 |
+| GPIO48 | LEDs WS2812B | Tira trasera 16 LEDs — Phase 3 |
 
 > **Total: 16 pines asignados por el proyecto**
 
@@ -108,9 +108,9 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | **Reservados Flash** (QSPI, crash si se usan) | GPIO26–32 | 7 |
 | **Reservados PSRAM** (Octal, N16R8) | GPIO33–37 | 5 |
 | **Boot strapping** (usar con precaución) | GPIO0, GPIO3, GPIO45, GPIO46 | 4 |
-| **Asignados al proyecto** (ya en uso) | GPIO4, 5, 10, 12–15, 19–21, 38, 39, 42–44, 47 | 16 |
+| **Asignados al proyecto** (ya en uso) | GPIO4, 5, 10, 12–15, 19–21, 38, 39, 42, 44, 47, 48 | 16 |
 | **TOTAL NO DISPONIBLES** | — | **36** |
-| **Pines LIBRES sin restricciones** | GPIO1, 2, 6, 7, 8, 9, 11, 16, 17, 18, 40, 41, 48 | **13** |
+| **Pines LIBRES sin restricciones** | GPIO1, 2, 6, 7, 8, 9, 11, 16, 17, 18, 40, 41, 43 | **13** |
 
 ---
 
@@ -130,7 +130,7 @@ Estos pines están en uso activo por el firmware y el hardware del proyecto:
 | GPIO18 | GPIO |
 | GPIO40 | GPIO |
 | GPIO41 | GPIO |
-| GPIO48 | GPIO |
+| GPIO43 | GPIO, UART |
 
 > **Total: 13 pines libres sin restricciones** para uso inmediato.
 
