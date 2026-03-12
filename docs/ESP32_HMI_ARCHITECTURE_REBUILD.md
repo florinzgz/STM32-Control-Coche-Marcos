@@ -173,7 +173,7 @@ These are the **features** that must be preserved, independent of implementation
 | **Command Transmission** | Throttle, steering, mode commands | TX: 0x100, 0x101, 0x102 |
 | **ACK Tracking** | Non-blocking command acknowledgment | RX: 0x103 |
 | **LED Control (Front)** | 28× WS2812B — Knight Rider sweep, throttle-reactive colors | None (local GPIO47) |
-| **LED Control (Rear)** | 16× WS2812B — Position lights, brake, turn signals | None (local GPIO43) |
+| **LED Control (Rear)** | 16× WS2812B — Position lights, brake, turn signals | None (local GPIO48) |
 | **Audio Feedback** | DFPlayer Mini — 68 tracks, event-driven playback | None (local UART1 GPIO19/20) |
 | **Obstacle Display** | Real-time distance, zone, health from TOFSense LiDAR | TX: 0x208, 0x209 (ESP32→STM32) |
 | **Obstacle Audio Warning** | Proximity beeps triggered by obstacle distance | Linked to obstacle data |
@@ -393,7 +393,7 @@ The rendering pipeline uses TFT_eSPI's direct drawing API:
 | Parameter | Value |
 |-----------|-------|
 | **Front strip** | 28× WS2812B on GPIO 47 |
-| **Rear strip** | 16× WS2812B on GPIO 43 |
+| **Rear strip** | 16× WS2812B on GPIO 48 |
 | **LED type** | WS2812B (GRB order, 800 kHz) |
 | **Power** | 12 V LED strip, level-shifted from ESP32 3.3 V |
 | **Library** | FastLED (pre-allocated static arrays) |
@@ -660,7 +660,7 @@ The ESP32 processes the 8×8 distance matrix, computes zones, and:
 
 > **UART Assignment Clarification:** The original FULL-FIRMWARE used UART0 native
 > pins (GPIO 43 TX / GPIO 44 RX) for the TOFSense. However, in the new architecture:
-> - GPIO 43 is assigned to **LED_REAR** (WS2812B data line)
+> - GPIO 48 is assigned to **LED_REAR** (WS2812B data line)
 > - The sensor is RX-only (GPIO 44), so no TX pin conflict exists
 > - We use **UART2** (`HardwareSerial(2)`) remapped to GPIO 44 RX only
 > - UART0 is not used (USB CDC handles serial programming via `ARDUINO_USB_CDC_ON_BOOT=1`)
@@ -1356,7 +1356,7 @@ loop()
     │              FastLED Hardware                   │
     │                                                │
     │  GPIO 47 → 28× WS2812B (front)                │
-    │  GPIO 43 → 16× WS2812B (rear)                 │
+    │  GPIO 48 → 16× WS2812B (rear)                 │
     │                                                │
     │  Bit-bang transfer: ~1.1 ms for 44 LEDs        │
     │  Step-based animations, no blocking loops      │
@@ -1577,7 +1577,7 @@ This is possible because every module is a pair of free functions (`module_init(
 | Step-based LED animations | Non-blocking, bounded execution time | Animation loops with delay() (blocks loop) |
 | Pointer-based DFPlayer | Defers construction to setup() | Global DFPlayer object (pre-setup constructor) |
 | Priority audio queue | Bounded memory, O(1) operations | Dynamic list (unbounded growth) |
-| UART2 for obstacle | Avoids GPIO 43 conflict with LED_REAR, no conflict with UART1 (audio) | UART0 (conflicts with LED_REAR GPIO 43) |
+| UART2 for obstacle | Avoids GPIO conflict, no conflict with UART1 (audio) | UART0 (potential GPIO conflicts) |
 | Obstacle CAN TX from ESP32 | Preserves existing sensor wiring | Move sensor to STM32 (requires hardware change) |
 | Non-fatal subsystem failures | System continues without LED/audio/obstacle | Fatal failures (single subsystem crash = bootloop) |
 
@@ -1666,7 +1666,7 @@ against the ESP32-S3 Technical Reference Manual.
 | PSRAM pin? | No. OPI PSRAM uses GPIO 33–37. | ✅ SAFE |
 | USB pin? | No. USB D-/D+ are GPIO 19/20. | ✅ SAFE |
 | Flash pin? | No. SPI Flash uses GPIO 10–12. | ✅ SAFE |
-| Conflict with other assignment? | No. GPIO 44 is dedicated to TOFSense RX in the N16R8 pin map. LED_REAR uses GPIO 43 (separate pin). | ✅ SAFE |
+| Conflict with other assignment? | No. GPIO 44 is dedicated to TOFSense RX in the N16R8 pin map. LED_REAR uses GPIO 48 (separate pin). | ✅ SAFE |
 
 #### D.1.3 Boot Safety
 
@@ -1693,7 +1693,7 @@ against the ESP32-S3 Technical Reference Manual.
 | Strip | GPIO | Count | Verified? |
 |-------|------|-------|-----------|
 | Front (Knight Rider) | **GPIO 47** | 28 LEDs | ✅ |
-| Rear (position/brake/turn) | **GPIO 43** | 16 LEDs | ✅ |
+| Rear (position/brake/turn) | **GPIO 48** | 16 LEDs | ✅ |
 
 #### D.2.2 Pin Safety Verification — GPIO 47 (Front LEDs)
 
@@ -1705,15 +1705,15 @@ against the ESP32-S3 Technical Reference Manual.
 | Flash pin? | No. SPI Flash uses GPIO 10–12. | ✅ SAFE |
 | Conflict? | No. Dedicated to LED_FRONT in N16R8 pin map. | ✅ SAFE |
 
-#### D.2.3 Pin Safety Verification — GPIO 43 (Rear LEDs)
+#### D.2.3 Pin Safety Verification — GPIO 48 (Rear LEDs)
 
-| Check | GPIO 43 | Result |
+| Check | GPIO 48 | Result |
 |-------|---------|--------|
 | Strapping pin? | No. Strapping pins are GPIO 0, 3, 45, 46. | ✅ SAFE |
 | PSRAM pin? | No. OPI PSRAM uses GPIO 33–37. | ✅ SAFE |
 | USB pin? | No. USB uses GPIO 19/20. | ✅ SAFE |
 | Flash pin? | No. SPI Flash uses GPIO 10–12. | ✅ SAFE |
-| UART0 TX conflict? | **Resolved.** GPIO 43 is the native UART0 TX pin. In the original FULL-FIRMWARE, it was marked as `PIN_TOFSENSE_TX` but set to `-1` (unused, sensor is TX-only). In the new architecture, UART0 is not used (USB CDC replaces it), and TOFSense uses UART2 on GPIO 44 RX only. GPIO 43 is free for LED_REAR. | ✅ SAFE |
+| Conflict? | No. GPIO 48 is a general-purpose GPIO on the ESP32-S3 N16R8 with no special function conflicts. Dedicated to LED_REAR. | ✅ SAFE |
 
 #### D.2.4 FastLED.show() Timing Verification
 
@@ -1922,9 +1922,9 @@ All motor control, sensor, I2C, relay, and button pins are now STM32 responsibil
 | 20 | DFPlayer RX (UART1) | Input | audio_ctrl | No | No | No | **Yes (USB D+)** — freed by `ARDUINO_USB_CDC_ON_BOOT=1` |
 | 21 | Touch CS (XPT2046) | Output | tft_direct | No | No | No | No |
 | 42 | TFT Backlight | Output | tft_direct | No | No | No | No |
-| 43 | LED Rear (WS2812B) | Output | led_ctrl | No | No | No | No |
 | 44 | TOFSense RX (UART2) | Input | obstacle | No | No | No | No |
 | 47 | LED Front (WS2812B) | Output | led_ctrl | No | No | No | No |
+| 48 | LED Rear (WS2812B) | Output | led_ctrl | No | No | No | No |
 
 **Total GPIO used:** 14 pins  
 **Forbidden zones avoided:** GPIO 0, 3, 45, 46 (strapping) — none used. GPIO 33–37 (PSRAM) — none used. GPIO 10–12 (flash) — none used.  
