@@ -31,8 +31,9 @@ static constexpr uint8_t PIN_FWD_D2   = (1 << 4);  // GPA4
 static constexpr uint8_t GEAR_MASK    = 0x1F;       // Bits 0-4
 
 // I2C error handling constants
-static constexpr uint8_t  ERROR_THRESHOLD   = 5;     // Consecutive errors before backoff
-static constexpr uint32_t BACKOFF_POLL_MS   = 1000;   // Poll interval during backoff (ms)
+static constexpr uint8_t  ERROR_THRESHOLD  = 5;     // Consecutive errors before backoff
+                                                     // (5 × 50ms pollMs = 250ms to trigger)
+static constexpr uint32_t BACKOFF_POLL_MS  = 1000;  // Poll interval during backoff (ms)
 
 // Module state
 static Config       cfg_;
@@ -143,7 +144,7 @@ void update() {
                 Serial.println("[SHIFTER] MCP23017 I2C error — backoff active");
             }
         }
-        // Keep currentGear_ as NEUTRAL during error
+        // Set currentGear_ to NEUTRAL during error
         currentGear_ = Gear::NEUTRAL;
         return;
     }

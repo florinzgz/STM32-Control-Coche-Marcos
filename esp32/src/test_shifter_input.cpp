@@ -203,15 +203,15 @@ static void test_neutral_on_error() {
 }
 
 /* ====================================================================== */
-/* TEST 8 — isConnected() returns false when not initialized              */
+/* TEST 8 — isConnected() reflects init state correctly                   */
 /* ====================================================================== */
-static void test_not_initialized() {
-    printf("  test_not_initialized...\n");
-    // Note: we don't call init() here — this depends on the last test's state
-    // but isConnected checks initialized_ && connected_, so we test the API
-    // after a known good init
+static void test_connected_reflects_init() {
+    printf("  test_connected_reflects_init...\n");
     reset_and_init(true);
     ASSERT(shifter::isConnected());
+
+    reset_and_init(false);
+    ASSERT(!shifter::isConnected());
 }
 
 /* ====================================================================== */
@@ -252,7 +252,7 @@ int main(void) {
     test_error_backoff();
     test_recovery();
     test_neutral_on_error();
-    test_not_initialized();
+    test_connected_reflects_init();
     test_init_failure_backoff();
 
     printf("\n--- shifter_input tests: %d run, %d failed ---\n",
