@@ -38,7 +38,7 @@ echo This may take a few minutes...
 echo.
 
 REM Download using PowerShell
-set CUBE_URL=https://github.com/STMicroelectronics/STM32CubeG4/archive/refs/heads/master.zip
+set CUBE_URL=https://github.com/STMicroelectronics/STM32CubeG4/archive/refs/tags/v1.5.1.zip
 powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%CUBE_URL%' -OutFile '%TEMP_DIR%\stm32cubeg4.zip'}"
 
 if %ERRORLEVEL% neq 0 (
