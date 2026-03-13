@@ -482,7 +482,7 @@ static void test_normal_distance_valid() {
               static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
     ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 500);
-    ASSERT_EQ(rd.zone, 2);   // warning zone: 500–1000 mm (500 is NOT < 500)
+    ASSERT_EQ(rd.zone, 2);   // warning zone: [500, 1000) mm
 }
 
 // Test 16: Exactly minRangeMm distance (20 mm) → VALID at emergency zone.
