@@ -631,6 +631,82 @@ static void test_single_frame_within_byte_limit() {
     ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
 }
 
+// Test 20: Multiple bad frames followed by a good frame — the parser must
+//          recover and return a VALID reading from the good frame.
+//          This reproduces the cascading-failure scenario that caused
+//          intermittent INVALID every ~1–1.5 s on the real sensor.
+static void test_multiple_bad_frames_then_good() {
+    printf("  test_multiple_bad_frames_then_good...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject 3 corrupted frames (bad checksum) followed by 1 good frame.
+    // The parser should discard the bad frames and still find the good one.
+    for (int i = 0; i < 3; i++) {
+        uint8_t bad[FRAME_LEN];
+        buildFrame(bad);
+        setPixel(bad, 0, 500000 + i * 100000, 0, 100);
+        writeChecksum(bad);
+        bad[FRAME_LEN - 1] ^= 0xFF;  // Corrupt checksum
+        g_uart_inject(bad, FRAME_LEN);
+    }
+
+    uint8_t good[FRAME_LEN];
+    buildFrame(good);
+    setPixel(good, 0, 900000, 0, 100);  // 900 mm
+    writeChecksum(good);
+    g_uart_inject(good, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 900);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
+// Test 21: Many queued frames are all processed in a single update() call —
+//          no byte-limit cut-off causes the sensor to miss frames and time out.
+static void test_many_queued_frames_all_processed() {
+    printf("  test_many_queued_frames_all_processed...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject 5 valid frames (simulating a slow main-loop iteration).
+    // All should be processed, and the reading should reflect the last one.
+    for (int i = 0; i < 5; i++) {
+        uint8_t frame[FRAME_LEN];
+        buildFrame(frame);
+        setPixel(frame, 0, (uint32_t)(200 + i * 100) * 1000, 0, 100);
+        writeChecksum(frame);
+        g_uart_inject(frame, FRAME_LEN);
+    }
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    // Last frame: (200 + 4*100) * 1000 µm = 600,000 µm = 600 mm
+    ASSERT_EQ(rd.distance_mm, 600);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -655,6 +731,8 @@ int main() {
     test_overflow_flush_keeps_latest_frame();
     test_resync_after_bad_checksum();
     test_single_frame_within_byte_limit();
+    test_multiple_bad_frames_then_good();
+    test_many_queued_frames_all_processed();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

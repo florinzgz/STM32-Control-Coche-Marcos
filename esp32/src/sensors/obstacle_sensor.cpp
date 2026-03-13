@@ -16,7 +16,6 @@
 #include "obstacle_sensor.h"
 #include <Arduino.h>
 #include <HardwareSerial.h>
-#include <cstring>
 
 namespace obstacle_sensor {
 
@@ -233,36 +232,17 @@ void update(float vehicleSpeedKmh) {
         warmupDone_ = true;
     }
 
-    // ---- Overflow / freshness management ----
-    // If more than 2 full frames have accumulated in the UART RX ring-buffer
-    // while update() wasn't called (display refresh, CAN burst, etc.), the
-    // oldest data is stale.  Discard everything except the last frame's worth
-    // so we always process the most recent sensor output.  This prevents:
-    //  (a) byte-by-byte processing from blocking the main loop for too long,
-    //  (b) cascading checksum failures from buffer-overflow byte loss.
-    if (rxIdx_ == 0) {
-        int avail = tofSerial.available();
-        if (avail > (int)(FRAME_LENGTH * 2)) {
-            int toDiscard = avail - (int)FRAME_LENGTH;
-            for (int i = 0; i < toDiscard; i++) {
-                tofSerial.read();
-            }
-            diagBytesDiscarded_ += (uint32_t)toDiscard;
-        }
-    }
-
-    // Read available UART bytes and parse frames.
-    // Limit to MAX_BYTES_PER_UPDATE to prevent this loop from blocking the
-    // main loop when multiple frames are queued.  Any remaining bytes stay
-    // in the UART ring-buffer and are picked up on the next call.
-    static constexpr uint16_t MAX_BYTES_PER_UPDATE = FRAME_LENGTH * 3;
-    uint16_t bytesProcessed = 0;
+    // Read all available UART bytes and parse frames.
+    // When multiple frames are queued (e.g. after a display refresh or CAN
+    // burst), processing them all and keeping only the last valid result is
+    // both simpler and more robust than discarding bytes at arbitrary
+    // positions (which risks breaking frame alignment and causing cascading
+    // checksum failures — the root cause of intermittent INVALID readings).
     uint16_t measuredMm = 0;
     bool gotFrame = false;
 
-    while (tofSerial.available() > 0 && bytesProcessed < MAX_BYTES_PER_UPDATE) {
+    while (tofSerial.available() > 0) {
         uint8_t byte = (uint8_t)tofSerial.read();
-        bytesProcessed++;
 
         // Synchronize on header byte
         if (rxIdx_ == 0 && byte != FRAME_HEADER) {
@@ -322,29 +302,7 @@ void update(float vehicleSpeedKmh) {
                 default:
                     break;
             }
-            // After a failed parse, scan the consumed buffer for the next
-            // valid {0x57, 0x01} header.  Without this resync a single
-            // corrupted frame costs up to 400 extra bytes of re-alignment
-            // (almost an entire additional frame period at 10 Hz), which is
-            // the main driver behind the intermittent INVALID transitions
-            // the user observes at medium-to-long range.
-            if (pr == ParseResult::BAD_CHECKSUM || pr == ParseResult::BAD_HEADER) {
-                bool resynced = false;
-                for (uint16_t i = 1; i < FRAME_LENGTH - 1; i++) {
-                    if (rxBuf_[i] == FRAME_HEADER && rxBuf_[i + 1] == FUNCTION_MARK) {
-                        uint16_t remaining = FRAME_LENGTH - i;
-                        memmove(rxBuf_, rxBuf_ + i, remaining);
-                        rxIdx_ = remaining;
-                        resynced = true;
-                        break;
-                    }
-                }
-                if (!resynced) {
-                    rxIdx_ = 0;
-                }
-            } else {
-                rxIdx_ = 0;  // Successful parse — reset for next frame
-            }
+            rxIdx_ = 0;  // Reset for next frame
         }
     }
 
