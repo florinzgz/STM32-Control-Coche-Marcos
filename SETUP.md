@@ -7,6 +7,7 @@ This guide will help you set up the development environment and compile the STM3
 ### Required Software
 - **STM32CubeIDE** (version 1.14.0 or later) - [Download here](https://www.st.com/en/development-tools/stm32cubeide.html)
 - **Git** - For cloning the repository
+- **arm-none-eabi-gcc** *(optional, for command-line builds)*: `sudo apt-get install gcc-arm-none-eabi` (Linux)
 
 ### Hardware
 - STM32G474RE microcontroller (NUCLEO-G474RE board recommended)
@@ -41,7 +42,6 @@ The STM32 HAL drivers and CMSIS files are **included** in the repository under t
 
 #### Using Command Line (requires arm-none-eabi-gcc):
 ```bash
-sudo apt-get install gcc-arm-none-eabi   # Install toolchain (Linux)
 make clean
 make all
 ```
