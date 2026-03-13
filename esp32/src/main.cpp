@@ -12,6 +12,7 @@
 #include <climits>
 #include <esp_system.h>
 #include <ESP32-TWAI-CAN.hpp>
+#include <driver/twai.h>
 #include <TFT_eSPI.h>
 #include "can_ids.h"
 #include "can_rx.h"
@@ -94,6 +95,7 @@ static ScreenManager screenManager;
 static uint8_t  heartbeatCounter = 0;
 static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
+static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
 #if RUNTIME_MONITOR
 static unsigned long lastRtMonMs      = 0;
 #endif
@@ -982,6 +984,30 @@ void loop() {
     if (now - lastSerialMs >= 1000) {
         lastSerialMs = now;
         Serial.println("[HMI] heartbeat");
+    }
+
+    // TWAI bus diagnostic — log error counters every 5 seconds
+    if (now - lastCanDiagMs >= 5000) {
+        lastCanDiagMs = now;
+        twai_status_info_t status;
+        if (twai_get_status_info(&status) == ESP_OK) {
+            const char* stateStr = "UNKNOWN";
+            switch (status.state) {
+                case TWAI_STATE_STOPPED:    stateStr = "STOPPED";    break;
+                case TWAI_STATE_RUNNING:    stateStr = "RUNNING";    break;
+                case TWAI_STATE_BUS_OFF:    stateStr = "BUS_OFF";    break;
+                case TWAI_STATE_RECOVERING: stateStr = "RECOVERING"; break;
+            }
+            Serial.printf("[CAN-DIAG] state=%s tx_err=%lu rx_err=%lu "
+                          "tx_fail=%lu rx_miss=%lu arb_lost=%lu bus_err=%lu\n",
+                          stateStr,
+                          (unsigned long)status.tx_error_counter,
+                          (unsigned long)status.rx_error_counter,
+                          (unsigned long)status.tx_failed_count,
+                          (unsigned long)status.rx_missed_count,
+                          (unsigned long)status.arb_lost_count,
+                          (unsigned long)status.bus_error_count);
+        }
     }
 
 #if RUNTIME_MONITOR
