@@ -255,8 +255,11 @@ void BootScreen::draw() {
             char rxBuf[DIAG_RX_BUF] = "";
             int pos = 0;
             for (const auto& entry : RX_FLAG_TABLE) {
-                if (diagRxFlags_ & entry.flag)
-                    pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "%s", entry.label);
+                if (diagRxFlags_ & entry.flag) {
+                    int remain = static_cast<int>(sizeof(rxBuf)) - pos;
+                    if (remain <= 1) break;
+                    pos += snprintf(rxBuf + pos, remain, "%s", entry.label);
+                }
             }
             if (pos == 0) snprintf(rxBuf, sizeof(rxBuf), "-- (waiting)");
 
