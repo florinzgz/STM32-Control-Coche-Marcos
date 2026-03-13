@@ -33,6 +33,8 @@ private:
     bool prevCanLinked_ = false;
     obstacle_sensor::SensorStatus sensorStatus_     = obstacle_sensor::SensorStatus::WAITING;
     obstacle_sensor::SensorStatus prevSensorStatus_  = obstacle_sensor::SensorStatus::WAITING;
+    uint16_t sensorDistanceMm_     = 0;
+    uint16_t prevSensorDistanceMm_ = 0;
 
     // CAN diagnostic state (captured in update, rendered in draw)
     bool     diagNeedsRedraw_ = true;

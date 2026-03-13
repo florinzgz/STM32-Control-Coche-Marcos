@@ -20,10 +20,13 @@ namespace hmi {
 class ObstacleIndicator {
 public:
     /// Draw the obstacle sensor status line on the boot screen.
-    /// Only redraws when status changes.
+    /// Shows status (WAITING / VALID / INVALID) and live distance in mm.
+    /// Only redraws when status or distance changes.
     static void draw(TFT_eSPI& tft,
                      obstacle_sensor::SensorStatus status,
-                     obstacle_sensor::SensorStatus prevStatus);
+                     obstacle_sensor::SensorStatus prevStatus,
+                     uint16_t distance_mm,
+                     uint16_t prevDistance_mm);
 };
 
 } // namespace hmi
