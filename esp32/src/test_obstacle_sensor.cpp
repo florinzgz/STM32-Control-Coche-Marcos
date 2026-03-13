@@ -550,9 +550,10 @@ static void test_overflow_flush_keeps_latest_frame() {
     ASSERT_EQ(static_cast<uint8_t>(rd.status),
               static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
     ASSERT_EQ(rd.healthy, true);
-    // After overflow flush, at least one valid frame must be parsed.
-    // The reading should reflect a valid distance (not zero/uninitialized).
-    ASSERT(rd.distance_mm > 0);
+    // After overflow flush discards old frames, the latest frame (800 mm)
+    // should be the one that gets parsed successfully.
+    ASSERT_EQ(rd.distance_mm, 800);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
 // Test 18: Resync after bad frame — when a frame has a bad checksum,
@@ -599,11 +600,11 @@ static void test_resync_after_bad_checksum() {
     ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
-// Test 19: Byte processing limit — update() should not process more than
-//          MAX_BYTES_PER_UPDATE bytes in a single call, even if more data
-//          is available.  Remaining data is left for the next call.
-static void test_byte_processing_limit() {
-    printf("  test_byte_processing_limit...\n");
+// Test 19: Single frame within the per-update byte limit parses correctly.
+//          Verifies that the byte-limit guard (MAX_BYTES_PER_UPDATE) does
+//          not interfere with normal single-frame processing.
+static void test_single_frame_within_byte_limit() {
+    printf("  test_single_frame_within_byte_limit...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
@@ -653,7 +654,7 @@ int main() {
     test_exact_min_range_valid();
     test_overflow_flush_keeps_latest_frame();
     test_resync_after_bad_checksum();
-    test_byte_processing_limit();
+    test_single_frame_within_byte_limit();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
