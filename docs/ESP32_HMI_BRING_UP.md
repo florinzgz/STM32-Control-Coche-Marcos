@@ -28,7 +28,7 @@ Expected Serial output on boot:
 ```
 
 If `[CAN] Initialization FAILED` appears: check GPIO4 (TX) and GPIO5 (RX) wiring
-to the TJA1051 transceiver. Verify 3.3 V power to the transceiver.
+to the TJA1051 transceiver. Verify **5 V** power to the transceiver (VCC pin 3 must be 4.5–5.5 V; 3.3 V is NOT sufficient).
 
 ---
 

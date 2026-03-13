@@ -164,7 +164,7 @@ GPIO en modo de entrada.
 ```
 Circuito por nodo:
 
-  VCC_transceiver (5 V o 3.3 V según el diseño)
+  VCC_transceiver (5 V obligatorio — VCC mín 4.5 V según datasheet TJA1051T/3)
         │
        [10 kΩ]
         │

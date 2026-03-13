@@ -430,7 +430,7 @@ void hard_fault_handler_c(uint32_t *hardfault_args) {
 1. **Hardware:**
    - Resistencias 120Ω en ambos extremos del bus
    - CANH y CANL conectados correctamente
-   - Alimentación del transceptor TJA1051T/3 (3.3V o 5V)
+   - Alimentación del transceptor TJA1051T/3 (**5V obligatorio** — VCC mín 4.5 V; 3.3 V NO funciona)
 
 2. **Software:**
 ```c

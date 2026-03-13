@@ -240,9 +240,10 @@ This is within the recommended range (75–87.5%) for CAN 2.0. ✅
 
 | Item | Value |
 |------|-------|
-| Transceiver type | TJA1051T/3 (NXP, 3.3V logic) × 2 |
+| Transceiver type | TJA1051T/3 (NXP, 3.3V I/O logic, **VCC = 5V required**) × 2 |
 | Termination | 2 × 120 Ω required (one at each bus end) |
 | Bus standard | CAN 2.0A (11-bit ID, classic frames) |
+| ⚠️ **VCC issue** | **Confirmed: transceivers powered at 3.3V (below 4.5V min) — FIX: connect VCC to 5V** |
 
 ---
 
@@ -258,11 +259,48 @@ Both the STM32 and ESP32 firmware are correctly configured:
 - The ESP32 CAN driver is initialized and polling for frames
 - All CAN message IDs are consistent between both firmwares
 
-### Root cause is hardware-related
+### Root cause: CONFIRMED — TJA1051T/3 powered at 3.3V instead of 5V
 
-Since the firmware configuration is correct, the **"CAN: WAITING..."** symptom indicates that CAN frames are not reaching the ESP32 at the physical layer. The most probable hardware causes, in order of likelihood:
+> ⚠️ **CAUSA RAÍZ CONFIRMADA:** Los transceivers TJA1051T/3 están alimentados
+> con **3.3 V**, que está por debajo del voltaje mínimo de operación del chip
+> (**VCC mín = 4.5 V**, típico 5.0 V, máx 5.5 V según datasheet NXP).
+>
+> A 3.3 V el driver diferencial del bus no puede generar los niveles correctos
+> en CANH/CANL, por lo que **ningún frame CAN se transmite ni se recibe**.
 
-#### 1. Missing 120 Ω termination resistors (MOST LIKELY)
+The TJA1051T/3 datasheet (NXP) specifies:
+
+| Parameter | Min | Typ | Max | Unit |
+|-----------|-----|-----|-----|------|
+| **VCC (supply voltage)** | **4.5** | **5.0** | **5.5** | **V** |
+
+The "/3" suffix means the **I/O logic levels** (TXD, RXD pins) are 3.3V-compatible.
+It does **NOT** mean the chip can run on 3.3V VCC. The bus-side driver always needs 5V.
+
+#### Fix: Change TJA1051T/3 VCC from 3.3V to 5V
+
+Connect pin 3 (VCC) of **both** TJA1051T/3 modules to a **5V supply**:
+
+- **STM32 side:** Use the 5V pin on the Nucleo-64 board (CN7 pin 8) or the 5V rail from the LM2596 DC-DC converter.
+- **ESP32 side:** Use the 5V pin on the ESP32-S3 DevKitC-1 (USB VBUS or external 5V).
+
+```
+BEFORE (broken):
+  3.3V LDO ──► TJA1051T/3 VCC (pin 3)   ← VCC = 3.3V < 4.5V mín ❌
+
+AFTER (correct):
+  5V rail   ──► TJA1051T/3 VCC (pin 3)   ← VCC = 5.0V ✅
+```
+
+> **Nota:** El sufijo "/3" garantiza que los pines RXD/TXD operan a 3.3 V,
+> por lo que no hay riesgo de sobrevoltaje en los GPIOs del ESP32 (máx abs 3.6 V)
+> ni del STM32 (3.3 V). Solo VCC necesita 5 V.
+
+### Additional hardware checks (secondary causes)
+
+If CAN still does not work after fixing VCC to 5V, verify these secondary causes:
+
+#### 1. Missing 120 Ω termination resistors
 
 CAN requires two 120 Ω termination resistors — one at each end of the bus. Without proper termination, signal reflections corrupt the differential signal, causing bit errors and preventing frame reception. Many TJA1051 breakout modules ship with the termination jumper **disabled by default**.
 
@@ -285,12 +323,6 @@ If CANH on one transceiver connects to CANL on the other (and vice versa), the d
 PB8 (FDCAN1_RX) shares a PCB trace with BOOT0 via JP7. If JP7 is set to VDD, PB8 is held high and cannot function as CAN RX.
 
 **Action:** Verify JP7 is in the GND position (factory default).
-
-#### 5. Insufficient or missing 5V supply to transceivers
-
-The TJA1051 requires 5V VCC. If powered from 3.3V, the transceiver may not operate correctly.
-
-**Action:** Measure VCC on pin 3 of both TJA1051 modules — must be 4.75–5.25V.
 
 ---
 

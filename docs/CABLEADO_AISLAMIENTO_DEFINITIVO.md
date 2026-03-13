@@ -464,7 +464,7 @@ STM32 PB8 ◄────────────── ADuM1201 [B→A] ◄─�
 
 3.3V_STM32 ──► ADuM1201 Vdd1     ADuM1201 Vdd2 ◄── 3.3V_aislada (del DC-DC)
 
-3.3V_STM32 ──► DC-DC aislado ──► 3.3V_aislada ──► TJA1051T/3 VCC
+5V_rail    ──► DC-DC aislado ──► 5V_aislada   ──► TJA1051T/3 VCC  (⚠️ VCC = 4.5–5.5 V; 3.3 V NO funciona)
 
 CANH/CANL ────────────────────────────────────────── Bus CAN físico (ESP32 end)
 ```
