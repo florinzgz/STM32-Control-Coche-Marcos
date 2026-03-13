@@ -88,8 +88,8 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
 |---------|-------------------------|-------------------------------------------------|
 | **24 V** | Batería de tracción     | 4× motores tracción (vía BTS7960)              |
 | **12 V** | Batería de dirección    | Motor de dirección (vía BTS7960)                |
-| **5 V**  | DC-DC buck (LM2596)    | Lógica BTS7960 (VCC), tiras WS2812B             |
-| **3.3 V**| Regulador lineal / LDO | STM32G474RE, TCA9548A, INA226, CAN transceiver  |
+| **5 V**  | DC-DC buck (LM2596)    | Lógica BTS7960 (VCC), tiras WS2812B, **transceiver CAN TJA1051T/3** (VCC mín 4.5 V) |
+| **3.3 V**| Regulador lineal / LDO | STM32G474RE, TCA9548A, INA226                    |
 
 ### Umbrales de tensión de batería 24 V (firmware)
 
@@ -123,12 +123,13 @@ Definidos en `Core/Src/safety_system.c`:
 ### 5 V → 3.3 V
 
 - **Tipo:** Regulador lineal o LDO integrado en la placa Nucleo-G474RE.
-- **Salida:** 3.3 V para el MCU STM32G474RE, bus I²C (TCA9548A + INA226), señales digitales y transceiver CAN (TJA1051T/3).
+- **Salida:** 3.3 V para el MCU STM32G474RE, bus I²C (TCA9548A + INA226) y señales digitales.
+- **⚠️ IMPORTANTE:** El transceiver CAN TJA1051T/3 **NO** se alimenta de 3.3 V. Requiere **5 V** (VCC mín = 4.5 V según datasheet NXP). El sufijo "/3" solo indica que los pines I/O (TXD, RXD) operan a niveles lógicos de 3.3 V.
 
 ### Aislamiento CAN (opcional)
 
 Documentado en `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md`:
-- DC-DC aislado 3.3 V / 200 mA (p. ej. RECOM R-7803 o TMR1-xxxx) para alimentar el transceiver CAN aislado.
+- DC-DC aislado **5 V** / 200 mA (p. ej. RECOM R0505S o TMR1-0511) para alimentar el transceiver CAN aislado. El TJA1051T/3 requiere VCC = 4.5–5.5 V.
 - Aislador digital ADuM1201 entre STM32 y TJA1051T/3.
 
 ---

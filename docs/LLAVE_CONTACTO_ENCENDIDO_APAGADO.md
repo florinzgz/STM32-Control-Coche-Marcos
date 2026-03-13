@@ -348,7 +348,7 @@ Una vez que los relés están cerrados, la corriente fluye así:
                 │
                 ├──► STM32G474RE (MCU, 170 MHz)
                 ├──► TCA9548A + 6× INA226 (I²C)
-                ├──► Transceiver CAN TJA1051 (3.3 V)
+                ├──► Transceiver CAN TJA1051 (⚠️ requiere 5 V, NO 3.3 V)
                 └──► Señales digitales (PWM, GPIO, encoder)
 ```
 
