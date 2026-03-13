@@ -33,6 +33,22 @@ static constexpr int16_t DIAG_MARGIN_X = 10;
 // Timeout for considering a frame "recently received"
 static constexpr unsigned long DIAG_RX_RECENT_MS = 2000;
 
+// Text buffer sizes (sized for worst-case snprintf output)
+static constexpr int DIAG_BUF_SIZE  = 52;   // "BUS:RECOVERING  TxE:4294967295 RxE:4294967295" (46) + NUL
+static constexpr int DIAG_RX_BUF    = 40;   // "HB SPD CUR SAF STR TRC BAT " (28) + margin
+
+// RX flag-to-label mapping for compact iteration
+struct RxFlagLabel { uint16_t flag; const char* label; };
+static constexpr RxFlagLabel RX_FLAG_TABLE[] = {
+    { DIAG_RX_HB,  "HB "  },
+    { DIAG_RX_SPD, "SPD " },
+    { DIAG_RX_CUR, "CUR " },
+    { DIAG_RX_SAF, "SAF " },
+    { DIAG_RX_STR, "STR " },
+    { DIAG_RX_TRC, "TRC " },
+    { DIAG_RX_BAT, "BAT " },
+};
+
 void BootScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("boot");
     needsRedraw_ = true;
@@ -209,7 +225,7 @@ void BootScreen::draw() {
                 case TWAI_STATE_BUS_OFF:    stateStr = "BUS_OFF";    stateCol = ui::COL_RED;    break;
                 case TWAI_STATE_RECOVERING: stateStr = "RECOVERING"; stateCol = ui::COL_YELLOW; break;
             }
-            char buf[52];
+            char buf[DIAG_BUF_SIZE];
             snprintf(buf, sizeof(buf), "BUS:%s  TxE:%lu RxE:%lu",
                      stateStr,
                      (unsigned long)diagTxErr_,
@@ -222,7 +238,7 @@ void BootScreen::draw() {
 
         // Line 2: ESP32→STM32 (what ESP32 transmits = what STM32 receives)
         {
-            char buf[52];
+            char buf[DIAG_BUF_SIZE];
             if (diagObsActive_) {
                 snprintf(buf, sizeof(buf), "ESP32->STM32: HB(011) OBS(208,209)");
             } else {
@@ -236,18 +252,15 @@ void BootScreen::draw() {
 
         // Line 3: STM32→ESP32 (what STM32 transmits = what ESP32 receives)
         {
-            char rxBuf[40] = "";
+            char rxBuf[DIAG_RX_BUF] = "";
             int pos = 0;
-            if (diagRxFlags_ & DIAG_RX_HB)  pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "HB ");
-            if (diagRxFlags_ & DIAG_RX_SPD) pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "SPD ");
-            if (diagRxFlags_ & DIAG_RX_CUR) pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "CUR ");
-            if (diagRxFlags_ & DIAG_RX_SAF) pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "SAF ");
-            if (diagRxFlags_ & DIAG_RX_STR) pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "STR ");
-            if (diagRxFlags_ & DIAG_RX_TRC) pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "TRC ");
-            if (diagRxFlags_ & DIAG_RX_BAT) pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "BAT ");
+            for (const auto& entry : RX_FLAG_TABLE) {
+                if (diagRxFlags_ & entry.flag)
+                    pos += snprintf(rxBuf + pos, sizeof(rxBuf) - pos, "%s", entry.label);
+            }
             if (pos == 0) snprintf(rxBuf, sizeof(rxBuf), "-- (waiting)");
 
-            char buf[52];
+            char buf[DIAG_BUF_SIZE];
             snprintf(buf, sizeof(buf), "STM32->ESP32: %s", rxBuf);
             uint16_t rxCol = (pos > 0) ? ui::COL_GREEN : ui::COL_YELLOW;
             tft.setTextColor(rxCol, ui::COL_BG);
@@ -258,7 +271,7 @@ void BootScreen::draw() {
 
         // Line 4: Additional error counters
         {
-            char buf[52];
+            char buf[DIAG_BUF_SIZE];
             snprintf(buf, sizeof(buf), "Fail:%lu Miss:%lu BErr:%lu",
                      (unsigned long)diagTxFail_,
                      (unsigned long)diagRxMiss_,
