@@ -7,6 +7,7 @@
 #include "main.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
+#include "can_handler.h"
 
 extern FDCAN_HandleTypeDef hfdcan1;
 extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
@@ -155,12 +156,26 @@ void I2C1_ER_IRQHandler(void)
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
-    (void)hfdcan;
-    (void)RxFifo0ITs;
-    /* SAFETY FIX: CAN liveness is now validated per-heartbeat only.
-     * Non-heartbeat frames (obstacle data 0x208/0x209, replayed commands,
-     * stale frames after CAN recovery) must NOT reset the ESP32 liveness
-     * watchdog — only the dedicated heartbeat frame (0x011) counts.
-     * Safety_UpdateCANRxTime() is called exclusively from the
-     * CAN_ID_HEARTBEAT_ESP32 case in CAN_ProcessMessages().              */
+    if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U) {
+        FDCAN_RxHeaderTypeDef rx_hdr;
+        uint8_t rx_data[8] = {0};
+
+        if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx_hdr, rx_data) == HAL_OK) {
+            /* Store received frame in global debug buffers so that the
+             * debugger (Live Watch / SWV) can inspect them at any time.
+             * Note: writes are not atomic w.r.t. the main loop; this is
+             * acceptable because these buffers are for debug inspection
+             * only — no control decisions depend on them.                */
+            *((volatile FDCAN_RxHeaderTypeDef *)&g_CAN_RxHeader) = rx_hdr;
+            for (uint8_t i = 0; i < 8; i++)
+                ((volatile uint8_t *)g_CAN_RxData)[i] = rx_data[i];
+
+            /* Visual feedback: toggle LD2 on every received CAN frame.
+             * Note: LD2 is also toggled at 200 ms by the main-loop
+             * heartbeat; on CAN-active buses the combined pattern will
+             * differ from the steady 200 ms blink, providing a visual
+             * indication of bus activity.                                */
+            HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
+        }
+    }
 }

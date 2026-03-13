@@ -17,6 +17,9 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+/* CAN test frame ID — used by CAN_TestTransmit() and the Rx test filter */
+#define CAN_ID_TEST_FRAME   0x123
+
 /* CAN Message IDs (ESP32 ↔ STM32) */
 #define CAN_ID_HEARTBEAT_STM32    0x001  // STM32 → ESP32 (100ms)
 #define CAN_ID_HEARTBEAT_ESP32    0x011  // ESP32 → STM32 (100ms)
@@ -83,6 +86,7 @@ typedef struct {
 
 /* Function prototypes */
 void CAN_Init(void);
+void CAN_TestTransmit(void);
 void CAN_SendHeartbeat(void);
 void CAN_SendStatusSpeed(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
 void CAN_SendStatusCurrent(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
@@ -111,6 +115,11 @@ bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t can_stats;
 extern FDCAN_HandleTypeDef hfdcan1;
+
+/* Debug-visible global CAN buffers (volatile for debugger inspection) */
+extern volatile uint8_t               g_CAN_RxData[8];
+extern volatile FDCAN_RxHeaderTypeDef  g_CAN_RxHeader;
+extern volatile uint8_t               g_CAN_TxData[8];
 
 #ifdef __cplusplus
 }

@@ -28,6 +28,15 @@
 #include "error_log.h"
 #include <math.h>
 
+/* ---- Compile-time CAN self-test option ----
+ * Set to 1 to enable FDCAN1 internal loopback mode.  In loopback the
+ * transceiver is bypassed: transmitted frames are routed directly back
+ * to the Rx FIFO, allowing self-test without external bus hardware.
+ * Set to 0 (default) for normal external bus operation.               */
+#ifndef CAN_LOOPBACK_TEST
+#define CAN_LOOPBACK_TEST  0
+#endif
+
 /* ---- HAL handle instances ---- */
 ADC_HandleTypeDef   hadc1;
 FDCAN_HandleTypeDef hfdcan1;
@@ -166,6 +175,8 @@ int main(void)
     uint32_t tick_10ms   = 0;
     uint32_t tick_50ms   = 0;
     uint32_t tick_100ms  = 0;
+    uint32_t tick_200ms  = 0;    /* LED heartbeat */
+    uint32_t tick_500ms  = 0;    /* CAN test transmit */
     uint32_t tick_1000ms = 0;
 
     /* ---- LIMP_HOME degraded-pedal arming latch ----
@@ -399,14 +410,22 @@ int main(void)
              * Diagnostic only — not used by any control path.             */
             Encoder_SendDiagnostic();
 
-            /* Heartbeat: toggle LD2 (PA5) every 1 s so the user can
-             * verify that the firmware main loop is running.            */
-            HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
-
             /* DS18B20 hot-plug detection: re-enumerates the OneWire bus
              * every OW_RESCAN_INTERVAL_MS to detect sensors added or
              * removed at runtime (guarded internally by timestamp).       */
             Temperature_PeriodicRescan();
+        }
+
+        /* ---- 200 ms LED heartbeat (5 Hz): visible firmware alive indicator ---- */
+        if ((now - tick_200ms) >= 200) {
+            tick_200ms = now;
+            HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
+        }
+
+        /* ---- 500 ms CAN test transmit: send a test frame (ID 0x123) ---- */
+        if ((now - tick_500ms) >= 500) {
+            tick_500ms = now;
+            CAN_TestTransmit();
         }
 
         /* Process incoming CAN commands from ESP32 */
@@ -548,7 +567,11 @@ static void MX_FDCAN1_Init(void)
 {
     hfdcan1.Instance                  = FDCAN1;
     hfdcan1.Init.FrameFormat          = FDCAN_FRAME_CLASSIC;
+#if defined(CAN_LOOPBACK_TEST) && CAN_LOOPBACK_TEST
+    hfdcan1.Init.Mode                 = FDCAN_MODE_INTERNAL_LOOPBACK;
+#else
     hfdcan1.Init.Mode                 = FDCAN_MODE_NORMAL;
+#endif
     hfdcan1.Init.ClockDivider         = FDCAN_CLOCK_DIV1;
     hfdcan1.Init.NominalPrescaler     = 17;
     hfdcan1.Init.NominalSyncJumpWidth = 1;

@@ -26,6 +26,12 @@
 extern FDCAN_HandleTypeDef hfdcan1;
 CAN_Stats_t can_stats = {0};
 
+/* Debug-visible global CAN buffers — volatile so the debugger always
+ * reads them from RAM, not from an optimised-out register.            */
+volatile uint8_t              g_CAN_RxData[8] = {0};
+volatile FDCAN_RxHeaderTypeDef g_CAN_RxHeader = {0};
+volatile uint8_t              g_CAN_TxData[8] = {0};
+
 /* Internal state */
 static uint32_t last_tx_heartbeat = 0;
 static uint8_t  heartbeat_counter = 0;
@@ -102,15 +108,27 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
 /* ================================================================== */
 
 /**
- * @brief  Configure FDCAN RX filters to only accept valid ESP32 IDs.
+ * @brief  Configure FDCAN RX filters.
  *
- * This enforces CAN-bus authority: the STM32 only processes messages
- * from the known ESP32 command ID range and rejects everything else.
+ * When CAN_LOOPBACK_TEST is defined and non-zero, a single range filter
+ * accepts ALL standard IDs (0x000–0x7FF) so that self-test / loopback
+ * frames are received.  Otherwise the production filters restrict
+ * acceptance to known ESP32 message IDs.
  */
 static void CAN_ConfigureFilters(void)
 {
     FDCAN_FilterTypeDef filter = {0};
 
+#if defined(CAN_LOOPBACK_TEST) && CAN_LOOPBACK_TEST
+    /* ---- Accept ALL standard IDs (0x000–0x7FF) for loopback/test ---- */
+    filter.IdType       = FDCAN_STANDARD_ID;
+    filter.FilterIndex  = 0;
+    filter.FilterType   = FDCAN_FILTER_RANGE;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1    = 0x000;
+    filter.FilterID2    = 0x7FF;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+#else
     /* Filter 0: Accept ESP32 heartbeat (0x011) */
     filter.IdType       = FDCAN_STANDARD_ID;
     filter.FilterIndex  = 0;
@@ -145,6 +163,15 @@ static void CAN_ConfigureFilters(void)
     filter.FilterID1    = CAN_ID_OBSTACLE_DISTANCE;
     filter.FilterID2    = CAN_ID_OBSTACLE_SAFETY;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+
+    /* Filter 4: Accept CAN test frame used by CAN_TestTransmit() */
+    filter.FilterIndex  = 4;
+    filter.FilterType   = FDCAN_FILTER_DUAL;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    filter.FilterID1    = CAN_ID_TEST_FRAME;
+    filter.FilterID2    = CAN_ID_TEST_FRAME;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+#endif
 
     /* Reject all non-matching standard IDs */
     HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
@@ -195,6 +222,25 @@ void CAN_Init(void) {
     if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
         return;  /* Non-fatal: CAN disabled, safety timeout will engage */
     }
+}
+
+/**
+ * @brief  Send a CAN test frame (ID = CAN_ID_TEST_FRAME, DLC = 8).
+ *
+ * Intended to be called periodically (e.g. every 500 ms) from the main
+ * loop for CAN bus validation.  In internal-loopback mode
+ * (CAN_LOOPBACK_TEST = 1) the frame is echoed back to Rx FIFO0 and
+ * triggers HAL_FDCAN_RxFifo0Callback, providing a complete self-test.
+ * The payload is also copied to the volatile g_CAN_TxData[] buffer so
+ * it can be inspected in the debugger.
+ */
+void CAN_TestTransmit(void) {
+    uint8_t tx_buf[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    for (uint8_t i = 0; i < 8; i++)
+        ((volatile uint8_t *)g_CAN_TxData)[i] = tx_buf[i];
+
+    TransmitFrame(CAN_ID_TEST_FRAME, tx_buf, 8);
 }
 
 void CAN_SendHeartbeat(void) {
