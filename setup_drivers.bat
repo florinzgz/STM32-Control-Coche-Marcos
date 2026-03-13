@@ -123,8 +123,8 @@ echo    - Drivers\CMSIS\
 echo.
 echo Next steps:
 echo 1. Open the project in STM32CubeIDE
-echo 2. Right-click the project then Refresh (F5^)
-echo 3. Project then Clean... then select the project then Clean
+echo 2. Right-click the project -^> Refresh (F5^)
+echo 3. Project -^> Clean... -^> select the project -^> Clean
 echo 4. Build the project (Ctrl+B^)
 echo 5. Flash to your STM32 board
 echo.
