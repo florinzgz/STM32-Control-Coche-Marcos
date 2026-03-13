@@ -243,11 +243,22 @@ This is within the recommended range (75–87.5%) for CAN 2.0. ✅
 | Transceiver type | TJA1051T/3 (NXP, 3.3V I/O logic, **VCC = 5V required**) × 2 |
 | Termination | 2 × 120 Ω required (one at each bus end) |
 | Bus standard | CAN 2.0A (11-bit ID, classic frames) |
-| ⚠️ **VCC issue** | **Confirmed: transceivers powered at 3.3V (below 4.5V min) — FIX: connect VCC to 5V** |
+| ~~VCC issue~~ | ~~Confirmed: transceivers powered at 3.3V~~ → **FIXED: VCC now 5V** ✅ |
+| ⚠️ **Termination** | **No 120 Ω termination resistors installed — bus will not work** |
 
 ---
 
-## Most Likely Cause of the Issue
+## Previous Root Cause (RESOLVED)
+
+### ~~TJA1051T/3 powered at 3.3V instead of 5V~~ — FIXED ✅
+
+> El usuario ha confirmado que los transceptores TJA1051T/3 ahora están
+> alimentados correctamente a **5 V**, compartiendo masa (GND) entre la
+> STM32G4 y la ESP32-S3. La pantalla sigue mostrando "CAN: WAITING...".
+
+---
+
+## Current Root Cause Analysis
 
 ### Firmware analysis result: **No software defects detected**
 
@@ -259,86 +270,242 @@ Both the STM32 and ESP32 firmware are correctly configured:
 - The ESP32 CAN driver is initialized and polling for frames
 - All CAN message IDs are consistent between both firmwares
 
-### Root cause: CONFIRMED — TJA1051T/3 powered at 3.3V instead of 5V
+### Primary cause: Missing 120 Ω termination resistors
 
-> ⚠️ **CAUSA RAÍZ CONFIRMADA:** Los transceivers TJA1051T/3 están alimentados
-> con **3.3 V**, que está por debajo del voltaje mínimo de operación del chip
-> (**VCC mín = 4.5 V**, típico 5.0 V, máx 5.5 V según datasheet NXP).
+> ⚠️ **CAUSA RAÍZ MÁS PROBABLE:** No hay resistencias de terminación de
+> 120 Ω conectadas en el bus CAN. El usuario ha confirmado: *"No hay
+> terminadores extra conectados todavía."*
 >
-> A 3.3 V el driver diferencial del bus no puede generar los niveles correctos
-> en CANH/CANL, por lo que **ningún frame CAN se transmite ni se recibe**.
+> **Sin terminación, el bus CAN no puede funcionar.** Las reflexiones de
+> señal en los extremos abiertos corrompen la señal diferencial CANH/CANL,
+> causando errores de bit continuos. Ambos controladores (FDCAN de la STM32
+> y TWAI de la ESP32) detectan estos errores y nunca completan la recepción
+> de un frame.
 
-The TJA1051T/3 datasheet (NXP) specifies:
+#### Why termination is mandatory (not optional)
 
-| Parameter | Min | Typ | Max | Unit |
-|-----------|-----|-----|-----|------|
-| **VCC (supply voltage)** | **4.5** | **5.0** | **5.5** | **V** |
+CAN 2.0 (ISO 11898-2) uses differential signaling on a linear bus topology.
+The bus behaves as a **transmission line** with a characteristic impedance
+of ~120 Ω. Without matched termination at both ends:
 
-The "/3" suffix means the **I/O logic levels** (TXD, RXD pins) are 3.3V-compatible.
-It does **NOT** mean the chip can run on 3.3V VCC. The bus-side driver always needs 5V.
+| Effect | Consequence |
+|--------|-------------|
+| Signal reflections at open ends | Corrupt bit sampling — receiver sees wrong bit value |
+| Dominant-to-recessive transition ringing | CRC errors and stuff-bit violations |
+| Voltage levels outside spec | CANH/CANL levels fail to cross the ~0.9 V differential threshold |
+| Transmitter error counter increments | After 128 TX errors → **bus-off** (transceiver stops transmitting) |
 
-#### Fix: Change TJA1051T/3 VCC from 3.3V to 5V
+Even on very short buses (< 10 cm), missing termination causes unreliable
+or completely failed communication at 500 kbps.
 
-Connect pin 3 (VCC) of **both** TJA1051T/3 modules to a **5V supply**:
+#### Fix: Install two 120 Ω termination resistors
 
-- **STM32 side:** Use the 5V pin on the Nucleo-64 board (CN7 pin 8) or the 5V rail from the LM2596 DC-DC converter.
-- **ESP32 side:** Use the 5V pin on the ESP32-S3 DevKitC-1 (USB VBUS or external 5V).
+Place **one 120 Ω resistor between CANH and CANL** at each physical end of the bus:
 
 ```
-BEFORE (broken):
-  3.3V LDO ──► TJA1051T/3 VCC (pin 3)   ← VCC = 3.3V < 4.5V mín ❌
+ESP32 side (TJA1051 #1):                STM32 side (TJA1051 #2):
 
-AFTER (correct):
-  5V rail   ──► TJA1051T/3 VCC (pin 3)   ← VCC = 5.0V ✅
+  CANH [pin 7] ──┐                        ┌── CANH [pin 7]
+               [120Ω]   ← twisted pair →  [120Ω]
+  CANL [pin 6] ──┘                        └── CANL [pin 6]
+
+Result: measured resistance CANH–CANL = ~60 Ω (two 120 Ω in parallel) ✅
 ```
 
-> **Nota:** El sufijo "/3" garantiza que los pines RXD/TXD operan a 3.3 V,
-> por lo que no hay riesgo de sobrevoltaje en los GPIOs del ESP32 (máx abs 3.6 V)
-> ni del STM32 (3.3 V). Solo VCC necesita 5 V.
+**Resistor spec:** 120 Ω ±5%, 1/4 W or higher, carbon film or metal film.
 
-### Additional hardware checks (secondary causes)
+**Module jumpers:** Many TJA1051 breakout boards have a **solder jumper** or
+**DIP switch** for a built-in 120 Ω resistor. Check both modules — the
+jumper may be **disabled by default**. If enabled on both, no external
+resistors are needed.
 
-If CAN still does not work after fixing VCC to 5V, verify these secondary causes:
+#### Verification after installing terminators
 
-#### 1. Missing 120 Ω termination resistors
+1. **Power off** both systems
+2. Measure resistance between CANH and CANL with a multimeter:
+   - **~60 Ω** → two terminators present ✅
+   - **~120 Ω** → only one terminator (install the second) ⚠️
+   - **> 1 kΩ or open** → no terminators (install both) ❌
+3. **Power on** both systems and check the ESP32 serial monitor
 
-CAN requires two 120 Ω termination resistors — one at each end of the bus. Without proper termination, signal reflections corrupt the differential signal, causing bit errors and preventing frame reception. Many TJA1051 breakout modules ship with the termination jumper **disabled by default**.
+### Secondary causes to verify
 
-**Action:** Verify the termination jumper is enabled on both TJA1051 modules. Measure resistance between CANH and CANL (should be ~60 Ω with both terminators in place).
+If CAN still does not work after installing termination, check these causes
+**in order** (most likely first):
 
-#### 2. TJA1051 S/SLNT (standby/silent) pin not grounded
+#### 1. TJA1051 S/SLNT (silent mode) pin not grounded
 
-The TJA1051 pin 8 (S or SLNT) must be connected to GND for normal operation. If left floating or pulled high, the transceiver enters standby mode and will not transmit or receive.
+The TJA1051 pin 8 (labeled S, SLNT, or STB depending on the module) **must**
+be connected to GND for normal operation. If left floating or pulled high,
+the transceiver enters silent mode: it can still receive (weakly), but
+**cannot transmit** — the bus sees no frames and both sides remain in error.
 
-**Action:** Verify pin 8 on both TJA1051 modules is connected to GND.
+| Pin 8 level | Mode | TX | RX |
+|-------------|------|----|----|
+| **LOW (GND)** | **Normal** ✅ | ✅ Active | ✅ Active |
+| HIGH (VCC) | Silent | ❌ Disabled | ✅ Active |
+| Floating | Undefined | ⚠️ Erratic | ⚠️ Erratic |
 
-#### 3. CANH/CANL crossed between transceivers
+**Action:** Verify pin 8 is connected to GND on **both** TJA1051 modules.
+Use a multimeter in continuity mode to confirm the connection from pin 8
+to the GND rail.
 
-If CANH on one transceiver connects to CANL on the other (and vice versa), the differential signal is inverted and no frames will be decoded.
+#### 2. CANH/CANL crossed between transceivers
+
+If CANH on one transceiver connects to CANL on the other (and vice versa),
+the differential signal is inverted. The transceivers cannot decode the
+inverted polarity and treat every bit as an error.
 
 **Action:** Trace the physical wiring to ensure CANH↔CANH and CANL↔CANL.
+Use the color coding on twisted pair cables (e.g., orange = CANH,
+orange/white = CANL) and verify at both ends.
+
+#### 3. No common GND between ESP32 and STM32 systems
+
+CAN is differential, but the transceivers need a common ground reference
+for the voltage thresholds to work correctly. Without a shared GND, the
+common-mode voltage can drift outside the ±2 V tolerance of the TJA1051.
+
+**Action:** Verify that both systems share a dedicated GND wire (not just
+through the CAN cable — a separate GND wire between the boards is required).
 
 #### 4. BOOT0 jumper (JP7) on Nucleo-64 in wrong position
 
-PB8 (FDCAN1_RX) shares a PCB trace with BOOT0 via JP7. If JP7 is set to VDD, PB8 is held high and cannot function as CAN RX.
+PB8 (FDCAN1_RX) shares a PCB trace with BOOT0 via JP7. If JP7 is set to
+VDD, PB8 is held high and FDCAN1 RX is non-functional.
 
-**Action:** Verify JP7 is in the GND position (factory default).
+**Action:** Verify JP7 is in the GND position (factory default). The user
+has confirmed this is correct ✅.
+
+#### 5. 100 nF decoupling capacitors missing
+
+Each TJA1051 should have a 100 nF ceramic capacitor between VCC (pin 3)
+and GND (pin 2), placed as close to the IC as possible. Without decoupling,
+transient noise on VCC during bus transitions can cause sporadic bit errors.
+
+**Action:** Install 100 nF (0.1 µF) ceramic capacitors on both modules.
+
+---
+
+## Firmware Diagnostics
+
+### ESP32 TWAI bus status logging
+
+The firmware now includes periodic TWAI diagnostic output on the ESP32
+serial monitor (every 5 seconds). Connect USB to the ESP32 and open a
+serial terminal at 115200 baud. Look for lines like:
+
+```
+[CAN-DIAG] state=RUNNING tx_err=0 rx_err=0 tx_fail=0 rx_miss=0 arb_lost=0 bus_err=0
+```
+
+#### Interpreting the diagnostic output
+
+| Field | Meaning | Healthy value | Problem indication |
+|-------|---------|---------------|-------------------|
+| `state` | TWAI driver state | `RUNNING` | `BUS_OFF` = too many errors; `RECOVERING` = attempting recovery |
+| `tx_err` | TX error counter (0–255) | 0 | > 96 = error warning; ≥ 128 = bus-off |
+| `rx_err` | RX error counter (0–255) | 0 | > 96 = error warning; rising count = signal quality issue |
+| `tx_fail` | Failed TX attempts | 0 | > 0 = no ACK received (other node not responding) |
+| `rx_miss` | Missed RX frames (queue full) | 0 | > 0 = increase RX queue size |
+| `arb_lost` | Arbitration lost count | 0 (only one TX node) | > 0 = normal if multiple TX nodes |
+| `bus_err` | Bus error count | 0 | > 0 = physical layer errors (wiring, termination, noise) |
+
+#### Common diagnostic patterns
+
+| Serial output pattern | Likely cause | Fix |
+|----------------------|--------------|-----|
+| `state=BUS_OFF tx_err=128+` | No termination resistors | Install 2× 120 Ω |
+| `state=RUNNING tx_err=0 rx_err=0` but no heartbeat | STM32 not transmitting or TJA1051 silent pin HIGH | Check STM32 side, pin 8 to GND |
+| `tx_fail` incrementing | No ACK from any node (STM32 not receiving) | Check STM32 RX wiring, termination |
+| `bus_err` incrementing rapidly | Wiring fault, crossed CANH/CANL, or noise | Re-check physical connections |
+| `state=STOPPED` | `ESP32Can.begin()` failed | Check serial for `[CAN] Initialization FAILED` |
 
 ---
 
 ## Recommended Debugging Steps
 
-1. **Serial monitor check:** Connect USB to both boards and verify:
-   - STM32: no error messages (CAN init is silent but non-fatal)
-   - ESP32: look for `[CAN] Initialized at 500 kbps` vs `[CAN] Initialization FAILED`
+### Step 1 — Serial monitor (both boards)
 
-2. **Multimeter check:** Measure CANH-to-CANL resistance (expect ~60 Ω)
+Connect USB to both boards and verify:
 
-3. **Oscilloscope check:** Probe CANH/CANL on the STM32 transceiver output — should show differential signaling at 500 kbps
+- **ESP32:** Look for `[CAN] Initialized at 500 kbps` (success) vs
+  `[CAN] Initialization FAILED` (TWAI driver problem).
+  Then check the periodic `[CAN-DIAG]` lines for error counters.
+- **STM32:** The STM32 does not have serial debug output for CAN by default,
+  but the onboard LED behavior and safety state transitions can indicate CAN
+  status. If the STM32 has a SWV/ITM trace output, `can_stats.tx_errors` and
+  `can_stats.busoff_count` can be inspected.
 
-4. **Loopback test (STM32):** Temporarily change `FDCAN_MODE_NORMAL` to `FDCAN_MODE_EXTERNAL_LOOPBACK` in `MX_FDCAN1_Init()` to test the transceiver independently
+### Step 2 — Multimeter check (power off)
 
-5. **Loopback test (ESP32):** Use the TWAI self-test mode to verify the ESP32 CAN peripheral operates correctly
+1. Disconnect power from both systems
+2. Measure resistance between CANH and CANL:
+   - **~60 Ω** → both terminators present ✅
+   - **~120 Ω** → only one terminator ⚠️
+   - **Open** → no terminators ❌ ← **this is the current state**
+3. Check continuity:
+   - TJA1051 #1 pin 8 (S) to GND → should beep ✅
+   - TJA1051 #2 pin 8 (S) to GND → should beep ✅
+   - TJA1051 #1 VCC to 5V rail → should beep ✅
+   - TJA1051 #2 VCC to 5V rail → should beep ✅
+
+### Step 3 — Voltage levels (power on, firmware running)
+
+| Measurement | Expected | If wrong |
+|-------------|----------|----------|
+| TJA1051 #1 VCC (pin 3) | 4.75–5.25 V | Check 5V supply |
+| TJA1051 #2 VCC (pin 3) | 4.75–5.25 V | Check 5V supply |
+| CANH idle voltage | ~2.5 V | If 0 V or 5 V → bus error, check GND/VCC |
+| CANL idle voltage | ~2.5 V | If 0 V or 5 V → bus error, check GND/VCC |
+| CANH − CANL idle | ~0 V | If ≠ 0 V → a node is stuck transmitting |
+
+### Step 4 — Oscilloscope (if available)
+
+Probe CANH and CANL with an oscilloscope:
+- **With termination:** You should see bursts of differential signaling
+  at ~10 Hz (100 ms heartbeat). Dominant bit: CANH ~3.5 V, CANL ~1.5 V.
+  Recessive bit: both ~2.5 V.
+- **Without termination:** You will see ringing and reflections on every
+  transition — this confirms the termination issue.
+
+### Step 5 — Loopback test (isolate each node)
+
+#### STM32 loopback
+
+Temporarily change `FDCAN_MODE_NORMAL` to `FDCAN_MODE_EXTERNAL_LOOPBACK`
+in `MX_FDCAN1_Init()` (`Core/Src/main.c` line 540). This makes the FDCAN
+peripheral transmit a frame and receive its own frame via the transceiver.
+If the heartbeat counter increments in the FDCAN RX FIFO, the STM32 side
+(MCU + transceiver + termination) is working.
+
+#### ESP32 loopback
+
+Temporarily change the TWAI mode to `TWAI_MODE_NO_ACK` (self-test mode) in
+the `ESP32Can.begin()` call. In this mode, the ESP32 transmits without
+requiring an ACK from another node. If the `[CAN-DIAG]` output shows
+`tx_err=0` and `tx_fail=0`, the ESP32 side is working.
+
+### Step 6 — CAN analyzer (if available)
+
+Connect a CAN bus analyzer (PCAN-USB, CANable, USBtin, etc.) **in parallel**
+to the bus (CANH, CANL, GND). Set it to 500 kbps. If frames with IDs 0x001
+and 0x011 appear, both nodes are transmitting correctly.
+
+---
+
+## Summary of Required Actions
+
+| Priority | Action | Status |
+|----------|--------|--------|
+| 🔴 **Critical** | Install 120 Ω termination between CANH and CANL at **both** ends | ❌ Not done |
+| 🟡 **Verify** | TJA1051 pin 8 (S/SLNT) connected to GND on **both** modules | ⬜ Unconfirmed |
+| 🟡 **Verify** | 100 nF decoupling capacitor on VCC-GND of **both** TJA1051 | ⬜ Unconfirmed |
+| ✅ **Done** | TJA1051 VCC = 5V on both modules | ✅ Confirmed |
+| ✅ **Done** | Common GND between ESP32 and STM32 | ✅ Confirmed |
+| ✅ **Done** | CANH↔CANH, CANL↔CANL (not crossed) | ✅ Confirmed |
+| ✅ **Done** | JP7 (BOOT0) in GND position | ✅ Confirmed |
+| ✅ **Done** | Firmware bitrate 500 kbps on both sides | ✅ Verified in code |
 
 ---
 
@@ -352,9 +519,10 @@ PB8 (FDCAN1_RX) shares a PCB trace with BOOT0 via JP7. If JP7 is set to VDD, PB8
 | `Core/Src/can_handler.c` | CAN_Init(), CAN_SendStatusLights(), CAN_ProcessMessages() |
 | `Core/Inc/can_handler.h` | CAN message ID definitions, public API |
 | `Core/Src/stm32g4xx_hal_msp.c` | HAL_FDCAN_MspInit() — GPIO/clock/interrupt config |
-| `esp32/src/main.cpp` | ESP32 setup() — ESP32Can.begin(), heartbeat TX |
+| `esp32/src/main.cpp` | ESP32 setup() — ESP32Can.begin(), heartbeat TX, TWAI diagnostics |
 | `esp32/src/can_rx.cpp` | ESP32 CAN RX decoder |
 | `esp32/include/can_ids.h` | ESP32 CAN ID definitions (frozen contract) |
 | `esp32/src/screens/boot_screen.cpp` | "CAN: WAITING..." display logic |
 | `esp32/platformio.ini` | ESP32-TWAI-CAN library dependency |
 | `docs/ESP32_STM32_CAN_CONNECTION.md` | Physical wiring reference |
+| `docs/VALIDACION_CONEXION_FISICA_CAN.md` | Physical validation checklist |
