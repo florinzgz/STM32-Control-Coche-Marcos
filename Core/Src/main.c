@@ -399,6 +399,10 @@ int main(void)
              * Diagnostic only — not used by any control path.             */
             Encoder_SendDiagnostic();
 
+            /* Heartbeat: toggle LD2 (PA5) every 1 s so the user can
+             * verify that the firmware main loop is running.            */
+            HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
+
             /* DS18B20 hot-plug detection: re-enumerates the OneWire bus
              * every OW_RESCAN_INTERVAL_MS to detect sensors added or
              * removed at runtime (guarded internally by timestamp).       */
@@ -498,6 +502,13 @@ static void MX_GPIO_Init(void)
     /* Relay outputs (GPIOC) */
     gpio.Pin = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
     HAL_GPIO_Init(GPIOC, &gpio);
+
+    /* Nucleo-64 user LED LD2 (PA5) — heartbeat indicator */
+    gpio.Pin   = PIN_LD2;
+    gpio.Mode  = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull  = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &gpio);
 
     /* LED power relays (PB10 front, PB11 rear) — both start OFF (safe default) */
     gpio.Pin = PIN_RELAY_LED | PIN_RELAY_LED_REAR;
