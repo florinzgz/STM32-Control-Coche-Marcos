@@ -56,6 +56,8 @@ void BootScreen::onEnter() {
     prevCanLinked_ = false;
     sensorStatus_     = obstacle_sensor::SensorStatus::WAITING;
     prevSensorStatus_ = obstacle_sensor::SensorStatus::WAITING;
+    sensorDistanceMm_     = 0;
+    prevSensorDistanceMm_ = 0;
 
     // Reset diagnostic state
     diagNeedsRedraw_ = true;
@@ -78,7 +80,9 @@ void BootScreen::update(const vehicle::VehicleData& data) {
                   (now - data.heartbeat().timestampMs) < 500);
 
     // Obstacle sensor status
-    sensorStatus_ = obstacle_sensor::getReading().status;
+    obstacle_sensor::Reading sensorReading = obstacle_sensor::getReading();
+    sensorStatus_      = sensorReading.status;
+    sensorDistanceMm_  = sensorReading.distance_mm;
 
     // ---- CAN diagnostics ----
 
@@ -163,6 +167,7 @@ void BootScreen::draw() {
         prevSensorStatus_ = (sensorStatus_ == obstacle_sensor::SensorStatus::WAITING)
                             ? obstacle_sensor::SensorStatus::VALID
                             : obstacle_sensor::SensorStatus::WAITING;  // Force redraw
+        prevSensorDistanceMm_ = ~sensorDistanceMm_;  // Force distance redraw (always differs)
         diagNeedsRedraw_ = true;  // Force diagnostic redraw
     }
 
@@ -193,8 +198,10 @@ void BootScreen::draw() {
 
     // Obstacle sensor status (partial redraw)
     RTRACE_SET_LAYER(2);
-    hmi::ObstacleIndicator::draw(tft, sensorStatus_, prevSensorStatus_);
-    prevSensorStatus_ = sensorStatus_;
+    hmi::ObstacleIndicator::draw(tft, sensorStatus_, prevSensorStatus_,
+                                 sensorDistanceMm_, prevSensorDistanceMm_);
+    prevSensorStatus_      = sensorStatus_;
+    prevSensorDistanceMm_  = sensorDistanceMm_;
 
     // CAN diagnostics panel (partial redraw when values change)
     if (diagNeedsRedraw_) {
