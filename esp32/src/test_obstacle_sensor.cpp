@@ -369,8 +369,8 @@ static void test_config_defaults() {
     // RX buffer: must be larger than a single 400-byte frame
     ASSERT(cfg.rxBufSize > FRAME_LEN);
 
-    // Default value should be 1024 (2.5 frames, ~11 ms headroom at 921600)
-    ASSERT_EQ(cfg.rxBufSize, 1024);
+    // Default value should be 2048 (~5 frames, ~22 ms headroom at 921600)
+    ASSERT_EQ(cfg.rxBufSize, 2048);
 }
 
 /* ---- Integration helper: inject a frame and run update() ---------------- */
@@ -505,6 +505,132 @@ static void test_exact_min_range_valid() {
     ASSERT_EQ(rd.zone, 4);   // emergency zone: < 200 mm
 }
 
+// Test 17: Overflow flush — when more than 2 frames of data are buffered,
+//          old bytes are discarded and only the latest frame is processed.
+//          This prevents blocking and cascading checksum failures.
+static void test_overflow_flush_keeps_latest_frame() {
+    printf("  test_overflow_flush_keeps_latest_frame...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject 3 frames: 2 old + 1 new (latest).
+    // The overflow logic should discard old data and parse the latest.
+
+    // Frame 1 (old): 300 mm
+    uint8_t frame1[FRAME_LEN];
+    buildFrame(frame1);
+    setPixel(frame1, 0, 300000, 0, 100);
+    writeChecksum(frame1);
+
+    // Frame 2 (old): 400 mm
+    uint8_t frame2[FRAME_LEN];
+    buildFrame(frame2);
+    setPixel(frame2, 0, 400000, 0, 100);
+    writeChecksum(frame2);
+
+    // Frame 3 (latest): 800 mm
+    uint8_t frame3[FRAME_LEN];
+    buildFrame(frame3);
+    setPixel(frame3, 0, 800000, 0, 100);
+    writeChecksum(frame3);
+
+    g_uart_inject(frame1, FRAME_LEN);
+    g_uart_inject(frame2, FRAME_LEN);
+    g_uart_inject(frame3, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    // After overflow flush discards old frames, the latest frame (800 mm)
+    // should be the one that gets parsed successfully.
+    ASSERT_EQ(rd.distance_mm, 800);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
+// Test 18: Resync after bad frame — when a frame has a bad checksum,
+//          the parser should scan for the next valid header {0x57, 0x01}
+//          inside the consumed buffer, avoiding a full frame's worth of
+//          re-alignment delay.
+static void test_resync_after_bad_checksum() {
+    printf("  test_resync_after_bad_checksum...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Build a corrupted frame (bad checksum) followed by a valid frame.
+    // The valid frame's header sits inside the bad frame's data area.
+    // After checksum failure, resync should find it.
+
+    uint8_t bad_frame[FRAME_LEN];
+    buildFrame(bad_frame);
+    setPixel(bad_frame, 0, 600000, 0, 100);
+    writeChecksum(bad_frame);
+    bad_frame[FRAME_LEN - 1] ^= 0xFF;  // Corrupt checksum
+
+    uint8_t good_frame[FRAME_LEN];
+    buildFrame(good_frame);
+    setPixel(good_frame, 0, 750000, 0, 100);  // 750 mm
+    writeChecksum(good_frame);
+
+    g_uart_inject(bad_frame, FRAME_LEN);
+    g_uart_inject(good_frame, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    // The good frame (750 mm) should have been parsed after resync
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 750);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
+// Test 19: Single frame within the per-update byte limit parses correctly.
+//          Verifies that the byte-limit guard (MAX_BYTES_PER_UPDATE) does
+//          not interfere with normal single-frame processing.
+static void test_single_frame_within_byte_limit() {
+    printf("  test_single_frame_within_byte_limit...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject 1 valid frame.  After the overflow flush discards excess,
+    // the remaining data fits within the per-update limit and parses OK.
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    setPixel(frame, 0, 1200000, 0, 100);  // 1200 mm
+    writeChecksum(frame);
+
+    g_uart_inject(frame, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 1200);
+    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -526,6 +652,9 @@ int main() {
     test_above_max_range_still_invalid();
     test_normal_distance_valid();
     test_exact_min_range_valid();
+    test_overflow_flush_keeps_latest_frame();
+    test_resync_after_bad_checksum();
+    test_single_frame_within_byte_limit();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
