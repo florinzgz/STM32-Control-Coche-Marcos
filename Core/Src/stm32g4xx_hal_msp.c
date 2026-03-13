@@ -14,6 +14,8 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
     __HAL_RCC_FDCAN_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     
+    /* PB8 = FDCAN1_RX (CN7 pin 3, shares BOOT0 via JP7 — JP7 must be GND)
+     * PB9 = FDCAN1_TX (CN7 pin 5) */
     GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
