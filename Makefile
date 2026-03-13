@@ -62,6 +62,7 @@ ASM_SOURCES = Core/Startup/startup_stm32g474retx.s
 C_INCLUDES = \
   -I$(CORE_INC) \
   -IDrivers/STM32G4xx_HAL_Driver/Inc \
+  -IDrivers/STM32G4xx_HAL_Driver/Inc/Legacy \
   -IDrivers/CMSIS/Device/ST/STM32G4xx/Include \
   -IDrivers/CMSIS/Include
 

@@ -34,11 +34,14 @@ The STM32 HAL drivers and CMSIS files are **included** in the repository under t
 ### 3. Build the Project
 
 #### Using STM32CubeIDE:
-1. Right-click on project → **Build Project**
-2. Or press **Ctrl+B**
+1. If a `Debug/` folder already exists in the project directory, **delete it first** to ensure a clean build.
+2. Right-click on the project → **Refresh** (F5)
+3. **Project → Clean...** → select the project → **Clean**
+4. Right-click on project → **Build Project** (or press **Ctrl+B**)
 
 #### Using Command Line (requires arm-none-eabi-gcc):
 ```bash
+sudo apt-get install gcc-arm-none-eabi   # Install toolchain (Linux)
 make clean
 make all
 ```
@@ -95,6 +98,24 @@ STM32-Control-Coche-Marcos/
 
 ### Build errors after cloning
 - **Solution**: Ensure the `Drivers/` folder was cloned correctly and contains `STM32G4xx_HAL_Driver/` and `CMSIS/`
+
+### Circular dependency / "Building file:" empty / `arm-none-eabi-gcc ""`
+If you see errors like:
+```
+make: Circular Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.o <- Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.o dependency dropped.
+Building file:
+arm-none-eabi-gcc "" ...
+```
+- **Cause**: Stale build artifacts in the `Debug/` directory (usually from a previous failed build or after pulling new source files via `git pull`). Eclipse CDT does not automatically detect files added externally.
+- **Solution**:
+  1. **Delete the Debug/ folder** inside the project directory (manually or via file explorer).
+  2. In STM32CubeIDE, right-click the project → **Refresh** (or press **F5**) so Eclipse detects the latest files on disk.
+  3. **Project → Clean...** → select the project → **Clean**.
+  4. **Build** the project again (**Ctrl+B**).
+  5. If the error persists after these steps, regenerate the project from CubeMX:
+     - Open `STM32-Control-Coche-Marcos.ioc` in STM32CubeIDE
+     - Click **Project → Generate Code** (Alt+K)
+     - This regenerates the Eclipse build files while keeping your application code intact
 
 ### ESP32-S3: "Could not open COMx" / PermissionError
 - **Cause**: The serial port is in use by another program, or the board is not in download mode.
