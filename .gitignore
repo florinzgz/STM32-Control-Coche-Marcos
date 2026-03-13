@@ -36,6 +36,7 @@ build/
 # STM32 específicos
 # ===========================
 *.ioc.bak
+Drivers/
 
 # ===========================
 # Logs y temporales
