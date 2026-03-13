@@ -19,6 +19,21 @@
 #include "error_log.h"
 #include <math.h>
 
+/* ---- Defensive declarations ----
+ * These symbols are normally provided by main.h (included via
+ * can_handler.h).  Re-declared here so the build succeeds even if
+ * CubeMX regenerates main.h without the custom content.           */
+#ifndef PIN_RELAY_LED
+#define PIN_RELAY_LED       GPIO_PIN_10  /* PB10 — front LED strip relay */
+#endif
+#ifndef PIN_RELAY_LED_REAR
+#define PIN_RELAY_LED_REAR  GPIO_PIN_11  /* PB11 — rear  LED strip relay */
+#endif
+#ifndef INA226_CHANNEL_BATTERY
+#define INA226_CHANNEL_BATTERY  4        /* TCA9548A channel index       */
+#endif
+extern bool Startup_IsInhibited(void);
+
 /* Safe-default for speed when NaN/Inf detected — ensures gear change is rejected */
 #define SANITIZE_SPEED_DEFAULT  99.0f
 

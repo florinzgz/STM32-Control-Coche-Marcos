@@ -20,6 +20,10 @@
 #include "main.h"
 #include "can_handler.h"
 
+/* TIM2 handle — defined in main.c.  Declared here as well so that the
+ * build succeeds even if CubeMX regenerates main.h without the extern. */
+extern TIM_HandleTypeDef htim2;
+
 /* ---- Internal state for delta tracking ----
  * Initialised to 0, matching the TIM2 counter state after
  * Steering_Init() zeros it.  All public functions in this module
