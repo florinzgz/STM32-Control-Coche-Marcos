@@ -158,16 +158,23 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
     if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U) {
         FDCAN_RxHeaderTypeDef rx_hdr;
-        uint8_t rx_data[8];
+        uint8_t rx_data[8] = {0};
 
         if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx_hdr, rx_data) == HAL_OK) {
             /* Store received frame in global debug buffers so that the
-             * debugger (Live Watch / SWV) can inspect them at any time.  */
+             * debugger (Live Watch / SWV) can inspect them at any time.
+             * Note: writes are not atomic w.r.t. the main loop; this is
+             * acceptable because these buffers are for debug inspection
+             * only — no control decisions depend on them.                */
+            *((volatile FDCAN_RxHeaderTypeDef *)&g_CAN_RxHeader) = rx_hdr;
             for (uint8_t i = 0; i < 8; i++)
                 ((volatile uint8_t *)g_CAN_RxData)[i] = rx_data[i];
-            *((volatile FDCAN_RxHeaderTypeDef *)&g_CAN_RxHeader) = rx_hdr;
 
-            /* Visual feedback: toggle LD2 on every received CAN frame */
+            /* Visual feedback: toggle LD2 on every received CAN frame.
+             * Note: LD2 is also toggled at 200 ms by the main-loop
+             * heartbeat; on CAN-active buses the combined pattern will
+             * differ from the steady 200 ms blink, providing a visual
+             * indication of bus activity.                                */
             HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
         }
     }

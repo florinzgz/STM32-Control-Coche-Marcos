@@ -164,12 +164,12 @@ static void CAN_ConfigureFilters(void)
     filter.FilterID2    = CAN_ID_OBSTACLE_SAFETY;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 
-    /* Filter 4: Accept CAN test frame (0x123) used by CAN_TestTransmit() */
+    /* Filter 4: Accept CAN test frame used by CAN_TestTransmit() */
     filter.FilterIndex  = 4;
     filter.FilterType   = FDCAN_FILTER_DUAL;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = 0x123;
-    filter.FilterID2    = 0x123;
+    filter.FilterID1    = CAN_ID_TEST_FRAME;
+    filter.FilterID2    = CAN_ID_TEST_FRAME;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 #endif
 
@@ -224,16 +224,23 @@ void CAN_Init(void) {
     }
 }
 
+/**
+ * @brief  Send a CAN test frame (ID = CAN_ID_TEST_FRAME, DLC = 8).
+ *
+ * Intended to be called periodically (e.g. every 500 ms) from the main
+ * loop for CAN bus validation.  In internal-loopback mode
+ * (CAN_LOOPBACK_TEST = 1) the frame is echoed back to Rx FIFO0 and
+ * triggers HAL_FDCAN_RxFifo0Callback, providing a complete self-test.
+ * The payload is also copied to the volatile g_CAN_TxData[] buffer so
+ * it can be inspected in the debugger.
+ */
 void CAN_TestTransmit(void) {
-    /* Send a test CAN frame with ID 0x123 for debugging/self-test.
-     * Payload: 8 bytes of incrementing pattern for easy scope/analyser ID.
-     * In loopback mode this frame is received by our own Rx FIFO0 callback. */
-    uint8_t tx_buf[8];
-    for (uint8_t i = 0; i < 8; i++) {
-        tx_buf[i] = i + 1;
+    uint8_t tx_buf[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    for (uint8_t i = 0; i < 8; i++)
         ((volatile uint8_t *)g_CAN_TxData)[i] = tx_buf[i];
-    }
-    TransmitFrame(0x123, tx_buf, 8);
+
+    TransmitFrame(CAN_ID_TEST_FRAME, tx_buf, 8);
 }
 
 void CAN_SendHeartbeat(void) {

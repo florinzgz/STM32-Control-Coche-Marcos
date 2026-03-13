@@ -17,6 +17,9 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+/* CAN test frame ID — used by CAN_TestTransmit() and the Rx test filter */
+#define CAN_ID_TEST_FRAME   0x123
+
 /* CAN Message IDs (ESP32 ↔ STM32) */
 #define CAN_ID_HEARTBEAT_STM32    0x001  // STM32 → ESP32 (100ms)
 #define CAN_ID_HEARTBEAT_ESP32    0x011  // ESP32 → STM32 (100ms)
