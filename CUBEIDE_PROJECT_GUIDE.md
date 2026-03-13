@@ -182,6 +182,27 @@ Searched locations with zero hits:
 
 ---
 
+## 9. Startup assembly file (`Core/Startup/startup_stm32g474retx.s`)
+
+**Status: FIXED** — replaced with the official STM32CubeG4 v1.5.1 version.
+
+The previous startup file had critical issues:
+
+| Issue | Severity | Detail |
+|-------|----------|--------|
+| Truncated vector table | **Critical** | Only 68 entries — missing 35 IRQ vectors (positions 47–101) for ADC3, DMA2, UART4/5, TIM5-7/20, SPI3/4, I2C3/4, HRTIM, FDCAN2/3, CORDIC, FMAC, etc. |
+| Wrong handler positions | **Critical** | COMP1_2_3 at vector position 50 (should be 64); FPU at 67 (should be 81) |
+| Incorrect entries | **Critical** | USB_HP/USB_LP duplicated at positions 60–61 (should be DMA2_Channel5, ADC4) |
+| Missing `__libc_init_array` | **High** | C runtime static initializers not called before `main()` |
+| Inefficient data-copy loop | Low | Reloaded constant addresses inside loop body |
+
+The fixed file matches the official
+`Drivers/CMSIS/Device/ST/STM32G4xx/Source/Templates/gcc/startup_stm32g474xx.s`
+from STM32CubeG4 v1.5.1 byte-for-byte (102 IRQ vectors, proper
+Reset_Handler with `__libc_init_array`).
+
+---
+
 ## Summary of answers
 
 | Question | Answer |
