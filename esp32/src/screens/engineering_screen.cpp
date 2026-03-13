@@ -296,7 +296,6 @@ void EngineeringScreen::draw() {
         pedalDataChanged_ = false;
 
         char buf[ui::FMT_BUF_LARGE];
-        static const char* const wheelNames[4] = {"FL", "FR", "RL", "RR"};
 
         RTRACE_SET_LAYER(2);
         tft.setTextSize(1);
