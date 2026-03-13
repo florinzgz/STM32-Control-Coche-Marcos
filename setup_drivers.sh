@@ -78,6 +78,35 @@ cp -r "$TEMP_DIR/$CUBE_DIR/Drivers/CMSIS" Drivers/
 echo "🧹 Cleaning up..."
 rm -rf "$TEMP_DIR"
 
+# Verify critical files exist
+echo "🔍 Verifying installation..."
+VERIFY_OK=true
+for f in \
+    Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.c \
+    Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal.h \
+    Drivers/CMSIS/Device/ST/STM32G4xx/Include/stm32g4xx.h \
+    Drivers/CMSIS/Include/core_cm4.h; do
+    if [ ! -f "$f" ]; then
+        echo "   ❌ Missing: $f"
+        VERIFY_OK=false
+    fi
+done
+
+if [ "$VERIFY_OK" = false ]; then
+    echo ""
+    echo "❌ ERROR: Some driver files are missing."
+    echo "   Try deleting the Drivers/ folder and running this script again."
+    exit 1
+fi
+echo "   ✅ All critical files present."
+
+# Remove stale Debug build directory to prevent circular dependency errors
+if [ -d "Debug" ]; then
+    echo ""
+    echo "🧹 Removing stale Debug/ directory to prevent build errors..."
+    rm -rf Debug
+fi
+
 echo ""
 echo "✅ Success! STM32 HAL Drivers installed."
 echo ""
@@ -87,8 +116,10 @@ echo "   - Drivers/CMSIS/"
 echo ""
 echo "Next steps:"
 echo "1. Open the project in STM32CubeIDE"
-echo "2. Build the project (Ctrl+B)"
-echo "3. Flash to your STM32 board"
+echo "2. Right-click the project → Refresh (F5)"
+echo "3. Project → Clean... → select the project → Clean"
+echo "4. Build the project (Ctrl+B)"
+echo "5. Flash to your STM32 board"
 echo ""
 echo "For more information, see SETUP.md"
 echo "================================================"
