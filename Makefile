@@ -1,4 +1,6 @@
 # Makefile for ARM GCC build system for STM32G474RE
+# NOTE: Run STM32CubeMX code generation on the .ioc file first
+# to create the Drivers/ folder (HAL + CMSIS) before building.
 
 # Define the project name
 PROJECT = STM32G474RE
