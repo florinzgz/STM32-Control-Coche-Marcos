@@ -30,11 +30,17 @@ static constexpr uint8_t PIN_FORWARD  = (1 << 3);  // GPA3
 static constexpr uint8_t PIN_FWD_D2   = (1 << 4);  // GPA4
 static constexpr uint8_t GEAR_MASK    = 0x1F;       // Bits 0-4
 
+// I2C error handling constants
+static constexpr uint8_t  ERROR_THRESHOLD   = 5;     // Consecutive errors before backoff
+static constexpr uint32_t BACKOFF_POLL_MS   = 1000;   // Poll interval during backoff (ms)
+
 // Module state
 static Config       cfg_;
 static Gear         currentGear_   = Gear::NEUTRAL;
 static unsigned long lastPollMs_   = 0;
 static bool         initialized_   = false;
+static uint8_t      errorCount_    = 0;               // Consecutive I2C error counter
+static bool         connected_     = false;            // MCP23017 responding on I2C
 
 // -------------------------------------------------------------------------
 // Write a single register to MCP23017
@@ -48,16 +54,20 @@ static bool writeReg(uint8_t reg, uint8_t val) {
 
 // -------------------------------------------------------------------------
 // Read a single register from MCP23017
+// Returns 0xFF on error.  Sets connected_ to false on I2C failure.
 // -------------------------------------------------------------------------
 static uint8_t readReg(uint8_t reg) {
     Wire.beginTransmission(cfg_.i2cAddr);
     Wire.write(reg);
-    Wire.endTransmission(false);
-    Wire.requestFrom(cfg_.i2cAddr, (uint8_t)1);
-    if (Wire.available()) {
-        return Wire.read();
+    uint8_t err = Wire.endTransmission(false);
+    if (err != 0) {
+        return 0xFF;  // Error — skip requestFrom to avoid log spam
     }
-    return 0xFF;  // Error — all bits high (no gear detected)
+    uint8_t n = Wire.requestFrom(cfg_.i2cAddr, (uint8_t)1);
+    if (n == 0 || !Wire.available()) {
+        return 0xFF;  // Error — no data received
+    }
+    return Wire.read();
 }
 
 // -------------------------------------------------------------------------
@@ -92,27 +102,64 @@ void init(const Config& cfg) {
     Wire.begin(cfg_.sdaPin, cfg_.sclPin);
     Wire.setClock(400000);  // 400 kHz I2C (Fast Mode)
 
-    // Configure Port A pins 0-4 as inputs (set bits = input)
-    writeReg(REG_IODIRA, GEAR_MASK);
+    // Probe the MCP23017: try to configure Port A
+    bool ok = writeReg(REG_IODIRA, GEAR_MASK);
+    if (ok) {
+        ok = writeReg(REG_GPPUA, GEAR_MASK);
+    }
 
-    // Enable internal pull-ups on input pins
-    writeReg(REG_GPPUA, GEAR_MASK);
-
+    connected_   = ok;
+    errorCount_  = ok ? 0 : ERROR_THRESHOLD;
     initialized_ = true;
     lastPollMs_  = 0;
     currentGear_ = Gear::NEUTRAL;
 
-    Serial.println("[SHIFTER] MCP23017 initialized");
+    if (ok) {
+        Serial.println("[SHIFTER] MCP23017 initialized");
+    } else {
+        Serial.println("[SHIFTER] MCP23017 NOT detected — backoff active");
+    }
 }
 
 void update() {
     if (!initialized_) return;
 
     unsigned long now = millis();
-    if (now - lastPollMs_ < cfg_.pollMs) return;
+
+    // Use longer poll interval when the device is in error backoff
+    uint32_t interval = (errorCount_ >= ERROR_THRESHOLD) ? BACKOFF_POLL_MS : cfg_.pollMs;
+    if (now - lastPollMs_ < interval) return;
     lastPollMs_ = now;
 
     uint8_t portVal = readReg(REG_GPIOA);
+
+    if (portVal == 0xFF) {
+        // I2C read failed
+        if (errorCount_ < ERROR_THRESHOLD) {
+            errorCount_++;
+            if (errorCount_ == ERROR_THRESHOLD) {
+                // Transition to disconnected — log once
+                connected_ = false;
+                Serial.println("[SHIFTER] MCP23017 I2C error — backoff active");
+            }
+        }
+        // Keep currentGear_ as NEUTRAL during error
+        currentGear_ = Gear::NEUTRAL;
+        return;
+    }
+
+    // Successful read — recover from error state if needed
+    if (errorCount_ > 0) {
+        if (!connected_) {
+            // Re-initialize registers after reconnection
+            writeReg(REG_IODIRA, GEAR_MASK);
+            writeReg(REG_GPPUA, GEAR_MASK);
+            Serial.println("[SHIFTER] MCP23017 reconnected");
+        }
+        errorCount_ = 0;
+        connected_  = true;
+    }
+
     currentGear_ = decodeGear(portVal);
 }
 
@@ -124,6 +171,10 @@ Gear getGear() {
 uint8_t getGearRaw() {
     if (!initialized_) return static_cast<uint8_t>(Gear::NEUTRAL);
     return static_cast<uint8_t>(currentGear_);
+}
+
+bool isConnected() {
+    return initialized_ && connected_;
 }
 
 } // namespace shifter

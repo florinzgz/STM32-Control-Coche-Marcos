@@ -50,6 +50,9 @@ Gear getGear();
 /// Get the raw gear value as uint8_t for CAN transmission.
 uint8_t getGearRaw();
 
+/// Returns true when the MCP23017 is responding on I2C.
+bool isConnected();
+
 } // namespace shifter
 
 #endif // SHIFTER_INPUT_H
