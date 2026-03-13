@@ -83,6 +83,7 @@ typedef struct {
 
 /* Function prototypes */
 void CAN_Init(void);
+void CAN_TestTransmit(void);
 void CAN_SendHeartbeat(void);
 void CAN_SendStatusSpeed(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
 void CAN_SendStatusCurrent(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
@@ -111,6 +112,11 @@ bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t can_stats;
 extern FDCAN_HandleTypeDef hfdcan1;
+
+/* Debug-visible global CAN buffers (volatile for debugger inspection) */
+extern volatile uint8_t               g_CAN_RxData[8];
+extern volatile FDCAN_RxHeaderTypeDef  g_CAN_RxHeader;
+extern volatile uint8_t               g_CAN_TxData[8];
 
 #ifdef __cplusplus
 }
