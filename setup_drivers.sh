@@ -41,7 +41,7 @@ echo "   This may take a few minutes..."
 
 # Download the latest STM32CubeG4 package
 # Note: ST doesn't provide direct download links, so we use the GitHub mirror
-CUBE_URL="https://github.com/STMicroelectronics/STM32CubeG4/archive/refs/heads/master.zip"
+CUBE_URL="https://github.com/STMicroelectronics/STM32CubeG4/archive/refs/tags/v1.5.1.zip"
 
 if command -v curl &> /dev/null; then
     curl -L -o stm32cubeg4.zip "$CUBE_URL"

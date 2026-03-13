@@ -90,6 +90,9 @@ extern "C" {
 #define PIN_I2C_SCL        GPIO_PIN_6   /* PB6 - I2C1_SCL */
 #define PIN_I2C_SDA        GPIO_PIN_7   /* PB7 - I2C1_SDA */
 
+/* ---- Nucleo-64 User LED (LD2, active HIGH) ---- */
+#define PIN_LD2            GPIO_PIN_5   /* PA5 — Nucleo-64 user LED (LD2) */
+
 /* ---- OneWire Bus (DS18B20 temperatures) ---- */
 #define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
 
