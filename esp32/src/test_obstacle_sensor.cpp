@@ -373,6 +373,138 @@ static void test_config_defaults() {
     ASSERT_EQ(cfg.rxBufSize, 1024);
 }
 
+/* ---- Integration helper: inject a frame and run update() ---------------- */
+
+// Reset sensor + UART stub, advance past warmup, then inject `frame`
+// and call update().  Returns the reading produced.
+static obstacle_sensor::Reading injectFrameAndUpdate(uint8_t* frame) {
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+
+    // Advance past warmup (default 1000 ms)
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject frame bytes and run update
+    g_uart_inject(frame, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    return obstacle_sensor::getReading();
+}
+
+// Test 12: All pixels invalid (NO_VALID_PIXELS) → treated as emergency-close
+//          instead of timing out to INVALID.
+//          This is the core fix: the TOFSense-M reports all pixels invalid
+//          when an object is < ~50 mm from the sensor (hardware limitation).
+static void test_all_pixels_invalid_is_emergency_close() {
+    printf("  test_all_pixels_invalid_is_emergency_close...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // All 64 pixels have dis_status = 1 (invalid) — no valid measurements
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 50000, /*status=*/1, 100);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Should be VALID (not INVALID) — treated as "too close"
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+
+    // Distance should be clamped to minRangeMm (default 20 mm)
+    ASSERT_EQ(rd.distance_mm, 20);
+
+    // Zone should be 4 (emergency: < 200 mm)
+    ASSERT_EQ(rd.zone, 4);
+}
+
+// Test 13: Distance below minRangeMm is clamped (not INVALID).
+//          If the sensor reports a valid pixel at e.g. 10 mm, that's still
+//          a real obstacle — clamp to minRangeMm and report VALID.
+static void test_below_min_range_clamped_to_min() {
+    printf("  test_below_min_range_clamped_to_min...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 10 mm = 10,000 µm (below minRangeMm = 20)
+    setPixel(frame, 0, 10000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // clamped to minRangeMm
+    ASSERT_EQ(rd.zone, 4);           // emergency zone
+}
+
+// Test 14: Distance above maxRangeMm still goes INVALID.
+//          Only below-minimum clamping changed; above-max is still rejected.
+static void test_above_max_range_still_invalid() {
+    printf("  test_above_max_range_still_invalid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 5000 mm = 5,000,000 µm (above maxRangeMm = 4000)
+    setPixel(frame, 0, 5000000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+    ASSERT_EQ(rd.healthy, false);
+}
+
+// Test 15: Normal in-range distance (500 mm) → VALID, correct zone.
+static void test_normal_distance_valid() {
+    printf("  test_normal_distance_valid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 500 mm = 500,000 µm
+    setPixel(frame, 0, 500000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 500);
+    ASSERT_EQ(rd.zone, 2);   // warning zone: 500–1000 mm (500 is NOT < 500)
+}
+
+// Test 16: Exactly minRangeMm distance (20 mm) → VALID at emergency zone.
+static void test_exact_min_range_valid() {
+    printf("  test_exact_min_range_valid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 20 mm = 20,000 µm (exactly minRangeMm)
+    setPixel(frame, 0, 20000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);
+    ASSERT_EQ(rd.zone, 4);   // emergency zone: < 200 mm
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -389,6 +521,11 @@ int main() {
     test_two_byte_sync_pattern();
     test_init_resets_state();
     test_config_defaults();
+    test_all_pixels_invalid_is_emergency_close();
+    test_below_min_range_clamped_to_min();
+    test_above_max_range_still_invalid();
+    test_normal_distance_valid();
+    test_exact_min_range_valid();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

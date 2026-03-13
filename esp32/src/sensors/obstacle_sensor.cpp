@@ -283,6 +283,16 @@ void update(float vehicleSpeedKmh) {
                     break;
                 case ParseResult::NO_VALID_PIXELS:
                     diagAllPixelsInvalid_++;
+                    // All pixels report dis_status ≠ 0.  The TOFSense-M
+                    // cannot measure distances below ~50 mm; when an object
+                    // is that close every pixel saturates and reports
+                    // invalid.  Treat this as "too close to measure" —
+                    // an emergency-close detection at minRangeMm — instead
+                    // of letting the frame-timeout mark the sensor INVALID
+                    // (which would look like a sensor fault, not an
+                    // obstacle).
+                    measuredMm = cfg_.minRangeMm;
+                    gotFrame   = true;
                     break;
                 default:
                     break;
@@ -336,12 +346,17 @@ void update(float vehicleSpeedKmh) {
     }
 
     // Range validation
-    bool inRange = (measuredMm >= cfg_.minRangeMm && measuredMm <= cfg_.maxRangeMm);
-
-    if (!inRange) {
+    if (measuredMm > cfg_.maxRangeMm) {
+        // Above maximum range — likely no target or sensor noise
         reading_.healthy = false;
         reading_.status  = SensorStatus::INVALID;
         return;
+    }
+    // Clamp below-minimum distances (object too close for accurate
+    // measurement).  Report as minRangeMm so the reading enters the
+    // emergency zone instead of being marked INVALID.
+    if (measuredMm < cfg_.minRangeMm) {
+        measuredMm = cfg_.minRangeMm;
     }
 
     // Valid reading — update distance

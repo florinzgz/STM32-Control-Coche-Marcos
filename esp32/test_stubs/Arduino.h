@@ -57,11 +57,32 @@ struct FakeSerial_ {
 inline FakeSerial_ Serial;
 
 /* ---- HardwareSerial stub (used by audio_manager, obstacle_sensor) ----- */
+/* Injectable UART data: tests push bytes into g_uart_inject_buf via         */
+/* g_uart_inject(). HardwareSerial::available()/read() drain from it.        */
+inline uint8_t  g_uart_inject_buf[4096] = {};
+inline uint16_t g_uart_inject_len       = 0;
+inline uint16_t g_uart_inject_pos       = 0;
+
+static inline void g_uart_inject(const uint8_t* data, uint16_t len) {
+    for (uint16_t i = 0; i < len && g_uart_inject_len < sizeof(g_uart_inject_buf); i++) {
+        g_uart_inject_buf[g_uart_inject_len++] = data[i];
+    }
+}
+
+static inline void g_uart_inject_reset() {
+    g_uart_inject_len = 0;
+    g_uart_inject_pos = 0;
+}
+
 struct HardwareSerial {
     explicit HardwareSerial(int) {}
     void begin(unsigned long, int, int, int) {}
     void setRxBufferSize(size_t) {}
     size_t write(const uint8_t*, size_t n) { return n; }
-    int available() { return 0; }
-    int read() { return -1; }
+    int available() { return (int)(g_uart_inject_len - g_uart_inject_pos); }
+    int read() {
+        if (g_uart_inject_pos < g_uart_inject_len)
+            return g_uart_inject_buf[g_uart_inject_pos++];
+        return -1;
+    }
 };
