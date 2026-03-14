@@ -398,4 +398,81 @@ Reading getReading() {
     return reading_;
 }
 
+// =========================================================================
+// NLink 0x5A configuration command implementation
+// =========================================================================
+
+uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
+                      uint8_t payloadLen, uint8_t* outBuf,
+                      uint16_t outBufSize) {
+    // Frame: [0x5A] [len] [cmdId] [payload...] [checksum]
+    // Total length = 1 (header) + 1 (len) + 1 (cmd) + payloadLen + 1 (checksum)
+    uint16_t totalLen = (uint16_t)(3 + payloadLen + 1);
+    if (totalLen > outBufSize) return 0;
+
+    outBuf[0] = CMD_HEADER;                  // 0x5A
+    outBuf[1] = (uint8_t)totalLen;           // Total frame length
+    outBuf[2] = cmdId;                       // Command ID
+    for (uint8_t i = 0; i < payloadLen; i++) {
+        outBuf[3 + i] = payload[i];
+    }
+    // Checksum: sum of all bytes except the checksum byte itself
+    uint8_t sum = 0;
+    for (uint16_t i = 0; i < totalLen - 1; i++) {
+        sum += outBuf[i];
+    }
+    outBuf[totalLen - 1] = sum;
+    return totalLen;
+}
+
+// Internal helper: send a command frame over UART TX
+static bool sendCmd(const uint8_t* frame, uint16_t len) {
+    if (!initialized_) return false;
+    tofSerial.write(frame, len);
+    return true;
+}
+
+bool setRangeMode(RangeMode mode) {
+    uint8_t buf[8];
+    uint8_t payload = static_cast<uint8_t>(mode);
+    uint16_t len = buildCommand(static_cast<uint8_t>(CmdId::SET_RANGE_MODE),
+                                &payload, 1, buf, sizeof(buf));
+    if (len == 0) return false;
+    return sendCmd(buf, len);
+}
+
+bool setBaudRate(BaudRateCode baud) {
+    uint8_t buf[8];
+    uint8_t payload = static_cast<uint8_t>(baud);
+    uint16_t len = buildCommand(static_cast<uint8_t>(CmdId::SET_BAUD_RATE),
+                                &payload, 1, buf, sizeof(buf));
+    if (len == 0) return false;
+    return sendCmd(buf, len);
+}
+
+bool setFrameRate(uint8_t hz) {
+    uint8_t buf[8];
+    uint16_t len = buildCommand(static_cast<uint8_t>(CmdId::SET_FRAME_RATE),
+                                &hz, 1, buf, sizeof(buf));
+    if (len == 0) return false;
+    return sendCmd(buf, len);
+}
+
+bool setOutputMode(OutputMode mode) {
+    uint8_t buf[8];
+    uint8_t payload = static_cast<uint8_t>(mode);
+    uint16_t len = buildCommand(static_cast<uint8_t>(CmdId::SET_OUTPUT_MODE),
+                                &payload, 1, buf, sizeof(buf));
+    if (len == 0) return false;
+    return sendCmd(buf, len);
+}
+
+bool saveConfig() {
+    uint8_t buf[8];
+    uint16_t len = buildCommand(static_cast<uint8_t>(CmdId::SAVE_CONFIG),
+                                nullptr, 0, buf, sizeof(buf));
+    if (len == 0) return false;
+    return sendCmd(buf, len);
+}
+
 } // namespace obstacle_sensor

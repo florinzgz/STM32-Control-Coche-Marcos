@@ -707,6 +707,155 @@ static void test_many_queued_frames_all_processed() {
     ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
+/* ---- Configuration command tests ---------------------------------------- */
+
+// Test 22: buildCommand produces correct frame for SET_RANGE_MODE (long range)
+//          Frame: [0x5A, len, 0x07, 0x01, checksum]
+static void test_build_command_range_mode() {
+    printf("  test_build_command_range_mode...\n");
+
+    uint8_t buf[16];
+    uint8_t payload = static_cast<uint8_t>(obstacle_sensor::RangeMode::LONG_RANGE);
+    uint16_t len = obstacle_sensor::buildCommand(
+        static_cast<uint8_t>(obstacle_sensor::CmdId::SET_RANGE_MODE),
+        &payload, 1, buf, sizeof(buf));
+
+    // Total = header(1) + len(1) + cmd(1) + payload(1) + checksum(1) = 5
+    ASSERT_EQ(len, 5);
+
+    // Header
+    ASSERT_EQ(buf[0], 0x5A);
+
+    // Length byte = total frame bytes
+    ASSERT_EQ(buf[1], 5);
+
+    // Command ID = SET_RANGE_MODE (0x07)
+    ASSERT_EQ(buf[2], 0x07);
+
+    // Payload = LONG_RANGE (0x01)
+    ASSERT_EQ(buf[3], 0x01);
+
+    // Checksum = (0x5A + 0x05 + 0x07 + 0x01) & 0xFF = 0x67
+    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x07 + 0x01);
+    ASSERT_EQ(buf[4], expectedSum);
+}
+
+// Test 23: buildCommand for SAVE_CONFIG (no payload)
+//          Frame: [0x5A, 0x04, 0x08, checksum]
+static void test_build_command_save_config() {
+    printf("  test_build_command_save_config...\n");
+
+    uint8_t buf[16];
+    uint16_t len = obstacle_sensor::buildCommand(
+        static_cast<uint8_t>(obstacle_sensor::CmdId::SAVE_CONFIG),
+        nullptr, 0, buf, sizeof(buf));
+
+    // Total = header(1) + len(1) + cmd(1) + checksum(1) = 4
+    ASSERT_EQ(len, 4);
+    ASSERT_EQ(buf[0], 0x5A);
+    ASSERT_EQ(buf[1], 4);
+    ASSERT_EQ(buf[2], 0x08);
+
+    // Checksum = (0x5A + 0x04 + 0x08) & 0xFF
+    uint8_t expectedSum = (uint8_t)(0x5A + 4 + 0x08);
+    ASSERT_EQ(buf[3], expectedSum);
+}
+
+// Test 24: buildCommand for SET_BAUD_RATE (115200)
+static void test_build_command_baud_rate() {
+    printf("  test_build_command_baud_rate...\n");
+
+    uint8_t buf[16];
+    uint8_t payload = static_cast<uint8_t>(obstacle_sensor::BaudRateCode::BAUD_115200);
+    uint16_t len = obstacle_sensor::buildCommand(
+        static_cast<uint8_t>(obstacle_sensor::CmdId::SET_BAUD_RATE),
+        &payload, 1, buf, sizeof(buf));
+
+    ASSERT_EQ(len, 5);
+    ASSERT_EQ(buf[0], 0x5A);
+    ASSERT_EQ(buf[1], 5);
+    ASSERT_EQ(buf[2], 0x03);  // SET_BAUD_RATE
+    ASSERT_EQ(buf[3], 0x04);  // BAUD_115200
+
+    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x03 + 0x04);
+    ASSERT_EQ(buf[4], expectedSum);
+}
+
+// Test 25: buildCommand returns 0 when buffer is too small
+static void test_build_command_buffer_too_small() {
+    printf("  test_build_command_buffer_too_small...\n");
+
+    uint8_t buf[3];  // Too small for any command
+    uint8_t payload = 0x01;
+    uint16_t len = obstacle_sensor::buildCommand(
+        0x07, &payload, 1, buf, sizeof(buf));
+
+    ASSERT_EQ(len, 0);  // Should fail
+}
+
+// Test 26: buildCommand checksum is correct modulo 256
+static void test_build_command_checksum_wraps() {
+    printf("  test_build_command_checksum_wraps...\n");
+
+    uint8_t buf[16];
+    uint8_t payload = 0xFF;
+    uint16_t len = obstacle_sensor::buildCommand(0xFF, &payload, 1, buf, sizeof(buf));
+
+    ASSERT_EQ(len, 5);
+    // Sum = 0x5A + 0x05 + 0xFF + 0xFF = 0x25D → 0x5D (mod 256)
+    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0xFF + 0xFF);
+    ASSERT_EQ(buf[4], expectedSum);
+}
+
+// Test 27: 2000 mm distance parses correctly through the full pipeline
+//          (regression test for the ~1368 mm issue — verifies code is NOT
+//          the cause of the truncation; the limit is sensor configuration).
+static void test_2000mm_distance_parses_correctly() {
+    printf("  test_2000mm_distance_parses_correctly...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 2000 mm = 2,000,000 µm = 0x1E8480
+    // Byte[0]=0x80, Byte[1]=0x84, Byte[2]=0x1E
+    setPixel(frame, 0, 2000000, /*status=*/0, 200);
+    writeChecksum(frame);
+
+    // Verify the raw bytes are correct
+    uint16_t base = 9;  // pixel 0
+    ASSERT_EQ(frame[base + 0], 0x80);
+    ASSERT_EQ(frame[base + 1], 0x84);
+    ASSERT_EQ(frame[base + 2], 0x1E);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 2000);
+    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+}
+
+// Test 28: 4000 mm (max range) parses correctly
+static void test_4000mm_max_range_parses_correctly() {
+    printf("  test_4000mm_max_range_parses_correctly...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 4000 mm = 4,000,000 µm = 0x3D0900
+    setPixel(frame, 0, 4000000, /*status=*/0, 150);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 4000);
+    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -733,6 +882,13 @@ int main() {
     test_single_frame_within_byte_limit();
     test_multiple_bad_frames_then_good();
     test_many_queued_frames_all_processed();
+    test_build_command_range_mode();
+    test_build_command_save_config();
+    test_build_command_baud_rate();
+    test_build_command_buffer_too_small();
+    test_build_command_checksum_wraps();
+    test_2000mm_distance_parses_correctly();
+    test_4000mm_max_range_parses_correctly();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
