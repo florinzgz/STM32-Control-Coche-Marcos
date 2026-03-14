@@ -955,8 +955,10 @@ static void test_3000mm_distance_parses_correctly() {
 }
 
 // Test 33: Signal strength value does not affect distance parsing.
-//          The parser must use only dis_status (not signal_strength) to
-//          determine pixel validity, even at long range where signal is weak.
+//          The parser uses only dis_status (not signal_strength) to determine
+//          pixel validity.  At long range the signal is naturally weaker;
+//          this test confirms weak signal alone does not reject the reading.
+//          (dis_status-based rejection is verified by test 12.)
 static void test_signal_strength_does_not_affect_distance() {
     printf("  test_signal_strength_does_not_affect_distance...\n");
 
