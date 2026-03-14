@@ -10,7 +10,7 @@
 // change sensor parameters via UART, including range mode, baud rate,
 // frame rate, output mode, and persist settings to flash.
 //
-// KNOWN ISSUE — ~1368 mm maximum distance:
+// CONFIGURATION NOTE — ~1368 mm maximum distance:
 //   If the sensor reports a maximum of ~1300–1500 mm instead of its full
 //   4000 mm range, the most likely cause is that it is configured in
 //   "Short Range / High Precision" mode.  This mode limits the maximum
