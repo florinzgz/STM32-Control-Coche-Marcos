@@ -428,6 +428,7 @@ uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
 // Internal helper: send a command frame over UART TX
 static bool sendCmd(const uint8_t* frame, uint16_t len) {
     if (!initialized_) return false;
+    if (cfg_.txPin < 0) return false;   // TX pin not connected
     tofSerial.write(frame, len);
     return true;
 }
@@ -451,6 +452,7 @@ bool setBaudRate(BaudRateCode baud) {
 }
 
 bool setFrameRate(uint8_t hz) {
+    if (hz == 0) return false;          // 0 Hz is not a valid frame rate
     uint8_t buf[8];
     uint16_t len = buildCommand(static_cast<uint8_t>(CmdId::SET_FRAME_RATE),
                                 &hz, 1, buf, sizeof(buf));

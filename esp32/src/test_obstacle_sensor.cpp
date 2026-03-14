@@ -856,6 +856,147 @@ static void test_4000mm_max_range_parses_correctly() {
     ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
 }
 
+// Test 29: buildCommand for SET_OUTPUT_MODE (active continuous mode)
+//          Frame: [0x5A, 0x05, 0x02, 0x00, checksum]
+static void test_build_command_output_mode() {
+    printf("  test_build_command_output_mode...\n");
+
+    uint8_t buf[16];
+    uint8_t payload = static_cast<uint8_t>(obstacle_sensor::OutputMode::ACTIVE);
+    uint16_t len = obstacle_sensor::buildCommand(
+        static_cast<uint8_t>(obstacle_sensor::CmdId::SET_OUTPUT_MODE),
+        &payload, 1, buf, sizeof(buf));
+
+    // Total = header(1) + len(1) + cmd(1) + payload(1) + checksum(1) = 5
+    ASSERT_EQ(len, 5);
+    ASSERT_EQ(buf[0], 0x5A);
+    ASSERT_EQ(buf[1], 5);
+    ASSERT_EQ(buf[2], 0x02);  // SET_OUTPUT_MODE
+    ASSERT_EQ(buf[3], 0x00);  // ACTIVE
+
+    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x02 + 0x00);
+    ASSERT_EQ(buf[4], expectedSum);
+}
+
+// Test 30: buildCommand for SET_FRAME_RATE (10 Hz, recommended for long range)
+//          Frame: [0x5A, 0x05, 0x05, 0x0A, checksum]
+static void test_build_command_frame_rate() {
+    printf("  test_build_command_frame_rate...\n");
+
+    uint8_t buf[16];
+    uint8_t hz = 10;
+    uint16_t len = obstacle_sensor::buildCommand(
+        static_cast<uint8_t>(obstacle_sensor::CmdId::SET_FRAME_RATE),
+        &hz, 1, buf, sizeof(buf));
+
+    ASSERT_EQ(len, 5);
+    ASSERT_EQ(buf[0], 0x5A);
+    ASSERT_EQ(buf[1], 5);
+    ASSERT_EQ(buf[2], 0x05);  // SET_FRAME_RATE
+    ASSERT_EQ(buf[3], 10);    // 10 Hz
+
+    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x05 + 10);
+    ASSERT_EQ(buf[4], expectedSum);
+}
+
+// Test 31: Negative int24 distance is correctly skipped by the parser.
+//          The distance field is a signed 24-bit value; negative values
+//          (bit 23 set) represent invalid/error conditions and must not
+//          produce a valid reading.
+static void test_negative_distance_skipped() {
+    printf("  test_negative_distance_skipped...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to -100,000 µm (negative distance).
+    // In 24-bit two's complement: -100000 = 0xFE7960
+    // Bytes LE: [0x60, 0x79, 0xFE]
+    setPixel(frame, 0, -100000, /*status=*/0, 100);
+
+    // Set pixel 1 to a valid 500 mm = 500,000 µm (should be the result)
+    setPixel(frame, 1, 500000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // The negative pixel should be skipped; pixel 1's 500 mm is the minimum
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 500);
+}
+
+// Test 32: 3000 mm intermediate long-range distance parses correctly.
+//          Covers the gap between 2000 mm (test 27) and 4000 mm (test 28).
+static void test_3000mm_distance_parses_correctly() {
+    printf("  test_3000mm_distance_parses_correctly...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // 3000 mm = 3,000,000 µm = 0x2DC6C0
+    setPixel(frame, 0, 3000000, /*status=*/0, 120);
+    writeChecksum(frame);
+
+    // Verify raw bytes (LE)
+    uint16_t base = 9;
+    ASSERT_EQ(frame[base + 0], 0xC0);
+    ASSERT_EQ(frame[base + 1], 0xC6);
+    ASSERT_EQ(frame[base + 2], 0x2D);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 3000);
+    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+}
+
+// Test 33: Signal strength value does not affect distance parsing.
+//          The parser must use only dis_status (not signal_strength) to
+//          determine pixel validity, even at long range where signal is weak.
+static void test_signal_strength_does_not_affect_distance() {
+    printf("  test_signal_strength_does_not_affect_distance...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixel 0 to 3500 mm with very low signal (signal=1)
+    setPixel(frame, 0, 3500000, /*status=*/0, 1);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Low signal should NOT cause rejection — only dis_status matters
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 3500);
+    ASSERT_EQ(rd.zone, 0);
+}
+
+// Test 34: High-level send commands fail gracefully when TX pin is not
+//          connected (Config::txPin = -1, the default).
+static void test_send_command_fails_without_tx_pin() {
+    printf("  test_send_command_fails_without_tx_pin...\n");
+
+    // Default Config has txPin = -1 (not connected)
+    obstacle_sensor::init();
+
+    // Advance past warmup so initialized_ is true
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // All command functions should return false
+    ASSERT_EQ(obstacle_sensor::setRangeMode(obstacle_sensor::RangeMode::LONG_RANGE), false);
+    ASSERT_EQ(obstacle_sensor::setBaudRate(obstacle_sensor::BaudRateCode::BAUD_921600), false);
+    ASSERT_EQ(obstacle_sensor::setFrameRate(10), false);
+    ASSERT_EQ(obstacle_sensor::setOutputMode(obstacle_sensor::OutputMode::ACTIVE), false);
+    ASSERT_EQ(obstacle_sensor::saveConfig(), false);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -889,6 +1030,12 @@ int main() {
     test_build_command_checksum_wraps();
     test_2000mm_distance_parses_correctly();
     test_4000mm_max_range_parses_correctly();
+    test_build_command_output_mode();
+    test_build_command_frame_rate();
+    test_negative_distance_skipped();
+    test_3000mm_distance_parses_correctly();
+    test_signal_strength_does_not_affect_distance();
+    test_send_command_fails_without_tx_pin();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
