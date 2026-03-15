@@ -30,6 +30,11 @@ ifneq ($(wildcard $(_CPROJ)),)
   # Check 2: wrong assembler inputType superClass (.input.s instead of .input)
   _BAD_ASM := $(shell grep -c 'superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.s"' $(_CPROJ) 2>/dev/null)
 
+  # Check 2b: duplicate element IDs among managed-build elements
+  # (only elements with superClass — cconfiguration/storageModule/configuration
+  #  intentionally share IDs and are excluded)
+  _DUP_IDS := $(shell grep -E 'superClass="[^"]*"' $(_CPROJ) 2>/dev/null | grep -oP '(?<=id=")[^"]*' | sort | uniq -d | head -1)
+
   # Check 3: stale subdir.mk with circular .o self-dependencies
   # Catches the case where .cproject was already fixed but Debug/ was not
   # regenerated.  Detects rules where the same .o path appears as both
@@ -51,6 +56,9 @@ ifneq ($(wildcard $(_CPROJ)),)
     ifneq ($(_BAD_ASM),)
       _NEEDS_FIX := 1
     endif
+  endif
+  ifneq ($(_DUP_IDS),)
+    _NEEDS_FIX := 1
   endif
 
   ifeq ($(_NEEDS_FIX),1)
