@@ -203,6 +203,8 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
     // likely caused by phase wrap-around at close range.  A real obstacle
     // produces consistent pixel distances; wrap-around produces scattered
     // values (e.g. 121, 273, 1000 or 1700, 2500 mm).
+    // Note: maxDistMm >= minDistMm is guaranteed here because both are
+    // updated from the same valid-pixel set (validCount >= MIN_VALID_PIXELS).
     if ((maxDistMm - minDistMm) > MAX_PIXEL_DISPERSION_MM) {
         return ParseResult::HIGH_DISPERSION;
     }
