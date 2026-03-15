@@ -29,6 +29,15 @@ static constexpr uint8_t  FUNCTION_MARK     = 0x01;   // Frame0 function mark
 static constexpr uint16_t FRAME_LENGTH      = 400;    // Total frame size (bytes) for 8×8 mode
 static constexpr uint8_t  PIXEL_COUNT_8X8   = 64;     // 8×8 matrix
 static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (dis_status) + 2 (signal_strength)
+// Minimum number of valid pixels required to trust a frame's distance data.
+// When the TOFSense-M is in LONG RANGE mode and an object is within the
+// sensor's blind zone (< ~50 mm), most pixels saturate (dis_status ≠ 0)
+// but a few may report valid distances at 2000–3000 mm due to phase
+// wrap-around artifacts.  This produces the "data reversed" symptom:
+// very close objects appear far.  Requiring at least MIN_VALID_PIXELS
+// valid pixels rejects these artifacts and triggers emergency-close
+// (NO_VALID_PIXELS → minRangeMm) instead.
+static constexpr uint8_t  MIN_VALID_PIXELS  = 4;
 // NLink protocol distance unit: 1 mm per LSB (raw int24 value IS in mm).
 // The official Nooploop code (nlink_tofsensem_frame0.c) divides by 1000.0f
 // to produce a float in meters; we keep the raw mm value for our uint16
@@ -140,7 +149,7 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
 
     // Extract minimum valid distance across all 64 pixels.
     uint32_t minDistMm = 0xFFFFFFFF;
-    bool anyValid = false;
+    uint8_t validCount = 0;
 
     for (uint8_t px = 0; px < PIXEL_COUNT_8X8; px++) {
         uint16_t base = OFF_PIXEL_DATA + (uint16_t)(px * BYTES_PER_PIXEL);
@@ -160,13 +169,20 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
         if (raw <= 0) continue;  // Negative or zero distance — skip
 
         uint32_t distMm = (uint32_t)raw;  // Already in mm
+        validCount++;
         if (distMm < minDistMm) {
             minDistMm = distMm;
-            anyValid = true;
         }
     }
 
-    if (!anyValid) return ParseResult::NO_VALID_PIXELS;
+    if (validCount == 0) return ParseResult::NO_VALID_PIXELS;
+
+    // When very few pixels are valid while most are invalid, the valid
+    // ones are likely phase wrap-around artifacts from an object within
+    // the sensor's blind zone (< ~50 mm).  Treat as emergency-close
+    // instead of reporting the misleading high distances.
+    if (validCount < MIN_VALID_PIXELS) return ParseResult::NO_VALID_PIXELS;
+
     outDistMm = (minDistMm > 0xFFFF) ? (uint16_t)0xFFFF : (uint16_t)minDistMm;
     return ParseResult::OK;
 }
@@ -402,11 +418,13 @@ void update(float vehicleSpeedKmh) {
     }
 
     // Range validation
+    // Above-maximum distances indicate no obstacle within the sensor's
+    // effective range — this is normal operation (open air / distant
+    // background).  Clamp to maxRangeMm so the reading stays VALID at
+    // zone 0 (no obstacle), instead of marking it INVALID (which would
+    // look like a sensor fault to the STM32 and trigger fallback mode).
     if (measuredMm > cfg_.maxRangeMm) {
-        // Above maximum range — likely no target or sensor noise
-        reading_.healthy = false;
-        reading_.status  = SensorStatus::INVALID;
-        return;
+        measuredMm = cfg_.maxRangeMm;
     }
     // Clamp below-minimum distances (object too close for accurate
     // measurement).  Report as minRangeMm so the reading enters the
