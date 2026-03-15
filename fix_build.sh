@@ -47,6 +47,8 @@ echo "🔍 Checking .cproject for id==superClass conflicts..."
 CONFLICTS=0
 COUNTER=0
 # Process lines that contain both id="..." and superClass="..."
+# The grep output is captured once via process substitution; each sed
+# call modifies the file on disk so changes accumulate correctly.
 while IFS= read -r line; do
     # Extract id value
     id_val=$(echo "$line" | sed -n 's/.*[[:space:]]id="\([^"]*\)".*/\1/p')
@@ -54,13 +56,14 @@ while IFS= read -r line; do
     sc_val=$(echo "$line" | sed -n 's/.*superClass="\([^"]*\)".*/\1/p')
 
     if [ -n "$id_val" ] && [ -n "$sc_val" ] && [ "$id_val" = "$sc_val" ]; then
-        # Generate a unique numeric suffix using counter to vary the seed
+        # Generate a unique numeric suffix combining timestamp, PID, and counter
         COUNTER=$((COUNTER + 1))
-        suffix="$(awk -v seed="$(($(date +%s) + COUNTER * 97))" 'BEGIN{srand(seed); printf "%09d", int(rand()*1000000000)}')"
+        suffix="$(awk -v seed="$(($(date +%s) * $$ + COUNTER * 97))" 'BEGIN{srand(seed); printf "%09d", int(rand()*1000000000)}')"
         new_id="${id_val}.${suffix}"
         echo "   ⚠️  Fixing: ${id_val}"
         echo "            → ${new_id}"
-        # Escape dots for sed regex and replace only the id attribute
+        # Replace exactly the id="<value>" token (dots escaped for regex).
+        # Each CDT element has a distinct id, so this is a single-match replace.
         escaped_id=$(echo "$id_val" | sed 's/\./\\./g')
         sed "s|id=\"${escaped_id}\"|id=\"${new_id}\"|" .cproject > .cproject.tmp \
             && mv .cproject.tmp .cproject
