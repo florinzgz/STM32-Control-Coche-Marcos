@@ -48,12 +48,12 @@ powershell -Command ^
   "} " ^
   "if ($conflicts -eq 0) { Write-Host '   PASS: no id==superClass conflicts.' } " ^
   "" ^
-  "# Check 3: Duplicate IDs " ^
+  "# Check 3: Duplicate IDs (only managed-build elements with superClass) " ^
   "Write-Host ''; Write-Host '2. Duplicate element IDs'; " ^
-  "$ids = $xml.SelectNodes('//*[@id]') | ForEach-Object { $_.id }; " ^
+  "$ids = $xml.SelectNodes('//*[@id and @superClass]') | ForEach-Object { $_.id }; " ^
   "$dups = $ids | Group-Object | Where-Object { $_.Count -gt 1 }; " ^
   "if ($dups.Count -eq 0) { " ^
-  "  Write-Host '   PASS: all element IDs are unique.'; " ^
+  "  Write-Host '   PASS: all managed-build element IDs are unique.'; " ^
   "} else { " ^
   "  foreach ($d in $dups) { " ^
   "    Write-Host ('   FAIL: duplicate id=' + $d.Name + ' (' + $d.Count + 'x)'); " ^

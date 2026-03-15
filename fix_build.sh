@@ -92,9 +92,7 @@ DUP_IDS=$(grep -E 'superClass="[^"]*"' .cproject 2>/dev/null \
 DUP_FIXED=0
 
 if [ -n "$DUP_IDS" ]; then
-    echo "$DUP_IDS" | while IFS= read -r dup_id; do
-        # Skip the first occurrence; re-ID subsequent duplicates
-        SEEN=0
+    while IFS= read -r dup_id; do
         escaped_id=$(echo "$dup_id" | sed 's/\./\\./g')
         # Count occurrences
         COUNT=$(grep -c "id=\"$dup_id\"" .cproject 2>/dev/null || echo 0)
@@ -104,6 +102,7 @@ if [ -n "$DUP_IDS" ]; then
             SKIP=1
             while [ "$SKIP" -lt "$COUNT" ]; do
                 COUNTER=$((COUNTER + 1))
+                # Seed uses timestamp, PID, and counter to ensure uniqueness
                 suffix="$(awk -v seed="$(($(date +%s) * $$ + COUNTER * 131))" \
                     'BEGIN{srand(seed); printf "%09d", int(rand()*1000000000)}')"
                 new_id="${dup_id}.${suffix}"
@@ -123,7 +122,7 @@ if [ -n "$DUP_IDS" ]; then
                 SKIP=$((SKIP + 1))
             done
         fi
-    done
+    done <<< "$DUP_IDS"
     FIXED=1
 fi
 
