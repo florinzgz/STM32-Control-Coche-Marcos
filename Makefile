@@ -101,6 +101,10 @@ vpath %.s $(sort $(dir $(ASM_SOURCES)))
 fix:
 	@if [ -f fix_build.sh ]; then bash fix_build.sh; fi
 
+# Validate .cproject without modifying it (read-only health check)
+validate:
+	@if [ -f validate_cproject.sh ]; then bash validate_cproject.sh; fi
+
 # Build targets
 all: fix $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
 	$(SZ) $(BUILD_DIR)/$(PROJECT).elf
@@ -128,4 +132,4 @@ clean:
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean fix
+.PHONY: all clean fix validate

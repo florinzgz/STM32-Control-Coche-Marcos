@@ -16,7 +16,8 @@
 # This script:
 #   1. Removes the stale Debug/ build directory
 #   2. Scans .cproject for id==superClass conflicts and fixes them
-#   3. Fixes the assembler inputType superClass if needed
+#   3. Scans for duplicate element IDs among managed-build elements
+#   4. Fixes the assembler inputType superClass if needed
 
 set -e
 
@@ -78,7 +79,58 @@ else
     echo "   ✅ Fixed $CONFLICTS conflict(s)."
 fi
 
-# ---- Step 3: Check assembler inputType superClass ----
+# ---- Step 3: Fix duplicate element IDs among managed-build elements ----
+# Only check elements that have a superClass attribute (tool, option,
+# inputType, builder, targetPlatform, toolChain).  The cconfiguration,
+# storageModule, and configuration elements intentionally share the
+# same ID for the same build configuration — that is normal.
+echo "🔍 Checking .cproject for duplicate element IDs..."
+
+DUP_IDS=$(grep -E 'superClass="[^"]*"' .cproject 2>/dev/null \
+    | grep -oP '(?<=id=")[^"]*' \
+    | sort | uniq -d)
+DUP_FIXED=0
+
+if [ -n "$DUP_IDS" ]; then
+    while IFS= read -r dup_id; do
+        escaped_id=$(echo "$dup_id" | sed 's/\./\\./g')
+        # Count occurrences
+        COUNT=$(grep -c "id=\"$dup_id\"" .cproject 2>/dev/null || echo 0)
+        if [ "$COUNT" -gt 1 ]; then
+            echo "   ⚠️  Duplicate id: $dup_id (${COUNT}x)"
+            # Replace all but the first occurrence with unique IDs
+            SKIP=1
+            while [ "$SKIP" -lt "$COUNT" ]; do
+                COUNTER=$((COUNTER + 1))
+                # Seed uses timestamp, PID, and counter to ensure uniqueness
+                suffix="$(awk -v seed="$(($(date +%s) * $$ + COUNTER * 131))" \
+                    'BEGIN{srand(seed); printf "%09d", int(rand()*1000000000)}')"
+                new_id="${dup_id}.${suffix}"
+                # Use awk to replace only the Nth occurrence
+                awk -v old="$dup_id" -v new="$new_id" -v skip="$SKIP" '
+                {
+                    n = gsub("id=\"" old "\"", "id=\"" old "\"")
+                    if (n > 0) {
+                        count += n
+                        if (count > skip) {
+                            sub("id=\"" old "\"", "id=\"" new "\"")
+                        }
+                    }
+                    print
+                }' .cproject > .cproject.tmp && mv .cproject.tmp .cproject
+                DUP_FIXED=$((DUP_FIXED + 1))
+                SKIP=$((SKIP + 1))
+            done
+        fi
+    done <<< "$DUP_IDS"
+    FIXED=1
+fi
+
+if [ "$DUP_FIXED" -eq 0 ] && [ -z "$DUP_IDS" ]; then
+    echo "   ✅ No duplicate element IDs found."
+fi
+
+# ---- Step 4: Check assembler inputType superClass ----
 if grep -q 'superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.s"' .cproject 2>/dev/null; then
     echo "   ⚠️  Fixing assembler inputType superClass (.input.s → .input)"
     sed 's|superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.s"|superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input"|' \
