@@ -32,10 +32,10 @@ ifneq ($(wildcard $(_CPROJ)),)
 
   # Check 3: stale subdir.mk with circular .o self-dependencies
   # Catches the case where .cproject was already fixed but Debug/ was not
-  # regenerated.  Pattern: any subdir.mk rule where an .o file appears as
-  # both target and prerequisite (i.e. .o depends on .o instead of .c).
-  # Use find+grep because subdir.mk files live at varying directory depths.
-  _STALE_MK := $(shell find $(CURDIR) -name subdir.mk -exec grep -l '\.o:.*\.o' {} + 2>/dev/null | head -1)
+  # regenerated.  Detects rules where the same .o path appears as both
+  # target and prerequisite (e.g. "foo.o: foo.o" instead of "foo.o: foo.c").
+  # Uses awk to extract the target and verify it also appears after the colon.
+  _STALE_MK := $(shell find $(CURDIR) -name subdir.mk -exec awk '/\.o[[:space:]]*:/{t=$$0;sub(/:.*$$/,"",t);gsub(/^[[:space:]]+|[[:space:]]+$$/,"",t);p=$$0;sub(/^[^:]*:/,"",p);if(t~/\.o$$/ && index(p,t)>0){print FILENAME;exit}}' {} + 2>/dev/null | head -1)
 
   _NEEDS_FIX :=
   ifeq ($(_ID_EQ_SC),1)
