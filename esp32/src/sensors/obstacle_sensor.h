@@ -31,9 +31,18 @@
 //   sensor's blind zone (< ~50 mm), most pixels saturate (dis_status ≠ 0)
 //   but a few may report valid distances at 2000–3000 mm due to phase
 //   wrap-around.  This produces the "datos al revés" symptom: close objects
-//   appear far.  The driver requires at least MIN_VALID_PIXELS (4) valid
-//   pixels before trusting a frame's distance data.  Frames with fewer
-//   valid pixels are treated as emergency-close (minRangeMm).
+//   appear far.  The driver uses two complementary protections:
+//
+//   1. MIN_VALID_PIXELS (4): Frames with fewer than 4 valid pixels are
+//      treated as emergency-close (minRangeMm).
+//
+//   2. MAX_PIXEL_DISPERSION_MM (500): When valid pixels are present but
+//      their distances scatter widely (max − min > 500 mm), the frame is
+//      treated as wrap-around → emergency-close.  This catches the case
+//      where MORE than 4 pixels pass dis_status==0 but report inconsistent
+//      wrap-around distances (e.g. 121, 273, 1000 or 1700, 2500 mm).
+//      A real obstacle produces consistent pixel distances (spread < 300 mm
+//      even for curved surfaces).
 //
 // ABOVE-MAX-RANGE HANDLING (open air / outdoors):
 //   When valid pixels report distances above maxRangeMm (4000 mm), the

@@ -38,6 +38,15 @@ static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (dis_s
 // valid pixels rejects these artifacts and triggers emergency-close
 // (NO_VALID_PIXELS → minRangeMm) instead.
 static constexpr uint8_t  MIN_VALID_PIXELS  = 4;
+// Maximum allowed distance spread (max − min) among valid pixels in a
+// single frame.  When an object is very close (< ~50 mm) or the sensor
+// is covered, the TOFSense-M may report MORE than MIN_VALID_PIXELS
+// pixels with dis_status == 0, but their distances scatter wildly
+// (e.g. 121, 273, 1000 mm or 1700, 2500 mm) due to phase wrap-around.
+// A real obstacle produces consistent pixel distances (spread < 300 mm
+// even for curved surfaces).  Frames exceeding this threshold are
+// treated as wrap-around artifacts → emergency-close (minRangeMm).
+static constexpr uint16_t MAX_PIXEL_DISPERSION_MM = 500;
 // NLink protocol distance unit: 1 mm per LSB (raw int24 value IS in mm).
 // The official Nooploop code (nlink_tofsensem_frame0.c) divides by 1000.0f
 // to produce a float in meters; we keep the raw mm value for our uint16
@@ -88,6 +97,7 @@ static uint32_t diagFramesOk_        = 0;  // Frames parsed successfully
 static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
 static uint32_t diagHeaderFail_      = 0;  // Wrong header or function mark
 static uint32_t diagAllPixelsInvalid_= 0;  // All 64 dis_status ≠ 0
+static uint32_t diagHighDispersion_  = 0;  // Valid pixels but spread > MAX_PIXEL_DISPERSION_MM
 static uint32_t diagBytesDiscarded_  = 0;  // Bytes skipped waiting for 0x57
 static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current diag interval
 static bool     diagShortRangeWarned_= false; // Only warn about SHORT RANGE once per session
@@ -121,7 +131,8 @@ enum class ParseResult : uint8_t {
     TOO_SHORT,         // Buffer too short
     BAD_HEADER,        // Wrong header or function_mark
     BAD_CHECKSUM,      // 8-bit sum mismatch
-    NO_VALID_PIXELS    // All 64 pixels have dis_status ≠ 0
+    NO_VALID_PIXELS,   // All 64 pixels have dis_status ≠ 0, or fewer than MIN_VALID_PIXELS
+    HIGH_DISPERSION    // Valid pixels present but distance spread exceeds MAX_PIXEL_DISPERSION_MM (wrap-around)
 };
 
 // -------------------------------------------------------------------------
@@ -149,6 +160,7 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
 
     // Extract minimum valid distance across all 64 pixels.
     uint32_t minDistMm = 0xFFFFFFFF;
+    uint32_t maxDistMm = 0;
     uint8_t validCount = 0;
 
     for (uint8_t px = 0; px < PIXEL_COUNT_8X8; px++) {
@@ -173,6 +185,9 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
         if (distMm < minDistMm) {
             minDistMm = distMm;
         }
+        if (distMm > maxDistMm) {
+            maxDistMm = distMm;
+        }
     }
 
     if (validCount == 0) return ParseResult::NO_VALID_PIXELS;
@@ -182,6 +197,17 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
     // the sensor's blind zone (< ~50 mm).  Treat as emergency-close
     // instead of reporting the misleading high distances.
     if (validCount < MIN_VALID_PIXELS) return ParseResult::NO_VALID_PIXELS;
+
+    // High-dispersion check: when valid pixels disagree widely (spread
+    // > MAX_PIXEL_DISPERSION_MM), the readings are inconsistent and
+    // likely caused by phase wrap-around at close range.  A real obstacle
+    // produces consistent pixel distances; wrap-around produces scattered
+    // values (e.g. 121, 273, 1000 or 1700, 2500 mm).
+    // Note: maxDistMm >= minDistMm is guaranteed here because both are
+    // updated from the same valid-pixel set (validCount >= MIN_VALID_PIXELS).
+    if ((maxDistMm - minDistMm) > MAX_PIXEL_DISPERSION_MM) {
+        return ParseResult::HIGH_DISPERSION;
+    }
 
     outDistMm = (minDistMm > 0xFFFF) ? (uint16_t)0xFFFF : (uint16_t)minDistMm;
     return ParseResult::OK;
@@ -222,6 +248,7 @@ void init(const Config& cfg) {
     diagChecksumFail_   = 0;
     diagHeaderFail_     = 0;
     diagAllPixelsInvalid_ = 0;
+    diagHighDispersion_   = 0;
     diagBytesDiscarded_ = 0;
     diagMaxDistMm_      = 0;
     diagShortRangeWarned_ = false;
@@ -334,6 +361,15 @@ void update(float vehicleSpeedKmh) {
                     measuredMm = cfg_.minRangeMm;
                     gotFrame   = true;
                     break;
+                case ParseResult::HIGH_DISPERSION:
+                    diagHighDispersion_++;
+                    // Valid pixels present but their distances scatter
+                    // widely (e.g. 121, 273, 1000 mm when sensor is
+                    // covered).  This is phase wrap-around at close range.
+                    // Treat the same as NO_VALID_PIXELS: emergency-close.
+                    measuredMm = cfg_.minRangeMm;
+                    gotFrame   = true;
+                    break;
                 default:
                     break;
             }
@@ -343,15 +379,16 @@ void update(float vehicleSpeedKmh) {
 
     // Periodic diagnostic output (every DIAG_INTERVAL_MS)
     if (now - lastDiagMs_ >= DIAG_INTERVAL_MS) {
-        uint32_t totalFail = diagChecksumFail_ + diagHeaderFail_ + diagAllPixelsInvalid_;
+        uint32_t totalFail = diagChecksumFail_ + diagHeaderFail_ + diagAllPixelsInvalid_ + diagHighDispersion_;
         if (diagFramesOk_ > 0 || totalFail > 0 || diagBytesDiscarded_ > 0) {
             Serial.printf("[OBSTACLE] Diag %lus: OK=%lu cksumFail=%lu hdrFail=%lu "
-                          "noPixels=%lu discarded=%lu\n",
+                          "noPixels=%lu highDisp=%lu discarded=%lu\n",
                           (unsigned long)(DIAG_INTERVAL_MS / 1000),
                           (unsigned long)diagFramesOk_,
                           (unsigned long)diagChecksumFail_,
                           (unsigned long)diagHeaderFail_,
                           (unsigned long)diagAllPixelsInvalid_,
+                          (unsigned long)diagHighDispersion_,
                           (unsigned long)diagBytesDiscarded_);
             if (diagChecksumFail_ > diagFramesOk_ && diagChecksumFail_ > 0) {
                 Serial.println("[OBSTACLE] WARNING: Most frames fail checksum. "
@@ -403,6 +440,7 @@ void update(float vehicleSpeedKmh) {
         diagChecksumFail_    = 0;
         diagHeaderFail_      = 0;
         diagAllPixelsInvalid_= 0;
+        diagHighDispersion_  = 0;
         diagBytesDiscarded_  = 0;
         diagMaxDistMm_       = 0;
         lastDiagMs_          = now;
