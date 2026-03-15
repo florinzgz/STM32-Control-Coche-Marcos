@@ -1171,6 +1171,65 @@ static void test_save_config_sends_correct_bytes() {
     ASSERT_EQ(g_uart_tx_buf[2], 0x08);
 }
 
+// Test 42: Repeated all-pixels-invalid frames always return minRangeMm (20 mm).
+//          This reproduces the exact "sensor stuck at 20 mm" symptom reported
+//          when the TOFSense-M is in SHORT RANGE mode pointing at open air:
+//          every pixel reports dis_status ≠ 0, so the driver keeps returning
+//          minRangeMm (20 mm) as emergency-close.  After switching to LONG
+//          RANGE mode (via configureLongRange()), valid pixel data arrives and
+//          the correct distance is returned.
+static void test_repeated_all_pixels_invalid_stays_at_min() {
+    printf("  test_repeated_all_pixels_invalid_stays_at_min...\n");
+
+    // Build a frame where all 64 pixels are invalid (dis_status=1)
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 50000, /*status=*/1, 100);
+    }
+    writeChecksum(frame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 5 consecutive all-invalid frames — simulates open air in SHORT RANGE
+    for (int i = 0; i < 5; i++) {
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.distance_mm, 20);   // Always minRangeMm
+        ASSERT_EQ(rd.zone, 4);           // Emergency zone
+        ASSERT_EQ(static_cast<uint8_t>(rd.status),
+                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+        ASSERT_EQ(rd.healthy, true);
+    }
+
+    // Now inject a valid frame with a real distance (3000 mm) — simulates
+    // switching to LONG RANGE mode where the sensor can actually see objects
+    uint8_t goodFrame[FRAME_LEN];
+    buildFrame(goodFrame);
+    setPixel(goodFrame, 0, 3000000, /*status=*/0, 200);  // 3000 mm
+    writeChecksum(goodFrame);
+
+    g_uart_inject(goodFrame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 3000);   // Now reads correctly
+    ASSERT_EQ(rd.zone, 0);            // Normal zone (>= 1500 mm)
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1217,6 +1276,7 @@ int main() {
     test_configure_long_range_sends_correct_commands();
     test_set_range_mode_sends_correct_bytes();
     test_save_config_sends_correct_bytes();
+    test_repeated_all_pixels_invalid_stays_at_min();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

@@ -10,14 +10,18 @@
 // change sensor parameters via UART, including range mode, baud rate,
 // frame rate, output mode, and persist settings to flash.
 //
-// CONFIGURATION NOTE — ~1368 mm maximum distance:
-//   If the sensor reports a maximum of ~1300–1500 mm instead of its full
-//   4000 mm range, the most likely cause is that it is configured in
-//   "Short Range / High Precision" mode.  This mode limits the maximum
-//   measurable distance to ~1.3–1.5 m in exchange for better accuracy.
+// CONFIGURATION NOTE — constant 20 mm reading (sensor "stuck at 20 mm"):
+//   If the sensor always returns 20 mm (= minRangeMm) regardless of the
+//   actual distance to obstacles, the most likely cause is that it is
+//   configured in "Short Range / High Precision" mode.  In this mode the
+//   maximum measurable distance is only ~1.3–1.5 m; when nothing is within
+//   that range, every pixel reports dis_status ≠ 0 (invalid), and the
+//   driver returns minRangeMm (20 mm) as an emergency-close fallback.
 //   FIX: switch to Long Range mode:
-//       obstacle_sensor::setRangeMode(RangeMode::LONG_RANGE);
-//       obstacle_sensor::saveConfig();
+//       obstacle_sensor::Config cfg;
+//       cfg.txPin = 17;               // Connect ESP32 TX → sensor RX
+//       obstacle_sensor::init(cfg);
+//       obstacle_sensor::configureLongRange();  // Sends 4 NLink commands
 //   Or use the NAssistant PC tool to change the measurement mode.
 //   The UART data frame parser itself is correct (verified by unit tests
 //   for 2000 mm and 4000 mm distances).

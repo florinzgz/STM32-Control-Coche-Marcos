@@ -341,6 +341,24 @@ void update(float vehicleSpeedKmh) {
                                "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
+            // Detect "always 20 mm" symptom: when all (or most) frames have
+            // NO valid pixels, the driver returns minRangeMm (20 mm).  This
+            // almost always means the sensor is in SHORT RANGE mode and there
+            // is nothing within its ~1.3 m range — every pixel saturates and
+            // reports dis_status ≠ 0.  Warn with actionable instructions.
+            if (!diagShortRangeWarned_
+                    && diagAllPixelsInvalid_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
+                    && diagFramesOk_ == 0) {
+                Serial.printf("[OBSTACLE] WARNING: All %lu frames returned "
+                              "NO valid pixels (distance stuck at %u mm). "
+                              "Sensor is likely in SHORT RANGE mode with no "
+                              "obstacle within ~1.3 m.  Fix: call "
+                              "configureLongRange() with txPin connected, "
+                              "or use NAssistant to switch to Long Range mode.\n",
+                              (unsigned long)diagAllPixelsInvalid_,
+                              (unsigned)cfg_.minRangeMm);
+                diagShortRangeWarned_ = true;
+            }
             if (!diagShortRangeWarned_
                     && diagFramesOk_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
                     && diagMaxDistMm_ > 0

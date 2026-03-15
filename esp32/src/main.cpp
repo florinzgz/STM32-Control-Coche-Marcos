@@ -355,8 +355,18 @@ void setup() {
         Serial.println("[CAN] Initialization FAILED");
     }
 
-    // Initialize obstacle sensor driver (TOFSense-M on UART1, GPIO 18 RX)
-    obstacle_sensor::init();
+    // Initialize obstacle sensor driver (TOFSense-M on UART1)
+    //   RX = GPIO 18 (sensor TX → ESP32 RX via voltage divider)
+    //   TX = GPIO 17 (ESP32 TX → sensor RX, needed for configuration commands)
+    {
+        obstacle_sensor::Config obsCfg;
+        obsCfg.txPin = 17;   // Enable TX so configureLongRange() can send commands
+        obstacle_sensor::init(obsCfg);
+        // Switch sensor to LONG RANGE mode (4 m).  Without this, the sensor
+        // stays in SHORT RANGE mode (max ~1.3 m) and reports 20 mm in open
+        // air because all pixels return invalid when nothing is in range.
+        obstacle_sensor::configureLongRange();
+    }
 
     // Initialize CAN TX for obstacle distance frame (0x208)
     can_obstacle::init();
