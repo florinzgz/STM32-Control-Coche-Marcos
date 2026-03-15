@@ -940,8 +940,10 @@ static void test_negative_distance_skipped() {
     // Bytes LE: [0x9C, 0xFF, 0xFF]
     setPixel(frame, 0, -100, /*status=*/0, 100);
 
-    // Set pixels 1-4 to a valid 500 mm (should be the result)
-    for (uint8_t px = 1; px <= TEST_MIN_PX; px++)
+    // Set pixels 1-4 to a valid 500 mm (should be the result).
+    // Pixel 0 has dis_status=0 but negative distance → skipped by parser,
+    // so only these TEST_MIN_PX pixels count as valid.
+    for (uint8_t px = 1; px < 1 + TEST_MIN_PX; px++)
         setPixel(frame, px, 500, /*status=*/0, 100);
     writeChecksum(frame);
 
