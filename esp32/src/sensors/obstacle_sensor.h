@@ -26,6 +26,21 @@
 //   The UART data frame parser itself is correct (verified by unit tests
 //   for 2000 mm and 4000 mm distances).
 //
+// WRAP-AROUND PROTECTION (close-range "data reversed" symptom):
+//   When the TOFSense-M is in LONG RANGE mode and an object is within the
+//   sensor's blind zone (< ~50 mm), most pixels saturate (dis_status ≠ 0)
+//   but a few may report valid distances at 2000–3000 mm due to phase
+//   wrap-around.  This produces the "datos al revés" symptom: close objects
+//   appear far.  The driver requires at least MIN_VALID_PIXELS (4) valid
+//   pixels before trusting a frame's distance data.  Frames with fewer
+//   valid pixels are treated as emergency-close (minRangeMm).
+//
+// ABOVE-MAX-RANGE HANDLING (open air / outdoors):
+//   When valid pixels report distances above maxRangeMm (4000 mm), the
+//   reading is clamped to maxRangeMm and reported as VALID at zone 0
+//   (no obstacle).  This prevents open-air readings from being marked
+//   INVALID (which would look like a sensor fault to the STM32).
+//
 // Per-pixel layout (6 bytes each, per Nooploop nlink_tofsensem_frame0.c):
 //   [0-2]  dis:              3-byte signed int24 LE, unit = mm
 //                            (official code: NLINK_ParseInt24() / 1000.0f → meters)

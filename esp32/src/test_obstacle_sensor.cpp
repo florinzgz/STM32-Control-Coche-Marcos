@@ -94,6 +94,17 @@ static void setPixel(uint8_t* buf, uint8_t px, int32_t distMm,
     buf[base + 5] = (uint8_t)((signal >> 8) & 0xFF);
 }
 
+// Helper: set multiple consecutive pixels to the same valid distance.
+// Used to satisfy the MIN_VALID_PIXELS threshold (4 pixels) so that
+// the frame parses as OK instead of being rejected as wrap-around.
+static constexpr uint8_t TEST_MIN_PX = 4;  // Matches MIN_VALID_PIXELS in driver
+static void setValidPixels(uint8_t* buf, int32_t distMm,
+                           uint16_t signal = 100, uint8_t startPx = 0) {
+    for (uint8_t px = startPx; px < startPx + TEST_MIN_PX; px++) {
+        setPixel(buf, px, distMm, /*status=*/0, signal);
+    }
+}
+
 // Compute and write the checksum at byte 399
 static void writeChecksum(uint8_t* buf) {
     uint8_t sum = 0;
@@ -437,7 +448,7 @@ static void test_below_min_range_clamped_to_min() {
     buildFrame(frame);
 
     // Set pixel 0 to 10 mm (below minRangeMm = 20)
-    setPixel(frame, 0, 10, /*status=*/0, 100);
+    setValidPixels(frame, 10);
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
@@ -449,23 +460,32 @@ static void test_below_min_range_clamped_to_min() {
     ASSERT_EQ(rd.zone, 4);           // emergency zone
 }
 
-// Test 14: Distance above maxRangeMm still goes INVALID.
-//          Only below-minimum clamping changed; above-max is still rejected.
-static void test_above_max_range_still_invalid() {
-    printf("  test_above_max_range_still_invalid...\n");
+// Test 14: Distance above maxRangeMm is clamped to maxRangeMm (VALID).
+//          This represents "open air" — nothing within the sensor's effective
+//          range.  The reading is valid (sensor is working) at zone 0 (no
+//          obstacle), rather than being marked INVALID (which would look like
+//          a sensor fault to the STM32).
+static void test_above_max_range_clamped_to_max() {
+    printf("  test_above_max_range_clamped_to_max...\n");
 
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Set pixel 0 to 5000 mm (above maxRangeMm = 4000)
-    setPixel(frame, 0, 5000, /*status=*/0, 100);
+    // Set many pixels to 5000 mm (above maxRangeMm = 4000) to exceed
+    // MIN_VALID_PIXELS threshold (need ≥ 4 valid pixels).
+    for (uint8_t px = 0; px < 10; px++) {
+        setPixel(frame, px, 5000, /*status=*/0, 100);
+    }
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
+    // Should be VALID at maxRangeMm, zone 0 (no obstacle)
     ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
-    ASSERT_EQ(rd.healthy, false);
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 4000);  // clamped to maxRangeMm
+    ASSERT_EQ(rd.zone, 0);            // normal zone: ≥ 1500 mm
 }
 
 // Test 15: Normal in-range distance (500 mm) → VALID, correct zone.
@@ -476,7 +496,7 @@ static void test_normal_distance_valid() {
     buildFrame(frame);
 
     // Set pixel 0 to 500 mm
-    setPixel(frame, 0, 500, /*status=*/0, 100);
+    setValidPixels(frame, 500);
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
@@ -496,7 +516,7 @@ static void test_exact_min_range_valid() {
     buildFrame(frame);
 
     // Set pixel 0 to 20 mm (exactly minRangeMm)
-    setPixel(frame, 0, 20, /*status=*/0, 100);
+    setValidPixels(frame, 20);
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
@@ -528,19 +548,19 @@ static void test_overflow_flush_keeps_latest_frame() {
     // Frame 1 (old): 300 mm
     uint8_t frame1[FRAME_LEN];
     buildFrame(frame1);
-    setPixel(frame1, 0, 300, 0, 100);
+    setValidPixels(frame1, 300);
     writeChecksum(frame1);
 
     // Frame 2 (old): 400 mm
     uint8_t frame2[FRAME_LEN];
     buildFrame(frame2);
-    setPixel(frame2, 0, 400, 0, 100);
+    setValidPixels(frame2, 400);
     writeChecksum(frame2);
 
     // Frame 3 (latest): 800 mm
     uint8_t frame3[FRAME_LEN];
     buildFrame(frame3);
-    setPixel(frame3, 0, 800, 0, 100);
+    setValidPixels(frame3, 800);
     writeChecksum(frame3);
 
     g_uart_inject(frame1, FRAME_LEN);
@@ -580,13 +600,13 @@ static void test_resync_after_bad_checksum() {
 
     uint8_t bad_frame[FRAME_LEN];
     buildFrame(bad_frame);
-    setPixel(bad_frame, 0, 600, 0, 100);
+    setValidPixels(bad_frame, 600);
     writeChecksum(bad_frame);
     bad_frame[FRAME_LEN - 1] ^= 0xFF;  // Corrupt checksum
 
     uint8_t good_frame[FRAME_LEN];
     buildFrame(good_frame);
-    setPixel(good_frame, 0, 750, 0, 100);  // 750 mm
+    setValidPixels(good_frame, 750);  // 750 mm
     writeChecksum(good_frame);
 
     g_uart_inject(bad_frame, FRAME_LEN);
@@ -621,7 +641,7 @@ static void test_single_frame_within_byte_limit() {
     // the remaining data fits within the per-update limit and parses OK.
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
-    setPixel(frame, 0, 1200, 0, 100);  // 1200 mm
+    setValidPixels(frame, 1200);  // 1200 mm
     writeChecksum(frame);
 
     g_uart_inject(frame, FRAME_LEN);
@@ -654,7 +674,7 @@ static void test_multiple_bad_frames_then_good() {
     for (int i = 0; i < 3; i++) {
         uint8_t bad[FRAME_LEN];
         buildFrame(bad);
-        setPixel(bad, 0, 500 + i * 100, 0, 100);
+        setValidPixels(bad, 500 + i * 100);
         writeChecksum(bad);
         bad[FRAME_LEN - 1] ^= 0xFF;  // Corrupt checksum
         g_uart_inject(bad, FRAME_LEN);
@@ -662,7 +682,7 @@ static void test_multiple_bad_frames_then_good() {
 
     uint8_t good[FRAME_LEN];
     buildFrame(good);
-    setPixel(good, 0, 900, 0, 100);  // 900 mm
+    setValidPixels(good, 900);  // 900 mm
     writeChecksum(good);
     g_uart_inject(good, FRAME_LEN);
 
@@ -694,7 +714,7 @@ static void test_many_queued_frames_all_processed() {
     for (int i = 0; i < 5; i++) {
         uint8_t frame[FRAME_LEN];
         buildFrame(frame);
-        setPixel(frame, 0, (uint32_t)(200 + i * 100), 0, 100);
+        setValidPixels(frame, (int32_t)(200 + i * 100));
         writeChecksum(frame);
         g_uart_inject(frame, FRAME_LEN);
     }
@@ -822,6 +842,9 @@ static void test_2000mm_distance_parses_correctly() {
     // Set pixel 0 to 2000 mm = 0x0007D0
     // Byte[0]=0xD0, Byte[1]=0x07, Byte[2]=0x00
     setPixel(frame, 0, 2000, /*status=*/0, 200);
+    // Set additional pixels to meet MIN_VALID_PIXELS threshold
+    for (uint8_t px = 1; px < TEST_MIN_PX; px++)
+        setPixel(frame, px, 2000, /*status=*/0, 200);
     writeChecksum(frame);
 
     // Verify the raw bytes are correct
@@ -847,7 +870,7 @@ static void test_4000mm_max_range_parses_correctly() {
     buildFrame(frame);
 
     // Set pixel 0 to 4000 mm = 0x000FA0
-    setPixel(frame, 0, 4000, /*status=*/0, 150);
+    setValidPixels(frame, 4000, 150);
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
@@ -917,8 +940,11 @@ static void test_negative_distance_skipped() {
     // Bytes LE: [0x9C, 0xFF, 0xFF]
     setPixel(frame, 0, -100, /*status=*/0, 100);
 
-    // Set pixel 1 to a valid 500 mm (should be the result)
-    setPixel(frame, 1, 500, /*status=*/0, 100);
+    // Set pixels 1-4 to a valid 500 mm (should be the result).
+    // Pixel 0 has dis_status=0 but negative distance → skipped by parser,
+    // so only these TEST_MIN_PX pixels count as valid.
+    for (uint8_t px = 1; px < 1 + TEST_MIN_PX; px++)
+        setPixel(frame, px, 500, /*status=*/0, 100);
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
@@ -940,6 +966,9 @@ static void test_3000mm_distance_parses_correctly() {
 
     // 3000 mm = 0x000BB8
     setPixel(frame, 0, 3000, /*status=*/0, 120);
+    // Additional pixels to meet MIN_VALID_PIXELS
+    for (uint8_t px = 1; px < TEST_MIN_PX; px++)
+        setPixel(frame, px, 3000, /*status=*/0, 120);
     writeChecksum(frame);
 
     // Verify raw bytes (LE)
@@ -969,7 +998,7 @@ static void test_signal_strength_does_not_affect_distance() {
     buildFrame(frame);
 
     // Set pixel 0 to 3500 mm with very low signal (signal=1)
-    setPixel(frame, 0, 3500, /*status=*/0, 1);
+    setValidPixels(frame, 3500, 1);
     writeChecksum(frame);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
@@ -1059,6 +1088,9 @@ static void test_4000mm_raw_bytes() {
     // 4000 mm = 0x000FA0
     // LE bytes: [0xA0, 0x0F, 0x00]
     setPixel(frame, 0, 4000, /*status=*/0, 100);
+    // Additional pixels to meet MIN_VALID_PIXELS
+    for (uint8_t px = 1; px < TEST_MIN_PX; px++)
+        setPixel(frame, px, 4000, /*status=*/0, 100);
     writeChecksum(frame);
 
     uint16_t base = 9;  // pixel 0
@@ -1218,7 +1250,7 @@ static void test_repeated_all_pixels_invalid_stays_at_min() {
     // switching to LONG RANGE mode where the sensor can actually see objects
     uint8_t goodFrame[FRAME_LEN];
     buildFrame(goodFrame);
-    setPixel(goodFrame, 0, 3000, /*status=*/0, 200);  // 3000 mm
+    setValidPixels(goodFrame, 3000, 200);  // 3000 mm
     writeChecksum(goodFrame);
 
     g_uart_inject(goodFrame, FRAME_LEN);
@@ -1308,6 +1340,117 @@ static void test_official_nooploop_example_frame() {
     ASSERT_EQ(rd.zone, 4);           // emergency zone
 }
 
+// Test 44: Wrap-around detection — 3 valid pixels with high distances
+//          (2245 mm) while all other pixels are invalid.
+//          This reproduces the exact "data reversed" symptom reported:
+//          palm at 2 cm → sensor shows 2245 mm instead of emergency-close.
+//          With the MIN_VALID_PIXELS threshold, the 3 valid pixels are
+//          rejected as phase wrap-around artifacts and treated as
+//          emergency-close (NO_VALID_PIXELS → 20 mm).
+static void test_few_valid_pixels_treated_as_wraparound() {
+    printf("  test_few_valid_pixels_treated_as_wraparound...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Simulate wrap-around: 3 valid pixels with high distances (2245 mm),
+    // all other 61 pixels are invalid (dis_status=1).
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 2245, /*status=*/1, 50);  // All invalid
+    }
+    // Only 3 pixels "valid" with wrap-around distances
+    setPixel(frame, 10, 2245, /*status=*/0, 200);
+    setPixel(frame, 11, 2800, /*status=*/0, 180);
+    setPixel(frame, 12, 3000, /*status=*/0, 160);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Should be treated as emergency-close (NO_VALID_PIXELS)
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
+    ASSERT_EQ(rd.zone, 4);           // emergency zone
+}
+
+// Test 45: Exactly MIN_VALID_PIXELS (4) valid pixels → accepted as real data.
+//          This tests the threshold boundary: 4 valid pixels should be
+//          enough to produce a valid reading, not treated as wrap-around.
+static void test_exactly_min_valid_pixels_accepted() {
+    printf("  test_exactly_min_valid_pixels_accepted...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set exactly 4 valid pixels at 800 mm, rest are invalid
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 800, /*status=*/1, 50);  // All invalid
+    }
+    setPixel(frame, 0, 800, /*status=*/0, 200);
+    setPixel(frame, 1, 900, /*status=*/0, 180);
+    setPixel(frame, 2, 850, /*status=*/0, 190);
+    setPixel(frame, 3, 800, /*status=*/0, 200);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // 4 valid pixels → accepted; minimum is 800 mm
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 800);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
+// Test 46: Single valid pixel → wrap-around rejection (emergency-close).
+//          Verifies that even 1 valid pixel with a plausible distance
+//          is rejected when fewer than MIN_VALID_PIXELS are valid.
+static void test_single_valid_pixel_rejected_as_wraparound() {
+    printf("  test_single_valid_pixel_rejected_as_wraparound...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Only pixel 0 is valid at 1500 mm, rest are invalid
+    setPixel(frame, 0, 1500, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Single valid pixel → NO_VALID_PIXELS → emergency-close
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm
+    ASSERT_EQ(rd.zone, 4);           // emergency
+}
+
+// Test 47: Above-maxRange with many valid pixels → clamped to maxRangeMm.
+//          Simulates open air in LONG RANGE mode where the sensor sees
+//          background at 5000+ mm.  Result is VALID at zone 0 (no obstacle).
+static void test_open_air_above_max_range_is_valid() {
+    printf("  test_open_air_above_max_range_is_valid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // All 64 pixels valid at 6000 mm (way above maxRangeMm = 4000)
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 6000, /*status=*/0, 80);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Should be VALID at maxRangeMm, zone 0
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 4000);  // clamped to maxRangeMm
+    ASSERT_EQ(rd.zone, 0);            // normal zone
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1326,7 +1469,7 @@ int main() {
     test_config_defaults();
     test_all_pixels_invalid_is_emergency_close();
     test_below_min_range_clamped_to_min();
-    test_above_max_range_still_invalid();
+    test_above_max_range_clamped_to_max();
     test_normal_distance_valid();
     test_exact_min_range_valid();
     test_overflow_flush_keeps_latest_frame();
@@ -1356,6 +1499,10 @@ int main() {
     test_save_config_sends_correct_bytes();
     test_repeated_all_pixels_invalid_stays_at_min();
     test_official_nooploop_example_frame();
+    test_few_valid_pixels_treated_as_wraparound();
+    test_exactly_min_valid_pixels_accepted();
+    test_single_valid_pixel_rejected_as_wraparound();
+    test_open_air_above_max_range_is_valid();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
