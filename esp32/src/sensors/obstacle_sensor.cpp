@@ -414,7 +414,10 @@ void update(float vehicleSpeedKmh) {
                       (unsigned)MAX_AUTO_RECOVERY_ATTEMPTS,
                       (unsigned long)consecutiveInvalidFrames_);
         configureLongRange();
-        consecutiveInvalidFrames_ = 0;  // reset after retry
+        // Reset counter to provide a 50-frame (~5 second) backoff before
+        // the next retry attempt.  Without this reset, the ≥ 50 condition
+        // would trigger on every subsequent update() call.
+        consecutiveInvalidFrames_ = 0;
     }
 
     // Periodic diagnostic output (every DIAG_INTERVAL_MS)
