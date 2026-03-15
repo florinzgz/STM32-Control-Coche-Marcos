@@ -1451,6 +1451,180 @@ static void test_open_air_above_max_range_is_valid() {
     ASSERT_EQ(rd.zone, 0);            // normal zone
 }
 
+// Test 48: High dispersion — many valid pixels with scattered distances.
+//          Reproduces the "sensor covered" symptom: valid pixels at 121, 273,
+//          1000 mm (spread 879 mm > 500 mm threshold).  Should be treated as
+//          wrap-around → emergency-close (20 mm).
+static void test_high_dispersion_covered_sensor() {
+    printf("  test_high_dispersion_covered_sensor...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Simulate covered sensor: most pixels invalid, but 8 valid pixels
+    // with wildly scattered wrap-around distances (121, 273, 1000 mm).
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 500, /*status=*/1, 50);  // All invalid
+    }
+    // 8 valid pixels with high dispersion (spread = 1000 - 121 = 879 mm)
+    setPixel(frame, 0,  121,  /*status=*/0, 100);
+    setPixel(frame, 1,  273,  /*status=*/0, 100);
+    setPixel(frame, 10, 400,  /*status=*/0, 100);
+    setPixel(frame, 11, 550,  /*status=*/0, 100);
+    setPixel(frame, 20, 700,  /*status=*/0, 100);
+    setPixel(frame, 21, 800,  /*status=*/0, 100);
+    setPixel(frame, 30, 900,  /*status=*/0, 100);
+    setPixel(frame, 31, 1000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // High dispersion → emergency-close
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
+    ASSERT_EQ(rd.zone, 4);           // emergency zone
+}
+
+// Test 49: High dispersion — close-range wrap-around at ~2 cm.
+//          Reproduces the "object at 2 cm shows 1700, 2500 mm" symptom.
+//          Spread = 2500 - 1700 = 800 mm > 500 mm threshold.
+static void test_high_dispersion_close_range_wraparound() {
+    printf("  test_high_dispersion_close_range_wraparound...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Simulate wrap-around: 6 valid pixels with high distances
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 2000, /*status=*/1, 50);  // All invalid
+    }
+    setPixel(frame, 5,  1700, /*status=*/0, 200);
+    setPixel(frame, 6,  1900, /*status=*/0, 180);
+    setPixel(frame, 7,  2100, /*status=*/0, 160);
+    setPixel(frame, 8,  2300, /*status=*/0, 150);
+    setPixel(frame, 15, 2400, /*status=*/0, 140);
+    setPixel(frame, 16, 2500, /*status=*/0, 130);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // High dispersion → emergency-close
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
+    ASSERT_EQ(rd.zone, 4);           // emergency zone
+}
+
+// Test 50: Normal dispersion — real obstacle with consistent pixel distances.
+//          All valid pixels at 800 ± 50 mm (spread = 100 mm < 500 mm).
+//          Should be accepted as a valid reading.
+static void test_normal_dispersion_real_obstacle() {
+    printf("  test_normal_dispersion_real_obstacle...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Real obstacle: 32 valid pixels with consistent distances
+    for (uint8_t px = 0; px < 32; px++) {
+        int32_t dist = 750 + (px % 5) * 25;  // 750, 775, 800, 825, 850
+        setPixel(frame, px, dist, /*status=*/0, 200);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Low dispersion → valid reading at minimum distance (750 mm)
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 750);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
+// Test 51: Dispersion boundary — spread exactly at threshold (500 mm).
+//          Spread = 1000 - 500 = 500 mm, which equals the threshold.
+//          Should be accepted (threshold check is strictly greater-than).
+static void test_dispersion_at_boundary_accepted() {
+    printf("  test_dispersion_at_boundary_accepted...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // 4 valid pixels with spread = exactly 500 mm
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 700, /*status=*/1, 50);
+    }
+    setPixel(frame, 0, 500,  /*status=*/0, 200);
+    setPixel(frame, 1, 600,  /*status=*/0, 200);
+    setPixel(frame, 2, 900,  /*status=*/0, 200);
+    setPixel(frame, 3, 1000, /*status=*/0, 200);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Spread == 500 → NOT exceeded → valid (minimum = 500 mm)
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 500);
+    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
+}
+
+// Test 52: Dispersion just above threshold — spread = 501 mm.
+//          Should be rejected as high dispersion → emergency-close.
+static void test_dispersion_just_above_threshold_rejected() {
+    printf("  test_dispersion_just_above_threshold_rejected...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // 4 valid pixels with spread = 501 mm (just over threshold)
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 700, /*status=*/1, 50);
+    }
+    setPixel(frame, 0, 500,  /*status=*/0, 200);
+    setPixel(frame, 1, 600,  /*status=*/0, 200);
+    setPixel(frame, 2, 900,  /*status=*/0, 200);
+    setPixel(frame, 3, 1001, /*status=*/0, 200);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Spread = 501 → exceeded → emergency-close
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
+    ASSERT_EQ(rd.zone, 4);           // emergency zone
+}
+
+// Test 53: All 64 pixels valid at same distance — zero dispersion.
+//          Verifies that uniform readings (e.g. flat wall) are accepted.
+static void test_all_pixels_same_distance_accepted() {
+    printf("  test_all_pixels_same_distance_accepted...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // All 64 pixels valid at 1500 mm
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 1500, /*status=*/0, 200);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // Zero dispersion → valid
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 1500);
+    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1503,6 +1677,12 @@ int main() {
     test_exactly_min_valid_pixels_accepted();
     test_single_valid_pixel_rejected_as_wraparound();
     test_open_air_above_max_range_is_valid();
+    test_high_dispersion_covered_sensor();
+    test_high_dispersion_close_range_wraparound();
+    test_normal_dispersion_real_obstacle();
+    test_dispersion_at_boundary_accepted();
+    test_dispersion_just_above_threshold_rejected();
+    test_all_pixels_same_distance_accepted();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
