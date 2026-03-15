@@ -70,8 +70,8 @@ static HardwareSerial tofSerial(1);
 // resistor values → marginal signal → intermittent checksum failures).
 // -------------------------------------------------------------------------
 static constexpr unsigned long DIAG_INTERVAL_MS = 5000;
-static constexpr uint32_t DIAG_MIN_FRAMES_FOR_RANGE_CHECK = 10;  // Minimum OK frames before checking range mode
-static constexpr uint16_t SHORT_RANGE_MAX_DISTANCE_MM     = 1500; // If max distance < this, likely SHORT RANGE mode
+static constexpr uint32_t DIAG_MIN_FRAMES_FOR_RANGE_CHECK      = 10;   // Minimum OK frames before checking range mode
+static constexpr uint16_t SHORT_RANGE_DETECTION_THRESHOLD_MM   = 1500; // If max distance < this, likely SHORT RANGE mode
 static unsigned long lastDiagMs_      = 0;
 static uint32_t diagFramesOk_        = 0;  // Frames parsed successfully
 static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
@@ -79,6 +79,7 @@ static uint32_t diagHeaderFail_      = 0;  // Wrong header or function mark
 static uint32_t diagAllPixelsInvalid_= 0;  // All 64 dis_status ≠ 0
 static uint32_t diagBytesDiscarded_  = 0;  // Bytes skipped waiting for 0x57
 static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current diag interval
+static bool     diagShortRangeWarned_= false; // Only warn about SHORT RANGE once per session
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
@@ -203,6 +204,7 @@ void init(const Config& cfg) {
     diagAllPixelsInvalid_ = 0;
     diagBytesDiscarded_ = 0;
     diagMaxDistMm_      = 0;
+    diagShortRangeWarned_ = false;
 
     reading_ = Reading{};  // Reset to defaults
 
@@ -339,9 +341,10 @@ void update(float vehicleSpeedKmh) {
                                "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
-            if (diagFramesOk_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
+            if (!diagShortRangeWarned_
+                    && diagFramesOk_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
                     && diagMaxDistMm_ > 0
-                    && diagMaxDistMm_ < SHORT_RANGE_MAX_DISTANCE_MM) {
+                    && diagMaxDistMm_ < SHORT_RANGE_DETECTION_THRESHOLD_MM) {
                 Serial.printf("[OBSTACLE] WARNING: Max distance seen = %u mm "
                               "(expected up to 4000 mm in LONG RANGE mode). "
                               "Sensor may still be in SHORT RANGE / HIGH PRECISION "
@@ -349,6 +352,7 @@ void update(float vehicleSpeedKmh) {
                               "Config::txPin, and call configureLongRange(); or use "
                               "NAssistant to switch to Long Range mode.\n",
                               (unsigned)diagMaxDistMm_);
+                diagShortRangeWarned_ = true;  // Only warn once per session
             }
         } else if (reading_.status != SensorStatus::WAITING) {
             Serial.println("[OBSTACLE] Diag: no UART data received — check wiring "
