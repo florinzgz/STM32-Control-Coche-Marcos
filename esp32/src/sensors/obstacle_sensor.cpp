@@ -103,6 +103,21 @@ static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current d
 static bool     diagShortRangeWarned_= false; // Only warn about SHORT RANGE once per session
 
 // -------------------------------------------------------------------------
+// Auto-recovery state — retries configureLongRange() when the sensor is
+// stuck in SHORT RANGE mode (sustained all-pixels-invalid frames).
+// -------------------------------------------------------------------------
+// Number of consecutive frames where all pixels were invalid or had high
+// dispersion.  Reset to 0 whenever a ParseResult::OK frame arrives.
+static uint32_t consecutiveInvalidFrames_ = 0;
+// Number of auto-recovery attempts already performed.
+static uint8_t  autoRecoveryAttempts_     = 0;
+// Maximum number of automatic configureLongRange() retries.
+static constexpr uint8_t  MAX_AUTO_RECOVERY_ATTEMPTS    = 3;
+// Number of consecutive invalid frames before triggering auto-recovery.
+// At 10 Hz frame rate, 50 frames ≈ 5 seconds of sustained failure.
+static constexpr uint32_t AUTO_RECOVERY_FRAME_THRESHOLD = 50;
+
+// -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
 //   < 200 mm  → zone 4 (emergency, scale=0.0)
 //   200–500   → zone 3 (critical,  scale=0.3)
@@ -252,6 +267,8 @@ void init(const Config& cfg) {
     diagBytesDiscarded_ = 0;
     diagMaxDistMm_      = 0;
     diagShortRangeWarned_ = false;
+    consecutiveInvalidFrames_ = 0;
+    autoRecoveryAttempts_     = 0;
 
     reading_ = Reading{};  // Reset to defaults
 
@@ -340,6 +357,7 @@ void update(float vehicleSpeedKmh) {
                     measuredMm = dist;
                     gotFrame = true;
                     diagFramesOk_++;
+                    consecutiveInvalidFrames_ = 0;  // healthy frame → reset
                     if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
                     break;
                 case ParseResult::BAD_HEADER:
@@ -350,6 +368,7 @@ void update(float vehicleSpeedKmh) {
                     break;
                 case ParseResult::NO_VALID_PIXELS:
                     diagAllPixelsInvalid_++;
+                    consecutiveInvalidFrames_++;
                     // All pixels report dis_status ≠ 0.  The TOFSense-M
                     // cannot measure distances below ~50 mm; when an object
                     // is that close every pixel saturates and reports
@@ -363,6 +382,7 @@ void update(float vehicleSpeedKmh) {
                     break;
                 case ParseResult::HIGH_DISPERSION:
                     diagHighDispersion_++;
+                    consecutiveInvalidFrames_++;
                     // Valid pixels present but their distances scatter
                     // widely (e.g. 121, 273, 1000 mm when sensor is
                     // covered).  This is phase wrap-around at close range.
@@ -375,6 +395,29 @@ void update(float vehicleSpeedKmh) {
             }
             rxIdx_ = 0;  // Reset for next frame
         }
+    }
+
+    // Auto-recovery: if the sensor keeps returning all-invalid frames for
+    // an extended period (AUTO_RECOVERY_FRAME_THRESHOLD consecutive frames),
+    // it is likely still in SHORT RANGE mode.  Retry configureLongRange()
+    // up to MAX_AUTO_RECOVERY_ATTEMPTS times.  This handles the case where
+    // the initial configureLongRange() in setup() was sent before the
+    // sensor's command processor was ready (sensor still booting).
+    if (consecutiveInvalidFrames_ >= AUTO_RECOVERY_FRAME_THRESHOLD
+            && autoRecoveryAttempts_ < MAX_AUTO_RECOVERY_ATTEMPTS
+            && cfg_.txPin >= 0) {
+        autoRecoveryAttempts_++;
+        Serial.printf("[OBSTACLE] Auto-recovery attempt %u/%u: "
+                      "re-sending configureLongRange() "
+                      "(%lu consecutive invalid frames)\n",
+                      (unsigned)autoRecoveryAttempts_,
+                      (unsigned)MAX_AUTO_RECOVERY_ATTEMPTS,
+                      (unsigned long)consecutiveInvalidFrames_);
+        configureLongRange();
+        // Reset counter to provide a 50-frame (~5 second) backoff before
+        // the next retry attempt.  Without this reset, the ≥ 50 condition
+        // would trigger on every subsequent update() call.
+        consecutiveInvalidFrames_ = 0;
     }
 
     // Periodic diagnostic output (every DIAG_INTERVAL_MS)
@@ -503,6 +546,10 @@ void update(float vehicleSpeedKmh) {
 
 Reading getReading() {
     return reading_;
+}
+
+uint8_t getAutoRecoveryAttempts() {
+    return autoRecoveryAttempts_;
 }
 
 // =========================================================================

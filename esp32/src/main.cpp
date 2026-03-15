@@ -362,9 +362,17 @@ void setup() {
         obstacle_sensor::Config obsCfg;
         obsCfg.txPin = 17;   // Enable TX so configureLongRange() can send commands
         obstacle_sensor::init(obsCfg);
+        // Wait for the sensor to boot before sending configuration commands.
+        // The TOFSense-M needs time after power-on to initialize its command
+        // processor.  Without this delay, commands sent immediately after UART
+        // init are ignored and the sensor stays in SHORT RANGE mode (→ 20 mm).
+        delay(500);
         // Switch sensor to LONG RANGE mode (4 m).  Without this, the sensor
         // stays in SHORT RANGE mode (max ~1.3 m) and reports 20 mm in open
         // air because all pixels return invalid when nothing is in range.
+        // If this initial attempt fails (e.g. sensor still booting), the
+        // driver's auto-recovery will retry automatically after detecting
+        // sustained all-pixels-invalid frames.
         obstacle_sensor::configureLongRange();
     }
 
