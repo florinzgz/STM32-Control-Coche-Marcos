@@ -1625,6 +1625,214 @@ static void test_all_pixels_same_distance_accepted() {
     ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
 }
 
+// Test 54: Auto-recovery triggers configureLongRange() after sustained
+//          all-pixels-invalid frames (50 consecutive).  Verifies that
+//          the driver automatically retries the configuration when the
+//          sensor appears stuck in SHORT RANGE mode.
+static void test_auto_recovery_triggers_after_threshold() {
+    printf("  test_auto_recovery_triggers_after_threshold...\n");
+
+    // Build a frame where all 64 pixels are invalid (dis_status=1)
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 50, /*status=*/1, 100);
+    }
+    writeChecksum(frame);
+
+    // Init with TX pin connected (auto-recovery requires txPin ≥ 0)
+    g_uart_inject_reset();
+    g_uart_tx_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 50 consecutive all-invalid frames (AUTO_RECOVERY_FRAME_THRESHOLD)
+    g_uart_tx_reset();  // Clear any TX data from init
+    for (int i = 0; i < 50; i++) {
+        g_uart_inject_reset();  // Reset inject buffer to reuse space
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    // Auto-recovery should have triggered
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 1);
+    // Verify that configureLongRange() sent commands over UART TX
+    ASSERT(g_uart_tx_len > 0);
+}
+
+// Test 55: Auto-recovery does NOT trigger when txPin is not connected.
+static void test_auto_recovery_skipped_without_tx_pin() {
+    printf("  test_auto_recovery_skipped_without_tx_pin...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 50, /*status=*/1, 100);
+    }
+    writeChecksum(frame);
+
+    // Init WITHOUT TX pin (txPin = -1, default)
+    g_uart_inject_reset();
+    g_uart_tx_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();  // default config: txPin = -1
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 60 consecutive all-invalid frames — well past threshold
+    for (int i = 0; i < 60; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    // No auto-recovery without TX pin
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+}
+
+// Test 56: Auto-recovery counter resets when a valid frame arrives.
+//          Feed 49 invalid frames (below threshold), then one valid frame,
+//          then 49 more invalid frames.  Auto-recovery should NOT trigger.
+static void test_auto_recovery_resets_on_valid_frame() {
+    printf("  test_auto_recovery_resets_on_valid_frame...\n");
+
+    uint8_t badFrame[FRAME_LEN];
+    buildFrame(badFrame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(badFrame, px, 50, /*status=*/1, 100);
+    }
+    writeChecksum(badFrame);
+
+    uint8_t goodFrame[FRAME_LEN];
+    buildFrame(goodFrame);
+    setValidPixels(goodFrame, 2000, 200);
+    writeChecksum(goodFrame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 49 invalid frames — just below threshold
+    for (int i = 0; i < 49; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(badFrame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+
+    // Feed one valid frame — resets consecutive counter
+    g_uart_inject_reset();
+    g_uart_inject(goodFrame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+
+    // Feed 49 more invalid frames — counter restarts from 0
+    for (int i = 0; i < 49; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(badFrame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    // Should NOT have triggered (49 < 50 threshold)
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+}
+
+// Test 57: Auto-recovery stops after MAX_AUTO_RECOVERY_ATTEMPTS (3).
+static void test_auto_recovery_limited_to_max_attempts() {
+    printf("  test_auto_recovery_limited_to_max_attempts...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 50, /*status=*/1, 100);
+    }
+    writeChecksum(frame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Trigger auto-recovery 3 times (each needs 50 invalid frames)
+    for (int attempt = 0; attempt < 3; attempt++) {
+        for (int i = 0; i < 50; i++) {
+            g_uart_inject_reset();
+            g_uart_inject(frame, FRAME_LEN);
+            g_test_millis += 100;
+            obstacle_sensor::update(0.0f);
+        }
+        ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), (uint8_t)(attempt + 1));
+    }
+
+    // Now feed 50 more — should NOT trigger a 4th attempt
+    for (int i = 0; i < 50; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 3);  // Stays at 3
+}
+
+// Test 58: init() resets auto-recovery state.
+static void test_init_resets_auto_recovery() {
+    printf("  test_init_resets_auto_recovery...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 50, /*status=*/1, 100);
+    }
+    writeChecksum(frame);
+
+    // First run: trigger one auto-recovery
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    for (int i = 0; i < 50; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 1);
+
+    // Re-init — should reset auto-recovery state
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init(cfg);
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1683,6 +1891,11 @@ int main() {
     test_dispersion_at_boundary_accepted();
     test_dispersion_just_above_threshold_rejected();
     test_all_pixels_same_distance_accepted();
+    test_auto_recovery_triggers_after_threshold();
+    test_auto_recovery_skipped_without_tx_pin();
+    test_auto_recovery_resets_on_valid_frame();
+    test_auto_recovery_limited_to_max_attempts();
+    test_init_resets_auto_recovery();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
