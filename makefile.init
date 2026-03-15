@@ -34,8 +34,14 @@ ifneq ($(wildcard $(_CPROJ)),)
   # Catches the case where .cproject was already fixed but Debug/ was not
   # regenerated.  Detects rules where the same .o path appears as both
   # target and prerequisite (e.g. "foo.o: foo.o" instead of "foo.o: foo.c").
-  # Uses awk to extract the target and verify it also appears after the colon.
-  _STALE_MK := $(shell find $(CURDIR) -name subdir.mk -exec awk '/\.o[[:space:]]*:/{t=$$0;sub(/:.*$$/,"",t);gsub(/^[[:space:]]+|[[:space:]]+$$/,"",t);p=$$0;sub(/^[^:]*:/,"",p);if(t~/\.o$$/ && index(p,t)>0){print FILENAME;exit}}' {} + 2>/dev/null | head -1)
+  # The awk script: extracts target (before ":"), strips whitespace, then
+  # checks if that same target string appears in the prerequisites (after ":").
+  _STALE_MK := $(shell find $(CURDIR) -name subdir.mk -exec awk ' \
+    /\.o[[:space:]]*:/ { \
+      t = $$0; sub(/:.*$$/, "", t); gsub(/^[[:space:]]+|[[:space:]]+$$/, "", t); \
+      p = $$0; sub(/^[^:]*:/, "", p); \
+      if (t ~ /\.o$$/ && index(p, t) > 0) { print FILENAME; exit } \
+    }' {} + 2>/dev/null | head -1)
 
   _NEEDS_FIX :=
   ifeq ($(_ID_EQ_SC),1)
@@ -79,7 +85,7 @@ ifneq ($(wildcard $(_CPROJ)),)
     $(info  Stale Debug/ directory — subdir.mk has circular .o deps.)
     $(info  Removing Debug/ so CubeIDE regenerates clean makefiles...)
     $(info ========================================================)
-    _DUMMY2 := $(shell rm -rf $(CURDIR))
+    _CLEANUP := $(shell rm -rf $(CURDIR))
     $(info  Done! Run  Clean + Build  one more time.)
     $(info ========================================================)
     $(info )
