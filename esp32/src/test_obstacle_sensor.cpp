@@ -1653,9 +1653,9 @@ static void test_auto_recovery_triggers_after_threshold() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 50 consecutive all-invalid frames (AUTO_RECOVERY_FRAME_THRESHOLD)
+    // Feed 30 consecutive all-invalid frames (AUTO_RECOVERY_FRAME_THRESHOLD)
     g_uart_tx_reset();  // Clear any TX data from init
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 30; i++) {
         g_uart_inject_reset();  // Reset inject buffer to reuse space
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
@@ -1689,7 +1689,7 @@ static void test_auto_recovery_skipped_without_tx_pin() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 60 consecutive all-invalid frames — well past threshold
+    // Feed 60 consecutive all-invalid frames — well past threshold (30)
     for (int i = 0; i < 60; i++) {
         g_uart_inject_reset();
         g_uart_inject(frame, FRAME_LEN);
@@ -1728,8 +1728,8 @@ static void test_auto_recovery_resets_on_valid_frame() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 49 invalid frames — just below threshold
-    for (int i = 0; i < 49; i++) {
+    // Feed 29 invalid frames — just below threshold (30)
+    for (int i = 0; i < 29; i++) {
         g_uart_inject_reset();
         g_uart_inject(badFrame, FRAME_LEN);
         g_test_millis += 100;
@@ -1744,19 +1744,19 @@ static void test_auto_recovery_resets_on_valid_frame() {
     obstacle_sensor::update(0.0f);
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 
-    // Feed 49 more invalid frames — counter restarts from 0
-    for (int i = 0; i < 49; i++) {
+    // Feed 29 more invalid frames — counter restarts from 0
+    for (int i = 0; i < 29; i++) {
         g_uart_inject_reset();
         g_uart_inject(badFrame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
 
-    // Should NOT have triggered (49 < 50 threshold)
+    // Should NOT have triggered (29 < 30 threshold)
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 }
 
-// Test 57: Auto-recovery stops after MAX_AUTO_RECOVERY_ATTEMPTS (3).
+// Test 57: Auto-recovery stops after MAX_AUTO_RECOVERY_ATTEMPTS (10).
 static void test_auto_recovery_limited_to_max_attempts() {
     printf("  test_auto_recovery_limited_to_max_attempts...\n");
 
@@ -1776,9 +1776,9 @@ static void test_auto_recovery_limited_to_max_attempts() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Trigger auto-recovery 3 times (each needs 50 invalid frames)
-    for (int attempt = 0; attempt < 3; attempt++) {
-        for (int i = 0; i < 50; i++) {
+    // Trigger auto-recovery 10 times (each needs 30 invalid frames)
+    for (int attempt = 0; attempt < 10; attempt++) {
+        for (int i = 0; i < 30; i++) {
             g_uart_inject_reset();
             g_uart_inject(frame, FRAME_LEN);
             g_test_millis += 100;
@@ -1787,14 +1787,14 @@ static void test_auto_recovery_limited_to_max_attempts() {
         ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), (uint8_t)(attempt + 1));
     }
 
-    // Now feed 50 more — should NOT trigger a 4th attempt
-    for (int i = 0; i < 50; i++) {
+    // Now feed 30 more — should NOT trigger an 11th attempt
+    for (int i = 0; i < 30; i++) {
         g_uart_inject_reset();
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 3);  // Stays at 3
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 10);  // Stays at 10
 }
 
 // Test 58: init() resets auto-recovery state.
@@ -1818,7 +1818,7 @@ static void test_init_resets_auto_recovery() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 30; i++) {
         g_uart_inject_reset();
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;

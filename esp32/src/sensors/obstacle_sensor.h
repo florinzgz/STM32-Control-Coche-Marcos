@@ -30,8 +30,8 @@
 // AUTO-RECOVERY:
 //   If the initial configureLongRange() fails (e.g. sent before the sensor
 //   finished booting), the driver automatically detects sustained
-//   all-pixels-invalid frames and retries configureLongRange() up to 3
-//   times (every ~50 frames ≈ 5 seconds at 10 Hz).  This handles the
+//   all-pixels-invalid frames and retries configureLongRange() up to 10
+//   times (every ~30 frames ≈ 3 seconds at 10 Hz).  This handles the
 //   common case where the sensor ignores commands sent too early at
 //   power-on.  Use getAutoRecoveryAttempts() to check how many retries
 //   were needed (0 = initial config worked, >0 = auto-recovery kicked in).

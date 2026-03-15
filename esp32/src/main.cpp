@@ -366,7 +366,9 @@ void setup() {
         // The TOFSense-M needs time after power-on to initialize its command
         // processor.  Without this delay, commands sent immediately after UART
         // init are ignored and the sensor stays in SHORT RANGE mode (→ 20 mm).
-        delay(500);
+        // 2000 ms is conservative; the sensor typically boots in ~1 s, but
+        // cold-start and brown-out recovery can take longer.
+        delay(2000);
         // Switch sensor to LONG RANGE mode (4 m).  Without this, the sensor
         // stays in SHORT RANGE mode (max ~1.3 m) and reports 20 mm in open
         // air because all pixels return invalid when nothing is in range.
