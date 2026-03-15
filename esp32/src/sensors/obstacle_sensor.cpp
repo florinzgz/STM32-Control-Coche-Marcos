@@ -76,6 +76,7 @@ static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
 static uint32_t diagHeaderFail_      = 0;  // Wrong header or function mark
 static uint32_t diagAllPixelsInvalid_= 0;  // All 64 dis_status ≠ 0
 static uint32_t diagBytesDiscarded_  = 0;  // Bytes skipped waiting for 0x57
+static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current diag interval
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
@@ -199,11 +200,20 @@ void init(const Config& cfg) {
     diagHeaderFail_     = 0;
     diagAllPixelsInvalid_ = 0;
     diagBytesDiscarded_ = 0;
+    diagMaxDistMm_      = 0;
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u)\n",
-                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize);
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d)\n",
+                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
+                  cfg_.rxPin, cfg_.txPin);
+    if (cfg_.txPin < 0) {
+        Serial.println("[OBSTACLE] TX pin not connected — config commands "
+                       "(setRangeMode, configureLongRange, saveConfig, etc.) "
+                       "will not work. If the sensor is not in LONG RANGE mode, "
+                       "connect ESP32 TX (e.g. GPIO 17) to sensor RX and set "
+                       "Config::txPin, or use NAssistant to configure the sensor.");
+    }
 }
 
 void update(float vehicleSpeedKmh) {
@@ -279,6 +289,7 @@ void update(float vehicleSpeedKmh) {
                     measuredMm = dist;
                     gotFrame = true;
                     diagFramesOk_++;
+                    if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
                     break;
                 case ParseResult::BAD_HEADER:
                     diagHeaderFail_++;
@@ -326,6 +337,15 @@ void update(float vehicleSpeedKmh) {
                                "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
+            if (diagFramesOk_ > 10 && diagMaxDistMm_ > 0 && diagMaxDistMm_ < 1500) {
+                Serial.printf("[OBSTACLE] WARNING: Max distance seen = %u mm "
+                              "(expected up to 4000 mm in LONG RANGE mode). "
+                              "Sensor may still be in SHORT RANGE / HIGH PRECISION "
+                              "mode. Fix: connect ESP32 TX to sensor RX, set "
+                              "Config::txPin, and call configureLongRange(); or use "
+                              "NAssistant to switch to Long Range mode.\n",
+                              (unsigned)diagMaxDistMm_);
+            }
         } else if (reading_.status != SensorStatus::WAITING) {
             Serial.println("[OBSTACLE] Diag: no UART data received — check wiring "
                            "and baud rate (expected 921600 bps factory default). "
@@ -338,6 +358,7 @@ void update(float vehicleSpeedKmh) {
         diagHeaderFail_      = 0;
         diagAllPixelsInvalid_= 0;
         diagBytesDiscarded_  = 0;
+        diagMaxDistMm_       = 0;
         lastDiagMs_          = now;
     }
 
@@ -475,6 +496,14 @@ bool saveConfig() {
                                 nullptr, 0, buf, sizeof(buf));
     if (len == 0) return false;
     return sendCmd(buf, len);
+}
+
+bool configureLongRange() {
+    if (!setRangeMode(RangeMode::LONG_RANGE))  return false;
+    if (!setOutputMode(OutputMode::ACTIVE))     return false;
+    if (!setFrameRate(10))                      return false;
+    if (!saveConfig())                          return false;
+    return true;
 }
 
 } // namespace obstacle_sensor

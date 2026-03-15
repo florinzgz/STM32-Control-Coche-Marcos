@@ -999,6 +999,80 @@ static void test_send_command_fails_without_tx_pin() {
     ASSERT_EQ(obstacle_sensor::saveConfig(), false);
 }
 
+// Test 35: configureLongRange() fails when TX pin is not connected.
+static void test_configure_long_range_fails_without_tx() {
+    printf("  test_configure_long_range_fails_without_tx...\n");
+
+    // Default Config has txPin = -1 (not connected)
+    obstacle_sensor::init();
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // configureLongRange() should return false because TX is not connected
+    ASSERT_EQ(obstacle_sensor::configureLongRange(), false);
+}
+
+// Test 36: configureLongRange() succeeds when TX pin is connected.
+static void test_configure_long_range_succeeds_with_tx() {
+    printf("  test_configure_long_range_succeeds_with_tx...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;  // TX pin connected
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // configureLongRange() should return true
+    ASSERT_EQ(obstacle_sensor::configureLongRange(), true);
+}
+
+// Test 37: setFrameRate(0) is rejected (0 Hz is invalid).
+static void test_set_frame_rate_zero_rejected() {
+    printf("  test_set_frame_rate_zero_rejected...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    ASSERT_EQ(obstacle_sensor::setFrameRate(0), false);
+    // Valid frame rate should succeed
+    ASSERT_EQ(obstacle_sensor::setFrameRate(1), true);
+    ASSERT_EQ(obstacle_sensor::setFrameRate(15), true);
+}
+
+// Test 38: 4000 mm raw bytes verification — confirms no truncation or
+//          byte-order issues in the int24 LE encoding at max range.
+static void test_4000mm_raw_bytes() {
+    printf("  test_4000mm_raw_bytes...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // 4000 mm = 4,000,000 µm = 0x3D0900
+    // LE bytes: [0x00, 0x09, 0x3D]
+    setPixel(frame, 0, 4000000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    uint16_t base = 9;  // pixel 0
+    ASSERT_EQ(frame[base + 0], 0x00);  // LSB
+    ASSERT_EQ(frame[base + 1], 0x09);  // middle byte
+    ASSERT_EQ(frame[base + 2], 0x3D);  // MSB (bit 23 = 0 → positive)
+
+    // Verify the value is positive (bit 23 not set → no sign extension)
+    ASSERT(!(frame[base + 2] & 0x80));
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 4000);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1038,6 +1112,10 @@ int main() {
     test_3000mm_distance_parses_correctly();
     test_signal_strength_does_not_affect_distance();
     test_send_command_fails_without_tx_pin();
+    test_configure_long_range_fails_without_tx();
+    test_configure_long_range_succeeds_with_tx();
+    test_set_frame_rate_zero_rejected();
+    test_4000mm_raw_bytes();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
