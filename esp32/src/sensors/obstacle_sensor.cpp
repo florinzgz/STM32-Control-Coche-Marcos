@@ -112,10 +112,10 @@ static uint32_t consecutiveInvalidFrames_ = 0;
 // Number of auto-recovery attempts already performed.
 static uint8_t  autoRecoveryAttempts_     = 0;
 // Maximum number of automatic configureLongRange() retries.
-static constexpr uint8_t  MAX_AUTO_RECOVERY_ATTEMPTS    = 3;
+static constexpr uint8_t  MAX_AUTO_RECOVERY_ATTEMPTS    = 10;
 // Number of consecutive invalid frames before triggering auto-recovery.
-// At 10 Hz frame rate, 50 frames ≈ 5 seconds of sustained failure.
-static constexpr uint32_t AUTO_RECOVERY_FRAME_THRESHOLD = 50;
+// At 10 Hz frame rate, 30 frames ≈ 3 seconds of sustained failure.
+static constexpr uint32_t AUTO_RECOVERY_FRAME_THRESHOLD = 30;
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
