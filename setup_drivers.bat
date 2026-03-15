@@ -113,6 +113,13 @@ if exist "Debug" (
     rmdir /s /q Debug
 )
 
+REM Fix .cproject element IDs if CubeMX has overwritten them
+if exist "fix_build.bat" (
+    echo.
+    echo Verifying .cproject element IDs...
+    call fix_build.bat
+)
+
 echo.
 echo ================================================
 echo SUCCESS! STM32 HAL Drivers installed.
