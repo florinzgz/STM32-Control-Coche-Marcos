@@ -235,10 +235,20 @@ bool saveConfig();
 //   3. setFrameRate(10)               — 10 Hz (recommended for 8×8 long range)
 //   4. saveConfig()                   — persist to sensor flash
 //
+// Each command is followed by a 100 ms delay (CMD_INTER_DELAY_MS) to give
+// the sensor time to process it before the next command arrives.  Without
+// these delays, the sensor may miss commands sent back-to-back, resulting
+// in partial configuration (e.g. LONG RANGE requested but not saved).
+//
 // Requires TX pin connected (Config::txPin ≥ 0).  Returns true only if
-// ALL four commands were sent successfully.  On real hardware, call
-// delay(50) after this function to give the sensor time to apply and
-// save the new settings before reading data.
+// ALL four commands were sent successfully.
+//
+// WIRING REQUIREMENT:
+//   ESP32 TX (GPIO 17) → sensor RX (pin 3 of GH1.25 connector)
+//   Set Config::txPin = 17 before calling init().
+//   The sensor's TX → ESP32 RX connection is only needed for reading
+//   data, not for sending configuration commands.  But BOTH connections
+//   are needed if you want to configure AND read simultaneously.
 //
 // If the sensor is already configured via NAssistant and you only need
 // to read data, this function is not required — only an RX connection

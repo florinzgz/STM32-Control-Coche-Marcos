@@ -502,10 +502,22 @@ bool saveConfig() {
     return sendCmd(buf, len);
 }
 
+// Delay between NLink 0x5A configuration commands (ms).
+// The TOFSense-M needs time to process each command before accepting the next.
+// Without this delay, sending multiple commands back-to-back may cause the
+// sensor to miss commands after the first one — resulting in partial
+// configuration (e.g. LONG RANGE set but not saved, or save issued before
+// the range-mode change is applied internally).
+// 100 ms is conservative; the sensor typically processes in < 50 ms.
+static constexpr unsigned long CMD_INTER_DELAY_MS = 100;
+
 bool configureLongRange() {
     if (!setRangeMode(RangeMode::LONG_RANGE))  return false;
+    delay(CMD_INTER_DELAY_MS);
     if (!setOutputMode(OutputMode::ACTIVE))     return false;
+    delay(CMD_INTER_DELAY_MS);
     if (!setFrameRate(10))                      return false;
+    delay(CMD_INTER_DELAY_MS);
     if (!saveConfig())                          return false;
     return true;
 }

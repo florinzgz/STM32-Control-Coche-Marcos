@@ -63,6 +63,11 @@ inline uint8_t  g_uart_inject_buf[4096] = {};
 inline uint16_t g_uart_inject_len       = 0;
 inline uint16_t g_uart_inject_pos       = 0;
 
+/* Captured UART TX data: HardwareSerial::write() appends to g_uart_tx_buf. */
+/* Tests can inspect what commands were sent to the sensor.                   */
+inline uint8_t  g_uart_tx_buf[4096]     = {};
+inline uint16_t g_uart_tx_len           = 0;
+
 static inline void g_uart_inject(const uint8_t* data, uint16_t len) {
     for (uint16_t i = 0; i < len && g_uart_inject_len < sizeof(g_uart_inject_buf); i++) {
         g_uart_inject_buf[g_uart_inject_len++] = data[i];
@@ -74,11 +79,20 @@ static inline void g_uart_inject_reset() {
     g_uart_inject_pos = 0;
 }
 
+static inline void g_uart_tx_reset() {
+    g_uart_tx_len = 0;
+}
+
 struct HardwareSerial {
     explicit HardwareSerial(int) {}
     void begin(unsigned long, int, int, int) {}
     void setRxBufferSize(size_t) {}
-    size_t write(const uint8_t*, size_t n) { return n; }
+    size_t write(const uint8_t* data, size_t n) {
+        for (size_t i = 0; i < n && g_uart_tx_len < sizeof(g_uart_tx_buf); i++) {
+            g_uart_tx_buf[g_uart_tx_len++] = data[i];
+        }
+        return n;
+    }
     int available() { return (int)(g_uart_inject_len - g_uart_inject_pos); }
     int read() {
         if (g_uart_inject_pos < g_uart_inject_len)
