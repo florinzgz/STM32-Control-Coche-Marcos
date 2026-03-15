@@ -33,6 +33,7 @@ The `Drivers/` folder (HAL + CMSIS) is **not included** in the repository. You m
 4. Click **Finish**
 5. Open `STM32-Control-Coche-Marcos.ioc` in STM32CubeIDE
 6. Click **Project → Generate Code** (Alt+K) to create the `Drivers/` folder
+7. Run `./fix_build.sh` (Linux/macOS) or `fix_build.bat` (Windows) to fix any `.cproject` changes made by CubeMX
 
 Alternatively, run the setup script from the command line:
 ```bash
@@ -117,16 +118,23 @@ make: Circular Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.o <- Drivers/STM32
 Building file:
 arm-none-eabi-gcc "" ...
 ```
-- **Cause**: Stale build artifacts in the `Debug/` directory (usually from a previous failed build or after pulling new source files via `git pull`). Eclipse CDT does not automatically detect files added externally.
-- **Solution**:
-  1. **Delete the Debug/ folder** inside the project directory (manually or via file explorer).
-  2. In STM32CubeIDE, right-click the project → **Refresh** (or press **F5**) so Eclipse detects the latest files on disk.
-  3. **Project → Clean...** → select the project → **Clean**.
-  4. **Build** the project again (**Ctrl+B**).
-  5. If the error persists after these steps, regenerate the project from CubeMX:
-     - Open `STM32-Control-Coche-Marcos.ioc` in STM32CubeIDE
-     - Click **Project → Generate Code** (Alt+K)
-     - This regenerates the Eclipse build files while keeping your application code intact
+- **Cause**: The `.cproject` file contains element IDs that are identical to their `superClass` template IDs. Eclipse CDT then confuses instances with templates and generates `subdir.mk` rules where `.o` files depend on themselves instead of the `.c` source file. This typically happens when **STM32CubeMX overwrites `.cproject`** during code generation (e.g., after opening the `.ioc` and clicking *Generate Code*).
+- **Quick fix** — run the helper script:
+  ```bash
+  # Linux / macOS
+  ./fix_build.sh
+
+  # Windows
+  fix_build.bat
+  ```
+  The script removes the stale `Debug/` directory and automatically fixes any broken `.cproject` element IDs.
+- **Manual fix** (if you prefer not to use the script):
+  1. Restore the repository's correct `.cproject`: `git checkout .cproject`
+  2. **Delete the `Debug/` folder** inside the project directory.
+  3. In STM32CubeIDE, right-click the project → **Refresh** (F5).
+  4. **Project → Clean...** → select the project → **Clean**.
+  5. **Build** the project again (**Ctrl+B**).
+- **Preventing recurrence**: After every CubeMX code generation (Alt+K), run `./fix_build.sh` (or `git checkout .cproject`) before building.
 
 ### ESP32-S3: "Could not open COMx" / PermissionError
 - **Cause**: The serial port is in use by another program, or the board is not in download mode.

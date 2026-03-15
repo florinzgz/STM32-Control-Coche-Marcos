@@ -107,6 +107,13 @@ if [ -d "Debug" ]; then
     rm -rf Debug
 fi
 
+# Fix .cproject element IDs if CubeMX has overwritten them
+if [ -x "./fix_build.sh" ]; then
+    echo ""
+    echo "🔧 Verifying .cproject element IDs..."
+    ./fix_build.sh
+fi
+
 echo ""
 echo "✅ Success! STM32 HAL Drivers installed."
 echo ""
