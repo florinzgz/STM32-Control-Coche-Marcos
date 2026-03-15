@@ -26,8 +26,9 @@
 //   The UART data frame parser itself is correct (verified by unit tests
 //   for 2000 mm and 4000 mm distances).
 //
-// Per-pixel layout (6 bytes each, per Nooploop reference):
-//   [0-2]  dis:              3-byte signed int24 LE, unit = µm (/1000 = mm)
+// Per-pixel layout (6 bytes each, per Nooploop nlink_tofsensem_frame0.c):
+//   [0-2]  dis:              3-byte signed int24 LE, unit = mm
+//                            (official code: NLINK_ParseInt24() / 1000.0f → meters)
 //   [3]    dis_status:       0 = valid measurement
 //   [4-5]  signal_strength:  uint16 LE
 //

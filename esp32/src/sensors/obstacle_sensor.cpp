@@ -29,8 +29,10 @@ static constexpr uint8_t  FUNCTION_MARK     = 0x01;   // Frame0 function mark
 static constexpr uint16_t FRAME_LENGTH      = 400;    // Total frame size (bytes) for 8×8 mode
 static constexpr uint8_t  PIXEL_COUNT_8X8   = 64;     // 8×8 matrix
 static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (dis_status) + 2 (signal_strength)
-// NLink protocol distance unit: 1 µm per LSB (divide by 1000 for mm)
-static constexpr int32_t DISTANCE_UNITS_PER_MM = 1000;
+// NLink protocol distance unit: 1 mm per LSB (raw int24 value IS in mm).
+// The official Nooploop code (nlink_tofsensem_frame0.c) divides by 1000.0f
+// to produce a float in meters; we keep the raw mm value for our uint16
+// Reading::distance_mm field.
 
 // Frame offsets (per official Nooploop struct ntsm_frame0_raw_t)
 static constexpr uint16_t OFF_HEADER        = 0;      // 0x57
@@ -117,8 +119,9 @@ enum class ParseResult : uint8_t {
 // Parse a complete NLink_TOFSense_M_Frame0 and extract minimum distance
 // Returns distance in mm via outDistMm, or 0 on failure.
 //
-// Per-pixel layout (6 bytes, per official Nooploop struct):
-//   [0-2]  dis:              3-byte signed int24 LE, unit = µm (/1000 = mm)
+// Per-pixel layout (6 bytes, per official Nooploop struct ntsm_frame0_pixel_raw_t):
+//   [0-2]  dis:              3-byte signed int24 LE, unit = mm
+//                            (official code divides by 1000.0f to get meters)
 //   [3]    dis_status:       0 = valid measurement
 //   [4-5]  signal_strength:  uint16 LE
 // -------------------------------------------------------------------------
@@ -146,7 +149,8 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
         uint8_t status = buf[base + 3];
         if (status != 0) continue;  // Skip invalid pixels
 
-        // Distance: 3-byte signed little-endian, unit = µm per LSB
+        // Distance: 3-byte signed little-endian, unit = mm per LSB
+        // (per official Nooploop nlink_tofsensem_frame0.c — NLINK_ParseInt24)
         int32_t raw = (int32_t)buf[base]
                     | ((int32_t)buf[base + 1] << 8)
                     | ((int32_t)buf[base + 2] << 16);
@@ -155,7 +159,7 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDis
 
         if (raw <= 0) continue;  // Negative or zero distance — skip
 
-        uint32_t distMm = (uint32_t)(raw / DISTANCE_UNITS_PER_MM);
+        uint32_t distMm = (uint32_t)raw;  // Already in mm
         if (distMm < minDistMm) {
             minDistMm = distMm;
             anyValid = true;
