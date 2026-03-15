@@ -86,7 +86,10 @@ struct Reading {
 // -------------------------------------------------------------------------
 struct Config {
     int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
-    int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
+    int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only).
+                                        // Set to a valid GPIO (e.g. 17) if you need to send
+                                        // configuration commands (setRangeMode, saveConfig, etc.)
+                                        // to the sensor.  Requires wiring ESP32 TX → sensor RX.
     uint32_t baudRate          = 921600; // TOFSense-M default baud rate (must match sensor config; changeable via NAssistant)
     uint16_t rxBufSize         = 2048;  // UART RX ring-buffer (must be > 400; default ESP32 256 is too small)
     uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
@@ -222,6 +225,44 @@ bool setOutputMode(OutputMode mode);
 /// Save current configuration to sensor flash memory.
 /// Settings persist across power cycles after this command.
 bool saveConfig();
+
+// -------------------------------------------------------------------------
+// Convenience: configure sensor for long-range (4 m) operation.
+//
+// Sends the full configuration sequence in one call:
+//   1. setRangeMode(LONG_RANGE)      — enables 4 m measurement range
+//   2. setOutputMode(ACTIVE)          — continuous output
+//   3. setFrameRate(10)               — 10 Hz (recommended for 8×8 long range)
+//   4. saveConfig()                   — persist to sensor flash
+//
+// Each command is followed by a 100 ms delay (CMD_INTER_DELAY_MS) to give
+// the sensor time to process it before the next command arrives.  Without
+// these delays, the sensor may miss commands sent back-to-back, resulting
+// in partial configuration (e.g. LONG RANGE requested but not saved).
+//
+// Requires TX pin connected (Config::txPin ≥ 0).  Returns true only if
+// ALL four commands were sent successfully.
+//
+// WIRING REQUIREMENT:
+//   ESP32 TX (GPIO 17) → sensor RX (pin 3 of GH1.25 connector)
+//   Set Config::txPin = 17 before calling init().
+//   The sensor's TX → ESP32 RX connection is only needed for reading
+//   data, not for sending configuration commands.  But BOTH connections
+//   are needed if you want to configure AND read simultaneously.
+//
+// If the sensor is already configured via NAssistant and you only need
+// to read data, this function is not required — only an RX connection
+// (sensor TX → ESP32 RX) is needed for reading.
+//
+// ROOT CAUSE DIAGNOSIS — "can't see 4000 mm":
+//   If the sensor's RX pin is NOT connected to the ESP32's TX pin,
+//   this function (and all setXxx / saveConfig calls) will fail silently
+//   because the UART command frames never reach the sensor.  The sensor
+//   stays in whatever mode it was previously in (likely Short Range,
+//   max ~1368 mm).  Connect sensor RX to ESP32 TX (GPIO 17 recommended)
+//   and set Config::txPin = 17 before calling init().
+// -------------------------------------------------------------------------
+bool configureLongRange();
 
 } // namespace obstacle_sensor
 

@@ -62,11 +62,33 @@ El cruce TX↔RX es inherente al protocolo UART: el transmisor de un lado se con
 
 ### 2.3 ¿Se conectan ambos (TX y RX)?
 
-**No, solo TX del sensor → RX del ESP32.** En este sistema:
+**Depende del caso de uso:**
+
+| Conexión | ¿Para qué? | ¿Cuándo es necesaria? |
+|----------|-------------|----------------------|
+| **Sensor TX → ESP32 RX** (GPIO 18) | **Leer** datos de distancia | **Siempre** (obligatoria) |
+| **ESP32 TX → Sensor RX** (GPIO 17) | **Enviar** comandos de configuración (0x5A) | **Solo si** necesitas cambiar configuración por UART |
+
+**Modo solo lectura (por defecto):**
 - El sensor transmite datos de distancia continuamente (modo activo)
 - El ESP32 solo **recibe** datos — no envía comandos al sensor
 - El pin RX del sensor (pin 3) queda **sin conectar**
-- En el código, `txPin = -1` desactiva la función TX del UART del ESP32
+- En el código, `Config::txPin = -1` desactiva la función TX del UART del ESP32
+
+**Modo lectura + configuración (requerido para `configureLongRange()`):**
+- Conectar **ESP32 TX (GPIO 17) → sensor RX (pin 3)**
+- En el código, establecer `Config::txPin = 17`
+- Permite enviar comandos NLink 0x5A: `setRangeMode()`, `saveConfig()`, etc.
+- **Necesario** si el sensor no está en LONG RANGE mode y necesitas cambiarlo por UART
+
+> ⚠️ **CAUSA RAÍZ del límite ~1368 mm:** Si el sensor está en modo SHORT RANGE
+> (alta precisión) y el pin RX del sensor **NO está conectado**, los comandos
+> `setRangeMode(LONG_RANGE)` y `saveConfig()` **nunca llegan al sensor**.
+> El sensor se queda en SHORT RANGE y solo mide hasta ~1.3–1.5 m.
+>
+> **Solución:** Conectar ESP32 TX → sensor RX, establecer `Config::txPin = 17`,
+> y llamar a `configureLongRange()` una vez; o usar NAssistant para configurar
+> el sensor directamente por USB.
 
 ### 2.4 ¿Se necesitan resistencias, divisor de tensión o level shifter?
 
@@ -391,6 +413,96 @@ El firmware ahora incluye **diagnósticos automáticos** que se imprimen cada 5 
 6. La pantalla debe mostrar `SENSOR: VALID` de forma estable
 
 > **Alternativa:** si no se tienen las resistencias correctas, usar un **level shifter BSS138** (Opción 2, sección 2.4) que no requiere calcular valores de resistencias.
+
+---
+
+## 6. Diagnóstico: distancia máxima ~1368 mm (no se ven 4000 mm)
+
+### 6.1 Síntoma
+
+El sensor reporta distancias correctas hasta ~1300–1500 mm, pero nunca muestra
+valores cercanos a 4000 mm aunque haya objetos a esa distancia. El firmware
+muestra un nuevo mensaje de diagnóstico:
+
+```
+[OBSTACLE] WARNING: Max distance seen = 1368 mm (expected up to 4000 mm
+in LONG RANGE mode). Sensor may still be in SHORT RANGE / HIGH PRECISION mode.
+```
+
+### 6.2 Causa raíz
+
+El TOFSense-M tiene **dos modos de medición**:
+
+| Modo | Rango máximo | Precisión | Código |
+|------|-------------|-----------|--------|
+| **SHORT RANGE** (Alta precisión) | ~1.3–1.5 m | Mayor | `RangeMode::SHORT_RANGE` (0x00) |
+| **LONG RANGE** (Estándar) | ~4 m | Estándar | `RangeMode::LONG_RANGE` (0x01) |
+
+El sensor puede venir de fábrica (o haber sido reconfigurado con NAssistant) en
+**SHORT RANGE mode**, lo que limita artificialmente la distancia máxima.
+
+### 6.3 ¿Por qué no basta con llamar a `setRangeMode(LONG_RANGE)`?
+
+Si **Config::txPin = -1** (valor por defecto), el ESP32 **no tiene conexión TX**
+al pin RX del sensor. En este caso:
+
+1. `setRangeMode(LONG_RANGE)` → retorna `false` (no se puede enviar)
+2. `saveConfig()` → retorna `false`
+3. El sensor **nunca recibe el comando** y se queda en SHORT RANGE
+
+El parser de distancia es correcto (verificado con tests unitarios para 2000, 3000
+y 4000 mm). El problema es la **configuración del sensor**, no el código.
+
+### 6.4 Solución — Opción A: Configurar por UART (recomendado)
+
+1. **Conectar** ESP32 TX (GPIO 17) → sensor RX (pin 3 del conector GH1.25)
+2. **Configurar** en el código:
+   ```cpp
+   obstacle_sensor::Config cfg;
+   cfg.txPin = 17;  // Habilitar TX
+   obstacle_sensor::init(cfg);
+
+   // Después de init y warmup:
+   obstacle_sensor::configureLongRange();  // Envía LONG_RANGE + ACTIVE + 10Hz + SAVE
+   delay(50);  // Dar tiempo al sensor para guardar
+   ```
+3. **Verificar** en el monitor serie que las distancias alcanzan 4000 mm
+4. Una vez configurado, el cable TX es opcional (el sensor recuerda la config)
+
+### 6.5 Solución — Opción B: Configurar con NAssistant
+
+1. Desconectar el sensor del ESP32
+2. Conectar el sensor al PC vía adaptador USB-UART (3.3 V TTL, 921600 bps)
+3. Abrir NAssistant (descarga: https://support.nooploop.com/tofsense/download/)
+4. En la pestaña de configuración, cambiar **Range Mode → Long Range**
+5. Hacer clic en **Save** para persistir la configuración
+6. Reconectar al ESP32 — el sensor ya estará en LONG RANGE mode
+
+### 6.6 Configuración óptima para ESP32-S3 + TOFSense-M (hasta 4 metros)
+
+| Parámetro | Valor recomendado | Razón |
+|-----------|-------------------|-------|
+| **RangeMode** | `LONG_RANGE` (0x01) | Habilita medición hasta 4 m |
+| **OutputMode** | `ACTIVE` (0x00) | Transmisión continua sin polling |
+| **FrameRate** | 10 Hz | Balance entre latencia y procesamiento para 8×8 |
+| **BaudRate** | 921600 bps | Factory default, suficiente para 400 bytes × 10 Hz |
+| **RX Buffer** | 2048 bytes | ~5 frames de headroom (~22 ms) |
+| **txPin** | GPIO 17 (o -1 si ya configurado) | Necesario solo para enviar comandos |
+| **Voltage divider** | R1=1kΩ + R2=4.7kΩ | Protección obligatoria para ESP32-S3 |
+| **Decoupling cap** | 100 nF entre VCC y GND | Filtrado de ruido |
+
+### 6.7 Baudrate 921600 vs 460800 vs 115200
+
+| Baudrate | Frames/s posibles | Latencia | Notas ESP32-S3 |
+|----------|-------------------|----------|----------------|
+| **921600** (recomendado) | hasta ~230 | ~4.3 ms/frame | Funciona bien con buffer 2048. No requiere DMA. |
+| 460800 | hasta ~115 | ~8.7 ms/frame | Alternativa si hay pérdida de frames en cables > 30 cm |
+| 115200 | hasta ~28 | ~34.7 ms/frame | Solo si hay problemas graves de señal |
+
+La ESP32-S3 maneja 921600 bps sin DMA gracias a su FIFO hardware de UART
+(128 bytes) combinado con el buffer software de 2048 bytes. No se necesitan
+buffers más grandes ni DMA para la tasa de 10 Hz (un frame de 400 bytes cada
+100 ms, con 22 ms de headroom en el buffer).
 
 ---
 

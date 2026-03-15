@@ -999,6 +999,178 @@ static void test_send_command_fails_without_tx_pin() {
     ASSERT_EQ(obstacle_sensor::saveConfig(), false);
 }
 
+// Test 35: configureLongRange() fails when TX pin is not connected.
+static void test_configure_long_range_fails_without_tx() {
+    printf("  test_configure_long_range_fails_without_tx...\n");
+
+    // Default Config has txPin = -1 (not connected)
+    obstacle_sensor::init();
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // configureLongRange() should return false because TX is not connected
+    ASSERT_EQ(obstacle_sensor::configureLongRange(), false);
+}
+
+// Test 36: configureLongRange() succeeds when TX pin is connected.
+static void test_configure_long_range_succeeds_with_tx() {
+    printf("  test_configure_long_range_succeeds_with_tx...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;  // TX pin connected
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // configureLongRange() should return true
+    ASSERT_EQ(obstacle_sensor::configureLongRange(), true);
+}
+
+// Test 37: setFrameRate(0) is rejected (0 Hz is invalid).
+static void test_set_frame_rate_zero_rejected() {
+    printf("  test_set_frame_rate_zero_rejected...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    ASSERT_EQ(obstacle_sensor::setFrameRate(0), false);
+    // Valid frame rate should succeed
+    ASSERT_EQ(obstacle_sensor::setFrameRate(1), true);
+    ASSERT_EQ(obstacle_sensor::setFrameRate(15), true);
+}
+
+// Test 38: 4000 mm raw bytes verification — confirms no truncation or
+//          byte-order issues in the int24 LE encoding at max range.
+static void test_4000mm_raw_bytes() {
+    printf("  test_4000mm_raw_bytes...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // 4000 mm = 4,000,000 µm = 0x3D0900
+    // LE bytes: [0x00, 0x09, 0x3D]
+    setPixel(frame, 0, 4000000, /*status=*/0, 100);
+    writeChecksum(frame);
+
+    uint16_t base = 9;  // pixel 0
+    ASSERT_EQ(frame[base + 0], 0x00);  // LSB
+    ASSERT_EQ(frame[base + 1], 0x09);  // middle byte
+    ASSERT_EQ(frame[base + 2], 0x3D);  // MSB (bit 23 = 0 → positive)
+
+    // Verify the value is positive (bit 23 not set → no sign extension)
+    ASSERT(!(frame[base + 2] & 0x80));
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 4000);
+}
+
+// Test 39: configureLongRange() sends all 4 commands with correct bytes.
+//          Uses the UART TX capture buffer to verify each command frame
+//          was sent with the right header, length, cmdId, payload, and checksum.
+//          This is the key test for the "can't see 4000 mm" diagnosis:
+//          if these bytes actually reach the sensor, the sensor WILL switch
+//          to LONG RANGE mode.  The missing piece on real hardware is
+//          wiring ESP32 TX → sensor RX.
+static void test_configure_long_range_sends_correct_commands() {
+    printf("  test_configure_long_range_sends_correct_commands...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;  // TX pin connected
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Reset TX capture buffer
+    g_uart_tx_reset();
+
+    // Call configureLongRange — should send 4 commands
+    ASSERT_EQ(obstacle_sensor::configureLongRange(), true);
+
+    // Expected commands (each is 5 or 4 bytes):
+    //   1. SET_RANGE_MODE(LONG_RANGE): [0x5A, 5, 0x07, 0x01, checksum]
+    //   2. SET_OUTPUT_MODE(ACTIVE):    [0x5A, 5, 0x02, 0x00, checksum]
+    //   3. SET_FRAME_RATE(10):         [0x5A, 5, 0x05, 0x0A, checksum]
+    //   4. SAVE_CONFIG:                [0x5A, 4, 0x08,       checksum]
+    // Total bytes = 5 + 5 + 5 + 4 = 19
+    ASSERT_EQ(g_uart_tx_len, 19);
+
+    // Command 1: SET_RANGE_MODE (offset 0)
+    ASSERT_EQ(g_uart_tx_buf[0], 0x5A);    // header
+    ASSERT_EQ(g_uart_tx_buf[1], 5);       // length
+    ASSERT_EQ(g_uart_tx_buf[2], 0x07);    // SET_RANGE_MODE
+    ASSERT_EQ(g_uart_tx_buf[3], 0x01);    // LONG_RANGE
+    ASSERT_EQ(g_uart_tx_buf[4], (uint8_t)(0x5A + 5 + 0x07 + 0x01));  // checksum
+
+    // Command 2: SET_OUTPUT_MODE (offset 5)
+    ASSERT_EQ(g_uart_tx_buf[5], 0x5A);
+    ASSERT_EQ(g_uart_tx_buf[6], 5);
+    ASSERT_EQ(g_uart_tx_buf[7], 0x02);    // SET_OUTPUT_MODE
+    ASSERT_EQ(g_uart_tx_buf[8], 0x00);    // ACTIVE
+    ASSERT_EQ(g_uart_tx_buf[9], (uint8_t)(0x5A + 5 + 0x02 + 0x00));
+
+    // Command 3: SET_FRAME_RATE (offset 10)
+    ASSERT_EQ(g_uart_tx_buf[10], 0x5A);
+    ASSERT_EQ(g_uart_tx_buf[11], 5);
+    ASSERT_EQ(g_uart_tx_buf[12], 0x05);   // SET_FRAME_RATE
+    ASSERT_EQ(g_uart_tx_buf[13], 10);     // 10 Hz
+    ASSERT_EQ(g_uart_tx_buf[14], (uint8_t)(0x5A + 5 + 0x05 + 10));
+
+    // Command 4: SAVE_CONFIG (offset 15)
+    ASSERT_EQ(g_uart_tx_buf[15], 0x5A);
+    ASSERT_EQ(g_uart_tx_buf[16], 4);      // length = 4 (no payload)
+    ASSERT_EQ(g_uart_tx_buf[17], 0x08);   // SAVE_CONFIG
+    ASSERT_EQ(g_uart_tx_buf[18], (uint8_t)(0x5A + 4 + 0x08));
+}
+
+// Test 40: Individual setRangeMode(LONG_RANGE) sends correct bytes to UART TX.
+static void test_set_range_mode_sends_correct_bytes() {
+    printf("  test_set_range_mode_sends_correct_bytes...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    g_uart_tx_reset();
+    ASSERT_EQ(obstacle_sensor::setRangeMode(obstacle_sensor::RangeMode::LONG_RANGE), true);
+
+    ASSERT_EQ(g_uart_tx_len, 5);
+    ASSERT_EQ(g_uart_tx_buf[0], 0x5A);
+    ASSERT_EQ(g_uart_tx_buf[1], 5);
+    ASSERT_EQ(g_uart_tx_buf[2], 0x07);
+    ASSERT_EQ(g_uart_tx_buf[3], 0x01);
+}
+
+// Test 41: Individual saveConfig() sends correct bytes to UART TX.
+static void test_save_config_sends_correct_bytes() {
+    printf("  test_save_config_sends_correct_bytes...\n");
+
+    obstacle_sensor::Config cfg{};
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    g_uart_tx_reset();
+    ASSERT_EQ(obstacle_sensor::saveConfig(), true);
+
+    ASSERT_EQ(g_uart_tx_len, 4);
+    ASSERT_EQ(g_uart_tx_buf[0], 0x5A);
+    ASSERT_EQ(g_uart_tx_buf[1], 4);
+    ASSERT_EQ(g_uart_tx_buf[2], 0x08);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1038,6 +1210,13 @@ int main() {
     test_3000mm_distance_parses_correctly();
     test_signal_strength_does_not_affect_distance();
     test_send_command_fails_without_tx_pin();
+    test_configure_long_range_fails_without_tx();
+    test_configure_long_range_succeeds_with_tx();
+    test_set_frame_rate_zero_rejected();
+    test_4000mm_raw_bytes();
+    test_configure_long_range_sends_correct_commands();
+    test_set_range_mode_sends_correct_bytes();
+    test_save_config_sends_correct_bytes();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

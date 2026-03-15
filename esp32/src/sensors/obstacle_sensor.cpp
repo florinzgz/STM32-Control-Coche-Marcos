@@ -70,12 +70,16 @@ static HardwareSerial tofSerial(1);
 // resistor values → marginal signal → intermittent checksum failures).
 // -------------------------------------------------------------------------
 static constexpr unsigned long DIAG_INTERVAL_MS = 5000;
+static constexpr uint32_t DIAG_MIN_FRAMES_FOR_RANGE_CHECK      = 10;   // Minimum OK frames before checking range mode
+static constexpr uint16_t SHORT_RANGE_DETECTION_THRESHOLD_MM   = 1500; // If max distance < this, likely SHORT RANGE mode
 static unsigned long lastDiagMs_      = 0;
 static uint32_t diagFramesOk_        = 0;  // Frames parsed successfully
 static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
 static uint32_t diagHeaderFail_      = 0;  // Wrong header or function mark
 static uint32_t diagAllPixelsInvalid_= 0;  // All 64 dis_status ≠ 0
 static uint32_t diagBytesDiscarded_  = 0;  // Bytes skipped waiting for 0x57
+static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current diag interval
+static bool     diagShortRangeWarned_= false; // Only warn about SHORT RANGE once per session
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
@@ -199,11 +203,21 @@ void init(const Config& cfg) {
     diagHeaderFail_     = 0;
     diagAllPixelsInvalid_ = 0;
     diagBytesDiscarded_ = 0;
+    diagMaxDistMm_      = 0;
+    diagShortRangeWarned_ = false;
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u)\n",
-                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize);
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d)\n",
+                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
+                  cfg_.rxPin, cfg_.txPin);
+    if (cfg_.txPin < 0) {
+        Serial.println("[OBSTACLE] TX pin not connected — config commands "
+                       "(setRangeMode, configureLongRange, saveConfig, etc.) "
+                       "will not work. If the sensor is not in LONG RANGE mode, "
+                       "connect ESP32 TX (e.g. GPIO 17) to sensor RX and set "
+                       "Config::txPin, or use NAssistant to configure the sensor.");
+    }
 }
 
 void update(float vehicleSpeedKmh) {
@@ -279,6 +293,7 @@ void update(float vehicleSpeedKmh) {
                     measuredMm = dist;
                     gotFrame = true;
                     diagFramesOk_++;
+                    if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
                     break;
                 case ParseResult::BAD_HEADER:
                     diagHeaderFail_++;
@@ -326,6 +341,19 @@ void update(float vehicleSpeedKmh) {
                                "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
+            if (!diagShortRangeWarned_
+                    && diagFramesOk_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
+                    && diagMaxDistMm_ > 0
+                    && diagMaxDistMm_ < SHORT_RANGE_DETECTION_THRESHOLD_MM) {
+                Serial.printf("[OBSTACLE] WARNING: Max distance seen = %u mm "
+                              "(expected up to 4000 mm in LONG RANGE mode). "
+                              "Sensor may still be in SHORT RANGE / HIGH PRECISION "
+                              "mode. Fix: connect ESP32 TX to sensor RX, set "
+                              "Config::txPin, and call configureLongRange(); or use "
+                              "NAssistant to switch to Long Range mode.\n",
+                              (unsigned)diagMaxDistMm_);
+                diagShortRangeWarned_ = true;  // Only warn once per session
+            }
         } else if (reading_.status != SensorStatus::WAITING) {
             Serial.println("[OBSTACLE] Diag: no UART data received — check wiring "
                            "and baud rate (expected 921600 bps factory default). "
@@ -338,6 +366,7 @@ void update(float vehicleSpeedKmh) {
         diagHeaderFail_      = 0;
         diagAllPixelsInvalid_= 0;
         diagBytesDiscarded_  = 0;
+        diagMaxDistMm_       = 0;
         lastDiagMs_          = now;
     }
 
@@ -475,6 +504,26 @@ bool saveConfig() {
                                 nullptr, 0, buf, sizeof(buf));
     if (len == 0) return false;
     return sendCmd(buf, len);
+}
+
+// Delay between NLink 0x5A configuration commands (ms).
+// The TOFSense-M needs time to process each command before accepting the next.
+// Without this delay, sending multiple commands back-to-back may cause the
+// sensor to miss commands after the first one — resulting in partial
+// configuration (e.g. LONG RANGE set but not saved, or save issued before
+// the range-mode change is applied internally).
+// 100 ms is conservative; the sensor typically processes in < 50 ms.
+static constexpr unsigned long CMD_INTER_DELAY_MS = 100;
+
+bool configureLongRange() {
+    if (!setRangeMode(RangeMode::LONG_RANGE))  return false;
+    delay(CMD_INTER_DELAY_MS);
+    if (!setOutputMode(OutputMode::ACTIVE))     return false;
+    delay(CMD_INTER_DELAY_MS);
+    if (!setFrameRate(10))                      return false;
+    delay(CMD_INTER_DELAY_MS);
+    if (!saveConfig())                          return false;
+    return true;
 }
 
 } // namespace obstacle_sensor
