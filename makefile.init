@@ -1,0 +1,64 @@
+# makefile.init — Auto-detect broken .cproject before CubeIDE builds
+#
+# Eclipse CDT's generated Debug/makefile includes this file via:
+#   -include ../makefile.init
+#
+# When STM32CubeMX regenerates code it sometimes overwrites .cproject
+# with element IDs identical to their superClass template IDs.  Eclipse
+# then generates subdir.mk rules where .o files depend on themselves
+# (circular dependency), producing the confusing error:
+#
+#   make: Circular *.o <- *.o dependency dropped.
+#   arm-none-eabi-gcc "" ...
+#
+# This file detects the problem at make-parse time and auto-repairs it
+# by running fix_build.sh, then stops the build with a clear message.
+# The next Clean + Build will succeed.
+
+_PROJ  := $(realpath $(CURDIR)/..)
+_CPROJ := $(_PROJ)/.cproject
+_FIX   := $(_PROJ)/fix_build.sh
+
+ifneq ($(wildcard $(_CPROJ)),)
+
+  # Check 1: any element where id == superClass  (causes circular .o deps)
+  _ID_EQ_SC := $(shell awk -F'"' '{id="";sc="";for(i=2;i<=NF;i+=2){if($$(i-1)~/ id=$$/)id=$$i;if($$(i-1)~/superClass=$$/)sc=$$i}if(id!=""&&sc!=""&&id==sc){print 1;exit}}' $(_CPROJ) 2>/dev/null)
+
+  # Check 2: wrong assembler inputType superClass (.input.s instead of .input)
+  _BAD_ASM := $(shell grep -c 'superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.s"' $(_CPROJ) 2>/dev/null)
+
+  _NEEDS_FIX :=
+  ifeq ($(_ID_EQ_SC),1)
+    _NEEDS_FIX := 1
+  endif
+  ifneq ($(_BAD_ASM),0)
+    ifneq ($(_BAD_ASM),)
+      _NEEDS_FIX := 1
+    endif
+  endif
+
+  ifeq ($(_NEEDS_FIX),1)
+    ifneq ($(wildcard $(_FIX)),)
+      $(info )
+      $(info ========================================================)
+      $(info  .cproject broken — CubeMX overwrote element IDs.)
+      $(info  Running fix_build.sh to repair automatically...)
+      $(info ========================================================)
+      _DUMMY := $(shell cd $(_PROJ) && bash $(_FIX) 2>&1)
+      $(info  Fixed! Run  Clean + Build  one more time.)
+      $(info ========================================================)
+      $(info )
+      $(error Build stopped after auto-repair. Please rebuild now.)
+    else
+      $(info )
+      $(info ========================================================)
+      $(info  .cproject broken — CubeMX overwrote element IDs.)
+      $(info  Fix: git checkout .cproject && rm -rf Debug/)
+      $(info  Then Clean + Build again.)
+      $(info ========================================================)
+      $(info )
+      $(error Build stopped — .cproject needs manual repair.)
+    endif
+  endif
+
+endif
