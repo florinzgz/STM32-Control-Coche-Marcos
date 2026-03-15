@@ -70,6 +70,8 @@ static HardwareSerial tofSerial(1);
 // resistor values → marginal signal → intermittent checksum failures).
 // -------------------------------------------------------------------------
 static constexpr unsigned long DIAG_INTERVAL_MS = 5000;
+static constexpr uint32_t DIAG_MIN_FRAMES_FOR_RANGE_CHECK = 10;  // Minimum OK frames before checking range mode
+static constexpr uint16_t SHORT_RANGE_MAX_DISTANCE_MM     = 1500; // If max distance < this, likely SHORT RANGE mode
 static unsigned long lastDiagMs_      = 0;
 static uint32_t diagFramesOk_        = 0;  // Frames parsed successfully
 static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
@@ -337,7 +339,9 @@ void update(float vehicleSpeedKmh) {
                                "correct R1=1kohm (series) + R2=4.7kohm (to GND). "
                                "See TOFSENSE_M_WIRING_GUIDE.md section 5");
             }
-            if (diagFramesOk_ > 10 && diagMaxDistMm_ > 0 && diagMaxDistMm_ < 1500) {
+            if (diagFramesOk_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
+                    && diagMaxDistMm_ > 0
+                    && diagMaxDistMm_ < SHORT_RANGE_MAX_DISTANCE_MM) {
                 Serial.printf("[OBSTACLE] WARNING: Max distance seen = %u mm "
                               "(expected up to 4000 mm in LONG RANGE mode). "
                               "Sensor may still be in SHORT RANGE / HIGH PRECISION "
