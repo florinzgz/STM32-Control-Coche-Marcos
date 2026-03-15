@@ -14,6 +14,9 @@
 # This file detects the problem at make-parse time and auto-repairs it
 # by running fix_build.sh, then stops the build with a clear message.
 # The next Clean + Build will succeed.
+#
+# It also catches stale Debug/ directories whose subdir.mk files still
+# contain circular .o self-dependencies even after .cproject was fixed.
 
 _PROJ  := $(realpath $(CURDIR)/..)
 _CPROJ := $(_PROJ)/.cproject
@@ -26,6 +29,19 @@ ifneq ($(wildcard $(_CPROJ)),)
 
   # Check 2: wrong assembler inputType superClass (.input.s instead of .input)
   _BAD_ASM := $(shell grep -c 'superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.s"' $(_CPROJ) 2>/dev/null)
+
+  # Check 3: stale subdir.mk with circular .o self-dependencies
+  # Catches the case where .cproject was already fixed but Debug/ was not
+  # regenerated.  Detects rules where the same .o path appears as both
+  # target and prerequisite (e.g. "foo.o: foo.o" instead of "foo.o: foo.c").
+  # The awk script: extracts target (before ":"), strips whitespace, then
+  # checks if that same target string appears in the prerequisites (after ":").
+  _STALE_MK := $(shell find $(CURDIR) -name subdir.mk -exec awk ' \
+    /\.o[[:space:]]*:/ { \
+      t = $$0; sub(/:.*$$/, "", t); gsub(/^[[:space:]]+|[[:space:]]+$$/, "", t); \
+      p = $$0; sub(/^[^:]*:/, "", p); \
+      if (t ~ /\.o$$/ && index(p, t) > 0) { print FILENAME; exit } \
+    }' {} + 2>/dev/null | head -1)
 
   _NEEDS_FIX :=
   ifeq ($(_ID_EQ_SC),1)
@@ -59,6 +75,21 @@ ifneq ($(wildcard $(_CPROJ)),)
       $(info )
       $(error Build stopped — .cproject needs manual repair.)
     endif
+  endif
+
+  # Even if .cproject looks OK, stale subdir.mk files may still have
+  # circular deps from a previous broken generation.
+  ifneq ($(_STALE_MK),)
+    $(info )
+    $(info ========================================================)
+    $(info  Stale Debug/ directory — subdir.mk has circular .o deps.)
+    $(info  Removing Debug/ so CubeIDE regenerates clean makefiles...)
+    $(info ========================================================)
+    _CLEANUP := $(shell rm -rf $(CURDIR))
+    $(info  Done! Run  Clean + Build  one more time.)
+    $(info ========================================================)
+    $(info )
+    $(error Build stopped after removing stale Debug/. Please rebuild now.)
   endif
 
 endif
