@@ -534,6 +534,16 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOB, &gpio);
     HAL_GPIO_WritePin(GPIOB, PIN_RELAY_LED | PIN_RELAY_LED_REAR, GPIO_PIN_RESET);
 
+    /* OneWire bus (PB0) — DS18B20 temperature sensors.
+     * Initialise as open-drain HIGH (idle) so the bus is in a known
+     * state before Sensor_Init() performs the first OW_Reset().       */
+    gpio.Pin   = PIN_ONEWIRE;
+    gpio.Mode  = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull  = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOB, &gpio);
+    HAL_GPIO_WritePin(GPIOB, PIN_ONEWIRE, GPIO_PIN_SET);
+
     /* Wheel speed EXTI inputs */
     gpio.Pin  = PIN_WHEEL_FL | PIN_WHEEL_FR | PIN_WHEEL_RL;
     gpio.Mode = GPIO_MODE_IT_RISING;
@@ -547,6 +557,15 @@ static void MX_GPIO_Init(void)
      * configuration as the wheel speed sensors (rising-edge trigger). */
     gpio.Pin  = PIN_STEER_CENTER;
     gpio.Mode = GPIO_MODE_IT_RISING;
+    gpio.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    /* Encoder Z-index pulse (PB4).  The Z channel is NOT used for
+     * control (see motor_control.c rationale), but the pin must be
+     * initialised as input with pull-up to match the .ioc config and
+     * prevent the NPN open-collector output from floating.            */
+    gpio.Pin  = PIN_ENC_Z;
+    gpio.Mode = GPIO_MODE_INPUT;
     gpio.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOB, &gpio);
 
