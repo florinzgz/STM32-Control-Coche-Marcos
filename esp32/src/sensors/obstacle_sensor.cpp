@@ -2,7 +2,9 @@
 // ESP32-S3 — Obstacle Sensor Driver (implementation)
 //
 // Reads TOFSense-M 8×8 LiDAR sensor via UART1.
-// Parses NLink_TOFSense_M_Frame0 protocol (400-byte frames).
+// Supports two frame formats with auto-detection:
+//   - Compact format: 257 bytes (1 header + 64×4 pixel data)
+//   - Frame0 format:  400 bytes (9-byte header + 64×6 pixel data + 6 reserved + 1 checksum)
 // Validates readings against physical range, detects stuck sensor,
 // and provides a warmup period for sensor stabilization.
 //
@@ -20,18 +22,27 @@
 namespace obstacle_sensor {
 
 // -------------------------------------------------------------------------
-// NLink_TOFSense_M_Frame0 protocol constants
-// Reference: TOFSense-M User Manual V3.0 (Nooploop)
-//            https://github.com/nooploop-dev/autorobo_a — nlink_tofsensem_frame0.c
+// TOFSense-M protocol constants
+// Two frame formats are supported with auto-detection:
+//   - Compact: 257 bytes (1 header + 64×4 pixel data), no checksum
+//   - Frame0:  400 bytes (9-byte header + 64×6 pixel data + 6 reserved + 1 checksum)
+// Per-pixel layout (both formats):
+//   [0-1] pixel_id: uint16 LE
+//   [2-3] distance: uint16 LE, mm
+//   [4-5] extra/signal: uint16 LE (Frame0 only)
+// Pixel validity: 0 < distance < INVALID_DIST_THRESHOLD (65000)
 // -------------------------------------------------------------------------
 static constexpr uint8_t  FRAME_HEADER      = 0x57;
 static constexpr uint8_t  FUNCTION_MARK     = 0x01;   // Frame0 function mark
-static constexpr uint16_t FRAME_LENGTH      = 400;    // Total frame size (bytes) for 8×8 mode
+static constexpr uint16_t FRAME0_LENGTH     = 400;    // Frame0 (legacy) total size
+static constexpr uint16_t COMPACT_FRAME_LENGTH = 257; // Compact: 1 + 64×4
 static constexpr uint8_t  PIXEL_COUNT_8X8   = 64;     // 8×8 matrix
-static constexpr uint8_t  BYTES_PER_PIXEL   = 6;      // 3 (distance) + 1 (dis_status) + 2 (signal_strength)
+static constexpr uint8_t  FRAME0_BYTES_PER_PIXEL  = 6;  // Frame0: ID(2) + Dist(2) + Extra(2)
+static constexpr uint8_t  COMPACT_BYTES_PER_PIXEL = 4;  // Compact: ID(2) + Dist(2)
+static constexpr uint16_t INVALID_DIST_THRESHOLD  = 65000; // Distances >= this are "no return"
 // Minimum number of valid pixels required to trust a frame's distance data.
 // When the TOFSense-M is in LONG RANGE mode and an object is within the
-// sensor's blind zone (< ~50 mm), most pixels saturate (dis_status ≠ 0)
+// sensor's blind zone (< ~50 mm), most pixels report invalid distances
 // but a few may report valid distances at 2000–3000 mm due to phase
 // wrap-around artifacts.  This produces the "data reversed" symptom:
 // very close objects appear far.  Requiring at least MIN_VALID_PIXELS
@@ -41,28 +52,19 @@ static constexpr uint8_t  MIN_VALID_PIXELS  = 4;
 // Maximum allowed distance spread (max − min) among valid pixels in a
 // single frame.  When an object is very close (< ~50 mm) or the sensor
 // is covered, the TOFSense-M may report MORE than MIN_VALID_PIXELS
-// pixels with dis_status == 0, but their distances scatter wildly
+// pixels with valid distances, but their values scatter wildly
 // (e.g. 121, 273, 1000 mm or 1700, 2500 mm) due to phase wrap-around.
 // A real obstacle produces consistent pixel distances (spread < 300 mm
 // even for curved surfaces).  Frames exceeding this threshold are
 // treated as wrap-around artifacts → emergency-close (minRangeMm).
 static constexpr uint16_t MAX_PIXEL_DISPERSION_MM = 500;
-// NLink protocol distance unit: 1 mm per LSB (raw int24 value IS in mm).
-// The official Nooploop code (nlink_tofsensem_frame0.c) divides by 1000.0f
-// to produce a float in meters; we keep the raw mm value for our uint16
-// Reading::distance_mm field.
 
-// Frame offsets (per official Nooploop struct ntsm_frame0_raw_t)
-static constexpr uint16_t OFF_HEADER        = 0;      // 0x57
-static constexpr uint16_t OFF_FUNCTION_MARK = 1;      // 0x01 (Frame0)
-static constexpr uint16_t OFF_RESERVED      = 2;      // Reserved
-static constexpr uint16_t OFF_ID            = 3;      // Sensor ID
-static constexpr uint16_t OFF_SYSTEM_TIME   = 4;      // System time (4 bytes, LE)
-static constexpr uint16_t OFF_PIXEL_COUNT   = 8;      // Pixel count (64 for 8×8)
-static constexpr uint16_t OFF_PIXEL_DATA    = 9;      // Start of pixel data
-// Pixel data: 64 pixels × 6 bytes = 384 bytes (offset 9..392)
-// Reserved1: 6 bytes (offset 393..398)
-// Checksum at offset 399 (8-bit sum mod 256 of bytes 0..398)
+// Frame offsets
+static constexpr uint16_t OFF_HEADER             = 0;
+static constexpr uint16_t OFF_FUNCTION_MARK      = 1;
+static constexpr uint16_t FRAME0_OFF_PIXEL_COUNT = 8;
+static constexpr uint16_t FRAME0_OFF_PIXEL_DATA  = 9;
+static constexpr uint16_t COMPACT_OFF_PIXEL_DATA = 1;  // Right after header
 
 // -------------------------------------------------------------------------
 // Module state
@@ -77,8 +79,12 @@ static bool          stuckActive_      = false;
 static bool          initialized_      = false;
 static bool          warmupDone_       = false;
 
-// UART receive buffer
-static uint8_t       rxBuf_[FRAME_LENGTH];
+// Frame format auto-detection state
+enum class FrameMode : uint8_t { AUTO, COMPACT, FRAME0 };
+static FrameMode detectedMode_ = FrameMode::AUTO;
+
+// UART receive buffer (sized for the larger frame format)
+static uint8_t       rxBuf_[FRAME0_LENGTH];
 static uint16_t      rxIdx_            = 0;
 
 // UART1 for TOFSense-M
@@ -96,7 +102,7 @@ static unsigned long lastDiagMs_      = 0;
 static uint32_t diagFramesOk_        = 0;  // Frames parsed successfully
 static uint32_t diagChecksumFail_    = 0;  // Checksum mismatches
 static uint32_t diagHeaderFail_      = 0;  // Wrong header or function mark
-static uint32_t diagAllPixelsInvalid_= 0;  // All 64 dis_status ≠ 0
+static uint32_t diagAllPixelsInvalid_= 0;  // All 64 pixels invalid (dist==0 or >=65000)
 static uint32_t diagHighDispersion_  = 0;  // Valid pixels but spread > MAX_PIXEL_DISPERSION_MM
 static uint32_t diagBytesDiscarded_  = 0;  // Bytes skipped waiting for 0x57
 static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current diag interval
@@ -146,80 +152,71 @@ enum class ParseResult : uint8_t {
     TOO_SHORT,         // Buffer too short
     BAD_HEADER,        // Wrong header or function_mark
     BAD_CHECKSUM,      // 8-bit sum mismatch
-    NO_VALID_PIXELS,   // All 64 pixels have dis_status ≠ 0, or fewer than MIN_VALID_PIXELS
+    NO_VALID_PIXELS,   // All 64 pixels invalid (dist==0 or >=65000), or fewer than MIN_VALID_PIXELS
     HIGH_DISPERSION    // Valid pixels present but distance spread exceeds MAX_PIXEL_DISPERSION_MM (wrap-around)
 };
 
 // -------------------------------------------------------------------------
-// Parse a complete NLink_TOFSense_M_Frame0 and extract minimum distance
-// Returns distance in mm via outDistMm, or 0 on failure.
+// Parse a complete TOFSense-M frame and extract minimum distance.
+// Supports both Frame0 (400-byte) and Compact (257-byte) formats via
+// parameterized pixel stride and offset.
 //
-// Per-pixel layout (6 bytes, per official Nooploop struct ntsm_frame0_pixel_raw_t):
-//   [0-2]  dis:              3-byte signed int24 LE, unit = mm
-//                            (official code divides by 1000.0f to get meters)
-//   [3]    dis_status:       0 = valid measurement
-//   [4-5]  signal_strength:  uint16 LE
+// Per-pixel layout (both formats):
+//   [0-1]  pixel_id:  uint16 LE
+//   [2-3]  distance:  uint16 LE, mm
+//   [4-5]  extra/signal: uint16 LE (Frame0 only)
+//
+// Pixel validity: 0 < distance < INVALID_DIST_THRESHOLD (65000)
 // -------------------------------------------------------------------------
-static ParseResult parseFrame(const uint8_t* buf, uint16_t len, uint16_t& outDistMm) {
+static ParseResult parseFrame(const uint8_t* buf, uint16_t len,
+                               uint8_t bytesPerPixel, uint16_t pixelDataOffset,
+                               bool checkChecksum, uint16_t frameLen,
+                               uint16_t& outDistMm) {
     outDistMm = 0;
-    if (len < FRAME_LENGTH) return ParseResult::TOO_SHORT;
-    if (buf[OFF_HEADER] != FRAME_HEADER || buf[OFF_FUNCTION_MARK] != FUNCTION_MARK)
-        return ParseResult::BAD_HEADER;
+    if (len < frameLen) return ParseResult::TOO_SHORT;
 
-    // Verify checksum: 8-bit sum of all bytes except the checksum byte itself
-    uint8_t checksum = 0;
-    for (uint16_t i = 0; i < FRAME_LENGTH - 1; i++) {
-        checksum += buf[i];
+    // Header validation
+    if (buf[OFF_HEADER] != FRAME_HEADER) return ParseResult::BAD_HEADER;
+
+    // For Frame0: validate function mark and checksum
+    if (checkChecksum) {
+        if (buf[OFF_FUNCTION_MARK] != FUNCTION_MARK) return ParseResult::BAD_HEADER;
+        uint8_t checksum = 0;
+        for (uint16_t i = 0; i < frameLen - 1; i++) checksum += buf[i];
+        if (checksum != buf[frameLen - 1]) return ParseResult::BAD_CHECKSUM;
     }
-    if (checksum != buf[FRAME_LENGTH - 1]) return ParseResult::BAD_CHECKSUM;
 
-    // Extract minimum valid distance across all 64 pixels.
+    // Extract minimum valid distance across all 64 pixels
     uint32_t minDistMm = 0xFFFFFFFF;
     uint32_t maxDistMm = 0;
     uint8_t validCount = 0;
 
     for (uint8_t px = 0; px < PIXEL_COUNT_8X8; px++) {
-        uint16_t base = OFF_PIXEL_DATA + (uint16_t)(px * BYTES_PER_PIXEL);
-        if (base + BYTES_PER_PIXEL > FRAME_LENGTH) break;
+        uint16_t base = pixelDataOffset + (uint16_t)(px * bytesPerPixel);
+        if (base + bytesPerPixel > frameLen) break;
 
-        uint8_t status = buf[base + 3];
-        if (status != 0) continue;  // Skip invalid pixels
+        // Distance: uint16 LE at bytes 2-3 of each pixel group
+        uint16_t dist = (uint16_t)buf[base + 2] | ((uint16_t)buf[base + 3] << 8);
 
-        // Distance: 3-byte signed little-endian, unit = mm per LSB
-        // (per official Nooploop nlink_tofsensem_frame0.c — NLINK_ParseInt24)
-        int32_t raw = (int32_t)buf[base]
-                    | ((int32_t)buf[base + 1] << 8)
-                    | ((int32_t)buf[base + 2] << 16);
-        // Sign-extend 24-bit value to 32-bit: check bit 23 (sign bit)
-        if (raw & 0x800000) raw |= (int32_t)0xFF000000;
+        // Valid if 0 < dist < INVALID_DIST_THRESHOLD
+        if (dist == 0 || dist >= INVALID_DIST_THRESHOLD) continue;
 
-        if (raw <= 0) continue;  // Negative or zero distance — skip
-
-        uint32_t distMm = (uint32_t)raw;  // Already in mm
+        uint32_t distMm = (uint32_t)dist;
         validCount++;
-        if (distMm < minDistMm) {
-            minDistMm = distMm;
-        }
-        if (distMm > maxDistMm) {
-            maxDistMm = distMm;
-        }
+        if (distMm < minDistMm) minDistMm = distMm;
+        if (distMm > maxDistMm) maxDistMm = distMm;
     }
 
     if (validCount == 0) return ParseResult::NO_VALID_PIXELS;
 
     // When very few pixels are valid while most are invalid, the valid
     // ones are likely phase wrap-around artifacts from an object within
-    // the sensor's blind zone (< ~50 mm).  Treat as emergency-close
-    // instead of reporting the misleading high distances.
+    // the sensor's blind zone (< ~50 mm).  Treat as emergency-close.
     if (validCount < MIN_VALID_PIXELS) return ParseResult::NO_VALID_PIXELS;
 
     // High-dispersion check: when valid pixels disagree widely (spread
     // > MAX_PIXEL_DISPERSION_MM), the readings are inconsistent and
-    // likely caused by phase wrap-around at close range.  A real obstacle
-    // produces consistent pixel distances; wrap-around produces scattered
-    // values (e.g. 121, 273, 1000 or 1700, 2500 mm).
-    // Note: maxDistMm >= minDistMm is guaranteed here because both are
-    // updated from the same valid-pixel set (validCount >= MIN_VALID_PIXELS).
+    // likely caused by phase wrap-around at close range.
     if ((maxDistMm - minDistMm) > MAX_PIXEL_DISPERSION_MM) {
         return ParseResult::HIGH_DISPERSION;
     }
@@ -256,6 +253,7 @@ void init(const Config& cfg) {
     warmupDone_    = false;
     initialized_   = true;
     rxIdx_         = 0;
+    detectedMode_  = FrameMode::AUTO;
 
     // Reset diagnostic counters
     lastDiagMs_         = millis();
@@ -272,7 +270,7 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d)\n",
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d, auto-detect Frame0/Compact)\n",
                   (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
                   cfg_.rxPin, cfg_.txPin);
     if (cfg_.txPin < 0) {
@@ -322,43 +320,81 @@ void update(float vehicleSpeedKmh) {
     while (tofSerial.available() > 0) {
         uint8_t byte = (uint8_t)tofSerial.read();
 
-        // Synchronize on header byte
+        // Sync on header byte
         if (rxIdx_ == 0 && byte != FRAME_HEADER) {
             diagBytesDiscarded_++;
-            continue;  // Discard until we find the header
-        }
-
-        // Validate function_mark as second sync byte.  The header value
-        // 0x57 can appear naturally inside pixel distance data (~1.5×
-        // per frame).  Checking byte[1]==0x01 immediately avoids locking
-        // onto a false header, which would consume 400 bytes before
-        // parseFrame() rejects it — potentially missing the real frame.
-        if (rxIdx_ == 1 && byte != FUNCTION_MARK) {
-            // Not a valid frame start — reset.
-            // If this byte is itself a header, keep it as byte[0].
-            if (byte == FRAME_HEADER) {
-                rxBuf_[0] = byte;
-                // rxIdx_ stays at 1
-            } else {
-                rxIdx_ = 0;
-                diagBytesDiscarded_++;
-            }
             continue;
         }
 
         rxBuf_[rxIdx_++] = byte;
 
+        // Determine current frame's target length based on detected mode
+        uint16_t targetLen = 0;
+        bool isFrame0 = false;
+
+        if (detectedMode_ == FrameMode::COMPACT) {
+            targetLen = COMPACT_FRAME_LENGTH;
+            isFrame0 = false;
+        } else if (detectedMode_ == FrameMode::FRAME0) {
+            targetLen = FRAME0_LENGTH;
+            isFrame0 = true;
+        } else {
+            // AUTO mode: decide based on header bytes once we have 9 bytes
+            if (rxIdx_ >= 9) {
+                if (rxBuf_[1] == FUNCTION_MARK && rxBuf_[2] == 0xFF && rxBuf_[8] == 0x40) {
+                    targetLen = FRAME0_LENGTH;
+                    isFrame0 = true;
+                } else {
+                    targetLen = COMPACT_FRAME_LENGTH;
+                    isFrame0 = false;
+                }
+            } else {
+                continue;  // Need more bytes to detect format
+            }
+        }
+
         // Complete frame received
-        if (rxIdx_ >= FRAME_LENGTH) {
+        if (targetLen > 0 && rxIdx_ >= targetLen) {
             uint16_t dist = 0;
-            ParseResult pr = parseFrame(rxBuf_, rxIdx_, dist);
+            ParseResult pr;
+            if (isFrame0) {
+                pr = parseFrame(rxBuf_, rxIdx_,
+                               FRAME0_BYTES_PER_PIXEL, FRAME0_OFF_PIXEL_DATA,
+                               true, FRAME0_LENGTH, dist);
+            } else {
+                pr = parseFrame(rxBuf_, rxIdx_,
+                               COMPACT_BYTES_PER_PIXEL, COMPACT_OFF_PIXEL_DATA,
+                               false, COMPACT_FRAME_LENGTH, dist);
+            }
+
             switch (pr) {
                 case ParseResult::OK:
                     measuredMm = dist;
                     gotFrame = true;
                     diagFramesOk_++;
-                    consecutiveInvalidFrames_ = 0;  // healthy frame → reset
+                    consecutiveInvalidFrames_ = 0;
                     if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
+                    if (detectedMode_ == FrameMode::AUTO) {
+                        detectedMode_ = isFrame0 ? FrameMode::FRAME0 : FrameMode::COMPACT;
+                    }
+                    break;
+                case ParseResult::NO_VALID_PIXELS:
+                    diagAllPixelsInvalid_++;
+                    consecutiveInvalidFrames_++;
+                    measuredMm = cfg_.minRangeMm;
+                    gotFrame   = true;
+                    if (detectedMode_ == FrameMode::AUTO) {
+                        detectedMode_ = isFrame0 ? FrameMode::FRAME0 : FrameMode::COMPACT;
+                    }
+                    break;
+                case ParseResult::HIGH_DISPERSION:
+                    diagHighDispersion_++;
+                    consecutiveInvalidFrames_++;
+                    measuredMm = cfg_.minRangeMm;
+                    gotFrame   = true;
+                    if (detectedMode_ == FrameMode::AUTO) {
+                        detectedMode_ = isFrame0 ? FrameMode::FRAME0 : FrameMode::COMPACT;
+                    }
                     break;
                 case ParseResult::BAD_HEADER:
                     diagHeaderFail_++;
@@ -366,34 +402,10 @@ void update(float vehicleSpeedKmh) {
                 case ParseResult::BAD_CHECKSUM:
                     diagChecksumFail_++;
                     break;
-                case ParseResult::NO_VALID_PIXELS:
-                    diagAllPixelsInvalid_++;
-                    consecutiveInvalidFrames_++;
-                    // All pixels report dis_status ≠ 0.  The TOFSense-M
-                    // cannot measure distances below ~50 mm; when an object
-                    // is that close every pixel saturates and reports
-                    // invalid.  Treat this as "too close to measure" —
-                    // an emergency-close detection at minRangeMm — instead
-                    // of letting the frame-timeout mark the sensor INVALID
-                    // (which would look like a sensor fault, not an
-                    // obstacle).
-                    measuredMm = cfg_.minRangeMm;
-                    gotFrame   = true;
-                    break;
-                case ParseResult::HIGH_DISPERSION:
-                    diagHighDispersion_++;
-                    consecutiveInvalidFrames_++;
-                    // Valid pixels present but their distances scatter
-                    // widely (e.g. 121, 273, 1000 mm when sensor is
-                    // covered).  This is phase wrap-around at close range.
-                    // Treat the same as NO_VALID_PIXELS: emergency-close.
-                    measuredMm = cfg_.minRangeMm;
-                    gotFrame   = true;
-                    break;
                 default:
                     break;
             }
-            rxIdx_ = 0;  // Reset for next frame
+            rxIdx_ = 0;
         }
     }
 
@@ -444,8 +456,8 @@ void update(float vehicleSpeedKmh) {
             // Detect "always 20 mm" symptom: when all (or most) frames have
             // NO valid pixels, the driver returns minRangeMm (20 mm).  This
             // almost always means the sensor is in SHORT RANGE mode and there
-            // is nothing within its ~1.3 m range — every pixel saturates and
-            // reports dis_status ≠ 0.  Warn with actionable instructions.
+            // is nothing within its ~1.3 m range — every pixel reports
+            // an invalid distance.  Warn with actionable instructions.
             if (!diagShortRangeWarned_
                     && diagAllPixelsInvalid_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
                     && diagFramesOk_ == 0) {
