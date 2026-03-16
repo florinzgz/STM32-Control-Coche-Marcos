@@ -20,24 +20,13 @@
 //   maximum measurable distance is only ~1.3–1.5 m; when nothing is within
 //   that range, every pixel reports an invalid distance (0 or ≥65000), and
 //   the driver returns minRangeMm (20 mm) as an emergency-close fallback.
-//   FIX: switch to Long Range mode:
-//       obstacle_sensor::Config cfg;
-//       cfg.txPin = 17;               // Connect ESP32 TX → sensor RX
-//       obstacle_sensor::init(cfg);
-//       delay(500);                    // Let sensor boot before config
-//       obstacle_sensor::configureLongRange();  // Sends 4 NLink commands
-//   Or use the NAssistant PC tool to change the measurement mode.
+//   FIX: use the NAssistant PC tool to switch the sensor to Long Range mode.
 //   The UART data frame parser itself is correct (verified by unit tests
 //   for 2000 mm and 4000 mm distances).
-//
-// AUTO-RECOVERY:
-//   If the initial configureLongRange() fails (e.g. sent before the sensor
-//   finished booting), the driver automatically detects sustained
-//   all-pixels-invalid frames and retries configureLongRange() up to 10
-//   times (every ~30 frames ≈ 3 seconds at 10 Hz).  This handles the
-//   common case where the sensor ignores commands sent too early at
-//   power-on.  Use getAutoRecoveryAttempts() to check how many retries
-//   were needed (0 = initial config worked, >0 = auto-recovery kicked in).
+//   NOTE: Sending configureLongRange() at boot was found to interfere with
+//   the sensor, causing it to stay stuck at 20 mm.  The sensor should be
+//   configured externally (via NAssistant) and the ESP32 should only read
+//   data frames, not send configuration commands at startup.
 //
 // WRAP-AROUND PROTECTION (close-range "data reversed" symptom):
 //   When the TOFSense-M is in LONG RANGE mode and an object is within the
@@ -269,17 +258,6 @@ bool setOutputMode(OutputMode mode);
 /// Save current configuration to sensor flash memory.
 /// Settings persist across power cycles after this command.
 bool saveConfig();
-
-// -------------------------------------------------------------------------
-// Auto-recovery: number of configureLongRange() retries performed.
-//
-// When the sensor stays in SHORT RANGE mode (e.g. configureLongRange()
-// was called before the sensor finished booting), the driver detects
-// sustained all-pixels-invalid frames and automatically retries.
-// This accessor returns the number of auto-recovery attempts so far
-// (useful for diagnostics / serial output).
-// -------------------------------------------------------------------------
-uint8_t getAutoRecoveryAttempts();
 
 // -------------------------------------------------------------------------
 // Convenience: configure sensor for long-range (4 m) operation.
