@@ -259,7 +259,7 @@ Pedal_% = ((Voltage_ADC - 0.33) / (2.97 - 0.33)) × 100%
 - **Datasheet**: STM32G474RE [DS12589 Rev 5]
 - **Reference Manual**: RM0440
 - **Programming Manual**: PM0214
-- **HAL Library**: STM32Cube_FW_G4_V1.5.0
+- **HAL Library**: STM32Cube_FW_G4_V1.6.2
 
 ---
 
