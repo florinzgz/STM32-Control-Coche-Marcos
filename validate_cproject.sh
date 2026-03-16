@@ -53,6 +53,15 @@ if command -v xmllint >/dev/null 2>&1; then
         echo "   Recommendation: delete .cproject and regenerate from .ioc"
         ERRORS=$((ERRORS + 1))
     fi
+elif _PY=$(command -v python3 || command -v python) 2>/dev/null && "$_PY" -c "import xml.etree.ElementTree" 2>/dev/null; then
+    # Fallback: use Python standard-library XML parser (python3 or python)
+    if "$_PY" -c "import xml.etree.ElementTree as ET; ET.parse('$CPROJECT')" 2>/dev/null; then
+        echo "   ✅ PASS — XML is well-formed (python)."
+    else
+        echo "   ❌ FAIL — XML is malformed (python)."
+        echo "   Recommendation: delete .cproject and regenerate from .ioc"
+        ERRORS=$((ERRORS + 1))
+    fi
 else
     # Fallback: basic check for matching tags
     open_tags=$(grep -co '<[a-zA-Z]' "$CPROJECT" 2>/dev/null || echo 0)
