@@ -89,6 +89,14 @@ powershell -Command ^
   "  } " ^
   "} " ^
   "" ^
+  "# Check 6: Trailing empty Defaults field " ^
+  "Write-Host ''; Write-Host '5. Trailing empty Defaults field'; " ^
+  "if ($content -match '\|\|\s*\x22\s*valueType=') { " ^
+  "  Write-Host '   FAIL: trailing empty Defaults field'; $errors++; " ^
+  "} else { " ^
+  "  Write-Host '   PASS: no trailing empty Defaults field.'; " ^
+  "} " ^
+  "" ^
   "# Summary " ^
   "Write-Host ''; Write-Host '======================================'; " ^
   "if ($errors -eq 0) { " ^
@@ -105,7 +113,7 @@ set ERRORS=%ERRORLEVEL%
 
 REM ---- Check 6: Stale Debug/ ----
 echo.
-echo 5. Stale Debug/ directory
+echo 6. Stale Debug/ directory
 if exist "Debug" (
     echo    WARNING: Debug/ directory exists. Consider deleting it before rebuild.
 ) else (

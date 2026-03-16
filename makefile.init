@@ -33,7 +33,10 @@ ifneq ($(wildcard $(_CPROJ)),)
   # Check 2b: duplicate element IDs among managed-build elements
   # (only elements with superClass — cconfiguration/storageModule/configuration
   #  intentionally share IDs and are excluded)
-  _DUP_IDS := $(shell grep -E 'superClass="[^"]*"' $(_CPROJ) 2>/dev/null | grep -oP '(?<=id=")[^"]*' | sort | uniq -d | head -1)
+  _DUP_IDS := $(shell grep -E 'superClass="[^"]*"' $(_CPROJ) 2>/dev/null | sed -n 's/.*id="\([^"]*\)".*/\1/p' | sort | uniq -d | head -1)
+
+  # Check 4: trailing empty Defaults field (|| "" causes GCC "" argument)
+  _EMPTY_DEFAULTS := $(shell grep -c 'name="Defaults".*|| *"' $(_CPROJ) 2>/dev/null)
 
   # Check 3: stale subdir.mk with circular .o self-dependencies
   # Catches the case where .cproject was already fixed but Debug/ was not
@@ -59,6 +62,11 @@ ifneq ($(wildcard $(_CPROJ)),)
   endif
   ifneq ($(_DUP_IDS),)
     _NEEDS_FIX := 1
+  endif
+  ifneq ($(_EMPTY_DEFAULTS),0)
+    ifneq ($(_EMPTY_DEFAULTS),)
+      _NEEDS_FIX := 1
+    endif
   endif
 
   ifeq ($(_NEEDS_FIX),1)

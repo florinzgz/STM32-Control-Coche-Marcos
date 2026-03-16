@@ -13,6 +13,7 @@
 #   4. Wrong assembler inputType superClass  (.input.s instead of .input)
 #   5. Required tool elements present  (compiler, linker, assembler)
 #   6. Stale Debug/ directory with circular .o self-dependencies
+#   7. Trailing empty Defaults field  (|| "" causes GCC "" argument)
 #
 # Exit codes:
 #   0  — all checks passed
@@ -50,6 +51,24 @@ if command -v xmllint >/dev/null 2>&1; then
         echo "   ✅ PASS — XML is well-formed."
     else
         echo "   ❌ FAIL — XML is malformed."
+        echo "   Recommendation: delete .cproject and regenerate from .ioc"
+        ERRORS=$((ERRORS + 1))
+    fi
+elif _PY=$(command -v python3 || command -v python || command -v py) 2>/dev/null && "$_PY" -c "import xml.etree.ElementTree" 2>/dev/null; then
+    # Fallback: use Python standard-library XML parser (python3, python, or py)
+    if "$_PY" -c "import xml.etree.ElementTree as ET; ET.parse('$CPROJECT')" 2>/dev/null; then
+        echo "   ✅ PASS — XML is well-formed ($(basename "$_PY"))."
+    else
+        echo "   ❌ FAIL — XML is malformed ($(basename "$_PY"))."
+        echo "   Recommendation: delete .cproject and regenerate from .ioc"
+        ERRORS=$((ERRORS + 1))
+    fi
+elif _PS=$(command -v powershell.exe || command -v pwsh) 2>/dev/null; then
+    # Fallback: use PowerShell XML parser (always available on Windows/MINGW64)
+    if "$_PS" -NoProfile -Command "[xml](Get-Content '$CPROJECT')" >/dev/null 2>&1; then
+        echo "   ✅ PASS — XML is well-formed ($(basename "$_PS"))."
+    else
+        echo "   ❌ FAIL — XML is malformed ($(basename "$_PS"))."
         echo "   Recommendation: delete .cproject and regenerate from .ioc"
         ERRORS=$((ERRORS + 1))
     fi
@@ -96,7 +115,7 @@ fi
 echo ""
 echo "3. Duplicate element IDs"
 DUP_IDS=$(grep -E 'superClass="[^"]*"' "$CPROJECT" 2>/dev/null \
-    | grep -oP '(?<=id=")[^"]*' \
+    | sed -n 's/.*id="\([^"]*\)".*/\1/p' \
     | sort | uniq -d)
 if [ -z "$DUP_IDS" ]; then
     echo "   ✅ PASS — all element IDs are unique."
@@ -170,6 +189,21 @@ if [ -d "Debug" ]; then
     fi
 else
     echo "   ✅ PASS — no Debug/ directory (will be regenerated on build)."
+fi
+
+# ---- Check 7: Trailing empty Defaults field ----
+# CubeMX migration sometimes appends an empty field ("|| ") to the Defaults
+# option value.  CubeIDE emits the empty field as "" on the GCC command line,
+# causing "linker input file not found" build errors.
+echo ""
+echo "7. Trailing empty Defaults field"
+if grep -q 'name="Defaults".*|| *" *valueType=' "$CPROJECT" 2>/dev/null; then
+    echo "   ❌ FAIL — Defaults option has trailing empty field (|| \"\")"
+    echo "   This causes arm-none-eabi-gcc to receive an empty \"\" argument."
+    echo "   Run fix_build.sh to repair."
+    ERRORS=$((ERRORS + 1))
+else
+    echo "   ✅ PASS — no trailing empty Defaults field."
 fi
 
 # ---- Summary ----

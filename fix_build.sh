@@ -18,6 +18,7 @@
 #   2. Scans .cproject for id==superClass conflicts and fixes them
 #   3. Scans for duplicate element IDs among managed-build elements
 #   4. Fixes the assembler inputType superClass if needed
+#   5. Strips trailing empty Defaults fields (|| "") that cause GCC "" errors
 
 set -e
 
@@ -87,7 +88,7 @@ fi
 echo "🔍 Checking .cproject for duplicate element IDs..."
 
 DUP_IDS=$(grep -E 'superClass="[^"]*"' .cproject 2>/dev/null \
-    | grep -oP '(?<=id=")[^"]*' \
+    | sed -n 's/.*id="\([^"]*\)".*/\1/p' \
     | sort | uniq -d)
 DUP_FIXED=0
 
@@ -135,6 +136,16 @@ if grep -q 'superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler
     echo "   ⚠️  Fixing assembler inputType superClass (.input.s → .input)"
     sed 's|superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.s"|superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input"|' \
         .cproject > .cproject.tmp && mv .cproject.tmp .cproject
+    FIXED=1
+fi
+
+# ---- Step 5: Fix trailing empty Defaults field ----
+# CubeMX migration sometimes leaves a trailing "|| " in the Defaults option
+# value, producing an empty field that CubeIDE passes to GCC as "".
+if grep -q 'name="Defaults".*|| *" *valueType=' .cproject 2>/dev/null; then
+    echo "   ⚠️  Fixing trailing empty Defaults field (|| \"\")"
+    sed '/name="Defaults"/s/ *|| *" *valueType=/" valueType=/' .cproject > .cproject.tmp \
+        && mv .cproject.tmp .cproject
     FIXED=1
 fi
 
