@@ -328,7 +328,7 @@ void update(float vehicleSpeedKmh) {
 
         rxBuf_[rxIdx_++] = byte;
 
-        // Determine current frame's target length based on detected/detected mode
+        // Determine current frame's target length based on detected mode
         uint16_t targetLen = 0;
         bool isFrame0 = false;
 
