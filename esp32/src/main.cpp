@@ -357,26 +357,11 @@ void setup() {
 
     // Initialize obstacle sensor driver (TOFSense-M on UART1)
     //   RX = GPIO 18 (sensor TX → ESP32 RX via voltage divider)
-    //   TX = GPIO 17 (ESP32 TX → sensor RX, needed for configuration commands)
-    {
-        obstacle_sensor::Config obsCfg;
-        obsCfg.txPin = 17;   // Enable TX so configureLongRange() can send commands
-        obstacle_sensor::init(obsCfg);
-        // Wait for the sensor to boot before sending configuration commands.
-        // The TOFSense-M needs time after power-on to initialize its command
-        // processor.  Without this delay, commands sent immediately after UART
-        // init are ignored and the sensor stays in SHORT RANGE mode (→ 20 mm).
-        // 2000 ms is conservative; the sensor typically boots in ~1 s, but
-        // cold-start and brown-out recovery can take longer.
-        delay(2000);
-        // Switch sensor to LONG RANGE mode (4 m).  Without this, the sensor
-        // stays in SHORT RANGE mode (max ~1.3 m) and reports 20 mm in open
-        // air because all pixels return invalid when nothing is in range.
-        // If this initial attempt fails (e.g. sensor still booting), the
-        // driver's auto-recovery will retry automatically after detecting
-        // sustained all-pixels-invalid frames.
-        obstacle_sensor::configureLongRange();
-    }
+    //   Read-only mode: the sensor must already be configured in LONG RANGE
+    //   mode (factory default or via NAssistant PC tool).  Sending config
+    //   commands (configureLongRange) was found to interfere with the sensor,
+    //   causing it to stay stuck at 20 mm.
+    obstacle_sensor::init();
 
     // Initialize CAN TX for obstacle distance frame (0x208)
     can_obstacle::init();
