@@ -53,12 +53,21 @@ if command -v xmllint >/dev/null 2>&1; then
         echo "   Recommendation: delete .cproject and regenerate from .ioc"
         ERRORS=$((ERRORS + 1))
     fi
-elif _PY=$(command -v python3 || command -v python) 2>/dev/null && "$_PY" -c "import xml.etree.ElementTree" 2>/dev/null; then
-    # Fallback: use Python standard-library XML parser (python3 or python)
+elif _PY=$(command -v python3 || command -v python || command -v py) 2>/dev/null && "$_PY" -c "import xml.etree.ElementTree" 2>/dev/null; then
+    # Fallback: use Python standard-library XML parser (python3, python, or py)
     if "$_PY" -c "import xml.etree.ElementTree as ET; ET.parse('$CPROJECT')" 2>/dev/null; then
         echo "   ✅ PASS — XML is well-formed ($(basename "$_PY"))."
     else
         echo "   ❌ FAIL — XML is malformed ($(basename "$_PY"))."
+        echo "   Recommendation: delete .cproject and regenerate from .ioc"
+        ERRORS=$((ERRORS + 1))
+    fi
+elif _PS=$(command -v powershell.exe || command -v pwsh) 2>/dev/null; then
+    # Fallback: use PowerShell XML parser (always available on Windows/MINGW64)
+    if "$_PS" -NoProfile -Command "[xml](Get-Content '$CPROJECT')" >/dev/null 2>&1; then
+        echo "   ✅ PASS — XML is well-formed ($(basename "$_PS"))."
+    else
+        echo "   ❌ FAIL — XML is malformed ($(basename "$_PS"))."
         echo "   Recommendation: delete .cproject and regenerate from .ioc"
         ERRORS=$((ERRORS + 1))
     fi
