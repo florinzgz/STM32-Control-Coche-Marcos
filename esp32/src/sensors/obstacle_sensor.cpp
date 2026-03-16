@@ -109,6 +109,21 @@ static uint16_t diagMaxDistMm_       = 0;  // Maximum distance seen in current d
 static bool     diagShortRangeWarned_= false; // Only warn about SHORT RANGE once per session
 
 // -------------------------------------------------------------------------
+// Auto-recovery state — retries configureLongRange() when the sensor is
+// stuck in SHORT RANGE mode (sustained all-pixels-invalid frames).
+// -------------------------------------------------------------------------
+// Number of consecutive frames where all pixels were invalid or had high
+// dispersion.  Reset to 0 whenever a ParseResult::OK frame arrives.
+static uint32_t consecutiveInvalidFrames_ = 0;
+// Number of auto-recovery attempts already performed.
+static uint8_t  autoRecoveryAttempts_     = 0;
+// Maximum number of automatic configureLongRange() retries.
+static constexpr uint8_t  MAX_AUTO_RECOVERY_ATTEMPTS    = 10;
+// Number of consecutive invalid frames before triggering auto-recovery.
+// At 10 Hz frame rate, 30 frames ≈ 3 seconds of sustained failure.
+static constexpr uint32_t AUTO_RECOVERY_FRAME_THRESHOLD = 30;
+
+// -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
 //   < 200 mm  → zone 4 (emergency, scale=0.0)
 //   200–500   → zone 3 (critical,  scale=0.3)
@@ -250,6 +265,8 @@ void init(const Config& cfg) {
     diagBytesDiscarded_ = 0;
     diagMaxDistMm_      = 0;
     diagShortRangeWarned_ = false;
+    consecutiveInvalidFrames_ = 0;
+    autoRecoveryAttempts_     = 0;
 
     reading_ = Reading{};  // Reset to defaults
 
@@ -348,6 +365,7 @@ void update(float vehicleSpeedKmh) {
                     measuredMm = dist;
                     gotFrame = true;
                     diagFramesOk_++;
+                    consecutiveInvalidFrames_ = 0;
                     if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
                     if (detectedMode_ == FrameMode::AUTO) {
                         detectedMode_ = isFrame0 ? FrameMode::FRAME0 : FrameMode::COMPACT;
@@ -355,6 +373,7 @@ void update(float vehicleSpeedKmh) {
                     break;
                 case ParseResult::NO_VALID_PIXELS:
                     diagAllPixelsInvalid_++;
+                    consecutiveInvalidFrames_++;
                     measuredMm = cfg_.minRangeMm;
                     gotFrame   = true;
                     if (detectedMode_ == FrameMode::AUTO) {
@@ -363,6 +382,7 @@ void update(float vehicleSpeedKmh) {
                     break;
                 case ParseResult::HIGH_DISPERSION:
                     diagHighDispersion_++;
+                    consecutiveInvalidFrames_++;
                     measuredMm = cfg_.minRangeMm;
                     gotFrame   = true;
                     if (detectedMode_ == FrameMode::AUTO) {
@@ -380,6 +400,29 @@ void update(float vehicleSpeedKmh) {
             }
             rxIdx_ = 0;
         }
+    }
+
+    // Auto-recovery: if the sensor keeps returning all-invalid frames for
+    // an extended period (AUTO_RECOVERY_FRAME_THRESHOLD consecutive frames),
+    // it is likely still in SHORT RANGE mode.  Retry configureLongRange()
+    // up to MAX_AUTO_RECOVERY_ATTEMPTS times.  This handles the case where
+    // the initial configureLongRange() in setup() was sent before the
+    // sensor's command processor was ready (sensor still booting).
+    if (consecutiveInvalidFrames_ >= AUTO_RECOVERY_FRAME_THRESHOLD
+            && autoRecoveryAttempts_ < MAX_AUTO_RECOVERY_ATTEMPTS
+            && cfg_.txPin >= 0) {
+        autoRecoveryAttempts_++;
+        Serial.printf("[OBSTACLE] Auto-recovery attempt %u/%u: "
+                      "re-sending configureLongRange() "
+                      "(%lu consecutive invalid frames)\n",
+                      (unsigned)autoRecoveryAttempts_,
+                      (unsigned)MAX_AUTO_RECOVERY_ATTEMPTS,
+                      (unsigned long)consecutiveInvalidFrames_);
+        configureLongRange();
+        // Reset counter to provide a 30-frame (~3 second) backoff before
+        // the next retry attempt.  Without this reset, the ≥ 30 condition
+        // would trigger on every subsequent update() call.
+        consecutiveInvalidFrames_ = 0;
     }
 
     // Periodic diagnostic output (every DIAG_INTERVAL_MS)
@@ -414,8 +457,9 @@ void update(float vehicleSpeedKmh) {
                 Serial.printf("[OBSTACLE] WARNING: All %lu frames returned "
                               "NO valid pixels (distance stuck at %u mm). "
                               "Sensor is likely in SHORT RANGE mode with no "
-                              "obstacle within ~1.3 m.  Fix: use NAssistant "
-                              "to switch the sensor to Long Range mode.\n",
+                              "obstacle within ~1.3 m.  Fix: call "
+                              "configureLongRange() with txPin connected, "
+                              "or use NAssistant to switch to Long Range mode.\n",
                               (unsigned long)diagAllPixelsInvalid_,
                               (unsigned)cfg_.minRangeMm);
                 diagShortRangeWarned_ = true;
@@ -427,8 +471,9 @@ void update(float vehicleSpeedKmh) {
                 Serial.printf("[OBSTACLE] WARNING: Max distance seen = %u mm "
                               "(expected up to 4000 mm in LONG RANGE mode). "
                               "Sensor may still be in SHORT RANGE / HIGH PRECISION "
-                              "mode. Fix: use NAssistant to switch the sensor to "
-                              "Long Range mode.\n",
+                              "mode. Fix: connect ESP32 TX to sensor RX, set "
+                              "Config::txPin, and call configureLongRange(); or use "
+                              "NAssistant to switch to Long Range mode.\n",
                               (unsigned)diagMaxDistMm_);
                 diagShortRangeWarned_ = true;  // Only warn once per session
             }
@@ -506,6 +551,10 @@ void update(float vehicleSpeedKmh) {
 
 Reading getReading() {
     return reading_;
+}
+
+uint8_t getAutoRecoveryAttempts() {
+    return autoRecoveryAttempts_;
 }
 
 // =========================================================================
