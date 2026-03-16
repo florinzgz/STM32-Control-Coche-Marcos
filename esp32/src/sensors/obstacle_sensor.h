@@ -2,7 +2,10 @@
 // ESP32-S3 — Obstacle Sensor Driver (TOFSense-M by Nooploop)
 //
 // Reads distance from TOFSense-M 8×8 LiDAR sensor via UART.
-// Parses NLink_TOFSense_M_Frame0 protocol (400-byte frames at 921600 bps).
+// Supports two frame formats with auto-detection:
+//   - Compact format: 257 bytes (1 header + 64×4 pixel data)
+//   - Frame0 format:  400 bytes (9-byte header + 64×6 pixel data + 6 reserved + 1 checksum)
+// Parses at 921600 bps (factory default).
 // Provides validated readings with stuck-sensor detection,
 // warmup filtering, and physical-range validation.
 //
@@ -15,8 +18,8 @@
 //   actual distance to obstacles, the most likely cause is that it is
 //   configured in "Short Range / High Precision" mode.  In this mode the
 //   maximum measurable distance is only ~1.3–1.5 m; when nothing is within
-//   that range, every pixel reports dis_status ≠ 0 (invalid), and the
-//   driver returns minRangeMm (20 mm) as an emergency-close fallback.
+//   that range, every pixel reports an invalid distance (0 or ≥65000), and
+//   the driver returns minRangeMm (20 mm) as an emergency-close fallback.
 //   FIX: switch to Long Range mode:
 //       obstacle_sensor::Config cfg;
 //       cfg.txPin = 17;               // Connect ESP32 TX → sensor RX
@@ -38,7 +41,7 @@
 //
 // WRAP-AROUND PROTECTION (close-range "data reversed" symptom):
 //   When the TOFSense-M is in LONG RANGE mode and an object is within the
-//   sensor's blind zone (< ~50 mm), most pixels saturate (dis_status ≠ 0)
+//   sensor's blind zone (< ~50 mm), most pixels saturate (invalid distance)
 //   but a few may report valid distances at 2000–3000 mm due to phase
 //   wrap-around.  This produces the "datos al revés" symptom: close objects
 //   appear far.  The driver uses two complementary protections:
@@ -49,8 +52,8 @@
 //   2. MAX_PIXEL_DISPERSION_MM (500): When valid pixels are present but
 //      their distances scatter widely (max − min > 500 mm), the frame is
 //      treated as wrap-around → emergency-close.  This catches the case
-//      where MORE than 4 pixels pass dis_status==0 but report inconsistent
-//      wrap-around distances (e.g. 121, 273, 1000 or 1700, 2500 mm).
+//      where MORE than 4 pixels report valid distances but with inconsistent
+//      wrap-around values (e.g. 121, 273, 1000 or 1700, 2500 mm).
 //      A real obstacle produces consistent pixel distances (spread < 300 mm
 //      even for curved surfaces).
 //
@@ -60,11 +63,13 @@
 //   (no obstacle).  This prevents open-air readings from being marked
 //   INVALID (which would look like a sensor fault to the STM32).
 //
-// Per-pixel layout (6 bytes each, per Nooploop nlink_tofsensem_frame0.c):
-//   [0-2]  dis:              3-byte signed int24 LE, unit = mm
-//                            (official code: NLINK_ParseInt24() / 1000.0f → meters)
-//   [3]    dis_status:       0 = valid measurement
-//   [4-5]  signal_strength:  uint16 LE
+// Per-pixel layout (both formats share the same distance extraction):
+//   [0-1]  pixel_id:  uint16 LE — pixel/target identifier
+//   [2-3]  distance:  uint16 LE, unit = mm
+//   [4-5]  extra/signal: uint16 LE (Frame0 only, not present in compact)
+//
+// Pixel validity: 0 < distance < 65000 means valid measurement.
+//                 distance == 0 or distance >= 65000 means invalid/no return.
 //
 // Sensor output rate: ~10 Hz (active mode).
 // Output: distance_mm, zone, health flag, stuck flag, sensor status.

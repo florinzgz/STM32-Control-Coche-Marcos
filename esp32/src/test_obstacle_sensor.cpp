@@ -3,8 +3,8 @@
  * @file    test_obstacle_sensor.cpp
  * @brief   Host-compilable unit tests for obstacle_sensor frame parsing.
  *
- *          Tests the NLink_TOFSense_M_Frame0 protocol parsing against the
- *          official Nooploop specification (User Manual V3.0).
+ *          Tests the TOFSense-M protocol parsing for both Frame0 (400-byte)
+ *          and Compact (257-byte) formats.
  *
  *          Compile and run on host (from esp32/src/):
  *            g++ -std=c++17 -I. -I../test_stubs \
@@ -12,13 +12,15 @@
  *                -o /tmp/test_obstacle_sensor && /tmp/test_obstacle_sensor
  *
  *          Requirements verified:
- *            1. Frame header = 0x57, function_mark = 0x01
- *            2. Pixel data starts at byte offset 9 (byte 8 = pixel_count)
- *            3. Per-pixel layout: dis(3) + dis_status(1) + signal_strength(2)
- *            4. Distance unit: mm (raw int24 value is in mm)
- *            5. Checksum: sum of bytes [0..398] mod 256, stored at byte 399
- *            6. Invalid frames rejected (wrong header, bad checksum)
- *            7. Zone mapping matches STM32 safety tiers
+ *            1. Frame0: header = 0x57, function_mark = 0x01, 400 bytes
+ *            2. Compact: header = 0x57, 257 bytes, no checksum
+ *            3. Per-pixel layout: pixel_id(2) + distance(2) [+ extra(2) for Frame0]
+ *            4. Distance: uint16 LE at bytes 2-3 of each pixel group, in mm
+ *            5. Pixel validity: 0 < dist < 65000
+ *            6. Frame0 checksum: sum of bytes [0..398] mod 256, stored at byte 399
+ *            7. Invalid frames rejected (wrong header, bad checksum)
+ *            8. Zone mapping matches STM32 safety tiers
+ *            9. Auto-detection of frame format
  ****************************************************************************
  */
 
@@ -52,46 +54,83 @@ static int s_tests_failed = 0;
 
 /* ---- Frame construction helpers ----------------------------------------- */
 
-// Official NLink_TOFSense_M_Frame0 layout (400 bytes for 8x8):
+// Frame0 layout (400 bytes for 8x8):
 //   [0]     frame_header    = 0x57
 //   [1]     function_mark   = 0x01
-//   [2]     reserved
+//   [2]     reserved        = 0xFF
 //   [3]     id
 //   [4-7]   system_time     (uint32 LE)
-//   [8]     pixel_count     (64 for 8x8)
+//   [8]     pixel_count     (0x40 = 64 for 8x8)
 //   [9-392] pixel_data      (64 × 6 bytes)
 //   [393-398] reserved1     (6 bytes)
 //   [399]   checksum        (sum of bytes [0..398] mod 256)
 
 static constexpr uint16_t FRAME_LEN = 400;
+static constexpr uint16_t COMPACT_LEN = 257;
 
 static void buildFrame(uint8_t* buf) {
     memset(buf, 0, FRAME_LEN);
     buf[0] = 0x57;  // frame_header
     buf[1] = 0x01;  // function_mark
-    buf[2] = 0x00;  // reserved
+    buf[2] = 0xFF;  // reserved (used for auto-detection)
     buf[3] = 0x01;  // id
     // system_time = 0
-    buf[8] = 64;    // pixel_count = 64 (8x8)
+    buf[8] = 0x40;  // pixel_count = 64 (8x8) — 0x40 used for auto-detection
 }
 
-// Set a pixel's distance and status in the frame buffer.
-// Per-pixel layout (6 bytes each):
-//   [0-2] dis: int24 LE, unit = mm (per official Nooploop nlink_tofsensem_frame0.c)
-//   [3]   dis_status: 0 = valid
-//   [4-5] signal_strength: uint16 LE
+// Build a compact frame (257 bytes): header + 64×4 pixel data
+static void buildCompactFrame(uint8_t* buf) {
+    memset(buf, 0, COMPACT_LEN);
+    buf[0] = 0x57;  // frame_header (only byte of header in compact)
+}
+
+// Set a pixel's distance in the Frame0 buffer.
+// Per-pixel layout (6 bytes each in Frame0):
+//   [0-1] pixel_id: uint16 LE
+//   [2-3] distance: uint16 LE, mm
+//   [4-5] extra/signal: uint16 LE
+//
+// The `status` parameter is kept for API compatibility but is unused.
+// To mark a pixel as invalid, use distMm = 0 or distMm >= 65000.
 static void setPixel(uint8_t* buf, uint8_t px, int32_t distMm,
-                     uint8_t status, uint16_t signal) {
-    uint16_t base = 9 + px * 6;  // pixel data starts at offset 9
-    // Distance: 3-byte LE signed (mm)
-    buf[base + 0] = (uint8_t)(distMm & 0xFF);
-    buf[base + 1] = (uint8_t)((distMm >> 8) & 0xFF);
-    buf[base + 2] = (uint8_t)((distMm >> 16) & 0xFF);
-    // dis_status
-    buf[base + 3] = status;
-    // signal_strength (uint16 LE)
+                     uint8_t /*status_unused*/, uint16_t signal) {
+    uint16_t base = 9 + px * 6;  // Frame0: pixel data starts at offset 9
+    // Pixel ID (bytes 0-1): use pixel index as ID
+    buf[base + 0] = px;
+    buf[base + 1] = 0x00;
+    // Distance: uint16 LE at bytes 2-3
+    uint16_t dist16;
+    if (distMm <= 0) {
+        dist16 = 0;  // Invalid (zero distance)
+    } else if (distMm >= 65000) {
+        dist16 = 65535;  // "No return"
+    } else {
+        dist16 = (uint16_t)distMm;
+    }
+    buf[base + 2] = (uint8_t)(dist16 & 0xFF);
+    buf[base + 3] = (uint8_t)((dist16 >> 8) & 0xFF);
+    // Extra/signal (bytes 4-5)
     buf[base + 4] = (uint8_t)(signal & 0xFF);
     buf[base + 5] = (uint8_t)((signal >> 8) & 0xFF);
+}
+
+// Set a pixel in a compact frame buffer (4 bytes per pixel, offset 1)
+static void setCompactPixel(uint8_t* buf, uint8_t px, int32_t distMm, uint16_t pixelId = 0) {
+    uint16_t base = 1 + px * 4;  // Compact: pixel data starts at offset 1
+    // Pixel ID (bytes 0-1)
+    buf[base + 0] = (uint8_t)(pixelId & 0xFF);
+    buf[base + 1] = (uint8_t)((pixelId >> 8) & 0xFF);
+    // Distance: uint16 LE at bytes 2-3
+    uint16_t dist16;
+    if (distMm <= 0) {
+        dist16 = 0;
+    } else if (distMm >= 65000) {
+        dist16 = 65535;
+    } else {
+        dist16 = (uint16_t)distMm;
+    }
+    buf[base + 2] = (uint8_t)(dist16 & 0xFF);
+    buf[base + 3] = (uint8_t)((dist16 >> 8) & 0xFF);
 }
 
 // Helper: set multiple consecutive pixels to the same valid distance.
@@ -120,7 +159,7 @@ static void writeChecksum(uint8_t* buf) {
 // through the public API (init + update + getReading).
 
 // UART data injection: override the HardwareSerial stub to provide data
-static uint8_t  g_uart_buf[FRAME_LEN * 2];
+static uint8_t  g_uart_buf[FRAME_LEN * 2 + COMPACT_LEN];
 static uint16_t g_uart_len = 0;
 static uint16_t g_uart_pos = 0;
 
@@ -145,20 +184,27 @@ static uint16_t g_uart_pos = 0;
 
 /* ---- Tests -------------------------------------------------------------- */
 
-// Test 1: Verify frame layout constants match official Nooploop spec
+// Test 1: Verify frame layout constants match protocol spec
 static void test_frame_constants() {
     printf("  test_frame_constants...\n");
 
-    // Official struct:
+    // Frame0:
     // header(1) + function_mark(1) + reserved(1) + id(1) + system_time(4)
     //   + pixel_count(1) + pixels(64*6) + reserved1(6) + sum(1) = 400
     ASSERT_EQ(1 + 1 + 1 + 1 + 4 + 1 + 64 * 6 + 6 + 1, 400);
 
-    // Pixel data starts after header (9 bytes)
+    // Compact:
+    // header(1) + pixels(64*4) = 257
+    ASSERT_EQ(1 + 64 * 4, 257);
+
+    // Pixel data starts after header (9 bytes) in Frame0
     ASSERT_EQ(1 + 1 + 1 + 1 + 4 + 1, 9);  // pixel data offset
 
-    // Each pixel is 6 bytes: dis(3) + dis_status(1) + signal_strength(2)
-    ASSERT_EQ(3 + 1 + 2, 6);
+    // Each Frame0 pixel is 6 bytes: pixel_id(2) + distance(2) + extra(2)
+    ASSERT_EQ(2 + 2 + 2, 6);
+
+    // Each Compact pixel is 4 bytes: pixel_id(2) + distance(2)
+    ASSERT_EQ(2 + 2, 4);
 }
 
 // Test 2: Build a valid frame and verify checksum computation
@@ -189,29 +235,29 @@ static void test_pixel_data_offset() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // byte 8 should be pixel_count (64), NOT part of pixel data
-    ASSERT_EQ(frame[8], 64);
+    // byte 8 should be pixel_count (0x40 = 64), NOT part of pixel data
+    ASSERT_EQ(frame[8], 0x40);
 
     // Pixel 0 data starts at byte 9
     // Set pixel 0 distance to a known value
     int32_t testDist = 500;  // 500 mm
     setPixel(frame, 0, testDist, 0, 100);
 
-    // Verify byte 9 contains the LSB of the distance
-    ASSERT_EQ(frame[9], (uint8_t)(testDist & 0xFF));
-    ASSERT_EQ(frame[10], (uint8_t)((testDist >> 8) & 0xFF));
-    ASSERT_EQ(frame[11], (uint8_t)((testDist >> 16) & 0xFF));
+    // Verify bytes 9-10 are pixel_id (px=0 → 0x00, 0x00)
+    ASSERT_EQ(frame[9], 0x00);
+    ASSERT_EQ(frame[10], 0x00);
 
-    // Verify byte 12 is dis_status (0 = valid)
-    ASSERT_EQ(frame[12], 0);
+    // Verify bytes 11-12 are distance uint16 LE (500 = 0x01F4)
+    ASSERT_EQ(frame[11], (uint8_t)(testDist & 0xFF));       // 0xF4
+    ASSERT_EQ(frame[12], (uint8_t)((testDist >> 8) & 0xFF)); // 0x01
 
-    // Verify bytes 13-14 are signal_strength (100 = 0x64, 0x00)
+    // Verify bytes 13-14 are extra/signal (100 = 0x64, 0x00)
     ASSERT_EQ(frame[13], 0x64);
     ASSERT_EQ(frame[14], 0x00);
 }
 
-// Test 4: Verify per-pixel field order matches official struct
-// Official: dis(3) + dis_status(1) + signal_strength(2)
+// Test 4: Verify per-pixel field order matches protocol
+// Layout: pixel_id(2) + distance(2) + extra/signal(2)
 static void test_pixel_field_order() {
     printf("  test_pixel_field_order...\n");
 
@@ -220,33 +266,31 @@ static void test_pixel_field_order() {
 
     // Set pixel 5 with specific values to verify field positions
     int32_t dist = 2000;            // 2000 mm = 2 m
-    uint8_t status = 0;             // valid
+    uint8_t status = 0;             // unused
     uint16_t signal = 0x1234;       // test pattern
 
     setPixel(frame, 5, dist, status, signal);
 
     uint16_t base = 9 + 5 * 6;  // pixel 5 starts at byte 9 + 30 = 39
 
-    // [base+0..2] = distance (3 bytes LE)
-    ASSERT_EQ(frame[base + 0], (uint8_t)(dist & 0xFF));
-    ASSERT_EQ(frame[base + 1], (uint8_t)((dist >> 8) & 0xFF));
-    ASSERT_EQ(frame[base + 2], (uint8_t)((dist >> 16) & 0xFF));
+    // [base+0..1] = pixel_id (px=5 → 0x05, 0x00)
+    ASSERT_EQ(frame[base + 0], 5);
+    ASSERT_EQ(frame[base + 1], 0x00);
 
-    // [base+3] = dis_status
-    ASSERT_EQ(frame[base + 3], status);
+    // [base+2..3] = distance (uint16 LE: 2000 = 0x07D0)
+    ASSERT_EQ(frame[base + 2], (uint8_t)(dist & 0xFF));
+    ASSERT_EQ(frame[base + 3], (uint8_t)((dist >> 8) & 0xFF));
 
-    // [base+4..5] = signal_strength (uint16 LE)
+    // [base+4..5] = extra/signal (uint16 LE)
     ASSERT_EQ(frame[base + 4], 0x34);
     ASSERT_EQ(frame[base + 5], 0x12);
 }
 
-// Test 5: Verify distance unit is mm (per official Nooploop nlink_tofsensem_frame0.c).
-//         Raw int24 value is already in mm — no division needed.
-//         Official code divides by 1000.0f to get meters (float); we keep mm.
+// Test 5: Verify distance unit is mm (uint16 LE at bytes 2-3 of each pixel).
 static void test_distance_conversion() {
     printf("  test_distance_conversion...\n");
 
-    // Raw int24 = mm → no conversion needed for our uint16 distance_mm
+    // Distance is uint16 LE in mm — no conversion needed
     // 1 meter = 1000 mm raw
     ASSERT_EQ(1000, 1000);
 
@@ -259,8 +303,11 @@ static void test_distance_conversion() {
     // 4000 mm (max range)
     ASSERT_EQ(4000, 4000);
 
-    // Max int24 positive = 8,388,607 mm ≈ 8388 m (far beyond sensor range)
-    ASSERT_EQ(8388607, 8388607);
+    // Max valid uint16 distance = 64999 (below INVALID_DIST_THRESHOLD)
+    ASSERT(64999 < 65000);
+
+    // 65000 and above are invalid ("no return")
+    ASSERT(65000 >= 65000);
 }
 
 // Test 6: Verify zone mapping thresholds
@@ -323,34 +370,28 @@ static void test_checksum_position() {
     ASSERT_EQ(393 + 6 - 1, 398);
 }
 
-// Test 9: Verify two-byte sync pattern (0x57 0x01) distinguishes real headers
-//         from false 0x57 occurrences in pixel distance data.
-//         The update() function now checks both bytes during frame sync.
+// Test 9: Verify sync on 0x57 header byte.
+//         In Frame0 mode, auto-detection uses bytes 1,2,8 to distinguish formats.
+//         A false 0x57 inside pixel data is handled by format detection + checksum.
 static void test_two_byte_sync_pattern() {
     printf("  test_two_byte_sync_pattern...\n");
-
-    // A false 0x57 inside pixel data must NOT look like a valid header.
-    // The function_mark byte (0x01) serves as the confirmation byte.
-    // Probability of false sync: 1/256 (only 0x57) → 1/65536 (0x57+0x01).
 
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Set pixel 0 to a distance where the LSB is 0x57 (87 mm).
-    // This creates a 0x57 inside pixel data at offset 9.
-    setPixel(frame, 0, 87, 0, 100);   // 87 mm, valid, signal=100
+    // Set pixel 0 to a distance where the ID byte is 0x00.
+    // The pixel_id is set to the pixel index by setPixel.
+    setPixel(frame, 0, 87, 0, 100);   // 87 mm, signal=100
     writeChecksum(frame);
 
-    // The byte at offset 9 (pixel 0, distance LSB) is 0x57 — same as header.
-    ASSERT_EQ(frame[9], 0x57);
+    // The byte at offset 9 (pixel 0, pixel_id LSB) is 0x00.
+    ASSERT_EQ(frame[9], 0x00);
 
-    // But the next byte (distance byte 1) is 0x00 — NOT 0x01.
-    // The two-byte sync check rejects this as a false header.
-    ASSERT(frame[10] != 0x01);
-
-    // The real header at offset 0 has the correct two-byte pattern.
+    // The real header at offset 0 has the correct Frame0 marker pattern.
     ASSERT_EQ(frame[0], 0x57);
     ASSERT_EQ(frame[1], 0x01);
+    ASSERT_EQ(frame[2], 0xFF);
+    ASSERT_EQ(frame[8], 0x40);
 }
 
 // Test 10: Verify init() resets state correctly for warmup flush
@@ -418,9 +459,9 @@ static void test_all_pixels_invalid_is_emergency_close() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // All 64 pixels have dis_status = 1 (invalid) — no valid measurements
+    // All 64 pixels have invalid distance (65535 = "no return")
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 50, /*status=*/1, 100);
+        setPixel(frame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(frame);
 
@@ -839,19 +880,22 @@ static void test_2000mm_distance_parses_correctly() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Set pixel 0 to 2000 mm = 0x0007D0
-    // Byte[0]=0xD0, Byte[1]=0x07, Byte[2]=0x00
+    // Set pixel 0 to 2000 mm — distance uint16 LE at bytes 2-3
+    // 2000 = 0x07D0 → byte[2]=0xD0, byte[3]=0x07
     setPixel(frame, 0, 2000, /*status=*/0, 200);
     // Set additional pixels to meet MIN_VALID_PIXELS threshold
     for (uint8_t px = 1; px < TEST_MIN_PX; px++)
         setPixel(frame, px, 2000, /*status=*/0, 200);
     writeChecksum(frame);
 
-    // Verify the raw bytes are correct
+    // Verify the raw bytes are correct (pixel 0 starts at offset 9)
     uint16_t base = 9;  // pixel 0
-    ASSERT_EQ(frame[base + 0], 0xD0);
-    ASSERT_EQ(frame[base + 1], 0x07);
-    ASSERT_EQ(frame[base + 2], 0x00);
+    // Bytes 0-1: pixel_id = 0
+    ASSERT_EQ(frame[base + 0], 0x00);
+    ASSERT_EQ(frame[base + 1], 0x00);
+    // Bytes 2-3: distance uint16 LE = 2000 = 0x07D0
+    ASSERT_EQ(frame[base + 2], 0xD0);
+    ASSERT_EQ(frame[base + 3], 0x07);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
@@ -925,23 +969,20 @@ static void test_build_command_frame_rate() {
     ASSERT_EQ(buf[4], expectedSum);
 }
 
-// Test 31: Negative int24 distance is correctly skipped by the parser.
-//          The distance field is a signed 24-bit value; negative values
-//          (bit 23 set) represent invalid/error conditions and must not
-//          produce a valid reading.
+// Test 31: Negative distance is converted to 0 (invalid) by setPixel.
+//          The distance field is uint16; negative values become dist=0
+//          which is treated as invalid by the parser.
 static void test_negative_distance_skipped() {
     printf("  test_negative_distance_skipped...\n");
 
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Set pixel 0 to -100 mm (negative distance).
-    // In 24-bit two's complement: -100 = 0xFFFF9C
-    // Bytes LE: [0x9C, 0xFF, 0xFF]
+    // Set pixel 0 to -100 mm → dist16 = 0 (invalid, zero distance)
     setPixel(frame, 0, -100, /*status=*/0, 100);
 
     // Set pixels 1-4 to a valid 500 mm (should be the result).
-    // Pixel 0 has dis_status=0 but negative distance → skipped by parser,
+    // Pixel 0 has dist=0 (invalid) → skipped by parser,
     // so only these TEST_MIN_PX pixels count as valid.
     for (uint8_t px = 1; px < 1 + TEST_MIN_PX; px++)
         setPixel(frame, px, 500, /*status=*/0, 100);
@@ -964,18 +1005,17 @@ static void test_3000mm_distance_parses_correctly() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // 3000 mm = 0x000BB8
+    // 3000 mm = 0x0BB8, uint16 LE
     setPixel(frame, 0, 3000, /*status=*/0, 120);
     // Additional pixels to meet MIN_VALID_PIXELS
     for (uint8_t px = 1; px < TEST_MIN_PX; px++)
         setPixel(frame, px, 3000, /*status=*/0, 120);
     writeChecksum(frame);
 
-    // Verify raw bytes (LE)
+    // Verify raw bytes (LE) — distance at bytes 2-3 of pixel 0
     uint16_t base = 9;
-    ASSERT_EQ(frame[base + 0], 0xB8);
-    ASSERT_EQ(frame[base + 1], 0x0B);
-    ASSERT_EQ(frame[base + 2], 0x00);
+    ASSERT_EQ(frame[base + 2], 0xB8);  // dist LSB
+    ASSERT_EQ(frame[base + 3], 0x0B);  // dist MSB
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
@@ -987,10 +1027,9 @@ static void test_3000mm_distance_parses_correctly() {
 }
 
 // Test 33: Signal strength value does not affect distance parsing.
-//          The parser uses only dis_status (not signal_strength) to determine
+//          The parser uses only the distance value (not extra/signal) to determine
 //          pixel validity.  At long range the signal is naturally weaker;
 //          this test confirms weak signal alone does not reject the reading.
-//          (dis_status-based rejection is verified by test 12.)
 static void test_signal_strength_does_not_affect_distance() {
     printf("  test_signal_strength_does_not_affect_distance...\n");
 
@@ -1078,15 +1117,15 @@ static void test_set_frame_rate_zero_rejected() {
 }
 
 // Test 38: 4000 mm raw bytes verification — confirms no truncation or
-//          byte-order issues in the int24 LE encoding at max range.
+//          byte-order issues in the uint16 LE encoding at max range.
 static void test_4000mm_raw_bytes() {
     printf("  test_4000mm_raw_bytes...\n");
 
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // 4000 mm = 0x000FA0
-    // LE bytes: [0xA0, 0x0F, 0x00]
+    // 4000 mm = 0x0FA0
+    // uint16 LE bytes at pixel offset +2,+3: [0xA0, 0x0F]
     setPixel(frame, 0, 4000, /*status=*/0, 100);
     // Additional pixels to meet MIN_VALID_PIXELS
     for (uint8_t px = 1; px < TEST_MIN_PX; px++)
@@ -1094,12 +1133,12 @@ static void test_4000mm_raw_bytes() {
     writeChecksum(frame);
 
     uint16_t base = 9;  // pixel 0
-    ASSERT_EQ(frame[base + 0], 0xA0);  // LSB
-    ASSERT_EQ(frame[base + 1], 0x0F);  // middle byte
-    ASSERT_EQ(frame[base + 2], 0x00);  // MSB (bit 23 = 0 → positive)
-
-    // Verify the value is positive (bit 23 not set → no sign extension)
-    ASSERT(!(frame[base + 2] & 0x80));
+    // Bytes 0-1: pixel_id = 0
+    ASSERT_EQ(frame[base + 0], 0x00);
+    ASSERT_EQ(frame[base + 1], 0x00);
+    // Bytes 2-3: distance uint16 LE = 4000 = 0x0FA0
+    ASSERT_EQ(frame[base + 2], 0xA0);  // LSB
+    ASSERT_EQ(frame[base + 3], 0x0F);  // MSB
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
@@ -1209,18 +1248,18 @@ static void test_save_config_sends_correct_bytes() {
 // Test 42: Repeated all-pixels-invalid frames always return minRangeMm (20 mm).
 //          This reproduces the exact "sensor stuck at 20 mm" symptom reported
 //          when the TOFSense-M is in SHORT RANGE mode pointing at open air:
-//          every pixel reports dis_status ≠ 0, so the driver keeps returning
-//          minRangeMm (20 mm) as emergency-close.  After switching to LONG
-//          RANGE mode (via configureLongRange()), valid pixel data arrives and
-//          the correct distance is returned.
+//          every pixel reports an invalid distance (65535), so the driver keeps
+//          returning minRangeMm (20 mm) as emergency-close.  After switching
+//          to LONG RANGE mode (via configureLongRange()), valid pixel data
+//          arrives and the correct distance is returned.
 static void test_repeated_all_pixels_invalid_stays_at_min() {
     printf("  test_repeated_all_pixels_invalid_stays_at_min...\n");
 
-    // Build a frame where all 64 pixels are invalid (dis_status=1)
+    // Build a frame where all 64 pixels are invalid (dist=65535)
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 50, /*status=*/1, 100);
+        setPixel(frame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(frame);
 
@@ -1268,13 +1307,11 @@ static void test_repeated_all_pixels_invalid_stays_at_min() {
 // Test 43: Parse the official Nooploop example frame from the support page.
 //          This is the exact 400-byte frame provided at:
 //            https://support.nooploop.com/tofsense/example-code
-//          Verifies our parser correctly handles a real sensor frame:
-//            - Valid header (0x57, 0x01)
-//            - Valid checksum (0x05)
-//            - All 64 pixels have dis_status ≠ 0 (21× status=5, 43× status=0xFF)
-//            → NO_VALID_PIXELS → returns minRangeMm (20 mm) as emergency-close.
-//          This matches the official Nooploop code behavior where the user
-//          application must check dis_status per pixel.
+//          With the corrected uint16 LE distance parsing:
+//            - Distance is at bytes 2-3 of each 6-byte pixel group
+//            - Validity is determined by distance value (0 or >=65000 = invalid)
+//          The frame contains pixels with valid distances that should now
+//          parse correctly as a valid reading.
 static void test_official_nooploop_example_frame() {
     printf("  test_official_nooploop_example_frame...\n");
 
@@ -1320,7 +1357,17 @@ static void test_official_nooploop_example_frame() {
     for (int i = 0; i < 399; i++) sum += rx_buf[i];
     ASSERT_EQ(sum, rx_buf[399]);
 
-    // Feed through the full pipeline — all pixels are invalid in this frame
+    // Analyze the frame: with corrected parsing (distance = uint16 at bytes 2-3
+    // of each pixel group), let's extract what the parser sees.
+    // Pixel 0 starts at offset 9: bytes [0x1d, 0x00, 0x00, 0x05, 0xa1, 0x84]
+    //   pixel_id = uint16(0x1d, 0x00) = 29
+    //   distance = uint16(0x00, 0x05) = 1280 mm → VALID
+    // Many pixels have distance = 0x0005 = 5 (bytes 2-3 = [0x05, 0x00])... wait,
+    // let me re-check: the bytes at base+2, base+3.
+    // Pixel 0: base=9, buf[11]=0x00, buf[12]=0x05 → dist = 0x0500 = 1280
+    // Actually: uint16 LE: buf[11] | (buf[12] << 8) = 0x00 | (0x05 << 8) = 0x0500 = 1280
+
+    // Feed through the full pipeline
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
@@ -1332,12 +1379,15 @@ static void test_official_nooploop_example_frame() {
     obstacle_sensor::update(0.0f);
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    // All pixels have dis_status ≠ 0 → NO_VALID_PIXELS → emergency-close
+
+    // With corrected uint16 LE distance parsing at bytes 2-3:
+    // 21 pixels have valid distance = 1280 mm (0x0500), dispersion = 0
+    // This is a valid reading at 1280 mm (caution zone: [1000, 1500) mm)
     ASSERT_EQ(static_cast<uint8_t>(rd.status),
               static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
+    ASSERT_EQ(rd.distance_mm, 1280);
+    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
 }
 
 // Test 44: Wrap-around detection — 3 valid pixels with high distances
@@ -1353,10 +1403,10 @@ static void test_few_valid_pixels_treated_as_wraparound() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Simulate wrap-around: 3 valid pixels with high distances (2245 mm),
-    // all other 61 pixels are invalid (dis_status=1).
+    // Simulate wrap-around: all 64 pixels invalid (dist=65535),
+    // then 3 pixels valid with wrap-around distances.
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 2245, /*status=*/1, 50);  // All invalid
+        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
     }
     // Only 3 pixels "valid" with wrap-around distances
     setPixel(frame, 10, 2245, /*status=*/0, 200);
@@ -1383,9 +1433,9 @@ static void test_exactly_min_valid_pixels_accepted() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Set exactly 4 valid pixels at 800 mm, rest are invalid
+    // Set exactly 4 valid pixels at 800 mm, rest are invalid (dist=65535)
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 800, /*status=*/1, 50);  // All invalid
+        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
     }
     setPixel(frame, 0, 800, /*status=*/0, 200);
     setPixel(frame, 1, 900, /*status=*/0, 180);
@@ -1461,10 +1511,10 @@ static void test_high_dispersion_covered_sensor() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
 
-    // Simulate covered sensor: most pixels invalid, but 8 valid pixels
+    // Simulate covered sensor: most pixels invalid (dist=65535), but 8 valid pixels
     // with wildly scattered wrap-around distances (121, 273, 1000 mm).
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 500, /*status=*/1, 50);  // All invalid
+        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
     }
     // 8 valid pixels with high dispersion (spread = 1000 - 121 = 879 mm)
     setPixel(frame, 0,  121,  /*status=*/0, 100);
@@ -1498,7 +1548,7 @@ static void test_high_dispersion_close_range_wraparound() {
 
     // Simulate wrap-around: 6 valid pixels with high distances
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 2000, /*status=*/1, 50);  // All invalid
+        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
     }
     setPixel(frame, 5,  1700, /*status=*/0, 200);
     setPixel(frame, 6,  1900, /*status=*/0, 180);
@@ -1555,7 +1605,7 @@ static void test_dispersion_at_boundary_accepted() {
 
     // 4 valid pixels with spread = exactly 500 mm
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 700, /*status=*/1, 50);
+        setPixel(frame, px, 65535, /*status=*/0, 50);
     }
     setPixel(frame, 0, 500,  /*status=*/0, 200);
     setPixel(frame, 1, 600,  /*status=*/0, 200);
@@ -1583,7 +1633,7 @@ static void test_dispersion_just_above_threshold_rejected() {
 
     // 4 valid pixels with spread = 501 mm (just over threshold)
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 700, /*status=*/1, 50);
+        setPixel(frame, px, 65535, /*status=*/0, 50);
     }
     setPixel(frame, 0, 500,  /*status=*/0, 200);
     setPixel(frame, 1, 600,  /*status=*/0, 200);
@@ -1632,11 +1682,11 @@ static void test_all_pixels_same_distance_accepted() {
 static void test_auto_recovery_triggers_after_threshold() {
     printf("  test_auto_recovery_triggers_after_threshold...\n");
 
-    // Build a frame where all 64 pixels are invalid (dis_status=1)
+    // Build a frame where all 64 pixels are invalid (dist=65535)
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 50, /*status=*/1, 100);
+        setPixel(frame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(frame);
 
@@ -1675,7 +1725,7 @@ static void test_auto_recovery_skipped_without_tx_pin() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 50, /*status=*/1, 100);
+        setPixel(frame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(frame);
 
@@ -1710,7 +1760,7 @@ static void test_auto_recovery_resets_on_valid_frame() {
     uint8_t badFrame[FRAME_LEN];
     buildFrame(badFrame);
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(badFrame, px, 50, /*status=*/1, 100);
+        setPixel(badFrame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(badFrame);
 
@@ -1763,7 +1813,7 @@ static void test_auto_recovery_limited_to_max_attempts() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 50, /*status=*/1, 100);
+        setPixel(frame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(frame);
 
@@ -1804,7 +1854,7 @@ static void test_init_resets_auto_recovery() {
     uint8_t frame[FRAME_LEN];
     buildFrame(frame);
     for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 50, /*status=*/1, 100);
+        setPixel(frame, px, 65535, /*status=*/0, 100);
     }
     writeChecksum(frame);
 
@@ -1831,6 +1881,85 @@ static void test_init_resets_auto_recovery() {
     g_test_millis = 0;
     obstacle_sensor::init(cfg);
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+}
+
+// Test 59: Compact frame (257 bytes) parses correctly.
+//          The compact format is: 1 byte header (0x57) + 64×4 bytes pixel data.
+//          No checksum, no function mark.
+static void test_compact_frame_parses_correctly() {
+    printf("  test_compact_frame_parses_correctly...\n");
+
+    uint8_t frame[COMPACT_LEN];
+    buildCompactFrame(frame);
+
+    // Set pixels with valid distances using compact layout
+    for (uint8_t px = 0; px < 10; px++) {
+        setCompactPixel(frame, px, 1500, px);
+    }
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject the compact frame
+    g_uart_inject(frame, COMPACT_LEN);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 1500);
+    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+}
+
+// Test 60: Distance at uint16 max-1 (64999) is still valid — boundary test
+//          for INVALID_DIST_THRESHOLD (65000).
+static void test_distance_64999_is_valid() {
+    printf("  test_distance_64999_is_valid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // Set pixels to 64999 mm (just below INVALID_DIST_THRESHOLD)
+    setValidPixels(frame, 64999, 100);
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // 64999 is valid but > maxRangeMm (4000), so clamped to 4000
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 4000);  // clamped to maxRangeMm
+    ASSERT_EQ(rd.zone, 0);
+}
+
+// Test 61: Distance at INVALID_DIST_THRESHOLD (65000) is invalid — boundary test.
+static void test_distance_65000_is_invalid() {
+    printf("  test_distance_65000_is_invalid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+
+    // All pixels at 65000 (= INVALID_DIST_THRESHOLD) → all invalid
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65000, /*status=*/0, 100);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    // All pixels invalid → NO_VALID_PIXELS → emergency-close
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
+    ASSERT_EQ(rd.zone, 4);           // emergency zone
 }
 
 /* ---- Main --------------------------------------------------------------- */
@@ -1896,6 +2025,9 @@ int main() {
     test_auto_recovery_resets_on_valid_frame();
     test_auto_recovery_limited_to_max_attempts();
     test_init_resets_auto_recovery();
+    test_compact_frame_parses_correctly();
+    test_distance_64999_is_valid();
+    test_distance_65000_is_invalid();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
