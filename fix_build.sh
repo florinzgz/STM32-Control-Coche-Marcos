@@ -87,7 +87,7 @@ fi
 echo "🔍 Checking .cproject for duplicate element IDs..."
 
 DUP_IDS=$(grep -E 'superClass="[^"]*"' .cproject 2>/dev/null \
-    | grep -oP '(?<=id=")[^"]*' \
+    | sed -n 's/.*id="\([^"]*\)".*/\1/p' \
     | sort | uniq -d)
 DUP_FIXED=0
 

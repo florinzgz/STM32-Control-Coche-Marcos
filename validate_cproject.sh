@@ -96,7 +96,7 @@ fi
 echo ""
 echo "3. Duplicate element IDs"
 DUP_IDS=$(grep -E 'superClass="[^"]*"' "$CPROJECT" 2>/dev/null \
-    | grep -oP '(?<=id=")[^"]*' \
+    | sed -n 's/.*id="\([^"]*\)".*/\1/p' \
     | sort | uniq -d)
 if [ -z "$DUP_IDS" ]; then
     echo "   ✅ PASS — all element IDs are unique."
