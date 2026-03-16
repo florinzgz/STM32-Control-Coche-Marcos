@@ -66,6 +66,15 @@ if %ERRORLEVEL%==0 (
     set FIXED=1
 )
 
+REM ---- Step 4: Fix trailing empty Defaults field ----
+powershell -Command "if ((Get-Content '.cproject' -Raw) -match '\|\|\s*\x22\s*valueType=') { exit 1 } else { exit 0 }"
+if %ERRORLEVEL%==1 (
+    echo    Fixing trailing empty Defaults field
+    powershell -Command ^
+      "(Get-Content '.cproject') -replace '\|\|\s*(\x22\s*valueType=)', '$1' | Set-Content '.cproject'"
+    set FIXED=1
+)
+
 echo.
 echo Done. Next steps:
 echo    1. In STM32CubeIDE: right-click project -^> Refresh (F5^)

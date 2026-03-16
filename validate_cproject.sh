@@ -13,6 +13,7 @@
 #   4. Wrong assembler inputType superClass  (.input.s instead of .input)
 #   5. Required tool elements present  (compiler, linker, assembler)
 #   6. Stale Debug/ directory with circular .o self-dependencies
+#   7. Trailing empty Defaults field  (|| "" causes GCC "" argument)
 #
 # Exit codes:
 #   0  — all checks passed
@@ -188,6 +189,21 @@ if [ -d "Debug" ]; then
     fi
 else
     echo "   ✅ PASS — no Debug/ directory (will be regenerated on build)."
+fi
+
+# ---- Check 7: Trailing empty Defaults field ----
+# CubeMX migration sometimes appends an empty field ("|| ") to the Defaults
+# option value.  CubeIDE emits the empty field as "" on the GCC command line,
+# causing "linker input file not found" build errors.
+echo ""
+echo "7. Trailing empty Defaults field"
+if grep -q 'name="Defaults".*|| *" *valueType=' "$CPROJECT" 2>/dev/null; then
+    echo "   ❌ FAIL — Defaults option has trailing empty field (|| \"\")"
+    echo "   This causes arm-none-eabi-gcc to receive an empty \"\" argument."
+    echo "   Run fix_build.sh to repair."
+    ERRORS=$((ERRORS + 1))
+else
+    echo "   ✅ PASS — no trailing empty Defaults field."
 fi
 
 # ---- Summary ----
