@@ -34,7 +34,7 @@
 | Software | Versión Mínima | Propósito |
 |----------|----------------|-----------|
 | **STM32CubeIDE** | 1.14.0 | IDE, compilador, debugger |
-| **STM32CubeMX** | 6.10.0 | Generador de código de inicialización |
+| **STM32CubeMX** | 6.17.0 | Generador de código de inicialización |
 | **Git** | 2.30+ | Control de versiones |
 | **ST-Link Utility** | 4.6+ (opcional) | Flasheo standalone |
 

@@ -12,8 +12,8 @@ and compiles the correct `main.c`.
 |------|-------|
 | **File** | `STM32-Control-Coche-Marcos.ioc` |
 | **Path** | Repository root (`./STM32-Control-Coche-Marcos.ioc`) |
-| **CubeMX version** | 6.10.0 |
-| **Firmware package** | STM32Cube FW_G4 V1.5.1 |
+| **CubeMX version** | 6.17.0 |
+| **Firmware package** | STM32Cube FW_G4 V1.6.2 |
 | **Target MCU** | STM32G474RETx (LQFP64) |
 | **Toolchain** | STM32CubeIDE |
 
