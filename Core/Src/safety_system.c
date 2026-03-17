@@ -1512,8 +1512,10 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
     }
     obstacle_last_counter = counter;
 
-    /* Zone plausibility: clamp to valid range (0–4, matching ESP32 distanceToZone) */
-    if (zone > 4) zone = 0;
+    /* Zone plausibility: clamp to valid range (0–4, matching ESP32 distanceToZone).
+     * Invalid zone → emergency (4): fail-safe — assume closest obstacle
+     * rather than clear, so a corrupted zone byte never opens the way.   */
+    if (zone > 4) zone = 4;
 
     uint32_t now = HAL_GetTick();
 
@@ -1611,8 +1613,9 @@ void Obstacle_ProcessSafetyCAN(const uint8_t *data, uint8_t len)
     esp32_obs_stuck         = data[2];
     esp32_obs_last_rx_tick  = HAL_GetTick();
 
-    /* Clamp zone to valid range (0–4) */
-    if (esp32_obs_zone > 4) esp32_obs_zone = 0;
+    /* Clamp zone to valid range (0–4).
+     * Invalid zone → emergency (4): fail-safe assumption.              */
+    if (esp32_obs_zone > 4) esp32_obs_zone = 4;
 
     /* Cross-validation: if ESP32 reports stuck but STM32 sees plausible
      * data, flag a diagnostic warning — sensors may disagree.           */
