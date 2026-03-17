@@ -673,10 +673,10 @@ void CAN_ProcessMessages(void) {
         __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST);
         sat_inc_u32(&can_stats.fifo_overflow_count);
 
-        /* Escalate on repeated overflow (> 5 events = sustained overload).
+        /* Escalate on repeated overflow (≥ threshold = sustained overload).
          * A single overflow is a transient — bus load spike or delayed poll.
          * Persistent overflow means messages are consistently being lost.  */
-        if (can_stats.fifo_overflow_count > CAN_FIFO_OVERFLOW_DEGRADE_THRESHOLD) {
+        if (can_stats.fifo_overflow_count >= CAN_FIFO_OVERFLOW_DEGRADE_THRESHOLD) {
             Safety_SetDegradedLevel(DEGRADED_L1, DEGRADED_REASON_SENSOR_FAULT);
         }
     }

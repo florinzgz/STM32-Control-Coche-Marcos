@@ -255,12 +255,12 @@ static bool isValidFrame(const uint8_t* buf, uint16_t len) {
 
     // Compact format (257 bytes, no checksum — accept if header matches)
     if (len >= COMPACT_FRAME_LENGTH) {
+        // Buffer is at least 257 bytes (checked above).
         // Compact frames have pixel data immediately after header.
         // No strong structural validation is possible without checksum,
         // but at minimum the frame must start with 0x57 and NOT match
         // Frame0 format markers (to avoid false positive on partial Frame0).
-        if (len < FRAME0_LENGTH ||
-            buf[OFF_FUNCTION_MARK] != FUNCTION_MARK) {
+        if (buf[OFF_FUNCTION_MARK] != FUNCTION_MARK) {
             return true;  // Compact frame — accept (header-only validation)
         }
     }
@@ -648,9 +648,9 @@ uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
                       uint16_t outBufSize) {
     // Frame: [0x5A] [len] [cmdId] [payload...] [checksum]
     // Total length = 1 (header) + 1 (len) + 1 (cmd) + payloadLen + 1 (checksum)
+    if (payloadLen > 0 && payload == nullptr) return 0;
     uint16_t totalLen = (uint16_t)(3 + payloadLen + 1);
     if (totalLen > outBufSize) return 0;
-    if (payloadLen > 0 && payload == nullptr) return 0;
 
     outBuf[0] = CMD_HEADER;                  // 0x5A
     outBuf[1] = (uint8_t)totalLen;           // Total frame length
