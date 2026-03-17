@@ -78,6 +78,17 @@ static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
 static uint8_t  busoff_retry_count  = 0;    /* Number of recovery attempts since bus-off  */
 
+/* SAFETY FIX: Global CAN watchdog — track last received CAN message (any ID).
+ * Unlike last_can_rx_time (heartbeat only), this tracks ANY received frame.
+ * If the CAN bus dies completely (no frames at all), this timestamp goes stale.
+ * Checked by CAN_IsGlobalSilent() to detect total bus silence.               */
+static uint32_t last_any_rx_tick = 0;
+/* CAN global silence threshold (ms).  If no CAN frames of any kind arrive
+ * within this window, the bus is considered dead.  Set wider than heartbeat
+ * timeout (250 ms) because non-heartbeat frames may arrive at different rates.
+ * 1000 ms = 1 second of complete silence.                                     */
+#define CAN_GLOBAL_SILENCE_MS  1000U
+
 /* Saturating increment for uint32_t counters.
  * Prevents wrap-around to 0 after 4 billion events, which would
  * clear the saturated diagnostic byte in CAN_SendStatusSafety.   */
@@ -222,6 +233,7 @@ void CAN_Init(void) {
     busoff_active       = 0;
     busoff_last_attempt = 0;
     busoff_retry_count  = 0;
+    last_any_rx_tick    = HAL_GetTick();  /* Global CAN watchdog init */
 
     /* SAFETY FIX: Reset ESP32 heartbeat counter tracking state */
     esp32_hb_last_counter = 0xFFU;
@@ -652,10 +664,21 @@ void CAN_ProcessMessages(void) {
     /* Check for FIFO message-lost (overflow) condition.
      * The FDCAN sets this flag when a new message arrives but
      * FIFO0 is full and the newest message is discarded.
-     * Detecting this allows field diagnostics of missed frames. */
+     * Detecting this allows field diagnostics of missed frames.
+     *
+     * SAFETY FIX: FIFO overflow means CAN messages were lost.
+     * Lost messages = unknown system state.  Escalate to DEGRADED_L1
+     * if overflow count exceeds threshold (sustained bus overload).   */
     if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST)) {
         __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST);
         sat_inc_u32(&can_stats.fifo_overflow_count);
+
+        /* Escalate on repeated overflow (> 5 events = sustained overload).
+         * A single overflow is a transient — bus load spike or delayed poll.
+         * Persistent overflow means messages are consistently being lost.  */
+        if (can_stats.fifo_overflow_count > CAN_FIFO_OVERFLOW_DEGRADE_THRESHOLD) {
+            Safety_SetDegradedLevel(DEGRADED_L1, DEGRADED_REASON_SENSOR_FAULT);
+        }
     }
 
     /* Process all pending messages in RX FIFO0 */
@@ -674,6 +697,7 @@ void CAN_ProcessMessages(void) {
             ((volatile uint8_t *)g_CAN_RxData)[i] = rx_payload[i];
         
         sat_inc_u32(&can_stats.rx_count);
+        last_any_rx_tick = HAL_GetTick();  /* Global CAN watchdog refresh */
         uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);
         
         /* Parse received messages based on ID.
@@ -1133,4 +1157,20 @@ void CAN_CheckBusOff(void)
 bool CAN_IsESP32Alive(void) {
     uint32_t time_since_heartbeat = HAL_GetTick() - can_stats.last_heartbeat_esp32;
     return (time_since_heartbeat < CAN_TIMEOUT_HEARTBEAT_MS);
+}
+
+/**
+ * @brief  Check if the CAN bus is globally silent (no frames at all).
+ *
+ * Unlike CAN_IsESP32Alive() which only tracks ESP32 heartbeats, this
+ * function detects total bus silence — no messages from any node.
+ * A completely silent CAN bus indicates a hardware fault (bad wiring,
+ * failed transceiver, bus contention) that the heartbeat timeout alone
+ * might not catch quickly if other periodic messages mask the problem.
+ *
+ * @retval true   No CAN frames received for > CAN_GLOBAL_SILENCE_MS
+ * @retval false  At least one frame received recently
+ */
+bool CAN_IsGlobalSilent(void) {
+    return ((HAL_GetTick() - last_any_rx_tick) > CAN_GLOBAL_SILENCE_MS);
 }

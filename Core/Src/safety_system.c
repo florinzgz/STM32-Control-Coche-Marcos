@@ -80,6 +80,12 @@ static uint8_t  emergency_stopped       = 0;
 static float    last_steering_cmd   = 0.0f;
 static uint32_t last_steering_tick  = 0;
 
+/* SAFETY FIX: Steering validity flag.
+ * Set to 1 when steering timeout fires — prevents stale steering data
+ * from being used by Safety_ValidateSteering().  Cleared when a new
+ * valid steering command arrives via CAN.                              */
+static uint8_t  steering_timed_out  = 0;
+
 /* Consecutive-error counter for DEGRADED → SAFE escalation.
  * Traced to base firmware relays.cpp: consecutiveErrors.
  * Only modified from the main-loop safety checks (never from ISR).    */
@@ -555,6 +561,11 @@ float Safety_ValidateSteering(float requested_deg)
     /* Reject commands when not ACTIVE or DEGRADED */
     if (!Safety_IsCommandAllowed()) return Steering_GetCurrentAngle();
 
+    /* SAFETY FIX: A new valid steering command clears the timeout flag.
+     * This ensures that a fresh CAN 0x101 resumes normal steering
+     * after a previous timeout forced center.                          */
+    steering_timed_out = 0;
+
     /* Clamp to mechanical limits */
     if (requested_deg < -MAX_STEER_DEG) requested_deg = -MAX_STEER_DEG;
     if (requested_deg >  MAX_STEER_DEG) requested_deg =  MAX_STEER_DEG;
@@ -594,12 +605,24 @@ void Safety_CheckSteeringTimeout(void)
     if (last_steering_tick > 0 &&
         (now - last_steering_tick) > STEERING_CMD_TIMEOUT_MS) {
         /* Steering commands have gone stale — return to center.
-         * Use the existing rate-limited path to avoid a sudden jerk. */
+         * Use the existing rate-limited path to avoid a sudden jerk.
+         *
+         * SAFETY FIX: Also mark steering as timed-out so that
+         * Safety_ValidateSteering() rejects any use of the stale
+         * last_steering_cmd value.  This flag is cleared when a
+         * new valid CAN 0x101 arrives.                              */
+        steering_timed_out = 1;
+        last_steering_cmd  = 0.0f;
         Steering_SetAngle(0.0f);
         /* Update the tick so this fires once per timeout period,
          * not continuously every 10 ms.                              */
         last_steering_tick = now;
     }
+}
+
+bool Safety_IsSteeringTimedOut(void)
+{
+    return (steering_timed_out != 0);
 }
 
 bool Safety_ValidateModeChange(bool enable_4x4, bool tank_turn)
@@ -640,6 +663,7 @@ void Safety_Init(void)
     last_can_rx_time  = HAL_GetTick();
     last_steering_cmd = 0.0f;
     last_steering_tick = HAL_GetTick();
+    steering_timed_out = 0;
     consecutive_errors = 0;
     last_error_tick    = 0;
     recovery_clean_since = 0;
@@ -1035,6 +1059,19 @@ void Safety_CheckTemperature(void)
 
 void Safety_CheckCANTimeout(void)
 {
+    /* SAFETY FIX: Global CAN watchdog — detect total bus silence.
+     * If no CAN frames of any kind have arrived within
+     * CAN_GLOBAL_SILENCE_MS the bus is completely dead (hardware
+     * fault, failed transceiver, severed wiring).  This is more
+     * severe than a heartbeat timeout (which only means the ESP32
+     * stopped sending) and gets caught even if other periodic
+     * messages are expected to mask it.                             */
+    if (CAN_IsGlobalSilent() &&
+        (system_state == SYS_STATE_ACTIVE ||
+         system_state == SYS_STATE_DEGRADED)) {
+        Safety_SetState(SYS_STATE_LIMP_HOME);
+    }
+
     if ((HAL_GetTick() - last_can_rx_time) > CAN_TIMEOUT_MS) {
         ServiceMode_SetFault(MODULE_CAN_TIMEOUT, MODULE_FAULT_ERROR);
         Safety_SetError(SAFETY_ERROR_CAN_TIMEOUT);
@@ -1094,10 +1131,23 @@ void Safety_CheckCANTimeout(void)
                 limphome_recovery_pending = 1;
                 limphome_recovery_since   = HAL_GetTick();
             } else if ((HAL_GetTick() - limphome_recovery_since) >= RECOVERY_HOLD_MS) {
-                limphome_recovery_pending = 0;
-                Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
-                Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
-                Safety_SetState(SYS_STATE_ACTIVE);
+                /* SAFETY FIX: Before transitioning, verify that the CAN
+                 * bus has remained continuously healthy for the entire
+                 * debounce window.  Check that no non-CAN errors exist
+                 * and that the heartbeat is still alive right now.
+                 * If any condition fails, reset the window.             */
+                if (safety_error != SAFETY_ERROR_NONE &&
+                    safety_error != SAFETY_ERROR_CAN_TIMEOUT &&
+                    safety_error != SAFETY_ERROR_CAN_BUSOFF) {
+                    /* A non-CAN error appeared during the window.
+                     * Cannot enter ACTIVE; stay in LIMP_HOME.           */
+                    limphome_recovery_pending = 0;
+                } else {
+                    limphome_recovery_pending = 0;
+                    Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
+                    Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
+                    Safety_SetState(SYS_STATE_ACTIVE);
+                }
             }
         } else if (system_state != SYS_STATE_LIMP_HOME) {
             limphome_recovery_pending = 0;

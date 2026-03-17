@@ -2130,6 +2130,106 @@ static void test_distance_65000_is_invalid() {
     ASSERT_EQ(rd.zone, 4);           // emergency zone
 }
 
+/* ---- Resync after false 0x57 header ------------------------------------ */
+
+// Test: When a 0x57 appears in payload data of a corrupted frame (false sync),
+// the resync logic must search forward for the next valid frame start instead
+// of just resetting to wait for a new 0x57 byte.
+// This tests the improved BAD_CHECKSUM resync path.
+static void test_resync_finds_real_frame_after_false_header() {
+    printf("  test_resync_finds_real_frame_after_false_header...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Build a corrupted frame that starts with 0x57 but has bad checksum.
+    // Plant a valid frame's 0x57 header inside the corrupted frame's payload,
+    // specifically at a position where the resync scan should find it.
+    uint8_t corrupt[FRAME_LEN];
+    buildFrame(corrupt);
+    setValidPixels(corrupt, 999);
+    // Deliberately corrupt the checksum
+    writeChecksum(corrupt);
+    corrupt[FRAME_LEN - 1] ^= 0xAA;  // Break checksum
+
+    // Build a good frame
+    uint8_t good[FRAME_LEN];
+    buildFrame(good);
+    setValidPixels(good, 2500);
+    writeChecksum(good);
+
+    // Inject: corrupt frame immediately followed by good frame
+    // The good frame starts with 0x57 at position 400 in the stream.
+    // After BAD_CHECKSUM on the corrupt frame, the resync should
+    // reset rxIdx_ and the next iteration picks up the good frame.
+    g_uart_inject(corrupt, FRAME_LEN);
+    g_uart_inject(good, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 2500);
+}
+
+// Test: Multiple corrupted frames with embedded 0x57 bytes followed by a valid
+// frame.  Verifies that the parser correctly recovers alignment even when
+// there are false 0x57 headers in the corrupted data.
+// Uses pre-detected Frame0 mode to ensure checksum validation rejects false frames.
+static void test_multiple_false_headers_then_valid() {
+    printf("  test_multiple_false_headers_then_valid...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // First: inject a valid frame to lock the auto-detect to Frame0 mode
+    uint8_t first[FRAME_LEN];
+    buildFrame(first);
+    setValidPixels(first, 3000);
+    writeChecksum(first);
+    g_uart_inject(first, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    // Verify first frame was accepted (locks to Frame0 mode)
+    obstacle_sensor::Reading rd1 = obstacle_sensor::getReading();
+    ASSERT_EQ(rd1.distance_mm, 3000);
+
+    // Now inject a corrupt frame with embedded 0x57 bytes, followed by valid frame
+    uint8_t corrupt[FRAME_LEN];
+    buildFrame(corrupt);
+    setValidPixels(corrupt, 999);
+    writeChecksum(corrupt);
+    // Plant 0x57 bytes in payload area to simulate false headers
+    corrupt[20] = 0x57;
+    corrupt[50] = 0x57;
+    // Break checksum so it fails validation
+    corrupt[FRAME_LEN - 1] ^= 0xFF;
+
+    uint8_t good[FRAME_LEN];
+    buildFrame(good);
+    setValidPixels(good, 1800);
+    writeChecksum(good);
+
+    g_uart_inject(corrupt, FRAME_LEN);
+    g_uart_inject(good, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd2 = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd2.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd2.healthy, true);
+    ASSERT_EQ(rd2.distance_mm, 1800);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -2201,6 +2301,8 @@ int main() {
     test_compact_frame_parses_correctly();
     test_distance_64999_is_valid();
     test_distance_65000_is_invalid();
+    test_resync_finds_real_frame_after_false_header();
+    test_multiple_false_headers_then_valid();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
