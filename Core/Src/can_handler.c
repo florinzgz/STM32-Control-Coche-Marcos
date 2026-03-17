@@ -78,6 +78,24 @@ static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
 static uint8_t  busoff_retry_count  = 0;    /* Number of recovery attempts since bus-off  */
 
+/* SAFETY FIX: Global CAN watchdog — track last received CAN message (any ID).
+ * Unlike last_can_rx_time (heartbeat only), this tracks ANY received frame.
+ * If the CAN bus dies completely (no frames at all), this timestamp goes stale.
+ * Checked by CAN_IsGlobalSilent() to detect total bus silence.               */
+static uint32_t last_any_rx_tick = 0;
+/* CAN global silence threshold (ms).  If no CAN frames of any kind arrive
+ * within this window, the bus is considered dead.  Set wider than heartbeat
+ * timeout (250 ms) because non-heartbeat frames may arrive at different rates.
+ * 1000 ms = 1 second of complete silence.                                     */
+#define CAN_GLOBAL_SILENCE_MS  1000U
+
+/* Saturating increment for uint32_t counters.
+ * Prevents wrap-around to 0 after 4 billion events, which would
+ * clear the saturated diagnostic byte in CAN_SendStatusSafety.   */
+static inline void sat_inc_u32(uint32_t *counter) {
+    if (*counter < UINT32_MAX) (*counter)++;
+}
+
 /* Internal helper to send a CAN frame */
 static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
     FDCAN_TxHeaderTypeDef tx_hdr = {0};
@@ -110,9 +128,9 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     HAL_StatusTypeDef result = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_hdr, payload);
     
     if (result == HAL_OK) {
-        can_stats.tx_count++;
+        sat_inc_u32(&can_stats.tx_count);
     } else {
-        can_stats.tx_errors++;
+        sat_inc_u32(&can_stats.tx_errors);
     }
     
     return result;
@@ -208,12 +226,14 @@ void CAN_Init(void) {
     can_stats.rx_errors = 0;
     can_stats.last_heartbeat_esp32 = HAL_GetTick();
     can_stats.busoff_count = 0;
+    can_stats.fifo_overflow_count = 0;
     heartbeat_counter = 0;
 
     /* Reset bus-off recovery state */
     busoff_active       = 0;
     busoff_last_attempt = 0;
     busoff_retry_count  = 0;
+    last_any_rx_tick    = HAL_GetTick();  /* Global CAN watchdog init */
 
     /* SAFETY FIX: Reset ESP32 heartbeat counter tracking state */
     esp32_hb_last_counter = 0xFFU;
@@ -339,13 +359,20 @@ void CAN_SendStatusTemp(int8_t t1, int8_t t2, int8_t t3, int8_t t4, int8_t t5) {
 }
 
 void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code) {
-    uint8_t safety_data[3];
+    uint8_t safety_data[5];
     
     safety_data[0] = abs ? 1 : 0;
     safety_data[1] = tcs ? 1 : 0;
     safety_data[2] = error_code;
+    /* Byte 3: system state (SYS_STATE_*) for HMI display.
+     * Byte 4: saturated CAN RX error count for diagnostics.
+     * Backward compatible: ESP32 parsers that only read bytes 0–2
+     * will ignore the additional payload (DLC ≥ 3 check passes).  */
+    safety_data[3] = (uint8_t)Safety_GetState();
+    safety_data[4] = (can_stats.rx_errors > 255) ? 255
+                     : (uint8_t)can_stats.rx_errors;
     
-    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 3);
+    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 5);
 }
 
 void CAN_SendStatusSteering(int16_t angle, bool calibrated) {
@@ -634,10 +661,30 @@ void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
     
+    /* Check for FIFO message-lost (overflow) condition.
+     * The FDCAN sets this flag when a new message arrives but
+     * FIFO0 is full and the newest message is discarded.
+     * Detecting this allows field diagnostics of missed frames.
+     *
+     * SAFETY FIX: FIFO overflow means CAN messages were lost.
+     * Lost messages = unknown system state.  Escalate to DEGRADED_L1
+     * if overflow count exceeds threshold (sustained bus overload).   */
+    if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST)) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST);
+        sat_inc_u32(&can_stats.fifo_overflow_count);
+
+        /* Escalate on repeated overflow (≥ threshold = sustained overload).
+         * A single overflow is a transient — bus load spike or delayed poll.
+         * Persistent overflow means messages are consistently being lost.  */
+        if (can_stats.fifo_overflow_count >= CAN_FIFO_OVERFLOW_DEGRADE_THRESHOLD) {
+            Safety_SetDegradedLevel(DEGRADED_L1, DEGRADED_REASON_SENSOR_FAULT);
+        }
+    }
+
     /* Process all pending messages in RX FIFO0 */
     while (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0) {
         if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &rx_hdr, rx_payload) != HAL_OK) {
-            can_stats.rx_errors++;
+            sat_inc_u32(&can_stats.rx_errors);
             continue;
         }
 
@@ -649,7 +696,8 @@ void CAN_ProcessMessages(void) {
         for (uint8_t i = 0; i < 8; i++)
             ((volatile uint8_t *)g_CAN_RxData)[i] = rx_payload[i];
         
-        can_stats.rx_count++;
+        sat_inc_u32(&can_stats.rx_count);
+        last_any_rx_tick = HAL_GetTick();  /* Global CAN watchdog refresh */
         uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);
         
         /* Parse received messages based on ID.
@@ -699,7 +747,7 @@ void CAN_ProcessMessages(void) {
                      * validate liveness.  Reject to prevent bypass of
                      * the freeze detection mechanism.  CAN timeout will
                      * naturally expire → LIMP_HOME as designed.          */
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
                 
@@ -711,7 +759,11 @@ void CAN_ProcessMessages(void) {
                  * the latch clears could bypass the inhibit for up to one 50 ms pedal
                  * update cycle.  Safety_ValidateThrottle() additionally enforces the
                  * state-machine gate, so both checks must independently pass.           */
-                if (msg_len >= 1 && !Startup_IsInhibited()) {
+                if (msg_len < 1) {
+                    sat_inc_u32(&can_stats.rx_errors);
+                    break;
+                }
+                if (!Startup_IsInhibited()) {
                     float requested_pct = (float)rx_payload[0];
                     /* Reject out-of-range values at CAN ingress.
                      * Valid throttle is 0–100%; values 101–255 from a
@@ -721,7 +773,7 @@ void CAN_ProcessMessages(void) {
                      * step-rate anomaly detector in Traction_SetDemand
                      * and cause a spurious DEGRADED transition.          */
                     if (requested_pct > 100.0f) {
-                        can_stats.rx_errors++;
+                        sat_inc_u32(&can_stats.rx_errors);
                         break;
                     }
                     float validated_pct = Safety_ValidateThrottle(requested_pct);
@@ -735,11 +787,14 @@ void CAN_ProcessMessages(void) {
                     float requested_deg = (float)angle_raw / 10.0f;
                     float validated_deg = Safety_ValidateSteering(requested_deg);
                     Steering_SetAngle(validated_deg);
+                } else {
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
                 
             case CAN_ID_CMD_MODE:
                 if (msg_len < 1) {
+                    sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(0x02, ACK_INVALID);
                     break;
                 }
@@ -823,6 +878,7 @@ void CAN_ProcessMessages(void) {
                  *     require a rolling counter, session token, or challenge-
                  *     response mechanism to prevent replay and injection.     */
                 if (msg_len < 1) {
+                    sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(0x10, ACK_INVALID);
                     break;
                 }
@@ -942,7 +998,7 @@ void CAN_ProcessMessages(void) {
             case CAN_ID_OBSTACLE_DISTANCE:
                 /* Obstacle distance from ESP32 (0x208):
                  *   Byte 0-1: minimum distance (mm, uint16 LE)
-                 *   Byte 2:   zone level (0–5, uint8)
+                 *   Byte 2:   zone level (0–4, uint8)
                  *   Byte 3:   sensor health (0=unhealthy, 1=healthy)
                  *   Byte 4:   rolling counter (uint8, 0–255)
                  *
@@ -951,6 +1007,8 @@ void CAN_ProcessMessages(void) {
                  * independently of the ESP32's 5-zone logic.            */
                 if (msg_len >= 5) {
                     Obstacle_ProcessCAN(rx_payload, msg_len);
+                } else {
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
 
@@ -966,6 +1024,8 @@ void CAN_ProcessMessages(void) {
                  * cross-validation and diagnostic logging only.             */
                 if (msg_len >= 3) {
                     Obstacle_ProcessSafetyCAN(rx_payload, msg_len);
+                } else {
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
 
@@ -984,6 +1044,7 @@ void CAN_ProcessMessages(void) {
                     }
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_OK);
                 } else {
+                    sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
                 }
                 break;
@@ -1087,7 +1148,7 @@ void CAN_CheckBusOff(void)
         busoff_active       = 1;
         busoff_last_attempt = HAL_GetTick();
         busoff_retry_count  = 0;
-        can_stats.busoff_count++;
+        sat_inc_u32(&can_stats.busoff_count);
         Safety_SetError(SAFETY_ERROR_CAN_BUSOFF);
         Safety_SetState(SYS_STATE_LIMP_HOME);
     }
@@ -1096,4 +1157,20 @@ void CAN_CheckBusOff(void)
 bool CAN_IsESP32Alive(void) {
     uint32_t time_since_heartbeat = HAL_GetTick() - can_stats.last_heartbeat_esp32;
     return (time_since_heartbeat < CAN_TIMEOUT_HEARTBEAT_MS);
+}
+
+/**
+ * @brief  Check if the CAN bus is globally silent (no frames at all).
+ *
+ * Unlike CAN_IsESP32Alive() which only tracks ESP32 heartbeats, this
+ * function detects total bus silence — no messages from any node.
+ * A completely silent CAN bus indicates a hardware fault (bad wiring,
+ * failed transceiver, bus contention) that the heartbeat timeout alone
+ * might not catch quickly if other periodic messages mask the problem.
+ *
+ * @retval true   No CAN frames received for > CAN_GLOBAL_SILENCE_MS
+ * @retval false  At least one frame received recently
+ */
+bool CAN_IsGlobalSilent(void) {
+    return ((HAL_GetTick() - last_any_rx_tick) > CAN_GLOBAL_SILENCE_MS);
 }

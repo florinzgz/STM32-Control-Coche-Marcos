@@ -226,6 +226,49 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len,
 }
 
 // -------------------------------------------------------------------------
+// Frame structure validation (lightweight — no pixel parsing).
+// Checks header byte, format markers, length, and checksum (Frame0 only).
+// Used during resynchronization to reject false 0x57 headers that appear
+// inside payload data of corrupted or misaligned frames.
+//
+// Returns true if the buffer contains a structurally valid frame:
+//   - Header byte 0x57 at position 0
+//   - For Frame0: function mark 0x01 at position 1, valid checksum
+//   - For Compact: header only (no checksum available)
+//   - Buffer length matches expected frame size
+//
+// Does NOT validate pixel data — that's done by parseFrame().
+// -------------------------------------------------------------------------
+static bool isValidFrame(const uint8_t* buf, uint16_t len) {
+    if (len == 0 || buf[OFF_HEADER] != FRAME_HEADER) return false;
+
+    // Try Frame0 first (400 bytes, has checksum for strong validation)
+    if (len >= FRAME0_LENGTH) {
+        if (buf[OFF_FUNCTION_MARK] == FUNCTION_MARK &&
+            buf[2] == 0xFF && buf[8] == 0x40) {
+            // Validate Frame0 checksum (sum of bytes 0..398 must equal byte 399)
+            uint8_t checksum = 0;
+            for (uint16_t i = 0; i < FRAME0_LENGTH - 1; i++) checksum += buf[i];
+            return (checksum == buf[FRAME0_LENGTH - 1]);
+        }
+    }
+
+    // Compact format (257 bytes, no checksum — accept if header matches)
+    if (len >= COMPACT_FRAME_LENGTH) {
+        // Buffer is at least 257 bytes (checked above).
+        // Compact frames have pixel data immediately after header.
+        // No strong structural validation is possible without checksum,
+        // but at minimum the frame must start with 0x57 and NOT match
+        // Frame0 format markers (to avoid false positive on partial Frame0).
+        if (buf[OFF_FUNCTION_MARK] != FUNCTION_MARK) {
+            return true;  // Compact frame — accept (header-only validation)
+        }
+    }
+
+    return false;
+}
+
+// -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
 
@@ -319,6 +362,20 @@ void update(float vehicleSpeedKmh) {
             continue;
         }
 
+        // Bounds check: prevent writing past rxBuf_[FRAME0_LENGTH].
+        // If we've filled the entire buffer without finding a complete frame,
+        // the accumulation was caused by corrupted data or an unknown format.
+        // Reset and attempt to resync: if the current byte is a valid header,
+        // keep it as the start of a new frame instead of discarding it.
+        if (rxIdx_ >= FRAME0_LENGTH) {
+            rxIdx_ = 0;
+            diagBytesDiscarded_++;
+            if (byte == FRAME_HEADER) {
+                rxBuf_[rxIdx_++] = byte;  // Start new frame with this header
+            }
+            continue;
+        }
+
         rxBuf_[rxIdx_++] = byte;
 
         // Determine current frame's target length based on detected mode
@@ -398,7 +455,32 @@ void update(float vehicleSpeedKmh) {
                 default:
                     break;
             }
-            rxIdx_ = 0;
+
+            /* Frame consumed (or rejected).  Reset for next frame.
+             *
+             * SAFETY FIX: On BAD_CHECKSUM or BAD_HEADER, the 0x57 we
+             * synced on may have been a payload byte (false sync).
+             * Scan forward through the consumed buffer looking for
+             * another 0x57 that could be the real start of the next
+             * frame.  This avoids losing a frame that was partially
+             * consumed by a false sync on an embedded 0x57.           */
+            if (pr == ParseResult::BAD_CHECKSUM || pr == ParseResult::BAD_HEADER) {
+                // Search for next potential frame header in the buffer
+                uint16_t resyncIdx = 0;
+                for (uint16_t scan = 1; scan < rxIdx_; scan++) {
+                    if (rxBuf_[scan] == FRAME_HEADER) {
+                        // Found a candidate — shift remaining data to buffer start
+                        resyncIdx = rxIdx_ - scan;
+                        for (uint16_t j = 0; j < resyncIdx; j++) {
+                            rxBuf_[j] = rxBuf_[scan + j];
+                        }
+                        break;
+                    }
+                }
+                rxIdx_ = resyncIdx;
+            } else {
+                rxIdx_ = 0;
+            }
         }
     }
 
@@ -566,6 +648,7 @@ uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
                       uint16_t outBufSize) {
     // Frame: [0x5A] [len] [cmdId] [payload...] [checksum]
     // Total length = 1 (header) + 1 (len) + 1 (cmd) + payloadLen + 1 (checksum)
+    if (payloadLen > 0 && payload == nullptr) return 0;
     uint16_t totalLen = (uint16_t)(3 + payloadLen + 1);
     if (totalLen > outBufSize) return 0;
 

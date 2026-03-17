@@ -74,6 +74,12 @@ typedef enum {
 #define CAN_BUSOFF_RETRY_INTERVAL_MS  500   /* Non-blocking retry interval      */
 #define CAN_BUSOFF_MAX_RETRIES        10    /* Max recovery attempts before ERROR */
 
+/* FIFO overflow escalation threshold.
+ * After this many cumulative message-lost events, CAN_ProcessMessages()
+ * escalates to DEGRADED_L1.  A single overflow is a transient; sustained
+ * overflow indicates bus overload or a stuck processing loop.             */
+#define CAN_FIFO_OVERFLOW_DEGRADE_THRESHOLD  5U
+
 /* CAN Statistics */
 typedef struct {
     uint32_t tx_count;
@@ -82,6 +88,7 @@ typedef struct {
     uint32_t rx_errors;
     uint32_t last_heartbeat_esp32;
     uint32_t busoff_count;                  /* Total bus-off events detected     */
+    uint32_t fifo_overflow_count;           /* FIFO message-lost events          */
 } CAN_Stats_t;
 
 /* Function prototypes */
@@ -104,6 +111,7 @@ void CAN_SendServiceStatus(void);
 void CAN_SendErrorLogHeader(void);
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
+bool CAN_IsGlobalSilent(void);
 void CAN_CheckBusOff(void);
 bool CAN_IsBusOff(void);
 

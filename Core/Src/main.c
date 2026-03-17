@@ -203,6 +203,7 @@ int main(void)
             Safety_CheckCurrent();
             Safety_CheckTemperature();
             Safety_CheckCANTimeout();
+            Safety_CheckSteeringTimeout();
             CAN_CheckBusOff();
             Safety_CheckSensors();
             Safety_CheckEncoder();
