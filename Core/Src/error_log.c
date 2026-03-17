@@ -29,11 +29,11 @@
 #include <stddef.h>
 
 /* ---- Flash layout ----
- * STM32G474RE: 512 KB flash, 128 pages of 4 KB each.
- * Page 125 starts at 0x0807C000 (bank 1).
+ * STM32G474RE: 512 KB flash, 128 pages of 4 KB each (single-bank).
+ * Page 125 starts at 0x0807D000 (bank 1).
  * Page 126 = steering calibration, page 127 = EPS params.          */
 #define ERRLOG_FLASH_PAGE      125U
-#define ERRLOG_FLASH_BASE      0x0807C000U
+#define ERRLOG_FLASH_BASE      0x0807D000U
 
 #define ERRLOG_MAGIC           0x4552524CU   /* "ERRL" */
 

@@ -33,7 +33,11 @@ _Min_Stack_Size = 0x400;     /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
-  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 508K
+  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 500K
+  /* Pages 125-127 reserved for NVM data — not part of FLASH region.
+   * Page 125 (0x0807D000): error_log.c   persistent error ring buffer
+   * Page 126 (0x0807E000): steering_cal_store.c   steering calibration
+   * Page 127 (0x0807F000): eps_params.c   EPS tuning parameters        */
   EPS_PARAMS (r)  : ORIGIN = 0x0807F000,   LENGTH = 4K
 }
 
