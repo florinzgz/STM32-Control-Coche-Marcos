@@ -5,7 +5,7 @@
 **CubeMX:** v6.17.0  
 **HAL:** STM32Cube FW_G4 V1.6.2  
 **Fecha:** 2026-03-17  
-**Tipo:** Auditoría de solo lectura — ningún archivo fue modificado
+**Tipo:** Auditoría con corrección — se corrigió el hallazgo crítico de FPU (startup_stm32g474retx.s)
 
 ---
 
@@ -27,15 +27,15 @@ Se detectaron **17 hallazgos** clasificados por severidad:
 ## 1. 🔴 CRÍTICO — Directiva FPU del startup assembly incoherente con toolchain
 
 **Archivo:** `Core/Startup/startup_stm32g474retx.s`, línea 30  
-**Valor actual:** `.fpu softvfp`  
-**Valor esperado:** `.fpu fpv4-sp-d16`
+**Valor original:** `.fpu softvfp`  
+**Valor corregido:** `.fpu fpv4-sp-d16` ✅ (corregido en este PR)
 
 **Descripción:**  
 El archivo de arranque assembly declara `.fpu softvfp` (emulación de punto flotante por software), pero el resto de la cadena de compilación está configurada para usar FPU hardware:
 
 | Componente | Configuración FPU | Archivo/Línea |
 |---|---|---|
-| startup .s | `.fpu softvfp` ❌ | `startup_stm32g474retx.s:30` |
+| startup .s | `.fpu fpv4-sp-d16` ✅ (corregido) | `startup_stm32g474retx.s:30` |
 | Makefile | `-mfpu=fpv4-sp-d16 -mfloat-abi=hard` ✅ | `Makefile:78` |
 | .cproject | `fpv4-sp-d16` + `hard` ABI ✅ | `.cproject:23-24` |
 | system_stm32g4xx.c | `FPU->FPCCR |= ((3UL << 30) | (3UL << 28))` ✅ | `system_stm32g4xx.c:13` |
@@ -44,7 +44,8 @@ El archivo de arranque assembly declara `.fpu softvfp` (emulación de punto flot
 El archivo de startup se ensambla con convención de llamada software para flotantes, mientras que el código C generado usa convención hardware. El vector de reset, la copia de `.data`, y el borrado de `.bss` se ejecutan antes de `main()` — si cualquier función de librería llamada en esa fase (e.g., `__libc_init_array`) usa operaciones float, el ABI sería incompatible. En la práctica, dado que el startup solo copia memoria y salta a `main()`, el impacto real es mínimo, pero es una violación del ABI que puede causar errores sutiles si se modifica el startup o se añaden constructores globales con float.
 
 **Recomendación:**  
-Cambiar `.fpu softvfp` a `.fpu fpv4-sp-d16` en `startup_stm32g474retx.s` línea 30 para que coincida con el toolchain.
+~~Cambiar `.fpu softvfp` a `.fpu fpv4-sp-d16` en `startup_stm32g474retx.s` línea 30 para que coincida con el toolchain.~~  
+**CORREGIDO:** Se aplicó el cambio `.fpu softvfp` → `.fpu fpv4-sp-d16` en este PR.
 
 ---
 
