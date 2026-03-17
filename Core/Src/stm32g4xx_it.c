@@ -157,25 +157,18 @@ void I2C1_ER_IRQHandler(void)
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
     if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U) {
-        FDCAN_RxHeaderTypeDef rx_hdr;
-        uint8_t rx_data[8] = {0};
-
-        if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx_hdr, rx_data) == HAL_OK) {
-            /* Store received frame in global debug buffers so that the
-             * debugger (Live Watch / SWV) can inspect them at any time.
-             * Note: writes are not atomic w.r.t. the main loop; this is
-             * acceptable because these buffers are for debug inspection
-             * only — no control decisions depend on them.                */
-            *((volatile FDCAN_RxHeaderTypeDef *)&g_CAN_RxHeader) = rx_hdr;
-            for (uint8_t i = 0; i < 8; i++)
-                ((volatile uint8_t *)g_CAN_RxData)[i] = rx_data[i];
-
-            /* Visual feedback: toggle LD2 on every received CAN frame.
-             * Note: LD2 is also toggled at 200 ms by the main-loop
-             * heartbeat; on CAN-active buses the combined pattern will
-             * differ from the steady 200 ms blink, providing a visual
-             * indication of bus activity.                                */
-            HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
-        }
+        /* Visual feedback: toggle LD2 on every received CAN frame.
+         * Note: LD2 is also toggled at 200 ms by the main-loop
+         * heartbeat; on CAN-active buses the combined pattern will
+         * differ from the steady 200 ms blink, providing a visual
+         * indication of bus activity.
+         *
+         * IMPORTANT: Do NOT call HAL_FDCAN_GetRxMessage() here.
+         * The message must remain in FIFO0 so that the main-loop
+         * CAN_ProcessMessages() can read and process it (heartbeat
+         * liveness, throttle commands, steering, etc.).  Reading
+         * here would consume the message before the main loop sees
+         * it, causing silent loss of all ESP32 commands.            */
+        HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
     }
 }

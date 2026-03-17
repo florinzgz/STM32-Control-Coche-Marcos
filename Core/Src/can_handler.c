@@ -640,6 +640,14 @@ void CAN_ProcessMessages(void) {
             can_stats.rx_errors++;
             continue;
         }
+
+        /* Store received frame in global debug buffers so that the
+         * debugger (Live Watch / SWV) can inspect them at any time.
+         * Previously done in the ISR callback, but moved here so the
+         * message is read exactly once — by the processing loop.     */
+        *((volatile FDCAN_RxHeaderTypeDef *)&g_CAN_RxHeader) = rx_hdr;
+        for (uint8_t i = 0; i < 8; i++)
+            ((volatile uint8_t *)g_CAN_RxData)[i] = rx_payload[i];
         
         can_stats.rx_count++;
         uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);

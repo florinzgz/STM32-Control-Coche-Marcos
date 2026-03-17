@@ -599,6 +599,32 @@ static void MX_FDCAN1_Init(void)
     hfdcan1.Init.AutoRetransmission   = ENABLE;
     hfdcan1.Init.TransmitPause        = DISABLE;
     hfdcan1.Init.ProtocolException    = DISABLE;
+
+    /* ---- Message RAM configuration ----
+     * The STM32G4 FDCAN uses shared message RAM whose layout MUST be
+     * explicitly configured.  Without these fields, all element counts
+     * default to 0 (struct is zero-initialised) and the peripheral
+     * has NO TX FIFO and NO RX FIFO — HAL_FDCAN_AddMessageToTxFifoQ()
+     * always returns HAL_ERROR (FIFO full) and no frame can be
+     * received or transmitted.
+     *
+     * MessageRAMOffset = 0 because only FDCAN1 is used; the three
+     * FDCAN instances share 2560 words and each needs a unique offset. */
+    hfdcan1.Init.MessageRAMOffset     = 0;
+    hfdcan1.Init.StdFiltersNbr        = 28;  /* Up to 28 standard-ID filters  */
+    hfdcan1.Init.ExtFiltersNbr        = 0;
+    hfdcan1.Init.RxFifo0ElmtsNbr      = 3;   /* 3 elements in RX FIFO0       */
+    hfdcan1.Init.RxFifo0ElmtSize      = FDCAN_DATA_BYTES_8;
+    hfdcan1.Init.RxFifo1ElmtsNbr      = 0;
+    hfdcan1.Init.RxFifo1ElmtSize      = FDCAN_DATA_BYTES_8;
+    hfdcan1.Init.RxBuffersNbr         = 0;
+    hfdcan1.Init.RxBufferSize         = FDCAN_DATA_BYTES_8;
+    hfdcan1.Init.TxEventsNbr          = 0;
+    hfdcan1.Init.TxBuffersNbr         = 0;
+    hfdcan1.Init.TxFifoQueueElmtsNbr  = 3;   /* 3 elements in TX FIFO        */
+    hfdcan1.Init.TxFifoQueueMode      = FDCAN_TX_FIFO_OPERATION;
+    hfdcan1.Init.TxElmtSize           = FDCAN_DATA_BYTES_8;
+
     if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
         fdcan_init_ok = false;
         return;  /* Non-fatal: system continues without CAN */
