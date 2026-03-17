@@ -78,6 +78,13 @@ static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
 static uint8_t  busoff_retry_count  = 0;    /* Number of recovery attempts since bus-off  */
 
+/* Saturating increment for uint32_t counters.
+ * Prevents wrap-around to 0 after 4 billion events, which would
+ * clear the saturated diagnostic byte in CAN_SendStatusSafety.   */
+static inline void sat_inc_u32(uint32_t *counter) {
+    if (*counter < UINT32_MAX) (*counter)++;
+}
+
 /* Internal helper to send a CAN frame */
 static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
     FDCAN_TxHeaderTypeDef tx_hdr = {0};
@@ -110,9 +117,9 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     HAL_StatusTypeDef result = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_hdr, payload);
     
     if (result == HAL_OK) {
-        can_stats.tx_count++;
+        sat_inc_u32(&can_stats.tx_count);
     } else {
-        can_stats.tx_errors++;
+        sat_inc_u32(&can_stats.tx_errors);
     }
     
     return result;
@@ -208,6 +215,7 @@ void CAN_Init(void) {
     can_stats.rx_errors = 0;
     can_stats.last_heartbeat_esp32 = HAL_GetTick();
     can_stats.busoff_count = 0;
+    can_stats.fifo_overflow_count = 0;
     heartbeat_counter = 0;
 
     /* Reset bus-off recovery state */
@@ -641,10 +649,19 @@ void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
     
+    /* Check for FIFO message-lost (overflow) condition.
+     * The FDCAN sets this flag when a new message arrives but
+     * FIFO0 is full and the newest message is discarded.
+     * Detecting this allows field diagnostics of missed frames. */
+    if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST)) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST);
+        sat_inc_u32(&can_stats.fifo_overflow_count);
+    }
+
     /* Process all pending messages in RX FIFO0 */
     while (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0) {
         if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &rx_hdr, rx_payload) != HAL_OK) {
-            can_stats.rx_errors++;
+            sat_inc_u32(&can_stats.rx_errors);
             continue;
         }
 
@@ -656,7 +673,7 @@ void CAN_ProcessMessages(void) {
         for (uint8_t i = 0; i < 8; i++)
             ((volatile uint8_t *)g_CAN_RxData)[i] = rx_payload[i];
         
-        can_stats.rx_count++;
+        sat_inc_u32(&can_stats.rx_count);
         uint8_t msg_len = ExtractDLC(rx_hdr.DataLength);
         
         /* Parse received messages based on ID.
@@ -706,7 +723,7 @@ void CAN_ProcessMessages(void) {
                      * validate liveness.  Reject to prevent bypass of
                      * the freeze detection mechanism.  CAN timeout will
                      * naturally expire → LIMP_HOME as designed.          */
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
                 
@@ -719,7 +736,7 @@ void CAN_ProcessMessages(void) {
                  * update cycle.  Safety_ValidateThrottle() additionally enforces the
                  * state-machine gate, so both checks must independently pass.           */
                 if (msg_len < 1) {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                     break;
                 }
                 if (!Startup_IsInhibited()) {
@@ -732,7 +749,7 @@ void CAN_ProcessMessages(void) {
                      * step-rate anomaly detector in Traction_SetDemand
                      * and cause a spurious DEGRADED transition.          */
                     if (requested_pct > 100.0f) {
-                        can_stats.rx_errors++;
+                        sat_inc_u32(&can_stats.rx_errors);
                         break;
                     }
                     float validated_pct = Safety_ValidateThrottle(requested_pct);
@@ -747,13 +764,13 @@ void CAN_ProcessMessages(void) {
                     float validated_deg = Safety_ValidateSteering(requested_deg);
                     Steering_SetAngle(validated_deg);
                 } else {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
                 
             case CAN_ID_CMD_MODE:
                 if (msg_len < 1) {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(0x02, ACK_INVALID);
                     break;
                 }
@@ -837,7 +854,7 @@ void CAN_ProcessMessages(void) {
                  *     require a rolling counter, session token, or challenge-
                  *     response mechanism to prevent replay and injection.     */
                 if (msg_len < 1) {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(0x10, ACK_INVALID);
                     break;
                 }
@@ -967,7 +984,7 @@ void CAN_ProcessMessages(void) {
                 if (msg_len >= 5) {
                     Obstacle_ProcessCAN(rx_payload, msg_len);
                 } else {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
 
@@ -984,7 +1001,7 @@ void CAN_ProcessMessages(void) {
                 if (msg_len >= 3) {
                     Obstacle_ProcessSafetyCAN(rx_payload, msg_len);
                 } else {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                 }
                 break;
 
@@ -1003,7 +1020,7 @@ void CAN_ProcessMessages(void) {
                     }
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_OK);
                 } else {
-                    can_stats.rx_errors++;
+                    sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
                 }
                 break;
@@ -1107,7 +1124,7 @@ void CAN_CheckBusOff(void)
         busoff_active       = 1;
         busoff_last_attempt = HAL_GetTick();
         busoff_retry_count  = 0;
-        can_stats.busoff_count++;
+        sat_inc_u32(&can_stats.busoff_count);
         Safety_SetError(SAFETY_ERROR_CAN_BUSOFF);
         Safety_SetState(SYS_STATE_LIMP_HOME);
     }

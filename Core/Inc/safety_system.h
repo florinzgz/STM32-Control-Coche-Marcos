@@ -210,6 +210,7 @@ void TCS_Reset(void);
 void Safety_CheckCurrent(void);
 void Safety_CheckTemperature(void);
 void Safety_CheckCANTimeout(void);
+void Safety_CheckSteeringTimeout(void);
 void Safety_CheckSensors(void);
 void Safety_CheckEncoder(void);
 void Safety_CheckBatteryVoltage(void);

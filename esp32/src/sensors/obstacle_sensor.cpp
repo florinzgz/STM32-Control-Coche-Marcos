@@ -319,10 +319,17 @@ void update(float vehicleSpeedKmh) {
             continue;
         }
 
-        // Bounds check: prevent writing past rxBuf_[FRAME0_LENGTH]
+        // Bounds check: prevent writing past rxBuf_[FRAME0_LENGTH].
+        // If we've filled the entire buffer without finding a complete frame,
+        // the accumulation was caused by corrupted data or an unknown format.
+        // Reset and attempt to resync: if the current byte is a valid header,
+        // keep it as the start of a new frame instead of discarding it.
         if (rxIdx_ >= FRAME0_LENGTH) {
             rxIdx_ = 0;
             diagBytesDiscarded_++;
+            if (byte == FRAME_HEADER) {
+                rxBuf_[rxIdx_++] = byte;  // Start new frame with this header
+            }
             continue;
         }
 

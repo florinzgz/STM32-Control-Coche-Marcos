@@ -82,6 +82,7 @@ typedef struct {
     uint32_t rx_errors;
     uint32_t last_heartbeat_esp32;
     uint32_t busoff_count;                  /* Total bus-off events detected     */
+    uint32_t fifo_overflow_count;           /* FIFO message-lost events          */
 } CAN_Stats_t;
 
 /* Function prototypes */
