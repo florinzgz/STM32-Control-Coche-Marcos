@@ -771,6 +771,58 @@ static void test_many_queued_frames_all_processed() {
     ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
+// Test 21b: Inject > 400 bytes of non-frame data (0x57 header followed by
+//           garbage) to exercise the rxBuf_ bounds check.  The parser must
+//           not overflow the 400-byte rxBuf_ and must not crash.
+//           After the garbage, inject a valid frame and verify recovery.
+static void test_rxbuf_overflow_protection() {
+    printf("  test_rxbuf_overflow_protection...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject a 0x57 header byte followed by 500 bytes of 0xAA garbage.
+    // This simulates a corrupt stream that starts with a valid header
+    // but never forms a valid frame.  Without bounds checking, rxIdx_
+    // would overflow the 400-byte rxBuf_.
+    uint8_t overflow[501];
+    overflow[0] = 0x57;  // Valid frame header
+    for (int i = 1; i < 501; i++) overflow[i] = 0xAA;
+    g_uart_inject(overflow, 501);
+
+    // Process the garbage — must not crash or corrupt memory
+    obstacle_sensor::update(0.0f);
+
+    // After processing garbage, inject two valid frames and re-init
+    // to reset auto-detection state, then verify recovery
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    uint8_t good[FRAME_LEN];
+    buildFrame(good);
+    setValidPixels(good, 1200);
+    writeChecksum(good);
+    g_uart_inject(good, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    // Must have recovered and parsed the valid frame
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 1200);
+    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
+}
+
 /* ---- Configuration command tests ---------------------------------------- */
 
 // Test 22: buildCommand produces correct frame for SET_RANGE_MODE (long range)
@@ -2012,6 +2064,7 @@ int main() {
     test_single_frame_within_byte_limit();
     test_multiple_bad_frames_then_good();
     test_many_queued_frames_all_processed();
+    test_rxbuf_overflow_protection();
     test_build_command_range_mode();
     test_build_command_save_config();
     test_build_command_baud_rate();

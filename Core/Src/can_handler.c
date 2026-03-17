@@ -339,13 +339,20 @@ void CAN_SendStatusTemp(int8_t t1, int8_t t2, int8_t t3, int8_t t4, int8_t t5) {
 }
 
 void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code) {
-    uint8_t safety_data[3];
+    uint8_t safety_data[5];
     
     safety_data[0] = abs ? 1 : 0;
     safety_data[1] = tcs ? 1 : 0;
     safety_data[2] = error_code;
+    /* Byte 3: system state (SYS_STATE_*) for HMI display.
+     * Byte 4: saturated CAN RX error count for diagnostics.
+     * Backward compatible: ESP32 parsers that only read bytes 0–2
+     * will ignore the additional payload (DLC ≥ 3 check passes).  */
+    safety_data[3] = (uint8_t)Safety_GetState();
+    safety_data[4] = (can_stats.rx_errors > 255) ? 255
+                     : (uint8_t)can_stats.rx_errors;
     
-    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 3);
+    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 5);
 }
 
 void CAN_SendStatusSteering(int16_t angle, bool calibrated) {
@@ -711,7 +718,11 @@ void CAN_ProcessMessages(void) {
                  * the latch clears could bypass the inhibit for up to one 50 ms pedal
                  * update cycle.  Safety_ValidateThrottle() additionally enforces the
                  * state-machine gate, so both checks must independently pass.           */
-                if (msg_len >= 1 && !Startup_IsInhibited()) {
+                if (msg_len < 1) {
+                    can_stats.rx_errors++;
+                    break;
+                }
+                if (!Startup_IsInhibited()) {
                     float requested_pct = (float)rx_payload[0];
                     /* Reject out-of-range values at CAN ingress.
                      * Valid throttle is 0–100%; values 101–255 from a
@@ -742,6 +753,7 @@ void CAN_ProcessMessages(void) {
                 
             case CAN_ID_CMD_MODE:
                 if (msg_len < 1) {
+                    can_stats.rx_errors++;
                     CAN_SendCommandAck(0x02, ACK_INVALID);
                     break;
                 }
@@ -825,6 +837,7 @@ void CAN_ProcessMessages(void) {
                  *     require a rolling counter, session token, or challenge-
                  *     response mechanism to prevent replay and injection.     */
                 if (msg_len < 1) {
+                    can_stats.rx_errors++;
                     CAN_SendCommandAck(0x10, ACK_INVALID);
                     break;
                 }
@@ -990,6 +1003,7 @@ void CAN_ProcessMessages(void) {
                     }
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_OK);
                 } else {
+                    can_stats.rx_errors++;
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
                 }
                 break;

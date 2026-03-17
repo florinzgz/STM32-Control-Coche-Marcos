@@ -319,6 +319,13 @@ void update(float vehicleSpeedKmh) {
             continue;
         }
 
+        // Bounds check: prevent writing past rxBuf_[FRAME0_LENGTH]
+        if (rxIdx_ >= FRAME0_LENGTH) {
+            rxIdx_ = 0;
+            diagBytesDiscarded_++;
+            continue;
+        }
+
         rxBuf_[rxIdx_++] = byte;
 
         // Determine current frame's target length based on detected mode
