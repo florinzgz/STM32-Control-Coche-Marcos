@@ -857,6 +857,30 @@ static void test_build_command_buffer_too_small() {
     ASSERT_EQ(len, 0);  // Should fail
 }
 
+// Test 25b: buildCommand returns 0 when payload is null but payloadLen > 0
+static void test_build_command_null_payload_rejected() {
+    printf("  test_build_command_null_payload_rejected...\n");
+
+    uint8_t buf[16];
+    uint16_t len = obstacle_sensor::buildCommand(
+        0x07, nullptr, 1, buf, sizeof(buf));
+
+    ASSERT_EQ(len, 0);  // Should reject null payload with non-zero length
+}
+
+// Test 25c: buildCommand accepts null payload when payloadLen is 0
+static void test_build_command_null_payload_zero_len_ok() {
+    printf("  test_build_command_null_payload_zero_len_ok...\n");
+
+    uint8_t buf[16];
+    uint16_t len = obstacle_sensor::buildCommand(
+        0x08, nullptr, 0, buf, sizeof(buf));
+
+    ASSERT(len > 0);  // Should succeed: no payload to copy
+    ASSERT_EQ(buf[0], 0x5A);
+    ASSERT_EQ(buf[2], 0x08);
+}
+
 // Test 26: buildCommand checksum is correct modulo 256
 static void test_build_command_checksum_wraps() {
     printf("  test_build_command_checksum_wraps...\n");
@@ -1992,6 +2016,8 @@ int main() {
     test_build_command_save_config();
     test_build_command_baud_rate();
     test_build_command_buffer_too_small();
+    test_build_command_null_payload_rejected();
+    test_build_command_null_payload_zero_len_ok();
     test_build_command_checksum_wraps();
     test_2000mm_distance_parses_correctly();
     test_4000mm_max_range_parses_correctly();

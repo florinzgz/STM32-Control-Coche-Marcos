@@ -735,6 +735,8 @@ void CAN_ProcessMessages(void) {
                     float requested_deg = (float)angle_raw / 10.0f;
                     float validated_deg = Safety_ValidateSteering(requested_deg);
                     Steering_SetAngle(validated_deg);
+                } else {
+                    can_stats.rx_errors++;
                 }
                 break;
                 
@@ -942,7 +944,7 @@ void CAN_ProcessMessages(void) {
             case CAN_ID_OBSTACLE_DISTANCE:
                 /* Obstacle distance from ESP32 (0x208):
                  *   Byte 0-1: minimum distance (mm, uint16 LE)
-                 *   Byte 2:   zone level (0–5, uint8)
+                 *   Byte 2:   zone level (0–4, uint8)
                  *   Byte 3:   sensor health (0=unhealthy, 1=healthy)
                  *   Byte 4:   rolling counter (uint8, 0–255)
                  *
@@ -951,6 +953,8 @@ void CAN_ProcessMessages(void) {
                  * independently of the ESP32's 5-zone logic.            */
                 if (msg_len >= 5) {
                     Obstacle_ProcessCAN(rx_payload, msg_len);
+                } else {
+                    can_stats.rx_errors++;
                 }
                 break;
 
@@ -966,6 +970,8 @@ void CAN_ProcessMessages(void) {
                  * cross-validation and diagnostic logging only.             */
                 if (msg_len >= 3) {
                     Obstacle_ProcessSafetyCAN(rx_payload, msg_len);
+                } else {
+                    can_stats.rx_errors++;
                 }
                 break;
 

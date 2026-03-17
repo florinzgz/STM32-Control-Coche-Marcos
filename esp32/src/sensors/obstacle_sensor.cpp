@@ -568,6 +568,7 @@ uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
     // Total length = 1 (header) + 1 (len) + 1 (cmd) + payloadLen + 1 (checksum)
     uint16_t totalLen = (uint16_t)(3 + payloadLen + 1);
     if (totalLen > outBufSize) return 0;
+    if (payloadLen > 0 && payload == nullptr) return 0;
 
     outBuf[0] = CMD_HEADER;                  // 0x5A
     outBuf[1] = (uint8_t)totalLen;           // Total frame length

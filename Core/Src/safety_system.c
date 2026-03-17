@@ -1033,10 +1033,15 @@ void Safety_CheckCANTimeout(void)
         /* CAN restored from LIMP_HOME → attempt ACTIVE.
          * Heartbeat has appeared and system is healthy.
          * ACTIVE still requires steering calibration — if centering
-         * never completed, the vehicle stays in LIMP_HOME.            */
+         * never completed, the vehicle stays in LIMP_HOME.
+         * Clear both CAN_TIMEOUT and CAN_BUSOFF: if the bus recovered
+         * on its own (auto-recovery) without CAN_CheckBusOff() completing
+         * its reinit sequence, the residual BUSOFF error would otherwise
+         * persist and block future state transitions.                    */
         if (system_state == SYS_STATE_LIMP_HOME &&
             Steering_IsCalibrated()) {
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
+            Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* If in SAFE due to CAN timeout and heartbeat restored, try recovery.
@@ -1044,8 +1049,10 @@ void Safety_CheckCANTimeout(void)
          * but this path remains for backward-compatible recovery from
          * earlier firmware versions or manual SAFE entry.               */
         if (system_state == SYS_STATE_SAFE &&
-            safety_error == SAFETY_ERROR_CAN_TIMEOUT) {
+            (safety_error == SAFETY_ERROR_CAN_TIMEOUT ||
+             safety_error == SAFETY_ERROR_CAN_BUSOFF)) {
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
+            Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* DEGRADED recovery: if fault has been cleared while in DEGRADED,
@@ -1442,8 +1449,8 @@ void Obstacle_ProcessCAN(const uint8_t *data, uint8_t len)
     }
     obstacle_last_counter = counter;
 
-    /* Zone plausibility: clamp to valid range */
-    if (zone > 5) zone = 0;
+    /* Zone plausibility: clamp to valid range (0–4, matching ESP32 distanceToZone) */
+    if (zone > 4) zone = 0;
 
     uint32_t now = HAL_GetTick();
 
