@@ -122,6 +122,15 @@ static constexpr uint8_t  MAX_AUTO_RECOVERY_ATTEMPTS    = 10;
 // Number of consecutive invalid frames before triggering auto-recovery.
 // At 10 Hz frame rate, 30 frames ≈ 3 seconds of sustained failure.
 static constexpr uint32_t AUTO_RECOVERY_FRAME_THRESHOLD = 30;
+// Number of consecutive invalid frames after which the sensor is declared
+// permanently faulted (no more recovery attempts possible, or TX unavailable).
+// 60 frames ≈ 6 seconds at 10 Hz.  Prevents the emergency-close fallback
+// (minRangeMm = 20, healthy=true) from being mistaken for a genuine obstacle.
+static constexpr uint32_t SENSOR_FAULT_FRAME_THRESHOLD  = 60;
+// Latched when the sensor has been in persistent invalid state beyond
+// SENSOR_FAULT_FRAME_THRESHOLD with no recovery possible.  Cleared when
+// a valid ParseResult::OK frame arrives.
+static bool     sensorFaultActive_        = false;
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
@@ -310,6 +319,7 @@ void init(const Config& cfg) {
     diagShortRangeWarned_ = false;
     consecutiveInvalidFrames_ = 0;
     autoRecoveryAttempts_     = 0;
+    sensorFaultActive_        = false;
 
     reading_ = Reading{};  // Reset to defaults
 
@@ -419,6 +429,11 @@ void update(float vehicleSpeedKmh) {
 
             switch (pr) {
                 case ParseResult::OK:
+                    if (sensorFaultActive_) {
+                        Serial.println("[OBSTACLE] Recovery: valid pixels received — "
+                                       "sensor fault cleared.");
+                        sensorFaultActive_ = false;
+                    }
                     measuredMm = dist;
                     gotFrame = true;
                     diagFramesOk_++;
@@ -629,6 +644,39 @@ void update(float vehicleSpeedKmh) {
     reading_.stuck   = stuckActive_;
     reading_.healthy = !stuckActive_;
     reading_.status  = stuckActive_ ? SensorStatus::INVALID : SensorStatus::VALID;
+
+    // ---- Sensor fault override ----
+    // When auto-recovery is exhausted (or TX unavailable) AND the sensor
+    // keeps returning all-invalid pixels for SENSOR_FAULT_FRAME_THRESHOLD
+    // consecutive frames, override healthy/status to signal a permanent
+    // sensor fault.  This prevents the emergency-close fallback
+    // (minRangeMm = 20, healthy=true) from appearing as a real obstacle
+    // to the STM32's safety system (which would force the vehicle to stop).
+    // On real hardware the STM32 applies OBSTACLE_FAULT_SCALE (50% speed
+    // cap) when sensor health = 0, which is a better outcome than a full
+    // stop caused by a phantom 20 mm obstacle.
+    bool recoveryPossible = (autoRecoveryAttempts_ < MAX_AUTO_RECOVERY_ATTEMPTS)
+                            && (cfg_.txPin >= 0);
+    if (!recoveryPossible
+            && consecutiveInvalidFrames_ >= SENSOR_FAULT_FRAME_THRESHOLD) {
+        if (!sensorFaultActive_) {
+            sensorFaultActive_ = true;
+            Serial.printf("[OBSTACLE] FAULT: Sensor declared permanently invalid — "
+                          "%lu consecutive invalid frames, %u/%u recovery attempts, "
+                          "txPin=%d. "
+                          "Fix: set Config::txPin to the ESP32 TX GPIO wired to "
+                          "sensor RX and reboot, or use NAssistant to configure "
+                          "Long Range mode.\n",
+                          (unsigned long)consecutiveInvalidFrames_,
+                          (unsigned)autoRecoveryAttempts_,
+                          (unsigned)MAX_AUTO_RECOVERY_ATTEMPTS,
+                          cfg_.txPin);
+        }
+        reading_.healthy = false;
+        reading_.status  = SensorStatus::INVALID;
+    }
+
+    reading_.updateCount++;
 }
 
 Reading getReading() {

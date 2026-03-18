@@ -123,6 +123,7 @@ struct Reading {
     bool         healthy      = false;  // true if reading is valid and plausible
     bool         stuck        = false;  // true if stuck-sensor condition detected
     SensorStatus status       = SensorStatus::WAITING;
+    uint32_t     updateCount  = 0;      // Increments on each measurement frame (telemetry/diagnostics)
 };
 
 // -------------------------------------------------------------------------

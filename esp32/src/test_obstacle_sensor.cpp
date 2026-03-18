@@ -2230,6 +2230,199 @@ static void test_multiple_false_headers_then_valid() {
     ASSERT_EQ(rd2.distance_mm, 1800);
 }
 
+// Test 63: After all auto-recovery attempts are exhausted (10 retries × 30
+//          invalid frames) and 60 more consecutive invalid frames pass,
+//          the sensor is declared permanently faulted: healthy=false,
+//          status=INVALID, distance still at minRangeMm.
+static void test_sensor_fault_after_recovery_exhausted() {
+    printf("  test_sensor_fault_after_recovery_exhausted...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65535, /*status=*/0, 100);
+    }
+    writeChecksum(frame);
+
+    g_uart_inject_reset();
+    g_uart_tx_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Exhaust all 10 auto-recovery attempts (each needs 30 invalid frames)
+    for (int attempt = 0; attempt < 10; attempt++) {
+        for (int i = 0; i < 30; i++) {
+            g_uart_inject_reset();
+            g_uart_inject(frame, FRAME_LEN);
+            g_test_millis += 100;
+            obstacle_sensor::update(0.0f);
+        }
+    }
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 10);
+
+    // Feed up to 59 more invalid frames — still below SENSOR_FAULT_FRAME_THRESHOLD.
+    // consecutiveInvalidFrames_ resets to 0 after the 10th auto-recovery attempt,
+    // so we need SENSOR_FAULT_FRAME_THRESHOLD (60) consecutive frames after that
+    // reset before the fault activates.
+    for (int i = 0; i < 59; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    {
+        // Still below fault threshold
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.healthy, true);   // Not yet faulted
+        ASSERT_EQ(rd.distance_mm, 20); // Still at minRangeMm
+    }
+
+    // One more frame crosses SENSOR_FAULT_FRAME_THRESHOLD → fault activates
+    g_uart_inject_reset();
+    g_uart_inject(frame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.healthy, false);  // Sensor declared faulted
+        ASSERT_EQ(static_cast<uint8_t>(rd.status),
+                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+        ASSERT_EQ(rd.distance_mm, 20); // Distance stays at minRangeMm for safety
+    }
+}
+
+// Test 64: With txPin = -1 (no TX), the sensor fault is triggered after
+//          SENSOR_FAULT_FRAME_THRESHOLD (60) consecutive invalid frames.
+static void test_sensor_fault_without_tx_pin() {
+    printf("  test_sensor_fault_without_tx_pin...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65535, /*status=*/0, 100);
+    }
+    writeChecksum(frame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();  // default: txPin = -1
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 59 consecutive all-invalid frames — just below threshold
+    for (int i = 0; i < 59; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.healthy, true);   // Not yet faulted (59 < 60)
+    }
+
+    // 60th frame crosses the threshold → fault activates
+    g_uart_inject_reset();
+    g_uart_inject(frame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.healthy, false);
+        ASSERT_EQ(static_cast<uint8_t>(rd.status),
+                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+        ASSERT_EQ(rd.distance_mm, 20);
+        ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0); // No retries (no TX)
+    }
+}
+
+// Test 65: Sensor fault clears when a valid frame arrives.
+static void test_sensor_fault_clears_on_valid_frame() {
+    printf("  test_sensor_fault_clears_on_valid_frame...\n");
+
+    uint8_t badFrame[FRAME_LEN];
+    buildFrame(badFrame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(badFrame, px, 65535, /*status=*/0, 100);
+    }
+    writeChecksum(badFrame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();  // txPin = -1: no recovery, fault after 60 frames
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Drive sensor into fault state (60 invalid frames)
+    for (int i = 0; i < 60; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(badFrame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.healthy, false);  // Fault active
+    }
+
+    // Inject a valid frame — fault should clear
+    uint8_t goodFrame[FRAME_LEN];
+    buildFrame(goodFrame);
+    setValidPixels(goodFrame, 1500, 200);
+    writeChecksum(goodFrame);
+
+    g_uart_inject_reset();
+    g_uart_inject(goodFrame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.healthy, true);   // Fault cleared
+        ASSERT_EQ(static_cast<uint8_t>(rd.status),
+                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+        ASSERT_EQ(rd.distance_mm, 1500);
+    }
+}
+
+// Test 66: updateCount increments on each measurement frame.
+static void test_update_count_increments() {
+    printf("  test_update_count_increments...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    setValidPixels(frame, 2000, 200);
+    writeChecksum(frame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    uint32_t prevCount = obstacle_sensor::getReading().updateCount;
+
+    for (int i = 0; i < 3; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.updateCount, prevCount + (uint32_t)(i + 1));
+    }
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -2303,6 +2496,10 @@ int main() {
     test_distance_65000_is_invalid();
     test_resync_finds_real_frame_after_false_header();
     test_multiple_false_headers_then_valid();
+    test_sensor_fault_after_recovery_exhausted();
+    test_sensor_fault_without_tx_pin();
+    test_sensor_fault_clears_on_valid_frame();
+    test_update_count_increments();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
