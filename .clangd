@@ -15,7 +15,8 @@ CompileFlags:
     - -mfpu=*
     - -fdata-sections
     - -ffunction-sections
-  CompilationDatabase: .
+
+CompilationDatabase: .
 
 Diagnostics:
   UnusedIncludes: Strict

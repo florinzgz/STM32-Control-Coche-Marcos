@@ -14,7 +14,8 @@ CompileFlags:
     - -mlongcalls
     - -fstrict-volatile-bitfields
     - -fno-tree-switch-conversion
-  CompilationDatabase: .
+
+CompilationDatabase: .
 
 Diagnostics:
   UnusedIncludes: Strict
