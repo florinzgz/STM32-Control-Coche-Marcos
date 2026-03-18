@@ -1,0 +1,33 @@
+# clangd configuration for ESP32-S3 HMI firmware (Arduino + PlatformIO)
+# Isolated from STM32 project — do NOT mix includes or toolchains.
+
+CompileFlags:
+  Add:
+    - -std=gnu++17
+    - -DARDUINO_USB_MODE=1
+    - -DARDUINO_USB_CDC_ON_BOOT=1
+    - -DBOARD_HAS_PSRAM=1
+    - -Iinclude
+    - -Isrc
+  Remove:
+    # Suppress unknown Xtensa-specific flags that clangd doesn't understand
+    - -mlongcalls
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+  CompilationDatabase: .
+
+Diagnostics:
+  UnusedIncludes: Strict
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - cert-*
+      - misc-*
+      - performance-*
+      - readability-*
+      - modernize-*
+    Remove:
+      - readability-magic-numbers
+      - modernize-use-trailing-return-type
+      - cert-dcl37-c
+      - cert-dcl51-cpp

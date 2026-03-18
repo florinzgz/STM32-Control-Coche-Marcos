@@ -79,6 +79,8 @@ Release/
 *.gcov
 cov-int/
 *.sarif
+compile_commands.json
+esp32/compile_commands.json
 
 # ===========================
 # Python (para tools/)

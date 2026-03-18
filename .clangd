@@ -1,0 +1,32 @@
+# clangd configuration for STM32 G474 firmware
+# Isolated from ESP32 project — do NOT mix includes or toolchains.
+
+CompileFlags:
+  Add:
+    - -DSTM32G474xx
+    - -DUSE_HAL_DRIVER
+    - --target=arm-none-eabi
+    - -ICore/Inc
+  Remove:
+    # Suppress unknown ARM-specific flags that clangd doesn't understand
+    - -mcpu=*
+    - -mthumb
+    - -mfloat-abi=*
+    - -mfpu=*
+    - -fdata-sections
+    - -ffunction-sections
+  CompilationDatabase: .
+
+Diagnostics:
+  UnusedIncludes: Strict
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - cert-*
+      - misc-*
+      - performance-*
+      - readability-*
+    Remove:
+      - readability-magic-numbers
+      - cert-dcl37-c
+      - cert-dcl51-cpp
