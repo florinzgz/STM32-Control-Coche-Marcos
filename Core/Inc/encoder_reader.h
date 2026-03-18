@@ -10,8 +10,8 @@
   ****************************************************************************
   */
 
-#ifndef __ENCODER_READER_H
-#define __ENCODER_READER_H
+#ifndef ENCODER_READER_H
+#define ENCODER_READER_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,4 +53,4 @@ void Encoder_SendDiagnostic(void);
 }
 #endif
 
-#endif /* __ENCODER_READER_H */
+#endif /* ENCODER_READER_H */

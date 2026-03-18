@@ -21,8 +21,8 @@
   ****************************************************************************
   */
 
-#ifndef __STEERING_CENTERING_H
-#define __STEERING_CENTERING_H
+#ifndef STEERING_CENTERING_H
+#define STEERING_CENTERING_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,4 +92,4 @@ void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center);
 }
 #endif
 
-#endif /* __STEERING_CENTERING_H */
+#endif /* STEERING_CENTERING_H */

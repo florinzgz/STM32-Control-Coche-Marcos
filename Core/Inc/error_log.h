@@ -26,8 +26,8 @@
   ****************************************************************************
   */
 
-#ifndef __ERROR_LOG_H
-#define __ERROR_LOG_H
+#ifndef ERROR_LOG_H
+#define ERROR_LOG_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -125,4 +125,4 @@ uint32_t ErrorLog_GetTotalEvents(void);
 }
 #endif
 
-#endif /* __ERROR_LOG_H */
+#endif /* ERROR_LOG_H */

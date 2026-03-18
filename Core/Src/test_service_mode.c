@@ -158,14 +158,14 @@ static void test_classification_table_complete(void)
     ServiceMode_Init();
 
     /* Verify every valid module ID has a valid classification */
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         ModuleClass_t cls = ServiceMode_GetClass((ModuleID_t)i);
         ASSERT_TRUE(cls == MODULE_CLASS_CRITICAL || cls == MODULE_CLASS_NON_CRITICAL);
     }
 
     /* Verify exactly 4 CRITICAL modules (IDs 0–3) */
     uint8_t critical_count = 0;
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (ServiceMode_GetClass((ModuleID_t)i) == MODULE_CLASS_CRITICAL)
             critical_count++;
     }
@@ -197,7 +197,7 @@ static void test_factory_restore(void)
     ServiceMode_FactoryRestore();
 
     /* All modules should be re-enabled */
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         ASSERT_TRUE(ServiceMode_IsEnabled((ModuleID_t)i));
     }
 
@@ -262,7 +262,7 @@ static void test_bitmask_accessors(void)
 
     /* Initially all modules enabled — enabled mask should have all 25 bits set */
     uint32_t enabled_mask = ServiceMode_GetEnabledMask();
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         ASSERT_TRUE((enabled_mask >> i) & 1);
     }
 
@@ -291,7 +291,7 @@ static void test_multi_disable_consistency(void)
     ServiceMode_Init();
 
     /* Disable all non-critical modules one by one */
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (ServiceMode_GetClass((ModuleID_t)i) == MODULE_CLASS_NON_CRITICAL) {
             ASSERT_TRUE(ServiceMode_DisableModule((ModuleID_t)i));
         }
@@ -311,7 +311,7 @@ static void test_multi_disable_consistency(void)
 
     /* Factory restore should recover everything */
     ServiceMode_FactoryRestore();
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         ASSERT_TRUE(ServiceMode_IsEnabled((ModuleID_t)i));
     }
 }

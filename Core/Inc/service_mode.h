@@ -25,8 +25,8 @@
   ****************************************************************************
   */
 
-#ifndef __SERVICE_MODE_H
-#define __SERVICE_MODE_H
+#ifndef SERVICE_MODE_H
+#define SERVICE_MODE_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -236,4 +236,4 @@ uint32_t ServiceMode_GetDisabledMask(void);
 }
 #endif
 
-#endif /* __SERVICE_MODE_H */
+#endif /* SERVICE_MODE_H */

@@ -79,7 +79,7 @@ static ModuleFault_t module_fault[MODULE_COUNT];
 
 void ServiceMode_Init(void)
 {
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         module_enabled[i] = true;
         module_fault[i]   = MODULE_FAULT_NONE;
     }
@@ -186,7 +186,7 @@ bool ServiceMode_ShouldBlock(ModuleID_t id)
 
 bool ServiceMode_HasCriticalFault(void)
 {
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (module_class[i] == MODULE_CLASS_CRITICAL &&
             module_fault[i] != MODULE_FAULT_NONE) {
             return true;
@@ -198,7 +198,7 @@ bool ServiceMode_HasCriticalFault(void)
 uint8_t ServiceMode_CountActiveNonCriticalFaults(void)
 {
     uint8_t count = 0;
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (module_class[i] == MODULE_CLASS_NON_CRITICAL &&
             module_fault[i] != MODULE_FAULT_NONE &&
             module_enabled[i]) {
@@ -214,7 +214,7 @@ uint8_t ServiceMode_CountActiveNonCriticalFaults(void)
 
 void ServiceMode_FactoryRestore(void)
 {
-    for (uint8_t i = 0; i < MODULE_COUNT; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         module_enabled[i] = true;
         /* Clear manual-disable faults but preserve real faults.
          * Real faults will reappear on the next check cycle. */
@@ -231,7 +231,7 @@ void ServiceMode_FactoryRestore(void)
 uint32_t ServiceMode_GetEnabledMask(void)
 {
     uint32_t mask = 0;
-    for (uint8_t i = 0; i < MODULE_COUNT && i < 32; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (ServiceMode_IsEnabled((ModuleID_t)i)) {
             mask |= (1U << i);
         }
@@ -242,7 +242,7 @@ uint32_t ServiceMode_GetEnabledMask(void)
 uint32_t ServiceMode_GetFaultMask(void)
 {
     uint32_t mask = 0;
-    for (uint8_t i = 0; i < MODULE_COUNT && i < 32; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (module_fault[i] != MODULE_FAULT_NONE) {
             mask |= (1U << i);
         }
@@ -253,7 +253,7 @@ uint32_t ServiceMode_GetFaultMask(void)
 uint32_t ServiceMode_GetDisabledMask(void)
 {
     uint32_t mask = 0;
-    for (uint8_t i = 0; i < MODULE_COUNT && i < 32; i++) {
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
         if (!module_enabled[i] &&
             module_class[i] == MODULE_CLASS_NON_CRITICAL) {
             mask |= (1U << i);

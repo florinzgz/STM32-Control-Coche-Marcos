@@ -5,8 +5,8 @@
   ****************************************************************************
   */
 
-#ifndef __VEHICLE_PHYSICS_H
-#define __VEHICLE_PHYSICS_H
+#ifndef VEHICLE_PHYSICS_H
+#define VEHICLE_PHYSICS_H
 
 /* ---- Wheel physical data ---- */
 #define WHEEL_CIRCUM_MM         1100.0f                       /* Wheel circumference (mm) */
@@ -20,4 +20,4 @@
 #define MAX_STEER_DEG           54.0f   /* Maximum road-wheel angle (degrees) */
 #define STEERING_WHEEL_MAX_DEG  350.0f  /* Steering wheel mechanical travel (degrees) */
 
-#endif /* __VEHICLE_PHYSICS_H */
+#endif /* VEHICLE_PHYSICS_H */

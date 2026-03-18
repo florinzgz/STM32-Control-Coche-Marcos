@@ -12,8 +12,8 @@
   ****************************************************************************
   */
 
-#ifndef __ACKERMANN_H
-#define __ACKERMANN_H
+#ifndef ACKERMANN_H
+#define ACKERMANN_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,4 +50,4 @@ void Ackermann_ComputeWheelAngles(float road_angle_deg,
 }
 #endif
 
-#endif /* __ACKERMANN_H */
+#endif /* ACKERMANN_H */

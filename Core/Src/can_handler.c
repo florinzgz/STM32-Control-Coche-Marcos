@@ -918,7 +918,7 @@ void CAN_ProcessMessages(void) {
                                       * MODULE_CURRENT_SENSOR_0 (9) through
                                       * MODULE_CURRENT_SENSOR_5 (14) are
                                       * consecutive in ModuleID_t enum. */
-                                for (uint8_t s = MODULE_CURRENT_SENSOR_0;
+                                for (unsigned s = MODULE_CURRENT_SENSOR_0;
                                      s <= MODULE_CURRENT_SENSOR_5; s++) {
                                     ServiceMode_EnableModule((ModuleID_t)s);
                                     ServiceMode_ClearFault((ModuleID_t)s);
@@ -937,6 +937,8 @@ void CAN_ProcessMessages(void) {
                                 ServiceMode_ClearFault(MODULE_STEER_CENTER);
                                 ServiceMode_ClearFault(MODULE_STEER_ENCODER);
                                 ServiceMode_ClearFault(MODULE_ACKERMANN);
+                                break;
+                            default:
                                 break;
                         }
                         CAN_SendCommandAck(0x10, ACK_OK);

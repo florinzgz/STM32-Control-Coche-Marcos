@@ -5,8 +5,8 @@
   ****************************************************************************
   */
 
-#ifndef __SAFETY_SYSTEM_H
-#define __SAFETY_SYSTEM_H
+#ifndef SAFETY_SYSTEM_H
+#define SAFETY_SYSTEM_H
 
 #ifdef __cplusplus
 extern "C" {
