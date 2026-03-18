@@ -195,7 +195,9 @@ void ErrorLog_Record(uint8_t error_code, uint8_t subsystem,
     if (log_header.entry_count < ERROR_LOG_MAX_ENTRIES) {
         log_header.entry_count++;
     }
-    log_header.total_events++;
+    if (log_header.total_events < UINT32_MAX) {
+        log_header.total_events++;
+    }
 
     /* Auto-save to flash */
     errlog_write_flash();
