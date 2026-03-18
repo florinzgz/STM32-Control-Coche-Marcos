@@ -375,7 +375,18 @@ void setup() {
         // If this initial attempt fails (e.g. sensor still booting), the
         // driver's auto-recovery will retry automatically after detecting
         // sustained all-pixels-invalid frames.
-        obstacle_sensor::configureLongRange();
+        bool cfgOk = obstacle_sensor::configureLongRange();
+        if (cfgOk) {
+            Serial.printf("[OBSTACLE] Boot: configureLongRange() sent via txPin=%d — "
+                          "sensor switching to Long Range mode.\n",
+                          obsCfg.txPin);
+        } else {
+            Serial.printf("[OBSTACLE] Boot WARNING: configureLongRange() failed "
+                          "(txPin=%d) — check ESP32 TX → sensor RX wiring. "
+                          "Auto-recovery will retry after detecting sustained "
+                          "invalid frames.\n",
+                          obsCfg.txPin);
+        }
     }
 
     // Initialize CAN TX for obstacle distance frame (0x208)
@@ -514,10 +525,13 @@ void loop() {
         obstacle_sensor::update(speedKmh);
         can_obstacle::update();
 
-        // Update VehicleData with latest sensor reading for HMI display
+        // Update VehicleData with latest sensor reading for HMI display.
+        // distanceCm = 0 maps to "---" in the UI, signalling no valid reading.
+        // Use 0 when the sensor is unhealthy (fault/stuck/timeout) so the
+        // display shows "---" instead of a misleading "0.02 m" fallback value.
         obstacle_sensor::Reading rd = obstacle_sensor::getReading();
         vehicle::ObstacleData od;
-        od.distanceCm  = rd.distance_mm / 10;
+        od.distanceCm  = rd.healthy ? (rd.distance_mm / 10) : 0;
         od.timestampMs  = millis();
         vehicleData.setObstacle(od);
     }
