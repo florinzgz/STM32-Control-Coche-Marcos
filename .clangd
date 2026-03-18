@@ -1,7 +1,12 @@
 # clangd configuration for STM32 G474 firmware
 # Isolated from ESP32 project — do NOT mix includes or toolchains.
+# Only applies to files under Core/ to avoid contaminating ESP32.
+
+If:
+  PathMatch: Core/.*
 
 CompileFlags:
+  CompilationDatabase: .
   Add:
     - -DSTM32G474xx
     - -DUSE_HAL_DRIVER
@@ -15,8 +20,6 @@ CompileFlags:
     - -mfpu=*
     - -fdata-sections
     - -ffunction-sections
-
-CompilationDatabase: .
 
 Diagnostics:
   UnusedIncludes: Strict

@@ -2,6 +2,7 @@
 # Isolated from STM32 project — do NOT mix includes or toolchains.
 
 CompileFlags:
+  CompilationDatabase: .
   Add:
     - -std=gnu++17
     - -DARDUINO_USB_MODE=1
@@ -14,8 +15,6 @@ CompileFlags:
     - -mlongcalls
     - -fstrict-volatile-bitfields
     - -fno-tree-switch-conversion
-
-CompilationDatabase: .
 
 Diagnostics:
   UnusedIncludes: Strict
