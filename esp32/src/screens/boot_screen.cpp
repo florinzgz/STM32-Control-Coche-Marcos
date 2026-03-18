@@ -231,6 +231,7 @@ void BootScreen::draw() {
                 case TWAI_STATE_RUNNING:    stateStr = "RUNNING";    stateCol = ui::COL_GREEN;  break;
                 case TWAI_STATE_BUS_OFF:    stateStr = "BUS_OFF";    stateCol = ui::COL_RED;    break;
                 case TWAI_STATE_RECOVERING: stateStr = "RECOVERING"; stateCol = ui::COL_YELLOW; break;
+                default: break;
             }
             char buf[DIAG_BUF_SIZE];
             snprintf(buf, sizeof(buf), "BUS:%s  TxE:%lu RxE:%lu",

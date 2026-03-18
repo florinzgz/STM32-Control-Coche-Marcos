@@ -332,8 +332,8 @@ void EngineeringScreen::draw() {
         int16_t batY = 170;
         tft.fillRect(130, batY, 160, 16, ui::COL_BG);
         snprintf(buf, sizeof(buf), "%u.%02u V  %u.%02u A",
-                 batteryVoltage_ / 100, batteryVoltage_ % 100,
-                 batteryCurrent_ / 100, batteryCurrent_ % 100);
+                 (unsigned)(batteryVoltage_ / 100), (unsigned)(batteryVoltage_ % 100),
+                 (unsigned)(batteryCurrent_ / 100), (unsigned)(batteryCurrent_ % 100));
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.drawString(buf, 130, batY);
 
@@ -466,6 +466,8 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             // Open Factory Defaults submenu
                             currentMenu_ = SubMenu::FACTORY_DEFAULTS;
                             break;
+                        default:
+                            break;
                     }
                     needsRedraw_ = true;
                     return true;
@@ -594,7 +596,7 @@ void EngineeringScreen::drawMainMenu() {
     // Menu buttons
     for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
         int16_t btnY = MENU_START_Y + i * MENU_SPACING;
-        uint16_t bgCol = (i == 6) ? ui::COL_DARK_GRAY : ui::COL_DARK_GRAY;
+        uint16_t bgCol = ui::COL_DARK_GRAY;
         uint16_t txtCol = (i == 6) ? ui::COL_AMBER : ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
@@ -674,7 +676,7 @@ void EngineeringScreen::drawModuleControl() {
     // Header
     char hdrBuf[ui::FMT_BUF_LARGE];
     snprintf(hdrBuf, sizeof(hdrBuf), "MODULE CONTROL (%u/%u)",
-             moduleCtrlPage_ + 1, MODULE_CTRL_PAGES);
+             (unsigned)(moduleCtrlPage_ + 1), (unsigned)MODULE_CTRL_PAGES);
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);

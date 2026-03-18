@@ -26,8 +26,8 @@
   ****************************************************************************
   */
 
-#ifndef __STEERING_CAL_STORE_H
-#define __STEERING_CAL_STORE_H
+#ifndef STEERING_CAL_STORE_H
+#define STEERING_CAL_STORE_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,4 +96,4 @@ int32_t SteeringCal_GetStoredCenter(void);
 }
 #endif
 
-#endif /* __STEERING_CAL_STORE_H */
+#endif /* STEERING_CAL_STORE_H */

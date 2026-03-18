@@ -18,8 +18,8 @@
   ****************************************************************************
   */
 
-#ifndef __EPS_PARAMS_H
-#define __EPS_PARAMS_H
+#ifndef EPS_PARAMS_H
+#define EPS_PARAMS_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,4 +95,4 @@ void EPS_Params_ResetDefaults(void);
 }
 #endif
 
-#endif /* __EPS_PARAMS_H */
+#endif /* EPS_PARAMS_H */

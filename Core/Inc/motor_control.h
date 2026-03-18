@@ -1,5 +1,5 @@
-#ifndef __MOTOR_CONTROL_H
-#define __MOTOR_CONTROL_H
+#ifndef MOTOR_CONTROL_H
+#define MOTOR_CONTROL_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,4 +99,4 @@ void Motor_SetSignedPWM_Steering(int16_t speed);
 }
 #endif
 
-#endif /* __MOTOR_CONTROL_H */
+#endif /* MOTOR_CONTROL_H */

@@ -6,8 +6,8 @@
   ****************************************************************************
   */
 
-#ifndef __CAN_HANDLER_H
-#define __CAN_HANDLER_H
+#ifndef CAN_HANDLER_H
+#define CAN_HANDLER_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -133,4 +133,4 @@ extern volatile uint8_t               g_CAN_TxData[8];
 }
 #endif
 
-#endif /* __CAN_HANDLER_H */
+#endif /* CAN_HANDLER_H */

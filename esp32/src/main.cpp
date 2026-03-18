@@ -547,7 +547,7 @@ void loop() {
         uint32_t frameTime = millis() - lastFrameStart;
         if (showOverlay && screenManager.isInitialScreen()) {
             draw_runtime_overlay(tft, frameTime);
-        } else if (showOverlay) {
+        } else {
             showOverlay = false;
         }
     }

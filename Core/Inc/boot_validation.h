@@ -23,8 +23,8 @@
   ****************************************************************************
   */
 
-#ifndef __BOOT_VALIDATION_H
-#define __BOOT_VALIDATION_H
+#ifndef BOOT_VALIDATION_H
+#define BOOT_VALIDATION_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,4 +84,4 @@ const BootValidationStatus* BootValidation_GetStatus(void);
 }
 #endif
 
-#endif /* __BOOT_VALIDATION_H */
+#endif /* BOOT_VALIDATION_H */

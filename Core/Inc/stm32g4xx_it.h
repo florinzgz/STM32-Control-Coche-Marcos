@@ -5,8 +5,8 @@
   ****************************************************************************
   */
 
-#ifndef __STM32G4xx_IT_H
-#define __STM32G4xx_IT_H
+#ifndef STM32G4xx_IT_H
+#define STM32G4xx_IT_H
 
 #ifdef __cplusplus
 extern "C" {
