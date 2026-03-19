@@ -1,10 +1,9 @@
 // =============================================================================
-// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M by Nooploop)
+// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M S by Nooploop)
 //
-// Reads distance from TOFSense-M 8×8 LiDAR sensor via UART.
-// Supports two frame formats with auto-detection:
-//   - Compact format: 257 bytes (1 header + 64×4 pixel data)
-//   - Frame0 format:  400 bytes (9-byte header + 64×6 pixel data + 6 reserved + 1 checksum)
+// Reads distance from TOFSense-M S single-point LiDAR sensor via UART.
+// Protocol: 7-byte frames — one distance measurement per frame.
+//   Frame: [0x57] [0x00] [DIST_L] [DIST_H] [SIGNAL_L] [SIGNAL_H] [CHECKSUM]
 // Parses at 921600 bps (factory default).
 // Provides validated readings with stuck-sensor detection,
 // warmup filtering, and physical-range validation.
@@ -18,8 +17,8 @@
 //   actual distance to obstacles, the most likely cause is that it is
 //   configured in "Short Range / High Precision" mode.  In this mode the
 //   maximum measurable distance is only ~1.3–1.5 m; when nothing is within
-//   that range, every pixel reports an invalid distance (0 or ≥65000), and
-//   the driver returns minRangeMm (20 mm) as an emergency-close fallback.
+//   that range, the sensor reports a zero distance, and the driver returns
+//   minRangeMm (20 mm) as an emergency-close fallback.
 //   FIX: switch to Long Range mode:
 //       obstacle_sensor::Config cfg;
 //       cfg.txPin = 17;               // Connect ESP32 TX → sensor RX
@@ -27,49 +26,33 @@
 //       delay(2000);                   // Let sensor boot before config
 //       obstacle_sensor::configureLongRange();  // Sends 4 NLink commands
 //   Or use the NAssistant PC tool to change the measurement mode.
-//   The UART data frame parser itself is correct (verified by unit tests
-//   for 2000 mm and 4000 mm distances).
 //
 // AUTO-RECOVERY:
 //   If the initial configureLongRange() fails (e.g. sent before the sensor
 //   finished booting), the driver automatically detects sustained
-//   all-pixels-invalid frames and retries configureLongRange() up to 10
-//   times (every ~30 frames ≈ 3 seconds at 10 Hz).  This handles the
-//   common case where the sensor ignores commands sent too early at
-//   power-on.  Use getAutoRecoveryAttempts() to check how many retries
-//   were needed (0 = initial config worked, >0 = auto-recovery kicked in).
-//
-// WRAP-AROUND PROTECTION (close-range "data reversed" symptom):
-//   When the TOFSense-M is in LONG RANGE mode and an object is within the
-//   sensor's blind zone (< ~50 mm), most pixels saturate (invalid distance)
-//   but a few may report valid distances at 2000–3000 mm due to phase
-//   wrap-around.  This produces the "datos al revés" symptom: close objects
-//   appear far.  The driver uses two complementary protections:
-//
-//   1. MIN_VALID_PIXELS (4): Frames with fewer than 4 valid pixels are
-//      treated as emergency-close (minRangeMm).
-//
-//   2. MAX_PIXEL_DISPERSION_MM (500): When valid pixels are present but
-//      their distances scatter widely (max − min > 500 mm), the frame is
-//      treated as wrap-around → emergency-close.  This catches the case
-//      where MORE than 4 pixels report valid distances but with inconsistent
-//      wrap-around values (e.g. 121, 273, 1000 or 1700, 2500 mm).
-//      A real obstacle produces consistent pixel distances (spread < 300 mm
-//      even for curved surfaces).
+//   no-target frames and retries configureLongRange() up to 10 times
+//   (every ~30 frames ≈ 3 seconds at 10 Hz).  This handles the common
+//   case where the sensor ignores commands sent too early at power-on.
+//   Use getAutoRecoveryAttempts() to check how many retries were needed
+//   (0 = initial config worked, >0 = auto-recovery kicked in).
 //
 // ABOVE-MAX-RANGE HANDLING (open air / outdoors):
-//   When valid pixels report distances above maxRangeMm (4000 mm), the
-//   reading is clamped to maxRangeMm and reported as VALID at zone 0
-//   (no obstacle).  This prevents open-air readings from being marked
-//   INVALID (which would look like a sensor fault to the STM32).
+//   When the measured distance exceeds maxRangeMm (4000 mm), the reading
+//   is clamped to maxRangeMm and reported as VALID at zone 0 (no obstacle).
+//   This prevents open-air readings from being marked INVALID (which would
+//   look like a sensor fault to the STM32).
 //
-// Per-pixel layout (both formats share the same distance extraction):
-//   [0-1]  pixel_id:  uint16 LE — pixel/target identifier
-//   [2-3]  distance:  uint16 LE, unit = mm
-//   [4-5]  extra/signal: uint16 LE (Frame0 only, not present in compact)
+// Frame layout (TOFSense-M S single-point, 7 bytes):
+//   [0]   header         = 0x57
+//   [1]   function_mark  = 0x00 (single-point)
+//   [2]   distance_L     uint8  — distance low byte (mm)
+//   [3]   distance_H     uint8  — distance high byte (mm)
+//   [4]   signal_L       uint8  — signal strength low byte
+//   [5]   signal_H       uint8  — signal strength high byte
+//   [6]   checksum       sum of bytes [0..5] & 0xFF
 //
-// Pixel validity: 0 < distance < 65000 means valid measurement.
-//                 distance == 0 or distance >= 65000 means invalid/no return.
+// Distance validity: distance > 0 means valid measurement.
+//                    distance == 0 means no target / invalid.
 //
 // Sensor output rate: ~10 Hz (active mode).
 // Output: distance_mm, zone, health flag, stuck flag, sensor status.
@@ -84,9 +67,9 @@
 //   See docs/TOFSENSE_M_WIRING_GUIDE.md for wiring diagrams.
 //
 // Baudrate recommendations:
-//   921600 bps (factory default) works well with the 2048-byte RX buffer
-//   and is recommended for real-time obstacle detection.  If you experience
-//   frequent checksum failures (check [OBSTACLE] Diag output), try:
+//   921600 bps (factory default) works well and is recommended for
+//   real-time obstacle detection.  If you experience frequent checksum
+//   failures (check [OBSTACLE] Diag output), try:
 //     1. Verify wiring (voltage divider values, cable length < 30 cm)
 //     2. Lower to 460800 or 230400 bps (use setBaudRate() + saveConfig())
 //     3. Reduce frame rate to 5 Hz (use setFrameRate(5) + saveConfig())
@@ -127,7 +110,7 @@ struct Reading {
 };
 
 // -------------------------------------------------------------------------
-// Configuration — UART for TOFSense-M LiDAR sensor
+// Configuration — UART for TOFSense-M S LiDAR sensor
 // -------------------------------------------------------------------------
 struct Config {
     int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
@@ -135,8 +118,8 @@ struct Config {
                                         // Set to a valid GPIO (e.g. 17) if you need to send
                                         // configuration commands (setRangeMode, saveConfig, etc.)
                                         // to the sensor.  Requires wiring ESP32 TX → sensor RX.
-    uint32_t baudRate          = 921600; // TOFSense-M default baud rate (must match sensor config; changeable via NAssistant)
-    uint16_t rxBufSize         = 2048;  // UART RX ring-buffer (must be > 400; default ESP32 256 is too small)
+    uint32_t baudRate          = 921600; // TOFSense-M S default baud rate (must match sensor config; changeable via NAssistant)
+    uint16_t rxBufSize         = 512;   // UART RX ring-buffer (7-byte frames; default ESP32 256 works too)
     uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
     uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
     uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)
@@ -148,14 +131,14 @@ struct Config {
                                         // SHORT RANGE / HIGH PRECISION mode and cannot be
                                         // reconfigured (e.g. sensor RX not connected).
                                         // When true:
-                                        //   - All-pixels-invalid frames are treated as "nothing
-                                        //     in range" → reports maxRangeMm (safe), NOT
-                                        //     minRangeMm (emergency close).
-                                        //   - Sustained all-invalid is expected and does NOT
+                                        //   - No-target frames (distance == 0) are treated as
+                                        //     "nothing in range" → reports maxRangeMm (safe),
+                                        //     NOT minRangeMm (emergency close).
+                                        //   - Sustained no-target is expected and does NOT
                                         //     trigger sensor fault escalation.
                                         //   - No NLink commands are sent (auto-recovery disabled).
                                         // When false (default): original LONG RANGE behaviour —
-                                        //   all-pixels-invalid = emergency close (minRangeMm).
+                                        //   no-target = emergency close (minRangeMm).
 };
 
 /// Initialize sensor hardware.  Call once from setup().
@@ -172,7 +155,7 @@ Reading getReading();
 // Sensor configuration via NLink protocol (command header 0x5A)
 //
 // ROOT CAUSE OF ~1368 mm RANGE LIMIT:
-//   The TOFSense-M ships (or may be reconfigured via NAssistant) in
+//   The TOFSense-M S ships (or may be reconfigured via NAssistant) in
 //   "Short Range / High Precision" mode, which limits maximum distance
 //   to ~1.3–1.5 m.  To reach the full 4 m range, switch to "Long Range"
 //   mode using setRangeMode(RangeMode::LONG_RANGE) followed by
@@ -273,7 +256,7 @@ bool setRangeMode(RangeMode mode);
 /// the matching Config::baudRate or communication will be lost.
 bool setBaudRate(BaudRateCode baud);
 
-/// Set output frame rate in Hz (1–15 for 8×8, 1–60 for 4×4).
+/// Set output frame rate in Hz.
 bool setFrameRate(uint8_t hz);
 
 /// Set output mode (active continuous or query-on-demand).
@@ -300,7 +283,7 @@ uint8_t getAutoRecoveryAttempts();
 // Sends the full configuration sequence in one call:
 //   1. setRangeMode(LONG_RANGE)      — enables 4 m measurement range
 //   2. setOutputMode(ACTIVE)          — continuous output
-//   3. setFrameRate(10)               — 10 Hz (recommended for 8×8 long range)
+//   3. setFrameRate(10)               — 10 Hz (recommended for single-point)
 //   4. saveConfig()                   — persist to sensor flash
 //
 // Each command is followed by a 100 ms delay (CMD_INTER_DELAY_MS) to give

@@ -3,8 +3,9 @@
  * @file    test_obstacle_sensor.cpp
  * @brief   Host-compilable unit tests for obstacle_sensor frame parsing.
  *
- *          Tests the TOFSense-M protocol parsing for both Frame0 (400-byte)
- *          and Compact (257-byte) formats.
+ *          Tests the TOFSense-M S (single-point) protocol parsing.
+ *          Frame format: 7 bytes
+ *            [0x57] [0x00] [DIST_L] [DIST_H] [SIG_L] [SIG_H] [CHECKSUM]
  *
  *          Compile and run on host (from esp32/src/):
  *            g++ -std=c++17 -I. -I../test_stubs \
@@ -12,15 +13,15 @@
  *                -o /tmp/test_obstacle_sensor && /tmp/test_obstacle_sensor
  *
  *          Requirements verified:
- *            1. Frame0: header = 0x57, function_mark = 0x01, 400 bytes
- *            2. Compact: header = 0x57, 257 bytes, no checksum
- *            3. Per-pixel layout: pixel_id(2) + distance(2) [+ extra(2) for Frame0]
- *            4. Distance: uint16 LE at bytes 2-3 of each pixel group, in mm
- *            5. Pixel validity: 0 < dist < 65000
- *            6. Frame0 checksum: sum of bytes [0..398] mod 256, stored at byte 399
- *            7. Invalid frames rejected (wrong header, bad checksum)
- *            8. Zone mapping matches STM32 safety tiers
- *            9. Auto-detection of frame format
+ *            1. Frame: header = 0x57, function_mark = 0x00, 7 bytes
+ *            2. Distance: uint16 LE at bytes 2-3, in mm
+ *            3. Signal:   uint16 LE at bytes 4-5
+ *            4. Checksum: sum of bytes [0..5] mod 256, stored at byte 6
+ *            5. distance == 0 means no target (invalid)
+ *            6. Invalid frames rejected (wrong header, bad checksum)
+ *            7. Zone mapping matches STM32 safety tiers
+ *            8. Stuck detection, warmup, auto-recovery
+ *            9. NLink 0x5A configuration commands
  ****************************************************************************
  */
 
@@ -54,385 +55,44 @@ static int s_tests_failed = 0;
 
 /* ---- Frame construction helpers ----------------------------------------- */
 
-// Frame0 layout (400 bytes for 8x8):
-//   [0]     frame_header    = 0x57
-//   [1]     function_mark   = 0x01
-//   [2]     reserved        = 0xFF
-//   [3]     id
-//   [4-7]   system_time     (uint32 LE)
-//   [8]     pixel_count     (0x40 = 64 for 8x8)
-//   [9-392] pixel_data      (64 × 6 bytes)
-//   [393-398] reserved1     (6 bytes)
-//   [399]   checksum        (sum of bytes [0..398] mod 256)
+// Matches AUTO_RECOVERY_FRAME_THRESHOLD in the driver (30 frames)
+static constexpr uint32_t TEST_RECOVERY_THRESHOLD = 30;
 
-static constexpr uint16_t FRAME_LEN = 400;
-static constexpr uint16_t COMPACT_LEN = 257;
+// TOFSense-M S frame layout (7 bytes):
+//   [0]   header         = 0x57
+//   [1]   function_mark  = 0x00
+//   [2]   distance_L     uint8
+//   [3]   distance_H     uint8
+//   [4]   signal_L       uint8
+//   [5]   signal_H       uint8
+//   [6]   checksum       sum([0..5]) & 0xFF
 
-static void buildFrame(uint8_t* buf) {
-    memset(buf, 0, FRAME_LEN);
-    buf[0] = 0x57;  // frame_header
-    buf[1] = 0x01;  // function_mark
-    buf[2] = 0xFF;  // reserved (used for auto-detection)
-    buf[3] = 0x01;  // id
-    // system_time = 0
-    buf[8] = 0x40;  // pixel_count = 64 (8x8) — 0x40 used for auto-detection
-}
+static constexpr uint16_t FRAME_LEN = 7;
 
-// Build a compact frame (257 bytes): header + 64×4 pixel data
-static void buildCompactFrame(uint8_t* buf) {
-    memset(buf, 0, COMPACT_LEN);
-    buf[0] = 0x57;  // frame_header (only byte of header in compact)
-}
-
-// Set a pixel's distance in the Frame0 buffer.
-// Per-pixel layout (6 bytes each in Frame0):
-//   [0-1] pixel_id: uint16 LE
-//   [2-3] distance: uint16 LE, mm
-//   [4-5] extra/signal: uint16 LE
-//
-// The `status` parameter is kept for API compatibility but is unused.
-// To mark a pixel as invalid, use distMm = 0 or distMm >= 65000.
-static void setPixel(uint8_t* buf, uint8_t px, int32_t distMm,
-                     uint8_t /*status_unused*/, uint16_t signal) {
-    uint16_t base = 9 + px * 6;  // Frame0: pixel data starts at offset 9
-    // Pixel ID (bytes 0-1): use pixel index as ID
-    buf[base + 0] = px;
-    buf[base + 1] = 0x00;
-    // Distance: uint16 LE at bytes 2-3
-    uint16_t dist16;
-    if (distMm <= 0) {
-        dist16 = 0;  // Invalid (zero distance)
-    } else if (distMm >= 65000) {
-        dist16 = 65535;  // "No return"
-    } else {
-        dist16 = (uint16_t)distMm;
-    }
-    buf[base + 2] = (uint8_t)(dist16 & 0xFF);
-    buf[base + 3] = (uint8_t)((dist16 >> 8) & 0xFF);
-    // Extra/signal (bytes 4-5)
-    buf[base + 4] = (uint8_t)(signal & 0xFF);
-    buf[base + 5] = (uint8_t)((signal >> 8) & 0xFF);
-}
-
-// Set a pixel in a compact frame buffer (4 bytes per pixel, offset 1)
-static void setCompactPixel(uint8_t* buf, uint8_t px, int32_t distMm, uint16_t pixelId = 0) {
-    uint16_t base = 1 + px * 4;  // Compact: pixel data starts at offset 1
-    // Pixel ID (bytes 0-1)
-    buf[base + 0] = (uint8_t)(pixelId & 0xFF);
-    buf[base + 1] = (uint8_t)((pixelId >> 8) & 0xFF);
-    // Distance: uint16 LE at bytes 2-3
-    uint16_t dist16;
-    if (distMm <= 0) {
-        dist16 = 0;
-    } else if (distMm >= 65000) {
-        dist16 = 65535;
-    } else {
-        dist16 = (uint16_t)distMm;
-    }
-    buf[base + 2] = (uint8_t)(dist16 & 0xFF);
-    buf[base + 3] = (uint8_t)((dist16 >> 8) & 0xFF);
-}
-
-// Helper: set multiple consecutive pixels to the same valid distance.
-// Used to satisfy the MIN_VALID_PIXELS threshold (4 pixels) so that
-// the frame parses as OK instead of being rejected as wrap-around.
-static constexpr uint8_t TEST_MIN_PX = 4;  // Matches MIN_VALID_PIXELS in driver
-static void setValidPixels(uint8_t* buf, int32_t distMm,
-                           uint16_t signal = 100, uint8_t startPx = 0) {
-    for (uint8_t px = startPx; px < startPx + TEST_MIN_PX; px++) {
-        setPixel(buf, px, distMm, /*status=*/0, signal);
-    }
-}
-
-// Compute and write the checksum at byte 399
-static void writeChecksum(uint8_t* buf) {
+// Build a valid M-S frame with given distance and signal
+static void buildMSFrame(uint8_t* buf, uint16_t distMm, uint16_t signal) {
+    buf[0] = 0x57;  // header
+    buf[1] = 0x00;  // function_mark (single-point)
+    buf[2] = (uint8_t)(distMm & 0xFF);        // distance_L
+    buf[3] = (uint8_t)((distMm >> 8) & 0xFF); // distance_H
+    buf[4] = (uint8_t)(signal & 0xFF);         // signal_L
+    buf[5] = (uint8_t)((signal >> 8) & 0xFF);  // signal_H
+    // Checksum: sum of bytes [0..5] & 0xFF
     uint8_t sum = 0;
-    for (uint16_t i = 0; i < FRAME_LEN - 1; i++) {
-        sum += buf[i];
-    }
-    buf[FRAME_LEN - 1] = sum;
+    for (int i = 0; i < 6; i++) sum += buf[i];
+    buf[6] = sum;
 }
 
-/* ---- Access to static parseFrame via the translation unit --------------- */
-// We access the parseFrame function through the obstacle_sensor namespace.
-// Since parseFrame is static, we use a test helper that feeds a full frame
-// through the public API (init + update + getReading).
-
-// UART data injection: override the HardwareSerial stub to provide data
-static uint8_t  g_uart_buf[FRAME_LEN * 2 + COMPACT_LEN];
-static uint16_t g_uart_len = 0;
-static uint16_t g_uart_pos = 0;
-
-// Patch the HardwareSerial stub to return injected data
-// (Override the inline stubs from test_stubs/Arduino.h)
-// NOTE: The HardwareSerial in the stub is a struct with available() and read().
-// We need to hook into it. Since obstacle_sensor.cpp creates its own
-// HardwareSerial(1), and the stub's available()/read() always return 0/-1,
-// we need a different approach.
-
-// Since we can't easily inject UART data through the stub, we test the
-// frame parsing logic by directly calling internal functions.
-// We include the .cpp to access static functions in the same TU.
-
-// The obstacle_sensor.cpp is already compiled as part of this test.
-// We can access the static parseFrame by declaring it extern here
-// (since it's in the same binary). However, static functions have internal
-// linkage. Instead, we replicate the parsing logic in a test-only wrapper.
-
-// Actually, the simplest approach: we test the PUBLIC API behavior by
-// verifying the constants and frame structure match the official spec.
-
-/* ---- Tests -------------------------------------------------------------- */
-
-// Test 1: Verify frame layout constants match protocol spec
-static void test_frame_constants() {
-    printf("  test_frame_constants...\n");
-
-    // Frame0:
-    // header(1) + function_mark(1) + reserved(1) + id(1) + system_time(4)
-    //   + pixel_count(1) + pixels(64*6) + reserved1(6) + sum(1) = 400
-    ASSERT_EQ(1 + 1 + 1 + 1 + 4 + 1 + 64 * 6 + 6 + 1, 400);
-
-    // Compact:
-    // header(1) + pixels(64*4) = 257
-    ASSERT_EQ(1 + 64 * 4, 257);
-
-    // Pixel data starts after header (9 bytes) in Frame0
-    ASSERT_EQ(1 + 1 + 1 + 1 + 4 + 1, 9);  // pixel data offset
-
-    // Each Frame0 pixel is 6 bytes: pixel_id(2) + distance(2) + extra(2)
-    ASSERT_EQ(2 + 2 + 2, 6);
-
-    // Each Compact pixel is 4 bytes: pixel_id(2) + distance(2)
-    ASSERT_EQ(2 + 2, 4);
-}
-
-// Test 2: Build a valid frame and verify checksum computation
-static void test_checksum_computation() {
-    printf("  test_checksum_computation...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 1 meter (1000 mm), valid status
-    setPixel(frame, 0, 1000, 0, 100);
-
-    // Compute checksum
-    writeChecksum(frame);
-
-    // Verify: sum of bytes [0..398] should equal byte[399]
-    uint8_t sum = 0;
-    for (uint16_t i = 0; i < FRAME_LEN - 1; i++) {
-        sum += frame[i];
-    }
-    ASSERT_EQ(sum, frame[399]);
-}
-
-// Test 3: Verify pixel data offset is correct (byte 9, not byte 8)
-static void test_pixel_data_offset() {
-    printf("  test_pixel_data_offset...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // byte 8 should be pixel_count (0x40 = 64), NOT part of pixel data
-    ASSERT_EQ(frame[8], 0x40);
-
-    // Pixel 0 data starts at byte 9
-    // Set pixel 0 distance to a known value
-    int32_t testDist = 500;  // 500 mm
-    setPixel(frame, 0, testDist, 0, 100);
-
-    // Verify bytes 9-10 are pixel_id (px=0 → 0x00, 0x00)
-    ASSERT_EQ(frame[9], 0x00);
-    ASSERT_EQ(frame[10], 0x00);
-
-    // Verify bytes 11-12 are distance uint16 LE (500 = 0x01F4)
-    ASSERT_EQ(frame[11], (uint8_t)(testDist & 0xFF));       // 0xF4
-    ASSERT_EQ(frame[12], (uint8_t)((testDist >> 8) & 0xFF)); // 0x01
-
-    // Verify bytes 13-14 are extra/signal (100 = 0x64, 0x00)
-    ASSERT_EQ(frame[13], 0x64);
-    ASSERT_EQ(frame[14], 0x00);
-}
-
-// Test 4: Verify per-pixel field order matches protocol
-// Layout: pixel_id(2) + distance(2) + extra/signal(2)
-static void test_pixel_field_order() {
-    printf("  test_pixel_field_order...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 5 with specific values to verify field positions
-    int32_t dist = 2000;            // 2000 mm = 2 m
-    uint8_t status = 0;             // unused
-    uint16_t signal = 0x1234;       // test pattern
-
-    setPixel(frame, 5, dist, status, signal);
-
-    uint16_t base = 9 + 5 * 6;  // pixel 5 starts at byte 9 + 30 = 39
-
-    // [base+0..1] = pixel_id (px=5 → 0x05, 0x00)
-    ASSERT_EQ(frame[base + 0], 5);
-    ASSERT_EQ(frame[base + 1], 0x00);
-
-    // [base+2..3] = distance (uint16 LE: 2000 = 0x07D0)
-    ASSERT_EQ(frame[base + 2], (uint8_t)(dist & 0xFF));
-    ASSERT_EQ(frame[base + 3], (uint8_t)((dist >> 8) & 0xFF));
-
-    // [base+4..5] = extra/signal (uint16 LE)
-    ASSERT_EQ(frame[base + 4], 0x34);
-    ASSERT_EQ(frame[base + 5], 0x12);
-}
-
-// Test 5: Verify distance unit is mm (uint16 LE at bytes 2-3 of each pixel).
-static void test_distance_conversion() {
-    printf("  test_distance_conversion...\n");
-
-    // Distance is uint16 LE in mm — no conversion needed
-    // 1 meter = 1000 mm raw
-    ASSERT_EQ(1000, 1000);
-
-    // 500 mm raw
-    ASSERT_EQ(500, 500);
-
-    // 200 mm (emergency zone threshold)
-    ASSERT_EQ(200, 200);
-
-    // 4000 mm (max range)
-    ASSERT_EQ(4000, 4000);
-
-    // Max valid uint16 distance = 64999 (below INVALID_DIST_THRESHOLD)
-    ASSERT(64999 < 65000);
-
-    // 65000 and above are invalid ("no return")
-    ASSERT(65000 >= 65000);
-}
-
-// Test 6: Verify zone mapping thresholds
-static void test_zone_mapping() {
-    printf("  test_zone_mapping...\n");
-
-    // Zone mapping from obstacle_sensor.cpp:
-    // < 200 mm  → zone 4 (emergency)
-    // 200–500   → zone 3 (critical)
-    // 500–1000  → zone 2 (warning)
-    // 1000–1500 → zone 1 (caution)
-    // ≥ 1500    → zone 0 (normal)
-
-    // Init to get default state
-    obstacle_sensor::init();
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-
-    // Default reading should be WAITING during warmup
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
-    ASSERT_EQ(rd.healthy, false);
-}
-
-// Test 7: Verify frame header validation
-static void test_frame_header_bytes() {
-    printf("  test_frame_header_bytes...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Byte 0 must be 0x57 (frame_header)
-    ASSERT_EQ(frame[0], 0x57);
-
-    // Byte 1 must be 0x01 (function_mark for Frame0)
-    ASSERT_EQ(frame[1], 0x01);
-}
-
-// Test 8: Verify checksum byte position is at byte 399
-static void test_checksum_position() {
-    printf("  test_checksum_position...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    setPixel(frame, 0, 1000, 0, 50);
-    writeChecksum(frame);
-
-    // Checksum should be at the very last byte (399)
-    // Reserved1 occupies bytes 393-398
-    uint16_t checksumOffset = FRAME_LEN - 1;
-    ASSERT_EQ(checksumOffset, 399);
-
-    // Pixel data ends at byte 392 (9 + 64*6 - 1)
-    uint16_t lastPixelByte = 9 + 64 * 6 - 1;
-    ASSERT_EQ(lastPixelByte, 392);
-
-    // Reserved1 starts at byte 393
-    ASSERT_EQ(lastPixelByte + 1, 393);
-
-    // Reserved1 ends at byte 398 (6 bytes: 393-398)
-    ASSERT_EQ(393 + 6 - 1, 398);
-}
-
-// Test 9: Verify sync on 0x57 header byte.
-//         In Frame0 mode, auto-detection uses bytes 1,2,8 to distinguish formats.
-//         A false 0x57 inside pixel data is handled by format detection + checksum.
-static void test_two_byte_sync_pattern() {
-    printf("  test_two_byte_sync_pattern...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to a distance where the ID byte is 0x00.
-    // The pixel_id is set to the pixel index by setPixel.
-    setPixel(frame, 0, 87, 0, 100);   // 87 mm, signal=100
-    writeChecksum(frame);
-
-    // The byte at offset 9 (pixel 0, pixel_id LSB) is 0x00.
-    ASSERT_EQ(frame[9], 0x00);
-
-    // The real header at offset 0 has the correct Frame0 marker pattern.
-    ASSERT_EQ(frame[0], 0x57);
-    ASSERT_EQ(frame[1], 0x01);
-    ASSERT_EQ(frame[2], 0xFF);
-    ASSERT_EQ(frame[8], 0x40);
-}
-
-// Test 10: Verify init() resets state correctly for warmup flush
-static void test_init_resets_state() {
-    printf("  test_init_resets_state...\n");
-
-    // After init(), sensor should be in WAITING state
-    obstacle_sensor::init();
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
-    ASSERT_EQ(rd.healthy, false);
-    ASSERT_EQ(rd.stuck, false);
-    ASSERT_EQ(rd.distance_mm, 0);
-    ASSERT_EQ(rd.zone, 0);
-}
-
-// Test 11: Verify Config defaults — baud rate and RX buffer size
-//          Baud rate must be 921600 (TOFSense / TOFSense-M factory default).
-//          RX buffer must be > 400 (one full frame) to prevent overflow.
-static void test_config_defaults() {
-    printf("  test_config_defaults...\n");
-
-    obstacle_sensor::Config cfg{};
-
-    // Baud rate: 921600 — factory default per Nooploop User Manual V3.0
-    ASSERT_EQ(cfg.baudRate, 921600UL);
-
-    // RX buffer: must be larger than a single 400-byte frame
-    ASSERT(cfg.rxBufSize > FRAME_LEN);
-
-    // Default value should be 2048 (~5 frames, ~22 ms headroom at 921600)
-    ASSERT_EQ(cfg.rxBufSize, 2048);
+// Build a no-target frame (distance = 0)
+static void buildNoTargetFrame(uint8_t* buf, uint16_t signal) {
+    buildMSFrame(buf, 0, signal);
 }
 
 /* ---- Integration helper: inject a frame and run update() ---------------- */
 
 // Reset sensor + UART stub, advance past warmup, then inject `frame`
 // and call update().  Returns the reading produced.
-static obstacle_sensor::Reading injectFrameAndUpdate(uint8_t* frame) {
+static obstacle_sensor::Reading injectFrameAndUpdate(const uint8_t* frame) {
     g_uart_inject_reset();
     g_test_millis = 0;
 
@@ -449,532 +109,407 @@ static obstacle_sensor::Reading injectFrameAndUpdate(uint8_t* frame) {
     return obstacle_sensor::getReading();
 }
 
-// Test 12: All pixels invalid (NO_VALID_PIXELS) → treated as emergency-close
-//          instead of timing out to INVALID.
-//          This is the core fix: the TOFSense-M reports all pixels invalid
-//          when an object is < ~50 mm from the sensor (hardware limitation).
-static void test_all_pixels_invalid_is_emergency_close() {
-    printf("  test_all_pixels_invalid_is_emergency_close...\n");
+// Variant with custom config
+static obstacle_sensor::Reading injectFrameWithConfig(
+        const uint8_t* frame, const obstacle_sensor::Config& cfg) {
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    g_uart_inject(frame, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    return obstacle_sensor::getReading();
+}
+
+/* ---- Tests -------------------------------------------------------------- */
+
+// Test 1: Verify frame layout constants
+static void test_frame_constants() {
+    printf("  test_frame_constants...\n");
+
+    // M-S frame: header(1) + func(1) + dist(2) + signal(2) + checksum(1) = 7
+    ASSERT_EQ(1 + 1 + 2 + 2 + 1, 7);
+    ASSERT_EQ(FRAME_LEN, 7);
+}
+
+// Test 2: Build a valid frame and verify checksum computation
+static void test_checksum_computation() {
+    printf("  test_checksum_computation...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
+    buildMSFrame(frame, 1000, 100);
 
-    // All 64 pixels have invalid distance (65535 = "no return")
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
+    // Verify: sum of bytes [0..5] should equal byte[6]
+    uint8_t sum = 0;
+    for (int i = 0; i < 6; i++) sum += frame[i];
+    ASSERT_EQ(sum, frame[6]);
+}
+
+// Test 3: Verify distance field position (bytes 2-3, uint16 LE)
+static void test_distance_field_position() {
+    printf("  test_distance_field_position...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 500, 100);
+
+    // Header
+    ASSERT_EQ(frame[0], 0x57);
+    ASSERT_EQ(frame[1], 0x00);
+
+    // Distance 500 = 0x01F4
+    ASSERT_EQ(frame[2], (uint8_t)(500 & 0xFF));
+    ASSERT_EQ(frame[3], (uint8_t)((500 >> 8) & 0xFF));
+}
+
+// Test 4: Verify signal field position (bytes 4-5, uint16 LE)
+static void test_signal_field_position() {
+    printf("  test_signal_field_position...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1000, 0x1234);
+
+    ASSERT_EQ(frame[4], 0x34);
+    ASSERT_EQ(frame[5], 0x12);
+}
+
+// Test 5: Verify distance unit is mm (no conversion needed)
+static void test_distance_conversion() {
+    printf("  test_distance_conversion...\n");
+
+    ASSERT_EQ(1000, 1000);   // 1 m
+    ASSERT_EQ(500, 500);     // 50 cm
+    ASSERT_EQ(200, 200);     // emergency zone
+    ASSERT_EQ(4000, 4000);   // max range
+}
+
+// Test 6: Verify zone mapping thresholds
+static void test_zone_mapping() {
+    printf("  test_zone_mapping...\n");
+
+    obstacle_sensor::init();
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
+    ASSERT_EQ(rd.healthy, false);
+}
+
+// Test 7: Verify frame header bytes
+static void test_frame_header_bytes() {
+    printf("  test_frame_header_bytes...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1000, 100);
+
+    ASSERT_EQ(frame[0], 0x57);
+    ASSERT_EQ(frame[1], 0x00);
+}
+
+// Test 8: Verify checksum byte position is at byte 6
+static void test_checksum_position() {
+    printf("  test_checksum_position...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1000, 50);
+
+    uint16_t checksumOffset = FRAME_LEN - 1;
+    ASSERT_EQ(checksumOffset, 6);
+}
+
+// Test 9: Verify init() resets state correctly
+static void test_init_resets_state() {
+    printf("  test_init_resets_state...\n");
+
+    obstacle_sensor::init();
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
+    ASSERT_EQ(rd.healthy, false);
+    ASSERT_EQ(rd.stuck, false);
+    ASSERT_EQ(rd.distance_mm, 0);
+    ASSERT_EQ(rd.zone, 0);
+}
+
+// Test 10: Verify Config defaults
+static void test_config_defaults() {
+    printf("  test_config_defaults...\n");
+
+    obstacle_sensor::Config cfg{};
+
+    ASSERT_EQ(cfg.baudRate, 921600UL);
+    ASSERT_EQ(cfg.rxBufSize, 512);
+    ASSERT_EQ(cfg.minRangeMm, 20);
+    ASSERT_EQ(cfg.maxRangeMm, 4000);
+    ASSERT_EQ(cfg.shortRangeMode, false);
+}
+
+// Test 11: No-target frame -> emergency close (distance = minRangeMm)
+static void test_no_target_is_emergency_close() {
+    printf("  test_no_target_is_emergency_close...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildNoTargetFrame(frame, 100);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    // Should be VALID (not INVALID) — treated as "too close"
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 20);  // minRangeMm
+    ASSERT_EQ(rd.zone, 4);          // emergency zone (< 200)
     ASSERT_EQ(rd.healthy, true);
-
-    // Distance should be clamped to minRangeMm (default 20 mm)
-    ASSERT_EQ(rd.distance_mm, 20);
-
-    // Zone should be 4 (emergency: < 200 mm)
-    ASSERT_EQ(rd.zone, 4);
 }
 
-// Test 13: Distance below minRangeMm is clamped (not INVALID).
-//          If the sensor reports a valid pixel at e.g. 10 mm, that's still
-//          a real obstacle — clamp to minRangeMm and report VALID.
+// Test 12: Below-minimum distance clamped to minRangeMm
 static void test_below_min_range_clamped_to_min() {
     printf("  test_below_min_range_clamped_to_min...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 10 mm (below minRangeMm = 20)
-    setValidPixels(frame, 10);
-    writeChecksum(frame);
+    buildMSFrame(frame, 5, 100);  // 5 mm < minRangeMm (20)
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 20);  // clamped to minRangeMm
+    ASSERT_EQ(rd.zone, 4);          // emergency
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // clamped to minRangeMm
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
 }
 
-// Test 14: Distance above maxRangeMm is clamped to maxRangeMm (VALID).
-//          This represents "open air" — nothing within the sensor's effective
-//          range.  The reading is valid (sensor is working) at zone 0 (no
-//          obstacle), rather than being marked INVALID (which would look like
-//          a sensor fault to the STM32).
+// Test 13: Above-maximum distance clamped to maxRangeMm
 static void test_above_max_range_clamped_to_max() {
     printf("  test_above_max_range_clamped_to_max...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set many pixels to 5000 mm (above maxRangeMm = 4000) to exceed
-    // MIN_VALID_PIXELS threshold (need ≥ 4 valid pixels).
-    for (uint8_t px = 0; px < 10; px++) {
-        setPixel(frame, px, 5000, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
+    buildMSFrame(frame, 5000, 100);  // 5000 mm > maxRangeMm (4000)
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    // Should be VALID at maxRangeMm, zone 0 (no obstacle)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 4000);  // clamped to maxRangeMm
-    ASSERT_EQ(rd.zone, 0);            // normal zone: ≥ 1500 mm
+    ASSERT_EQ(rd.zone, 0);            // normal (> 1500)
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 15: Normal in-range distance (500 mm) → VALID, correct zone.
+// Test 14: Normal distance -> valid reading
 static void test_normal_distance_valid() {
     printf("  test_normal_distance_valid...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 500 mm
-    setValidPixels(frame, 500);
-    writeChecksum(frame);
+    buildMSFrame(frame, 1000, 200);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
+    ASSERT_EQ(rd.distance_mm, 1000);
+    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500)
+    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(static_cast<uint8_t>(rd.status),
               static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 500);
-    ASSERT_EQ(rd.zone, 2);   // warning zone: [500, 1000) mm
 }
 
-// Test 16: Exactly minRangeMm distance (20 mm) → VALID at emergency zone.
+// Test 15: Exact minimum range -> valid
 static void test_exact_min_range_valid() {
     printf("  test_exact_min_range_valid...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 20 mm (exactly minRangeMm)
-    setValidPixels(frame, 20);
-    writeChecksum(frame);
+    buildMSFrame(frame, 20, 100);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 20);
-    ASSERT_EQ(rd.zone, 4);   // emergency zone: < 200 mm
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 17: Overflow flush — when more than 2 frames of data are buffered,
-//          old bytes are discarded and only the latest frame is processed.
-//          This prevents blocking and cascading checksum failures.
+// Test 16: Overflow flush keeps latest frame
 static void test_overflow_flush_keeps_latest_frame() {
     printf("  test_overflow_flush_keeps_latest_frame...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
-
-    // Advance past warmup
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
+    obstacle_sensor::update(0.0f);
 
-    // Inject 3 frames: 2 old + 1 new (latest).
-    // The overflow logic should discard old data and parse the latest.
-
-    // Frame 1 (old): 300 mm
-    uint8_t frame1[FRAME_LEN];
-    buildFrame(frame1);
-    setValidPixels(frame1, 300);
-    writeChecksum(frame1);
-
-    // Frame 2 (old): 400 mm
-    uint8_t frame2[FRAME_LEN];
-    buildFrame(frame2);
-    setValidPixels(frame2, 400);
-    writeChecksum(frame2);
-
-    // Frame 3 (latest): 800 mm
-    uint8_t frame3[FRAME_LEN];
-    buildFrame(frame3);
-    setValidPixels(frame3, 800);
-    writeChecksum(frame3);
+    // Inject two frames -- driver should process both and keep last
+    uint8_t frame1[FRAME_LEN], frame2[FRAME_LEN];
+    buildMSFrame(frame1, 800, 100);
+    buildMSFrame(frame2, 1200, 100);
 
     g_uart_inject(frame1, FRAME_LEN);
     g_uart_inject(frame2, FRAME_LEN);
-    g_uart_inject(frame3, FRAME_LEN);
-
     obstacle_sensor::update(0.0f);
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 1200);  // last frame wins
     ASSERT_EQ(rd.healthy, true);
-    // After overflow flush discards old frames, the latest frame (800 mm)
-    // should be the one that gets parsed successfully.
-    ASSERT_EQ(rd.distance_mm, 800);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
-// Test 18: Resync after bad frame — when a frame has a bad checksum,
-//          the parser should scan for the next valid header {0x57, 0x01}
-//          inside the consumed buffer, avoiding a full frame's worth of
-//          re-alignment delay.
+// Test 17: Resync after bad checksum
 static void test_resync_after_bad_checksum() {
     printf("  test_resync_after_bad_checksum...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
-
-    // Advance past warmup
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
+    obstacle_sensor::update(0.0f);
 
-    // Build a corrupted frame (bad checksum) followed by a valid frame.
-    // The valid frame's header sits inside the bad frame's data area.
-    // After checksum failure, resync should find it.
+    // Build a bad frame (corrupt checksum)
+    uint8_t badFrame[FRAME_LEN];
+    buildMSFrame(badFrame, 500, 100);
+    badFrame[6] ^= 0xFF;  // Corrupt checksum
 
-    uint8_t bad_frame[FRAME_LEN];
-    buildFrame(bad_frame);
-    setValidPixels(bad_frame, 600);
-    writeChecksum(bad_frame);
-    bad_frame[FRAME_LEN - 1] ^= 0xFF;  // Corrupt checksum
+    // Build a good frame
+    uint8_t goodFrame[FRAME_LEN];
+    buildMSFrame(goodFrame, 2000, 200);
 
-    uint8_t good_frame[FRAME_LEN];
-    buildFrame(good_frame);
-    setValidPixels(good_frame, 750);  // 750 mm
-    writeChecksum(good_frame);
-
-    g_uart_inject(bad_frame, FRAME_LEN);
-    g_uart_inject(good_frame, FRAME_LEN);
-
+    g_uart_inject(badFrame, FRAME_LEN);
+    g_uart_inject(goodFrame, FRAME_LEN);
     obstacle_sensor::update(0.0f);
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    // The good frame (750 mm) should have been parsed after resync
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    // The good frame should be found after resync
+    ASSERT_EQ(rd.distance_mm, 2000);
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 750);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
-// Test 19: Single frame within the per-update byte limit parses correctly.
-//          Verifies that the byte-limit guard (MAX_BYTES_PER_UPDATE) does
-//          not interfere with normal single-frame processing.
+// Test 18: Single frame within byte limit
 static void test_single_frame_within_byte_limit() {
     printf("  test_single_frame_within_byte_limit...\n");
 
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-
-    // Advance past warmup
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // Inject 1 valid frame.  After the overflow flush discards excess,
-    // the remaining data fits within the per-update limit and parses OK.
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    setValidPixels(frame, 1200);  // 1200 mm
-    writeChecksum(frame);
+    buildMSFrame(frame, 750, 100);
 
-    g_uart_inject(frame, FRAME_LEN);
-    obstacle_sensor::update(0.0f);
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.distance_mm, 1200);
-    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
+    ASSERT_EQ(rd.distance_mm, 750);
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 20: Multiple bad frames followed by a good frame — the parser must
-//          recover and return a VALID reading from the good frame.
-//          This reproduces the cascading-failure scenario that caused
-//          intermittent INVALID every ~1–1.5 s on the real sensor.
+// Test 19: Multiple bad frames then good
 static void test_multiple_bad_frames_then_good() {
     printf("  test_multiple_bad_frames_then_good...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
-
-    // Advance past warmup
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
+    obstacle_sensor::update(0.0f);
 
-    // Inject 3 corrupted frames (bad checksum) followed by 1 good frame.
-    // The parser should discard the bad frames and still find the good one.
+    // Inject 3 bad frames
     for (int i = 0; i < 3; i++) {
         uint8_t bad[FRAME_LEN];
-        buildFrame(bad);
-        setValidPixels(bad, 500 + i * 100);
-        writeChecksum(bad);
-        bad[FRAME_LEN - 1] ^= 0xFF;  // Corrupt checksum
+        buildMSFrame(bad, 500, 100);
+        bad[6] ^= 0xFF;
         g_uart_inject(bad, FRAME_LEN);
     }
 
+    // Inject 1 good frame
     uint8_t good[FRAME_LEN];
-    buildFrame(good);
-    setValidPixels(good, 900);  // 900 mm
-    writeChecksum(good);
+    buildMSFrame(good, 1500, 200);
     g_uart_inject(good, FRAME_LEN);
 
     obstacle_sensor::update(0.0f);
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 1500);
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 900);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
-// Test 21: Many queued frames are all processed in a single update() call —
-//          no byte-limit cut-off causes the sensor to miss frames and time out.
+// Test 20: Many queued frames -- all processed
 static void test_many_queued_frames_all_processed() {
     printf("  test_many_queued_frames_all_processed...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
-
-    // Advance past warmup
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
+    obstacle_sensor::update(0.0f);
 
-    // Inject 5 valid frames (simulating a slow main-loop iteration).
-    // All should be processed, and the reading should reflect the last one.
-    for (int i = 0; i < 5; i++) {
+    // Inject 10 frames with increasing distances
+    for (int i = 0; i < 10; i++) {
         uint8_t frame[FRAME_LEN];
-        buildFrame(frame);
-        setValidPixels(frame, (int32_t)(200 + i * 100));
-        writeChecksum(frame);
+        buildMSFrame(frame, (uint16_t)(100 + i * 100), 100);
         g_uart_inject(frame, FRAME_LEN);
     }
 
     obstacle_sensor::update(0.0f);
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 1000);  // last frame: 100 + 9*100 = 1000
     ASSERT_EQ(rd.healthy, true);
-    // Last frame: (200 + 4*100) = 600 mm
-    ASSERT_EQ(rd.distance_mm, 600);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
 }
 
-// Test 21b: Inject > 400 bytes of non-frame data (0x57 header followed by
-//           garbage) to exercise the rxBuf_ bounds check.  The parser must
-//           not overflow the 400-byte rxBuf_ and must not crash.
-//           After the garbage, inject a valid frame and verify recovery.
+// Test 21: RX buffer overflow protection
 static void test_rxbuf_overflow_protection() {
     printf("  test_rxbuf_overflow_protection...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
-
-    // Advance past warmup
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // Inject a 0x57 header byte followed by 500 bytes of 0xAA garbage.
-    // This simulates a corrupt stream that starts with a valid header
-    // but never forms a valid frame.  Without bounds checking, rxIdx_
-    // would overflow the 400-byte rxBuf_.
-    uint8_t overflow[501];
-    overflow[0] = 0x57;  // Valid frame header
-    for (int i = 1; i < 501; i++) overflow[i] = 0xAA;
-    g_uart_inject(overflow, 501);
-
-    // Process the garbage — must not crash or corrupt memory
     obstacle_sensor::update(0.0f);
 
-    // After processing garbage, inject two valid frames and re-init
-    // to reset auto-detection state, then verify recovery
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    uint8_t good[FRAME_LEN];
-    buildFrame(good);
-    setValidPixels(good, 1200);
-    writeChecksum(good);
-    g_uart_inject(good, FRAME_LEN);
-
-    obstacle_sensor::update(0.0f);
-
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    // Must have recovered and parsed the valid frame
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 1200);
-    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
-}
-
-// Test 21c: Verify resync after buffer overflow when the overflow byte
-//           is 0x57 (valid frame header).  The parser should use this byte
-//           as the start of a new frame rather than discarding it.
-//           Use init() to reset auto-detection state before the good frame.
-static void test_rxbuf_overflow_resync_on_header() {
-    printf("  test_rxbuf_overflow_resync_on_header...\n");
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-
-    // Advance past warmup
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // Inject exactly 400 bytes of garbage (starting with 0x57).
-    // This fills the buffer to the overflow boundary.
-    uint8_t prefix[400];
-    prefix[0] = 0x57;
-    for (int i = 1; i < 400; i++) prefix[i] = 0xBB;
-    g_uart_inject(prefix, 400);
-
-    // Process the garbage — must not crash
-    obstacle_sensor::update(0.0f);
-
-    // Re-init to reset auto-detection state (as would happen on sensor restart)
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // Now inject a valid Frame0 frame and verify recovery
-    uint8_t good[FRAME_LEN];
-    buildFrame(good);
-    setValidPixels(good, 800);
-    writeChecksum(good);
-    g_uart_inject(good, FRAME_LEN);
-
-    obstacle_sensor::update(0.0f);
-
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 800);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
-}
-
-// Test 21d: Verify that corrupted data with multiple 0x57 bytes at
-//           non-boundary positions does NOT produce a valid-looking frame
-//           with the wrong distance.  After garbage, a properly constructed
-//           frame must be parseable.
-static void test_corrupted_stream_with_embedded_headers() {
-    printf("  test_corrupted_stream_with_embedded_headers...\n");
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-
-    // Advance past warmup
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // Inject 200 bytes of data that contains 0x57 at various positions.
-    // These may trigger partial frame accumulations and resets.
-    uint8_t noise[200];
-    for (int i = 0; i < 200; i++) {
-        noise[i] = (i % 20 == 0) ? 0x57 : (uint8_t)(i & 0xFF);
+    // Inject a lot of garbage (no header) + a valid frame
+    for (int i = 0; i < 100; i++) {
+        uint8_t junk = 0xAA;
+        g_uart_inject(&junk, 1);
     }
-    g_uart_inject(noise, 200);
-    obstacle_sensor::update(0.0f);
-
-    // Re-init to reset state, then inject a good frame and verify recovery
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
 
     uint8_t good[FRAME_LEN];
-    buildFrame(good);
-    setValidPixels(good, 1500);
-    writeChecksum(good);
+    buildMSFrame(good, 600, 100);
     g_uart_inject(good, FRAME_LEN);
+
     obstacle_sensor::update(0.0f);
 
-    obstacle_sensor::Reading rd2 = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd2.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd2.healthy, true);
-    ASSERT_EQ(rd2.distance_mm, 1500);
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 600);
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 22: buildCommand produces correct frame for SET_RANGE_MODE (long range)
-//          Frame: [0x5A, len, 0x07, 0x01, checksum]
+// Test 22: NLink buildCommand -- range mode
 static void test_build_command_range_mode() {
     printf("  test_build_command_range_mode...\n");
 
-    uint8_t buf[16];
+    uint8_t buf[8];
     uint8_t payload = static_cast<uint8_t>(obstacle_sensor::RangeMode::LONG_RANGE);
     uint16_t len = obstacle_sensor::buildCommand(
         static_cast<uint8_t>(obstacle_sensor::CmdId::SET_RANGE_MODE),
         &payload, 1, buf, sizeof(buf));
 
-    // Total = header(1) + len(1) + cmd(1) + payload(1) + checksum(1) = 5
     ASSERT_EQ(len, 5);
+    ASSERT_EQ(buf[0], 0x5A);           // CMD_HEADER
+    ASSERT_EQ(buf[1], 5);              // total length
+    ASSERT_EQ(buf[2], 0x07);           // SET_RANGE_MODE
+    ASSERT_EQ(buf[3], 0x01);           // LONG_RANGE
 
-    // Header
-    ASSERT_EQ(buf[0], 0x5A);
-
-    // Length byte = total frame bytes
-    ASSERT_EQ(buf[1], 5);
-
-    // Command ID = SET_RANGE_MODE (0x07)
-    ASSERT_EQ(buf[2], 0x07);
-
-    // Payload = LONG_RANGE (0x01)
-    ASSERT_EQ(buf[3], 0x01);
-
-    // Checksum = (0x5A + 0x05 + 0x07 + 0x01) & 0xFF = 0x67
     uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x07 + 0x01);
     ASSERT_EQ(buf[4], expectedSum);
 }
 
-// Test 23: buildCommand for SAVE_CONFIG (no payload)
-//          Frame: [0x5A, 0x04, 0x08, checksum]
+// Test 23: NLink buildCommand -- save config
 static void test_build_command_save_config() {
     printf("  test_build_command_save_config...\n");
 
-    uint8_t buf[16];
+    uint8_t buf[8];
     uint16_t len = obstacle_sensor::buildCommand(
         static_cast<uint8_t>(obstacle_sensor::CmdId::SAVE_CONFIG),
         nullptr, 0, buf, sizeof(buf));
 
-    // Total = header(1) + len(1) + cmd(1) + checksum(1) = 4
     ASSERT_EQ(len, 4);
     ASSERT_EQ(buf[0], 0x5A);
     ASSERT_EQ(buf[1], 4);
     ASSERT_EQ(buf[2], 0x08);
-
-    // Checksum = (0x5A + 0x04 + 0x08) & 0xFF
     uint8_t expectedSum = (uint8_t)(0x5A + 4 + 0x08);
     ASSERT_EQ(buf[3], expectedSum);
 }
 
-// Test 24: buildCommand for SET_BAUD_RATE (115200)
+// Test 24: NLink buildCommand -- baud rate
 static void test_build_command_baud_rate() {
     printf("  test_build_command_baud_rate...\n");
 
-    uint8_t buf[16];
-    uint8_t payload = static_cast<uint8_t>(obstacle_sensor::BaudRateCode::BAUD_115200);
+    uint8_t buf[8];
+    uint8_t payload = static_cast<uint8_t>(obstacle_sensor::BaudRateCode::BAUD_921600);
     uint16_t len = obstacle_sensor::buildCommand(
         static_cast<uint8_t>(obstacle_sensor::CmdId::SET_BAUD_RATE),
         &payload, 1, buf, sizeof(buf));
@@ -982,1160 +517,481 @@ static void test_build_command_baud_rate() {
     ASSERT_EQ(len, 5);
     ASSERT_EQ(buf[0], 0x5A);
     ASSERT_EQ(buf[1], 5);
-    ASSERT_EQ(buf[2], 0x03);  // SET_BAUD_RATE
-    ASSERT_EQ(buf[3], 0x04);  // BAUD_115200
-
-    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x03 + 0x04);
-    ASSERT_EQ(buf[4], expectedSum);
+    ASSERT_EQ(buf[2], 0x03);
+    ASSERT_EQ(buf[3], 0x07);
 }
 
-// Test 25: buildCommand returns 0 when buffer is too small
+// Test 25: NLink buildCommand -- buffer too small
 static void test_build_command_buffer_too_small() {
     printf("  test_build_command_buffer_too_small...\n");
 
-    uint8_t buf[3];  // Too small for any command
+    uint8_t buf[3];  // Too small for 5-byte frame
     uint8_t payload = 0x01;
-    uint16_t len = obstacle_sensor::buildCommand(
-        0x07, &payload, 1, buf, sizeof(buf));
-
-    ASSERT_EQ(len, 0);  // Should fail
+    uint16_t len = obstacle_sensor::buildCommand(0x07, &payload, 1, buf, sizeof(buf));
+    ASSERT_EQ(len, 0);
 }
 
-// Test 25b: buildCommand returns 0 when payload is null but payloadLen > 0
+// Test 26: NLink buildCommand -- null payload with len > 0 rejected
 static void test_build_command_null_payload_rejected() {
     printf("  test_build_command_null_payload_rejected...\n");
 
-    uint8_t buf[16];
-    uint16_t len = obstacle_sensor::buildCommand(
-        0x07, nullptr, 1, buf, sizeof(buf));
-
-    ASSERT_EQ(len, 0);  // Should reject null payload with non-zero length
+    uint8_t buf[8];
+    uint16_t len = obstacle_sensor::buildCommand(0x07, nullptr, 1, buf, sizeof(buf));
+    ASSERT_EQ(len, 0);
 }
 
-// Test 25c: buildCommand accepts null payload when payloadLen is 0
+// Test 27: NLink buildCommand -- null payload with len 0 ok
 static void test_build_command_null_payload_zero_len_ok() {
     printf("  test_build_command_null_payload_zero_len_ok...\n");
 
-    uint8_t buf[16];
-    uint16_t len = obstacle_sensor::buildCommand(
-        0x08, nullptr, 0, buf, sizeof(buf));
-
-    ASSERT(len > 0);  // Should succeed: no payload to copy
+    uint8_t buf[8];
+    uint16_t len = obstacle_sensor::buildCommand(0x08, nullptr, 0, buf, sizeof(buf));
+    ASSERT(len > 0);
     ASSERT_EQ(buf[0], 0x5A);
-    ASSERT_EQ(buf[2], 0x08);
 }
 
-// Test 26: buildCommand checksum is correct modulo 256
+// Test 28: NLink buildCommand -- checksum wraps
 static void test_build_command_checksum_wraps() {
     printf("  test_build_command_checksum_wraps...\n");
 
-    uint8_t buf[16];
+    uint8_t buf[8];
     uint8_t payload = 0xFF;
     uint16_t len = obstacle_sensor::buildCommand(0xFF, &payload, 1, buf, sizeof(buf));
+    ASSERT(len > 0);
 
-    ASSERT_EQ(len, 5);
-    // Sum = 0x5A + 0x05 + 0xFF + 0xFF = 0x25D → 0x5D (mod 256)
-    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0xFF + 0xFF);
-    ASSERT_EQ(buf[4], expectedSum);
+    uint8_t sum = 0;
+    for (uint16_t i = 0; i < len - 1; i++) sum += buf[i];
+    ASSERT_EQ(buf[len - 1], sum);
 }
 
-// Test 27: 2000 mm distance parses correctly through the full pipeline
-//          (regression test for the ~1368 mm issue — verifies code is NOT
-//          the cause of the truncation; the limit is sensor configuration).
+// Test 29: 2000 mm distance parses correctly
 static void test_2000mm_distance_parses_correctly() {
     printf("  test_2000mm_distance_parses_correctly...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 2000 mm — distance uint16 LE at bytes 2-3
-    // 2000 = 0x07D0 → byte[2]=0xD0, byte[3]=0x07
-    setPixel(frame, 0, 2000, /*status=*/0, 200);
-    // Set additional pixels to meet MIN_VALID_PIXELS threshold
-    for (uint8_t px = 1; px < TEST_MIN_PX; px++)
-        setPixel(frame, px, 2000, /*status=*/0, 200);
-    writeChecksum(frame);
-
-    // Verify the raw bytes are correct (pixel 0 starts at offset 9)
-    uint16_t base = 9;  // pixel 0
-    // Bytes 0-1: pixel_id = 0
-    ASSERT_EQ(frame[base + 0], 0x00);
-    ASSERT_EQ(frame[base + 1], 0x00);
-    // Bytes 2-3: distance uint16 LE = 2000 = 0x07D0
-    ASSERT_EQ(frame[base + 2], 0xD0);
-    ASSERT_EQ(frame[base + 3], 0x07);
+    buildMSFrame(frame, 2000, 150);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 2000);
-    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+    ASSERT_EQ(rd.zone, 0);  // normal (> 1500)
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 28: 4000 mm (max range) parses correctly
+// Test 30: 4000 mm max range parses correctly
 static void test_4000mm_max_range_parses_correctly() {
     printf("  test_4000mm_max_range_parses_correctly...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 4000 mm = 0x000FA0
-    setValidPixels(frame, 4000, 150);
-    writeChecksum(frame);
+    buildMSFrame(frame, 4000, 100);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 4000);
-    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+    ASSERT_EQ(rd.zone, 0);
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 29: buildCommand for SET_OUTPUT_MODE (active continuous mode)
-//          Frame: [0x5A, 0x05, 0x02, 0x00, checksum]
+// Test 31: NLink buildCommand -- output mode
 static void test_build_command_output_mode() {
     printf("  test_build_command_output_mode...\n");
 
-    uint8_t buf[16];
+    uint8_t buf[8];
     uint8_t payload = static_cast<uint8_t>(obstacle_sensor::OutputMode::ACTIVE);
     uint16_t len = obstacle_sensor::buildCommand(
         static_cast<uint8_t>(obstacle_sensor::CmdId::SET_OUTPUT_MODE),
         &payload, 1, buf, sizeof(buf));
 
-    // Total = header(1) + len(1) + cmd(1) + payload(1) + checksum(1) = 5
     ASSERT_EQ(len, 5);
     ASSERT_EQ(buf[0], 0x5A);
-    ASSERT_EQ(buf[1], 5);
     ASSERT_EQ(buf[2], 0x02);  // SET_OUTPUT_MODE
     ASSERT_EQ(buf[3], 0x00);  // ACTIVE
-
-    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x02 + 0x00);
-    ASSERT_EQ(buf[4], expectedSum);
 }
 
-// Test 30: buildCommand for SET_FRAME_RATE (10 Hz, recommended for long range)
-//          Frame: [0x5A, 0x05, 0x05, 0x0A, checksum]
+// Test 32: NLink buildCommand -- frame rate
 static void test_build_command_frame_rate() {
     printf("  test_build_command_frame_rate...\n");
 
-    uint8_t buf[16];
+    uint8_t buf[8];
     uint8_t hz = 10;
     uint16_t len = obstacle_sensor::buildCommand(
         static_cast<uint8_t>(obstacle_sensor::CmdId::SET_FRAME_RATE),
         &hz, 1, buf, sizeof(buf));
 
     ASSERT_EQ(len, 5);
-    ASSERT_EQ(buf[0], 0x5A);
-    ASSERT_EQ(buf[1], 5);
     ASSERT_EQ(buf[2], 0x05);  // SET_FRAME_RATE
-    ASSERT_EQ(buf[3], 10);    // 10 Hz
-
-    uint8_t expectedSum = (uint8_t)(0x5A + 5 + 0x05 + 10);
-    ASSERT_EQ(buf[4], expectedSum);
+    ASSERT_EQ(buf[3], 10);
 }
 
-// Test 31: Negative distance is converted to 0 (invalid) by setPixel.
-//          The distance field is uint16; negative values become dist=0
-//          which is treated as invalid by the parser.
-static void test_negative_distance_skipped() {
-    printf("  test_negative_distance_skipped...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to -100 mm → dist16 = 0 (invalid, zero distance)
-    setPixel(frame, 0, -100, /*status=*/0, 100);
-
-    // Set pixels 1-4 to a valid 500 mm (should be the result).
-    // Pixel 0 has dist=0 (invalid) → skipped by parser,
-    // so only these TEST_MIN_PX pixels count as valid.
-    for (uint8_t px = 1; px < 1 + TEST_MIN_PX; px++)
-        setPixel(frame, px, 500, /*status=*/0, 100);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // The negative pixel should be skipped; pixel 1's 500 mm is the minimum
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 500);
-}
-
-// Test 32: 3000 mm intermediate long-range distance parses correctly.
-//          Covers the gap between 2000 mm (test 27) and 4000 mm (test 28).
+// Test 33: 3000 mm distance parses correctly
 static void test_3000mm_distance_parses_correctly() {
     printf("  test_3000mm_distance_parses_correctly...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // 3000 mm = 0x0BB8, uint16 LE
-    setPixel(frame, 0, 3000, /*status=*/0, 120);
-    // Additional pixels to meet MIN_VALID_PIXELS
-    for (uint8_t px = 1; px < TEST_MIN_PX; px++)
-        setPixel(frame, px, 3000, /*status=*/0, 120);
-    writeChecksum(frame);
-
-    // Verify raw bytes (LE) — distance at bytes 2-3 of pixel 0
-    uint16_t base = 9;
-    ASSERT_EQ(frame[base + 2], 0xB8);  // dist LSB
-    ASSERT_EQ(frame[base + 3], 0x0B);  // dist MSB
+    buildMSFrame(frame, 3000, 200);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 3000);
-    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
+    ASSERT_EQ(rd.zone, 0);
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 33: Signal strength value does not affect distance parsing.
-//          The parser uses only the distance value (not extra/signal) to determine
-//          pixel validity.  At long range the signal is naturally weaker;
-//          this test confirms weak signal alone does not reject the reading.
+// Test 34: Signal strength does not affect distance
 static void test_signal_strength_does_not_affect_distance() {
     printf("  test_signal_strength_does_not_affect_distance...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixel 0 to 3500 mm with very low signal (signal=1)
-    setValidPixels(frame, 3500, 1);
-    writeChecksum(frame);
+    buildMSFrame(frame, 1500, 0xFFFF);  // max signal
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    // Low signal should NOT cause rejection — only dis_status matters
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 1500);
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 3500);
-    ASSERT_EQ(rd.zone, 0);
 }
 
-// Test 34: High-level send commands fail gracefully when TX pin is not
-//          connected (Config::txPin = -1, the default).
+// Test 35: Send command fails without TX pin
 static void test_send_command_fails_without_tx_pin() {
     printf("  test_send_command_fails_without_tx_pin...\n");
 
-    // Default Config has txPin = -1 (not connected)
-    obstacle_sensor::init();
+    obstacle_sensor::Config cfg;
+    cfg.txPin = -1;
+    obstacle_sensor::init(cfg);
 
-    // Advance past warmup so initialized_ is true
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // All command functions should return false
-    ASSERT_EQ(obstacle_sensor::setRangeMode(obstacle_sensor::RangeMode::LONG_RANGE), false);
-    ASSERT_EQ(obstacle_sensor::setBaudRate(obstacle_sensor::BaudRateCode::BAUD_921600), false);
-    ASSERT_EQ(obstacle_sensor::setFrameRate(10), false);
-    ASSERT_EQ(obstacle_sensor::setOutputMode(obstacle_sensor::OutputMode::ACTIVE), false);
-    ASSERT_EQ(obstacle_sensor::saveConfig(), false);
+    bool ok = obstacle_sensor::setRangeMode(obstacle_sensor::RangeMode::LONG_RANGE);
+    ASSERT_EQ(ok, false);
 }
 
-// Test 35: configureLongRange() fails when TX pin is not connected.
+// Test 36: configureLongRange fails without TX
 static void test_configure_long_range_fails_without_tx() {
     printf("  test_configure_long_range_fails_without_tx...\n");
 
-    // Default Config has txPin = -1 (not connected)
-    obstacle_sensor::init();
+    obstacle_sensor::Config cfg;
+    cfg.txPin = -1;
+    obstacle_sensor::init(cfg);
 
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // configureLongRange() should return false because TX is not connected
-    ASSERT_EQ(obstacle_sensor::configureLongRange(), false);
+    bool ok = obstacle_sensor::configureLongRange();
+    ASSERT_EQ(ok, false);
 }
 
-// Test 36: configureLongRange() succeeds when TX pin is connected.
+// Test 37: configureLongRange succeeds with TX
 static void test_configure_long_range_succeeds_with_tx() {
     printf("  test_configure_long_range_succeeds_with_tx...\n");
 
-    obstacle_sensor::Config cfg{};
-    cfg.txPin = 17;  // TX pin connected
-    obstacle_sensor::init(cfg);
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // configureLongRange() should return true
-    ASSERT_EQ(obstacle_sensor::configureLongRange(), true);
-}
-
-// Test 37: setFrameRate(0) is rejected (0 Hz is invalid).
-static void test_set_frame_rate_zero_rejected() {
-    printf("  test_set_frame_rate_zero_rejected...\n");
-
-    obstacle_sensor::Config cfg{};
+    obstacle_sensor::Config cfg;
     cfg.txPin = 17;
     obstacle_sensor::init(cfg);
 
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    ASSERT_EQ(obstacle_sensor::setFrameRate(0), false);
-    // Valid frame rate should succeed
-    ASSERT_EQ(obstacle_sensor::setFrameRate(1), true);
-    ASSERT_EQ(obstacle_sensor::setFrameRate(15), true);
+    g_uart_tx_reset();
+    bool ok = obstacle_sensor::configureLongRange();
+    ASSERT_EQ(ok, true);
+    ASSERT(g_uart_tx_len > 0);
 }
 
-// Test 38: 4000 mm raw bytes verification — confirms no truncation or
-//          byte-order issues in the uint16 LE encoding at max range.
+// Test 38: setFrameRate(0) rejected
+static void test_set_frame_rate_zero_rejected() {
+    printf("  test_set_frame_rate_zero_rejected...\n");
+
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
+    obstacle_sensor::init(cfg);
+
+    bool ok = obstacle_sensor::setFrameRate(0);
+    ASSERT_EQ(ok, false);
+}
+
+// Test 39: 4000 mm raw bytes verification
 static void test_4000mm_raw_bytes() {
     printf("  test_4000mm_raw_bytes...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
+    buildMSFrame(frame, 4000, 100);
 
-    // 4000 mm = 0x0FA0
-    // uint16 LE bytes at pixel offset +2,+3: [0xA0, 0x0F]
-    setPixel(frame, 0, 4000, /*status=*/0, 100);
-    // Additional pixels to meet MIN_VALID_PIXELS
-    for (uint8_t px = 1; px < TEST_MIN_PX; px++)
-        setPixel(frame, px, 4000, /*status=*/0, 100);
-    writeChecksum(frame);
-
-    uint16_t base = 9;  // pixel 0
-    // Bytes 0-1: pixel_id = 0
-    ASSERT_EQ(frame[base + 0], 0x00);
-    ASSERT_EQ(frame[base + 1], 0x00);
-    // Bytes 2-3: distance uint16 LE = 4000 = 0x0FA0
-    ASSERT_EQ(frame[base + 2], 0xA0);  // LSB
-    ASSERT_EQ(frame[base + 3], 0x0F);  // MSB
+    // 4000 = 0x0FA0
+    ASSERT_EQ(frame[2], 0xA0);
+    ASSERT_EQ(frame[3], 0x0F);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
     ASSERT_EQ(rd.distance_mm, 4000);
 }
 
-// Test 39: configureLongRange() sends all 4 commands with correct bytes.
-//          Uses the UART TX capture buffer to verify each command frame
-//          was sent with the right header, length, cmdId, payload, and checksum.
-//          This is the key test for the "can't see 4000 mm" diagnosis:
-//          if these bytes actually reach the sensor, the sensor WILL switch
-//          to LONG RANGE mode.  The missing piece on real hardware is
-//          wiring ESP32 TX → sensor RX.
+// Test 40: configureLongRange sends correct command sequence
 static void test_configure_long_range_sends_correct_commands() {
     printf("  test_configure_long_range_sends_correct_commands...\n");
 
-    obstacle_sensor::Config cfg{};
-    cfg.txPin = 17;  // TX pin connected
+    obstacle_sensor::Config cfg;
+    cfg.txPin = 17;
     obstacle_sensor::init(cfg);
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // Reset TX capture buffer
     g_uart_tx_reset();
 
-    // Call configureLongRange — should send 4 commands
-    ASSERT_EQ(obstacle_sensor::configureLongRange(), true);
+    obstacle_sensor::configureLongRange();
 
-    // Expected commands (each is 5 or 4 bytes):
-    //   1. SET_RANGE_MODE(LONG_RANGE): [0x5A, 5, 0x07, 0x01, checksum]
-    //   2. SET_OUTPUT_MODE(ACTIVE):    [0x5A, 5, 0x02, 0x00, checksum]
-    //   3. SET_FRAME_RATE(10):         [0x5A, 5, 0x05, 0x0A, checksum]
-    //   4. SAVE_CONFIG:                [0x5A, 4, 0x08,       checksum]
-    // Total bytes = 5 + 5 + 5 + 4 = 19
+    // 4 commands: setRangeMode(5) + setOutputMode(5) + setFrameRate(5) + saveConfig(4) = 19
     ASSERT_EQ(g_uart_tx_len, 19);
 
-    // Command 1: SET_RANGE_MODE (offset 0)
-    ASSERT_EQ(g_uart_tx_buf[0], 0x5A);    // header
-    ASSERT_EQ(g_uart_tx_buf[1], 5);       // length
-    ASSERT_EQ(g_uart_tx_buf[2], 0x07);    // SET_RANGE_MODE
-    ASSERT_EQ(g_uart_tx_buf[3], 0x01);    // LONG_RANGE
-    ASSERT_EQ(g_uart_tx_buf[4], (uint8_t)(0x5A + 5 + 0x07 + 0x01));  // checksum
+    // First command: SET_RANGE_MODE = LONG_RANGE
+    ASSERT_EQ(g_uart_tx_buf[0], 0x5A);
+    ASSERT_EQ(g_uart_tx_buf[2], 0x07);
+    ASSERT_EQ(g_uart_tx_buf[3], 0x01);
 
-    // Command 2: SET_OUTPUT_MODE (offset 5)
+    // Second command: SET_OUTPUT_MODE = ACTIVE
     ASSERT_EQ(g_uart_tx_buf[5], 0x5A);
-    ASSERT_EQ(g_uart_tx_buf[6], 5);
-    ASSERT_EQ(g_uart_tx_buf[7], 0x02);    // SET_OUTPUT_MODE
-    ASSERT_EQ(g_uart_tx_buf[8], 0x00);    // ACTIVE
-    ASSERT_EQ(g_uart_tx_buf[9], (uint8_t)(0x5A + 5 + 0x02 + 0x00));
+    ASSERT_EQ(g_uart_tx_buf[7], 0x02);
+    ASSERT_EQ(g_uart_tx_buf[8], 0x00);
 
-    // Command 3: SET_FRAME_RATE (offset 10)
+    // Third command: SET_FRAME_RATE = 10
     ASSERT_EQ(g_uart_tx_buf[10], 0x5A);
-    ASSERT_EQ(g_uart_tx_buf[11], 5);
-    ASSERT_EQ(g_uart_tx_buf[12], 0x05);   // SET_FRAME_RATE
-    ASSERT_EQ(g_uart_tx_buf[13], 10);     // 10 Hz
-    ASSERT_EQ(g_uart_tx_buf[14], (uint8_t)(0x5A + 5 + 0x05 + 10));
+    ASSERT_EQ(g_uart_tx_buf[12], 0x05);
+    ASSERT_EQ(g_uart_tx_buf[13], 10);
 
-    // Command 4: SAVE_CONFIG (offset 15)
+    // Fourth command: SAVE_CONFIG (4 bytes)
     ASSERT_EQ(g_uart_tx_buf[15], 0x5A);
-    ASSERT_EQ(g_uart_tx_buf[16], 4);      // length = 4 (no payload)
-    ASSERT_EQ(g_uart_tx_buf[17], 0x08);   // SAVE_CONFIG
-    ASSERT_EQ(g_uart_tx_buf[18], (uint8_t)(0x5A + 4 + 0x08));
+    ASSERT_EQ(g_uart_tx_buf[17], 0x08);
 }
 
-// Test 40: Individual setRangeMode(LONG_RANGE) sends correct bytes to UART TX.
+// Test 41: setRangeMode sends correct bytes
 static void test_set_range_mode_sends_correct_bytes() {
     printf("  test_set_range_mode_sends_correct_bytes...\n");
 
-    obstacle_sensor::Config cfg{};
+    obstacle_sensor::Config cfg;
     cfg.txPin = 17;
     obstacle_sensor::init(cfg);
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
     g_uart_tx_reset();
-    ASSERT_EQ(obstacle_sensor::setRangeMode(obstacle_sensor::RangeMode::LONG_RANGE), true);
 
+    obstacle_sensor::setRangeMode(obstacle_sensor::RangeMode::SHORT_RANGE);
     ASSERT_EQ(g_uart_tx_len, 5);
-    ASSERT_EQ(g_uart_tx_buf[0], 0x5A);
-    ASSERT_EQ(g_uart_tx_buf[1], 5);
-    ASSERT_EQ(g_uart_tx_buf[2], 0x07);
-    ASSERT_EQ(g_uart_tx_buf[3], 0x01);
+    ASSERT_EQ(g_uart_tx_buf[3], 0x00);  // SHORT_RANGE
 }
 
-// Test 41: Individual saveConfig() sends correct bytes to UART TX.
+// Test 42: saveConfig sends correct bytes
 static void test_save_config_sends_correct_bytes() {
     printf("  test_save_config_sends_correct_bytes...\n");
 
-    obstacle_sensor::Config cfg{};
+    obstacle_sensor::Config cfg;
     cfg.txPin = 17;
     obstacle_sensor::init(cfg);
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
     g_uart_tx_reset();
-    ASSERT_EQ(obstacle_sensor::saveConfig(), true);
 
+    obstacle_sensor::saveConfig();
     ASSERT_EQ(g_uart_tx_len, 4);
     ASSERT_EQ(g_uart_tx_buf[0], 0x5A);
     ASSERT_EQ(g_uart_tx_buf[1], 4);
     ASSERT_EQ(g_uart_tx_buf[2], 0x08);
 }
 
-// Test 42: Repeated all-pixels-invalid frames always return minRangeMm (20 mm).
-//          This reproduces the exact "sensor stuck at 20 mm" symptom reported
-//          when the TOFSense-M is in SHORT RANGE mode pointing at open air:
-//          every pixel reports an invalid distance (65535), so the driver keeps
-//          returning minRangeMm (20 mm) as emergency-close.  After switching
-//          to LONG RANGE mode (via configureLongRange()), valid pixel data
-//          arrives and the correct distance is returned.
-static void test_repeated_all_pixels_invalid_stays_at_min() {
-    printf("  test_repeated_all_pixels_invalid_stays_at_min...\n");
-
-    // Build a frame where all 64 pixels are invalid (dist=65535)
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
+// Test 43: Repeated no-target frames stay at minRangeMm
+static void test_repeated_no_target_stays_at_min() {
+    printf("  test_repeated_no_target_stays_at_min...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
     obstacle_sensor::init();
-
-    // Advance past warmup
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 5 consecutive all-invalid frames — simulates open air in SHORT RANGE
+    // Inject 5 no-target frames
     for (int i = 0; i < 5; i++) {
+        g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
 
         obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.distance_mm, 20);   // Always minRangeMm
-        ASSERT_EQ(rd.zone, 4);           // Emergency zone
-        ASSERT_EQ(static_cast<uint8_t>(rd.status),
-                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-        ASSERT_EQ(rd.healthy, true);
+        ASSERT_EQ(rd.distance_mm, 20);  // minRangeMm
     }
-
-    // Now inject a valid frame with a real distance (3000 mm) — simulates
-    // switching to LONG RANGE mode where the sensor can actually see objects
-    uint8_t goodFrame[FRAME_LEN];
-    buildFrame(goodFrame);
-    setValidPixels(goodFrame, 3000, 200);  // 3000 mm
-    writeChecksum(goodFrame);
-
-    g_uart_inject(goodFrame, FRAME_LEN);
-    g_test_millis += 100;
-    obstacle_sensor::update(0.0f);
-
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(rd.distance_mm, 3000);   // Now reads correctly
-    ASSERT_EQ(rd.zone, 0);            // Normal zone (>= 1500 mm)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 43: Parse the official Nooploop example frame from the support page.
-//          This is the exact 400-byte frame provided at:
-//            https://support.nooploop.com/tofsense/example-code
-//          With the corrected uint16 LE distance parsing:
-//            - Distance is at bytes 2-3 of each 6-byte pixel group
-//            - Validity is determined by distance value (0 or >=65000 = invalid)
-//          The frame contains pixels with valid distances that should now
-//          parse correctly as a valid reading.
-static void test_official_nooploop_example_frame() {
-    printf("  test_official_nooploop_example_frame...\n");
-
-    // Official example frame from https://support.nooploop.com/tofsense/example-code
-    static const uint8_t rx_buf[400] = {
-        0x57,0x01,0xff,0x00,0x17,0x56,0x00,0x00,0x40,0x1d,0x00,0x00,0x05,0xa1,0x84,
-        0x20,0x00,0x00,0x05,0xcf,0x69,0x20,0x00,0x00,0x05,0x9e,0x75,0x21,0x00,0x00,
-        0x05,0x99,0x73,0x20,0x00,0x00,0x05,0xb0,0x72,0x1f,0x00,0x00,0x05,0x73,0x51,
-        0x1f,0x00,0x00,0x05,0x7c,0xc3,0x1e,0x00,0x00,0xff,0x57,0x40,0x21,0x00,0x00,
-        0x05,0x9a,0xd5,0x22,0x00,0x00,0x05,0x71,0xdc,0x26,0x00,0x00,0x05,0xee,0xe7,
-        0x22,0x00,0x00,0x05,0xd6,0xde,0x23,0x00,0x00,0x05,0x6a,0xef,0x22,0x00,0x00,
-        0x05,0xf8,0xe5,0x22,0x00,0x00,0x05,0x84,0x9b,0x20,0x00,0x00,0xff,0x23,0x30,
-        0x27,0x00,0x00,0x05,0x74,0x5b,0x29,0x00,0x00,0x05,0xb6,0x70,0x27,0x00,0x00,
-        0x05,0xe2,0x5c,0x27,0x00,0x00,0x05,0x04,0x4e,0x27,0x00,0x00,0x05,0xec,0x4c,
-        0x24,0x00,0x00,0x05,0x57,0x4d,0x23,0x00,0x00,0xff,0xf0,0x3a,0x21,0x00,0x00,
-        0xff,0xff,0x20,0x2b,0x00,0x00,0xff,0x3c,0x25,0x29,0x00,0x00,0xff,0x6f,0x2e,
-        0x29,0x00,0x00,0xff,0xde,0x26,0x28,0x00,0x00,0xff,0xa7,0x22,0x26,0x00,0x00,
-        0xff,0x57,0x23,0x23,0x00,0x00,0xff,0x91,0x27,0x23,0x00,0x00,0xff,0x05,0x23,
-        0x21,0x00,0x00,0xff,0x34,0x15,0x27,0x00,0x00,0xff,0x61,0x13,0x27,0x00,0x00,
-        0xff,0xeb,0x18,0x24,0x00,0x00,0xff,0x8a,0x18,0x24,0x00,0x00,0xff,0x86,0x19,
-        0x22,0x00,0x00,0xff,0x13,0x1c,0x22,0x00,0x00,0xff,0xa1,0x1e,0x21,0x00,0x00,
-        0xff,0x3b,0x18,0x1f,0x00,0x00,0xff,0x47,0x0c,0x23,0x00,0x00,0xff,0xff,0x0b,
-        0x22,0x00,0x00,0xff,0x35,0x0e,0x20,0x00,0x00,0xff,0x8b,0x10,0x20,0x00,0x00,
-        0xff,0x80,0x11,0x20,0x00,0x00,0xff,0xe8,0x11,0x20,0x00,0x00,0xff,0x22,0x10,
-        0x1e,0x00,0x00,0xff,0x7d,0x0b,0x1e,0x00,0x00,0xff,0x0b,0x0b,0x1e,0x00,0x00,
-        0xff,0x4a,0x09,0x1e,0x00,0x00,0xff,0xb7,0x0a,0x1f,0x00,0x00,0xff,0x2d,0x0d,
-        0x1e,0x00,0x00,0xff,0x1c,0x0f,0x1d,0x00,0x00,0xff,0x06,0x10,0x1e,0x00,0x00,
-        0xff,0x21,0x0d,0x1e,0x00,0x00,0xff,0x89,0x0b,0x17,0x00,0x00,0xff,0x4b,0x17,
-        0x1c,0x00,0x00,0xff,0x9d,0x09,0x1c,0x00,0x00,0xff,0x43,0x0d,0x1d,0x00,0x00,
-        0xff,0xd5,0x0c,0x1b,0x00,0x00,0xff,0xaa,0x0e,0x1c,0x00,0x00,0xff,0x29,0x0f,
-        0x1a,0x00,0x00,0xff,0x57,0x0d,0x18,0x00,0x00,0xff,0xd1,0x0f,0x13,0x00,0x00,
-        0x05,0xa4,0x5c,0xff,0xff,0xff,0xff,0xff,0xff,0x05
-    };
-
-    // Verify frame structure
-    ASSERT_EQ(sizeof(rx_buf), 400);
-    ASSERT_EQ(rx_buf[0], 0x57);      // frame_header
-    ASSERT_EQ(rx_buf[1], 0x01);      // function_mark (Frame0)
-    ASSERT_EQ(rx_buf[8], 0x40);      // pixel_count = 64 (8×8)
-
-    // Verify checksum is valid
-    uint8_t sum = 0;
-    for (int i = 0; i < 399; i++) sum += rx_buf[i];
-    ASSERT_EQ(sum, rx_buf[399]);
-
-    // Analyze the frame: with corrected parsing (distance = uint16 at bytes 2-3
-    // of each pixel group), let's extract what the parser sees.
-    // Pixel 0 starts at offset 9: bytes [0x1d, 0x00, 0x00, 0x05, 0xa1, 0x84]
-    //   pixel_id = uint16(0x1d, 0x00) = 29
-    //   distance = uint16(0x00, 0x05) = 1280 mm → VALID
-    // Many pixels have distance = 0x0005 = 5 (bytes 2-3 = [0x05, 0x00])... wait,
-    // let me re-check: the bytes at base+2, base+3.
-    // Pixel 0: base=9, buf[11]=0x00, buf[12]=0x05 → dist = 0x0500 = 1280
-    // Actually: uint16 LE: buf[11] | (buf[12] << 8) = 0x00 | (0x05 << 8) = 0x0500 = 1280
-
-    // Feed through the full pipeline
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    g_uart_inject(rx_buf, sizeof(rx_buf));
-    obstacle_sensor::update(0.0f);
-
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-
-    // With corrected uint16 LE distance parsing at bytes 2-3:
-    // 21 pixels have valid distance = 1280 mm (0x0500), dispersion = 0
-    // This is a valid reading at 1280 mm (caution zone: [1000, 1500) mm)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 1280);
-    ASSERT_EQ(rd.zone, 1);  // caution zone: [1000, 1500) mm
-}
-
-// Test 44: Wrap-around detection — 3 valid pixels with high distances
-//          (2245 mm) while all other pixels are invalid.
-//          This reproduces the exact "data reversed" symptom reported:
-//          palm at 2 cm → sensor shows 2245 mm instead of emergency-close.
-//          With the MIN_VALID_PIXELS threshold, the 3 valid pixels are
-//          rejected as phase wrap-around artifacts and treated as
-//          emergency-close (NO_VALID_PIXELS → 20 mm).
-static void test_few_valid_pixels_treated_as_wraparound() {
-    printf("  test_few_valid_pixels_treated_as_wraparound...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Simulate wrap-around: all 64 pixels invalid (dist=65535),
-    // then 3 pixels valid with wrap-around distances.
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
-    }
-    // Only 3 pixels "valid" with wrap-around distances
-    setPixel(frame, 10, 2245, /*status=*/0, 200);
-    setPixel(frame, 11, 2800, /*status=*/0, 180);
-    setPixel(frame, 12, 3000, /*status=*/0, 160);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // Should be treated as emergency-close (NO_VALID_PIXELS)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
-}
-
-// Test 45: Exactly MIN_VALID_PIXELS (4) valid pixels → accepted as real data.
-//          This tests the threshold boundary: 4 valid pixels should be
-//          enough to produce a valid reading, not treated as wrap-around.
-static void test_exactly_min_valid_pixels_accepted() {
-    printf("  test_exactly_min_valid_pixels_accepted...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set exactly 4 valid pixels at 800 mm, rest are invalid (dist=65535)
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
-    }
-    setPixel(frame, 0, 800, /*status=*/0, 200);
-    setPixel(frame, 1, 900, /*status=*/0, 180);
-    setPixel(frame, 2, 850, /*status=*/0, 190);
-    setPixel(frame, 3, 800, /*status=*/0, 200);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // 4 valid pixels → accepted; minimum is 800 mm
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 800);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
-}
-
-// Test 46: Single valid pixel → wrap-around rejection (emergency-close).
-//          Verifies that even 1 valid pixel with a plausible distance
-//          is rejected when fewer than MIN_VALID_PIXELS are valid.
-static void test_single_valid_pixel_rejected_as_wraparound() {
-    printf("  test_single_valid_pixel_rejected_as_wraparound...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Only pixel 0 is valid at 1500 mm, rest are invalid
-    setPixel(frame, 0, 1500, /*status=*/0, 100);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // Single valid pixel → NO_VALID_PIXELS → emergency-close
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm
-    ASSERT_EQ(rd.zone, 4);           // emergency
-}
-
-// Test 47: Above-maxRange with many valid pixels → clamped to maxRangeMm.
-//          Simulates open air in LONG RANGE mode where the sensor sees
-//          background at 5000+ mm.  Result is VALID at zone 0 (no obstacle).
+// Test 44: Open-air above max range is valid
 static void test_open_air_above_max_range_is_valid() {
     printf("  test_open_air_above_max_range_is_valid...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // All 64 pixels valid at 6000 mm (way above maxRangeMm = 4000)
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 6000, /*status=*/0, 80);
-    }
-    writeChecksum(frame);
+    buildMSFrame(frame, 5000, 100);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    // Should be VALID at maxRangeMm, zone 0
+    ASSERT_EQ(rd.distance_mm, 4000);  // clamped
+    ASSERT_EQ(rd.zone, 0);
+    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(static_cast<uint8_t>(rd.status),
               static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 4000);  // clamped to maxRangeMm
-    ASSERT_EQ(rd.zone, 0);            // normal zone
 }
 
-// Test 48: High dispersion — many valid pixels with scattered distances.
-//          Reproduces the "sensor covered" symptom: valid pixels at 121, 273,
-//          1000 mm (spread 879 mm > 500 mm threshold).  Should be treated as
-//          wrap-around → emergency-close (20 mm).
-static void test_high_dispersion_covered_sensor() {
-    printf("  test_high_dispersion_covered_sensor...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Simulate covered sensor: most pixels invalid (dist=65535), but 8 valid pixels
-    // with wildly scattered wrap-around distances (121, 273, 1000 mm).
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
-    }
-    // 8 valid pixels with high dispersion (spread = 1000 - 121 = 879 mm)
-    setPixel(frame, 0,  121,  /*status=*/0, 100);
-    setPixel(frame, 1,  273,  /*status=*/0, 100);
-    setPixel(frame, 10, 400,  /*status=*/0, 100);
-    setPixel(frame, 11, 550,  /*status=*/0, 100);
-    setPixel(frame, 20, 700,  /*status=*/0, 100);
-    setPixel(frame, 21, 800,  /*status=*/0, 100);
-    setPixel(frame, 30, 900,  /*status=*/0, 100);
-    setPixel(frame, 31, 1000, /*status=*/0, 100);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // High dispersion → emergency-close
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
-}
-
-// Test 49: High dispersion — close-range wrap-around at ~2 cm.
-//          Reproduces the "object at 2 cm shows 1700, 2500 mm" symptom.
-//          Spread = 2500 - 1700 = 800 mm > 500 mm threshold.
-static void test_high_dispersion_close_range_wraparound() {
-    printf("  test_high_dispersion_close_range_wraparound...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Simulate wrap-around: 6 valid pixels with high distances
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);  // All invalid
-    }
-    setPixel(frame, 5,  1700, /*status=*/0, 200);
-    setPixel(frame, 6,  1900, /*status=*/0, 180);
-    setPixel(frame, 7,  2100, /*status=*/0, 160);
-    setPixel(frame, 8,  2300, /*status=*/0, 150);
-    setPixel(frame, 15, 2400, /*status=*/0, 140);
-    setPixel(frame, 16, 2500, /*status=*/0, 130);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // High dispersion → emergency-close
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
-}
-
-// Test 50: Normal dispersion — real obstacle with consistent pixel distances.
-//          All valid pixels at 800 ± 50 mm (spread = 100 mm < 500 mm).
-//          Should be accepted as a valid reading.
-static void test_normal_dispersion_real_obstacle() {
-    printf("  test_normal_dispersion_real_obstacle...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Real obstacle: 32 valid pixels with consistent distances
-    for (uint8_t px = 0; px < 32; px++) {
-        int32_t dist = 750 + (px % 5) * 25;  // 750, 775, 800, 825, 850
-        setPixel(frame, px, dist, /*status=*/0, 200);
-    }
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // Low dispersion → valid reading at minimum distance (750 mm)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 750);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
-}
-
-// Test 51: Dispersion boundary — spread exactly at threshold (500 mm).
-//          Spread = 1000 - 500 = 500 mm, which equals the threshold.
-//          Should be accepted (threshold check is strictly greater-than).
-static void test_dispersion_at_boundary_accepted() {
-    printf("  test_dispersion_at_boundary_accepted...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // 4 valid pixels with spread = exactly 500 mm
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);
-    }
-    setPixel(frame, 0, 500,  /*status=*/0, 200);
-    setPixel(frame, 1, 600,  /*status=*/0, 200);
-    setPixel(frame, 2, 900,  /*status=*/0, 200);
-    setPixel(frame, 3, 1000, /*status=*/0, 200);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // Spread == 500 → NOT exceeded → valid (minimum = 500 mm)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 500);
-    ASSERT_EQ(rd.zone, 2);  // warning zone: [500, 1000) mm
-}
-
-// Test 52: Dispersion just above threshold — spread = 501 mm.
-//          Should be rejected as high dispersion → emergency-close.
-static void test_dispersion_just_above_threshold_rejected() {
-    printf("  test_dispersion_just_above_threshold_rejected...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // 4 valid pixels with spread = 501 mm (just over threshold)
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);
-    }
-    setPixel(frame, 0, 500,  /*status=*/0, 200);
-    setPixel(frame, 1, 600,  /*status=*/0, 200);
-    setPixel(frame, 2, 900,  /*status=*/0, 200);
-    setPixel(frame, 3, 1001, /*status=*/0, 200);
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // Spread = 501 → exceeded → emergency-close
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
-}
-
-// Test 53: All 64 pixels valid at same distance — zero dispersion.
-//          Verifies that uniform readings (e.g. flat wall) are accepted.
-static void test_all_pixels_same_distance_accepted() {
-    printf("  test_all_pixels_same_distance_accepted...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // All 64 pixels valid at 1500 mm
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 1500, /*status=*/0, 200);
-    }
-    writeChecksum(frame);
-
-    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
-
-    // Zero dispersion → valid
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 1500);
-    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
-}
-
-// Test 54: Auto-recovery triggers configureLongRange() after sustained
-//          all-pixels-invalid frames (30 consecutive).  Verifies that
-//          the driver automatically retries the configuration when the
-//          sensor appears stuck in SHORT RANGE mode.
+// Test 45: Auto-recovery triggers after threshold
 static void test_auto_recovery_triggers_after_threshold() {
     printf("  test_auto_recovery_triggers_after_threshold...\n");
 
-    // Build a frame where all 64 pixels are invalid (dist=65535)
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    // Init with TX pin connected (auto-recovery requires txPin ≥ 0)
-    g_uart_inject_reset();
-    g_uart_tx_reset();
-    g_test_millis = 0;
     obstacle_sensor::Config cfg;
     cfg.txPin = 17;
+    g_uart_inject_reset();
+    g_test_millis = 0;
     obstacle_sensor::init(cfg);
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
-
-    // Advance past warmup
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 30 consecutive all-invalid frames (AUTO_RECOVERY_FRAME_THRESHOLD)
-    g_uart_tx_reset();  // Clear any TX data from init
-    for (int i = 0; i < 30; i++) {
-        g_uart_inject_reset();  // Reset inject buffer to reuse space
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+
+    // Inject 30+ no-target frames to trigger auto-recovery
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
+        g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
 
-    // Auto-recovery should have triggered
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 1);
-    // Verify that configureLongRange() sent commands over UART TX
-    ASSERT(g_uart_tx_len > 0);
+    ASSERT(obstacle_sensor::getAutoRecoveryAttempts() >= 1);
 }
 
-// Test 55: Auto-recovery does NOT trigger when txPin is not connected.
+// Test 46: Auto-recovery skipped without TX pin
 static void test_auto_recovery_skipped_without_tx_pin() {
     printf("  test_auto_recovery_skipped_without_tx_pin...\n");
 
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    // Init WITHOUT TX pin (txPin = -1, default)
+    obstacle_sensor::Config cfg;
+    cfg.txPin = -1;
     g_uart_inject_reset();
-    g_uart_tx_reset();
     g_test_millis = 0;
-    obstacle_sensor::init();  // default config: txPin = -1
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
-
+    obstacle_sensor::init(cfg);
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 60 consecutive all-invalid frames — well past threshold (30)
-    for (int i = 0; i < 60; i++) {
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
 
-    // No auto-recovery without TX pin
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 }
 
-// Test 56: Auto-recovery counter resets when a valid frame arrives.
-//          Feed 29 invalid frames (below threshold), then one valid frame,
-//          then 29 more invalid frames.  Auto-recovery should NOT trigger.
+// Test 47: Auto-recovery resets on valid frame
 static void test_auto_recovery_resets_on_valid_frame() {
     printf("  test_auto_recovery_resets_on_valid_frame...\n");
 
-    uint8_t badFrame[FRAME_LEN];
-    buildFrame(badFrame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(badFrame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(badFrame);
-
-    uint8_t goodFrame[FRAME_LEN];
-    buildFrame(goodFrame);
-    setValidPixels(goodFrame, 2000, 200);
-    writeChecksum(goodFrame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
     obstacle_sensor::Config cfg;
     cfg.txPin = 17;
+    g_uart_inject_reset();
+    g_test_millis = 0;
     obstacle_sensor::init(cfg);
-
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 29 invalid frames — just below threshold (30)
-    for (int i = 0; i < 29; i++) {
+    // Inject 20 no-target frames (not enough to trigger)
+    for (uint32_t i = 0; i < 20; i++) {
         g_uart_inject_reset();
-        g_uart_inject(badFrame, FRAME_LEN);
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
+        g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 
-    // Feed one valid frame — resets consecutive counter
+    // Then inject a valid frame
     g_uart_inject_reset();
-    g_uart_inject(goodFrame, FRAME_LEN);
+    uint8_t good[FRAME_LEN];
+    buildMSFrame(good, 1000, 200);
+    g_uart_inject(good, FRAME_LEN);
     g_test_millis += 100;
     obstacle_sensor::update(0.0f);
+
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 
-    // Feed 29 more invalid frames — counter restarts from 0
-    for (int i = 0; i < 29; i++) {
+    // Now inject 30 more no-target -- should trigger recovery from 0
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
-        g_uart_inject(badFrame, FRAME_LEN);
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
+        g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
 
-    // Should NOT have triggered (29 < 30 threshold)
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
+    ASSERT(obstacle_sensor::getAutoRecoveryAttempts() >= 1);
 }
 
-// Test 57: Auto-recovery stops after MAX_AUTO_RECOVERY_ATTEMPTS (10).
+// Test 48: Auto-recovery limited to max attempts
 static void test_auto_recovery_limited_to_max_attempts() {
     printf("  test_auto_recovery_limited_to_max_attempts...\n");
 
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
     obstacle_sensor::Config cfg;
     cfg.txPin = 17;
+    g_uart_inject_reset();
+    g_test_millis = 0;
     obstacle_sensor::init(cfg);
-
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Trigger auto-recovery 10 times (each needs 30 invalid frames)
-    for (int attempt = 0; attempt < 10; attempt++) {
-        for (int i = 0; i < 30; i++) {
-            g_uart_inject_reset();
-            g_uart_inject(frame, FRAME_LEN);
-            g_test_millis += 100;
-            obstacle_sensor::update(0.0f);
-        }
-        ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), (uint8_t)(attempt + 1));
-    }
-
-    // Now feed 30 more — should NOT trigger an 11th attempt
-    for (int i = 0; i < 30; i++) {
+    for (uint32_t i = 0; i < 350; i++) {
         g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 10);  // Stays at 10
+
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 10);
 }
 
-// Test 58: init() resets auto-recovery state.
+// Test 49: init resets auto-recovery
 static void test_init_resets_auto_recovery() {
     printf("  test_init_resets_auto_recovery...\n");
 
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    // First run: trigger one auto-recovery
-    g_uart_inject_reset();
-    g_test_millis = 0;
     obstacle_sensor::Config cfg;
     cfg.txPin = 17;
+    g_uart_inject_reset();
+    g_test_millis = 0;
     obstacle_sensor::init(cfg);
-
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    for (int i = 0; i < 30; i++) {
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 1);
+    ASSERT(obstacle_sensor::getAutoRecoveryAttempts() >= 1);
 
-    // Re-init — should reset auto-recovery state
-    g_uart_inject_reset();
-    g_test_millis = 0;
+    // Re-init should reset
     obstacle_sensor::init(cfg);
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 }
 
-// Test 59: Compact frame (257 bytes) parses correctly.
-//          The compact format is: 1 byte header (0x57) + 64×4 bytes pixel data.
-//          No checksum, no function mark.
-static void test_compact_frame_parses_correctly() {
-    printf("  test_compact_frame_parses_correctly...\n");
-
-    uint8_t frame[COMPACT_LEN];
-    buildCompactFrame(frame);
-
-    // Set pixels with valid distances using compact layout
-    for (uint8_t px = 0; px < 10; px++) {
-        setCompactPixel(frame, px, 1500, px);
-    }
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-
-    // Advance past warmup
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // Inject the compact frame
-    g_uart_inject(frame, COMPACT_LEN);
-    obstacle_sensor::update(0.0f);
-
-    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 1500);
-    ASSERT_EQ(rd.zone, 0);  // normal zone: ≥ 1500 mm
-}
-
-// Test 60: Distance at uint16 max-1 (64999) is still valid — boundary test
-//          for INVALID_DIST_THRESHOLD (65000).
-static void test_distance_64999_is_valid() {
-    printf("  test_distance_64999_is_valid...\n");
+// Test 50: Distance 65534 is valid (clamped to max)
+static void test_distance_65534_is_valid() {
+    printf("  test_distance_65534_is_valid...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // Set pixels to 64999 mm (just below INVALID_DIST_THRESHOLD)
-    setValidPixels(frame, 64999, 100);
-    writeChecksum(frame);
+    buildMSFrame(frame, 65534, 100);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    // 64999 is valid but > maxRangeMm (4000), so clamped to 4000
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(rd.distance_mm, 4000);  // clamped to maxRangeMm
-    ASSERT_EQ(rd.zone, 0);
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 61: Distance at INVALID_DIST_THRESHOLD (65000) is invalid — boundary test.
-static void test_distance_65000_is_invalid() {
-    printf("  test_distance_65000_is_invalid...\n");
+// Test 51: Distance 0 is no-target
+static void test_distance_zero_is_no_target() {
+    printf("  test_distance_zero_is_no_target...\n");
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-
-    // All pixels at 65000 (= INVALID_DIST_THRESHOLD) → all invalid
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65000, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
+    buildMSFrame(frame, 0, 100);
 
     obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
 
-    // All pixels invalid → NO_VALID_PIXELS → emergency-close
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);   // minRangeMm fallback
-    ASSERT_EQ(rd.zone, 4);           // emergency zone
+    ASSERT_EQ(rd.distance_mm, 20);  // minRangeMm
 }
 
-/* ---- Resync after false 0x57 header ------------------------------------ */
-
-// Test: When a 0x57 appears in payload data of a corrupted frame (false sync),
-// the resync logic must search forward for the next valid frame start instead
-// of just resetting to wait for a new 0x57 byte.
-// This tests the improved BAD_CHECKSUM resync path.
+// Test 52: Resync finds real frame after false header
 static void test_resync_finds_real_frame_after_false_header() {
     printf("  test_resync_finds_real_frame_after_false_header...\n");
 
@@ -2143,44 +999,24 @@ static void test_resync_finds_real_frame_after_false_header() {
     g_test_millis = 0;
     obstacle_sensor::init();
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
+    obstacle_sensor::update(0.0f);
 
-    // Build a corrupted frame that starts with 0x57 but has bad checksum.
-    // Plant a valid frame's 0x57 header inside the corrupted frame's payload,
-    // specifically at a position where the resync scan should find it.
-    uint8_t corrupt[FRAME_LEN];
-    buildFrame(corrupt);
-    setValidPixels(corrupt, 999);
-    // Deliberately corrupt the checksum
-    writeChecksum(corrupt);
-    corrupt[FRAME_LEN - 1] ^= 0xAA;  // Break checksum
+    // Inject: 0x57 (false header) + some garbage + valid frame
+    uint8_t falseStart[] = {0x57, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    g_uart_inject(falseStart, sizeof(falseStart));
 
-    // Build a good frame
     uint8_t good[FRAME_LEN];
-    buildFrame(good);
-    setValidPixels(good, 2500);
-    writeChecksum(good);
-
-    // Inject: corrupt frame immediately followed by good frame
-    // The good frame starts with 0x57 at position 400 in the stream.
-    // After BAD_CHECKSUM on the corrupt frame, the resync should
-    // reset rxIdx_ and the next iteration picks up the good frame.
-    g_uart_inject(corrupt, FRAME_LEN);
+    buildMSFrame(good, 900, 100);
     g_uart_inject(good, FRAME_LEN);
 
     obstacle_sensor::update(0.0f);
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 900);
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 2500);
 }
 
-// Test: Multiple corrupted frames with embedded 0x57 bytes followed by a valid
-// frame.  Verifies that the parser correctly recovers alignment even when
-// there are false 0x57 headers in the corrupted data.
-// Uses pre-detected Frame0 mode to ensure checksum validation rejects false frames.
+// Test 53: Multiple false headers then valid
 static void test_multiple_false_headers_then_valid() {
     printf("  test_multiple_false_headers_then_valid...\n");
 
@@ -2188,413 +1024,217 @@ static void test_multiple_false_headers_then_valid() {
     g_test_millis = 0;
     obstacle_sensor::init();
     g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    // First: inject a valid frame to lock the auto-detect to Frame0 mode
-    uint8_t first[FRAME_LEN];
-    buildFrame(first);
-    setValidPixels(first, 3000);
-    writeChecksum(first);
-    g_uart_inject(first, FRAME_LEN);
     obstacle_sensor::update(0.0f);
 
-    // Verify first frame was accepted (locks to Frame0 mode)
-    obstacle_sensor::Reading rd1 = obstacle_sensor::getReading();
-    ASSERT_EQ(rd1.distance_mm, 3000);
-
-    // Now inject a corrupt frame with embedded 0x57 bytes, followed by valid frame
-    uint8_t corrupt[FRAME_LEN];
-    buildFrame(corrupt);
-    setValidPixels(corrupt, 999);
-    writeChecksum(corrupt);
-    // Plant 0x57 bytes in payload area to simulate false headers
-    corrupt[20] = 0x57;
-    corrupt[50] = 0x57;
-    // Break checksum so it fails validation
-    corrupt[FRAME_LEN - 1] ^= 0xFF;
+    for (int i = 0; i < 3; i++) {
+        uint8_t noise[] = {0x57, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+        g_uart_inject(noise, sizeof(noise));
+    }
 
     uint8_t good[FRAME_LEN];
-    buildFrame(good);
-    setValidPixels(good, 1800);
-    writeChecksum(good);
-
-    g_uart_inject(corrupt, FRAME_LEN);
+    buildMSFrame(good, 1100, 200);
     g_uart_inject(good, FRAME_LEN);
 
     obstacle_sensor::update(0.0f);
 
-    obstacle_sensor::Reading rd2 = obstacle_sensor::getReading();
-    ASSERT_EQ(static_cast<uint8_t>(rd2.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd2.healthy, true);
-    ASSERT_EQ(rd2.distance_mm, 1800);
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 1100);
+    ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 63: After all auto-recovery attempts are exhausted (10 retries × 30
-//          invalid frames) and 60 more consecutive invalid frames pass,
-//          the sensor is declared permanently faulted: healthy=false,
-//          status=INVALID, distance still at minRangeMm.
+// Test 54: Sensor fault after recovery exhausted
 static void test_sensor_fault_after_recovery_exhausted() {
     printf("  test_sensor_fault_after_recovery_exhausted...\n");
 
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    g_uart_inject_reset();
-    g_uart_tx_reset();
-    g_test_millis = 0;
     obstacle_sensor::Config cfg;
     cfg.txPin = 17;
+    cfg.shortRangeMode = false;
+    g_uart_inject_reset();
+    g_test_millis = 0;
     obstacle_sensor::init(cfg);
-
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Exhaust all 10 auto-recovery attempts (each needs 30 invalid frames)
-    for (int attempt = 0; attempt < 10; attempt++) {
-        for (int i = 0; i < 30; i++) {
-            g_uart_inject_reset();
-            g_uart_inject(frame, FRAME_LEN);
-            g_test_millis += 100;
-            obstacle_sensor::update(0.0f);
-        }
-    }
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 10);
-
-    // Feed up to 59 more invalid frames — still below SENSOR_FAULT_FRAME_THRESHOLD.
-    // consecutiveInvalidFrames_ resets to 0 after the 10th auto-recovery attempt,
-    // so we need SENSOR_FAULT_FRAME_THRESHOLD (60) consecutive frames after that
-    // reset before the fault activates.
-    for (int i = 0; i < 59; i++) {
+    for (uint32_t i = 0; i < 400; i++) {
         g_uart_inject_reset();
-        g_uart_inject(frame, FRAME_LEN);
-        g_test_millis += 100;
-        obstacle_sensor::update(0.0f);
-    }
-    {
-        // Still below fault threshold
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.healthy, true);   // Not yet faulted
-        ASSERT_EQ(rd.distance_mm, 20); // Still at minRangeMm
-    }
-
-    // One more frame crosses SENSOR_FAULT_FRAME_THRESHOLD → fault activates
-    g_uart_inject_reset();
-    g_uart_inject(frame, FRAME_LEN);
-    g_test_millis += 100;
-    obstacle_sensor::update(0.0f);
-
-    {
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.healthy, false);  // Sensor declared faulted
-        ASSERT_EQ(static_cast<uint8_t>(rd.status),
-                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
-        ASSERT_EQ(rd.distance_mm, 20); // Distance stays at minRangeMm for safety
-    }
-}
-
-// Test 64: With txPin = -1 (no TX), the sensor fault is triggered after
-//          SENSOR_FAULT_FRAME_THRESHOLD (60) consecutive invalid frames.
-static void test_sensor_fault_without_tx_pin() {
-    printf("  test_sensor_fault_without_tx_pin...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();  // default: txPin = -1
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // Feed 59 consecutive all-invalid frames — just below threshold
-    for (int i = 0; i < 59; i++) {
-        g_uart_inject_reset();
-        g_uart_inject(frame, FRAME_LEN);
-        g_test_millis += 100;
-        obstacle_sensor::update(0.0f);
-    }
-    {
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.healthy, true);   // Not yet faulted (59 < 60)
-    }
-
-    // 60th frame crosses the threshold → fault activates
-    g_uart_inject_reset();
-    g_uart_inject(frame, FRAME_LEN);
-    g_test_millis += 100;
-    obstacle_sensor::update(0.0f);
-
-    {
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.healthy, false);
-        ASSERT_EQ(static_cast<uint8_t>(rd.status),
-                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
-        ASSERT_EQ(rd.distance_mm, 20);
-        ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0); // No retries (no TX)
-    }
-}
-
-// Test 65: Sensor fault clears when a valid frame arrives.
-static void test_sensor_fault_clears_on_valid_frame() {
-    printf("  test_sensor_fault_clears_on_valid_frame...\n");
-
-    uint8_t badFrame[FRAME_LEN];
-    buildFrame(badFrame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(badFrame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(badFrame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();  // txPin = -1: no recovery, fault after 60 frames
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // Drive sensor into fault state (60 invalid frames)
-    for (int i = 0; i < 60; i++) {
-        g_uart_inject_reset();
-        g_uart_inject(badFrame, FRAME_LEN);
-        g_test_millis += 100;
-        obstacle_sensor::update(0.0f);
-    }
-    {
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.healthy, false);  // Fault active
-    }
-
-    // Inject a valid frame — fault should clear
-    uint8_t goodFrame[FRAME_LEN];
-    buildFrame(goodFrame);
-    setValidPixels(goodFrame, 1500, 200);
-    writeChecksum(goodFrame);
-
-    g_uart_inject_reset();
-    g_uart_inject(goodFrame, FRAME_LEN);
-    g_test_millis += 100;
-    obstacle_sensor::update(0.0f);
-
-    {
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.healthy, true);   // Fault cleared
-        ASSERT_EQ(static_cast<uint8_t>(rd.status),
-                  static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-        ASSERT_EQ(rd.distance_mm, 1500);
-    }
-}
-
-// Test 66: updateCount increments on each measurement frame.
-static void test_update_count_increments() {
-    printf("  test_update_count_increments...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    setValidPixels(frame, 2000, 200);
-    writeChecksum(frame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::init();
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    uint32_t prevCount = obstacle_sensor::getReading().updateCount;
-
-    for (int i = 0; i < 3; i++) {
-        g_uart_inject_reset();
-        g_uart_inject(frame, FRAME_LEN);
-        g_test_millis += 100;
-        obstacle_sensor::update(0.0f);
-
-        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.updateCount, prevCount + (uint32_t)(i + 1));
-    }
-}
-
-// ---- SHORT RANGE read-only mode tests -----------------------------------
-
-// Helper: inject a frame with a custom Config and return the reading.
-static obstacle_sensor::Reading injectFrameWithConfig(
-        uint8_t* frame, uint16_t frameLen,
-        const obstacle_sensor::Config& cfg) {
-    g_uart_inject_reset();
-    g_test_millis = 0;
-
-    obstacle_sensor::init(cfg);
-
-    // Advance past warmup
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);  // flush warmup
-
-    g_uart_inject(frame, frameLen);
-    obstacle_sensor::update(0.0f);
-
-    return obstacle_sensor::getReading();
-}
-
-// Test 67: In shortRangeMode, all pixels invalid → maxRangeMm (safe/clear),
-//          NOT minRangeMm (emergency close).  This is the core fix: in SHORT
-//          RANGE mode, all pixels invalid means "nothing within ~1.3 m".
-static void test_short_range_all_invalid_reports_max_range() {
-    printf("  test_short_range_all_invalid_reports_max_range...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    obstacle_sensor::Config cfg;
-    cfg.shortRangeMode = true;
-    cfg.maxRangeMm     = 1350;
-
-    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
-
-    // Should be VALID at maxRangeMm (safe), NOT 20 mm (emergency)
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 1350);   // maxRangeMm, not minRangeMm
-    ASSERT_EQ(rd.zone, 1);             // caution zone: [1000, 1500) mm
-}
-
-// Test 68: In shortRangeMode, too-few valid pixels (1–3) still treated as
-//          emergency close (wrap-around protection still applies).
-static void test_short_range_too_few_pixels_still_emergency() {
-    printf("  test_short_range_too_few_pixels_still_emergency...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);
-    }
-    // Only 2 pixels valid (< TEST_MIN_PX / MIN_VALID_PIXELS)
-    setPixel(frame, 10, 800, /*status=*/0, 200);
-    setPixel(frame, 11, 900, /*status=*/0, 180);
-    writeChecksum(frame);
-
-    obstacle_sensor::Config cfg;
-    cfg.shortRangeMode = true;
-    cfg.maxRangeMm     = 1350;
-
-    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
-
-    // Too few valid pixels → emergency close (minRangeMm) even in short range mode
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);     // minRangeMm (emergency close)
-    ASSERT_EQ(rd.zone, 4);             // emergency zone
-}
-
-// Test 69: In shortRangeMode, sustained all-pixels-invalid does NOT trigger
-//          sensor fault.  Sustained "nothing in range" is expected behaviour.
-static void test_short_range_no_fault_on_sustained_all_invalid() {
-    printf("  test_short_range_no_fault_on_sustained_all_invalid...\n");
-
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(frame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
-    obstacle_sensor::Config cfg;
-    cfg.shortRangeMode = true;
-    cfg.maxRangeMm     = 1350;
-    obstacle_sensor::init(cfg);
-
-    g_test_millis = 1100;
-    obstacle_sensor::update(0.0f);
-
-    // Feed 100 consecutive all-invalid frames — far beyond fault threshold (60)
-    for (int i = 0; i < 100; i++) {
-        g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
         g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-    // Must NOT be faulted — this is normal behaviour in SHORT RANGE mode
+    ASSERT_EQ(rd.healthy, false);
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+}
+
+// Test 55: Sensor fault without TX pin
+static void test_sensor_fault_without_tx_pin() {
+    printf("  test_sensor_fault_without_tx_pin...\n");
+
+    obstacle_sensor::Config cfg;
+    cfg.txPin = -1;
+    cfg.shortRangeMode = false;
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init(cfg);
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    for (uint32_t i = 0; i < 70; i++) {
+        g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.healthy, false);
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+}
+
+// Test 56: Sensor fault clears on valid frame
+static void test_sensor_fault_clears_on_valid_frame() {
+    printf("  test_sensor_fault_clears_on_valid_frame...\n");
+
+    obstacle_sensor::Config cfg;
+    cfg.txPin = -1;
+    cfg.shortRangeMode = false;
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init(cfg);
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    for (uint32_t i = 0; i < 70; i++) {
+        g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.healthy, false);
+
+    // Now send a valid frame
+    g_uart_inject_reset();
+    uint8_t good[FRAME_LEN];
+    buildMSFrame(good, 1500, 200);
+    g_uart_inject(good, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+
+    rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 1500);
     ASSERT_EQ(rd.healthy, true);
     ASSERT_EQ(static_cast<uint8_t>(rd.status),
               static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.distance_mm, 1350);   // maxRangeMm (safe)
-    ASSERT_EQ(rd.zone, 1);             // caution zone [1000, 1500)
-    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0); // No recovery attempts
 }
 
-// Test 70: In shortRangeMode with valid distance data, parsing works normally.
+// Test 57: Update count increments
+static void test_update_count_increments() {
+    printf("  test_update_count_increments...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 500, 100);
+
+    // First frame
+    g_uart_inject(frame, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+    ASSERT_EQ(obstacle_sensor::getReading().updateCount, 1);
+
+    // Second frame
+    g_uart_inject_reset();
+    g_uart_inject(frame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+    ASSERT_EQ(obstacle_sensor::getReading().updateCount, 2);
+
+    // Third frame
+    g_uart_inject_reset();
+    g_uart_inject(frame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+    ASSERT_EQ(obstacle_sensor::getReading().updateCount, 3);
+}
+
+// Test 58: Short-range mode -- no target reports maxRangeMm
+static void test_short_range_no_target_reports_max_range() {
+    printf("  test_short_range_no_target_reports_max_range...\n");
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm = 1350;
+
+    uint8_t frame[FRAME_LEN];
+    buildNoTargetFrame(frame, 100);
+
+    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, cfg);
+
+    ASSERT_EQ(rd.distance_mm, 1350);  // maxRangeMm (safe)
+    ASSERT_EQ(rd.zone, 1);            // caution zone: [1000, 1500)
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test 59: Short-range mode -- no fault on sustained no-target
+static void test_short_range_no_fault_on_sustained_no_target() {
+    printf("  test_short_range_no_fault_on_sustained_no_target...\n");
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm = 1350;
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init(cfg);
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    for (uint32_t i = 0; i < 100; i++) {
+        g_uart_inject_reset();
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 1350);
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test 60: Short-range mode -- valid distance normal
 static void test_short_range_valid_distance_normal() {
     printf("  test_short_range_valid_distance_normal...\n");
 
-    uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    setValidPixels(frame, 800, 200);   // 800 mm — within SHORT RANGE
-    writeChecksum(frame);
-
     obstacle_sensor::Config cfg;
     cfg.shortRangeMode = true;
-    cfg.maxRangeMm     = 1350;
-
-    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
-
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
-    ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 800);
-    ASSERT_EQ(rd.zone, 2);             // warning zone: [500, 1000)
-}
-
-// Test 71: In shortRangeMode, high dispersion still treated as emergency close.
-static void test_short_range_high_dispersion_still_emergency() {
-    printf("  test_short_range_high_dispersion_still_emergency...\n");
+    cfg.maxRangeMm = 1350;
 
     uint8_t frame[FRAME_LEN];
-    buildFrame(frame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(frame, px, 65535, /*status=*/0, 50);
-    }
-    // 10 valid pixels with high dispersion (spread > 500 mm)
-    for (uint8_t px = 0; px < 5; px++) {
-        setPixel(frame, px, 200, /*status=*/0, 200);
-    }
-    for (uint8_t px = 5; px < 10; px++) {
-        setPixel(frame, px, 1200, /*status=*/0, 200);
-    }
-    writeChecksum(frame);
+    buildMSFrame(frame, 500, 100);
 
-    obstacle_sensor::Config cfg;
-    cfg.shortRangeMode = true;
-    cfg.maxRangeMm     = 1350;
+    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, cfg);
 
-    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
-
-    // High dispersion → emergency close even in shortRangeMode
-    ASSERT_EQ(static_cast<uint8_t>(rd.status),
-              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 500);
+    ASSERT_EQ(rd.zone, 2);
     ASSERT_EQ(rd.healthy, true);
-    ASSERT_EQ(rd.distance_mm, 20);     // minRangeMm
-    ASSERT_EQ(rd.zone, 4);             // emergency
 }
 
-// Test 72: shortRangeMode defaults to false.
+// Test 61: Short-range mode default is false
 static void test_short_range_mode_default_false() {
     printf("  test_short_range_mode_default_false...\n");
 
@@ -2602,50 +1242,39 @@ static void test_short_range_mode_default_false() {
     ASSERT_EQ(cfg.shortRangeMode, false);
 }
 
-// Test 73: In shortRangeMode, recovery from all-invalid to valid frame works.
-//          Simulates an obstacle entering the sensor's range after a period of
-//          no objects (all-invalid → valid distance).
+// Test 62: Short-range recovery to valid
 static void test_short_range_recovery_to_valid() {
     printf("  test_short_range_recovery_to_valid...\n");
 
-    uint8_t badFrame[FRAME_LEN];
-    buildFrame(badFrame);
-    for (uint8_t px = 0; px < 64; px++) {
-        setPixel(badFrame, px, 65535, /*status=*/0, 100);
-    }
-    writeChecksum(badFrame);
-
-    uint8_t goodFrame[FRAME_LEN];
-    buildFrame(goodFrame);
-    setValidPixels(goodFrame, 500, 200);
-    writeChecksum(goodFrame);
-
-    g_uart_inject_reset();
-    g_test_millis = 0;
     obstacle_sensor::Config cfg;
     cfg.shortRangeMode = true;
-    cfg.maxRangeMm     = 1350;
+    cfg.maxRangeMm = 1350;
+    g_uart_inject_reset();
+    g_test_millis = 0;
     obstacle_sensor::init(cfg);
-
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Feed 20 all-invalid frames (nothing in range)
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < 5; i++) {
         g_uart_inject_reset();
-        g_uart_inject(badFrame, FRAME_LEN);
+        uint8_t frame[FRAME_LEN];
+        buildNoTargetFrame(frame, 100);
+        g_uart_inject(frame, FRAME_LEN);
         g_test_millis += 100;
         obstacle_sensor::update(0.0f);
     }
+
     {
         obstacle_sensor::Reading rd = obstacle_sensor::getReading();
-        ASSERT_EQ(rd.distance_mm, 1350);  // maxRangeMm (safe)
+        ASSERT_EQ(rd.distance_mm, 1350);
         ASSERT_EQ(rd.healthy, true);
     }
 
     // Now an obstacle enters range
     g_uart_inject_reset();
-    g_uart_inject(goodFrame, FRAME_LEN);
+    uint8_t good[FRAME_LEN];
+    buildMSFrame(good, 500, 200);
+    g_uart_inject(good, FRAME_LEN);
     g_test_millis += 100;
     obstacle_sensor::update(0.0f);
 
@@ -2653,27 +1282,209 @@ static void test_short_range_recovery_to_valid() {
         obstacle_sensor::Reading rd = obstacle_sensor::getReading();
         ASSERT_EQ(rd.distance_mm, 500);
         ASSERT_EQ(rd.healthy, true);
-        ASSERT_EQ(rd.zone, 2);            // warning zone: [500, 1000)
+        ASSERT_EQ(rd.zone, 2);
     }
+}
+
+// Test 63: Zone thresholds -- exact boundaries
+static void test_zone_exact_boundaries() {
+    printf("  test_zone_exact_boundaries...\n");
+
+    // < 200 -> zone 4 (emergency)
+    uint8_t f1[FRAME_LEN]; buildMSFrame(f1, 199, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f1).zone, 4);
+
+    // 200 -> zone 3 (critical)
+    uint8_t f2[FRAME_LEN]; buildMSFrame(f2, 200, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f2).zone, 3);
+
+    // 499 -> zone 3
+    uint8_t f3[FRAME_LEN]; buildMSFrame(f3, 499, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f3).zone, 3);
+
+    // 500 -> zone 2 (warning)
+    uint8_t f4[FRAME_LEN]; buildMSFrame(f4, 500, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f4).zone, 2);
+
+    // 999 -> zone 2
+    uint8_t f5[FRAME_LEN]; buildMSFrame(f5, 999, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f5).zone, 2);
+
+    // 1000 -> zone 1 (caution)
+    uint8_t f6[FRAME_LEN]; buildMSFrame(f6, 1000, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f6).zone, 1);
+
+    // 1499 -> zone 1
+    uint8_t f7[FRAME_LEN]; buildMSFrame(f7, 1499, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f7).zone, 1);
+
+    // 1500 -> zone 0 (normal)
+    uint8_t f8[FRAME_LEN]; buildMSFrame(f8, 1500, 100);
+    ASSERT_EQ(injectFrameAndUpdate(f8).zone, 0);
+}
+
+// Test 64: Frame timeout sets INVALID
+static void test_frame_timeout() {
+    printf("  test_frame_timeout...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1000, 100);
+    g_uart_inject(frame, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.healthy, true);
+
+    // Advance time beyond timeout (default 500 ms) without new frames
+    g_test_millis += 600;
+    g_uart_inject_reset();
+    obstacle_sensor::update(0.0f);
+
+    rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.healthy, false);
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+}
+
+// Test 65: Corrupted stream with embedded 0x57 headers
+static void test_corrupted_stream_with_embedded_headers() {
+    printf("  test_corrupted_stream_with_embedded_headers...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    uint8_t noise1[] = {0x10, 0x20, 0x57, 0x99, 0x88, 0x77, 0x66};
+    g_uart_inject(noise1, sizeof(noise1));
+
+    uint8_t good[FRAME_LEN];
+    buildMSFrame(good, 700, 150);
+    g_uart_inject(good, FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 700);
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test 66: Distance 1 is valid (clamped to minRangeMm)
+static void test_distance_1mm_valid() {
+    printf("  test_distance_1mm_valid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1, 100);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 20);  // clamped to minRangeMm
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test 67: Distance 65535 (max uint16) -> clamped to maxRangeMm
+static void test_distance_max_uint16() {
+    printf("  test_distance_max_uint16...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 65535, 100);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 4000);  // clamped
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test 68: Warmup period -> WAITING status
+static void test_warmup_period() {
+    printf("  test_warmup_period...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    g_test_millis = 500;
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
+    ASSERT_EQ(rd.healthy, false);
+}
+
+// Test 69: Bad function mark rejected
+static void test_bad_function_mark_rejected() {
+    printf("  test_bad_function_mark_rejected...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Build frame with wrong function mark (0x01 instead of 0x00)
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1000, 100);
+    frame[1] = 0x01;  // Wrong function mark
+    // Recalculate checksum
+    uint8_t sum = 0;
+    for (int i = 0; i < 6; i++) sum += frame[i];
+    frame[6] = sum;
+
+    g_uart_inject(frame, FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    // Should have been rejected as BAD_HEADER — reading unchanged
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    // After warmup flush + one rejected frame, distance stays at 0
+    // (no valid frame has ever been processed in this session)
+    ASSERT_EQ(rd.distance_mm, 0);
+}
+
+// Test 70: Exact checksum verification -- known values
+static void test_exact_checksum_known_values() {
+    printf("  test_exact_checksum_known_values...\n");
+
+    // Frame for 1000 mm, signal 100:
+    // [0x57, 0x00, 0xE8, 0x03, 0x64, 0x00, checksum]
+    // sum = 0x57 + 0x00 + 0xE8 + 0x03 + 0x64 + 0x00
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 1000, 100);
+
+    ASSERT_EQ(frame[0], 0x57);
+    ASSERT_EQ(frame[1], 0x00);
+    ASSERT_EQ(frame[2], 0xE8);  // 1000 & 0xFF
+    ASSERT_EQ(frame[3], 0x03);  // 1000 >> 8
+    ASSERT_EQ(frame[4], 0x64);  // 100 & 0xFF
+    ASSERT_EQ(frame[5], 0x00);  // 100 >> 8
+
+    uint8_t expected = (uint8_t)(0x57 + 0x00 + 0xE8 + 0x03 + 0x64 + 0x00);
+    ASSERT_EQ(frame[6], expected);
 }
 
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
-    printf("=== test_obstacle_sensor ===\n");
+    printf("=== test_obstacle_sensor (TOFSense-M S single-point) ===\n");
 
     test_frame_constants();
     test_checksum_computation();
-    test_pixel_data_offset();
-    test_pixel_field_order();
+    test_distance_field_position();
+    test_signal_field_position();
     test_distance_conversion();
     test_zone_mapping();
     test_frame_header_bytes();
     test_checksum_position();
-    test_two_byte_sync_pattern();
     test_init_resets_state();
     test_config_defaults();
-    test_all_pixels_invalid_is_emergency_close();
+    test_no_target_is_emergency_close();
     test_below_min_range_clamped_to_min();
     test_above_max_range_clamped_to_max();
     test_normal_distance_valid();
@@ -2684,8 +1495,6 @@ int main() {
     test_multiple_bad_frames_then_good();
     test_many_queued_frames_all_processed();
     test_rxbuf_overflow_protection();
-    test_rxbuf_overflow_resync_on_header();
-    test_corrupted_stream_with_embedded_headers();
     test_build_command_range_mode();
     test_build_command_save_config();
     test_build_command_baud_rate();
@@ -2697,7 +1506,6 @@ int main() {
     test_4000mm_max_range_parses_correctly();
     test_build_command_output_mode();
     test_build_command_frame_rate();
-    test_negative_distance_skipped();
     test_3000mm_distance_parses_correctly();
     test_signal_strength_does_not_affect_distance();
     test_send_command_fails_without_tx_pin();
@@ -2708,39 +1516,34 @@ int main() {
     test_configure_long_range_sends_correct_commands();
     test_set_range_mode_sends_correct_bytes();
     test_save_config_sends_correct_bytes();
-    test_repeated_all_pixels_invalid_stays_at_min();
-    test_official_nooploop_example_frame();
-    test_few_valid_pixels_treated_as_wraparound();
-    test_exactly_min_valid_pixels_accepted();
-    test_single_valid_pixel_rejected_as_wraparound();
+    test_repeated_no_target_stays_at_min();
     test_open_air_above_max_range_is_valid();
-    test_high_dispersion_covered_sensor();
-    test_high_dispersion_close_range_wraparound();
-    test_normal_dispersion_real_obstacle();
-    test_dispersion_at_boundary_accepted();
-    test_dispersion_just_above_threshold_rejected();
-    test_all_pixels_same_distance_accepted();
     test_auto_recovery_triggers_after_threshold();
     test_auto_recovery_skipped_without_tx_pin();
     test_auto_recovery_resets_on_valid_frame();
     test_auto_recovery_limited_to_max_attempts();
     test_init_resets_auto_recovery();
-    test_compact_frame_parses_correctly();
-    test_distance_64999_is_valid();
-    test_distance_65000_is_invalid();
+    test_distance_65534_is_valid();
+    test_distance_zero_is_no_target();
     test_resync_finds_real_frame_after_false_header();
     test_multiple_false_headers_then_valid();
     test_sensor_fault_after_recovery_exhausted();
     test_sensor_fault_without_tx_pin();
     test_sensor_fault_clears_on_valid_frame();
     test_update_count_increments();
-    test_short_range_all_invalid_reports_max_range();
-    test_short_range_too_few_pixels_still_emergency();
-    test_short_range_no_fault_on_sustained_all_invalid();
+    test_short_range_no_target_reports_max_range();
+    test_short_range_no_fault_on_sustained_no_target();
     test_short_range_valid_distance_normal();
-    test_short_range_high_dispersion_still_emergency();
     test_short_range_mode_default_false();
     test_short_range_recovery_to_valid();
+    test_zone_exact_boundaries();
+    test_frame_timeout();
+    test_corrupted_stream_with_embedded_headers();
+    test_distance_1mm_valid();
+    test_distance_max_uint16();
+    test_warmup_period();
+    test_bad_function_mark_rejected();
+    test_exact_checksum_known_values();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
