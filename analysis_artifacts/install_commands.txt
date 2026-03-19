@@ -1,4 +1,4 @@
-# Formal Verification — Installation Commands
+# Formal Verification & Wiring Documentation — Installation Commands
 # Date: 2026-03-19
 # Platform: Ubuntu 24.04.3 LTS (x86_64)
 
@@ -74,3 +74,48 @@ sudo apt-get install -y cppcheck
 # arm-none-eabi-gcc would be installed with:
 #   sudo apt-get install -y gcc-arm-none-eabi
 # Not installed because formal verification uses host-compiled stubs.
+
+# ============================================================
+# 9. Wiring Documentation Verification
+# ============================================================
+# No additional packages required. The verification script uses only:
+#   bash, grep, awk, wc (all part of coreutils/base system)
+#
+# Run the wiring checks:
+chmod +x analysis_artifacts/run_wiring_checks.sh
+bash analysis_artifacts/run_wiring_checks.sh
+#
+# Expected output: all pin definitions match, all deliverables present.
+
+# ============================================================
+# 10. Optional EDA Tools (for diagram generation)
+# ============================================================
+# KiCad (open-source EDA):
+#   sudo apt-get install -y kicad
+# Not installed in CI; only needed for schematic/PCB editing.
+#
+# Graphviz (for automated diagram generation):
+#   sudo apt-get install -y graphviz
+# Not installed; ASCII diagrams in harness_overview.md suffice.
+
+# ============================================================
+# Reproduction Commands (clean machine)
+# ============================================================
+# To reproduce all analysis artifacts on a clean Ubuntu 24.04 system:
+#
+# 1. Clone the repository:
+#    git clone <repo-url> && cd STM32-Control-Coche-Marcos
+#
+# 2. Install tools (sections 2-5 above)
+#
+# 3. Run wiring verification:
+#    bash analysis_artifacts/run_wiring_checks.sh
+#
+# 4. Review deliverables in analysis_artifacts/:
+#    - wiring_manual.md        (comprehensive wiring manual)
+#    - BOM.csv                 (bill of materials)
+#    - connector_pinouts.md    (connector pin assignments)
+#    - safety_checks.md        (verification procedures)
+#    - findings_hardware.csv   (firmware vs docs discrepancies)
+#    - harness_diagrams/       (point-to-point wiring diagrams)
+#    - patches/                (proposed documentation fixes)
