@@ -162,7 +162,7 @@ enum class ParseResult : uint8_t {
     BAD_HEADER,        // Wrong header or function_mark
     BAD_CHECKSUM,      // 8-bit sum mismatch
     NO_VALID_PIXELS,   // All 64 pixels invalid (dist==0 or >=65000) — zero valid pixels
-    TOO_FEW_PIXELS,    // Some valid pixels but fewer than MIN_VALID_PIXELS (likely wrap-around artifact)
+    TOO_FEW_PIXELS,    // Some valid pixels but fewer than MIN_VALID_PIXELS (4) — likely wrap-around artifact
     HIGH_DISPERSION    // Valid pixels present but distance spread exceeds MAX_PIXEL_DISPERSION_MM (wrap-around)
 };
 
@@ -580,9 +580,10 @@ void update(float vehicleSpeedKmh) {
                 if (cfg_.shortRangeMode) {
                     Serial.printf("[OBSTACLE] INFO: All %lu frames had NO valid "
                                   "pixels — normal for SHORT RANGE read-only mode "
-                                  "with no obstacle within ~1.3 m. Reporting %u mm "
+                                  "with no obstacle within ~%.1f m. Reporting %u mm "
                                   "(safe/clear).\n",
                                   (unsigned long)diagAllPixelsInvalid_,
+                                  (float)cfg_.maxRangeMm / 1000.0f,
                                   (unsigned)cfg_.maxRangeMm);
                 } else {
                     Serial.printf("[OBSTACLE] WARNING: All %lu frames returned "

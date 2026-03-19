@@ -2481,7 +2481,7 @@ static void test_short_range_too_few_pixels_still_emergency() {
     for (uint8_t px = 0; px < 64; px++) {
         setPixel(frame, px, 65535, /*status=*/0, 50);
     }
-    // Only 2 pixels valid (< MIN_VALID_PIXELS = 4)
+    // Only 2 pixels valid (< TEST_MIN_PX / MIN_VALID_PIXELS)
     setPixel(frame, 10, 800, /*status=*/0, 200);
     setPixel(frame, 11, 900, /*status=*/0, 180);
     writeChecksum(frame);
