@@ -253,65 +253,6 @@
           }
         }
       ]
-    },
-    {
-      "tool": {
-        "driver": {
-          "name": "Infer",
-          "version": "1.2.0",
-          "informationUri": "https://fbinfer.com/"
-        }
-      },
-      "results": [
-        {
-          "ruleId": "INTEGER_OVERFLOW_L1",
-          "level": "note",
-          "message": {
-            "text": "[FALSE POSITIVE] eps_sequence-- underflow \u2014 always >= 1 after increment at line 163"
-          },
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "Core/Src/eps_params.c"
-                },
-                "region": {
-                  "startLine": 200
-                }
-              }
-            }
-          ],
-          "properties": {
-            "id": "FV-011",
-            "classification": "false_positive",
-            "severity": "low"
-          }
-        },
-        {
-          "ruleId": "INTEGER_OVERFLOW_L2",
-          "level": "note",
-          "message": {
-            "text": "[FALSE POSITIVE] maxDistMm - minDistMm underflow \u2014 minDistMm <= maxDistMm invariant from tracking loop"
-          },
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "esp32/src/sensors/obstacle_sensor.cpp"
-                },
-                "region": {
-                  "startLine": 229
-                }
-              }
-            }
-          ],
-          "properties": {
-            "id": "FV-012",
-            "classification": "false_positive",
-            "severity": "low"
-          }
-        }
-      ]
     }
   ]
 }
