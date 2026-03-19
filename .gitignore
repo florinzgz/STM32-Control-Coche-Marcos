@@ -42,6 +42,7 @@ Drivers/
 # Logs y temporales
 # ===========================
 *.log
+!analysis_artifacts/**/*.log
 *.tmp
 *.temp
 .DS_Store

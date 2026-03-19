@@ -1,0 +1,95 @@
+CBMC version 5.95.1 (cbmc-5.95.1) 64-bit x86_64 linux
+Parsing Core/Src/can_handler.c
+Converting
+Type-checking can_handler
+Generating GOTO Program
+Adding CPROVER library (x86_64)
+Removal of function pointers and virtual functions
+Generic Property Instrumentation
+Running with 10 object bits, 54 offset bits (user-specified)
+Starting Bounded Model Checking
+Runtime Symex: 0.0022393s
+size of program expression: 238 steps
+simple slicing removed 0 assignments
+Generated 0 VCC(s), 0 remaining after simplification
+Runtime Postprocess Equation: 1.2854e-05s
+
+** Results:
+Core/Src/can_handler.c function CAN_CheckBusOff
+[CAN_CheckBusOff.overflow.1] line 1099 arithmetic overflow on unsigned - in now - busoff_last_attempt: SUCCESS
+[CAN_CheckBusOff.overflow.2] line 1110 arithmetic overflow on unsigned + in busoff_retry_count + 1: SUCCESS
+
+Core/Src/can_handler.c function CAN_IsESP32Alive
+[CAN_IsESP32Alive.overflow.1] line 1160 arithmetic overflow on unsigned - in return_value_HAL_GetTick - can_stats.last_heartbeat_esp32: SUCCESS
+
+Core/Src/can_handler.c function CAN_IsGlobalSilent
+[CAN_IsGlobalSilent.overflow.1] line 1177 arithmetic overflow on unsigned - in return_value_HAL_GetTick - last_any_rx_tick: SUCCESS
+
+Core/Src/can_handler.c function CAN_ProcessMessages
+[CAN_ProcessMessages.overflow.1] line 696 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[CAN_ProcessMessages.array_bounds.1] line 697 array 'rx_payload' upper bound in rx_payload[(signed long int)i]: SUCCESS
+[CAN_ProcessMessages.pointer_dereference.1] line 697 dereference failure: pointer outside object bounds in ((volatile uint8_t *)g_CAN_RxData)[(signed long int)i]: SUCCESS
+[CAN_ProcessMessages.overflow.2] line 733 arithmetic overflow on unsigned + in esp32_hb_same_count + 1: SUCCESS
+[CAN_ProcessMessages.overflow.3] line 786 arithmetic overflow on signed shl in (signed int)rx_payload[(signed long int)1] << 8: SUCCESS
+[CAN_ProcessMessages.overflow.4] line 787 arithmetic overflow on floating-point division in (float)angle_raw / 10.0f: SUCCESS
+[CAN_ProcessMessages.NaN.1] line 828 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR: SUCCESS
+[CAN_ProcessMessages.NaN.2] line 828 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL: SUCCESS
+[CAN_ProcessMessages.overflow.5] line 828 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR: SUCCESS
+[CAN_ProcessMessages.overflow.6] line 828 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL: SUCCESS
+[CAN_ProcessMessages.NaN.3] line 829 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR: SUCCESS
+[CAN_ProcessMessages.overflow.7] line 829 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR: SUCCESS
+[CAN_ProcessMessages.overflow.8] line 829 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR) / 4.0f: SUCCESS
+[CAN_ProcessMessages.overflow.9] line 922 arithmetic overflow on unsigned + in s + 1u: SUCCESS
+[CAN_ProcessMessages.NaN.4] line 969 NaN on + in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0: SUCCESS
+[CAN_ProcessMessages.overflow.10] line 969 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0: SUCCESS
+[CAN_ProcessMessages.NaN.5] line 970 NaN on + in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0: SUCCESS
+[CAN_ProcessMessages.overflow.11] line 970 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0: SUCCESS
+[CAN_ProcessMessages.NaN.6] line 971 NaN on + in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0 + return_value_Wheel_GetSpeed_RR$0: SUCCESS
+[CAN_ProcessMessages.overflow.12] line 971 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0 + return_value_Wheel_GetSpeed_RR$0: SUCCESS
+[CAN_ProcessMessages.overflow.13] line 972 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0 + return_value_Wheel_GetSpeed_RR$0) / 4.0f: SUCCESS
+
+Core/Src/can_handler.c function CAN_SendHeartbeat
+[CAN_SendHeartbeat.overflow.1] line 285 arithmetic overflow on unsigned - in current_time - last_tx_heartbeat: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.1] line 299 dereference failure: pointer NULL in ts->mode4x4: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.2] line 299 dereference failure: pointer invalid in ts->mode4x4: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.3] line 299 dereference failure: deallocated dynamic object in ts->mode4x4: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.4] line 299 dereference failure: dead object in ts->mode4x4: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.5] line 299 dereference failure: pointer outside object bounds in ts->mode4x4: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.6] line 299 dereference failure: invalid integer address in ts->mode4x4: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.7] line 300 dereference failure: pointer NULL in ts->axisRotation: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.8] line 300 dereference failure: pointer invalid in ts->axisRotation: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.9] line 300 dereference failure: deallocated dynamic object in ts->axisRotation: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.10] line 300 dereference failure: dead object in ts->axisRotation: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.11] line 300 dereference failure: pointer outside object bounds in ts->axisRotation: SUCCESS
+[CAN_SendHeartbeat.pointer_dereference.12] line 300 dereference failure: invalid integer address in ts->axisRotation: SUCCESS
+[CAN_SendHeartbeat.overflow.2] line 305 arithmetic overflow on unsigned + in heartbeat_counter + 1: SUCCESS
+
+Core/Src/can_handler.c function CAN_SendStatusBattery
+[CAN_SendStatusBattery.overflow.1] line 465 arithmetic overflow on floating-point multiplication in amps * 100.0f: SUCCESS
+[CAN_SendStatusBattery.overflow.2] line 466 arithmetic overflow on floating-point multiplication in volts * 100.0f: SUCCESS
+
+Core/Src/can_handler.c function CAN_SendStatusTraction
+[CAN_SendStatusTraction.overflow.2] line 406 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[CAN_SendStatusTraction.array_bounds.1] line 407 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[CAN_SendStatusTraction.array_bounds.2] line 410 array 'data' upper bound in data[(signed long int)i]: SUCCESS
+[CAN_SendStatusTraction.overflow.1] line 410 arithmetic overflow on floating-point multiplication in s * 100.0f: SUCCESS
+
+Core/Src/can_handler.c function CAN_TestTransmit
+[CAN_TestTransmit.overflow.1] line 275 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[CAN_TestTransmit.array_bounds.1] line 276 array 'tx_buf' upper bound in tx_buf[(signed long int)i]: SUCCESS
+[CAN_TestTransmit.pointer_dereference.1] line 276 dereference failure: pointer outside object bounds in ((volatile uint8_t *)g_CAN_TxData)[(signed long int)i]: SUCCESS
+
+Core/Src/can_handler.c function sat_inc_u32
+[sat_inc_u32.overflow.1] line 96 arithmetic overflow on unsigned + in *counter + 1u: SUCCESS
+[sat_inc_u32.pointer_dereference.1] line 96 dereference failure: pointer NULL in *counter: SUCCESS
+[sat_inc_u32.pointer_dereference.2] line 96 dereference failure: pointer invalid in *counter: SUCCESS
+[sat_inc_u32.pointer_dereference.3] line 96 dereference failure: deallocated dynamic object in *counter: SUCCESS
+[sat_inc_u32.pointer_dereference.4] line 96 dereference failure: dead object in *counter: SUCCESS
+[sat_inc_u32.pointer_dereference.5] line 96 dereference failure: pointer outside object bounds in *counter: SUCCESS
+[sat_inc_u32.pointer_dereference.6] line 96 dereference failure: invalid integer address in *counter: SUCCESS
+
+analysis_artifacts/stubs/stm32g4xx_hal.h function HAL_GetTick
+[HAL_GetTick.overflow.1] line 1220 arithmetic overflow on unsigned + in tick + 1u: SUCCESS
+
+** 0 of 56 failed (1 iterations)
+VERIFICATION SUCCESSFUL
