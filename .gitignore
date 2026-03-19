@@ -79,6 +79,7 @@ Release/
 *.gcov
 cov-int/
 *.sarif
+*.plist
 compile_commands.json
 esp32/compile_commands.json
 

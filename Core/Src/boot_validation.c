@@ -17,6 +17,7 @@
 #include "motor_control.h"
 #include "can_handler.h"
 #include "service_mode.h"
+#include <math.h>
 
 /* Plausibility thresholds — aligned with safety_system.c definitions.
  * Temperature: DS18B20 range is -55 °C to +125 °C; we accept
@@ -52,7 +53,7 @@ static bool check_temperature_plausible(void)
             continue;   /* Disabled sensors are excluded from check */
         enabled_count++;
         float t = Temperature_Get(i);
-        if (t < BOOT_TEMP_MIN_C || t > BOOT_TEMP_MAX_C)
+        if (isnan(t) || t < BOOT_TEMP_MIN_C || t > BOOT_TEMP_MAX_C)
             return false;
         if (t == 0.0f)
             zero_count++;
@@ -72,7 +73,7 @@ static bool check_current_plausible(void)
         if (!ServiceMode_IsEnabled(MODULE_CURRENT_SENSOR_0 + i))
             continue;
         float c = Current_GetAmps(i);
-        if (c < BOOT_CURRENT_MIN_A || c > BOOT_CURRENT_MAX_A)
+        if (isnan(c) || c < BOOT_CURRENT_MIN_A || c > BOOT_CURRENT_MAX_A)
             return false;
     }
     return true;
@@ -93,7 +94,7 @@ static bool check_encoder_healthy(void)
 static bool check_battery_ok(void)
 {
     float v = Voltage_GetBus(4);
-    return (v >= BOOT_BATTERY_MIN_V);
+    return (!isnan(v) && v >= BOOT_BATTERY_MIN_V);
 }
 
 /**
