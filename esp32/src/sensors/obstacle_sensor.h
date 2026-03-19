@@ -1,109 +1,54 @@
 // =============================================================================
-// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M by Nooploop)
+// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M 8×8 by Nooploop)
 //
-// Reads distance from TOFSense-M LiDAR sensor via UART.
-// Supports two frame formats:
+// Reads distance from TOFSense-M (8×8 matrix) LiDAR sensor via UART.
+// This driver supports ONLY the multi-pixel frame format:
 //
-//   1) Single-point (TOFSense-M S) — 7-byte frames:
-//      [0x57] [0x00] [DIST_L] [DIST_H] [SIG_L] [SIG_H] [CHECKSUM]
-//      Distance in mm (uint16 LE).
+//   Multi-pixel (TOFSense-M 8×8) — 400-byte Frame0:
+//     [0x57] [0x01] [0xFF] [ID] [TIME×4] [NUM_PIX=0x40]
+//     followed by 64 × 6-byte pixel blocks:
+//       [DIST_L] [DIST_H] [DIST_UH] [STATUS] [SIG_L] [SIG_H]
+//     Distance in µm (uint24 LE, divide by 1000 for mm).
+//     Status 0x00 = valid pixel.
+//     Trailer: 6 × 0xFF + 1-byte checksum (sum of all preceding & 0xFF).
 //
-//   2) Multi-pixel (TOFSense-M 8×8) — 400-byte frames:
-//      [0x57] [0x01] [0xFF] [ID] [TIME×4] [NUM_PIX=0x40]
-//      followed by 64 × 6-byte pixel blocks:
-//        [DIST_L] [DIST_H] [DIST_UH] [STATUS] [SIG_L] [SIG_H]
-//      Distance in µm (uint24 LE, divide by 1000 for mm).
-//      Status 0x00 = valid pixel.
-//      Trailer: 6 × 0xFF + 1-byte checksum (sum of all preceding & 0xFF).
-//      The driver uses the MINIMUM valid-pixel distance as the obstacle
-//      distance (closest point in the 8×8 field of view).
+// The driver computes:
+//   - minDist:    minimum valid-pixel distance (closest obstacle)
+//   - maxDist:    maximum valid-pixel distance
+//   - avgDist:    mean valid-pixel distance
+//   - validCount: number of pixels with status == 0x00 and distance > 0
+//   - dispersion: maxDist − minDist (spread across the 8×8 FOV)
 //
-// Parses at 921600 bps (factory default).
+// The reported distance is minDist (closest point in the FOV).
+// Frames are rejected if validCount < MIN_VALID_PIXELS (4) or
+// dispersion > MAX_PIXEL_DISPERSION_MM (3000 mm).
+//
+// Parses at 921600 bps (factory default), 8N1.
 // Provides validated readings with stuck-sensor detection,
 // warmup filtering, and physical-range validation.
 //
-// Also provides a configuration API (NLink 0x5A command protocol) to
-// change sensor parameters via UART, including range mode, baud rate,
-// frame rate, output mode, and persist settings to flash.
+// UART configuration:
+//   UART1, RX = GPIO 18 (sensor TX → ESP32 RX), TX = -1 (no commands)
+//   Baud rate = 921600 bps, 8N1
 //
-// CONFIGURATION NOTE — constant 20 mm reading (sensor "stuck at 20 mm"):
-//   If the sensor always returns 20 mm (= minRangeMm) regardless of the
-//   actual distance to obstacles, the most likely cause is that it is
-//   configured in "Short Range / High Precision" mode.  In this mode the
-//   maximum measurable distance is only ~1.3–1.5 m; when nothing is within
-//   that range, the sensor reports a zero distance, and the driver returns
-//   minRangeMm (20 mm) as an emergency-close fallback.
-//   FIX: switch to Long Range mode:
-//       obstacle_sensor::Config cfg;
-//       cfg.txPin = 17;               // Connect ESP32 TX → sensor RX
-//       obstacle_sensor::init(cfg);
-//       delay(2000);                   // Let sensor boot before config
-//       obstacle_sensor::configureLongRange();  // Sends 4 NLink commands
-//   Or use the NAssistant PC tool to change the measurement mode.
-//
-// AUTO-RECOVERY:
-//   If the initial configureLongRange() fails (e.g. sent before the sensor
-//   finished booting), the driver automatically detects sustained
-//   no-target frames and retries configureLongRange() up to 10 times
-//   (every ~30 frames ≈ 3 seconds at 10 Hz).  This handles the common
-//   case where the sensor ignores commands sent too early at power-on.
-//   Use getAutoRecoveryAttempts() to check how many retries were needed
-//   (0 = initial config worked, >0 = auto-recovery kicked in).
-//
-// ABOVE-MAX-RANGE HANDLING (open air / outdoors):
-//   When the measured distance exceeds maxRangeMm (4000 mm), the reading
-//   is clamped to maxRangeMm and reported as VALID at zone 0 (no obstacle).
-//   This prevents open-air readings from being marked INVALID (which would
-//   look like a sensor fault to the STM32).
-//
-// Frame layout — Single-point (TOFSense-M S, 7 bytes):
-//   [0]   header         = 0x57
-//   [1]   function_mark  = 0x00 (single-point)
-//   [2]   distance_L     uint8  — distance low byte (mm)
-//   [3]   distance_H     uint8  — distance high byte (mm)
-//   [4]   signal_L       uint8  — signal strength low byte
-//   [5]   signal_H       uint8  — signal strength high byte
-//   [6]   checksum       sum of bytes [0..5] & 0xFF
-//
-// Frame layout — Multi-pixel (TOFSense-M 8×8, 400 bytes):
+// Frame layout (400 bytes):
 //   [0]    header         = 0x57
 //   [1]    function_mark  = 0x01 (multi-pixel)
 //   [2]    reserved       = 0xFF
 //   [3]    sensor_id
 //   [4-7]  system_time    uint32 LE (ms)
-//   [8]    num_pixels     (typically 0x40 = 64 for 8×8)
-//   [9..N] pixel data     num_pixels × 6 bytes each:
+//   [8]    num_pixels     (0x40 = 64 for 8×8)
+//   [9..N] pixel data     64 × 6 bytes each:
 //            [0-2] distance  uint24 LE (µm)
 //            [3]   status    0x00 = valid
 //            [4-5] signal    uint16 LE
 //   [N+1..N+6] end marker  6 × 0xFF
 //   [N+7]  checksum        sum of bytes [0..N+6] & 0xFF
 //
-// Distance validity (single-point): distance > 0 means valid measurement.
-//                                   distance == 0 means no target / invalid.
-// Distance validity (multi-pixel):  status == 0 means valid pixel.
-//
-// Sensor output rate: ~10 Hz (active mode).
-// Output: distance_mm, zone, health flag, stuck flag, sensor status.
-//
 // Hardware: TOFSense-M (Nooploop) — GH1.25 4-pin connector
-//   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX (GPIO 18)
-//   VCC must be 5 V (sensor will not work at 3.3 V).
-//   UART IO level: datasheet says 3.3 V TTL, but real measurements show
-//   3.5–3.6 V on TX.  ESP32-S3 absolute max is 3.6 V → protection REQUIRED:
-//     Option 1: voltage divider (1 kΩ + 4.7 kΩ to GND) → ~2.9 V
-//     Option 2: BSS138-based level shifter (NOT TXS0108E) → 3.3 V
+//   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX
+//   UART IO level: 3.5–3.6 V → protection REQUIRED (voltage divider or level shifter).
 //   See docs/TOFSENSE_M_WIRING_GUIDE.md for wiring diagrams.
-//
-// Baudrate recommendations:
-//   921600 bps (factory default) works well and is recommended for
-//   real-time obstacle detection.  If you experience frequent checksum
-//   failures (check [OBSTACLE] Diag output), try:
-//     1. Verify wiring (voltage divider values, cable length < 30 cm)
-//     2. Lower to 460800 or 230400 bps (use setBaudRate() + saveConfig())
-//     3. Reduce frame rate to 5 Hz (use setFrameRate(5) + saveConfig())
-//   Lower baudrates reduce throughput but improve signal integrity on
-//   longer cables or electrically noisy environments.
 //
 // Reference: TOFSense-M User Manual V3.0
 //            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
@@ -122,7 +67,7 @@ namespace obstacle_sensor {
 // -------------------------------------------------------------------------
 enum class SensorStatus : uint8_t {
     WAITING,     // Warmup period — not yet producing valid data
-    INVALID,     // Timeout, out-of-range, or stuck
+    INVALID,     // Timeout, too few pixels, excessive dispersion, or stuck
     VALID        // Healthy reading within physical range
 };
 
@@ -130,25 +75,28 @@ enum class SensorStatus : uint8_t {
 // Validated sensor reading — consumed by can_obstacle for 0x208 frame
 // -------------------------------------------------------------------------
 struct Reading {
-    uint16_t     distance_mm  = 0;      // Measured distance (mm), 0 = no reading
+    uint16_t     distance_mm  = 0;      // Minimum valid-pixel distance (mm), 0 = no reading
     uint8_t      zone         = 0;      // Distance zone (0–4): 0=far, 1=caution, 2=warn, 3=crit, 4=emergency
     bool         healthy      = false;  // true if reading is valid and plausible
     bool         stuck        = false;  // true if stuck-sensor condition detected
     SensorStatus status       = SensorStatus::WAITING;
-    uint32_t     updateCount  = 0;      // Increments on each measurement frame (telemetry/diagnostics)
+    uint32_t     updateCount  = 0;      // Increments on each valid frame (telemetry/diagnostics)
+    // Pixel statistics from last valid frame
+    uint16_t     minDist_mm   = 0;      // Minimum valid-pixel distance (mm)
+    uint16_t     maxDist_mm   = 0;      // Maximum valid-pixel distance (mm)
+    uint16_t     avgDist_mm   = 0;      // Mean valid-pixel distance (mm)
+    uint8_t      validCount   = 0;      // Number of valid pixels (0–64)
+    uint16_t     dispersion_mm= 0;      // maxDist − minDist (mm)
 };
 
 // -------------------------------------------------------------------------
-// Configuration — UART for TOFSense-M S LiDAR sensor
+// Configuration — UART for TOFSense-M 8×8 LiDAR sensor
 // -------------------------------------------------------------------------
 struct Config {
     int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
-    int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only).
-                                        // Set to a valid GPIO (e.g. 17) if you need to send
-                                        // configuration commands (setRangeMode, saveConfig, etc.)
-                                        // to the sensor.  Requires wiring ESP32 TX → sensor RX.
-    uint32_t baudRate          = 921600; // TOFSense-M default baud rate (must match sensor config; changeable via NAssistant)
-    uint16_t rxBufSize         = 1024;  // UART RX ring-buffer (needs room for 400-byte multi-pixel frames)
+    int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
+    uint32_t baudRate          = 921600; // TOFSense-M factory default
+    uint16_t rxBufSize         = 1024;  // UART RX ring-buffer (must fit ≥1 × 400-byte frame)
     uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
     uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
     uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)
@@ -156,18 +104,6 @@ struct Config {
     uint32_t stuckDurationMs   = 1000;  // Duration for stuck detection (ms)
     uint16_t stuckThresholdMm  = 10;    // Change threshold for stuck detection (mm)
     float    minSpeedForStuck  = 1.0f;  // Vehicle speed threshold (km/h) for stuck detection
-    bool     shortRangeMode    = false; // Set to true when the sensor is permanently in
-                                        // SHORT RANGE / HIGH PRECISION mode and cannot be
-                                        // reconfigured (e.g. sensor RX not connected).
-                                        // When true:
-                                        //   - No-target frames (distance == 0) are treated as
-                                        //     "nothing in range" → reports maxRangeMm (safe),
-                                        //     NOT minRangeMm (emergency close).
-                                        //   - Sustained no-target is expected and does NOT
-                                        //     trigger sensor fault escalation.
-                                        //   - No NLink commands are sent (auto-recovery disabled).
-                                        // When false (default): original LONG RANGE behaviour —
-                                        //   no-target = emergency close (minRangeMm).
 };
 
 /// Initialize sensor hardware.  Call once from setup().
@@ -181,48 +117,17 @@ void update(float vehicleSpeedKmh);
 Reading getReading();
 
 // =========================================================================
-// Sensor configuration via NLink protocol (command header 0x5A)
-//
-// ROOT CAUSE OF ~1368 mm RANGE LIMIT:
-//   The TOFSense-M S ships (or may be reconfigured via NAssistant) in
-//   "Short Range / High Precision" mode, which limits maximum distance
-//   to ~1.3–1.5 m.  To reach the full 4 m range, switch to "Long Range"
-//   mode using setRangeMode(RangeMode::LONG_RANGE) followed by
-//   saveConfig().
-//
-// IMPORTANT:
-//   • Sending commands requires a TX pin connected to the sensor's RX.
-//     Set Config::txPin to a valid GPIO (default is -1 = not connected).
-//   • After changing baudrate, call init() again with the new baudRate
-//     in Config, otherwise UART communication will be lost.
-//   • Always call saveConfig() after changing settings to persist them
-//     in the sensor's flash memory (survives power cycle).
-//   • Configuration can also be done via the NAssistant PC tool
-//     (recommended for initial setup).
-//
-// Command frame format (host → sensor, per TOFSense-M User Manual V3.0):
-//   Byte 0:      0x5A (command header)
-//   Byte 1:      Length (total bytes including header and checksum)
-//   Byte 2:      Command ID
-//   Bytes 3..N-2: Payload (command-specific)
-//   Byte N-1:    Checksum (sum of bytes [0..N-2] & 0xFF)
-//
-// Reference: TOFSense-M User Manual V3.0, Section 6 — UART Configuration
-//            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
+// NLink 0x5A command protocol — for sensor configuration via UART TX.
+// Requires Config::txPin ≥ 0 (TX wired to sensor RX).
 // =========================================================================
 
-/// NLink 0x5A command protocol constants
 static constexpr uint8_t CMD_HEADER = 0x5A;
 
-/// Measurement range mode — controls max distance vs. precision trade-off.
-/// The sensor in SHORT_RANGE mode caps at ~1.3–1.5 m (high precision).
-/// Switch to LONG_RANGE for full 4 m capability.
 enum class RangeMode : uint8_t {
-    SHORT_RANGE = 0x00,   ///< High precision, max ~1.3–1.5 m
-    LONG_RANGE  = 0x01    ///< Standard precision, max ~4 m
+    SHORT_RANGE = 0x00,
+    LONG_RANGE  = 0x01
 };
 
-/// UART baud rate codes (index sent in the command payload).
 enum class BaudRateCode : uint8_t {
     BAUD_9600    = 0x00,
     BAUD_19200   = 0x01,
@@ -231,117 +136,34 @@ enum class BaudRateCode : uint8_t {
     BAUD_115200  = 0x04,
     BAUD_230400  = 0x05,
     BAUD_460800  = 0x06,
-    BAUD_921600  = 0x07   ///< Factory default
+    BAUD_921600  = 0x07
 };
 
-/// Sensor output mode.
 enum class OutputMode : uint8_t {
-    ACTIVE = 0x00,  ///< Continuous output at configured frame rate
-    QUERY  = 0x01   ///< Output one frame per query command
+    ACTIVE = 0x00,
+    QUERY  = 0x01
 };
 
-/// Command IDs for the 0x5A configuration protocol
-/// (per TOFSense-M User Manual V3.0, Section 6.2)
 enum class CmdId : uint8_t {
-    SET_SENSOR_ID   = 0x01,   ///< Set module ID
-    SET_OUTPUT_MODE = 0x02,   ///< Active / query
-    SET_BAUD_RATE   = 0x03,   ///< UART baud rate
-    SET_OUTPUT_IF   = 0x04,   ///< UART / CAN interface
-    SET_FRAME_RATE  = 0x05,   ///< Output frequency (Hz)
-    SET_RESOLUTION  = 0x06,   ///< 4×4 or 8×8
-    SET_RANGE_MODE  = 0x07,   ///< Short range / long range
-    SAVE_CONFIG     = 0x08    ///< Persist settings to flash
+    SET_SENSOR_ID   = 0x01,
+    SET_OUTPUT_MODE = 0x02,
+    SET_BAUD_RATE   = 0x03,
+    SET_OUTPUT_IF   = 0x04,
+    SET_FRAME_RATE  = 0x05,
+    SET_RESOLUTION  = 0x06,
+    SET_RANGE_MODE  = 0x07,
+    SAVE_CONFIG     = 0x08
 };
 
-// -------------------------------------------------------------------------
-// Build a raw NLink 0x5A command frame.
-//
-// Writes [0x5A, totalLen, cmdId, payload..., checksum] into `outBuf`.
-// Returns total frame length written, or 0 if outBuf is too small.
-//
-// @param cmdId       Command ID (CmdId enum value)
-// @param payload     Pointer to payload bytes (may be nullptr if payloadLen==0)
-// @param payloadLen  Number of payload bytes
-// @param outBuf      Destination buffer (must be >= payloadLen + 3)
-// @param outBufSize  Size of outBuf
-// -------------------------------------------------------------------------
 uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
                       uint8_t payloadLen, uint8_t* outBuf,
                       uint16_t outBufSize);
 
-// -------------------------------------------------------------------------
-// High-level configuration API
-//
-// All functions return true if the command was sent successfully.
-// The sensor must have TX pin connected (Config::txPin ≠ -1).
-// Call saveConfig() after changing settings to persist them.
-// -------------------------------------------------------------------------
-
-/// Switch between short-range (high precision) and long-range modes.
-/// This is the fix for the ~1368 mm range limit.
 bool setRangeMode(RangeMode mode);
-
-/// Change UART baud rate.  After calling this, you must re-init with
-/// the matching Config::baudRate or communication will be lost.
 bool setBaudRate(BaudRateCode baud);
-
-/// Set output frame rate in Hz.
 bool setFrameRate(uint8_t hz);
-
-/// Set output mode (active continuous or query-on-demand).
 bool setOutputMode(OutputMode mode);
-
-/// Save current configuration to sensor flash memory.
-/// Settings persist across power cycles after this command.
 bool saveConfig();
-
-// -------------------------------------------------------------------------
-// Auto-recovery: number of configureLongRange() retries performed.
-//
-// When the sensor stays in SHORT RANGE mode (e.g. configureLongRange()
-// was called before the sensor finished booting), the driver detects
-// sustained all-pixels-invalid frames and automatically retries.
-// This accessor returns the number of auto-recovery attempts so far
-// (useful for diagnostics / serial output).
-// -------------------------------------------------------------------------
-uint8_t getAutoRecoveryAttempts();
-
-// -------------------------------------------------------------------------
-// Convenience: configure sensor for long-range (4 m) operation.
-//
-// Sends the full configuration sequence in one call:
-//   1. setRangeMode(LONG_RANGE)      — enables 4 m measurement range
-//   2. setOutputMode(ACTIVE)          — continuous output
-//   3. setFrameRate(10)               — 10 Hz (recommended for single-point)
-//   4. saveConfig()                   — persist to sensor flash
-//
-// Each command is followed by a 100 ms delay (CMD_INTER_DELAY_MS) to give
-// the sensor time to process it before the next command arrives.  Without
-// these delays, the sensor may miss commands sent back-to-back, resulting
-// in partial configuration (e.g. LONG RANGE requested but not saved).
-//
-// Requires TX pin connected (Config::txPin ≥ 0).  Returns true only if
-// ALL four commands were sent successfully.
-//
-// WIRING REQUIREMENT:
-//   ESP32 TX (GPIO 17) → sensor RX (pin 3 of GH1.25 connector)
-//   Set Config::txPin = 17 before calling init().
-//   The sensor's TX → ESP32 RX connection is only needed for reading
-//   data, not for sending configuration commands.  But BOTH connections
-//   are needed if you want to configure AND read simultaneously.
-//
-// If the sensor is already configured via NAssistant and you only need
-// to read data, this function is not required — only an RX connection
-// (sensor TX → ESP32 RX) is needed for reading.
-//
-// ROOT CAUSE DIAGNOSIS — "can't see 4000 mm":
-//   If the sensor's RX pin is NOT connected to the ESP32's TX pin,
-//   this function (and all setXxx / saveConfig calls) will fail silently
-//   because the UART command frames never reach the sensor.  The sensor
-//   stays in whatever mode it was previously in (likely Short Range,
-//   max ~1368 mm).  Connect sensor RX to ESP32 TX (GPIO 17 recommended)
-//   and set Config::txPin = 17 before calling init().
-// -------------------------------------------------------------------------
 bool configureLongRange();
 
 } // namespace obstacle_sensor
