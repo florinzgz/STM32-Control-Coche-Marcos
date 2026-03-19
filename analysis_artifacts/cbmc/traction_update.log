@@ -1,0 +1,1293 @@
+CBMC version 5.95.1 (cbmc-5.95.1) 64-bit x86_64 linux
+Parsing Core/Src/motor_control.c
+Converting
+Type-checking motor_control
+Generating GOTO Program
+Adding CPROVER library (x86_64)
+Removal of function pointers and virtual functions
+Generic Property Instrumentation
+Running with 10 object bits, 54 offset bits (user-specified)
+Starting Bounded Model Checking
+**** WARNING: no body for function Safety_GetState
+Unwinding loop Traction_Update.4 iteration 1 file Core/Src/motor_control.c line 894 function Traction_Update thread 0
+Unwinding loop Traction_Update.4 iteration 2 file Core/Src/motor_control.c line 894 function Traction_Update thread 0
+Unwinding loop Traction_Update.4 iteration 3 file Core/Src/motor_control.c line 894 function Traction_Update thread 0
+Unwinding loop Traction_Update.4 iteration 4 file Core/Src/motor_control.c line 894 function Traction_Update thread 0
+**** WARNING: no body for function Wheel_GetSpeed_FL
+**** WARNING: no body for function Wheel_GetSpeed_FR
+**** WARNING: no body for function Wheel_GetSpeed_RL
+**** WARNING: no body for function Wheel_GetSpeed_RR
+**** WARNING: no body for function Safety_SetError
+**** WARNING: no body for function Temperature_Get
+**** WARNING: no body for function ServiceMode_SetFault
+**** WARNING: no body for function Safety_GetError
+Unwinding loop Traction_Update.5 iteration 1 file Core/Src/motor_control.c line 1045 function Traction_Update thread 0
+Unwinding loop Traction_Update.5 iteration 2 file Core/Src/motor_control.c line 1045 function Traction_Update thread 0
+Unwinding loop Traction_Update.5 iteration 3 file Core/Src/motor_control.c line 1045 function Traction_Update thread 0
+Unwinding loop Traction_Update.5 iteration 4 file Core/Src/motor_control.c line 1045 function Traction_Update thread 0
+Unwinding loop Traction_Update.6 iteration 1 file Core/Src/motor_control.c line 1074 function Traction_Update thread 0
+Unwinding loop Traction_Update.6 iteration 2 file Core/Src/motor_control.c line 1074 function Traction_Update thread 0
+Unwinding loop Traction_Update.6 iteration 3 file Core/Src/motor_control.c line 1074 function Traction_Update thread 0
+Unwinding loop Traction_Update.6 iteration 4 file Core/Src/motor_control.c line 1074 function Traction_Update thread 0
+**** WARNING: no body for function Safety_GetTractionCapFactor
+**** WARNING: no body for function tanf
+Unwinding loop compute_ackermann_differential.0 iteration 1 file Core/Src/motor_control.c line 755 function compute_ackermann_differential thread 0
+Unwinding loop compute_ackermann_differential.0 iteration 2 file Core/Src/motor_control.c line 755 function compute_ackermann_differential thread 0
+Unwinding loop compute_ackermann_differential.0 iteration 3 file Core/Src/motor_control.c line 755 function compute_ackermann_differential thread 0
+Unwinding loop compute_ackermann_differential.0 iteration 4 file Core/Src/motor_control.c line 755 function compute_ackermann_differential thread 0
+Unwinding loop Traction_Update.8 iteration 1 file Core/Src/motor_control.c line 1286 function Traction_Update thread 0
+Unwinding loop Traction_Update.8 iteration 2 file Core/Src/motor_control.c line 1286 function Traction_Update thread 0
+Unwinding loop Traction_Update.8 iteration 3 file Core/Src/motor_control.c line 1286 function Traction_Update thread 0
+Unwinding loop Traction_Update.8 iteration 4 file Core/Src/motor_control.c line 1286 function Traction_Update thread 0
+Unwinding loop Traction_Update.12 iteration 1 file Core/Src/motor_control.c line 1357 function Traction_Update thread 0
+Unwinding loop Traction_Update.12 iteration 2 file Core/Src/motor_control.c line 1357 function Traction_Update thread 0
+Unwinding loop Traction_Update.12 iteration 3 file Core/Src/motor_control.c line 1357 function Traction_Update thread 0
+Unwinding loop Traction_Update.12 iteration 4 file Core/Src/motor_control.c line 1357 function Traction_Update thread 0
+Unwinding loop Traction_Update.13 iteration 1 file Core/Src/motor_control.c line 1365 function Traction_Update thread 0
+Unwinding loop Traction_Update.13 iteration 2 file Core/Src/motor_control.c line 1365 function Traction_Update thread 0
+Unwinding loop Traction_Update.13 iteration 3 file Core/Src/motor_control.c line 1365 function Traction_Update thread 0
+Unwinding loop Traction_Update.13 iteration 4 file Core/Src/motor_control.c line 1365 function Traction_Update thread 0
+**** WARNING: no body for function Current_GetAmps
+Unwinding loop Traction_Update.14 iteration 1 file Core/Src/motor_control.c line 1382 function Traction_Update thread 0
+Unwinding loop Traction_Update.14 iteration 2 file Core/Src/motor_control.c line 1382 function Traction_Update thread 0
+Unwinding loop Traction_Update.14 iteration 3 file Core/Src/motor_control.c line 1382 function Traction_Update thread 0
+Unwinding loop Traction_Update.14 iteration 4 file Core/Src/motor_control.c line 1382 function Traction_Update thread 0
+Runtime Symex: 0.044483s
+size of program expression: 1610 steps
+simple slicing removed 11 assignments
+Generated 531 VCC(s), 131 remaining after simplification
+Runtime Postprocess Equation: 8.6191e-05s
+Passing problem to propositional reduction
+converting SSA
+Runtime Convert SSA: 0.0522507s
+Running propositional reduction
+Post-processing
+Runtime Post-process: 0.00216935s
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 202390 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.221753s
+Runtime decision procedure: 0.274239s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 147002 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0038255s
+Runtime decision procedure: 0.00387222s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00334296s
+Runtime decision procedure: 0.00337847s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00332565s
+Runtime decision procedure: 0.00335901s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00329871s
+Runtime decision procedure: 0.00333187s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00332075s
+Runtime decision procedure: 0.00335325s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00330284s
+Runtime decision procedure: 0.00333675s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00329139s
+Runtime decision procedure: 0.00332454s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00333626s
+Runtime decision procedure: 0.00336909s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0406449s
+Runtime decision procedure: 0.0406804s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146944 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0088462s
+Runtime decision procedure: 0.00888487s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146290 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00505828s
+Runtime decision procedure: 0.00509827s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146275 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.089294s
+Runtime decision procedure: 0.0893368s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 146267 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00577066s
+Runtime decision procedure: 0.00580853s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141688 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00396435s
+Runtime decision procedure: 0.00399866s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141688 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00590898s
+Runtime decision procedure: 0.00595492s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141688 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0143262s
+Runtime decision procedure: 0.0143619s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141688 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0179235s
+Runtime decision procedure: 0.01796s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141688 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00522577s
+Runtime decision procedure: 0.00526214s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141317 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00513368s
+Runtime decision procedure: 0.00516739s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141317 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0511204s
+Runtime decision procedure: 0.0511536s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141317 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.0203334s
+Runtime decision procedure: 0.020368s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141254 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.128843s
+Runtime decision procedure: 0.128883s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+59416 variables, 141240 clauses
+SAT checker: instance is UNSATISFIABLE
+Runtime Solver: 0.0166527s
+Runtime decision procedure: 0.0167428s
+
+** Results:
+Core/Src/motor_control.c function Ackermann_Compute
+[Ackermann_Compute.overflow.1] line 1754 arithmetic overflow on floating-point multiplication in wheelAngleDeg * (float)3.141593: SUCCESS
+[Ackermann_Compute.overflow.2] line 1754 arithmetic overflow on floating-point division in (wheelAngleDeg * (float)3.141593) / 180.0f: SUCCESS
+[Ackermann_Compute.NaN.1] line 1755 NaN on / in ackermann_wheelbase / return_value_tanf: SUCCESS
+[Ackermann_Compute.division-by-zero.1] line 1755 division by zero in ackermann_wheelbase / return_value_tanf: SUCCESS
+[Ackermann_Compute.overflow.3] line 1755 arithmetic overflow on floating-point division in ackermann_wheelbase / return_value_tanf: SUCCESS
+[Ackermann_Compute.NaN.2] line 1757 NaN on - in turn_radius - ackermann_track / 2.0f: SUCCESS
+[Ackermann_Compute.overflow.4] line 1757 arithmetic overflow on floating-point division in ackermann_track / 2.0f: SUCCESS
+[Ackermann_Compute.overflow.5] line 1757 arithmetic overflow on floating-point subtraction in turn_radius - ackermann_track / 2.0f: SUCCESS
+[Ackermann_Compute.NaN.3] line 1758 NaN on + in turn_radius + ackermann_track / 2.0f: SUCCESS
+[Ackermann_Compute.overflow.6] line 1758 arithmetic overflow on floating-point addition in turn_radius + ackermann_track / 2.0f: SUCCESS
+[Ackermann_Compute.NaN.4] line 1760 NaN on / in ackermann_wheelbase / inner_radius: SUCCESS
+[Ackermann_Compute.division-by-zero.2] line 1760 division by zero in ackermann_wheelbase / inner_radius: SUCCESS
+[Ackermann_Compute.overflow.7] line 1760 arithmetic overflow on floating-point division in ackermann_wheelbase / inner_radius: SUCCESS
+[Ackermann_Compute.NaN.5] line 1761 NaN on / in ackermann_wheelbase / outer_radius: SUCCESS
+[Ackermann_Compute.division-by-zero.3] line 1761 division by zero in ackermann_wheelbase / outer_radius: SUCCESS
+[Ackermann_Compute.overflow.8] line 1761 arithmetic overflow on floating-point division in ackermann_wheelbase / outer_radius: SUCCESS
+[Ackermann_Compute.overflow.9] line 1763 arithmetic overflow on floating-point multiplication in inner_rad * 180.0f: SUCCESS
+[Ackermann_Compute.overflow.10] line 1763 arithmetic overflow on floating-point division in (inner_rad * 180.0f) / (float)3.141593: SUCCESS
+[Ackermann_Compute.overflow.11] line 1764 arithmetic overflow on floating-point multiplication in outer_rad * 180.0f: SUCCESS
+[Ackermann_Compute.overflow.12] line 1764 arithmetic overflow on floating-point division in (outer_rad * 180.0f) / (float)3.141593: SUCCESS
+
+Core/Src/motor_control.c function Encoder_CheckHealth
+[Encoder_CheckHealth.pointer_dereference.1] line 1680 dereference failure: pointer NULL in (&htim2)->Instance->CNT: SUCCESS
+[Encoder_CheckHealth.pointer_dereference.2] line 1680 dereference failure: pointer invalid in (&htim2)->Instance->CNT: SUCCESS
+[Encoder_CheckHealth.pointer_dereference.3] line 1680 dereference failure: deallocated dynamic object in (&htim2)->Instance->CNT: SUCCESS
+[Encoder_CheckHealth.pointer_dereference.4] line 1680 dereference failure: dead object in (&htim2)->Instance->CNT: SUCCESS
+[Encoder_CheckHealth.pointer_dereference.5] line 1680 dereference failure: pointer outside object bounds in (&htim2)->Instance->CNT: SUCCESS
+[Encoder_CheckHealth.pointer_dereference.6] line 1680 dereference failure: invalid integer address in (&htim2)->Instance->CNT: SUCCESS
+[Encoder_CheckHealth.overflow.1] line 1686 arithmetic overflow on floating-point division in ((54.0f + 20.0f) * (float)(1200 * 4)) / 360.0f: SUCCESS
+[Encoder_CheckHealth.overflow.2] line 1686 arithmetic overflow on floating-point division in ((54.0f + 20.0f) * (float)(1200 * 4)) / 360.0f: SUCCESS
+[Encoder_CheckHealth.overflow.3] line 1686 arithmetic overflow on signed unary minus in -((int32_t)(((54.0f + 20.0f) * (float)(1200 * 4)) / 360.0f)): SUCCESS
+[Encoder_CheckHealth.overflow.4] line 1694 arithmetic overflow on signed - in count - enc_prev_count: SUCCESS
+[Encoder_CheckHealth.overflow.5] line 1695 arithmetic overflow on signed unary minus in -delta: SUCCESS
+[Encoder_CheckHealth.overflow.6] line 1710 arithmetic overflow on unsigned - in now - enc_last_change_tick: SUCCESS
+
+Core/Src/motor_control.c function Motor_SetPWM_FL
+[Motor_SetPWM_FL.overflow.1] line 1790 arithmetic overflow on signed unary minus in -((signed int)(int16_t)pwm): SUCCESS
+
+Core/Src/motor_control.c function Motor_SetPWM_FR
+[Motor_SetPWM_FR.overflow.1] line 1794 arithmetic overflow on signed unary minus in -((signed int)(int16_t)pwm): SUCCESS
+
+Core/Src/motor_control.c function Motor_SetPWM_RL
+[Motor_SetPWM_RL.overflow.1] line 1798 arithmetic overflow on signed unary minus in -((signed int)(int16_t)pwm): SUCCESS
+
+Core/Src/motor_control.c function Motor_SetPWM_RR
+[Motor_SetPWM_RR.overflow.1] line 1802 arithmetic overflow on signed unary minus in -((signed int)(int16_t)pwm): SUCCESS
+
+Core/Src/motor_control.c function Motor_SetPWM_Steering
+[Motor_SetPWM_Steering.overflow.1] line 1806 arithmetic overflow on signed unary minus in -((signed int)(int16_t)pwm): SUCCESS
+
+Core/Src/motor_control.c function Motor_SetSigned
+[Motor_SetSigned.overflow.1] line 1866 arithmetic overflow on signed unary minus in -((signed int)signed_pwm): SUCCESS
+[Motor_SetSigned.pointer_dereference.1] line 1871 dereference failure: pointer NULL in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.2] line 1871 dereference failure: pointer invalid in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.3] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.4] line 1871 dereference failure: dead object in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.5] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.6] line 1871 dereference failure: invalid integer address in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.7] line 1871 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.8] line 1871 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.9] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.10] line 1871 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.11] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.12] line 1871 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.13] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.14] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.15] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.16] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.17] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.18] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.19] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.20] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.21] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.22] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.23] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.24] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.25] line 1871 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.26] line 1871 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.27] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.28] line 1871 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.29] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.30] line 1871 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.31] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.32] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.33] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.34] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.35] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.36] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.37] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.38] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.39] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.40] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.41] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.42] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.43] line 1871 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.44] line 1871 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.45] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.46] line 1871 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.47] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.48] line 1871 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.49] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.50] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.51] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.52] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.53] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.54] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.55] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.56] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.57] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.58] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.59] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.60] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.61] line 1871 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.62] line 1871 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.63] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.64] line 1871 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.65] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.66] line 1871 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.67] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.68] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.69] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.70] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.71] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.72] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.73] line 1871 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.74] line 1871 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.75] line 1871 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.76] line 1871 dereference failure: dead object in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.77] line 1871 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.78] line 1871 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.79] line 1872 dereference failure: pointer NULL in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.80] line 1872 dereference failure: pointer invalid in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.81] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.82] line 1872 dereference failure: dead object in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.83] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.84] line 1872 dereference failure: invalid integer address in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.85] line 1872 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.86] line 1872 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.87] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.88] line 1872 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.89] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.90] line 1872 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.91] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.92] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.93] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.94] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.95] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.96] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.97] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.98] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.99] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.100] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.101] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.102] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.103] line 1872 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.104] line 1872 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.105] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.106] line 1872 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.107] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.108] line 1872 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.109] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.110] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.111] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.112] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.113] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.114] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.115] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.116] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.117] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.118] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.119] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.120] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.121] line 1872 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.122] line 1872 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.123] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.124] line 1872 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.125] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.126] line 1872 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.127] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.128] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.129] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.130] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.131] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.132] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.133] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.134] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.135] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.136] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.137] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.138] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.139] line 1872 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.140] line 1872 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.141] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.142] line 1872 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.143] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.144] line 1872 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.145] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.146] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.147] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.148] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.149] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.150] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.151] line 1872 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.152] line 1872 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.153] line 1872 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.154] line 1872 dereference failure: dead object in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.155] line 1872 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.156] line 1872 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.157] line 1873 dereference failure: pointer NULL in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.158] line 1873 dereference failure: pointer invalid in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.159] line 1873 dereference failure: deallocated dynamic object in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.160] line 1873 dereference failure: dead object in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.161] line 1873 dereference failure: pointer outside object bounds in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.162] line 1873 dereference failure: invalid integer address in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.163] line 1876 dereference failure: pointer NULL in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.164] line 1876 dereference failure: pointer invalid in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.165] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.166] line 1876 dereference failure: dead object in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.167] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.168] line 1876 dereference failure: invalid integer address in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.169] line 1876 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.170] line 1876 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.171] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.172] line 1876 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.173] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.174] line 1876 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.175] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.176] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.177] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.178] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.179] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.180] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.181] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.182] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.183] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.184] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.185] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.186] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.187] line 1876 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.188] line 1876 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.189] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.190] line 1876 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.191] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.192] line 1876 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.193] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.194] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.195] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.196] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.197] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.198] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.199] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.200] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.201] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.202] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.203] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.204] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.205] line 1876 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.206] line 1876 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.207] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.208] line 1876 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.209] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.210] line 1876 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.211] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.212] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.213] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.214] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.215] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.216] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.217] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.218] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.219] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.220] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.221] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.222] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.223] line 1876 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.224] line 1876 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.225] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.226] line 1876 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.227] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.228] line 1876 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.229] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.230] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.231] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.232] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.233] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.234] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.235] line 1876 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.236] line 1876 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.237] line 1876 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.238] line 1876 dereference failure: dead object in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.239] line 1876 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.240] line 1876 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.241] line 1877 dereference failure: pointer NULL in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.242] line 1877 dereference failure: pointer invalid in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.243] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.244] line 1877 dereference failure: dead object in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.245] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.246] line 1877 dereference failure: invalid integer address in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.247] line 1877 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.248] line 1877 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.249] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.250] line 1877 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.251] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.252] line 1877 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.253] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.254] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.255] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.256] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.257] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.258] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.259] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.260] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.261] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.262] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.263] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.264] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR1: SUCCESS
+[Motor_SetSigned.pointer_dereference.265] line 1877 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.266] line 1877 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.267] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.268] line 1877 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.269] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.270] line 1877 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.271] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.272] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.273] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.274] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.275] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.276] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.277] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.278] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.279] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.280] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.281] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.282] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.283] line 1877 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.284] line 1877 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.285] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.286] line 1877 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.287] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.288] line 1877 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.289] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.290] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.291] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.292] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.293] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.294] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.295] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.296] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.297] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.298] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.299] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.300] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.301] line 1877 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.302] line 1877 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.303] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.304] line 1877 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.305] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.306] line 1877 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.307] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.308] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.309] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.310] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.311] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.312] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.313] line 1877 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.314] line 1877 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.315] line 1877 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.316] line 1877 dereference failure: dead object in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.317] line 1877 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.318] line 1877 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.319] line 1878 dereference failure: pointer NULL in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.320] line 1878 dereference failure: pointer invalid in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.321] line 1878 dereference failure: deallocated dynamic object in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.322] line 1878 dereference failure: dead object in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.323] line 1878 dereference failure: pointer outside object bounds in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.324] line 1878 dereference failure: invalid integer address in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.325] line 1881 dereference failure: pointer NULL in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.326] line 1881 dereference failure: pointer invalid in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.327] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.328] line 1881 dereference failure: dead object in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.329] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.330] line 1881 dereference failure: invalid integer address in motor->rpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.331] line 1881 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.332] line 1881 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.333] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.334] line 1881 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.335] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.336] line 1881 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.337] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.338] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.339] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.340] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.341] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.342] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.343] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.344] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.345] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.346] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.347] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.348] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.349] line 1881 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.350] line 1881 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.351] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.352] line 1881 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.353] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.354] line 1881 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.355] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.356] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.357] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.358] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.359] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.360] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.361] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.362] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.363] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.364] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.365] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.366] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.367] line 1881 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.368] line 1881 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.369] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.370] line 1881 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.371] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.372] line 1881 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.373] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.374] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.375] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.376] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.377] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.378] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.379] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.380] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.381] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.382] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.383] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.384] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.385] line 1881 dereference failure: pointer NULL in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.386] line 1881 dereference failure: pointer invalid in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.387] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.388] line 1881 dereference failure: dead object in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.389] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.390] line 1881 dereference failure: invalid integer address in motor->rpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.391] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.392] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.393] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.394] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.395] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.396] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.397] line 1881 dereference failure: pointer NULL in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.398] line 1881 dereference failure: pointer invalid in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.399] line 1881 dereference failure: deallocated dynamic object in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.400] line 1881 dereference failure: dead object in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.401] line 1881 dereference failure: pointer outside object bounds in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.402] line 1881 dereference failure: invalid integer address in motor->rpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.403] line 1882 dereference failure: pointer NULL in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.404] line 1882 dereference failure: pointer invalid in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.405] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.406] line 1882 dereference failure: dead object in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.407] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.408] line 1882 dereference failure: invalid integer address in motor->lpwm_channel: SUCCESS
+[Motor_SetSigned.pointer_dereference.409] line 1882 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.410] line 1882 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.411] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.412] line 1882 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.413] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.414] line 1882 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.415] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.416] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.417] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.418] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.419] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: FAILURE
+[Motor_SetSigned.pointer_dereference.420] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.421] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.422] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.423] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.424] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.425] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.426] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR1: FAILURE
+[Motor_SetSigned.pointer_dereference.427] line 1882 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.428] line 1882 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.429] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.430] line 1882 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.431] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.432] line 1882 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.433] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.434] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.435] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.436] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.437] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.438] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.439] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.440] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.441] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.442] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.443] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.444] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR2: SUCCESS
+[Motor_SetSigned.pointer_dereference.445] line 1882 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.446] line 1882 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.447] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.448] line 1882 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.449] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.450] line 1882 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.451] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.452] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.453] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.454] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.455] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.456] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.457] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.458] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.459] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.460] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.461] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.462] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR3: SUCCESS
+[Motor_SetSigned.pointer_dereference.463] line 1882 dereference failure: pointer NULL in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.464] line 1882 dereference failure: pointer invalid in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.465] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.466] line 1882 dereference failure: dead object in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.467] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.468] line 1882 dereference failure: invalid integer address in motor->lpwm_timer: SUCCESS
+[Motor_SetSigned.pointer_dereference.469] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.470] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.471] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.472] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.473] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.474] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance: SUCCESS
+[Motor_SetSigned.pointer_dereference.475] line 1882 dereference failure: pointer NULL in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.476] line 1882 dereference failure: pointer invalid in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.477] line 1882 dereference failure: deallocated dynamic object in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.478] line 1882 dereference failure: dead object in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.479] line 1882 dereference failure: pointer outside object bounds in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.480] line 1882 dereference failure: invalid integer address in motor->lpwm_timer->Instance->CCR4: SUCCESS
+[Motor_SetSigned.pointer_dereference.481] line 1883 dereference failure: pointer NULL in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.482] line 1883 dereference failure: pointer invalid in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.483] line 1883 dereference failure: deallocated dynamic object in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.484] line 1883 dereference failure: dead object in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.485] line 1883 dereference failure: pointer outside object bounds in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.486] line 1883 dereference failure: invalid integer address in motor->direction: SUCCESS
+[Motor_SetSigned.pointer_dereference.487] line 1889 dereference failure: pointer NULL in motor->en_port: SUCCESS
+[Motor_SetSigned.pointer_dereference.488] line 1889 dereference failure: pointer invalid in motor->en_port: SUCCESS
+[Motor_SetSigned.pointer_dereference.489] line 1889 dereference failure: deallocated dynamic object in motor->en_port: SUCCESS
+[Motor_SetSigned.pointer_dereference.490] line 1889 dereference failure: dead object in motor->en_port: SUCCESS
+[Motor_SetSigned.pointer_dereference.491] line 1889 dereference failure: pointer outside object bounds in motor->en_port: SUCCESS
+[Motor_SetSigned.pointer_dereference.492] line 1889 dereference failure: invalid integer address in motor->en_port: SUCCESS
+[Motor_SetSigned.pointer_dereference.493] line 1890 dereference failure: pointer NULL in motor->en_pin: SUCCESS
+[Motor_SetSigned.pointer_dereference.494] line 1890 dereference failure: pointer invalid in motor->en_pin: SUCCESS
+[Motor_SetSigned.pointer_dereference.495] line 1890 dereference failure: deallocated dynamic object in motor->en_pin: SUCCESS
+[Motor_SetSigned.pointer_dereference.496] line 1890 dereference failure: dead object in motor->en_pin: SUCCESS
+[Motor_SetSigned.pointer_dereference.497] line 1890 dereference failure: pointer outside object bounds in motor->en_pin: SUCCESS
+[Motor_SetSigned.pointer_dereference.498] line 1890 dereference failure: invalid integer address in motor->en_pin: SUCCESS
+
+Core/Src/motor_control.c function Steering_ControlLoop
+[Steering_ControlLoop.overflow.1] line 1504 arithmetic overflow on unsigned - in now - last_time: SUCCESS
+[Steering_ControlLoop.overflow.2] line 1512 arithmetic overflow on unsigned - in now - last_time: SUCCESS
+[Steering_ControlLoop.overflow.3] line 1512 arithmetic overflow on floating-point division in (float)(now - last_time) / 1000.0f: SUCCESS
+[Steering_ControlLoop.pointer_dereference.1] line 1517 dereference failure: pointer NULL in (&htim2)->Instance->CNT: SUCCESS
+[Steering_ControlLoop.pointer_dereference.2] line 1517 dereference failure: pointer invalid in (&htim2)->Instance->CNT: SUCCESS
+[Steering_ControlLoop.pointer_dereference.3] line 1517 dereference failure: deallocated dynamic object in (&htim2)->Instance->CNT: SUCCESS
+[Steering_ControlLoop.pointer_dereference.4] line 1517 dereference failure: dead object in (&htim2)->Instance->CNT: SUCCESS
+[Steering_ControlLoop.pointer_dereference.5] line 1517 dereference failure: pointer outside object bounds in (&htim2)->Instance->CNT: SUCCESS
+[Steering_ControlLoop.pointer_dereference.6] line 1517 dereference failure: invalid integer address in (&htim2)->Instance->CNT: SUCCESS
+[Steering_ControlLoop.overflow.4] line 1518 arithmetic overflow on floating-point multiplication in (float)encoder_count * 360.0f: SUCCESS
+[Steering_ControlLoop.overflow.5] line 1518 arithmetic overflow on floating-point division in ((float)encoder_count * 360.0f) / (float)(1200 * 4): SUCCESS
+[Steering_ControlLoop.NaN.1] line 1522 NaN on - in theta - eps_prev_angle_deg: SUCCESS
+[Steering_ControlLoop.NaN.2] line 1522 NaN on / in (theta - eps_prev_angle_deg) / dt: SUCCESS
+[Steering_ControlLoop.division-by-zero.1] line 1522 division by zero in (theta - eps_prev_angle_deg) / dt: SUCCESS
+[Steering_ControlLoop.overflow.6] line 1522 arithmetic overflow on floating-point subtraction in theta - eps_prev_angle_deg: SUCCESS
+[Steering_ControlLoop.overflow.7] line 1522 arithmetic overflow on floating-point division in (theta - eps_prev_angle_deg) / dt: SUCCESS
+[Steering_ControlLoop.NaN.3] line 1527 NaN on - in omega_raw - eps_omega_filt: SUCCESS
+[Steering_ControlLoop.NaN.4] line 1527 NaN on + in eps_omega_filt + 0.3f * (omega_raw - eps_omega_filt): SUCCESS
+[Steering_ControlLoop.overflow.8] line 1527 arithmetic overflow on floating-point subtraction in omega_raw - eps_omega_filt: SUCCESS
+[Steering_ControlLoop.overflow.9] line 1527 arithmetic overflow on floating-point multiplication in 0.3f * (omega_raw - eps_omega_filt): SUCCESS
+[Steering_ControlLoop.overflow.10] line 1527 arithmetic overflow on floating-point addition in eps_omega_filt + 0.3f * (omega_raw - eps_omega_filt): SUCCESS
+[Steering_ControlLoop.NaN.5] line 1533 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR: SUCCESS
+[Steering_ControlLoop.NaN.6] line 1533 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL: SUCCESS
+[Steering_ControlLoop.overflow.11] line 1533 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR: SUCCESS
+[Steering_ControlLoop.overflow.12] line 1533 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL: SUCCESS
+[Steering_ControlLoop.NaN.7] line 1534 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR: SUCCESS
+[Steering_ControlLoop.overflow.13] line 1534 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR: SUCCESS
+[Steering_ControlLoop.overflow.14] line 1534 arithmetic overflow on floating-point multiplication in (return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR) * 0.25f: SUCCESS
+[Steering_ControlLoop.NaN.8] line 1547 NaN on - in abs_omega - lo: SUCCESS
+[Steering_ControlLoop.NaN.9] line 1547 NaN on - in hi - lo: SUCCESS
+[Steering_ControlLoop.NaN.10] line 1547 NaN on / in (abs_omega - lo) / (hi - lo): SUCCESS
+[Steering_ControlLoop.division-by-zero.2] line 1547 division by zero in (abs_omega - lo) / (hi - lo): SUCCESS
+[Steering_ControlLoop.overflow.15] line 1547 arithmetic overflow on floating-point subtraction in abs_omega - lo: SUCCESS
+[Steering_ControlLoop.overflow.16] line 1547 arithmetic overflow on floating-point subtraction in hi - lo: SUCCESS
+[Steering_ControlLoop.overflow.17] line 1547 arithmetic overflow on floating-point division in (abs_omega - lo) / (hi - lo): SUCCESS
+[Steering_ControlLoop.NaN.11] line 1548 NaN on * in t * t: SUCCESS
+[Steering_ControlLoop.NaN.12] line 1548 NaN on * in t * t * (3.0f - 2.0f * t): SUCCESS
+[Steering_ControlLoop.overflow.18] line 1548 arithmetic overflow on floating-point multiplication in t * t: SUCCESS
+[Steering_ControlLoop.overflow.19] line 1548 arithmetic overflow on floating-point multiplication in 2.0f * t: SUCCESS
+[Steering_ControlLoop.overflow.20] line 1548 arithmetic overflow on floating-point subtraction in 3.0f - 2.0f * t: SUCCESS
+[Steering_ControlLoop.overflow.21] line 1548 arithmetic overflow on floating-point multiplication in t * t * (3.0f - 2.0f * t): SUCCESS
+[Steering_ControlLoop.NaN.13] line 1553 NaN on / in v_kmh / p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.NaN.14] line 1553 NaN on / in 1.0f / (1.0f + v_kmh / p->assist_vs_speed): SUCCESS
+[Steering_ControlLoop.division-by-zero.3] line 1553 division by zero in v_kmh / p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.division-by-zero.4] line 1553 division by zero in 1.0f / (1.0f + v_kmh / p->assist_vs_speed): SUCCESS
+[Steering_ControlLoop.overflow.22] line 1553 arithmetic overflow on floating-point division in v_kmh / p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.overflow.23] line 1553 arithmetic overflow on floating-point addition in 1.0f + v_kmh / p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.overflow.24] line 1553 arithmetic overflow on floating-point division in 1.0f / (1.0f + v_kmh / p->assist_vs_speed): SUCCESS
+[Steering_ControlLoop.pointer_dereference.7] line 1553 dereference failure: pointer NULL in p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.8] line 1553 dereference failure: pointer invalid in p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.9] line 1553 dereference failure: deallocated dynamic object in p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.10] line 1553 dereference failure: dead object in p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.11] line 1553 dereference failure: pointer outside object bounds in p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.12] line 1553 dereference failure: invalid integer address in p->assist_vs_speed: SUCCESS
+[Steering_ControlLoop.NaN.15] line 1554 NaN on / in v_kmh / p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.division-by-zero.5] line 1554 division by zero in v_kmh / p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.overflow.25] line 1554 arithmetic overflow on floating-point division in v_kmh / p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.overflow.26] line 1554 arithmetic overflow on floating-point addition in 0.3f + v_kmh / p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.13] line 1554 dereference failure: pointer NULL in p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.14] line 1554 dereference failure: pointer invalid in p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.15] line 1554 dereference failure: deallocated dynamic object in p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.16] line 1554 dereference failure: dead object in p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.17] line 1554 dereference failure: pointer outside object bounds in p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.pointer_dereference.18] line 1554 dereference failure: invalid integer address in p->return_vs_speed: SUCCESS
+[Steering_ControlLoop.NaN.16] line 1566 NaN on * in lambda * p->assist_strength: SUCCESS
+[Steering_ControlLoop.NaN.17] line 1566 NaN on * in lambda * p->assist_strength * g_v: SUCCESS
+[Steering_ControlLoop.NaN.18] line 1566 NaN on * in lambda * p->assist_strength * g_v * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.NaN.19] line 1566 NaN on + in tau + lambda * p->assist_strength * g_v * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.overflow.27] line 1566 arithmetic overflow on floating-point multiplication in lambda * p->assist_strength: SUCCESS
+[Steering_ControlLoop.overflow.28] line 1566 arithmetic overflow on floating-point multiplication in lambda * p->assist_strength * g_v: SUCCESS
+[Steering_ControlLoop.overflow.29] line 1566 arithmetic overflow on floating-point multiplication in lambda * p->assist_strength * g_v * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.overflow.30] line 1566 arithmetic overflow on floating-point addition in tau + lambda * p->assist_strength * g_v * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.pointer_dereference.19] line 1566 dereference failure: pointer NULL in p->assist_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.20] line 1566 dereference failure: pointer invalid in p->assist_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.21] line 1566 dereference failure: deallocated dynamic object in p->assist_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.22] line 1566 dereference failure: dead object in p->assist_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.23] line 1566 dereference failure: pointer outside object bounds in p->assist_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.24] line 1566 dereference failure: invalid integer address in p->assist_strength: SUCCESS
+[Steering_ControlLoop.NaN.20] line 1567 NaN on * in (1.0f - lambda) * p->center_strength: SUCCESS
+[Steering_ControlLoop.NaN.21] line 1567 NaN on * in (1.0f - lambda) * p->center_strength * h_v: SUCCESS
+[Steering_ControlLoop.NaN.22] line 1567 NaN on * in (1.0f - lambda) * p->center_strength * h_v * theta: SUCCESS
+[Steering_ControlLoop.NaN.23] line 1567 NaN on - in tau - (1.0f - lambda) * p->center_strength * h_v * theta: SUCCESS
+[Steering_ControlLoop.overflow.31] line 1567 arithmetic overflow on floating-point subtraction in 1.0f - lambda: SUCCESS
+[Steering_ControlLoop.overflow.32] line 1567 arithmetic overflow on floating-point multiplication in (1.0f - lambda) * p->center_strength: SUCCESS
+[Steering_ControlLoop.overflow.33] line 1567 arithmetic overflow on floating-point multiplication in (1.0f - lambda) * p->center_strength * h_v: SUCCESS
+[Steering_ControlLoop.overflow.34] line 1567 arithmetic overflow on floating-point multiplication in (1.0f - lambda) * p->center_strength * h_v * theta: SUCCESS
+[Steering_ControlLoop.overflow.35] line 1567 arithmetic overflow on floating-point subtraction in tau - (1.0f - lambda) * p->center_strength * h_v * theta: SUCCESS
+[Steering_ControlLoop.pointer_dereference.25] line 1567 dereference failure: pointer NULL in p->center_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.26] line 1567 dereference failure: pointer invalid in p->center_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.27] line 1567 dereference failure: deallocated dynamic object in p->center_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.28] line 1567 dereference failure: dead object in p->center_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.29] line 1567 dereference failure: pointer outside object bounds in p->center_strength: SUCCESS
+[Steering_ControlLoop.pointer_dereference.30] line 1567 dereference failure: invalid integer address in p->center_strength: SUCCESS
+[Steering_ControlLoop.NaN.24] line 1568 NaN on * in p->damping * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.NaN.25] line 1568 NaN on - in tau - p->damping * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.overflow.36] line 1568 arithmetic overflow on floating-point multiplication in p->damping * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.overflow.37] line 1568 arithmetic overflow on floating-point subtraction in tau - p->damping * eps_omega_filt: SUCCESS
+[Steering_ControlLoop.pointer_dereference.31] line 1568 dereference failure: pointer NULL in p->damping: SUCCESS
+[Steering_ControlLoop.pointer_dereference.32] line 1568 dereference failure: pointer invalid in p->damping: SUCCESS
+[Steering_ControlLoop.pointer_dereference.33] line 1568 dereference failure: deallocated dynamic object in p->damping: SUCCESS
+[Steering_ControlLoop.pointer_dereference.34] line 1568 dereference failure: dead object in p->damping: SUCCESS
+[Steering_ControlLoop.pointer_dereference.35] line 1568 dereference failure: pointer outside object bounds in p->damping: SUCCESS
+[Steering_ControlLoop.pointer_dereference.36] line 1568 dereference failure: invalid integer address in p->damping: SUCCESS
+[Steering_ControlLoop.NaN.26] line 1569 NaN on * in p->friction_comp * fric_sign: SUCCESS
+[Steering_ControlLoop.NaN.27] line 1569 NaN on + in tau + p->friction_comp * fric_sign: SUCCESS
+[Steering_ControlLoop.overflow.38] line 1569 arithmetic overflow on floating-point multiplication in p->friction_comp * fric_sign: SUCCESS
+[Steering_ControlLoop.overflow.39] line 1569 arithmetic overflow on floating-point addition in tau + p->friction_comp * fric_sign: SUCCESS
+[Steering_ControlLoop.pointer_dereference.37] line 1569 dereference failure: pointer NULL in p->friction_comp: SUCCESS
+[Steering_ControlLoop.pointer_dereference.38] line 1569 dereference failure: pointer invalid in p->friction_comp: SUCCESS
+[Steering_ControlLoop.pointer_dereference.39] line 1569 dereference failure: deallocated dynamic object in p->friction_comp: SUCCESS
+[Steering_ControlLoop.pointer_dereference.40] line 1569 dereference failure: dead object in p->friction_comp: SUCCESS
+[Steering_ControlLoop.pointer_dereference.41] line 1569 dereference failure: pointer outside object bounds in p->friction_comp: SUCCESS
+[Steering_ControlLoop.pointer_dereference.42] line 1569 dereference failure: invalid integer address in p->friction_comp: SUCCESS
+[Steering_ControlLoop.overflow.43] line 1579 arithmetic overflow on floating-point subtraction in 1.0f - ((1.0f - 0.5f) * (v_kmh - 20.0f)) / hs_range: SUCCESS
+[Steering_ControlLoop.NaN.28] line 1580 NaN on / in ((1.0f - 0.5f) * (v_kmh - 20.0f)) / hs_range: SUCCESS
+[Steering_ControlLoop.division-by-zero.6] line 1580 division by zero in ((1.0f - 0.5f) * (v_kmh - 20.0f)) / hs_range: SUCCESS
+[Steering_ControlLoop.overflow.40] line 1580 arithmetic overflow on floating-point subtraction in v_kmh - 20.0f: SUCCESS
+[Steering_ControlLoop.overflow.41] line 1580 arithmetic overflow on floating-point multiplication in (1.0f - 0.5f) * (v_kmh - 20.0f): SUCCESS
+[Steering_ControlLoop.overflow.42] line 1580 arithmetic overflow on floating-point division in ((1.0f - 0.5f) * (v_kmh - 20.0f)) / hs_range: SUCCESS
+[Steering_ControlLoop.NaN.29] line 1582 NaN on * in tau * hs_fade: SUCCESS
+[Steering_ControlLoop.overflow.44] line 1582 arithmetic overflow on floating-point multiplication in tau * hs_fade: SUCCESS
+[Steering_ControlLoop.NaN.30] line 1587 NaN on * in tau * return_value_Safety_GetSteeringLimitFactor: SUCCESS
+[Steering_ControlLoop.overflow.45] line 1587 arithmetic overflow on floating-point multiplication in tau * return_value_Safety_GetSteeringLimitFactor: SUCCESS
+[Steering_ControlLoop.pointer_dereference.43] line 1598 dereference failure: pointer NULL in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.44] line 1598 dereference failure: pointer invalid in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.45] line 1598 dereference failure: deallocated dynamic object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.46] line 1598 dereference failure: dead object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.47] line 1598 dereference failure: pointer outside object bounds in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.48] line 1598 dereference failure: invalid integer address in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.49] line 1599 dereference failure: pointer NULL in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.50] line 1599 dereference failure: pointer invalid in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.51] line 1599 dereference failure: deallocated dynamic object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.52] line 1599 dereference failure: dead object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.53] line 1599 dereference failure: pointer outside object bounds in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.54] line 1599 dereference failure: invalid integer address in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.55] line 1599 dereference failure: pointer NULL in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.56] line 1599 dereference failure: pointer invalid in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.57] line 1599 dereference failure: deallocated dynamic object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.58] line 1599 dereference failure: dead object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.59] line 1599 dereference failure: pointer outside object bounds in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.60] line 1599 dereference failure: invalid integer address in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.61] line 1600 dereference failure: pointer NULL in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.62] line 1600 dereference failure: pointer invalid in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.63] line 1600 dereference failure: deallocated dynamic object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.64] line 1600 dereference failure: dead object in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.65] line 1600 dereference failure: pointer outside object bounds in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.66] line 1600 dereference failure: invalid integer address in p->min_drive_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.67] line 1604 dereference failure: pointer NULL in p->coast_band_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.68] line 1604 dereference failure: pointer invalid in p->coast_band_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.69] line 1604 dereference failure: deallocated dynamic object in p->coast_band_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.70] line 1604 dereference failure: dead object in p->coast_band_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.71] line 1604 dereference failure: pointer outside object bounds in p->coast_band_pct: SUCCESS
+[Steering_ControlLoop.pointer_dereference.72] line 1604 dereference failure: invalid integer address in p->coast_band_pct: SUCCESS
+[Steering_ControlLoop.overflow.46] line 1610 arithmetic overflow on floating-point multiplication in pwm_pct * (float)4249: SUCCESS
+[Steering_ControlLoop.overflow.47] line 1610 arithmetic overflow on floating-point division in (pwm_pct * (float)4249) / 100.0f: SUCCESS
+[Steering_ControlLoop.overflow.48] line 1613 arithmetic overflow on signed - in (signed int)pwm_raw - (signed int)eps_prev_pwm_raw: SUCCESS
+[Steering_ControlLoop.overflow.49] line 1614 arithmetic overflow on signed + in (signed int)eps_prev_pwm_raw + 250: SUCCESS
+[Steering_ControlLoop.overflow.50] line 1615 arithmetic overflow on signed - in (signed int)eps_prev_pwm_raw - 250: SUCCESS
+[Steering_ControlLoop.overflow.51] line 1620 arithmetic overflow on signed unary minus in -((signed int)pwm_raw): SUCCESS
+[Steering_ControlLoop.overflow.52] line 1623 arithmetic overflow on floating-point multiplication in (float)pwm_abs * 100.0f: SUCCESS
+[Steering_ControlLoop.overflow.53] line 1623 arithmetic overflow on floating-point division in ((float)pwm_abs * 100.0f) / (float)4249: SUCCESS
+[Steering_ControlLoop.overflow.54] line 1627 arithmetic overflow on signed unary minus in -((signed int)(int16_t)pwm_abs): SUCCESS
+
+Core/Src/motor_control.c function Steering_GetCurrentAngle
+[Steering_GetCurrentAngle.pointer_dereference.1] line 1632 dereference failure: pointer NULL in (&htim2)->Instance->CNT: FAILURE
+[Steering_GetCurrentAngle.pointer_dereference.2] line 1632 dereference failure: pointer invalid in (&htim2)->Instance->CNT: FAILURE
+[Steering_GetCurrentAngle.pointer_dereference.3] line 1632 dereference failure: deallocated dynamic object in (&htim2)->Instance->CNT: FAILURE
+[Steering_GetCurrentAngle.pointer_dereference.4] line 1632 dereference failure: dead object in (&htim2)->Instance->CNT: FAILURE
+[Steering_GetCurrentAngle.pointer_dereference.5] line 1632 dereference failure: pointer outside object bounds in (&htim2)->Instance->CNT: FAILURE
+[Steering_GetCurrentAngle.pointer_dereference.6] line 1632 dereference failure: invalid integer address in (&htim2)->Instance->CNT: FAILURE
+[Steering_GetCurrentAngle.overflow.1] line 1633 arithmetic overflow on floating-point multiplication in (float)cnt * 360.0f: SUCCESS
+[Steering_GetCurrentAngle.overflow.2] line 1633 arithmetic overflow on floating-point division in ((float)cnt * 360.0f) / (float)(1200 * 4): SUCCESS
+
+Core/Src/motor_control.c function Steering_GetWheelAngles
+[Steering_GetWheelAngles.pointer_dereference.1] line 1656 dereference failure: pointer NULL in *out_fl_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.2] line 1656 dereference failure: pointer invalid in *out_fl_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.3] line 1656 dereference failure: deallocated dynamic object in *out_fl_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.4] line 1656 dereference failure: dead object in *out_fl_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.5] line 1656 dereference failure: pointer outside object bounds in *out_fl_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.6] line 1656 dereference failure: invalid integer address in *out_fl_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.7] line 1657 dereference failure: pointer NULL in *out_fr_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.8] line 1657 dereference failure: pointer invalid in *out_fr_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.9] line 1657 dereference failure: deallocated dynamic object in *out_fr_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.10] line 1657 dereference failure: dead object in *out_fr_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.11] line 1657 dereference failure: pointer outside object bounds in *out_fr_deg: SUCCESS
+[Steering_GetWheelAngles.pointer_dereference.12] line 1657 dereference failure: invalid integer address in *out_fr_deg: SUCCESS
+
+Core/Src/motor_control.c function Steering_Init
+[Steering_Init.pointer_dereference.1] line 495 dereference failure: pointer NULL in (&htim2)->Instance->CNT: SUCCESS
+[Steering_Init.pointer_dereference.2] line 495 dereference failure: pointer invalid in (&htim2)->Instance->CNT: SUCCESS
+[Steering_Init.pointer_dereference.3] line 495 dereference failure: deallocated dynamic object in (&htim2)->Instance->CNT: SUCCESS
+[Steering_Init.pointer_dereference.4] line 495 dereference failure: dead object in (&htim2)->Instance->CNT: SUCCESS
+[Steering_Init.pointer_dereference.5] line 495 dereference failure: pointer outside object bounds in (&htim2)->Instance->CNT: SUCCESS
+[Steering_Init.pointer_dereference.6] line 495 dereference failure: invalid integer address in (&htim2)->Instance->CNT: SUCCESS
+
+Core/Src/motor_control.c function Traction_EmergencyStop
+[Traction_EmergencyStop.overflow.1] line 1436 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_EmergencyStop.array_bounds.1] line 1437 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)i]: SUCCESS
+
+Core/Src/motor_control.c function Traction_Init
+[Traction_Init.overflow.1] line 451 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Init.array_bounds.1] line 452 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Init.overflow.2] line 473 arithmetic overflow on unsigned + in j + 1: SUCCESS
+[Traction_Init.array_bounds.2] line 474 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)j]: SUCCESS
+
+Core/Src/motor_control.c function Traction_SetDemand
+[Traction_SetDemand.NaN.1] line 540 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR: SUCCESS
+[Traction_SetDemand.NaN.2] line 540 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL: SUCCESS
+[Traction_SetDemand.overflow.1] line 540 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR: SUCCESS
+[Traction_SetDemand.overflow.2] line 540 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL: SUCCESS
+[Traction_SetDemand.NaN.3] line 541 NaN on + in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR: SUCCESS
+[Traction_SetDemand.overflow.3] line 541 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR: SUCCESS
+[Traction_SetDemand.overflow.4] line 541 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL + return_value_Wheel_GetSpeed_FR + return_value_Wheel_GetSpeed_RL + return_value_Wheel_GetSpeed_RR) / 4.0f: SUCCESS
+[Traction_SetDemand.overflow.5] line 544 arithmetic overflow on unsigned - in now_anom - prev_raw_demand_tick: SUCCESS
+[Traction_SetDemand.overflow.6] line 546 arithmetic overflow on floating-point division in dt_anom / 10.0f: SUCCESS
+[Traction_SetDemand.overflow.7] line 546 arithmetic overflow on floating-point multiplication in 15.0f * (dt_anom / 10.0f): SUCCESS
+[Traction_SetDemand.NaN.4] line 547 NaN on - in throttlePct - prev_raw_demand: SUCCESS
+[Traction_SetDemand.overflow.8] line 547 arithmetic overflow on floating-point subtraction in throttlePct - prev_raw_demand: SUCCESS
+[Traction_SetDemand.NaN.5] line 552 NaN on + in prev_raw_demand + allowed_step: SUCCESS
+[Traction_SetDemand.overflow.9] line 552 arithmetic overflow on floating-point addition in prev_raw_demand + allowed_step: SUCCESS
+[Traction_SetDemand.NaN.6] line 554 NaN on - in prev_raw_demand - allowed_step: SUCCESS
+[Traction_SetDemand.overflow.10] line 554 arithmetic overflow on floating-point subtraction in prev_raw_demand - allowed_step: SUCCESS
+[Traction_SetDemand.NaN.7] line 575 NaN on - in throttlePct - frozen_pedal_value: SUCCESS
+[Traction_SetDemand.overflow.11] line 575 arithmetic overflow on floating-point subtraction in throttlePct - frozen_pedal_value: SUCCESS
+[Traction_SetDemand.NaN.8] line 580 NaN on + in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0: SUCCESS
+[Traction_SetDemand.NaN.9] line 580 NaN on + in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0: SUCCESS
+[Traction_SetDemand.overflow.12] line 580 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0: SUCCESS
+[Traction_SetDemand.overflow.13] line 580 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0: SUCCESS
+[Traction_SetDemand.NaN.10] line 581 NaN on + in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0 + return_value_Wheel_GetSpeed_RR$0: SUCCESS
+[Traction_SetDemand.overflow.14] line 581 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0 + return_value_Wheel_GetSpeed_RR$0: SUCCESS
+[Traction_SetDemand.overflow.15] line 581 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL$0 + return_value_Wheel_GetSpeed_FR$0 + return_value_Wheel_GetSpeed_RL$0 + return_value_Wheel_GetSpeed_RR$0) / 4.0f: SUCCESS
+[Traction_SetDemand.overflow.16] line 582 arithmetic overflow on unsigned - in now_anom - frozen_pedal_tick: SUCCESS
+[Traction_SetDemand.NaN.11] line 585 NaN on + in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1: SUCCESS
+[Traction_SetDemand.NaN.12] line 585 NaN on + in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1: SUCCESS
+[Traction_SetDemand.overflow.17] line 585 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1: SUCCESS
+[Traction_SetDemand.overflow.18] line 585 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1: SUCCESS
+[Traction_SetDemand.NaN.13] line 586 NaN on + in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1 + return_value_Wheel_GetSpeed_RR$1: SUCCESS
+[Traction_SetDemand.overflow.19] line 586 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1 + return_value_Wheel_GetSpeed_RR$1: SUCCESS
+[Traction_SetDemand.overflow.20] line 586 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1 + return_value_Wheel_GetSpeed_RR$1) / 4.0f: SUCCESS
+[Traction_SetDemand.NaN.14] line 587 NaN on - in current_speed - frozen_pedal_speed: SUCCESS
+[Traction_SetDemand.overflow.21] line 587 arithmetic overflow on floating-point subtraction in current_speed - frozen_pedal_speed: SUCCESS
+[Traction_SetDemand.overflow.22] line 616 arithmetic overflow on floating-point multiplication in 0.15f * throttlePct: SUCCESS
+[Traction_SetDemand.NaN.15] line 617 NaN on + in 0.15f * throttlePct + (1.0f - 0.15f) * pedal_ema: SUCCESS
+[Traction_SetDemand.overflow.23] line 617 arithmetic overflow on floating-point multiplication in (1.0f - 0.15f) * pedal_ema: SUCCESS
+[Traction_SetDemand.overflow.24] line 617 arithmetic overflow on floating-point addition in 0.15f * throttlePct + (1.0f - 0.15f) * pedal_ema: SUCCESS
+[Traction_SetDemand.overflow.25] line 622 arithmetic overflow on unsigned - in now - pedal_last_tick: SUCCESS
+[Traction_SetDemand.overflow.26] line 622 arithmetic overflow on floating-point division in (float)(now - pedal_last_tick) / 1000.0f: SUCCESS
+[Traction_SetDemand.NaN.16] line 627 NaN on - in target - pedal_ramped: SUCCESS
+[Traction_SetDemand.overflow.27] line 627 arithmetic overflow on floating-point subtraction in target - pedal_ramped: SUCCESS
+[Traction_SetDemand.overflow.28] line 631 arithmetic overflow on floating-point multiplication in 50.0f * dt: SUCCESS
+[Traction_SetDemand.overflow.29] line 635 arithmetic overflow on floating-point multiplication in 100.0f * dt: SUCCESS
+[Traction_SetDemand.NaN.17] line 638 NaN on + in pedal_ramped + diff: SUCCESS
+[Traction_SetDemand.overflow.30] line 638 arithmetic overflow on floating-point addition in pedal_ramped + diff: SUCCESS
+
+Core/Src/motor_control.c function Traction_Update
+[Traction_Update.overflow.1] line 782 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.overflow.2] line 793 arithmetic overflow on floating-point subtraction in 20.0f - max_current: SUCCESS
+[Traction_Update.overflow.3] line 794 arithmetic overflow on floating-point division in (20.0f - max_current) / (20.0f - 15.0f): SUCCESS
+[Traction_Update.NaN.1] line 795 NaN on * in hold_pct * ratio: SUCCESS
+[Traction_Update.overflow.4] line 795 arithmetic overflow on floating-point multiplication in hold_pct * ratio: SUCCESS
+[Traction_Update.overflow.5] line 802 arithmetic overflow on floating-point subtraction in 85.0f - max_temp: SUCCESS
+[Traction_Update.overflow.6] line 803 arithmetic overflow on floating-point division in (85.0f - max_temp) / (85.0f - 70.0f): SUCCESS
+[Traction_Update.NaN.2] line 804 NaN on * in hold_pct * ratio: SUCCESS
+[Traction_Update.overflow.7] line 804 arithmetic overflow on floating-point multiplication in hold_pct * ratio: SUCCESS
+[Traction_Update.overflow.8] line 807 arithmetic overflow on floating-point multiplication in hold_pct * (float)4249: SUCCESS
+[Traction_Update.overflow.9] line 807 arithmetic overflow on floating-point division in (hold_pct * (float)4249) / 100.0f: SUCCESS
+[Traction_Update.overflow.10] line 824 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.1] line 825 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.2] line 826 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.3] line 849 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)j]: SUCCESS
+[Traction_Update.overflow.11] line 849 arithmetic overflow on unsigned + in j + 1: SUCCESS
+[Traction_Update.overflow.12] line 856 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.4] line 857 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.5] line 858 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.13] line 872 arithmetic overflow on unsigned - in now_db - dynbrake_last_tick: SUCCESS
+[Traction_Update.overflow.14] line 872 arithmetic overflow on floating-point division in (float)(now_db - dynbrake_last_tick) / 1000.0f: SUCCESS
+[Traction_Update.NaN.3] line 876 NaN on - in demand - prev_demand_pct: SUCCESS
+[Traction_Update.NaN.4] line 876 NaN on / in (demand - prev_demand_pct) / dt_db: SUCCESS
+[Traction_Update.division-by-zero.1] line 876 division by zero in (demand - prev_demand_pct) / dt_db: SUCCESS
+[Traction_Update.overflow.15] line 876 arithmetic overflow on floating-point subtraction in demand - prev_demand_pct: SUCCESS
+[Traction_Update.overflow.16] line 876 arithmetic overflow on floating-point division in (demand - prev_demand_pct) / dt_db: SUCCESS
+[Traction_Update.overflow.17] line 894 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.6] line 895 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.NaN.5] line 905 NaN on + in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1: FAILURE
+[Traction_Update.NaN.6] line 905 NaN on + in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1: FAILURE
+[Traction_Update.overflow.18] line 905 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1: FAILURE
+[Traction_Update.overflow.19] line 905 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1: FAILURE
+[Traction_Update.NaN.7] line 906 NaN on + in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1 + return_value_Wheel_GetSpeed_RR$1: FAILURE
+[Traction_Update.overflow.20] line 906 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1 + return_value_Wheel_GetSpeed_RR$1: FAILURE
+[Traction_Update.overflow.21] line 906 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL$1 + return_value_Wheel_GetSpeed_FR$1 + return_value_Wheel_GetSpeed_RL$1 + return_value_Wheel_GetSpeed_RR$1) / 4.0f: SUCCESS
+[Traction_Update.overflow.22] line 914 arithmetic overflow on floating-point multiplication in return_value_fabsf * 0.5f: SUCCESS
+[Traction_Update.NaN.8] line 919 NaN on * in target_brake * return_value_Safety_GetPowerLimitFactor: SUCCESS
+[Traction_Update.overflow.23] line 919 arithmetic overflow on floating-point multiplication in target_brake * return_value_Safety_GetPowerLimitFactor: SUCCESS
+[Traction_Update.overflow.24] line 924 arithmetic overflow on floating-point multiplication in target_brake * 0.2f: SUCCESS
+[Traction_Update.overflow.25] line 929 arithmetic overflow on floating-point multiplication in 100.0f * dt_db: SUCCESS
+[Traction_Update.NaN.9] line 930 NaN on - in target_brake - dynbrake_pct: SUCCESS
+[Traction_Update.overflow.26] line 930 arithmetic overflow on floating-point subtraction in target_brake - dynbrake_pct: SUCCESS
+[Traction_Update.NaN.10] line 932 NaN on + in dynbrake_pct + diff_b: SUCCESS
+[Traction_Update.overflow.27] line 932 arithmetic overflow on floating-point addition in dynbrake_pct + diff_b: SUCCESS
+[Traction_Update.overflow.28] line 939 arithmetic overflow on floating-point multiplication in 80.0f * dt_db: SUCCESS
+[Traction_Update.NaN.11] line 940 NaN on - in dynbrake_pct - release: SUCCESS
+[Traction_Update.overflow.29] line 940 arithmetic overflow on floating-point subtraction in dynbrake_pct - release: SUCCESS
+[Traction_Update.NaN.12] line 971 NaN on * in effective_demand * gear_scale: SUCCESS
+[Traction_Update.overflow.30] line 971 arithmetic overflow on floating-point multiplication in effective_demand * gear_scale: SUCCESS
+[Traction_Update.NaN.13] line 981 NaN on + in return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2: SUCCESS
+[Traction_Update.NaN.14] line 981 NaN on + in return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2 + return_value_Wheel_GetSpeed_RL$2: SUCCESS
+[Traction_Update.overflow.31] line 981 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2: SUCCESS
+[Traction_Update.overflow.32] line 981 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2 + return_value_Wheel_GetSpeed_RL$2: SUCCESS
+[Traction_Update.NaN.15] line 982 NaN on + in return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2 + return_value_Wheel_GetSpeed_RL$2 + return_value_Wheel_GetSpeed_RR$2: SUCCESS
+[Traction_Update.overflow.33] line 982 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2 + return_value_Wheel_GetSpeed_RL$2 + return_value_Wheel_GetSpeed_RR$2: SUCCESS
+[Traction_Update.overflow.34] line 982 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL$2 + return_value_Wheel_GetSpeed_FR$2 + return_value_Wheel_GetSpeed_RL$2 + return_value_Wheel_GetSpeed_RR$2) / 4.0f: SUCCESS
+[Traction_Update.overflow.35] line 987 arithmetic overflow on floating-point subtraction in 5.0f - avg_spd: SUCCESS
+[Traction_Update.overflow.36] line 988 arithmetic overflow on floating-point division in (5.0f - avg_spd) / (5.0f * 0.2f): SUCCESS
+[Traction_Update.NaN.16] line 991 NaN on * in effective_demand * headroom: SUCCESS
+[Traction_Update.overflow.37] line 991 arithmetic overflow on floating-point multiplication in effective_demand * headroom: SUCCESS
+[Traction_Update.overflow.39] line 1045 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.overflow.38] line 1047 arithmetic overflow on signed + in 4 + (signed int)i: SUCCESS
+[Traction_Update.array_bounds.7] line 1051 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.8] line 1052 array 'motor_overtemp_cutoff' upper bound in motor_overtemp_cutoff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.9] line 1057 array 'motor_overtemp_cutoff' upper bound in motor_overtemp_cutoff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.10] line 1059 array 'motor_overtemp_cutoff' upper bound in motor_overtemp_cutoff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.11] line 1061 array 'motor_overtemp_cutoff' upper bound in motor_overtemp_cutoff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.12] line 1063 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.40] line 1074 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.13] line 1075 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.14] line 1075 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.41] line 1087 arithmetic overflow on floating-point multiplication in effective_demand * (100.0f - 8.0f): SUCCESS
+[Traction_Update.overflow.42] line 1087 arithmetic overflow on floating-point division in (effective_demand * (100.0f - 8.0f)) / 100.0f: SUCCESS
+[Traction_Update.overflow.43] line 1087 arithmetic overflow on floating-point addition in 8.0f + (effective_demand * (100.0f - 8.0f)) / 100.0f: SUCCESS
+[Traction_Update.overflow.44] line 1088 arithmetic overflow on floating-point multiplication in mapped * (float)4249: SUCCESS
+[Traction_Update.overflow.45] line 1088 arithmetic overflow on floating-point division in (mapped * (float)4249) / 100.0f: SUCCESS
+[Traction_Update.overflow.46] line 1090 arithmetic overflow on floating-point multiplication in return_value_fabsf$1 * (float)4249: SUCCESS
+[Traction_Update.overflow.47] line 1090 arithmetic overflow on floating-point division in (return_value_fabsf$1 * (float)4249) / 100.0f: SUCCESS
+[Traction_Update.overflow.48] line 1104 arithmetic overflow on floating-point multiplication in 0.08f * pwm_f: SUCCESS
+[Traction_Update.NaN.17] line 1105 NaN on + in 0.08f * pwm_f + (1.0f - 0.08f) * creep_smooth_pct: SUCCESS
+[Traction_Update.overflow.49] line 1105 arithmetic overflow on floating-point multiplication in (1.0f - 0.08f) * creep_smooth_pct: SUCCESS
+[Traction_Update.overflow.50] line 1105 arithmetic overflow on floating-point addition in 0.08f * pwm_f + (1.0f - 0.08f) * creep_smooth_pct: SUCCESS
+[Traction_Update.overflow.51] line 1107 arithmetic overflow on floating-point addition in creep_smooth_pct + 0.5f: SUCCESS
+[Traction_Update.NaN.18] line 1133 NaN on * in (float)base_pwm * effective_obstacle: SUCCESS
+[Traction_Update.overflow.52] line 1133 arithmetic overflow on floating-point multiplication in (float)base_pwm * effective_obstacle: SUCCESS
+[Traction_Update.NaN.19] line 1144 NaN on * in (float)base_pwm * traction_cap: SUCCESS
+[Traction_Update.overflow.53] line 1144 arithmetic overflow on floating-point multiplication in (float)base_pwm * traction_cap: SUCCESS
+[Traction_Update.overflow.54] line 1174 arithmetic overflow on signed unary minus in -((signed int)dir): SUCCESS
+[Traction_Update.NaN.20] line 1206 NaN on + in return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3: FAILURE
+[Traction_Update.NaN.21] line 1206 NaN on + in return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3 + return_value_Wheel_GetSpeed_RL$3: FAILURE
+[Traction_Update.overflow.55] line 1206 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3: FAILURE
+[Traction_Update.overflow.56] line 1206 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3 + return_value_Wheel_GetSpeed_RL$3: FAILURE
+[Traction_Update.NaN.22] line 1207 NaN on + in return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3 + return_value_Wheel_GetSpeed_RL$3 + return_value_Wheel_GetSpeed_RR$3: FAILURE
+[Traction_Update.overflow.57] line 1207 arithmetic overflow on floating-point addition in return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3 + return_value_Wheel_GetSpeed_RL$3 + return_value_Wheel_GetSpeed_RR$3: FAILURE
+[Traction_Update.overflow.58] line 1207 arithmetic overflow on floating-point division in (return_value_Wheel_GetSpeed_FL$3 + return_value_Wheel_GetSpeed_FR$3 + return_value_Wheel_GetSpeed_RL$3 + return_value_Wheel_GetSpeed_RR$3) / 4.0f: SUCCESS
+[Traction_Update.overflow.59] line 1241 arithmetic overflow on unsigned - in return_value_HAL_GetTick$0 - coast_start_tick: SUCCESS
+[Traction_Update.NaN.23] line 1253 NaN on + in brake_release_pct + 40.0f * dt_db: SUCCESS
+[Traction_Update.overflow.60] line 1253 arithmetic overflow on floating-point multiplication in 40.0f * dt_db: SUCCESS
+[Traction_Update.overflow.61] line 1253 arithmetic overflow on floating-point addition in brake_release_pct + 40.0f * dt_db: SUCCESS
+[Traction_Update.NaN.24] line 1256 NaN on * in (float)base_pwm * brake_release_pct: SUCCESS
+[Traction_Update.overflow.62] line 1256 arithmetic overflow on floating-point multiplication in (float)base_pwm * brake_release_pct: SUCCESS
+[Traction_Update.overflow.63] line 1256 arithmetic overflow on floating-point division in ((float)base_pwm * brake_release_pct) / 100.0f: SUCCESS
+[Traction_Update.overflow.66] line 1272 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.NaN.25] line 1275 NaN on * in (float)base_pwm * acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.NaN.26] line 1275 NaN on * in (float)base_pwm * acker_diff[(signed long int)i] * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.15] line 1275 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.16] line 1275 array 'acker_diff' upper bound in acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.17] line 1275 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.64] line 1275 arithmetic overflow on floating-point multiplication in (float)base_pwm * acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.65] line 1275 arithmetic overflow on floating-point multiplication in (float)base_pwm * acker_diff[(signed long int)i] * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.18] line 1276 array 'desired_dir' upper bound in desired_dir[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.19] line 1277 array 'desired_en' upper bound in desired_en[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.20] line 1280 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.21] line 1281 array 'desired_en' upper bound in desired_en[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.67] line 1286 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.22] line 1287 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.23] line 1288 array 'desired_en' upper bound in desired_en[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.70] line 1305 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.NaN.27] line 1306 NaN on * in (float)base_pwm * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.24] line 1306 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.25] line 1306 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.68] line 1306 arithmetic overflow on floating-point multiplication in (float)base_pwm * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.26] line 1307 array 'desired_dir' upper bound in desired_dir[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.69] line 1307 arithmetic overflow on signed unary minus in -((signed int)dir): SUCCESS
+[Traction_Update.array_bounds.27] line 1308 array 'desired_en' upper bound in desired_en[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.73] line 1312 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.NaN.28] line 1313 NaN on * in (float)axle_pwm * acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.NaN.29] line 1313 NaN on * in (float)axle_pwm * acker_diff[(signed long int)i] * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.28] line 1313 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.29] line 1313 array 'acker_diff' upper bound in acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.30] line 1313 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.71] line 1313 arithmetic overflow on floating-point multiplication in (float)axle_pwm * acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.72] line 1313 arithmetic overflow on floating-point multiplication in (float)axle_pwm * acker_diff[(signed long int)i] * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.31] line 1314 array 'desired_en' upper bound in desired_en[(signed long int)i]: SUCCESS
+[Traction_Update.NaN.30] line 1318 NaN on * in (float)base_pwm * acker_diff[(signed long int)0]: SUCCESS
+[Traction_Update.NaN.31] line 1318 NaN on * in (float)base_pwm * acker_diff[(signed long int)0] * safety_status.wheel_scale[(signed long int)0]: SUCCESS
+[Traction_Update.overflow.74] line 1318 arithmetic overflow on floating-point multiplication in (float)base_pwm * acker_diff[(signed long int)0]: SUCCESS
+[Traction_Update.overflow.75] line 1318 arithmetic overflow on floating-point multiplication in (float)base_pwm * acker_diff[(signed long int)0] * safety_status.wheel_scale[(signed long int)0]: SUCCESS
+[Traction_Update.NaN.32] line 1319 NaN on * in (float)base_pwm * acker_diff[(signed long int)1]: SUCCESS
+[Traction_Update.NaN.33] line 1319 NaN on * in (float)base_pwm * acker_diff[(signed long int)1] * safety_status.wheel_scale[(signed long int)1]: SUCCESS
+[Traction_Update.overflow.76] line 1319 arithmetic overflow on floating-point multiplication in (float)base_pwm * acker_diff[(signed long int)1]: SUCCESS
+[Traction_Update.overflow.77] line 1319 arithmetic overflow on floating-point multiplication in (float)base_pwm * acker_diff[(signed long int)1] * safety_status.wheel_scale[(signed long int)1]: SUCCESS
+[Traction_Update.overflow.81] line 1339 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.32] line 1340 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.33] line 1340 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.78] line 1340 arithmetic overflow on signed - in (int32_t)desired_pwm[(signed long int)i] - (int32_t)prev_output_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.79] line 1342 arithmetic overflow on unsigned + in (unsigned int)prev_output_pwm[(signed long int)i] + 80u: SUCCESS
+[Traction_Update.array_bounds.34] line 1344 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.35] line 1344 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.36] line 1345 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.80] line 1345 arithmetic overflow on unsigned - in (unsigned int)prev_output_pwm[(signed long int)i] - 80u: SUCCESS
+[Traction_Update.array_bounds.37] line 1348 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.38] line 1348 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.82] line 1357 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.39] line 1358 array 'prev_output_pwm' upper bound in prev_output_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.84] line 1365 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.40] line 1367 array 'desired_en' upper bound in desired_en[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.41] line 1367 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.42] line 1372 array 'desired_dir' upper bound in desired_dir[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.43] line 1372 array 'desired_pwm' upper bound in desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.83] line 1372 arithmetic overflow on signed * in (int32_t)desired_dir[(signed long int)i] * (int32_t)desired_pwm[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.44] line 1374 array 'motors' upper bound in motors[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.87] line 1382 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[Traction_Update.array_bounds.45] line 1383 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.46] line 1384 array 'traction_state'.wheels upper bound in traction_state.wheels[(signed long int)i]: SUCCESS
+[Traction_Update.NaN.34] line 1387 NaN on * in (float)per_wheel_base * acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.NaN.35] line 1387 NaN on * in (float)per_wheel_base * acker_diff[(signed long int)i] * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.47] line 1387 array 'acker_diff' upper bound in acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.array_bounds.48] line 1387 array 'safety_status'.wheel_scale upper bound in safety_status.wheel_scale[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.85] line 1387 arithmetic overflow on floating-point multiplication in (float)per_wheel_base * acker_diff[(signed long int)i]: SUCCESS
+[Traction_Update.overflow.86] line 1387 arithmetic overflow on floating-point multiplication in (float)per_wheel_base * acker_diff[(signed long int)i] * safety_status.wheel_scale[(signed long int)i]: SUCCESS
+
+Core/Src/motor_control.c function compute_ackermann_differential
+[compute_ackermann_differential.pointer_dereference.1] line 693 dereference failure: pointer NULL in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.2] line 693 dereference failure: pointer invalid in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.3] line 693 dereference failure: deallocated dynamic object in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.4] line 693 dereference failure: dead object in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.5] line 693 dereference failure: pointer outside object bounds in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.6] line 693 dereference failure: invalid integer address in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.7] line 694 dereference failure: pointer NULL in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.8] line 694 dereference failure: pointer invalid in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.9] line 694 dereference failure: deallocated dynamic object in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.10] line 694 dereference failure: dead object in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.11] line 694 dereference failure: pointer outside object bounds in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.12] line 694 dereference failure: invalid integer address in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.13] line 695 dereference failure: pointer NULL in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.14] line 695 dereference failure: pointer invalid in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.15] line 695 dereference failure: deallocated dynamic object in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.16] line 695 dereference failure: dead object in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.17] line 695 dereference failure: pointer outside object bounds in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.18] line 695 dereference failure: invalid integer address in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.19] line 696 dereference failure: pointer NULL in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.20] line 696 dereference failure: pointer invalid in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.21] line 696 dereference failure: deallocated dynamic object in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.22] line 696 dereference failure: dead object in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.23] line 696 dereference failure: pointer outside object bounds in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.24] line 696 dereference failure: invalid integer address in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.overflow.1] line 707 arithmetic overflow on floating-point multiplication in abs_angle * (float)3.141593: SUCCESS
+[compute_ackermann_differential.overflow.2] line 707 arithmetic overflow on floating-point division in (abs_angle * (float)3.141593) / 180.0f: SUCCESS
+[compute_ackermann_differential.NaN.1] line 714 NaN on / in 0.95f / tan_angle: FAILURE
+[compute_ackermann_differential.division-by-zero.1] line 714 division by zero in 0.95f / tan_angle: SUCCESS
+[compute_ackermann_differential.overflow.3] line 714 arithmetic overflow on floating-point division in 0.95f / tan_angle: SUCCESS
+[compute_ackermann_differential.overflow.4] line 719 arithmetic overflow on floating-point division in 0.7f / 2.0f: SUCCESS
+[compute_ackermann_differential.NaN.2] line 720 NaN on / in half_track / R: SUCCESS
+[compute_ackermann_differential.division-by-zero.2] line 720 division by zero in half_track / R: FAILURE
+[compute_ackermann_differential.overflow.5] line 720 arithmetic overflow on floating-point division in half_track / R: FAILURE
+[compute_ackermann_differential.overflow.6] line 733 arithmetic overflow on floating-point subtraction in 1.0f - correction: SUCCESS
+[compute_ackermann_differential.overflow.7] line 734 arithmetic overflow on floating-point addition in 1.0f + correction: SUCCESS
+[compute_ackermann_differential.pointer_dereference.25] line 742 dereference failure: pointer NULL in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.26] line 742 dereference failure: pointer invalid in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.27] line 742 dereference failure: deallocated dynamic object in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.28] line 742 dereference failure: dead object in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.29] line 742 dereference failure: pointer outside object bounds in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.30] line 742 dereference failure: invalid integer address in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.31] line 743 dereference failure: pointer NULL in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.32] line 743 dereference failure: pointer invalid in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.33] line 743 dereference failure: deallocated dynamic object in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.34] line 743 dereference failure: dead object in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.35] line 743 dereference failure: pointer outside object bounds in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.36] line 743 dereference failure: invalid integer address in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.37] line 744 dereference failure: pointer NULL in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.38] line 744 dereference failure: pointer invalid in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.39] line 744 dereference failure: deallocated dynamic object in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.40] line 744 dereference failure: dead object in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.41] line 744 dereference failure: pointer outside object bounds in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.42] line 744 dereference failure: invalid integer address in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.43] line 745 dereference failure: pointer NULL in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.44] line 745 dereference failure: pointer invalid in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.45] line 745 dereference failure: deallocated dynamic object in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.46] line 745 dereference failure: dead object in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.47] line 745 dereference failure: pointer outside object bounds in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.48] line 745 dereference failure: invalid integer address in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.49] line 748 dereference failure: pointer NULL in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.50] line 748 dereference failure: pointer invalid in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.51] line 748 dereference failure: deallocated dynamic object in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.52] line 748 dereference failure: dead object in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.53] line 748 dereference failure: pointer outside object bounds in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.54] line 748 dereference failure: invalid integer address in diff_out[(signed long int)0]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.55] line 749 dereference failure: pointer NULL in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.56] line 749 dereference failure: pointer invalid in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.57] line 749 dereference failure: deallocated dynamic object in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.58] line 749 dereference failure: dead object in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.59] line 749 dereference failure: pointer outside object bounds in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.60] line 749 dereference failure: invalid integer address in diff_out[(signed long int)1]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.61] line 750 dereference failure: pointer NULL in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.62] line 750 dereference failure: pointer invalid in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.63] line 750 dereference failure: deallocated dynamic object in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.64] line 750 dereference failure: dead object in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.65] line 750 dereference failure: pointer outside object bounds in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.66] line 750 dereference failure: invalid integer address in diff_out[(signed long int)2]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.67] line 751 dereference failure: pointer NULL in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.68] line 751 dereference failure: pointer invalid in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.69] line 751 dereference failure: deallocated dynamic object in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.70] line 751 dereference failure: dead object in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.71] line 751 dereference failure: pointer outside object bounds in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.72] line 751 dereference failure: invalid integer address in diff_out[(signed long int)3]: SUCCESS
+[compute_ackermann_differential.overflow.8] line 755 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[compute_ackermann_differential.pointer_dereference.73] line 756 dereference failure: pointer NULL in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.74] line 756 dereference failure: pointer invalid in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.75] line 756 dereference failure: deallocated dynamic object in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.76] line 756 dereference failure: dead object in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.77] line 756 dereference failure: pointer outside object bounds in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.78] line 756 dereference failure: invalid integer address in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.79] line 756 dereference failure: pointer NULL in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.80] line 756 dereference failure: pointer invalid in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.81] line 756 dereference failure: deallocated dynamic object in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.82] line 756 dereference failure: dead object in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.83] line 756 dereference failure: pointer outside object bounds in diff_out[(signed long int)i]: SUCCESS
+[compute_ackermann_differential.pointer_dereference.84] line 756 dereference failure: invalid integer address in diff_out[(signed long int)i]: SUCCESS
+
+analysis_artifacts/stubs/stm32g4xx_hal.h function HAL_GetTick
+[HAL_GetTick.overflow.1] line 1220 arithmetic overflow on unsigned + in tick + 1u: SUCCESS
+
+** 41 of 1045 failed (24 iterations)
+VERIFICATION FAILED

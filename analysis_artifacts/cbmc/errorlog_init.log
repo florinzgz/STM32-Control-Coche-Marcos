@@ -1,0 +1,274 @@
+CBMC version 5.95.1 (cbmc-5.95.1) 64-bit x86_64 linux
+Parsing Core/Src/error_log.c
+Converting
+Type-checking error_log
+Generating GOTO Program
+Adding CPROVER library (x86_64)
+Removal of function pointers and virtual functions
+Generic Property Instrumentation
+Running with 10 object bits, 54 offset bits (user-specified)
+Starting Bounded Model Checking
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 1 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 2 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 3 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 4 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 5 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 6 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 7 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 8 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.1 iteration 9 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 1 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 2 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 3 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 4 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 5 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 6 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 7 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Unwinding loop errlog_crc32.0 iteration 8 file Core/Src/error_log.c line 65 function errlog_crc32 thread 0
+Not unwinding loop errlog_crc32.1 iteration 10 file Core/Src/error_log.c line 63 function errlog_crc32 thread 0
+Runtime Symex: 0.0372073s
+size of program expression: 1027 steps
+simple slicing removed 22 assignments
+Generated 171 VCC(s), 80 remaining after simplification
+Runtime Postprocess Equation: 4.9823e-05s
+Passing problem to propositional reduction
+converting SSA
+Runtime Convert SSA: 0.00481341s
+Running propositional reduction
+Post-processing
+Runtime Post-process: 0.0001183s
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 7663 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00823187s
+Runtime decision procedure: 0.0131405s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 4101 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.000140292s
+Runtime decision procedure: 0.000160199s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 4102 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 9.647e-05s
+Runtime decision procedure: 0.000113041s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 4103 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.000177641s
+Runtime decision procedure: 0.000193301s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 4103 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.000977963s
+Runtime decision procedure: 0.000994134s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 1729 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 7.7885e-05s
+Runtime decision procedure: 9.3674e-05s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 1728 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.000162803s
+Runtime decision procedure: 0.00017717s
+Running propositional reduction
+Solving with MiniSAT 2.2.1 with simplifier
+3730 variables, 1717 clauses
+SAT checker inconsistent: instance is UNSATISFIABLE
+Runtime Solver: 3.085e-06s
+Runtime decision procedure: 1.2132e-05s
+
+** Results:
+<builtin-library-memcpy> function memcpy
+[memcpy.pointer.1] line 33 same object violation in (const char *)(const void *)flash_hdr >= (const char *)(void *)&log_header + (signed long int)sizeof(errlog_flash_header_t) /*16ul*/ : SUCCESS
+[memcpy.pointer.3] line 33 same object violation in (const char *)(const void *)flash_entries >= (const char *)(void *)log_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.1] line 33 pointer relation: invalid integer address in (const char *)(const void *)flash_hdr: SUCCESS
+[memcpy.pointer_arithmetic.3] line 33 pointer relation: pointer NULL in (const char *)(const void *)flash_entries: SUCCESS
+[memcpy.pointer_arithmetic.4] line 33 pointer relation: pointer invalid in (const char *)(const void *)flash_entries: SUCCESS
+[memcpy.pointer_arithmetic.5] line 33 pointer relation: deallocated dynamic object in (const char *)(const void *)flash_entries: SUCCESS
+[memcpy.pointer_arithmetic.6] line 33 pointer relation: dead object in (const char *)(const void *)flash_entries: SUCCESS
+[memcpy.pointer_arithmetic.7] line 33 pointer relation: pointer outside object bounds in (const char *)(const void *)flash_entries: SUCCESS
+[memcpy.pointer_arithmetic.8] line 33 pointer relation: invalid integer address in (const char *)(const void *)flash_entries: SUCCESS
+[memcpy.pointer_arithmetic.9] line 33 pointer relation: pointer outside object bounds in (const char *)(void *)log_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer.2] line 34 same object violation in (const char *)(void *)&log_header >= (const char *)(const void *)flash_hdr + (signed long int)sizeof(errlog_flash_header_t) /*16ul*/ : SUCCESS
+[memcpy.pointer.4] line 34 same object violation in (const char *)(void *)log_entries >= (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.2] line 34 pointer relation: invalid integer address in (const char *)(const void *)flash_hdr + (signed long int)sizeof(errlog_flash_header_t) /*16ul*/ : SUCCESS
+[memcpy.pointer_arithmetic.10] line 34 pointer relation: pointer NULL in (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.11] line 34 pointer relation: pointer invalid in (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.12] line 34 pointer relation: deallocated dynamic object in (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.13] line 34 pointer relation: dead object in (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.14] line 34 pointer relation: pointer outside object bounds in (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+[memcpy.pointer_arithmetic.15] line 34 pointer relation: invalid integer address in (const char *)(const void *)flash_entries + (signed long int)(size_t)copy_bytes: SUCCESS
+
+Core/Src/error_log.c function ErrorLog_Clear
+[ErrorLog_Clear.precondition_instance.1] line 235 memset destination region writeable: SUCCESS
+
+Core/Src/error_log.c function ErrorLog_GetEntry
+[ErrorLog_GetEntry.overflow.1] line 220 arithmetic overflow on signed + in (signed int)log_header.write_index + (signed int)index: SUCCESS
+[ErrorLog_GetEntry.array_bounds.1] line 225 array 'log_entries' upper bound in log_entries[(signed long int)actual]: SUCCESS
+[ErrorLog_GetEntry.pointer_dereference.1] line 225 dereference failure: pointer NULL in *out: SUCCESS
+[ErrorLog_GetEntry.pointer_dereference.2] line 225 dereference failure: pointer invalid in *out: SUCCESS
+[ErrorLog_GetEntry.pointer_dereference.3] line 225 dereference failure: deallocated dynamic object in *out: SUCCESS
+[ErrorLog_GetEntry.pointer_dereference.4] line 225 dereference failure: dead object in *out: SUCCESS
+[ErrorLog_GetEntry.pointer_dereference.5] line 225 dereference failure: pointer outside object bounds in *out: SUCCESS
+[ErrorLog_GetEntry.pointer_dereference.6] line 225 dereference failure: invalid integer address in *out: SUCCESS
+
+Core/Src/error_log.c function ErrorLog_Init
+[ErrorLog_Init.precondition_instance.1] line 150 memcpy src/dst overlap: SUCCESS
+[ErrorLog_Init.precondition_instance.2] line 150 memcpy source region readable: SUCCESS
+[ErrorLog_Init.precondition_instance.3] line 150 memcpy destination region writeable: SUCCESS
+[ErrorLog_Init.overflow.1] line 155 arithmetic overflow on unsigned * in (unsigned long int)(uint32_t)log_header.entry_count * sizeof(error_log_entry_t) /*16ul*/ : SUCCESS
+[ErrorLog_Init.precondition_instance.4] line 159 memcpy src/dst overlap: SUCCESS
+[ErrorLog_Init.precondition_instance.5] line 159 memcpy source region readable: SUCCESS
+[ErrorLog_Init.precondition_instance.6] line 159 memcpy destination region writeable: SUCCESS
+[ErrorLog_Init.precondition_instance.7] line 162 memset destination region writeable: SUCCESS
+[ErrorLog_Init.precondition_instance.8] line 167 memset destination region writeable: SUCCESS
+
+Core/Src/error_log.c function ErrorLog_Record
+[ErrorLog_Record.array_bounds.1] line 193 array 'log_entries' upper bound in log_entries[(signed long int)log_header.write_index]: SUCCESS
+[ErrorLog_Record.overflow.1] line 194 arithmetic overflow on signed + in (signed int)log_header.write_index + 1: SUCCESS
+[ErrorLog_Record.overflow.2] line 196 arithmetic overflow on unsigned + in log_header.entry_count + 1: SUCCESS
+[ErrorLog_Record.overflow.3] line 199 arithmetic overflow on unsigned + in log_header.total_events + 1u: SUCCESS
+
+Core/Src/error_log.c function errlog_crc32
+[errlog_crc32.overflow.2] line 63 arithmetic overflow on unsigned + in i + 1u: SUCCESS
+[errlog_crc32.unwind.1] line 63 unwinding assertion loop 1: FAILURE
+[errlog_crc32.pointer_dereference.1] line 64 dereference failure: pointer NULL in p[(signed long int)i]: FAILURE
+[errlog_crc32.pointer_dereference.2] line 64 dereference failure: pointer invalid in p[(signed long int)i]: SUCCESS
+[errlog_crc32.pointer_dereference.3] line 64 dereference failure: deallocated dynamic object in p[(signed long int)i]: FAILURE
+[errlog_crc32.pointer_dereference.4] line 64 dereference failure: dead object in p[(signed long int)i]: FAILURE
+[errlog_crc32.pointer_dereference.5] line 64 dereference failure: pointer outside object bounds in p[(signed long int)i]: FAILURE
+[errlog_crc32.pointer_dereference.6] line 64 dereference failure: invalid integer address in p[(signed long int)i]: FAILURE
+[errlog_crc32.overflow.1] line 65 arithmetic overflow on signed + in b + 1: SUCCESS
+
+Core/Src/error_log.c function errlog_header_valid
+[errlog_header_valid.pointer_dereference.1] line 78 dereference failure: pointer NULL in hdr->magic: FAILURE
+[errlog_header_valid.pointer_dereference.2] line 78 dereference failure: pointer invalid in hdr->magic: SUCCESS
+[errlog_header_valid.pointer_dereference.3] line 78 dereference failure: deallocated dynamic object in hdr->magic: FAILURE
+[errlog_header_valid.pointer_dereference.4] line 78 dereference failure: dead object in hdr->magic: FAILURE
+[errlog_header_valid.pointer_dereference.5] line 78 dereference failure: pointer outside object bounds in hdr->magic: FAILURE
+[errlog_header_valid.pointer_dereference.6] line 78 dereference failure: invalid integer address in hdr->magic: FAILURE
+[errlog_header_valid.pointer_dereference.7] line 79 dereference failure: pointer NULL in hdr->entry_count: FAILURE
+[errlog_header_valid.pointer_dereference.8] line 79 dereference failure: pointer invalid in hdr->entry_count: SUCCESS
+[errlog_header_valid.pointer_dereference.9] line 79 dereference failure: deallocated dynamic object in hdr->entry_count: FAILURE
+[errlog_header_valid.pointer_dereference.10] line 79 dereference failure: dead object in hdr->entry_count: FAILURE
+[errlog_header_valid.pointer_dereference.11] line 79 dereference failure: pointer outside object bounds in hdr->entry_count: FAILURE
+[errlog_header_valid.pointer_dereference.12] line 79 dereference failure: invalid integer address in hdr->entry_count: FAILURE
+[errlog_header_valid.pointer_dereference.13] line 80 dereference failure: pointer NULL in hdr->write_index: FAILURE
+[errlog_header_valid.pointer_dereference.14] line 80 dereference failure: pointer invalid in hdr->write_index: SUCCESS
+[errlog_header_valid.pointer_dereference.15] line 80 dereference failure: deallocated dynamic object in hdr->write_index: FAILURE
+[errlog_header_valid.pointer_dereference.16] line 80 dereference failure: dead object in hdr->write_index: FAILURE
+[errlog_header_valid.pointer_dereference.17] line 80 dereference failure: pointer outside object bounds in hdr->write_index: FAILURE
+[errlog_header_valid.pointer_dereference.18] line 80 dereference failure: invalid integer address in hdr->write_index: FAILURE
+[errlog_header_valid.pointer_dereference.19] line 82 dereference failure: pointer NULL in hdr->checksum: SUCCESS
+[errlog_header_valid.pointer_dereference.20] line 82 dereference failure: pointer invalid in hdr->checksum: SUCCESS
+[errlog_header_valid.pointer_dereference.21] line 82 dereference failure: deallocated dynamic object in hdr->checksum: SUCCESS
+[errlog_header_valid.pointer_dereference.22] line 82 dereference failure: dead object in hdr->checksum: SUCCESS
+[errlog_header_valid.pointer_dereference.23] line 82 dereference failure: pointer outside object bounds in hdr->checksum: SUCCESS
+[errlog_header_valid.pointer_dereference.24] line 82 dereference failure: invalid integer address in hdr->checksum: SUCCESS
+
+Core/Src/error_log.c function errlog_write_flash
+[errlog_write_flash.overflow.3] line 112 arithmetic overflow on unsigned + in i + 1u: SUCCESS
+[errlog_write_flash.overflow.1] line 114 arithmetic overflow on unsigned * in i * 8u: SUCCESS
+[errlog_write_flash.overflow.2] line 114 arithmetic overflow on unsigned + in 0x807D000u + i * 8u: SUCCESS
+[errlog_write_flash.pointer_dereference.1] line 114 dereference failure: pointer outside object bounds in hdr_src[(signed long int)i]: SUCCESS
+[errlog_write_flash.overflow.4] line 123 arithmetic overflow on unsigned * in (unsigned long int)(uint32_t)log_header.entry_count * sizeof(error_log_entry_t) /*16ul*/ : SUCCESS
+[errlog_write_flash.overflow.5] line 124 arithmetic overflow on unsigned + in entries_bytes + 7u: SUCCESS
+[errlog_write_flash.overflow.9] line 127 arithmetic overflow on unsigned + in i + 1u: SUCCESS
+[errlog_write_flash.overflow.6] line 129 arithmetic overflow on unsigned + in 0x807D000u + entries_offset: SUCCESS
+[errlog_write_flash.overflow.7] line 129 arithmetic overflow on unsigned * in i * 8u: SUCCESS
+[errlog_write_flash.overflow.8] line 129 arithmetic overflow on unsigned + in 0x807D000u + entries_offset + i * 8u: SUCCESS
+[errlog_write_flash.pointer_dereference.2] line 130 dereference failure: pointer outside object bounds in ent_src[(signed long int)i]: SUCCESS
+
+analysis_artifacts/stubs/stm32g4xx_hal.h function HAL_FLASHEx_Erase
+[HAL_FLASHEx_Erase.pointer_dereference.1] line 1579 dereference failure: pointer NULL in *PageError: SUCCESS
+[HAL_FLASHEx_Erase.pointer_dereference.2] line 1579 dereference failure: pointer invalid in *PageError: SUCCESS
+[HAL_FLASHEx_Erase.pointer_dereference.3] line 1579 dereference failure: deallocated dynamic object in *PageError: SUCCESS
+[HAL_FLASHEx_Erase.pointer_dereference.4] line 1579 dereference failure: dead object in *PageError: SUCCESS
+[HAL_FLASHEx_Erase.pointer_dereference.5] line 1579 dereference failure: pointer outside object bounds in *PageError: SUCCESS
+[HAL_FLASHEx_Erase.pointer_dereference.6] line 1579 dereference failure: invalid integer address in *PageError: SUCCESS
+
+analysis_artifacts/stubs/stm32g4xx_hal.h function HAL_GetTick
+[HAL_GetTick.overflow.1] line 1220 arithmetic overflow on unsigned + in tick + 1u: SUCCESS
+
+** 21 of 92 failed (8 iterations)
+VERIFICATION FAILED

@@ -1,0 +1,73 @@
+CBMC version 5.95.1 (cbmc-5.95.1) 64-bit x86_64 linux
+Parsing Core/Src/boot_validation.c
+Converting
+Type-checking boot_validation
+Generating GOTO Program
+Adding CPROVER library (x86_64)
+Removal of function pointers and virtual functions
+Generic Property Instrumentation
+Running with 10 object bits, 54 offset bits (user-specified)
+Starting Bounded Model Checking
+**** WARNING: no body for function ServiceMode_IsEnabled
+**** WARNING: no body for function Temperature_Get
+Unwinding loop check_temperature_plausible.0 iteration 1 file Core/Src/boot_validation.c line 51 function check_temperature_plausible thread 0
+Unwinding loop check_temperature_plausible.0 iteration 2 file Core/Src/boot_validation.c line 51 function check_temperature_plausible thread 0
+Unwinding loop check_temperature_plausible.0 iteration 3 file Core/Src/boot_validation.c line 51 function check_temperature_plausible thread 0
+Unwinding loop check_temperature_plausible.0 iteration 4 file Core/Src/boot_validation.c line 51 function check_temperature_plausible thread 0
+Unwinding loop check_temperature_plausible.0 iteration 5 file Core/Src/boot_validation.c line 51 function check_temperature_plausible thread 0
+**** WARNING: no body for function Current_GetAmps
+Unwinding loop check_current_plausible.0 iteration 1 file Core/Src/boot_validation.c line 72 function check_current_plausible thread 0
+Unwinding loop check_current_plausible.0 iteration 2 file Core/Src/boot_validation.c line 72 function check_current_plausible thread 0
+Unwinding loop check_current_plausible.0 iteration 3 file Core/Src/boot_validation.c line 72 function check_current_plausible thread 0
+Unwinding loop check_current_plausible.0 iteration 4 file Core/Src/boot_validation.c line 72 function check_current_plausible thread 0
+**** WARNING: no body for function Encoder_HasFault
+**** WARNING: no body for function Voltage_GetBus
+**** WARNING: no body for function Safety_GetError
+**** WARNING: no body for function ServiceMode_SetFault
+Unwinding loop BootValidation_Run.0 iteration 1 file Core/Src/boot_validation.c line 192 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.0 iteration 2 file Core/Src/boot_validation.c line 192 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.0 iteration 3 file Core/Src/boot_validation.c line 192 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.0 iteration 4 file Core/Src/boot_validation.c line 192 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.0 iteration 5 file Core/Src/boot_validation.c line 192 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.1 iteration 1 file Core/Src/boot_validation.c line 201 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.1 iteration 2 file Core/Src/boot_validation.c line 201 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.1 iteration 3 file Core/Src/boot_validation.c line 201 function BootValidation_Run thread 0
+Unwinding loop BootValidation_Run.1 iteration 4 file Core/Src/boot_validation.c line 201 function BootValidation_Run thread 0
+Runtime Symex: 0.0109839s
+size of program expression: 669 steps
+simple slicing removed 490 assignments
+Generated 55 VCC(s), 8 remaining after simplification
+Runtime Postprocess Equation: 3.4825e-05s
+Passing problem to propositional reduction
+converting SSA
+Runtime Convert SSA: 0.00297833s
+Running propositional reduction
+Post-processing
+Runtime Post-process: 2.194e-06s
+Solving with MiniSAT 2.2.1 with simplifier
+2694 variables, 8677 clauses
+SAT checker inconsistent: instance is UNSATISFIABLE
+Runtime Solver: 1.1972e-05s
+Runtime decision procedure: 0.0030246s
+
+** Results:
+Core/Src/boot_validation.c function BootValidation_Run
+[BootValidation_Run.overflow.3] line 192 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[BootValidation_Run.overflow.1] line 193 arithmetic overflow on signed + in 4 + (signed int)i: SUCCESS
+[BootValidation_Run.overflow.2] line 197 arithmetic overflow on signed + in 4 + (signed int)i: SUCCESS
+[BootValidation_Run.overflow.6] line 201 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[BootValidation_Run.overflow.4] line 202 arithmetic overflow on signed + in 9 + (signed int)i: SUCCESS
+[BootValidation_Run.overflow.5] line 206 arithmetic overflow on signed + in 9 + (signed int)i: SUCCESS
+
+Core/Src/boot_validation.c function check_current_plausible
+[check_current_plausible.overflow.2] line 72 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[check_current_plausible.overflow.1] line 73 arithmetic overflow on signed + in 9 + (signed int)i: SUCCESS
+
+Core/Src/boot_validation.c function check_temperature_plausible
+[check_temperature_plausible.overflow.4] line 51 arithmetic overflow on unsigned + in i + 1: SUCCESS
+[check_temperature_plausible.overflow.1] line 52 arithmetic overflow on signed + in 4 + (signed int)i: SUCCESS
+[check_temperature_plausible.overflow.2] line 54 arithmetic overflow on unsigned + in enabled_count + 1: SUCCESS
+[check_temperature_plausible.overflow.3] line 59 arithmetic overflow on unsigned + in zero_count + 1: SUCCESS
+
+** 0 of 12 failed (1 iterations)
+VERIFICATION SUCCESSFUL
