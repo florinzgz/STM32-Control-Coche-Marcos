@@ -232,7 +232,12 @@ print(fixed)
         done
     fi
 
-    if [ "${MX_COUNT:-0}" -eq 0 ] 2>/dev/null; then
+    # Ensure MX_COUNT is numeric (default 0 if Python/awk failed)
+    case "$MX_COUNT" in
+        ''|*[!0-9]*) MX_COUNT=0 ;;
+    esac
+
+    if [ "$MX_COUNT" -eq 0 ]; then
         echo "   ✅ No duplicate entries in .mxproject."
     else
         echo "   ✅ Fixed ${MX_COUNT} field(s) in .mxproject."
