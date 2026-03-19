@@ -75,6 +75,37 @@ if %ERRORLEVEL%==1 (
     set FIXED=1
 )
 
+REM ---- Step 5: Fix .mxproject duplicate entries ----
+if exist ".mxproject" (
+    echo Checking .mxproject for duplicate entries...
+    powershell -Command ^
+      "$changed = 0; " ^
+      "$lines = Get-Content '.mxproject'; " ^
+      "$out = @(); " ^
+      "foreach ($line in $lines) { " ^
+      "  if ($line -match '^(SourceFiles|LibFiles|CDefines|HeaderPath)=(.+)$') { " ^
+      "    $key = $Matches[1]; $val = $Matches[2]; " ^
+      "    $items = $val -split ';' | Where-Object { $_ -ne '' }; " ^
+      "    $unique = $items | Select-Object -Unique; " ^
+      "    if ($items.Count -ne $unique.Count) { " ^
+      "      $deduped = ($unique -join ';') + ';'; " ^
+      "      Write-Host ('   Deduplicating ' + $key + ' in .mxproject'); " ^
+      "      $changed++; " ^
+      "      $out += $key + '=' + $deduped; " ^
+      "    } else { $out += $line; } " ^
+      "  } else { $out += $line; } " ^
+      "} " ^
+      "if ($changed -gt 0) { " ^
+      "  $out | Set-Content '.mxproject'; " ^
+      "  Write-Host ('   Fixed ' + $changed + ' field(s).'); " ^
+      "  exit 1; " ^
+      "} else { " ^
+      "  Write-Host '   No duplicate entries in .mxproject.'; " ^
+      "  exit 0; " ^
+      "}"
+    if %ERRORLEVEL%==1 set FIXED=1
+)
+
 echo.
 echo Done. Next steps:
 echo    1. In STM32CubeIDE: right-click project -^> Refresh (F5^)

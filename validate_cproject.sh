@@ -206,6 +206,35 @@ else
     echo "   ✅ PASS — no trailing empty Defaults field."
 fi
 
+# ---- Check 8: .mxproject duplicate entries ----
+echo ""
+echo "8. .mxproject duplicate entries"
+if [ -f ".mxproject" ]; then
+    MX_DUPS=0
+    for KEY in SourceFiles LibFiles CDefines HeaderPath; do
+        if grep -q "^${KEY}=" .mxproject 2>/dev/null; then
+            LINE=$(grep "^${KEY}=" .mxproject)
+            VALUE="${LINE#*=}"
+            TOTAL=$(echo "$VALUE" | tr ';' '\n' | awk 'NF' | wc -l)
+            UNIQUE=$(echo "$VALUE" | tr ';' '\n' | awk 'NF' | sort -u | wc -l)
+            if [ "$TOTAL" -ne "$UNIQUE" ]; then
+                DUP_N=$((TOTAL - UNIQUE))
+                echo "   ❌ FAIL — ${KEY} has $DUP_N duplicate(s) ($TOTAL entries, $UNIQUE unique)"
+                MX_DUPS=$((MX_DUPS + DUP_N))
+            fi
+        fi
+    done
+    if [ "$MX_DUPS" -eq 0 ]; then
+        echo "   ✅ PASS — no duplicate entries in .mxproject."
+    else
+        echo "   Run fix_build.sh to deduplicate."
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    echo "   ⚠️  SKIP — .mxproject not found (will be created by CubeMX)."
+    WARNINGS=$((WARNINGS + 1))
+fi
+
 # ---- Summary ----
 echo ""
 echo "======================================"
