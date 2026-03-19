@@ -1469,6 +1469,39 @@ static void test_exact_checksum_known_values() {
     ASSERT_EQ(frame[6], expected);
 }
 
+// Test 71: No frames ever received → transitions to INVALID after warmup + timeout
+static void test_no_frame_ever_received_timeout() {
+    printf("  test_no_frame_ever_received_timeout...\n");
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+
+    // During warmup → WAITING
+    g_test_millis = 500;
+    obstacle_sensor::update(0.0f);
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
+
+    // Just past warmup (1000 ms) but before timeout (500 ms) → still WAITING
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flushes warmup
+    g_test_millis = 1400;           // 300 ms after warmup end
+    obstacle_sensor::update(0.0f);
+    rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::WAITING));
+
+    // Past warmup + timeout (1000 + 500 = 1500 ms) → INVALID
+    g_test_millis = 1700;
+    obstacle_sensor::update(0.0f);
+    rd = obstacle_sensor::getReading();
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::INVALID));
+    ASSERT_EQ(rd.healthy, false);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1544,6 +1577,7 @@ int main() {
     test_warmup_period();
     test_bad_function_mark_rejected();
     test_exact_checksum_known_values();
+    test_no_frame_ever_received_timeout();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
