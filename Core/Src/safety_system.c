@@ -18,6 +18,7 @@
 #include "service_mode.h"
 #include "boot_validation.h"
 #include "error_log.h"
+#include "can_handler.h"
 #include "math_safety.h"
 
 /* ---- Thresholds (from base firmware) ---- */

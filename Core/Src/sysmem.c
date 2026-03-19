@@ -7,6 +7,7 @@
   */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /**
