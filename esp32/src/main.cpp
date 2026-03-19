@@ -355,25 +355,19 @@ void setup() {
         Serial.println("[CAN] Initialization FAILED");
     }
 
-    // Initialize obstacle sensor driver (TOFSense-M on UART1)
+    // Initialize obstacle sensor driver (TOFSense-M 8×8 on UART1)
     //   RX = GPIO 18 (sensor TX → ESP32 RX via voltage divider)
     //   TX = NOT CONNECTED (sensor RX not wired to ESP32 TX)
     //
     // READ-ONLY MODE: The sensor's RX pin is not connected to the ESP32's
-    // TX, so no NLink configuration commands can reach the sensor.  The
-    // sensor is permanently in SHORT RANGE / HIGH PRECISION mode (~1.3 m
-    // max).  shortRangeMode=true tells the driver to treat all-pixels-
-    // invalid frames as "nothing in range" (safe) instead of emergency-
-    // close (20 mm fallback).  Do NOT call configureLongRange() — the
-    // commands would be sent to an unconnected pin and silently lost.
-    // To switch to LONG RANGE mode, either:
-    //   1. Wire ESP32 GPIO 17 → sensor RX and set txPin=17, or
-    //   2. Use the NAssistant PC tool to pre-configure the sensor.
+    // TX, so no NLink configuration commands can reach the sensor.
+    // The driver parses multi-pixel frames (400 bytes, 0x57 0x01, 64 pixels)
+    // and uses the minimum valid-pixel distance as the obstacle reading.
+    // To configure the sensor, use the NAssistant PC tool.
     {
         obstacle_sensor::Config obsCfg;
         obsCfg.txPin          = -1;     // TX not connected — read-only
-        obsCfg.shortRangeMode = true;   // Sensor permanently in SHORT RANGE
-        obsCfg.maxRangeMm     = 1350;   // SHORT RANGE max ~1.3 m
+        obsCfg.maxRangeMm     = 4000;   // TOFSense-M max range = 4 m
         obstacle_sensor::init(obsCfg);
     }
 
