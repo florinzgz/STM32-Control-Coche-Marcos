@@ -361,19 +361,19 @@ void setup() {
     //
     // READ-ONLY MODE: The sensor's RX pin is not connected to the ESP32's
     // TX, so no NLink configuration commands can reach the sensor.  The
-    // sensor is permanently in SHORT RANGE / HIGH PRECISION mode (~1.3 m
-    // max).  shortRangeMode=true tells the driver to treat all-pixels-
-    // invalid frames as "nothing in range" (safe) instead of emergency-
-    // close (20 mm fallback).  Do NOT call configureLongRange() — the
-    // commands would be sent to an unconnected pin and silently lost.
+    // driver auto-detects both single-point (7-byte, 0x57 0x00) and
+    // multi-pixel (400-byte, 0x57 0x01) frame formats.  Multi-pixel
+    // frames use the minimum valid-pixel distance as the obstacle reading.
+    // shortRangeMode=true tells the driver to treat no-target frames as
+    // "nothing in range" (safe) instead of emergency-close (20 mm).
     // To switch to LONG RANGE mode, either:
     //   1. Wire ESP32 GPIO 17 → sensor RX and set txPin=17, or
     //   2. Use the NAssistant PC tool to pre-configure the sensor.
     {
         obstacle_sensor::Config obsCfg;
         obsCfg.txPin          = -1;     // TX not connected — read-only
-        obsCfg.shortRangeMode = true;   // Sensor permanently in SHORT RANGE
-        obsCfg.maxRangeMm     = 1350;   // SHORT RANGE max ~1.3 m
+        obsCfg.shortRangeMode = true;   // Sensor in SHORT RANGE mode
+        obsCfg.maxRangeMm     = 4000;   // Multi-pixel can measure up to ~4 m
         obstacle_sensor::init(obsCfg);
     }
 

@@ -1,9 +1,23 @@
 // =============================================================================
-// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M S by Nooploop)
+// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M by Nooploop)
 //
-// Reads distance from TOFSense-M S single-point LiDAR sensor via UART.
-// Protocol: 7-byte frames — one distance measurement per frame.
-//   Frame: [0x57] [0x00] [DIST_L] [DIST_H] [SIGNAL_L] [SIGNAL_H] [CHECKSUM]
+// Reads distance from TOFSense-M LiDAR sensor via UART.
+// Supports two frame formats:
+//
+//   1) Single-point (TOFSense-M S) — 7-byte frames:
+//      [0x57] [0x00] [DIST_L] [DIST_H] [SIG_L] [SIG_H] [CHECKSUM]
+//      Distance in mm (uint16 LE).
+//
+//   2) Multi-pixel (TOFSense-M 8×8) — 400-byte frames:
+//      [0x57] [0x01] [0xFF] [ID] [TIME×4] [NUM_PIX=0x40]
+//      followed by 64 × 6-byte pixel blocks:
+//        [DIST_L] [DIST_H] [DIST_UH] [STATUS] [SIG_L] [SIG_H]
+//      Distance in µm (uint24 LE, divide by 1000 for mm).
+//      Status 0x00 = valid pixel.
+//      Trailer: 6 × 0xFF + 1-byte checksum (sum of all preceding & 0xFF).
+//      The driver uses the MINIMUM valid-pixel distance as the obstacle
+//      distance (closest point in the 8×8 field of view).
+//
 // Parses at 921600 bps (factory default).
 // Provides validated readings with stuck-sensor detection,
 // warmup filtering, and physical-range validation.
@@ -42,7 +56,7 @@
 //   This prevents open-air readings from being marked INVALID (which would
 //   look like a sensor fault to the STM32).
 //
-// Frame layout (TOFSense-M S single-point, 7 bytes):
+// Frame layout — Single-point (TOFSense-M S, 7 bytes):
 //   [0]   header         = 0x57
 //   [1]   function_mark  = 0x00 (single-point)
 //   [2]   distance_L     uint8  — distance low byte (mm)
@@ -51,13 +65,28 @@
 //   [5]   signal_H       uint8  — signal strength high byte
 //   [6]   checksum       sum of bytes [0..5] & 0xFF
 //
-// Distance validity: distance > 0 means valid measurement.
-//                    distance == 0 means no target / invalid.
+// Frame layout — Multi-pixel (TOFSense-M 8×8, 400 bytes):
+//   [0]    header         = 0x57
+//   [1]    function_mark  = 0x01 (multi-pixel)
+//   [2]    reserved       = 0xFF
+//   [3]    sensor_id
+//   [4-7]  system_time    uint32 LE (ms)
+//   [8]    num_pixels     (typically 0x40 = 64 for 8×8)
+//   [9..N] pixel data     num_pixels × 6 bytes each:
+//            [0-2] distance  uint24 LE (µm)
+//            [3]   status    0x00 = valid
+//            [4-5] signal    uint16 LE
+//   [N+1..N+6] end marker  6 × 0xFF
+//   [N+7]  checksum        sum of bytes [0..N+6] & 0xFF
+//
+// Distance validity (single-point): distance > 0 means valid measurement.
+//                                   distance == 0 means no target / invalid.
+// Distance validity (multi-pixel):  status == 0 means valid pixel.
 //
 // Sensor output rate: ~10 Hz (active mode).
 // Output: distance_mm, zone, health flag, stuck flag, sensor status.
 //
-// Hardware: TOFSense-M S (Nooploop) — GH1.25 4-pin connector
+// Hardware: TOFSense-M (Nooploop) — GH1.25 4-pin connector
 //   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX (GPIO 18)
 //   VCC must be 5 V (sensor will not work at 3.3 V).
 //   UART IO level: datasheet says 3.3 V TTL, but real measurements show
@@ -118,8 +147,8 @@ struct Config {
                                         // Set to a valid GPIO (e.g. 17) if you need to send
                                         // configuration commands (setRangeMode, saveConfig, etc.)
                                         // to the sensor.  Requires wiring ESP32 TX → sensor RX.
-    uint32_t baudRate          = 921600; // TOFSense-M S default baud rate (must match sensor config; changeable via NAssistant)
-    uint16_t rxBufSize         = 512;   // UART RX ring-buffer (7-byte frames; default ESP32 256 works too)
+    uint32_t baudRate          = 921600; // TOFSense-M default baud rate (must match sensor config; changeable via NAssistant)
+    uint16_t rxBufSize         = 1024;  // UART RX ring-buffer (needs room for 400-byte multi-pixel frames)
     uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
     uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
     uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)

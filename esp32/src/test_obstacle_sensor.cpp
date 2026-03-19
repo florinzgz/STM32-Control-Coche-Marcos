@@ -243,7 +243,7 @@ static void test_config_defaults() {
     obstacle_sensor::Config cfg{};
 
     ASSERT_EQ(cfg.baudRate, 921600UL);
-    ASSERT_EQ(cfg.rxBufSize, 512);
+    ASSERT_EQ(cfg.rxBufSize, 1024);
     ASSERT_EQ(cfg.minRangeMm, 20);
     ASSERT_EQ(cfg.maxRangeMm, 4000);
     ASSERT_EQ(cfg.shortRangeMode, false);
@@ -1419,7 +1419,7 @@ static void test_warmup_period() {
     ASSERT_EQ(rd.healthy, false);
 }
 
-// Test 69: Bad function mark rejected
+// Test 69: Bad function mark rejected (0x02 is neither single-point 0x00 nor multi-pixel 0x01)
 static void test_bad_function_mark_rejected() {
     printf("  test_bad_function_mark_rejected...\n");
 
@@ -1429,10 +1429,10 @@ static void test_bad_function_mark_rejected() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Build frame with wrong function mark (0x01 instead of 0x00)
+    // Build frame with unknown function mark (0x02 — neither 0x00 nor 0x01)
     uint8_t frame[FRAME_LEN];
     buildMSFrame(frame, 1000, 100);
-    frame[1] = 0x01;  // Wrong function mark
+    frame[1] = 0x02;  // Unknown function mark
     // Recalculate checksum
     uint8_t sum = 0;
     for (int i = 0; i < 6; i++) sum += frame[i];
@@ -1441,7 +1441,7 @@ static void test_bad_function_mark_rejected() {
     g_uart_inject(frame, FRAME_LEN);
     obstacle_sensor::update(0.0f);
 
-    // Should have been rejected as BAD_HEADER — reading unchanged
+    // Should have been rejected — reading unchanged
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
     // After warmup flush + one rejected frame, distance stays at 0
     // (no valid frame has ever been processed in this session)
@@ -1502,10 +1502,419 @@ static void test_no_frame_ever_received_timeout() {
     ASSERT_EQ(rd.healthy, false);
 }
 
+/* ---- Multi-pixel frame helpers ------------------------------------------ */
+
+// Multi-pixel (8×8 = 64 pixels) frame: 400 bytes
+// [0]     0x57 header
+// [1]     0x01 function mark
+// [2]     0xFF reserved
+// [3]     sensor_id
+// [4-7]   system_time (uint32 LE)
+// [8]     num_pixels (0x40 = 64)
+// [9..]   64 × 6 bytes: [dist24 LE µm][status][sig16 LE]
+// [393-398] 6 × 0xFF end marker
+// [399]   checksum
+
+static constexpr uint16_t MP_FRAME_LEN = 400;
+
+// Build a multi-pixel frame with all pixels at the same distance (µm)
+// and same signal strength.  Status=0 (valid) for all pixels.
+static void buildMPFrame(uint8_t* buf, uint32_t distUm, uint16_t signal) {
+    buf[0] = 0x57;  // header
+    buf[1] = 0x01;  // multi-pixel function mark
+    buf[2] = 0xFF;  // reserved
+    buf[3] = 0x00;  // sensor_id
+    // system_time = 0
+    buf[4] = 0; buf[5] = 0; buf[6] = 0; buf[7] = 0;
+    buf[8] = 64;    // num_pixels
+
+    for (int px = 0; px < 64; px++) {
+        uint16_t off = 9 + px * 6;
+        buf[off + 0] = (uint8_t)(distUm & 0xFF);
+        buf[off + 1] = (uint8_t)((distUm >> 8) & 0xFF);
+        buf[off + 2] = (uint8_t)((distUm >> 16) & 0xFF);
+        buf[off + 3] = 0x00;   // status = valid
+        buf[off + 4] = (uint8_t)(signal & 0xFF);
+        buf[off + 5] = (uint8_t)((signal >> 8) & 0xFF);
+    }
+
+    // End marker
+    for (int i = 393; i < 399; i++) buf[i] = 0xFF;
+
+    // Checksum
+    uint8_t sum = 0;
+    for (int i = 0; i < 399; i++) sum += buf[i];
+    buf[399] = sum;
+}
+
+// Build a multi-pixel frame with per-pixel distances (µm array)
+static void buildMPFrameVarying(uint8_t* buf, const uint32_t* distUm,
+                                 const uint8_t* status, uint16_t signal) {
+    buf[0] = 0x57;
+    buf[1] = 0x01;
+    buf[2] = 0xFF;
+    buf[3] = 0x00;
+    buf[4] = 0; buf[5] = 0; buf[6] = 0; buf[7] = 0;
+    buf[8] = 64;
+
+    for (int px = 0; px < 64; px++) {
+        uint16_t off = 9 + px * 6;
+        buf[off + 0] = (uint8_t)(distUm[px] & 0xFF);
+        buf[off + 1] = (uint8_t)((distUm[px] >> 8) & 0xFF);
+        buf[off + 2] = (uint8_t)((distUm[px] >> 16) & 0xFF);
+        buf[off + 3] = status[px];
+        buf[off + 4] = (uint8_t)(signal & 0xFF);
+        buf[off + 5] = (uint8_t)((signal >> 8) & 0xFF);
+    }
+
+    for (int i = 393; i < 399; i++) buf[i] = 0xFF;
+
+    uint8_t sum = 0;
+    for (int i = 0; i < 399; i++) sum += buf[i];
+    buf[399] = sum;
+}
+
+// Inject a multi-pixel frame (400 bytes) and run update()
+static obstacle_sensor::Reading injectMPFrameAndUpdate(const uint8_t* frame) {
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    g_uart_inject(frame, MP_FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    return obstacle_sensor::getReading();
+}
+
+/* ---- Multi-pixel tests -------------------------------------------------- */
+
+// Test MP1: Multi-pixel frame with uniform 1500mm (1500000 µm)
+static void test_mp_uniform_distance() {
+    printf("  test_mp_uniform_distance...\n");
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrame(frame, 1500000, 30);  // 1500 mm = 1500000 µm
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 1500);
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+}
+
+// Test MP2: Multi-pixel frame with varying distances — min should be used
+static void test_mp_minimum_distance_used() {
+    printf("  test_mp_minimum_distance_used...\n");
+
+    uint32_t dists[64];
+    uint8_t stats[64];
+    for (int i = 0; i < 64; i++) {
+        dists[i] = 2000000;  // 2000 mm
+        stats[i] = 0x00;     // valid
+    }
+    // Pixel 42 is closest at 750 mm
+    dists[42] = 750000;  // 750 mm = 750000 µm
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrameVarying(frame, dists, stats, 30);
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 750);
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.zone, 2);  // 500-1000 mm = zone 2 (warning)
+}
+
+// Test MP3: Multi-pixel frame with invalid pixels skipped
+static void test_mp_invalid_pixels_skipped() {
+    printf("  test_mp_invalid_pixels_skipped...\n");
+
+    uint32_t dists[64];
+    uint8_t stats[64];
+    for (int i = 0; i < 64; i++) {
+        dists[i] = 500000;   // 500 mm closest... but invalid
+        stats[i] = 0x09;     // invalid status
+    }
+    // Only pixel 10 is valid at 1200 mm
+    dists[10] = 1200000;
+    stats[10] = 0x00;
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrameVarying(frame, dists, stats, 30);
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 1200);
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test MP4: All pixels invalid → NO_TARGET
+static void test_mp_all_invalid_no_target() {
+    printf("  test_mp_all_invalid_no_target...\n");
+
+    uint32_t dists[64];
+    uint8_t stats[64];
+    for (int i = 0; i < 64; i++) {
+        dists[i] = 1000000;
+        stats[i] = 0x09;  // all invalid
+    }
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrameVarying(frame, dists, stats, 30);
+
+    // Default config: shortRangeMode=false → NO_TARGET → minRangeMm
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 20);  // minRangeMm emergency close
+}
+
+// Test MP5: All pixels zero distance → NO_TARGET
+static void test_mp_all_zero_distance_no_target() {
+    printf("  test_mp_all_zero_distance_no_target...\n");
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrame(frame, 0, 30);  // All pixels at 0 µm
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+    ASSERT_EQ(rd.distance_mm, 20);  // minRangeMm
+}
+
+// Test MP6: Checksum verification
+static void test_mp_bad_checksum_rejected() {
+    printf("  test_mp_bad_checksum_rejected...\n");
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrame(frame, 1500000, 30);
+    frame[399] ^= 0xFF;  // Corrupt checksum
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    g_uart_inject(frame, MP_FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 0);  // No valid frame processed
+}
+
+// Test MP7: Close distance (emergency zone)
+static void test_mp_emergency_zone() {
+    printf("  test_mp_emergency_zone...\n");
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrame(frame, 100000, 30);  // 100 mm = 100000 µm
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+
+    ASSERT_EQ(rd.distance_mm, 100);
+    ASSERT_EQ(rd.zone, 4);  // < 200 mm = emergency
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test MP8: Distance at exactly zone boundaries
+static void test_mp_zone_boundaries() {
+    printf("  test_mp_zone_boundaries...\n");
+
+    // 200 mm → zone 3 (critical, 200–500)
+    {
+        uint8_t frame[MP_FRAME_LEN];
+        buildMPFrame(frame, 200000, 30);
+        obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+        ASSERT_EQ(rd.distance_mm, 200);
+        ASSERT_EQ(rd.zone, 3);
+    }
+
+    // 500 mm → zone 2 (warning, 500–1000)
+    {
+        uint8_t frame[MP_FRAME_LEN];
+        buildMPFrame(frame, 500000, 30);
+        obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+        ASSERT_EQ(rd.distance_mm, 500);
+        ASSERT_EQ(rd.zone, 2);
+    }
+
+    // 1000 mm → zone 1 (caution, 1000–1500)
+    {
+        uint8_t frame[MP_FRAME_LEN];
+        buildMPFrame(frame, 1000000, 30);
+        obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+        ASSERT_EQ(rd.distance_mm, 1000);
+        ASSERT_EQ(rd.zone, 1);
+    }
+
+    // 1500 mm → zone 0 (normal, >1500)
+    {
+        uint8_t frame[MP_FRAME_LEN];
+        buildMPFrame(frame, 1500000, 30);
+        obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+        ASSERT_EQ(rd.distance_mm, 1500);
+        ASSERT_EQ(rd.zone, 0);
+    }
+}
+
+// Test MP9: Short range mode — all invalid → reports maxRangeMm
+static void test_mp_short_range_all_invalid() {
+    printf("  test_mp_short_range_all_invalid...\n");
+
+    uint32_t dists[64];
+    uint8_t stats[64];
+    for (int i = 0; i < 64; i++) {
+        dists[i] = 1000000;
+        stats[i] = 0x09;
+    }
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrameVarying(frame, dists, stats, 30);
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm = 1350;
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init(cfg);
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+    g_uart_inject(frame, MP_FRAME_LEN);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 1350);  // maxRangeMm (safe/clear)
+}
+
+// Test MP10: Real-world data from user — parse first packet
+static void test_mp_real_world_packet() {
+    printf("  test_mp_real_world_packet...\n");
+
+    // First packet from user's NAssistant capture
+    const char* hex =
+        "57 01 ff 00 5f ba 00 00 40 92 00 13 00 1e 00 d7 33 16 00 22 00 "
+        "63 6a 17 00 31 00 fe ef 16 00 27 00 cf d5 17 00 22 00 7c f9 17 "
+        "00 20 00 d0 bf 16 00 1d 00 00 e7 18 00 14 00 4e bf 15 00 27 00 "
+        "5c 64 17 00 33 00 b4 ca 17 00 3d 00 ff b4 17 00 28 00 03 10 18 "
+        "00 2b 00 cf 52 18 00 22 00 0f f5 17 00 22 00 07 d5 17 00 16 00 "
+        "f8 2d 17 00 29 00 f0 3f 17 00 2f 00 84 18 18 00 39 00 9c 6e 18 "
+        "00 3b 00 9c 1b 17 00 2c 00 ab a3 18 00 1f 00 ca 26 19 00 1e 00 "
+        "6f fe 17 00 1c 00 5c 79 17 00 2c 00 88 e3 16 00 34 00 20 09 18 "
+        "00 3c 00 d8 7d 18 00 36 00 f6 78 18 00 2d 00 73 bd 18 00 25 00 "
+        "7c f3 18 00 20 00 fe 98 18 00 1b 00 63 9c 17 00 25 00 6a 0a 18 "
+        "00 2a 00 b8 6c 17 00 3a 00 58 bc 18 00 36 00 84 12 19 00 39 00 "
+        "7c 76 18 00 20 00 58 44 19 00 1d 00 fb 7f 19 00 19 00 37 1e 17 "
+        "00 22 00 d0 04 18 00 29 00 40 1c 18 00 29 00 13 9b 18 00 31 00 "
+        "f4 f2 18 00 35 00 b6 6c 19 00 27 00 b7 50 19 00 22 00 ce b3 19 "
+        "00 15 00 07 b5 14 00 22 00 74 0b 18 00 26 00 a0 89 18 00 29 00 "
+        "46 de 17 00 27 00 b8 6f 19 00 32 00 6e 5f 19 00 2d 00 70 c3 18 "
+        "00 1d 00 c8 ba 13 00 0b 00 ec d0 11 00 1a 00 42 1f 17 00 1e 00 "
+        "ae 9d 18 00 27 00 97 e9 18 00 28 00 5a 92 18 00 1e 00 87 a3 19 "
+        "00 2e 00 ac e5 19 00 20 00 50 05 1a 00 17 00 ff ff ff ff ff ff 08";
+
+    // Parse hex string into bytes
+    uint8_t frame[MP_FRAME_LEN];
+    int idx = 0;
+    const char* p = hex;
+    while (*p && idx < MP_FRAME_LEN) {
+        while (*p == ' ') p++;
+        if (*p == '\0') break;
+        unsigned int val = 0;
+        // Parse two hex chars
+        for (int d = 0; d < 2 && *p; d++, p++) {
+            val <<= 4;
+            if (*p >= '0' && *p <= '9') val |= (*p - '0');
+            else if (*p >= 'a' && *p <= 'f') val |= (*p - 'a' + 10);
+            else if (*p >= 'A' && *p <= 'F') val |= (*p - 'A' + 10);
+        }
+        frame[idx++] = (uint8_t)val;
+    }
+    ASSERT_EQ(idx, MP_FRAME_LEN);
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+
+    // Min pixel distance from analysis: pixel 55 (row 6 col 7) = 1167596 µm → 1167 mm
+    // Actually, the minimum is at the lower-left corner: pixel 56 = 0x11D0EC = 1167596 µm
+    // But let me check: pixel 55 = c8 ba 13 00 0b 00 → dist = 0x13BAC8 = 1293000 µm = 1293 mm
+    // pixel 56 = ec d0 11 00 1a 00 → dist = 0x11D0EC = 1167596 µm = 1167 mm
+    // So minimum = 1167 mm
+    ASSERT_EQ(rd.distance_mm, 1167);
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.zone, 1);  // 1000-1500 mm = caution
+}
+
+// Test MP11: Very small distance in µm rounds correctly
+static void test_mp_small_distance_um_to_mm() {
+    printf("  test_mp_small_distance_um_to_mm...\n");
+
+    // 500 µm = 0 mm (integer truncation) → parser returns 1 mm to avoid
+    // 0 = no-target, then update() clamps to minRangeMm (20 mm)
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrame(frame, 500, 30);
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+    ASSERT_EQ(rd.distance_mm, 20);  // Clamped to minRangeMm
+}
+
+// Test MP12: Above max range gets clamped
+static void test_mp_above_max_range_clamped() {
+    printf("  test_mp_above_max_range_clamped...\n");
+
+    // 6000 mm = 6000000 µm → should be clamped to maxRangeMm (4000)
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrame(frame, 6000000, 30);
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+    ASSERT_EQ(rd.distance_mm, 4000);  // maxRangeMm
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test MP13: Single-point still works after multi-pixel support added
+static void test_sp_still_works() {
+    printf("  test_sp_still_works...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildMSFrame(frame, 2500, 100);
+
+    obstacle_sensor::Reading rd = injectFrameAndUpdate(frame);
+    ASSERT_EQ(rd.distance_mm, 2500);
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.zone, 0);  // > 1500 mm = normal
+}
+
+// Test MP14: Mixed pixel validity — some valid, some invalid, some zero
+static void test_mp_mixed_validity() {
+    printf("  test_mp_mixed_validity...\n");
+
+    uint32_t dists[64];
+    uint8_t stats[64];
+    for (int i = 0; i < 64; i++) {
+        dists[i] = 3000000;   // 3000 mm default
+        stats[i] = 0x00;      // valid
+    }
+    // Make some invalid
+    stats[0] = 0x01;
+    stats[1] = 0xFF;
+    dists[2] = 0;            // Zero distance (skip)
+    // Pixel 32 is closest valid at 400 mm
+    dists[32] = 400000;
+
+    uint8_t frame[MP_FRAME_LEN];
+    buildMPFrameVarying(frame, dists, stats, 30);
+
+    obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+    ASSERT_EQ(rd.distance_mm, 400);
+    ASSERT_EQ(rd.zone, 3);  // 200-500 = critical
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
-    printf("=== test_obstacle_sensor (TOFSense-M S single-point) ===\n");
+    printf("=== test_obstacle_sensor (TOFSense-M single-point + multi-pixel) ===\n");
 
     test_frame_constants();
     test_checksum_computation();
@@ -1578,6 +1987,22 @@ int main() {
     test_bad_function_mark_rejected();
     test_exact_checksum_known_values();
     test_no_frame_ever_received_timeout();
+
+    // Multi-pixel frame tests
+    test_mp_uniform_distance();
+    test_mp_minimum_distance_used();
+    test_mp_invalid_pixels_skipped();
+    test_mp_all_invalid_no_target();
+    test_mp_all_zero_distance_no_target();
+    test_mp_bad_checksum_rejected();
+    test_mp_emergency_zone();
+    test_mp_zone_boundaries();
+    test_mp_short_range_all_invalid();
+    test_mp_real_world_packet();
+    test_mp_small_distance_um_to_mm();
+    test_mp_above_max_range_clamped();
+    test_sp_still_works();
+    test_mp_mixed_validity();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

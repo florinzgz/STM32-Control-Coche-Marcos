@@ -1,12 +1,14 @@
 // =============================================================================
 // ESP32-S3 — Obstacle Sensor Driver (implementation)
 //
-// Reads TOFSense-M S single-point LiDAR sensor via UART1.
-// Frame format: 7 bytes — [0x57] [0x00] [DIST_L] [DIST_H] [SIG_L] [SIG_H] [CHK]
+// Reads TOFSense-M LiDAR sensor via UART1.
+// Supports two frame formats:
+//   Single-point (7 bytes):  [0x57][0x00][DIST_L][DIST_H][SIG_L][SIG_H][CHK]
+//   Multi-pixel  (400 bytes): [0x57][0x01][0xFF][ID][TIME×4][0x40][64×6B pixels][0xFF×6][CHK]
 // Validates readings against physical range, detects stuck sensor,
 // and provides a warmup period for sensor stabilization.
 //
-// Sensor: TOFSense-M S (Nooploop), UART 921600 bps, active output mode.
+// Sensor: TOFSense-M (Nooploop), UART 921600 bps, active output mode.
 // Matches STM32 expectations for CAN 0x208 payload.
 //
 // Reference: TOFSense-M User Manual V3.0
@@ -20,8 +22,9 @@
 namespace obstacle_sensor {
 
 // -------------------------------------------------------------------------
-// TOFSense-M S protocol constants
-// Single-point frame: 7 bytes
+// TOFSense-M protocol constants
+//
+// Single-point frame (function_mark = 0x00): 7 bytes
 //   [0]   header         = 0x57
 //   [1]   function_mark  = 0x00
 //   [2]   distance_L     (uint16 LE low byte, mm)
@@ -30,12 +33,39 @@ namespace obstacle_sensor {
 //   [5]   signal_H       (uint16 LE high byte)
 //   [6]   checksum       (sum of bytes [0..5] & 0xFF)
 //
-// Distance validity: distance > 0 means valid measurement.
-//                    distance == 0 means no target / invalid.
+// Multi-pixel frame (function_mark = 0x01): 9 + N*6 + 7 bytes
+//   [0]     header         = 0x57
+//   [1]     function_mark  = 0x01
+//   [2]     reserved       = 0xFF
+//   [3]     sensor_id
+//   [4-7]   system_time    (uint32 LE, ms)
+//   [8]     num_pixels     (0x40 = 64 for 8×8)
+//   [9..]   pixel data     N × 6 bytes:
+//             [0-2] distance  (uint24 LE, micrometers)
+//             [3]   status    (0x00 = valid)
+//             [4-5] signal    (uint16 LE)
+//   [..]    end_marker     6 × 0xFF
+//   [last]  checksum       (sum of all preceding bytes & 0xFF)
+//
+// Distance validity (single-point): distance > 0 means valid.
+//                                   distance == 0 means no target.
+// Distance validity (multi-pixel):  status == 0 means valid pixel.
 // -------------------------------------------------------------------------
 static constexpr uint8_t  FRAME_HEADER         = 0x57;
 static constexpr uint8_t  FUNCTION_MARK_MS     = 0x00;   // Single-point function mark
-static constexpr uint16_t MS_FRAME_LENGTH      = 7;      // Total frame size
+static constexpr uint8_t  FUNCTION_MARK_MP     = 0x01;   // Multi-pixel function mark
+static constexpr uint16_t MS_FRAME_LENGTH      = 7;      // Single-point frame size
+
+// Multi-pixel frame layout
+static constexpr uint8_t  MP_NUM_PIXELS        = 64;     // 8×8 matrix
+static constexpr uint8_t  MP_BYTES_PER_PIXEL   = 6;      // 3 dist + 1 status + 2 signal
+static constexpr uint8_t  MP_END_MARKER_LEN    = 6;      // 6 × 0xFF
+static constexpr uint16_t MP_HEADER_LEN        = 9;      // header(1)+mark(1)+reserved(1)+id(1)+time(4)+numpix(1)
+static constexpr uint16_t MP_FRAME_LENGTH      = MP_HEADER_LEN
+                                                + MP_NUM_PIXELS * MP_BYTES_PER_PIXEL
+                                                + MP_END_MARKER_LEN
+                                                + 1;      // checksum (= 400)
+static constexpr uint8_t  MP_PIXEL_STATUS_VALID = 0x00;  // Status byte: 0 = valid pixel
 
 // Frame byte offsets
 static constexpr uint16_t OFF_HEADER           = 0;
@@ -58,11 +88,9 @@ static bool          initialized_      = false;
 static bool          warmupDone_       = false;
 
 // UART receive buffer — accumulates bytes for the current frame being
-// assembled.  This is separate from the UART hardware RX ring buffer
-// (cfg_.rxBufSize): the hardware buffer absorbs bursts at 921600 bps
-// while the driver reads bytes one at a time.  The static buffer only
-// needs to hold one complete frame (7 bytes) plus headroom for resync.
-static uint8_t       rxBuf_[MS_FRAME_LENGTH * 4];
+// assembled.  Needs to hold a full multi-pixel frame (400 bytes) plus
+// some headroom for resync.
+static uint8_t       rxBuf_[MP_FRAME_LENGTH + 16];
 static uint16_t      rxIdx_            = 0;
 
 // UART1 for TOFSense-M S
@@ -164,6 +192,71 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len,
 }
 
 // -------------------------------------------------------------------------
+// Parse a complete TOFSense-M multi-pixel frame (8×8 matrix).
+//
+// Frame layout (400 bytes for 64 pixels):
+//   [0]      header        = 0x57
+//   [1]      func_mark     = 0x01
+//   [2]      reserved      = 0xFF
+//   [3]      sensor_id
+//   [4-7]    system_time   uint32 LE (ms)
+//   [8]      num_pixels    (0x40 = 64)
+//   [9..]    pixel data    64 × 6 bytes:
+//              [0-2] distance  uint24 LE (micrometers)
+//              [3]   status    0x00 = valid
+//              [4-5] signal    uint16 LE
+//   [393-398] end_marker   6 × 0xFF
+//   [399]    checksum      sum of bytes [0..398] & 0xFF
+//
+// Returns minimum valid pixel distance in mm (closest obstacle).
+// -------------------------------------------------------------------------
+static ParseResult parseMultiPixelFrame(const uint8_t* buf, uint16_t len,
+                                         uint16_t& outDistMm) {
+    outDistMm = 0;
+    if (len < MP_FRAME_LENGTH) return ParseResult::TOO_SHORT;
+
+    // Header validation
+    if (buf[0] != FRAME_HEADER) return ParseResult::BAD_HEADER;
+    if (buf[1] != FUNCTION_MARK_MP) return ParseResult::BAD_HEADER;
+
+    // Pixel count must be 64
+    if (buf[8] != MP_NUM_PIXELS) return ParseResult::BAD_HEADER;
+
+    // Checksum: sum of all bytes except the last, & 0xFF
+    uint8_t checksum = 0;
+    for (uint16_t i = 0; i < MP_FRAME_LENGTH - 1; i++) checksum += buf[i];
+    if (checksum != buf[MP_FRAME_LENGTH - 1]) return ParseResult::BAD_CHECKSUM;
+
+    // Extract minimum valid-pixel distance (closest obstacle in the 8×8 FOV)
+    uint32_t minDistUm = UINT32_MAX;
+    uint8_t  validPixels = 0;
+
+    for (uint8_t px = 0; px < MP_NUM_PIXELS; px++) {
+        uint16_t off = MP_HEADER_LEN + px * MP_BYTES_PER_PIXEL;
+        uint8_t status = buf[off + 3];
+        if (status != MP_PIXEL_STATUS_VALID) continue;
+
+        uint32_t distUm = (uint32_t)buf[off]
+                        | ((uint32_t)buf[off + 1] << 8)
+                        | ((uint32_t)buf[off + 2] << 16);
+        if (distUm == 0) continue;  // Skip zero-distance pixels (no target)
+
+        validPixels++;
+        if (distUm < minDistUm) minDistUm = distUm;
+    }
+
+    if (validPixels == 0) return ParseResult::NO_TARGET;
+
+    // Convert µm → mm (integer division, truncate)
+    uint32_t distMm = minDistUm / 1000;
+    if (distMm > UINT16_MAX) distMm = UINT16_MAX;
+    outDistMm = (uint16_t)distMm;
+    if (outDistMm == 0) outDistMm = 1;  // Avoid reporting 0 (= no-target)
+
+    return ParseResult::OK;
+}
+
+// -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
 
@@ -200,7 +293,7 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.printf("[OBSTACLE] TOFSense-M S init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d, single-point 7-byte frame%s)\n",
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d, single-point + multi-pixel%s)\n",
                   (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
                   cfg_.rxPin, cfg_.txPin,
                   cfg_.shortRangeMode ? ", SHORT RANGE read-only" : "");
@@ -255,66 +348,106 @@ void update(float vehicleSpeedKmh) {
 
         rxBuf_[rxIdx_++] = byte;
 
-        // Complete frame received (7 bytes)
-        if (rxIdx_ >= MS_FRAME_LENGTH) {
-            uint16_t dist = 0;
-            ParseResult pr = parseFrame(rxBuf_, rxIdx_, dist);
-
-            switch (pr) {
-                case ParseResult::OK:
-                    if (sensorFaultActive_) {
-                        Serial.println("[OBSTACLE] Recovery: valid distance received — "
-                                       "sensor fault cleared.");
-                        sensorFaultActive_ = false;
-                    }
-                    measuredMm = dist;
-                    gotFrame = true;
-                    diagFramesOk_++;
-                    consecutiveInvalidFrames_ = 0;
-                    if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
-                    break;
-                case ParseResult::NO_TARGET:
-                    diagNoTarget_++;
-                    if (cfg_.shortRangeMode) {
-                        // SHORT RANGE: no target = nothing within ~1.3 m = safe.
-                        // Report maxRangeMm (zone 0) instead of emergency-close.
-                        measuredMm = cfg_.maxRangeMm;
-                    } else {
-                        // LONG RANGE: no target → emergency-close fallback.
-                        consecutiveInvalidFrames_++;
-                        measuredMm = cfg_.minRangeMm;
-                    }
-                    gotFrame = true;
-                    break;
-                case ParseResult::BAD_HEADER:
-                    diagHeaderFail_++;
-                    break;
-                case ParseResult::BAD_CHECKSUM:
-                    diagChecksumFail_++;
-                    break;
-                default:
-                    break;
+        // Determine expected frame length once we have the function mark (byte [1])
+        uint16_t expectedLen = 0;
+        if (rxIdx_ >= 2) {
+            if (rxBuf_[1] == FUNCTION_MARK_MS) {
+                expectedLen = MS_FRAME_LENGTH;       // 7 bytes (single-point)
+            } else if (rxBuf_[1] == FUNCTION_MARK_MP) {
+                expectedLen = MP_FRAME_LENGTH;       // 400 bytes (multi-pixel)
             }
+            // Unknown function mark: will be handled below when we have enough bytes
+        }
 
-            /* Frame consumed (or rejected).  Reset for next frame.
-             *
-             * On BAD_CHECKSUM or BAD_HEADER, scan forward for another
-             * 0x57 that could be the real start of the next frame.   */
-            if (pr == ParseResult::BAD_CHECKSUM || pr == ParseResult::BAD_HEADER) {
-                uint16_t resyncIdx = 0;
-                for (uint16_t scan = 1; scan < rxIdx_; scan++) {
-                    if (rxBuf_[scan] == FRAME_HEADER) {
-                        resyncIdx = rxIdx_ - scan;
-                        for (uint16_t j = 0; j < resyncIdx; j++) {
-                            rxBuf_[j] = rxBuf_[scan + j];
-                        }
-                        break;
+        // Not enough bytes yet for the detected frame type — keep accumulating
+        if (expectedLen > 0 && rxIdx_ < expectedLen) continue;
+
+        // If function mark is unknown and we have at least 7 bytes, treat as error
+        if (expectedLen == 0 && rxIdx_ >= MS_FRAME_LENGTH) {
+            // Unknown function mark — reject
+            diagHeaderFail_++;
+            // Resync: scan for next 0x57
+            uint16_t resyncIdx = 0;
+            for (uint16_t scan = 1; scan < rxIdx_; scan++) {
+                if (rxBuf_[scan] == FRAME_HEADER) {
+                    resyncIdx = rxIdx_ - scan;
+                    for (uint16_t j = 0; j < resyncIdx; j++) {
+                        rxBuf_[j] = rxBuf_[scan + j];
                     }
+                    break;
                 }
-                rxIdx_ = resyncIdx;
-            } else {
-                rxIdx_ = 0;
             }
+            rxIdx_ = resyncIdx;
+            continue;
+        }
+
+        // Still accumulating and don't know length yet (only 1 byte = header)
+        if (expectedLen == 0) continue;
+
+        // Complete frame received — attempt parse
+        uint16_t dist = 0;
+        ParseResult pr;
+
+        if (rxBuf_[1] == FUNCTION_MARK_MP) {
+            pr = parseMultiPixelFrame(rxBuf_, rxIdx_, dist);
+        } else {
+            pr = parseFrame(rxBuf_, rxIdx_, dist);
+        }
+
+        switch (pr) {
+            case ParseResult::OK:
+                if (sensorFaultActive_) {
+                    Serial.println("[OBSTACLE] Recovery: valid distance received — "
+                                   "sensor fault cleared.");
+                    sensorFaultActive_ = false;
+                }
+                measuredMm = dist;
+                gotFrame = true;
+                diagFramesOk_++;
+                consecutiveInvalidFrames_ = 0;
+                if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
+                break;
+            case ParseResult::NO_TARGET:
+                diagNoTarget_++;
+                if (cfg_.shortRangeMode) {
+                    // SHORT RANGE: no target = nothing within ~1.3 m = safe.
+                    // Report maxRangeMm (zone 0) instead of emergency-close.
+                    measuredMm = cfg_.maxRangeMm;
+                } else {
+                    // LONG RANGE: no target → emergency-close fallback.
+                    consecutiveInvalidFrames_++;
+                    measuredMm = cfg_.minRangeMm;
+                }
+                gotFrame = true;
+                break;
+            case ParseResult::BAD_HEADER:
+                diagHeaderFail_++;
+                break;
+            case ParseResult::BAD_CHECKSUM:
+                diagChecksumFail_++;
+                break;
+            default:
+                break;
+        }
+
+        /* Frame consumed (or rejected).  Reset for next frame.
+         *
+         * On BAD_CHECKSUM or BAD_HEADER, scan forward for another
+         * 0x57 that could be the real start of the next frame.   */
+        if (pr == ParseResult::BAD_CHECKSUM || pr == ParseResult::BAD_HEADER) {
+            uint16_t resyncIdx = 0;
+            for (uint16_t scan = 1; scan < rxIdx_; scan++) {
+                if (rxBuf_[scan] == FRAME_HEADER) {
+                    resyncIdx = rxIdx_ - scan;
+                    for (uint16_t j = 0; j < resyncIdx; j++) {
+                        rxBuf_[j] = rxBuf_[scan + j];
+                    }
+                    break;
+                }
+            }
+            rxIdx_ = resyncIdx;
+        } else {
+            rxIdx_ = 0;
         }
     }
 
