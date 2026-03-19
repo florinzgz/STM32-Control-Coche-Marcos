@@ -407,8 +407,14 @@ void update(float vehicleSpeedKmh) {
     }
 
     if (!gotFrame) {
-        // No valid frame received — check timeout
-        if (lastValidMs_ > 0 && (now - lastValidMs_) > cfg_.frameTimeoutMs) {
+        // No valid frame received — check timeout.
+        // Two cases:
+        //   1) Had a valid frame before → timeout from lastValidMs_.
+        //   2) Never received any frame → timeout from end of warmup.
+        unsigned long refMs = lastValidMs_ > 0
+                            ? lastValidMs_
+                            : (initTimeMs_ + cfg_.warmupMs);
+        if ((now - refMs) > cfg_.frameTimeoutMs) {
             reading_.status  = SensorStatus::INVALID;
             reading_.healthy = false;
         }
