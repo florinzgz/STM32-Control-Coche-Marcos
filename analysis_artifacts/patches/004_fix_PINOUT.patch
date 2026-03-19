@@ -1,0 +1,168 @@
+--- a/docs/PINOUT.md	2026-03-19 09:01:20.567562446 +0000
++++ b/docs/PINOUT.md	2026-03-19 09:03:34.663017268 +0000
+@@ -24,7 +24,7 @@
+ ### Especificaciones Clave
+ - **MCU:** STM32G474RE (LQFP64)
+ - **Total Pines Usados:** 42 de 51 I/O disponibles
+-- **PWM:** TIM1 (4 canales tracción) + TIM8 (dirección) @ 20 kHz
++- **PWM:** TIM1 (2 canales tracción frontal RPWM/LPWM) + TIM8 (2 canales tracción trasera RPWM/LPWM) + TIM3 (dirección RPWM/LPWM) @ 20 kHz
+ - **Sensores:**
+   - **5 sensores de rueda** (4 ruedas + 1 encoder dirección)
+   - **5 sensores de temperatura** DS18B20 (4 motores + 1 ambiente)
+@@ -37,45 +37,58 @@
+ ### Control Directo por PWM (SIN PCA9685)
+ 
+ Los motores son controlados **directamente** por los timers del STM32:
+-- **TIM1** (Advanced Timer) → 4 motores de tracción
+-- **TIM8** (Advanced Timer) → Motor de dirección
++- **TIM1** (Advanced Timer) → 2 motores frontales (FL: CH1/CH2, FR: CH3/CH4) — RPWM/LPWM
++- **TIM8** (Advanced Timer) → 2 motores traseros (RL: CH1/CH2, RR: CH3/CH4) — RPWM/LPWM
++- **TIM3** (General-Purpose Timer) → Motor de dirección (CH1/CH2) — RPWM/LPWM
+ - **Frecuencia:** 20 kHz (period 50 µs)
+ - **Resolución:** ~13 bits (ARR = 8499)
+ 
+ ### 🔴 Motores de Tracción (4× BTS7960)
+ 
+-Cada motor requiere 3 señales: **PWM** (velocidad), **DIR** (dirección), **EN** (habilitación).
++Cada motor BTS7960 usa 2 señales PWM directas: **RPWM** (avance) y **LPWM** (retroceso). Los pines DIR (PC0–PC4) han sido liberados. EN: FL=PC5, RR=PC13 como GPIO; FR/RL/STEER conectados a 3.3V permanente.
+ 
+-| Motor | PWM Pin | Timer/Canal | DIR Pin | EN Pin | Función |
+-|-------|---------|-------------|---------|--------|---------|
+-| **FL** (Front Left) | **PA8** | TIM1_CH1 | **PC0** | **PC1** | Rueda delantera izquierda |
+-| **FR** (Front Right) | **PA9** | TIM1_CH2 | **PC2** | **PC3** | Rueda delantera derecha |
+-| **RL** (Rear Left) | **PA10** | TIM1_CH3 | **PC4** | **PC5** | Rueda trasera izquierda |
+-| **RR** (Rear Right) | **PA11** | TIM1_CH4 | **PC6** | **PC7** | Rueda trasera derecha |
++| Motor | RPWM Pin | LPWM Pin | Timer | EN Pin | Función |
++|-------|----------|----------|-------|--------|---------|
++| **FL** (Front Left) | **PA8** | **PA9** | TIM1_CH1/CH2 | **PC5** (GPIO) | Rueda delantera izquierda |
++| **FR** (Front Right) | **PA10** | **PA11** | TIM1_CH3/CH4 | 3.3V fijo | Rueda delantera derecha |
++| **RL** (Rear Left) | **PC6** | **PC7** | TIM8_CH1/CH2 | 3.3V fijo | Rueda trasera izquierda |
++| **RR** (Rear Right) | **PC8** | **PC9** | TIM8_CH3/CH4 | **PC13** (GPIO) | Rueda trasera derecha |
+ 
+-#### Configuración TIM1
++#### Configuración TIM1 (Motores Frontales FL + FR)
+ ```c
+-// Configuración TIM1 para PWM @ 20 kHz
+-TIM1->PSC = 0;              // Prescaler = 1 (170 MHz / 1 = 170 MHz)
+-TIM1->ARR = 8499;           // Auto-reload: 170 MHz / 8500 = 20 kHz
+-TIM1->CCR1 = 0;             // Duty cycle motor FL (0-8499)
+-TIM1->CCR2 = 0;             // Duty cycle motor FR (0-8499)
+-TIM1->CCR3 = 0;             // Duty cycle motor RL (0-8499)
+-TIM1->CCR4 = 0;             // Duty cycle motor RR (0-8499)
++// TIM1 @ 20 kHz center-aligned (170 MHz / (2 × 4250) = 20 kHz)
++TIM1->PSC = 0;              // Prescaler = 1
++TIM1->ARR = 4249;           // Auto-reload center-aligned
++TIM1->CCR1 = 0;             // RPWM_FL (avance)
++TIM1->CCR2 = 0;             // LPWM_FL (retroceso)
++TIM1->CCR3 = 0;             // RPWM_FR (avance)
++TIM1->CCR4 = 0;             // LPWM_FR (retroceso)
+ ```
+ 
+-### 🟢 Motor de Dirección (1× BTS7960)
++### 🟢 Motor de Dirección (1× BTS7960) — TIM3
+ 
+-| Motor | PWM Pin | Timer/Canal | DIR Pin | EN Pin | Función |
+-|-------|---------|-------------|---------|--------|---------|
+-| **STEER** | **PC8** | TIM8_CH3 | **PC9** | **PC10** | Motor de dirección Ackermann |
++| Motor | RPWM Pin | LPWM Pin | Timer | EN Pin | Función |
++|-------|----------|----------|-------|--------|---------|
++| **STEER** | **PA6** | **PA7** | TIM3_CH1/CH2 | 3.3V fijo | Motor de dirección Ackermann |
+ 
+-#### Configuración TIM8
++#### Configuración TIM8 (Motores Traseros RL + RR)
+ ```c
+-// Configuración TIM8 para PWM @ 20 kHz
+-TIM8->PSC = 0;              // Prescaler = 1 (170 MHz)
+-TIM8->ARR = 8499;           // Auto-reload: 20 kHz
+-TIM8->CCR3 = 0;             // Duty cycle motor dirección (0-8499)
++// TIM8 @ 20 kHz center-aligned
++TIM8->PSC = 0;              // Prescaler = 1
++TIM8->ARR = 4249;           // Auto-reload center-aligned
++TIM8->CCR1 = 0;             // RPWM_RL (avance)
++TIM8->CCR2 = 0;             // LPWM_RL (retroceso)
++TIM8->CCR3 = 0;             // RPWM_RR (avance)
++TIM8->CCR4 = 0;             // LPWM_RR (retroceso)
++```
++
++#### Configuración TIM3 (Motor Dirección)
++```c
++// TIM3 @ 20 kHz center-aligned
++TIM3->PSC = 0;
++TIM3->ARR = 4249;
++TIM3->CCR1 = 0;             // RPWM_STEER (avance)
++TIM3->CCR2 = 0;             // LPWM_STEER (retroceso)
+ ```
+ 
+ ---
+@@ -92,13 +105,13 @@
+ 
+ | Sensor | Pin | Modo | EXTI | Función |
+ |--------|-----|------|------|---------|
+-| **WHEEL_FL** | **PB0** | GPIO Input (Pull-up) | EXTI0 | Velocidad rueda delantera izquierda |
+-| **WHEEL_FR** | **PB1** | GPIO Input (Pull-up) | EXTI1 | Velocidad rueda delantera derecha |
+-| **WHEEL_RL** | **PB2** | GPIO Input (Pull-up) | EXTI2 | Velocidad rueda trasera izquierda |
+-| **WHEEL_RR** | **PB10** | GPIO Input (Pull-up) | EXTI10 | Velocidad rueda trasera derecha |
++| **WHEEL_FL** | **PA0** | GPIO Input (Pull-up) | EXTI0 | Velocidad rueda delantera izquierda |
++| **WHEEL_FR** | **PA1** | GPIO Input (Pull-up) | EXTI1 | Velocidad rueda delantera derecha |
++| **WHEEL_RL** | **PA2** | GPIO Input (Pull-up) | EXTI2 | Velocidad rueda trasera izquierda |
++| **WHEEL_RR** | **PB15** | GPIO Input (Pull-up) | EXTI15 | Velocidad rueda trasera derecha |
+ 
+ **Características:**
+-- Pulsos por revolución: Variable según sensor (típicamente 1-4 PPR)
++- Pulsos por revolución: 6 (6 bulones por revolución, definido como WHEEL_PULSES_REV en firmware)
+ - Detección por flanco descendente (activo bajo)
+ - Resistencia pull-up interna habilitada
+ - Interrupciones EXTI para conteo preciso
+@@ -337,36 +350,36 @@
+ 
+ | Puerto | Pin | Función | Periférico | Notas |
+ |--------|-----|---------|------------|-------|
+-| **PA0** | 1 | PEDAL | ADC1_IN1 | Pedal Hall analógico |
++| **PA0** | 1 | WHEEL_FL | GPIO/EXTI0 | Sensor rueda FL |
+ | **PA8** | 29 | PWM_FL | TIM1_CH1 | Motor tracción FL |
+ | **PA9** | 30 | PWM_FR | TIM1_CH2 | Motor tracción FR |
+ | **PA10** | 31 | PWM_RL | TIM1_CH3 | Motor tracción RL |
+ | **PA11** | 32 | PWM_RR | TIM1_CH4 | Motor tracción RR |
+ | **PA15** | 38 | ENC_A | TIM2_CH1 | Encoder dirección A |
+-| **PB0** | 14 | WHEEL_FL | GPIO/EXTI0 | Sensor rueda FL |
+-| **PB1** | 15 | WHEEL_FR | GPIO/EXTI1 | Sensor rueda FR |
+-| **PB2** | 16 | WHEEL_RL | GPIO/EXTI2 | Sensor rueda RL |
++| **PB0** | 14 | ONEWIRE | GPIO | Bus DS18B20 (5 sensores) |
++| **PB1** | 15 | — | — | No asignado en firmware |
++| **PB2** | 16 | — | — | No asignado en firmware |
+ | **PB3** | 39 | ENC_B | TIM2_CH2 | Encoder dirección B |
+ | **PB4** | 40 | ENC_Z | GPIO/EXTI4 | Encoder índice Z |
+-| **PB5** | 41 | TEMP_ONEWIRE | GPIO | Bus DS18B20 (5 sensores) |
++| **PB5** | 41 | STEER_CENTER | GPIO/EXTI5 | Sensor inductivo centro dirección |
+ | **PB6** | 42 | I2C_SCL | I2C1_SCL | Sensores INA226 |
+ | **PB7** | 43 | I2C_SDA | I2C1_SDA | Sensores INA226 |
+ | **PB8** | 45 | CAN_RX | FDCAN1_RX (AF9) | Recepción CAN |
+ | **PB9** | 46 | CAN_TX | FDCAN1_TX (AF9) | Transmisión CAN |
+-| **PB10** | 21 | WHEEL_RR | GPIO/EXTI10 | Sensor rueda RR |
++| **PB10** | 21 | RELAY_LED | GPIO Output | Relé tira LED frontal |
+ | **PB12** | 25 | SHIFTER_FWD | GPIO Input | Shifter Forward |
+ | **PB13** | 26 | SHIFTER_NEU | GPIO Input | Shifter Neutral |
+ | **PB14** | 27 | SHIFTER_REV | GPIO Input | Shifter Reverse |
+-| **PC0** | 8 | DIR_FL | GPIO Output | Dirección motor FL |
+-| **PC1** | 9 | EN_FL | GPIO Output | Enable motor FL |
+-| **PC2** | 10 | DIR_FR | GPIO Output | Dirección motor FR |
+-| **PC3** | 11 | EN_FR | GPIO Output | Enable motor FR |
+-| **PC4** | 24 | DIR_RL | GPIO Output | Dirección motor RL |
+-| **PC5** | 25 | EN_RL | GPIO Output | Enable motor RL |
+-| **PC6** | 37 | DIR_RR | GPIO Output | Dirección motor RR |
+-| **PC7** | 38 | EN_RR | GPIO Output | Enable motor RR |
+-| **PC8** | 39 | PWM_STEER | TIM8_CH3 | Motor dirección |
+-| **PC9** | 40 | DIR_STEER | GPIO Output | Dirección steering |
++| **PC0** | 8 | — (liberado) | — | DIR_FL liberado (RPWM/LPWM) |
++| **PC1** | 9 | — (liberado) | — | EN_FL liberado (3.3V fijo) |
++| **PC2** | 10 | — (liberado) | — | DIR_FR liberado (RPWM/LPWM) |
++| **PC3** | 11 | — (liberado) | — | EN_FR liberado (3.3V fijo) |
++| **PC4** | 24 | — (liberado) | — | DIR_RL liberado (RPWM/LPWM) |
++| **PC5** | 25 | EN_FL | GPIO Output | Enable motor FL (activo HIGH) |
++| **PC6** | 37 | RPWM_RL | TIM8_CH1 | Motor trasero izq. avance |
++| **PC7** | 38 | LPWM_RL | TIM8_CH2 | Motor trasero izq. retroceso |
++| **PC8** | 39 | RPWM_RR | TIM8_CH3 | Motor trasero der. avance |
++| **PC9** | 40 | LPWM_RR | TIM8_CH4 | Motor trasero der. retroceso |
+ | **PC10** | 51 | EN_STEER | GPIO Output | Enable steering |
+ | **PC11** | 52 | RELAY_MAIN | GPIO Output | Relé principal |
+ | **PC12** | 53 | RELAY_TRAC | GPIO Output | Relé tracción |
