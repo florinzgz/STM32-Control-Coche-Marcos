@@ -161,7 +161,8 @@ enum class ParseResult : uint8_t {
     TOO_SHORT,         // Buffer too short
     BAD_HEADER,        // Wrong header or function_mark
     BAD_CHECKSUM,      // 8-bit sum mismatch
-    NO_VALID_PIXELS,   // All 64 pixels invalid (dist==0 or >=65000), or fewer than MIN_VALID_PIXELS
+    NO_VALID_PIXELS,   // All 64 pixels invalid (dist==0 or >=65000) — zero valid pixels
+    TOO_FEW_PIXELS,    // Some valid pixels but fewer than MIN_VALID_PIXELS (likely wrap-around artifact)
     HIGH_DISPERSION    // Valid pixels present but distance spread exceeds MAX_PIXEL_DISPERSION_MM (wrap-around)
 };
 
@@ -221,7 +222,7 @@ static ParseResult parseFrame(const uint8_t* buf, uint16_t len,
     // When very few pixels are valid while most are invalid, the valid
     // ones are likely phase wrap-around artifacts from an object within
     // the sensor's blind zone (< ~50 mm).  Treat as emergency-close.
-    if (validCount < MIN_VALID_PIXELS) return ParseResult::NO_VALID_PIXELS;
+    if (validCount < MIN_VALID_PIXELS) return ParseResult::TOO_FEW_PIXELS;
 
     // High-dispersion check: when valid pixels disagree widely (spread
     // > MAX_PIXEL_DISPERSION_MM), the readings are inconsistent and
@@ -323,9 +324,10 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
-    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d, auto-detect Frame0/Compact)\n",
+    Serial.printf("[OBSTACLE] TOFSense-M init (UART1, %lu bps, rxBuf %u, rxPin %d, txPin %d, auto-detect Frame0/Compact%s)\n",
                   (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
-                  cfg_.rxPin, cfg_.txPin);
+                  cfg_.rxPin, cfg_.txPin,
+                  cfg_.shortRangeMode ? ", SHORT RANGE read-only" : "");
 }
 
 void update(float vehicleSpeedKmh) {
@@ -445,6 +447,28 @@ void update(float vehicleSpeedKmh) {
                     break;
                 case ParseResult::NO_VALID_PIXELS:
                     diagAllPixelsInvalid_++;
+                    if (cfg_.shortRangeMode) {
+                        // SHORT RANGE: all pixels invalid = nothing within ~1.3 m = safe.
+                        // Report maxRangeMm (zone 0) instead of emergency-close.
+                        // Do NOT count as consecutive-invalid for fault detection —
+                        // this is expected behaviour when nothing is in range.
+                        measuredMm = cfg_.maxRangeMm;
+                    } else {
+                        // LONG RANGE (original): all pixels invalid = close-range
+                        // blind zone → emergency-close fallback.
+                        consecutiveInvalidFrames_++;
+                        measuredMm = cfg_.minRangeMm;
+                    }
+                    gotFrame   = true;
+                    if (detectedMode_ == FrameMode::AUTO) {
+                        detectedMode_ = isFrame0 ? FrameMode::FRAME0 : FrameMode::COMPACT;
+                    }
+                    break;
+                case ParseResult::TOO_FEW_PIXELS:
+                    // Fewer than MIN_VALID_PIXELS valid pixels — likely phase
+                    // wrap-around artifacts.  Treat as emergency-close regardless
+                    // of range mode (wrap-around can happen in either mode).
+                    diagAllPixelsInvalid_++;
                     consecutiveInvalidFrames_++;
                     measuredMm = cfg_.minRangeMm;
                     gotFrame   = true;
@@ -548,17 +572,28 @@ void update(float vehicleSpeedKmh) {
             // almost always means the sensor is in SHORT RANGE mode and there
             // is nothing within its ~1.3 m range — every pixel reports
             // an invalid distance.  Warn with actionable instructions.
+            // In shortRangeMode this is expected (driver reports maxRangeMm
+            // instead), so only emit an informational message.
             if (!diagShortRangeWarned_
                     && diagAllPixelsInvalid_ > DIAG_MIN_FRAMES_FOR_RANGE_CHECK
                     && diagFramesOk_ == 0) {
-                Serial.printf("[OBSTACLE] WARNING: All %lu frames returned "
-                              "NO valid pixels (distance stuck at %u mm). "
-                              "Sensor is likely in SHORT RANGE mode with no "
-                              "obstacle within ~1.3 m.  Fix: call "
-                              "configureLongRange() with txPin connected, "
-                              "or use NAssistant to switch to Long Range mode.\n",
-                              (unsigned long)diagAllPixelsInvalid_,
-                              (unsigned)cfg_.minRangeMm);
+                if (cfg_.shortRangeMode) {
+                    Serial.printf("[OBSTACLE] INFO: All %lu frames had NO valid "
+                                  "pixels — normal for SHORT RANGE read-only mode "
+                                  "with no obstacle within ~1.3 m. Reporting %u mm "
+                                  "(safe/clear).\n",
+                                  (unsigned long)diagAllPixelsInvalid_,
+                                  (unsigned)cfg_.maxRangeMm);
+                } else {
+                    Serial.printf("[OBSTACLE] WARNING: All %lu frames returned "
+                                  "NO valid pixels (distance stuck at %u mm). "
+                                  "Sensor is likely in SHORT RANGE mode with no "
+                                  "obstacle within ~1.3 m.  Fix: call "
+                                  "configureLongRange() with txPin connected, "
+                                  "or use NAssistant to switch to Long Range mode.\n",
+                                  (unsigned long)diagAllPixelsInvalid_,
+                                  (unsigned)cfg_.minRangeMm);
+                }
                 diagShortRangeWarned_ = true;
             }
             if (!diagShortRangeWarned_
@@ -655,9 +690,16 @@ void update(float vehicleSpeedKmh) {
     // On real hardware the STM32 applies OBSTACLE_FAULT_SCALE (50% speed
     // cap) when sensor health = 0, which is a better outcome than a full
     // stop caused by a phantom 20 mm obstacle.
+    //
+    // SKIP in shortRangeMode: sustained all-pixels-invalid is expected
+    // when nothing is within the sensor's ~1.3 m range.  The driver
+    // already reports maxRangeMm (safe) in that case, so no fault needed.
+    // Only TOO_FEW_PIXELS and HIGH_DISPERSION increment the counter in
+    // shortRangeMode — and those genuinely deserve fault escalation.
     bool recoveryPossible = (autoRecoveryAttempts_ < MAX_AUTO_RECOVERY_ATTEMPTS)
                             && (cfg_.txPin >= 0);
-    if (!recoveryPossible
+    if (!cfg_.shortRangeMode
+            && !recoveryPossible
             && consecutiveInvalidFrames_ >= SENSOR_FAULT_FRAME_THRESHOLD) {
         if (!sensorFaultActive_) {
             sensorFaultActive_ = true;

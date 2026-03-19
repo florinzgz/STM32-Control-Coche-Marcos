@@ -2423,6 +2423,240 @@ static void test_update_count_increments() {
     }
 }
 
+// ---- SHORT RANGE read-only mode tests -----------------------------------
+
+// Helper: inject a frame with a custom Config and return the reading.
+static obstacle_sensor::Reading injectFrameWithConfig(
+        uint8_t* frame, uint16_t frameLen,
+        const obstacle_sensor::Config& cfg) {
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init(cfg);
+
+    // Advance past warmup
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    g_uart_inject(frame, frameLen);
+    obstacle_sensor::update(0.0f);
+
+    return obstacle_sensor::getReading();
+}
+
+// Test 67: In shortRangeMode, all pixels invalid → maxRangeMm (safe/clear),
+//          NOT minRangeMm (emergency close).  This is the core fix: in SHORT
+//          RANGE mode, all pixels invalid means "nothing within ~1.3 m".
+static void test_short_range_all_invalid_reports_max_range() {
+    printf("  test_short_range_all_invalid_reports_max_range...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65535, /*status=*/0, 100);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm     = 1350;
+
+    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
+
+    // Should be VALID at maxRangeMm (safe), NOT 20 mm (emergency)
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 1350);   // maxRangeMm, not minRangeMm
+    ASSERT_EQ(rd.zone, 1);             // caution zone: [1000, 1500) mm
+}
+
+// Test 68: In shortRangeMode, too-few valid pixels (1–3) still treated as
+//          emergency close (wrap-around protection still applies).
+static void test_short_range_too_few_pixels_still_emergency() {
+    printf("  test_short_range_too_few_pixels_still_emergency...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65535, /*status=*/0, 50);
+    }
+    // Only 2 pixels valid (< MIN_VALID_PIXELS = 4)
+    setPixel(frame, 10, 800, /*status=*/0, 200);
+    setPixel(frame, 11, 900, /*status=*/0, 180);
+    writeChecksum(frame);
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm     = 1350;
+
+    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
+
+    // Too few valid pixels → emergency close (minRangeMm) even in short range mode
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);     // minRangeMm (emergency close)
+    ASSERT_EQ(rd.zone, 4);             // emergency zone
+}
+
+// Test 69: In shortRangeMode, sustained all-pixels-invalid does NOT trigger
+//          sensor fault.  Sustained "nothing in range" is expected behaviour.
+static void test_short_range_no_fault_on_sustained_all_invalid() {
+    printf("  test_short_range_no_fault_on_sustained_all_invalid...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65535, /*status=*/0, 100);
+    }
+    writeChecksum(frame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm     = 1350;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 100 consecutive all-invalid frames — far beyond fault threshold (60)
+    for (int i = 0; i < 100; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(frame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    // Must NOT be faulted — this is normal behaviour in SHORT RANGE mode
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.distance_mm, 1350);   // maxRangeMm (safe)
+    ASSERT_EQ(rd.zone, 1);             // caution zone [1000, 1500)
+    ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0); // No recovery attempts
+}
+
+// Test 70: In shortRangeMode with valid distance data, parsing works normally.
+static void test_short_range_valid_distance_normal() {
+    printf("  test_short_range_valid_distance_normal...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    setValidPixels(frame, 800, 200);   // 800 mm — within SHORT RANGE
+    writeChecksum(frame);
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm     = 1350;
+
+    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
+
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 800);
+    ASSERT_EQ(rd.zone, 2);             // warning zone: [500, 1000)
+}
+
+// Test 71: In shortRangeMode, high dispersion still treated as emergency close.
+static void test_short_range_high_dispersion_still_emergency() {
+    printf("  test_short_range_high_dispersion_still_emergency...\n");
+
+    uint8_t frame[FRAME_LEN];
+    buildFrame(frame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(frame, px, 65535, /*status=*/0, 50);
+    }
+    // 10 valid pixels with high dispersion (spread > 500 mm)
+    for (uint8_t px = 0; px < 5; px++) {
+        setPixel(frame, px, 200, /*status=*/0, 200);
+    }
+    for (uint8_t px = 5; px < 10; px++) {
+        setPixel(frame, px, 1200, /*status=*/0, 200);
+    }
+    writeChecksum(frame);
+
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm     = 1350;
+
+    obstacle_sensor::Reading rd = injectFrameWithConfig(frame, FRAME_LEN, cfg);
+
+    // High dispersion → emergency close even in shortRangeMode
+    ASSERT_EQ(static_cast<uint8_t>(rd.status),
+              static_cast<uint8_t>(obstacle_sensor::SensorStatus::VALID));
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.distance_mm, 20);     // minRangeMm
+    ASSERT_EQ(rd.zone, 4);             // emergency
+}
+
+// Test 72: shortRangeMode defaults to false.
+static void test_short_range_mode_default_false() {
+    printf("  test_short_range_mode_default_false...\n");
+
+    obstacle_sensor::Config cfg{};
+    ASSERT_EQ(cfg.shortRangeMode, false);
+}
+
+// Test 73: In shortRangeMode, recovery from all-invalid to valid frame works.
+//          Simulates an obstacle entering the sensor's range after a period of
+//          no objects (all-invalid → valid distance).
+static void test_short_range_recovery_to_valid() {
+    printf("  test_short_range_recovery_to_valid...\n");
+
+    uint8_t badFrame[FRAME_LEN];
+    buildFrame(badFrame);
+    for (uint8_t px = 0; px < 64; px++) {
+        setPixel(badFrame, px, 65535, /*status=*/0, 100);
+    }
+    writeChecksum(badFrame);
+
+    uint8_t goodFrame[FRAME_LEN];
+    buildFrame(goodFrame);
+    setValidPixels(goodFrame, 500, 200);
+    writeChecksum(goodFrame);
+
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::Config cfg;
+    cfg.shortRangeMode = true;
+    cfg.maxRangeMm     = 1350;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Feed 20 all-invalid frames (nothing in range)
+    for (int i = 0; i < 20; i++) {
+        g_uart_inject_reset();
+        g_uart_inject(badFrame, FRAME_LEN);
+        g_test_millis += 100;
+        obstacle_sensor::update(0.0f);
+    }
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.distance_mm, 1350);  // maxRangeMm (safe)
+        ASSERT_EQ(rd.healthy, true);
+    }
+
+    // Now an obstacle enters range
+    g_uart_inject_reset();
+    g_uart_inject(goodFrame, FRAME_LEN);
+    g_test_millis += 100;
+    obstacle_sensor::update(0.0f);
+
+    {
+        obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+        ASSERT_EQ(rd.distance_mm, 500);
+        ASSERT_EQ(rd.healthy, true);
+        ASSERT_EQ(rd.zone, 2);            // warning zone: [500, 1000)
+    }
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -2500,6 +2734,13 @@ int main() {
     test_sensor_fault_without_tx_pin();
     test_sensor_fault_clears_on_valid_frame();
     test_update_count_increments();
+    test_short_range_all_invalid_reports_max_range();
+    test_short_range_too_few_pixels_still_emergency();
+    test_short_range_no_fault_on_sustained_all_invalid();
+    test_short_range_valid_distance_normal();
+    test_short_range_high_dispersion_still_emergency();
+    test_short_range_mode_default_false();
+    test_short_range_recovery_to_valid();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;
