@@ -16,8 +16,8 @@ Los resultados previos de Frama-C (2026-03-18) fueron **verificados manualmente*
 | Archivos de configuración     | .ioc, .ld, .ini, Makefile |
 | Líneas de código (STM32)      | 12,317         |
 | Líneas de código (ESP32)      | ~9,578         |
-| Tests ejecutados              | 348 (STM32) + 464 (ESP32) = 812 |
-| Tests pasados                 | **812 / 812 (100%)** |
+| Tests ejecutados              | 347 (STM32) + 464 (ESP32) = 811 |
+| Tests pasados                 | **811 / 811 (100%)** |
 | Errores críticos reales       | **0**          |
 | Errores medios reales         | **1**          |
 | Errores bajos reales          | **0**          |
