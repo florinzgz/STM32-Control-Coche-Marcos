@@ -18,12 +18,18 @@
 #include "service_mode.h"
 #include "boot_validation.h"
 #include "error_log.h"
+#include "math_safety.h"
 
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
 #define TCS_SLIP_THRESHOLD   15   /* tcs_system.cpp: slipThreshold = 15.0f */
 #define MAX_CURRENT_A        25.0f
 #define CAN_TIMEOUT_MS       250
+
+/* Saturating uint32_t increment — prevents wrap to 0 */
+static inline void sat_inc_u32(uint32_t *counter) {
+    if (*counter < UINT32_MAX) (*counter)++;
+}
 
 /* Battery undervoltage thresholds (24 V system).
  *
@@ -439,7 +445,7 @@ void Safety_SetDegradedLevel(DegradedLevel_t level, DegradedReason_t reason)
      * not on intra-degraded escalation (L1→L2).                        */
     if (level > degraded_level) {
         if (degraded_level == DEGRADED_LEVEL_NONE) {
-            degraded_telemetry_count++;
+            sat_inc_u32(&degraded_telemetry_count);
         }
         degraded_level  = level;
         degraded_reason = reason;
@@ -633,6 +639,7 @@ bool Safety_ValidateModeChange(bool enable_4x4, bool tank_turn)
     /* Mode change only allowed at very low speed */
     float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
                        Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+    avg_speed = sanitize_float(avg_speed, MODE_CHANGE_MAX_SPEED_KMH + 1.0f);
     if (avg_speed > MODE_CHANGE_MAX_SPEED_KMH) return false;
 
     return true;
@@ -809,7 +816,7 @@ void ABS_Update(void)
     if (mask) {
         safety_status.abs_active = true;
         safety_status.abs_wheel_mask = mask;
-        safety_status.abs_activation_count++;
+        sat_inc_u32(&safety_status.abs_activation_count);
         /* Global fallback: if ALL wheels lock, apply global throttle
          * cut as a last-resort safety measure (vehicle is on ice or
          * sensors are unreliable).                                    */
@@ -928,7 +935,7 @@ void TCS_Update(void)
     if (mask) {
         safety_status.tcs_active = true;
         safety_status.tcs_wheel_mask = mask;
-        safety_status.tcs_activation_count++;
+        sat_inc_u32(&safety_status.tcs_activation_count);
         /* Global fallback: if ALL wheels spin, apply global limit as
          * last-resort safety (all traction lost).                     */
         if (mask == 0x0F) {
@@ -1496,6 +1503,7 @@ static float Obstacle_GetVehicleSpeed(void)
 {
     float avg = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
                  Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+    avg = sanitize_float(avg, 0.0f);
     if (avg < 0.0f) avg = 0.0f;
     return avg;
 }

@@ -536,8 +536,9 @@ void Traction_SetDemand(float throttlePct)
         prev_raw_demand_tick = now_anom;
         frozen_pedal_value   = throttlePct;
         frozen_pedal_tick    = now_anom;
-        frozen_pedal_speed   = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                                Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        frozen_pedal_speed   = sanitize_float(
+                                (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                                 Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
         anomaly_init         = 1;
     } else {
         float dt_anom = (float)(now_anom - prev_raw_demand_tick);
@@ -575,12 +576,14 @@ void Traction_SetDemand(float throttlePct)
         /* Pedal moved — reset frozen tracking */
         frozen_pedal_value = throttlePct;
         frozen_pedal_tick  = now_anom;
-        frozen_pedal_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                              Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        frozen_pedal_speed = sanitize_float(
+                              (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                               Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
     } else if ((now_anom - frozen_pedal_tick) > FROZEN_PEDAL_TIMEOUT_MS) {
         /* Pedal has been frozen — check speed divergence */
-        float current_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                               Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        float current_speed = sanitize_float(
+                                (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                                 Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
         if (fabsf(current_speed - frozen_pedal_speed) > FROZEN_PEDAL_SPEED_DELTA_KMH) {
             /* Speed changed significantly while pedal frozen → anomaly */
             Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
@@ -898,8 +901,9 @@ void Traction_Update(void)
 
     /* Disable below minimum speed */
     if (dynbrake_allowed) {
-        float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                           Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        float avg_speed = sanitize_float(
+                            (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                             Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
         if (avg_speed < DYNBRAKE_MIN_SPEED_KMH) {
             dynbrake_allowed = false;
         }
@@ -973,8 +977,9 @@ void Traction_Update(void)
      * further acceleration.  This is a defence-in-depth layer on top
      * of the 20% torque limit applied upstream.                        */
     if (sys_st == SYS_STATE_LIMP_HOME && effective_demand > 0.0f) {
-        float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                         Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+        float avg_spd = sanitize_float(
+                          (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                           Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f, 0.0f);
         if (avg_spd > LIMP_HOME_SPEED_LIMIT_KMH) {
             effective_demand = 0.0f;
         } else if (avg_spd > (LIMP_HOME_SPEED_LIMIT_KMH * 0.8f)) {
