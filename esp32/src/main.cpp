@@ -357,36 +357,24 @@ void setup() {
 
     // Initialize obstacle sensor driver (TOFSense-M on UART1)
     //   RX = GPIO 18 (sensor TX → ESP32 RX via voltage divider)
-    //   TX = GPIO 17 (ESP32 TX → sensor RX, needed for configuration commands)
+    //   TX = NOT CONNECTED (sensor RX not wired to ESP32 TX)
+    //
+    // READ-ONLY MODE: The sensor's RX pin is not connected to the ESP32's
+    // TX, so no NLink configuration commands can reach the sensor.  The
+    // sensor is permanently in SHORT RANGE / HIGH PRECISION mode (~1.3 m
+    // max).  shortRangeMode=true tells the driver to treat all-pixels-
+    // invalid frames as "nothing in range" (safe) instead of emergency-
+    // close (20 mm fallback).  Do NOT call configureLongRange() — the
+    // commands would be sent to an unconnected pin and silently lost.
+    // To switch to LONG RANGE mode, either:
+    //   1. Wire ESP32 GPIO 17 → sensor RX and set txPin=17, or
+    //   2. Use the NAssistant PC tool to pre-configure the sensor.
     {
         obstacle_sensor::Config obsCfg;
-        obsCfg.txPin = 17;   // Enable TX so configureLongRange() can send commands
+        obsCfg.txPin          = -1;     // TX not connected — read-only
+        obsCfg.shortRangeMode = true;   // Sensor permanently in SHORT RANGE
+        obsCfg.maxRangeMm     = 1350;   // SHORT RANGE max ~1.3 m
         obstacle_sensor::init(obsCfg);
-        // Wait for the sensor to boot before sending configuration commands.
-        // The TOFSense-M needs time after power-on to initialize its command
-        // processor.  Without this delay, commands sent immediately after UART
-        // init are ignored and the sensor stays in SHORT RANGE mode (→ 20 mm).
-        // 2000 ms is conservative; the sensor typically boots in ~1 s, but
-        // cold-start and brown-out recovery can take longer.
-        delay(2000);
-        // Switch sensor to LONG RANGE mode (4 m).  Without this, the sensor
-        // stays in SHORT RANGE mode (max ~1.3 m) and reports 20 mm in open
-        // air because all pixels return invalid when nothing is in range.
-        // If this initial attempt fails (e.g. sensor still booting), the
-        // driver's auto-recovery will retry automatically after detecting
-        // sustained all-pixels-invalid frames.
-        bool cfgOk = obstacle_sensor::configureLongRange();
-        if (cfgOk) {
-            Serial.printf("[OBSTACLE] Boot: configureLongRange() sent via txPin=%d — "
-                          "sensor switching to Long Range mode.\n",
-                          obsCfg.txPin);
-        } else {
-            Serial.printf("[OBSTACLE] Boot WARNING: configureLongRange() failed "
-                          "(txPin=%d) — check ESP32 TX → sensor RX wiring. "
-                          "Auto-recovery will retry after detecting sustained "
-                          "invalid frames.\n",
-                          obsCfg.txPin);
-        }
     }
 
     // Initialize CAN TX for obstacle distance frame (0x208)

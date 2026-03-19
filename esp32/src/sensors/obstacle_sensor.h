@@ -144,6 +144,18 @@ struct Config {
     uint32_t stuckDurationMs   = 1000;  // Duration for stuck detection (ms)
     uint16_t stuckThresholdMm  = 10;    // Change threshold for stuck detection (mm)
     float    minSpeedForStuck  = 1.0f;  // Vehicle speed threshold (km/h) for stuck detection
+    bool     shortRangeMode    = false; // Set to true when the sensor is permanently in
+                                        // SHORT RANGE / HIGH PRECISION mode and cannot be
+                                        // reconfigured (e.g. sensor RX not connected).
+                                        // When true:
+                                        //   - All-pixels-invalid frames are treated as "nothing
+                                        //     in range" → reports maxRangeMm (safe), NOT
+                                        //     minRangeMm (emergency close).
+                                        //   - Sustained all-invalid is expected and does NOT
+                                        //     trigger sensor fault escalation.
+                                        //   - No NLink commands are sent (auto-recovery disabled).
+                                        // When false (default): original LONG RANGE behaviour —
+                                        //   all-pixels-invalid = emergency close (minRangeMm).
 };
 
 /// Initialize sensor hardware.  Call once from setup().
