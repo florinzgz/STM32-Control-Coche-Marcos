@@ -1419,9 +1419,9 @@ static void test_warmup_period() {
     ASSERT_EQ(rd.healthy, false);
 }
 
-// Test 69: Bad function mark rejected (0x02 is neither single-point 0x00 nor multi-pixel 0x01)
-static void test_bad_function_mark_rejected() {
-    printf("  test_bad_function_mark_rejected...\n");
+// Test 69: Unknown function mark rejected (0x02 is neither single-point 0x00 nor multi-pixel 0x01)
+static void test_unknown_function_mark_rejected() {
+    printf("  test_unknown_function_mark_rejected...\n");
 
     g_uart_inject_reset();
     g_test_millis = 0;
@@ -1429,10 +1429,10 @@ static void test_bad_function_mark_rejected() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    // Build frame with unknown function mark (0x02 — neither 0x00 nor 0x01)
+    // Build frame with unknown function mark (0x02)
     uint8_t frame[FRAME_LEN];
     buildMSFrame(frame, 1000, 100);
-    frame[1] = 0x02;  // Unknown function mark
+    frame[1] = 0x02;  // Unknown function mark (0x02)
     // Recalculate checksum
     uint8_t sum = 0;
     for (int i = 0; i < 6; i++) sum += frame[i];
@@ -1984,7 +1984,7 @@ int main() {
     test_distance_1mm_valid();
     test_distance_max_uint16();
     test_warmup_period();
-    test_bad_function_mark_rejected();
+    test_unknown_function_mark_rejected();
     test_exact_checksum_known_values();
     test_no_frame_ever_received_timeout();
 
