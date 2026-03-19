@@ -1,0 +1,21 @@
+ID,Component,Pin_Doc,Pin_Firmware,Doc_File,Doc_Line,Firmware_File,Firmware_Line,Severity,Description,Action_Proposed
+HW-001,Motor FL PWM,PA8 (PWM only) + PC0 (DIR),PA8 TIM1_CH1 RPWM + PA9 TIM1_CH2 LPWM,docs/PINOUT_DEFINITIVO.md,37-42,Core/Inc/main.h,21-22,CRITICAL,PINOUT_DEFINITIVO uses old DIR+PWM scheme; firmware uses RPWM/LPWM dual-PWM on TIM1,Update docs to RPWM/LPWM architecture
+HW-002,Motor FR PWM,PA9 (PWM only) + PC1 (DIR),PA10 TIM1_CH3 RPWM + PA11 TIM1_CH4 LPWM,docs/PINOUT_DEFINITIVO.md,38-52,Core/Inc/main.h,23-24,CRITICAL,PINOUT_DEFINITIVO wrong timer channels and pins,Update docs to match TIM1_CH3/CH4
+HW-003,Motor RL PWM,PA10 TIM1_CH3,PC6 TIM8_CH1 RPWM + PC7 TIM8_CH2 LPWM,docs/PINOUT_DEFINITIVO.md,39,Core/Inc/main.h,28-29,CRITICAL,Rear motors moved from TIM1 to TIM8 on PC6/PC7,Update docs to TIM8 assignment
+HW-004,Motor RR PWM,PA11 TIM1_CH4,PC8 TIM8_CH3 RPWM + PC9 TIM8_CH4 LPWM,docs/PINOUT_DEFINITIVO.md,40,Core/Inc/main.h,30-31,CRITICAL,Rear-right motor on TIM8_CH3/CH4 not TIM1,Update docs to TIM8 assignment
+HW-005,Motor Steer PWM,PC8 TIM8_CH3,PA6 TIM3_CH1 RPWM + PA7 TIM3_CH2 LPWM,docs/PINOUT_DEFINITIVO.md,50,Core/Inc/main.h,36-37,CRITICAL,Steering moved from TIM8 to TIM3 on PA6/PA7,Update docs to TIM3 assignment
+HW-006,EN_FR GPIO,PC6 (GPIO EN),PC6 repurposed as TIM8_CH1 (RPWM_RL),docs/PINOUT_DEFINITIVO.md,65,Core/Inc/main.h,54,CRITICAL,PC6 no longer GPIO; tie BTS7960 EN to 3.3V,Update docs; remove EN_FR GPIO reference
+HW-007,EN_RL GPIO,PC7 (GPIO EN),PC7 repurposed as TIM8_CH2 (LPWM_RL),docs/PINOUT_DEFINITIVO.md,66,Core/Inc/main.h,55,CRITICAL,PC7 no longer GPIO; tie BTS7960 EN to 3.3V,Update docs; remove EN_RL GPIO reference
+HW-008,EN_RR GPIO,PD2 (impossible pin),PC13 GPIO output,docs/PINOUT_DEFINITIVO.md,67,Core/Inc/main.h,56,CRITICAL,PD2 does not exist on LQFP64 package; actual is PC13,Correct to PC13
+HW-009,EN_STEER GPIO,PC9 (GPIO EN),PC9 repurposed as TIM8_CH4 (LPWM_RR),docs/PINOUT_DEFINITIVO.md,68,Core/Inc/main.h,57,CRITICAL,PC9 no longer GPIO; tie BTS7960 EN to 3.3V,Update docs; remove EN_STEER GPIO reference
+HW-010,Wheel FL Sensor,PB5,PA0 (EXTI0),docs/PINOUT_DEFINITIVO.md,98,Core/Inc/main.h,74,CRITICAL,PB5 is actually STEER_CENTER; wheel FL is PA0,Correct pin assignment in docs
+HW-011,Wheel FR Sensor,PB10,PA1 (EXTI1),docs/PINOUT_DEFINITIVO.md,99,Core/Inc/main.h,75,CRITICAL,PB10 is actually RELAY_LED_FRONT; wheel FR is PA1,Correct pin assignment in docs
+HW-012,Wheel RL Sensor,PB11,PA2 (EXTI2),docs/PINOUT_DEFINITIVO.md,100,Core/Inc/main.h,76,CRITICAL,PB11 is actually RELAY_LED_REAR; wheel RL is PA2,Correct pin assignment in docs
+HW-013,Wheel RR Sensor,PB12,PB15 (EXTI15),docs/PINOUT_DEFINITIVO.md,101,Core/Inc/main.h,77,CRITICAL,PB12 wrong; firmware uses PB15,Correct pin assignment in docs
+HW-014,Pedal Divider R values,R1=1k R2=2k,R1=10k R2=6.8k,docs/PINOUT_DEFINITIVO.md,165,Core/Inc/main.h,101,HIGH,Wrong resistor values would give incorrect ADC scaling,Correct to 10k/6.8k
+HW-015,Pedal Sensor Model,A1324LUA-T,SS1324LUA-T,docs/PINOUT_DEFINITIVO.md,164,Core/Inc/main.h,100,MEDIUM,Wrong Hall sensor model number,Correct model reference
+HW-016,INA226 Shunt,2 mohm all channels,"1 mohm (motor) / 0.5 mohm (battery)",docs/PINOUT_DEFINITIVO.md,153,Core/Inc/main.h,130-131,HIGH,Wrong shunt values cause incorrect current readings,Correct to per-channel values
+HW-017,Direction GPIO PC0-PC4,Active direction control,Freed / not driven by firmware,docs/PINOUT_DEFINITIVO.md,54-59,Core/Inc/main.h,39-46,HIGH,5 GPIO pins documented as DIR are now unused; leave unconnected,Mark as freed in docs
+HW-018,LED Relay Pins,Not documented,PB10 (front) / PB11 (rear),docs/PINOUT_DEFINITIVO.md,N/A,Core/Inc/main.h,70-71,HIGH,LED power relays not in PINOUT_DEFINITIVO at all,Add to pinout documentation
+HW-019,RELAY_DIR pin (PINOUT.md),PD2,PC12,docs/PINOUT.md,310,Core/Inc/main.h,62,HIGH,PD2 does not exist on LQFP64; actual is PC12,Correct to PC12
+HW-020,INA226 Shunt (HW_SPEC),2 mohm,"1 mohm / 0.5 mohm",docs/HARDWARE_SPECIFICATION.md,272-275,Core/Inc/main.h,130-131,HIGH,Same shunt error duplicated in HARDWARE_SPECIFICATION,Correct to per-channel values
