@@ -149,6 +149,99 @@ if grep -q 'name="Defaults".*|| *" *valueType=' .cproject 2>/dev/null; then
     FIXED=1
 fi
 
+# ---- Step 6: Fix .mxproject duplicate entries ----
+# CubeMX migration sometimes duplicates the SourceFiles, LibFiles, and
+# CDefines entries in .mxproject.  CubeIDE uses these lists to generate the
+# subdir.mk build rules; duplicates cause circular .o deps and empty source
+# file arguments (gcc "").
+if [ -f ".mxproject" ]; then
+    echo "🔍 Checking .mxproject for duplicate entries..."
+
+    # Use Python (available on Linux/macOS/Windows-Git-Bash) for safe
+    # in-place deduplication of semicolon-separated fields.  Falls back
+    # to awk if Python is not available.
+    _PY=""
+    for _p in python3 python py; do
+        if command -v "$_p" >/dev/null 2>&1; then _PY="$_p"; break; fi
+    done
+
+    if [ -n "$_PY" ]; then
+        MX_FIXED=$("$_PY" -c "
+import sys
+keys = ('SourceFiles', 'LibFiles', 'CDefines', 'HeaderPath')
+fixed = 0
+lines = open('.mxproject', 'r').readlines()
+out = []
+for line in lines:
+    matched = False
+    for key in keys:
+        prefix = key + '='
+        if line.startswith(prefix):
+            value = line[len(prefix):].rstrip('\n\r')
+            items = [x for x in value.split(';') if x]
+            if len(items) != len(set(items)):
+                seen = set(); unique = []
+                for item in items:
+                    if item not in seen:
+                        seen.add(item); unique.append(item)
+                deduped = ';'.join(unique) + ';' if unique else ''
+                fixed += 1
+                sys.stderr.write('   ⚠️  Deduplicating ' + key + ' in .mxproject\n')
+                out.append(prefix + deduped + '\n')
+            else:
+                out.append(line)
+            matched = True
+            break
+    if not matched:
+        out.append(line)
+open('.mxproject', 'w').writelines(out)
+print(fixed)
+" 2>&1)
+        # Extract the count (last line is the number)
+        MX_COUNT=$(echo "$MX_FIXED" | tail -1)
+        # Print any warning lines (everything except last line)
+        echo "$MX_FIXED" | head -n -1
+    else
+        # Fallback: use awk line-by-line replacement
+        MX_COUNT=0
+        for KEY in SourceFiles LibFiles CDefines HeaderPath; do
+            if grep -q "^${KEY}=" .mxproject 2>/dev/null; then
+                BEFORE=$(grep "^${KEY}=" .mxproject | wc -c)
+                awk -v key="$KEY" '
+                BEGIN { prefix = key "=" }
+                $0 ~ "^" prefix {
+                    val = substr($0, length(prefix)+1)
+                    n = split(val, items, ";")
+                    delete seen; out = ""
+                    for (i = 1; i <= n; i++) {
+                        if (items[i] != "" && !seen[items[i]]++) {
+                            out = out items[i] ";"
+                        }
+                    }
+                    print prefix out
+                    next
+                }
+                { print }
+                ' .mxproject > .mxproject.tmp && mv .mxproject.tmp .mxproject
+                AFTER=$(grep "^${KEY}=" .mxproject | wc -c)
+                if [ "$BEFORE" -ne "$AFTER" ]; then
+                    echo "   ⚠️  Deduplicating ${KEY} in .mxproject"
+                    MX_COUNT=$((MX_COUNT + 1))
+                fi
+            fi
+        done
+    fi
+
+    if [ "${MX_COUNT:-0}" -eq 0 ] 2>/dev/null; then
+        echo "   ✅ No duplicate entries in .mxproject."
+    else
+        echo "   ✅ Fixed ${MX_COUNT} field(s) in .mxproject."
+        FIXED=1
+    fi
+else
+    echo "ℹ️  No .mxproject file found (will be created by CubeMX code generation)."
+fi
+
 # ---- Summary ----
 echo ""
 if [ "$FIXED" -eq 0 ]; then
