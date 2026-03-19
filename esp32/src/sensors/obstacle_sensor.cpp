@@ -54,6 +54,9 @@ static constexpr uint16_t MP_FRAME_LENGTH      = MP_HEADER_LEN
                                                 + 1;      // checksum (= 400)
 static constexpr uint8_t  MP_PIXEL_STATUS_VALID = 0x00;  // Status byte: 0 = valid pixel
 
+// Frame byte offset for function mark
+static constexpr uint16_t OFF_FUNCTION_MARK = 1;
+
 // Pixel validation thresholds
 static constexpr uint8_t  MIN_VALID_PIXELS           = 4;     // Minimum valid pixels for a usable frame
 static constexpr uint16_t MAX_PIXEL_DISPERSION_MM    = 3000;  // Max spread (maxDist-minDist) in mm
@@ -304,7 +307,7 @@ void update(float vehicleSpeedKmh) {
         rxBuf_[rxIdx_++] = byte;
 
         // After receiving function mark (byte[1]), verify it's 0x01
-        if (rxIdx_ == 2 && rxBuf_[1] != FUNCTION_MARK_MP) {
+        if (rxIdx_ == 2 && rxBuf_[OFF_FUNCTION_MARK] != FUNCTION_MARK_MP) {
             // Not a multi-pixel frame — reject and resync
             diagHeaderFail_++;
             rxIdx_ = 0;
@@ -347,8 +350,8 @@ void update(float vehicleSpeedKmh) {
                 break;
             case ParseResult::HIGH_DISPERSION:
                 diagHighDispersion_++;
-                // Noisy/unreliable data → use the min distance anyway as
-                // a conservative safety measure, but flag as degraded
+                // Noisy/unreliable data — use the min distance as a
+                // conservative safety measure
                 measuredMm = stats.minDist_mm;
                 gotFrame = true;
                 lastStats = stats;

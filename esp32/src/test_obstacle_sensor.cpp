@@ -400,8 +400,9 @@ static void test_below_min_range_clamped() {
 // Test 16: Small distance µm → mm conversion
 static void test_small_distance_um_to_mm() {
     printf("  test_small_distance_um_to_mm...\n");
+    // 500 µm → 0 mm → set to 1 mm → clamped to minRangeMm (20 mm)
     uint8_t frame[MP_FRAME_LEN];
-    buildMPFrame(frame, 500, 30);  // 500 µm → 0 mm → clamped to 1 → clamped to minRangeMm
+    buildMPFrame(frame, 500, 30);
 
     obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
     ASSERT_EQ(rd.distance_mm, 20);  // minRangeMm
