@@ -57,7 +57,11 @@ static bool          stuckActive_      = false;
 static bool          initialized_      = false;
 static bool          warmupDone_       = false;
 
-// UART receive buffer (sized for a few frames)
+// UART receive buffer — accumulates bytes for the current frame being
+// assembled.  This is separate from the UART hardware RX ring buffer
+// (cfg_.rxBufSize): the hardware buffer absorbs bursts at 921600 bps
+// while the driver reads bytes one at a time.  The static buffer only
+// needs to hold one complete frame (7 bytes) plus headroom for resync.
 static uint8_t       rxBuf_[MS_FRAME_LENGTH * 4];
 static uint16_t      rxIdx_            = 0;
 

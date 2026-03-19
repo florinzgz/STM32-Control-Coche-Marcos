@@ -55,6 +55,9 @@ static int s_tests_failed = 0;
 
 /* ---- Frame construction helpers ----------------------------------------- */
 
+// Matches AUTO_RECOVERY_FRAME_THRESHOLD in the driver (30 frames)
+static constexpr uint32_t TEST_RECOVERY_THRESHOLD = 30;
+
 // TOFSense-M S frame layout (7 bytes):
 //   [0]   header         = 0x57
 //   [1]   function_mark  = 0x00
@@ -831,7 +834,7 @@ static void test_auto_recovery_triggers_after_threshold() {
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 
     // Inject 30+ no-target frames to trigger auto-recovery
-    for (uint32_t i = 0; i < 31; i++) {
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
         uint8_t frame[FRAME_LEN];
         buildNoTargetFrame(frame, 100);
@@ -855,7 +858,7 @@ static void test_auto_recovery_skipped_without_tx_pin() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    for (uint32_t i = 0; i < 31; i++) {
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
         uint8_t frame[FRAME_LEN];
         buildNoTargetFrame(frame, 100);
@@ -900,7 +903,7 @@ static void test_auto_recovery_resets_on_valid_frame() {
     ASSERT_EQ(obstacle_sensor::getAutoRecoveryAttempts(), 0);
 
     // Now inject 30 more no-target -- should trigger recovery from 0
-    for (uint32_t i = 0; i < 31; i++) {
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
         uint8_t frame[FRAME_LEN];
         buildNoTargetFrame(frame, 100);
@@ -948,7 +951,7 @@ static void test_init_resets_auto_recovery() {
     g_test_millis = 1100;
     obstacle_sensor::update(0.0f);
 
-    for (uint32_t i = 0; i < 31; i++) {
+    for (uint32_t i = 0; i < TEST_RECOVERY_THRESHOLD + 1; i++) {
         g_uart_inject_reset();
         uint8_t frame[FRAME_LEN];
         buildNoTargetFrame(frame, 100);
@@ -1438,8 +1441,11 @@ static void test_bad_function_mark_rejected() {
     g_uart_inject(frame, FRAME_LEN);
     obstacle_sensor::update(0.0f);
 
-    // Should have been rejected -- no valid frame processed
-    // Reading remains from default or previous state
+    // Should have been rejected as BAD_HEADER — reading unchanged
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    // After warmup flush + one rejected frame, distance stays at 0
+    // (no valid frame has ever been processed in this session)
+    ASSERT_EQ(rd.distance_mm, 0);
 }
 
 // Test 70: Exact checksum verification -- known values
