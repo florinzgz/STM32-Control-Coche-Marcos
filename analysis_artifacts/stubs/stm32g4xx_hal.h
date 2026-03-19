@@ -16,6 +16,11 @@
 #include <stddef.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>   /* S_IFCHR for syscalls.c */
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #ifdef __cplusplus
 extern "C" {

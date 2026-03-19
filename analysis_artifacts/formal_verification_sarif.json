@@ -1,0 +1,314 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CBMC",
+          "version": "5.95.1",
+          "informationUri": "https://www.cprover.org/cbmc/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "nan-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] NaN on float addition: Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() intermediate sum (sanitized by outer sanitize_float)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 905
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "nan-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] NaN on float addition: 4-wheel speed sum intermediate NaN (sanitized by outer sanitize_float)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 906
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "nan-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] NaN on float addition: Wheel speed sum (sanitized on next line)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 1206
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "pointer-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Null pointer dereference on timer Instance (requires Motor_Init before use)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 1881
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "pointer-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Null pointer on htim2.Instance->CNT (requires init before Steering_GetCurrentAngle)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 1632
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "nan-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] NaN on division 0.95f/tan_angle (guarded by tan_angle < 0.001f check)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 714
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "div-by-zero",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Division by zero half_track/R (R derived from tan_angle >= 0.001f, never zero)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/motor_control.c"
+                },
+                "region": {
+                  "startLine": 720
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "pointer-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Flash-mapped pointer dereference in eps_slot_valid (valid hardware address)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/eps_params.c"
+                },
+                "region": {
+                  "startLine": 83
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "pointer-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Flash-mapped pointer dereference in errlog_header_valid (valid hardware address)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/error_log.c"
+                },
+                "region": {
+                  "startLine": 78
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "pointer-check",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Null pointer on htim2.Instance->CNT (requires init before SteeringCentering_Step)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/steering_centering.c"
+                },
+                "region": {
+                  "startLine": 183
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "unwind",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] Loop unwind limit in OW_DelayUs (tool limitation)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/sensor_manager.c"
+                },
+                "region": {
+                  "startLine": 495
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        }
+      ]
+    },
+    {
+      "tool": {
+        "driver": {
+          "name": "Infer",
+          "version": "1.2.0",
+          "informationUri": "https://fbinfer.com/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "INTEGER_OVERFLOW_L1",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] INTEGER_OVERFLOW_L1: eps_sequence-- (always >= 1 after increment at line 163)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Core/Src/eps_params.c"
+                },
+                "region": {
+                  "startLine": 200
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        },
+        {
+          "ruleId": "INTEGER_OVERFLOW_L2",
+          "level": "note",
+          "message": {
+            "text": "[FALSE POSITIVE] INTEGER_OVERFLOW_L2: maxDistMm - minDistMm (minDistMm <= maxDistMm guaranteed by min/max tracking)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "esp32/src/sensors/obstacle_sensor.cpp"
+                },
+                "region": {
+                  "startLine": 229
+                }
+              }
+            }
+          ],
+          "properties": {
+            "classification": "false_positive"
+          }
+        }
+      ]
+    }
+  ]
+}
