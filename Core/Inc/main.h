@@ -20,13 +20,17 @@ extern "C" {
 /* the same UEV → overlap = 0.  TIM1 BREAK2 is armed to Cortex LOCKUP.         */
 /*                                                                               */
 /* ---- BTS7960 (IBT-2) Logic Level Compatibility ----                          */
-/* STM32G474RE outputs 3.3V GPIO / timer signals.  BTS7960 datasheet specifies  */
-/* V_IH(min) = 2.0V for INH (EN) and IN (PWM) inputs, so 3.3V is above the     */
-/* minimum threshold.  However, some Chinese IBT-2 modules use 74HC logic on    */
-/* the EN path which has V_IH(min) = 3.15V at VCC=4.5V — marginal with 3.3V.   */
-/* ⚠ WARNING: Verify that the specific IBT-2 modules in use reliably recognise  */
-/* 3.3V as HIGH.  If unreliable, add 3.3V→5V level shifters (e.g. BSS138) on   */
-/* the EN lines, or tie EN directly to 5V and control direction via PWM only.   */
+/* STM32G474RE outputs 3.3V GPIO / timer signals.  BTS7960 IC datasheet         */
+/* specifies V_IH(min) = 2.0V for INH (EN) and IN (PWM) inputs, so 3.3V is     */
+/* above the BTS7960 IC threshold.  However, the IBT-2 module includes a        */
+/* 74HC244 octal buffer (confirmed by Handsontec official documentation) that    */
+/* sits between the input header and the BTS7960 ICs.  The 74HC244 V_IH(min) =  */
+/* 0.7 × VCC: at VCC=5V → 3.5V (3.3V is BELOW threshold); at VCC=3.3V →       */
+/* 2.31V (3.3V is safely above).                                                */
+/* ⚠ SOLUTION: This design powers IBT-2 VCC from the STM32 3.3V rail, NOT 5V.  */
+/* This ensures the 74HC244 V_IH(min) = 2.31V, well below the 3.3V signal      */
+/* level from the MCU.  If VCC must be 5V, add BSS138 level shifters or tie     */
+/* EN directly to 5V and control direction via RPWM/LPWM only.                  */
 /*                                                                               */
 /* ---- BTS7960 R_IS / L_IS Current Sense (NOT USED) ----                       */
 /* The BTS7960 provides analog current sense outputs (R_IS, L_IS) with a ratio  */
