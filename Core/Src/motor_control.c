@@ -167,6 +167,37 @@ static inline float sanitize_float(float val, float safe_default)
  * the choice of RPWM vs LPWM channel.                                */
 #define BTS7960_BRAKE_PWM        0U   /* Both RPWM=0, LPWM=0 = passive brake */
 
+/* ---- Half-bridge brake/coast asymmetry compensation ----
+ *
+ * Hardware context: The BTS7960 modules are used as single half-bridge
+ * switches (NOT full H-bridge).  This creates asymmetric behaviour:
+ *
+ *   FL (en_port = GPIO PC5) and RR (en_port = GPIO PC13):
+ *     PWM=0 → Motor_SetSigned sets EN=LOW → TRUE COAST (Hi-Z)
+ *
+ *   FR (en_port = NULL, tied HIGH) and RL (en_port = NULL, tied HIGH):
+ *     PWM=0 → EN stays HIGH → PASSIVE BRAKE (motor terminals shorted)
+ *
+ * Consequence: TRAC_PHASE_BRAKE produces identical output to
+ * TRAC_PHASE_COAST on FL/RR (both coast).  To compensate:
+ *
+ * A) Simulated braking (TRAC_PHASE_BRAKE on FL/RR):
+ *    Apply a small forward PWM to create resistive torque.  15 %
+ *    is chosen as a conservative value that provides noticeable
+ *    deceleration without aggressive jerking on a child vehicle.
+ *
+ * B) Coast compensation (TRAC_PHASE_COAST on FL/RR):
+ *    Apply a small forward PWM bias (4 %) to partially match the
+ *    passive-brake drag that FR/RL experience, reducing the yaw
+ *    moment caused by asymmetric deceleration.
+ *
+ * C) Neutral ramp-down:
+ *    When entering GEAR_NEUTRAL, ramp PWM to zero gradually using
+ *    the existing pedal ramp-down rate instead of instant cutoff.    */
+#define SIMBRAKE_PWM_PCT         15.0f  /* Simulated brake duty for FL/RR (%)  */
+#define COAST_COMPENSATION_PCT    4.0f  /* Coast bias for FL/RR symmetry (%)   */
+#define NEUTRAL_RAMP_DOWN_PCT_S 100.0f  /* Neutral entry ramp-down rate (%/s)  */
+
 /* ---- Park hold configuration ----
  *
  * In gear P the STM32 applies a controlled active motor brake to
@@ -322,6 +353,15 @@ static float           brake_release_pct = 0.0f;  /* Ramp during brake→drive *
 static float           creep_smooth_pct  = 0.0f;  /* Extra EMA for creep zone*/
 static uint8_t         creep_smooth_init = 0;      /* First sample flag       */
 
+/* ---- Neutral ramp-down state ----
+ * When entering GEAR_NEUTRAL, PWM ramps down gradually instead of
+ * cutting immediately to zero.  This prevents abrupt torque removal
+ * and associated vehicle jerk.  The ramp is applied to all motors
+ * and uses the same time-base as the pedal ramp limiter.            */
+static float           neutral_ramp_pct   = 0.0f; /* Current ramp level (%)  */
+static uint32_t        neutral_ramp_tick  = 0;     /* Timestamp for dt calc   */
+static uint8_t         neutral_ramp_active = 0;    /* 1 = ramping down        */
+
 /* ---- Gear position state ---- */
 static GearPosition_t current_gear = GEAR_FORWARD;
 
@@ -470,6 +510,8 @@ void Traction_Init(void)
     brake_release_pct = 0.0f;
     creep_smooth_pct  = 0.0f;
     creep_smooth_init = 0;
+    neutral_ramp_pct   = 0.0f;
+    neutral_ramp_active = 0;
     for (uint8_t j = 0; j < 4; j++) {
         prev_output_pwm[j] = 0;
     }
@@ -829,14 +871,53 @@ void Traction_Update(void)
     }
 
     /* --- Gear N: Neutral / Coast ---
-     * All motors enter full coast mode: PWM = 0, H-bridge disabled.
-     * No active braking, no holding torque — wheels spin freely.
-     * Dynamic braking is also disabled in Neutral.                     */
+     * All motors transition to full coast mode with a smooth ramp-down.
+     * No active braking, no holding torque — wheels spin freely once
+     * the ramp completes.  Dynamic braking is also disabled.
+     *
+     * The ramp-down prevents abrupt torque removal when shifting from
+     * a driving gear to Neutral while the vehicle is in motion.        */
     if (current_gear == GEAR_NEUTRAL) {
-        Motor_SetSigned(&motor_fl, 0);
-        Motor_SetSigned(&motor_fr, 0);
-        Motor_SetSigned(&motor_rl, 0);
-        Motor_SetSigned(&motor_rr, 0);
+        /* Initialise ramp on first cycle in Neutral */
+        if (!neutral_ramp_active) {
+            /* Capture the highest current motor output as ramp start.
+             * This prevents a ramp from 100% when motors were at 10%. */
+            float max_pct = 0.0f;
+            for (uint8_t j = 0; j < 4; j++) {
+                float pct = (float)prev_output_pwm[j] * 100.0f / (float)PWM_PERIOD;
+                if (pct > max_pct) max_pct = pct;
+            }
+            neutral_ramp_pct   = max_pct;
+            neutral_ramp_tick  = HAL_GetTick();
+            neutral_ramp_active = 1;
+        }
+
+        /* Compute dt and ramp down */
+        uint32_t now_n = HAL_GetTick();
+        float dt_n = (float)(now_n - neutral_ramp_tick) / 1000.0f;
+        if (dt_n < 0.001f) dt_n = 0.001f;
+        neutral_ramp_tick = now_n;
+
+        if (neutral_ramp_pct > 0.0f) {
+            neutral_ramp_pct -= NEUTRAL_RAMP_DOWN_PCT_S * dt_n;
+            if (neutral_ramp_pct < 0.0f) neutral_ramp_pct = 0.0f;
+        }
+
+        if (neutral_ramp_pct > 0.0f) {
+            /* Still ramping — apply diminishing PWM to all motors */
+            uint16_t ramp_pwm = (uint16_t)(neutral_ramp_pct * (float)PWM_PERIOD / 100.0f);
+            int8_t ramp_dir = (traction_state.wheels[0].reverse) ? -1 : 1;
+            Motor_SetSigned(&motor_fl, (int16_t)((int32_t)ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_fr, (int16_t)((int32_t)ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_rl, (int16_t)((int32_t)ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_rr, (int16_t)((int32_t)ramp_dir * ramp_pwm));
+        } else {
+            /* Ramp complete — full coast */
+            Motor_SetSigned(&motor_fl, 0);
+            Motor_SetSigned(&motor_fr, 0);
+            Motor_SetSigned(&motor_rl, 0);
+            Motor_SetSigned(&motor_rr, 0);
+        }
 
         /* Reset dynamic braking state so it doesn't spike on gear change */
         dynbrake_pct    = 0.0f;
@@ -861,6 +942,9 @@ void Traction_Update(void)
         }
         return;
     }
+
+    /* Leaving Neutral — clear ramp state */
+    neutral_ramp_active = 0;
 
     /* --- Gear F/D1/D2/R: Normal traction with dynamic braking ---       */
     float demand = traction_state.demandPct;
@@ -1282,22 +1366,40 @@ void Traction_Update(void)
             }
         }
     } else if (trac_phase == TRAC_PHASE_BRAKE) {
-        /* Hold brake — BTS7960 active brake on all motors */
+        /* Hold brake — BTS7960 passive brake on FR/RL (EN tied HIGH,
+         * PWM=0 → motor terminals shorted).  FL/RR have GPIO-controlled
+         * EN that goes LOW at PWM=0, producing coast instead of brake.
+         * Apply simulated braking PWM to FL/RR for symmetric behaviour. */
+        uint16_t sim_brake_pwm = (uint16_t)(SIMBRAKE_PWM_PCT * (float)PWM_PERIOD / 100.0f);
         for (uint8_t i = 0; i < 4; i++) {
-            desired_pwm[i] = BTS7960_BRAKE_PWM;
-            desired_en[i]  = 1;
+            if (i == MOTOR_FL || i == MOTOR_RR) {
+                /* GPIO-EN motors: apply small forward PWM for resistive
+                 * torque (simulated braking).  Direction follows last
+                 * travel direction so the torque opposes motion.         */
+                desired_pwm[i] = sim_brake_pwm;
+                desired_en[i]  = 1;
+            } else {
+                /* NULL-EN motors (FR/RL): passive brake via PWM=0 */
+                desired_pwm[i] = BTS7960_BRAKE_PWM;
+                desired_en[i]  = 1;
+            }
         }
     } else if (trac_phase == TRAC_PHASE_COAST) {
-        /* Coast — front motors disabled, vehicle rolls freely */
-        desired_pwm[MOTOR_FL] = 0; desired_en[MOTOR_FL] = 0;
+        /* Coast — motors disabled for free rolling.
+         * FR/RL (EN tied HIGH) still experience passive brake drag at
+         * PWM=0.  Compensate FL/RR with a small bias PWM to reduce
+         * the asymmetric yaw moment from unequal drag.                 */
+        uint16_t coast_bias_pwm = (uint16_t)(COAST_COMPENSATION_PCT * (float)PWM_PERIOD / 100.0f);
+        /* FL/RR: small bias for drag symmetry */
+        desired_pwm[MOTOR_FL] = coast_bias_pwm; desired_en[MOTOR_FL] = 1;
+        desired_pwm[MOTOR_RR] = coast_bias_pwm; desired_en[MOTOR_RR] = 1;
+        /* FR/RL: true coast (EN tied HIGH → PWM=0 = passive brake inherently) */
         desired_pwm[MOTOR_FR] = 0; desired_en[MOTOR_FR] = 0;
         if (rear_active) {
             desired_pwm[MOTOR_RL] = 0; desired_en[MOTOR_RL] = 0;
-            desired_pwm[MOTOR_RR] = 0; desired_en[MOTOR_RR] = 0;
         } else {
             /* 4x2: rear still braked even in coast */
             desired_pwm[MOTOR_RL] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RL] = 1;
-            desired_pwm[MOTOR_RR] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RR] = 1;
         }
     } else {
         /* DRIVE phase — normal traction with smooth driving features */
@@ -1443,6 +1545,8 @@ void Traction_EmergencyStop(void)
     brake_release_pct = 0.0f;
     creep_smooth_pct  = 0.0f;
     creep_smooth_init = 0;
+    neutral_ramp_pct   = 0.0f;
+    neutral_ramp_active = 0;
     for (uint8_t i = 0; i < 4; i++) {
         prev_output_pwm[i] = 0;
     }
