@@ -361,6 +361,7 @@ static uint8_t         creep_smooth_init = 0;      /* First sample flag       */
 static float           neutral_ramp_pct   = 0.0f; /* Current ramp level (%)  */
 static uint32_t        neutral_ramp_tick  = 0;     /* Timestamp for dt calc   */
 static uint8_t         neutral_ramp_active = 0;    /* 1 = ramping down        */
+static int8_t          neutral_ramp_dir   = 1;     /* Captured travel direction*/
 
 /* ---- Gear position state ---- */
 static GearPosition_t current_gear = GEAR_FORWARD;
@@ -512,6 +513,7 @@ void Traction_Init(void)
     creep_smooth_init = 0;
     neutral_ramp_pct   = 0.0f;
     neutral_ramp_active = 0;
+    neutral_ramp_dir   = 1;
     for (uint8_t j = 0; j < 4; j++) {
         prev_output_pwm[j] = 0;
     }
@@ -890,6 +892,12 @@ void Traction_Update(void)
             neutral_ramp_pct   = max_pct;
             neutral_ramp_tick  = HAL_GetTick();
             neutral_ramp_active = 1;
+            /* Capture travel direction from the motor hardware state at
+             * the instant of gear change.  motor_fl.direction reflects
+             * the most recent Motor_SetSigned write (1=fwd, -1=rev, 0=stop).
+             * Using the motor struct avoids relying on a single wheel's
+             * telemetry reverse flag which may not represent all motors.  */
+            neutral_ramp_dir = (motor_fl.direction != 0) ? motor_fl.direction : 1;
         }
 
         /* Compute dt and ramp down */
@@ -904,13 +912,14 @@ void Traction_Update(void)
         }
 
         if (neutral_ramp_pct > 0.0f) {
-            /* Still ramping — apply diminishing PWM to all motors */
+            /* Still ramping — apply diminishing PWM to all motors.
+             * Direction uses the captured travel direction so torque
+             * matches the vehicle's inertia during the entire ramp.  */
             uint16_t ramp_pwm = (uint16_t)(neutral_ramp_pct * (float)PWM_PERIOD / 100.0f);
-            int8_t ramp_dir = (traction_state.wheels[0].reverse) ? -1 : 1;
-            Motor_SetSigned(&motor_fl, (int16_t)((int32_t)ramp_dir * ramp_pwm));
-            Motor_SetSigned(&motor_fr, (int16_t)((int32_t)ramp_dir * ramp_pwm));
-            Motor_SetSigned(&motor_rl, (int16_t)((int32_t)ramp_dir * ramp_pwm));
-            Motor_SetSigned(&motor_rr, (int16_t)((int32_t)ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_fl, (int16_t)((int32_t)neutral_ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_fr, (int16_t)((int32_t)neutral_ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_rl, (int16_t)((int32_t)neutral_ramp_dir * ramp_pwm));
+            Motor_SetSigned(&motor_rr, (int16_t)((int32_t)neutral_ramp_dir * ramp_pwm));
         } else {
             /* Ramp complete — full coast */
             Motor_SetSigned(&motor_fl, 0);
@@ -1388,9 +1397,14 @@ void Traction_Update(void)
         /* Coast — motors disabled for free rolling.
          * FR/RL (EN tied HIGH) still experience passive brake drag at
          * PWM=0.  Compensate FL/RR with a small bias PWM to reduce
-         * the asymmetric yaw moment from unequal drag.                 */
+         * the asymmetric yaw moment from unequal drag.
+         *
+         * The bias direction is set by desired_dir[] (initialised to
+         * dir at the top of this block), which already accounts for
+         * GEAR_REVERSE.  This ensures the small drag-matching torque
+         * always aligns with the vehicle's travel direction.           */
         uint16_t coast_bias_pwm = (uint16_t)(COAST_COMPENSATION_PCT * (float)PWM_PERIOD / 100.0f);
-        /* FL/RR: small bias for drag symmetry */
+        /* FL/RR: small bias for drag symmetry — direction via desired_dir */
         desired_pwm[MOTOR_FL] = coast_bias_pwm; desired_en[MOTOR_FL] = 1;
         desired_pwm[MOTOR_RR] = coast_bias_pwm; desired_en[MOTOR_RR] = 1;
         /* FR/RL: true coast (EN tied HIGH → PWM=0 = passive brake inherently) */
@@ -1547,6 +1561,7 @@ void Traction_EmergencyStop(void)
     creep_smooth_init = 0;
     neutral_ramp_pct   = 0.0f;
     neutral_ramp_active = 0;
+    neutral_ramp_dir   = 1;
     for (uint8_t i = 0; i < 4; i++) {
         prev_output_pwm[i] = 0;
     }
