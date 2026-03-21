@@ -111,6 +111,13 @@ jobs:
 
       - name: cppcheck (error + warning level)
         run: |
+          # Suppressions: false positives from HAL stubs and auto-generated code.
+          #   unusedFunction        — ISRs called via vector table, not C code
+          #   knownConditionTrueFalse — HAL stubs return HAL_OK; defensive checks are valid in production
+          #   constParameterPointer — HAL callback signatures defined by ST HAL library
+          #   funcArgNamesDifferent — STM32CubeMX MSP generators use different param names
+          #   redundantAssignment   — intentional test patterns
+          #   unusedStructMember    — test structs mirror production layout
           cppcheck --enable=all --inconclusive --force \
             --suppress=missingIncludeSystem --suppress=missingInclude \
             --suppress=unusedFunction \
