@@ -14,6 +14,9 @@ on:
       - 'Makefile'
       - '.github/workflows/firmware-validation.yml'
 
+permissions:
+  contents: read
+
 jobs:
   # ── Build with strict warnings ──────────────────────────────────────
   build:
@@ -104,7 +107,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cppcheck
-          pip install flawfinder lizard
+          pip install flawfinder==2.0.19 lizard==1.17.10
 
       - name: cppcheck (error + warning level)
         run: |
