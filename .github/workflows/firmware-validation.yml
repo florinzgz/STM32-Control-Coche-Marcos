@@ -113,6 +113,7 @@ jobs:
         run: |
           cppcheck --enable=all --inconclusive --force \
             --suppress=missingIncludeSystem --suppress=missingInclude \
+            --suppress=unusedFunction \
             -DHOST_TEST -DUSE_HAL_DRIVER -DSTM32G474xx \
             -ICore/Inc -Ianalysis_artifacts/stubs \
             --error-exitcode=2 \

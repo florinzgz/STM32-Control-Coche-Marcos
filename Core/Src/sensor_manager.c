@@ -359,10 +359,22 @@ static void I2C_BusRecovery(void)
     i2c_fail_count = 0;
 }
 
+#define INA226_REG_CONFIG          0x00
 #define INA226_REG_SHUNT_VOLTAGE   0x01
 #define INA226_REG_BUS_VOLTAGE     0x02
 #define INA226_SHUNT_LSB_UV        2.5f   /* 2.5 µV per LSB */
 #define INA226_BUS_LSB_MV          1.25f  /* 1.25 mV per LSB */
+
+/* INA226 configuration register value (explicit — do not rely on defaults).
+ * Bits [14:12] = 100  (reserved, always 4)
+ * Bits [11:9]  = 001  (AVG = 4 samples — noise rejection for motor loads)
+ * Bits [8:6]   = 100  (VBUSCT = 1.1 ms)
+ * Bits [5:3]   = 100  (VSHCT  = 1.1 ms)
+ * Bits [2:0]   = 111  (continuous shunt + bus voltage)
+ * Result: 0x4327 → averaging smooths ADC noise from PWM switching.
+ * Total conversion time per measurement: 4 × (1.1 + 1.1) = 8.8 ms,
+ * well within the 50 ms read cycle.                                       */
+#define INA226_CONFIG_VALUE        0x4327
 
 /**
  * @brief  Select a channel on the TCA9548A multiplexer.
@@ -392,6 +404,38 @@ static int16_t INA226_ReadReg(uint8_t reg)
         return 0;
     }
     return (int16_t)((buf[0] << 8) | buf[1]);
+}
+
+/**
+ * @brief  Write a 16-bit register on INA226 (currently selected mux channel).
+ * @retval HAL status.
+ */
+static HAL_StatusTypeDef INA226_WriteReg(uint8_t reg, uint16_t value)
+{
+    uint8_t buf[2];
+    buf[0] = (uint8_t)(value >> 8);
+    buf[1] = (uint8_t)(value & 0xFF);
+    HAL_StatusTypeDef status = HAL_I2C_Mem_Write(&hi2c1, (I2C_ADDR_INA226 << 1), reg,
+                                                  I2C_MEMADD_SIZE_8BIT, buf, 2, 50);
+    if (status != HAL_OK) {
+        i2c_fail_count++;
+    }
+    return status;
+}
+
+/**
+ * @brief  Configure all INA226 sensors via TCA9548A multiplexer.
+ *
+ * Writes the configuration register (0x00) on each channel to ensure
+ * a known state (averaging, conversion time, continuous mode) rather
+ * than relying on power-on defaults.  Called once during Sensor_Init().
+ */
+static void INA226_ConfigureAll(void)
+{
+    for (uint8_t i = 0; i < NUM_INA226; i++) {
+        if (TCA9548A_SelectChannel(i) != HAL_OK) continue;
+        INA226_WriteReg(INA226_REG_CONFIG, INA226_CONFIG_VALUE);
+    }
 }
 
 void Current_ReadAll(void)
@@ -820,6 +864,11 @@ void Sensor_Init(void)
 
     i2c_fail_count        = 0;
     i2c_recovery_attempts = 0;
+
+    /* Explicitly configure all INA226 sensors to a known state
+     * (averaging, conversion time, continuous mode) rather than
+     * relying on power-on defaults — safety-critical requirement.     */
+    INA226_ConfigureAll();
 
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         temperatures[i] = 0.0f;
