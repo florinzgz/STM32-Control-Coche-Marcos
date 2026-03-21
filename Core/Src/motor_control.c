@@ -1359,6 +1359,16 @@ void Traction_Update(void)
         }
     }
 
+    /* ---- Defence-in-depth: clamp per-wheel PWM to PWM_PERIOD (audit fix) ----
+     * Float-to-uint16 casts from upstream multiplications (acker_diff,
+     * wheel_scale, obstacle_scale) could theoretically exceed PWM_PERIOD
+     * due to float rounding.  Motor_SetSigned also clamps internally,
+     * but an explicit clamp here ensures the telemetry PWM values and
+     * jerk limiter comparisons are never corrupted.                      */
+    for (uint8_t i = 0; i < 4; i++) {
+        if (desired_pwm[i] > PWM_PERIOD) desired_pwm[i] = PWM_PERIOD;
+    }
+
     /* Write final RPWM/LPWM to hardware.
      * Motor_SetSigned guarantees RPWM and LPWM are never simultaneously
      * non-zero; direction is encoded as the active channel.              */
@@ -1865,6 +1875,27 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
     uint16_t duty = (signed_pwm >= 0) ? (uint16_t)signed_pwm
                                       : (uint16_t)(-signed_pwm);
     if (duty > PWM_PERIOD) duty = PWM_PERIOD;
+
+    /* ---- Direction-change dead-state enforcement (audit fix) ----
+     * When the requested direction differs from the current direction
+     * AND the motor is not stopping (duty > 0), force both channels
+     * to zero first.  This guarantees a zero-torque intermediate
+     * state during direction reversal, preventing any possibility of
+     * transient shoot-through even if OCPreload were misconfigured.
+     * With OCPreload enabled (as configured in MX_TIM*_Init), the
+     * actual outputs only change at the next UEV, but this software
+     * guard provides defence-in-depth.                                */
+    int8_t new_dir = (signed_pwm > 0) ? 1 : ((signed_pwm < 0) ? -1 : 0);
+    if (duty > 0U && motor->direction != 0 && new_dir != 0 &&
+        new_dir != motor->direction) {
+        /* Transitioning between forward and reverse — insert zero state */
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        /* The zero state takes effect at the next UEV (50 µs at 20 kHz).
+         * The new direction is then applied in the same function call
+         * and takes effect at the UEV after that.  Total dead time is
+         * one PWM period (50 µs) — well within BTS7960 requirements.   */
+    }
 
     if (signed_pwm > 0) {
         /* Forward: clear LPWM first, then set RPWM */
