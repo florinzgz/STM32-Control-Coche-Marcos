@@ -156,6 +156,8 @@ void I2C1_ER_IRQHandler(void)
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
+    (void)hfdcan;  /* Single FDCAN instance — handle not used */
+
     if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U) {
         /* Visual feedback: toggle LD2 on every received CAN frame.
          * Note: LD2 is also toggled at 200 ms by the main-loop

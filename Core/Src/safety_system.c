@@ -634,6 +634,9 @@ bool Safety_IsSteeringTimedOut(void)
 
 bool Safety_ValidateModeChange(bool enable_4x4, bool tank_turn)
 {
+    (void)enable_4x4;  /* Reserved for future 4×4 mode validation */
+    (void)tank_turn;    /* Reserved for future tank-turn validation */
+
     /* Reject commands when not ACTIVE or DEGRADED */
     if (!Safety_IsCommandAllowed()) return false;
 

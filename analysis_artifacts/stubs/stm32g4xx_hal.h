@@ -11,6 +11,11 @@
  * of headers (stm32g4xx.h, stm32g4xx_hal_*.h, stm32g4xx_hal_conf.h, CMSIS).
  */
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -1597,4 +1602,8 @@ void SystemCoreClockUpdate(void);
 
 #ifdef __cplusplus
 }
+#endif
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
 #endif
