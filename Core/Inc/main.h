@@ -18,6 +18,30 @@ extern "C" {
 /* ---- Motor PWM Pins — TIM1 (advanced): FL motor CH1/CH2, FR motor CH3/CH4 ---- */
 /* RPWM and LPWM of each motor share the SAME timer so both channels update at  */
 /* the same UEV → overlap = 0.  TIM1 BREAK2 is armed to Cortex LOCKUP.         */
+/*                                                                               */
+/* ---- BTS7960 (IBT-2) Logic Level Compatibility ----                          */
+/* STM32G474RE outputs 3.3V GPIO / timer signals.  BTS7960 IC datasheet         */
+/* specifies V_IH(min) = 2.0V for INH (EN) and IN (PWM) inputs, so 3.3V is     */
+/* above the BTS7960 IC threshold.  However, the IBT-2 module includes a        */
+/* 74HC244 octal buffer (confirmed by Handsontec official documentation) that    */
+/* sits between the input header and the BTS7960 ICs.  The 74HC244 V_IH(min) =  */
+/* 0.7 × VCC: at VCC=5V → 3.5V (3.3V is BELOW threshold); at VCC=3.3V →       */
+/* 2.31V (3.3V is safely above).                                                */
+/* ⚠ SOLUTION: This design powers IBT-2 VCC from the STM32 3.3V rail, NOT 5V.  */
+/* This ensures the 74HC244 V_IH(min) = 2.31V, well below the 3.3V signal      */
+/* level from the MCU.  If VCC must be 5V, add BSS138 level shifters or tie     */
+/* EN directly to 5V and control direction via RPWM/LPWM only.                  */
+/*                                                                               */
+/* ---- BTS7960 R_IS / L_IS Current Sense (NOT USED) ----                       */
+/* The BTS7960 provides analog current sense outputs (R_IS, L_IS) with a ratio  */
+/* of ~8500:1 (I_IS = I_LOAD / 8500).  These are NOT connected to the STM32    */
+/* ADC in this design.  Instead, external INA226 sensors on the I2C bus provide */
+/* current monitoring with higher accuracy and digital readout.                  */
+/* ⚠ NOTE: The INA226 read cycle (~2ms at 400kHz I2C) is slower than the       */
+/* BTS7960 analog current sense (~1µs response).  For the fastest possible      */
+/* hardware-level overcurrent protection, consider connecting R_IS/L_IS to      */
+/* STM32 ADC channels with analog watchdog (AWD) interrupt for sub-microsecond  */
+/* overcurrent detection as an additional defence layer.                         */
 #define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 — RPWM_FL  */
 #define PIN_LPWM_FL        GPIO_PIN_9   /* PA9  - TIM1_CH2 — LPWM_FL  */
 #define PIN_PWM_FR         GPIO_PIN_10  /* PA10 - TIM1_CH3 — RPWM_FR  */

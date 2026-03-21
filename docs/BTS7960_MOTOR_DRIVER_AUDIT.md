@@ -4,33 +4,53 @@
 > **Source files examined**: `Core/Inc/main.h`, `Core/Src/main.c`,
 > `Core/Src/stm32g4xx_hal_msp.c`, `Core/Inc/motor_control.h`,
 > `Core/Src/motor_control.c`, `Core/Inc/safety_system.h`.
+> **Last updated**: 2026-03-21 (aligned with RPWM/LPWM dual-PWM architecture)
 
 ---
 
 ## 1. Per-Motor Pin Mapping
 
-The firmware uses **one MCU PWM output + one GPIO direction + one GPIO enable** per BTS7960/IBT-2 module.
-There is **no dual-PWM** (separate RPWM/LPWM) control; instead, the single PWM signal is routed to the BTS7960 module and the external direction logic (on the IBT-2 carrier board or external wiring) selects which half-bridge receives the PWM.
+The firmware uses **dual-PWM** (separate RPWM/LPWM) control — each BTS7960 half-bridge
+receives its own independent PWM signal.  Direction is encoded as the **choice of active
+channel**: RPWM active = forward, LPWM active = reverse.  Both channels of each motor
+share the **same timer** so both CCR preload registers transfer at the same UEV
+(update event), guaranteeing **zero overlap** between RPWM and LPWM.
 
-### 1.1 Traction Motors (TIM1 — 20 kHz, center-aligned, ARR = 4249)
+The single write path `Motor_SetSigned()` enforces that RPWM and LPWM are **never
+simultaneously non-zero**.  Direction-change dead-state enforcement inserts a zero-torque
+intermediate state when reversing.
 
-| Signal    | Motor FL         | Motor FR         | Motor RL         | Motor RR         |
-|-----------|------------------|------------------|------------------|------------------|
-| **PWM**   | PA8 — TIM1_CH1   | PA9 — TIM1_CH2   | PA10 — TIM1_CH3  | PA11 — TIM1_CH4  |
-| **DIR**   | PC0              | PC1              | PC2              | PC3              |
-| **EN**    | PC5              | PC6              | PC7              | PC13             |
-| **R_IS / L_IS** | Not connected to MCU — current sensing is done externally via INA226 on I2C (TCA9548A ch 0–3) | ← same | ← same | ← same |
+### 1.1 Traction Motors — Front (TIM1, advanced, 20 kHz center-aligned, ARR = 4249)
 
-### 1.2 Steering Motor (TIM8 — 20 kHz, center-aligned, ARR = 4249)
+| Signal          | Motor FL                    | Motor FR                      |
+|-----------------|-----------------------------|-------------------------------|
+| **RPWM**        | PA8  — TIM1_CH1             | PA10 — TIM1_CH3               |
+| **LPWM**        | PA9  — TIM1_CH2             | PA11 — TIM1_CH4               |
+| **R_EN / L_EN** | PC5  — GPIO output (active) | Tied to 3.3 V in hardware     |
+| **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 0) | ← same (ch 1) |
+| **Protection**  | TIM1 BREAK2 → Cortex LOCKUP | ← same                        |
 
-| Signal    | Motor Steering   |
-|-----------|------------------|
-| **PWM**   | PC8 — TIM8_CH3   |
-| **DIR**   | PC4              |
-| **EN**    | PC9              |
-| **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 on I2C (TCA9548A ch 5) |
+### 1.2 Traction Motors — Rear (TIM8, advanced, 20 kHz center-aligned, ARR = 4249)
 
-### 1.3 Current Sense Pins (R_IS / L_IS)
+| Signal          | Motor RL                    | Motor RR                      |
+|-----------------|-----------------------------|-------------------------------|
+| **RPWM**        | PC6  — TIM8_CH1             | PC8  — TIM8_CH3               |
+| **LPWM**        | PC7  — TIM8_CH2             | PC9  — TIM8_CH4               |
+| **R_EN / L_EN** | Tied to 3.3 V in hardware   | PC13 — GPIO output (active)   |
+| **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 2) | ← same (ch 3) |
+| **Protection**  | TIM8 BREAK2 → Cortex LOCKUP | ← same                        |
+
+### 1.3 Steering Motor (TIM3, general-purpose, 20 kHz center-aligned, ARR = 4249)
+
+| Signal          | Motor Steering              |
+|-----------------|-----------------------------|
+| **RPWM**        | PA6  — TIM3_CH1             |
+| **LPWM**        | PA7  — TIM3_CH2             |
+| **R_EN / L_EN** | Tied to 3.3 V in hardware   |
+| **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 5) |
+| **Protection**  | Software only (TIM3 has no BREAK input; fault handlers zero CCR1/CCR2 directly) |
+
+### 1.4 Current Sense (R_IS / L_IS — NOT USED)
 
 The BTS7960 analog current-sense outputs (R_IS, L_IS) are **not wired to any MCU ADC input**.
 All motor current measurement is performed by **external INA226 high-side current-sense ICs** connected via the I2C1 bus through a TCA9548A 8-channel multiplexer:
@@ -45,58 +65,82 @@ All motor current measurement is performed by **external INA226 high-side curren
 | 5                | Steering motor       | 1 mΩ (50 A)   |
 | 6–7              | *Unused / unassigned in firmware* | —   |
 
+### 1.5 Enable Pin Strategy
+
+| Motor  | EN Pin  | Management                                                         |
+|--------|---------|--------------------------------------------------------------------|
+| FL     | PC5     | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
+| FR     | —       | Tied to 3.3 V permanently in hardware (`en_port = NULL`)           |
+| RL     | —       | Tied to 3.3 V permanently in hardware (`en_port = NULL`)           |
+| RR     | PC13    | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
+| STEER  | —       | Tied to 3.3 V permanently in hardware (`en_port = NULL`)           |
+
+**Boot default**: PC5 and PC13 are initialized as GPIO_MODE_OUTPUT_PP in `MX_GPIO_Init()`.
+HAL defaults these to GPIO_PIN_RESET (LOW = H-bridge disabled) — **safe on power-up**.
+
+### 1.6 Freed Direction Pins (Legacy)
+
+The original firmware used DIR + single PWM.  After the migration to RPWM/LPWM
+dual-PWM control, the direction pins are freed and no longer driven:
+
+| Pin | Former Function | Current Status          |
+|-----|-----------------|-------------------------|
+| PC0 | DIR_FL          | Freed — leave unconnected or GPIO_OUT LOW |
+| PC1 | DIR_FR          | Freed — leave unconnected or GPIO_OUT LOW |
+| PC2 | DIR_RL          | Freed — leave unconnected or GPIO_OUT LOW |
+| PC3 | DIR_RR          | Freed — leave unconnected or GPIO_OUT LOW |
+| PC4 | DIR_STEER       | Freed — leave unconnected or GPIO_OUT LOW |
+
 ---
 
 ## 2. Direction Implementation in Software
 
-### 2.1 Scheme: DIR + Single PWM (not dual-PWM)
+### 2.1 Scheme: Dual-PWM (RPWM / LPWM)
 
-The firmware does **not** generate separate RPWM and LPWM signals.
-Each motor is controlled by three independent signals:
+Each motor is controlled by **three signals** — two PWM channels and one enable:
 
-| MCU Output | BTS7960 / IBT-2 Connection | Function |
-|------------|----------------------------|----------|
-| **PWM pin** (TIMx_CHy) | Connected to the PWM input of whichever half-bridge is selected by DIR | Duty cycle 0–4249 (0–100 %) |
-| **DIR pin** (GPIOx)     | Directly drives the direction-select input on the IBT-2 module | `GPIO_PIN_SET` (HIGH) = forward; `GPIO_PIN_RESET` (LOW) = reverse |
-| **EN pin** (GPIOx)      | Directly drives a combined R_EN + L_EN line (both tied together on the IBT-2 module) | HIGH = H-bridge enabled; LOW = H-bridge disabled (coast) |
+| MCU Output       | BTS7960 Connection | Function                           |
+|------------------|--------------------|------------------------------------|
+| **RPWM** (TIMx_CHa) | BTS7960 RPWM input | Forward half-bridge PWM (0–4249)   |
+| **LPWM** (TIMx_CHb) | BTS7960 LPWM input | Reverse half-bridge PWM (0–4249)   |
+| **EN** (GPIO or tied) | BTS7960 R_EN + L_EN | H-bridge enable — HIGH active     |
 
-**Source code** (`motor_control.c`):
+**Source code** (`motor_control.c` — `Motor_SetSigned()`):
 
 ```c
-static void Motor_SetPWM(Motor_t *motor, uint16_t pwm) {
-    if (pwm > PWM_PERIOD) pwm = PWM_PERIOD;
-    __HAL_TIM_SET_COMPARE(motor->timer, motor->channel, pwm);
-}
+// Forward: RPWM = duty, LPWM = 0
+// Reverse: RPWM = 0, LPWM = duty
+// Stop:    RPWM = 0, LPWM = 0
 
-static void Motor_SetDirection(Motor_t *motor, int8_t direction) {
-    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin,
-                      (direction > 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
-
-static void Motor_Enable(Motor_t *motor, uint8_t enable) {
-    HAL_GPIO_WritePin(motor->en_port, motor->en_pin,
-                      enable ? GPIO_PIN_SET : GPIO_PIN_RESET);
+if (signed_pwm > 0) {
+    __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);  // clear first
+    __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, duty);
+} else if (signed_pwm < 0) {
+    __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);  // clear first
+    __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, duty);
+} else {
+    __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+    __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
 }
 ```
 
-The `Motor_t` struct maps each motor's timer/channel, direction port/pin, and enable port/pin:
+The `Motor_t` struct maps each motor's RPWM/LPWM timer channels and enable GPIO:
 
 ```c
-motor_fl.timer = &htim1;  motor_fl.channel = TIM_CHANNEL_1;
-motor_fl.dir_port = GPIOC; motor_fl.dir_pin = PIN_DIR_FL;   // PC0
-motor_fl.en_port  = GPIOC; motor_fl.en_pin  = PIN_EN_FL;    // PC5
-// (similar for FR, RL, RR, Steering)
+motor_fl.rpwm_timer   = &htim1;  motor_fl.rpwm_channel = TIM_CHANNEL_1;  // PA8
+motor_fl.lpwm_timer   = &htim1;  motor_fl.lpwm_channel = TIM_CHANNEL_2;  // PA9
+motor_fl.en_port      = GPIOC;   motor_fl.en_pin       = PIN_EN_FL;      // PC5
 ```
 
 ### 2.2 How Direction Works per Gear
 
-| Gear               | `effective_demand ≥ 0` → `dir` | `effective_demand < 0` → `dir` | Notes |
-|--------------------|--------------------------------|--------------------------------|-------|
-| FORWARD (D1)       | `+1` (forward)                 | `−1` (reverse)                 | Max 60 % power |
-| FORWARD_D2         | `+1` (forward)                 | `−1` (reverse)                 | Max 100 % power |
-| REVERSE            | `−1` (reversed)                | `+1` (reversed)                | Max 60 % power; dir is inverted from the base direction |
-| PARK               | `+1` (hold brake uses forward) | N/A (no throttle accepted)     | Active hold brake only |
-| NEUTRAL            | N/A (motors disabled)          | N/A                            | Coast — no PWM, EN=LOW |
+| Gear               | `effective_demand ≥ 0` → direction | `effective_demand < 0` → direction | Notes |
+|--------------------|------------------------------------|------------------------------------|-------|
+| FORWARD (D1)       | +1 (RPWM active)                  | −1 (LPWM active)                  | Max 60 % power |
+| FORWARD_D2         | +1 (RPWM active)                  | −1 (LPWM active)                  | Max 100 % power |
+| REVERSE            | −1 (inverted: LPWM active)        | +1 (inverted: RPWM active)        | Max 60 % power |
+| PARK               | +1 (hold brake forward)           | N/A (no throttle accepted)         | Active hold brake |
+| NEUTRAL            | N/A (both channels = 0)           | N/A                                | Coast — RPWM=0, LPWM=0 |
 
 In tank-turn (axis rotation) mode, left-side motors (FL, RL) receive `−dir` while right-side motors (FR, RR) receive `+dir`.
 
@@ -104,16 +148,16 @@ In tank-turn (axis rotation) mode, left-side motors (FL, RL) receive `−dir` wh
 
 The firmware implements **three distinct braking modes**, all using the BTS7960 H-bridge:
 
-#### A. BTS7960 Active Brake (short-brake / hold)
+#### A. BTS7960 Passive Brake (both PWM = 0)
 
-**Constant**: `BTS7960_BRAKE_PWM = PWM_PERIOD = 4249` (100 % duty)
+**Constant**: `BTS7960_BRAKE_PWM = 0` (both RPWM and LPWM at 0)
 
-The firmware notes that Chinese BTS7960 modules have a design defect: when EN=HIGH and PWM=0, the motor **floats** (no braking). To achieve active braking, the firmware drives PWM to **100 % duty** with EN=HIGH. This shorts the motor terminals through the H-bridge, producing electromagnetic braking torque.
+With RPWM/LPWM direct control, passive brake is achieved by setting both channels to 0.
+The BTS7960 internal logic then holds both motor terminals at the same potential, producing
+electromagnetic braking.
 
 **Used in**:
-- Steering deadband hold (`Steering_ControlLoop` when error < 0.5°)
-- Steering neutralize (`Steering_Neutralize`)
-- Traction zero-demand hold (when `|effective_demand| ≤ 0.5 %`)
+- Traction zero-demand hold (TRAC_PHASE_BRAKE state)
 - 4×2 mode rear wheels (rear motors are braked while front motors drive)
 
 #### B. Dynamic Braking (deceleration)
@@ -124,7 +168,7 @@ When the driver lifts off the throttle rapidly (throttle rate decreasing), the f
 brake_pct = |throttle_rate| × DYNBRAKE_FACTOR (0.5)
 ```
 
-Clamped to `DYNBRAKE_MAX_PCT` (60 %). The brake is applied by setting `effective_demand = −dynbrake_pct` which reverses the motor direction relative to travel, creating an opposing torque. Energy is dissipated as heat in motor windings — **no regenerative charging**.
+Clamped to `DYNBRAKE_MAX_PCT` (60 %). The brake is applied by setting `effective_demand = −dynbrake_pct` which activates the opposing LPWM channel relative to travel direction, creating opposing torque. Energy is dissipated as heat in motor windings — **no regenerative charging**.
 
 Dynamic braking is **disabled** when:
 - Average wheel speed < 3 km/h
@@ -134,10 +178,9 @@ Dynamic braking is **disabled** when:
 
 #### C. Park Hold Brake
 
-In GEAR_PARK, all four motors receive a controlled low-duty active brake:
+In GEAR_PARK, all four motors receive a controlled low-duty active signal via RPWM:
 
 - Default hold duty: 30 % (`PARK_HOLD_PWM_PCT`)
-- Direction set to forward; braking comes from low-duty driving with EN=HIGH
 - Current derating: braking reduced above 15 A, disabled above 20 A
 - Temperature derating: braking reduced above 70 °C, disabled above 85 °C
 - Overridden (released) when system enters SAFE or ERROR state
@@ -146,72 +189,69 @@ In GEAR_PARK, all four motors receive a controlled low-duty active brake:
 
 ## 3. Electrical Behavior in Special States
 
-### 3.1 Throttle = 0 (Zero Demand)
-
-**Condition**: `|effective_demand| ≤ TRACTION_ZERO_DEMAND_PCT` (0.5 %)
-
-**What happens**:
+### 3.1 Throttle = 0 (Zero Demand — TRAC_PHASE_BRAKE)
 
 | Signal | Value | Electrical Effect |
 |--------|-------|-------------------|
-| PWM    | `BTS7960_BRAKE_PWM` = 4249 (100 % duty) | Both FETs in the active half-bridge are driven ON |
-| DIR    | Unchanged (last direction) | Irrelevant when PWM=100 % — both FETs conduct |
-| EN     | HIGH | H-bridge is enabled |
+| RPWM   | 0 (CCR = 0)   | Right half-bridge inactive |
+| LPWM   | 0 (CCR = 0)   | Left half-bridge inactive  |
+| EN     | HIGH (where GPIO-controlled) | H-bridge enabled    |
 
-**Result**: Motor terminals are shorted through the H-bridge. The motor acts as a generator loaded by its own winding resistance, producing **electromagnetic braking torque** that holds the vehicle stationary. No energy is returned to the battery.
+**Result**: Both RPWM=0 and LPWM=0 with EN=HIGH produces passive electromagnetic braking.
 
-**Exception — Neutral gear**: PWM=0, EN=LOW → motor floats freely (coast mode).
+**Exception — Neutral gear**: RPWM=0, LPWM=0, EN not driven LOW explicitly but motor receives no torque → coast-like behavior.
+
+**Exception — Coast phase**: When transitioning from DRIVE to low-speed, EN is deasserted (LOW) for motors with GPIO EN (FL, RR), providing true coast (free-rolling).
 
 ### 3.2 Brake / Hold Active (Park Gear)
 
-**Condition**: `current_gear == GEAR_PARK`
-
-**What happens**:
-
 | Signal | Value | Electrical Effect |
 |--------|-------|-------------------|
-| PWM    | `hold_pct × PWM_PERIOD / 100` (default ≈ 1275 for 30 %) | Partial duty — pulsed motor drive |
-| DIR    | HIGH (forward) | One half-bridge is pulsed |
+| RPWM   | `hold_pct × PWM_PERIOD / 100` (default ≈ 1275 for 30 %) | Forward half-bridge pulsed |
+| LPWM   | 0   | Reverse half-bridge inactive |
 | EN     | HIGH (if hold_pwm > 0), LOW (if derating forced hold to 0) | H-bridge enabled unless thermally derated |
 
-**Result**: The motor receives a low-duty forward drive signal. This creates a modest holding torque that resists vehicle motion (simulated parking lock). Current and temperature are monitored; braking is progressively reduced or fully disabled to prevent motor overheating during extended hold.
+**Result**: The motor receives a low-duty forward drive signal via RPWM, creating a modest holding torque.
 
-**Safety override**: If the system enters SAFE or ERROR state while in Park, the hold brake is **released** (PWM=0, EN=LOW → coast) to allow the safety system full authority.
+**Safety override**: If the system enters SAFE or ERROR state while in Park, the hold brake is **released** (RPWM=0, LPWM=0, EN=LOW → coast) to allow the safety system full authority.
 
 ### 3.3 Emergency Stop
 
 **Trigger**: `Traction_EmergencyStop()` called from safety system
 
-**What happens**:
-
 | Signal | Value | Electrical Effect |
 |--------|-------|-------------------|
-| PWM    | 0 | No drive signal |
-| EN     | LOW (all 5 motors) | H-bridge **disabled** — FETs turned off |
+| RPWM   | 0 | No forward drive signal |
+| LPWM   | 0 | No reverse drive signal |
+| EN     | LOW (all 5 motors where GPIO-controlled) | H-bridge **disabled** — FETs turned off |
 
 **Sequence** (code order):
-1. All five motors' EN pins driven LOW (coast mode)
-2. All five motors' PWM set to 0
-3. `traction_state.demandPct` forced to 0
-4. Pedal filter state reset (`pedal_ema`, `pedal_ramped`, `pedal_filter_init`)
-5. Dynamic braking state reset
+1. All five motors: `Motor_SetSigned(motor, 0)` → RPWM=0, LPWM=0, EN=LOW
+2. `traction_state.demandPct` forced to 0
+3. Pedal filter state reset (`pedal_ema`, `pedal_ramped`, `pedal_filter_init`)
+4. Dynamic braking state reset
+5. Demand anomaly detection state reset
+6. Smooth driving state reset (phase → BRAKE, jerk limiter → 0)
 
-**Result**: All H-bridges are **completely de-energized**. Motors enter coast mode (no braking, no drive). The firmware deliberately uses coast (EN=LOW) instead of active brake (PWM=100 %) because in an emergency the fault condition may involve the power stage itself (overcurrent, short circuit), and keeping FETs conducting would be unsafe.
-
-**Additionally**: The `Error_Handler()` function uses direct register writes to force all GPIOC enable and relay pins LOW, providing a hardware-level backup shutdown independent of the HAL layer.
+**Result**: All H-bridges are **completely de-energized**. Motors enter coast mode. The firmware deliberately uses coast (EN=LOW) instead of active brake because in an emergency the fault condition may involve the power stage itself (overcurrent, short circuit), and keeping FETs conducting would be unsafe.
 
 ### 3.4 Error_Handler (Hard Fault / Unrecoverable)
 
 ```c
 void Error_Handler(void) {
     __disable_irq();
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER
+    TIM1->BDTR &= ~TIM_BDTR_MOE;   // Disable TIM1 outputs (FL, FR)
+    TIM8->BDTR &= ~TIM_BDTR_MOE;   // Disable TIM8 outputs (RL, RR)
+    TIM3->CCR1  = 0U;               // RPWM_STEER → 0
+    TIM3->CCR2  = 0U;               // LPWM_STEER → 0
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     while (1) { }
 }
 ```
 
-All motor enable pins and all relay control pins are driven LOW via direct register access (bypassing HAL). This cuts both the H-bridge logic enable AND the relay-supplied motor power buses. The system halts in an infinite loop with interrupts disabled.
+All motor PWM outputs are disabled (MOE cleared on TIM1/TIM8, CCRs zeroed on TIM3) and all relay/enable GPIO pins are driven LOW via direct register access (bypassing HAL). This cuts both the H-bridge PWM outputs AND the relay-supplied motor power buses. The system halts in an infinite loop with interrupts disabled.
 
 ---
 
@@ -221,13 +261,17 @@ All motor enable pins and all relay control pins are driven LOW via direct regis
                     ┌─────────────────────────────────────────┐
                     │           BTS7960 / IBT-2 Module        │
                     │                                         │
-  MCU PWM pin ──────┤─► PWM input ──┬── RPWM (when DIR=1)    │
-                    │               └── LPWM (when DIR=0)    │──── Motor
-  MCU DIR pin ──────┤─► Direction select                      │
-  MCU EN  pin ──────┤─► R_EN + L_EN (tied together)           │
+  MCU RPWM pin ────┤─► RPWM input ──── Right half-bridge     │
+                    │                                         │──── Motor
+  MCU LPWM pin ────┤─► LPWM input ──── Left  half-bridge     │
                     │                                         │
+  MCU EN pin ──────┤─► R_EN + L_EN (tied or GPIO-controlled) │
+  (or tied to 3.3V)│                                         │
                     │   R_IS ──── (not connected to MCU)      │
                     │   L_IS ──── (not connected to MCU)      │
+                    │                                         │
+                    │   VCC  ──── 3.3 V (from STM32 rail)    │
+                    │   GND  ──── Common with STM32           │
                     └─────────────────────────────────────────┘
                                           │
                          Current measured by external INA226
@@ -235,8 +279,11 @@ All motor enable pins and all relay control pins are driven LOW via direct regis
 ```
 
 **Key observations**:
-1. The firmware uses a **DIR + single PWM** scheme, not dual-PWM (separate RPWM/LPWM from the MCU).
-2. R_EN and L_EN are driven by a **single** MCU GPIO pin per motor. The firmware treats them as one enable signal; the IBT-2 board wiring should be verified against the hardware schematic to confirm that R_EN and L_EN are tied together.
-3. The BTS7960's built-in current-sense outputs (R_IS, L_IS) are **not used**; external INA226 ICs provide current measurement.
-4. Active braking uses **PWM=100 %** (not PWM=0) due to Chinese BTS7960 module behavior where PWM=0+EN=HIGH results in motor float rather than brake.
-5. Emergency stop uses **EN=LOW** (coast/disconnect) to fully de-energize the H-bridge power stage.
+1. The firmware uses **dual-PWM** (separate RPWM/LPWM from the MCU) — NOT DIR + single PWM.
+2. Direction is encoded as the choice of active PWM channel: RPWM active = forward, LPWM active = reverse.
+3. R_EN and L_EN are tied together on the IBT-2 module; only FL (PC5) and RR (PC13) have GPIO-controlled EN. The other three motors have EN permanently tied to 3.3 V.
+4. The BTS7960's built-in current-sense outputs (R_IS, L_IS) are **not used**; external INA226 ICs provide current measurement.
+5. `Motor_SetSigned()` is the **sole write path** to hardware timer CCR registers — guarantees RPWM and LPWM are never simultaneously non-zero.
+6. OCPreload is enabled on all PWM channels; CCR updates take effect only at the next timer UEV (50 µs at 20 kHz).
+7. TIM1/TIM8 have BREAK2 linked to Cortex-M4 LOCKUP signal for hardware-level output disable.
+8. Emergency stop uses **RPWM=0, LPWM=0, EN=LOW** (coast/disconnect) to fully de-energize the H-bridge.
