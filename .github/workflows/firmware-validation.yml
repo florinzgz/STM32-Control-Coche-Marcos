@@ -1,0 +1,125 @@
+name: Firmware Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'Core/**'
+      - 'Makefile'
+      - '.github/workflows/firmware-validation.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'Core/**'
+      - 'Makefile'
+      - '.github/workflows/firmware-validation.yml'
+
+jobs:
+  # ── Build with strict warnings ──────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM GCC toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Syntax-check all firmware sources (-Wall -Wextra -Werror)
+        run: |
+          PASS=0; FAIL=0
+          for f in Core/Src/main.c Core/Src/motor_control.c \
+                   Core/Src/can_handler.c Core/Src/safety_system.c \
+                   Core/Src/sensor_manager.c Core/Src/service_mode.c \
+                   Core/Src/ackermann.c Core/Src/steering_centering.c \
+                   Core/Src/boot_validation.c Core/Src/encoder_reader.c \
+                   Core/Src/eps_params.c Core/Src/error_log.c \
+                   Core/Src/steering_cal_store.c Core/Src/math_safety.c \
+                   Core/Src/stm32g4xx_it.c Core/Src/stm32g4xx_hal_msp.c \
+                   Core/Src/system_stm32g4xx.c Core/Src/syscalls.c \
+                   Core/Src/sysmem.c; do
+            if arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard \
+                -mfpu=fpv4-sp-d16 -std=gnu11 -DUSE_HAL_DRIVER -DSTM32G474xx \
+                -Ianalysis_artifacts/stubs -ICore/Inc \
+                -Wall -Wextra -Werror -fsyntax-only "$f" 2>&1; then
+              PASS=$((PASS + 1))
+            else
+              FAIL=$((FAIL + 1))
+            fi
+          done
+          echo "Results: $PASS passed, $FAIL failed"
+          [ "$FAIL" -eq 0 ] || exit 1
+
+  # ── Unit tests ──────────────────────────────────────────────────────
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run test_motor_control
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_motor_control.c -o /tmp/test_motor_control
+          /tmp/test_motor_control
+
+      - name: Run test_math_safety
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_math_safety.c Core/Src/math_safety.c \
+              -o /tmp/test_math_safety
+          /tmp/test_math_safety
+
+      - name: Run test_error_log
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_error_log.c Core/Src/error_log.c \
+              -o /tmp/test_error_log
+          /tmp/test_error_log
+
+      - name: Run test_service_mode
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_service_mode.c Core/Src/service_mode.c \
+              -o /tmp/test_service_mode
+          /tmp/test_service_mode
+
+      - name: Run test_eps_params
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_eps_params.c Core/Src/eps_params.c \
+              -o /tmp/test_eps_params
+          /tmp/test_eps_params
+
+  # ── Static analysis ─────────────────────────────────────────────────
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+          pip install flawfinder lizard
+
+      - name: cppcheck (error + warning level)
+        run: |
+          cppcheck --enable=all --inconclusive --force \
+            --suppress=missingIncludeSystem --suppress=missingInclude \
+            -DHOST_TEST -DUSE_HAL_DRIVER -DSTM32G474xx \
+            -ICore/Inc -Ianalysis_artifacts/stubs \
+            --error-exitcode=2 \
+            Core/Src/*.c Core/Inc/*.h 2>&1
+
+      - name: flawfinder (level ≥ 3 = fail)
+        run: |
+          flawfinder --minlevel=3 --error-level=3 Core/Src/ Core/Inc/
+
+      - name: lizard complexity (threshold 15)
+        run: |
+          lizard Core/Src/ Core/Inc/ -l c -T cyclomatic_complexity=15 \
+            -w || true  # Report but don't fail on complexity

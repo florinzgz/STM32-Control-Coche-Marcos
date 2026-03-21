@@ -169,7 +169,7 @@ bool EPS_Params_Save(void)
                                      : EPS_SLOT_A_ADDR;
 
     /* Copy the backup slot from flash into RAM before erasing */
-    const eps_flash_slot_t *prev_flash = (const eps_flash_slot_t *)prev_addr;
+    const eps_flash_slot_t *prev_flash = (const eps_flash_slot_t *)(uintptr_t)prev_addr;
     if (eps_slot_valid(prev_flash)) {
         memcpy(&prev_slot, prev_flash, sizeof(eps_flash_slot_t));
         has_prev = true;
