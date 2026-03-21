@@ -967,7 +967,9 @@ void Safety_CheckCurrent(void)
         if (!ServiceMode_IsEnabled(mod)) continue;
 
         float amps = Current_GetAmps(i);
-        if (amps > MAX_CURRENT_A) {
+        /* Check absolute overcurrent — reverse current through the shunt
+         * (regenerative braking, back-EMF) must also be detected.         */
+        if (amps > MAX_CURRENT_A || amps < -MAX_CURRENT_A) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERCURRENT);
             /* Count consecutive errors — escalate to SAFE only after
