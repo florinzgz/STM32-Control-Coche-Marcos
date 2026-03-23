@@ -362,6 +362,7 @@ int main(void)
             tick_100ms = now;
 
             Safety_CheckBatteryVoltage();
+            Safety_CheckBatteryOvervoltage();
 
             CAN_SendHeartbeat();
             CAN_SendStatusSpeed(

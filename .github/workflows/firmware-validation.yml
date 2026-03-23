@@ -97,6 +97,14 @@ jobs:
               -o /tmp/test_eps_params
           /tmp/test_eps_params
 
+      - name: Run test_sensor_calibration
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_sensor_calibration.c \
+              -o /tmp/test_sensor_calibration
+          /tmp/test_sensor_calibration
+
   # ── Static analysis ─────────────────────────────────────────────────
   static-analysis:
     runs-on: ubuntu-latest

@@ -1477,6 +1477,14 @@ static inline HAL_StatusTypeDef HAL_I2C_Mem_Write(I2C_HandleTypeDef *hi2c,
 
 static inline void HAL_I2C_EV_IRQHandler(I2C_HandleTypeDef *hi2c)  { (void)hi2c; }
 static inline void HAL_I2C_ER_IRQHandler(I2C_HandleTypeDef *hi2c)  { (void)hi2c; }
+
+static inline HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c,
+    uint16_t DevAddress, uint32_t Trials, uint32_t Timeout)
+{
+    (void)hi2c; (void)DevAddress; (void)Trials; (void)Timeout;
+    return HAL_OK;
+}
+
 /* I2C MspInit callback — real definition in stm32g4xx_hal_msp.c */
 void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c);
 

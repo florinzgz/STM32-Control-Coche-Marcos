@@ -24,7 +24,8 @@
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
 #define TCS_SLIP_THRESHOLD   15   /* tcs_system.cpp: slipThreshold = 15.0f */
-#define MAX_CURRENT_A        25.0f
+#define MAX_CURRENT_A        25.0f   /* per-motor overcurrent threshold      */
+#define MAX_CURRENT_BATT_A   100.0f  /* battery channel aggregates all loads  */
 #define CAN_TIMEOUT_MS       250
 
 /* Saturating uint32_t increment — prevents wrap to 0 */
@@ -54,6 +55,23 @@ static inline void sat_inc_u32(uint32_t *counter) {
 #define BATTERY_UV_CRITICAL_V   18.0f   /* Enter SAFE below this          */
 #define BATTERY_UV_HYST_V       0.5f    /* Hysteresis band for recovery   */
 
+/* Battery overvoltage thresholds (24 V system).
+ *
+ * Overvoltage can occur from:
+ *   - Charger malfunction (no BMS cutoff)
+ *   - Regenerative braking feeding energy back to battery
+ *   - Voltage regulator failure on auxiliary power
+ *
+ * 30.0 V warning ≈ 5.0 V/cell — above max charge voltage (4.2 V/cell = 25.2 V).
+ *   Indicates abnormal condition; reduce load and alert operator.
+ * 35.0 V critical — risk of damage to 24 V electronics (capacitors, ICs).
+ *   Immediate shutdown to protect components.
+ *
+ * Hysteresis (0.5 V) prevents oscillation during transient spikes.       */
+#define BATTERY_OV_WARNING_V    30.0f   /* Enter DEGRADED above this      */
+#define BATTERY_OV_CRITICAL_V   35.0f   /* Enter SAFE above this          */
+#define BATTERY_OV_HYST_V       0.5f    /* Hysteresis band for recovery   */
+
 /* Command-validation constants */
 #define THROTTLE_MIN         0.0f
 #define THROTTLE_MAX         100.0f
@@ -72,7 +90,8 @@ static inline void sat_inc_u32(uint32_t *counter) {
 #define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
-#define SENSOR_CURRENT_MAX_A 50.0f    /* anything above this is a fault */
+#define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
+#define SENSOR_CURRENT_MAX_BATT_A 100.0f   /* battery channel: 100A sensor range  */
 #define SENSOR_SPEED_MAX_KMH 25.0f    /* RS775 20000RPM / 1:75 gear → ~266 wheel RPM
                                         * × 1.1m circumf → ~17.6 km/h max.
                                         * 25 km/h gives ~40 % plausibility margin. */
@@ -957,6 +976,16 @@ void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wh
 
 /* ---- Overcurrent ------------------------------------------------- */
 
+/* Overcurrent reaction path:
+ *   1. Single event  → DEGRADED (power-limited via Safety_ValidateThrottle)
+ *   2. ≥2 consecutive → DEGRADED L3 (more restrictive limits)
+ *   3. ≥3 consecutive → SAFE → Safety_FailSafe():
+ *        – Traction_EmergencyStop() disables all motor PWM + H-bridge EN
+ *        – Relay_PowerDown() de-energises main/traction/direction relays
+ *        – Steering centred or neutralised
+ *   Hardware fuses and BTS7960 internal current limiting handle sub-ms
+ *   transients; this software path protects against sustained faults.  */
+
 void Safety_CheckCurrent(void)
 {
     for (uint8_t i = 0; i < NUM_INA226; i++) {
@@ -967,9 +996,14 @@ void Safety_CheckCurrent(void)
         if (!ServiceMode_IsEnabled(mod)) continue;
 
         float amps = Current_GetAmps(i);
+        /* Use per-channel overcurrent threshold: battery channel carries
+         * total system current (motors + steering + electronics) and must
+         * allow up to 100 A.                                               */
+        float limit = (i == INA226_CHANNEL_BATTERY)
+                    ? MAX_CURRENT_BATT_A : MAX_CURRENT_A;
         /* Check absolute overcurrent — reverse current through the shunt
          * (regenerative braking, back-EMF) must also be detected.         */
-        if (amps > MAX_CURRENT_A || amps < -MAX_CURRENT_A) {
+        if (amps > limit || amps < -limit) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERCURRENT);
             /* Count consecutive errors — escalate to SAFE only after
@@ -1235,7 +1269,9 @@ void Safety_CheckSensors(void)
         ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         float a = Current_GetAmps(i);
-        if (a < -1.0f || a > SENSOR_CURRENT_MAX_A) {
+        float ceil = (i == INA226_CHANNEL_BATTERY)
+                   ? SENSOR_CURRENT_MAX_BATT_A : SENSOR_CURRENT_MAX_A;
+        if (a < -1.0f || a > ceil) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
@@ -1440,6 +1476,52 @@ void Safety_CheckBatteryVoltage(void)
         safety_error == SAFETY_ERROR_BATTERY_UV_WARNING &&
         voltage > (BATTERY_UV_WARNING_V + BATTERY_UV_HYST_V)) {
         Safety_ClearError(SAFETY_ERROR_BATTERY_UV_WARNING);
+    }
+}
+
+/**
+ * @brief  Check battery bus overvoltage and enforce protection.
+ *
+ * Overvoltage can damage 24 V electronics (capacitors, ICs, sensors).
+ * Sources: charger malfunction, regen braking, regulator failure.
+ *
+ * Warning (> 30.0 V):
+ *   - Transition to SYS_STATE_DEGRADED (reduce load)
+ *
+ * Critical (> 35.0 V):
+ *   - Transition to SYS_STATE_SAFE (disable actuators immediately)
+ *   - NO auto-recovery: operator must investigate overvoltage source
+ *
+ * Recovery from DEGRADED: voltage < WARNING − HYSTERESIS (29.5 V).
+ */
+void Safety_CheckBatteryOvervoltage(void)
+{
+    float voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+
+    /* Ignore 0 V readings (sensor failure handled by undervoltage check) */
+    if (voltage <= 0.0f) return;
+
+    /* Critical overvoltage — SAFE state, no auto-recovery */
+    if (voltage > BATTERY_OV_CRITICAL_V) {
+        Safety_SetError(SAFETY_ERROR_BATTERY_OV_CRITICAL);
+        Safety_SetState(SYS_STATE_SAFE);
+        return;
+    }
+
+    /* Warning overvoltage — DEGRADED state with power limiting */
+    if (voltage > BATTERY_OV_WARNING_V) {
+        Safety_SetError(SAFETY_ERROR_BATTERY_OV_WARNING);
+        Safety_SetState(SYS_STATE_DEGRADED);
+        Safety_SetDegradedLevel(DEGRADED_L2,
+                                DEGRADED_REASON_BATTERY_OV);
+        return;
+    }
+
+    /* Voltage OK — attempt recovery from DEGRADED if hysteresis met */
+    if (system_state == SYS_STATE_DEGRADED &&
+        safety_error == SAFETY_ERROR_BATTERY_OV_WARNING &&
+        voltage < (BATTERY_OV_WARNING_V - BATTERY_OV_HYST_V)) {
+        Safety_ClearError(SAFETY_ERROR_BATTERY_OV_WARNING);
     }
 }
 

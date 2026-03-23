@@ -373,8 +373,29 @@ static void I2C_BusRecovery(void)
  * Bits [2:0]   = 111  (continuous shunt + bus voltage)
  * Result: 0x4327 → averaging smooths ADC noise from PWM switching.
  * Total conversion time per measurement: 4 × (1.1 + 1.1) = 8.8 ms,
- * well within the 50 ms read cycle.                                       */
+ * well within the 50 ms read cycle.
+ *
+ * ---- MEASUREMENT LATENCY WARNING ----
+ * Per-sensor conversion latency: 8.8 ms (4-sample avg × 2.2 ms).
+ * I2C read overhead per sensor: ~0.3 ms (mux select + 2 register reads).
+ * Full 6-sensor cycle: ~6 × (8.8 + 0.3) ≈ 54.6 ms effective latency.
+ * The 50 ms read cycle guarantees fresh data each call.
+ *
+ * IMPORTANT: INA226 measurements are NOT suitable for fast overcurrent
+ * protection (<10 ms events).  Hardware protection (fuses, BTS7960
+ * internal current limiting) must handle sub-millisecond transients.
+ * The INA226 provides monitoring and slow-fault detection only.           */
 #define INA226_CONFIG_VALUE        0x4327
+
+/* ---- EMA filter for current readings ----
+ * α = 0.2 balances noise rejection with response time.
+ * Settling time: ~5 cycles (250 ms at 50 ms update rate).
+ * Applied to current_amps[] after each read; raw value available via
+ * Current_GetAmpsRaw() for diagnostics.                                   */
+#define CURRENT_EMA_ALPHA          0.2f
+
+static float current_amps_raw[NUM_INA226] = {0};
+static bool  current_ema_primed           = false;
 
 /**
  * @brief  Select a channel on the TCA9548A multiplexer.
@@ -424,6 +445,24 @@ static HAL_StatusTypeDef INA226_WriteReg(uint8_t reg, uint16_t value)
 }
 
 /**
+ * @brief  Check that the TCA9548A multiplexer is present on the I2C bus.
+ * @retval true if ACK received from 0x70, false otherwise.
+ *
+ * Called during Sensor_Init().  If the mux is absent, no INA226 channel
+ * can be reached — all current/voltage readings will be zero.
+ * The caller must enter SAFE state on failure.
+ */
+#define TCA9548A_PRESENCE_TRIALS      2    /* I2C address probe retries   */
+#define TCA9548A_PRESENCE_TIMEOUT_MS  50   /* Timeout per trial (ms)      */
+
+static bool TCA9548A_IsPresent(void)
+{
+    return (HAL_I2C_IsDeviceReady(&hi2c1, (I2C_ADDR_TCA9548A << 1),
+                                  TCA9548A_PRESENCE_TRIALS,
+                                  TCA9548A_PRESENCE_TIMEOUT_MS) == HAL_OK);
+}
+
+/**
  * @brief  Configure all INA226 sensors via TCA9548A multiplexer.
  *
  * Writes the configuration register (0x00) on each channel to ensure
@@ -445,27 +484,49 @@ void Current_ReadAll(void)
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         if (TCA9548A_SelectChannel(i) != HAL_OK) {
-            current_amps[i] = 0.0f;
-            voltage_bus[i]  = 0.0f;
+            current_amps_raw[i] = 0.0f;
+            current_amps[i]     = 0.0f;
+            voltage_bus[i]      = 0.0f;
             continue;
         }
 
         /* Shunt voltage → current:  I = V_shunt / R_shunt
          * Use correct shunt resistance per channel:
-         *   Channel 4 (battery): 0.5 mΩ (100A sensor)
-         *   All others:          1.0 mΩ (50A sensors)             */
+         *   Channel 4 (battery): 0.75 mΩ (100A/75mV sensor)
+         *   All others:          1.5 mΩ  (50A/75mV sensors)            */
         int16_t shunt_raw = INA226_ReadReg(INA226_REG_SHUNT_VOLTAGE);
         float shunt_uv    = (float)shunt_raw * INA226_SHUNT_LSB_UV;
         float shunt_mohm  = (i == INA226_CHANNEL_BATTERY)
                           ? (float)INA226_SHUNT_MOHM_BATTERY
                           : (float)INA226_SHUNT_MOHM_MOTOR;
-        current_amps[i]   = shunt_uv / shunt_mohm;  /* µV / mΩ = mA */
-        current_amps[i]  /= 1000.0f;  /* Convert mA to A */
+        float raw_amps    = shunt_uv / shunt_mohm / 1000.0f;  /* µV/mΩ→mA→A */
+
+        /* Battery channel: clamp negative current to 0.
+         * The battery bus cannot sink current in this topology (no regen
+         * charging path).  Negative readings on ch4 are noise artefacts
+         * from INA226 offset; clamping prevents false fault triggers.
+         * Motor channels: allow bidirectional (regen braking / back-EMF). */
+        if (i == INA226_CHANNEL_BATTERY && raw_amps < 0.0f) {
+            raw_amps = 0.0f;
+        }
+
+        current_amps_raw[i] = raw_amps;
+
+        /* EMA filter: smooth transient spikes from PWM switching noise.
+         * filtered = α × new + (1 − α) × old                           */
+        if (!current_ema_primed) {
+            current_amps[i] = raw_amps;     /* Prime on first cycle */
+        } else {
+            current_amps[i] = CURRENT_EMA_ALPHA * raw_amps
+                            + (1.0f - CURRENT_EMA_ALPHA) * current_amps[i];
+        }
 
         /* Bus voltage */
         int16_t bus_raw   = INA226_ReadReg(INA226_REG_BUS_VOLTAGE);
         voltage_bus[i]    = (float)bus_raw * INA226_BUS_LSB_MV / 1000.0f;  /* Convert mV to V */
     }
+
+    current_ema_primed = true;
 
     /* I2C failure detection and recovery */
     if (i2c_fail_count >= I2C_FAIL_THRESHOLD) {
@@ -486,6 +547,11 @@ void Current_ReadAll(void)
 float Current_GetAmps(uint8_t index) {
     if (index >= NUM_INA226) return 0.0f;
     return current_amps[index];
+}
+
+float Current_GetAmpsRaw(uint8_t index) {
+    if (index >= NUM_INA226) return 0.0f;
+    return current_amps_raw[index];
 }
 
 float Voltage_GetBus(uint8_t index) {
@@ -858,12 +924,24 @@ void Sensor_Init(void)
     pedal_ema_primed       = false;
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
-        current_amps[i] = 0.0f;
-        voltage_bus[i]  = 0.0f;
+        current_amps[i]     = 0.0f;
+        current_amps_raw[i] = 0.0f;
+        voltage_bus[i]      = 0.0f;
     }
 
     i2c_fail_count        = 0;
     i2c_recovery_attempts = 0;
+    current_ema_primed    = false;
+
+    /* TCA9548A multiplexer presence check (CRITICAL).
+     * If the mux is absent, no INA226 channel is reachable and all
+     * current/voltage readings will be zero — enter SAFE state.       */
+    if (!TCA9548A_IsPresent()) {
+        Safety_SetError(SAFETY_ERROR_I2C_FAILURE);
+        Safety_SetState(SYS_STATE_SAFE);
+        /* Continue init so that DS18B20 and other sensors are still set up;
+         * INA226_ConfigureAll will silently fail on each channel.         */
+    }
 
     /* Explicitly configure all INA226 sensors to a known state
      * (averaging, conversion time, continuous mode) rather than
