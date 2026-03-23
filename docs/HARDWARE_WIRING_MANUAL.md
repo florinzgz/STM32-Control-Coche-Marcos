@@ -473,8 +473,8 @@ enumeración del algoritmo de búsqueda OneWire.
 | Pin SDA | **PB7** | `PIN_I2C_SDA` (`main.h:61`) |
 | Dirección INA226 | **0x40** | `I2C_ADDR_INA226` (`main.h:75`) |
 | Multiplexor | **TCA9548A** en dirección **0x70** | `I2C_ADDR_TCA9548A` (`main.h:74`) |
-| Resistencia shunt (motor) | **1.5 mΩ** (50A/75mV) | `INA226_SHUNT_MOHM_MOTOR` (`main.h`) |
-| Resistencia shunt (batería) | **0.75 mΩ** (100A/75mV) | `INA226_SHUNT_MOHM_BATTERY` (`main.h`) |
+| Resistencia shunt (motor) | **1.5 mΩ** (50A/75mV) | `INA226_SHUNT_MOHM_MOTOR` (`main.h:157`) |
+| Resistencia shunt (batería) | **0.75 mΩ** (100A/75mV) | `INA226_SHUNT_MOHM_BATTERY` (`main.h:158`) |
 
 **Esquema de conexión I2C:**
 
@@ -940,7 +940,8 @@ STM32 GPIO  ──[330Ω]──► LED(PC817) ──GND
                         │
               5V ─────── COLECTOR(PC817)
                          EMISOR(PC817) ──► BASE(BC547) ──[10kΩ]──GND
-              5V ──────────────────────────── BOBINA(+) ──[1N4007]── BOBINA(−)
+                                           COLECTOR(BC547) ──► BOBINA(−)
+              5V ──────────────────────── BOBINA(+) ──[1N4007]── BOBINA(−)
               (diodo flyback: cátodo al + de la bobina, ánodo al − de la bobina)
 ```
 
