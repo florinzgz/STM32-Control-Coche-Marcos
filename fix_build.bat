@@ -75,35 +75,94 @@ if %ERRORLEVEL%==1 (
     set FIXED=1
 )
 
-REM ---- Step 5: Fix .mxproject duplicate entries ----
+REM ---- Step 5: Fix .mxproject corruption ----
+REM Handles: duplicates, .c in LibFiles, .h in SourceFiles, trailing semicolons,
+REM bare empty list lines, and duplicate sections.
 if exist ".mxproject" (
-    echo Checking .mxproject for duplicate entries...
+    echo Checking .mxproject for corruption...
     powershell -Command ^
       "$changed = 0; " ^
       "$lines = Get-Content '.mxproject'; " ^
-      "$out = @(); " ^
+      "$out = @(); $seenSections = @{}; $skipSection = $false; " ^
       "foreach ($line in $lines) { " ^
-      "  if ($line -match '^(SourceFiles|LibFiles|CDefines|HeaderPath)=(.+)$') { " ^
-      "    $key = $Matches[1]; $val = $Matches[2]; " ^
-      "    $items = $val -split ';' | Where-Object { $_ -ne '' }; " ^
+      "  if ($line -match '^\[.+\]$') { " ^
+      "    if ($seenSections.ContainsKey($line)) { " ^
+      "      Write-Host ('   Removing duplicate section: ' + $line); " ^
+      "      $changed++; $skipSection = $true; continue; " ^
+      "    }; $seenSections[$line] = $true; $skipSection = $false; $out += $line; continue; " ^
+      "  }; " ^
+      "  if ($skipSection) { continue; }; " ^
+      "  if ($line -match '^(HeaderFiles|SourceFiles)=;?$') { " ^
+      "    Write-Host ('   Removing bare empty line: ' + $line); $changed++; continue; " ^
+      "  }; " ^
+      "  if ($line -match '^LibFiles=(.+)$') { " ^
+      "    $items = $Matches[1] -split ';' | Where-Object { $_ -ne '' }; " ^
+      "    $cFiles = $items | Where-Object { $_ -like '*.c' }; " ^
+      "    if ($cFiles) { foreach ($cf in $cFiles) { Write-Host ('   Removing .c from LibFiles: ' + $cf) }; $changed++; }; " ^
+      "    $items = $items | Where-Object { $_ -notlike '*.c' }; " ^
+      "    $unique = $items | Select-Object -Unique | Sort-Object; " ^
+      "    if ($items.Count -ne $unique.Count) { Write-Host '   Deduplicating LibFiles'; $changed++; }; " ^
+      "    $out += 'LibFiles=' + ($unique -join ';'); continue; " ^
+      "  }; " ^
+      "  if ($line -match '^SourceFiles=(.+)$' -and $line -notmatch '^SourceFiles#') { " ^
+      "    $items = $Matches[1] -split ';' | Where-Object { $_ -ne '' }; " ^
+      "    $hFiles = $items | Where-Object { $_ -like '*.h' }; " ^
+      "    if ($hFiles) { foreach ($hf in $hFiles) { Write-Host ('   Removing .h from SourceFiles: ' + $hf) }; $changed++; }; " ^
+      "    $items = $items | Where-Object { $_ -notlike '*.h' }; " ^
+      "    $unique = $items | Select-Object -Unique | Sort-Object; " ^
+      "    if ($items.Count -ne $unique.Count) { Write-Host '   Deduplicating SourceFiles'; $changed++; }; " ^
+      "    $out += 'SourceFiles=' + ($unique -join ';'); continue; " ^
+      "  }; " ^
+      "  if ($line -match '^CDefines=(.+)$') { " ^
+      "    $items = $Matches[1] -split ';' | Where-Object { $_ -ne '' }; " ^
       "    $unique = $items | Select-Object -Unique; " ^
-      "    if ($items.Count -ne $unique.Count) { " ^
-      "      $deduped = ($unique -join ';') + ';'; " ^
-      "      Write-Host ('   Deduplicating ' + $key + ' in .mxproject'); " ^
-      "      $changed++; " ^
-      "      $out += $key + '=' + $deduped; " ^
-      "    } else { $out += $line; } " ^
-      "  } else { $out += $line; } " ^
+      "    if ($items.Count -ne $unique.Count) { Write-Host '   Deduplicating CDefines'; $changed++; }; " ^
+      "    $out += 'CDefines=' + ($unique -join ';'); continue; " ^
+      "  }; " ^
+      "  if ($line -match '^HeaderPath=(.+)$' -and $line -notmatch '^HeaderPath#') { " ^
+      "    $items = $Matches[1] -split ';' | Where-Object { $_ -ne '' }; " ^
+      "    $unique = $items | Select-Object -Unique; " ^
+      "    if ($items.Count -ne $unique.Count) { Write-Host '   Deduplicating HeaderPath'; $changed++; }; " ^
+      "    $out += 'HeaderPath=' + ($unique -join ';'); continue; " ^
+      "  }; " ^
+      "  $out += $line; " ^
       "} " ^
       "if ($changed -gt 0) { " ^
       "  $out | Set-Content '.mxproject'; " ^
-      "  Write-Host ('   Fixed ' + $changed + ' field(s).'); " ^
+      "  Write-Host ('   Fixed ' + $changed + ' issue(s).'); " ^
       "  exit 1; " ^
       "} else { " ^
-      "  Write-Host '   No duplicate entries in .mxproject.'; " ^
+      "  Write-Host '   No .mxproject corruption found.'; " ^
       "  exit 0; " ^
       "}"
     if %ERRORLEVEL%==1 set FIXED=1
+)
+
+REM ---- Step 6: Detect and fix unexpected STM32\ folder structure ----
+if exist "STM32" (
+    echo Detected unexpected STM32\ directory...
+    if exist "STM32\Drivers" (
+        echo    Moving STM32\Drivers\ to Drivers\...
+        if exist "Drivers" (
+            xcopy /e /y /q "STM32\Drivers\*" "Drivers\" >nul 2>&1
+        ) else (
+            move "STM32\Drivers" "Drivers" >nul 2>&1
+        )
+        set FIXED=1
+    )
+    if exist "STM32\Core" (
+        echo    Moving STM32\Core\ to Core\...
+        if exist "Core" (
+            xcopy /e /y /q "STM32\Core\*" "Core\" >nul 2>&1
+        ) else (
+            move "STM32\Core" "Core" >nul 2>&1
+        )
+        set FIXED=1
+    )
+    rmdir /s /q "STM32" 2>nul
+    if not exist "STM32" echo    Removed STM32\ directory.
+) else (
+    echo No unexpected STM32\ directory found.
 )
 
 echo.

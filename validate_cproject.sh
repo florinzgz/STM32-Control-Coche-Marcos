@@ -235,6 +235,68 @@ else
     WARNINGS=$((WARNINGS + 1))
 fi
 
+# ---- Check 9: .mxproject file type validation ----
+echo ""
+echo "9. .mxproject file type validation"
+if [ -f ".mxproject" ]; then
+    MX_TYPE_ERR=0
+    # Check for .c files in LibFiles (should only contain .h)
+    if grep -q "^LibFiles=" .mxproject 2>/dev/null; then
+        C_IN_LIB=$(grep "^LibFiles=" .mxproject | tr ';' '\n' | grep '\.c$' | wc -l)
+        if [ "$C_IN_LIB" -gt 0 ]; then
+            echo "   ❌ FAIL — LibFiles contains $C_IN_LIB .c file(s) (should be .h only)"
+            MX_TYPE_ERR=$((MX_TYPE_ERR + C_IN_LIB))
+        fi
+    fi
+    # Check for .h files in SourceFiles (should only contain .c)
+    if grep -q "^SourceFiles=" .mxproject 2>/dev/null; then
+        H_IN_SRC=$(grep "^SourceFiles=" .mxproject | grep -v "^SourceFiles#" | tr ';' '\n' | grep '\.h$' | wc -l)
+        if [ "$H_IN_SRC" -gt 0 ]; then
+            echo "   ❌ FAIL — SourceFiles contains $H_IN_SRC .h file(s) (should be .c only)"
+            MX_TYPE_ERR=$((MX_TYPE_ERR + H_IN_SRC))
+        fi
+    fi
+    # Check for trailing semicolons producing empty entries
+    TRAILING=$(grep -cE '^(SourceFiles|LibFiles|CDefines|HeaderPath)=.*;;' .mxproject 2>/dev/null) || TRAILING=0
+    if [ "$TRAILING" -gt 0 ]; then
+        echo "   ❌ FAIL — $TRAILING line(s) with trailing/double semicolons (empty entries)"
+        MX_TYPE_ERR=$((MX_TYPE_ERR + TRAILING))
+    fi
+    # Check for bare empty list lines
+    BARE=$(grep -cE '^(HeaderFiles|SourceFiles)=;?$' .mxproject 2>/dev/null) || BARE=0
+    if [ "$BARE" -gt 0 ]; then
+        echo "   ❌ FAIL — $BARE bare empty list line(s) (e.g. HeaderFiles=;)"
+        MX_TYPE_ERR=$((MX_TYPE_ERR + BARE))
+    fi
+    if [ "$MX_TYPE_ERR" -eq 0 ]; then
+        echo "   ✅ PASS — .mxproject file types and format are correct."
+    else
+        echo "   Run fix_build.sh to repair."
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    echo "   ⚠️  SKIP — .mxproject not found."
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+# ---- Check 10: Unexpected STM32/ folder structure ----
+echo ""
+echo "10. Folder structure (STM32/ directory)"
+if [ -d "STM32" ]; then
+    echo "   ❌ FAIL — unexpected STM32/ directory detected."
+    if [ -d "STM32/Drivers" ]; then
+        echo "      Found STM32/Drivers/ — should be Drivers/ at project root."
+    fi
+    if [ -d "STM32/Core" ]; then
+        echo "      Found STM32/Core/ — should be Core/ at project root."
+    fi
+    echo "   This typically happens when CubeMX uses a non-standard output path."
+    echo "   Run fix_build.sh to move contents to the correct location."
+    ERRORS=$((ERRORS + 1))
+else
+    echo "   ✅ PASS — no unexpected STM32/ directory."
+fi
+
 # ---- Summary ----
 echo ""
 echo "======================================"

@@ -149,17 +149,20 @@ if grep -q 'name="Defaults".*|| *" *valueType=' .cproject 2>/dev/null; then
     FIXED=1
 fi
 
-# ---- Step 6: Fix .mxproject duplicate entries ----
-# CubeMX migration sometimes duplicates the SourceFiles, LibFiles, and
-# CDefines entries in .mxproject.  CubeIDE uses these lists to generate the
-# subdir.mk build rules; duplicates cause circular .o deps and empty source
-# file arguments (gcc "").
+# ---- Step 6: Fix .mxproject duplicate entries, file type mismatches,
+#              trailing semicolons, empty entries, and bare list lines ----
+# CubeMX migration sometimes corrupts .mxproject with:
+#   - duplicated SourceFiles, LibFiles, CDefines entries
+#   - .c files incorrectly listed in LibFiles (should be .h only)
+#   - .h files incorrectly listed in SourceFiles (should be .c only)
+#   - trailing semicolons (;;;) that produce empty source entries
+#   - bare "HeaderFiles=;" or "SourceFiles=;" lines that conflict with indexed entries
+#   - repeated section blocks
+# CubeIDE uses these lists to generate subdir.mk build rules; any of
+# these issues cause circular .o deps and empty GCC arguments (gcc "").
 if [ -f ".mxproject" ]; then
-    echo "🔍 Checking .mxproject for duplicate entries..."
+    echo "🔍 Checking .mxproject for corruption..."
 
-    # Use Python (available on Linux/macOS/Windows-Git-Bash) for safe
-    # in-place deduplication of semicolon-separated fields.  Falls back
-    # to awk if Python is not available.
     _PY=""
     for _p in python3 python py; do
         if command -v "$_p" >/dev/null 2>&1; then _PY="$_p"; break; fi
@@ -168,41 +171,117 @@ if [ -f ".mxproject" ]; then
     if [ -n "$_PY" ]; then
         MX_FIXED=$("$_PY" -c "
 import sys
-keys = ('SourceFiles', 'LibFiles', 'CDefines', 'HeaderPath')
+
 fixed = 0
 lines = open('.mxproject', 'r').readlines()
 out = []
+seen_sections = set()
+skip_section = False
+
 for line in lines:
-    matched = False
-    for key in keys:
-        prefix = key + '='
-        if line.startswith(prefix):
-            value = line[len(prefix):].rstrip('\n\r')
-            items = [x for x in value.split(';') if x]
-            if len(items) != len(set(items)):
-                seen = set(); unique = []
-                for item in items:
-                    if item not in seen:
-                        seen.add(item); unique.append(item)
-                deduped = ';'.join(unique) + ';' if unique else ''
-                fixed += 1
-                sys.stderr.write('   ⚠️  Deduplicating ' + key + ' in .mxproject\n')
-                out.append(prefix + deduped + '\n')
-            else:
-                out.append(line)
-            matched = True
-            break
-    if not matched:
+    stripped = line.rstrip('\n\r')
+
+    # --- Remove duplicate INI section headers ---
+    if stripped.startswith('[') and stripped.endswith(']'):
+        if stripped in seen_sections:
+            sys.stderr.write('   ⚠️  Removing duplicate section: ' + stripped + '\n')
+            fixed += 1
+            skip_section = True
+            continue
+        seen_sections.add(stripped)
+        skip_section = False
         out.append(line)
+        continue
+    if skip_section:
+        continue
+
+    # --- Remove bare empty list lines like 'HeaderFiles=;' or 'SourceFiles=;' ---
+    if stripped in ('HeaderFiles=;', 'SourceFiles=;', 'HeaderFiles=', 'SourceFiles='):
+        sys.stderr.write('   ⚠️  Removing bare empty line: ' + stripped + '\n')
+        fixed += 1
+        continue
+
+    # --- Fix LibFiles: deduplicate, remove .c files, strip trailing semicolons ---
+    if stripped.startswith('LibFiles='):
+        value = stripped[len('LibFiles='):]
+        items = [x for x in value.split(';') if x.strip()]
+        # Remove .c files (they belong in SourceFiles, not LibFiles)
+        c_files = [x for x in items if x.strip().endswith('.c')]
+        if c_files:
+            for cf in c_files:
+                sys.stderr.write('   ⚠️  Removing .c file from LibFiles: ' + cf + '\n')
+            items = [x for x in items if not x.strip().endswith('.c')]
+            fixed += 1
+        # Deduplicate
+        seen = set(); unique = []
+        for item in items:
+            if item not in seen:
+                seen.add(item); unique.append(item)
+        if len(unique) != len(items):
+            sys.stderr.write('   ⚠️  Deduplicating LibFiles\n')
+            fixed += 1
+        out.append('LibFiles=' + ';'.join(sorted(unique)) + '\n')
+        continue
+
+    # --- Fix SourceFiles (non-indexed): deduplicate, remove .h files, strip trailing semicolons ---
+    if stripped.startswith('SourceFiles=') and not stripped.startswith('SourceFiles#'):
+        value = stripped[len('SourceFiles='):]
+        items = [x for x in value.split(';') if x.strip()]
+        # Remove .h files (they belong in LibFiles, not SourceFiles)
+        h_files = [x for x in items if x.strip().endswith('.h')]
+        if h_files:
+            for hf in h_files:
+                sys.stderr.write('   ⚠️  Removing .h file from SourceFiles: ' + hf + '\n')
+            items = [x for x in items if not x.strip().endswith('.h')]
+            fixed += 1
+        # Deduplicate
+        seen = set(); unique = []
+        for item in items:
+            if item not in seen:
+                seen.add(item); unique.append(item)
+        if len(unique) != len(items):
+            sys.stderr.write('   ⚠️  Deduplicating SourceFiles\n')
+            fixed += 1
+        out.append('SourceFiles=' + ';'.join(sorted(unique)) + '\n')
+        continue
+
+    # --- Fix CDefines: deduplicate ---
+    if stripped.startswith('CDefines='):
+        value = stripped[len('CDefines='):]
+        items = [x for x in value.split(';') if x.strip()]
+        seen = set(); unique = []
+        for item in items:
+            if item not in seen:
+                seen.add(item); unique.append(item)
+        if len(unique) != len(items):
+            sys.stderr.write('   ⚠️  Deduplicating CDefines\n')
+            fixed += 1
+        out.append('CDefines=' + ';'.join(unique) + '\n')
+        continue
+
+    # --- Fix HeaderPath: deduplicate ---
+    if stripped.startswith('HeaderPath=') and not stripped.startswith('HeaderPath#'):
+        value = stripped[len('HeaderPath='):]
+        items = [x for x in value.split(';') if x.strip()]
+        seen = set(); unique = []
+        for item in items:
+            if item not in seen:
+                seen.add(item); unique.append(item)
+        if len(unique) != len(items):
+            sys.stderr.write('   ⚠️  Deduplicating HeaderPath\n')
+            fixed += 1
+        out.append('HeaderPath=' + ';'.join(unique) + '\n')
+        continue
+
+    out.append(line)
+
 open('.mxproject', 'w').writelines(out)
 print(fixed)
 " 2>&1)
-        # Extract the count (last line is the number)
         MX_COUNT=$(echo "$MX_FIXED" | tail -1)
-        # Print any warning lines (everything except last line)
         echo "$MX_FIXED" | head -n -1
     else
-        # Fallback: use awk line-by-line replacement
+        # Fallback: use awk for basic deduplication
         MX_COUNT=0
         for KEY in SourceFiles LibFiles CDefines HeaderPath; do
             if grep -q "^${KEY}=" .mxproject 2>/dev/null; then
@@ -232,19 +311,50 @@ print(fixed)
         done
     fi
 
-    # Ensure MX_COUNT is numeric (default 0 if Python/awk failed)
     case "$MX_COUNT" in
         ''|*[!0-9]*) MX_COUNT=0 ;;
     esac
 
     if [ "$MX_COUNT" -eq 0 ]; then
-        echo "   ✅ No duplicate entries in .mxproject."
+        echo "   ✅ No .mxproject corruption found."
     else
-        echo "   ✅ Fixed ${MX_COUNT} field(s) in .mxproject."
+        echo "   ✅ Fixed ${MX_COUNT} issue(s) in .mxproject."
         FIXED=1
     fi
 else
     echo "ℹ️  No .mxproject file found (will be created by CubeMX code generation)."
+fi
+
+# ---- Step 7: Detect and fix unexpected STM32/ folder structure ----
+# Some CubeMX versions generate an unexpected intermediate directory:
+#   STM32/Drivers/  instead of  Drivers/
+# This breaks all include paths and source entries in .cproject.
+if [ -d "STM32" ]; then
+    echo "🔍 Detected unexpected STM32/ directory..."
+    if [ -d "STM32/Drivers" ]; then
+        echo "   ⚠️  Found STM32/Drivers/ — moving to Drivers/"
+        if [ -d "Drivers" ]; then
+            echo "   ⚠️  Merging STM32/Drivers/ into existing Drivers/"
+            cp -rn STM32/Drivers/* Drivers/ 2>/dev/null || true
+        else
+            mv STM32/Drivers Drivers
+        fi
+        FIXED=1
+    fi
+    if [ -d "STM32/Core" ]; then
+        echo "   ⚠️  Found STM32/Core/ — moving to Core/"
+        if [ -d "Core" ]; then
+            echo "   ⚠️  Merging STM32/Core/ into existing Core/"
+            cp -rn STM32/Core/* Core/ 2>/dev/null || true
+        else
+            mv STM32/Core Core
+        fi
+        FIXED=1
+    fi
+    # Remove STM32/ if now empty
+    rmdir STM32 2>/dev/null && echo "   🧹 Removed empty STM32/ directory" || true
+else
+    echo "✅ No unexpected STM32/ directory found."
 fi
 
 # ---- Summary ----

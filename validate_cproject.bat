@@ -120,6 +120,42 @@ if exist "Debug" (
     echo    PASS: no Debug/ directory.
 )
 
+REM ---- Check 7: .mxproject file type validation ----
+echo.
+echo 7. .mxproject file type validation
+if exist ".mxproject" (
+    powershell -Command ^
+      "$errs = 0; " ^
+      "$content = Get-Content '.mxproject' -Raw; " ^
+      "$libLine = ($content -split '`n' | Where-Object { $_ -match '^LibFiles=' }); " ^
+      "if ($libLine) { " ^
+      "  $cInLib = ($libLine -split ';' | Where-Object { $_ -like '*.c' }).Count; " ^
+      "  if ($cInLib -gt 0) { Write-Host ('   FAIL: LibFiles has ' + $cInLib + ' .c file(s)'); $errs += $cInLib; } " ^
+      "}; " ^
+      "$srcLine = ($content -split '`n' | Where-Object { $_ -match '^SourceFiles=' -and $_ -notmatch '^SourceFiles#' }); " ^
+      "if ($srcLine) { " ^
+      "  $hInSrc = ($srcLine -split ';' | Where-Object { $_ -like '*.h' }).Count; " ^
+      "  if ($hInSrc -gt 0) { Write-Host ('   FAIL: SourceFiles has ' + $hInSrc + ' .h file(s)'); $errs += $hInSrc; } " ^
+      "}; " ^
+      "if ($errs -eq 0) { Write-Host '   PASS: .mxproject file types correct.'; }; " ^
+      "exit $errs"
+    if %ERRORLEVEL% GTR 0 set /a ERRORS=%ERRORS%+1
+) else (
+    echo    SKIP: .mxproject not found.
+)
+
+REM ---- Check 8: Unexpected STM32/ directory ----
+echo.
+echo 8. Folder structure (STM32/ directory^)
+if exist "STM32" (
+    echo    FAIL: unexpected STM32\ directory detected.
+    if exist "STM32\Drivers" echo       Found STM32\Drivers\ - should be Drivers\ at project root.
+    echo    Run fix_build.bat to correct.
+    set /a ERRORS=%ERRORS%+1
+) else (
+    echo    PASS: no unexpected STM32\ directory.
+)
+
 echo.
 if %ERRORS% GTR 0 (
     echo %ERRORS% error(s^) found. Run fix_build.bat to repair.
