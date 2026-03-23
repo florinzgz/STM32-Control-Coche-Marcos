@@ -12,6 +12,12 @@ CORE_INC = Core/Inc
 # Source files
 C_SOURCES = \
   $(CORE_SRC)/main.c \
+  $(CORE_SRC)/adc.c \
+  $(CORE_SRC)/fdcan.c \
+  $(CORE_SRC)/gpio.c \
+  $(CORE_SRC)/i2c.c \
+  $(CORE_SRC)/iwdg.c \
+  $(CORE_SRC)/tim.c \
   $(CORE_SRC)/motor_control.c \
   $(CORE_SRC)/can_handler.c \
   $(CORE_SRC)/sensor_manager.c \

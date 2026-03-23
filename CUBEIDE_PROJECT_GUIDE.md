@@ -233,3 +233,108 @@ bash setup_drivers.sh        # Linux/macOS
 # 4. Build (in IDE or command line)
 make all                     # standalone ARM GCC build
 ```
+
+---
+
+## Regenerating the project from the `.ioc` file
+
+If you need to regenerate the STM32CubeIDE build system (e.g., after
+peripheral changes, or to fix broken Makefile/subdir.mk files), follow
+these exact steps:
+
+### Step 1: Validate and repair build files
+
+```bash
+# Run the validation script (read-only check)
+bash validate_cproject.sh
+
+# If issues are found, run the fix script
+bash fix_build.sh
+```
+
+The `fix_build.sh` script automatically repairs:
+- `.cproject` element ID conflicts (circular `.o` dependencies)
+- `.cproject` duplicate element IDs
+- `.cproject` assembler inputType errors
+- `.cproject` trailing empty Defaults fields (empty GCC `""` arguments)
+- `.mxproject` duplicate entries, file type mismatches, trailing semicolons
+- Unexpected `STM32/` folder structure (moves to standard `Drivers/`)
+
+### Step 2: Clean old build artifacts
+
+```bash
+# Delete the Debug/ build directory
+rm -rf Debug/
+
+# If using standalone Makefile:
+make clean
+```
+
+### Step 3: Regenerate code from CubeMX
+
+> **⚠️ IMPORTANT**: Always open the `.ioc` file **from within
+> STM32CubeIDE** (double-click `STM32-Control-Coche-Marcos.ioc` in the
+> Project Explorer), **not** from standalone STM32CubeMX.  Opening in
+> standalone CubeMX may generate files under an unexpected `STM32/`
+> subdirectory instead of the project root.
+
+1. In STM32CubeIDE, double-click `STM32-Control-Coche-Marcos.ioc`
+2. Click **Generate Code** (`Alt+K`)
+3. CubeMX will regenerate:
+   - `Core/Src/adc.c`, `fdcan.c`, `gpio.c`, `i2c.c`, `iwdg.c`, `tim.c`
+   - `Core/Src/stm32g4xx_hal_msp.c`, `stm32g4xx_it.c`
+   - `Core/Inc/*.h` (peripheral headers, `stm32g4xx_hal_conf.h`)
+   - `Drivers/` folder (HAL + CMSIS libraries)
+   - **NOT** `main.c` (protected by `NoMain=true`)
+
+### Step 4: Verify and rebuild
+
+```bash
+# Run fix script again (CubeMX may reintroduce .cproject issues)
+bash fix_build.sh
+
+# In CubeIDE:
+#   1. Right-click project → Refresh (F5)
+#   2. Project → Clean... → select project → Clean
+#   3. Build (Ctrl+B)
+
+# Or using standalone Makefile:
+make clean && make all
+```
+
+### Step 5: Verify no build errors
+
+Check for these common post-regeneration issues:
+- **Circular dependencies** (`make: Circular *.o <- *.o`): run `fix_build.sh`
+- **Empty GCC arguments** (`arm-none-eabi-gcc ""`): run `fix_build.sh`
+- **Missing files**: ensure `Drivers/` exists (run `setup_drivers.sh`)
+- **Wrong folder structure** (`STM32/Drivers/` instead of `Drivers/`):
+  run `fix_build.sh` which auto-detects and corrects this
+
+### Folder structure reference
+
+After successful regeneration, the project should have this structure:
+
+```
+STM32-Control-Coche-Marcos/
+├── Core/
+│   ├── Inc/          ← Generated + custom headers
+│   ├── Src/          ← Generated init + custom firmware sources
+│   └── Startup/      ← startup_stm32g474retx.s
+├── Drivers/
+│   ├── CMSIS/        ← ARM CMSIS headers
+│   └── STM32G4xx_HAL_Driver/
+│       ├── Inc/      ← HAL/LL driver headers
+│       └── Src/      ← HAL/LL driver sources
+├── .cproject         ← CubeIDE build configuration
+├── .mxproject        ← CubeMX project metadata
+├── .project          ← Eclipse project descriptor
+├── Makefile          ← Standalone ARM GCC build
+├── STM32-Control-Coche-Marcos.ioc
+└── STM32G474RETX_FLASH.ld
+```
+
+> **Note**: There must **NOT** be an intermediate `STM32/` directory.
+> If you see `STM32/Drivers/` instead of `Drivers/`, this means CubeMX
+> generated code in the wrong location.  Run `bash fix_build.sh` to
+> automatically move files to the correct paths.
