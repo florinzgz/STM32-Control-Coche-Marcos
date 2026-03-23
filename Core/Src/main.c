@@ -668,12 +668,14 @@ static void MX_I2C1_Init(void)
         return;  /* Non-fatal: sensors unavailable, system continues */
     }
 
-    /* Digital noise filter: reject glitches shorter than 2 × tI2CCLK
-     * (≈ 12 ns at 170 MHz).  Negligible impact on SCL frequency but
-     * improves I2C reliability in the high-EMI environment near motor
+    /* Digital noise filter: reject glitches shorter than DNF × tI2CCLK
+     * (≈ 12 ns at 170 MHz for DNF=2).  Negligible impact on SCL frequency
+     * but improves I2C reliability in the high-EMI environment near motor
      * PWM drivers and BTS7960 switching transients.
-     * Based on NXP AN10216 bus robustness recommendations.            */
-    HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0x02);
+     * Based on NXP AN10216 bus robustness recommendations.
+     * Range 0–15; 0 = disabled, 2 = rejects pulses < 2 I2C clock cycles. */
+#define I2C_DIGITAL_NOISE_FILTER  2U
+    HAL_I2CEx_ConfigDigitalFilter(&hi2c1, I2C_DIGITAL_NOISE_FILTER);
 
     /* Ensure analog filter is enabled (default ON, but be explicit for
      * documentation and defence against accidental CubeMX regeneration). */
