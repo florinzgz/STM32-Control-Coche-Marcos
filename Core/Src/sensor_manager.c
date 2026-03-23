@@ -452,9 +452,14 @@ static HAL_StatusTypeDef INA226_WriteReg(uint8_t reg, uint16_t value)
  * can be reached — all current/voltage readings will be zero.
  * The caller must enter SAFE state on failure.
  */
+#define TCA9548A_PRESENCE_TRIALS      2    /* I2C address probe retries   */
+#define TCA9548A_PRESENCE_TIMEOUT_MS  50   /* Timeout per trial (ms)      */
+
 static bool TCA9548A_IsPresent(void)
 {
-    return (HAL_I2C_IsDeviceReady(&hi2c1, (I2C_ADDR_TCA9548A << 1), 2, 50) == HAL_OK);
+    return (HAL_I2C_IsDeviceReady(&hi2c1, (I2C_ADDR_TCA9548A << 1),
+                                  TCA9548A_PRESENCE_TRIALS,
+                                  TCA9548A_PRESENCE_TIMEOUT_MS) == HAL_OK);
 }
 
 /**

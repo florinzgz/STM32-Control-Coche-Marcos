@@ -1513,7 +1513,7 @@ void Safety_CheckBatteryOvervoltage(void)
         Safety_SetError(SAFETY_ERROR_BATTERY_OV_WARNING);
         Safety_SetState(SYS_STATE_DEGRADED);
         Safety_SetDegradedLevel(DEGRADED_L2,
-                                DEGRADED_REASON_BATTERY_UV);  /* Reuse UV reason for voltage faults */
+                                DEGRADED_REASON_BATTERY_OV);
         return;
     }
 

@@ -155,7 +155,8 @@ typedef enum {
     DEGRADED_REASON_BATTERY_UV      = 5,  /* Battery undervoltage warning  */
     DEGRADED_REASON_DEMAND_ANOMALY  = 6,  /* Throttle demand anomaly       */
     DEGRADED_REASON_ENCODER_FAULT   = 7,  /* Steering encoder fault        */
-    DEGRADED_REASON_PERSISTENT      = 8   /* Multiple faults accumulated   */
+    DEGRADED_REASON_PERSISTENT      = 8,  /* Multiple faults accumulated   */
+    DEGRADED_REASON_BATTERY_OV      = 9   /* Battery overvoltage warning   */
 } DegradedReason_t;
 
 /* Per-level scaling factors (power, steering assist, traction cap).
