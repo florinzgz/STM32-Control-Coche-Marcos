@@ -212,9 +212,9 @@ static void test_bus_voltage_zero(void)
 
 static void test_motor_overcurrent_threshold(void)
 {
-    /* Motor channels: 25A overcurrent limit, well below 50A sensor max */
-    ASSERT_TRUE(MAX_CURRENT_A < (float)INA226_SHUNT_MOHM_MOTOR * 50.0f,
-                "Motor overcurrent < full-scale current");
+    /* Motor channels: 25A overcurrent limit, well below 50A sensor capacity */
+    ASSERT_TRUE(MAX_CURRENT_A < 50.0f,
+                "Motor overcurrent < sensor full-scale (50A)");
     ASSERT_NEAR(MAX_CURRENT_A, 25.0f, 0.1f,
                 "Motor overcurrent threshold is 25A");
 }

@@ -970,7 +970,8 @@ void Safety_CheckCurrent(void)
 
         float amps = Current_GetAmps(i);
         /* Use per-channel overcurrent threshold: battery channel carries
-         * aggregate load of all motors and must allow up to 100 A.       */
+         * total system current (motors + steering + electronics) and must
+         * allow up to 100 A.                                               */
         float limit = (i == INA226_CHANNEL_BATTERY)
                     ? MAX_CURRENT_BATT_A : MAX_CURRENT_A;
         /* Check absolute overcurrent — reverse current through the shunt
