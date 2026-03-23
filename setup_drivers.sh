@@ -21,8 +21,8 @@ if [ -d "Drivers" ]; then
     rm -rf Drivers
 fi
 
-echo "📥 This script will download STM32CubeG4 firmware package (~150 MB)"
-echo "   and extract only the necessary HAL drivers."
+echo "📥 This script will download STM32 HAL drivers and CMSIS headers."
+echo "   Three packages will be fetched from GitHub (~160 MB total)."
 echo ""
 read -p "Continue? (y/N): " -n 1 -r
 echo
@@ -31,52 +31,74 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
+# Preferred download command
+download() {
+    if command -v curl &> /dev/null; then
+        curl -fsSL -o "$1" "$2"
+    elif command -v wget &> /dev/null; then
+        wget -q -O "$1" "$2"
+    else
+        echo "❌ Error: Neither curl nor wget found. Please install one of them."
+        exit 1
+    fi
+}
+
 # Create temp directory
 TEMP_DIR=$(mktemp -d)
-cd "$TEMP_DIR"
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
+# ---- 1. Main STM32CubeG4 package (provides CMSIS/Include and project skeleton) ----
 echo ""
-echo "📦 Downloading STM32CubeG4 package..."
-echo "   This may take a few minutes..."
-
-# Download the latest STM32CubeG4 package
-# Note: ST doesn't provide direct download links, so we use the GitHub mirror
+echo "📦 [1/3] Downloading STM32CubeG4 main package..."
 CUBE_URL="https://github.com/STMicroelectronics/STM32CubeG4/archive/refs/tags/v1.6.2.zip"
+download "$TEMP_DIR/stm32cubeg4.zip" "$CUBE_URL"
+echo "📂 Extracting..."
+unzip -q "$TEMP_DIR/stm32cubeg4.zip" -d "$TEMP_DIR"
+CUBE_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "STM32CubeG4-*" | head -n 1)
 
-if command -v curl &> /dev/null; then
-    curl -L -o stm32cubeg4.zip "$CUBE_URL"
-elif command -v wget &> /dev/null; then
-    wget -O stm32cubeg4.zip "$CUBE_URL"
-else
-    echo "❌ Error: Neither curl nor wget found. Please install one of them."
-    exit 1
-fi
+# ---- 2. HAL Driver (submodule in main repo, empty in zip) ----
+echo "📦 [2/3] Downloading STM32G4xx HAL Driver..."
+HAL_URL="https://github.com/STMicroelectronics/stm32g4xx_hal_driver/archive/refs/tags/v1.2.4.zip"
+download "$TEMP_DIR/hal_driver.zip" "$HAL_URL"
+echo "📂 Extracting..."
+unzip -q "$TEMP_DIR/hal_driver.zip" -d "$TEMP_DIR"
+HAL_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "stm32g4xx*hal*driver*" | head -n 1)
 
+# ---- 3. CMSIS Device (submodule in main repo, empty in zip) ----
+echo "📦 [3/3] Downloading CMSIS Device STM32G4xx..."
+CMSIS_DEV_URL="https://github.com/STMicroelectronics/cmsis_device_g4/archive/refs/tags/v1.2.4.zip"
+download "$TEMP_DIR/cmsis_device.zip" "$CMSIS_DEV_URL"
+echo "📂 Extracting..."
+unzip -q "$TEMP_DIR/cmsis_device.zip" -d "$TEMP_DIR"
+CMSIS_DEV_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "cmsis*device*g4*" | head -n 1)
+
+# ---- Assemble Drivers/ directory ----
 echo ""
-echo "📂 Extracting drivers..."
-unzip -q stm32cubeg4.zip
+echo "📋 Assembling Drivers/ directory..."
+mkdir -p Drivers/STM32G4xx_HAL_Driver
+mkdir -p Drivers/CMSIS/Device/ST/STM32G4xx
+mkdir -p Drivers/CMSIS/Include
 
-# Find the extracted directory
-CUBE_DIR=$(find . -maxdepth 1 -type d -name "STM32CubeG4-*" | head -n 1)
-
-if [ -z "$CUBE_DIR" ]; then
-    echo "❌ Error: Could not find extracted STM32CubeG4 directory"
-    exit 1
+# Copy HAL Driver (from dedicated repo, not the empty submodule stub)
+cp -r "$HAL_DIR/Inc" Drivers/STM32G4xx_HAL_Driver/
+cp -r "$HAL_DIR/Src" Drivers/STM32G4xx_HAL_Driver/
+# Copy Legacy headers if present
+if [ -d "$HAL_DIR/Inc/Legacy" ]; then
+    mkdir -p Drivers/STM32G4xx_HAL_Driver/Inc/Legacy
 fi
 
-# Go back to project directory
-cd - > /dev/null
+# Copy CMSIS core headers (from main CubeG4 package)
+if [ -d "$CUBE_DIR/Drivers/CMSIS/Include" ]; then
+    cp -r "$CUBE_DIR/Drivers/CMSIS/Include/"* Drivers/CMSIS/Include/
+elif [ -d "$CUBE_DIR/Drivers/CMSIS/Core/Include" ]; then
+    cp -r "$CUBE_DIR/Drivers/CMSIS/Core/Include/"* Drivers/CMSIS/Include/
+fi
 
-# Copy only the necessary drivers
-echo "📋 Copying HAL drivers to project..."
-mkdir -p Drivers
+# Copy CMSIS Device headers (from dedicated repo, not the empty submodule stub)
+cp -r "$CMSIS_DEV_DIR/Include" Drivers/CMSIS/Device/ST/STM32G4xx/
+cp -r "$CMSIS_DEV_DIR/Source" Drivers/CMSIS/Device/ST/STM32G4xx/
 
-cp -r "$TEMP_DIR/$CUBE_DIR/Drivers/STM32G4xx_HAL_Driver" Drivers/
-cp -r "$TEMP_DIR/$CUBE_DIR/Drivers/CMSIS" Drivers/
-
-# Clean up
-echo "🧹 Cleaning up..."
-rm -rf "$TEMP_DIR"
+echo "🧹 Cleaning up temporary files..."
 
 # Verify critical files exist
 echo "🔍 Verifying installation..."
