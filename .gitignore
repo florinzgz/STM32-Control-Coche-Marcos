@@ -142,3 +142,5 @@ test_eps_params
 !.gitignore
 !README.md
 !LICENSE
+test_motor_control
+test_sensor_calibration
