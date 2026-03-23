@@ -31,7 +31,9 @@ typedef enum {
     SAFETY_ERROR_BATTERY_UV_CRITICAL = 10,  /* Battery voltage < 18.0 V */
     SAFETY_ERROR_I2C_FAILURE = 11,          /* I2C bus locked / unrecoverable */
     SAFETY_ERROR_OBSTACLE = 12,             /* Obstacle emergency or CAN timeout */
-    SAFETY_ERROR_CAN_BUSOFF = 13            /* FDCAN bus-off condition detected   */
+    SAFETY_ERROR_CAN_BUSOFF = 13,           /* FDCAN bus-off condition detected   */
+    SAFETY_ERROR_BATTERY_OV_WARNING = 14,   /* Battery voltage > 30.0 V          */
+    SAFETY_ERROR_BATTERY_OV_CRITICAL = 15   /* Battery voltage > 35.0 V          */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.
@@ -215,6 +217,7 @@ bool Safety_IsSteeringTimedOut(void);
 void Safety_CheckSensors(void);
 void Safety_CheckEncoder(void);
 void Safety_CheckBatteryVoltage(void);
+void Safety_CheckBatteryOvervoltage(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);
 void Safety_PowerDown(void);

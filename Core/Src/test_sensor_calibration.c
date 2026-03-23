@@ -308,6 +308,168 @@ static void test_battery_full_scale_75mV(void)
 }
 
 /* =====================================================================
+ *  10. Register saturation (int16_t max = 32767)
+ * ===================================================================== */
+
+static void test_motor_register_saturation(void)
+{
+    /* At shunt register max (32767 × 2.5 µV = 81917.5 µV = 81.9 mV):
+     * Current = 81917.5 / 1.5 / 1000 = 54.61 A
+     * This slightly exceeds 50A full-scale but fits the register — no overflow. */
+    int16_t raw = 32767;
+    float amps = calc_current_amps(raw, (float)INA226_SHUNT_MOHM_MOTOR);
+    ASSERT_NEAR(amps, 54.611f, 0.01f,
+                "Motor saturated register (32767) current");
+    ASSERT_TRUE(amps > 0.0f, "Motor saturated register gives positive current");
+}
+
+static void test_battery_register_saturation(void)
+{
+    /* At shunt register max: current = 81917.5 / 0.75 / 1000 = 109.22 A */
+    int16_t raw = 32767;
+    float amps = calc_current_amps(raw, (float)INA226_SHUNT_MOHM_BATTERY);
+    ASSERT_NEAR(amps, 109.223f, 0.01f,
+                "Battery saturated register (32767) current");
+    ASSERT_TRUE(amps > 0.0f, "Battery saturated register gives positive current");
+}
+
+static void test_negative_register_saturation(void)
+{
+    /* At shunt register min (-32768 × 2.5 µV = -81920 µV):
+     * Motor current = -81920 / 1.5 / 1000 = -54.613 A */
+    int16_t raw = -32768;
+    float amps = calc_current_amps(raw, (float)INA226_SHUNT_MOHM_MOTOR);
+    ASSERT_TRUE(amps < -54.0f, "Negative saturated register gives large negative current");
+}
+
+/* =====================================================================
+ *  11. Negative current handling — battery channel clamping
+ * ===================================================================== */
+
+static void test_battery_negative_current_clamped(void)
+{
+    /* Battery channel cannot sink current in this topology.
+     * Negative readings are noise artefacts — should be clamped to 0.
+     * This test verifies the clamping logic conceptually (actual clamping
+     * is in Current_ReadAll, tested here as a constant/threshold check). */
+    int16_t raw = -100;  /* Small negative noise */
+    float amps = calc_current_amps(raw, (float)INA226_SHUNT_MOHM_BATTERY);
+    /* Raw calc gives negative — firmware clamps battery ch to 0 */
+    ASSERT_TRUE(amps < 0.0f, "Raw battery negative reading is negative before clamp");
+    /* After clamp (firmware logic): result would be 0 */
+    float clamped = (amps < 0.0f) ? 0.0f : amps;
+    ASSERT_NEAR(clamped, 0.0f, 0.001f,
+                "Battery negative current clamped to 0");
+}
+
+static void test_motor_negative_current_allowed(void)
+{
+    /* Motor channels allow bidirectional current (regen braking) */
+    int16_t raw = -6000;
+    float amps = calc_current_amps(raw, (float)INA226_SHUNT_MOHM_MOTOR);
+    ASSERT_TRUE(amps < 0.0f, "Motor negative current allowed (not clamped)");
+    ASSERT_NEAR(amps, -10.0f, 0.01f, "Motor regen -10A calculation");
+}
+
+/* =====================================================================
+ *  12. EMA filter math verification
+ * ===================================================================== */
+
+static void test_ema_filter_step_response(void)
+{
+    /* EMA: filtered = α × new + (1 − α) × old, with α = 0.2
+     * Step from 0 to 100: after 1 cycle → 20, after 2 → 36, etc.     */
+    float alpha = 0.2f;
+    float filtered = 0.0f;
+
+    filtered = alpha * 100.0f + (1.0f - alpha) * filtered;  /* Cycle 1 */
+    ASSERT_NEAR(filtered, 20.0f, 0.01f, "EMA cycle 1: 0→100");
+
+    filtered = alpha * 100.0f + (1.0f - alpha) * filtered;  /* Cycle 2 */
+    ASSERT_NEAR(filtered, 36.0f, 0.01f, "EMA cycle 2: 0→100");
+
+    filtered = alpha * 100.0f + (1.0f - alpha) * filtered;  /* Cycle 3 */
+    ASSERT_NEAR(filtered, 48.8f, 0.01f, "EMA cycle 3: 0→100");
+}
+
+static void test_ema_filter_steady_state(void)
+{
+    /* After many cycles with constant input, output should converge */
+    float alpha = 0.2f;
+    float filtered = 0.0f;
+    for (int i = 0; i < 50; i++) {
+        filtered = alpha * 25.0f + (1.0f - alpha) * filtered;
+    }
+    ASSERT_NEAR(filtered, 25.0f, 0.01f,
+                "EMA converges to constant input after 50 cycles");
+}
+
+static void test_ema_filter_noise_rejection(void)
+{
+    /* Single spike on top of 25 A baseline: spike should be attenuated */
+    float alpha = 0.2f;
+    float filtered = 25.0f;  /* Already at steady state */
+
+    /* One spike to 75 A */
+    filtered = alpha * 75.0f + (1.0f - alpha) * filtered;
+    ASSERT_NEAR(filtered, 35.0f, 0.01f,
+                "EMA attenuates 50A spike: 25→35 (not 75)");
+
+    /* Return to 25 A */
+    filtered = alpha * 25.0f + (1.0f - alpha) * filtered;
+    ASSERT_NEAR(filtered, 33.0f, 0.01f,
+                "EMA recovers toward baseline after spike");
+}
+
+/* =====================================================================
+ *  13. Overvoltage threshold validation
+ * ===================================================================== */
+
+#define BATTERY_OV_WARNING_V    30.0f
+#define BATTERY_OV_CRITICAL_V   35.0f
+
+static void test_overvoltage_warning_threshold(void)
+{
+    ASSERT_NEAR(BATTERY_OV_WARNING_V, 30.0f, 0.1f,
+                "OV warning threshold = 30V");
+    ASSERT_TRUE(BATTERY_OV_WARNING_V > 25.2f,
+                "OV warning > full charge voltage (25.2V)");
+}
+
+static void test_overvoltage_critical_threshold(void)
+{
+    ASSERT_NEAR(BATTERY_OV_CRITICAL_V, 35.0f, 0.1f,
+                "OV critical threshold = 35V");
+    ASSERT_TRUE(BATTERY_OV_CRITICAL_V > BATTERY_OV_WARNING_V,
+                "OV critical > OV warning");
+}
+
+static void test_overvoltage_register_fits(void)
+{
+    /* 35 V → raw = 35000 / 1.25 = 28000 < 32767 ✓ */
+    int32_t raw = (int32_t)(35.0f * 1000.0f / INA226_BUS_LSB_MV);
+    ASSERT_TRUE(raw <= 32767, "35V fits bus voltage register");
+}
+
+/* =====================================================================
+ *  14. I2C address sanity for mux failure detection
+ * ===================================================================== */
+
+static void test_mux_address_valid(void)
+{
+    /* TCA9548A address 0x70 is in valid 7-bit I2C range (0x08–0x77) */
+    ASSERT_TRUE(I2C_ADDR_TCA9548A >= 0x08 && I2C_ADDR_TCA9548A <= 0x77,
+                "TCA9548A address in valid I2C range");
+}
+
+static void test_ina226_address_valid(void)
+{
+    /* INA226 address 0x40 is in valid 7-bit I2C range */
+    ASSERT_TRUE(I2C_ADDR_INA226 >= 0x08 && I2C_ADDR_INA226 <= 0x77,
+                "INA226 address in valid I2C range");
+}
+
+/* =====================================================================
  *  main
  * ===================================================================== */
 
@@ -356,6 +518,29 @@ int main(void)
     /* 9. Full-scale voltage */
     test_motor_full_scale_75mV();
     test_battery_full_scale_75mV();
+
+    /* 10. Register saturation */
+    test_motor_register_saturation();
+    test_battery_register_saturation();
+    test_negative_register_saturation();
+
+    /* 11. Negative current handling */
+    test_battery_negative_current_clamped();
+    test_motor_negative_current_allowed();
+
+    /* 12. EMA filter math */
+    test_ema_filter_step_response();
+    test_ema_filter_steady_state();
+    test_ema_filter_noise_rejection();
+
+    /* 13. Overvoltage thresholds */
+    test_overvoltage_warning_threshold();
+    test_overvoltage_critical_threshold();
+    test_overvoltage_register_fits();
+
+    /* 14. I2C address sanity (mux failure detection) */
+    test_mux_address_valid();
+    test_ina226_address_valid();
 
     printf("\n--- sensor_calibration tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

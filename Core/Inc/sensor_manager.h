@@ -47,6 +47,7 @@ uint8_t Temperature_GetCount(void);
 /* ---- INA226 Current (I2C via TCA9548A) ---- */
 void Current_ReadAll(void);
 float Current_GetAmps(uint8_t index);
+float Current_GetAmpsRaw(uint8_t index);  /* Unfiltered instantaneous reading */
 float Voltage_GetBus(uint8_t index);
 
 #ifdef __cplusplus
