@@ -524,6 +524,31 @@ static ADC_TypeDef _stub_adc1;
 #define ADC1 (&_stub_adc1)
 
 typedef struct {
+    uint32_t Ratio;
+    uint32_t RightBitShift;
+    uint32_t TriggeredMode;
+    uint32_t OversamplingStopReset;
+} ADC_OversamplingTypeDef;
+
+#define ADC_OVERSAMPLING_RATIO_2        0x00000000U
+#define ADC_OVERSAMPLING_RATIO_4        0x00000001U
+#define ADC_OVERSAMPLING_RATIO_8        0x00000002U
+#define ADC_OVERSAMPLING_RATIO_16       0x00000003U
+#define ADC_OVERSAMPLING_RATIO_32       0x00000004U
+#define ADC_OVERSAMPLING_RATIO_64       0x00000005U
+#define ADC_OVERSAMPLING_RATIO_128      0x00000006U
+#define ADC_OVERSAMPLING_RATIO_256      0x00000007U
+#define ADC_RIGHTBITSHIFT_NONE          0x00000000U
+#define ADC_RIGHTBITSHIFT_1             0x00000001U
+#define ADC_RIGHTBITSHIFT_2             0x00000002U
+#define ADC_RIGHTBITSHIFT_3             0x00000003U
+#define ADC_RIGHTBITSHIFT_4             0x00000004U
+#define ADC_TRIGGEREDMODE_SINGLE_TRIGGER  0x00000000U
+#define ADC_TRIGGEREDMODE_MULTI_TRIGGER   0x00000001U
+#define ADC_REGOVERSAMPLING_CONTINUED_MODE  0x00000000U
+#define ADC_REGOVERSAMPLING_RESUMED_MODE    0x00000001U
+
+typedef struct {
     uint32_t ClockPrescaler;
     uint32_t Resolution;
     uint32_t DataAlign;
@@ -539,6 +564,7 @@ typedef struct {
     FunctionalState DMAContinuousRequests;
     uint32_t Overrun;
     FunctionalState OversamplingMode;
+    ADC_OversamplingTypeDef Oversampling;
     uint32_t GainCompensation;
 } ADC_InitTypeDef;
 
@@ -1487,6 +1513,24 @@ static inline HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c,
 
 /* I2C MspInit callback — real definition in stm32g4xx_hal_msp.c */
 void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c);
+
+/* I2C Extended API stubs */
+#define I2C_ANALOGFILTER_ENABLE     0x00000000U
+#define I2C_ANALOGFILTER_DISABLE    0x00000001U
+
+static inline HAL_StatusTypeDef HAL_I2CEx_ConfigDigitalFilter(I2C_HandleTypeDef *hi2c,
+    uint32_t DigitalFilter)
+{
+    (void)hi2c; (void)DigitalFilter;
+    return HAL_OK;
+}
+
+static inline HAL_StatusTypeDef HAL_I2CEx_ConfigAnalogFilter(I2C_HandleTypeDef *hi2c,
+    uint32_t AnalogFilter)
+{
+    (void)hi2c; (void)AnalogFilter;
+    return HAL_OK;
+}
 
 /* ========================================================================= */
 /*  TIM Function Stubs                                                       */
