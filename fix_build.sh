@@ -388,6 +388,13 @@ fi
 # Some CubeMX versions generate an unexpected intermediate directory:
 #   STM32/Drivers/  instead of  Drivers/
 # This breaks all include paths and source entries in .cproject.
+# Root cause: ProjectManager.UnderRoot=false in the .ioc file.
+IOC_FILE=$(find . -maxdepth 1 -name '*.ioc' -print -quit)
+if [ -n "$IOC_FILE" ] && grep -q 'ProjectManager\.UnderRoot=false' "$IOC_FILE"; then
+    echo "   ⚠️  Found ProjectManager.UnderRoot=false in $IOC_FILE — fixing to true"
+    sed -i 's/ProjectManager\.UnderRoot=false/ProjectManager.UnderRoot=true/' "$IOC_FILE"
+    FIXED=1
+fi
 if [ -d "STM32" ]; then
     echo "🔍 Detected unexpected STM32/ directory..."
     if [ -d "STM32/Drivers" ]; then

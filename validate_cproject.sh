@@ -282,6 +282,15 @@ fi
 # ---- Check 10: Unexpected STM32/ folder structure ----
 echo ""
 echo "10. Folder structure (STM32/ directory)"
+IOC_FILE=$(find . -maxdepth 1 -name '*.ioc' -print -quit)
+CHECK10_OK=1
+if [ -n "$IOC_FILE" ] && grep -q 'ProjectManager\.UnderRoot=false' "$IOC_FILE"; then
+    echo "   ❌ FAIL — ProjectManager.UnderRoot=false in $IOC_FILE."
+    echo "   This setting causes CubeMX to generate code into an STM32/ subdirectory."
+    echo "   Change to ProjectManager.UnderRoot=true or run fix_build.sh."
+    ERRORS=$((ERRORS + 1))
+    CHECK10_OK=0
+fi
 if [ -d "STM32" ]; then
     echo "   ❌ FAIL — unexpected STM32/ directory detected."
     if [ -d "STM32/Drivers" ]; then
@@ -293,7 +302,9 @@ if [ -d "STM32" ]; then
     echo "   This typically happens when CubeMX uses a non-standard output path."
     echo "   Run fix_build.sh to move contents to the correct location."
     ERRORS=$((ERRORS + 1))
-else
+    CHECK10_OK=0
+fi
+if [ "$CHECK10_OK" -eq 1 ]; then
     echo "   ✅ PASS — no unexpected STM32/ directory."
 fi
 
