@@ -887,8 +887,8 @@ que destruiría el GPIO si no hay protección.
   LED (+)──── (ánodo del LED dentro del PC817)           NC ──── (normalmente cerrado)
   LED (-) ─────────────────────────────── GND
       │
-  PC817 colector ─────────────────────────── Base BC547 (vía R2 = 10 kΩ a GND)
-  PC817 emisor  ─── VCC 5V (pull-up del colector) ──────── Colector BC547
+  PC817 colector ─── VCC 5V (alimentación relé) ──────── Colector BC547
+  PC817 emisor  ─────────────────────────── Base BC547 (vía R2 = 10 kΩ a GND)
                                                              Emisor BC547 ──── GND
 
 ```
