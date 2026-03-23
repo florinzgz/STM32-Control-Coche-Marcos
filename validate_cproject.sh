@@ -297,6 +297,34 @@ else
     echo "   ✅ PASS — no unexpected STM32/ directory."
 fi
 
+# ---- Check 11: test_*.c files excluded from .cproject sourceEntries ----
+echo ""
+echo "11. Test file exclusions (test_*.c in Core/Src)"
+if [ -d "Core/Src" ]; then
+    TESTS_ON_DISK=$(find Core/Src -maxdepth 1 -name 'test_*.c' -printf '%f\n' | sort)
+    if [ -n "$TESTS_ON_DISK" ]; then
+        CUR_EXCL=$(sed -n 's/.*<entry excluding="\([^"]*\)".*name="Core\/Src".*/\1/p' "$CPROJECT")
+        MISSING_TESTS=0
+        while IFS= read -r tf; do
+            if ! echo "$CUR_EXCL" | tr '|' '\n' | grep -qFx "$tf"; then
+                echo "   ❌ FAIL — $tf not excluded from Core/Src sourceEntry"
+                MISSING_TESTS=$((MISSING_TESTS + 1))
+            fi
+        done <<< "$TESTS_ON_DISK"
+        if [ "$MISSING_TESTS" -eq 0 ]; then
+            echo "   ✅ PASS — all test_*.c files are excluded."
+        else
+            echo "   $MISSING_TESTS test file(s) not excluded. Run fix_build.sh to repair."
+            ERRORS=$((ERRORS + MISSING_TESTS))
+        fi
+    else
+        echo "   ✅ PASS — no test_*.c files found in Core/Src."
+    fi
+else
+    echo "   ⚠️  SKIP — Core/Src directory not found."
+    WARNINGS=$((WARNINGS + 1))
+fi
+
 # ---- Summary ----
 echo ""
 echo "======================================"

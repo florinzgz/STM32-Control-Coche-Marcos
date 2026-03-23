@@ -149,6 +149,62 @@ if grep -q 'name="Defaults".*|| *" *valueType=' .cproject 2>/dev/null; then
     FIXED=1
 fi
 
+# ---- Step 5b: Ensure all test_*.c files are excluded from .cproject sourceEntries ----
+# Host-only test files (test_*.c) in Core/Src define their own main() and
+# must not be compiled in the firmware build.  CubeMX regeneration sometimes
+# resets the excluding attribute, dropping newly added test files.  This
+# causes duplicate-symbol, empty-GCC-argument, and circular-dep errors.
+if [ -d "Core/Src" ]; then
+    echo "🔍 Checking .cproject for un-excluded test_*.c files..."
+    # Collect test file basenames that exist on disk
+    TESTS_ON_DISK=$(find Core/Src -maxdepth 1 -name 'test_*.c' -printf '%f\n' | sort)
+    if [ -n "$TESTS_ON_DISK" ]; then
+        # Extract the current excluding attribute for Core/Src sourceEntry
+        CUR_EXCL=$(sed -n 's/.*<entry excluding="\([^"]*\)".*name="Core\/Src".*/\1/p' .cproject)
+        MISSING=""
+        while IFS= read -r tf; do
+            if ! echo "$CUR_EXCL" | tr '|' '\n' | grep -qFx "$tf"; then
+                MISSING="$MISSING $tf"
+            fi
+        done <<< "$TESTS_ON_DISK"
+        if [ -n "$MISSING" ]; then
+            NEW_EXCL="$CUR_EXCL"
+            for tf in $MISSING; do
+                echo "   ⚠️  Adding missing exclusion: $tf"
+                NEW_EXCL="${NEW_EXCL}|${tf}"
+            done
+            # Sort the pipe-separated list for deterministic output
+            SORTED_EXCL=$(echo "$NEW_EXCL" | tr '|' '\n' | sort | paste -sd '|')
+            # Use python for literal string replacement (avoids regex issues with | in sed/awk)
+            _PY_EXCL=""
+            for _p in python3 python py; do
+                if command -v "$_p" >/dev/null 2>&1; then _PY_EXCL="$_p"; break; fi
+            done
+            if [ -n "$_PY_EXCL" ]; then
+                "$_PY_EXCL" -c "
+import sys
+old = sys.argv[1]
+new = sys.argv[2]
+with open('.cproject', 'r') as f:
+    content = f.read()
+content = content.replace('excluding=\"' + old + '\"', 'excluding=\"' + new + '\"', 1)
+with open('.cproject', 'w') as f:
+    f.write(content)
+" "$CUR_EXCL" "$SORTED_EXCL"
+            else
+                # Fallback: escape pipes for sed
+                ESC_OLD=$(printf '%s\n' "$CUR_EXCL" | sed 's/[|.]/\\&/g')
+                ESC_NEW=$(printf '%s\n' "$SORTED_EXCL" | sed 's/[|&]/\\&/g')
+                sed "0,/excluding=\"${ESC_OLD}\"/s//excluding=\"${ESC_NEW}\"/" \
+                    .cproject > .cproject.tmp && mv .cproject.tmp .cproject
+            fi
+            FIXED=1
+        else
+            echo "   ✅ All test_*.c files are excluded."
+        fi
+    fi
+fi
+
 # ---- Step 6: Fix .mxproject duplicate entries, file type mismatches,
 #              trailing semicolons, empty entries, and bare list lines ----
 # CubeMX migration sometimes corrupts .mxproject with:
