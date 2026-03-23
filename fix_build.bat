@@ -160,7 +160,7 @@ if exist "STM32" (
         set FIXED=1
     )
     rmdir /s /q "STM32" 2>nul
-    echo    Removed STM32\ directory.
+    if not exist "STM32" echo    Removed STM32\ directory.
 ) else (
     echo No unexpected STM32\ directory found.
 )
