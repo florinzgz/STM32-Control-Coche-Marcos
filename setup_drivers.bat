@@ -1,6 +1,7 @@
 @echo off
 REM Script to download and setup STM32 HAL Drivers for Windows
-REM This is a convenience script for users who don't want to use STM32CubeMX
+REM Downloads HAL driver, CMSIS core, and CMSIS device packages separately
+REM because the main STM32CubeG4 zip does not include git submodule content.
 
 echo ================================================
 echo STM32 HAL Drivers Setup Script (Windows)
@@ -19,8 +20,8 @@ if exist "Drivers" (
 )
 
 echo.
-echo This script will download STM32CubeG4 firmware package (~150 MB^)
-echo and extract only the necessary HAL drivers.
+echo This script will download STM32 HAL drivers and CMSIS headers.
+echo Three packages will be fetched from GitHub (~160 MB total^).
 echo.
 set /p CONTINUE="Continue? (y/N): "
 if /i not "%CONTINUE%"=="y" (
@@ -32,49 +33,53 @@ REM Create temp directory
 set TEMP_DIR=%TEMP%\stm32_drivers_%RANDOM%
 mkdir "%TEMP_DIR%"
 
+REM ---- 1. Main STM32CubeG4 package (CMSIS/Include) ----
 echo.
-echo Downloading STM32CubeG4 package...
-echo This may take a few minutes...
-echo.
-
-REM Download using PowerShell
+echo [1/3] Downloading STM32CubeG4 main package...
 set CUBE_URL=https://github.com/STMicroelectronics/STM32CubeG4/archive/refs/tags/v1.6.2.zip
 powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%CUBE_URL%' -OutFile '%TEMP_DIR%\stm32cubeg4.zip'}"
-
-if %ERRORLEVEL% neq 0 (
-    echo ERROR: Download failed
-    rmdir /s /q "%TEMP_DIR%"
-    exit /b 1
-)
-
-echo.
-echo Extracting drivers...
+if %ERRORLEVEL% neq 0 ( echo ERROR: Download failed & rmdir /s /q "%TEMP_DIR%" & exit /b 1 )
+echo Extracting...
 powershell -Command "& {Expand-Archive -Path '%TEMP_DIR%\stm32cubeg4.zip' -DestinationPath '%TEMP_DIR%' -Force}"
-
-if %ERRORLEVEL% neq 0 (
-    echo ERROR: Extraction failed
-    rmdir /s /q "%TEMP_DIR%"
-    exit /b 1
-)
-
-REM Find the extracted directory
 for /d %%i in ("%TEMP_DIR%\STM32CubeG4-*") do set CUBE_DIR=%%i
 
-if not defined CUBE_DIR (
-    echo ERROR: Could not find extracted STM32CubeG4 directory
-    rmdir /s /q "%TEMP_DIR%"
-    exit /b 1
+REM ---- 2. HAL Driver (submodule, empty in main zip) ----
+echo [2/3] Downloading STM32G4xx HAL Driver...
+set HAL_URL=https://github.com/STMicroelectronics/stm32g4xx_hal_driver/archive/refs/tags/v1.2.4.zip
+powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%HAL_URL%' -OutFile '%TEMP_DIR%\hal_driver.zip'}"
+if %ERRORLEVEL% neq 0 ( echo ERROR: Download failed & rmdir /s /q "%TEMP_DIR%" & exit /b 1 )
+echo Extracting...
+powershell -Command "& {Expand-Archive -Path '%TEMP_DIR%\hal_driver.zip' -DestinationPath '%TEMP_DIR%' -Force}"
+for /d %%i in ("%TEMP_DIR%\stm32g4xx*hal*driver*") do set HAL_DIR=%%i
+
+REM ---- 3. CMSIS Device (submodule, empty in main zip) ----
+echo [3/3] Downloading CMSIS Device STM32G4xx...
+set CMSIS_DEV_URL=https://github.com/STMicroelectronics/cmsis_device_g4/archive/refs/tags/v1.2.4.zip
+powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%CMSIS_DEV_URL%' -OutFile '%TEMP_DIR%\cmsis_device.zip'}"
+if %ERRORLEVEL% neq 0 ( echo ERROR: Download failed & rmdir /s /q "%TEMP_DIR%" & exit /b 1 )
+echo Extracting...
+powershell -Command "& {Expand-Archive -Path '%TEMP_DIR%\cmsis_device.zip' -DestinationPath '%TEMP_DIR%' -Force}"
+for /d %%i in ("%TEMP_DIR%\cmsis*device*g4*") do set CMSIS_DEV_DIR=%%i
+
+REM ---- Assemble Drivers/ ----
+echo.
+echo Assembling Drivers\ directory...
+mkdir Drivers\STM32G4xx_HAL_Driver
+mkdir Drivers\CMSIS\Device\ST\STM32G4xx
+mkdir Drivers\CMSIS\Include
+
+xcopy /E /I /Q "%HAL_DIR%\Inc" "Drivers\STM32G4xx_HAL_Driver\Inc"
+xcopy /E /I /Q "%HAL_DIR%\Src" "Drivers\STM32G4xx_HAL_Driver\Src"
+
+if exist "%CUBE_DIR%\Drivers\CMSIS\Include" (
+    xcopy /E /I /Q "%CUBE_DIR%\Drivers\CMSIS\Include" "Drivers\CMSIS\Include"
+) else if exist "%CUBE_DIR%\Drivers\CMSIS\Core\Include" (
+    xcopy /E /I /Q "%CUBE_DIR%\Drivers\CMSIS\Core\Include" "Drivers\CMSIS\Include"
 )
 
-REM Copy only the necessary drivers
-echo.
-echo Copying HAL drivers to project...
-mkdir Drivers
-xcopy /E /I /Q "%CUBE_DIR%\Drivers\STM32G4xx_HAL_Driver" "Drivers\STM32G4xx_HAL_Driver"
-xcopy /E /I /Q "%CUBE_DIR%\Drivers\CMSIS" "Drivers\CMSIS"
+xcopy /E /I /Q "%CMSIS_DEV_DIR%\Include" "Drivers\CMSIS\Device\ST\STM32G4xx\Include"
+xcopy /E /I /Q "%CMSIS_DEV_DIR%\Source" "Drivers\CMSIS\Device\ST\STM32G4xx\Source"
 
-REM Clean up
-echo.
 echo Cleaning up...
 rmdir /s /q "%TEMP_DIR%"
 
