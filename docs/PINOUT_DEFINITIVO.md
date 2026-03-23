@@ -1,5 +1,24 @@
 # PINOUT DEFINITIVO - STM32G474RE (LQFP64)
 
+> ## ⛔ DOCUMENTO OBSOLETO — NO USAR PARA CABLEADO
+>
+> **Este documento NO refleja la arquitectura actual del firmware (RPWM/LPWM directo, PR #120).**
+> Contiene asignaciones de pines incorrectas que pueden causar daño al hardware si se siguen.
+>
+> **Errores críticos en este documento:**
+> - Usa arquitectura antigua (PWM+DIR+EN) en vez de RPWM/LPWM directo por timer
+> - Steering motor en PC8/TIM8_CH3 (incorrecto — es PA6/TIM3_CH1 + PA7/TIM3_CH2)
+> - Enable pins incorrectos (PC6=EN_FR, PC7=EN_RL, PD2=EN_RR — todos incorrectos)
+> - Sensores de rueda en pines incorrectos (PB5/PB10/PB11/PB12 en vez de PA0/PA1/PA2/PB15)
+> - Valor de shunt INA226 incorrecto (2 mΩ en vez de 1.5 mΩ / 0.75 mΩ)
+> - Asignación de canales INA226 incorrecta
+> - Divisor del pedal incorrecto
+>
+> **Usar en su lugar:**
+> - [`docs/CONEXIONES_COMPLETAS.md`](CONEXIONES_COMPLETAS.md) — Guía cable por cable actualizada
+> - [`docs/HARDWARE_WIRING_MANUAL.md`](HARDWARE_WIRING_MANUAL.md) — Manual eléctrico completo
+> - [`Core/Inc/main.h`](../Core/Inc/main.h) — Definiciones de pines en firmware (fuente de verdad)
+
 ## Especificaciones del Microcontrolador
 
 - **MCU**: STM32G474RE

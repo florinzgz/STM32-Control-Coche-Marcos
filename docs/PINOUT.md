@@ -1,5 +1,23 @@
 # 📌 PINOUT Completo - STM32G474RE
 
+> ## ⛔ DOCUMENTO OBSOLETO — NO USAR PARA CABLEADO
+>
+> **Este documento NO refleja la arquitectura actual del firmware (RPWM/LPWM directo, PR #120).**
+> Contiene asignaciones de pines incorrectas que pueden causar daño al hardware si se siguen.
+>
+> **Errores críticos en este documento:**
+> - Pines de motor incorrectos (usa arquitectura antigua PWM+DIR+EN en vez de RPWM/LPWM)
+> - Pines de sensores de rueda incorrectos (PB0/PB1/PB2/PB10 en vez de PA0/PA1/PA2/PB15)
+> - Valor ARR incorrecto (8499 en vez de 4249)
+> - Valor de shunt INA226 incorrecto (2 mΩ en vez de 1.5 mΩ / 0.75 mΩ)
+> - Asignación de canales INA226 incorrecta
+> - Divisor del pedal incorrecto (1kΩ+2kΩ en vez de 10kΩ+6.8kΩ)
+>
+> **Usar en su lugar:**
+> - [`docs/CONEXIONES_COMPLETAS.md`](CONEXIONES_COMPLETAS.md) — Guía cable por cable actualizada
+> - [`docs/HARDWARE_WIRING_MANUAL.md`](HARDWARE_WIRING_MANUAL.md) — Manual eléctrico completo
+> - [`Core/Inc/main.h`](../Core/Inc/main.h) — Definiciones de pines en firmware (fuente de verdad)
+
 **Firmware de Control Vehicular - Asignación de Pines Definitiva**
 
 ---

@@ -88,7 +88,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 |---------|-----|
 | **24 V** | Motores de tracción (4×) — alimentación de los BTS7960 de tracción |
 | **12 V** | Motor de dirección — alimentación del BTS7960 de dirección |
-| **5 V** | Lógica de los módulos BTS7960 (VCC lógico) |
+| **3.3 V** | Lógica de los módulos BTS7960 (VCC lógico) — ⚠️ NO usar 5V (ver §10) |
 | **3.3 V** | STM32G474RE, sensores I2C, señales digitales |
 
 > **Nota**: Las tensiones de 24 V y 12 V no aparecen como constantes explícitas en el firmware
@@ -224,13 +224,17 @@ genéricamente como H-bridge: un pin PWM + un pin DIR + un pin EN por motor.
 
 ### Señales por rueda
 
-Cada BTS7960 de tracción recibe 3 señales del STM32:
+Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 
 | Señal | Función | Nivel |
 |-------|---------|-------|
-| **PWM** | Velocidad del motor (20 kHz, TIM1) | 0–3.3 V → lógica BTS7960 |
-| **DIR** | Dirección de giro (GPIO, GPIOC) | HIGH/LOW = adelante/atrás |
-| **EN** | Habilitación del driver (GPIO, GPIOC) | HIGH = habilitado |
+| **RPWM** | PWM de avance (20 kHz, TIM1/TIM8) | 0–3.3 V → lógica BTS7960 |
+| **LPWM** | PWM de retroceso (20 kHz, TIM1/TIM8) | 0–3.3 V → lógica BTS7960 |
+| **EN** | Habilitación del driver (GPIO o 3.3V fijo) | HIGH = habilitado |
+
+> **Nota:** La dirección se codifica por elección de canal: RPWM > 0 / LPWM = 0 (avance)
+> o RPWM = 0 / LPWM > 0 (retroceso). **No hay pin DIR.** Los pines DIR (PC0–PC4) han sido
+> liberados y no deben conectarse.
 
 ### Tabla por rueda
 
@@ -292,7 +296,7 @@ PA9  (TIM1_CH2 — LPWM_FL) ─────────────────�
 PC5  (GPIO EN_FL)          ───────────────────────► R_EN ─┐
                                                            ├─ (unir)
                                                     L_EN ─┘
-                                                    VCC ← 5 V lógica
+                                                    VCC ← 3.3 V (⚠️ NO 5V — ver nota §10)
                                                     B+  ← 24 V (vía relé TRAC + shunt INA226)
                                                     B-  ← GND potencia
 ```
@@ -304,8 +308,13 @@ PC5  (GPIO EN_FL)          ─────────────────�
 
 **Condensador de desacoplo obligatorio en VCC del BTS7960:**
 ```
-5V ────[100 nF cerámico]──── GND   (soldar junto al pin VCC de cada módulo BTS7960)
+3.3V ────[100 nF cerámico]──── GND   (soldar junto al pin VCC de cada módulo BTS7960)
 ```
+
+> ⚠️ **VCC LÓGICA = 3.3V (NO 5V):** El módulo IBT-2 incluye un buffer 74HC244 cuyo
+> V_IH(min) = 0.7 × VCC. A VCC=5V → V_IH(min)=3.5V, y las señales de 3.3V del STM32
+> quedan **por debajo del umbral** → riesgo de control intermitente del motor.
+> Con VCC=3.3V → V_IH(min)=2.31V, bien por debajo de 3.3V. Ver `main.h` líneas 28–33.
 
 ---
 
@@ -464,7 +473,8 @@ enumeración del algoritmo de búsqueda OneWire.
 | Pin SDA | **PB7** | `PIN_I2C_SDA` (`main.h:61`) |
 | Dirección INA226 | **0x40** | `I2C_ADDR_INA226` (`main.h:75`) |
 | Multiplexor | **TCA9548A** en dirección **0x70** | `I2C_ADDR_TCA9548A` (`main.h:74`) |
-| Resistencia shunt | **1 mΩ** | `INA226_SHUNT_MOHM` (`main.h:82`) |
+| Resistencia shunt (motor) | **1.5 mΩ** (50A/75mV) | `INA226_SHUNT_MOHM_MOTOR` (`main.h:157`) |
+| Resistencia shunt (batería) | **0.75 mΩ** (100A/75mV) | `INA226_SHUNT_MOHM_BATTERY` (`main.h:158`) |
 
 **Esquema de conexión I2C:**
 
@@ -543,11 +553,19 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 | **MAIN** (Principal) | **PC10** | GPIOC | Alimentación general del sistema de potencia | NO DEDUCIBLE SOLO DESDE EL CÓDIGO |
 | **TRAC** (Tracción) | **PC11** | GPIOC | Alimentación de los drivers de tracción (24 V) | 24 V |
 | **DIR** (Dirección) | **PC12** | GPIOC | Alimentación del driver de dirección (12 V) | 12 V |
+| **LED** (Frontal) | **PB10** | GPIOB | Alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V |
+| **LED_REAR** (Trasero) | **PB11** | GPIOB | Alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V |
 
-Definidos en `main.h` (líneas 39–41):
+Definidos en `main.h`:
 - `PIN_RELAY_MAIN` = GPIO_PIN_10 (PC10)
 - `PIN_RELAY_TRAC` = GPIO_PIN_11 (PC11)
 - `PIN_RELAY_DIR`  = GPIO_PIN_12 (PC12)
+- `PIN_RELAY_LED`  = GPIO_PIN_10 (PB10)
+- `PIN_RELAY_LED_REAR` = GPIO_PIN_11 (PB11)
+
+> **Nota:** Los relés LED (PB10/PB11) se controlan mediante el comando CAN ID 0x120
+> enviado desde el ESP32. El ESP32 genera la señal de datos WS2812B; el STM32 solo
+> controla el corte de alimentación 5V por seguridad.
 
 > **Nota**: Los pines GPIO del STM32 (3.3 V, máximo ~20 mA) **no pueden accionar un relé
 > directamente**. Se requiere un transistor/MOSFET de conmutación o un módulo de relé
@@ -748,7 +766,7 @@ STM32 PA9  (TIM1_CH2) ───────────────────�
 STM32 PC5  (GPIO EN)  ─────────────────────────────► BTS7960 FL: R_EN  ─┐
                                                                           ├─ (cable corto)
                                                       BTS7960 FL: L_EN  ─┘
-                                                      BTS7960 FL: VCC  ◄── 5 V lógica
+                                                      BTS7960 FL: VCC  ◄── 3.3 V (⚠️ NO 5V)
                                                       BTS7960 FL: GND  ◄── GND común
                                                       BTS7960 FL: B+   ◄── 24 V (relé TRAC → shunt INA226 #0)
                                                       BTS7960 FL: B-   ◄── GND potencia
@@ -869,8 +887,8 @@ que destruiría el GPIO si no hay protección.
   LED (+)──── (ánodo del LED dentro del PC817)           NC ──── (normalmente cerrado)
   LED (-) ─────────────────────────────── GND
       │
-  PC817 colector ─────────────────────────── Base BC547 (vía R2 = 10 kΩ a GND)
-  PC817 emisor  ─── VCC 5V (pull-up del colector) ──────── Colector BC547
+  PC817 colector ─── VCC 5V (alimentación relé) ──────── Colector BC547
+  PC817 emisor  ─────────────────────────── Base BC547 (vía R2 = 10 kΩ a GND)
                                                              Emisor BC547 ──── GND
 
 ```
@@ -888,35 +906,42 @@ que destruiría el GPIO si no hay protección.
         │
        GND_STM32 ──── CÁTODO LED (PC817 pin 2)
 
-        PC817 COLECTOR (pin 4) ──────────────────────────┐
-        PC817 EMISOR   (pin 3) ──── 5V_lógica            │
-                                                    BASE BC547
+        PC817 COLECTOR (pin 4) ──── 5V_relé              ← VCC del lado relé
+        PC817 EMISOR   (pin 3) ──────────────────────┐  ← salida fototransistor
+                                                BASE BC547
                                                          │
                                                     [R2 = 10 kΩ]
                                                          │
                                                         GND
 
-        5V_lógica ─────────────────────────────── COLECTOR BC547
+        5V_relé ──────────────────────────────── COLECTOR BC547
                                                          │
                                                    BOBINA relé (−)
                                                          │
-                                                   BOBINA relé (+) ───── 5V_lógica
+                                                   BOBINA relé (+) ───── 5V_relé
                                                          │
                                                ┌── 1N4007 ÁNODO
                                                │
-                                    1N4007 CÁTODO ───── 5V_lógica
+                                    1N4007 CÁTODO ───── 5V_relé
                               (diodo en paralelo con la bobina,
                                polaridad inversa — flyback)
 ```
+
+> **Nota:** El PC817 funciona en modo seguidor de emisor: el colector (pin 4) va a VCC del
+> relé (5V), y el emisor (pin 3) es la salida que controla la base del BC547.
+> Cuando el LED se ilumina → fototransistor conduce → emisor sube a ~4.7V → BC547 ON → relé ON.
+> Cuando el LED se apaga → fototransistor OFF → emisor es tirado a GND por R2 → BC547 OFF → relé OFF.
+
 
 **En forma compacta:**
 
 ```
 STM32 GPIO  ──[330Ω]──► LED(PC817) ──GND
                         │
-              5V ──[PULL]── COLECTOR(PC817) ──► BASE(BC547) ──[10kΩ]──GND
-                                                COLECTOR(BC547) ──► BOBINA(−)
-              5V ──────────────────────────── BOBINA(+) ──[1N4007]── BOBINA(−)
+              5V ─────── COLECTOR(PC817)
+                         EMISOR(PC817) ──► BASE(BC547) ──[10kΩ]──GND
+                                           COLECTOR(BC547) ──► BOBINA(−)
+              5V ──────────────────────── BOBINA(+) ──[1N4007]── BOBINA(−)
               (diodo flyback: cátodo al + de la bobina, ánodo al − de la bobina)
 ```
 
@@ -1031,9 +1056,15 @@ Relé DIR NO ──┬────── Bus 12 V
 Para impedir que el ruido de los PWM de 20 kHz se propague por la alimentación:
 
 ```
-5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051, BTS7960 VCC
+5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051
                                                               └── [10 µF] a GND
+
+3.3 V_MCU ────────────────────────────────────── 3.3 V ──► BTS7960 VCC (lógica)
+                                                         └── [100 nF] a GND (por módulo)
 ```
+
+> **Nota:** El TJA1051 requiere 5V. Los módulos BTS7960 (IBT-2) se alimentan desde 3.3V
+> (ver §10 para justificación del 74HC244).
 
 > Si no se dispone de ferrita, un fusible reseteable (PTC) de 500 mA en la línea 5 V_limpio
 > actúa también como filtro de baja frecuencia y protege contra cortocircuitos.
@@ -1148,10 +1179,10 @@ Seguir este orden estrictamente:
 | 1 | Condensador electrolítico | 47 µF / 10 V | Bulk 5 V lógica |
 | 5 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas de relé (uno por relé, incluye LED relays) |
 | 5 | Diodo 1N5408 | 3 A / 1 000 V | Anti-CEMF en terminales de motor |
-| 3 | Resistencia | 330 Ω / 1/4 W | Serie LED optoacoplador relé (si circuito discreto) |
-| 3 | Resistencia | 10 kΩ / 1/4 W | Pull-down base transistor relé (si circuito discreto) |
-| 3 | Resistencia | 100 Ω / 1/2 W | Snubber RC contactos relé (R del RC) |
-| 3 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC) |
+| 5 | Resistencia | 330 Ω / 1/4 W | Serie LED optoacoplador relé (si circuito discreto, 5 relés) |
+| 5 | Resistencia | 10 kΩ / 1/4 W | Pull-down base transistor relé (si circuito discreto, 5 relés) |
+| 5 | Resistencia | 100 Ω / 1/2 W | Snubber RC contactos relé (R del RC, 5 relés) |
+| 5 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC, 5 relés) |
 | 3 | Resistencia | 1 kΩ / 1/4 W | R1 divisor encoder (A, B, Z) 5 V→3,3 V |
 | 3 | Resistencia | 2,2 kΩ / 1/4 W | R2 divisor encoder (A, B, Z) a GND |
 
