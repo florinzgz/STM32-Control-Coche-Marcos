@@ -96,10 +96,12 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 | — | Batería 24V- | GND (motor power) | Cable grueso ≥2.5 mm² |
 | — | Motor cable A | OUT1 | Al motor DC |
 | — | Motor cable B | OUT2 | Al motor DC |
-| — | STM32 3.3V o 5V | VCC (lógica) | Alimentación lógica del driver |
+| — | STM32 3.3V | VCC (lógica) | Alimentación lógica del driver (⚠️ usar 3.3V, NO 5V — ver nota abajo) |
 | — | STM32 GND | GND (lógica) | **GND COMÚN OBLIGATORIO** |
 
 > ⚠️ **IMPORTANTE:** El GND del STM32, de los BTS7960, y de la fuente 24V deben estar conectados entre sí (GND común). Sin esto, las señales RPWM y LPWM no funcionan.
+>
+> ⚠️ **VCC LÓGICA = 3.3V (NO 5V):** El módulo IBT-2 incluye un buffer 74HC244 cuyo V_IH(min) = 0.7 × VCC. A VCC=5V → V_IH(min)=3.5V, lo que hace que las señales de 3.3V del STM32 estén **por debajo del umbral** y puedan no ser reconocidas. Alimentando el VCC lógico del IBT-2 desde 3.3V → V_IH(min)=2.31V, bien por debajo de 3.3V. Ver `main.h` líneas 28–33.
 
 ---
 
@@ -253,12 +255,12 @@ Pedal señal (0.3V–4.8V)
 
 | Canal TCA | INA226 # | Mide | Shunt | Dirección I2C (detrás del mux) |
 |----------|---------|------|-------|-------------------------------|
-| CH0 | INA226 #0 | Corriente Motor FL | 1 mΩ (50A max) | 0x40 |
-| CH1 | INA226 #1 | Corriente Motor FR | 1 mΩ (50A max) | 0x40 |
-| CH2 | INA226 #2 | Corriente Motor RL | 1 mΩ (50A max) | 0x40 |
-| CH3 | INA226 #3 | Corriente Motor RR | 1 mΩ (50A max) | 0x40 |
-| CH4 | INA226 #4 | Corriente/Tensión Batería 24V | 0.5 mΩ (100A max) | 0x40 |
-| CH5 | INA226 #5 | Corriente Motor STEER | 1 mΩ (50A max) | 0x40 |
+| CH0 | INA226 #0 | Corriente Motor FL | 1.5 mΩ (50A/75mV) | 0x40 |
+| CH1 | INA226 #1 | Corriente Motor FR | 1.5 mΩ (50A/75mV) | 0x40 |
+| CH2 | INA226 #2 | Corriente Motor RL | 1.5 mΩ (50A/75mV) | 0x40 |
+| CH3 | INA226 #3 | Corriente Motor RR | 1.5 mΩ (50A/75mV) | 0x40 |
+| CH4 | INA226 #4 | Corriente/Tensión Batería 24V | 0.75 mΩ (100A/75mV) | 0x40 |
+| CH5 | INA226 #5 | Corriente Motor STEER | 1.5 mΩ (50A/75mV) | 0x40 |
 
 **Cada INA226 necesita:**
 | Cable | De | A (INA226) | Notas |
@@ -418,6 +420,36 @@ Instalar junto a cada BTS7960 para suprimir transitorios PWM en el bus de alimen
 
 ---
 
+## 10b) RELÉS LED — 2× Relé para tiras WS2812B
+
+El STM32 controla la alimentación 5V de las tiras LED WS2812B (frontal y trasera) mediante dos relés adicionales. El ESP32 genera la señal de datos para los WS2812B; el STM32 controla el corte de energía por seguridad.
+
+### Señales de control (STM32 → módulo relé con optoacoplador)
+
+| Cable | De (STM32) | A (Módulo relé) | Función |
+|-------|-----------|-----------------|---------|
+| 35 | **PB10** | IN (RELAY_LED) | Relé LED frontal: alimentación 5V tira WS2812B frontal (28 LEDs) |
+| 36 | **PB11** | IN (RELAY_LED_REAR) | Relé LED trasero: alimentación 5V tira WS2812B trasera (16 LEDs) |
+
+**Control por CAN:** El ESP32 envía el comando CAN ID **0x120** para activar/desactivar:
+- Byte 0 = relé frontal (PB10): 0x01=ON, 0x00=OFF
+- Byte 1 = relé trasero (PB11): 0x01=ON, 0x00=OFF
+
+**Conexiones de potencia:**
+
+| Cable | De | A | Notas |
+|-------|-----|---|-------|
+| — | Fuente 5V (LED) | Relé LED frontal (COM) | Fuente ≥3A para 28 LEDs |
+| — | Relé LED frontal (NO) | Tira WS2812B frontal (VCC) | 5V conmutados |
+| — | Fuente 5V (LED) | Relé LED trasero (COM) | Fuente ≥2A para 16 LEDs |
+| — | Relé LED trasero (NO) | Tira WS2812B trasera (VCC) | 5V conmutados |
+
+> ⚠️ Los relés LED requieren el mismo circuito de protección (diodo flyback, snubber RC) que los relés de potencia (sección 10). Usar módulos con optoacoplador para aislar la lógica 3.3V.
+>
+> **Referencia firmware:** `PIN_RELAY_LED` (PB10) y `PIN_RELAY_LED_REAR` (PB11) en `main.h`.
+
+---
+
 ## 11) ESP32-S3 — Conexiones Display (TFT ST7796)
 
 | Cable | De (ESP32) | A (Display TFT) | Función |
@@ -528,21 +560,23 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | 17 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
 | 18 | **PB8** | GPIOB | AF9 | FDCAN1_RX | TJA1051 #1 → RXD | ⚠️ Vía transceiver, NO directo |
 | 19 | **PB9** | GPIOB | AF9 | FDCAN1_TX | TJA1051 #1 → TXD | ⚠️ Vía transceiver, NO directo |
-| 20 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
-| 21 | **PC0** | GPIOC | — | **LIBRE** | ~~BTS7960 FL DIR~~ — desconectado | Pin liberado (PR #120) |
-| 22 | **PC1** | GPIOC | — | **LIBRE** | ~~BTS7960 FR DIR~~ — desconectado | Pin liberado (PR #120) |
-| 23 | **PC2** | GPIOC | — | **LIBRE** | ~~BTS7960 RL DIR~~ — desconectado | Pin liberado (PR #120) |
-| 24 | **PC3** | GPIOC | — | **LIBRE** | ~~BTS7960 RR DIR~~ — desconectado | Pin liberado (PR #120) |
-| 25 | **PC4** | GPIOC | — | **LIBRE** | ~~BTS7960 STEER DIR~~ — desconectado | Pin liberado (PR #120) |
-| 26 | **PC5** | GPIOC | Output | GPIO | BTS7960 FL → R_EN + L_EN | HIGH = motor habilitado |
-| 27 | **PC6** | GPIOC | AF4 | TIM8_CH1 | BTS7960 RL → **RPWM** | PWM 20 kHz — adelante |
-| 28 | **PC7** | GPIOC | AF4 | TIM8_CH2 | BTS7960 RL → **LPWM** | PWM 20 kHz — atrás |
-| 29 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
-| 30 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
-| 31 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
-| 32 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
-| 33 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
-| 34 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado |
+| 20 | **PB10** | GPIOB | Output | GPIO | Módulo relé LED frontal | HIGH = ON (tira WS2812B 28 LEDs) |
+| 21 | **PB11** | GPIOB | Output | GPIO | Módulo relé LED trasero | HIGH = ON (tira WS2812B 16 LEDs) |
+| 22 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
+| 23 | **PC0** | GPIOC | — | **LIBRE** | ~~BTS7960 FL DIR~~ — desconectado | Pin liberado (PR #120) |
+| 24 | **PC1** | GPIOC | — | **LIBRE** | ~~BTS7960 FR DIR~~ — desconectado | Pin liberado (PR #120) |
+| 25 | **PC2** | GPIOC | — | **LIBRE** | ~~BTS7960 RL DIR~~ — desconectado | Pin liberado (PR #120) |
+| 26 | **PC3** | GPIOC | — | **LIBRE** | ~~BTS7960 RR DIR~~ — desconectado | Pin liberado (PR #120) |
+| 27 | **PC4** | GPIOC | — | **LIBRE** | ~~BTS7960 STEER DIR~~ — desconectado | Pin liberado (PR #120) |
+| 28 | **PC5** | GPIOC | Output | GPIO | BTS7960 FL → R_EN + L_EN | HIGH = motor habilitado |
+| 29 | **PC6** | GPIOC | AF4 | TIM8_CH1 | BTS7960 RL → **RPWM** | PWM 20 kHz — adelante |
+| 30 | **PC7** | GPIOC | AF4 | TIM8_CH2 | BTS7960 RL → **LPWM** | PWM 20 kHz — atrás |
+| 31 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
+| 32 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
+| 33 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
+| 34 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
+| 35 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
+| 36 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado |
 
 ### Conexiones hardware (no GPIO)
 
@@ -576,11 +610,11 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
 | 2 | TJA1051T/3 módulo | Transceivers CAN | 3.3V compatible |
 | 1 | TOFSense-M S (Nooploop) | Sensor obstáculos LiDAR 8×8 | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, conector GH1.25 |
-| 3 | Módulo relé + optoacoplador | Relés potencia | HY-M158 o similar, 3.3V trigger |
+| 5 | Módulo relé + optoacoplador | Relés potencia y LED | HY-M158 o similar, 3.3V trigger (3× potencia + 2× LED) |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
 | 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB6, PB7, PB0 |
 | 1 | Adaptador nivel 5V→3.3V | Encoder A/B | 2 canales mín (PA15, PB3) |
-| 5 | Resistencia shunt | INA226 | 4× 1 mΩ + 1× 0.5 mΩ |
+| 6 | Resistencia shunt | INA226 | 5× 1.5 mΩ (50A/75mV, motores+dirección) + 1× 0.75 mΩ (100A/75mV, batería) |
 | 1 | Fuente 24V | Tracción | ≥20A capacidad |
 | 1 | Fuente 12V | Dirección | ≥5A capacidad |
 | 1 | Fuente 5V | Lógica / sensores | ≥2A capacidad |
@@ -589,9 +623,9 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 
 | Qty | Componente | Valor | Uso | Notas |
 |-----|-----------|-------|-----|-------|
-| 3 | Diodo flyback | **1N4007** (1A, 1000V) | Uno por bobina de relé (MAIN, TRAC, DIR) | En paralelo con la bobina, polaridad inversa; incluido en muchos módulos HY-M158 — verificar |
-| 3 | Condensador snubber | **100 nF / 250V** (polipropileno) | En paralelo con contactos COM–NO de cada relé | Reduce arcos en conmutación; 250V para margen ante picos inductivos en carga inductiva 24V |
-| 3 | Resistencia snubber | **100 Ω / 0.5W** | En serie con condensador snubber (RC snubber) | Limita corriente de descarga del condensador |
+| 5 | Diodo flyback | **1N4007** (1A, 1000V) | Uno por bobina de relé (MAIN, TRAC, DIR, LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; incluido en muchos módulos HY-M158 — verificar |
+| 5 | Condensador snubber | **100 nF / 250V** (polipropileno) | En paralelo con contactos COM–NO de cada relé (5 relés) | Reduce arcos en conmutación; 250V para margen ante picos inductivos en carga inductiva 24V |
+| 5 | Resistencia snubber | **100 Ω / 0.5W** | En serie con condensador snubber (RC snubber, 5 relés) | Limita corriente de descarga del condensador |
 | 5 | Condensador bulk | **470 µF / 35V** (electrolítico) | Uno por BTS7960, entre B+ y GND del driver | Reserva de energía, filtra transitorios de carga del motor |
 | 10 | Condensador bypass | **100 nF / 50V** (X7R/X5R cerámico) | Dos por BTS7960 (uno en B+/GND, uno en VCC lógico/GND) | Filtra ruido PWM 20 kHz en alimentación |
 | 5 | Diodo rueda libre motor | **SB560** Schottky (5A, 60V) o similar | Opcional: uno por motor, entre terminales del motor (cable A–cable B, no en el BTS7960) | El BTS7960 ya incluye diodos internos de protección. Un diodo Schottky externo de 60V ≥3A en los terminales del motor añade protección ante contra-EMF de larga duración. Usar 60V mínimo (margen sobre 24V). |
