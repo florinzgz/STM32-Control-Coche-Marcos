@@ -452,8 +452,8 @@ void Current_ReadAll(void)
 
         /* Shunt voltage → current:  I = V_shunt / R_shunt
          * Use correct shunt resistance per channel:
-         *   Channel 4 (battery): 0.5 mΩ (100A sensor)
-         *   All others:          1.0 mΩ (50A sensors)             */
+         *   Channel 4 (battery): 0.75 mΩ (100A/75mV sensor)
+         *   All others:          1.5 mΩ  (50A/75mV sensors)            */
         int16_t shunt_raw = INA226_ReadReg(INA226_REG_SHUNT_VOLTAGE);
         float shunt_uv    = (float)shunt_raw * INA226_SHUNT_LSB_UV;
         float shunt_mohm  = (i == INA226_CHANNEL_BATTERY)

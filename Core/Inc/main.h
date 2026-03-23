@@ -144,16 +144,19 @@ extern "C" {
 
 /* ---- Sensor Constants ---- */
 /* INA226 shunt resistors (mΩ) — values per hardware BOM:
- * Channels 0-3 (motor wheels): 50A sensors with 1 mΩ shunt
+ *   External shunts rated at 75 mV full-scale drop:
+ *     50A  shunt: R = 75 mV / 50 A  = 1.5 mΩ  (0.0015 Ω)
+ *     100A shunt: R = 75 mV / 100 A = 0.75 mΩ  (0.00075 Ω)
+ * Channels 0-3 (motor wheels): 50A / 75mV shunt → 1.5 mΩ
  *   → placed BEFORE each BTS7960 driver (between relay output and B+ input)
- * Channel 4 (battery 24V):     100A sensor with 0.5 mΩ shunt
+ * Channel 4 (battery 24V):     100A / 75mV shunt → 0.75 mΩ
  *   → placed BEFORE the main relay (between battery + terminal and relay input)
  *     so that Voltage_GetBus() always reads battery voltage even when relay is open
- * Channel 5 (steering motor):  50A sensor with 1 mΩ shunt
+ * Channel 5 (steering motor):  50A / 75mV shunt → 1.5 mΩ
  *   → placed BEFORE the steering BTS7960 driver (between relay output and B+ input) */
-#define INA226_SHUNT_MOHM_MOTOR    1      /* 1 mΩ for 50A sensors    */
-#define INA226_SHUNT_MOHM_BATTERY  0.5f  /* 0.5 mΩ for 100A sensor  */
-#define INA226_CHANNEL_BATTERY     4    /* TCA9548A channel index  */
+#define INA226_SHUNT_MOHM_MOTOR    1.5f   /* 1.5 mΩ for 50A/75mV sensors  */
+#define INA226_SHUNT_MOHM_BATTERY  0.75f  /* 0.75 mΩ for 100A/75mV sensor */
+#define INA226_CHANNEL_BATTERY     4      /* TCA9548A channel index        */
 
 /* ---- Global HAL handles ---- */
 extern ADC_HandleTypeDef hadc1;

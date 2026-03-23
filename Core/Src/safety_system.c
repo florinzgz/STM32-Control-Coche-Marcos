@@ -24,7 +24,8 @@
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
 #define TCS_SLIP_THRESHOLD   15   /* tcs_system.cpp: slipThreshold = 15.0f */
-#define MAX_CURRENT_A        25.0f
+#define MAX_CURRENT_A        25.0f   /* per-motor overcurrent threshold      */
+#define MAX_CURRENT_BATT_A   100.0f  /* battery channel aggregates all loads  */
 #define CAN_TIMEOUT_MS       250
 
 /* Saturating uint32_t increment — prevents wrap to 0 */
@@ -72,7 +73,8 @@ static inline void sat_inc_u32(uint32_t *counter) {
 #define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
-#define SENSOR_CURRENT_MAX_A 50.0f    /* anything above this is a fault */
+#define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
+#define SENSOR_CURRENT_MAX_BATT_A 100.0f   /* battery channel: 100A sensor range  */
 #define SENSOR_SPEED_MAX_KMH 25.0f    /* RS775 20000RPM / 1:75 gear → ~266 wheel RPM
                                         * × 1.1m circumf → ~17.6 km/h max.
                                         * 25 km/h gives ~40 % plausibility margin. */
@@ -967,9 +969,13 @@ void Safety_CheckCurrent(void)
         if (!ServiceMode_IsEnabled(mod)) continue;
 
         float amps = Current_GetAmps(i);
+        /* Use per-channel overcurrent threshold: battery channel carries
+         * aggregate load of all motors and must allow up to 100 A.       */
+        float limit = (i == INA226_CHANNEL_BATTERY)
+                    ? MAX_CURRENT_BATT_A : MAX_CURRENT_A;
         /* Check absolute overcurrent — reverse current through the shunt
          * (regenerative braking, back-EMF) must also be detected.         */
-        if (amps > MAX_CURRENT_A || amps < -MAX_CURRENT_A) {
+        if (amps > limit || amps < -limit) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERCURRENT);
             /* Count consecutive errors — escalate to SAFE only after
@@ -1235,7 +1241,9 @@ void Safety_CheckSensors(void)
         ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         float a = Current_GetAmps(i);
-        if (a < -1.0f || a > SENSOR_CURRENT_MAX_A) {
+        float ceil = (i == INA226_CHANNEL_BATTERY)
+                   ? SENSOR_CURRENT_MAX_BATT_A : SENSOR_CURRENT_MAX_A;
+        if (a < -1.0f || a > ceil) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
