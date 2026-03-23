@@ -304,9 +304,11 @@ if [ -d "Core/Src" ]; then
     TESTS_ON_DISK=$(find Core/Src -maxdepth 1 -name 'test_*.c' -printf '%f\n' | sort)
     if [ -n "$TESTS_ON_DISK" ]; then
         CUR_EXCL=$(sed -n 's/.*<entry excluding="\([^"]*\)".*name="Core\/Src".*/\1/p' "$CPROJECT")
+        # Build set of currently excluded files once for efficient lookup
+        CUR_SET=$(echo "$CUR_EXCL" | tr '|' '\n')
         MISSING_TESTS=0
         while IFS= read -r tf; do
-            if ! echo "$CUR_EXCL" | tr '|' '\n' | grep -qFx "$tf"; then
+            if ! echo "$CUR_SET" | grep -qFx "$tf"; then
                 echo "   ❌ FAIL — $tf not excluded from Core/Src sourceEntry"
                 MISSING_TESTS=$((MISSING_TESTS + 1))
             fi

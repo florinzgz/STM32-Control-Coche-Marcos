@@ -161,9 +161,11 @@ if [ -d "Core/Src" ]; then
     if [ -n "$TESTS_ON_DISK" ]; then
         # Extract the current excluding attribute for Core/Src sourceEntry
         CUR_EXCL=$(sed -n 's/.*<entry excluding="\([^"]*\)".*name="Core\/Src".*/\1/p' .cproject)
+        # Build set of currently excluded files once for efficient lookup
+        CUR_SET=$(echo "$CUR_EXCL" | tr '|' '\n')
         MISSING=""
         while IFS= read -r tf; do
-            if ! echo "$CUR_EXCL" | tr '|' '\n' | grep -qFx "$tf"; then
+            if ! echo "$CUR_SET" | grep -qFx "$tf"; then
                 MISSING="$MISSING $tf"
             fi
         done <<< "$TESTS_ON_DISK"
@@ -173,8 +175,9 @@ if [ -d "Core/Src" ]; then
                 echo "   ⚠️  Adding missing exclusion: $tf"
                 NEW_EXCL="${NEW_EXCL}|${tf}"
             done
-            # Sort the pipe-separated list for deterministic output
-            SORTED_EXCL=$(echo "$NEW_EXCL" | tr '|' '\n' | sort | paste -sd '|')
+            # Sort the pipe-separated list for deterministic output;
+            # filter empty elements to avoid a leading pipe when CUR_EXCL is empty
+            SORTED_EXCL=$(echo "$NEW_EXCL" | tr '|' '\n' | awk 'NF' | sort | paste -sd '|')
             # Use python for literal string replacement (avoids regex issues with | in sed/awk)
             _PY_EXCL=""
             for _p in python3 python py; do
