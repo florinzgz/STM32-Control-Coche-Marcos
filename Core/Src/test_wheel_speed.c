@@ -114,24 +114,34 @@ static void test_flood_threshold(void)
 static void test_stale_timeout(void)
 {
     /* Stale timeout must be long enough to not trigger at low speeds.
-     * At 1 km/h, pulse period ~600 ms.  Timeout should accommodate this. */
+     * At 1 km/h, pulse period ~660 ms.  Timeout should accommodate this. */
     float low_speed_ms = 1.0f / 3.6f;
     float low_freq_hz  = low_speed_ms / WHEEL_CIRCUMF_M_TEST * (float)WHEEL_PULSES_REV;
     float low_period_ms = 1000.0f / low_freq_hz;
 
-    /* At 1 km/h, period is ~600 ms — timeout of 500 ms would trigger.
-     * This is acceptable: vehicle is nearly stopped. */
     ASSERT_TRUE(WHEEL_STALE_TIMEOUT_MS >= 200U,
                 "Stale timeout must be >= 200 ms");
     ASSERT_TRUE(WHEEL_STALE_TIMEOUT_MS <= 2000U,
                 "Stale timeout must be <= 2 s (responsiveness)");
 
-    /* Document the speed below which stale triggers */
+    /* Compute the speed boundary where stale detection activates.
+     * Below this speed, the inter-pulse period exceeds the timeout
+     * and the wheel is flagged stale (speed forced to 0).             */
     float stale_freq = 1000.0f / (float)WHEEL_STALE_TIMEOUT_MS;
     float stale_rps  = stale_freq / (float)WHEEL_PULSES_REV;
     float stale_speed_kmh = stale_rps * WHEEL_CIRCUMF_M_TEST * 3.6f;
     printf("  INFO: Stale triggers below %.1f km/h (timeout=%u ms, period=%.0f ms at 1 km/h)\n",
            (double)stale_speed_kmh, (unsigned)WHEEL_STALE_TIMEOUT_MS, (double)low_period_ms);
+
+    /* The stale boundary must be below 2 km/h — at any meaningful
+     * driving speed (>2 km/h) the sensor must NOT be falsely stale. */
+    ASSERT_TRUE(stale_speed_kmh < 2.0f,
+                "Stale boundary must be below 2 km/h (no false stale while moving)");
+
+    /* The stale boundary must be above 0.5 km/h — a truly stopped wheel
+     * must eventually be detected as stale (not stuck at last speed).  */
+    ASSERT_TRUE(stale_speed_kmh > 0.5f,
+                "Stale boundary must be above 0.5 km/h (detect stopped wheels)");
 }
 
 /* =====================================================================
