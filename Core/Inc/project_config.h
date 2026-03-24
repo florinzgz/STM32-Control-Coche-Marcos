@@ -157,7 +157,13 @@
 /* ========================================================================== */
 /*                       ONEWIRE BUS (DS18B20 temperatures)                   */
 /* ========================================================================== */
-#define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
+/* IMPORTANT: PB0 MUST be initialised as GPIO_MODE_OUTPUT_OD (open-drain)
+ * with GPIO_PULLUP and GPIO_SPEED_FREQ_HIGH.  The .ioc file uses
+ * GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_OD to encode this.
+ * If CubeMX ever resets PB0 to push-pull, the OneWire bus will fail
+ * because DS18B20 requires open-drain signalling with a pull-up resistor.
+ * MX_GPIO_Init() in main.c sets this correctly; verify after regeneration. */
+#define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 — open-drain, pull-up, high speed */
 
 /* ========================================================================== */
 /*                       PEDAL ACCELERATOR (ADC)                              */
