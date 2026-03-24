@@ -142,6 +142,11 @@ void TIM1_UP_TIM16_IRQHandler(void)
     HAL_TIM_IRQHandler(&htim1);
 }
 
+void TIM8_UP_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim8);
+}
+
 void TIM2_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim2);

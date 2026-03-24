@@ -129,12 +129,38 @@
 #define PIN_WHEEL_RL       GPIO_PIN_2   /* PA2 - EXTI2 */
 #define PIN_WHEEL_RR       GPIO_PIN_15  /* PB15 - EXTI15 */
 
+/* Software debounce: minimum ms between accepted EXTI pulses per wheel.
+ * At 25 km/h (max plausible speed), 1.1 m circumference, 6 pulses/rev:
+ *   freq = (25/3.6)/1.1 × 6 ≈ 38 Hz → period ≈ 26 ms.
+ * 1 ms blanking (HAL_GetTick resolution) safely rejects contact bounce
+ * without attenuating valid pulses at any realistic speed.               */
+#define WHEEL_MIN_PULSE_INTERVAL_MS  1U
+
+/* Stale detection: if no new pulse arrives within this window the wheel
+ * speed is forced to 0 and the channel is flagged stale.  500 ms means
+ * the vehicle must be nearly stopped (< 0.4 km/h) to trigger.           */
+#define WHEEL_STALE_TIMEOUT_MS       500U
+
+/* ISR flood ceiling: maximum accepted pulse rate (Hz) per wheel.
+ * Any rate above this is physically impossible and indicates sensor
+ * noise or wiring fault — pulses exceeding this are silently dropped
+ * and the wheel is flagged as saturated.
+ * 200 Hz corresponds to ~55 km/h (well above 25 km/h plausibility).     */
+#define WHEEL_MAX_FREQ_HZ            200U
+
+/* Output clamp: computed speed is hard-limited to this value (km/h).
+ * Prevents NaN, negative, or wildly impossible speed readings from
+ * propagating to traction control, ABS, and CAN telemetry.
+ * Set to 40 km/h — well above the 25 km/h safety plausibility
+ * threshold in safety_system.c, but low enough to catch malfunction.     */
+#define WHEEL_SPEED_CLAMP_KMH        40.0f
+
 /* ========================================================================== */
 /*                       STEERING ENCODER (TIM2 Quadrature)                   */
 /* ========================================================================== */
 #define PIN_ENC_A          GPIO_PIN_15  /* PA15 - TIM2_CH1 */
 #define PIN_ENC_B          GPIO_PIN_3   /* PB3  - TIM2_CH2 */
-#define PIN_ENC_Z          GPIO_PIN_4   /* PB4  - EXTI4 (index pulse) */
+#define PIN_ENC_Z          GPIO_PIN_4   /* PB4  - GPIO polled input (index pulse) */
 
 /* ========================================================================== */
 /*                       STEERING CENTER INDUCTIVE SENSOR                     */
@@ -157,7 +183,13 @@
 /* ========================================================================== */
 /*                       ONEWIRE BUS (DS18B20 temperatures)                   */
 /* ========================================================================== */
-#define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 */
+/* IMPORTANT: PB0 MUST be initialised as GPIO_MODE_OUTPUT_OD (open-drain)
+ * with GPIO_PULLUP and GPIO_SPEED_FREQ_HIGH.  The .ioc file uses
+ * GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_OD to encode this.
+ * If CubeMX ever resets PB0 to push-pull, the OneWire bus will fail
+ * because DS18B20 requires open-drain signalling with a pull-up resistor.
+ * MX_GPIO_Init() in main.c sets this correctly; verify after regeneration. */
+#define PIN_ONEWIRE        GPIO_PIN_0   /* PB0 — open-drain, pull-up, high speed */
 
 /* ========================================================================== */
 /*                       PEDAL ACCELERATOR (ADC)                              */

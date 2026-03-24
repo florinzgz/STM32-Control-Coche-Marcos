@@ -49,6 +49,14 @@ bool    Startup_IsInhibited(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+/* CubeMX regeneration note:
+ * Pin definitions (STEER_CENTER_Pin, WHEEL_FL_Pin, etc.) are NOT placed here.
+ * All project-specific pin macros live in Core/Inc/project_config.h, which is
+ * included above via "USER CODE BEGIN Includes".  This strategy ensures that
+ * a CubeMX code-generation run never overwrites the pin mapping.  CubeMX may
+ * add its own *_Pin / *_GPIO_Port defines between this comment and the USER
+ * CODE marker below; those are harmless but unused — the firmware references
+ * the PIN_* macros from project_config.h exclusively.                        */
 /* USER CODE BEGIN Private defines */
 
 /* ---- Global HAL handles ---- */

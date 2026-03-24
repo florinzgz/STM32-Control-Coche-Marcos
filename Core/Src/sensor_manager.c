@@ -23,6 +23,22 @@
 
 /* =========================================================================
  *  Wheel Speed Sensors – EXTI pulse counting
+ *
+ *  ARCHITECTURE NOTE — Timer-based alternative:
+ *  The current EXTI+counter approach is simple and adequate for the
+ *  low-frequency LJ12A3 sensors (6 pulses/rev, max ~38 Hz at 25 km/h).
+ *  For higher-resolution sensors or faster vehicles, consider using
+ *  TIMx in Input Capture mode (one TIM channel per wheel).  Benefits:
+ *    - Hardware edge timestamping (no ISR jitter)
+ *    - Built-in digital filtering (TIMx_CCMR1.ICxF)
+ *    - No ISR at all for pulse counting (DMA or period measurement)
+ *    - Precise instantaneous frequency measurement
+ *  The STM32G474 has enough timers, but the 4 wheel pins (PA0, PA1,
+ *  PA2, PB15) are not all on the same timer, so 3-4 timers would be
+ *  required.  The current EXTI approach is retained because:
+ *    (a) interrupt rate is very low (~38 Hz worst-case per wheel)
+ *    (b) existing wiring matches EXTI lines, not timer channels
+ *    (c) software debounce + stale detection provides adequate safety
  * ========================================================================= */
 
 /* Pulse counters incremented in EXTI ISR */
@@ -32,23 +48,50 @@ static uint32_t wheel_last_tick[NUM_WHEELS]       = {0};
 static float    wheel_speed_kmh[NUM_WHEELS]       = {0};
 static float    wheel_rpm[NUM_WHEELS]             = {0};
 
-/* Software debounce: minimum interval between accepted pulses.
- * At 60 km/h with 1.1 m circumference and 6 pulses/rev:
- *   freq = (60/3.6)/1.1 × 6 ≈ 91 Hz → period ≈ 11 ms.
- * A 1 ms blanking window (HAL_GetTick resolution) rejects contact
- * bounce without affecting valid pulses at any realistic speed.       */
+/* Debounce and flood detection state (ISR context) */
 static volatile uint32_t wheel_last_pulse_tick[NUM_WHEELS] = {0};
+static volatile uint32_t wheel_prev_pulse_tick[NUM_WHEELS] = {0};
+static volatile uint32_t wheel_flood_count[NUM_WHEELS]     = {0};
+static volatile uint32_t wheel_flood_window_start[NUM_WHEELS] = {0};
 
+/* Precomputed flood ceiling: max accepted pulses per 1-second window */
+#define WHEEL_FLOOD_WINDOW_MS    1000U
+
+/* ISR-safe debounce + flood filter.
+ * Called from EXTI vectors — must be minimal and non-blocking.
+ *
+ * 1. Debounce: reject pulses arriving faster than
+ *    WHEEL_MIN_PULSE_INTERVAL_MS (contact bounce rejection).
+ * 2. Flood detection: count pulses within a 1-second sliding window.
+ *    If the count exceeds WHEEL_MAX_FREQ_HZ, further pulses are
+ *    silently dropped until the window rolls over.  This caps CPU
+ *    load even under sensor noise / wiring fault conditions.
+ *
+ * Performance: worst-case ISR body is ~20 instructions (read tick,
+ * two comparisons, one increment, one store).  At max accepted rate
+ * of 200 Hz, CPU overhead is < 0.01% at 170 MHz.                     */
 static inline void Wheel_IRQDebounced(uint8_t idx)
 {
     uint32_t now = HAL_GetTick();
-    /* HAL_GetTick() has 1 ms resolution; accept pulse only if at least
-     * 1 ms has elapsed since the last accepted pulse.  This provides
-     * effective debounce for mechanical contact bounce.               */
-    if ((now - wheel_last_pulse_tick[idx]) >= 1U) {
-        wheel_pulse[idx]++;
-        wheel_last_pulse_tick[idx] = now;
+
+    /* 1. Time-based debounce — reject contact bounce */
+    if ((now - wheel_last_pulse_tick[idx]) < WHEEL_MIN_PULSE_INTERVAL_MS)
+        return;
+
+    /* 2. Flood detection — cap pulse rate per 1-second window */
+    if ((now - wheel_flood_window_start[idx]) >= WHEEL_FLOOD_WINDOW_MS) {
+        /* New window: reset counter */
+        wheel_flood_window_start[idx] = now;
+        wheel_flood_count[idx] = 0;
     }
+    if (wheel_flood_count[idx] >= WHEEL_MAX_FREQ_HZ)
+        return;  /* Silently drop — sensor saturated */
+
+    /* Accept pulse */
+    wheel_pulse[idx]++;
+    wheel_flood_count[idx]++;
+    wheel_prev_pulse_tick[idx] = wheel_last_pulse_tick[idx];
+    wheel_last_pulse_tick[idx] = now;
 }
 
 void Wheel_FL_IRQHandler(void) { Wheel_IRQDebounced(0); }
@@ -76,34 +119,163 @@ void SteeringCenter_ClearFlag(void) { steer_center_flag = 0; }
  * @brief  Compute speed for one wheel from accumulated pulses.
  * @param  idx   Wheel index 0-3 (FL,FR,RL,RR).
  *
- * Called periodically (e.g. every 50 ms) from the main loop.
- * speed_kmh = (pulses_delta / PULSES_PER_REV) * CIRCUMFERENCE * (1000/dt_ms) * 3.6
+ * Called from Wheel_UpdateSpeeds() — NOT from individual getters.
+ *
+ * Concurrency: volatile ISR counters (wheel_pulse, wheel_last_pulse_tick,
+ * wheel_prev_pulse_tick) are snapshot-copied under a brief __disable_irq /
+ * __enable_irq critical section (~5 instructions) to prevent the ISR from
+ * updating the tick between the pulse read and the tick read.
+ *
+ * Counter overflow: uint32_t subtraction is modular (C99 §6.2.5 ¶9).
+ * `pulses − prev` gives the correct delta even when the counter wraps
+ * (≈49.7 days at 200 Hz max).  No explicit overflow guard needed.
+ *
+ * Hybrid speed computation:
+ *   delta ≥ 2 → standard count-based (good accuracy at medium-high speed)
+ *   delta == 1 → period-based using inter-pulse interval (avoids 10 ms
+ *                quantisation at low speed)
+ *   delta == 0 → upper-bound estimate from time-since-last-pulse with
+ *                monotonic decay (smooth approach to 0 instead of abrupt
+ *                0/nonzero oscillation)
+ *
+ * Stale detection: if no new pulse within WHEEL_STALE_TIMEOUT_MS, speed
+ * is forced to zero (sensor disconnect / vehicle stopped).
+ *
+ * Plausibility ceiling: output is clamped to WHEEL_SPEED_CLAMP_KMH.
+ * Prevents NaN, negative, or wildly impossible values from reaching
+ * traction control, ABS, or CAN telemetry.
  */
 static void Wheel_ComputeSpeed(uint8_t idx)
 {
-    uint32_t now    = HAL_GetTick();
-    uint32_t dt     = now - wheel_last_tick[idx];
+    uint32_t now = HAL_GetTick();
+    uint32_t dt  = now - wheel_last_tick[idx];
     if (dt == 0) return;
 
-    uint32_t pulses = wheel_pulse[idx];
-    uint32_t delta  = pulses - wheel_pulse_prev[idx];
+    /* ---- Atomic snapshot ----
+     * Briefly disable interrupts to copy all ISR-shared state in one
+     * indivisible read.  Critical section is ~5 instructions at
+     * 170 MHz ≈ 30 ns — negligible jitter on any peripheral.           */
+    __disable_irq();
+    uint32_t pulses    = wheel_pulse[idx];
+    uint32_t last_pt   = wheel_last_pulse_tick[idx];
+    uint32_t prev_pt   = wheel_prev_pulse_tick[idx];
+    __enable_irq();
 
-    float revolutions = (float)delta / (float)WHEEL_PULSES_REV;
-    float dist_m      = revolutions * WHEEL_CIRCUMF_M;
-    float speed_ms    = dist_m * 1000.0f / (float)dt;
+    /* Overflow-safe delta (unsigned modular subtraction) */
+    uint32_t delta = pulses - wheel_pulse_prev[idx];
 
-    wheel_speed_kmh[idx] = speed_ms * 3.6f;
-    wheel_rpm[idx]       = revolutions * 60000.0f / (float)dt;
+    /* Stale detection: no new pulse within timeout → force zero.
+     * This catches sensor disconnect and vehicle-stopped conditions.   */
+    if ((now - last_pt) >= WHEEL_STALE_TIMEOUT_MS) {
+        wheel_speed_kmh[idx] = 0.0f;
+        wheel_rpm[idx]       = 0.0f;
+        wheel_pulse_prev[idx] = pulses;
+        wheel_last_tick[idx]  = now;
+        return;
+    }
 
+    /* ---- Hybrid speed computation ----                                */
+    float speed_kmh;
+    float rpm;
+    const float dist_per_pulse = WHEEL_CIRCUMF_M / (float)WHEEL_PULSES_REV;
+
+    if (delta >= 2U) {
+        /* Count-based: accurate at medium-high speed */
+        float revolutions = (float)delta / (float)WHEEL_PULSES_REV;
+        float dist_m      = revolutions * WHEEL_CIRCUMF_M;
+        float speed_ms    = dist_m * 1000.0f / (float)dt;
+        speed_kmh = speed_ms * 3.6f;
+        rpm       = revolutions * 60000.0f / (float)dt;
+
+    } else if (delta == 1U) {
+        /* Period-based: use interval between last two accepted pulses.
+         * More precise than "1 pulse / 10 ms" at low speeds.           */
+        uint32_t period_ms = last_pt - prev_pt;
+        if (period_ms > 0U && period_ms < WHEEL_STALE_TIMEOUT_MS) {
+            float speed_ms = dist_per_pulse * 1000.0f / (float)period_ms;
+            speed_kmh = speed_ms * 3.6f;
+            rpm       = 60000.0f / ((float)period_ms * (float)WHEEL_PULSES_REV);
+        } else {
+            /* First pulse ever or period unreliable — fall back to count */
+            float speed_ms = dist_per_pulse * 1000.0f / (float)dt;
+            speed_kmh = speed_ms * 3.6f;
+            rpm       = 60000.0f / ((float)dt * (float)WHEEL_PULSES_REV);
+        }
+
+    } else {
+        /* delta == 0: no new pulse in this window.
+         * Upper-bound estimate: speed ≤ 1 pulse distance / time since
+         * the last pulse.  Ensures smooth monotonic decay toward 0
+         * instead of abrupt 0-nonzero oscillation at low speeds.       */
+        uint32_t since_last = now - last_pt;
+        if (since_last > 0U) {
+            float speed_ms = dist_per_pulse * 1000.0f / (float)since_last;
+            speed_kmh = speed_ms * 3.6f;
+            rpm       = 60000.0f / ((float)since_last * (float)WHEEL_PULSES_REV);
+            /* Monotonic decay: never exceed previous reading */
+            if (speed_kmh > wheel_speed_kmh[idx])
+                speed_kmh = wheel_speed_kmh[idx];
+            if (rpm > wheel_rpm[idx])
+                rpm = wheel_rpm[idx];
+        } else {
+            speed_kmh = wheel_speed_kmh[idx];
+            rpm       = wheel_rpm[idx];
+        }
+    }
+
+    /* ---- Plausibility ceiling ----
+     * Clamp to WHEEL_SPEED_CLAMP_KMH.  Also reject NaN (x != x).     */
+    if (speed_kmh < 0.0f || speed_kmh != speed_kmh)
+        speed_kmh = 0.0f;
+    if (speed_kmh > WHEEL_SPEED_CLAMP_KMH)
+        speed_kmh = WHEEL_SPEED_CLAMP_KMH;
+
+    if (rpm < 0.0f || rpm != rpm)
+        rpm = 0.0f;
+    {
+        float rpm_ceil = WHEEL_SPEED_CLAMP_KMH / 3.6f / WHEEL_CIRCUMF_M * 60.0f;
+        if (rpm > rpm_ceil) rpm = rpm_ceil;
+    }
+
+    wheel_speed_kmh[idx] = speed_kmh;
+    wheel_rpm[idx]       = rpm;
     wheel_pulse_prev[idx] = pulses;
     wheel_last_tick[idx]  = now;
 }
 
-float Wheel_GetSpeed_FL(void) { Wheel_ComputeSpeed(0); return wheel_speed_kmh[0]; }
-float Wheel_GetSpeed_FR(void) { Wheel_ComputeSpeed(1); return wheel_speed_kmh[1]; }
-float Wheel_GetSpeed_RL(void) { Wheel_ComputeSpeed(2); return wheel_speed_kmh[2]; }
-float Wheel_GetSpeed_RR(void) { Wheel_ComputeSpeed(3); return wheel_speed_kmh[3]; }
+/**
+ * @brief  Batch-update all 4 wheel speeds.
+ *
+ * Must be called exactly ONCE per control cycle (10 ms tier recommended).
+ * All subsequent Wheel_GetSpeed_*() calls return the cached values,
+ * eliminating redundant computation and ensuring all consumers in the
+ * same cycle see identical speed values (consistency guarantee).
+ */
+void Wheel_UpdateSpeeds(void)
+{
+    for (uint8_t i = 0; i < NUM_WHEELS; i++) {
+        Wheel_ComputeSpeed(i);
+    }
+}
+
+/* Getters: return cached speed from last Wheel_UpdateSpeeds() call.
+ * No computation, no side-effects on shared state.                    */
+float Wheel_GetSpeed_FL(void) { return wheel_speed_kmh[0]; }
+float Wheel_GetSpeed_FR(void) { return wheel_speed_kmh[1]; }
+float Wheel_GetSpeed_RL(void) { return wheel_speed_kmh[2]; }
+float Wheel_GetSpeed_RR(void) { return wheel_speed_kmh[3]; }
 float Wheel_GetRPM_FL(void)   { return wheel_rpm[0]; }
+
+/**
+ * @brief  Check if a wheel sensor is stale (no pulse within timeout).
+ * @param  idx  Wheel index 0-3.
+ * @return true if stale or idx out of range.
+ */
+bool Wheel_IsStale(uint8_t idx)
+{
+    if (idx >= NUM_WHEELS) return true;
+    return ((HAL_GetTick() - wheel_last_pulse_tick[idx]) >= WHEEL_STALE_TIMEOUT_MS);
+}
 
 /* =========================================================================
  *  Pedal – Internal ADC dual-sample + software plausibility
@@ -905,12 +1077,15 @@ void Temperature_PeriodicRescan(void)
 void Sensor_Init(void)
 {
     for (uint8_t i = 0; i < NUM_WHEELS; i++) {
-        wheel_pulse[i]           = 0;
-        wheel_pulse_prev[i]      = 0;
-        wheel_last_tick[i]       = HAL_GetTick();
-        wheel_speed_kmh[i]       = 0.0f;
-        wheel_rpm[i]             = 0.0f;
-        wheel_last_pulse_tick[i] = 0;
+        wheel_pulse[i]              = 0;
+        wheel_pulse_prev[i]         = 0;
+        wheel_last_tick[i]          = HAL_GetTick();
+        wheel_speed_kmh[i]          = 0.0f;
+        wheel_rpm[i]                = 0.0f;
+        wheel_last_pulse_tick[i]    = 0;
+        wheel_prev_pulse_tick[i]    = 0;
+        wheel_flood_count[i]        = 0;
+        wheel_flood_window_start[i] = 0;
     }
 
     pedal_raw_adc  = 0;

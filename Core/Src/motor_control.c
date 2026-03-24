@@ -13,6 +13,7 @@
 #include "sensor_manager.h"
 #include "service_mode.h"
 #include <math.h>
+#include <stdbool.h>
 
 /* ---- NaN / Inf float validation ----
  *

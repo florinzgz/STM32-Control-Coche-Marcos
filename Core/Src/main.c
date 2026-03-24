@@ -211,6 +211,11 @@ int main(void)
         if ((now - tick_10ms) >= 10) {
             tick_10ms = now;
 
+            /* Batch-update wheel speeds FIRST — all safety/traction
+             * consumers in this cycle see identical, consistent values.
+             * Must precede ABS/TCS/Safety which read Wheel_GetSpeed_*().*/
+            Wheel_UpdateSpeeds();
+
             ABS_Update();
             TCS_Update();
             Safety_CheckCurrent();

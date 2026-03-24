@@ -107,6 +107,14 @@ jobs:
               -o /tmp/test_sensor_calibration
           /tmp/test_sensor_calibration
 
+      - name: Run test_wheel_speed
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_wheel_speed.c \
+              -o /tmp/test_wheel_speed
+          /tmp/test_wheel_speed
+
   # ── Static analysis ─────────────────────────────────────────────────
   static-analysis:
     runs-on: ubuntu-latest
