@@ -384,6 +384,83 @@ else
     echo "ℹ️  No .mxproject file found (will be created by CubeMX code generation)."
 fi
 
+# ---- Step 6b: .mxproject / .cproject consistency ----
+# Remove files from .mxproject SourceFiles that are excluded in .cproject
+# Drivers sourceEntry.  This prevents CubeMX from re-including them on
+# code regeneration, which can trigger circular-dependency build errors.
+if [ -f ".mxproject" ] && [ -f ".cproject" ]; then
+    echo "🔍 Checking .mxproject/.cproject source file consistency..."
+
+    # Extract the excluding attribute from the Drivers sourceEntry
+    DRIVERS_EXCL=$(sed -n 's/.*<entry excluding="\([^"]*\)".*name="Drivers".*/\1/p' .cproject)
+    if [ -n "$DRIVERS_EXCL" ]; then
+        # Build list of excluded .c files (convert / to \ for comparison with .mxproject)
+        EXCL_C_FILES=$(echo "$DRIVERS_EXCL" | tr '|' '\n' | grep '\.c$' | sed 's|/|\\|g')
+
+        if [ -n "$EXCL_C_FILES" ]; then
+            _PY_CONS=""
+            for _p in python3 python py; do
+                if command -v "$_p" >/dev/null 2>&1; then _PY_CONS="$_p"; break; fi
+            done
+
+            if [ -n "$_PY_CONS" ]; then
+                CONS_FIXED=$("$_PY_CONS" -c "
+import sys
+
+excl_files = set()
+for line in sys.argv[1].strip().split('\n'):
+    line = line.strip()
+    if line:
+        excl_files.add(line)
+
+fixed = 0
+lines = open('.mxproject', 'r').readlines()
+out = []
+for line in lines:
+    stripped = line.rstrip('\n\r')
+    if stripped.startswith('SourceFiles=') and not stripped.startswith('SourceFiles#'):
+        items = [x for x in stripped[len('SourceFiles='):].split(';') if x.strip()]
+        filtered = []
+        for item in items:
+            # Check if this Drivers file is in the exclude list
+            rel = item
+            if rel.startswith('Drivers\\\\'):
+                rel = rel[8:]  # Remove 'Drivers\\\\'
+            if rel in excl_files:
+                sys.stderr.write('   ⚠️  Removing excluded file from .mxproject: ' + item + '\n')
+                fixed += 1
+            else:
+                filtered.append(item)
+        out.append('SourceFiles=' + ';'.join(filtered) + '\n')
+    else:
+        out.append(line)
+
+if fixed > 0:
+    open('.mxproject', 'w').writelines(out)
+print(fixed)
+" "$EXCL_C_FILES" 2>&1)
+                CONS_COUNT=$(echo "$CONS_FIXED" | tail -1)
+                echo "$CONS_FIXED" | head -n -1
+                case "$CONS_COUNT" in
+                    ''|*[!0-9]*) CONS_COUNT=0 ;;
+                esac
+                if [ "$CONS_COUNT" -gt 0 ]; then
+                    echo "   ✅ Removed $CONS_COUNT excluded file(s) from .mxproject."
+                    FIXED=1
+                else
+                    echo "   ✅ .mxproject and .cproject are consistent."
+                fi
+            else
+                echo "   ⚠️  SKIP — no python available for consistency check."
+            fi
+        else
+            echo "   ✅ No excluded .c files in Drivers sourceEntry."
+        fi
+    else
+        echo "   ✅ No Drivers sourceEntry found in .cproject (skipping)."
+    fi
+fi
+
 # ---- Step 7: Detect and fix unexpected STM32/ folder structure ----
 # Some CubeMX versions generate an unexpected intermediate directory:
 #   STM32/Drivers/  instead of  Drivers/

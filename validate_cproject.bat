@@ -124,7 +124,7 @@ REM ---- Check 7: .mxproject file type validation ----
 echo.
 echo 7. .mxproject file type validation
 if exist ".mxproject" (
-    powershell -Command ^
+    powershell -NoProfile -Command ^
       "$errs = 0; " ^
       "$content = Get-Content '.mxproject' -Raw; " ^
       "$libLine = ($content -split '`n' | Where-Object { $_ -match '^LibFiles=' }); " ^
@@ -154,6 +154,60 @@ if exist "STM32" (
     set /a ERRORS=%ERRORS%+1
 ) else (
     echo    PASS: no unexpected STM32\ directory.
+)
+
+REM ---- Check 9: test_*.c file exclusions ----
+echo.
+echo 9. Test file exclusions (test_*.c in Core\Src^)
+if exist "Core\Src" (
+    powershell -NoProfile -Command ^
+      "$testFiles = Get-ChildItem 'Core\Src\test_*.c' -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }; " ^
+      "if (-not $testFiles) { Write-Host '   PASS: no test_*.c files found.'; exit 0; } " ^
+      "$content = Get-Content '.cproject' -Raw -Encoding UTF8; " ^
+      "$errs = 0; " ^
+      "if ($content -match 'excluding=""([^""]*)""[^>]*name=""Core/Src""') { " ^
+      "  $curExcl = $Matches[1] -split '\|'; " ^
+      "  foreach ($tf in $testFiles) { " ^
+      "    if ($curExcl -notcontains $tf) { " ^
+      "      Write-Host ('   FAIL: ' + $tf + ' not excluded from Core/Src'); " ^
+      "      $errs++; " ^
+      "    } " ^
+      "  } " ^
+      "  if ($errs -eq 0) { Write-Host '   PASS: all test_*.c files excluded.'; } " ^
+      "} else { Write-Host '   SKIP: Core/Src sourceEntry not found.'; } " ^
+      "exit $errs"
+    if %ERRORLEVEL% GTR 0 set /a ERRORS=%ERRORS%+1
+) else (
+    echo    SKIP: Core\Src not found.
+)
+
+REM ---- Check 10: .mxproject / .cproject consistency ----
+echo.
+echo 10. .mxproject / .cproject source file consistency
+if exist ".mxproject" (
+    powershell -NoProfile -Command ^
+      "$cproj = Get-Content '.cproject' -Raw -Encoding UTF8; " ^
+      "$errs = 0; " ^
+      "if ($cproj -match 'excluding=""([^""]*)""[^>]*name=""Drivers""') { " ^
+      "  $exclFiles = ($Matches[1] -split '\|') | Where-Object { $_ -like '*.c' } | ForEach-Object { $_ -replace '/', '\' }; " ^
+      "  $mxContent = Get-Content '.mxproject' -Raw; " ^
+      "  $srcLine = ($mxContent -split '`n' | Where-Object { $_ -match '^SourceFiles=' -and $_ -notmatch '^SourceFiles#' }); " ^
+      "  if ($srcLine) { " ^
+      "    foreach ($ex in $exclFiles) { " ^
+      "      $fullPath = 'Drivers\' + $ex; " ^
+      "      if ($srcLine -match [regex]::Escape($fullPath)) { " ^
+      "        Write-Host ('   FAIL: .mxproject contains excluded file: ' + $fullPath); " ^
+      "        $errs++; " ^
+      "      } " ^
+      "    } " ^
+      "  } " ^
+      "  if ($errs -eq 0) { Write-Host '   PASS: .mxproject and .cproject are consistent.'; } " ^
+      "  else { Write-Host '   Run fix_build.bat to repair.'; } " ^
+      "} else { Write-Host '   PASS: no Drivers exclusions to check.'; } " ^
+      "exit $errs"
+    if %ERRORLEVEL% GTR 0 set /a ERRORS=%ERRORS%+1
+) else (
+    echo    SKIP: .mxproject not found.
 )
 
 echo.
