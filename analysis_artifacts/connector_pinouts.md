@@ -125,7 +125,7 @@ Battery 24V ──► F1 (60A) ──► RELAY_MAIN (PC10)
               ┌──────┤      ┌──────┤             │
               ▼      ▼      ▼      ▼             ▼
            INA226  INA226 INA226 INA226       INA226
-           (1mΩ)  (1mΩ)  (1mΩ)  (1mΩ)       (1mΩ)
+          (1.5mΩ) (1.5mΩ)(1.5mΩ)(1.5mΩ)    (1.5mΩ)
               │      │      │      │             │
               ▼      ▼      ▼      ▼             ▼
            BTS FL  BTS FR BTS RL BTS RR       BTS STEER
@@ -133,7 +133,19 @@ Battery 24V ──► F1 (60A) ──► RELAY_MAIN (PC10)
               ▼      ▼      ▼      ▼             ▼
            Motor   Motor  Motor  Motor        Motor
             FL      FR     RL     RR          STEER
+
+Battery INA226 (CH4, 0.75 mΩ) placed BEFORE RELAY_MAIN to always read battery voltage.
+
+Capacitors at each BTS7960 (mandatory):
+  B+──[470µF/35V]──GND  (bulk, traction motors; use 470µF/25V for steering 12V bus)
+  B+──[100nF/50V]──GND  (bypass, HF filter, as close to IC as possible)
+  VCC──[100nF/50V]──GND_logic  (logic decoupling, next to VCC pin)
+  M+──[100nF/50V]──M−  (motor terminal snubber, mount at motor body)
 ```
+
+> **INA226 shunt values (from `Core/Inc/project_config.h`):**
+> - Motor channels (CH0–CH3, CH5): **1.5 mΩ** (50A/75mV rating)
+> - Battery channel (CH4): **0.75 mΩ** (100A/75mV rating)
 
 ---
 
