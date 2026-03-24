@@ -280,7 +280,7 @@ static void test_counter_overflow(void)
      * Simulate counter near UINT32_MAX that wraps around.              */
     uint32_t prev = UINT32_MAX - 5;
     uint32_t curr = 3;  /* Wrapped past 0 */
-    uint32_t delta = curr - prev;  /* Should be 8 */
+    uint32_t delta = curr - prev;  /* UINT32_MAX-5 → MAX → 0 → 3 = 9 steps */
 
     ASSERT_EQ_U32(delta, 9, "Overflow delta: (3) - (MAX-5) == 9");
 
