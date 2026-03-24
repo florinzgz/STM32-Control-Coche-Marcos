@@ -130,6 +130,7 @@ jobs:
           #   unusedStructMember    — test structs mirror production layout
           cppcheck --enable=all --inconclusive --force \
             --suppress=missingIncludeSystem --suppress=missingInclude \
+            --suppress=unmatchedSuppression \
             --suppress=unusedFunction \
             --suppress=knownConditionTrueFalse \
             --suppress=constParameterPointer \
