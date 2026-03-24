@@ -119,7 +119,9 @@ findstr /C:"assembler.input.s" .cproject >nul 2>&1
 if %ERRORLEVEL%==0 (
     echo    Fixing assembler inputType superClass
     powershell -NoProfile -Command ^
-      "(Get-Content '.cproject' -Raw -Encoding UTF8) -replace 'assembler\.input\.s""', 'assembler.input""' | Set-Content '.cproject' -NoNewline -Encoding UTF8"
+      "$c = Get-Content '.cproject' -Raw -Encoding UTF8; " ^
+      "$c = $c -replace 'assembler\.input\.s""', 'assembler.input""'; " ^
+      "[System.IO.File]::WriteAllText((Resolve-Path '.cproject').Path, $c, (New-Object System.Text.UTF8Encoding($false)))"
     set FIXED=1
 )
 
