@@ -77,13 +77,15 @@ All PWM signals are **center-aligned at 20 kHz** (Period = 4249, Prescaler = 0 a
 
 | Motor | RPWM | LPWM | Timer | EN Pin | INA226 Channel |
 |-------|------|------|-------|--------|----------------|
-| Front-Left | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 (GPIO) | CH0 (1 mΩ) |
-| Front-Right | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | **3.3V (tied)** | CH1 (1 mΩ) |
-| Rear-Left | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | **3.3V (tied)** | CH2 (1 mΩ) |
-| Rear-Right | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 (GPIO) | CH3 (1 mΩ) |
-| Steering | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | **3.3V (tied)** | CH5 (1 mΩ) |
+| Front-Left | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 (GPIO) | CH0 (1.5 mΩ) |
+| Front-Right | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | **3.3V (tied)** | CH1 (1.5 mΩ) |
+| Rear-Left | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | **3.3V (tied)** | CH2 (1.5 mΩ) |
+| Rear-Right | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 (GPIO) | CH3 (1.5 mΩ) |
+| Steering | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | **3.3V (tied)** | CH5 (1.5 mΩ) |
 
-**Source:** `Core/Inc/main.h:21-57`, `Core/Src/main.c:652-842`
+> **Note:** Battery INA226 (CH4) uses **0.75 mΩ** shunt (100A/75mV rating). Motor shunts are **1.5 mΩ** (50A/75mV rating). Source: `INA226_SHUNT_MOHM_MOTOR=1.5f`, `INA226_SHUNT_MOHM_BATTERY=0.75f` in `Core/Inc/project_config.h`.
+
+**Source:** `Core/Inc/project_config.h:208-209`, `Core/Src/main.c:652-842`
 
 ### 2.2 BTS7960 Wiring Detail (per module)
 
@@ -94,11 +96,17 @@ From STM32:
   EN pin (or 3.3V) ─┬───────► BTS7960 R_EN
                      └───────► BTS7960 L_EN
 
-Power path:
-  24V bus ──► Fuse(30A) ──► INA226 shunt(1mΩ) ──► BTS7960 B+
-                                                    BTS7960 B− ──► GND bus
-                                                    BTS7960 M+ ──► Motor terminal 1
-                                                    BTS7960 M− ──► Motor terminal 2
+Power path (traction motors, 24V):
+  24V bus ──► Fuse(30A) ──► INA226 shunt(1.5mΩ) ──► BTS7960 B+
+                                                      BTS7960 B− ──► GND bus
+                                                      BTS7960 M+ ──► Motor terminal 1
+                                                      BTS7960 M− ──► Motor terminal 2
+
+Power path (steering motor, 12V):
+  12V bus ──► Fuse(15A) ──► INA226 shunt(1.5mΩ) ──► BTS7960 STEER B+
+                                                      BTS7960 B− ──► GND bus
+                                                      BTS7960 M+ ──► Motor STEER terminal 1
+                                                      BTS7960 M− ──► Motor STEER terminal 2
 
 Logic supply:
   3.3V ──► BTS7960 VCC
@@ -107,12 +115,18 @@ Logic supply:
 
 ### 2.3 Motor Protection Components
 
-| Component | Value | Purpose | Calculation |
-|-----------|-------|---------|-------------|
-| Fuse per motor | 30A slow-blow | Overcurrent protection | I_max=25A × 1.25 = 31A → 30A fuse |
-| INA226 shunt | 1 mΩ ±1%, 3W, 2512 | Current measurement | P_max = 50² × 0.001 = 2.5W (< 3W rating) |
-| TVS on B+ | SMBJ30A (30V standoff) | Transient suppression | Clamp voltage = 48.4V @ 1A; protects BTS7960 (max 27V continuous but handles transients) |
-| Bulk cap at BTS | 470 µF/35V electrolytic | Inrush/ripple filtering | τ = 470µ × 0.001 = 0.47 µs; handles motor start surges |
+| Component | Value | Location | Purpose | Calculation / Notes |
+|-----------|-------|----------|---------|---------------------|
+| Fuse per traction motor | 30A slow-blow | Between relay and INA226 shunt | Overcurrent protection | I_max=25A × 1.25 = 31A → 30A fuse |
+| Fuse for steering motor | 15A slow-blow | Between DIR relay and INA226 shunt | Overcurrent protection | 12V motor; adjust to actual motor rating |
+| INA226 shunt (motors) | **1.5 mΩ** ±1%, 3W, 2512 | In series with B+ line before each BTS7960 | Current measurement | P_max = 50² × 0.0015 = 3.75W → use 5W rated shunt; `INA226_SHUNT_MOHM_MOTOR=1.5f` |
+| INA226 shunt (battery) | **0.75 mΩ** ±1%, 5W, 2512 | Between battery+ and RELAY_MAIN COM | Battery current + voltage | P_max = 100² × 0.00075 = 7.5W → use 10W rated shunt; `INA226_SHUNT_MOHM_BATTERY=0.75f` |
+| TVS on B+ (traction) | SMBJ30A (30V standoff) | On B+ line at each BTS7960 module | Transient suppression | Clamp 48.4V @ 1A; protects BTS7960 gate from spikes |
+| Bulk cap at BTS (traction) | **470 µF / 35V** electrolytic | Between B+ and GND at each BTS7960 (traction) | Inrush/ripple filtering | Handles motor start surges on 24V bus |
+| Bulk cap at BTS (steering) | **470 µF / 25V** electrolytic | Between B+ and GND at BTS7960 STEER | Inrush/ripple filtering | For 12V steering bus; 25V rating provides margin |
+| Bypass cap at BTS (power) | **100 nF / 50V** X7R ceramic | Between B+ and GND, next to BTS7960 IC | HF PWM noise decoupling | Filters 20 kHz and harmonics from power bus |
+| Bypass cap at BTS (logic) | **100 nF / 50V** X7R ceramic | Between VCC and GND_logic at each BTS7960 | 74HC244 buffer decoupling | Prevents logic glitches at 20 kHz switching |
+| Snubber cap at motor | **100 nF / 50V** X7R ceramic | Between M+ and M− terminals at motor body | Motor EMI snubber | Suppresses back-EMF spikes from brushed DC motor; critical near steering encoder |
 
 ---
 
@@ -306,12 +320,12 @@ Each DS18B20:
 
 | TCA Channel | INA226 | Shunt | Measurement |
 |-------------|--------|-------|-------------|
-| CH0 | Motor FL | 1 mΩ / 3W / 2512 | 0–50A motor current |
-| CH1 | Motor FR | 1 mΩ / 3W / 2512 | 0–50A motor current |
-| CH2 | Motor RL | 1 mΩ / 3W / 2512 | 0–50A motor current |
-| CH3 | Motor RR | 1 mΩ / 3W / 2512 | 0–50A motor current |
-| CH4 | Battery 24V | 0.5 mΩ / 5W / 4-term | 0–100A battery current |
-| CH5 | Steering | 1 mΩ / 3W / 2512 | 0–50A steering current |
+| CH0 | Motor FL | **1.5 mΩ** / ≥5W / 2512 | 0–50A motor current |
+| CH1 | Motor FR | **1.5 mΩ** / ≥5W / 2512 | 0–50A motor current |
+| CH2 | Motor RL | **1.5 mΩ** / ≥5W / 2512 | 0–50A motor current |
+| CH3 | Motor RR | **1.5 mΩ** / ≥5W / 2512 | 0–50A motor current |
+| CH4 | Battery 24V | **0.75 mΩ** / ≥10W / 2512 | 0–100A battery current |
+| CH5 | Steering | **1.5 mΩ** / ≥5W / 2512 | 0–50A steering current |
 
 **Placement:** Battery shunt (CH4) is placed BEFORE the main relay (between battery terminal and relay input) so voltage is always readable even when relay is open.
 
@@ -597,13 +611,15 @@ Selected: 30A slow-blow blade fuse
 ### 10.3 Current Shunt Power
 
 ```
-Motor shunt (1 mΩ):
-  P = I² × R = 50² × 0.001 = 2.5 W (at absolute max 50A)
-  Selected: 3W rated → margin = 3/2.5 = 1.2× ✓
+Motor shunt (1.5 mΩ):
+  P = I² × R = 50² × 0.0015 = 3.75 W (at absolute max 50A)
+  Selected: ≥5W rated → margin = 5/3.75 = 1.33× ✓
+  Source: INA226_SHUNT_MOHM_MOTOR = 1.5f (project_config.h)
 
-Battery shunt (0.5 mΩ):
-  P = I² × R = 100² × 0.0005 = 5.0 W (at absolute max 100A)
-  Selected: 5W rated → margin = 1.0× (tight; consider 7W for derating)
+Battery shunt (0.75 mΩ):
+  P = I² × R = 100² × 0.00075 = 7.5 W (at absolute max 100A)
+  Selected: ≥10W rated → margin = 10/7.5 = 1.33× ✓
+  Source: INA226_SHUNT_MOHM_BATTERY = 0.75f (project_config.h)
 ```
 
 ### 10.4 CAN Bus Termination

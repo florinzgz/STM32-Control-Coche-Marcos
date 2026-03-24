@@ -297,7 +297,7 @@ PC5  (GPIO EN_FL)          ─────────────────�
                                                            ├─ (unir)
                                                     L_EN ─┘
                                                     VCC ← 3.3 V (⚠️ NO 5V — ver nota §10)
-                                                    B+  ← 24 V (vía relé TRAC + shunt INA226)
+                                                    B+  ← 24 V (vía relé TRAC + shunt INA226 1.5 mΩ)
                                                     B-  ← GND potencia
 ```
 
@@ -305,6 +305,30 @@ PC5  (GPIO EN_FL)          ─────────────────�
 > **Motor RL**: PC6 (TIM8_CH1 → RPWM), PC7 (TIM8_CH2 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
 > **Motor RR**: PC8 (TIM8_CH3 → RPWM), PC9 (TIM8_CH4 → LPWM). EN: PC13 GPIO.
 > **Motor STEER**: PA6 (TIM3_CH1 → RPWM), PA7 (TIM3_CH2 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
+
+### ⚡ Condensadores obligatorios por BTS7960 de tracción (4× motores)
+
+Instalar **todos los condensadores siguientes** antes de encender el sistema. Sin ellos, el PWM a 20 kHz genera transitorios que pueden resetear el STM32 o dañar sensores.
+
+| Componente | Valor | Ubicación exacta | Función |
+|-----------|-------|-----------------|---------|
+| C_bulk | **470 µF / 35 V** electrolítico (105°C) | Entre **B+** y **GND** de cada BTS7960 de tracción | Reserva de energía; absorbe inrush al arrancar el motor y picos del bus 24V |
+| C_bypass potencia | **100 nF / 50 V** X7R cerámico | Entre **B+** y **GND**, lo más cerca posible del IC BTS7960 | Filtra armónicos del PWM 20 kHz en el bus de potencia |
+| C_bypass lógica | **100 nF / 50 V** X7R cerámico | Entre **VCC** y **GND** lógicos del módulo (junto al pin VCC) | Desacoplo del buffer 74HC244; evita glitches de control a 20 kHz |
+| C_snubber motor | **100 nF / 50 V** X7R cerámico | Entre **M+** y **M-** del motor (fijar al conector del motor, NO en el BTS7960) | Suprime picos de contra-EMF del motor brushed; filtra ruido EMI en I2C/CAN/ADC |
+
+```
+         B+ (24V) ──┬──────────────────► BTS7960 B+
+                    │                          │
+             [470µF/35V]  [100nF/50V]       Motor
+              (bulk)       (bypass)        M+ ──┤
+                    │           │               │ [100nF/50V]
+         GND ───────┴───────────┴               │  (snubber)
+                                            M- ──┤
+         VCC_logic ──────┬──────────► VCC               │
+                   [100nF/50V]          └────────────────┘
+         GND_logic ──────┘
+```
 
 **Condensador de desacoplo obligatorio en VCC del BTS7960:**
 ```
@@ -326,17 +350,43 @@ PC5  (GPIO EN_FL)          ─────────────────�
 
 ### Tensión
 
-**12 V** para el motor de dirección.
+**12 V** para el motor de dirección (vía relé DIR + shunt INA226 #5, 1.5 mΩ).
 
 ### Pines STM32
 
 | Señal | Pin | Función | Referencia |
 |-------|-----|---------|------------|
-| RPWM | **PA6** | TIM3_CH1 (AF2) | `PIN_PWM_STEER` (`main.h:36`) |
-| LPWM | **PA7** | TIM3_CH2 (AF2) | `PIN_LPWM_STEER` (`main.h:37`) |
+| RPWM | **PA6** | TIM3_CH1 (AF2) | `PIN_PWM_STEER` (`project_config.h`) |
+| LPWM | **PA7** | TIM3_CH2 (AF2) | `PIN_LPWM_STEER` (`project_config.h`) |
 
 > Los pines DIR (PC4) y EN (PC9) ya **no se usan**. PC9 ha sido reasignado a TIM8_CH4 (LPWM_RR).
 > Conectar R_EN/L_EN del BTS7960 de dirección directamente a 3.3 V.
+
+### ⚡ Condensadores obligatorios — BTS7960 de dirección
+
+> **Especialmente crítico:** El encoder E6B2-CWZ6C está físicamente próximo al motor de
+> dirección. Sin el condensador snubber en los terminales del motor, la contra-EMF puede
+> corromper los pulsos del encoder → fallo de calibración `SAFETY_ERROR_CENTERING`.
+
+| Componente | Valor | Ubicación exacta | Función |
+|-----------|-------|-----------------|---------|
+| C_bulk | **470 µF / 25 V** electrolítico (105°C) | Entre **B+** (12V) y **GND** del BTS7960 STEER | Reserva de energía; absorbe inrush y oscilaciones al girar la dirección |
+| C_bypass potencia | **100 nF / 50 V** X7R cerámico | Entre **B+** y **GND**, junto al IC BTS7960 STEER | Filtra PWM 20 kHz en el bus de 12V |
+| C_bypass lógica | **100 nF / 50 V** X7R cerámico | Entre **VCC** y **GND** lógicos del BTS7960 STEER | Desacoplo del 74HC244 |
+| C_snubber motor | **100 nF / 50 V** X7R cerámico | Entre **M+** y **M-** del motor de dirección (junto al motor) | **Crítico:** suprime contra-EMF que deteriora las señales del encoder |
+
+```
+         B+ (12V) ──┬──────────────────► BTS7960 STEER B+
+                    │                            │
+             [470µF/25V]  [100nF/50V]         Motor STEER
+              (bulk)       (bypass)          M+ ──┤
+                    │           │                 │ [100nF/50V]
+         GND ───────┴───────────┴                 │  (snubber)
+                                             M- ──┤
+         VCC_logic ──────┬──────────► VCC                │
+                   [100nF/50V]          └─────────────────┘
+         GND_logic ──────┘
+```
 
 ### Configuración PWM (TIM3)
 
@@ -352,16 +402,16 @@ PC5  (GPIO EN_FL)          ─────────────────�
 
 ### Encoder de dirección (E6B2-CWZ6C)
 
-Definido en `main.h` (líneas 11–15) y leído por TIM2 en modo cuadratura.
+Definido en `project_config.h` y leído por TIM2 en modo cuadratura.
 
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
-| Modelo | E6B2-CWZ6C | `main.h` (comentario) |
-| PPR | **1200** | `ENCODER_PPR` (`main.h:14`) |
-| CPR (×4 cuadratura) | **4800** | `ENCODER_CPR` (`main.h:15`) |
-| Canal A | **PA15** (TIM2_CH1, AF1) | `PIN_ENC_A` (`main.h:50`) |
-| Canal B | **PB3** (TIM2_CH2, AF1) | `PIN_ENC_B` (`main.h:51`) |
-| Índice (Z) | **PB4** (EXTI4) | `PIN_ENC_Z` (`main.h:52`) |
+| Modelo | E6B2-CWZ6C | comentario en `project_config.h` |
+| PPR | **1200** | `ENCODER_PPR` (`project_config.h`) |
+| CPR (×4 cuadratura) | **4800** | `ENCODER_CPR` (`project_config.h`) |
+| Canal A | **PA15** (TIM2_CH1, AF1) | `PIN_ENC_A` (`project_config.h`) |
+| Canal B | **PB3** (TIM2_CH2, AF1) | `PIN_ENC_B` (`project_config.h`) |
+| Índice (Z) | **PB4** (EXTI4) | `PIN_ENC_Z` (`project_config.h`) |
 | Periodo TIM2 | 65535 | `main.c`: `MX_TIM2_Init` |
 | Modo conteo | TI12 (ambos canales, ×4) | `main.c` |
 
@@ -369,8 +419,8 @@ Definido en `main.h` (líneas 11–15) y leído por TIM2 en modo cuadratura.
 
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
-| Tipo | **LJ12A3** (inductivo) | `main.h` (comentario línea 55) |
-| Pin | **PB5** | `PIN_STEER_CENTER` (`main.h:57`) |
+| Tipo | **LJ12A3** (inductivo) | `project_config.h` |
+| Pin | **PB5** | `PIN_STEER_CENTER` (`project_config.h`) |
 | Interrupción | EXTI5 (flanco ascendente, pull-up) | `main.c`: GPIO init |
 | Función | Detecta un tornillo en la cremallera en la posición de centro |
 | Uso | Calibración automática al arranque (`steering_centering.c`) |

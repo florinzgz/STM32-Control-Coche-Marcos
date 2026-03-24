@@ -88,16 +88,40 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 
 > ✅ RPWM y LPWM en el **mismo** timer (TIM8). Con OCPreload activo, overlap = 0 µs.
 
-### Conexiones de potencia BTS7960 (por cada driver)
+### Conexiones de potencia BTS7960 (por cada driver de tracción)
 
 | Cable | De | A (BTS7960) | Notas |
 |-------|-----|-----------|-------|
-| — | Batería 24V+ | VCC (motor power) | Cable grueso ≥2.5 mm² |
-| — | Batería 24V- | GND (motor power) | Cable grueso ≥2.5 mm² |
-| — | Motor cable A | OUT1 | Al motor DC |
-| — | Motor cable B | OUT2 | Al motor DC |
+| — | Batería 24V+ (vía relé TRAC + shunt INA226) | B+ (motor power) | Cable grueso ≥2.5 mm² |
+| — | Batería 24V- | B- / GND (motor power) | Cable grueso ≥2.5 mm² |
+| — | Motor cable A | M+ (OUT1) | Al motor DC |
+| — | Motor cable B | M- (OUT2) | Al motor DC |
 | — | STM32 3.3V | VCC (lógica) | Alimentación lógica del driver (⚠️ usar 3.3V, NO 5V — ver nota abajo) |
 | — | STM32 GND | GND (lógica) | **GND COMÚN OBLIGATORIO** |
+
+### ⚡ Condensadores de protección — OBLIGATORIOS (por cada BTS7960 de tracción)
+
+Instalar lo más cerca posible de cada módulo BTS7960 para suprimir transitorios EMI del PWM a 20 kHz:
+
+| Componente | Valor | Conexión | Función | Sin él puede pasar... |
+|-----------|-------|----------|---------|----------------------|
+| C_bulk (electrolítico) | **470 µF / 35 V** | Entre **B+** y **GND** del driver | Reserva de energía; absorbe inrush y caídas bruscas de corriente al arrancar el motor | Caída de tensión en el bus 24V, reseteo del STM32 por ruido |
+| C_bypass (cerámico X7R) | **100 nF / 50 V** | Entre **B+** y **GND**, lo más cerca posible del IC | Filtro de alta frecuencia (PWM 20 kHz y sus armónicos) | Interferencias en I2C, CAN y ADC del pedal |
+| C_logica (cerámico X7R) | **100 nF / 50 V** | Entre **VCC lógico** y **GND lógico** del BTS7960 | Desacoplo local del buffer 74HC244; evita glitches lógicos a 20 kHz | Control intermitente o errático del motor |
+| C_motor (cerámico X7R) | **100 nF / 50 V** | Entre terminales **M+** y **M-** del motor (junto al motor) | Snubber EMI; suprime picos de contra-EMF del motor brushed | Ruido RF en I2C/CAN/ADC; posible daño al BTS7960 |
+
+```
+         B+  ──────┬──────────────────► BTS7960 B+
+                   │                         │
+             [470µF/35V]  [100nF/50V]    Motor
+              (bulk)       (bypass)     M+ ──┤
+                   │           │             │ [100nF/50V]
+         GND ──────┴───────────┴             │   (snubber)
+                                        M- ──┤
+         VCC_logic ──────┬──────────► BTS7960 VCC             │
+                   [100nF/50V]          └──────────────────────┘
+         GND_logic ──────┘
+```
 
 > ⚠️ **IMPORTANTE:** El GND del STM32, de los BTS7960, y de la fuente 24V deben estar conectados entre sí (GND común). Sin esto, las señales RPWM y LPWM no funcionan.
 >
@@ -115,11 +139,37 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 | 14 | **PA7** (TIM3_CH2, AF2) | LPWM | PWM 20 kHz — derecha |
 | — | **3.3V** (directo) | R_EN + L_EN (unidos) | Tied HIGH permanente — siempre habilitado |
 
-**Alimentación:** Fuente de 12V separada para el motor de dirección.
+**Alimentación:** Fuente de 12V separada para el motor de dirección (vía relé DIR + shunt INA226 #5).
 
 > ⚠️ PC8 y PC9 ya no son STEER PWM/EN. Son ahora RPWM_RR y LPWM_RR (TIM8_CH3/CH4).
 > ⚠️ PC4 ya no es DIR_STEER. Queda libre; dejar desconectado o como GPIO output LOW.
 > ✅ RPWM y LPWM en el **mismo** timer (TIM3). TIM3 no tiene BREAK input; los fault handlers zerean CCR1/CCR2 por software.
+
+### ⚡ Condensadores de protección — OBLIGATORIOS (BTS7960 de dirección)
+
+Instalar lo más cerca posible del módulo BTS7960 de dirección (bus 12V):
+
+| Componente | Valor | Conexión | Función | Sin él puede pasar... |
+|-----------|-------|----------|---------|----------------------|
+| C_bulk (electrolítico) | **470 µF / 25 V** | Entre **B+** (12V) y **GND** del driver | Reserva de energía; absorbe inrush y oscilaciones al girar la dirección | Oscilación en el bus 12V; comportamiento errático del volante |
+| C_bypass (cerámico X7R) | **100 nF / 50 V** | Entre **B+** y **GND**, lo más cerca posible del IC | Filtro de alta frecuencia (PWM 20 kHz) | Interferencias EMI en sensores y CAN |
+| C_logica (cerámico X7R) | **100 nF / 50 V** | Entre **VCC lógico** y **GND lógico** del BTS7960 | Desacoplo local del buffer 74HC244 | Control intermitente del motor de dirección |
+| C_motor (cerámico X7R) | **100 nF / 50 V** | Entre terminales **M+** y **M-** del motor (junto al motor) | Snubber EMI; suprime picos de contra-EMF del motor de dirección | Ruido RF en encoder (PA15/PB3), afecta calibración de centrado |
+
+```
+         B+ (12V) ──┬──────────────────► BTS7960 STEER B+
+                    │                           │
+             [470µF/25V]  [100nF/50V]        Motor STEER
+              (bulk)       (bypass)         M+ ──┤
+                    │           │                │ [100nF/50V]
+         GND ───────┴───────────┴                │   (snubber)
+                                             M- ──┤
+         VCC_logic ──────┬──────────► BTS7960 VCC              │
+                   [100nF/50V]          └───────────────────────┘
+         GND_logic ──────┘
+```
+
+> ⚠️ **ESPECIALMENTE IMPORTANTE para el motor de dirección:** El condensador snubber en los terminales del motor (M+/M-) es crítico porque el encoder E6B2-CWZ6C está físicamente cerca del motor. Sin él, la contra-EMF del motor de dirección genera ruido RF que puede corromper los pulsos del encoder y provocar fallos de centrado (`SAFETY_ERROR_CENTERING`).
 
 ---
 
@@ -621,18 +671,35 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 
 ### Componentes de protección (OBLIGATORIOS — PR #120)
 
+#### Condensadores por motor (5 motores × 4 condensadores = 20 condensadores en total)
+
+| Qty | Componente | Valor | Ubicación | Función |
+|-----|-----------|-------|-----------|---------|
+| 4 | Condensador bulk (motores tracción) | **470 µF / 35 V** electrolítico | Entre B+ y GND de cada BTS7960 de tracción (FL, FR, RL, RR) | Reserva energía, absorbe inrush al arrancar, filtra transitorios DC |
+| 1 | Condensador bulk (dirección) | **470 µF / 25 V** electrolítico | Entre B+ (12V) y GND del BTS7960 STEER | Igual para el bus de 12V del motor de dirección |
+| 5 | Condensador bypass potencia | **100 nF / 50 V** X7R cerámico | Entre B+ y GND de cada BTS7960 (todos), lo más cerca del IC | Filtra armónicos del PWM 20 kHz en el bus de potencia |
+| 5 | Condensador bypass lógica | **100 nF / 50 V** X7R cerámico | Entre VCC lógico y GND lógico de cada BTS7960 (junto al conector VCC) | Desacoplo local del 74HC244; evita glitches a 20 kHz |
+| 5 | Condensador snubber motor | **100 nF / 50 V** X7R cerámico | Entre terminales **M+** y **M-** de cada motor (junto al motor, NO en el BTS7960) | Suprime picos de contra-EMF del motor brushed; protege encoder y señales I2C/CAN |
+
+#### Diodos y snubbers para relés
+
 | Qty | Componente | Valor | Uso | Notas |
 |-----|-----------|-------|-----|-------|
-| 5 | Diodo flyback | **1N4007** (1A, 1000V) | Uno por bobina de relé (MAIN, TRAC, DIR, LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; incluido en muchos módulos HY-M158 — verificar |
-| 5 | Condensador snubber | **100 nF / 250V** (polipropileno) | En paralelo con contactos COM–NO de cada relé (5 relés) | Reduce arcos en conmutación; 250V para margen ante picos inductivos en carga inductiva 24V |
-| 5 | Resistencia snubber | **100 Ω / 0.5W** | En serie con condensador snubber (RC snubber, 5 relés) | Limita corriente de descarga del condensador |
-| 5 | Condensador bulk | **470 µF / 35V** (electrolítico) | Uno por BTS7960, entre B+ y GND del driver | Reserva de energía, filtra transitorios de carga del motor |
-| 10 | Condensador bypass | **100 nF / 50V** (X7R/X5R cerámico) | Dos por BTS7960 (uno en B+/GND, uno en VCC lógico/GND) | Filtra ruido PWM 20 kHz en alimentación |
-| 5 | Diodo rueda libre motor | **SB560** Schottky (5A, 60V) o similar | Opcional: uno por motor, entre terminales del motor (cable A–cable B, no en el BTS7960) | El BTS7960 ya incluye diodos internos de protección. Un diodo Schottky externo de 60V ≥3A en los terminales del motor añade protección ante contra-EMF de larga duración. Usar 60V mínimo (margen sobre 24V). |
+| 5 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé (MAIN, TRAC, DIR, LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; incluido en muchos módulos HY-M158 — verificar |
+| 5 | Condensador snubber contacto relé | **100 nF / 250 V** (polipropileno) | En paralelo con contactos COM–NO de cada relé (5 relés) | Reduce arcos en conmutación; 250V para margen ante picos inductivos |
+| 5 | Resistencia snubber contacto relé | **100 Ω / 0.5 W** | En serie con el condensador snubber de contacto (RC snubber) | Limita corriente de descarga del condensador |
+
+#### Protección adicional (opcional pero recomendada)
+
+| Qty | Componente | Valor | Uso | Notas |
+|-----|-----------|-------|-----|-------|
+| 5 | Diodo Schottky volante libre motor | **SB560** o similar (5A, 60V) | Uno por motor, entre terminales M+ y M- (en paralelo con el motor) | El BTS7960 ya incluye diodos internos; el diodo externo añade protección extra ante contra-EMF prolongada. Usar ≥60V por margen sobre 24V |
 
 > ⚠️ Los diodos flyback en la bobina de relé son críticos. Sin ellos, al desactivar el relé se genera un pico de cientos de voltios que puede destruir el transistor del módulo optoacoplador.
 >
 > ⚠️ Los condensadores bulk en cada BTS7960 son especialmente importantes con la nueva arquitectura RPWM/LPWM directo, ya que el driver maneja transiciones de dirección con mayor frecuencia.
+>
+> ⚠️ El condensador snubber en los terminales del motor de dirección (M+/M-) es especialmente crítico porque el encoder E6B2-CWZ6C está físicamente cerca: sin él, la contra-EMF puede corromper los pulsos del encoder y provocar `SAFETY_ERROR_CENTERING`.
 
 ### Pines liberados (PC0–PC4) — ya no se cablean
 
@@ -699,12 +766,13 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 
 ## REFERENCIAS
 
+- `docs/MATERIALES_POR_MODULO.md` — **Lista completa de materiales por módulo y por conexión (BOM)**
 - `docs/PINOUT_DEFINITIVO.md` — Tabla de pines detallada
 - `docs/HARDWARE_WIRING_MANUAL.md` — Manual eléctrico completo
 - `docs/HARDWARE_SPECIFICATION.md` — Especificaciones de componentes
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Conexión CAN detallada
 - `docs/TOFSENSE_M_WIRING_GUIDE.md` — Guía de conexión TOFSense-M S (sensor obstáculos)
 - `docs/HARDWARE_VALIDATION_PROCEDURE.md` — Procedimiento de validación Phase 1
-- `Core/Inc/main.h` — Definiciones de pines en firmware
+- `Core/Inc/project_config.h` — **Fuente de verdad de definiciones de pines en firmware**
 - `esp32/platformio.ini` — Pines ESP32 (CAN + Display)
 - `esp32/src/sensors/obstacle_sensor.h` — Configuración UART del TOFSense-M (GPIO18, 921600 bps)
