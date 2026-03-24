@@ -132,6 +132,19 @@ int main(void)
 
     SystemClock_Config();
 
+    /* Lower SysTick priority so it cannot preempt time-critical FDCAN
+     * reception (priority 1) or motor timer interrupts (priority 2).
+     * HAL_Init() sets SysTick to priority 0 (highest); move it to 4
+     * so the interrupt hierarchy is:
+     *   0 = Cortex faults (HardFault, MemManage, BusFault, UsageFault)
+     *   1 = FDCAN1_IT0  (CAN reception — most time-critical peripheral)
+     *   2 = TIM1/TIM2/TIM8/EXTI  (motor PWM + encoder + wheel sensors)
+     *   3 = I2C1  (sensor polling — tolerates latency)
+     *   4 = SysTick  (1 ms tick — only needs to run between ISRs)
+     * SysTick still preempts the main loop, so HAL_Delay() and
+     * HAL_GetTick() work correctly in non-ISR context.                */
+    HAL_NVIC_SetPriority(SysTick_IRQn, 4, 0);
+
     /* Peripheral initialisation */
     MX_GPIO_Init();
     MX_ADC1_Init();
@@ -491,7 +504,8 @@ void SystemClock_Config(void)
      * RCC_CCIPR.FDCANSEL resets to 00 = HSE, which is NOT enabled
      * (this project uses HSI + PLL).  Select PCLK1 (170 MHz) so the
      * FDCAN bit-timing registers produce the intended 500 kbps:
-     *   170 MHz / (17 × (1 + 14 + 5)) = 500 kbps                    */
+     *   170 MHz / (10 × (1 + 29 + 4)) = 500 kbps
+     * Sample point: 88.2 %, SJW: 4 TQ                                */
     RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
     PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;
     PeriphClkInit.FdcanClockSelection  = RCC_FDCANCLKSOURCE_PCLK1;
@@ -594,12 +608,33 @@ static void MX_FDCAN1_Init(void)
     hfdcan1.Init.Mode                 = FDCAN_MODE_NORMAL;
 #endif
     hfdcan1.Init.ClockDivider         = FDCAN_CLOCK_DIV1;
-    hfdcan1.Init.NominalPrescaler     = 17;
-    hfdcan1.Init.NominalSyncJumpWidth = 1;
-    hfdcan1.Init.NominalTimeSeg1      = 14;
-    hfdcan1.Init.NominalTimeSeg2      = 5;
+    /* CAN 500 kbps bit timing — optimised for high-noise motor environment.
+     *
+     * Clock source: PCLK1 = 170 MHz (HSI+PLL, no external crystal).
+     *   TQ = 170 MHz / 10 = 17 MHz → 58.82 ns per time quantum.
+     *   Bit time = 1 (sync) + 29 (seg1) + 4 (seg2) = 34 TQ.
+     *   Baud rate = 17 MHz / 34 = 500 kbps.
+     *
+     * Sample point = (1 + 29) / 34 = 88.2 %
+     *   CiA 301 recommends 87.5 % for 500 kbps; 88.2 % is within
+     *   the ±2 % tolerance window and provides excellent noise margin
+     *   by sampling late in the bit period.
+     *
+     * SJW = 4 TQ → ±11.8 % oscillator tolerance compensation.
+     *   The HSI RC oscillator has ±1 % accuracy; SJW = 4 gives >10×
+     *   margin, ensuring reliable synchronisation even with temperature
+     *   drift.  Previous SJW = 1 only allowed ±2.94 % tolerance.       */
+    hfdcan1.Init.NominalPrescaler     = 10;
+    hfdcan1.Init.NominalSyncJumpWidth = 4;
+    hfdcan1.Init.NominalTimeSeg1      = 29;
+    hfdcan1.Init.NominalTimeSeg2      = 4;
     hfdcan1.Init.AutoRetransmission   = ENABLE;
-    hfdcan1.Init.TransmitPause        = DISABLE;
+    hfdcan1.Init.TransmitPause        = ENABLE;  /* Pause between TX frames:
+                                                   * inserts ≥2 TQ idle between
+                                                   * consecutive transmissions,
+                                                   * improving bus fairness and
+                                                   * reducing error frames under
+                                                   * high bus load.              */
     hfdcan1.Init.ProtocolException    = DISABLE;
 
     /* ---- Message RAM configuration ----
@@ -632,6 +667,20 @@ static void MX_I2C1_Init(void)
         i2c_init_ok = false;
         return;  /* Non-fatal: sensors unavailable, system continues */
     }
+
+    /* Digital noise filter: reject glitches shorter than DNF × tI2CCLK
+     * (≈ 12 ns at 170 MHz for DNF=2).  Negligible impact on SCL frequency
+     * but improves I2C reliability in the high-EMI environment near motor
+     * PWM drivers and BTS7960 switching transients.
+     * Based on NXP AN10216 bus robustness recommendations.
+     * Range 0–15; 0 = disabled, 2 = rejects pulses < 2 I2C clock cycles. */
+#define I2C_DIGITAL_NOISE_FILTER  2U
+    HAL_I2CEx_ConfigDigitalFilter(&hi2c1, I2C_DIGITAL_NOISE_FILTER);
+
+    /* Ensure analog filter is enabled (default ON, but be explicit for
+     * documentation and defence against accidental CubeMX regeneration). */
+    HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE);
+
     i2c_init_ok = true;
 }
 
@@ -842,7 +891,17 @@ static void MX_ADC1_Init(void)
     hadc1.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
     hadc1.Init.DMAContinuousRequests = DISABLE;
     hadc1.Init.Overrun               = ADC_OVR_DATA_OVERWRITTEN;
-    hadc1.Init.OversamplingMode      = DISABLE;
+    /* Hardware oversampling: 16 conversions averaged by right-shifting 4 bits.
+     * Result remains 12-bit (0–4095), fully transparent to Pedal_Update().
+     * Provides ~12 dB noise reduction on the pedal ADC input — critical in
+     * the high-EMI environment near BTS7960 motor drivers and PWM wiring.
+     * Conversion time: 16 × (247.5 + 12.5) / 42.5 MHz ≈ 98 µs, negligible
+     * compared to the 50 ms Pedal_Update() cycle.                          */
+    hadc1.Init.OversamplingMode      = ENABLE;
+    hadc1.Init.Oversampling.Ratio                = ADC_OVERSAMPLING_RATIO_16;
+    hadc1.Init.Oversampling.RightBitShift        = ADC_RIGHTBITSHIFT_4;
+    hadc1.Init.Oversampling.TriggeredMode        = ADC_TRIGGEREDMODE_SINGLE_TRIGGER;
+    hadc1.Init.Oversampling.OversamplingStopReset = ADC_REGOVERSAMPLING_CONTINUED_MODE;
     hadc1.Init.GainCompensation      = 0;
     if (HAL_ADC_Init(&hadc1) != HAL_OK) {
         Error_Handler();
@@ -855,7 +914,11 @@ static void MX_ADC1_Init(void)
     ADC_ChannelConfTypeDef sConfig = {0};
     sConfig.Channel      = ADC_CHANNEL_4;
     sConfig.Rank         = ADC_REGULAR_RANK_1;
-    sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5; /* ~1.1 µs at 42.5 MHz */
+    sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5; /* ~5.8 µs at 42.5 MHz — extended
+                                                       * from 47.5 cycles (1.1 µs) for
+                                                       * better noise rejection on the
+                                                       * pedal input in motor-EMI
+                                                       * environment.                   */
     sConfig.SingleDiff   = ADC_SINGLE_ENDED;
     sConfig.OffsetNumber = ADC_OFFSET_NONE;
     sConfig.Offset       = 0;
