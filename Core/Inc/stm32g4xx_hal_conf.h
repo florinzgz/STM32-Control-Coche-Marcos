@@ -1,14 +1,38 @@
-/* STM32G4 HAL configuration header file */
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file    stm32g4xx_hal_conf.h
+  * @brief   HAL configuration file.
+  ******************************************************************************
+  */
+/* USER CODE END Header */
 
-#ifndef STM32G4XX_HAL_CONF_H
-#define STM32G4XX_HAL_CONF_H
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef STM32G4xx_HAL_CONF_H
+#define STM32G4xx_HAL_CONF_H
 
 #ifdef __cplusplus
  extern "C" {
 #endif
 
-/* Module Selection */
+/* Exported types ------------------------------------------------------------*/
+/* USER CODE BEGIN ET */
+
+/* USER CODE END ET */
+
+/* Exported constants --------------------------------------------------------*/
+/* USER CODE BEGIN EC */
+
+/* USER CODE END EC */
+
+/* ########################## Module Selection ############################## */
+/**
+  * @brief This is the list of modules to be used in the HAL driver
+  */
 #define HAL_MODULE_ENABLED
+/* USER CODE BEGIN DEFINE */
+
+/* USER CODE END DEFINE */
 #define HAL_ADC_MODULE_ENABLED
 #define HAL_CORTEX_MODULE_ENABLED
 #define HAL_DMA_MODULE_ENABLED
@@ -22,7 +46,7 @@
 #define HAL_RCC_MODULE_ENABLED
 #define HAL_TIM_MODULE_ENABLED
 
-/* Oscillator Values */
+/* ########################## Oscillator Values adaptation ################## */
 #if !defined  (HSE_VALUE) 
   #define HSE_VALUE    8000000U   /*!< Value of the External oscillator in Hz */
 #endif /* HSE_VALUE */
@@ -56,7 +80,7 @@
   #define HSI48_VALUE              48000000U /*!< Value of the HSI48 oscillator in Hz */
 #endif /* HSI48_VALUE */
 
-/* System Configuration */
+/* ######################### System Configuration ########################## */
 #define  VDD_VALUE                    3300U /*!< Value of VDD in mv */
 #define  TICK_INT_PRIORITY            0U    /*!< tick interrupt priority */
 #define  USE_RTOS                     0U
@@ -64,7 +88,7 @@
 #define  INSTRUCTION_CACHE_ENABLE     1U
 #define  DATA_CACHE_ENABLE            1U
 
-/* Assert Selection */
+/* ########################## Assert Selection ############################## */
 #ifdef  USE_FULL_ASSERT
   #define assert_param(expr) ((expr) ? (void)0U : assert_failed((uint8_t *)__FILE__, __LINE__))
   void assert_failed(uint8_t* file, uint32_t line);
@@ -72,7 +96,11 @@
   #define assert_param(expr) ((void)0U)
 #endif /* USE_FULL_ASSERT */
 
-/* Include HAL modules */
+/* Includes ------------------------------------------------------------------*/
+/**
+  * @brief Include module's header file
+  */
+
 #ifdef HAL_RCC_MODULE_ENABLED
   #include "stm32g4xx_hal_rcc.h"
 #endif /* HAL_RCC_MODULE_ENABLED */
@@ -122,8 +150,17 @@
   #include "stm32g4xx_hal_tim.h"
 #endif /* HAL_TIM_MODULE_ENABLED */
 
+/* Exported macro ------------------------------------------------------------*/
+/* USER CODE BEGIN EM */
+
+/* USER CODE END EM */
+
+/* USER CODE BEGIN CALLBACK */
+
+/* USER CODE END CALLBACK */
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* STM32G4XX_HAL_CONF_H */
+#endif /* STM32G4xx_HAL_CONF_H */
