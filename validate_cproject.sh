@@ -338,6 +338,42 @@ else
     WARNINGS=$((WARNINGS + 1))
 fi
 
+# ---- Check 12: .mxproject / .cproject consistency ----
+echo ""
+echo "12. .mxproject / .cproject source file consistency"
+if [ -f ".mxproject" ]; then
+    DRIVERS_EXCL=$(sed -n 's/.*<entry excluding="\([^"]*\)".*name="Drivers".*/\1/p' "$CPROJECT")
+    if [ -n "$DRIVERS_EXCL" ]; then
+        # Get excluded .c files, convert path separators for matching .mxproject
+        EXCL_C_FILES=$(echo "$DRIVERS_EXCL" | tr '|' '\n' | grep '\.c$')
+        MX_SRC_LINE=$(grep "^SourceFiles=" .mxproject | grep -v "^SourceFiles#")
+        CONS_ERRS=0
+        if [ -n "$EXCL_C_FILES" ] && [ -n "$MX_SRC_LINE" ]; then
+            while IFS= read -r excl_file; do
+                # Convert forward slashes to backslashes to match .mxproject format
+                excl_bs=$(echo "$excl_file" | sed 's|/|\\|g')
+                full_path="Drivers\\${excl_bs}"
+                if echo "$MX_SRC_LINE" | grep -qF "$full_path"; then
+                    echo "   ❌ FAIL — .mxproject SourceFiles contains excluded file: $full_path"
+                    CONS_ERRS=$((CONS_ERRS + 1))
+                fi
+            done <<< "$EXCL_C_FILES"
+        fi
+        if [ "$CONS_ERRS" -eq 0 ]; then
+            echo "   ✅ PASS — .mxproject and .cproject are consistent."
+        else
+            echo "   $CONS_ERRS file(s) in .mxproject conflict with .cproject excludes."
+            echo "   Run fix_build.sh to repair."
+            ERRORS=$((ERRORS + 1))
+        fi
+    else
+        echo "   ✅ PASS — no Drivers sourceEntry exclusions to check."
+    fi
+else
+    echo "   ⚠️  SKIP — .mxproject not found."
+    WARNINGS=$((WARNINGS + 1))
+fi
+
 # ---- Summary ----
 echo ""
 echo "======================================"
