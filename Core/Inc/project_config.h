@@ -134,7 +134,7 @@
 /* ========================================================================== */
 #define PIN_ENC_A          GPIO_PIN_15  /* PA15 - TIM2_CH1 */
 #define PIN_ENC_B          GPIO_PIN_3   /* PB3  - TIM2_CH2 */
-#define PIN_ENC_Z          GPIO_PIN_4   /* PB4  - EXTI4 (index pulse) */
+#define PIN_ENC_Z          GPIO_PIN_4   /* PB4  - GPIO polled input (index pulse) */
 
 /* ========================================================================== */
 /*                       STEERING CENTER INDUCTIVE SENSOR                     */
