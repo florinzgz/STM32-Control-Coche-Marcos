@@ -18,11 +18,22 @@ void Wheel_FR_IRQHandler(void);
 void Wheel_RL_IRQHandler(void);
 void Wheel_RR_IRQHandler(void);
 
-float Wheel_GetSpeed_FL(void);
+/* Call once per control cycle (e.g. 10 ms tier) to compute all wheel
+ * speeds from accumulated EXTI pulse counts.  Getters below then
+ * return the cached values — no redundant computation, no side-effects
+ * on shared ISR counters from multiple call sites.                     */
+void  Wheel_UpdateSpeeds(void);
+
+float Wheel_GetSpeed_FL(void);   /* Returns km/h (cached from last update) */
 float Wheel_GetSpeed_FR(void);
 float Wheel_GetSpeed_RL(void);
 float Wheel_GetSpeed_RR(void);
 float Wheel_GetRPM_FL(void);
+
+/* Returns true if wheel idx (0-3) has not received a valid pulse
+ * within WHEEL_STALE_TIMEOUT_MS — indicates sensor disconnect or
+ * vehicle stopped.                                                     */
+bool  Wheel_IsStale(uint8_t idx);
 
 /* ---- Steering center inductive sensor (EXTI) ---- */
 void SteeringCenter_IRQHandler(void);

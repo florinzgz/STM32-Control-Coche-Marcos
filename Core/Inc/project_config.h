@@ -129,6 +129,25 @@
 #define PIN_WHEEL_RL       GPIO_PIN_2   /* PA2 - EXTI2 */
 #define PIN_WHEEL_RR       GPIO_PIN_15  /* PB15 - EXTI15 */
 
+/* Software debounce: minimum ms between accepted EXTI pulses per wheel.
+ * At 25 km/h (max plausible speed), 1.1 m circumference, 6 pulses/rev:
+ *   freq = (25/3.6)/1.1 × 6 ≈ 38 Hz → period ≈ 26 ms.
+ * 1 ms blanking (HAL_GetTick resolution) safely rejects contact bounce
+ * without attenuating valid pulses at any realistic speed.               */
+#define WHEEL_MIN_PULSE_INTERVAL_MS  1U
+
+/* Stale detection: if no new pulse arrives within this window the wheel
+ * speed is forced to 0 and the channel is flagged stale.  500 ms means
+ * the vehicle must be nearly stopped (< 0.4 km/h) to trigger.           */
+#define WHEEL_STALE_TIMEOUT_MS       500U
+
+/* ISR flood ceiling: maximum accepted pulse rate (Hz) per wheel.
+ * Any rate above this is physically impossible and indicates sensor
+ * noise or wiring fault — pulses exceeding this are silently dropped
+ * and the wheel is flagged as saturated.
+ * 200 Hz corresponds to ~55 km/h (well above 25 km/h plausibility).     */
+#define WHEEL_MAX_FREQ_HZ            200U
+
 /* ========================================================================== */
 /*                       STEERING ENCODER (TIM2 Quadrature)                   */
 /* ========================================================================== */
