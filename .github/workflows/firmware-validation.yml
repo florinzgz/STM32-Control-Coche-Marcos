@@ -39,7 +39,9 @@ jobs:
                    Core/Src/steering_cal_store.c Core/Src/math_safety.c \
                    Core/Src/stm32g4xx_it.c Core/Src/stm32g4xx_hal_msp.c \
                    Core/Src/system_stm32g4xx.c Core/Src/syscalls.c \
-                   Core/Src/sysmem.c; do
+                   Core/Src/sysmem.c \
+                   Core/Src/i2c.c Core/Src/adc.c Core/Src/fdcan.c \
+                   Core/Src/gpio.c Core/Src/iwdg.c Core/Src/tim.c; do
             if arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard \
                 -mfpu=fpv4-sp-d16 -std=gnu11 -DUSE_HAL_DRIVER -DSTM32G474xx \
                 -Ianalysis_artifacts/stubs -ICore/Inc \
@@ -128,6 +130,7 @@ jobs:
           #   unusedStructMember    — test structs mirror production layout
           cppcheck --enable=all --inconclusive --force \
             --suppress=missingIncludeSystem --suppress=missingInclude \
+            --suppress=unmatchedSuppression \
             --suppress=unusedFunction \
             --suppress=knownConditionTrueFalse \
             --suppress=constParameterPointer \

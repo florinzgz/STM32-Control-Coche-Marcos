@@ -18,6 +18,21 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
+/* USER CODE BEGIN Includes */
+
+/* USER CODE END Includes */
+
+/* USER CODE BEGIN Private defines */
+/* NOTE: Do NOT redefine HAL_StatusTypeDef or its enumerators (HAL_OK, etc.)
+   here — they are provided by the HAL driver via stm32g4xx_hal_def.h and
+   included through main.h → stm32g4xx_hal.h.  Duplicating them causes
+   'redeclaration of enumerator' errors after CubeMX code regeneration. */
+/* USER CODE END Private defines */
+
+/* USER CODE BEGIN Prototypes */
+
+/* USER CODE END Prototypes */
+
 #ifdef __cplusplus
 }
 #endif
