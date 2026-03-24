@@ -1292,6 +1292,22 @@ void Safety_CheckSensors(void)
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
+        /* Stale detection: flag sensor if no pulses within timeout.
+         * A stale wheel while other wheels report speed indicates a
+         * disconnected or failed sensor — triggers DEGRADED via the
+         * fault_count accumulator below.                                */
+        if (Wheel_IsStale(i) && spd[i] == 0.0f) {
+            /* Only flag if at least one other wheel has nonzero speed.
+             * All wheels stale at zero = vehicle stopped (normal).      */
+            uint8_t any_moving = 0;
+            for (uint8_t j = 0; j < 4; j++) {
+                if (j != i && spd[j] > 1.0f) { any_moving = 1; break; }
+            }
+            if (any_moving) {
+                ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                fault_count++;
+            }
+        }
     }
 
     /* Pedal plausibility: dual-channel cross-validation.

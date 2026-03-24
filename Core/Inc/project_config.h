@@ -148,6 +148,13 @@
  * 200 Hz corresponds to ~55 km/h (well above 25 km/h plausibility).     */
 #define WHEEL_MAX_FREQ_HZ            200U
 
+/* Output clamp: computed speed is hard-limited to this value (km/h).
+ * Prevents NaN, negative, or wildly impossible speed readings from
+ * propagating to traction control, ABS, and CAN telemetry.
+ * Set to 40 km/h — well above the 25 km/h safety plausibility
+ * threshold in safety_system.c, but low enough to catch malfunction.     */
+#define WHEEL_SPEED_CLAMP_KMH        40.0f
+
 /* ========================================================================== */
 /*                       STEERING ENCODER (TIM2 Quadrature)                   */
 /* ========================================================================== */

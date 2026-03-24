@@ -17,6 +17,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <limits.h>
 
 /* ---- Stub HAL handles required by main.h externs ---- */
 #ifdef HOST_TEST
@@ -270,6 +271,127 @@ static void test_flood_math(void)
 }
 
 /* =====================================================================
+ *  9. Counter overflow delta safety
+ * ===================================================================== */
+
+static void test_counter_overflow(void)
+{
+    /* uint32_t subtraction is modular: wrapping yields correct delta.
+     * Simulate counter near UINT32_MAX that wraps around.              */
+    uint32_t prev = UINT32_MAX - 5;
+    uint32_t curr = 3;  /* Wrapped past 0 */
+    uint32_t delta = curr - prev;  /* Should be 8 */
+
+    ASSERT_EQ_U32(delta, 9, "Overflow delta: (3) - (MAX-5) == 9");
+
+    /* Edge case: no wrap */
+    prev = 100; curr = 106;
+    delta = curr - prev;
+    ASSERT_EQ_U32(delta, 6, "Normal delta: 106 - 100 == 6");
+
+    /* Edge case: same value (no pulses) */
+    prev = 42; curr = 42;
+    delta = curr - prev;
+    ASSERT_EQ_U32(delta, 0, "Zero delta: 42 - 42 == 0");
+
+    /* Large wrap distance */
+    prev = UINT32_MAX;
+    curr = 0;
+    delta = curr - prev;
+    ASSERT_EQ_U32(delta, 1, "Wrap by 1: 0 - MAX == 1");
+}
+
+/* =====================================================================
+ *  10. Speed clamp ceiling validation
+ * ===================================================================== */
+
+static void test_speed_clamp(void)
+{
+    /* WHEEL_SPEED_CLAMP_KMH must be defined and positive */
+    ASSERT_TRUE(WHEEL_SPEED_CLAMP_KMH > 0.0f,
+                "Speed clamp must be positive");
+
+    /* Must be above the physical max speed (25 km/h safety threshold) */
+    ASSERT_TRUE(WHEEL_SPEED_CLAMP_KMH > 25.0f,
+                "Speed clamp must exceed safety threshold (25 km/h)");
+
+    /* Must be below absurd values — catches wild computation errors */
+    ASSERT_TRUE(WHEEL_SPEED_CLAMP_KMH <= 100.0f,
+                "Speed clamp must be <= 100 km/h (sanity)");
+
+    /* RPM ceiling consistent with speed ceiling */
+    float rpm_ceil = WHEEL_SPEED_CLAMP_KMH / 3.6f / WHEEL_CIRCUMF_M_TEST * 60.0f;
+    printf("  INFO: Speed clamp = %.1f km/h, RPM ceiling = %.1f\n",
+           (double)WHEEL_SPEED_CLAMP_KMH, (double)rpm_ceil);
+    ASSERT_TRUE(rpm_ceil > 0.0f && rpm_ceil < 10000.0f,
+                "RPM ceiling must be reasonable");
+}
+
+/* =====================================================================
+ *  11. Period-based low-speed precision
+ * ===================================================================== */
+
+static void test_period_based_speed(void)
+{
+    /* Period measurement: single pulse with known inter-pulse time.
+     * 1 pulse, period = 200 ms between two consecutive pulses
+     * → 1/6 rev in 200 ms → 0.183 m in 0.2 s → 0.917 m/s → 3.3 km/h  */
+    uint32_t period_ms = 200;
+    float dist_per_pulse = WHEEL_CIRCUMF_M_TEST / (float)WHEEL_PULSES_REV;
+    float speed_ms       = dist_per_pulse * 1000.0f / (float)period_ms;
+    float speed_kmh      = speed_ms * 3.6f;
+
+    ASSERT_NEAR(speed_kmh, 3.3f, 0.1f,
+                "Period 200 ms → 3.3 km/h (period-based)");
+
+    /* Very slow: period = 500 ms (near stale boundary)
+     * → 0.183 m in 0.5 s → 0.367 m/s → 1.32 km/h                     */
+    period_ms = 500;
+    speed_ms  = dist_per_pulse * 1000.0f / (float)period_ms;
+    speed_kmh = speed_ms * 3.6f;
+
+    ASSERT_NEAR(speed_kmh, 1.32f, 0.05f,
+                "Period 500 ms → 1.32 km/h (near stale boundary)");
+
+    /* Count-based comparison at same rate: 1 pulse in 10 ms window
+     * gives 1/6 rev in 10 ms → 0.183 m in 0.01 s → 18.3 m/s → 66 km/h
+     * (wildly overestimated!).  Period-based gives correct 3.3 km/h.
+     * This demonstrates the quantisation error at low speed.            */
+    float count_based_kmh = dist_per_pulse * 1000.0f / 10.0f * 3.6f;
+    ASSERT_TRUE(count_based_kmh > 60.0f,
+                "Count-based at 1 pulse/10ms greatly overestimates speed");
+    ASSERT_TRUE(speed_kmh < 5.0f,
+                "Period-based gives correct low speed");
+}
+
+/* =====================================================================
+ *  12. Decay estimate (delta == 0)
+ * ===================================================================== */
+
+static void test_decay_estimate(void)
+{
+    /* When no new pulse arrives, upper-bound speed decays with time.
+     * dist_per_pulse / since_last gives decreasing upper bound.         */
+    float dist_per_pulse = WHEEL_CIRCUMF_M_TEST / (float)WHEEL_PULSES_REV;
+
+    /* 50 ms since last pulse → upper bound = 0.183 / 0.05 * 3.6 = 13.2 km/h */
+    uint32_t since_last = 50;
+    float ub = dist_per_pulse * 1000.0f / (float)since_last * 3.6f;
+    ASSERT_NEAR(ub, 13.2f, 0.1f, "Upper bound at 50 ms since last pulse");
+
+    /* 200 ms since last → upper bound = 3.3 km/h */
+    since_last = 200;
+    ub = dist_per_pulse * 1000.0f / (float)since_last * 3.6f;
+    ASSERT_NEAR(ub, 3.3f, 0.1f, "Upper bound at 200 ms since last pulse");
+
+    /* 499 ms (just before stale) → upper bound = 1.32 km/h */
+    since_last = 499;
+    ub = dist_per_pulse * 1000.0f / (float)since_last * 3.6f;
+    ASSERT_TRUE(ub > 1.0f && ub < 2.0f,
+                "Upper bound at 499 ms (near stale) is near 1.3 km/h");
+}
+
+/* =====================================================================
  *  main
  * ===================================================================== */
 
@@ -285,6 +407,10 @@ int main(void)
     test_constant_consistency();
     test_isr_load_estimate();
     test_flood_math();
+    test_counter_overflow();
+    test_speed_clamp();
+    test_period_based_speed();
+    test_decay_estimate();
 
     printf("\n--- wheel_speed tests: %d run, %d failed ---\n",
            tests_run, tests_failed);
