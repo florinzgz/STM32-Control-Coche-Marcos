@@ -36,7 +36,7 @@ C_SOURCES = \
   $(CORE_SRC)/syscalls.c \
   $(CORE_SRC)/sysmem.c
 
-# HAL driver sources (STM32G4xx HAL v1.5.1)
+# HAL driver sources (STM32G4xx HAL v1.2.2)
 HAL_SRC = Drivers/STM32G4xx_HAL_Driver/Src
 HAL_SOURCES = \
   $(HAL_SRC)/stm32g4xx_hal.c \
