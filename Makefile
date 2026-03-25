@@ -1,6 +1,5 @@
 # Makefile for ARM GCC build system for STM32G474RE
-# NOTE: Run STM32CubeMX code generation on the .ioc file first
-# to create the Drivers/ folder (HAL + CMSIS) before building.
+# Drivers/ (HAL + CMSIS) are committed in the repository.
 
 # Define the project name
 PROJECT = STM32G474RE
@@ -37,7 +36,7 @@ C_SOURCES = \
   $(CORE_SRC)/syscalls.c \
   $(CORE_SRC)/sysmem.c
 
-# HAL driver sources (added by STM32CubeMX — generate code before building)
+# HAL driver sources (STM32G4xx HAL v1.5.1)
 HAL_SRC = Drivers/STM32G4xx_HAL_Driver/Src
 HAL_SOURCES = \
   $(HAL_SRC)/stm32g4xx_hal.c \
