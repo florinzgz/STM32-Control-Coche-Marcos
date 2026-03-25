@@ -137,10 +137,11 @@ test_error_log
 test_service_mode
 test_steering_cal_store
 test_eps_params
+test_motor_control
+test_sensor_calibration
+test_wheel_speed
 
 # Pero mantener archivos esenciales
 !.gitignore
 !README.md
 !LICENSE
-test_motor_control
-test_sensor_calibration
