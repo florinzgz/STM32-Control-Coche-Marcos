@@ -77,13 +77,13 @@ typedef enum {
 
 /* SCB stub for system_stm32g4xx.c: SCB->VTOR */
 typedef struct {
-    __IO uint32_t CPUID;
+    __I  uint32_t CPUID;
     __IO uint32_t ICSR;
     __IO uint32_t VTOR;
     __IO uint32_t AIRCR;
     __IO uint32_t SCR;
     __IO uint32_t CCR;
-    __IO uint32_t SHPR[12];
+    __IO uint8_t  SHP[12];
     __IO uint32_t SHCSR;
     __IO uint32_t CFSR;
     __IO uint32_t HFSR;
@@ -299,15 +299,18 @@ typedef struct {
     __IO uint32_t CCR3;
     __IO uint32_t CCR4;
     __IO uint32_t BDTR;
-    __IO uint32_t DCR;
-    __IO uint32_t DMAR;
-    __IO uint32_t OR1;
-    __IO uint32_t CCMR3;
     __IO uint32_t CCR5;
     __IO uint32_t CCR6;
+    __IO uint32_t CCMR3;
+    __IO uint32_t DTR2;
+    __IO uint32_t ECR;
+    __IO uint32_t TISEL;
     __IO uint32_t AF1;
     __IO uint32_t AF2;
-    __IO uint32_t TISEL;
+    __IO uint32_t OR;
+         uint32_t RESERVED0[220];
+    __IO uint32_t DCR;
+    __IO uint32_t DMAR;
 } TIM_TypeDef;
 
 static TIM_TypeDef _stub_tim1, _stub_tim2, _stub_tim3, _stub_tim8;
@@ -372,9 +375,11 @@ typedef struct {
     uint32_t BreakState;
     uint32_t BreakPolarity;
     uint32_t BreakFilter;
+    uint32_t BreakAFMode;
     uint32_t Break2State;
     uint32_t Break2Polarity;
     uint32_t Break2Filter;
+    uint32_t Break2AFMode;
     uint32_t AutomaticOutput;
 } TIM_BreakDeadTimeConfigTypeDef;
 
@@ -442,6 +447,8 @@ typedef struct {
 #define TIM_CHANNEL_2   0x00000004U
 #define TIM_CHANNEL_3   0x00000008U
 #define TIM_CHANNEL_4   0x0000000CU
+#define TIM_CHANNEL_5   0x00000010U
+#define TIM_CHANNEL_6   0x00000014U
 #define TIM_CHANNEL_ALL 0x0000003CU
 
 /* TIM break/deadtime constants */
@@ -1040,40 +1047,42 @@ typedef struct {
     __IO uint32_t ICSCR;
     __IO uint32_t CFGR;
     __IO uint32_t PLLCFGR;
-    uint32_t      RESERVED0[2];
+    uint32_t      RESERVED0;
+    uint32_t      RESERVED1;
     __IO uint32_t CIER;
     __IO uint32_t CIFR;
     __IO uint32_t CICR;
-    uint32_t      RESERVED1;
+    uint32_t      RESERVED2;
     __IO uint32_t AHB1RSTR;
     __IO uint32_t AHB2RSTR;
     __IO uint32_t AHB3RSTR;
-    uint32_t      RESERVED2;
+    uint32_t      RESERVED3;
     __IO uint32_t APB1RSTR1;
     __IO uint32_t APB1RSTR2;
     __IO uint32_t APB2RSTR;
-    uint32_t      RESERVED3;
+    uint32_t      RESERVED4;
     __IO uint32_t AHB1ENR;
     __IO uint32_t AHB2ENR;
     __IO uint32_t AHB3ENR;
-    uint32_t      RESERVED4;
+    uint32_t      RESERVED5;
     __IO uint32_t APB1ENR1;
     __IO uint32_t APB1ENR2;
     __IO uint32_t APB2ENR;
-    uint32_t      RESERVED5;
+    uint32_t      RESERVED6;
     __IO uint32_t AHB1SMENR;
     __IO uint32_t AHB2SMENR;
     __IO uint32_t AHB3SMENR;
-    uint32_t      RESERVED6;
+    uint32_t      RESERVED7;
     __IO uint32_t APB1SMENR1;
     __IO uint32_t APB1SMENR2;
     __IO uint32_t APB2SMENR;
-    uint32_t      RESERVED7;
+    uint32_t      RESERVED8;
     __IO uint32_t CCIPR;
-    __IO uint32_t CCIPR2;
+    uint32_t      RESERVED9;
     __IO uint32_t BDCR;
     __IO uint32_t CSR;
     __IO uint32_t CRRCR;
+    __IO uint32_t CCIPR2;
 } RCC_TypeDef;
 
 static RCC_TypeDef _stub_rcc;
