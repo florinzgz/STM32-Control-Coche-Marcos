@@ -5,13 +5,17 @@ on:
     branches: [ main, develop ]
     paths:
       - 'Core/**'
+      - 'Drivers/**'
       - 'Makefile'
+      - 'scripts/**'
       - '.github/workflows/firmware-validation.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'Core/**'
+      - 'Drivers/**'
       - 'Makefile'
+      - 'scripts/**'
       - '.github/workflows/firmware-validation.yml'
 
 permissions:
@@ -158,3 +162,45 @@ jobs:
         run: |
           lizard Core/Src/ Core/Inc/ -l c -T cyclomatic_complexity=15 \
             -w || true  # Report but don't fail on complexity
+
+  # ── Repository integrity checks ────────────────────────────────────
+  integrity-check:
+    runs-on: ubuntu-latest
+    needs: [tests]
+    env:
+      EXPECTED_HAL_VERSION: "V1.2.2"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Check 1: Drivers/ has not changed vs main"
+        run: |
+          git fetch origin main
+          CHANGED=$(git diff --name-only origin/main...HEAD -- Drivers/ || true)
+          if [ -n "$CHANGED" ]; then
+            echo "FAIL: Drivers/ has modifications:"
+            echo "$CHANGED"
+            exit 1
+          fi
+          echo "Drivers/ unchanged — OK"
+
+      - name: "Check 2: No forbidden template .c files"
+        run: |
+          TEMPLATES=$(find . -type f -name "*template*.c" -not -path "./.git/*" || true)
+          if [ -n "$TEMPLATES" ]; then
+            echo "FAIL: Forbidden template .c files found:"
+            echo "$TEMPLATES"
+            exit 1
+          fi
+          echo "No template .c files — OK"
+
+      - name: "Check 3: HAL version is exactly ${{ env.EXPECTED_HAL_VERSION }}"
+        run: |
+          HAL_FILE="Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.c"
+          if ! grep -q "STM32G4xx HAL Driver version number $EXPECTED_HAL_VERSION" "$HAL_FILE"; then
+            echo "FAIL: HAL version mismatch (expected $EXPECTED_HAL_VERSION)"
+            grep "HAL Driver version number" "$HAL_FILE" || true
+            exit 1
+          fi
+          echo "HAL version $EXPECTED_HAL_VERSION — OK"
