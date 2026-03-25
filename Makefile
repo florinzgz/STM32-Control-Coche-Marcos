@@ -103,16 +103,8 @@ OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ASM_SOURCES:.s=.o)))
 vpath %.c $(sort $(dir $(C_SOURCES) $(HAL_SOURCES)))
 vpath %.s $(sort $(dir $(ASM_SOURCES)))
 
-# Fix .cproject before building (prevents circular-dependency errors in CubeIDE)
-fix:
-	@if [ -f fix_build.sh ]; then bash fix_build.sh; fi
-
-# Validate .cproject without modifying it (read-only health check)
-validate:
-	@if [ -f validate_cproject.sh ]; then bash validate_cproject.sh; fi
-
 # Build targets
-all: fix $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
+all: $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
 	$(SZ) $(BUILD_DIR)/$(PROJECT).elf
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
@@ -138,4 +130,4 @@ clean:
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean fix validate
+.PHONY: all clean
