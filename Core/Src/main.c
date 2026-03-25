@@ -27,6 +27,7 @@
 #include "steering_cal_store.h"
 #include "error_log.h"
 #include <math.h>
+#include "build_sanity_checks.h"
 
 /* ---- Compile-time CAN self-test option ----
  * Set to 1 to enable FDCAN1 internal loopback mode.  In loopback the
