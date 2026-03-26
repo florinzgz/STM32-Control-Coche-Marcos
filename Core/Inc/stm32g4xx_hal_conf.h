@@ -155,7 +155,11 @@
 
 /* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
-
+/* Safety: redundant I2C include -- survives CubeMX regeneration even when
+   CubeMX removes the conditional-include block outside USER CODE sections. */
+#ifdef HAL_I2C_MODULE_ENABLED
+  #include "stm32g4xx_hal_i2c.h"
+#endif
 /* USER CODE END EM */
 
 /* USER CODE BEGIN CALLBACK */
