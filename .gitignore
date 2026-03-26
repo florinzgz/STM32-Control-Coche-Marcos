@@ -4,6 +4,8 @@
 .metadata/
 .settings/*
 !.settings/org.eclipse.core.resources.prefs
+.cproject
+.mxproject
 *.launch
 *.tmp
 *.bak
