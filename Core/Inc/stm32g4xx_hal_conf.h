@@ -31,7 +31,10 @@
   */
 #define HAL_MODULE_ENABLED
 /* USER CODE BEGIN DEFINE */
-
+/* Safety guard: ensure I2C module stays enabled after CubeMX regeneration */
+#ifndef HAL_I2C_MODULE_ENABLED
+#define HAL_I2C_MODULE_ENABLED
+#endif
 /* USER CODE END DEFINE */
 #define HAL_ADC_MODULE_ENABLED
 #define HAL_CORTEX_MODULE_ENABLED
