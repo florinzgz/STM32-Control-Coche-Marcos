@@ -26,7 +26,6 @@ extern "C" {
    stm32g4xx_hal_conf.h without HAL_I2C_MODULE_ENABLED (e.g. if the I2C
    peripheral is not yet configured in the .ioc pinout).                 */
 #ifndef HAL_I2C_MODULE_ENABLED
-  #define HAL_I2C_MODULE_ENABLED
   #include "stm32g4xx_hal_i2c.h"
   #include "stm32g4xx_hal_i2c_ex.h"
 #endif
