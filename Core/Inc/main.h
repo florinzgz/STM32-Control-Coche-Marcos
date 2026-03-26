@@ -22,6 +22,14 @@ extern "C" {
 /* USER CODE BEGIN Includes */
 #include "project_config.h"
 #include <stdbool.h>
+/* Fallback: ensure I2C types are available even when CubeMX regenerates
+   stm32g4xx_hal_conf.h without HAL_I2C_MODULE_ENABLED (e.g. if the I2C
+   peripheral is not yet configured in the .ioc pinout).                 */
+#ifndef HAL_I2C_MODULE_ENABLED
+  #define HAL_I2C_MODULE_ENABLED
+  #include "stm32g4xx_hal_i2c.h"
+  #include "stm32g4xx_hal_i2c_ex.h"
+#endif
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
