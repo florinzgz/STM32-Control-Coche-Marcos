@@ -62,6 +62,10 @@
     #error "BUILD CHECK: HAL_FDCAN_MODULE_ENABLED not defined — FDCAN interrupts (CAN bus) unavailable"
   #endif
 
+  #ifndef HAL_I2C_MODULE_ENABLED
+    #error "BUILD CHECK: HAL_I2C_MODULE_ENABLED not defined — I2C bus (AS5048B steering encoder) unavailable; add #define HAL_I2C_MODULE_ENABLED in stm32g4xx_hal_conf.h"
+  #endif
+
   #ifndef HAL_TIM_MODULE_ENABLED
     #error "BUILD CHECK: HAL_TIM_MODULE_ENABLED not defined — TIM interrupts (motor PWM) unavailable"
   #endif
