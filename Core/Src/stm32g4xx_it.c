@@ -13,6 +13,23 @@ extern FDCAN_HandleTypeDef hfdcan1;
 extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 extern I2C_HandleTypeDef hi2c1;
 
+/* ---- Fault-indication LED helper ----
+ * Ensures PA5 (LD2) is driveable even if MX_GPIO_Init() has not run,
+ * then blinks LD2 forever at a rate determined by delay_count.
+ * Approximate timing at SYSCLK = 170 MHz:
+ *   800 000 → ~50 ms toggle (~10 Hz blink)
+ * 4 000 000 → ~250 ms toggle (~2 Hz blink)                            */
+static void Fault_BlinkLD2(uint32_t delay_count)
+{
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    GPIOA->MODER = (GPIOA->MODER & ~(3U << (5 * 2)))
+                 | (1U << (5 * 2));           /* PA5 = output           */
+    while (1) {
+        GPIOA->ODR ^= PIN_LD2;
+        for (volatile uint32_t d = 0; d < delay_count; d++) { __NOP(); }
+    }
+}
+
 /* ---- Cortex-M4 core exceptions ---- */
 
 void NMI_Handler(void)
@@ -39,7 +56,10 @@ void HardFault_Handler(void)
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     /* LED power relays on GPIOB — also force OFF */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    while (1) { }
+
+    /* Rapid-blink LD2 (~10 Hz) — indicates a CPU fault (distinct from
+     * Error_Handler's ~2 Hz slow blink and the main-loop 5 Hz heartbeat). */
+    Fault_BlinkLD2(800000U);            /* never returns */
 }
 
 void MemManage_Handler(void)
@@ -51,7 +71,7 @@ void MemManage_Handler(void)
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    while (1) { }
+    Fault_BlinkLD2(800000U);
 }
 
 void BusFault_Handler(void)
@@ -63,7 +83,7 @@ void BusFault_Handler(void)
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    while (1) { }
+    Fault_BlinkLD2(800000U);
 }
 
 void UsageFault_Handler(void)
@@ -75,7 +95,7 @@ void UsageFault_Handler(void)
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    while (1) { }
+    Fault_BlinkLD2(800000U);
 }
 
 void SVC_Handler(void)
