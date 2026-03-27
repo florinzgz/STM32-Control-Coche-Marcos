@@ -1093,6 +1093,7 @@ bool CAN_IsBusOff(void)
 void CAN_CheckBusOff(void)
 {
     FDCAN_ProtocolStatusTypeDef psr;
+    FDCAN_ErrorCountersTypeDef  ecr;
 
     /* If a recovery attempt is in progress, enforce retry interval */
     if (busoff_active) {
@@ -1152,12 +1153,9 @@ void CAN_CheckBusOff(void)
     can_diag.error_passive   = psr.ErrorPassive ? 1U : 0U;
     can_diag.bus_off         = psr.BusOff       ? 1U : 0U;
     can_diag.warning         = psr.Warning      ? 1U : 0U;
-    {
-        FDCAN_ErrorCountersTypeDef ecr;
-        if (HAL_FDCAN_GetErrorCounters(&hfdcan1, &ecr) == HAL_OK) {
-            can_diag.tec = (uint8_t)ecr.TxErrorCnt;
-            can_diag.rec = (uint8_t)ecr.RxErrorCnt;
-        }
+    if (HAL_FDCAN_GetErrorCounters(&hfdcan1, &ecr) == HAL_OK) {
+        can_diag.tec = (uint8_t)ecr.TxErrorCnt;
+        can_diag.rec = (uint8_t)ecr.RxErrorCnt;
     }
 
     if (psr.BusOff) {
