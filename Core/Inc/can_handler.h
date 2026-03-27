@@ -103,6 +103,18 @@ typedef struct {
     uint8_t  rec;               /* Receive Error Counter  (0-255)       */
 } CAN_Diag_t;
 
+/* FDCAN initialisation sequence diagnostics — readable via SWD debugger.
+ * Populated once by CAN_Init(); never modified at runtime.
+ * Each field stores the HAL return value (HAL_OK = 0) so the exact
+ * step that failed can be identified without printf/UART.              */
+typedef struct {
+    uint8_t  hal_init;           /* HAL_FDCAN_Init          return value */
+    uint8_t  filter_global;      /* ConfigGlobalFilter      return value */
+    uint8_t  notify;             /* ActivateNotification    return value */
+    uint8_t  start;              /* HAL_FDCAN_Start         return value */
+    uint8_t  started;            /* 1 = FDCAN fully started, 0 = failed */
+} CAN_InitDiag_t;
+
 /* Function prototypes */
 void CAN_Init(void);
 void CAN_TestTransmit(void);
@@ -133,8 +145,9 @@ bool LED_Relay_Get(void);             /* front relay state */
 void LED_Relay_Rear_Set(bool on);     /* rear relay */
 bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
-extern CAN_Stats_t can_stats;
-extern CAN_Diag_t  can_diag;
+extern CAN_Stats_t    can_stats;
+extern CAN_Diag_t     can_diag;
+extern CAN_InitDiag_t can_init_diag;
 extern FDCAN_HandleTypeDef hfdcan1;
 
 /* Debug-visible global CAN buffers (volatile for debugger inspection) */
