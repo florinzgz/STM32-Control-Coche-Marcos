@@ -100,9 +100,9 @@ pin modification.  Analyse GDB register dump captured during debug session.
 
 ### Verdict: **COMPATIBLE** ✅
 
-The 0.7 % sample point difference is well within the CiA 301 ±2 % window.
+The 0.7% sample point difference is well within the CiA 301 ±2% window.
 Both SJW values provide >10× margin over the actual oscillator tolerances
-(ESP32 crystal ≈ 0 %, STM32 HSI ±1 %).  No timing changes required.
+(ESP32 crystal ≈0%, STM32 HSI ±1%).  No timing changes required.
 
 ---
 
@@ -205,11 +205,11 @@ p/x hfdcan1.Instance->CCCR    → $5 = 0x8007add      ← FDCAN1 CCCR
 #### RCC_CR (0x4002 1000) = 0x0000 0500
 
 ```
-Bit 24 PLLON    = 0   → PLL is OFF
-Bit 16 HSEON    = 0   → HSE is OFF
-Bit 10 HSIRDY   = 1   → HSI16 oscillator ready
-Bit  8 HSION    = 1   → HSI16 oscillator enabled
-Bit  0 MSION    = 0   → MSI disabled (was on at reset, now off)
+Bit 24 PLLON  = 0  → PLL is OFF
+Bit 16 HSEON  = 0  → HSE is OFF
+Bit 10 HSIRDY = 1  → HSI16 oscillator ready
+Bit  8 HSION  = 1  → HSI16 oscillator enabled
+Bit  0 MSION  = 0  → MSI disabled (was on at reset, now off)
 ```
 
 **Interpretation:** The system is running on HSI16 (16 MHz).  PLL has not
@@ -221,7 +221,7 @@ the function is still in progress or it failed and called `Error_Handler()`.
 #### RCC_CCIPR (0x4002 1088) = 0x0000 0000
 
 ```
-Bits [25:24] FDCANSEL = 00   → FDCAN clock source = HSE (reset default)
+Bits [25:24] FDCANSEL = 00  → FDCAN clock source = HSE (reset default)
 ```
 
 **Interpretation:** The `HAL_RCCEx_PeriphCLKConfig()` call at the end of
@@ -232,9 +232,9 @@ has no kernel clock.**
 #### RCC_APB1ENR1 (0x4002 1058) = 0x0000 0400
 
 ```
-Bit 28 PWREN    = 0   → PWR peripheral clock NOT enabled
-Bit 25 FDCANEN  = 0   → FDCAN peripheral clock NOT enabled
-Bit 10 RTCAPBEN = 1   → RTC APB clock enabled (reset default)
+Bit 28 PWREN   = 0  → PWR peripheral clock NOT enabled
+Bit 25 FDCANEN = 0  → FDCAN peripheral clock NOT enabled
+Bit 10 RTCAPBEN = 1 → RTC APB clock enabled (reset default)
 ```
 
 **Interpretation:** This is the reset-default value.  `HAL_MspInit()` (which
@@ -307,15 +307,15 @@ Check the LED pattern (section 5 above).
 ```gdb
 # RCC_CR: expect PLLON=1, PLLRDY=1, HSION=1
 p/x *(uint32_t*)0x40021000
-# Healthy value: 0x0300_0500 or higher (bits 24+25 set = PLL on + ready)
+# Healthy value: 0x03000500 or higher (bits 24+25 set = PLL on + ready)
 
 # RCC_CCIPR: expect FDCANSEL = 10 (PCLK1)
 p/x *(uint32_t*)0x40021088
-# Healthy value: bits [25:24] = 10 → value has 0x0200_0000 set
+# Healthy value: bits [25:24] = 10 → value has 0x02000000 set
 
-# RCC_APB1ENR1: expect FDCANEN=1, PWREN=1
+# RCC_APB1ENR1: expect FDCANEN=1 (bit 25), PWREN=1 (bit 28)
 p/x *(uint32_t*)0x40021058
-# Healthy value: bit 25 + bit 28 set → at least 0x1200_0400
+# Healthy value: bits 25 + 28 set → at least 0x12000400
 ```
 
 ### Step 3 — Verify FDCAN init result
