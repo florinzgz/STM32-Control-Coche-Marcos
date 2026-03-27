@@ -428,10 +428,11 @@ void Motor_Init(void)
     motor_fl.en_port      = GPIOC;   motor_fl.en_pin       = PIN_EN_FL;  /* PC5 */
     motor_fl.direction    = 0;
 
-    /* ---- motor_fr: RPWM = TIM1_CH3 (PA10), LPWM = TIM1_CH4 (PA11) ---- */
-    /* Both channels on TIM1 → same UEV → overlap = 0                     */
+    /* ---- motor_fr: RPWM = TIM1_CH3 (PA10), LPWM = TIM17_CH1 (PB9) ---- */
+    /* LPWM_FR moved from TIM1_CH4/PA11 to TIM17/PB9 (PA11 → FDCAN1_RX).
+     * Only one of RPWM/LPWM is active at a time, so cross-timer is safe.  */
     motor_fr.rpwm_timer   = &htim1;  motor_fr.rpwm_channel = TIM_CHANNEL_3;
-    motor_fr.lpwm_timer   = &htim1;  motor_fr.lpwm_channel = TIM_CHANNEL_4;
+    motor_fr.lpwm_timer   = &htim17; motor_fr.lpwm_channel = TIM_CHANNEL_1;
     motor_fr.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
     motor_fr.direction    = 0;
 
@@ -456,13 +457,15 @@ void Motor_Init(void)
     motor_steer.en_port     = NULL;   /* EN tied to 3.3 V in hardware */
     motor_steer.direction   = 0;
 
-    /* ---- Start TIM1 channels: FL (CH1/CH2) and FR (CH3/CH4) ---- */
+    /* ---- Start TIM1 channels: FL (CH1/CH2) and FR RPWM (CH3) ---- */
     /* HAL_TIM_PWM_Start re-enables MOE (TIM1 is advanced; MOE was cleared
      * by BREAK2 config with AutomaticOutput=DISABLE).                  */
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);  /* RPWM_FL  */
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);  /* LPWM_FL  */
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  /* RPWM_FR  */
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);  /* LPWM_FR  */
+
+    /* ---- Start TIM17 channel: FR LPWM (CH1) ---- */
+    HAL_TIM_PWM_Start(&htim17, TIM_CHANNEL_1); /* LPWM_FR  */
 
     /* ---- Start TIM8 channels: RL (CH1/CH2) and RR (CH3/CH4) ---- */
     HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);  /* RPWM_RL  */
