@@ -770,6 +770,13 @@ typedef struct {
     uint32_t TDCvalue;
 } FDCAN_ProtocolStatusTypeDef;
 
+typedef struct {
+    uint32_t TxErrorCnt;     /*!< Specifies the Transmit Error Counter Value */
+    uint32_t RxErrorCnt;     /*!< Specifies the Receive Error Counter Value */
+    uint32_t RxErrorPassive; /*!< Specifies the Receive Error Passive status */
+    uint32_t ErrorLogging;   /*!< Specifies the error logging counter value */
+} FDCAN_ErrorCountersTypeDef;
+
 /* FDCAN ID types */
 #define FDCAN_STANDARD_ID 0x00000000U
 #define FDCAN_EXTENDED_ID 0x40000000U
@@ -1458,6 +1465,14 @@ static inline HAL_StatusTypeDef HAL_FDCAN_GetProtocolStatus(FDCAN_HandleTypeDef 
 {
     (void)hfdcan;
     if (ProtocolStatus) { memset(ProtocolStatus, 0, sizeof(*ProtocolStatus)); }
+    return HAL_OK;
+}
+
+static inline HAL_StatusTypeDef HAL_FDCAN_GetErrorCounters(FDCAN_HandleTypeDef *hfdcan,
+    FDCAN_ErrorCountersTypeDef *ErrorCounters)
+{
+    (void)hfdcan;
+    if (ErrorCounters) { memset(ErrorCounters, 0, sizeof(*ErrorCounters)); }
     return HAL_OK;
 }
 

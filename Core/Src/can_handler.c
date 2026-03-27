@@ -40,6 +40,7 @@ extern bool Startup_IsInhibited(void);
 /* Global variables */
 extern FDCAN_HandleTypeDef hfdcan1;
 CAN_Stats_t can_stats = {0};
+CAN_Diag_t  can_diag = {0};
 
 /* Debug-visible global CAN buffers — volatile so the debugger always
  * reads them from RAM, not from an optimised-out register.            */
@@ -1141,6 +1142,22 @@ void CAN_CheckBusOff(void)
     /* Normal operation: poll FDCAN protocol status for bus-off */
     if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr) != HAL_OK) {
         return;  /* Cannot read status — skip this cycle */
+    }
+
+    /* ---- CAN bus error diagnostics ----
+     * Populate can_diag with the full protocol status so a debugger
+     * (or a future diagnostic CAN frame) can identify the exact error
+     * type.  LastErrorCode distinguishes ACK, bit, stuff, form, CRC.   */
+    can_diag.last_error_code = (uint8_t)psr.LastErrorCode;
+    can_diag.error_passive   = psr.ErrorPassive ? 1U : 0U;
+    can_diag.bus_off         = psr.BusOff       ? 1U : 0U;
+    can_diag.warning         = psr.Warning      ? 1U : 0U;
+    {
+        FDCAN_ErrorCountersTypeDef ecr;
+        if (HAL_FDCAN_GetErrorCounters(&hfdcan1, &ecr) == HAL_OK) {
+            can_diag.tec = (uint8_t)ecr.TxErrorCnt;
+            can_diag.rec = (uint8_t)ecr.RxErrorCnt;
+        }
     }
 
     if (psr.BusOff) {
