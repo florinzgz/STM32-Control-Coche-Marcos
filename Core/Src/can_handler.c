@@ -39,8 +39,9 @@ extern bool Startup_IsInhibited(void);
 
 /* Global variables */
 extern FDCAN_HandleTypeDef hfdcan1;
-CAN_Stats_t can_stats = {0};
-CAN_Diag_t  can_diag = {0};
+CAN_Stats_t    can_stats     = {0};
+CAN_Diag_t     can_diag      = {0};
+CAN_InitDiag_t can_init_diag = {0};
 
 /* Debug-visible global CAN buffers — volatile so the debugger always
  * reads them from RAM, not from an optimised-out register.            */
@@ -207,12 +208,19 @@ static void CAN_ConfigureFilters(void)
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 #endif
 
-    /* Reject all non-matching standard IDs */
-    HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
-                                  FDCAN_REJECT,   /* non-matching std */
-                                  FDCAN_REJECT,   /* non-matching ext */
-                                  FDCAN_REJECT_REMOTE,
-                                  FDCAN_REJECT_REMOTE);
+    /* Accept all non-matching standard IDs into FIFO0.
+     * This guarantees at least one acceptance path exists, preventing
+     * reception failures when individual filters are misconfigured.
+     * Safety: CAN_ProcessMessages() only acts on known message IDs
+     * (via its switch/case); any unexpected ID is silently discarded,
+     * so accepting extra standard IDs has no functional side-effect.
+     * Extended IDs and remote frames remain rejected.                 */
+    can_init_diag.filter_global = (uint8_t)HAL_FDCAN_ConfigGlobalFilter(
+        &hfdcan1,
+        FDCAN_ACCEPT_IN_RX_FIFO0,  /* non-matching std */
+        FDCAN_REJECT,               /* non-matching ext */
+        FDCAN_REJECT_REMOTE,
+        FDCAN_REJECT_REMOTE);
 }
 
 /* ================================================================== */
@@ -244,20 +252,39 @@ void CAN_Init(void) {
      * System continues without CAN — Safety_CheckCANTimeout() will
      * detect the missing heartbeat and keep the system in STANDBY.  */
     extern bool fdcan_init_ok;
-    if (!fdcan_init_ok) return;
-    
+    if (!fdcan_init_ok) {
+        can_init_diag.hal_init = 1U;  /* Record: HAL_FDCAN_Init failed */
+        return;
+    }
+    can_init_diag.hal_init = 0U;      /* HAL_FDCAN_Init succeeded      */
+
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
 
+    /* If global filter setup failed, FDCAN state may be inconsistent */
+    if (can_init_diag.filter_global != HAL_OK) {
+        fdcan_init_ok = false;
+        return;  /* Non-fatal: CAN disabled, safety timeout will engage */
+    }
+
     /* Enable RX FIFO0 new message notifications */
-    if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
+    HAL_StatusTypeDef rc;
+    rc = HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+    can_init_diag.notify = (uint8_t)rc;
+    if (rc != HAL_OK) {
+        fdcan_init_ok = false;
         return;  /* Non-fatal: CAN disabled, safety timeout will engage */
     }
-    
+
     /* Start FDCAN peripheral */
-    if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
+    rc = HAL_FDCAN_Start(&hfdcan1);
+    can_init_diag.start = (uint8_t)rc;
+    if (rc != HAL_OK) {
+        fdcan_init_ok = false;
         return;  /* Non-fatal: CAN disabled, safety timeout will engage */
     }
+
+    can_init_diag.started = 1U;
 }
 
 /**

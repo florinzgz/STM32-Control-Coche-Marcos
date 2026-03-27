@@ -42,6 +42,13 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
 
   /* USER CODE END FDCAN1_MspInit 0 */
     __HAL_RCC_FDCAN_CLK_ENABLE();
+    /* Force-reset the FDCAN peripheral to clear stale error state.
+     * After a watchdog or abnormal reset the FDCAN registers may
+     * retain bus-off / CCCR.CSA flags, causing HAL_FDCAN_Init() to
+     * time out.  A peripheral reset via RCC clears all FDCAN
+     * registers to power-on defaults.                                */
+    __HAL_RCC_FDCAN_FORCE_RESET();
+    __HAL_RCC_FDCAN_RELEASE_RESET();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
     /* PA11 = FDCAN1_RX (CN10 pin 14)
