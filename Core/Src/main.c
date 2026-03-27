@@ -154,8 +154,8 @@ int main(void)
      * and reached peripheral initialisation.  Pattern interpretation:
      *   • No blink at all  → MCU not executing user code
      *                        (check BOOT0 jumper or re-flash via ST-LINK)
-     *   • 3 blinks then dark → firmware crashed during a later MX_Init
-     *                          (Error_Handler, see slow-blink pattern)
+     *   • 3 blinks then slow blink → firmware crashed during a later MX_Init
+     *                          (Error_Handler ~2 Hz slow-blink pattern)
      *   • 3 blinks then 5 Hz → firmware running normally (heartbeat)    */
     for (int k = 0; k < 3; k++) {
         HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
@@ -977,10 +977,13 @@ void Error_Handler(void)
     /* LED power relays on GPIOB — also force OFF (both front and rear) */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
 
-    /* Slow-blink LD2 (~1 Hz) — distinguishes "firmware crashed" from
+    /* Slow-blink LD2 (~2 Hz) — distinguishes "firmware crashed" from
      * "firmware not loaded" (LED stays off).  Uses busy-wait because
      * interrupts are disabled.  If IWDG is already running the MCU
-     * will reset after ~500 ms; the brief blink is still visible.     */
+     * will reset after ~500 ms; the brief blink is still visible.
+     * Delay count assumes SYSCLK = 170 MHz (HSI+PLL, see
+     * SystemClock_Config); at that frequency ~4 000 000 volatile
+     * iterations ≈ 250 ms.                                            */
     __HAL_RCC_GPIOA_CLK_ENABLE();
     GPIOA->MODER = (GPIOA->MODER & ~(3U << (5 * 2)))
                  | (1U << (5 * 2));           /* PA5 = output           */
