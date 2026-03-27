@@ -10,7 +10,7 @@
   *    TIM1    – PWM for FL motor + FR RPWM (20 kHz, PA8-PA10)
   *    TIM2    – Quadrature encoder (steering)
   *    TIM8    – PWM for RL/RR motors (20 kHz, PC6-PC9)
-  *    TIM17   – PWM for FR LPWM (20 kHz, PB9)
+  *    TIM15   – PWM for FR LPWM (20 kHz, PB14)
   *    IWDG    – Independent watchdog (500 ms)
   ****************************************************************************
   */
@@ -43,7 +43,7 @@
 ADC_HandleTypeDef   hadc1;
 FDCAN_HandleTypeDef hfdcan1;
 I2C_HandleTypeDef   hi2c1;
-TIM_HandleTypeDef   htim1, htim2, htim3, htim8, htim17;
+TIM_HandleTypeDef   htim1, htim2, htim3, htim8, htim15;
 IWDG_HandleTypeDef  hiwdg;
 
 /* ---- LIMP_HOME degraded-pedal arming constants ---- */
@@ -121,7 +121,7 @@ static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM8_Init(void);
-static void MX_TIM17_Init(void);
+static void MX_TIM15_Init(void);
 static void MX_IWDG_Init(void);
 
 /* ================================================================== */
@@ -173,7 +173,7 @@ int main(void)
     MX_TIM2_Init();
     MX_TIM3_Init();
     MX_TIM8_Init();
-    MX_TIM17_Init();
+    MX_TIM15_Init();
     MX_IWDG_Init();
 
     /* Module initialisation */
@@ -713,7 +713,7 @@ static void MX_TIM1_Init(void)
 {
     /* TIM1 drives FL motor (CH1=RPWM_FL/PA8, CH2=LPWM_FL/PA9) and
      * FR motor RPWM (CH3=RPWM_FR/PA10).
-     * LPWM_FR moved to TIM17_CH1 (PB9) because PA11 is now FDCAN1_RX.
+     * LPWM_FR moved to TIM15_CH1 (PB14) because PA11 is now FDCAN1_RX.
      * RPWM and LPWM of FL share the SAME timer so both CCR
      * preload registers transfer at the same UEV — overlap = 0.
      * TIM1 is an advanced timer: BREAK2 is armed to the Cortex-M4
@@ -899,25 +899,27 @@ static void MX_TIM8_Init(void)
     }
 }
 
-static void MX_TIM17_Init(void)
+static void MX_TIM15_Init(void)
 {
-    /* TIM17 drives LPWM_FR (PB9, AF1).  This output was previously on
-     * TIM1_CH4 / PA11 but PA11 is now FDCAN1_RX.  TIM17 is a single-
-     * channel timer; edge-aligned mode with PSC=1 / ARR=4249 gives the
+    /* TIM15 drives LPWM_FR (PB14, AF1).  This output was previously on
+     * TIM1_CH4 / PA11 but PA11 is now FDCAN1_RX.  TIM15 is used in
+     * single-channel mode; edge-aligned with PSC=1 / ARR=4249 gives the
      * same 20 kHz PWM frequency and 0-4249 duty range as TIM1/TIM8
      * (which use center-aligned with PSC=0 / ARR=4249).
+     * PB9 was avoided because it shares JP7 on Nucleo-G474RE and can
+     * inadvertently put the MCU into the bootloader.
      *
-     * Safety: TIM17 BREAK is connected to the Cortex-M4 LOCKUP signal
+     * Safety: TIM15 BREAK is connected to the Cortex-M4 LOCKUP signal
      * via SYSCFG CLL (already locked by MX_TIM1_Init).  On LOCKUP the
      * BKIN input clears MOE, forcing the output LOW.                    */
-    htim17.Instance               = TIM17;
-    htim17.Init.Prescaler         = 1;    /* 170 MHz / 2 = 85 MHz TQ       */
-    htim17.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim17.Init.Period            = 4249; /* 85 MHz / 4250 = 20 kHz        */
-    htim17.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
-    htim17.Init.RepetitionCounter = 0;
-    htim17.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-    if (HAL_TIM_PWM_Init(&htim17) != HAL_OK) {
+    htim15.Instance               = TIM15;
+    htim15.Init.Prescaler         = 1;    /* 170 MHz / 2 = 85 MHz TQ       */
+    htim15.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim15.Init.Period            = 4249; /* 85 MHz / 4250 = 20 kHz        */
+    htim15.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
+    htim15.Init.RepetitionCounter = 0;
+    htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_PWM_Init(&htim15) != HAL_OK) {
         Error_Handler();
     }
 
@@ -926,12 +928,12 @@ static void MX_TIM17_Init(void)
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    HAL_TIM_PWM_ConfigChannel(&htim17, &oc, TIM_CHANNEL_1);  /* LPWM_FR — PB9 */
+    HAL_TIM_PWM_ConfigChannel(&htim15, &oc, TIM_CHANNEL_1);  /* LPWM_FR — PB14 */
 
-    __HAL_TIM_ENABLE_OCxPRELOAD(&htim17, TIM_CHANNEL_1);
+    __HAL_TIM_ENABLE_OCxPRELOAD(&htim15, TIM_CHANNEL_1);
 
-    /* BREAK: Cortex-M4 LOCKUP → hardware disables TIM17 output.
-     * TIM17 only has BREAK1 (no BREAK2); CLL routes LOCKUP to BKIN.   */
+    /* BREAK: Cortex-M4 LOCKUP → hardware disables TIM15 output.
+     * TIM15 only has BREAK1 (no BREAK2); CLL routes LOCKUP to BKIN.   */
     TIM_BreakDeadTimeConfigTypeDef bdtr = {0};
     bdtr.OffStateRunMode  = TIM_OSSR_ENABLE;
     bdtr.OffStateIDLEMode = TIM_OSSI_ENABLE;
@@ -941,7 +943,7 @@ static void MX_TIM17_Init(void)
     bdtr.BreakPolarity    = TIM_BREAKPOLARITY_HIGH;
     bdtr.BreakFilter      = 0;
     bdtr.AutomaticOutput  = TIM_AUTOMATICOUTPUT_DISABLE;
-    if (HAL_TIMEx_ConfigBreakDeadTime(&htim17, &bdtr) != HAL_OK) {
+    if (HAL_TIMEx_ConfigBreakDeadTime(&htim15, &bdtr) != HAL_OK) {
         Error_Handler();
     }
 }
@@ -1019,8 +1021,8 @@ void Error_Handler(void)
      * Only PC5 (EN_FL) and PC13 (EN_RR) remain as GPIO enable outputs.       */
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM1 PWM outputs (FL, FR RPWM)  */
     TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM8 PWM outputs (RL, RR)   */
-    TIM17->BDTR &= ~TIM_BDTR_MOE;  /* Disable TIM17 PWM output (LPWM_FR)      */
-    TIM17->CCR1 = 0U;              /* LPWM_FR → 0                             */
+    TIM15->BDTR &= ~TIM_BDTR_MOE;  /* Disable TIM15 PWM output (LPWM_FR)      */
+    TIM15->CCR1 = 0U;              /* LPWM_FR → 0                             */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 (TIM3 has no BREAK)      */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0                          */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR

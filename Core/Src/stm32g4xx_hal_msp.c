@@ -128,7 +128,7 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     /* PA8=RPWM_FL (TIM1_CH1), PA9=LPWM_FL (TIM1_CH2),
      * PA10=RPWM_FR (TIM1_CH3).
      * PA11 was TIM1_CH4 (LPWM_FR) but is now FDCAN1_RX;
-     * LPWM_FR moved to TIM17_CH1 / PB9.                  */
+     * LPWM_FR moved to TIM15_CH1 / PB14.                 */
     GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -178,18 +178,18 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
 
   /* USER CODE END TIM8_PWM_MspInit 1 */
   }
-  else if(htim_pwm->Instance==TIM17)
+  else if(htim_pwm->Instance==TIM15)
   {
-    __HAL_RCC_TIM17_CLK_ENABLE();
+    __HAL_RCC_TIM15_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /* PB9 = LPWM_FR (TIM17_CH1, AF1) — front-right motor reverse PWM.
-     * Moved here from PA11/TIM1_CH4 so PA11 can serve as FDCAN1_RX.   */
-    GPIO_InitStruct.Pin = GPIO_PIN_9;
+    /* PB14 = LPWM_FR (TIM15_CH1, AF1) — front-right motor reverse PWM.
+     * Moved here from PB9/TIM17_CH1 to avoid JP7 bootloader conflict. */
+    GPIO_InitStruct.Pin = GPIO_PIN_14;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF1_TIM17;
+    GPIO_InitStruct.Alternate = GPIO_AF1_TIM15;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   }
 }
@@ -281,15 +281,15 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
     GPIO_InitStruct.Alternate = GPIO_AF4_TIM8;
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
   }
-  else if(htim->Instance==TIM17)
+  else if(htim->Instance==TIM15)
   {
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    GPIO_InitStruct.Pin = GPIO_PIN_9;
+    GPIO_InitStruct.Pin = GPIO_PIN_14;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF1_TIM17;
+    GPIO_InitStruct.Alternate = GPIO_AF1_TIM15;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   }
 }

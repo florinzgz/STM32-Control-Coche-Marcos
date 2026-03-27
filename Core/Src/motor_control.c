@@ -428,11 +428,12 @@ void Motor_Init(void)
     motor_fl.en_port      = GPIOC;   motor_fl.en_pin       = PIN_EN_FL;  /* PC5 */
     motor_fl.direction    = 0;
 
-    /* ---- motor_fr: RPWM = TIM1_CH3 (PA10), LPWM = TIM17_CH1 (PB9) ---- */
-    /* LPWM_FR moved from TIM1_CH4/PA11 to TIM17/PB9 (PA11 → FDCAN1_RX).
+    /* ---- motor_fr: RPWM = TIM1_CH3 (PA10), LPWM = TIM15_CH1 (PB14) ---- */
+    /* LPWM_FR moved from TIM17/PB9 to TIM15/PB14 (PB9 shares JP7 on
+     * Nucleo-G474RE and can inadvertently trigger bootloader entry).
      * Only one of RPWM/LPWM is active at a time, so cross-timer is safe.  */
     motor_fr.rpwm_timer   = &htim1;  motor_fr.rpwm_channel = TIM_CHANNEL_3;
-    motor_fr.lpwm_timer   = &htim17; motor_fr.lpwm_channel = TIM_CHANNEL_1;
+    motor_fr.lpwm_timer   = &htim15; motor_fr.lpwm_channel = TIM_CHANNEL_1;
     motor_fr.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
     motor_fr.direction    = 0;
 
@@ -464,8 +465,8 @@ void Motor_Init(void)
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);  /* LPWM_FL  */
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  /* RPWM_FR  */
 
-    /* ---- Start TIM17 channel: FR LPWM (CH1) ---- */
-    HAL_TIM_PWM_Start(&htim17, TIM_CHANNEL_1); /* LPWM_FR  */
+    /* ---- Start TIM15 channel: FR LPWM (CH1) ---- */
+    HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_1); /* LPWM_FR  */
 
     /* ---- Start TIM8 channels: RL (CH1/CH2) and RR (CH3/CH4) ---- */
     HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);  /* RPWM_RL  */

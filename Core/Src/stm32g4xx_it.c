@@ -50,8 +50,8 @@ void HardFault_Handler(void)
      *    Force EN_FL, EN_RR and all relays LOW via BSRR.                  */
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM1 outputs: RPWM_FL, LPWM_FL, RPWM_FR */
     TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM8 outputs: RPWM_RL, LPWM_RL, RPWM_RR, LPWM_RR */
-    TIM17->BDTR &= ~TIM_BDTR_MOE;  /* Disable TIM17 output: LPWM_FR */
-    TIM17->CCR1 = 0U;              /* LPWM_FR → 0                   */
+    TIM15->BDTR &= ~TIM_BDTR_MOE;  /* Disable TIM15 output: LPWM_FR */
+    TIM15->CCR1 = 0U;              /* LPWM_FR → 0                   */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0 */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
@@ -68,8 +68,8 @@ void MemManage_Handler(void)
 {
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM8->BDTR &= ~TIM_BDTR_MOE;
-    TIM17->BDTR &= ~TIM_BDTR_MOE;
-    TIM17->CCR1 = 0U;
+    TIM15->BDTR &= ~TIM_BDTR_MOE;
+    TIM15->CCR1 = 0U;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
@@ -82,8 +82,8 @@ void BusFault_Handler(void)
 {
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM8->BDTR &= ~TIM_BDTR_MOE;
-    TIM17->BDTR &= ~TIM_BDTR_MOE;
-    TIM17->CCR1 = 0U;
+    TIM15->BDTR &= ~TIM_BDTR_MOE;
+    TIM15->CCR1 = 0U;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
@@ -96,8 +96,8 @@ void UsageFault_Handler(void)
 {
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM8->BDTR &= ~TIM_BDTR_MOE;
-    TIM17->BDTR &= ~TIM_BDTR_MOE;
-    TIM17->CCR1 = 0U;
+    TIM15->BDTR &= ~TIM_BDTR_MOE;
+    TIM15->CCR1 = 0U;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR

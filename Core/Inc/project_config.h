@@ -37,7 +37,7 @@
 /* ---- TIM1 (advanced): FL motor CH1/CH2, FR motor RPWM CH3 ----
  * RPWM and LPWM of FL share the SAME timer so both channels update
  * at the same UEV → overlap = 0.  TIM1 BREAK2 is armed to Cortex LOCKUP.
- * FR motor RPWM is on TIM1_CH3; LPWM_FR is on TIM17_CH1 (PB9) because
+ * FR motor RPWM is on TIM1_CH3; LPWM_FR is on TIM15_CH1 (PB14) because
  * PA11 was reassigned to FDCAN1_RX.  Since only one of RPWM/LPWM is
  * active at any time (BTS7960 H-bridge), the cross-timer arrangement
  * is safe — Motor_SetSigned() always zeroes the inactive channel first.
@@ -68,7 +68,7 @@
 #define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 — RPWM_FL  */
 #define PIN_LPWM_FL        GPIO_PIN_9   /* PA9  - TIM1_CH2 — LPWM_FL  */
 #define PIN_PWM_FR         GPIO_PIN_10  /* PA10 - TIM1_CH3 — RPWM_FR  */
-#define PIN_LPWM_FR        GPIO_PIN_9   /* PB9  - TIM17_CH1 — LPWM_FR */
+#define PIN_LPWM_FR        GPIO_PIN_14  /* PB14 - TIM15_CH1 — LPWM_FR */
 
 /* ---- TIM8 (advanced): RL motor CH1/CH2, RR motor CH3/CH4 ----
  * Same-timer guarantee and BREAK2/LOCKUP protection as TIM1.                 */

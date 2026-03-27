@@ -265,7 +265,7 @@ typedef enum {
 #define GPIO_AF2_TIM3      0x02U
 #define GPIO_AF4_TIM8      0x04U
 #define GPIO_AF4_I2C1      0x04U
-#define GPIO_AF1_TIM17     0x01U
+#define GPIO_AF1_TIM15     0x01U
 #define GPIO_AF6_TIM1      0x06U
 #define GPIO_AF9_FDCAN1    0x09U
 
@@ -314,12 +314,12 @@ typedef struct {
     __IO uint32_t DMAR;
 } TIM_TypeDef;
 
-static TIM_TypeDef _stub_tim1, _stub_tim2, _stub_tim3, _stub_tim8, _stub_tim17;
+static TIM_TypeDef _stub_tim1, _stub_tim2, _stub_tim3, _stub_tim8, _stub_tim15;
 #define TIM1  (&_stub_tim1)
 #define TIM2  (&_stub_tim2)
 #define TIM3  (&_stub_tim3)
 #define TIM8  (&_stub_tim8)
-#define TIM17 (&_stub_tim17)
+#define TIM15 (&_stub_tim15)
 
 #define TIM_BDTR_MOE  0x8000U
 
@@ -1241,7 +1241,7 @@ typedef struct {
 #define __HAL_RCC_TIM2_CLK_ENABLE()    ((void)0)
 #define __HAL_RCC_TIM3_CLK_ENABLE()    ((void)0)
 #define __HAL_RCC_TIM8_CLK_ENABLE()    ((void)0)
-#define __HAL_RCC_TIM17_CLK_ENABLE()   ((void)0)
+#define __HAL_RCC_TIM15_CLK_ENABLE()   ((void)0)
 #define __HAL_RCC_I2C1_CLK_ENABLE()    ((void)0)
 #define __HAL_RCC_ADC12_CLK_ENABLE()   ((void)0)
 #define __HAL_RCC_PWR_CLK_ENABLE()     ((void)0)
