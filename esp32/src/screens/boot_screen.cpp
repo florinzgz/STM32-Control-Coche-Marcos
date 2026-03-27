@@ -23,19 +23,23 @@ static constexpr uint16_t DIAG_RX_BAT  = (1 << 6);
 
 // Diagnostic area layout (below obstacle indicator)
 static constexpr int16_t DIAG_SEP_Y    = ui::SCREEN_H / 2 + 104;  // separator line
-static constexpr int16_t DIAG_LINE_H   = 11;                       // line spacing
-static constexpr int16_t DIAG_LINE1_Y  = DIAG_SEP_Y + 6;          // bus status
-static constexpr int16_t DIAG_LINE2_Y  = DIAG_LINE1_Y + DIAG_LINE_H;  // TX info
-static constexpr int16_t DIAG_LINE3_Y  = DIAG_LINE2_Y + DIAG_LINE_H;  // RX info
+static constexpr int16_t DIAG_LINE_H   = 10;                       // line spacing
+static constexpr int16_t DIAG_LINE1_Y  = DIAG_SEP_Y + 4;          // ESP32 bus status
+static constexpr int16_t DIAG_LINE2_Y  = DIAG_LINE1_Y + DIAG_LINE_H;  // STM32 heartbeat
+static constexpr int16_t DIAG_LINE3_Y  = DIAG_LINE2_Y + DIAG_LINE_H;  // RX frame flags
 static constexpr int16_t DIAG_LINE4_Y  = DIAG_LINE3_Y + DIAG_LINE_H;  // error counts
+static constexpr int16_t DIAG_LINE5_Y  = DIAG_LINE4_Y + DIAG_LINE_H;  // diagnostic verdict
 static constexpr int16_t DIAG_MARGIN_X = 10;
 
 // Timeout for considering a frame "recently received"
 static constexpr unsigned long DIAG_RX_RECENT_MS = 2000;
 
 // Text buffer sizes (sized for worst-case snprintf output)
-static constexpr int DIAG_BUF_SIZE  = 52;   // "BUS:RECOVERING  TxE:4294967295 RxE:4294967295" (46) + NUL
+static constexpr int DIAG_BUF_SIZE  = 56;   // "STM32: FROZEN cnt:255 St:LIMP F:FF E:FF" + NUL
 static constexpr int DIAG_RX_BUF    = 40;   // "HB SPD CUR SAF STR TRC BAT " (28) + margin
+
+// Freeze detection: if alive counter hasn't changed for 1 s, STM32 main loop is stuck
+static constexpr unsigned long DIAG_FREEZE_MS = 1000;
 
 // RX flag-to-label mapping for compact iteration
 struct RxFlagLabel { uint16_t flag; const char* label; };
@@ -69,6 +73,16 @@ void BootScreen::onEnter() {
     diagBusErr_      = 0;
     diagRxFlags_     = 0;
     diagObsActive_   = false;
+
+    // Reset STM32 heartbeat diagnostic state
+    diagStm32HbValid_      = false;
+    diagStm32Frozen_       = false;
+    diagStm32Alive_        = 0;
+    diagStm32PrevAlive_    = 0xFF;
+    diagStm32AliveChangedMs_ = 0;
+    diagStm32State_        = 0xFF;
+    diagStm32Faults_       = 0;
+    diagStm32Error_        = 0;
 }
 
 void BootScreen::onExit() {}
@@ -132,6 +146,31 @@ void BootScreen::update(const vehicle::VehicleData& data) {
     if (obsActive != diagObsActive_) {
         diagObsActive_ = obsActive;
         diagNeedsRedraw_ = true;
+    }
+
+    // ---- STM32 heartbeat details (freeze detection + status) ----
+    const auto& hb = data.heartbeat();
+    bool hbValid = (hb.timestampMs > 0 && (now - hb.timestampMs) < DIAG_RX_RECENT_MS);
+
+    // Track alive counter changes for freeze detection
+    if (hbValid && hb.aliveCounter != diagStm32PrevAlive_) {
+        diagStm32PrevAlive_    = hb.aliveCounter;
+        diagStm32AliveChangedMs_ = now;
+    }
+    bool frozen = hbValid && (diagStm32AliveChangedMs_ > 0) &&
+                  (now - diagStm32AliveChangedMs_) > DIAG_FREEZE_MS;
+
+    if (hbValid != diagStm32HbValid_ || frozen != diagStm32Frozen_ ||
+        hb.aliveCounter != diagStm32Alive_ ||
+        static_cast<uint8_t>(hb.systemState) != diagStm32State_ ||
+        hb.faultFlags != diagStm32Faults_ || hb.errorCode != diagStm32Error_) {
+        diagStm32HbValid_ = hbValid;
+        diagStm32Frozen_  = frozen;
+        diagStm32Alive_   = hb.aliveCounter;
+        diagStm32State_   = static_cast<uint8_t>(hb.systemState);
+        diagStm32Faults_  = hb.faultFlags;
+        diagStm32Error_   = hb.errorCode;
+        diagNeedsRedraw_  = true;
     }
 }
 
@@ -222,7 +261,7 @@ void BootScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
-        // Line 1: Bus status + error counters
+        // Line 1: ESP32 TWAI bus status + error counters
         {
             const char* stateStr = "UNKNOWN";
             uint16_t stateCol = ui::COL_YELLOW;
@@ -234,7 +273,7 @@ void BootScreen::draw() {
                 default: break;
             }
             char buf[DIAG_BUF_SIZE];
-            snprintf(buf, sizeof(buf), "BUS:%s  TxE:%lu RxE:%lu",
+            snprintf(buf, sizeof(buf), "ESP32: %s  TxE:%lu RxE:%lu",
                      stateStr,
                      (unsigned long)diagTxErr_,
                      (unsigned long)diagRxErr_);
@@ -244,18 +283,47 @@ void BootScreen::draw() {
                         stateCol, ui::COL_BG, 1, TL_DATUM);
         }
 
-        // Line 2: ESP32→STM32 (what ESP32 transmits = what STM32 receives)
+        // Line 2: STM32 heartbeat status (alive counter, state, faults, error)
         {
             char buf[DIAG_BUF_SIZE];
-            if (diagObsActive_) {
-                snprintf(buf, sizeof(buf), "ESP32->STM32: HB(011) OBS(208,209)");
+            uint16_t stm32Col;
+            if (!diagStm32HbValid_) {
+                snprintf(buf, sizeof(buf), "STM32: NO HEARTBEAT");
+                stm32Col = ui::COL_RED;
+            } else if (diagStm32Frozen_) {
+                // State abbreviation for frozen display
+                const char* st = "??";
+                switch (diagStm32State_) {
+                    case 0: st = "BOOT"; break;
+                    case 1: st = "STBY"; break;
+                    case 2: st = "ACT";  break;
+                    case 3: st = "DEG";  break;
+                    case 4: st = "SAFE"; break;
+                    case 5: st = "ERR";  break;
+                    case 6: st = "LIMP"; break;
+                }
+                snprintf(buf, sizeof(buf), "STM32: FROZEN cnt:%u St:%s F:%02X E:%02X",
+                         diagStm32Alive_, st, diagStm32Faults_, diagStm32Error_);
+                stm32Col = ui::COL_ORANGE;
             } else {
-                snprintf(buf, sizeof(buf), "ESP32->STM32: HB(011)");
+                const char* st = "??";
+                switch (diagStm32State_) {
+                    case 0: st = "BOOT"; break;
+                    case 1: st = "STBY"; break;
+                    case 2: st = "ACT";  break;
+                    case 3: st = "DEG";  break;
+                    case 4: st = "SAFE"; break;
+                    case 5: st = "ERR";  break;
+                    case 6: st = "LIMP"; break;
+                }
+                snprintf(buf, sizeof(buf), "STM32: OK cnt:%u St:%s F:%02X E:%02X",
+                         diagStm32Alive_, st, diagStm32Faults_, diagStm32Error_);
+                stm32Col = (diagStm32Faults_ > 0) ? ui::COL_YELLOW : ui::COL_GREEN;
             }
-            tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+            tft.setTextColor(stm32Col, ui::COL_BG);
             tft.drawString(buf, DIAG_MARGIN_X, DIAG_LINE2_Y);
             RTRACE_TEXT(DIAG_MARGIN_X, DIAG_LINE2_Y, buf,
-                        ui::COL_CYAN, ui::COL_BG, 1, TL_DATUM);
+                        stm32Col, ui::COL_BG, 1, TL_DATUM);
         }
 
         // Line 3: STM32→ESP32 (what STM32 transmits = what ESP32 receives)
@@ -293,6 +361,34 @@ void BootScreen::draw() {
             tft.drawString(buf, DIAG_MARGIN_X, DIAG_LINE4_Y);
             RTRACE_TEXT(DIAG_MARGIN_X, DIAG_LINE4_Y, buf,
                         errCol, ui::COL_BG, 1, TL_DATUM);
+        }
+
+        // Line 5: Diagnostic verdict — quick summary of which side has the problem
+        {
+            const char* verdict;
+            uint16_t verdictCol;
+            bool espOk = (diagBusState_ == TWAI_STATE_RUNNING);
+
+            if (!espOk) {
+                verdict    = ">> ESP32 CAN bus error";
+                verdictCol = ui::COL_RED;
+            } else if (!diagStm32HbValid_) {
+                verdict    = ">> STM32 not responding - check STM32/wiring";
+                verdictCol = ui::COL_RED;
+            } else if (diagStm32Frozen_) {
+                verdict    = ">> STM32 main loop frozen!";
+                verdictCol = ui::COL_ORANGE;
+            } else if (diagStm32Faults_ > 0) {
+                verdict    = ">> STM32 reporting faults";
+                verdictCol = ui::COL_YELLOW;
+            } else {
+                verdict    = ">> Both sides OK";
+                verdictCol = ui::COL_GREEN;
+            }
+            tft.setTextColor(verdictCol, ui::COL_BG);
+            tft.drawString(verdict, DIAG_MARGIN_X, DIAG_LINE5_Y);
+            RTRACE_TEXT(DIAG_MARGIN_X, DIAG_LINE5_Y, verdict,
+                        verdictCol, ui::COL_BG, 1, TL_DATUM);
         }
     }
 
