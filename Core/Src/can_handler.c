@@ -208,10 +208,13 @@ static void CAN_ConfigureFilters(void)
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 #endif
 
-    /* Accept all non-matching standard IDs into FIFO0 for debugging.
-     * This ensures at least one acceptance path exists even if the
-     * individual filters above are misconfigured.  Extended IDs and
-     * remote frames remain rejected (not used in this project).       */
+    /* Accept all non-matching standard IDs into FIFO0.
+     * This guarantees at least one acceptance path exists, preventing
+     * reception failures when individual filters are misconfigured.
+     * Safety: CAN_ProcessMessages() only acts on known message IDs
+     * (via its switch/case); any unexpected ID is silently discarded,
+     * so accepting extra standard IDs has no functional side-effect.
+     * Extended IDs and remote frames remain rejected.                 */
     can_init_diag.filter_global = (uint8_t)HAL_FDCAN_ConfigGlobalFilter(
         &hfdcan1,
         FDCAN_ACCEPT_IN_RX_FIFO0,  /* non-matching std */
@@ -257,6 +260,12 @@ void CAN_Init(void) {
 
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
+
+    /* If global filter setup failed, FDCAN state may be inconsistent */
+    if (can_init_diag.filter_global != HAL_OK) {
+        fdcan_init_ok = false;
+        return;  /* Non-fatal: CAN disabled, safety timeout will engage */
+    }
 
     /* Enable RX FIFO0 new message notifications */
     HAL_StatusTypeDef rc;
