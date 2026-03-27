@@ -157,8 +157,8 @@ int main(void)
      *   • No blink at all  → MCU not executing user code
      *                        (check BOOT0 jumper or re-flash via ST-LINK)
      *   • 3 blinks then slow blink → firmware crashed during a later MX_Init
-     *                          (Error_Handler ~2 Hz slow-blink pattern)
-     *   • 3 blinks then 5 Hz → firmware running normally (heartbeat)    */
+     *                          (Error_Handler ~2 Hz constant-blink pattern)
+     *   • 3 blinks then brief flash every ~2 s → firmware running normally */
     for (int k = 0; k < 3; k++) {
         HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
         HAL_Delay(60);
@@ -208,7 +208,7 @@ int main(void)
     uint32_t tick_10ms   = 0;
     uint32_t tick_50ms   = 0;
     uint32_t tick_100ms  = 0;
-    uint32_t tick_200ms  = 0;    /* LED heartbeat */
+    uint32_t tick_heartbeat = 0; /* LED heartbeat (brief flash every ~2 s) */
     uint32_t tick_500ms  = 0;    /* CAN test transmit */
     uint32_t tick_1000ms = 0;
 
@@ -456,10 +456,18 @@ int main(void)
             Temperature_PeriodicRescan();
         }
 
-        /* ---- 200 ms LED heartbeat (5 Hz): visible firmware alive indicator ---- */
-        if ((now - tick_200ms) >= 200) {
-            tick_200ms = now;
-            HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
+        /* ---- ~2 s LED heartbeat: brief flash confirms firmware alive ----
+         * Pattern: LED ON for ~50 ms then OFF for ~1950 ms (repeats).
+         * Clearly distinct from Error_Handler (~2 Hz constant blink)
+         * and fault-handler rapid ~10 Hz blink.                          */
+        {
+            uint32_t phase = now - tick_heartbeat;
+            if (phase >= 2000) {
+                tick_heartbeat = now;
+                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+            } else if (phase >= 50) {
+                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+            }
         }
 
         /* ---- 500 ms CAN test transmit: send a test frame (ID 0x123) ---- */
