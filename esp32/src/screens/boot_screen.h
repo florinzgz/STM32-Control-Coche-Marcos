@@ -6,10 +6,11 @@
 // No interactive elements. No heap allocation.
 //
 // The diagnostic panel shows:
-//   - TWAI bus state and error counters
-//   - ESP32→STM32 TX frame summary (= what STM32 receives)
+//   - ESP32 TWAI bus state and error counters
+//   - STM32 heartbeat status (alive counter, system state, faults, freeze detect)
 //   - STM32→ESP32 RX frame summary (= what STM32 transmits)
 //   - Bus error counters (tx_fail, rx_miss, bus_err)
+//   - Diagnostic verdict: which side (ESP32 or STM32) has the problem
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.1
 // =============================================================================
@@ -46,6 +47,16 @@ private:
     uint32_t diagBusErr_      = 0;
     uint16_t diagRxFlags_     = 0;      // Bitmask: which STM32 frame types received
     bool     diagObsActive_   = false;  // Obstacle sensor TX active
+
+    // STM32 heartbeat diagnostic state (freeze detection + status)
+    bool     diagStm32HbValid_      = false;  // Heartbeat received recently?
+    bool     diagStm32Frozen_       = false;  // Alive counter not incrementing?
+    uint8_t  diagStm32Alive_        = 0;      // Latest alive counter value
+    uint8_t  diagStm32PrevAlive_    = 0xFF;   // Previous alive counter for freeze detect
+    unsigned long diagStm32AliveChangedMs_ = 0; // Timestamp when counter last changed
+    uint8_t  diagStm32State_        = 0xFF;   // System state from heartbeat
+    uint8_t  diagStm32Faults_       = 0;      // Fault flags byte from heartbeat
+    uint8_t  diagStm32Error_        = 0;      // Error code byte from heartbeat
 };
 
 #endif // BOOT_SCREEN_H
