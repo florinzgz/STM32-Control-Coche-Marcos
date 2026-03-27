@@ -261,9 +261,9 @@ void CAN_Init(void) {
     /* Verify that the FDCAN kernel clock is sourced from PCLK1.
      * After reset FDCANSEL defaults to 00 = HSE (which is not enabled
      * in this project).  SystemClock_Config() must have already set it
-     * to PCLK1 (RCC_CCIPR_FDCANSEL_1 = binary 10) before this point.
-     * A wrong source means the bit-timing registers produce a
-     * different baud rate, causing ACK / stuff errors on the bus.     */
+     * to PCLK1 via RCC_FDCANCLKSOURCE_PCLK1 (CCIPR bits [25:24] = 10)
+     * before this point.  A wrong source means the bit-timing registers
+     * produce a different baud rate, causing ACK / stuff errors.      */
     can_init_diag.clk_ok =
         (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
 
