@@ -4,8 +4,9 @@
 .metadata/
 .settings/*
 !.settings/org.eclipse.core.resources.prefs
-.cproject
-.mxproject
+# .cproject and .mxproject are now tracked so CubeIDE compiles out-of-the-box
+# .cproject
+# .mxproject
 *.launch
 *.tmp
 *.bak
