@@ -91,6 +91,18 @@ typedef struct {
     uint32_t fifo_overflow_count;           /* FIFO message-lost events          */
 } CAN_Stats_t;
 
+/* CAN bus error diagnostics — readable via SWD debugger.
+ * Updated every 10 ms by CAN_CheckBusOff().                          */
+typedef struct {
+    uint8_t  last_error_code;   /* FDCAN PSR.LEC: 0=none 1=stuff 2=form
+                                 * 3=ack 4=bit1(rec) 5=bit0(dom) 6=CRC */
+    uint8_t  error_passive;     /* 1 = Error Passive state              */
+    uint8_t  bus_off;           /* 1 = Bus-Off state                    */
+    uint8_t  warning;           /* 1 = error warning threshold exceeded */
+    uint8_t  tec;               /* Transmit Error Counter (0-255)       */
+    uint8_t  rec;               /* Receive Error Counter  (0-255)       */
+} CAN_Diag_t;
+
 /* Function prototypes */
 void CAN_Init(void);
 void CAN_TestTransmit(void);
@@ -122,6 +134,7 @@ void LED_Relay_Rear_Set(bool on);     /* rear relay */
 bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t can_stats;
+extern CAN_Diag_t  can_diag;
 extern FDCAN_HandleTypeDef hfdcan1;
 
 /* Debug-visible global CAN buffers (volatile for debugger inspection) */

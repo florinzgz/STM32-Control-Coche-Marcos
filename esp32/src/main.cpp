@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <climits>
+#include <cstring>
 #include <esp_system.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
@@ -345,14 +346,47 @@ void setup() {
     tft.setTextSize(1);
     Serial.println("[TFT] Display initialized (480x320 landscape)");
 
-    ESP32Can.setPins(CAN_TX_PIN, CAN_RX_PIN);
-    ESP32Can.setRxQueueSize(5);
-    ESP32Can.setTxQueueSize(5);
+    /* ---- Manual TWAI initialization with CiA 301 optimal timing ----
+     *
+     * The ESP32-TWAI-CAN library default 500 kbps timing uses a sample
+     * point of 80.0 % (BRP=8, TSEG1=15, TSEG2=4).  The STM32 FDCAN is
+     * configured at 88.2 %.  The 8.2 % difference is right at the limit
+     * of what SJW can compensate — combined with the STM32's HSI ±1 %
+     * clock tolerance, this causes persistent BERR / ACK errors.
+     *
+     * Fix: use custom timing with 87.5 % sample point (CiA 301
+     * recommended for 500 kbps), closely matching the STM32's 88.2 %.
+     *
+     * APB clock  = 80 MHz
+     * BRP        = 10    → TQ = 10 / 80 MHz = 125 ns
+     * Bit time   = 1 (sync) + 13 (seg1) + 2 (seg2) = 16 TQ = 2 µs
+     * Baud rate  = 80 MHz / 10 / 16 = 500 kbps
+     * Sample pt  = (1 + 13) / 16 = 87.5 %
+     * SJW        = 2  → ±12.5 % oscillator tolerance                  */
+    {
+        twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
+            static_cast<gpio_num_t>(CAN_TX_PIN),
+            static_cast<gpio_num_t>(CAN_RX_PIN),
+            TWAI_MODE_NORMAL);
+        g_config.rx_queue_len = 5;
+        g_config.tx_queue_len = 5;
 
-    if (ESP32Can.begin(ESP32Can.convertSpeed(500))) {
-        Serial.println("[CAN] Initialized at 500 kbps");
-    } else {
-        Serial.println("[CAN] Initialization FAILED");
+        twai_timing_config_t t_config;
+        memset(&t_config, 0, sizeof(t_config));
+        t_config.brp            = 10;
+        t_config.tseg_1         = 13;
+        t_config.tseg_2         = 2;
+        t_config.sjw            = 2;
+        t_config.triple_sampling = false;
+
+        twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+        if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK &&
+            twai_start() == ESP_OK) {
+            Serial.println("[CAN] Initialized at 500 kbps (SP=87.5%)");
+        } else {
+            Serial.println("[CAN] Initialization FAILED");
+        }
     }
 
     // Initialize obstacle sensor driver (TOFSense-M 8×8 on UART1)
