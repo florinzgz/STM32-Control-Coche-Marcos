@@ -1231,6 +1231,18 @@ typedef struct {
 #define RCC_FDCANCLKSOURCE_PLL   0x00000001U
 #define RCC_FDCANCLKSOURCE_PCLK1 0x00000002U
 
+/* RCC FDCAN clock source query (reads RCC_CCIPR.FDCANSEL bits [25:24]) */
+#define RCC_CCIPR_FDCANSEL_Pos  24U
+#define RCC_CCIPR_FDCANSEL_Msk  (0x3UL << RCC_CCIPR_FDCANSEL_Pos)
+#define RCC_CCIPR_FDCANSEL      RCC_CCIPR_FDCANSEL_Msk
+#define __HAL_RCC_GET_FDCAN_SOURCE() \
+    ((uint32_t)(RCC->CCIPR & RCC_CCIPR_FDCANSEL))
+
+/* FDCAN CCCR register bit — INIT (bit 0) */
+#define FDCAN_CCCR_INIT_Pos  0U
+#define FDCAN_CCCR_INIT_Msk  (0x1UL << FDCAN_CCCR_INIT_Pos)
+#define FDCAN_CCCR_INIT      FDCAN_CCCR_INIT_Msk
+
 /* RCC clock enable macros */
 #define __HAL_RCC_GPIOA_CLK_ENABLE()   ((void)0)
 #define __HAL_RCC_GPIOB_CLK_ENABLE()   ((void)0)

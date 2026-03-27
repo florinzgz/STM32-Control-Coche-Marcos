@@ -258,6 +258,15 @@ void CAN_Init(void) {
     }
     can_init_diag.hal_init = 0U;      /* HAL_FDCAN_Init succeeded      */
 
+    /* Verify that the FDCAN kernel clock is sourced from PCLK1.
+     * After reset FDCANSEL defaults to 00 = HSE (which is not enabled
+     * in this project).  SystemClock_Config() must have already set it
+     * to PCLK1 via RCC_FDCANCLKSOURCE_PCLK1 (CCIPR bits [25:24] = 10)
+     * before this point.  A wrong source means the bit-timing registers
+     * produce a different baud rate, causing ACK / stuff errors.      */
+    can_init_diag.clk_ok =
+        (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
+
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
 
@@ -285,6 +294,13 @@ void CAN_Init(void) {
     }
 
     can_init_diag.started = 1U;
+
+    /* Confirm CCCR.INIT is cleared — the peripheral has left
+     * initialisation mode and is actively participating on the bus.
+     * If INIT is still set, HAL_FDCAN_Start did not complete the
+     * handshake (possible stale state after abnormal reset).          */
+    can_init_diag.cccr_init_ok =
+        ((hfdcan1.Instance->CCCR & FDCAN_CCCR_INIT) == 0U) ? 1U : 0U;
 }
 
 /**
