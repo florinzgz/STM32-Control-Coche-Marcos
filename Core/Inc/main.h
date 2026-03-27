@@ -20,10 +20,6 @@ extern "C" {
 #include "stm32g4xx_hal.h"
 
 /* USER CODE BEGIN Includes */
-#include "stm32g4xx_hal_i2c.h"   /* Explicit include: ensures I2C_HandleTypeDef is
-                                   * defined before the extern hi2c1 declaration below,
-                                   * regardless of include order in translation units.
-                                   * Safe against CubeMX regeneration (USER CODE block). */
 #include "project_config.h"
 #include <stdbool.h>
 /* USER CODE END Includes */
