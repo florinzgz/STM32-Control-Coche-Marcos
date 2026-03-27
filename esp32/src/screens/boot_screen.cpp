@@ -53,6 +53,20 @@ static constexpr RxFlagLabel RX_FLAG_TABLE[] = {
     { DIAG_RX_BAT, "BAT " },
 };
 
+// STM32 system state to short abbreviation (for diagnostic display)
+static const char* stm32StateStr(uint8_t state) {
+    switch (state) {
+        case 0: return "BOOT";
+        case 1: return "STBY";
+        case 2: return "ACT";
+        case 3: return "DEG";
+        case 4: return "SAFE";
+        case 5: return "ERR";
+        case 6: return "LIMP";
+        default: return "??";
+    }
+}
+
 void BootScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("boot");
     needsRedraw_ = true;
@@ -291,33 +305,14 @@ void BootScreen::draw() {
                 snprintf(buf, sizeof(buf), "STM32: NO HEARTBEAT");
                 stm32Col = ui::COL_RED;
             } else if (diagStm32Frozen_) {
-                // State abbreviation for frozen display
-                const char* st = "??";
-                switch (diagStm32State_) {
-                    case 0: st = "BOOT"; break;
-                    case 1: st = "STBY"; break;
-                    case 2: st = "ACT";  break;
-                    case 3: st = "DEG";  break;
-                    case 4: st = "SAFE"; break;
-                    case 5: st = "ERR";  break;
-                    case 6: st = "LIMP"; break;
-                }
                 snprintf(buf, sizeof(buf), "STM32: FROZEN cnt:%u St:%s F:%02X E:%02X",
-                         diagStm32Alive_, st, diagStm32Faults_, diagStm32Error_);
+                         diagStm32Alive_, stm32StateStr(diagStm32State_),
+                         diagStm32Faults_, diagStm32Error_);
                 stm32Col = ui::COL_ORANGE;
             } else {
-                const char* st = "??";
-                switch (diagStm32State_) {
-                    case 0: st = "BOOT"; break;
-                    case 1: st = "STBY"; break;
-                    case 2: st = "ACT";  break;
-                    case 3: st = "DEG";  break;
-                    case 4: st = "SAFE"; break;
-                    case 5: st = "ERR";  break;
-                    case 6: st = "LIMP"; break;
-                }
                 snprintf(buf, sizeof(buf), "STM32: OK cnt:%u St:%s F:%02X E:%02X",
-                         diagStm32Alive_, st, diagStm32Faults_, diagStm32Error_);
+                         diagStm32Alive_, stm32StateStr(diagStm32State_),
+                         diagStm32Faults_, diagStm32Error_);
                 stm32Col = (diagStm32Faults_ > 0) ? ui::COL_YELLOW : ui::COL_GREEN;
             }
             tft.setTextColor(stm32Col, ui::COL_BG);
