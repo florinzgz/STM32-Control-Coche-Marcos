@@ -209,14 +209,13 @@ Bit 24 PLLON  = 0  → PLL is OFF
 Bit 16 HSEON  = 0  → HSE is OFF
 Bit 10 HSIRDY = 1  → HSI16 oscillator ready
 Bit  8 HSION  = 1  → HSI16 oscillator enabled
-Bit  0 MSION  = 0  → MSI disabled (was on at reset, now off)
 ```
 
 **Interpretation:** The system is running on HSI16 (16 MHz).  PLL has not
-been configured, so SYSCLK = 16 MHz, not 170 MHz.  The fact that MSION = 0
-but HSION = 1 means `HAL_RCC_OscConfig()` in `SystemClock_Config()` started
-executing (it switches from MSI to HSI), but PLL was never enabled — either
-the function is still in progress or it failed and called `Error_Handler()`.
+been configured, so SYSCLK = 16 MHz, not 170 MHz.  HSI16 is the default
+clock source after reset on STM32G4 (this family has no MSI oscillator).
+The PLL was never enabled — either `SystemClock_Config()` is still in
+progress or it failed and called `Error_Handler()`.
 
 #### RCC_CCIPR (0x4002 1088) = 0x0000 0000
 
