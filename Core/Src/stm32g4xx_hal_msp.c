@@ -48,6 +48,12 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
      * time out.  A peripheral reset via RCC clears all FDCAN
      * registers to power-on defaults.                                */
     __HAL_RCC_FDCAN_FORCE_RESET();
+    /* Ensure the reset assertion is committed to the APB1 bus before
+     * releasing it.  Without this barrier the back-to-back write to
+     * APB1RSTR1 may produce a reset pulse too short to fully clear
+     * the peripheral state on some STM32G4 revisions.                */
+    __DSB();
+    __NOP(); __NOP(); __NOP(); __NOP();  /* ≥4 AHB cycles for reset  */
     __HAL_RCC_FDCAN_RELEASE_RESET();
     /* Re-enable the APB1 bus clock after the force-reset.
      * On some STM32G4 revisions the peripheral-reset pulse can leave
@@ -57,16 +63,25 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
      * a two-cycle stabilisation delay required by the bus bridge.    */
     __HAL_RCC_FDCAN_CLK_ENABLE();
     /* Re-apply FDCAN kernel clock source after the peripheral reset.
-     * The force-reset clears RCC_CCIPR.FDCANSEL back to the default
-     * 00 = HSE, which is not available in this project (HSI + PLL).
-     * Selecting PCLK1 here ensures the bit-timing registers produce
-     * the intended 500 kbps baud rate (170 MHz / 10 / 34 = 500k).   */
+     * On some STM32G4 silicon revisions the force-reset may affect
+     * RCC_CCIPR.FDCANSEL (clock source defaults to 00 = HSE, which
+     * is not available in this project — HSI + PLL).  Re-applying
+     * PCLK1 here ensures the bit-timing registers produce the
+     * intended 500 kbps baud rate (170 MHz / 10 / 34 = 500k).       */
     __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
     /* Ensure all RCC writes are visible before HAL_FDCAN_Init()
      * accesses the FDCAN CCCR register.  Without this barrier the
      * store to APB1ENR1 / CCIPR may still be in the write buffer
      * when the first CCCR read executes, returning garbage.          */
     __DSB();
+    __ISB();
+    /* Brief stabilisation delay for the FDCAN peripheral clock gate.
+     * On some STM32G4 revisions the clock gate needs additional APB1
+     * cycles after reset release before register reads return valid
+     * values.  At 170 MHz, 32 NOP cycles ≈ 190 ns — well above the
+     * minimum 2-cycle requirement, providing margin against bus-
+     * bridge pipeline latency.                                       */
+    for (volatile uint32_t i = 0; i < 32U; i++) { /* stabilise */ }
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
     /* PA11 = FDCAN1_RX (CN10 pin 14)
