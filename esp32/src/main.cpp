@@ -101,6 +101,16 @@ static unsigned long lastSerialMs     = 0;
 static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
 static unsigned long lastBusOffCheckMs = 0;  // TWAI bus-off recovery check
 static uint8_t       busOffRecoveryCount = 0;
+
+/* Error-passive recovery state.
+ * When TEC reaches 128 the TWAI controller enters error-passive but keeps
+ * state = RUNNING — the existing bus-off recovery never fires.  If the
+ * condition persists for ERROR_PASSIVE_TIMEOUT_MS we do a full driver
+ * reinit (stop → uninstall → install → start) to clear error counters. */
+static constexpr uint32_t ERROR_PASSIVE_TIMEOUT_MS = 3000;
+static constexpr uint8_t  ERROR_PASSIVE_MAX_RESETS = 10;
+static unsigned long errorPassiveSince  = 0;  // 0 = not in error-passive
+static uint8_t       errorPassiveResets = 0;
 #if RUNTIME_MONITOR
 static unsigned long lastRtMonMs      = 0;
 #endif
@@ -387,6 +397,41 @@ static void renderTask(void* /*param*/) {
 }
 
 // ---------------------------------------------------------------------------
+// twaiInit() — (re-)install and start the TWAI driver with project timing.
+//
+// Returns true on success.  Called from setup() for the initial bring-up and
+// from the error-passive recovery path when the controller is stuck with
+// TEC ≥ 128 but never reaches bus-off.
+// ---------------------------------------------------------------------------
+static bool twaiInit() {
+    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
+        static_cast<gpio_num_t>(CAN_TX_PIN),
+        static_cast<gpio_num_t>(CAN_RX_PIN),
+        TWAI_MODE_NORMAL);
+    g_config.rx_queue_len = 5;
+    g_config.tx_queue_len = 5;
+
+    twai_timing_config_t t_config;
+    memset(&t_config, 0, sizeof(t_config));
+    t_config.brp            = 10;
+    t_config.tseg_1         = 13;
+    t_config.tseg_2         = 2;
+    t_config.sjw            = 2;
+    t_config.triple_sampling = false;
+
+    twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+    if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK) {
+        return false;
+    }
+    if (twai_start() != ESP_OK) {
+        twai_driver_uninstall();
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // setup() — called once at power-on
 // ---------------------------------------------------------------------------
 void setup() {
@@ -439,7 +484,7 @@ void setup() {
     tft.setTextSize(1);
     Serial.println("[TFT] Display initialized (480x320 landscape)");
 
-    /* ---- Manual TWAI initialization with CiA 301 optimal timing ----
+    /* ---- TWAI initialization with CiA 301 optimal timing ----
      *
      * The ESP32-TWAI-CAN library default 500 kbps timing uses a sample
      * point of 80.0 % (BRP=8, TSEG1=15, TSEG2=4).  The STM32 FDCAN is
@@ -456,30 +501,10 @@ void setup() {
      * Baud rate  = 80 MHz / 10 / 16 = 500 kbps
      * Sample pt  = (1 + 13) / 16 = 87.5 %
      * SJW        = 2  → ±12.5 % oscillator tolerance                  */
-    {
-        twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
-            static_cast<gpio_num_t>(CAN_TX_PIN),
-            static_cast<gpio_num_t>(CAN_RX_PIN),
-            TWAI_MODE_NORMAL);
-        g_config.rx_queue_len = 5;
-        g_config.tx_queue_len = 5;
-
-        twai_timing_config_t t_config;
-        memset(&t_config, 0, sizeof(t_config));
-        t_config.brp            = 10;
-        t_config.tseg_1         = 13;
-        t_config.tseg_2         = 2;
-        t_config.sjw            = 2;
-        t_config.triple_sampling = false;
-
-        twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-
-        if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK &&
-            twai_start() == ESP_OK) {
-            Serial.println("[CAN] Initialized at 500 kbps (SP=87.5%)");
-        } else {
-            Serial.println("[CAN] Initialization FAILED");
-        }
+    if (twaiInit()) {
+        Serial.println("[CAN] Initialized at 500 kbps (SP=87.5%)");
+    } else {
+        Serial.println("[CAN] Initialization FAILED");
     }
 
     // Initialize obstacle sensor driver (TOFSense-M 8×8 on UART1)
@@ -1131,10 +1156,16 @@ void loop() {
                           (unsigned long)status.rx_missed_count,
                           (unsigned long)status.arb_lost_count,
                           (unsigned long)status.bus_error_count);
+            if (status.tx_error_counter >= 128 &&
+                status.state == TWAI_STATE_RUNNING) {
+                Serial.println("[CAN-DIAG] WARNING: Error-passive "
+                               "(tx_err>=128). Check CAN bus wiring "
+                               "and termination.");
+            }
         }
     }
 
-    /* ---- TWAI bus-off recovery ----
+    /* ---- TWAI bus-off / error-passive recovery ----
      * If the ESP32 transmits before the STM32 starts (or after a bus
      * glitch), the TWAI controller enters BUS_OFF after TEC reaches 256.
      * Without recovery the ESP32 stays dead permanently.
@@ -1143,6 +1174,12 @@ void loop() {
      *   BUS_OFF → twai_initiate_recovery() → RECOVERING
      *   RECOVERING → (128×11 recessive bits) → STOPPED
      *   STOPPED → twai_start() → RUNNING
+     *
+     * Error-passive recovery:
+     *   When TEC saturates at 128 (error-passive) the TWAI state remains
+     *   RUNNING so bus-off recovery never triggers.  If error-passive
+     *   persists for ERROR_PASSIVE_TIMEOUT_MS, a full driver reinit
+     *   (stop → uninstall → install → start) clears error counters.
      *
      * Check every 250 ms; limit to 10 attempts to avoid hammering a
      * bus that is genuinely broken (mirrors STM32 CAN_BUSOFF_MAX_RETRIES). */
@@ -1157,14 +1194,51 @@ void loop() {
                     twai_initiate_recovery();
                     busOffRecoveryCount++;
                 }
+                errorPassiveSince = 0;  // not error-passive while bus-off
             } else if (sts.state == TWAI_STATE_STOPPED) {
                 /* Recovery completed — restart the driver */
                 if (twai_start() == ESP_OK) {
                     Serial.println("[CAN] Recovery complete — TWAI restarted");
                     busOffRecoveryCount = 0;
                 }
+                errorPassiveSince = 0;
             } else if (sts.state == TWAI_STATE_RUNNING) {
                 busOffRecoveryCount = 0;
+
+                /* ---- Error-passive detection ----
+                 * TEC ≥ 128 means the controller is error-passive.  It can
+                 * still receive but transmissions are degraded.  If this
+                 * persists, a full driver reinit is the only way to clear
+                 * the error counters (twai_initiate_recovery() is only
+                 * valid from BUS_OFF state). */
+                if (sts.tx_error_counter >= 128) {
+                    if (errorPassiveSince == 0) {
+                        errorPassiveSince = now;
+                    } else if ((now - errorPassiveSince) >= ERROR_PASSIVE_TIMEOUT_MS &&
+                               errorPassiveResets < ERROR_PASSIVE_MAX_RESETS) {
+                        Serial.printf("[CAN] Error-passive (tx_err=%lu) for >%lus "
+                                      "— reinit attempt %u/%u\n",
+                                      (unsigned long)sts.tx_error_counter,
+                                      (unsigned long)(ERROR_PASSIVE_TIMEOUT_MS / 1000),
+                                      errorPassiveResets + 1,
+                                      ERROR_PASSIVE_MAX_RESETS);
+                        twai_stop();
+                        twai_driver_uninstall();
+                        if (twaiInit()) {
+                            Serial.println("[CAN] Error-passive recovery "
+                                           "complete — TWAI reinitialized");
+                        } else {
+                            Serial.println("[CAN] Error-passive recovery "
+                                           "FAILED — TWAI reinit error");
+                        }
+                        errorPassiveResets++;
+                        errorPassiveSince = 0;
+                    }
+                } else {
+                    /* TEC below error-passive threshold — healthy */
+                    errorPassiveSince  = 0;
+                    errorPassiveResets = 0;
+                }
             }
         }
     }
