@@ -132,6 +132,28 @@ void update() {
     if (now - lastPollMs_ < interval) return;
     lastPollMs_ = now;
 
+    // When in backoff, use address-only probe (endTransmission with STOP)
+    // instead of readReg() to avoid ESP32 Wire.requestFrom() error spam
+    // when the MCP23017 is not connected.
+    if (errorCount_ >= ERROR_THRESHOLD) {
+        Wire.beginTransmission(cfg_.i2cAddr);
+        if (Wire.endTransmission() != 0) {
+            currentGear_ = Gear::NEUTRAL;
+            return;  // Device still absent — stay in backoff
+        }
+        // Device responded — re-initialize and resume
+        if (!writeReg(REG_IODIRA, GEAR_MASK) || !writeReg(REG_GPPUA, GEAR_MASK)) {
+            currentGear_ = Gear::NEUTRAL;
+            return;  // Re-init failed — stay in backoff
+        }
+        errorCount_ = 0;
+        connected_  = true;
+        Serial.println("[SHIFTER] MCP23017 reconnected");
+        uint8_t portVal = readReg(REG_GPIOA);
+        currentGear_ = (portVal != 0xFF) ? decodeGear(portVal) : Gear::NEUTRAL;
+        return;
+    }
+
     uint8_t portVal = readReg(REG_GPIOA);
 
     if (portVal == 0xFF) {
@@ -149,14 +171,8 @@ void update() {
         return;
     }
 
-    // Successful read — recover from error state if needed
+    // Successful read — recover from minor error streak
     if (errorCount_ > 0) {
-        if (!connected_) {
-            // Re-initialize registers after reconnection
-            writeReg(REG_IODIRA, GEAR_MASK);
-            writeReg(REG_GPPUA, GEAR_MASK);
-            Serial.println("[SHIFTER] MCP23017 reconnected");
-        }
         errorCount_ = 0;
         connected_  = true;
     }
