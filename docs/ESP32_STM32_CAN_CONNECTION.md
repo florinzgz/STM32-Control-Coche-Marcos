@@ -194,5 +194,5 @@ The SN65HVD230 operates at 3.3 V supply — matching both the ESP32-S3 and STM32
 - STM32G4 FDCAN Configuration: See `CAN_PROTOCOL.md`
 - ESP32-S3 TWAI Configuration: See ESP32 firmware repository
 - **UM2505** — STM32G4 Nucleo-64 boards (MB1367) User Manual, STMicroelectronics.
-  Tabla 17: *«Pin assignment of the ST morpho connectors»* — mapeo de PA11/PA12 a CN10 pin 14/12.
+  Tabla 17: *«Pin assignment of the ST morpho connectors»* — mapeo de PA12/PA11 a CN10 pin 12/14.
   Disponible en: https://www.st.com/resource/en/user_manual/um2505-stm32g4-nucleo64-boards-mb1367-stmicroelectronics.pdf

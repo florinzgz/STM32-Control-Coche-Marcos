@@ -28,7 +28,7 @@ Expected Serial output on boot:
 ```
 
 If `[CAN] Initialization FAILED` appears: check GPIO4 (TX) and GPIO5 (RX) wiring
-to the TJA1051 transceiver. Verify **5 V** power to the transceiver (VCC pin 3 must be 4.5–5.5 V; 3.3 V is NOT sufficient).
+to the SN65HVD230 transceiver. Verify **3.3 V** power to the transceiver (VCC pin 3; do NOT apply 5 V — the SN65HVD230 absolute maximum is 4.0 V).
 
 ---
 
@@ -166,8 +166,8 @@ build_flags =
 
 | Signal | ESP32-S3 GPIO | Connected to |
 |--------|--------------|-------------|
-| CAN TX | 4 | TJA1051 TXD |
-| CAN RX | 5 | TJA1051 RXD |
+| CAN TX | 4 | SN65HVD230 D (pin 1) |
+| CAN RX | 5 | SN65HVD230 R (pin 4) |
 | TFT MOSI | 13 | ST7796 SDA |
 | TFT SCLK | 14 | ST7796 SCL |
 | TFT CS | 15 | ST7796 CS |

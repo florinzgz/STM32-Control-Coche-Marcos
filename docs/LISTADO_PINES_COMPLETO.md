@@ -31,24 +31,24 @@
 
 ---
 
-### 1.2 CAN Bus (Transceiver TJA1051)
+### 1.2 CAN Bus (Transceiver SN65HVD230)
 
 | GPIO | Señal | Conecta a | Dirección | Componentes externos |
 |------|-------|-----------|-----------|----------------------|
-| 4 | CAN_TX | TJA1051 pin 1 (TXD) | Salida | — |
-| 5 | CAN_RX | TJA1051 pin 4 (RXD) | Entrada | — |
+| 4 | CAN_TX | SN65HVD230 pin 1 (D) | Salida | — |
+| 5 | CAN_RX | SN65HVD230 pin 4 (R) | Entrada | — |
 
 **Componentes necesarios:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Resistencia de terminación | 120 Ω ¼W | Entre CANH y CANL del TJA1051 | Terminación de bus CAN |
-| Condensador de desacoplo | 100 nF cerámico | Entre VCC (pin 3) y GND (pin 2) del TJA1051 | Filtrado de ruido |
+| Resistencia de terminación | 120 Ω ¼W | Entre CANH y CANL del SN65HVD230 | Terminación de bus CAN |
+| Condensador de desacoplo | 100 nF cerámico | Entre VCC (pin 3) y GND (pin 2) del SN65HVD230 | Filtrado de ruido |
 
-**Conexiones adicionales del TJA1051:**
-- Pin 3 (VCC) → 5 V
+**Conexiones adicionales del SN65HVD230:**
+- Pin 3 (VCC) → 3.3 V
 - Pin 2 (GND) → GND
-- Pin 8 (S / Silent) → GND (modo normal)
+- Pin 8 (Rs / SLNT) → GND (modo alta velocidad)
 - Pin 5 (VREF) → No conectar
 
 ---
@@ -443,10 +443,10 @@
 
 | Pin LQFP | GPIO | Periférico | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 61 | PB8 | FDCAN1_RX | CAN RX | TJA1051 #1 pin 4 (RXD) | — |
-| 62 | PB9 | FDCAN1_TX | CAN TX | TJA1051 #1 pin 1 (TXD) | — |
+| 44 | PA11 | FDCAN1_RX | CAN RX | SN65HVD230 #1 pin 4 (R) | — |
+| 45 | PA12 | FDCAN1_TX | CAN TX | SN65HVD230 #1 pin 1 (D) | — |
 
-**Componentes del TJA1051 lado STM32:**
+**Componentes del SN65HVD230 lado STM32:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
@@ -454,12 +454,12 @@
 | Condensador de desacoplo | 100 nF cerámico | Entre VCC (pin 3) y GND (pin 2) | Filtrado de ruido |
 | Protección ESD | TPD2E001 (opcional) | En CANH y CANL | Protección contra descargas |
 
-**Conexiones del TJA1051 #1:**
-- Pin 1 (TXD) ← PB9
-- Pin 4 (RXD) → PB8
-- Pin 3 (VCC) → 5 V
+**Conexiones del SN65HVD230 #1:**
+- Pin 1 (D) ← PA12
+- Pin 4 (R) → PA11
+- Pin 3 (VCC) → 3.3 V
 - Pin 2 (GND) → GND
-- Pin 8 (S) → GND (modo normal)
+- Pin 8 (Rs) → GND (modo alta velocidad)
 
 ---
 
@@ -528,7 +528,8 @@
 | PA8 | RPWM motor FL | TIM1_CH1 | Salida PWM |
 | PA9 | LPWM motor FL | TIM1_CH2 | Salida PWM |
 | PA10 | RPWM motor FR | TIM1_CH3 | Salida PWM |
-| PA11 | LPWM motor FR | TIM1_CH4 | Salida PWM |
+| PA11 | CAN RX | FDCAN1_RX | Entrada |
+| PA12 | CAN TX | FDCAN1_TX | Salida |
 | PA13 | SWDIO | SWD | Debug |
 | PA14 | SWCLK | SWD | Debug |
 | PA15 | Encoder canal A | TIM2_CH1 | Entrada |
@@ -538,8 +539,6 @@
 | PB5 | Sensor centrado dirección | EXTI5 | Entrada (pull-up) |
 | PB6 | I2C SCL | I2C1_SCL | Bidireccional (OD) |
 | PB7 | I2C SDA | I2C1_SDA | Bidireccional (OD) |
-| PB8 | CAN RX | FDCAN1_RX | Entrada |
-| PB9 | CAN TX | FDCAN1_TX | Salida |
 | PB10 | Relé LED frontal | GPIO | Salida |
 | PB11 | Relé LED trasero | GPIO | Salida |
 | PB15 | Velocidad rueda RR | EXTI15 | Entrada (pull-up) |
@@ -587,7 +586,7 @@
 | 1 | 10 µF / 6.3 V | Tantalio | Pin VDDA (analógico) del STM32 |
 | 2 | 20 pF | Cerámico | Condensadores de carga del cristal 8 MHz |
 | 5 | 100 nF / 50 V | Cerámico | Snubber motores |
-| ~8 | 100 nF | Cerámico | Desacoplo de módulos (TCA9548A, INA226, TJA1051, etc.) |
+| ~8 | 100 nF | Cerámico | Desacoplo de módulos (TCA9548A, INA226, SN65HVD230, etc.) |
 
 ### Diodos
 
@@ -608,7 +607,7 @@
 | Cantidad | Componente | Ubicación |
 |----------|-----------|-----------|
 | 1 | Cristal 8 MHz | Oscilador externo STM32 (PH0/PH1) |
-| 2 | TJA1051 | Transceiver CAN (uno por MCU) |
+| 2 | SN65HVD230 | Transceiver CAN (uno por MCU) |
 | 1 | TCA9548A | Multiplexor I2C |
 | 6 | INA226 | Sensores de corriente/tensión |
 | 1 | MCP23017 | I/O expander para shifter |

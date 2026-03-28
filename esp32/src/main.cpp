@@ -83,7 +83,7 @@ static void draw_runtime_overlay(TFT_eSPI& tft, uint32_t frameTimeMs) {
     tft.drawString("FPS: " + String(fps), 4, 36);
 }
 
-// CAN transceiver pins (TJA1051 — see platformio.ini header)
+// CAN transceiver pins (SN65HVD230, 3.3V — module Rs/SLNT pin tied to GND)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
 

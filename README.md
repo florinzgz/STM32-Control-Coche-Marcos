@@ -297,7 +297,7 @@ The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communi
 - **[Quick Reference](docs/CONEXIONES_RAPIDAS_ESP32.md)** - Fast lookup tables
 
 **Display:** TFT ST7796 480×320 (GPIO 10, 12–14, 21, 38, 39, 42)  
-**CAN-Bus:** TJA1051 transceiver (GPIO 4, 5)  
+**CAN-Bus:** SN65HVD230 transceiver (GPIO 4, 5)  
 **Audio:** DFPlayer Mini (GPIO 43 TX, 44 RX) + audio relay (GPIO 11)  
 **Traction switch (2WD/4WD):** GPIO 15  
 **Shifter:** MCP23017 I2C (GPIO 8 SDA, 9 SCL)  
