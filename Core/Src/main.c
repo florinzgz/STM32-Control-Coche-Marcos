@@ -683,11 +683,18 @@ static void MX_FDCAN1_Init(void)
     /* Retry loop: HAL_FDCAN_Init() can fail on the first attempt when
      * the peripheral clock gate has not fully stabilised after a
      * force-reset (observed as CCCR reading garbage, e.g. 0x8007aa5).
-     * A short delay followed by a second attempt lets the bus bridge
-     * settle.  Three attempts provide sufficient margin.              */
-    #define FDCAN_INIT_MAX_RETRIES       3
-    #define FDCAN_CLOCK_SETTLE_DELAY_MS  2U   /* Post-reset bus bridge settle */
+     * A short delay followed by another attempt lets the bus bridge
+     * settle.  Five attempts with 5 ms spacing provide sufficient
+     * margin even on STM32G4 revisions with slow clock-gate recovery. */
+    #define FDCAN_INIT_MAX_RETRIES       5
+    #define FDCAN_CLOCK_SETTLE_DELAY_MS  5U   /* Post-reset bus bridge settle */
     #define FDCAN_CCCR_RESERVED_MASK     0xFFFF0000U  /* Bits 16-31 are reserved */
+
+    /* Pre-loop delay: let the peripheral's initial clock-gate state
+     * settle after SystemClock_Config() changed the PLL / PCLK1 source
+     * and HAL_RCCEx_PeriphCLKConfig() set FDCANSEL = PCLK1.           */
+    #define FDCAN_INITIAL_SETTLE_DELAY_MS  1U
+    HAL_Delay(FDCAN_INITIAL_SETTLE_DELAY_MS);
 
     for (int attempt = 0; attempt < FDCAN_INIT_MAX_RETRIES; attempt++) {
         if (attempt > 0) {
