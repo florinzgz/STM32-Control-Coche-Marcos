@@ -53,7 +53,7 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
      * The force-reset clears RCC_CCIPR.FDCANSEL back to the default
      * 00 = HSE, which is not available in this project (HSI + PLL).
      * Selecting PCLK1 here ensures the bit-timing registers produce
-     * the intended 500 kbps baud rate (170 MHz / 10 / 34 = 500 k).  */
+     * the intended 500 kbps baud rate (170 MHz / 10 / 34 = 500k).   */
     __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
