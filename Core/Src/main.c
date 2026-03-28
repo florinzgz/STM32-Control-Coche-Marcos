@@ -693,7 +693,8 @@ static void MX_FDCAN1_Init(void)
     /* Pre-loop delay: let the peripheral's initial clock-gate state
      * settle after SystemClock_Config() changed the PLL / PCLK1 source
      * and HAL_RCCEx_PeriphCLKConfig() set FDCANSEL = PCLK1.           */
-    HAL_Delay(1);
+    #define FDCAN_INITIAL_SETTLE_DELAY_MS  1U
+    HAL_Delay(FDCAN_INITIAL_SETTLE_DELAY_MS);
 
     for (int attempt = 0; attempt < FDCAN_INIT_MAX_RETRIES; attempt++) {
         if (attempt > 0) {

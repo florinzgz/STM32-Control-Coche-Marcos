@@ -78,10 +78,11 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
     /* Brief stabilisation delay for the FDCAN peripheral clock gate.
      * On some STM32G4 revisions the clock gate needs additional APB1
      * cycles after reset release before register reads return valid
-     * values.  At 170 MHz, 32 NOP cycles ≈ 190 ns — well above the
+     * values.  At 170 MHz, 32 iterations ≈ 190 ns — well above the
      * minimum 2-cycle requirement, providing margin against bus-
      * bridge pipeline latency.                                       */
-    for (volatile uint32_t i = 0; i < 32U; i++) { /* stabilise */ }
+#define FDCAN_CLK_STABILISE_ITERS  32U
+    for (volatile uint32_t i = 0; i < FDCAN_CLK_STABILISE_ITERS; i++) { /* stabilise */ }
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
     /* PA11 = FDCAN1_RX (CN10 pin 14)
