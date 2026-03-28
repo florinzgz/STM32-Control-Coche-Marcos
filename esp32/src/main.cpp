@@ -12,6 +12,8 @@
 #include <climits>
 #include <cstring>
 #include <esp_system.h>
+#include <freertos/semphr.h>
+#include <freertos/queue.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
 #include <TFT_eSPI.h>
@@ -210,6 +212,17 @@ static bool     stm32IsAlive         = false;
 static bool     stm32StartupSeen     = false;  // true while startup_inhibit was last 1
 static bool     gearResyncPending    = false;  // true = need to re-send gear on ACTIVE
 
+// ---- Render task (Core 0) — offloads TFT + touch from main loop ----
+static SemaphoreHandle_t vdMutex = nullptr;
+static vehicle::VehicleData renderVD;  // shared copy for render task
+static QueueHandle_t touchActionQueue = nullptr;
+
+enum class TouchAction : uint8_t {
+    FRONT_LED_TOGGLE,
+    REAR_LED_TOGGLE,
+    TANK_MODE_TOGGLE,
+};
+
 // ---- Command ACK tracking (Phase 13) ----
 // Non-blocking: records when a command was sent and checks for ACK arrival.
 // UI state is only updated once ACK is received or timeout expires.
@@ -293,6 +306,84 @@ static void sendModeCommand(uint8_t modeFlags) {
     frame.data[1]          = shifter::getGearRaw();  // Include current gear
     ESP32Can.writeFrame(frame);
     ackBeginWait(can::CMD_MODE & 0xFF);
+}
+
+// ---------------------------------------------------------------------------
+// renderTask() — FreeRTOS task pinned to Core 0
+//
+// Handles all TFT display and touch operations, keeping the main loop()
+// on Core 1 free for CAN, sensors, audio, and LEDs without SPI blocking.
+// The TFT SPI bus (~28 ms per frame) no longer stalls CAN polling or
+// safety-critical processing.
+// ---------------------------------------------------------------------------
+static void renderTask(void* /*param*/) {
+    vehicle::VehicleData localVD;
+
+    for (;;) {
+        // 1. Copy latest vehicle data from main loop
+        if (xSemaphoreTake(vdMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            localVD = renderVD;
+            xSemaphoreGive(vdMutex);
+        }
+
+        // 2. Update & render screen (frame limiter inside screenManager)
+        lastFrameStart = millis();
+        RTMON_UI_BEGIN();
+        screenManager.update(localVD);
+        RTMON_UI_END();
+
+        // 3. Runtime overlay on boot screen only
+        {
+            uint32_t frameTime = millis() - lastFrameStart;
+            if (showOverlay && screenManager.isInitialScreen()) {
+                draw_runtime_overlay(tft, frameTime);
+            } else {
+                showOverlay = false;
+            }
+        }
+
+        // 4. Centralized touch handling (same SPI bus as TFT)
+        {
+            uint16_t tx = 0, ty = 0;
+            bool isTouched = tft.getTouch(&tx, &ty);
+            touch::update(isTouched, static_cast<int16_t>(tx),
+                          static_cast<int16_t>(ty));
+
+            touch::TouchEvent evt = touch::getEvent();
+
+            if (evt.type == touch::EventType::LONG_PRESS) {
+                screenManager.onLongPress(evt.x, evt.y);
+            }
+
+            if (evt.type == touch::EventType::TAP) {
+                screenManager.onTouch(evt.x, evt.y);
+
+                if (!screenManager.isBlockingInput()) {
+                    if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
+                        TouchAction act = TouchAction::FRONT_LED_TOGGLE;
+                        xQueueSend(touchActionQueue, &act, 0);
+                    }
+                    if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
+                        TouchAction act = TouchAction::REAR_LED_TOGGLE;
+                        xQueueSend(touchActionQueue, &act, 0);
+                    }
+                    uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
+                    if (modeHit == 3) {
+                        TouchAction act = TouchAction::TANK_MODE_TOGGLE;
+                        xQueueSend(touchActionQueue, &act, 0);
+                    }
+                }
+            }
+
+#if RUNTIME_MONITOR
+            // Debug overlay toggle (3 s hold) and draw
+            RTMON_OVERLAY_UPDATE(isTouched);
+            RTMON_OVERLAY_DRAW(tft);
+#endif
+        }
+
+        vTaskDelay(1);  // yield to other Core 0 tasks (WiFi, BT, etc.)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +537,24 @@ void setup() {
         md.timestampMs = millis();
         vehicleData.setMode(md);
     }
+
+    // Create render task on Core 0 — offloads all TFT and touch operations
+    // from the main loop, preventing SPI blocking on Core 1.
+    vdMutex = xSemaphoreCreateMutex();
+    touchActionQueue = xQueueCreate(8, sizeof(TouchAction));
+    if (vdMutex == nullptr || touchActionQueue == nullptr) {
+        Serial.println("[HMI] CRITICAL: Failed to create render task resources");
+        // Fall through — render task won't be created, TFT won't update.
+        // System is still safe (CAN, safety, LEDs continue on Core 1).
+    } else {
+        BaseType_t rc = xTaskCreatePinnedToCore(
+            renderTask, "Render", 16384, nullptr, 1, nullptr, 0);
+        if (rc != pdPASS) {
+            Serial.println("[HMI] CRITICAL: Failed to create render task");
+        } else {
+            Serial.println("[HMI] Render task started on Core 0");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -554,20 +663,11 @@ void loop() {
         vehicleData.setObstacle(od);
     }
 
-    // Update HMI screen based on current vehicle state
-    lastFrameStart = millis();
-    RTMON_UI_BEGIN();
-    screenManager.update(vehicleData);
-    RTMON_UI_END();
-
-    // Mostrar overlay SOLO en la pantalla inicial
-    {
-        uint32_t frameTime = millis() - lastFrameStart;
-        if (showOverlay && screenManager.isInitialScreen()) {
-            draw_runtime_overlay(tft, frameTime);
-        } else {
-            showOverlay = false;
-        }
+    // ---- Update shared vehicle data for render task (Core 0) ----
+    // Non-blocking: skip if render task holds the mutex (stale-by-one-frame is OK).
+    if (vdMutex != nullptr && xSemaphoreTake(vdMutex, 0) == pdTRUE) {
+        renderVD = vehicleData;
+        xSemaphoreGive(vdMutex);
     }
 
     // ---- Shifter gear update ----
@@ -638,29 +738,14 @@ void loop() {
         }
     }
 
-    // ---- Centralized touch handling ----
-    {
-        uint16_t tx = 0, ty = 0;
-        bool isTouched = tft.getTouch(&tx, &ty);
-        touch::update(isTouched, static_cast<int16_t>(tx),
-                      static_cast<int16_t>(ty));
-
-        touch::TouchEvent evt = touch::getEvent();
-
-        if (evt.type == touch::EventType::LONG_PRESS) {
-            // Long press on battery icon → open PIN entry screen
-            screenManager.onLongPress(evt.x, evt.y);
-        }
-
-        if (evt.type == touch::EventType::TAP) {
-            // Forward to screen manager (PIN / engineering dispatch)
-            screenManager.onTouch(evt.x, evt.y);
-
-            // LED toggle and mode icons are suppressed while PIN/engineering
-            // overlay is active to avoid unintended commands
-            if (!screenManager.isBlockingInput()) {
-                // Front LED toggle
-                if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
+    // ---- Process touch actions from render task (Core 0) ----
+    // Touch reading and screen dispatch happen on Core 0 (same SPI bus as TFT).
+    // Actions that require CAN sends or state changes are queued here.
+    if (touchActionQueue != nullptr) {
+        TouchAction act;
+        while (xQueueReceive(touchActionQueue, &act, 0) == pdTRUE) {
+            switch (act) {
+                case TouchAction::FRONT_LED_TOGGLE:
                     frontLedLocalState = !frontLedLocalState;
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     config_store::setFrontLedEnabled(frontLedLocalState);
@@ -669,10 +754,9 @@ void loop() {
                                 audio::Priority::LO);
                     Serial.printf("[LED] Front → %s\n",
                                   frontLedLocalState ? "ON" : "OFF");
-                }
+                    break;
 
-                // Rear LED toggle
-                if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
+                case TouchAction::REAR_LED_TOGGLE:
                     rearLedLocalState = !rearLedLocalState;
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     config_store::setRearLedEnabled(rearLedLocalState);
@@ -681,27 +765,23 @@ void loop() {
                                 audio::Priority::LO);
                     Serial.printf("[LED] Rear → %s\n",
                                   rearLedLocalState ? "ON" : "OFF");
-                }
+                    break;
 
-                // Mode icons — 360° tank turn only (touch selectable)
-                // 4x4/4x2 traction is now controlled by the physical switch.
-                // SAFETY FIX: Only send mode command when STM32 is alive.
-                uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
-                if (modeHit == 3 && stm32IsAlive) {
-                    // 360° toggle: flip tank turn bit, preserve 4x4 from switch
-                    currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
-                    audio::play(audio::Sound::BEEP, audio::Priority::LO);
-                    sendModeCommand(currentModeFlags);
-                    // Only persist tank turn to NVS; traction comes from physical switch
-                    config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
-                    {
-                        vehicle::ModeData md;
-                        md.modeFlags   = currentModeFlags;
-                        md.timestampMs = millis();
-                        vehicleData.setMode(md);
+                case TouchAction::TANK_MODE_TOGGLE:
+                    if (stm32IsAlive) {
+                        currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
+                        audio::play(audio::Sound::BEEP, audio::Priority::LO);
+                        sendModeCommand(currentModeFlags);
+                        config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
+                        {
+                            vehicle::ModeData md;
+                            md.modeFlags   = currentModeFlags;
+                            md.timestampMs = millis();
+                            vehicleData.setMode(md);
+                        }
+                        Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
                     }
-                    Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
-                }
+                    break;
             }
         }
     }
@@ -1010,14 +1090,6 @@ void loop() {
         // Single update call drives all animation + FastLED.show()
         led_ctrl::update();
     }
-
-#if RUNTIME_MONITOR
-    // Debug overlay — detect long touch (3 seconds) to toggle
-    uint16_t touchX = 0, touchY = 0;
-    bool touched = tft.getTouch(&touchX, &touchY);
-    RTMON_OVERLAY_UPDATE(touched);
-    RTMON_OVERLAY_DRAW(tft);
-#endif
 
     // Send heartbeat 0x011 every 100 ms
     if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
