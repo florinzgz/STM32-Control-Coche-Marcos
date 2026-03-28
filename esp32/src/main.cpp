@@ -542,8 +542,19 @@ void setup() {
     // from the main loop, preventing SPI blocking on Core 1.
     vdMutex = xSemaphoreCreateMutex();
     touchActionQueue = xQueueCreate(8, sizeof(TouchAction));
-    xTaskCreatePinnedToCore(renderTask, "Render", 16384, nullptr, 1, nullptr, 0);
-    Serial.println("[HMI] Render task started on Core 0");
+    if (vdMutex == nullptr || touchActionQueue == nullptr) {
+        Serial.println("[HMI] CRITICAL: Failed to create render task resources");
+        // Fall through — render task won't be created, TFT won't update.
+        // System is still safe (CAN, safety, LEDs continue on Core 1).
+    } else {
+        BaseType_t rc = xTaskCreatePinnedToCore(
+            renderTask, "Render", 16384, nullptr, 1, nullptr, 0);
+        if (rc != pdPASS) {
+            Serial.println("[HMI] CRITICAL: Failed to create render task");
+        } else {
+            Serial.println("[HMI] Render task started on Core 0");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +665,7 @@ void loop() {
 
     // ---- Update shared vehicle data for render task (Core 0) ----
     // Non-blocking: skip if render task holds the mutex (stale-by-one-frame is OK).
-    if (xSemaphoreTake(vdMutex, 0) == pdTRUE) {
+    if (vdMutex != nullptr && xSemaphoreTake(vdMutex, 0) == pdTRUE) {
         renderVD = vehicleData;
         xSemaphoreGive(vdMutex);
     }
@@ -730,7 +741,7 @@ void loop() {
     // ---- Process touch actions from render task (Core 0) ----
     // Touch reading and screen dispatch happen on Core 0 (same SPI bus as TFT).
     // Actions that require CAN sends or state changes are queued here.
-    {
+    if (touchActionQueue != nullptr) {
         TouchAction act;
         while (xQueueReceive(touchActionQueue, &act, 0) == pdTRUE) {
             switch (act) {
