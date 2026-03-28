@@ -1212,26 +1212,37 @@ void loop() {
                  * the error counters (twai_initiate_recovery() is only
                  * valid from BUS_OFF state). */
                 if (sts.tx_error_counter >= 128) {
-                    if (errorPassiveSince == 0) {
-                        errorPassiveSince = now;
-                    } else if (errorPassiveResets >= ERROR_PASSIVE_MAX_RESETS) {
+                    if (errorPassiveResets >= ERROR_PASSIVE_MAX_RESETS) {
                         /* Max attempts exhausted — stop retrying.
-                         * Clear timestamp so we don't re-evaluate. */
+                         * Keep block inert until TEC drops below 128. */
                         errorPassiveSince = 0;
+                    } else if (errorPassiveSince == 0) {
+                        errorPassiveSince = now;
                     } else if ((now - errorPassiveSince) >= ERROR_PASSIVE_TIMEOUT_MS) {
                         Serial.printf("[CAN] Error-passive (tx_err=%lu) for >3s "
                                       "— reinit attempt %u/%u\n",
                                       (unsigned long)sts.tx_error_counter,
                                       errorPassiveResets + 1,
                                       ERROR_PASSIVE_MAX_RESETS);
-                        twai_stop();
-                        twai_driver_uninstall();
-                        if (twaiInit()) {
-                            Serial.println("[CAN] Error-passive recovery "
-                                           "complete — TWAI reinitialized");
+                        esp_err_t stop_res = twai_stop();
+                        if (stop_res != ESP_OK &&
+                            stop_res != ESP_ERR_INVALID_STATE) {
+                            Serial.printf("[CAN] twai_stop() failed: 0x%x\n",
+                                          (unsigned)stop_res);
                         } else {
-                            Serial.println("[CAN] Error-passive recovery "
-                                           "FAILED — TWAI reinit error");
+                            esp_err_t uninst_res = twai_driver_uninstall();
+                            if (uninst_res != ESP_OK &&
+                                uninst_res != ESP_ERR_INVALID_STATE) {
+                                Serial.printf("[CAN] twai_driver_uninstall() "
+                                              "failed: 0x%x\n",
+                                              (unsigned)uninst_res);
+                            } else if (twaiInit()) {
+                                Serial.println("[CAN] Error-passive recovery "
+                                               "complete — TWAI reinitialized");
+                            } else {
+                                Serial.println("[CAN] Error-passive recovery "
+                                               "FAILED — TWAI reinit error");
+                            }
                         }
                         errorPassiveResets++;
                         errorPassiveSince = 0;
