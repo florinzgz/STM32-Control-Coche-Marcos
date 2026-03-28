@@ -1214,12 +1214,14 @@ void loop() {
                 if (sts.tx_error_counter >= 128) {
                     if (errorPassiveSince == 0) {
                         errorPassiveSince = now;
-                    } else if ((now - errorPassiveSince) >= ERROR_PASSIVE_TIMEOUT_MS &&
-                               errorPassiveResets < ERROR_PASSIVE_MAX_RESETS) {
-                        Serial.printf("[CAN] Error-passive (tx_err=%lu) for >%lus "
+                    } else if (errorPassiveResets >= ERROR_PASSIVE_MAX_RESETS) {
+                        /* Max attempts exhausted — stop retrying.
+                         * Clear timestamp so we don't re-evaluate. */
+                        errorPassiveSince = 0;
+                    } else if ((now - errorPassiveSince) >= ERROR_PASSIVE_TIMEOUT_MS) {
+                        Serial.printf("[CAN] Error-passive (tx_err=%lu) for >3s "
                                       "— reinit attempt %u/%u\n",
                                       (unsigned long)sts.tx_error_counter,
-                                      (unsigned long)(ERROR_PASSIVE_TIMEOUT_MS / 1000),
                                       errorPassiveResets + 1,
                                       ERROR_PASSIVE_MAX_RESETS);
                         twai_stop();
