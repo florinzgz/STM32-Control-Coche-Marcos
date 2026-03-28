@@ -1251,6 +1251,7 @@ typedef struct {
 #define __HAL_RCC_FDCAN_CLK_ENABLE()   ((void)0)
 #define __HAL_RCC_FDCAN_FORCE_RESET()  ((void)0)
 #define __HAL_RCC_FDCAN_RELEASE_RESET() ((void)0)
+#define __HAL_RCC_FDCAN_CONFIG(source)  ((void)0)
 #define __HAL_RCC_TIM1_CLK_ENABLE()    ((void)0)
 #define __HAL_RCC_TIM2_CLK_ENABLE()    ((void)0)
 #define __HAL_RCC_TIM3_CLK_ENABLE()    ((void)0)
