@@ -26,7 +26,7 @@
 | **Programador** | ST-Link V2/V3 | Incluido en NUCLEO board |
 | **Cable USB** | USB-A a Mini/Micro-USB | Para ST-Link |
 | **Fuente 5V** | 2A mínimo | Alimentación externa si se usan motores |
-| **Transceptor CAN** | TJA1051T/3 | High-speed CAN transceiver |
+| **Transceptor CAN** | SN65HVD230 | High-speed CAN transceiver (3.3 V) |
 | **Resistencias CAN** | 2× 120Ω | Terminación del bus CAN |
 
 ### Software Necesario
@@ -430,12 +430,12 @@ void hard_fault_handler_c(uint32_t *hardfault_args) {
 1. **Hardware:**
    - Resistencias 120Ω en ambos extremos del bus
    - CANH y CANL conectados correctamente
-   - Alimentación del transceptor TJA1051T/3 (**5V obligatorio** — VCC mín 4.5 V; 3.3 V NO funciona)
+   - Alimentación del transceptor SN65HVD230 (**3.3 V** — máximo absoluto 4.0 V; NO aplicar 5 V)
 
 2. **Software:**
 ```c
 // Verificar configuración de pines
-HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);  // PB8=RX, PB9=TX
+HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);  // PA11=RX, PA12=TX
 
 // Verificar bitrate
 hfdcan1.NominalPrescaler = 20;  // 500 kbps @ 170 MHz

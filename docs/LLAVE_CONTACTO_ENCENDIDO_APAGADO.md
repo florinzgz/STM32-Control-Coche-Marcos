@@ -348,7 +348,7 @@ Una vez que los relés están cerrados, la corriente fluye así:
                 │
                 ├──► STM32G474RE (MCU, 170 MHz)
                 ├──► TCA9548A + 6× INA226 (I²C)
-                ├──► Transceiver CAN TJA1051 (⚠️ requiere 5 V, NO 3.3 V)
+                ├──► Transceiver CAN SN65HVD230 (3.3 V)
                 └──► Señales digitales (PWM, GPIO, encoder)
 ```
 
@@ -449,7 +449,7 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
                │   │    │                                                                │
                │   │    │  GPIO 40 (IGNITION_SENSE) ◄── R1=33kΩ ── Llave contacto      │
                │   │    │  GPIO 41 (POWER_HOLD)     ──► Transistor ──► Relé retención   │
-               │   │    │  GPIO 4/5 (CAN TX/RX)     ──► TJA1051 ──► CAN Bus ──► STM32  │
+               │   │    │  GPIO 4/5 (CAN TX/RX)     ──► SN65HVD230 ──► CAN Bus ──► STM32  │
                │   │    └───────────────────────────────────────────────────────────────┘
                │   │                                    ▲ 5V
                │   │                                    │

@@ -83,7 +83,7 @@ static void draw_runtime_overlay(TFT_eSPI& tft, uint32_t frameTimeMs) {
     tft.drawString("FPS: " + String(fps), 4, 36);
 }
 
-// CAN transceiver pins (TJA1051 — see platformio.ini header)
+// CAN transceiver pins (SN65HVD230, 3.3V — module Rs/SLNT pin tied to GND)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
 
@@ -97,6 +97,8 @@ static uint8_t  heartbeatCounter = 0;
 static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
 static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
+static unsigned long lastBusOffCheckMs = 0;  // TWAI bus-off recovery check
+static uint8_t       busOffRecoveryCount = 0;
 #if RUNTIME_MONITOR
 static unsigned long lastRtMonMs      = 0;
 #endif
@@ -1057,6 +1059,41 @@ void loop() {
                           (unsigned long)status.rx_missed_count,
                           (unsigned long)status.arb_lost_count,
                           (unsigned long)status.bus_error_count);
+        }
+    }
+
+    /* ---- TWAI bus-off recovery ----
+     * If the ESP32 transmits before the STM32 starts (or after a bus
+     * glitch), the TWAI controller enters BUS_OFF after TEC reaches 256.
+     * Without recovery the ESP32 stays dead permanently.
+     *
+     * Recovery sequence (per ESP-IDF TWAI API):
+     *   BUS_OFF → twai_initiate_recovery() → RECOVERING
+     *   RECOVERING → (128×11 recessive bits) → STOPPED
+     *   STOPPED → twai_start() → RUNNING
+     *
+     * Check every 250 ms; limit to 10 attempts to avoid hammering a
+     * bus that is genuinely broken (mirrors STM32 CAN_BUSOFF_MAX_RETRIES). */
+    if (now - lastBusOffCheckMs >= 250) {
+        lastBusOffCheckMs = now;
+        twai_status_info_t sts;
+        if (twai_get_status_info(&sts) == ESP_OK) {
+            if (sts.state == TWAI_STATE_BUS_OFF) {
+                if (busOffRecoveryCount < 10) {
+                    Serial.printf("[CAN] BUS_OFF detected — recovery attempt %u/10\n",
+                                  busOffRecoveryCount + 1);
+                    twai_initiate_recovery();
+                    busOffRecoveryCount++;
+                }
+            } else if (sts.state == TWAI_STATE_STOPPED) {
+                /* Recovery completed — restart the driver */
+                if (twai_start() == ESP_OK) {
+                    Serial.println("[CAN] Recovery complete — TWAI restarted");
+                    busOffRecoveryCount = 0;
+                }
+            } else if (sts.state == TWAI_STATE_RUNNING) {
+                busOffRecoveryCount = 0;
+            }
         }
     }
 
