@@ -680,11 +680,38 @@ static void MX_FDCAN1_Init(void)
     hfdcan1.Init.ExtFiltersNbr        = 0;
     hfdcan1.Init.TxFifoQueueMode      = FDCAN_TX_FIFO_OPERATION;
 
-    if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
-        fdcan_init_ok = false;
-        return;  /* Non-fatal: system continues without CAN */
+    /* Retry loop: HAL_FDCAN_Init() can fail on the first attempt when
+     * the peripheral clock gate has not fully stabilised after a
+     * force-reset (observed as CCCR reading garbage, e.g. 0x8007aa5).
+     * A short delay followed by a second attempt lets the bus bridge
+     * settle.  Three attempts provide sufficient margin.              */
+    #define FDCAN_INIT_MAX_RETRIES 3
+    for (int attempt = 0; attempt < FDCAN_INIT_MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+            HAL_FDCAN_DeInit(&hfdcan1);
+            HAL_Delay(2);  /* Allow clock / reset to settle */
+        }
+
+        if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
+            continue;  /* Retry */
+        }
+
+        /* Sanity-check: after successful init CCCR.INIT must be set
+         * (peripheral in configuration mode) and reserved upper bits
+         * (16-31) must be zero.  If they are not, the peripheral is
+         * not responding — register reads return bus-default garbage.
+         * De-init and retry in that case.                             */
+        uint32_t cccr = hfdcan1.Instance->CCCR;
+        if ((cccr & FDCAN_CCCR_INIT) == 0U || (cccr & 0xFFFF0000U) != 0U) {
+            HAL_FDCAN_DeInit(&hfdcan1);
+            continue;  /* Retry */
+        }
+
+        fdcan_init_ok = true;
+        return;
     }
-    fdcan_init_ok = true;
+
+    fdcan_init_ok = false;  /* All attempts exhausted — CAN disabled */
 }
 
 static void MX_I2C1_Init(void)

@@ -241,6 +241,11 @@ void CAN_Init(void) {
     can_init_diag.clk_ok =
         (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
 
+    if (!can_init_diag.clk_ok) {
+        fdcan_init_ok = false;
+        return;  /* Wrong kernel clock — CAN baud rate would be wrong */
+    }
+
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
 
@@ -267,14 +272,20 @@ void CAN_Init(void) {
         return;  /* Non-fatal: CAN disabled, safety timeout will engage */
     }
 
-    can_init_diag.started = 1U;
-
     /* Confirm CCCR.INIT is cleared — the peripheral has left
      * initialisation mode and is actively participating on the bus.
      * If INIT is still set, HAL_FDCAN_Start did not complete the
      * handshake (possible stale state after abnormal reset).          */
     can_init_diag.cccr_init_ok =
         ((hfdcan1.Instance->CCCR & FDCAN_CCCR_INIT) == 0U) ? 1U : 0U;
+
+    if (!can_init_diag.cccr_init_ok) {
+        fdcan_init_ok = false;
+        can_init_diag.started = 0U;
+        return;  /* Peripheral stuck in INIT — bus not operational */
+    }
+
+    can_init_diag.started = 1U;
 }
 
 /**
