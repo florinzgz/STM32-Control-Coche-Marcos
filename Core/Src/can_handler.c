@@ -164,61 +164,35 @@ static void CAN_ConfigureFilters(void)
     filter.FilterID2    = 0x7FF;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 #else
-    /* Filter 0: Accept ESP32 heartbeat (0x011) */
+    /* Filter 0: Accept ALL standard IDs via mask filter.
+     * FDCAN_FILTER_MASK with FilterID2 (mask) = 0x000 means every bit
+     * is don't-care, so all 11-bit IDs are accepted into RXFIFO0.
+     * CAN_ProcessMessages() only acts on known IDs (switch/case);
+     * unrecognised IDs are silently discarded.
+     *
+     * Using a single mask-based accept-all filter guarantees the
+     * FDCAN message-RAM filter element is valid and the peripheral
+     * can leave INIT mode cleanly after HAL_FDCAN_Start().          */
     filter.IdType       = FDCAN_STANDARD_ID;
     filter.FilterIndex  = 0;
-    filter.FilterType   = FDCAN_FILTER_DUAL;
+    filter.FilterType   = FDCAN_FILTER_MASK;
     filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = CAN_ID_HEARTBEAT_ESP32;
-    filter.FilterID2    = CAN_ID_HEARTBEAT_ESP32;
-    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
-
-    /* Filter 1: Accept ESP32 commands (0x100–0x102) */
-    filter.FilterIndex  = 1;
-    filter.FilterType   = FDCAN_FILTER_RANGE;
-    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = CAN_ID_CMD_THROTTLE;
-    filter.FilterID2    = CAN_ID_CMD_MODE;
-    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
-
-    /* Filter 2: Accept ESP32 service commands (0x110) and LED command (0x120).
-     * Range filter accepts all IDs 0x110–0x120.  Intermediate IDs (0x111–0x11F)
-     * are not used by any module and are silently ignored by CAN_ProcessMessages(). */
-    filter.FilterIndex  = 2;
-    filter.FilterType   = FDCAN_FILTER_RANGE;
-    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = CAN_ID_SERVICE_CMD;
-    filter.FilterID2    = CAN_ID_CMD_LED;
-    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
-
-    /* Filter 3: Accept ESP32 obstacle data (0x208–0x209) */
-    filter.FilterIndex  = 3;
-    filter.FilterType   = FDCAN_FILTER_RANGE;
-    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = CAN_ID_OBSTACLE_DISTANCE;
-    filter.FilterID2    = CAN_ID_OBSTACLE_SAFETY;
-    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
-
-    /* Filter 4: Accept CAN test frame used by CAN_TestTransmit() */
-    filter.FilterIndex  = 4;
-    filter.FilterType   = FDCAN_FILTER_DUAL;
-    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-    filter.FilterID1    = CAN_ID_TEST_FRAME;
-    filter.FilterID2    = CAN_ID_TEST_FRAME;
+    filter.FilterID1    = 0x000;
+    filter.FilterID2    = 0x000;
     HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
 #endif
 
-    /* Accept all non-matching standard IDs into FIFO0.
-     * This guarantees at least one acceptance path exists, preventing
-     * reception failures when individual filters are misconfigured.
+    /* Accept all non-matching IDs (standard and extended) into FIFO0.
+     * Together with the mask-based accept-all filter at index 0, this
+     * provides a belt-and-suspenders acceptance path that guarantees
+     * FDCAN receives frames from the ESP32 regardless of ID.
      * Safety: CAN_ProcessMessages() only acts on known message IDs
-     * (via its switch/case); any unexpected ID is silently discarded,
-     * so accepting extra standard IDs has no functional side-effect.
-     * Extended IDs and remote frames remain rejected.                 */
+     * (via its switch/case); any unexpected ID is silently discarded.
+     * Remote frames remain rejected.                                  */
     can_init_diag.filter_global = (uint8_t)HAL_FDCAN_ConfigGlobalFilter(
         &hfdcan1,
         FDCAN_ACCEPT_IN_RX_FIFO0,  /* non-matching std */
-        FDCAN_REJECT,               /* non-matching ext */
+        FDCAN_ACCEPT_IN_RX_FIFO0,  /* non-matching ext */
         FDCAN_REJECT_REMOTE,
         FDCAN_REJECT_REMOTE);
 }
