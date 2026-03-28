@@ -177,11 +177,11 @@ Sensores en el bus (un solo pin):
 
 | Señal | Pin | Periférico | Función |
 |-------|-----|-----------|---------|
-| CAN RX | **PB8** | FDCAN1_RX (AF9) | Recepción CAN a 500 kbps |
-| CAN TX | **PB9** | FDCAN1_TX (AF9) | Transmisión CAN a 500 kbps |
+| CAN RX | **PA11** | FDCAN1_RX (AF9) | Recepción CAN a 500 kbps |
+| CAN TX | **PA12** | FDCAN1_TX (AF9) | Transmisión CAN a 500 kbps |
 | | **Subtotal:** | | **2 pines** |
 
-- Transceiver externo TJA1051T/3 requerido
+- Transceiver externo SN65HVD230 requerido
 - Terminación 120Ω en ambos extremos del bus
 
 ### 2.11 Debug SWD — Reservados (2 pines)
@@ -213,8 +213,8 @@ Sensores en el bus (un solo pin):
 | 15 | PB5 | GPIOB | Centrado dirección | EXTI5, sensor inductivo |
 | 16 | PB6 | GPIOB | I2C (corriente/pedal) | I2C1_SCL, 400 kHz |
 | 17 | PB7 | GPIOB | I2C (corriente/pedal) | I2C1_SDA, 400 kHz |
-| 18 | PB8 | GPIOB | CAN bus | FDCAN1_RX, 500 kbps |
-| 19 | PB9 | GPIOB | CAN bus | FDCAN1_TX, 500 kbps |
+| 18 | PA11 | GPIOA | CAN bus | FDCAN1_RX, 500 kbps |
+| 19 | PA12 | GPIOA | CAN bus | FDCAN1_TX, 500 kbps |
 | 20 | PB10 | GPIOB | Relé LED frontal | Alimentación 5V tira WS2812B frontal |
 | 21 | PB11 | GPIOB | Relé LED trasero | Alimentación 5V tira WS2812B trasera |
 | 22 | PB15 | GPIOB | Sensor rueda RR | EXTI15, velocidad rueda |
@@ -295,7 +295,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | Display TFT SPI (ST7796) | 6 | 16.7% |
 | Touch panel SPI | 1 | 2.8% |
 | Display backlight | 1 | 2.8% |
-| CAN bus (TWAI vía TJA1051) | 2 | 5.6% |
+| CAN bus (TWAI vía SN65HVD230) | 2 | 5.6% |
 | Sensor de obstáculos TOFSense-M | 1 (UART RX) | 2.8% |
 | DFPlayer Mini audio (UART2) | 2 | 5.6% |
 | Relé audio | 1 | 2.8% |
@@ -339,7 +339,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 - Comparte MOSI (GPIO13), SCLK (GPIO14) y MISO (GPIO12) con el display
 - TOUCH_CS cuenta como pin adicional; MISO (T_DO) se comparte con el bus SPI
 
-### 5.3 CAN bus — TWAI vía TJA1051 (2 pines)
+### 5.3 CAN bus — TWAI vía SN65HVD230 (2 pines)
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
@@ -347,7 +347,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | CAN RX | **GPIO5** | Recepción CAN (TWAI_RX) | 500 kbps |
 | | | **Subtotal:** | **2 pines** |
 
-- Transceiver externo TJA1051T/3 obligatorio
+- Transceiver externo SN65HVD230 obligatorio
 - Biblioteca: ESP32-TWAI-CAN v1.0.1
 - Terminación 120Ω en el lado ESP32
 
@@ -441,8 +441,8 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 | # | GPIO | Módulo | Función |
 |---|------|--------|---------|
-| 1 | GPIO4 | CAN bus | TWAI TX → TJA1051 TXD |
-| 2 | GPIO5 | CAN bus | TWAI RX → TJA1051 RXD |
+| 1 | GPIO4 | CAN bus | TWAI TX → SN65HVD230 D |
+| 2 | GPIO5 | CAN bus | TWAI RX → SN65HVD230 R |
 | 3 | GPIO8 | Palanca de cambios | I2C SDA (MCP23017 @ 0x20) |
 | 4 | GPIO9 | Palanca de cambios | I2C SCL (MCP23017 @ 0x20) |
 | 5 | GPIO10 | Display TFT | SPI CS (chip select display) |

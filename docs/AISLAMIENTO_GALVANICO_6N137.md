@@ -129,14 +129,14 @@ el contador del encoder TIM2 a cero (`SteeringCentering_Step()` en
 
 ---
 
-#### 2.1.4 Bus CAN (FDCAN1 — PB8/PB9)
+#### 2.1.4 Bus CAN (FDCAN1 — PA11/PA12)
 
 | Señal | Pin STM32 | Periférico | Bitrate |
 |-------|-----------|------------|---------|
-| CAN_RX | PB8 | FDCAN1_RX | 500 kbps |
-| CAN_TX | PB9 | FDCAN1_TX | 500 kbps |
+| CAN_RX | PA11 | FDCAN1_RX | 500 kbps |
+| CAN_TX | PA12 | FDCAN1_TX | 500 kbps |
 
-**Análisis:** El bus CAN ya usa el transceiver TJA1051T/3 con muy buen rechazo en modo
+**Análisis:** El bus CAN ya usa el transceiver SN65HVD230 con muy buen rechazo en modo
 común (±25 V). Es un protocolo diferencial con detección de errores hardware. La
 comunicación es de corto alcance (dentro del mismo vehículo).
 
@@ -146,7 +146,7 @@ aislamiento *galvánico completo* (incluyendo alimentación del transceiver), lo
 un convertidor DC-DC aislado además del optoacoplador — complejidad que excede los
 módulos disponibles. La solución correcta sería un chip integrado ISO1050 o ADuM1191.
 
-**Veredicto: NO AISLAR** con los módulos 6N137 disponibles. El TJA1051T/3 ya ofrece
+**Veredicto: NO AISLAR** con los módulos 6N137 disponibles. El SN65HVD230 ya ofrece
 protección suficiente en la mayoría de entornos industriales de automoción. Si la longitud
 del bus CAN o el entorno eléctrico lo requirieran en el futuro, usar ISO1050.
 
@@ -414,7 +414,7 @@ bootloader ni a la programación** del STM32. ✅
 
 | Señal | Razón técnica | Alternativa futura si fuera necesario |
 |-------|--------------|---------------------------------------|
-| **CAN Bus (PB8/PB9)** | Protocolo diferencial con transceiver TJA1051T/3. El 6N137 por sí solo no aporta aislamiento galvánico completo (necesita también convertidor DC-DC aislado). La solución adecuada es un chip integrado (ISO1050, ADuM1191). | ISO1050 o ADuM1191 |
+| **CAN Bus (PA11/PA12)** | Protocolo diferencial con transceiver SN65HVD230. El 6N137 por sí solo no aporta aislamiento galvánico completo (necesita también convertidor DC-DC aislado). La solución adecuada es un chip integrado (ISO1050, ADuM1191). | ISO1050 o ADuM1191 |
 | **I2C Bus (PB6/PB7)** | Protocolo open-drain bidireccional. El 6N137 es unidireccional. Aislar I2C requiere chips dedicados (ADUM1250, ISO1540). | ADUM1250 o ISO1540 |
 | **OneWire (PB0)** | Protocolo bidireccional de un solo cable. Incompatible con optoacopladores estándar. Los DS18B20 operan a 3.3 V en zona de baja tensión. | Si hubiera ruido, mover DS18B20 fuera del bus OneWire a I2C (MCP9808). |
 | **Pedal ADC (PA3)** | Señal analógica continua; los optoacopladores digitales no pueden aislarla. El circuito ya tiene protección: divisor de tensión + ADS1115 plausibilidad. | AMC1200, ISO124 (sigma-delta aislados). |
@@ -543,7 +543,7 @@ rango operativo del 6N137 (máximo 15 mA continuo). ✅
 
 | Señal | Pins | Razón de exclusión | Solución alternativa si se requiere |
 |-------|------|--------------------|-------------------------------------|
-| CAN TX/RX | PB8/PB9 | Diferencial TJA1051T/3; 6N137 solo no basta (necesita DC-DC aislado) | ISO1050, ADuM1191 |
+| CAN TX/RX | PA11/PA12 | Diferencial SN65HVD230; 6N137 solo no basta (necesita DC-DC aislado) | ISO1050, ADuM1191 |
 | I2C SCL/SDA | PB6/PB7 | Protocolo bidireccional open-drain, incompatible con 6N137 | ADUM1250, ISO1540 |
 | OneWire | PB0 | Protocolo bidireccional, tensión 3.3 V, baja criticidad | — |
 | Pedal ADC | PA3 | Señal analógica; 6N137 es digital | AMC1200, ISO124 |
@@ -561,7 +561,7 @@ rango operativo del 6N137 (máximo 15 mA continuo). ✅
 | EXTI sensores rueda (periodo mínimo 6.6 ms) vs. propagación 120 ns | ✅ Sin impacto |
 | EXTI centro dirección (pulso único, baja frecuencia) | ✅ Sin impacto |
 | IWDG, SWD, arranque, bootloader | ✅ No afectados (señales internas al MCU) |
-| CAN 500 kbps (no aislado) | ✅ TJA1051T/3 existente |
+| CAN 500 kbps (no aislado) | ✅ SN65HVD230 existente |
 | I2C 400 kHz (no aislado) | ✅ Sin cambios |
 
 ---

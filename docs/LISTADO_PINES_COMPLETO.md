@@ -222,7 +222,8 @@
 | 41 | PA8 | TIM1_CH1 | RPWM_FL | BTS7960 FL → pin RPWM | Optoacoplador HY-M158 + R 330 Ω en serie (LED del opto) |
 | 42 | PA9 | TIM1_CH2 | LPWM_FL | BTS7960 FL → pin LPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
 | 43 | PA10 | TIM1_CH3 | RPWM_FR | BTS7960 FR → pin RPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
-| 44 | PA11 | TIM1_CH4 | LPWM_FR | BTS7960 FR → pin LPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
+
+> **Nota:** PA11 se reasignó a FDCAN1_RX (CAN bus). LPWM_FR ahora usa TIM15_CH1 en PB14.
 
 **Configuración TIM1:** Prescaler = 0, Period = 4249, Center-Aligned, BREAK2 armado a Cortex LOCKUP
 
@@ -541,6 +542,7 @@
 | PB7 | I2C SDA | I2C1_SDA | Bidireccional (OD) |
 | PB10 | Relé LED frontal | GPIO | Salida |
 | PB11 | Relé LED trasero | GPIO | Salida |
+| PB14 | LPWM motor FR | TIM15_CH1 | Salida PWM |
 | PB15 | Velocidad rueda RR | EXTI15 | Entrada (pull-up) |
 | PC5 | Enable motor FL | GPIO | Salida |
 | PC6 | RPWM motor RL | TIM8_CH1 | Salida PWM |
