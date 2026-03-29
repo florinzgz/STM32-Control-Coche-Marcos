@@ -279,7 +279,9 @@ void CAN_Init(void) {
          * show INIT=1 with reserved upper bits zero.                   */
         #define FDCAN_CCCR_RESERVED_MASK  0xFFFF0000U  /* Bits 16-31 reserved */
         {
+            // cppcheck-suppress duplicateAssignExpression
             uint32_t c1 = hfdcan1.Instance->CCCR;
+            // cppcheck-suppress duplicateAssignExpression
             uint32_t c2 = hfdcan1.Instance->CCCR;
             uint32_t c3 = hfdcan1.Instance->CCCR;
             if (c1 != c2 || c2 != c3 ||

@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-275 — fix(ci): suppress cppcheck duplicateAssignExpression false positives on CCCR triple-read
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrige fallo de CI cppcheck (exit code 2) causado por falsos positivos `duplicateAssignExpression` en las lecturas triples de CCCR. Cppcheck no entiende que `hfdcan1.Instance->CCCR` es un registro hardware volátil que puede retornar valores diferentes en cada lectura.
+- **Root cause:** Las lecturas triples de CCCR en `main.c` y `can_handler.c` son intencionalmente la misma expresión repetida 3 veces para detectar datos inconsistentes del bus AHB. Cppcheck las clasifica como `duplicateAssignExpression` (asignaciones duplicadas) porque no analiza semántica de registros volátiles.
+- **Solución aplicada:** (1) Añadidos comentarios `// cppcheck-suppress duplicateAssignExpression` en las 4 líneas afectadas. (2) Añadido flag `--inline-suppr` al comando cppcheck en CI para habilitar supresiones inline.
+- **Impacto en el sistema:** Solo CI — sin cambio funcional en firmware. Las supresiones son localizadas y documentan por qué el patrón es intencional.
+- **Archivos modificados:** `Core/Src/main.c`, `Core/Src/can_handler.c`, `.github/workflows/firmware-validation.yml`
+- **Próximos pasos:** Ninguno.
+
 ### PR-274 — fix(fdcan): add CCCR triple-read to CAN_Init clock re-apply path
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -348,3 +358,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **Unblock main loop** — vTaskDelay(1) yield Core 1, Serial TX buffer 512, UART read acotado a 800 bytes | #272 |
 | 2026-03-29 | **FDCAN init consistency fix** — Multi-read CCCR check, clock source resilience en CAN_Init, diagnósticos ccipr_raw | #273 |
 | 2026-03-29 | **FDCAN CAN_Init CCCR triple-read** — Añadido triple-read CCCR al path de re-init por clock re-apply en CAN_Init | #274 |
+| 2026-03-29 | **CI cppcheck fix** — Supresión inline de falsos positivos `duplicateAssignExpression` en lecturas triples CCCR + `--inline-suppr` | #275 |

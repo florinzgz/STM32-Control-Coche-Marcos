@@ -718,7 +718,9 @@ static void MX_FDCAN1_Init(void)
          * can occasionally pass the bitmask checks.  Reading CCCR
          * multiple times and comparing detects this: real register
          * values are deterministic, stale bus data is not.            */
+        // cppcheck-suppress duplicateAssignExpression
         uint32_t cccr1 = hfdcan1.Instance->CCCR;
+        // cppcheck-suppress duplicateAssignExpression
         uint32_t cccr2 = hfdcan1.Instance->CCCR;
         uint32_t cccr3 = hfdcan1.Instance->CCCR;
         if (cccr1 != cccr2 || cccr2 != cccr3) {
