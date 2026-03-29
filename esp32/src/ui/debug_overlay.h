@@ -40,7 +40,7 @@ private:
     static constexpr int16_t OVL_X      = 80;
     static constexpr int16_t OVL_Y      = 60;
     static constexpr int16_t OVL_W      = 320;
-    static constexpr int16_t OVL_H      = 200;
+    static constexpr int16_t OVL_H      = 220;
     static constexpr int16_t LINE_H     = 20;
     static constexpr int16_t MARGIN     = 10;
 
