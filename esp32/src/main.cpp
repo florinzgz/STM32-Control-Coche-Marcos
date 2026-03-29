@@ -288,7 +288,7 @@ static void sendLedCommand(bool front, bool rear) {
     frame.data_length_code = 2;
     frame.data[0]          = front ? 1 : 0;
     frame.data[1]          = rear  ? 1 : 0;
-    ESP32Can.writeFrame(frame);
+    ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
 }
 
@@ -301,7 +301,7 @@ static void sendGearCommand(uint8_t gear) {
     frame.data_length_code = 2;
     frame.data[0]          = currentModeFlags;  // Include current mode flags
     frame.data[1]          = gear;
-    ESP32Can.writeFrame(frame);
+    ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     ackBeginWait(can::CMD_MODE & 0xFF);  // Low byte of 0x102 = 0x02
 }
 
@@ -314,7 +314,7 @@ static void sendModeCommand(uint8_t modeFlags) {
     frame.data_length_code = 2;
     frame.data[0]          = modeFlags;
     frame.data[1]          = shifter::getGearRaw();  // Include current gear
-    ESP32Can.writeFrame(frame);
+    ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     ackBeginWait(can::CMD_MODE & 0xFF);
 }
 
@@ -1126,7 +1126,7 @@ void loop() {
         frame.data_length_code = 1;
         frame.data[0]          = heartbeatCounter++;
 
-        ESP32Can.writeFrame(frame);
+        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     }
 
     // Serial heartbeat every ~1 second

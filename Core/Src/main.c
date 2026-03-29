@@ -687,13 +687,14 @@ static void MX_FDCAN1_Init(void)
      * settle.  Five attempts with 5 ms spacing provide sufficient
      * margin even on STM32G4 revisions with slow clock-gate recovery. */
     #define FDCAN_INIT_MAX_RETRIES       5
-    #define FDCAN_CLOCK_SETTLE_DELAY_MS  5U   /* Post-reset bus bridge settle */
+    #define FDCAN_CLOCK_SETTLE_DELAY_MS  10U  /* Post-reset bus bridge settle */
     #define FDCAN_CCCR_RESERVED_MASK     0xFFFF0000U  /* Bits 16-31 are reserved */
 
     /* Pre-loop delay: let the peripheral's initial clock-gate state
      * settle after SystemClock_Config() changed the PLL / PCLK1 source
-     * and HAL_RCCEx_PeriphCLKConfig() set FDCANSEL = PCLK1.           */
-    #define FDCAN_INITIAL_SETTLE_DELAY_MS  1U
+     * and HAL_RCCEx_PeriphCLKConfig() set FDCANSEL = PCLK1.
+     * 2 ms provides margin for bus-bridge pipeline on all G4 revisions. */
+    #define FDCAN_INITIAL_SETTLE_DELAY_MS  2U
     HAL_Delay(FDCAN_INITIAL_SETTLE_DELAY_MS);
 
     for (int attempt = 0; attempt < FDCAN_INIT_MAX_RETRIES; attempt++) {
