@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-274 — fix(fdcan): add CCCR triple-read to CAN_Init clock re-apply path
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Cierra edge case en el path de re-init de `CAN_Init()`: tras re-aplicar clock source PCLK1 y re-invocar `HAL_FDCAN_Init()`, faltaba la comprobación triple-lectura de CCCR que sí tenía `MX_FDCAN1_Init`. Sin esta comprobación, el re-init podía reportar éxito con datos basura.
+- **Root cause:** El re-init en `CAN_Init()` (líneas 265-274) no incluía validación triple-lectura de CCCR tras `HAL_FDCAN_Init()`. Si la clock gate seguía inestable tras el cambio de fuente de reloj, `HAL_FDCAN_Init()` podía devolver `HAL_OK` con registros retornando stale bus data — el mismo falso positivo que la triple-lectura de `MX_FDCAN1_Init` previene.
+- **Solución aplicada:** Añadido bloque triple-lectura CCCR inmediatamente después de `HAL_FDCAN_Init()` en el path de clock re-apply de `CAN_Init()`. Verifica que 3 lecturas consecutivas sean idénticas, INIT=1, y bits 16-31 = 0.
+- **Impacto en el sistema:** Elimina el último path de falso positivo conocido en la cadena de init FDCAN.
+- **Archivos modificados:** `Core/Src/can_handler.c`
+- **Próximos pasos:** Verificar en hardware con SWD que el re-init path funciona correctamente.
+
 ### PR-273 — fix(fdcan): multi-read CCCR consistency + clock source resilience
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -337,3 +347,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **RuntimeMonitor fix** — Stats por periodo (no acumulativo), separación UI/render, instrumentación loop Core 1 | #271 |
 | 2026-03-29 | **Unblock main loop** — vTaskDelay(1) yield Core 1, Serial TX buffer 512, UART read acotado a 800 bytes | #272 |
 | 2026-03-29 | **FDCAN init consistency fix** — Multi-read CCCR check, clock source resilience en CAN_Init, diagnósticos ccipr_raw | #273 |
+| 2026-03-29 | **FDCAN CAN_Init CCCR triple-read** — Añadido triple-read CCCR al path de re-init por clock re-apply en CAN_Init | #274 |

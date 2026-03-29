@@ -272,6 +272,23 @@ void CAN_Init(void) {
             fdcan_init_ok = false;
             return;  /* Re-init failed — CAN disabled */
         }
+
+        /* Triple-read CCCR sanity check — same as MX_FDCAN1_Init.
+         * After clock-source re-apply the peripheral may still return
+         * stale AHB bus data.  Three consecutive reads must agree AND
+         * show INIT=1 with reserved upper bits zero.                   */
+        #define FDCAN_CCCR_RESERVED_MASK  0xFFFF0000U  /* Bits 16-31 reserved */
+        {
+            uint32_t c1 = hfdcan1.Instance->CCCR;
+            uint32_t c2 = hfdcan1.Instance->CCCR;
+            uint32_t c3 = hfdcan1.Instance->CCCR;
+            if (c1 != c2 || c2 != c3 ||
+                (c1 & FDCAN_CCCR_INIT) == 0U ||
+                (c1 & FDCAN_CCCR_RESERVED_MASK) != 0U) {
+                fdcan_init_ok = false;
+                return;  /* CCCR still garbage after clock re-apply */
+            }
+        }
     }
     can_init_diag.clk_ok =
         (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
