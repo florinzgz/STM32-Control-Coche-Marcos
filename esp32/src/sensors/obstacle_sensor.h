@@ -96,7 +96,7 @@ struct Config {
     int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
     int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
     uint32_t baudRate          = 921600; // TOFSense-M factory default
-    uint16_t rxBufSize         = 1024;  // UART RX ring-buffer (must fit ≥1 × 400-byte frame)
+    uint16_t rxBufSize         = 4096;  // UART RX ring-buffer (~44 ms at 921600 baud)
     uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
     uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
     uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)

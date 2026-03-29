@@ -94,6 +94,7 @@ static uint32_t diagTooFewPixels_    = 0;
 static uint32_t diagHighDispersion_  = 0;
 static uint32_t diagBytesDiscarded_  = 0;
 static uint16_t diagMaxDistMm_       = 0;
+static uint16_t diagUartHWM_         = 0;  // UART available() high-water mark
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
@@ -247,6 +248,7 @@ void init(const Config& cfg) {
     diagHighDispersion_ = 0;
     diagBytesDiscarded_ = 0;
     diagMaxDistMm_      = 0;
+    diagUartHWM_        = 0;
 
     reading_ = Reading{};  // Reset to defaults
 
@@ -285,10 +287,18 @@ void update(float vehicleSpeedKmh) {
     uint16_t measuredMm = 0;
     bool gotFrame = false;
     PixelStats lastStats{};
-    // Cap: 2 frames worth of bytes — guarantees at least one complete frame
-    // can be parsed even if we start mid-frame, without unbounded draining.
-    static constexpr uint16_t MAX_BYTES_PER_UPDATE = MP_FRAME_LENGTH * 2;
+    // Cap: 4 frames worth of bytes — drains accumulated data after loop
+    // jitter while still bounding CPU time per call.
+    static constexpr uint16_t MAX_BYTES_PER_UPDATE = MP_FRAME_LENGTH * 4;
     uint16_t bytesProcessed = 0;
+
+    // Track UART buffer high-water mark for overflow diagnostics
+    {
+        int avail = tofSerial.available();
+        if (avail > 0 && static_cast<uint16_t>(avail) > diagUartHWM_) {
+            diagUartHWM_ = static_cast<uint16_t>(avail);
+        }
+    }
 
     while (tofSerial.available() > 0 && bytesProcessed < MAX_BYTES_PER_UPDATE) {
         uint8_t byte = (uint8_t)tofSerial.read();
@@ -373,17 +383,29 @@ void update(float vehicleSpeedKmh) {
         }
 
         // Frame consumed (or rejected). Reset for next frame.
-        // On BAD_CHECKSUM or BAD_HEADER, scan for next 0x57.
+        // On BAD_CHECKSUM or BAD_HEADER, scan for next 0x57+0x01 pair.
+        // Checking both header AND function mark prevents false resync
+        // on 0x57 bytes that appear naturally in pixel distance data,
+        // avoiding cascading checksum failures.
         if (pr == ParseResult::BAD_CHECKSUM || pr == ParseResult::BAD_HEADER) {
             uint16_t resyncIdx = 0;
-            for (uint16_t scan = 1; scan < rxIdx_; scan++) {
-                if (rxBuf_[scan] == FRAME_HEADER) {
+            // Scan for 0x57+0x01 pair (header + function mark)
+            for (uint16_t scan = 1; scan + 1 < rxIdx_; scan++) {
+                if (rxBuf_[scan] == FRAME_HEADER &&
+                    rxBuf_[scan + 1] == FUNCTION_MARK_MP) {
                     resyncIdx = rxIdx_ - scan;
                     for (uint16_t j = 0; j < resyncIdx; j++) {
                         rxBuf_[j] = rxBuf_[scan + j];
                     }
                     break;
                 }
+            }
+            // If no pair found, check if the very last byte is a header
+            // (function mark not yet received — keep it for next read)
+            if (resyncIdx == 0 && rxIdx_ > 0 &&
+                rxBuf_[rxIdx_ - 1] == FRAME_HEADER) {
+                rxBuf_[0] = FRAME_HEADER;
+                resyncIdx = 1;
             }
             rxIdx_ = resyncIdx;
         } else {
@@ -397,7 +419,8 @@ void update(float vehicleSpeedKmh) {
                        + diagNoTarget_ + diagTooFewPixels_ + diagHighDispersion_;
         if (total > 0 || diagBytesDiscarded_ > 0) {
             Serial.printf("[OBSTACLE] Diag %lus: OK=%lu cksumFail=%lu hdrFail=%lu "
-                          "noTarget=%lu fewPx=%lu highDisp=%lu discarded=%lu maxDist=%u\n",
+                          "noTarget=%lu fewPx=%lu highDisp=%lu discarded=%lu "
+                          "maxDist=%u uartHWM=%u\n",
                           (unsigned long)(DIAG_INTERVAL_MS / 1000),
                           (unsigned long)diagFramesOk_,
                           (unsigned long)diagChecksumFail_,
@@ -406,7 +429,8 @@ void update(float vehicleSpeedKmh) {
                           (unsigned long)diagTooFewPixels_,
                           (unsigned long)diagHighDispersion_,
                           (unsigned long)diagBytesDiscarded_,
-                          (unsigned)diagMaxDistMm_);
+                          (unsigned)diagMaxDistMm_,
+                          (unsigned)diagUartHWM_);
             if (diagChecksumFail_ > diagFramesOk_ && diagChecksumFail_ > 0) {
                 Serial.println("[OBSTACLE] WARNING: Most frames fail checksum. "
                                "Check voltage divider and cable length.");
@@ -424,6 +448,7 @@ void update(float vehicleSpeedKmh) {
         diagHighDispersion_  = 0;
         diagBytesDiscarded_  = 0;
         diagMaxDistMm_       = 0;
+        diagUartHWM_         = 0;
         lastDiagMs_          = now;
     }
 

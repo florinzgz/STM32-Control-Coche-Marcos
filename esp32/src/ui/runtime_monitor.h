@@ -42,6 +42,12 @@ inline constexpr uint8_t RING_SIZE = 120;
 // -------------------------------------------------------------------------
 inline constexpr uint32_t BLOCKING_THRESHOLD_US = 4000;  // 4 ms
 
+// Render runs on Core 0 (separate from main loop on Core 1).
+// TFT SPI transfers take ~22–28 ms per frame, which is normal and does
+// NOT block CAN/sensor processing.  Use a higher threshold to avoid
+// permanent false-positive warnings.
+inline constexpr uint32_t RENDER_BLOCKING_THRESHOLD_US = 35000;  // 35 ms
+
 // -------------------------------------------------------------------------
 // Serial logging interval
 // -------------------------------------------------------------------------
