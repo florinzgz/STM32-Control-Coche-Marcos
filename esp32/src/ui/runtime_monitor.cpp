@@ -126,7 +126,7 @@ void RuntimeMonitor::renderBegin() {
 void RuntimeMonitor::renderEnd() {
     uint32_t elapsed = micros() - renderStartUs_;
     if (elapsed > renderMaxUs_) renderMaxUs_ = elapsed;
-    if (elapsed > BLOCKING_THRESHOLD_US) renderBlocking_ = true;
+    if (elapsed > RENDER_BLOCKING_THRESHOLD_US) renderBlocking_ = true;
 }
 
 // -------------------------------------------------------------------------

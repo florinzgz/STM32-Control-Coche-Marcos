@@ -188,7 +188,7 @@ static void test_config_defaults() {
     ASSERT_EQ(cfg.rxPin, 18);
     ASSERT_EQ(cfg.txPin, -1);
     ASSERT_EQ(cfg.baudRate, 921600UL);
-    ASSERT_EQ(cfg.rxBufSize, 1024);
+    ASSERT_EQ(cfg.rxBufSize, 4096);
     ASSERT_EQ(cfg.minRangeMm, 20);
     ASSERT_EQ(cfg.maxRangeMm, 4000);
     ASSERT_EQ(cfg.warmupMs, 1000UL);
@@ -1099,6 +1099,67 @@ static void test_pixel_various_distances() {
     ASSERT_EQ(rd.zone, 3);            // 200–500 = critical
 }
 
+// Test 49: Resync ignores false 0x57 in pixel data (requires 0x57+0x01 pair)
+static void test_resync_skips_false_header() {
+    printf("  test_resync_skips_false_header...\n");
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Build a corrupt frame — has 0x57 bytes in pixel data but NOT
+    // followed by 0x01.  The improved resync should skip these false
+    // header matches and find the real frame that follows.
+    uint8_t corrupt[MP_FRAME_LEN];
+    buildMPFrame(corrupt, 1000000, 30);
+    // Corrupt the checksum to force a BAD_CHECKSUM parse result
+    corrupt[399] = (uint8_t)(corrupt[399] + 1);
+    // Plant a false 0x57 in pixel data (byte 50), NOT followed by 0x01
+    corrupt[50] = 0x57;
+    corrupt[51] = 0xAA;   // NOT 0x01 → improved resync skips this
+
+    g_uart_inject(corrupt, MP_FRAME_LEN);
+
+    // Inject a valid frame immediately after
+    uint8_t valid[MP_FRAME_LEN];
+    buildMPFrame(valid, 2500000, 30);
+    g_uart_inject(valid, MP_FRAME_LEN);
+
+    // Two updates: first processes the corrupt frame (resync skips false 0x57),
+    // second picks up the valid frame.
+    obstacle_sensor::update(0.0f);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 2500);
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// Test 50: Resync finds valid 0x57+0x01 pair after corruption
+static void test_resync_finds_valid_pair() {
+    printf("  test_resync_finds_valid_pair...\n");
+    g_uart_inject_reset();
+    g_test_millis = 0;
+    obstacle_sensor::init();
+    g_test_millis = 1100;
+    obstacle_sensor::update(0.0f);
+
+    // Inject a few garbage bytes followed by a valid frame
+    uint8_t garbage[] = {0x57, 0xAA, 0x57, 0xBB, 0xCC};  // false 0x57 headers
+    g_uart_inject(garbage, sizeof(garbage));
+
+    uint8_t valid[MP_FRAME_LEN];
+    buildMPFrame(valid, 1800000, 30);
+    g_uart_inject(valid, MP_FRAME_LEN);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 1800);
+    ASSERT_EQ(rd.healthy, true);
+}
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
@@ -1153,6 +1214,8 @@ int main() {
     test_4000mm_max_range();
     test_20mm_min_range();
     test_pixel_various_distances();
+    test_resync_skips_false_header();
+    test_resync_finds_valid_pair();
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

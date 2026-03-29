@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-276 — fix(obstacle): improve UART reliability + reduce false RT blocking warnings
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Mejora fiabilidad del sensor de obstáculos (TOFSense-M 8×8) y reduce falsos positivos en warnings de bloqueo del RuntimeMonitor.
+- **Root cause:** (1) Buffer UART RX de 1024 bytes se llenaba en ~11 ms a 921600 baud; cualquier jitter del loop >11 ms causaba overflow con pérdida de bytes mid-frame, provocando fallos de checksum en cascada. (2) Resync tras BAD_CHECKSUM solo buscaba 0x57 (1/256 probabilidad por byte) — bytes 0x57 en datos de píxeles generaban falsos resyncs, causando más fallos de checksum en cadena. (3) Umbral de bloqueo de render (4 ms) era demasiado bajo para TFT SPI (~22 ms normal) ejecutándose en Core 0 (sin bloquear el loop principal en Core 1).
+- **Solución aplicada:** (1) `rxBufSize` 1024→4096 bytes (~44 ms de headroom a 921600 baud). (2) `MAX_BYTES_PER_UPDATE` 800→1600 bytes (procesa hasta 4 frames/llamada). (3) Resync mejorado: busca par 0x57+0x01 (header+function_mark) en vez de solo 0x57, reduciendo probabilidad de falso resync de 1/256 a 1/65536. (4) Threshold de bloqueo de render separado: `RENDER_BLOCKING_THRESHOLD_US = 35000` (35 ms) para Core 0, ya que SPI TFT ~22 ms es normal y no afecta al loop principal. (5) Añadido `uartHWM` (high-water mark) al diagnóstico para detectar overflow de buffer UART.
+- **Impacto en el sistema:** Sensor de obstáculos más fiable con mejor tolerancia a jitter del loop. Warnings `render=YES` solo aparecen ante stalls reales (>35 ms), no ante frames TFT normales. Nuevos diagnósticos `uartHWM` ayudan a detectar overflow.
+- **Archivos modificados:** `esp32/src/sensors/obstacle_sensor.h`, `esp32/src/sensors/obstacle_sensor.cpp`, `esp32/src/ui/runtime_monitor.h`, `esp32/src/ui/runtime_monitor.cpp`, `esp32/src/test_obstacle_sensor.cpp`
+- **Próximos pasos:** Verificar en hardware que `uartHWM` se mantiene < 4096 y que la tasa de `cksumFail` disminuye significativamente. Si `uartHWM` ≥ 3500, considerar aumentar el buffer o reducir frame rate del sensor con NAssistant.
+
 ### PR-275 — fix(ci): suppress cppcheck duplicateAssignExpression false positives on CCCR triple-read
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -336,6 +346,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 23. **Instrumentación separada**: `RTMON_UI_BEGIN/END` envuelve solo `currentScreen_->update(data)` dentro de `screen_manager.cpp`, NO el `screenManager.update()` completo en renderTask. `RTMON_RENDER_BEGIN/END` envuelve `draw()`. `RTMON_LOOP_BEGIN/END` envuelve el main `loop()` en Core 1.
 24. **Stats por periodo**: `logToSerial()` resetea flags de bloqueo, max/min frame, phase maximums y zone counters tras imprimir. Cada ventana de 5 s es independiente. NO llamar `reset()` desde `logToSerial()` — ring buffer y FPS counters deben persistir entre periodos.
 25. **CAN TX non-blocking**: Todos los `ESP32Can.writeFrame()` deben usar `timeout=0`. El timeout por defecto de 1000 ms bloquea el loop cuando la cola TX está llena (bus muerto/error-passive).
+26. **Render blocking threshold**: `RENDER_BLOCKING_THRESHOLD_US = 35000` (35 ms) para Core 0. TFT SPI ~22–28 ms es normal. `BLOCKING_THRESHOLD_US = 4000` (4 ms) para CAN/UI/loop en Core 1.
 
 ---
 
@@ -359,3 +370,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **FDCAN init consistency fix** — Multi-read CCCR check, clock source resilience en CAN_Init, diagnósticos ccipr_raw | #273 |
 | 2026-03-29 | **FDCAN CAN_Init CCCR triple-read** — Añadido triple-read CCCR al path de re-init por clock re-apply en CAN_Init | #274 |
 | 2026-03-29 | **CI cppcheck fix** — Supresión inline de falsos positivos `duplicateAssignExpression` en lecturas triples CCCR + `--inline-suppr` | #275 |
+| 2026-03-29 | **Obstacle sensor reliability** — UART RX buffer 1024→4096, resync 0x57+0x01, MAX_BYTES_PER_UPDATE 800→1600, render blocking threshold 4→35 ms, uartHWM diag | #276 |
