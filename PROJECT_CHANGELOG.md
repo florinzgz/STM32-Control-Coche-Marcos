@@ -79,6 +79,45 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-275 — fix(ci): suppress cppcheck duplicateAssignExpression false positives on CCCR triple-read
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrige fallo de CI cppcheck (exit code 2) causado por falsos positivos `duplicateAssignExpression` en las lecturas triples de CCCR. Cppcheck no entiende que `hfdcan1.Instance->CCCR` es un registro hardware volátil que puede retornar valores diferentes en cada lectura.
+- **Root cause:** Las lecturas triples de CCCR en `main.c` y `can_handler.c` son intencionalmente la misma expresión repetida 3 veces para detectar datos inconsistentes del bus AHB. Cppcheck las clasifica como `duplicateAssignExpression` (asignaciones duplicadas) porque no analiza semántica de registros volátiles.
+- **Solución aplicada:** (1) Añadidos comentarios `// cppcheck-suppress duplicateAssignExpression` en las 4 líneas afectadas. (2) Añadido flag `--inline-suppr` al comando cppcheck en CI para habilitar supresiones inline.
+- **Impacto en el sistema:** Solo CI — sin cambio funcional en firmware. Las supresiones son localizadas y documentan por qué el patrón es intencional.
+- **Archivos modificados:** `Core/Src/main.c`, `Core/Src/can_handler.c`, `.github/workflows/firmware-validation.yml`
+- **Próximos pasos:** Ninguno.
+
+### PR-274 — fix(fdcan): add CCCR triple-read to CAN_Init clock re-apply path
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Cierra edge case en el path de re-init de `CAN_Init()`: tras re-aplicar clock source PCLK1 y re-invocar `HAL_FDCAN_Init()`, faltaba la comprobación triple-lectura de CCCR que sí tenía `MX_FDCAN1_Init`. Sin esta comprobación, el re-init podía reportar éxito con datos basura.
+- **Root cause:** El re-init en `CAN_Init()` (líneas 265-274) no incluía validación triple-lectura de CCCR tras `HAL_FDCAN_Init()`. Si la clock gate seguía inestable tras el cambio de fuente de reloj, `HAL_FDCAN_Init()` podía devolver `HAL_OK` con registros retornando stale bus data — el mismo falso positivo que la triple-lectura de `MX_FDCAN1_Init` previene.
+- **Solución aplicada:** Añadido bloque triple-lectura CCCR inmediatamente después de `HAL_FDCAN_Init()` en el path de clock re-apply de `CAN_Init()`. Verifica que 3 lecturas consecutivas sean idénticas, INIT=1, y bits 16-31 = 0.
+- **Impacto en el sistema:** Elimina el último path de falso positivo conocido en la cadena de init FDCAN.
+- **Archivos modificados:** `Core/Src/can_handler.c`
+- **Próximos pasos:** Verificar en hardware con SWD que el re-init path funciona correctamente.
+
+### PR-273 — fix(fdcan): multi-read CCCR consistency + clock source resilience
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrige dos bugs interrelacionados en la inicialización FDCAN del STM32: (1) la comprobación CCCR en `MX_FDCAN1_Init` podía ser engañada por datos basura aleatorios del bus AHB, y (2) `CAN_Init` fallaba permanentemente si el clock source PCLK1 no estaba latched tras el force-reset.
+- **Root cause:** Cuando la clock gate del FDCAN APB está inestable tras force-reset, las lecturas de registros devuelven datos aleatorios del bus (stale AHB bus data). Una lectura única de CCCR puede coincidir con los bits esperados (INIT=1, reservados=0), generando un falso positivo. Además, `CCIPR.FDCANSEL` puede revertir a su valor por defecto (HSE=00) en ciertos revisions de silicio, causando que `CAN_Init` abandone sin recuperación.
+- **Solución aplicada:** (1) Triple lectura de CCCR en `MX_FDCAN1_Init` con comparación de consistencia — si las 3 lecturas no son idénticas, el periférico no está clocked correctamente. (2) `CAN_Init` re-aplica PCLK1 con barrera `__DSB()` si detecta clock source incorrecto, y hace re-init completo del periférico. (3) Nuevos campos diagnóstico `clk_reapplied` y `ccipr_raw` en `CAN_InitDiag_t`.
+- **Impacto en el sistema:** Elimina falsos positivos en init FDCAN. El sistema puede recuperar el clock source sin quedar permanentemente sin CAN. Diagnósticos SWD mejorados para depuración futura.
+- **Archivos modificados:** `Core/Src/main.c`, `Core/Src/can_handler.c`, `Core/Inc/can_handler.h`
+- **Próximos pasos:** Verificar en hardware con SWD que `clk_reapplied` y `ccipr_raw` reportan valores correctos.
+
+### PR-272 — fix: unblock main loop — vTaskDelay yield, Serial TX buffer, bounded UART read
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Tres correcciones para eliminar bloqueo residual del main loop en Core 1: (1) yield al scheduler, (2) buffer Serial TX, (3) lectura UART acotada del sensor de obstáculos.
+- **Root cause:** (1) `loop()` nunca hacía `vTaskDelay()` — monopolizaba Core 1 sin dar CPU al TWAI driver, idle task ni housekeeping del sistema. (2) `Serial.printf()` con diagnósticos largos (>128 chars) bloqueaba hasta 18 ms esperando que el FIFO UART se drenase a 115200 baud. (3) `while (tofSerial.available() > 0)` sin límite podía procesar hasta 1024 bytes por iteración a 921600 baud.
+- **Solución aplicada:** (1) `vTaskDelay(1)` al final de `loop()` para yield de Core 1 (~1 ms). (2) `Serial.setTxBufferSize(512)` antes de `Serial.begin()` — los printf van a ring buffer y no bloquean. (3) Lectura UART acotada a `MP_FRAME_LENGTH * 2` (800 bytes) por llamada a `update()`.
+- **Impacto en el sistema:** Loop fluido sin bloqueos: scheduler Core 1 activo, Serial no bloqueante, procesamiento UART predecible. Loop rate ~500 Hz (2 ms/iteración incluyendo yield).
+- **Próximos pasos:** Ninguno.
+
 ### PR-271 — fix(rtmon): reset per-period stats, separate UI/render timing, add loop instrumentation
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -316,3 +355,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-28–29 | **ESP32 CAN error-passive recovery** — Full driver reinit cuando tx_err=128 persiste >3 s | #267, #268 |
 | 2026-03-29 | **FDCAN clock stabilisation + CAN TX non-blocking** — CLK_STABILISE_ITERS 32→3200, writeFrame timeout=0 en 8 call sites | #270 |
 | 2026-03-29 | **RuntimeMonitor fix** — Stats por periodo (no acumulativo), separación UI/render, instrumentación loop Core 1 | #271 |
+| 2026-03-29 | **Unblock main loop** — vTaskDelay(1) yield Core 1, Serial TX buffer 512, UART read acotado a 800 bytes | #272 |
+| 2026-03-29 | **FDCAN init consistency fix** — Multi-read CCCR check, clock source resilience en CAN_Init, diagnósticos ccipr_raw | #273 |
+| 2026-03-29 | **FDCAN CAN_Init CCCR triple-read** — Añadido triple-read CCCR al path de re-init por clock re-apply en CAN_Init | #274 |
+| 2026-03-29 | **CI cppcheck fix** — Supresión inline de falsos positivos `duplicateAssignExpression` en lecturas triples CCCR + `--inline-suppr` | #275 |

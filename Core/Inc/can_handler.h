@@ -115,6 +115,8 @@ typedef struct {
     uint8_t  started;            /* 1 = FDCAN fully started, 0 = failed */
     uint8_t  clk_ok;             /* 1 = FDCANSEL == PCLK1, 0 = wrong   */
     uint8_t  cccr_init_ok;       /* 1 = CCCR.INIT cleared after start  */
+    uint8_t  clk_reapplied;      /* 1 = PCLK1 was re-applied by CAN_Init */
+    uint32_t ccipr_raw;          /* Raw RCC_CCIPR snapshot for debugging */
 } CAN_InitDiag_t;
 
 /* Function prototypes */

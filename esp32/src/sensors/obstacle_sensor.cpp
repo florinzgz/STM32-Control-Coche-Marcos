@@ -279,14 +279,20 @@ void update(float vehicleSpeedKmh) {
         warmupDone_ = true;
     }
 
-    // Read all available UART bytes and parse frames.
+    // Read available UART bytes and parse frames.
+    // Cap reads per call to prevent unbounded processing at 921600 baud.
     // Process all queued frames and keep only the last valid result.
     uint16_t measuredMm = 0;
     bool gotFrame = false;
     PixelStats lastStats{};
+    // Cap: 2 frames worth of bytes — guarantees at least one complete frame
+    // can be parsed even if we start mid-frame, without unbounded draining.
+    static constexpr uint16_t MAX_BYTES_PER_UPDATE = MP_FRAME_LENGTH * 2;
+    uint16_t bytesProcessed = 0;
 
-    while (tofSerial.available() > 0) {
+    while (tofSerial.available() > 0 && bytesProcessed < MAX_BYTES_PER_UPDATE) {
         uint8_t byte = (uint8_t)tofSerial.read();
+        ++bytesProcessed;
 
         // Sync on header byte
         if (rxIdx_ == 0 && byte != FRAME_HEADER) {

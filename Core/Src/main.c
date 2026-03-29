@@ -711,9 +711,23 @@ static void MX_FDCAN1_Init(void)
          * (peripheral in configuration mode) and reserved upper bits
          * (16-31) must be zero.  If they are not, the peripheral is
          * not responding — register reads return bus-default garbage.
-         * De-init and retry in that case.                             */
-        uint32_t cccr = hfdcan1.Instance->CCCR;
-        if ((cccr & FDCAN_CCCR_INIT) == 0U || (cccr & FDCAN_CCCR_RESERVED_MASK) != 0U) {
+         *
+         * IMPORTANT: A single CCCR read is NOT sufficient.  When the
+         * FDCAN APB clock gate is unstable after force-reset, register
+         * reads return stale AHB bus data.  This garbage is random and
+         * can occasionally pass the bitmask checks.  Reading CCCR
+         * multiple times and comparing detects this: real register
+         * values are deterministic, stale bus data is not.            */
+        // cppcheck-suppress duplicateAssignExpression
+        uint32_t cccr1 = hfdcan1.Instance->CCCR;
+        // cppcheck-suppress duplicateAssignExpression
+        uint32_t cccr2 = hfdcan1.Instance->CCCR;
+        uint32_t cccr3 = hfdcan1.Instance->CCCR;
+        if (cccr1 != cccr2 || cccr2 != cccr3) {
+            HAL_FDCAN_DeInit(&hfdcan1);
+            continue;  /* Inconsistent reads — clock gate unstable */
+        }
+        if ((cccr1 & FDCAN_CCCR_INIT) == 0U || (cccr1 & FDCAN_CCCR_RESERVED_MASK) != 0U) {
             HAL_FDCAN_DeInit(&hfdcan1);
             continue;  /* Retry */
         }

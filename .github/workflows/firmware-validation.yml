@@ -140,7 +140,7 @@ jobs:
           #   funcArgNamesDifferent — STM32CubeMX MSP generators use different param names
           #   redundantAssignment   — intentional test patterns
           #   unusedStructMember    — test structs mirror production layout
-          cppcheck --enable=all --inconclusive --force \
+          cppcheck --enable=all --inconclusive --force --inline-suppr \
             --suppress=missingIncludeSystem --suppress=missingInclude \
             --suppress=unmatchedSuppression \
             --suppress=unusedFunction \
