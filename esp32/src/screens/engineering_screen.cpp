@@ -508,7 +508,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                     frame.data_length_code = 2;
                     frame.data[0]          = action;
                     frame.data[1]          = i;  // module ID
-                    ESP32Can.writeFrame(frame);
+                    ESP32Can.writeFrame(frame, 0);  // Non-blocking
                     Serial.printf("[ENG] Module %u %s\n", i,
                                   currentlyEnabled ? "DISABLE" : "ENABLE");
                     needsRedraw_ = true;
@@ -531,7 +531,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                     frame.data_length_code = 2;
                     frame.data[0]          = factoryActions[i];
                     frame.data[1]          = 0;
-                    ESP32Can.writeFrame(frame);
+                    ESP32Can.writeFrame(frame, 0);  // Non-blocking
                     Serial.printf("[ENG] Factory reset cmd 0x%02X sent\n",
                                   factoryActions[i]);
                     needsRedraw_ = true;

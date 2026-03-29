@@ -76,7 +76,7 @@ void update() {
         // Byte 4: rolling counter (0–255)
         frame.data[4] = counter_++;
 
-        ESP32Can.writeFrame(frame);
+        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     }
 
     // ---- 0x209: Obstacle Safety State (100 ms) ----
@@ -100,7 +100,7 @@ void update() {
         // Byte 3: reserved
         frame.data[3] = 0;
 
-        ESP32Can.writeFrame(frame);
+        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     }
 }
 
