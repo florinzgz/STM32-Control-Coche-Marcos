@@ -433,6 +433,7 @@ static bool twaiInit() {
 // setup() — called once at power-on
 // ---------------------------------------------------------------------------
 void setup() {
+    Serial.setTxBufferSize(512);   // Prevent Serial.printf() blocking on long diagnostics
     Serial.begin(115200);
     delay(500);
     psram_diagnostic();
@@ -1263,4 +1264,6 @@ void loop() {
     }
 #endif
     RTMON_LOOP_END();
+
+    vTaskDelay(1);  // Yield Core 1 — let TWAI driver, idle task, and system housekeeping run
 }

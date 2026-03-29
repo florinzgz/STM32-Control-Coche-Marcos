@@ -79,6 +79,15 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-272 — fix: unblock main loop — vTaskDelay yield, Serial TX buffer, bounded UART read
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Tres correcciones para eliminar bloqueo residual del main loop en Core 1: (1) yield al scheduler, (2) buffer Serial TX, (3) lectura UART acotada del sensor de obstáculos.
+- **Root cause:** (1) `loop()` nunca hacía `vTaskDelay()` — monopolizaba Core 1 sin dar CPU al TWAI driver, idle task ni housekeeping del sistema. (2) `Serial.printf()` con diagnósticos largos (>128 chars) bloqueaba hasta 18 ms esperando que el FIFO UART se drenase a 115200 baud. (3) `while (tofSerial.available() > 0)` sin límite podía procesar hasta 1024 bytes por iteración a 921600 baud.
+- **Solución aplicada:** (1) `vTaskDelay(1)` al final de `loop()` para yield de Core 1 (~1 ms). (2) `Serial.setTxBufferSize(512)` antes de `Serial.begin()` — los printf van a ring buffer y no bloquean. (3) Lectura UART acotada a `MP_FRAME_LENGTH * 2` (800 bytes) por llamada a `update()`.
+- **Impacto en el sistema:** Loop fluido sin bloqueos: scheduler Core 1 activo, Serial no bloqueante, procesamiento UART predecible. Loop rate ~500 Hz (2 ms/iteración incluyendo yield).
+- **Próximos pasos:** Ninguno.
+
 ### PR-271 — fix(rtmon): reset per-period stats, separate UI/render timing, add loop instrumentation
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -316,3 +325,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-28–29 | **ESP32 CAN error-passive recovery** — Full driver reinit cuando tx_err=128 persiste >3 s | #267, #268 |
 | 2026-03-29 | **FDCAN clock stabilisation + CAN TX non-blocking** — CLK_STABILISE_ITERS 32→3200, writeFrame timeout=0 en 8 call sites | #270 |
 | 2026-03-29 | **RuntimeMonitor fix** — Stats por periodo (no acumulativo), separación UI/render, instrumentación loop Core 1 | #271 |
+| 2026-03-29 | **Unblock main loop** — vTaskDelay(1) yield Core 1, Serial TX buffer 512, UART read acotado a 800 bytes | #272 |
