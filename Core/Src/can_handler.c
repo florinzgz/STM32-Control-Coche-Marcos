@@ -263,7 +263,11 @@ void CAN_Init(void) {
          * MspInit call inside HAL_FDCAN_Init that re-enables the APB
          * clock and stabilises the peripheral.                         */
         HAL_FDCAN_DeInit(&hfdcan1);
-        HAL_Delay(2);  /* Let bus bridge settle after clock source change */
+        /* 2 ms delay matches FDCAN_INITIAL_SETTLE_DELAY_MS used in
+         * MX_FDCAN1_Init — provides margin for the APB1 bus bridge
+         * pipeline to fully propagate the CCIPR clock-source change
+         * before HAL_FDCAN_Init accesses peripheral registers.        */
+        HAL_Delay(2);
         if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
             fdcan_init_ok = false;
             return;  /* Re-init failed — CAN disabled */
