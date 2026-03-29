@@ -232,12 +232,43 @@ void CAN_Init(void) {
     }
     can_init_diag.hal_init = 0U;      /* HAL_FDCAN_Init succeeded      */
 
+    /* Snapshot RCC_CCIPR for SWD debugging — shows actual FDCANSEL
+     * and all other peripheral clock mux bits at CAN_Init() entry.    */
+    can_init_diag.ccipr_raw = RCC->CCIPR;
+
     /* Verify that the FDCAN kernel clock is sourced from PCLK1.
      * After reset FDCANSEL defaults to 00 = HSE (which is not enabled
      * in this project).  SystemClock_Config() must have already set it
      * to PCLK1 via RCC_FDCANCLKSOURCE_PCLK1 (CCIPR bits [25:24] = 10)
      * before this point.  A wrong source means the bit-timing registers
-     * produce a different baud rate, causing ACK / stuff errors.      */
+     * produce a different baud rate, causing ACK / stuff errors.
+     *
+     * Resilience: if the clock source has reverted to its reset default
+     * (e.g. due to silicon-specific behaviour during the force-reset
+     * sequence in MspInit), re-apply PCLK1 with proper barriers and
+     * verify it sticks.  This avoids a permanent CAN-disabled state
+     * on silicon revisions where CCIPR.FDCANSEL does not latch
+     * reliably during the MspInit reset window.                       */
+    can_init_diag.clk_reapplied = 0U;
+    if (__HAL_RCC_GET_FDCAN_SOURCE() != RCC_FDCANCLKSOURCE_PCLK1) {
+        __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
+        __DSB();
+        can_init_diag.clk_reapplied = 1U;
+
+        /* If the clock source was wrong, MX_FDCAN1_Init's "success" was
+         * likely a false positive (CCCR garbage happened to pass the
+         * sanity check while the peripheral was unclocked).  Re-init
+         * the FDCAN peripheral now that the clock source is correct.
+         * DeInit resets the HAL state to RESET, enabling a fresh
+         * MspInit call inside HAL_FDCAN_Init that re-enables the APB
+         * clock and stabilises the peripheral.                         */
+        HAL_FDCAN_DeInit(&hfdcan1);
+        HAL_Delay(2);  /* Let bus bridge settle after clock source change */
+        if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) {
+            fdcan_init_ok = false;
+            return;  /* Re-init failed — CAN disabled */
+        }
+    }
     can_init_diag.clk_ok =
         (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
 

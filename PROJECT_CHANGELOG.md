@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-273 — fix(fdcan): multi-read CCCR consistency + clock source resilience
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrige dos bugs interrelacionados en la inicialización FDCAN del STM32: (1) la comprobación CCCR en `MX_FDCAN1_Init` podía ser engañada por datos basura aleatorios del bus AHB, y (2) `CAN_Init` fallaba permanentemente si el clock source PCLK1 no estaba latched tras el force-reset.
+- **Root cause:** Cuando la clock gate del FDCAN APB está inestable tras force-reset, las lecturas de registros devuelven datos aleatorios del bus (stale AHB bus data). Una lectura única de CCCR puede coincidir con los bits esperados (INIT=1, reservados=0), generando un falso positivo. Además, `CCIPR.FDCANSEL` puede revertir a su valor por defecto (HSE=00) en ciertos revisions de silicio, causando que `CAN_Init` abandone sin recuperación.
+- **Solución aplicada:** (1) Triple lectura de CCCR en `MX_FDCAN1_Init` con comparación de consistencia — si las 3 lecturas no son idénticas, el periférico no está clocked correctamente. (2) `CAN_Init` re-aplica PCLK1 con barrera `__DSB()` si detecta clock source incorrecto, y hace re-init completo del periférico. (3) Nuevos campos diagnóstico `clk_reapplied` y `ccipr_raw` en `CAN_InitDiag_t`.
+- **Impacto en el sistema:** Elimina falsos positivos en init FDCAN. El sistema puede recuperar el clock source sin quedar permanentemente sin CAN. Diagnósticos SWD mejorados para depuración futura.
+- **Archivos modificados:** `Core/Src/main.c`, `Core/Src/can_handler.c`, `Core/Inc/can_handler.h`
+- **Próximos pasos:** Verificar en hardware con SWD que `clk_reapplied` y `ccipr_raw` reportan valores correctos.
+
 ### PR-272 — fix: unblock main loop — vTaskDelay yield, Serial TX buffer, bounded UART read
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -326,3 +336,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **FDCAN clock stabilisation + CAN TX non-blocking** — CLK_STABILISE_ITERS 32→3200, writeFrame timeout=0 en 8 call sites | #270 |
 | 2026-03-29 | **RuntimeMonitor fix** — Stats por periodo (no acumulativo), separación UI/render, instrumentación loop Core 1 | #271 |
 | 2026-03-29 | **Unblock main loop** — vTaskDelay(1) yield Core 1, Serial TX buffer 512, UART read acotado a 800 bytes | #272 |
+| 2026-03-29 | **FDCAN init consistency fix** — Multi-read CCCR check, clock source resilience en CAN_Init, diagnósticos ccipr_raw | #273 |
