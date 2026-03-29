@@ -14,7 +14,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 1. **Safety-first**: Máquina de estados de seguridad (BOOT→STANDBY→ACTIVE→DEGRADED→SAFE→ERROR), watchdog IWDG, BREAK2 kill de PWM ante fallo de CPU.
 2. **Dual-core ESP32**: Render en Core 0, CAN/sensores/audio en Core 1. Datos compartidos vía mutex.
 3. **Inicialización robusta**: Reintentos con validación hardware (CCCR, clock source), logs de diagnóstico persistentes.
-4. **Tolerancia a fallos CAN**: Bus-off recovery (ambos lados), error-passive recovery (ESP32), timeout → LIMP_HOME.
+4. **Tolerancia a fallos CAN**: Bus-off recovery (ambos lados), error-passive recovery bifásica (ESP32: 10 rápidos + lento ilimitado), timeout → LIMP_HOME.
 5. **Persistencia**: Error log en Flash (página 125, 250 entradas con CRC32), calibración de dirección en Flash (página 126).
 6. **Modularidad**: 25 módulos habilitables/deshabilitables vía Service Mode.
 
@@ -46,7 +46,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | Subsistema | Estado | Notas |
 |---|---|---|
 | **Pantalla TFT** | ✅ Operativo | ST7796 480×320, render en Core 0 (FreeRTOS task) |
-| **CAN (TWAI)** | ✅ Operativo (hardened) | Bus-off recovery + error-passive recovery, max 10 intentos |
+| **CAN (TWAI)** | ✅ Operativo (hardened) | Bus-off recovery + error-passive recovery bifásica (10 rápidos @3s + lento @30s) |
 | **Selector de marchas** | ✅ Operativo | MCP23017 I2C, P/R/N/D/D2, backoff con `endTransmission(true)` |
 | **Audio (DFPlayer)** | ⚠️ Parcial | Hardware presente, integración completa pendiente |
 | **LEDs WS2812B** | ✅ Operativo | Front (47 LEDs @ GPIO 47), rear (16 LEDs @ GPIO 48) |
@@ -79,7 +79,15 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
-### PR-276 — fix(obstacle): improve UART reliability + reduce false RT blocking warnings
+### PR-277 — fix(can): two-phase error-passive recovery (never give up)
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** La recuperación de error-passive del TWAI (ESP32) ahora usa una estrategia bifásica en vez de abandonar tras 10 intentos.
+- **Root cause:** Cuando el TEC saturaba a 128 (error-passive) y el STM32 no estaba en el bus (sin ACK), la recuperación se agotaba tras 10 reinits rápidos (cada 3 s = 30 s total). Después, el ESP32 nunca volvía a intentar recuperar el CAN, dejando el `bus_err` creciendo indefinidamente (observado: 45430 → 138000+). Si el STM32 arrancaba después de esos 30 s, el CAN del ESP32 quedaba muerto permanentemente hasta reinicio.
+- **Solución aplicada:** Estrategia bifásica: (1) Phase 1 (fast): primeros 10 intentos cada 3 s (comportamiento original). (2) Phase 2 (slow): intentos ilimitados cada 30 s — suficiente para recuperarse cuando el STM32 se conecte, sin martillear el bus. Renombrado `ERROR_PASSIVE_MAX_RESETS` → `ERROR_PASSIVE_MAX_FAST`, añadido `ERROR_PASSIVE_SLOW_TIMEOUT_MS = 30000`. El contador `errorPassiveResets` se resetea cuando TEC cae por debajo de 128 (bus sano).
+- **Impacto en el sistema:** El CAN del ESP32 ya no queda permanentemente muerto si los 10 reinits rápidos no resuelven el error-passive. El sistema sigue intentando periódicamente con reinits lentos, permitiendo recuperación automática si el STM32 se conecta tarde.
+- **Archivos modificados:** `esp32/src/main.cpp`
+- **Próximos pasos:** Verificar en hardware que el reinit lento (30 s) recupera el CAN correctamente cuando el STM32 se conecta después de los 10 intentos rápidos.
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
 - **Descripción del cambio:** Mejora fiabilidad del sensor de obstáculos (TOFSense-M 8×8) y reduce falsos positivos en warnings de bloqueo del RuntimeMonitor.
@@ -371,3 +379,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **FDCAN CAN_Init CCCR triple-read** — Añadido triple-read CCCR al path de re-init por clock re-apply en CAN_Init | #274 |
 | 2026-03-29 | **CI cppcheck fix** — Supresión inline de falsos positivos `duplicateAssignExpression` en lecturas triples CCCR + `--inline-suppr` | #275 |
 | 2026-03-29 | **Obstacle sensor reliability** — UART RX buffer 1024→4096, resync 0x57+0x01, MAX_BYTES_PER_UPDATE 800→1600, render blocking threshold 4→35 ms, uartHWM diag | #276 |
+| 2026-03-29 | **CAN error-passive bifásica** — Recovery no abandona tras 10 intentos: fase rápida (10×3s) + fase lenta (ilimitado×30s) | #277 |

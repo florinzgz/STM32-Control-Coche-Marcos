@@ -106,9 +106,16 @@ static uint8_t       busOffRecoveryCount = 0;
  * When TEC reaches 128 the TWAI controller enters error-passive but keeps
  * state = RUNNING — the existing bus-off recovery never fires.  If the
  * condition persists for ERROR_PASSIVE_TIMEOUT_MS we do a full driver
- * reinit (stop → uninstall → install → start) to clear error counters. */
-static constexpr uint32_t ERROR_PASSIVE_TIMEOUT_MS = 3000;
-static constexpr uint8_t  ERROR_PASSIVE_MAX_RESETS = 10;
+ * reinit (stop → uninstall → install → start) to clear error counters.
+ *
+ * Two-phase strategy:
+ *   Phase 1 (fast):  up to ERROR_PASSIVE_MAX_FAST attempts every 3 s.
+ *   Phase 2 (slow):  unlimited attempts every 30 s — avoids hammering the
+ *                     bus while still recovering if the remote node (STM32)
+ *                     comes online later. */
+static constexpr uint32_t ERROR_PASSIVE_TIMEOUT_MS      = 3000;   // fast-phase interval
+static constexpr uint32_t ERROR_PASSIVE_SLOW_TIMEOUT_MS = 30000;  // slow-phase interval
+static constexpr uint8_t  ERROR_PASSIVE_MAX_FAST        = 10;     // fast-phase attempts
 static unsigned long errorPassiveSince  = 0;  // 0 = not in error-passive
 static uint8_t       errorPassiveResets = 0;
 #if RUNTIME_MONITOR
@@ -1175,14 +1182,15 @@ void loop() {
      *   RECOVERING → (128×11 recessive bits) → STOPPED
      *   STOPPED → twai_start() → RUNNING
      *
-     * Error-passive recovery:
+     * Error-passive recovery (two-phase):
      *   When TEC saturates at 128 (error-passive) the TWAI state remains
      *   RUNNING so bus-off recovery never triggers.  If error-passive
-     *   persists for ERROR_PASSIVE_TIMEOUT_MS, a full driver reinit
+     *   persists for the timeout period, a full driver reinit
      *   (stop → uninstall → install → start) clears error counters.
+     *   Phase 1: first 10 attempts at 3 s intervals (fast).
+     *   Phase 2: unlimited attempts at 30 s intervals (slow periodic).
      *
-     * Check every 250 ms; limit to 10 attempts to avoid hammering a
-     * bus that is genuinely broken (mirrors STM32 CAN_BUSOFF_MAX_RETRIES). */
+     * Check every 250 ms; bus-off limited to 10 attempts. */
     if (now - lastBusOffCheckMs >= 250) {
         lastBusOffCheckMs = now;
         twai_status_info_t sts;
@@ -1205,25 +1213,38 @@ void loop() {
             } else if (sts.state == TWAI_STATE_RUNNING) {
                 busOffRecoveryCount = 0;
 
-                /* ---- Error-passive detection ----
+                /* ---- Error-passive detection (two-phase) ----
                  * TEC ≥ 128 means the controller is error-passive.  It can
                  * still receive but transmissions are degraded.  If this
                  * persists, a full driver reinit is the only way to clear
                  * the error counters (twai_initiate_recovery() is only
-                 * valid from BUS_OFF state). */
+                 * valid from BUS_OFF state).
+                 *
+                 * Phase 1 (fast):  first ERROR_PASSIVE_MAX_FAST attempts
+                 *                  at ERROR_PASSIVE_TIMEOUT_MS intervals.
+                 * Phase 2 (slow):  unlimited attempts at
+                 *                  ERROR_PASSIVE_SLOW_TIMEOUT_MS intervals. */
                 if (sts.tx_error_counter >= 128) {
-                    if (errorPassiveResets >= ERROR_PASSIVE_MAX_RESETS) {
-                        /* Max attempts exhausted — stop retrying.
-                         * Keep block inert until TEC drops below 128. */
-                        errorPassiveSince = 0;
-                    } else if (errorPassiveSince == 0) {
+                    bool slowPhase = (errorPassiveResets >= ERROR_PASSIVE_MAX_FAST);
+                    uint32_t timeout = slowPhase
+                                     ? ERROR_PASSIVE_SLOW_TIMEOUT_MS
+                                     : ERROR_PASSIVE_TIMEOUT_MS;
+
+                    if (errorPassiveSince == 0) {
                         errorPassiveSince = now;
-                    } else if ((now - errorPassiveSince) >= ERROR_PASSIVE_TIMEOUT_MS) {
-                        Serial.printf("[CAN] Error-passive (tx_err=%lu) for >3s "
-                                      "— reinit attempt %u/%u\n",
-                                      (unsigned long)sts.tx_error_counter,
-                                      errorPassiveResets + 1,
-                                      ERROR_PASSIVE_MAX_RESETS);
+                    } else if ((now - errorPassiveSince) >= timeout) {
+                        if (slowPhase) {
+                            Serial.printf("[CAN] Error-passive (tx_err=%lu) "
+                                          "— slow-periodic reinit (%lus cycle)\n",
+                                          (unsigned long)sts.tx_error_counter,
+                                          (unsigned long)(ERROR_PASSIVE_SLOW_TIMEOUT_MS / 1000));
+                        } else {
+                            Serial.printf("[CAN] Error-passive (tx_err=%lu) for >3s "
+                                          "— reinit attempt %u/%u\n",
+                                          (unsigned long)sts.tx_error_counter,
+                                          errorPassiveResets + 1,
+                                          ERROR_PASSIVE_MAX_FAST);
+                        }
                         esp_err_t stop_res = twai_stop();
                         if (stop_res != ESP_OK &&
                             stop_res != ESP_ERR_INVALID_STATE) {
