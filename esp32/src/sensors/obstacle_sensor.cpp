@@ -285,6 +285,8 @@ void update(float vehicleSpeedKmh) {
     uint16_t measuredMm = 0;
     bool gotFrame = false;
     PixelStats lastStats{};
+    // Cap: 2 frames worth of bytes — guarantees at least one complete frame
+    // can be parsed even if we start mid-frame, without unbounded draining.
     static constexpr uint16_t MAX_BYTES_PER_UPDATE = MP_FRAME_LENGTH * 2;
     uint16_t bytesProcessed = 0;
 
