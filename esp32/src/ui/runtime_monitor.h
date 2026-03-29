@@ -79,11 +79,13 @@ struct RuntimeStats {
     uint32_t canMaxUs;          // max CAN receive processing time
     uint32_t uiUpdateMaxUs;     // max UI update time
     uint32_t renderMaxUs;       // max render (draw) time
+    uint32_t loopMaxUs;         // max main loop() iteration time
 
     // Blocking flags
     bool     canBlocking;       // CAN phase exceeded threshold
     bool     uiBlocking;        // UI update exceeded threshold
     bool     renderBlocking;    // Render phase exceeded threshold
+    bool     loopBlocking;      // Main loop exceeded threshold
 };
 
 // -------------------------------------------------------------------------
@@ -112,6 +114,10 @@ public:
     /// Call before/after rendering (screen.draw())
     static void renderBegin();
     static void renderEnd();
+
+    /// Call at the start/end of each main loop() iteration
+    static void loopBegin();
+    static void loopEnd();
 
     // ---- Zone redraw tracking ----
 
@@ -158,6 +164,10 @@ private:
     static uint32_t  renderMaxUs_;
     static bool      renderBlocking_;
 
+    static uint32_t  loopStartUs_;
+    static uint32_t  loopMaxUs_;
+    static bool      loopBlocking_;
+
     // Zone redraw counters (accumulated between getStats() calls)
     static uint16_t  zoneCounts_[static_cast<uint8_t>(Zone::COUNT)];
     static uint16_t  fullRedrawCount_;
@@ -181,6 +191,8 @@ private:
 #define RTMON_UI_END()           rtmon::RuntimeMonitor::uiEnd()
 #define RTMON_RENDER_BEGIN()     rtmon::RuntimeMonitor::renderBegin()
 #define RTMON_RENDER_END()       rtmon::RuntimeMonitor::renderEnd()
+#define RTMON_LOOP_BEGIN()       rtmon::RuntimeMonitor::loopBegin()
+#define RTMON_LOOP_END()         rtmon::RuntimeMonitor::loopEnd()
 #define RTMON_ZONE_REDRAW(z)     rtmon::RuntimeMonitor::zoneRedraw(z)
 #define RTMON_FULL_REDRAW()      rtmon::RuntimeMonitor::fullRedraw()
 #define RTMON_LOG()              rtmon::RuntimeMonitor::logToSerial()
@@ -199,6 +211,8 @@ private:
 #define RTMON_UI_END()           ((void)0)
 #define RTMON_RENDER_BEGIN()     ((void)0)
 #define RTMON_RENDER_END()       ((void)0)
+#define RTMON_LOOP_BEGIN()       ((void)0)
+#define RTMON_LOOP_END()         ((void)0)
 #define RTMON_ZONE_REDRAW(z)     ((void)0)
 #define RTMON_FULL_REDRAW()      ((void)0)
 #define RTMON_LOG()              ((void)0)

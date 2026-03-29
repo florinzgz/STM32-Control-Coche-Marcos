@@ -27,7 +27,9 @@ ScreenManager::ScreenManager()
 void ScreenManager::update(const vehicle::VehicleData& data) {
     // ---- Engineering screen active ----
     if (engineeringActive_) {
+        RTMON_UI_BEGIN();
         currentScreen_->update(data);
+        RTMON_UI_END();
         if (frameLimiter_.shouldDraw()) {
             RTMON_FRAME_BEGIN();
             RTMON_RENDER_BEGIN();
@@ -50,7 +52,9 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 
     // ---- PIN screen active ----
     if (pinActive_) {
+        RTMON_UI_BEGIN();
         pinScreen_.update(data);
+        RTMON_UI_END();
         if (frameLimiter_.shouldDraw()) {
             RTMON_FRAME_BEGIN();
             RTMON_RENDER_BEGIN();
@@ -89,7 +93,9 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
         frameLimiter_.forceNextFrame();  // Immediate redraw on transition
     }
 
+    RTMON_UI_BEGIN();
     currentScreen_->update(data);
+    RTMON_UI_END();
 
     if (frameLimiter_.shouldDraw()) {
         RTMON_FRAME_BEGIN();

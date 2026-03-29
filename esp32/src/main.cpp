@@ -338,9 +338,7 @@ static void renderTask(void* /*param*/) {
 
         // 2. Update & render screen (frame limiter inside screenManager)
         lastFrameStart = millis();
-        RTMON_UI_BEGIN();
         screenManager.update(localVD);
-        RTMON_UI_END();
 
         // 3. Runtime overlay on boot screen only
         {
@@ -586,6 +584,7 @@ void setup() {
 // loop() — called repeatedly
 // ---------------------------------------------------------------------------
 void loop() {
+    RTMON_LOOP_BEGIN();
     unsigned long now = millis();
 
     // Poll CAN RX and decode incoming frames
@@ -1263,4 +1262,5 @@ void loop() {
         RTMON_LOG();
     }
 #endif
+    RTMON_LOOP_END();
 }

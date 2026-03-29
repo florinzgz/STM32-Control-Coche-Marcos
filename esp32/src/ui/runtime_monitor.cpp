@@ -42,6 +42,10 @@ uint32_t  RuntimeMonitor::renderStartUs_       = 0;
 uint32_t  RuntimeMonitor::renderMaxUs_         = 0;
 bool      RuntimeMonitor::renderBlocking_      = false;
 
+uint32_t  RuntimeMonitor::loopStartUs_         = 0;
+uint32_t  RuntimeMonitor::loopMaxUs_           = 0;
+bool      RuntimeMonitor::loopBlocking_        = false;
+
 uint16_t  RuntimeMonitor::zoneCounts_[static_cast<uint8_t>(Zone::COUNT)] = {};
 uint16_t  RuntimeMonitor::fullRedrawCount_     = 0;
 
@@ -126,6 +130,20 @@ void RuntimeMonitor::renderEnd() {
 }
 
 // -------------------------------------------------------------------------
+// Phase timing — Main loop iteration
+// -------------------------------------------------------------------------
+
+void RuntimeMonitor::loopBegin() {
+    loopStartUs_ = micros();
+}
+
+void RuntimeMonitor::loopEnd() {
+    uint32_t elapsed = micros() - loopStartUs_;
+    if (elapsed > loopMaxUs_) loopMaxUs_ = elapsed;
+    if (elapsed > BLOCKING_THRESHOLD_US) loopBlocking_ = true;
+}
+
+// -------------------------------------------------------------------------
 // Zone redraw tracking
 // -------------------------------------------------------------------------
 
@@ -170,11 +188,13 @@ RuntimeStats RuntimeMonitor::getStats() {
     s.canMaxUs      = canMaxUs_;
     s.uiUpdateMaxUs = uiMaxUs_;
     s.renderMaxUs   = renderMaxUs_;
+    s.loopMaxUs     = loopMaxUs_;
 
     // Blocking flags
     s.canBlocking    = canBlocking_;
     s.uiBlocking     = uiBlocking_;
     s.renderBlocking = renderBlocking_;
+    s.loopBlocking   = loopBlocking_;
 
     return s;
 }
@@ -198,6 +218,8 @@ void RuntimeMonitor::reset() {
     uiBlocking_    = false;
     renderMaxUs_   = 0;
     renderBlocking_ = false;
+    loopMaxUs_     = 0;
+    loopBlocking_  = false;
 
     memset(zoneCounts_, 0, sizeof(zoneCounts_));
     fullRedrawCount_ = 0;
@@ -220,28 +242,45 @@ void RuntimeMonitor::logToSerial() {
         totalRedraws += s.zoneRedraws[i];
     }
 
-    char buf[128];
+    char buf[160];
     snprintf(buf, sizeof(buf),
-        "[RT] fps=%u avg=%lu max=%lu min=%lu redraw=%u full=%u can=%lu",
+        "[RT] fps=%u avg=%lu max=%lu min=%lu redraw=%u full=%u can=%lu loop=%lu",
         s.fps,
         (unsigned long)s.avgFrameUs,
         (unsigned long)s.maxFrameUs,
         (unsigned long)s.minFrameUs,
         totalRedraws,
         s.fullRedraws,
-        (unsigned long)s.canMaxUs);
+        (unsigned long)s.canMaxUs,
+        (unsigned long)s.loopMaxUs);
 
     Serial.println(buf);
 
-    if (s.canBlocking || s.uiBlocking || s.renderBlocking) {
-        char warnBuf[96];
+    if (s.canBlocking || s.uiBlocking || s.renderBlocking || s.loopBlocking) {
+        char warnBuf[128];
         snprintf(warnBuf, sizeof(warnBuf),
-            "[RT] WARN blocking: can=%s ui=%s render=%s",
+            "[RT] WARN blocking: can=%s ui=%s render=%s loop=%s",
             s.canBlocking    ? "YES" : "no",
             s.uiBlocking     ? "YES" : "no",
-            s.renderBlocking ? "YES" : "no");
+            s.renderBlocking ? "YES" : "no",
+            s.loopBlocking   ? "YES" : "no");
         Serial.println(warnBuf);
     }
+
+    // Reset per-period stats so each logging interval reflects only
+    // what happened during that 5-second window (not all-time highs).
+    maxFrameUs_     = 0;
+    minFrameUs_     = UINT32_MAX;
+    canMaxUs_       = 0;
+    canBlocking_    = false;
+    uiMaxUs_        = 0;
+    uiBlocking_     = false;
+    renderMaxUs_    = 0;
+    renderBlocking_ = false;
+    loopMaxUs_      = 0;
+    loopBlocking_   = false;
+    memset(zoneCounts_, 0, sizeof(zoneCounts_));
+    fullRedrawCount_ = 0;
 }
 
 } // namespace rtmon

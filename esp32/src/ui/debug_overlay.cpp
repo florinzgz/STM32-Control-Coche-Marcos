@@ -122,6 +122,12 @@ void DebugOverlay::draw(TFT_eSPI& tft) {
     tft.setTextColor(s.renderBlocking ? ui::COL_RED : ui::COL_WHITE,
                      ui::COL_BLACK);
     tft.drawString(buf, x, y);
+    y += LINE_H;
+
+    snprintf(buf, sizeof(buf), "Loop max:     %lu us", (unsigned long)s.loopMaxUs);
+    tft.setTextColor(s.loopBlocking ? ui::COL_RED : ui::COL_WHITE,
+                     ui::COL_BLACK);
+    tft.drawString(buf, x, y);
 
     // Reset text state
     tft.setTextColor(ui::COL_WHITE, ui::COL_BG);

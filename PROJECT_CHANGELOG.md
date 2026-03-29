@@ -73,10 +73,29 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - Safety checks: 100 Hz (10 ms).
 - CAN heartbeat: 10 Hz (100 ms).
 - ESP32 render: ~28 ms/frame (liberado del main loop).
+- RuntimeMonitor: Logs cada 5 s con stats por periodo (fps, avg/max/min frame, can, loop). Flags de bloqueo independientes por fase (can, ui, render, loop). Threshold: 4 ms.
 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR-271 — fix(rtmon): reset per-period stats, separate UI/render timing, add loop instrumentation
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrección de falsos positivos en `[RT] WARN blocking`, separación de instrumentación UI/render, y adición de timing del main loop (Core 1).
+- **Root cause:** (1) Flags de bloqueo y stats max acumulaban desde el boot sin resetearse entre periodos de 5 s — una sola frame >4 ms durante boot hacía que el warning se mostrase indefinidamente. (2) `RTMON_UI` envolvía `screenManager.update()` completo (incluyendo `draw()`), por lo que `ui=YES` siempre acompañaba a `render=YES`. (3) Sin instrumentación del main loop en Core 1.
+- **Solución aplicada:** `logToSerial()` resetea flags de bloqueo, max/min frame, phase maximums y zone counters tras imprimir (cada periodo de 5 s es independiente). `RTMON_UI_BEGIN/END` movido dentro de `screen_manager.cpp` para envolver solo `currentScreen_->update(data)`. Añadido `RTMON_LOOP_BEGIN/END` en `loop()`. Formato de log actualizado con `loop=` timing. Debug overlay muestra loop max.
+- **Impacto en el sistema:** Diagnósticos de rendimiento ahora reflejan la realidad de cada periodo. `render=YES` esperado (TFT SPI), `ui=YES` indica stall real de procesamiento de datos, `loop=YES` indica bloqueo real en Core 1.
+- **Próximos pasos:** Ninguno.
+
+### PR-270 — Fix FDCAN init failure (CCCR garbage reads) and ESP32 CAN TX blocking
+- **Fecha:** 2026-03-29
+- **Autor:** Copilot
+- **Descripción del cambio:** (1) Aumento de delay de estabilización de clock gate FDCAN de 32 a 3200 iteraciones (~19 µs). (2) Todos los `ESP32Can.writeFrame()` cambiados a `timeout=0` (non-blocking).
+- **Root cause:** (1) `FDCAN_CLK_STABILISE_ITERS=32` (~190 ns) era insuficiente en algunas revisiones de silicio STM32G4, causando lecturas basura de CCCR. (2) `writeFrame()` con timeout por defecto de 1000 ms bloqueaba el main loop hasta 1 s cuando la cola TX estaba llena (bus muerto/error-passive).
+- **Solución aplicada:** `FDCAN_CLK_STABILISE_ITERS` 32→3200. `FDCAN_INITIAL_SETTLE_DELAY_MS` 1→2 ms, `FDCAN_CLOCK_SETTLE_DELAY_MS` 5→10 ms. 8 call sites de `writeFrame()` actualizados con `timeout=0`.
+- **Impacto en el sistema:** FDCAN init fiable en todas las revisiones de silicio. CAN TX nunca bloquea el main loop.
+- **Próximos pasos:** Ninguno.
 
 ### PR-268 — fix: reorder error-passive guard and validate TWAI teardown return values
 - **Fecha:** 2026-03-29
@@ -274,6 +293,11 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ### Diagnósticos
 22. **CAN_InitDiag_t**: 7 campos (hal_init, filter_global, notify, start, started, clk_ok, cccr_init_ok). Legible vía SWD con `p can_init_diag`.
 
+### RuntimeMonitor (ESP32)
+23. **Instrumentación separada**: `RTMON_UI_BEGIN/END` envuelve solo `currentScreen_->update(data)` dentro de `screen_manager.cpp`, NO el `screenManager.update()` completo en renderTask. `RTMON_RENDER_BEGIN/END` envuelve `draw()`. `RTMON_LOOP_BEGIN/END` envuelve el main `loop()` en Core 1.
+24. **Stats por periodo**: `logToSerial()` resetea flags de bloqueo, max/min frame, phase maximums y zone counters tras imprimir. Cada ventana de 5 s es independiente. NO llamar `reset()` desde `logToSerial()` — ring buffer y FPS counters deben persistir entre periodos.
+25. **CAN TX non-blocking**: Todos los `ESP32Can.writeFrame()` deben usar `timeout=0`. El timeout por defecto de 1000 ms bloquea el loop cuando la cola TX está llena (bus muerto/error-passive).
+
 ---
 
 ## 6. Historial de Cambios
@@ -290,3 +314,5 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-28 | **FreeRTOS render offload** — TFT+touch en Core 0, main loop libre en Core 1 | #265 |
 | 2026-03-28 | **ESP32 CAN bus-off recovery** — twai_initiate_recovery + twai_start, max 10 intentos | #261 |
 | 2026-03-28–29 | **ESP32 CAN error-passive recovery** — Full driver reinit cuando tx_err=128 persiste >3 s | #267, #268 |
+| 2026-03-29 | **FDCAN clock stabilisation + CAN TX non-blocking** — CLK_STABILISE_ITERS 32→3200, writeFrame timeout=0 en 8 call sites | #270 |
+| 2026-03-29 | **RuntimeMonitor fix** — Stats por periodo (no acumulativo), separación UI/render, instrumentación loop Core 1 | #271 |
