@@ -10,7 +10,7 @@
  *            [0xFF×6][CHECKSUM]
  *
  *          Compile and run on host (from esp32/src/):
- *            g++ -std=c++17 -I. -I../test_stubs \
+ *            g++ -std=c++17 -DOBSTACLE_SENSOR_ENABLED=1 -I. -I../test_stubs \
  *                sensors/obstacle_sensor.cpp test_obstacle_sensor.cpp \
  *                -o /tmp/test_obstacle_sensor && /tmp/test_obstacle_sensor
  *
@@ -27,6 +27,9 @@
  *           10. Single-point frames (0x57 0x00) must be REJECTED
  ****************************************************************************
  */
+
+// Force-enable sensor code for testing (override the default disabled state)
+#define OBSTACLE_SENSOR_ENABLED 1
 
 #include <Arduino.h>
 #include <cstdio>

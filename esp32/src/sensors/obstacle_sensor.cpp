@@ -19,9 +19,31 @@
 
 #include "obstacle_sensor.h"
 #include <Arduino.h>
+#if OBSTACLE_SENSOR_ENABLED
 #include <HardwareSerial.h>
+#endif
 
 namespace obstacle_sensor {
+
+// =========================================================================
+// SENSOR DISABLED MODE (OBSTACLE_SENSOR_ENABLED == 0):
+// - Zero CPU usage: update() returns immediately, no function calls
+// - Zero UART activity: no HardwareSerial constructed, no begin/read/write
+// - Zero buffer allocation: rxBuf_ and diagnostic counters not instantiated
+// - Safe default output for CAN/UI: distance=0, healthy=false, status=INVALID
+// - CAN 0x208/0x209 frames report health=0, status=INVALID (sensor absent)
+// - UI shows "---" (no valid distance)
+// - No periodic logs — single startup message only
+// =========================================================================
+
+// -------------------------------------------------------------------------
+// Module state — always available (both enabled and disabled modes)
+// -------------------------------------------------------------------------
+static Config  cfg_;
+static Reading reading_;
+static bool    initialized_ = false;
+
+#if OBSTACLE_SENSOR_ENABLED
 
 // -------------------------------------------------------------------------
 // TOFSense-M 8×8 protocol constants
@@ -62,16 +84,13 @@ static constexpr uint8_t  MIN_VALID_PIXELS           = 4;     // Minimum valid p
 static constexpr uint16_t MAX_PIXEL_DISPERSION_MM    = 3000;  // Max spread (maxDist-minDist) in mm
 
 // -------------------------------------------------------------------------
-// Module state
+// Sensor-active state — only allocated when sensor hardware is connected
 // -------------------------------------------------------------------------
-static Config       cfg_;
-static Reading      reading_;
 static unsigned long initTimeMs_       = 0;
 static unsigned long lastValidMs_      = 0;
 static uint16_t      prevDistanceMm_   = 0;
 static unsigned long stuckSinceMs_     = 0;
 static bool          stuckActive_      = false;
-static bool          initialized_      = false;
 static bool          warmupDone_       = false;
 
 // UART receive buffer — holds a full multi-pixel frame (400 bytes) + headroom
@@ -215,6 +234,8 @@ static ParseResult parseMultiPixelFrame(const uint8_t* buf, uint16_t len,
     outDistMm = stats.minDist_mm;
     return ParseResult::OK;
 }
+
+#endif // OBSTACLE_SENSOR_ENABLED — end of sensor-active declarations
 
 // -------------------------------------------------------------------------
 // Public API
@@ -555,6 +576,8 @@ uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
     return totalLen;
 }
 
+#if OBSTACLE_SENSOR_ENABLED
+
 static bool sendCmd(const uint8_t* frame, uint16_t len) {
     if (!initialized_) return false;
     if (cfg_.txPin < 0) return false;
@@ -618,5 +641,22 @@ bool configureLongRange() {
     if (!saveConfig())                          return false;
     return true;
 }
+
+#else // !OBSTACLE_SENSOR_ENABLED — sensor commands unavailable
+
+// cppcheck-suppress unusedFunction
+bool setRangeMode(RangeMode)    { return false; }
+// cppcheck-suppress unusedFunction
+bool setBaudRate(BaudRateCode)  { return false; }
+// cppcheck-suppress unusedFunction
+bool setFrameRate(uint8_t)      { return false; }
+// cppcheck-suppress unusedFunction
+bool setOutputMode(OutputMode)  { return false; }
+// cppcheck-suppress unusedFunction
+bool saveConfig()               { return false; }
+// cppcheck-suppress unusedFunction
+bool configureLongRange()       { return false; }
+
+#endif // OBSTACLE_SENSOR_ENABLED
 
 } // namespace obstacle_sensor
