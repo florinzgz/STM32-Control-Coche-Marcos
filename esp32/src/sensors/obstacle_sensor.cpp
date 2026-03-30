@@ -481,6 +481,8 @@ void update(float vehicleSpeedKmh) {
         // This prevents losing sync when 0x59 appears in distance/strength data.
         tfmIdx_ = 0;
         if (!gotFrame) {
+            // Start at index 2: positions [0],[1] are known headers (0x59 0x59);
+            // any embedded header pair must begin at [2] or later.
             for (uint8_t scan = 2; scan + 1 < TFM_FRAME_LENGTH; scan++) {
                 if (tfmBuf_[scan] == TFM_HEADER &&
                     tfmBuf_[scan + 1] == TFM_HEADER) {
