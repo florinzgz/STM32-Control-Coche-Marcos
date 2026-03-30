@@ -68,8 +68,8 @@
 //      TF-Mini Plus pinout (4-pin JST-GH):
 //        Pin 1 = +5V (requires 5V, ~140mA peak)
 //        Pin 2 = GND
-//        Pin 3 = TX → ESP32 RX (GPIO 18)
-//        Pin 4 = RX ← ESP32 TX (optional, for configuration commands)
+//        Pin 3 = TX → ESP32 RX (Config.rxPin, default GPIO 18)
+//        Pin 4 = RX ← ESP32 TX (Config.txPin, optional for commands)
 //      UART levels: 3.3V compatible — NO voltage divider needed
 //      (unlike TOFSense-M which outputs 3.5–3.6V)
 //
