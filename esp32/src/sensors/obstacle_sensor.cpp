@@ -405,10 +405,14 @@ void update(float vehicleSpeedKmh) {
         return;
     }
 
-    // First call after warmup: flush stale UART data
+    // First call after warmup: flush stale UART data.
+    // Bounded to rxBufSize bytes to prevent blocking if data arrives
+    // faster than we can drain (defensive — should not happen in practice).
     if (!warmupDone_) {
-        while (sensorSerial.available() > 0) {
+        uint16_t flushed = 0;
+        while (sensorSerial.available() > 0 && flushed < cfg_.rxBufSize) {
             sensorSerial.read();
+            ++flushed;
         }
 #if SENSOR_TYPE == SENSOR_TYPE_TFMINI
         tfmIdx_ = 0;
@@ -471,7 +475,30 @@ void update(float vehicleSpeedKmh) {
             }
         }
 
+        // Resync: scan rejected frame for a potential header pair (0x59 0x59).
+        // If found in the data payload, shift it to the start of tfmBuf_
+        // so the next bytes continue accumulating into a valid frame.
+        // This prevents losing sync when 0x59 appears in distance/strength data.
         tfmIdx_ = 0;
+        if (!gotFrame) {
+            for (uint8_t scan = 2; scan + 1 < TFM_FRAME_LENGTH; scan++) {
+                if (tfmBuf_[scan] == TFM_HEADER &&
+                    tfmBuf_[scan + 1] == TFM_HEADER) {
+                    uint8_t remain = TFM_FRAME_LENGTH - scan;
+                    for (uint8_t j = 0; j < remain; j++) {
+                        tfmBuf_[j] = tfmBuf_[scan + j];
+                    }
+                    tfmIdx_ = remain;
+                    break;
+                }
+            }
+            // If no pair found, check if the last byte is 0x59
+            // (could be the first header byte of the next frame)
+            if (tfmIdx_ == 0 && tfmBuf_[TFM_FRAME_LENGTH - 1] == TFM_HEADER) {
+                tfmBuf_[0] = TFM_HEADER;
+                tfmIdx_ = 1;
+            }
+        }
         // Parse max 1 frame per update() call for deterministic timing
         if (gotFrame) break;
     }
