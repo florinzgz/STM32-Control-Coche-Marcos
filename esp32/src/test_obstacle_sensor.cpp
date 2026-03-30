@@ -1494,7 +1494,7 @@ static void test_tfmini_header_byte_in_distance() {
     ASSERT_EQ(rd.distance_mm, 890);
     ASSERT_EQ(rd.healthy, true);
 
-    // Distance = 0x5959 cm = 22873 cm — exceeds uint16_t capacity (22873*10=228730),
+    // Distance = 0x5959 cm = 22873 cm — 22873*10 = 228730 exceeds UINT16_MAX (65535),
     // rejected by overflow guard.
     rd = injectTfMiniAndUpdate(0x5959, 500);
     ASSERT_EQ(rd.healthy, false);
