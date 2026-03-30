@@ -53,10 +53,31 @@
 // Reference: TOFSense-M User Manual V3.0
 //            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
 //            docs/CAN_CONTRACT_FINAL.md rev 1.3 (0x208 payload)
+//
+// ---- SENSOR ENABLE/DISABLE ------------------------------------------------
+// Set OBSTACLE_SENSOR_ENABLED to 0 to disable all UART and parsing logic.
+// When disabled:
+//   - init() logs a message but does NOT configure UART
+//   - update() is a no-op (returns immediately, no blocking)
+//   - getReading() returns safe defaults (distance=0, healthy=false,
+//     status=INVALID) — CAN module stops sending frames, UI shows "---"
+//
+// Set to 1 to re-enable when the sensor hardware is reconnected.
+//
+// Future: replace TOFSense-M with Benewake TF-Mini Plus (UART, 115200 baud).
+//         See distance_sensor.h for the common interface abstraction.
+// -------------------------------------------------------------------------
 // =============================================================================
 
 #ifndef OBSTACLE_SENSOR_H_DRIVER
 #define OBSTACLE_SENSOR_H_DRIVER
+
+// ---- Compile-time sensor enable flag ----------------------------------------
+// 0 = sensor hardware removed (all UART/parsing disabled, safe defaults)
+// 1 = sensor connected and active
+#ifndef OBSTACLE_SENSOR_ENABLED
+#define OBSTACLE_SENSOR_ENABLED 0
+#endif
 
 #include <cstdint>
 

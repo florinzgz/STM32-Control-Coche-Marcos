@@ -223,6 +223,7 @@ static ParseResult parseMultiPixelFrame(const uint8_t* buf, uint16_t len,
 void init(const Config& cfg) {
     cfg_ = cfg;
 
+#if OBSTACLE_SENSOR_ENABLED
     // Set UART RX ring-buffer size BEFORE begin().
     tofSerial.setRxBufferSize(cfg_.rxBufSize);
 
@@ -257,9 +258,25 @@ void init(const Config& cfg) {
                   (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
                   cfg_.rxPin, cfg_.txPin,
                   (unsigned)cfg_.minRangeMm, (unsigned)cfg_.maxRangeMm);
+#else
+    // Sensor hardware removed — no UART init, no reads, no parsing.
+    // getReading() returns safe defaults (distance=0, healthy=false, INVALID).
+    initialized_ = false;
+    reading_ = Reading{};
+    reading_.status  = SensorStatus::INVALID;
+    reading_.healthy = false;
+    Serial.println("[OBSTACLE] Sensor DISABLED (OBSTACLE_SENSOR_ENABLED=0). "
+                   "No UART configured. Returning safe defaults.");
+#endif
 }
 
 void update(float vehicleSpeedKmh) {
+#if !OBSTACLE_SENSOR_ENABLED
+    // Sensor disabled — no UART reads, no parsing, no blocking.
+    // reading_ keeps its safe defaults set in init().
+    (void)vehicleSpeedKmh;
+    return;
+#else
     if (!initialized_) return;
 
     unsigned long now = millis();
@@ -506,6 +523,7 @@ void update(float vehicleSpeedKmh) {
     reading_.status  = stuckActive_ ? SensorStatus::INVALID : SensorStatus::VALID;
 
     reading_.updateCount++;
+#endif  // OBSTACLE_SENSOR_ENABLED
 }
 
 Reading getReading() {
