@@ -45,6 +45,36 @@ static bool    initialized_ = false;
 
 #if OBSTACLE_SENSOR_ENABLED
 
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+// =========================================================================
+// TF-Mini Plus protocol constants
+//
+// Frame layout: 9 bytes
+//   [0]   header1    = 0x59
+//   [1]   header2    = 0x59
+//   [2]   dist_L     distance low byte (cm)
+//   [3]   dist_H     distance high byte (cm)
+//   [4]   str_L      signal strength low byte
+//   [5]   str_H      signal strength high byte
+//   [6]   temp_L     temperature low byte (reserved)
+//   [7]   temp_H     temperature high byte (reserved)
+//   [8]   checksum   sum of bytes [0..7] & 0xFF
+//
+// Distance: uint16 LE in cm → convert to mm for the Reading struct.
+// Strength < 100 or == 65535: reject (unreliable / saturated).
+// Distance == 0 or == 65535: reject (out-of-range sentinel).
+// =========================================================================
+static constexpr uint8_t  TFM_HEADER          = 0x59;
+static constexpr uint8_t  TFM_FRAME_LENGTH    = 9;
+static constexpr uint16_t TFM_MIN_STRENGTH    = 100;
+static constexpr uint16_t TFM_DIST_INVALID    = 0xFFFF;  // 65535
+// Non-blocking: max bytes read per update() call.
+// At 115200 baud / 100 Hz, ~9 bytes arrive every 10 ms.
+// 32 bytes covers ~3 frames worth of data — ample for loop jitter.
+static constexpr uint16_t TFM_MAX_BYTES_PER_UPDATE = 32;
+
+#else  // SENSOR_TYPE_TOFSENSE
+
 // -------------------------------------------------------------------------
 // TOFSense-M 8×8 protocol constants
 //
@@ -83,8 +113,14 @@ static constexpr uint16_t OFF_FUNCTION_MARK = 1;
 static constexpr uint8_t  MIN_VALID_PIXELS           = 4;     // Minimum valid pixels for a usable frame
 static constexpr uint16_t MAX_PIXEL_DISPERSION_MM    = 3000;  // Max spread (maxDist-minDist) in mm
 
+// UART receive buffer — holds a full multi-pixel frame (400 bytes) + headroom
+static uint8_t       rxBuf_[MP_FRAME_LENGTH + 16];
+static uint16_t      rxIdx_            = 0;
+
+#endif  // SENSOR_TYPE (TOFSense-M constants/buffer)
+
 // -------------------------------------------------------------------------
-// Sensor-active state — only allocated when sensor hardware is connected
+// Sensor-active state — shared across sensor types
 // -------------------------------------------------------------------------
 static unsigned long initTimeMs_       = 0;
 static unsigned long lastValidMs_      = 0;
@@ -93,12 +129,14 @@ static unsigned long stuckSinceMs_     = 0;
 static bool          stuckActive_      = false;
 static bool          warmupDone_       = false;
 
-// UART receive buffer — holds a full multi-pixel frame (400 bytes) + headroom
-static uint8_t       rxBuf_[MP_FRAME_LENGTH + 16];
-static uint16_t      rxIdx_            = 0;
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+// TF-Mini Plus: 9-byte frame buffer (no large rxBuf_ needed)
+static uint8_t       tfmBuf_[TFM_FRAME_LENGTH];
+static uint8_t       tfmIdx_           = 0;
+#endif
 
-// UART1 for TOFSense-M
-static HardwareSerial tofSerial(1);
+// UART1 for sensor
+static HardwareSerial sensorSerial(1);
 
 // -------------------------------------------------------------------------
 // Diagnostic counters — logged every DIAG_INTERVAL_MS
@@ -135,6 +173,48 @@ static uint8_t distanceToZone(uint16_t mm) {
     if (mm < ZONE_CAUTION_MM)   return 1;
     return 0;
 }
+
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+// =========================================================================
+// TF-Mini Plus frame parser
+//
+// Parse a complete 9-byte TF-Mini Plus frame.
+// Returns true if valid, with distance in mm written to outDistMm.
+//
+// Frame: [0x59][0x59][DIST_L][DIST_H][STR_L][STR_H][TEMP_L][TEMP_H][CHK]
+// Checksum: sum of bytes [0..7] & 0xFF must equal byte [8]
+// Distance: uint16 LE in cm → mm
+// Strength: uint16 LE, reject < TFM_MIN_STRENGTH
+// Reject distance == 0 or == 65535
+// =========================================================================
+static bool parseTfMiniFrame(const uint8_t* buf, uint16_t& outDistMm) {
+    outDistMm = 0;
+
+    // Header validation
+    if (buf[0] != TFM_HEADER || buf[1] != TFM_HEADER) return false;
+
+    // Checksum: sum of bytes [0..7] & 0xFF
+    uint8_t checksum = 0;
+    for (uint8_t i = 0; i < 8; i++) checksum += buf[i];
+    if (checksum != buf[8]) return false;
+
+    // Distance in cm (uint16 LE)
+    uint16_t distCm = (uint16_t)buf[2] | ((uint16_t)buf[3] << 8);
+
+    // Signal strength (uint16 LE)
+    uint16_t strength = (uint16_t)buf[4] | ((uint16_t)buf[5] << 8);
+
+    // Reject invalid readings
+    if (distCm == 0)                       return false;  // No target
+    if (distCm == TFM_DIST_INVALID)        return false;  // Out-of-range sentinel
+    if (strength < TFM_MIN_STRENGTH)       return false;  // Unreliable signal
+
+    // Convert cm → mm
+    outDistMm = distCm * 10;
+    return true;
+}
+
+#else  // SENSOR_TYPE_TOFSENSE
 
 // -------------------------------------------------------------------------
 // Parse result — allows update() to distinguish failure modes for diag
@@ -235,6 +315,8 @@ static ParseResult parseMultiPixelFrame(const uint8_t* buf, uint16_t len,
     return ParseResult::OK;
 }
 
+#endif  // SENSOR_TYPE (parser selection)
+
 #endif // OBSTACLE_SENSOR_ENABLED — end of sensor-active declarations
 
 // -------------------------------------------------------------------------
@@ -246,10 +328,10 @@ void init(const Config& cfg) {
 
 #if OBSTACLE_SENSOR_ENABLED
     // Set UART RX ring-buffer size BEFORE begin().
-    tofSerial.setRxBufferSize(cfg_.rxBufSize);
+    sensorSerial.setRxBufferSize(cfg_.rxBufSize);
 
-    // Initialize UART1 for TOFSense-M 8×8
-    tofSerial.begin(cfg_.baudRate, SERIAL_8N1, cfg_.rxPin, cfg_.txPin);
+    // Initialize UART1
+    sensorSerial.begin(cfg_.baudRate, SERIAL_8N1, cfg_.rxPin, cfg_.txPin);
 
     initTimeMs_    = millis();
     lastValidMs_   = 0;
@@ -258,7 +340,12 @@ void init(const Config& cfg) {
     stuckActive_   = false;
     warmupDone_    = false;
     initialized_   = true;
+
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+    tfmIdx_        = 0;
+#else
     rxIdx_         = 0;
+#endif
 
     // Reset diagnostic counters
     lastDiagMs_         = millis();
@@ -274,11 +361,19 @@ void init(const Config& cfg) {
 
     reading_ = Reading{};  // Reset to defaults
 
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+    Serial.printf("[OBSTACLE] TF-Mini Plus init (UART1, %lu bps, rxBuf %u, "
+                  "rxPin %d, range %u–%u mm)\n",
+                  (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
+                  cfg_.rxPin,
+                  (unsigned)cfg_.minRangeMm, (unsigned)cfg_.maxRangeMm);
+#else
     Serial.printf("[OBSTACLE] TOFSense-M 8x8 init (UART1, %lu bps, rxBuf %u, "
                   "rxPin %d, txPin %d, range %u–%u mm)\n",
                   (unsigned long)cfg_.baudRate, (unsigned)cfg_.rxBufSize,
                   cfg_.rxPin, cfg_.txPin,
                   (unsigned)cfg_.minRangeMm, (unsigned)cfg_.maxRangeMm);
+#endif
 #else
     // Sensor hardware removed — no UART init, no reads, no parsing.
     // getReading() returns safe defaults (distance=0, healthy=false, INVALID).
@@ -312,18 +407,76 @@ void update(float vehicleSpeedKmh) {
 
     // First call after warmup: flush stale UART data
     if (!warmupDone_) {
-        while (tofSerial.available() > 0) {
-            tofSerial.read();
+        while (sensorSerial.available() > 0) {
+            sensorSerial.read();
         }
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+        tfmIdx_ = 0;
+#else
         rxIdx_ = 0;
+#endif
         warmupDone_ = true;
     }
 
     // Read available UART bytes and parse frames.
-    // Cap reads per call to prevent unbounded processing at 921600 baud.
-    // Process all queued frames and keep only the last valid result.
     uint16_t measuredMm = 0;
     bool gotFrame = false;
+
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+    // ---- TF-Mini Plus: 9-byte frames, non-blocking ----
+    // Read max TFM_MAX_BYTES_PER_UPDATE bytes per call (32).
+    // Parse at most 1 valid frame per call — exit immediately after.
+    uint16_t bytesProcessed = 0;
+
+    while (sensorSerial.available() > 0 &&
+           bytesProcessed < TFM_MAX_BYTES_PER_UPDATE) {
+        uint8_t b = (uint8_t)sensorSerial.read();
+        ++bytesProcessed;
+
+        // Sync: first byte must be 0x59
+        if (tfmIdx_ == 0 && b != TFM_HEADER) {
+            diagBytesDiscarded_++;
+            continue;
+        }
+        // Second byte must also be 0x59
+        if (tfmIdx_ == 1 && b != TFM_HEADER) {
+            diagHeaderFail_++;
+            tfmIdx_ = 0;
+            // Re-check: if this byte is 0x59, it could be the start
+            if (b == TFM_HEADER) {
+                tfmBuf_[tfmIdx_++] = b;
+            }
+            continue;
+        }
+
+        tfmBuf_[tfmIdx_++] = b;
+
+        if (tfmIdx_ < TFM_FRAME_LENGTH) continue;
+
+        // Complete 9-byte frame — attempt parse
+        uint16_t dist = 0;
+        if (parseTfMiniFrame(tfmBuf_, dist)) {
+            measuredMm = dist;
+            gotFrame = true;
+            diagFramesOk_++;
+            if (dist > diagMaxDistMm_) diagMaxDistMm_ = dist;
+        } else {
+            // Distinguish checksum vs data rejection for diagnostics
+            uint8_t cksum = 0;
+            for (uint8_t i = 0; i < 8; i++) cksum += tfmBuf_[i];
+            if (cksum != tfmBuf_[8]) {
+                diagChecksumFail_++;
+            } else {
+                diagNoTarget_++;  // Valid checksum but rejected data
+            }
+        }
+
+        tfmIdx_ = 0;
+        // Parse max 1 frame per loop iteration for deterministic timing
+        if (gotFrame) break;
+    }
+
+#else  // SENSOR_TYPE_TOFSENSE
     PixelStats lastStats{};
     // Cap: 4 frames worth of bytes — drains accumulated data after loop
     // jitter while still bounding CPU time per call.
@@ -332,14 +485,14 @@ void update(float vehicleSpeedKmh) {
 
     // Track UART buffer high-water mark for overflow diagnostics
     {
-        int avail = tofSerial.available();
+        int avail = sensorSerial.available();
         if (avail > 0 && static_cast<uint16_t>(avail) > diagUartHWM_) {
             diagUartHWM_ = static_cast<uint16_t>(avail);
         }
     }
 
-    while (tofSerial.available() > 0 && bytesProcessed < MAX_BYTES_PER_UPDATE) {
-        uint8_t byte = (uint8_t)tofSerial.read();
+    while (sensorSerial.available() > 0 && bytesProcessed < MAX_BYTES_PER_UPDATE) {
+        uint8_t byte = (uint8_t)sensorSerial.read();
         ++bytesProcessed;
 
         // Sync on header byte
@@ -450,6 +603,7 @@ void update(float vehicleSpeedKmh) {
             rxIdx_ = 0;
         }
     }
+#endif  // SENSOR_TYPE (update loop)
 
     // Periodic diagnostic output
     if (now - lastDiagMs_ >= DIAG_INTERVAL_MS) {
@@ -474,8 +628,13 @@ void update(float vehicleSpeedKmh) {
                                "Check voltage divider and cable length.");
             }
         } else if (reading_.status != SensorStatus::WAITING) {
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+            Serial.println("[OBSTACLE] Diag: no UART data — check wiring "
+                           "and baud rate (expected 115200 bps)");
+#else
             Serial.println("[OBSTACLE] Diag: no UART data — check wiring "
                            "and baud rate (expected 921600 bps)");
+#endif
         }
         // Reset counters
         diagFramesOk_        = 0;
@@ -513,11 +672,21 @@ void update(float vehicleSpeedKmh) {
     // Valid reading — update state
     reading_.distance_mm  = measuredMm;
     reading_.zone         = distanceToZone(measuredMm);
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+    // TF-Mini Plus: single-point sensor — all pixel statistics report the
+    // same single distance value.
+    reading_.minDist_mm    = measuredMm;
+    reading_.maxDist_mm    = measuredMm;
+    reading_.avgDist_mm    = measuredMm;
+    reading_.validCount    = 1;
+    reading_.dispersion_mm = 0;
+#else
     reading_.minDist_mm   = lastStats.minDist_mm;
     reading_.maxDist_mm   = lastStats.maxDist_mm;
     reading_.avgDist_mm   = lastStats.avgDist_mm;
     reading_.validCount   = lastStats.validCount;
     reading_.dispersion_mm= lastStats.dispersion_mm;
+#endif
     lastValidMs_          = now;
 
     // Stuck-sensor detection
@@ -581,7 +750,7 @@ uint16_t buildCommand(uint8_t cmdId, const uint8_t* payload,
 static bool sendCmd(const uint8_t* frame, uint16_t len) {
     if (!initialized_) return false;
     if (cfg_.txPin < 0) return false;
-    tofSerial.write(frame, len);
+    sensorSerial.write(frame, len);
     return true;
 }
 

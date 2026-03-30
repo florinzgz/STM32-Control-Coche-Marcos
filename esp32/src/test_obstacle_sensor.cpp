@@ -1,18 +1,25 @@
 /**
  ****************************************************************************
  * @file    test_obstacle_sensor.cpp
- * @brief   Host-compilable unit tests for obstacle_sensor (TOFSense-M 8×8).
+ * @brief   Host-compilable unit tests for obstacle_sensor driver.
  *
- *          Tests the multi-pixel protocol parsing ONLY.
- *          Frame format: 400 bytes
- *            [0x57][0x01][0xFF][ID][TIME×4][0x40]
- *            [64 × {DIST_L,DIST_H,DIST_UH,STATUS,SIG_L,SIG_H}]
- *            [0xFF×6][CHECKSUM]
+ *          Supports both sensor types via -DSENSOR_TYPE=N:
+ *            0 = TOFSense-M 8×8 (400-byte multi-pixel frames)
+ *            1 = TF-Mini Plus   (9-byte single-point frames)
  *
  *          Compile and run on host (from esp32/src/):
- *            g++ -std=c++17 -DOBSTACLE_SENSOR_ENABLED=1 -I. -I../test_stubs \
+ *
+ *          TOFSense-M tests (default):
+ *            g++ -std=c++17 -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=0 \
+ *                -I. -I../test_stubs \
  *                sensors/obstacle_sensor.cpp test_obstacle_sensor.cpp \
  *                -o /tmp/test_obstacle_sensor && /tmp/test_obstacle_sensor
+ *
+ *          TF-Mini Plus tests:
+ *            g++ -std=c++17 -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=1 \
+ *                -I. -I../test_stubs \
+ *                sensors/obstacle_sensor.cpp test_obstacle_sensor.cpp \
+ *                -o /tmp/test_obstacle_sensor_tfmini && /tmp/test_obstacle_sensor_tfmini
  *
  *          Requirements verified:
  *            1. Frame: header=0x57, function_mark=0x01, 400 bytes
@@ -30,6 +37,12 @@
 
 // Force-enable sensor code for testing (override the default disabled state)
 #define OBSTACLE_SENSOR_ENABLED 1
+
+// Select sensor type for testing.  Default: TOFSense-M (existing tests).
+// To test TF-Mini Plus parser, compile with -DSENSOR_TYPE=1 (SENSOR_TYPE_TFMINI).
+#ifndef SENSOR_TYPE
+#define SENSOR_TYPE 0  // SENSOR_TYPE_TOFSENSE — existing multi-pixel tests
+#endif
 
 #include <Arduino.h>
 #include <cstdio>
@@ -1163,9 +1176,251 @@ static void test_resync_finds_valid_pair() {
     ASSERT_EQ(rd.healthy, true);
 }
 
+/* =====================================================================
+ * TF-Mini Plus tests (SENSOR_TYPE_TFMINI)
+ *
+ * These tests verify the TF-Mini Plus 9-byte frame parser.
+ * Only compiled when SENSOR_TYPE == SENSOR_TYPE_TFMINI (== 1).
+ *
+ * To run:
+ *   g++ -std=c++17 -DOBSTACLE_SENSOR_ENABLED=1 -DSENSOR_TYPE=1 \
+ *       -I. -I../test_stubs \
+ *       sensors/obstacle_sensor.cpp test_obstacle_sensor.cpp \
+ *       -o /tmp/test_obstacle_sensor_tfmini && /tmp/test_obstacle_sensor_tfmini
+ * ===================================================================== */
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+
+// Build a TF-Mini Plus 9-byte frame.
+// dist_cm: distance in cm (uint16 LE)
+// strength: signal strength (uint16 LE)
+static void buildTfMiniFrame(uint8_t* buf, uint16_t dist_cm, uint16_t strength) {
+    buf[0] = 0x59;
+    buf[1] = 0x59;
+    buf[2] = (uint8_t)(dist_cm & 0xFF);
+    buf[3] = (uint8_t)((dist_cm >> 8) & 0xFF);
+    buf[4] = (uint8_t)(strength & 0xFF);
+    buf[5] = (uint8_t)((strength >> 8) & 0xFF);
+    buf[6] = 0x00;  // temp_L
+    buf[7] = 0x00;  // temp_H
+    // Checksum: sum of bytes [0..7] & 0xFF
+    uint8_t sum = 0;
+    for (int i = 0; i < 8; i++) sum += buf[i];
+    buf[8] = sum;
+}
+
+static obstacle_sensor::Reading injectTfMiniAndUpdate(uint16_t dist_cm,
+                                                       uint16_t strength) {
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+
+    // Advance past warmup
+    g_test_millis = 600;   // Config default warmupMs = 500 for TF-Mini Plus
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    uint8_t frame[9];
+    buildTfMiniFrame(frame, dist_cm, strength);
+    g_uart_inject(frame, 9);
+
+    obstacle_sensor::update(0.0f);
+
+    return obstacle_sensor::getReading();
+}
+
+static void test_tfmini_valid_frame() {
+    printf("  test_tfmini_valid_frame\n");
+    // 150 cm = 1500 mm, good strength
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(150, 500);
+    ASSERT_EQ(rd.distance_mm, 1500);
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT(rd.status == obstacle_sensor::SensorStatus::VALID);
+    ASSERT_EQ(rd.zone, 0);   // >= 1500 → normal zone 0
+    ASSERT_EQ(rd.validCount, 1);
+    ASSERT_EQ(rd.dispersion_mm, 0);
+}
+
+static void test_tfmini_zero_distance_rejected() {
+    printf("  test_tfmini_zero_distance_rejected\n");
+    // Distance == 0 should be rejected
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(0, 500);
+    // No valid frame → should timeout to INVALID or remain WAITING
+    ASSERT_EQ(rd.healthy, false);
+}
+
+static void test_tfmini_max_distance_rejected() {
+    printf("  test_tfmini_max_distance_rejected\n");
+    // Distance == 65535 (0xFFFF) should be rejected
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(0xFFFF, 500);
+    ASSERT_EQ(rd.healthy, false);
+}
+
+static void test_tfmini_low_strength_rejected() {
+    printf("  test_tfmini_low_strength_rejected\n");
+    // Strength < 100 should be rejected
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(150, 50);
+    ASSERT_EQ(rd.healthy, false);
+}
+
+static void test_tfmini_bad_checksum_rejected() {
+    printf("  test_tfmini_bad_checksum_rejected\n");
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+    g_test_millis = 600;
+    obstacle_sensor::update(0.0f);
+
+    uint8_t frame[9];
+    buildTfMiniFrame(frame, 150, 500);
+    frame[8] ^= 0xFF;  // Corrupt checksum
+    g_uart_inject(frame, 9);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.healthy, false);
+}
+
+static void test_tfmini_cm_to_mm_conversion() {
+    printf("  test_tfmini_cm_to_mm_conversion\n");
+    // 100 cm = 1000 mm
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(100, 200);
+    ASSERT_EQ(rd.distance_mm, 1000);
+}
+
+static void test_tfmini_range_clamping() {
+    printf("  test_tfmini_range_clamping\n");
+    // Above max range (12000 mm = 1200 cm) should be clamped
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(1500, 500);
+    // 1500 cm = 15000 mm, clamped to maxRangeMm = 12000
+    ASSERT_EQ(rd.distance_mm, 12000);
+}
+
+static void test_tfmini_zone_emergency() {
+    printf("  test_tfmini_zone_emergency\n");
+    // 15 cm = 150 mm → zone 4 (emergency, < 200 mm)
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(15, 500);
+    ASSERT_EQ(rd.distance_mm, 150);
+    ASSERT_EQ(rd.zone, 4);
+}
+
+static void test_tfmini_config_defaults() {
+    printf("  test_tfmini_config_defaults\n");
+    obstacle_sensor::Config cfg;
+    ASSERT_EQ(cfg.baudRate, 115200u);
+    ASSERT_EQ(cfg.rxBufSize, 256);
+    ASSERT_EQ(cfg.maxRangeMm, 12000);
+    ASSERT_EQ(cfg.minRangeMm, 100);
+    ASSERT_EQ(cfg.warmupMs, 500u);
+}
+
+static void test_tfmini_non_blocking_cap() {
+    printf("  test_tfmini_non_blocking_cap\n");
+    // Inject many bytes — update should only process TFM_MAX_BYTES_PER_UPDATE (32)
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+    g_test_millis = 600;
+    obstacle_sensor::update(0.0f);
+
+    // Inject 10 valid frames = 90 bytes (> 32 byte cap)
+    for (int i = 0; i < 10; i++) {
+        uint8_t frame[9];
+        buildTfMiniFrame(frame, (uint16_t)(100 + i), 500);
+        g_uart_inject(frame, 9);
+    }
+
+    obstacle_sensor::update(0.0f);
+
+    // Should have parsed at most 1 valid frame (exits after first valid)
+    // and consumed at most 32 bytes
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.healthy, true);
+    ASSERT(rd.distance_mm >= 1000 && rd.distance_mm <= 1090);
+
+    // Remaining bytes should still be in the inject buffer
+    // (not all consumed in one call)
+    ASSERT(g_uart_inject_pos <= 32u);
+}
+
+static void test_tfmini_resync_on_bad_header() {
+    printf("  test_tfmini_resync_on_bad_header\n");
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+    g_test_millis = 600;
+    obstacle_sensor::update(0.0f);
+
+    // Inject garbage byte followed by valid frame
+    uint8_t garbage = 0xAA;
+    g_uart_inject(&garbage, 1);
+
+    uint8_t frame[9];
+    buildTfMiniFrame(frame, 200, 300);
+    g_uart_inject(frame, 9);
+
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 2000);
+    ASSERT_EQ(rd.healthy, true);
+}
+
+static void test_tfmini_stuck_detection() {
+    printf("  test_tfmini_stuck_detection\n");
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::Config cfg;
+    obstacle_sensor::init(cfg);
+
+    g_test_millis = 600;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Send same distance multiple times while moving
+    for (int i = 0; i < 20; i++) {
+        uint8_t frame[9];
+        buildTfMiniFrame(frame, 100, 500);
+        g_uart_inject(frame, 9);
+        g_test_millis = 600 + (unsigned long)(i + 1) * 100;
+        obstacle_sensor::update(5.0f);  // speed > minSpeedForStuck
+    }
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.stuck, true);
+    ASSERT_EQ(rd.healthy, false);
+}
+
+#endif // SENSOR_TYPE == SENSOR_TYPE_TFMINI
+
 /* ---- Main --------------------------------------------------------------- */
 
 int main() {
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+    printf("=== test_obstacle_sensor (TF-Mini Plus 9-byte frames) ===\n");
+
+    test_tfmini_config_defaults();
+    test_tfmini_valid_frame();
+    test_tfmini_cm_to_mm_conversion();
+    test_tfmini_zero_distance_rejected();
+    test_tfmini_max_distance_rejected();
+    test_tfmini_low_strength_rejected();
+    test_tfmini_bad_checksum_rejected();
+    test_tfmini_range_clamping();
+    test_tfmini_zone_emergency();
+    test_tfmini_non_blocking_cap();
+    test_tfmini_resync_on_bad_header();
+    test_tfmini_stuck_detection();
+    // buildCommand is shared (NLink protocol) — also test here
+    test_build_command_range_mode();
+    test_build_command_save_config();
+    test_build_command_buffer_too_small();
+    test_build_command_null_payload_rejected();
+    test_build_command_null_payload_zero_len_ok();
+#else
     printf("=== test_obstacle_sensor (TOFSense-M 8x8 multi-pixel only) ===\n");
 
     test_frame_constants();
@@ -1219,6 +1474,7 @@ int main() {
     test_pixel_various_distances();
     test_resync_skips_false_header();
     test_resync_finds_valid_pair();
+#endif  // SENSOR_TYPE
 
     printf("\n%d tests run, %d failed\n", s_tests_run, s_tests_failed);
     return s_tests_failed > 0 ? 1 : 0;

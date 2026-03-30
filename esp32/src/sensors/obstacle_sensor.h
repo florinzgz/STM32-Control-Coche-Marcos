@@ -79,6 +79,27 @@
 #define OBSTACLE_SENSOR_ENABLED 0
 #endif
 
+// ---- Sensor type selection --------------------------------------------------
+// Select which physical sensor hardware is connected.
+// Only one type may be active at a time.
+#define SENSOR_TYPE_TOFSENSE  0   // Nooploop TOFSense-M 8×8 (921600 baud, 400-byte frames)
+#define SENSOR_TYPE_TFMINI    1   // Benewake TF-Mini Plus   (115200 baud, 9-byte frames)
+
+#ifndef SENSOR_TYPE
+#define SENSOR_TYPE  SENSOR_TYPE_TFMINI   // Default: TF-Mini Plus (next planned sensor)
+#endif
+
+// ---- TO ENABLE TF-MINI PLUS: ------------------------------------------------
+// 1. Set OBSTACLE_SENSOR_ENABLED = 1 in this file (or via -D compiler flag)
+// 2. Set SENSOR_TYPE = SENSOR_TYPE_TFMINI (already the default)
+// 3. Connect sensor TX to ESP32 RX (GPIO 18 default), 3.3V logic — no divider
+// 4. Provide 5V power to sensor (Pin 1), GND (Pin 2)
+// 5. Ensure baud rate = 115200 (TF-Mini Plus factory default)
+// 6. Flash firmware (pio run -t upload)
+// 7. Verify logs: "[OBSTACLE] TF-Mini Plus init ..." should appear on Serial
+// 8. Verify CAN data: 0x208 frames with valid distance (health=1, status=VALID)
+// ---- END ACTIVATION INSTRUCTIONS -------------------------------------------
+
 #include <cstdint>
 
 namespace obstacle_sensor {
@@ -111,20 +132,29 @@ struct Reading {
 };
 
 // -------------------------------------------------------------------------
-// Configuration — UART for TOFSense-M 8×8 LiDAR sensor
+// Configuration — UART for obstacle distance sensor
+// Defaults depend on SENSOR_TYPE (TF-Mini Plus vs TOFSense-M).
 // -------------------------------------------------------------------------
 struct Config {
     int      rxPin             = 18;    // GPIO for UART1 RX (sensor TX → ESP32 RX)
     int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
+#if SENSOR_TYPE == SENSOR_TYPE_TFMINI
+    uint32_t baudRate          = 115200; // TF-Mini Plus factory default
+    uint16_t rxBufSize         = 256;    // 9-byte frames — 256 bytes is ample
+    uint32_t warmupMs          = 500;    // TF-Mini Plus stabilises faster
+    uint16_t minRangeMm        = 100;    // TF-Mini Plus minimum range (10 cm)
+    uint16_t maxRangeMm        = 12000;  // TF-Mini Plus maximum range (12 m)
+#else  // SENSOR_TYPE_TOFSENSE
     uint32_t baudRate          = 921600; // TOFSense-M factory default
-    uint16_t rxBufSize         = 4096;  // UART RX ring-buffer (~44 ms at 921600 baud)
-    uint32_t warmupMs          = 1000;  // Warmup period after init (ms)
-    uint16_t minRangeMm        = 20;    // Minimum physical range (mm)
-    uint16_t maxRangeMm        = 4000;  // Maximum physical range (mm)
-    uint32_t frameTimeoutMs    = 500;   // Max time without valid frame before INVALID
-    uint32_t stuckDurationMs   = 1000;  // Duration for stuck detection (ms)
-    uint16_t stuckThresholdMm  = 10;    // Change threshold for stuck detection (mm)
-    float    minSpeedForStuck  = 1.0f;  // Vehicle speed threshold (km/h) for stuck detection
+    uint16_t rxBufSize         = 4096;   // UART RX ring-buffer (~44 ms at 921600 baud)
+    uint32_t warmupMs          = 1000;   // Warmup period after init (ms)
+    uint16_t minRangeMm        = 20;     // Minimum physical range (mm)
+    uint16_t maxRangeMm        = 4000;   // Maximum physical range (mm)
+#endif
+    uint32_t frameTimeoutMs    = 500;    // Max time without valid frame before INVALID
+    uint32_t stuckDurationMs   = 1000;   // Duration for stuck detection (ms)
+    uint16_t stuckThresholdMm  = 10;     // Change threshold for stuck detection (mm)
+    float    minSpeedForStuck  = 1.0f;   // Vehicle speed threshold (km/h) for stuck detection
 };
 
 /// Initialize sensor hardware.  Call once from setup().
