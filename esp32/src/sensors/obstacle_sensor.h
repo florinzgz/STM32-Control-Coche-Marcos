@@ -87,7 +87,9 @@
 
 #ifndef SENSOR_TYPE
 #define SENSOR_TYPE  SENSOR_TYPE_TFMINI   // Default: TF-Mini Plus (next planned sensor)
-#endif
+#endif                                    // When OBSTACLE_SENSOR_ENABLED=0 (current state),
+                                          // this default has no effect — all sensor code is
+                                          // compiled out.  It only matters when re-enabling.
 
 // ---- TO ENABLE TF-MINI PLUS: ------------------------------------------------
 // 1. Set OBSTACLE_SENSOR_ENABLED = 1 in this file (or via -D compiler flag)

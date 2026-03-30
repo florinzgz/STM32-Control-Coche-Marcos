@@ -472,7 +472,7 @@ void update(float vehicleSpeedKmh) {
         }
 
         tfmIdx_ = 0;
-        // Parse max 1 frame per loop iteration for deterministic timing
+        // Parse max 1 frame per update() call for deterministic timing
         if (gotFrame) break;
     }
 
