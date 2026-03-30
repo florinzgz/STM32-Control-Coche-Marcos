@@ -209,8 +209,10 @@ static bool parseTfMiniFrame(const uint8_t* buf, uint16_t& outDistMm) {
     if (distCm == TFM_DIST_INVALID)        return false;  // Out-of-range sentinel
     if (strength < TFM_MIN_STRENGTH)       return false;  // Unreliable signal
 
-    // Convert cm → mm
-    outDistMm = distCm * 10;
+    // Convert cm → mm (guard against uint16_t overflow: 6554*10 = 65540 > 65535)
+    uint32_t distMm = (uint32_t)distCm * 10u;
+    if (distMm > UINT16_MAX) return false;
+    outDistMm = (uint16_t)distMm;
     return true;
 }
 
@@ -684,8 +686,10 @@ void update(float vehicleSpeedKmh) {
                             ? lastValidMs_
                             : (initTimeMs_ + cfg_.warmupMs);
         if ((now - refMs) > cfg_.frameTimeoutMs) {
-            reading_.status  = SensorStatus::INVALID;
-            reading_.healthy = false;
+            reading_.status      = SensorStatus::INVALID;
+            reading_.healthy     = false;
+            reading_.distance_mm = 0;  // Clear stale value (defense-in-depth)
+            reading_.zone        = 0;  // Reset zone to safe default
         }
         return;
     }

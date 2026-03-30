@@ -1494,10 +1494,10 @@ static void test_tfmini_header_byte_in_distance() {
     ASSERT_EQ(rd.distance_mm, 890);
     ASSERT_EQ(rd.healthy, true);
 
-    // Distance = 0x5959 cm = 22873 cm — above max range, clamped
+    // Distance = 0x5959 cm = 22873 cm — exceeds uint16_t capacity (22873*10=228730),
+    // rejected by overflow guard.
     rd = injectTfMiniAndUpdate(0x5959, 500);
-    ASSERT_EQ(rd.distance_mm, 12000);
-    ASSERT_EQ(rd.healthy, true);
+    ASSERT_EQ(rd.healthy, false);
 }
 
 // ---- Edge case: resync after corrupt frame with 0x59 in data ----
@@ -1622,6 +1622,56 @@ static void test_tfmini_min_range_clamping() {
     ASSERT_EQ(rd.healthy, true);
 }
 
+// ---- Edge case: distCm * 10 uint16_t overflow guard ----
+// If distCm > 6553, the cm→mm conversion (distCm*10) exceeds uint16_t max (65535).
+// Without an overflow guard, 6554*10 = 65540 truncates to 4, creating a false
+// emergency reading (distance=100mm, zone=4, healthy=true).
+// The parser must reject such values.
+static void test_tfmini_overflow_large_distance() {
+    printf("  test_tfmini_overflow_large_distance\n");
+    // 6554 cm * 10 = 65540 → would overflow uint16_t.  Must be rejected.
+    obstacle_sensor::Reading rd = injectTfMiniAndUpdate(6554, 500);
+    ASSERT_EQ(rd.healthy, false);
+
+    // 6553 cm * 10 = 65530 → fits in uint16_t, clamped to maxRangeMm=12000
+    rd = injectTfMiniAndUpdate(6553, 500);
+    ASSERT_EQ(rd.distance_mm, 12000);
+    ASSERT_EQ(rd.healthy, true);
+}
+
+// ---- Edge case: distance_mm cleared on timeout ----
+// After timeout, distance_mm and zone must be zeroed (defense-in-depth).
+// Stale values must not persist in CAN frames after sensor disconnect.
+static void test_tfmini_timeout_clears_distance() {
+    printf("  test_tfmini_timeout_clears_distance\n");
+    g_uart_inject_reset();
+    g_test_millis = 0;
+
+    obstacle_sensor::init();
+    g_test_millis = 600;
+    obstacle_sensor::update(0.0f);  // flush warmup
+
+    // Inject a valid frame to set distance_mm to a non-zero value
+    uint8_t frame[9];
+    buildTfMiniFrame(frame, 150, 500);
+    g_uart_inject(frame, 9);
+    obstacle_sensor::update(0.0f);
+
+    obstacle_sensor::Reading rd = obstacle_sensor::getReading();
+    ASSERT_EQ(rd.distance_mm, 1500);
+    ASSERT_EQ(rd.healthy, true);
+
+    // Advance past timeout (frameTimeoutMs=500 default)
+    g_test_millis = 600 + 600;
+    obstacle_sensor::update(0.0f);
+
+    rd = obstacle_sensor::getReading();
+    ASSERT(rd.status == obstacle_sensor::SensorStatus::INVALID);
+    ASSERT_EQ(rd.healthy, false);
+    ASSERT_EQ(rd.distance_mm, 0);   // Must be cleared, not stale 1500
+    ASSERT_EQ(rd.zone, 0);          // Must be reset to safe default
+}
+
 #endif // SENSOR_TYPE == SENSOR_TYPE_TFMINI
 
 /* ---- Main --------------------------------------------------------------- */
@@ -1652,6 +1702,8 @@ int main() {
     test_tfmini_multiple_corrupt_recovery();
     test_tfmini_strength_at_threshold();
     test_tfmini_min_range_clamping();
+    test_tfmini_overflow_large_distance();
+    test_tfmini_timeout_clears_distance();
     // buildCommand is shared (NLink protocol) — also test here
     test_build_command_range_mode();
     test_build_command_save_config();
