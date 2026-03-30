@@ -518,14 +518,11 @@ void setup() {
     //   TX = NOT CONNECTED (sensor RX not wired to ESP32 TX)
     //
     // READ-ONLY MODE: The sensor's RX pin is not connected to the ESP32's
-    // TX, so no NLink configuration commands can reach the sensor.
-    // The driver parses multi-pixel frames (400 bytes, 0x57 0x01, 64 pixels)
-    // and uses the minimum valid-pixel distance as the obstacle reading.
-    // To configure the sensor, use the NAssistant PC tool.
+    // TX, so no configuration commands can reach the sensor.
+    // Config defaults are selected at compile time based on SENSOR_TYPE.
     {
         obstacle_sensor::Config obsCfg;
-        obsCfg.txPin          = -1;     // TX not connected — read-only
-        obsCfg.maxRangeMm     = 4000;   // TOFSense-M max range = 4 m
+        obsCfg.txPin = -1;   // TX not connected — read-only
         obstacle_sensor::init(obsCfg);
     }
 
