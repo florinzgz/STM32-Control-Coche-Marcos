@@ -79,6 +79,17 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-275 (GitHub) — fix(sensor): TF-Mini Plus uint16 overflow guard and stale data clearing on timeout
+- **Fecha:** 2026-03-30
+- **Autor:** Copilot
+- **Descripción del cambio:** Auditoría profunda del parser TF-Mini Plus encontró dos bugs edge-case reales (overflow uint16 en conversión cm→mm y datos stale tras timeout). Además, se añadió soporte dual de sensor (TOFSense-M y TF-Mini Plus) seleccionable en compile-time, flag de habilitación del sensor, y documentación de interfaz común.
+- **Root cause:** (1) `distCm * 10` se computaba como `uint16_t`, wrapping silenciosamente para valores >6553 cm (e.g., `6554 * 10 = 65540` trunca a `4`). Esto creaba una lectura de emergencia falsa con `healthy=true`. (2) En timeout de frame, `status` y `healthy` se limpiaban pero `distance_mm` y `zone` retenían sus últimos valores válidos. Frames CAN 0x208 llevarían distancia stale con `health=0`.
+- **Solución aplicada:** (1) Cast intermedio a `uint32_t` con guarda: `uint32_t distMm = (uint32_t)distCm * 10u; if (distMm > UINT16_MAX) return false;`. (2) Timeout ahora limpia `distance_mm = 0` y `zone = 0` (zone 0 = "far/normal", correcto para sensor desconectado). (3) Flag `OBSTACLE_SENSOR_ENABLED` (default 0) para deshabilitar toda la lógica UART/parsing cuando no hay sensor. (4) Selección de sensor vía `SENSOR_TYPE` (TOFSENSE=0, TFMINI=1, default TFMINI). (5) Nuevo archivo `distance_sensor.h` con guía de integración TF-Mini Plus. (6) Simplificación de `main.cpp`: config defaults por `SENSOR_TYPE` en vez de hardcoded.
+- **Impacto en el sistema:** Eliminados dos edge-cases de seguridad en el parser TF-Mini Plus. Estado INVALID ahora es completamente consistente (distance=0, zone=0, healthy=false, status=INVALID). Soporte dual de sensor preparado para intercambio de hardware.
+- **Archivos modificados:** `esp32/src/sensors/obstacle_sensor.cpp`, `esp32/src/sensors/obstacle_sensor.h`, `esp32/src/sensors/distance_sensor.h` (nuevo), `esp32/src/main.cpp`, `esp32/src/test_obstacle_sensor.cpp`
+- **Tests:** `test_tfmini_overflow_large_distance` (boundary 6553/6554 cm), `test_tfmini_timeout_clears_distance` (verifica distance y zone a 0 tras timeout), `test_tfmini_header_byte_in_distance` (0x5959 rechazado por overflow guard). TF-Mini Plus: 74 tests, TOFSense-M: 135 tests.
+- **Próximos pasos:** Verificar en hardware con TF-Mini Plus conectado. Verificar que CAN 0x208 reporta `health=0, status=INVALID` correctamente cuando el sensor está desconectado.
+
 ### PR-277 — fix(can): two-phase error-passive recovery (never give up)
 - **Fecha:** 2026-03-29
 - **Autor:** Copilot
@@ -356,6 +367,12 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 25. **CAN TX non-blocking**: Todos los `ESP32Can.writeFrame()` deben usar `timeout=0`. El timeout por defecto de 1000 ms bloquea el loop cuando la cola TX está llena (bus muerto/error-passive).
 26. **Render blocking threshold**: `RENDER_BLOCKING_THRESHOLD_US = 35000` (35 ms) para Core 0. TFT SPI ~22–28 ms es normal. `BLOCKING_THRESHOLD_US = 4000` (4 ms) para CAN/UI/loop en Core 1.
 
+### Sensor de Obstáculos (ESP32)
+27. **Sensor type selection**: `SENSOR_TYPE` en `obstacle_sensor.h` — `SENSOR_TYPE_TOFSENSE=0` (921600 baud, 400B frames), `SENSOR_TYPE_TFMINI=1` (115200 baud, 9B frames). Default: TFMINI.
+28. **Sensor enable flag**: `OBSTACLE_SENSOR_ENABLED` en `obstacle_sensor.h` — `0` = deshabilitado (sin UART, sin buffers, sin CPU), `1` = habilitado. Default: 0 (sensor no conectado actualmente).
+29. **TF-Mini Plus overflow guard**: Conversión cm→mm usa `uint32_t` intermedio + guarda `> UINT16_MAX`. Valores >6553 cm se rechazan como inválidos (retorna `false`).
+30. **Timeout limpia estado completo**: En timeout de frame, `distance_mm = 0`, `zone = 0`, `healthy = false`, `status = INVALID`. Nunca se envían datos stale por CAN.
+
 ---
 
 ## 6. Historial de Cambios
@@ -380,3 +397,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **CI cppcheck fix** — Supresión inline de falsos positivos `duplicateAssignExpression` en lecturas triples CCCR + `--inline-suppr` | #275 |
 | 2026-03-29 | **Obstacle sensor reliability** — UART RX buffer 1024→4096, resync 0x57+0x01, MAX_BYTES_PER_UPDATE 800→1600, render blocking threshold 4→35 ms, uartHWM diag | #276 |
 | 2026-03-29 | **CAN error-passive bifásica** — Recovery no abandona tras 10 intentos: fase rápida (10×3s) + fase lenta (ilimitado×30s) | #277 |
+| 2026-03-30 | **TF-Mini Plus overflow + stale data fix** — uint16 overflow guard en cm→mm, timeout limpia distance/zone, soporte dual sensor (TOFSense-M/TF-Mini Plus), flag OBSTACLE_SENSOR_ENABLED, distance_sensor.h | #275 (GitHub) |
