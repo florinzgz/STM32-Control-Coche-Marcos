@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-02-22
+> Last updated: 2026-03-30
 
 ---
 
@@ -81,7 +81,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
 | ESP32 heartbeat transmission (0x011 every 100 ms) | Logic in `loop()` | `esp32/src/main.cpp` |
 | Command ACK tracking (non-blocking, 200 ms timeout) | `ackBeginWait()`, `ackCheck()` | `esp32/src/main.cpp` |
-| Obstacle sensor driver (TOFSense-M LiDAR, GPIO 18 UART1 RX, 921600 bps, 5-zone mapping) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle sensor driver (TOFSense-M / TF-Mini Plus, GPIO 18 UART1 RX, compile-time SENSOR_TYPE, 5-zone mapping, uint16 overflow guard) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
 | Obstacle CAN TX (0x208 at 66 ms, DLC 5 with rolling counter) | `can_obstacle` namespace | `esp32/src/can/can_obstacle.cpp` |
 | Obstacle boot indicator (WAITING/VALID/INVALID status) | `ObstacleIndicator` | `esp32/src/hmi/obstacle_indicator.cpp` |
 | Gear shifter input (MCP23017 I2C, GPIO 8/9, P/R/N/D1/D2) | `shifter` namespace | `esp32/src/shifter_input.cpp` |
@@ -288,7 +288,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-4 one-hot, P/R/N/D1/D2) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
 | Centralized touch handler (TAP/LONG_PRESS/RELEASE, 200 ms debounce) | `touch::init()`, `touch::update()`, `touch::getEvent()` | `esp32/src/touch_handler.cpp` |
 | NVS config store (CRC32 validated, driveMode/brightness/LED/volume, dirty-flag deferred writes) | `config_store::init()`, `config_store::save()`, `config_store::flush()` | `esp32/src/config_store.cpp` |
-| TOFSense-M obstacle sensor (GPIO 18 UART1 RX, 921600 bps, 5-zone mapping, stuck detection) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle sensor multi-type driver (TOFSense-M 921600 bps / TF-Mini Plus 115200 bps, GPIO 18 UART1 RX, compile-time SENSOR_TYPE, 5-zone mapping, stuck detection, uint16 overflow guard, stale data clearing on timeout) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle sensor enable/disable flag (OBSTACLE_SENSOR_ENABLED=0 disables all UART/parsing, safe defaults) | `OBSTACLE_SENSOR_ENABLED` compile flag | `esp32/src/sensors/obstacle_sensor.h` |
+| Distance sensor common interface documentation (TF-Mini Plus integration guide) | N/A (header doc) | `esp32/src/sensors/distance_sensor.h` |
 | Obstacle CAN TX (0x208 DLC 5 at 66 ms + 0x209 DLC 4 at 100 ms) | `can_obstacle::init()`, `can_obstacle::update()` | `esp32/src/can/can_obstacle.cpp` |
 | Power manager (ignition key GPIO 40/41, OFF→RUNNING→SHUTTING_DOWN) | `power_mgr::init()`, `power_mgr::update()` | `esp32/src/power_manager.cpp` |
 
@@ -384,6 +386,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **NVS writes are deferred with dirty flag** — setters mark config dirty; `flush()` persists every 10 s and on shutdown. NVS ~100K cycle limit still applies but writes are batched | `dirty_` flag + `flush()` in `config_store.cpp`; periodic call in `main.cpp` | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 | **Service mode state is RAM-only (by design)** — module enable/disable settings reset to all-enabled on every power cycle, which is the safe default. ESP32-S3 handles all user-facing persistence via NVS. | `module_enabled[]` is static array, defaults to all-enabled | `Core/Src/service_mode.c` |
 | **Encoder reader module is observation-only** — `encoder_reader.c` provides raw count access and CAN diagnostics but is not connected to any control, odometry, speed, traction, braking, or steering logic | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
+| **Obstacle sensor disabled by default** — `OBSTACLE_SENSOR_ENABLED=0` in `obstacle_sensor.h`. No UART configured, no buffers allocated, `update()` is no-op, `getReading()` returns INVALID with safe defaults (distance=0, zone=0, healthy=false). Set to 1 and select `SENSOR_TYPE` to re-enable. | `OBSTACLE_SENSOR_ENABLED` flag, `SENSOR_TYPE` flag | `esp32/src/sensors/obstacle_sensor.h` |
+| **TF-Mini Plus max measurable distance is 6553 cm** — values >6553 cm cause `distCm * 10 > UINT16_MAX` and are rejected as invalid by the overflow guard. Sensor datasheet max is 12 m (1200 cm), so this is not a practical limitation. | `parseTfMiniFrame()` overflow guard | `esp32/src/sensors/obstacle_sensor.cpp` |
 
 ---
 
@@ -521,7 +525,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 ## 6) MIGRATION STATUS REPORT
 
-> Last updated: 2026-02-22
+> Last updated: 2026-03-30
 > Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
 > Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
 
@@ -544,7 +548,7 @@ The percentage is derived from a weighted analysis of all subsystems in the orig
 | **Sensor Management** | HIGH | `current.cpp`, `temperature.cpp`, `wheels.cpp`, `pedal.cpp` | INA226×6, DS18B20×5, wheel×4, pedal ADC, encoder | ✅ Reimplemented | 100% |
 | **CAN Communication** | CRITICAL | Did not exist (monolithic) | Full protocol (24 message types, frozen contract v1.3) | ✅ New | 100% |
 | **Gear System** | HIGH | `shifter.cpp` via MCP23017 | P/R/N/D1/D2 speed-gated + ESP32 MCP23017 shifter | ✅ Improved | 100% |
-| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | TOFSense-M LiDAR on ESP32 (UART1) + 5-zone CAN backstop on STM32 | ✅ Reimplemented | 100% |
+| **Obstacle Detection** | HIGH | `obstacle_detection.cpp` (LiDAR) | Dual-sensor (TOFSense-M / TF-Mini Plus) on ESP32 (UART1, compile-time SENSOR_TYPE) + 5-zone CAN backstop on STM32. uint16 overflow guard, stale data clearing. | ✅ Reimplemented | 100% |
 | **Service Mode** | MEDIUM | Did not exist | 25 modules, CAN commands, factory restore | ✅ New | 100% |
 | **Display / HMI** | MEDIUM | `hud.cpp` (68 KB), compositor, gauges, icons | 6 screens, 12 UI widgets, partial-redraw, 20 FPS, gear + mode display | ✅ Reimplemented | 95% |
 | **Hidden Engineering Menu** | LOW | `menu_hidden.cpp` (46 KB) | Engineering screen (code 8989, 5 submenus, EXIT) | ✅ Reimplemented | 85% |
