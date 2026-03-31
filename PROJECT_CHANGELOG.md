@@ -79,6 +79,17 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-278 — fix(fdcan): adaptive CCCR readback poll replaces fixed-count stabilisation loop
+- **Fecha:** 2026-03-31
+- **Autor:** Copilot
+- **Descripción del cambio:** Reemplaza el bucle volátil de 3200 iteraciones en `HAL_FDCAN_MspInit` por un poll adaptativo de CCCR con timeout de 50 ms (SysTick). Añade verificación readback de FDCANSEL tras re-aplicación.
+- **Root cause:** En algunas revisiones de silicio STM32G4, tras `__HAL_RCC_FDCAN_FORCE_RESET()`, el clock gate del periférico necesita más tiempo del previsto para estabilizarse. El bucle fijo de 3200 iteraciones (~113 µs) era insuficiente: CCCR retornaba datos basura estables del pipeline de instrucciones AHB (e.g. `0x08007bc9`, valor próximo a LR/PC en flash). Además, la primera escritura a `RCC_CCIPR.FDCANSEL` tras force-reset podía no latchar en algunas revisiones.
+- **Solución aplicada:** (1) Poll adaptativo: lee CCCR repetidamente hasta que bits reservados [31:16] sean cero (periférico respondiendo), con timeout de 50 ms vía `HAL_GetTick()`. (2) Readback de FDCANSEL: tras `__HAL_RCC_FDCAN_CONFIG(PCLK1)`, lee `RCC_CCIPR` para verificar que el valor latchó; si no, re-aplica con barrera adicional.
+- **Impacto en el sistema:** Mayor resiliencia en inicialización FDCAN en revisiones de silicio con clock gate lento. El poll adaptativo se adapta automáticamente al tiempo necesario en vez de depender de una estimación fija.
+- **Archivos modificados:** `Core/Src/stm32g4xx_hal_msp.c`
+- **Tests:** 455 unit tests pasados (sin cambio funcional en paths testados). Validación completa requiere hardware con SWD.
+- **Próximos pasos:** Verificar en hardware que CCCR retorna valores válidos tras el poll y que `can_init_diag.hal_init == 0` en todas las condiciones de arranque (cold boot, watchdog reset, power glitch).
+
 ### PR-275 (GitHub) — fix(sensor): TF-Mini Plus uint16 overflow guard and stale data clearing on timeout
 - **Fecha:** 2026-03-30
 - **Autor:** Copilot
@@ -398,3 +409,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **Obstacle sensor reliability** — UART RX buffer 1024→4096, resync 0x57+0x01, MAX_BYTES_PER_UPDATE 800→1600, render blocking threshold 4→35 ms, uartHWM diag | #276 |
 | 2026-03-29 | **CAN error-passive bifásica** — Recovery no abandona tras 10 intentos: fase rápida (10×3s) + fase lenta (ilimitado×30s) | #277 |
 | 2026-03-30 | **TF-Mini Plus overflow + stale data fix** — uint16 overflow guard en cm→mm, timeout limpia distance/zone, soporte dual sensor (TOFSense-M/TF-Mini Plus), flag OBSTACLE_SENSOR_ENABLED, distance_sensor.h | #275 (GitHub) |
+| 2026-03-31 | **FDCAN MspInit adaptive poll** — Reemplaza bucle volátil 3200 iter por poll CCCR adaptativo (50 ms timeout) + verificación readback FDCANSEL | #278 |

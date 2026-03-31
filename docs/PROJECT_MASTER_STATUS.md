@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-03-30
+> Last updated: 2026-03-31
 
 ---
 
@@ -525,7 +525,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 ## 6) MIGRATION STATUS REPORT
 
-> Last updated: 2026-03-30
+> Last updated: 2026-03-31
 > Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
 > Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
 
