@@ -69,22 +69,40 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
      * PCLK1 here ensures the bit-timing registers produce the
      * intended 500 kbps baud rate (170 MHz / 10 / 34 = 500k).       */
     __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
-    /* Ensure all RCC writes are visible before HAL_FDCAN_Init()
-     * accesses the FDCAN CCCR register.  Without this barrier the
-     * store to APB1ENR1 / CCIPR may still be in the write buffer
-     * when the first CCCR read executes, returning garbage.          */
+    /* Ensure all RCC writes are visible before reading back CCIPR.   */
     __DSB();
+    /* Verify FDCANSEL latched — re-apply once if the first write did
+     * not stick.  On some G4 silicon revisions the force-reset can
+     * leave RCC_CCIPR in a transient state where the first write to
+     * FDCANSEL is lost.                                               */
+    if (__HAL_RCC_GET_FDCAN_SOURCE() != RCC_FDCANCLKSOURCE_PCLK1) {
+        __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
+        __DSB();
+    }
     __ISB();
-    /* Brief stabilisation delay for the FDCAN peripheral clock gate.
-     * On some STM32G4 revisions the clock gate needs additional APB1
-     * cycles after reset release before register reads return valid
-     * values.  At 170 MHz, 3200 iterations ≈ 19 µs — well above the
-     * minimum 2-cycle requirement, providing substantial margin
-     * against bus-bridge pipeline latency.  Previous value of 32
-     * (~190 ns) was insufficient on some silicon revisions, causing
-     * CCCR reads to return garbage (e.g. 0x8007aa5).                  */
-#define FDCAN_CLK_STABILISE_ITERS  3200U
-    for (volatile uint32_t i = 0; i < FDCAN_CLK_STABILISE_ITERS; i++) { /* stabilise */ }
+    /* Wait for the FDCAN peripheral clock gate to stabilise by
+     * polling CCCR until reserved bits [31:16] read zero — meaning
+     * the peripheral is clocked and responding with real register
+     * data.  This replaces the previous fixed-count volatile loop
+     * (3200 iterations) which was insufficient on some silicon
+     * revisions: CCCR returned stable garbage (e.g. 0x08007bc9,
+     * stale AHB instruction-pipeline data) because the clock gate
+     * had not fully propagated through the bus bridge.
+     *
+     * The poll is adaptive: it returns as soon as the peripheral
+     * responds.  A 50 ms SysTick-based timeout prevents an infinite
+     * loop on hardware failure.  SysTick is active here because
+     * HAL_Init() configures it before MX_FDCAN1_Init() is called.   */
+#define FDCAN_CLK_READY_TIMEOUT_MS  50U
+    {
+        uint32_t msp_start = HAL_GetTick();
+        while ((HAL_GetTick() - msp_start) < FDCAN_CLK_READY_TIMEOUT_MS) {
+            uint32_t cccr = hfdcan->Instance->CCCR;
+            if ((cccr & 0xFFFF0000U) == 0U) {
+                break;  /* Reserved bits zero — peripheral responding */
+            }
+        }
+    }
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
     /* PA11 = FDCAN1_RX (CN10 pin 14)
