@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-279 — fix(esp32/can): TWAI clk_src zeroed by memset — CAN bus inoperative
+- **Fecha:** 2026-04-02
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrige bug crítico en la inicialización TWAI del ESP32 que impedía toda comunicación CAN entre la ESP32-S3 y la STM32.
+- **Root cause:** `twaiInit()` usaba `memset(&t_config, 0, sizeof(t_config))` para inicializar `twai_timing_config_t`. En ESP-IDF ≥ 5.0 este struct contiene un campo `clk_src` (clock source) cuyo valor por defecto (`TWAI_CLK_SRC_DEFAULT = SOC_MOD_CLK_APB`) NO es cero. El `memset` ponía `clk_src = 0`, lo que hacía que `twai_driver_install()` fallara con `ESP_ERR_INVALID_ARG` (reloj inválido) o seleccionara un reloj incorrecto (e.g. CPU @ 240 MHz en vez de APB @ 80 MHz), produciendo un baud rate de 1500 kbps en vez de 500 kbps — incompatible con el FDCAN del STM32.
+- **Solución aplicada:** Reemplazar `memset` por inicialización con macro `TWAI_TIMING_CONFIG_500KBITS()` (que configura `clk_src` correctamente en todas las versiones de ESP-IDF), y después sobreescribir los campos de timing personalizados (brp=10, tseg_1=13, tseg_2=2, sjw=2) para mantener el sample point de 87.5% que empareja con el 88.2% del STM32.
+- **Impacto en el sistema:** Restaura la comunicación CAN entre ESP32-S3 y STM32. Sin este fix, NINGÚN frame CAN podía intercambiarse entre las dos placas.
+- **Archivos modificados:** `esp32/src/main.cpp`
+- **Tests:** Integrity checks pasados. Validación completa requiere hardware (ESP32-S3 + STM32 + 2× TJA1051T/3).
+
 ### PR-278 — fix(fdcan): adaptive CCCR readback poll replaces fixed-count stabilisation loop
 - **Fecha:** 2026-03-31
 - **Autor:** Copilot
@@ -410,3 +420,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-29 | **CAN error-passive bifásica** — Recovery no abandona tras 10 intentos: fase rápida (10×3s) + fase lenta (ilimitado×30s) | #277 |
 | 2026-03-30 | **TF-Mini Plus overflow + stale data fix** — uint16 overflow guard en cm→mm, timeout limpia distance/zone, soporte dual sensor (TOFSense-M/TF-Mini Plus), flag OBSTACLE_SENSOR_ENABLED, distance_sensor.h | #275 (GitHub) |
 | 2026-03-31 | **FDCAN MspInit adaptive poll** — Reemplaza bucle volátil 3200 iter por poll CCCR adaptativo (50 ms timeout) + verificación readback FDCANSEL | #278 |
+| 2026-04-02 | **TWAI clk_src fix** — `memset` zeroed `clk_src` field in ESP-IDF 5.x → CAN bus inoperative. Replaced with `TWAI_TIMING_CONFIG_500KBITS()` macro init | #279 |

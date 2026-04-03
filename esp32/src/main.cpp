@@ -10,7 +10,7 @@
 
 #include <Arduino.h>
 #include <climits>
-#include <cstring>
+
 #include <esp_system.h>
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
@@ -416,8 +416,16 @@ static bool twaiInit() {
     g_config.rx_queue_len = 5;
     g_config.tx_queue_len = 5;
 
-    twai_timing_config_t t_config;
-    memset(&t_config, 0, sizeof(t_config));
+    /* Start from the standard 500 kbps macro so that clk_src (and
+     * quanta_resolution_hz on ESP-IDF ≥ 5.x) are initialised to the
+     * correct platform defaults.  The previous memset(&t_config,0,...)
+     * zeroed clk_src, which is NOT TWAI_CLK_SRC_DEFAULT on ESP-IDF 5.x
+     * — causing twai_driver_install() to fail or to select the wrong
+     * clock, producing a baud-rate mismatch with the STM32 FDCAN.
+     *
+     * We then override brp/tseg/sjw to achieve an 87.5 % sample point
+     * (CiA 301 recommended) that closely matches the STM32's 88.2 %. */
+    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
     t_config.brp            = 10;
     t_config.tseg_1         = 13;
     t_config.tseg_2         = 2;
