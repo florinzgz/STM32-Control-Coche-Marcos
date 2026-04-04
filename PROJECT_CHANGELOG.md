@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### Current PR — audit(system): Full-system CAN validation audit + ESP32 CAN RX diagnostics
+- **Fecha:** 2026-04-04
+- **Autor:** Copilot
+- **Descripción del cambio:** Auditoría completa del sistema dual-MCU (STM32 FDCAN + ESP32 TWAI). Análisis exhaustivo de firmware, protocolo CAN y procedimientos de validación hardware. Corrección de documentación DLC y adición de diagnósticos CAN RX.
+- **Root cause identificado:** El firmware CAN es correcto y production-ready en ambos MCU. El fallo "waiting for CAN" es causado por problemas hardware: (P1) Pin 8 Rs del SN65HVD230 no conectado a GND, (P2) falta de GND común entre MCUs, (P3) terminación incorrecta.
+- **Solución aplicada:** (1) Corrección de documentación STATUS_SAFETY DLC 3→5 en `can_ids.h`. (2) Adición de logging diagnóstico CAN RX en `can_rx.cpp`: primeros 10 frames recibidos con ID/DLC/datos + contador periódico cada 10s. (3) Documento de auditoría completo `docs/FULL_SYSTEM_VALIDATION_AUDIT.md` con root cause analysis, checklist de validación hardware, y estado final por subsistema.
+- **Impacto en el sistema:** Mejora diagnósticos para identificar fallos hardware CAN. Sin cambio funcional en paths de control.
+- **Archivos modificados:** `esp32/include/can_ids.h`, `esp32/src/can_rx.cpp`, `docs/FULL_SYSTEM_VALIDATION_AUDIT.md`, `PROJECT_CHANGELOG.md`, `docs/PROJECT_MASTER_STATUS.md`
+- **Tests:** STM32 build con `-Wall -Wextra -Werror` pasa sin errores. Sin cambios en código STM32.
+
 ### PR-279 — fix(esp32/can): TWAI clk_src zeroed by memset — CAN bus inoperative
 - **Fecha:** 2026-04-02
 - **Autor:** Copilot
@@ -421,3 +431,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-30 | **TF-Mini Plus overflow + stale data fix** — uint16 overflow guard en cm→mm, timeout limpia distance/zone, soporte dual sensor (TOFSense-M/TF-Mini Plus), flag OBSTACLE_SENSOR_ENABLED, distance_sensor.h | #275 (GitHub) |
 | 2026-03-31 | **FDCAN MspInit adaptive poll** — Reemplaza bucle volátil 3200 iter por poll CCCR adaptativo (50 ms timeout) + verificación readback FDCANSEL | #278 |
 | 2026-04-02 | **TWAI clk_src fix** — `memset` zeroed `clk_src` field in ESP-IDF 5.x → CAN bus inoperative. Replaced with `TWAI_TIMING_CONFIG_500KBITS()` macro init | #279 |
+| 2026-04-04 | **Full-system CAN audit** — Comprehensive firmware + protocol audit, CAN RX diagnostics, DLC doc fix, hardware validation checklist, root cause analysis | Current PR |

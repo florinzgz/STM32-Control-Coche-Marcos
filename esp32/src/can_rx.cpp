@@ -177,12 +177,39 @@ static void decodeLights(const CanFrame& f, vehicle::VehicleData& data) {
 }
 
 // -------------------------------------------------------------------------
+// Debug: RX frame counter and first-frame logging
+// -------------------------------------------------------------------------
+static uint32_t rxFrameCount  = 0;  // Total CAN frames received since boot
+static uint32_t lastRxLogMs   = 0;  // Timestamp of last periodic RX log
+
+// Log the first CAN_RX_DEBUG_FIRST_N frames after boot for diagnostics
+static constexpr uint32_t CAN_RX_DEBUG_FIRST_N = 10;
+
+// Periodic RX statistics log interval (ms)
+static constexpr uint32_t CAN_RX_STATS_INTERVAL_MS = 10000;
+
+// -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
 
 void poll(vehicle::VehicleData& data) {
     CanFrame frame;
     while (ESP32Can.readFrame(frame, 0)) {
+        ++rxFrameCount;
+
+        // Debug: log first N received frames so the serial console shows
+        // CAN bus activity (or lack thereof) immediately after power-on.
+        if (rxFrameCount <= CAN_RX_DEBUG_FIRST_N) {
+            Serial.printf("[CAN-RX] #%lu ID=0x%03lX DLC=%u data=[",
+                          (unsigned long)rxFrameCount,
+                          (unsigned long)frame.identifier,
+                          (unsigned)frame.data_length_code);
+            for (uint8_t i = 0; i < frame.data_length_code && i < 8; ++i) {
+                Serial.printf("%s%02X", i ? " " : "", frame.data[i]);
+            }
+            Serial.println("]");
+        }
+
         switch (frame.identifier) {
             case can::HEARTBEAT_STM32:  decodeHeartbeat(frame, data);      break;
             case can::STATUS_SPEED:     decodeSpeed(frame, data);          break;
@@ -203,6 +230,14 @@ void poll(vehicle::VehicleData& data) {
                 // Unknown CAN ID — silently ignored
                 break;
         }
+    }
+
+    // Periodic RX statistics log (every CAN_RX_STATS_INTERVAL_MS)
+    unsigned long now = millis();
+    if (now - lastRxLogMs >= CAN_RX_STATS_INTERVAL_MS) {
+        lastRxLogMs = now;
+        Serial.printf("[CAN-RX] total_frames=%lu\n",
+                      (unsigned long)rxFrameCount);
     }
 }
 
