@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-04-02
+> Last updated: 2026-04-04
 
 ---
 
@@ -96,7 +96,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 
 ### CAN Communication
 
-- **Physical layer:** FDCAN1 on STM32 (PB8/PB9), ESP32-TWAI (GPIO4/GPIO5), 500 kbps Classic CAN
+- **Physical layer:** FDCAN1 on STM32 (PA11 RX / PA12 TX, AF9), ESP32-TWAI (GPIO4 TX / GPIO5 RX), 500 kbps Classic CAN, SN65HVD230 transceivers (3.3V)
 - **Protocol:** Standard 11-bit IDs, 8-byte max payload
 - **RX filtering:** STM32 accepts only known ESP32 IDs (0x011, 0x100–0x102, 0x110, 0x208–0x209) via FDCAN hardware filters; all other IDs rejected
 
@@ -525,7 +525,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 ## 6) MIGRATION STATUS REPORT
 
-> Last updated: 2026-04-02
+> Last updated: 2026-04-04
 > Reference: `FULL-FIRMWARE-Coche-Marcos` (ESP32-S3 monolithic, v2.18.3)
 > Current: `STM32-Control-Coche-Marcos` (STM32G474RE + ESP32-S3 dual-MCU)
 
