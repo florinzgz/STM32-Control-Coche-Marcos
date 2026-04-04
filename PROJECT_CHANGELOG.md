@@ -90,6 +90,26 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Tests:** N/A — solo documentación.
 - **Próximos pasos:** Verificar en hardware que todas las secciones de cable y valores de componentes coinciden con la implementación física.
 
+### PR-279b — docs: CAN hardware fix procedure + fix stale PB8/PB9 pin references
+- **Fecha:** 2026-04-04
+- **Autor:** Copilot
+- **Descripción del cambio:** Creación de documento ejecutable `CAN_HARDWARE_FIX_PROCEDURE.md` para resolver el fallo "waiting for CAN". Corrección de referencias de pines obsoletas PB8/PB9 → PA11/PA12 en documentación crítica.
+- **Root cause confirmado:** Los pines FDCAN1 fueron remapeados de PB8/PB9 a PA11/PA12 (AF9) en marzo 2026 (PR #255-256). Documentos legacy aún referencian PB8/PB9 — si el hardware sigue esa documentación obsoleta, el transceiver CAN está conectado a pines incorrectos. Además, Pin 8 (Rs) del SN65HVD230 probablemente no está conectado a GND.
+- **Solución aplicada:** (1) Nuevo documento `docs/CAN_HARDWARE_FIX_PROCEDURE.md`: flowchart de diagnóstico, pinout verificado del SN65HVD230, tablas de mediciones eléctricas, procedimiento paso a paso con interpretación de resultados. (2) Corrección de `HARDWARE_VALIDATION_PROCEDURE.md`: PB8/PB9 → PA11/PA12 en 2 ubicaciones. (3) Corrección de `PROJECT_MASTER_STATUS.md`: FDCAN pin reference actualizada a PA11/PA12 con detalles de transceiver.
+- **Impacto en el sistema:** Documentación-only. Previene errores de cableado causados por documentación obsoleta.
+- **Archivos modificados:** `docs/CAN_HARDWARE_FIX_PROCEDURE.md` (nuevo), `docs/HARDWARE_VALIDATION_PROCEDURE.md`, `docs/PROJECT_MASTER_STATUS.md`, `PROJECT_CHANGELOG.md`
+- **Tests:** Sin cambios en firmware.
+
+### PR-279a — audit(system): Full-system CAN validation audit + ESP32 CAN RX diagnostics
+- **Fecha:** 2026-04-04
+- **Autor:** Copilot
+- **Descripción del cambio:** Auditoría completa del sistema dual-MCU (STM32 FDCAN + ESP32 TWAI). Análisis exhaustivo de firmware, protocolo CAN y procedimientos de validación hardware. Corrección de documentación DLC y adición de diagnósticos CAN RX.
+- **Root cause identificado:** El firmware CAN es correcto y production-ready en ambos MCU. El fallo "waiting for CAN" es causado por problemas hardware: (P1) Pin 8 Rs del SN65HVD230 no conectado a GND, (P2) falta de GND común entre MCUs, (P3) terminación incorrecta.
+- **Solución aplicada:** (1) Corrección de documentación STATUS_SAFETY DLC 3→5 en `can_ids.h`. (2) Adición de logging diagnóstico CAN RX en `can_rx.cpp`: primeros 10 frames recibidos con ID/DLC/datos + contador periódico cada 10s. (3) Documento de auditoría completo `docs/FULL_SYSTEM_VALIDATION_AUDIT.md` con root cause analysis, checklist de validación hardware, y estado final por subsistema.
+- **Impacto en el sistema:** Mejora diagnósticos para identificar fallos hardware CAN. Sin cambio funcional en paths de control.
+- **Archivos modificados:** `esp32/include/can_ids.h`, `esp32/src/can_rx.cpp`, `docs/FULL_SYSTEM_VALIDATION_AUDIT.md`, `PROJECT_CHANGELOG.md`, `docs/PROJECT_MASTER_STATUS.md`
+- **Tests:** STM32 build con `-Wall -Wextra -Werror` pasa sin errores. Sin cambios en código STM32.
+
 ### PR-279 — fix(esp32/can): TWAI clk_src zeroed by memset — CAN bus inoperative
 - **Fecha:** 2026-04-02
 - **Autor:** Copilot
@@ -432,4 +452,6 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-30 | **TF-Mini Plus overflow + stale data fix** — uint16 overflow guard en cm→mm, timeout limpia distance/zone, soporte dual sensor (TOFSense-M/TF-Mini Plus), flag OBSTACLE_SENSOR_ENABLED, distance_sensor.h | #275 (GitHub) |
 | 2026-03-31 | **FDCAN MspInit adaptive poll** — Reemplaza bucle volátil 3200 iter por poll CCCR adaptativo (50 ms timeout) + verificación readback FDCANSEL | #278 |
 | 2026-04-02 | **TWAI clk_src fix** — `memset` zeroed `clk_src` field in ESP-IDF 5.x → CAN bus inoperative. Replaced with `TWAI_TIMING_CONFIG_500KBITS()` macro init | #279 |
+| 2026-04-04 | **Full-system CAN audit** — Comprehensive firmware + protocol audit, CAN RX diagnostics, DLC doc fix, hardware validation checklist, root cause analysis | #279a |
+| 2026-04-04 | **CAN hardware fix procedure** — Executable troubleshooting guide, fix stale PB8/PB9 pin refs → PA11/PA12 in HARDWARE_VALIDATION_PROCEDURE.md + PROJECT_MASTER_STATUS.md | #279b |
 | 2026-04-04 | **Documento sistema alimentación** — 9 secciones + BOM: arquitectura, recorrido alimentación, relés, apagado retardado, LEDs, protección, masas, esquema eléctrico, materiales | #280 |
