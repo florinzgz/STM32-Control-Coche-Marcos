@@ -79,6 +79,17 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-280 — docs: complete power supply system document (9 sections + BOM)
+- **Fecha:** 2026-04-04
+- **Autor:** Copilot
+- **Descripción del cambio:** Documento técnico completo del sistema de alimentación en `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md` con 9 secciones + 2 apéndices. Cubre arquitectura de alimentación (24V/12V/5V/3.3V), recorrido completo desde baterías hasta actuadores, integración de relés (MAIN/TRAC/DIR/LED), apagado retardado (3s retention relay + audio DFPlayer), alimentación LED WS2812B (relés CAN 0x120), protección eléctrica (fusibles, TVS, desacoplo, umbrales batería), distribución de masas (punto estrella), esquema eléctrico detallado (31 pines STM32, I2C, FDCAN 500 kbps), y lista de materiales completa (BOM).
+- **Root cause:** N/A — documento de diseño, no fix.
+- **Solución aplicada:** Consolidación de datos de firmware verificado (safety_system.c, can_handler.c, main.c, power_manager.cpp, audio_manager.cpp) y documentación existente (LLAVE_CONTACTO, POWER_DISTRIBUTION, CONEXIONES_COMPLETAS, HARDWARE_WIRING_MANUAL, MATERIALES_POR_MODULO) en un único documento de referencia.
+- **Impacto en el sistema:** Ningún cambio funcional. Documento de referencia para montaje, diagnóstico y mantenimiento del sistema de alimentación.
+- **Archivos modificados:** `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md` (nuevo), `PROJECT_CHANGELOG.md`, `docs/PROJECT_MASTER_STATUS.md`
+- **Tests:** N/A — solo documentación.
+- **Próximos pasos:** Verificar en hardware que todas las secciones de cable y valores de componentes coinciden con la implementación física.
+
 ### PR-279 — fix(esp32/can): TWAI clk_src zeroed by memset — CAN bus inoperative
 - **Fecha:** 2026-04-02
 - **Autor:** Copilot
@@ -421,3 +432,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-30 | **TF-Mini Plus overflow + stale data fix** — uint16 overflow guard en cm→mm, timeout limpia distance/zone, soporte dual sensor (TOFSense-M/TF-Mini Plus), flag OBSTACLE_SENSOR_ENABLED, distance_sensor.h | #275 (GitHub) |
 | 2026-03-31 | **FDCAN MspInit adaptive poll** — Reemplaza bucle volátil 3200 iter por poll CCCR adaptativo (50 ms timeout) + verificación readback FDCANSEL | #278 |
 | 2026-04-02 | **TWAI clk_src fix** — `memset` zeroed `clk_src` field in ESP-IDF 5.x → CAN bus inoperative. Replaced with `TWAI_TIMING_CONFIG_500KBITS()` macro init | #279 |
+| 2026-04-04 | **Documento sistema alimentación** — 9 secciones + BOM: arquitectura, recorrido alimentación, relés, apagado retardado, LEDs, protección, masas, esquema eléctrico, materiales | #280 |
