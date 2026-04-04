@@ -20,7 +20,7 @@
 |-----------|-----------|-------|
 | STM32G474RE Nucleo/custom board | USB (ST-Link) for serial monitor | Powers MCU via USB or external 24 V supply |
 | ESP32-S3 with ST7796 480×320 TFT display | SPI (display), CAN bus to STM32 | USB serial for ESP32 log output |
-| CAN bus wiring | STM32 PB8 (FDCAN1_RX) / PB9 (FDCAN1_TX) ↔ ESP32 GPIO4/GPIO5 | 500 kbps, 120 Ω termination resistors at both ends |
+| CAN bus wiring | STM32 PA11 (FDCAN1_RX) / PA12 (FDCAN1_TX) ↔ ESP32 GPIO4/GPIO5 via SN65HVD230 | 500 kbps, 120 Ω termination at both ends, Pin 8 (Rs) → GND |
 | CAN transceiver modules (×2) | One per MCU (e.g., SN65HVD230 or MCP2551) | Required for physical CAN signaling |
 | 4× traction motors with H-bridge drivers | TIM1 CH1–CH4 PWM outputs | Wheels must be off the ground or on a stand |
 | Steering motor with H-bridge driver | TIM8 CH3 PWM output | Connected to physical steering rack |
@@ -117,7 +117,7 @@
 
 **Procedure:**
 
-1. Disconnect the CAN transceiver from the STM32 (remove wiring from PB8/PB9).
+1. Disconnect the CAN transceiver from the STM32 (remove wiring from PA11/PA12).
 2. Power on the STM32.
 3. Observe via serial or SWD debugger that the system reaches the main loop.
 4. Verify the watchdog does not reset the system (no repeated resets in serial log).

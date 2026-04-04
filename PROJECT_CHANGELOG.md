@@ -79,7 +79,17 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
-### Current PR — audit(system): Full-system CAN validation audit + ESP32 CAN RX diagnostics
+### Current PR — docs: CAN hardware fix procedure + fix stale PB8/PB9 pin references
+- **Fecha:** 2026-04-04
+- **Autor:** Copilot
+- **Descripción del cambio:** Creación de documento ejecutable `CAN_HARDWARE_FIX_PROCEDURE.md` para resolver el fallo "waiting for CAN". Corrección de referencias de pines obsoletas PB8/PB9 → PA11/PA12 en documentación crítica.
+- **Root cause confirmado:** Los pines FDCAN1 fueron remapeados de PB8/PB9 a PA11/PA12 (AF9) en marzo 2026 (PR #255-256). Documentos legacy aún referencian PB8/PB9 — si el hardware sigue esa documentación obsoleta, el transceiver CAN está conectado a pines incorrectos. Además, Pin 8 (Rs) del SN65HVD230 probablemente no está conectado a GND.
+- **Solución aplicada:** (1) Nuevo documento `docs/CAN_HARDWARE_FIX_PROCEDURE.md`: flowchart de diagnóstico, pinout verificado del SN65HVD230, tablas de mediciones eléctricas, procedimiento paso a paso con interpretación de resultados. (2) Corrección de `HARDWARE_VALIDATION_PROCEDURE.md`: PB8/PB9 → PA11/PA12 en 2 ubicaciones. (3) Corrección de `PROJECT_MASTER_STATUS.md`: FDCAN pin reference actualizada a PA11/PA12 con detalles de transceiver.
+- **Impacto en el sistema:** Documentación-only. Previene errores de cableado causados por documentación obsoleta.
+- **Archivos modificados:** `docs/CAN_HARDWARE_FIX_PROCEDURE.md` (nuevo), `docs/HARDWARE_VALIDATION_PROCEDURE.md`, `docs/PROJECT_MASTER_STATUS.md`, `PROJECT_CHANGELOG.md`
+- **Tests:** Sin cambios en firmware.
+
+### Previous PR — audit(system): Full-system CAN validation audit + ESP32 CAN RX diagnostics
 - **Fecha:** 2026-04-04
 - **Autor:** Copilot
 - **Descripción del cambio:** Auditoría completa del sistema dual-MCU (STM32 FDCAN + ESP32 TWAI). Análisis exhaustivo de firmware, protocolo CAN y procedimientos de validación hardware. Corrección de documentación DLC y adición de diagnósticos CAN RX.
@@ -432,3 +442,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-03-31 | **FDCAN MspInit adaptive poll** — Reemplaza bucle volátil 3200 iter por poll CCCR adaptativo (50 ms timeout) + verificación readback FDCANSEL | #278 |
 | 2026-04-02 | **TWAI clk_src fix** — `memset` zeroed `clk_src` field in ESP-IDF 5.x → CAN bus inoperative. Replaced with `TWAI_TIMING_CONFIG_500KBITS()` macro init | #279 |
 | 2026-04-04 | **Full-system CAN audit** — Comprehensive firmware + protocol audit, CAN RX diagnostics, DLC doc fix, hardware validation checklist, root cause analysis | Current PR |
+| 2026-04-04 | **CAN hardware fix procedure** — Executable troubleshooting guide, fix stale PB8/PB9 pin refs → PA11/PA12 in HARDWARE_VALIDATION_PROCEDURE.md + PROJECT_MASTER_STATUS.md | Current PR |
