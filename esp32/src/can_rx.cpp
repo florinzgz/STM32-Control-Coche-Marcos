@@ -232,10 +232,11 @@ void poll(vehicle::VehicleData& data) {
         }
     }
 
-    // Periodic RX statistics log (every CAN_RX_STATS_INTERVAL_MS)
-    unsigned long now = millis();
-    if (now - lastRxLogMs >= CAN_RX_STATS_INTERVAL_MS) {
-        lastRxLogMs = now;
+    // Periodic RX statistics log (every CAN_RX_STATS_INTERVAL_MS).
+    // Unsigned subtraction handles millis() wrap-around (~49 days) correctly.
+    unsigned long nowMs = millis();
+    if (nowMs - lastRxLogMs >= CAN_RX_STATS_INTERVAL_MS) {
+        lastRxLogMs = nowMs;
         Serial.printf("[CAN-RX] total_frames=%lu\n",
                       (unsigned long)rxFrameCount);
     }
