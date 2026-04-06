@@ -13,7 +13,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "can_handler.h"
+#include "can_init_diag.h"
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */

@@ -48,19 +48,16 @@ The STM32 decides what is allowed. The ESP32 requests; the STM32 disposes.
 
 ### RX Filter Policy
 
-The STM32 accepts only white-listed CAN IDs. All other messages are rejected at the hardware filter level and never reach the application.
+The STM32 uses a single MASK-based accept-all hardware filter (mask = 0x000, all bits don't-care) that routes every standard CAN ID into RXFIFO0. Non-matching standard and extended IDs are also accepted into RXFIFO0 via `HAL_FDCAN_ConfigGlobalFilter()`. Remote frames are rejected at the hardware level.
 
-| Filter | Type | Accepted IDs | Destination |
-|--------|------|-------------|-------------|
-| 0 | Dual (exact match) | 0x011 (ESP32 heartbeat) | RXFIFO0 |
-| 1 | Range | 0x100 – 0x102 (ESP32 commands) | RXFIFO0 |
-| 2 | Range | 0x110 – 0x120 (service cmd 0x110 + LED cmd 0x120) | RXFIFO0 |
-| 3 | Range | 0x208 – 0x209 (ESP32 obstacle data) | RXFIFO0 |
-| Global | Reject | Everything else | Discarded |
+| Filter | Type | ID / Mask | Effect | Destination |
+|--------|------|-----------|--------|-------------|
+| 0 | Mask | ID=0x000, Mask=0x000 | Accept ALL standard 11-bit IDs | RXFIFO0 |
+| Global (std) | Accept | — | Non-matching standard IDs accepted | RXFIFO0 |
+| Global (ext) | Accept | — | Non-matching extended IDs accepted | RXFIFO0 |
+| Global (remote) | Reject | — | All remote frames rejected | Discarded |
 
-> **Note:** Filter 2 uses a range filter accepting all IDs 0x110–0x120. Intermediate IDs (0x111–0x11F) are not used by any module and are silently ignored by `CAN_ProcessMessages()`.
-
-Remote frames are rejected. Extended-ID frames are rejected.
+> **Note:** Filtering is performed in software by `CAN_ProcessMessages()`, which uses a switch/case on the received ID. Only known message IDs (0x011, 0x100–0x102, 0x110, 0x120, 0x208–0x209) trigger application logic; all other IDs are silently discarded. This accept-all hardware strategy ensures the FDCAN message-RAM filter element is always valid and the peripheral can leave INIT mode cleanly after `HAL_FDCAN_Start()`.
 
 Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 
