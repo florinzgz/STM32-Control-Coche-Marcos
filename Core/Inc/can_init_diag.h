@@ -34,6 +34,6 @@ typedef struct {
     uint32_t ccipr_raw;          /* Raw RCC_CCIPR snapshot for debugging */
 } CAN_InitDiag_t;
 
-extern CAN_InitDiag_t can_init_diag;
+extern volatile CAN_InitDiag_t can_init_diag;
 
 #endif /* CAN_INIT_DIAG_H */
