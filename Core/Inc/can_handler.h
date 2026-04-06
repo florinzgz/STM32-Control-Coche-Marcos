@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 #include "main.h"
+#include "can_init_diag.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -103,25 +104,9 @@ typedef struct {
     uint8_t  rec;               /* Receive Error Counter  (0-255)       */
 } CAN_Diag_t;
 
-/* FDCAN initialisation sequence diagnostics — readable via SWD debugger.
- * Populated once by CAN_Init(); never modified at runtime.
- * Each field stores the HAL return value (HAL_OK = 0) so the exact
- * step that failed can be identified without printf/UART.              */
-typedef struct {
-    uint8_t  hal_init;           /* HAL_FDCAN_Init          return value */
-    uint8_t  filter_global;      /* ConfigGlobalFilter      return value */
-    uint8_t  notify;             /* ActivateNotification    return value */
-    uint8_t  start;              /* HAL_FDCAN_Start         return value */
-    uint8_t  started;            /* 1 = FDCAN fully started, 0 = failed */
-    uint8_t  clk_ok;             /* 1 = FDCANSEL == PCLK1, 0 = wrong   */
-    uint8_t  cccr_init_ok;       /* 1 = CCCR.INIT cleared after start  */
-    uint8_t  clk_reapplied;      /* 1 = PCLK1 was re-applied by CAN_Init */
-    uint8_t  retries;            /* Number of full init retries used    */
-    uint8_t  timeout_flag;       /* 1 = CCCR poll timed out in MspInit */
-    uint8_t  msp_clk_ok;        /* 1 = APB1ENR1.FDCANEN verified in MspInit */
-    uint8_t  msp_ccipr_ok;      /* 1 = FDCANSEL==PCLK1 verified in MspInit */
-    uint32_t ccipr_raw;          /* Raw RCC_CCIPR snapshot for debugging */
-} CAN_InitDiag_t;
+/* CAN_InitDiag_t is defined in can_init_diag.h (included above) to allow
+ * stm32g4xx_hal_msp.c to record MspInit diagnostics without depending on
+ * the full CAN handler API.                                              */
 
 /* Function prototypes */
 void CAN_Init(void);
@@ -155,7 +140,6 @@ bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t    can_stats;
 extern CAN_Diag_t     can_diag;
-extern volatile CAN_InitDiag_t can_init_diag;
 extern FDCAN_HandleTypeDef hfdcan1;
 
 /* Debug-visible global CAN buffers (volatile for debugger inspection) */

@@ -244,7 +244,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 | Feature | Evidence | Files |
 |---|---|---|
-| FDCAN RX hardware filters (MASK accept-all, reject-all default) | `CAN_ConfigureFilters()` | `Core/Src/can_handler.c` |
+| FDCAN RX hardware filters (MASK accept-all (mask=0), non-matching IDs routed to FIFO0) | `CAN_ConfigureFilters()` | `Core/Src/can_handler.c` |
 | FDCAN init robustness (clock-before-enable, readback-verify, adaptive CCCR poll, 5 retries) | `HAL_FDCAN_MspInit()`, `MX_FDCAN1_Init()`, `CAN_Init()` | `Core/Src/stm32g4xx_hal_msp.c`, `Core/Src/main.c`, `Core/Src/can_handler.c` |
 | FDCAN init diagnostics (12 fields + ccipr_raw, SWD readable) | `CAN_InitDiag_t can_init_diag` | `Core/Inc/can_handler.h`, `Core/Src/can_handler.c` |
 | Heartbeat TX (0x001, alive counter + state + fault flags + error code + status_flags) | `CAN_SendHeartbeat()` | `Core/Src/can_handler.c` |
