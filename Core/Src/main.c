@@ -152,18 +152,23 @@ int main(void)
     MX_GPIO_Init();
 
     /* ---- Startup LED indication ----
-     * Three quick blinks on LD2 (PA5) confirm the firmware has booted
-     * and reached peripheral initialisation.  Pattern interpretation:
-     *   • No blink at all  → MCU not executing user code
-     *                        (check BOOT0 jumper or re-flash via ST-LINK)
-     *   • 3 blinks then slow blink → firmware crashed during a later MX_Init
-     *                          (Error_Handler ~2 Hz constant-blink pattern)
-     *   • 3 blinks then brief flash every ~2 s → firmware running normally */
+     * Three clearly-visible blinks on LD2 (PA5) confirm the firmware
+     * has booted and reached peripheral initialisation.
+     *
+     * Pattern interpretation (observe LD2 after plugging USB / reset):
+     *   • No blink at all     → MCU not executing user code
+     *                           (check BOOT0 jumper or re-flash via ST-LINK)
+     *   • 3 blinks then ~2 Hz → firmware crashed during a later MX_Init
+     *                           (Error_Handler constant-blink pattern)
+     *   • 3 blinks, pause, 1 long blink, then brief flash every ~2 s
+     *                         → firmware running normally, CAN init OK
+     *   • 3 blinks, pause, 5 rapid blinks, then brief flash every ~2 s
+     *                         → firmware running, but CAN init FAILED   */
     for (int k = 0; k < 3; k++) {
         HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-        HAL_Delay(60);
+        HAL_Delay(150);
         HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-        HAL_Delay(60);
+        HAL_Delay(150);
     }
 
     MX_ADC1_Init();
@@ -187,6 +192,32 @@ int main(void)
     SteeringCentering_Init();
     ErrorLog_Init();
     ErrorLog_SetResetCause(reset_cause);
+
+    /* ---- Post-init CAN status LED indication ----
+     * After all peripherals are initialised, show CAN init result on LD2:
+     *   • 1 long blink (400 ms)  → FDCAN initialised successfully
+     *   • 5 rapid blinks (80 ms) → FDCAN init failed (hardware issue)
+     * A 300 ms gap before the pattern separates it visually from the
+     * 3 boot blinks.  The total extra delay (≤ 1.1 s) is acceptable
+     * because IWDG timeout is ~4 s and CAN heartbeat hasn't started. */
+    HAL_Delay(300);  /* visual separator after 3 boot blinks */
+    {
+        if (fdcan_init_ok) {
+            /* CAN OK: one long blink */
+            HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+            HAL_Delay(400);
+            HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+            HAL_Delay(200);
+        } else {
+            /* CAN FAILED: 5 rapid blinks */
+            for (int k = 0; k < 5; k++) {
+                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+                HAL_Delay(80);
+                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+                HAL_Delay(80);
+            }
+        }
+    }
 
     /* ---- Persistent steering calibration ----
      * Attempt to restore the last known center position from flash.
