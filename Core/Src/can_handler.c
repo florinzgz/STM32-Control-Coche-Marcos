@@ -222,6 +222,12 @@ void CAN_Init(void) {
     esp32_hb_last_counter = 0xFFU;
     esp32_hb_same_count   = 0;
 
+    /* SAFETY FIX: Clear started flag early — will only be set to 1U
+     * at the very end if ALL steps succeed.  This ensures every
+     * failure path (explicit return or fall-through) leaves
+     * can_init_diag.started == 0U.                                    */
+    can_init_diag.started = 0U;
+
     /* Skip hardware activation if FDCAN peripheral init failed.
      * System continues without CAN — Safety_CheckCANTimeout() will
      * detect the missing heartbeat and keep the system in STANDBY.  */
@@ -300,6 +306,18 @@ void CAN_Init(void) {
         return;  /* Wrong kernel clock — CAN baud rate would be wrong */
     }
 
+    /* Verify APB1 clock is still enabled — belt-and-suspenders check.
+     * If the clock gate dropped since MspInit, all subsequent register
+     * accesses would return garbage.                                   */
+    if (!(RCC->APB1ENR1 & RCC_APB1ENR1_FDCANEN)) {
+        __HAL_RCC_FDCAN_CLK_ENABLE();
+        __DSB();
+        if (!(RCC->APB1ENR1 & RCC_APB1ENR1_FDCANEN)) {
+            fdcan_init_ok = false;
+            return;  /* Clock enable failed — hardware fault */
+        }
+    }
+
     /* Configure RX acceptance filters */
     CAN_ConfigureFilters();
 
@@ -335,7 +353,6 @@ void CAN_Init(void) {
 
     if (!can_init_diag.cccr_init_ok) {
         fdcan_init_ok = false;
-        can_init_diag.started = 0U;
         return;  /* Peripheral stuck in INIT — bus not operational */
     }
 

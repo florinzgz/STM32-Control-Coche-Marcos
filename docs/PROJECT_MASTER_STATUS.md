@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-04-04
+> Last updated: 2026-04-06
 
 ---
 
@@ -244,7 +244,9 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 | Feature | Evidence | Files |
 |---|---|---|
-| FDCAN RX hardware filters (4 filter banks, reject-all default) | `CAN_ConfigureFilters()` | `Core/Src/can_handler.c` |
+| FDCAN RX hardware filters (MASK accept-all, reject-all default) | `CAN_ConfigureFilters()` | `Core/Src/can_handler.c` |
+| FDCAN init robustness (clock-before-enable, readback-verify, adaptive CCCR poll, 5 retries) | `HAL_FDCAN_MspInit()`, `MX_FDCAN1_Init()`, `CAN_Init()` | `Core/Src/stm32g4xx_hal_msp.c`, `Core/Src/main.c`, `Core/Src/can_handler.c` |
+| FDCAN init diagnostics (12 fields + ccipr_raw, SWD readable) | `CAN_InitDiag_t can_init_diag` | `Core/Inc/can_handler.h`, `Core/Src/can_handler.c` |
 | Heartbeat TX (0x001, alive counter + state + fault flags + error code + status_flags) | `CAN_SendHeartbeat()` | `Core/Src/can_handler.c` |
 | Mode flags echo in heartbeat (status_flags byte 4: bit 1 = 4×4, bit 2 = tank turn, bits 3-5 = DS18B20 count) | `STATUS_FLAG_MODE_4X4`, `STATUS_FLAG_TANK_TURN` in heartbeat payload | `Core/Src/can_handler.c` |
 | Status TX: speed, current, temp, safety, steering, traction, temp map, battery | `CAN_SendStatus*()` family | `Core/Src/can_handler.c` |

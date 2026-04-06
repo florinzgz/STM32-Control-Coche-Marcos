@@ -684,7 +684,7 @@ static void MX_FDCAN1_Init(void)
      * the peripheral clock gate has not fully stabilised after a
      * force-reset (observed as CCCR reading garbage, e.g. 0x8007aa5).
      * A short delay followed by another attempt lets the bus bridge
-     * settle.  Five attempts with 5 ms spacing provide sufficient
+     * settle.  Five attempts with 10 ms spacing provide sufficient
      * margin even on STM32G4 revisions with slow clock-gate recovery. */
     #define FDCAN_INIT_MAX_RETRIES       5
     #define FDCAN_CLOCK_SETTLE_DELAY_MS  10U  /* Post-reset bus bridge settle */
@@ -697,8 +697,11 @@ static void MX_FDCAN1_Init(void)
     #define FDCAN_INITIAL_SETTLE_DELAY_MS  2U
     HAL_Delay(FDCAN_INITIAL_SETTLE_DELAY_MS);
 
+    can_init_diag.retries = 0U;
+
     for (int attempt = 0; attempt < FDCAN_INIT_MAX_RETRIES; attempt++) {
         if (attempt > 0) {
+            can_init_diag.retries = (uint8_t)attempt;
             HAL_FDCAN_DeInit(&hfdcan1);
             HAL_Delay(FDCAN_CLOCK_SETTLE_DELAY_MS);
         }
@@ -712,12 +715,12 @@ static void MX_FDCAN1_Init(void)
          * (16-31) must be zero.  If they are not, the peripheral is
          * not responding — register reads return bus-default garbage.
          *
-         * IMPORTANT: A single CCCR read is NOT sufficient.  When the
-         * FDCAN APB clock gate is unstable after force-reset, register
-         * reads return stale AHB bus data.  This garbage is random and
-         * can occasionally pass the bitmask checks.  Reading CCCR
-         * multiple times and comparing detects this: real register
-         * values are deterministic, stale bus data is not.            */
+         * IMPORTANT: Triple-read CCCR validation.  When the FDCAN APB
+         * clock gate is unstable after force-reset, register reads
+         * return stale AHB bus data.  This garbage is random and can
+         * occasionally pass the bitmask checks.  Reading CCCR three
+         * times and comparing detects this: real register values are
+         * deterministic, stale bus data is not.                       */
         // cppcheck-suppress duplicateAssignExpression
         uint32_t cccr1 = hfdcan1.Instance->CCCR;
         // cppcheck-suppress duplicateAssignExpression
