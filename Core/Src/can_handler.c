@@ -41,7 +41,10 @@ extern bool Startup_IsInhibited(void);
 extern FDCAN_HandleTypeDef hfdcan1;
 CAN_Stats_t    can_stats     = {0};
 CAN_Diag_t     can_diag      = {0};
-CAN_InitDiag_t can_init_diag = {0};
+/* volatile: written once at init, read only via SWD debugger — volatile
+ * ensures -O2 never optimises away the stores (same rationale as
+ * g_CAN_RxData / g_CAN_RxHeader / g_CAN_TxData below).                */
+volatile CAN_InitDiag_t can_init_diag = {0};
 
 /* Debug-visible global CAN buffers — volatile so the debugger always
  * reads them from RAM, not from an optimised-out register.            */

@@ -155,7 +155,7 @@ bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t    can_stats;
 extern CAN_Diag_t     can_diag;
-extern CAN_InitDiag_t can_init_diag;
+extern volatile CAN_InitDiag_t can_init_diag;
 extern FDCAN_HandleTypeDef hfdcan1;
 
 /* Debug-visible global CAN buffers (volatile for debugger inspection) */
