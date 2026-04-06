@@ -65,31 +65,38 @@ The initialization follows a strict 6-step sequence:
 
 #### Step 1: Configure Clock Source BEFORE Enabling Peripheral
 
-```
+```c
 __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
 __DSB();
-// Readback-verify; re-apply if first write didn't latch
+/* Readback-verify; re-apply if first write didn't latch */
+if (__HAL_RCC_GET_FDCAN_SOURCE() != RCC_FDCANCLKSOURCE_PCLK1) {
+    __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
+    __DSB();
+}
 ```
 
 Setting the kernel clock source **before** enabling the APB clock avoids any window where the peripheral gate is open with the wrong clock.
 
 #### Step 2: Enable APB1 Bus Clock
 
-```
+```c
 __HAL_RCC_FDCAN_CLK_ENABLE();
-// Readback-verify RCC->APB1ENR1 bit FDCANEN
+/* Readback-verify RCC->APB1ENR1 bit FDCANEN */
+if (!(RCC->APB1ENR1 & RCC_APB1ENR1_FDCANEN)) {
+    /* Clock enable failed — record in diagnostics */
+}
 ```
 
 The readback detects hardware faults where the clock enable doesn't take effect.
 
 #### Step 3: Robust Reset Sequence
 
-```
+```c
 __HAL_RCC_FDCAN_FORCE_RESET();
-__DSB(); __ISB();           // Full barrier — commit to bus
-__NOP() × 4;               // ≥4 AHB cycles for propagation
+__DSB(); __ISB();                    /* Full barrier — commit to bus */
+__NOP(); __NOP(); __NOP(); __NOP();  /* >=4 AHB cycles for propagation */
 __HAL_RCC_FDCAN_RELEASE_RESET();
-__DSB(); __ISB();           // Full barrier after release
+__DSB(); __ISB();                    /* Full barrier after release */
 ```
 
 After reset release:
@@ -99,10 +106,10 @@ After reset release:
 
 #### Step 4: Adaptive CCCR Poll (No Fixed Delays)
 
-```
-while ((HAL_GetTick() - start) < 50ms) {
-    if ((CCCR & 0xFFFF0000) == 0)   // Reserved bits zero?
-        break;                        // Peripheral is responding
+```c
+while ((HAL_GetTick() - start) < 50) {  /* 50 ms timeout */
+    if ((CCCR & 0xFFFF0000U) == 0U)     /* Reserved bits zero? */
+        break;                           /* Peripheral is responding */
 }
 ```
 

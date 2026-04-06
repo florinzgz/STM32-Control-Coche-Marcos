@@ -129,19 +129,22 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
 #define FDCAN_CLK_READY_TIMEOUT_MS  50U
     {
         uint32_t msp_start = HAL_GetTick();
+        uint8_t  cccr_ok   = 0U;
         can_init_diag.timeout_flag = 0U;
         while ((HAL_GetTick() - msp_start) < FDCAN_CLK_READY_TIMEOUT_MS) {
             uint32_t cccr = hfdcan->Instance->CCCR;
             if ((cccr & 0xFFFF0000U) == 0U) {
-                goto cccr_poll_ok;  /* Reserved bits zero — peripheral is live */
+                cccr_ok = 1U;  /* Reserved bits zero — peripheral is live */
+                break;
             }
         }
-        /* Timeout: peripheral did not respond within 50 ms.  Record
-         * the flag; caller (MX_FDCAN1_Init) will detect via CCCR
-         * triple-read validation and retry.                            */
-        can_init_diag.timeout_flag = 1U;
+        if (!cccr_ok) {
+            /* Timeout: peripheral did not respond within 50 ms.  Record
+             * the flag; caller (MX_FDCAN1_Init) will detect via CCCR
+             * triple-read validation and retry.                        */
+            can_init_diag.timeout_flag = 1U;
+        }
     }
-cccr_poll_ok:
 
     /* ================================================================
      * STEP 5: GPIO configuration for FDCAN1.
