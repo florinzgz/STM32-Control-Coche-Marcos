@@ -13,6 +13,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "can_handler.h"
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */
@@ -41,79 +42,124 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
   /* USER CODE BEGIN FDCAN1_MspInit 0 */
 
   /* USER CODE END FDCAN1_MspInit 0 */
-    __HAL_RCC_FDCAN_CLK_ENABLE();
-    /* Force-reset the FDCAN peripheral to clear stale error state.
-     * After a watchdog or abnormal reset the FDCAN registers may
-     * retain bus-off / CCCR.CSA flags, causing HAL_FDCAN_Init() to
-     * time out.  A peripheral reset via RCC clears all FDCAN
-     * registers to power-on defaults.                                */
-    __HAL_RCC_FDCAN_FORCE_RESET();
-    /* Ensure the reset assertion is committed to the APB1 bus before
-     * releasing it.  Without this barrier the back-to-back write to
-     * APB1RSTR1 may produce a reset pulse too short to fully clear
-     * the peripheral state on some STM32G4 revisions.                */
-    __DSB();
-    __NOP(); __NOP(); __NOP(); __NOP();  /* ≥4 AHB cycles for reset  */
-    __HAL_RCC_FDCAN_RELEASE_RESET();
-    /* Re-enable the APB1 bus clock after the force-reset.
-     * On some STM32G4 revisions the peripheral-reset pulse can leave
-     * the clock gate in an indeterminate state, causing subsequent
-     * register reads to return garbage (e.g. CCCR = 0x8007aa5).
-     * The read-back inside __HAL_RCC_FDCAN_CLK_ENABLE() also acts as
-     * a two-cycle stabilisation delay required by the bus bridge.    */
-    __HAL_RCC_FDCAN_CLK_ENABLE();
-    /* Re-apply FDCAN kernel clock source after the peripheral reset.
-     * On some STM32G4 silicon revisions the force-reset may affect
-     * RCC_CCIPR.FDCANSEL (clock source defaults to 00 = HSE, which
-     * is not available in this project — HSI + PLL).  Re-applying
-     * PCLK1 here ensures the bit-timing registers produce the
-     * intended 500 kbps baud rate (170 MHz / 10 / 34 = 500k).       */
+
+    /* ================================================================
+     * STEP 1: Force FDCAN kernel clock source to PCLK1 BEFORE enabling
+     * the peripheral clock.  After any reset FDCANSEL defaults to
+     * 00 = HSE which is NOT enabled in this project (HSI + PLL).
+     * Setting the source first avoids any window where the peripheral
+     * gate is open with the wrong (or absent) kernel clock.
+     * ================================================================ */
     __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
-    /* Ensure all RCC writes are visible before reading back CCIPR.   */
     __DSB();
-    /* Verify FDCANSEL latched — re-apply once if the first write did
-     * not stick.  On some G4 silicon revisions the force-reset can
-     * leave RCC_CCIPR in a transient state where the first write to
-     * FDCANSEL is lost.                                               */
+
+    /* Readback-verify FDCANSEL.  On some G4 revisions the first write
+     * after a system reset may not latch reliably.                     */
+    if (__HAL_RCC_GET_FDCAN_SOURCE() != RCC_FDCANCLKSOURCE_PCLK1) {
+        __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
+        __DSB();
+    }
+    can_init_diag.msp_ccipr_ok =
+        (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
+
+    /* ================================================================
+     * STEP 2: Enable the FDCAN APB1 bus clock.
+     * ================================================================ */
+    __HAL_RCC_FDCAN_CLK_ENABLE();
+
+    /* Readback-verify the clock-enable bit latched in APB1ENR1.
+     * RCC_APB1ENR1_FDCANEN is bit 25 on STM32G4.                      */
+    if (!(RCC->APB1ENR1 & RCC_APB1ENR1_FDCANEN)) {
+        /* Critical: clock not enabled — peripheral reads will be garbage.
+         * Record in diagnostics and continue (caller will detect via
+         * CCCR validation).                                             */
+        can_init_diag.msp_clk_ok = 0U;
+    } else {
+        can_init_diag.msp_clk_ok = 1U;
+    }
+
+    /* ================================================================
+     * STEP 3: Robust peripheral reset sequence.
+     * Force-reset clears all FDCAN registers to power-on defaults,
+     * eliminating stale bus-off / CCCR.CSA flags from prior life.
+     * ================================================================ */
+    __HAL_RCC_FDCAN_FORCE_RESET();
+    __DSB();
+    __ISB();
+    /* ≥4 AHB cycles for the reset assertion to propagate through the
+     * bus bridge on all G4 silicon revisions.                          */
+    __NOP(); __NOP(); __NOP(); __NOP();
+    __HAL_RCC_FDCAN_RELEASE_RESET();
+    __DSB();
+    __ISB();
+
+    /* After force-reset the clock gate may be in an indeterminate
+     * state.  Re-enable APB1 clock and re-apply kernel clock source.  */
+    __HAL_RCC_FDCAN_CLK_ENABLE();
+
+    /* Re-apply FDCANSEL after reset — force-reset may clear CCIPR
+     * bits on some G4 silicon revisions.                               */
+    __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
+    __DSB();
+
+    /* Readback-verify FDCANSEL after reset sequence.  Re-apply once
+     * more if the first post-reset write did not stick.                */
     if (__HAL_RCC_GET_FDCAN_SOURCE() != RCC_FDCANCLKSOURCE_PCLK1) {
         __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
         __DSB();
     }
     __ISB();
-    /* Wait for the FDCAN peripheral clock gate to stabilise by
-     * polling CCCR until reserved bits [31:16] read zero — meaning
-     * the peripheral is clocked and responding with real register
-     * data.  This replaces the previous fixed-count volatile loop
-     * (3200 iterations) which was insufficient on some silicon
-     * revisions: CCCR returned stable garbage (e.g. 0x08007bc9,
-     * stale AHB instruction-pipeline data) because the clock gate
-     * had not fully propagated through the bus bridge.
+
+    /* Update diagnostics with final state after reset sequence.        */
+    can_init_diag.msp_ccipr_ok =
+        (__HAL_RCC_GET_FDCAN_SOURCE() == RCC_FDCANCLKSOURCE_PCLK1) ? 1U : 0U;
+    can_init_diag.msp_clk_ok =
+        (RCC->APB1ENR1 & RCC_APB1ENR1_FDCANEN) ? 1U : 0U;
+
+    /* ================================================================
+     * STEP 4: Adaptive poll — wait for the FDCAN peripheral to respond
+     * with valid register data.  After force-reset the APB1 bus bridge
+     * pipeline may return stale AHB data (flash addresses like
+     * 0x08007d8d) until the clock gate fully propagates.
      *
-     * The poll is adaptive: it returns as soon as the peripheral
-     * responds.  A 50 ms SysTick-based timeout prevents an infinite
-     * loop on hardware failure.  SysTick is active here because
-     * HAL_Init() configures it before MX_FDCAN1_Init() is called.   */
+     * Poll CCCR until reserved bits [31:16] read zero.  A 50 ms
+     * SysTick-based timeout prevents an infinite loop on hardware
+     * failure.  No fixed delays — exit as soon as peripheral responds.
+     * ================================================================ */
 #define FDCAN_CLK_READY_TIMEOUT_MS  50U
     {
         uint32_t msp_start = HAL_GetTick();
+        can_init_diag.timeout_flag = 0U;
         while ((HAL_GetTick() - msp_start) < FDCAN_CLK_READY_TIMEOUT_MS) {
             uint32_t cccr = hfdcan->Instance->CCCR;
             if ((cccr & 0xFFFF0000U) == 0U) {
-                break;  /* Reserved bits zero — peripheral responding */
+                goto cccr_poll_ok;  /* Reserved bits zero — peripheral is live */
             }
         }
+        /* Timeout: peripheral did not respond within 50 ms.  Record
+         * the flag; caller (MX_FDCAN1_Init) will detect via CCCR
+         * triple-read validation and retry.                            */
+        can_init_diag.timeout_flag = 1U;
     }
+cccr_poll_ok:
+
+    /* ================================================================
+     * STEP 5: GPIO configuration for FDCAN1.
+     * PA11 = FDCAN1_RX (CN10 pin 14)
+     * PA12 = FDCAN1_TX (CN10 pin 12)
+     * ================================================================ */
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    
-    /* PA11 = FDCAN1_RX (CN10 pin 14)
-     * PA12 = FDCAN1_TX (CN10 pin 12) */
+
     GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF9_FDCAN1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-    
+
+    /* ================================================================
+     * STEP 6: NVIC interrupt configuration.
+     * ================================================================ */
     HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
     HAL_NVIC_SetPriority(FDCAN1_IT1_IRQn, 1, 0);

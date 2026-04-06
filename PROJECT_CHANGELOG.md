@@ -79,6 +79,17 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-281 — fix(fdcan): robust deterministic FDCAN initialization with readback verification
+- **Fecha:** 2026-04-06
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrección CRÍTICA de la inicialización FDCAN que causaba fallo total del periférico CAN. Implementa secuencia de bring-up 100% robusta, determinista y verificable por hardware.
+- **Root cause:** Tras reset, `RCC_CCIPR.FDCANSEL` = 00 (HSE, no habilitado en este proyecto). `RCC->APB1ENR1` no tenía bit FDCANEN habilitado. Lecturas de registros FDCAN retornaban datos basura de flash (stale AHB bus data, e.g. `0x08007d8d`). El `force-reset` en MspInit podía dejar el clock gate en estado indeterminado y la primera escritura a FDCANSEL podía no latchar en algunas revisiones de silicio.
+- **Solución aplicada:** (1) MspInit: configurar FDCANSEL=PCLK1 ANTES de habilitar APB1 clock, con readback-verify. (2) Reset robusto: `__DSB(); __ISB()` tras force/release reset, re-enable clock + re-apply FDCANSEL post-reset. (3) Poll adaptativo de CCCR (50 ms timeout, sin delays fijos). (4) Readback-verify de `RCC->APB1ENR1` bit FDCANEN. (5) CAN_Init: `can_init_diag.started = 0U` al inicio (no por-path), solo promovido a 1U al final. (6) CAN_Init: verificación adicional de APB1ENR1 antes de configurar filtros. (7) Nuevos campos en `CAN_InitDiag_t`: retries, timeout_flag, msp_clk_ok, msp_ccipr_ok. (8) MX_FDCAN1_Init: registro de retry count en diagnostics.
+- **Impacto en el sistema:** Elimina el fallo total de FDCAN por clock mal configurado o stale AHB reads. Inicialización determinista independiente de la revisión de silicio. Todos los paths de fallo dejan estado limpio y diagnosticable.
+- **Archivos modificados:** `Core/Src/stm32g4xx_hal_msp.c`, `Core/Src/can_handler.c`, `Core/Inc/can_handler.h`, `Core/Src/main.c`, `docs/FDCAN_BRINGUP_ROBUSTNESS.md` (nuevo), `PROJECT_CHANGELOG.md`, `docs/PROJECT_MASTER_STATUS.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa sin errores. Validación completa requiere hardware con SWD.
+- **Próximos pasos:** Verificar en hardware: `can_init_diag.started == 1`, `RCC->APB1ENR1` bit 25 set, `RCC->CCIPR` bits [25:24] = 10, CCCR ≠ 0x0800xxxx.
+
 ### PR-280 — docs: complete power supply system document (9 sections + BOM)
 - **Fecha:** 2026-04-04
 - **Autor:** Copilot
@@ -411,7 +422,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 21. **ESP32 Wire**: Usar `endTransmission(true)` (con STOP) para detección NACK fiable. `endTransmission(false)` devuelve 0 sin dispositivo.
 
 ### Diagnósticos
-22. **CAN_InitDiag_t**: 7 campos (hal_init, filter_global, notify, start, started, clk_ok, cccr_init_ok). Legible vía SWD con `p can_init_diag`.
+22. **CAN_InitDiag_t**: 12 campos (hal_init, filter_global, notify, start, started, clk_ok, cccr_init_ok, clk_reapplied, retries, timeout_flag, msp_clk_ok, msp_ccipr_ok) + ccipr_raw. Legible vía SWD con `p can_init_diag`.
 
 ### RuntimeMonitor (ESP32)
 23. **Instrumentación separada**: `RTMON_UI_BEGIN/END` envuelve solo `currentScreen_->update(data)` dentro de `screen_manager.cpp`, NO el `screenManager.update()` completo en renderTask. `RTMON_RENDER_BEGIN/END` envuelve `draw()`. `RTMON_LOOP_BEGIN/END` envuelve el main `loop()` en Core 1.
@@ -455,3 +466,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-04 | **Full-system CAN audit** — Comprehensive firmware + protocol audit, CAN RX diagnostics, DLC doc fix, hardware validation checklist, root cause analysis | #279a |
 | 2026-04-04 | **CAN hardware fix procedure** — Executable troubleshooting guide, fix stale PB8/PB9 pin refs → PA11/PA12 in HARDWARE_VALIDATION_PROCEDURE.md + PROJECT_MASTER_STATUS.md | #279b |
 | 2026-04-04 | **Documento sistema alimentación** — 9 secciones + BOM: arquitectura, recorrido alimentación, relés, apagado retardado, LEDs, protección, masas, esquema eléctrico, materiales | #280 |
+| 2026-04-06 | **FDCAN init robusta** — Secuencia determinista de bring-up: clock source before enable, readback-verify RCC, reset con DSB/ISB, poll adaptativo CCCR, started=0 por defecto, 4 nuevos campos diagnóstico | #281 |

@@ -116,6 +116,10 @@ typedef struct {
     uint8_t  clk_ok;             /* 1 = FDCANSEL == PCLK1, 0 = wrong   */
     uint8_t  cccr_init_ok;       /* 1 = CCCR.INIT cleared after start  */
     uint8_t  clk_reapplied;      /* 1 = PCLK1 was re-applied by CAN_Init */
+    uint8_t  retries;            /* Number of full init retries used    */
+    uint8_t  timeout_flag;       /* 1 = CCCR poll timed out in MspInit */
+    uint8_t  msp_clk_ok;        /* 1 = APB1ENR1.FDCANEN verified in MspInit */
+    uint8_t  msp_ccipr_ok;      /* 1 = FDCANSEL==PCLK1 verified in MspInit */
     uint32_t ccipr_raw;          /* Raw RCC_CCIPR snapshot for debugging */
 } CAN_InitDiag_t;
 
