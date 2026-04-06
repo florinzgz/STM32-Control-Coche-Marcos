@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-282 — refactor(fdcan): decouple hal_msp from can_handler, fix stale filter documentation
+
+- **Fecha:** 2026-04-06
+- **Autor:** Copilot
+- **Descripción del cambio:** Refactor seguro para reducir acoplamiento arquitectónico entre `stm32g4xx_hal_msp.c` y `can_handler.h`. Corrección de documentación de filtros CAN que describía erróneamente una política "reject-all" cuando la implementación real es accept-all con filtrado por software.
+- **Solución aplicada:** (1) Extraer `CAN_InitDiag_t` a nuevo header `Core/Inc/can_init_diag.h`. (2) Reemplazar `#include "can_handler.h"` en hal_msp.c por `#include "can_init_diag.h"`. (3) `can_handler.h` incluye `can_init_diag.h` (sin duplicar typedef). (4) Corregir "reject-all default" → "accept-all (mask=0), non-matching IDs routed to FIFO0" en PROJECT_MASTER_STATUS.md. (5) Actualizar RX Filter Policy en CAN_CONTRACT_FINAL.md para reflejar la implementación real (MASK accept-all + software filtering en switch/case).
+- **Impacto en el sistema:** Cero cambios funcionales. Binary idéntico (56032 text, 72 data, 7832 bss). Solo reduce coupling y corrige documentación.
+- **Archivos modificados:** `Core/Inc/can_init_diag.h` (nuevo), `Core/Inc/can_handler.h`, `Core/Src/stm32g4xx_hal_msp.c`, `docs/PROJECT_MASTER_STATUS.md`, `docs/CAN_CONTRACT_FINAL.md`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa sin errores ni warnings. Binary size idéntico.
+
 ### PR-281 — fix(fdcan): robust deterministic FDCAN initialization with readback verification
 - **Fecha:** 2026-04-06
 - **Autor:** Copilot
@@ -467,3 +477,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-04 | **CAN hardware fix procedure** — Executable troubleshooting guide, fix stale PB8/PB9 pin refs → PA11/PA12 in HARDWARE_VALIDATION_PROCEDURE.md + PROJECT_MASTER_STATUS.md | #279b |
 | 2026-04-04 | **Documento sistema alimentación** — 9 secciones + BOM: arquitectura, recorrido alimentación, relés, apagado retardado, LEDs, protección, masas, esquema eléctrico, materiales | #280 |
 | 2026-04-06 | **FDCAN init robusta** — Secuencia determinista de bring-up: clock source before enable, readback-verify RCC, reset con DSB/ISB, poll adaptativo CCCR, started=0 por defecto, 4 nuevos campos diagnóstico | #281 |
+| 2026-04-06 | **Decouple hal_msp + fix filter docs** — Extraer `CAN_InitDiag_t` a header propio, eliminar include de `can_handler.h` en hal_msp.c, corregir descripción filtros CAN (accept-all, no reject-all) | #282 |
