@@ -52,7 +52,7 @@
 | PA8 RPWM_FL | PA8 | BTS7960 FL RPWM | 24 AWG |
 | PA9 LPWM_FL | PA9 | BTS7960 FL LPWM | 24 AWG |
 | PA10 RPWM_FR | PA10 | BTS7960 FR RPWM | 24 AWG |
-| PA11 LPWM_FR | PA11 | BTS7960 FR LPWM | 24 AWG |
+| PC3 LPWM_FR | PC3 | BTS7960 FR LPWM | 24 AWG |
 | PC6 RPWM_RL | PC6 | BTS7960 RL RPWM | 24 AWG |
 | PC7 LPWM_RL | PC7 | BTS7960 RL LPWM | 24 AWG |
 | PC8 RPWM_RR | PC8 | BTS7960 RR RPWM | 24 AWG |
@@ -71,6 +71,7 @@
 | PA15 / PB3 Encoder | PA15, PB3 | 6N137 optoacopladores | 28 AWG apantallado |
 | PB4 ENC_Z | PB4 | 6N137 optoacoplador índice Z | 28 AWG apantallado |
 | PB5 STEER_CENTER | PB5 | Sensor inductivo centrado | 24 AWG |
+| PB14 LED_DIAG | PB14 | LED diagnóstico (Morpho CN10 pin 28) | 24 AWG |
 
 ---
 

@@ -223,7 +223,8 @@
 | 42 | PA9 | TIM1_CH2 | LPWM_FL | BTS7960 FL → pin LPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
 | 43 | PA10 | TIM1_CH3 | RPWM_FR | BTS7960 FR → pin RPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
 
-> **Nota:** PA11 se reasignó a FDCAN1_RX (CAN bus). LPWM_FR ahora usa TIM15_CH1 en PB14.
+> **Nota:** PA11 se reasignó a FDCAN1_RX (CAN bus). LPWM_FR ahora usa TIM1_CH4 en PC3 (AF2).
+> PB14 queda libre y se configura como GPIO_Output para LED diagnóstico (LED_DIAG).
 
 **Configuración TIM1:** Prescaler = 0, Period = 4249, Center-Aligned, BREAK2 armado a Cortex LOCKUP
 
@@ -509,7 +510,7 @@
 | 15 | PC0 | DIR_FL | Libre — dejar desconectado o GPIO LOW |
 | 16 | PC1 | DIR_FR | Libre — dejar desconectado o GPIO LOW |
 | 17 | PC2 | DIR_RL | Libre — dejar desconectado o GPIO LOW |
-| 18 | PC3 | DIR_RR | Libre — dejar desconectado o GPIO LOW |
+| 18 | PC3 | LPWM_FR | TIM1_CH4 (AF2) — PWM motor FR reverso |
 | 34 | PC4 | DIR_STEER | Libre — dejar desconectado o GPIO LOW |
 
 > Estos pines fueron liberados por la migración a la arquitectura RPWM/LPWM (PR #120).
@@ -542,7 +543,7 @@
 | PB7 | I2C SDA | I2C1_SDA | Bidireccional (OD) |
 | PB10 | Relé LED frontal | GPIO | Salida |
 | PB11 | Relé LED trasero | GPIO | Salida |
-| PB14 | LPWM motor FR | TIM15_CH1 | Salida PWM |
+| PB14 | LED_DIAG | GPIO_Output | Salida digital |
 | PB15 | Velocidad rueda RR | EXTI15 | Entrada (pull-up) |
 | PC5 | Enable motor FL | GPIO | Salida |
 | PC6 | RPWM motor RL | TIM8_CH1 | Salida PWM |

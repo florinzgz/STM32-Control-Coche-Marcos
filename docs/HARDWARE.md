@@ -226,7 +226,7 @@ DS18B20 (5×) ─┬─ Pull-up 4.7kΩ ─ 3.3V
 | **Tipo** | Switch mecánico 3 posiciones |
 | **Posiciones** | Forward, Neutral, Reverse |
 | **Lógica** | Activo BAJO (pull-up interno) |
-| **Pines STM32** | PB12 (FWD), PB13 (NEU), PB14 (REV) |
+| **Pines STM32** | PB12 (FWD), PB13 (NEU) — PB14 reasignado a LED_DIAG |
 
 **Exclusividad:** Solo UNA posición puede estar activa simultáneamente (hardware).
 

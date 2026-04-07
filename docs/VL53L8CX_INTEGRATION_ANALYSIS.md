@@ -398,7 +398,7 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 | PB3–PB5 | 3 | Encoder B, encoder Z-index, steering center |
 | PB6–PB9 | 4 | I2C1_SCL, I2C1_SDA, FDCAN1_RX, FDCAN1_TX |
 | PB10 | 1 | (Reservado/wheel sensor alternativo — verificar HW) |
-| PB12–PB14 | 3 | Shifter FWD/NEU/REV |
+| PB12–PB13 | 2 | Shifter FWD/NEU (PB14 reasignado a LED_DIAG) |
 | PB15 | 1 | Wheel speed RR (EXTI15) |
 | PC0–PC7 | 8 | Motor DIR (4) + EN (4) |
 | PC8–PC13 | 6 | PWM steering, EN steering, Relays (3), EN RR |

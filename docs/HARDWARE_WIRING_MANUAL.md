@@ -241,13 +241,14 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 | Rueda | RPWM (Pin) | Timer/Canal | LPWM (Pin) | Timer/Canal | DIR (Pin) | EN (Pin) | Sensor velocidad | INA226 (índice) | DS18B20 (índice) |
 |-------|------------|-------------|------------|-------------|-----------|----------|------------------|-----------------|-------------------|
 | **FL** (Frontal izq.) | PA8 | TIM1_CH1 | PA9 | TIM1_CH2 | PC0 (freed) | PC5 (GPIO) | PA0 (EXTI0) | 0 | 0 |
-| **FR** (Frontal der.) | PA10 | TIM1_CH3 | PA11 | TIM1_CH4 | PC1 (freed) | 3.3V fijo | PA1 (EXTI1) | 1 | 1 |
+| **FR** (Frontal der.) | PA10 | TIM1_CH3 | PC3 | TIM1_CH4 | PC1 (freed) | 3.3V fijo | PA1 (EXTI1) | 1 | 1 |
 | **RL** (Trasera izq.) | PC6 | TIM8_CH1 | PC7 | TIM8_CH2 | PC2 (freed) | 3.3V fijo | PA2 (EXTI2) | 2 | 2 |
-| **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | PC3 (freed) | PC13 (GPIO) | PB15 (EXTI15) | 3 | 3 |
+| **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | *(freed)* | PC13 (GPIO) | PB15 (EXTI15) | 3 | 3 |
 
-> **Nota**: DIR pins (PC0-PC4) ya no son controlados por el firmware — la dirección se
-> determina por la elección de RPWM vs LPWM. Estos pines deben dejarse desconectados
-> o configurados como GPIO output LOW. EN pins: solo FL (PC5) y RR (PC13) son
+> **Nota**: DIR pins (PC0–PC2, PC4) ya no son controlados por el firmware — la dirección se
+> determina por la elección de RPWM vs LPWM. PC3 (ex-DIR_RR) fue reasignado a LPWM_FR (TIM1_CH4).
+> Los demás DIR pins deben dejarse desconectados o configurados como GPIO output LOW.
+> EN pins: solo FL (PC5) y RR (PC13) son
 > GPIO outputs; los demás motores tienen R_EN/L_EN del BTS7960 conectados directamente
 > a 3.3 V. PC6/PC7/PC9 fueron reasignados como salidas PWM (TIM8).
 
@@ -678,7 +679,7 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 7 | **PA8** | GPIOA | RPWM motor FL | BTS7960 FL | TIM1_CH1 (AF6) | 3.3 V PWM | `PIN_PWM_FL` |
 | 8 | **PA9** | GPIOA | LPWM motor FL | BTS7960 FL | TIM1_CH2 (AF6) | 3.3 V PWM | `PIN_LPWM_FL` |
 | 9 | **PA10** | GPIOA | RPWM motor FR | BTS7960 FR | TIM1_CH3 (AF6) | 3.3 V PWM | `PIN_PWM_FR` |
-| 10 | **PA11** | GPIOA | LPWM motor FR | BTS7960 FR | TIM1_CH4 (AF6) | 3.3 V PWM | `PIN_LPWM_FR` |
+| 10 | **PC3** | GPIOC | LPWM motor FR | BTS7960 FR | TIM1_CH4 (AF2) | 3.3 V PWM | `PIN_LPWM_FR` |
 | 11 | **PA15** | GPIOA | Encoder dirección A | E6B2-CWZ6C CH-A | TIM2_CH1 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_A` |
 | 12 | **PB0** | GPIOB | Bus OneWire | DS18B20 (×5) | GPIO bit-bang | 3.3 V (pull-up 4.7 kΩ) | `PIN_ONEWIRE` |
 | 13 | **PB3** | GPIOB | Encoder dirección B | E6B2-CWZ6C CH-B | TIM2_CH2 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_B` |
@@ -716,7 +717,7 @@ Están gestionadas por el ESP32 o simplemente no existen en el sistema:
 
 | Función | Estado | Explicación |
 |---------|--------|-------------|
-| **Palanca de cambios (F/N/R)** | **En el ESP32** | El ESP32 lee la palanca física y envía el modo al STM32 via CAN (ID 0x102). No hay pines GPIO en el STM32 para la palanca. Los pines PB12/PB13/PB14 mencionados en documentación anterior **no están inicializados** en `MX_GPIO_Init()`. |
+| **Palanca de cambios (F/N/R)** | **En el ESP32** | El ESP32 lee la palanca física y envía el modo al STM32 via CAN (ID 0x102). No hay pines GPIO en el STM32 para la palanca. Los pines PB12/PB13 mencionados en documentación anterior **no están inicializados** en `MX_GPIO_Init()`. PB14 ahora es LED_DIAG (GPIO_Output). |
 | **Llave de contacto** | **No implementado en STM32** | No existe ningún pin GPIO ni lógica de lectura de llave en el firmware. |
 | **Pantalla / Display** | **En el ESP32** | No hay periféricos SPI/paralelo para display en el STM32. La interfaz HMI reside en el ESP32. |
 | **Audio / Buzzer** | **No implementado en STM32** | No hay salida DAC, I2S ni PWM para audio. |
@@ -851,7 +852,7 @@ STM32 PA11 (TIM1_CH4) ───────────────────�
 | PC0         | DIR_FL GPIO   | Libre — no conectar      |
 | PC1         | DIR_FR GPIO   | Libre — no conectar      |
 | PC2         | DIR_RL GPIO   | Libre — no conectar      |
-| PC3         | DIR_RR GPIO   | Libre — no conectar      |
+| PC3         | DIR_RR GPIO   | LPWM_FR — TIM1_CH4 (AF2) |
 | PC4         | DIR_STEER GPIO| Libre — no conectar      |
 
 ### Componentes que se eliminan del BOM

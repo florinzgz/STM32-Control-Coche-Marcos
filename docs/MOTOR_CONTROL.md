@@ -139,7 +139,7 @@ void TIM1_PWM_Init(void) {
     HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1); // RPWM_FL (PA8)
     HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2); // LPWM_FL (PA9)
     HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3); // RPWM_FR (PA10)
-    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4); // LPWM_FR (PA11)
+    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4); // LPWM_FR (PC3)
     
     // BREAK2 armed to Cortex LOCKUP — hardware PWM kill on CPU fault
     TIM_BreakDeadTimeConfigTypeDef sBreakCfg = {0};

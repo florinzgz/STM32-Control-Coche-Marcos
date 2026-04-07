@@ -71,7 +71,7 @@
 | PA8 | RPWM_FL (TIM1_CH1) | `PIN_PWM_FL = GPIO_PIN_8` | `main.h:21` | ✅ |
 | PA9 | LPWM_FL (TIM1_CH2) | `PIN_LPWM_FL = GPIO_PIN_9` | `main.h:22` | ✅ |
 | PA10 | RPWM_FR (TIM1_CH3) | `PIN_PWM_FR = GPIO_PIN_10` | `main.h:23` | ✅ |
-| PA11 | LPWM_FR (TIM1_CH4) | `PIN_LPWM_FR = GPIO_PIN_11` | `main.h:24` | ✅ |
+| PC3 | LPWM_FR (TIM1_CH4) | `PIN_LPWM_FR = GPIO_PIN_3` | `main.h:24` | ✅ |
 | PC6 | RPWM_RL (TIM8_CH1) | `PIN_PWM_RL = GPIO_PIN_6` | `main.h:28` | ✅ |
 | PC7 | LPWM_RL (TIM8_CH2) | `PIN_LPWM_RL = GPIO_PIN_7` | `main.h:29` | ✅ |
 | PC8 | RPWM_RR (TIM8_CH3) | `PIN_PWM_RR = GPIO_PIN_8` | `main.h:30` | ✅ |
