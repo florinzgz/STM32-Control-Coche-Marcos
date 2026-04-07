@@ -34,13 +34,16 @@
 /*                       MOTOR PWM PIN MAPPING                                */
 /* ========================================================================== */
 
-/* ---- TIM1 (advanced): FL motor CH1/CH2, FR motor RPWM CH3 ----
+/* ---- TIM1 (advanced): FL motor CH1/CH2, FR motor RPWM CH3 + LPWM CH4 ----
  * RPWM and LPWM of FL share the SAME timer so both channels update
  * at the same UEV → overlap = 0.  TIM1 BREAK2 is armed to Cortex LOCKUP.
- * FR motor RPWM is on TIM1_CH3; LPWM_FR is on TIM15_CH1 (PB14) because
- * PA11 was reassigned to FDCAN1_RX.  Since only one of RPWM/LPWM is
- * active at any time (BTS7960 H-bridge), the cross-timer arrangement
- * is safe — Motor_SetSigned() always zeroes the inactive channel first.
+ * FR motor RPWM is on TIM1_CH3 (PA10); LPWM_FR is on TIM1_CH4 (PC3).
+ * PA11 was reassigned to FDCAN1_RX, so LPWM_FR was moved off TIM1_CH4/PA11.
+ * PC3 provides TIM1_CH4 via AF2 — both RPWM_FR and LPWM_FR are now on
+ * the same timer (TIM1), ensuring perfect UEV synchronisation (overlap = 0)
+ * and automatic BREAK2/LOCKUP protection.
+ * Since only one of RPWM/LPWM is active at any time (BTS7960 H-bridge),
+ * Motor_SetSigned() always zeroes the inactive channel first.
  *
  * ---- BTS7960 (IBT-2) Logic Level Compatibility ----
  * STM32G474RE outputs 3.3V GPIO / timer signals.  BTS7960 IC datasheet
@@ -68,7 +71,7 @@
 #define PIN_PWM_FL         GPIO_PIN_8   /* PA8  - TIM1_CH1 — RPWM_FL  */
 #define PIN_LPWM_FL        GPIO_PIN_9   /* PA9  - TIM1_CH2 — LPWM_FL  */
 #define PIN_PWM_FR         GPIO_PIN_10  /* PA10 - TIM1_CH3 — RPWM_FR  */
-#define PIN_LPWM_FR        GPIO_PIN_14  /* PB14 - TIM15_CH1 — LPWM_FR */
+#define PIN_LPWM_FR        GPIO_PIN_3   /* PC3  - TIM1_CH4 — LPWM_FR */
 
 /* ---- TIM8 (advanced): RL motor CH1/CH2, RR motor CH3/CH4 ----
  * Same-timer guarantee and BREAK2/LOCKUP protection as TIM1.                 */
@@ -188,6 +191,19 @@
 #define PIN_LD2            GPIO_PIN_5   /* PA5 — Nucleo-64 user LED (LD2)    */
 #define PORT_LD2           GPIOA        /* PA5 port                          */
 #define PIN_LD2_N          5U           /* bit number for direct MODER/ODR   */
+
+/* ========================================================================== */
+/*                       DIAGNOSTIC LED (PB14, external)                      */
+/* ========================================================================== */
+/* PB14 was freed from TIM15_CH1 (LPWM_FR moved to PC3/TIM1_CH4).
+ * Now available as a dedicated diagnostic LED — not shared with ST-Link
+ * (unlike PA5/LD2 which shares SB21 with SPI SCK).
+ * Accessible on Morpho CN10 pin 28.  Requires external LED + 330Ω resistor.
+ * Can be used for: boot, CAN status, heartbeat, errors — independently
+ * of PA5/LD2 which may exhibit interference during debug sessions.          */
+#define PIN_LED_DIAG       GPIO_PIN_14  /* PB14 — external diagnostic LED    */
+#define PORT_LED_DIAG      GPIOB        /* PB14 port                         */
+#define PIN_LED_DIAG_N     14U          /* bit number for direct MODER/ODR   */
 
 /* ========================================================================== */
 /*                       ONEWIRE BUS (DS18B20 temperatures)                   */

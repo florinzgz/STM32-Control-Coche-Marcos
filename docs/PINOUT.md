@@ -272,7 +272,7 @@ OneWire_ReadTemperature();
 |----------|-----|------|---------------|---------|
 | **FWD** | **PB12** | GPIO Input | LOW | Marcha adelante |
 | **NEU** | **PB13** | GPIO Input | LOW | Neutral (punto muerto) |
-| **REV** | **PB14** | GPIO Input | LOW | Marcha atrás |
+| **REV** | *(eliminado)* | — | — | PB14 reasignado a LED_DIAG (GPIO_Output) |
 
 **Configuración:**
 - Pull-up interno habilitado
@@ -374,7 +374,7 @@ HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
 | **PB10** | 21 | WHEEL_RR | GPIO/EXTI10 | Sensor rueda RR |
 | **PB12** | 25 | SHIFTER_FWD | GPIO Input | Shifter Forward |
 | **PB13** | 26 | SHIFTER_NEU | GPIO Input | Shifter Neutral |
-| **PB14** | 27 | SHIFTER_REV | GPIO Input | Shifter Reverse |
+| **PB14** | 27 | LED_DIAG | GPIO Output | LED diagnóstico |
 | **PC0** | 8 | DIR_FL | GPIO Output | Dirección motor FL |
 | **PC1** | 9 | EN_FL | GPIO Output | Enable motor FL |
 | **PC2** | 10 | DIR_FR | GPIO Output | Dirección motor FR |

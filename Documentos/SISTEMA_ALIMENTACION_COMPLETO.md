@@ -96,7 +96,7 @@ BAT 24V (+)
    │    RELAY_TRAC (PC11, GPIOC)  ←── STM32 safety_system.c
    │       │
    │       ├──► Fusible 30 A ──► BTS7960 FL (TIM1_CH1 PA8 / TIM1_CH2 PA9)  ──► Motor FL
-   │       ├──► Fusible 30 A ──► BTS7960 FR (TIM1_CH3 PA10 / TIM15_CH1 PB14) ──► Motor FR
+   │       ├──► Fusible 30 A ──► BTS7960 FR (TIM1_CH3 PA10 / TIM1_CH4 PC3)  ──► Motor FR
    │       ├──► Fusible 30 A ──► BTS7960 RL (TIM8_CH1 PC6 / TIM8_CH2 PC7)  ──► Motor RL
    │       └──► Fusible 30 A ──► BTS7960 RR (TIM8_CH3 PC8 / TIM8_CH4 PC9)  ──► Motor RR
    │
@@ -631,7 +631,7 @@ Todas las masas (GND) del sistema convergen en un **único punto central** llama
 | 18 | PB7 | GPIOB | I2C SDA | TCA9548A | I2C1_SDA | 3.3V open-drain |
 | 19 | PB10 | GPIOB | Relay LED frontal | WS2812B | GPIO Output | 3.3V (driver) |
 | 20 | PB11 | GPIOB | Relay LED trasero | WS2812B | GPIO Output | 3.3V (driver) |
-| 21 | PB14 | GPIOB | LPWM FR | BTS7960 FR | TIM15_CH1 | 3.3V PWM |
+| 21 | PC3 | GPIOC | LPWM FR | BTS7960 FR | TIM1_CH4 | 3.3V PWM |
 | 22 | PB15 | GPIOB | Wheel speed RR | LJ12A3 | EXTI15 | 3.3V (vía PC817) |
 | 23 | PC5 | GPIOC | Enable FL | BTS7960 FL | GPIO Output | 3.3V digital |
 | 24 | PC6 | GPIOC | RPWM RL | BTS7960 RL | TIM8_CH1 | 3.3V PWM |

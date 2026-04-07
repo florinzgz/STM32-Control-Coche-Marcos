@@ -160,7 +160,7 @@ Pinout & Configuration:
    ├─ PB0-PB2, PB10 (Sensores rueda)
    ├─ PC0-PC7, PC9-PC10 (Control motores)
    ├─ PC11-PC12, PD2 (Relés)
-   ├─ PB12-PB14 (Shifter)
+   ├─ PB12-PB13 (Shifter), PB14 (LED_DIAG)
    └─ PB5 (OneWire temperatura)
 ```
 

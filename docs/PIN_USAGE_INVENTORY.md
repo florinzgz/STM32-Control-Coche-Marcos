@@ -205,7 +205,7 @@ Sensores en el bus (un solo pin):
 | 7 | PA8 | GPIOA | Motor FL | TIM1_CH1, RPWM_FL 20 kHz |
 | 8 | PA9 | GPIOA | Motor FL | TIM1_CH2, LPWM_FL 20 kHz |
 | 9 | PA10 | GPIOA | Motor FR | TIM1_CH3, RPWM_FR 20 kHz |
-| 10 | PA11 | GPIOA | Motor FR | TIM1_CH4, LPWM_FR 20 kHz |
+| 10 | PC3 | GPIOC | Motor FR | TIM1_CH4, LPWM_FR 20 kHz |
 | 11 | PA15 | GPIOA | Encoder dirección | TIM2_CH1, canal A cuadratura |
 | 12 | PB0 | GPIOB | Temperatura (DS18B20) | OneWire bus, 5 sensores |
 | 13 | PB3 | GPIOB | Encoder dirección | TIM2_CH2, canal B cuadratura |
@@ -243,11 +243,11 @@ Los siguientes pines GPIO del STM32G474RE **NO están usados** y están disponib
 | 5 | PB2 | GPIOB | GPIO general | **LIBRE** |
 | 6 | PB12 | GPIOB | SPI2_NSS, I2S2_WS | **LIBRE** |
 | 7 | PB13 | GPIOB | SPI2_SCK, I2S2_CK | **LIBRE** |
-| 8 | PB14 | GPIOB | SPI2_MISO, TIM15_CH1 | **LIBRE** |
+| 8 | PB14 | GPIOB | GPIO_Output | **LED_DIAG** |
 | 9 | PC0 | GPIOC | GPIO, ADC1_IN6 | **LIBRE** (antes DIR_FL, liberado) |
 | 10 | PC1 | GPIOC | GPIO, ADC1_IN7 | **LIBRE** (antes DIR_FR, liberado) |
 | 11 | PC2 | GPIOC | GPIO, ADC1_IN8 | **LIBRE** (antes DIR_RL, liberado) |
-| 12 | PC3 | GPIOC | GPIO, ADC1_IN9 | **LIBRE** (antes DIR_RR, liberado) |
+| 12 | PC3 | GPIOC | TIM1_CH4 (AF2) | **LPWM_FR** — PWM motor FR 20 kHz |
 | 13 | PC4 | GPIOC | GPIO, ADC2_IN5 | **LIBRE** (antes DIR_STEER, liberado) |
 | 14 | PD2 | GPIOD | GPIO general, TIM3_ETR | **LIBRE** |
 
@@ -265,11 +265,11 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | Posible expansión | Pines sugeridos | Nº pines |
 |-------------------|-----------------|----------|
 | UART debug serie | PC0 (TX) + PC1 (RX) | 2 |
-| SPI adicional (sensor, SD card) | PA5 (SCK) + PC2 (MISO) + PC3 (MOSI) + PA4 (CS) | 4 |
+| SPI adicional (sensor, SD card) | PA5 (SCK) + PC2 (MISO) + PA4 (CS) | 3 |
 | ADC adicional (sensor batería, otro sensor) | PB1, PA4, PA5 | 1-3 |
 | Segundo bus I2C | PC0 (SCL) + PC1 (SDA) | 2 |
-| LEDs de estado / buzzer | PB2, PB12, PB13, PB14 | 1-4 |
-| Sensores adicionales | PC2, PC3, PC4, PB12, PB13, PB14 | 2-6 |
+| LEDs de estado / buzzer | PB2, PB12, PB13 | 1-3 |
+| Sensores adicionales | PC2, PC4, PB12, PB13 | 2-4 |
 | USB | PA12 (DP) | 1 |
 
 ---

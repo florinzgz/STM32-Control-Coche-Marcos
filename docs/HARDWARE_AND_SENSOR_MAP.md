@@ -530,7 +530,7 @@ Reference: [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWA
 
 | Component | Base Firmware File(s) | Status |
 |-----------|----------------------|--------|
-| **Shifter (F/N/R)** | `src/input/shifter.cpp` | **Not ported.** No GPIO pins (PB12/PB13/PB14) initialized in STM32 `MX_GPIO_Init()`. Drive direction is controlled via `CMD_MODE` (0x102) bit flags from ESP32. The physical shifter hardware is read by the ESP32 and translated to CAN commands; it is not connected to the STM32. |
+| **Shifter (F/N/R)** | `src/input/shifter.cpp` | **Not ported.** No GPIO pins (PB12/PB13) initialized in STM32 `MX_GPIO_Init()`. PB14 is now LED_DIAG (GPIO_Output). Drive direction is controlled via `CMD_MODE` (0x102) bit flags from ESP32. The physical shifter hardware is read by the ESP32 and translated to CAN commands; it is not connected to the STM32. |
 | NVS persistence | `src/system/limp_mode.cpp` (`reset()`) | Not ported. STM32 has no EEPROM. Service mode flags reset on every power cycle. |
 | Power management | `src/system/power_mgmt.cpp` | Partially ported — relay sequencing exists in `safety_system.c` but battery SOC monitoring is not present. |
 
@@ -592,7 +592,7 @@ actual firmware source code (`Core/Inc/main.h` and `Core/Src/*.c`).
 ### 6.3 Shifter (F/N/R) — Not Present in STM32 Firmware
 
 The following documents mention a physical shifter on PB12/PB13/PB14 that does **not exist**
-in the STM32 firmware code:
+in the STM32 firmware code (PB14 is now LED_DIAG, GPIO_Output):
 
 - `docs/HARDWARE.md` — lists Shifter F/N/R with PB12/PB13/PB14
 - `docs/HARDWARE_SPECIFICATION.md` — lists shifter sensors

@@ -113,7 +113,7 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | # | Componente | Bus/Pin | Justificación |
 |---|-----------|---------|---------------|
 | 2a | UART externo (GPS, telemetría, Bluetooth) | PA4 (TX), PA5 (RX) → USART2 o LPUART1 | Pines libres, periférico disponible |
-| 2b | SPI externo (IMU, sensor barométrico, SD card) | PB12 (NSS), PB13 (SCK), PB14 (MISO), PB2 (MOSI) | SPI2 disponible, pines libres |
+| 2b | SPI externo (IMU, sensor barométrico, SD card) | PB12 (NSS), PB13 (SCK), PB2 (MOSI) | SPI2 disponible, pines libres (PB14 reasignado a LED_DIAG) |
 | 2c | Sensor analógico adicional (sensor de presión, nivel) | PB1 → ADC1_IN12 | Canal ADC libre, sin conflicto |
 
 ### Prioridad 3 — Auxiliares y expansión
@@ -172,8 +172,8 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PB10 | **OCUPADO** | Relay LED Front | GPIO | — |
 | PB11 | **OCUPADO** | Relay LED Rear | GPIO | — |
 | PB12 | **LIBRE** | — | AF5: SPI2_NSS, AF6: I2C2_SMBA | SPI2 NSS candidato |
+| PB14 | **LED_DIAG** | GPIO_Output | — | — | LED diagnóstico |
 | PB13 | **LIBRE** | — | AF5: SPI2_SCK | SPI2 SCK candidato |
-| PB14 | **LIBRE** | — | AF5: SPI2_MISO | SPI2 MISO candidato |
 | PB15 | **OCUPADO** | EXTI15 — Wheel RR | — | — |
 
 #### Puerto C
@@ -183,7 +183,7 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PC0 | **LIBRE** | (ex-DIR_FL) | ADC1_IN6, GPIO | GPIO salida / ADC auxiliar |
 | PC1 | **LIBRE** | (ex-DIR_FR) | ADC1_IN7, GPIO | GPIO salida / ADC auxiliar |
 | PC2 | **LIBRE** | (ex-DIR_RL) | ADC1_IN8, GPIO | GPIO salida / ADC auxiliar |
-| PC3 | **LIBRE** | (ex-DIR_RR) | ADC1_IN9, GPIO | GPIO salida / ADC auxiliar |
+| PC3 | **OCUPADO** | LPWM_FR (TIM1_CH4) | AF2 | PWM motor FR reverso |
 | PC4 | **LIBRE** | (ex-DIR_STEER) | ADC1_IN5, USART1_TX | GPIO salida / UART alternativo |
 | PC5 | **OCUPADO** | EN_FL | GPIO output | — |
 | PC6 | **OCUPADO** | TIM8_CH1 — RPWM RL | AF4 | — |
@@ -214,11 +214,11 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | **PB2** | SPI3_MOSI (AF5) | Alternativa MOSI para SPI3 |
 | **PB12** | SPI2_NSS | Chip select SPI |
 | **PB13** | SPI2_SCK | Reloj SPI |
-| **PB14** | SPI2_MISO | Datos SPI entrada |
+| **PB14** | LED_DIAG (GPIO_Output) | LED diagnóstico |
 | **PC0** | GPIO salida (buzzer, LED) | Pin DIR liberado |
 | **PC1** | GPIO salida / ADC1_IN7 | Pin DIR liberado |
 | **PC2** | GPIO salida / ADC1_IN8 | Pin DIR liberado |
-| **PC3** | GPIO salida / ADC1_IN9 | Pin DIR liberado |
+| **PC3** | LPWM_FR (TIM1_CH4) | PWM motor FR reverso |
 | **PC4** | GPIO salida / USART1_TX alt | Pin DIR liberado |
 
 ### 3.3 Protocolo anti-conflictos
@@ -422,7 +422,7 @@ Antes de asignar cualquier pin libre:
 ### 5.4 Bus SPI (Prioridad 2b)
 
 #### Conexión física
-- **Pines recomendados:** PB13 (SCK), PB14 (MISO), PB12 (NSS/CS)
+- **Pines recomendados:** PB13 (SCK), PB12 (NSS/CS). PB14 ya no disponible (LED_DIAG).
 - **MOSI:** Requiere verificación de AF en datasheet. En LQFP64, SPI2_MOSI no está disponible en PB2 (PB2 es SPI3_MOSI, AF5). Alternativas:
   - **Opción A**: Usar SPI3 completo si pines compatibles están libres
   - **Opción B**: Usar PA12 (libre) si soporta SPI2_MOSI en AF del STM32G474
@@ -435,7 +435,7 @@ Antes de asignar cualquier pin libre:
 
 **En `.ioc` (CubeMX):**
 1. Activar SPI2 o SPI3 en modo Full-Duplex Master (según pin MOSI seleccionado)
-2. Asignar pines SPI: PB13 (SCK), PB14 (MISO), MOSI según opción elegida (ver conexión física)
+2. Asignar pines SPI: PB13 (SCK), MISO según pin disponible, MOSI según opción elegida (ver conexión física). PB14 no disponible (LED_DIAG).
 3. PB12 como GPIO_Output (CS manual)
 4. Prescaler: empezar con baja velocidad (Fpclk/256) y subir gradualmente
 5. CPOL/CPHA según datasheet del dispositivo esclavo
@@ -587,7 +587,7 @@ Antes de asignar cualquier pin libre:
 | IRQ | Prioridad | Handler | Función |
 |-----|-----------|---------|---------|
 | FDCAN1_IT0 | 1 | `FDCAN1_IT0_IRQHandler()` | CAN RX/TX (máxima prioridad aplicación) |
-| TIM1_BRK_TIM15 | 0 | Configurado por HAL | BREAK2/LOCKUP PWM kill (prioridad sistema) |
+| TIM1_BRK_TIM15 | 0 | Configurado por HAL | BREAK2/LOCKUP PWM kill (prioridad sistema). TIM15 no utilizado. |
 | EXTI0 | 2 | `EXTI0_IRQHandler()` | Wheel FL speed |
 | EXTI1 | 2 | `EXTI1_IRQHandler()` | Wheel FR speed |
 | EXTI2 | 2 | `EXTI2_IRQHandler()` | Wheel RL speed |
@@ -627,7 +627,7 @@ Antes de asignar cualquier pin libre:
 | TIM8 | PWM RL/RR (20 kHz) | Frecuencia en PC6, duty cycle correcto |
 | TIM6 | **LIBRE** | Disponible para temporización auxiliar |
 | TIM7 | **LIBRE** | Disponible para temporización auxiliar |
-| TIM15 | Compartido con TIM1_BRK | **NO usar** — asociado a BREAK |
+| TIM15 | Compartido con TIM1_BRK | **LIBRE** — TIM15 eliminado del proyecto |
 | TIM16, TIM17, TIM20 | **LIBRE** | Disponibles |
 
 > **PRECAUCIÓN**: No modificar prescaler ni period de TIM1/TIM3/TIM8 — afecta directamente a la frecuencia PWM de los motores.
@@ -865,7 +865,7 @@ Una etapa se considera **ESTABLE** cuando cumple **TODOS** estos criterios simul
 | PB2 | — | — | — | SPI3_MOSI | — | — | — |
 | PB12 | — | — | I2C2_SMBA | SPI2_NSS | — | — | — |
 | PB13 | — | — | — | SPI2_SCK | — | — | — |
-| PB14 | — | — | — | SPI2_MISO | — | — | — |
+| PB14 | — | — | — | — | — | — | — |
 | PC0 | — | — | — | — | — | — | — |
 | PC1 | — | — | — | — | — | — | — |
 | PC2 | — | — | — | — | — | — | — |

@@ -74,7 +74,7 @@
 | 15  | PC0  | DIR_FL    | Dirección Motor FL |
 | 16  | PC1  | DIR_FR    | Dirección Motor FR |
 | 17  | PC2  | DIR_RL    | Dirección Motor RL |
-| 18  | PC3  | DIR_RR    | Dirección Motor RR |
+| 18  | PC3  | TIM1_CH4  | LPWM_FR Motor FR |
 | 34  | PC4  | DIR_STEER | Dirección Motor Dirección |
 
 ### Enable Signals (GPIO Output)
@@ -227,7 +227,7 @@ Pedal_% = ((Voltage_ADC - 0.33) / (2.97 - 0.33)) × 100%
 | 60  | PB8   | GPIO     | Libre/Expansión |
 | 61  | PB9   | GPIO     | Libre/Expansión |
 | 47  | PB13  | GPIO     | Libre/Expansión |
-| 48  | PB14  | GPIO     | Libre/Expansión |
+| 48  | PB14  | GPIO     | LED_DIAG (GPIO_Output) |
 | 49  | PB15  | GPIO     | Libre/Expansión |
 
 ## Recomendaciones de Cableado

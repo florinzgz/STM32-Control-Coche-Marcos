@@ -386,6 +386,15 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Impacto en el sistema:** Diagnóstico visual claro del estado de la MCU.
 - **Próximos pasos:** Ninguno.
 
+### PR — Move LPWM_FR from PB14/TIM15_CH1 to PC3/TIM1_CH4 + LED_DIAG on PB14
+- **Fecha:** 2025-07-17
+- **Autor:** Copilot
+- **Descripción del cambio:** Reubicación de LPWM_FR de PB14/TIM15_CH1 a PC3/TIM1_CH4 (AF2). PB14 liberado y reasignado como GPIO_Output para LED diagnóstico (LED_DIAG). TIM15 eliminado completamente del proyecto. Los 4 canales del motor FR quedan ahora en TIM1 (CH1=RPWM_FL/PA8, CH2=LPWM_FL/PA9, CH3=RPWM_FR/PA10, CH4=LPWM_FR/PC3).
+- **Root cause:** Consolidación de todos los canales PWM de tracción frontal en un solo timer (TIM1) y liberación de TIM15.
+- **Solución aplicada:** GPIO remap de LPWM_FR a PC3/TIM1_CH4, PB14 como LED_DIAG, eliminación de TIM15.
+- **Impacto en el sistema:** PWM de motor FR en TIM1_CH4/PC3 (Morpho CN7 pin 37). LED diagnóstico en PB14 (Morpho CN10 pin 28).
+- **Próximos pasos:** Ninguno.
+
 ### PR-256 — Move LPWM_FR from PB9/TIM17_CH1 to PB14/TIM15_CH1
 - **Fecha:** 2026-03-27
 - **Autor:** Copilot
