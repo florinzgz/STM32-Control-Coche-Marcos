@@ -266,6 +266,7 @@ typedef enum {
 #define GPIO_AF4_TIM8      0x04U
 #define GPIO_AF4_I2C1      0x04U
 #define GPIO_AF1_TIM15     0x01U
+#define GPIO_AF2_TIM1      0x02U
 #define GPIO_AF6_TIM1      0x06U
 #define GPIO_AF9_FDCAN1    0x09U
 
