@@ -52,18 +52,18 @@ static void psram_diagnostic() {
     size_t total = ESP.getPsramSize();
     size_t libre = ESP.getFreePsram();
 
-    Serial.printf("PSRAM total: %d bytes\n", total);
-    Serial.printf("PSRAM libre: %d bytes\n", libre);
+    Serial.printf("PSRAM total: %u bytes\n", (unsigned)total);
+    Serial.printf("PSRAM libre: %u bytes\n", (unsigned)libre);
 
     // Reservar la mitad de la PSRAM disponible (seguro para N16R8: 8MB)
     size_t testSize = total / 2;
     uint8_t* block = (uint8_t*) ps_malloc(testSize);
 
     if (block) {
-        Serial.printf("PSRAM TEST: asignación de %d bytes OK\n", testSize);
+        Serial.printf("PSRAM TEST: asignación de %u bytes OK\n", (unsigned)testSize);
         free(block);
     } else {
-        Serial.printf("PSRAM TEST: fallo asignando %d bytes\n", testSize);
+        Serial.printf("PSRAM TEST: fallo asignando %u bytes\n", (unsigned)testSize);
     }
 
     Serial.println("==========================");
@@ -1269,7 +1269,7 @@ void loop() {
                     } else if ((now - errorPassiveSince) >= timeout) {
                         if (slowPhase) {
                             Serial.printf("[CAN] Error-passive (tx_err=%lu) "
-                                          "— slow-periodic reinit (%lus cycle)\n",
+                                          "— slow-periodic reinit (%lu s cycle)\n",
                                           (unsigned long)sts.tx_error_counter,
                                           (unsigned long)(ERROR_PASSIVE_SLOW_TIMEOUT_MS / 1000));
                         } else {
