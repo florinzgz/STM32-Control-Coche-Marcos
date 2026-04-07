@@ -112,9 +112,9 @@ bool i2c_init_ok   = false;
 
 /* ---- Boot phase tracker (readable via SWD even when debugger halts at boot) ----
  * 0 = pre-init (initial C startup)
- * 1 = GPIO done, boot LED blinks started
- * 2 = MX peripherals done (FDCAN, I2C, TIM, IWDG)
- * 3 = Module init done (Motor, CAN, Safety, etc.)
+ * 1 = GPIO + FDCAN done (CAN bus active, ACKing ESP32 frames)
+ * 2 = MX peripherals done (I2C, TIM, IWDG)
+ * 3 = Module init done (Motor, Safety, etc.)
  * 4 = Post-init LED indication done
  * 5 = Main loop entered
  *
@@ -161,7 +161,31 @@ int main(void)
 
     /* Peripheral initialisation */
     MX_GPIO_Init();
-    boot_phase = 1;  /* GPIO done, entering boot LED sequence */
+
+    /* ================================================================
+     * CRITICAL: Start FDCAN BEFORE the boot LED sequence.
+     *
+     * On a two-node CAN bus (ESP32-S3 + STM32), the ESP32 boots ~600 ms
+     * after power-on and immediately starts transmitting heartbeat frames
+     * every 100 ms.  Without a second node to ACK those frames, every
+     * transmission fails (TEC += 8).  At ~32 failures the ESP32 reaches
+     * BUS_OFF (TEC = 256) and must recover — a process that adds seconds
+     * of latency and may exhaust the 10-attempt recovery budget.
+     *
+     * Previously, the 2.3 s boot LED blink ran BEFORE FDCAN init,
+     * leaving the ESP32 alone on the bus for the entire duration.
+     * Moving FDCAN init + CAN_Init() here ensures the STM32 starts
+     * ACKing CAN frames within ~50 ms of power-on, eliminating the
+     * ESP32 bus-off entirely.
+     *
+     * CAN_Init() has no dependency on any other module (Motor, Safety,
+     * Sensors) — only on SystemClock_Config() for PCLK1 and GPIO for
+     * PA11/PA12 (configured by HAL_FDCAN_MspInit internally).
+     * ================================================================ */
+    MX_FDCAN1_Init();
+    CAN_Init();
+
+    boot_phase = 1;  /* GPIO + FDCAN done, CAN bus active */
 
     /* ---- Startup LED indication ----
      * Three clearly-visible blinks on LD2 (PA5, soldered on the Nucleo
@@ -170,6 +194,10 @@ int main(void)
      * Sequence: 500 ms dark (baseline) → 3 × (300 ms ON / 300 ms OFF).
      * Total ≈ 2.3 s.  IWDG has not started yet, so there is no
      * watchdog constraint on this phase.
+     *
+     * FDCAN is already running — the STM32 is ACKing ESP32 frames
+     * during these blinks.  Messages queue in FIFO0 (depth 3);
+     * any overflow is harmless and cleared before the main loop.
      *
      * Pattern interpretation (observe LD2 after reset):
      *   • No blink at all     → MCU not executing user code
@@ -190,7 +218,6 @@ int main(void)
     }
 
     MX_ADC1_Init();
-    MX_FDCAN1_Init();
     MX_I2C1_Init();
     MX_TIM1_Init();
     MX_TIM2_Init();
@@ -206,7 +233,8 @@ int main(void)
     Sensor_Init();
     Safety_Init();
     ServiceMode_Init();
-    CAN_Init();
+    /* CAN_Init() was moved to early boot (before LED blinks) to ensure
+     * the FDCAN starts ACKing ESP32 frames immediately on power-on. */
     SteeringCentering_Init();
     ErrorLog_Init();
     ErrorLog_SetResetCause(reset_cause);
@@ -254,6 +282,16 @@ int main(void)
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
     boot_phase = 4;  /* Post-init complete, about to enter main loop */
+
+    /* ---- Drain CAN FIFO and clear boot-time overflow ----
+     * During the boot LED sequence and module init the FDCAN was
+     * running (ACKing ESP32 frames) but no one was reading FIFO0.
+     * Messages accumulated and may have overflowed (message lost).
+     * Drain the FIFO now so the main loop starts with a clean slate,
+     * and reset the overflow counter to prevent false DEGRADED_L1
+     * escalation from harmless boot-time message loss.                */
+    CAN_ProcessMessages();
+    can_stats.fifo_overflow_count = 0;
 
     /* Timing counters */
     uint32_t tick_10ms   = 0;
