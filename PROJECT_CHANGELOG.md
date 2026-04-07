@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-285 — refactor(led): migrate status LED from PA5 (LD2) to PB8
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Se migra todo el indicador LED de estado de PA5 (LD2) a PB8 (STATUS_LED). PA5 comparte el solder bridge SB21 con el SPI SCK del ST-Link en la placa Nucleo-64, causando que el LED sea controlado por el debugger en vez del firmware. PB8 es un GPIO libre accesible en el conector Morpho (CN10 pin 3). Requiere conectar un LED externo con resistencia a PB8.
+- **Root cause:** PA5 (LD2) está compartido con el ST-Link SPI vía SB21 (cerrado por defecto en fábrica). Durante programación o debug activo, el ST-Link puede encender/apagar PA5 sin control del firmware, haciendo el LED no fiable para indicar estados del sistema. Según UM2505, la NUCLEO-G474RE solo tiene LD1 (COM, ST-Link) y LD2 (USER, PA5) — no existe LD4.
+- **Solución aplicada:** (1) Nuevo define centralizado: `PIN_LED_STATUS` (GPIO_PIN_8), `PORT_LED_STATUS` (GPIOB), `PIN_LED_STATUS_N` (8U) en project_config.h. (2) Todos los `HAL_GPIO_WritePin(GPIOA, PIN_LD2, ...)` → `HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, ...)`. (3) Error_Handler y fault handlers: registro directo actualizado de GPIOA bit 5 → GPIOB bit 8. (4) .ioc actualizado con PB8 como GPIO_Output etiquetado STATUS_LED.
+- **Impacto en el sistema:** Solo afecta qué pin físico se usa para indicación visual. No cambia lógica, timing, ni safety. El usuario necesita conectar un LED+resistencia a PB8 (Morpho CN10 pin 3).
+- **Archivos modificados:** `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/stm32g4xx_it.c`, `STM32-Control-Coche-Marcos.ioc`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa. Integrity check pasa.
+
 ### PR-284 — feat(led): make boot blinks unmissable (300 ms + dark lead-in)
 - **Fecha:** 2026-04-07
 - **Autor:** Copilot
@@ -500,3 +510,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-06 | **Decouple hal_msp + fix filter docs** — Extraer `CAN_InitDiag_t` a header propio, eliminar include de `can_handler.h` en hal_msp.c, corregir descripción filtros CAN (accept-all, no reject-all) | #282 |
 | 2026-04-06 | **LED boot visibility** — Boot blinks 60→150 ms, post-init CAN status LED (1 long=OK, 5 rapid=FAIL), volatile can_init_diag | #283 |
 | 2026-04-07 | **Boot blinks unmissable** — Boot blinks 150→300 ms, dark lead-in 500 ms, CAN status blinks más lentos, separación 500 ms | #284 |
+| 2026-04-07 | **LED migrada PA5→PB8** — Status LED de PA5 (LD2, interferido por ST-Link SB21) a PB8 (GPIO libre, Morpho CN10-3). LED externo requerido. | #285 |

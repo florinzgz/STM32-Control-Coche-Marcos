@@ -152,14 +152,14 @@ int main(void)
     MX_GPIO_Init();
 
     /* ---- Startup LED indication ----
-     * Three clearly-visible blinks on LD2 (PA5) confirm the firmware
-     * has booted and reached peripheral initialisation.
+     * Three clearly-visible blinks on the status LED (PB8) confirm the
+     * firmware has booted and reached peripheral initialisation.
      *
      * Sequence: 500 ms dark (baseline) → 3 × (300 ms ON / 300 ms OFF).
      * Total ≈ 2.3 s.  IWDG has not started yet, so there is no
      * watchdog constraint on this phase.
      *
-     * Pattern interpretation (observe LD2 after plugging USB / reset):
+     * Pattern interpretation (observe status LED after reset):
      *   • No blink at all     → MCU not executing user code
      *                           (check BOOT0 jumper or re-flash via ST-LINK)
      *   • 3 blinks then ~2 Hz → firmware crashed during a later MX_Init
@@ -168,12 +168,12 @@ int main(void)
      *                         → firmware running normally, CAN init OK
      *   • 3 blinks, pause, 5 rapid blinks, then brief flash every ~2 s
      *                         → firmware running, but CAN init FAILED   */
-    HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET); /* ensure OFF  */
+    HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_RESET); /* ensure OFF  */
     HAL_Delay(500);  /* dark lead-in so the first ON edge is obvious   */
     for (int k = 0; k < 3; k++) {
-        HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_SET);
         HAL_Delay(300);
-        HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_RESET);
         HAL_Delay(300);
     }
 
@@ -200,7 +200,8 @@ int main(void)
     ErrorLog_SetResetCause(reset_cause);
 
     /* ---- Post-init CAN status LED indication ----
-     * After all peripherals are initialised, show CAN init result on LD2:
+     * After all peripherals are initialised, show CAN init result on
+     * the status LED (PB8):
      *   • 1 long blink (600 ms)  → FDCAN initialised successfully
      *   • 5 blinks (150 ms ON/OFF) → FDCAN init failed (hardware issue)
      * A 500 ms gap before the pattern separates it visually from the
@@ -210,16 +211,16 @@ int main(void)
     {
         if (fdcan_init_ok) {
             /* CAN OK: one long blink */
-            HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_SET);
             HAL_Delay(600);
-            HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_RESET);
             HAL_Delay(300);
         } else {
             /* CAN FAILED: 5 rapid blinks */
             for (int k = 0; k < 5; k++) {
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+                HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_SET);
                 HAL_Delay(150);
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_RESET);
                 HAL_Delay(150);
             }
         }
@@ -501,9 +502,9 @@ int main(void)
             uint32_t phase = now - tick_heartbeat;
             if (phase >= 2000) {
                 tick_heartbeat = now;
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+                HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_SET);
             } else if (phase >= 50) {
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, GPIO_PIN_RESET);
             }
         }
 
@@ -608,12 +609,13 @@ static void MX_GPIO_Init(void)
     gpio.Pin = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* Nucleo-64 user LED LD2 (PA5) — heartbeat indicator */
-    gpio.Pin   = PIN_LD2;
+    /* Status LED (PB8) — heartbeat / fault indicator.
+     * Moved from PA5 (LD2) to avoid ST-Link SPI interference via SB21. */
+    gpio.Pin   = PIN_LED_STATUS;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOA, &gpio);
+    HAL_GPIO_Init(PORT_LED_STATUS, &gpio);
 
     /* LED power relays (PB10 front, PB11 rear) — both start OFF (safe default) */
     gpio.Pin = PIN_RELAY_LED | PIN_RELAY_LED_REAR;
@@ -1130,18 +1132,19 @@ void Error_Handler(void)
     /* LED power relays on GPIOB — also force OFF (both front and rear) */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
 
-    /* Slow-blink LD2 (~2 Hz) — distinguishes "firmware crashed" from
-     * "firmware not loaded" (LED stays off).  Uses busy-wait because
-     * interrupts are disabled.  If IWDG is already running the MCU
-     * will reset after ~500 ms; the brief blink is still visible.
-     * Delay count assumes SYSCLK = 170 MHz (HSI+PLL, see
+    /* Slow-blink status LED (~2 Hz) — distinguishes "firmware crashed"
+     * from "firmware not loaded" (LED stays off).  Uses busy-wait
+     * because interrupts are disabled.  If IWDG is already running
+     * the MCU will reset after ~500 ms; the brief blink is still
+     * visible.  Delay count assumes SYSCLK = 170 MHz (HSI+PLL, see
      * SystemClock_Config); at that frequency ~4 000 000 volatile
      * iterations ≈ 250 ms.                                            */
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    GPIOA->MODER = (GPIOA->MODER & ~(3U << (5 * 2)))
-                 | (1U << (5 * 2));           /* PA5 = output           */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    PORT_LED_STATUS->MODER = (PORT_LED_STATUS->MODER
+                              & ~(3U << (PIN_LED_STATUS_N * 2)))
+                           | (1U << (PIN_LED_STATUS_N * 2));  /* PB8 = output */
     while (1) {
-        GPIOA->ODR ^= PIN_LD2;
+        PORT_LED_STATUS->ODR ^= PIN_LED_STATUS;
         for (volatile uint32_t d = 0; d < 4000000U; d++) { __NOP(); }
     }
 }
