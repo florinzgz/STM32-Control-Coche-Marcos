@@ -9,7 +9,24 @@ void SystemInit(void)
   #if defined(USER_VECT_TAB_ADDRESS)
     SCB->VTOR = VECT_TAB_BASE_ADDRESS | VECT_TAB_OFFSET;
   #endif
-  
+
+  /* Enable FPU: grant full access to coprocessors CP10 and CP11.
+   * This MUST happen before any FPU instruction executes, otherwise
+   * the Cortex-M4 raises a UsageFault (NOCP) that escalates to
+   * HardFault.  The toolchain compiles with -mfloat-abi=hard, so
+   * the compiler may emit VLDR/VMOV as early as HAL_Init().
+   *
+   * Use the direct CPACR address (0xE000ED88) instead of the CMSIS
+   * SCB->CPACR accessor because some toolchain-bundled CMSIS headers
+   * (e.g. gcc-arm-none-eabi 13.2) define SCB_Type without the CPACR
+   * field and shadow the project's newer Drivers/CMSIS headers.     */
+  (*((volatile uint32_t *)0xE000ED88U)) |= ((3UL << 20) | (3UL << 22));
+  __DSB();
+  __ISB();
+
+  /* Enable automatic and lazy FPU context stacking on exception
+   * entry so that ISR prologue/epilogue cost is minimal when the
+   * handler does not touch FP registers.                            */
   FPU->FPCCR |= ((3UL << 30) | (3UL << 28));
 }
 
