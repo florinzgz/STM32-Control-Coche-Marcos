@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-284 — feat(led): make boot blinks unmissable (300 ms + dark lead-in)
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** El usuario no veía los 3 blinks de boot al pulsar RESET porque a 150 ms ON/OFF el patrón duraba solo 900 ms y se confundía con un encendido directo. Se duplica el timing a 300 ms ON/OFF (1.8 s) con un período oscuro de 500 ms previo. También se aumenta el blink CAN-OK de 400 ms a 600 ms y CAN-FAIL de 80 ms a 150 ms ON/OFF. Separación post-boot aumentada a 500 ms.
+- **Root cause:** Sin período oscuro inicial, el primer blink ON se confunde con el encendido natural del LED tras reset. A 150 ms por fase, los 3 blinks pasan en 900 ms — demasiado rápido para el ojo.
+- **Solución aplicada:** (1) LED OFF explícito + 500 ms dark lead-in antes de empezar los blinks. (2) Boot blinks: 150 ms → 300 ms por fase (3 blinks = 1.8 s, imposible de no ver). (3) CAN status: pausa 500 ms + 1 blink largo 600 ms (CAN OK) o 5 blinks 150 ms (CAN FAIL). Todo antes de IWDG timeout (~4 s).
+- **Impacto en el sistema:** Solo afecta la secuencia de boot LED (~4 s de delay total antes del main loop). No afecta lógica de control, safety, ni timing del main loop. IWDG se inicia después de los boot blinks.
+- **Archivos modificados:** `Core/Src/main.c`, `PROJECT_CHANGELOG.md`
+- **Tests:** Integrity check pasa. Build requiere cross-compiler (no disponible en sandbox).
+
 ### PR-283 — feat(led): improve boot visibility and add CAN init status indication
 - **Fecha:** 2026-04-06
 - **Autor:** Copilot
@@ -489,3 +499,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-06 | **FDCAN init robusta** — Secuencia determinista de bring-up: clock source before enable, readback-verify RCC, reset con DSB/ISB, poll adaptativo CCCR, started=0 por defecto, 4 nuevos campos diagnóstico | #281 |
 | 2026-04-06 | **Decouple hal_msp + fix filter docs** — Extraer `CAN_InitDiag_t` a header propio, eliminar include de `can_handler.h` en hal_msp.c, corregir descripción filtros CAN (accept-all, no reject-all) | #282 |
 | 2026-04-06 | **LED boot visibility** — Boot blinks 60→150 ms, post-init CAN status LED (1 long=OK, 5 rapid=FAIL), volatile can_init_diag | #283 |
+| 2026-04-07 | **Boot blinks unmissable** — Boot blinks 150→300 ms, dark lead-in 500 ms, CAN status blinks más lentos, separación 500 ms | #284 |

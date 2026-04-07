@@ -155,6 +155,10 @@ int main(void)
      * Three clearly-visible blinks on LD2 (PA5) confirm the firmware
      * has booted and reached peripheral initialisation.
      *
+     * Sequence: 500 ms dark (baseline) → 3 × (300 ms ON / 300 ms OFF).
+     * Total ≈ 2.3 s.  IWDG has not started yet, so there is no
+     * watchdog constraint on this phase.
+     *
      * Pattern interpretation (observe LD2 after plugging USB / reset):
      *   • No blink at all     → MCU not executing user code
      *                           (check BOOT0 jumper or re-flash via ST-LINK)
@@ -164,11 +168,13 @@ int main(void)
      *                         → firmware running normally, CAN init OK
      *   • 3 blinks, pause, 5 rapid blinks, then brief flash every ~2 s
      *                         → firmware running, but CAN init FAILED   */
+    HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET); /* ensure OFF  */
+    HAL_Delay(500);  /* dark lead-in so the first ON edge is obvious   */
     for (int k = 0; k < 3; k++) {
         HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-        HAL_Delay(150);
+        HAL_Delay(300);
         HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-        HAL_Delay(150);
+        HAL_Delay(300);
     }
 
     MX_ADC1_Init();
@@ -195,26 +201,26 @@ int main(void)
 
     /* ---- Post-init CAN status LED indication ----
      * After all peripherals are initialised, show CAN init result on LD2:
-     *   • 1 long blink (400 ms)  → FDCAN initialised successfully
-     *   • 5 rapid blinks (80 ms) → FDCAN init failed (hardware issue)
-     * A 300 ms gap before the pattern separates it visually from the
-     * 3 boot blinks.  The total extra delay (≤ 1.1 s) is acceptable
+     *   • 1 long blink (600 ms)  → FDCAN initialised successfully
+     *   • 5 blinks (150 ms ON/OFF) → FDCAN init failed (hardware issue)
+     * A 500 ms gap before the pattern separates it visually from the
+     * 3 boot blinks.  The total extra delay (≤ 2 s) is acceptable
      * because IWDG timeout is ~4 s and CAN heartbeat hasn't started. */
-    HAL_Delay(300);  /* visual separator after 3 boot blinks */
+    HAL_Delay(500);  /* visual separator after 3 boot blinks */
     {
         if (fdcan_init_ok) {
             /* CAN OK: one long blink */
             HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-            HAL_Delay(400);
+            HAL_Delay(600);
             HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-            HAL_Delay(200);
+            HAL_Delay(300);
         } else {
             /* CAN FAILED: 5 rapid blinks */
             for (int k = 0; k < 5; k++) {
                 HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-                HAL_Delay(80);
+                HAL_Delay(150);
                 HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-                HAL_Delay(80);
+                HAL_Delay(150);
             }
         }
     }
