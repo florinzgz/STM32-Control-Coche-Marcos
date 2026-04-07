@@ -12,6 +12,7 @@
 #include <climits>
 
 #include <esp_system.h>
+#include <esp_idf_version.h>
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
 #include <ESP32-TWAI-CAN.hpp>
@@ -426,6 +427,27 @@ static bool twaiInit() {
      * We then override brp/tseg/sjw to achieve an 87.5 % sample point
      * (CiA 301 recommended) that closely matches the STM32's 88.2 %. */
     twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
+
+    /* CRITICAL FIX: On ESP-IDF ≥ 5.0, TWAI_TIMING_CONFIG_500KBITS()
+     * sets quanta_resolution_hz = 10 000 000 (10 MHz) with brp = 0.
+     * When quanta_resolution_hz > 0, twai_driver_install() calculates:
+     *   brp = APB_CLK / quanta_resolution_hz = 80 MHz / 10 MHz = 8
+     * This produces:
+     *   bit time = (1+13+2) × 8/80 MHz = 1600 ns → 625 kbps
+     *
+     * The STM32 FDCAN is configured for 500 kbps (170 MHz / 10 / 34).
+     * A 25 % baud-rate mismatch makes communication IMPOSSIBLE — every
+     * frame fails bit-level validation (stuff/CRC errors, no ACKs).
+     *
+     * Fix: clear quanta_resolution_hz so the driver uses the manually
+     * specified brp = 10 directly:
+     *   bit time = (1+13+2) × 10/80 MHz = 2000 ns → 500 kbps  ✓
+     *
+     * The clk_src field (set by the macro) is preserved, ensuring the
+     * correct APB clock source is selected on all ESP-IDF versions.   */
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    t_config.quanta_resolution_hz = 0;
+#endif
     t_config.brp            = 10;
     t_config.tseg_1         = 13;
     t_config.tseg_2         = 2;
@@ -516,7 +538,14 @@ void setup() {
      * Sample pt  = (1 + 13) / 16 = 87.5 %
      * SJW        = 2  → ±12.5 % oscillator tolerance                  */
     if (twaiInit()) {
-        Serial.println("[CAN] Initialized at 500 kbps (SP=87.5%)");
+        Serial.printf("[CAN] Initialized at 500 kbps (SP=87.5%%, BRP=10, "
+                      "TSEG1=13, TSEG2=2, SJW=2)\n");
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+        Serial.printf("[CAN] ESP-IDF %d.%d.%d — quanta_resolution_hz cleared "
+                      "to force BRP mode\n",
+                      ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR,
+                      ESP_IDF_VERSION_PATCH);
+#endif
     } else {
         Serial.println("[CAN] Initialization FAILED");
     }
