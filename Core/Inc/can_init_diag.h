@@ -19,7 +19,8 @@
  * Each field stores the HAL return value (HAL_OK = 0) so the exact
  * step that failed can be identified without printf/UART.
  *
- * Debug console cheat-sheet (copy-paste into GDB / STM32CubeIDE):
+ * Debug console cheat-sheet (copy-paste into GDB / STM32CubeIDE).
+ * NOTE: memory addresses are STM32G4-specific (RM0440):
  *   print can_init_diag
  *   print boot_phase            // 0=pre-GPIO … 5=main-loop
  *   print fdcan_init_ok
@@ -34,7 +35,7 @@ typedef struct {
     uint8_t  clk_ok;             /* 1 = FDCANSEL == PCLK1, 0 = wrong   */
     uint8_t  cccr_init_ok;       /* 1 = CCCR.INIT cleared after start  */
     uint8_t  clk_reapplied;      /* 1 = PCLK1 was re-applied by CAN_Init */
-    uint8_t  retries;            /* Number of full init retries used    */
+    uint8_t  retries;            /* Attempt index (0 = first, 4 = last) */
     uint8_t  timeout_flag;       /* 1 = CCCR poll timed out in MspInit */
     uint8_t  msp_clk_ok;        /* 1 = APB1ENR1.FDCANEN verified in MspInit */
     uint8_t  msp_ccipr_ok;      /* 1 = FDCANSEL==PCLK1 verified in MspInit */
