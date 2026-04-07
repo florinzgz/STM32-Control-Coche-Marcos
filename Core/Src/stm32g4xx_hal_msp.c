@@ -238,13 +238,24 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     /* PA8=RPWM_FL (TIM1_CH1), PA9=LPWM_FL (TIM1_CH2),
      * PA10=RPWM_FR (TIM1_CH3).
      * PA11 was TIM1_CH4 (LPWM_FR) but is now FDCAN1_RX;
-     * LPWM_FR moved to TIM15_CH1 / PB14.                 */
+     * LPWM_FR moved to TIM1_CH4 / PC3 (AF2).                 */
     GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    /* PC3 = LPWM_FR (TIM1_CH4, AF2) — front-right motor reverse PWM.
+     * Moved from PB14/TIM15_CH1 to consolidate both FR motor channels
+     * on TIM1 for perfect UEV synchronisation and BREAK2/LOCKUP safety. */
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM1;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
   /* USER CODE BEGIN TIM1_PWM_MspInit 1 */
 
   /* USER CODE END TIM1_PWM_MspInit 1 */
@@ -287,20 +298,6 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
   /* USER CODE BEGIN TIM8_PWM_MspInit 1 */
 
   /* USER CODE END TIM8_PWM_MspInit 1 */
-  }
-  else if(htim_pwm->Instance==TIM15)
-  {
-    __HAL_RCC_TIM15_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    /* PB14 = LPWM_FR (TIM15_CH1, AF1) — front-right motor reverse PWM.
-     * Moved here from PB9/TIM17_CH1 to avoid JP7 bootloader conflict. */
-    GPIO_InitStruct.Pin = GPIO_PIN_14;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF1_TIM15;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   }
 }
 
@@ -368,6 +365,12 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    /* PC3 = LPWM_FR (TIM1_CH4, AF2) */
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM1;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
   }
   else if(htim->Instance==TIM3)
   {
@@ -390,17 +393,6 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF4_TIM8;
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-  }
-  else if(htim->Instance==TIM15)
-  {
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    GPIO_InitStruct.Pin = GPIO_PIN_14;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF1_TIM15;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   }
 }
 
