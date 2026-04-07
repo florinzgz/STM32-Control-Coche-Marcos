@@ -9,7 +9,19 @@ void SystemInit(void)
   #if defined(USER_VECT_TAB_ADDRESS)
     SCB->VTOR = VECT_TAB_BASE_ADDRESS | VECT_TAB_OFFSET;
   #endif
-  
+
+  /* Enable FPU: grant full access to coprocessors CP10 and CP11.
+   * This MUST happen before any FPU instruction executes, otherwise
+   * the Cortex-M4 raises a UsageFault (NOCP) that escalates to
+   * HardFault.  The toolchain compiles with -mfloat-abi=hard, so
+   * the compiler may emit VLDR/VMOV as early as HAL_Init().        */
+  SCB->CPACR |= ((3UL << (10 * 2)) | (3UL << (11 * 2)));
+  __DSB();
+  __ISB();
+
+  /* Enable automatic and lazy FPU context stacking on exception
+   * entry so that ISR prologue/epilogue cost is minimal when the
+   * handler does not touch FP registers.                            */
   FPU->FPCCR |= ((3UL << 30) | (3UL << 28));
 }
 
