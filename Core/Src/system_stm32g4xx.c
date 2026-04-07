@@ -14,8 +14,13 @@ void SystemInit(void)
    * This MUST happen before any FPU instruction executes, otherwise
    * the Cortex-M4 raises a UsageFault (NOCP) that escalates to
    * HardFault.  The toolchain compiles with -mfloat-abi=hard, so
-   * the compiler may emit VLDR/VMOV as early as HAL_Init().        */
-  SCB->CPACR |= ((3UL << (10 * 2)) | (3UL << (11 * 2)));
+   * the compiler may emit VLDR/VMOV as early as HAL_Init().
+   *
+   * Use the direct CPACR address (0xE000ED88) instead of the CMSIS
+   * SCB->CPACR accessor because some toolchain-bundled CMSIS headers
+   * (e.g. gcc-arm-none-eabi 13.2) define SCB_Type without the CPACR
+   * field and shadow the project's newer Drivers/CMSIS headers.     */
+  (*((volatile uint32_t *)0xE000ED88U)) |= ((3UL << 20) | (3UL << 22));
   __DSB();
   __ISB();
 
