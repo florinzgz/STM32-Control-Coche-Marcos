@@ -110,6 +110,19 @@ bool Startup_IsInhibited(void) { return startup_inhibit; }
 bool fdcan_init_ok = false;
 bool i2c_init_ok   = false;
 
+/* ---- Boot phase tracker (readable via SWD even when debugger halts at boot) ----
+ * 0 = pre-init (initial C startup)
+ * 1 = GPIO done, boot LED blinks started
+ * 2 = MX peripherals done (FDCAN, I2C, TIM, IWDG)
+ * 3 = Module init done (Motor, CAN, Safety, etc.)
+ * 4 = Post-init LED indication done
+ * 5 = Main loop entered
+ *
+ * If the debugger shows boot_phase < 5, the MCU was halted during boot
+ * and all diagnostic variables (can_init_diag, fdcan_init_ok, etc.)
+ * may still be at their initial zero/false values — not a real failure. */
+volatile uint8_t boot_phase = 0;
+
 /* ---- Private prototypes ---- */
 void SystemClock_Config(void);
 static void MX_ADC1_Init(void);
@@ -148,6 +161,7 @@ int main(void)
 
     /* Peripheral initialisation */
     MX_GPIO_Init();
+    boot_phase = 1;  /* GPIO done, entering boot LED sequence */
 
     /* ---- Startup LED indication ----
      * Three clearly-visible blinks on LD2 (PA5, soldered on the Nucleo
@@ -183,6 +197,7 @@ int main(void)
     MX_TIM3_Init();
     MX_TIM8_Init();
     MX_IWDG_Init();
+    boot_phase = 2;  /* All MX peripherals initialised */
 
     /* Module initialisation */
     Motor_Init();
@@ -195,6 +210,7 @@ int main(void)
     SteeringCentering_Init();
     ErrorLog_Init();
     ErrorLog_SetResetCause(reset_cause);
+    boot_phase = 3;  /* All modules initialised */
 
     /* ---- Post-init CAN status LED indication ----
      * After all peripherals are initialised, show CAN init result on LD2:
@@ -237,6 +253,7 @@ int main(void)
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
+    boot_phase = 4;  /* Post-init complete, about to enter main loop */
 
     /* Timing counters */
     uint32_t tick_10ms   = 0;
@@ -258,6 +275,7 @@ int main(void)
     SystemState_t prev_state_for_arm = SYS_STATE_BOOT;
 
     /* ---- Main control loop ---- */
+    boot_phase = 5;  /* Main loop entered — init complete */
     while (1) {
         uint32_t now = HAL_GetTick();
 
@@ -504,6 +522,19 @@ int main(void)
             }
         }
 
+        /* ---- LED_DIAG (PB14): CAN status indicator ----
+         * Visible without a debugger on the external diagnostic LED.
+         *   • CAN OK (fdcan_init_ok):  solid ON
+         *   • CAN FAIL (!fdcan_init_ok): fast blink ~4 Hz (125 ms ON/OFF)
+         * Requires external LED + 330 Ω resistor on PB14 (CN10 pin 28). */
+        if (fdcan_init_ok) {
+            HAL_GPIO_WritePin(PORT_LED_DIAG, PIN_LED_DIAG, GPIO_PIN_SET);
+        } else {
+            uint32_t diag_phase = now % 250U;
+            HAL_GPIO_WritePin(PORT_LED_DIAG, PIN_LED_DIAG,
+                (diag_phase < 125U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        }
+
         /* ---- 500 ms CAN test transmit: send a test frame (ID 0x123) ---- */
         if ((now - tick_500ms) >= 500) {
             tick_500ms = now;
@@ -745,8 +776,8 @@ static void MX_FDCAN1_Init(void)
     can_init_diag.retries = 0U;
 
     for (int attempt = 0; attempt < FDCAN_INIT_MAX_RETRIES; attempt++) {
+        can_init_diag.retries = (uint8_t)attempt;
         if (attempt > 0) {
-            can_init_diag.retries = (uint8_t)attempt;
             HAL_FDCAN_DeInit(&hfdcan1);
             HAL_Delay(FDCAN_CLOCK_SETTLE_DELAY_MS);
         }
@@ -771,6 +802,7 @@ static void MX_FDCAN1_Init(void)
         // cppcheck-suppress duplicateAssignExpression
         uint32_t cccr2 = hfdcan1.Instance->CCCR;
         uint32_t cccr3 = hfdcan1.Instance->CCCR;
+        can_init_diag.cccr_last = cccr1;  /* Capture for SWD debugging */
         if (cccr1 != cccr2 || cccr2 != cccr3) {
             HAL_FDCAN_DeInit(&hfdcan1);
             continue;  /* Inconsistent reads — clock gate unstable */

@@ -15,9 +15,16 @@
 #include <stdint.h>
 
 /* FDCAN initialisation sequence diagnostics — readable via SWD debugger.
- * Populated once by CAN_Init(); never modified at runtime.
+ * Populated by MspInit and CAN_Init(); never modified at runtime after boot.
  * Each field stores the HAL return value (HAL_OK = 0) so the exact
- * step that failed can be identified without printf/UART.              */
+ * step that failed can be identified without printf/UART.
+ *
+ * Debug console cheat-sheet (copy-paste into GDB / STM32CubeIDE):
+ *   print can_init_diag
+ *   print boot_phase            // 0=pre-GPIO … 5=main-loop
+ *   print fdcan_init_ok
+ *   print/x *(uint32_t*)0x40021088   // RCC->CCIPR  (FDCANSEL bits 25:24)
+ *   print/x *(uint32_t*)0x40021058   // RCC->APB1ENR1 (FDCANEN bit 25)  */
 typedef struct {
     uint8_t  hal_init;           /* HAL_FDCAN_Init          return value */
     uint8_t  filter_global;      /* ConfigGlobalFilter      return value */
@@ -32,6 +39,8 @@ typedef struct {
     uint8_t  msp_clk_ok;        /* 1 = APB1ENR1.FDCANEN verified in MspInit */
     uint8_t  msp_ccipr_ok;      /* 1 = FDCANSEL==PCLK1 verified in MspInit */
     uint32_t ccipr_raw;          /* Raw RCC_CCIPR snapshot for debugging */
+    uint8_t  msp_call_count;     /* Incremented each HAL_FDCAN_MspInit call */
+    uint32_t cccr_last;          /* Last raw CCCR reading from retry loop   */
 } CAN_InitDiag_t;
 
 extern volatile CAN_InitDiag_t can_init_diag;

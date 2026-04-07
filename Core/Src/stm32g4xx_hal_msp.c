@@ -40,7 +40,7 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
   if(hfdcan->Instance==FDCAN1)
   {
   /* USER CODE BEGIN FDCAN1_MspInit 0 */
-
+    can_init_diag.msp_call_count++;   /* Track how many times MspInit runs */
   /* USER CODE END FDCAN1_MspInit 0 */
 
     /* ================================================================
