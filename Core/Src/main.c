@@ -152,10 +152,14 @@ int main(void)
     MX_GPIO_Init();
 
     /* ---- Startup LED indication ----
-     * Three clearly-visible blinks on LD2 (PA5) confirm the firmware
-     * has booted and reached peripheral initialisation.
+     * Three clearly-visible blinks on LD2 (PA5, soldered on the Nucleo
+     * board) confirm the firmware has booted and reached peripheral init.
      *
-     * Pattern interpretation (observe LD2 after plugging USB / reset):
+     * Sequence: 500 ms dark (baseline) → 3 × (300 ms ON / 300 ms OFF).
+     * Total ≈ 2.3 s.  IWDG has not started yet, so there is no
+     * watchdog constraint on this phase.
+     *
+     * Pattern interpretation (observe LD2 after reset):
      *   • No blink at all     → MCU not executing user code
      *                           (check BOOT0 jumper or re-flash via ST-LINK)
      *   • 3 blinks then ~2 Hz → firmware crashed during a later MX_Init
@@ -164,11 +168,13 @@ int main(void)
      *                         → firmware running normally, CAN init OK
      *   • 3 blinks, pause, 5 rapid blinks, then brief flash every ~2 s
      *                         → firmware running, but CAN init FAILED   */
+    HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET); /* ensure OFF  */
+    HAL_Delay(500);  /* dark lead-in so the first ON edge is obvious   */
     for (int k = 0; k < 3; k++) {
-        HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-        HAL_Delay(150);
-        HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-        HAL_Delay(150);
+        HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_SET);
+        HAL_Delay(300);
+        HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET);
+        HAL_Delay(300);
     }
 
     MX_ADC1_Init();
@@ -195,26 +201,26 @@ int main(void)
 
     /* ---- Post-init CAN status LED indication ----
      * After all peripherals are initialised, show CAN init result on LD2:
-     *   • 1 long blink (400 ms)  → FDCAN initialised successfully
-     *   • 5 rapid blinks (80 ms) → FDCAN init failed (hardware issue)
-     * A 300 ms gap before the pattern separates it visually from the
-     * 3 boot blinks.  The total extra delay (≤ 1.1 s) is acceptable
+     *   • 1 long blink (600 ms)  → FDCAN initialised successfully
+     *   • 5 blinks (150 ms ON/OFF) → FDCAN init failed (hardware issue)
+     * A 500 ms gap before the pattern separates it visually from the
+     * 3 boot blinks.  The total extra delay (≤ 2 s) is acceptable
      * because IWDG timeout is ~4 s and CAN heartbeat hasn't started. */
-    HAL_Delay(300);  /* visual separator after 3 boot blinks */
+    HAL_Delay(500);  /* visual separator after 3 boot blinks */
     {
         if (fdcan_init_ok) {
             /* CAN OK: one long blink */
-            HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-            HAL_Delay(400);
-            HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-            HAL_Delay(200);
+            HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_SET);
+            HAL_Delay(600);
+            HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET);
+            HAL_Delay(300);
         } else {
             /* CAN FAILED: 5 rapid blinks */
             for (int k = 0; k < 5; k++) {
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
-                HAL_Delay(80);
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
-                HAL_Delay(80);
+                HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_SET);
+                HAL_Delay(150);
+                HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET);
+                HAL_Delay(150);
             }
         }
     }
@@ -495,9 +501,9 @@ int main(void)
             uint32_t phase = now - tick_heartbeat;
             if (phase >= 2000) {
                 tick_heartbeat = now;
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_SET);
+                HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_SET);
             } else if (phase >= 50) {
-                HAL_GPIO_WritePin(GPIOA, PIN_LD2, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET);
             }
         }
 
@@ -602,12 +608,13 @@ static void MX_GPIO_Init(void)
     gpio.Pin = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* Nucleo-64 user LED LD2 (PA5) — heartbeat indicator */
+    /* Nucleo-64 user LED LD2 (PA5) — soldered on the board.
+     * Used for boot blinks, CAN status, heartbeat, and fault indication. */
     gpio.Pin   = PIN_LD2;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOA, &gpio);
+    HAL_GPIO_Init(PORT_LD2, &gpio);
 
     /* LED power relays (PB10 front, PB11 rear) — both start OFF (safe default) */
     gpio.Pin = PIN_RELAY_LED | PIN_RELAY_LED_REAR;
@@ -1132,10 +1139,11 @@ void Error_Handler(void)
      * SystemClock_Config); at that frequency ~4 000 000 volatile
      * iterations ≈ 250 ms.                                            */
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    GPIOA->MODER = (GPIOA->MODER & ~(3U << (5 * 2)))
-                 | (1U << (5 * 2));           /* PA5 = output           */
+    PORT_LD2->MODER = (PORT_LD2->MODER
+                       & ~(3U << (PIN_LD2_N * 2)))
+                    | (1U << (PIN_LD2_N * 2));           /* PA5 = output */
     while (1) {
-        GPIOA->ODR ^= PIN_LD2;
+        PORT_LD2->ODR ^= PIN_LD2;
         for (volatile uint32_t d = 0; d < 4000000U; d++) { __NOP(); }
     }
 }

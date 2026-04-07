@@ -79,6 +79,36 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-286 — fix(led): revert LED back to PA5 (LD2) — onboard Nucleo LED
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Se revierte el LED de estado de PB8 a PA5 (LD2). LD2 es el LED verde soldado directamente en la placa NUCLEO-G474RE (UM2505 §6.5). No necesita LED externo ni resistencia. El cambio a PB8 fue un error — PA5 es la opción correcta para este hardware.
+- **Root cause:** En PR-285 se movió el LED a PB8 creyendo que PA5 tenía interferencia del ST-Link vía SB21. Sin embargo, el usuario confirmó que LD2 (PA5) es el LED soldado en la propia placa Nucleo y funciona correctamente. No hay ningún LED externo conectado.
+- **Solución aplicada:** (1) Revertir defines a `PIN_LD2` (GPIO_PIN_5), `PORT_LD2` (GPIOA), `PIN_LD2_N` (5U). (2) Todos los `HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, ...)` → `HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, ...)`. (3) Error_Handler y fault handlers: GPIOB bit 8 → GPIOA bit 5. (4) Eliminar PB8 STATUS_LED del .ioc.
+- **Impacto en el sistema:** Solo cambia el pin físico. Vuelve al LED soldado en la placa. No requiere hardware externo.
+- **Archivos modificados:** `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/stm32g4xx_it.c`, `STM32-Control-Coche-Marcos.ioc`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa. Integrity check pasa.
+
+### PR-285 — refactor(led): migrate status LED from PA5 (LD2) to PB8
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Se migra todo el indicador LED de estado de PA5 (LD2) a PB8 (STATUS_LED). PA5 comparte el solder bridge SB21 con el SPI SCK del ST-Link en la placa Nucleo-64, causando que el LED sea controlado por el debugger en vez del firmware. PB8 es un GPIO libre accesible en el conector Morpho (CN10 pin 3). Requiere conectar un LED externo con resistencia a PB8.
+- **Root cause:** PA5 (LD2) está compartido con el ST-Link SPI vía SB21 (cerrado por defecto en fábrica). Durante programación o debug activo, el ST-Link puede encender/apagar PA5 sin control del firmware, haciendo el LED no fiable para indicar estados del sistema. Según UM2505, la NUCLEO-G474RE solo tiene LD1 (COM, ST-Link) y LD2 (USER, PA5) — no existe LD4.
+- **Solución aplicada:** (1) Nuevo define centralizado: `PIN_LED_STATUS` (GPIO_PIN_8), `PORT_LED_STATUS` (GPIOB), `PIN_LED_STATUS_N` (8U) en project_config.h. (2) Todos los `HAL_GPIO_WritePin(GPIOA, PIN_LD2, ...)` → `HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, ...)`. (3) Error_Handler y fault handlers: registro directo actualizado de GPIOA bit 5 → GPIOB bit 8. (4) .ioc actualizado con PB8 como GPIO_Output etiquetado STATUS_LED.
+- **Impacto en el sistema:** Solo afecta qué pin físico se usa para indicación visual. No cambia lógica, timing, ni safety. El usuario necesita conectar un LED+resistencia a PB8 (Morpho CN10 pin 3).
+- **Archivos modificados:** `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/stm32g4xx_it.c`, `STM32-Control-Coche-Marcos.ioc`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa. Integrity check pasa.
+
+### PR-284 — feat(led): make boot blinks unmissable (300 ms + dark lead-in)
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** El usuario no veía los 3 blinks de boot al pulsar RESET porque a 150 ms ON/OFF el patrón duraba solo 900 ms y se confundía con un encendido directo. Se duplica el timing a 300 ms ON/OFF (1.8 s) con un período oscuro de 500 ms previo. También se aumenta el blink CAN-OK de 400 ms a 600 ms y CAN-FAIL de 80 ms a 150 ms ON/OFF. Separación post-boot aumentada a 500 ms.
+- **Root cause:** Sin período oscuro inicial, el primer blink ON se confunde con el encendido natural del LED tras reset. A 150 ms por fase, los 3 blinks pasan en 900 ms — demasiado rápido para el ojo.
+- **Solución aplicada:** (1) LED OFF explícito + 500 ms dark lead-in antes de empezar los blinks. (2) Boot blinks: 150 ms → 300 ms por fase (3 blinks = 1.8 s, imposible de no ver). (3) CAN status: pausa 500 ms + 1 blink largo 600 ms (CAN OK) o 5 blinks 150 ms (CAN FAIL). Todo antes de IWDG timeout (~4 s).
+- **Impacto en el sistema:** Solo afecta la secuencia de boot LED (~4 s de delay total antes del main loop). No afecta lógica de control, safety, ni timing del main loop. IWDG se inicia después de los boot blinks.
+- **Archivos modificados:** `Core/Src/main.c`, `PROJECT_CHANGELOG.md`
+- **Tests:** Integrity check pasa. Build requiere cross-compiler (no disponible en sandbox).
+
 ### PR-283 — feat(led): improve boot visibility and add CAN init status indication
 - **Fecha:** 2026-04-06
 - **Autor:** Copilot
@@ -489,3 +519,6 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-06 | **FDCAN init robusta** — Secuencia determinista de bring-up: clock source before enable, readback-verify RCC, reset con DSB/ISB, poll adaptativo CCCR, started=0 por defecto, 4 nuevos campos diagnóstico | #281 |
 | 2026-04-06 | **Decouple hal_msp + fix filter docs** — Extraer `CAN_InitDiag_t` a header propio, eliminar include de `can_handler.h` en hal_msp.c, corregir descripción filtros CAN (accept-all, no reject-all) | #282 |
 | 2026-04-06 | **LED boot visibility** — Boot blinks 60→150 ms, post-init CAN status LED (1 long=OK, 5 rapid=FAIL), volatile can_init_diag | #283 |
+| 2026-04-07 | **Boot blinks unmissable** — Boot blinks 150→300 ms, dark lead-in 500 ms, CAN status blinks más lentos, separación 500 ms | #284 |
+| 2026-04-07 | **LED migrada PA5→PB8** — Status LED de PA5 (LD2, interferido por ST-Link SB21) a PB8 (GPIO libre, Morpho CN10-3). LED externo requerido. | #285 |
+| 2026-04-07 | **LED revertida PB8→PA5 (LD2)** — LD2 está soldado en la placa Nucleo. No necesita LED externo. Revert de PR-285. | #286 |

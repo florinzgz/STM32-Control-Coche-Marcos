@@ -22,10 +22,11 @@ extern I2C_HandleTypeDef hi2c1;
 static void Fault_BlinkLD2(uint32_t delay_count)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    GPIOA->MODER = (GPIOA->MODER & ~(3U << (5 * 2)))
-                 | (1U << (5 * 2));           /* PA5 = output           */
+    PORT_LD2->MODER = (PORT_LD2->MODER
+                       & ~(3U << (PIN_LD2_N * 2)))
+                    | (1U << (PIN_LD2_N * 2));           /* PA5 = output */
     while (1) {
-        GPIOA->ODR ^= PIN_LD2;
+        PORT_LD2->ODR ^= PIN_LD2;
         for (volatile uint32_t d = 0; d < delay_count; d++) { __NOP(); }
     }
 }
@@ -59,8 +60,8 @@ void HardFault_Handler(void)
     /* LED power relays on GPIOB — also force OFF */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
 
-    /* Rapid-blink LD2 (~10 Hz) — indicates a CPU fault (distinct from
-     * Error_Handler's ~2 Hz slow blink and the main-loop 5 Hz heartbeat). */
+    /* Rapid-blink status LED (~10 Hz) — indicates a CPU fault (distinct
+     * from Error_Handler's ~2 Hz slow blink and the main-loop heartbeat). */
     Fault_BlinkLD2(800000U);            /* never returns */
 }
 
@@ -198,10 +199,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U) {
         /* Visual feedback: toggle LD2 on every received CAN frame.
-         * Note: LD2 is also toggled at 200 ms by the main-loop
-         * heartbeat; on CAN-active buses the combined pattern will
-         * differ from the steady 200 ms blink, providing a visual
-         * indication of bus activity.
+         * Note: LD2 is also toggled by the main-loop heartbeat;
+         * on CAN-active buses the combined pattern will differ from the
+         * steady heartbeat blink, providing a visual indication of bus
+         * activity.
          *
          * IMPORTANT: Do NOT call HAL_FDCAN_GetRxMessage() here.
          * The message must remain in FIFO0 so that the main-loop
@@ -209,6 +210,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
          * liveness, throttle commands, steering, etc.).  Reading
          * here would consume the message before the main loop sees
          * it, causing silent loss of all ESP32 commands.            */
-        HAL_GPIO_TogglePin(GPIOA, PIN_LD2);
+        HAL_GPIO_TogglePin(PORT_LD2, PIN_LD2);
     }
 }

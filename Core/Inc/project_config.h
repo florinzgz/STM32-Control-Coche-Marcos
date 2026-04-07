@@ -180,9 +180,14 @@
 #define PIN_I2C_SDA        GPIO_PIN_7   /* PB7 - I2C1_SDA */
 
 /* ========================================================================== */
-/*                       NUCLEO-64 USER LED                                   */
+/*                       NUCLEO-64 USER LED  (LD2)                            */
 /* ========================================================================== */
-#define PIN_LD2            GPIO_PIN_5   /* PA5 — Nucleo-64 user LED (LD2) */
+/* LD2 is a green LED soldered on the NUCLEO-G474RE board, directly connected
+ * to PA5 (per UM2505 §6.5).  No external wiring or resistor is needed.
+ * Used for boot indication, CAN status, heartbeat, and fault blink.         */
+#define PIN_LD2            GPIO_PIN_5   /* PA5 — Nucleo-64 user LED (LD2)    */
+#define PORT_LD2           GPIOA        /* PA5 port                          */
+#define PIN_LD2_N          5U           /* bit number for direct MODER/ODR   */
 
 /* ========================================================================== */
 /*                       ONEWIRE BUS (DS18B20 temperatures)                   */
