@@ -180,18 +180,14 @@
 #define PIN_I2C_SDA        GPIO_PIN_7   /* PB7 - I2C1_SDA */
 
 /* ========================================================================== */
-/*                       STATUS LED (heartbeat / fault indicator)             */
+/*                       NUCLEO-64 USER LED  (LD2)                            */
 /* ========================================================================== */
-/* Moved from PA5 (LD2) to PB8 because PA5 shares solder bridge SB21 with the
- * ST-Link SPI SCK on the Nucleo-64 board, causing the LED to be driven by the
- * debugger rather than the firmware.  PB8 is a free GPIO on the Morpho
- * connector (CN10 pin 3).  Connect an external LED+resistor there.
- *
- * To use a different pin, update these three macros and the GPIO init in
- * MX_GPIO_Init() (main.c).                                                  */
-#define PIN_LED_STATUS     GPIO_PIN_8   /* PB8 — status LED pin              */
-#define PORT_LED_STATUS    GPIOB        /* PB8 — status LED port             */
-#define PIN_LED_STATUS_N   8U           /* bit number for direct MODER/ODR   */
+/* LD2 is a green LED soldered on the NUCLEO-G474RE board, directly connected
+ * to PA5 (per UM2505 §6.5).  No external wiring or resistor is needed.
+ * Used for boot indication, CAN status, heartbeat, and fault blink.         */
+#define PIN_LD2            GPIO_PIN_5   /* PA5 — Nucleo-64 user LED (LD2)    */
+#define PORT_LD2           GPIOA        /* PA5 port                          */
+#define PIN_LD2_N          5U           /* bit number for direct MODER/ODR   */
 
 /* ========================================================================== */
 /*                       ONEWIRE BUS (DS18B20 temperatures)                   */

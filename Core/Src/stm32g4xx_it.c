@@ -14,20 +14,19 @@ extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 extern I2C_HandleTypeDef hi2c1;
 
 /* ---- Fault-indication LED helper ----
- * Ensures PB8 (status LED) is driveable even if MX_GPIO_Init() has not
- * run, then blinks the status LED forever at a rate determined by
- * delay_count.
+ * Ensures PA5 (LD2) is driveable even if MX_GPIO_Init() has not run,
+ * then blinks LD2 forever at a rate determined by delay_count.
  * Approximate timing at SYSCLK = 170 MHz:
  *   800 000 → ~50 ms toggle (~10 Hz blink)
  * 4 000 000 → ~250 ms toggle (~2 Hz blink)                            */
-static void Fault_BlinkLED(uint32_t delay_count)
+static void Fault_BlinkLD2(uint32_t delay_count)
 {
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    PORT_LED_STATUS->MODER = (PORT_LED_STATUS->MODER
-                              & ~(3U << (PIN_LED_STATUS_N * 2)))
-                           | (1U << (PIN_LED_STATUS_N * 2));  /* PB8 = output */
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    PORT_LD2->MODER = (PORT_LD2->MODER
+                       & ~(3U << (PIN_LD2_N * 2)))
+                    | (1U << (PIN_LD2_N * 2));           /* PA5 = output */
     while (1) {
-        PORT_LED_STATUS->ODR ^= PIN_LED_STATUS;
+        PORT_LD2->ODR ^= PIN_LD2;
         for (volatile uint32_t d = 0; d < delay_count; d++) { __NOP(); }
     }
 }
@@ -63,7 +62,7 @@ void HardFault_Handler(void)
 
     /* Rapid-blink status LED (~10 Hz) — indicates a CPU fault (distinct
      * from Error_Handler's ~2 Hz slow blink and the main-loop heartbeat). */
-    Fault_BlinkLED(800000U);            /* never returns */
+    Fault_BlinkLD2(800000U);            /* never returns */
 }
 
 void MemManage_Handler(void)
@@ -77,7 +76,7 @@ void MemManage_Handler(void)
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    Fault_BlinkLED(800000U);
+    Fault_BlinkLD2(800000U);
 }
 
 void BusFault_Handler(void)
@@ -91,7 +90,7 @@ void BusFault_Handler(void)
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    Fault_BlinkLED(800000U);
+    Fault_BlinkLD2(800000U);
 }
 
 void UsageFault_Handler(void)
@@ -105,7 +104,7 @@ void UsageFault_Handler(void)
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    Fault_BlinkLED(800000U);
+    Fault_BlinkLD2(800000U);
 }
 
 void SVC_Handler(void)
@@ -199,8 +198,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     (void)hfdcan;  /* Single FDCAN instance — handle not used */
 
     if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0U) {
-        /* Visual feedback: toggle status LED on every received CAN frame.
-         * Note: the status LED is also toggled by the main-loop heartbeat;
+        /* Visual feedback: toggle LD2 on every received CAN frame.
+         * Note: LD2 is also toggled by the main-loop heartbeat;
          * on CAN-active buses the combined pattern will differ from the
          * steady heartbeat blink, providing a visual indication of bus
          * activity.
@@ -211,6 +210,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
          * liveness, throttle commands, steering, etc.).  Reading
          * here would consume the message before the main loop sees
          * it, causing silent loss of all ESP32 commands.            */
-        HAL_GPIO_TogglePin(PORT_LED_STATUS, PIN_LED_STATUS);
+        HAL_GPIO_TogglePin(PORT_LD2, PIN_LD2);
     }
 }

@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-286 — fix(led): revert LED back to PA5 (LD2) — onboard Nucleo LED
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Se revierte el LED de estado de PB8 a PA5 (LD2). LD2 es el LED verde soldado directamente en la placa NUCLEO-G474RE (UM2505 §6.5). No necesita LED externo ni resistencia. El cambio a PB8 fue un error — PA5 es la opción correcta para este hardware.
+- **Root cause:** En PR-285 se movió el LED a PB8 creyendo que PA5 tenía interferencia del ST-Link vía SB21. Sin embargo, el usuario confirmó que LD2 (PA5) es el LED soldado en la propia placa Nucleo y funciona correctamente. No hay ningún LED externo conectado.
+- **Solución aplicada:** (1) Revertir defines a `PIN_LD2` (GPIO_PIN_5), `PORT_LD2` (GPIOA), `PIN_LD2_N` (5U). (2) Todos los `HAL_GPIO_WritePin(PORT_LED_STATUS, PIN_LED_STATUS, ...)` → `HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, ...)`. (3) Error_Handler y fault handlers: GPIOB bit 8 → GPIOA bit 5. (4) Eliminar PB8 STATUS_LED del .ioc.
+- **Impacto en el sistema:** Solo cambia el pin físico. Vuelve al LED soldado en la placa. No requiere hardware externo.
+- **Archivos modificados:** `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/stm32g4xx_it.c`, `STM32-Control-Coche-Marcos.ioc`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa. Integrity check pasa.
+
 ### PR-285 — refactor(led): migrate status LED from PA5 (LD2) to PB8
 - **Fecha:** 2026-04-07
 - **Autor:** Copilot
@@ -511,3 +521,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-06 | **LED boot visibility** — Boot blinks 60→150 ms, post-init CAN status LED (1 long=OK, 5 rapid=FAIL), volatile can_init_diag | #283 |
 | 2026-04-07 | **Boot blinks unmissable** — Boot blinks 150→300 ms, dark lead-in 500 ms, CAN status blinks más lentos, separación 500 ms | #284 |
 | 2026-04-07 | **LED migrada PA5→PB8** — Status LED de PA5 (LD2, interferido por ST-Link SB21) a PB8 (GPIO libre, Morpho CN10-3). LED externo requerido. | #285 |
+| 2026-04-07 | **LED revertida PB8→PA5 (LD2)** — LD2 está soldado en la placa Nucleo. No necesita LED externo. Revert de PR-285. | #286 |
