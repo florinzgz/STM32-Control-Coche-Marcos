@@ -141,18 +141,26 @@ static bool check_can_not_busoff(void)
 
 /**
  * @brief  Non-destructive RAM sanity check.
- *         Writes a known pattern to a temporary stack variable and
- *         reads it back.  Detects gross RAM failures (stuck bits,
+ *         Writes known patterns to temporary stack variables and
+ *         reads them back.  Detects gross RAM failures (stuck bits,
  *         address-line faults) without clobbering any application data.
+ *         Uses complementary patterns (0xAAAA/0x5555) to detect stuck-at
+ *         faults on individual data lines.
  */
 static bool check_ram_sanity(void)
 {
-    volatile uint32_t ram_test = 0xDEADBEEFU;
-    if (ram_test != 0xDEADBEEFU) return false;
-    ram_test = 0x55AA55AAU;
-    if (ram_test != 0x55AA55AAU) return false;
-    ram_test = 0x00000000U;
-    if (ram_test != 0x00000000U) return false;
+    volatile uint32_t a = 0xDEADBEEFU;
+    volatile uint32_t b = 0xAAAAAAAAU;
+    if (a != 0xDEADBEEFU) return false;
+    if (b != 0xAAAAAAAAU) return false;
+    a = 0x55555555U;
+    b = 0x00000000U;
+    if (a != 0x55555555U) return false;
+    if (b != 0x00000000U) return false;
+    a = 0x00000000U;
+    b = 0xFFFFFFFFU;
+    if (a != 0x00000000U) return false;
+    if (b != 0xFFFFFFFFU) return false;
     return true;
 }
 
