@@ -94,6 +94,11 @@ static uint32_t last_any_rx_tick = 0;
  * 1000 ms = 1 second of complete silence.                                     */
 #define CAN_GLOBAL_SILENCE_MS  1000U
 
+/* Consecutive TX failure threshold before raising diagnostic flag.
+ * 5 consecutive failures (500 ms of failed heartbeats at 100 ms rate)
+ * strongly indicates the bus has no peer to ACK frames.                */
+#define CAN_TX_NACK_THRESHOLD  5U
+
 /* Saturating increment for uint32_t counters.
  * Prevents wrap-around to 0 after 4 billion events, which would
  * clear the saturated diagnostic byte in CAN_SendStatusSafety.   */
@@ -134,8 +139,16 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     
     if (result == HAL_OK) {
         sat_inc_u32(&can_stats.tx_count);
+        /* TX success — reset consecutive failure tracker */
+        can_diag.tx_consec_fail = 0;
+        can_diag.tx_nack_flag   = 0;
     } else {
         sat_inc_u32(&can_stats.tx_errors);
+        /* TX failure — track consecutive failures for NACK detection */
+        if (can_diag.tx_consec_fail < 255U)
+            can_diag.tx_consec_fail++;
+        if (can_diag.tx_consec_fail >= CAN_TX_NACK_THRESHOLD)
+            can_diag.tx_nack_flag = 1;
     }
     
     return result;
@@ -1292,4 +1305,35 @@ bool CAN_IsESP32Alive(void) {
  */
 bool CAN_IsGlobalSilent(void) {
     return ((HAL_GetTick() - last_any_rx_tick) > CAN_GLOBAL_SILENCE_MS);
+}
+
+/**
+ * @brief  Compute CAN RX frames-per-second metric.
+ *
+ * Call once per second from the 1000 ms task tier.  Compares the current
+ * rx_count with the snapshot taken at the previous call and stores the
+ * delta in can_stats.rx_frames_per_sec.
+ *
+ * A sudden drop from e.g. 50 fps to 0 indicates the bus has died (even
+ * if CAN_IsGlobalSilent() has not yet reached its 1-second threshold).
+ * The value is purely diagnostic — no safety action is taken here.
+ */
+void CAN_UpdateFrameRate(void) {
+    uint32_t now = HAL_GetTick();
+    /* Guard: avoid division-by-zero if called too soon after init.
+     * rx_rate_tick is 0 on first call — initialise and return.        */
+    if (can_stats.rx_rate_tick == 0) {
+        can_stats.rx_rate_tick  = now;
+        can_stats.rx_count_prev = can_stats.rx_count;
+        return;
+    }
+    uint32_t elapsed = now - can_stats.rx_rate_tick;
+    if (elapsed == 0) return;  /* Avoid division by zero */
+    /* Compute frames received since last snapshot */
+    uint32_t delta = can_stats.rx_count - can_stats.rx_count_prev;
+    /* Normalise to 1-second rate (handles jitter if called at ±10 ms) */
+    can_stats.rx_frames_per_sec = (delta * 1000U) / elapsed;
+    /* Save snapshot for next call */
+    can_stats.rx_count_prev = can_stats.rx_count;
+    can_stats.rx_rate_tick  = now;
 }

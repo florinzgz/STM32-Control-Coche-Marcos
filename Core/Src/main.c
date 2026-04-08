@@ -544,6 +544,10 @@ int main(void)
              * every OW_RESCAN_INTERVAL_MS to detect sensors added or
              * removed at runtime (guarded internally by timestamp).       */
             Temperature_PeriodicRescan();
+
+            /* CAN frame rate computation — diagnostic metric.
+             * Updates can_stats.rx_frames_per_sec for SWD inspection.     */
+            CAN_UpdateFrameRate();
         }
 
         /* ---- ~2 s LED heartbeat: brief flash confirms firmware alive ----

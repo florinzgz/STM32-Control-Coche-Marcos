@@ -90,6 +90,10 @@ typedef struct {
     uint32_t last_heartbeat_esp32;
     uint32_t busoff_count;                  /* Total bus-off events detected     */
     uint32_t fifo_overflow_count;           /* FIFO message-lost events          */
+    /* ---- Frame health monitoring (Part 3) ---- */
+    uint32_t rx_count_prev;                 /* rx_count snapshot at last 1-second tick */
+    uint32_t rx_frames_per_sec;             /* Computed: frames received in last 1 s   */
+    uint32_t rx_rate_tick;                  /* Timestamp of last FPS computation        */
 } CAN_Stats_t;
 
 /* CAN bus error diagnostics — readable via SWD debugger.
@@ -102,6 +106,9 @@ typedef struct {
     uint8_t  warning;           /* 1 = error warning threshold exceeded */
     uint8_t  tec;               /* Transmit Error Counter (0-255)       */
     uint8_t  rec;               /* Receive Error Counter  (0-255)       */
+    /* ---- TX validation (Part 5) ---- */
+    uint8_t  tx_nack_flag;      /* 1 = repeated TX failures detected    */
+    uint8_t  tx_consec_fail;    /* Consecutive TX failures (0-255)      */
 } CAN_Diag_t;
 
 /* CAN_InitDiag_t is defined in can_init_diag.h (included above) to allow
@@ -131,6 +138,7 @@ bool CAN_IsESP32Alive(void);
 bool CAN_IsGlobalSilent(void);
 void CAN_CheckBusOff(void);
 bool CAN_IsBusOff(void);
+void CAN_UpdateFrameRate(void);     /* Call every ~1 s to compute rx FPS  */
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */
