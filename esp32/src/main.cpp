@@ -477,7 +477,7 @@ void setup() {
 
     // Reset cause reporting
     esp_reset_reason_t reason = esp_reset_reason();
-    Serial.printf("[HMI] Reset reason: %s\n",
+    Serial.printf("[BOOT][INFO] Reset reason: %s\n",
         reason == ESP_RST_POWERON  ? "PowerOn" :
         reason == ESP_RST_SW       ? "Software" :
         reason == ESP_RST_PANIC    ? "Panic" :
@@ -489,7 +489,7 @@ void setup() {
         reason == ESP_RST_DEEPSLEEP ? "DeepSleep" :
                                       "Unknown");
 
-    Serial.println("[HMI] ESP32 HMI CAN bring-up booted");
+    Serial.println("[BOOT][INFO] ESP32 HMI CAN bring-up booted");
 
     // Initialize NVS config store
     config_store::init();
@@ -498,10 +498,10 @@ void setup() {
     if (psramInit()) {
         // Give system a moment to complete PSRAM initialization
         delay(10);
-        Serial.printf("[PSRAM] Initialized — total: %u bytes, free: %u bytes\n",
+        Serial.printf("[BOOT][INFO] PSRAM initialized — total: %u bytes, free: %u bytes\n",
                       (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreePsram());
     } else {
-        Serial.println("[PSRAM] CRITICAL: Initialization FAILED — check board_build.arduino.memory_type");
+        Serial.println("[BOOT][ERR] PSRAM initialization FAILED — check board_build.arduino.memory_type");
         // Consider halting or entering degraded mode if PSRAM is required
         // while(1) { delay(1000); }
     }
@@ -518,7 +518,7 @@ void setup() {
     tft.fillScreen(0x2104);  // Dark gray background
     tft.setTextColor(0xFFFF, 0x2104);
     tft.setTextSize(1);
-    Serial.println("[TFT] Display initialized (480x320 landscape)");
+    Serial.println("[BOOT][INFO] Display initialized (480x320 landscape)");
 
     /* ---- TWAI initialization with CiA 301 optimal timing ----
      *
@@ -538,16 +538,16 @@ void setup() {
      * Sample pt  = (1 + 13) / 16 = 87.5 %
      * SJW        = 2  → ±12.5 % oscillator tolerance                  */
     if (twaiInit()) {
-        Serial.printf("[CAN] Initialized at 500 kbps (SP=87.5%%, BRP=10, "
+        Serial.printf("[CAN][INFO] Initialized at 500 kbps (SP=87.5%%, BRP=10, "
                       "TSEG1=13, TSEG2=2, SJW=2)\n");
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-        Serial.printf("[CAN] ESP-IDF %d.%d.%d — quanta_resolution_hz cleared "
+        Serial.printf("[CAN][INFO] ESP-IDF %d.%d.%d — quanta_resolution_hz cleared "
                       "to force BRP mode\n",
                       ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR,
                       ESP_IDF_VERSION_PATCH);
 #endif
     } else {
-        Serial.println("[CAN] Initialization FAILED");
+        Serial.println("[CAN][ERR] Initialization FAILED");
     }
 
     // Initialize obstacle sensor driver (TOFSense-M 8×8 on UART1)
@@ -608,16 +608,16 @@ void setup() {
     vdMutex = xSemaphoreCreateMutex();
     touchActionQueue = xQueueCreate(8, sizeof(TouchAction));
     if (vdMutex == nullptr || touchActionQueue == nullptr) {
-        Serial.println("[HMI] CRITICAL: Failed to create render task resources");
+        Serial.println("[BOOT][ERR] Failed to create render task resources");
         // Fall through — render task won't be created, TFT won't update.
         // System is still safe (CAN, safety, LEDs continue on Core 1).
     } else {
         BaseType_t rc = xTaskCreatePinnedToCore(
             renderTask, "Render", 16384, nullptr, 1, nullptr, 0);
         if (rc != pdPASS) {
-            Serial.println("[HMI] CRITICAL: Failed to create render task");
+            Serial.println("[BOOT][ERR] Failed to create render task");
         } else {
-            Serial.println("[HMI] Render task started on Core 0");
+            Serial.println("[BOOT][INFO] Render task started on Core 0");
         }
     }
 }
@@ -676,7 +676,7 @@ void loop() {
                 }
                 stm32IsAlive = (stm32HbSameCount < STM32_HB_FREEZE_COUNT);
                 if (!stm32IsAlive) {
-                    Serial.println("[SAFETY] STM32 heartbeat counter frozen — inhibiting commands");
+                    Serial.println("[SAFETY][WARN] STM32 heartbeat counter frozen — inhibiting commands");
                 }
             }
 
@@ -690,7 +690,7 @@ void loop() {
                 // Rising edge of startup_inhibit → STM32 just booted/reset
                 stm32StartupSeen  = true;
                 gearResyncPending = true;
-                Serial.println("[SAFETY] STM32 restart detected — gear resync pending");
+                Serial.println("[SAFETY][INFO] STM32 restart detected — gear resync pending");
             }
             if (gearResyncPending && !startupInhibitNow &&
                 hb.systemState == can::SystemState::ACTIVE && stm32IsAlive) {
@@ -699,7 +699,7 @@ void loop() {
                 sendGearCommand(curGear);
                 lastSentGear    = curGear;  // prevent duplicate send from shifter loop
                 gearResyncPending = false;
-                Serial.printf("[SAFETY] Gear resync sent: gear=%u\n", curGear);
+                Serial.printf("[SAFETY][INFO] Gear resync sent: gear=%u\n", curGear);
             }
             if (!startupInhibitNow) {
                 stm32StartupSeen = false;  // inhibit cleared, ready for next detection
@@ -1188,7 +1188,7 @@ void loop() {
                 case TWAI_STATE_BUS_OFF:    stateStr = "BUS_OFF";    break;
                 case TWAI_STATE_RECOVERING: stateStr = "RECOVERING"; break;
             }
-            Serial.printf("[CAN-DIAG] state=%s tx_err=%lu rx_err=%lu "
+            Serial.printf("[CAN][DIAG] state=%s tx_err=%lu rx_err=%lu "
                           "tx_fail=%lu rx_miss=%lu arb_lost=%lu bus_err=%lu\n",
                           stateStr,
                           (unsigned long)status.tx_error_counter,
@@ -1199,7 +1199,7 @@ void loop() {
                           (unsigned long)status.bus_error_count);
             if (status.tx_error_counter >= 128 &&
                 status.state == TWAI_STATE_RUNNING) {
-                Serial.println("[CAN-DIAG] WARNING: Error-passive "
+                Serial.println("[CAN][WARN] Error-passive "
                                "(tx_err>=128). Check CAN bus wiring "
                                "and termination.");
             }
@@ -1231,7 +1231,7 @@ void loop() {
         if (twai_get_status_info(&sts) == ESP_OK) {
             if (sts.state == TWAI_STATE_BUS_OFF) {
                 if (busOffRecoveryCount < 10) {
-                    Serial.printf("[CAN] BUS_OFF detected — recovery attempt %u/10\n",
+                    Serial.printf("[CAN][ERR] BUS_OFF detected — recovery attempt %u/10\n",
                                   busOffRecoveryCount + 1);
                     twai_initiate_recovery();
                     busOffRecoveryCount++;
@@ -1240,7 +1240,7 @@ void loop() {
             } else if (sts.state == TWAI_STATE_STOPPED) {
                 /* Recovery completed — restart the driver */
                 if (twai_start() == ESP_OK) {
-                    Serial.println("[CAN] Recovery complete — TWAI restarted");
+                    Serial.println("[CAN][INFO] Recovery complete — TWAI restarted");
                     busOffRecoveryCount = 0;
                 }
                 errorPassiveSince = 0;
@@ -1268,12 +1268,12 @@ void loop() {
                         errorPassiveSince = now;
                     } else if ((now - errorPassiveSince) >= timeout) {
                         if (slowPhase) {
-                            Serial.printf("[CAN] Error-passive (tx_err=%lu) "
+                            Serial.printf("[CAN][WARN] Error-passive (tx_err=%lu) "
                                           "— slow-periodic reinit (%lu s cycle)\n",
                                           (unsigned long)sts.tx_error_counter,
                                           (unsigned long)(ERROR_PASSIVE_SLOW_TIMEOUT_MS / 1000));
                         } else {
-                            Serial.printf("[CAN] Error-passive (tx_err=%lu) for >3s "
+                            Serial.printf("[CAN][WARN] Error-passive (tx_err=%lu) for >3s "
                                           "— reinit attempt %u/%u\n",
                                           (unsigned long)sts.tx_error_counter,
                                           errorPassiveResets + 1,
@@ -1282,20 +1282,20 @@ void loop() {
                         esp_err_t stop_res = twai_stop();
                         if (stop_res != ESP_OK &&
                             stop_res != ESP_ERR_INVALID_STATE) {
-                            Serial.printf("[CAN] twai_stop() failed: 0x%x\n",
+                            Serial.printf("[CAN][ERR] twai_stop() failed: 0x%x\n",
                                           (unsigned)stop_res);
                         } else {
                             esp_err_t uninst_res = twai_driver_uninstall();
                             if (uninst_res != ESP_OK &&
                                 uninst_res != ESP_ERR_INVALID_STATE) {
-                                Serial.printf("[CAN] twai_driver_uninstall() "
+                                Serial.printf("[CAN][ERR] twai_driver_uninstall() "
                                               "failed: 0x%x\n",
                                               (unsigned)uninst_res);
                             } else if (twaiInit()) {
-                                Serial.println("[CAN] Error-passive recovery "
+                                Serial.println("[CAN][INFO] Error-passive recovery "
                                                "complete — TWAI reinitialized");
                             } else {
-                                Serial.println("[CAN] Error-passive recovery "
+                                Serial.println("[CAN][ERR] Error-passive recovery "
                                                "FAILED — TWAI reinit error");
                             }
                         }
