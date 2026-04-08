@@ -89,6 +89,24 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Archivos modificados:** `Core/Src/boot_validation.c`, `esp32/src/main.cpp`, `PROJECT_CHANGELOG.md`
 - **Tests:** Build con `-Wall -Wextra -Werror` pasa (56096 text, 72 data, 7768 bss).
 
+### PR-290 — feat: advanced robustness features (NaN hardening, CAN diagnostics, boot validation, logging)
+- **Fecha:** 2026-04-08
+- **Autor:** Copilot
+- **Descripción del cambio:** Implementación de funcionalidades avanzadas de robustez en 7 áreas: endurecimiento NaN/Inf de sensores, monitoreo de trama CAN, validación TX FDCAN, extensión de validación de boot, y estandarización de logs.
+- **Root cause:** Aunque el firmware era funcional y limpio, las rutas de comparación de float en `safety_system.c` no protegían contra NaN/Inf (IEEE 754 hace que todas las comparaciones con NaN retornen false, permitiendo que valores inválidos pasen silenciosamente por checks de rango). Además, faltaban métricas de diagnóstico CAN (FPS, fallos TX consecutivos) y validaciones de boot (RAM, clock, periféricos).
+- **Solución aplicada:**
+  1. **NaN/Inf Hardening (PART 1 — CRÍTICO):** Añadidos `isnan()`/`isinf()` a 10+ rutas de comparación float: `Safety_CheckCurrent()`, `Safety_CheckTemperature()` (umbral crítico + histéresis), `Safety_CheckSensors()` (temperatura, corriente, velocidad de rueda), `Safety_CheckBatteryVoltage()`, `Safety_CheckBatteryOvervoltage()`. NaN ahora se trata como fallo del lado seguro (overcurrent, overtemp crítico, fallo de sensor).
+  2. **CAN Frame Health Monitoring (PART 3):** Nuevos campos `rx_frames_per_sec`, `rx_count_prev`, `rx_rate_tick` en `CAN_Stats_t`. Nueva función `CAN_UpdateFrameRate()` llamada cada 1 s desde el tier 1000 ms.
+  3. **FDCAN TX Validation (PART 5):** Nuevos campos `tx_nack_flag`, `tx_consec_fail` en `CAN_Diag_t`. Seguimiento de fallos TX consecutivos en `TransmitFrame()`. Flag levantado tras 5 fallos consecutivos (no ACK).
+  4. **Boot Validation Extension (PART 6):** Tres nuevos checks: `check_ram_sanity()` (patrón write/read no destructivo), `check_clock_sane()` (SystemCoreClock 160-180 MHz), `check_periph_ready()` (diagnóstico fdcan_init_ok/i2c_init_ok). Bitmask ampliado uint8→uint16.
+  5. **Logging Standardization (PART 7):** Prefijos ESP32 estandarizados a formato `[MODULE][SEVERITY]`: `[CAN][INFO/ERR/WARN]`, `[BOOT][INFO/ERR]`, `[SAFETY][WARN/INFO]`, `[CAN][DIAG]`.
+- **Partes ya implementadas previamente (sin cambios necesarios):**
+  - PART 2 (CAN Diagnostics): Ya completo — `CAN_Diag_t` con PSR/ECR/TEC/REC, bus-off/error-passive/warning.
+  - PART 4 (ESP32 BUS-OFF Recovery): Ya completo — polling `twai_get_status_info()`, `twai_initiate_recovery()`, error-passive recovery bifásica.
+- **Impacto en el sistema:** Cierra la vulnerabilidad NaN en todas las rutas de seguridad. Añade métricas de diagnóstico CAN sin overhead en runtime. Boot validation más completa sin aumentar tiempo de boot. Compatible hacia atrás — no cambia APIs públicas ni comportamiento existente.
+- **Archivos modificados:** `Core/Src/safety_system.c`, `Core/Inc/can_handler.h`, `Core/Src/can_handler.c`, `Core/Src/main.c`, `Core/Inc/boot_validation.h`, `Core/Src/boot_validation.c`, `esp32/src/main.cpp`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56368 text, 72 data, 7784 bss). +272 bytes text vs baseline.
+
 ### PR-288 — fix(esp32): word-by-word audit + 3 bug fixes + changelog update
 - **Fecha:** 2026-04-07
 - **Autor:** Copilot
@@ -589,3 +607,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-07 | **Fix baud rate ESP32 625→500 kbps** — CRÍTICO: ESP-IDF 5.x ignora brp cuando quanta_resolution_hz>0. Fix: clear quanta_resolution_hz=0. Restaura comunicación CAN. | #287 |
 | 2026-04-07 | **Auditoría palabra-por-palabra** — 10 archivos STM32 (LIMPIO) + 5 archivos ESP32 (3 bugs corregidos: printf %lus, %d→%u para size_t, COM8 hardcodeado). Changelog actualizado. | #288 |
 | 2026-04-08 | **2ª auditoría** — boot_validation.c: isnan() añadido a logging diagnóstico (NaN sensors ahora registran fault). ESP32: cast (unsigned) en PSRAM printf. | #289 |
+| 2026-04-08 | **Robustez avanzada** — NaN/Inf hardening en 10+ rutas safety, TX NACK detection, CAN FPS metric, boot RAM/clock/periph checks, logs estandarizados [MODULE][SEVERITY] | #290 |
