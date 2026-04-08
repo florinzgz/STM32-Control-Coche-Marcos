@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-289 — fix: second-pass word-by-word audit — NaN diagnostic logging + printf cast
+- **Fecha:** 2026-04-08
+- **Autor:** Copilot
+- **Descripción del cambio:** Segunda pasada de auditoría exhaustiva palabra-por-palabra de todo el firmware (STM32 + ESP32). Se encontraron y corrigieron 2 bugs menores restantes tras la primera auditoría (PR-288).
+- **Root cause:** (1) `boot_validation.c` líneas 196/205: la función de detección `check_temperature_plausible()` (línea 56) y `check_current_plausible()` (línea 76) usan `isnan()` correctamente, pero el código de logging diagnóstico que identifica qué sensor exacto falló NO incluía `isnan()`. Si un sensor retornaba NaN, la comparación `t < min || t > max` evaluaba a false (NaN → comparación siempre false), y el fault no se registraba para ese sensor concreto. (2) `esp32/src/main.cpp` línea 501: `ESP.getPsramSize()` retorna `size_t`, usado con `%u` sin cast `(unsigned)`. Inconsistente con la corrección aplicada en PR-288 a las líneas 55-56.
+- **Solución aplicada:** (1) Añadir `isnan(t) ||` y `isnan(c) ||` a las condiciones de logging diagnóstico en `boot_validation.c` líneas 196 y 205, igualando la lógica de las funciones de detección. (2) Añadir cast `(unsigned)` a los argumentos de `Serial.printf()` en línea 501.
+- **Impacto en el sistema:** (1) Ahora los sensores que retornan NaN quedan correctamente registrados con MODULE_FAULT_WARNING en ServiceMode, mejorando la trazabilidad de fallos. No afecta la detección ni la seguridad (la detección ya funcionaba). +16 bytes de text (isnan inlining). (2) Printf portabilidad.
+- **Archivos modificados:** `Core/Src/boot_validation.c`, `esp32/src/main.cpp`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56096 text, 72 data, 7768 bss).
+
 ### PR-288 — fix(esp32): word-by-word audit + 3 bug fixes + changelog update
 - **Fecha:** 2026-04-07
 - **Autor:** Copilot
@@ -578,3 +588,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-07 | **FDCAN antes de boot blinks** — Mover MX_FDCAN1_Init+CAN_Init antes de la secuencia LED. ESP32 ya no entra en BUS_OFF durante boot. | #287a |
 | 2026-04-07 | **Fix baud rate ESP32 625→500 kbps** — CRÍTICO: ESP-IDF 5.x ignora brp cuando quanta_resolution_hz>0. Fix: clear quanta_resolution_hz=0. Restaura comunicación CAN. | #287 |
 | 2026-04-07 | **Auditoría palabra-por-palabra** — 10 archivos STM32 (LIMPIO) + 5 archivos ESP32 (3 bugs corregidos: printf %lus, %d→%u para size_t, COM8 hardcodeado). Changelog actualizado. | #288 |
+| 2026-04-08 | **2ª auditoría** — boot_validation.c: isnan() añadido a logging diagnóstico (NaN sensors ahora registran fault). ESP32: cast (unsigned) en PSRAM printf. | #289 |

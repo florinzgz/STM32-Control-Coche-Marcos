@@ -193,7 +193,7 @@ void BootValidation_Run(void)
                 if (!ServiceMode_IsEnabled(MODULE_TEMP_SENSOR_0 + i))
                     continue;
                 float t = Temperature_Get(i);
-                if (t < BOOT_TEMP_MIN_C || t > BOOT_TEMP_MAX_C)
+                if (isnan(t) || t < BOOT_TEMP_MIN_C || t > BOOT_TEMP_MAX_C)
                     ServiceMode_SetFault(MODULE_TEMP_SENSOR_0 + i, MODULE_FAULT_WARNING);
             }
         }
@@ -202,7 +202,7 @@ void BootValidation_Run(void)
                 if (!ServiceMode_IsEnabled(MODULE_CURRENT_SENSOR_0 + i))
                     continue;
                 float c = Current_GetAmps(i);
-                if (c < BOOT_CURRENT_MIN_A || c > BOOT_CURRENT_MAX_A)
+                if (isnan(c) || c < BOOT_CURRENT_MIN_A || c > BOOT_CURRENT_MAX_A)
                     ServiceMode_SetFault(MODULE_CURRENT_SENSOR_0 + i, MODULE_FAULT_WARNING);
             }
         }
