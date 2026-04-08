@@ -79,6 +79,16 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-291 — fix: cppcheck shadowVariable — move SystemCoreClock extern to file scope
+- **Fecha:** 2026-04-08
+- **Autor:** Copilot
+- **Descripción del cambio:** Corregir falso positivo de cppcheck `shadowVariable` en `boot_validation.c` que provocaba fallo del CI (exit code 2).
+- **Root cause:** La declaración `extern uint32_t SystemCoreClock;` dentro de la función `check_clock_sane()` (línea 177) sombreaba la declaración idéntica a nivel de archivo en el stub HAL de análisis (`analysis_artifacts/stubs/stm32g4xx_hal.h:189`). cppcheck lo reporta como `shadowVariable` y el CI falla con exit code 2.
+- **Solución aplicada:** Mover la declaración `extern uint32_t SystemCoreClock;` de dentro de `check_clock_sane()` al bloque de externs a nivel de archivo (junto a `fdcan_init_ok` e `i2c_init_ok`). La variable ya está definida en `system_stm32g4xx.c` y la declaración a nivel de archivo es semánticamente idéntica. Sin cambio funcional.
+- **Impacto en el sistema:** Ninguno funcional. Resuelve fallo de CI cppcheck. Build size sin cambios (56408 text).
+- **Archivos modificados:** `Core/Src/boot_validation.c`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56408 text, 72 data, 7784 bss).
+
 ### PR-289 — fix: second-pass word-by-word audit — NaN diagnostic logging + printf cast
 - **Fecha:** 2026-04-08
 - **Autor:** Copilot
@@ -608,3 +618,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-07 | **Auditoría palabra-por-palabra** — 10 archivos STM32 (LIMPIO) + 5 archivos ESP32 (3 bugs corregidos: printf %lus, %d→%u para size_t, COM8 hardcodeado). Changelog actualizado. | #288 |
 | 2026-04-08 | **2ª auditoría** — boot_validation.c: isnan() añadido a logging diagnóstico (NaN sensors ahora registran fault). ESP32: cast (unsigned) en PSRAM printf. | #289 |
 | 2026-04-08 | **Robustez avanzada** — NaN/Inf hardening en 10+ rutas safety, TX NACK detection, CAN FPS metric, boot RAM/clock/periph checks, logs estandarizados [MODULE][SEVERITY] | #290 |
+| 2026-04-08 | **cppcheck shadowVariable fix** — Mover `extern SystemCoreClock` a file scope en boot_validation.c para evitar shadow con HAL stub | #291 |

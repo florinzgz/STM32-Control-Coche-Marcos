@@ -24,6 +24,11 @@
 extern bool fdcan_init_ok;
 extern bool i2c_init_ok;
 
+/* CMSIS core clock — defined in system_stm32g4xx.c.
+ * Declared at file scope to avoid cppcheck shadowVariable when the
+ * HAL stub header also declares it at file scope.                    */
+extern uint32_t SystemCoreClock;
+
 /* Plausibility thresholds — aligned with safety_system.c definitions.
  * Temperature: DS18B20 range is -55 °C to +125 °C; we accept
  *              -40 °C to +125 °C as plausible (same as SENSOR_TEMP_*).
@@ -174,7 +179,6 @@ static bool check_clock_sane(void)
 {
     /* Expected: 170 000 000 Hz.  Accept 160–180 MHz range to
      * account for HSI trimming tolerance and PLL jitter.          */
-    extern uint32_t SystemCoreClock;
     return (SystemCoreClock >= 160000000U && SystemCoreClock <= 180000000U);
 }
 
