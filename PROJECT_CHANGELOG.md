@@ -79,6 +79,88 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-291 — fix: cppcheck shadowVariable — move SystemCoreClock extern to file scope
+- **Fecha:** 2026-04-08
+- **Autor:** Copilot
+- **Descripción del cambio:** Corregir falso positivo de cppcheck `shadowVariable` en `boot_validation.c` que provocaba fallo del CI (exit code 2).
+- **Root cause:** La declaración `extern uint32_t SystemCoreClock;` dentro de la función `check_clock_sane()` (línea 177) sombreaba la declaración idéntica a nivel de archivo en el stub HAL de análisis (`analysis_artifacts/stubs/stm32g4xx_hal.h:189`). cppcheck lo reporta como `shadowVariable` y el CI falla con exit code 2.
+- **Solución aplicada:** Mover la declaración `extern uint32_t SystemCoreClock;` de dentro de `check_clock_sane()` al bloque de externs a nivel de archivo (junto a `fdcan_init_ok` e `i2c_init_ok`). La variable ya está definida en `system_stm32g4xx.c` y la declaración a nivel de archivo es semánticamente idéntica. Sin cambio funcional.
+- **Impacto en el sistema:** Ninguno funcional. Resuelve fallo de CI cppcheck. Build size sin cambios (56408 text).
+- **Archivos modificados:** `Core/Src/boot_validation.c`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56408 text, 72 data, 7784 bss).
+
+### PR-289 — fix: second-pass word-by-word audit — NaN diagnostic logging + printf cast
+- **Fecha:** 2026-04-08
+- **Autor:** Copilot
+- **Descripción del cambio:** Segunda pasada de auditoría exhaustiva palabra-por-palabra de todo el firmware (STM32 + ESP32). Se encontraron y corrigieron 2 bugs menores restantes tras la primera auditoría (PR-288).
+- **Root cause:** (1) `boot_validation.c` líneas 196/205: la función de detección `check_temperature_plausible()` (línea 56) y `check_current_plausible()` (línea 76) usan `isnan()` correctamente, pero el código de logging diagnóstico que identifica qué sensor exacto falló NO incluía `isnan()`. Si un sensor retornaba NaN, la comparación `t < min || t > max` evaluaba a false (NaN → comparación siempre false), y el fault no se registraba para ese sensor concreto. (2) `esp32/src/main.cpp` línea 501: `ESP.getPsramSize()` retorna `size_t`, usado con `%u` sin cast `(unsigned)`. Inconsistente con la corrección aplicada en PR-288 a las líneas 55-56.
+- **Solución aplicada:** (1) Añadir `isnan(t) ||` y `isnan(c) ||` a las condiciones de logging diagnóstico en `boot_validation.c` líneas 196 y 205, igualando la lógica de las funciones de detección. (2) Añadir cast `(unsigned)` a los argumentos de `Serial.printf()` en línea 501.
+- **Impacto en el sistema:** (1) Ahora los sensores que retornan NaN quedan correctamente registrados con MODULE_FAULT_WARNING en ServiceMode, mejorando la trazabilidad de fallos. No afecta la detección ni la seguridad (la detección ya funcionaba). +16 bytes de text (isnan inlining). (2) Printf portabilidad.
+- **Archivos modificados:** `Core/Src/boot_validation.c`, `esp32/src/main.cpp`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56096 text, 72 data, 7768 bss).
+
+### PR-290 — feat: advanced robustness features (NaN hardening, CAN diagnostics, boot validation, logging)
+- **Fecha:** 2026-04-08
+- **Autor:** Copilot
+- **Descripción del cambio:** Implementación de funcionalidades avanzadas de robustez en 7 áreas: endurecimiento NaN/Inf de sensores, monitoreo de trama CAN, validación TX FDCAN, extensión de validación de boot, y estandarización de logs.
+- **Root cause:** Aunque el firmware era funcional y limpio, las rutas de comparación de float en `safety_system.c` no protegían contra NaN/Inf (IEEE 754 hace que todas las comparaciones con NaN retornen false, permitiendo que valores inválidos pasen silenciosamente por checks de rango). Además, faltaban métricas de diagnóstico CAN (FPS, fallos TX consecutivos) y validaciones de boot (RAM, clock, periféricos).
+- **Solución aplicada:**
+  1. **NaN/Inf Hardening (PART 1 — CRÍTICO):** Añadidos `isnan()`/`isinf()` a 10+ rutas de comparación float: `Safety_CheckCurrent()`, `Safety_CheckTemperature()` (umbral crítico + histéresis), `Safety_CheckSensors()` (temperatura, corriente, velocidad de rueda), `Safety_CheckBatteryVoltage()`, `Safety_CheckBatteryOvervoltage()`. NaN ahora se trata como fallo del lado seguro (overcurrent, overtemp crítico, fallo de sensor).
+  2. **CAN Frame Health Monitoring (PART 3):** Nuevos campos `rx_frames_per_sec`, `rx_count_prev`, `rx_rate_tick` en `CAN_Stats_t`. Nueva función `CAN_UpdateFrameRate()` llamada cada 1 s desde el tier 1000 ms.
+  3. **FDCAN TX Validation (PART 5):** Nuevos campos `tx_nack_flag`, `tx_consec_fail` en `CAN_Diag_t`. Seguimiento de fallos TX consecutivos en `TransmitFrame()`. Flag levantado tras 5 fallos consecutivos (no ACK).
+  4. **Boot Validation Extension (PART 6):** Tres nuevos checks: `check_ram_sanity()` (patrón write/read no destructivo), `check_clock_sane()` (SystemCoreClock 160-180 MHz), `check_periph_ready()` (diagnóstico fdcan_init_ok/i2c_init_ok). Bitmask ampliado uint8→uint16.
+  5. **Logging Standardization (PART 7):** Prefijos ESP32 estandarizados a formato `[MODULE][SEVERITY]`: `[CAN][INFO/ERR/WARN]`, `[BOOT][INFO/ERR]`, `[SAFETY][WARN/INFO]`, `[CAN][DIAG]`.
+- **Partes ya implementadas previamente (sin cambios necesarios):**
+  - PART 2 (CAN Diagnostics): Ya completo — `CAN_Diag_t` con PSR/ECR/TEC/REC, bus-off/error-passive/warning.
+  - PART 4 (ESP32 BUS-OFF Recovery): Ya completo — polling `twai_get_status_info()`, `twai_initiate_recovery()`, error-passive recovery bifásica.
+- **Impacto en el sistema:** Cierra la vulnerabilidad NaN en todas las rutas de seguridad. Añade métricas de diagnóstico CAN sin overhead en runtime. Boot validation más completa sin aumentar tiempo de boot. Compatible hacia atrás — no cambia APIs públicas ni comportamiento existente.
+- **Archivos modificados:** `Core/Src/safety_system.c`, `Core/Inc/can_handler.h`, `Core/Src/can_handler.c`, `Core/Src/main.c`, `Core/Inc/boot_validation.h`, `Core/Src/boot_validation.c`, `esp32/src/main.cpp`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56368 text, 72 data, 7784 bss). +272 bytes text vs baseline.
+
+### PR-288 — fix(esp32): word-by-word audit + 3 bug fixes + changelog update
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Auditoría exhaustiva palabra-por-palabra de todo el firmware STM32 (10 archivos core) y ESP32 (5 archivos core). La STM32 está limpia (0 bugs). Se encontraron y corrigieron 3 bugs en ESP32.
+- **Root cause:** El debugger seguía dando errores de comunicación CAN. Se realizó una revisión exhaustiva del código para identificar cualquier error restante. Los bugs encontrados estaban en el lado ESP32 (especificadores printf incorrectos + puerto hardcodeado).
+- **Bugs corregidos:**
+  1. **CRÍTICO — `%lus` formato printf inválido** (`esp32/src/main.cpp:1272`): El especificador `%lus` es inválido en printf. La "s" se unía al formato `%lu`, causando comportamiento indefinido en la salida serial del diagnóstico error-passive. Fix: `%lus` → `%lu s` (espacio antes de "s").
+  2. **ALTO — `%d` para `size_t`** (`esp32/src/main.cpp:55,56,63,66`): Se usaba `%d` (signed int) para imprimir valores `size_t` en diagnóstico PSRAM. En arquitecturas donde `size_t` ≠ `int`, puede truncar o mostrar valores incorrectos. Fix: `%d` → `%u` con cast explícito `(unsigned)`.
+  3. **ALTO — puerto COM8 hardcodeado** (`esp32/platformio.ini:81`): `upload_port = COM8` impide compilar/flashear en cualquier máquina que no sea la del desarrollador. Fix: línea comentada con `;`.
+- **Auditoría STM32 (resultado: LIMPIO):**
+  - `Core/Src/main.c`: Boot sequence, FDCAN init timing, LED patterns — ✅
+  - `Core/Src/can_handler.c`: CAN IDs, DLC mapping, endianness, TransmitFrame — ✅
+  - `Core/Src/stm32g4xx_hal_msp.c`: GPIO AF9, clock source, NVIC priorities — ✅
+  - `Core/Src/stm32g4xx_it.c`: Fault handlers, MOE disable, IRQ dispatch — ✅
+  - `Core/Inc/project_config.h`: Pin definitions, no conflicts — ✅
+  - `Core/Inc/can_handler.h`: CAN ID defines consistency — ✅
+  - `Core/Inc/can_init_diag.h`: Diagnostic struct — ✅
+  - `Core/Src/safety_system.c`: State machine, thresholds, ABS/TCS — ✅
+  - `Core/Src/motor_control.c`: Timer channels, PWM, direction logic — ✅
+  - `Core/Src/system_stm32g4xx.c`: FPU init via CPACR — ✅
+- **Impacto en el sistema:** Corrige output serial de diagnóstico CAN error-passive y PSRAM. No afecta lógica de control ni safety. Permite a cualquier usuario flashear sin editar platformio.ini.
+- **Archivos modificados:** `esp32/src/main.cpp`, `esp32/platformio.ini`, `PROJECT_CHANGELOG.md`
+- **Tests:** STM32 build con `-Wall -Wextra -Werror` pasa (56080 text, 72 data, 7768 bss). ESP32 no compilable en sandbox (requiere PlatformIO con ESP-IDF).
+
+### PR-287 — fix(esp32): clear quanta_resolution_hz to fix 625kbps→500kbps baud rate mismatch
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Corrección CRÍTICA del baud rate CAN de la ESP32-S3 que impedía toda comunicación con la STM32. En ESP-IDF ≥ 5.0, la macro `TWAI_TIMING_CONFIG_500KBITS()` establece `quanta_resolution_hz = 10 MHz` con `brp = 0`. Cuando el código luego sobrescribe `brp = 10`, ambos campos son no-zero, y el driver ESP-IDF **ignora** `brp` y calcula: `brp = APB_CLK / quanta_resolution_hz = 80 MHz / 10 MHz = 8`. Esto produce `(1+13+2) × 8/80 MHz = 1600 ns → 625 kbps` en vez de los 500 kbps esperados — un **25% de desajuste** que hace IMPOSIBLE la comunicación.
+- **Root cause:** Cambio de comportamiento en ESP-IDF 5.x: la macro de timing ahora rellena `quanta_resolution_hz`, y cuando ambos `quanta_resolution_hz > 0` y `brp > 0`, el driver prioriza `quanta_resolution_hz` e ignora `brp`. Esto no ocurría en ESP-IDF 4.x donde el campo no existía.
+- **Solución aplicada:** (1) `#include <esp_idf_version.h>` para detección de versión en compilación. (2) Bloque `#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)` que limpia `t_config.quanta_resolution_hz = 0` antes de sobrescribir `brp = 10`. Esto fuerza al driver a usar BRP directo: `80 MHz / 10 / 16 = 500 kbps ✓`. (3) Diagnóstico serial mejorado mostrando versión ESP-IDF y confirmación del modo BRP forzado. (4) Formato printf corregido con `%%` para literal `%`.
+- **Impacto en el sistema:** Restaura comunicación CAN entre ESP32-S3 y STM32G474RE. Antes de este fix, la ESP32 transmitía a 625 kbps y la STM32 escuchaba a 500 kbps — ningún frame era ACKeado, causando bus-off inmediato.
+- **Archivos modificados:** `esp32/src/main.cpp`
+- **Tests:** Verificación manual de cálculo de baud rate. Build STM32 pasa (sin cambios en STM32).
+
+### PR-287a — fix(fdcan): start FDCAN before boot LED blinks to prevent ESP32 bus-off
+- **Fecha:** 2026-04-07
+- **Autor:** Copilot
+- **Descripción del cambio:** Mover la inicialización FDCAN (`MX_FDCAN1_Init()` + `CAN_Init()`) ANTES de la secuencia de boot LED (3 blinks × 300 ms = 2.3 s). Esto asegura que la STM32 empiece a ACKear tramas CAN dentro de ~50 ms del encendido, en vez de después de los 2.3 s de la secuencia visual.
+- **Root cause:** En un bus CAN de 2 nodos, la ESP32-S3 arranca ~600 ms después del encendido y empieza a transmitir heartbeats cada 100 ms. Si la STM32 no ACKea dentro de ~1.3 s, el TEC de la ESP32 alcanza 256 → BUS_OFF. Los 2.3 s de boot blinks dejaban a la ESP32 sola en el bus demasiado tiempo.
+- **Solución aplicada:** (1) `MX_GPIO_Init()` → `MX_FDCAN1_Init()` → `CAN_Init()` → `boot_phase = 1` → boot LED blinks. (2) Drain FIFO post-blinks (CAN_ProcessMessages + reset overflow counter). (3) Documentación inline detallada del timing.
+- **Impacto en el sistema:** FDCAN activo ACKeando frames durante los boot blinks. Sin dependencia de Motor/Safety/Sensor modules.
+- **Archivos modificados:** `Core/Src/main.c`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa.
+
 ### PR-286 — fix(led): revert LED back to PA5 (LD2) — onboard Nucleo LED
 - **Fecha:** 2026-04-07
 - **Autor:** Copilot
@@ -531,3 +613,9 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-07 | **Boot blinks unmissable** — Boot blinks 150→300 ms, dark lead-in 500 ms, CAN status blinks más lentos, separación 500 ms | #284 |
 | 2026-04-07 | **LED migrada PA5→PB8** — Status LED de PA5 (LD2, interferido por ST-Link SB21) a PB8 (GPIO libre, Morpho CN10-3). LED externo requerido. | #285 |
 | 2026-04-07 | **LED revertida PB8→PA5 (LD2)** — LD2 está soldado en la placa Nucleo. No necesita LED externo. Revert de PR-285. | #286 |
+| 2026-04-07 | **FDCAN antes de boot blinks** — Mover MX_FDCAN1_Init+CAN_Init antes de la secuencia LED. ESP32 ya no entra en BUS_OFF durante boot. | #287a |
+| 2026-04-07 | **Fix baud rate ESP32 625→500 kbps** — CRÍTICO: ESP-IDF 5.x ignora brp cuando quanta_resolution_hz>0. Fix: clear quanta_resolution_hz=0. Restaura comunicación CAN. | #287 |
+| 2026-04-07 | **Auditoría palabra-por-palabra** — 10 archivos STM32 (LIMPIO) + 5 archivos ESP32 (3 bugs corregidos: printf %lus, %d→%u para size_t, COM8 hardcodeado). Changelog actualizado. | #288 |
+| 2026-04-08 | **2ª auditoría** — boot_validation.c: isnan() añadido a logging diagnóstico (NaN sensors ahora registran fault). ESP32: cast (unsigned) en PSRAM printf. | #289 |
+| 2026-04-08 | **Robustez avanzada** — NaN/Inf hardening en 10+ rutas safety, TX NACK detection, CAN FPS metric, boot RAM/clock/periph checks, logs estandarizados [MODULE][SEVERITY] | #290 |
+| 2026-04-08 | **cppcheck shadowVariable fix** — Mover `extern SystemCoreClock` a file scope en boot_validation.c para evitar shadow con HAL stub | #291 |

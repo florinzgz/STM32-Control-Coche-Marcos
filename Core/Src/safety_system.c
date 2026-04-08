@@ -20,6 +20,7 @@
 #include "error_log.h"
 #include "can_handler.h"
 #include "math_safety.h"
+#include <math.h>       /* isnan(), isinf() — NaN/Inf hardening */
 
 /* ---- Thresholds (from base firmware) ---- */
 #define ABS_SLIP_THRESHOLD   15   /* abs_system.cpp: slipThreshold = 15.0f */
@@ -1002,8 +1003,10 @@ void Safety_CheckCurrent(void)
         float limit = (i == INA226_CHANNEL_BATTERY)
                     ? MAX_CURRENT_BATT_A : MAX_CURRENT_A;
         /* Check absolute overcurrent — reverse current through the shunt
-         * (regenerative braking, back-EMF) must also be detected.         */
-        if (amps > limit || amps < -limit) {
+         * (regenerative braking, back-EMF) must also be detected.
+         * NaN/Inf hardening: invalid ADC reading → treat as overcurrent
+         * (safe side — prefer false positive over silent pass-through).   */
+        if (isnan(amps) || isinf(amps) || amps > limit || amps < -limit) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERCURRENT);
             /* Count consecutive errors — escalate to SAFE only after
@@ -1065,7 +1068,9 @@ void Safety_CheckTemperature(void)
         if (!ServiceMode_IsEnabled(mod)) continue;
 
         float t = Temperature_Get(i);
-        if (t > TEMP_CRITICAL_C) {
+        /* NaN/Inf hardening: invalid reading → treat as critical overtemp
+         * (safe side — prefer actuator shutdown over silent pass-through). */
+        if (isnan(t) || isinf(t) || t > TEMP_CRITICAL_C) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             Safety_SetError(SAFETY_ERROR_OVERTEMP);
             Safety_SetState(SYS_STATE_SAFE);
@@ -1091,7 +1096,9 @@ void Safety_CheckTemperature(void)
         for (uint8_t i = 0; i < NUM_DS18B20; i++) {
             ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
             if (!ServiceMode_IsEnabled(mod)) continue;
-            if (Temperature_Get(i) > (TEMP_WARNING_C - 5.0f)) {
+            float ht = Temperature_Get(i);
+            /* NaN/Inf blocks hysteresis recovery (safe side) */
+            if (isnan(ht) || isinf(ht) || ht > (TEMP_WARNING_C - 5.0f)) {
                 all_below_hysteresis = false;
                 break;
             }
@@ -1254,7 +1261,8 @@ void Safety_CheckSensors(void)
         ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         float t = Temperature_Get(i);
-        if (t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
+        /* NaN/Inf hardening: invalid sensor reading → plausibility fault */
+        if (isnan(t) || isinf(t) || t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
@@ -1271,7 +1279,8 @@ void Safety_CheckSensors(void)
         float a = Current_GetAmps(i);
         float ceil = (i == INA226_CHANNEL_BATTERY)
                    ? SENSOR_CURRENT_MAX_BATT_A : SENSOR_CURRENT_MAX_A;
-        if (a < -1.0f || a > ceil) {
+        /* NaN/Inf hardening: invalid sensor reading → plausibility fault */
+        if (isnan(a) || isinf(a) || a < -1.0f || a > ceil) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
@@ -1288,7 +1297,9 @@ void Safety_CheckSensors(void)
     for (uint8_t i = 0; i < 4; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
-        if (spd[i] < 0.0f || spd[i] > SENSOR_SPEED_MAX_KMH) {
+        /* NaN/Inf hardening: invalid speed reading → plausibility fault */
+        if (isnan(spd[i]) || isinf(spd[i]) ||
+            spd[i] < 0.0f || spd[i] > SENSOR_SPEED_MAX_KMH) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
         }
@@ -1458,8 +1469,9 @@ void Safety_CheckBatteryVoltage(void)
     float voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
 
     /* Sensor failure: 0.0 V means TCA9548A channel select failed or
-     * INA226 returned zero — treat as critical (fail-safe).           */
-    if (voltage <= 0.0f) {
+     * INA226 returned zero — treat as critical (fail-safe).
+     * NaN/Inf hardening: invalid ADC reading → critical sensor failure. */
+    if (isnan(voltage) || isinf(voltage) || voltage <= 0.0f) {
         Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
         Safety_SetState(SYS_STATE_SAFE);
         return;
@@ -1514,8 +1526,9 @@ void Safety_CheckBatteryOvervoltage(void)
 {
     float voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
 
-    /* Ignore 0 V readings (sensor failure handled by undervoltage check) */
-    if (voltage <= 0.0f) return;
+    /* Ignore 0 V readings (sensor failure handled by undervoltage check).
+     * NaN/Inf hardening: invalid ADC → skip OV check (UV handles it). */
+    if (isnan(voltage) || isinf(voltage) || voltage <= 0.0f) return;
 
     /* Critical overvoltage — SAFE state, no auto-recovery */
     if (voltage > BATTERY_OV_CRITICAL_V) {
