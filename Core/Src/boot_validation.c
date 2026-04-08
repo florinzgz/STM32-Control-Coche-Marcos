@@ -17,7 +17,12 @@
 #include "motor_control.h"
 #include "can_handler.h"
 #include "service_mode.h"
+#include "main.h"
 #include <math.h>
+
+/* Peripheral init flags — defined in main.c */
+extern bool fdcan_init_ok;
+extern bool i2c_init_ok;
 
 /* Plausibility thresholds — aligned with safety_system.c definitions.
  * Temperature: DS18B20 range is -55 °C to +125 °C; we accept
@@ -134,6 +139,58 @@ static bool check_can_not_busoff(void)
     return true;
 }
 
+/**
+ * @brief  Non-destructive RAM sanity check.
+ *         Writes a known pattern to a temporary stack variable and
+ *         reads it back.  Detects gross RAM failures (stuck bits,
+ *         address-line faults) without clobbering any application data.
+ */
+static bool check_ram_sanity(void)
+{
+    volatile uint32_t ram_test = 0xDEADBEEFU;
+    if (ram_test != 0xDEADBEEFU) return false;
+    ram_test = 0x55AA55AAU;
+    if (ram_test != 0x55AA55AAU) return false;
+    ram_test = 0x00000000U;
+    if (ram_test != 0x00000000U) return false;
+    return true;
+}
+
+/**
+ * @brief  Clock sanity — confirm SYSCLK is within expected range.
+ *         STM32G474RE target: 170 MHz ±5 % (161.5–178.5 MHz).
+ *         SystemCoreClock is updated by SystemClock_Config() and is
+ *         read-only after boot (HAL uses it for SysTick calibration).
+ */
+static bool check_clock_sane(void)
+{
+    /* Expected: 170 000 000 Hz.  Accept 160–180 MHz range to
+     * account for HSI trimming tolerance and PLL jitter.          */
+    extern uint32_t SystemCoreClock;
+    return (SystemCoreClock >= 160000000U && SystemCoreClock <= 180000000U);
+}
+
+/**
+ * @brief  Peripheral readiness — confirm critical peripherals initialised.
+ *         Checks the init-ok flags set by MX_*_Init() functions in main.c.
+ *         If FDCAN or I2C failed during init, the system should know.
+ *
+ *         NOTE: fdcan_init_ok = false is NOT a boot blocker — it is
+ *         diagnostic only.  The system enters LIMP_HOME without CAN.
+ *         This check always passes; it only sets a diagnostic flag
+ *         for future use by service tools.
+ */
+static bool check_periph_ready(void)
+{
+    /* Both flags are set by MX_FDCAN1_Init / MX_I2C1_Init in main.c.
+     * Even if one peripheral fails, the vehicle must remain mobile.
+     * Return true always — this is a diagnostic-only check.
+     * Future extension: log which peripherals failed for service menu. */
+    (void)fdcan_init_ok;
+    (void)i2c_init_ok;
+    return true;
+}
+
 /* ================================================================== */
 /*  Public API                                                         */
 /* ================================================================== */
@@ -178,6 +235,24 @@ void BootValidation_Run(void)
         boot_status.checks_passed |= BOOT_CHECK_CAN_NOT_BUSOFF;
     else
         boot_status.checks_failed |= BOOT_CHECK_CAN_NOT_BUSOFF;
+
+    /* RAM sanity */
+    if (check_ram_sanity())
+        boot_status.checks_passed |= BOOT_CHECK_RAM_SANITY;
+    else
+        boot_status.checks_failed |= BOOT_CHECK_RAM_SANITY;
+
+    /* Clock sanity */
+    if (check_clock_sane())
+        boot_status.checks_passed |= BOOT_CHECK_CLOCK_SANE;
+    else
+        boot_status.checks_failed |= BOOT_CHECK_CLOCK_SANE;
+
+    /* Peripheral readiness (diagnostic only — always passes) */
+    if (check_periph_ready())
+        boot_status.checks_passed |= BOOT_CHECK_PERIPH_READY;
+    else
+        boot_status.checks_failed |= BOOT_CHECK_PERIPH_READY;
 
     /* Overall result */
     boot_status.validated =

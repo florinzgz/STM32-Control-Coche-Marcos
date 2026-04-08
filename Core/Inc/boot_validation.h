@@ -40,18 +40,24 @@ extern "C" {
 #define BOOT_CHECK_BATTERY_OK          (1U << 3)
 #define BOOT_CHECK_NO_SAFETY_ERROR     (1U << 4)
 #define BOOT_CHECK_CAN_NOT_BUSOFF      (1U << 5)
+#define BOOT_CHECK_RAM_SANITY          (1U << 6)
+#define BOOT_CHECK_CLOCK_SANE          (1U << 7)
+#define BOOT_CHECK_PERIPH_READY        (1U << 8)
 
 #define BOOT_CHECK_ALL_MASK  (BOOT_CHECK_TEMP_PLAUSIBLE    | \
                               BOOT_CHECK_CURRENT_PLAUSIBLE | \
                               BOOT_CHECK_ENCODER_HEALTHY   | \
                               BOOT_CHECK_BATTERY_OK        | \
                               BOOT_CHECK_NO_SAFETY_ERROR   | \
-                              BOOT_CHECK_CAN_NOT_BUSOFF)
+                              BOOT_CHECK_CAN_NOT_BUSOFF    | \
+                              BOOT_CHECK_RAM_SANITY        | \
+                              BOOT_CHECK_CLOCK_SANE        | \
+                              BOOT_CHECK_PERIPH_READY)
 
 /* ---- Boot validation status ---- */
 typedef struct {
-    uint8_t  checks_passed;   /* Bitmask of passed checks (BOOT_CHECK_*) */
-    uint8_t  checks_failed;   /* Bitmask of failed checks                */
+    uint16_t checks_passed;   /* Bitmask of passed checks (BOOT_CHECK_*) */
+    uint16_t checks_failed;   /* Bitmask of failed checks                */
     bool     validated;        /* true when all checks pass               */
 } BootValidationStatus;
 
