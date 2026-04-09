@@ -206,8 +206,12 @@ int main(void)
      *                           (Error_Handler constant-blink pattern)
      *   • 3 blinks, pause, 1 long blink, then brief flash every ~2 s
      *                         → firmware running normally, CAN init OK
-     *   • 3 blinks, pause, 5 rapid blinks, then brief flash every ~2 s
-     *                         → firmware running, but CAN init FAILED   */
+     *   • 3 blinks, pause, 5 rapid blinks, then steady 1 Hz blink
+     *                         → firmware running, but CAN init FAILED
+     *
+     * Main-loop LD2 summary (no external LED needed):
+     *   • Brief flash every ~2 s (50 ms ON) → CAN OK, firmware alive
+     *   • Steady 1 Hz blink (500 ms ON/OFF) → CAN FAILED              */
     HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET); /* ensure OFF  */
     HAL_Delay(500);  /* dark lead-in so the first ON edge is obvious   */
     for (int k = 0; k < 3; k++) {
@@ -550,11 +554,20 @@ int main(void)
             CAN_UpdateFrameRate();
         }
 
-        /* ---- ~2 s LED heartbeat: brief flash confirms firmware alive ----
-         * Pattern: LED ON for ~50 ms then OFF for ~1950 ms (repeats).
-         * Clearly distinct from Error_Handler (~2 Hz constant blink)
-         * and fault-handler rapid ~10 Hz blink.                          */
-        {
+        /* ---- LD2 heartbeat with CAN status ----
+         * LD2 (PA5, green LED soldered on the Nucleo board) now shows
+         * both firmware liveness AND CAN bus status at a glance:
+         *
+         *   • CAN OK  (fdcan_init_ok): brief flash every ~2 s
+         *     (50 ms ON / 1950 ms OFF).  Means firmware + CAN healthy.
+         *   • CAN FAIL (!fdcan_init_ok): steady 1 Hz blink
+         *     (500 ms ON / 500 ms OFF).  Means CAN init failed.
+         *
+         * Both are clearly distinct from:
+         *   - Error_Handler  → constant ~2 Hz blink (250 ms toggle)
+         *   - HardFault      → rapid ~10 Hz blink                       */
+        if (fdcan_init_ok) {
+            /* CAN OK: brief flash every 2 s */
             uint32_t phase = now - tick_heartbeat;
             if (phase >= 2000) {
                 tick_heartbeat = now;
@@ -562,6 +575,11 @@ int main(void)
             } else if (phase >= 50) {
                 HAL_GPIO_WritePin(PORT_LD2, PIN_LD2, GPIO_PIN_RESET);
             }
+        } else {
+            /* CAN FAIL: steady 1 Hz blink (500 ms ON / 500 ms OFF) */
+            uint32_t ld2_phase = now % 1000U;
+            HAL_GPIO_WritePin(PORT_LD2, PIN_LD2,
+                (ld2_phase < 500U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
         }
 
         /* ---- LED_DIAG (PB14): CAN status indicator ----

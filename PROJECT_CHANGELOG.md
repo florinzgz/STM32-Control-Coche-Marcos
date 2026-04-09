@@ -79,6 +79,19 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR-292 — feat: LD2 now shows CAN status in main loop (no external LED needed)
+- **Fecha:** 2026-04-09
+- **Autor:** Copilot
+- **Descripción del cambio:** LD2 (PA5, LED verde soldado en la Nucleo) ahora muestra el estado CAN de forma continua en el bucle principal, no solo durante el arranque. Ya no se necesita un LED externo en PB14 para ver si el CAN funciona.
+- **Root cause:** El patrón de LD2 en el main loop era siempre "flash breve cada 2 s" independientemente de si el CAN estaba OK o FAIL. El usuario solo podía ver el estado CAN en PB14 (LED_DIAG), que requiere un LED externo con resistencia de 330 Ω que no estaba instalado. El patrón de arranque (1 blink largo = OK, 5 rápidos = FAIL) solo se mostraba una vez al inicio y era fácil de perder.
+- **Solución aplicada:** Modificar el heartbeat LD2 del main loop para reflejar el estado CAN:
+  - **CAN OK** (`fdcan_init_ok`): flash breve cada ~2 s (50 ms ON / 1950 ms OFF) — patrón anterior, sin cambio.
+  - **CAN FAIL** (`!fdcan_init_ok`): parpadeo constante 1 Hz (500 ms ON / 500 ms OFF) — claramente diferente.
+  Actualizada la documentación de patrones LED en los comentarios del boot.
+- **Impacto en el sistema:** Solo cambia el comportamiento visual de LD2 cuando CAN ha fallado. Sin impacto en lógica de control ni seguridad. LED_DIAG (PB14) sigue funcionando igual para quien tenga LED externo.
+- **Archivos modificados:** `Core/Src/main.c`, `PROJECT_CHANGELOG.md`
+- **Tests:** Build con `-Wall -Wextra -Werror` pasa (56496 text, 72 data, 7784 bss).
+
 ### PR-291 — fix: cppcheck shadowVariable — move SystemCoreClock extern to file scope
 - **Fecha:** 2026-04-08
 - **Autor:** Copilot
@@ -619,3 +632,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-08 | **2ª auditoría** — boot_validation.c: isnan() añadido a logging diagnóstico (NaN sensors ahora registran fault). ESP32: cast (unsigned) en PSRAM printf. | #289 |
 | 2026-04-08 | **Robustez avanzada** — NaN/Inf hardening en 10+ rutas safety, TX NACK detection, CAN FPS metric, boot RAM/clock/periph checks, logs estandarizados [MODULE][SEVERITY] | #290 |
 | 2026-04-08 | **cppcheck shadowVariable fix** — Mover `extern SystemCoreClock` a file scope en boot_validation.c para evitar shadow con HAL stub | #291 |
+| 2026-04-09 | **LD2 muestra estado CAN en main loop** — CAN OK: flash breve 2s, CAN FAIL: parpadeo 1Hz. No necesita LED externo PB14. | #292 |
