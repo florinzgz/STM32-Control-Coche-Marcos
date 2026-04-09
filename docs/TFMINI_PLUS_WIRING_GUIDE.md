@@ -154,13 +154,14 @@ El firmware (`obstacle_sensor.cpp`) aplica las siguientes validaciones:
 2. Abrir monitor serie: `pio device monitor -b 115200`
 3. Buscar el mensaje de inicialización:
    ```
-   [OBSTACLE] TF-Mini Plus init (UART1, 115200 bps, rxBuf 256, rxPin 18, range 100–12000 mm)
+   [OBSTACLE] TF-Mini Plus init (UART1, 115200 bps, rxBuf 512, rxPin 18, range 100–12000 mm)
    ```
 4. Esperar diagnóstico (cada 5 segundos):
    ```
-   [OBSTACLE] Diag 5s: OK=50 cksumFail=0 hdrFail=0 noTarget=0 ...
+   [OBSTACLE] Diag 5s: OK=~500 cksumFail=0 hdrFail=0 noTarget=0 ...
    ```
-   - `OK > 0`: el sensor está transmitiendo y el parser funciona ✅
+   - `OK ≈ 500` (100 Hz × 5 s): lectura completa de todas las tramas ✅
+   - `OK > 0` pero < 100: el main loop no drena todas las tramas ⚠️
    - `cksumFail > 0`: problema de cableado o baud rate ⚠️
    - Sin datos: verificar conexión TX → GPIO 18 y alimentación 5 V ❌
 

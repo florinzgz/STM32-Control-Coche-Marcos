@@ -550,8 +550,8 @@ void setup() {
         Serial.println("[CAN][ERR] Initialization FAILED");
     }
 
-    // Initialize obstacle sensor driver (TOFSense-M 8×8 on UART1)
-    //   RX = GPIO 18 (sensor TX → ESP32 RX via voltage divider)
+    // Initialize obstacle sensor driver (TF-Mini Plus on UART1, GPIO 18)
+    //   RX = GPIO 18 (sensor TX → ESP32 RX, 3.3V TTL direct connection)
     //   TX = NOT CONNECTED (sensor RX not wired to ESP32 TX)
     //
     // READ-ONLY MODE: The sensor's RX pin is not connected to the ESP32's

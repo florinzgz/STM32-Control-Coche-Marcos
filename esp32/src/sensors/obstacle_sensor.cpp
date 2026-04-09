@@ -1,20 +1,20 @@
 // =============================================================================
 // ESP32-S3 — Obstacle Sensor Driver (implementation)
 //
-// Reads TOFSense-M 8×8 LiDAR sensor via UART1.
-// ONLY the multi-pixel frame format is supported:
+// Active sensor: Benewake TF-Mini Plus (SENSOR_TYPE_TFMINI)
+//   [0x59][0x59][DIST_L][DIST_H][STR_L][STR_H][TEMP_L][TEMP_H][CHK]
+//   115200 bps, 100 Hz, distance in cm (uint16 LE → converted to mm).
+//
+// Also supports (compile-time): Nooploop TOFSense-M 8×8
 //   [0x57][0x01][0xFF][ID][TIME×4][0x40][64×6B pixels][0xFF×6][CHK]
+//   921600 bps, 10 Hz, 400-byte multi-pixel frames.
 //
 // Validates readings against physical range, detects stuck sensor,
 // and provides a warmup period for sensor stabilization.
-// Computes per-frame pixel statistics (min/max/avg/validCount/dispersion).
-// Rejects frames with too few valid pixels or excessive dispersion.
-//
-// Sensor: TOFSense-M 8×8 (Nooploop), UART 921600 bps, active output mode.
 // Matches STM32 expectations for CAN 0x208 payload.
 //
-// Reference: TOFSense-M User Manual V3.0
-//            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
+// Reference: docs/TFMINI_PLUS_WIRING_GUIDE.md
+//            docs/CAN_CONTRACT_FINAL.md rev 1.3
 // =============================================================================
 
 #include "obstacle_sensor.h"
@@ -69,9 +69,11 @@ static constexpr uint8_t  TFM_FRAME_LENGTH    = 9;
 static constexpr uint16_t TFM_MIN_STRENGTH    = 100;
 static constexpr uint16_t TFM_DIST_INVALID    = 0xFFFF;  // 65535
 // Non-blocking: max bytes read per update() call.
-// At 115200 baud / 100 Hz, ~9 bytes arrive every 10 ms.
-// 32 bytes covers ~3 frames worth of data — ample for loop jitter.
-static constexpr uint16_t TFM_MAX_BYTES_PER_UPDATE = 32;
+// At 115200 baud / 100 Hz, ~115 bytes arrive every 10 ms.
+// Budget 256 bytes to drain a full UART buffer in one call,
+// preventing silent overflow when the main loop runs slower
+// than 100 Hz (observed ~10 Hz due to CAN/render/serial work).
+static constexpr uint16_t TFM_MAX_BYTES_PER_UPDATE = 256;
 
 #else  // SENSOR_TYPE_TOFSENSE
 
@@ -503,8 +505,9 @@ void update(float vehicleSpeedKmh) {
                 tfmIdx_ = 1;
             }
         }
-        // Parse max 1 frame per update() call for deterministic timing
-        if (gotFrame) break;
+        // Continue draining: keep the last valid frame (freshest reading).
+        // Previous design broke after 1 frame, causing 90% data loss when
+        // the main loop runs slower than 100 Hz.
     }
 
 #else  // SENSOR_TYPE_TOFSENSE
