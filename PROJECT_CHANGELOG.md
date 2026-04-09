@@ -50,7 +50,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Selector de marchas** | ✅ Operativo | MCP23017 I2C, P/R/N/D/D2, backoff con `endTransmission(true)` |
 | **Audio (DFPlayer)** | ⚠️ Parcial | Hardware presente, integración completa pendiente |
 | **LEDs WS2812B** | ✅ Operativo | Front (47 LEDs @ GPIO 47), rear (16 LEDs @ GPIO 48) |
-| **Obstáculos (LiDAR)** | ✅ Operativo | TOFSense-M, 5 zonas, timeout 500 ms → fail-safe |
+| **Obstáculos (LiDAR)** | ✅ Operativo | TF-Mini Plus (115200 bps, GPIO 18), 5 zonas, timeout 500 ms → fail-safe |
 | **Power Manager** | ✅ Operativo | Ignition GPIO 40 + power hold GPIO 41 |
 | **Config Store** | ✅ Operativo | SPIFFS NVM persistente |
 | **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) |
@@ -91,6 +91,28 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Impacto en el sistema:** Solo cambia el comportamiento visual de LD2 cuando CAN ha fallado. Sin impacto en lógica de control ni seguridad. LED_DIAG (PB14) sigue funcionando igual para quien tenga LED externo.
 - **Archivos modificados:** `Core/Src/main.c`, `PROJECT_CHANGELOG.md`
 - **Tests:** Build con `-Wall -Wextra -Werror` pasa (56496 text, 72 data, 7784 bss).
+
+### PR — feat(obstacle): Activar sensor TF-Mini Plus (OBSTACLE_SENSOR_ENABLED=1)
+- **Fecha:** 2026-04-09
+- **Autor:** Copilot
+- **Descripción del cambio:** Activación del sensor de obstáculos TF-Mini Plus en el firmware de la ESP32-S3. El sensor estaba completamente implementado pero deshabilitado (`OBSTACLE_SENSOR_ENABLED=0`) desde PR-275. Ahora se habilita para uso con el hardware TF-Mini Plus disponible.
+- **Root cause:** El sensor de obstáculos estaba deshabilitado porque el hardware (TOFSense-M original) fue retirado. El usuario ahora dispone de un TF-Mini Plus listo para conectar.
+- **Solución aplicada:**
+  - Cambiar `OBSTACLE_SENSOR_ENABLED` de 0 a 1 en `obstacle_sensor.h`
+  - `SENSOR_TYPE` ya era `SENSOR_TYPE_TFMINI` (115200 bps, 9-byte frames)
+  - Actualizar comentarios del header para reflejar el estado activo
+  - Crear guía de cableado `docs/TFMINI_PLUS_WIRING_GUIDE.md`
+  - Actualizar `docs/OBSTACLE_SENSOR_DESIGN_DECISION.md` con sección de migración
+  - Actualizar `docs/PROJECT_MASTER_STATUS.md` con estado actual del sensor
+- **Impacto en el sistema:** La ESP32 ahora:
+  - Configura UART1 (GPIO 18, 115200 bps) al arranque
+  - Lee tramas TF-Mini Plus (9 bytes, 100 Hz) y valida checksum/señal/rango
+  - Transmite CAN 0x208 (distancia + zona + salud + counter) cada 66 ms
+  - Transmite CAN 0x209 (estado de seguridad) cada 100 ms
+  - La STM32 aplica su backstop de 5 zonas con los datos recibidos
+  - Sin cambios en el firmware STM32 (56496 text idéntico)
+- **Archivos modificados:** `esp32/src/sensors/obstacle_sensor.h`, `docs/TFMINI_PLUS_WIRING_GUIDE.md` (nuevo), `docs/OBSTACLE_SENSOR_DESIGN_DECISION.md`, `docs/PROJECT_MASTER_STATUS.md`, `PROJECT_CHANGELOG.md`
+- **Tests:** STM32 build limpio (56496 text). Tests obstacle sensor: 74 TF-Mini Plus + 135 TOFSense-M = 209 tests, 0 failures.
 
 ### PR-291 — fix: cppcheck shadowVariable — move SystemCoreClock extern to file scope
 - **Fecha:** 2026-04-08
@@ -633,3 +655,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-08 | **Robustez avanzada** — NaN/Inf hardening en 10+ rutas safety, TX NACK detection, CAN FPS metric, boot RAM/clock/periph checks, logs estandarizados [MODULE][SEVERITY] | #290 |
 | 2026-04-08 | **cppcheck shadowVariable fix** — Mover `extern SystemCoreClock` a file scope en boot_validation.c para evitar shadow con HAL stub | #291 |
 | 2026-04-09 | **LD2 muestra estado CAN en main loop** — CAN OK: flash breve 2s, CAN FAIL: parpadeo 1Hz. No necesita LED externo PB14. | #292 |
+| 2026-04-09 | **Activar sensor TF-Mini Plus** — OBSTACLE_SENSOR_ENABLED=1, SENSOR_TYPE=TFMINI. Firmware listo para sensor 115200 bps en GPIO 18. Guía de cableado + docs actualizados. | — |
