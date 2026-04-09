@@ -487,7 +487,7 @@ Repite el mismo proceso de la Fase 8 para cada motor:
 | STEER | PA6 (RPWM), PA7 (LPWM) | Fijo a 3.3V | TIM3 CH1/CH2 | `project_config.h:86-87` |
 
 **Para FR y RL:** R_EN y L_EN van **puenteados a 3.3V fijo** (siempre habilitados).
-Wire the corresponding BTS7960 R_EN/L_EN pins directly to 3.3 V (see `project_config.h:106`).
+Conecta los pines R_EN/L_EN del BTS7960 correspondiente directamente a 3.3V (ver `project_config.h:106`).
 
 **Motor de dirección:** Alimentación **12V** (no 24V) a través de RELAY_DIR (PC12).
 
