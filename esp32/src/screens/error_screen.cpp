@@ -62,6 +62,8 @@ const char* ErrorScreen::diagSubsystemName(uint8_t sub) {
 void ErrorScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("error");
     needsRedraw_ = true;
+    canLost_     = false;
+    prevCanLost_ = false;
     faultFlags_  = 0;
     prevFaultFlags_ = 0xFF;
     errorCode_   = 0;
@@ -77,6 +79,12 @@ void ErrorScreen::onEnter() {
 void ErrorScreen::onExit() {}
 
 void ErrorScreen::update(const vehicle::VehicleData& data) {
+    // Detect CAN communication loss: heartbeat was once received but is
+    // now older than CAN_LOSS_TIMEOUT_MS.
+    unsigned long hbTs = data.heartbeat().timestampMs;
+    canLost_ = (hbTs > 0) &&
+               ((millis() - hbTs) > can::CAN_LOSS_TIMEOUT_MS);
+
     faultFlags_    = data.heartbeat().faultFlags;
     errorCode_     = data.safety().errorCode;
     diagCode_      = data.diag().errorCode;
@@ -84,6 +92,12 @@ void ErrorScreen::update(const vehicle::VehicleData& data) {
 }
 
 void ErrorScreen::draw() {
+    // Force full repaint when CAN-lost state changes
+    if (canLost_ != prevCanLost_) {
+        prevCanLost_ = canLost_;
+        needsRedraw_ = true;
+    }
+
     if (needsRedraw_) {
         needsRedraw_ = false;
 
@@ -93,19 +107,30 @@ void ErrorScreen::draw() {
 
         RTRACE_SET_LAYER(1);
 
-        // SYSTEM ERROR banner
+        // Banner — changes depending on CAN-lost vs STM32-reported error
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(3);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString("SYSTEM ERROR", ui::SCREEN_W / 2, 30);
-        RTRACE_TEXT(ui::SCREEN_W / 2, 30, "SYSTEM ERROR",
-                    ui::COL_WHITE, ui::COL_RED, 3, MC_DATUM);
 
-        // Manual reset instruction
-        tft.setTextSize(1);
-        tft.drawString("Manual reset required", ui::SCREEN_W / 2, 60);
-        RTRACE_TEXT(ui::SCREEN_W / 2, 60, "Manual reset required",
-                    ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+        if (canLost_) {
+            tft.drawString("CAN LINK LOST", ui::SCREEN_W / 2, 30);
+            RTRACE_TEXT(ui::SCREEN_W / 2, 30, "CAN LINK LOST",
+                        ui::COL_WHITE, ui::COL_RED, 3, MC_DATUM);
+
+            tft.setTextSize(1);
+            tft.drawString("STM32 heartbeat not received", ui::SCREEN_W / 2, 60);
+            RTRACE_TEXT(ui::SCREEN_W / 2, 60, "STM32 heartbeat not received",
+                        ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+        } else {
+            tft.drawString("SYSTEM ERROR", ui::SCREEN_W / 2, 30);
+            RTRACE_TEXT(ui::SCREEN_W / 2, 30, "SYSTEM ERROR",
+                        ui::COL_WHITE, ui::COL_RED, 3, MC_DATUM);
+
+            tft.setTextSize(1);
+            tft.drawString("Manual reset required", ui::SCREEN_W / 2, 60);
+            RTRACE_TEXT(ui::SCREEN_W / 2, 60, "Manual reset required",
+                        ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+        }
 
         // Section labels (left-aligned)
         tft.setTextDatum(TL_DATUM);

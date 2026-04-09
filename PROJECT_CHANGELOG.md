@@ -79,6 +79,25 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — fix: ESP32 screen transitions to error when CAN cable disconnected
+- **Fecha:** 2026-04-09
+- **Autor:** Copilot
+- **Descripción del cambio:** La pantalla del ESP32 no reaccionaba al desconectar el cable CAN. Ahora, si el heartbeat del STM32 no llega durante >1.5 s, el ScreenManager fuerza la transición a la pantalla de error mostrando "CAN LINK LOST / STM32 heartbeat not received". Se auto-recupera al reconectar el cable.
+- **Root cause:** `ScreenManager::update()` solo leía `data.heartbeat().systemState` para decidir qué pantalla mostrar. Cuando el cable CAN se desconectaba, no llegaban nuevos heartbeats y el `systemState` mantenía su último valor (STANDBY, ACTIVE, etc.) → la pantalla nunca cambiaba.
+- **Solución aplicada:**
+  1. Añadido `CAN_LOSS_TIMEOUT_MS = 1500` en `can_ids.h`
+  2. Detección de heartbeat stale en `ScreenManager::update()` — si edad > 1500 ms y no estamos en BOOT, forzar `newState = ERROR`
+  3. `ErrorScreen` detecta heartbeat stale y muestra banner "CAN LINK LOST" en lugar de "SYSTEM ERROR"
+  4. Auto-recuperación: cuando el heartbeat vuelve, `canLost_` se limpia y vuelve al estado normal
+- **Impacto:** El usuario ve inmediatamente (en <2 s) que la comunicación CAN se ha interrumpido, con un mensaje claro en pantalla roja.
+- **Archivos modificados:**
+  - `esp32/include/can_ids.h` — nueva constante `CAN_LOSS_TIMEOUT_MS`
+  - `esp32/src/screen_manager.h` — nuevo campo `canLost_`
+  - `esp32/src/screen_manager.cpp` — detección heartbeat stale + fuerza ERROR
+  - `esp32/src/screens/error_screen.h` — campos `canLost_` / `prevCanLost_`
+  - `esp32/src/screens/error_screen.cpp` — banner condicional "CAN LINK LOST" vs "SYSTEM ERROR"
+- **Tests:** STM32 firmware build (`make -j$(nproc)`) clean con `-Wall -Wextra -Werror`.
+
 ### PR — audit(obstacle): TF-Mini Plus sampling rate fix + file comment cleanup
 - **Fecha:** 2026-04-09
 - **Autor:** Copilot
@@ -681,3 +700,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-09 | **Activar sensor TF-Mini Plus** — OBSTACLE_SENSOR_ENABLED=1, SENSOR_TYPE=TFMINI. Firmware listo para sensor 115200 bps en GPIO 18. Guía de cableado + docs actualizados. | — |
 | 2026-04-09 | **Auditoría TF-Mini Plus** — Fix sampling rate 10→100 Hz (TFM_MAX_BYTES_PER_UPDATE 32→256, eliminar 1-frame-per-call, rxBuf 256→512). Latencia 100ms→10ms. Comentarios actualizados. | — |
 | 2026-04-09 | **Guía puesta en marcha segura** — Documento 10 fases (I2C→DS18B20→INA226→encoder→sensores→pedal→relés→motores) con conexiones exactas, materiales, circuitos optoacopladores (6N137/PC817), BOM completa. | — |
+| 2026-04-09 | **CAN loss → pantalla error** — ScreenManager detecta heartbeat STM32 stale >1.5s → fuerza transición a ERROR screen con banner "CAN LINK LOST". Auto-recuperación al reconectar. | — |

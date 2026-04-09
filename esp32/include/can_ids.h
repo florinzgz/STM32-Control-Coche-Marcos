@@ -158,6 +158,7 @@ inline constexpr uint32_t STATUS_SLOW_RATE_MS   = 1000;  // Temperature
 inline constexpr uint32_t OBSTACLE_RATE_MS      = 66;    // Obstacle distance (15 Hz)
 inline constexpr uint32_t OBSTACLE_TIMEOUT_MS   = 500;   // STM32 obstacle CAN timeout (fail-safe)
 inline constexpr uint32_t ACK_TIMEOUT_MS        = 200;   // ESP32 command ACK timeout (UI update)
+inline constexpr uint32_t CAN_LOSS_TIMEOUT_MS   = 1500;  // ESP32 HMI: force error screen after no HB
 
 // -------------------------------------------------------------------------
 // Drive Mode Flags — CMD_MODE byte 0 (§4.5)
