@@ -74,9 +74,9 @@
 
 // ---- Compile-time sensor enable flag ----------------------------------------
 // 0 = sensor hardware removed (all UART/parsing disabled, safe defaults)
-// 1 = sensor connected and active
+// 1 = sensor connected and active (TF-Mini Plus on GPIO 18, 115200 baud)
 #ifndef OBSTACLE_SENSOR_ENABLED
-#define OBSTACLE_SENSOR_ENABLED 0
+#define OBSTACLE_SENSOR_ENABLED 1
 #endif
 
 // ---- Sensor type selection --------------------------------------------------
@@ -86,21 +86,22 @@
 #define SENSOR_TYPE_TFMINI    1   // Benewake TF-Mini Plus   (115200 baud, 9-byte frames)
 
 #ifndef SENSOR_TYPE
-#define SENSOR_TYPE  SENSOR_TYPE_TFMINI   // Default: TF-Mini Plus (next planned sensor)
-#endif                                    // When OBSTACLE_SENSOR_ENABLED=0 (current state),
-                                          // this default has no effect — all sensor code is
-                                          // compiled out.  It only matters when re-enabling.
+#define SENSOR_TYPE  SENSOR_TYPE_TFMINI   // Active: Benewake TF-Mini Plus (115200 baud, 9-byte frames)
+#endif
 
-// ---- TO ENABLE TF-MINI PLUS: ------------------------------------------------
-// 1. Set OBSTACLE_SENSOR_ENABLED = 1 in this file (or via -D compiler flag)
-// 2. Set SENSOR_TYPE = SENSOR_TYPE_TFMINI (already the default)
+// ---- TF-MINI PLUS — CURRENTLY ACTIVE ----------------------------------------
+// Sensor is ENABLED with the following configuration:
+// 1. OBSTACLE_SENSOR_ENABLED = 1 (active)
+// 2. SENSOR_TYPE = SENSOR_TYPE_TFMINI (TF-Mini Plus)
 // 3. Connect sensor TX to ESP32 RX (GPIO 18 default), 3.3V logic — no divider
-// 4. Provide 5V power to sensor (Pin 1), GND (Pin 2)
+// 4. Provide 5V power to sensor (red wire), GND (black wire)
 // 5. Ensure baud rate = 115200 (TF-Mini Plus factory default)
 // 6. Flash firmware (pio run -t upload)
 // 7. Verify logs: "[OBSTACLE] TF-Mini Plus init ..." should appear on Serial
 // 8. Verify CAN data: 0x208 frames with valid distance (health=1, status=VALID)
-// ---- END ACTIVATION INSTRUCTIONS -------------------------------------------
+//
+// To DISABLE: set OBSTACLE_SENSOR_ENABLED = 0 (or -DOBSTACLE_SENSOR_ENABLED=0)
+// ---- END CONFIGURATION STATUS -----------------------------------------------
 
 #include <cstdint>
 
