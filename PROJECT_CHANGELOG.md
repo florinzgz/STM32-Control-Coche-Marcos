@@ -50,7 +50,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Selector de marchas** | ✅ Operativo | MCP23017 I2C, P/R/N/D/D2, backoff con `endTransmission(true)` |
 | **Audio (DFPlayer)** | ⚠️ Parcial | Hardware presente, integración completa pendiente |
 | **LEDs WS2812B** | ✅ Operativo | Front (47 LEDs @ GPIO 47), rear (16 LEDs @ GPIO 48) |
-| **Obstáculos (LiDAR)** | ✅ Operativo | TOFSense-M, 5 zonas, timeout 500 ms → fail-safe |
+| **Obstáculos (LiDAR)** | ✅ Operativo | TF-Mini Plus (115200 bps, GPIO 18), 5 zonas, timeout 500 ms → fail-safe |
 | **Power Manager** | ✅ Operativo | Ignition GPIO 40 + power hold GPIO 41 |
 | **Config Store** | ✅ Operativo | SPIFFS NVM persistente |
 | **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) |
@@ -79,6 +79,29 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — audit(obstacle): TF-Mini Plus sampling rate fix + file comment cleanup
+- **Fecha:** 2026-04-09
+- **Autor:** Copilot
+- **Descripción del cambio:** Auditoría de producción del subsistema TF-Mini Plus. Descubierta pérdida del 90% de tramas del sensor (10 Hz observado vs 100 Hz esperado). Fix aplicado junto con limpieza de comentarios obsoletos.
+- **Root cause:** Dos restricciones combinadas causaban que `update()` solo procesara 1 trama por llamada:
+  1. `TFM_MAX_BYTES_PER_UPDATE = 32` (≈3.5 tramas) limitaba los bytes leídos
+  2. `if (gotFrame) break;` salía del bucle tras la primera trama válida
+  Con el main loop corriendo a ~10 Hz (por CAN/render/serial), solo se capturaban ~50 tramas/5s. El buffer UART de 256 bytes se llenaba (~900 bytes/s a 100 Hz × 9 bytes) y el hardware descartaba datos silenciosamente.
+- **Solución aplicada:**
+  1. Aumentar `TFM_MAX_BYTES_PER_UPDATE` de 32 a 256 (drena buffer completo por llamada)
+  2. Eliminar `if (gotFrame) break;` — ahora procesa todas las tramas disponibles, conservando solo la última válida (lectura más fresca)
+  3. Aumentar `rxBufSize` de 256 a 512 bytes (margen de ~570 ms a 100 Hz)
+  4. Actualizar comentarios file-level en `.h` y `.cpp` (eliminadas referencias obsoletas a TOFSense-M como sensor primario)
+  5. Actualizar comentario en `main.cpp` (TOFSense-M → TF-Mini Plus)
+  6. Actualizar `TFMINI_PLUS_WIRING_GUIDE.md` con diagnósticos esperados post-fix
+- **Impacto en el sistema:**
+  - ESP32: tasa de muestreo sube de ~10 Hz a ~100 Hz (todas las tramas del sensor)
+  - Latencia end-to-end: baja de ~100 ms a ~10 ms (trama más fresca siempre disponible)
+  - CAN 0x208: datos más actualizados en cada frame (cada 66 ms)
+  - STM32: sin cambios (56496 text idéntico)
+- **Archivos modificados:** `esp32/src/sensors/obstacle_sensor.h`, `esp32/src/sensors/obstacle_sensor.cpp`, `esp32/src/main.cpp`, `esp32/src/test_obstacle_sensor.cpp`, `docs/TFMINI_PLUS_WIRING_GUIDE.md`, `PROJECT_CHANGELOG.md`
+- **Tests:** 74 TF-Mini Plus + 135 TOFSense-M = 209 tests, 0 failures. STM32 build limpio (56496 text).
+
 ### PR-292 — feat: LD2 now shows CAN status in main loop (no external LED needed)
 - **Fecha:** 2026-04-09
 - **Autor:** Copilot
@@ -91,6 +114,28 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Impacto en el sistema:** Solo cambia el comportamiento visual de LD2 cuando CAN ha fallado. Sin impacto en lógica de control ni seguridad. LED_DIAG (PB14) sigue funcionando igual para quien tenga LED externo.
 - **Archivos modificados:** `Core/Src/main.c`, `PROJECT_CHANGELOG.md`
 - **Tests:** Build con `-Wall -Wextra -Werror` pasa (56496 text, 72 data, 7784 bss).
+
+### PR — feat(obstacle): Activar sensor TF-Mini Plus (OBSTACLE_SENSOR_ENABLED=1)
+- **Fecha:** 2026-04-09
+- **Autor:** Copilot
+- **Descripción del cambio:** Activación del sensor de obstáculos TF-Mini Plus en el firmware de la ESP32-S3. El sensor estaba completamente implementado pero deshabilitado (`OBSTACLE_SENSOR_ENABLED=0`) desde PR-275. Ahora se habilita para uso con el hardware TF-Mini Plus disponible.
+- **Root cause:** El sensor de obstáculos estaba deshabilitado porque el hardware (TOFSense-M original) fue retirado. El usuario ahora dispone de un TF-Mini Plus listo para conectar.
+- **Solución aplicada:**
+  - Cambiar `OBSTACLE_SENSOR_ENABLED` de 0 a 1 en `obstacle_sensor.h`
+  - `SENSOR_TYPE` ya era `SENSOR_TYPE_TFMINI` (115200 bps, 9-byte frames)
+  - Actualizar comentarios del header para reflejar el estado activo
+  - Crear guía de cableado `docs/TFMINI_PLUS_WIRING_GUIDE.md`
+  - Actualizar `docs/OBSTACLE_SENSOR_DESIGN_DECISION.md` con sección de migración
+  - Actualizar `docs/PROJECT_MASTER_STATUS.md` con estado actual del sensor
+- **Impacto en el sistema:** La ESP32 ahora:
+  - Configura UART1 (GPIO 18, 115200 bps) al arranque
+  - Lee tramas TF-Mini Plus (9 bytes, 100 Hz) y valida checksum/señal/rango
+  - Transmite CAN 0x208 (distancia + zona + salud + counter) cada 66 ms
+  - Transmite CAN 0x209 (estado de seguridad) cada 100 ms
+  - La STM32 aplica su backstop de 5 zonas con los datos recibidos
+  - Sin cambios en el firmware STM32 (56496 text idéntico)
+- **Archivos modificados:** `esp32/src/sensors/obstacle_sensor.h`, `docs/TFMINI_PLUS_WIRING_GUIDE.md` (nuevo), `docs/OBSTACLE_SENSOR_DESIGN_DECISION.md`, `docs/PROJECT_MASTER_STATUS.md`, `PROJECT_CHANGELOG.md`
+- **Tests:** STM32 build limpio (56496 text). Tests obstacle sensor: 74 TF-Mini Plus + 135 TOFSense-M = 209 tests, 0 failures.
 
 ### PR-291 — fix: cppcheck shadowVariable — move SystemCoreClock extern to file scope
 - **Fecha:** 2026-04-08
@@ -633,3 +678,5 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-08 | **Robustez avanzada** — NaN/Inf hardening en 10+ rutas safety, TX NACK detection, CAN FPS metric, boot RAM/clock/periph checks, logs estandarizados [MODULE][SEVERITY] | #290 |
 | 2026-04-08 | **cppcheck shadowVariable fix** — Mover `extern SystemCoreClock` a file scope en boot_validation.c para evitar shadow con HAL stub | #291 |
 | 2026-04-09 | **LD2 muestra estado CAN en main loop** — CAN OK: flash breve 2s, CAN FAIL: parpadeo 1Hz. No necesita LED externo PB14. | #292 |
+| 2026-04-09 | **Activar sensor TF-Mini Plus** — OBSTACLE_SENSOR_ENABLED=1, SENSOR_TYPE=TFMINI. Firmware listo para sensor 115200 bps en GPIO 18. Guía de cableado + docs actualizados. | — |
+| 2026-04-09 | **Auditoría TF-Mini Plus** — Fix sampling rate 10→100 Hz (TFM_MAX_BYTES_PER_UPDATE 32→256, eliminar 1-frame-per-call, rxBuf 256→512). Latencia 100ms→10ms. Comentarios actualizados. | — |

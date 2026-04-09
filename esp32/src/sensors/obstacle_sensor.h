@@ -1,57 +1,26 @@
 // =============================================================================
-// ESP32-S3 — Obstacle Sensor Driver (TOFSense-M 8×8 by Nooploop)
+// ESP32-S3 — Obstacle Sensor Driver (TF-Mini Plus / TOFSense-M 8×8)
 //
-// Reads distance from TOFSense-M (8×8 matrix) LiDAR sensor via UART.
-// This driver supports ONLY the multi-pixel frame format:
+// Active sensor: Benewake TF-Mini Plus (SENSOR_TYPE_TFMINI)
+//   - UART 115200 bps, 9-byte frames, 100 Hz output
+//   - Single-point distance in cm (uint16 LE), converted to mm
+//   - Signal strength validation, checksum, stuck detection
+//   - Range: 100–12000 mm (10 cm – 12 m)
 //
-//   Multi-pixel (TOFSense-M 8×8) — 400-byte Frame0:
-//     [0x57] [0x01] [0xFF] [ID] [TIME×4] [NUM_PIX=0x40]
-//     followed by 64 × 6-byte pixel blocks:
-//       [DIST_L] [DIST_H] [DIST_UH] [STATUS] [SIG_L] [SIG_H]
-//     Distance in µm (uint24 LE, divide by 1000 for mm).
-//     Status 0x00 = valid pixel.
-//     Trailer: 6 × 0xFF + 1-byte checksum (sum of all preceding & 0xFF).
+// Also supports (compile-time): Nooploop TOFSense-M 8×8
+//   - UART 921600 bps, 400-byte multi-pixel frames
+//   - 64 pixels, per-pixel statistics, quality gates
 //
 // The driver computes:
-//   - minDist:    minimum valid-pixel distance (closest obstacle)
-//   - maxDist:    maximum valid-pixel distance
-//   - avgDist:    mean valid-pixel distance
-//   - validCount: number of pixels with status == 0x00 and distance > 0
-//   - dispersion: maxDist − minDist (spread across the 8×8 FOV)
-//
-// The reported distance is minDist (closest point in the FOV).
-// Frames are rejected if validCount < MIN_VALID_PIXELS (4) or
-// dispersion > MAX_PIXEL_DISPERSION_MM (3000 mm).
-//
-// Parses at 921600 bps (factory default), 8N1.
-// Provides validated readings with stuck-sensor detection,
-// warmup filtering, and physical-range validation.
+//   - distance_mm: validated distance to nearest obstacle
+//   - zone:        0–4 mapping matching STM32 safety tiers
+//   - stuck:       sensor-stuck detection (unchanged distance while moving)
+//   - healthy:     composite health flag for CAN reporting
 //
 // UART configuration:
 //   UART1, RX = GPIO 18 (sensor TX → ESP32 RX), TX = -1 (no commands)
-//   Baud rate = 921600 bps, 8N1
 //
-// Frame layout (400 bytes):
-//   [0]    header         = 0x57
-//   [1]    function_mark  = 0x01 (multi-pixel)
-//   [2]    reserved       = 0xFF
-//   [3]    sensor_id
-//   [4-7]  system_time    uint32 LE (ms)
-//   [8]    num_pixels     (0x40 = 64 for 8×8)
-//   [9..N] pixel data     64 × 6 bytes each:
-//            [0-2] distance  uint24 LE (µm)
-//            [3]   status    0x00 = valid
-//            [4-5] signal    uint16 LE
-//   [N+1..N+6] end marker  6 × 0xFF
-//   [N+7]  checksum        sum of bytes [0..N+6] & 0xFF
-//
-// Hardware: TOFSense-M (Nooploop) — GH1.25 4-pin connector
-//   Pin1=VCC (5 V required), Pin2=GND, Pin3=RX (not used), Pin4=TX → ESP32 RX
-//   UART IO level: 3.5–3.6 V → protection REQUIRED (voltage divider or level shifter).
-//   See docs/TOFSENSE_M_WIRING_GUIDE.md for wiring diagrams.
-//
-// Reference: TOFSense-M User Manual V3.0
-//            https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf
+// Reference: docs/TFMINI_PLUS_WIRING_GUIDE.md
 //            docs/CAN_CONTRACT_FINAL.md rev 1.3 (0x208 payload)
 //
 // ---- SENSOR ENABLE/DISABLE ------------------------------------------------
@@ -63,9 +32,6 @@
 //     status=INVALID) — CAN module stops sending frames, UI shows "---"
 //
 // Set to 1 to re-enable when the sensor hardware is reconnected.
-//
-// Future: replace TOFSense-M with Benewake TF-Mini Plus (UART, 115200 baud).
-//         See distance_sensor.h for the common interface abstraction.
 // -------------------------------------------------------------------------
 // =============================================================================
 
@@ -74,9 +40,9 @@
 
 // ---- Compile-time sensor enable flag ----------------------------------------
 // 0 = sensor hardware removed (all UART/parsing disabled, safe defaults)
-// 1 = sensor connected and active
+// 1 = sensor connected and active (TF-Mini Plus on GPIO 18, 115200 baud)
 #ifndef OBSTACLE_SENSOR_ENABLED
-#define OBSTACLE_SENSOR_ENABLED 0
+#define OBSTACLE_SENSOR_ENABLED 1
 #endif
 
 // ---- Sensor type selection --------------------------------------------------
@@ -86,21 +52,22 @@
 #define SENSOR_TYPE_TFMINI    1   // Benewake TF-Mini Plus   (115200 baud, 9-byte frames)
 
 #ifndef SENSOR_TYPE
-#define SENSOR_TYPE  SENSOR_TYPE_TFMINI   // Default: TF-Mini Plus (next planned sensor)
-#endif                                    // When OBSTACLE_SENSOR_ENABLED=0 (current state),
-                                          // this default has no effect — all sensor code is
-                                          // compiled out.  It only matters when re-enabling.
+#define SENSOR_TYPE  SENSOR_TYPE_TFMINI   // Active: Benewake TF-Mini Plus (115200 baud, 9-byte frames)
+#endif
 
-// ---- TO ENABLE TF-MINI PLUS: ------------------------------------------------
-// 1. Set OBSTACLE_SENSOR_ENABLED = 1 in this file (or via -D compiler flag)
-// 2. Set SENSOR_TYPE = SENSOR_TYPE_TFMINI (already the default)
+// ---- TF-MINI PLUS — CURRENTLY ACTIVE ----------------------------------------
+// Sensor is ENABLED with the following configuration:
+// 1. OBSTACLE_SENSOR_ENABLED = 1 (active)
+// 2. SENSOR_TYPE = SENSOR_TYPE_TFMINI (TF-Mini Plus)
 // 3. Connect sensor TX to ESP32 RX (GPIO 18 default), 3.3V logic — no divider
-// 4. Provide 5V power to sensor (Pin 1), GND (Pin 2)
+// 4. Provide 5V power to sensor (red wire), GND (black wire)
 // 5. Ensure baud rate = 115200 (TF-Mini Plus factory default)
 // 6. Flash firmware (pio run -t upload)
 // 7. Verify logs: "[OBSTACLE] TF-Mini Plus init ..." should appear on Serial
 // 8. Verify CAN data: 0x208 frames with valid distance (health=1, status=VALID)
-// ---- END ACTIVATION INSTRUCTIONS -------------------------------------------
+//
+// To DISABLE: set OBSTACLE_SENSOR_ENABLED = 0 (or -DOBSTACLE_SENSOR_ENABLED=0)
+// ---- END CONFIGURATION STATUS -----------------------------------------------
 
 #include <cstdint>
 
@@ -142,7 +109,7 @@ struct Config {
     int      txPin             = -1;    // GPIO for UART1 TX (-1 = not connected, receive-only)
 #if SENSOR_TYPE == SENSOR_TYPE_TFMINI
     uint32_t baudRate          = 115200; // TF-Mini Plus factory default
-    uint16_t rxBufSize         = 256;    // 9-byte frames — 256 bytes is ample
+    uint16_t rxBufSize         = 512;    // 9-byte frames @ 100 Hz → 900 B/s; 512 B ≈ 570 ms headroom
     uint32_t warmupMs          = 500;    // TF-Mini Plus stabilises faster
     uint16_t minRangeMm        = 100;    // TF-Mini Plus minimum range (10 cm)
     uint16_t maxRangeMm        = 12000;  // TF-Mini Plus maximum range (12 m)

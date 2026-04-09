@@ -179,5 +179,25 @@ La ubicación del sensor en la ESP32-S3 maximiza el **aislamiento de dominios de
 
 ---
 
-*Documento generado: 2026-02-17*
+## 6. Actualización: Migración a TF-Mini Plus (2026-04-09)
+
+El sensor activo ha sido cambiado de **TOFSense-M 8×8** a **Benewake TF-Mini Plus**:
+
+| Aspecto | Antes (TOFSense-M) | Ahora (TF-Mini Plus) |
+|---------|--------------------|-----------------------|
+| `OBSTACLE_SENSOR_ENABLED` | 0 (deshabilitado) | **1 (activo)** |
+| `SENSOR_TYPE` | N/A (code compiled out) | **SENSOR_TYPE_TFMINI** |
+| Baud rate | 921600 | **115200** |
+| Nivel TX | 3.5–3.6 V (divisor obligatorio) | **3.3 V (conexión directa)** |
+| Rango | 2 cm – 4 m | **10 cm – 12 m** |
+| Trama | 400 bytes (64 píxeles) | **9 bytes (punto único)** |
+
+La arquitectura de seguridad **no cambia**: el sensor sigue en la ESP32-S3, comunicándose con la STM32 por CAN (0x208/0x209). El backstop de 3 niveles, timeout CAN, y detección de datos obsoletos siguen operativos exactamente igual.
+
+**Guía de cableado:** `docs/TFMINI_PLUS_WIRING_GUIDE.md`
+
+---
+
+*Documento generado: 2026-02-17*  
+*Última actualización: 2026-04-09 — Activación TF-Mini Plus*  
 *Este documento justifica la decisión de diseño sin proponer modificaciones al sistema existente.*

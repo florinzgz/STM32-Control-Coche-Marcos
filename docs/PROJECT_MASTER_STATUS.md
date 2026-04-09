@@ -1,7 +1,7 @@
 # PROJECT MASTER STATUS — Single Source of Truth
 
 > **This document is mandatory.** Every PR must update it before being considered complete.
-> Last updated: 2026-04-07 (PR-286)
+> Last updated: 2026-04-09
 
 ---
 
@@ -81,7 +81,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
 | ESP32 heartbeat transmission (0x011 every 100 ms) | Logic in `loop()` | `esp32/src/main.cpp` |
 | Command ACK tracking (non-blocking, 200 ms timeout) | `ackBeginWait()`, `ackCheck()` | `esp32/src/main.cpp` |
-| Obstacle sensor driver (TOFSense-M / TF-Mini Plus, GPIO 18 UART1 RX, compile-time SENSOR_TYPE, 5-zone mapping, uint16 overflow guard) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle sensor driver (TF-Mini Plus active, OBSTACLE_SENSOR_ENABLED=1, GPIO 18 UART1 RX, 115200 bps, 5-zone mapping, uint16 overflow guard) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
 | Obstacle CAN TX (0x208 at 66 ms, DLC 5 with rolling counter) | `can_obstacle` namespace | `esp32/src/can/can_obstacle.cpp` |
 | Obstacle boot indicator (WAITING/VALID/INVALID status) | `ObstacleIndicator` | `esp32/src/hmi/obstacle_indicator.cpp` |
 | Gear shifter input (MCP23017 I2C, GPIO 8/9, P/R/N/D1/D2) | `shifter` namespace | `esp32/src/shifter_input.cpp` |
@@ -290,8 +290,8 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-4 one-hot, P/R/N/D1/D2) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
 | Centralized touch handler (TAP/LONG_PRESS/RELEASE, 200 ms debounce) | `touch::init()`, `touch::update()`, `touch::getEvent()` | `esp32/src/touch_handler.cpp` |
 | NVS config store (CRC32 validated, driveMode/brightness/LED/volume, dirty-flag deferred writes) | `config_store::init()`, `config_store::save()`, `config_store::flush()` | `esp32/src/config_store.cpp` |
-| Obstacle sensor multi-type driver (TOFSense-M 921600 bps / TF-Mini Plus 115200 bps, GPIO 18 UART1 RX, compile-time SENSOR_TYPE, 5-zone mapping, stuck detection, uint16 overflow guard, stale data clearing on timeout) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
-| Obstacle sensor enable/disable flag (OBSTACLE_SENSOR_ENABLED=0 disables all UART/parsing, safe defaults) | `OBSTACLE_SENSOR_ENABLED` compile flag | `esp32/src/sensors/obstacle_sensor.h` |
+| Obstacle sensor multi-type driver (TF-Mini Plus ACTIVE: 115200 bps, GPIO 18 UART1 RX, SENSOR_TYPE_TFMINI, 5-zone mapping, stuck detection, uint16 overflow guard, stale data clearing on timeout. TOFSense-M also supported at compile time.) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |
+| Obstacle sensor enable flag (OBSTACLE_SENSOR_ENABLED=1, TF-Mini Plus active. Set to 0 to disable all UART/parsing with safe defaults) | `OBSTACLE_SENSOR_ENABLED` compile flag | `esp32/src/sensors/obstacle_sensor.h` |
 | Distance sensor common interface documentation (TF-Mini Plus integration guide) | N/A (header doc) | `esp32/src/sensors/distance_sensor.h` |
 | Obstacle CAN TX (0x208 DLC 5 at 66 ms + 0x209 DLC 4 at 100 ms) | `can_obstacle::init()`, `can_obstacle::update()` | `esp32/src/can/can_obstacle.cpp` |
 | Power manager (ignition key GPIO 40/41, OFF→RUNNING→SHUTTING_DOWN) | `power_mgr::init()`, `power_mgr::update()` | `esp32/src/power_manager.cpp` |
@@ -388,7 +388,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **NVS writes are deferred with dirty flag** — setters mark config dirty; `flush()` persists every 10 s and on shutdown. NVS ~100K cycle limit still applies but writes are batched | `dirty_` flag + `flush()` in `config_store.cpp`; periodic call in `main.cpp` | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 | **Service mode state is RAM-only (by design)** — module enable/disable settings reset to all-enabled on every power cycle, which is the safe default. ESP32-S3 handles all user-facing persistence via NVS. | `module_enabled[]` is static array, defaults to all-enabled | `Core/Src/service_mode.c` |
 | **Encoder reader module is observation-only** — `encoder_reader.c` provides raw count access and CAN diagnostics but is not connected to any control, odometry, speed, traction, braking, or steering logic | `Encoder_GetRawCount()`, `Encoder_GetDelta()`, `Encoder_SendDiagnostic()` | `Core/Src/encoder_reader.c` |
-| **Obstacle sensor disabled by default** — `OBSTACLE_SENSOR_ENABLED=0` in `obstacle_sensor.h`. No UART configured, no buffers allocated, `update()` is no-op, `getReading()` returns INVALID with safe defaults (distance=0, zone=0, healthy=false). Set to 1 and select `SENSOR_TYPE` to re-enable. | `OBSTACLE_SENSOR_ENABLED` flag, `SENSOR_TYPE` flag | `esp32/src/sensors/obstacle_sensor.h` |
+| **Obstacle sensor now ENABLED** — `OBSTACLE_SENSOR_ENABLED=1`, `SENSOR_TYPE=SENSOR_TYPE_TFMINI` (TF-Mini Plus, 115200 bps on GPIO 18). UART1 active, 9-byte frame parser running, CAN 0x208/0x209 transmitting when sensor data is valid. To disable: set `OBSTACLE_SENSOR_ENABLED=0`. Wiring guide: `docs/TFMINI_PLUS_WIRING_GUIDE.md`. | `OBSTACLE_SENSOR_ENABLED` flag, `SENSOR_TYPE` flag | `esp32/src/sensors/obstacle_sensor.h` |
 | **TF-Mini Plus max measurable distance is 6553 cm** — values >6553 cm cause `distCm * 10 > UINT16_MAX` and are rejected as invalid by the overflow guard. Sensor datasheet max is 12 m (1200 cm), so this is not a practical limitation. | `parseTfMiniFrame()` overflow guard | `esp32/src/sensors/obstacle_sensor.cpp` |
 
 ---

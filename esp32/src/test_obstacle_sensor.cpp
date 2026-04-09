@@ -1309,7 +1309,7 @@ static void test_tfmini_config_defaults() {
     printf("  test_tfmini_config_defaults\n");
     obstacle_sensor::Config cfg;
     ASSERT_EQ(cfg.baudRate, 115200u);
-    ASSERT_EQ(cfg.rxBufSize, 256);
+    ASSERT_EQ(cfg.rxBufSize, 512);
     ASSERT_EQ(cfg.maxRangeMm, 12000);
     ASSERT_EQ(cfg.minRangeMm, 100);
     ASSERT_EQ(cfg.warmupMs, 500u);
@@ -1317,7 +1317,8 @@ static void test_tfmini_config_defaults() {
 
 static void test_tfmini_non_blocking_cap() {
     printf("  test_tfmini_non_blocking_cap\n");
-    // Inject many bytes — update should only process TFM_MAX_BYTES_PER_UPDATE (32)
+    // Inject many bytes — update should process up to TFM_MAX_BYTES_PER_UPDATE (256)
+    // and keep the last valid frame (freshest reading).
     g_uart_inject_reset();
     g_test_millis = 0;
 
@@ -1325,7 +1326,8 @@ static void test_tfmini_non_blocking_cap() {
     g_test_millis = 600;
     obstacle_sensor::update(0.0f);
 
-    // Inject 10 valid frames = 90 bytes (> 32 byte cap)
+    // Inject 10 valid frames = 90 bytes (within 256 byte cap).
+    // update() drains all available data and keeps the last valid frame.
     for (int i = 0; i < 10; i++) {
         uint8_t frame[9];
         buildTfMiniFrame(frame, (uint16_t)(100 + i), 500);
@@ -1334,15 +1336,13 @@ static void test_tfmini_non_blocking_cap() {
 
     obstacle_sensor::update(0.0f);
 
-    // Should have parsed at most 1 valid frame (exits after first valid)
-    // and consumed at most 32 bytes
+    // Should have parsed all 10 frames, keeping the last one (109 cm = 1090 mm)
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
     ASSERT_EQ(rd.healthy, true);
-    ASSERT(rd.distance_mm >= 1000 && rd.distance_mm <= 1090);
+    ASSERT_EQ(rd.distance_mm, 1090);
 
-    // Remaining bytes should still be in the inject buffer
-    // (not all consumed in one call)
-    ASSERT(g_uart_inject_pos <= 32u);
+    // All 90 bytes should be consumed (90 < 256 cap)
+    ASSERT_EQ(g_uart_inject_pos, 90u);
 }
 
 static void test_tfmini_resync_on_bad_header() {
