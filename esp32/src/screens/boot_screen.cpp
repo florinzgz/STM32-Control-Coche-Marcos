@@ -4,6 +4,7 @@
 
 #include "boot_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include "hmi/obstacle_indicator.h"
 #include "sensors/obstacle_sensor.h"
@@ -21,25 +22,25 @@ static constexpr uint16_t DIAG_RX_STR  = (1 << 4);
 static constexpr uint16_t DIAG_RX_TRC  = (1 << 5);
 static constexpr uint16_t DIAG_RX_BAT  = (1 << 6);
 
-// Diagnostic area layout (below obstacle indicator)
-static constexpr int16_t DIAG_SEP_Y    = ui::SCREEN_H / 2 + 104;  // separator line
-static constexpr int16_t DIAG_LINE_H   = 10;                       // line spacing
+// Diagnostic area layout (below obstacle indicator) — from ui_config.h
+static constexpr int16_t DIAG_SEP_Y    = ui::cfg::BTILE_DIAG_SEP_Y;
+static constexpr int16_t DIAG_LINE_H   = ui::cfg::BTILE_DIAG_LINE_H;
 static constexpr int16_t DIAG_LINE1_Y  = DIAG_SEP_Y + 4;          // ESP32 bus status
 static constexpr int16_t DIAG_LINE2_Y  = DIAG_LINE1_Y + DIAG_LINE_H;  // STM32 heartbeat
 static constexpr int16_t DIAG_LINE3_Y  = DIAG_LINE2_Y + DIAG_LINE_H;  // RX frame flags
 static constexpr int16_t DIAG_LINE4_Y  = DIAG_LINE3_Y + DIAG_LINE_H;  // error counts
 static constexpr int16_t DIAG_LINE5_Y  = DIAG_LINE4_Y + DIAG_LINE_H;  // diagnostic verdict
-static constexpr int16_t DIAG_MARGIN_X = 10;
+static constexpr int16_t DIAG_MARGIN_X = ui::cfg::BTILE_DIAG_MARGIN_X;
 
 // Timeout for considering a frame "recently received"
-static constexpr unsigned long DIAG_RX_RECENT_MS = 2000;
+static constexpr unsigned long DIAG_RX_RECENT_MS = ui::cfg::BTILE_DIAG_RX_RECENT_MS;
 
 // Text buffer sizes (sized for worst-case snprintf output)
 static constexpr int DIAG_BUF_SIZE  = 56;   // "STM32: FROZEN cnt:255 St:LIMP F:FF E:FF" + NUL
 static constexpr int DIAG_RX_BUF    = 40;   // "HB SPD CUR SAF STR TRC BAT " (28) + margin
 
-// Freeze detection: if alive counter hasn't changed for 1 s, STM32 main loop is stuck
-static constexpr unsigned long DIAG_FREEZE_MS = 1000;
+// Freeze detection: if alive counter hasn't changed for configured duration, STM32 main loop is stuck
+static constexpr unsigned long DIAG_FREEZE_MS = ui::cfg::BTILE_DIAG_FREEZE_MS;
 
 // RX flag-to-label mapping for compact iteration
 struct RxFlagLabel { uint16_t flag; const char* label; };
@@ -108,11 +109,10 @@ void BootScreen::onEnter() {
 
 void BootScreen::onExit() {}
 
-void BootScreen::update(const vehicle::VehicleData& data) {
+void BootScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     // CAN link is considered active if heartbeat timestamp is recent
-    unsigned long now = millis();
     canLinked_ = (data.heartbeat().timestampMs > 0 &&
-                  (now - data.heartbeat().timestampMs) < 500);
+                  (frameTimeMs - data.heartbeat().timestampMs) < 500);
 
     // Obstacle sensor status
     obstacle_sensor::Reading sensorReading = obstacle_sensor::getReading();
@@ -142,19 +142,19 @@ void BootScreen::update(const vehicle::VehicleData& data) {
 
     // RX frame flags — which STM32 frame types have been received recently
     uint16_t rxFlags = 0;
-    if (data.heartbeat().timestampMs > 0 && (now - data.heartbeat().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.heartbeat().timestampMs > 0 && (frameTimeMs - data.heartbeat().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_HB;
-    if (data.speed().timestampMs > 0 && (now - data.speed().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.speed().timestampMs > 0 && (frameTimeMs - data.speed().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_SPD;
-    if (data.current().timestampMs > 0 && (now - data.current().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.current().timestampMs > 0 && (frameTimeMs - data.current().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_CUR;
-    if (data.safety().timestampMs > 0 && (now - data.safety().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.safety().timestampMs > 0 && (frameTimeMs - data.safety().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_SAF;
-    if (data.steering().timestampMs > 0 && (now - data.steering().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.steering().timestampMs > 0 && (frameTimeMs - data.steering().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_STR;
-    if (data.traction().timestampMs > 0 && (now - data.traction().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.traction().timestampMs > 0 && (frameTimeMs - data.traction().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_TRC;
-    if (data.battery().timestampMs > 0 && (now - data.battery().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.battery().timestampMs > 0 && (frameTimeMs - data.battery().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_BAT;
 
     if (rxFlags != diagRxFlags_) {
@@ -171,15 +171,15 @@ void BootScreen::update(const vehicle::VehicleData& data) {
 
     // ---- STM32 heartbeat details (freeze detection + status) ----
     const auto& hb = data.heartbeat();
-    bool hbValid = (hb.timestampMs > 0 && (now - hb.timestampMs) < DIAG_RX_RECENT_MS);
+    bool hbValid = (hb.timestampMs > 0 && (frameTimeMs - hb.timestampMs) < DIAG_RX_RECENT_MS);
 
     // Track alive counter changes for freeze detection
     if (hbValid && hb.aliveCounter != diagStm32PrevAlive_) {
         diagStm32PrevAlive_    = hb.aliveCounter;
-        diagStm32AliveChangedMs_ = now;
+        diagStm32AliveChangedMs_ = frameTimeMs;
     }
     bool frozen = hbValid && (diagStm32AliveChangedMs_ > 0) &&
-                  (now - diagStm32AliveChangedMs_) > DIAG_FREEZE_MS;
+                  (frameTimeMs - diagStm32AliveChangedMs_) > DIAG_FREEZE_MS;
 
     if (hbValid != diagStm32HbValid_ || frozen != diagStm32Frozen_ ||
         hb.aliveCounter != diagStm32Alive_ ||
@@ -255,7 +255,7 @@ void BootScreen::draw() {
 
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
-        tft.setTextPadding(160);
+        tft.setTextPadding(ui::cfg::PAD_BOOT_CAN_STATUS);
         if (canLinked_) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString("CAN: LINKED", ui::SCREEN_W / 2, statusY);
@@ -283,7 +283,8 @@ void BootScreen::draw() {
 
     // ---- TILE: CAN diagnostics panel ----
     if (tiles_.isDirty(BTILE_DIAGNOSTICS)) {
-        diagNeedsRedraw_ = false;
+        // NOTE: diagNeedsRedraw_ is cleared AFTER the tile render block below,
+        // not inside it — preserving draw-phase purity.
 
         RTRACE_SET_LAYER(2);
 
@@ -411,6 +412,7 @@ void BootScreen::draw() {
                         verdictCol, ui::COL_BG, 1, TL_DATUM);
         }
         tiles_.markClean(BTILE_DIAGNOSTICS);
+        diagNeedsRedraw_ = false;   // Clear event flag AFTER render (draw purity)
     }
 
     RTRACE_DUMP_IF_PENDING();

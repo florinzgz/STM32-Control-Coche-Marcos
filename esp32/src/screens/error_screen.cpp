@@ -16,6 +16,7 @@
 
 #include "error_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include "can_ids.h"
 #include <TFT_eSPI.h>
@@ -80,27 +81,39 @@ void ErrorScreen::onEnter() {
     diagCode_    = 0;
     prevDiagCode_ = 0xFF;
     diagSubsystem_ = 0;
-    errorEntryMs_  = millis();
+    errorEntryMs_  = 0;               // captured on first update() (frame time contract)
     prevElapsedSec_ = 0xFFFFFFFF;
     prevDiagSubsystem_ = 0xFF;
+    failsafeFrameCount_ = 0;
 
-    // Initialize tile regions
-    tiles_.setRect(ETILE_BANNER,  0,   0, ui::SCREEN_W, 75);
-    tiles_.setRect(ETILE_FAULTS, 10,  80, 460, 83);
-    tiles_.setRect(ETILE_SAFETY, 10, 170, 460, 40);
-    tiles_.setRect(ETILE_DIAG,   10, 220, 460, 40);
-    tiles_.setRect(ETILE_ELAPSED,10, 270, 460, 30);
+    // Initialize tile regions (dimensions from ui_config.h)
+    tiles_.setRect(ETILE_BANNER,  0,   0,
+                   ui::SCREEN_W, ui::cfg::ETILE_BANNER_H);
+    tiles_.setRect(ETILE_FAULTS,  ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_FAULTS_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_FAULTS_H);
+    tiles_.setRect(ETILE_SAFETY,  ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_SAFETY_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_SAFETY_H);
+    tiles_.setRect(ETILE_DIAG,    ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_DIAG_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_DIAG_H);
+    tiles_.setRect(ETILE_ELAPSED, ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_ELAPSED_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_ELAPSED_H);
     tiles_.invalidateAll();
 }
 
 void ErrorScreen::onExit() {}
 
-void ErrorScreen::update(const vehicle::VehicleData& data) {
+void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
+    // Capture error entry time on first update() — ensures we use the injected
+    // frameTimeMs instead of a raw millis() call (frame time contract §4).
+    if (errorEntryMs_ == 0) {
+        errorEntryMs_ = frameTimeMs;
+    }
+
     // Detect CAN communication loss: heartbeat was once received but is
     // now older than CAN_LOSS_TIMEOUT_MS.
     unsigned long hbTs = data.heartbeat().timestampMs;
     canLost_ = (hbTs > 0) &&
-               ((millis() - hbTs) > can::CAN_LOSS_TIMEOUT_MS);
+               ((frameTimeMs - hbTs) > can::CAN_LOSS_TIMEOUT_MS);
 
     faultFlags_    = data.heartbeat().faultFlags;
     errorCode_     = data.safety().errorCode;
@@ -117,8 +130,19 @@ void ErrorScreen::update(const vehicle::VehicleData& data) {
         tiles_.updateHash(ETILE_DIAG, dh);
     }
     // Elapsed time — computed once here, used in both hash and draw()
-    elapsedSec_ = (millis() - errorEntryMs_) / 1000;
+    elapsedSec_ = (frameTimeMs - errorEntryMs_) / 1000;
     tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec_));
+
+    // ---- Hash failsafe: staggered forced redraw of critical tiles (V10) ----
+    ++failsafeFrameCount_;
+    if (failsafeFrameCount_ >= ui::cfg::HASH_FAILSAFE_INTERVAL) {
+        failsafeFrameCount_ = 0;
+    }
+    {
+        constexpr uint16_t STAGGER = ui::cfg::HASH_FAILSAFE_INTERVAL / 2;
+        if (failsafeFrameCount_ == 0)          tiles_.forceRedraw(ETILE_BANNER);
+        if (failsafeFrameCount_ == STAGGER)    tiles_.forceRedraw(ETILE_FAULTS);
+    }
 }
 
 void ErrorScreen::draw() {
@@ -210,7 +234,7 @@ void ErrorScreen::draw() {
 
         // Hex code — padded to avoid remnants
         snprintf(buf, sizeof(buf), "0x%02X", faultFlags_);
-        tft.setTextPadding(80);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_HEX);
         tft.drawString(buf, 130, 80);
         RTRACE_TEXT(130, 80, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
@@ -250,7 +274,7 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_FULL);
         tft.drawString(buf, 10, 186);
         RTRACE_TEXT(10, 186, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
@@ -269,7 +293,7 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_FULL);
         tft.drawString(buf, 10, 236);
         RTRACE_TEXT(10, 236, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
@@ -294,7 +318,7 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_AMBER, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_FULL);
         tft.drawString(buf, 10, 286);
         RTRACE_TEXT(10, 286, buf, ui::COL_AMBER, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);

@@ -40,6 +40,7 @@
 
 #include "screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/tile_engine.h"
 #include "ui/gear_display.h"
 #include "ui/mode_icons.h"
@@ -68,7 +69,7 @@ class DriveScreen : public Screen {
 public:
     void onEnter() override;
     void onExit()  override;
-    void update(const vehicle::VehicleData& data) override;
+    void update(const vehicle::VehicleData& data, unsigned long frameTimeMs) override;
     void draw()    override;
 
 private:
@@ -103,6 +104,10 @@ private:
 
     bool     needsFullRedraw_    = true;
 
+    // Precomputed wheel draw values (threshold-filtered in update phase)
+    uint8_t  drawTraction_[4]    = {};
+    int8_t   drawTemp_[4]        = {};
+
     // System state for degraded/limp overlays (HMI_STATE_MODEL §2.4)
     can::SystemState curSystemState_  = can::SystemState::ACTIVE;
     can::SystemState prevSystemState_ = can::SystemState::ACTIVE;
@@ -111,12 +116,26 @@ private:
     uint8_t curFaultFlags_  = 0;
     uint8_t prevFaultFlags_ = 0;
 
+    // Overlay visibility tracking for invalidation chain.
+    // When an overlay transitions from visible→invisible, underlying
+    // tiles are marked dirty to restore their content.
+    // These are precomputed in update() — draw() MUST NOT recompute them.
+    bool prevDegradedVisible_ = false;
+    bool prevFaultsVisible_   = false;
+    bool prevAckVisible_      = false;
+    bool curDegradedVisible_  = false;   // precomputed in update()
+    bool curFaultsVisible_    = false;   // precomputed in update()
+    bool curAckVisible_       = false;   // precomputed in update()
+
     // ACK visual feedback state
-    unsigned long ackLastShownMs_   = 0;   // millis() when indicator was last shown
+    unsigned long ackLastShownMs_   = 0;   // frameTimeMs when indicator was last shown
     unsigned long ackTrackedAckMs_  = 0;   // last ack().timestampMs we processed
     unsigned long ackTrackedTmoMs_  = 0;   // last ackTimeoutMs() we processed
     uint8_t       ackDisplayResult_ = 0;   // 0=none, 1=OK, 2=rejected, 3=timeout
     bool          ackIndicatorDirty_ = false;
+
+    // Hash failsafe: frame counter for periodic forced redraw of critical tiles
+    uint16_t failsafeFrameCount_ = 0;
 
     void drawSpeed();
     void drawAckIndicator();

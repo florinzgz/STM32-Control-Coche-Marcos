@@ -95,6 +95,9 @@ private:
     bool pinActive_         = false;  // true while PIN screen is shown
     bool engineeringActive_ = false;  // true while engineering screen is shown
     bool canLost_           = false;  // true when STM32 heartbeat lost > CAN_LOSS_TIMEOUT_MS
+
+    // Frame time monotonicity tracking (V10 contract)
+    unsigned long prevFrameTimeMs_ = 0;
 };
 
 #endif // SCREEN_MANAGER_H

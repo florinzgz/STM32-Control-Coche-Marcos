@@ -37,7 +37,7 @@ class ErrorScreen : public Screen {
 public:
     void onEnter() override;
     void onExit()  override;
-    void update(const vehicle::VehicleData& data) override;
+    void update(const vehicle::VehicleData& data, unsigned long frameTimeMs) override;
     void draw()    override;
 
 private:
@@ -57,9 +57,12 @@ private:
     uint8_t  prevDiagCode_   = 0xFF;
     uint8_t  diagSubsystem_  = 0;
     uint8_t  prevDiagSubsystem_ = 0xFF;
-    uint32_t errorEntryMs_   = 0;      // millis() when error screen entered
+    uint32_t errorEntryMs_   = 0;      // frameTimeMs when error screen entered (captured on first update)
     uint32_t elapsedSec_     = 0;      // computed once in update()
     uint32_t prevElapsedSec_ = 0xFFFFFFFF;
+
+    // Hash failsafe frame counter
+    uint16_t failsafeFrameCount_ = 0;
 };
 
 #endif // ERROR_SCREEN_H

@@ -20,13 +20,14 @@
 #define PIN_SCREEN_H
 
 #include "screen.h"
+#include "ui/ui_config.h"
 #include <cstdint>
 
 class PinScreen : public Screen {
 public:
     void onEnter() override;
     void onExit()  override;
-    void update(const vehicle::VehicleData& data) override;
+    void update(const vehicle::VehicleData& data, unsigned long frameTimeMs) override;
     void draw()    override;
 
     /// Process a touch tap.  Returns true if consumed.
@@ -57,9 +58,10 @@ private:
     bool     cancelled_   = false;
     bool     needsRedraw_ = true;
     bool     wrongCode_   = false;    // briefly show "Codigo incorrecto"
-    uint32_t wrongCodeMs_ = 0;
+    bool     wrongCodePending_ = false; // set in checkPin(), consumed in update()
+    uint32_t wrongCodeMs_ = 0;         // frameTimeMs when wrong code was accepted
 
-    static constexpr uint32_t WRONG_CODE_DISPLAY_MS = 1000;
+    static constexpr uint32_t WRONG_CODE_DISPLAY_MS = ui::cfg::PSCR_WRONG_CODE_DISPLAY_MS;
 
     void handleDigit(uint8_t d);
     void handleDelete();

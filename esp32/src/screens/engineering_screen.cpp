@@ -167,7 +167,7 @@ void EngineeringScreen::onEnter() {
 
 void EngineeringScreen::onExit() {}
 
-void EngineeringScreen::update(const vehicle::VehicleData& data) {
+void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     // Cache service mode data for fault viewer / module control
     faultBits_    = data.service().faultMask;
     enabledBits_  = data.service().enabledMask;
@@ -187,11 +187,11 @@ void EngineeringScreen::update(const vehicle::VehicleData& data) {
             } else {
                 lastAckResult_ = 2;  // treat INVALID as rejected
             }
-            lastAckMs_ = millis();
+            lastAckMs_ = frameTimeMs;
             needsRedraw_ = true;
         }
         // Expire feedback message after 2 seconds
-        if (lastAckResult_ != 0 && (millis() - lastAckMs_) > ACK_FEEDBACK_TIMEOUT_MS) {
+        if (lastAckResult_ != 0 && (frameTimeMs - lastAckMs_) > ACK_FEEDBACK_TIMEOUT_MS) {
             lastAckResult_ = 0;
             needsRedraw_ = true;
         }

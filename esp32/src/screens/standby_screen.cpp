@@ -6,6 +6,7 @@
 
 #include "standby_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include <TFT_eSPI.h>
 #include <cstdio>
@@ -21,15 +22,18 @@ void StandbyScreen::onEnter() {
     memset(temps_, 0, sizeof(temps_));
     memset(prevTemps_, 0x7F, sizeof(prevTemps_));
 
-    // Initialize tile regions
-    tiles_.setRect(YTILE_TEMPS,  140, 185, 200, 110);
-    tiles_.setRect(YTILE_FAULTS, 0,   290, ui::SCREEN_W, 30);
+    // Initialize tile regions (dimensions from ui_config.h)
+    tiles_.setRect(YTILE_TEMPS,  ui::cfg::YTILE_TEMPS_X, ui::cfg::YTILE_TEMPS_Y,
+                   ui::cfg::YTILE_TEMPS_W, ui::cfg::YTILE_TEMPS_H);
+    tiles_.setRect(YTILE_FAULTS, 0, ui::cfg::YTILE_FAULTS_Y,
+                   ui::SCREEN_W, ui::cfg::YTILE_FAULTS_H);
     tiles_.invalidateAll();
 }
 
 void StandbyScreen::onExit() {}
 
-void StandbyScreen::update(const vehicle::VehicleData& data) {
+void StandbyScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
+    (void)frameTimeMs;  // Not used in StandbyScreen — no timing-dependent logic
     faultFlags_ = data.heartbeat().faultFlags;
     for (uint8_t i = 0; i < 5; ++i) {
         temps_[i] = data.temp().temps[i];
@@ -110,7 +114,7 @@ void StandbyScreen::draw() {
                 tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
                 tft.setTextSize(1);
                 tft.setTextDatum(TL_DATUM);
-                tft.setTextPadding(80);
+                tft.setTextPadding(ui::cfg::PAD_STANDBY_TEMP);
                 tft.drawString(buf, 140, 185 + i * 22);
                 RTRACE_TEXT(140, 185 + i * 22, buf,
                             ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
@@ -126,7 +130,7 @@ void StandbyScreen::draw() {
 
         tft.setTextDatum(MC_DATUM);
         tft.setTextSize(1);
-        tft.setTextPadding(240);
+        tft.setTextPadding(ui::cfg::PAD_STANDBY_FAULTS);
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString("NO FAULTS", ui::SCREEN_W / 2, 308);

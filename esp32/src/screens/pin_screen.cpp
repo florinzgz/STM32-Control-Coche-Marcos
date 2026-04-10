@@ -4,6 +4,7 @@
 
 #include "pin_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include <TFT_eSPI.h>
 #include <Arduino.h>
@@ -15,16 +16,23 @@ extern TFT_eSPI tft;
 // ---- Out-of-line definition of constexpr array -----
 constexpr uint8_t PinScreen::CORRECT_PIN[PinScreen::PIN_LEN];
 
-// ---- Layout constants -----------------------------------------------
-// Keypad buttons: 90×50 px, 3 columns centred on 480 px wide screen
-static constexpr int16_t BTN_W      = 90;
-static constexpr int16_t BTN_H      = 50;
-static constexpr int16_t BTN_GAP    = 15;   // horizontal gap between columns
-static constexpr int16_t BTN_VGAP   = 10;   // vertical gap between rows
+// ---- Layout constants (derived from ui_config.h) --------------------
+// Keypad buttons: PSCR_BTN_W × PSCR_BTN_H, 3 columns centred on 480 px wide screen
+static constexpr int16_t BTN_W   = ui::cfg::PSCR_BTN_W;
+static constexpr int16_t BTN_H   = ui::cfg::PSCR_BTN_H;
 // 3 cols × 90 + 2 × 15 = 300; start X = (480 - 300) / 2 = 90
-static constexpr int16_t COL_X[3]   = {90, 195, 300};
-// 4 rows starting at Y=80, row pitch = 50+10 = 60
-static constexpr int16_t ROW_Y[4]   = {80, 140, 200, 260};
+static constexpr int16_t COL_X[3] = {
+    (ui::SCREEN_W - (3 * BTN_W + 2 * ui::cfg::PSCR_BTN_GAP)) / 2,
+    (ui::SCREEN_W - (3 * BTN_W + 2 * ui::cfg::PSCR_BTN_GAP)) / 2 + BTN_W + ui::cfg::PSCR_BTN_GAP,
+    (ui::SCREEN_W - (3 * BTN_W + 2 * ui::cfg::PSCR_BTN_GAP)) / 2 + 2 * (BTN_W + ui::cfg::PSCR_BTN_GAP)
+};
+// 4 rows starting at Y=80, row pitch = BTN_H + BTN_VGAP
+static constexpr int16_t ROW_Y[4] = {
+    80,
+    80 + (BTN_H + ui::cfg::PSCR_BTN_VGAP),
+    80 + 2 * (BTN_H + ui::cfg::PSCR_BTN_VGAP),
+    80 + 3 * (BTN_H + ui::cfg::PSCR_BTN_VGAP)
+};
 
 // Key mapping [row][col]: 0-9 digits, KEY_DELETE, KEY_CANCEL
 static constexpr uint8_t KEY_MAP[4][3] = {
@@ -34,13 +42,12 @@ static constexpr uint8_t KEY_MAP[4][3] = {
     {PinScreen::KEY_DELETE, 0, PinScreen::KEY_CANCEL}
 };
 
-// PIN dot display
-static constexpr int16_t DOT_W      = 28;
-static constexpr int16_t DOT_H      = 28;
-static constexpr int16_t DOT_GAP    = 12;
-// 4 dots × 28 + 3 × 12 = 148; start X = (480 - 148) / 2 = 166
+// PIN dot display (from ui_config.h)
+static constexpr int16_t DOT_W      = ui::cfg::PSCR_DOT_W;
+static constexpr int16_t DOT_H      = ui::cfg::PSCR_DOT_H;
+static constexpr int16_t DOT_GAP    = ui::cfg::PSCR_DOT_GAP;
 static constexpr int16_t DOT_START_X = (ui::SCREEN_W - (4 * DOT_W + 3 * DOT_GAP)) / 2;
-static constexpr int16_t DOT_Y      = 38;
+static constexpr int16_t DOT_Y      = ui::cfg::PSCR_DOT_Y;
 
 // -------------------------------------------------------------------------
 // Lifecycle
@@ -52,9 +59,16 @@ void PinScreen::onEnter() {
 
 void PinScreen::onExit() {}
 
-void PinScreen::update(const vehicle::VehicleData& /*data*/) {
+void PinScreen::update(const vehicle::VehicleData& /*data*/, unsigned long frameTimeMs) {
+    // Capture wrong-code timestamp from pending touch event (Frame Time Contract §4:
+    // touch handler sets a flag, update() captures the frame-aligned timestamp).
+    if (wrongCodePending_) {
+        wrongCodePending_ = false;
+        wrongCodeMs_      = frameTimeMs;
+    }
+
     // Expire "wrong code" message after timeout
-    if (wrongCode_ && (millis() - wrongCodeMs_) >= WRONG_CODE_DISPLAY_MS) {
+    if (wrongCode_ && (frameTimeMs - wrongCodeMs_) >= WRONG_CODE_DISPLAY_MS) {
         wrongCode_   = false;
         needsRedraw_ = true;
     }
@@ -62,12 +76,13 @@ void PinScreen::update(const vehicle::VehicleData& /*data*/) {
 
 void PinScreen::reset() {
     memset(digits_, 0, sizeof(digits_));
-    len_         = 0;
-    confirmed_   = false;
-    cancelled_   = false;
-    wrongCode_   = false;
-    wrongCodeMs_ = 0;
-    needsRedraw_ = true;
+    len_              = 0;
+    confirmed_        = false;
+    cancelled_        = false;
+    wrongCode_        = false;
+    wrongCodePending_ = false;
+    wrongCodeMs_      = 0;
+    needsRedraw_      = true;
 }
 
 // -------------------------------------------------------------------------
@@ -221,9 +236,9 @@ void PinScreen::checkPin() {
     for (uint8_t i = 0; i < PIN_LEN; ++i) {
         if (digits_[i] != CORRECT_PIN[i]) {
             // Wrong — show message, clear entry for retry
-            wrongCode_   = true;
-            wrongCodeMs_ = millis();
-            len_         = 0;
+            wrongCode_        = true;
+            wrongCodePending_ = true;   // timestamp captured in update() (frame time contract)
+            len_              = 0;
             memset(digits_, 0, sizeof(digits_));
             needsRedraw_ = true;
             Serial.println("[PIN] Wrong code");

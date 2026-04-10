@@ -412,8 +412,10 @@ static void renderTask(void* /*param*/) {
 
 #if RUNTIME_MONITOR
             // Debug overlay toggle (3 s hold) and draw
-            RTMON_OVERLAY_UPDATE(isTouched);
-            RTMON_OVERLAY_DRAW(tft);
+            // Uses lastFrameStart (captured once per frame at line 367)
+            // to comply with frame time contract — no direct millis() in UI.
+            RTMON_OVERLAY_UPDATE(isTouched, lastFrameStart);
+            RTMON_OVERLAY_DRAW(tft, lastFrameStart);
 #endif
         }
 

@@ -9,9 +9,13 @@
 
 #include "obstacle_indicator.h"
 #include "../ui/ui_common.h"
+#include "../ui/ui_config.h"
 #include "../ui/render_trace.h"
 
 namespace hmi {
+
+// Sensor status text padding — sized for max "SENSOR: INVALID  65535 mm" at size 1
+static constexpr int16_t PAD_SENSOR_STATUS = 280;
 
 void ObstacleIndicator::draw(TFT_eSPI& tft,
                              obstacle_sensor::SensorStatus status,
@@ -25,7 +29,7 @@ void ObstacleIndicator::draw(TFT_eSPI& tft,
 
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
-    tft.setTextPadding(280);   // anti-flicker: padding instead of fillRect
+    tft.setTextPadding(PAD_SENSOR_STATUS);   // anti-flicker: padding instead of fillRect
 
     // Buffer for status + distance text (e.g. "SENSOR: INVALID  65535 mm\0" = 29 chars)
     static constexpr int INDICATOR_BUF_SIZE = 40;

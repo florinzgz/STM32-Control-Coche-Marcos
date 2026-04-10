@@ -29,7 +29,7 @@ class EngineeringScreen : public Screen {
 public:
     void onEnter() override;
     void onExit()  override;
-    void update(const vehicle::VehicleData& data) override;
+    void update(const vehicle::VehicleData& data, unsigned long frameTimeMs) override;
     void draw()    override;
 
     /// Process a touch tap event.  Returns true if consumed.
@@ -95,7 +95,7 @@ private:
 
     // Module control ACK feedback — brief status message after toggle
     uint8_t     lastAckResult_   = 0;      // 0=none, 1=OK, 2=REJECTED, 3=BLOCKED
-    uint32_t    lastAckMs_       = 0;      // millis() when ACK was received
+    uint32_t    lastAckMs_       = 0;      // frameTimeMs when ACK was received
     uint32_t    lastAckTracked_  = 0;      // last ack timestamp we processed
 
     // Sensor mapping edit state
