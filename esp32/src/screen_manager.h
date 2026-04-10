@@ -7,21 +7,27 @@
 // Integrates frame limiter: update() is called every loop,
 // but draw() only executes at the target frame rate (20 FPS).
 //
-// DETERMINISTIC RENDER PIPELINE:
+// TILE-BASED DIRTY REGION RENDER ENGINE:
 //   CAN RX (Core 1) → VehicleData → mutex copy → localVD snapshot (Core 0)
 //   → screenManager.update(snapshot):
-//       1. screen.update(snapshot) → copies into cur_* (frame latch)
-//       2. frameLimiter_.shouldDraw() gates at 20 FPS
-//       3. screen.draw() reads ONLY cur_*/prev_* — immutable during render
+//       1. screen.update(snapshot) → copies into cur_*, computes tile hashes
+//       2. TileSet::updateHash() → compares hash → marks dirty if changed
+//       3. frameLimiter_.shouldDraw() gates at 20 FPS
+//       4. screen.draw() iterates tiles, only renders dirty ones
 //   Result: each rendered frame uses data from a single consistent time instant.
 //   CAN updates arriving mid-render do NOT affect the current frame.
+//   Only tiles whose content hash changed since last frame are redrawn.
 //
 // ANTI-FLICKER STRATEGY:
 //   - Static layer (car body, labels, outlines) drawn once in onEnter()
-//   - Dynamic layer uses dirty flags: only changed values are repainted
+//   - Dynamic layer uses tile dirty flags: only changed tiles are repainted
+//   - Tile hash comparison: FNV-1a hash per tile for fast skip decision
 //   - Text updates use setTextPadding() to overwrite in a single SPI pass
 //     instead of fillRect+drawString (which causes visible blank flash)
-//   - CAN-loss overlay: partial redraw of banner area only, not full screen
+//   - Bar widgets (pedal, battery, obstacle) use differential update:
+//     only the portion that changed is painted, not clear+redraw
+//   - CAN-loss overlay: partial redraw of banner tile only, not full screen
+//   - Overlay tiles restore underlying tiles when dismissed
 //
 // Engineering menu access:
 //   1. Long-press (3 s) on the battery icon → PIN entry screen.

@@ -79,6 +79,42 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — feat: Tile-Based Dirty Region Engine (motor de render tipo cluster OEM automotriz)
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Refactor completo del sistema HMI para implementar un motor de render por regiones (tiles) tipo cluster OEM automotriz. Cada zona de la pantalla es un tile independiente con su propio dirty flag y hash de contenido FNV-1a. Solo los tiles cuyo contenido ha cambiado desde el último frame se redibujan.
+- **Root cause:** El sistema anterior usaba comparaciones campo-por-campo para detectar cambios, sin agrupación formal en regiones. Los bar widgets (pedal, batería, sensor obstáculo) usaban clear+redraw completo en cada actualización, causando un flash visible (clear = COL_BG seguido de fill = color).
+- **Solución aplicada:**
+  1. **tile_engine.h**: Nuevo módulo con TileRect, TileHash (FNV-1a 32-bit), y TileSet<N> template. Hash comparison per-tile para decisión de skip/redraw.
+  2. **DriveScreen**: 12 tiles formales (SPEED, OBSTACLE, WHEELS, STEERING, BATTERY, GEAR, PEDAL, MODE_ICONS, LED_TOGGLE, DEGRADED overlay, FAULTS overlay, ACK). Pipeline: update() computa hashes → updateHash() marca dirty → draw() solo renderiza tiles sucios.
+  3. **ErrorScreen**: 5 tiles (BANNER, FAULTS, SAFETY, DIAG, ELAPSED). Cada tile se actualiza independientemente.
+  4. **SafeScreen**: 6 tiles (FAULTS, ERROR, SPEEDS, CURRENTS, TEMPS, STEERING).
+  5. **StandbyScreen**: 2 tiles (TEMPS, FAULTS).
+  6. **BootScreen**: 3 tiles (CAN_STATUS, SENSOR, DIAGNOSTICS).
+  7. **PedalBar**: Differential update — solo la porción que creció o se redujo se pinta. Si cambió el color (threshold crossing), redraw mínimo.
+  8. **BatteryIndicator**: Differential update — mismo patrón que PedalBar.
+  9. **ObstacleSensor**: Differential update — bar de proximidad sin clear+redraw.
+  10. **screen_manager.h**: Documentación actualizada reflejando pipeline tile-based.
+- **Archivos afectados:**
+  - `esp32/src/ui/tile_engine.h` — NUEVO: Core tile infrastructure
+  - `esp32/src/screens/drive_screen.h` — TileSet<12>, tile enum
+  - `esp32/src/screens/drive_screen.cpp` — Hash computation in update(), tile iteration in draw()
+  - `esp32/src/screens/error_screen.h` — TileSet<5>, tile enum
+  - `esp32/src/screens/error_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/screens/safe_screen.h` — TileSet<6>, tile enum
+  - `esp32/src/screens/safe_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/screens/standby_screen.h` — TileSet<2>, tile enum
+  - `esp32/src/screens/standby_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/screens/boot_screen.h` — TileSet<3>, tile enum
+  - `esp32/src/screens/boot_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/ui/pedal_bar.cpp` — Differential bar update
+  - `esp32/src/ui/battery_indicator.cpp` — Differential bar update
+  - `esp32/src/ui/obstacle_sensor.cpp` — Differential bar update
+  - `esp32/src/screen_manager.h` — Updated documentation
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Render completamente tile-based. Reducción significativa de carga SPI (solo tiles dirty). Eliminación de clear+redraw flash en barras. Coherencia total snapshot→tiles. Arquitectura escalable tipo instrument cluster de vehículo real.
+- **Tests:** Compilación exitosa. Revisión de código. Validación de lógica de hash y dirty flags. Sin cambios en CAN protocol, VehicleState struct, STM32 firmware.
+
 ### PR — feat: complete screen verification — degraded overlay + safe telemetry + fault indicators
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
@@ -797,3 +833,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **Verificación pantallas final** — DriveScreen: overlay degradado/limp + indicadores fault flags. SafeScreen: telemetría read-only (speed/current/temp/steering). Cumplimiento completo HMI_STATE_MODEL.md. | — |
 | 2026-04-10 | **HMI anti-flicker + render optimización** — Fix: CAN_TIMEOUT bit 0 faltante en DriveScreen fault overlay. Opt: draw calls gated por dirty checks (zero work si no cambia). Opt: umbrales torque Δ>2% y temp Δ≥1°C para evitar redraw por ruido. Fix: ErrorScreen CAN-lost → partial banner redraw (no full fillScreen). | — |
 | 2026-04-10 | **Deterministic render pipeline** — Anti-flicker: reemplazar fillRect+drawString por setTextPadding en 12 componentes UI (zero-gap text overwrite). Fix: draw_runtime_overlay String→snprintf (eliminar heap allocation). Doc: formalizar pipeline CAN→snapshot→frame-latch→render en vehicle_data.h, screen_manager.h, main.cpp. | — |
+| 2026-04-10 | **Tile-Based Dirty Region Engine** — Refactor completo del HMI a motor de render por regiones (tiles). TileSet template con hash FNV-1a: cada tile solo se redibuja si su contenido cambia. DriveScreen: 12 tiles (speed, obstacle, wheels, steering, battery, gear, pedal, mode, LED, degraded overlay, faults overlay, ACK). ErrorScreen: 5 tiles. SafeScreen: 6 tiles. StandbyScreen: 2 tiles. BootScreen: 3 tiles. Bar widgets (pedal, batería, sensor obstáculo) con differential update (solo la porción cambiada). Eliminación total de clear+redraw flash en barras. Overlay tiles restauran tiles subyacentes al desaparecer. Nuevo: `tile_engine.h` con TileRect, TileHash, TileSet<N>. | — |
