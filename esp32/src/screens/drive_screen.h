@@ -28,6 +28,7 @@
 #include "ui/gear_display.h"
 #include "ui/mode_icons.h"
 #include "ui/led_toggle.h"
+#include "can_ids.h"
 #include <cstdint>
 
 class DriveScreen : public Screen {
@@ -66,6 +67,14 @@ private:
 
     bool     needsFullRedraw_    = true;
 
+    // System state for degraded/limp overlays (HMI_STATE_MODEL §2.4)
+    can::SystemState curSystemState_  = can::SystemState::ACTIVE;
+    can::SystemState prevSystemState_ = can::SystemState::ACTIVE;
+
+    // Fault flags for visual overlays (HMI_STATE_MODEL §4.1)
+    uint8_t curFaultFlags_  = 0;
+    uint8_t prevFaultFlags_ = 0;
+
     // ACK visual feedback state
     unsigned long ackLastShownMs_   = 0;   // millis() when indicator was last shown
     unsigned long ackTrackedAckMs_  = 0;   // last ack().timestampMs we processed
@@ -75,6 +84,8 @@ private:
 
     void drawSpeed();
     void drawAckIndicator();
+    void drawDegradedOverlay();
+    void drawFaultOverlays();
 };
 
 #endif // DRIVE_SCREEN_H

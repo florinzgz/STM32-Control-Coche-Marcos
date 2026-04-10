@@ -79,6 +79,26 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — feat: complete screen verification — degraded overlay + safe telemetry + fault indicators
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Verificación de las pantallas contra la especificación HMI_STATE_MODEL.md e implementación de las funcionalidades faltantes: overlay de modo degradado/limp-home en DriveScreen, indicadores de fault flags en DriveScreen, y telemetría read-only en SafeScreen.
+- **Root cause:** Tres funcionalidades definidas en HMI_STATE_MODEL.md (§2.4, §2.5, §4.1) no estaban implementadas:
+  1. DriveScreen no mostraba ningún indicador cuando systemState era DEGRADED(3) o LIMP_HOME(6).
+  2. DriveScreen no mostraba indicadores visuales de fault_flags (OVERTEMP, OVERCURRENT, ENCODER, WHEEL SENSOR, ABS, TCS, CENTERING).
+  3. SafeScreen solo mostraba fault_flags y error_code, sin la telemetría read-only requerida (velocidades, corrientes, temperaturas, ángulo dirección).
+- **Solución aplicada:**
+  1. DriveScreen: banner ámbar "DEGRADED MODE - 40% POWER" / "LIMP HOME - REDUCED SPEED" en zona Y=40–58 cuando systemState es DEGRADED o LIMP_HOME. Partial redraw solo cuando cambia el estado.
+  2. DriveScreen: tira de indicadores de faults compactos en Y=28 (zona inferior del top bar). OVERTEMP/OVERCURR/ENC FAULT/WHL SENS/CENTER en ámbar. ABS/TCS en cian (informational). Partial redraw cuando cambia faultFlags.
+  3. SafeScreen: layout rediseñado — banner SAFE MODE (40px) + fault/error + separador + telemetría read-only con 4 velocidades, 4 corrientes, 5 temperaturas, ángulo dirección. Partial redraw por campo. Temperaturas cambian de color (>60°C ámbar, >80°C rojo).
+- **Impacto:** Las 7 pantallas del HMI (Boot, Standby, Drive, Degraded, Limp Home, Safe, Error) cumplen ahora completamente con la especificación HMI_STATE_MODEL.md. El conductor ve claramente el estado degradado y los fallos activos.
+- **Archivos modificados:**
+  - `esp32/src/screens/drive_screen.h` — campos para systemState, faultFlags, métodos drawDegradedOverlay/drawFaultOverlays
+  - `esp32/src/screens/drive_screen.cpp` — overlay degradado, indicadores de faults, captura systemState/faultFlags en update()
+  - `esp32/src/screens/safe_screen.h` — campos para speed/current/temp/steering arrays
+  - `esp32/src/screens/safe_screen.cpp` — layout completo con telemetría read-only, partial redraw
+- **Tests:** STM32 build validation (`make clean && make -j$(nproc)` passed).
+
 ### PR — feat: update drive screen display for TF-Mini Plus sensor
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
@@ -720,3 +740,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-09 | **Guía puesta en marcha segura** — Documento 10 fases (I2C→DS18B20→INA226→encoder→sensores→pedal→relés→motores) con conexiones exactas, materiales, circuitos optoacopladores (6N137/PC817), BOM completa. | — |
 | 2026-04-09 | **CAN loss → pantalla error** — ScreenManager detecta heartbeat STM32 stale >1.5s → fuerza transición a ERROR screen con banner "CAN LINK LOST". Auto-recuperación al reconectar. | — |
 | 2026-04-10 | **Drive screen → TF-Mini Plus** — Actualización pantalla final para TF-Mini Plus: bar proximidad 400→600 cm, zonas color ajustadas (verde >3m, cian 1.5–3m, amarillo 0.8–1.5m, naranja 0.3–0.8m, rojo <0.3m), comentarios TOFSense-M→TF-Mini Plus. | — |
+| 2026-04-10 | **Verificación pantallas final** — DriveScreen: overlay degradado/limp + indicadores fault flags. SafeScreen: telemetría read-only (speed/current/temp/steering). Cumplimiento completo HMI_STATE_MODEL.md. | — |

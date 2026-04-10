@@ -30,6 +30,7 @@
 #include "ui/render_trace.h"
 #include "ui/runtime_monitor.h"
 #include "shifter_input.h"
+#include "can_ids.h"
 #include <Arduino.h>
 #include <cstdio>
 #include <cstring>
@@ -43,6 +44,16 @@ static constexpr int16_t ACK_Y = 2;
 static constexpr int16_t ACK_W = 80;
 static constexpr int16_t ACK_H = 16;
 static constexpr unsigned long ACK_DISPLAY_DURATION_MS = 1500;
+
+// Degraded/limp mode overlay layout (HMI_STATE_MODEL §2.4)
+static constexpr int16_t DEG_BANNER_X = 0;
+static constexpr int16_t DEG_BANNER_Y = 40;
+static constexpr int16_t DEG_BANNER_W = 480;
+static constexpr int16_t DEG_BANNER_H = 18;
+
+// Fault overlay area (bottom margin of top bar, right of mode icons)
+static constexpr int16_t FAULT_OVERLAY_Y = 28;
+static constexpr int16_t FAULT_OVERLAY_H = 10;
 
 // -------------------------------------------------------------------------
 // onEnter — called when transitioning to this screen
@@ -70,6 +81,12 @@ void DriveScreen::onEnter() {
     ackTrackedTmoMs_   = 0;
     ackDisplayResult_  = 0;
     ackIndicatorDirty_ = false;
+
+    // Reset degraded/fault overlay state
+    curSystemState_  = can::SystemState::ACTIVE;
+    prevSystemState_ = can::SystemState::ACTIVE;
+    curFaultFlags_   = 0;
+    prevFaultFlags_  = 0;
 }
 
 // -------------------------------------------------------------------------
@@ -143,6 +160,12 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     // LED relay states from STM32
     curFrontLedOn_ = data.lights().frontRelayOn;
     curRearLedOn_  = data.lights().rearRelayOn;
+
+    // System state for degraded/limp overlay (HMI_STATE_MODEL §2.4)
+    curSystemState_ = data.heartbeat().systemState;
+
+    // Fault flags for visual overlays (HMI_STATE_MODEL §4.1)
+    curFaultFlags_ = data.heartbeat().faultFlags;
 
     // ACK visual feedback: detect new ACK or timeout events
     {
@@ -231,6 +254,9 @@ void DriveScreen::draw() {
         prevMode_.isTankTurn = !curMode_.isTankTurn;
         prevFrontLedOn_     = !curFrontLedOn_;
         prevRearLedOn_      = !curRearLedOn_;
+        prevSystemState_    = (curSystemState_ == can::SystemState::ACTIVE)
+                              ? can::SystemState::DEGRADED : can::SystemState::ACTIVE;
+        prevFaultFlags_     = curFaultFlags_ ^ 0xFF;
     }
 
     // Partial redraw: only changed elements
@@ -301,6 +327,12 @@ void DriveScreen::draw() {
     ui::LedToggle::draw(tft, curFrontLedOn_, prevFrontLedOn_,
                              curRearLedOn_,  prevRearLedOn_);
 
+    // Degraded/limp mode overlay (HMI_STATE_MODEL §2.4)
+    drawDegradedOverlay();
+
+    // Fault flag visual overlays (HMI_STATE_MODEL §4.1)
+    drawFaultOverlays();
+
     // ACK visual feedback indicator (brief text near top bar)
     drawAckIndicator();
 
@@ -316,6 +348,8 @@ void DriveScreen::draw() {
     prevObstacleCm_  = curObstacleCm_;
     prevFrontLedOn_  = curFrontLedOn_;
     prevRearLedOn_   = curRearLedOn_;
+    prevSystemState_ = curSystemState_;
+    prevFaultFlags_  = curFaultFlags_;
 
     RTRACE_DUMP_IF_PENDING();
 }
@@ -377,4 +411,87 @@ void DriveScreen::drawAckIndicator() {
     RTRACE_TEXT(ACK_X + ACK_W / 2, ACK_Y + 2, text,
                 color, ui::COL_BG, 1, TC_DATUM);
     tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// Degraded / Limp-Home mode overlay (HMI_STATE_MODEL §2.4)
+//
+// When system_state is DEGRADED(3) or LIMP_HOME(6), draws an amber banner
+// just below the top bar to alert the driver.
+// -------------------------------------------------------------------------
+void DriveScreen::drawDegradedOverlay() {
+    if (curSystemState_ == prevSystemState_) return;
+
+    // Clear the banner area regardless (remove old banner if state changed)
+    tft.fillRect(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_BG);
+    RTRACE_FILL_RECT(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_BG);
+
+    const char* bannerText = nullptr;
+
+    if (curSystemState_ == can::SystemState::DEGRADED) {
+        bannerText = "DEGRADED MODE - 40% POWER";
+    } else if (curSystemState_ == can::SystemState::LIMP_HOME) {
+        bannerText = "LIMP HOME - REDUCED SPEED";
+    }
+
+    if (bannerText != nullptr) {
+        tft.fillRect(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_AMBER);
+        RTRACE_FILL_RECT(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_AMBER);
+        tft.setTextColor(ui::COL_BLACK, ui::COL_AMBER);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(bannerText, DEG_BANNER_W / 2, DEG_BANNER_Y + DEG_BANNER_H / 2);
+        RTRACE_TEXT(DEG_BANNER_W / 2, DEG_BANNER_Y + DEG_BANNER_H / 2, bannerText,
+                    ui::COL_BLACK, ui::COL_AMBER, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Fault flag visual overlays (HMI_STATE_MODEL §4.1)
+//
+// Draws compact fault indicators below the top bar.
+// ABS/TCS are informational (green/cyan), faults are amber/red.
+// -------------------------------------------------------------------------
+void DriveScreen::drawFaultOverlays() {
+    if (curFaultFlags_ == prevFaultFlags_) return;
+
+    // Clear the fault overlay strip
+    tft.fillRect(0, FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H, ui::COL_BG);
+    RTRACE_FILL_RECT(0, FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H, ui::COL_BG);
+
+    if (curFaultFlags_ == 0) return;  // No faults active
+
+    // Build compact fault indicator string
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+
+    int16_t x = 4;
+    static constexpr int16_t LABEL_GAP = 4;
+
+    // Fault indicators — amber/red for faults, cyan for informational
+    struct FaultEntry {
+        uint8_t     mask;
+        const char* label;
+        uint16_t    color;
+    };
+    static constexpr FaultEntry entries[] = {
+        { 0x02, "OVERTEMP",    ui::COL_AMBER  },   // Bit 1
+        { 0x04, "OVERCURR",    ui::COL_AMBER  },   // Bit 2
+        { 0x08, "ENC FAULT",   ui::COL_AMBER  },   // Bit 3
+        { 0x10, "WHL SENS",    ui::COL_AMBER  },   // Bit 4
+        { 0x20, "ABS",         ui::COL_CYAN   },   // Bit 5 (informational)
+        { 0x40, "TCS",         ui::COL_CYAN   },   // Bit 6 (informational)
+        { 0x80, "CENTER",      ui::COL_AMBER  },   // Bit 7
+    };
+
+    for (const auto& e : entries) {
+        if (curFaultFlags_ & e.mask) {
+            tft.setTextColor(e.color, ui::COL_BG);
+            tft.drawString(e.label, x, FAULT_OVERLAY_Y);
+            RTRACE_TEXT(x, FAULT_OVERLAY_Y, e.label,
+                        e.color, ui::COL_BG, 1, TL_DATUM);
+            x += static_cast<int16_t>(tft.textWidth(e.label) + LABEL_GAP);
+        }
+    }
 }
