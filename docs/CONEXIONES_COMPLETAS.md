@@ -1,9 +1,9 @@
 # ESQUEMA COMPLETO DE CONEXIONES — Guía Cable por Cable
 
-**Fecha:** 2026-02-25
+**Fecha:** 2026-04-10
 **Propósito:** Referencia de taller para conectar todo el hardware y validar Phase 1
-**Fuente:** Extraído directamente del firmware (`main.h`, `main.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`, `can_handler.c`, `steering_centering.c`, `platformio.ini`, `obstacle_sensor.h`)
-**Actualizado:** PR #120 — arquitectura RPWM/LPWM directo por motor (mismo timer), BREAK2/LOCKUP hardware; añadido sensor TOFSense-M S (ESP32-S3, UART1 GPIO18)
+**Fuente:** Extraído directamente del firmware (`project_config.h`, `main.c`, `stm32g4xx_hal_msp.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`, `can_handler.c`, `steering_centering.c`, `obstacle_sensor.h`, `audio_manager.h`, `led_controller.h`, `shifter_input.h`, `relay_audio.h`)
+**Actualizado:** Abril 2026 — CAN movido a PA11/PA12, LPWM_FR movido a PC3, sensor obstáculos cambiado de TOFSense-M a TF-Mini Plus, añadidos: DFPlayer Mini, tiras LED WS2812B, palanca de cambios MCP23017, relé de audio, LED diagnóstico PB14
 
 ---
 
@@ -14,16 +14,17 @@
   │                       STM32G474RE (Nucleo-64)                                 │
   │                          170 MHz, 3.3V                                        │
   │                                                                               │
-  │  TIM1 (20kHz) ──► FL RPWM/LPWM (PA8/PA9) + FR RPWM/LPWM (PA10/PA11)        │
+  │  TIM1 (20kHz) ──► FL RPWM/LPWM (PA8/PA9) + FR RPWM/LPWM (PA10/PC3)        │
   │  TIM8 (20kHz) ──► RL RPWM/LPWM (PC6/PC7) + RR RPWM/LPWM (PC8/PC9)         │
   │  TIM3 (20kHz) ──► STEER RPWM/LPWM (PA6/PA7)                                │
   │  TIM2 (encoder) ◄── Encoder dirección (PA15/PB3)                             │
-  │  GPIO out ──► 2× EN GPIO (PC5/PC13) + 3× RELAY + EN_FR/RL/STEER→3.3V       │
+  │  FDCAN1 ──► PA12 TX / PA11 RX ──► TJA1051 ──► CAN Bus ──► ESP32-S3         │
+  │  GPIO out ──► 2× EN GPIO (PC5/PC13) + 3+2 RELAY + EN_FR/RL/STEER→3.3V     │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z                   │
   │  I2C1 ──► TCA9548A ──► 6× INA226                                            │
-  │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PA3)         │
+  │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PA3)     │
   │  OneWire ──► 5× DS18B20 (PB0)                                                │
-  │  FDCAN1 ──► TJA1051 ──► CAN Bus ──► TJA1051 ──► ESP32-S3                   │
+  │  LED_DIAG (PB14) ──► LED externo + 330Ω (diagnóstico CAN)                   │
   └──────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -32,13 +33,17 @@
   │                                                                              │
   │  CAN ──► TJA1051 ──► CAN Bus ──► STM32 (GPIO4 TX, GPIO5 RX)                │
   │  SPI ──► Display TFT ST7796 480×320 (GPIO10/12/13/14/21/38/39/42)           │
-  │  UART1 RX (GPIO18) ◄── TOFSense-M S (sensor obstáculos, 921600 bps)        │
-  │  UART2 ──► DFPlayer Mini (audio)                                             │
+  │  UART1 RX (GPIO18) ◄── TF-Mini Plus (sensor obstáculos, 115200 bps)        │
+  │  UART2 ──► DFPlayer Mini (audio, GPIO43 TX / GPIO44 RX, 9600 bps)          │
+  │  I2C (GPIO8 SDA / GPIO9 SCL) ──► MCP23017 ──► Palanca de cambios           │
+  │  GPIO11 ──► Relé audio (active LOW, aísla altavoz)                          │
+  │  GPIO47 ──► WS2812B frontal (28 LEDs, datos)                                │
+  │  GPIO48 ──► WS2812B trasero (16 LEDs, datos)                                │
   └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Total cables del STM32:** GPIO + alimentación + I2C + CAN
-**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 3 relés, 2 TJA1051, 1 TOFSense-M S (en ESP32)
+**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 5 relés (3 potencia + 2 LED), 2 TJA1051, 1 LED_DIAG externo, 1 TF-Mini Plus (en ESP32), 1 DFPlayer Mini (en ESP32), 1 MCP23017 + palanca de cambios (en ESP32), 1 relé audio (en ESP32), 2 tiras WS2812B (en ESP32)
 
 > ⚠️ **CAMBIO ARQUITECTURA (PR #120):** Los motores ya NO usan un pin DIR + un solo PWM. Ahora cada motor recibe **RPWM y LPWM directos** desde el mismo timer. **Eliminar** el cableado DIR (PC0–PC4). Los pines EN_FR, EN_RL y EN_STEER ya no son GPIO; conectar R_EN y L_EN del BTS7960 correspondiente directamente a 3.3 V.
 
@@ -63,9 +68,10 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 | Cable | De (STM32) | A (BTS7960 FR) | Función |
 |-------|-----------|----------------|---------|
 | 4 | **PA10** (TIM1_CH3, AF6) | RPWM | PWM 20 kHz — adelante |
-| 5 | **PA11** (TIM1_CH4, AF6) | LPWM | PWM 20 kHz — atrás |
+| 5 | **PC3** (TIM1_CH4, AF2) | LPWM | PWM 20 kHz — atrás |
 | — | **3.3V** (directo) | R_EN + L_EN (unidos) | Tied HIGH permanente — siempre habilitado |
 
+> ⚠️ **CAMBIO CRÍTICO:** PA11 ya **NO** es LPWM_FR — ahora PA11 es **FDCAN1_RX** (bus CAN). LPWM_FR se ha movido a **PC3** (TIM1_CH4 vía AF2). Conectar PA11 al BTS7960 FR **destruirá la comunicación CAN**.
 > ⚠️ PC6 ya no es EN_FR. PC6 es ahora RPWM_RL (TIM8_CH1). Conectar R_EN y L_EN del BTS7960 FR directamente a 3.3 V.
 
 ### Motor RL (Trasero Izquierdo) — TIM8 CH1/CH2, BREAK2/LOCKUP armado
@@ -358,11 +364,15 @@ Pedal señal (0.3V–4.8V)
 
 | Cable | De (STM32) | A (TJA1051 #1) | Función |
 |-------|-----------|----------------|---------|
-| 28 | **PB9** | TXD (pin 1) | Transmitir datos CAN (FDCAN1_TX, AF9) |
-| 29 | **PB8** | RXD (pin 4) | Recibir datos CAN (FDCAN1_RX, AF9) |
+| 28 | **PA12** | TXD (pin 1) | Transmitir datos CAN (FDCAN1_TX, AF9) |
+| 29 | **PA11** | RXD (pin 4) | Recibir datos CAN (FDCAN1_RX, AF9) |
 | — | 5V | VCC (pin 3) | Alimentación transceiver |
 | — | GND | GND (pin 2) | GND común |
 | — | GND | S (pin 8) | Modo normal (NO conectar a VCC) |
+
+> ⚠️ **CAMBIO CRÍTICO vs. versiones anteriores del documento:** Los pines CAN del STM32 ya **NO** son PB8/PB9. Son **PA11 (RX)** y **PA12 (TX)** — confirmado en `stm32g4xx_hal_msp.c` y `project_config.h`. Conectar PB8/PB9 al transceiver CAN **no funcionará** y dejará la comunicación CAN completamente inoperativa.
+>
+> ⚠️ PA11 está en el conector Morpho **CN10 pin 14**. PA12 está en **CN10 pin 12**.
 
 ### Lado ESP32-S3 → TJA1051T/3 #2
 
@@ -391,14 +401,14 @@ Pedal señal (0.3V–4.8V)
 ```
 STM32 Nucleo          TJA1051 #1           Bus CAN           TJA1051 #2          ESP32-S3
 ┌─────────┐       ┌──────────────┐    ┌─────────────┐    ┌──────────────┐       ┌─────────┐
-│ PB9(TX) ─┼──────►│ TXD    CANH ─┼────┼── CANH ─────┼────┼─ CANH    TXD│◄──────┼─ GPIO4  │
-│ PB8(RX) ◄┼──────│ RXD    CANL ─┼────┼── CANL ─────┼────┼─ CANL    RXD│──────►│  GPIO5  │
+│PA12(TX) ─┼──────►│ TXD    CANH ─┼────┼── CANH ─────┼────┼─ CANH    TXD│◄──────┼─ GPIO4  │
+│PA11(RX) ◄┼──────│ RXD    CANL ─┼────┼── CANL ─────┼────┼─ CANL    RXD│──────►│  GPIO5  │
 │ 5V ──────┼──────│ VCC         │    │  120Ω      │    │         VCC│──────┼── 5V     │
 │ GND ─────┼──────│ GND     S──►GND │    │  120Ω      │    │ GND◄──S GND│──────┼── GND    │
 └─────────┘       └──────────────┘    └─────────────┘    └──────────────┘       └─────────┘
 ```
 
-> ⚠️ **NUNCA** conectar PB8/PB9 directamente a CANH/CANL. El transceiver TJA1051 es OBLIGATORIO. Sin él, el CAN no funciona y puedes dañar los pines.
+> ⚠️ **NUNCA** conectar PA11/PA12 directamente a CANH/CANL. El transceiver TJA1051 es OBLIGATORIO. Sin él, el CAN no funciona y puedes dañar los pines.
 
 ---
 
@@ -517,77 +527,74 @@ El STM32 controla la alimentación 5V de las tiras LED WS2812B (frontal y traser
 
 ---
 
-## 12) ESP32-S3 — Sensor de Obstáculos TOFSense-M S (UART1)
+## 12) ESP32-S3 — Sensor de Obstáculos TF-Mini Plus (UART1)
 
-El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado directamente al ESP32-S3 vía UART. Proporciona detección de obstáculos con 64 píxeles de distancia a ~10 Hz.
+El sensor **Benewake TF-Mini Plus** es un LiDAR Time-of-Flight de punto único conectado directamente al ESP32-S3 vía UART. Proporciona detección de obstáculos con una lectura de distancia a ~100 Hz.
 
-### Conexión TOFSense-M S → ESP32-S3
+> ⚠️ **CAMBIO DE SENSOR:** El sensor anterior era el TOFSense-M S (Nooploop) con protocolo de 921600 bps y divisor de tensión obligatorio. Ha sido reemplazado por el **TF-Mini Plus** con 115200 bps y **conexión directa sin divisor** (3.3V TTL nativo).
 
-| Cable | De (TOFSense-M, conector GH1.25) | A (ESP32-S3) | Función |
-|-------|----------------------------------|-------------|---------|
-| — | **Pin 1 (VCC)** | **5V** (regulador o fuente) | Alimentación sensor (⚠️ 5V obligatorio, NO 3.3V) |
-| — | **Pin 2 (GND)** | **GND** | GND común con ESP32 |
-| — | **Pin 3 (RX)** | **No conectado** | Recepción unidireccional — no se envían comandos al sensor |
-| — | **Pin 4 (TX)** | **GPIO18** (UART1 RX) via divisor | Sensor TX → divisor R1=1kΩ+R2=4.7kΩ → ESP32 RX. ⚠️ Divisor obligatorio (TX medido = 3.5–3.6V) |
+### Conexión TF-Mini Plus → ESP32-S3
+
+| Cable | De (TF-Mini Plus, 4 hilos) | A (ESP32-S3) | Función |
+|-------|---------------------------|-------------|---------|
+| — | **Rojo (VCC)** | **5V** (regulador o VBUS) | Alimentación sensor (⚠️ 5V obligatorio, NO 3.3V) |
+| — | **Negro (GND)** | **GND** | GND común con ESP32 |
+| — | **Blanco (RX)** | **No conectado** | Recepción unidireccional — no se envían comandos al sensor |
+| — | **Verde (TX)** | **GPIO18** (UART1 RX) **directo** | Sensor TX → ESP32 RX. ✅ Conexión directa (3.3V TTL nativo) |
 
 ### Diagrama de conexión
 
 ```
-                    TOFSense-M S (GH1.25)
+                    TF-Mini Plus (4 hilos)
                    ┌──────────────────────┐
- 5V (regulador) ───┤ VCC  (pin 1)         │
+ 5V (regulador) ───┤ VCC  (rojo)          │
                    │                      │     ⚠ VCC = 5V obligatorio
- GND ──────────────┤ GND  (pin 2)         │     ⚠ TX medido = 3.5–3.6V
+ GND ──────────────┤ GND  (negro)         │     ✅ TX = 3.3V TTL nativo
                    │                      │
-           n/c ────┤ RX   (pin 3)         │     (no se envían comandos)
+           n/c ────┤ RX   (blanco)        │     (no se envían comandos)
                    │                      │
-                   │ TX   (pin 4) ────────┼──┐
-                   └──────────────────────┘  │  Divisor de tensión
-                         │    │              │  OBLIGATORIO
-                        100nF (desacoplo)    │
-                                        ┌────┘
-                                        │
-                                   ┌────┴────┐
-                                   │  R1=1kΩ │ (serie)
-                                   └────┬────┘
-                                        │
-                                        ├──── ESP32 GPIO18 (UART1 RX)
-                                        │
-                                   ┌────┴────┐
-                                   │ R2=4.7kΩ│ (a GND)
-                                   └────┬────┘
-                                        │
-                                       GND
+                   │ TX   (verde) ────────┼────── ESP32 GPIO18 (UART1 RX)
+                   └──────────────────────┘       ✅ Conexión directa
+                                                  (sin divisor de tensión)
 ```
+
+> ✅ **Sin divisor de tensión:** A diferencia del TOFSense-M (que producía 3.5–3.6V), el TF-Mini Plus transmite a **3.3V TTL nativo**, compatible directamente con los GPIO del ESP32-S3. Hay margen de 300 mV respecto al máximo absoluto (3.6V).
 
 ### Especificaciones de comunicación
 
 | Parámetro | Valor |
 |-----------|-------|
 | **Interfaz** | UART (modo activo, transmisión continua) |
-| **Baudrate** | 921600 bps |
+| **Baudrate** | **115200 bps** (factory default) |
 | **Formato** | 8N1 (8 data bits, sin paridad, 1 stop bit) |
-| **Nivel lógico UART** | 3.5–3.6V medido (nominal 3.3V TTL). Protección obligatoria: **Opción 1** divisor R1=1kΩ+R2=4.7kΩ (~2.9V) o **Opción 2** level shifter BSS138 (3.3V exactos). ⚠️ NO usar TXS0108E |
-| **Frecuencia de datos** | ~10 Hz (una trama de 400 bytes cada ~100 ms) |
-| **Protocolo** | NLink_TOFSense_M_Frame0 (header 0x57, 64 píxeles × 6 bytes) |
-| **Rango útil** | 20 mm – 4000 mm |
+| **Nivel lógico UART** | 3.3V TTL nativo — conexión directa a ESP32 |
+| **Frecuencia de datos** | ~100 Hz (una trama cada ~10 ms) |
+| **Protocolo** | Trama 9 bytes: `[0x59][0x59][DIST_L][DIST_H][STR_L][STR_H][TEMP_L][TEMP_H][CHK]` |
+| **Rango útil** | 100 mm – 12000 mm (10 cm – 12 m) |
+| **Consumo** | ~120 mA típico (pico ~140 mA) |
+| **Dimensiones** | 35 × 21 × 18 mm |
 
 ### Referencia en firmware
 
-- `esp32/src/sensors/obstacle_sensor.h` — Configuración: `rxPin = 18`, `txPin = -1`, `baudRate = 921600`
-- `esp32/src/sensors/obstacle_sensor.cpp` — Parser del protocolo NLink, detección de sensor atascado
+- `esp32/src/sensors/obstacle_sensor.h` — Configuración: `rxPin = 18`, `txPin = -1`, `baudRate = 115200`, `SENSOR_TYPE = SENSOR_TYPE_TFMINI`
+- `esp32/src/sensors/obstacle_sensor.cpp` — Parser del protocolo TF-Mini Plus, detección de sensor atascado
 - `esp32/src/main.cpp` — Inicialización: `obstacle_sensor::init()` en `setup()`
-- `docs/TOFSENSE_M_WIRING_GUIDE.md` — Guía completa de cableado y troubleshooting
+- `docs/TFMINI_PLUS_WIRING_GUIDE.md` — Guía completa de cableado y troubleshooting
 
-> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. Las señales UART miden **3.5–3.6 V** (por encima del 3.3V nominal del datasheet). Se requiere **protección obligatoria** entre sensor TX y GPIO18: **Opción 1** divisor de tensión (R1=1 kΩ + R2=4.7 kΩ a GND) o **Opción 2** level shifter BSS138 (SparkFun BOB-12009, Adafruit 757, o genérico). **NO conectar directamente** — el ESP32-S3 tiene máx. absoluto de 3.6V en GPIO. ⚠️ NO usar level shifters TXS0108E (oscilaciones a 921600 bps).
-
-> ⚠️ **IMPORTANTE:** Se recomienda un condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector GH1.25, para filtrar ruido de alimentación.
+> ⚠️ **IMPORTANTE:** El sensor requiere 5V en VCC para funcionar. A 3.3V no arranca o produce lecturas inválidas. ¡Pero la señal TX es 3.3V — NO necesita divisor ni level shifter!
+>
+> ⚠️ Se recomienda un condensador de desacoplo de **100 nF** entre VCC y GND del sensor, lo más cerca posible del conector, para filtrar ruido de alimentación.
 
 ---
 
 ## 13) TABLA COMPLETA — TODOS LOS CABLES DEL STM32
 
-> ⚠️ Tabla actualizada tras PR #120. Los pines DIR (PC0–PC4) están liberados. PC6/PC7/PC8/PC9 son ahora salidas PWM TIM8. PA6/PA7 son nuevas salidas PWM TIM3 (STEER).
+> ⚠️ **Tabla actualizada Abril 2026.** Cambios críticos vs. versiones anteriores:
+> - **CAN:** PA11 (RX) / PA12 (TX) — ya NO son PB8/PB9
+> - **LPWM_FR:** PC3 (TIM1_CH4, AF2) — ya NO es PA11
+> - **PC3:** Reutilizado como LPWM_FR (ya no es LIBRE/DIR_RR)
+> - **PB14:** LED diagnóstico externo (nuevo)
+> - **PA5:** LED LD2 de la Nucleo (heartbeat/estado CAN)
 
 | # | Pin STM32 | Puerto | Tipo | Periférico | Conectar a | Notas |
 |---|-----------|--------|------|------------|-----------|-------|
@@ -595,38 +602,39 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | 2 | **PA1** | GPIOA | Input | EXTI1 | Sensor velocidad rueda FR | Pull-up, flanco subida |
 | 3 | **PA2** | GPIOA | Input | EXTI2 | Sensor velocidad rueda RL | Pull-up, flanco subida |
 | 4 | **PA3** | GPIOA | Analog | ADC1_IN4 | Pedal (divisor) | Canal primario, señal dividida 0–2V |
-| 5 | **PA6** | GPIOA | AF2 | TIM3_CH1 | BTS7960 STEER → **RPWM** | PWM 20 kHz — izquierda |
-| 6 | **PA7** | GPIOA | AF2 | TIM3_CH2 | BTS7960 STEER → **LPWM** | PWM 20 kHz — derecha |
-| 7 | **PA8** | GPIOA | AF6 | TIM1_CH1 | BTS7960 FL → **RPWM** | PWM 20 kHz — adelante |
-| 8 | **PA9** | GPIOA | AF6 | TIM1_CH2 | BTS7960 FL → **LPWM** | PWM 20 kHz — atrás |
-| 9 | **PA10** | GPIOA | AF6 | TIM1_CH3 | BTS7960 FR → **RPWM** | PWM 20 kHz — adelante |
-| 10 | **PA11** | GPIOA | AF6 | TIM1_CH4 | BTS7960 FR → **LPWM** | PWM 20 kHz — atrás |
-| 11 | **PA15** | GPIOA | AF1 | TIM2_CH1 | Encoder E6B2 canal A | ⚠️ Adaptador 5V→3.3V |
-| 12 | **PB0** | GPIOB | Output | Bit-bang | Bus OneWire (5× DS18B20) | Pull-up 4.7kΩ a 3.3V |
-| 13 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Adaptador 5V→3.3V |
-| 14 | **PB4** | GPIOB | Input | EXTI4 | Encoder E6B2 índice Z | 1 pulso/vuelta |
-| 15 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
-| 16 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
-| 17 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
-| 18 | **PB8** | GPIOB | AF9 | FDCAN1_RX | TJA1051 #1 → RXD | ⚠️ Vía transceiver, NO directo |
-| 19 | **PB9** | GPIOB | AF9 | FDCAN1_TX | TJA1051 #1 → TXD | ⚠️ Vía transceiver, NO directo |
+| 5 | **PA5** | GPIOA | Output | GPIO | LED LD2 (en Nucleo) | Heartbeat CAN: OK=flash 50ms/2s, FAIL=blink 1Hz |
+| 6 | **PA6** | GPIOA | AF2 | TIM3_CH1 | BTS7960 STEER → **RPWM** | PWM 20 kHz — izquierda |
+| 7 | **PA7** | GPIOA | AF2 | TIM3_CH2 | BTS7960 STEER → **LPWM** | PWM 20 kHz — derecha |
+| 8 | **PA8** | GPIOA | AF6 | TIM1_CH1 | BTS7960 FL → **RPWM** | PWM 20 kHz — adelante |
+| 9 | **PA9** | GPIOA | AF6 | TIM1_CH2 | BTS7960 FL → **LPWM** | PWM 20 kHz — atrás |
+| 10 | **PA10** | GPIOA | AF6 | TIM1_CH3 | BTS7960 FR → **RPWM** | PWM 20 kHz — adelante |
+| 11 | **PA11** | GPIOA | AF9 | **FDCAN1_RX** | TJA1051 #1 → **RXD** | ⚠️ CAN RX — Morpho CN10 pin 14 |
+| 12 | **PA12** | GPIOA | AF9 | **FDCAN1_TX** | TJA1051 #1 → **TXD** | ⚠️ CAN TX — Morpho CN10 pin 12 |
+| 13 | **PA15** | GPIOA | AF1 | TIM2_CH1 | Encoder E6B2 canal A | ⚠️ Adaptador 5V→3.3V |
+| 14 | **PB0** | GPIOB | Output OD | Bit-bang | Bus OneWire (5× DS18B20) | Pull-up 4.7kΩ a 3.3V |
+| 15 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Adaptador 5V→3.3V |
+| 16 | **PB4** | GPIOB | Input | GPIO (polled) | Encoder E6B2 índice Z | Pull-up, 1 pulso/vuelta |
+| 17 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
+| 18 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
+| 19 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
 | 20 | **PB10** | GPIOB | Output | GPIO | Módulo relé LED frontal | HIGH = ON (tira WS2812B 28 LEDs) |
 | 21 | **PB11** | GPIOB | Output | GPIO | Módulo relé LED trasero | HIGH = ON (tira WS2812B 16 LEDs) |
-| 22 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
-| 23 | **PC0** | GPIOC | — | **LIBRE** | ~~BTS7960 FL DIR~~ — desconectado | Pin liberado (PR #120) |
-| 24 | **PC1** | GPIOC | — | **LIBRE** | ~~BTS7960 FR DIR~~ — desconectado | Pin liberado (PR #120) |
-| 25 | **PC2** | GPIOC | — | **LIBRE** | ~~BTS7960 RL DIR~~ — desconectado | Pin liberado (PR #120) |
-| 26 | **PC3** | GPIOC | — | **LIBRE** | ~~BTS7960 RR DIR~~ — desconectado | Pin liberado (PR #120) |
-| 27 | **PC4** | GPIOC | — | **LIBRE** | ~~BTS7960 STEER DIR~~ — desconectado | Pin liberado (PR #120) |
-| 28 | **PC5** | GPIOC | Output | GPIO | BTS7960 FL → R_EN + L_EN | HIGH = motor habilitado |
-| 29 | **PC6** | GPIOC | AF4 | TIM8_CH1 | BTS7960 RL → **RPWM** | PWM 20 kHz — adelante |
-| 30 | **PC7** | GPIOC | AF4 | TIM8_CH2 | BTS7960 RL → **LPWM** | PWM 20 kHz — atrás |
-| 31 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
-| 32 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
-| 33 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
-| 34 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
-| 35 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
-| 36 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado |
+| 22 | **PB14** | GPIOB | Output | GPIO | **LED_DIAG** (externo) | LED + 330Ω en Morpho CN10 pin 28. CAN OK=ON, FAIL=OFF |
+| 23 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
+| 24 | **PC0** | GPIOC | — | **LIBRE** | ~~DIR_FL~~ — desconectado | Pin liberado |
+| 25 | **PC1** | GPIOC | — | **LIBRE** | ~~DIR_FR~~ — desconectado | Pin liberado |
+| 26 | **PC2** | GPIOC | — | **LIBRE** | ~~DIR_RL~~ — desconectado | Pin liberado |
+| 27 | **PC3** | GPIOC | **AF2** | **TIM1_CH4** | BTS7960 FR → **LPWM** | ⚠️ PWM 20 kHz — atrás (ya NO es LIBRE) |
+| 28 | **PC4** | GPIOC | — | **LIBRE** | ~~DIR_STEER~~ — desconectado | Pin liberado |
+| 29 | **PC5** | GPIOC | Output | GPIO | BTS7960 FL → R_EN + L_EN | HIGH = motor habilitado |
+| 30 | **PC6** | GPIOC | AF4 | TIM8_CH1 | BTS7960 RL → **RPWM** | PWM 20 kHz — adelante |
+| 31 | **PC7** | GPIOC | AF4 | TIM8_CH2 | BTS7960 RL → **LPWM** | PWM 20 kHz — atrás |
+| 32 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
+| 33 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
+| 34 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
+| 35 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
+| 36 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
+| 37 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado |
 
 ### Conexiones hardware (no GPIO)
 
@@ -659,7 +667,7 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
 | 2 | TJA1051T/3 módulo | Transceivers CAN | 3.3V compatible |
-| 1 | TOFSense-M S (Nooploop) | Sensor obstáculos LiDAR 8×8 | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, conector GH1.25 |
+| 1 | TF-Mini Plus (Benewake) | Sensor obstáculos LiDAR punto único | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, 115200 bps, conexión directa 3.3V |
 | 5 | Módulo relé + optoacoplador | Relés potencia y LED | HY-M158 o similar, 3.3V trigger (3× potencia + 2× LED) |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
 | 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB6, PB7, PB0 |
@@ -701,14 +709,16 @@ El sensor TOFSense-M S (Nooploop) es un LiDAR 8×8 Time-of-Flight conectado dire
 >
 > ⚠️ El condensador snubber en los terminales del motor de dirección (M+/M-) es especialmente crítico porque el encoder E6B2-CWZ6C está físicamente cerca: sin él, la contra-EMF puede corromper los pulsos del encoder y provocar `SAFETY_ERROR_CENTERING`.
 
-### Pines liberados (PC0–PC4) — ya no se cablean
+### Pines liberados (PC0, PC1, PC2, PC4) — ya no se cablean
+
+> ⚠️ **PC3 ya NO está libre** — ahora es LPWM_FR (TIM1_CH4, AF2). Solo quedan 4 pines libres.
 
 | Pin | Uso anterior | Estado actual |
 |-----|-------------|---------------|
 | PC0 | DIR_FL (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
 | PC1 | DIR_FR (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
 | PC2 | DIR_RL (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
-| PC3 | DIR_RR (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
+| PC3 | DIR_RR (GPIO OUT) | **⚠️ REUTILIZADO:** Ahora es **LPWM_FR** (TIM1_CH4, AF2) — PWM activo, NO desconectar |
 | PC4 | DIR_STEER (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
 
 ### Herramientas necesarias para Phase 1
