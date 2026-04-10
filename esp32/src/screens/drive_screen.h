@@ -4,18 +4,33 @@
 // Full operational display with live telemetry.
 // Drawn when system_state is ACTIVE (2) or DEGRADED (3).
 //
-// Layout (480×320 landscape):
-//   Top bar (0–40):    mode icons (4x4, 4x2, 360°) + battery percentage
-//   Sensor (40–85):    frontal obstacle distance + proximity bar
-//   Center (85–230):   car top-view with 4 wheels (torque %, temp, color)
-//                      steering circular gauge (right side)
-//                      "360°" label above steering gauge
-//   Speed (230–270):   large speed value centered
-//   Pedal (270–300):   pedal bar (0-100%, gradient, percentage text)
-//   Gears (300–320):   gear display (P, R, N, D1, D2) — flat text
+// TILE-BASED DIRTY REGION ENGINE:
+//   The screen is divided into independent tiles, each with its own dirty
+//   flag and content hash. Only tiles whose data has changed since the last
+//   rendered frame are redrawn. This minimises SPI transactions and
+//   eliminates visual flicker from unnecessary overdraw.
+//
+// Tile map (480×320 landscape):
+//   TILE_MODE_ICONS   — top bar left (4x4, 4x2, 360°)
+//   TILE_LED_TOGGLE   — top bar left-center (front/rear LED buttons)
+//   TILE_ACK          — top bar center (command ACK indicator)
+//   TILE_BATTERY      — top bar right (battery percentage + bar)
+//   TILE_OBSTACLE     — sensor zone (40–85 px)
+//   TILE_WHEELS       — car area wheels (4 wheel rects + labels)
+//   TILE_STEERING     — car area steering gauge (right side)
+//   TILE_SPEED        — large centered speed display (230–270 px)
+//   TILE_PEDAL        — pedal bar (270–300 px)
+//   TILE_GEAR         — gear display (300–320 px)
+//   TILE_DEGRADED     — overlay: degraded/limp mode banner
+//   TILE_FAULTS       — overlay: fault flag indicators
+//
+// Pipeline per frame:
+//   1. update(snapshot) → compute tile hashes from frozen VehicleData
+//   2. TileSet::updateHash() → compare hash → mark dirty if changed
+//   3. draw() → iterate tile set, only render dirty tiles
+//   4. markClean() after each tile render
 //
 // No heap allocation in update()/draw(). All formatting on stack.
-// Partial redraw only — dirty flags track which elements changed.
 //
 // Reference: docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
@@ -25,11 +40,29 @@
 
 #include "screen.h"
 #include "ui/ui_common.h"
+#include "ui/tile_engine.h"
 #include "ui/gear_display.h"
 #include "ui/mode_icons.h"
 #include "ui/led_toggle.h"
 #include "can_ids.h"
 #include <cstdint>
+
+/// Tile indices for DriveScreen
+enum DriveTile : uint8_t {
+    DTILE_SPEED = 0,
+    DTILE_OBSTACLE,
+    DTILE_WHEELS,
+    DTILE_STEERING,
+    DTILE_BATTERY,
+    DTILE_GEAR,
+    DTILE_PEDAL,
+    DTILE_MODE_ICONS,
+    DTILE_LED_TOGGLE,
+    DTILE_DEGRADED,
+    DTILE_FAULTS,
+    DTILE_ACK,
+    DTILE_COUNT
+};
 
 class DriveScreen : public Screen {
 public:
@@ -39,6 +72,9 @@ public:
     void draw()    override;
 
 private:
+    // Tile set — manages dirty flags and hashes for all drive screen regions
+    ui::TileSet<DTILE_COUNT> tiles_;
+
     // Cached previous-frame values for dirty detection
     uint8_t  prevTraction_[4]    = {};
     int8_t   prevTemp_[4]        = {};

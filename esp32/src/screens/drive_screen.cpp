@@ -1,17 +1,29 @@
 // =============================================================================
-// ESP32-S3 HMI — Drive Screen Implementation
+// ESP32-S3 HMI — Drive Screen Implementation (Tile-Based Dirty Region Engine)
 //
-// Implements the main driving dashboard with full telemetry display.
-// Uses partial redraw: only elements that changed since the previous
-// frame are redrawn, keeping render time <5 ms.
+// Implements the main driving dashboard using a tile-based render architecture.
+// Each screen region is a logical tile with its own dirty flag and content
+// hash. Only tiles whose source data changed since the last frame are redrawn.
 //
-// Layout zones (480×320 landscape):
-//   Top bar (0–40):      [4x4] [4x2] [360°]              [BAT XX%]
-//   Sensor (40–85):      frontal obstacle distance + proximity bar
-//   Center (85–230):     car body + 4 wheels (torque/temp) + steering gauge
-//   Speed (230–270):     large centered speed (km/h)
-//   Pedal (270–300):     pedal bar 0–100% with gradient
-//   Gears (300–320):     [P] [R] [N] [D1] [D2] — flat text
+// Tile map (480×320 landscape):
+//   DTILE_MODE_ICONS  [  0, 0,180, 40]  — 4x4/4x2/360° icons
+//   DTILE_LED_TOGGLE  [180, 0,120, 40]  — front/rear LED buttons
+//   DTILE_ACK         [200, 0, 80, 20]  — ACK indicator (overlaps LED area)
+//   DTILE_BATTERY     [405, 0, 75, 40]  — battery icon + percentage
+//   DTILE_OBSTACLE    [  0,40,480, 45]  — frontal sensor distance + bar
+//   DTILE_WHEELS      [  0,85,370,145]  — 4 wheels + labels
+//   DTILE_STEERING    [370,85,110,145]  — steering circular gauge
+//   DTILE_SPEED       [  0,230,480,40]  — large speed display
+//   DTILE_PEDAL       [  0,270,480,30]  — pedal bar + percentage
+//   DTILE_GEAR        [  0,300,480,20]  — gear selector P/R/N/D1/D2
+//   DTILE_DEGRADED    [  0, 40,480,18]  — overlay: degraded/limp banner
+//   DTILE_FAULTS      [  0, 28,480,10]  — overlay: fault indicators
+//
+// Pipeline per frame:
+//   1. update(snapshot) → latch cur_* from frozen VehicleData
+//   2. Compute FNV-1a hash per tile → updateHash() → dirty if changed
+//   3. draw() → skip clean tiles, render only dirty ones
+//   4. Tiles marked clean after render; prev_* updated for next frame
 //
 // No String class. No heap allocation. No recursion.
 // All format buffers are fixed-size stack arrays with snprintf().
@@ -62,6 +74,23 @@ void DriveScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("drive");
     needsFullRedraw_ = true;
 
+    // ---- Initialize tile regions ----
+    tiles_.setRect(DTILE_SPEED,      0,   ui::SPEED_Y,  ui::SCREEN_W, ui::SPEED_H);
+    tiles_.setRect(DTILE_OBSTACLE,   0,   ui::SENSOR_Y, ui::SCREEN_W, ui::SENSOR_H);
+    tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y, 370, ui::CAR_AREA_H);
+    tiles_.setRect(DTILE_STEERING,   370, ui::CAR_AREA_Y, 110, ui::CAR_AREA_H);
+    tiles_.setRect(DTILE_BATTERY,    ui::BAT_X, 0, 75, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_GEAR,       0,   ui::GEAR_Y, ui::SCREEN_W, ui::GEAR_H);
+    tiles_.setRect(DTILE_PEDAL,      0,   ui::PEDAL_Y, ui::SCREEN_W, ui::PEDAL_H);
+    tiles_.setRect(DTILE_MODE_ICONS, 0,   0, 180, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_LED_TOGGLE, 180, 0, 120, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_DEGRADED,   DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H);
+    tiles_.setRect(DTILE_FAULTS,     0,   FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H);
+    tiles_.setRect(DTILE_ACK,        ACK_X, ACK_Y, ACK_W, ACK_H);
+
+    // Invalidate all tile hashes — forces full redraw of every tile
+    tiles_.invalidateAll();
+
     // Zero out previous values to force full redraw
     memset(prevTraction_, 0, sizeof(prevTraction_));
     memset(prevTemp_, 0, sizeof(prevTemp_));
@@ -97,7 +126,7 @@ void DriveScreen::onExit() {
 }
 
 // -------------------------------------------------------------------------
-// update — read vehicle data into current-frame cache
+// update — read vehicle data into current-frame cache + compute tile hashes
 // -------------------------------------------------------------------------
 void DriveScreen::update(const vehicle::VehicleData& data) {
     // Traction (torque per wheel)
@@ -195,17 +224,86 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
             ackIndicatorDirty_ = true;
         }
     }
+
+    // ---- Compute tile hashes for dirty detection ----
+    // Each tile gets a compact FNV-1a hash of its source data.
+    // If the hash matches the previous frame, the tile is skipped.
+
+    // SPEED tile
+    tiles_.updateHash(DTILE_SPEED, ui::tileHashVal(curSpeedAvgRaw_));
+
+    // OBSTACLE tile
+    tiles_.updateHash(DTILE_OBSTACLE, ui::tileHashVal(curObstacleCm_));
+
+    // WHEELS tile — hash all 4 traction + 4 temp values together.
+    // Uses threshold filtering: small CAN jitter doesn't trigger redraw.
+    {
+        ui::TileHash wh = ui::FNV_OFFSET;
+        for (uint8_t i = 0; i < 4; ++i) {
+            // Apply threshold: only count change if Δtorque > 2 or Δtemp ≥ 1
+            uint8_t dt = (curTraction_[i] > prevTraction_[i])
+                         ? (curTraction_[i] - prevTraction_[i])
+                         : (prevTraction_[i] - curTraction_[i]);
+            int8_t  dT = (curTemp_[i] > prevTemp_[i])
+                         ? static_cast<int8_t>(curTemp_[i] - prevTemp_[i])
+                         : static_cast<int8_t>(prevTemp_[i] - curTemp_[i]);
+
+            // Use drawn value (prev) if below threshold, current if above
+            uint8_t drawTraction = (dt > 2) ? curTraction_[i] : prevTraction_[i];
+            int8_t  drawTemp     = (dT >= 1) ? curTemp_[i] : prevTemp_[i];
+            wh = ui::tileHashFeed(wh, drawTraction);
+            wh = ui::tileHashFeed(wh, drawTemp);
+        }
+        tiles_.updateHash(DTILE_WHEELS, wh);
+    }
+
+    // STEERING tile
+    tiles_.updateHash(DTILE_STEERING, ui::tileHashVal(curSteeringRaw_));
+
+    // BATTERY tile
+    tiles_.updateHash(DTILE_BATTERY, ui::tileHashVal(curBattVoltRaw_));
+
+    // GEAR tile
+    tiles_.updateHash(DTILE_GEAR, ui::tileHashVal(curGear_));
+
+    // PEDAL tile
+    tiles_.updateHash(DTILE_PEDAL, ui::tileHashVal(curPedalPct_));
+
+    // MODE_ICONS tile
+    {
+        ui::TileHash mh = ui::tileHashVal(curMode_.is4x4);
+        mh = ui::tileHashFeed(mh, curMode_.isTankTurn);
+        tiles_.updateHash(DTILE_MODE_ICONS, mh);
+    }
+
+    // LED_TOGGLE tile
+    {
+        ui::TileHash lh = ui::tileHashVal(curFrontLedOn_);
+        lh = ui::tileHashFeed(lh, curRearLedOn_);
+        tiles_.updateHash(DTILE_LED_TOGGLE, lh);
+    }
+
+    // DEGRADED overlay tile
+    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(curSystemState_));
+
+    // FAULTS overlay tile
+    tiles_.updateHash(DTILE_FAULTS, ui::tileHashVal(curFaultFlags_));
+
+    // ACK tile — uses dirty flag directly (event-driven, not hash-based)
+    if (ackIndicatorDirty_) {
+        tiles_.markDirty(DTILE_ACK);
+    }
 }
 
 // -------------------------------------------------------------------------
-// draw — render changed elements to TFT
+// draw — tile-based render: only dirty tiles are redrawn
 // -------------------------------------------------------------------------
 void DriveScreen::draw() {
     if (needsFullRedraw_) {
         needsFullRedraw_ = false;
         RTMON_FULL_REDRAW();
 
-        // Clear entire screen
+        // ---- STATIC LAYER (drawn once per screen enter) ----
         RTRACE_SET_LAYER(0);
         tft.fillScreen(ui::COL_BG);
         RTRACE_FILL_SCREEN(ui::COL_BG);
@@ -239,8 +337,8 @@ void DriveScreen::draw() {
                     ui::COL_CYAN, ui::COL_BG, 1, TC_DATUM);
         tft.setTextDatum(TL_DATUM);
 
-        // Force draw of all dynamic elements
-        prevSpeedAvgRaw_ = curSpeedAvgRaw_ + 1;  // Force mismatch
+        // Force all prev_* to differ from cur_* so every tile renders
+        prevSpeedAvgRaw_ = curSpeedAvgRaw_ + 1;
         prevBattVoltRaw_ = curBattVoltRaw_ + 1;
         prevPedalPct_    = curPedalPct_ + 1;
         prevGear_        = (curGear_ == ui::Gear::P) ? ui::Gear::N : ui::Gear::P;
@@ -257,31 +355,35 @@ void DriveScreen::draw() {
         prevSystemState_    = (curSystemState_ == can::SystemState::ACTIVE)
                               ? can::SystemState::DEGRADED : can::SystemState::ACTIVE;
         prevFaultFlags_     = curFaultFlags_ ^ 0xFF;
+
+        // Mark all tiles dirty for initial dynamic render pass
+        tiles_.markAllDirty();
     }
 
-    // Partial redraw: only changed elements
+    // ---- DYNAMIC LAYER — tile-based dirty region rendering ----
     RTRACE_SET_LAYER(2);
 
-    // Speed (in its own zone, 230–270px)
-    if (curSpeedAvgRaw_ != prevSpeedAvgRaw_) {
+    // TILE: Speed (230–270px)
+    if (tiles_.isDirty(DTILE_SPEED)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::SPEED);
         drawSpeed();
+        tiles_.markClean(DTILE_SPEED);
     }
 
-    // Obstacle sensor (40–85px)
-    if (curObstacleCm_ != prevObstacleCm_) {
+    // TILE: Obstacle sensor (40–85px)
+    if (tiles_.isDirty(DTILE_OBSTACLE)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::OBSTACLE);
         ui::ObstacleSensor::draw(tft, curObstacleCm_, prevObstacleCm_);
+        tiles_.markClean(DTILE_OBSTACLE);
     }
 
-    // Wheels — apply threshold filtering to reduce noise-driven redraws:
-    //   torque: redraw only if Δ > 2%   temperature: redraw only if Δ ≥ 1°C
-    // prevTraction_/prevTemp_ track "last drawn" values, not "last CAN" values.
-    // Accumulated small CAN changes eventually cross the threshold.
-    {
+    // TILE: Wheels — uses threshold filtering from update() hash
+    if (tiles_.isDirty(DTILE_WHEELS)) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
+
+        // Compute draw values with threshold filtering
         uint8_t drawTraction[4];
         int8_t  drawTemp[4];
-        bool carDirty = false;
 
         for (uint8_t i = 0; i < 4; ++i) {
             uint8_t dt = (curTraction_[i] > prevTraction_[i])
@@ -291,79 +393,84 @@ void DriveScreen::draw() {
                          ? static_cast<int8_t>(curTemp_[i] - prevTemp_[i])
                          : static_cast<int8_t>(prevTemp_[i] - curTemp_[i]);
 
-            bool tractionDirty = (dt > 2);
-            bool tempDirty     = (dT >= 1);
-
-            // Use current value if threshold crossed, otherwise keep prev (no redraw)
-            drawTraction[i] = tractionDirty ? curTraction_[i] : prevTraction_[i];
-            drawTemp[i]     = tempDirty     ? curTemp_[i]     : prevTemp_[i];
-
-            if (tractionDirty || tempDirty) {
-                carDirty = true;
-            }
+            drawTraction[i] = (dt > 2) ? curTraction_[i] : prevTraction_[i];
+            drawTemp[i]     = (dT >= 1) ? curTemp_[i]    : prevTemp_[i];
         }
 
-        if (carDirty || curSteeringRaw_ != prevSteeringRaw_) {
-            RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
-            ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
-                {drawTraction[0], drawTraction[1], drawTraction[2], drawTraction[3]}, 0},
-                vehicle::TempMapData{
-                {drawTemp[0], drawTemp[1], drawTemp[2], drawTemp[3], 0}, 0},
-                prevTraction_, prevTemp_);
+        ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
+            {drawTraction[0], drawTraction[1], drawTraction[2], drawTraction[3]}, 0},
+            vehicle::TempMapData{
+            {drawTemp[0], drawTemp[1], drawTemp[2], drawTemp[3], 0}, 0},
+            prevTraction_, prevTemp_);
 
-            // Update prev to what was actually drawn (not raw CAN values)
-            memcpy(prevTraction_, drawTraction, sizeof(prevTraction_));
-            memcpy(prevTemp_, drawTemp, sizeof(prevTemp_));
-        }
+        // Update prev to what was actually drawn (not raw CAN values)
+        memcpy(prevTraction_, drawTraction, sizeof(prevTraction_));
+        memcpy(prevTemp_, drawTemp, sizeof(prevTemp_));
+        tiles_.markClean(DTILE_WHEELS);
     }
 
-    // Steering circular gauge (right side)
-    if (curSteeringRaw_ != prevSteeringRaw_) {
+    // TILE: Steering circular gauge (right side)
+    if (tiles_.isDirty(DTILE_STEERING)) {
         ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_);
+        tiles_.markClean(DTILE_STEERING);
     }
 
-    // Battery (part of top bar zone)
-    if (curBattVoltRaw_ != prevBattVoltRaw_) {
+    // TILE: Battery (top-right)
+    if (tiles_.isDirty(DTILE_BATTERY)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
         ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_);
+        tiles_.markClean(DTILE_BATTERY);
     }
 
-    // Gear
-    if (curGear_ != prevGear_) {
+    // TILE: Gear
+    if (tiles_.isDirty(DTILE_GEAR)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::GEAR);
         ui::GearDisplay::draw(tft, curGear_, prevGear_);
+        tiles_.markClean(DTILE_GEAR);
     }
 
-    // Pedal bar
-    if (curPedalPct_ != prevPedalPct_) {
+    // TILE: Pedal bar
+    if (tiles_.isDirty(DTILE_PEDAL)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::PEDAL);
         ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_);
+        tiles_.markClean(DTILE_PEDAL);
     }
 
-    // Mode icons (part of top bar zone)
-    if (curMode_.is4x4 != prevMode_.is4x4 || curMode_.isTankTurn != prevMode_.isTankTurn) {
+    // TILE: Mode icons
+    if (tiles_.isDirty(DTILE_MODE_ICONS)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
         ui::ModeIcons::draw(tft, curMode_, prevMode_);
+        tiles_.markClean(DTILE_MODE_ICONS);
     }
 
-    // LED toggle buttons (part of top bar zone)
-    if (curFrontLedOn_ != prevFrontLedOn_ || curRearLedOn_ != prevRearLedOn_) {
+    // TILE: LED toggle buttons
+    if (tiles_.isDirty(DTILE_LED_TOGGLE)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
         ui::LedToggle::draw(tft, curFrontLedOn_, prevFrontLedOn_,
                                  curRearLedOn_,  prevRearLedOn_);
+        tiles_.markClean(DTILE_LED_TOGGLE);
     }
 
-    // Degraded/limp mode overlay (HMI_STATE_MODEL §2.4)
-    drawDegradedOverlay();
+    // TILE: Degraded/limp mode overlay (HMI_STATE_MODEL §2.4)
+    if (tiles_.isDirty(DTILE_DEGRADED)) {
+        drawDegradedOverlay();
+        tiles_.markClean(DTILE_DEGRADED);
+    }
 
-    // Fault flag visual overlays (HMI_STATE_MODEL §4.1)
-    drawFaultOverlays();
+    // TILE: Fault flag visual overlays (HMI_STATE_MODEL §4.1)
+    if (tiles_.isDirty(DTILE_FAULTS)) {
+        drawFaultOverlays();
+        tiles_.markClean(DTILE_FAULTS);
+    }
 
-    // ACK visual feedback indicator (brief text near top bar)
-    drawAckIndicator();
+    // TILE: ACK visual feedback indicator (event-driven)
+    if (tiles_.isDirty(DTILE_ACK)) {
+        drawAckIndicator();
+        tiles_.markClean(DTILE_ACK);
+    }
 
     // Copy current values to previous for next frame
-    // (traction/temp prev values managed in the wheel block above — threshold logic)
+    // (traction/temp prev values managed in the wheel tile above — threshold logic)
     prevSteeringRaw_ = curSteeringRaw_;
     prevSpeedAvgRaw_ = curSpeedAvgRaw_;
     prevBattVoltRaw_ = curBattVoltRaw_;
@@ -409,9 +516,9 @@ void DriveScreen::drawSpeed() {
 
 // -------------------------------------------------------------------------
 // ACK visual feedback — brief indicator in top bar after mode/gear command
+// Called only when DTILE_ACK is dirty (event-driven).
 // -------------------------------------------------------------------------
 void DriveScreen::drawAckIndicator() {
-    if (!ackIndicatorDirty_) return;
     ackIndicatorDirty_ = false;
 
     const char* text = "";
@@ -440,10 +547,9 @@ void DriveScreen::drawAckIndicator() {
 //
 // When system_state is DEGRADED(3) or LIMP_HOME(6), draws an amber banner
 // just below the top bar to alert the driver.
+// Called only when DTILE_DEGRADED is dirty (system state changed).
 // -------------------------------------------------------------------------
 void DriveScreen::drawDegradedOverlay() {
-    if (curSystemState_ == prevSystemState_) return;
-
     // Clear the banner area regardless (remove old banner if state changed)
     tft.fillRect(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_BG);
     RTRACE_FILL_RECT(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_BG);
@@ -474,10 +580,9 @@ void DriveScreen::drawDegradedOverlay() {
 //
 // Draws compact fault indicators below the top bar.
 // ABS/TCS are informational (green/cyan), faults are amber/red.
+// Called only when DTILE_FAULTS is dirty (fault flags changed).
 // -------------------------------------------------------------------------
 void DriveScreen::drawFaultOverlays() {
-    if (curFaultFlags_ == prevFaultFlags_) return;
-
     // Clear the fault overlay strip — needed because multiple labels are
     // drawn at variable positions; setTextPadding alone cannot clear the
     // entire strip when the active set of faults changes.
