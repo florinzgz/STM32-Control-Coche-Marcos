@@ -79,6 +79,24 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — feat: update drive screen display for TF-Mini Plus sensor
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Actualización de la pantalla de conducción (drive screen) para reflejar el cambio de sensor de obstáculos de TOFSense-M a TF-Mini Plus. El sensor TF-Mini Plus tiene un rango de 10 cm–12 m (vs 2 cm–4 m del TOFSense-M), lo que requiere ajustar la barra de proximidad y los umbrales de color.
+- **Root cause:** La barra de proximidad y los umbrales de color estaban calibrados para el rango máximo del TOFSense-M (400 cm). Con el TF-Mini Plus (rango hasta 1200 cm), las lecturas entre 4–12 m quedaban todas como "barra vacía" y los umbrales de color no aprovechaban el rango extendido.
+- **Solución aplicada:**
+  1. Barra de proximidad: max 400→600 cm (6 m da buena resolución visual en zona de alerta 0–4 m)
+  2. Umbrales `proximityColor()`: ajustados para rango mayor — verde >3m, cian 1.5–3m, amarillo 0.8–1.5m, naranja 0.3–0.8m, rojo <0.3m
+  3. Comentarios actualizados: "TOFSense-M" → "TF-Mini Plus" en `vehicle_data.h`, `obstacle_sensor.h`
+  4. `ObstacleData.distanceCm` comentario max ~400→~1200 cm
+- **Impacto:** La pantalla de conducción muestra correctamente el sensor TF-Mini Plus: barra de proximidad proporcional hasta 6 m, colores graduales en todo el rango útil.
+- **Archivos modificados:**
+  - `esp32/src/vehicle_data.h` — comentario TOFSense-M → TF-Mini Plus, max range
+  - `esp32/src/ui/obstacle_sensor.cpp` — barra proximidad BAR_MAX_CM 400→600
+  - `esp32/src/ui/obstacle_sensor.h` — comentario header actualizado
+  - `esp32/src/ui/ui_common.h` — `proximityColor()` umbrales ajustados para TF-Mini Plus
+- **Tests:** ESP32 build validation.
+
 ### PR — fix: ESP32 screen transitions to error when CAN cable disconnected
 - **Fecha:** 2026-04-09
 - **Autor:** Copilot
@@ -701,3 +719,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-09 | **Auditoría TF-Mini Plus** — Fix sampling rate 10→100 Hz (TFM_MAX_BYTES_PER_UPDATE 32→256, eliminar 1-frame-per-call, rxBuf 256→512). Latencia 100ms→10ms. Comentarios actualizados. | — |
 | 2026-04-09 | **Guía puesta en marcha segura** — Documento 10 fases (I2C→DS18B20→INA226→encoder→sensores→pedal→relés→motores) con conexiones exactas, materiales, circuitos optoacopladores (6N137/PC817), BOM completa. | — |
 | 2026-04-09 | **CAN loss → pantalla error** — ScreenManager detecta heartbeat STM32 stale >1.5s → fuerza transición a ERROR screen con banner "CAN LINK LOST". Auto-recuperación al reconectar. | — |
+| 2026-04-10 | **Drive screen → TF-Mini Plus** — Actualización pantalla final para TF-Mini Plus: bar proximidad 400→600 cm, zonas color ajustadas (verde >3m, cian 1.5–3m, amarillo 0.8–1.5m, naranja 0.3–0.8m, rojo <0.3m), comentarios TOFSense-M→TF-Mini Plus. | — |

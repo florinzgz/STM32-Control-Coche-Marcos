@@ -67,10 +67,14 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
     if (distanceCm > 0) {
         uint16_t col = proximityColor(distanceCm);
 
-        // Map distance to bar width (400 cm = empty, 0 cm = full)
-        uint16_t clampDist = (distanceCm > 400) ? 400 : distanceCm;
+        // Map distance to bar width (600 cm = empty, 0 cm = full).
+        // TF-Mini Plus range is 10–1200 cm; 600 cm (6 m) gives good
+        // visual resolution in the 0–4 m warning zone while still
+        // showing a sliver of fill at moderate distances (4–6 m).
+        static constexpr uint16_t BAR_MAX_CM = 600;
+        uint16_t clampDist = (distanceCm > BAR_MAX_CM) ? BAR_MAX_CM : distanceCm;
         int16_t fillW = static_cast<int16_t>(
-            (static_cast<int32_t>(400 - clampDist) * (SENSOR_BAR_W - 4)) / 400);
+            (static_cast<int32_t>(BAR_MAX_CM - clampDist) * (SENSOR_BAR_W - 4)) / BAR_MAX_CM);
 
         if (fillW > 0) {
             tft.fillRect(SENSOR_BAR_X + 2, barY + 2,

@@ -135,10 +135,10 @@ struct AckData {
 };
 
 // -------------------------------------------------------------------------
-// Front obstacle sensor (0x208) — TOFSense-M LiDAR distance in cm
+// Front obstacle sensor (0x208) — TF-Mini Plus LiDAR distance in cm
 // -------------------------------------------------------------------------
 struct ObstacleData {
-    uint16_t distanceCm  = 0;   // 0 = no reading, max ~400 cm
+    uint16_t distanceCm  = 0;   // 0 = no reading, max ~1200 cm (TF-Mini Plus 12 m range)
     unsigned long timestampMs = 0;
 };
 
