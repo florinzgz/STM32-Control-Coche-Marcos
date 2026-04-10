@@ -113,6 +113,27 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
   - `PROJECT_CHANGELOG.md` — This entry
 - **Impacto:** Render pipeline is now fully time-deterministic: same (VehicleData, frameTimeMs) → same derived state → same framebuffer ALWAYS. Critical tiles have bounded recovery time from hash collisions. Zero behavioral change for normal operation — millis() was already being called once per frame externally, but now it's formalized as an injected dependency.
 - **Tests:** Internal refactoring. No CAN, VehicleData, or widget interface changes. Build verified on STM32 side (make clean && make).
+
+### PR — feat: V10 Hardening Extension — Staggered Failsafe, Critical Tile Policy, Render Atomicity
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Final hardening V10: distribute forced redraws to eliminate SPI spikes, add fault-condition hash override for critical tiles, formalize frame time monotonicity and render atomicity contracts.
+- **Root cause:** (1) Hash failsafe redraws all critical tiles simultaneously every 100 frames, creating a periodic SPI spike. (2) No mechanism to override hash suppression under fault conditions — a hash collision during a fault could hide safety information. (3) Frame time monotonicity and render atomicity were guaranteed by implementation but not formally contracted.
+- **Solución aplicada:**
+  1. **Staggered failsafe**: Critical tile forced redraws are now distributed across the HASH_FAILSAFE_INTERVAL. DriveScreen: SPEED@0, FAULTS@25, DEGRADED@50, BATTERY@75. ErrorScreen: BANNER@0, FAULTS@50. Eliminates the multi-tile SPI spike every 100 frames.
+  2. **Critical tile fault override**: When `curFaultFlags_ != 0`, DTILE_SPEED and DTILE_FAULTS are force-redrawn EVERY frame, overriding hash suppression. Ensures fault visualization is always visually current.
+  3. **Frame time contract (tile_engine.h)**: Formal documentation of frameTimeMs single-sampling, monotonicity, overflow-safe deltas, and determinism guarantee.
+  4. **Frame time monotonicity assertion**: ScreenManager tracks prevFrameTimeMs_ and asserts (in UI_TILE_DEBUG mode) that time never goes backwards.
+  5. **Render atomicity contract (tile_engine.h)**: Formal documentation that tile render → overlay invalidation → markClean → flag clear is atomic (single-threaded Core 0, no yield points).
+- **Archivos afectados:**
+  - `esp32/src/ui/tile_engine.h` — Frame Time Contract, Render Atomicity Contract, Hash Failsafe Distribution, Critical Tile Policy documentation
+  - `esp32/src/screens/drive_screen.cpp` — Staggered failsafe + fault-condition critical tile override
+  - `esp32/src/screens/error_screen.cpp` — Staggered failsafe
+  - `esp32/src/screen_manager.h` — prevFrameTimeMs_ member
+  - `esp32/src/screen_manager.cpp` — frameTimeMs monotonicity debug assertion
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Zero behavioral change under normal operation (no faults, no hash collisions). Under fault conditions, SPEED and FAULTS tiles update every frame instead of relying on hash comparison. SPI load is distributed evenly instead of spiking every 100 frames. All contracts now formally documented.
+- **Tests:** STM32 build verified (make clean && make -j with -Wall -Wextra -Werror).
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Enforce draw-phase purity (zero state mutation in draw helpers), add formal overlay composition modes (REPLACE/MERGE), and centralize all remaining layout constants from SafeScreen and BootScreen.
@@ -941,3 +962,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **Tile Engine Formalization & Pipeline Hardening** — (1) Z-order layer system: TileLayer enum (STATIC/BASE/OVERLAY/SYSTEM) con reglas formales de composición. (2) Overlay invalidation contract documentado en tile_engine.h. (3) Debug assertions (UI_TILE_DEBUG) para diagnóstico de setRect() bounds. (4) Pipeline puro: overlay visibility precomputada en update(), draw() solo consume. (5) Tile layout constants centralizados: DTILE_*/ETILE_*/YTILE_* en ui_config.h. 6 archivos modificados. | — |
 | 2026-04-10 | **Draw Purity Enforcement & Full Layout Centralization** — (1) Draw-phase purity: ackIndicatorDirty_ y diagNeedsRedraw_ movidos fuera de draw helpers. (2) OverlayMode enum (REPLACE/MERGE) con registro por overlay documentando composición y tiles afectados. (3) SafeScreen: 17 layout constants (STILE_*) centralizados en ui_config.h. (4) BootScreen: 5 diagnostic layout constants (BTILE_DIAG_*) centralizados. 5 archivos modificados. | — |
 | 2026-04-10 | **Time Determinism, Hash Failsafe, Flag Safety** — (1) `frameTimeMs` injected into Screen::update() — millis() captured once per frame in ScreenManager. All screen timing uses injected value. (2) TileSet::forceRedraw() for critical tiles every 100 frames (5s). (3) Flag safety contract documented. 16 files modified. | — |
+| 2026-04-10 | **V10 Hardening: Staggered Failsafe, Critical Tile Policy, Render Atomicity** — (1) Staggered forced redraws: critical tiles distributed across failsafe interval (no SPI spike). (2) Fault-condition override: SPEED+FAULTS force-redraw every frame when faults active. (3) Frame time contract: monotonicity assertion + overflow-safe delta docs. (4) Render atomicity contract: formal single-threaded guarantee. 6 files modified. | — |

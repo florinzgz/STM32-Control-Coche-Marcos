@@ -34,6 +34,39 @@
 //   This separation guarantees render is functionally pure w.r.t. frame state.
 //   same (VehicleData, frameTimeMs) ⇒ same derived state ALWAYS.
 //
+// FRAME TIME CONTRACT (V10):
+//
+//   frameTimeMs is captured ONCE per frame in ScreenManager::update() via
+//   millis() and injected into screen.update(data, frameTimeMs).
+//
+//   Guarantees:
+//     1. SINGLE-SAMPLED: frameTimeMs is read exactly once per frame. All
+//        timing decisions within the frame use the same value.
+//     2. MONOTONIC: millis() on ESP32 is monotonically non-decreasing (wraps
+//        at 2^32 ≈ 49.7 days). A debug assertion detects backward jumps.
+//     3. OVERFLOW-SAFE: All delta calculations use unsigned subtraction
+//        (frameTimeMs - refTimeMs) which is overflow-safe in C/C++ for
+//        unsigned types. A wrap produces the correct elapsed time as long as
+//        the true delta is less than 2^32 ms (~49.7 days).
+//     4. DETERMINISTIC: identical (VehicleData, frameTimeMs) input must
+//        produce identical derived state — no hidden time dependencies.
+//
+// RENDER ATOMICITY CONTRACT (V10):
+//
+//   The update/draw cycle runs entirely on Core 0 in a single FreeRTOS task
+//   with no yield points during execution. This guarantees:
+//
+//     1. NO PARTIAL STATE: Within a single draw() call, the sequence
+//        render → overlay_invalidation → markClean → flag_clear is atomic.
+//        No concurrent code can observe intermediate dirty/clean state.
+//     2. NO MID-FRAME MUTATION: CAN RX runs on Core 1 and writes to a
+//        shared VehicleData behind a mutex. The renderTask latches localVD
+//        once per frame BEFORE calling update(). During update()+draw(),
+//        the snapshot is frozen — CAN updates do not affect the current frame.
+//     3. FLAG SAFETY: Event flags (e.g. ackIndicatorDirty_) are set in
+//        update() and cleared in draw() ONLY AFTER the corresponding tile
+//        renders AND markClean() completes. A flag is never lost.
+//
 // Z-ORDER LAYER MODEL (formal overlay compositing):
 //
 //   Layer 0 — STATIC: background fill, outlines, labels (drawn once in onEnter)
@@ -67,6 +100,26 @@
 //   the tile will be repainted within a bounded time window.
 //
 //   forceRedraw(idx): zeroes the stored hash → next updateHash() always dirty.
+//
+// HASH FAILSAFE DISTRIBUTION (V10):
+//
+//   To avoid SPI spikes (multiple critical tiles redrawing on the same frame),
+//   forced redraws are STAGGERED across the failsafe interval:
+//     - Each critical tile is assigned a different frame offset within the
+//       HASH_FAILSAFE_INTERVAL cycle.
+//     - Example (DriveScreen, 4 tiles, interval=100):
+//       SPEED at frame 0, FAULTS at 25, DEGRADED at 50, BATTERY at 75.
+//     - This distributes the SPI load evenly across time.
+//
+// CRITICAL TILE POLICY (V10):
+//
+//   Tiles classified as CRITICAL (SPEED, FAULTS, WARNINGS) receive special
+//   treatment under fault conditions:
+//     - When curFaultFlags_ != 0, critical tiles are force-redrawn EVERY frame
+//       (hash suppression override). This ensures fault-related information
+//       is always visually current regardless of hash collisions.
+//     - Under normal operation (no faults), the standard staggered failsafe
+//       interval applies.
 //
 // Usage:
 //   1. Define an enum for tile indices (e.g. DriveTile::SPEED)

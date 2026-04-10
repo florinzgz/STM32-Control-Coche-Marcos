@@ -127,12 +127,15 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     elapsedSec_ = (frameTimeMs - errorEntryMs_) / 1000;
     tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec_));
 
-    // ---- Hash failsafe: periodic forced redraw of critical tiles ----
+    // ---- Hash failsafe: staggered forced redraw of critical tiles (V10) ----
     ++failsafeFrameCount_;
     if (failsafeFrameCount_ >= ui::cfg::HASH_FAILSAFE_INTERVAL) {
         failsafeFrameCount_ = 0;
-        tiles_.forceRedraw(ETILE_BANNER);
-        tiles_.forceRedraw(ETILE_FAULTS);
+    }
+    {
+        constexpr uint16_t STAGGER = ui::cfg::HASH_FAILSAFE_INTERVAL / 2;
+        if (failsafeFrameCount_ == 0)          tiles_.forceRedraw(ETILE_BANNER);
+        if (failsafeFrameCount_ == STAGGER)    tiles_.forceRedraw(ETILE_FAULTS);
     }
 }
 

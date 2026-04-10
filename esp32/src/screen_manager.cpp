@@ -31,6 +31,20 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
     // ensuring deterministic behavior: same (data, frameTimeMs) ⇒ same UI.
     const unsigned long frameTimeMs = millis();
 
+    // Frame Time Contract (V10): assert monotonicity.
+    // millis() on ESP32 is monotonically non-decreasing; a backward jump
+    // would indicate a systemic bug (timer reset, memory corruption).
+    // Unsigned subtraction handles the 2^32 wrap correctly (~49.7 days).
+#if UI_TILE_DEBUG
+    if (frameTimeMs < prevFrameTimeMs_ &&
+        (prevFrameTimeMs_ - frameTimeMs) < 0x80000000UL) {
+        // Not a wrap — genuine backward jump (should never happen)
+        Serial.printf("[FRAME] WARNING: frameTimeMs went backwards: %lu → %lu\n",
+                      prevFrameTimeMs_, frameTimeMs);
+    }
+#endif
+    prevFrameTimeMs_ = frameTimeMs;
+
     // ---- Engineering screen active ----
     if (engineeringActive_) {
         RTMON_UI_BEGIN();

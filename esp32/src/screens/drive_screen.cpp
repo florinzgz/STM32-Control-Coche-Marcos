@@ -321,16 +321,27 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         tiles_.markDirty(DTILE_ACK);
     }
 
-    // ---- Hash failsafe: periodic forced redraw of critical tiles ----
-    // Safety net against hash collisions or missed invalidation.
-    // At 20 FPS, HASH_FAILSAFE_INTERVAL=100 → every 5 seconds.
+    // ---- Hash failsafe: staggered forced redraw of critical tiles (V10) ----
+    // Distribute forced redraws across the interval to avoid SPI spikes.
+    // Each critical tile redraws at a different frame offset within the cycle.
     ++failsafeFrameCount_;
     if (failsafeFrameCount_ >= ui::cfg::HASH_FAILSAFE_INTERVAL) {
         failsafeFrameCount_ = 0;
+    }
+    {
+        constexpr uint16_t STAGGER = ui::cfg::HASH_FAILSAFE_INTERVAL / 4;
+        if (failsafeFrameCount_ == 0)               tiles_.forceRedraw(DTILE_SPEED);
+        if (failsafeFrameCount_ == STAGGER)          tiles_.forceRedraw(DTILE_FAULTS);
+        if (failsafeFrameCount_ == STAGGER * 2)      tiles_.forceRedraw(DTILE_DEGRADED);
+        if (failsafeFrameCount_ == STAGGER * 3)      tiles_.forceRedraw(DTILE_BATTERY);
+    }
+
+    // ---- Critical tile policy (V10): fault-condition override ----
+    // When faults are active, SPEED and FAULTS tiles bypass hash suppression
+    // every frame. Ensures fault visualization is always current.
+    if (curFaultFlags_ != 0) {
         tiles_.forceRedraw(DTILE_SPEED);
         tiles_.forceRedraw(DTILE_FAULTS);
-        tiles_.forceRedraw(DTILE_DEGRADED);
-        tiles_.forceRedraw(DTILE_BATTERY);
     }
 }
 
