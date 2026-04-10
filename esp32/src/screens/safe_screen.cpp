@@ -214,7 +214,7 @@ void SafeScreen::draw() {
             int16_t x = COL_VAL_START + 18 + i * 76;
             tft.fillRect(x, TEMP_VAL_Y, 52, 10, ui::COL_BG);
             char buf[ui::FMT_BUF_SMALL];
-            snprintf(buf, sizeof(buf), "%dC", temps_[i]);
+            snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", temps_[i]);
             uint16_t col = (temps_[i] >= 80) ? ui::COL_RED :
                            (temps_[i] >= 60) ? ui::COL_AMBER : ui::COL_WHITE;
             tft.setTextColor(col, ui::COL_BG);
@@ -233,7 +233,7 @@ void SafeScreen::draw() {
         int16_t deg = steeringAngle_ / 10;
         int16_t frac = steeringAngle_ % 10;
         if (frac < 0) frac = -frac;
-        snprintf(buf, sizeof(buf), "%d.%d deg", deg, frac);
+        snprintf(buf, sizeof(buf), "%d.%d\xC2\xB0", deg, frac);
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
