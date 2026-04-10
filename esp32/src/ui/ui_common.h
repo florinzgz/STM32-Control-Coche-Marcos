@@ -154,7 +154,7 @@ inline uint16_t torqueColor(uint8_t pct) {
 }
 
 // -------------------------------------------------------------------------
-// Helper: obstacle distance to color (proximity indicator) — 6 zones
+// Helper: obstacle distance to color (proximity indicator) — 5 zones + gray
 // Tuned for TF-Mini Plus range (10–1200 cm / 0.1–12 m).
 // -------------------------------------------------------------------------
 inline uint16_t proximityColor(uint16_t distanceCm) {
