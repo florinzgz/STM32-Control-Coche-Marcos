@@ -276,10 +276,11 @@ void DriveScreen::draw() {
 
     // Wheels — apply threshold filtering to reduce noise-driven redraws:
     //   torque: redraw only if Δ > 2%   temperature: redraw only if Δ ≥ 1°C
+    // prevTraction_/prevTemp_ track "last drawn" values, not "last CAN" values.
+    // Accumulated small CAN changes eventually cross the threshold.
     {
-        // Build filtered traction/temp arrays that collapse small deltas
-        uint8_t filtTraction[4];
-        int8_t  filtTemp[4];
+        uint8_t drawTraction[4];
+        int8_t  drawTemp[4];
         bool carDirty = false;
 
         for (uint8_t i = 0; i < 4; ++i) {
@@ -290,11 +291,14 @@ void DriveScreen::draw() {
                          ? static_cast<int8_t>(curTemp_[i] - prevTemp_[i])
                          : static_cast<int8_t>(prevTemp_[i] - curTemp_[i]);
 
-            // Apply thresholds: keep previous value unless change exceeds threshold
-            filtTraction[i] = (dt > 2) ? curTraction_[i] : prevTraction_[i];
-            filtTemp[i]     = (dT >= 1) ? curTemp_[i]    : prevTemp_[i];
+            bool tractionDirty = (dt > 2);
+            bool tempDirty     = (dT >= 1);
 
-            if (filtTraction[i] != prevTraction_[i] || filtTemp[i] != prevTemp_[i]) {
+            // Use current value if threshold crossed, otherwise keep prev (no redraw)
+            drawTraction[i] = tractionDirty ? curTraction_[i] : prevTraction_[i];
+            drawTemp[i]     = tempDirty     ? curTemp_[i]     : prevTemp_[i];
+
+            if (tractionDirty || tempDirty) {
                 carDirty = true;
             }
         }
@@ -302,16 +306,14 @@ void DriveScreen::draw() {
         if (carDirty || curSteeringRaw_ != prevSteeringRaw_) {
             RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
             ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
-                {filtTraction[0], filtTraction[1], filtTraction[2], filtTraction[3]}, 0},
+                {drawTraction[0], drawTraction[1], drawTraction[2], drawTraction[3]}, 0},
                 vehicle::TempMapData{
-                {filtTemp[0], filtTemp[1], filtTemp[2], filtTemp[3], 0}, 0},
+                {drawTemp[0], drawTemp[1], drawTemp[2], drawTemp[3], 0}, 0},
                 prevTraction_, prevTemp_);
 
-            // Commit filtered values so thresholds apply relative to last drawn state
-            for (uint8_t i = 0; i < 4; ++i) {
-                curTraction_[i] = filtTraction[i];
-                curTemp_[i]     = filtTemp[i];
-            }
+            // Update prev to what was actually drawn (not raw CAN values)
+            memcpy(prevTraction_, drawTraction, sizeof(prevTraction_));
+            memcpy(prevTemp_, drawTemp, sizeof(prevTemp_));
         }
     }
 
@@ -361,8 +363,7 @@ void DriveScreen::draw() {
     drawAckIndicator();
 
     // Copy current values to previous for next frame
-    memcpy(prevTraction_, curTraction_, sizeof(prevTraction_));
-    memcpy(prevTemp_, curTemp_, sizeof(prevTemp_));
+    // (traction/temp prev values managed in the wheel block above — threshold logic)
     prevSteeringRaw_ = curSteeringRaw_;
     prevSpeedAvgRaw_ = curSpeedAvgRaw_;
     prevBattVoltRaw_ = curBattVoltRaw_;
