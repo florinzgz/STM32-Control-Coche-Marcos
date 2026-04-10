@@ -253,6 +253,16 @@ inline constexpr int16_t BTILE_DIAG_MARGIN_X     = 10;
 inline constexpr unsigned long BTILE_DIAG_RX_RECENT_MS = 2000;
 inline constexpr unsigned long BTILE_DIAG_FREEZE_MS    = 1000;
 
+// =========================================================================
+// Hash Failsafe — Periodic Forced Redraw Interval (frames)
+//
+// Critical tiles (SPEED, FAULT, WARNING) are force-redrawn every N frames
+// as a safety net against hash collisions or missed invalidation.
+// At 20 FPS, 100 frames = 5 seconds.
+// =========================================================================
+
+inline constexpr uint16_t HASH_FAILSAFE_INTERVAL = 100;
+
 } // namespace cfg
 } // namespace ui
 

@@ -84,6 +84,7 @@ void ErrorScreen::onEnter() {
     errorEntryMs_  = millis();
     prevElapsedSec_ = 0xFFFFFFFF;
     prevDiagSubsystem_ = 0xFF;
+    failsafeFrameCount_ = 0;
 
     // Initialize tile regions (dimensions from ui_config.h)
     tiles_.setRect(ETILE_BANNER,  0,   0,
@@ -125,6 +126,14 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // Elapsed time — computed once here, used in both hash and draw()
     elapsedSec_ = (frameTimeMs - errorEntryMs_) / 1000;
     tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec_));
+
+    // ---- Hash failsafe: periodic forced redraw of critical tiles ----
+    ++failsafeFrameCount_;
+    if (failsafeFrameCount_ >= ui::cfg::HASH_FAILSAFE_INTERVAL) {
+        failsafeFrameCount_ = 0;
+        tiles_.forceRedraw(ETILE_BANNER);
+        tiles_.forceRedraw(ETILE_FAULTS);
+    }
 }
 
 void ErrorScreen::draw() {

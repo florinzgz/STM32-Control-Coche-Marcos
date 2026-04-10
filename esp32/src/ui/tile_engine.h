@@ -16,19 +16,23 @@
 //
 // PIPELINE (RENDER CONTRACT — ABSOLUTE RULE):
 //
-//   UPDATE PHASE (screen.update()):
+//   UPDATE PHASE (screen.update(data, frameTimeMs)):
 //     - Compute all derived state (filters, thresholds, hysteresis)
 //     - Populate cur_* members and precomputed draw values
 //     - Call updateHash() per tile → marks dirty if hash changed
+//     - All timing logic MUST use injected frameTimeMs, NOT millis()
 //     - NO DRAW CALLS. NO SPI TRANSACTIONS.
 //
 //   DRAW PHASE (screen.draw()):
 //     - Consume ONLY precomputed state from update phase
 //     - Render dirty tiles to TFT via SPI
 //     - MUST NOT modify derived state or recompute business logic
+//     - Event flags (ackIndicatorDirty_, etc.) cleared ONLY after
+//       the corresponding tile renders successfully (flag safety §16)
 //     - After render: markClean() + copy cur→prev for next frame
 //
 //   This separation guarantees render is functionally pure w.r.t. frame state.
+//   same (VehicleData, frameTimeMs) ⇒ same derived state ALWAYS.
 //
 // Z-ORDER LAYER MODEL (formal overlay compositing):
 //
@@ -53,6 +57,16 @@
 //
 //   This guarantees zero visual artifacts from overlay lifecycle.
 //   Each screen's draw() documents its specific invalidation chain.
+//
+// HASH FAILSAFE SYSTEM (safety-critical tiles):
+//
+//   FNV-1a 32-bit has a non-zero collision probability. For safety-critical
+//   tiles (SPEED, FAULT, WARNING, BATTERY), a periodic forceRedraw() is
+//   triggered every HASH_FAILSAFE_INTERVAL frames (see ui_config.h).
+//   This guarantees that even if a hash collision causes a missed update,
+//   the tile will be repainted within a bounded time window.
+//
+//   forceRedraw(idx): zeroes the stored hash → next updateHash() always dirty.
 //
 // Usage:
 //   1. Define an enum for tile indices (e.g. DriveTile::SPEED)
@@ -289,6 +303,17 @@ public:
     void invalidateAll() {
         memset(hashes_, 0, sizeof(hashes_));
         markAllDirty();
+    }
+
+    /// Force-redraw a specific tile (hash failsafe).
+    /// Zeroes the stored hash so the next updateHash() will always mark dirty.
+    /// Use for critical tiles (SPEED, FAULT) as a safety net against
+    /// hash collisions or missed invalidation.
+    void forceRedraw(uint8_t idx) {
+        if (idx < N) {
+            hashes_[idx] = 0;
+            dirty_[idx]  = true;
+        }
     }
 
     /// Number of tiles in this set

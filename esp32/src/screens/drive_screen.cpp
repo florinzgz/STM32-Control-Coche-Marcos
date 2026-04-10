@@ -141,6 +141,9 @@ void DriveScreen::onEnter() {
     // Reset precomputed wheel draw values
     memset(drawTraction_, 0, sizeof(drawTraction_));
     memset(drawTemp_, 0, sizeof(drawTemp_));
+
+    // Reset hash failsafe counter
+    failsafeFrameCount_ = 0;
 }
 
 // -------------------------------------------------------------------------
@@ -316,6 +319,18 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     curAckVisible_ = (ackDisplayResult_ != 0);
     if (ackIndicatorDirty_) {
         tiles_.markDirty(DTILE_ACK);
+    }
+
+    // ---- Hash failsafe: periodic forced redraw of critical tiles ----
+    // Safety net against hash collisions or missed invalidation.
+    // At 20 FPS, HASH_FAILSAFE_INTERVAL=100 → every 5 seconds.
+    ++failsafeFrameCount_;
+    if (failsafeFrameCount_ >= ui::cfg::HASH_FAILSAFE_INTERVAL) {
+        failsafeFrameCount_ = 0;
+        tiles_.forceRedraw(DTILE_SPEED);
+        tiles_.forceRedraw(DTILE_FAULTS);
+        tiles_.forceRedraw(DTILE_DEGRADED);
+        tiles_.forceRedraw(DTILE_BATTERY);
     }
 }
 

@@ -60,6 +60,9 @@ private:
     uint32_t errorEntryMs_   = 0;      // millis() when error screen entered
     uint32_t elapsedSec_     = 0;      // computed once in update()
     uint32_t prevElapsedSec_ = 0xFFFFFFFF;
+
+    // Hash failsafe frame counter
+    uint16_t failsafeFrameCount_ = 0;
 };
 
 #endif // ERROR_SCREEN_H

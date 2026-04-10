@@ -134,6 +134,9 @@ private:
     uint8_t       ackDisplayResult_ = 0;   // 0=none, 1=OK, 2=rejected, 3=timeout
     bool          ackIndicatorDirty_ = false;
 
+    // Hash failsafe: frame counter for periodic forced redraw of critical tiles
+    uint16_t failsafeFrameCount_ = 0;
+
     void drawSpeed();
     void drawAckIndicator();
     void drawDegradedOverlay();
