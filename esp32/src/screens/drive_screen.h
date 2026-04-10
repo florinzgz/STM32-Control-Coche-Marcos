@@ -119,9 +119,13 @@ private:
     // Overlay visibility tracking for invalidation chain.
     // When an overlay transitions from visible→invisible, underlying
     // tiles are marked dirty to restore their content.
+    // These are precomputed in update() — draw() MUST NOT recompute them.
     bool prevDegradedVisible_ = false;
     bool prevFaultsVisible_   = false;
     bool prevAckVisible_      = false;
+    bool curDegradedVisible_  = false;   // precomputed in update()
+    bool curFaultsVisible_    = false;   // precomputed in update()
+    bool curAckVisible_       = false;   // precomputed in update()
 
     // ACK visual feedback state
     unsigned long ackLastShownMs_   = 0;   // millis() when indicator was last shown

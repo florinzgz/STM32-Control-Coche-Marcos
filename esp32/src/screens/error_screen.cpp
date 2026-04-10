@@ -85,12 +85,17 @@ void ErrorScreen::onEnter() {
     prevElapsedSec_ = 0xFFFFFFFF;
     prevDiagSubsystem_ = 0xFF;
 
-    // Initialize tile regions
-    tiles_.setRect(ETILE_BANNER,  0,   0, ui::SCREEN_W, 75);
-    tiles_.setRect(ETILE_FAULTS, 10,  80, 460, 83);
-    tiles_.setRect(ETILE_SAFETY, 10, 170, 460, 40);
-    tiles_.setRect(ETILE_DIAG,   10, 220, 460, 40);
-    tiles_.setRect(ETILE_ELAPSED,10, 270, 460, 30);
+    // Initialize tile regions (dimensions from ui_config.h)
+    tiles_.setRect(ETILE_BANNER,  0,   0,
+                   ui::SCREEN_W, ui::cfg::ETILE_BANNER_H);
+    tiles_.setRect(ETILE_FAULTS,  ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_FAULTS_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_FAULTS_H);
+    tiles_.setRect(ETILE_SAFETY,  ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_SAFETY_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_SAFETY_H);
+    tiles_.setRect(ETILE_DIAG,    ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_DIAG_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_DIAG_H);
+    tiles_.setRect(ETILE_ELAPSED, ui::cfg::ETILE_CONTENT_X, ui::cfg::ETILE_ELAPSED_Y,
+                   ui::cfg::ETILE_CONTENT_W, ui::cfg::ETILE_ELAPSED_H);
     tiles_.invalidateAll();
 }
 

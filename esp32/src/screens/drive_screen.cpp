@@ -5,19 +5,19 @@
 // Each screen region is a logical tile with its own dirty flag and content
 // hash. Only tiles whose source data changed since the last frame are redrawn.
 //
-// Tile map (480×320 landscape):
-//   DTILE_MODE_ICONS  [  0, 0,180, 40]  — 4x4/4x2/360° icons
-//   DTILE_LED_TOGGLE  [180, 0,120, 40]  — front/rear LED buttons
-//   DTILE_ACK         [200, 0, 80, 20]  — ACK indicator (overlaps LED area)
-//   DTILE_BATTERY     [405, 0, 75, 40]  — battery icon + percentage
-//   DTILE_OBSTACLE    [  0,40,480, 45]  — frontal sensor distance + bar
-//   DTILE_WHEELS      [  0,85,370,145]  — 4 wheels + labels
-//   DTILE_STEERING    [370,85,110,145]  — steering circular gauge
-//   DTILE_SPEED       [  0,230,480,40]  — large speed display
-//   DTILE_PEDAL       [  0,270,480,30]  — pedal bar + percentage
-//   DTILE_GEAR        [  0,300,480,20]  — gear selector P/R/N/D1/D2
-//   DTILE_DEGRADED    [  0, 40,480,18]  — overlay: degraded/limp banner
-//   DTILE_FAULTS      [  0, 28,480,10]  — overlay: fault indicators
+// Tile map (480×320 landscape) — dimensions defined in ui_config.h:
+//   DTILE_MODE_ICONS  — 4x4/4x2/360° icons (top bar left)
+//   DTILE_LED_TOGGLE  — front/rear LED buttons (top bar left-center)
+//   DTILE_ACK         — ACK indicator (overlaps LED area, overlay layer)
+//   DTILE_BATTERY     — battery icon + percentage (top bar right)
+//   DTILE_OBSTACLE    — frontal sensor distance + bar
+//   DTILE_WHEELS      — 4 wheels + labels
+//   DTILE_STEERING    — steering circular gauge
+//   DTILE_SPEED       — large speed display
+//   DTILE_PEDAL       — pedal bar + percentage
+//   DTILE_GEAR        — gear selector P/R/N/D1/D2
+//   DTILE_DEGRADED    — overlay: degraded/limp banner
+//   DTILE_FAULTS      — overlay: fault indicators
 //
 // Pipeline per frame:
 //   1. update(snapshot) → latch cur_* from frozen VehicleData
@@ -80,16 +80,21 @@ void DriveScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("drive");
     needsFullRedraw_ = true;
 
-    // ---- Initialize tile regions ----
+    // ---- Initialize tile regions (dimensions from ui_config.h) ----
     tiles_.setRect(DTILE_SPEED,      0,   ui::SPEED_Y,  ui::SCREEN_W, ui::SPEED_H);
     tiles_.setRect(DTILE_OBSTACLE,   0,   ui::SENSOR_Y, ui::SCREEN_W, ui::SENSOR_H);
-    tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y, 370, ui::CAR_AREA_H);
-    tiles_.setRect(DTILE_STEERING,   370, ui::CAR_AREA_Y, 110, ui::CAR_AREA_H);
-    tiles_.setRect(DTILE_BATTERY,    ui::BAT_X, 0, 75, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y,
+                   ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H);
+    tiles_.setRect(DTILE_STEERING,   ui::cfg::DTILE_STEERING_X, ui::CAR_AREA_Y,
+                   ui::cfg::DTILE_STEERING_W, ui::CAR_AREA_H);
+    tiles_.setRect(DTILE_BATTERY,    ui::BAT_X, 0,
+                   ui::cfg::DTILE_BATTERY_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_GEAR,       0,   ui::GEAR_Y, ui::SCREEN_W, ui::GEAR_H);
     tiles_.setRect(DTILE_PEDAL,      0,   ui::PEDAL_Y, ui::SCREEN_W, ui::PEDAL_H);
-    tiles_.setRect(DTILE_MODE_ICONS, 0,   0, 180, ui::TOP_BAR_H);
-    tiles_.setRect(DTILE_LED_TOGGLE, 180, 0, 120, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_MODE_ICONS, ui::cfg::DTILE_MODE_ICONS_X, 0,
+                   ui::cfg::DTILE_MODE_ICONS_W, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_LED_TOGGLE, ui::cfg::DTILE_LED_TOGGLE_X, 0,
+                   ui::cfg::DTILE_LED_TOGGLE_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_DEGRADED,   ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
                                      ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H);
     tiles_.setRect(DTILE_FAULTS,     0,   ui::cfg::OVL_FAULT_Y, ui::SCREEN_W, ui::cfg::OVL_FAULT_H);
@@ -129,6 +134,9 @@ void DriveScreen::onEnter() {
     prevDegradedVisible_ = false;
     prevFaultsVisible_   = false;
     prevAckVisible_      = false;
+    curDegradedVisible_  = false;
+    curFaultsVisible_    = false;
+    curAckVisible_       = false;
 
     // Reset precomputed wheel draw values
     memset(drawTraction_, 0, sizeof(drawTraction_));
@@ -295,16 +303,18 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     // DEGRADED overlay tile — hash the display state (whether banner is shown),
     // not the raw system state, to avoid unnecessary redraws on transitions
     // between states that both don't trigger the overlay (e.g. ACTIVE→SAFE).
-    {
-        bool showDegraded = (curSystemState_ == can::SystemState::DEGRADED ||
-                             curSystemState_ == can::SystemState::LIMP_HOME);
-        tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(showDegraded));
-    }
+    // Visibility is precomputed here; draw() MUST NOT recompute it.
+    curDegradedVisible_ = (curSystemState_ == can::SystemState::DEGRADED ||
+                           curSystemState_ == can::SystemState::LIMP_HOME);
+    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(curDegradedVisible_));
 
-    // FAULTS overlay tile
+    // FAULTS overlay tile — visibility precomputed for draw()
+    curFaultsVisible_ = (curFaultFlags_ != 0);
     tiles_.updateHash(DTILE_FAULTS, ui::tileHashVal(curFaultFlags_));
 
     // ACK tile — uses dirty flag directly (event-driven, not hash-based)
+    // Visibility precomputed for overlay invalidation in draw()
+    curAckVisible_ = (ackDisplayResult_ != 0);
     if (ackIndicatorDirty_) {
         tiles_.markDirty(DTILE_ACK);
     }
@@ -450,42 +460,41 @@ void DriveScreen::draw() {
         tiles_.markClean(DTILE_LED_TOGGLE);
     }
 
+    // ---- OVERLAY LAYER (Z-order 2) — rendered after base tiles ----
+    // Overlay visibility was precomputed in update(). draw() only consumes it.
+
     // TILE: Degraded/limp mode overlay (HMI_STATE_MODEL §2.4)
     if (tiles_.isDirty(DTILE_DEGRADED)) {
-        bool curVisible = (curSystemState_ == can::SystemState::DEGRADED ||
-                           curSystemState_ == can::SystemState::LIMP_HOME);
         drawDegradedOverlay();
         // Overlay invalidation: when banner is removed, restore underlying OBSTACLE tile
-        if (prevDegradedVisible_ && !curVisible) {
+        if (prevDegradedVisible_ && !curDegradedVisible_) {
             tiles_.markDirty(DTILE_OBSTACLE);
         }
-        prevDegradedVisible_ = curVisible;
+        prevDegradedVisible_ = curDegradedVisible_;
         tiles_.markClean(DTILE_DEGRADED);
     }
 
     // TILE: Fault flag visual overlays (HMI_STATE_MODEL §4.1)
     if (tiles_.isDirty(DTILE_FAULTS)) {
-        bool curVisible = (curFaultFlags_ != 0);
         drawFaultOverlays();
         // Overlay invalidation: when faults are cleared, restore underlying top-bar tiles
-        if (prevFaultsVisible_ && !curVisible) {
+        if (prevFaultsVisible_ && !curFaultsVisible_) {
             tiles_.markDirty(DTILE_MODE_ICONS);
             tiles_.markDirty(DTILE_LED_TOGGLE);
             tiles_.markDirty(DTILE_BATTERY);
         }
-        prevFaultsVisible_ = curVisible;
+        prevFaultsVisible_ = curFaultsVisible_;
         tiles_.markClean(DTILE_FAULTS);
     }
 
     // TILE: ACK visual feedback indicator (event-driven)
     if (tiles_.isDirty(DTILE_ACK)) {
-        bool curVisible = (ackDisplayResult_ != 0);
         drawAckIndicator();
         // Overlay invalidation: when ACK clears, restore underlying LED toggle tile
-        if (prevAckVisible_ && !curVisible) {
+        if (prevAckVisible_ && !curAckVisible_) {
             tiles_.markDirty(DTILE_LED_TOGGLE);
         }
-        prevAckVisible_ = curVisible;
+        prevAckVisible_ = curAckVisible_;
         tiles_.markClean(DTILE_ACK);
     }
 

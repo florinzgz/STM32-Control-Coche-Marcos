@@ -166,6 +166,53 @@ inline constexpr uint8_t BATT_COLOR_MID     = 50;  // ≤ this → yellow, else 
 
 inline constexpr uint16_t OBSTACLE_BAR_MAX_CM = 600;
 
+// =========================================================================
+// DriveScreen Tile Layout Dimensions
+//
+// Defines the geometry of each tile region on the drive screen.
+// These constants are referenced in DriveScreen::onEnter() setRect() calls.
+// All values are in pixels relative to the 480×320 screen.
+// =========================================================================
+
+// Top bar sub-regions (Y: 0–40)
+inline constexpr int16_t DTILE_MODE_ICONS_X  = 0;
+inline constexpr int16_t DTILE_MODE_ICONS_W  = 180;
+inline constexpr int16_t DTILE_LED_TOGGLE_X  = 180;
+inline constexpr int16_t DTILE_LED_TOGGLE_W  = 120;
+inline constexpr int16_t DTILE_BATTERY_W     = 75;
+
+// Car area split (Y: CAR_AREA_Y)
+inline constexpr int16_t DTILE_WHEELS_W      = 370;
+inline constexpr int16_t DTILE_STEERING_X    = 370;
+inline constexpr int16_t DTILE_STEERING_W    = 110;
+
+// =========================================================================
+// ErrorScreen Tile Layout Dimensions
+// =========================================================================
+
+inline constexpr int16_t ETILE_BANNER_H      = 75;
+inline constexpr int16_t ETILE_CONTENT_X     = 10;
+inline constexpr int16_t ETILE_CONTENT_W     = 460;
+inline constexpr int16_t ETILE_FAULTS_Y      = 80;
+inline constexpr int16_t ETILE_FAULTS_H      = 83;
+inline constexpr int16_t ETILE_SAFETY_Y      = 170;
+inline constexpr int16_t ETILE_SAFETY_H      = 40;
+inline constexpr int16_t ETILE_DIAG_Y        = 220;
+inline constexpr int16_t ETILE_DIAG_H        = 40;
+inline constexpr int16_t ETILE_ELAPSED_Y     = 270;
+inline constexpr int16_t ETILE_ELAPSED_H     = 30;
+
+// =========================================================================
+// StandbyScreen Tile Layout Dimensions
+// =========================================================================
+
+inline constexpr int16_t YTILE_TEMPS_X       = 140;
+inline constexpr int16_t YTILE_TEMPS_Y       = 185;
+inline constexpr int16_t YTILE_TEMPS_W       = 200;
+inline constexpr int16_t YTILE_TEMPS_H       = 110;
+inline constexpr int16_t YTILE_FAULTS_Y      = 290;
+inline constexpr int16_t YTILE_FAULTS_H      = 30;
+
 } // namespace cfg
 } // namespace ui
 

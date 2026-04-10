@@ -14,9 +14,45 @@
 //   - Overlay restore: overlay tiles can invalidate underlying tiles
 //     when they appear or disappear
 //
-// PIPELINE:
-//   CAN RX → VehicleData → snapshot latch → TileSet::updateHash() per tile
-//   → dirty list → render only dirty tiles → display
+// PIPELINE (RENDER CONTRACT — ABSOLUTE RULE):
+//
+//   UPDATE PHASE (screen.update()):
+//     - Compute all derived state (filters, thresholds, hysteresis)
+//     - Populate cur_* members and precomputed draw values
+//     - Call updateHash() per tile → marks dirty if hash changed
+//     - NO DRAW CALLS. NO SPI TRANSACTIONS.
+//
+//   DRAW PHASE (screen.draw()):
+//     - Consume ONLY precomputed state from update phase
+//     - Render dirty tiles to TFT via SPI
+//     - MUST NOT modify derived state or recompute business logic
+//     - After render: markClean() + copy cur→prev for next frame
+//
+//   This separation guarantees render is functionally pure w.r.t. frame state.
+//
+// Z-ORDER LAYER MODEL (formal overlay compositing):
+//
+//   Layer 0 — STATIC: background fill, outlines, labels (drawn once in onEnter)
+//   Layer 1 — BASE: regular data tiles (speed, battery, wheels, pedal, gear...)
+//   Layer 2 — OVERLAY: conditional overlays (ACK, FAULTS, DEGRADED, CAN LOST)
+//   Layer 3 — SYSTEM: reserved for future system-level indicators
+//
+//   Rules:
+//     - Overlays may physically overlap base tiles
+//     - When an overlay becomes invisible, all overlapped base tiles MUST be
+//       marked dirty to restore their content ("no persistent artifact" rule)
+//     - Overlay visibility MUST be computed in update(), not draw()
+//     - Render order: base tiles first, then overlay tiles
+//
+// OVERLAY INVALIDATION CONTRACT:
+//
+//   When an overlay tile transitions visible→invisible:
+//     1. The overlay's draw area is cleared to background color
+//     2. All base tiles whose rects intersect the overlay rect are markDirty()
+//     3. On the next frame, those base tiles repaint their content
+//
+//   This guarantees zero visual artifacts from overlay lifecycle.
+//   Each screen's draw() documents its specific invalidation chain.
 //
 // Usage:
 //   1. Define an enum for tile indices (e.g. DriveTile::SPEED)
@@ -36,7 +72,36 @@
 #include <cstring>
 #include "ui_common.h"
 
+// Enable debug assertions for tile engine (set to 1 for development builds).
+// When enabled, out-of-bounds coordinates or invalid tile indices trigger
+// Serial.printf diagnostics instead of silent clamping.
+#ifndef UI_TILE_DEBUG
+#define UI_TILE_DEBUG 0
+#endif
+
+#if UI_TILE_DEBUG
+#include <cstdio>
+#define TILE_ASSERT(cond, msg, ...) \
+    do { if (!(cond)) { Serial.printf("[TILE] ASSERT: " msg "\n", ##__VA_ARGS__); } } while (0)
+#else
+#define TILE_ASSERT(cond, msg, ...) ((void)0)
+#endif
+
 namespace ui {
+
+// -------------------------------------------------------------------------
+// Tile Z-order layers — formal compositing hierarchy
+//
+// Used for documentation and render trace classification.
+// The actual render order is determined by the tile iteration order in
+// each screen's draw() method, which MUST follow this layering.
+// -------------------------------------------------------------------------
+enum class TileLayer : uint8_t {
+    STATIC  = 0,    // Background, outlines, labels (drawn once in onEnter)
+    BASE    = 1,    // Regular data tiles (speed, battery, wheels, etc.)
+    OVERLAY = 2,    // Conditional overlays (ACK, FAULTS, DEGRADED)
+    SYSTEM  = 3     // Reserved: system-level indicators
+};
 
 // -------------------------------------------------------------------------
 // Tile rectangle — defines a screen region
@@ -104,9 +169,19 @@ public:
 
     /// Define the screen region for a tile.
     /// Coordinates are clamped to screen bounds (SCREEN_W × SCREEN_H).
-    /// Negative or out-of-bounds values are silently corrected.
+    /// Negative or out-of-bounds values are silently corrected (asserted in debug).
     void setRect(uint8_t idx, int16_t x, int16_t y, int16_t w, int16_t h) {
-        if (idx >= N) return;
+        if (idx >= N) {
+            TILE_ASSERT(false, "setRect: idx=%u >= N=%u", idx, N);
+            return;
+        }
+
+        // Debug: warn about negative or out-of-bounds inputs before clamping
+        TILE_ASSERT(x >= 0 && y >= 0, "setRect[%u]: negative origin (%d,%d)", idx, x, y);
+        TILE_ASSERT(w > 0 && h > 0, "setRect[%u]: non-positive size (%d×%d)", idx, w, h);
+        TILE_ASSERT(x + w <= SCREEN_W && y + h <= SCREEN_H,
+                    "setRect[%u]: exceeds screen (%d+%d > %d || %d+%d > %d)",
+                    idx, x, w, SCREEN_W, y, h, SCREEN_H);
 
         // Clamp origin to screen area
         if (x < 0) { w += x; x = 0; }

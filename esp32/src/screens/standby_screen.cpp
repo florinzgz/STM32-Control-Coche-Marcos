@@ -22,9 +22,11 @@ void StandbyScreen::onEnter() {
     memset(temps_, 0, sizeof(temps_));
     memset(prevTemps_, 0x7F, sizeof(prevTemps_));
 
-    // Initialize tile regions
-    tiles_.setRect(YTILE_TEMPS,  140, 185, 200, 110);
-    tiles_.setRect(YTILE_FAULTS, 0,   290, ui::SCREEN_W, 30);
+    // Initialize tile regions (dimensions from ui_config.h)
+    tiles_.setRect(YTILE_TEMPS,  ui::cfg::YTILE_TEMPS_X, ui::cfg::YTILE_TEMPS_Y,
+                   ui::cfg::YTILE_TEMPS_W, ui::cfg::YTILE_TEMPS_H);
+    tiles_.setRect(YTILE_FAULTS, 0, ui::cfg::YTILE_FAULTS_Y,
+                   ui::SCREEN_W, ui::cfg::YTILE_FAULTS_H);
     tiles_.invalidateAll();
 }
 
