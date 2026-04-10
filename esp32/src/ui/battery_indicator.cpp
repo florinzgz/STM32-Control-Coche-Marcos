@@ -91,12 +91,16 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
                          prevFW - fillW, BAT_H - 4, COL_BG);
     }
 
-    // Percentage text centered in battery — use black text for contrast
+    // Percentage text centered in battery
+    // Hysteresis: switch to black-on-color at 55% fill, back at 45% fill
+    // to avoid rapid color flipping near the 50% boundary.
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%u%%", pct);
-    // Use background color matching the dominant fill for text contrast
-    uint16_t txtBg = (fillW > (barInner / 2)) ? col : COL_BG;
-    uint16_t txtFg = (fillW > (barInner / 2)) ? COL_BLACK : col;
+    bool prevUsedDark = (prevFW > (barInner * 55 / 100));
+    bool curUseDark   = (fillW  > (barInner * 55 / 100)) ||
+                        (fillW  > (barInner * 45 / 100) && prevUsedDark);
+    uint16_t txtBg = curUseDark ? col : COL_BG;
+    uint16_t txtFg = curUseDark ? COL_BLACK : col;
     tft.setTextColor(txtFg, txtBg);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);

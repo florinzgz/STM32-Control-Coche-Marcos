@@ -67,6 +67,30 @@ static constexpr int16_t DEG_BANNER_H = 18;
 static constexpr int16_t FAULT_OVERLAY_Y = 28;
 static constexpr int16_t FAULT_OVERLAY_H = 10;
 
+// Wheel threshold filtering constants (shared by update hash & draw)
+// Traction: redraw only if Δ > 2% (CAN jitter filter)
+// Temperature: redraw only if Δ ≥ 1°C
+static constexpr uint8_t TRACTION_THRESHOLD = 2;
+static constexpr int8_t  TEMP_THRESHOLD     = 1;
+
+/// Apply threshold filtering to a single wheel's traction + temperature.
+/// Returns true if either value crossed its threshold.
+static inline bool wheelThresholdFilter(
+    uint8_t curTraction, uint8_t prevTraction, uint8_t& drawTraction,
+    int8_t  curTemp,     int8_t  prevTemp,     int8_t& drawTemp) {
+    uint8_t dt = (curTraction > prevTraction)
+                 ? static_cast<uint8_t>(curTraction - prevTraction)
+                 : static_cast<uint8_t>(prevTraction - curTraction);
+    int8_t  dT = (curTemp > prevTemp)
+                 ? static_cast<int8_t>(curTemp - prevTemp)
+                 : static_cast<int8_t>(prevTemp - curTemp);
+
+    drawTraction = (dt > TRACTION_THRESHOLD) ? curTraction : prevTraction;
+    drawTemp     = (dT >= TEMP_THRESHOLD)    ? curTemp     : prevTemp;
+
+    return (dt > TRACTION_THRESHOLD) || (dT >= TEMP_THRESHOLD);
+}
+
 // -------------------------------------------------------------------------
 // onEnter — called when transitioning to this screen
 // -------------------------------------------------------------------------
@@ -240,19 +264,11 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
     {
         ui::TileHash wh = ui::FNV_OFFSET;
         for (uint8_t i = 0; i < 4; ++i) {
-            // Apply threshold: only count change if Δtorque > 2 or Δtemp ≥ 1
-            uint8_t dt = (curTraction_[i] > prevTraction_[i])
-                         ? (curTraction_[i] - prevTraction_[i])
-                         : (prevTraction_[i] - curTraction_[i]);
-            int8_t  dT = (curTemp_[i] > prevTemp_[i])
-                         ? static_cast<int8_t>(curTemp_[i] - prevTemp_[i])
-                         : static_cast<int8_t>(prevTemp_[i] - curTemp_[i]);
-
-            // Use drawn value (prev) if below threshold, current if above
-            uint8_t drawTraction = (dt > 2) ? curTraction_[i] : prevTraction_[i];
-            int8_t  drawTemp     = (dT >= 1) ? curTemp_[i] : prevTemp_[i];
-            wh = ui::tileHashFeed(wh, drawTraction);
-            wh = ui::tileHashFeed(wh, drawTemp);
+            uint8_t drawT; int8_t drawTp;
+            wheelThresholdFilter(curTraction_[i], prevTraction_[i], drawT,
+                                 curTemp_[i], prevTemp_[i], drawTp);
+            wh = ui::tileHashFeed(wh, drawT);
+            wh = ui::tileHashFeed(wh, drawTp);
         }
         tiles_.updateHash(DTILE_WHEELS, wh);
     }
@@ -283,8 +299,14 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
         tiles_.updateHash(DTILE_LED_TOGGLE, lh);
     }
 
-    // DEGRADED overlay tile
-    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(curSystemState_));
+    // DEGRADED overlay tile — hash the display state (whether banner is shown),
+    // not the raw system state, to avoid unnecessary redraws on transitions
+    // between states that both don't trigger the overlay (e.g. ACTIVE→SAFE).
+    {
+        bool showDegraded = (curSystemState_ == can::SystemState::DEGRADED ||
+                             curSystemState_ == can::SystemState::LIMP_HOME);
+        tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(showDegraded));
+    }
 
     // FAULTS overlay tile
     tiles_.updateHash(DTILE_FAULTS, ui::tileHashVal(curFaultFlags_));
@@ -377,7 +399,7 @@ void DriveScreen::draw() {
         tiles_.markClean(DTILE_OBSTACLE);
     }
 
-    // TILE: Wheels — uses threshold filtering from update() hash
+    // TILE: Wheels — uses threshold filtering from helper
     if (tiles_.isDirty(DTILE_WHEELS)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
 
@@ -386,15 +408,10 @@ void DriveScreen::draw() {
         int8_t  drawTemp[4];
 
         for (uint8_t i = 0; i < 4; ++i) {
-            uint8_t dt = (curTraction_[i] > prevTraction_[i])
-                         ? (curTraction_[i] - prevTraction_[i])
-                         : (prevTraction_[i] - curTraction_[i]);
-            int8_t  dT = (curTemp_[i] > prevTemp_[i])
-                         ? static_cast<int8_t>(curTemp_[i] - prevTemp_[i])
-                         : static_cast<int8_t>(prevTemp_[i] - curTemp_[i]);
-
-            drawTraction[i] = (dt > 2) ? curTraction_[i] : prevTraction_[i];
-            drawTemp[i]     = (dT >= 1) ? curTemp_[i]    : prevTemp_[i];
+            wheelThresholdFilter(curTraction_[i], prevTraction_[i],
+                                 drawTraction[i],
+                                 curTemp_[i], prevTemp_[i],
+                                 drawTemp[i]);
         }
 
         ui::CarRenderer::drawWheels(tft, vehicle::TractionData{

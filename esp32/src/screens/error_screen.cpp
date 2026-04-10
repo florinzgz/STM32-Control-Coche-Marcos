@@ -116,9 +116,9 @@ void ErrorScreen::update(const vehicle::VehicleData& data) {
         dh = ui::tileHashFeed(dh, diagSubsystem_);
         tiles_.updateHash(ETILE_DIAG, dh);
     }
-    // Elapsed time changes every second — hash the second count
-    uint32_t elapsedSec = (millis() - errorEntryMs_) / 1000;
-    tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec));
+    // Elapsed time — computed once here, used in both hash and draw()
+    elapsedSec_ = (millis() - errorEntryMs_) / 1000;
+    tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec_));
 }
 
 void ErrorScreen::draw() {
@@ -278,12 +278,11 @@ void ErrorScreen::draw() {
 
     // ---- TILE: Elapsed time ----
     if (tiles_.isDirty(ETILE_ELAPSED)) {
-        uint32_t elapsedSec = (millis() - errorEntryMs_) / 1000;
-        prevElapsedSec_ = elapsedSec;
+        prevElapsedSec_ = elapsedSec_;
 
         char buf[48];
-        uint32_t mins = elapsedSec / 60;
-        uint32_t secs = elapsedSec % 60;
+        uint32_t mins = elapsedSec_ / 60;
+        uint32_t secs = elapsedSec_ % 60;
         if (mins > 0) {
             snprintf(buf, sizeof(buf), "%lum %02lus in error state",
                      (unsigned long)mins, (unsigned long)secs);
