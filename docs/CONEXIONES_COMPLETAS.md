@@ -558,7 +558,7 @@ El sensor **Benewake TF-Mini Plus** es un LiDAR Time-of-Flight de punto único c
                                                   (sin divisor de tensión)
 ```
 
-> ✅ **Sin divisor de tensión:** A diferencia del TOFSense-M (que producía 3.5–3.6V), el TF-Mini Plus transmite a **3.3V TTL nativo**, compatible directamente con los GPIO del ESP32-S3. Hay margen de 300 mV respecto al máximo absoluto (3.6V).
+> ✅ **Sin divisor de tensión:** A diferencia del TOFSense-M (que producía 3.5–3.6V), el TF-Mini Plus transmite a **3.3V TTL nativo** (salida típica 3.3V ±0.1V según datasheet Benewake), compatible directamente con los GPIO del ESP32-S3 (máximo absoluto 3.6V, margen de ~300 mV).
 
 ### Especificaciones de comunicación
 
@@ -1136,7 +1136,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ## REFERENCIAS
 
 - `docs/MATERIALES_POR_MODULO.md` — **Lista completa de materiales por módulo y por conexión (BOM)**
-- `docs/PINOUT_DEFINITIVO.md` — Tabla de pines detallada (⚠️ verificar que esté actualizado)
+- `docs/PINOUT_DEFINITIVO.md` — Tabla de pines detallada (⚠️ puede no estar actualizado con los cambios CAN PA11/PA12 y LPWM_FR PC3 — usar `project_config.h` como fuente de verdad)
 - `docs/HARDWARE_WIRING_MANUAL.md` — Manual eléctrico completo
 - `docs/HARDWARE_SPECIFICATION.md` — Especificaciones de componentes
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Conexión CAN detallada
