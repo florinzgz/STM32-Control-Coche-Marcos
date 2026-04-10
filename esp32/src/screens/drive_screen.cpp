@@ -265,67 +265,91 @@ void DriveScreen::draw() {
     // Speed (in its own zone, 230–270px)
     if (curSpeedAvgRaw_ != prevSpeedAvgRaw_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::SPEED);
+        drawSpeed();
     }
-    drawSpeed();
 
     // Obstacle sensor (40–85px)
     if (curObstacleCm_ != prevObstacleCm_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::OBSTACLE);
+        ui::ObstacleSensor::draw(tft, curObstacleCm_, prevObstacleCm_);
     }
-    ui::ObstacleSensor::draw(tft, curObstacleCm_, prevObstacleCm_);
 
-    // Wheels (torque + temperature)
+    // Wheels — apply threshold filtering to reduce noise-driven redraws:
+    //   torque: redraw only if Δ > 2%   temperature: redraw only if Δ ≥ 1°C
     {
+        // Build filtered traction/temp arrays that collapse small deltas
+        uint8_t filtTraction[4];
+        int8_t  filtTemp[4];
         bool carDirty = false;
+
         for (uint8_t i = 0; i < 4; ++i) {
-            if (curTraction_[i] != prevTraction_[i] || curTemp_[i] != prevTemp_[i]) {
+            uint8_t dt = (curTraction_[i] > prevTraction_[i])
+                         ? (curTraction_[i] - prevTraction_[i])
+                         : (prevTraction_[i] - curTraction_[i]);
+            int8_t  dT = (curTemp_[i] > prevTemp_[i])
+                         ? static_cast<int8_t>(curTemp_[i] - prevTemp_[i])
+                         : static_cast<int8_t>(prevTemp_[i] - curTemp_[i]);
+
+            // Apply thresholds: keep previous value unless change exceeds threshold
+            filtTraction[i] = (dt > 2) ? curTraction_[i] : prevTraction_[i];
+            filtTemp[i]     = (dT >= 1) ? curTemp_[i]    : prevTemp_[i];
+
+            if (filtTraction[i] != prevTraction_[i] || filtTemp[i] != prevTemp_[i]) {
                 carDirty = true;
-                break;
             }
         }
+
         if (carDirty || curSteeringRaw_ != prevSteeringRaw_) {
             RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
+            ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
+                {filtTraction[0], filtTraction[1], filtTraction[2], filtTraction[3]}, 0},
+                vehicle::TempMapData{
+                {filtTemp[0], filtTemp[1], filtTemp[2], filtTemp[3], 0}, 0},
+                prevTraction_, prevTemp_);
+
+            // Commit filtered values so thresholds apply relative to last drawn state
+            for (uint8_t i = 0; i < 4; ++i) {
+                curTraction_[i] = filtTraction[i];
+                curTemp_[i]     = filtTemp[i];
+            }
         }
     }
-    ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
-        {curTraction_[0], curTraction_[1], curTraction_[2], curTraction_[3]}, 0},
-        vehicle::TempMapData{
-        {curTemp_[0], curTemp_[1], curTemp_[2], curTemp_[3], 0}, 0},
-        prevTraction_, prevTemp_);
 
     // Steering circular gauge (right side)
-    ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_);
+    if (curSteeringRaw_ != prevSteeringRaw_) {
+        ui::CarRenderer::drawSteering(tft, curSteeringRaw_, prevSteeringRaw_);
+    }
 
     // Battery (part of top bar zone)
     if (curBattVoltRaw_ != prevBattVoltRaw_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+        ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_);
     }
-    ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_);
 
     // Gear
     if (curGear_ != prevGear_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::GEAR);
+        ui::GearDisplay::draw(tft, curGear_, prevGear_);
     }
-    ui::GearDisplay::draw(tft, curGear_, prevGear_);
 
     // Pedal bar
     if (curPedalPct_ != prevPedalPct_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::PEDAL);
+        ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_);
     }
-    ui::PedalBar::draw(tft, curPedalPct_, prevPedalPct_);
 
     // Mode icons (part of top bar zone)
     if (curMode_.is4x4 != prevMode_.is4x4 || curMode_.isTankTurn != prevMode_.isTankTurn) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+        ui::ModeIcons::draw(tft, curMode_, prevMode_);
     }
-    ui::ModeIcons::draw(tft, curMode_, prevMode_);
 
     // LED toggle buttons (part of top bar zone)
     if (curFrontLedOn_ != prevFrontLedOn_ || curRearLedOn_ != prevRearLedOn_) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+        ui::LedToggle::draw(tft, curFrontLedOn_, prevFrontLedOn_,
+                                 curRearLedOn_,  prevRearLedOn_);
     }
-    ui::LedToggle::draw(tft, curFrontLedOn_, prevFrontLedOn_,
-                             curRearLedOn_,  prevRearLedOn_);
 
     // Degraded/limp mode overlay (HMI_STATE_MODEL §2.4)
     drawDegradedOverlay();
@@ -476,6 +500,7 @@ void DriveScreen::drawFaultOverlays() {
         uint16_t    color;
     };
     static constexpr FaultEntry entries[] = {
+        { 0x01, "CAN TMO",     ui::COL_AMBER  },   // Bit 0: CAN_TIMEOUT
         { 0x02, "OVERTEMP",    ui::COL_AMBER  },   // Bit 1
         { 0x04, "OVERCURR",    ui::COL_AMBER  },   // Bit 2
         { 0x08, "ENC FAULT",   ui::COL_AMBER  },   // Bit 3

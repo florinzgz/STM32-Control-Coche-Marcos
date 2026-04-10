@@ -92,10 +92,12 @@ void ErrorScreen::update(const vehicle::VehicleData& data) {
 }
 
 void ErrorScreen::draw() {
-    // Force full repaint when CAN-lost state changes
+    // Detect CAN-lost state change — only redraw the banner area (partial),
+    // NOT the entire screen, to avoid visible full-screen flash.
+    bool bannerDirty = false;
     if (canLost_ != prevCanLost_) {
         prevCanLost_ = canLost_;
-        needsRedraw_ = true;
+        bannerDirty = true;
     }
 
     if (needsRedraw_) {
@@ -107,7 +109,39 @@ void ErrorScreen::draw() {
 
         RTRACE_SET_LAYER(1);
 
-        // Banner — changes depending on CAN-lost vs STM32-reported error
+        // Section labels (left-aligned) — drawn once
+        tft.setTextDatum(TL_DATUM);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+        tft.setTextSize(1);
+        tft.drawString("FAULT FLAGS:", 10, 80);
+        RTRACE_TEXT(10, 80, "FAULT FLAGS:",
+                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
+        tft.drawString("SAFETY ERROR:", 10, 170);
+        RTRACE_TEXT(10, 170, "SAFETY ERROR:",
+                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
+        tft.drawString("DIAGNOSTIC:", 10, 220);
+        RTRACE_TEXT(10, 220, "DIAGNOSTIC:",
+                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
+        tft.drawString("ELAPSED:", 10, 270);
+        RTRACE_TEXT(10, 270, "ELAPSED:",
+                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
+
+        // Force redraw of all dynamic values
+        prevFaultFlags_ = faultFlags_ + 1;
+        prevErrorCode_  = errorCode_ + 1;
+        prevDiagCode_   = diagCode_ + 1;
+        prevElapsedSec_ = 0xFFFFFFFF;
+
+        // Banner is always drawn on full redraw
+        bannerDirty = true;
+    }
+
+    // ---- Banner area (partial redraw on canLost_ toggle) ----
+    if (bannerDirty) {
+        // Clear only the banner area (top 75 px), not the entire screen
+        tft.fillRect(0, 0, ui::SCREEN_W, 75, ui::COL_RED);
+        RTRACE_FILL_RECT(0, 0, ui::SCREEN_W, 75, ui::COL_RED);
+
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(3);
         tft.setTextDatum(MC_DATUM);
@@ -131,29 +165,7 @@ void ErrorScreen::draw() {
             RTRACE_TEXT(ui::SCREEN_W / 2, 60, "Manual reset required",
                         ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
         }
-
-        // Section labels (left-aligned)
         tft.setTextDatum(TL_DATUM);
-        tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
-        tft.setTextSize(1);
-        tft.drawString("FAULT FLAGS:", 10, 80);
-        RTRACE_TEXT(10, 80, "FAULT FLAGS:",
-                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
-        tft.drawString("SAFETY ERROR:", 10, 170);
-        RTRACE_TEXT(10, 170, "SAFETY ERROR:",
-                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
-        tft.drawString("DIAGNOSTIC:", 10, 220);
-        RTRACE_TEXT(10, 220, "DIAGNOSTIC:",
-                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
-        tft.drawString("ELAPSED:", 10, 270);
-        RTRACE_TEXT(10, 270, "ELAPSED:",
-                    ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
-
-        // Force redraw of all dynamic values
-        prevFaultFlags_ = faultFlags_ + 1;
-        prevErrorCode_  = errorCode_ + 1;
-        prevDiagCode_   = diagCode_ + 1;
-        prevElapsedSec_ = 0xFFFFFFFF;
     }
 
     RTRACE_SET_LAYER(2);

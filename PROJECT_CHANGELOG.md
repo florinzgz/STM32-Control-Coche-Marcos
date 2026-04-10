@@ -83,6 +83,27 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Verificación de las pantallas contra la especificación HMI_STATE_MODEL.md e implementación de las funcionalidades faltantes: overlay de modo degradado/limp-home en DriveScreen, indicadores de fault flags en DriveScreen, y telemetría read-only en SafeScreen.
+
+### PR — refactor: HMI anti-flicker + render optimization
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Revisión y optimización del sistema HMI completo para eliminar flicker y redraws innecesarios. Corrección de un bug crítico (bit 0 CAN_TIMEOUT faltante en fault overlay de DriveScreen).
+- **Root cause:** Tres problemas identificados en la revisión:
+  1. DriveScreen `drawFaultOverlays()` listaba bits 1–7 pero omitía bit 0 (CAN_TIMEOUT 0x01) — el flag de timeout CAN nunca se mostraba.
+  2. DriveScreen `draw()` llamaba incondicionalmente a las funciones de render de cada zona (drawSpeed, ObstacleSensor::draw, CarRenderer::drawWheels/drawSteering, BatteryIndicator::draw, GearDisplay::draw, PedalBar::draw, ModeIcons::draw, LedToggle::draw) incluso cuando los datos no habían cambiado. Las funciones hacían early-return interno, pero la llamada y evaluación de parámetros implicaba overhead innecesario cada frame.
+  3. ErrorScreen hacía `tft.fillScreen(COL_RED)` (480×320 = 153600 píxeles) cada vez que el estado canLost_ cambiaba, causando flash visible cuando CAN se restauraba/perdía.
+  4. Sensor noise en torque/temperatura provocaba redraws constantes de ruedas sin cambio visual significativo.
+- **Solución aplicada:**
+  1. Añadida entrada `{ 0x01, "CAN TMO", ui::COL_AMBER }` al array `entries[]` de `drawFaultOverlays()`. Ahora todos los 8 bits (0–7) del bitmask están representados.
+  2. Movidas todas las llamadas a draw helpers dentro del bloque `if (curVal != prevVal)`, eliminando llamadas a función cuando no hay cambio real.
+  3. ErrorScreen: separada la lógica de `canLost_` toggle del `needsRedraw_`. Ahora solo redibuja el banner (top 75px via `fillRect`) en vez del screen completo (`fillScreen`). Labels estáticos se dibujan una sola vez en `needsRedraw_`.
+  4. Añadidos umbrales de cambio para ruedas: torque Δ>2%, temperatura Δ≥1°C. Valores filtrados se commitean como estado dibujado para mantener referencia estable.
+- **Impacto:** Eliminación de flicker en ErrorScreen durante transiciones CAN lost↔restored. Reducción de carga CPU en DriveScreen (zero-work frames cuando datos no cambian). Bug fix: CAN_TIMEOUT ahora visible en dashboard. Reducción de redraws de ruedas por sensor noise.
+- **Archivos modificados:**
+  - `esp32/src/screens/drive_screen.cpp` — fault overlay bit 0 fix, dirty-gated draw calls, wheel thresholds
+  - `esp32/src/screens/error_screen.cpp` — partial banner redraw instead of full fillScreen on canLost_ toggle
+  - `PROJECT_CHANGELOG.md` — documentación del cambio
+- **Tests:** STM32 build validation (`make clean && make -j$(nproc)` passed with -Wall -Wextra -Werror).
 - **Root cause:** Tres funcionalidades definidas en HMI_STATE_MODEL.md (§2.4, §2.5, §4.1) no estaban implementadas:
   1. DriveScreen no mostraba ningún indicador cuando systemState era DEGRADED(3) o LIMP_HOME(6).
   2. DriveScreen no mostraba indicadores visuales de fault_flags (OVERTEMP, OVERCURRENT, ENCODER, WHEEL SENSOR, ABS, TCS, CENTERING).
@@ -741,3 +762,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-09 | **CAN loss → pantalla error** — ScreenManager detecta heartbeat STM32 stale >1.5s → fuerza transición a ERROR screen con banner "CAN LINK LOST". Auto-recuperación al reconectar. | — |
 | 2026-04-10 | **Drive screen → TF-Mini Plus** — Actualización pantalla final para TF-Mini Plus: bar proximidad 400→600 cm, zonas color ajustadas (verde >3m, cian 1.5–3m, amarillo 0.8–1.5m, naranja 0.3–0.8m, rojo <0.3m), comentarios TOFSense-M→TF-Mini Plus. | — |
 | 2026-04-10 | **Verificación pantallas final** — DriveScreen: overlay degradado/limp + indicadores fault flags. SafeScreen: telemetría read-only (speed/current/temp/steering). Cumplimiento completo HMI_STATE_MODEL.md. | — |
+| 2026-04-10 | **HMI anti-flicker + render optimización** — Fix: CAN_TIMEOUT bit 0 faltante en DriveScreen fault overlay. Opt: draw calls gated por dirty checks (zero work si no cambia). Opt: umbrales torque Δ>2% y temp Δ≥1°C para evitar redraw por ruido. Fix: ErrorScreen CAN-lost → partial banner redraw (no full fillScreen). | — |
