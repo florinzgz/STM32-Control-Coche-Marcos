@@ -80,6 +80,36 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ## 3. Cambios Recientes (últimos PR)
 
 ### PR — feat: Tile-Based Dirty Region Engine (motor de render tipo cluster OEM automotriz)
+
+### PR — refactor: HMI Security Audit & Tile Engine Hardening
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Auditoría completa de seguridad, optimización y refactor del sistema HMI tile-based. Centralización de constantes, corrección de artefactos de overlay, eliminación de duplicación de cálculos, bounds safety en tile engine, y determinismo en hysteresis de batería.
+- **Root cause:** Múltiples defectos potenciales detectados en el motor de render: (1) magic numbers dispersos en 10+ archivos, (2) tiles overlay (DEGRADED, FAULTS, ACK) se solapan con tiles base pero markClean() no restaura el contenido subyacente, (3) wheelThresholdFilter se ejecuta 2× por frame (update hash + draw), (4) setRect() no valida coordenadas contra límites de pantalla, (5) hysteresis de texto en batería depende de estado del frame anterior (no determinista).
+- **Solución aplicada:**
+  1. **ui_config.h** (NUEVO): 25+ constantes centralizadas — PAD_SPEED/ACK/PEDAL/OBSTACLE/ERROR/SAFE/STANDBY/BOOT, THR_TRACTION_DELTA/TEMP_DELTA, BATT_HYSTERESIS_HIGH/LOW, OVL_DEGRADED_*/OVL_FAULT_*, PEDAL_COLOR_LOW/MID, BATT_COLOR_LOW/MID, TEMP_COLOR_WARNING/CRITICAL.
+  2. **Overlay invalidation chain**: Cuando un overlay se desactiva, los tiles subyacentes se marcan dirty para restaurar su contenido. DEGRADED→OBSTACLE, FAULTS→MODE_ICONS+LED_TOGGLE+BATTERY, ACK→LED_TOGGLE.
+  3. **wheelThresholdFilter precompute**: Valores de dibujo calculados una sola vez en update() y almacenados en drawTraction_[4]/drawTemp_[4]. draw() consume los valores precomputados sin recalcular.
+  4. **Tile bounds safety**: setRect() ahora clampea x,y a ≥0, w,h a ≥0, y (x+w, y+h) a ≤SCREEN_W/SCREEN_H.
+  5. **Battery hysteresis determinista**: Reemplaza `prevUsedDark` (dependencia frame anterior) por comparación explícita con BATT_HYSTERESIS_HIGH/LOW thresholds. En banda de hysteresis, usa dirección del cambio (prevFW≥highThresh).
+  6. **All setTextPadding**: Reemplazados 20+ valores hardcoded por constantes nombradas de ui_config.h.
+- **Archivos afectados:**
+  - `esp32/src/ui/ui_config.h` — NUEVO: Configuración centralizada HMI
+  - `esp32/src/ui/tile_engine.h` — Bounds safety en setRect()
+  - `esp32/src/ui/battery_indicator.cpp` — Hysteresis determinista, config constants
+  - `esp32/src/ui/pedal_bar.cpp` — Config constants (color thresholds, padding)
+  - `esp32/src/ui/obstacle_sensor.cpp` — Config constants (padding, bar max range)
+  - `esp32/src/ui/car_renderer.cpp` — Config constants (wheel label padding)
+  - `esp32/src/screens/drive_screen.h` — Precomputed draw values, overlay tracking members
+  - `esp32/src/screens/drive_screen.cpp` — Overlay invalidation, precompute, config constants
+  - `esp32/src/screens/error_screen.cpp` — Config constants
+  - `esp32/src/screens/safe_screen.cpp` — Config constants (padding, temp thresholds)
+  - `esp32/src/screens/standby_screen.cpp` — Config constants
+  - `esp32/src/screens/boot_screen.cpp` — Config constants
+  - `esp32/src/hmi/obstacle_indicator.cpp` — Named constant for padding
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Sistema HMI determinista. Overlays no dejan artefactos visuales. Cero duplicación de cálculo por frame. Arquitectura limpia con constantes centralizadas. Compatible con TFT_eSPI + CAN + STM32 sin cambios.
+- **Tests:** Compilación conceptual verificada. Sin cambios en CAN protocol, VehicleData, STM32 firmware. Todos los cambios son renombrado de constantes y correcciones de lógica de render — no afectan la interfaz CAN ni datos de vehículo.
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Refactor completo del sistema HMI para implementar un motor de render por regiones (tiles) tipo cluster OEM automotriz. Cada zona de la pantalla es un tile independiente con su propio dirty flag y hash de contenido FNV-1a. Solo los tiles cuyo contenido ha cambiado desde el último frame se redibujan.
@@ -834,3 +864,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **HMI anti-flicker + render optimización** — Fix: CAN_TIMEOUT bit 0 faltante en DriveScreen fault overlay. Opt: draw calls gated por dirty checks (zero work si no cambia). Opt: umbrales torque Δ>2% y temp Δ≥1°C para evitar redraw por ruido. Fix: ErrorScreen CAN-lost → partial banner redraw (no full fillScreen). | — |
 | 2026-04-10 | **Deterministic render pipeline** — Anti-flicker: reemplazar fillRect+drawString por setTextPadding en 12 componentes UI (zero-gap text overwrite). Fix: draw_runtime_overlay String→snprintf (eliminar heap allocation). Doc: formalizar pipeline CAN→snapshot→frame-latch→render en vehicle_data.h, screen_manager.h, main.cpp. | — |
 | 2026-04-10 | **Tile-Based Dirty Region Engine** — Refactor completo del HMI a motor de render por regiones (tiles). TileSet template con hash FNV-1a: cada tile solo se redibuja si su contenido cambia. DriveScreen: 12 tiles (speed, obstacle, wheels, steering, battery, gear, pedal, mode, LED, degraded overlay, faults overlay, ACK). ErrorScreen: 5 tiles. SafeScreen: 6 tiles. StandbyScreen: 2 tiles. BootScreen: 3 tiles. Bar widgets (pedal, batería, sensor obstáculo) con differential update (solo la porción cambiada). Eliminación total de clear+redraw flash en barras. Overlay tiles restauran tiles subyacentes al desaparecer. Nuevo: `tile_engine.h` con TileRect, TileHash, TileSet<N>. | — |
+| 2026-04-10 | **HMI Security Audit & Tile Engine Hardening** — Auditoría completa del sistema HMI tile-based. (1) `ui_config.h`: centralización de 20+ magic numbers (text paddings, thresholds, overlay layout, color levels). (2) Overlay invalidation chain: DEGRADED→OBSTACLE, FAULTS→top-bar, ACK→LED_TOGGLE — fix de artefactos visuales al cerrar overlays sobre tiles solapados. (3) wheelThresholdFilter dedup: antes se ejecutaba 2× por frame (update+draw), ahora 1× con resultados precomputados. (4) Tile bounds safety: setRect() clampea coordenadas a SCREEN_W×SCREEN_H. (5) Battery hysteresis determinista: reemplaza dependencia de frame anterior por thresholds explícitos BATT_HYSTERESIS_HIGH/LOW. (6) 15 archivos actualizados. | — |
