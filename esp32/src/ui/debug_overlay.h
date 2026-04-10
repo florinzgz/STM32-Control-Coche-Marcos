@@ -25,12 +25,14 @@ class DebugOverlay {
 public:
     /// Call every loop iteration with current touch state.
     /// touchDown: true if screen is currently being touched
+    /// frameTimeMs: injected frame time (same value used by all screens)
     /// Returns true if overlay is currently visible.
-    static bool update(bool touchDown);
+    static bool update(bool touchDown, uint32_t frameTimeMs);
 
     /// Draw overlay if visible. Call after screen draw().
     /// Uses direct TFT calls on existing instance.
-    static void draw(TFT_eSPI& tft);
+    /// frameTimeMs: injected frame time for refresh throttling
+    static void draw(TFT_eSPI& tft, uint32_t frameTimeMs);
 
     /// Returns true if overlay is currently visible
     static bool isVisible();
@@ -56,14 +58,14 @@ private:
 
 } // namespace rtmon
 
-#define RTMON_OVERLAY_UPDATE(touch)   rtmon::DebugOverlay::update(touch)
-#define RTMON_OVERLAY_DRAW(tft)       rtmon::DebugOverlay::draw(tft)
-#define RTMON_OVERLAY_VISIBLE()       rtmon::DebugOverlay::isVisible()
+#define RTMON_OVERLAY_UPDATE(touch, ft)   rtmon::DebugOverlay::update(touch, ft)
+#define RTMON_OVERLAY_DRAW(tft, ft)       rtmon::DebugOverlay::draw(tft, ft)
+#define RTMON_OVERLAY_VISIBLE()           rtmon::DebugOverlay::isVisible()
 
 #else  // RUNTIME_MONITOR == 0
 
-#define RTMON_OVERLAY_UPDATE(touch)   (false)
-#define RTMON_OVERLAY_DRAW(tft)       ((void)0)
+#define RTMON_OVERLAY_UPDATE(touch, ft)   (false)
+#define RTMON_OVERLAY_DRAW(tft, ft)       ((void)0)
 #define RTMON_OVERLAY_VISIBLE()       (false)
 
 #endif // RUNTIME_MONITOR

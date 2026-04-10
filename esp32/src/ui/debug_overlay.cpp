@@ -26,8 +26,8 @@ uint32_t DebugOverlay::lastUpdateMs_   = 0;
 // -------------------------------------------------------------------------
 // Update — detect long-press to toggle overlay
 // -------------------------------------------------------------------------
-bool DebugOverlay::update(bool touchDown) {
-    uint32_t now = millis();
+bool DebugOverlay::update(bool touchDown, uint32_t frameTimeMs) {
+    uint32_t now = frameTimeMs;
 
     if (touchDown && !prevTouchDown_) {
         // Touch just started
@@ -50,10 +50,10 @@ bool DebugOverlay::update(bool touchDown) {
 // -------------------------------------------------------------------------
 // Draw overlay — only when visible, throttled to REFRESH_MS
 // -------------------------------------------------------------------------
-void DebugOverlay::draw(TFT_eSPI& tft) {
+void DebugOverlay::draw(TFT_eSPI& tft, uint32_t frameTimeMs) {
     if (!visible_) return;
 
-    uint32_t now = millis();
+    uint32_t now = frameTimeMs;
     if (lastUpdateMs_ != 0 && (now - lastUpdateMs_ < REFRESH_MS)) return;
     lastUpdateMs_ = now;
 
