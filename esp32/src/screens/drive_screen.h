@@ -128,7 +128,7 @@ private:
     bool curAckVisible_       = false;   // precomputed in update()
 
     // ACK visual feedback state
-    unsigned long ackLastShownMs_   = 0;   // millis() when indicator was last shown
+    unsigned long ackLastShownMs_   = 0;   // frameTimeMs when indicator was last shown
     unsigned long ackTrackedAckMs_  = 0;   // last ack().timestampMs we processed
     unsigned long ackTrackedTmoMs_  = 0;   // last ackTimeoutMs() we processed
     uint8_t       ackDisplayResult_ = 0;   // 0=none, 1=OK, 2=rejected, 3=timeout

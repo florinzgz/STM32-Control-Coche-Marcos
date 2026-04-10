@@ -264,6 +264,28 @@ inline constexpr unsigned long BTILE_DIAG_FREEZE_MS    = 1000;
 
 inline constexpr uint16_t HASH_FAILSAFE_INTERVAL = 100;
 
+// =========================================================================
+// PinScreen Layout Dimensions
+//
+// Numeric keypad for engineering access. Layout on 480×320 landscape:
+//   3×4 grid of 90×50 buttons, 4 PIN dots (28×28), title/subtitle above.
+// =========================================================================
+
+// Keypad button dimensions
+inline constexpr int16_t PSCR_BTN_W      = 90;
+inline constexpr int16_t PSCR_BTN_H      = 50;
+inline constexpr int16_t PSCR_BTN_GAP    = 15;   // horizontal gap between columns
+inline constexpr int16_t PSCR_BTN_VGAP   = 10;   // vertical gap between rows
+
+// PIN dot display
+inline constexpr int16_t PSCR_DOT_W      = 28;
+inline constexpr int16_t PSCR_DOT_H      = 28;
+inline constexpr int16_t PSCR_DOT_GAP    = 12;
+inline constexpr int16_t PSCR_DOT_Y      = 38;
+
+// Wrong-code message timeout (ms)
+inline constexpr uint32_t PSCR_WRONG_CODE_DISPLAY_MS = 1000;
+
 } // namespace cfg
 } // namespace ui
 

@@ -20,6 +20,7 @@
 #define PIN_SCREEN_H
 
 #include "screen.h"
+#include "ui/ui_config.h"
 #include <cstdint>
 
 class PinScreen : public Screen {
@@ -57,9 +58,10 @@ private:
     bool     cancelled_   = false;
     bool     needsRedraw_ = true;
     bool     wrongCode_   = false;    // briefly show "Codigo incorrecto"
-    uint32_t wrongCodeMs_ = 0;
+    bool     wrongCodePending_ = false; // set in checkPin(), consumed in update()
+    uint32_t wrongCodeMs_ = 0;         // frameTimeMs when wrong code was accepted
 
-    static constexpr uint32_t WRONG_CODE_DISPLAY_MS = 1000;
+    static constexpr uint32_t WRONG_CODE_DISPLAY_MS = ui::cfg::PSCR_WRONG_CODE_DISPLAY_MS;
 
     void handleDigit(uint8_t d);
     void handleDelete();

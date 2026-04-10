@@ -81,7 +81,7 @@ void ErrorScreen::onEnter() {
     diagCode_    = 0;
     prevDiagCode_ = 0xFF;
     diagSubsystem_ = 0;
-    errorEntryMs_  = millis();
+    errorEntryMs_  = 0;               // captured on first update() (frame time contract)
     prevElapsedSec_ = 0xFFFFFFFF;
     prevDiagSubsystem_ = 0xFF;
     failsafeFrameCount_ = 0;
@@ -103,6 +103,12 @@ void ErrorScreen::onEnter() {
 void ErrorScreen::onExit() {}
 
 void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
+    // Capture error entry time on first update() — ensures we use the injected
+    // frameTimeMs instead of a raw millis() call (frame time contract §4).
+    if (errorEntryMs_ == 0) {
+        errorEntryMs_ = frameTimeMs;
+    }
+
     // Detect CAN communication loss: heartbeat was once received but is
     // now older than CAN_LOSS_TIMEOUT_MS.
     unsigned long hbTs = data.heartbeat().timestampMs;
