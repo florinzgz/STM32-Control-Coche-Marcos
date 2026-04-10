@@ -42,10 +42,16 @@ public:
                              int16_t prevAngleRaw);
 
 private:
-    /// Draw a single wheel box at given position
+    /// Draw a single wheel tyre graphic at given position
     static void drawWheel(TFT_eSPI& tft,
                           int16_t x, int16_t y,
                           uint8_t torquePct, int8_t tempC);
+
+    /// Draw torque/temp label text next to a wheel
+    static void drawWheelLabel(TFT_eSPI& tft,
+                               int16_t wx, int16_t wy,
+                               uint8_t torquePct, int8_t tempC,
+                               bool rightSide);
 
     /// Clear and redraw steering rotation line
     static void drawSteerLine(TFT_eSPI& tft,
