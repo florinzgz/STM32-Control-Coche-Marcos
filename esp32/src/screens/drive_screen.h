@@ -69,7 +69,7 @@ class DriveScreen : public Screen {
 public:
     void onEnter() override;
     void onExit()  override;
-    void update(const vehicle::VehicleData& data) override;
+    void update(const vehicle::VehicleData& data, unsigned long frameTimeMs) override;
     void draw()    override;
 
 private:

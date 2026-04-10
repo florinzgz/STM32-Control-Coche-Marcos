@@ -52,9 +52,9 @@ void PinScreen::onEnter() {
 
 void PinScreen::onExit() {}
 
-void PinScreen::update(const vehicle::VehicleData& /*data*/) {
+void PinScreen::update(const vehicle::VehicleData& /*data*/, unsigned long frameTimeMs) {
     // Expire "wrong code" message after timeout
-    if (wrongCode_ && (millis() - wrongCodeMs_) >= WRONG_CODE_DISPLAY_MS) {
+    if (wrongCode_ && (frameTimeMs - wrongCodeMs_) >= WRONG_CODE_DISPLAY_MS) {
         wrongCode_   = false;
         needsRedraw_ = true;
     }

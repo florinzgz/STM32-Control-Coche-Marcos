@@ -109,11 +109,10 @@ void BootScreen::onEnter() {
 
 void BootScreen::onExit() {}
 
-void BootScreen::update(const vehicle::VehicleData& data) {
+void BootScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     // CAN link is considered active if heartbeat timestamp is recent
-    unsigned long now = millis();
     canLinked_ = (data.heartbeat().timestampMs > 0 &&
-                  (now - data.heartbeat().timestampMs) < 500);
+                  (frameTimeMs - data.heartbeat().timestampMs) < 500);
 
     // Obstacle sensor status
     obstacle_sensor::Reading sensorReading = obstacle_sensor::getReading();
@@ -143,19 +142,19 @@ void BootScreen::update(const vehicle::VehicleData& data) {
 
     // RX frame flags — which STM32 frame types have been received recently
     uint16_t rxFlags = 0;
-    if (data.heartbeat().timestampMs > 0 && (now - data.heartbeat().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.heartbeat().timestampMs > 0 && (frameTimeMs - data.heartbeat().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_HB;
-    if (data.speed().timestampMs > 0 && (now - data.speed().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.speed().timestampMs > 0 && (frameTimeMs - data.speed().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_SPD;
-    if (data.current().timestampMs > 0 && (now - data.current().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.current().timestampMs > 0 && (frameTimeMs - data.current().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_CUR;
-    if (data.safety().timestampMs > 0 && (now - data.safety().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.safety().timestampMs > 0 && (frameTimeMs - data.safety().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_SAF;
-    if (data.steering().timestampMs > 0 && (now - data.steering().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.steering().timestampMs > 0 && (frameTimeMs - data.steering().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_STR;
-    if (data.traction().timestampMs > 0 && (now - data.traction().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.traction().timestampMs > 0 && (frameTimeMs - data.traction().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_TRC;
-    if (data.battery().timestampMs > 0 && (now - data.battery().timestampMs) < DIAG_RX_RECENT_MS)
+    if (data.battery().timestampMs > 0 && (frameTimeMs - data.battery().timestampMs) < DIAG_RX_RECENT_MS)
         rxFlags |= DIAG_RX_BAT;
 
     if (rxFlags != diagRxFlags_) {
@@ -172,15 +171,15 @@ void BootScreen::update(const vehicle::VehicleData& data) {
 
     // ---- STM32 heartbeat details (freeze detection + status) ----
     const auto& hb = data.heartbeat();
-    bool hbValid = (hb.timestampMs > 0 && (now - hb.timestampMs) < DIAG_RX_RECENT_MS);
+    bool hbValid = (hb.timestampMs > 0 && (frameTimeMs - hb.timestampMs) < DIAG_RX_RECENT_MS);
 
     // Track alive counter changes for freeze detection
     if (hbValid && hb.aliveCounter != diagStm32PrevAlive_) {
         diagStm32PrevAlive_    = hb.aliveCounter;
-        diagStm32AliveChangedMs_ = now;
+        diagStm32AliveChangedMs_ = frameTimeMs;
     }
     bool frozen = hbValid && (diagStm32AliveChangedMs_ > 0) &&
-                  (now - diagStm32AliveChangedMs_) > DIAG_FREEZE_MS;
+                  (frameTimeMs - diagStm32AliveChangedMs_) > DIAG_FREEZE_MS;
 
     if (hbValid != diagStm32HbValid_ || frozen != diagStm32Frozen_ ||
         hb.aliveCounter != diagStm32Alive_ ||

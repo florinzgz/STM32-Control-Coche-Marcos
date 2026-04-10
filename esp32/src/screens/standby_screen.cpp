@@ -32,7 +32,8 @@ void StandbyScreen::onEnter() {
 
 void StandbyScreen::onExit() {}
 
-void StandbyScreen::update(const vehicle::VehicleData& data) {
+void StandbyScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
+    (void)frameTimeMs;  // Not used in StandbyScreen — no timing-dependent logic
     faultFlags_ = data.heartbeat().faultFlags;
     for (uint8_t i = 0; i < 5; ++i) {
         temps_[i] = data.temp().temps[i];

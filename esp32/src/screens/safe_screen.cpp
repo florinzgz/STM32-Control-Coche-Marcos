@@ -49,7 +49,8 @@ void SafeScreen::onEnter() {
 
 void SafeScreen::onExit() {}
 
-void SafeScreen::update(const vehicle::VehicleData& data) {
+void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
+    (void)frameTimeMs;  // Not used in SafeScreen — no timing-dependent logic
     faultFlags_ = data.heartbeat().faultFlags;
     errorCode_  = data.safety().errorCode;
 

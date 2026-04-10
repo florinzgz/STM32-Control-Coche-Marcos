@@ -26,10 +26,15 @@ ScreenManager::ScreenManager()
 }
 
 void ScreenManager::update(const vehicle::VehicleData& data) {
+    // Capture wall-clock time ONCE per frame. All screen update() logic
+    // uses this injected value instead of calling millis() directly,
+    // ensuring deterministic behavior: same (data, frameTimeMs) ⇒ same UI.
+    const unsigned long frameTimeMs = millis();
+
     // ---- Engineering screen active ----
     if (engineeringActive_) {
         RTMON_UI_BEGIN();
-        currentScreen_->update(data);
+        currentScreen_->update(data, frameTimeMs);
         RTMON_UI_END();
         if (frameLimiter_.shouldDraw()) {
             RTMON_FRAME_BEGIN();
@@ -54,7 +59,7 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
     // ---- PIN screen active ----
     if (pinActive_) {
         RTMON_UI_BEGIN();
-        pinScreen_.update(data);
+        pinScreen_.update(data, frameTimeMs);
         RTMON_UI_END();
         if (frameLimiter_.shouldDraw()) {
             RTMON_FRAME_BEGIN();
@@ -94,7 +99,7 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
     {
         unsigned long hbTs = data.heartbeat().timestampMs;
         if (hbTs > 0) {
-            unsigned long age = millis() - hbTs;
+            unsigned long age = frameTimeMs - hbTs;
             bool stale = (age > can::CAN_LOSS_TIMEOUT_MS);
 
             if (stale && currentState_ != can::SystemState::BOOT) {
@@ -120,7 +125,7 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
     }
 
     RTMON_UI_BEGIN();
-    currentScreen_->update(data);
+    currentScreen_->update(data, frameTimeMs);
     RTMON_UI_END();
 
     if (frameLimiter_.shouldDraw()) {

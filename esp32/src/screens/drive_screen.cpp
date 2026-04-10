@@ -153,7 +153,7 @@ void DriveScreen::onExit() {
 // -------------------------------------------------------------------------
 // update — read vehicle data into current-frame cache + compute tile hashes
 // -------------------------------------------------------------------------
-void DriveScreen::update(const vehicle::VehicleData& data) {
+void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     // Traction (torque per wheel)
     for (uint8_t i = 0; i < 4; ++i) {
         curTraction_[i] = data.traction().scale[i];
@@ -223,14 +223,13 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
 
     // ACK visual feedback: detect new ACK or timeout events
     {
-        unsigned long now = millis();
         const auto& ad = data.ack();
 
         // New ACK received from STM32
         if (ad.timestampMs > 0 && ad.timestampMs > ackTrackedAckMs_) {
             ackTrackedAckMs_ = ad.timestampMs;
             ackDisplayResult_ = (ad.result == can::AckResult::OK) ? 1 : 2;
-            ackLastShownMs_   = now;
+            ackLastShownMs_   = frameTimeMs;
             ackIndicatorDirty_ = true;
         }
 
@@ -239,12 +238,12 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
         if (tmo > 0 && tmo > ackTrackedTmoMs_) {
             ackTrackedTmoMs_  = tmo;
             ackDisplayResult_ = 3;
-            ackLastShownMs_   = now;
+            ackLastShownMs_   = frameTimeMs;
             ackIndicatorDirty_ = true;
         }
 
         // Auto-clear after display duration
-        if (ackDisplayResult_ != 0 && (now - ackLastShownMs_) >= ui::cfg::ACK_DISPLAY_DURATION_MS) {
+        if (ackDisplayResult_ != 0 && (frameTimeMs - ackLastShownMs_) >= ui::cfg::ACK_DISPLAY_DURATION_MS) {
             ackDisplayResult_ = 0;
             ackIndicatorDirty_ = true;
         }

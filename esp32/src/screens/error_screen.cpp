@@ -101,12 +101,12 @@ void ErrorScreen::onEnter() {
 
 void ErrorScreen::onExit() {}
 
-void ErrorScreen::update(const vehicle::VehicleData& data) {
+void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     // Detect CAN communication loss: heartbeat was once received but is
     // now older than CAN_LOSS_TIMEOUT_MS.
     unsigned long hbTs = data.heartbeat().timestampMs;
     canLost_ = (hbTs > 0) &&
-               ((millis() - hbTs) > can::CAN_LOSS_TIMEOUT_MS);
+               ((frameTimeMs - hbTs) > can::CAN_LOSS_TIMEOUT_MS);
 
     faultFlags_    = data.heartbeat().faultFlags;
     errorCode_     = data.safety().errorCode;
@@ -123,7 +123,7 @@ void ErrorScreen::update(const vehicle::VehicleData& data) {
         tiles_.updateHash(ETILE_DIAG, dh);
     }
     // Elapsed time — computed once here, used in both hash and draw()
-    elapsedSec_ = (millis() - errorEntryMs_) / 1000;
+    elapsedSec_ = (frameTimeMs - errorEntryMs_) / 1000;
     tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec_));
 }
 

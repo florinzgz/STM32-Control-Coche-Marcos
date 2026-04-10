@@ -22,8 +22,13 @@ public:
     /// Called when this screen is about to be replaced
     virtual void onExit() = 0;
 
-    /// Called every loop iteration with latest vehicle data
-    virtual void update(const vehicle::VehicleData& data) = 0;
+    /// Called every loop iteration with latest vehicle data.
+    /// @param data   Frozen CAN snapshot for this frame
+    /// @param frameTimeMs  Wall-clock time captured once per frame (millis()).
+    ///        All timing logic in update() MUST use this value instead of
+    ///        calling millis() directly, ensuring deterministic behavior:
+    ///        same (data, frameTimeMs) ⇒ same derived state ALWAYS.
+    virtual void update(const vehicle::VehicleData& data, unsigned long frameTimeMs) = 0;
 
     /// Called at the frame-limited rate to render the screen via TFT_eSPI
     virtual void draw() = 0;
