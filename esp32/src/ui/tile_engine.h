@@ -104,6 +104,29 @@ enum class TileLayer : uint8_t {
 };
 
 // -------------------------------------------------------------------------
+// Overlay composition mode — defines how an overlay interacts with base tiles
+//
+// Each overlay tile declares its mode (documented per-screen below).
+// The mode determines the invalidation strategy when the overlay disappears.
+//
+// DriveScreen overlay registry:
+//   DTILE_DEGRADED → REPLACE, overlaps DTILE_OBSTACLE
+//   DTILE_FAULTS   → REPLACE, overlaps DTILE_MODE_ICONS + DTILE_LED_TOGGLE + DTILE_BATTERY
+//   DTILE_ACK      → REPLACE, overlaps DTILE_LED_TOGGLE
+//
+// ErrorScreen: no overlays (all tiles are base layer, screen is self-contained)
+// SafeScreen:  no overlays
+// StandbyScreen: no overlays
+// BootScreen: no overlays
+// -------------------------------------------------------------------------
+enum class OverlayMode : uint8_t {
+    REPLACE = 0,    // Overlay completely covers base tile region.
+                    // On removal: clear overlay area → markDirty all overlapped base tiles.
+    MERGE   = 1     // Overlay coexists with base tile (partial overlap / transparency).
+                    // On removal: markDirty overlapped base tiles (content preserved).
+};
+
+// -------------------------------------------------------------------------
 // Tile rectangle — defines a screen region
 // -------------------------------------------------------------------------
 struct TileRect {

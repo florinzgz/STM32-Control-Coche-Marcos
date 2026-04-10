@@ -490,6 +490,7 @@ void DriveScreen::draw() {
     // TILE: ACK visual feedback indicator (event-driven)
     if (tiles_.isDirty(DTILE_ACK)) {
         drawAckIndicator();
+        ackIndicatorDirty_ = false;   // Clear event flag AFTER render (draw purity)
         // Overlay invalidation: when ACK clears, restore underlying LED toggle tile
         if (prevAckVisible_ && !curAckVisible_) {
             tiles_.markDirty(DTILE_LED_TOGGLE);
@@ -548,7 +549,9 @@ void DriveScreen::drawSpeed() {
 // Called only when DTILE_ACK is dirty (event-driven).
 // -------------------------------------------------------------------------
 void DriveScreen::drawAckIndicator() {
-    ackIndicatorDirty_ = false;
+    // NOTE: ackIndicatorDirty_ is cleared by the caller (draw()) AFTER this
+    // returns, preserving draw-phase purity — draw helpers must not modify
+    // event-driven flags consumed by update().
 
     const char* text = "";
     uint16_t color = ui::COL_BG;

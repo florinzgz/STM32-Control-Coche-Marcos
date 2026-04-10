@@ -213,6 +213,46 @@ inline constexpr int16_t YTILE_TEMPS_H       = 110;
 inline constexpr int16_t YTILE_FAULTS_Y      = 290;
 inline constexpr int16_t YTILE_FAULTS_H      = 30;
 
+// =========================================================================
+// SafeScreen Layout Dimensions
+//
+// Vertical stacking layout for SAFE MODE screen:
+//   Banner (0–40), Info (46), Faults (62–86), Error (90–114),
+//   Separator (118), Speeds (126–152), Currents (154–180),
+//   Temps (182–208), Steering (214+)
+// =========================================================================
+
+inline constexpr int16_t STILE_BANNER_H        = 40;
+inline constexpr int16_t STILE_INFO_Y           = 46;
+inline constexpr int16_t STILE_FAULT_LABEL_Y    = 62;
+inline constexpr int16_t STILE_FAULT_VALUE_Y    = 74;
+inline constexpr int16_t STILE_ERR_LABEL_Y      = 90;
+inline constexpr int16_t STILE_ERR_VALUE_Y      = 102;
+inline constexpr int16_t STILE_TELEM_SEP_Y      = 118;
+inline constexpr int16_t STILE_SPEED_LABEL_Y    = 126;
+inline constexpr int16_t STILE_SPEED_VAL_Y      = 138;
+inline constexpr int16_t STILE_CURR_LABEL_Y     = 154;
+inline constexpr int16_t STILE_CURR_VAL_Y       = 166;
+inline constexpr int16_t STILE_TEMP_LABEL_Y     = 182;
+inline constexpr int16_t STILE_TEMP_VAL_Y       = 194;
+inline constexpr int16_t STILE_STEER_Y          = 214;
+inline constexpr int16_t STILE_COL_LABEL_X      = 10;
+inline constexpr int16_t STILE_COL_VAL_START    = 80;
+inline constexpr int16_t STILE_COL_VAL_SPACE    = 100;
+
+// =========================================================================
+// BootScreen Diagnostic Layout Dimensions
+//
+// Diagnostic panel below obstacle indicator on boot screen.
+// Rendered as a single tile (BTILE_DIAGNOSTICS) with multi-line text.
+// =========================================================================
+
+inline constexpr int16_t BTILE_DIAG_SEP_Y       = 264;  // SCREEN_H/2 + 104
+inline constexpr int16_t BTILE_DIAG_LINE_H       = 10;
+inline constexpr int16_t BTILE_DIAG_MARGIN_X     = 10;
+inline constexpr unsigned long BTILE_DIAG_RX_RECENT_MS = 2000;
+inline constexpr unsigned long BTILE_DIAG_FREEZE_MS    = 1000;
+
 } // namespace cfg
 } // namespace ui
 

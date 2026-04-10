@@ -22,25 +22,25 @@ static constexpr uint16_t DIAG_RX_STR  = (1 << 4);
 static constexpr uint16_t DIAG_RX_TRC  = (1 << 5);
 static constexpr uint16_t DIAG_RX_BAT  = (1 << 6);
 
-// Diagnostic area layout (below obstacle indicator)
-static constexpr int16_t DIAG_SEP_Y    = ui::SCREEN_H / 2 + 104;  // separator line
-static constexpr int16_t DIAG_LINE_H   = 10;                       // line spacing
+// Diagnostic area layout (below obstacle indicator) — from ui_config.h
+static constexpr int16_t DIAG_SEP_Y    = ui::cfg::BTILE_DIAG_SEP_Y;
+static constexpr int16_t DIAG_LINE_H   = ui::cfg::BTILE_DIAG_LINE_H;
 static constexpr int16_t DIAG_LINE1_Y  = DIAG_SEP_Y + 4;          // ESP32 bus status
 static constexpr int16_t DIAG_LINE2_Y  = DIAG_LINE1_Y + DIAG_LINE_H;  // STM32 heartbeat
 static constexpr int16_t DIAG_LINE3_Y  = DIAG_LINE2_Y + DIAG_LINE_H;  // RX frame flags
 static constexpr int16_t DIAG_LINE4_Y  = DIAG_LINE3_Y + DIAG_LINE_H;  // error counts
 static constexpr int16_t DIAG_LINE5_Y  = DIAG_LINE4_Y + DIAG_LINE_H;  // diagnostic verdict
-static constexpr int16_t DIAG_MARGIN_X = 10;
+static constexpr int16_t DIAG_MARGIN_X = ui::cfg::BTILE_DIAG_MARGIN_X;
 
 // Timeout for considering a frame "recently received"
-static constexpr unsigned long DIAG_RX_RECENT_MS = 2000;
+static constexpr unsigned long DIAG_RX_RECENT_MS = ui::cfg::BTILE_DIAG_RX_RECENT_MS;
 
 // Text buffer sizes (sized for worst-case snprintf output)
 static constexpr int DIAG_BUF_SIZE  = 56;   // "STM32: FROZEN cnt:255 St:LIMP F:FF E:FF" + NUL
 static constexpr int DIAG_RX_BUF    = 40;   // "HB SPD CUR SAF STR TRC BAT " (28) + margin
 
-// Freeze detection: if alive counter hasn't changed for 1 s, STM32 main loop is stuck
-static constexpr unsigned long DIAG_FREEZE_MS = 1000;
+// Freeze detection: if alive counter hasn't changed for configured duration, STM32 main loop is stuck
+static constexpr unsigned long DIAG_FREEZE_MS = ui::cfg::BTILE_DIAG_FREEZE_MS;
 
 // RX flag-to-label mapping for compact iteration
 struct RxFlagLabel { uint16_t flag; const char* label; };
@@ -284,7 +284,8 @@ void BootScreen::draw() {
 
     // ---- TILE: CAN diagnostics panel ----
     if (tiles_.isDirty(BTILE_DIAGNOSTICS)) {
-        diagNeedsRedraw_ = false;
+        // NOTE: diagNeedsRedraw_ is cleared AFTER the tile render block below,
+        // not inside it — preserving draw-phase purity.
 
         RTRACE_SET_LAYER(2);
 
@@ -412,6 +413,7 @@ void BootScreen::draw() {
                         verdictCol, ui::COL_BG, 1, TL_DATUM);
         }
         tiles_.markClean(BTILE_DIAGNOSTICS);
+        diagNeedsRedraw_ = false;   // Clear event flag AFTER render (draw purity)
     }
 
     RTRACE_DUMP_IF_PENDING();
