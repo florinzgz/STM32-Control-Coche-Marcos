@@ -82,6 +82,31 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ### PR — feat: Tile-Based Dirty Region Engine (motor de render tipo cluster OEM automotriz)
 
 ### PR — refactor: HMI Security Audit & Tile Engine Hardening
+
+### PR — refactor: Tile Engine Formalization & Pipeline Hardening (OEM Cluster Level)
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Formalización del tile engine a nivel OEM automotive cluster: Z-order layer system, pipeline estricto update/draw, overlay invalidation contract, debug assertions, y centralización completa de tile layout dimensions.
+- **Root cause:** (1) Overlay visibility se recomputaba en draw() violando la regla de render puro. (2) tile_engine.h no definía Z-order formal para overlay compositing. (3) Tile layout dimensions (180, 120, 370, 75, etc.) hardcoded en onEnter() sin nombre semántico. (4) Bounds safety era silencioso sin opción de diagnóstico. (5) No existía contrato formal para overlay invalidation.
+- **Solución aplicada:**
+  1. **tile_engine.h — Z-order layer system**: TileLayer enum (STATIC/BASE/OVERLAY/SYSTEM) con reglas formales de composición documentadas. Render contract: update phase (NO SPI) → draw phase (SOLO consume estado precomputado).
+  2. **tile_engine.h — Debug assertions**: `UI_TILE_DEBUG` flag habilita Serial.printf diagnóstico cuando setRect recibe coordenadas negativas, tamaños inválidos, o fuera de pantalla. Producción: silent clamp (sin overhead).
+  3. **tile_engine.h — Overlay invalidation contract**: Documentación formal del ciclo de vida overlay: visible→invisible → clear + markDirty tiles subyacentes → repaint.
+  4. **DriveScreen — Pure render**: Overlay visibility (curDegradedVisible_, curFaultsVisible_, curAckVisible_) precomputada en update(), draw() solo consume. Eliminada recomputación de `(curSystemState_ == DEGRADED || LIMP_HOME)` y `(curFaultFlags_ != 0)` en draw().
+  5. **ui_config.h — Tile layout constants**: DTILE_MODE_ICONS_X/W, DTILE_LED_TOGGLE_X/W, DTILE_BATTERY_W, DTILE_WHEELS_W, DTILE_STEERING_X/W para DriveScreen. ETILE_BANNER_H, ETILE_CONTENT_X/W, ETILE_FAULTS_Y/H, ETILE_SAFETY_Y/H, ETILE_DIAG_Y/H, ETILE_ELAPSED_Y/H para ErrorScreen. YTILE_TEMPS_X/Y/W/H, YTILE_FAULTS_Y/H para StandbyScreen.
+  6. **drive_screen.cpp**: Todos los setRect() usan constantes de ui_config.h.
+  7. **error_screen.cpp**: Todos los setRect() usan constantes de ui_config.h.
+  8. **standby_screen.cpp**: Todos los setRect() usan constantes de ui_config.h.
+- **Archivos afectados:**
+  - `esp32/src/ui/tile_engine.h` — Z-order enum, render contract, debug asserts, overlay contract
+  - `esp32/src/ui/ui_config.h` — Tile layout dimension constants (DTILE_*, ETILE_*, YTILE_*)
+  - `esp32/src/screens/drive_screen.h` — curDegradedVisible_, curFaultsVisible_, curAckVisible_
+  - `esp32/src/screens/drive_screen.cpp` — Pure render, named constants, layer comments
+  - `esp32/src/screens/error_screen.cpp` — Named layout constants
+  - `esp32/src/screens/standby_screen.cpp` — Named layout constants
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Pipeline de render formalmente puro (update no hace SPI, draw no recomputa lógica). Overlays con jerarquía Z formal y contrato de invalidación. Todas las dimensiones de tile en configuración central. Debug assertions disponibles para desarrollo. Zero cambios en interfaz CAN, VehicleData, o STM32 firmware.
+- **Tests:** Sin cambios en interfaces externas. Cambios son refactoring interno del render engine: renombrado de constantes, reordenación de computación, y documentación formal.
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Auditoría completa de seguridad, optimización y refactor del sistema HMI tile-based. Centralización de constantes, corrección de artefactos de overlay, eliminación de duplicación de cálculos, bounds safety en tile engine, y determinismo en hysteresis de batería.
@@ -865,3 +890,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **Deterministic render pipeline** — Anti-flicker: reemplazar fillRect+drawString por setTextPadding en 12 componentes UI (zero-gap text overwrite). Fix: draw_runtime_overlay String→snprintf (eliminar heap allocation). Doc: formalizar pipeline CAN→snapshot→frame-latch→render en vehicle_data.h, screen_manager.h, main.cpp. | — |
 | 2026-04-10 | **Tile-Based Dirty Region Engine** — Refactor completo del HMI a motor de render por regiones (tiles). TileSet template con hash FNV-1a: cada tile solo se redibuja si su contenido cambia. DriveScreen: 12 tiles (speed, obstacle, wheels, steering, battery, gear, pedal, mode, LED, degraded overlay, faults overlay, ACK). ErrorScreen: 5 tiles. SafeScreen: 6 tiles. StandbyScreen: 2 tiles. BootScreen: 3 tiles. Bar widgets (pedal, batería, sensor obstáculo) con differential update (solo la porción cambiada). Eliminación total de clear+redraw flash en barras. Overlay tiles restauran tiles subyacentes al desaparecer. Nuevo: `tile_engine.h` con TileRect, TileHash, TileSet<N>. | — |
 | 2026-04-10 | **HMI Security Audit & Tile Engine Hardening** — Auditoría completa del sistema HMI tile-based. (1) `ui_config.h`: centralización de 20+ magic numbers (text paddings, thresholds, overlay layout, color levels). (2) Overlay invalidation chain: DEGRADED→OBSTACLE, FAULTS→top-bar, ACK→LED_TOGGLE — fix de artefactos visuales al cerrar overlays sobre tiles solapados. (3) wheelThresholdFilter dedup: antes se ejecutaba 2× por frame (update+draw), ahora 1× con resultados precomputados. (4) Tile bounds safety: setRect() clampea coordenadas a SCREEN_W×SCREEN_H. (5) Battery hysteresis determinista: reemplaza dependencia de frame anterior por thresholds explícitos BATT_HYSTERESIS_HIGH/LOW. (6) 15 archivos actualizados. | — |
+| 2026-04-10 | **Tile Engine Formalization & Pipeline Hardening** — (1) Z-order layer system: TileLayer enum (STATIC/BASE/OVERLAY/SYSTEM) con reglas formales de composición. (2) Overlay invalidation contract documentado en tile_engine.h. (3) Debug assertions (UI_TILE_DEBUG) para diagnóstico de setRect() bounds. (4) Pipeline puro: overlay visibility precomputada en update(), draw() solo consume. (5) Tile layout constants centralizados: DTILE_*/ETILE_*/YTILE_* en ui_config.h. 6 archivos modificados. | — |
