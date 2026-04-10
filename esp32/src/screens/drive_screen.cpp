@@ -41,6 +41,7 @@
 #include "ui/obstacle_sensor.h"
 #include "ui/render_trace.h"
 #include "ui/runtime_monitor.h"
+#include "ui/ui_config.h"
 #include "shifter_input.h"
 #include "can_ids.h"
 #include <Arduino.h>
@@ -50,28 +51,9 @@
 // External TFT instance (initialized in main.cpp)
 extern TFT_eSPI tft;
 
-// ACK visual feedback constants
-static constexpr int16_t ACK_X = 200;   // Centered in top bar
-static constexpr int16_t ACK_Y = 2;
-static constexpr int16_t ACK_W = 80;
-static constexpr int16_t ACK_H = 16;
-static constexpr unsigned long ACK_DISPLAY_DURATION_MS = 1500;
-
-// Degraded/limp mode overlay layout (HMI_STATE_MODEL §2.4)
-static constexpr int16_t DEG_BANNER_X = 0;
-static constexpr int16_t DEG_BANNER_Y = 40;
-static constexpr int16_t DEG_BANNER_W = 480;
-static constexpr int16_t DEG_BANNER_H = 18;
-
-// Fault overlay area (bottom margin of top bar, right of mode icons)
-static constexpr int16_t FAULT_OVERLAY_Y = 28;
-static constexpr int16_t FAULT_OVERLAY_H = 10;
-
-// Wheel threshold filtering constants (shared by update hash & draw)
-// Traction: redraw only if Δ > 2% (CAN jitter filter)
-// Temperature: redraw only if Δ ≥ 1°C
-static constexpr uint8_t TRACTION_THRESHOLD = 2;
-static constexpr int8_t  TEMP_THRESHOLD     = 1;
+// Wheel threshold filtering constants (from centralized config)
+static constexpr uint8_t TRACTION_THRESHOLD = ui::cfg::THR_TRACTION_DELTA;
+static constexpr int8_t  TEMP_THRESHOLD     = ui::cfg::THR_TEMP_DELTA;
 
 /// Apply threshold filtering to a single wheel's traction + temperature.
 /// Returns true if either value crossed its threshold.
@@ -108,9 +90,11 @@ void DriveScreen::onEnter() {
     tiles_.setRect(DTILE_PEDAL,      0,   ui::PEDAL_Y, ui::SCREEN_W, ui::PEDAL_H);
     tiles_.setRect(DTILE_MODE_ICONS, 0,   0, 180, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_LED_TOGGLE, 180, 0, 120, ui::TOP_BAR_H);
-    tiles_.setRect(DTILE_DEGRADED,   DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H);
-    tiles_.setRect(DTILE_FAULTS,     0,   FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H);
-    tiles_.setRect(DTILE_ACK,        ACK_X, ACK_Y, ACK_W, ACK_H);
+    tiles_.setRect(DTILE_DEGRADED,   ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
+                                     ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H);
+    tiles_.setRect(DTILE_FAULTS,     0,   ui::cfg::OVL_FAULT_Y, ui::SCREEN_W, ui::cfg::OVL_FAULT_H);
+    tiles_.setRect(DTILE_ACK,        ui::cfg::ACK_X, ui::cfg::ACK_Y,
+                                     ui::cfg::ACK_W, ui::cfg::ACK_H);
 
     // Invalidate all tile hashes — forces full redraw of every tile
     tiles_.invalidateAll();
@@ -140,6 +124,15 @@ void DriveScreen::onEnter() {
     prevSystemState_ = can::SystemState::ACTIVE;
     curFaultFlags_   = 0;
     prevFaultFlags_  = 0;
+
+    // Reset overlay visibility tracking
+    prevDegradedVisible_ = false;
+    prevFaultsVisible_   = false;
+    prevAckVisible_      = false;
+
+    // Reset precomputed wheel draw values
+    memset(drawTraction_, 0, sizeof(drawTraction_));
+    memset(drawTemp_, 0, sizeof(drawTemp_));
 }
 
 // -------------------------------------------------------------------------
@@ -243,7 +236,7 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
         }
 
         // Auto-clear after display duration
-        if (ackDisplayResult_ != 0 && (now - ackLastShownMs_) >= ACK_DISPLAY_DURATION_MS) {
+        if (ackDisplayResult_ != 0 && (now - ackLastShownMs_) >= ui::cfg::ACK_DISPLAY_DURATION_MS) {
             ackDisplayResult_ = 0;
             ackIndicatorDirty_ = true;
         }
@@ -261,14 +254,14 @@ void DriveScreen::update(const vehicle::VehicleData& data) {
 
     // WHEELS tile — hash all 4 traction + 4 temp values together.
     // Uses threshold filtering: small CAN jitter doesn't trigger redraw.
+    // Precomputed draw values are stored for use in draw() phase.
     {
         ui::TileHash wh = ui::FNV_OFFSET;
         for (uint8_t i = 0; i < 4; ++i) {
-            uint8_t drawT; int8_t drawTp;
-            wheelThresholdFilter(curTraction_[i], prevTraction_[i], drawT,
-                                 curTemp_[i], prevTemp_[i], drawTp);
-            wh = ui::tileHashFeed(wh, drawT);
-            wh = ui::tileHashFeed(wh, drawTp);
+            wheelThresholdFilter(curTraction_[i], prevTraction_[i], drawTraction_[i],
+                                 curTemp_[i], prevTemp_[i], drawTemp_[i]);
+            wh = ui::tileHashFeed(wh, drawTraction_[i]);
+            wh = ui::tileHashFeed(wh, drawTemp_[i]);
         }
         tiles_.updateHash(DTILE_WHEELS, wh);
     }
@@ -399,30 +392,19 @@ void DriveScreen::draw() {
         tiles_.markClean(DTILE_OBSTACLE);
     }
 
-    // TILE: Wheels — uses threshold filtering from helper
+    // TILE: Wheels — uses precomputed threshold-filtered values from update()
     if (tiles_.isDirty(DTILE_WHEELS)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
 
-        // Compute draw values with threshold filtering
-        uint8_t drawTraction[4];
-        int8_t  drawTemp[4];
-
-        for (uint8_t i = 0; i < 4; ++i) {
-            wheelThresholdFilter(curTraction_[i], prevTraction_[i],
-                                 drawTraction[i],
-                                 curTemp_[i], prevTemp_[i],
-                                 drawTemp[i]);
-        }
-
         ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
-            {drawTraction[0], drawTraction[1], drawTraction[2], drawTraction[3]}, 0},
+            {drawTraction_[0], drawTraction_[1], drawTraction_[2], drawTraction_[3]}, 0},
             vehicle::TempMapData{
-            {drawTemp[0], drawTemp[1], drawTemp[2], drawTemp[3], 0}, 0},
+            {drawTemp_[0], drawTemp_[1], drawTemp_[2], drawTemp_[3], 0}, 0},
             prevTraction_, prevTemp_);
 
         // Update prev to what was actually drawn (not raw CAN values)
-        memcpy(prevTraction_, drawTraction, sizeof(prevTraction_));
-        memcpy(prevTemp_, drawTemp, sizeof(prevTemp_));
+        memcpy(prevTraction_, drawTraction_, sizeof(prevTraction_));
+        memcpy(prevTemp_, drawTemp_, sizeof(prevTemp_));
         tiles_.markClean(DTILE_WHEELS);
     }
 
@@ -470,19 +452,40 @@ void DriveScreen::draw() {
 
     // TILE: Degraded/limp mode overlay (HMI_STATE_MODEL §2.4)
     if (tiles_.isDirty(DTILE_DEGRADED)) {
+        bool curVisible = (curSystemState_ == can::SystemState::DEGRADED ||
+                           curSystemState_ == can::SystemState::LIMP_HOME);
         drawDegradedOverlay();
+        // Overlay invalidation: when banner is removed, restore underlying OBSTACLE tile
+        if (prevDegradedVisible_ && !curVisible) {
+            tiles_.markDirty(DTILE_OBSTACLE);
+        }
+        prevDegradedVisible_ = curVisible;
         tiles_.markClean(DTILE_DEGRADED);
     }
 
     // TILE: Fault flag visual overlays (HMI_STATE_MODEL §4.1)
     if (tiles_.isDirty(DTILE_FAULTS)) {
+        bool curVisible = (curFaultFlags_ != 0);
         drawFaultOverlays();
+        // Overlay invalidation: when faults are cleared, restore underlying top-bar tiles
+        if (prevFaultsVisible_ && !curVisible) {
+            tiles_.markDirty(DTILE_MODE_ICONS);
+            tiles_.markDirty(DTILE_LED_TOGGLE);
+            tiles_.markDirty(DTILE_BATTERY);
+        }
+        prevFaultsVisible_ = curVisible;
         tiles_.markClean(DTILE_FAULTS);
     }
 
     // TILE: ACK visual feedback indicator (event-driven)
     if (tiles_.isDirty(DTILE_ACK)) {
+        bool curVisible = (ackDisplayResult_ != 0);
         drawAckIndicator();
+        // Overlay invalidation: when ACK clears, restore underlying LED toggle tile
+        if (prevAckVisible_ && !curVisible) {
+            tiles_.markDirty(DTILE_LED_TOGGLE);
+        }
+        prevAckVisible_ = curVisible;
         tiles_.markClean(DTILE_ACK);
     }
 
@@ -522,7 +525,7 @@ void DriveScreen::drawSpeed() {
     tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
     tft.setTextSize(3);
     tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(120);   // covers max "999.9" at size 3
+    tft.setTextPadding(ui::cfg::PAD_SPEED);
     tft.drawString(buf, ui::SCREEN_W / 2, ui::SPEED_Y);
     RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y, buf,
                 ui::COL_WHITE, ui::COL_BG, 3, TC_DATUM);
@@ -551,9 +554,9 @@ void DriveScreen::drawAckIndicator() {
     tft.setTextColor(color, ui::COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(ACK_W);
-    tft.drawString(text, ACK_X + ACK_W / 2, ACK_Y + 2);
-    RTRACE_TEXT(ACK_X + ACK_W / 2, ACK_Y + 2, text,
+    tft.setTextPadding(ui::cfg::PAD_ACK);
+    tft.drawString(text, ui::cfg::ACK_X + ui::cfg::ACK_W / 2, ui::cfg::ACK_Y + 2);
+    RTRACE_TEXT(ui::cfg::ACK_X + ui::cfg::ACK_W / 2, ui::cfg::ACK_Y + 2, text,
                 color, ui::COL_BG, 1, TC_DATUM);
     tft.setTextPadding(0);
     tft.setTextDatum(TL_DATUM);
@@ -568,8 +571,10 @@ void DriveScreen::drawAckIndicator() {
 // -------------------------------------------------------------------------
 void DriveScreen::drawDegradedOverlay() {
     // Clear the banner area regardless (remove old banner if state changed)
-    tft.fillRect(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_BG);
-    RTRACE_FILL_RECT(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_BG);
+    tft.fillRect(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
+                 ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_BG);
+    RTRACE_FILL_RECT(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
+                     ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_BG);
 
     const char* bannerText = nullptr;
 
@@ -580,13 +585,17 @@ void DriveScreen::drawDegradedOverlay() {
     }
 
     if (bannerText != nullptr) {
-        tft.fillRect(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_AMBER);
-        RTRACE_FILL_RECT(DEG_BANNER_X, DEG_BANNER_Y, DEG_BANNER_W, DEG_BANNER_H, ui::COL_AMBER);
+        tft.fillRect(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
+                     ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_AMBER);
+        RTRACE_FILL_RECT(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
+                         ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_AMBER);
         tft.setTextColor(ui::COL_BLACK, ui::COL_AMBER);
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString(bannerText, DEG_BANNER_W / 2, DEG_BANNER_Y + DEG_BANNER_H / 2);
-        RTRACE_TEXT(DEG_BANNER_W / 2, DEG_BANNER_Y + DEG_BANNER_H / 2, bannerText,
+        tft.drawString(bannerText, ui::cfg::OVL_DEGRADED_W / 2,
+                        ui::cfg::OVL_DEGRADED_Y + ui::cfg::OVL_DEGRADED_H / 2);
+        RTRACE_TEXT(ui::cfg::OVL_DEGRADED_W / 2,
+                    ui::cfg::OVL_DEGRADED_Y + ui::cfg::OVL_DEGRADED_H / 2, bannerText,
                     ui::COL_BLACK, ui::COL_AMBER, 1, MC_DATUM);
         tft.setTextDatum(TL_DATUM);
     }
@@ -603,8 +612,8 @@ void DriveScreen::drawFaultOverlays() {
     // Clear the fault overlay strip — needed because multiple labels are
     // drawn at variable positions; setTextPadding alone cannot clear the
     // entire strip when the active set of faults changes.
-    tft.fillRect(0, FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H, ui::COL_BG);
-    RTRACE_FILL_RECT(0, FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H, ui::COL_BG);
+    tft.fillRect(0, ui::cfg::OVL_FAULT_Y, ui::SCREEN_W, ui::cfg::OVL_FAULT_H, ui::COL_BG);
+    RTRACE_FILL_RECT(0, ui::cfg::OVL_FAULT_Y, ui::SCREEN_W, ui::cfg::OVL_FAULT_H, ui::COL_BG);
 
     if (curFaultFlags_ == 0) return;  // No faults active
 
@@ -613,7 +622,6 @@ void DriveScreen::drawFaultOverlays() {
     tft.setTextDatum(TL_DATUM);
 
     int16_t x = 4;
-    static constexpr int16_t LABEL_GAP = 4;
 
     // Fault indicators — amber/red for faults, cyan for informational
     struct FaultEntry {
@@ -635,10 +643,10 @@ void DriveScreen::drawFaultOverlays() {
     for (const auto& e : entries) {
         if (curFaultFlags_ & e.mask) {
             tft.setTextColor(e.color, ui::COL_BG);
-            tft.drawString(e.label, x, FAULT_OVERLAY_Y);
-            RTRACE_TEXT(x, FAULT_OVERLAY_Y, e.label,
+            tft.drawString(e.label, x, ui::cfg::OVL_FAULT_Y);
+            RTRACE_TEXT(x, ui::cfg::OVL_FAULT_Y, e.label,
                         e.color, ui::COL_BG, 1, TL_DATUM);
-            x += static_cast<int16_t>(tft.textWidth(e.label) + LABEL_GAP);
+            x += static_cast<int16_t>(tft.textWidth(e.label) + ui::cfg::OVL_FAULT_LABEL_GAP);
         }
     }
 }

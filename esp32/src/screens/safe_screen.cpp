@@ -10,6 +10,7 @@
 
 #include "safe_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include <TFT_eSPI.h>
 #include <cstdio>
@@ -169,7 +170,7 @@ void SafeScreen::draw() {
 
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_SAFE_FULL);
 
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
@@ -193,7 +194,7 @@ void SafeScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_SAFE_FULL);
         tft.drawString(buf, COL_LABEL_X, ERR_VALUE_Y);
         tft.setTextPadding(0);
         tiles_.markClean(STILE_ERROR);
@@ -211,7 +212,7 @@ void SafeScreen::draw() {
                 tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
                 tft.setTextSize(1);
                 tft.setTextDatum(TL_DATUM);
-                tft.setTextPadding(78);
+                tft.setTextPadding(ui::cfg::PAD_SAFE_WHEEL_VAL);
                 tft.drawString(buf, x, SPEED_VAL_Y);
                 tft.setTextPadding(0);
             }
@@ -231,7 +232,7 @@ void SafeScreen::draw() {
                 tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
                 tft.setTextSize(1);
                 tft.setTextDatum(TL_DATUM);
-                tft.setTextPadding(78);
+                tft.setTextPadding(ui::cfg::PAD_SAFE_WHEEL_VAL);
                 tft.drawString(buf, x, CURR_VAL_Y);
                 tft.setTextPadding(0);
             }
@@ -247,12 +248,12 @@ void SafeScreen::draw() {
                 int16_t x = COL_VAL_START + 18 + i * 76;
                 char buf[ui::FMT_BUF_SMALL];
                 snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", temps_[i]);
-                uint16_t col = (temps_[i] >= 80) ? ui::COL_RED :
-                               (temps_[i] >= 60) ? ui::COL_AMBER : ui::COL_WHITE;
+                uint16_t col = (temps_[i] >= ui::cfg::TEMP_COLOR_CRITICAL) ? ui::COL_RED :
+                               (temps_[i] >= ui::cfg::TEMP_COLOR_WARNING) ? ui::COL_AMBER : ui::COL_WHITE;
                 tft.setTextColor(col, ui::COL_BG);
                 tft.setTextSize(1);
                 tft.setTextDatum(TL_DATUM);
-                tft.setTextPadding(52);
+                tft.setTextPadding(ui::cfg::PAD_SAFE_TEMP);
                 tft.drawString(buf, x, TEMP_VAL_Y);
                 tft.setTextPadding(0);
             }
@@ -271,7 +272,7 @@ void SafeScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(140);
+        tft.setTextPadding(ui::cfg::PAD_SAFE_STEERING);
         tft.drawString(buf, COL_VAL_START, STEER_Y);
         tft.setTextPadding(0);
         tiles_.markClean(STILE_STEERING);

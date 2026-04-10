@@ -4,6 +4,7 @@
 
 #include "boot_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include "hmi/obstacle_indicator.h"
 #include "sensors/obstacle_sensor.h"
@@ -255,7 +256,7 @@ void BootScreen::draw() {
 
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
-        tft.setTextPadding(160);
+        tft.setTextPadding(ui::cfg::PAD_BOOT_CAN_STATUS);
         if (canLinked_) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString("CAN: LINKED", ui::SCREEN_W / 2, statusY);

@@ -4,6 +4,7 @@
 
 #include "pedal_bar.h"
 #include "render_trace.h"
+#include "ui_config.h"
 #include <cstdio>
 
 namespace ui {
@@ -49,9 +50,9 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
 
     // Choose color based on new percentage
     uint16_t fillCol;
-    if (pct <= 40) {
+    if (pct <= cfg::PEDAL_COLOR_LOW) {
         fillCol = COL_GREEN;
-    } else if (pct <= 70) {
+    } else if (pct <= cfg::PEDAL_COLOR_MID) {
         fillCol = COL_YELLOW;
     } else {
         fillCol = COL_RED;
@@ -59,9 +60,9 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
 
     // Determine previous color to check if a color boundary was crossed
     uint16_t prevCol;
-    if (prevCl <= 40) {
+    if (prevCl <= cfg::PEDAL_COLOR_LOW) {
         prevCol = COL_GREEN;
-    } else if (prevCl <= 70) {
+    } else if (prevCl <= cfg::PEDAL_COLOR_MID) {
         prevCol = COL_YELLOW;
     } else {
         prevCol = COL_RED;
@@ -103,7 +104,7 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(ML_DATUM);
-    tft.setTextPadding(70);
+    tft.setTextPadding(cfg::PAD_PEDAL_TEXT);
     tft.drawString(buf, PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2);
     RTRACE_TEXT(PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2, buf,
                 COL_WHITE, COL_BG, 2, ML_DATUM);

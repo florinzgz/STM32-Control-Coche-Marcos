@@ -1,0 +1,172 @@
+// =============================================================================
+// ESP32-S3 HMI — Centralized UI Configuration
+//
+// All magic numbers, thresholds, text padding widths, and overlay layout
+// constants are defined here. No screen or widget should contain hardcoded
+// visual parameters — they must reference constants from this header.
+//
+// Naming convention:
+//   PAD_*   — text padding widths (pixels) for setTextPadding()
+//   THR_*   — threshold values for hysteresis / jitter filtering
+//   OVL_*   — overlay layout constants
+//   BATT_*  — battery indicator constants
+//
+// Reference: docs/HMI_RENDERING_STRATEGY.md
+// =============================================================================
+
+#ifndef UI_CONFIG_H
+#define UI_CONFIG_H
+
+#include <cstdint>
+
+namespace ui {
+namespace cfg {
+
+// =========================================================================
+// Text Padding Widths (pixels)
+//
+// Each constant is sized for the worst-case string at the given font size.
+// Derived from TFT_eSPI default font metrics:
+//   Size 1: ~6 px/char,  Size 2: ~12 px/char,  Size 3: ~18 px/char
+// =========================================================================
+
+// DriveScreen — speed display (size 3, max "999.9")
+inline constexpr int16_t PAD_SPEED           = 120;
+
+// DriveScreen — ACK indicator (size 1, max "REJECTED")
+inline constexpr int16_t PAD_ACK             = 80;
+
+// DriveScreen — wheel labels (size 2, max "100%"; size 1, max "-99°C")
+inline constexpr int16_t PAD_WHEEL_LABEL     = 46;
+
+// DriveScreen — pedal percentage (size 2, max "100%")
+inline constexpr int16_t PAD_PEDAL_TEXT      = 70;
+
+// Obstacle sensor — distance text (size 1, max "12.00 m")
+inline constexpr int16_t PAD_OBSTACLE_DIST   = 80;
+
+// ErrorScreen — fault hex code (size 2, max "0xFF")
+inline constexpr int16_t PAD_ERROR_HEX       = 80;
+
+// ErrorScreen — full-width text fields (size 2)
+inline constexpr int16_t PAD_ERROR_FULL      = 460;
+
+// SafeScreen — fault/error text (size 1, full-width)
+inline constexpr int16_t PAD_SAFE_FULL       = 460;
+
+// SafeScreen — per-wheel speed/current values (size 1, max "999.9 km/h")
+inline constexpr int16_t PAD_SAFE_WHEEL_VAL  = 78;
+
+// SafeScreen — temperature values (size 1, max "-99°C")
+inline constexpr int16_t PAD_SAFE_TEMP       = 52;
+
+// SafeScreen — steering angle (size 1, max "-999.9°")
+inline constexpr int16_t PAD_SAFE_STEERING   = 140;
+
+// StandbyScreen — temperature values (size 1, max "-99 C")
+inline constexpr int16_t PAD_STANDBY_TEMP    = 80;
+
+// StandbyScreen — fault flags (size 1, centered)
+inline constexpr int16_t PAD_STANDBY_FAULTS  = 240;
+
+// BootScreen — CAN status text (size 1, max "CAN: WAITING...")
+inline constexpr int16_t PAD_BOOT_CAN_STATUS = 160;
+
+// Battery indicator — percentage text (size 1, max "100%")
+// Computed as battery inner width minus margins
+inline constexpr int16_t PAD_BATTERY_TEXT    = 55;  // BAT_W - 10 (inner) - 4 margins ≈ 55
+
+// =========================================================================
+// CAN Jitter Filtering Thresholds (DriveScreen wheels)
+//
+// Prevent redraw from minor CAN noise. Only redraw when the value change
+// exceeds the threshold. Applied in update() phase only.
+// =========================================================================
+
+// Traction: redraw only if absolute Δ > this value (%)
+inline constexpr uint8_t THR_TRACTION_DELTA  = 2;
+
+// Temperature: redraw only if absolute Δ ≥ this value (°C)
+inline constexpr int8_t  THR_TEMP_DELTA      = 1;
+
+// =========================================================================
+// Battery Indicator Hysteresis
+//
+// Text on the battery bar switches between dark-on-color and light-on-bg.
+// Hysteresis prevents rapid flipping near the 50% fill boundary.
+// Thresholds are expressed as percentage of bar inner width (0–100).
+// =========================================================================
+
+// Switch TO dark text when fill >= this %
+inline constexpr uint8_t BATT_HYSTERESIS_HIGH = 55;
+
+// Switch FROM dark text when fill < this %
+inline constexpr uint8_t BATT_HYSTERESIS_LOW  = 45;
+
+// Battery voltage range (0.01V units) for 24V pack
+inline constexpr uint16_t BATT_VOLTAGE_MIN_RAW = 1800;  // 18.00 V = 0%
+inline constexpr uint16_t BATT_VOLTAGE_MAX_RAW = 2520;  // 25.20 V = 100%
+
+// =========================================================================
+// ACK Visual Feedback
+// =========================================================================
+
+// Duration the ACK indicator is shown (ms)
+inline constexpr unsigned long ACK_DISPLAY_DURATION_MS = 1500;
+
+// ACK indicator position in top bar
+inline constexpr int16_t ACK_X = 200;
+inline constexpr int16_t ACK_Y = 2;
+inline constexpr int16_t ACK_W = 80;
+inline constexpr int16_t ACK_H = 16;
+
+// =========================================================================
+// Overlay Layout — Degraded/Limp Banner (DriveScreen)
+// =========================================================================
+
+inline constexpr int16_t OVL_DEGRADED_X = 0;
+inline constexpr int16_t OVL_DEGRADED_Y = 40;
+inline constexpr int16_t OVL_DEGRADED_W = 480;
+inline constexpr int16_t OVL_DEGRADED_H = 18;
+
+// =========================================================================
+// Overlay Layout — Fault Indicators (DriveScreen top bar bottom margin)
+// =========================================================================
+
+inline constexpr int16_t OVL_FAULT_Y = 28;
+inline constexpr int16_t OVL_FAULT_H = 10;
+
+// Gap between fault label strings (pixels)
+inline constexpr int16_t OVL_FAULT_LABEL_GAP = 4;
+
+// =========================================================================
+// Temperature Color Thresholds (SafeScreen)
+// =========================================================================
+
+inline constexpr int8_t TEMP_COLOR_WARNING  = 60;  // °C → amber
+inline constexpr int8_t TEMP_COLOR_CRITICAL = 80;  // °C → red
+
+// =========================================================================
+// Pedal Bar Color Thresholds
+// =========================================================================
+
+inline constexpr uint8_t PEDAL_COLOR_LOW    = 40;  // ≤ this → green
+inline constexpr uint8_t PEDAL_COLOR_MID    = 70;  // ≤ this → yellow, else red
+
+// =========================================================================
+// Battery Level Color Thresholds
+// =========================================================================
+
+inline constexpr uint8_t BATT_COLOR_LOW     = 20;  // ≤ this → red
+inline constexpr uint8_t BATT_COLOR_MID     = 50;  // ≤ this → yellow, else green
+
+// =========================================================================
+// Obstacle Sensor Bar Max Range (cm)
+// =========================================================================
+
+inline constexpr uint16_t OBSTACLE_BAR_MAX_CM = 600;
+
+} // namespace cfg
+} // namespace ui
+
+#endif // UI_CONFIG_H

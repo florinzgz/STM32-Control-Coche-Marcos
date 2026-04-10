@@ -6,6 +6,7 @@
 
 #include "standby_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include <TFT_eSPI.h>
 #include <cstdio>
@@ -110,7 +111,7 @@ void StandbyScreen::draw() {
                 tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
                 tft.setTextSize(1);
                 tft.setTextDatum(TL_DATUM);
-                tft.setTextPadding(80);
+                tft.setTextPadding(ui::cfg::PAD_STANDBY_TEMP);
                 tft.drawString(buf, 140, 185 + i * 22);
                 RTRACE_TEXT(140, 185 + i * 22, buf,
                             ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
@@ -126,7 +127,7 @@ void StandbyScreen::draw() {
 
         tft.setTextDatum(MC_DATUM);
         tft.setTextSize(1);
-        tft.setTextPadding(240);
+        tft.setTextPadding(ui::cfg::PAD_STANDBY_FAULTS);
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString("NO FAULTS", ui::SCREEN_W / 2, 308);

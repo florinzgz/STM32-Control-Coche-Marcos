@@ -4,6 +4,7 @@
 
 #include "obstacle_sensor.h"
 #include "render_trace.h"
+#include "ui_config.h"
 #include <cstdio>
 
 namespace ui {
@@ -52,7 +53,7 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(80);
+    tft.setTextPadding(cfg::PAD_OBSTACLE_DIST);
     tft.drawString(buf, SCREEN_W / 2, textY);
     RTRACE_TEXT(SCREEN_W / 2, textY, buf, COL_WHITE, COL_BG, 1, TC_DATUM);
     tft.setTextPadding(0);
@@ -60,7 +61,7 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
 
     // Proximity bar fill — differential update
     int16_t barY = SENSOR_Y + 28;
-    static constexpr uint16_t BAR_MAX_CM = 600;
+    static constexpr uint16_t BAR_MAX_CM = cfg::OBSTACLE_BAR_MAX_CM;
     int16_t barInner = SENSOR_BAR_W - 4;
 
     // Compute fill widths for current and previous values

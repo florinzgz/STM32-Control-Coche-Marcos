@@ -16,6 +16,7 @@
 
 #include "error_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include "can_ids.h"
 #include <TFT_eSPI.h>
@@ -210,7 +211,7 @@ void ErrorScreen::draw() {
 
         // Hex code — padded to avoid remnants
         snprintf(buf, sizeof(buf), "0x%02X", faultFlags_);
-        tft.setTextPadding(80);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_HEX);
         tft.drawString(buf, 130, 80);
         RTRACE_TEXT(130, 80, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
@@ -250,7 +251,7 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_FULL);
         tft.drawString(buf, 10, 186);
         RTRACE_TEXT(10, 186, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
@@ -269,7 +270,7 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_FULL);
         tft.drawString(buf, 10, 236);
         RTRACE_TEXT(10, 236, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
@@ -294,7 +295,7 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_AMBER, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(460);
+        tft.setTextPadding(ui::cfg::PAD_ERROR_FULL);
         tft.drawString(buf, 10, 286);
         RTRACE_TEXT(10, 286, buf, ui::COL_AMBER, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);

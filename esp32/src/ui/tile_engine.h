@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include "ui_common.h"
 
 namespace ui {
 
@@ -101,11 +102,25 @@ public:
         memset(hashes_, 0, sizeof(hashes_));
     }
 
-    /// Define the screen region for a tile
+    /// Define the screen region for a tile.
+    /// Coordinates are clamped to screen bounds (SCREEN_W × SCREEN_H).
+    /// Negative or out-of-bounds values are silently corrected.
     void setRect(uint8_t idx, int16_t x, int16_t y, int16_t w, int16_t h) {
-        if (idx < N) {
-            rects_[idx] = {x, y, w, h};
-        }
+        if (idx >= N) return;
+
+        // Clamp origin to screen area
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+
+        // Clamp dimensions to non-negative
+        if (w < 0) w = 0;
+        if (h < 0) h = 0;
+
+        // Clamp to screen extents
+        if (x + w > SCREEN_W) w = SCREEN_W - x;
+        if (y + h > SCREEN_H) h = SCREEN_H - y;
+
+        rects_[idx] = {x, y, w, h};
     }
 
     /// Get the rect for a tile

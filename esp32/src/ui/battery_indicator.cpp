@@ -4,13 +4,14 @@
 
 #include "battery_indicator.h"
 #include "render_trace.h"
+#include "ui_config.h"
 #include <cstdio>
 
 namespace ui {
 
 // 24V lead-acid/LiFePO4 pack: 18.0V = 0%, 25.2V = 100%
-static constexpr uint16_t BATT_MIN_RAW = 1800;   // 18.00 V in 0.01V units
-static constexpr uint16_t BATT_MAX_RAW = 2520;   // 25.20 V in 0.01V units
+static constexpr uint16_t BATT_MIN_RAW = cfg::BATT_VOLTAGE_MIN_RAW;
+static constexpr uint16_t BATT_MAX_RAW = cfg::BATT_VOLTAGE_MAX_RAW;
 
 // -------------------------------------------------------------------------
 // Static outline
@@ -40,9 +41,9 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
 
     // Choose color based on level
     uint16_t col;
-    if (pct > 50) {
+    if (pct > cfg::BATT_COLOR_MID) {
         col = COL_GREEN;
-    } else if (pct > 20) {
+    } else if (pct > cfg::BATT_COLOR_LOW) {
         col = COL_YELLOW;
     } else {
         col = COL_RED;
@@ -50,9 +51,9 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
 
     // Previous color for threshold detection
     uint16_t prevCol;
-    if (prevPct > 50) {
+    if (prevPct > cfg::BATT_COLOR_MID) {
         prevCol = COL_GREEN;
-    } else if (prevPct > 20) {
+    } else if (prevPct > cfg::BATT_COLOR_LOW) {
         prevCol = COL_YELLOW;
     } else {
         prevCol = COL_RED;
@@ -92,13 +93,24 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     }
 
     // Percentage text centered in battery
-    // Hysteresis: switch to black-on-color at 55% fill, back at 45% fill
-    // to avoid rapid color flipping near the 50% boundary.
+    // Deterministic hysteresis: switch to dark text at BATT_HYSTERESIS_HIGH,
+    // switch back at BATT_HYSTERESIS_LOW. The decision depends only on the
+    // current fill level relative to the thresholds, not on previous frame state.
+    // In the hysteresis band [LOW, HIGH), retain the previous visual style.
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%u%%", pct);
-    bool prevUsedDark = (prevFW > (barInner * 55 / 100));
-    bool curUseDark   = (fillW  > (barInner * 55 / 100)) ||
-                        (fillW  > (barInner * 45 / 100) && prevUsedDark);
+    int16_t highThresh = barInner * cfg::BATT_HYSTERESIS_HIGH / 100;
+    int16_t lowThresh  = barInner * cfg::BATT_HYSTERESIS_LOW  / 100;
+    bool curUseDark;
+    if (fillW >= highThresh) {
+        curUseDark = true;
+    } else if (fillW < lowThresh) {
+        curUseDark = false;
+    } else {
+        // In hysteresis band — use previous fill to determine: if bar is
+        // growing into the band, stay light; if shrinking into it, stay dark.
+        curUseDark = (prevFW >= highThresh);
+    }
     uint16_t txtBg = curUseDark ? col : COL_BG;
     uint16_t txtFg = curUseDark ? COL_BLACK : col;
     tft.setTextColor(txtFg, txtBg);

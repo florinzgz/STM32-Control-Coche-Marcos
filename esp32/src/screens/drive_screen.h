@@ -40,6 +40,7 @@
 
 #include "screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/tile_engine.h"
 #include "ui/gear_display.h"
 #include "ui/mode_icons.h"
@@ -103,6 +104,10 @@ private:
 
     bool     needsFullRedraw_    = true;
 
+    // Precomputed wheel draw values (threshold-filtered in update phase)
+    uint8_t  drawTraction_[4]    = {};
+    int8_t   drawTemp_[4]        = {};
+
     // System state for degraded/limp overlays (HMI_STATE_MODEL §2.4)
     can::SystemState curSystemState_  = can::SystemState::ACTIVE;
     can::SystemState prevSystemState_ = can::SystemState::ACTIVE;
@@ -110,6 +115,13 @@ private:
     // Fault flags for visual overlays (HMI_STATE_MODEL §4.1)
     uint8_t curFaultFlags_  = 0;
     uint8_t prevFaultFlags_ = 0;
+
+    // Overlay visibility tracking for invalidation chain.
+    // When an overlay transitions from visible→invisible, underlying
+    // tiles are marked dirty to restore their content.
+    bool prevDegradedVisible_ = false;
+    bool prevFaultsVisible_   = false;
+    bool prevAckVisible_      = false;
 
     // ACK visual feedback state
     unsigned long ackLastShownMs_   = 0;   // millis() when indicator was last shown
