@@ -7,6 +7,22 @@
 // Integrates frame limiter: update() is called every loop,
 // but draw() only executes at the target frame rate (20 FPS).
 //
+// DETERMINISTIC RENDER PIPELINE:
+//   CAN RX (Core 1) → VehicleData → mutex copy → localVD snapshot (Core 0)
+//   → screenManager.update(snapshot):
+//       1. screen.update(snapshot) → copies into cur_* (frame latch)
+//       2. frameLimiter_.shouldDraw() gates at 20 FPS
+//       3. screen.draw() reads ONLY cur_*/prev_* — immutable during render
+//   Result: each rendered frame uses data from a single consistent time instant.
+//   CAN updates arriving mid-render do NOT affect the current frame.
+//
+// ANTI-FLICKER STRATEGY:
+//   - Static layer (car body, labels, outlines) drawn once in onEnter()
+//   - Dynamic layer uses dirty flags: only changed values are repainted
+//   - Text updates use setTextPadding() to overwrite in a single SPI pass
+//     instead of fillRect+drawString (which causes visible blank flash)
+//   - CAN-loss overlay: partial redraw of banner area only, not full screen
+//
 // Engineering menu access:
 //   1. Long-press (3 s) on the battery icon → PIN entry screen.
 //   2. Enter the correct 4-digit PIN (8989) on the keypad.

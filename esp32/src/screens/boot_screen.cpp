@@ -224,17 +224,16 @@ void BootScreen::draw() {
         diagNeedsRedraw_ = true;  // Force diagnostic redraw
     }
 
-    // CAN link status (partial redraw)
+    // CAN link status (partial redraw — anti-flicker: padding instead of fillRect)
     if (canLinked_ != prevCanLinked_) {
         prevCanLinked_ = canLinked_;
 
         int16_t statusY = ui::SCREEN_H / 2 + 70;
         RTRACE_SET_LAYER(2);
-        tft.fillRect(0, statusY - 10, ui::SCREEN_W, 20, ui::COL_BG);
-        RTRACE_FILL_RECT(0, statusY - 10, ui::SCREEN_W, 20, ui::COL_BG);
 
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
+        tft.setTextPadding(160);
         if (canLinked_) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
             tft.drawString("CAN: LINKED", ui::SCREEN_W / 2, statusY);
@@ -246,6 +245,7 @@ void BootScreen::draw() {
             RTRACE_TEXT(ui::SCREEN_W / 2, statusY, "CAN: WAITING...",
                         ui::COL_RED, ui::COL_BG, 1, MC_DATUM);
         }
+        tft.setTextPadding(0);
         tft.setTextDatum(TL_DATUM);
     }
 

@@ -340,42 +340,42 @@ void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
         // Label to the right of the wheel
         int16_t lx = wx + WHEEL_W + 4;
         int16_t ly = wy + 4;
-        // Clear label area
-        tft.fillRect(lx, ly - 2, 46, 28, COL_BG);
-        RTRACE_FILL_RECT(lx, ly - 2, 46, 28, COL_BG);
         // Torque %
         snprintf(buf, sizeof(buf), "%u%%", torquePct);
         tft.setTextColor(torqueCol, COL_BG);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextPadding(46);
         tft.drawString(buf, lx, ly);
         RTRACE_TEXT(lx, ly, buf, torqueCol, COL_BG, 2, TL_DATUM);
         // Temperature
         snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
         tft.setTextColor(COL_CYAN, COL_BG);
         tft.setTextSize(1);
+        tft.setTextPadding(46);
         tft.drawString(buf, lx + 2, ly + 18);
         RTRACE_TEXT(lx + 2, ly + 18, buf, COL_CYAN, COL_BG, 1, TL_DATUM);
+        tft.setTextPadding(0);
     } else {
         // Label to the left of the wheel
         int16_t lx = wx - 50;
         int16_t ly = wy + 4;
-        // Clear label area
-        tft.fillRect(lx, ly - 2, 46, 28, COL_BG);
-        RTRACE_FILL_RECT(lx, ly - 2, 46, 28, COL_BG);
         // Torque %
         snprintf(buf, sizeof(buf), "%u%%", torquePct);
         tft.setTextColor(torqueCol, COL_BG);
         tft.setTextSize(2);
         tft.setTextDatum(TR_DATUM);
+        tft.setTextPadding(46);
         tft.drawString(buf, lx + 46, ly);
         RTRACE_TEXT(lx + 46, ly, buf, torqueCol, COL_BG, 2, TR_DATUM);
         // Temperature
         snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
         tft.setTextColor(COL_CYAN, COL_BG);
         tft.setTextSize(1);
+        tft.setTextPadding(46);
         tft.drawString(buf, lx + 44, ly + 18);
         RTRACE_TEXT(lx + 44, ly + 18, buf, COL_CYAN, COL_BG, 1, TR_DATUM);
+        tft.setTextPadding(0);
     }
 
     tft.setTextDatum(TL_DATUM);

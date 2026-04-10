@@ -76,14 +76,24 @@ static void draw_runtime_overlay(TFT_eSPI& tft, uint32_t frameTimeMs) {
     // Fondo semitransparente
     tft.fillRect(0, 0, 160, 60, TFT_BLACK);
 
-    // PSRAM y RAM
+    // PSRAM y RAM — stack-only formatting (no heap String class)
+    char line[32];
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.drawString("PSRAM: " + String(ESP.getFreePsram() / 1024) + " KB", 4, 4);
-    tft.drawString("RAM:   " + String(ESP.getFreeHeap() / 1024) + " KB", 4, 20);
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+
+    snprintf(line, sizeof(line), "PSRAM: %u KB",
+             (unsigned)(ESP.getFreePsram() / 1024));
+    tft.drawString(line, 4, 4);
+
+    snprintf(line, sizeof(line), "RAM:   %u KB",
+             (unsigned)(ESP.getFreeHeap() / 1024));
+    tft.drawString(line, 4, 20);
 
     // FPS y tiempo de render
     uint32_t fps = frameTimeMs > 0 ? 1000 / frameTimeMs : 0;
-    tft.drawString("FPS: " + String(fps), 4, 36);
+    snprintf(line, sizeof(line), "FPS: %lu", (unsigned long)fps);
+    tft.drawString(line, 4, 36);
 }
 
 // CAN transceiver pins (SN65HVD230, 3.3V — module Rs/SLNT pin tied to GND)
@@ -333,6 +343,15 @@ static void sendModeCommand(uint8_t modeFlags) {
 // on Core 1 free for CAN, sensors, audio, and LEDs without SPI blocking.
 // The TFT SPI bus (~28 ms per frame) no longer stalls CAN polling or
 // safety-critical processing.
+//
+// FRAME LATCH ARCHITECTURE (deterministic render):
+//   1. Acquire mutex → copy renderVD into localVD (frozen snapshot)
+//   2. Pass localVD to screenManager.update(localVD):
+//      a. screen.update(localVD) copies data into cur_* members
+//      b. frameLimiter gates screen.draw() to 20 FPS
+//      c. screen.draw() reads only from cur_*/prev_* — NOT from localVD
+//   3. Result: each rendered frame represents a single, consistent time instant
+//      Even if CAN updates arrive mid-render, the displayed frame is atomic.
 // ---------------------------------------------------------------------------
 static void renderTask(void* /*param*/) {
     vehicle::VehicleData localVD;

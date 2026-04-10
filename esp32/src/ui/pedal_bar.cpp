@@ -64,18 +64,17 @@ void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
                          fillW, PEDAL_BAR_H - 4, fillCol);
     }
 
-    // Percentage text (right of bar)
+    // Percentage text (right of bar) — anti-flicker: padding instead of fillRect
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%3u%%", pct);
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(ML_DATUM);
-    // Clear old text area
-    tft.fillRect(PEDAL_TEXT_X, barY, 70, PEDAL_BAR_H, COL_BG);
-    RTRACE_FILL_RECT(PEDAL_TEXT_X, barY, 70, PEDAL_BAR_H, COL_BG);
+    tft.setTextPadding(70);
     tft.drawString(buf, PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2);
     RTRACE_TEXT(PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2, buf,
                 COL_WHITE, COL_BG, 2, ML_DATUM);
+    tft.setTextPadding(0);
 
     tft.setTextDatum(TL_DATUM);  // Reset
     tft.setTextSize(1);

@@ -93,13 +93,14 @@ void StandbyScreen::draw() {
             char buf[ui::FMT_BUF_SMALL];
             snprintf(buf, sizeof(buf), "%3d C", temps_[i]);
 
-            tft.fillRect(140, 185 + i * 22, 80, 16, ui::COL_BG);
-            RTRACE_FILL_RECT(140, 185 + i * 22, 80, 16, ui::COL_BG);
             tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
             tft.setTextSize(1);
+            tft.setTextDatum(TL_DATUM);
+            tft.setTextPadding(80);
             tft.drawString(buf, 140, 185 + i * 22);
             RTRACE_TEXT(140, 185 + i * 22, buf,
                         ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
+            tft.setTextPadding(0);
         }
     }
 
@@ -107,13 +108,11 @@ void StandbyScreen::draw() {
     if (faultFlags_ != prevFaultFlags_) {
         prevFaultFlags_ = faultFlags_;
 
-        tft.fillRect(40, 300, 240, 20, ui::COL_BG);
-        RTRACE_FILL_RECT(40, 300, 240, 20, ui::COL_BG);
-
         tft.setTextDatum(MC_DATUM);
+        tft.setTextSize(1);
+        tft.setTextPadding(240);
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
-            tft.setTextSize(1);
             tft.drawString("NO FAULTS", ui::SCREEN_W / 2, 308);
             RTRACE_TEXT(ui::SCREEN_W / 2, 308, "NO FAULTS",
                         ui::COL_GREEN, ui::COL_BG, 1, MC_DATUM);
@@ -121,11 +120,11 @@ void StandbyScreen::draw() {
             char buf[ui::FMT_BUF_MED];
             snprintf(buf, sizeof(buf), "FLAGS: 0x%02X", faultFlags_);
             tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
-            tft.setTextSize(1);
             tft.drawString(buf, ui::SCREEN_W / 2, 308);
             RTRACE_TEXT(ui::SCREEN_W / 2, 308, buf,
                         ui::COL_AMBER, ui::COL_BG, 1, MC_DATUM);
         }
+        tft.setTextPadding(0);
         tft.setTextDatum(TL_DATUM);
     }
 

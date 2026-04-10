@@ -174,7 +174,7 @@ void ErrorScreen::draw() {
     if (faultFlags_ != prevFaultFlags_) {
         prevFaultFlags_ = faultFlags_;
 
-        // Clear the fault flags display area (full width)
+        // Clear the fault flags display area (multi-line layout requires fillRect)
         tft.fillRect(10, 93, 460, 70, ui::COL_RED);
         RTRACE_FILL_RECT(10, 93, 460, 70, ui::COL_RED);
 
@@ -183,10 +183,12 @@ void ErrorScreen::draw() {
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
 
-        // Hex code
+        // Hex code — padded to avoid remnants
         snprintf(buf, sizeof(buf), "0x%02X", faultFlags_);
+        tft.setTextPadding(80);
         tft.drawString(buf, 130, 80);
         RTRACE_TEXT(130, 80, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
+        tft.setTextPadding(0);
 
         // List active fault flag names (text size 1, two columns)
         tft.setTextSize(1);
@@ -215,9 +217,6 @@ void ErrorScreen::draw() {
     if (errorCode_ != prevErrorCode_) {
         prevErrorCode_ = errorCode_;
 
-        tft.fillRect(10, 183, 460, 30, ui::COL_RED);
-        RTRACE_FILL_RECT(10, 183, 460, 30, ui::COL_RED);
-
         char buf[64];
         snprintf(buf, sizeof(buf), "Code %u: %s", errorCode_,
                  safetyErrorName(errorCode_));
@@ -225,17 +224,16 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextPadding(460);
         tft.drawString(buf, 10, 186);
         RTRACE_TEXT(10, 186, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
+        tft.setTextPadding(0);
     }
 
     // ---- Diagnostic: error code + subsystem name ----
     if (diagCode_ != prevDiagCode_ || diagSubsystem_ != prevDiagSubsystem_) {
         prevDiagCode_ = diagCode_;
         prevDiagSubsystem_ = diagSubsystem_;
-
-        tft.fillRect(10, 233, 460, 30, ui::COL_RED);
-        RTRACE_FILL_RECT(10, 233, 460, 30, ui::COL_RED);
 
         char buf[64];
         snprintf(buf, sizeof(buf), "Error %u  Subsystem: %s",
@@ -244,17 +242,16 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextPadding(460);
         tft.drawString(buf, 10, 236);
         RTRACE_TEXT(10, 236, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
+        tft.setTextPadding(0);
     }
 
     // ---- Elapsed time (permanence) since error ----
     uint32_t elapsedSec = (millis() - errorEntryMs_) / 1000;
     if (elapsedSec != prevElapsedSec_) {
         prevElapsedSec_ = elapsedSec;
-
-        tft.fillRect(10, 283, 460, 30, ui::COL_RED);
-        RTRACE_FILL_RECT(10, 283, 460, 30, ui::COL_RED);
 
         char buf[48];
         uint32_t mins = elapsedSec / 60;
@@ -270,8 +267,10 @@ void ErrorScreen::draw() {
         tft.setTextColor(ui::COL_AMBER, ui::COL_RED);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextPadding(460);
         tft.drawString(buf, 10, 286);
         RTRACE_TEXT(10, 286, buf, ui::COL_AMBER, ui::COL_RED, 2, TL_DATUM);
+        tft.setTextPadding(0);
     }
 
     tft.setTextDatum(TL_DATUM);

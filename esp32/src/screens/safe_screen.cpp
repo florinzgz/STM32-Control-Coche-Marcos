@@ -144,10 +144,9 @@ void SafeScreen::draw() {
     if (faultFlags_ != prevFaultFlags_) {
         prevFaultFlags_ = faultFlags_;
 
-        tft.fillRect(COL_LABEL_X, FAULT_VALUE_Y, 460, 12, ui::COL_BG);
-        RTRACE_FILL_RECT(COL_LABEL_X, FAULT_VALUE_Y, 460, 12, ui::COL_BG);
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
+        tft.setTextPadding(460);
 
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
@@ -158,21 +157,21 @@ void SafeScreen::draw() {
             tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
             tft.drawString(buf, COL_LABEL_X, FAULT_VALUE_Y);
         }
+        tft.setTextPadding(0);
     }
 
     // Error code (partial redraw)
     if (errorCode_ != prevErrorCode_) {
         prevErrorCode_ = errorCode_;
 
-        tft.fillRect(COL_LABEL_X, ERR_VALUE_Y, 460, 12, ui::COL_BG);
-        RTRACE_FILL_RECT(COL_LABEL_X, ERR_VALUE_Y, 460, 12, ui::COL_BG);
-
         char buf[ui::FMT_BUF_MED];
         snprintf(buf, sizeof(buf), "Code: %u", errorCode_);
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextPadding(460);
         tft.drawString(buf, COL_LABEL_X, ERR_VALUE_Y);
+        tft.setTextPadding(0);
     }
 
     // Wheel speeds (partial redraw per wheel)
@@ -180,14 +179,15 @@ void SafeScreen::draw() {
         if (wheelSpeed_[i] != prevWheelSpeed_[i]) {
             prevWheelSpeed_[i] = wheelSpeed_[i];
             int16_t x = COL_VAL_START + 18 + i * COL_VAL_SPACE;
-            tft.fillRect(x, SPEED_VAL_Y, 78, 10, ui::COL_BG);
             char buf[ui::FMT_BUF_SMALL];
             snprintf(buf, sizeof(buf), "%u.%u km/h",
                      wheelSpeed_[i] / 10, wheelSpeed_[i] % 10);
             tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
             tft.setTextSize(1);
             tft.setTextDatum(TL_DATUM);
+            tft.setTextPadding(78);
             tft.drawString(buf, x, SPEED_VAL_Y);
+            tft.setTextPadding(0);
         }
     }
 
@@ -196,14 +196,15 @@ void SafeScreen::draw() {
         if (motorCurrent_[i] != prevMotorCurrent_[i]) {
             prevMotorCurrent_[i] = motorCurrent_[i];
             int16_t x = COL_VAL_START + 18 + i * COL_VAL_SPACE;
-            tft.fillRect(x, CURR_VAL_Y, 78, 10, ui::COL_BG);
             char buf[ui::FMT_BUF_SMALL];
             snprintf(buf, sizeof(buf), "%u.%02uA",
                      motorCurrent_[i] / 100, motorCurrent_[i] % 100);
             tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
             tft.setTextSize(1);
             tft.setTextDatum(TL_DATUM);
+            tft.setTextPadding(78);
             tft.drawString(buf, x, CURR_VAL_Y);
+            tft.setTextPadding(0);
         }
     }
 
@@ -212,7 +213,6 @@ void SafeScreen::draw() {
         if (temps_[i] != prevTemps_[i]) {
             prevTemps_[i] = temps_[i];
             int16_t x = COL_VAL_START + 18 + i * 76;
-            tft.fillRect(x, TEMP_VAL_Y, 52, 10, ui::COL_BG);
             char buf[ui::FMT_BUF_SMALL];
             snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", temps_[i]);
             uint16_t col = (temps_[i] >= 80) ? ui::COL_RED :
@@ -220,15 +220,15 @@ void SafeScreen::draw() {
             tft.setTextColor(col, ui::COL_BG);
             tft.setTextSize(1);
             tft.setTextDatum(TL_DATUM);
+            tft.setTextPadding(52);
             tft.drawString(buf, x, TEMP_VAL_Y);
+            tft.setTextPadding(0);
         }
     }
 
     // Steering angle (partial redraw)
     if (steeringAngle_ != prevSteeringAngle_) {
         prevSteeringAngle_ = steeringAngle_;
-        tft.fillRect(COL_VAL_START, STEER_Y, 140, 12, ui::COL_BG);
-        RTRACE_FILL_RECT(COL_VAL_START, STEER_Y, 140, 12, ui::COL_BG);
         char buf[ui::FMT_BUF_MED];
         int16_t deg = steeringAngle_ / 10;
         int16_t frac = steeringAngle_ % 10;
@@ -237,7 +237,9 @@ void SafeScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextPadding(140);
         tft.drawString(buf, COL_VAL_START, STEER_Y);
+        tft.setTextPadding(0);
     }
 
     RTRACE_DUMP_IF_PENDING();

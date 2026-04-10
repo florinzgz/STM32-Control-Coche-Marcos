@@ -43,15 +43,15 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
         snprintf(buf, sizeof(buf), "%u.%02u m", meters, cents);
     }
 
-    // Clear text area and redraw — centered horizontally
+    // Clear text area and redraw — centered horizontally (anti-flicker: padding)
     int16_t textY = SENSOR_Y + 14;
-    tft.fillRect(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
-    RTRACE_FILL_RECT(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
+    tft.setTextPadding(80);
     tft.drawString(buf, SCREEN_W / 2, textY);
     RTRACE_TEXT(SCREEN_W / 2, textY, buf, COL_WHITE, COL_BG, 1, TC_DATUM);
+    tft.setTextPadding(0);
     tft.setTextDatum(TL_DATUM);
 
     // Proximity bar fill

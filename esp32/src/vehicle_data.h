@@ -5,6 +5,16 @@
 // All values are populated by can_rx and read by UI modules.
 // No logic, no thresholds, no decisions.
 //
+// RENDER PIPELINE (deterministic frame latch):
+//   CAN INPUT → can_rx::poll() → VehicleData (shadow store, Core 1)
+//            → mutex copy to renderVD (shared) → localVD (render task, Core 0)
+//            → screen.update(localVD) copies into cur_* members (frame latch)
+//            → screen.draw() uses only cur_*/prev_* (immutable during render)
+//
+// The localVD copy in the render task acts as a frozen snapshot — CAN updates
+// arriving during the render frame do NOT affect the in-progress draw.
+// This guarantees frame-consistent, zero-jitter display output.
+//
 // Reference: docs/CAN_CONTRACT_FINAL.md rev 1.0
 // =============================================================================
 

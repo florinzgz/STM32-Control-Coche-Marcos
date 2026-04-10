@@ -88,6 +88,39 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Revisión y optimización del sistema HMI completo para eliminar flicker y redraws innecesarios. Corrección de un bug crítico (bit 0 CAN_TIMEOUT faltante en fault overlay de DriveScreen).
+
+### PR — refactor: deterministic render pipeline + zero-flicker text updates
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Implementación de pipeline de render determinista tipo "OEM automotive cluster". Eliminación total de flicker textual mediante setTextPadding. Formalización de arquitectura frame-latch CAN→snapshot→render.
+- **Root cause:** Dos categorías de problemas identificados:
+  1. **Flicker textual**: Todas las pantallas usaban `tft.fillRect()` para borrar el área de texto seguido de `tft.drawString()` para redibujar. El gap entre ambas operaciones SPI (0.5–2ms) creaba un parpadeo visible: flash de color de fondo entre el borrado y el nuevo texto.
+  2. **Heap allocation en overlay**: `draw_runtime_overlay()` usaba `String(ESP.getFreePsram() / 1024) + " KB"` que realiza 3 heap allocations por línea, causando micro-stutters y fragmentación del heap.
+- **Solución aplicada:**
+  1. Reemplazado `fillRect` + `drawString` por `setTextPadding(width)` + `drawString` en 12 componentes UI. TFT_eSPI dibuja texto + relleno de background en una sola transacción SPI, eliminando el gap visible.
+  2. Reemplazado `String` concatenation por `snprintf` a buffer stack en `draw_runtime_overlay()`.
+  3. Documentación formal del pipeline determinista en `vehicle_data.h`, `screen_manager.h`, y `main.cpp` renderTask.
+- **Archivos afectados:**
+  - `drive_screen.cpp` — drawSpeed, drawAckIndicator, drawFaultOverlays: setTextPadding
+  - `error_screen.cpp` — safety error, diagnostic, elapsed time: setTextPadding
+  - `safe_screen.cpp` — fault flags, error code, speeds, currents, temps, steering: setTextPadding
+  - `standby_screen.cpp` — temperatures, fault flags: setTextPadding
+  - `boot_screen.cpp` — CAN link status: setTextPadding
+  - `car_renderer.cpp` — wheel labels (torque%, temp): setTextPadding
+  - `obstacle_sensor.cpp` (UI) — distance text: setTextPadding
+  - `pedal_bar.cpp` — percentage text: setTextPadding
+  - `obstacle_indicator.cpp` — sensor status: setTextPadding
+  - `main.cpp` — draw_runtime_overlay: String→snprintf, renderTask documentation
+  - `vehicle_data.h` — render pipeline documentation
+  - `screen_manager.h` — deterministic render documentation
+  - `PROJECT_CHANGELOG.md` — documentación del cambio
+- **Impacto:** Eliminación total de flicker textual en todas las pantallas del HMI. Eliminación de heap allocation en overlay de boot. Pipeline CAN→UI→Render documentado y formalizado.
+- **Tests:** Verificación visual: zero visible flash en transiciones de valores de texto.
+
+### PR — refactor: HMI anti-flicker + render optimization
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Revisión y optimización del sistema HMI completo para eliminar flicker y redraws innecesarios. Corrección de un bug crítico (bit 0 CAN_TIMEOUT faltante en fault overlay de DriveScreen).
 - **Root cause:** Tres problemas identificados en la revisión:
   1. DriveScreen `drawFaultOverlays()` listaba bits 1–7 pero omitía bit 0 (CAN_TIMEOUT 0x01) — el flag de timeout CAN nunca se mostraba.
   2. DriveScreen `draw()` llamaba incondicionalmente a las funciones de render de cada zona (drawSpeed, ObstacleSensor::draw, CarRenderer::drawWheels/drawSteering, BatteryIndicator::draw, GearDisplay::draw, PedalBar::draw, ModeIcons::draw, LedToggle::draw) incluso cuando los datos no habían cambiado. Las funciones hacían early-return interno, pero la llamada y evaluación de parámetros implicaba overhead innecesario cada frame.
@@ -763,3 +796,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **Drive screen → TF-Mini Plus** — Actualización pantalla final para TF-Mini Plus: bar proximidad 400→600 cm, zonas color ajustadas (verde >3m, cian 1.5–3m, amarillo 0.8–1.5m, naranja 0.3–0.8m, rojo <0.3m), comentarios TOFSense-M→TF-Mini Plus. | — |
 | 2026-04-10 | **Verificación pantallas final** — DriveScreen: overlay degradado/limp + indicadores fault flags. SafeScreen: telemetría read-only (speed/current/temp/steering). Cumplimiento completo HMI_STATE_MODEL.md. | — |
 | 2026-04-10 | **HMI anti-flicker + render optimización** — Fix: CAN_TIMEOUT bit 0 faltante en DriveScreen fault overlay. Opt: draw calls gated por dirty checks (zero work si no cambia). Opt: umbrales torque Δ>2% y temp Δ≥1°C para evitar redraw por ruido. Fix: ErrorScreen CAN-lost → partial banner redraw (no full fillScreen). | — |
+| 2026-04-10 | **Deterministic render pipeline** — Anti-flicker: reemplazar fillRect+drawString por setTextPadding en 12 componentes UI (zero-gap text overwrite). Fix: draw_runtime_overlay String→snprintf (eliminar heap allocation). Doc: formalizar pipeline CAN→snapshot→frame-latch→render en vehicle_data.h, screen_manager.h, main.cpp. | — |

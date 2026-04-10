@@ -381,10 +381,12 @@ void DriveScreen::draw() {
 
 // -------------------------------------------------------------------------
 // Speed display helper — in its own zone (230–270px), NOT inside car
+//
+// Anti-flicker: uses setTextPadding() to overwrite previous text in a
+// single SPI transaction instead of fillRect+drawString (which causes
+// a visible blank flash between clear and redraw).
 // -------------------------------------------------------------------------
 void DriveScreen::drawSpeed() {
-    if (curSpeedAvgRaw_ == prevSpeedAvgRaw_) return;
-
     // Convert raw (0.1 km/h) to display
     uint16_t intPart  = curSpeedAvgRaw_ / 10;
     uint16_t fracPart = curSpeedAvgRaw_ % 10;
@@ -392,17 +394,15 @@ void DriveScreen::drawSpeed() {
     char buf[ui::FMT_BUF_MED];
     snprintf(buf, sizeof(buf), "%u.%u", intPart, fracPart);
 
-    // Clear speed area
-    tft.fillRect(0, ui::SPEED_Y, ui::SCREEN_W, 24, ui::COL_BG);
-    RTRACE_FILL_RECT(0, ui::SPEED_Y, ui::SCREEN_W, 24, ui::COL_BG);
-
-    // Draw speed value — large centered text
+    // Draw speed value — padded to fixed width eliminates flicker
     tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
     tft.setTextSize(3);
     tft.setTextDatum(TC_DATUM);
+    tft.setTextPadding(120);   // covers max "999.9" at size 3
     tft.drawString(buf, ui::SCREEN_W / 2, ui::SPEED_Y);
     RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y, buf,
                 ui::COL_WHITE, ui::COL_BG, 3, TC_DATUM);
+    tft.setTextPadding(0);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 }
@@ -414,27 +414,24 @@ void DriveScreen::drawAckIndicator() {
     if (!ackIndicatorDirty_) return;
     ackIndicatorDirty_ = false;
 
-    // Clear indicator area
-    tft.fillRect(ACK_X, ACK_Y, ACK_W, ACK_H, ui::COL_BG);
-    RTRACE_FILL_RECT(ACK_X, ACK_Y, ACK_W, ACK_H, ui::COL_BG);
-
-    if (ackDisplayResult_ == 0) return;  // Nothing to show
-
-    const char* text;
-    uint16_t color;
+    const char* text = "";
+    uint16_t color = ui::COL_BG;
     switch (ackDisplayResult_) {
         case 1:  text = "OK";       color = ui::COL_GREEN;  break;
         case 2:  text = "REJECTED"; color = ui::COL_RED;    break;
         case 3:  text = "TIMEOUT";  color = ui::COL_YELLOW; break;
-        default: return;
+        default: text = "";         color = ui::COL_BG;     break;
     }
 
+    // Anti-flicker: setTextPadding overwrites the previous text in one pass
     tft.setTextColor(color, ui::COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
+    tft.setTextPadding(ACK_W);
     tft.drawString(text, ACK_X + ACK_W / 2, ACK_Y + 2);
     RTRACE_TEXT(ACK_X + ACK_W / 2, ACK_Y + 2, text,
                 color, ui::COL_BG, 1, TC_DATUM);
+    tft.setTextPadding(0);
     tft.setTextDatum(TL_DATUM);
 }
 
@@ -481,7 +478,9 @@ void DriveScreen::drawDegradedOverlay() {
 void DriveScreen::drawFaultOverlays() {
     if (curFaultFlags_ == prevFaultFlags_) return;
 
-    // Clear the fault overlay strip
+    // Clear the fault overlay strip — needed because multiple labels are
+    // drawn at variable positions; setTextPadding alone cannot clear the
+    // entire strip when the active set of faults changes.
     tft.fillRect(0, FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H, ui::COL_BG);
     RTRACE_FILL_RECT(0, FAULT_OVERLAY_Y, ui::SCREEN_W, FAULT_OVERLAY_H, ui::COL_BG);
 
