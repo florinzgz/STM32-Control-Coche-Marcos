@@ -22,11 +22,10 @@ void ObstacleIndicator::draw(TFT_eSPI& tft,
 
     // Position below CAN status line (boot screen layout)
     int16_t statusY = ui::SCREEN_H / 2 + 90;
-    tft.fillRect(0, statusY - 10, ui::SCREEN_W, 20, ui::COL_BG);
-    RTRACE_FILL_RECT(0, statusY - 10, ui::SCREEN_W, 20, ui::COL_BG);
 
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
+    tft.setTextPadding(280);   // anti-flicker: padding instead of fillRect
 
     // Buffer for status + distance text (e.g. "SENSOR: INVALID  65535 mm\0" = 29 chars)
     static constexpr int INDICATOR_BUF_SIZE = 40;
@@ -55,6 +54,7 @@ void ObstacleIndicator::draw(TFT_eSPI& tft,
             break;
     }
 
+    tft.setTextPadding(0);
     tft.setTextDatum(TL_DATUM);
 }
 

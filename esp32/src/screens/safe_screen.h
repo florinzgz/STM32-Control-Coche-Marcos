@@ -2,8 +2,16 @@
 // ESP32-S3 HMI — Safe Screen
 //
 // Shown when system_state = SAFE (4).
-// Prominent safety warning banner. Limited telemetry visible.
-// All controls disabled. No heap allocation.
+// Prominent safety warning banner. Read-only telemetry visible:
+// wheel speeds, motor currents, temperatures, steering angle.
+//
+// TILE-BASED DIRTY REGION ENGINE:
+//   STILE_FAULTS    — fault flags
+//   STILE_ERROR     — error code
+//   STILE_SPEEDS    — wheel speed values (4 wheels)
+//   STILE_CURRENTS  — motor current values (4 wheels)
+//   STILE_TEMPS     — temperature values (5 sensors)
+//   STILE_STEERING  — steering angle
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.5
 // =============================================================================
@@ -12,7 +20,20 @@
 #define SAFE_SCREEN_H
 
 #include "screen.h"
+#include "ui/tile_engine.h"
 #include <cstdint>
+#include <array>
+
+/// Tile indices for SafeScreen
+enum SafeTile : uint8_t {
+    STILE_FAULTS = 0,
+    STILE_ERROR,
+    STILE_SPEEDS,
+    STILE_CURRENTS,
+    STILE_TEMPS,
+    STILE_STEERING,
+    STILE_COUNT
+};
 
 class SafeScreen : public Screen {
 public:
@@ -22,11 +43,23 @@ public:
     void draw()    override;
 
 private:
+    ui::TileSet<STILE_COUNT> tiles_;
+
     bool    needsRedraw_    = true;
     uint8_t faultFlags_     = 0;
     uint8_t prevFaultFlags_ = 0xFF;
     uint8_t errorCode_      = 0;
     uint8_t prevErrorCode_  = 0xFF;
+
+    // Read-only telemetry (HMI_STATE_MODEL §2.5)
+    std::array<uint16_t, 4> wheelSpeed_     = {};   // 0.1 km/h units
+    std::array<uint16_t, 4> prevWheelSpeed_ = {};
+    std::array<uint16_t, 4> motorCurrent_   = {};   // 0.01 A units
+    std::array<uint16_t, 4> prevMotorCurrent_ = {};
+    std::array<int8_t, 5>   temps_          = {};   // °C
+    std::array<int8_t, 5>   prevTemps_      = {};
+    int16_t steeringAngle_     = 0;                  // 0.1° units
+    int16_t prevSteeringAngle_ = 0;
 };
 
 #endif // SAFE_SCREEN_H

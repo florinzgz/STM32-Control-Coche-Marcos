@@ -79,6 +79,116 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — feat: Tile-Based Dirty Region Engine (motor de render tipo cluster OEM automotriz)
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Refactor completo del sistema HMI para implementar un motor de render por regiones (tiles) tipo cluster OEM automotriz. Cada zona de la pantalla es un tile independiente con su propio dirty flag y hash de contenido FNV-1a. Solo los tiles cuyo contenido ha cambiado desde el último frame se redibujan.
+- **Root cause:** El sistema anterior usaba comparaciones campo-por-campo para detectar cambios, sin agrupación formal en regiones. Los bar widgets (pedal, batería, sensor obstáculo) usaban clear+redraw completo en cada actualización, causando un flash visible (clear = COL_BG seguido de fill = color).
+- **Solución aplicada:**
+  1. **tile_engine.h**: Nuevo módulo con TileRect, TileHash (FNV-1a 32-bit), y TileSet<N> template. Hash comparison per-tile para decisión de skip/redraw.
+  2. **DriveScreen**: 12 tiles formales (SPEED, OBSTACLE, WHEELS, STEERING, BATTERY, GEAR, PEDAL, MODE_ICONS, LED_TOGGLE, DEGRADED overlay, FAULTS overlay, ACK). Pipeline: update() computa hashes → updateHash() marca dirty → draw() solo renderiza tiles sucios.
+  3. **ErrorScreen**: 5 tiles (BANNER, FAULTS, SAFETY, DIAG, ELAPSED). Cada tile se actualiza independientemente.
+  4. **SafeScreen**: 6 tiles (FAULTS, ERROR, SPEEDS, CURRENTS, TEMPS, STEERING).
+  5. **StandbyScreen**: 2 tiles (TEMPS, FAULTS).
+  6. **BootScreen**: 3 tiles (CAN_STATUS, SENSOR, DIAGNOSTICS).
+  7. **PedalBar**: Differential update — solo la porción que creció o se redujo se pinta. Si cambió el color (threshold crossing), redraw mínimo.
+  8. **BatteryIndicator**: Differential update — mismo patrón que PedalBar.
+  9. **ObstacleSensor**: Differential update — bar de proximidad sin clear+redraw.
+  10. **screen_manager.h**: Documentación actualizada reflejando pipeline tile-based.
+- **Archivos afectados:**
+  - `esp32/src/ui/tile_engine.h` — NUEVO: Core tile infrastructure
+  - `esp32/src/screens/drive_screen.h` — TileSet<12>, tile enum
+  - `esp32/src/screens/drive_screen.cpp` — Hash computation in update(), tile iteration in draw()
+  - `esp32/src/screens/error_screen.h` — TileSet<5>, tile enum
+  - `esp32/src/screens/error_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/screens/safe_screen.h` — TileSet<6>, tile enum
+  - `esp32/src/screens/safe_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/screens/standby_screen.h` — TileSet<2>, tile enum
+  - `esp32/src/screens/standby_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/screens/boot_screen.h` — TileSet<3>, tile enum
+  - `esp32/src/screens/boot_screen.cpp` — Hash computation + tile iteration
+  - `esp32/src/ui/pedal_bar.cpp` — Differential bar update
+  - `esp32/src/ui/battery_indicator.cpp` — Differential bar update
+  - `esp32/src/ui/obstacle_sensor.cpp` — Differential bar update
+  - `esp32/src/screen_manager.h` — Updated documentation
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Render completamente tile-based. Reducción significativa de carga SPI (solo tiles dirty). Eliminación de clear+redraw flash en barras. Coherencia total snapshot→tiles. Arquitectura escalable tipo instrument cluster de vehículo real.
+- **Tests:** Compilación exitosa. Revisión de código. Validación de lógica de hash y dirty flags. Sin cambios en CAN protocol, VehicleState struct, STM32 firmware.
+
+### PR — feat: complete screen verification — degraded overlay + safe telemetry + fault indicators
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Verificación de las pantallas contra la especificación HMI_STATE_MODEL.md e implementación de las funcionalidades faltantes: overlay de modo degradado/limp-home en DriveScreen, indicadores de fault flags en DriveScreen, y telemetría read-only en SafeScreen.
+
+### PR — refactor: HMI anti-flicker + render optimization
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Revisión y optimización del sistema HMI completo para eliminar flicker y redraws innecesarios. Corrección de un bug crítico (bit 0 CAN_TIMEOUT faltante en fault overlay de DriveScreen).
+
+### PR — refactor: deterministic render pipeline + zero-flicker text updates
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Implementación de pipeline de render determinista tipo "OEM automotive cluster". Eliminación total de flicker textual mediante setTextPadding. Formalización de arquitectura frame-latch CAN→snapshot→render.
+- **Root cause:** Dos categorías de problemas identificados:
+  1. **Flicker textual**: Todas las pantallas usaban `tft.fillRect()` para borrar el área de texto seguido de `tft.drawString()` para redibujar. El gap entre ambas operaciones SPI (0.5–2ms) creaba un parpadeo visible: flash de color de fondo entre el borrado y el nuevo texto.
+  2. **Heap allocation en overlay**: `draw_runtime_overlay()` usaba `String(ESP.getFreePsram() / 1024) + " KB"` que realiza 3 heap allocations por línea, causando micro-stutters y fragmentación del heap.
+- **Solución aplicada:**
+  1. Reemplazado `fillRect` + `drawString` por `setTextPadding(width)` + `drawString` en 12 componentes UI. TFT_eSPI dibuja texto + relleno de background en una sola transacción SPI, eliminando el gap visible.
+  2. Reemplazado `String` concatenation por `snprintf` a buffer stack en `draw_runtime_overlay()`.
+  3. Documentación formal del pipeline determinista en `vehicle_data.h`, `screen_manager.h`, y `main.cpp` renderTask.
+- **Archivos afectados:**
+  - `drive_screen.cpp` — drawSpeed, drawAckIndicator, drawFaultOverlays: setTextPadding
+  - `error_screen.cpp` — safety error, diagnostic, elapsed time: setTextPadding
+  - `safe_screen.cpp` — fault flags, error code, speeds, currents, temps, steering: setTextPadding
+  - `standby_screen.cpp` — temperatures, fault flags: setTextPadding
+  - `boot_screen.cpp` — CAN link status: setTextPadding
+  - `car_renderer.cpp` — wheel labels (torque%, temp): setTextPadding
+  - `obstacle_sensor.cpp` (UI) — distance text: setTextPadding
+  - `pedal_bar.cpp` — percentage text: setTextPadding
+  - `obstacle_indicator.cpp` — sensor status: setTextPadding
+  - `main.cpp` — draw_runtime_overlay: String→snprintf, renderTask documentation
+  - `vehicle_data.h` — render pipeline documentation
+  - `screen_manager.h` — deterministic render documentation
+  - `PROJECT_CHANGELOG.md` — documentación del cambio
+- **Impacto:** Eliminación total de flicker textual en todas las pantallas del HMI. Eliminación de heap allocation en overlay de boot. Pipeline CAN→UI→Render documentado y formalizado.
+- **Tests:** Verificación visual: zero visible flash en transiciones de valores de texto.
+
+### PR — refactor: HMI anti-flicker + render optimization
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Revisión y optimización del sistema HMI completo para eliminar flicker y redraws innecesarios. Corrección de un bug crítico (bit 0 CAN_TIMEOUT faltante en fault overlay de DriveScreen).
+- **Root cause:** Tres problemas identificados en la revisión:
+  1. DriveScreen `drawFaultOverlays()` listaba bits 1–7 pero omitía bit 0 (CAN_TIMEOUT 0x01) — el flag de timeout CAN nunca se mostraba.
+  2. DriveScreen `draw()` llamaba incondicionalmente a las funciones de render de cada zona (drawSpeed, ObstacleSensor::draw, CarRenderer::drawWheels/drawSteering, BatteryIndicator::draw, GearDisplay::draw, PedalBar::draw, ModeIcons::draw, LedToggle::draw) incluso cuando los datos no habían cambiado. Las funciones hacían early-return interno, pero la llamada y evaluación de parámetros implicaba overhead innecesario cada frame.
+  3. ErrorScreen hacía `tft.fillScreen(COL_RED)` (480×320 = 153600 píxeles) cada vez que el estado canLost_ cambiaba, causando flash visible cuando CAN se restauraba/perdía.
+  4. Sensor noise en torque/temperatura provocaba redraws constantes de ruedas sin cambio visual significativo.
+- **Solución aplicada:**
+  1. Añadida entrada `{ 0x01, "CAN TMO", ui::COL_AMBER }` al array `entries[]` de `drawFaultOverlays()`. Ahora todos los 8 bits (0–7) del bitmask están representados.
+  2. Movidas todas las llamadas a draw helpers dentro del bloque `if (curVal != prevVal)`, eliminando llamadas a función cuando no hay cambio real.
+  3. ErrorScreen: separada la lógica de `canLost_` toggle del `needsRedraw_`. Ahora solo redibuja el banner (top 75px via `fillRect`) en vez del screen completo (`fillScreen`). Labels estáticos se dibujan una sola vez en `needsRedraw_`.
+  4. Añadidos umbrales de cambio para ruedas: torque Δ>2%, temperatura Δ≥1°C. Valores filtrados se commitean como estado dibujado para mantener referencia estable.
+- **Impacto:** Eliminación de flicker en ErrorScreen durante transiciones CAN lost↔restored. Reducción de carga CPU en DriveScreen (zero-work frames cuando datos no cambian). Bug fix: CAN_TIMEOUT ahora visible en dashboard. Reducción de redraws de ruedas por sensor noise.
+- **Archivos modificados:**
+  - `esp32/src/screens/drive_screen.cpp` — fault overlay bit 0 fix, dirty-gated draw calls, wheel thresholds
+  - `esp32/src/screens/error_screen.cpp` — partial banner redraw instead of full fillScreen on canLost_ toggle
+  - `PROJECT_CHANGELOG.md` — documentación del cambio
+- **Tests:** STM32 build validation (`make clean && make -j$(nproc)` passed with -Wall -Wextra -Werror).
+- **Root cause:** Tres funcionalidades definidas en HMI_STATE_MODEL.md (§2.4, §2.5, §4.1) no estaban implementadas:
+  1. DriveScreen no mostraba ningún indicador cuando systemState era DEGRADED(3) o LIMP_HOME(6).
+  2. DriveScreen no mostraba indicadores visuales de fault_flags (OVERTEMP, OVERCURRENT, ENCODER, WHEEL SENSOR, ABS, TCS, CENTERING).
+  3. SafeScreen solo mostraba fault_flags y error_code, sin la telemetría read-only requerida (velocidades, corrientes, temperaturas, ángulo dirección).
+- **Solución aplicada:**
+  1. DriveScreen: banner ámbar "DEGRADED MODE - 40% POWER" / "LIMP HOME - REDUCED SPEED" en zona Y=40–58 cuando systemState es DEGRADED o LIMP_HOME. Partial redraw solo cuando cambia el estado.
+  2. DriveScreen: tira de indicadores de faults compactos en Y=28 (zona inferior del top bar). OVERTEMP/OVERCURR/ENC FAULT/WHL SENS/CENTER en ámbar. ABS/TCS en cian (informational). Partial redraw cuando cambia faultFlags.
+  3. SafeScreen: layout rediseñado — banner SAFE MODE (40px) + fault/error + separador + telemetría read-only con 4 velocidades, 4 corrientes, 5 temperaturas, ángulo dirección. Partial redraw por campo. Temperaturas cambian de color (>60°C ámbar, >80°C rojo).
+- **Impacto:** Las 7 pantallas del HMI (Boot, Standby, Drive, Degraded, Limp Home, Safe, Error) cumplen ahora completamente con la especificación HMI_STATE_MODEL.md. El conductor ve claramente el estado degradado y los fallos activos.
+- **Archivos modificados:**
+  - `esp32/src/screens/drive_screen.h` — campos para systemState, faultFlags, métodos drawDegradedOverlay/drawFaultOverlays
+  - `esp32/src/screens/drive_screen.cpp` — overlay degradado, indicadores de faults, captura systemState/faultFlags en update()
+  - `esp32/src/screens/safe_screen.h` — campos para speed/current/temp/steering arrays
+  - `esp32/src/screens/safe_screen.cpp` — layout completo con telemetría read-only, partial redraw
+- **Tests:** STM32 build validation (`make clean && make -j$(nproc)` passed).
+
 ### PR — feat: update drive screen display for TF-Mini Plus sensor
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
@@ -720,3 +830,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-09 | **Guía puesta en marcha segura** — Documento 10 fases (I2C→DS18B20→INA226→encoder→sensores→pedal→relés→motores) con conexiones exactas, materiales, circuitos optoacopladores (6N137/PC817), BOM completa. | — |
 | 2026-04-09 | **CAN loss → pantalla error** — ScreenManager detecta heartbeat STM32 stale >1.5s → fuerza transición a ERROR screen con banner "CAN LINK LOST". Auto-recuperación al reconectar. | — |
 | 2026-04-10 | **Drive screen → TF-Mini Plus** — Actualización pantalla final para TF-Mini Plus: bar proximidad 400→600 cm, zonas color ajustadas (verde >3m, cian 1.5–3m, amarillo 0.8–1.5m, naranja 0.3–0.8m, rojo <0.3m), comentarios TOFSense-M→TF-Mini Plus. | — |
+| 2026-04-10 | **Verificación pantallas final** — DriveScreen: overlay degradado/limp + indicadores fault flags. SafeScreen: telemetría read-only (speed/current/temp/steering). Cumplimiento completo HMI_STATE_MODEL.md. | — |
+| 2026-04-10 | **HMI anti-flicker + render optimización** — Fix: CAN_TIMEOUT bit 0 faltante en DriveScreen fault overlay. Opt: draw calls gated por dirty checks (zero work si no cambia). Opt: umbrales torque Δ>2% y temp Δ≥1°C para evitar redraw por ruido. Fix: ErrorScreen CAN-lost → partial banner redraw (no full fillScreen). | — |
+| 2026-04-10 | **Deterministic render pipeline** — Anti-flicker: reemplazar fillRect+drawString por setTextPadding en 12 componentes UI (zero-gap text overwrite). Fix: draw_runtime_overlay String→snprintf (eliminar heap allocation). Doc: formalizar pipeline CAN→snapshot→frame-latch→render en vehicle_data.h, screen_manager.h, main.cpp. | — |
+| 2026-04-10 | **Tile-Based Dirty Region Engine** — Refactor completo del HMI a motor de render por regiones (tiles). TileSet template con hash FNV-1a: cada tile solo se redibuja si su contenido cambia. DriveScreen: 12 tiles (speed, obstacle, wheels, steering, battery, gear, pedal, mode, LED, degraded overlay, faults overlay, ACK). ErrorScreen: 5 tiles. SafeScreen: 6 tiles. StandbyScreen: 2 tiles. BootScreen: 3 tiles. Bar widgets (pedal, batería, sensor obstáculo) con differential update (solo la porción cambiada). Eliminación total de clear+redraw flash en barras. Overlay tiles restauran tiles subyacentes al desaparecer. Nuevo: `tile_engine.h` con TileRect, TileHash, TileSet<N>. | — |

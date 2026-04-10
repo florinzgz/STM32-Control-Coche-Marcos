@@ -28,6 +28,10 @@ void ObstacleSensor::drawStatic(TFT_eSPI& tft) {
 
 // -------------------------------------------------------------------------
 // Update distance value and proximity bar
+//
+// Anti-flicker differential update: only the changed portion of the
+// proximity bar is redrawn. When bar grows, fill the new portion.
+// When it shrinks, clear the old tail. Zero SPI overhead on static values.
 // -------------------------------------------------------------------------
 void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
                           uint16_t prevDistanceCm) {
@@ -43,45 +47,59 @@ void ObstacleSensor::draw(TFT_eSPI& tft, uint16_t distanceCm,
         snprintf(buf, sizeof(buf), "%u.%02u m", meters, cents);
     }
 
-    // Clear text area and redraw — centered horizontally
+    // Clear text area and redraw — centered horizontally (anti-flicker: padding)
     int16_t textY = SENSOR_Y + 14;
-    tft.fillRect(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
-    RTRACE_FILL_RECT(SCREEN_W / 2 - 40, textY, 80, 12, COL_BG);
     tft.setTextColor(COL_WHITE, COL_BG);
     tft.setTextSize(1);
     tft.setTextDatum(TC_DATUM);
+    tft.setTextPadding(80);
     tft.drawString(buf, SCREEN_W / 2, textY);
     RTRACE_TEXT(SCREEN_W / 2, textY, buf, COL_WHITE, COL_BG, 1, TC_DATUM);
+    tft.setTextPadding(0);
     tft.setTextDatum(TL_DATUM);
 
-    // Proximity bar fill
+    // Proximity bar fill — differential update
     int16_t barY = SENSOR_Y + 28;
+    static constexpr uint16_t BAR_MAX_CM = 600;
+    int16_t barInner = SENSOR_BAR_W - 4;
 
-    // Clear bar interior
-    tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
-                 SENSOR_BAR_W - 4, SENSOR_BAR_H - 4, COL_BG);
-    RTRACE_FILL_RECT(SENSOR_BAR_X + 2, barY + 2,
-                     SENSOR_BAR_W - 4, SENSOR_BAR_H - 4, COL_BG);
+    // Compute fill widths for current and previous values
+    auto computeFill = [&](uint16_t dist) -> int16_t {
+        if (dist == 0) return 0;
+        uint16_t clamped = (dist > BAR_MAX_CM) ? BAR_MAX_CM : dist;
+        return static_cast<int16_t>(
+            (static_cast<int32_t>(BAR_MAX_CM - clamped) * barInner) / BAR_MAX_CM);
+    };
 
-    // Only draw fill when sensor has a valid reading
-    if (distanceCm > 0) {
-        uint16_t col = proximityColor(distanceCm);
+    int16_t fillW = computeFill(distanceCm);
+    int16_t prevFW = computeFill(prevDistanceCm);
 
-        // Map distance to bar width (600 cm = empty, 0 cm = full).
-        // TF-Mini Plus range is 10–1200 cm; 600 cm (6 m) gives good
-        // visual resolution in the 0–4 m warning zone while still
-        // showing a sliver of fill at moderate distances (4–6 m).
-        static constexpr uint16_t BAR_MAX_CM = 600;
-        uint16_t clampDist = (distanceCm > BAR_MAX_CM) ? BAR_MAX_CM : distanceCm;
-        int16_t fillW = static_cast<int16_t>(
-            (static_cast<int32_t>(BAR_MAX_CM - clampDist) * (SENSOR_BAR_W - 4)) / BAR_MAX_CM);
+    uint16_t fillCol = (distanceCm > 0) ? proximityColor(distanceCm) : COL_BG;
+    uint16_t prevCol = (prevDistanceCm > 0) ? proximityColor(prevDistanceCm) : COL_BG;
 
-        if (fillW > 0) {
+    if (fillCol != prevCol || (prevDistanceCm == 0) != (distanceCm == 0)) {
+        // Color changed or transitioning from/to no-reading: full bar redraw
+        tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
+                     barInner, SENSOR_BAR_H - 4, COL_BG);
+        if (fillW > 0 && distanceCm > 0) {
             tft.fillRect(SENSOR_BAR_X + 2, barY + 2,
-                         fillW, SENSOR_BAR_H - 4, col);
+                         fillW, SENSOR_BAR_H - 4, fillCol);
             RTRACE_FILL_RECT(SENSOR_BAR_X + 2, barY + 2,
-                             fillW, SENSOR_BAR_H - 4, col);
+                             fillW, SENSOR_BAR_H - 4, fillCol);
         }
+    } else if (fillW > prevFW) {
+        // Bar grew (object closer) — fill the new portion
+        if (prevFW < 0) prevFW = 0;
+        tft.fillRect(SENSOR_BAR_X + 2 + prevFW, barY + 2,
+                     fillW - prevFW, SENSOR_BAR_H - 4, fillCol);
+        RTRACE_FILL_RECT(SENSOR_BAR_X + 2 + prevFW, barY + 2,
+                         fillW - prevFW, SENSOR_BAR_H - 4, fillCol);
+    } else if (fillW < prevFW) {
+        // Bar shrank (object further) — clear the removed portion
+        tft.fillRect(SENSOR_BAR_X + 2 + fillW, barY + 2,
+                     prevFW - fillW, SENSOR_BAR_H - 4, COL_BG);
+        RTRACE_FILL_RECT(SENSOR_BAR_X + 2 + fillW, barY + 2,
+                         prevFW - fillW, SENSOR_BAR_H - 4, COL_BG);
     }
 }
 
