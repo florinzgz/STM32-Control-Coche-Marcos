@@ -73,8 +73,8 @@ inline constexpr int16_t PAD_STANDBY_FAULTS  = 240;
 inline constexpr int16_t PAD_BOOT_CAN_STATUS = 160;
 
 // Battery indicator — percentage text (size 1, max "100%")
-// Computed as battery inner width minus margins
-inline constexpr int16_t PAD_BATTERY_TEXT    = 55;  // BAT_W - 10 (inner) - 4 margins ≈ 55
+// Based on battery inner width (75 total - 10 outline - 4 margin ≈ 61) minus padding
+inline constexpr int16_t PAD_BATTERY_TEXT    = 55;
 
 // =========================================================================
 // CAN Jitter Filtering Thresholds (DriveScreen wheels)

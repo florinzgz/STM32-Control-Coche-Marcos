@@ -96,7 +96,9 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     // Deterministic hysteresis: switch to dark text at BATT_HYSTERESIS_HIGH,
     // switch back at BATT_HYSTERESIS_LOW. The decision depends only on the
     // current fill level relative to the thresholds, not on previous frame state.
-    // In the hysteresis band [LOW, HIGH), retain the previous visual style.
+    // In the hysteresis band [LOW, HIGH), the previous fill level determines
+    // the outcome: if the bar was already past the high threshold last frame,
+    // dark text is retained; otherwise light text is used.
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%u%%", pct);
     int16_t highThresh = barInner * cfg::BATT_HYSTERESIS_HIGH / 100;
@@ -107,8 +109,8 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     } else if (fillW < lowThresh) {
         curUseDark = false;
     } else {
-        // In hysteresis band — use previous fill to determine: if bar is
-        // growing into the band, stay light; if shrinking into it, stay dark.
+        // In hysteresis band — retain dark text only if previous fill
+        // was already above the high threshold (was in dark mode).
         curUseDark = (prevFW >= highThresh);
     }
     uint16_t txtBg = curUseDark ? col : COL_BG;
