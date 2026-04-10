@@ -13,6 +13,7 @@
 #include "screen_manager.h"
 #include "ui/runtime_monitor.h"
 #include "ui/ui_common.h"
+#include <Arduino.h>
 
 ScreenManager::ScreenManager()
     : currentScreen_(&bootScreen_)
@@ -84,6 +85,31 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 
     // ---- Normal state-machine ----
     can::SystemState newState = data.heartbeat().systemState;
+
+    // ---- CAN-loss detection ----
+    // If the STM32 heartbeat was once received (timestampMs > 0) but is now
+    // older than CAN_LOSS_TIMEOUT_MS, the CAN cable is likely disconnected.
+    // Force transition to the ERROR screen so the user gets visual feedback.
+    // On the BOOT screen the existing "CAN: WAITING..." indicator suffices.
+    {
+        unsigned long hbTs = data.heartbeat().timestampMs;
+        if (hbTs > 0) {
+            unsigned long age = millis() - hbTs;
+            bool stale = (age > can::CAN_LOSS_TIMEOUT_MS);
+
+            if (stale && currentState_ != can::SystemState::BOOT) {
+                if (!canLost_) {
+                    canLost_ = true;
+                    Serial.printf("[SCREEN] CAN lost — no heartbeat for >%lu ms\n",
+                                  (unsigned long)can::CAN_LOSS_TIMEOUT_MS);
+                }
+                newState = can::SystemState::ERROR;
+            } else if (canLost_ && !stale) {
+                canLost_ = false;
+                Serial.println("[SCREEN] CAN communication restored");
+            }
+        }
+    }
 
     if (newState != currentState_) {
         currentScreen_->onExit();

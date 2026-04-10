@@ -29,6 +29,8 @@ private:
     static const char* diagSubsystemName(uint8_t sub);
 
     bool     needsRedraw_    = true;
+    bool     canLost_        = false;   // CAN communication lost (ESP32-detected)
+    bool     prevCanLost_    = false;   // previous value for redraw detection
     uint8_t  faultFlags_     = 0;
     uint8_t  prevFaultFlags_ = 0xFF;
     uint8_t  errorCode_      = 0;
