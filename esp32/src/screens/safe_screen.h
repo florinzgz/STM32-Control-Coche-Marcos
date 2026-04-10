@@ -4,7 +4,14 @@
 // Shown when system_state = SAFE (4).
 // Prominent safety warning banner. Read-only telemetry visible:
 // wheel speeds, motor currents, temperatures, steering angle.
-// All controls disabled. No heap allocation.
+//
+// TILE-BASED DIRTY REGION ENGINE:
+//   STILE_FAULTS    — fault flags
+//   STILE_ERROR     — error code
+//   STILE_SPEEDS    — wheel speed values (4 wheels)
+//   STILE_CURRENTS  — motor current values (4 wheels)
+//   STILE_TEMPS     — temperature values (5 sensors)
+//   STILE_STEERING  — steering angle
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.5
 // =============================================================================
@@ -13,8 +20,20 @@
 #define SAFE_SCREEN_H
 
 #include "screen.h"
+#include "ui/tile_engine.h"
 #include <cstdint>
 #include <array>
+
+/// Tile indices for SafeScreen
+enum SafeTile : uint8_t {
+    STILE_FAULTS = 0,
+    STILE_ERROR,
+    STILE_SPEEDS,
+    STILE_CURRENTS,
+    STILE_TEMPS,
+    STILE_STEERING,
+    STILE_COUNT
+};
 
 class SafeScreen : public Screen {
 public:
@@ -24,6 +43,8 @@ public:
     void draw()    override;
 
 private:
+    ui::TileSet<STILE_COUNT> tiles_;
+
     bool    needsRedraw_    = true;
     uint8_t faultFlags_     = 0;
     uint8_t prevFaultFlags_ = 0xFF;

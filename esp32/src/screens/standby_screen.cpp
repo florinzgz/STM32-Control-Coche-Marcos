@@ -1,5 +1,7 @@
 // =============================================================================
-// ESP32-S3 HMI — Standby Screen Implementation
+// ESP32-S3 HMI — Standby Screen Implementation (Tile-Based Dirty Region Engine)
+//
+// Each dynamic data group is a tile — only redrawn when its hash changes.
 // =============================================================================
 
 #include "standby_screen.h"
@@ -18,6 +20,11 @@ void StandbyScreen::onEnter() {
     prevFaultFlags_ = 0xFF;
     memset(temps_, 0, sizeof(temps_));
     memset(prevTemps_, 0x7F, sizeof(prevTemps_));
+
+    // Initialize tile regions
+    tiles_.setRect(YTILE_TEMPS,  140, 185, 200, 110);
+    tiles_.setRect(YTILE_FAULTS, 0,   290, ui::SCREEN_W, 30);
+    tiles_.invalidateAll();
 }
 
 void StandbyScreen::onExit() {}
@@ -27,6 +34,10 @@ void StandbyScreen::update(const vehicle::VehicleData& data) {
     for (uint8_t i = 0; i < 5; ++i) {
         temps_[i] = data.temp().temps[i];
     }
+
+    // Compute tile hashes
+    tiles_.updateHash(YTILE_TEMPS,  ui::tileHash(temps_, sizeof(temps_)));
+    tiles_.updateHash(YTILE_FAULTS, ui::tileHashVal(faultFlags_));
 }
 
 void StandbyScreen::draw() {
@@ -81,31 +92,36 @@ void StandbyScreen::draw() {
 
         prevFaultFlags_ = faultFlags_ + 1;  // Force redraw
         memset(prevTemps_, 0x7F, sizeof(prevTemps_));
+
+        tiles_.markAllDirty();
     }
 
     RTRACE_SET_LAYER(2);
 
-    // Temperature values (partial redraw)
-    for (uint8_t i = 0; i < 5; ++i) {
-        if (temps_[i] != prevTemps_[i]) {
-            prevTemps_[i] = temps_[i];
+    // ---- TILE: Temperature values ----
+    if (tiles_.isDirty(YTILE_TEMPS)) {
+        for (uint8_t i = 0; i < 5; ++i) {
+            if (temps_[i] != prevTemps_[i]) {
+                prevTemps_[i] = temps_[i];
 
-            char buf[ui::FMT_BUF_SMALL];
-            snprintf(buf, sizeof(buf), "%3d C", temps_[i]);
+                char buf[ui::FMT_BUF_SMALL];
+                snprintf(buf, sizeof(buf), "%3d C", temps_[i]);
 
-            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-            tft.setTextSize(1);
-            tft.setTextDatum(TL_DATUM);
-            tft.setTextPadding(80);
-            tft.drawString(buf, 140, 185 + i * 22);
-            RTRACE_TEXT(140, 185 + i * 22, buf,
-                        ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
-            tft.setTextPadding(0);
+                tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+                tft.setTextSize(1);
+                tft.setTextDatum(TL_DATUM);
+                tft.setTextPadding(80);
+                tft.drawString(buf, 140, 185 + i * 22);
+                RTRACE_TEXT(140, 185 + i * 22, buf,
+                            ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
+                tft.setTextPadding(0);
+            }
         }
+        tiles_.markClean(YTILE_TEMPS);
     }
 
-    // Fault flags (partial redraw)
-    if (faultFlags_ != prevFaultFlags_) {
+    // ---- TILE: Fault flags ----
+    if (tiles_.isDirty(YTILE_FAULTS)) {
         prevFaultFlags_ = faultFlags_;
 
         tft.setTextDatum(MC_DATUM);
@@ -126,6 +142,7 @@ void StandbyScreen::draw() {
         }
         tft.setTextPadding(0);
         tft.setTextDatum(TL_DATUM);
+        tiles_.markClean(YTILE_FAULTS);
     }
 
     RTRACE_DUMP_IF_PENDING();

@@ -3,14 +3,11 @@
 //
 // Static splash screen shown during system_state = BOOT (0).
 // Displays firmware name, CAN link status, and CAN diagnostic panel.
-// No interactive elements. No heap allocation.
 //
-// The diagnostic panel shows:
-//   - ESP32 TWAI bus state and error counters
-//   - STM32 heartbeat status (alive counter, system state, faults, freeze detect)
-//   - STM32→ESP32 RX frame summary (= what STM32 transmits)
-//   - Bus error counters (tx_fail, rx_miss, bus_err)
-//   - Diagnostic verdict: which side (ESP32 or STM32) has the problem
+// TILE-BASED DIRTY REGION ENGINE:
+//   BTILE_CAN_STATUS  — CAN link status (LINKED / WAITING)
+//   BTILE_SENSOR      — obstacle sensor status
+//   BTILE_DIAGNOSTICS — CAN diagnostic panel (ESP32 bus, STM32 heartbeat, etc.)
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.1
 // =============================================================================
@@ -19,7 +16,16 @@
 #define BOOT_SCREEN_H
 
 #include "screen.h"
+#include "ui/tile_engine.h"
 #include "../sensors/obstacle_sensor.h"
+
+/// Tile indices for BootScreen
+enum BootTile : uint8_t {
+    BTILE_CAN_STATUS = 0,
+    BTILE_SENSOR,
+    BTILE_DIAGNOSTICS,
+    BTILE_COUNT
+};
 
 class BootScreen : public Screen {
 public:
@@ -29,6 +35,8 @@ public:
     void draw()    override;
 
 private:
+    ui::TileSet<BTILE_COUNT> tiles_;
+
     bool needsRedraw_ = true;
     bool canLinked_    = false;
     bool prevCanLinked_ = false;

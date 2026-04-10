@@ -1,8 +1,17 @@
 // =============================================================================
-// ESP32-S3 HMI — Error Screen Implementation
+// ESP32-S3 HMI — Error Screen Implementation (Tile-Based Dirty Region Engine)
 //
 // Shows full human-readable fault flag names, safety error descriptions,
 // diagnostic subsystem names, and elapsed time since the error occurred.
+//
+// Tile map:
+//   ETILE_BANNER   [  0,  0, 480, 75]  — title banner (SYSTEM ERROR / CAN LINK LOST)
+//   ETILE_FAULTS   [ 10, 80, 460, 83]  — fault flags hex + individual names
+//   ETILE_SAFETY   [ 10,170, 460, 40]  — safety error code + name
+//   ETILE_DIAG     [ 10,220, 460, 40]  — diagnostic error + subsystem
+//   ETILE_ELAPSED  [ 10,270, 460, 30]  — elapsed time since error
+//
+// Each tile is only redrawn when its content hash changes.
 // =============================================================================
 
 #include "error_screen.h"
@@ -74,6 +83,14 @@ void ErrorScreen::onEnter() {
     errorEntryMs_  = millis();
     prevElapsedSec_ = 0xFFFFFFFF;
     prevDiagSubsystem_ = 0xFF;
+
+    // Initialize tile regions
+    tiles_.setRect(ETILE_BANNER,  0,   0, ui::SCREEN_W, 75);
+    tiles_.setRect(ETILE_FAULTS, 10,  80, 460, 83);
+    tiles_.setRect(ETILE_SAFETY, 10, 170, 460, 40);
+    tiles_.setRect(ETILE_DIAG,   10, 220, 460, 40);
+    tiles_.setRect(ETILE_ELAPSED,10, 270, 460, 30);
+    tiles_.invalidateAll();
 }
 
 void ErrorScreen::onExit() {}
@@ -89,20 +106,26 @@ void ErrorScreen::update(const vehicle::VehicleData& data) {
     errorCode_     = data.safety().errorCode;
     diagCode_      = data.diag().errorCode;
     diagSubsystem_ = data.diag().subsystem;
+
+    // ---- Compute tile hashes ----
+    tiles_.updateHash(ETILE_BANNER, ui::tileHashVal(canLost_));
+    tiles_.updateHash(ETILE_FAULTS, ui::tileHashVal(faultFlags_));
+    tiles_.updateHash(ETILE_SAFETY, ui::tileHashVal(errorCode_));
+    {
+        ui::TileHash dh = ui::tileHashVal(diagCode_);
+        dh = ui::tileHashFeed(dh, diagSubsystem_);
+        tiles_.updateHash(ETILE_DIAG, dh);
+    }
+    // Elapsed time changes every second — hash the second count
+    uint32_t elapsedSec = (millis() - errorEntryMs_) / 1000;
+    tiles_.updateHash(ETILE_ELAPSED, ui::tileHashVal(elapsedSec));
 }
 
 void ErrorScreen::draw() {
-    // Detect CAN-lost state change — only redraw the banner area (partial),
-    // NOT the entire screen, to avoid visible full-screen flash.
-    bool bannerDirty = false;
-    if (canLost_ != prevCanLost_) {
-        prevCanLost_ = canLost_;
-        bannerDirty = true;
-    }
-
     if (needsRedraw_) {
         needsRedraw_ = false;
 
+        // ---- STATIC LAYER ----
         RTRACE_SET_LAYER(0);
         tft.fillScreen(ui::COL_RED);
         RTRACE_FILL_SCREEN(ui::COL_RED);
@@ -126,18 +149,21 @@ void ErrorScreen::draw() {
         RTRACE_TEXT(10, 270, "ELAPSED:",
                     ui::COL_WHITE, ui::COL_RED, 1, TL_DATUM);
 
-        // Force redraw of all dynamic values
+        // Force redraw of all dynamic tiles
         prevFaultFlags_ = faultFlags_ + 1;
         prevErrorCode_  = errorCode_ + 1;
         prevDiagCode_   = diagCode_ + 1;
         prevElapsedSec_ = 0xFFFFFFFF;
 
-        // Banner is always drawn on full redraw
-        bannerDirty = true;
+        tiles_.markAllDirty();
     }
 
-    // ---- Banner area (partial redraw on canLost_ toggle) ----
-    if (bannerDirty) {
+    RTRACE_SET_LAYER(2);
+
+    // ---- TILE: Banner (CAN LOST / SYSTEM ERROR) ----
+    if (tiles_.isDirty(ETILE_BANNER)) {
+        prevCanLost_ = canLost_;
+
         // Clear only the banner area (top 75 px), not the entire screen
         tft.fillRect(0, 0, ui::SCREEN_W, 75, ui::COL_RED);
         RTRACE_FILL_RECT(0, 0, ui::SCREEN_W, 75, ui::COL_RED);
@@ -166,12 +192,11 @@ void ErrorScreen::draw() {
                         ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
         }
         tft.setTextDatum(TL_DATUM);
+        tiles_.markClean(ETILE_BANNER);
     }
 
-    RTRACE_SET_LAYER(2);
-
-    // ---- Fault flags: hex code + individual flag names ----
-    if (faultFlags_ != prevFaultFlags_) {
+    // ---- TILE: Fault flags ----
+    if (tiles_.isDirty(ETILE_FAULTS)) {
         prevFaultFlags_ = faultFlags_;
 
         // Clear the fault flags display area (multi-line layout requires fillRect)
@@ -211,10 +236,11 @@ void ErrorScreen::draw() {
                 }
             }
         }
+        tiles_.markClean(ETILE_FAULTS);
     }
 
-    // ---- Safety error: code + human-readable name ----
-    if (errorCode_ != prevErrorCode_) {
+    // ---- TILE: Safety error ----
+    if (tiles_.isDirty(ETILE_SAFETY)) {
         prevErrorCode_ = errorCode_;
 
         char buf[64];
@@ -228,10 +254,11 @@ void ErrorScreen::draw() {
         tft.drawString(buf, 10, 186);
         RTRACE_TEXT(10, 186, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
+        tiles_.markClean(ETILE_SAFETY);
     }
 
-    // ---- Diagnostic: error code + subsystem name ----
-    if (diagCode_ != prevDiagCode_ || diagSubsystem_ != prevDiagSubsystem_) {
+    // ---- TILE: Diagnostic ----
+    if (tiles_.isDirty(ETILE_DIAG)) {
         prevDiagCode_ = diagCode_;
         prevDiagSubsystem_ = diagSubsystem_;
 
@@ -246,11 +273,12 @@ void ErrorScreen::draw() {
         tft.drawString(buf, 10, 236);
         RTRACE_TEXT(10, 236, buf, ui::COL_WHITE, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
+        tiles_.markClean(ETILE_DIAG);
     }
 
-    // ---- Elapsed time (permanence) since error ----
-    uint32_t elapsedSec = (millis() - errorEntryMs_) / 1000;
-    if (elapsedSec != prevElapsedSec_) {
+    // ---- TILE: Elapsed time ----
+    if (tiles_.isDirty(ETILE_ELAPSED)) {
+        uint32_t elapsedSec = (millis() - errorEntryMs_) / 1000;
         prevElapsedSec_ = elapsedSec;
 
         char buf[48];
@@ -271,6 +299,7 @@ void ErrorScreen::draw() {
         tft.drawString(buf, 10, 286);
         RTRACE_TEXT(10, 286, buf, ui::COL_AMBER, ui::COL_RED, 2, TL_DATUM);
         tft.setTextPadding(0);
+        tiles_.markClean(ETILE_ELAPSED);
     }
 
     tft.setTextDatum(TL_DATUM);

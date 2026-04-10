@@ -1,8 +1,9 @@
 // =============================================================================
-// ESP32-S3 HMI — Safe Screen Implementation
+// ESP32-S3 HMI — Safe Screen Implementation (Tile-Based Dirty Region Engine)
 //
 // Displays SAFE MODE banner, fault flags, error code, and read-only
 // telemetry: wheel speeds, motor currents, temperatures, steering angle.
+// Each data group is a tile — only redrawn when its hash changes.
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.5
 // =============================================================================
@@ -50,6 +51,15 @@ void SafeScreen::onEnter() {
     prevTemps_.fill(0x7F);
     steeringAngle_     = 0;
     prevSteeringAngle_ = 0x7FFF;
+
+    // Initialize tile regions
+    tiles_.setRect(STILE_FAULTS,   COL_LABEL_X, FAULT_VALUE_Y, 460, 12);
+    tiles_.setRect(STILE_ERROR,    COL_LABEL_X, ERR_VALUE_Y,   460, 12);
+    tiles_.setRect(STILE_SPEEDS,   COL_VAL_START, SPEED_VAL_Y, 400, 14);
+    tiles_.setRect(STILE_CURRENTS, COL_VAL_START, CURR_VAL_Y,  400, 14);
+    tiles_.setRect(STILE_TEMPS,    COL_VAL_START, TEMP_VAL_Y,  400, 14);
+    tiles_.setRect(STILE_STEERING, COL_VAL_START, STEER_Y,     140, 14);
+    tiles_.invalidateAll();
 }
 
 void SafeScreen::onExit() {}
@@ -66,6 +76,17 @@ void SafeScreen::update(const vehicle::VehicleData& data) {
         temps_[i] = data.temp().temps[i];
     }
     steeringAngle_ = data.steering().angleRaw;
+
+    // ---- Compute tile hashes ----
+    tiles_.updateHash(STILE_FAULTS, ui::tileHashVal(faultFlags_));
+    tiles_.updateHash(STILE_ERROR,  ui::tileHashVal(errorCode_));
+    tiles_.updateHash(STILE_SPEEDS, ui::tileHash(wheelSpeed_.data(),
+                      wheelSpeed_.size() * sizeof(uint16_t)));
+    tiles_.updateHash(STILE_CURRENTS, ui::tileHash(motorCurrent_.data(),
+                      motorCurrent_.size() * sizeof(uint16_t)));
+    tiles_.updateHash(STILE_TEMPS, ui::tileHash(temps_.data(),
+                      temps_.size() * sizeof(int8_t)));
+    tiles_.updateHash(STILE_STEERING, ui::tileHashVal(steeringAngle_));
 }
 
 void SafeScreen::draw() {
@@ -136,12 +157,14 @@ void SafeScreen::draw() {
         prevMotorCurrent_.fill(0xFFFF);
         prevTemps_.fill(0x7F);
         prevSteeringAngle_ = steeringAngle_ + 1;
+
+        tiles_.markAllDirty();
     }
 
     RTRACE_SET_LAYER(2);
 
-    // Fault flags (partial redraw)
-    if (faultFlags_ != prevFaultFlags_) {
+    // ---- TILE: Fault flags ----
+    if (tiles_.isDirty(STILE_FAULTS)) {
         prevFaultFlags_ = faultFlags_;
 
         tft.setTextDatum(TL_DATUM);
@@ -158,10 +181,11 @@ void SafeScreen::draw() {
             tft.drawString(buf, COL_LABEL_X, FAULT_VALUE_Y);
         }
         tft.setTextPadding(0);
+        tiles_.markClean(STILE_FAULTS);
     }
 
-    // Error code (partial redraw)
-    if (errorCode_ != prevErrorCode_) {
+    // ---- TILE: Error code ----
+    if (tiles_.isDirty(STILE_ERROR)) {
         prevErrorCode_ = errorCode_;
 
         char buf[ui::FMT_BUF_MED];
@@ -172,62 +196,72 @@ void SafeScreen::draw() {
         tft.setTextPadding(460);
         tft.drawString(buf, COL_LABEL_X, ERR_VALUE_Y);
         tft.setTextPadding(0);
+        tiles_.markClean(STILE_ERROR);
     }
 
-    // Wheel speeds (partial redraw per wheel)
-    for (uint8_t i = 0; i < 4; ++i) {
-        if (wheelSpeed_[i] != prevWheelSpeed_[i]) {
-            prevWheelSpeed_[i] = wheelSpeed_[i];
-            int16_t x = COL_VAL_START + 18 + i * COL_VAL_SPACE;
-            char buf[ui::FMT_BUF_SMALL];
-            snprintf(buf, sizeof(buf), "%u.%u km/h",
-                     wheelSpeed_[i] / 10, wheelSpeed_[i] % 10);
-            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-            tft.setTextSize(1);
-            tft.setTextDatum(TL_DATUM);
-            tft.setTextPadding(78);
-            tft.drawString(buf, x, SPEED_VAL_Y);
-            tft.setTextPadding(0);
+    // ---- TILE: Wheel speeds ----
+    if (tiles_.isDirty(STILE_SPEEDS)) {
+        for (uint8_t i = 0; i < 4; ++i) {
+            if (wheelSpeed_[i] != prevWheelSpeed_[i]) {
+                prevWheelSpeed_[i] = wheelSpeed_[i];
+                int16_t x = COL_VAL_START + 18 + i * COL_VAL_SPACE;
+                char buf[ui::FMT_BUF_SMALL];
+                snprintf(buf, sizeof(buf), "%u.%u km/h",
+                         wheelSpeed_[i] / 10, wheelSpeed_[i] % 10);
+                tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+                tft.setTextSize(1);
+                tft.setTextDatum(TL_DATUM);
+                tft.setTextPadding(78);
+                tft.drawString(buf, x, SPEED_VAL_Y);
+                tft.setTextPadding(0);
+            }
         }
+        tiles_.markClean(STILE_SPEEDS);
     }
 
-    // Motor currents (partial redraw per wheel)
-    for (uint8_t i = 0; i < 4; ++i) {
-        if (motorCurrent_[i] != prevMotorCurrent_[i]) {
-            prevMotorCurrent_[i] = motorCurrent_[i];
-            int16_t x = COL_VAL_START + 18 + i * COL_VAL_SPACE;
-            char buf[ui::FMT_BUF_SMALL];
-            snprintf(buf, sizeof(buf), "%u.%02uA",
-                     motorCurrent_[i] / 100, motorCurrent_[i] % 100);
-            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-            tft.setTextSize(1);
-            tft.setTextDatum(TL_DATUM);
-            tft.setTextPadding(78);
-            tft.drawString(buf, x, CURR_VAL_Y);
-            tft.setTextPadding(0);
+    // ---- TILE: Motor currents ----
+    if (tiles_.isDirty(STILE_CURRENTS)) {
+        for (uint8_t i = 0; i < 4; ++i) {
+            if (motorCurrent_[i] != prevMotorCurrent_[i]) {
+                prevMotorCurrent_[i] = motorCurrent_[i];
+                int16_t x = COL_VAL_START + 18 + i * COL_VAL_SPACE;
+                char buf[ui::FMT_BUF_SMALL];
+                snprintf(buf, sizeof(buf), "%u.%02uA",
+                         motorCurrent_[i] / 100, motorCurrent_[i] % 100);
+                tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+                tft.setTextSize(1);
+                tft.setTextDatum(TL_DATUM);
+                tft.setTextPadding(78);
+                tft.drawString(buf, x, CURR_VAL_Y);
+                tft.setTextPadding(0);
+            }
         }
+        tiles_.markClean(STILE_CURRENTS);
     }
 
-    // Temperatures (partial redraw per sensor)
-    for (uint8_t i = 0; i < 5; ++i) {
-        if (temps_[i] != prevTemps_[i]) {
-            prevTemps_[i] = temps_[i];
-            int16_t x = COL_VAL_START + 18 + i * 76;
-            char buf[ui::FMT_BUF_SMALL];
-            snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", temps_[i]);
-            uint16_t col = (temps_[i] >= 80) ? ui::COL_RED :
-                           (temps_[i] >= 60) ? ui::COL_AMBER : ui::COL_WHITE;
-            tft.setTextColor(col, ui::COL_BG);
-            tft.setTextSize(1);
-            tft.setTextDatum(TL_DATUM);
-            tft.setTextPadding(52);
-            tft.drawString(buf, x, TEMP_VAL_Y);
-            tft.setTextPadding(0);
+    // ---- TILE: Temperatures ----
+    if (tiles_.isDirty(STILE_TEMPS)) {
+        for (uint8_t i = 0; i < 5; ++i) {
+            if (temps_[i] != prevTemps_[i]) {
+                prevTemps_[i] = temps_[i];
+                int16_t x = COL_VAL_START + 18 + i * 76;
+                char buf[ui::FMT_BUF_SMALL];
+                snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", temps_[i]);
+                uint16_t col = (temps_[i] >= 80) ? ui::COL_RED :
+                               (temps_[i] >= 60) ? ui::COL_AMBER : ui::COL_WHITE;
+                tft.setTextColor(col, ui::COL_BG);
+                tft.setTextSize(1);
+                tft.setTextDatum(TL_DATUM);
+                tft.setTextPadding(52);
+                tft.drawString(buf, x, TEMP_VAL_Y);
+                tft.setTextPadding(0);
+            }
         }
+        tiles_.markClean(STILE_TEMPS);
     }
 
-    // Steering angle (partial redraw)
-    if (steeringAngle_ != prevSteeringAngle_) {
+    // ---- TILE: Steering angle ----
+    if (tiles_.isDirty(STILE_STEERING)) {
         prevSteeringAngle_ = steeringAngle_;
         char buf[ui::FMT_BUF_MED];
         int16_t deg = steeringAngle_ / 10;
@@ -240,6 +274,7 @@ void SafeScreen::draw() {
         tft.setTextPadding(140);
         tft.drawString(buf, COL_VAL_START, STEER_Y);
         tft.setTextPadding(0);
+        tiles_.markClean(STILE_STEERING);
     }
 
     RTRACE_DUMP_IF_PENDING();

@@ -97,6 +97,13 @@ void BootScreen::onEnter() {
     diagStm32State_        = 0xFF;
     diagStm32Faults_       = 0;
     diagStm32Error_        = 0;
+
+    // Initialize tile regions
+    tiles_.setRect(BTILE_CAN_STATUS,  0, ui::SCREEN_H / 2 + 60, ui::SCREEN_W, 20);
+    tiles_.setRect(BTILE_SENSOR,      0, ui::SCREEN_H / 2 + 80, ui::SCREEN_W, 20);
+    tiles_.setRect(BTILE_DIAGNOSTICS, 0, DIAG_SEP_Y - 1,
+                   ui::SCREEN_W, ui::SCREEN_H - DIAG_SEP_Y + 1);
+    tiles_.invalidateAll();
 }
 
 void BootScreen::onExit() {}
@@ -186,6 +193,18 @@ void BootScreen::update(const vehicle::VehicleData& data) {
         diagStm32Error_   = hb.errorCode;
         diagNeedsRedraw_  = true;
     }
+
+    // ---- Compute tile hashes ----
+    tiles_.updateHash(BTILE_CAN_STATUS, ui::tileHashVal(canLinked_));
+    {
+        ui::TileHash sh = ui::tileHashVal(sensorStatus_);
+        sh = ui::tileHashFeed(sh, sensorDistanceMm_);
+        tiles_.updateHash(BTILE_SENSOR, sh);
+    }
+    // Diagnostics tile uses diagNeedsRedraw_ as event-driven dirty flag
+    if (diagNeedsRedraw_) {
+        tiles_.markDirty(BTILE_DIAGNOSTICS);
+    }
 }
 
 void BootScreen::draw() {
@@ -222,14 +241,17 @@ void BootScreen::draw() {
                             : obstacle_sensor::SensorStatus::WAITING;  // Force redraw
         prevSensorDistanceMm_ = ~sensorDistanceMm_;  // Force distance redraw (always differs)
         diagNeedsRedraw_ = true;  // Force diagnostic redraw
+
+        tiles_.markAllDirty();
     }
 
-    // CAN link status (partial redraw — anti-flicker: padding instead of fillRect)
-    if (canLinked_ != prevCanLinked_) {
+    RTRACE_SET_LAYER(2);
+
+    // ---- TILE: CAN link status ----
+    if (tiles_.isDirty(BTILE_CAN_STATUS)) {
         prevCanLinked_ = canLinked_;
 
         int16_t statusY = ui::SCREEN_H / 2 + 70;
-        RTRACE_SET_LAYER(2);
 
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
@@ -247,17 +269,20 @@ void BootScreen::draw() {
         }
         tft.setTextPadding(0);
         tft.setTextDatum(TL_DATUM);
+        tiles_.markClean(BTILE_CAN_STATUS);
     }
 
-    // Obstacle sensor status (partial redraw)
-    RTRACE_SET_LAYER(2);
-    hmi::ObstacleIndicator::draw(tft, sensorStatus_, prevSensorStatus_,
-                                 sensorDistanceMm_, prevSensorDistanceMm_);
-    prevSensorStatus_      = sensorStatus_;
-    prevSensorDistanceMm_  = sensorDistanceMm_;
+    // ---- TILE: Obstacle sensor status ----
+    if (tiles_.isDirty(BTILE_SENSOR)) {
+        hmi::ObstacleIndicator::draw(tft, sensorStatus_, prevSensorStatus_,
+                                     sensorDistanceMm_, prevSensorDistanceMm_);
+        prevSensorStatus_      = sensorStatus_;
+        prevSensorDistanceMm_  = sensorDistanceMm_;
+        tiles_.markClean(BTILE_SENSOR);
+    }
 
-    // CAN diagnostics panel (partial redraw when values change)
-    if (diagNeedsRedraw_) {
+    // ---- TILE: CAN diagnostics panel ----
+    if (tiles_.isDirty(BTILE_DIAGNOSTICS)) {
         diagNeedsRedraw_ = false;
 
         RTRACE_SET_LAYER(2);
@@ -385,6 +410,7 @@ void BootScreen::draw() {
             RTRACE_TEXT(DIAG_MARGIN_X, DIAG_LINE5_Y, verdict,
                         verdictCol, ui::COL_BG, 1, TL_DATUM);
         }
+        tiles_.markClean(BTILE_DIAGNOSTICS);
     }
 
     RTRACE_DUMP_IF_PENDING();
