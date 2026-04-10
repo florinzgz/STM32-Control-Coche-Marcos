@@ -258,7 +258,8 @@ inline constexpr unsigned long BTILE_DIAG_FREEZE_MS    = 1000;
 //
 // Critical tiles (SPEED, FAULT, WARNING) are force-redrawn every N frames
 // as a safety net against hash collisions or missed invalidation.
-// At 20 FPS, 100 frames = 5 seconds.
+// At the nominal 20 FPS target frame rate, 100 frames ≈ 5 seconds.
+// Under load the actual interval may be longer (frame rate < 20 FPS).
 // =========================================================================
 
 inline constexpr uint16_t HASH_FAILSAFE_INTERVAL = 100;
