@@ -86,6 +86,33 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ### PR — refactor: Tile Engine Formalization & Pipeline Hardening (OEM Cluster Level)
 
 ### PR — refactor: Draw Purity Enforcement, OverlayMode, Full Layout Centralization
+
+### PR — feat: Time Determinism, Hash Failsafe, Flag Safety (OEM Final Hardening)
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Final hardening pass: inject deterministic `frameTimeMs` into all screens, add hash failsafe system for critical tiles, formalize flag safety contract. Makes render pipeline fully reproducible from (VehicleData + time).
+- **Root cause:** (1) `millis()` called directly inside screen `update()` methods broke time reproducibility — same input could produce different UI state depending on when millis() was sampled within the function. (2) FNV-1a 32-bit hash has non-zero collision probability; no safety net existed for missed tile updates on critical elements (speed, faults). (3) Flag safety contract was implemented but not formally documented.
+- **Solución aplicada:**
+  1. **Screen::update() signature**: Added `unsigned long frameTimeMs` parameter. ScreenManager captures `millis()` exactly once per frame and injects it into all screens. All timing logic in update() uses the injected value.
+  2. **Time determinism**: Replaced all `millis()` calls in DriveScreen (ACK), ErrorScreen (canLost, elapsed), BootScreen (CAN link, RX staleness, freeze detection), PinScreen (wrong code timeout), EngineeringScreen (ACK timeout) with `frameTimeMs`.
+  3. **Hash failsafe**: Added `TileSet::forceRedraw(idx)` method (zeroes hash + marks dirty). DriveScreen and ErrorScreen call it on critical tiles (SPEED, FAULTS, DEGRADED, BATTERY, BANNER) every `HASH_FAILSAFE_INTERVAL` frames (100 = 5s at 20 FPS).
+  4. **Flag safety documentation**: Documented in tile_engine.h that event flags are cleared ONLY after successful tile render.
+  5. **ui_config.h**: Added `HASH_FAILSAFE_INTERVAL = 100`.
+- **Archivos afectados:**
+  - `esp32/src/screens/screen.h` — `update()` signature + `frameTimeMs`
+  - `esp32/src/screen_manager.cpp` — Capture millis() once, pass to screens
+  - `esp32/src/screens/drive_screen.h/cpp` — frameTimeMs, failsafe counter
+  - `esp32/src/screens/error_screen.h/cpp` — frameTimeMs, failsafe counter
+  - `esp32/src/screens/boot_screen.h/cpp` — frameTimeMs replaces millis()
+  - `esp32/src/screens/pin_screen.h/cpp` — frameTimeMs
+  - `esp32/src/screens/engineering_screen.h/cpp` — frameTimeMs
+  - `esp32/src/screens/safe_screen.cpp` — (void)frameTimeMs
+  - `esp32/src/screens/standby_screen.cpp` — (void)frameTimeMs
+  - `esp32/src/ui/tile_engine.h` — forceRedraw(), pipeline docs, hash failsafe docs
+  - `esp32/src/ui/ui_config.h` — HASH_FAILSAFE_INTERVAL
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Render pipeline is now fully time-deterministic: same (VehicleData, frameTimeMs) → same derived state → same framebuffer ALWAYS. Critical tiles have bounded recovery time from hash collisions. Zero behavioral change for normal operation — millis() was already being called once per frame externally, but now it's formalized as an injected dependency.
+- **Tests:** Internal refactoring. No CAN, VehicleData, or widget interface changes. Build verified on STM32 side (make clean && make).
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Enforce draw-phase purity (zero state mutation in draw helpers), add formal overlay composition modes (REPLACE/MERGE), and centralize all remaining layout constants from SafeScreen and BootScreen.
@@ -913,3 +940,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **HMI Security Audit & Tile Engine Hardening** — Auditoría completa del sistema HMI tile-based. (1) `ui_config.h`: centralización de 20+ magic numbers (text paddings, thresholds, overlay layout, color levels). (2) Overlay invalidation chain: DEGRADED→OBSTACLE, FAULTS→top-bar, ACK→LED_TOGGLE — fix de artefactos visuales al cerrar overlays sobre tiles solapados. (3) wheelThresholdFilter dedup: antes se ejecutaba 2× por frame (update+draw), ahora 1× con resultados precomputados. (4) Tile bounds safety: setRect() clampea coordenadas a SCREEN_W×SCREEN_H. (5) Battery hysteresis determinista: reemplaza dependencia de frame anterior por thresholds explícitos BATT_HYSTERESIS_HIGH/LOW. (6) 15 archivos actualizados. | — |
 | 2026-04-10 | **Tile Engine Formalization & Pipeline Hardening** — (1) Z-order layer system: TileLayer enum (STATIC/BASE/OVERLAY/SYSTEM) con reglas formales de composición. (2) Overlay invalidation contract documentado en tile_engine.h. (3) Debug assertions (UI_TILE_DEBUG) para diagnóstico de setRect() bounds. (4) Pipeline puro: overlay visibility precomputada en update(), draw() solo consume. (5) Tile layout constants centralizados: DTILE_*/ETILE_*/YTILE_* en ui_config.h. 6 archivos modificados. | — |
 | 2026-04-10 | **Draw Purity Enforcement & Full Layout Centralization** — (1) Draw-phase purity: ackIndicatorDirty_ y diagNeedsRedraw_ movidos fuera de draw helpers. (2) OverlayMode enum (REPLACE/MERGE) con registro por overlay documentando composición y tiles afectados. (3) SafeScreen: 17 layout constants (STILE_*) centralizados en ui_config.h. (4) BootScreen: 5 diagnostic layout constants (BTILE_DIAG_*) centralizados. 5 archivos modificados. | — |
+| 2026-04-10 | **Time Determinism, Hash Failsafe, Flag Safety** — (1) `frameTimeMs` injected into Screen::update() — millis() captured once per frame in ScreenManager. All screen timing uses injected value. (2) TileSet::forceRedraw() for critical tiles every 100 frames (5s). (3) Flag safety contract documented. 16 files modified. | — |
