@@ -84,6 +84,27 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ### PR — refactor: HMI Security Audit & Tile Engine Hardening
 
 ### PR — refactor: Tile Engine Formalization & Pipeline Hardening (OEM Cluster Level)
+
+### PR — refactor: Draw Purity Enforcement, OverlayMode, Full Layout Centralization
+- **Fecha:** 2026-04-10
+- **Autor:** Copilot
+- **Descripción del cambio:** Enforce draw-phase purity (zero state mutation in draw helpers), add formal overlay composition modes (REPLACE/MERGE), and centralize all remaining layout constants from SafeScreen and BootScreen.
+- **Root cause:** (1) `ackIndicatorDirty_` was cleared inside `drawAckIndicator()` (draw phase), violating pure-render contract. (2) `diagNeedsRedraw_` was cleared inside BootScreen tile render block. (3) Overlay tiles had no formal composition mode declaration. (4) SafeScreen had 17 local layout constants not in ui_config.h. (5) BootScreen diagnostic layout/timing constants were file-local.
+- **Solución aplicada:**
+  1. **Draw purity**: Moved `ackIndicatorDirty_ = false` from `drawAckIndicator()` to `draw()` caller. Moved `diagNeedsRedraw_ = false` after tile render in BootScreen.
+  2. **OverlayMode enum**: Added `OverlayMode::REPLACE` / `OverlayMode::MERGE` to tile_engine.h with per-overlay registry documenting which DriveScreen overlays use which mode and which base tiles they overlap.
+  3. **SafeScreen layout**: 17 constants (STILE_BANNER_H through STILE_COL_VAL_SPACE) moved to ui_config.h. safe_screen.cpp uses `using namespace ui::cfg`.
+  4. **BootScreen layout**: BTILE_DIAG_SEP_Y, BTILE_DIAG_LINE_H, BTILE_DIAG_MARGIN_X, BTILE_DIAG_RX_RECENT_MS, BTILE_DIAG_FREEZE_MS moved to ui_config.h. boot_screen.cpp aliases them locally.
+- **Archivos afectados:**
+  - `esp32/src/ui/tile_engine.h` — OverlayMode enum + per-overlay composition registry
+  - `esp32/src/ui/ui_config.h` — STILE_* (17) + BTILE_DIAG_* (5) constants
+  - `esp32/src/screens/drive_screen.cpp` — Draw purity: ackIndicatorDirty_ cleared after render
+  - `esp32/src/screens/safe_screen.cpp` — All layout refs → STILE_* from ui_config.h
+  - `esp32/src/screens/boot_screen.cpp` — Draw purity + layout refs → BTILE_DIAG_* from ui_config.h
+  - `PROJECT_CHANGELOG.md` — This entry
+- **Impacto:** Draw phase is now fully pure (no state mutation in draw helpers). All 5 screens' layout constants are in ui_config.h. Overlay composition is formally documented. Zero behavioral changes — all modifications are structural refactoring.
+- **Tests:** Internal refactoring only. No CAN, VehicleData, or widget interface changes.
+
 - **Fecha:** 2026-04-10
 - **Autor:** Copilot
 - **Descripción del cambio:** Formalización del tile engine a nivel OEM automotive cluster: Z-order layer system, pipeline estricto update/draw, overlay invalidation contract, debug assertions, y centralización completa de tile layout dimensions.
@@ -891,3 +912,4 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | 2026-04-10 | **Tile-Based Dirty Region Engine** — Refactor completo del HMI a motor de render por regiones (tiles). TileSet template con hash FNV-1a: cada tile solo se redibuja si su contenido cambia. DriveScreen: 12 tiles (speed, obstacle, wheels, steering, battery, gear, pedal, mode, LED, degraded overlay, faults overlay, ACK). ErrorScreen: 5 tiles. SafeScreen: 6 tiles. StandbyScreen: 2 tiles. BootScreen: 3 tiles. Bar widgets (pedal, batería, sensor obstáculo) con differential update (solo la porción cambiada). Eliminación total de clear+redraw flash en barras. Overlay tiles restauran tiles subyacentes al desaparecer. Nuevo: `tile_engine.h` con TileRect, TileHash, TileSet<N>. | — |
 | 2026-04-10 | **HMI Security Audit & Tile Engine Hardening** — Auditoría completa del sistema HMI tile-based. (1) `ui_config.h`: centralización de 20+ magic numbers (text paddings, thresholds, overlay layout, color levels). (2) Overlay invalidation chain: DEGRADED→OBSTACLE, FAULTS→top-bar, ACK→LED_TOGGLE — fix de artefactos visuales al cerrar overlays sobre tiles solapados. (3) wheelThresholdFilter dedup: antes se ejecutaba 2× por frame (update+draw), ahora 1× con resultados precomputados. (4) Tile bounds safety: setRect() clampea coordenadas a SCREEN_W×SCREEN_H. (5) Battery hysteresis determinista: reemplaza dependencia de frame anterior por thresholds explícitos BATT_HYSTERESIS_HIGH/LOW. (6) 15 archivos actualizados. | — |
 | 2026-04-10 | **Tile Engine Formalization & Pipeline Hardening** — (1) Z-order layer system: TileLayer enum (STATIC/BASE/OVERLAY/SYSTEM) con reglas formales de composición. (2) Overlay invalidation contract documentado en tile_engine.h. (3) Debug assertions (UI_TILE_DEBUG) para diagnóstico de setRect() bounds. (4) Pipeline puro: overlay visibility precomputada en update(), draw() solo consume. (5) Tile layout constants centralizados: DTILE_*/ETILE_*/YTILE_* en ui_config.h. 6 archivos modificados. | — |
+| 2026-04-10 | **Draw Purity Enforcement & Full Layout Centralization** — (1) Draw-phase purity: ackIndicatorDirty_ y diagNeedsRedraw_ movidos fuera de draw helpers. (2) OverlayMode enum (REPLACE/MERGE) con registro por overlay documentando composición y tiles afectados. (3) SafeScreen: 17 layout constants (STILE_*) centralizados en ui_config.h. (4) BootScreen: 5 diagnostic layout constants (BTILE_DIAG_*) centralizados. 5 archivos modificados. | — |
