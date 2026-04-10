@@ -154,15 +154,16 @@ inline uint16_t torqueColor(uint8_t pct) {
 }
 
 // -------------------------------------------------------------------------
-// Helper: obstacle distance to color (proximity indicator) — 5 zones
+// Helper: obstacle distance to color (proximity indicator) — 6 zones
+// Tuned for TF-Mini Plus range (10–1200 cm / 0.1–12 m).
 // -------------------------------------------------------------------------
 inline uint16_t proximityColor(uint16_t distanceCm) {
     if (distanceCm == 0)   return COL_GRAY;    // no reading
-    if (distanceCm > 150)  return COL_GREEN;   // > 1.5 m: safe
-    if (distanceCm > 100)  return COL_CYAN;    // 1.0–1.5 m: caution
-    if (distanceCm > 50)   return COL_YELLOW;  // 0.5–1.0 m: warning
-    if (distanceCm > 20)   return COL_ORANGE;  // 0.2–0.5 m: critical
-    return COL_RED;                             // < 0.2 m: emergency
+    if (distanceCm > 300)  return COL_GREEN;   // > 3.0 m: safe
+    if (distanceCm > 150)  return COL_CYAN;    // 1.5–3.0 m: caution
+    if (distanceCm > 80)   return COL_YELLOW;  // 0.8–1.5 m: warning
+    if (distanceCm > 30)   return COL_ORANGE;  // 0.3–0.8 m: critical
+    return COL_RED;                             // < 0.3 m: emergency
 }
 
 } // namespace ui

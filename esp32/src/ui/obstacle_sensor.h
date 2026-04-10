@@ -3,7 +3,8 @@
 //
 // Draws frontal obstacle distance indicator above the car body.
 // Shows distance in meters and a color-coded proximity bar.
-// Green (>1.5m), yellow (0.5–1.5m), red (<0.5m).
+// Green (>3m), cyan (1.5–3m), yellow (0.8–1.5m), orange (0.3–0.8m), red (<0.3m).
+// Tuned for TF-Mini Plus sensor (range 10 cm – 12 m).
 //
 // Reference: docs/HMI_RENDERING_STRATEGY.md
 // =============================================================================
