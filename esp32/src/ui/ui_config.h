@@ -167,17 +167,14 @@ inline constexpr uint8_t BATT_COLOR_MID     = 50;  // ≤ this → yellow, else 
 // RPM Display (DriveScreen — alongside speed)
 //
 // Wheel RPM derived from average speed and wheel circumference (1.1 m).
+// Formula: RPM = raw_0_1kmh * 100 / 66  (integer-only, no float)
 // Capped at RPM_DISPLAY_MAX for the display (matches vehicle design max).
 // =========================================================================
-
-// Wheel circumference (m) — matches STM32 vehicle_physics.h WHEEL_CIRCUMF_M
-inline constexpr float WHEEL_CIRCUMF_M       = 1.1f;
 
 // Maximum RPM shown on display (clamp)
 inline constexpr uint16_t RPM_DISPLAY_MAX    = 400;
 
-// X positions for speed sub-labels (TC_DATUM, at SPEED_Y + 26)
-inline constexpr int16_t KMH_LABEL_X         = 195;
+// X position for RPM sub-label (TC_DATUM, at SPEED_Y + 26)
 inline constexpr int16_t RPM_LABEL_X         = 295;
 
 // =========================================================================
