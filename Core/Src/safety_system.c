@@ -116,8 +116,10 @@ static inline void sat_inc_u32(uint32_t *counter) {
  * Threshold rationale:
  *   Total current ≈ 3.0 A chosen because 4 × RS775 at 24 V under
  *   20 % throttle draw ≈ 1.5–2.5 A each → total ≈ 6–10 A.
- *   3.0 A total sum leaves ~50 % margin for single-wheel scenarios
- *   while remaining well above INA226 noise floor (~0.1 A per ch).    */
+ *   3.0 A total sum provides margin above INA226 noise floor
+ *   (~0.1 A per channel) while catching the relay-open case
+ *   (near 0 A total).  Single-wheel scenarios (1 motor enabled)
+ *   still exceed 3.0 A under normal drive conditions.                 */
 #define RELAY_CHK_THROTTLE_MIN_PCT  20.0f   /* Primary: min throttle %      */
 #define RELAY_CHK_THROTTLE_SPEED_PCT 10.0f  /* Secondary: lower floor when
                                              * speed confirms motion        */
@@ -1654,10 +1656,12 @@ void Safety_CheckRelayHealth(void)
 
     /* Read current throttle demand (post-validation, post-clamp).
      * Pedal_GetPercent returns the EMA-filtered 0-100% pedal value.
-     * In LIMP_HOME the clamped demand is lower, but the raw pedal
-     * still reflects driver intent — use raw percent for the check
-     * so that a 25% raw pedal (→5% LIMP demand) still triggers
-     * relay validation when the driver clearly wants to move.       */
+     * In LIMP_HOME the clamped traction demand is lower (20%),
+     * but Pedal_GetPercent still reflects the full filtered pedal
+     * position — e.g. 25% filtered pedal (→5% LIMP demand) still
+     * triggers relay validation when the driver clearly wants to
+     * move.  This is intentional: the relay check uses the pedal
+     * position, not the post-limit traction demand.                 */
     float throttle = Pedal_GetPercent();
 
     /* Speed-aware activation: compute average wheel speed (km/h).
