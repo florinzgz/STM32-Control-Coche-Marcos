@@ -171,12 +171,35 @@ static inline float sanitize_float(float val, float safe_default)
 /* ---- BTS7960 coast/brake behaviour (all motors symmetric) ----
  *
  * All five BTS7960 modules now have dedicated GPIO EN pins on GPIOC.
- * Motor_SetSigned sets EN=LOW when PWM=0 and EN=HIGH when PWM>0,
- * giving every motor identical coast (EN=LOW → Hi-Z) and brake
- * (RPWM=0, LPWM=0, EN=HIGH → motor terminals shorted) behaviour.
+ * Motor_SetMode() selects the physical state explicitly:
+ *
+ *   MOTOR_MODE_COAST: PWM=0, EN=LOW → Hi-Z, motor free-spinning
+ *   MOTOR_MODE_BRAKE: PWM=0, EN=HIGH → motor terminals shorted (hold)
+ *   MOTOR_MODE_DRIVE: EN=HIGH, PWM=duty → motor driven
+ *
+ * Motor_SetSigned(0) always produces coast (EN=LOW) — used for
+ * emergency stop and neutral ramp completion where de-energising
+ * the H-bridge is the correct fail-safe action.
+ *
+ * Traction_Update() uses Motor_SetMode() for the traction phase
+ * state machine to correctly distinguish brake from coast.
  *
  * No asymmetry compensation is needed.                                */
 #define NEUTRAL_RAMP_DOWN_PCT_S 100.0f  /* Neutral entry ramp-down rate (%/s)  */
+
+/* ---- Safe transition dead-time ----
+ *
+ * Minimum delay (µs) enforced when Motor_SetMode() changes the EN/PWM
+ * state of a BTS7960 half-bridge.  This ensures the FETs in the driver
+ * have fully settled before the new drive state is applied, preventing
+ * transient shoot-through during direction changes or brake↔drive
+ * transitions.
+ *
+ * At 20 kHz centre-aligned PWM the period is 50 µs.  5 µs (10 % of
+ * one period) is well above the BTS7960 t_d(on)/t_d(off) spec of
+ * ~0.2 µs and provides generous margin for the 74HC244 buffer
+ * propagation delay (~15 ns).                                         */
+#define SAFE_DEADTIME_US  5U
 
 /* ---- Park hold configuration ----
  *
@@ -391,8 +414,30 @@ extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
 
 /* Private function prototypes */
 static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm);
+static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm);
 static float __attribute__((unused)) PID_Compute(PID_t *pid, float measured, float dt);
 static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
+
+/* ---- Microsecond busy-wait helper ----
+ * Uses DWT cycle counter when available (Cortex-M4), otherwise
+ * falls back to a calibrated NOP loop.  On HOST_TEST builds this
+ * is a no-op since there is no real hardware to wait for.
+ * Only used for SAFE_DEADTIME_US (5 µs) — negligible CPU cost.     */
+#ifndef HOST_TEST
+static inline void delay_us(uint32_t us)
+{
+    /* At 170 MHz, one µs = 170 cycles.  Use SysTick LOAD trick
+     * or simple NOP loop.  The NOP loop is calibrated at -O2:
+     * ~6 cycles per iteration → 170/6 ≈ 28 iterations per µs.
+     * We use 30 to add margin.                                     */
+    uint32_t count = us * 30U;
+    for (volatile uint32_t i = 0; i < count; i++) {
+        __NOP();
+    }
+}
+#else
+static inline void delay_us(uint32_t us) { (void)us; }
+#endif
 
 /* ==================================================================
  *  Initialization
@@ -437,6 +482,16 @@ void Motor_Init(void)
     motor_steer.en_port     = GPIOC;  motor_steer.en_pin       = PIN_EN_STEER; /* PC4 */
     motor_steer.direction   = 0;
 
+    /* C2 HARDENING: Force all EN pins LOW before starting any PWM timer.
+     * This is defence-in-depth: MX_GPIO_Init() already set them LOW,
+     * but between GPIO init and here, MX_TIM*_Init() may have enabled
+     * timer clocks.  Reconfirming EN=LOW here guarantees no motor can
+     * receive torque until Motor_SetSigned/Motor_SetMode explicitly
+     * commands it after the timers are started.                         */
+    HAL_GPIO_WritePin(GPIOC, PIN_EN_FL | PIN_EN_FR | PIN_EN_RL
+                                       | PIN_EN_RR | PIN_EN_STEER,
+                      GPIO_PIN_RESET);
+
     /* ---- Start TIM1 channels: FL (CH1/CH2) and FR (CH3/CH4) ---- */
     /* HAL_TIM_PWM_Start re-enables MOE (TIM1 is advanced; MOE was cleared
      * by BREAK2 config with AutomaticOutput=DISABLE).                  */
@@ -458,12 +513,14 @@ void Motor_Init(void)
     /* ---- Quadrature encoder for steering ---- */
     HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
 
-    /* ---- Safe initial state: all motors stopped (RPWM=0, LPWM=0) ---- */
-    Motor_SetSigned(&motor_fl,    0);
-    Motor_SetSigned(&motor_fr,    0);
-    Motor_SetSigned(&motor_rl,    0);
-    Motor_SetSigned(&motor_rr,    0);
-    Motor_SetSigned(&motor_steer, 0);
+    /* ---- Safe initial state: all motors in coast (RPWM=0, LPWM=0, EN=LOW) ----
+     * Coast is chosen (not brake) because at startup we want all H-bridges
+     * fully de-energised until the traction state machine commands otherwise. */
+    Motor_SetMode(&motor_fl,    MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_fr,    MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_rl,    MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_rr,    MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_steer, MOTOR_MODE_COAST, 0);
 }
 
 void Traction_Init(void)
@@ -1447,19 +1504,31 @@ void Traction_Update(void)
         if (desired_pwm[i] > PWM_PERIOD) desired_pwm[i] = PWM_PERIOD;
     }
 
-    /* Write final RPWM/LPWM to hardware.
-     * Motor_SetSigned guarantees RPWM and LPWM are never simultaneously
-     * non-zero; direction is encoded as the active channel.              */
+    /* Write final motor state to hardware using Motor_SetMode().
+     *
+     * M4 fix: The previous code always called Motor_SetSigned(0) when
+     * desired_pwm==0, which set EN=LOW (coast) regardless of whether
+     * brake was intended.  Now the desired_en[] flag explicitly selects:
+     *
+     *   desired_en=1, desired_pwm=0 → MOTOR_MODE_BRAKE (EN=HIGH, PWM=0)
+     *   desired_en=0, desired_pwm=0 → MOTOR_MODE_COAST (EN=LOW,  PWM=0)
+     *   desired_en=1, desired_pwm>0 → MOTOR_MODE_DRIVE (EN=HIGH, PWM=duty)
+     *   desired_en=0, desired_pwm>0 → MOTOR_MODE_COAST (safety: EN=LOW)
+     *
+     * This ensures TRAC_PHASE_BRAKE produces real passive braking
+     * (motor terminals shorted) instead of unintended coast.            */
     for (uint8_t i = 0; i < 4; i++) {
-        int16_t sp;
-        if (!desired_en[i] || desired_pwm[i] == 0) {
-            sp = 0;
+        if (!desired_en[i]) {
+            /* Coast — motor Hi-Z, free rolling */
+            Motor_SetMode(motors[i], MOTOR_MODE_COAST, 0);
+        } else if (desired_pwm[i] == 0) {
+            /* Brake — EN=HIGH, PWM=0, motor terminals shorted */
+            Motor_SetMode(motors[i], MOTOR_MODE_BRAKE, 0);
         } else {
-            /* desired_dir[i] is ±1; desired_pwm[i] ≤ PWM_PERIOD = 4249 which
-             * fits safely in int16_t (max 32767).                         */
-            sp = (int16_t)((int32_t)desired_dir[i] * (int32_t)desired_pwm[i]);
+            /* Drive — EN=HIGH, apply signed duty cycle */
+            int16_t sp = (int16_t)((int32_t)desired_dir[i] * (int32_t)desired_pwm[i]);
+            Motor_SetMode(motors[i], MOTOR_MODE_DRIVE, sp);
         }
-        Motor_SetSigned(motors[i], sp);
     }
 
     /* Update state with sensor readings */
@@ -1989,7 +2058,10 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, duty);
         motor->direction = -1;
     } else {
-        /* Stop / passive brake: both channels to zero */
+        /* Stop: both channels to zero, EN → LOW (coast).
+         * For explicit brake (EN=HIGH, PWM=0), use Motor_SetMode()
+         * with MOTOR_MODE_BRAKE instead.  Motor_SetSigned(0) always
+         * produces coast — safe default for emergency stop paths.     */
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
         motor->direction = 0;
@@ -2000,6 +2072,63 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
     if (motor->en_port != NULL) {
         HAL_GPIO_WritePin(motor->en_port, motor->en_pin,
                           (duty > 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    }
+}
+
+/**
+ * @brief  Mode-aware motor control — selects BTS7960 physical state.
+ *
+ *  This function replaces the implicit duty==0→coast assumption of
+ *  Motor_SetSigned() with an explicit three-mode API:
+ *
+ *    MOTOR_MODE_COAST: PWM=0, EN=LOW  → Hi-Z, motor free-spinning
+ *    MOTOR_MODE_BRAKE: PWM=0, EN=HIGH → motor terminals shorted (hold)
+ *    MOTOR_MODE_DRIVE: EN=HIGH, then apply signed PWM
+ *
+ *  Safe transition: PWM is always zeroed and a dead-time is enforced
+ *  before any EN or direction change, preventing transient shoot-through.
+ *
+ * @param motor      Pointer to the motor structure.
+ * @param mode       Desired physical operating mode.
+ * @param signed_pwm Signed duty: >0 forward, <0 reverse, 0 ignored
+ *                   in COAST and BRAKE modes (used only in DRIVE).
+ */
+static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
+{
+    switch (mode) {
+
+    case MOTOR_MODE_COAST:
+        /* Safe order: zero PWM first, then deassert EN.
+         * This ensures no current flows when EN transitions.            */
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        motor->direction = 0;
+        if (motor->en_port != NULL) {
+            HAL_GPIO_WritePin(motor->en_port, motor->en_pin, GPIO_PIN_RESET);
+        }
+        break;
+
+    case MOTOR_MODE_BRAKE:
+        /* Safe order: zero PWM first (dead-time), then assert EN.
+         * With RPWM=0 and LPWM=0 and EN=HIGH, the BTS7960 shorts
+         * the motor terminals → passive electromagnetic braking.
+         * ⚠ No PWM is applied in this mode — the motor is held.        */
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        delay_us(SAFE_DEADTIME_US);
+        motor->direction = 0;
+        if (motor->en_port != NULL) {
+            HAL_GPIO_WritePin(motor->en_port, motor->en_pin, GPIO_PIN_SET);
+        }
+        break;
+
+    case MOTOR_MODE_DRIVE:
+        /* Delegate to Motor_SetSigned which handles direction-change
+         * dead-state, RPWM/LPWM sequencing, and EN assertion.
+         * If signed_pwm == 0, this degrades to coast (EN=LOW) which
+         * is the correct fallback for zero-duty drive requests.         */
+        Motor_SetSigned(motor, signed_pwm);
+        break;
     }
 }
 

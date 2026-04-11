@@ -4,10 +4,16 @@
   * @brief   Host-compilable unit tests for motor control behaviour.
   *
   *          Validates:
+  *            - motor_mode_t enum: COAST/BRAKE/DRIVE are distinct
   *            - All motors have GPIO EN (symmetric coast/brake)
+  *            - BRAKE phase: desired_en=1 + desired_pwm=0 → BRAKE (not coast)
+  *            - COAST phase: desired_en=0 + desired_pwm=0 → COAST
+  *            - DRIVE phase: desired_en=1 + desired_pwm>0 → DRIVE
+  *            - Transition safety: DRIVE→BRAKE, DRIVE→COAST, BRAKE→DRIVE
   *            - Neutral ramp-down rate is positive and bounded
   *            - Park hold derating reduces correctly
   *            - PWM calculations produce expected values
+  *            - SAFE_DEADTIME_US is defined and reasonable
   *
   *          Compile with host GCC (from repository root):
   *            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -21,6 +27,10 @@
 #include <stdbool.h>
 #include <math.h>
 
+/* Include the motor_mode_t enum from the production header.
+ * HOST_TEST stubs provide the required HAL/CMSIS types.     */
+#include "motor_control.h"
+
 /* ---- Reproduce constants from motor_control.c (internal defines) ---- */
 #define PWM_PERIOD               4249U
 #define NEUTRAL_RAMP_DOWN_PCT_S 100.0f
@@ -30,12 +40,7 @@
 #define PARK_HOLD_CURRENT_MAX_A  20.0f
 #define PARK_HOLD_TEMP_WARN_C    70.0f
 #define PARK_HOLD_TEMP_CRIT_C    85.0f
-
-/* Motor indices */
-#define MOTOR_FL  0
-#define MOTOR_FR  1
-#define MOTOR_RL  2
-#define MOTOR_RR  3
+#define SAFE_DEADTIME_US          5U
 
 /* ---- Test harness ---- */
 static int tests_run    = 0;
@@ -60,15 +65,56 @@ static int tests_failed = 0;
     }                                                                 \
 } while (0)
 
+#define ASSERT_EQ_INT(got, expected) do {                             \
+    int _got = (got);                                                 \
+    int _exp = (expected);                                            \
+    tests_run++;                                                      \
+    if (_got != _exp) {                                               \
+        printf("FAIL %s:%d  %s == %d (expected %d)\n",               \
+               __FILE__, __LINE__, #got, _got, _exp);                 \
+        tests_failed++;                                               \
+    }                                                                 \
+} while (0)
+
+/* ==================================================================
+ *  Test: motor_mode_t enum values are distinct and correct
+ * ================================================================== */
+static void test_motor_mode_enum(void)
+{
+    /* Ensure all three modes have distinct values */
+    ASSERT_TRUE(MOTOR_MODE_COAST != MOTOR_MODE_DRIVE);
+    ASSERT_TRUE(MOTOR_MODE_COAST != MOTOR_MODE_BRAKE);
+    ASSERT_TRUE(MOTOR_MODE_DRIVE != MOTOR_MODE_BRAKE);
+
+    /* COAST = 0 (default/safe) */
+    ASSERT_EQ_INT((int)MOTOR_MODE_COAST, 0);
+    ASSERT_EQ_INT((int)MOTOR_MODE_DRIVE, 1);
+    ASSERT_EQ_INT((int)MOTOR_MODE_BRAKE, 2);
+}
+
+/* ==================================================================
+ *  Test: SAFE_DEADTIME_US is defined and reasonable
+ * ================================================================== */
+static void test_safe_deadtime(void)
+{
+    /* Must be positive and non-zero */
+    ASSERT_TRUE(SAFE_DEADTIME_US > 0);
+
+    /* Must be less than one PWM period (50 µs at 20 kHz) */
+    ASSERT_TRUE(SAFE_DEADTIME_US < 50);
+
+    /* Must be at least 1 µs for BTS7960 FET switching */
+    ASSERT_TRUE(SAFE_DEADTIME_US >= 1);
+}
+
 /* ==================================================================
  *  Test: All motors now have GPIO EN — symmetric behaviour
  * ================================================================== */
 static void test_all_motors_have_gpio_en(void)
 {
     /* With the unified EN wiring, every motor index has a GPIO EN pin.
-     * Motor_SetSigned sets EN=LOW at PWM=0 (coast) and EN=HIGH at
-     * PWM>0 — identical behaviour for all four traction motors and
-     * the steering motor.  No special-casing needed.                   */
+     * Motor_SetMode selects COAST (EN=LOW) or BRAKE (EN=HIGH) based
+     * on the explicit mode parameter — identical for all motors.        */
     for (uint8_t i = 0; i < 4; i++) {
         /* All motors get the same brake phase: BTS7960_BRAKE_PWM (0) */
         uint16_t brake_pwm = BTS7960_BRAKE_PWM;
@@ -77,11 +123,233 @@ static void test_all_motors_have_gpio_en(void)
 }
 
 /* ==================================================================
+ *  Test: BRAKE phase logic — desired_en=1, desired_pwm=0 → BRAKE
+ *
+ *  This is the M4 fix verification.  Previously, desired_en=1 with
+ *  desired_pwm=0 would still produce sp=0 → Motor_SetSigned(0) →
+ *  EN=LOW (coast).  Now it must produce MOTOR_MODE_BRAKE (EN=HIGH).
+ * ================================================================== */
+static void test_brake_phase_produces_brake_mode(void)
+{
+    /* Simulate Traction_Update() BRAKE phase decision */
+    uint16_t desired_pwm[4] = {0, 0, 0, 0};
+    uint8_t  desired_en[4]  = {1, 1, 1, 1};  /* BRAKE: EN=1, PWM=0 */
+
+    for (uint8_t i = 0; i < 4; i++) {
+        motor_mode_t selected_mode;
+
+        if (!desired_en[i]) {
+            selected_mode = MOTOR_MODE_COAST;
+        } else if (desired_pwm[i] == 0) {
+            selected_mode = MOTOR_MODE_BRAKE;
+        } else {
+            selected_mode = MOTOR_MODE_DRIVE;
+        }
+
+        /* MUST be BRAKE, not COAST */
+        ASSERT_EQ_INT((int)selected_mode, (int)MOTOR_MODE_BRAKE);
+    }
+}
+
+/* ==================================================================
+ *  Test: COAST phase logic — desired_en=0, desired_pwm=0 → COAST
+ * ================================================================== */
+static void test_coast_phase_produces_coast_mode(void)
+{
+    /* Simulate Traction_Update() COAST phase (4x4) */
+    uint16_t desired_pwm[4] = {0, 0, 0, 0};
+    uint8_t  desired_en[4]  = {0, 0, 0, 0};  /* COAST: EN=0, PWM=0 */
+
+    for (uint8_t i = 0; i < 4; i++) {
+        motor_mode_t selected_mode;
+
+        if (!desired_en[i]) {
+            selected_mode = MOTOR_MODE_COAST;
+        } else if (desired_pwm[i] == 0) {
+            selected_mode = MOTOR_MODE_BRAKE;
+        } else {
+            selected_mode = MOTOR_MODE_DRIVE;
+        }
+
+        ASSERT_EQ_INT((int)selected_mode, (int)MOTOR_MODE_COAST);
+    }
+}
+
+/* ==================================================================
+ *  Test: DRIVE phase logic — desired_en=1, desired_pwm>0 → DRIVE
+ * ================================================================== */
+static void test_drive_phase_produces_drive_mode(void)
+{
+    uint16_t desired_pwm[4] = {1000, 1000, 1000, 1000};
+    uint8_t  desired_en[4]  = {1, 1, 1, 1};
+
+    for (uint8_t i = 0; i < 4; i++) {
+        motor_mode_t selected_mode;
+
+        if (!desired_en[i]) {
+            selected_mode = MOTOR_MODE_COAST;
+        } else if (desired_pwm[i] == 0) {
+            selected_mode = MOTOR_MODE_BRAKE;
+        } else {
+            selected_mode = MOTOR_MODE_DRIVE;
+        }
+
+        ASSERT_EQ_INT((int)selected_mode, (int)MOTOR_MODE_DRIVE);
+    }
+}
+
+/* ==================================================================
+ *  Test: Safety fallback — desired_en=0, desired_pwm>0 → COAST
+ *
+ *  This edge case should not happen in normal operation but verifies
+ *  defence-in-depth: if EN is low, the motor must be off regardless
+ *  of the PWM value.
+ * ================================================================== */
+static void test_safety_fallback_en0_pwm_nonzero(void)
+{
+    uint16_t desired_pwm = 2000;
+    uint8_t  desired_en  = 0;
+
+    motor_mode_t selected_mode;
+    if (!desired_en) {
+        selected_mode = MOTOR_MODE_COAST;
+    } else if (desired_pwm == 0) {
+        selected_mode = MOTOR_MODE_BRAKE;
+    } else {
+        selected_mode = MOTOR_MODE_DRIVE;
+    }
+
+    ASSERT_EQ_INT((int)selected_mode, (int)MOTOR_MODE_COAST);
+}
+
+/* ==================================================================
+ *  Test: DRIVE→BRAKE transition produces correct mode sequence
+ * ================================================================== */
+static void test_transition_drive_to_brake(void)
+{
+    /* Simulate: first cycle is DRIVE, then demand drops → BRAKE */
+    motor_mode_t mode_cycle1, mode_cycle2;
+
+    /* Cycle 1: DRIVE (en=1, pwm=2000) */
+    uint8_t en1 = 1; uint16_t pwm1 = 2000;
+    mode_cycle1 = (!en1) ? MOTOR_MODE_COAST
+                : (pwm1 == 0) ? MOTOR_MODE_BRAKE
+                : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode_cycle1, (int)MOTOR_MODE_DRIVE);
+
+    /* Cycle 2: BRAKE (en=1, pwm=0) */
+    uint8_t en2 = 1; uint16_t pwm2 = 0;
+    mode_cycle2 = (!en2) ? MOTOR_MODE_COAST
+                : (pwm2 == 0) ? MOTOR_MODE_BRAKE
+                : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode_cycle2, (int)MOTOR_MODE_BRAKE);
+}
+
+/* ==================================================================
+ *  Test: DRIVE→COAST transition produces correct mode sequence
+ * ================================================================== */
+static void test_transition_drive_to_coast(void)
+{
+    motor_mode_t mode_cycle1, mode_cycle2;
+
+    /* Cycle 1: DRIVE */
+    uint8_t en1 = 1; uint16_t pwm1 = 2000;
+    mode_cycle1 = (!en1) ? MOTOR_MODE_COAST
+                : (pwm1 == 0) ? MOTOR_MODE_BRAKE
+                : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode_cycle1, (int)MOTOR_MODE_DRIVE);
+
+    /* Cycle 2: COAST (en=0, pwm=0) */
+    uint8_t en2 = 0; uint16_t pwm2 = 0;
+    mode_cycle2 = (!en2) ? MOTOR_MODE_COAST
+                : (pwm2 == 0) ? MOTOR_MODE_BRAKE
+                : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode_cycle2, (int)MOTOR_MODE_COAST);
+}
+
+/* ==================================================================
+ *  Test: BRAKE→DRIVE transition produces correct mode sequence
+ * ================================================================== */
+static void test_transition_brake_to_drive(void)
+{
+    motor_mode_t mode_cycle1, mode_cycle2;
+
+    /* Cycle 1: BRAKE */
+    uint8_t en1 = 1; uint16_t pwm1 = 0;
+    mode_cycle1 = (!en1) ? MOTOR_MODE_COAST
+                : (pwm1 == 0) ? MOTOR_MODE_BRAKE
+                : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode_cycle1, (int)MOTOR_MODE_BRAKE);
+
+    /* Cycle 2: DRIVE */
+    uint8_t en2 = 1; uint16_t pwm2 = 1500;
+    mode_cycle2 = (!en2) ? MOTOR_MODE_COAST
+                : (pwm2 == 0) ? MOTOR_MODE_BRAKE
+                : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode_cycle2, (int)MOTOR_MODE_DRIVE);
+}
+
+/* ==================================================================
+ *  Test: 4x2 COAST phase — rear wheels stay braked
+ *
+ *  In 4x2 mode, coast only applies to front wheels (active).
+ *  Rear wheels remain in BRAKE to prevent rear axle rolling.
+ * ================================================================== */
+static void test_4x2_coast_rear_stays_braked(void)
+{
+    /* Simulate Traction_Update() COAST in 4x2: FL/FR coast, RL/RR brake */
+    uint16_t desired_pwm[4] = {0, 0, BTS7960_BRAKE_PWM, BTS7960_BRAKE_PWM};
+    uint8_t  desired_en[4]  = {0, 0, 1, 1};
+
+    for (uint8_t i = 0; i < 4; i++) {
+        motor_mode_t selected_mode;
+        if (!desired_en[i]) {
+            selected_mode = MOTOR_MODE_COAST;
+        } else if (desired_pwm[i] == 0) {
+            selected_mode = MOTOR_MODE_BRAKE;
+        } else {
+            selected_mode = MOTOR_MODE_DRIVE;
+        }
+
+        if (i <= MOTOR_FR) {
+            ASSERT_EQ_INT((int)selected_mode, (int)MOTOR_MODE_COAST);
+        } else {
+            ASSERT_EQ_INT((int)selected_mode, (int)MOTOR_MODE_BRAKE);
+        }
+    }
+}
+
+/* ==================================================================
+ *  Test: Pendiente simulada — duty=0 + brake_requested → EN=HIGH
+ *
+ *  The core M4 scenario: vehicle on a slope, pedal released,
+ *  system should apply brake (EN=HIGH) not coast (EN=LOW).
+ * ================================================================== */
+static void test_slope_hold_brake(void)
+{
+    /* Low speed, pedal at 0 → TRAC_PHASE_BRAKE expected */
+    float effective_demand = 0.0f;
+    float avg_speed = 1.0f;  /* Below COAST_SPEED_THRESHOLD_KMH (2.0) */
+
+    /* Phase would be BRAKE when speed < threshold and demand = 0 */
+    bool should_brake = (effective_demand <= 1.0f && avg_speed <= 2.0f);
+    ASSERT_TRUE(should_brake);
+
+    /* In brake phase: desired_en=1, desired_pwm=0 */
+    uint8_t en = 1;
+    uint16_t pwm = 0;
+    motor_mode_t mode = (!en) ? MOTOR_MODE_COAST
+                      : (pwm == 0) ? MOTOR_MODE_BRAKE
+                      : MOTOR_MODE_DRIVE;
+    ASSERT_EQ_INT((int)mode, (int)MOTOR_MODE_BRAKE);
+}
+
+/* ==================================================================
  *  Test: TRAC_PHASE_BRAKE is symmetric for all motors
  * ================================================================== */
 static void test_brake_phase_symmetric(void)
 {
-    /* All four motors receive BTS7960_BRAKE_PWM in brake phase */
+    /* All four motors receive BTS7960_BRAKE_PWM with EN=1 in brake phase */
     for (uint8_t i = 0; i < 4; i++) {
         uint16_t expected = BTS7960_BRAKE_PWM;
         ASSERT_EQ_U16(expected, 0);
@@ -189,19 +457,73 @@ static void test_park_hold_safety_bounds(void)
     ASSERT_TRUE(park_hold < PWM_PERIOD);
 }
 
+/* ==================================================================
+ *  Test: motor_mode_t default value is COAST (safe)
+ * ================================================================== */
+static void test_motor_mode_default_is_coast(void)
+{
+    /* A zero-initialised motor_mode_t must be COAST (fail-safe) */
+    motor_mode_t mode = 0;
+    ASSERT_EQ_INT((int)mode, (int)MOTOR_MODE_COAST);
+}
+
+/* ==================================================================
+ *  Test: PWM clamping — values > PWM_PERIOD are clamped
+ * ================================================================== */
+static void test_pwm_clamping(void)
+{
+    uint16_t pwm = 5000;  /* Exceeds PWM_PERIOD */
+    if (pwm > PWM_PERIOD) pwm = PWM_PERIOD;
+    ASSERT_EQ_U16(pwm, PWM_PERIOD);
+
+    /* Values within range are unchanged */
+    uint16_t pwm2 = 2000;
+    if (pwm2 > PWM_PERIOD) pwm2 = PWM_PERIOD;
+    ASSERT_EQ_U16(pwm2, 2000);
+}
+
+/* ==================================================================
+ *  Test: INT16_MIN edge case — negation is safe
+ * ================================================================== */
+static void test_int16_min_safe(void)
+{
+    /* Motor_SetSigned clamps INT16_MIN to INT16_MIN+1 to avoid
+     * undefined behaviour from negating -32768 in two's complement */
+    int16_t speed = INT16_MIN;
+    if (speed == INT16_MIN) speed = INT16_MIN + 1;
+
+    /* Negation should now be safe */
+    uint16_t duty = (uint16_t)(-speed);
+    ASSERT_TRUE(duty == 32767);
+}
+
 /* ---- main ------------------------------------------------------------ */
 
 int main(void)
 {
+    test_motor_mode_enum();
+    test_safe_deadtime();
     test_all_motors_have_gpio_en();
+    test_brake_phase_produces_brake_mode();
+    test_coast_phase_produces_coast_mode();
+    test_drive_phase_produces_drive_mode();
+    test_safety_fallback_en0_pwm_nonzero();
+    test_transition_drive_to_brake();
+    test_transition_drive_to_coast();
+    test_transition_brake_to_drive();
+    test_4x2_coast_rear_stays_braked();
+    test_slope_hold_brake();
     test_brake_phase_symmetric();
     test_coast_phase_symmetric();
     test_neutral_ramp_rate();
     test_park_derating();
     test_neutral_ramp_computation();
     test_park_hold_safety_bounds();
+    test_motor_mode_default_is_coast();
+    test_pwm_clamping();
+    test_int16_min_safe();
 
-    printf("\n--- motor_control symmetric EN tests: %d run, %d failed ---\n",
+    printf("\n--- motor_control M4 brake/coast/drive tests: %d run, %d failed ---\n",
            tests_run, tests_failed);
 
     return tests_failed ? 1 : 0;

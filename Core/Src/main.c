@@ -681,6 +681,17 @@ static void MX_GPIO_Init(void)
 
     GPIO_InitTypeDef gpio = {0};
 
+    /* C1 HARDENING: Force all motor EN pins LOW before configuring them.
+     * STM32G4 ODR resets to 0 on power-on, but this explicit write
+     * guarantees EN=LOW even after a warm reset or watchdog reset
+     * where ODR may retain its previous value.  This prevents any
+     * transient motor activation before the timers are configured.
+     *
+     * BSRR write is atomic and takes effect in one AHB cycle.
+     * GPIO clock was just enabled above, so GPIOC is accessible.       */
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
+                  | PIN_EN_STEER) << 16U;
+
     /* GPIO enable outputs for all five BTS7960 modules (GPIOC).
      * All motors now have dedicated GPIO EN pins for symmetric
      * coast/brake behaviour.  PC0 (EN_FR), PC1 (EN_RL), PC4 (EN_STEER)
