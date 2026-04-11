@@ -117,10 +117,11 @@ static inline void sat_inc_u32(uint32_t *counter) {
  * consecutive 10 ms checks to trigger — rejects transient glitches.
  *
  * Adaptive threshold rationale:
- *   threshold = BASE_A + K × throttle_pct
+ *   threshold = clamp(BASE_A + K × throttle_pct, BASE_A, MAX_A)
  *   At 20 %: 1.5 + 0.02 × 20 = 1.9 A  (gentle — low-throttle creep)
  *   At 50 %: 1.5 + 0.02 × 50 = 2.5 A  (moderate drive)
  *   At 100%: 1.5 + 0.02 × 100= 3.5 A  (high confidence at full power)
+ *   Clamped to [1.5, 4.0] A to prevent runaway from corrupted throttle.
  *   This avoids false positives at low throttle while maintaining
  *   tight fault detection under high demand.  One multiply + one add.
  *
@@ -139,6 +140,10 @@ static inline void sat_inc_u32(uint32_t *counter) {
 #define RELAY_CHK_CURRENT_BASE_A    1.5f    /* Adaptive threshold: base (A) */
 #define RELAY_CHK_CURRENT_K         0.02f   /* Adaptive threshold: slope
                                              * (A per % throttle)           */
+#define RELAY_CHK_CURRENT_MAX_A     4.0f    /* Adaptive threshold: ceiling.
+                                             * Clamps result of BASE + K×thr
+                                             * to prevent runaway from
+                                             * corrupted throttle input.    */
 #define RELAY_CHK_DEBOUNCE_CYCLES   3U      /* Consecutive fails to trigger */
 #define RELAY_CHK_RECOVERY_MS       1500U   /* Hysteresis: sustain healthy
                                              * current this long to clear   */
@@ -1768,6 +1773,11 @@ void Safety_CheckRelayHealth(void)
             if (isnan(amps) || isinf(amps)) continue;
             /* Manual absolute value */
             if (amps < 0.0f) amps = -amps;
+            /* Plausibility ceiling: reject corrupt I2C reads that return
+             * finite but wildly implausible values.  Without this, a
+             * single 999 A glitch would inflate sum and mask a real relay
+             * fault.  Uses existing SENSOR_CURRENT_MAX_A (50 A).         */
+            if (amps > SENSOR_CURRENT_MAX_A) continue;
             sum += amps;
             count++;
         }
@@ -1799,6 +1809,12 @@ void Safety_CheckRelayHealth(void)
         } else {
             eff_threshold = RELAY_CHK_CURRENT_BASE_A +
                             RELAY_CHK_CURRENT_K * throttle;
+            /* Safety clamp: bound adaptive threshold to [BASE, MAX].
+             * Prevents runaway values from corrupted throttle input
+             * (e.g. ADC glitch returning >100 %).  One compare, O(1). */
+            if (eff_threshold > RELAY_CHK_CURRENT_MAX_A) {
+                eff_threshold = RELAY_CHK_CURRENT_MAX_A;
+            }
             eff_debounce  = RELAY_CHK_DEBOUNCE_CYCLES;
         }
 
