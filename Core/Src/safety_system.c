@@ -1846,7 +1846,11 @@ void Safety_CheckRelayHealth(void)
                     Safety_SetState(SYS_STATE_DEGRADED);
                     Safety_SetDegradedLevel(DEGRADED_L3,
                                             DEGRADED_REASON_SENSOR_FAULT);
-                    /* Record fault onset for minimum visibility hold */
+                    /* Record fault onset for minimum visibility hold.
+                     * Intentionally set-once: if fault re-triggers before
+                     * recovery completes, the original timestamp persists
+                     * so the hold counts from first occurrence.  Cleared
+                     * only on full recovery (line ~1887).                */
                     if (relay_chk_fault_set_tick == 0) {
                         relay_chk_fault_set_tick = now;
                     }
