@@ -1666,7 +1666,7 @@ void Safety_CheckRelayHealth(void)
 
         if (sum < threshold_sum) {
             /* Fault condition: throttle demanded but no motor current */
-            if (relay_chk_debounce < 255) relay_chk_debounce++;
+            if (relay_chk_debounce < UINT8_MAX) relay_chk_debounce++;
 
             if (relay_chk_debounce >= RELAY_CHK_DEBOUNCE_CYCLES) {
                 /* Confirmed relay-open fault */
