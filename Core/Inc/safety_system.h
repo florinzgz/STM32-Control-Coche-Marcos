@@ -97,7 +97,7 @@ typedef enum {
  * contract extensions.                                              */
 #define FAULT_BATT_UV_WARN      (1U << 8)   /* Battery < 20.0 V */
 #define FAULT_BATT_UV_CRIT      (1U << 9)   /* Battery < 18.0 V */
-#define FAULT_RELAY_OPEN        (1U << 10)  /* Relay commanded but no motor current */
+#define FAULT_RELAY_OPEN        (1U << 10)  /* Relay health: insufficient motor current */
 
 /* ABS/TCS status */
 typedef struct {
