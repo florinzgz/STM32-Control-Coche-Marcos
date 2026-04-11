@@ -137,10 +137,30 @@ private:
     // Hash failsafe: frame counter for periodic forced redraw of critical tiles
     uint16_t failsafeFrameCount_ = 0;
 
+    // ---- Tank Turn Confirmation Dialog ----
+    // When the user taps the 360° icon, a confirmation bar is shown
+    // instead of immediately toggling tank turn mode.
+    bool     tankConfirmVisible_  = false;   // true while confirm bar is shown
+    bool     tankConfirmDirty_    = true;    // needs redraw
+
     void drawSpeed();
     void drawAckIndicator();
     void drawDegradedOverlay();
     void drawFaultOverlays();
+    void drawTankConfirmBar();
+
+public:
+    /// Show the tank turn confirmation bar overlay.
+    void showTankConfirm();
+
+    /// Process a touch during confirmation. Returns:
+    ///   0 = not consumed (touch outside confirm bar)
+    ///   1 = YES — user confirmed, ready to toggle
+    ///   2 = NO — user cancelled
+    uint8_t handleTankConfirmTouch(int16_t x, int16_t y);
+
+    /// Returns true if the tank confirm bar is currently visible.
+    bool isTankConfirmVisible() const { return tankConfirmVisible_; }
 };
 
 #endif // DRIVE_SCREEN_H

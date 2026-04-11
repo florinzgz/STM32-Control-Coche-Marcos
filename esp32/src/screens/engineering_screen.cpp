@@ -20,11 +20,11 @@ extern TFT_eSPI tft;
 // ---- Menu button layout ----
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
-static constexpr int16_t MENU_BTN_H   = 36;
-static constexpr int16_t MENU_START_Y = 55;
-static constexpr int16_t MENU_SPACING = 42;
+static constexpr int16_t MENU_BTN_H   = 26;
+static constexpr int16_t MENU_START_Y = 50;
+static constexpr int16_t MENU_SPACING = 28;
 
-static constexpr int     NUM_MAIN_ITEMS = 7;
+static constexpr int     NUM_MAIN_ITEMS = 9;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -32,7 +32,9 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "ENCODER CALIBRATION",
     "INA226 SENSOR MAPPING",
     "TEMP SENSOR MAPPING",
-    "FACTORY DEFAULTS"
+    "FACTORY DEFAULTS",
+    "DTC ERROR LOG",
+    "MAINTENANCE"
 };
 
 // ---- Back / Save buttons ----
@@ -147,6 +149,7 @@ void EngineeringScreen::onEnter() {
     needsRedraw_ = true;
     exitRequested_ = false;
     currentMenu_ = SubMenu::MAIN;
+    clearLogPending_ = false;   // §5: reset confirmation state on screen enter
     inaEditRow_  = 0;
     tempEditRow_ = 0;
     moduleCtrlPage_ = 0;
@@ -247,6 +250,8 @@ void EngineeringScreen::draw() {
             case SubMenu::SENSOR_MAP_INA:   drawSensorMapIna();        break;
             case SubMenu::SENSOR_MAP_TEMP:  drawSensorMapTemp();       break;
             case SubMenu::FACTORY_DEFAULTS: drawFactoryDefaults();     break;
+            case SubMenu::DTC_LOG_VIEWER:   drawDtcLogViewer();        break;
+            case SubMenu::MAINTENANCE:      drawMaintenance();         break;
         }
     }
 
@@ -407,6 +412,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
     if (x >= BACK_X && x <= BACK_X + BACK_W &&
         y >= BACK_Y && y <= BACK_Y + BACK_H) {
         if (currentMenu_ != SubMenu::MAIN) {
+            clearLogPending_ = false;  // reset confirmation state on navigation (§4.1)
             currentMenu_ = SubMenu::MAIN;
             needsRedraw_ = true;
         } else {
@@ -465,6 +471,14 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                         case 6:
                             // Open Factory Defaults submenu
                             currentMenu_ = SubMenu::FACTORY_DEFAULTS;
+                            break;
+                        case 7:
+                            // Open DTC Error Log viewer
+                            currentMenu_ = SubMenu::DTC_LOG_VIEWER;
+                            break;
+                        case 8:
+                            // Open Maintenance status/reset
+                            currentMenu_ = SubMenu::MAINTENANCE;
                             break;
                         default:
                             break;
@@ -542,6 +556,51 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         return false;
     }
 
+    // DTC Log Viewer: CLEAR LOG button (bottom-right) — requires confirmation (§4.1)
+    if (currentMenu_ == SubMenu::DTC_LOG_VIEWER) {
+        if (x >= SAVE_X && x <= SAVE_X + SAVE_W &&
+            y >= SAVE_Y && y <= SAVE_Y + SAVE_H) {
+            if (clearLogPending_) {
+                // Second tap — confirmed; clear the log
+                config_store::clearFaultLog();
+                clearLogPending_ = false;
+            } else {
+                // First tap — enter confirmation state
+                clearLogPending_ = true;
+            }
+            needsRedraw_ = true;
+            return true;
+        }
+        // Any other touch cancels confirmation
+        if (clearLogPending_) {
+            clearLogPending_ = false;
+            needsRedraw_ = true;
+        }
+        return false;
+    }
+
+    // Maintenance: RESET COUNTER and ACK buttons
+    if (currentMenu_ == SubMenu::MAINTENANCE) {
+        // RESET COUNTER button (bottom-right, where SAVE usually is)
+        if (x >= SAVE_X && x <= SAVE_X + SAVE_W &&
+            y >= SAVE_Y && y <= SAVE_Y + SAVE_H) {
+            config_store::resetMaintenanceCounter();
+            config_store::flush();
+            needsRedraw_ = true;
+            Serial.println("[ENG] Maintenance counter reset");
+            return true;
+        }
+        // ACK REMINDER button (center-right, above RESET)
+        if (x >= 200 && x <= 400 && y >= 200 && y <= 230) {
+            config_store::acknowledgeMaintenance();
+            config_store::flush();
+            needsRedraw_ = true;
+            Serial.println("[ENG] Maintenance acknowledged");
+            return true;
+        }
+        return false;
+    }
+
     // INA226 mapping: tap a row to cycle its position assignment
     if (currentMenu_ == SubMenu::SENSOR_MAP_INA) {
         for (uint8_t i = 0; i < config_store::NUM_INA226_CH; ++i) {
@@ -597,7 +656,10 @@ void EngineeringScreen::drawMainMenu() {
     for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
         int16_t btnY = MENU_START_Y + i * MENU_SPACING;
         uint16_t bgCol = ui::COL_DARK_GRAY;
-        uint16_t txtCol = (i == 6) ? ui::COL_AMBER : ui::COL_WHITE;
+        uint16_t txtCol = (i == 6) ? ui::COL_AMBER :       // Factory Defaults
+                          (i == 7) ? ui::COL_CYAN :         // DTC Error Log
+                          (i == 8) ? ui::COL_GREEN :        // Maintenance
+                          ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
         RTRACE_FILL_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
@@ -1169,5 +1231,279 @@ void EngineeringScreen::drawFactoryDefaults() {
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
                 ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawDtcLogViewer — Persistent DTC Fault Log Viewer
+//
+// Shows last N fault events stored in NVS with human-readable error code
+// descriptions, fault flags, subsystem, and system state at the time.
+// CLEAR LOG button erases all entries.
+// -------------------------------------------------------------------------
+
+// Safety error code → short name (matches can_ids.h SafetyError)
+static const char* dtcErrorName(uint8_t code) {
+    switch (code) {
+        case 0:  return "NONE";
+        case 1:  return "OVERCURRENT";
+        case 2:  return "OVERTEMP";
+        case 3:  return "CAN TIMEOUT";
+        case 4:  return "SENSOR FAULT";
+        case 5:  return "MOTOR STALL";
+        case 6:  return "E-STOP";
+        case 7:  return "WATCHDOG";
+        case 8:  return "CENTERING";
+        case 9:  return "BATT UV WARN";
+        case 10: return "BATT UV CRIT";
+        case 11: return "I2C FAIL";
+        case 12: return "OBSTACLE";
+        case 13: return "CAN BUS-OFF";
+        default: return "UNKNOWN";
+    }
+}
+
+// System state → short name
+static const char* dtcStateName(uint8_t st) {
+    switch (st) {
+        case 0: return "BOOT";
+        case 1: return "STANDBY";
+        case 2: return "ACTIVE";
+        case 3: return "DEGRADED";
+        case 4: return "SAFE";
+        case 5: return "ERROR";
+        case 6: return "LIMP";
+        default: return "?";
+    }
+}
+
+void EngineeringScreen::drawDtcLogViewer() {
+    RTRACE_BEGIN_SCREEN("eng_dtc_log");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("DTC FAULT LOG", ui::SCREEN_W / 2, 12);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 12, "DTC FAULT LOG",
+                ui::COL_AMBER, ui::COL_BG, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+
+    uint8_t count = config_store::getFaultLogCount();
+
+    if (count == 0) {
+        tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
+        tft.drawString("No faults recorded.", 40, 50);
+        RTRACE_TEXT(40, 50, "No faults recorded.",
+                    ui::COL_GREEN, ui::COL_BG, 1, TL_DATUM);
+    } else {
+        // Column headers
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString("#", 10, 28);
+        tft.drawString("Uptime", 30, 28);
+        tft.drawString("Error", 110, 28);
+        tft.drawString("Flags", 230, 28);
+        tft.drawString("Sub", 300, 28);
+        tft.drawString("State", 350, 28);
+
+        // Show up to 12 most recent entries (screen space limited)
+        uint8_t maxShow = (count < 12) ? count : 12;
+        // Show most recent first: iterate from newest (count-1) to oldest
+        for (uint8_t i = 0; i < maxShow; ++i) {
+            uint8_t idx = count - 1 - i;  // newest first
+            config_store::FaultLogEntry fte;
+            if (!config_store::getFaultLogEntry(idx, fte)) continue;
+
+            int16_t rowY = 40 + i * 18;
+            char buf[80];
+
+            // Entry number
+            snprintf(buf, sizeof(buf), "%u", idx + 1);
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            tft.drawString(buf, 10, rowY);
+
+            // Uptime (hh:mm:ss for clarity §4.2)
+            uint32_t sec = fte.uptimeMs / 1000;
+            uint32_t hrs = sec / 3600;
+            uint32_t mns = (sec % 3600) / 60;
+            uint32_t scs = sec % 60;
+            if (hrs > 0) {
+                snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu",
+                         (unsigned long)hrs, (unsigned long)mns, (unsigned long)scs);
+            } else {
+                snprintf(buf, sizeof(buf), "%lu:%02lu",
+                         (unsigned long)mns, (unsigned long)scs);
+            }
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            tft.drawString(buf, 30, rowY);
+
+            // Error code + name
+            snprintf(buf, sizeof(buf), "%u:%s", fte.errorCode,
+                     dtcErrorName(fte.errorCode));
+            uint16_t errCol = (fte.errorCode > 0) ? ui::COL_RED : ui::COL_GREEN;
+            tft.setTextColor(errCol, ui::COL_BG);
+            tft.drawString(buf, 110, rowY);
+
+            // Fault flags hex
+            snprintf(buf, sizeof(buf), "0x%02X", fte.faultFlags);
+            tft.setTextColor(fte.faultFlags ? ui::COL_AMBER : ui::COL_GREEN, ui::COL_BG);
+            tft.drawString(buf, 230, rowY);
+
+            // Subsystem
+            static const char* const subNames[] = {"GLB","MOT","SEN","CAN"};
+            const char* subName = (fte.subsystem < 4) ? subNames[fte.subsystem] : "?";
+            tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+            tft.drawString(subName, 300, rowY);
+
+            // System state
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            tft.drawString(dtcStateName(fte.systemState), 350, rowY);
+        }
+
+        // Entry count summary
+        char countBuf[32];
+        snprintf(countBuf, sizeof(countBuf), "Total: %u/%u entries",
+                 count, config_store::FAULT_LOG_MAX_ENTRIES);
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(countBuf, 10, 260);
+    }
+
+    // Back button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    // CLEAR LOG button (red, bottom-right) — shows "CONFIRM?" after first tap (§4.1)
+    if (count > 0) {
+        uint16_t btnCol = clearLogPending_ ? ui::COL_AMBER : ui::COL_RED;
+        const char* btnLabel = clearLogPending_ ? "CONFIRM?" : "CLEAR";
+        tft.fillRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, btnCol);
+        RTRACE_FILL_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, btnCol);
+        tft.drawRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+        RTRACE_DRAW_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+        tft.setTextColor(clearLogPending_ ? ui::COL_BLACK : ui::COL_WHITE, btnCol);
+        tft.drawString(btnLabel, SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2);
+        RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, btnLabel,
+                    clearLogPending_ ? ui::COL_BLACK : ui::COL_WHITE, btnCol, 1, MC_DATUM);
+    }
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawMaintenance — Maintenance counter status and reset
+//
+// Shows cumulative runtime, maintenance threshold, and whether service
+// is due.  Provides RESET COUNTER and ACK REMINDER buttons.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawMaintenance() {
+    RTRACE_BEGIN_SCREEN("eng_maintenance");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("MAINTENANCE", ui::SCREEN_W / 2, 22);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 22, "MAINTENANCE",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    const auto& cfg = config_store::get();
+    char buf[64];
+
+    // Runtime
+    uint32_t totalSec = cfg.runtimeSeconds;
+    uint32_t hours = totalSec / 3600;
+    uint32_t mins  = (totalSec % 3600) / 60;
+    snprintf(buf, sizeof(buf), "Runtime: %lu h %lu min", (unsigned long)hours, (unsigned long)mins);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+    tft.drawString(buf, 40, 60);
+
+    // Threshold
+    snprintf(buf, sizeof(buf), "Service interval: %lu hours",
+             (unsigned long)cfg.maintIntervalHours);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString(buf, 40, 80);
+
+    // Progress bar
+    uint32_t thresholdSec = cfg.maintIntervalHours * 3600UL;
+    uint8_t pct = (thresholdSec > 0) ?
+        static_cast<uint8_t>((totalSec * 100UL) / thresholdSec) : 100;
+    if (pct > 100) pct = 100;
+
+    int16_t barX = 40, barY = 100, barW = 300, barH = 18;
+    tft.drawRect(barX, barY, barW, barH, ui::COL_GRAY);
+    uint16_t fillCol = (pct >= 100) ? ui::COL_RED :
+                       (pct >= 80)  ? ui::COL_AMBER : ui::COL_GREEN;
+    int16_t fillW = static_cast<int16_t>((int32_t)barW * pct / 100);
+    if (fillW > 2) {
+        tft.fillRect(barX + 1, barY + 1, fillW - 2, barH - 2, fillCol);
+    }
+    snprintf(buf, sizeof(buf), "%u%%", pct);
+    tft.setTextColor(ui::COL_WHITE, fillCol);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(buf, barX + barW / 2, barY + barH / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Status message
+    bool due = config_store::isMaintenanceDue();
+    if (due) {
+        tft.setTextColor(ui::COL_RED, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString("MANTENIMIENTO PENDIENTE", 40, 140);
+        tft.setTextSize(1);
+
+        if (cfg.maintAcknowledged) {
+            tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+            tft.drawString("(Acknowledged - reminder silenced)", 40, 165);
+        } else {
+            // ACK REMINDER button
+            tft.fillRect(200, 200, 200, 30, ui::COL_AMBER);
+            tft.drawRect(200, 200, 200, 30, ui::COL_WHITE);
+            tft.setTextColor(ui::COL_BLACK, ui::COL_AMBER);
+            tft.setTextDatum(MC_DATUM);
+            tft.drawString("ACEPTAR MANTENIMIENTO", 300, 215);
+            tft.setTextDatum(TL_DATUM);
+        }
+    } else {
+        tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString("OK - NO SERVICE DUE", 40, 140);
+        tft.setTextSize(1);
+    }
+
+    // Back button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    // RESET COUNTER button (bottom-right)
+    tft.fillRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_RED);
+    RTRACE_FILL_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_RED);
+    tft.drawRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+    RTRACE_DRAW_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.drawString("RESET", SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2);
+    RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, "RESET",
+                ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+
     tft.setTextDatum(TL_DATUM);
 }

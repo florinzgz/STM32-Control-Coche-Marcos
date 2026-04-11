@@ -189,6 +189,23 @@ bool ScreenManager::isInitialScreen() const {
     return currentState_ == can::SystemState::BOOT;
 }
 
+bool ScreenManager::isTankConfirmActive() const {
+    // Only relevant when drive screen is active (ACTIVE/DEGRADED/LIMP_HOME)
+    if (currentScreen_ != &driveScreen_) return false;
+    return driveScreen_.isTankConfirmVisible();
+}
+
+void ScreenManager::showTankConfirm() {
+    if (currentScreen_ == &driveScreen_) {
+        driveScreen_.showTankConfirm();
+    }
+}
+
+uint8_t ScreenManager::handleTankConfirmTouch(int16_t x, int16_t y) {
+    if (currentScreen_ != &driveScreen_) return 0;
+    return driveScreen_.handleTankConfirmTouch(x, y);
+}
+
 Screen* ScreenManager::screenForState(can::SystemState state) {
     switch (state) {
         case can::SystemState::BOOT:      return &bootScreen_;

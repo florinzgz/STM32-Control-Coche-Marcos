@@ -163,6 +163,12 @@ static constexpr uint16_t BATTERY_CRIT_THRESHOLD_RAW = 1800; // 18.00 V in 0.01 
 static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beeps
 static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
 
+// ---- Runtime counter for maintenance tracking ----
+static unsigned long lastRuntimeTickMs = 0;
+static uint32_t      runtimeAccumMs    = 0;       // partial seconds accumulated in RAM (§2.2)
+static constexpr unsigned long RUNTIME_COMMIT_INTERVAL_MS = 60000;  // commit to NVS every 60 s
+static bool     maintenanceWarnPlayed = false;
+
 // ---- Temperature audio tracking ----
 static bool     tempHighPlayed = false;        // one-shot for temp high warning
 static constexpr int8_t TEMP_HIGH_THRESHOLD = 85;  // °C — play alert above this
@@ -387,25 +393,42 @@ static void renderTask(void* /*param*/) {
             touch::TouchEvent evt = touch::getEvent();
 
             if (evt.type == touch::EventType::LONG_PRESS) {
-                screenManager.onLongPress(evt.x, evt.y);
+                // Block long-press while tank confirm modal is active (§3.1)
+                if (!screenManager.isTankConfirmActive()) {
+                    screenManager.onLongPress(evt.x, evt.y);
+                }
             }
 
             if (evt.type == touch::EventType::TAP) {
                 screenManager.onTouch(evt.x, evt.y);
 
                 if (!screenManager.isBlockingInput()) {
-                    if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
-                        TouchAction act = TouchAction::FRONT_LED_TOGGLE;
-                        xQueueSend(touchActionQueue, &act, 0);
-                    }
-                    if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
-                        TouchAction act = TouchAction::REAR_LED_TOGGLE;
-                        xQueueSend(touchActionQueue, &act, 0);
-                    }
-                    uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
-                    if (modeHit == 3) {
-                        TouchAction act = TouchAction::TANK_MODE_TOGGLE;
-                        xQueueSend(touchActionQueue, &act, 0);
+                    // ---- Tank turn confirmation dialog active ----
+                    // If the confirm bar is visible, route ALL taps to it first.
+                    if (screenManager.isTankConfirmActive()) {
+                        uint8_t confirmResult = screenManager.handleTankConfirmTouch(evt.x, evt.y);
+                        if (confirmResult == 1) {
+                            // User confirmed YES → queue the actual toggle
+                            TouchAction act = TouchAction::TANK_MODE_TOGGLE;
+                            xQueueSend(touchActionQueue, &act, 0);
+                        }
+                        // confirmResult 2 = NO (dismissed), 0 = consumed
+                        // In all cases, skip normal touch handling this frame
+                    } else {
+                        // Normal touch handling (no confirm dialog)
+                        if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
+                            TouchAction act = TouchAction::FRONT_LED_TOGGLE;
+                            xQueueSend(touchActionQueue, &act, 0);
+                        }
+                        if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
+                            TouchAction act = TouchAction::REAR_LED_TOGGLE;
+                            xQueueSend(touchActionQueue, &act, 0);
+                        }
+                        uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
+                        if (modeHit == 3) {
+                            // Show confirmation dialog instead of immediate toggle
+                            screenManager.showTankConfirm();
+                        }
                     }
                 }
             }
@@ -662,6 +685,9 @@ void loop() {
     // The STM32 echoes the active mode flags in the heartbeat status_flags
     // (bits 1-2).  This allows the ESP32 to confirm the STM32 actually
     // applied the requested mode, even if the ACK was lost.
+    // §1 CAN state validation: this is the SOLE source of truth for UI mode
+    // state.  Tank turn and traction toggles only send CAN commands — the UI
+    // updates here after the STM32 confirms via heartbeat echo.
     // Guard: only sync after first valid heartbeat has been received
     // (timestampMs is 0 until the first CAN heartbeat is decoded).
     {
@@ -674,6 +700,8 @@ void loop() {
                 md.modeFlags   = currentModeFlags;
                 md.timestampMs = millis();
                 vehicleData.setMode(md);
+                // Persist confirmed tank turn state to NVS
+                config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
             }
         }
     }
@@ -804,8 +832,8 @@ void loop() {
             currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
                              | tractionBit;
             sendModeCommand(currentModeFlags);
-            // Only persist tank turn to NVS; traction comes from physical switch
-            config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
+            // NVS persist deferred to heartbeat sync (§1) — only confirmed
+            // state is persisted to avoid stale data on power loss.
             {
                 vehicle::ModeData md;
                 md.modeFlags   = currentModeFlags;
@@ -859,14 +887,12 @@ void loop() {
                         currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
                         audio::play(audio::Sound::BEEP, audio::Priority::LO);
                         sendModeCommand(currentModeFlags);
-                        config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
-                        {
-                            vehicle::ModeData md;
-                            md.modeFlags   = currentModeFlags;
-                            md.timestampMs = millis();
-                            vehicleData.setMode(md);
-                        }
-                        Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
+                        // §1 CAN state validation: do NOT update vehicleData here.
+                        // The heartbeat sync (lines 693-700) updates UI state
+                        // ONLY after the STM32 confirms via statusFlags echo.
+                        // NVS persistence also deferred to heartbeat confirmation.
+                        Serial.printf("[MODE] Tank toggle requested → 0x%02X\n",
+                                      currentModeFlags);
                     }
                     break;
             }
@@ -1036,6 +1062,18 @@ void loop() {
                     default:
                         break;
                 }
+
+                // ---- DTC Fault Log: persist error event to NVS ----
+                {
+                    config_store::FaultLogEntry fte;
+                    fte.uptimeMs    = now;
+                    fte.errorCode   = safeErr;
+                    fte.faultFlags  = vehicleData.heartbeat().faultFlags;
+                    fte.subsystem   = vehicleData.diag().subsystem;
+                    fte.systemState = static_cast<uint8_t>(vehicleData.heartbeat().systemState);
+                    config_store::logFault(fte);
+                }
+
                 lastSafetyError = safeErr;
             } else if (safeErr == 0) {
                 lastSafetyError = 0;
@@ -1075,6 +1113,50 @@ void loop() {
     if ((now - lastNvsFlushMs) >= NVS_FLUSH_INTERVAL_MS) {
         lastNvsFlushMs = now;
         config_store::flush();
+    }
+
+    // ---- Runtime counter for maintenance tracking (§2.1, §2.2) ----
+    // Accumulate milliseconds in RAM continuously while operating.
+    // Commit full seconds to NVS periodically (every ~60 s) to reduce flash wear.
+    // Delta-based: uses real elapsed time, not frame count.
+    {
+        auto sysState = vehicleData.heartbeat().systemState;
+        bool isOperating = (sysState == can::SystemState::ACTIVE ||
+                            sysState == can::SystemState::DEGRADED ||
+                            sysState == can::SystemState::LIMP_HOME);
+        if (isOperating) {
+            // Accumulate real elapsed ms since last tick (§2.1 — delta-based)
+            // Unsigned subtraction handles millis() wrap correctly (~49.7 days).
+            // Clamp to a reasonable max to guard against stale lastRuntimeTickMs.
+            uint32_t elapsed = static_cast<uint32_t>(now - lastRuntimeTickMs);
+            if (elapsed > 10000) elapsed = 10000;  // sanity: cap at 10 s per tick
+            runtimeAccumMs += elapsed;
+
+            // Commit accumulated whole seconds to NVS periodically (§2.2)
+            if (runtimeAccumMs >= RUNTIME_COMMIT_INTERVAL_MS) {
+                uint32_t wholeSec = runtimeAccumMs / 1000;
+                runtimeAccumMs -= wholeSec * 1000;  // keep fractional ms
+                uint32_t cur = config_store::get().runtimeSeconds;
+                config_store::setRuntimeSeconds(cur + wholeSec);
+            }
+        } else {
+            // Not operating: commit any accumulated partial seconds before discarding
+            if (runtimeAccumMs >= 1000) {
+                uint32_t wholeSec = runtimeAccumMs / 1000;
+                uint32_t cur = config_store::get().runtimeSeconds;
+                config_store::setRuntimeSeconds(cur + wholeSec);
+            }
+            runtimeAccumMs = 0;
+        }
+        lastRuntimeTickMs = now;
+
+        // Play maintenance reminder once per power cycle when threshold crossed (§2.3)
+        if (config_store::isMaintenanceDue() && !maintenanceWarnPlayed &&
+            !config_store::get().maintAcknowledged) {
+            audio::play(audio::Sound::TEST_SYSTEM, audio::Priority::LO);
+            maintenanceWarnPlayed = true;
+            Serial.println("[MAINT] Maintenance reminder — service due");
+        }
     }
 
     // ---- WS2812B LED update ----

@@ -8,6 +8,7 @@
 #include "ui/ui_common.h"
 #include "ui/ui_config.h"
 #include "ui/render_trace.h"
+#include "config_store.h"
 #include <TFT_eSPI.h>
 #include <cstdio>
 #include <cstring>
@@ -96,6 +97,18 @@ void StandbyScreen::draw() {
 
         prevFaultFlags_ = faultFlags_ + 1;  // Force redraw
         memset(prevTemps_, 0x7F, sizeof(prevTemps_));
+
+        // ---- Maintenance indicator ----
+        if (config_store::isMaintenanceDue() &&
+            !config_store::get().maintAcknowledged) {
+            tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+            tft.setTextSize(1);
+            tft.setTextDatum(MC_DATUM);
+            tft.drawString("MANTENIMIENTO PENDIENTE", ui::SCREEN_W / 2, 130);
+            RTRACE_TEXT(ui::SCREEN_W / 2, 130, "MANTENIMIENTO PENDIENTE",
+                        ui::COL_AMBER, ui::COL_BG, 1, MC_DATUM);
+            tft.setTextDatum(TL_DATUM);
+        }
 
         tiles_.markAllDirty();
     }
