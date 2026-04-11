@@ -34,7 +34,7 @@ typedef enum {
     SAFETY_ERROR_CAN_BUSOFF = 13,           /* FDCAN bus-off condition detected   */
     SAFETY_ERROR_BATTERY_OV_WARNING = 14,   /* Battery voltage > 30.0 V          */
     SAFETY_ERROR_BATTERY_OV_CRITICAL = 15,  /* Battery voltage > 35.0 V          */
-    SAFETY_ERROR_RELAY_OPEN = 16,           /* Relay commanded but no motor current */
+    SAFETY_ERROR_RELAY_OPEN = 16,           /* Relay health: insufficient motor current */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.

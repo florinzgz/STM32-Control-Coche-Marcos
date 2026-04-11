@@ -1811,8 +1811,10 @@ void Safety_CheckRelayHealth(void)
                             RELAY_CHK_CURRENT_K * throttle;
             /* Safety clamp: bound adaptive threshold to [BASE, MAX].
              * Prevents runaway values from corrupted throttle input
-             * (e.g. ADC glitch returning >100 %).  One compare, O(1). */
-            if (eff_threshold > RELAY_CHK_CURRENT_MAX_A) {
+             * (e.g. ADC glitch returning >100% or negative).  O(1). */
+            if (eff_threshold < RELAY_CHK_CURRENT_BASE_A) {
+                eff_threshold = RELAY_CHK_CURRENT_BASE_A;
+            } else if (eff_threshold > RELAY_CHK_CURRENT_MAX_A) {
                 eff_threshold = RELAY_CHK_CURRENT_MAX_A;
             }
             eff_debounce  = RELAY_CHK_DEBOUNCE_CYCLES;
