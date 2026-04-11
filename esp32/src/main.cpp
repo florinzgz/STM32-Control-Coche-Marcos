@@ -1123,7 +1123,10 @@ void loop() {
                             sysState == can::SystemState::LIMP_HOME);
         if (isOperating) {
             // Accumulate real elapsed ms since last tick (§2.1 — delta-based)
+            // Unsigned subtraction handles millis() wrap correctly (~49.7 days).
+            // Clamp to a reasonable max to guard against stale lastRuntimeTickMs.
             uint32_t elapsed = static_cast<uint32_t>(now - lastRuntimeTickMs);
+            if (elapsed > 10000) elapsed = 10000;  // sanity: cap at 10 s per tick
             runtimeAccumMs += elapsed;
 
             // Commit accumulated whole seconds to NVS periodically (§2.2)

@@ -292,7 +292,13 @@ void logFault(const FaultLogEntry& entry) {
 
     // --- Write rate protection (§1.2) ---
     // Even if state changed, enforce minimum interval to protect flash.
-    bool tooSoon = (entry.uptimeMs - lastLoggedUptimeMs_) < FLOG_MIN_INTERVAL_MS;
+    // Unsigned subtraction is safe for millis() wrap (~49.7 days):
+    // if uptime < last (e.g. reboot), delta wraps to a large value → not "too soon".
+    bool tooSoon = false;
+    if (lastLoggedUptimeMs_ != 0) {
+        uint32_t delta = entry.uptimeMs - lastLoggedUptimeMs_;
+        tooSoon = (delta < FLOG_MIN_INTERVAL_MS);
+    }
 
     if (isDuplicate || tooSoon) {
         return;  // Suppress — not a new event or too soon
