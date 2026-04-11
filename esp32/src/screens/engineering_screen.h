@@ -50,7 +50,9 @@ private:
         ENCODER_CAL,
         SENSOR_MAP_INA,    // INA226 channel-to-position mapping
         SENSOR_MAP_TEMP,   // DS18B20 sensor-to-position mapping
-        FACTORY_DEFAULTS   // Individual factory-default reset options
+        FACTORY_DEFAULTS,  // Individual factory-default reset options
+        DTC_LOG_VIEWER,    // Persistent DTC fault log viewer
+        MAINTENANCE        // Maintenance counter reset + status
     };
 
     void drawMainMenu();
@@ -61,6 +63,8 @@ private:
     void drawSensorMapIna();
     void drawSensorMapTemp();
     void drawFactoryDefaults();
+    void drawDtcLogViewer();
+    void drawMaintenance();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
