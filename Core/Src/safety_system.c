@@ -94,18 +94,43 @@ static inline void sat_inc_u32(uint32_t *counter) {
  * Detects relay-not-closing condition using throttle demand vs motor
  * current observation.  Runs only in ACTIVE / DEGRADED / LIMP_HOME.
  *
- * Algorithm: if throttle has been above RELAY_CHK_THROTTLE_MIN_PCT
- * for RELAY_CHK_DELAY_MS and the average absolute motor current
- * (INA226 ch 0-3) is below RELAY_CHK_CURRENT_MIN_A, the relay is
- * presumed open (no power reaching motors).
+ * Algorithm:
+ *   1. Activation: throttle > RELAY_CHK_THROTTLE_MIN_PCT (primary) OR
+ *      throttle > RELAY_CHK_THROTTLE_SPEED_PCT with speed > SPEED_MIN
+ *      (secondary — catches relay failure while vehicle is in motion).
+ *   2. After RELAY_CHK_DELAY_MS, compute TOTAL absolute motor current
+ *      (INA226 ch 0-3 sum, not per-wheel average) and compare against
+ *      RELAY_CHK_CURRENT_MIN_TOTAL_A.
+ *   3. If below threshold for RELAY_CHK_DEBOUNCE_CYCLES consecutive
+ *      calls, trigger SAFETY_ERROR_RELAY_OPEN → DEGRADED L3.
+ *   4. Voltage correlation: skip check if battery voltage below
+ *      RELAY_CHK_VOLTAGE_MIN_V (a depleted battery cannot deliver
+ *      current regardless of relay state — false positive protection).
+ *   5. Recovery hysteresis: fault clears ONLY after RELAY_CHK_RECOVERY_MS
+ *      of sustained healthy current — prevents DEGRADED ↔ ACTIVE
+ *      oscillation.
  *
- * Debounce: the above condition must persist for
- * RELAY_CHK_DEBOUNCE_CYCLES consecutive checks (10 ms each) to
- * trigger a fault — rejects transient glitches.                       */
-#define RELAY_CHK_THROTTLE_MIN_PCT  20.0f   /* Min throttle to start check  */
-#define RELAY_CHK_DELAY_MS          300U    /* Settle time after throttle   */
-#define RELAY_CHK_CURRENT_MIN_A     0.5f    /* Below this → relay suspect   */
+ * Debounce: fault condition must persist for RELAY_CHK_DEBOUNCE_CYCLES
+ * consecutive 10 ms checks to trigger — rejects transient glitches.
+ *
+ * Threshold rationale:
+ *   Total current ≈ 3.0 A chosen because 4 × RS775 at 24 V under
+ *   20 % throttle draw ≈ 1.5–2.5 A each → total ≈ 6–10 A.
+ *   3.0 A total sum leaves ~50 % margin for single-wheel scenarios
+ *   while remaining well above INA226 noise floor (~0.1 A per ch).    */
+#define RELAY_CHK_THROTTLE_MIN_PCT  20.0f   /* Primary: min throttle %      */
+#define RELAY_CHK_THROTTLE_SPEED_PCT 10.0f  /* Secondary: lower floor when
+                                             * speed confirms motion        */
+#define RELAY_CHK_SPEED_MIN_KMH     2.0f    /* Min speed for secondary
+                                             * activation (km/h)            */
+#define RELAY_CHK_DELAY_MS          300U    /* Settle time after activation  */
+#define RELAY_CHK_CURRENT_MIN_TOTAL_A 3.0f  /* Total sum below this → relay
+                                             * suspect (was 0.5 per-wheel)  */
 #define RELAY_CHK_DEBOUNCE_CYCLES   3U      /* Consecutive fails to trigger */
+#define RELAY_CHK_RECOVERY_MS       1500U   /* Hysteresis: sustain healthy
+                                             * current this long to clear   */
+#define RELAY_CHK_VOLTAGE_MIN_V     18.0f   /* Skip check below this battery
+                                             * voltage (false positive guard)*/
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
 #define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
@@ -149,10 +174,15 @@ static uint32_t        relay_seq_timestamp = 0;
 
 /* ---- Relay health check runtime state ----
  * Tracks whether the relay-open detection window is active and how
- * many consecutive 10 ms cycles the fault condition has persisted.   */
+ * many consecutive 10 ms cycles the fault condition has persisted.
+ * relay_chk_recovery_tick tracks the recovery hysteresis window —
+ * the fault is only cleared after sustained healthy current.          */
 static uint8_t  relay_chk_active       = 0;     /* 1 = timing window running  */
 static uint32_t relay_chk_start_tick   = 0;     /* HAL_GetTick() at window start */
 static uint8_t  relay_chk_debounce     = 0;     /* Consecutive fail counter   */
+static uint32_t relay_chk_recovery_tick = 0;    /* 0 = not recovering; else
+                                                  * HAL_GetTick() at start of
+                                                  * healthy current window      */
 
 /* Recovery debounce: require RECOVERY_HOLD_MS of clean operation
  * before transitioning DEGRADED → ACTIVE.  Prevents rapid state
@@ -750,6 +780,7 @@ void Safety_Init(void)
     relay_chk_active         = 0;
     relay_chk_start_tick     = 0;
     relay_chk_debounce       = 0;
+    relay_chk_recovery_tick  = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -1583,15 +1614,22 @@ void Safety_CheckBatteryOvervoltage(void)
 
 /* ---- Relay health check (post-ACTIVE runtime validation) ----------
  *
- * Detects relay-not-closing using existing signals (throttle + INA226).
+ * Detects relay-not-closing using existing signals (throttle + INA226
+ * motor current + wheel speed + battery voltage).
  * Active ONLY in ACTIVE / DEGRADED / LIMP_HOME.
  *
  * Algorithm:
- *   1. When throttle > RELAY_CHK_THROTTLE_MIN_PCT, start a timing window.
- *   2. After RELAY_CHK_DELAY_MS, check average |motor current| (ch 0-3).
- *   3. If below RELAY_CHK_CURRENT_MIN_A for RELAY_CHK_DEBOUNCE_CYCLES
- *      consecutive calls, trigger SAFETY_ERROR_RELAY_OPEN → DEGRADED L3.
- *   4. When throttle drops below threshold, reset the check.
+ *   1. Activation: throttle > 20% (primary) OR throttle > 10% with
+ *      vehicle speed > 2 km/h (secondary — catches relay failure
+ *      while vehicle is in motion at lower demand).
+ *   2. After 300 ms settle, compute TOTAL absolute motor current
+ *      (INA226 ch 0-3 sum).
+ *   3. Voltage guard: skip check if battery < 18 V (depleted battery
+ *      cannot deliver current regardless of relay state).
+ *   4. If total current < 3.0 A for 3 consecutive calls (30 ms),
+ *      trigger SAFETY_ERROR_RELAY_OPEN → DEGRADED L3.
+ *   5. Recovery: fault clears ONLY after 1500 ms of sustained healthy
+ *      current — prevents DEGRADED ↔ ACTIVE oscillation.
  *
  * O(1) per call.  No division.  No blocking.  No CAN changes.
  * Called from the 10 ms safety loop (same tier as Safety_CheckCurrent). */
@@ -1600,15 +1638,17 @@ void Safety_CheckRelayHealth(void)
 {
     /* Only active when motion is allowed (ACTIVE / DEGRADED / LIMP_HOME) */
     if (!Safety_IsMotionAllowed()) {
-        relay_chk_active   = 0;
-        relay_chk_debounce = 0;
+        relay_chk_active        = 0;
+        relay_chk_debounce      = 0;
+        relay_chk_recovery_tick = 0;
         return;
     }
 
     /* Skip if relay power-up sequence has not completed */
     if (relay_seq_state != RELAY_SEQ_COMPLETE) {
-        relay_chk_active   = 0;
-        relay_chk_debounce = 0;
+        relay_chk_active        = 0;
+        relay_chk_debounce      = 0;
+        relay_chk_recovery_tick = 0;
         return;
     }
 
@@ -1620,7 +1660,23 @@ void Safety_CheckRelayHealth(void)
      * relay validation when the driver clearly wants to move.       */
     float throttle = Pedal_GetPercent();
 
-    if (throttle > RELAY_CHK_THROTTLE_MIN_PCT) {
+    /* Speed-aware activation: compute average wheel speed (km/h).
+     * Pattern reused from Safety_ValidateModeChange / ABS / TCS.
+     * Multiply by 0.25 instead of dividing by 4 (no division).     */
+    float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                       Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+
+    /* Activation condition:
+     *   Primary:   throttle > 20 % (standing start / normal drive)
+     *   Secondary: throttle > 10 % AND speed > 2 km/h (relay failure
+     *              while vehicle is moving at lower demand).
+     * At idle (throttle ≤ 10 %, speed ≤ 2 km/h): no check → no FP.  */
+    uint8_t demand_present =
+        (throttle > RELAY_CHK_THROTTLE_MIN_PCT) ||
+        (throttle > RELAY_CHK_THROTTLE_SPEED_PCT &&
+         avg_speed > RELAY_CHK_SPEED_MIN_KMH);
+
+    if (demand_present) {
         uint32_t now = HAL_GetTick();
 
         if (!relay_chk_active) {
@@ -1636,11 +1692,23 @@ void Safety_CheckRelayHealth(void)
             return;
         }
 
-        /* Compute average absolute motor current (ch 0-3).
-         * Skip disabled sensors.  Use manual absolute value
-         * (no fabsf — avoid pulling in libm for a single call).
-         * Sum is kept as integer-scaled fixed-point: multiply by 4
-         * later avoided by comparing sum against threshold×count.   */
+        /* Voltage correlation: skip relay check if battery voltage is
+         * below the critical threshold.  A depleted battery cannot
+         * deliver motor current regardless of relay state — triggering
+         * a relay fault here would be a false positive.  The existing
+         * battery undervoltage checks handle that condition.          */
+        float batt_v = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+        if (isnan(batt_v) || isinf(batt_v) ||
+            batt_v < RELAY_CHK_VOLTAGE_MIN_V) {
+            relay_chk_debounce = 0;
+            return;
+        }
+
+        /* Compute TOTAL absolute motor current (ch 0-3).
+         * Uses sum of all enabled motor channels instead of per-wheel
+         * average — more robust against single-channel noise.
+         * Skip disabled sensors (service mode).  Manual abs value
+         * (no fabsf — avoid pulling in libm for a single call).      */
         float sum = 0.0f;
         uint8_t count = 0;
         for (uint8_t i = 0; i < NUM_WHEELS; i++) {
@@ -1660,12 +1728,20 @@ void Safety_CheckRelayHealth(void)
             return;
         }
 
-        /* Compare sum vs threshold×count (avoids division).
-         * avg < RELAY_CHK_CURRENT_MIN_A  ⟺  sum < threshold × count */
-        float threshold_sum = RELAY_CHK_CURRENT_MIN_A * (float)count;
+        /* Compare total sum against fixed threshold.
+         * No division needed — RELAY_CHK_CURRENT_MIN_TOTAL_A is the
+         * minimum expected TOTAL current across all enabled channels
+         * when throttle is above the activation threshold.
+         *
+         * Rationale: 4 × RS775 at 24 V under 20% throttle draw
+         * ≈ 1.5–2.5 A each → total ≈ 6–10 A.  Threshold of 3.0 A
+         * leaves ~50% margin while remaining well above INA226
+         * noise floor (~0.1 A per channel).                          */
+        if (sum < RELAY_CHK_CURRENT_MIN_TOTAL_A) {
+            /* Fault condition: demand present but no motor current.
+             * Reset recovery timer — fault condition persists.        */
+            relay_chk_recovery_tick = 0;
 
-        if (sum < threshold_sum) {
-            /* Fault condition: throttle demanded but no motor current */
             if (relay_chk_debounce < UINT8_MAX) relay_chk_debounce++;
 
             if (relay_chk_debounce >= RELAY_CHK_DEBOUNCE_CYCLES) {
@@ -1680,17 +1756,39 @@ void Safety_CheckRelayHealth(void)
             /* Current present — relay is healthy, reset debounce */
             relay_chk_debounce = 0;
 
-            /* Clear relay-open error if it was previously set,
-             * allowing DEGRADED → ACTIVE recovery.                   */
+            /* Recovery hysteresis: only clear the relay-open fault
+             * after RELAY_CHK_RECOVERY_MS of sustained healthy current.
+             * Prevents DEGRADED ↔ ACTIVE oscillation from noisy
+             * current readings or intermittent relay contact.
+             *
+             * The recovery timer starts when current first exceeds the
+             * threshold and resets if current drops below it again.
+             * Fault is cleared only when the timer expires.           */
             if (safety_error == SAFETY_ERROR_RELAY_OPEN) {
-                ServiceMode_ClearFault(MODULE_RELAY_MAIN);
-                Safety_ClearError(SAFETY_ERROR_RELAY_OPEN);
+                if (relay_chk_recovery_tick == 0) {
+                    /* Start recovery window */
+                    relay_chk_recovery_tick = now;
+                } else if ((now - relay_chk_recovery_tick) >=
+                           RELAY_CHK_RECOVERY_MS) {
+                    /* Sustained healthy current confirmed — clear fault */
+                    ServiceMode_ClearFault(MODULE_RELAY_MAIN);
+                    Safety_ClearError(SAFETY_ERROR_RELAY_OPEN);
+                    relay_chk_recovery_tick = 0;
+                }
+                /* else: still waiting for hysteresis window to expire */
             }
         }
     } else {
-        /* Throttle below threshold — reset the check window */
-        relay_chk_active   = 0;
-        relay_chk_debounce = 0;
+        /* Throttle and speed both below thresholds — reset check window.
+         * Do NOT clear relay_chk_recovery_tick here: if a relay fault
+         * was detected and throttle drops briefly, re-demanding throttle
+         * must still sustain healthy current for the full recovery
+         * period.  However, since we cannot measure current without
+         * demand, reset the recovery timer — it will restart when
+         * demand returns and current is observed.                     */
+        relay_chk_active        = 0;
+        relay_chk_debounce      = 0;
+        relay_chk_recovery_tick = 0;
     }
 }
 
