@@ -33,7 +33,8 @@ typedef enum {
     SAFETY_ERROR_OBSTACLE = 12,             /* Obstacle emergency or CAN timeout */
     SAFETY_ERROR_CAN_BUSOFF = 13,           /* FDCAN bus-off condition detected   */
     SAFETY_ERROR_BATTERY_OV_WARNING = 14,   /* Battery voltage > 30.0 V          */
-    SAFETY_ERROR_BATTERY_OV_CRITICAL = 15   /* Battery voltage > 35.0 V          */
+    SAFETY_ERROR_BATTERY_OV_CRITICAL = 15,  /* Battery voltage > 35.0 V          */
+    SAFETY_ERROR_RELAY_OPEN = 16,           /* Relay health: insufficient motor current */
 } Safety_Error_t;
 
 /* System operational state – the STM32 progresses through these states.
@@ -96,6 +97,7 @@ typedef enum {
  * contract extensions.                                              */
 #define FAULT_BATT_UV_WARN      (1U << 8)   /* Battery < 20.0 V */
 #define FAULT_BATT_UV_CRIT      (1U << 9)   /* Battery < 18.0 V */
+#define FAULT_RELAY_OPEN        (1U << 10)  /* Relay health: insufficient motor current */
 
 /* ABS/TCS status */
 typedef struct {
@@ -219,6 +221,7 @@ void Safety_CheckSensors(void);
 void Safety_CheckEncoder(void);
 void Safety_CheckBatteryVoltage(void);
 void Safety_CheckBatteryOvervoltage(void);
+void Safety_CheckRelayHealth(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);
 void Safety_PowerDown(void);

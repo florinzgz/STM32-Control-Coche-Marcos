@@ -1259,6 +1259,9 @@ static const char* dtcErrorName(uint8_t code) {
         case 11: return "I2C FAIL";
         case 12: return "OBSTACLE";
         case 13: return "CAN BUS-OFF";
+        case 14: return "BATT OV WARN";
+        case 15: return "BATT OV CRIT";
+        case 16: return "RELAY OPEN";
         default: return "UNKNOWN";
     }
 }

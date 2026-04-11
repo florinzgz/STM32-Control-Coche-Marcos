@@ -54,6 +54,9 @@ const char* ErrorScreen::safetyErrorName(uint8_t code) {
         case 11: return "I2C FAILURE";
         case 12: return "OBSTACLE";
         case 13: return "CAN BUS-OFF";
+        case 14: return "BATTERY OV WARN";
+        case 15: return "BATTERY OV CRIT";
+        case 16: return "RELAY OPEN";
         default: return "UNKNOWN";
     }
 }

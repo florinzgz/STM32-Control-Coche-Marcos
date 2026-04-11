@@ -339,6 +339,7 @@ int main(void)
             CAN_CheckBusOff();
             Safety_CheckSensors();
             Safety_CheckEncoder();
+            Safety_CheckRelayHealth();
 
             /* Boot validation checklist — run during STANDBY to
              * evaluate sensor plausibility before allowing ACTIVE.
