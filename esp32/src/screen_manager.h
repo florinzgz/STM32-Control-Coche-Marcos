@@ -76,6 +76,16 @@ public:
     /// (COCHE MARCOS / HMI v1.0 / CAN: WAITING / SENSOR: WAITING).
     bool isInitialScreen() const;
 
+    /// Returns true if the DriveScreen is active and showing the tank confirm dialog.
+    bool isTankConfirmActive() const;
+
+    /// Show the tank turn confirmation dialog on the DriveScreen.
+    void showTankConfirm();
+
+    /// Forward a touch to the tank confirm dialog.
+    /// Returns: 0=not consumed, 1=YES (confirmed), 2=NO (cancelled).
+    uint8_t handleTankConfirmTouch(int16_t x, int16_t y);
+
 private:
     Screen* screenForState(can::SystemState state);
     void    activatePinScreen();

@@ -144,6 +144,10 @@ void DriveScreen::onEnter() {
 
     // Reset hash failsafe counter
     failsafeFrameCount_ = 0;
+
+    // Reset tank turn confirmation dialog
+    tankConfirmVisible_ = false;
+    tankConfirmDirty_   = true;
 }
 
 // -------------------------------------------------------------------------
@@ -538,6 +542,12 @@ void DriveScreen::draw() {
     prevSystemState_ = curSystemState_;
     prevFaultFlags_  = curFaultFlags_;
 
+    // ---- SYSTEM LAYER (Z-order 3) — confirmation dialogs ----
+    if (tankConfirmVisible_ && tankConfirmDirty_) {
+        drawTankConfirmBar();
+        tankConfirmDirty_ = false;
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
 
@@ -686,4 +696,107 @@ void DriveScreen::drawFaultOverlays() {
             x += static_cast<int16_t>(tft.textWidth(e.label) + ui::cfg::OVL_FAULT_LABEL_GAP);
         }
     }
+}
+
+// -------------------------------------------------------------------------
+// Tank Turn Confirmation Bar — modal overlay (SYSTEM layer Z-order 3)
+//
+// Drawn when the user taps the 360° icon. Asks for confirmation before
+// activating/deactivating tank turn mode to prevent accidental taps.
+// -------------------------------------------------------------------------
+void DriveScreen::drawTankConfirmBar() {
+    using namespace ui::cfg;
+
+    // Semi-transparent background bar
+    tft.fillRect(TANK_CONFIRM_BAR_X, TANK_CONFIRM_BAR_Y,
+                 TANK_CONFIRM_BAR_W, TANK_CONFIRM_BAR_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(TANK_CONFIRM_BAR_X, TANK_CONFIRM_BAR_Y,
+                     TANK_CONFIRM_BAR_W, TANK_CONFIRM_BAR_H, ui::COL_DARK_GRAY);
+    tft.drawRect(TANK_CONFIRM_BAR_X, TANK_CONFIRM_BAR_Y,
+                 TANK_CONFIRM_BAR_W, TANK_CONFIRM_BAR_H, ui::COL_AMBER);
+    RTRACE_DRAW_RECT(TANK_CONFIRM_BAR_X, TANK_CONFIRM_BAR_Y,
+                     TANK_CONFIRM_BAR_W, TANK_CONFIRM_BAR_H, ui::COL_AMBER);
+
+    // Question text
+    const char* question = curMode_.isTankTurn
+                            ? "DESACTIVAR TANK TURN?"
+                            : "ACTIVAR TANK TURN?";
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextSize(1);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(question,
+                   TANK_CONFIRM_BAR_X + TANK_CONFIRM_BAR_W / 2,
+                   TANK_CONFIRM_BAR_Y + 12);
+    RTRACE_TEXT(TANK_CONFIRM_BAR_X + TANK_CONFIRM_BAR_W / 2,
+                TANK_CONFIRM_BAR_Y + 12, question,
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    // SÍ button (green)
+    tft.fillRect(TANK_CONFIRM_YES_X, TANK_CONFIRM_YES_Y,
+                 TANK_CONFIRM_YES_W, TANK_CONFIRM_YES_H, ui::COL_GREEN);
+    RTRACE_FILL_RECT(TANK_CONFIRM_YES_X, TANK_CONFIRM_YES_Y,
+                     TANK_CONFIRM_YES_W, TANK_CONFIRM_YES_H, ui::COL_GREEN);
+    tft.setTextColor(ui::COL_BLACK, ui::COL_GREEN);
+    tft.setTextSize(2);
+    tft.drawString("SI", TANK_CONFIRM_YES_X + TANK_CONFIRM_YES_W / 2,
+                   TANK_CONFIRM_YES_Y + TANK_CONFIRM_YES_H / 2);
+    RTRACE_TEXT(TANK_CONFIRM_YES_X + TANK_CONFIRM_YES_W / 2,
+                TANK_CONFIRM_YES_Y + TANK_CONFIRM_YES_H / 2, "SI",
+                ui::COL_BLACK, ui::COL_GREEN, 2, MC_DATUM);
+
+    // NO button (red)
+    tft.fillRect(TANK_CONFIRM_NO_X, TANK_CONFIRM_NO_Y,
+                 TANK_CONFIRM_NO_W, TANK_CONFIRM_NO_H, ui::COL_RED);
+    RTRACE_FILL_RECT(TANK_CONFIRM_NO_X, TANK_CONFIRM_NO_Y,
+                     TANK_CONFIRM_NO_W, TANK_CONFIRM_NO_H, ui::COL_RED);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+    tft.setTextSize(2);
+    tft.drawString("NO", TANK_CONFIRM_NO_X + TANK_CONFIRM_NO_W / 2,
+                   TANK_CONFIRM_NO_Y + TANK_CONFIRM_NO_H / 2);
+    RTRACE_TEXT(TANK_CONFIRM_NO_X + TANK_CONFIRM_NO_W / 2,
+                TANK_CONFIRM_NO_Y + TANK_CONFIRM_NO_H / 2, "NO",
+                ui::COL_WHITE, ui::COL_RED, 2, MC_DATUM);
+
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+}
+
+void DriveScreen::showTankConfirm() {
+    tankConfirmVisible_ = true;
+    tankConfirmDirty_   = true;
+}
+
+uint8_t DriveScreen::handleTankConfirmTouch(int16_t x, int16_t y) {
+    using namespace ui::cfg;
+
+    if (!tankConfirmVisible_) return 0;
+
+    // SÍ button hit test
+    if (x >= TANK_CONFIRM_YES_X && x <= TANK_CONFIRM_YES_X + TANK_CONFIRM_YES_W &&
+        y >= TANK_CONFIRM_YES_Y && y <= TANK_CONFIRM_YES_Y + TANK_CONFIRM_YES_H) {
+        tankConfirmVisible_ = false;
+        // Force redraw of tiles covered by the confirm bar
+        needsFullRedraw_ = true;
+        return 1;  // YES
+    }
+
+    // NO button hit test
+    if (x >= TANK_CONFIRM_NO_X && x <= TANK_CONFIRM_NO_X + TANK_CONFIRM_NO_W &&
+        y >= TANK_CONFIRM_NO_Y && y <= TANK_CONFIRM_NO_Y + TANK_CONFIRM_NO_H) {
+        tankConfirmVisible_ = false;
+        // Force redraw of tiles covered by the confirm bar
+        needsFullRedraw_ = true;
+        return 2;  // NO
+    }
+
+    // Touch is inside the confirm bar area but not on a button — consume it
+    if (x >= TANK_CONFIRM_BAR_X && x <= TANK_CONFIRM_BAR_X + TANK_CONFIRM_BAR_W &&
+        y >= TANK_CONFIRM_BAR_Y && y <= TANK_CONFIRM_BAR_Y + TANK_CONFIRM_BAR_H) {
+        return 0;  // consumed but no action
+    }
+
+    // Touch outside the confirm bar — dismiss (treat as NO)
+    tankConfirmVisible_ = false;
+    needsFullRedraw_ = true;
+    return 2;  // dismiss = NO
 }

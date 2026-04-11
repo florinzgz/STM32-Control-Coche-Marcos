@@ -286,6 +286,30 @@ inline constexpr int16_t PSCR_DOT_Y      = 38;
 // Wrong-code message timeout (ms)
 inline constexpr uint32_t PSCR_WRONG_CODE_DISPLAY_MS = 1000;
 
+// =========================================================================
+// Tank Turn Confirmation Bar Layout
+//
+// Horizontal bar drawn at the center of the screen when user taps 360° icon.
+// Contains question text + SÍ / NO buttons.
+// =========================================================================
+
+inline constexpr int16_t TANK_CONFIRM_BAR_X  = 60;
+inline constexpr int16_t TANK_CONFIRM_BAR_Y  = 130;
+inline constexpr int16_t TANK_CONFIRM_BAR_W  = 360;
+inline constexpr int16_t TANK_CONFIRM_BAR_H  = 60;
+
+// SÍ button (left side of bar)
+inline constexpr int16_t TANK_CONFIRM_YES_X  = 80;
+inline constexpr int16_t TANK_CONFIRM_YES_Y  = 155;
+inline constexpr int16_t TANK_CONFIRM_YES_W  = 120;
+inline constexpr int16_t TANK_CONFIRM_YES_H  = 28;
+
+// NO button (right side of bar)
+inline constexpr int16_t TANK_CONFIRM_NO_X   = 280;
+inline constexpr int16_t TANK_CONFIRM_NO_Y   = 155;
+inline constexpr int16_t TANK_CONFIRM_NO_W   = 120;
+inline constexpr int16_t TANK_CONFIRM_NO_H   = 28;
+
 } // namespace cfg
 } // namespace ui
 

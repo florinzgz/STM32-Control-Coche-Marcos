@@ -399,18 +399,32 @@ static void renderTask(void* /*param*/) {
                 screenManager.onTouch(evt.x, evt.y);
 
                 if (!screenManager.isBlockingInput()) {
-                    if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
-                        TouchAction act = TouchAction::FRONT_LED_TOGGLE;
-                        xQueueSend(touchActionQueue, &act, 0);
-                    }
-                    if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
-                        TouchAction act = TouchAction::REAR_LED_TOGGLE;
-                        xQueueSend(touchActionQueue, &act, 0);
-                    }
-                    uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
-                    if (modeHit == 3) {
-                        TouchAction act = TouchAction::TANK_MODE_TOGGLE;
-                        xQueueSend(touchActionQueue, &act, 0);
+                    // ---- Tank turn confirmation dialog active ----
+                    // If the confirm bar is visible, route ALL taps to it first.
+                    if (screenManager.isTankConfirmActive()) {
+                        uint8_t confirmResult = screenManager.handleTankConfirmTouch(evt.x, evt.y);
+                        if (confirmResult == 1) {
+                            // User confirmed YES → queue the actual toggle
+                            TouchAction act = TouchAction::TANK_MODE_TOGGLE;
+                            xQueueSend(touchActionQueue, &act, 0);
+                        }
+                        // confirmResult 2 = NO (dismissed), 0 = consumed
+                        // In all cases, skip normal touch handling this frame
+                    } else {
+                        // Normal touch handling (no confirm dialog)
+                        if (ui::LedToggle::hitTestFront(evt.x, evt.y)) {
+                            TouchAction act = TouchAction::FRONT_LED_TOGGLE;
+                            xQueueSend(touchActionQueue, &act, 0);
+                        }
+                        if (ui::LedToggle::hitTestRear(evt.x, evt.y)) {
+                            TouchAction act = TouchAction::REAR_LED_TOGGLE;
+                            xQueueSend(touchActionQueue, &act, 0);
+                        }
+                        uint8_t modeHit = ui::ModeIcons::hitTest(evt.x, evt.y);
+                        if (modeHit == 3) {
+                            // Show confirmation dialog instead of immediate toggle
+                            screenManager.showTankConfirm();
+                        }
                     }
                 }
             }
