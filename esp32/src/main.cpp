@@ -685,6 +685,9 @@ void loop() {
     // The STM32 echoes the active mode flags in the heartbeat status_flags
     // (bits 1-2).  This allows the ESP32 to confirm the STM32 actually
     // applied the requested mode, even if the ACK was lost.
+    // §1 CAN state validation: this is the SOLE source of truth for UI mode
+    // state.  Tank turn and traction toggles only send CAN commands — the UI
+    // updates here after the STM32 confirms via heartbeat echo.
     // Guard: only sync after first valid heartbeat has been received
     // (timestampMs is 0 until the first CAN heartbeat is decoded).
     {
@@ -697,6 +700,8 @@ void loop() {
                 md.modeFlags   = currentModeFlags;
                 md.timestampMs = millis();
                 vehicleData.setMode(md);
+                // Persist confirmed tank turn state to NVS
+                config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
             }
         }
     }
@@ -827,8 +832,8 @@ void loop() {
             currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
                              | tractionBit;
             sendModeCommand(currentModeFlags);
-            // Only persist tank turn to NVS; traction comes from physical switch
-            config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
+            // NVS persist deferred to heartbeat sync (§1) — only confirmed
+            // state is persisted to avoid stale data on power loss.
             {
                 vehicle::ModeData md;
                 md.modeFlags   = currentModeFlags;
@@ -882,14 +887,12 @@ void loop() {
                         currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
                         audio::play(audio::Sound::BEEP, audio::Priority::LO);
                         sendModeCommand(currentModeFlags);
-                        config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
-                        {
-                            vehicle::ModeData md;
-                            md.modeFlags   = currentModeFlags;
-                            md.timestampMs = millis();
-                            vehicleData.setMode(md);
-                        }
-                        Serial.printf("[MODE] Flags → 0x%02X\n", currentModeFlags);
+                        // §1 CAN state validation: do NOT update vehicleData here.
+                        // The heartbeat sync (lines 693-700) updates UI state
+                        // ONLY after the STM32 confirms via statusFlags echo.
+                        // NVS persistence also deferred to heartbeat confirmation.
+                        Serial.printf("[MODE] Tank toggle requested → 0x%02X\n",
+                                      currentModeFlags);
                     }
                     break;
             }

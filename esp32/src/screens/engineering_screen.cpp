@@ -149,6 +149,7 @@ void EngineeringScreen::onEnter() {
     needsRedraw_ = true;
     exitRequested_ = false;
     currentMenu_ = SubMenu::MAIN;
+    clearLogPending_ = false;   // §5: reset confirmation state on screen enter
     inaEditRow_  = 0;
     tempEditRow_ = 0;
     moduleCtrlPage_ = 0;

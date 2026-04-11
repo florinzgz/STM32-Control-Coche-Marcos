@@ -290,18 +290,20 @@ void logFault(const FaultLogEntry& entry) {
     bool isDuplicate = (entry.errorCode  == lastLoggedErrorCode_ &&
                         entry.faultFlags == lastLoggedFaultFlags_);
 
-    // --- Write rate protection (§1.2) ---
-    // Even if state changed, enforce minimum interval to protect flash.
-    // Unsigned subtraction is safe for millis() wrap (~49.7 days):
-    // if uptime < last (e.g. reboot), delta wraps to a large value → not "too soon".
-    bool tooSoon = false;
-    if (lastLoggedUptimeMs_ != 0) {
-        uint32_t delta = entry.uptimeMs - lastLoggedUptimeMs_;
-        tooSoon = (delta < FLOG_MIN_INTERVAL_MS);
+    if (isDuplicate) {
+        return;  // Exact same state — suppress
     }
 
-    if (isDuplicate || tooSoon) {
-        return;  // Suppress — not a new event or too soon
+    // --- Write rate protection / debounce (§1.2, §2) ---
+    // Rate-limit faultFlags toggling for the SAME errorCode to filter CAN noise.
+    // New error codes always pass through immediately to avoid missing transitions.
+    // Unsigned subtraction is safe for millis() wrap (~49.7 days):
+    // if uptime < last (e.g. reboot), delta wraps to a large value → not "too soon".
+    if (entry.errorCode == lastLoggedErrorCode_ && lastLoggedUptimeMs_ != 0) {
+        uint32_t delta = entry.uptimeMs - lastLoggedUptimeMs_;
+        if (delta < FLOG_MIN_INTERVAL_MS) {
+            return;  // Same error, flags changed but too soon — debounce
+        }
     }
 
     faultLog_[faultLogWriteIdx_] = entry;
