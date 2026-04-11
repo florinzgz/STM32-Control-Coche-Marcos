@@ -21,13 +21,27 @@ static constexpr const char* KEY_LED_REAR    = "led_r";
 static constexpr const char* KEY_VOLUME      = "vol";
 static constexpr const char* KEY_INA_MAP     = "ina_map";  // 6-byte blob
 static constexpr const char* KEY_TEMP_MAP    = "tmp_map";  // 5-byte blob
+static constexpr const char* KEY_RUNTIME     = "runtime";  // uint32 seconds
+static constexpr const char* KEY_MAINT_INT   = "maint_h";  // uint32 hours
+static constexpr const char* KEY_MAINT_ACK   = "maint_ack";// uint8
 static constexpr const char* KEY_CRC         = "crc";
+
+// Fault log NVS keys (separate namespace to avoid bloating main config writes)
+static constexpr const char* NVS_FAULTLOG_NS = "hmi_flog";
+static constexpr const char* KEY_FLOG_COUNT  = "fl_cnt";   // uint8 entry count
+static constexpr const char* KEY_FLOG_WRITE  = "fl_wr";    // uint8 write index (ring)
+static constexpr const char* KEY_FLOG_DATA   = "fl_data";  // blob: FAULT_LOG_MAX_ENTRIES * sizeof(FaultLogEntry)
 
 // Module state
 static Preferences prefs_;
 static Config      currentCfg_;
 static bool        initialized_ = false;
 static bool        dirty_       = false;     // Unsaved changes pending
+
+// Fault log ring buffer (kept in memory, persisted on each logFault call)
+static FaultLogEntry faultLog_[FAULT_LOG_MAX_ENTRIES] = {};
+static uint8_t       faultLogCount_    = 0;
+static uint8_t       faultLogWriteIdx_ = 0;
 
 // -------------------------------------------------------------------------
 // CRC32 computation (standard CRC-32/ISO-HDLC)
@@ -67,6 +81,9 @@ void init() {
         currentCfg_ = Config{};
         save(currentCfg_);
     }
+
+    // Load fault log from separate NVS namespace
+    loadFaultLog();
 }
 
 bool load(Config& cfg) {
@@ -91,6 +108,11 @@ bool load(Config& cfg) {
     if (tmpLen != NUM_TEMP_SENS) {
         memcpy(cfg.tempSensorMap, tmpDefault, NUM_TEMP_SENS);
     }
+
+    // Load maintenance fields
+    cfg.runtimeSeconds     = prefs_.getULong(KEY_RUNTIME, 0);
+    cfg.maintIntervalHours = prefs_.getULong(KEY_MAINT_INT, MAINT_DEFAULT_INTERVAL_HOURS);
+    cfg.maintAcknowledged  = prefs_.getUChar(KEY_MAINT_ACK, 0);
 
     uint32_t storedCrc = prefs_.getULong(KEY_CRC, 0);
 
@@ -124,6 +146,9 @@ bool save(const Config& cfg) {
     prefs_.putUChar(KEY_VOLUME, toSave.audioVolume);
     prefs_.putBytes(KEY_INA_MAP, toSave.ina226Map, NUM_INA226_CH);
     prefs_.putBytes(KEY_TEMP_MAP, toSave.tempSensorMap, NUM_TEMP_SENS);
+    prefs_.putULong(KEY_RUNTIME, toSave.runtimeSeconds);
+    prefs_.putULong(KEY_MAINT_INT, toSave.maintIntervalHours);
+    prefs_.putUChar(KEY_MAINT_ACK, toSave.maintAcknowledged);
     prefs_.putULong(KEY_CRC, toSave.crc32);
 
     prefs_.end();
@@ -172,6 +197,21 @@ void setTempSensorMap(const uint8_t map[NUM_TEMP_SENS]) {
     dirty_ = true;
 }
 
+void setRuntimeSeconds(uint32_t seconds) {
+    currentCfg_.runtimeSeconds = seconds;
+    dirty_ = true;
+}
+
+void setMaintIntervalHours(uint32_t hours) {
+    currentCfg_.maintIntervalHours = hours;
+    dirty_ = true;
+}
+
+void setMaintAcknowledged(uint8_t ack) {
+    currentCfg_.maintAcknowledged = ack;
+    dirty_ = true;
+}
+
 void flush() {
     if (!dirty_) return;
     save(currentCfg_);
@@ -189,7 +229,99 @@ void factoryReset() {
 
     currentCfg_ = Config{};
     save(currentCfg_);
+    clearFaultLog();
     Serial.println("[NVS] Factory reset complete");
+}
+
+// -------------------------------------------------------------------------
+// Fault Log — persistent ring buffer in separate NVS namespace
+// -------------------------------------------------------------------------
+
+static void loadFaultLog() {
+    Preferences fprefs;
+    fprefs.begin(NVS_FAULTLOG_NS, true);  // read-only
+    faultLogCount_    = fprefs.getUChar(KEY_FLOG_COUNT, 0);
+    faultLogWriteIdx_ = fprefs.getUChar(KEY_FLOG_WRITE, 0);
+    if (faultLogCount_ > FAULT_LOG_MAX_ENTRIES) faultLogCount_ = 0;
+    if (faultLogWriteIdx_ >= FAULT_LOG_MAX_ENTRIES) faultLogWriteIdx_ = 0;
+
+    size_t expected = FAULT_LOG_MAX_ENTRIES * sizeof(FaultLogEntry);
+    size_t actual   = fprefs.getBytes(KEY_FLOG_DATA, faultLog_, expected);
+    if (actual != expected) {
+        // Corrupt or first boot — reset
+        memset(faultLog_, 0, sizeof(faultLog_));
+        faultLogCount_    = 0;
+        faultLogWriteIdx_ = 0;
+    }
+    fprefs.end();
+    Serial.printf("[NVS] Fault log loaded: %u entries\n", faultLogCount_);
+}
+
+static void saveFaultLog() {
+    Preferences fprefs;
+    fprefs.begin(NVS_FAULTLOG_NS, false);  // read-write
+    fprefs.putUChar(KEY_FLOG_COUNT, faultLogCount_);
+    fprefs.putUChar(KEY_FLOG_WRITE, faultLogWriteIdx_);
+    fprefs.putBytes(KEY_FLOG_DATA, faultLog_,
+                    FAULT_LOG_MAX_ENTRIES * sizeof(FaultLogEntry));
+    fprefs.end();
+}
+
+void logFault(const FaultLogEntry& entry) {
+    faultLog_[faultLogWriteIdx_] = entry;
+    faultLogWriteIdx_ = (faultLogWriteIdx_ + 1) % FAULT_LOG_MAX_ENTRIES;
+    if (faultLogCount_ < FAULT_LOG_MAX_ENTRIES) {
+        faultLogCount_++;
+    }
+    saveFaultLog();
+    Serial.printf("[NVS] Fault logged: code=%u flags=0x%02X sub=%u state=%u\n",
+                  entry.errorCode, entry.faultFlags,
+                  entry.subsystem, entry.systemState);
+}
+
+uint8_t getFaultLogCount() {
+    return faultLogCount_;
+}
+
+bool getFaultLogEntry(uint8_t index, FaultLogEntry& out) {
+    if (index >= faultLogCount_) return false;
+    // Ring buffer: oldest entry is at (writeIdx - count) mod MAX
+    uint8_t oldest = (faultLogWriteIdx_ + FAULT_LOG_MAX_ENTRIES - faultLogCount_)
+                     % FAULT_LOG_MAX_ENTRIES;
+    uint8_t actual = (oldest + index) % FAULT_LOG_MAX_ENTRIES;
+    out = faultLog_[actual];
+    return true;
+}
+
+void clearFaultLog() {
+    memset(faultLog_, 0, sizeof(faultLog_));
+    faultLogCount_    = 0;
+    faultLogWriteIdx_ = 0;
+    Preferences fprefs;
+    fprefs.begin(NVS_FAULTLOG_NS, false);
+    fprefs.clear();
+    fprefs.end();
+    Serial.println("[NVS] Fault log cleared");
+}
+
+// -------------------------------------------------------------------------
+// Maintenance status helpers
+// -------------------------------------------------------------------------
+
+bool isMaintenanceDue() {
+    uint32_t thresholdSec = currentCfg_.maintIntervalHours * 3600UL;
+    return currentCfg_.runtimeSeconds >= thresholdSec;
+}
+
+void acknowledgeMaintenance() {
+    currentCfg_.maintAcknowledged = 1;
+    dirty_ = true;
+}
+
+void resetMaintenanceCounter() {
+    currentCfg_.runtimeSeconds    = 0;
+    currentCfg_.maintAcknowledged = 0;
+    dirty_ = true;
 }
 
 } // namespace config_store

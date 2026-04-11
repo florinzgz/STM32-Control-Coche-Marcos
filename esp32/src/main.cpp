@@ -163,6 +163,11 @@ static constexpr uint16_t BATTERY_CRIT_THRESHOLD_RAW = 1800; // 18.00 V in 0.01 
 static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beeps
 static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
 
+// ---- Runtime counter for maintenance tracking ----
+static unsigned long lastRuntimeUpdateMs = 0;
+static constexpr unsigned long RUNTIME_UPDATE_INTERVAL_MS = 60000;  // update every 60 s
+static bool     maintenanceWarnPlayed = false;
+
 // ---- Temperature audio tracking ----
 static bool     tempHighPlayed = false;        // one-shot for temp high warning
 static constexpr int8_t TEMP_HIGH_THRESHOLD = 85;  // °C — play alert above this
@@ -1036,6 +1041,18 @@ void loop() {
                     default:
                         break;
                 }
+
+                // ---- DTC Fault Log: persist error event to NVS ----
+                {
+                    config_store::FaultLogEntry fte;
+                    fte.uptimeMs    = now;
+                    fte.errorCode   = safeErr;
+                    fte.faultFlags  = vehicleData.heartbeat().faultFlags;
+                    fte.subsystem   = vehicleData.diag().subsystem;
+                    fte.systemState = static_cast<uint8_t>(vehicleData.heartbeat().systemState);
+                    config_store::logFault(fte);
+                }
+
                 lastSafetyError = safeErr;
             } else if (safeErr == 0) {
                 lastSafetyError = 0;
@@ -1075,6 +1092,35 @@ void loop() {
     if ((now - lastNvsFlushMs) >= NVS_FLUSH_INTERVAL_MS) {
         lastNvsFlushMs = now;
         config_store::flush();
+    }
+
+    // ---- Runtime counter for maintenance tracking ----
+    // Accumulate seconds only when system is in ACTIVE/DEGRADED/LIMP_HOME states
+    // (vehicle is actually being operated, not just powered on in BOOT/STANDBY).
+    {
+        auto sysState = vehicleData.heartbeat().systemState;
+        bool isOperating = (sysState == can::SystemState::ACTIVE ||
+                            sysState == can::SystemState::DEGRADED ||
+                            sysState == can::SystemState::LIMP_HOME);
+        if (isOperating && (now - lastRuntimeUpdateMs) >= RUNTIME_UPDATE_INTERVAL_MS) {
+            uint32_t addSec = (now - lastRuntimeUpdateMs) / 1000;
+            if (addSec > 0) {
+                uint32_t cur = config_store::get().runtimeSeconds;
+                config_store::setRuntimeSeconds(cur + addSec);
+            }
+            lastRuntimeUpdateMs = now;
+        } else if (!isOperating) {
+            lastRuntimeUpdateMs = now;  // Reset so we don't accumulate standby time
+        }
+
+        // Play maintenance reminder once per power cycle when threshold crossed
+        if (config_store::isMaintenanceDue() && !maintenanceWarnPlayed &&
+            !config_store::get().maintAcknowledged) {
+            // Use ERROR_GENERAL sound as maintenance reminder (no dedicated track)
+            audio::play(audio::Sound::TEST_SYSTEM, audio::Priority::LO);
+            maintenanceWarnPlayed = true;
+            Serial.println("[MAINT] Maintenance reminder — service due");
+        }
     }
 
     // ---- WS2812B LED update ----
