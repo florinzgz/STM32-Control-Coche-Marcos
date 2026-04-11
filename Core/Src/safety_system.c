@@ -89,6 +89,23 @@ static inline void sat_inc_u32(uint32_t *counter) {
 /* Relay power sequencing delays (milliseconds) */
 #define RELAY_MAIN_SETTLE_MS     50   /* inrush current settling time      */
 #define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
+
+/* Relay health check thresholds (post-ACTIVE runtime validation).
+ * Detects relay-not-closing condition using throttle demand vs motor
+ * current observation.  Runs only in ACTIVE / DEGRADED / LIMP_HOME.
+ *
+ * Algorithm: if throttle has been above RELAY_CHK_THROTTLE_MIN_PCT
+ * for RELAY_CHK_DELAY_MS and the average absolute motor current
+ * (INA226 ch 0-3) is below RELAY_CHK_CURRENT_MIN_A, the relay is
+ * presumed open (no power reaching motors).
+ *
+ * Debounce: the above condition must persist for
+ * RELAY_CHK_DEBOUNCE_CYCLES consecutive checks (10 ms each) to
+ * trigger a fault — rejects transient glitches.                       */
+#define RELAY_CHK_THROTTLE_MIN_PCT  20.0f   /* Min throttle to start check  */
+#define RELAY_CHK_DELAY_MS          300U    /* Settle time after throttle   */
+#define RELAY_CHK_CURRENT_MIN_A     0.5f    /* Below this → relay suspect   */
+#define RELAY_CHK_DEBOUNCE_CYCLES   3U      /* Consecutive fails to trigger */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
 #define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
@@ -129,6 +146,13 @@ typedef enum {
 
 static RelaySeqState_t relay_seq_state     = RELAY_SEQ_IDLE;
 static uint32_t        relay_seq_timestamp = 0;
+
+/* ---- Relay health check runtime state ----
+ * Tracks whether the relay-open detection window is active and how
+ * many consecutive 10 ms cycles the fault condition has persisted.   */
+static uint8_t  relay_chk_active       = 0;     /* 1 = timing window running  */
+static uint32_t relay_chk_start_tick   = 0;     /* HAL_GetTick() at window start */
+static uint8_t  relay_chk_debounce     = 0;     /* Consecutive fail counter   */
 
 /* Recovery debounce: require RECOVERY_HOLD_MS of clean operation
  * before transitioning DEGRADED → ACTIVE.  Prevents rapid state
@@ -723,6 +747,9 @@ void Safety_Init(void)
     child_pedal_sample_tick  = 0;
     child_reaction_active    = 0;
     child_reaction_start     = 0;
+    relay_chk_active         = 0;
+    relay_chk_start_tick     = 0;
+    relay_chk_debounce       = 0;
     system_state      = SYS_STATE_BOOT;
 }
 
@@ -1551,6 +1578,119 @@ void Safety_CheckBatteryOvervoltage(void)
         safety_error == SAFETY_ERROR_BATTERY_OV_WARNING &&
         voltage < (BATTERY_OV_WARNING_V - BATTERY_OV_HYST_V)) {
         Safety_ClearError(SAFETY_ERROR_BATTERY_OV_WARNING);
+    }
+}
+
+/* ---- Relay health check (post-ACTIVE runtime validation) ----------
+ *
+ * Detects relay-not-closing using existing signals (throttle + INA226).
+ * Active ONLY in ACTIVE / DEGRADED / LIMP_HOME.
+ *
+ * Algorithm:
+ *   1. When throttle > RELAY_CHK_THROTTLE_MIN_PCT, start a timing window.
+ *   2. After RELAY_CHK_DELAY_MS, check average |motor current| (ch 0-3).
+ *   3. If below RELAY_CHK_CURRENT_MIN_A for RELAY_CHK_DEBOUNCE_CYCLES
+ *      consecutive calls, trigger SAFETY_ERROR_RELAY_OPEN → DEGRADED L3.
+ *   4. When throttle drops below threshold, reset the check.
+ *
+ * O(1) per call.  No division.  No blocking.  No CAN changes.
+ * Called from the 10 ms safety loop (same tier as Safety_CheckCurrent). */
+
+void Safety_CheckRelayHealth(void)
+{
+    /* Only active when motion is allowed (ACTIVE / DEGRADED / LIMP_HOME) */
+    if (!Safety_IsMotionAllowed()) {
+        relay_chk_active   = 0;
+        relay_chk_debounce = 0;
+        return;
+    }
+
+    /* Skip if relay power-up sequence has not completed */
+    if (relay_seq_state != RELAY_SEQ_COMPLETE) {
+        relay_chk_active   = 0;
+        relay_chk_debounce = 0;
+        return;
+    }
+
+    /* Read current throttle demand (post-validation, post-clamp).
+     * Pedal_GetPercent returns the EMA-filtered 0-100% pedal value.
+     * In LIMP_HOME the clamped demand is lower, but the raw pedal
+     * still reflects driver intent — use raw percent for the check
+     * so that a 25% raw pedal (→5% LIMP demand) still triggers
+     * relay validation when the driver clearly wants to move.       */
+    float throttle = Pedal_GetPercent();
+
+    if (throttle > RELAY_CHK_THROTTLE_MIN_PCT) {
+        uint32_t now = HAL_GetTick();
+
+        if (!relay_chk_active) {
+            /* Start timing window */
+            relay_chk_active     = 1;
+            relay_chk_start_tick = now;
+            relay_chk_debounce   = 0;
+            return;
+        }
+
+        /* Wait for settle delay before evaluating current */
+        if ((now - relay_chk_start_tick) < RELAY_CHK_DELAY_MS) {
+            return;
+        }
+
+        /* Compute average absolute motor current (ch 0-3).
+         * Skip disabled sensors.  Use manual absolute value
+         * (no fabsf — avoid pulling in libm for a single call).
+         * Sum is kept as integer-scaled fixed-point: multiply by 4
+         * later avoided by comparing sum against threshold×count.   */
+        float sum = 0.0f;
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < NUM_WHEELS; i++) {
+            ModuleID_t mod = (ModuleID_t)(MODULE_CURRENT_SENSOR_0 + i);
+            if (!ServiceMode_IsEnabled(mod)) continue;
+            float amps = Current_GetAmps(i);
+            if (isnan(amps) || isinf(amps)) continue;
+            /* Manual absolute value */
+            if (amps < 0.0f) amps = -amps;
+            sum += amps;
+            count++;
+        }
+
+        /* If no enabled sensors, cannot determine relay state — bail */
+        if (count == 0) {
+            relay_chk_debounce = 0;
+            return;
+        }
+
+        /* Compare sum vs threshold×count (avoids division).
+         * avg < RELAY_CHK_CURRENT_MIN_A  ⟺  sum < threshold × count */
+        float threshold_sum = RELAY_CHK_CURRENT_MIN_A * (float)count;
+
+        if (sum < threshold_sum) {
+            /* Fault condition: throttle demanded but no motor current */
+            if (relay_chk_debounce < 255) relay_chk_debounce++;
+
+            if (relay_chk_debounce >= RELAY_CHK_DEBOUNCE_CYCLES) {
+                /* Confirmed relay-open fault */
+                ServiceMode_SetFault(MODULE_RELAY_MAIN, MODULE_FAULT_ERROR);
+                Safety_SetError(SAFETY_ERROR_RELAY_OPEN);
+                Safety_SetState(SYS_STATE_DEGRADED);
+                Safety_SetDegradedLevel(DEGRADED_L3,
+                                        DEGRADED_REASON_SENSOR_FAULT);
+            }
+        } else {
+            /* Current present — relay is healthy, reset debounce */
+            relay_chk_debounce = 0;
+
+            /* Clear relay-open error if it was previously set,
+             * allowing DEGRADED → ACTIVE recovery.                   */
+            if (safety_error == SAFETY_ERROR_RELAY_OPEN) {
+                ServiceMode_ClearFault(MODULE_RELAY_MAIN);
+                Safety_ClearError(SAFETY_ERROR_RELAY_OPEN);
+            }
+        }
+    } else {
+        /* Throttle below threshold — reset the check window */
+        relay_chk_active   = 0;
+        relay_chk_debounce = 0;
     }
 }
 
