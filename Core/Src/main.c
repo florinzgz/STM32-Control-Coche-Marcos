@@ -681,13 +681,11 @@ static void MX_GPIO_Init(void)
 
     GPIO_InitTypeDef gpio = {0};
 
-    /* GPIO enable outputs (GPIOC).
-     * EN_FL (PC5) and EN_RR (PC13) remain as GPIO outputs.
-     * PC6/PC7 (TIM8_CH1/CH2 = RPWM_RL/LPWM_RL) and PC8/PC9
-     * (TIM8_CH3/CH4 = RPWM_RR/LPWM_RR) are timer AF outputs;
-     * they must NOT be initialised here as GPIO.
-     * Wire the corresponding BTS7960 R_EN/L_EN pins to 3.3 V.         */
-    gpio.Pin   = PIN_EN_FL | PIN_EN_RR;
+    /* GPIO enable outputs for all five BTS7960 modules (GPIOC).
+     * All motors now have dedicated GPIO EN pins for symmetric
+     * coast/brake behaviour.  PC0 (EN_FR), PC1 (EN_RL), PC4 (EN_STEER)
+     * were freed direction pins; PC5 (EN_FL), PC13 (EN_RR) unchanged.  */
+    gpio.Pin   = PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1175,13 +1173,13 @@ void Error_Handler(void)
     /* Safe the hardware: clear MOE on advanced timers, zero TIM3 STEER CCRs,
      * then drive GPIO outputs LOW (relays off, motor EN pins off).
      * Uses direct register access because HAL may be in an inconsistent state.
-     * PC6-PC9 are TIM8 AF outputs; PA6-PA7 are TIM3 AF outputs — not GPIO.
-     * Only PC5 (EN_FL) and PC13 (EN_RR) remain as GPIO enable outputs.       */
+     * All five motor EN pins are on GPIOC and controlled as GPIO outputs.     */
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM1 PWM outputs (FL, FR)   */
     TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM8 PWM outputs (RL, RR)   */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 (TIM3 has no BREAK)      */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0                          */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
+                  | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     /* LED power relays on GPIOB — also force OFF (both front and rear) */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;

@@ -69,10 +69,9 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 |-------|-----------|----------------|---------|
 | 4 | **PA10** (TIM1_CH3, AF6) | RPWM | PWM 20 kHz — adelante |
 | 5 | **PC3** (TIM1_CH4, AF2) | LPWM | PWM 20 kHz — atrás |
-| — | **3.3V** (directo) | R_EN + L_EN (unidos) | Tied HIGH permanente — siempre habilitado |
+| 6 | **PC0** (GPIO output) | R_EN + L_EN (unidos) | Enable: HIGH=activado, LOW=apagado |
 
 > ⚠️ **CAMBIO CRÍTICO:** PA11 ya **NO** es LPWM_FR — ahora PA11 es **FDCAN1_RX** (bus CAN). LPWM_FR se ha movido a **PC3** (TIM1_CH4 vía AF2). Conectar PA11 al BTS7960 FR **destruirá la comunicación CAN**.
-> ⚠️ PC6 ya no es EN_FR. PC6 es ahora RPWM_RL (TIM8_CH1). Conectar R_EN y L_EN del BTS7960 FR directamente a 3.3 V.
 
 ### Motor RL (Trasero Izquierdo) — TIM8 CH1/CH2, BREAK2/LOCKUP armado
 
@@ -80,9 +79,7 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 |-------|-----------|----------------|---------|
 | 7 | **PC6** (TIM8_CH1, AF4) | RPWM | PWM 20 kHz — adelante |
 | 8 | **PC7** (TIM8_CH2, AF4) | LPWM | PWM 20 kHz — atrás |
-| — | **3.3V** (directo) | R_EN + L_EN (unidos) | Tied HIGH permanente — siempre habilitado |
-
-> ⚠️ PC7 ya no es EN_RL. Conectar R_EN y L_EN del BTS7960 RL directamente a 3.3 V.
+| 9 | **PC1** (GPIO output) | R_EN + L_EN (unidos) | Enable: HIGH=activado, LOW=apagado |
 
 ### Motor RR (Trasero Derecho) — TIM8 CH3/CH4, BREAK2/LOCKUP armado
 
@@ -143,12 +140,10 @@ Instalar lo más cerca posible de cada módulo BTS7960 para suprimir transitorio
 |-------|-----------|-------------------|---------|
 | 13 | **PA6** (TIM3_CH1, AF2) | RPWM | PWM 20 kHz — izquierda |
 | 14 | **PA7** (TIM3_CH2, AF2) | LPWM | PWM 20 kHz — derecha |
-| — | **3.3V** (directo) | R_EN + L_EN (unidos) | Tied HIGH permanente — siempre habilitado |
+| 15 | **PC4** (GPIO output) | R_EN + L_EN (unidos) | Enable: HIGH=activado, LOW=apagado |
 
 **Alimentación:** Fuente de 12V separada para el motor de dirección (vía relé DIR + shunt INA226 #5).
 
-> ⚠️ PC8 y PC9 ya no son STEER PWM/EN. Son ahora RPWM_RR y LPWM_RR (TIM8_CH3/CH4).
-> ⚠️ PC4 ya no es DIR_STEER. Queda libre; dejar desconectado o como GPIO output LOW.
 > ✅ RPWM y LPWM en el **mismo** timer (TIM3). TIM3 no tiene BREAK input; los fault handlers zerean CCR1/CCR2 por software.
 
 ### ⚡ Condensadores de protección — OBLIGATORIOS (BTS7960 de dirección)
@@ -774,11 +769,11 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 21 | **PB11** | GPIOB | Output | GPIO | Módulo relé LED trasero | HIGH = ON (tira WS2812B 16 LEDs) |
 | 22 | **PB14** | GPIOB | Output | GPIO | **LED_DIAG** (externo) | LED + 330Ω en Morpho CN10 pin 28. CAN OK=ON, FAIL=OFF |
 | 23 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
-| 24 | **PC0** | GPIOC | — | **LIBRE** | ~~DIR_FL~~ — desconectado | Pin liberado |
-| 25 | **PC1** | GPIOC | — | **LIBRE** | ~~DIR_FR~~ — desconectado | Pin liberado |
+| 24 | **PC0** | GPIOC | Output | GPIO | BTS7960 FR → R_EN + L_EN | HIGH = motor habilitado |
+| 25 | **PC1** | GPIOC | Output | GPIO | BTS7960 RL → R_EN + L_EN | HIGH = motor habilitado |
 | 26 | **PC2** | GPIOC | — | **LIBRE** | ~~DIR_RL~~ — desconectado | Pin liberado |
 | 27 | **PC3** | GPIOC | **AF2** | **TIM1_CH4** | BTS7960 FR → **LPWM** | ⚠️ PWM 20 kHz — atrás (ya NO es LIBRE) |
-| 28 | **PC4** | GPIOC | — | **LIBRE** | ~~DIR_STEER~~ — desconectado | Pin liberado |
+| 28 | **PC4** | GPIOC | Output | GPIO | BTS7960 STEER → R_EN + L_EN | HIGH = motor habilitado |
 | 29 | **PC5** | GPIOC | Output | GPIO | BTS7960 FL → R_EN + L_EN | HIGH = motor habilitado |
 | 30 | **PC6** | GPIOC | AF4 | TIM8_CH1 | BTS7960 RL → **RPWM** | PWM 20 kHz — adelante |
 | 31 | **PC7** | GPIOC | AF4 | TIM8_CH2 | BTS7960 RL → **LPWM** | PWM 20 kHz — atrás |
@@ -791,11 +786,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 ### Conexiones hardware (no GPIO)
 
-| Componente | Desde | Hasta | Valor |
-|-----------|-------|-------|-------|
-| R_EN + L_EN (BTS7960 FR) | — | **3.3V** | Tied HIGH permanente |
-| R_EN + L_EN (BTS7960 RL) | — | **3.3V** | Tied HIGH permanente |
-| R_EN + L_EN (BTS7960 STEER) | — | **3.3V** | Tied HIGH permanente |
+> Todos los BTS7960 ahora tienen EN controlado por GPIO — no hay conexiones "tied to 3.3V".
 
 ### Tabla completa de pines ESP32-S3
 
@@ -1066,8 +1057,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 3. **PC12** → Módulo relé DIRECCIÓN
 4. **PB10** → Módulo relé LED frontal
 5. **PB11** → Módulo relé LED trasero
-6. BTS7960 FR/RL/STEER: R_EN + L_EN → **3.3V** (tied HIGH)
-7. BTS7960 FL: EN → **PC5** (GPIO), BTS7960 RR: EN → **PC13** (GPIO)
+6. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC13**, STEER: EN → **PC4** (todos GPIO)
 8. Condensadores bulk + bypass en cada BTS7960
 
 **⚠️ NO conectar los motores todavía.** Solo verificar que los relés conmutan.

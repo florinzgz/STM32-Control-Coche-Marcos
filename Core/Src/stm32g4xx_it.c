@@ -48,12 +48,13 @@ void HardFault_Handler(void)
      *    is unreachable due to stack corruption.
      *
      * C) Zero TIM3 CCRs for STEER (TIM3 has no BREAK input).
-     *    Force EN_FL, EN_RR and all relays LOW via BSRR.                  */
+     *    Force all motor EN pins and all relays LOW via BSRR.             */
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM1 outputs: RPWM_FL, LPWM_FL, RPWM_FR, LPWM_FR */
     TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM8 outputs: RPWM_RL, LPWM_RL, RPWM_RR, LPWM_RR */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0 */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
+                  | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     /* LED power relays on GPIOB — also force OFF */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
@@ -69,7 +70,8 @@ void MemManage_Handler(void)
     TIM8->BDTR &= ~TIM_BDTR_MOE;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
+                  | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     Fault_BlinkLD2(800000U);
@@ -81,7 +83,8 @@ void BusFault_Handler(void)
     TIM8->BDTR &= ~TIM_BDTR_MOE;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
+                  | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     Fault_BlinkLD2(800000U);
@@ -93,7 +96,8 @@ void UsageFault_Handler(void)
     TIM8->BDTR &= ~TIM_BDTR_MOE;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
+    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
+                  | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     Fault_BlinkLD2(800000U);

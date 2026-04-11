@@ -168,35 +168,14 @@ static inline float sanitize_float(float val, float safe_default)
  * the choice of RPWM vs LPWM channel.                                */
 #define BTS7960_BRAKE_PWM        0U   /* Both RPWM=0, LPWM=0 = passive brake */
 
-/* ---- Half-bridge brake/coast asymmetry compensation ----
+/* ---- BTS7960 coast/brake behaviour (all motors symmetric) ----
  *
- * Hardware context: The BTS7960 modules are used as single half-bridge
- * switches (NOT full H-bridge).  This creates asymmetric behaviour:
+ * All five BTS7960 modules now have dedicated GPIO EN pins on GPIOC.
+ * Motor_SetSigned sets EN=LOW when PWM=0 and EN=HIGH when PWM>0,
+ * giving every motor identical coast (EN=LOW → Hi-Z) and brake
+ * (RPWM=0, LPWM=0, EN=HIGH → motor terminals shorted) behaviour.
  *
- *   FL (en_port = GPIO PC5) and RR (en_port = GPIO PC13):
- *     PWM=0 → Motor_SetSigned sets EN=LOW → TRUE COAST (Hi-Z)
- *
- *   FR (en_port = NULL, tied HIGH) and RL (en_port = NULL, tied HIGH):
- *     PWM=0 → EN stays HIGH → PASSIVE BRAKE (motor terminals shorted)
- *
- * Consequence: TRAC_PHASE_BRAKE produces identical output to
- * TRAC_PHASE_COAST on FL/RR (both coast).  To compensate:
- *
- * A) Simulated braking (TRAC_PHASE_BRAKE on FL/RR):
- *    Apply a small forward PWM to create resistive torque.  15 %
- *    is chosen as a conservative value that provides noticeable
- *    deceleration without aggressive jerking on a child vehicle.
- *
- * B) Coast compensation (TRAC_PHASE_COAST on FL/RR):
- *    Apply a small forward PWM bias (4 %) to partially match the
- *    passive-brake drag that FR/RL experience, reducing the yaw
- *    moment caused by asymmetric deceleration.
- *
- * C) Neutral ramp-down:
- *    When entering GEAR_NEUTRAL, ramp PWM to zero gradually using
- *    the existing pedal ramp-down rate instead of instant cutoff.    */
-#define SIMBRAKE_PWM_PCT         15.0f  /* Simulated brake duty for FL/RR (%)  */
-#define COAST_COMPENSATION_PCT    4.0f  /* Coast bias for FL/RR symmetry (%)   */
+ * No asymmetry compensation is needed.                                */
 #define NEUTRAL_RAMP_DOWN_PCT_S 100.0f  /* Neutral entry ramp-down rate (%/s)  */
 
 /* ---- Park hold configuration ----
@@ -284,7 +263,7 @@ typedef struct {
     uint32_t           rpwm_channel;
     TIM_HandleTypeDef *lpwm_timer;   /* Timer for LPWM (reverse direction) */
     uint32_t           lpwm_channel;
-    GPIO_TypeDef      *en_port;      /* Hardware EN GPIO (NULL = tied HIGH in HW) */
+    GPIO_TypeDef      *en_port;      /* Hardware EN GPIO port (GPIOC for all)    */
     uint16_t           en_pin;
     int8_t             direction;    /* Stored direction: 1=forward, -1=reverse  */
     int16_t            power;        /* Retained for ABI compatibility            */
@@ -434,14 +413,14 @@ void Motor_Init(void)
      * the cross-timer arrangement.  PB14 freed for LED_DIAG.            */
     motor_fr.rpwm_timer   = &htim1;  motor_fr.rpwm_channel = TIM_CHANNEL_3;
     motor_fr.lpwm_timer   = &htim1;  motor_fr.lpwm_channel = TIM_CHANNEL_4;
-    motor_fr.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
+    motor_fr.en_port      = GPIOC;   motor_fr.en_pin       = PIN_EN_FR;  /* PC0 */
     motor_fr.direction    = 0;
 
     /* ---- motor_rl: RPWM = TIM8_CH1 (PC6), LPWM = TIM8_CH2 (PC7) ---- */
     /* Both channels on TIM8 → same UEV → overlap = 0                    */
     motor_rl.rpwm_timer   = &htim8;  motor_rl.rpwm_channel = TIM_CHANNEL_1;
     motor_rl.lpwm_timer   = &htim8;  motor_rl.lpwm_channel = TIM_CHANNEL_2;
-    motor_rl.en_port      = NULL;    /* EN tied to 3.3 V in hardware */
+    motor_rl.en_port      = GPIOC;   motor_rl.en_pin       = PIN_EN_RL;  /* PC1 */
     motor_rl.direction    = 0;
 
     /* ---- motor_rr: RPWM = TIM8_CH3 (PC8), LPWM = TIM8_CH4 (PC9) ---- */
@@ -455,7 +434,7 @@ void Motor_Init(void)
     /* Both channels on TIM3 → same UEV → overlap = 0                      */
     motor_steer.rpwm_timer  = &htim3; motor_steer.rpwm_channel = TIM_CHANNEL_1;
     motor_steer.lpwm_timer  = &htim3; motor_steer.lpwm_channel = TIM_CHANNEL_2;
-    motor_steer.en_port     = NULL;   /* EN tied to 3.3 V in hardware */
+    motor_steer.en_port     = GPIOC;  motor_steer.en_pin       = PIN_EN_STEER; /* PC4 */
     motor_steer.direction   = 0;
 
     /* ---- Start TIM1 channels: FL (CH1/CH2) and FR (CH3/CH4) ---- */
@@ -1378,45 +1357,25 @@ void Traction_Update(void)
             }
         }
     } else if (trac_phase == TRAC_PHASE_BRAKE) {
-        /* Hold brake — BTS7960 passive brake on FR/RL (EN tied HIGH,
-         * PWM=0 → motor terminals shorted).  FL/RR have GPIO-controlled
-         * EN that goes LOW at PWM=0, producing coast instead of brake.
-         * Apply simulated braking PWM to FL/RR for symmetric behaviour. */
-        uint16_t sim_brake_pwm = (uint16_t)(SIMBRAKE_PWM_PCT * (float)PWM_PERIOD / 100.0f);
+        /* Hold brake — all motors now have GPIO EN, so PWM=0 + EN=HIGH
+         * produces symmetric passive brake on every wheel.               */
         for (uint8_t i = 0; i < 4; i++) {
-            if (i == MOTOR_FL || i == MOTOR_RR) {
-                /* GPIO-EN motors: apply small forward PWM for resistive
-                 * torque (simulated braking).  Direction follows last
-                 * travel direction so the torque opposes motion.         */
-                desired_pwm[i] = sim_brake_pwm;
-                desired_en[i]  = 1;
-            } else {
-                /* NULL-EN motors (FR/RL): passive brake via PWM=0 */
-                desired_pwm[i] = BTS7960_BRAKE_PWM;
-                desired_en[i]  = 1;
-            }
+            desired_pwm[i] = BTS7960_BRAKE_PWM;
+            desired_en[i]  = 1;
         }
     } else if (trac_phase == TRAC_PHASE_COAST) {
-        /* Coast — motors disabled for free rolling.
-         * FR/RL (EN tied HIGH) still experience passive brake drag at
-         * PWM=0.  Compensate FL/RR with a small bias PWM to reduce
-         * the asymmetric yaw moment from unequal drag.
-         *
-         * The bias direction is set by desired_dir[] (initialised to
-         * dir at the top of this block), which already accounts for
-         * GEAR_REVERSE.  This ensures the small drag-matching torque
-         * always aligns with the vehicle's travel direction.           */
-        uint16_t coast_bias_pwm = (uint16_t)(COAST_COMPENSATION_PCT * (float)PWM_PERIOD / 100.0f);
-        /* FL/RR: small bias for drag symmetry — direction via desired_dir */
-        desired_pwm[MOTOR_FL] = coast_bias_pwm; desired_en[MOTOR_FL] = 1;
-        desired_pwm[MOTOR_RR] = coast_bias_pwm; desired_en[MOTOR_RR] = 1;
-        /* FR/RL: true coast (EN tied HIGH → PWM=0 = passive brake inherently) */
-        desired_pwm[MOTOR_FR] = 0; desired_en[MOTOR_FR] = 0;
-        if (rear_active) {
-            desired_pwm[MOTOR_RL] = 0; desired_en[MOTOR_RL] = 0;
-        } else {
-            /* 4x2: rear still braked even in coast */
-            desired_pwm[MOTOR_RL] = BTS7960_BRAKE_PWM; desired_en[MOTOR_RL] = 1;
+        /* Coast — all motors disabled for symmetric free rolling.
+         * With all EN pins under GPIO control, PWM=0 + EN=LOW gives
+         * true coast (Hi-Z) on every motor — no bias needed.          */
+        for (uint8_t i = 0; i < 4; i++) {
+            if (!rear_active && (i == MOTOR_RL || i == MOTOR_RR)) {
+                /* 4x2: rear axle stays braked even in coast */
+                desired_pwm[i] = BTS7960_BRAKE_PWM;
+                desired_en[i]  = 1;
+            } else {
+                desired_pwm[i] = 0;
+                desired_en[i]  = 0;
+            }
         }
     } else {
         /* DRIVE phase — normal traction with smooth driving features */
@@ -2036,9 +1995,8 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
         motor->direction = 0;
     }
 
-    /* Assert / deassert GPIO EN where the pin exists as a GPIO output.
-     * For motors whose EN pin has been repurposed as a PWM AF output,
-     * en_port is NULL and the BTS7960 EN is tied permanently to 3.3 V. */
+    /* Assert / deassert GPIO EN.  All five motors now have dedicated
+     * GPIO EN pins, giving symmetric coast/brake behaviour.             */
     if (motor->en_port != NULL) {
         HAL_GPIO_WritePin(motor->en_port, motor->en_pin,
                           (duty > 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET);

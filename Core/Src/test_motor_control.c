@@ -1,15 +1,13 @@
 /**
   ****************************************************************************
   * @file    test_motor_control.c
-  * @brief   Host-compilable unit tests for motor control half-bridge
-  *          brake/coast asymmetry compensation.
+  * @brief   Host-compilable unit tests for motor control behaviour.
   *
   *          Validates:
-  *            - Simulated brake PWM is within safe bounds
-  *            - Coast compensation PWM is within safe bounds
+  *            - All motors have GPIO EN (symmetric coast/brake)
   *            - Neutral ramp-down rate is positive and bounded
+  *            - Park hold derating reduces correctly
   *            - PWM calculations produce expected values
-  *            - Asymmetry-aware motor identification
   *
   *          Compile with host GCC (from repository root):
   *            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -25,8 +23,6 @@
 
 /* ---- Reproduce constants from motor_control.c (internal defines) ---- */
 #define PWM_PERIOD               4249U
-#define SIMBRAKE_PWM_PCT         15.0f
-#define COAST_COMPENSATION_PCT    4.0f
 #define NEUTRAL_RAMP_DOWN_PCT_S 100.0f
 #define BTS7960_BRAKE_PWM         0U
 #define PARK_HOLD_PWM_PCT        30.0f
@@ -64,54 +60,47 @@ static int tests_failed = 0;
     }                                                                 \
 } while (0)
 
-/* ---- Helper: check if motor has GPIO-controlled EN (coasts at PWM=0) ---- */
-static bool motor_has_gpio_en(uint8_t idx)
+/* ==================================================================
+ *  Test: All motors now have GPIO EN — symmetric behaviour
+ * ================================================================== */
+static void test_all_motors_have_gpio_en(void)
 {
-    return (idx == MOTOR_FL || idx == MOTOR_RR);
-}
-
-/* ---- Helper: check if motor has EN tied HIGH (passive brakes at PWM=0) ---- */
-static bool motor_has_tied_en(uint8_t idx)
-{
-    return (idx == MOTOR_FR || idx == MOTOR_RL);
+    /* With the unified EN wiring, every motor index has a GPIO EN pin.
+     * Motor_SetSigned sets EN=LOW at PWM=0 (coast) and EN=HIGH at
+     * PWM>0 — identical behaviour for all four traction motors and
+     * the steering motor.  No special-casing needed.                   */
+    for (uint8_t i = 0; i < 4; i++) {
+        /* All motors get the same brake phase: BTS7960_BRAKE_PWM (0) */
+        uint16_t brake_pwm = BTS7960_BRAKE_PWM;
+        ASSERT_EQ_U16(brake_pwm, 0);
+    }
 }
 
 /* ==================================================================
- *  Test: Simulated brake PWM value is within safe bounds
+ *  Test: TRAC_PHASE_BRAKE is symmetric for all motors
  * ================================================================== */
-static void test_simbrake_pwm_range(void)
+static void test_brake_phase_symmetric(void)
 {
-    uint16_t sim_brake_pwm = (uint16_t)(SIMBRAKE_PWM_PCT * (float)PWM_PERIOD / 100.0f);
-
-    /* Must be non-zero (otherwise it's just coast) */
-    ASSERT_TRUE(sim_brake_pwm > 0);
-
-    /* Must be well below 50% — this is a child vehicle, not aggressive braking */
-    ASSERT_TRUE(sim_brake_pwm < PWM_PERIOD / 2);
-
-    /* Expected value: 15% of 4249 ≈ 637 */
-    ASSERT_EQ_U16(sim_brake_pwm, (uint16_t)(0.15f * 4249.0f));
+    /* All four motors receive BTS7960_BRAKE_PWM in brake phase */
+    for (uint8_t i = 0; i < 4; i++) {
+        uint16_t expected = BTS7960_BRAKE_PWM;
+        ASSERT_EQ_U16(expected, 0);
+    }
 }
 
 /* ==================================================================
- *  Test: Coast compensation PWM value is within safe bounds
+ *  Test: TRAC_PHASE_COAST is symmetric for all motors (4x4 mode)
  * ================================================================== */
-static void test_coast_compensation_range(void)
+static void test_coast_phase_symmetric(void)
 {
-    uint16_t coast_bias = (uint16_t)(COAST_COMPENSATION_PCT * (float)PWM_PERIOD / 100.0f);
-
-    /* Must be non-zero (otherwise no compensation) */
-    ASSERT_TRUE(coast_bias > 0);
-
-    /* Must be less than simulated brake (coast drag < brake drag) */
-    uint16_t sim_brake = (uint16_t)(SIMBRAKE_PWM_PCT * (float)PWM_PERIOD / 100.0f);
-    ASSERT_TRUE(coast_bias < sim_brake);
-
-    /* Must be below 10% — barely perceptible, just enough for symmetry */
-    ASSERT_TRUE(coast_bias < PWM_PERIOD / 10);
-
-    /* Expected value: 4% of 4249 ≈ 169 */
-    ASSERT_EQ_U16(coast_bias, (uint16_t)(0.04f * 4249.0f));
+    /* In 4x4 mode (all wheels active), coast sets PWM=0 + EN=0
+     * for every motor — true coast, no asymmetric bias.               */
+    for (uint8_t i = 0; i < 4; i++) {
+        uint16_t coast_pwm = 0;
+        uint8_t  coast_en  = 0;
+        ASSERT_EQ_U16(coast_pwm, 0);
+        ASSERT_EQ_U16(coast_en,  0);
+    }
 }
 
 /* ==================================================================
@@ -126,68 +115,6 @@ static void test_neutral_ramp_rate(void)
     float ramp_time_from_30pct = 30.0f / NEUTRAL_RAMP_DOWN_PCT_S;
     ASSERT_TRUE(ramp_time_from_30pct > 0.05f);   /* Not instant */
     ASSERT_TRUE(ramp_time_from_30pct < 2.0f);     /* Not sluggish */
-}
-
-/* ==================================================================
- *  Test: Motor EN type classification is consistent
- * ================================================================== */
-static void test_motor_en_classification(void)
-{
-    /* FL and RR have GPIO EN (coast at PWM=0) */
-    ASSERT_TRUE(motor_has_gpio_en(MOTOR_FL));
-    ASSERT_TRUE(motor_has_gpio_en(MOTOR_RR));
-
-    /* FR and RL have tied EN (passive brake at PWM=0) */
-    ASSERT_TRUE(motor_has_tied_en(MOTOR_FR));
-    ASSERT_TRUE(motor_has_tied_en(MOTOR_RL));
-
-    /* No motor should be both */
-    for (uint8_t i = 0; i < 4; i++) {
-        ASSERT_TRUE(motor_has_gpio_en(i) != motor_has_tied_en(i));
-    }
-}
-
-/* ==================================================================
- *  Test: TRAC_PHASE_BRAKE produces different output for FL/RR vs FR/RL
- * ================================================================== */
-static void test_brake_phase_asymmetry(void)
-{
-    uint16_t sim_brake_pwm = (uint16_t)(SIMBRAKE_PWM_PCT * (float)PWM_PERIOD / 100.0f);
-
-    for (uint8_t i = 0; i < 4; i++) {
-        uint16_t expected_pwm;
-        if (motor_has_gpio_en(i)) {
-            /* FL/RR: simulated brake (non-zero PWM) */
-            expected_pwm = sim_brake_pwm;
-        } else {
-            /* FR/RL: passive brake (PWM=0) */
-            expected_pwm = BTS7960_BRAKE_PWM;
-        }
-
-        /* This mirrors the logic in Traction_Update TRAC_PHASE_BRAKE */
-        uint16_t actual;
-        if (i == MOTOR_FL || i == MOTOR_RR) {
-            actual = sim_brake_pwm;
-        } else {
-            actual = BTS7960_BRAKE_PWM;
-        }
-        ASSERT_EQ_U16(actual, expected_pwm);
-    }
-}
-
-/* ==================================================================
- *  Test: TRAC_PHASE_COAST produces different output for FL/RR vs FR/RL
- * ================================================================== */
-static void test_coast_phase_asymmetry(void)
-{
-    uint16_t coast_bias = (uint16_t)(COAST_COMPENSATION_PCT * (float)PWM_PERIOD / 100.0f);
-
-    /* FL/RR get coast compensation bias */
-    ASSERT_TRUE(coast_bias > 0);
-
-    /* FR/RL get zero (EN=0 → coast intent, but hardware EN tied HIGH) */
-    /* The actual hardware will still passively brake, but the firmware
-     * sets desired_en=0 as the intent for coast behaviour.              */
 }
 
 /* ==================================================================
@@ -249,22 +176,16 @@ static void test_neutral_ramp_computation(void)
 }
 
 /* ==================================================================
- *  Test: Simulated brake does not exceed safety bounds
+ *  Test: Park hold PWM is within safe bounds
  * ================================================================== */
-static void test_simbrake_safety_bounds(void)
+static void test_park_hold_safety_bounds(void)
 {
-    /* Simulated brake must be less than park hold */
-    uint16_t sim_brake = (uint16_t)(SIMBRAKE_PWM_PCT * (float)PWM_PERIOD / 100.0f);
     uint16_t park_hold = (uint16_t)(PARK_HOLD_PWM_PCT * (float)PWM_PERIOD / 100.0f);
-    ASSERT_TRUE(sim_brake < park_hold);
 
-    /* Coast compensation must be less than simulated brake */
-    uint16_t coast_comp = (uint16_t)(COAST_COMPENSATION_PCT * (float)PWM_PERIOD / 100.0f);
-    ASSERT_TRUE(coast_comp < sim_brake);
+    /* Must be non-zero */
+    ASSERT_TRUE(park_hold > 0);
 
-    /* Ordering: coast_comp < sim_brake < park_hold < PWM_PERIOD */
-    ASSERT_TRUE(coast_comp < sim_brake);
-    ASSERT_TRUE(sim_brake < park_hold);
+    /* Must be well below full scale */
     ASSERT_TRUE(park_hold < PWM_PERIOD);
 }
 
@@ -272,17 +193,15 @@ static void test_simbrake_safety_bounds(void)
 
 int main(void)
 {
-    test_simbrake_pwm_range();
-    test_coast_compensation_range();
+    test_all_motors_have_gpio_en();
+    test_brake_phase_symmetric();
+    test_coast_phase_symmetric();
     test_neutral_ramp_rate();
-    test_motor_en_classification();
-    test_brake_phase_asymmetry();
-    test_coast_phase_asymmetry();
     test_park_derating();
     test_neutral_ramp_computation();
-    test_simbrake_safety_bounds();
+    test_park_hold_safety_bounds();
 
-    printf("\n--- motor_control half-bridge compensation tests: %d run, %d failed ---\n",
+    printf("\n--- motor_control symmetric EN tests: %d run, %d failed ---\n",
            tests_run, tests_failed);
 
     return tests_failed ? 1 : 0;
