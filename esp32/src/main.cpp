@@ -1117,11 +1117,10 @@ void loop() {
                             sysState == can::SystemState::DEGRADED ||
                             sysState == can::SystemState::LIMP_HOME);
         if (isOperating && (now - lastRuntimeUpdateMs) >= RUNTIME_UPDATE_INTERVAL_MS) {
-            uint32_t addSec = (now - lastRuntimeUpdateMs) / 1000;
-            if (addSec > 0) {
-                uint32_t cur = config_store::get().runtimeSeconds;
-                config_store::setRuntimeSeconds(cur + addSec);
-            }
+            // Use a fixed increment (60 s) to avoid precision loss from integer division
+            constexpr uint32_t RUNTIME_INCREMENT_SEC = RUNTIME_UPDATE_INTERVAL_MS / 1000;
+            uint32_t cur = config_store::get().runtimeSeconds;
+            config_store::setRuntimeSeconds(cur + RUNTIME_INCREMENT_SEC);
             lastRuntimeUpdateMs = now;
         } else if (!isOperating) {
             lastRuntimeUpdateMs = now;  // Reset so we don't accumulate standby time

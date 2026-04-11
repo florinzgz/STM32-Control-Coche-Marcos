@@ -1424,7 +1424,7 @@ void EngineeringScreen::drawMaintenance() {
     uint16_t fillCol = (pct >= 100) ? ui::COL_RED :
                        (pct >= 80)  ? ui::COL_AMBER : ui::COL_GREEN;
     int16_t fillW = static_cast<int16_t>((int32_t)barW * pct / 100);
-    if (fillW > 0) {
+    if (fillW > 2) {
         tft.fillRect(barX + 1, barY + 1, fillW - 2, barH - 2, fillCol);
     }
     snprintf(buf, sizeof(buf), "%u%%", pct);
@@ -1450,7 +1450,7 @@ void EngineeringScreen::drawMaintenance() {
             tft.drawRect(200, 200, 200, 30, ui::COL_WHITE);
             tft.setTextColor(ui::COL_BLACK, ui::COL_AMBER);
             tft.setTextDatum(MC_DATUM);
-            tft.drawString("CONFIRMAR RECORDATORIO", 300, 215);
+            tft.drawString("ACEPTAR MANTENIMIENTO", 300, 215);
             tft.setTextDatum(TL_DATUM);
         }
     } else {

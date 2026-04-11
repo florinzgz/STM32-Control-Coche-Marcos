@@ -269,6 +269,7 @@ static void saveFaultLog() {
 
 void logFault(const FaultLogEntry& entry) {
     faultLog_[faultLogWriteIdx_] = entry;
+    // Advance write pointer (overwrites oldest entry when full — circular buffer)
     faultLogWriteIdx_ = (faultLogWriteIdx_ + 1) % FAULT_LOG_MAX_ENTRIES;
     if (faultLogCount_ < FAULT_LOG_MAX_ENTRIES) {
         faultLogCount_++;
