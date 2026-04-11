@@ -94,6 +94,7 @@ private:
     int8_t   curTemp_[4]         = {};
     int16_t  curSteeringRaw_     = 0;
     uint16_t curSpeedAvgRaw_     = 0;
+    uint16_t curRpmAvg_          = 0;
     uint16_t curBattVoltRaw_     = 0;
     uint8_t  curPedalPct_        = 0;
     ui::Gear curGear_            = ui::Gear::P;

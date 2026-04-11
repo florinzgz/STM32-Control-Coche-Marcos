@@ -33,6 +33,9 @@ namespace cfg {
 // DriveScreen — speed display (size 3, max "999.9")
 inline constexpr int16_t PAD_SPEED           = 120;
 
+// DriveScreen — RPM display (size 1, max "400 rpm")
+inline constexpr int16_t PAD_RPM             = 60;
+
 // DriveScreen — ACK indicator (size 1, max "REJECTED")
 inline constexpr int16_t PAD_ACK             = 80;
 
@@ -159,6 +162,20 @@ inline constexpr uint8_t PEDAL_COLOR_MID    = 70;  // ≤ this → yellow, else 
 
 inline constexpr uint8_t BATT_COLOR_LOW     = 20;  // ≤ this → red
 inline constexpr uint8_t BATT_COLOR_MID     = 50;  // ≤ this → yellow, else green
+
+// =========================================================================
+// RPM Display (DriveScreen — alongside speed)
+//
+// Wheel RPM derived from average speed and wheel circumference (1.1 m).
+// Formula: RPM = raw_0_1kmh * 100 / 66  (integer-only, no float)
+// Capped at RPM_DISPLAY_MAX for the display (matches vehicle design max).
+// =========================================================================
+
+// Maximum RPM shown on display (clamp)
+inline constexpr uint16_t RPM_DISPLAY_MAX    = 400;
+
+// X position for RPM sub-label (TC_DATUM, at SPEED_Y + 26)
+inline constexpr int16_t RPM_LABEL_X         = 295;
 
 // =========================================================================
 // Obstacle Sensor Bar Max Range (cm)

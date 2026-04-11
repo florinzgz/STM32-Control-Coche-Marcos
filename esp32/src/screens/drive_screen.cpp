@@ -183,6 +183,21 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     }
     curSpeedAvgRaw_ = static_cast<uint16_t>(sum / 4);
 
+    // Wheel RPM from average speed:
+    //   RPM = speed_kmh / (3.6 × WHEEL_CIRCUMF_M) × 60
+    //       = speed_kmh × 60 / (3.6 × 1.1)
+    //       = speed_kmh × 60 / 3.96
+    //   With raw in 0.1 km/h units (speed_kmh = raw / 10):
+    //       RPM = (raw / 10) × 60 / 3.96 = raw × 6 / 3.96
+    //           = raw × 600 / 396 = raw × 100 / 66  (simplified)
+    //   Max overflow: 65535 × 100 = 6 553 500, fits in uint32_t.
+    //   Integer truncation ≤ 1 RPM — acceptable for display.
+    {
+        uint32_t rpm = static_cast<uint32_t>(curSpeedAvgRaw_) * 100 / 66;
+        if (rpm > ui::cfg::RPM_DISPLAY_MAX) rpm = ui::cfg::RPM_DISPLAY_MAX;
+        curRpmAvg_ = static_cast<uint16_t>(rpm);
+    }
+
     // Battery voltage
     curBattVoltRaw_ = data.battery().voltageRaw;
 
@@ -373,7 +388,7 @@ void DriveScreen::draw() {
         ui::PedalBar::drawStatic(tft);
         ui::GearDisplay::drawStatic(tft);
 
-        // Speed label (below speed value)
+        // Speed label (below speed value, centered)
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TC_DATUM);
@@ -575,6 +590,19 @@ void DriveScreen::drawSpeed() {
     RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y, buf,
                 ui::COL_WHITE, ui::COL_BG, 3, TC_DATUM);
     tft.setTextPadding(0);
+
+    // Draw RPM value (right of speed area, same baseline as "km/h" label)
+    char rpmBuf[ui::FMT_BUF_SMALL];
+    snprintf(rpmBuf, sizeof(rpmBuf), "%u rpm", curRpmAvg_);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextPadding(ui::cfg::PAD_RPM);
+    tft.drawString(rpmBuf, ui::cfg::RPM_LABEL_X, ui::SPEED_Y + 26);
+    RTRACE_TEXT(ui::cfg::RPM_LABEL_X, ui::SPEED_Y + 26, rpmBuf,
+                ui::COL_WHITE, ui::COL_BG, 1, TC_DATUM);
+    tft.setTextPadding(0);
+
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 }
