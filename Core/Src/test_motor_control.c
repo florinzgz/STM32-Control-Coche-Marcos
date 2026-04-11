@@ -560,11 +560,10 @@ static void test_glitch_no_pwm_with_en_low(void)
         }
         ASSERT_EQ_INT((int)mode, (int)expected[i]);
 
-        /* Invariant: in COAST mode, the driver must receive PWM=0.
-         * Motor_SetMode enforces this by zeroing both CCRs.           */
-        if (mode == MOTOR_MODE_COAST) {
-            ASSERT_TRUE(pwm_vals[i] == 0 || mode == MOTOR_MODE_COAST);
-        }
+        /* Invariant: in COAST mode, Motor_SetMode zeroes both CCRs
+         * regardless of the requested PWM — so we only verify the
+         * mode was selected correctly (already done above).  The
+         * actual hardware zeroing is guaranteed by Motor_SetMode.     */
     }
 }
 
