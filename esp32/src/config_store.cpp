@@ -43,6 +43,13 @@ static FaultLogEntry faultLog_[FAULT_LOG_MAX_ENTRIES] = {};
 static uint8_t       faultLogCount_    = 0;
 static uint8_t       faultLogWriteIdx_ = 0;
 
+// Duplicate suppression: last logged state (errorCode + faultFlags)
+// Prevents log flooding when a fault persists across multiple CAN frames.
+static uint8_t  lastLoggedErrorCode_  = 0;
+static uint8_t  lastLoggedFaultFlags_ = 0;
+static uint32_t lastLoggedUptimeMs_   = 0;
+static constexpr uint32_t FLOG_MIN_INTERVAL_MS = 1000;  // minimum 1 s between logs
+
 // -------------------------------------------------------------------------
 // CRC32 computation (standard CRC-32/ISO-HDLC)
 // -------------------------------------------------------------------------
@@ -242,8 +249,18 @@ static void loadFaultLog() {
     fprefs.begin(NVS_FAULTLOG_NS, true);  // read-only
     faultLogCount_    = fprefs.getUChar(KEY_FLOG_COUNT, 0);
     faultLogWriteIdx_ = fprefs.getUChar(KEY_FLOG_WRITE, 0);
+
+    // Defensive bounds clamping (power-loss / corruption safety §1.3)
     if (faultLogCount_ > FAULT_LOG_MAX_ENTRIES) faultLogCount_ = 0;
     if (faultLogWriteIdx_ >= FAULT_LOG_MAX_ENTRIES) faultLogWriteIdx_ = 0;
+
+    // Cross-check: when buffer is not full, writeIdx must equal count.
+    // If inconsistent (power loss mid-write), reset to safe state.
+    if (faultLogCount_ < FAULT_LOG_MAX_ENTRIES &&
+        faultLogWriteIdx_ != faultLogCount_) {
+        faultLogCount_    = 0;
+        faultLogWriteIdx_ = 0;
+    }
 
     size_t expected = FAULT_LOG_MAX_ENTRIES * sizeof(FaultLogEntry);
     size_t actual   = fprefs.getBytes(KEY_FLOG_DATA, faultLog_, expected);
@@ -268,12 +285,31 @@ static void saveFaultLog() {
 }
 
 void logFault(const FaultLogEntry& entry) {
+    // --- Duplicate suppression (§1.1) ---
+    // Only log on rising edge: errorCode changed OR faultFlags changed meaningfully.
+    bool isDuplicate = (entry.errorCode  == lastLoggedErrorCode_ &&
+                        entry.faultFlags == lastLoggedFaultFlags_);
+
+    // --- Write rate protection (§1.2) ---
+    // Even if state changed, enforce minimum interval to protect flash.
+    bool tooSoon = (entry.uptimeMs - lastLoggedUptimeMs_) < FLOG_MIN_INTERVAL_MS;
+
+    if (isDuplicate || tooSoon) {
+        return;  // Suppress — not a new event or too soon
+    }
+
     faultLog_[faultLogWriteIdx_] = entry;
     // Advance write pointer (overwrites oldest entry when full — circular buffer)
     faultLogWriteIdx_ = (faultLogWriteIdx_ + 1) % FAULT_LOG_MAX_ENTRIES;
     if (faultLogCount_ < FAULT_LOG_MAX_ENTRIES) {
         faultLogCount_++;
     }
+
+    // Update suppression state
+    lastLoggedErrorCode_  = entry.errorCode;
+    lastLoggedFaultFlags_ = entry.faultFlags;
+    lastLoggedUptimeMs_   = entry.uptimeMs;
+
     saveFaultLog();
     Serial.printf("[NVS] Fault logged: code=%u flags=0x%02X sub=%u state=%u\n",
                   entry.errorCode, entry.faultFlags,
@@ -285,11 +321,13 @@ uint8_t getFaultLogCount() {
 }
 
 bool getFaultLogEntry(uint8_t index, FaultLogEntry& out) {
-    if (index >= faultLogCount_) return false;
+    if (index >= faultLogCount_ || faultLogCount_ == 0) return false;
     // Ring buffer: oldest entry is at (writeIdx - count) mod MAX
     uint8_t oldest = (faultLogWriteIdx_ + FAULT_LOG_MAX_ENTRIES - faultLogCount_)
                      % FAULT_LOG_MAX_ENTRIES;
     uint8_t actual = (oldest + index) % FAULT_LOG_MAX_ENTRIES;
+    // Defensive bounds clamp (§1.3 — should never fire, but protects against corruption)
+    if (actual >= FAULT_LOG_MAX_ENTRIES) actual = 0;
     out = faultLog_[actual];
     return true;
 }

@@ -164,8 +164,9 @@ static unsigned long lastObstacleWarnMs = 0;   // debounce obstacle warning beep
 static constexpr unsigned long OBSTACLE_WARN_INTERVAL_MS = 2000;
 
 // ---- Runtime counter for maintenance tracking ----
-static unsigned long lastRuntimeUpdateMs = 0;
-static constexpr unsigned long RUNTIME_UPDATE_INTERVAL_MS = 60000;  // update every 60 s
+static unsigned long lastRuntimeTickMs = 0;
+static uint32_t      runtimeAccumMs    = 0;       // partial seconds accumulated in RAM (§2.2)
+static constexpr unsigned long RUNTIME_COMMIT_INTERVAL_MS = 60000;  // commit to NVS every 60 s
 static bool     maintenanceWarnPlayed = false;
 
 // ---- Temperature audio tracking ----
@@ -392,7 +393,10 @@ static void renderTask(void* /*param*/) {
             touch::TouchEvent evt = touch::getEvent();
 
             if (evt.type == touch::EventType::LONG_PRESS) {
-                screenManager.onLongPress(evt.x, evt.y);
+                // Block long-press while tank confirm modal is active (§3.1)
+                if (!screenManager.isTankConfirmActive()) {
+                    screenManager.onLongPress(evt.x, evt.y);
+                }
             }
 
             if (evt.type == touch::EventType::TAP) {
@@ -1108,28 +1112,41 @@ void loop() {
         config_store::flush();
     }
 
-    // ---- Runtime counter for maintenance tracking ----
-    // Accumulate seconds only when system is in ACTIVE/DEGRADED/LIMP_HOME states
-    // (vehicle is actually being operated, not just powered on in BOOT/STANDBY).
+    // ---- Runtime counter for maintenance tracking (§2.1, §2.2) ----
+    // Accumulate milliseconds in RAM continuously while operating.
+    // Commit full seconds to NVS periodically (every ~60 s) to reduce flash wear.
+    // Delta-based: uses real elapsed time, not frame count.
     {
         auto sysState = vehicleData.heartbeat().systemState;
         bool isOperating = (sysState == can::SystemState::ACTIVE ||
                             sysState == can::SystemState::DEGRADED ||
                             sysState == can::SystemState::LIMP_HOME);
-        if (isOperating && (now - lastRuntimeUpdateMs) >= RUNTIME_UPDATE_INTERVAL_MS) {
-            // Use a fixed increment (60 s) to avoid precision loss from integer division
-            constexpr uint32_t RUNTIME_INCREMENT_SEC = RUNTIME_UPDATE_INTERVAL_MS / 1000;
-            uint32_t cur = config_store::get().runtimeSeconds;
-            config_store::setRuntimeSeconds(cur + RUNTIME_INCREMENT_SEC);
-            lastRuntimeUpdateMs = now;
-        } else if (!isOperating) {
-            lastRuntimeUpdateMs = now;  // Reset so we don't accumulate standby time
-        }
+        if (isOperating) {
+            // Accumulate real elapsed ms since last tick (§2.1 — delta-based)
+            uint32_t elapsed = static_cast<uint32_t>(now - lastRuntimeTickMs);
+            runtimeAccumMs += elapsed;
 
-        // Play maintenance reminder once per power cycle when threshold crossed
+            // Commit accumulated whole seconds to NVS periodically (§2.2)
+            if (runtimeAccumMs >= RUNTIME_COMMIT_INTERVAL_MS) {
+                uint32_t wholeSec = runtimeAccumMs / 1000;
+                runtimeAccumMs -= wholeSec * 1000;  // keep fractional ms
+                uint32_t cur = config_store::get().runtimeSeconds;
+                config_store::setRuntimeSeconds(cur + wholeSec);
+            }
+        } else {
+            // Not operating: commit any accumulated partial seconds before discarding
+            if (runtimeAccumMs >= 1000) {
+                uint32_t wholeSec = runtimeAccumMs / 1000;
+                uint32_t cur = config_store::get().runtimeSeconds;
+                config_store::setRuntimeSeconds(cur + wholeSec);
+            }
+            runtimeAccumMs = 0;
+        }
+        lastRuntimeTickMs = now;
+
+        // Play maintenance reminder once per power cycle when threshold crossed (§2.3)
         if (config_store::isMaintenanceDue() && !maintenanceWarnPlayed &&
             !config_store::get().maintAcknowledged) {
-            // Use ERROR_GENERAL sound as maintenance reminder (no dedicated track)
             audio::play(audio::Sound::TEST_SYSTEM, audio::Priority::LO);
             maintenanceWarnPlayed = true;
             Serial.println("[MAINT] Maintenance reminder — service due");

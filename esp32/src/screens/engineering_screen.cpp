@@ -411,6 +411,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
     if (x >= BACK_X && x <= BACK_X + BACK_W &&
         y >= BACK_Y && y <= BACK_Y + BACK_H) {
         if (currentMenu_ != SubMenu::MAIN) {
+            clearLogPending_ = false;  // reset confirmation state on navigation (§4.1)
             currentMenu_ = SubMenu::MAIN;
             needsRedraw_ = true;
         } else {
@@ -554,13 +555,25 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         return false;
     }
 
-    // DTC Log Viewer: CLEAR LOG button (bottom-right)
+    // DTC Log Viewer: CLEAR LOG button (bottom-right) — requires confirmation (§4.1)
     if (currentMenu_ == SubMenu::DTC_LOG_VIEWER) {
         if (x >= SAVE_X && x <= SAVE_X + SAVE_W &&
             y >= SAVE_Y && y <= SAVE_Y + SAVE_H) {
-            config_store::clearFaultLog();
+            if (clearLogPending_) {
+                // Second tap — confirmed; clear the log
+                config_store::clearFaultLog();
+                clearLogPending_ = false;
+            } else {
+                // First tap — enter confirmation state
+                clearLogPending_ = true;
+            }
             needsRedraw_ = true;
             return true;
+        }
+        // Any other touch cancels confirmation
+        if (clearLogPending_) {
+            clearLogPending_ = false;
+            needsRedraw_ = true;
         }
         return false;
     }
@@ -1311,10 +1324,18 @@ void EngineeringScreen::drawDtcLogViewer() {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
             tft.drawString(buf, 10, rowY);
 
-            // Uptime (mm:ss)
+            // Uptime (hh:mm:ss for clarity §4.2)
             uint32_t sec = fte.uptimeMs / 1000;
-            snprintf(buf, sizeof(buf), "%lu:%02lu",
-                     (unsigned long)(sec / 60), (unsigned long)(sec % 60));
+            uint32_t hrs = sec / 3600;
+            uint32_t mns = (sec % 3600) / 60;
+            uint32_t scs = sec % 60;
+            if (hrs > 0) {
+                snprintf(buf, sizeof(buf), "%lu:%02lu:%02lu",
+                         (unsigned long)hrs, (unsigned long)mns, (unsigned long)scs);
+            } else {
+                snprintf(buf, sizeof(buf), "%lu:%02lu",
+                         (unsigned long)mns, (unsigned long)scs);
+            }
             tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
             tft.drawString(buf, 30, rowY);
 
@@ -1360,16 +1381,18 @@ void EngineeringScreen::drawDtcLogViewer() {
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
                 ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
 
-    // CLEAR LOG button (red, bottom-right)
+    // CLEAR LOG button (red, bottom-right) — shows "CONFIRM?" after first tap (§4.1)
     if (count > 0) {
-        tft.fillRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_RED);
-        RTRACE_FILL_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_RED);
+        uint16_t btnCol = clearLogPending_ ? ui::COL_AMBER : ui::COL_RED;
+        const char* btnLabel = clearLogPending_ ? "CONFIRM?" : "CLEAR";
+        tft.fillRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, btnCol);
+        RTRACE_FILL_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, btnCol);
         tft.drawRect(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
         RTRACE_DRAW_RECT(SAVE_X, SAVE_Y, SAVE_W, SAVE_H, ui::COL_WHITE);
-        tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
-        tft.drawString("CLEAR", SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2);
-        RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, "CLEAR",
-                    ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+        tft.setTextColor(clearLogPending_ ? ui::COL_BLACK : ui::COL_WHITE, btnCol);
+        tft.drawString(btnLabel, SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2);
+        RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, btnLabel,
+                    clearLogPending_ ? ui::COL_BLACK : ui::COL_WHITE, btnCol, 1, MC_DATUM);
     }
     tft.setTextDatum(TL_DATUM);
 }
