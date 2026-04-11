@@ -290,6 +290,9 @@ typedef struct {
     uint16_t           en_pin;
     int8_t             direction;    /* Stored direction: 1=forward, -1=reverse  */
     int16_t            power;        /* Retained for ABI compatibility            */
+    motor_mode_t       current_mode; /* Last mode set by Motor_SetMode() — used
+                                      * for safe transition detection.  Initialised
+                                      * to MOTOR_MODE_COAST (0) by zero-init.     */
 } Motor_t;
 
 typedef struct {
@@ -2029,22 +2032,23 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
     /* ---- Direction-change dead-state enforcement (audit fix) ----
      * When the requested direction differs from the current direction
      * AND the motor is not stopping (duty > 0), force both channels
-     * to zero first.  This guarantees a zero-torque intermediate
-     * state during direction reversal, preventing any possibility of
-     * transient shoot-through even if OCPreload were misconfigured.
+     * to zero first and enforce a software dead-time delay.
+     *
+     * This guarantees a zero-torque intermediate state during direction
+     * reversal, preventing any possibility of transient shoot-through
+     * even if OCPreload were misconfigured.
+     *
      * With OCPreload enabled (as configured in MX_TIM*_Init), the
-     * actual outputs only change at the next UEV, but this software
-     * guard provides defence-in-depth.                                */
+     * actual outputs only change at the next UEV (50 µs), but the
+     * software delay provides defence-in-depth for the BTS7960 FET
+     * switching times (~0.2 µs t_d(on)/t_d(off)).                     */
     int8_t new_dir = (signed_pwm > 0) ? 1 : ((signed_pwm < 0) ? -1 : 0);
     if (duty > 0U && motor->direction != 0 && new_dir != 0 &&
         new_dir != motor->direction) {
         /* Transitioning between forward and reverse — insert zero state */
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
-        /* The zero state takes effect at the next UEV (50 µs at 20 kHz).
-         * The new direction is then applied in the same function call
-         * and takes effect at the UEV after that.  Total dead time is
-         * one PWM period (50 µs) — well within BTS7960 requirements.   */
+        delay_us(SAFE_DEADTIME_US);
     }
 
     if (signed_pwm > 0) {
@@ -2095,10 +2099,35 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
  */
 static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
 {
+    /* ---- Universal safe-transition pre-step ----
+     *
+     * Before ANY mode change, zero all PWM outputs and enforce a
+     * dead-time delay.  This guarantees that the FETs in the BTS7960
+     * have fully settled before the new drive state is applied,
+     * preventing transient shoot-through during:
+     *   - DRIVE → BRAKE  (high duty → shorted terminals)
+     *   - DRIVE → COAST  (high duty → Hi-Z)
+     *   - BRAKE → DRIVE  (shorted terminals → active drive)
+     *   - COAST → DRIVE  (Hi-Z → active drive)
+     *
+     * The pre-step is skipped when the mode is NOT changing (e.g.
+     * consecutive DRIVE calls with same direction) to avoid
+     * unnecessary PWM glitches during normal operation.  The
+     * direction-change case within DRIVE is handled separately
+     * by Motor_SetSigned()'s own dead-state enforcement.
+     *
+     * Cost: 5 µs busy-wait per mode transition — negligible at the
+     * 10 ms control loop rate.                                        */
+    if (mode != motor->current_mode) {
+        __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        delay_us(SAFE_DEADTIME_US);
+    }
+
     switch (mode) {
 
     case MOTOR_MODE_COAST:
-        /* Safe order: zero PWM first, then deassert EN.
+        /* Safe order: zero PWM (already done above), then deassert EN.
          * This ensures no current flows when EN transitions.            */
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
@@ -2109,13 +2138,12 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
         break;
 
     case MOTOR_MODE_BRAKE:
-        /* Safe order: zero PWM first (dead-time), then assert EN.
-         * With RPWM=0 and LPWM=0 and EN=HIGH, the BTS7960 shorts
-         * the motor terminals → passive electromagnetic braking.
+        /* Safe order: zero PWM (already done above + dead-time), then
+         * assert EN.  With RPWM=0 and LPWM=0 and EN=HIGH, the BTS7960
+         * shorts the motor terminals → passive electromagnetic braking.
          * ⚠ No PWM is applied in this mode — the motor is held.        */
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
-        delay_us(SAFE_DEADTIME_US);
         motor->direction = 0;
         if (motor->en_port != NULL) {
             HAL_GPIO_WritePin(motor->en_port, motor->en_pin, GPIO_PIN_SET);
@@ -2130,6 +2158,9 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
         Motor_SetSigned(motor, signed_pwm);
         break;
     }
+
+    /* Track current mode for transition detection */
+    motor->current_mode = mode;
 }
 
 static float __attribute__((unused)) PID_Compute(PID_t *pid, float measured, float dt)
