@@ -138,9 +138,9 @@ Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 |-------------|--------|-----------|---------|
 | **1** | TXD | GPIO4 (ESP32) | Entrada de transmisión desde ESP32 |
 | **2** | GND | GND común | Tierra del transceiver |
-| **3** | VCC | +5V | Alimentación 5V del transceiver |
+| **3** | VCC | **+5V** (ext.) | Alimentación 5V del transceiver (4.5–5.5 V) |
 | **4** | RXD | GPIO5 (ESP32) | Salida de recepción al ESP32 |
-| **5** | VREF | No conectado | Referencia de voltaje (opcional) |
+| **5** | **VIO** | **+3.3V** | ⚠️ **OBLIGATORIO** — Nivel lógico I/O. Conectar a 3.3 V del ESP32. Si se deja flotante o a 5 V, RXD producirá 5 V → **destruye GPIO5** |
 | **6** | CANL | Bus CAN Low | Cable trenzado al otro transceiver |
 | **7** | CANH | Bus CAN High | Cable trenzado al otro transceiver |
 | **8** | S (Silent) | GND | Modo normal (conectar a GND) |
@@ -161,8 +161,10 @@ ESP32-S3                    TJA1051 #1              Bus CAN          TJA1051 #2 
 │  GPIO5 ◄─┼────────────│ 4 RXD        │     │   120Ω       │   │        RXD 4 ├───────────►│ PA11 (RX)│
 │  (RX)    │            │              │     │    ║         │   │              │            │          │
 │          │            │    6    CANL├─────┤──── CANL ────├───┤ CANL   6     │            │          │
-│  +5V  ───┼───────────►│ 3 VCC        │     │              │   │        VCC 3 │◄───────────┤ +5V      │
-│          │            │              │     │   120Ω       │   │              │            │          │
+│  +5V  ───┼───────────►│ 3 VCC        │     │              │   │        VCC 3 │◄───────────┤ +5V (ext)│
+│  (ext.)  │            │              │     │   120Ω       │   │              │            │          │
+│  3.3V ───┼───────────►│ 5 VIO ⚠️     │     │              │   │    VIO 5 ⚠️   │◄───────────┤ 3.3V     │
+│          │            │              │     │              │   │              │            │          │
 │  GND  ───┼───────────►│ 2 GND        │     │              │   │        GND 2 │◄───────────┤ GND      │
 │          │            │              │     │              │   │              │            │          │
 │  GND  ───┼───────────►│ 8 S (Silent) │     └──────────────┘   │ S (Silent) 8 │◄───────────┤ GND      │

@@ -6,10 +6,11 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                         STM32G474RE                              │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  TIM1 (20kHz) → PWM_FL, PWM_FR, PWM_RL, PWM_RR          │   │
-│  │  TIM8 (20kHz) → PWM_STEER                                │   │
+│  │  TIM1 (20kHz) → PWM_FL (CH1/2), PWM_FR (CH3/4)         │   │
+│  │  TIM8 (20kHz) → PWM_RL (CH1/2), PWM_RR (CH3/4)         │   │
+│  │  TIM3 (20kHz) → PWM_STEER (CH1/2)                       │   │
 │  │  TIM2 (Quadrature) → ENC_A, ENC_B                        │   │
-│  │  GPIO → DIR_xx, EN_xx, RELAY_xx                          │   │
+│  │  GPIO → EN_xx, RELAY_xx                                  │   │
 │  │  ADC1 → PEDAL                                            │   │
 │  │  FDCAN1 → CAN Bus (500 kbps)                            │   │
 │  │  I2C1 → TCA9548A → INA226 (×6)                          │   │
@@ -53,7 +54,7 @@ Cada BTS7960 tiene:
 ┌─────────────────────────────────┐
 │         BTS7960 Module          │
 ├─────────────────────────────────┤
-│ VCC    → 5V (lógica control)    │
+│ VCC    → 3.3V (lógica control) ⚠️  │
 │ GND    → GND común               │
 │ RPWM   → PWM directo (forward)   │
 │ LPWM   → PWM inverso (reverse)   │
@@ -61,10 +62,16 @@ Cada BTS7960 tiene:
 │ L_EN   → Enable izquierdo (HIGH) │
 │ R_IS   → Current sense derecho   │
 │ L_IS   → Current sense izquierdo │
-│ VMOT   → 12V (alimentación motor)│
+│ VMOT   → 24V/12V (motor)         │
 │ M+     → Terminal + motor        │
 │ M-     → Terminal - motor        │
 └─────────────────────────────────┘
+
+> ⚠️ **IMPORTANTE — VCC del IBT-2 a 3.3 V, NO 5 V:**
+> El módulo IBT-2 incluye un buffer 74HC244 cuyo V_IH(min) = 0.7 × VCC.
+> A VCC = 5 V → V_IH(min) = 3.5 V, y las señales de 3.3 V del STM32 quedan **por debajo** del umbral (no fiable).
+> A VCC = 3.3 V → V_IH(min) = 2.31 V, y las señales de 3.3 V del STM32 están **por encima** del umbral (correcto).
+> Por ello, este diseño alimenta VCC del IBT-2 desde el rail de 3.3 V del STM32 (ver `project_config.h`).
 ```
 
 ### Esquema de Conexión STM32 → BTS7960
@@ -254,31 +261,33 @@ Cada DS18B20:
 **Distribución canales:**
 ```
 TCA9548A
-├── Canal 0: INA226_FL    (0x40) → Motor FL  
-├── Canal 1: INA226_FR    (0x40) → Motor FR  
-├── Canal 2: INA226_RL    (0x40) → Motor RL  
-├── Canal 3: INA226_RR    (0x40) → Motor RR  
-├── Canal 4: INA226_STEER (0x40) → Motor Dir
-└── Canal 5: INA226_MAIN  (0x40) → Principal
+├── Canal 0: INA226_FL    (0x40) → Motor FL  (shunt 1.5 mΩ)
+├── Canal 1: INA226_FR    (0x40) → Motor FR  (shunt 1.5 mΩ)
+├── Canal 2: INA226_RL    (0x40) → Motor RL  (shunt 1.5 mΩ)
+├── Canal 3: INA226_RR    (0x40) → Motor RR  (shunt 1.5 mΩ)
+├── Canal 4: INA226_MAIN  (0x40) → Batería 24V (shunt 0.75 mΩ)
+└── Canal 5: INA226_STEER (0x40) → Motor Dir (shunt 1.5 mΩ)
 ```
 
 **Especificaciones INA226:**
-- Rango tensión: 0-36V
+- VCC (lógica): 3.3 V (rango 2.7–5.5 V)
+- Rango tensión bus: 0-36V
 - Resolución tensión: 1.25mV/bit
 - Resolución corriente: Configurable según shunt
 - Velocidad conversión: 140μs - 8.244ms
 - Precisión: ±0.1%
 
-**Configuración Shunt:**
-- Resistencia: 0.002Ω (2mΩ)
-- Potencia: 3W
-- Rango: ±82mV (máximo INA226)
-- Corriente máxima: 41A
+**Configuración Shunt (según BOM real — ver `project_config.h`):**
+- Motores (canales 0–3, 5): **0.0015 Ω (1.5 mΩ)** — shunt 50 A / 75 mV
+- Batería (canal 4): **0.00075 Ω (0.75 mΩ)** — shunt 100 A / 75 mV
+- Potencia mínima shunt: 3 W
+- Rango entrada shunt INA226: ±81.92 mV (máximo)
 
 **Cálculo Corriente:**
 ```
 Current (A) = Shunt_Voltage (mV) / Shunt_Resistance (mΩ)
-           = Shunt_Voltage (mV) / 2
+Motor:   Current = Shunt_mV / 1.5
+Batería: Current = Shunt_mV / 0.75
 ```
 
 ## Encoder de Dirección - E6B2-CWZ6C
@@ -338,16 +347,21 @@ float angle_deg = (TIM2->CNT - 2400) * 0.075f;
 
 ### Acondicionamiento de Señal
 
-**Divisor de tensión** (5V → 3.3V):
+**Divisor de tensión** (5V → 3.3V — ver `project_config.h`):
 ```
-5V Output ──┬── 1kΩ ──┬── PA3 (ADC1_IN4)
-            │         │
-           │         2kΩ
-           │         │
-          GND ───────┴── GND
+5V Output ──┬── 10kΩ ──┬── PA3 (ADC1_IN4)
+            │          │
+            │         6.8kΩ
+            │          │
+           GND ────────┴── GND
 
-Vout = 5V × (2kΩ / (1kΩ + 2kΩ)) = 3.33V (máximo)
+Vout_max = 5V × (6.8kΩ / (10kΩ + 6.8kΩ)) = 2.02V
+Rango pedal: 0.5V–4.5V → 0.20V–1.82V en PA3
 ```
+
+> **Nota:** El divisor 10 kΩ / 6.8 kΩ produce un rango más reducido (0–2.02 V) que el
+> fondo de escala del ADC (3.3 V), pero proporciona un margen de seguridad amplio:
+> incluso si la salida del sensor llega a 5.5 V, la tensión en PA3 sería 2.23 V < 3.3 V.
 
 **Conversión ADC:**
 ```c
@@ -384,10 +398,10 @@ Cada rueda tiene:
 
 | Rueda | Pin GPIO | EXTI | Tornillos | Diámetro |
 |-------|----------|------|-----------|----------|
-| FL    | PB5      | EXTI5  | 6 | 50cm |
-| FR    | PB10     | EXTI10 | 6 | 50cm |
-| RL    | PB11     | EXTI11 | 6 | 50cm |
-| RR    | PB12     | EXTI12 | 6 | 50cm |
+| FL    | PA0      | EXTI0  | 6 | 50cm |
+| FR    | PA1      | EXTI1  | 6 | 50cm |
+| RL    | PA2      | EXTI2  | 6 | 50cm |
+| RR    | PB15     | EXTI15 | 6 | 50cm |
 
 **Circuito por sensor:**
 ```
@@ -425,13 +439,13 @@ float speed_kmh = speed_ms * 3.6f;  // 18.9 km/h
 
 ### Hardware CAN
 
-**Transceiver**: TJA1050 o MCP2551
+**Transceiver**: TJA1051T/3 (NXP) — VCC = 5 V, VIO = 3.3 V (ver `ESP32_STM32_CAN_CONNECTION.md`)
 **Terminación**: 120Ω en cada extremo
 
 ```
 STM32_PA11 (RX) ──┐
                   │    ┌───────────┐
-STM32_PA12 (TX) ──┼────┤ TJA1050  ├──── CAN_H ── 120Ω ── CAN_L
+STM32_PA12 (TX) ──┼────┤ TJA1051T/3├──── CAN_H ── 120Ω ── CAN_L
                   │    └───────────┘
                  GND                    │
                                      Bus CAN
@@ -453,7 +467,7 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | Componente | Cantidad | Especificación | Notas |
 |------------|----------|----------------|-------|
 | STM32G474RE | 1 | LQFP64, 170MHz | Microcontrolador principal |
-| BTS7960 | 5 | 43A H-Bridge | Drivers de motor |
+| BTS7960 (IBT-2) | 5 | 43A H-Bridge | Drivers de motor — VCC a 3.3 V |
 | TCA9548A | 1 | I2C Multiplexor | 8 canales |
 | INA226 | 6 | I2C Current/Voltage | Medición corriente |
 | DS18B20 | 5 | OneWire Temp | Sensores temperatura |
@@ -461,9 +475,10 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | LJ12A3-4-Z/BX | 4 | 4mm Inductive | Sensores velocidad |
 | A1324LUA-T | 1 | Hall Effect Linear | Sensor pedal |
 | HY-M158 | 8 | Optoacoplador | Aislamiento |
-| TJA1050 | 1 | CAN Transceiver | Bus CAN |
+| TJA1051T/3 | 2 | CAN Transceiver (NXP) | VCC=5V, VIO=3.3V — uno por nodo |
 | Relé SRD-05VDC | 3 | 30A, 5V coil | Relés potencia |
-| Resistor 0.002Ω | 6 | 2mΩ, 3W | Shunt corriente |
+| Shunt 1.5 mΩ | 5 | 50A/75mV, 3W | INA226 motores (ch 0–3, 5) |
+| Shunt 0.75 mΩ | 1 | 100A/75mV, 3W | INA226 batería (ch 4) |
 | Resistor 10kΩ | 20 | 1/4W | Pull-ups |
 | Resistor 120Ω | 2 | 1/4W | Terminación CAN |
 | Capacitor 100nF | 30 | Cerámico X7R | Desacoplo |
