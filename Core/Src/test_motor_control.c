@@ -163,8 +163,8 @@ static void test_all_motors_have_gpio_en(void)
 static void test_brake_phase_produces_brake_mode(void)
 {
     /* Simulate Traction_Update() BRAKE phase decision */
-    uint16_t desired_pwm[4] = {0, 0, 0, 0};
-    uint8_t  desired_en[4]  = {1, 1, 1, 1};  /* BRAKE: EN=1, PWM=0 */
+    const uint16_t desired_pwm[4] = {0, 0, 0, 0};
+    const uint8_t  desired_en[4]  = {1, 1, 1, 1};  /* BRAKE: EN=1, PWM=0 */
 
     for (uint8_t i = 0; i < 4; i++) {
         motor_mode_t selected_mode;
@@ -188,8 +188,8 @@ static void test_brake_phase_produces_brake_mode(void)
 static void test_coast_phase_produces_coast_mode(void)
 {
     /* Simulate Traction_Update() COAST phase (4x4) */
-    uint16_t desired_pwm[4] = {0, 0, 0, 0};
-    uint8_t  desired_en[4]  = {0, 0, 0, 0};  /* COAST: EN=0, PWM=0 */
+    const uint16_t desired_pwm[4] = {0, 0, 0, 0};
+    const uint8_t  desired_en[4]  = {0, 0, 0, 0};  /* COAST: EN=0, PWM=0 */
 
     for (uint8_t i = 0; i < 4; i++) {
         motor_mode_t selected_mode;
@@ -211,8 +211,8 @@ static void test_coast_phase_produces_coast_mode(void)
  * ================================================================== */
 static void test_drive_phase_produces_drive_mode(void)
 {
-    uint16_t desired_pwm[4] = {1000, 1000, 1000, 1000};
-    uint8_t  desired_en[4]  = {1, 1, 1, 1};
+    const uint16_t desired_pwm[4] = {1000, 1000, 1000, 1000};
+    const uint8_t  desired_en[4]  = {1, 1, 1, 1};
 
     for (uint8_t i = 0; i < 4; i++) {
         motor_mode_t selected_mode;
@@ -329,8 +329,8 @@ static void test_transition_brake_to_drive(void)
 static void test_4x2_coast_rear_stays_braked(void)
 {
     /* Simulate Traction_Update() COAST in 4x2: FL/FR coast, RL/RR brake */
-    uint16_t desired_pwm[4] = {0, 0, BTS7960_BRAKE_PWM, BTS7960_BRAKE_PWM};
-    uint8_t  desired_en[4]  = {0, 0, 1, 1};
+    const uint16_t desired_pwm[4] = {0, 0, BTS7960_BRAKE_PWM, BTS7960_BRAKE_PWM};
+    const uint8_t  desired_en[4]  = {0, 0, 1, 1};
 
     for (uint8_t i = 0; i < 4; i++) {
         motor_mode_t selected_mode;
@@ -573,8 +573,8 @@ static void test_transition_extreme_drive_brake_reverse(void)
 static void test_glitch_no_pwm_with_en_low(void)
 {
     /* Exhaustive: test all combinations of en={0,1} and pwm={0, 500, 4249} */
-    uint8_t  en_vals[]  = {0, 0, 0, 1, 1, 1};
-    uint16_t pwm_vals[] = {0, 500, 4249, 0, 500, 4249};
+    const uint8_t  en_vals[]  = {0, 0, 0, 1, 1, 1};
+    const uint16_t pwm_vals[] = {0, 500, 4249, 0, 500, 4249};
     motor_mode_t expected[] = {
         MOTOR_MODE_COAST, MOTOR_MODE_COAST, MOTOR_MODE_COAST,  /* en=0 → always coast */
         MOTOR_MODE_BRAKE, MOTOR_MODE_DRIVE, MOTOR_MODE_DRIVE   /* en=1 → brake/drive  */
@@ -739,7 +739,7 @@ static void test_emergency_stop_always_coast(void)
     /* Motor_SetSigned(0) → duty=0 → EN=LOW (coast) */
     int16_t speed = 0;
     uint16_t duty = (speed >= 0) ? (uint16_t)speed : (uint16_t)(-speed);
-    GPIO_PinState expected_en = (duty > 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET;
+    GPIO_PinState expected_en = (duty != 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET;
     ASSERT_EQ_INT((int)expected_en, (int)GPIO_PIN_RESET);
 }
 
@@ -779,6 +779,7 @@ static void test_stress_1000_cycles(void)
     };
     int pattern_len = 4;
     motor_mode_t prev_mode = MOTOR_MODE_COAST;  /* Initial mode */
+    int transitions = 0;
 
     for (int cycle = 0; cycle < 1000; cycle++) {
         int idx = cycle % pattern_len;
@@ -792,9 +793,11 @@ static void test_stress_1000_cycles(void)
         }
         ASSERT_EQ_INT((int)mode, (int)pattern[idx].expected);
 
-        /* Verify transition detection: pre-step fires iff mode changes */
+        /* Verify transition detection: pre-step fires iff mode changes.
+         * (We only reach here when mode != prev_mode, so the count is
+         * the real assertion — tracked via 'transitions' below.)       */
         if (mode != prev_mode) {
-            ASSERT_TRUE(mode != prev_mode);  /* Transition detected */
+            transitions++;
         }
 
         /* Invariant: EN=LOW → mode must be COAST, never DRIVE or BRAKE */
@@ -809,6 +812,11 @@ static void test_stress_1000_cycles(void)
 
         prev_mode = mode;
     }
+
+    /* Pattern has 4 distinct modes cycling every 4 steps;
+     * first cycle produces 3 transitions (COAST→DRIVE, DRIVE→BRAKE,
+     * BRAKE→DRIVE, DRIVE→COAST) then repeats — expect > 0 total.     */
+    ASSERT_TRUE(transitions > 0);
 }
 
 /* ==================================================================
@@ -823,7 +831,7 @@ static void test_stress_1000_cycles(void)
  * ================================================================== */
 static void test_glitch_exhaustive_duty_en(void)
 {
-    uint16_t duties[] = {0, 1, 2125, 4249, 5000};  /* includes over-max */
+    const uint16_t duties[] = {0, 1, 2125, 4249, 5000};  /* includes over-max */
     int n = 5;
 
     for (int en = 0; en <= 1; en++) {
