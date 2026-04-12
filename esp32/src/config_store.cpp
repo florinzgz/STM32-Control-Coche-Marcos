@@ -72,6 +72,9 @@ static uint32_t computeCrc32(const Config& cfg) {
     return crc ^ 0xFFFFFFFF;
 }
 
+// Forward declarations (internal helpers defined below)
+static void loadFaultLog();
+
 // -------------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------------
