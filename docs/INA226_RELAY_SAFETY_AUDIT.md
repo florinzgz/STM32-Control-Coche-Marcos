@@ -184,7 +184,7 @@ LED strip power could remain energised after a CPU fault.
 | Motor FL RPWM    | PA8 (TIM1_CH1)  | ✅ main.h:45        |
 | Motor FL LPWM    | PA9 (TIM1_CH2)  | ✅ main.h:46        |
 | Motor FR RPWM    | PA10 (TIM1_CH3) | ✅ main.h:47        |
-| Motor FR LPWM    | PA11 (TIM1_CH4) | ✅ main.h:48        |
+| Motor FR LPWM    | PC3 (TIM1_CH4, AF2) | ✅ project_config.h:48 |
 | Motor RL RPWM    | PC6 (TIM8_CH1)  | ✅ main.h:52        |
 | Motor RL LPWM    | PC7 (TIM8_CH2)  | ✅ main.h:53        |
 | Motor RR RPWM    | PC8 (TIM8_CH3)  | ✅ main.h:54        |
@@ -193,8 +193,8 @@ LED strip power could remain energised after a CPU fault.
 | Steer LPWM       | PA7 (TIM3_CH2)  | ✅ main.h:61        |
 | EN_FL             | PC5             | ✅ main.h:77        |
 | EN_RR             | PC13            | ✅ main.h:80        |
-| CAN TX            | PB9             | ✅ main.h:134       |
-| CAN RX            | PB8             | ✅ main.h:135       |
+| CAN TX            | PA12            | ✅ project_config.h:134 |
+| CAN RX            | PA11            | ✅ project_config.h:135 |
 | Pedal ADC         | PA3             | ✅ main.h:131       |
 
 ### Consistency Score: **100%** — All firmware pins match documentation

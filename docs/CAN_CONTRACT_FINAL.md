@@ -43,7 +43,7 @@ The STM32 decides what is allowed. The ESP32 requests; the STM32 disposes.
 | FD bit-rate switch | Off | `FDCAN_BRS_OFF` in `can_handler.c` |
 | Max payload | 8 bytes | Classic CAN frame limit |
 | Topology | Point-to-point (ESP32-S3 ↔ STM32G474RE) | — |
-| Pins | PB8 (FDCAN1_RX), PB9 (FDCAN1_TX) — AF9 | `main.h` |
+| Pins | PA11 (FDCAN1_RX), PA12 (FDCAN1_TX) — AF9 | `project_config.h` |
 | Error handling | Hardware auto-retransmission; protocol exception disabled (`ProtocolException = DISABLE`) | `main.c` |
 
 ### RX Filter Policy
@@ -86,7 +86,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x200 | STATUS_SPEED | 8 | 100 ms | Four wheel speeds | `can_handler.c`, `main.c` |
 | 0x201 | STATUS_CURRENT | 8 | 100 ms | Four motor currents | `can_handler.c`, `main.c` |
 | 0x202 | STATUS_TEMP | 5 | 1000 ms | Five temperature sensors | `can_handler.c`, `main.c` |
-| 0x203 | STATUS_SAFETY | 3 | 100 ms | ABS/TCS active flags and error code | `can_handler.c`, `main.c` |
+| 0x203 | STATUS_SAFETY | 5 | 100 ms | ABS/TCS active flags, error code, system state, rx_errors | `can_handler.c`, `main.c` |
 | 0x204 | STATUS_STEERING | 3 | 100 ms | Actual steering angle and calibration flag | `can_handler.c`, `main.c` |
 | 0x205 | STATUS_TRACTION | 4 | 100 ms | Per-wheel traction scale (ABS/TCS) | `can_handler.c`, `main.c` |
 | 0x206 | STATUS_TEMP_MAP | 5 | 1000 ms | Explicit temperature sensor mapping (FL/FR/RL/RR/AMB) | `can_handler.c`, `main.c` |
@@ -219,6 +219,8 @@ Source: `CAN_SendStatusTemp()` in `can_handler.c`, called from `main.c`
 | 0 | abs_active | uint8 | 1 = ABS currently active, 0 = inactive |
 | 1 | tcs_active | uint8 | 1 = TCS currently active, 0 = inactive |
 | 2 | error_code | uint8 | Current safety error code (see section 6) |
+| 3 | state | uint8 | Current system state (`system_state`) |
+| 4 | rx_errors | uint8 | FDCAN RX error counter |
 
 Source: `CAN_SendStatusSafety()` in `can_handler.c`, called from `main.c`
 

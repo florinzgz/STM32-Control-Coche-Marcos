@@ -68,7 +68,7 @@ o si se alimenta exclusivamente de la placa STM32:
 | Caso | TJA1051_A VCC | TXD del TJA1051_A | Comportamiento bus |
 |------|---------------|-------------------|--------------------|
 | **A1.** TJA1051_A sin alimentación (STM32 power off) | 0 V | — | CANH/CANL en alta Z. Solo 120 Ω de terminación en lado A. |
-| **A2.** TJA1051_A alimentado desde 5V general (siempre) | 5 V | Flotante (PB9 no traccionado) | TXD puede ir a LOW → dominante → Dominant Timeout en ~3 ms → modo silencioso |
+| **A2.** TJA1051_A alimentado desde 5V general (siempre) | 5 V | Flotante (PA12 no traccionado) | TXD puede ir a LOW → dominante → Dominant Timeout en ~3 ms → modo silencioso |
 
 En ambos casos el resultado final es el mismo: el TJA1051_A **no actúa sobre CANH/CANL**.
 
@@ -130,8 +130,8 @@ del ESP32 no es un fallo de seguridad hardware.
 
 ### 1.5 Riesgo identificado: startup transient de TXD sin pull-up
 
-El firmware configura PB9 (FDCAN1_TX) como `GPIO_MODE_AF_PP, GPIO_NOPULL` en la función
-`HAL_FDCAN_MspInit()`. Antes de que se ejecute `MX_FDCAN1_Init()`, el pin PB9 está en
+El firmware configura PA12 (FDCAN1_TX) como `GPIO_MODE_AF_PP, GPIO_NOPULL` en la función
+`HAL_FDCAN_MspInit()`. Antes de que se ejecute `MX_FDCAN1_Init()`, el pin PA12 está en
 modo GPIO_INPUT (alta impedancia, comportamiento por defecto tras reset del STM32).
 
 Durante esta ventana de tiempo (desde power-on hasta `MX_FDCAN1_Init()`):
@@ -210,13 +210,13 @@ Circuito por nodo:
 ║  ─────────────────    │             │   ─────────────────────────── ║
 ║                       │             │                               ║
 ║  STM32G474RE          │             │                               ║
-║  PB9(FDCAN1_TX)──┐   │             │                               ║
+║  PA12(FDCAN1_TX)─┐   │             │                               ║
 ║                  │   │             │                               ║
 ║  [Si CAN aislado]│   │             │  ┌── 10kΩ ── VCC_TJA_A        ║
 ║  [ADuM1201] ─────┤   │~~~~~~~~~~~~~│  │                            ║
 ║                  └──►│             │►─┤ TJA1051T/3_A TXD (pin 1)   ║
 ║                      │  DC-DC iso  │  │ CANH (pin 7) ──────────────╫──CANH
-║  PB8(FDCAN1_RX)◄─┐  │  5V/200mA   │  │ CANL (pin 6) ──────────────╫──CANL
+║  PA11(FDCAN1_RX)◄┐  │  5V/200mA   │  │ CANL (pin 6) ──────────────╫──CANL
 ║  [ADuM1201] ─────┘  │             │◄─┤ RXD  (pin 4)               ║
 ║                      │             │  └─ S (pin 8) → GND_CAN       ║
 ║                      │             │                               ║
@@ -519,7 +519,7 @@ STM32 o en el conector del módulo de aislamiento).
 **Fecha:** 2026-02-25
 **Basado en auditoría de:**
 - `Core/Src/main.c` — `MX_FDCAN1_Init()` (FDCAN_MODE_NORMAL, AutoRetransmission=ENABLE)
-- `Core/Src/stm32g4xx_hal_msp.c` — `HAL_FDCAN_MspInit()` (GPIO_NOPULL en PB9)
+- `Core/Src/stm32g4xx_hal_msp.c` — `HAL_FDCAN_MspInit()` (GPIO_NOPULL en PA12)
 - `Core/Src/can_handler.c` — `CAN_CheckBusOff()`, bus-off → LIMP_HOME, retry logic
 - `Core/Src/boot_validation.c` — `check_can_not_busoff()` always true
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — topología, 2× TJA1051T/3, S pin → GND

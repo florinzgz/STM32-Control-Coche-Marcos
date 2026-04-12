@@ -33,12 +33,12 @@ El firmware actual ejecuta 18 módulos C compilados con ARM GCC (`arm-none-eabi-
 
 | Periférico | Función | Pines | Config |
 |------------|---------|-------|--------|
-| **TIM1** | PWM motores FL/FR | PA8, PA9, PA10, PA11 | 20 kHz, center-aligned, ARR=4249 |
+| **TIM1** | PWM motores FL/FR | PA8, PA9, PA10, PC3 | 20 kHz, center-aligned, ARR=4249 |
 | **TIM8** | PWM motores RL/RR | PC6, PC7, PC8, PC9 | 20 kHz, center-aligned, ARR=4249 |
 | **TIM3** | PWM dirección | PA6, PA7 | 20 kHz, center-aligned |
 | **TIM2** | Encoder cuadratura | PA15, PB3 | 32-bit, 4800 CPR |
 | **ADC1** | Pedal acelerador | PA3 | 12-bit, IN4, muestreo ~1.1 µs |
-| **FDCAN1** | Comunicación ESP32 | PB8 (RX), PB9 (TX) | 500 kbps, prescaler 17, AF9 |
+| **FDCAN1** | Comunicación ESP32 | PA11 (RX), PA12 (TX) | 500 kbps, prescaler 17, AF9 |
 | **I2C1** | Sensores corriente/ADC | PB6 (SCL), PB7 (SDA) | 400 kHz fast mode, open-drain |
 | **IWDG** | Watchdog independiente | — | ~500 ms (prescaler 32, reload 4095) |
 | **OneWire** | DS18B20 temperaturas | PB0 | Bit-bang GPIO |
@@ -149,8 +149,8 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PA8 | **OCUPADO** | TIM1_CH1 — RPWM FL | AF6 | — |
 | PA9 | **OCUPADO** | TIM1_CH2 — LPWM FL | AF6 | — |
 | PA10 | **OCUPADO** | TIM1_CH3 — RPWM FR | AF6 | — |
-| PA11 | **OCUPADO** | TIM1_CH4 — LPWM FR | AF6 | — |
-| PA12 | **LIBRE** | — | AF10: USB_DP, AF6: TIM1_ETR | GPIO disponible (sin asignación en IOC ni código) |
+| PA11 | **OCUPADO** | FDCAN1_RX (CAN bus) | AF9 | — |
+| PA12 | **OCUPADO** | FDCAN1_TX (CAN bus) | AF9 | — |
 | PA13 | **RESERVADO** | SWDIO — Debug | — | NO tocar |
 | PA14 | **RESERVADO** | SWCLK — Debug | — | NO tocar |
 | PA15 | **OCUPADO** | TIM2_CH1 — Encoder A | AF1 | — |
@@ -167,8 +167,8 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PB5 | **OCUPADO** | EXTI5 — Steering center | — | — |
 | PB6 | **OCUPADO** | I2C1_SCL | AF4 | — |
 | PB7 | **OCUPADO** | I2C1_SDA | AF4 | — |
-| PB8 | **OCUPADO** | FDCAN1_RX | AF9 | — |
-| PB9 | **OCUPADO** | FDCAN1_TX | AF9 | — |
+| PB8 | **LIBRE** | — | AF9: FDCAN1_RX, AF4: I2C1_SCL | GPIO disponible |
+| PB9 | **LIBRE** | — | AF9: FDCAN1_TX, AF4: I2C1_SDA | GPIO disponible |
 | PB10 | **OCUPADO** | Relay LED Front | GPIO | — |
 | PB11 | **OCUPADO** | Relay LED Rear | GPIO | — |
 | PB12 | **LIBRE** | — | AF5: SPI2_NSS, AF6: I2C2_SMBA | SPI2 NSS candidato |

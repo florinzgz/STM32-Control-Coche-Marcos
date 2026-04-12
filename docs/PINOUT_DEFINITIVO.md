@@ -1,3 +1,12 @@
+> ⚠️ **DOCUMENTO COMPLETAMENTE OBSOLETO — NO USAR PARA CABLEADO**
+>
+> Este pinout fue creado con la arquitectura antigua (DIR + PWM, CAN en PB8/PB9).
+> El firmware actual usa arquitectura **RPWM/LPWM**, CAN en **PA11/PA12**, y
+> LPWM_FR en **PC3**. Consultar los documentos actualizados:
+> - `CONEXIONES_COMPLETAS.md` — guía de cableado definitiva
+> - `HARDWARE_WIRING_MANUAL.md` — manual técnico de cableado
+> - `project_config.h` — fuente de verdad de la asignación de pines
+
 # PINOUT DEFINITIVO - STM32G474RE (LQFP64)
 
 > ## ⛔ DOCUMENTO OBSOLETO — NO USAR PARA CABLEADO

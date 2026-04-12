@@ -1,5 +1,5 @@
 # REFERENCIA RÁPIDA - CONEXIONES ESP32-S3
-## Pines de Pantalla, CAN-Bus y Sensor TOFSense-M
+## Pines de Pantalla, CAN-Bus y Sensor TF-Mini Plus
 
 ---
 
@@ -53,22 +53,19 @@
 
 ---
 
-## SENSOR DE OBSTÁCULOS (TOFSense-M S via UART1)
+## SENSOR DE OBSTÁCULOS (TF-Mini Plus via UART1)
 
-### Conexiones TOFSense-M S → ESP32-S3
+### Conexiones TF-Mini Plus → ESP32-S3
 
-| TOFSense-M (GH1.25) | → | ESP32-S3 / Fuente | Función |
-|----------------------|---|-------------------|---------|
-| Pin 1 (VCC) | → | 5V (regulador) | ⚠️ Alimentación 5V obligatorio |
-| Pin 2 (GND) | → | GND | Tierra común |
-| Pin 3 (RX) | → | No conectar | No se envían comandos |
-| Pin 4 (TX) | → | GPIO 18 | UART1 RX (datos de distancia) |
+| TF-Mini Plus | → | ESP32-S3 / Fuente | Función |
+|--------------|---|-------------------|---------|
+| Red (VCC) | → | 5V (regulador) | Alimentación 5V |
+| Black (GND) | → | GND | Tierra común |
+| White/Green (TX) | → | GPIO 18 | UART1 RX (datos de distancia, 3.3V directo) |
 
-- **Baudrate:** 921600 bps, 8N1
-- **Nivel lógico UART:** 3.5–3.6 V medido (nominal 3.3V TTL según datasheet)
-- **⚠️ Protección OBLIGATORIA (elegir una):**
-  - **Opción 1 — Divisor de tensión:** R1=1 kΩ (serie) + R2=4.7 kΩ (a GND). Reduce 3.6 V a ~2.9 V
-  - **Opción 2 — Level shifter BSS138:** módulo tipo SparkFun BOB-12009 o genérico "Logic Level Converter 3.3V–5V". Convierte a 3.3 V exactos. ⚠️ NO usar TXS0108E
+- **Baudrate:** 115200 bps, 8N1
+- **Trama:** 9 bytes por frame
+- **Nivel lógico UART:** 3.3V TTL — conexión directa a ESP32, NO requiere divisor de tensión
 - **Condensador desacoplo:** 100 nF entre VCC y GND del sensor (recomendado)
 
 ---
@@ -79,7 +76,7 @@
 |-----------|---------|-----------|
 | ESP32-S3 + Display | 3.3V | ~500 mA |
 | TJA1051 CAN | 5V | ~70 mA |
-| TOFSense-M S | 5V | ~200 mA (según Datasheet V3.0) |
+| TF-Mini Plus | 5V | ~120 mA |
 
 ---
 
@@ -90,7 +87,7 @@
 1. ESP32 3.3V → GND: **3.30V ± 0.1V**
 2. Display VCC → GND: **3.30V ± 0.1V**
 3. TJA1051 VCC → GND: **5.00V ± 0.2V**
-4. TOFSense-M VCC → GND: **5.00V ± 0.2V**
+4. TF-Mini Plus VCC → GND: **5.00V ± 0.2V**
 5. CANH → GND (idle): **~2.5V**
 6. CANL → GND (idle): **~2.5V**
 7. CANH ↔ CANL (resistencia): **60Ω** (con terminación)
@@ -100,7 +97,7 @@
 1. ESP32 arranca: `[HMI] ESP32 HMI CAN bring-up booted`
 2. TFT inicializado: `[TFT] Display initialized`
 3. CAN funciona: `[CAN] Initialized at 500 kbps`
-4. TOFSense-M: `[OBSTACLE] TOFSense-M initialized (UART1, 921600 bps)`
+4. TF-Mini Plus: `[OBSTACLE] TF-Mini Plus init (UART1, 115200 bps)`
 5. Heartbeat: `[HMI] heartbeat` cada 1 segundo
 
 ---
@@ -119,12 +116,11 @@
 - **Errores frecuentes** → Pin S (pin 8) debe ir a GND, no flotar
 - **Bus-off** → Verificar 500 kbps en ambos MCUs
 
-### TOFSense-M
+### TF-Mini Plus
 
 - **Estado INVALID permanente** → Verificar VCC = 5V (no 3.3V)
-- **Sin datos** → Verificar que sensor TX (pin 4) pasa por divisor R1=1kΩ+R2=4.7kΩ a GPIO 18
-- **Checksum fallido** → Verificar baudrate 921600 en firmware
-- **⚠️ GPIO 18 dañado** → Si se conectó TX directo sin divisor (3.5–3.6 V), el pin puede estar dañado
+- **Sin datos** → Verificar que sensor TX (White/Green) está conectado a GPIO 18
+- **Checksum fallido** → Verificar baudrate 115200 en firmware
 
 ---
 
@@ -146,10 +142,10 @@
 │  GPIO 4  ───┼──→ CAN TX (a TJA1051)
 │  GPIO 5  ◄──┼─── CAN RX (de TJA1051)
 │             │
-│  GPIO 18 ◄──┼─── R1=1kΩ+R2=4.7kΩ ── TOFSense-M TX (UART1 RX, 921600 bps)
+│  GPIO 18 ◄──┼─── TF-Mini Plus TX (UART1 RX, 115200 bps, 3.3V direct)
 │             │
 │  3.3V ──────┼──→ Display VCC
-│  5V ────────┼──→ TJA1051 VCC + TOFSense-M VCC
+│  5V ────────┼──→ TJA1051 VCC + TF-Mini Plus VCC
 │  GND ───────┼──→ Común (todos)
 │             │
 └─────────────┘
@@ -160,7 +156,7 @@
 **Ver documentación completa en:**
 - `ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md` (guía detallada)
 - `DIAGRAMA_PINES_VISUAL.md` (diagramas visuales)
-- `TOFSENSE_M_WIRING_GUIDE.md` (guía de conexión TOFSense-M)
+- `TFMINI_PLUS_WIRING_GUIDE.md` (guía de conexión TF-Mini Plus)
 
 **Configuración firmware:**
 - `esp32/include/User_Setup.h` (definiciones de pines TFT_eSPI)

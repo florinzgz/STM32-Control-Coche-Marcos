@@ -155,10 +155,10 @@ Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 ESP32-S3                    TJA1051 #1              Bus CAN          TJA1051 #2              STM32G474RE
 ┌──────────┐            ┌──────────────┐     ┌──────────────┐   ┌──────────────┐            ┌──────────┐
 │          │            │              │     │              │   │              │            │          │
-│  GPIO4 ──┼───────────►│ 1 TXD   CANH├─────┤──── CANH ────├───┤ CANH   TXD 1 │◄───────────┤ PB9 (TX) │
+│  GPIO4 ──┼───────────►│ 1 TXD   CANH├─────┤──── CANH ────├───┤ CANH   TXD 1 │◄───────────┤ PA12 (TX)│
 │  (TX)    │            │              │     │              │   │              │            │          │
 │          │            │    7         │     │              │   │        7     │            │          │
-│  GPIO5 ◄─┼────────────│ 4 RXD        │     │   120Ω       │   │        RXD 4 ├───────────►│ PB8 (RX) │
+│  GPIO5 ◄─┼────────────│ 4 RXD        │     │   120Ω       │   │        RXD 4 ├───────────►│ PA11 (RX)│
 │  (RX)    │            │              │     │    ║         │   │              │            │          │
 │          │            │    6    CANL├─────┤──── CANL ────├───┤ CANL   6     │            │          │
 │  +5V  ───┼───────────►│ 3 VCC        │     │              │   │        VCC 3 │◄───────────┤ +5V      │
@@ -222,7 +222,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | **0x200** | STATUS_SPEED | 8 | Velocidad de 4 ruedas (2 bytes cada una) |
 | **0x201** | STATUS_CURRENT | 8 | Corriente de 4 motores (2 bytes cada uno) |
 | **0x202** | STATUS_TEMP | 5 | Temperaturas de 5 sensores (1 byte cada uno) |
-| **0x203** | STATUS_SAFETY | 3 | Estado ABS, TCS, errores |
+| **0x203** | STATUS_SAFETY | 5 | Estado ABS, TCS, errores, estado sistema, rx_errors |
 | **0x204** | STATUS_STEERING | 3 | Ángulo de dirección calibrado |
 | **0x205** | STATUS_TRACTION | 4 | Escala de tracción por rueda |
 | **0x206** | STATUS_TEMP_MAP | 5 | Mapa térmico de motores |

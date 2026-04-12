@@ -19,7 +19,7 @@
   │  TIM3 (20kHz) ──► STEER RPWM/LPWM (PA6/PA7)                                │
   │  TIM2 (encoder) ◄── Encoder dirección (PA15/PB3)                             │
   │  FDCAN1 ──► PA12 TX / PA11 RX ──► TJA1051 ──► CAN Bus ──► ESP32-S3         │
-  │  GPIO out ──► 2× EN GPIO (PC5/PC13) + 3+2 RELAY + EN_FR/RL/STEER→3.3V     │
+  │  GPIO out ──► 5× EN GPIO (PC5/PC0/PC1/PC13/PC4) + 3+2 RELAY               │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z                   │
   │  I2C1 ──► TCA9548A ──► 6× INA226                                            │
   │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PA3)     │
@@ -45,7 +45,7 @@
 **Total cables del STM32:** GPIO + alimentación + I2C + CAN
 **Componentes a conectar:** 5 BTS7960, 1 encoder, 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 5 relés (3 potencia + 2 LED), 2 TJA1051, 1 LED_DIAG externo, 1 TF-Mini Plus (en ESP32), 1 DFPlayer Mini (en ESP32), 1 MCP23017 + palanca de cambios (en ESP32), 1 relé audio (en ESP32), 2 tiras WS2812B (en ESP32)
 
-> ⚠️ **CAMBIO ARQUITECTURA (PR #120):** Los motores ya NO usan un pin DIR + un solo PWM. Ahora cada motor recibe **RPWM y LPWM directos** desde el mismo timer. **Eliminar** el cableado DIR (PC0–PC4). Los pines EN_FR, EN_RL y EN_STEER ya no son GPIO; conectar R_EN y L_EN del BTS7960 correspondiente directamente a 3.3 V.
+> ⚠️ **CAMBIO ARQUITECTURA (PR #120):** Los motores ya NO usan un pin DIR + un solo PWM. Ahora cada motor recibe **RPWM y LPWM directos** desde el mismo timer. **Eliminar** el cableado DIR (PC0–PC4). Los antiguos pines DIR (PC0, PC1, PC4) se reutilizan ahora como EN_FR (PC0), EN_RL (PC1), EN_STEER (PC4) — GPIO output controlado por firmware. **NO** conectar R_EN/L_EN directamente a 3.3 V.
 
 ---
 
@@ -886,17 +886,17 @@ PB14 ──►[330Ω]──►[LED]──► GND
 >
 > ⚠️ El condensador snubber en los terminales del motor de dirección (M+/M-) es especialmente crítico porque el encoder E6B2-CWZ6C está físicamente cerca: sin él, la contra-EMF puede corromper los pulsos del encoder y provocar `SAFETY_ERROR_CENTERING`.
 
-### Pines liberados (PC0, PC1, PC2, PC4) — ya no se cablean
+### Pines liberados (PC2) — ya no se cablean
 
-> ⚠️ **PC3 ya NO está libre** — ahora es LPWM_FR (TIM1_CH4, AF2). Solo quedan 4 pines libres.
+> ⚠️ **PC3 ya NO está libre** — ahora es LPWM_FR (TIM1_CH4, AF2). PC0, PC1 y PC4 se reutilizan como EN_FR, EN_RL y EN_STEER respectivamente. Solo queda 1 pin libre.
 
 | Pin | Uso anterior | Estado actual |
 |-----|-------------|---------------|
-| PC0 | DIR_FL (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
-| PC1 | DIR_FR (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
+| PC0 | DIR_FL (GPIO OUT) | **EN_FR** — GPIO output, conectar a R_EN + L_EN del BTS7960 FR |
+| PC1 | DIR_FR (GPIO OUT) | **EN_RL** — GPIO output, conectar a R_EN + L_EN del BTS7960 RL |
 | PC2 | DIR_RL (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
 | PC3 | DIR_RR (GPIO OUT) | **⚠️ REUTILIZADO:** Ahora es **LPWM_FR** (TIM1_CH4, AF2) — PWM activo, NO desconectar |
-| PC4 | DIR_STEER (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
+| PC4 | DIR_STEER (GPIO OUT) | **EN_STEER** — GPIO output, conectar a R_EN + L_EN del BTS7960 dirección |
 
 ### Herramientas necesarias para Phase 1
 

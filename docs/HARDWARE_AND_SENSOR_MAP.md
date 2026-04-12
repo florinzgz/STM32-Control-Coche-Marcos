@@ -40,7 +40,7 @@
 | Traction FL | Front-Left | PA8 | TIM1_CH1 | PC0 | PC5 | PWM 20 kHz + GPIO | `motor_control.c`, `main.c` | — (always on) |
 | Traction FR | Front-Right | PA9 | TIM1_CH2 | PC1 | PC6 | PWM 20 kHz + GPIO | `motor_control.c`, `main.c` | — (always on) |
 | Traction RL | Rear-Left | PA10 | TIM1_CH3 | PC2 | PC7 | PWM 20 kHz + GPIO | `motor_control.c`, `main.c` | — (always on) |
-| Traction RR | Rear-Right | PA11 | TIM1_CH4 | PC3 | PC13 | PWM 20 kHz + GPIO | `motor_control.c`, `main.c` | — (always on) |
+| Traction RR | Rear-Right | PC3 | TIM1_CH4 | PC3 | PC13 | PWM 20 kHz + GPIO | `motor_control.c`, `main.c` | — (always on) |
 | Steering | Center rack | PC8 | TIM8_CH3 | PC4 | PC9 | PWM 20 kHz + GPIO | `motor_control.c`, `main.c` | — (always on) |
 
 **Notes:**
@@ -168,7 +168,7 @@
 
 | Bus | Peripheral | Pins | Speed | Protocol | File(s) |
 |-----|------------|------|-------|----------|---------|
-| CAN | FDCAN1 | PB8 (RX), PB9 (TX) | 500 kbps | CAN 2.0A, 11-bit IDs | `can_handler.c`, `main.c` |
+| CAN | FDCAN1 | PA11 (RX), PA12 (TX) | 500 kbps | CAN 2.0A, 11-bit IDs | `can_handler.c`, `main.c` |
 | I2C | I2C1 | PB6 (SCL), PB7 (SDA) | 400 kHz | I2C Fast-mode | `sensor_manager.c`, `main.c` |
 | OneWire | GPIO bit-bang | PB0 | ~16 kbps | Dallas 1-Wire | `sensor_manager.c` |
 
@@ -562,8 +562,8 @@ actual firmware source code (`Core/Inc/main.h` and `Core/Src/*.c`).
 | OneWire | **PB0** | PB5 ❌ | PB0 ✅ | PB5 ❌ | PB0 ✅ |
 | Pedal ADC | **PA3 / ADC1_IN4** | PA0 / ADC1_IN1 ❌ | PA3 / ADC1_IN4 ✅ | PA0 / ADC1_IN1 ❌ | PA3 ✅ |
 | EN_RR | **PC13** | PC7 ❌ | PD2 ❌ | — | PD2 ❌ |
-| CAN RX | **PB8 (AF9)** | PB8 ✅ | PA11 ❌ | — | PB8 ✅ |
-| CAN TX | **PB9 (AF9)** | PB9 ✅ | PA12 ❌ | — | PB9 ✅ |
+| CAN RX | **PA11 (AF9)** | PA11 ✅ | PA11 ✅ | — | PA11 ✅ |
+| CAN TX | **PA12 (AF9)** | PA12 ✅ | PA12 ✅ | — | PA12 ✅ |
 | DIR pins | **PC0–PC4** | Mixed ❌ | PC0–PC4 ✅ | — | PC0–PC4 ✅ |
 | EN pins | **PC5,6,7,13,9** | Mixed ❌ | PC5,6,7,PD2,9 ❌(RR) | — | PC5,6,7,PD2,9 ❌(RR) |
 | Relay MAIN | **PC10** | PC11 ❌ | PC10 ✅ | — | PC10 ✅ |
