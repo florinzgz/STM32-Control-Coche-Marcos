@@ -524,7 +524,7 @@ static inline void delay_us(uint32_t us)
         uint32_t start  = DWT->CYCCNT;
         uint32_t cycles = us * dwt_cycles_per_us;
         while ((DWT->CYCCNT - start) < cycles) {
-            /* busy-wait — unsigned subtraction handles CYCCNT wrap */
+            __NOP();  /* Explicit busy-wait — prevents compiler elision */
         }
     } else {
         /* Fallback: conservative NOP loop for 170 MHz / -O2.

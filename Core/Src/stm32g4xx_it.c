@@ -33,39 +33,48 @@ static void Fault_BlinkLD2(uint32_t delay_count)
 
 /* ---- Cortex-M4 core exceptions ---- */
 
-void NMI_Handler(void)
+/* Emergency motor shutdown — called from all fault handlers.
+ * EN-first order: BSRR → MOE → CCR.
+ *
+ * 1) BSRR: Force all motor EN pins and relays LOW.  This is the
+ *    single fastest action to guarantee Hi-Z on ALL BTS7960 drivers
+ *    (including TIM3/steering which has no BREAK input).  EN=LOW
+ *    makes the BTS7960 ignore PWM inputs immediately, stopping all
+ *    current flow — critical in overcurrent / short-circuit faults
+ *    where keeping FETs conducting (passive brake) would be unsafe.
+ *
+ * 2) MOE: Clear MOE on advanced timers → hardware-level shutdown of
+ *    TIM1/TIM8 PWM outputs.  Defence-in-depth: even if EN were
+ *    somehow re-asserted, timer outputs are forced to idle (LOW).
+ *
+ * 3) CCR: Zero all preload registers.  Third layer of defence: if
+ *    MOE were ever re-enabled (debugger, errant code), duty = 0 %.
+ *
+ * Extracted into a shared function to guarantee all fault handlers
+ * use the identical shutdown sequence and order.                     */
+static inline void Fault_MotorShutdown(void)
 {
-}
-
-void HardFault_Handler(void)
-{
-    /* Shutdown sequence: BSRR → MOE → CCR (EN-first order).
-     *
-     * 1) BSRR: Force all motor EN pins and relays LOW.  This is the
-     *    single fastest action to guarantee Hi-Z on ALL BTS7960 drivers
-     *    (including TIM3/steering which has no BREAK input).  EN=LOW
-     *    makes the BTS7960 ignore PWM inputs immediately, stopping all
-     *    current flow — critical in overcurrent / short-circuit faults
-     *    where keeping FETs conducting (passive brake) would be unsafe.
-     *
-     * 2) MOE: Clear MOE on advanced timers → hardware-level shutdown of
-     *    TIM1/TIM8 PWM outputs.  Defence-in-depth: even if EN were
-     *    somehow re-asserted, timer outputs are forced to idle (LOW).
-     *
-     * 3) CCR: Zero all preload registers.  Third layer of defence: if
-     *    MOE were ever re-enabled (debugger, errant code), duty = 0 %.  */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
                   | PIN_EN_STEER
                   | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM1 outputs: RPWM_FL, LPWM_FL, RPWM_FR, LPWM_FR */
-    TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM8 outputs: RPWM_RL, LPWM_RL, RPWM_RR, LPWM_RR */
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
     TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;  /* FL: RPWM, LPWM → 0 */
     TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;  /* FR: RPWM, LPWM → 0 */
     TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;  /* RL: RPWM, LPWM → 0 */
     TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;  /* RR: RPWM, LPWM → 0 */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0 */
+}
+
+void NMI_Handler(void)
+{
+}
+
+void HardFault_Handler(void)
+{
+    Fault_MotorShutdown();
 
     /* Rapid-blink status LED (~10 Hz) — indicates a CPU fault (distinct
      * from Error_Handler's ~2 Hz slow blink and the main-loop heartbeat). */
@@ -74,55 +83,19 @@ void HardFault_Handler(void)
 
 void MemManage_Handler(void)
 {
-    /* EN-first shutdown (see HardFault_Handler for rationale) */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
-                  | PIN_EN_STEER
-                  | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
-    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    TIM1->BDTR &= ~TIM_BDTR_MOE;
-    TIM8->BDTR &= ~TIM_BDTR_MOE;
-    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;
-    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;
-    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;
-    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;
-    TIM3->CCR1  = 0U;
-    TIM3->CCR2  = 0U;
+    Fault_MotorShutdown();
     Fault_BlinkLD2(800000U);
 }
 
 void BusFault_Handler(void)
 {
-    /* EN-first shutdown (see HardFault_Handler for rationale) */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
-                  | PIN_EN_STEER
-                  | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
-    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    TIM1->BDTR &= ~TIM_BDTR_MOE;
-    TIM8->BDTR &= ~TIM_BDTR_MOE;
-    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;
-    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;
-    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;
-    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;
-    TIM3->CCR1  = 0U;
-    TIM3->CCR2  = 0U;
+    Fault_MotorShutdown();
     Fault_BlinkLD2(800000U);
 }
 
 void UsageFault_Handler(void)
 {
-    /* EN-first shutdown (see HardFault_Handler for rationale) */
-    GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
-                  | PIN_EN_STEER
-                  | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
-    GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
-    TIM1->BDTR &= ~TIM_BDTR_MOE;
-    TIM8->BDTR &= ~TIM_BDTR_MOE;
-    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;
-    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;
-    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;
-    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;
-    TIM3->CCR1  = 0U;
-    TIM3->CCR2  = 0U;
+    Fault_MotorShutdown();
     Fault_BlinkLD2(800000U);
 }
 
