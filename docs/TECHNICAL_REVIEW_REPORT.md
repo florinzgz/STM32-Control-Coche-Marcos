@@ -160,7 +160,7 @@ Non-blocking retry at configurable intervals. On bus-off: Stop → DeInit → In
 - Command ACK (0x103) provides closed-loop feedback for mode changes — the ESP32 can confirm the STM32 actually applied the requested gear/mode.
 
 **Alternatives rejected:**
-- **CAN FD:** STM32G474 supports FDCAN but the SN65HVD230 transceiver is CAN 2.0-only. CAN FD would require hardware changes.
+- **CAN FD:** STM32G474 supports FDCAN but the TJA1051T/3 transceiver is CAN 2.0-only. CAN FD would require hardware changes.
 - **SPI or UART direct link:** CAN provides automatic error detection, prioritization, and electrical isolation. SPI/UART would need software error handling and galvanic isolation components.
 
 ---

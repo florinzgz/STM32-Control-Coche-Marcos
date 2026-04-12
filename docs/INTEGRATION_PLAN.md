@@ -254,7 +254,7 @@ Antes de asignar cualquier pin libre:
 | Componente | Consumo típico | Consumo pico | Fuente |
 |-----------|---------------|-------------|--------|
 | STM32G474RE | 30 mA | 50 mA | 3.3 V regulado |
-| FDCAN transceiver (TJA1050/1051) | 10 mA | 75 mA | 5 V |
+| FDCAN transceiver (TJA1051T/3) | 10 mA | 75 mA | 5 V |
 | TCA9548A | 0.01 mA | 0.1 mA | 3.3 V |
 | INA226 ×6 | 2 mA | 3 mA | 3.3 V |
 | DS18B20 ×5 | 5 mA | 7.5 mA | 3.3 V |
