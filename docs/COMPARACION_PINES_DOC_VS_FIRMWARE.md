@@ -97,8 +97,8 @@
 | PB7 | I2C_SDA | `PIN_I2C_SDA = GPIO_PIN_7` | `main.h:91` | ✅ |
 | PB0 | ONEWIRE | `PIN_ONEWIRE = GPIO_PIN_0` | `main.h:94` | ✅ |
 | PA3 | PEDAL (ADC1_IN4) | `PIN_PEDAL = GPIO_PIN_3` | `main.h:99` | ✅ |
-| PB8 | CAN_RX (FDCAN1_RX) | `PIN_CAN_RX = GPIO_PIN_8` | `main.h:111` | ✅ |
-| PB9 | CAN_TX (FDCAN1_TX) | `PIN_CAN_TX = GPIO_PIN_9` | `main.h:110` | ✅ |
+| PA11 | CAN_RX (FDCAN1_RX) | `PIN_CAN_RX = GPIO_PIN_11` | `project_config.h:227` | ✅ |
+| PA12 | CAN_TX (FDCAN1_TX) | `PIN_CAN_TX = GPIO_PIN_12` | `project_config.h:226` | ✅ |
 | PA13 | SWDIO | HAL MSP debug pins | `stm32g4xx_hal_msp.c` | ✅ |
 | PA14 | SWCLK | HAL MSP debug pins | `stm32g4xx_hal_msp.c` | ✅ |
 
@@ -134,7 +134,7 @@
 
 | # | Tema | PINOUT_DEFINITIVO.md (documento antiguo) | Firmware actual / LISTADO | Nota |
 |---|------|------------------------------------------|---------------------------|------|
-| 1 | CAN Bus | PA11 (FDCAN1_RX), PA12 (FDCAN1_TX) | PB8 (RX), PB9 (TX) | LISTADO es correcto. PINOUT_DEFINITIVO está obsoleto en este punto. |
+| 1 | CAN Bus | PA11 (FDCAN1_RX), PA12 (FDCAN1_TX) | PA11 (RX), PA12 (TX) | Ambos documentos coinciden con el firmware actual. |
 | 2 | Sensores velocidad rueda | PB5, PB10, PB11, PB12 | PA0, PA1, PA2, PB15 | LISTADO es correcto. PINOUT_DEFINITIVO tiene asignaciones antiguas. |
 | 3 | Motor PWM asignación | 1 PWM + 1 DIR por motor (PA8=FL, PA9=FR, PA10=RL, PA11=RR) | 2 PWM (RPWM+LPWM) por motor en mismo timer (PA8/PA9=FL, PA10/PA11=FR) | LISTADO refleja la arquitectura RPWM/LPWM actual (PR #120). PINOUT_DEFINITIVO tiene esquema DIR+PWM antiguo. |
 | 4 | Enable EN_RR | PD2 (PINOUT_DEFINITIVO) | PC13 (firmware) | LISTADO es correcto con PC13. PD2 no existe en LQFP64. |

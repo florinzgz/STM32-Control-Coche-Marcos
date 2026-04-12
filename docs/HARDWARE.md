@@ -298,7 +298,7 @@ DS18B20 (5×) ─┬─ Pull-up 4.7kΩ ─ 3.3V
 | **Bitrate** | 500 kbps |
 | **Transceptor** | TJA1051T/3 (NXP/Nexperia) |
 | **Tensión transceptor** | 5V |
-| **Pines STM32** | PB8 (RX), PB9 (TX) |
+| **Pines STM32** | PA11 (RX), PA12 (TX) |
 | **Terminación** | 120Ω en ambos extremos |
 
 **Topología:**
