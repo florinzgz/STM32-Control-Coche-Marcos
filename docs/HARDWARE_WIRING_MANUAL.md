@@ -230,7 +230,7 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 |-------|---------|-------|
 | **RPWM** | PWM de avance (20 kHz, TIM1/TIM8) | 0–3.3 V → lógica BTS7960 |
 | **LPWM** | PWM de retroceso (20 kHz, TIM1/TIM8) | 0–3.3 V → lógica BTS7960 |
-| **EN** | Habilitación del driver (GPIO o 3.3V fijo) | HIGH = habilitado |
+| **EN** | Habilitación del driver (GPIO output) | HIGH = habilitado |
 
 > **Nota:** La dirección se codifica por elección de canal: RPWM > 0 / LPWM = 0 (avance)
 > o RPWM = 0 / LPWM > 0 (retroceso). **No hay pin DIR.** Los pines DIR (PC0–PC4) han sido
