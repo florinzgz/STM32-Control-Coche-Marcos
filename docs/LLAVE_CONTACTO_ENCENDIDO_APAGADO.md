@@ -301,13 +301,13 @@ Una vez que los relés están cerrados, la corriente fluye así:
         │ 4 mm²                                                           │ 2.5 mm²
         ▼                                                                  │
    INA226 ch4 ← mide tensión de batería (incluso con relé abierto)       │
-   (0.5 mΩ)                                                               │
+   (0.75 mΩ)                                                               │
         │                                                                  │
         ▼                                                                  │
    ┌─────────┐     ┌─────────┐     ┌────┬────┬────┬────┐     ┌──────────┐│
    │RELAY_MAIN│ →  │RELAY_TRAC│ →  │INA │INA │INA │INA │ →  │4×BTS7960 │┘
    │ (PC10)  │     │ (PC11)  │     │ch0 │ch1 │ch2 │ch3 │     │ drivers  │
-   │ 60A fuse│     │ 50A fuse│     │1mΩ │1mΩ │1mΩ │1mΩ │     │          │
+   │ 60A fuse│     │ 50A fuse│     │1.5m│1.5m│1.5m│1.5m│     │          │
    └─────────┘     └─────────┘     └────┴────┴────┴────┘     └──────────┘
                                                                     ▲
                                                                     │ PWM 20 kHz
@@ -326,7 +326,7 @@ Una vez que los relés están cerrados, la corriente fluye así:
         ▼
    ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
    │RELAY_DIR │ →  │INA226 ch5│ →  │ BTS7960  │ →  │  Motor   │
-   │ (PC12)   │     │ (1 mΩ)  │     │ steering │     │Dirección │
+   │ (PC12)   │     │(1.5 mΩ) │     │ steering │     │Dirección │
    │ 20A fuse │     │          │     │          │     │          │
    └──────────┘     └──────────┘     └──────────┘     └──────────┘
                                           ▲
@@ -466,13 +466,13 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
 
   ┌─────────┐
   │Bat 24 V │──► INA226 ch4 ──► RELAY_MAIN ──► RELAY_TRAC ──┬── INA226 ch0 ── BTS7960 ── Motor FL
-  └─────────┘    (0.5mΩ)       (PC10)         (PC11)        ├── INA226 ch1 ── BTS7960 ── Motor FR
+  └─────────┘    (0.75mΩ)      (PC10)         (PC11)        ├── INA226 ch1 ── BTS7960 ── Motor FR
                                                               ├── INA226 ch2 ── BTS7960 ── Motor RL
                                                               └── INA226 ch3 ── BTS7960 ── Motor RR
 
   ┌─────────┐
   │Bat 12 V │──► RELAY_DIR ──► INA226 ch5 ── BTS7960 ── Motor Dirección
-  └─────────┘    (PC12)        (1mΩ)
+  └─────────┘    (PC12)        (1.5mΩ)
 ```
 
 ---

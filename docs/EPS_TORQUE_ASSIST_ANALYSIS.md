@@ -137,7 +137,7 @@ Un filtro paso bajo en la velocidad estimada es necesario (ver Sección E.1).
 |-----------|-------|----------------|
 | Timer PWM | TIM8 CH3, center-aligned, 20 kHz | ✅ Frecuencia inaudible, resolución 4250 pasos |
 | Señales | DIR (PC4) + PWM (PC8) + EN (PC9) | ✅ Control total de par, dirección y habilitación |
-| Corriente máx. | 50 A (shunt 1 mΩ, INA226 ch 5) | ✅ Medición disponible para protección |
+| Corriente máx. | 50 A (shunt 1.5 mΩ, INA226 ch 5) | ✅ Medición disponible para protección |
 | Coast mode | EN=LOW → motor flotante | ✅ Necesario para "sin asistencia" |
 | Freno activo | PWM=100% → cortocircuito EM | ✅ Disponible para freno de estacionamiento |
 

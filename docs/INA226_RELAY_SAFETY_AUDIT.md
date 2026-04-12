@@ -31,12 +31,12 @@ CI pipeline failure also fixed (cppcheck false-positive on ISR handlers).
 
 | Channel | Location         | Shunt (mΩ) | Max Current | Placement              |
 |---------|------------------|------------|-------------|------------------------|
-| 0       | Front-Left Motor | 1.0        | 50 A        | Before BTS7960 driver  |
-| 1       | Front-Right Motor| 1.0        | 50 A        | Before BTS7960 driver  |
-| 2       | Rear-Left Motor  | 1.0        | 50 A        | Before BTS7960 driver  |
-| 3       | Rear-Right Motor | 1.0        | 50 A        | Before BTS7960 driver  |
-| 4       | 24V Battery Bus  | 0.5        | 100 A       | Before main relay      |
-| 5       | Steering Motor   | 1.0        | 50 A        | Before steering driver |
+| 0       | Front-Left Motor | 1.5        | 50 A        | Before BTS7960 driver  |
+| 1       | Front-Right Motor| 1.5        | 50 A        | Before BTS7960 driver  |
+| 2       | Rear-Left Motor  | 1.5        | 50 A        | Before BTS7960 driver  |
+| 3       | Rear-Right Motor | 1.5        | 50 A        | Before BTS7960 driver  |
+| 4       | 24V Battery Bus  | 0.75       | 100 A       | Before main relay      |
+| 5       | Steering Motor   | 1.5        | 50 A        | Before steering driver |
 
 No duplicate I2C addresses — multiplexer prevents conflicts. ✅
 
@@ -102,7 +102,7 @@ The code relied on power-on defaults (0x4127 = 1 sample averaging).
 ### Multi-Sensor Consistency ✅
 - All 6 sensors use the same I2C address (0x40) — isolated by TCA9548A
 - Channel-to-motor mapping verified in code and documentation
-- Battery channel (4) correctly uses 0.5 mΩ shunt; all others use 1.0 mΩ
+- Battery channel (4) correctly uses 0.75 mΩ shunt; all others use 1.5 mΩ
 
 ---
 
