@@ -141,8 +141,10 @@ Realizar estos pasos **en orden** antes de aplicar alimentación al sistema comp
 
 | Medición | Punto | Valor esperado | Si falla |
 |----------|-------|----------------|----------|
-| Tensión VCC TJA1051T/3 #1 | Pin 3 vs GND | 3.1 V – 3.5 V | Verificar fuente 3.3V y cableado |
-| Tensión VCC TJA1051T/3 #2 | Pin 3 vs GND | 3.1 V – 3.5 V | Verificar fuente 3.3V y cableado |
+| Tensión VCC TJA1051T/3 #1 | Pin 3 vs GND | **4.5 V – 5.5 V** | Verificar fuente 5V y cableado |
+| Tensión VCC TJA1051T/3 #2 | Pin 3 vs GND | **4.5 V – 5.5 V** | Verificar fuente 5V y cableado |
+| Tensión VIO TJA1051T/3 #1 | Pin 5 vs GND | **3.1 V – 3.5 V** | Verificar conexión VIO a 3.3V ⚠️ |
+| Tensión VIO TJA1051T/3 #2 | Pin 5 vs GND | **3.1 V – 3.5 V** | Verificar conexión VIO a 3.3V ⚠️ |
 | Tensión CANH en reposo | Pin 7 vs GND | **~2.5 V** | Si es 0V o 3.3V, el bus está en error; verificar alimentación y GND común |
 | Tensión CANL en reposo | Pin 6 vs GND | **~2.5 V** | Igual que arriba |
 | Diferencial CANH − CANL | Medir con multímetro entre pin 7 y pin 6 | **~0 V** | Si hay diferencial, hay tráfico activo o un transceiver está transmitiendo de forma incorrecta |
@@ -174,11 +176,12 @@ Con analizador CAN (PCAN-USB, CANable, etc.):
 ESP32-S3                TJA1051T/3 #1             Bus CAN              TJA1051T/3 #2           STM32G474RE
                        (lado ESP32)             (par trenzado)         (lado STM32)
 
-GPIO4 (TX) ──────→   D [1]                                              D [1] ←────── PA12 (FDCAN1_TX)
-GPIO5 (RX) ←──────   R [4]  [7] CANH ──┬──────────────────────┬── CANH [7]    R [4] ──────→ PA11 (FDCAN1_RX)
-    +3.3V ─────────→ VCC [3]             │                      │             VCC [3] ←──────── +3.3V
+GPIO4 (TX) ──────→  TXD [1]                                             TXD [1] ←────── PA12 (FDCAN1_TX)
+GPIO5 (RX) ←──────  RXD [4]  [7] CANH ──┬──────────────────────┬── CANH [7]   RXD [4] ──────→ PA11 (FDCAN1_RX)
+    +5V ───────────→ VCC [3]             │                      │             VCC [3] ←──────── +5V (ext.)
+   +3.3V ──────────→ VIO [5] ⚠️          │                      │             VIO [5] ←──────── +3.3V ⚠️
       GND ─────────→ GND [2]          [120Ω]                 [120Ω]          GND [2] ←──────── GND
-      GND ─────────→  Rs [8]  [6] CANL ──┴──────────────────────┴── CANL [6]  Rs [8] ←──────── GND
+      GND ─────────→   S [8]  [6] CANL ──┴──────────────────────┴── CANL [6]   S [8] ←──────── GND
                        │                                               │
                      100nF ←→ GND                             100nF ←→ GND
                      (desacoplo VCC)                          (desacoplo VCC)
@@ -193,9 +196,10 @@ GND ESP32 ───────────────────────�
 
 - [ ] TJA1051T/3 #1 pin 1 (TXD) conectado a GPIO4 del ESP32
 - [ ] TJA1051T/3 #1 pin 4 (RXD) conectado a GPIO5 del ESP32
-- [ ] TJA1051T/3 #1 pin 3 (VCC) conectado a +3.3V
+- [ ] TJA1051T/3 #1 pin 3 (VCC) conectado a **+5V** (fuente externa)
+- [ ] TJA1051T/3 #1 **pin 5 (VIO) conectado a +3.3V** ← ⚠️ OBLIGATORIO — protege ESP32
 - [ ] TJA1051T/3 #1 pin 2 (GND) conectado a GND ESP32
-- [ ] TJA1051T/3 #1 **pin 8 (Rs) conectado a GND** ← fácil de olvidar
+- [ ] TJA1051T/3 #1 **pin 8 (S) conectado a GND** ← fácil de olvidar
 - [ ] TJA1051T/3 #1 100nF entre VCC y GND
 - [ ] CANH (pin 7) y CANL (pin 6) del TJA1051T/3 #1 al cable trenzado
 - [ ] 120Ω entre CANH y CANL en el extremo ESP32
@@ -203,9 +207,10 @@ GND ESP32 ───────────────────────�
 - [ ] 120Ω entre CANH y CANL en el extremo STM32
 - [ ] TJA1051T/3 #2 pin 1 (TXD) conectado a PA12 del STM32
 - [ ] TJA1051T/3 #2 pin 4 (RXD) conectado a PA11 del STM32
-- [ ] TJA1051T/3 #2 pin 3 (VCC) conectado a +3.3V
+- [ ] TJA1051T/3 #2 pin 3 (VCC) conectado a **+5V** (fuente externa)
+- [ ] TJA1051T/3 #2 **pin 5 (VIO) conectado a +3.3V** ← ⚠️ OBLIGATORIO
 - [ ] TJA1051T/3 #2 pin 2 (GND) conectado a GND STM32
-- [ ] TJA1051T/3 #2 **pin 8 (Rs) conectado a GND** ← fácil de olvidar
+- [ ] TJA1051T/3 #2 **pin 8 (S) conectado a GND** ← fácil de olvidar
 - [ ] TJA1051T/3 #2 100nF entre VCC y GND
 - [ ] **GND ESP32 y GND STM32 unidos con cable dedicado** ← OBLIGATORIO
 - [ ] Resistencia CANH–CANL medida = ~60 Ω (verificación eléctrica previa)
@@ -231,17 +236,17 @@ directamente contra el código fuente del firmware:
 
 ---
 
-## 9. Seguridad de voltaje — TJA1051T/3 (3.3V nativo)
+## 9. Seguridad de voltaje — TJA1051T/3 (NXP, VCC=5V, VIO=3.3V)
 
-> ✅ **El TJA1051T/3 opera nativamente a 3.3V.** Sus niveles lógicos de E/S son
-> de 3.3V, compatibles directamente con la ESP32-S3 y la STM32G474RE sin necesidad
-> de divisores resistivos ni adaptadores de nivel.
+> ✅ **El TJA1051T/3 requiere VCC = 5V pero tiene un pin VIO para adaptar los niveles lógicos I/O.**
+> Con VIO conectado a 3.3V, los niveles de TXD y RXD son de 3.3V, compatibles
+> directamente con la ESP32-S3 y la STM32G474RE sin necesidad de divisores resistivos.
 
-### TJA1051T/3 (TI, 3.3V) — SEGURO
+### TJA1051T/3 (NXP, VCC=5V, VIO=3.3V) — SEGURO con VIO conectado
 
-El TJA1051T/3 se alimenta a **3.3V** y sus salidas lógicas (pin 4, R) nunca superan
-3.3V → **no hay riesgo** de dañar ni la ESP32 ni la STM32. Este es el transceiver
-especificado en este proyecto.
+El TJA1051T/3 se alimenta a **5V** (VCC, pin 3) pero el pin **VIO** (pin 5) conectado a **3.3V**
+establece los niveles lógicos de RXD (pin 4) a 3.3V → **no hay riesgo** de dañar ni la ESP32
+ni la STM32, siempre que VIO esté correctamente conectado a 3.3V.
 
 | MCU | Pin RX | Nivel lógico transceiver | Consecuencia |
 |-----|--------|-------------------------|--------------|
@@ -279,8 +284,9 @@ Transceiver pin 4 (RX, 5V) ──── [1 kΩ] ──┬──→ GPIO del MCU 
 La línea TX (MCU → transceiver) **no necesita divisor** porque 3.3 V es
 suficiente para que el transceiver detecte un nivel HIGH (V_IH min = 2.0 V).
 
-> **Recomendación:** Usar siempre el **TJA1051T/3** (3.3V nativo). Si se ha comprado
-> un transceiver de 5V, añadir los divisores resistivos **antes de alimentar**.
+> **Recomendación:** Usar siempre el **TJA1051T/3** (NXP) con VIO=3.3V. **No usar TJA1051T/4** (sin VIO)
+> con el ESP32-S3 sin divisores externos. Si se ha comprado un transceiver de 5V sin VIO,
+> añadir los divisores resistivos **antes de alimentar**.
 > Consultar `docs/ESP32_STM32_CAN_CONNECTION.md` para el diagrama completo.
 
 ---
@@ -290,5 +296,5 @@ suficiente para que el transceiver detecte un nivel HIGH (V_IH min = 2.0 V).
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Guía completa de conexión CAN
 - `docs/CAN_BUS_AUDIT_REPORT.md` — Auditoría firmware y protocolo CAN
 - `docs/CAN_CONTRACT_FINAL.md` — Protocolo CAN rev 1.3 (IDs y DLCs)
-- TI TJA1051T/3 Datasheet: 3.3-V CAN Bus Transceiver (Texas Instruments)
+- NXP TJA1051T/3 Datasheet: High-Speed CAN Transceiver with VIO (NXP/Nexperia)
 - ISO 11898-2: Road vehicles — High-speed CAN physical layer
