@@ -166,8 +166,8 @@ The TJA1051T/3 CAN transceiver has a **silent mode pin** (Pin 8, labeled S):
 | # | Measurement | Probes | Expected | Root Cause if FAIL |
 |---|-------------|--------|----------|--------------------|
 | E1 | CANH ↔ CANL resistance | Between bus wires | **~60 Ω** | Missing/wrong termination |
-| E2 | Rs → GND (STM32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **S not connected — #1 cause** |
-| E3 | Rs → GND (ESP32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **S not connected — #1 cause** |
+| E2 | S → GND (STM32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **S not connected — #1 cause** |
+| E3 | S → GND (ESP32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **S not connected — #1 cause** |
 | E4 | VCC ↔ GND (each transceiver) | Pin 3 to Pin 2 | **>1 kΩ** | Short circuit |
 | E5 | ESP32 GND ↔ STM32 GND | Between board GND pins | **Continuity** | Missing common ground |
 | E6 | CANH continuity | STM32 TCV pin 7 to ESP32 TCV pin 7 | **Continuity** | Broken CANH wire |

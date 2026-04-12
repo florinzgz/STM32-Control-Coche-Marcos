@@ -66,7 +66,7 @@ Dependiendo del módulo o versión del datasheet, el pin 8 puede aparecer etique
 | **STB** | STB (Standby) | ⚠️ Verificar — algunos módulos usan STB; para el TJA1051T/3 el comportamiento es: GND = normal mode |
 
 > **Regla práctica:** Sea cual sea la etiqueta (Rs, SLOPE o STB), conéctalo a GND.
-> Para el transceiver CAN de alta velocidad TI TJA1051T/3, GND en este pin = modo high-speed normal.
+> Para el transceiver CAN de alta velocidad NXP TJA1051T/3, GND en este pin = modo normal.
 
 ### 3.2 Tabla de comportamiento del pin 8 en el TJA1051T/3
 
