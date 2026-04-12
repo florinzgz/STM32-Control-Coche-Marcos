@@ -135,17 +135,16 @@ if (signed_pwm > 0) {
 | Motor | EN Control | PWM=0 Behavior | Actual Mode |
 |-------|-----------|-----------------|-------------|
 | **FL** | GPIO (PC5) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
-| **FR** | Tied to 3.3 V | EN remains HIGH | **PASSIVE BRAKE** (low-side short) |
-| **RL** | Tied to 3.3 V | EN remains HIGH | **PASSIVE BRAKE** (low-side short) |
+| **FR** | GPIO (PC0) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
+| **RL** | GPIO (PC1) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
 | **RR** | GPIO (PC13) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
+| **STEER** | GPIO (PC4) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
 
 When `Motor_SetSigned(motor, 0)` is called (line 1920–1922):
-- `duty = 0` → `GPIO_PIN_RESET` → EN driven LOW for FL/RR (coast)
-- FR/RL: `en_port = NULL` → EN stays HIGH → BTS7960 low-side brake
+- `duty = 0` → `GPIO_PIN_RESET` → EN driven LOW for all motors (coast)
 
-This means `TRAC_PHASE_BRAKE` and `TRAC_PHASE_COAST` produce **identical hardware output**
-on FL and RR (both result in coast), while FR and RL are **always in passive brake** when
-PWM=0 regardless of the intended phase.
+All five motors now have dedicated GPIO EN pins, so `TRAC_PHASE_BRAKE` and `TRAC_PHASE_COAST`
+produce **identical hardware output** (coast) on all motors when PWM=0.
 
 ### B. Neutral (Coast / Freewheel)
 

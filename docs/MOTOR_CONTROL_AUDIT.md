@@ -247,8 +247,10 @@ GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
 | RPWM_STEER (TIM3)  | CCR1 = 0U (directo, sin buffer)                 |
 | LPWM_STEER (TIM3)  | CCR2 = 0U (directo, sin buffer)                 |
 | EN_FL (PC5)        | LOW vía BSRR reset                              |
+| EN_FR (PC0)        | LOW vía BSRR reset                              |
+| EN_RL (PC1)        | LOW vía BSRR reset                              |
 | EN_RR (PC13)       | LOW vía BSRR reset                              |
-| EN_FR/RL/STEER     | Tied 3.3V en HW — permanecen HIGH               |
+| EN_STEER (PC4)     | LOW vía BSRR reset                              |
 | RELAY_TRAC (PC11)  | LOW vía BSRR reset                              |
 
 **LOCKUP hardware path (opción A, automático):**
