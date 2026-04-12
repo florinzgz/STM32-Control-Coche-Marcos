@@ -477,6 +477,10 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
  * Only used for SAFE_DEADTIME_US (5 µs) — negligible CPU cost.     */
 #ifndef HOST_TEST
 
+/* Precomputed cycles-per-microsecond — set once by DWT_Init().
+ * Avoids division on every delay_us() call.                         */
+static uint32_t dwt_cycles_per_us = 170U;  /* Safe default for 170 MHz */
+
 /* DWT initialisation — called once from Motor_Init().
  * Enables the trace unit and starts the cycle counter.
  * Safe to call multiple times (idempotent).                         */
@@ -485,12 +489,13 @@ static inline void DWT_Init(void)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;   /* Enable trace */
     DWT->CYCCNT = 0U;
     DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;             /* Start counter */
+    dwt_cycles_per_us = SystemCoreClock / 1000000U;
 }
 
 static inline void delay_us(uint32_t us)
 {
     uint32_t start  = DWT->CYCCNT;
-    uint32_t cycles = us * (SystemCoreClock / 1000000U);
+    uint32_t cycles = us * dwt_cycles_per_us;
     while ((DWT->CYCCNT - start) < cycles) {
         /* busy-wait — unsigned subtraction handles CYCCNT wrap */
     }
@@ -2226,7 +2231,15 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
     /* Disable interrupts for the entire mode transition to prevent
      * an ISR from seeing an intermediate EN/PWM state.  This is
      * defence-in-depth: all current callers are main-loop-only, but
-     * this protects against future call sites from ISR context.       */
+     * this protects against future call sites from ISR context.
+     *
+     * INTERRUPT LATENCY: When the pre-step fires, interrupts are
+     * held for ~5 µs (SAFE_DEADTIME_US × dwt_cycles_per_us = 850
+     * cycles at 170 MHz).  This is well within the tolerance of all
+     * ISRs in this system (FDCAN @ 100 ms period, SysTick @ 1 ms,
+     * TIM UEV @ 50 µs).  If sub-10 µs ISR response were ever
+     * required, the critical section could be narrowed to protect
+     * only the EN GPIO write.                                         */
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
 
