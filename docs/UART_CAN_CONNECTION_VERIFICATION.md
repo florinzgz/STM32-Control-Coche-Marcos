@@ -290,7 +290,7 @@ Si la comunicación falla, medir con osciloscopio:
 | CANH (dominante, con tráfico) | ~3.5 V | _____ V |
 | CANL (dominante, con tráfico) | ~1.5 V | _____ V |
 | Diferencial (CANH − CANL, dominante) | ~2.0 V | _____ V |
-| Forma de onda TX (PB9 STM lado MCU) | Tramas 500 kbps | ☐ sí / ☐ no |
+| Forma de onda TX (PA12 STM lado MCU) | Tramas 500 kbps | ☐ sí / ☐ no |
 | Forma de onda TX (GPIO4 ESP lado MCU) | Tramas 500 kbps | ☐ sí / ☐ no |
 
 ---

@@ -312,7 +312,7 @@ Una vez que los relés están cerrados, la corriente fluye así:
                                                                     ▲
                                                                     │ PWM 20 kHz
                                                                STM32 TIM1/TIM8
-                                                               (PA8-PA11, PC6-PC9)
+                                                               (PA8-PA10+PC3, PC6-PC9)
 ```
 
 ### 5.2 Cadena de potencia de dirección
@@ -433,7 +433,7 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
                    │                │ PC11 (RELAY_TRAC) ──► Opto ──► Relé TRAC (50A fuse)       │
   ┌─────────┐      │                │ PC12 (RELAY_DIR)  ──► Opto ──► Relé DIR  (20A fuse)       │
   │Bat 12 V │──┐   │                │                                                            │
-  └─────────┘  │   │                │ TIM1 CH1-CH4 (PA8-PA11) ──► BTS7960 FL/FR                 │
+  └─────────┘  │   │                │ TIM1 CH1-CH3 (PA8-PA10) + CH4 (PC3) ──► BTS7960 FL/FR          │
                │   │                │ TIM8 CH1-CH4 (PC6-PC9)  ──► BTS7960 RL/RR                 │
                │   │                │ TIM3 CH1-CH2 (PA6-PA7)  ──► BTS7960 Dirección              │
                │   │                └────────────────────────────────────────────────────────────┘

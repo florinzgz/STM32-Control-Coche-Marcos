@@ -209,8 +209,8 @@ sensores de presión de rueda, entradas de seguridad externas, señales de carro
 
 | Canal | Señal | Dirección | Pin STM32 | Velocidad requerida |
 |-------|-------|-----------|-----------|---------------------|
-| **ISO-1** | CAN_TX | STM32 → ESP32 | PB9 (FDCAN1_TX AF9) | ≥ 5 Mbps |
-| **ISO-2** | CAN_RX | ESP32 → STM32 | PB8 (FDCAN1_RX AF9) | ≥ 5 Mbps |
+| **ISO-1** | CAN_TX | STM32 → ESP32 | PA12 (FDCAN1_TX AF9) | ≥ 5 Mbps |
+| **ISO-2** | CAN_RX | ESP32 → STM32 | PA11 (FDCAN1_RX AF9) | ≥ 5 Mbps |
 
 Ver Sección 9 para detalles del circuito y chips recomendados.
 
@@ -230,8 +230,8 @@ Tabla completa de todas las señales aisladas, lista para ejecutar en taller.
 | 6 | **WHEEL_RR** | LJ12A3 cubo rueda RR (NPN OC, 6–36 V) | PB15 / EXTI15 | **PC817** | Placa-A, canal A4 | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FL |
 | 7 | **STEER_CENTER** | LJ12A3 cremallera dirección (NPN OC, 6–36 V) | PB5 / EXTI5 | **PC817** | Placa-A, canal A5 | 12–24 V sensor, cerca motor dirección | 3.3 V STM32 | Pulso único en arranque; falsa detección → cero encoder incorrecto; picos inductivos relé DIR |
 | 8 | **ENC_Z** | E6B2-CWZ6C salida Z (NPN OC, 5–24 V) | PB4 / EXTI4 *(†)* | **PC817** | Placa-A, canal A6 | VCC_encoder dominio | 3.3 V STM32 | < 50 Hz; pulso 41.7 µs >> 6 µs PC817; EXTI no activo en firmware actual |
-| 9 | **CAN_TX** | STM32G474RE PB9 (FDCAN1_TX) | PB9 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
-| 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PB8 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
+| 9 | **CAN_TX** | STM32G474RE PA12 (FDCAN1_TX) | PA12 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
+| 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PA11 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
 
 *(†) ENC_Z: no activo en el firmware actual. Requiere configurar EXTI4 y añadir ISR cuando
 se decida activar. Ver Sección 10.5.*
