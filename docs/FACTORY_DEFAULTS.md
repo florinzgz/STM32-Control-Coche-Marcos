@@ -57,7 +57,7 @@ are not modified by this reset. For PID gain changes, a firmware update is requi
 - I2C bus errors cleared but sensors still showing faulted
 - Current readings incorrect after hardware changes
 
-**Note**: Shunt resistance values (1mΩ for motors, 0.5mΩ for battery) are compile-time
+**Note**: Shunt resistance values (1.5mΩ for motors, 0.75mΩ for battery) are compile-time
 constants and are not modified by this reset. For shunt calibration changes, a firmware
 update is required.
 
@@ -135,7 +135,7 @@ factory defaults menu:
 | Steering PID Kd | 0.5 | `motor_control.c` |
 | Max motor current | 25A | `safety_system.c` |
 | Max motor temperature | 80°C warning, 90°C critical | `safety_system.c` |
-| INA226 shunt resistance | 1mΩ (motor), 0.5mΩ (battery) | `sensor_manager.c` |
+| INA226 shunt resistance | 1.5mΩ (motor), 0.75mΩ (battery) | `project_config.h` |
 | ABS/TCS slip threshold | 15% | `safety_system.c` |
 
 To modify these values, a firmware update is required.

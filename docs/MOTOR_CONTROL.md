@@ -54,7 +54,7 @@ El diseño original consideraba el módulo **PCA9685** (16 canales PWM vía I²C
 │  │RPWM  │ LPWM  │RPWM   │  │RPWM  │ LPWM  │RPWM   │  │RPWM  │ LPWM       │ │
 │  │ FL   │  FL   │ FR    │  │ RL   │  RL   │ RR    │  │STEER │ STEER       │ │
 │  │      │       │ CH4   │  │      │       │ CH4   │  │      │             │ │
-│  │      │       │ PA11  │  │      │       │ PC9   │  │      │             │ │
+│  │      │       │ PC3   │  │      │       │ PC9   │  │      │             │ │
 │  │      │       │LPWM   │  │      │       │LPWM   │  │      │             │ │
 │  │      │       │ FR    │  │      │       │ RR    │  │      │             │ │
 │  └──┬───┴──┬────┴──┬────┘  └──┬───┴──┬────┴──┬────┘  └──┬───┴──┬──────────┘ │
@@ -92,10 +92,9 @@ Cada BTS7960 requiere **2 señales PWM** desde el STM32 (RPWM y LPWM del mismo t
 |-------|------|---------|-----------------|
 | **RPWM** | Salida Timer (0-100%) | Giro hacia adelante | 0% |
 | **LPWM** | Salida Timer (0-100%) | Giro hacia atrás | 0% |
-| **EN** | GPIO Output o 3.3V fijo | Habilitación driver (1=ON, 0=OFF) | Según motor |
+| **EN** | GPIO Output | Habilitación driver (1=ON, 0=OFF) | LOW (deshabilitado) |
 
-> **Nota:** Solo PC5 (EN_FL) y PC13 (EN_RR) son GPIO activos. Los demás BTS7960
-> tienen R_EN/L_EN conectados fijo a 3.3 V.
+> **Nota:** Todos los motores tienen GPIO EN dedicado: PC5 (FL), PC0 (FR), PC1 (RL), PC13 (RR), PC4 (STEER).
 
 ### Tabla de Verdad BTS7960 (RPWM/LPWM)
 
@@ -277,10 +276,10 @@ void Motor_SetSignedPWM_STEER(int16_t speed);
 | Motor | RPWM | LPWM | Timer | EN |
 |-------|------|------|-------|----|
 | FL | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 (GPIO) |
-| FR | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | 3.3V fijo |
-| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | 3.3V fijo |
+| FR | PA10 (TIM1_CH3) | PC3 (TIM1_CH4) | TIM1 | PC0 (GPIO) |
+| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | PC1 (GPIO) |
 | RR | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 (GPIO) |
-| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | 3.3V fijo |
+| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | PC4 (GPIO) |
 
 ### Función de Control de Motor
 

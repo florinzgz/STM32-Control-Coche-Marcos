@@ -29,7 +29,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
         │
         │  4 mm²
         ▼
- ┌──────────────┐    INA226 ch4 (0.5 mΩ, 100 A)
+ ┌──────────────┐    INA226 ch4 (0.75 mΩ, 100 A)
  │  Fusible 60A │    ← sensor ANTES del relé principal
  └──────┬───────┘
         │
@@ -49,7 +49,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
    ┌────┼────┬────┐                          5 V lógica BTS7960
    │    │    │    │                          5 V WS2812B (vía relés LED)
    ▼    ▼    ▼    ▼
-  INA  INA  INA  INA   ← ch0/ch1/ch2/ch3 (1 mΩ, 50 A)
+  INA  INA  INA  INA   ← ch0/ch1/ch2/ch3 (1.5 mΩ, 50 A)
    │    │    │    │
   BTS  BTS  BTS  BTS   ← BTS7960 drivers
    │    │    │    │
@@ -67,7 +67,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
  └──────┬───────┘
         │ 2.5 mm²
         ▼
-  INA226 ch5 (1 mΩ, 50 A)
+  INA226 ch5 (1.5 mΩ, 50 A)
         │
        BTS7960
         │
@@ -88,8 +88,8 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
 |---------|-------------------------|-------------------------------------------------|
 | **24 V** | Batería de tracción     | 4× motores tracción (vía BTS7960)              |
 | **12 V** | Batería de dirección    | Motor de dirección (vía BTS7960)                |
-| **5 V**  | DC-DC buck (LM2596)    | Lógica BTS7960 (VCC), tiras WS2812B, **transceiver CAN TJA1051T/3** (VCC mín 4.5 V) |
-| **3.3 V**| Regulador lineal / LDO | STM32G474RE, TCA9548A, INA226                    |
+| **5 V**  | DC-DC buck (LM2596)    | Tiras WS2812B, **transceiver CAN TJA1051T/3** (VCC mín 4.5 V) |
+| **3.3 V**| Regulador lineal / LDO | STM32G474RE, TCA9548A, INA226, **lógica BTS7960 (IBT-2 VCC)** |
 
 ### Umbrales de tensión de batería 24 V (firmware)
 
@@ -117,8 +117,8 @@ Definidos en `Core/Src/safety_system.c`:
 ### 24 V → 5 V (LM2596)
 
 - **Tipo:** Buck síncrono, hasta 3 A.
-- **Salida:** 5 V para lógica BTS7960 y alimentación de tiras LED WS2812B.
-- **Nota:** Los módulos BTS7960 requieren 5 V en su pin VCC para la lógica interna; la etapa de potencia se alimenta directamente desde la batería correspondiente (24 V o 12 V) a través de los pines B+ / B−.
+- **Salida:** 5 V para alimentación de tiras LED WS2812B y transceiver CAN TJA1051T/3 (VCC).
+- **Nota:** Los módulos BTS7960 (IBT-2) se alimentan a **3.3 V** en su pin VCC (no 5 V), para que la lógica del buffer 74HC244 sea compatible con señales de 3.3 V del STM32. La etapa de potencia se alimenta directamente desde la batería correspondiente (24 V o 12 V) a través de los pines B+ / B−.
 
 ### 5 V → 3.3 V
 
@@ -229,24 +229,24 @@ STM32 I²C1
     ▼
  TCA9548A (0x70)
     │
-    ├── Canal 0 ── INA226 (0x40) ── Motor FL   [1 mΩ,  50 A]
-    ├── Canal 1 ── INA226 (0x40) ── Motor FR   [1 mΩ,  50 A]
-    ├── Canal 2 ── INA226 (0x40) ── Motor RL   [1 mΩ,  50 A]
-    ├── Canal 3 ── INA226 (0x40) ── Motor RR   [1 mΩ,  50 A]
-    ├── Canal 4 ── INA226 (0x40) ── Batería 24V [0.5 mΩ, 100 A]
-    └── Canal 5 ── INA226 (0x40) ── Dirección   [1 mΩ,  50 A]
+    ├── Canal 0 ── INA226 (0x40) ── Motor FL   [1.5 mΩ,  50 A]
+    ├── Canal 1 ── INA226 (0x40) ── Motor FR   [1.5 mΩ,  50 A]
+    ├── Canal 2 ── INA226 (0x40) ── Motor RL   [1.5 mΩ,  50 A]
+    ├── Canal 3 ── INA226 (0x40) ── Motor RR   [1.5 mΩ,  50 A]
+    ├── Canal 4 ── INA226 (0x40) ── Batería 24V [0.75 mΩ, 100 A]
+    └── Canal 5 ── INA226 (0x40) ── Dirección   [1.5 mΩ,  50 A]
 ```
 
 ### Ubicación física de cada sensor
 
 | Canal | Sensor        | Shunt   | Rango  | Ubicación                                                   |
 |-------|---------------|---------|--------|-------------------------------------------------------------|
-| 0     | INA226_FL     | 1 mΩ   | 50 A   | **ANTES** del BTS7960 FL (entre salida RELAY_TRAC y B+)     |
-| 1     | INA226_FR     | 1 mΩ   | 50 A   | **ANTES** del BTS7960 FR (entre salida RELAY_TRAC y B+)     |
-| 2     | INA226_RL     | 1 mΩ   | 50 A   | **ANTES** del BTS7960 RL (entre salida RELAY_TRAC y B+)     |
-| 3     | INA226_RR     | 1 mΩ   | 50 A   | **ANTES** del BTS7960 RR (entre salida RELAY_TRAC y B+)     |
-| 4     | INA226_MAIN   | 0.5 mΩ | 100 A  | **ANTES** del RELAY_MAIN (entre batería + y entrada relé)   |
-| 5     | INA226_STEER  | 1 mΩ   | 50 A   | **ANTES** del BTS7960 DIR (entre salida RELAY_DIR y B+)     |
+| 0     | INA226_FL     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 FL (entre salida RELAY_TRAC y B+)     |
+| 1     | INA226_FR     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 FR (entre salida RELAY_TRAC y B+)     |
+| 2     | INA226_RL     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 RL (entre salida RELAY_TRAC y B+)     |
+| 3     | INA226_RR     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 RR (entre salida RELAY_TRAC y B+)     |
+| 4     | INA226_MAIN   | 0.75 mΩ | 100 A  | **ANTES** del RELAY_MAIN (entre batería + y entrada relé)   |
+| 5     | INA226_STEER  | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 DIR (entre salida RELAY_DIR y B+)     |
 
 > **Crítico — Canal 4:** El sensor de batería está colocado **antes** del relé principal. Esto permite que `Voltage_GetBus(INA226_CHANNEL_BATTERY)` lea la tensión de la batería incluso con el relé abierto. Es esencial para:
 > - Validación de batería en el arranque (boot validation), antes de cerrar relés.
@@ -260,7 +260,7 @@ STM32 I²C1
        │
        ▼
   ┌──────────┐
-  │ INA226   │ ← Canal 4 (0.5 mΩ, 100 A) — mide tensión y corriente total
+  │ INA226   │ ← Canal 4 (0.75 mΩ, 100 A) — mide tensión y corriente total
   │ ch4 MAIN │
   └────┬─────┘
        │
@@ -277,7 +277,7 @@ STM32 I²C1
   ▼    ▼        ▼        ▼        ▼
  INA  INA      INA      INA
  ch0  ch1      ch2      ch3
- 1mΩ  1mΩ     1mΩ      1mΩ
+ 1.5mΩ 1.5mΩ   1.5mΩ    1.5mΩ
   │    │        │        │
  BTS  BTS      BTS      BTS
  7960 7960     7960     7960

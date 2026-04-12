@@ -152,8 +152,8 @@ Configuración en `stm32g4xx_hal_msp.c`: GPIO modo AF push-pull, velocidad alta,
 
 **PA11 y PA12 son salidas lógicas CMOS a 3.3 V. NO son señales CAN.**
 
-Es **obligatorio** un transceiver CAN externo (por ejemplo: MCP2551, SN65HVD230, TJA1050)
-entre el STM32 y el bus CAN físico.
+Es **obligatorio** un transceiver CAN externo. Este proyecto usa el **TJA1051T/3** (NXP) con VCC=5V y VIO=3.3V.
+Ver `ESP32_STM32_CAN_CONNECTION.md` para detalles completos de conexión.
 
 ### Esquema de conexión
 
@@ -851,11 +851,11 @@ STM32 PC0  (GPIO EN_FR) ──────────────────�
 
 | Pin antiguo | Uso anterior  | Estado nuevo             |
 |-------------|---------------|--------------------------|
-| PC0         | DIR_FL GPIO   | Libre — no conectar      |
-| PC1         | DIR_FR GPIO   | Libre — no conectar      |
+| PC0         | DIR_FL GPIO   | **EN_FR** — GPIO output  |
+| PC1         | DIR_FR GPIO   | **EN_RL** — GPIO output  |
 | PC2         | DIR_RL GPIO   | Libre — no conectar      |
 | PC3         | DIR_RR GPIO   | LPWM_FR — TIM1_CH4 (AF2) |
-| PC4         | DIR_STEER GPIO| Libre — no conectar      |
+| PC4         | DIR_STEER GPIO| **EN_STEER** — GPIO output |
 
 ### Componentes que se eliminan del BOM
 

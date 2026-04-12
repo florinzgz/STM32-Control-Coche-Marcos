@@ -2,7 +2,7 @@
 
 > **Purpose:** Step-by-step procedure to fix the hardware-level CAN failure.
 > **Firmware status:** VERIFIED 100% CORRECT — do NOT modify any firmware.
-> **Root cause:** Hardware wiring issues with SN65HVD230 CAN transceiver(s).
+> **Root cause:** Hardware wiring issues with TJA1051T/3 CAN transceiver(s).
 > **Last updated:** 2026-04-04
 
 ---
@@ -20,8 +20,8 @@ POWER OFF both MCUs
    │  YES    NO ──► FIX: Add/correct 120 Ω termination at each bus end
    │         │
    ▼         │
-  Check Pin 8 (Rs) to GND     ◄────────────────────────────────────────┘
-  on BOTH SN65HVD230 modules
+  Check Pin 8 (S) to GND     ◄────────────────────────────────────────┘
+  on BOTH TJA1051T/3 modules
         │
    ┌────┴────┐
    │  0 Ω?   │
@@ -49,51 +49,53 @@ POWER OFF both MCUs
 
 ---
 
-## 1. CRITICAL FIX: SN65HVD230 Pin 8 (Rs) → GND
+## 1. CRITICAL FIX: TJA1051T/3 Pin 8 (S) → GND
 
 **This is the #1 most probable root cause (70% likelihood).**
 
-### What is Pin 8 (Rs)?
+### What is Pin 8 (S)?
 
-The SN65HVD230 CAN transceiver has a **slope control / standby pin** (Pin 8, labeled Rs):
+The TJA1051T/3 CAN transceiver has a **silent mode pin** (Pin 8, labeled S):
 
 | Pin 8 State | Mode | Result |
 |-------------|------|--------|
-| **Connected to GND** | **High-speed mode** | ✅ Normal CAN operation |
-| Connected to VCC (3.3V) | Standby mode | ❌ TX and RX **disabled** |
+| **Connected to GND** | **Normal mode** | ✅ Normal CAN operation |
+| Connected to VCC (5V) | Silent mode | ❌ TX **disabled**, only listen |
 | Floating (not connected) | Undefined | ❌ Intermittent, unreliable |
-| Resistor to GND (<10kΩ) | Slope-control | ⚠️ Reduced speed, may work |
 
 ### How to Fix
 
 1. **Power off** both MCU boards
-2. Locate Pin 8 (Rs) on **each** SN65HVD230 module (there are 2 modules — one per MCU)
+2. Locate Pin 8 (S) on **each** TJA1051T/3 module (there are 2 modules — one per MCU)
 3. With multimeter in continuity/resistance mode:
-   - Place one probe on Pin 8 (Rs)
+   - Place one probe on Pin 8 (S)
    - Place other probe on Pin 2 (GND)
    - **Expected: 0 Ω (direct connection)**
    - If **open circuit or >10 kΩ** → this is the root cause
 4. **Fix:** Solder a wire from Pin 8 to Pin 2 (GND) on the module, or bridge them with a jumper
-5. Repeat for the **second** SN65HVD230 module
+5. Repeat for the **second** TJA1051T/3 module
 
-### SN65HVD230 Pinout Reference (DIP-8 / SOIC-8)
+### TJA1051T/3 Pinout Reference (SO8 / SOT96-1)
 
 ```
-        ┌───────────┐
-  D  1──┤           ├──8  Rs   ← MUST connect to GND
-GND  2──┤ SN65HVD230├──7  CANH
-VCC  3──┤           ├──6  CANL
-  R  4──┤           ├──5  Vref (NC — leave unconnected)
-        └───────────┘
+          ┌─────────────┐
+ TXD  1──┤             ├──8  S    ← MUST connect to GND
+ GND  2──┤  TJA1051T/3 ├──7  CANH
+ VCC  3──┤             ├──6  CANL
+ RXD  4──┤             ├──5  VIO  ← MUST connect to 3.3V ⚠️
+          └─────────────┘
 ```
 
-- **Pin 1 (D):** Data input from MCU TX pin
+- **Pin 1 (TXD):** Data input from MCU TX pin
 - **Pin 2 (GND):** Ground — connect to MCU GND
-- **Pin 3 (VCC):** Power — connect to 3.3V
-- **Pin 4 (R):** Data output to MCU RX pin
+- **Pin 3 (VCC):** Power — **connect to 5V** (4.5–5.5 V, NOT 3.3V)
+- **Pin 4 (RXD):** Data output to MCU RX pin
+- **Pin 5 (VIO):** I/O level reference — **connect to 3.3V** (OBLIGATORIO para ESP32-S3)
 - **Pin 6 (CANL):** CAN Low — connect to bus
 - **Pin 7 (CANH):** CAN High — connect to bus
-- **Pin 8 (Rs):** Slope/standby — **CONNECT TO GND**
+- **Pin 8 (S):** Silent mode — **CONNECT TO GND**
+
+> ⚠️ **CRÍTICO:** Si Pin 5 (VIO) se deja flotante o a 5V, el RXD producirá 5V → **destruye GPIO del ESP32-S3** (máx. 3.6V).
 
 ---
 
@@ -101,23 +103,26 @@ VCC  3──┤           ├──6  CANL
 
 ### STM32 Side (Nucleo-64 MB1367)
 
-| Signal | STM32 Pin | Nucleo Connector | SN65HVD230 Pin |
+| Signal | STM32 Pin | Nucleo Connector | TJA1051T/3 Pin |
 |--------|-----------|------------------|----------------|
-| FDCAN1_TX | **PA12** (AF9) | **CN10 Pin 12** | Pin 1 (D) |
-| FDCAN1_RX | **PA11** (AF9) | **CN10 Pin 14** | Pin 4 (R) |
-| VCC (3.3V) | — | **CN10 Pin 7** | Pin 3 (VCC) |
-| GND | — | **CN10 Pin 20** | Pin 2 (GND) + Pin 8 (Rs) |
+| FDCAN1_TX | **PA12** (AF9) | **CN10 Pin 12** | Pin 1 (TXD) |
+| FDCAN1_RX | **PA11** (AF9) | **CN10 Pin 14** | Pin 4 (RXD) |
+| VCC (**5V**) | — | **Fuente ext.** | Pin 3 (VCC) — 5V obligatorio |
+| VIO (3.3V) | — | **CN10 Pin 7** | Pin 5 (VIO) — 3.3V nivel lógico |
+| GND | — | **CN10 Pin 20** | Pin 2 (GND), Pin 8 (S→GND) |
 
 ```
   Nucleo-64 CN10 (right morpho header, USB connector at top)
 
-  Pin 11  [ ][ ]  Pin 12 [PA12]  ← FDCAN1_TX  → SN65HVD230 pin 1 (D)
-  Pin 13  [ ][ ]  Pin 14 [PA11]  ← FDCAN1_RX  → SN65HVD230 pin 4 (R)
+  Pin 11  [ ][ ]  Pin 12 [PA12]  ← FDCAN1_TX  → TJA1051T/3 pin 1 (TXD)
+  Pin 13  [ ][ ]  Pin 14 [PA11]  ← FDCAN1_RX  → TJA1051T/3 pin 4 (RXD)
     ...
   Pin  5  [ ][ ]  Pin  6
-  Pin  7 [3V3][ ] Pin  8        ← 3.3V        → SN65HVD230 pin 3 (VCC)
+  Pin  7 [3V3][ ] Pin  8        ← 3.3V        → TJA1051T/3 pin 5 (VIO)
     ...
-  Pin 19  [ ][ ]  Pin 20 [GND]  ← GND         → SN65HVD230 pins 2 + 8
+  Pin 19  [ ][ ]  Pin 20 [GND]  ← GND         → TJA1051T/3 pins 2 + 8 (S→GND)
+
+  5V externo (DC-DC LM2596)     → TJA1051T/3 pin 3 (VCC)
 ```
 
 > ⚠️ **WARNING:** Older documentation references PB8/PB9 as FDCAN pins.
@@ -127,12 +132,13 @@ VCC  3──┤           ├──6  CANL
 
 ### ESP32-S3 Side
 
-| Signal | ESP32 Pin | SN65HVD230 Pin |
+| Signal | ESP32 Pin | TJA1051T/3 Pin |
 |--------|-----------|----------------|
-| CAN_TX | **GPIO 4** | Pin 1 (D) |
-| CAN_RX | **GPIO 5** | Pin 4 (R) |
-| VCC (3.3V) | 3V3 pin | Pin 3 (VCC) |
-| GND | GND pin | Pin 2 (GND) + Pin 8 (Rs) |
+| CAN_TX | **GPIO 4** | Pin 1 (TXD) |
+| CAN_RX | **GPIO 5** | Pin 4 (RXD) |
+| VCC (**5V**) | 5V ext. | Pin 3 (VCC) — 5V obligatorio |
+| VIO (**3.3V**) | 3V3 pin | Pin 5 (VIO) — ⚠️ OBLIGATORIO, protege ESP32 |
+| GND | GND pin | Pin 2 (GND), Pin 8 (S→GND) |
 
 ### CAN Bus Connections
 
@@ -160,8 +166,8 @@ VCC  3──┤           ├──6  CANL
 | # | Measurement | Probes | Expected | Root Cause if FAIL |
 |---|-------------|--------|----------|--------------------|
 | E1 | CANH ↔ CANL resistance | Between bus wires | **~60 Ω** | Missing/wrong termination |
-| E2 | Rs → GND (STM32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **Rs not connected — #1 cause** |
-| E3 | Rs → GND (ESP32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **Rs not connected — #1 cause** |
+| E2 | S → GND (STM32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **S not connected — #1 cause** |
+| E3 | S → GND (ESP32 transceiver) | Pin 8 to Pin 2 | **0 Ω** | **S not connected — #1 cause** |
 | E4 | VCC ↔ GND (each transceiver) | Pin 3 to Pin 2 | **>1 kΩ** | Short circuit |
 | E5 | ESP32 GND ↔ STM32 GND | Between board GND pins | **Continuity** | Missing common ground |
 | E6 | CANH continuity | STM32 TCV pin 7 to ESP32 TCV pin 7 | **Continuity** | Broken CANH wire |
@@ -171,9 +177,10 @@ VCC  3──┤           ├──6  CANL
 
 | # | Measurement | Probes | Expected | Root Cause if FAIL |
 |---|-------------|--------|----------|--------------------|
-| E8 | Transceiver VCC (each) | Pin 3 to Pin 2 | **3.3V ±5%** | Power supply issue |
-| E9 | CANH idle voltage | CANH to GND | **~2.5V** | Transceiver not powered / Rs issue |
-| E10 | CANL idle voltage | CANL to GND | **~2.5V** | Transceiver not powered / Rs issue |
+| E8 | Transceiver VCC (each) | Pin 3 to Pin 2 | **5.0V ±5%** | Power supply issue — must be 5V |
+| E8b | Transceiver VIO (each) | Pin 5 to Pin 2 | **3.3V ±5%** | VIO not connected — ⚠️ risk of ESP32 damage |
+| E9 | CANH idle voltage | CANH to GND | **~2.5V** | Transceiver not powered / S pin issue |
+| E10 | CANL idle voltage | CANL to GND | **~2.5V** | Transceiver not powered / S pin issue |
 | E11 | CANH during TX | Oscilloscope on CANH | **Pulses 2.5V → 3.5V** | TX not working |
 | E12 | CANL during TX | Oscilloscope on CANL | **Pulses 2.5V → 1.5V** | TX not working |
 | E13 | STM32 PA12 (TX output) | Oscilloscope on PA12 | **Digital activity** | FDCAN not started |
@@ -187,8 +194,8 @@ VCC  3──┤           ├──6  CANL
 | ~2.5V | ~2.5V | Yes | No | ESP32 TWAI not started (check serial log) |
 | ~2.5V | ~2.5V | No | Yes | STM32 FDCAN not started (check LD2 pattern) |
 | 0V | 0V | — | — | Transceiver not powered — check VCC |
-| ~3.3V | 0V | — | — | Transceiver in standby — **Pin 8 (Rs) at VCC** |
-| Flat | Flat | Yes | Yes | **Pin 8 (Rs) floating** or wrong wiring |
+| ~3.3V | 0V | — | — | Transceiver in standby — **Pin 8 (S) at VCC** |
+| Flat | Flat | Yes | Yes | **Pin 8 (S) floating** or wrong wiring |
 
 ---
 
@@ -222,7 +229,7 @@ Look for these messages:
 
 ```
 [CAN-DIAG] state=BUS_OFF ...                  ← Hardware fault — check wiring
-[CAN-DIAG] ... tx_err=128 ...                 ← Error-passive — check Rs pin, GND
+[CAN-DIAG] ... tx_err=128 ...                 ← Error-passive — check S pin, GND
 [CAN] BUS_OFF detected — recovery attempt ... ← Auto-recovery in progress
 ```
 
@@ -280,7 +287,7 @@ Run the system for **>5 minutes** and verify:
 
 | Root Cause (ranked) | Probability | Fix |
 |---------------------|-------------|-----|
-| **SN65HVD230 Pin 8 (Rs) not connected to GND** | **70%** | Solder Pin 8 → GND on **both** modules |
+| **TJA1051T/3 Pin 8 (S) not connected to GND** | **70%** | Solder Pin 8 → GND on **both** modules |
 | Missing common GND wire | 15% | Add dedicated GND wire ESP32↔STM32 |
 | Missing/wrong termination resistors | 10% | Ensure 120 Ω at each bus end (~60 Ω total) |
 | CANH/CANL reversed | 3% | Verify CANH↔CANH, CANL↔CANL |

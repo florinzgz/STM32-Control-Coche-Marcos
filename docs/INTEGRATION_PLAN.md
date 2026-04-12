@@ -50,7 +50,7 @@ El firmware actual ejecuta 18 módulos C compilados con ARM GCC (`arm-none-eabi-
 | Dirección | Dispositivo | Canal TCA9548A | Función |
 |-----------|-------------|---------------|---------|
 | 0x70 | TCA9548A | — | Multiplexor I2C 8 canales |
-| 0x40 | INA226 ×6 | Canales 0–5 | Sensores corriente (1 mΩ/0.5 mΩ shunt) |
+| 0x40 | INA226 ×6 | Canales 0–5 | Sensores corriente (1.5 mΩ/0.75 mΩ shunt) |
 
 **Mensajes CAN activos (27 tipos):**
 
@@ -254,15 +254,15 @@ Antes de asignar cualquier pin libre:
 | Componente | Consumo típico | Consumo pico | Fuente |
 |-----------|---------------|-------------|--------|
 | STM32G474RE | 30 mA | 50 mA | 3.3 V regulado |
-| FDCAN transceiver (TJA1050/1051) | 10 mA | 75 mA | 5 V |
+| FDCAN transceiver (TJA1051T/3) | 10 mA | 75 mA | 5 V |
 | TCA9548A | 0.01 mA | 0.1 mA | 3.3 V |
 | INA226 ×6 | 2 mA | 3 mA | 3.3 V |
 | DS18B20 ×5 | 5 mA | 7.5 mA | 3.3 V |
 | Pull-ups I2C (4.7 kΩ ×2) | 1.4 mA | 1.4 mA | 3.3 V |
-| BTS7960 ×5 (lógica) | 25 mA | 50 mA | 5 V |
+| BTS7960 ×5 (lógica IBT-2) | 25 mA | 50 mA | 3.3 V |
 | Relés ×5 (bobina) | 250 mA | 500 mA | 12/24 V |
-| **TOTAL 3.3 V** | **~40 mA** | **~62 mA** | — |
-| **TOTAL 5 V** | **~35 mA** | **~125 mA** | — |
+| **TOTAL 3.3 V** | **~65 mA** | **~112 mA** | — |
+| **TOTAL 5 V** | **~10 mA** | **~75 mA** | — |
 
 ### 4.2 Procedimiento antes de conectar cada módulo nuevo
 
@@ -293,7 +293,7 @@ Antes de asignar cualquier pin libre:
 #### Conexión física
 - Conectar al bus I2C1 existente (PB6/PB7) **a través del TCA9548A** en canal 6 o 7 (actualmente canales 0–5 ocupados)
 - Configurar dirección I2C del nuevo INA226 a **0x40** (misma que los demás — el TCA9548A aísla)
-- Shunt resistor según corriente: 1 mΩ (motores, ≤25 A) o 0.5 mΩ (batería, ≤100 A)
+- Shunt resistor según corriente: 1.5 mΩ (motores, ≤50 A) o 0.75 mΩ (batería, ≤100 A)
 - Condensador desacoplo 100 nF entre VDD-GND del INA226
 
 #### Configuración en firmware

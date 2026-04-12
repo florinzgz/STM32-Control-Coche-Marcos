@@ -53,7 +53,7 @@ The inactive channel is always zeroed **before** the active channel is set. Both
 | Motor | RPWM Channel | LPWM Channel | Timer | Protection |
 |-------|-------------|-------------|-------|------------|
 | FL | TIM1_CH1 (PA8) | TIM1_CH2 (PA9) | TIM1 | BREAK2/LOCKUP |
-| FR | TIM1_CH3 (PA10) | TIM1_CH4 (PA11) | TIM1 | BREAK2/LOCKUP |
+| FR | TIM1_CH3 (PA10) | TIM1_CH4 (PC3) | TIM1 | BREAK2/LOCKUP |
 | RL | TIM8_CH1 (PC6) | TIM8_CH2 (PC7) | TIM8 | BREAK2/LOCKUP |
 | RR | TIM8_CH3 (PC8) | TIM8_CH4 (PC9) | TIM8 | BREAK2/LOCKUP |
 | STEER | TIM3_CH1 (PA6) | TIM3_CH2 (PA7) | TIM3 | Software only |
@@ -108,16 +108,16 @@ makes shoot-through impossible through firmware logic.
 | Motor | EN Pin | Type | Default State | Management |
 |-------|--------|------|---------------|------------|
 | FL | PC5 | GPIO output | LOW (disabled) | `Motor_SetSigned()` — dynamic |
-| FR | — | Tied to 3.3V | HIGH (always enabled) | Hardware |
-| RL | — | Tied to 3.3V | HIGH (always enabled) | Hardware |
+| FR | PC0 | GPIO output | LOW (disabled) | `Motor_SetSigned()` — dynamic |
+| RL | PC1 | GPIO output | LOW (disabled) | `Motor_SetSigned()` — dynamic |
 | RR | PC13 | GPIO output | LOW (disabled) | `Motor_SetSigned()` — dynamic |
-| STEER | — | Tied to 3.3V | HIGH (always enabled) | Hardware |
+| STEER | PC4 | GPIO output | LOW (disabled) | `Motor_SetSigned()` — dynamic |
 
 - **File:** `Core/Src/main.c`, `MX_GPIO_Init()` (line ~502)
-- **Verdict:** ✅ Safe default state on boot — EN_FL (PC5) and EN_RR (PC13) initialized as GPIO_OUTPUT_PP with no explicit write → HAL defaults to GPIO_PIN_RESET (LOW = disabled).
+- **Verdict:** ✅ Safe default state on boot — all EN pins (PC0, PC1, PC4, PC5, PC13) initialized as GPIO_OUTPUT_PP with no explicit write → HAL defaults to GPIO_PIN_RESET (LOW = disabled).
 
 - **File:** `Core/Src/motor_control.c`, `Motor_SetSigned()` (line ~1889)
-- **Verdict:** ✅ EN pins are actively managed — asserted when duty > 0, deasserted when duty == 0. Motors with `en_port == NULL` have EN tied to 3.3V in hardware (documented in comments).
+- **Verdict:** ✅ EN pins are actively managed — asserted when duty > 0, deasserted when duty == 0. All five motors have dedicated GPIO EN pins.
 
 #### Advisory: PIN_EN_FR / PIN_EN_RL / PIN_EN_STEER Definitions
 

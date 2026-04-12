@@ -138,9 +138,9 @@ Las siguientes definiciones están en `esp32/include/User_Setup.h`:
 |-------------|--------|-----------|---------|
 | **1** | TXD | GPIO4 (ESP32) | Entrada de transmisión desde ESP32 |
 | **2** | GND | GND común | Tierra del transceiver |
-| **3** | VCC | +5V | Alimentación 5V del transceiver |
+| **3** | VCC | **+5V** (ext.) | Alimentación 5V del transceiver (4.5–5.5 V) |
 | **4** | RXD | GPIO5 (ESP32) | Salida de recepción al ESP32 |
-| **5** | VREF | No conectado | Referencia de voltaje (opcional) |
+| **5** | **VIO** | **+3.3V** | ⚠️ **OBLIGATORIO** — Nivel lógico I/O. Conectar a 3.3 V del ESP32. Si se deja flotante o a 5 V, RXD producirá 5 V → **destruye GPIO5** |
 | **6** | CANL | Bus CAN Low | Cable trenzado al otro transceiver |
 | **7** | CANH | Bus CAN High | Cable trenzado al otro transceiver |
 | **8** | S (Silent) | GND | Modo normal (conectar a GND) |
@@ -161,8 +161,10 @@ ESP32-S3                    TJA1051 #1              Bus CAN          TJA1051 #2 
 │  GPIO5 ◄─┼────────────│ 4 RXD        │     │   120Ω       │   │        RXD 4 ├───────────►│ PA11 (RX)│
 │  (RX)    │            │              │     │    ║         │   │              │            │          │
 │          │            │    6    CANL├─────┤──── CANL ────├───┤ CANL   6     │            │          │
-│  +5V  ───┼───────────►│ 3 VCC        │     │              │   │        VCC 3 │◄───────────┤ +5V      │
-│          │            │              │     │   120Ω       │   │              │            │          │
+│  +5V  ───┼───────────►│ 3 VCC        │     │              │   │        VCC 3 │◄───────────┤ +5V (ext)│
+│  (ext.)  │            │              │     │   120Ω       │   │              │            │          │
+│  3.3V ───┼───────────►│ 5 VIO ⚠️     │     │              │   │    VIO 5 ⚠️   │◄───────────┤ 3.3V     │
+│          │            │              │     │              │   │              │            │          │
 │  GND  ───┼───────────►│ 2 GND        │     │              │   │        GND 2 │◄───────────┤ GND      │
 │          │            │              │     │              │   │              │            │          │
 │  GND  ───┼───────────►│ 8 S (Silent) │     └──────────────┘   │ S (Silent) 8 │◄───────────┤ GND      │
@@ -286,7 +288,9 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
    - Montar TJA1051 con capacitor 100nF en VCC
    - Conectar GPIO4 y GPIO5 al transceiver
    - Conectar 5V y GND al TJA1051
+   - **Conectar 3.3V al pin VIO (pin 5) del TJA1051** ⚠️ OBLIGATORIO
    - Conectar pin S (Silent) a GND
+   - **Verificar con multímetro: VCC=5V, VIO=3.3V ANTES de conectar ESP32**
 
 5. **Conectar Bus CAN físico:**
    - Conectar CANH y CANL al otro transceiver (STM32)
@@ -304,6 +308,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | ESP32 3.3V → GND | 3.30V ±0.1V | Alimentación estable |
 | Display VCC → GND | 3.30V ±0.1V | Mismo que ESP32 |
 | TJA1051 VCC → GND | 5.00V ±0.2V | Fuente 5V |
+| TJA1051 VIO (pin 5) → GND | 3.30V ±0.1V | ⚠️ Si ≠ 3.3V, NO conectar ESP32 |
 | CANH → GND (idle) | ~2.5V | Sin transmisión |
 | CANL → GND (idle) | ~2.5V | Sin transmisión |
 | CANH - CANL (idle) | ~0V | Diferencial en reposo |
@@ -334,6 +339,7 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | Recepción OK, transmisión falla | TXD no conectado | Verificar GPIO4 → pin 1 del TJA1051 |
 | Transmisión OK, recepción falla | RXD no conectado | Verificar GPIO5 → pin 4 del TJA1051 |
 | Voltajes CAN incorrectos | TJA1051 sin alimentación 5V | Verificar pin 3 = 5V |
+| ESP32 GPIO dañado | VIO (pin 5) flotante o a 5V | ⚠️ Conectar VIO a 3.3V — sin VIO, RXD = 5V destruye ESP32 |
 | Resistencia 120Ω medida | Terminación duplicada en un extremo | Quitar una resistencia |
 
 ---
@@ -371,12 +377,15 @@ El ESP32-S3 envía y recibe los siguientes mensajes CAN:
 | Parámetro | Valor |
 |-----------|-------|
 | **Tipo** | High-Speed CAN Transceiver |
-| **Voltaje** | 4.75V - 5.25V |
+| **VCC (alimentación)** | **4.5V - 5.5V** (obligatorio 5V) |
+| **VIO (nivel I/O)** | **2.8V - 5.5V** → conectar a **3.3V** del MCU |
 | **Velocidad** | Hasta 1 Mbps |
 | **Corriente (activo)** | ~70 mA |
 | **Corriente (standby)** | ~5 mA |
-| **Niveles lógicos I/O** | Compatible 3.3V y 5V |
+| **Niveles lógicos I/O** | Siguen VIO — con VIO=3.3V, compatibles con ESP32-S3 |
 | **Temperatura** | -40°C a +125°C |
+
+> ⚠️ **Pin 5 (VIO) OBLIGATORIO a 3.3V.** Sin conexión VIO, RXD produce 5V → destruye GPIO del ESP32-S3.
 
 ---
 

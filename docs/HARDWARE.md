@@ -184,22 +184,22 @@ DS18B20 (5×) ─┬─ Pull-up 4.7kΩ ─ 3.3V
 | **Modelo** | Texas Instruments INA226 |
 | **Protocolo** | I²C @ 400 kHz |
 | **Rango tensión** | 0-36V |
-| **Rango corriente** | ±81.92A (con shunt 0.001Ω) |
+| **Rango corriente** | ±54.6A (motor, shunt 1.5 mΩ) / ±109.2A (batería, shunt 0.75 mΩ) |
 | **Resolución** | 1.25 mA (corriente), 1.25 mV (tensión) |
 | **Precisión** | ±0.1% (ganancia) |
-| **Direcciones I²C** | 0x40, 0x41, 0x44, 0x45, 0x48, 0x49 |
+| **Direcciones I²C** | Todas 0x40 (aisladas por canal TCA9548A) |
 | **Multiplexor** | TCA9548A (8 canales) @ 0x70 |
 | **Pines STM32** | PB6 (SCL), PB7 (SDA) |
 
-**Distribución:**
-- INA226 #1 (0x40): Motor FL
-- INA226 #2 (0x41): Motor FR
-- INA226 #3 (0x44): Motor RL
-- INA226 #4 (0x45): Motor RR
-- INA226 #5 (0x48): Motor Dirección
-- INA226 #6 (0x49): Batería Principal
+**Distribución (todos a dirección I2C 0x40, separados por canal TCA9548A):**
+- Canal 0: INA226 — Motor FL (1.5 mΩ)
+- Canal 1: INA226 — Motor FR (1.5 mΩ)
+- Canal 2: INA226 — Motor RL (1.5 mΩ)
+- Canal 3: INA226 — Motor RR (1.5 mΩ)
+- Canal 4: INA226 — Batería 24V (0.75 mΩ)
+- Canal 5: INA226 — Motor Dirección (1.5 mΩ)
 
-**Shunt Resistor:** 0.001Ω (1 mΩ) @ 2W mínimo
+**Shunt Resistor:** 0.0015Ω (1.5 mΩ) motores / 0.00075Ω (0.75 mΩ) batería — @ 2W mínimo
 
 ### 5. Pedal Analógico Hall
 
@@ -324,7 +324,7 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 
 **Direcciones I²C:**
 - TCA9548A: 0x70 (multiplexor)
-- INA226 #1-6: 0x40, 0x41, 0x44, 0x45, 0x48, 0x49
+- INA226 #1-6: todas 0x40 (aisladas por canales TCA9548A 0–5)
 
 ### 3. OneWire
 
@@ -434,7 +434,8 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 | Cantidad | Componente | Valor |
 |----------|------------|-------|
 | 2 | Resistencia terminación CAN | 120Ω 1/4W |
-| 6 | Shunt resistor (INA226) | 0.001Ω 2W |
+| 5 | Shunt resistor (INA226 motores) | 0.0015Ω (1.5 mΩ) ≥4W |
+| 1 | Shunt resistor (INA226 batería) | 0.00075Ω (0.75 mΩ) ≥8W |
 | 2 | Pull-up I²C | 4.7kΩ 1/4W |
 | 1 | Pull-up OneWire | 4.7kΩ 1/4W |
 | 10 | Pull-up GPIO | 10kΩ 1/4W |

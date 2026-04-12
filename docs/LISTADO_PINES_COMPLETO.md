@@ -31,25 +31,29 @@
 
 ---
 
-### 1.2 CAN Bus (Transceiver SN65HVD230)
+### 1.2 CAN Bus (Transceiver TJA1051T/3)
 
 | GPIO | Señal | Conecta a | Dirección | Componentes externos |
 |------|-------|-----------|-----------|----------------------|
-| 4 | CAN_TX | SN65HVD230 pin 1 (D) | Salida | — |
-| 5 | CAN_RX | SN65HVD230 pin 4 (R) | Entrada | — |
+| 4 | CAN_TX | TJA1051T/3 pin 1 (TXD) | Salida | — |
+| 5 | CAN_RX | TJA1051T/3 pin 4 (RXD) | Entrada | — |
 
 **Componentes necesarios:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Resistencia de terminación | 120 Ω ¼W | Entre CANH y CANL del SN65HVD230 | Terminación de bus CAN |
-| Condensador de desacoplo | 100 nF cerámico | Entre VCC (pin 3) y GND (pin 2) del SN65HVD230 | Filtrado de ruido |
+| Resistencia de terminación | 120 Ω ¼W | Entre CANH y CANL del TJA1051T/3 | Terminación de bus CAN |
+| Condensador de desacoplo | 100 nF cerámico | Entre VCC (pin 3) y GND (pin 2) del TJA1051T/3 | Filtrado de ruido |
 
-**Conexiones adicionales del SN65HVD230:**
-- Pin 3 (VCC) → 3.3 V
+**Conexiones del TJA1051T/3 (lado ESP32):**
+- Pin 1 (TXD) ← GPIO4
 - Pin 2 (GND) → GND
-- Pin 8 (Rs / SLNT) → GND (modo alta velocidad)
-- Pin 5 (VREF) → No conectar
+- Pin 3 (VCC) → **5 V** (4.5–5.5 V obligatorio)
+- Pin 4 (RXD) → GPIO5
+- Pin 5 (VIO) → **3.3 V** ⚠️ OBLIGATORIO — sin VIO, RXD = 5 V → destruye ESP32-S3
+- Pin 6 (CANL) → Bus CAN bajo
+- Pin 7 (CANH) → Bus CAN alto
+- Pin 8 (S) → GND (modo normal)
 
 ---
 
@@ -413,7 +417,7 @@
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Resistencia shunt | 1 mΩ (motores) / 0.5 mΩ (batería) | En serie con cable de potencia (+) | Medición de corriente |
+| Resistencia shunt | 1.5 mΩ (motores) / 0.75 mΩ (batería) | En serie con cable de potencia (+) | Medición de corriente |
 | Condensador de desacoplo | 100 nF cerámico | Entre VCC y GND del INA226 | Filtrado |
 
 ---
@@ -445,10 +449,10 @@
 
 | Pin LQFP | GPIO | Periférico | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 44 | PA11 | FDCAN1_RX | CAN RX | SN65HVD230 #1 pin 4 (R) | — |
-| 45 | PA12 | FDCAN1_TX | CAN TX | SN65HVD230 #1 pin 1 (D) | — |
+| 44 | PA11 | FDCAN1_RX | CAN RX | TJA1051T/3 #1 pin 4 (RXD) | — |
+| 45 | PA12 | FDCAN1_TX | CAN TX | TJA1051T/3 #1 pin 1 (TXD) | — |
 
-**Componentes del SN65HVD230 lado STM32:**
+**Componentes del TJA1051T/3 lado STM32:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
@@ -456,12 +460,15 @@
 | Condensador de desacoplo | 100 nF cerámico | Entre VCC (pin 3) y GND (pin 2) | Filtrado de ruido |
 | Protección ESD | TPD2E001 (opcional) | En CANH y CANL | Protección contra descargas |
 
-**Conexiones del SN65HVD230 #1:**
-- Pin 1 (D) ← PA12
-- Pin 4 (R) → PA11
-- Pin 3 (VCC) → 3.3 V
+**Conexiones del TJA1051T/3 #1 (lado STM32):**
+- Pin 1 (TXD) ← PA12
 - Pin 2 (GND) → GND
-- Pin 8 (Rs) → GND (modo alta velocidad)
+- Pin 3 (VCC) → **5 V** (4.5–5.5 V obligatorio)
+- Pin 4 (RXD) → PA11
+- Pin 5 (VIO) → **3.3 V** (nivel lógico del STM32)
+- Pin 6 (CANL) → Bus CAN bajo
+- Pin 7 (CANH) → Bus CAN alto
+- Pin 8 (S) → GND (modo normal)
 
 ---
 
@@ -589,7 +596,7 @@
 | 1 | 10 µF / 6.3 V | Tantalio | Pin VDDA (analógico) del STM32 |
 | 2 | 20 pF | Cerámico | Condensadores de carga del cristal 8 MHz |
 | 5 | 100 nF / 50 V | Cerámico | Snubber motores |
-| ~8 | 100 nF | Cerámico | Desacoplo de módulos (TCA9548A, INA226, SN65HVD230, etc.) |
+| ~8 | 100 nF | Cerámico | Desacoplo de módulos (TCA9548A, INA226, TJA1051T/3, etc.) |
 
 ### Diodos
 
@@ -610,7 +617,7 @@
 | Cantidad | Componente | Ubicación |
 |----------|-----------|-----------|
 | 1 | Cristal 8 MHz | Oscilador externo STM32 (PH0/PH1) |
-| 2 | SN65HVD230 | Transceiver CAN (uno por MCU) |
+| 2 | TJA1051T/3 | Transceiver CAN (uno por MCU) — VCC=5V, VIO=3.3V |
 | 1 | TCA9548A | Multiplexor I2C |
 | 6 | INA226 | Sensores de corriente/tensión |
 | 1 | MCP23017 | I/O expander para shifter |

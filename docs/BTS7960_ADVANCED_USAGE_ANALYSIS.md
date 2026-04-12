@@ -135,17 +135,16 @@ if (signed_pwm > 0) {
 | Motor | EN Control | PWM=0 Behavior | Actual Mode |
 |-------|-----------|-----------------|-------------|
 | **FL** | GPIO (PC5) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
-| **FR** | Tied to 3.3 V | EN remains HIGH | **PASSIVE BRAKE** (low-side short) |
-| **RL** | Tied to 3.3 V | EN remains HIGH | **PASSIVE BRAKE** (low-side short) |
+| **FR** | GPIO (PC0) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
+| **RL** | GPIO (PC1) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
 | **RR** | GPIO (PC13) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
+| **STEER** | GPIO (PC4) | EN set LOW by `Motor_SetSigned` | **COAST** (Hi-Z) |
 
 When `Motor_SetSigned(motor, 0)` is called (line 1920–1922):
-- `duty = 0` → `GPIO_PIN_RESET` → EN driven LOW for FL/RR (coast)
-- FR/RL: `en_port = NULL` → EN stays HIGH → BTS7960 low-side brake
+- `duty = 0` → `GPIO_PIN_RESET` → EN driven LOW for all motors (coast)
 
-This means `TRAC_PHASE_BRAKE` and `TRAC_PHASE_COAST` produce **identical hardware output**
-on FL and RR (both result in coast), while FR and RL are **always in passive brake** when
-PWM=0 regardless of the intended phase.
+All five motors now have dedicated GPIO EN pins, so `TRAC_PHASE_BRAKE` and `TRAC_PHASE_COAST`
+produce **identical hardware output** (coast) on all motors when PWM=0.
 
 ### B. Neutral (Coast / Freewheel)
 
@@ -344,10 +343,10 @@ negligible practical impact at the operating speeds of this vehicle.
 | Motor | RPWM | LPWM | Timer | EN Pin | EN Method | PWM=0 Mode |
 |-------|------|------|-------|--------|-----------|------------|
 | FL | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 | GPIO output | Coast (Hi-Z) |
-| FR | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | — | Tied 3.3 V | Passive brake |
-| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | — | Tied 3.3 V | Passive brake |
+| FR | PA10 (TIM1_CH3) | PC3 (TIM1_CH4) | TIM1 | PC0 | GPIO output | Coast (Hi-Z) |
+| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | PC1 | GPIO output | Coast (Hi-Z) |
 | RR | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 | GPIO output | Coast (Hi-Z) |
-| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | — | Tied 3.3 V | Passive brake |
+| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | PC4 | GPIO output | Coast (Hi-Z) |
 
 ## APPENDIX: Firmware Constants Reference
 

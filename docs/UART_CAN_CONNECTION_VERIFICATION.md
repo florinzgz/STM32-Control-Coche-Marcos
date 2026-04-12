@@ -23,8 +23,8 @@
 
 | Señal | Pin | AF | Notas |
 |-------|-----|----|-------|
-| FDCAN1_TX | PB9 | AF9 | Hacia TJA1051 pin 1 (TXD) |
-| FDCAN1_RX | PB8 | AF9 | Desde TJA1051 pin 4 (RXD) — JP7 debe estar en GND |
+| FDCAN1_TX | PA12 | AF9 | Hacia TJA1051T/3 pin 1 (TXD) |
+| FDCAN1_RX | PA11 | AF9 | Desde TJA1051T/3 pin 4 (RXD) |
 | LD2 (user LED) | PA5 | GPIO | Heartbeat 5 Hz en funcionamiento normal |
 | BOOT0 | JP7 | — | Jumper GND = arranque desde Flash |
 
@@ -113,8 +113,8 @@ JP7 en la NUCLEO‑G474RE controla la señal **BOOT0**:
 | Si no hay capuchón: puenteado con cable corto | ☐ sí / ☐ no |
 | BOOT0 medido = 0.00 V | ☐ sí / ☐ no |
 
-> **Importante:** PB8 (FDCAN1_RX) comparte conector con JP7 en CN7.
-> Si JP7 no está en posición GND, PB8 puede tener niveles inesperados.
+> **Nota:** Los pines CAN del STM32 son **PA11 (RX)** y **PA12 (TX)**, NO PB8/PB9.
+> PB8/PB9 se encuentran libres. JP7 no afecta al bus CAN.
 
 ---
 
@@ -290,7 +290,7 @@ Si la comunicación falla, medir con osciloscopio:
 | CANH (dominante, con tráfico) | ~3.5 V | _____ V |
 | CANL (dominante, con tráfico) | ~1.5 V | _____ V |
 | Diferencial (CANH − CANL, dominante) | ~2.0 V | _____ V |
-| Forma de onda TX (PB9 STM lado MCU) | Tramas 500 kbps | ☐ sí / ☐ no |
+| Forma de onda TX (PA12 STM lado MCU) | Tramas 500 kbps | ☐ sí / ☐ no |
 | Forma de onda TX (GPIO4 ESP lado MCU) | Tramas 500 kbps | ☐ sí / ☐ no |
 
 ---

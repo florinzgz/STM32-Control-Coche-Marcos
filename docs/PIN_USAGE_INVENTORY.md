@@ -180,7 +180,7 @@ Sensores en el bus (un solo pin):
 | CAN TX | **PA12** | FDCAN1_TX (AF9) | Transmisión CAN a 500 kbps |
 | | **Subtotal:** | | **2 pines** |
 
-- Transceiver externo SN65HVD230 requerido
+- Transceiver externo TJA1051T/3 requerido (VCC=5V, VIO=3.3V)
 - Terminación 120Ω en ambos extremos del bus
 
 ### 2.11 Debug SWD — Reservados (2 pines)
@@ -294,7 +294,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | Display TFT SPI (ST7796) | 6 | 16.7% |
 | Touch panel SPI | 1 | 2.8% |
 | Display backlight | 1 | 2.8% |
-| CAN bus (TWAI vía SN65HVD230) | 2 | 5.6% |
+| CAN bus (TWAI vía TJA1051T/3) | 2 | 5.6% |
 | Sensor de obstáculos TOFSense-M | 1 (UART RX) | 2.8% |
 | DFPlayer Mini audio (UART2) | 2 | 5.6% |
 | Relé audio | 1 | 2.8% |
@@ -338,7 +338,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 - Comparte MOSI (GPIO13), SCLK (GPIO14) y MISO (GPIO12) con el display
 - TOUCH_CS cuenta como pin adicional; MISO (T_DO) se comparte con el bus SPI
 
-### 5.3 CAN bus — TWAI vía SN65HVD230 (2 pines)
+### 5.3 CAN bus — TWAI vía TJA1051T/3 (2 pines)
 
 | Señal | GPIO | Función | Velocidad |
 |-------|------|---------|-----------|
@@ -346,7 +346,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | CAN RX | **GPIO5** | Recepción CAN (TWAI_RX) | 500 kbps |
 | | | **Subtotal:** | **2 pines** |
 
-- Transceiver externo SN65HVD230 obligatorio
+- Transceiver externo TJA1051T/3 obligatorio (VCC=5V, VIO=3.3V)
 - Biblioteca: ESP32-TWAI-CAN v1.0.1
 - Terminación 120Ω en el lado ESP32
 
@@ -440,8 +440,8 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 | # | GPIO | Módulo | Función |
 |---|------|--------|---------|
-| 1 | GPIO4 | CAN bus | TWAI TX → SN65HVD230 D |
-| 2 | GPIO5 | CAN bus | TWAI RX → SN65HVD230 R |
+| 1 | GPIO4 | CAN bus | TWAI TX → TJA1051T/3 TXD |
+| 2 | GPIO5 | CAN bus | TWAI RX → TJA1051T/3 RXD |
 | 3 | GPIO8 | Palanca de cambios | I2C SDA (MCP23017 @ 0x20) |
 | 4 | GPIO9 | Palanca de cambios | I2C SCL (MCP23017 @ 0x20) |
 | 5 | GPIO10 | Display TFT | SPI CS (chip select display) |

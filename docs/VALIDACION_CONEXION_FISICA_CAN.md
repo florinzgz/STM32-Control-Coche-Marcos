@@ -1,8 +1,8 @@
-# Validación Práctica — Conexión Física CAN: ESP32-S3 ↔ SN65HVD230 ↔ STM32G474RE
+# Validación Práctica — Conexión Física CAN: ESP32-S3 ↔ TJA1051T/3 ↔ STM32G474RE
 
 **Fecha:** 2026-03-02  
 **Versión:** 1.0  
-**Componentes:** ESP32-S3 · SN65HVD230 (×2) · STM32G474RE · Bus CAN (CANH/CANL)
+**Componentes:** ESP32-S3 · TJA1051T/3 (×2) · STM32G474RE · Bus CAN (CANH/CANL)
 
 ---
 
@@ -12,16 +12,16 @@
 
 | Conexión propuesta | Estado | Detalle |
 |-------------------|--------|---------|
-| ESP32-S3 GPIO4 (TX) → SN65HVD230 #1 pin 1 (D) | ✅ CORRECTO | GPIO4 es el pin TWAI TX del ESP32 |
-| ESP32-S3 GPIO5 (RX) → SN65HVD230 #1 pin 4 (R) | ✅ CORRECTO | GPIO5 es el pin TWAI RX del ESP32 |
-| SN65HVD230 #1 VCC (pin 3) → +3.3V | ✅ CORRECTO | El SN65HVD230 opera a 3.3V |
-| SN65HVD230 #1 GND (pin 2) → GND | ✅ CORRECTO | Obligatorio |
-| SN65HVD230 #1 CANH (pin 7) → cable trenzado → SN65HVD230 #2 CANH (pin 7) | ✅ CORRECTO | Par trenzado reduce EMI |
-| SN65HVD230 #1 CANL (pin 6) → cable trenzado → SN65HVD230 #2 CANL (pin 6) | ✅ CORRECTO | Par trenzado reduce EMI |
-| SN65HVD230 #2 D (pin 1) ← STM32 PA12 (FDCAN1_TX, AF9) | ✅ CORRECTO | PA12 es el pin FDCAN1 TX del STM32G474RE |
-| SN65HVD230 #2 R (pin 4) → STM32 PA11 (FDCAN1_RX, AF9) | ✅ CORRECTO | PA11 es el pin FDCAN1 RX del STM32G474RE |
-| SN65HVD230 #2 VCC (pin 3) → +3.3V | ✅ CORRECTO | El SN65HVD230 opera a 3.3V |
-| SN65HVD230 #2 GND (pin 2) → GND | ✅ CORRECTO | Obligatorio |
+| ESP32-S3 GPIO4 (TX) → TJA1051T/3 #1 pin 1 (TXD) | ✅ CORRECTO | GPIO4 es el pin TWAI TX del ESP32 |
+| ESP32-S3 GPIO5 (RX) → TJA1051T/3 #1 pin 4 (RXD) | ✅ CORRECTO | GPIO5 es el pin TWAI RX del ESP32 |
+| TJA1051T/3 #1 VCC (pin 3) → +5V, VIO (pin 5) → +3.3V | ✅ CORRECTO | VCC del TJA1051T/3 = 5V, VIO = 3.3V |
+| TJA1051T/3 #1 GND (pin 2) → GND | ✅ CORRECTO | Obligatorio |
+| TJA1051T/3 #1 CANH (pin 7) → cable trenzado → TJA1051T/3 #2 CANH (pin 7) | ✅ CORRECTO | Par trenzado reduce EMI |
+| TJA1051T/3 #1 CANL (pin 6) → cable trenzado → TJA1051T/3 #2 CANL (pin 6) | ✅ CORRECTO | Par trenzado reduce EMI |
+| TJA1051T/3 #2 TXD (pin 1) ← STM32 PA12 (FDCAN1_TX, AF9) | ✅ CORRECTO | PA12 es el pin FDCAN1 TX del STM32G474RE |
+| TJA1051T/3 #2 RXD (pin 4) → STM32 PA11 (FDCAN1_RX, AF9) | ✅ CORRECTO | PA11 es el pin FDCAN1 RX del STM32G474RE |
+| TJA1051T/3 #2 VCC (pin 3) → +5V, VIO (pin 5) → +3.3V | ✅ CORRECTO | VCC del TJA1051T/3 = 5V, VIO = 3.3V |
+| TJA1051T/3 #2 GND (pin 2) → GND | ✅ CORRECTO | Obligatorio |
 | 120Ω solo en los extremos | ✅ CORRECTO | Uno en el lado ESP32, uno en el lado STM32 |
 
 ---
@@ -30,21 +30,21 @@
 
 **SÍ. Faltan tres conexiones que son obligatorias:**
 
-### 2.1 Pin 8 (Rs) — OBLIGATORIO en AMBOS transceivers
+### 2.1 Pin 8 (S) — OBLIGATORIO en AMBOS transceivers
 
-**Este pin DEBE conectarse a GND en los dos módulos SN65HVD230.**
+**Este pin DEBE conectarse a GND en los dos módulos TJA1051T/3.**
 
 | Transceiver | Pin 8 | Debe conectarse a |
 |-------------|-------|-------------------|
-| SN65HVD230 #1 (lado ESP32) | Rs (slope control) | GND del sistema ESP32 |
-| SN65HVD230 #2 (lado STM32) | Rs (slope control) | GND del sistema STM32 |
+| TJA1051T/3 #1 (lado ESP32) | S (silent mode) | GND del sistema ESP32 |
+| TJA1051T/3 #2 (lado STM32) | S (silent mode) | GND del sistema STM32 |
 
 Si este pin queda flotante o conectado a VCC, el transceiver entra en **modo standby**:
 puede recibir pero **no transmite**. Resultado: comunicación unidireccional o nula.
 
 ### 2.2 Condensador de desacoplo 100nF — RECOMENDADO en ambos transceivers
 
-Colocar un condensador cerámico de 100nF entre VCC (pin 3) y GND (pin 2) de cada SN65HVD230,
+Colocar un condensador cerámico de 100nF entre VCC (pin 3) y GND (pin 2) de cada TJA1051T/3,
 **lo más cerca posible del chip**. Sin él, el bus puede tener ruido en las transiciones de bit.
 
 ### 2.3 GND común entre ambos nodos — OBLIGATORIO
@@ -53,37 +53,38 @@ Ver sección 4.
 
 ---
 
-## 3. Pin 8 (Rs) — Cómo conectarlo exactamente
+## 3. Pin 8 (S) — Cómo conectarlo exactamente
 
 ### 3.1 Nombres equivalentes para el mismo pin físico
 
 Dependiendo del módulo o versión del datasheet, el pin 8 puede aparecer etiquetado como:
 
-| Etiqueta en el módulo | Nombre en datasheet TI | ¿Es el mismo pin? |
+| Etiqueta en el módulo | Nombre en datasheet NXP | ¿Es el mismo pin? |
 |-----------------------|-------------------------|-------------------|
-| **Rs** | Rs (Slope control) | ✅ Sí — nombre oficial SN65HVD230 |
+| **S** | S (Silent mode) | ✅ Sí — nombre oficial TJA1051T/3 (NXP) |
+| **Rs** | S (Silent mode) | ✅ Sí — etiqueta alternativa en algunos módulos breakout |
 | **SLOPE** | SLOPE | ✅ Sí — etiqueta alternativa en algunos módulos breakout |
-| **STB** | STB (Standby) | ⚠️ Verificar — algunos módulos usan STB; para el SN65HVD230 el comportamiento es: GND = high-speed mode |
+| **STB** | STB (Standby) | ⚠️ Verificar — algunos módulos usan STB; para el TJA1051T/3 el comportamiento es: GND = normal mode |
 
-> **Regla práctica:** Sea cual sea la etiqueta (Rs, SLOPE o STB), conéctalo a GND.
-> Para el transceiver CAN de alta velocidad TI SN65HVD230, GND en este pin = modo high-speed normal.
+> **Regla práctica:** Sea cual sea la etiqueta (S, Rs, SLOPE o STB), conéctalo a GND.
+> Para el transceiver CAN de alta velocidad NXP TJA1051T/3, GND en este pin = modo normal.
 
-### 3.2 Tabla de comportamiento del pin 8 en el SN65HVD230
+### 3.2 Tabla de comportamiento del pin 8 en el TJA1051T/3
 
 | Nivel en pin 8 | Modo | TX activo | RX activo |
 |----------------|------|-----------|-----------|
-| LOW → GND | **High-speed** ✅ | Sí | Sí |
-| HIGH → VCC | Standby | **NO** ❌ | Sí |
+| LOW → GND | **Normal** ✅ | Sí | Sí |
+| HIGH → VCC | Silent | **NO** ❌ | Sí |
 | Flotante | Indefinido | Imprevisible | Imprevisible |
 
 ### 3.3 Conexión exacta
 
 ```
-SN65HVD230 #1 (lado ESP32):
-  Pin 8 (Rs) ──────────────────→ GND del ESP32
+TJA1051T/3 #1 (lado ESP32):
+  Pin 8 (S) ──────────────────→ GND del ESP32
 
-SN65HVD230 #2 (lado STM32):
-  Pin 8 (Rs) ──────────────────→ GND del STM32
+TJA1051T/3 #2 (lado STM32):
+  Pin 8 (S) ──────────────────→ GND del STM32
 ```
 
 Cable corto, conexión directa. No se necesita resistencia ni condensador en este pin.
@@ -116,7 +117,7 @@ ESP32 GND ───┬───────────────────�
 
 - El cable GND de interconexión debe ser de **sección similar** al cable de señal
 - Si los dos sistemas están en placas separadas, conectar GND con un cable dedicado (22–24 AWG es suficiente para esta distancia corta)
-- El GND de ambos SN65HVD230 ya está conectado al GND de su respectivo nodo; no hace falta un cable GND adicional entre los transceivers si el GND de los MCUs ya está unido
+- El GND de ambos TJA1051T/3 ya está conectado al GND de su respectivo nodo; no hace falta un cable GND adicional entre los transceivers si el GND de los MCUs ya está unido
 
 ---
 
@@ -128,9 +129,9 @@ Realizar estos pasos **en orden** antes de aplicar alimentación al sistema comp
 
 | Medición | Puntos | Valor esperado | Si falla |
 |----------|--------|----------------|----------|
-| Resistencia CANH–CANL | Entre los pines 7 y 6 de cualquier SN65HVD230 | **~60 Ω** | Verificar que hay 2 resistencias de 120Ω, una en cada extremo |
-| Sin cortocircuito VCC–GND (SN65HVD230 #1) | Pin 3 vs pin 2 | > 1 kΩ | Revisar soldadura o cableado del transceiver ESP32 |
-| Sin cortocircuito VCC–GND (SN65HVD230 #2) | Pin 3 vs pin 2 | > 1 kΩ | Revisar soldadura o cableado del transceiver STM32 |
+| Resistencia CANH–CANL | Entre los pines 7 y 6 de cualquier TJA1051T/3 | **~60 Ω** | Verificar que hay 2 resistencias de 120Ω, una en cada extremo |
+| Sin cortocircuito VCC–GND (TJA1051T/3 #1) | Pin 3 vs pin 2 | > 1 kΩ | Revisar soldadura o cableado del transceiver ESP32 |
+| Sin cortocircuito VCC–GND (TJA1051T/3 #2) | Pin 3 vs pin 2 | > 1 kΩ | Revisar soldadura o cableado del transceiver STM32 |
 | CANH no cortocircuitado a GND | Pin 7 vs GND | > 60 Ω | Revisar cableado del bus |
 | CANL no cortocircuitado a GND | Pin 6 vs GND | > 60 Ω | Revisar cableado del bus |
 
@@ -141,8 +142,10 @@ Realizar estos pasos **en orden** antes de aplicar alimentación al sistema comp
 
 | Medición | Punto | Valor esperado | Si falla |
 |----------|-------|----------------|----------|
-| Tensión VCC SN65HVD230 #1 | Pin 3 vs GND | 3.1 V – 3.5 V | Verificar fuente 3.3V y cableado |
-| Tensión VCC SN65HVD230 #2 | Pin 3 vs GND | 3.1 V – 3.5 V | Verificar fuente 3.3V y cableado |
+| Tensión VCC TJA1051T/3 #1 | Pin 3 vs GND | **4.5 V – 5.5 V** | Verificar fuente 5V y cableado |
+| Tensión VCC TJA1051T/3 #2 | Pin 3 vs GND | **4.5 V – 5.5 V** | Verificar fuente 5V y cableado |
+| Tensión VIO TJA1051T/3 #1 | Pin 5 vs GND | **3.1 V – 3.5 V** | Verificar conexión VIO a 3.3V ⚠️ |
+| Tensión VIO TJA1051T/3 #2 | Pin 5 vs GND | **3.1 V – 3.5 V** | Verificar conexión VIO a 3.3V ⚠️ |
 | Tensión CANH en reposo | Pin 7 vs GND | **~2.5 V** | Si es 0V o 3.3V, el bus está en error; verificar alimentación y GND común |
 | Tensión CANL en reposo | Pin 6 vs GND | **~2.5 V** | Igual que arriba |
 | Diferencial CANH − CANL | Medir con multímetro entre pin 7 y pin 6 | **~0 V** | Si hay diferencial, hay tráfico activo o un transceiver está transmitiendo de forma incorrecta |
@@ -171,14 +174,15 @@ Con analizador CAN (PCAN-USB, CANable, etc.):
 ## 6. Diagrama completo de conexión validado
 
 ```
-ESP32-S3                SN65HVD230 #1             Bus CAN              SN65HVD230 #2           STM32G474RE
+ESP32-S3                TJA1051T/3 #1             Bus CAN              TJA1051T/3 #2           STM32G474RE
                        (lado ESP32)             (par trenzado)         (lado STM32)
 
-GPIO4 (TX) ──────→   D [1]                                              D [1] ←────── PA12 (FDCAN1_TX)
-GPIO5 (RX) ←──────   R [4]  [7] CANH ──┬──────────────────────┬── CANH [7]    R [4] ──────→ PA11 (FDCAN1_RX)
-    +3.3V ─────────→ VCC [3]             │                      │             VCC [3] ←──────── +3.3V
+GPIO4 (TX) ──────→  TXD [1]                                             TXD [1] ←────── PA12 (FDCAN1_TX)
+GPIO5 (RX) ←──────  RXD [4]  [7] CANH ──┬──────────────────────┬── CANH [7]   RXD [4] ──────→ PA11 (FDCAN1_RX)
+    +5V ───────────→ VCC [3]             │                      │             VCC [3] ←──────── +5V (ext.)
+   +3.3V ──────────→ VIO [5] ⚠️          │                      │             VIO [5] ←──────── +3.3V ⚠️
       GND ─────────→ GND [2]          [120Ω]                 [120Ω]          GND [2] ←──────── GND
-      GND ─────────→  Rs [8]  [6] CANL ──┴──────────────────────┴── CANL [6]  Rs [8] ←──────── GND
+      GND ─────────→   S [8]  [6] CANL ──┴──────────────────────┴── CANL [6]   S [8] ←──────── GND
                        │                                               │
                      100nF ←→ GND                             100nF ←→ GND
                      (desacoplo VCC)                          (desacoplo VCC)
@@ -191,22 +195,24 @@ GND ESP32 ───────────────────────�
 
 ## 7. Lista de verificación antes de encender
 
-- [ ] SN65HVD230 #1 pin 1 (D) conectado a GPIO4 del ESP32
-- [ ] SN65HVD230 #1 pin 4 (R) conectado a GPIO5 del ESP32
-- [ ] SN65HVD230 #1 pin 3 (VCC) conectado a +3.3V
-- [ ] SN65HVD230 #1 pin 2 (GND) conectado a GND ESP32
-- [ ] SN65HVD230 #1 **pin 8 (Rs) conectado a GND** ← fácil de olvidar
-- [ ] SN65HVD230 #1 100nF entre VCC y GND
-- [ ] CANH (pin 7) y CANL (pin 6) del SN65HVD230 #1 al cable trenzado
+- [ ] TJA1051T/3 #1 pin 1 (TXD) conectado a GPIO4 del ESP32
+- [ ] TJA1051T/3 #1 pin 4 (RXD) conectado a GPIO5 del ESP32
+- [ ] TJA1051T/3 #1 pin 3 (VCC) conectado a **+5V** (fuente externa)
+- [ ] TJA1051T/3 #1 **pin 5 (VIO) conectado a +3.3V** ← ⚠️ OBLIGATORIO — protege ESP32
+- [ ] TJA1051T/3 #1 pin 2 (GND) conectado a GND ESP32
+- [ ] TJA1051T/3 #1 **pin 8 (S) conectado a GND** ← fácil de olvidar
+- [ ] TJA1051T/3 #1 100nF entre VCC y GND
+- [ ] CANH (pin 7) y CANL (pin 6) del TJA1051T/3 #1 al cable trenzado
 - [ ] 120Ω entre CANH y CANL en el extremo ESP32
-- [ ] CANH y CANL del cable trenzado al SN65HVD230 #2 (pines 7 y 6)
+- [ ] CANH y CANL del cable trenzado al TJA1051T/3 #2 (pines 7 y 6)
 - [ ] 120Ω entre CANH y CANL en el extremo STM32
-- [ ] SN65HVD230 #2 pin 1 (D) conectado a PA12 del STM32
-- [ ] SN65HVD230 #2 pin 4 (R) conectado a PA11 del STM32
-- [ ] SN65HVD230 #2 pin 3 (VCC) conectado a +3.3V
-- [ ] SN65HVD230 #2 pin 2 (GND) conectado a GND STM32
-- [ ] SN65HVD230 #2 **pin 8 (Rs) conectado a GND** ← fácil de olvidar
-- [ ] SN65HVD230 #2 100nF entre VCC y GND
+- [ ] TJA1051T/3 #2 pin 1 (TXD) conectado a PA12 del STM32
+- [ ] TJA1051T/3 #2 pin 4 (RXD) conectado a PA11 del STM32
+- [ ] TJA1051T/3 #2 pin 3 (VCC) conectado a **+5V** (fuente externa)
+- [ ] TJA1051T/3 #2 **pin 5 (VIO) conectado a +3.3V** ← ⚠️ OBLIGATORIO
+- [ ] TJA1051T/3 #2 pin 2 (GND) conectado a GND STM32
+- [ ] TJA1051T/3 #2 **pin 8 (S) conectado a GND** ← fácil de olvidar
+- [ ] TJA1051T/3 #2 100nF entre VCC y GND
 - [ ] **GND ESP32 y GND STM32 unidos con cable dedicado** ← OBLIGATORIO
 - [ ] Resistencia CANH–CANL medida = ~60 Ω (verificación eléctrica previa)
 - [ ] Sin cortocircuitos en VCC o GND de los transceivers
@@ -225,43 +231,46 @@ directamente contra el código fuente del firmware:
 | STM32 FDCAN1 TX pin | PA12 (AF9) | `Core/Inc/main.h`: `PIN_CAN_TX = GPIO_PIN_12` + `Core/Src/stm32g4xx_hal_msp.c`: `GPIO_AF9_FDCAN1` | ✅ |
 | STM32 FDCAN1 RX pin | PA11 (AF9) | `Core/Inc/main.h`: `PIN_CAN_RX = GPIO_PIN_11` + `Core/Src/stm32g4xx_hal_msp.c`: `GPIO_AF9_FDCAN1` | ✅ |
 | Velocidad de bus | 500 kbps | `esp32/src/main.cpp`: `convertSpeed(500)` + `Core/Src/main.c`: `170 MHz / (17 × 20) = 500 kbps` | ✅ |
-| Pin Rs (pin 8) | Conectar a GND | Hardware externo — no controlado por firmware | ✅ |
+| Pin S (pin 8) | Conectar a GND | Hardware externo — no controlado por firmware | ✅ |
 | Terminación | 120Ω en cada extremo | Hardware externo — no controlado por firmware | ✅ |
 | GND común | Obligatorio | Hardware externo — sin GND común los transceivers no operan correctamente | ✅ |
 
 ---
 
-## 9. Seguridad de voltaje — SN65HVD230 (3.3V nativo)
+## 9. Seguridad de voltaje — TJA1051T/3 (NXP, VCC=5V, VIO=3.3V)
 
-> ✅ **El SN65HVD230 opera nativamente a 3.3V.** Sus niveles lógicos de E/S son
-> de 3.3V, compatibles directamente con la ESP32-S3 y la STM32G474RE sin necesidad
-> de divisores resistivos ni adaptadores de nivel.
+> ✅ **El TJA1051T/3 requiere VCC = 5V pero tiene un pin VIO para adaptar los niveles lógicos I/O.**
+> Con VIO conectado a 3.3V, los niveles de TXD y RXD son de 3.3V, compatibles
+> directamente con la ESP32-S3 y la STM32G474RE sin necesidad de divisores resistivos.
 
-### SN65HVD230 (TI, 3.3V) — SEGURO
+### TJA1051T/3 (NXP, VCC=5V, VIO=3.3V) — SEGURO con VIO conectado
 
-El SN65HVD230 se alimenta a **3.3V** y sus salidas lógicas (pin 4, R) nunca superan
-3.3V → **no hay riesgo** de dañar ni la ESP32 ni la STM32. Este es el transceiver
-especificado en este proyecto.
+El TJA1051T/3 se alimenta a **5V** (VCC, pin 3) pero el pin **VIO** (pin 5) conectado a **3.3V**
+establece los niveles lógicos de RXD (pin 4) a 3.3V → **no hay riesgo** de dañar ni la ESP32
+ni la STM32, siempre que VIO esté correctamente conectado a 3.3V.
 
 | MCU | Pin RX | Nivel lógico transceiver | Consecuencia |
 |-----|--------|-------------------------|--------------|
 | **ESP32-S3** | GPIO5 | 3.3 V | ✅ Seguro (máx 3.6 V) |
 | **STM32G474RE** | PA11 | 3.3 V | ✅ Seguro |
 
-### Nota sobre transceivers de 5V (MCP2551, TJA1050, etc.)
+### Nota sobre transceivers sin pin VIO (MCP2551, TJA1050, TJA1051T/4, etc.)
 
-Si por error se usa un transceiver CAN de **5V** (como el MCP2551 o TJA1050),
-la salida RX será de **5V**:
+El proyecto usa el **TJA1051T/3** que tiene pin VIO para adaptar niveles lógicos a 3.3 V.
+Si por error se usa un transceiver CAN **sin pin VIO** (como el MCP2551, TJA1050, o TJA1051T**/4**),
+la salida RX será de **5V** porque sigue VCC:
 
 | MCU | Pin RX | ¿Tolera 5 V? | Consecuencia sin protección |
 |-----|--------|---------------|----------------------------|
 | **ESP32-S3** | GPIO5 | ❌ No (máx 3.6 V) | **Destrucción del GPIO o del chip** |
 | **STM32G474RE** | PA11 | ✅ Sí (pin FT) | Seguro, pero recomendable proteger |
 
-### Solución si se tiene un transceiver de 5V
+### Solución si se tiene un transceiver de 5V sin pin VIO
 
 Añadir un **divisor resistivo** (1 kΩ en serie + 2 kΩ a GND) en la línea RX
-de **cada** transceiver para bajar los 5 V a 3.3 V:
+de **cada** transceiver para bajar los 5 V a 3.3 V.
+
+> ⚠️ **La solución correcta para este proyecto es usar TJA1051T/3** (con pin VIO) y conectar VIO a 3.3 V.
 
 ```
 Transceiver pin 4 (RX, 5V) ──── [1 kΩ] ──┬──→ GPIO del MCU (3.3 V)
@@ -276,8 +285,9 @@ Transceiver pin 4 (RX, 5V) ──── [1 kΩ] ──┬──→ GPIO del MCU 
 La línea TX (MCU → transceiver) **no necesita divisor** porque 3.3 V es
 suficiente para que el transceiver detecte un nivel HIGH (V_IH min = 2.0 V).
 
-> **Recomendación:** Usar siempre el **SN65HVD230** (3.3V nativo). Si se ha comprado
-> un transceiver de 5V, añadir los divisores resistivos **antes de alimentar**.
+> **Recomendación:** Usar siempre el **TJA1051T/3** (NXP) con VIO=3.3V. **No usar TJA1051T/4** (sin VIO)
+> con el ESP32-S3 sin divisores externos. Si se ha comprado un transceiver de 5V sin VIO,
+> añadir los divisores resistivos **antes de alimentar**.
 > Consultar `docs/ESP32_STM32_CAN_CONNECTION.md` para el diagrama completo.
 
 ---
@@ -287,5 +297,5 @@ suficiente para que el transceiver detecte un nivel HIGH (V_IH min = 2.0 V).
 - `docs/ESP32_STM32_CAN_CONNECTION.md` — Guía completa de conexión CAN
 - `docs/CAN_BUS_AUDIT_REPORT.md` — Auditoría firmware y protocolo CAN
 - `docs/CAN_CONTRACT_FINAL.md` — Protocolo CAN rev 1.3 (IDs y DLCs)
-- TI SN65HVD230 Datasheet: 3.3-V CAN Bus Transceiver (Texas Instruments)
+- NXP TJA1051T/3 Datasheet: High-Speed CAN Transceiver with VIO (NXP/Nexperia)
 - ISO 11898-2: Road vehicles — High-speed CAN physical layer

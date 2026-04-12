@@ -28,8 +28,8 @@ Dominio STM32                 Bus CAN físico          Dominio ESP32
 ──────────────                ──────────────          ─────────────
 
 STM32G474RE                                           ESP32-S3
-  PB9 (FDCAN1_TX) ──► TJA1051T/3_A                   TJA1051T/3_B ◄── GPIO4 (TX)
-  PB8 (FDCAN1_RX) ◄── TJA1051T/3_A ──CANH/CANL──── TJA1051T/3_B ──► GPIO5 (RX)
+  PA12 (FDCAN1_TX) ──► TJA1051T/3_A                   TJA1051T/3_B ◄── GPIO4 (TX)
+  PA11 (FDCAN1_RX) ◄── TJA1051T/3_A ──CANH/CANL──── TJA1051T/3_B ──► GPIO5 (RX)
 
   GND_STM32 ──────────► GND_A                         GND_B ◄── GND_ESP32
   5V_sistema ─────────► VCC_A                         VCC_B ◄── 5V_sistema
@@ -74,8 +74,8 @@ Dominio GND_STM32                  │ Barrera │    Dominio GND_CAN (= GND_ESP
 ──────────────────────────────────  │         │    ──────────────────────────────────
 
 STM32G474RE (3.3 V)                │         │
-  PB9 (FDCAN1_TX) ──► [Aislador]──►│~~~~~~~~~│──► TXD TJA1051T/3_A ──►┐
-  PB8 (FDCAN1_RX) ◄── [Aislador]◄──│~~~~~~~~~│◄── RXD TJA1051T/3_A   │   CANH ═══ CANH ─── TJA1051T/3_B ─── ESP32
+  PA12 (FDCAN1_TX) ──► [Aislador]──►│~~~~~~~~~│──► TXD TJA1051T/3_A ──►┐
+  PA11 (FDCAN1_RX) ◄── [Aislador]◄──│~~~~~~~~~│◄── RXD TJA1051T/3_A   │   CANH ═══ CANH ─── TJA1051T/3_B ─── ESP32
                                    │         │         VCC ◄── 5V_iso  │   CANL ═══ CANL ─── TJA1051T/3_B
   GND_STM32                        │  DC-DC  │         GND ─► GND_CAN  │
   3.3V_STM32 ──► Aislador VDD_1   │ aislado │         VCC ◄── 5V_iso ◄┘

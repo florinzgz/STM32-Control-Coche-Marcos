@@ -20,8 +20,8 @@
 |-----------|-----------|-------|
 | STM32G474RE Nucleo/custom board | USB (ST-Link) for serial monitor | Powers MCU via USB or external 24 V supply |
 | ESP32-S3 with ST7796 480×320 TFT display | SPI (display), CAN bus to STM32 | USB serial for ESP32 log output |
-| CAN bus wiring | STM32 PA11 (FDCAN1_RX) / PA12 (FDCAN1_TX) ↔ ESP32 GPIO4/GPIO5 via SN65HVD230 | 500 kbps, 120 Ω termination at both ends, Pin 8 (Rs) → GND |
-| CAN transceiver modules (×2) | One per MCU (e.g., SN65HVD230 or MCP2551) | Required for physical CAN signaling |
+| CAN bus wiring | STM32 PA11 (FDCAN1_RX) / PA12 (FDCAN1_TX) ↔ ESP32 GPIO4/GPIO5 via TJA1051T/3 | 500 kbps, 120 Ω termination at both ends, Pin 8 (S) → GND, VIO (Pin 5) → 3.3V |
+| CAN transceiver modules (×2) | One per MCU — TJA1051T/3 (NXP) | VCC=5V, VIO=3.3V. Required for physical CAN signaling |
 | 4× traction motors with H-bridge drivers | TIM1 CH1–CH4 PWM outputs | Wheels must be off the ground or on a stand |
 | Steering motor with H-bridge driver | TIM8 CH3 PWM output | Connected to physical steering rack |
 | E6B2-CWZ6C rotary encoder (4800 CPR) | TIM2 CH1 (PA0) / CH2 (PA1) quadrature inputs | Mechanically coupled to steering column |

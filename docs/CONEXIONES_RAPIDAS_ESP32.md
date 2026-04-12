@@ -39,9 +39,12 @@
 |----------|---|-------------|--------|
 | GPIO 4 | → | Pin 1 | TXD (Transmisión) |
 | GPIO 5 | → | Pin 4 | RXD (Recepción) |
-| 5V | → | Pin 3 | VCC (Alimentación) |
+| 5V (ext.) | → | Pin 3 | VCC (Alimentación 5 V) |
+| **3.3V** | → | **Pin 5** | **VIO (Nivel lógico I/O) — ⚠️ OBLIGATORIO** |
 | GND | → | Pin 2 | GND (Tierra) |
 | GND | → | Pin 8 | S (Modo Normal) |
+
+> ⚠️ **CRÍTICO:** El pin 5 (VIO) **DEBE** conectarse a 3.3 V. Si se deja flotante o a 5 V, el pin RXD producirá niveles de 5 V que **destruyen el GPIO5 del ESP32-S3** (máx. absoluto 3.6 V).
 
 ### Bus CAN Físico
 
@@ -86,8 +89,9 @@
 
 1. ESP32 3.3V → GND: **3.30V ± 0.1V**
 2. Display VCC → GND: **3.30V ± 0.1V**
-3. TJA1051 VCC → GND: **5.00V ± 0.2V**
-4. TF-Mini Plus VCC → GND: **5.00V ± 0.2V**
+3. TJA1051 VCC (pin 3) → GND: **5.00V ± 0.2V**
+4. TJA1051 VIO (pin 5) → GND: **3.30V ± 0.1V** ⚠️ Si ≠ 3.3V, NO conectar ESP32
+5. TF-Mini Plus VCC → GND: **5.00V ± 0.2V**
 5. CANH → GND (idle): **~2.5V**
 6. CANL → GND (idle): **~2.5V**
 7. CANH ↔ CANL (resistencia): **60Ω** (con terminación)
@@ -144,8 +148,8 @@
 │             │
 │  GPIO 18 ◄──┼─── TF-Mini Plus TX (UART1 RX, 115200 bps, 3.3V direct)
 │             │
-│  3.3V ──────┼──→ Display VCC
-│  5V ────────┼──→ TJA1051 VCC + TF-Mini Plus VCC
+│  3.3V ──────┼──→ Display VCC + TJA1051 VIO (pin 5) ⚠️
+│  5V (ext.) ─┼──→ TJA1051 VCC (pin 3) + TF-Mini Plus VCC
 │  GND ───────┼──→ Común (todos)
 │             │
 └─────────────┘

@@ -209,8 +209,8 @@ sensores de presión de rueda, entradas de seguridad externas, señales de carro
 
 | Canal | Señal | Dirección | Pin STM32 | Velocidad requerida |
 |-------|-------|-----------|-----------|---------------------|
-| **ISO-1** | CAN_TX | STM32 → ESP32 | PB9 (FDCAN1_TX AF9) | ≥ 5 Mbps |
-| **ISO-2** | CAN_RX | ESP32 → STM32 | PB8 (FDCAN1_RX AF9) | ≥ 5 Mbps |
+| **ISO-1** | CAN_TX | STM32 → ESP32 | PA12 (FDCAN1_TX AF9) | ≥ 5 Mbps |
+| **ISO-2** | CAN_RX | ESP32 → STM32 | PA11 (FDCAN1_RX AF9) | ≥ 5 Mbps |
 
 Ver Sección 9 para detalles del circuito y chips recomendados.
 
@@ -230,8 +230,8 @@ Tabla completa de todas las señales aisladas, lista para ejecutar en taller.
 | 6 | **WHEEL_RR** | LJ12A3 cubo rueda RR (NPN OC, 6–36 V) | PB15 / EXTI15 | **PC817** | Placa-A, canal A4 | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FL |
 | 7 | **STEER_CENTER** | LJ12A3 cremallera dirección (NPN OC, 6–36 V) | PB5 / EXTI5 | **PC817** | Placa-A, canal A5 | 12–24 V sensor, cerca motor dirección | 3.3 V STM32 | Pulso único en arranque; falsa detección → cero encoder incorrecto; picos inductivos relé DIR |
 | 8 | **ENC_Z** | E6B2-CWZ6C salida Z (NPN OC, 5–24 V) | PB4 / EXTI4 *(†)* | **PC817** | Placa-A, canal A6 | VCC_encoder dominio | 3.3 V STM32 | < 50 Hz; pulso 41.7 µs >> 6 µs PC817; EXTI no activo en firmware actual |
-| 9 | **CAN_TX** | STM32G474RE PB9 (FDCAN1_TX) | PB9 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
-| 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PB8 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
+| 9 | **CAN_TX** | STM32G474RE PA12 (FDCAN1_TX) | PA12 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
+| 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PA11 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
 
 *(†) ENC_Z: no activo en el firmware actual. Requiere configurar EXTI4 y añadir ISR cuando
 se decida activar. Ver Sección 10.5.*
@@ -403,7 +403,7 @@ de flanco de EXTI.** ✅
 
 ### 9.1 Situación actual
 
-El bus CAN conecta el STM32G474RE (PB8/PB9) con el ESP32-S3 a través del transceiver
+El bus CAN conecta el STM32G474RE (PA11/PA12) con el ESP32-S3 a través del transceiver
 TJA1051T/3. El transceiver ya rechaza el ruido de modo común en el bus diferencial (±25 V),
 pero ambas placas (STM32 y ESP32) comparten la referencia de masa del sistema. En un
 vehículo con motores DC de 24 V, los transitorios en la masa del chasis pueden acoplar
@@ -425,8 +425,8 @@ de masa supera la tolerancia del GPIO.
 #### Opción A — Chip de aislamiento digital + DC-DC separado
 
 ```
-STM32 PB9 (TX) ──► ADuM1201 canal A ──► TXD del TJA1051T/3 (lado aislado)
-STM32 PB8 (RX) ◄── ADuM1201 canal B ◄── RXD del TJA1051T/3 (lado aislado)
+STM32 PA12 (TX) ──► ADuM1201 canal A ──► TXD del TJA1051T/3 (lado aislado)
+STM32 PA11 (RX) ◄── ADuM1201 canal B ◄── RXD del TJA1051T/3 (lado aislado)
 
 Alimentación del lado aislado:
   VCC_3.3V → SN6501 (driver de bobina) → transformador 1:1 → rectificado → 3.3V_aislada
@@ -459,8 +459,8 @@ puede adquirir componentes, la **Opción B** (ISO1050) es más limpia y compacta
 Lado STM32 (GND_STM32)          Barrera galvánica         Lado CAN (GND_CAN)
 ───────────────────────          ─────────────────          ──────────────────
 
-STM32 PB9 ──────────────► ADuM1201 [A→B] ──────────────► TXD (TJA1051T/3)
-STM32 PB8 ◄────────────── ADuM1201 [B→A] ◄────────────── RXD (TJA1051T/3)
+STM32 PA12 ──────────────► ADuM1201 [A→B] ──────────────► TXD (TJA1051T/3)
+STM32 PA11 ◄────────────── ADuM1201 [B→A] ◄────────────── RXD (TJA1051T/3)
 
 3.3V_STM32 ──► ADuM1201 Vdd1     ADuM1201 Vdd2 ◄── 3.3V_aislada (del DC-DC)
 
@@ -499,7 +499,7 @@ proveniente del PC817. **Ningún cambio de firmware necesario.**
 
 ### 10.4 Bus CAN — sin cambio de firmware
 
-La interfaz software de FDCAN1 (PB8/PB9) no cambia. El aislador digital y el transceiver
+La interfaz software de FDCAN1 (PA11/PA12) no cambia. El aislador digital y el transceiver
 (TJA1051T/3 o ISO1050) son transparentes para el firmware. El protocolo CAN, los filtros
 de RX, el heartbeat y los temporizadores de timeout funcionan exactamente igual.
 **Ningún cambio de firmware necesario.**

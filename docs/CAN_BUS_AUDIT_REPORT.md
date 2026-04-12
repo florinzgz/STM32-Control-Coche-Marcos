@@ -311,11 +311,14 @@ BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR
 |-----------|-------|--------|
 | Part number | TJA1051T/3 | `CAN_PROTOCOL.md`, `ESP32_STM32_CAN_CONNECTION.md` |
 | Quantity | 2 (one per MCU) | `ESP32_STM32_CAN_CONNECTION.md` |
-| VCC | 5V | Datasheet |
-| STB pin (Silent mode) | Connected to GND (normal mode) | `ESP32_STM32_CAN_CONNECTION.md` line 30/40 |
-| Decoupling | 100 nF ceramic close to VCC | `ESP32_STM32_CAN_CONNECTION.md` line 88 |
+| VCC | **5 V** (4.5–5.5 V) | Datasheet NXP |
+| VIO | **3.3 V** (connected to MCU supply) | Datasheet NXP — obligatorio para niveles lógicos 3.3 V |
+| S pin (Silent mode) | Connected to GND (normal mode) | `ESP32_STM32_CAN_CONNECTION.md` |
+| Decoupling | 100 nF ceramic close to VCC | `ESP32_STM32_CAN_CONNECTION.md` |
 
-**Result: ✅ TJA1051T/3 properly configured for normal (non-silent) mode.**
+> ⚠️ **CRÍTICO:** Pin 5 (VIO) **DEBE** conectarse a 3.3 V en ambos nodos. Si se deja flotante, RXD sigue VCC (5 V) y **destruye el GPIO5 del ESP32-S3** (máx. 3.6 V).
+
+**Result: ✅ TJA1051T/3 properly configured for normal (non-silent) mode. VIO = 3.3 V required.**
 
 ### 5.2 Bus Termination (120Ω)
 

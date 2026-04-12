@@ -37,18 +37,18 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
 
 | Canal | Sensor | Shunt | Corriente máx. |
 |-------|--------|-------|-----------------|
-| 0 | Motor FL | 1 mΩ | 50 A |
-| 1 | Motor FR | 1 mΩ | 50 A |
-| 2 | Motor RL | 1 mΩ | 50 A |
-| 3 | Motor RR | 1 mΩ | 50 A |
-| 4 | Batería 24 V | 0.5 mΩ | 100 A |
-| 5 | Dirección | 1 mΩ | 50 A |
+| 0 | Motor FL | 1.5 mΩ | 50 A |
+| 1 | Motor FR | 1.5 mΩ | 50 A |
+| 2 | Motor RL | 1.5 mΩ | 50 A |
+| 3 | Motor RR | 1.5 mΩ | 50 A |
+| 4 | Batería 24 V | 0.75 mΩ | 100 A |
+| 5 | Dirección | 1.5 mΩ | 50 A |
 
 ### Resistencias y protección
 
 - **Pull-ups I2C:** 4.7 kΩ a 3.3 V en SDA y SCL (una sola vez en el bus, no por sensor).
-- **Shunt motores:** 1 mΩ — tolerancia ≤1 %, potencia ≥2.5 W (P = 50² × 0.001 = 2.5 W).
-- **Shunt batería:** 0.5 mΩ — tolerancia ≤1 %, potencia ≥5 W (P = 100² × 0.0005 = 5 W).
+- **Shunt motores:** 1.5 mΩ — tolerancia ≤1 %, potencia ≥3.75 W (P = 50² × 0.0015 = 3.75 W).
+- **Shunt batería:** 0.75 mΩ — tolerancia ≤1 %, potencia ≥7.5 W (P = 100² × 0.00075 = 7.5 W).
 
 ### Alimentación
 
@@ -60,8 +60,8 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
 
 - **400 kHz:** necesario para leer 6 sensores dentro de la ventana de control de 10 ms.
 - **TCA9548A:** permite que todos los INA226 tengan la misma dirección 0x40, simplificando el PCB y el firmware.
-- **Shunt 0.5 mΩ para batería:** reduce la caída de tensión a 50 mV @ 100 A (aceptable) frente a 100 mV con 1 mΩ.
-- **Shunt 1 mΩ para motores:** maximiza la resolución del ADC del INA226 (LSB = 2.5 µV → 2.5 A/bit a 1 mΩ).
+- **Shunt 0.75 mΩ para batería:** reduce la caída de tensión a 75 mV @ 100 A (aceptable).
+- **Shunt 1.5 mΩ para motores:** maximiza la resolución del ADC del INA226 (LSB = 2.5 µV → 1.67 A/bit a 1.5 mΩ).
 
 ### Qué ocurre si falla
 
@@ -89,7 +89,7 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
      ┌────────┴────────┐
      │  VCC ── 3.3V    │
      │  VS+ ──┐        │
-     │        ├─ Shunt (1 mΩ o 0.5 mΩ)
+     │        ├─ Shunt (1.5 mΩ o 0.75 mΩ)
      │  VS- ──┘        │
      │  GND ── GND     │
      │  A0=A1=GND→0x40 │

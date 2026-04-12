@@ -16,14 +16,14 @@ Extraído de `Motor_Init()` en `motor_control.c`:
 | Motor  | Timer | RPWM Canal    | RPWM Pin | LPWM Canal    | LPWM Pin | Mismo timer |
 |--------|-------|---------------|----------|---------------|----------|-------------|
 | FL     | TIM1  | TIM_CHANNEL_1 | PA8      | TIM_CHANNEL_2 | PA9      | **Sí**      |
-| FR     | TIM1  | TIM_CHANNEL_3 | PA10     | TIM_CHANNEL_4 | PA11     | **Sí**      |
+| FR     | TIM1  | TIM_CHANNEL_3 | PA10     | TIM_CHANNEL_4 | PC3      | **Sí**      |
 | RL     | TIM8  | TIM_CHANNEL_1 | PC6      | TIM_CHANNEL_2 | PC7      | **Sí**      |
 | RR     | TIM8  | TIM_CHANNEL_3 | PC8      | TIM_CHANNEL_4 | PC9      | **Sí**      |
 | STEER  | TIM3  | TIM_CHANNEL_1 | PA6      | TIM_CHANNEL_2 | PA7      | **Sí**      |
 
 Todos los motores usan el mismo timer para RPWM y LPWM.
 Los AF de los pines no cambian respecto a la versión anterior:
-- PA8–PA11: `GPIO_AF6_TIM1`
+- PA8–PA10: `GPIO_AF6_TIM1`, PC3: `GPIO_AF2_TIM1`
 - PC6–PC9:  `GPIO_AF4_TIM8`
 - PA6–PA7:  `GPIO_AF2_TIM3`
 
@@ -173,7 +173,7 @@ El freno activo del BTS7960 requeriría RPWM = 100% o LPWM = 100%.
 5. MX_ADC1_Init()
 6. MX_FDCAN1_Init()
 7. MX_I2C1_Init()
-8. MX_TIM1_Init()    ← CCR=0, BREAK2/LOCKUP armado; pines PA8-PA11 como AF PP
+8. MX_TIM1_Init()    ← CCR=0, BREAK2/LOCKUP armado; pines PA8-PA10+PC3 como AF PP
 9. MX_TIM2_Init()
 10. MX_TIM3_Init()   ← CCR=0; pines PA6-PA7 como AF PP
 11. MX_TIM8_Init()   ← CCR=0, BREAK2/LOCKUP armado; pines PC6-PC9 como AF PP
@@ -247,8 +247,10 @@ GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
 | RPWM_STEER (TIM3)  | CCR1 = 0U (directo, sin buffer)                 |
 | LPWM_STEER (TIM3)  | CCR2 = 0U (directo, sin buffer)                 |
 | EN_FL (PC5)        | LOW vía BSRR reset                              |
+| EN_FR (PC0)        | LOW vía BSRR reset                              |
+| EN_RL (PC1)        | LOW vía BSRR reset                              |
 | EN_RR (PC13)       | LOW vía BSRR reset                              |
-| EN_FR/RL/STEER     | Tied 3.3V en HW — permanecen HIGH               |
+| EN_STEER (PC4)     | LOW vía BSRR reset                              |
 | RELAY_TRAC (PC11)  | LOW vía BSRR reset                              |
 
 **LOCKUP hardware path (opción A, automático):**

@@ -60,10 +60,13 @@
 | PA6 RPWM_STEER | PA6 | BTS7960 STEER RPWM | 24 AWG |
 | PA7 LPWM_STEER | PA7 | BTS7960 STEER LPWM | 24 AWG |
 | PC5 EN_FL | PC5 | BTS7960 FL R_EN + L_EN | 24 AWG |
+| PC0 EN_FR | PC0 | BTS7960 FR R_EN + L_EN | 24 AWG |
+| PC1 EN_RL | PC1 | BTS7960 RL R_EN + L_EN | 24 AWG |
 | PC13 EN_RR | PC13 | BTS7960 RR R_EN + L_EN | 24 AWG |
+| PC4 EN_STEER | PC4 | BTS7960 STEER R_EN + L_EN | 24 AWG |
 | PC10/11/12 RELAY | PC10, PC11, PC12 | Módulos relé (opto) | 24 AWG |
 | PB10/11 LED RELAY | PB10, PB11 | Módulos relé LED | 24 AWG |
-| PB8/PB9 CAN | PB8, PB9 | Transceiver TJA1051 | 24 AWG |
+| PA11/PA12 CAN | PA11, PA12 | Transceiver TJA1051T/3 | 24 AWG |
 | PB6/PB7 I2C | PB6, PB7 | TCA9548A SCL/SDA | 24 AWG |
 | PB0 OneWire | PB0 | Bus DS18B20 | 24 AWG |
 | PA3 ADC Pedal | PA3 | Divisor resistivo pedal | 28 AWG apantallado |
@@ -95,8 +98,7 @@
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 2 | Cable señal (RPWM + LPWM) | 24 AWG, ~30–50 cm | Del STM32 al BTS7960 — NO debe correr paralelo a cables de potencia |
-| 1 | Cable EN (si aplica: solo FL y RR) | 24 AWG | PC5 (FL) o PC13 (RR) al R_EN + L_EN del driver |
-| — | Puente de cable | 24 AWG, 5 cm | Unir R_EN y L_EN del mismo módulo (FR, RL: conectar a 3.3V fijo) |
+| 1 | Cable EN | 24 AWG | Desde pin EN del STM32 (PC0/PC1/PC4/PC5/PC13) al R_EN + L_EN del driver |
 
 ### Materiales para el cableado de potencia (por cada BTS7960 de tracción)
 

@@ -159,7 +159,7 @@ NOTAS:
 │     5V       │ Alimentación │   Pin 3 VCC  │ Fuente 5V regulada       │
 │     GND      │ Tierra       │   Pin 2 GND  │ Común con ESP32          │
 │     GND      │ Normal Mode  │   Pin 8 S    │ Desactiva modo silencioso│
-│     NC       │ Referencia   │   Pin 5 VREF │ No conectado             │
+│    3.3V      │ Nivel I/O    │   Pin 5 VIO  │ ⚠️ OBLIGATORIO → 3.3V    │
 └──────────────┴──────────────┴──────────────┴──────────────────────────┘
 ```
 
@@ -176,10 +176,10 @@ DevKitC-1           (lado ESP32)      (cable trenzado)    (lado STM32)          
 
 ┌──────────┐      ┌──────────────┐    ┌──────────────┐  ┌──────────────┐      ┌──────────┐
 │          │      │              │    │              │  │              │      │          │
-│  GPIO4 ──┼─────►│1 TXD    CANH├────┤7  ════════  7├──┤7 CANH    TXD│◄─────┼── PB9    │
+│  GPIO4 ──┼─────►│1 TXD    CANH├────┤7  ════════  7├──┤7 CANH    TXD│◄─────┼── PA12   │
 │   (TX)   │      │         (7)  │    │    CANH      │  │  (7)         │      │  (TX)    │
 │          │      │              │    │     ║║       │  │              │      │          │
-│  GPIO5 ◄─┼──────│4 RXD         │    │    120Ω      │  │         RXD 4├──────┼─► PB8    │
+│  GPIO5 ◄─┼──────│4 RXD         │    │    120Ω      │  │         RXD 4├──────┼─► PA11   │
 │   (RX)   │      │              │    │     ║║       │  │              │      │  (RX)    │
 │          │      │         CANL├────┤6  ════════  6├──┤6 CANL        │      │          │
 │   5V  ───┼─────►│3 VCC    (6)  │    │    CANL      │  │  (6)     VCC 3│◄─────┼── 5V     │
@@ -247,6 +247,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 ├──────────┼──────────────┼────────────────────────────────────────────┤
 │   3.3V   │ Alimentación │ Display VCC                                │
 │    5V    │ Alimentación │ TJA1051 VCC (pin 3)                        │
+│   3.3V   │ Nivel I/O    │ TJA1051 VIO (pin 5) ⚠️ OBLIGATORIO         │
 │   GND    │ Tierra       │ Común: Display, TJA1051, STM32            │
 └──────────┴──────────────┴────────────────────────────────────────────┘
 ```
@@ -304,7 +305,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │ Cant │      Componente        │ Longitud │          Uso             │
 ├──────┼────────────────────────┼──────────┼──────────────────────────┤
 │  1   │ Cable Dupont 20 pines  │  15 cm   │ ESP32 ↔ Display          │
-│  1   │ Cable Dupont 4 pines   │  10 cm   │ ESP32 ↔ TJA1051          │
+│  1   │ Cable Dupont 5 pines   │  10 cm   │ ESP32 ↔ TJA1051 (TXD,RXD,VCC,VIO,GND) │
 │  1   │ Par trenzado 24 AWG    │  Var.    │ CANH/CANL (CAN bus)      │
 │  2   │ Resistencia 120Ω 1/4W  │   —      │ Terminación CAN          │
 │  2   │ Capacitor 100nF        │   —      │ Desacoplo VCC (display)  │
@@ -347,7 +348,8 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │ ☐  │ 6. Conectar touch panel (21)                     │    │
 │ ☐  │ 7. Cargar firmware de prueba display             │    │
 │ ☐  │ 8. Verificar pantalla se enciende                │    │
-│ ☐  │ 9. Conectar 5V a TJA1051 VCC                     │    │
+│ ☐  │ 9. Conectar 5V a TJA1051 VCC (pin 3)              │    │
+│ ☐  │ 9b. Conectar 3.3V a TJA1051 VIO (pin 5) ⚠️       │    │
 │ ☐  │ 10. Conectar GPIO 4 y 5 a TJA1051                │    │
 │ ☐  │ 11. Conectar pin S (Silent) a GND                │    │
 │ ☐  │ 12. Instalar capacitor 100nF en VCC del TJA1051  │    │
