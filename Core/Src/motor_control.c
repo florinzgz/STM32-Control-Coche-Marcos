@@ -509,6 +509,7 @@ static inline void DWT_Init(void)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;   /* Enable trace */
     DWT->CYCCNT = 0U;
     DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;             /* Start counter */
+    __DSB();  /* Ensure CYCCNTENA write completes before first CYCCNT read */
     dwt_cycles_per_us = SystemCoreClock / 1000000U;
     dwt_initialized = 1U;                              /* Arm the guard */
 }
@@ -2254,6 +2255,20 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
      * unnecessary PWM glitches during normal operation.  The
      * direction-change case within DRIVE is handled separately
      * by Motor_SetSigned()'s own dead-state enforcement.
+     *
+     * OCPRELOAD INTERACTION: With OCPreload enabled, the CCR=0 writes
+     * above go to the preload (shadow) register and only take effect
+     * at the next timer UEV (~25 µs).  If the new-mode CCR writes
+     * (below) happen before UEV, the preload is overwritten and the
+     * zero-duty state never appears on the physical outputs.  This
+     * is acceptable because:
+     *   a) All RPWM/LPWM pairs share the same timer → UEV updates
+     *      both CCRs atomically, preventing any window where both
+     *      channels are simultaneously non-zero.
+     *   b) The BTS7960 integrates its own internal FET dead-time.
+     *   c) The delay primarily covers BTS7960 INH (EN) settling time
+     *      (~0.2 µs t_d(on)/t_d(off)) and 74HC244 buffer propagation
+     *      (~15 ns), both of which are satisfied by the 5 µs wait.
      *
      * CRITICAL SECTION: The pre-step + mode change must be atomic
      * with respect to interrupts.  An ISR preempting between the
