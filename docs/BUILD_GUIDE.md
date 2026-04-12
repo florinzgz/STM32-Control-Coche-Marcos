@@ -139,18 +139,24 @@ Si el proyecto no tiene configuración `.ioc`, crear una nueva:
 ```
 Pinout & Configuration:
 ├─ TIM1 (Internal Clock, PWM Generation CH1-CH4)
-│  ├─ CH1: PA8 (PWM_FL)
-│  ├─ CH2: PA9 (PWM_FR)
-│  ├─ CH3: PA10 (PWM_RL)
-│  └─ CH4: PA11 (PWM_RR)
-├─ TIM8 (Internal Clock, PWM Generation CH3)
-│  └─ CH3: PC8 (PWM_STEER)
+│  ├─ CH1: PA8 (RPWM_FL)
+│  ├─ CH2: PA9 (LPWM_FL)
+│  ├─ CH3: PA10 (RPWM_FR)
+│  └─ CH4: PC3 (LPWM_FR)
+├─ TIM8 (Internal Clock, PWM Generation CH1-CH4)
+│  ├─ CH1: PC6 (RPWM_RL)
+│  ├─ CH2: PC7 (LPWM_RL)
+│  ├─ CH3: PC8 (RPWM_RR)
+│  └─ CH4: PC9 (LPWM_RR)
+├─ TIM3 (Internal Clock, PWM Generation CH1-CH2)
+│  ├─ CH1: PA6 (RPWM_STEER)
+│  └─ CH2: PA7 (LPWM_STEER)
 ├─ TIM2 (Encoder Mode)
 │  ├─ CH1: PA15 (ENC_A)
 │  └─ CH2: PB3 (ENC_B)
 ├─ FDCAN1
-│  ├─ TX: PB9
-│  └─ RX: PB8
+│  ├─ TX: PA12
+│  └─ RX: PA11
 ├─ I2C1
 │  ├─ SCL: PB6
 │  └─ SDA: PB7

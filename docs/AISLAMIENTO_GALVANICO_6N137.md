@@ -211,10 +211,9 @@ los motores (en el habitáculo del conductor).
 
 | Señal | Pines | Cantidad | Frecuencia |
 |-------|-------|----------|------------|
-| PWM tración | PA8–PA11 | 4 | 20 kHz |
-| PWM dirección | PC8 | 1 | 20 kHz |
-| DIR (dirección) | PC0–PC4 | 5 | DC / conmutación lenta |
-| EN (habilitación) | PC5–PC7, PC9, PC13 | 5 | DC / conmutación lenta |
+| RPWM/LPWM tracción | PA8-PA10+PC3 (TIM1), PC6-PC9 (TIM8) | 8 | 20 kHz |
+| RPWM/LPWM dirección | PA6-PA7 (TIM3) | 2 | 20 kHz |
+| EN (habilitación) | PC0, PC1, PC4, PC5, PC13 | 5 | DC / conmutación lenta |
 
 **Análisis:** Estas señales van **desde** el STM32 **hacia** el entorno ruidoso (BTS7960).
 El riesgo es la inyección inversa de ruido, que el BTS7960 atenúa con su propia

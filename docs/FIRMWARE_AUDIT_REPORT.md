@@ -53,7 +53,7 @@ The inactive channel is always zeroed **before** the active channel is set. Both
 | Motor | RPWM Channel | LPWM Channel | Timer | Protection |
 |-------|-------------|-------------|-------|------------|
 | FL | TIM1_CH1 (PA8) | TIM1_CH2 (PA9) | TIM1 | BREAK2/LOCKUP |
-| FR | TIM1_CH3 (PA10) | TIM1_CH4 (PA11) | TIM1 | BREAK2/LOCKUP |
+| FR | TIM1_CH3 (PA10) | TIM1_CH4 (PC3) | TIM1 | BREAK2/LOCKUP |
 | RL | TIM8_CH1 (PC6) | TIM8_CH2 (PC7) | TIM8 | BREAK2/LOCKUP |
 | RR | TIM8_CH3 (PC8) | TIM8_CH4 (PC9) | TIM8 | BREAK2/LOCKUP |
 | STEER | TIM3_CH1 (PA6) | TIM3_CH2 (PA7) | TIM3 | Software only |

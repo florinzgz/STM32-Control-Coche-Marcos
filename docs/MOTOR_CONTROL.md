@@ -54,7 +54,7 @@ El diseño original consideraba el módulo **PCA9685** (16 canales PWM vía I²C
 │  │RPWM  │ LPWM  │RPWM   │  │RPWM  │ LPWM  │RPWM   │  │RPWM  │ LPWM       │ │
 │  │ FL   │  FL   │ FR    │  │ RL   │  RL   │ RR    │  │STEER │ STEER       │ │
 │  │      │       │ CH4   │  │      │       │ CH4   │  │      │             │ │
-│  │      │       │ PA11  │  │      │       │ PC9   │  │      │             │ │
+│  │      │       │ PC3   │  │      │       │ PC9   │  │      │             │ │
 │  │      │       │LPWM   │  │      │       │LPWM   │  │      │             │ │
 │  │      │       │ FR    │  │      │       │ RR    │  │      │             │ │
 │  └──┬───┴──┬────┴──┬────┘  └──┬───┴──┬────┴──┬────┘  └──┬───┴──┬──────────┘ │

@@ -58,7 +58,7 @@ htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 oc.OCMode     = TIM_OCMODE_PWM1;
 oc.OCPolarity = TIM_OCPOLARITY_HIGH;
 oc.OCPreload  = TIM_OCPRELOAD_ENABLE;   /* CCR buffered — applied at update event */
-/* Channels: CH1 (PA8/FL), CH2 (PA9/FR), CH3 (PA10/RL), CH4 (PA11/RR) */
+/* Channels: CH1 (PA8/FL RPWM), CH2 (PA9/FL LPWM), CH3 (PA10/FR RPWM), CH4 (PC3/FR LPWM) */
 ```
 
 **Cálculo de frecuencia (center-aligned):**
@@ -125,10 +125,10 @@ Este timer no genera PWM — cuenta pulsos del encoder E6B2-CWZ6C. No se ve afec
 
 ```c
 /* Core/Src/motor_control.c — Motor_Init() */
-motor_fl.timer = &htim1;  motor_fl.channel = TIM_CHANNEL_1;   /* PA8 */
-motor_fr.timer = &htim1;  motor_fr.channel = TIM_CHANNEL_2;   /* PA9 */
-motor_rl.timer = &htim1;  motor_rl.channel = TIM_CHANNEL_3;   /* PA10 */
-motor_rr.timer = &htim1;  motor_rr.channel = TIM_CHANNEL_4;   /* PA11 */
+motor_fl.timer = &htim1;  motor_fl.channel = TIM_CHANNEL_1;   /* PA8 RPWM */
+motor_fr.timer = &htim1;  motor_fr.channel = TIM_CHANNEL_2;   /* PA9 LPWM */
+motor_rl.timer = &htim1;  motor_rl.channel = TIM_CHANNEL_3;   /* PA10 RPWM_FR */
+motor_rr.timer = &htim1;  motor_rr.channel = TIM_CHANNEL_4;   /* PC3 LPWM_FR */
 ```
 
 Los 4 canales (CH1–CH4) de TIM1 comparten:
@@ -283,8 +283,9 @@ Con `TIM_COUNTERMODE_CENTERALIGNED1`:
 
 | Timer | Uso | Canales | Modo | ¿Correcto? |
 |-------|-----|---------|------|------------|
-| **TIM1** (Advanced) | 4× PWM tracción | CH1 (PA8), CH2 (PA9), CH3 (PA10), CH4 (PA11) | Center-aligned 1 | ✅ Perfecto — 4 motores síncronos, pulso centrado |
-| **TIM8** (Advanced) | 1× PWM dirección | CH3 (PC8) | Center-aligned 1 | ✅ Correcto — consistente con TIM1, independiente |
+| **TIM1** (Advanced) | 2× PWM FL + FR (RPWM/LPWM) | CH1 (PA8), CH2 (PA9), CH3 (PA10), CH4 (PC3) | Center-aligned 1 | ✅ Perfecto — FL/FR síncronos, pulso centrado |
+| **TIM8** (Advanced) | 2× PWM RL + RR (RPWM/LPWM) | CH1 (PC6), CH2 (PC7), CH3 (PC8), CH4 (PC9) | Center-aligned 1 | ✅ Correcto — RL/RR síncronos |
+| **TIM3** (General) | 1× PWM dirección (RPWM/LPWM) | CH1 (PA6), CH2 (PA7) | Center-aligned 1 | ✅ Correcto — independiente |
 | **TIM2** (General 32-bit) | Encoder cuadratura | CH1 (PA15), CH2 (PB3) | Edge-aligned UP | ✅ Sin cambios — encoder no afectado |
 
 ### 6.1 Propuesta de sincronización TIM1/TIM8 (opcional, no implementada)
@@ -333,7 +334,7 @@ PWM TIMER TREE (Center-aligned)
     ┌───┬──┬┴──┐         │       ┌───┴───┐
     │   │  │   │         │       │       │
    CH1 CH2 CH3 CH4      CH3    CH1     CH2
-   PA8 PA9 PA10 PA11    PC8   PA15     PB3
+      PA8 PA9 PA10 PC3    PC8   PA15     PB3
     │   │   │    │       │      │       │
    FL  FR  RL   RR    STEER   ENC_A   ENC_B
 

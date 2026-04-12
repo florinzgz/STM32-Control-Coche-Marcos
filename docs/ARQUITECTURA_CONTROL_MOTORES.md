@@ -44,10 +44,10 @@ STM32 → Timer Hardware → PWM Pins
 // Configuración TIM1
 TIM1->PSC = 0;          // Sin prescaler (170 MHz)
 TIM1->ARR = 8499;       // Auto-reload: 170MHz / 8500 = 20kHz
-TIM1->CCR1 = 0-8499;    // PWM Motor FL (PA8)
-TIM1->CCR2 = 0-8499;    // PWM Motor FR (PA9)
-TIM1->CCR3 = 0-8499;    // PWM Motor RL (PA10)
-TIM1->CCR4 = 0-8499;    // PWM Motor RR (PA11)
+TIM1->CCR1 = 0-8499;    // PWM Motor FL RPWM (PA8)
+TIM1->CCR2 = 0-8499;    // PWM Motor FL LPWM (PA9)
+TIM1->CCR3 = 0-8499;    // PWM Motor FR RPWM (PA10)
+TIM1->CCR4 = 0-8499;    // PWM Motor FR LPWM (PC3)
 
 // PWM Mode 1 (active high)
 TIM1->CCMR1 |= TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1;
