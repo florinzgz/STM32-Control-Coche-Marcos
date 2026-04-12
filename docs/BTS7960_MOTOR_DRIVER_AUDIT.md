@@ -57,12 +57,12 @@ All motor current measurement is performed by **external INA226 high-side curren
 
 | TCA9548A Channel | INA226 Measures      | Shunt Resistor |
 |------------------|----------------------|----------------|
-| 0                | Motor FL current     | 1 mΩ (50 A)   |
-| 1                | Motor FR current     | 1 mΩ (50 A)   |
-| 2                | Motor RL current     | 1 mΩ (50 A)   |
-| 3                | Motor RR current     | 1 mΩ (50 A)   |
-| 4                | Battery 24 V bus     | 0.5 mΩ (100 A)|
-| 5                | Steering motor       | 1 mΩ (50 A)   |
+| 0                | Motor FL current     | 1.5 mΩ (50 A) |
+| 1                | Motor FR current     | 1.5 mΩ (50 A) |
+| 2                | Motor RL current     | 1.5 mΩ (50 A) |
+| 3                | Motor RR current     | 1.5 mΩ (50 A) |
+| 4                | Battery 24 V bus     | 0.75 mΩ (100 A)|
+| 5                | Steering motor       | 1.5 mΩ (50 A) |
 | 6–7              | *Unused / unassigned in firmware* | —   |
 
 ### 1.5 Enable Pin Strategy

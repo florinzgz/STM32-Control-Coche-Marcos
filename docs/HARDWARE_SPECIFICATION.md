@@ -150,7 +150,7 @@ L_EN = EN_PIN;
    - Resistencia: 100Ω 1/4W
 
 3. **Current Sensing**
-   - Resistencia shunt: 0.002Ω (2mΩ) por motor
+   - Resistencia shunt: 0.0015Ω (1.5mΩ) por motor, 0.00075Ω (0.75mΩ) batería
    - Amplificador: INA226 (medición precisa)
    - Rango: ±20A tracción, ±10A dirección
 

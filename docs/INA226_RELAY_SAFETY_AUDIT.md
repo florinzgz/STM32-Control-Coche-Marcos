@@ -47,14 +47,14 @@ Current calculation (manual, not using calibration register):
 I(A) = (shunt_raw × 2.5 µV) / R_shunt(mΩ) / 1000
 ```
 
-**Motor channels (1 mΩ):**
-- At 25 A: shunt_raw = 25 × 1.0 × 1000 / 2.5 = 10000 → fits int16_t (max 32767) ✅
-- At 50 A: shunt_raw = 20000 → fits ✅
-- LSB resolution: 2.5 µV / 1.0 mΩ / 1000 = 0.0025 A ✅
+**Motor channels (1.5 mΩ):**
+- At 25 A: shunt_raw = 25 × 1.5 × 1000 / 2.5 = 15000 → fits int16_t (max 32767) ✅
+- At 50 A: shunt_raw = 30000 → fits ✅
+- LSB resolution: 2.5 µV / 1.5 mΩ / 1000 = 0.00167 A ✅
 
-**Battery channel (0.5 mΩ):**
-- At 100 A: shunt_raw = 100 × 0.5 × 1000 / 2.5 = 20000 → fits ✅
-- LSB resolution: 2.5 µV / 0.5 mΩ / 1000 = 0.005 A ✅
+**Battery channel (0.75 mΩ):**
+- At 100 A: shunt_raw = 100 × 0.75 × 1000 / 2.5 = 30000 → fits ✅
+- LSB resolution: 2.5 µV / 0.75 mΩ / 1000 = 0.00333 A ✅
 
 Bus voltage: `V(V) = bus_raw × 1.25 mV / 1000`
 - At 24V: bus_raw = 19200 → fits unsigned 15 bits ✅

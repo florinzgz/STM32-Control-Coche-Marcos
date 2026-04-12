@@ -173,12 +173,12 @@
 | 1 | INA226_FR | Motor FR | ±20A |
 | 2 | INA226_RL | Motor RL | ±20A |
 | 3 | INA226_RR | Motor RR | ±20A |
-| 4 | INA226_STEER | Motor Dirección | ±10A |
-| 5 | INA226_MAIN | Alimentación Principal | ±50A |
+| 4 | INA226_MAIN | Batería 24V | ±100A |
+| 5 | INA226_STEER | Motor Dirección | ±50A |
 
 **Especificación INA226:**
 - Rango tensión: 0-36V
-- Resistencia shunt: 0.002Ω (2mΩ)
+- Resistencia shunt: 0.0015Ω (1.5mΩ) motores, 0.00075Ω (0.75mΩ) batería
 - Precisión: ±0.1%
 - Ganancia ADC: Configurable
 

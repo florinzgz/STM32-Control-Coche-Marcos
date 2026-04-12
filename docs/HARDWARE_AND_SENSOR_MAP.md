@@ -106,7 +106,7 @@
 - **Bus:** I2C1 @ 400 kHz (PB6 = SCL, PB7 = SDA).
 - **Multiplexer:** TCA9548A at I2C address **0x70**.
 - **INA226 address:** All at **0x40** (unique per TCA9548A channel).
-- **Shunt resistor:** 1 mΩ (`INA226_SHUNT_MOHM` in `main.h`).
+- **Shunt resistor:** 1.5 mΩ motors / 0.75 mΩ battery (see `project_config.h`).
 - **Shunt LSB:** 2.5 µV. **Bus LSB:** 1.25 mV.
 - **Classification:** All six are NON-CRITICAL.
 - **File(s):** `sensor_manager.c` (read logic), `safety_system.c` (overcurrent check).
