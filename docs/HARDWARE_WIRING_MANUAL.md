@@ -3,7 +3,7 @@
 **Documento de referencia para taller — Solo conexiones reales**
 
 > **IMPORTANTE**: Todo lo documentado aquí está trazado directamente al código fuente del firmware
-> (`main.h`, `main.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`,
+> (`project_config.h`, `main.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`,
 > `stm32g4xx_hal_msp.c`, `can_handler.c`, `vehicle_physics.h`, `steering_centering.c`).
 > No se ha inventado ningún componente, pin ni sensor. Si algo no existe en el firmware,
 > se indica explícitamente.
@@ -123,7 +123,7 @@ El STM32G474RE en formato Nucleo-64 se alimenta por:
 
 - **NUNCA** conectar 24 V o 12 V a ningún pin del STM32 — destruirá el chip
 - **NUNCA** conectar la salida de un motor directamente al STM32
-- **NUNCA** conectar el bus CAN (CANH/CANL) directamente a PB8/PB9 — se necesita transceiver
+- **NUNCA** conectar el bus CAN (CANH/CANL) directamente a PA11/PA12 — se necesita transceiver
 - Los sensores inductivos (LJ12A3) si operan a más de 3.3 V necesitan adaptación de nivel
 - Los sensores DS18B20 operan a 3.3 V y pueden conectarse directamente (con pull-up)
 
@@ -143,14 +143,14 @@ El STM32G474RE en formato Nucleo-64 se alimenta por:
 
 | Señal | Pin STM32 | Función alternativa | Definición en código |
 |-------|-----------|---------------------|----------------------|
-| CAN TX | **PB9** | FDCAN1_TX (AF9) | `PIN_CAN_TX` (`main.h:70`) |
-| CAN RX | **PB8** | FDCAN1_RX (AF9) | `PIN_CAN_RX` (`main.h:71`) |
+| CAN TX | **PA12** | FDCAN1_TX (AF9) | `PIN_CAN_TX` (`project_config.h:226`) |
+| CAN RX | **PA11** | FDCAN1_RX (AF9) | `PIN_CAN_RX` (`project_config.h:227`) |
 
 Configuración en `stm32g4xx_hal_msp.c`: GPIO modo AF push-pull, velocidad alta, función alternativa AF9.
 
 ### Transceiver CAN — OBLIGATORIO
 
-**PB8 y PB9 son salidas lógicas CMOS a 3.3 V. NO son señales CAN.**
+**PA11 y PA12 son salidas lógicas CMOS a 3.3 V. NO son señales CAN.**
 
 Es **obligatorio** un transceiver CAN externo (por ejemplo: MCP2551, SN65HVD230, TJA1050)
 entre el STM32 y el bus CAN físico.
@@ -160,9 +160,9 @@ entre el STM32 y el bus CAN físico.
 ```
 STM32G474RE            Transceiver CAN              Bus CAN
 ┌──────────┐          ┌──────────────┐          ┌───────────┐
-│      PB9 ├──────────► TXD      CANH├──────────► CANH      │
+│     PA12 ├──────────► TXD      CANH├──────────► CANH      │
 │  (CAN TX)│          │              │          │           │
-│      PB8 ◄──────────┤ RXD      CANL├──────────► CANL      │
+│     PA11 ◄──────────┤ RXD      CANL├──────────► CANL      │
 │  (CAN RX)│          │              │          │           │
 │     3.3V ├──────────► VCC      GND ├──────────► GND       │
 │      GND ├──────────► GND          │          │           │
@@ -240,17 +240,17 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 
 | Rueda | RPWM (Pin) | Timer/Canal | LPWM (Pin) | Timer/Canal | DIR (Pin) | EN (Pin) | Sensor velocidad | INA226 (índice) | DS18B20 (índice) |
 |-------|------------|-------------|------------|-------------|-----------|----------|------------------|-----------------|-------------------|
-| **FL** (Frontal izq.) | PA8 | TIM1_CH1 | PA9 | TIM1_CH2 | PC0 (freed) | PC5 (GPIO) | PA0 (EXTI0) | 0 | 0 |
-| **FR** (Frontal der.) | PA10 | TIM1_CH3 | PC3 | TIM1_CH4 | PC1 (freed) | 3.3V fijo | PA1 (EXTI1) | 1 | 1 |
-| **RL** (Trasera izq.) | PC6 | TIM8_CH1 | PC7 | TIM8_CH2 | PC2 (freed) | 3.3V fijo | PA2 (EXTI2) | 2 | 2 |
+| **FL** (Frontal izq.) | PA8 | TIM1_CH1 | PA9 | TIM1_CH2 | *(freed)* | PC5 (GPIO) | PA0 (EXTI0) | 0 | 0 |
+| **FR** (Frontal der.) | PA10 | TIM1_CH3 | PC3 | TIM1_CH4 | *(freed → EN)* | PC0 (GPIO) | PA1 (EXTI1) | 1 | 1 |
+| **RL** (Trasera izq.) | PC6 | TIM8_CH1 | PC7 | TIM8_CH2 | *(freed → EN)* | PC1 (GPIO) | PA2 (EXTI2) | 2 | 2 |
 | **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | *(freed)* | PC13 (GPIO) | PB15 (EXTI15) | 3 | 3 |
 
 > **Nota**: DIR pins (PC0–PC2, PC4) ya no son controlados por el firmware — la dirección se
 > determina por la elección de RPWM vs LPWM. PC3 (ex-DIR_RR) fue reasignado a LPWM_FR (TIM1_CH4).
 > Los demás DIR pins deben dejarse desconectados o configurados como GPIO output LOW.
-> EN pins: solo FL (PC5) y RR (PC13) son
-> GPIO outputs; los demás motores tienen R_EN/L_EN del BTS7960 conectados directamente
-> a 3.3 V. PC6/PC7/PC9 fueron reasignados como salidas PWM (TIM8).
+> EN pins: todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO:
+> PC5 (FL), PC0 (FR), PC1 (RL), PC13 (RR), PC4 (STEER).
+> NO conectar R_EN/L_EN a 3.3V fijo — el firmware controla el enable.
 
 > **Nota sobre índices INA226 y DS18B20**: El firmware usa indexación 0–5 para INA226
 > (6 sensores) y 0–4 para DS18B20 (5 sensores). El código de seguridad
@@ -268,7 +268,7 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 | Periodo (ARR) | 4249 | `main.c`: `MX_TIM1_Init` |
 | Prescaler | 0 | `main.c`: `MX_TIM1_Init` |
 | Modo contador | Center-Aligned | 170 MHz ÷ (2 × 4250) = 20 kHz |
-| Canales activos | CH1 (RPWM_FL), CH2 (LPWM_FL), CH3 (RPWM_FR), CH4 (LPWM_FR) | `main.h` |
+| Canales activos | CH1 (RPWM_FL), CH2 (LPWM_FL), CH3 (RPWM_FR), CH4 (LPWM_FR) | `project_config.h` |
 | BREAK2 | Cortex LOCKUP | Hardware PWM kill en fallo CPU |
 
 ### Configuración PWM (TIM8 — tracción RL/RR)
@@ -277,7 +277,7 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 |-----------|-------|------------|
 | Frecuencia | **20 kHz** | `main.c`: `MX_TIM8_Init` |
 | Periodo (ARR) | 4249 | Center-Aligned: 170 MHz ÷ (2 × 4250) = 20 kHz |
-| Canales activos | CH1 (RPWM_RL), CH2 (LPWM_RL), CH3 (RPWM_RR), CH4 (LPWM_RR) | `main.h` |
+| Canales activos | CH1 (RPWM_RL), CH2 (LPWM_RL), CH3 (RPWM_RR), CH4 (LPWM_RR) | `project_config.h` |
 | BREAK2 | Cortex LOCKUP | Hardware PWM kill en fallo CPU |
 
 ### Conexión STM32 → BTS7960 (por motor de tracción)
@@ -302,10 +302,10 @@ PC5  (GPIO EN_FL)          ─────────────────�
                                                     B-  ← GND potencia
 ```
 
-> **Motor FR**: PA10 (TIM1_CH3 → RPWM), PA11 (TIM1_CH4 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
-> **Motor RL**: PC6 (TIM8_CH1 → RPWM), PC7 (TIM8_CH2 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
+> **Motor FR**: PA10 (TIM1_CH3 → RPWM), PC3 (TIM1_CH4 → LPWM, AF2). EN: PC0 (GPIO output).
+> **Motor RL**: PC6 (TIM8_CH1 → RPWM), PC7 (TIM8_CH2 → LPWM). EN: PC1 (GPIO output).
 > **Motor RR**: PC8 (TIM8_CH3 → RPWM), PC9 (TIM8_CH4 → LPWM). EN: PC13 GPIO.
-> **Motor STEER**: PA6 (TIM3_CH1 → RPWM), PA7 (TIM3_CH2 → LPWM). EN: conectar R_EN/L_EN directo a 3.3 V.
+> **Motor STEER**: PA6 (TIM3_CH1 → RPWM), PA7 (TIM3_CH2 → LPWM). EN: PC4 (GPIO output).
 
 ### ⚡ Condensadores obligatorios por BTS7960 de tracción (4× motores)
 
@@ -339,7 +339,7 @@ Instalar **todos los condensadores siguientes** antes de encender el sistema. Si
 > ⚠️ **VCC LÓGICA = 3.3V (NO 5V):** El módulo IBT-2 incluye un buffer 74HC244 cuyo
 > V_IH(min) = 0.7 × VCC. A VCC=5V → V_IH(min)=3.5V, y las señales de 3.3V del STM32
 > quedan **por debajo del umbral** → riesgo de control intermitente del motor.
-> Con VCC=3.3V → V_IH(min)=2.31V, bien por debajo de 3.3V. Ver `main.h` líneas 28–33.
+> Con VCC=3.3V → V_IH(min)=2.31V, bien por debajo de 3.3V. Ver `project_config.h` líneas 48–59.
 
 ---
 
@@ -361,7 +361,7 @@ Instalar **todos los condensadores siguientes** antes de encender el sistema. Si
 | LPWM | **PA7** | TIM3_CH2 (AF2) | `PIN_LPWM_STEER` (`project_config.h`) |
 
 > Los pines DIR (PC4) y EN (PC9) ya **no se usan**. PC9 ha sido reasignado a TIM8_CH4 (LPWM_RR).
-> Conectar R_EN/L_EN del BTS7960 de dirección directamente a 3.3 V.
+> EN: PC4 (GPIO output). NO conectar a 3.3V fijo — el firmware controla el enable.
 
 ### ⚡ Condensadores obligatorios — BTS7960 de dirección
 
@@ -455,12 +455,12 @@ Tipo: sensores inductivos de proximidad (tipo LJ12A3, 6 tornillos por revolució
 
 | Rueda | Pin STM32 | Puerto | Interrupción | Flanco | Pull-up | Referencia |
 |-------|-----------|--------|--------------|--------|---------|------------|
-| FL | **PA0** | GPIOA | EXTI0 | Ascendente | Sí (interno) | `PIN_WHEEL_FL` (`main.h:44`) |
-| FR | **PA1** | GPIOA | EXTI1 | Ascendente | Sí (interno) | `PIN_WHEEL_FR` (`main.h:45`) |
-| RL | **PA2** | GPIOA | EXTI2 | Ascendente | Sí (interno) | `PIN_WHEEL_RL` (`main.h:46`) |
-| RR | **PB15** | GPIOB | EXTI15 | Ascendente | Sí (interno) | `PIN_WHEEL_RR` (`main.h:47`) |
+| FL | **PA0** | GPIOA | EXTI0 | Ascendente | Sí (interno) | `PIN_WHEEL_FL` (`project_config.h:126`) |
+| FR | **PA1** | GPIOA | EXTI1 | Ascendente | Sí (interno) | `PIN_WHEEL_FR` (`project_config.h:127`) |
+| RL | **PA2** | GPIOA | EXTI2 | Ascendente | Sí (interno) | `PIN_WHEEL_RL` (`project_config.h:128`) |
+| RR | **PB15** | GPIOB | EXTI15 | Ascendente | Sí (interno) | `PIN_WHEEL_RR` (`project_config.h:129`) |
 
-Constantes de cálculo de velocidad (`main.h`, `vehicle_physics.h`):
+Constantes de cálculo de velocidad (`project_config.h`, `vehicle_physics.h`):
 
 - Pulsos por revolución: **6** (`WHEEL_PULSES_REV`)
 - Circunferencia de rueda: **1.1 m** (`WHEEL_CIRCUMF_M`)
@@ -483,9 +483,9 @@ Ver [sección 5 — Motor de dirección](#encoder-de-dirección-e6b2-cwz6c) para
 
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
-| Cantidad | **5** | `NUM_DS18B20` (`main.h:77`) |
+| Cantidad | **5** | `NUM_DS18B20` (`project_config.h:239`) |
 | Bus | **OneWire** (bit-bang) | `sensor_manager.c` |
-| Pin | **PB0** | `PIN_ONEWIRE` (`main.h:64`) |
+| Pin | **PB0** | `PIN_ONEWIRE` (`project_config.h:209`) |
 | Protocolo | Búsqueda automática de ROM al inicio | `OW_SearchAll()` en `sensor_manager.c` |
 | Familia | 0x28 (validación CRC-8) | `sensor_manager.c` |
 | Pull-up | **Obligatorio**: resistencia de 4.7 kΩ entre PB0 y 3.3 V | Requisito del protocolo OneWire |
@@ -518,14 +518,14 @@ enumeración del algoritmo de búsqueda OneWire.
 
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
-| Cantidad | **6** | `NUM_INA226` (`main.h:76`) |
+| Cantidad | **6** | `NUM_INA226` (`project_config.h:238`) |
 | Bus | **I2C1** (400 kHz, Fast Mode) | `main.c`: `MX_I2C1_Init` |
-| Pin SCL | **PB6** | `PIN_I2C_SCL` (`main.h:60`) |
-| Pin SDA | **PB7** | `PIN_I2C_SDA` (`main.h:61`) |
-| Dirección INA226 | **0x40** | `I2C_ADDR_INA226` (`main.h:75`) |
-| Multiplexor | **TCA9548A** en dirección **0x70** | `I2C_ADDR_TCA9548A` (`main.h:74`) |
-| Resistencia shunt (motor) | **1.5 mΩ** (50A/75mV) | `INA226_SHUNT_MOHM_MOTOR` (`main.h:157`) |
-| Resistencia shunt (batería) | **0.75 mΩ** (100A/75mV) | `INA226_SHUNT_MOHM_BATTERY` (`main.h:158`) |
+| Pin SCL | **PB6** | `PIN_I2C_SCL` (`project_config.h:174`) |
+| Pin SDA | **PB7** | `PIN_I2C_SDA` (`project_config.h:175`) |
+| Dirección INA226 | **0x40** | `I2C_ADDR_INA226` (`project_config.h:233`) |
+| Multiplexor | **TCA9548A** en dirección **0x70** | `I2C_ADDR_TCA9548A` (`project_config.h:232`) |
+| Resistencia shunt (motor) | **1.5 mΩ** (50A/75mV) | `INA226_SHUNT_MOHM_MOTOR` (`project_config.h:257`) |
+| Resistencia shunt (batería) | **0.75 mΩ** (100A/75mV) | `INA226_SHUNT_MOHM_BATTERY` (`project_config.h:258`) |
 
 **Esquema de conexión I2C:**
 
@@ -582,7 +582,7 @@ antes de cada lectura.
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
 | Tipo | **Analógico** (potenciómetro o sensor Hall) | `sensor_manager.c` |
-| Pin | **PA3** | `PIN_PEDAL` (`main.h:67`) |
+| Pin | **PA3** | `PIN_PEDAL` (`project_config.h:221`) |
 | Canal ADC | **ADC1_IN4** | `main.c`: `MX_ADC1_Init` |
 | Resolución | 12 bits (0–4095) | `main.c` |
 | Tiempo muestreo | 47.5 ciclos | `main.c` |
@@ -607,7 +607,7 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 | **LED** (Frontal) | **PB10** | GPIOB | Alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V |
 | **LED_REAR** (Trasero) | **PB11** | GPIOB | Alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V |
 
-Definidos en `main.h`:
+Definidos en `project_config.h`:
 - `PIN_RELAY_MAIN` = GPIO_PIN_10 (PC10)
 - `PIN_RELAY_TRAC` = GPIO_PIN_11 (PC11)
 - `PIN_RELAY_DIR`  = GPIO_PIN_12 (PC12)
@@ -687,26 +687,29 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 15 | **PB5** | GPIOB | Sensor centro dirección | LJ12A3 inductivo | EXTI5 | 3.3 V (con adaptación si necesario) | `PIN_STEER_CENTER` |
 | 16 | **PB6** | GPIOB | I2C SCL | TCA9548A + INA226 | I2C1_SCL (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SCL` |
 | 17 | **PB7** | GPIOB | I2C SDA | TCA9548A + INA226 | I2C1_SDA (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SDA` |
-| 18 | **PB8** | GPIOB | CAN RX | Transceiver CAN | FDCAN1_RX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_RX` |
-| 19 | **PB9** | GPIOB | CAN TX | Transceiver CAN | FDCAN1_TX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_TX` |
+| 18 | **PA11** | GPIOA | CAN RX | Transceiver CAN | FDCAN1_RX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_RX` |
+| 19 | **PA12** | GPIOA | CAN TX | Transceiver CAN | FDCAN1_TX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_TX` |
 | 20 | **PB10** | GPIOB | Relé LED frontal | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED` |
 | 21 | **PB11** | GPIOB | Relé LED trasero | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED_REAR` |
 | 22 | **PB15** | GPIOB | Sensor velocidad RR | Inductivo (LJ12A3) | EXTI15 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_RR` |
-| 23 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
-| 24 | **PC6** | GPIOC | RPWM motor RL | BTS7960 RL | TIM8_CH1 (AF4) | 3.3 V PWM | `PIN_PWM_RL` |
-| 25 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
-| 26 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
-| 27 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
-| 28 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
-| 29 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
-| 30 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
-| 31 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` |
+| 23 | **PC0** | GPIOC | Enable motor FR | BTS7960 FR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FR` |
+| 24 | **PC1** | GPIOC | Enable motor RL | BTS7960 RL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RL` |
+| 25 | **PC4** | GPIOC | Enable motor STEER | BTS7960 STEER (EN) | GPIO Output | 3.3 V digital | `PIN_EN_STEER` |
+| 26 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
+| 27 | **PC6** | GPIOC | RPWM motor RL | BTS7960 RL | TIM8_CH1 (AF4) | 3.3 V PWM | `PIN_PWM_RL` |
+| 28 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
+| 29 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
+| 30 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
+| 31 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
+| 32 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
+| 33 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
+| 34 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` |
 
-> **Nota:** Los pines de dirección (PC0–PC4) están **liberados** (ya no se usan).
-> RPWM/LPWM se generan directamente desde los timers hardware.
-> Los BTS7960 de FR, RL y STEER tienen R_EN/L_EN conectados fijo a 3.3 V.
+> **Nota:** Los pines de dirección antiguos (PC0, PC1, PC4) han sido reasignados como EN (enable)
+> para FR, RL y STEER respectivamente. RPWM/LPWM se generan directamente desde los timers hardware.
+> Todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO.
 
-**Total: 31 pines del STM32 en uso.**
+**Total: 34 pines del STM32 en uso.**
 
 ---
 
@@ -757,7 +760,7 @@ automáticamente.
 
 | Bus | Pines | Velocidad | Dispositivos |
 |-----|-------|-----------|-------------|
-| **FDCAN1** | PB8 (RX), PB9 (TX) | 500 kbps | ESP32 (vía transceiver) |
+| **FDCAN1** | PA11 (RX), PA12 (TX) | 500 kbps | ESP32 (vía transceiver) |
 | **I2C1** | PB6 (SCL), PB7 (SDA) | 400 kHz | TCA9548A (0x70) → 6× INA226 (0x40) |
 | **OneWire** | PB0 | ~16 kbps (bit-bang) | 5× DS18B20 |
 | **ADC1** | PA3 | N/A (polling) | Pedal acelerador |
@@ -799,15 +802,14 @@ siguiente período del timer (no hay glitch entre transiciones).
 | Motor     | RPWM (avance)           | LPWM (retroceso)         | EN GPIO         |
 |-----------|-------------------------|--------------------------|-----------------|
 | FL (front-left)  | PA8 — TIM1_CH1   | PA9 — TIM1_CH2           | PC5 (GPIO out)  |
-| FR (front-right) | PA10 — TIM1_CH3  | PA11 — TIM1_CH4          | 3.3 V en HW    |
-| RL (rear-left)   | PC6 — TIM8_CH1   | PC7 — TIM8_CH2           | 3.3 V en HW    |
+| FR (front-right) | PA10 — TIM1_CH3  | PC3 — TIM1_CH4 (AF2)    | PC0 (GPIO out)  |
+| RL (rear-left)   | PC6 — TIM8_CH1   | PC7 — TIM8_CH2           | PC1 (GPIO out)  |
 | RR (rear-right)  | PC8 — TIM8_CH3   | PC9 — TIM8_CH4           | PC13 (GPIO out) |
-| STEER            | PA6 — TIM3_CH1   | PA7 — TIM3_CH2           | 3.3 V en HW    |
+| STEER            | PA6 — TIM3_CH1   | PA7 — TIM3_CH2           | PC4 (GPIO out)  |
 
-> **Nota EN**: Los motores FL y RR conservan su pin GPIO de enable (PC5, PC13).
-> Los motores FR, RL y STEER tienen R_EN / L_EN del BTS7960 conectados
-> directamente a 3.3 V (siempre habilitados); la dirección se controla exclusivamente
-> por cuál canal PWM está activo.
+> **Nota EN**: Todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO:
+> PC5 (FL), PC0 (FR), PC1 (RL), PC13 (RR), PC4 (STEER).
+> NO conectar R_EN/L_EN a 3.3V fijo — el firmware controla el enable.
 
 ### Conexión directa — motor FL (ejemplo)
 
@@ -825,12 +827,12 @@ STM32 PC5  (GPIO EN)  ───────────────────�
                                                       BTS7960 FL: M-   ──► Motor FL terminal B
 ```
 
-### Conexión directa — motor FR (ejemplo, EN a 3.3 V)
+### Conexión directa — motor FR (ejemplo, EN GPIO PC0)
 
 ```
 STM32 PA10 (TIM1_CH3) ─────────────────────────────► BTS7960 FR: RPWM
-STM32 PA11 (TIM1_CH4) ─────────────────────────────► BTS7960 FR: LPWM
-3.3 V ────────────────────────────────────────────► BTS7960 FR: R_EN  ─┐
+STM32 PC3  (TIM1_CH4, AF2) ────────────────────────► BTS7960 FR: LPWM
+STM32 PC0  (GPIO EN_FR) ───────────────────────────► BTS7960 FR: R_EN  ─┐
                                                                           ├─ (unir con cable corto)
                                                       BTS7960 FR: L_EN  ─┘
 ```
@@ -1172,10 +1174,10 @@ Documentado en §6.5. Usar el divisor 10 kΩ + 6,8 kΩ. El pin PA3 nunca superar
 Documentado en `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md`. Usar optoacoplador PC817 para
 todos los sensores de velocidad de rueda y centrado. **No conectar nunca directamente.**
 
-#### Bus CAN (PB8, PB9 → transceiver TJA1051)
+#### Bus CAN (PA11, PA12 → transceiver TJA1051)
 
-El transceiver CAN actúa como barrera de tensión. Los pines PB8/PB9 solo ven señales
-lógicas de 3,3 V generadas por el TJA1051. **No conectar el bus CAN directamente a PB8/PB9.**
+El transceiver CAN actúa como barrera de tensión. Los pines PA11/PA12 solo ven señales
+lógicas de 3,3 V generadas por el TJA1051. **No conectar el bus CAN directamente a PA11/PA12.**
 
 ### 12.6 Tensiones a verificar con multímetro antes de encender el STM32
 
@@ -1189,7 +1191,7 @@ Antes de conectar la placa Nucleo, medir con multímetro en modo DC:
 | PB3 con encoder girando (max) | ≤ 3,5 V | Revisar divisor resistivo |
 | PA3 con pedal a fondo (max) | ≤ 2,1 V | Revisar divisor 10 kΩ + 6,8 kΩ |
 | Salida optoacoplador PA0-PA2, PB15 | 3,3 V en reposo, 0 V al detectar | Revisar PC817 |
-| PB8 (CAN RX) con bus activo | 0,5 – 2,5 V oscilante | Normal, señal CAN diferencial convertida |
+| PA11 (CAN RX) con bus activo | 0,5 – 2,5 V oscilante | Normal, señal CAN diferencial convertida |
 | GND–GND entre STM32 y BTS7960 | < 0,1 V | Si hay > 0,3 V, revisar cableado de masa |
 
 ### 12.7 Secuencia de encendido que evita reinicios
