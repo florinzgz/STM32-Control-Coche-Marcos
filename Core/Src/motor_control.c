@@ -126,6 +126,12 @@ static inline float sanitize_float(float val, float safe_default)
 #define MOTOR_DEADZONE_PCT           8.0f   /* Min PWM% when driving (creep)  */
 #define BRAKE_RELEASE_RAMP_PCT_S     40.0f  /* Brake→drive transition rate    */
 #define COAST_SPEED_THRESHOLD_KMH    2.0f   /* Coast above this speed (km/h)  */
+#define COAST_SPEED_HYSTERESIS_KMH   0.5f   /* Hysteresis band for coast↔brake
+                                              * transition: enter coast at
+                                              * COAST_SPEED_THRESHOLD_KMH, exit
+                                              * at THRESHOLD - HYSTERESIS.  This
+                                              * prevents oscillation when speed
+                                              * hovers near the threshold.      */
 #define COAST_TIMEOUT_MS             3000U  /* Max coast duration (ms)        */
 #define MAX_PWM_DELTA_PER_CYCLE      80U    /* Max PWM change per 10 ms cycle */
 #define CREEP_DEMAND_SMOOTHING_ALPHA 0.08f  /* Extra EMA below creep zone     */
@@ -152,21 +158,43 @@ static inline float sanitize_float(float val, float safe_default)
 #define DYNBRAKE_MIN_SPEED_KMH   3.0f    /* Disable below this speed       */
 #define DYNBRAKE_RAMP_DOWN_PCT_S 80.0f   /* Max brake release rate (%/s)   */
 
-/* ---- BTS7960 active brake ----
+/* ---- BTS7960 passive brake (design decision) ----
  *
- * Chinese BTS7960 modules have a known design defect: when EN=HIGH
- * and PWM=0, the motor is not braked — it floats.  This causes
- * unintended rolling on slopes and steering drift.
+ * BRAKE is implemented as EN=HIGH, RPWM=0, LPWM=0 (passive EM brake).
+ * The BTS7960 internal logic then holds both motor terminals at the
+ * same potential (low-side FETs ON), producing electromagnetic braking
+ * by short-circuiting the motor windings.
  *
- * With direct RPWM/LPWM generation (no external 74HC logic) the
- * BTS7960 passive brake state is achieved by setting both RPWM and
- * LPWM to 0.  The BTS7960 internal logic then holds both motor
- * terminals at the same potential, producing electromagnetic braking.
+ * DECISION: Passive brake is sufficient for this application because:
+ *   1) The vehicle mass is low (~50 kg + driver)
+ *   2) The back-EMF at typical speeds (5-10 km/h) produces adequate
+ *      braking torque through the short-circuit current
+ *   3) Active brake (applying small opposing PWM) would generate heat
+ *      in both the FETs and motor windings during sustained holds
  *
- * In the previous design (74HC external logic) 100 % PWM + DIR=1 was
- * used; that is no longer needed because direction is now encoded as
+ * FALLBACK: If passive brake proves insufficient on steep slopes,
+ * enable BRAKE_ACTIVE_FALLBACK and tune BRAKE_ACTIVE_MIN_PWM.  This
+ * applies a small opposing duty on one channel to increase the braking
+ * current.  Must be field-tested to determine the minimum effective
+ * value (~5-10% is typical).
+ *
+ * Previous design (74HC external logic) used 100% PWM + DIR=1 for
+ * brake; that is no longer needed because direction is encoded as
  * the choice of RPWM vs LPWM channel.                                */
 #define BTS7960_BRAKE_PWM        0U   /* Both RPWM=0, LPWM=0 = passive brake */
+
+/* Optional active brake fallback — disabled by default.
+ * Enable by defining BRAKE_ACTIVE_FALLBACK=1 if passive brake is
+ * insufficient in field testing.  BRAKE_ACTIVE_MIN_PWM is the duty
+ * (in timer ticks, max PWM_PERIOD=4249) applied to LPWM during brake
+ * to increase braking current.  RPWM remains 0.
+ * Typical value: 5-10% of PWM_PERIOD (212-425 ticks).                */
+#ifndef BRAKE_ACTIVE_FALLBACK
+#define BRAKE_ACTIVE_FALLBACK    0
+#endif
+#if BRAKE_ACTIVE_FALLBACK
+#define BRAKE_ACTIVE_MIN_PWM     212U  /* ~5% of 4249 — tune in field  */
+#endif
 
 /* ---- BTS7960 coast/brake behaviour (all motors symmetric) ----
  *
@@ -1371,7 +1399,11 @@ void Traction_Update(void)
         if (effective_demand > DRIVE_ENTER_PCT) {
             trac_phase = TRAC_PHASE_DRIVE;
             brake_release_pct = 0.0f;
-        } else if (avg_speed <= COAST_SPEED_THRESHOLD_KMH) {
+        } else if (avg_speed <= (COAST_SPEED_THRESHOLD_KMH
+                                 - COAST_SPEED_HYSTERESIS_KMH)) {
+            /* Speed dropped below hysteresis band — engage hold brake.
+             * The hysteresis prevents oscillation when speed hovers
+             * near COAST_SPEED_THRESHOLD_KMH.                         */
             trac_phase = TRAC_PHASE_BRAKE;
         } else if ((HAL_GetTick() - coast_start_tick) >= COAST_TIMEOUT_MS) {
             trac_phase = TRAC_PHASE_BRAKE;
@@ -1489,7 +1521,7 @@ void Traction_Update(void)
         /* In brake/coast, reset prev_output_pwm to 0 so the jerk
          * limiter sees a smooth transition from "stopped" to "driving"
          * when entering DRIVE phase.  Without this, prev_output_pwm
-         * would track BTS7960_BRAKE_PWM (4249), and the jerk limiter
+         * would track BTS7960_BRAKE_PWM (0), and the jerk limiter
          * would fight the brake_release_pct ramp by keeping PWM locked
          * near full brake for ~530ms (P2 fix).                         */
         for (uint8_t i = 0; i < 4; i++) {
@@ -2018,6 +2050,16 @@ void Motor_SetSignedPWM_Steering(int16_t speed) {
  *  Both CCRs are double-buffered (OCPreload enabled) so the actual
  *  output only changes at the next timer period boundary, making the
  *  simultaneous-active risk negligible in hardware.
+ *
+ *  @note THREAD SAFETY: Same restriction as Motor_SetMode() — must
+ *        only be called from the main loop.  Not re-entrant.
+ *
+ *  @note MODE TRACKING: This function does NOT update current_mode.
+ *        Callers that need explicit mode tracking (COAST/BRAKE/DRIVE)
+ *        should use Motor_SetMode() instead.  Direct Motor_SetSigned()
+ *        calls (Emergency stop, Park hold, Neutral ramp) intentionally
+ *        bypass mode tracking because they are transitional states that
+ *        will be followed by a proper Motor_SetMode() call.
  */
 static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
 {
@@ -2096,6 +2138,14 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm)
  * @param mode       Desired physical operating mode.
  * @param signed_pwm Signed duty: >0 forward, <0 reverse, 0 ignored
  *                   in COAST and BRAKE modes (used only in DRIVE).
+ *
+ * @note THREAD SAFETY: This function must ONLY be called from the
+ *       main loop context (10 ms tick).  It is NOT re-entrant and
+ *       NOT safe to call from ISR, CAN callback, or any other
+ *       interrupt context.  The delay_us() busy-wait and multi-step
+ *       register writes are not atomic.  All callers in this firmware
+ *       are confirmed main-loop-only (Traction_Update, Motor_Init,
+ *       Traction_EmergencyStop).
  */
 static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
 {
@@ -2141,9 +2191,17 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
         /* Safe order: zero PWM (already done above + dead-time), then
          * assert EN.  With RPWM=0 and LPWM=0 and EN=HIGH, the BTS7960
          * shorts the motor terminals → passive electromagnetic braking.
-         * ⚠ No PWM is applied in this mode — the motor is held.        */
+         *
+         * If BRAKE_ACTIVE_FALLBACK is enabled, a small duty is applied
+         * on LPWM to increase braking current for steep-slope hold.
+         * See design decision comment at BRAKE_ACTIVE_FALLBACK define. */
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
+#if BRAKE_ACTIVE_FALLBACK
+        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel,
+                              BRAKE_ACTIVE_MIN_PWM);
+#else
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+#endif
         motor->direction = 0;
         if (motor->en_port != NULL) {
             HAL_GPIO_WritePin(motor->en_port, motor->en_pin, GPIO_PIN_SET);
