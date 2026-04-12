@@ -361,7 +361,8 @@ Pedal señal (0.3V–4.8V)
 |-------|-----------|----------------|---------|
 | 28 | **PA12** | TXD (pin 1) | Transmitir datos CAN (FDCAN1_TX, AF9) |
 | 29 | **PA11** | RXD (pin 4) | Recibir datos CAN (FDCAN1_RX, AF9) |
-| — | 5V | VCC (pin 3) | Alimentación transceiver |
+| — | 5V | VCC (pin 3) | Alimentación transceiver (**5 V obligatorio**) |
+| — | 3.3V | **VIO (pin 5)** | **Nivel lógico I/O — conectar a 3.3 V del STM32** |
 | — | GND | GND (pin 2) | GND común |
 | — | GND | S (pin 8) | Modo normal (NO conectar a VCC) |
 
@@ -375,7 +376,8 @@ Pedal señal (0.3V–4.8V)
 |-------|-----------|----------------|---------|
 | — | **GPIO4** | TXD (pin 1) | Transmitir datos CAN |
 | — | **GPIO5** | RXD (pin 4) | Recibir datos CAN |
-| — | 5V | VCC (pin 3) | Alimentación transceiver |
+| — | 5V | VCC (pin 3) | Alimentación transceiver (**5 V obligatorio**) |
+| — | **3.3V** | **VIO (pin 5)** | ⚠️ **OBLIGATORIO** — nivel lógico I/O. Sin VIO=3.3V, RXD=5V → destruye ESP32 |
 | — | GND | GND (pin 2) | GND común |
 | — | GND | S (pin 8) | Modo normal |
 
@@ -833,7 +835,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 6 | INA226 módulo | Sensores corriente | Breakout boards |
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
-| 2 | TJA1051T/3 módulo | Transceivers CAN | 3.3V compatible |
+| 2 | TJA1051T/3 módulo | Transceivers CAN | VCC=5V, VIO=3.3V |
 | 1 | TF-Mini Plus (Benewake) | Sensor obstáculos LiDAR punto único | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, 115200 bps, conexión directa 3.3V |
 | 5 | Módulo relé + optoacoplador | Relés potencia y LED | HY-M158 o similar, 3.3V trigger (3× potencia + 2× LED) |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
@@ -955,8 +957,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### 🟡 ETAPA 2 — Bus CAN (comunicación entre MCUs)
 
 **Qué conectar:**
-1. TJA1051 #1: **PA12** → TXD, **PA11** → RXD, 5V, GND, S→GND
-2. TJA1051 #2: **GPIO4** → TXD, **GPIO5** → RXD, 5V, GND, S→GND
+1. TJA1051 #1: **PA12** → TXD, **PA11** → RXD, 5V→VCC, **3.3V→VIO**, GND, S→GND
+2. TJA1051 #2: **GPIO4** → TXD, **GPIO5** → RXD, 5V→VCC, **3.3V→VIO** ⚠️, GND, S→GND
 3. CANH↔CANH, CANL↔CANL (par trenzado recomendado)
 4. **Resistencia 120Ω** entre CANH y CANL en **cada** extremo
 

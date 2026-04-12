@@ -115,10 +115,11 @@ Antes de encender todo, verificar con multímetro:
 
 1. **ESP32 3.3V → GND**: 3.30V ± 0.1V
 2. **Display VCC → GND**: 3.30V ± 0.1V  
-3. **TJA1051 VCC → GND**: 5.00V ± 0.2V
-4. **CANH → GND (bus idle)**: ~2.5V
-5. **CANL → GND (bus idle)**: ~2.5V
-6. **Resistencia CANH ↔ CANL**: 60Ω (con terminación instalada)
+3. **TJA1051 VCC (pin 3) → GND**: 5.00V ± 0.2V
+4. **TJA1051 VIO (pin 5) → GND**: 3.30V ± 0.1V ⚠️ Si ≠ 3.3V, NO conectar ESP32
+5. **CANH → GND (bus idle)**: ~2.5V
+6. **CANL → GND (bus idle)**: ~2.5V
+7. **Resistencia CANH ↔ CANL**: 60Ω (con terminación instalada)
 
 ---
 
@@ -169,7 +170,7 @@ A: El touch panel usa polling en lugar de interrupciones, por lo que T_IRQ no es
 A: Sí, MISO (GPIO 12) se comparte entre el display (SDO) y el touch (T_DO). Es necesario para que el XPT2046 envíe las coordenadas de toque.
 
 **Q: ¿Por qué el TJA1051 necesita 5V si el ESP32 es 3.3V?**  
-A: El TJA1051 necesita 5V para alimentación, pero sus pines de entrada/salida son compatibles con 3.3V.
+A: El TJA1051T/3 necesita **5V en VCC** (pin 3) para alimentar el transceiver CAN. El pin **VIO** (pin 5) se conecta a **3.3V** y establece los niveles lógicos de TXD/RXD a 3.3V, compatibles con el ESP32-S3. **Si VIO no se conecta a 3.3V, RXD producirá 5V y destruirá el GPIO del ESP32.**
 
 **Q: ¿Cuánta corriente consume el sistema?**  
 A: ESP32 + Display ≈ 500mA @ 3.3V, TJA1051 ≈ 70mA @ 5V

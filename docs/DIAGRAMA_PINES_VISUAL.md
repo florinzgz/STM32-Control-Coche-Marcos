@@ -247,6 +247,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 ├──────────┼──────────────┼────────────────────────────────────────────┤
 │   3.3V   │ Alimentación │ Display VCC                                │
 │    5V    │ Alimentación │ TJA1051 VCC (pin 3)                        │
+│   3.3V   │ Nivel I/O    │ TJA1051 VIO (pin 5) ⚠️ OBLIGATORIO         │
 │   GND    │ Tierra       │ Común: Display, TJA1051, STM32            │
 └──────────┴──────────────┴────────────────────────────────────────────┘
 ```
@@ -304,7 +305,7 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │ Cant │      Componente        │ Longitud │          Uso             │
 ├──────┼────────────────────────┼──────────┼──────────────────────────┤
 │  1   │ Cable Dupont 20 pines  │  15 cm   │ ESP32 ↔ Display          │
-│  1   │ Cable Dupont 4 pines   │  10 cm   │ ESP32 ↔ TJA1051          │
+│  1   │ Cable Dupont 5 pines   │  10 cm   │ ESP32 ↔ TJA1051 (TXD,RXD,VCC,VIO,GND) │
 │  1   │ Par trenzado 24 AWG    │  Var.    │ CANH/CANL (CAN bus)      │
 │  2   │ Resistencia 120Ω 1/4W  │   —      │ Terminación CAN          │
 │  2   │ Capacitor 100nF        │   —      │ Desacoplo VCC (display)  │
@@ -347,7 +348,8 @@ Medición esperada entre CANH-CANL con ambas instaladas: ~60Ω
 │ ☐  │ 6. Conectar touch panel (21)                     │    │
 │ ☐  │ 7. Cargar firmware de prueba display             │    │
 │ ☐  │ 8. Verificar pantalla se enciende                │    │
-│ ☐  │ 9. Conectar 5V a TJA1051 VCC                     │    │
+│ ☐  │ 9. Conectar 5V a TJA1051 VCC (pin 3)              │    │
+│ ☐  │ 9b. Conectar 3.3V a TJA1051 VIO (pin 5) ⚠️       │    │
 │ ☐  │ 10. Conectar GPIO 4 y 5 a TJA1051                │    │
 │ ☐  │ 11. Conectar pin S (Silent) a GND                │    │
 │ ☐  │ 12. Instalar capacitor 100nF en VCC del TJA1051  │    │
