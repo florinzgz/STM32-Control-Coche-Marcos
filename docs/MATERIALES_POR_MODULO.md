@@ -98,8 +98,7 @@
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 2 | Cable señal (RPWM + LPWM) | 24 AWG, ~30–50 cm | Del STM32 al BTS7960 — NO debe correr paralelo a cables de potencia |
-| 1 | Cable EN (si aplica: solo FL y RR) | 24 AWG | PC5 (FL) o PC13 (RR) al R_EN + L_EN del driver |
-| — | Puente de cable | 24 AWG, 5 cm | Unir R_EN y L_EN del mismo módulo (FR, RL: conectar a 3.3V fijo) |
+| 1 | Cable EN | 24 AWG | Desde pin EN del STM32 (PC0/PC1/PC4/PC5/PC13) al R_EN + L_EN del driver |
 
 ### Materiales para el cableado de potencia (por cada BTS7960 de tracción)
 

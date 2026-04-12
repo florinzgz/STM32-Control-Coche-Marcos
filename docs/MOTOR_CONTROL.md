@@ -92,10 +92,9 @@ Cada BTS7960 requiere **2 señales PWM** desde el STM32 (RPWM y LPWM del mismo t
 |-------|------|---------|-----------------|
 | **RPWM** | Salida Timer (0-100%) | Giro hacia adelante | 0% |
 | **LPWM** | Salida Timer (0-100%) | Giro hacia atrás | 0% |
-| **EN** | GPIO Output o 3.3V fijo | Habilitación driver (1=ON, 0=OFF) | Según motor |
+| **EN** | GPIO Output | Habilitación driver (1=ON, 0=OFF) | LOW (deshabilitado) |
 
-> **Nota:** Solo PC5 (EN_FL) y PC13 (EN_RR) son GPIO activos. Los demás BTS7960
-> tienen R_EN/L_EN conectados fijo a 3.3 V.
+> **Nota:** Todos los motores tienen GPIO EN dedicado: PC5 (FL), PC0 (FR), PC1 (RL), PC13 (RR), PC4 (STEER).
 
 ### Tabla de Verdad BTS7960 (RPWM/LPWM)
 
