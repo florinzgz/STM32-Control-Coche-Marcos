@@ -104,10 +104,41 @@ typedef struct {
     __I  uint32_t MVFR2;
 } FPU_Type;
 
-static SCB_Type _stub_scb;
-static FPU_Type _stub_fpu;
-#define SCB (&_stub_scb)
-#define FPU (&_stub_fpu)
+/* DWT stub for DWT-based microsecond delay (motor_control.c delay_us_dwt) */
+typedef struct {
+    __IO uint32_t CTRL;
+    __IO uint32_t CYCCNT;
+    __IO uint32_t CPICNT;
+    __IO uint32_t EXCCNT;
+    __IO uint32_t SLEEPCNT;
+    __IO uint32_t LSUCNT;
+    __IO uint32_t FOLDCNT;
+    __I  uint32_t PCSR;
+    __IO uint32_t COMP0;
+    __IO uint32_t MASK0;
+    __IO uint32_t FUNCTION0;
+} DWT_Type;
+
+#define DWT_CTRL_CYCCNTENA_Msk  (1UL)
+
+/* CoreDebug stub for enabling DWT trace (DEMCR register) */
+typedef struct {
+    __IO uint32_t DHCSR;
+    __O  uint32_t DCRSR;
+    __IO uint32_t DCRDR;
+    __IO uint32_t DEMCR;
+} CoreDebug_Type;
+
+#define CoreDebug_DEMCR_TRCENA_Msk  (1UL << 24)
+
+static SCB_Type       _stub_scb;
+static FPU_Type       _stub_fpu;
+static DWT_Type       _stub_dwt;
+static CoreDebug_Type _stub_coredebug;
+#define SCB       (&_stub_scb)
+#define FPU       (&_stub_fpu)
+#define DWT       (&_stub_dwt)
+#define CoreDebug (&_stub_coredebug)
 
 /* VECT_TAB constants used by system_stm32g4xx.c */
 #ifndef VECT_TAB_BASE_ADDRESS
