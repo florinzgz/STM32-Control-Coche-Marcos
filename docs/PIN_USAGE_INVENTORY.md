@@ -27,16 +27,16 @@
 | **Pines totales del chip** | 64 |
 | **Pines de alimentación/tierra/reset/cristal** | 13 (VBAT, VDDA, VSSA, 3×VDD, 4×VSS, NRST, PH0, PH1) |
 | **Pines GPIO disponibles** | 47 (PA0–PA15, PB0–PB15, PC0–PC13, PD2) |
-| **Pines usados por el proyecto** | 31 |
+| **Pines usados por el proyecto** | 34 |
 | **Pines reservados (SWD debug)** | 2 (PA13/SWDIO, PA14/SWCLK) |
-| **Pines libres para expansión** | **14** (incluye 5 pines DIR liberados: PC0–PC4) |
+| **Pines libres para expansión** | **11** |
 
 ### Distribución de pines usados por categoría
 
 | Categoría | Pines usados | Porcentaje |
 |-----------|-------------|------------|
 | PWM motores RPWM/LPWM (TIM1 + TIM3 + TIM8) | 10 | 21.3% |
-| Habilitación motores (GPIO out) | 2 (PC5, PC13) | 4.3% |
+| Habilitación motores (GPIO out) | 5 (PC0, PC1, PC4, PC5, PC13) | 10.6% |
 | Relés potencia (GPIO out) | 3 | 6.4% |
 | Relés LED (GPIO out) | 2 (PB10, PB11) | 4.3% |
 | Sensores velocidad rueda (EXTI) | 4 | 8.5% |
@@ -46,40 +46,39 @@
 | Bus I2C (INA226/TCA9548A) | 2 | 4.3% |
 | Bus OneWire (DS18B20) | 1 | 2.1% |
 | Bus CAN (FDCAN1) | 2 | 4.3% |
-| **TOTAL USADOS** | **31** | **66.0%** |
+| **TOTAL USADOS** | **34** | **72.3%** |
 | Reservados SWD | 2 | 4.3% |
-| Pines DIR liberados (PC0–PC4) | 5 | 10.6% |
-| **LIBRES** | **12** | **25.5%** |
+| Pin DIR liberado (PC2) | 1 | 2.1% |
+| **LIBRES** | **10** | **21.3%** |
 
 ---
 
 ## 2. STM32G474RE — Detalle por módulo
 
-### 2.1 Motores de tracción — 4× BTS7960 (10 pines PWM + 2 pines EN = 12 pines)
+### 2.1 Motores de tracción — 4× BTS7960 (8 pines PWM + 4 pines EN = 12 pines)
 
-Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM). Los pines DIR (PC0–PC3) ya **no se usan** (liberados).
+Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habilitación).
 
 | Motor | Pin RPWM | Timer | Pin LPWM | Timer | Pin EN | Total pines |
 |-------|----------|-------|----------|-------|--------|-------------|
 | FL (Delantero Izq.) | **PA8** | TIM1_CH1 | **PA9** | TIM1_CH2 | **PC5** (GPIO) | 3 |
-| FR (Delantero Der.) | **PA10** | TIM1_CH3 | **PA11** | TIM1_CH4 | 3.3V fijo | 2 |
-| RL (Trasero Izq.) | **PC6** | TIM8_CH1 | **PC7** | TIM8_CH2 | 3.3V fijo | 2 |
+| FR (Delantero Der.) | **PA10** | TIM1_CH3 | **PC3** | TIM1_CH4 (AF2) | **PC0** (GPIO) | 3 |
+| RL (Trasero Izq.) | **PC6** | TIM8_CH1 | **PC7** | TIM8_CH2 | **PC1** (GPIO) | 3 |
 | RR (Trasero Der.) | **PC8** | TIM8_CH3 | **PC9** | TIM8_CH4 | **PC13** (GPIO) | 3 |
-| | | | | | **Subtotal:** | **10 PWM + 2 EN = 12 pines** |
+| | | | | | **Subtotal:** | **8 PWM + 4 EN = 12 pines** |
 
 - PWM a 20 kHz, center-aligned, resolución ~12 bits (ARR = 4249)
 - Solo un canal (RPWM o LPWM) activo por motor a la vez
 - TIM1 y TIM8: BREAK2 armado a Cortex LOCKUP (hardware PWM kill en fallo CPU)
-- EN de FR y RL: no hay pin GPIO; conectar R_EN/L_EN del BTS7960 directo a 3.3 V
 
-### 2.2 Motor de dirección — 1× BTS7960 (2 pines PWM)
+### 2.2 Motor de dirección — 1× BTS7960 (2 pines PWM + 1 pin EN = 3 pines)
 
 | Motor | Pin RPWM | Timer | Pin LPWM | Timer | Pin EN | Total pines |
 |-------|----------|-------|----------|-------|--------|-------------|
-| STEER (Dirección) | **PA6** | TIM3_CH1 | **PA7** | TIM3_CH2 | 3.3V fijo | 2 |
-| | | | | | **Subtotal:** | **2 pines** |
+| STEER (Dirección) | **PA6** | TIM3_CH1 | **PA7** | TIM3_CH2 | **PC4** (GPIO) | 3 |
+| | | | | | **Subtotal:** | **3 pines** |
 
-> DIR (PC4) y EN (PC9) ya **no se usan**. PC9 fue reasignado a TIM8_CH4 (LPWM_RR).
+> PC9 fue reasignado a TIM8_CH4 (LPWM_RR). PC4 se usa ahora como EN_STEER (GPIO output).
 > TIM3 no tiene entrada BREAK; los fault handlers escriben CCR1=0, CCR2=0 por software.
 
 ### 2.3 Relés de potencia (5 pines)
@@ -227,29 +226,31 @@ Sensores en el bus (un solo pin):
 | 29 | PC11 | GPIOC | Relé TRAC | Alimentación motores |
 | 30 | PC12 | GPIOC | Relé DIR | Alimentación dirección |
 | 31 | PC13 | GPIOC | Motor RR | EN (habilitación), GPIO active HIGH |
+| 32 | PC0 | GPIOC | Motor FR | EN (habilitación), GPIO active HIGH |
+| 33 | PC1 | GPIOC | Motor RL | EN (habilitación), GPIO active HIGH |
+| 34 | PC4 | GPIOC | Motor STEER | EN (habilitación), GPIO active HIGH |
 
 ---
 
 ## 3. STM32G474RE — Pines libres
 
-Los siguientes pines GPIO del STM32G474RE **NO están usados** y están disponibles para expansión futura:
+Los siguientes pines GPIO del STM32G474RE están disponibles para expansión o han sido reasignados recientemente:
 
 | # | Pin | Puerto | Funciones alternativas disponibles | Estado |
 |---|-----|--------|--------------------------------------|--------|
 | 1 | PA4 | GPIOA | DAC1_OUT1, SPI1_NSS, ADC2_IN17 | **LIBRE** |
 | 2 | PA5 | GPIOA | DAC1_OUT2, SPI1_SCK, ADC2_IN13 | **LIBRE** |
-| 3 | PA12 | GPIOA | USB_DP, FDCAN1_TX (alt), TIM1_ETR | **LIBRE** |
-| 4 | PB1 | GPIOB | ADC3_IN1, TIM3_CH4 | **LIBRE** |
-| 5 | PB2 | GPIOB | GPIO general | **LIBRE** |
-| 6 | PB12 | GPIOB | SPI2_NSS, I2S2_WS | **LIBRE** |
-| 7 | PB13 | GPIOB | SPI2_SCK, I2S2_CK | **LIBRE** |
-| 8 | PB14 | GPIOB | GPIO_Output | **LED_DIAG** |
-| 9 | PC0 | GPIOC | GPIO, ADC1_IN6 | **LIBRE** (antes DIR_FL, liberado) |
-| 10 | PC1 | GPIOC | GPIO, ADC1_IN7 | **LIBRE** (antes DIR_FR, liberado) |
-| 11 | PC2 | GPIOC | GPIO, ADC1_IN8 | **LIBRE** (antes DIR_RL, liberado) |
-| 12 | PC3 | GPIOC | TIM1_CH4 (AF2) | **LPWM_FR** — PWM motor FR 20 kHz |
-| 13 | PC4 | GPIOC | GPIO, ADC2_IN5 | **LIBRE** (antes DIR_STEER, liberado) |
-| 14 | PD2 | GPIOD | GPIO general, TIM3_ETR | **LIBRE** |
+| 3 | PB1 | GPIOB | ADC3_IN1, TIM3_CH4 | **LIBRE** |
+| 4 | PB2 | GPIOB | GPIO general | **LIBRE** |
+| 5 | PB12 | GPIOB | SPI2_NSS, I2S2_WS | **LIBRE** |
+| 6 | PB13 | GPIOB | SPI2_SCK, I2S2_CK | **LIBRE** |
+| 7 | PB14 | GPIOB | GPIO_Output | **LED_DIAG** |
+| 8 | PC0 | GPIOC | GPIO, ADC1_IN6 | **EN_FR** — habilitación motor FR (GPIO) |
+| 9 | PC1 | GPIOC | GPIO, ADC1_IN7 | **EN_RL** — habilitación motor RL (GPIO) |
+| 10 | PC2 | GPIOC | GPIO, ADC1_IN8 | **LIBRE** (antes DIR_RL, liberado) |
+| 11 | PC3 | GPIOC | TIM1_CH4 (AF2) | **LPWM_FR** — PWM motor FR 20 kHz |
+| 12 | PC4 | GPIOC | GPIO, ADC2_IN5 | **EN_STEER** — habilitación motor dirección (GPIO) |
+| 13 | PD2 | GPIOD | GPIO general, TIM3_ETR | **LIBRE** |
 
 Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se necesita debugging:
 
@@ -258,19 +259,17 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 14 | PA13 | GPIOA | SWDIO (debug) | ⚠️ NO recomendado liberar |
 | 15 | PA14 | GPIOA | SWCLK (debug) | ⚠️ NO recomendado liberar |
 
-> **Resumen: 14 pines libres para uso inmediato** (16 si se sacrifica debug SWD, no recomendado).
+> **Resumen: 8 pines libres para uso inmediato** (10 si se sacrifica debug SWD, no recomendado).
 
 ### Posibles usos de los pines libres
 
 | Posible expansión | Pines sugeridos | Nº pines |
 |-------------------|-----------------|----------|
-| UART debug serie | PC0 (TX) + PC1 (RX) | 2 |
+| UART debug serie | PB12 (TX) + PB13 (RX) | 2 |
 | SPI adicional (sensor, SD card) | PA5 (SCK) + PC2 (MISO) + PA4 (CS) | 3 |
 | ADC adicional (sensor batería, otro sensor) | PB1, PA4, PA5 | 1-3 |
-| Segundo bus I2C | PC0 (SCL) + PC1 (SDA) | 2 |
 | LEDs de estado / buzzer | PB2, PB12, PB13 | 1-3 |
-| Sensores adicionales | PC2, PC4, PB12, PB13 | 2-4 |
-| USB | PA12 (DP) | 1 |
+| Sensores adicionales | PC2, PB12, PB13 | 2-3 |
 
 ---
 
