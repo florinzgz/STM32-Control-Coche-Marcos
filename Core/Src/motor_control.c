@@ -468,18 +468,38 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
 /* ---- Microsecond busy-wait helper ----
  * Uses the Cortex-M4 DWT cycle counter (CYCCNT) for deterministic,
  * compiler-independent and clock-frequency-independent timing.
- * The NOP-loop fallback has been removed because it depended on
- * -O2 optimisation and a hand-calibrated iteration count.
  *
  * DWT is initialised by Motor_Init() → DWT_Init().
  *
+ * DEFENCE-IN-DEPTH — DWT guard flag:
+ *   If delay_us() is ever called before DWT_Init() (e.g. after a warm
+ *   reset where the call graph is re-entered unexpectedly), the guard
+ *   flag falls through to a conservative NOP-loop fallback calibrated
+ *   for 170 MHz / -O2.  This avoids a zero-delay or infinite-loop if
+ *   CYCCNT is not yet running.
+ *
+ * OVERFLOW PROTECTION:
+ *   delay_us() clamps the delay to DELAY_US_MAX_US (25 000 µs ≈ 25 ms)
+ *   to prevent uint32_t overflow of (us * dwt_cycles_per_us).
+ *   At 170 MHz: 25 000 × 170 = 4 250 000 — well within uint32_t range.
+ *   Production code only uses SAFE_DEADTIME_US (5 µs), so this clamp
+ *   is pure defence-in-depth.
+ *
  * On HOST_TEST builds this is a no-op (no real hardware).
  * Only used for SAFE_DEADTIME_US (5 µs) — negligible CPU cost.     */
+
+#define DELAY_US_MAX_US  25000U  /* Max delay: 25 ms — prevents overflow */
+
 #ifndef HOST_TEST
 
 /* Precomputed cycles-per-microsecond — set once by DWT_Init().
  * Avoids division on every delay_us() call.                         */
 static uint32_t dwt_cycles_per_us = 170U;  /* Safe default for 170 MHz */
+
+/* Guard flag: set to 1 by DWT_Init().  If delay_us() is called before
+ * DWT_Init(), the NOP-loop fallback executes instead of reading an
+ * uninitialised or stopped CYCCNT.                                  */
+static volatile uint8_t dwt_initialized = 0U;
 
 /* DWT initialisation — called once from Motor_Init().
  * Enables the trace unit and starts the cycle counter.
@@ -490,18 +510,34 @@ static inline void DWT_Init(void)
     DWT->CYCCNT = 0U;
     DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;             /* Start counter */
     dwt_cycles_per_us = SystemCoreClock / 1000000U;
+    dwt_initialized = 1U;                              /* Arm the guard */
 }
 
 static inline void delay_us(uint32_t us)
 {
-    uint32_t start  = DWT->CYCCNT;
-    uint32_t cycles = us * dwt_cycles_per_us;
-    while ((DWT->CYCCNT - start) < cycles) {
-        /* busy-wait — unsigned subtraction handles CYCCNT wrap */
+    /* Clamp to prevent uint32_t overflow in cycle calculation */
+    if (us > DELAY_US_MAX_US) us = DELAY_US_MAX_US;
+
+    if (dwt_initialized) {
+        /* Primary path: DWT cycle-counter busy-wait (deterministic) */
+        uint32_t start  = DWT->CYCCNT;
+        uint32_t cycles = us * dwt_cycles_per_us;
+        while ((DWT->CYCCNT - start) < cycles) {
+            /* busy-wait — unsigned subtraction handles CYCCNT wrap */
+        }
+    } else {
+        /* Fallback: conservative NOP loop for 170 MHz / -O2.
+         * Less accurate than DWT but guarantees a non-zero delay.
+         * 30 NOPs ≈ 1 µs at 170 MHz with -O2 (same calibration as
+         * the original pre-DWT implementation).                     */
+        for (volatile uint32_t i = 0; i < us * 30U; i++) {
+            __NOP();
+        }
     }
 }
 #else
-static inline void DWT_Init(void)  { /* no-op in test builds */ }
+static volatile uint8_t dwt_initialized = 0U;
+static inline void DWT_Init(void)  { dwt_initialized = 1U; }
 static inline void delay_us(uint32_t us) { (void)us; }
 #endif
 

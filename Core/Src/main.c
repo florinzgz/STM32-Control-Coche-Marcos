@@ -1181,12 +1181,18 @@ static void MX_IWDG_Init(void)
 void Error_Handler(void)
 {
     __disable_irq();
-    /* Safe the hardware: clear MOE on advanced timers, zero TIM3 STEER CCRs,
-     * then drive GPIO outputs LOW (relays off, motor EN pins off).
-     * Uses direct register access because HAL may be in an inconsistent state.
-     * All five motor EN pins are on GPIOC and controlled as GPIO outputs.     */
+    /* Safe the hardware: clear MOE on advanced timers, zero ALL CCRs
+     * (TIM1 CH1-4, TIM8 CH1-4, TIM3 CH1-2), then drive GPIO outputs
+     * LOW (relays off, motor EN pins off).
+     * CCR zeroing is defence-in-depth: if MOE were ever re-enabled
+     * (debugger, errant code path), duty would be 0 % — no torque.
+     * Uses direct register access because HAL may be inconsistent.    */
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM1 PWM outputs (FL, FR)   */
     TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM8 PWM outputs (RL, RR)   */
+    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;  /* FL: RPWM, LPWM → 0 */
+    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;  /* FR: RPWM, LPWM → 0 */
+    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;  /* RL: RPWM, LPWM → 0 */
+    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;  /* RR: RPWM, LPWM → 0 */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 (TIM3 has no BREAK)      */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0                          */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR

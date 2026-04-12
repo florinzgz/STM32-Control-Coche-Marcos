@@ -39,7 +39,7 @@ void NMI_Handler(void)
 
 void HardFault_Handler(void)
 {
-    /* Option D (A + C): hardware path + software path.
+    /* Option D (A + B + C): hardware path + CCR scrub + software path.
      *
      * A) Clear MOE on advanced timers → immediate hardware shutdown of all
      *    TIM1 (FL, FR) and TIM8 (RL, RR) PWM outputs.  Outputs are driven
@@ -47,10 +47,18 @@ void HardFault_Handler(void)
      *    with initial Pulse=0.  This happens even if further code below
      *    is unreachable due to stack corruption.
      *
+     * B) Zero all TIM1/TIM8 CCR preload registers.  This is defence-in-
+     *    depth: if MOE were ever re-enabled (debugger, errant code), the
+     *    duty cycle would be 0 % — no motor torque.
+     *
      * C) Zero TIM3 CCRs for STEER (TIM3 has no BREAK input).
      *    Force all motor EN pins and all relays LOW via BSRR.             */
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM1 outputs: RPWM_FL, LPWM_FL, RPWM_FR, LPWM_FR */
     TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM8 outputs: RPWM_RL, LPWM_RL, RPWM_RR, LPWM_RR */
+    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;  /* FL: RPWM, LPWM → 0 */
+    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;  /* FR: RPWM, LPWM → 0 */
+    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;  /* RL: RPWM, LPWM → 0 */
+    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;  /* RR: RPWM, LPWM → 0 */
     TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 */
     TIM3->CCR2  = 0U;               /* LPWM_STEER → 0 */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
@@ -68,6 +76,10 @@ void MemManage_Handler(void)
 {
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM8->BDTR &= ~TIM_BDTR_MOE;
+    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;
+    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;
+    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;
+    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
@@ -81,6 +93,10 @@ void BusFault_Handler(void)
 {
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM8->BDTR &= ~TIM_BDTR_MOE;
+    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;
+    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;
+    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;
+    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
@@ -94,6 +110,10 @@ void UsageFault_Handler(void)
 {
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM8->BDTR &= ~TIM_BDTR_MOE;
+    TIM1->CCR1  = 0U;  TIM1->CCR2  = 0U;
+    TIM1->CCR3  = 0U;  TIM1->CCR4  = 0U;
+    TIM8->CCR1  = 0U;  TIM8->CCR2  = 0U;
+    TIM8->CCR3  = 0U;  TIM8->CCR4  = 0U;
     TIM3->CCR1  = 0U;
     TIM3->CCR2  = 0U;
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
