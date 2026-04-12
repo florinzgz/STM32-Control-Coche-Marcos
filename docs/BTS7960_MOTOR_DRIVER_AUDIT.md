@@ -26,7 +26,7 @@ intermediate state when reversing.
 |-----------------|-----------------------------|-------------------------------|
 | **RPWM**        | PA8  — TIM1_CH1             | PA10 — TIM1_CH3               |
 | **LPWM**        | PA9  — TIM1_CH2             | PC3  — TIM1_CH4 (AF2)        |
-| **R_EN / L_EN** | PC5  — GPIO output (active) | Tied to 3.3 V in hardware     |
+| **R_EN / L_EN** | PC5  — GPIO output (active) | PC0  — GPIO output (active)   |
 | **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 0) | ← same (ch 1) |
 | **Protection**  | TIM1 BREAK2 → Cortex LOCKUP | ← same                        |
 
@@ -36,7 +36,7 @@ intermediate state when reversing.
 |-----------------|-----------------------------|-------------------------------|
 | **RPWM**        | PC6  — TIM8_CH1             | PC8  — TIM8_CH3               |
 | **LPWM**        | PC7  — TIM8_CH2             | PC9  — TIM8_CH4               |
-| **R_EN / L_EN** | Tied to 3.3 V in hardware   | PC13 — GPIO output (active)   |
+| **R_EN / L_EN** | PC1  — GPIO output (active) | PC13 — GPIO output (active)   |
 | **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 2) | ← same (ch 3) |
 | **Protection**  | TIM8 BREAK2 → Cortex LOCKUP | ← same                        |
 
@@ -46,7 +46,7 @@ intermediate state when reversing.
 |-----------------|-----------------------------|
 | **RPWM**        | PA6  — TIM3_CH1             |
 | **LPWM**        | PA7  — TIM3_CH2             |
-| **R_EN / L_EN** | Tied to 3.3 V in hardware   |
+| **R_EN / L_EN** | PC4  — GPIO output (active) |
 | **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 5) |
 | **Protection**  | Software only (TIM3 has no BREAK input; fault handlers zero CCR1/CCR2 directly) |
 
@@ -70,12 +70,12 @@ All motor current measurement is performed by **external INA226 high-side curren
 | Motor  | EN Pin  | Management                                                         |
 |--------|---------|--------------------------------------------------------------------|
 | FL     | PC5     | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
-| FR     | —       | Tied to 3.3 V permanently in hardware (`en_port = NULL`)           |
-| RL     | —       | Tied to 3.3 V permanently in hardware (`en_port = NULL`)           |
+| FR     | PC0     | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
+| RL     | PC1     | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
 | RR     | PC13    | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
-| STEER  | —       | Tied to 3.3 V permanently in hardware (`en_port = NULL`)           |
+| STEER  | PC4     | GPIO output — asserted (HIGH) when duty > 0, deasserted (LOW) when stopped |
 
-**Boot default**: PC5 and PC13 are initialized as GPIO_MODE_OUTPUT_PP in `MX_GPIO_Init()`.
+**Boot default**: PC0, PC1, PC4, PC5 and PC13 are initialized as GPIO_MODE_OUTPUT_PP in `MX_GPIO_Init()`.
 HAL defaults these to GPIO_PIN_RESET (LOW = H-bridge disabled) — **safe on power-up**.
 
 ### 1.6 Freed Direction Pins (Legacy)

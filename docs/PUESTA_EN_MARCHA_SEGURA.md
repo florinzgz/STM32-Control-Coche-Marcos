@@ -481,13 +481,13 @@ Repite el mismo proceso de la Fase 8 para cada motor:
 
 | Motor | Pins PWM | Pin EN | Timer | Referencia firmware |
 |-------|----------|--------|-------|---------------------|
-| FR | PA10 (RPWM), PC3 (LPWM) | Fijo a 3.3V | TIM1 CH3/CH4 | `project_config.h:73-74` |
-| RL | PC6 (RPWM), PC7 (LPWM) | Fijo a 3.3V | TIM8 CH1/CH2 | `project_config.h:78-79` |
+| FR | PA10 (RPWM), PC3 (LPWM) | PC0 (EN) | TIM1 CH3/CH4 | `project_config.h:73-74,106` |
+| RL | PC6 (RPWM), PC7 (LPWM) | PC1 (EN) | TIM8 CH1/CH2 | `project_config.h:78-79,107` |
 | RR | PC8 (RPWM), PC9 (LPWM) | PC13 (EN) | TIM8 CH3/CH4 | `project_config.h:80-81,110` |
-| STEER | PA6 (RPWM), PA7 (LPWM) | Fijo a 3.3V | TIM3 CH1/CH2 | `project_config.h:86-87` |
+| STEER | PA6 (RPWM), PA7 (LPWM) | PC4 (EN) | TIM3 CH1/CH2 | `project_config.h:86-87,111` |
 
-**Para FR y RL:** R_EN y L_EN van **puenteados a 3.3V fijo** (siempre habilitados).
-Conecta los pines R_EN/L_EN del BTS7960 correspondiente directamente a 3.3V (ver `project_config.h:106`).
+**Todos los motores tienen EN dedicado por GPIO** — el firmware controla la habilitación.
+Conecta R_EN + L_EN de cada BTS7960 al pin EN correspondiente (PC0, PC1, PC4, PC5, PC13).
 
 **Motor de dirección:** Alimentación **12V** (no 24V) a través de RELAY_DIR (PC12).
 

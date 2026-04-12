@@ -851,11 +851,11 @@ STM32 PC0  (GPIO EN_FR) ──────────────────�
 
 | Pin antiguo | Uso anterior  | Estado nuevo             |
 |-------------|---------------|--------------------------|
-| PC0         | DIR_FL GPIO   | Libre — no conectar      |
-| PC1         | DIR_FR GPIO   | Libre — no conectar      |
+| PC0         | DIR_FL GPIO   | **EN_FR** — GPIO output  |
+| PC1         | DIR_FR GPIO   | **EN_RL** — GPIO output  |
 | PC2         | DIR_RL GPIO   | Libre — no conectar      |
 | PC3         | DIR_RR GPIO   | LPWM_FR — TIM1_CH4 (AF2) |
-| PC4         | DIR_STEER GPIO| Libre — no conectar      |
+| PC4         | DIR_STEER GPIO| **EN_STEER** — GPIO output |
 
 ### Componentes que se eliminan del BOM
 
