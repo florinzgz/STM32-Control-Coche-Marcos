@@ -1,5 +1,7 @@
 # 📡 Protocolo CAN - ESP32↔STM32
 
+> ⚠️ **DEPRECATED:** This document is superseded by [`CAN_CONTRACT_FINAL.md`](CAN_CONTRACT_FINAL.md) (rev 1.3), which is the authoritative CAN protocol reference. Refer to that document for current pin assignments (PA11/PA12), message definitions, and payload formats.
+
 **Comunicación Determinística para Control Vehicular**
 
 ---

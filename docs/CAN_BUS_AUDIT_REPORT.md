@@ -25,8 +25,8 @@
 | Protocol Exception | DISABLE | `main.c` line 530 |
 | ID Type | FDCAN_STANDARD_ID (11-bit) | `can_handler.c` line 79 |
 | FD Bit-Rate Switch | FDCAN_BRS_OFF | `can_handler.c` line 83 |
-| TX pins | PB9 (FDCAN1_TX, AF9) | `main.h` |
-| RX pins | PB8 (FDCAN1_RX, AF9) | `main.h` |
+| TX pins | PA12 (FDCAN1_TX, AF9) | `project_config.h` |
+| RX pins | PA11 (FDCAN1_RX, AF9) | `project_config.h` |
 
 ### 1.2 ESP32-S3 (HMI)
 
@@ -98,7 +98,7 @@ Both sides are configured for:
 | 0x200 | STATUS_SPEED | 8 | 8 | — | — | ✅ |
 | 0x201 | STATUS_CURRENT | 8 | 8 | — | — | ✅ |
 | 0x202 | STATUS_TEMP | 5 | 5 | — | — | ✅ |
-| 0x203 | STATUS_SAFETY | 3 | 3 | — | — | ✅ |
+| 0x203 | STATUS_SAFETY | 5 | 5 | — | — | ✅ |
 | 0x204 | STATUS_STEERING | 3 | 3 | — | — | ✅ |
 | 0x205 | STATUS_TRACTION | 4 | 4 | — | — | ✅ |
 | 0x206 | STATUS_TEMP_MAP | 5 | 5 | — | — | ✅ |
