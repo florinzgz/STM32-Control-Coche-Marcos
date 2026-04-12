@@ -159,7 +159,7 @@ NOTAS:
 │     5V       │ Alimentación │   Pin 3 VCC  │ Fuente 5V regulada       │
 │     GND      │ Tierra       │   Pin 2 GND  │ Común con ESP32          │
 │     GND      │ Normal Mode  │   Pin 8 S    │ Desactiva modo silencioso│
-│     NC       │ Referencia   │   Pin 5 VREF │ No conectado             │
+│    3.3V      │ Nivel I/O    │   Pin 5 VIO  │ ⚠️ OBLIGATORIO → 3.3V    │
 └──────────────┴──────────────┴──────────────┴──────────────────────────┘
 ```
 

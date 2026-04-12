@@ -30,7 +30,7 @@
 
 **SÍ. Faltan tres conexiones que son obligatorias:**
 
-### 2.1 Pin 8 (Rs) — OBLIGATORIO en AMBOS transceivers
+### 2.1 Pin 8 (S) — OBLIGATORIO en AMBOS transceivers
 
 **Este pin DEBE conectarse a GND en los dos módulos TJA1051T/3.**
 
@@ -53,37 +53,38 @@ Ver sección 4.
 
 ---
 
-## 3. Pin 8 (Rs) — Cómo conectarlo exactamente
+## 3. Pin 8 (S) — Cómo conectarlo exactamente
 
 ### 3.1 Nombres equivalentes para el mismo pin físico
 
 Dependiendo del módulo o versión del datasheet, el pin 8 puede aparecer etiquetado como:
 
-| Etiqueta en el módulo | Nombre en datasheet TI | ¿Es el mismo pin? |
+| Etiqueta en el módulo | Nombre en datasheet NXP | ¿Es el mismo pin? |
 |-----------------------|-------------------------|-------------------|
-| **Rs** | S (Silent mode) | ✅ Sí — nombre oficial TJA1051T/3 (NXP) |
+| **S** | S (Silent mode) | ✅ Sí — nombre oficial TJA1051T/3 (NXP) |
+| **Rs** | S (Silent mode) | ✅ Sí — etiqueta alternativa en algunos módulos breakout |
 | **SLOPE** | SLOPE | ✅ Sí — etiqueta alternativa en algunos módulos breakout |
 | **STB** | STB (Standby) | ⚠️ Verificar — algunos módulos usan STB; para el TJA1051T/3 el comportamiento es: GND = normal mode |
 
-> **Regla práctica:** Sea cual sea la etiqueta (Rs, SLOPE o STB), conéctalo a GND.
+> **Regla práctica:** Sea cual sea la etiqueta (S, Rs, SLOPE o STB), conéctalo a GND.
 > Para el transceiver CAN de alta velocidad NXP TJA1051T/3, GND en este pin = modo normal.
 
 ### 3.2 Tabla de comportamiento del pin 8 en el TJA1051T/3
 
 | Nivel en pin 8 | Modo | TX activo | RX activo |
 |----------------|------|-----------|-----------|
-| LOW → GND | **High-speed** ✅ | Sí | Sí |
-| HIGH → VCC | Standby | **NO** ❌ | Sí |
+| LOW → GND | **Normal** ✅ | Sí | Sí |
+| HIGH → VCC | Silent | **NO** ❌ | Sí |
 | Flotante | Indefinido | Imprevisible | Imprevisible |
 
 ### 3.3 Conexión exacta
 
 ```
 TJA1051T/3 #1 (lado ESP32):
-  Pin 8 (Rs) ──────────────────→ GND del ESP32
+  Pin 8 (S) ──────────────────→ GND del ESP32
 
 TJA1051T/3 #2 (lado STM32):
-  Pin 8 (Rs) ──────────────────→ GND del STM32
+  Pin 8 (S) ──────────────────→ GND del STM32
 ```
 
 Cable corto, conexión directa. No se necesita resistencia ni condensador en este pin.
@@ -230,7 +231,7 @@ directamente contra el código fuente del firmware:
 | STM32 FDCAN1 TX pin | PA12 (AF9) | `Core/Inc/main.h`: `PIN_CAN_TX = GPIO_PIN_12` + `Core/Src/stm32g4xx_hal_msp.c`: `GPIO_AF9_FDCAN1` | ✅ |
 | STM32 FDCAN1 RX pin | PA11 (AF9) | `Core/Inc/main.h`: `PIN_CAN_RX = GPIO_PIN_11` + `Core/Src/stm32g4xx_hal_msp.c`: `GPIO_AF9_FDCAN1` | ✅ |
 | Velocidad de bus | 500 kbps | `esp32/src/main.cpp`: `convertSpeed(500)` + `Core/Src/main.c`: `170 MHz / (17 × 20) = 500 kbps` | ✅ |
-| Pin Rs (pin 8) | Conectar a GND | Hardware externo — no controlado por firmware | ✅ |
+| Pin S (pin 8) | Conectar a GND | Hardware externo — no controlado por firmware | ✅ |
 | Terminación | 120Ω en cada extremo | Hardware externo — no controlado por firmware | ✅ |
 | GND común | Obligatorio | Hardware externo — sin GND común los transceivers no operan correctamente | ✅ |
 

@@ -454,21 +454,23 @@ in byte 0.  If the STM32 is receiving correctly, `can_stats.rx_count`
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| **Transceiver IC** | SN65HVD230 (TI, 3.3V logic I/O, 3.3V bus) | `docs/ESP32_STM32_CAN_CONNECTION.md` |
+| **Transceiver IC** | TJA1051T/3 (NXP, VCC=5V, VIO=3.3V) | `docs/ESP32_STM32_CAN_CONNECTION.md` |
 | **Quantity** | 2 (one per board) | — |
-| **VCC** | 3.3V | Pin 3 on each module |
-| **Rs/SLNT pin** | Must be GND (high-speed mode) | Pin 8 on each module |
+| **VCC** | **5V** (pin 3) | 4.5–5.5V según datasheet NXP |
+| **VIO** | **3.3V** (pin 5) | Nivel lógico MCU — ⚠️ OBLIGATORIO |
+| **S pin** | Must be GND (normal mode) | Pin 8 on each module |
 
 ### Wiring diagram
 
 ```
-STM32 side                    SN65HVD230 #1      Bus          SN65HVD230 #2                 ESP32 side
+STM32 side                    TJA1051T/3 #1       Bus          TJA1051T/3 #2                 ESP32 side
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-PA12 (TX, AF9) ──→ Pin 1 D                                   Pin 1 D   ←── GPIO 4 (TX)
-PA11 (RX, AF9) ←── Pin 4 R                                   Pin 4 R   ──→ GPIO 5 (RX)
-3.3V           ──→ Pin 3 VCC                                  Pin 3 VCC ←── 3.3V
-GND            ──→ Pin 2 GND                                  Pin 2 GND ←── GND
-                   Pin 8 Rs → GND                             Pin 8 Rs → GND
+PA12 (TX, AF9) ──→ Pin 1 TXD                                   Pin 1 TXD ←── GPIO 4 (TX)
+PA11 (RX, AF9) ←── Pin 4 RXD                                   Pin 4 RXD ──→ GPIO 5 (RX)
+5V (ext.)      ──→ Pin 3 VCC                                   Pin 3 VCC ←── 5V (ext.)
+3.3V           ──→ Pin 5 VIO                                   Pin 5 VIO ←── 3.3V ⚠️
+GND            ──→ Pin 2 GND                                   Pin 2 GND ←── GND
+                   Pin 8 S → GND                               Pin 8 S → GND
                    Pin 7 CANH ←──── twisted pair ────→ Pin 7 CANH
                    Pin 6 CANL ←──── twisted pair ────→ Pin 6 CANL
                         ┊                                    ┊
@@ -488,12 +490,13 @@ CAN 2.0 (ISO 11898-2) requires **120 Ω** at each physical end of the bus.
 
 ### Hardware checklist
 
-- [ ] SN65HVD230 pin 8 (Rs/SLNT) to GND on **both** modules
-- [ ] VCC = 3.3V on **both** modules
+- [ ] TJA1051T/3 pin 8 (S) to GND on **both** modules
+- [ ] VCC (pin 3) = **5V** on **both** modules
+- [ ] VIO (pin 5) = **3.3V** on **both** modules ⚠️ OBLIGATORIO
 - [ ] CANH ↔ CANH, CANL ↔ CANL (not crossed)
 - [ ] Common GND wire between boards
 - [ ] 120 Ω termination at **both** ends
-- [ ] 100 nF decoupling caps on VCC–GND of each SN65HVD230
+- [ ] 100 nF decoupling caps on VCC–GND of each TJA1051T/3
 
 ---
 

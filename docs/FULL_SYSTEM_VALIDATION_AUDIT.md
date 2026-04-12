@@ -11,17 +11,17 @@
 
 The ESP32 boot screen displays "CAN: WAITING..." when no STM32 heartbeat (0x001) has been received within 500 ms of boot. After thorough firmware-level audit, the root causes are ranked by probability:
 
-### 🔴 P1 — HARDWARE: SN65HVD230 Pin 8 (Rs) Not Connected to GND
+### 🔴 P1 — HARDWARE: TJA1051T/3 Pin 8 (S) Not Connected to GND
 
 **Probability: HIGH (70%)**
 
-The SN65HVD230 CAN transceiver's Pin 8 (Rs / slope control) **must be tied to GND** for normal high-speed operation. If this pin is:
+The TJA1051T/3 CAN transceiver's Pin 8 (S / silent mode) **must be tied to GND** for normal operation. If this pin is:
 - **Floating:** Transceiver enters undefined state — intermittent TX, unreliable RX
-- **Tied to VCC (3.3V):** Transceiver enters standby/silent mode — TX disabled, RX only (uni-directional or no communication)
+- **Tied to VCC (5V):** Transceiver enters silent mode — TX disabled, RX only
 
-This is the **#1 most common CAN hardware failure** with SN65HVD230 modules.
+This is the **#1 most common CAN hardware failure** with TJA1051T/3 modules.
 
-**Fix:** Connect Pin 8 (Rs) to GND on **both** SN65HVD230 modules (STM32 side and ESP32 side).
+**Fix:** Connect Pin 8 (S) to GND on **both** TJA1051T/3 modules (STM32 side and ESP32 side).
 
 ### 🟠 P2 — HARDWARE: Missing Common GND Between MCUs
 
@@ -132,7 +132,7 @@ The STM32G4 HAL (v1.2.2) `FDCAN_InitTypeDef` does **not** include `RxFifo0ElmtsN
 | Filter | Accept-all | ✅ |
 | RX Queue | 5 elements | ✅ |
 | TX Queue | 5 elements | ✅ |
-| Transceiver | SN65HVD230 (3.3V, Rs tied to GND) | ✅ |
+| Transceiver | TJA1051T/3 (VCC=5V, VIO=3.3V, S tied to GND) | ✅ |
 
 #### Timing Initialization — ✅ PASS
 Uses `TWAI_TIMING_CONFIG_500KBITS()` macro first (preserves `clk_src` / `quanta_resolution_hz` for ESP-IDF 5.x), then overrides `brp`, `tseg_1`, `tseg_2`, `sjw`. This is the correct pattern.
@@ -199,8 +199,8 @@ Both sides use **little-endian** consistently for multi-byte fields.
 | Step | Check | Expected | Action if FAIL |
 |------|-------|----------|---------------|
 | H1 | Measure CANH↔CANL resistance | ~60Ω (2×120Ω parallel) | Add/replace termination resistors |
-| H2 | Verify SN65HVD230 Pin 8 (Rs) to GND (STM32 side) | 0Ω | Solder wire from Pin 8 to GND |
-| H3 | Verify SN65HVD230 Pin 8 (Rs) to GND (ESP32 side) | 0Ω | Solder wire from Pin 8 to GND |
+| H2 | Verify TJA1051T/3 Pin 8 (S) to GND (STM32 side) | 0Ω | Solder wire from Pin 8 to GND |
+| H3 | Verify TJA1051T/3 Pin 8 (S) to GND (ESP32 side) | 0Ω | Solder wire from Pin 8 to GND |
 | H4 | Verify GND common wire between ESP32 and STM32 | Continuity | Add dedicated GND wire |
 | H5 | Verify no VCC↔GND short on either transceiver | >1kΩ | Fix short circuit |
 | H6 | Verify CANH↔CANH connection (STM32 → ESP32) | Continuity | Rewire |
@@ -281,7 +281,7 @@ STM32 sends test frame `{1,2,3,4,5,6,7,8}` every 500 ms. Visible on CAN analyzer
 7. Within 1 second, verify `[CAN-RX] #1 ID=0x001 DLC=5 data=[...]` appears (STM32 heartbeat)
 8. If no `[CAN-RX]` messages appear:
    - Check `[CAN-DIAG]` output — look for `tx_err` / `rx_err` escalation
-   - If `state=BUS_OFF` → hardware issue (wiring, termination, Rs pin)
+   - If `state=BUS_OFF` → hardware issue (wiring, termination, S pin)
    - If `state=RUNNING` but `rx_err` climbing → bit timing or common GND issue
 9. Verify boot screen transitions from "CAN: WAITING..." to "CAN: LINKED" (green)
 
@@ -329,7 +329,7 @@ STM32 sends test frame `{1,2,3,4,5,6,7,8}` every 500 ms. Visible on CAN analyzer
 | **CAN Bit Timing Compatibility** | ✅ PASS | 88.2% vs 87.5% SP (0.7% delta, within tolerance) |
 | **Physical CAN Wiring** | ⚠️ HARDWARE | Cannot verify in firmware audit — see Section 3 |
 | **CAN Termination** | ⚠️ HARDWARE | Must verify ~60Ω between CANH/CANL |
-| **Transceiver Rs Pin** | 🔴 SUSPECT | Most likely root cause — verify Pin 8 → GND |
+| **Transceiver S Pin** | 🔴 SUSPECT | Most likely root cause — verify Pin 8 → GND |
 
 ### Overall Verdict
 
@@ -354,7 +354,7 @@ STM32 sends test frame `{1,2,3,4,5,6,7,8}` every 500 ms. Visible on CAN analyzer
 
 ## 8. Recommended Next Steps
 
-1. **IMMEDIATE:** Perform Hardware Validation (Section 3) — focus on H2/H3 (Rs pin) and H4 (common GND)
+1. **IMMEDIATE:** Perform Hardware Validation (Section 3) — focus on H2/H3 (S pin) and H4 (common GND)
 2. **IMMEDIATE:** With serial monitor, verify `[CAN-RX]` debug output appears after power-on
 3. **SHORT-TERM:** Connect CAN analyzer for real-time bus monitoring
 4. **MEDIUM-TERM:** Calibrate PID parameters, ABS/TCS thresholds (11% remaining firmware work)

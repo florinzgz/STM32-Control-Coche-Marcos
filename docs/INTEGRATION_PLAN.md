@@ -259,10 +259,10 @@ Antes de asignar cualquier pin libre:
 | INA226 ×6 | 2 mA | 3 mA | 3.3 V |
 | DS18B20 ×5 | 5 mA | 7.5 mA | 3.3 V |
 | Pull-ups I2C (4.7 kΩ ×2) | 1.4 mA | 1.4 mA | 3.3 V |
-| BTS7960 ×5 (lógica) | 25 mA | 50 mA | 5 V |
+| BTS7960 ×5 (lógica IBT-2) | 25 mA | 50 mA | 3.3 V |
 | Relés ×5 (bobina) | 250 mA | 500 mA | 12/24 V |
-| **TOTAL 3.3 V** | **~40 mA** | **~62 mA** | — |
-| **TOTAL 5 V** | **~35 mA** | **~125 mA** | — |
+| **TOTAL 3.3 V** | **~65 mA** | **~112 mA** | — |
+| **TOTAL 5 V** | **~10 mA** | **~75 mA** | — |
 
 ### 4.2 Procedimiento antes de conectar cada módulo nuevo
 

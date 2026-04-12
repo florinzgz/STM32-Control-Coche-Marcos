@@ -88,8 +88,8 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
 |---------|-------------------------|-------------------------------------------------|
 | **24 V** | Batería de tracción     | 4× motores tracción (vía BTS7960)              |
 | **12 V** | Batería de dirección    | Motor de dirección (vía BTS7960)                |
-| **5 V**  | DC-DC buck (LM2596)    | Lógica BTS7960 (VCC), tiras WS2812B, **transceiver CAN TJA1051T/3** (VCC mín 4.5 V) |
-| **3.3 V**| Regulador lineal / LDO | STM32G474RE, TCA9548A, INA226                    |
+| **5 V**  | DC-DC buck (LM2596)    | Tiras WS2812B, **transceiver CAN TJA1051T/3** (VCC mín 4.5 V) |
+| **3.3 V**| Regulador lineal / LDO | STM32G474RE, TCA9548A, INA226, **lógica BTS7960 (IBT-2 VCC)** |
 
 ### Umbrales de tensión de batería 24 V (firmware)
 
@@ -117,8 +117,8 @@ Definidos en `Core/Src/safety_system.c`:
 ### 24 V → 5 V (LM2596)
 
 - **Tipo:** Buck síncrono, hasta 3 A.
-- **Salida:** 5 V para lógica BTS7960 y alimentación de tiras LED WS2812B.
-- **Nota:** Los módulos BTS7960 requieren 5 V en su pin VCC para la lógica interna; la etapa de potencia se alimenta directamente desde la batería correspondiente (24 V o 12 V) a través de los pines B+ / B−.
+- **Salida:** 5 V para alimentación de tiras LED WS2812B y transceiver CAN TJA1051T/3 (VCC).
+- **Nota:** Los módulos BTS7960 (IBT-2) se alimentan a **3.3 V** en su pin VCC (no 5 V), para que la lógica del buffer 74HC244 sea compatible con señales de 3.3 V del STM32. La etapa de potencia se alimenta directamente desde la batería correspondiente (24 V o 12 V) a través de los pines B+ / B−.
 
 ### 5 V → 3.3 V
 
