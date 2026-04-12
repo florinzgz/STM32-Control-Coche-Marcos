@@ -124,6 +124,8 @@ static inline void __NOP(void)         { }
 static inline void __WFI(void)         { }
 static inline void __DSB(void)         { }
 static inline void __ISB(void)         { }
+static inline uint32_t __get_PRIMASK(void) { return 0; }
+static inline void __set_PRIMASK(uint32_t mask) { (void)mask; }
 
 /* ========================================================================= */
 /*  FunctionalState and basic HAL enums                                      */

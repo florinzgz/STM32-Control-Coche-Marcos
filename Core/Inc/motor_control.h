@@ -113,6 +113,15 @@ void Motor_SetSignedPWM_RL(int16_t speed);
 void Motor_SetSignedPWM_RR(int16_t speed);
 void Motor_SetSignedPWM_Steering(int16_t speed);
 
+/* ---- Runtime active-brake override (field-test API) ----
+ * Allows enabling active braking at runtime without recompilation.
+ * pwm_ticks: LPWM duty during MOTOR_MODE_BRAKE (0 = passive, max 4249).
+ *            Typical field-test values: 212 (~5%) to 425 (~10%).
+ * Only effective when BRAKE_ACTIVE_FALLBACK is 0 (compile-time passive).
+ * Thread-safe: single atomic uint16_t write.                           */
+void Motor_SetBrakeActiveOverride(uint16_t pwm_ticks);
+uint16_t Motor_GetBrakeActiveOverride(void);
+
 #ifdef __cplusplus
 }
 #endif

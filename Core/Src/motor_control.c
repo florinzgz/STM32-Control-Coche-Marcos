@@ -188,7 +188,13 @@ static inline float sanitize_float(float val, float safe_default)
  * insufficient in field testing.  BRAKE_ACTIVE_MIN_PWM is the duty
  * (in timer ticks, max PWM_PERIOD=4249) applied to LPWM during brake
  * to increase braking current.  RPWM remains 0.
- * Typical value: 5-10% of PWM_PERIOD (212-425 ticks).                */
+ * Typical value: 5-10% of PWM_PERIOD (212-425 ticks).
+ *
+ * Runtime override: brake_active_override can be set at runtime (e.g.
+ * via CAN service command) to enable active braking without
+ * recompiling.  When non-zero AND BRAKE_ACTIVE_FALLBACK==0, the
+ * runtime override value is used as the LPWM duty during BRAKE mode.
+ * Set to 0 to disable; typical field-test value: 212-425 ticks.      */
 #ifndef BRAKE_ACTIVE_FALLBACK
 #define BRAKE_ACTIVE_FALLBACK    0
 #endif
@@ -402,6 +408,16 @@ static GearPosition_t current_gear = GEAR_FORWARD;
 
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
+
+/* ---- Runtime active-brake override ----
+ * When BRAKE_ACTIVE_FALLBACK is 0 (compile-time passive brake), this
+ * variable allows field testing of active braking without reflashing.
+ * Set via Motor_SetBrakeActiveOverride().  When non-zero, the value
+ * is applied as LPWM duty (timer ticks, max PWM_PERIOD) during
+ * MOTOR_MODE_BRAKE.  RPWM remains 0, EN=HIGH.
+ * Typical test values: 212 (~5%) to 425 (~10%) ticks.
+ * 0 = passive brake (default).                                        */
+static uint16_t brake_active_override = 0;
 
 /* Ackermann-computed individual wheel angle setpoints (degrees).
  * Updated every time Steering_SetAngle() is called.               */
@@ -2032,6 +2048,19 @@ void Motor_SetSignedPWM_Steering(int16_t speed) {
     Motor_SetSigned(&motor_steer, speed);
 }
 
+/* ---- Runtime active-brake override ---- */
+
+void Motor_SetBrakeActiveOverride(uint16_t pwm_ticks)
+{
+    if (pwm_ticks > PWM_PERIOD) pwm_ticks = PWM_PERIOD;
+    brake_active_override = pwm_ticks;
+}
+
+uint16_t Motor_GetBrakeActiveOverride(void)
+{
+    return brake_active_override;
+}
+
 /* ==================================================================
  *  Private helpers
  * ================================================================== */
@@ -2166,8 +2195,22 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
      * direction-change case within DRIVE is handled separately
      * by Motor_SetSigned()'s own dead-state enforcement.
      *
+     * CRITICAL SECTION: The pre-step + mode change must be atomic
+     * with respect to interrupts.  An ISR preempting between the
+     * PWM-zero write and the EN state change could leave the
+     * H-bridge in an undefined intermediate state.  __disable_irq()
+     * ensures the entire transition completes without interruption.
+     *
      * Cost: 5 µs busy-wait per mode transition — negligible at the
      * 10 ms control loop rate.                                        */
+
+    /* Disable interrupts for the entire mode transition to prevent
+     * an ISR from seeing an intermediate EN/PWM state.  This is
+     * defence-in-depth: all current callers are main-loop-only, but
+     * this protects against future call sites from ISR context.       */
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
     if (mode != motor->current_mode) {
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
@@ -2192,15 +2235,21 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
          * assert EN.  With RPWM=0 and LPWM=0 and EN=HIGH, the BTS7960
          * shorts the motor terminals → passive electromagnetic braking.
          *
-         * If BRAKE_ACTIVE_FALLBACK is enabled, a small duty is applied
-         * on LPWM to increase braking current for steep-slope hold.
-         * See design decision comment at BRAKE_ACTIVE_FALLBACK define. */
+         * If BRAKE_ACTIVE_FALLBACK is enabled at compile time, a small
+         * duty is applied on LPWM to increase braking current.
+         * Otherwise, brake_active_override provides runtime control
+         * for field testing without recompilation.                      */
         __HAL_TIM_SET_COMPARE(motor->rpwm_timer, motor->rpwm_channel, 0U);
 #if BRAKE_ACTIVE_FALLBACK
         __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel,
                               BRAKE_ACTIVE_MIN_PWM);
 #else
-        __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel, 0U);
+        {
+            uint16_t brake_lpwm = brake_active_override;
+            if (brake_lpwm > PWM_PERIOD) brake_lpwm = PWM_PERIOD;
+            __HAL_TIM_SET_COMPARE(motor->lpwm_timer, motor->lpwm_channel,
+                                  brake_lpwm);
+        }
 #endif
         motor->direction = 0;
         if (motor->en_port != NULL) {
@@ -2219,6 +2268,10 @@ static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm)
 
     /* Track current mode for transition detection */
     motor->current_mode = mode;
+
+    /* Restore interrupt state — if IRQs were already disabled by the
+     * caller (e.g. Error_Handler), they stay disabled.                */
+    __set_PRIMASK(primask);
 }
 
 static float __attribute__((unused)) PID_Compute(PID_t *pid, float measured, float dt)
