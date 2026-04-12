@@ -30,7 +30,7 @@
 | Motor | RPWM Pin | LPWM Pin | Timer | Channels | BREAK2 |
 |-------|----------|----------|-------|----------|--------|
 | FL | PA8 | PA9 | TIM1 | CH1 / CH2 | ✅ Cortex LOCKUP |
-| FR | PA10 | PA11 | TIM1 | CH3 / CH4 | ✅ Cortex LOCKUP |
+| FR | PA10 | PC3 | TIM1 | CH3 / CH4 | ✅ Cortex LOCKUP |
 | RL | PC6 | PC7 | TIM8 | CH1 / CH2 | ✅ Cortex LOCKUP |
 | RR | PC8 | PC9 | TIM8 | CH3 / CH4 | ✅ Cortex LOCKUP |
 | STEER | PA6 | PA7 | TIM3 | CH1 / CH2 | ❌ Software only |
@@ -40,10 +40,10 @@
 | Motor | EN Pin | Method | Pull-up/down | Boot State |
 |-------|--------|--------|-------------|------------|
 | FL | PC5 | GPIO_MODE_OUTPUT_PP | None (push-pull) | LOW (disabled) ✅ |
-| FR | — | Tied to 3.3 V in hardware | — | HIGH (always enabled) |
-| RL | — | Tied to 3.3 V in hardware | — | HIGH (always enabled) |
+| FR | PC0 | GPIO_MODE_OUTPUT_PP | None (push-pull) | LOW (disabled) ✅ |
+| RL | PC1 | GPIO_MODE_OUTPUT_PP | None (push-pull) | LOW (disabled) ✅ |
 | RR | PC13 | GPIO_MODE_OUTPUT_PP | None (push-pull) | LOW (disabled) ✅ |
-| STEER | — | Tied to 3.3 V in hardware | — | HIGH (always enabled) |
+| STEER | PC4 | GPIO_MODE_OUTPUT_PP | None (push-pull) | LOW (disabled) ✅ |
 
 #### Pins Unused but Required?
 

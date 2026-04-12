@@ -417,7 +417,7 @@
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Resistencia shunt | 1 mΩ (motores) / 0.5 mΩ (batería) | En serie con cable de potencia (+) | Medición de corriente |
+| Resistencia shunt | 1.5 mΩ (motores) / 0.75 mΩ (batería) | En serie con cable de potencia (+) | Medición de corriente |
 | Condensador de desacoplo | 100 nF cerámico | Entre VCC y GND del INA226 | Filtrado |
 
 ---

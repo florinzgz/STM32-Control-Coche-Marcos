@@ -89,7 +89,7 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
      ┌────────┴────────┐
      │  VCC ── 3.3V    │
      │  VS+ ──┐        │
-     │        ├─ Shunt (1 mΩ o 0.5 mΩ)
+     │        ├─ Shunt (1.5 mΩ o 0.75 mΩ)
      │  VS- ──┘        │
      │  GND ── GND     │
      │  A0=A1=GND→0x40 │

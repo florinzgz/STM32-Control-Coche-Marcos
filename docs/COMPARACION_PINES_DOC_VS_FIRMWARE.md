@@ -122,7 +122,7 @@
 | Pedal divisor | 10kΩ + 6.8kΩ | `10 kΩ + 6.8 kΩ` | `stm32g4xx_hal_msp.c:125`, `sensor_manager.c:113` | ✅ |
 | Sensor Hall pedal | SS1324LUA-T | `SS1324LUA-T` | `main.h:102` | ✅ |
 | Encoder PPR | 1200 | `ENCODER_PPR = 1200` | `main.h:15` | ✅ |
-| INA226 shunt | 1 mΩ (motor) / 0.5 mΩ (bat) | `1` / `0.5f` | `main.h:130-131` | ✅ |
+| INA226 shunt | 1.5 mΩ (motor) / 0.75 mΩ (bat) | `1.5f` / `0.75f` | `project_config.h` | ✅ |
 | TCA9548A dirección | 0x70 | `I2C_ADDR_TCA9548A = 0x70` | `main.h:114` | ✅ |
 | INA226 dirección | 0x40 | `I2C_ADDR_INA226 = 0x40` | `main.h:115` | ✅ |
 | ADS1115 dirección | — | Eliminado del firmware (plausibilidad por software) | — | ✅ (eliminado) |

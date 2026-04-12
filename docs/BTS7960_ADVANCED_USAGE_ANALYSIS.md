@@ -344,10 +344,10 @@ negligible practical impact at the operating speeds of this vehicle.
 | Motor | RPWM | LPWM | Timer | EN Pin | EN Method | PWM=0 Mode |
 |-------|------|------|-------|--------|-----------|------------|
 | FL | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 | GPIO output | Coast (Hi-Z) |
-| FR | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | — | Tied 3.3 V | Passive brake |
-| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | — | Tied 3.3 V | Passive brake |
+| FR | PA10 (TIM1_CH3) | PC3 (TIM1_CH4) | TIM1 | PC0 | GPIO output | Coast (Hi-Z) |
+| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | PC1 | GPIO output | Coast (Hi-Z) |
 | RR | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 | GPIO output | Coast (Hi-Z) |
-| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | — | Tied 3.3 V | Passive brake |
+| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | PC4 | GPIO output | Coast (Hi-Z) |
 
 ## APPENDIX: Firmware Constants Reference
 

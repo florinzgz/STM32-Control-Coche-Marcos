@@ -302,7 +302,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Steering center inductive sensor (PB5/EXTI5) | `SteeringCenter_IRQHandler()`, `SteeringCenter_Detected()` | `Core/Src/sensor_manager.c` |
 | Pedal (ADC1 PA3 12-bit, dual-sample + software plausibility) | `Pedal_Update()`, `Pedal_ReadDualSample()`, `Pedal_RawToPercent()` | `Core/Src/sensor_manager.c` |
 | 6× INA226 current/voltage via TCA9548A I2C multiplexer | `Current_ReadAll()`, `TCA9548A_SelectChannel()`, `INA226_ReadReg()` | `Core/Src/sensor_manager.c` |
-| Per-channel shunt resistance (1 mΩ motor, 0.5 mΩ battery) | `INA226_SHUNT_MOHM_*` constants in channel selection logic | `Core/Src/sensor_manager.c` |
+| Per-channel shunt resistance (1.5 mΩ motor, 0.75 mΩ battery) | `INA226_SHUNT_MOHM_*` constants in channel selection logic | `Core/Src/sensor_manager.c` |
 | 5× DS18B20 temperature via OneWire (bit-bang, ROM search, CRC-8) | `OW_SearchAll()`, `OW_ReadTemperature()`, `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` |
 | DS18B20 hot-plug detection (periodic ROM re-enumeration every 10 s) | `Temperature_PeriodicRescan()` called from 1000 ms tier | `Core/Src/sensor_manager.c`, `Core/Src/main.c` |
 | DS18B20 stale data cleanup on sensor removal (temperatures zeroed for removed indices) | `OW_SearchAll()` clears `temperatures[i]` for `i >= ds18b20_count` | `Core/Src/sensor_manager.c` |
@@ -373,7 +373,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | **Fallback single-sensor read when no ROMs discovered** — `Temperature_ReadAll()` reads only `temperatures[0]` via Skip ROM | Fallback branch in `Temperature_ReadAll()` | `Core/Src/sensor_manager.c` lines 561–573 |
 | ~~**Drive screen mode flags are ESP32-local**~~ — ~~mode flags (4×4/360°) are stored in `VehicleData.ModeData` from local ESP32 touch input, not from STM32 CAN echo~~ | ✅ RESOLVED: STM32 heartbeat byte 4 (status_flags bits 1-2) echoes applied mode flags; ESP32 syncs from heartbeat in `main.cpp` | `Core/Src/can_handler.c`, `esp32/src/main.cpp` |
 | **Hardcoded vehicle physics constants** — wheelbase (0.95 m), track width (0.70 m), wheel circumference (1.1 m), max steer (54°) are compile-time `#define` | `vehicle_physics.h` | `Core/Inc/vehicle_physics.h` |
-| **Hardcoded INA226 shunt resistances** — 1 mΩ motor, 0.5 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/main.h` |
+| **Hardcoded INA226 shunt resistances** — 1.5 mΩ motor, 0.75 mΩ battery are compile-time constants | `INA226_SHUNT_MOHM_*` | `Core/Inc/project_config.h` |
 | **STM32 calibration is runtime-only (by design)** — steering centering, encoder zero, sensor offsets are recomputed every power cycle from hardware sensors | No flash write in STM32; calibration always reflects actual hardware state | All STM32 source files |
 | **ESP32-S3 is the single persistence authority** — all user config (mode, brightness, LED state, volume) persisted via NVS with CRC32 validation | `config_store.cpp` with dirty flag + periodic flush | `esp32/src/config_store.cpp`, `esp32/src/main.cpp` |
 | **CAN bus-off recovery limited to 5 retries then stops** — `CAN_BUSOFF_MAX_RETRIES` | `busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES` in `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
