@@ -479,7 +479,7 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
  *   CYCCNT is not yet running.
  *
  * OVERFLOW PROTECTION:
- *   delay_us() clamps the delay to DELAY_US_MAX_US (25 000 µs ≈ 25 ms)
+ *   delay_us() clamps the delay to MAX_DELAY_US (25 000 µs ≈ 25 ms)
  *   to prevent uint32_t overflow of (us * dwt_cycles_per_us).
  *   At 170 MHz: 25 000 × 170 = 4 250 000 — well within uint32_t range.
  *   Production code only uses SAFE_DEADTIME_US (5 µs), so this clamp
@@ -488,7 +488,7 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
  * On HOST_TEST builds this is a no-op (no real hardware).
  * Only used for SAFE_DEADTIME_US (5 µs) — negligible CPU cost.     */
 
-#define DELAY_US_MAX_US  25000U  /* Max delay: 25 ms — prevents overflow */
+#define MAX_DELAY_US  25000U  /* Max delay: 25 ms — prevents overflow */
 
 #ifndef HOST_TEST
 
@@ -516,7 +516,7 @@ static inline void DWT_Init(void)
 static inline void delay_us(uint32_t us)
 {
     /* Clamp to prevent uint32_t overflow in cycle calculation */
-    if (us > DELAY_US_MAX_US) us = DELAY_US_MAX_US;
+    if (us > MAX_DELAY_US) us = MAX_DELAY_US;
 
     if (dwt_initialized) {
         /* Primary path: DWT cycle-counter busy-wait (deterministic) */

@@ -70,8 +70,8 @@ static volatile uint8_t dwt_initialized = 0U;
 static inline void DWT_Init(void) { dwt_initialized = 1U; }
 static inline void delay_us(uint32_t us) { (void)us; }
 
-/* DELAY_US_MAX_US must match the production value */
-#define DELAY_US_MAX_US  25000U
+/* MAX_DELAY_US must match the production value */
+#define MAX_DELAY_US  25000U
 
 /* ---- Test harness ---- */
 static int tests_run    = 0;
@@ -1374,13 +1374,13 @@ static void test_dwt_guard_flag(void)
 /* ==================================================================
  *  Test: delay_us overflow clamp
  *
- *  At 170 MHz, DELAY_US_MAX_US × 170 = 4 250 000 — well within
- *  uint32_t.  Values above DELAY_US_MAX_US must be clamped.
+ *  At 170 MHz, MAX_DELAY_US × 170 = 4 250 000 — well within
+ *  uint32_t.  Values above MAX_DELAY_US must be clamped.
  *  Validate the clamp arithmetic.
  * ================================================================== */
 static void test_delay_us_overflow_clamp(void)
 {
-    uint32_t max_us  = DELAY_US_MAX_US;
+    uint32_t max_us  = MAX_DELAY_US;
     uint32_t cyc_per = 170U;  /* 170 MHz */
 
     /* Normal: 5 µs × 170 = 850 — no overflow */
@@ -1399,7 +1399,7 @@ static void test_delay_us_overflow_clamp(void)
      *  UINT32_MAX / 240 = 17 895 697 µs ≈ 17.9 s).
      * The clamp at 25 ms is a safety limit for motor control
      * where multi-ms delays are a design error.                     */
-    uint32_t unsafe_us = 30000U;  /* Above DELAY_US_MAX_US */
+    uint32_t unsafe_us = 30000U;  /* Above MAX_DELAY_US */
     uint32_t clamped   = (unsafe_us > max_us) ? max_us : unsafe_us;
     ASSERT_TRUE(clamped == max_us);
 
