@@ -81,7 +81,9 @@ El ESP32 ahora lee los mode flags confirmados del heartbeat y actualiza `current
 | PA8 | PWM Motor FL | TIM1_CH1 | ✅ Único |
 | PA9 | PWM Motor FR | TIM1_CH2 | ✅ Único |
 | PA10 | PWM Motor RL | TIM1_CH3 | ✅ Único |
-| PA11 | PWM Motor RR | TIM1_CH4 | ✅ Único |
+| PA11 | CAN RX | FDCAN1_RX (AF9) | ✅ Único |
+| PA12 | CAN TX | FDCAN1_TX (AF9) | ✅ Único |
+| PC3 | LPWM Motor FR | TIM1_CH4 (AF2) | ✅ Único |
 | PA15 | Encoder A | TIM2_CH1 | ✅ Único |
 | PB0 | OneWire DS18B20 | GPIO bit-bang | ✅ Único |
 | PB3 | Encoder B | TIM2_CH2 | ✅ Único |
@@ -89,8 +91,8 @@ El ESP32 ahora lee los mode flags confirmados del heartbeat y actualiza `current
 | PB5 | Steering center | EXTI5 | ✅ Único |
 | PB6 | I2C SCL | I2C1_SCL | ✅ Único |
 | PB7 | I2C SDA | I2C1_SDA | ✅ Único |
-| PB8 | CAN RX | FDCAN1_RX | ✅ Único |
-| PB9 | CAN TX | FDCAN1_TX | ✅ Único |
+| PB8 | LIBRE | — | — |
+| PB9 | LIBRE | — | — |
 | PB10 | LED relay | GPIO output | ✅ Único |
 | PB15 | Wheel RR speed | EXTI15 | ✅ Único |
 | PC0-4 | Direction ctrl | GPIO output | ✅ Únicos |

@@ -69,7 +69,7 @@ Cada motor requiere 3 señales: **PWM** (velocidad), **DIR** (dirección), **EN*
 | **FL** (Front Left) | **PA8** | TIM1_CH1 | **PC0** | **PC1** | Rueda delantera izquierda |
 | **FR** (Front Right) | **PA9** | TIM1_CH2 | **PC2** | **PC3** | Rueda delantera derecha |
 | **RL** (Rear Left) | **PA10** | TIM1_CH3 | **PC4** | **PC5** | Rueda trasera izquierda |
-| **RR** (Rear Right) | **PA11** | TIM1_CH4 | **PC6** | **PC7** | Rueda trasera derecha |
+| **FR LPWM** | **PC3** | TIM1_CH4 (AF2) | — | — | LPWM motor delantero derecho |
 
 #### Configuración TIM1
 ```c
@@ -299,8 +299,8 @@ else
 
 | Señal | Pin | Función Alternativa | Transceptor |
 |-------|-----|---------------------|-------------|
-| **CAN_TX** | **PB9** | FDCAN1_TX (AF9) | TJA1051T/3 (pin TX) |
-| **CAN_RX** | **PB8** | FDCAN1_RX (AF9) | TJA1051T/3 (pin RX) |
+| **CAN_TX** | **PA12** | FDCAN1_TX (AF9) | TJA1051T/3 (pin TX) |
+| **CAN_RX** | **PA11** | FDCAN1_RX (AF9) | TJA1051T/3 (pin RX) |
 
 **Configuración FDCAN1:**
 - Modo: CAN 2.0A (11-bit IDs estándar)
@@ -359,7 +359,9 @@ HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
 | **PA8** | 29 | PWM_FL | TIM1_CH1 | Motor tracción FL |
 | **PA9** | 30 | PWM_FR | TIM1_CH2 | Motor tracción FR |
 | **PA10** | 31 | PWM_RL | TIM1_CH3 | Motor tracción RL |
-| **PA11** | 32 | PWM_RR | TIM1_CH4 | Motor tracción RR |
+| **PA11** | 32 | CAN_RX | FDCAN1_RX (AF9) | Recepción CAN |
+| **PA12** | 33 | CAN_TX | FDCAN1_TX (AF9) | Transmisión CAN |
+| **PC3** | 11 | LPWM_FR | TIM1_CH4 (AF2) | LPWM motor tracción FR |
 | **PA15** | 38 | ENC_A | TIM2_CH1 | Encoder dirección A |
 | **PB0** | 14 | WHEEL_FL | GPIO/EXTI0 | Sensor rueda FL |
 | **PB1** | 15 | WHEEL_FR | GPIO/EXTI1 | Sensor rueda FR |
@@ -369,8 +371,8 @@ HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
 | **PB5** | 41 | TEMP_ONEWIRE | GPIO | Bus DS18B20 (5 sensores) |
 | **PB6** | 42 | I2C_SCL | I2C1_SCL | Sensores INA226 |
 | **PB7** | 43 | I2C_SDA | I2C1_SDA | Sensores INA226 |
-| **PB8** | 45 | CAN_RX | FDCAN1_RX (AF9) | Recepción CAN |
-| **PB9** | 46 | CAN_TX | FDCAN1_TX (AF9) | Transmisión CAN |
+| **PB8** | 45 | LIBRE | — | GPIO disponible |
+| **PB9** | 46 | LIBRE | — | GPIO disponible |
 | **PB10** | 21 | WHEEL_RR | GPIO/EXTI10 | Sensor rueda RR |
 | **PB12** | 25 | SHIFTER_FWD | GPIO Input | Shifter Forward |
 | **PB13** | 26 | SHIFTER_NEU | GPIO Input | Shifter Neutral |
@@ -394,12 +396,12 @@ HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
 
 | Periférico | Pines Usados | Función |
 |------------|--------------|---------|
-| **TIM1** | 4 canales (PA8-PA11) | PWM motores tracción @ 20 kHz |
+| **TIM1** | 4 canales (PA8, PA9, PA10, PC3) | PWM motores tracción @ 20 kHz |
 | **TIM2** | 2 canales (PA15, PB3) | Encoder quadrature dirección |
 | **TIM8** | 1 canal (PC8) | PWM motor dirección @ 20 kHz |
 | **ADC1** | 1 canal (PA0) | Pedal analógico Hall |
 | **I2C1** | SCL/SDA (PB6/PB7) | 6× INA226 vía TCA9548A |
-| **FDCAN1** | TX/RX (PB9/PB8) | CAN @ 500 kbps |
+| **FDCAN1** | TX/RX (PA12/PA11) | CAN @ 500 kbps |
 | **OneWire** | PB5 | 5× DS18B20 (temperaturas) |
 | **GPIO** | 26 pines | Sensores, motores, relés, shifter |
 

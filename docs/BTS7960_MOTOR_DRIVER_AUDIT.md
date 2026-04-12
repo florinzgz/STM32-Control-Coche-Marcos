@@ -25,7 +25,7 @@ intermediate state when reversing.
 | Signal          | Motor FL                    | Motor FR                      |
 |-----------------|-----------------------------|-------------------------------|
 | **RPWM**        | PA8  — TIM1_CH1             | PA10 — TIM1_CH3               |
-| **LPWM**        | PA9  — TIM1_CH2             | PA11 — TIM1_CH4               |
+| **LPWM**        | PA9  — TIM1_CH2             | PC3  — TIM1_CH4 (AF2)        |
 | **R_EN / L_EN** | PC5  — GPIO output (active) | Tied to 3.3 V in hardware     |
 | **R_IS / L_IS** | Not connected to MCU — current sensing via INA226 I2C (ch 0) | ← same (ch 1) |
 | **Protection**  | TIM1 BREAK2 → Cortex LOCKUP | ← same                        |
