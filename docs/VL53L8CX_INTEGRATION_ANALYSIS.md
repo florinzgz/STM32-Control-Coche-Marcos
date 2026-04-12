@@ -392,17 +392,19 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 | Puerto | Pines usados | Función |
 |--------|-------------|---------|
 | PA0–PA3 | 4 | Wheel speed FL/FR/RL + Pedal ADC |
-| PA8–PA11 | 4 | TIM1 CH1–CH4 (PWM motores) |
+| PA6–PA10 | 5 | TIM3 CH1–CH2 (steering RPWM/LPWM), TIM1 CH1–CH3 (FL/FR RPWM) |
+| PA11–PA12 | 2 | FDCAN1_RX, FDCAN1_TX |
 | PA15 | 1 | TIM2_CH1 (encoder A) |
 | PB0 | 1 | OneWire DS18B20 |
 | PB3–PB5 | 3 | Encoder B, encoder Z-index, steering center |
-| PB6–PB9 | 4 | I2C1_SCL, I2C1_SDA, FDCAN1_RX, FDCAN1_TX |
-| PB10 | 1 | (Reservado/wheel sensor alternativo — verificar HW) |
+| PB6–PB7 | 2 | I2C1_SCL, I2C1_SDA |
+| PB10–PB11 | 2 | LED relay front/rear |
 | PB12–PB13 | 2 | Shifter FWD/NEU (PB14 reasignado a LED_DIAG) |
 | PB15 | 1 | Wheel speed RR (EXTI15) |
-| PC0–PC7 | 8 | Motor DIR (4) + EN (4) |
-| PC8–PC13 | 6 | PWM steering, EN steering, Relays (3), EN RR |
-| PD2 | 1 | Relay DIR |
+| PC0–PC1 | 2 | EN_FR, EN_RL |
+| PC3–PC5 | 3 | LPWM_FR (TIM1_CH4), EN_STEER, EN_FL |
+| PC6–PC9 | 4 | TIM8 CH1–CH4 (RL/RR RPWM/LPWM) |
+| PC10–PC13 | 4 | Relays (3), EN_RR |
 | **Total** | **~37** | |
 
 ### Pines libres confirmados

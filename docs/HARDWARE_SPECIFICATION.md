@@ -76,45 +76,47 @@ Cada BTS7960 tiene:
 
 ### Esquema de Conexión STM32 → BTS7960
 
+> ⚠️ **SECCIÓN OBSOLETA** — La arquitectura actual usa RPWM/LPWM directo (no DIR+PWM).
+> Los pines correctos están en `Core/Inc/project_config.h`.
+
 #### Motor Frontal Izquierdo (FL)
 ```
-STM32           BTS7960_FL
-PA8 (PWM_FL) → RPWM (cuando DIR_FL=0)
-PA8 (PWM_FL) → LPWM (cuando DIR_FL=1)
-PC0 (DIR_FL) → Control lógica dirección
-PC5 (EN_FL)  → R_EN + L_EN (ambos habilitados juntos)
+STM32              BTS7960_FL
+PA8  (TIM1_CH1) → RPWM
+PA9  (TIM1_CH2) → LPWM
+PC5  (EN_FL)    → R_EN + L_EN
 ```
 
 #### Motor Frontal Derecho (FR)
 ```
-STM32           BTS7960_FR
-PA9 (PWM_FR) → RPWM/LPWM según DIR_FR
-PC1 (DIR_FR) → Control dirección
-PC6 (EN_FR)  → R_EN + L_EN
+STM32              BTS7960_FR
+PA10 (TIM1_CH3) → RPWM
+PC3  (TIM1_CH4) → LPWM
+PC0  (EN_FR)    → R_EN + L_EN
 ```
 
 #### Motor Trasero Izquierdo (RL)
 ```
-STM32           BTS7960_RL
-PA10 (PWM_RL) → RPWM/LPWM según DIR_RL
-PC2 (DIR_RL)  → Control dirección
-PC7 (EN_RL)   → R_EN + L_EN
+STM32              BTS7960_RL
+PC6  (TIM8_CH1) → RPWM
+PC7  (TIM8_CH2) → LPWM
+PC1  (EN_RL)    → R_EN + L_EN
 ```
 
 #### Motor Trasero Derecho (RR)
 ```
-STM32           BTS7960_RR
-PA11 (PWM_RR) → RPWM/LPWM según DIR_RR
-PC3 (DIR_RR)  → Control dirección
-PD2 (EN_RR)   → R_EN + L_EN
+STM32              BTS7960_RR
+PC8  (TIM8_CH3) → RPWM
+PC9  (TIM8_CH4) → LPWM
+PC13 (EN_RR)    → R_EN + L_EN
 ```
 
 #### Motor de Dirección (STEER)
 ```
-STM32             BTS7960_STEER
-PC8 (PWM_STEER) → RPWM/LPWM según DIR_STEER
-PC4 (DIR_STEER) → Control dirección
-PC9 (EN_STEER)  → R_EN + L_EN
+STM32              BTS7960_STEER
+PA6  (TIM3_CH1) → RPWM
+PA7  (TIM3_CH2) → LPWM
+PC4  (EN_STEER) → R_EN + L_EN
 ```
 
 ### Lógica de Control PWM con Dirección

@@ -10,18 +10,26 @@
 
 ### 1.1 Motores de tracción (4 ruedas)
 
+> ⚠️ **TABLA OBSOLETA** — La arquitectura actual usa RPWM/LPWM directo (no DIR+PWM).
+> Los pines correctos están en `Core/Inc/project_config.h`. PA11 ahora es **FDCAN1_RX**, NO PWM.
+
 | Motor | GPIO Puerto/Pin | Timer | Canal | Frecuencia PWM | Modo contador | Prescaler | Periodo (ARR) | AF |
 |-------|----------------|-------|-------|-----------------|---------------|-----------|---------------|-----|
-| FL (Delantero Izq.) | **PA8** | **TIM1** | CH1 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
-| FR (Delantero Der.) | **PA9** | **TIM1** | CH2 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
-| RL (Trasero Izq.) | **PA10** | **TIM1** | CH3 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
-| RR (Trasero Der.) | **PA11** | **TIM1** | CH4 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| FL RPWM | **PA8** | **TIM1** | CH1 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| FL LPWM | **PA9** | **TIM1** | CH2 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| FR RPWM | **PA10** | **TIM1** | CH3 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF6 |
+| FR LPWM | **PC3** | **TIM1** | CH4 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF2 |
+| RL RPWM | **PC6** | **TIM8** | CH1 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF4 |
+| RL LPWM | **PC7** | **TIM8** | CH2 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF4 |
+| RR RPWM | **PC8** | **TIM8** | CH3 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF4 |
+| RR LPWM | **PC9** | **TIM8** | CH4 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF4 |
 
 ### 1.2 Motor de dirección
 
 | Motor | GPIO Puerto/Pin | Timer | Canal | Frecuencia PWM | Modo contador | Prescaler | Periodo (ARR) | AF |
 |-------|----------------|-------|-------|-----------------|---------------|-----------|---------------|-----|
-| Steering (Dirección) | **PC8** | **TIM8** | CH3 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF4 |
+| STEER RPWM | **PA6** | **TIM3** | CH1 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF2 |
+| STEER LPWM | **PA7** | **TIM3** | CH2 | 20 kHz | Center-aligned (UP/DOWN) | 0 | 4249 | AF2 |
 
 ### 1.3 Encoder de dirección (no es PWM — lectura cuadratura)
 

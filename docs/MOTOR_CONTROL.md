@@ -277,10 +277,10 @@ void Motor_SetSignedPWM_STEER(int16_t speed);
 | Motor | RPWM | LPWM | Timer | EN |
 |-------|------|------|-------|----|
 | FL | PA8 (TIM1_CH1) | PA9 (TIM1_CH2) | TIM1 | PC5 (GPIO) |
-| FR | PA10 (TIM1_CH3) | PA11 (TIM1_CH4) | TIM1 | 3.3V fijo |
-| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | 3.3V fijo |
+| FR | PA10 (TIM1_CH3) | PC3 (TIM1_CH4) | TIM1 | PC0 (GPIO) |
+| RL | PC6 (TIM8_CH1) | PC7 (TIM8_CH2) | TIM8 | PC1 (GPIO) |
 | RR | PC8 (TIM8_CH3) | PC9 (TIM8_CH4) | TIM8 | PC13 (GPIO) |
-| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | 3.3V fijo |
+| STEER | PA6 (TIM3_CH1) | PA7 (TIM3_CH2) | TIM3 | PC4 (GPIO) |
 
 ### Función de Control de Motor
 
