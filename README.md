@@ -48,17 +48,21 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 | PA6 | RPWM_STEER | TIM3_CH1 | Steering Motor — forward |
 | PA7 | LPWM_STEER | TIM3_CH2 | Steering Motor — reverse |
 
-> **Note:** Direction pins (PC0–PC4) are **freed** and no longer used.
+> **Note:** Former direction pins PC0, PC1, PC4 are now repurposed as EN_FR, EN_RL,
+> EN_STEER respectively. PC2 and PC3 remain freed (PC3 is TIM1_CH4 for LPWM_FR).
 > RPWM/LPWM are generated directly by hardware timers. Only one channel is
 > active at a time — never simultaneous non-zero.
 
 ### Enable Signals
 | Pin | Function | Notes |
 |-----|----------|-------|
+| PC0 | EN_FR | GPIO output, active HIGH |
+| PC1 | EN_RL | GPIO output, active HIGH |
+| PC4 | EN_STEER | GPIO output, active HIGH |
 | PC5 | EN_FL | GPIO output, active HIGH |
 | PC13 | EN_RR | GPIO output, active HIGH |
 
-> EN pins for FR, RL and STEER BTS7960 modules: wire R_EN/L_EN directly to 3.3 V.
+> All five BTS7960 modules have identical 5-wire control: RPWM, LPWM, EN, GND, VCC.
 
 ### Relays
 | Pin | Function |

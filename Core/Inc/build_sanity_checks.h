@@ -104,8 +104,20 @@
     #warning "BUILD HINT: PIN_EN_FL not defined — front-left motor enable pin may be missing"
   #endif
 
+  #ifndef PIN_EN_FR
+    #warning "BUILD HINT: PIN_EN_FR not defined — front-right motor enable pin may be missing"
+  #endif
+
+  #ifndef PIN_EN_RL
+    #warning "BUILD HINT: PIN_EN_RL not defined — rear-left motor enable pin may be missing"
+  #endif
+
   #ifndef PIN_EN_RR
     #warning "BUILD HINT: PIN_EN_RR not defined — rear-right motor enable pin may be missing"
+  #endif
+
+  #ifndef PIN_EN_STEER
+    #warning "BUILD HINT: PIN_EN_STEER not defined — steering motor enable pin may be missing"
   #endif
 
 #endif /* __GNUC__ */

@@ -87,28 +87,20 @@
 #define PIN_LPWM_STEER     GPIO_PIN_7   /* PA7  - TIM3_CH2 — LPWM_STEER */
 
 /* ========================================================================== */
-/*                       DIRECTION CONTROL (GPIOC)                            */
-/* ========================================================================== */
-/* PC0-PC4 are freed now that RPWM/LPWM are generated directly by timers.
- * Kept as defines for documentation; leave pins unconnected or as GPIO_OUT LOW. */
-#define PIN_DIR_FL         GPIO_PIN_0   /* PC0 — freed */
-#define PIN_DIR_FR         GPIO_PIN_1   /* PC1 — freed */
-#define PIN_DIR_RL         GPIO_PIN_2   /* PC2 — freed */
-#define PIN_DIR_RR         GPIO_PIN_3   /* PC3 — freed */
-#define PIN_DIR_STEER      GPIO_PIN_4   /* PC4 — freed */
-
-/* ========================================================================== */
 /*                       ENABLE SIGNALS (GPIOC)                               */
 /* ========================================================================== */
-/* EN_FL (PC5) and EN_RR (PC13) remain as GPIO outputs.
- * PC6/PC7 are TIM8_CH1/CH2 (RPWM_RL/LPWM_RL); PC8/PC9 are TIM8_CH3/CH4
- * (RPWM_RR/LPWM_RR) — all are timer AF outputs, not GPIO EN pins.
- * Wire the corresponding BTS7960 R_EN/L_EN pins directly to 3.3 V.          */
+/* All five BTS7960 modules now have dedicated GPIO Enable pins.
+ * PC0, PC1, PC4 were formerly direction-control outputs (PIN_DIR_*) that
+ * became unused when RPWM/LPWM direct generation replaced DIR+PWM logic.
+ * They are now repurposed as EN_FR, EN_RL, EN_STEER respectively, giving
+ * every motor driver identical 5-wire control (RPWM, LPWM, EN, GND, VCC)
+ * and eliminating the brake/coast asymmetry between GPIO-EN and tied-HIGH
+ * motors.  PC2 and PC3 remain freed/unused.                                 */
+#define PIN_EN_FR          GPIO_PIN_0   /* PC0  — GPIO output, active HIGH (was DIR_FL) */
+#define PIN_EN_RL          GPIO_PIN_1   /* PC1  — GPIO output, active HIGH (was DIR_FR) */
 #define PIN_EN_FL          GPIO_PIN_5   /* PC5  — GPIO output, active HIGH */
-#define PIN_EN_FR          GPIO_PIN_6   /* PC6  — repurposed: TIM8_CH1 (RPWM_RL)   */
-#define PIN_EN_RL          GPIO_PIN_7   /* PC7  — repurposed: TIM8_CH2 (LPWM_RL)   */
 #define PIN_EN_RR          GPIO_PIN_13  /* PC13 — GPIO output, active HIGH */
-#define PIN_EN_STEER       GPIO_PIN_9   /* PC9  — repurposed: TIM8_CH4 (LPWM_RR)   */
+#define PIN_EN_STEER       GPIO_PIN_4   /* PC4  — GPIO output, active HIGH (was DIR_STEER) */
 
 /* ========================================================================== */
 /*                       RELAY CONTROL (GPIOC)                                */
