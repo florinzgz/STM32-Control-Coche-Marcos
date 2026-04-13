@@ -52,7 +52,8 @@ private:
         SENSOR_MAP_TEMP,   // DS18B20 sensor-to-position mapping
         FACTORY_DEFAULTS,  // Individual factory-default reset options
         DTC_LOG_VIEWER,    // Persistent DTC fault log viewer
-        MAINTENANCE        // Maintenance counter reset + status
+        MAINTENANCE,       // Maintenance counter reset + status
+        RELAY_CONTROL      // Manual relay override (engineering diagnostic)
     };
 
     void drawMainMenu();
@@ -65,6 +66,7 @@ private:
     void drawFactoryDefaults();
     void drawDtcLogViewer();
     void drawMaintenance();
+    void drawRelayControl();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -116,6 +118,11 @@ private:
     // Relay status for main menu header display
     uint8_t     relayStatus_     = 0;      // heartbeat byte 5 (bit0=M, bit1=T, bit2=D, bit7=SEQ)
     uint8_t     prevRelayStatus_ = 0xFF;   // force initial draw
+
+    // Relay override (engineering diagnostic mode)
+    bool        relayOverrideEnabled_ = false;   // local UI toggle state
+    uint8_t     relayOverrideMask_    = 0;       // bit0=MAIN, bit1=TRAC, bit2=DIR
+    bool        relayOverrideChanged_ = false;   // true when real CAN state changed
 };
 
 #endif // ENGINEERING_SCREEN_H

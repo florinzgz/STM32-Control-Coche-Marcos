@@ -24,7 +24,7 @@ static constexpr int16_t MENU_BTN_H   = 26;
 static constexpr int16_t MENU_START_Y = 50;
 static constexpr int16_t MENU_SPACING = 28;
 
-static constexpr int     NUM_MAIN_ITEMS = 9;
+static constexpr int     NUM_MAIN_ITEMS = 10;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -34,7 +34,8 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "TEMP SENSOR MAPPING",
     "FACTORY DEFAULTS",
     "DTC ERROR LOG",
-    "MAINTENANCE"
+    "MAINTENANCE",
+    "RELAY CONTROL (DEBUG)"
 };
 
 // ---- Back / Save buttons ----
@@ -166,9 +167,29 @@ void EngineeringScreen::onEnter() {
     const auto& cfg = config_store::get();
     memcpy(inaMap_,  cfg.ina226Map,      config_store::NUM_INA226_CH);
     memcpy(tempMap_, cfg.tempSensorMap,  config_store::NUM_TEMP_SENS);
+
+    // Reset relay override UI state on screen entry
+    relayOverrideEnabled_ = false;
+    relayOverrideMask_    = 0;
+    relayOverrideChanged_ = false;
 }
 
-void EngineeringScreen::onExit() {}
+void EngineeringScreen::onExit() {
+    // Auto-disable relay override when leaving engineering screen.
+    // Sends CAN command to STM32 to turn off override + all relay GPIOs.
+    if (relayOverrideEnabled_) {
+        CanFrame frame = {};
+        frame.identifier       = can::SERVICE_CMD;
+        frame.extd             = 0;
+        frame.data_length_code = 2;
+        frame.data[0]          = can::SERVICE_ACTION_RELAY_OVERRIDE;
+        frame.data[1]          = 0x00;  // enable=0, mask=0 → disable all
+        ESP32Can.writeFrame(frame, 0);
+        relayOverrideEnabled_ = false;
+        relayOverrideMask_    = 0;
+        Serial.println("[ENG] Relay override auto-disabled on exit");
+    }
+}
 
 void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     // Cache service mode data for fault viewer / module control
@@ -178,6 +199,24 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
 
     // Relay status (shown on main menu header)
     relayStatus_ = data.heartbeat().relayStatus;
+
+    // Relay override: sync UI state with real CAN telemetry.
+    // If the system state has moved away from STANDBY, the STM32 has
+    // auto-disabled the override — reflect this in the UI.
+    if (relayOverrideEnabled_) {
+        if (data.heartbeat().systemState != can::SystemState::STANDBY) {
+            relayOverrideEnabled_ = false;
+            relayOverrideMask_    = 0;
+            relayOverrideChanged_ = true;
+        }
+    }
+    // Detect relay status changes while in relay control submenu
+    if (currentMenu_ == SubMenu::RELAY_CONTROL) {
+        uint8_t realMask = relayStatus_ & 0x07U;
+        if (realMask != (prevRelayStatus_ & 0x07U)) {
+            relayOverrideChanged_ = true;
+        }
+    }
 
     // Track SERVICE_CMD ACK responses (cmdIdLow = 0x10)
     if (currentMenu_ == SubMenu::MODULE_CONTROL) {
@@ -255,6 +294,7 @@ void EngineeringScreen::draw() {
             case SubMenu::FACTORY_DEFAULTS: drawFactoryDefaults();     break;
             case SubMenu::DTC_LOG_VIEWER:   drawDtcLogViewer();        break;
             case SubMenu::MAINTENANCE:      drawMaintenance();         break;
+            case SubMenu::RELAY_CONTROL:    drawRelayControl();        break;
         }
     }
 
@@ -288,6 +328,12 @@ void EngineeringScreen::draw() {
         tft.drawString(buf, relX, relY + 22);
 
         prevRelayStatus_ = relayStatus_;
+    }
+
+    // Partial redraw for relay control submenu (CAN telemetry update)
+    if (currentMenu_ == SubMenu::RELAY_CONTROL && relayOverrideChanged_) {
+        relayOverrideChanged_ = false;
+        needsRedraw_ = true;  // full redraw — small screen, simpler than partial
     }
 
     // Partial redraw for fault viewer
@@ -447,6 +493,19 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
     if (x >= BACK_X && x <= BACK_X + BACK_W &&
         y >= BACK_Y && y <= BACK_Y + BACK_H) {
         if (currentMenu_ != SubMenu::MAIN) {
+            // Auto-disable relay override when leaving relay control submenu
+            if (currentMenu_ == SubMenu::RELAY_CONTROL && relayOverrideEnabled_) {
+                CanFrame frame = {};
+                frame.identifier       = can::SERVICE_CMD;
+                frame.extd             = 0;
+                frame.data_length_code = 2;
+                frame.data[0]          = can::SERVICE_ACTION_RELAY_OVERRIDE;
+                frame.data[1]          = 0x00;
+                ESP32Can.writeFrame(frame, 0);
+                relayOverrideEnabled_ = false;
+                relayOverrideMask_    = 0;
+                Serial.println("[ENG] Relay override disabled on BACK");
+            }
             clearLogPending_ = false;  // reset confirmation state on navigation (§4.1)
             currentMenu_ = SubMenu::MAIN;
             needsRedraw_ = true;
@@ -514,6 +573,10 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                         case 8:
                             // Open Maintenance status/reset
                             currentMenu_ = SubMenu::MAINTENANCE;
+                            break;
+                        case 9:
+                            // Open Relay Control (debug)
+                            currentMenu_ = SubMenu::RELAY_CONTROL;
                             break;
                         default:
                             break;
@@ -666,6 +729,52 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         return false;
     }
 
+    // Relay control: toggle override enable / individual relays
+    if (currentMenu_ == SubMenu::RELAY_CONTROL) {
+        // Relay control button layout (Y positions match drawRelayControl)
+        static constexpr int16_t RC_ROW_Y0 = 80;
+        static constexpr int16_t RC_ROW_SPC = 36;
+        static constexpr int16_t RC_ROW_H = 30;
+
+        for (int i = 0; i < 4; ++i) {
+            int16_t rowY = RC_ROW_Y0 + i * RC_ROW_SPC;
+            if (x >= MENU_X && x <= MENU_X + MENU_W &&
+                y >= rowY && y <= rowY + RC_ROW_H) {
+                if (i == 0) {
+                    // Toggle override enable/disable
+                    relayOverrideEnabled_ = !relayOverrideEnabled_;
+                    if (!relayOverrideEnabled_) {
+                        relayOverrideMask_ = 0;
+                    }
+                } else {
+                    // Toggle individual relay bit (only when override enabled)
+                    if (relayOverrideEnabled_) {
+                        uint8_t bit = (uint8_t)(1U << (i - 1));
+                        relayOverrideMask_ ^= bit;
+                    }
+                }
+                // Send CAN command
+                {
+                    CanFrame frame = {};
+                    frame.identifier       = can::SERVICE_CMD;
+                    frame.extd             = 0;
+                    frame.data_length_code = 2;
+                    frame.data[0]          = can::SERVICE_ACTION_RELAY_OVERRIDE;
+                    uint8_t ctl = 0;
+                    if (relayOverrideEnabled_) ctl |= 0x01U;
+                    ctl |= (uint8_t)((relayOverrideMask_ & 0x07U) << 1);
+                    frame.data[1] = ctl;
+                    ESP32Can.writeFrame(frame, 0);
+                    Serial.printf("[ENG] Relay override: en=%d mask=0x%02X\n",
+                                  relayOverrideEnabled_ ? 1 : 0, relayOverrideMask_);
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
     return false;
 }
 
@@ -694,6 +803,7 @@ void EngineeringScreen::drawMainMenu() {
         uint16_t txtCol = (i == 6) ? ui::COL_AMBER :       // Factory Defaults
                           (i == 7) ? ui::COL_CYAN :         // DTC Error Log
                           (i == 8) ? ui::COL_GREEN :        // Maintenance
+                          (i == 9) ? ui::COL_RED :          // Relay Control (debug)
                           ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
@@ -1579,5 +1689,130 @@ void EngineeringScreen::drawMaintenance() {
     RTRACE_TEXT(SAVE_X + SAVE_W / 2, SAVE_Y + SAVE_H / 2, "RESET",
                 ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
 
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// RELAY CONTROL (Engineering Diagnostic Mode)
+//
+// Manual relay GPIO override for diagnostic purposes.
+// Safety constraints enforced on STM32 side — the UI only reflects state.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawRelayControl() {
+    RTRACE_BEGIN_SCREEN("eng_relay_ctrl");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("RELAY CONTROL", ui::SCREEN_W / 2, 22);
+    tft.setTextDatum(TL_DATUM);
+
+    // Safety warning when override is active
+    if (relayOverrideEnabled_) {
+        tft.setTextColor(ui::COL_RED, ui::COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("!! MANUAL RELAY CONTROL ACTIVE !!", ui::SCREEN_W / 2, 48);
+        tft.setTextDatum(TL_DATUM);
+    } else {
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("Override disabled (STANDBY only)", ui::SCREEN_W / 2, 48);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // Button rows: Override Enable, MAIN, TRACTION, DIRECTION
+    static constexpr int16_t RC_ROW_Y0 = 80;
+    static constexpr int16_t RC_ROW_SPC = 36;
+    static constexpr int16_t RC_ROW_H = 30;
+
+    static const char* const rowLabels[4] = {
+        "Override Enable",
+        "MAIN      (PC10)",
+        "TRACTION  (PC11)",
+        "DIRECTION (PC12)"
+    };
+
+    // Real relay state from CAN heartbeat byte 5
+    const bool realMain = (relayStatus_ & 0x01U) != 0;
+    const bool realTrac = (relayStatus_ & 0x02U) != 0;
+    const bool realDir  = (relayStatus_ & 0x04U) != 0;
+    const bool realState[4] = {
+        relayOverrideEnabled_,
+        realMain,
+        realTrac,
+        realDir
+    };
+
+    tft.setTextSize(1);
+    for (int i = 0; i < 4; ++i) {
+        int16_t rowY = RC_ROW_Y0 + i * RC_ROW_SPC;
+
+        // Button background
+        uint16_t bgCol = ui::COL_DARK_GRAY;
+        uint16_t borderCol = ui::COL_GRAY;
+        if (i == 0) {
+            // Override enable toggle
+            bgCol = relayOverrideEnabled_ ? ui::COL_RED : ui::COL_DARK_GRAY;
+            borderCol = relayOverrideEnabled_ ? ui::COL_WHITE : ui::COL_GRAY;
+        } else if (relayOverrideEnabled_) {
+            bgCol = (relayOverrideMask_ & (1U << (i - 1)))
+                    ? ui::COL_GREEN : ui::COL_DARK_GRAY;
+            borderCol = ui::COL_WHITE;
+        }
+
+        tft.fillRect(MENU_X, rowY, MENU_W, RC_ROW_H, bgCol);
+        tft.drawRect(MENU_X, rowY, MENU_W, RC_ROW_H, borderCol);
+
+        // Label (left)
+        tft.setTextColor(ui::COL_WHITE, bgCol);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(rowLabels[i], MENU_X + 8, rowY + RC_ROW_H / 2);
+
+        // Status (right)
+        const char* statusStr = realState[i] ? "ON " : "OFF";
+        uint16_t statusCol = realState[i] ? ui::COL_GREEN : ui::COL_GRAY;
+        if (i == 0) {
+            statusStr = relayOverrideEnabled_ ? "ENABLED " : "DISABLED";
+            statusCol = relayOverrideEnabled_ ? ui::COL_RED : ui::COL_GRAY;
+        }
+        tft.setTextColor(statusCol, bgCol);
+        tft.setTextDatum(MR_DATUM);
+        tft.drawString(statusStr, MENU_X + MENU_W - 8, rowY + RC_ROW_H / 2);
+    }
+
+    // Relay status from CAN (real GPIO state)
+    {
+        tft.setTextDatum(TL_DATUM);
+        tft.setTextSize(1);
+        const int16_t infoY = RC_ROW_Y0 + 4 * RC_ROW_SPC + 10;
+
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.drawString("CAN RELAY STATUS (real)", MENU_X, infoY);
+
+        char buf[48];
+        snprintf(buf, sizeof(buf), "M:%s T:%s D:%s  SEQ:%s  [0x%02X]",
+                 realMain ? "ON " : "OFF",
+                 realTrac ? "ON " : "OFF",
+                 realDir  ? "ON " : "OFF",
+                 (relayStatus_ & 0x80U) ? "COMPLETE" : "IDLE    ",
+                 relayStatus_);
+
+        uint16_t relCol = (relayStatus_ & 0x80U) ? ui::COL_GREEN : ui::COL_AMBER;
+        tft.setTextColor(relCol, ui::COL_BG);
+        tft.drawString(buf, MENU_X, infoY + 14);
+    }
+
+    // BACK button (bottom-left)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     tft.setTextDatum(TL_DATUM);
 }
