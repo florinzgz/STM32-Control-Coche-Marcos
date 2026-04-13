@@ -38,6 +38,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Safety System** | ✅ Operativo | ABS/TCS 15% slip, overcurrent, overtemp, obstacle, CAN timeout |
 | **Error Log** | ✅ Operativo | Flash página 125, 250 entradas, CRC32, ring buffer |
 | **Service Mode** | ✅ Operativo | 25 módulos, factory defaults, fault tracking |
+| **Relay Override** | ✅ Operativo | Engineering diagnostic mode — manual relay GPIO via SERVICE_CMD 0xE0 |
 | **Watchdog (IWDG)** | ✅ Activo | ~500 ms timeout |
 | **BREAK2 (PWM kill)** | ✅ Armado | Vinculado a Cortex LOCKUP |
 | **Heartbeat LED** | ✅ Operativo | Flash breve ~50 ms cada ~2 s (diferenciable de Error_Handler) |
@@ -53,7 +54,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Obstáculos (LiDAR)** | ✅ Operativo | TF-Mini Plus (115200 bps, GPIO 18), 5 zonas, timeout 500 ms → fail-safe |
 | **Power Manager** | ✅ Operativo | Ignition GPIO 40 + power hold GPIO 41 |
 | **Config Store** | ✅ Operativo | SPIFFS NVM persistente |
-| **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) |
+| **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) + Relay Control submenu |
 
 ### Comunicación CAN
 - **Protocolo**: 27 tipos de mensaje, contrato congelado v1.3.
@@ -78,6 +79,84 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR — feat: Hidden Menu Relay Control (Engineering Diagnostic Mode)
+- **Fecha:** 2026-04-13
+- **Autor:** Copilot
+- **Descripción del cambio:** Add ability to manually activate/deactivate individual relays (MAIN/TRACTION/DIRECTION) from the ESP32 engineering menu for diagnostic purposes. Full safety gating prevents unsafe activation.
+
+#### RELAY CONTROL (ENGINEERING MODE)
+
+**Purpose:**
+Diagnostics only — allows individual relay GPIO toggling from the ESP32 engineering hidden menu while the vehicle is in STANDBY.
+
+**Safety constraints (enforced by STM32):**
+- System state must be STANDBY
+- Throttle ≤ 1% (pedal rest dead-zone)
+- Speed ≤ 0.5 km/h
+- No active safety errors (Safety_Error_t == NONE)
+- Relay sequencer must be IDLE (relay_seq_state == RELAY_SEQ_IDLE)
+
+**CAN mapping:**
+- Frame: SERVICE_CMD (0x110)
+- Action byte: 0xE0 (SERVICE_ACTION_RELAY_OVERRIDE)
+- Byte 1 bit layout:
+  - bit 0: override enable (1=on, 0=off)
+  - bit 1: MAIN relay (PC10)
+  - bit 2: TRACTION relay (PC11)
+  - bit 3: DIRECTION relay (PC12)
+
+**Auto-disable conditions:**
+- Any state transition (BOOT/STANDBY/ACTIVE/DEGRADED/ERROR/LIMP_HOME)
+- Throttle applied (> 1%)
+- Motion detected (> 0.5 km/h)
+- Safety error raised
+- ESP32 exits engineering screen (sends disable CAN command in onExit)
+- ESP32 navigates back from relay control submenu (sends disable)
+- CAN timeout (STM32 state change → auto-disable)
+- Relay sequencer starts (normal startup overrides)
+
+**Known limitations:**
+- Override only affects GPIO command layer, NOT relay_seq_state
+- Safety_IsPowerReady() remains FALSE during override (relay_seq_state stays IDLE)
+- Motor traction CANNOT engage during override (Traction_Update gates on Safety_IsPowerReady)
+- Override requires continuous 10ms re-validation (Safety_RelayOverrideUpdate in main loop)
+
+- **Archivos afectados:**
+  - `Core/Inc/safety_system.h` — Safety_SetRelayOverride, Safety_IsRelayOverrideActive, Safety_RelayOverrideUpdate declarations + docblock
+  - `Core/Src/safety_system.c` — relay_override_enabled/mask state, 5-point safety gating, continuous 10ms validation, auto-disable on state transition
+  - `Core/Inc/can_handler.h` — SERVICE_ACTION_RELAY_OVERRIDE (0xE0) define
+  - `Core/Src/can_handler.c` — 0xE0 action handler in SERVICE_CMD case
+  - `Core/Src/main.c` — Safety_RelayOverrideUpdate() call in 10ms loop after Relay_SequencerUpdate()
+  - `Core/Inc/project_config.h` — Relay override documentation block
+  - `esp32/include/can_ids.h` — SERVICE_ACTION_RELAY_OVERRIDE constant
+  - `esp32/src/screens/engineering_screen.h` — SubMenu::RELAY_CONTROL, relayOverrideEnabled_, relayOverrideMask_, drawRelayControl() declaration
+  - `esp32/src/screens/engineering_screen.cpp` — RELAY_CONTROL submenu (menu item 9, red text), drawRelayControl() rendering, handleTouch relay toggles, onEnter/onExit auto-disable, update() CAN telemetry sync
+
+- **Safety validation summary:**
+  - ✅ No change to motor PWM gating logic (Traction_Update gates on Safety_IsPowerReady)
+  - ✅ No change to relay sequencing timing (50ms MAIN → 20ms TRACTION → DIRECTION = 70ms total)
+  - ✅ No bypass of Safety_IsPowerReady() (relay_seq_state stays IDLE, returns false)
+  - ✅ No CAN ID breaking changes (reuses SERVICE_CMD 0x110 with new action 0xE0)
+  - ✅ No blocking calls introduced (all override logic is non-blocking)
+  - ✅ No race conditions (single-threaded main loop, override state is module-static)
+  - ✅ No unsafe state transitions (override auto-disabled on any Safety_SetState call)
+  - ✅ Startup inhibit logic unaffected
+  - ✅ 25/25 STM32 sources pass -Wall -Wextra -Werror syntax check
+  - ✅ 11,948 unit tests pass (0 failures)
+
+- **CAN impact:** SERVICE_CMD (0x110) extended with action 0xE0. No new CAN IDs. Heartbeat (0x001) byte 5 relay status unchanged. No frequency changes.
+
+- **UI changes:**
+  - EngineeringScreen: new "RELAY CONTROL (DEBUG)" submenu (item 9, red text)
+  - 4 toggle rows: Override Enable, MAIN (PC10), TRACTION (PC11), DIRECTION (PC12)
+  - Real CAN relay status display: M:ON/OFF T:ON/OFF D:ON/OFF SEQ:COMPLETE/IDLE [0xHH]
+  - Warning banner: "!! MANUAL RELAY CONTROL ACTIVE !!" when override enabled
+  - Auto-disable on screen exit and BACK navigation
+
+- **Impacto:** Zero impact on normal vehicle operation. Override only works in STANDBY with no motion. Motor control remains fully gated by Safety_IsPowerReady(). Engineering diagnostic capability added with OEM-grade safety constraints.
+
+- **Statement:** No regression in safety-critical paths.
 
 ### PR — feat: Tile-Based Dirty Region Engine (motor de render tipo cluster OEM automotriz)
 

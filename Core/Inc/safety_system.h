@@ -289,6 +289,33 @@ void Relay_PowerUp(void);
 void Relay_PowerDown(void);
 void Relay_SequencerUpdate(void);
 
+/* ---- Relay Override (Engineering / Diagnostic Mode) ----
+ *
+ * Allows manual relay GPIO control from the ESP32 engineering menu for
+ * diagnostic purposes ONLY.  Override is strictly safety-gated:
+ *   - System state must be STANDBY (no motion, relays normally off)
+ *   - Throttle must be 0 %
+ *   - Speed must be 0 km/h
+ *   - No active safety errors
+ *
+ * If any condition fails, the override is immediately disabled and all
+ * relay GPIOs are returned to their normal state (relay sequencer idle).
+ *
+ * Override does NOT:
+ *   - Bypass Safety_IsPowerReady() — relay_seq_state stays IDLE
+ *   - Affect normal relay sequencing logic
+ *   - Work during ACTIVE, DEGRADED, LIMP_HOME, or ERROR states
+ *   - Influence motor control (no torque possible without seq COMPLETE)
+ *
+ * CAN interface: SERVICE_CMD (0x110) action 0xE0, byte1 = relay mask:
+ *   bit 0: override enable
+ *   bit 1: MAIN relay
+ *   bit 2: TRACTION relay
+ *   bit 3: DIRECTION relay                                               */
+void Safety_SetRelayOverride(bool enabled, uint8_t mask);
+bool Safety_IsRelayOverrideActive(void);
+void Safety_RelayOverrideUpdate(void);
+
 /* Returns true only when the relay power-up sequence has completed
  * and all three relays (MAIN, TRACTION, DIRECTION) are physically
  * closed.  Subsystems that depend on relay power being available

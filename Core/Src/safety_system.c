@@ -242,6 +242,18 @@ typedef enum {
 static RelaySeqState_t relay_seq_state     = RELAY_SEQ_IDLE;
 static uint32_t        relay_seq_timestamp = 0;
 
+/* ---- Relay override (engineering diagnostic mode) ----
+ * Manual relay GPIO control gated through strict safety conditions.
+ * Override is ONLY effective in STANDBY with zero throttle, zero speed,
+ * and no active safety errors.  Automatically disabled on any violation.
+ *
+ * relay_override_mask bit layout:
+ *   bit 0: MAIN relay (PC10)
+ *   bit 1: TRACTION relay (PC11)
+ *   bit 2: DIRECTION relay (PC12)                                       */
+static bool    relay_override_enabled = false;
+static uint8_t relay_override_mask    = 0;
+
 /* ---- Relay health check runtime state ----
  * Tracks whether the relay-open detection window is active and how
  * many consecutive 10 ms cycles the fault condition has persisted.
@@ -416,6 +428,13 @@ SystemState_t Safety_GetState(void) { return system_state; }
 void Safety_SetState(SystemState_t state)
 {
     if (state == system_state) return;
+
+    /* Auto-disable relay override on any state transition.
+     * Override is ONLY valid in STANDBY; leaving STANDBY (or entering
+     * any other state) must immediately revoke the override.             */
+    if (relay_override_enabled) {
+        Safety_SetRelayOverride(false, 0);
+    }
 
     /* Only allow forward transitions and recovery transitions:
      *   SAFE→ACTIVE, DEGRADED→ACTIVE, LIMP_HOME→ACTIVE               */
@@ -744,6 +763,104 @@ uint8_t Safety_GetRelayStatusByte(void)
 #endif
 
     return status;
+}
+
+/* ================================================================== */
+/*  Relay Override (Engineering Diagnostic Mode)                        */
+/* ================================================================== */
+
+void Safety_SetRelayOverride(bool enabled, uint8_t mask)
+{
+    if (enabled) {
+        /* Safety gating: override ONLY allowed in strict conditions */
+        if (system_state != SYS_STATE_STANDBY) {
+            relay_override_enabled = false;
+            relay_override_mask    = 0;
+            return;
+        }
+        if (safety_error != SAFETY_ERROR_NONE) {
+            relay_override_enabled = false;
+            relay_override_mask    = 0;
+            return;
+        }
+        /* Throttle must be at rest (≤ 1 % dead-zone for analog pedal noise).
+         * Pedal_GetPercent() returns EMA-filtered 0–100 % value.
+         * The 1 % threshold matches the pedal rest noise floor.          */
+        float throttle = Pedal_GetPercent();
+        if (throttle > 1.0f) {
+            relay_override_enabled = false;
+            relay_override_mask    = 0;
+            return;
+        }
+        /* Speed must be 0 km/h */
+        float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                           Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+        if (avg_speed > 0.5f) {
+            relay_override_enabled = false;
+            relay_override_mask    = 0;
+            return;
+        }
+        /* Normal relay sequence must NOT be in progress */
+        if (relay_seq_state != RELAY_SEQ_IDLE) {
+            relay_override_enabled = false;
+            relay_override_mask    = 0;
+            return;
+        }
+        relay_override_enabled = true;
+        relay_override_mask    = mask & 0x07U;  /* Only bits 0-2 valid */
+    } else {
+        /* Disable override — turn off all relay GPIOs that were set by override */
+        if (relay_override_enabled) {
+            HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
+        }
+        relay_override_enabled = false;
+        relay_override_mask    = 0;
+    }
+}
+
+bool Safety_IsRelayOverrideActive(void)
+{
+    return relay_override_enabled;
+}
+
+void Safety_RelayOverrideUpdate(void)
+{
+    /* Called from 10 ms safety loop — after normal relay sequencing.
+     * Continuous safety re-validation: auto-disable on any violation.    */
+    if (!relay_override_enabled) return;
+
+    /* Re-check safety conditions every cycle */
+    if (system_state != SYS_STATE_STANDBY ||
+        safety_error != SAFETY_ERROR_NONE) {
+        Safety_SetRelayOverride(false, 0);
+        return;
+    }
+    float throttle = Pedal_GetPercent();
+    if (throttle > 1.0f) {
+        Safety_SetRelayOverride(false, 0);
+        return;
+    }
+    float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                       Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+    if (avg_speed > 0.5f) {
+        Safety_SetRelayOverride(false, 0);
+        return;
+    }
+    /* Normal sequencer must remain idle while override is active */
+    if (relay_seq_state != RELAY_SEQ_IDLE) {
+        Safety_SetRelayOverride(false, 0);
+        return;
+    }
+
+    /* Apply override mask to relay GPIOs */
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN,
+                      (relay_override_mask & 0x01U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC,
+                      (relay_override_mask & 0x02U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,
+                      (relay_override_mask & 0x04U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
 /* ================================================================== */

@@ -51,6 +51,7 @@ extern "C" {
 /* Service command action codes (SERVICE_CMD byte 0) */
 #define SERVICE_ACTION_DISABLE             0x00
 #define SERVICE_ACTION_ENABLE              0x01
+#define SERVICE_ACTION_RELAY_OVERRIDE      0xE0  /* Engineering relay override (byte1=mask) */
 #define SERVICE_ACTION_RESET_STEERING_PID  0xF0
 #define SERVICE_ACTION_RESET_WHEEL_SENSORS 0xF1
 #define SERVICE_ACTION_RESET_INA226_SHUNTS 0xF2

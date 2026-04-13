@@ -141,8 +141,32 @@
  * Debug methodology:
  *   DriveScreen:       compact "M T D" indicator in gear bar (color-coded)
  *   EngineeringScreen: detailed panel (ON/OFF per relay, SEQ status, hex)
+ *   Relay Control:     manual override via engineering menu (SERVICE_CMD 0xE0)
  *   SWD debugger:      relay_seq_state variable, Safety_GetRelayStatusByte()
  *   Current correlation: INA226 readings should rise ~50ms after SEQ_COMPLETE
+ *
+ * ---- RELAY OVERRIDE (ENGINEERING DIAGNOSTIC MODE) ----
+ *
+ * The engineering menu on ESP32 can manually control individual relay GPIOs
+ * for diagnostic purposes.  CAN interface: SERVICE_CMD (0x110) action 0xE0.
+ *
+ * Safety constraints (enforced by STM32):
+ *   - System state must be STANDBY
+ *   - Throttle == 0 %,  Speed == 0 km/h
+ *   - No active safety errors
+ *   - Normal relay sequencer must be IDLE
+ *
+ * Override does NOT:
+ *   - Affect Safety_IsPowerReady() (relay_seq_state stays IDLE)
+ *   - Bypass relay timing sequence (50ms + 20ms)
+ *   - Work during motion or ACTIVE/DEGRADED/ERROR states
+ *
+ * Auto-disable conditions:
+ *   - State transition (any state change)
+ *   - Throttle applied or motion detected
+ *   - Safety error raised
+ *   - ESP32 exits engineering screen (sends disable command)
+ *   - CAN timeout (STM32 state change → auto-disable)
  */
 #define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
 #define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 */

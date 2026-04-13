@@ -171,6 +171,7 @@ inline constexpr uint8_t MODE_FLAG_TANK_TURN = 0x02;   // Bit 1: 1 = tank turn e
 // -------------------------------------------------------------------------
 inline constexpr uint8_t SERVICE_ACTION_DISABLE        = 0x00;
 inline constexpr uint8_t SERVICE_ACTION_ENABLE         = 0x01;
+inline constexpr uint8_t SERVICE_ACTION_RELAY_OVERRIDE = 0xE0;  // Engineering relay override (byte1=mask)
 inline constexpr uint8_t SERVICE_ACTION_FACTORY_RESTORE = 0xFF;
 
 // Individual factory-default reset commands (byte 0 of SERVICE_CMD)
