@@ -159,6 +159,11 @@ static inline void sat_inc_u32(uint32_t *counter) {
                                              * Once triggered, error stays
                                              * visible for at least this
                                              * duration before clearing.    */
+#define RELAY_CHK_STALL_SPEED_KMH  0.5f    /* Min avg wheel speed (km/h) to
+                                             * confirm motion.  Below this,
+                                             * motors may be stalled (wall /
+                                             * obstacle) — relay fault is
+                                             * suppressed to avoid FP.      */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
 #define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
@@ -643,6 +648,17 @@ void Relay_PowerDown(void)
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);
+}
+
+bool Safety_IsPowerReady(void)
+{
+    return (relay_seq_state == RELAY_SEQ_COMPLETE);
+}
+
+bool Relay_IsSequenceInProgress(void)
+{
+    return (relay_seq_state == RELAY_SEQ_MAIN_ON ||
+            relay_seq_state == RELAY_SEQ_TRACTION_ON);
 }
 
 /* ================================================================== */
@@ -1836,9 +1852,20 @@ void Safety_CheckRelayHealth(void)
                  *
                  * Traction_GetState()->demandPct is the global traction
                  * demand (post-safety limits).  If 0, no motor output
-                 * is expected regardless of relay state.                  */
+                 * is expected regardless of relay state.
+                 *
+                 * Stall guard (OEM hardening): when all four wheels show
+                 * zero speed despite high throttle (vehicle blocked by
+                 * wall / obstacle), motor current can be unstable or
+                 * current-limited by the BTS7960 driver.  To avoid a
+                 * false relay-open fault in this scenario, require at
+                 * least one wheel above a minimum speed threshold.
+                 * Without wheel motion, the low current is ambiguous
+                 * (could be stall, not relay failure).                    */
                 const TractionState_t *ts = Traction_GetState();
-                if (ts != (void *)0 && ts->demandPct > 0.0f) {
+                uint8_t any_wheel_moving = (avg_speed > RELAY_CHK_STALL_SPEED_KMH) ? 1 : 0;
+                if (ts != (void *)0 && ts->demandPct > 0.0f &&
+                    any_wheel_moving) {
                     /* Confirmed relay-open fault */
                     ServiceMode_SetFault(MODULE_RELAY_MAIN,
                                          MODULE_FAULT_ERROR);

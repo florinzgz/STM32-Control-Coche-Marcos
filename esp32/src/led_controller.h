@@ -36,12 +36,30 @@ inline constexpr int NUM_LEDS_FRONT  = 28;
 inline constexpr int NUM_LEDS_REAR   = 16;
 
 // ---- Rear strip zone boundaries ----
+// Physical wiring assumption: LED[0] starts on LEFT side of vehicle
+// (standing behind the vehicle, looking forward).  If the installer
+// routes the data cable from the RIGHT side instead, define
+// LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
+// without editing hardware.  Default: 0 (normal orientation).
+#ifndef LED_STRIP_REVERSED
+#define LED_STRIP_REVERSED 0
+#endif
+
+#if LED_STRIP_REVERSED
+inline constexpr int REAR_IND_LEFT_START  = 13;   // Swapped: physical right = logical left
+inline constexpr int REAR_IND_LEFT_COUNT  = 3;
+inline constexpr int REAR_CENTRE_START    = 3;    // Centre unchanged
+inline constexpr int REAR_CENTRE_COUNT    = 10;
+inline constexpr int REAR_IND_RIGHT_START = 0;    // Swapped: physical left = logical right
+inline constexpr int REAR_IND_RIGHT_COUNT = 3;
+#else
 inline constexpr int REAR_IND_LEFT_START  = 0;    // LEDs 0-2: left turn
 inline constexpr int REAR_IND_LEFT_COUNT  = 3;
 inline constexpr int REAR_CENTRE_START    = 3;    // LEDs 3-12: centre
 inline constexpr int REAR_CENTRE_COUNT    = 10;
 inline constexpr int REAR_IND_RIGHT_START = 13;   // LEDs 13-15: right turn
 inline constexpr int REAR_IND_RIGHT_COUNT = 3;
+#endif
 
 // ---- Animation / brightness constants ----
 inline constexpr uint8_t  BRIGHTNESS_POSITION  = 51;   // 20 % for tail lights
