@@ -151,11 +151,13 @@ static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
 // Brownout/reboot guard: minimum interval between WELCOME sounds.
 // On rapid MCU resets (brownout, watchdog) the ESP32 may restart
-// multiple times in quick succession.  This static timestamp
-// prevents audio spam by enforcing a cooldown from the last
-// WELCOME play.  Static RAM persists across soft resets on ESP32
-// but not across full power cycles — which is the desired behaviour
-// (fresh power-on always plays welcome).
+// multiple times in quick succession.  This timestamp prevents audio
+// spam by enforcing a cooldown.  NOTE: static RAM is NOT guaranteed
+// to persist across all reset types on all ESP32 variants.  On a
+// full power cycle, lastWelcomePlayMs reinitialises to 0 (desired:
+// fresh boot always plays welcome).  On brownout or SW reset, the
+// per-sound cooldown in audio_manager.cpp (SOUND_COOLDOWN_MS=4s)
+// provides a secondary safety net even if this variable is lost.
 static unsigned long lastWelcomePlayMs = 0;
 static constexpr unsigned long WELCOME_COOLDOWN_MS = 5000;  // 5 s minimum gap
 

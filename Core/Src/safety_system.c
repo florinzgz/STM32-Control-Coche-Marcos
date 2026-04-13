@@ -159,6 +159,11 @@ static inline void sat_inc_u32(uint32_t *counter) {
                                              * Once triggered, error stays
                                              * visible for at least this
                                              * duration before clearing.    */
+#define RELAY_CHK_STALL_SPEED_KMH  0.5f    /* Min avg wheel speed (km/h) to
+                                             * confirm motion.  Below this,
+                                             * motors may be stalled (wall /
+                                             * obstacle) — relay fault is
+                                             * suppressed to avoid FP.      */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
 #define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
@@ -1858,7 +1863,7 @@ void Safety_CheckRelayHealth(void)
                  * Without wheel motion, the low current is ambiguous
                  * (could be stall, not relay failure).                    */
                 const TractionState_t *ts = Traction_GetState();
-                uint8_t any_wheel_moving = (avg_speed > 0.5f) ? 1 : 0;
+                uint8_t any_wheel_moving = (avg_speed > RELAY_CHK_STALL_SPEED_KMH) ? 1 : 0;
                 if (ts != (void *)0 && ts->demandPct > 0.0f &&
                     any_wheel_moving) {
                     /* Confirmed relay-open fault */
