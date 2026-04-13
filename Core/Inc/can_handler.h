@@ -22,7 +22,7 @@ extern "C" {
 #define CAN_ID_TEST_FRAME   0x123
 
 /* CAN Message IDs (ESP32 ↔ STM32) */
-#define CAN_ID_HEARTBEAT_STM32    0x001  // STM32 → ESP32 (100ms)
+#define CAN_ID_HEARTBEAT_STM32    0x001  // STM32 → ESP32 (100ms, DLC 6: byte5=relay status)
 #define CAN_ID_HEARTBEAT_ESP32    0x011  // ESP32 → STM32 (100ms)
 #define CAN_ID_CMD_THROTTLE       0x100  // ESP32 → STM32 (50ms)
 #define CAN_ID_CMD_STEERING       0x101  // ESP32 → STM32 (50ms)

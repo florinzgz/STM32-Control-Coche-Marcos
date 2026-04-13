@@ -304,6 +304,23 @@ bool Safety_IsPowerReady(void);
  * should depend on this; use Safety_IsPowerReady() instead.         */
 bool Relay_IsSequenceInProgress(void);
 
+/* Relay telemetry byte — packed bitmask of relay COMMAND states.
+ *
+ *   Bit 0: MAIN relay GPIO (PC10)      — 1 = commanded ON
+ *   Bit 1: TRACTION relay GPIO (PC11)  — 1 = commanded ON
+ *   Bit 2: DIRECTION relay GPIO (PC12) — 1 = commanded ON
+ *   Bit 7: Sequence complete flag       — 1 = RELAY_SEQ_COMPLETE
+ *   Bits 3-6: reserved (always 0)
+ *
+ * IMPORTANT: this reports the GPIO COMMAND state, not the physical
+ * relay contact state.  There is no electrical feedback from the relay
+ * coils — the STM32 does not have a relay-contact sense input.
+ * Physical verification of relay closure is done indirectly via
+ * INA226 current monitoring (Safety_CheckRelayHealth).
+ *
+ * Sent as heartbeat byte 5 (0x001, DLC 6).                           */
+uint8_t Safety_GetRelayStatusByte(void);
+
 /* Command validation – returns clamped/safe value */
 float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);

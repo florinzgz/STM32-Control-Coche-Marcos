@@ -699,6 +699,54 @@ bool Relay_IsSequenceInProgress(void)
 }
 
 /* ================================================================== */
+/*  Relay Telemetry                                                    */
+/* ================================================================== */
+/* ---- RELAY TELEMETRY MODEL ----
+ *
+ * This function assembles a single byte that represents the current
+ * relay COMMAND state, not the physical relay contact state.
+ *
+ * Relay verification hierarchy:
+ *   1. GPIO = command state (what the firmware told the relay to do)
+ *   2. CAN relay byte = exported GPIO state (what the ESP32 receives)
+ *   3. INA226 = physical validation under load (only with motor demand)
+ *
+ * There is NO GPIO feedback input from the relay contacts.  The
+ * STM32 drives relay coils through optoacoplador modules (HY-M158)
+ * and reads back the GPIO output state only.  Physical relay failure
+ * (coil open, contact weld) is detected indirectly via INA226 motor
+ * current in Safety_CheckRelayHealth().
+ *
+ * Debug assertion: if the sequencer reports COMPLETE but no relay
+ * GPIOs are set, something is inconsistent.  This is checked only
+ * in DEBUG builds to avoid runtime cost.                              */
+
+uint8_t Safety_GetRelayStatusByte(void)
+{
+    uint8_t status = 0;
+
+    /* Read GPIO output register — reports commanded state */
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_MAIN)) status |= (1U << 0);
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 1);
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR))  status |= (1U << 2);
+
+    /* Sequence complete flag */
+    if (relay_seq_state == RELAY_SEQ_COMPLETE) status |= (1U << 7);
+
+#ifdef DEBUG
+    /* Consistency assertion: COMPLETE implies all three relays ON.
+     * If this fires, the relay sequencer or power-down has a bug.
+     * No runtime side-effect — debug diagnostic only.                 */
+    if ((relay_seq_state == RELAY_SEQ_COMPLETE) && ((status & 0x07U) != 0x07U)) {
+        /* Breakpoint trap for SWD debugger — NOP in release builds */
+        __NOP();
+    }
+#endif
+
+    return status;
+}
+
+/* ================================================================== */
 /*  Command Validation Gate                                            */
 /* ================================================================== */
 
