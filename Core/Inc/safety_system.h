@@ -41,25 +41,57 @@ typedef enum {
  * CAN commands are accepted in ACTIVE and DEGRADED (with limits).
  * Local pedal control is accepted in LIMP_HOME (walking speed only).
  *
- *  BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR
- *                 ↘ LIMP_HOME ↗
+ * ---- COMPLETE STATE TRANSITION DIAGRAM ----
  *
- * Transitions:
- *   BOOT→STANDBY     : peripheral init complete
- *   STANDBY→ACTIVE   : ESP32 heartbeat received, sensors plausible
- *   STANDBY→LIMP_HOME: boot validation passed but no CAN heartbeat
- *   ACTIVE→DEGRADED  : non-critical fault (sensor glitch, temp warning,
- *                       centering fail, single overcurrent)
- *   ACTIVE→LIMP_HOME : CAN timeout (communication loss is NOT a hazard)
- *   DEGRADED→ACTIVE  : fault cleared (recovery — "drive home" philosophy)
- *   DEGRADED→LIMP_HOME: CAN timeout while already degraded
- *   DEGRADED→SAFE    : critical fault while already degraded, or
- *                       persistent fault (consecutive error count ≥ 3)
- *   LIMP_HOME→ACTIVE : CAN heartbeat restored AND system healthy
- *   ACTIVE→SAFE      : overcurrent, overtemp, inverter fault, watchdog,
- *                       electrical hazard, sensor incoherence
- *   SAFE→ACTIVE      : fault cleared AND ESP32 heartbeat restored
- *   any→ERROR        : unrecoverable fault (watchdog, emergency stop)
+ *                    ┌─────────────────────────────────────────────────┐
+ *                    │                                                 │
+ *  BOOT ──▸ STANDBY ──┬──▸ ACTIVE ⇄ DEGRADED ──▸ SAFE ──▸ ERROR     │
+ *                      │      │  ↑       │          │                 │
+ *                      │      │  │       │          │                 │
+ *                      │      ▼  │       ▼          ▼                 │
+ *                      └──▸ LIMP_HOME ◂─────────────┘                 │
+ *                                │                                    │
+ *                                └───────▸ ACTIVE ◂───────────────────┘
+ *
+ * ⚠ STATE MACHINE INTEGRITY CONSTRAINTS:
+ *
+ *   1. BOOT → ACTIVE is IMPOSSIBLE.
+ *      BOOT can only transition to STANDBY.  STANDBY requires ESP32
+ *      heartbeat + steering calibrated + boot validation before ACTIVE.
+ *      Safety_SetState() enforces this via the switch-case directed graph.
+ *
+ *   2. No double transitions per call.
+ *      Safety_SetState() performs a single transition and returns.
+ *      A second transition requires a new call from the main loop.
+ *
+ *   3. ACTIVE entry always calls Relay_PowerUp().
+ *      The relay sequencer must complete (Safety_IsPowerReady() == true)
+ *      before Traction_Update() permits motor output.  No subsystem
+ *      assumes power without relay completion.
+ *
+ *   4. startup_inhibit prevents early torque.
+ *      Active from boot until the pedal is held below 3% for 400 ms.
+ *      Independent of state machine — applies in STANDBY, ACTIVE,
+ *      DEGRADED, and LIMP_HOME.  SAFE already inhibits all torque.
+ *
+ *   5. ERROR is a terminal absorbing state.
+ *      Once in ERROR, Safety_PowerDown() is called and only a physical
+ *      reset can recover.  No automatic recovery path from ERROR.
+ *
+ * Transitions (authoritative — see Safety_SetState in safety_system.c):
+ *   BOOT→STANDBY         : peripheral init complete (always succeeds)
+ *   STANDBY→ACTIVE       : ESP32 heartbeat + calibrated + boot valid + no error
+ *   STANDBY→LIMP_HOME    : boot validation passed but CAN heartbeat timeout
+ *   ACTIVE→DEGRADED      : non-critical fault (sensor, temp warn, single OC)
+ *   ACTIVE→LIMP_HOME     : CAN timeout (communication loss is NOT a hazard)
+ *   ACTIVE→SAFE          : overcurrent, overtemp, electrical hazard, watchdog
+ *   DEGRADED→ACTIVE      : fault cleared + 500 ms recovery debounce
+ *   DEGRADED→LIMP_HOME   : CAN timeout while already degraded
+ *   DEGRADED→SAFE        : critical fault while degraded, or ≥3 consecutive errors
+ *   LIMP_HOME→ACTIVE     : CAN heartbeat restored + 500 ms debounce + calibrated
+ *   SAFE→ACTIVE          : fault cleared AND ESP32 heartbeat restored
+ *   SAFE→LIMP_HOME       : CAN timeout recovery (relays stay on)
+ *   any→ERROR            : unrecoverable fault (watchdog, emergency stop)
  *
  * SAFE is reserved for real hardware danger — never triggered by
  * missing CAN frames.  Communication loss enters LIMP_HOME instead.

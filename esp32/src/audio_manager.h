@@ -11,6 +11,48 @@
 //
 // Reference: FIRMWARE_MIGRATION_AUDIT.md Step 7
 //            Original firmware: include/alerts.h (Audio::Track enum)
+//
+// ---- AUDIO SYSTEM BEHAVIORAL CONTRACT ----
+//
+// 1. EDGE-TRIGGERED, NOT CONTINUOUS:
+//    audio::play() is called ONCE per event (state transition, fault onset).
+//    The audio system does NOT continuously play sounds.  If a fault condition
+//    persists (e.g., overcurrent), the sound plays once when the fault is
+//    first detected — it does NOT repeat until the fault is cleared and
+//    re-triggered.  This prevents alarm fatigue and DFPlayer saturation.
+//
+// 2. BLOCKING CALLS — INIT ONLY:
+//    The only blocking calls (delay(100) + delay(500) = 600 ms total) are
+//    in audio::init(), called once from setup().  The update() function and
+//    play() function are strictly non-blocking — they use UART write (< 1 ms)
+//    and timestamp-based state machine progression.  This guarantees
+//    compatibility with watchdog timers and real-time render loops.
+//
+// 3. COOLDOWN SYSTEM:
+//    Per-sound cooldown (4000 ms) prevents the same alert from being
+//    triggered more than once per 4 seconds.  HIGH priority sounds bypass
+//    cooldown to ensure emergency alerts always play immediately.
+//
+// 4. MULTI-ERROR ARBITRATION:
+//    Single-slot queue with priority preemption:
+//      LO  (0): gear clicks, info beeps, mode changes
+//      MEDIUM (1): obstacle warnings, battery alerts, temperature
+//      HI  (2): errors, emergency, welcome, farewell
+//    A new sound only queues if priority ≥ current playing priority.
+//    No race conditions: single-threaded (Core 0 render task only).
+//
+// 5. WELCOME SOUND PROTECTION:
+//    Sound::WELCOME (track 1) plays at HI priority during init.
+//    The 4000 ms cooldown prevents reset spam from replaying it
+//    repeatedly if the system brown-out-resets in a tight loop.
+//    After 4 seconds, a new welcome sound CAN play (intentional:
+//    a genuine power-cycle should greet the user).
+//
+// 6. AUDIO RELAY STATE MACHINE (relay_audio.h):
+//    Physical speaker relay prevents pop/click from DFPlayer idle noise:
+//      IDLE → ESTABLISHING (20 ms) → ON → RELEASING (150 ms) → IDLE
+//    Safety watchdog: relay auto-releases after 7000 ms max-on time.
+//    This is non-blocking and runs from update() timestamps.
 // =============================================================================
 
 #ifndef AUDIO_MANAGER_H

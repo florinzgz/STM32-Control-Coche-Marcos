@@ -36,11 +36,26 @@ inline constexpr int NUM_LEDS_FRONT  = 28;
 inline constexpr int NUM_LEDS_REAR   = 16;
 
 // ---- Rear strip zone boundaries ----
-// Physical wiring assumption: LED[0] starts on LEFT side of vehicle
-// (standing behind the vehicle, looking forward).  If the installer
-// routes the data cable from the RIGHT side instead, define
-// LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
-// without editing hardware.  Default: 0 (normal orientation).
+//
+// ⚠ PHYSICAL INSTALLATION CONTRACT:
+//
+// DATA IN of the rear WS2812B strip must start from the LEFT side of the
+// vehicle (standing behind the vehicle, looking forward toward the front).
+//
+//   REAR VIEW (looking at the back of the vehicle):
+//
+//     DATA IN →  [0] [1] [2] [3] ... [12] [13] [14] [15]
+//                ├─ LEFT ─┤  ├──── CENTRE ────┤  ├─ RIGHT ─┤
+//                3 LEDs        10 LEDs             3 LEDs
+//
+// If the installer routes the data cable from the RIGHT side instead,
+// define LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
+// without editing hardware.  The swap is compile-time only — zero runtime
+// cost.  Centre zone indices are unchanged in both orientations.
+//
+// LED_STRIP_REVERSED effect:
+//   0 (default): LED[0-2]=LEFT,  LED[13-15]=RIGHT  (normal)
+//   1 (swapped): LED[0-2]=RIGHT, LED[13-15]=LEFT   (reversed data cable)
 #ifndef LED_STRIP_REVERSED
 #define LED_STRIP_REVERSED 0
 #endif
