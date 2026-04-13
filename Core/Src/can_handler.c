@@ -1067,6 +1067,31 @@ void CAN_ProcessMessages(void) {
                                 break;
                         }
                         CAN_SendCommandAck(0x10, ACK_OK);
+                    } else if (cmd == 0xE0) {
+                        /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
+                         * Byte 1: relay control mask
+                         *   bit 0: override enable (1=on, 0=off)
+                         *   bit 1: MAIN relay
+                         *   bit 2: TRACTION relay
+                         *   bit 3: DIRECTION relay
+                         *
+                         * Safety gating is enforced by Safety_SetRelayOverride():
+                         *   - System must be in STANDBY
+                         *   - Throttle == 0%, Speed == 0 km/h
+                         *   - No active safety errors
+                         * If any condition fails, the command is silently rejected
+                         * and the override is disabled.                           */
+                        if (msg_len >= 2) {
+                            uint8_t relay_ctl = rx_payload[1];
+                            bool enable = (relay_ctl & 0x01U) != 0;
+                            uint8_t mask = (relay_ctl >> 1) & 0x07U;
+                            Safety_SetRelayOverride(enable, mask);
+                            CAN_AckResult_t ack_result = Safety_IsRelayOverrideActive()
+                                ? ACK_OK : (enable ? ACK_BLOCKED_BY_SAFETY : ACK_OK);
+                            CAN_SendCommandAck(0x10, ack_result);
+                        } else {
+                            CAN_SendCommandAck(0x10, ACK_INVALID);
+                        }
                     } else if (msg_len >= 2) {
                         uint8_t mod_id = rx_payload[1];
                         if (mod_id < MODULE_COUNT) {

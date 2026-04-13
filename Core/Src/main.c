@@ -362,6 +362,13 @@ int main(void)
              * instead of blocking HAL_Delay calls.                     */
             Relay_SequencerUpdate();
 
+            /* Relay override (engineering diagnostic mode) — applies
+             * manual relay GPIO control when enabled.  Runs AFTER the
+             * normal sequencer so override GPIOs take precedence.
+             * Continuously re-validates safety conditions and auto-
+             * disables on any violation.                                */
+            Safety_RelayOverrideUpdate();
+
             /* Run automatic centering during BOOT / STANDBY.
              * Once complete, Steering_ControlLoop() takes over. */
             if (!SteeringCentering_IsComplete() &&
