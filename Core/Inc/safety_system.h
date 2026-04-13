@@ -257,6 +257,21 @@ void Relay_PowerUp(void);
 void Relay_PowerDown(void);
 void Relay_SequencerUpdate(void);
 
+/* Returns true only when the relay power-up sequence has completed
+ * and all three relays (MAIN, TRACTION, DIRECTION) are physically
+ * closed.  Subsystems that depend on relay power being available
+ * should gate on this instead of checking system state alone.
+ *
+ * During the ~70 ms window between entering ACTIVE and relay
+ * sequence completion, this returns false.                          */
+bool Safety_IsPowerReady(void);
+
+/* Returns true while the relay sequencer is actively progressing
+ * (between Relay_PowerUp() call and sequence completion).
+ * Exposed for diagnostic / debug visibility only — no safety logic
+ * should depend on this; use Safety_IsPowerReady() instead.         */
+bool Relay_IsSequenceInProgress(void);
+
 /* Command validation – returns clamped/safe value */
 float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);

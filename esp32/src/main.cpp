@@ -149,6 +149,15 @@ static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, b
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
+// Brownout/reboot guard: minimum interval between WELCOME sounds.
+// On rapid MCU resets (brownout, watchdog) the ESP32 may restart
+// multiple times in quick succession.  This static timestamp
+// prevents audio spam by enforcing a cooldown from the last
+// WELCOME play.  Static RAM persists across soft resets on ESP32
+// but not across full power cycles — which is the desired behaviour
+// (fresh power-on always plays welcome).
+static unsigned long lastWelcomePlayMs = 0;
+static constexpr unsigned long WELCOME_COOLDOWN_MS = 5000;  // 5 s minimum gap
 
 // ---- Runtime overlay state ----
 static bool     showOverlay       = true;    // overlay visible on initial screen only
@@ -902,9 +911,13 @@ void loop() {
     // ---- Power management ----
     power_mgr::update();
 
-    // Welcome audio on startup
+    // Welcome audio on startup — with brownout/reboot cooldown
     if (power_mgr::isRunning() && !welcomePlayed) {
-        audio::play(audio::Sound::WELCOME, audio::Priority::HI);
+        if (lastWelcomePlayMs == 0 ||
+            (now - lastWelcomePlayMs) >= WELCOME_COOLDOWN_MS) {
+            audio::play(audio::Sound::WELCOME, audio::Priority::HI);
+            lastWelcomePlayMs = now;
+        }
         welcomePlayed  = true;
         farewellPlayed = false;
     }
@@ -1225,34 +1238,56 @@ void loop() {
         // Activate at 15° to signal the beginning of a turn.
         // Deactivate at 10° (5° hysteresis) to avoid flickering when the
         // wheel hovers around the threshold.
-        // SAFE/ERROR states override with hazard flash.
+        // Time filter: a new turn state must persist for ≥100 ms before
+        // being applied, preventing rapid left↔right flicker from small
+        // steering oscillations at low speed.
+        // SAFE/ERROR states override with hazard flash (immediate).
         {
             static constexpr int16_t TURN_ON_RAW  = 150;  // 15.0° — activate
             static constexpr int16_t TURN_OFF_RAW = 100;  // 10.0° — deactivate (hysteresis)
+            static constexpr unsigned long TURN_PERSIST_MS = 100;  // anti-jitter time filter
 
             int16_t angle = vehicleData.steering().angleRaw;
             static led_ctrl::TurnSignal prevTurn = led_ctrl::TurnSignal::OFF;
-
-            led_ctrl::TurnSignal turn = prevTurn;  // start from last state
+            static led_ctrl::TurnSignal candidateTurn = led_ctrl::TurnSignal::OFF;
+            static unsigned long candidateStartMs = 0;
 
             if (st == can::SystemState::SAFE || st == can::SystemState::ERROR) {
-                turn = led_ctrl::TurnSignal::HAZARD;
+                // Hazard override — immediate, no time filter
+                led_ctrl::setTurnSignal(led_ctrl::TurnSignal::HAZARD);
                 // Don't persist HAZARD into prevTurn — reset to OFF so that
                 // when the system recovers, the hysteresis starts clean.
                 prevTurn = led_ctrl::TurnSignal::OFF;
-                led_ctrl::setTurnSignal(turn);
+                candidateTurn = led_ctrl::TurnSignal::OFF;
+                candidateStartMs = 0;
             } else {
+                // Compute desired turn from angle + hysteresis
+                led_ctrl::TurnSignal desired = prevTurn;
                 if (angle < -TURN_ON_RAW) {
-                    turn = led_ctrl::TurnSignal::LEFT;
+                    desired = led_ctrl::TurnSignal::LEFT;
                 } else if (angle > TURN_ON_RAW) {
-                    turn = led_ctrl::TurnSignal::RIGHT;
+                    desired = led_ctrl::TurnSignal::RIGHT;
                 } else if (angle > -TURN_OFF_RAW && angle < TURN_OFF_RAW) {
-                    turn = led_ctrl::TurnSignal::OFF;
+                    desired = led_ctrl::TurnSignal::OFF;
                 }
                 // Between OFF_RAW and ON_RAW: keep previous state (hysteresis band)
 
-                prevTurn = turn;
-                led_ctrl::setTurnSignal(turn);
+                // Time filter: require new state to persist ≥100 ms
+                if (desired != prevTurn) {
+                    if (desired != candidateTurn) {
+                        candidateTurn = desired;
+                        candidateStartMs = now;
+                    } else if ((now - candidateStartMs) >= TURN_PERSIST_MS) {
+                        prevTurn = desired;
+                        candidateStartMs = 0;
+                    }
+                } else {
+                    // Stable — reset candidate
+                    candidateTurn = prevTurn;
+                    candidateStartMs = 0;
+                }
+
+                led_ctrl::setTurnSignal(prevTurn);
             }
         }
 
