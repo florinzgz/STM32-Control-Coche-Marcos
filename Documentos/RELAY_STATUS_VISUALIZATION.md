@@ -433,7 +433,7 @@ This is explicitly documented in:
 
 ---
 
-# 📝 CHANGES LOG (THIS PR)
+# 📝 CHANGES LOG (RELAY VISIBILITY FEATURE)
 
 ## STM32 Files Modified
 

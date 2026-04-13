@@ -69,10 +69,10 @@ public:
         tft.drawChar('D', cfg::REL_IND_X + 28, textY);
     }
 
-    /// Static label — draw "REL" prefix (call once on screen enter)
-    static void drawStatic(TFT_eSPI& /* tft */) {
-        // No static label needed — M/T/D are self-explanatory in context
-    }
+    /// Static label — draw "REL" prefix (call once on screen enter).
+    /// Intentionally empty: M/T/D letters are self-explanatory in the gear bar
+    /// context. Kept for API parity with GearDisplay, ModeIcons, etc.
+    static void drawStatic(TFT_eSPI& /* tft */) {}
 
 private:
     /// Color logic for a single relay letter
