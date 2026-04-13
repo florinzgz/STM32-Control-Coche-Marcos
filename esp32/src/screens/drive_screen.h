@@ -45,6 +45,7 @@
 #include "ui/gear_display.h"
 #include "ui/mode_icons.h"
 #include "ui/led_toggle.h"
+#include "ui/relay_indicator.h"
 #include "can_ids.h"
 #include <cstdint>
 
@@ -88,6 +89,7 @@ private:
     uint16_t prevObstacleCm_     = 0;
     bool     prevFrontLedOn_     = false;
     bool     prevRearLedOn_      = false;
+    uint8_t  prevRelayStatus_    = 0;
 
     // Current frame values (populated in update, used in draw)
     uint8_t  curTraction_[4]     = {};
@@ -102,6 +104,7 @@ private:
     uint16_t curObstacleCm_      = 0;
     bool     curFrontLedOn_      = false;
     bool     curRearLedOn_       = false;
+    uint8_t  curRelayStatus_     = 0;
 
     bool     needsFullRedraw_    = true;
 

@@ -17,6 +17,16 @@
 // Turn signals are managed locally on the ESP32 (no STM32 CAN involvement).
 // Power relay on STM32 (PB10) must be ON for LEDs to light.
 //
+// ---- FUTURE: RELAY-BASED VISUAL DIAGNOSTICS ----
+// The motor relay command state (MAIN/TRACTION/DIRECTION) is now available
+// in VehicleData::heartbeat().relayStatus (CAN 0x001 byte 5).
+// This can be used to:
+//   - Flash LED strips during relay power-up sequence as visual feedback
+//   - Show relay failure state via LED color changes
+//   - Provide non-UI relay diagnostics for installations without a display
+// Currently NOT implemented — relay state is display-only (DriveScreen +
+// EngineeringScreen).  LED controller remains purely lighting-focused.
+//
 // Reference: docs/PIN_USAGE_INVENTORY.md §5.6
 //            github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos
 // =============================================================================

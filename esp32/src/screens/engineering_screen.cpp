@@ -176,6 +176,9 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
     enabledBits_  = data.service().enabledMask;
     disabledBits_ = data.service().disabledMask;
 
+    // Relay status (shown on main menu header)
+    relayStatus_ = data.heartbeat().relayStatus;
+
     // Track SERVICE_CMD ACK responses (cmdIdLow = 0x10)
     if (currentMenu_ == SubMenu::MODULE_CONTROL) {
         const auto& ad = data.ack();
@@ -253,6 +256,38 @@ void EngineeringScreen::draw() {
             case SubMenu::DTC_LOG_VIEWER:   drawDtcLogViewer();        break;
             case SubMenu::MAINTENANCE:      drawMaintenance();         break;
         }
+    }
+
+    // Partial redraw for main menu relay status panel
+    if (currentMenu_ == SubMenu::MAIN && relayStatus_ != prevRelayStatus_) {
+        const int16_t relX = 120;
+        const int16_t relY = BACK_Y;
+        const bool seqComplete = (relayStatus_ & 0x80U) != 0;
+        const bool mainOn   = (relayStatus_ & 0x01U) != 0;
+        const bool tracOn   = (relayStatus_ & 0x02U) != 0;
+        const bool dirOn    = (relayStatus_ & 0x04U) != 0;
+
+        char buf[40];
+
+        // Clear and redraw relay values
+        tft.fillRect(relX, relY + 12, 250, 22, ui::COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        snprintf(buf, sizeof(buf), "M:%s T:%s D:%s",
+                 mainOn ? "ON " : "OFF", tracOn ? "ON " : "OFF",
+                 dirOn  ? "ON " : "OFF");
+        uint16_t col = seqComplete ? ui::COL_GREEN : ui::COL_AMBER;
+        tft.setTextColor(col, ui::COL_BG);
+        tft.drawString(buf, relX, relY + 12);
+
+        snprintf(buf, sizeof(buf), "SEQ:%s  [0x%02X]",
+                 seqComplete ? "COMPLETE   " : "IN PROGRESS",
+                 relayStatus_);
+        tft.setTextColor(seqComplete ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+        tft.drawString(buf, relX, relY + 22);
+
+        prevRelayStatus_ = relayStatus_;
     }
 
     // Partial redraw for fault viewer
@@ -687,6 +722,42 @@ void EngineeringScreen::drawMainMenu() {
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "EXIT",
                 ui::COL_AMBER, ui::COL_DARK_GRAY, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
+
+    // ---- Relay Status Panel (right side of bottom row) ----
+    // Shows detailed relay GPIO command state from STM32 heartbeat byte 5.
+    {
+        const int16_t relX = 120;
+        const int16_t relY = BACK_Y;
+
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.drawString("RELAY STATUS", relX, relY);
+
+        const bool seqComplete = (relayStatus_ & 0x80U) != 0;
+        const bool mainOn   = (relayStatus_ & 0x01U) != 0;
+        const bool tracOn   = (relayStatus_ & 0x02U) != 0;
+        const bool dirOn    = (relayStatus_ & 0x04U) != 0;
+
+        // Row 1: individual relays
+        char buf[40];
+        snprintf(buf, sizeof(buf), "M:%s T:%s D:%s",
+                 mainOn ? "ON " : "OFF", tracOn ? "ON " : "OFF",
+                 dirOn  ? "ON " : "OFF");
+        uint16_t col = seqComplete ? ui::COL_GREEN : ui::COL_AMBER;
+        tft.setTextColor(col, ui::COL_BG);
+        tft.drawString(buf, relX, relY + 12);
+
+        // Row 2: sequence status + raw hex
+        snprintf(buf, sizeof(buf), "SEQ:%s  [0x%02X]",
+                 seqComplete ? "COMPLETE   " : "IN PROGRESS",
+                 relayStatus_);
+        tft.setTextColor(seqComplete ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+        tft.drawString(buf, relX, relY + 22);
+
+        prevRelayStatus_ = relayStatus_;
+    }
 }
 
 void EngineeringScreen::drawFaultViewer() {

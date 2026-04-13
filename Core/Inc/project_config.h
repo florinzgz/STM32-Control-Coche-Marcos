@@ -117,7 +117,33 @@
  * non-blocking relay sequencer in safety_system.c.
  *
  * ⚠ See RELAY TIMING OWNERSHIP doc block in safety_system.c for details on
- *   external delay relay module constraints and Safety_IsPowerReady() gate. */
+ *   external delay relay module constraints and Safety_IsPowerReady() gate.
+ *
+ * ---- RELAY VISIBILITY & TELEMETRY MODEL ----
+ *
+ * The relay status is exported to ESP32 via CAN heartbeat byte 5:
+ *   Bit 0 = MAIN (PC10),  Bit 1 = TRACTION (PC11),  Bit 2 = DIRECTION (PC12)
+ *   Bit 7 = relay sequence complete flag
+ *
+ * Three-level verification:
+ *   Level 1: GPIO output register — what firmware COMMANDED
+ *            → Safety_GetRelayStatusByte() reads GPIOC ODR
+ *   Level 2: CAN relay byte — what the ESP32 RECEIVES
+ *            → Must match Level 1 (same source, no transformation)
+ *   Level 3: INA226 current monitoring — PHYSICAL verification
+ *            → Safety_CheckRelayHealth() detects relay failure
+ *            → Only works under motor demand (detection requires load)
+ *
+ * ⚠ THERE IS NO GPIO FEEDBACK INPUT from relay contacts.
+ *   The STM32 has no relay-contact sense pin.  Physical relay failure
+ *   (coil open, contact weld) can only be detected via Level 3.
+ *
+ * Debug methodology:
+ *   DriveScreen:       compact "M T D" indicator in gear bar (color-coded)
+ *   EngineeringScreen: detailed panel (ON/OFF per relay, SEQ status, hex)
+ *   SWD debugger:      relay_seq_state variable, Safety_GetRelayStatusByte()
+ *   Current correlation: INA226 readings should rise ~50ms after SEQ_COMPLETE
+ */
 #define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
 #define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 */
 #define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 */
