@@ -17,6 +17,16 @@
 // Turn signals are managed locally on the ESP32 (no STM32 CAN involvement).
 // Power relay on STM32 (PB10) must be ON for LEDs to light.
 //
+// ---- FUTURE: RELAY-BASED VISUAL DIAGNOSTICS ----
+// The motor relay command state (MAIN/TRACTION/DIRECTION) is now available
+// in VehicleData::heartbeat().relayStatus (CAN 0x001 byte 5).
+// This can be used to:
+//   - Flash LED strips during relay power-up sequence as visual feedback
+//   - Show relay failure state via LED color changes
+//   - Provide non-UI relay diagnostics for installations without a display
+// Currently NOT implemented — relay state is display-only (DriveScreen +
+// EngineeringScreen).  LED controller remains purely lighting-focused.
+//
 // Reference: docs/PIN_USAGE_INVENTORY.md §5.6
 //            github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos
 // =============================================================================
@@ -36,11 +46,26 @@ inline constexpr int NUM_LEDS_FRONT  = 28;
 inline constexpr int NUM_LEDS_REAR   = 16;
 
 // ---- Rear strip zone boundaries ----
-// Physical wiring assumption: LED[0] starts on LEFT side of vehicle
-// (standing behind the vehicle, looking forward).  If the installer
-// routes the data cable from the RIGHT side instead, define
-// LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
-// without editing hardware.  Default: 0 (normal orientation).
+//
+// ⚠ PHYSICAL INSTALLATION CONTRACT:
+//
+// DATA IN of the rear WS2812B strip must start from the LEFT side of the
+// vehicle (standing behind the vehicle, looking forward toward the front).
+//
+//   REAR VIEW (looking at the back of the vehicle):
+//
+//     DATA IN →  [0] [1] [2] [3] ... [12] [13] [14] [15]
+//                ├─ LEFT ─┤  ├──── CENTRE ────┤  ├─ RIGHT ─┤
+//                3 LEDs        10 LEDs             3 LEDs
+//
+// If the installer routes the data cable from the RIGHT side instead,
+// define LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
+// without editing hardware.  The swap is compile-time only — zero runtime
+// cost.  Centre zone indices are unchanged in both orientations.
+//
+// LED_STRIP_REVERSED effect:
+//   0 (default): LED[0-2]=LEFT,  LED[13-15]=RIGHT  (normal)
+//   1 (swapped): LED[0-2]=RIGHT, LED[13-15]=LEFT   (reversed data cable)
 #ifndef LED_STRIP_REVERSED
 #define LED_STRIP_REVERSED 0
 #endif

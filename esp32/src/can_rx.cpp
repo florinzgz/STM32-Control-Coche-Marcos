@@ -47,6 +47,8 @@ static void decodeHeartbeat(const CanFrame& f, vehicle::VehicleData& data) {
     hb.faultFlags   = f.data[2];
     hb.errorCode    = f.data[3];
     hb.statusFlags  = f.data[4];
+    // Byte 5: relay status (DLC >= 6) — backward compatible with DLC 5
+    hb.relayStatus  = (f.data_length_code >= 6) ? f.data[5] : 0;
     hb.timestampMs  = millis();
     data.setHeartbeat(hb);
 }

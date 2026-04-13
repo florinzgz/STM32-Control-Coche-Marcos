@@ -95,7 +95,14 @@
  * They are now repurposed as EN_FR, EN_RL, EN_STEER respectively, giving
  * every motor driver identical 5-wire control (RPWM, LPWM, EN, GND, VCC)
  * and eliminating the brake/coast asymmetry between GPIO-EN and tied-HIGH
- * motors.  PC2 and PC3 remain freed/unused.                                 */
+ * motors.  PC2 and PC3 remain freed/unused.
+ *
+ * ⚠ INIT SAFETY: All EN pins are forced LOW in MX_GPIO_Init() (main.c)
+ *   via GPIOC->BSRR atomic write BEFORE the GPIO is configured as output.
+ *   This guarantees no transient motor activation after warm reset or
+ *   watchdog reset where ODR may retain its previous value.
+ *   No EN pin is left floating — all are configured as push-pull output
+ *   with no pull resistor (the push-pull driver actively holds the level). */
 #define PIN_EN_FR          GPIO_PIN_0   /* PC0  — GPIO output, active HIGH (was DIR_FL) */
 #define PIN_EN_RL          GPIO_PIN_1   /* PC1  — GPIO output, active HIGH (was DIR_FR) */
 #define PIN_EN_FL          GPIO_PIN_5   /* PC5  — GPIO output, active HIGH */
@@ -105,6 +112,38 @@
 /* ========================================================================== */
 /*                       RELAY CONTROL (GPIOC)                                */
 /* ========================================================================== */
+/* Relay GPIO pins are configured as push-pull output, no pull, LOW at init.
+ * All relays default OPEN (fail-safe).  Power-up is managed by the
+ * non-blocking relay sequencer in safety_system.c.
+ *
+ * ⚠ See RELAY TIMING OWNERSHIP doc block in safety_system.c for details on
+ *   external delay relay module constraints and Safety_IsPowerReady() gate.
+ *
+ * ---- RELAY VISIBILITY & TELEMETRY MODEL ----
+ *
+ * The relay status is exported to ESP32 via CAN heartbeat byte 5:
+ *   Bit 0 = MAIN (PC10),  Bit 1 = TRACTION (PC11),  Bit 2 = DIRECTION (PC12)
+ *   Bit 7 = relay sequence complete flag
+ *
+ * Three-level verification:
+ *   Level 1: GPIO output register — what firmware COMMANDED
+ *            → Safety_GetRelayStatusByte() reads GPIOC ODR
+ *   Level 2: CAN relay byte — what the ESP32 RECEIVES
+ *            → Must match Level 1 (same source, no transformation)
+ *   Level 3: INA226 current monitoring — PHYSICAL verification
+ *            → Safety_CheckRelayHealth() detects relay failure
+ *            → Only works under motor demand (detection requires load)
+ *
+ * ⚠ THERE IS NO GPIO FEEDBACK INPUT from relay contacts.
+ *   The STM32 has no relay-contact sense pin.  Physical relay failure
+ *   (coil open, contact weld) can only be detected via Level 3.
+ *
+ * Debug methodology:
+ *   DriveScreen:       compact "M T D" indicator in gear bar (color-coded)
+ *   EngineeringScreen: detailed panel (ON/OFF per relay, SEQ status, hex)
+ *   SWD debugger:      relay_seq_state variable, Safety_GetRelayStatusByte()
+ *   Current correlation: INA226 readings should rise ~50ms after SEQ_COMPLETE
+ */
 #define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
 #define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 */
 #define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 */
@@ -257,5 +296,123 @@
 #define INA226_SHUNT_MOHM_MOTOR    1.5f   /* 1.5 mΩ for 50A/75mV sensors  */
 #define INA226_SHUNT_MOHM_BATTERY  0.75f  /* 0.75 mΩ for 100A/75mV sensor */
 #define INA226_CHANNEL_BATTERY     4      /* TCA9548A channel index        */
+
+/* ========================================================================== */
+/*               SYSTEM-LEVEL ELECTRICAL INTEGRATION NOTES                    */
+/* ========================================================================== */
+/*
+ * ---- §A: BTS7960 (IBT-2) LOGIC SUPPLY — 3.3V REQUIREMENT ----
+ *
+ * ⚠ CRITICAL: The IBT-2 VCC pin MUST be powered from the 3.3V rail.
+ *
+ * Reason: The IBT-2 module includes a 74HC244 octal buffer between the
+ * input header pins and the BTS7960 power ICs.  The 74HC244 input-high
+ * threshold V_IH(min) = 0.7 × VCC:
+ *
+ *   VCC = 5.0V → V_IH(min) = 3.50V → STM32 3.3V GPIO is BELOW threshold
+ *                                      (unreliable, may be read as LOW)
+ *
+ *   VCC = 3.3V → V_IH(min) = 2.31V → STM32 3.3V GPIO is ABOVE threshold
+ *                                      (reliable, correct operation)
+ *
+ * The BTS7960 IC itself accepts V_IH ≥ 2.0V on INH/IN pins, but the
+ * 74HC244 buffer is the limiting factor on the IBT-2 module.
+ *
+ * ⚠ VARIANT WARNING:
+ *   Some third-party IBT-2 clones use different buffer ICs (74HCT244,
+ *   CD74HC244, SN74HC244).  The 74HCT244 variant has V_IH(min) = 2.0V
+ *   regardless of VCC and works at 5V with 3.3V inputs.  If your module
+ *   uses 74HC (not 74HCT), the 3.3V VCC solution is REQUIRED.
+ *
+ *   If instability is observed at 3.3V VCC (e.g., motor twitching,
+ *   sporadic enable faults), the migration path is:
+ *     1. Power IBT-2 VCC from 5V rail
+ *     2. Add BSS138 bidirectional level shifters on ALL signal lines:
+ *        RPWM, LPWM, R_EN, L_EN (4 shifters per module, 20 total)
+ *     3. Alternatively: bypass the 74HC244 and drive BTS7960 INH/IN
+ *        directly (requires PCB modification)
+ *
+ * ⚠ EN PIN SAFETY:
+ *   All five EN pins (PC0, PC1, PC4, PC5, PC13) are forced LOW via
+ *   GPIOC->BSRR atomic write at the TOP of MX_GPIO_Init(), before
+ *   the GPIO mode is configured.  No floating inputs are possible —
+ *   push-pull drivers actively hold the level.
+ *
+ * ---- §B: POWER RAIL ARCHITECTURE — 3.3V / 5V SEPARATION ----
+ *
+ * ⚠ The STM32 internal 3.3V regulator (on the Nucleo-G474RE board) has
+ *   limited current capacity (~300 mA).  It is intended ONLY for the
+ *   MCU core and minimal on-board logic.
+ *
+ *   DO NOT power external sensors or modules from the STM32 3.3V pin:
+ *
+ *     ✗ INA226 sensors (6×, ~1 mA each = ~6 mA)        — use external LDO
+ *     ✗ TCA9548A multiplexor (~1 mA)                    — use external LDO
+ *     ✗ DS18B20 temperature sensors (5×, ~1.5 mA each)  — use external LDO
+ *     ✗ BTS7960 IBT-2 VCC (5×, ~10 mA each = ~50 mA)   — use external LDO
+ *     ✗ I2C pull-ups (2× 4.7kΩ, ~0.7 mA each)         — use external LDO
+ *     ✗ OneWire pull-up (4.7kΩ, ~0.7 mA)               — use external LDO
+ *
+ *   Total external 3.3V load: ~60–80 mA (well within AMS1117-3.3 capacity
+ *   of 1A, but EXCEEDS safe continuous draw from the Nucleo on-board reg).
+ *
+ *   RECOMMENDED: Use a dedicated external 3.3V regulator (AMS1117-3.3 or
+ *   equivalent buck converter) fed from the 5V DC-DC (LM2596).
+ *
+ *   ⚠ AMS1117-3.3 THERMAL NOTE: At 5V→3.3V with 80 mA load, the LDO
+ *   dissipates (5.0 − 3.3) × 0.08 = 136 mW — well within SOT-223
+ *   package thermal limits.  At higher loads (>500 mA), consider a
+ *   buck converter (e.g., AP63203, MP2315) to avoid thermal runaway.
+ *
+ * 5V rail (from LM2596 24V→5V buck):
+ *   ✓ CAN transceiver TJA1051T/3 VCC (requires 4.5–5.5V, NOT 3.3V)
+ *   ✓ WS2812B LED strips (via LED power relays PB10/PB11)
+ *   ✓ Relay coils (SRD-05VDC, via HY-M158 optoacopladors)
+ *   ✓ Encoder E6B2-CWZ6C power (5–12V)
+ *
+ * ---- §C: GROUNDING STRATEGY — STAR GROUND TOPOLOGY ----
+ *
+ * ⚠ CRITICAL FOR INA226 MEASUREMENT ACCURACY AND EMI IMMUNITY:
+ *
+ * All ground returns MUST converge at a single STAR GROUND point.
+ * Do NOT daisy-chain ground wires between subsystems.
+ *
+ *                            ★ STAR GROUND POINT
+ *                            │
+ *        ┌───────────────────┼───────────────────┬──────────────────┐
+ *        │                   │                   │                  │
+ *   GND Bat 24V         GND Bat 12V        GND Logic 3.3V     GND BTS7960
+ *   (heavy gauge)       (heavy gauge)      (signal grade)      (motor return)
+ *                                               │
+ *                                          ┌────┼────┬────┐
+ *                                          │    │    │    │
+ *                                     INA226  TCA  DS18  CAN
+ *                                     (×6)  9548A  B20   GND
+ *                                                  (×5)
+ *
+ * MANDATORY RULES:
+ *   1. Motor power return cables (2.5 mm² min) go DIRECTLY to star point.
+ *      Motor GND must NEVER share a return path with logic/sensor GND.
+ *      Motor switching noise (20 kHz PWM) on shared ground causes:
+ *        - INA226 measurement offset/noise (ground loop)
+ *        - I2C communication errors (ground bounce on SDA/SCL)
+ *        - ADC pedal reading jitter (ground noise on VSSA reference)
+ *
+ *   2. Battery negative terminals connect to star point with dedicated
+ *      cables (4 mm² min).  Do NOT daisy-chain: Bat24V− → BTS → star.
+ *
+ *   3. CAN bus GND connects to star point through galvanic isolation
+ *      (if ADuM1201 is used) or through a single point (no loop).
+ *
+ *   4. Decoupling capacitors (100 nF ceramic) placed at EACH IC VCC/GND
+ *      pin, returned to the star ground via shortest possible trace.
+ *      Bulk capacitor (1000 µF / 35V) on 24V bus near relay cluster.
+ *
+ *   5. INA226 VBUS and shunt connections:
+ *      INA226 measures differential shunt voltage (IN+ / IN−).
+ *      The sensor GND must be connected to the SAME star point as the
+ *      shunt resistor's low-side.  Ground offset between INA226 GND
+ *      and shunt GND causes measurement error proportional to the offset.
+ */
 
 #endif /* PROJECT_CONFIG_H */

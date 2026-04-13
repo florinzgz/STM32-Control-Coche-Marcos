@@ -408,7 +408,15 @@ void CAN_SendHeartbeat(void) {
          *            bit 0: STARTUP_INHIBIT active (Power-On Movement Prevention)
          *            bit 1: 4x4 mode active  (echo of mode applied by STM32)
          *            bit 2: Tank turn active  (echo of mode applied by STM32)
-         *            bit 3-5: DS18B20 sensor count (0-5)                       */
+         *            bit 3-5: DS18B20 sensor count (0-5)
+         *   Byte 5: relay_status   (bitmask, added for relay visibility)
+         *            bit 0: MAIN relay GPIO ON
+         *            bit 1: TRACTION relay GPIO ON
+         *            bit 2: DIRECTION relay GPIO ON
+         *            bit 7: relay sequence complete
+         *
+         * DLC extended from 5 to 6.  ESP32 parsers that check DLC >= 5
+         * continue to work — byte 5 is additive, not breaking.          */
         const TractionState_t *ts = Traction_GetState();
         uint8_t status_flags = 0;
         if (Startup_IsInhibited()) status_flags |= STATUS_FLAG_STARTUP_INHIBIT;
@@ -417,14 +425,15 @@ void CAN_SendHeartbeat(void) {
         status_flags |= (uint8_t)((Temperature_GetCount() & STATUS_FLAG_TEMP_COUNT_MASK)
                                   << STATUS_FLAG_TEMP_COUNT_SHIFT);
 
-        uint8_t payload[5];
+        uint8_t payload[6];
         payload[0] = heartbeat_counter++;
         payload[1] = (uint8_t)Safety_GetState();
         payload[2] = Safety_GetFaultFlags();
         payload[3] = (uint8_t)Safety_GetError();
         payload[4] = status_flags;
+        payload[5] = Safety_GetRelayStatusByte();
 
-        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 5);
+        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 6);
         last_tx_heartbeat = current_time;
     }
 }

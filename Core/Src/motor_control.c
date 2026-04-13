@@ -950,6 +950,29 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4])
 
 void Traction_Update(void)
 {
+    /* --- Power-ready gate ---
+     * Do NOT drive any motor output until the relay power-up sequence
+     * has completed.  During the ~70 ms window between entering ACTIVE
+     * and RELAY_SEQ_COMPLETE, motors would attempt to run with partial
+     * or no supply voltage — causing unpredictable BTS7960 behaviour,
+     * possible overcurrent spikes, and false relay-health alarms.
+     *
+     * This check is a pre-condition gate: all downstream motor output
+     * (park hold, traction, coast, brake) is suppressed until
+     * Safety_IsPowerReady() returns true.  The relay health check
+     * (Safety_CheckRelayHealth) still runs independently and provides
+     * post-hoc fault detection after power is established.
+     *
+     * SAFE/ERROR states bypass this gate because they already force
+     * all outputs to zero and call Relay_PowerDown().                  */
+    {
+        SystemState_t st = Safety_GetState();
+        if (st != SYS_STATE_SAFE && st != SYS_STATE_ERROR &&
+            !Safety_IsPowerReady()) {
+            return;  /* Relays not yet settled — suppress all motor output */
+        }
+    }
+
     /* --- Gear P: Park Hold ---
      * Apply controlled active brake via H-bridge to simulate a parking
      * lock.  No throttle demand is accepted.  Current and temperature

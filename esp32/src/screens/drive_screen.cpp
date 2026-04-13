@@ -116,6 +116,7 @@ void DriveScreen::onEnter() {
     prevObstacleCm_  = 0;
     prevFrontLedOn_  = false;
     prevRearLedOn_   = false;
+    prevRelayStatus_ = 0;
 
     // Reset ACK indicator state
     ackLastShownMs_    = 0;
@@ -237,6 +238,9 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     curFrontLedOn_ = data.lights().frontRelayOn;
     curRearLedOn_  = data.lights().rearRelayOn;
 
+    // Relay status (heartbeat byte 5)
+    curRelayStatus_ = data.heartbeat().relayStatus;
+
     // System state for degraded/limp overlay (HMI_STATE_MODEL §2.4)
     curSystemState_ = data.heartbeat().systemState;
 
@@ -301,8 +305,12 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // BATTERY tile
     tiles_.updateHash(DTILE_BATTERY, ui::tileHashVal(curBattVoltRaw_));
 
-    // GEAR tile
-    tiles_.updateHash(DTILE_GEAR, ui::tileHashVal(curGear_));
+    // GEAR tile (includes relay indicator — they share the same vertical strip)
+    {
+        ui::TileHash gh = ui::tileHashVal(curGear_);
+        gh = ui::tileHashFeed(gh, curRelayStatus_);
+        tiles_.updateHash(DTILE_GEAR, gh);
+    }
 
     // PEDAL tile
     tiles_.updateHash(DTILE_PEDAL, ui::tileHashVal(curPedalPct_));
@@ -475,10 +483,11 @@ void DriveScreen::draw() {
         tiles_.markClean(DTILE_BATTERY);
     }
 
-    // TILE: Gear
+    // TILE: Gear + Relay indicator (share same tile region)
     if (tiles_.isDirty(DTILE_GEAR)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::GEAR);
         ui::GearDisplay::draw(tft, curGear_, prevGear_);
+        ui::RelayIndicator::draw(tft, curRelayStatus_, prevRelayStatus_);
         tiles_.markClean(DTILE_GEAR);
     }
 
@@ -554,6 +563,7 @@ void DriveScreen::draw() {
     prevObstacleCm_  = curObstacleCm_;
     prevFrontLedOn_  = curFrontLedOn_;
     prevRearLedOn_   = curRearLedOn_;
+    prevRelayStatus_ = curRelayStatus_;
     prevSystemState_ = curSystemState_;
     prevFaultFlags_  = curFaultFlags_;
 

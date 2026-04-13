@@ -1237,6 +1237,34 @@ void loop() {
         }
 
         // ---- Turn-signal derivation from steering angle (0.1° units) ----
+        //
+        // ⚠ TURN SIGNAL TIMING & DETERMINISM CONTRACT:
+        //
+        // This logic is fully deterministic with the following guarantees:
+        //   - Runs once per render loop iteration (20 Hz cadence)
+        //   - Uses 'now' (millis()) captured once per frame at the top of
+        //     the render loop — identical across all consumers
+        //   - State transitions: prevTurn, candidateTurn, candidateStartMs
+        //     are static locals — no dynamic allocation, no race conditions
+        //   - Single-threaded: runs only on Core 0 render task
+        //
+        // Anti-jitter stack (three independent layers):
+        //   1. Hysteresis: 5° dead band (±10° off → ±15° on)
+        //      Prevents chatter when steering oscillates near threshold
+        //   2. Time filter: new state must persist ≥100 ms (2 frames at 20 Hz)
+        //      Prevents micro-oscillation from PWM-coupled steering noise
+        //   3. HAZARD override: SAFE/ERROR → immediate hazard (no filter)
+        //      Safety-critical indication bypasses all debounce logic
+        //
+        // Edge oscillation at low speed:
+        //   At low speed, steering angle can jitter ±2-5° due to encoder
+        //   resolution and motor vibration.  The 5° hysteresis band
+        //   (10°→15°) means the signal won't toggle unless the angle
+        //   swings by 5°.  The 100 ms persistence filter adds a second
+        //   layer: even if the angle briefly crosses 15° and returns,
+        //   the turn signal won't activate unless it stays above 15°
+        //   for at least 100 ms.
+        //
         // Activate at 15° to signal the beginning of a turn.
         // Deactivate at 10° (5° hysteresis) to avoid flickering when the
         // wheel hovers around the threshold.
