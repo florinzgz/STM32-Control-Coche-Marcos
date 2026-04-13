@@ -783,7 +783,9 @@ void Safety_SetRelayOverride(bool enabled, uint8_t mask)
             relay_override_mask    = 0;
             return;
         }
-        /* Throttle must be 0 % */
+        /* Throttle must be at rest (≤ 1 % dead-zone for analog pedal noise).
+         * Pedal_GetPercent() returns EMA-filtered 0–100 % value.
+         * The 1 % threshold matches the pedal rest noise floor.          */
         float throttle = Pedal_GetPercent();
         if (throttle > 1.0f) {
             relay_override_enabled = false;

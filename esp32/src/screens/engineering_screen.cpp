@@ -168,10 +168,21 @@ void EngineeringScreen::onEnter() {
     memcpy(inaMap_,  cfg.ina226Map,      config_store::NUM_INA226_CH);
     memcpy(tempMap_, cfg.tempSensorMap,  config_store::NUM_TEMP_SENS);
 
-    // Reset relay override UI state on screen entry
+    // Reset relay override UI state on screen entry.
+    // Send a disable command to ensure STM32 state is in sync in case
+    // the override was left active from a previous session.
     relayOverrideEnabled_ = false;
     relayOverrideMask_    = 0;
     relayOverrideChanged_ = false;
+    {
+        CanFrame frame = {};
+        frame.identifier       = can::SERVICE_CMD;
+        frame.extd             = 0;
+        frame.data_length_code = 2;
+        frame.data[0]          = can::SERVICE_ACTION_RELAY_OVERRIDE;
+        frame.data[1]          = 0x00;  // disable override
+        ESP32Can.writeFrame(frame, 0);
+    }
 }
 
 void EngineeringScreen::onExit() {
@@ -210,10 +221,12 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             relayOverrideChanged_ = true;
         }
     }
-    // Detect relay status changes while in relay control submenu
+    // Detect relay status changes while in relay control submenu.
+    // Compare against the raw relayStatus_ value to catch any change.
     if (currentMenu_ == SubMenu::RELAY_CONTROL) {
-        uint8_t realMask = relayStatus_ & 0x07U;
-        if (realMask != (prevRelayStatus_ & 0x07U)) {
+        static uint8_t prevRelayCtrlStatus = 0xFF;
+        if (relayStatus_ != prevRelayCtrlStatus) {
+            prevRelayCtrlStatus = relayStatus_;
             relayOverrideChanged_ = true;
         }
     }
