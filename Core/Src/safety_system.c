@@ -86,7 +86,44 @@ static inline void sat_inc_u32(uint32_t *counter) {
  * but keeps heartbeat alive (e.g., HMI crash, ESP32 task starvation).     */
 #define STEERING_CMD_TIMEOUT_MS  500
 
-/* Relay power sequencing delays (milliseconds) */
+/* ---- Relay power sequencing delays (milliseconds) ----
+ *
+ * ⚠ HARDWARE INTEGRATION CONTRACT — RELAY TIMING OWNERSHIP:
+ *
+ * The STM32 firmware owns ALL relay timing.  The non-blocking sequencer
+ * (Relay_SequencerUpdate) is called every 10 ms from the main safety loop
+ * and uses HAL_GetTick() timestamps to progress through the sequence:
+ *
+ *   MAIN ON  ──(50 ms)──▸  TRACTION ON  ──(20 ms)──▸  DIRECTION ON
+ *   (PC10)                  (PC11)                      (PC12)
+ *
+ * Total sequence: ~70 ms (deterministic, jitter ≤ 10 ms from loop cadence).
+ *
+ * ⚠ EXTERNAL DELAY RELAY MODULES (if present in the power path):
+ *   External "delay relay" modules (5V/12V/24V timer relays) used to
+ *   interface between the STM32 GPIO → optoacoplador → power relay
+ *   MUST be configured with ZERO delay (minimum timer setting).
+ *   The firmware relay sequencer already provides the required inrush
+ *   settling and arc suppression timing.  Any additional delay from
+ *   external timer modules would:
+ *     - Extend the power-up window beyond the expected ~70 ms
+ *     - Desynchronise relay health checks (300 ms post-activation)
+ *     - Cause false RELAY_OPEN faults if motors are commanded before
+ *       the external relay physically closes
+ *
+ * ⚠ POWER-READY GATE:
+ *   No subsystem may assume relay power is available until
+ *   Safety_IsPowerReady() returns true.  Traction_Update() gates
+ *   all motor output on this condition.  The relay health check
+ *   (Safety_CheckRelayHealth) provides post-hoc fault detection
+ *   after power is established.
+ *
+ * ⚠ RELAY SEQUENCER DETERMINISM:
+ *   Relay_SequencerUpdate() is a pure state machine with no blocking
+ *   calls, no HAL_Delay, and no I2C/SPI transactions.  It executes
+ *   in < 1 µs per call.  The 10 ms loop cadence introduces up to
+ *   10 ms of jitter per stage (within specification for SRD-05VDC
+ *   relays with 10 ms activation time).                                */
 #define RELAY_MAIN_SETTLE_MS     50   /* inrush current settling time      */
 #define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
 
@@ -1697,6 +1734,34 @@ void Safety_CheckBatteryOvervoltage(void)
 
 void Safety_CheckRelayHealth(void)
 {
+    /* ---- Relay Failure Detection — Design Constraints ----
+     *
+     * ⚠ IMPORTANT: Relay fault detection REQUIRES active motor demand.
+     *
+     * This function detects a relay-not-closing condition by comparing
+     * throttle demand against measured motor current (INA226 ch 0–3).
+     * It CANNOT detect a stuck-open relay when the vehicle is idle:
+     *   - Throttle < 10% AND speed < 2 km/h → check is inactive
+     *   - ABS/TCS actively limiting → demandPct = 0 → fault suppressed
+     *   - Obstacle system zeroed demand → no current expected → no fault
+     *   - Vehicle stalled (wheels blocked) → current ambiguous → suppressed
+     *
+     * Detection latency from demand onset:
+     *   300 ms (settle) + 30 ms (debounce, 3 × 10 ms) = ~330 ms typical
+     *   300 ms (settle) + 80 ms (brownout debounce)    = ~380 ms brownout
+     *
+     * This is by design: relay health cannot be assessed without
+     * current flow, and current flow requires motor demand.  The
+     * relay health check provides POST-HOC detection — not a
+     * pre-condition gate.  The pre-condition gate for relay power
+     * is Safety_IsPowerReady() (checked in Traction_Update).
+     *
+     * Arithmetic: all threshold checks use only multiply and compare
+     * (no division in the hot path).  NaN/Inf from INA226 is rejected
+     * per-channel.  Readings > 50 A are rejected as implausible.
+     * Debounce counter (uint8_t) is capped at UINT8_MAX (255) to
+     * prevent wrap-around — cannot overflow.                           */
+
     /* Only active when motion is allowed (ACTIVE / DEGRADED / LIMP_HOME) */
     if (!Safety_IsMotionAllowed()) {
         relay_chk_active        = 0;
