@@ -205,31 +205,55 @@ datos). Esto se consigue con un **relé de retención** (delay relay) externo:
 
 ### 3.3 Esquema del relé de retención
 
+> **⚠️ IMPORTANTE:** El diodo flyback D2 (1N4007) debe estar en **PARALELO** con
+> la bobina del relé (cátodo a bobina+, ánodo a bobina−/GND), **nunca en serie**.
+> Un diodo en serie NO protege contra el pico inductivo al desconectar la bobina.
+> Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md)
+> para la validación eléctrica completa y las correcciones de diseño.
+
 ```
-  Bat 12V (+) ──┬─── Llave contacto ───────────┐
-                │                                │
-                │   ┌──────────────────────┐     │
-                │   │   RELÉ RETENCIÓN     │     │
-                │   │   (SRD-05VDC o       │     │
-                │   │    similar 12V)      │     │
-                │   │                      │     │
-                │   │  Bobina (+) ◄────────┤─────┘
-                │   │  Bobina (+) ◄── ESP32 GPIO 41 (vía transistor NPN + R)
-                │   │  Bobina (−) ──► GND  │
-                │   │                      │
-                │   │  COM ◄───────────────┘ (conectado a Bat 12V+)
+  Bat 12V (+) ──┬─── Llave contacto ────────────────────────────┐
+                │                                                │
+                │   ┌──────────────────────────────────┐         │
+                │   │   RELÉ RETENCIÓN                 │         │
+                │   │   (12V DC, contactos ≥ 5A)       │         │
+                │   │                                  │         │
+                │   │         ┌────────┐               │         │
+                │   │  Bobina(+) ◄──┤ D2     │◄── Bobina(−)│    │
+                │   │     │         │ 1N4007 │       │     │     │
+                │   │     │         │flyback │       │     │     │
+                │   │     │         │PARALELO│       │     │     │
+                │   │     │         └────────┘       │     │     │
+                │   │     │                          │     │     │
+                │   │     │◄───── D_OR1 ◄── R4 ◄────┤─────┘     │
+                │   │     │       (1N4148)  (4.7kΩ)   │  (llave)  │
+                │   │     │                          │           │
+                │   │     │◄───── D_OR2 ◄── Q2_col   │           │
+                │   │     │       (1N4148)     ▲     │           │
+                │   │     │                    │     │           │
+                │   │     │              Q1 NPN(2N2222)│           │
+                │   │     │              Base ◄── R_base (1kΩ) ◄── ESP32 GPIO 41
+                │   │     │              Emisor ──► GND│           │
+                │   │     │                          │           │
+                │   │     └──── bobina(−) ──► GND    │           │
+                │   │                                  │           │
+                │   │  COM ◄───────────────────────────┘ (Bat 12V+)
                 │   │  NO  ──────────────────► Regulador 5V → ESP32 + STM32
-                │   │  NC  ── (sin conectar)│
-                │   └──────────────────────┘
+                │   │  NC  ── (sin conectar)  │
+                │   └──────────────────────────────────┘
                 │
                GND
 ```
 
 **Nota:** La bobina del relé se activa por **dos caminos en paralelo** (diodo OR):
-1. Directamente desde la llave de contacto (encendido inicial).
-2. Desde el GPIO 41 del ESP32 vía transistor NPN (retención durante apagado).
+1. Desde la llave de contacto vía **R4 (4.7kΩ) + Q1 transistor NPN (2N2222)** (encendido inicial).
+   La llave **no acciona la bobina directamente** — solo alimenta la base del transistor
+   (~1.13 mA), evitando arco eléctrico y desgaste de los contactos de la llave.
+2. Desde el GPIO 41 del ESP32 vía transistor NPN Q2 (retención durante apagado).
 
-Ambos caminos se combinan con un diodo (1N4148) para evitar retroalimentación.
+Ambos caminos se combinan con diodos OR (1N4148 × 2) para evitar retroalimentación.
+El diodo flyback D2 (1N4007) en **paralelo** con la bobina absorbe los picos inductivos
+al desconectar.
 
 ---
 
@@ -483,21 +507,33 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
 
 | Componente | Valor | Función |
 |------------|-------|---------|
-| Llave de contacto | SPST, rated ≥ 12 V / 1 A | Interruptor maestro ON/OFF |
-| R1 (divisor) | 33 kΩ, ¼ W | Resistencia superior del divisor de tensión |
-| R2 (divisor) | 10 kΩ, ¼ W | Resistencia inferior + pull-down |
+| Llave de contacto | SPST, rated ≥ 12 V / 1 A | Interruptor maestro ON/OFF (2 terminales) |
+| R1 (divisor) | 33 kΩ, ¼ W, metal film | Resistencia superior del divisor de tensión |
+| R2 (divisor) | 10 kΩ, ¼ W, metal film | Resistencia inferior + pull-down |
+| R3 (serie GPIO) | 10 kΩ, ¼ W | Protección anti-transitorio + parte del filtro RC |
+| C1 (filtro) | 100 nF (0.1 µF), 50 V, X7R | Filtro RC anti-ruido (τ = R3×C1 = 1 ms) |
 | Cable señal | 0.5 mm², apantallado recomendado | De la llave al divisor |
+
+> **Mejora opcional:** añadir zener 3.3 V (**1N4728**, disponible en inventario) entre GPIO 40 y GND para
+> clamp de protección contra transitorios automotrices.
+> Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md) §8.
 
 ### 8.2 Circuito de retención de alimentación (ESP32 GPIO 41)
 
 | Componente | Valor | Función |
 |------------|-------|---------|
-| Transistor NPN | BC547 o 2N2222 | Amplifica señal GPIO 41 para accionar bobina relé |
-| R_base | 1 kΩ, ¼ W | Limita corriente de base del transistor |
-| Diodo flyback | 1N4007 | Protección contra pico inductivo de bobina |
-| Diodo OR | 1N4148 × 2 | Combina señal de llave + POWER_HOLD sin retroalimentación |
+| Q1 (transistor NPN) | **2N2222** (camino llave) — **disponible en inventario** | Driver de bobina desde señal de llave |
+| Q2 (transistor NPN) | **2N2222** (camino GPIO 41) — **disponible en inventario** | Driver de bobina desde POWER_HOLD |
+| R4 (base Q1) | 4.7 kΩ, ¼ W | Limita corriente de base Q1 (~2.4 mA) desde llave |
+| R_base (Q2) | 1 kΩ, ¼ W | Limita corriente de base Q2 desde GPIO 41 (3.3V) |
+| D2 (flyback) | **1N4007** — en **PARALELO** con bobina | Protección contra pico inductivo (cátodo→bobina+, ánodo→bobina−) |
+| D_OR1, D_OR2 | 1N4148 × 2 | Combina señal de llave + POWER_HOLD sin retroalimentación |
 | Relé de retención | 12 V DC, contactos ≥ 5 A | Mantiene alimentación durante apagado |
 | Regulador 5 V | LM7805 o módulo buck 12 V→5 V | Alimentación de ESP32-S3 y STM32 |
+
+> ⚠️ **CRÍTICO:** El diodo flyback D2 debe estar en **PARALELO** con la bobina
+> del relé, **no en serie**. Un diodo en serie no protege contra kickback inductivo.
+> Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md) §3.1 y §7.1.
 
 ### 8.3 Relés de potencia (controlados por STM32)
 
