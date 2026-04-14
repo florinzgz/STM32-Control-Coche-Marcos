@@ -226,12 +226,12 @@ datos). Esto se consigue con un **relé de retención** (delay relay) externo:
                 │   │     │         └────────┘       │     │     │
                 │   │     │                          │     │     │
                 │   │     │◄───── D_OR1 ◄── R4 ◄────┤─────┘     │
-                │   │     │       (1N4148)  (10kΩ)   │  (llave)  │
+                │   │     │       (1N4148)  (4.7kΩ)   │  (llave)  │
                 │   │     │                          │           │
                 │   │     │◄───── D_OR2 ◄── Q2_col   │           │
                 │   │     │       (1N4148)     ▲     │           │
                 │   │     │                    │     │           │
-                │   │     │              Q1 NPN(BC547)│           │
+                │   │     │              Q1 NPN(2N2222)│           │
                 │   │     │              Base ◄── R_base (1kΩ) ◄── ESP32 GPIO 41
                 │   │     │              Emisor ──► GND│           │
                 │   │     │                          │           │
@@ -246,7 +246,7 @@ datos). Esto se consigue con un **relé de retención** (delay relay) externo:
 ```
 
 **Nota:** La bobina del relé se activa por **dos caminos en paralelo** (diodo OR):
-1. Desde la llave de contacto vía **R4 (10kΩ) + Q1 transistor NPN** (encendido inicial).
+1. Desde la llave de contacto vía **R4 (4.7kΩ) + Q1 transistor NPN (2N2222)** (encendido inicial).
    La llave **no acciona la bobina directamente** — solo alimenta la base del transistor
    (~1.13 mA), evitando arco eléctrico y desgaste de los contactos de la llave.
 2. Desde el GPIO 41 del ESP32 vía transistor NPN Q2 (retención durante apagado).
@@ -514,7 +514,7 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
 | C1 (filtro) | 100 nF (0.1 µF), 50 V, X7R | Filtro RC anti-ruido (τ = R3×C1 = 1 ms) |
 | Cable señal | 0.5 mm², apantallado recomendado | De la llave al divisor |
 
-> **Mejora opcional:** añadir zener 3.3 V (BZX55C3V3) entre GPIO 40 y GND para
+> **Mejora opcional:** añadir zener 3.3 V (**1N4728**, disponible en inventario) entre GPIO 40 y GND para
 > clamp de protección contra transitorios automotrices.
 > Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md) §8.
 
@@ -522,9 +522,9 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
 
 | Componente | Valor | Función |
 |------------|-------|---------|
-| Q1 (transistor NPN) | BC547B o 2N2222 (camino llave) | Driver de bobina desde señal de llave |
-| Q2 (transistor NPN) | BC547B o 2N2222 (camino GPIO 41) | Driver de bobina desde POWER_HOLD |
-| R4 (base Q1) | 10 kΩ, ¼ W | Limita corriente de base Q1 (~1.13 mA) desde llave |
+| Q1 (transistor NPN) | **2N2222** (camino llave) — **disponible en inventario** | Driver de bobina desde señal de llave |
+| Q2 (transistor NPN) | **2N2222** (camino GPIO 41) — **disponible en inventario** | Driver de bobina desde POWER_HOLD |
+| R4 (base Q1) | 4.7 kΩ, ¼ W | Limita corriente de base Q1 (~2.4 mA) desde llave |
 | R_base (Q2) | 1 kΩ, ¼ W | Limita corriente de base Q2 desde GPIO 41 (3.3V) |
 | D2 (flyback) | **1N4007** — en **PARALELO** con bobina | Protección contra pico inductivo (cátodo→bobina+, ánodo→bobina−) |
 | D_OR1, D_OR2 | 1N4148 × 2 | Combina señal de llave + POWER_HOLD sin retroalimentación |

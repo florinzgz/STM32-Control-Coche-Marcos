@@ -154,11 +154,11 @@ BAT +12V
                                                                               ║ ETAPA RELÉ  ║
                                                                               ════════════════
                                                                                       │
-                                                                               [R4 = 10 kΩ]
+                                                                               [R4 = 4.7 kΩ]
                                                                                       │
                                                                                Base ──┤
                                                                                       │
-                                                                         ┌──── Q1 (BC547 NPN)
+                                                                         ┌──── Q1 (2N2222 NPN)
                                                                          │     │
                                                               12V ───────┤     │
                                                                   │      │  Emisor
@@ -193,10 +193,10 @@ BAT +12V
      │                                                            │
      ├──────────────────────────────────────── → ────────────────┤
      │                                                            │
-     │                                                     [R4 = 10 kΩ]
+     │                                                     [R4 = 4.7 kΩ]
   [R1 = 47 kΩ]                                                   │
      │                                              ┌────── Base Q1
-     │                                              │      (BC547)
+     │                                              │      (2N2222)
      ├──[R3 = 10 kΩ]──┬──► ESP32 GPIO 40           │   Colector ←── Bobina(−) relé
      │                 │                            │      │
   [R2 = 10 kΩ]   [C1 = 100 nF]                    │   Emisor
@@ -243,11 +243,11 @@ BAT +12V
   │        ▼                                           │               │
   │   ┌─────────┐                                      │               │
   │   │R1 47 kΩ │                               ┌──────┴──────┐       │
-  │   └────┬────┘                               │ R4 = 10 kΩ  │       │
+  │   └────┬────┘                               │ R4 = 4.7 kΩ  │       │
   │        │                                    └──────┬──────┘       │
   │        ├──[R3 10kΩ]──[C1 100nF]── GND             │               │
   │        │                                      Base Q1              │
-  │        │                                    (BC547 NPN)            │
+  │        │                                    (2N2222 NPN)            │
   │        ├──────► ESP32 GPIO 40                     │               │
   │        │                                     Colector ◄── Bobina(−)│
   │   ┌────┴────┐                                     │               │
@@ -303,7 +303,7 @@ El circuito completo del relé de retención tiene **dos caminos de activación*
 | R2 | Resistencia | **10 kΩ** | ¼ W, 1%, metal film | Resistencia inferior del divisor (a GND) |
 | R3 | Resistencia | **10 kΩ** | ¼ W, 5% | Resistencia en serie anti-transitorio (limita corriente pico al GPIO) |
 | C1 | Condensador cerámico | **100 nF** (0.1 µF) | 50 V, X7R | Filtro RC anti-ruido (τ = R3 × C1 = 1 ms) |
-| — | (Opcional) Diodo zener | **3.3 V** | BZX55C3V3 o similar, 500 mW | Clamp de protección (ver §8) |
+| — | (Opcional) Diodo zener | **3.3 V** | **1N4728** (1 W, DO-41) — **disponible en inventario** | Clamp de protección (ver §8) |
 
 **Cálculos del divisor optimizado (R1=47k, R2=10k):**
 
@@ -327,19 +327,23 @@ Alternativa recomendada: mantener R1=33 kΩ, R2=10 kΩ (2.79 V ✅ > umbral HIGH
 
 | Ref. | Componente | Valor | Especificación | Función |
 |------|------------|-------|----------------|---------|
-| Q1 | Transistor NPN | **BC547B** | V_CE ≥ 45 V, I_C ≥ 100 mA, hFE ≥ 200 | Driver de bobina del relé |
-| R4 | Resistencia de base | **10 kΩ** | ¼ W | Limita corriente de base: I_b = (12 V − 0.7 V) / 10 kΩ ≈ 1.13 mA |
+| Q1 | Transistor NPN | **2N2222** | V_CE ≥ 30 V, I_C ≥ 600 mA, hFE ≥ 100 | Driver de bobina del relé (**disponible en inventario**) |
+| R4 | Resistencia de base | **4.7 kΩ** | ¼ W | Limita corriente de base: I_b = (12 V − 0.7 V) / 4.7 kΩ ≈ 2.4 mA (saturación 2×) |
 | D2 | Diodo flyback | **1N4007** | 1000 V, 1 A | Protección contra kickback inductivo (en **paralelo** con bobina) |
 | K1 | Relé de retención | **12 V DC** | Bobina ~100 mA, contactos ≥ 5 A | Mantiene alimentación 12 V → regulador 5 V |
 
-**Cálculos del driver del transistor:**
+**Cálculos del driver del transistor (2N2222):**
 
 ```
 Corriente de bobina del relé (típica): I_C = 80-120 mA
-Corriente de base necesaria: I_B = I_C / hFE = 120 mA / 200 = 0.6 mA
+Corriente de base necesaria: I_B = I_C / hFE = 120 mA / 100 = 1.2 mA (hFE mín. 2N2222 ≈ 100)
 Corriente de base real: I_B = (V_llave − V_BE) / R4 = (12 − 0.7) / 10k = 1.13 mA
-Factor de saturación: I_B_real / I_B_min = 1.13 / 0.6 = 1.88× ✅ (saturado)
-V_CE_sat típico: 0.2 V → Tensión en bobina: 12 − 0.2 = 11.8 V ✅
+Factor de saturación: I_B_real / I_B_min ≈ 0.94× → Cambiar R4 a 4.7 kΩ para margen:
+  I_B = (12 − 0.7) / 4.7k = 2.4 mA → Factor = 2.4 / 1.2 = 2.0× ✅ (saturado con margen)
+V_CE_sat típico: 0.3 V → Tensión en bobina: 12 − 0.3 = 11.7 V ✅
+
+Nota: El 2N2222 soporta I_C hasta 600 mA (vs. 100 mA del BC547),
+proporcionando mayor margen de seguridad para bobinas de relé.
 ```
 
 ### 5.3 Componentes compartidos / existentes
@@ -370,7 +374,7 @@ Paso 2: RAMAL A (GPIO)
                          ESP32 detecta llave ON (tras debounce 50ms en firmware)
 
 Paso 3: RAMAL B (Relé)
-         12V → R4 (10kΩ) → Base Q1 → I_B = 1.13 mA → Q1 saturado
+         12V → R4 (4.7kΩ) → Base Q1 → I_B = 2.4 mA → Q1 saturado
                                            ↓
                                     Colector Q1 → sink → bobina relé energizada
                                            ↓
@@ -435,10 +439,10 @@ Paso 4: ESP32 reproduce audio despedida (3 s) → GPIO 41 LOW → Q2 se apaga
 
 | Aspecto | Diseño original | Diseño corregido |
 |---------|----------------|------------------|
-| **Corriente por llave** | ~70-150 mA (bobina) + 0.28 mA (divisor) | Solo 0.28 mA (divisor) + 1.13 mA (base Q1) ≈ **1.4 mA** |
+| **Corriente por llave** | ~70-150 mA (bobina) + 0.28 mA (divisor) | Solo 0.28 mA (divisor) + 2.4 mA (base Q1) ≈ **2.7 mA** |
 | **Arco en contactos** | Sí (corriente inductiva) | No (corriente resistiva mínima) |
 | **Vida útil llave** | ~10k-50k ciclos (con arco) | ~100k-500k ciclos (sin arco) |
-| **Caída de tensión** | Variable (resistencia de contacto) | Despreciable (1.4 mA × 50 mΩ = 70 µV) |
+| **Caída de tensión** | Variable (resistencia de contacto) | Despreciable (2.7 mA × 50 mΩ = 135 µV) |
 
 ### 7.3 Filtro RC en línea GPIO
 
@@ -465,7 +469,7 @@ Incluso si el divisor falla (R2 abierto), R3 protege el pin GPIO.
 
 ### 8.1 Protección TVS / Zener
 
-Añadir un diodo zener de 3.3 V (BZX55C3V3) entre GPIO 40 y GND:
+Añadir un diodo zener de 3.3 V (**1N4728**, disponible en inventario) entre GPIO 40 y GND:
 
 ```
   R1 ──── R3 ──┬──► GPIO 40
@@ -530,8 +534,8 @@ Para entornos con ruido severo (motores DC con escobillas, alternador):
   D1 en SERIE con bobina                  D2 en PARALELO con bobina ✅
   → Sin protección flyback                → Flyback absorbido por D2
 
-  Bobina directa desde llave              Q1 (NPN) como driver de bobina ✅
-  → Arco, desgaste, 150 mA por llave     → Llave solo conduce 1.4 mA
+  Bobina directa desde llave              Q1 (2N2222 NPN) como driver de bobina ✅
+  → Arco, desgaste, 150 mA por llave     → Llave solo conduce 2.7 mA
 
   Sin filtro en GPIO                      R3 + C1 (filtro RC, τ=1ms) ✅
   → Susceptible a EMI y bounce            → Ruido filtrado, bounce suavizado
@@ -547,3 +551,44 @@ Para entornos con ruido severo (motores DC con escobillas, alternador):
 
 > **Referencia firmware:** `esp32/src/power_manager.h` (GPIO 40/41), `esp32/src/power_manager.cpp` (debounce 50ms, state machine)  
 > **Referencia docs:** `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` (circuito original), `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md` (alimentación general)
+
+---
+
+## Apéndice: Inventario de Componentes Disponibles
+
+> **Nota:** Los siguientes kits han sido adquiridos y están disponibles para este circuito y otros módulos del proyecto.
+
+### Kit de Diodos Zener (200 uds, 10 valores — 1N4728~1N4737)
+
+| Modelo | Tensión Zener | Uso en este proyecto |
+|--------|--------------|---------------------|
+| **1N4728** | **3.3 V** | ✅ Protección GPIO 40 (clamp 3.3V) — **usar este** |
+| 1N4729 | 3.6 V | Disponible (alternativa si se necesita margen) |
+| 1N4730 | 3.9 V | Disponible |
+| 1N4731 | 4.3 V | Disponible |
+| 1N4732 | 4.7 V | Disponible |
+| 1N4733 | 5.1 V | Disponible (protección en rail 5V) |
+| 1N4734 | 5.6 V | Disponible |
+| 1N4735 | 6.2 V | Disponible |
+| 1N4736 | 6.8 V | Disponible |
+| 1N4737 | 7.5 V | Disponible |
+
+> Todos 1 W, encapsulado DO-41. Superiores al BZX55C3V3 (500 mW) originalmente recomendado.
+
+### Kit de Transistores NPN/PNP (200 uds, 10 modelos — TO-92)
+
+| Modelo | Tipo | V_CE | I_C | hFE (typ) | Uso en este proyecto |
+|--------|------|------|-----|-----------|---------------------|
+| **2N2222** | **NPN** | 30 V | 600 mA | 100–300 | ✅ **Q1/Q2 driver de relé** — **usar este** |
+| **BC337** | **NPN** | 45 V | 800 mA | 100–600 | ✅ Alternativa excelente (mayor V_CE + I_C) |
+| 2N3904 | NPN | 40 V | 200 mA | 100–300 | Alternativa válida para señales |
+| S8050 | NPN | 25 V | 500 mA | 85–400 | Disponible |
+| C1815 | NPN | 50 V | 150 mA | 70–700 | Disponible |
+| BC327 | PNP | 45 V | 800 mA | 100–600 | Disponible (high-side switching) |
+| 2N2907 | PNP | 60 V | 600 mA | 100–300 | Disponible |
+| 2N3906 | PNP | 40 V | 200 mA | 100–300 | Disponible |
+| S8550 | PNP | 25 V | 500 mA | 85–400 | Disponible |
+| A1015 | PNP | 50 V | 150 mA | 70–400 | Disponible |
+
+> **Recomendación principal:** Usar **2N2222** para Q1 y Q2 (driver de relé). Si se necesita mayor margen de V_CE, usar **BC337** (45 V vs. 30 V).  
+> Para circuitos en otros módulos que necesiten transistores, tener en cuenta este inventario antes de comprar.
