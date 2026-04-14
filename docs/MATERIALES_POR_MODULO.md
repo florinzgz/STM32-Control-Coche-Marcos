@@ -232,6 +232,8 @@
 | 1 | Fuente 5V | Existente en el sistema | Alimentación del encoder (VCC marrón) |
 
 > **⚠️ Crítico:** La señal del encoder es de 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. El 6N137 proporciona tanto el aislamiento galvánico como el level shifting. El PC817 no es válido aquí: su retardo de 4–6 µs provoca pérdida de flancos a alta velocidad.
+>
+> **⚠️ Los transistores del inventario (2N2222, BC337, 2N3904, etc.) y los diodos zener (1N4728~1N4737) NO son válidos como sustitutos** para la interfaz del encoder. El nivel de señal 5V→3.3V del encoder en cuadratura exige componentes con retardo de propagación simétrico y bajo (<120 ns) — los transistores TO-92 genéricos no garantizan esto y corromperían el conteo. Se **deben usar** los 6N137 (o BSS138 como alternativa sin aislamiento).
 
 ---
 

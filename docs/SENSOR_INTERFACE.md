@@ -382,6 +382,8 @@ Encoder incremental de 1200 PPR que mide la posición angular del volante median
 - **Level shifter 5 V → 3.3 V:** obligatorio. El E6B2-CWZ6C tiene salida de 5 V (line driver o open-collector según versión).
   - **Opción 1 — BSS138 MOSFET:** level shifter bidireccional con pull-ups de 10 kΩ a cada lado (3.3 V y 5 V). Se necesitan 3 canales (A, B, Z).
   - **Opción 2 — Divisor resistivo:** 10 kΩ (serie) + 15 kΩ (a GND), ratio 0.6 → 5 V × 0.6 = 3.0 V. Más simple pero añade impedancia.
+  - **Opción 3 (preferida) — 6N137 optoacopladores:** alta velocidad (10 Mbps), aislamiento galvánico + level shifting simultáneo. Ver `docs/MATERIALES_POR_MODULO.md` §7.
+  - **⚠️ NO usar transistores genéricos** (2N2222, BC337, 2N3904, etc.) ni diodos zener (1N4728~1N4737) del inventario como level shifters del encoder. La asimetría en tiempo de propagación entre canales A y B corrompe la decodificación en cuadratura. Estos componentes están disponibles en inventario para otros circuitos (driver de relé, protección GPIO — ver `docs/IGNITION_KEY_CIRCUIT_VALIDATION.md`), pero NO son aptos aquí.
 - **Filtro fDTS (hardware TIM2):** 6 muestras consecutivas a frecuencia de reloj del timer; rechaza pulsos <210 ns (ruido electromagnético de los motores).
 
 ### Alimentación

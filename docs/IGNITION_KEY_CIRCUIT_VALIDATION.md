@@ -593,3 +593,5 @@ Para entornos con ruido severo (motores DC con escobillas, alternador):
 
 > **Recomendación principal:** Usar **2N2222** para Q1 y Q2 (driver de relé). Si se necesita mayor margen de V_CE, usar **BC337** (45 V vs. 30 V).  
 > Para circuitos en otros módulos que necesiten transistores, tener en cuenta este inventario antes de comprar.
+>
+> **⚠️ EXCLUSIÓN — Encoder E6B2-CWZ6C:** Estos transistores (TO-92) y diodos zener **NO son aptos** para la interfaz del encoder de dirección. El encoder requiere **optoacopladores 6N137** de alta velocidad (10 Mbps, 75–120 ns) o **level shifters BSS138** dedicados. Los transistores genéricos (2N2222, BC337, etc.) introducen retardo de propagación asimétrico entre canales A y B que corrompe la decodificación en cuadratura, y los diodos zener añaden capacitancia parásita inaceptable para señales digitales rápidas. Ver `docs/MATERIALES_POR_MODULO.md` §7 para los componentes correctos del encoder.
