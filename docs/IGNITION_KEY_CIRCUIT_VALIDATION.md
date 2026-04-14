@@ -337,13 +337,14 @@ Alternativa recomendada: mantener R1=33 kΩ, R2=10 kΩ (2.79 V ✅ > umbral HIGH
 ```
 Corriente de bobina del relé (típica): I_C = 80-120 mA
 Corriente de base necesaria: I_B = I_C / hFE = 120 mA / 100 = 1.2 mA (hFE mín. 2N2222 ≈ 100)
-Corriente de base real: I_B = (V_llave − V_BE) / R4 = (12 − 0.7) / 10k = 1.13 mA
-Factor de saturación: I_B_real / I_B_min ≈ 0.94× → Cambiar R4 a 4.7 kΩ para margen:
-  I_B = (12 − 0.7) / 4.7k = 2.4 mA → Factor = 2.4 / 1.2 = 2.0× ✅ (saturado con margen)
+Corriente de base real: I_B = (V_llave − V_BE) / R4 = (12 − 0.7) / 4.7k = 2.4 mA
+Factor de saturación: I_B_real / I_B_min = 2.4 / 1.2 = 2.0× ✅ (saturado con margen)
 V_CE_sat típico: 0.3 V → Tensión en bobina: 12 − 0.3 = 11.7 V ✅
 
-Nota: El 2N2222 soporta I_C hasta 600 mA (vs. 100 mA del BC547),
-proporcionando mayor margen de seguridad para bobinas de relé.
+Nota: Con R4 = 10 kΩ (valor anterior) → I_B = 1.13 mA → factor 0.94× (insuficiente).
+      R4 = 4.7 kΩ garantiza saturación robusta con el hFE mínimo del 2N2222.
+      El 2N2222 soporta I_C hasta 600 mA (vs. 100 mA del BC547),
+      proporcionando mayor margen de seguridad para bobinas de relé.
 ```
 
 ### 5.3 Componentes compartidos / existentes
