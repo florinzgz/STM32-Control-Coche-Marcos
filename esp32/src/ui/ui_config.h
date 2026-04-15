@@ -257,6 +257,23 @@ inline constexpr int16_t STILE_COL_LABEL_X      = 10;
 inline constexpr int16_t STILE_COL_VAL_START    = 80;
 inline constexpr int16_t STILE_COL_VAL_SPACE    = 100;
 
+// Extended SafeScreen rows — added below existing telemetry (Y: 230+)
+inline constexpr int16_t STILE_STEER_VIS_Y      = 230;  // Steering visual indicator row
+inline constexpr int16_t STILE_OBSTACLE_Y        = 246;  // Obstacle sensor bar row
+inline constexpr int16_t STILE_LED_STATUS_Y      = 266;  // LED system status row
+inline constexpr int16_t STILE_GEAR_BAR_Y        = 288;  // Gear bar (bottom, matching DriveScreen style)
+inline constexpr int16_t STILE_RELAY_X           = 430;  // Relay indicator (right side of gear bar)
+
+// Obstacle bar in SafeScreen (simplified, compact)
+inline constexpr int16_t STILE_OBS_BAR_X         = 80;
+inline constexpr int16_t STILE_OBS_BAR_W         = 200;
+inline constexpr int16_t STILE_OBS_BAR_H         = 10;
+
+// Text padding for new SafeScreen tiles
+inline constexpr int16_t PAD_SAFE_STEER_VIS      = 200;
+inline constexpr int16_t PAD_SAFE_OBSTACLE_TEXT   = 120;
+inline constexpr int16_t PAD_SAFE_LED_STATUS      = 300;
+
 // =========================================================================
 // BootScreen Diagnostic Layout Dimensions
 //

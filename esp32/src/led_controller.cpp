@@ -328,6 +328,10 @@ void setRearMode(RearMode mode) {
     currentRearMode = mode;
 }
 
+TurnSignal getTurnSignal() {
+    return currentTurnSignal;
+}
+
 void setTurnSignal(TurnSignal signal) {
     currentTurnSignal = signal;
 }

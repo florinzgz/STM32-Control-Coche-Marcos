@@ -144,6 +144,9 @@ void setRearMode(RearMode mode);
 /// Set turn signal state
 void setTurnSignal(TurnSignal signal);
 
+/// Get current turn signal state (read-only, for UI display)
+TurnSignal getTurnSignal();
+
 /// Enable / disable entire LED system
 void setEnabled(bool en);
 

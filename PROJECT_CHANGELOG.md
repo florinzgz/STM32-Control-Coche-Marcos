@@ -54,7 +54,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Obstáculos (LiDAR)** | ✅ Operativo | TF-Mini Plus (115200 bps, GPIO 18), 5 zonas, timeout 500 ms → fail-safe |
 | **Power Manager** | ✅ Operativo | Ignition GPIO 40 + power hold GPIO 41 |
 | **Config Store** | ✅ Operativo | SPIFFS NVM persistente |
-| **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) + Relay Control submenu |
+| **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) + Relay Control submenu. SafeScreen incluye visualización pasiva extendida (gear, obstacle, LEDs, relay, steering visual). |
 
 ### Comunicación CAN
 - **Protocolo**: 27 tipos de mensaje, contrato congelado v1.3.
@@ -79,6 +79,83 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR — feat: Extend Safe Mode Screen with Passive Visualization
+- **Fecha:** 2026-04-15
+- **Autor:** Copilot
+- **Descripción del cambio:** Extend the SAFE MODE screen (system_state = SAFE) with additional read-only operator information: gear position bar, obstacle sensor bar with color-coded proximity, LED system status, relay status indicators (M/T/D), and steering visual direction indicator. All additions are purely passive UI — no safety logic, CAN transmissions, motor/relay control, or state transitions modified.
+
+#### Nuevas visualizaciones en SafeScreen
+
+| Feature | Descripción |
+|---------|-------------|
+| **Gear Display** | Posición actual del selector (P/R/N/D1/D2) mostrada como barra horizontal en la parte inferior |
+| **Steering Visual** | Indicador de dirección (`<< LEFT`, `RIGHT >>`, `\| CENTER`) añadido al ángulo numérico con color cyan |
+| **Obstacle Sensor Bar** | Barra de proximidad con color (CLEAR verde >3m / NEAR ámbar 0.8-3m / DANGER rojo <0.8m) + distancia + estado |
+| **LED System Status** | Estado relay front/rear (ON/OFF) y señal de giro (LEFT/RIGHT/HAZARD/OFF) |
+| **Relay Status** | Indicadores M T D (MAIN/TRACTION/DIRECTION) con código de color según heartbeat byte 5 |
+
+#### Fuentes de datos (todas read-only)
+
+| Dato | Fuente | Archivo |
+|------|--------|---------|
+| Gear position | `shifter::getGearRaw()` (MCP23017 I2C) | `esp32/src/shifter_input.h:51` |
+| Steering angle | `VehicleData.steering().angleRaw` | `esp32/src/vehicle_data.h` |
+| Obstacle distance | `VehicleData.obstacle().distanceCm` | `esp32/src/vehicle_data.h` |
+| Front/Rear LED relay | `VehicleData.lights().frontRelayOn/rearRelayOn` | `esp32/src/vehicle_data.h` |
+| Turn signal | `led_ctrl::getTurnSignal()` (estado local ESP32) | `esp32/src/led_controller.h:148` |
+| Relay status | `VehicleData.heartbeat().relayStatus` | `esp32/src/vehicle_data.h` |
+
+#### Layout actualizado
+
+```
+┌─────────────────────────────────────────────────┐ Y=0
+│              SAFE MODE (amber banner)            │
+├─────────────────────────────────────────────────┤ Y=40
+│ Actuators inhibited - Controls disabled          │ Y=46
+│ FAULT FLAGS: [value]                             │ Y=62-86
+│ ERROR CODE:  [value]                             │ Y=90-114
+├─────────────────────────────────────────────────┤ Y=118
+│ READ-ONLY TELEMETRY                              │
+│ SPEED:    FL [v]  FR [v]  RL [v]  RR [v]        │ Y=126-152
+│ CURRENT:  FL [v]  FR [v]  RL [v]  RR [v]        │ Y=154-180
+│ TEMP:     FL [v]  FR [v]  RL [v]  RR [v] AMB [v]│ Y=182-208
+│ STEERING: -12.5° << LEFT                         │ Y=214  (ENHANCED: visual indicator)
+│                                                  │
+│ OBSTACLE: [████████░░░░░░░░░░░░] 1.50m CLEAR    │ Y=246  (NEW)
+│ LIGHTS:   F:ON  R:OFF  T:LEFT                    │ Y=266  (NEW)
+├─────────────────────────────────────────────────┤ Y=284
+│ [P] [R] [N] [D1] [D2]           M T D           │ Y=288  (NEW: gear + relay)
+└─────────────────────────────────────────────────┘ Y=320
+```
+
+- **Archivos afectados:**
+  - `esp32/src/screens/safe_screen.h` — 4 nuevos tile enums (STILE_OBSTACLE, STILE_LED_STAT, STILE_GEAR, STILE_RELAY), nuevas variables miembro para gear/obstacle/lights/relay/turn signal
+  - `esp32/src/screens/safe_screen.cpp` — `update()` extendido para leer nuevas fuentes de datos, `draw()` extendido con rendering de tiles para las 5 nuevas visualizaciones (+~300 líneas)
+  - `esp32/src/ui/ui_config.h` — Nuevas constantes de layout (STILE_STEER_VIS_Y, STILE_OBSTACLE_Y, STILE_LED_STATUS_Y, STILE_GEAR_BAR_Y, STILE_RELAY_X, STILE_OBS_BAR_*, PAD_SAFE_*)
+  - `esp32/src/led_controller.h` — Añadido `getTurnSignal()` getter read-only
+  - `esp32/src/led_controller.cpp` — Implementación de `getTurnSignal()` retornando estado actual de señal de giro
+  - `Documentos/SAFE_MODE_UI_EXTENSION.md` — Documentación completa de la extensión + verificación de consistencia de fuente de datos de gear
+
+- **Tiles añadidos al TileSet (SafeScreen: 6 → 10 tiles):**
+  - `STILE_OBSTACLE` — Barra de proximidad del sensor obstáculo
+  - `STILE_LED_STAT` — Estado del sistema LED (front/rear/turn)
+  - `STILE_GEAR` — Barra de posición de marchas
+  - `STILE_RELAY` — Indicador de estado de relés (M T D)
+
+- **Safety validation summary:**
+  - ✅ No se modifica lógica de seguridad (máquina de estados, transiciones)
+  - ✅ No hay transmisiones CAN nuevas (todos los datos son read-only)
+  - ✅ No hay control de motores/relés — solo rendering TFT
+  - ✅ No se llama a `millis()` directamente — se respeta el Frame Time Contract
+  - ✅ No hay asignación dinámica — todos los buffers son stack-allocated
+  - ✅ No hay llamadas bloqueantes — rendering inmediato por SPI
+  - ✅ `getTurnSignal()` es getter puro sin efectos secundarios
+  - ✅ Fuente de datos de gear verificada como consistente con DriveScreen (ambos usan `shifter::getGearRaw()`)
+
+- **Impacto:** Zero impacto en operación normal del vehículo. Extensión puramente visual del SafeScreen. Misma fuente de datos que DriveScreen para gear. Tile engine gestiona redibujado eficiente — solo se actualiza lo que cambia.
+
+- **Statement:** No regression in safety-critical paths. Purely additive passive visualization.
 
 ### PR — feat: Hidden Menu Relay Control (Engineering Diagnostic Mode)
 - **Fecha:** 2026-04-13
