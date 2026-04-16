@@ -140,11 +140,12 @@ L_EN = EN_PIN;
 
 ### Protecciones Implementadas en Hardware
 
-1. **Optoacopladores HY-M158** (aislamiento óptico)
-   - Modelo: HY-M158 o equivalente
-   - Aislamiento: 2500V RMS
-   - Tiempo respuesta: 10μs
-   - Conexión: Entre GPIO STM32 y BTS7960
+1. **Módulo 4-ch opto relé (SRD-12VDC-SL-C)** (aislamiento óptico)
+   - Módulo: 4 canales con optoacopladores, relés SRD-12VDC-SL-C
+   - Alimentación módulo: 12 V DC (DC+ / DC−)
+   - Trigger: High/Low level (compatible 3.3 V STM32)
+   - Contactos: 10A 250VAC / 10A 30VDC por canal
+   - Función: etapa intermedia que conmuta las bobinas (12V) de los relés de potencia
 
 2. **Snubber Circuits** (protección contra picos)
    - Diodo: 1N4148 o similar
@@ -160,20 +161,29 @@ L_EN = EN_PIN;
 
 ### Especificación Relés
 
-**Modelo**: SANYOU SRD-05VDC-SL-C o equivalente
+**Modelo relé de potencia**: Relé de alta corriente con bobina 12 V DC
 
-| Función | Pin | Corriente | Protección | Optoacoplador |
-|---------|-----|-----------|------------|---------------|
-| RELAY_MAIN | PC10 | 50A | Fusible 60A | HY-M158 |
-| RELAY_TRAC | PC11 | 40A | Fusible 50A | HY-M158 |
-| RELAY_DIR  | PC12 | 15A | Fusible 20A | HY-M158 |
+| Función | Pin | Corriente | Protección | Control intermedio |
+|---------|-----|-----------|------------|---------------------|
+| RELAY_MAIN | PC10 | 50A | Fusible 60A | Módulo 4-ch opto relé SRD-12VDC |
+| RELAY_TRAC | PC11 | 40A | Fusible 50A | Módulo 4-ch opto relé SRD-12VDC |
+| RELAY_DIR  | PC12 | 15A | Fusible 20A | Módulo 4-ch opto relé SRD-12VDC |
 
-**Características:**
-- Bobina: 5V DC, 70mA
-- Contactos: 30A @ 12V DC
-- Vida útil: 100,000 operaciones
-- Tiempo activación: 10ms
-- Diodo volante: 1N4007 (protección bobina)
+**Arquitectura de dos etapas:**
+- **Etapa 1 (módulo intermedio):** Módulo 4-ch con optoacopladores y relés
+  SRD-12VDC-SL-C (bobina 12V, contactos 10A). STM32 GPIO activa las entradas IN.
+- **Etapa 2 (relés de potencia):** Relés de alta corriente con bobina 12V DC.
+  Sus bobinas están alimentadas a través de los contactos de la etapa 1.
+
+**Características etapa 1 (módulo intermedio):**
+- Bobina relé módulo: 12V DC (SRD-12VDC-SL-C)
+- Contactos módulo: 10A @ 30V DC / 10A @ 250V AC
+- Trigger: High/Low level seleccionable, compatible 3.3V STM32
+- Optoacopladores integrados en placa
+
+**Características etapa 2 (relés de potencia):**
+- Bobina: 12V DC
+- Contactos: según carga (50A MAIN, 40A TRAC, 15A DIR)
 
 ### Secuencia de Activación Segura
 
@@ -194,24 +204,30 @@ Shutdown:
 5. RELAY_MAIN = OFF (corte total)
 ```
 
-### Esquema Optoacoplador HY-M158
+### Esquema Módulo 4-ch Opto Relé (SRD-12VDC-SL-C)
 
 ```
-STM32 (3.3V)                     Relé (5V/12V)
-    GPIO ──┬── 330Ω ──┐                  ┌──── + Bobina
-           │          │                  │
-           │    ┌─────┴─────┐           │
-           │    │  LED (IF)  │          │
-           │    │            │          │
-           │    │ HY-M158    │      Transistor
-           │    │            │    (NPN/Darlington)
-           │    │ Photodiode │          │
-           │    └─────┬─────┘           │
-           │          │                  │
-    GND ───┴──────────┴───────────────── - Bobina
-                                          │
-                                      Diodo 1N4007
-                                      (Flyback)
+STM32 (3.3V)                Módulo 4-ch opto relé (12V)       Relé de potencia
+    GPIO ──────► IN1        DC+ ◄── 12V                     ┌── Bobina (+)
+                            DC- ◄── GND                     │
+              Optoacoplador                                  │
+              interno del    ──► Relé SRD-12VDC  ──► COM ──── 12V
+              módulo              (contacto 10A)    NO ─────┤
+                                                            └── Bobina (-)
+                                                                  │
+                                                            Diodo 1N4007
+                                                            (Flyback)
+```
+
+**Cadena completa de un canal:**
+```
+STM32 GPIO (3.3V HIGH)
+    │
+    ▼
+Módulo opto relé IN1 → Optoacoplador LED → relé SRD-12VDC-SL-C cierra
+    │
+    ▼ (contacto 10A del módulo pasa 12V a la bobina del relé de potencia)
+Relé de potencia cierra → carga de alta corriente conmutada
 ```
 
 ## Sensores de Temperatura - DS18B20
@@ -476,9 +492,10 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | E6B2-CWZ6C | 1 | 1200 PPR Encoder | Encoder dirección |
 | LJ12A3-4-Z/BX | 4 | 4mm Inductive | Sensores velocidad |
 | A1324LUA-T | 1 | Hall Effect Linear | Sensor pedal |
-| HY-M158 | 8 | Optoacoplador | Aislamiento |
+| Módulo 4-ch opto relé | 1 | SRD-12VDC-SL-C, 4 canales | Control intermedio relés potencia |
+| Relé potencia (bobina 12V) | 3 | Alta corriente (≥50A contacto) | Relés MAIN, TRAC, DIR |
 | TJA1051T/3 | 2 | CAN Transceiver (NXP) | VCC=5V, VIO=3.3V — uno por nodo |
-| Relé SRD-05VDC | 3 | 30A, 5V coil | Relés potencia |
+| Relé SRD-05VDC (LED) | 2 | 10A, 5V coil | Relés LED WS2812B |
 | Shunt 1.5 mΩ | 5 | 50A/75mV, 3W | INA226 motores (ch 0–3, 5) |
 | Shunt 0.75 mΩ | 1 | 100A/75mV, 3W | INA226 batería (ch 4) |
 | Resistor 10kΩ | 20 | 1/4W | Pull-ups |

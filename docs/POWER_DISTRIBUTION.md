@@ -35,7 +35,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
         │
         ▼
  ┌──────────────┐  PC10
- │  RELAY_MAIN  │──────── STM32 (vía optoacoplador HY-M158)
+ │  RELAY_MAIN  │──────── STM32 (vía módulo 4-ch opto relé SRD-12VDC-SL-C)
  └──────┬───────┘
         │
    ┌────┴─────────────────────────────────────────┐
@@ -62,7 +62,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
         │  4 mm²
         ▼
  ┌──────────────┐  PC12
- │  RELAY_DIR   │──── STM32 (vía optoacoplador HY-M158)
+ │  RELAY_DIR   │──── STM32 (vía módulo 4-ch opto relé SRD-12VDC-SL-C)
  │  Fusible 20A │
  └──────┬───────┘
         │ 2.5 mm²
@@ -186,8 +186,26 @@ Todas las masas del sistema **deben** converger en un único punto de conexión 
 | `RELAY_LED`      | PB10      | GPIOB  | Tira WS2812B frontal (5 V)      | —       |
 | `RELAY_LED_REAR` | PB11      | GPIOB  | Tira WS2812B trasera (5 V)      | —       |
 
-Todos los relés se controlan mediante optoacopladores HY-M158 (bobina 5 V DC, 70 mA).
-Contactos nominales: 30 A @ 12 V DC.
+Los relés de potencia se controlan en **dos etapas**:
+
+1. **Etapa 1 — Módulo intermedio:** Módulo de 4 canales con optoacopladores y relés
+   SRD-12VDC-SL-C (bobina 12 V DC, contactos 10 A). El STM32 activa las entradas
+   IN1–IN4 del módulo con 3.3 V (high/low level trigger). El módulo se alimenta
+   desde la línea de 12 V (DC+ / DC−).
+
+2. **Etapa 2 — Relés de potencia:** Los contactos del módulo intermedio conmutan
+   los 12 V hacia las bobinas de los relés de potencia de alta corriente. Estos
+   relés de potencia (bobina 12 V DC) conmutan la línea de 24 V (tracción) o
+   la línea de 12 V (dirección) hacia los drivers BTS7960.
+
+Esquema de la cadena de control:
+```
+STM32 GPIO (3.3V) ──► Módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V)
+                          │
+                          ├── CH1 contacto → Bobina relé potencia MAIN (12V) → conmuta 24V general
+                          ├── CH2 contacto → Bobina relé potencia TRAC (12V) → conmuta 24V tracción
+                          └── CH3 contacto → Bobina relé potencia DIR  (12V) → conmuta 12V dirección
+```
 
 ### Secuencia de encendido (`Relay_PowerUp`)
 
@@ -356,7 +374,7 @@ STM32 I²C1
 | RELAY_MAIN queda soldado      | Corriente no cae a 0 tras Relay_PowerDown | Requiere desconexión manual de batería |
 | RELAY_TRAC no cierra          | INA226 ch0-ch3 sin corriente           | Motores de tracción inoperativos       |
 | RELAY_DIR no cierra           | INA226 ch5 sin corriente               | Dirección inoperativa → SAFE           |
-| Bobina de relé en corto       | Optoacoplador HY-M158 limita corriente | Fusible de bobina protege STM32        |
+| Bobina de relé en corto       | Módulo opto relé SRD-12VDC limita corriente | Fusible de bobina protege STM32        |
 
 ### Fallo de BTS7960
 

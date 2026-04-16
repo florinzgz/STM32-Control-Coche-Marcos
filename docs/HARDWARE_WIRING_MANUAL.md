@@ -897,108 +897,57 @@ el control de motores BTS7960 en este proyecto:
 
 ---
 
-## 11. Circuito completo de driver de relé con optoacoplador
+## 11. Circuito completo de driver de relé — arquitectura de dos etapas
 
-### Por qué se necesita
+### Por qué se necesitan dos etapas
 
 Los pines GPIO del STM32 operan a 3,3 V y pueden suministrar máximo 20 mA.
-La bobina de un relé mecánico requiere 70–100 mA a 5 V o 12 V.
-Además, al desactivar la bobina se genera un pico inductivo de hasta −200 V
-que destruiría el GPIO si no hay protección.
+Las bobinas de los relés de potencia requieren 12 V DC y corrientes de 70–150 mA.
+La solución utiliza una **arquitectura de dos etapas**:
 
-### Componentes por relé
+1. **Etapa 1 — Módulo 4-ch opto relé (SRD-12VDC-SL-C):**
+   - Módulo con 4 relés SRD-12VDC-SL-C (bobina 12V DC) y optoacopladores integrados
+   - Entradas IN1–IN4 compatibles con 3.3V del STM32 (high/low level trigger)
+   - Contactos: 10A @ 30V DC (suficiente para conmutar bobinas de relés de potencia)
+   - Alimentación: 12V DC (DC+ / DC−)
 
-| Componente | Valor | Función |
-|-----------|-------|---------|
-| Resistencia R1 | **330 Ω, 1/4 W** | Limita corriente LED del optoacoplador a ~8 mA |
-| Optoacoplador | **PC817** (o equivalente CNY17) | Aísla el GPIO 3,3 V del circuito de la bobina |
-| Transistor NPN | **BC547** o **2N2222** | Amplifica la corriente para accionar la bobina |
-| Resistencia R2 | **10 kΩ, 1/4 W** | Pull-down en la base del transistor (evita disparo espurio) |
-| Diodo flyback | **1N4007** (1 A / 1 000 V) | Elimina el pico inductivo al desactivar el relé |
-| Relé mecánico | **SRD-05VDC-SL-C** (5 V, 30 A) | Contactos de potencia |
+2. **Etapa 2 — Relés de potencia:**
+   - Bobina: 12V DC (alimentada a través de los contactos del módulo intermedio)
+   - Contactos: alta corriente (50A MAIN, 40A TRAC, 15A DIR)
 
-> Si se usa un **módulo de relé industrial con optoacoplador incorporado** (como HY-M158,
-> SRD-05VDC, o los módulos de 1/2/4 canales con entrada "IN" de nivel bajo activo),
-> verificar que el módulo sea compatible con señal HIGH a 3,3 V (algunos requieren 5 V
-> en la entrada). En ese caso, conectar PC10/PC11/PC12 directamente al pin "IN" del módulo
-> y el módulo se encarga del resto. Ver nota de verificación al final de esta sección.
-
-### Esquema completo (circuito discreto, un relé)
+### Esquema completo (dos etapas, un canal)
 
 ```
-  STM32 (3,3 V)                    Lado bobina (5 V)        Contactos (24 V / 12 V)
-  ─────────────                    ─────────────────        ───────────────────────
+  STM32 (3,3 V)                    Módulo 4-ch opto relé (12V)      Relé de potencia (12V bobina)
+  ─────────────                    ────────────────────────────      ────────────────────────────
 
-  PC10/11/12                5V ──┬──── Bobina relé (+) ──┬──── COM (común)
-      │                          │         │              │
-     [R1]                     [1N4007]    │              │    (cerrado cuando
-    330 Ω                    (flyback)    │              │     relé activo)
-      │                   cátodo → 5V    │              │
-      │                   ánodo  → ─────►┤ Bobina (-)  NO ──── (normalmente abierto)
-      ▼                                  │
-   PC817                                 │
-  LED (+)──── (ánodo del LED dentro del PC817)           NC ──── (normalmente cerrado)
-  LED (-) ─────────────────────────────── GND
-      │
-  PC817 colector ─── VCC 5V (alimentación relé) ──────── Colector BC547
-  PC817 emisor  ─────────────────────────── Base BC547 (vía R2 = 10 kΩ a GND)
-                                                             Emisor BC547 ──── GND
-
+  PC10/11/12 ──────► IN1/2/3       DC+ ◄── 12V (batería)           COM ──── Carga (24V / 12V)
+                                   DC- ◄── GND                      │
+              Dentro del módulo:                                     │  (cerrado cuando
+              Optoacoplador ──►     Relé SRD-12VDC                  NO     relé activo)
+              Transistor ──►        cierra contacto                  │
+                                        │                           NC ──── (normalmente cerrado)
+                                   Contacto COM ── 12V
+                                   Contacto NO ────────────► Bobina relé potencia (+)
+                                                              │
+                                                         [1N4007] (flyback)
+                                                              │
+                                                    Bobina relé potencia (−) ── GND
 ```
-
-**Esquema ASCII simplificado y detallado:**
-
-```
-    3,3 V STM32
-        │
-   PC10 (RELAY_MAIN)
-        │
-       [R1 = 330 Ω]
-        │
-        ├──── ÁNODO LED (PC817 pin 1)
-        │
-       GND_STM32 ──── CÁTODO LED (PC817 pin 2)
-
-        PC817 COLECTOR (pin 4) ──── 5V_relé              ← VCC del lado relé
-        PC817 EMISOR   (pin 3) ──────────────────────┐  ← salida fototransistor
-                                                BASE BC547
-                                                         │
-                                                    [R2 = 10 kΩ]
-                                                         │
-                                                        GND
-
-        5V_relé ──────────────────────────────── COLECTOR BC547
-                                                         │
-                                                   BOBINA relé (−)
-                                                         │
-                                                   BOBINA relé (+) ───── 5V_relé
-                                                         │
-                                               ┌── 1N4007 ÁNODO
-                                               │
-                                    1N4007 CÁTODO ───── 5V_relé
-                              (diodo en paralelo con la bobina,
-                               polaridad inversa — flyback)
-```
-
-> **Nota:** El PC817 funciona en modo seguidor de emisor: el colector (pin 4) va a VCC del
-> relé (5V), y el emisor (pin 3) es la salida que controla la base del BC547.
-> Cuando el LED se ilumina → fototransistor conduce → emisor sube a ~4.7V → BC547 ON → relé ON.
-> Cuando el LED se apaga → fototransistor OFF → emisor es tirado a GND por R2 → BC547 OFF → relé OFF.
-
 
 **En forma compacta:**
 
 ```
-STM32 GPIO  ──[330Ω]──► LED(PC817) ──GND
-                        │
-              5V ─────── COLECTOR(PC817)
-                         EMISOR(PC817) ──► BASE(BC547) ──[10kΩ]──GND
-                                           COLECTOR(BC547) ──► BOBINA(−)
-              5V ──────────────────────── BOBINA(+) ──[1N4007]── BOBINA(−)
-              (diodo flyback: cátodo al + de la bobina, ánodo al − de la bobina)
+STM32 GPIO (3.3V) ──► IN módulo opto relé ──► Contacto 10A cierra ──► 12V → Bobina potencia → GND
+                      (SRD-12VDC-SL-C)                                       ↑ [1N4007 flyback]
 ```
 
-### Verificación de módulos de relé industriales (HY-M158, SRD, etc.)
+> **Nota:** El módulo 4-ch opto relé (SRD-12VDC-SL-C) incluye internamente el optoacoplador,
+> transistor driver, diodo flyback y resistencia de limitación. NO se necesita circuito
+> discreto adicional para la etapa 1. El diodo flyback externo 1N4007 es necesario para
+> las bobinas de los relés de potencia (etapa 2).
+
+### Verificación del módulo 4-ch opto relé (SRD-12VDC-SL-C)
 
 Si se usan módulos prefabricados:
 
@@ -1230,10 +1179,10 @@ Seguir este orden estrictamente:
 | 1 | Condensador electrolítico | 1 000 µF / 35 V | Bulk bus 24 V |
 | 1 | Condensador electrolítico | 470 µF / 25 V | Bulk bus 12 V |
 | 1 | Condensador electrolítico | 47 µF / 10 V | Bulk 5 V lógica |
-| 5 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas de relé (uno por relé, incluye LED relays) |
+| 5 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas relés potencia (3 relés) + bobinas relés LED (2 relés). El módulo 4-ch SRD-12VDC-SL-C incluye flyback para sus relés internos |
 | 5 | Diodo 1N5408 | 3 A / 1 000 V | Anti-CEMF en terminales de motor |
-| 5 | Resistencia | 330 Ω / 1/4 W | Serie LED optoacoplador relé (si circuito discreto, 5 relés) |
-| 5 | Resistencia | 10 kΩ / 1/4 W | Pull-down base transistor relé (si circuito discreto, 5 relés) |
+| — | ~~Resistencia 330 Ω~~ | — | ~~Serie LED optoacoplador~~ **NO necesaria**: el módulo 4-ch SRD-12VDC-SL-C integra optoacopladores con sus resistencias |
+| — | ~~Resistencia 10 kΩ pull-down~~ | — | ~~Pull-down base transistor~~ **NO necesaria**: el módulo 4-ch integra todo el driver |
 | 5 | Resistencia | 100 Ω / 1/2 W | Snubber RC contactos relé (R del RC, 5 relés) |
 | 5 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC, 5 relés) |
 | 3 | Resistencia | 1 kΩ / 1/4 W | R1 divisor encoder (A, B, Z) 5 V→3,3 V |

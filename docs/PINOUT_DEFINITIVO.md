@@ -102,10 +102,10 @@
 | 52  | PC11  | RELAY_TRAC  | Relé Tracción (alimentación motores) |
 | 53  | PC12  | RELAY_DIR   | Relé Dirección (alimentación dirección) |
 
-**Especificación Relés:**
-- Bobina: 5V DC
-- Contactos: 30A @ 12V DC
-- Control: A través de optoacopladores HY-M158
+**Especificación Relés (arquitectura de dos etapas):**
+- Etapa 1: Módulo 4-ch opto relé SRD-12VDC-SL-C (bobina 12V, contactos 10A)
+- Etapa 2: Relés de potencia con bobina 12V DC
+- Control: STM32 GPIO 3.3V → módulo opto relé → bobina relé potencia
 
 ### Encoder de Dirección - TIM2 (Quadrature)
 | Pin | GPIO | Timer    | Function | Description |

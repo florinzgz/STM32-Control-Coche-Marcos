@@ -285,17 +285,17 @@
 
 | Pin LQFP | GPIO | Señal | Conecta a | Componentes externos |
 |----------|------|-------|-----------|----------------------|
-| 51 | PC10 | RELAY_MAIN | Relé principal (alimentación general, 50 A) | Optoacoplador HY-M158 + R 330 Ω + Diodo 1N4007 (volante en bobina del relé) |
-| 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Optoacoplador HY-M158 + R 330 Ω + Diodo 1N4007 |
-| 53 | PC12 | RELAY_DIR | Relé dirección (alimentación dirección, 15 A) | Optoacoplador HY-M158 + R 330 Ω + Diodo 1N4007 |
+| 51 | PC10 | RELAY_MAIN | Relé principal (alimentación general, 50 A) | Módulo 4-ch opto relé SRD-12VDC-SL-C (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+| 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Módulo 4-ch opto relé SRD-12VDC-SL-C (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+| 53 | PC12 | RELAY_DIR | Relé dirección (alimentación dirección, 15 A) | Módulo 4-ch opto relé SRD-12VDC-SL-C (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
 
-**Componentes por cada relé:**
+**Arquitectura de dos etapas por cada relé de potencia:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Optoacoplador HY-M158 | — | Entre GPIO y transistor de control del relé | Aislamiento galvánico 2500 V |
-| Resistencia LED opto | 330 Ω ¼W | En serie con LED del optoacoplador | Limitación de corriente |
-| Diodo volante (flyback) | 1N4007 | Antiparalelo a la bobina del relé | Protección contra picos inductivos al cortar la bobina |
+| Módulo 4-ch opto relé | SRD-12VDC-SL-C (12V) | Entre GPIO STM32 y bobina del relé de potencia | Aislamiento galvánico + conmutación 12V para bobina |
+| ~~Resistencia LED opto~~ | ~~330 Ω ¼W~~ | — | No necesaria: el módulo 4-ch integra las resistencias |
+| Diodo volante (flyback) | 1N4007 | Antiparalelo a la bobina del **relé de potencia** (etapa 2) | Protección contra picos inductivos al cortar la bobina |
 | Fusible | 60 A / 50 A / 20 A | En serie con contacto del relé | Protección de sobrecorriente |
 
 ---
@@ -573,7 +573,7 @@
 
 | Cantidad | Valor | Tolerancia | Ubicación |
 |----------|-------|------------|-----------|
-| 10 | 330 Ω ¼W | 5% | LED de optoacopladores HY-M158 (PWM + relés) |
+| 10 | 330 Ω ¼W | 5% | LED de optoacopladores HY-M158 (PWM señales BTS7960). Relés de potencia ya NO necesitan — usan módulo 4-ch SRD-12VDC-SL-C |
 | 2 | 4.7 kΩ | 5% | Pull-up I2C (PB6, PB7 del STM32) |
 | 2 | 4.7 kΩ | 5% | Pull-up I2C (GPIO 8, 9 del ESP32) — si no están en módulo |
 | 1 | 4.7 kΩ | 5% | Pull-up OneWire (PB0) |
@@ -610,7 +610,7 @@
 | Cantidad | Modelo | Ubicación |
 |----------|--------|-----------|
 | 10 | HY-M158 | Aislamiento señales PWM (10 canales) |
-| 3 | HY-M158 | Aislamiento relés de potencia (MAIN, TRAC, DIR) |
+| 1 | Módulo 4-ch opto relé SRD-12VDC-SL-C | Etapa intermedia relés potencia (MAIN, TRAC, DIR) |
 
 ### Otros
 

@@ -511,7 +511,7 @@ Para entornos con ruido severo (motores DC con escobillas, alternador):
                                  3.3V ── R6 (10kΩ) ── GPIO 40
 ```
 
-**Beneficio:** Aislamiento completo entre el circuito de 12 V y el ESP32. Elimina ruido de modo común. Consistente con la arquitectura de los relés de potencia del STM32 (que ya usan optoacopladores HY-M158).
+**Beneficio:** Aislamiento completo entre el circuito de 12 V y el ESP32. Elimina ruido de modo común. Consistente con la arquitectura de los relés de potencia del STM32 (que usan un módulo 4-ch opto relé SRD-12VDC-SL-C como etapa intermedia).
 
 **Coste:** +1 optoacoplador, +2 resistencias. Retardo típico: < 10 µs (despreciable para detección de llave).
 

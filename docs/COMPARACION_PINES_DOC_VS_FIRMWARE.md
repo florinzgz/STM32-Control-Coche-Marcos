@@ -151,7 +151,7 @@
 | Pull-up I2C 4.7 kΩ (PB6/PB7) | ✅ | `GPIO_NOPULL` en MSP → pull-up externo necesario | ✅ |
 | CAN terminación 120 Ω | ✅ | No en firmware (hardware externo) | ✅ |
 | Pedal divisor 10kΩ / 6.8kΩ | ✅ | `sensor_manager.c:147-148` confirma | ✅ |
-| HY-M158 optoacopladores | ✅ | Documentación de hardware | ✅ |
+| Módulo 4-ch opto relé SRD-12VDC-SL-C | ✅ | Documentación de hardware | ✅ |
 | Snubber 100Ω + 100nF + 1N4148 | ✅ | Documentación de hardware | ✅ |
 | Diodo volante 1N4007 (relés) | ✅ | Documentación de hardware | ✅ |
 | LED datos 330Ω (WS2812B) | ✅ | No en firmware (hardware externo) | ✅ Buena práctica |

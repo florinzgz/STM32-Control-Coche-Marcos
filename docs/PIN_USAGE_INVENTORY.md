@@ -92,7 +92,7 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habili
 | RELAY_LED_REAR | **PB11** | Alimentación 5V tira LED trasera WS2812B |
 | | **Subtotal:** | **5 pines** |
 
-- PC10–PC12: controlados vía optoacopladores (HY-M158), activo HIGH
+- PC10–PC12: controlados vía módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V), activo HIGH
 - PB10/PB11: controlados vía CAN (ID 0x120); el ESP32 genera la señal WS2812B, el STM32 controla el relé de alimentación
 
 ### 2.4 Sensores de velocidad de rueda — 4× inductivos LJ12A3 (4 pines)

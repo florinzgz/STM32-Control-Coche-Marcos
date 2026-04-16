@@ -390,7 +390,7 @@ Min: 0.3V × 0.404 = 0.12V
 
 | Qty | Componente | Especificación |
 |-----|-----------|---------------|
-| 3 | Módulo relé con optoacoplador | 5V coil, activación 3.3V (HIGH active) |
+| 3 | Módulo relé con optoacoplador | Módulo 4-ch SRD-12VDC-SL-C (12V, trigger 3.3V) |
 | 3 | Cable señal | 24 AWG, del STM32 al módulo relé |
 
 ### Conexiones
@@ -514,7 +514,7 @@ Conecta R_EN + L_EN de cada BTS7960 al pin EN correspondiente (PC0, PC1, PC4, PC
 | 5 | LJ12A3-4-Z/BX | 4 velocidad rueda + 1 centro dirección |
 | 1 | SS1324LUA-T | Pedal Hall |
 | 5 | BTS7960 IBT-2 | 4 tracción + 1 dirección |
-| 3 | Módulo relé opto | Main + Trac + Dir |
+| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C (Main + Trac + Dir) |
 | 5 | Fusible 30A slow-blow | 4 motores + 1 dirección |
 | ~30 | Condensador 100nF | Desacoplo general |
 | 5 | Condensador 470µF/35V | Bulk BTS7960 tracción |

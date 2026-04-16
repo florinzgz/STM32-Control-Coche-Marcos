@@ -431,7 +431,8 @@ PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
 
 ### Circuito de protección del driver de relé (por cada relé)
 
-Los módulos de relé con optoacoplador (HY-M158 o similar) deben incluir:
+Los módulos de relé con optoacoplador (módulo 4-ch SRD-12VDC-SL-C) controlan las bobinas
+de los relés de potencia en una arquitectura de dos etapas:
 
 ```
 STM32 GPIO ──► Optoacoplador ──► Transistor NPN ──► Bobina relé
@@ -450,7 +451,7 @@ Condensador snubber (100 nF, 250V) en paralelo con los contactos del relé
 | Condensador snubber C1 | **100 nF / 250 V** (polipropileno) | En paralelo con contactos COM–NO del relé | Amortigua arco eléctrico en conmutación; 250V para margen ante picos inductivos |
 | Resistencia serie R_snubber | **100 Ω / 0.5 W** | En serie con C1 (snubber RC) | Limita corriente de descarga del condensador |
 
-> ⚠️ Si los módulos de relé ya incluyen diodo flyback en placa (muchos HY-M158 lo incluyen), verificar antes de añadir uno externo. El condensador snubber en los contactos es adicional y generalmente NO está en el módulo.
+> ⚠️ El módulo 4-ch SRD-12VDC-SL-C ya incluye diodo flyback para sus relés internos. El diodo flyback adicional y snubber RC son para los **relés de potencia** de etapa 2, NO para el módulo intermedio.
 
 ### Conexiones de potencia del relé
 
@@ -462,7 +463,7 @@ Condensador snubber (100 nF, 250V) en paralelo con los contactos del relé
 | — | Relé TRAC (NO) | **INA226 #0-#3 (shunts motor)** → BTS7960 tracción VCC (×4) | Shunts ANTES de los drivers |
 | — | Relé DIR (NO) | **INA226 #5 (shunt dirección)** → BTS7960 dirección VCC | Shunt ANTES del driver (con conversor si aplica) |
 
-> **Nota:** Los relés deben usar módulos con optoacoplador (tipo HY-M158 o similar) para aislar la lógica 3.3V del STM32 de los contactos de potencia. La señal HIGH (3.3V) del STM32 activa el optoacoplador que a su vez activa la bobina del relé.
+> **Nota:** Los relés de potencia se controlan en dos etapas: STM32 GPIO (3.3V) → módulo 4-ch opto relé SRD-12VDC-SL-C (12V) → bobina relé de potencia (12V) → contactos de alta corriente. El módulo intermedio aísla la lógica 3.3V del STM32 de los circuitos de potencia.
 
 ### Condensadores de desacoplo en BTS7960 (por cada driver)
 
@@ -837,7 +838,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
 | 2 | TJA1051T/3 módulo | Transceivers CAN | VCC=5V, VIO=3.3V |
 | 1 | TF-Mini Plus (Benewake) | Sensor obstáculos LiDAR punto único | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, 115200 bps, conexión directa 3.3V |
-| 5 | Módulo relé + optoacoplador | Relés potencia y LED | HY-M158 o similar, 3.3V trigger (3× potencia + 2× LED) |
+| 5 | Módulo 4-ch opto relé + relés potencia | Relés potencia y LED | Módulo SRD-12VDC-SL-C 4-ch (etapa 1) + relés potencia bobina 12V (etapa 2) + 2× relé LED |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
 | 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB6, PB7, PB0 |
 | 1 | Adaptador nivel 5V→3.3V | Encoder A/B | 2 canales mín (PA15, PB3) |
@@ -872,7 +873,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 | Qty | Componente | Valor | Uso | Notas |
 |-----|-----------|-------|-----|-------|
-| 5 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé (MAIN, TRAC, DIR, LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; incluido en muchos módulos HY-M158 — verificar |
+| 5 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé de potencia (MAIN, TRAC, DIR) + relés LED (LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; el módulo SRD-12VDC-SL-C ya incluye flyback para sus relés internos |
 | 5 | Condensador snubber contacto relé | **100 nF / 250 V** (polipropileno) | En paralelo con contactos COM–NO de cada relé (5 relés) | Reduce arcos en conmutación; 250V para margen ante picos inductivos |
 | 5 | Resistencia snubber contacto relé | **100 Ω / 0.5 W** | En serie con el condensador snubber de contacto (RC snubber) | Limita corriente de descarga del condensador |
 
@@ -882,7 +883,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 |-----|-----------|-------|-----|-------|
 | 5 | Diodo Schottky volante libre motor | **SB560** o similar (5A, 60V) | Uno por motor, entre terminales M+ y M- (en paralelo con el motor) | El BTS7960 ya incluye diodos internos; el diodo externo añade protección extra ante contra-EMF prolongada. Usar ≥60V por margen sobre 24V |
 
-> ⚠️ Los diodos flyback en la bobina de relé son críticos. Sin ellos, al desactivar el relé se genera un pico de cientos de voltios que puede destruir el transistor del módulo optoacoplador.
+> ⚠️ Los diodos flyback en la bobina de los relés de potencia son críticos. Sin ellos, al desactivar el relé se genera un pico de cientos de voltios que puede destruir los contactos del módulo intermedio.
 >
 > ⚠️ Los condensadores bulk en cada BTS7960 son especialmente importantes con la nueva arquitectura RPWM/LPWM directo, ya que el driver maneja transiciones de dirección con mayor frecuencia.
 >
