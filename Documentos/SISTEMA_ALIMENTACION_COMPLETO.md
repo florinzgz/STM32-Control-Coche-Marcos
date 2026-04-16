@@ -238,17 +238,19 @@ El apagado es **inmediato y en orden inverso** (LIFO) para garantizar que los mo
 
 ### 3.4 Circuito de activación de relés
 
-Cada relé de potencia (MAIN, TRAC, DIR) usa un módulo **HY-M158 con optoacoplador** integrado:
+Cada relé de potencia (MAIN, TRAC, DIR) se controla mediante una **arquitectura de dos etapas**:
 
 ```
-STM32 GPIO (3.3V) ──► Módulo HY-M158 (IN)
-                        │
-                        ├── Optoacoplador (aislamiento galvánico 3.3V ↔ 12/24V)
-                        ├── Transistor de potencia (activa bobina)
-                        ├── Diodo flyback 1N4007 (integrado)
-                        └── LED indicador (estado del relé)
+STM32 GPIO (3.3V) ──► Módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V)
+                         │
+                         ├── Optoacoplador + driver integrado en módulo
+                         └── Contacto (10A) cierra circuito 12V
 
-Salida: Contacto NO → carga (motor/batería)
+                      ──► Bobina relé de potencia (12V DC)
+                         │
+                         ├── Contacto de alta corriente (50A/40A/15A)
+                         ├── Diodo flyback 1N4007 (en bobina relé potencia)
+                         └── Snubber RC en contactos (100Ω + 100nF/250V)
 ```
 
 ### 3.5 Control de relés LED por CAN
@@ -471,7 +473,7 @@ Cada relé incluye:
 |-----------|-------|---------|-----------|
 | Diodo flyback | 1N4007 (1A/1000V) | Absorbe pico inductivo al abrir bobina | Antiparalelo con bobina |
 | Snubber RC | 100 Ω + 100 nF/250V ac | Supresión de arco en contactos | Paralelo con contactos NO |
-| Optoacoplador | HY-M158 integrado | Aislamiento galvánico 3.3V ↔ carga | En el módulo de relé |
+| Optoacoplador | Módulo 4-ch SRD-12VDC-SL-C | Aislamiento galvánico 3.3V ↔ 12V (etapa intermedia) | Módulo de relé intermedio |
 
 ### 6.3 Protección de motores
 
@@ -771,7 +773,9 @@ BOOT ──► STANDBY ──► ACTIVE ⇄ DEGRADED ──► SAFE ──► ER
 
 | Qty | Componente | Referencia | Función |
 |-----|-----------|------------|---------|
-| 5 | Módulo relé con optoacoplador | HY-M158 | MAIN, TRAC, DIR, LED, LED_REAR |
+| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C | Etapa 1: MAIN, TRAC, DIR (CH4 disponible) |
+| 3 | Relé de potencia (bobina 12V) | Alta corriente | Etapa 2: MAIN (50A), TRAC (40A), DIR (15A) |
+| 2 | Módulo relé con optoacoplador | SRD-05VDC o similar | LED, LED_REAR |
 | 1 | Relé retención 12V | SRD-05VDC o similar | Mantiene alimentación post-llave |
 | 1 | Módulo relé audio | Con optoacoplador | Control altavoz DFPlayer |
 

@@ -101,7 +101,7 @@ static inline void sat_inc_u32(uint32_t *counter) {
  *
  * ⚠ EXTERNAL DELAY RELAY MODULES (if present in the power path):
  *   External "delay relay" modules (5V/12V/24V timer relays) used to
- *   interface between the STM32 GPIO → optoacoplador → power relay
+ *   interface between the STM32 GPIO → módulo 4-ch opto relé → power relay
  *   MUST be configured with ZERO delay (minimum timer setting).
  *   The firmware relay sequencer already provides the required inrush
  *   settling and arc suppression timing.  Any additional delay from
@@ -731,7 +731,9 @@ bool Relay_IsSequenceInProgress(void)
  *   3. INA226 = physical validation under load (only with motor demand)
  *
  * There is NO GPIO feedback input from the relay contacts.  The
- * STM32 drives relay coils through optoacoplador modules (HY-M158)
+ * STM32 drives relay coils through a 4-channel optocoupler relay module
+ * (SRD-12VDC-SL-C, 12V).  The module's contacts switch 12V to the coils
+ * of the high-current power relays (two-stage architecture).
  * and reads back the GPIO output state only.  Physical relay failure
  * (coil open, contact weld) is detected indirectly via INA226 motor
  * current in Safety_CheckRelayHealth().

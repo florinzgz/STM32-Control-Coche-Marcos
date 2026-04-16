@@ -289,7 +289,9 @@
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 5 | Módulo relé con optoacoplador | HY-M158 o similar, trigger a 3.3V, contacto 10A/250VAC | Uno por relé: MAIN (PC10), TRAC (PC11), DIR (PC12), LED_F (PB10), LED_R (PB11) |
+| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C, 12V, trigger 3.3V, contacto 10A/30VDC | Módulo intermedio para MAIN (PC10), TRAC (PC11), DIR (PC12). CH4 disponible |
+| 3 | Relé de potencia (bobina 12V) | Alta corriente: ≥50A (MAIN/TRAC), ≥20A (DIR) | Relés de potencia controlados por contactos del módulo intermedio |
+| 2 | Módulo relé con optoacoplador | SRD-05VDC o similar, trigger 3.3V, contacto 10A | Para LED_F (PB10), LED_R (PB11) |
 | 5 | Diodo flyback bobina | **1N4007** (1A, 1000V) | En paralelo con la bobina del relé, cátodo al polo positivo; verificar si el módulo ya lo incluye |
 | 5 | Condensador snubber contacto | **100 nF / 250V** (polipropileno) | Entre COM y NO del relé; amortigua el arco al conmutar cargas inductivas |
 | 5 | Resistencia snubber | **100 Ω / 0.5W** | En serie con el condensador snubber de contacto (red RC snubber) |
@@ -420,7 +422,9 @@
 | 1 | M5 | Motor DC 12V dirección | Brushed DC, dirección |
 | 1 | ENC1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, open-collector |
 | 1 | PEDAL | Sensor Hall SS1324LUA-T | 5V supply, 0.3–4.8V output |
-| 5 | REL1–REL5 | Módulo relé con optoacoplador | 3.3V trigger, ≥ 10A (HY-M158 o similar) |
+| 1 | MOD_RELAY | Módulo 4-ch opto relé SRD-12VDC-SL-C | 12V, 4 canales, trigger 3.3V (etapa 1 relés potencia) |
+| 3 | REL1–REL3 | Relé de potencia (bobina 12V) | ≥50A MAIN, ≥50A TRAC, ≥20A DIR (etapa 2) |
+| 2 | REL4–REL5 | Módulo relé SRD-05VDC o similar | 5V coil, LED_F (PB10), LED_R (PB11) |
 | 6 | INA1–INA6 | Módulo INA226 | Breakout board (Adafruit 4226) |
 | 1 | MUX1 | Módulo TCA9548A | Multiplexor I2C 8-canal |
 | 5 | TEMP1–TEMP5 | DS18B20 | Waterproof, OneWire |

@@ -543,7 +543,8 @@ Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
 | RELAY_TRAC | PC11 | 50 A | Motores de tracción 24 V |
 | RELAY_DIR | PC12 | 20 A | Motor de dirección 12 V |
 
-Cada relé incluye: optoacoplador HY-M158 + R 330 Ω + diodo flyback 1N4007 + snubber RC (100 Ω + 100 nF / 250 V).
+Cada relé de potencia incluye: diodo flyback 1N4007 + snubber RC (100 Ω + 100 nF / 250 V) en contactos.
+El módulo intermedio 4-ch opto relé (SRD-12VDC-SL-C, 12V) incluye su propia protección interna.
 
 ---
 

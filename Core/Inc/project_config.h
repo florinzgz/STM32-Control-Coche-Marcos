@@ -391,7 +391,7 @@
  * 5V rail (from LM2596 24V→5V buck):
  *   ✓ CAN transceiver TJA1051T/3 VCC (requires 4.5–5.5V, NOT 3.3V)
  *   ✓ WS2812B LED strips (via LED power relays PB10/PB11)
- *   ✓ Relay coils (SRD-05VDC, via HY-M158 optoacopladors)
+ *   ✓ Relay coils (via módulo 4-ch opto relé SRD-12VDC-SL-C, 12V)
  *   ✓ Encoder E6B2-CWZ6C power (5–12V)
  *
  * ---- §C: GROUNDING STRATEGY — STAR GROUND TOPOLOGY ----
