@@ -1211,7 +1211,8 @@ void loop() {
 
         // ---- Front LED mode from vehicle state ----
         if (st == can::SystemState::SAFE || st == can::SystemState::ERROR) {
-            led_ctrl::startEmergencyFlash(5);
+            // Safe Mode: KITT scanner on centre, HAZARD indicators on 4 corners
+            led_ctrl::setFrontMode(led_ctrl::FrontMode::KITT_IDLE);
         } else if (st == can::SystemState::LIMP_HOME) {
             led_ctrl::setFrontMode(led_ctrl::FrontMode::KITT_IDLE);
         } else if (vehicleData.safety().absActive) {

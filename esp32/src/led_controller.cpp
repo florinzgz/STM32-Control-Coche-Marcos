@@ -2,8 +2,14 @@
 // ESP32-S3 HMI — LED Controller Implementation (WS2812B via FastLED)
 //
 // Two independent strips driven by separate GPIOs:
-//   Front (GPIO 47, 28 LEDs): KITT scanner, throttle-reactive chase, alerts
+//   Front (GPIO 47, 28 LEDs): KITT scanner, throttle-reactive chase, alerts,
+//                              turn signals (5 LEDs each side)
 //   Rear  (GPIO 48, 16 LEDs): tail, brake, reverse, turn signals, regen
+//
+// Front LED zone mapping:
+//   [0–4]   Left turn-signal indicator  (5 LEDs)
+//   [5–22]  Centre: KITT / throttle / alert effects (18 LEDs)
+//   [23–27] Right turn-signal indicator (5 LEDs)
 //
 // Rear LED zone mapping:
 //   [0–2]   Left turn-signal indicator
@@ -210,6 +216,30 @@ static void updateRearCentre() {
 }
 
 // =====================================================================
+// Front turn-signal zones (LEDs 0–4, 23–27)
+// =====================================================================
+
+static void updateFrontTurnSignals() {
+    bool leftOn  = (currentTurnSignal == TurnSignal::LEFT  || currentTurnSignal == TurnSignal::HAZARD);
+    bool rightOn = (currentTurnSignal == TurnSignal::RIGHT || currentTurnSignal == TurnSignal::HAZARD);
+
+    // If no turn signal active, front LEDs are fully controlled by updateFrontLEDs()
+    if (!leftOn && !rightOn) return;
+
+    // Left front indicator (LEDs 0-4, 5 LEDs)
+    if (leftOn) {
+        fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT,
+                   blinkState ? AMBER : CRGB::Black);
+    }
+
+    // Right front indicator (LEDs 23-27, 5 LEDs)
+    if (rightOn) {
+        fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
+                   blinkState ? AMBER : CRGB::Black);
+    }
+}
+
+// =====================================================================
 // Rear turn-signal zones (LEDs 0–2, 13–15)
 // =====================================================================
 
@@ -301,6 +331,7 @@ void update() {
     }
 
     updateFrontLEDs();
+    updateFrontTurnSignals();
     updateRearCentre();
     updateTurnSignals();
 
