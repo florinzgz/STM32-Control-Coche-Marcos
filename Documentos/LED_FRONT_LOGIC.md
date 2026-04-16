@@ -142,7 +142,7 @@ Centre:  ──────── KITT RED scanner ─────────�
 
 | File | Changes |
 |------|---------|
-| `esp32/src/led_controller.cpp` | Hardened `updateFrontTurnSignals()`: persistent state, blink-ON-only overlay, hazard override |
+| `esp32/src/led_controller.h` | Front strip zone constants (`FRONT_IND_*`, `FRONT_CENTRE_*`) and documentation |
+| `esp32/src/led_controller.cpp` | Hardened `updateFrontTurnSignals()`: persistent state, blink-ON-only overlay, hazard override, zone isolation comments |
+| `esp32/src/main.cpp` | Safe Mode front LED changed from emergency flash to KITT_IDLE + HAZARD |
 | `Documentos/LED_FRONT_LOGIC.md` | This documentation file |
-
-No changes to: `led_controller.h`, `main.cpp`, rear LED logic, public API, timing architecture.
