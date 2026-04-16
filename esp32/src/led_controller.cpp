@@ -142,6 +142,13 @@ static void updateFlash(CRGB* leds, int count, CRGB c1, CRGB c2) {
 
 // =====================================================================
 // Front LED pattern dispatch
+//
+// ZONE NOTE (Task 4 — KITT zone isolation):
+//   Effects render across the full 28-LED strip to provide full-bar KITT
+//   when no turn signal is active.  Side zones [0–4] and [23–27] are
+//   conditionally overridden by updateFrontTurnSignals() (called next).
+//   The overlay writes ONLY during blink-ON, so KITT remains the visual
+//   base during blink-OFF — no explicit zone clipping is needed here.
 // =====================================================================
 
 static void updateFrontLEDs() {
@@ -217,25 +224,58 @@ static void updateRearCentre() {
 
 // =====================================================================
 // Front turn-signal zones (LEDs 0–4, 23–27)
+//
+// OVERLAY PRIORITY:
+//   1. updateFrontLEDs()        — renders KITT / base effect on full strip
+//   2. updateFrontTurnSignals() — overlays turn signals on side zones ONLY
+//
+// ZONE CONTRACT (Task 4 — KITT zone isolation):
+//   KITT / base effects render across the full 28-LED strip.  When no turn
+//   signal is active the full-bar KITT ("coche fantástico") is visible.
+//   When a turn signal is active, this overlay writes AMBER over the side
+//   zones during blink-ON only.  During blink-OFF the overlay does NOT
+//   write, so the underlying KITT fade remains visible — eliminating the
+//   hard BLACK cut that previously caused flicker.
+//
+// SAFE MODE (Task 3):
+//   TurnSignal::HAZARD (set by main.cpp on SAFE/ERROR state) forces both
+//   hazardOverride = true, activating both sides regardless of steering.
 // =====================================================================
 
 static void updateFrontTurnSignals() {
-    bool leftOn  = (currentTurnSignal == TurnSignal::LEFT  || currentTurnSignal == TurnSignal::HAZARD);
-    bool rightOn = (currentTurnSignal == TurnSignal::RIGHT || currentTurnSignal == TurnSignal::HAZARD);
+    // ---- Persistent turn-indicator state (Task 1 — hysteresis hardening) ----
+    // These static flags provide frame-stable tracking of which indicators
+    // are logically active.  The underlying currentTurnSignal is already
+    // debounced by main.cpp (15°/10° hysteresis + 100 ms persistence filter),
+    // so these flags serve as an explicit, documented record of active state
+    // that persists across frames and prevents any residual visual toggling.
+    static bool turnLeftActive  = false;
+    static bool turnRightActive = false;
 
-    // If no turn signal active, front LEDs are fully controlled by updateFrontLEDs()
-    if (!leftOn && !rightOn) return;
+    // ---- SAFE MODE hazard override (Task 3) ----
+    // When TurnSignal::HAZARD is set (SAFE/ERROR state from main.cpp),
+    // both sides are forced ON regardless of steering angle input.
+    // This is independent of the steering hysteresis — it's an absolute override.
+    const bool hazardOverride = (currentTurnSignal == TurnSignal::HAZARD);
+    turnLeftActive  = hazardOverride || (currentTurnSignal == TurnSignal::LEFT);
+    turnRightActive = hazardOverride || (currentTurnSignal == TurnSignal::RIGHT);
 
-    // Left front indicator (LEDs 0-4, 5 LEDs)
-    if (leftOn) {
-        fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT,
-                   blinkState ? AMBER : CRGB::Black);
-    }
+    // No turn signals active — KITT / base effect fills the full strip unmodified
+    if (!turnLeftActive && !turnRightActive) return;
 
-    // Right front indicator (LEDs 23-27, 5 LEDs)
-    if (rightOn) {
-        fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
-                   blinkState ? AMBER : CRGB::Black);
+    // ---- Overlay: AMBER only during blink-ON phase (Task 2) ----
+    // When blinkState == true  → write AMBER to active indicator zones.
+    // When blinkState == false → do NOT write anything.
+    //   This allows the underlying KITT / base effect to remain visible
+    //   during the OFF phase, eliminating the visual glitch caused by
+    //   writing BLACK (which would create a hard cut-to-black flicker).
+    if (blinkState) {
+        if (turnLeftActive) {
+            fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT, AMBER);
+        }
+        if (turnRightActive) {
+            fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT, AMBER);
+        }
     }
 }
 
