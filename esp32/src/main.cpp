@@ -232,6 +232,10 @@ static uint8_t burstSeverity(audio::Sound s) {
 static constexpr uint32_t LED_SPEED_SUM_THRESHOLD = 20;
 // Traction average below which we consider braking (0–100% scale)
 static constexpr uint8_t LED_TRACTION_BRAKING_THRESHOLD = 5;
+// Traction average below which we consider regen deceleration (above braking).
+// Range: braking < trAvg ≤ regen threshold, with speed > 0.
+// This triggers the blue-pulse regen indicator on the rear centre zone.
+static constexpr uint8_t LED_TRACTION_REGEN_THRESHOLD = 20;
 
 // ---- NVS flush interval ----
 static unsigned long lastNvsFlushMs = 0;
@@ -1187,12 +1191,28 @@ void loop() {
             led_ctrl::setEnabled(true);
         }
 
+        // ---- One-shot emergency flash on ERROR state transition ----
+        // When the system enters ERROR (not SAFE — SAFE is a controlled
+        // shutdown), fire 3 aggressive red/black flash cycles across both
+        // strips to grab the driver's attention.  After the flash completes,
+        // the sustained BRAKE_EMERGENCY + HAZARD indication takes over.
+        {
+            static can::SystemState prevLedState = can::SystemState::BOOT;
+            if (st == can::SystemState::ERROR && prevLedState != can::SystemState::ERROR) {
+                led_ctrl::startEmergencyFlash(3);
+            }
+            prevLedState = st;
+        }
+
         // Reverse detection from physical shifter
         bool reverse = (shifter::getGearRaw() == GEAR_REVERSE);
 
         // Braking & throttle detection: traction average near zero while
         // speed > 0 indicates dynamic braking or throttle release at speed.
+        // Regen zone: low throttle (5–20%) at speed — lighter deceleration
+        // than full braking, triggers blue-pulse regen indicator on rear.
         bool braking = false;
+        bool regen   = false;
         float throttlePct;
         {
             uint32_t trSum = 0;
@@ -1207,6 +1227,9 @@ void loop() {
                 spSum += vehicleData.speed().raw[i];
             }
             braking = (spSum > LED_SPEED_SUM_THRESHOLD && trAvg <= LED_TRACTION_BRAKING_THRESHOLD);
+            regen   = (spSum > LED_SPEED_SUM_THRESHOLD
+                       && trAvg > LED_TRACTION_BRAKING_THRESHOLD
+                       && trAvg <= LED_TRACTION_REGEN_THRESHOLD);
         }
 
         // ---- Front LED mode from vehicle state ----
@@ -1233,6 +1256,8 @@ void loop() {
             led_ctrl::setRearMode(led_ctrl::RearMode::REVERSE);
         } else if (braking) {
             led_ctrl::setRearMode(led_ctrl::RearMode::BRAKE);
+        } else if (regen) {
+            led_ctrl::setRearMode(led_ctrl::RearMode::REGEN_ACTIVE);
         } else {
             led_ctrl::setRearMode(led_ctrl::RearMode::POSITION);
         }

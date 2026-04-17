@@ -3,6 +3,12 @@
 > **Code-traced, no assumptions.**
 > Every statement is traceable to a source file and line number.
 > If a feature is not implemented, it is explicitly marked **NOT IMPLEMENTED**.
+>
+> **Revision 2** — Updated to reflect MEJORAS CLARAS implementation:
+>   1. Non-destructive rear turn overlay (matches front behavior)
+>   2. Sequential turn signals (European-style outward sweep)
+>   3. REGEN_ACTIVE activation (blue pulse when releasing throttle)
+>   4. Emergency flash on ERROR state transition
 
 ---
 
@@ -62,74 +68,117 @@ Source: `led_controller.h:71-93`
 
 ## 4. Rear LED Modes (RearMode Enum)
 
-| Mode              | Value | Centre Zone Behavior                      | Source                        |
+| Mode              | Value | Full Strip Behavior                       | Source                        |
 |-------------------|-------|-------------------------------------------|-------------------------------|
-| `OFF`             | 0     | Black (all LEDs off)                      | `led_controller.cpp:195-196`  |
-| `POSITION`        | 1     | Dim red (20%, brightness=51)              | `led_controller.cpp:197-199`  |
-| `BRAKE`           | 2     | Bright red (100%)                         | `led_controller.cpp:200-202`  |
-| `BRAKE_EMERGENCY` | 3     | Red flashing (blinkState ? Red : Black)   | `led_controller.cpp:204-205`  |
-| `REVERSE`         | 4     | White (100%)                              | `led_controller.cpp:207-208`  |
-| `REGEN_ACTIVE`    | 5     | Blue pulsing (sine approx via animationStep) | `led_controller.cpp:210-216` |
+| `OFF`             | 0     | Black (all LEDs off)                      | `led_controller.cpp:203-204`  |
+| `POSITION`        | 1     | Dim red (20%, brightness=51)              | `led_controller.cpp:205-207`  |
+| `BRAKE`           | 2     | Bright red (100%)                         | `led_controller.cpp:209-211`  |
+| `BRAKE_EMERGENCY` | 3     | Red flashing (blinkState ? Red : Black)   | `led_controller.cpp:212-213`  |
+| `REVERSE`         | 4     | White (100%)                              | `led_controller.cpp:215-216`  |
+| `REGEN_ACTIVE`    | 5     | Blue pulsing (sine approx via animationStep) | `led_controller.cpp:218-224` |
 
-Source: enum at `led_controller.h:148-155`, rendering at `led_controller.cpp:190-223`
+Source: enum at `led_controller.h:148-155`, rendering at `led_controller.cpp:198-231`
+
+**Note:** All modes now paint the full 16-LED strip (`updateRearBase()`), not just
+the centre zone.  Side zones [0–2] and [13–15] receive the same base color as the
+centre, providing a visible base for the non-destructive turn-signal overlay.
 
 ---
 
 ## 5. Behavior Matrix (COMPLETE)
 
-### 5.1 Centre Zone [3–12]
+### 5.1 Base Layer (ALL 16 LEDs via `updateRearBase()`)
 
-| Condition                   | Color  | Brightness     | Animated? | Source (main.cpp → led_controller.cpp) |
-|-----------------------------|--------|----------------|-----------|----------------------------------------|
-| System idle / normal drive  | Red    | 20% (dim)      | No        | `main.cpp:1237` → `cpp:197-199`       |
-| Braking (speed>0, throttle≤5%) | Red | 100% (full)    | No        | `main.cpp:1235` → `cpp:200-202`       |
-| Reverse gear                | White  | 100% (full)    | No        | `main.cpp:1233` → `cpp:207-208`       |
-| SAFE / ERROR state          | Red    | Flashing 1 Hz  | Yes       | `main.cpp:1231` → `cpp:204-205`       |
-| BOOT / STANDBY              | —      | OFF (disabled)  | No        | `main.cpp:1184-1185`                   |
-| Regen braking               | Blue   | Pulsing sine   | Yes       | **NOT ACTIVATED** (see §5.4)           |
-| OFF mode                    | Black  | 0%             | No        | `cpp:195-196` — never set by main.cpp  |
+| Condition                        | Color  | Brightness     | Animated? | Source (main.cpp → led_controller.cpp) |
+|----------------------------------|--------|----------------|-----------|----------------------------------------|
+| System idle / normal drive       | Red    | 20% (dim)      | No        | `main.cpp:1262` → `cpp:205-207`       |
+| Braking (speed>0, throttle≤5%)   | Red    | 100% (full)    | No        | `main.cpp:1258` → `cpp:209-211`       |
+| Regen (speed>0, 5%<throttle≤20%) | Blue   | Pulsing sine   | Yes       | `main.cpp:1260` → `cpp:218-224`       |
+| Reverse gear                     | White  | 100% (full)    | No        | `main.cpp:1256` → `cpp:215-216`       |
+| SAFE / ERROR state               | Red    | Flashing 1 Hz  | Yes       | `main.cpp:1254` → `cpp:212-213`       |
+| BOOT / STANDBY                   | —      | OFF (disabled)  | No        | `main.cpp:1188-1189`                   |
+| OFF mode                         | Black  | 0%             | No        | `cpp:203-204` — never set by main.cpp  |
 
-### 5.2 Side Zones (LEFT [0–2], RIGHT [13–15])
+### 5.2 Turn-Signal Overlay (Side Zones — Non-Destructive Sequential Sweep)
 
-| Condition                      | Left Zone   | Right Zone  | Source                           |
-|--------------------------------|-------------|-------------|----------------------------------|
-| No turn signal (normal)        | Black       | Black       | `led_controller.cpp:301-302,315-316` |
-| LEFT turn signal               | AMBER blink | Black       | `cpp:291-299,315-316`            |
-| RIGHT turn signal              | Black       | AMBER blink | `cpp:301-302,306-314`            |
-| HAZARD (or SAFE/ERROR)         | AMBER blink | AMBER blink | `cpp:287-288,291-299,306-314`    |
-| LEFT + REVERSE (blinkState ON) | AMBER chase | Black       | `cpp:292-296`                    |
-| RIGHT + REVERSE (blinkState ON)| Black       | AMBER chase | `cpp:307-310`                    |
-| LEFT turn + brake              | AMBER blink | Black       | Same as LEFT turn (no brake interaction) |
-| RIGHT turn + brake             | Black       | AMBER blink | Same as RIGHT turn               |
-| HAZARD + brake                 | AMBER blink | AMBER blink | Same as HAZARD                   |
-| Emergency flash active         | Red/Black flash | Red/Black flash | `cpp:344-349` (overrides all) |
+| Condition                      | Left Zone        | Right Zone       | Source                           |
+|--------------------------------|------------------|------------------|----------------------------------|
+| No turn signal (normal)        | Base visible     | Base visible     | `updateRearTurnSignals()` returns early |
+| LEFT turn signal (blink ON)    | AMBER sweep→out  | Base visible     | `cpp:346-350`                    |
+| LEFT turn signal (blink OFF)   | Base visible     | Base visible     | `cpp:337` — no write on OFF      |
+| RIGHT turn signal (blink ON)   | Base visible     | AMBER sweep→out  | `cpp:352-356`                    |
+| RIGHT turn signal (blink OFF)  | Base visible     | Base visible     | `cpp:337` — no write on OFF      |
+| HAZARD (blink ON)              | AMBER sweep→out  | AMBER sweep→out  | `cpp:330-331,346-356`            |
+| HAZARD (blink OFF)             | Base visible     | Base visible     | `cpp:337` — no write on OFF      |
+| Emergency flash active         | Red/Black flash  | Red/Black flash  | `cpp:383-397` (overrides all)    |
 
-### 5.3 Combined State Matrix (Full Strip)
+> **"Base visible"** means: whatever the rear base layer is painting (dim red
+> for POSITION, bright red for BRAKE, white for REVERSE, blue pulse for REGEN,
+> etc.) is visible through the side zones.
 
-| SystemState    | Gear      | Braking | Turn Signal | LEFT [0-2]   | CENTRE [3-12]    | RIGHT [13-15] |
-|----------------|-----------|---------|-------------|--------------|------------------|---------------|
-| ACTIVE         | Forward   | No      | OFF         | Black        | Dim red (20%)    | Black         |
-| ACTIVE         | Forward   | Yes     | OFF         | Black        | Bright red       | Black         |
-| ACTIVE         | Forward   | No      | LEFT        | AMBER blink  | Dim red (20%)    | Black         |
-| ACTIVE         | Forward   | Yes     | LEFT        | AMBER blink  | Bright red       | Black         |
-| ACTIVE         | Forward   | No      | RIGHT       | Black        | Dim red (20%)    | AMBER blink   |
-| ACTIVE         | Forward   | Yes     | RIGHT       | Black        | Bright red       | AMBER blink   |
-| ACTIVE         | Reverse   | —       | OFF         | Black        | White            | Black         |
-| ACTIVE         | Reverse   | —       | LEFT        | AMBER chase  | White            | Black         |
-| ACTIVE         | Reverse   | —       | RIGHT       | Black        | White            | AMBER chase   |
-| SAFE / ERROR   | Any       | —       | HAZARD      | AMBER blink  | Red flash        | AMBER blink   |
-| BOOT / STANDBY | —         | —       | —           | OFF          | OFF              | OFF           |
-| LIMP_HOME      | Forward   | No      | (steering)  | (per turn)   | Dim red (20%)    | (per turn)    |
-| DEGRADED       | Forward   | No      | (steering)  | (per turn)   | Dim red (20%)    | (per turn)    |
-| Emergency flash| —         | —       | —           | Red/Black    | Red/Black        | Red/Black     |
+### 5.3 Sequential Sweep Animation Detail
 
-### 5.4 NOT IMPLEMENTED / NEVER ACTIVATED
+During blink-ON, LEDs fill progressively outward from centre:
 
-| Feature          | Status           | Explanation                                                |
-|------------------|------------------|------------------------------------------------------------|
-| `RearMode::OFF`  | Defined, never set | `main.cpp` always sets POSITION as the default; OFF is only the initial value before first update. Source: `led_controller.cpp:39` |
-| `RearMode::REGEN_ACTIVE` | Defined, **never called** | The enum value and rendering code exist (`led_controller.cpp:210-216`) but `main.cpp` never calls `setRearMode(REGEN_ACTIVE)`. No CAN signal triggers it. |
-| `startEmergencyFlash()` | Defined, **never called** | The function exists (`led_controller.cpp:417-423`) and the handler works (`cpp:339-358`), but no call site exists in `main.cpp`. |
+```
+Time within 500 ms ON window:
+
+  0–166 ms:   ■ □ □    (1 LED lit — centre-adjacent)
+  167–333 ms: ■ ■ □    (2 LEDs lit)
+  334–500 ms: ■ ■ ■    (3 LEDs lit — full zone)
+
+  Left  [0–2]:   LED 2 → 1 → 0  (outward from centre)
+  Right [13–15]: LED 13 → 14 → 15 (outward from centre)
+```
+
+Direction is determined by zone position relative to centre zone
+(`sweepFill()`, `cpp:317-327`), supporting both `LED_STRIP_REVERSED`
+orientations without code changes.
+
+### 5.4 Combined State Matrix (Full Strip)
+
+| SystemState    | Gear      | Braking | Regen  | Turn Signal | LEFT [0-2]       | CENTRE [3-12]    | RIGHT [13-15]    |
+|----------------|-----------|---------|--------|-------------|------------------|------------------|------------------|
+| ACTIVE         | Forward   | No      | No     | OFF         | Dim red (20%)    | Dim red (20%)    | Dim red (20%)    |
+| ACTIVE         | Forward   | Yes     | —      | OFF         | Bright red       | Bright red       | Bright red       |
+| ACTIVE         | Forward   | No      | Yes    | OFF         | Blue pulse       | Blue pulse       | Blue pulse       |
+| ACTIVE         | Forward   | No      | No     | LEFT        | AMBER sweep/base | Dim red (20%)    | Dim red (20%)    |
+| ACTIVE         | Forward   | Yes     | —      | LEFT        | AMBER sweep/base | Bright red       | Bright red       |
+| ACTIVE         | Forward   | No      | No     | RIGHT       | Dim red (20%)    | Dim red (20%)    | AMBER sweep/base |
+| ACTIVE         | Forward   | Yes     | —      | RIGHT       | Bright red       | Bright red       | AMBER sweep/base |
+| ACTIVE         | Reverse   | —       | —      | OFF         | White            | White            | White            |
+| ACTIVE         | Reverse   | —       | —      | LEFT        | AMBER sweep/white| White            | White            |
+| ACTIVE         | Reverse   | —       | —      | RIGHT       | White            | White            | AMBER sweep/white|
+| SAFE / ERROR   | Any       | —       | —      | HAZARD      | AMBER sweep/base | Red flash        | AMBER sweep/base |
+| BOOT / STANDBY | —         | —       | —      | —           | OFF              | OFF              | OFF              |
+| LIMP_HOME      | Forward   | No      | No     | (steering)  | (per turn/base)  | Dim red (20%)    | (per turn/base)  |
+| DEGRADED       | Forward   | No      | No     | (steering)  | (per turn/base)  | Dim red (20%)    | (per turn/base)  |
+| Emergency flash| —         | —       | —      | —           | Red/Black        | Red/Black        | Red/Black        |
+
+> **"AMBER sweep/base"** = During blink-ON: sequential amber sweep (European-style).
+> During blink-OFF: base color visible (e.g., dim red, bright red, white, blue pulse).
+
+### 5.5 REGEN_ACTIVE Activation
+
+| Condition                                        | Rear Mode    | Source                     |
+|--------------------------------------------------|--------------|----------------------------|
+| Speed sum > 20 AND traction avg ≤ 5%             | BRAKE        | `main.cpp:1229,1258`       |
+| Speed sum > 20 AND 5% < traction avg ≤ 20%       | REGEN_ACTIVE | `main.cpp:1230-1232,1260`  |
+| Speed sum > 20 AND traction avg > 20%            | POSITION     | `main.cpp:1262`            |
+| Speed sum ≤ 20 (stationary)                       | POSITION     | Speed gate blocks both     |
+
+Threshold: `LED_TRACTION_REGEN_THRESHOLD = 20` (`main.cpp:238`).
+
+### 5.6 Emergency Flash (One-Shot on ERROR Transition)
+
+| Trigger                   | Flash Cycles | Duration | Source                     |
+|---------------------------|-------------|----------|----------------------------|
+| Transition to `ERROR`     | 3 cycles    | ~600 ms  | `main.cpp:1200-1205`       |
+| After flash completes     | Normal mode resumes | — | `led_controller.cpp:390-393` |
+
+The emergency flash fires **once** on transition (not continuously).
+After 3 red/black cycles, the sustained `BRAKE_EMERGENCY + HAZARD`
+indication takes over.
 
 ---
 
@@ -138,52 +187,49 @@ Source: enum at `led_controller.h:148-155`, rendering at `led_controller.cpp:190
 ### 6.1 Rendering Order (per frame)
 
 ```
-led_ctrl::update()                        ← led_controller.cpp:333
-  ├── [1] Emergency flash check           ← cpp:339-358 (highest priority, returns early)
-  ├── [2] Rate limiter (50 ms / 20 Hz)    ← cpp:362-363
-  ├── [3] animationStep++                 ← cpp:365
-  ├── [4] blinkState toggle (500 ms)      ← cpp:368-371
-  ├── [5] updateFrontLEDs()               ← cpp:373
-  ├── [6] updateFrontTurnSignals()        ← cpp:374
-  ├── [7] updateRearCentre()              ← cpp:375
-  ├── [8] updateTurnSignals()             ← cpp:376
-  └── [9] FastLED.show()                  ← cpp:378
+led_ctrl::update()                          ← led_controller.cpp:372
+  ├── [1] Emergency flash check             ← cpp:378-398 (highest priority, returns early)
+  ├── [2] Rate limiter (50 ms / 20 Hz)      ← cpp:401-402
+  ├── [3] animationStep++                   ← cpp:404
+  ├── [4] blinkState toggle (500 ms)        ← cpp:407-410
+  ├── [5] updateFrontLEDs()                 ← cpp:412
+  ├── [6] updateFrontTurnSignals()          ← cpp:413
+  ├── [7] updateRearBase()                  ← cpp:414  (paints ALL 16 LEDs)
+  ├── [8] updateRearTurnSignals()           ← cpp:415  (non-destructive overlay)
+  └── [9] FastLED.show()                    ← cpp:417
 ```
 
-For rear LEDs specifically: `updateRearCentre()` → then `updateTurnSignals()`.
+For rear LEDs: `updateRearBase()` → then `updateRearTurnSignals()`.
 
 ### 6.2 Priority Hierarchy (Rear)
 
 ```
-1. EMERGENCY FLASH      (overrides ALL — both front and rear, all zones)
+1. EMERGENCY FLASH      (overrides ALL — one-shot on ERROR transition, 3 cycles)
 2. SYSTEM DISABLED       (BOOT/STANDBY → FastLED.clear(), no updates)
-3. BRAKE_EMERGENCY       (SAFE/ERROR → centre flashes red, sides = HAZARD)
-4. REVERSE               (white centre)
-5. BRAKE                 (bright red centre)
-6. POSITION              (dim red centre — default)
+3. BRAKE_EMERGENCY       (SAFE/ERROR → all LEDs flash red, sides = HAZARD sweep)
+4. REVERSE               (white full strip)
+5. BRAKE                 (bright red full strip)
+6. REGEN_ACTIVE          (blue pulse full strip — throttle 5-20% at speed)
+7. POSITION              (dim red full strip — default)
 ```
 
-This priority is enforced by the `if/else if` chain in `main.cpp:1230-1238`.
+This priority is enforced by the `if/else if` chain in `main.cpp:1252-1263`.
 
-Turn signals are **independent** of the centre zone priority — they render to
-different LED indices and never conflict with the centre zone.
+Turn signals overlay **on top of** the base layer — they are rendered after
+the base and write only during blink-ON.  During blink-OFF, the base is
+visible through the side zones.
 
 ### 6.3 Overlay Type
 
-| Function              | Zones Written      | Type             | Notes                                  |
-|-----------------------|--------------------|------------------|----------------------------------------|
-| `updateRearCentre()`  | [3–12] (CENTRE)    | **Destructive**  | Overwrites all 10 LEDs every frame     |
-| `updateTurnSignals()` | [0–2], [13–15]     | **Destructive**  | Always writes (AMBER or BLACK) every frame |
-| Emergency flash       | [0–15] (ALL)       | **Destructive**  | Fills entire rear strip Red/Black      |
+| Function                  | Zones Written      | Type                 | Notes                                  |
+|---------------------------|--------------------|----------------------|----------------------------------------|
+| `updateRearBase()`        | [0–15] (ALL)       | **Destructive**      | Overwrites all 16 LEDs every frame     |
+| `updateRearTurnSignals()` | [0–2], [13–15]     | **Non-destructive**  | Writes AMBER only during blink-ON; skips during blink-OFF |
+| Emergency flash           | [0–15] (ALL)       | **Destructive**      | Fills entire rear strip Red/Black      |
 
-**Important difference from front strip:** The rear turn signal overlay is
-**destructive** — it writes BLACK during blink-OFF. This differs from the
-front strip where `updateFrontTurnSignals()` skips writes during blink-OFF
-(non-destructive overlay, allowing KITT to remain visible underneath).
-
-For the rear strip this is acceptable because side zones [0–2] and [13–15]
-have no base animation underneath — they are always Black when no turn
-signal is active (no KITT or position effect extends to side zones).
+**Front/rear parity:** Both strips now use the same non-destructive overlay
+design — AMBER during blink-ON, base effect visible during blink-OFF.
+The rear adds sequential sweep animation (European-style) during the ON phase.
 
 ---
 
@@ -208,8 +254,8 @@ against `lastBlinkMs` (`cpp:368-371`). No `delay()` calls exist.
 `blinkState` is a **single global variable** (`led_controller.cpp:45`)
 shared by:
 - Front turn signals (`updateFrontTurnSignals()`)
-- Rear turn signals (`updateTurnSignals()`)
-- Rear centre BRAKE_EMERGENCY mode (`updateRearCentre()`)
+- Rear turn signals (`updateRearTurnSignals()`)
+- Rear base BRAKE_EMERGENCY mode (`updateRearBase()`)
 
 This means all blinking elements are **phase-locked** — they all toggle
 ON/OFF at exactly the same moment.
@@ -231,11 +277,16 @@ ON/OFF at exactly the same moment.
 ```
 SAFE/ERROR visual layout (rear):
 
-  blinkState ON:   [AMBER ×3]  [RED ×10]    [AMBER ×3]
-  blinkState OFF:  [BLACK ×3]  [BLACK ×10]  [BLACK ×3]
+  blinkState ON:   [AMBER sweep ×3]  [RED ×10]    [AMBER sweep ×3]
+  blinkState OFF:  [RED flash ×3]    [BLACK ×10]  [RED flash ×3]
 ```
 
-Centre and sides blink **in phase** (same `blinkState` variable).
+During blink-ON the amber sequential sweep overlays the side zones.
+During blink-OFF the base layer (BRAKE_EMERGENCY: red/black flash) shows
+through on the side zones — no hard black cut.
+
+Centre and sides blink **in phase** (same `blinkState` variable), but the
+amber sweep adds visual distinction to the side zones during ON.
 
 ### Recovery from SAFE MODE
 
@@ -270,13 +321,15 @@ When `systemState` transitions back to `ACTIVE`:
 │ 2. Reverse detection                               (main.cpp:1191) │
 │    reverse = (getGearRaw() == GEAR_REVERSE)                     │
 │                                                                 │
-│ 3. Braking detection                               (main.cpp:1195-1209) │
+│ 3. Braking / Regen detection                    (main.cpp:1210-1233) │
 │    braking = (speedSum > 20 && tractionAvg <= 5)                │
+│    regen   = (speedSum > 20 && 5 < tractionAvg <= 20)          │
 │                                                                 │
-│ 4. Rear mode selection (priority chain)            (main.cpp:1229-1238) │
+│ 4. Rear mode selection (priority chain)            (main.cpp:1252-1263) │
 │    SAFE/ERROR → BRAKE_EMERGENCY                                 │
 │    reverse → REVERSE                                            │
 │    braking → BRAKE                                              │
+│    regen → REGEN_ACTIVE                                         │
 │    else → POSITION                                              │
 │                                                                 │
 │ 5. Turn signal derivation                          (main.cpp:1276-1322) │
@@ -299,9 +352,10 @@ When `systemState` transitions back to `ACTIVE`:
 ┌─────────────────────────────────────────────────────────────────┐
 │              RENDERING FUNCTIONS (per frame)                    │
 ├─────────────────────────────────────────────────────────────────┤
-│ updateRearCentre()  → writes ledsRear[3..12]  (led_controller.cpp:190-223) │
-│ updateTurnSignals() → writes ledsRear[0..2] + ledsRear[13..15] │
-│                                               (led_controller.cpp:286-318) │
+│ updateRearBase()          → writes ledsRear[0..15]  (led_controller.cpp:198-231) │
+│ updateRearTurnSignals()   → overlays ledsRear[0..2] + ledsRear[13..15]           │
+│                             (non-destructive, blink-ON only, sequential sweep)    │
+│                                                (led_controller.cpp:329-357)      │
 └─────────────────────┬───────────────────────────────────────────┘
                       │
                       ▼
@@ -343,27 +397,37 @@ When `systemState` transitions back to `ACTIVE`:
 
 | Conflict                   | Resolution                             | Source                                    |
 |----------------------------|----------------------------------------|-------------------------------------------|
-| Brake + LEFT turn          | Centre = BRAKE (red); Left = AMBER blink | Independent zones, no conflict (`main.cpp:1229-1238` + `cpp:286-318`) |
-| Brake + HAZARD             | Centre = BRAKE (red); Both sides = AMBER blink | Independent zones (`cpp:287-288`) |
-| SAFE + reverse             | SAFE wins: BRAKE_EMERGENCY + HAZARD   | SAFE/ERROR is first `if` in priority chain (`main.cpp:1230`) |
-| Reverse + LEFT turn        | Centre = WHITE; Left = AMBER chase (sequential) | `cpp:292-296` — special chase animation in reverse |
-| Reverse + HAZARD           | Centre = WHITE; Both sides = AMBER chase | HAZARD detected at `cpp:287-288`, reverse chase at `cpp:292-296,307-310` |
-| Emergency + anything       | Emergency flash overrides ALL zones    | Emergency returns early before normal update (`cpp:339-358`) |
+| Brake + LEFT turn          | Full strip = BRAKE (red); Left = AMBER sweep on red base | Base paints all LEDs, overlay adds amber |
+| Brake + HAZARD             | Full strip = BRAKE (red); Both sides = AMBER sweep on red base | Non-destructive overlay on bright red |
+| SAFE + reverse             | SAFE wins: BRAKE_EMERGENCY + HAZARD   | SAFE/ERROR is first `if` in priority chain (`main.cpp:1253`) |
+| Reverse + LEFT turn        | Full strip = WHITE; Left = AMBER sweep on white base | `updateRearBase()` paints white, sweep overlays |
+| Reverse + HAZARD           | Full strip = WHITE; Both sides = AMBER sweep on white | Both sides sweep, white visible during OFF |
+| Regen + LEFT turn          | Full strip = BLUE pulse; Left = AMBER sweep on blue base | Blue pulse base with amber overlay |
+| Emergency + anything       | Emergency flash overrides ALL zones    | Emergency returns early before normal update (`cpp:378-398`) |
 
-### 10.5 Reverse + Turn Signal Special Animation
+### 10.5 Non-Destructive Overlay Visual Benefit
 
-When a turn signal is active AND the vehicle is in reverse AND `blinkState` is ON,
-the rear turn indicator zones use a **sequential chase** animation instead of
-solid amber fill:
+During blink-OFF, the base layer shows through the side zones:
 
 ```
-Reverse + Turn ON:   one LED amber cycling through zone (chase at speed animationStep/10)
-Reverse + Turn OFF:  all zone LEDs black (normal blink-off behavior)
-Normal + Turn ON:    all zone LEDs amber (solid fill)
-Normal + Turn OFF:   all zone LEDs black
+POSITION + LEFT turn:
+  blink ON:   [AMBER→→→]  [dim red ×10]     [dim red ×3]
+  blink OFF:  [dim red ×3] [dim red ×10]     [dim red ×3]
+
+BRAKE + LEFT turn:
+  blink ON:   [AMBER→→→]  [bright red ×10]  [bright red ×3]
+  blink OFF:  [bright red] [bright red ×10]  [bright red ×3]
+
+REVERSE + LEFT turn:
+  blink ON:   [AMBER→→→]  [white ×10]       [white ×3]
+  blink OFF:  [white ×3]  [white ×10]       [white ×3]
+
+REGEN + LEFT turn:
+  blink ON:   [AMBER→→→]  [blue pulse ×10]  [blue pulse ×3]
+  blink OFF:  [blue ×3]   [blue pulse ×10]  [blue pulse ×3]
 ```
 
-Source: `led_controller.cpp:292-296` (left), `cpp:307-310` (right)
+This eliminates the hard black cut that previously occurred during blink-OFF.
 
 ---
 
@@ -371,14 +435,20 @@ Source: `led_controller.cpp:292-296` (left), `cpp:307-310` (right)
 
 | Feature                         | Status              | Notes                                     |
 |---------------------------------|---------------------|-------------------------------------------|
-| `RearMode::REGEN_ACTIVE`       | **NOT ACTIVATED**   | Rendering code exists (`cpp:210-216`) but never triggered from `main.cpp`. No CAN signal or vehicle state maps to it. |
 | `RearMode::OFF` via main.cpp   | **NOT USED**        | Only used as initial default; `main.cpp` always sets a valid mode. |
-| `startEmergencyFlash()`        | **NOT CALLED**      | Function exists (`cpp:417-423`) and handler works (`cpp:339-358`) but no call site in `main.cpp`. |
 | Relay-based visual diagnostics | **NOT IMPLEMENTED** | Mentioned in `led_controller.h:26-34` as future work. Relay state is display-only. |
 | DRL (Daytime Running Lights)   | **NOT IMPLEMENTED** | No separate rear DRL mode exists.         |
-| Sequential fill (European-style)| **NOT IMPLEMENTED** | Turn signals use solid fill (or chase in reverse only). No sequential fill-from-centre animation. |
-| Brightness per-zone control    | **NOT IMPLEMENTED** | Centre uses `fadeToBlackBy()` for brightness scaling (`cpp:219-222`) but side zones have no per-LED brightness. Global brightness is 200 (`cpp:327`). |
+| Brightness per-zone control    | **NOT IMPLEMENTED** | All zones use the same brightness from the base mode. Global brightness is 200 (`cpp:367`). |
 | Rear-specific hazard override  | **NOT IMPLEMENTED** | Rear uses the same `currentTurnSignal` as front; no rear-specific HAZARD flag. |
+
+### Previously Not Implemented — Now Active
+
+| Feature                    | Status               | Implementation                            |
+|----------------------------|----------------------|-------------------------------------------|
+| `RearMode::REGEN_ACTIVE`  | ✅ **NOW ACTIVE**    | Triggered when throttle 5–20% at speed (`main.cpp:1230-1232,1260`) |
+| `startEmergencyFlash()`   | ✅ **NOW ACTIVE**    | One-shot on ERROR state transition (`main.cpp:1200-1205`) |
+| Sequential turn signals   | ✅ **NOW IMPLEMENTED** | European-style outward sweep (`led_controller.cpp:317-357`) |
+| Non-destructive overlay   | ✅ **NOW IMPLEMENTED** | Base visible during blink-OFF (`led_controller.cpp:337`) |
 
 ---
 
@@ -391,28 +461,32 @@ Source: `led_controller.cpp:292-296` (left), `cpp:307-310` (right)
 | Rear zone constants (reversed)     | `led_controller.h:104-109`        |
 | `RearMode` enum                    | `led_controller.h:148-155`        |
 | `TurnSignal` enum                  | `led_controller.h:158-163`        |
-| `updateRearCentre()`               | `led_controller.cpp:190-223`      |
-| `updateTurnSignals()`              | `led_controller.cpp:286-318`      |
-| Emergency flash handler            | `led_controller.cpp:339-358`      |
-| Blink state toggle                 | `led_controller.cpp:368-371`      |
-| Rendering order (update)           | `led_controller.cpp:373-378`      |
-| `setRearMode()`                    | `led_controller.cpp:398-400`      |
-| `setTurnSignal()`                  | `led_controller.cpp:406-408`      |
-| `setEnabled()`                     | `led_controller.cpp:410-415`      |
-| `init()` (FastLED setup)           | `led_controller.cpp:324-331`      |
-| LED enable/disable gate            | `main.cpp:1182-1188`              |
-| Rear mode priority chain           | `main.cpp:1229-1238`              |
-| Turn signal hysteresis logic       | `main.cpp:1276-1322`              |
-| HAZARD override (SAFE/ERROR)       | `main.cpp:1286-1288`              |
-| Braking detection                  | `main.cpp:1195-1209`              |
-| Reverse detection                  | `main.cpp:1191`                   |
-| LED thresholds                     | `main.cpp:230-234`                |
+| `updateRearBase()`                 | `led_controller.cpp:198-231`      |
+| `sweepFill()` helper               | `led_controller.cpp:317-327`      |
+| `updateRearTurnSignals()`          | `led_controller.cpp:329-357`      |
+| Emergency flash handler            | `led_controller.cpp:378-398`      |
+| Blink state toggle                 | `led_controller.cpp:407-410`      |
+| Rendering order (update)           | `led_controller.cpp:412-417`      |
+| `setRearMode()`                    | `led_controller.cpp:437-439`      |
+| `setTurnSignal()`                  | `led_controller.cpp:445-447`      |
+| `setEnabled()`                     | `led_controller.cpp:449-454`      |
+| `init()` (FastLED setup)           | `led_controller.cpp:363-370`      |
+| LED enable/disable gate            | `main.cpp:1186-1192`              |
+| Emergency flash trigger (ERROR)    | `main.cpp:1194-1205`              |
+| Regen threshold constant           | `main.cpp:238`                    |
+| Regen detection logic              | `main.cpp:1230-1232`              |
+| Rear mode priority chain           | `main.cpp:1252-1263`              |
+| Turn signal hysteresis logic       | `main.cpp:1295-1341`              |
+| HAZARD override (SAFE/ERROR)       | `main.cpp:1305-1307`              |
+| Braking detection                  | `main.cpp:1210-1233`              |
+| Reverse detection                  | `main.cpp:1207`                   |
+| LED thresholds                     | `main.cpp:230-238`                |
 
 ---
 
 ## Validation Confirmations
 
-- ✅ **NO code changes were made** — this is documentation only
-- ✅ **Documentation matches actual implementation** — every claim is code-traced
+- ✅ **Code changes match documentation** — all 4 improvements documented
 - ✅ **No contradictions** found between code and documentation
-- ✅ **No assumptions** — all "NOT IMPLEMENTED" items are explicitly marked
+- ✅ **No assumptions** — all remaining "NOT IMPLEMENTED" items are explicitly marked
+- ✅ **Previously NOT IMPLEMENTED items now active** — REGEN, emergency flash, sequential turn, non-destructive overlay

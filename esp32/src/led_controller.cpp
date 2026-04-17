@@ -12,9 +12,14 @@
 //   [23–27] Right turn-signal indicator (5 LEDs)
 //
 // Rear LED zone mapping:
-//   [0–2]   Left turn-signal indicator
+//   [0–2]   Left turn-signal indicator (sequential sweep, non-destructive overlay)
 //   [3–12]  Centre: position / brake / reverse / regen
-//   [13–15] Right turn-signal indicator
+//   [13–15] Right turn-signal indicator (sequential sweep, non-destructive overlay)
+//
+// Both front and rear turn-signal overlays are non-destructive:
+//   - AMBER is written ONLY during blink-ON
+//   - During blink-OFF, no write → base effect remains visible
+//   - Rear uses sequential sweep (European-style, outward from centre)
 //
 // Architecture ported from FULL-FIRMWARE-Coche-Marcos (florinzgz):
 //   src/lighting/led_controller.cpp + include/led_controller.h
@@ -184,10 +189,18 @@ static void updateFrontLEDs() {
 }
 
 // =====================================================================
-// Rear centre zone (LEDs 3–12)
+// Rear base layer (ALL 16 LEDs)
+//
+// Paints the entire rear strip with the current rear mode (position,
+// brake, reverse, regen, etc.).  This provides a visible base on the
+// side zones [0–2] and [13–15] so that the turn-signal overlay can be
+// non-destructive — matching the front strip's KITT-under-blink design.
+//
+// Without this full-strip base, side zones would be black whenever no
+// turn signal is active, wasting 6 LEDs that could show tail/brake.
 // =====================================================================
 
-static void updateRearCentre() {
+static void updateRearBase() {
     CRGB col = CRGB::Black;
     uint8_t bright = BRIGHTNESS_FULL;
 
@@ -216,7 +229,7 @@ static void updateRearCentre() {
         }
     }
 
-    for (int i = REAR_CENTRE_START; i < REAR_CENTRE_START + REAR_CENTRE_COUNT; ++i) {
+    for (int i = 0; i < NUM_LEDS_REAR; ++i) {
         ledsRear[i] = col;
         ledsRear[i].fadeToBlackBy(255 - bright);
     }
@@ -281,39 +294,70 @@ static void updateFrontTurnSignals() {
 
 // =====================================================================
 // Rear turn-signal zones (LEDs 0–2, 13–15)
+//
+// OVERLAY PRIORITY:
+//   1. updateRearBase()          — renders tail/brake/reverse on ALL 16 LEDs
+//   2. updateRearTurnSignals()   — overlays turn signals on side zones ONLY
+//
+// ZONE CONTRACT (matching front strip design):
+//   The rear base paints all 16 LEDs with the current mode (position,
+//   brake, etc.).  When a turn signal is active, this overlay writes
+//   AMBER over the side zones during blink-ON only.  During blink-OFF
+//   the overlay does NOT write, so the underlying base (dim red, brake
+//   red, white reverse, etc.) remains visible — no hard black cut.
+//
+// SEQUENTIAL ANIMATION:
+//   During blink-ON, LEDs fill progressively outward from centre:
+//     Left  [0–2]:   LED 2 → 1 → 0  (centre-adjacent first)
+//     Right [13–15]: LED 13 → 14 → 15 (centre-adjacent first)
+//   The 500 ms blink-ON window is divided into 3 equal steps (~167 ms
+//   each).  Each step lights one additional LED.
+//
+// SAFE MODE:
+//   TurnSignal::HAZARD forces both sides — same as front.
 // =====================================================================
 
-static void updateTurnSignals() {
+/// Sequential sweep helper: fills LEDs outward from centre.
+/// Determines sweep direction from zone position relative to centre.
+static void sweepFill(int zoneStart, int zoneCount, uint8_t step, CRGB color) {
+    if (zoneStart < REAR_CENTRE_START) {
+        // Zone is physically left of centre → sweep outward = high index to low
+        for (int i = 0; i <= step && i < zoneCount; ++i)
+            ledsRear[zoneStart + zoneCount - 1 - i] = color;
+    } else {
+        // Zone is physically right of centre → sweep outward = low index to high
+        for (int i = 0; i <= step && i < zoneCount; ++i)
+            ledsRear[zoneStart + i] = color;
+    }
+}
+
+static void updateRearTurnSignals() {
     bool leftOn  = (currentTurnSignal == TurnSignal::LEFT  || currentTurnSignal == TurnSignal::HAZARD);
     bool rightOn = (currentTurnSignal == TurnSignal::RIGHT || currentTurnSignal == TurnSignal::HAZARD);
 
-    // Left indicator (LEDs 0-2)
+    // No turn signals active — base effect fills the full strip unmodified
+    if (!leftOn && !rightOn) return;
+
+    // Only overlay during blink-ON (non-destructive, like front)
+    if (!blinkState) return;
+
+    // Sequential sweep: divide the 500 ms blink-ON window into N steps
+    // (one per LED in the zone).  Each step lights one additional LED
+    // outward from centre.
+    uint32_t elapsed = millis() - lastBlinkMs;
+    // Clamp elapsed to blink period to avoid overflow after period end
+    if (elapsed > TURN_SIGNAL_BLINK_MS) elapsed = TURN_SIGNAL_BLINK_MS;
+
     if (leftOn) {
-        if (currentRearMode == RearMode::REVERSE && blinkState) {
-            // Sequential chase in reverse
-            int pos = (animationStep / 10) % REAR_IND_LEFT_COUNT;
-            for (int i = 0; i < REAR_IND_LEFT_COUNT; ++i)
-                ledsRear[REAR_IND_LEFT_START + i] = (i == pos) ? AMBER : CRGB::Black;
-        } else {
-            fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT,
-                       blinkState ? AMBER : CRGB::Black);
-        }
-    } else {
-        fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT, CRGB::Black);
+        uint8_t step = static_cast<uint8_t>(elapsed * REAR_IND_LEFT_COUNT / TURN_SIGNAL_BLINK_MS);
+        if (step >= REAR_IND_LEFT_COUNT) step = REAR_IND_LEFT_COUNT - 1;
+        sweepFill(REAR_IND_LEFT_START, REAR_IND_LEFT_COUNT, step, AMBER);
     }
 
-    // Right indicator (LEDs 13-15)
     if (rightOn) {
-        if (currentRearMode == RearMode::REVERSE && blinkState) {
-            int pos = (animationStep / 10) % REAR_IND_RIGHT_COUNT;
-            for (int i = 0; i < REAR_IND_RIGHT_COUNT; ++i)
-                ledsRear[REAR_IND_RIGHT_START + i] = (i == pos) ? AMBER : CRGB::Black;
-        } else {
-            fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
-                       blinkState ? AMBER : CRGB::Black);
-        }
-    } else {
-        fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT, CRGB::Black);
+        uint8_t step = static_cast<uint8_t>(elapsed * REAR_IND_RIGHT_COUNT / TURN_SIGNAL_BLINK_MS);
+        if (step >= REAR_IND_RIGHT_COUNT) step = REAR_IND_RIGHT_COUNT - 1;
+        sweepFill(REAR_IND_RIGHT_START, REAR_IND_RIGHT_COUNT, step, AMBER);
     }
 }
 
@@ -372,8 +416,8 @@ void update() {
 
     updateFrontLEDs();
     updateFrontTurnSignals();
-    updateRearCentre();
-    updateTurnSignals();
+    updateRearBase();
+    updateRearTurnSignals();
 
     FastLED.show();
 }
