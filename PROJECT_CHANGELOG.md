@@ -50,7 +50,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **CAN (TWAI)** | ✅ Operativo (hardened) | Bus-off recovery + error-passive recovery bifásica (10 rápidos @3s + lento @30s) |
 | **Selector de marchas** | ✅ Operativo | MCP23017 I2C, P/R/N/D/D2, backoff con `endTransmission(true)` |
 | **Audio (DFPlayer)** | ⚠️ Parcial | Hardware presente, integración completa pendiente |
-| **LEDs WS2812B** | ✅ Operativo | Front (47 LEDs @ GPIO 47), rear (16 LEDs @ GPIO 48) |
+| **LEDs WS2812B** | ✅ Operativo | Front (28 LEDs @ GPIO 47): KITT + turn signals (5/side) + throttle effects. Rear (16 LEDs @ GPIO 48): position/brake/reverse/regen + sequential turn signals. Non-destructive overlay en ambos strips. Emergency flash one-shot en ERROR. |
 | **Obstáculos (LiDAR)** | ✅ Operativo | TF-Mini Plus (115200 bps, GPIO 18), 5 zonas, timeout 500 ms → fail-safe |
 | **Power Manager** | ✅ Operativo | Ignition GPIO 40 + power hold GPIO 41 |
 | **Config Store** | ✅ Operativo | SPIFFS NVM persistente |
@@ -79,6 +79,91 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR — feat: Front LED Bar Turn Signals + Rear LED Premium Improvements
+- **Fecha:** 2026-04-17
+- **Autor:** Copilot
+- **Descripción del cambio:** Implementación completa de intermitentes LED en tira frontal (5 LEDs/lado), mejoras premium en tira trasera (overlay no destructivo, intermitentes secuenciales, activación REGEN, emergency flash real), y análisis documental completo de ambos sistemas LED.
+
+#### Fase 1 — Intermitentes frontales + Safe Mode HAZARD (commits d68aeda, 3567fc7, 834f802)
+
+| Feature | Descripción |
+|---------|-------------|
+| **Front turn signal zones** | Zonas [0–4] (izquierda) y [23–27] (derecha) definidas en `led_controller.h` con soporte `LED_STRIP_REVERSED` |
+| **Overlay no destructivo (frontal)** | `updateFrontTurnSignals()` solo escribe AMBER durante blink-ON; durante blink-OFF no escribe nada → efecto KITT permanece visible debajo |
+| **Safe Mode HAZARD** | En SAFE/ERROR: KITT_IDLE en centro + HAZARD (4 esquinas amber) reemplaza `startEmergencyFlash(5)` anterior |
+| **Estado persistente** | Variables `turnLeftActive`/`turnRightActive` estáticas para estabilidad frame-a-frame |
+| **Documentación** | `Documentos/LED_FRONT_LOGIC.md` — análisis completo de lógica frontal |
+
+#### Fase 2 — Análisis documental trasero (commit 0434657)
+
+| Feature | Descripción |
+|---------|-------------|
+| **REAR_LED_BEHAVIOR.md** | Análisis completo code-traced del strip trasero: diagrama de zonas, matriz de comportamiento, reglas de prioridad, flujo de datos CAN→FastLED, edge cases |
+| **NOT IMPLEMENTED explícito** | Documentadas las features definidas pero no activadas: `REGEN_ACTIVE`, `startEmergencyFlash()`, overlay destructivo |
+
+#### Fase 3 — Mejoras premium traseras (commit 0125572)
+
+| Feature | Descripción |
+|---------|-------------|
+| **🔧 1. Overlay no destructivo (trasero)** | `updateRearBase()` reemplaza `updateRearCentre()` — pinta los 16 LEDs (no solo centro). `updateRearTurnSignals()` solo escribe AMBER en blink-ON. Color base (rojo dim, brake, blanco reversa, azul regen) visible durante blink-OFF |
+| **🔧 2. Intermitentes secuenciales** | Sweep progresivo hacia exterior desde centro (European-style): LED 2→1→0 (izq), LED 13→14→15 (der). Ventana 500ms ON dividida en 3 pasos (~167ms cada uno). Helper `sweepFill()` detecta dirección automáticamente |
+| **🔧 3. REGEN_ACTIVE activado** | Azul pulsante cuando throttle 5–20% con velocidad > 0. Nuevo threshold `LED_TRACTION_REGEN_THRESHOLD = 20`. Prioridad: BRAKE_EMERGENCY > REVERSE > BRAKE > REGEN_ACTIVE > POSITION |
+| **🔧 4. Emergency flash real** | `startEmergencyFlash(3)` one-shot al transicionar a ERROR (no SAFE). 3 ciclos rojo/negro (~600ms), luego BRAKE_EMERGENCY + HAZARD sostenido |
+
+#### Cambios en archivos
+
+| Archivo | Cambios |
+|---------|---------|
+| `esp32/src/led_controller.h` | +39 líneas: zonas frontales [0–4]/[5–22]/[23–27], `LED_STRIP_REVERSED` para front, contrato instalación física |
+| `esp32/src/led_controller.cpp` | +179/−34 líneas: `updateFrontTurnSignals()`, `updateRearBase()` (reemplaza `updateRearCentre()`), `updateRearTurnSignals()` (reemplaza `updateTurnSignals()`), `sweepFill()`, overlay no destructivo en ambos strips |
+| `esp32/src/main.cpp` | +28/−2 líneas: `LED_TRACTION_REGEN_THRESHOLD=20`, detección regen, `REGEN_ACTIVE` en cadena de prioridad trasera, emergency flash one-shot en ERROR, SAFE→KITT_IDLE+HAZARD |
+| `Documentos/LED_FRONT_LOGIC.md` | +148 líneas: análisis completo lógica frontal (zonas, overlay, KITT aislamiento, HAZARD, timing) |
+| `Documentos/REAR_LED_BEHAVIOR.md` | +492 líneas: análisis completo trasero (zonas, matriz comportamiento, prioridad, flujo datos, edge cases, sweep secuencial, regen, emergency flash) |
+
+#### Cadena de prioridad rear actualizada
+
+```
+1. EMERGENCY FLASH      (one-shot al entrar en ERROR, 3 ciclos)
+2. SYSTEM DISABLED       (BOOT/STANDBY → FastLED.clear())
+3. BRAKE_EMERGENCY       (SAFE/ERROR → flash rojo + HAZARD sweep)
+4. REVERSE               (blanco 100% full strip)
+5. BRAKE                 (rojo 100% full strip)
+6. REGEN_ACTIVE          (azul pulsante full strip — throttle 5-20% con velocidad)
+7. POSITION              (rojo dim 20% full strip — default)
+```
+
+#### Detección regen (main.cpp)
+
+```
+trAvg ≤ 5          → BRAKE (rojo brillante)
+5 < trAvg ≤ 20     → REGEN_ACTIVE (azul pulsante)  ← NUEVO
+trAvg > 20          → POSITION (rojo dim)
+(todas requieren speedSum > LED_SPEED_SUM_THRESHOLD)
+```
+
+#### Overlay visual (blink ON vs OFF)
+
+```
+POSITION + LEFT turn:
+  blink ON:   [AMBER→→→]  [dim red ×10]     [dim red ×3]
+  blink OFF:  [dim red ×3] [dim red ×10]     [dim red ×3]
+
+BRAKE + LEFT turn:
+  blink ON:   [AMBER→→→]  [bright red ×10]  [bright red ×3]
+  blink OFF:  [bright red] [bright red ×10]  [bright red ×3]
+```
+
+- **Safety validation summary:**
+  - ✅ No se modifica máquina de estados de seguridad
+  - ✅ No hay transmisiones CAN nuevas
+  - ✅ Emergency flash solo se activa en transición a ERROR (one-shot, no continuo)
+  - ✅ REGEN_ACTIVE es puramente visual — no afecta tracción ni frenado
+  - ✅ Overlay no destructivo no cambia prioridades de zona — es aditivo
+  - ✅ `sweepFill()` bounds-checked con clamp de step
+  - ✅ `LED_STRIP_REVERSED` soportado en ambos strips
+
+- **Impacto:** Mejora visual significativa en ambos strips LED sin modificar lógica de seguridad. Comportamiento frontal y trasero ahora consistente (overlay no destructivo). Features previamente definidas pero no activadas (REGEN, emergency flash) ahora operativas.
 
 ### PR — feat: Extend Safe Mode Screen with Passive Visualization
 - **Fecha:** 2026-04-15
