@@ -2,13 +2,24 @@
 // ESP32-S3 HMI — LED Controller Implementation (WS2812B via FastLED)
 //
 // Two independent strips driven by separate GPIOs:
-//   Front (GPIO 47, 28 LEDs): KITT scanner, throttle-reactive chase, alerts
+//   Front (GPIO 47, 28 LEDs): KITT scanner, throttle-reactive chase, alerts,
+//                              turn signals (5 LEDs each side)
 //   Rear  (GPIO 48, 16 LEDs): tail, brake, reverse, turn signals, regen
 //
+// Front LED zone mapping:
+//   [0–4]   Left turn-signal indicator  (5 LEDs)
+//   [5–22]  Centre: KITT / throttle / alert effects (18 LEDs)
+//   [23–27] Right turn-signal indicator (5 LEDs)
+//
 // Rear LED zone mapping:
-//   [0–2]   Left turn-signal indicator
+//   [0–2]   Left turn-signal indicator (sequential sweep, non-destructive overlay)
 //   [3–12]  Centre: position / brake / reverse / regen
-//   [13–15] Right turn-signal indicator
+//   [13–15] Right turn-signal indicator (sequential sweep, non-destructive overlay)
+//
+// Both front and rear turn-signal overlays are non-destructive:
+//   - AMBER is written ONLY during blink-ON
+//   - During blink-OFF, no write → base effect remains visible
+//   - Rear uses sequential sweep (European-style, outward from centre)
 //
 // Architecture ported from FULL-FIRMWARE-Coche-Marcos (florinzgz):
 //   src/lighting/led_controller.cpp + include/led_controller.h
@@ -136,6 +147,13 @@ static void updateFlash(CRGB* leds, int count, CRGB c1, CRGB c2) {
 
 // =====================================================================
 // Front LED pattern dispatch
+//
+// ZONE NOTE (Task 4 — KITT zone isolation):
+//   Effects render across the full 28-LED strip to provide full-bar KITT
+//   when no turn signal is active.  Side zones [0–4] and [23–27] are
+//   conditionally overridden by updateFrontTurnSignals() (called next).
+//   The overlay writes ONLY during blink-ON, so KITT remains the visual
+//   base during blink-OFF — no explicit zone clipping is needed here.
 // =====================================================================
 
 static void updateFrontLEDs() {
@@ -171,10 +189,18 @@ static void updateFrontLEDs() {
 }
 
 // =====================================================================
-// Rear centre zone (LEDs 3–12)
+// Rear base layer (ALL 16 LEDs)
+//
+// Paints the entire rear strip with the current rear mode (position,
+// brake, reverse, regen, etc.).  This provides a visible base on the
+// side zones [0–2] and [13–15] so that the turn-signal overlay can be
+// non-destructive — matching the front strip's KITT-under-blink design.
+//
+// Without this full-strip base, side zones would be black whenever no
+// turn signal is active, wasting 6 LEDs that could show tail/brake.
 // =====================================================================
 
-static void updateRearCentre() {
+static void updateRearBase() {
     CRGB col = CRGB::Black;
     uint8_t bright = BRIGHTNESS_FULL;
 
@@ -203,47 +229,135 @@ static void updateRearCentre() {
         }
     }
 
-    for (int i = REAR_CENTRE_START; i < REAR_CENTRE_START + REAR_CENTRE_COUNT; ++i) {
+    for (int i = 0; i < NUM_LEDS_REAR; ++i) {
         ledsRear[i] = col;
         ledsRear[i].fadeToBlackBy(255 - bright);
     }
 }
 
 // =====================================================================
-// Rear turn-signal zones (LEDs 0–2, 13–15)
+// Front turn-signal zones (LEDs 0–4, 23–27)
+//
+// OVERLAY PRIORITY:
+//   1. updateFrontLEDs()        — renders KITT / base effect on full strip
+//   2. updateFrontTurnSignals() — overlays turn signals on side zones ONLY
+//
+// ZONE CONTRACT (Task 4 — KITT zone isolation):
+//   KITT / base effects render across the full 28-LED strip.  When no turn
+//   signal is active the full-bar KITT ("coche fantástico") is visible.
+//   When a turn signal is active, this overlay writes AMBER over the side
+//   zones during blink-ON only.  During blink-OFF the overlay does NOT
+//   write, so the underlying KITT fade remains visible — eliminating the
+//   hard BLACK cut that previously caused flicker.
+//
+// SAFE MODE (Task 3):
+//   TurnSignal::HAZARD (set by main.cpp on SAFE/ERROR state) forces both
+//   hazardOverride = true, activating both sides regardless of steering.
 // =====================================================================
 
-static void updateTurnSignals() {
+static void updateFrontTurnSignals() {
+    // ---- Persistent turn-indicator state (Task 1 — hysteresis hardening) ----
+    // These static flags provide frame-stable tracking of which indicators
+    // are logically active.  The underlying currentTurnSignal is already
+    // debounced by main.cpp (15°/10° hysteresis + 100 ms persistence filter),
+    // so these flags serve as an explicit, documented record of active state
+    // that persists across frames and prevents any residual visual toggling.
+    static bool turnLeftActive  = false;
+    static bool turnRightActive = false;
+
+    // ---- SAFE MODE hazard override (Task 3) ----
+    // When TurnSignal::HAZARD is set (SAFE/ERROR state from main.cpp),
+    // both sides are forced ON regardless of steering angle input.
+    // This is independent of the steering hysteresis — it's an absolute override.
+    const bool hazardOverride = (currentTurnSignal == TurnSignal::HAZARD);
+    turnLeftActive  = hazardOverride || (currentTurnSignal == TurnSignal::LEFT);
+    turnRightActive = hazardOverride || (currentTurnSignal == TurnSignal::RIGHT);
+
+    // No turn signals active — KITT / base effect fills the full strip unmodified
+    if (!turnLeftActive && !turnRightActive) return;
+
+    // ---- Overlay: AMBER only during blink-ON phase (Task 2) ----
+    // When blinkState == true  → write AMBER to active indicator zones.
+    // When blinkState == false → do NOT write anything.
+    //   This allows the underlying KITT / base effect to remain visible
+    //   during the OFF phase, eliminating the visual glitch caused by
+    //   writing BLACK (which would create a hard cut-to-black flicker).
+    if (blinkState) {
+        if (turnLeftActive) {
+            fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT, AMBER);
+        }
+        if (turnRightActive) {
+            fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT, AMBER);
+        }
+    }
+}
+
+// =====================================================================
+// Rear turn-signal zones (LEDs 0–2, 13–15)
+//
+// OVERLAY PRIORITY:
+//   1. updateRearBase()          — renders tail/brake/reverse on ALL 16 LEDs
+//   2. updateRearTurnSignals()   — overlays turn signals on side zones ONLY
+//
+// ZONE CONTRACT (matching front strip design):
+//   The rear base paints all 16 LEDs with the current mode (position,
+//   brake, etc.).  When a turn signal is active, this overlay writes
+//   AMBER over the side zones during blink-ON only.  During blink-OFF
+//   the overlay does NOT write, so the underlying base (dim red, brake
+//   red, white reverse, etc.) remains visible — no hard black cut.
+//
+// SEQUENTIAL ANIMATION:
+//   During blink-ON, LEDs fill progressively outward from centre:
+//     Left  [0–2]:   LED 2 → 1 → 0  (centre-adjacent first)
+//     Right [13–15]: LED 13 → 14 → 15 (centre-adjacent first)
+//   The 500 ms blink-ON window is divided into 3 equal steps (~167 ms
+//   each).  Each step lights one additional LED.
+//
+// SAFE MODE:
+//   TurnSignal::HAZARD forces both sides — same as front.
+// =====================================================================
+
+/// Sequential sweep helper: fills LEDs outward from centre.
+/// Determines sweep direction from zone position relative to centre.
+static void sweepFill(int zoneStart, int zoneCount, uint8_t step, CRGB color) {
+    if (zoneStart < REAR_CENTRE_START) {
+        // Zone is physically left of centre → sweep outward = high index to low
+        for (int i = 0; i <= step && i < zoneCount; ++i)
+            ledsRear[zoneStart + zoneCount - 1 - i] = color;
+    } else {
+        // Zone is physically right of centre → sweep outward = low index to high
+        for (int i = 0; i <= step && i < zoneCount; ++i)
+            ledsRear[zoneStart + i] = color;
+    }
+}
+
+static void updateRearTurnSignals() {
     bool leftOn  = (currentTurnSignal == TurnSignal::LEFT  || currentTurnSignal == TurnSignal::HAZARD);
     bool rightOn = (currentTurnSignal == TurnSignal::RIGHT || currentTurnSignal == TurnSignal::HAZARD);
 
-    // Left indicator (LEDs 0-2)
+    // No turn signals active — base effect fills the full strip unmodified
+    if (!leftOn && !rightOn) return;
+
+    // Only overlay during blink-ON (non-destructive, like front)
+    if (!blinkState) return;
+
+    // Sequential sweep: divide the 500 ms blink-ON window into N steps
+    // (one per LED in the zone).  Each step lights one additional LED
+    // outward from centre.
+    uint32_t elapsed = millis() - lastBlinkMs;
+    // Clamp elapsed to blink period to avoid overflow after period end
+    if (elapsed > TURN_SIGNAL_BLINK_MS) elapsed = TURN_SIGNAL_BLINK_MS;
+
     if (leftOn) {
-        if (currentRearMode == RearMode::REVERSE && blinkState) {
-            // Sequential chase in reverse
-            int pos = (animationStep / 10) % REAR_IND_LEFT_COUNT;
-            for (int i = 0; i < REAR_IND_LEFT_COUNT; ++i)
-                ledsRear[REAR_IND_LEFT_START + i] = (i == pos) ? AMBER : CRGB::Black;
-        } else {
-            fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT,
-                       blinkState ? AMBER : CRGB::Black);
-        }
-    } else {
-        fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT, CRGB::Black);
+        uint8_t step = static_cast<uint8_t>(elapsed * REAR_IND_LEFT_COUNT / TURN_SIGNAL_BLINK_MS);
+        if (step >= REAR_IND_LEFT_COUNT) step = REAR_IND_LEFT_COUNT - 1;
+        sweepFill(REAR_IND_LEFT_START, REAR_IND_LEFT_COUNT, step, AMBER);
     }
 
-    // Right indicator (LEDs 13-15)
     if (rightOn) {
-        if (currentRearMode == RearMode::REVERSE && blinkState) {
-            int pos = (animationStep / 10) % REAR_IND_RIGHT_COUNT;
-            for (int i = 0; i < REAR_IND_RIGHT_COUNT; ++i)
-                ledsRear[REAR_IND_RIGHT_START + i] = (i == pos) ? AMBER : CRGB::Black;
-        } else {
-            fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
-                       blinkState ? AMBER : CRGB::Black);
-        }
-    } else {
-        fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT, CRGB::Black);
+        uint8_t step = static_cast<uint8_t>(elapsed * REAR_IND_RIGHT_COUNT / TURN_SIGNAL_BLINK_MS);
+        if (step >= REAR_IND_RIGHT_COUNT) step = REAR_IND_RIGHT_COUNT - 1;
+        sweepFill(REAR_IND_RIGHT_START, REAR_IND_RIGHT_COUNT, step, AMBER);
     }
 }
 
@@ -301,8 +415,9 @@ void update() {
     }
 
     updateFrontLEDs();
-    updateRearCentre();
-    updateTurnSignals();
+    updateFrontTurnSignals();
+    updateRearBase();
+    updateRearTurnSignals();
 
     FastLED.show();
 }

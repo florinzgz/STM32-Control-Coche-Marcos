@@ -2,8 +2,14 @@
 // ESP32-S3 HMI — LED Controller (WS2812B)
 //
 // Drives two independent addressable WS2812B LED strips:
-//   Front strip (GPIO 47): 28 LEDs — KITT scanner, throttle-reactive effects
+//   Front strip (GPIO 47): 28 LEDs — KITT scanner, throttle-reactive effects,
+//                           turn signals (5 LEDs each side)
 //   Rear  strip (GPIO 48): 16 LEDs — tail, brake, reverse, turn signals
+//
+// Front LED zones (28 LEDs):
+//   [0–4]   Left turn-signal indicator  (amber blink 500 ms, 5 LEDs)
+//   [5–22]  Centre KITT scanner / throttle-reactive / alert effects
+//   [23–27] Right turn-signal indicator (amber blink 500 ms, 5 LEDs)
 //
 // Rear LED zones (16 LEDs):
 //   [0–2]   Left turn-signal indicator  (amber blink 500 ms)
@@ -45,6 +51,23 @@ inline constexpr int LED_REAR_PIN    = 48;   // GPIO 48 — rear strip data
 inline constexpr int NUM_LEDS_FRONT  = 28;
 inline constexpr int NUM_LEDS_REAR   = 16;
 
+// ---- Front strip zone boundaries ----
+//
+// ⚠ PHYSICAL INSTALLATION CONTRACT:
+//
+// DATA IN of the front WS2812B strip must start from the LEFT side of
+// the vehicle (standing in front of the vehicle, looking backward).
+//
+//   FRONT VIEW (looking at the front of the vehicle):
+//
+//     DATA IN →  [0] [1] [2] [3] [4] [5] ... [22] [23] [24] [25] [26] [27]
+//                ├──── LEFT ────┤  ├──── CENTRE ────┤  ├───── RIGHT ─────┤
+//                5 LEDs              18 LEDs              5 LEDs
+//
+// LED_STRIP_REVERSED effect on front strip:
+//   0 (default): LED[0-4]=LEFT,  LED[23-27]=RIGHT  (normal)
+//   1 (swapped): LED[0-4]=RIGHT, LED[23-27]=LEFT   (reversed data cable)
+//
 // ---- Rear strip zone boundaries ----
 //
 // ⚠ PHYSICAL INSTALLATION CONTRACT:
@@ -71,6 +94,13 @@ inline constexpr int NUM_LEDS_REAR   = 16;
 #endif
 
 #if LED_STRIP_REVERSED
+inline constexpr int FRONT_IND_LEFT_START  = 23;   // Swapped: physical right = logical left
+inline constexpr int FRONT_IND_LEFT_COUNT  = 5;
+inline constexpr int FRONT_CENTRE_START    = 5;    // Centre unchanged
+inline constexpr int FRONT_CENTRE_COUNT    = 18;
+inline constexpr int FRONT_IND_RIGHT_START = 0;    // Swapped: physical left = logical right
+inline constexpr int FRONT_IND_RIGHT_COUNT = 5;
+
 inline constexpr int REAR_IND_LEFT_START  = 13;   // Swapped: physical right = logical left
 inline constexpr int REAR_IND_LEFT_COUNT  = 3;
 inline constexpr int REAR_CENTRE_START    = 3;    // Centre unchanged
@@ -78,6 +108,13 @@ inline constexpr int REAR_CENTRE_COUNT    = 10;
 inline constexpr int REAR_IND_RIGHT_START = 0;    // Swapped: physical left = logical right
 inline constexpr int REAR_IND_RIGHT_COUNT = 3;
 #else
+inline constexpr int FRONT_IND_LEFT_START  = 0;    // LEDs 0-4: left turn
+inline constexpr int FRONT_IND_LEFT_COUNT  = 5;
+inline constexpr int FRONT_CENTRE_START    = 5;    // LEDs 5-22: centre
+inline constexpr int FRONT_CENTRE_COUNT    = 18;
+inline constexpr int FRONT_IND_RIGHT_START = 23;   // LEDs 23-27: right turn
+inline constexpr int FRONT_IND_RIGHT_COUNT = 5;
+
 inline constexpr int REAR_IND_LEFT_START  = 0;    // LEDs 0-2: left turn
 inline constexpr int REAR_IND_LEFT_COUNT  = 3;
 inline constexpr int REAR_CENTRE_START    = 3;    // LEDs 3-12: centre
