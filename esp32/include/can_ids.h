@@ -78,6 +78,7 @@ inline constexpr uint32_t SERVICE_DISABLED       = 0x303;   // STM32→ESP32, DL
 inline constexpr uint32_t ERROR_LOG_ENTRY        = 0x304;   // STM32→ESP32, DLC 8, on-demand
 inline constexpr uint32_t ERROR_LOG_HEADER       = 0x305;   // STM32→ESP32, DLC 8, 1000 ms
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
+inline constexpr uint32_t CMD_SENSOR_MAP_TEMP    = 0x112;   // ESP32→STM32, DLC 5, on-demand  DS18B20 physIdx→role mapping
 
 // -------------------------------------------------------------------------
 // System States — HEARTBEAT_STM32 byte 1 (§6)

@@ -260,6 +260,7 @@ static bool     stm32IsAlive         = false;
 // as the inhibit clears and the STM32 enters ACTIVE state.
 static bool     stm32StartupSeen     = false;  // true while startup_inhibit was last 1
 static bool     gearResyncPending    = false;  // true = need to re-send gear on ACTIVE
+static bool     tempMapResyncPending = false;  // true = need to re-send DS18B20 map after STM32 restart
 
 // ---- Render task (Core 0) — offloads TFT + touch from main loop ----
 static SemaphoreHandle_t vdMutex = nullptr;
@@ -752,9 +753,10 @@ void loop() {
             bool startupInhibitNow = (hb.statusFlags & 0x01u) != 0;
             if (startupInhibitNow && !stm32StartupSeen) {
                 // Rising edge of startup_inhibit → STM32 just booted/reset
-                stm32StartupSeen  = true;
-                gearResyncPending = true;
-                Serial.println("[SAFETY][INFO] STM32 restart detected — gear resync pending");
+                stm32StartupSeen    = true;
+                gearResyncPending   = true;
+                tempMapResyncPending = true;
+                Serial.println("[SAFETY][INFO] STM32 restart detected — gear + temp-map resync pending");
             }
             if (gearResyncPending && !startupInhibitNow &&
                 hb.systemState == can::SystemState::ACTIVE && stm32IsAlive) {
@@ -764,6 +766,22 @@ void loop() {
                 lastSentGear    = curGear;  // prevent duplicate send from shifter loop
                 gearResyncPending = false;
                 Serial.printf("[SAFETY][INFO] Gear resync sent: gear=%u\n", curGear);
+            }
+            // Re-send the DS18B20 physIdx→role mapping after STM32 restart so
+            // the STM32's in-RAM map matches the user's saved assignment.
+            // Sent in STANDBY or ACTIVE (STM32 can receive it in either state).
+            if (tempMapResyncPending && !startupInhibitNow && stm32IsAlive) {
+                const auto& cfg = config_store::get();
+                CanFrame frame = {};
+                frame.identifier       = can::CMD_SENSOR_MAP_TEMP;
+                frame.extd             = 0;
+                frame.data_length_code = config_store::NUM_TEMP_SENS;
+                for (uint8_t i = 0; i < config_store::NUM_TEMP_SENS; ++i) {
+                    frame.data[i] = cfg.tempSensorMap[i];
+                }
+                ESP32Can.writeFrame(frame, 0);
+                tempMapResyncPending = false;
+                Serial.println("[SAFETY][INFO] DS18B20 sensor map resync sent to STM32");
             }
             if (!startupInhibitNow) {
                 stm32StartupSeen = false;  // inhibit cleared, ready for next detection

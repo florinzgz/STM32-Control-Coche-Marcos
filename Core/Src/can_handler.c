@@ -17,6 +17,7 @@
 #include "service_mode.h"
 #include "math_safety.h"
 #include "error_log.h"
+#include "sensor_map_store.h"
 #include <math.h>
 
 /* ---- Defensive declarations ----
@@ -541,29 +542,34 @@ void CAN_SendStatusTraction(void) {
 /**
  * @brief  Send explicit temperature sensor mapping to ESP32.
  *
- * Uses the same DS18B20 readings already acquired by Temperature_ReadAll().
- * The payload assigns an unambiguous meaning to each byte:
+ * Applies the physIdx→role map stored in flash (via sensor_map_store) so
+ * that each byte in the frame corresponds to the labelled motor position:
  *
- *   Byte 0: Motor FL temperature (°C, int8_t)
- *   Byte 1: Motor FR temperature (°C, int8_t)
- *   Byte 2: Motor RL temperature (°C, int8_t)
- *   Byte 3: Motor RR temperature (°C, int8_t)
- *   Byte 4: Ambient temperature  (°C, int8_t)
+ *   Byte 0: FL motor temperature  (°C, int8_t)
+ *   Byte 1: FR motor temperature  (°C, int8_t)
+ *   Byte 2: RL motor temperature  (°C, int8_t)
+ *   Byte 3: RR motor temperature  (°C, int8_t)
+ *   Byte 4: Ambient temperature   (°C, int8_t)
  *
- * Sensor index mapping: 0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient.
- * Values are not filtered or recalculated — raw DS18B20 readings.
- * If a sensor is disabled in Service Mode the value is still reported.
+ * The mapping is set by the user via the engineering menu on the ESP32
+ * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 125.
+ * If no valid mapping has been saved, discovery order is used (index 0=FL, etc.)
  *
  * CAN ID: 0x206   DLC: 5   Rate: 1000 ms (1 Hz)
  */
 void CAN_SendStatusTempMap(void) {
-    uint8_t data[5];
+    uint8_t data[5] = {0};
 
-    data[0] = (uint8_t)(int8_t)Temperature_Get(0);  /* FL  */
-    data[1] = (uint8_t)(int8_t)Temperature_Get(1);  /* FR  */
-    data[2] = (uint8_t)(int8_t)Temperature_Get(2);  /* RL  */
-    data[3] = (uint8_t)(int8_t)Temperature_Get(3);  /* RR  */
-    data[4] = (uint8_t)(int8_t)Temperature_Get(4);  /* AMB */
+    /* Apply physIdx→role mapping: place each physical sensor's reading at
+     * the byte offset that corresponds to its assigned role (position).
+     * Unassigned sensors (role == 0xFF) are silently skipped.            */
+    const uint8_t *map = SensorMapStore_GetMap();
+    for (uint8_t physIdx = 0; physIdx < 5U; physIdx++) {
+        uint8_t role = map[physIdx];
+        if (role < 5U) {
+            data[role] = (uint8_t)(int8_t)Temperature_Get(physIdx);
+        }
+    }
 
     TransmitFrame(CAN_ID_STATUS_TEMP_MAP, data, 5);
 }
@@ -1200,7 +1206,42 @@ void CAN_ProcessMessages(void) {
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
                 }
                 break;
-                
+
+            case CAN_ID_CMD_SENSOR_MAP_TEMP:
+                /* DS18B20 physIdx→role mapping from ESP32 engineering menu.
+                 *   DLC:    5 (one byte per physical sensor index 0-4)
+                 *   Byte i: role assigned to physical sensor i
+                 *            0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient, 0xFF=unset
+                 *
+                 * Validated (values must be < 5 or 0xFF, no duplicates)
+                 * then persisted to flash page 125.  An ACK confirms.      */
+                if (msg_len < 5) {
+                    sat_inc_u32(&can_stats.rx_errors);
+                    CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF, ACK_INVALID);
+                    break;
+                }
+                {
+                    bool map_valid = true;
+                    uint8_t role_seen = 0;  /* bitmask of roles 0-4 seen */
+                    for (uint8_t i = 0; i < 5U; i++) {
+                        uint8_t role = rx_payload[i];
+                        if (role == 0xFF) continue;   /* unset — always OK */
+                        if (role >= 5U)  { map_valid = false; break; }
+                        uint8_t bit = (uint8_t)(1U << role);
+                        if (role_seen & bit) { map_valid = false; break; }
+                        role_seen |= bit;
+                    }
+                    if (!map_valid) {
+                        sat_inc_u32(&can_stats.rx_errors);
+                        CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF, ACK_INVALID);
+                        break;
+                    }
+                    bool saved = SensorMapStore_Save(rx_payload);
+                    CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF,
+                                       saved ? ACK_OK : ACK_REJECTED);
+                }
+                break;
+
             default:
                 /* Unknown message ID – filtered out by hardware,
                  * should never reach here.                        */

@@ -25,6 +25,7 @@
 #include "encoder_reader.h"
 #include "math_safety.h"
 #include "steering_cal_store.h"
+#include "sensor_map_store.h"
 #include "error_log.h"
 #include <math.h>
 #include "build_sanity_checks.h"
@@ -282,6 +283,12 @@ int main(void)
         SteeringCentering_MarkRestoredFromFlash(
             SteeringCal_GetStoredCenter());
     }
+
+    /* ---- Persistent DS18B20 sensor mapping ----
+     * Load the user-assigned physIdx→role mapping from flash page 125.
+     * If no valid mapping has been saved yet the identity mapping
+     * (index 0=FL, 1=FR, 2=RL, 3=RR, 4=AMB) is used as fall-back.    */
+    SensorMapStore_Init();
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
