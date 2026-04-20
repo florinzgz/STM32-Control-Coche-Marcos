@@ -68,6 +68,14 @@ static uint8_t  heartbeat_counter = 0;
 static bool led_relay_front = false;
 static bool led_relay_rear  = false;
 
+/* ---- DS18B20 sanity-filter thresholds (STATUS_TEMP_MAP) ----
+ * Practical operating window used by CAN_SendStatusTempMap() to reject
+ * glitched readings (disconnect sentinel -127 °C, NaN/Inf, CRC errors).
+ * Tighter than the datasheet -55..+125 °C so that any implausible in-
+ * vehicle reading is also filtered.                                   */
+#define TEMP_MIN_VALID_C   (-30.0f)
+#define TEMP_MAX_VALID_C   (120.0f)
+
 /* SAFETY FIX: ESP32 heartbeat alive-counter freeze detection.
  * Track the rolling counter sent in byte 0 of the ESP32 heartbeat (0x011).
  * A "zombie" ESP32 (main task frozen but timer ISR still firing) sends the
@@ -555,20 +563,67 @@ void CAN_SendStatusTraction(void) {
  * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 125.
  * If no valid mapping has been saved, discovery order is used (index 0=FL, etc.)
  *
+ * ---- Sanity filter (production hardening) ----
+ * DS18B20 readings can briefly become invalid when a sensor is physically
+ * disconnected, mid-conversion, or producing a CRC error.  Rather than
+ * propagating garbage to the ESP32 HMI, we filter each sample:
+ *   - NaN / ±Inf                      → rejected
+ *   - ≤ -30 °C or ≥ +120 °C            → rejected (outside practical range;
+ *                                        -127 sentinel from OneWire
+ *                                        read errors is also covered)
+ * Rejected samples are replaced with the last-known-good value for that
+ * role (or 0 at cold-boot when nothing has been seen yet), so a brief
+ * glitch never shows up as a wild spike on the dashboard.  The filter
+ * is strictly informational — it does NOT touch Safety_* or the
+ * overheat supervision path, which operate on the raw reading.
+ *
  * CAN ID: 0x206   DLC: 5   Rate: 1000 ms (1 Hz)
  */
 void CAN_SendStatusTempMap(void) {
+    /* Last-known-good °C per role (index = role 0..4).  Cold-start value
+     * of 0 is safe — it is the same neutral default the frame already
+     * used before this filter was added.                               */
+    static int8_t last_good_temp[5] = {0, 0, 0, 0, 0};
+
+    /* Sanity thresholds are defined at file scope (TEMP_MIN_VALID_C /
+     * TEMP_MAX_VALID_C) so they can be shared with other temperature
+     * code paths if needed.                                            */
+
     uint8_t data[5] = {0};
 
-    /* Apply physIdx→role mapping: place each physical sensor's reading at
-     * the byte offset that corresponds to its assigned role (position).
-     * Unassigned sensors (role == 0xFF) are silently skipped.            */
     const uint8_t *map = SensorMapStore_GetMap();
     for (uint8_t physIdx = 0; physIdx < 5U; physIdx++) {
         uint8_t role = map[physIdx];
-        if (role < 5U) {
-            data[role] = (uint8_t)(int8_t)Temperature_Get(physIdx);
+        if (role >= 5U) {
+            /* Unset / out-of-range role — shouldn't happen because the
+             * RX handler enforces strict mode, but stay defensive.     */
+            continue;
         }
+
+        float raw = Temperature_Get(physIdx);
+
+        /* Accept sample only if it is a finite number inside the window.
+         * isnan / isinf are the standard <math.h> checks; together with
+         * the range test they reject ±Inf, NaN, -127 (disconnect) and
+         * any other obviously-wrong reading.                           */
+        bool sample_ok = !isnan(raw) && !isinf(raw)
+                      && (raw >= TEMP_MIN_VALID_C)
+                      && (raw <= TEMP_MAX_VALID_C);
+
+        int8_t reported;
+        if (sample_ok) {
+            /* Safe to truncate to int8_t: range is bounded above.      */
+            reported = (int8_t)raw;
+            last_good_temp[role] = reported;
+        } else {
+            /* Fall back to the last valid reading for this ROLE (not
+             * physIdx): if the user re-maps sensors the last-good value
+             * rightly follows the role, so a freshly-assigned sensor
+             * inherits the previous motor's last reading for one
+             * frame rather than flashing 0 °C.                         */
+            reported = last_good_temp[role];
+        }
+        data[role] = (uint8_t)reported;
     }
 
     TransmitFrame(CAN_ID_STATUS_TEMP_MAP, data, 5);
@@ -1211,34 +1266,79 @@ void CAN_ProcessMessages(void) {
                 /* DS18B20 physIdx→role mapping from ESP32 engineering menu.
                  *   DLC:    5 (one byte per physical sensor index 0-4)
                  *   Byte i: role assigned to physical sensor i
-                 *            0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient, 0xFF=unset
+                 *            0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient
+                 *            0xFF reserved for "unset" (not accepted in
+                 *            strict mode — see below).
                  *
-                 * Validated (values must be < 5 or 0xFF, no duplicates)
-                 * then persisted to flash page 125.  An ACK confirms.      */
+                 * ---- STRICT VALIDATION (production hardening) ----
+                 * To guarantee that every motor position has an
+                 * unambiguous temperature source, we REQUIRE a complete
+                 * permutation of roles 0..4: each role must appear
+                 * exactly once.  This rejects:
+                 *   - payloads shorter than 5 bytes        (DLC check)
+                 *   - values outside the 0..4 range        (includes 0xFF)
+                 *   - duplicated roles (e.g. two sensors claim FL motor)
+                 *   - missing roles (implied by the two above rules)
+                 *
+                 * The ESP32 engineering UI always sends a full 5-byte
+                 * permutation, so strict mode is transparent in normal
+                 * operation and only catches genuinely broken payloads.
+                 *
+                 * ---- ACK SEMANTICS (format UNCHANGED) ----
+                 *   ACK_OK       → map validated AND flash write succeeded
+                 *   ACK_INVALID  → payload rejected at validation (never
+                 *                  reached flash, never touched any state)
+                 *   ACK_REJECTED → payload was valid but flash write
+                 *                  failed (unlock/erase/program error) OR
+                 *                  rate-limited (too many writes).  State
+                 *                  unchanged — previous mapping still
+                 *                  active.
+                 * The frame format is untouched; only the meaning of
+                 * each code on this specific command is clarified.      */
                 if (msg_len < 5) {
                     sat_inc_u32(&can_stats.rx_errors);
                     CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF, ACK_INVALID);
                     break;
                 }
                 {
-                    bool map_valid = true;
-                    uint8_t role_seen = 0;  /* bitmask of roles 0-4 seen */
+                    bool    map_valid = true;
+                    uint8_t role_seen = 0;  /* bitmask of roles 0..4 seen */
                     for (uint8_t i = 0; i < 5U; i++) {
                         uint8_t role = rx_payload[i];
-                        if (role == 0xFF) continue;   /* unset — always OK */
-                        if (role >= 5U)  { map_valid = false; break; }
+                        /* Strict mode: 0xFF (unset) is NOT accepted.  The
+                         * ESP32 always provides a complete permutation.   */
+                        if (role >= 5U) { map_valid = false; break; }
                         uint8_t bit = (uint8_t)(1U << role);
                         if (role_seen & bit) { map_valid = false; break; }
                         role_seen |= bit;
+                    }
+                    /* All five bits (0b00011111 = 0x1F) must be set — this
+                     * proves every role is assigned at least once and,
+                     * combined with the duplicate check above, exactly
+                     * once.  Redundant with the per-iteration checks but
+                     * kept as an explicit, self-documenting invariant.   */
+                    if (map_valid && role_seen != 0x1FU) {
+                        map_valid = false;
                     }
                     if (!map_valid) {
                         sat_inc_u32(&can_stats.rx_errors);
                         CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF, ACK_INVALID);
                         break;
                     }
+                    /* Valid payload — attempt to persist.  The store
+                     * performs its own no-op elision and wear-rate
+                     * limiting; on either a true write error or a
+                     * rate-limited rejection we report ACK_REJECTED so
+                     * the UI can distinguish "bad data" from "busy".   */
                     bool saved = SensorMapStore_Save(rx_payload);
                     CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF,
                                        saved ? ACK_OK : ACK_REJECTED);
+                    /* Post-save consistency:  SensorMapStore_Save()
+                     * updated the in-RAM active map BEFORE returning
+                     * (both on no-op elision and on successful write),
+                     * so the very next CAN_SendStatusTempMap() tick at
+                     * the 1 Hz slow-tier will naturally reflect the
+                     * new mapping — no extra CAN frame needed.          */
                 }
                 break;
 

@@ -28,6 +28,15 @@
 #define SMAP_MAGIC          0x534D4150U   /* "SMAP" */
 #define SMAP_VALID_FLAG     0xA5U
 
+/* ---- Write rate limit ---------------------------------------------------
+ * Minimum interval between consecutive successful flash writes.  Protects
+ * the flash page against wear from accidental rapid-fire saves (for
+ * example a CAN frame storm / UI bug) while still allowing legitimate
+ * user-initiated changes to go through after a short cool-down.
+ * HAL_GetTick() is the 1 ms system tick (see stm32g4xx_it.c).
+ * ------------------------------------------------------------------------ */
+#define SMAP_WRITE_MIN_INTERVAL_MS  1000U
+
 /* ---- On-flash slot format (16 bytes = 2 × 64-bit doublewords) ----------- */
 typedef struct {
     uint32_t magic;                       /* Must equal SMAP_MAGIC          */
@@ -42,8 +51,10 @@ _Static_assert(sizeof(smap_flash_slot_t) % 8 == 0,
                "smap_flash_slot_t size must be a multiple of 8 bytes");
 
 /* ---- RAM state ----------------------------------------------------------- */
-static bool    smap_flash_valid = false;
-static uint8_t smap_active[SMAP_NUM_SENSORS] = {0, 1, 2, 3, 4};  /* identity */
+static bool     smap_flash_valid      = false;
+static uint8_t  smap_active[SMAP_NUM_SENSORS] = {0, 1, 2, 3, 4};  /* identity */
+static uint32_t smap_last_write_tick  = 0;    /* HAL_GetTick of last successful flash write */
+static bool     smap_has_written_once = false;
 
 /* ---- CRC32 (same polynomial as steering_cal_store.c) --------------------- */
 static uint32_t smap_crc32(const void *data, uint32_t len)
@@ -91,6 +102,45 @@ void SensorMapStore_Init(void)
 
 bool SensorMapStore_Save(const uint8_t map[SMAP_NUM_SENSORS])
 {
+    /* ----------------------------------------------------------------------
+     * Flash-wear guard #1 — no-op elision.
+     *
+     * If the new map is byte-for-byte identical to the currently-active
+     * mapping AND a valid slot has already been written to flash (so we
+     * know the flash contents match `smap_active`), skip the erase/write
+     * entirely.  The result is still success because the caller's
+     * requested state is already in flash.
+     *
+     * Without this guard, the ESP32 auto-resync-on-STM32-reboot would
+     * re-erase and re-write the page on every boot cycle even when the
+     * user never changed anything.
+     * --------------------------------------------------------------------*/
+    if (smap_flash_valid &&
+        memcmp(smap_active, map, SMAP_NUM_SENSORS) == 0) {
+        return true;
+    }
+
+    /* ----------------------------------------------------------------------
+     * Flash-wear guard #2 — minimum write interval.
+     *
+     * Reject successive writes that arrive closer together than
+     * SMAP_WRITE_MIN_INTERVAL_MS (1 s).  The engineering menu is strictly
+     * user-driven, so a legitimate save can never arrive faster than a
+     * human tap.  Anything faster must be a bug, injected traffic, or a
+     * CAN storm — none of which should be allowed to wear out the page.
+     *
+     * Guard is disabled on the very first call (smap_has_written_once
+     * starts false) so that the first save after boot always runs.
+     * HAL_GetTick() is monotonic and overflows only after ~49.7 days.
+     * Using subtraction with uint32_t wrap-around makes the comparison
+     * correct even across the overflow boundary.
+     * --------------------------------------------------------------------*/
+    uint32_t now = HAL_GetTick();
+    if (smap_has_written_once &&
+        (uint32_t)(now - smap_last_write_tick) < SMAP_WRITE_MIN_INTERVAL_MS) {
+        return false;
+    }
+
     /* Build the slot in RAM */
     smap_flash_slot_t slot;
     memset(&slot, 0, sizeof(slot));
@@ -133,8 +183,10 @@ bool SensorMapStore_Save(const uint8_t map[SMAP_NUM_SENSORS])
 
     HAL_FLASH_Lock();
 
-    /* Update RAM state */
-    smap_flash_valid = true;
+    /* Update RAM state + rate-limit bookkeeping */
+    smap_flash_valid      = true;
+    smap_has_written_once = true;
+    smap_last_write_tick  = HAL_GetTick();
     memcpy(smap_active, map, SMAP_NUM_SENSORS);
     return true;
 }

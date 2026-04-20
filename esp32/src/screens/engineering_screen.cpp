@@ -72,9 +72,11 @@ static const char* const TEMP_POS_NAMES[config_store::NUM_TEMP_SENS] = {
     "FL Wheel", "FR Wheel", "RL Wheel", "RR Wheel", "Ambient"
 };
 
-// Display helper literals — UTF-8 degree symbol and arrow for sensor map rows
+// Display helper literals — UTF-8 degree symbol and arrow for sensor map rows.
+// TFT_eSPI's built-in font renders byte 0x1A as a right-pointing arrow glyph;
+// this is a font-specific glyph, NOT the ASCII control character SUB.
 static constexpr const char TEMP_DEGREE_STR[] = "\xC2\xB0" "C";   // "°C" in UTF-8
-static constexpr const char TEMP_ARROW_STR[]  = "\x1A ";           // → arrow character
+static constexpr const char TEMP_ARROW_STR[]  = "\x1A ";           // TFT_eSPI glyph 0x1A = right arrow
 
 // ---- Module control layout ----
 static constexpr int16_t MOD_ROW_X   = 10;
