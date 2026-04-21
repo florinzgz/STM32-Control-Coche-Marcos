@@ -2269,7 +2269,7 @@ static uint16_t Obstacle_StoppingDistance(float speed_kmh)
  *
  * Payload (DLC ≥ 5):
  *   Byte 0-1: minimum distance (mm, uint16 LE)
- *   Byte 2:   zone level (0–5)
+ *   Byte 2:   zone level (0–4)
  *   Byte 3:   sensor health (0/1)
  *   Byte 4:   rolling counter
  */

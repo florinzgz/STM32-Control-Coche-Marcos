@@ -80,6 +80,54 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — feat(obstacle+temperature): política 50 cm, EMA de zona, histéresis 750 mm, remap DS18B20 por CAN 0x112
+- **Fecha:** 2026-04-21
+- **Autor:** Copilot
+- **Rama:** `copilot/obstacle-sensor-distance-control`
+- **Descripción del cambio:** Auditoría cruzada STM32 ↔ ESP32 y cierre del PR de la política de obstáculo de 50 cm, filtrado EMA de zona en UI, histéresis restaurada, y mapeo dinámico DS18B20 vía CAN 0x112 con persistencia en Flash. Contrato CAN v1.3 preservado (IDs, DLC, layout, cadencia sin cambios).
+
+#### Cambios principales
+
+| Subsistema | Cambio |
+|---|---|
+| **Obstáculo (STM32)** | `OBSTACLE_EMERGENCY_MM = 500`, `OBSTACLE_RECOVERY_MM = 750` en `safety_system.c` (banda de histéresis 250 mm). `CONFIRM_MS` / `CLEAR_MS` / `TIMEOUT_MS` sin cambios. |
+| **Obstáculo (ESP32)** | Filtro EMA entero (α = 0.3, `ZONE_EMA_NUM` / `ZONE_EMA_DEN`, O(1)) en `obstacle_sensor.cpp` aplicado solo a clasificación de zona. `reading_.distance_mm` permanece crudo → CAN 0x208 sin filtrar. Reseed en `init()` y en timeout→INVALID. |
+| **UI (ESP32)** | `proximityColor()` en `ui_common.h` alineado 1:1 con las zonas de seguridad: rojo <500, naranja 500–1000, amarillo 1000–1500, cian 1500–2000, verde ≥2000 mm (en cm: <50 / <100 / <150 / <200 / ≥200). |
+| **Temperatura (STM32)** | Filtro bootstrap de plausibilidad en `CAN_SendStatusTempMap()` (ventana 0–60 °C, consenso de 2 muestras dentro de `BOOT_REF_TOLERANCE_C`). Reset de estado de filtro (`last_good_valid[]`, `bootstrap_count[]`, `bootstrap_ref[]`, `last_good_temp_f[]`) ante cambio de topología 1-Wire. |
+| **Remap DS18B20** | `CMD_SENSOR_MAP_TEMP` (CAN 0x112, DLC 5) desde menú de ingeniería ESP32 → `SensorMapStore_Save()` en Flash página 125, con `CMD_ACK` (0x103). `CAN_SendStatusTempMap()` consume `SensorMapStore_GetMap()` en cada tick. |
+| **Docs** | 13 archivos en `docs/` actualizados para retirar referencias obsoletas a 200 mm / 200–500 mm (política 50 cm unificada). |
+| **Comentarios** | `safety_system.c`: `/* zone level (0–5) */` → `(0–4)` (coherente con `can_handler.c:1445` y con las 5 zonas reales 0..4). `obstacle_sensor.h`: documentación de zonas y EMA ampliada. |
+| **Tests** | `esp32/src/test_obstacle_sensor.cpp`: 7 aserciones obsoletas corregidas + tests de límite exhaustivos para TOFSense-M y TF-Mini Plus (499/500/501, 999/1000/1001, 1499/1500/1501, 1999/2000/2001, 3999/4000 mm). |
+
+#### Auditoría cruzada — resultados
+
+| Verificación | Resultado |
+|---|---|
+| IDs 0x103 / 0x110 / 0x112 / 0x206 / 0x208 / 0x209 | ✅ sin cambios |
+| DLCs (3 / 2 / 5 / 5 / 5 / 4) | ✅ sin cambios |
+| Layout de bytes STM32 ↔ ESP32 (`can_handler.c` vs `can_obstacle.cpp` + `can_ids.h`) | ✅ idéntico |
+| Cadencia TX (1000 / 66 / 100 ms + on-demand) | ✅ sin cambios |
+| `Safety_*` y máquina de estados | ✅ sin modificar |
+| Acoplamiento temperatura ↔ obstáculo | ✅ desacoplado (códigos `SAFETY_ERROR_OVERTEMP` / `SAFETY_ERROR_OBSTACLE` independientes) |
+| Autoridad de obstáculo (<500 mm → `obstacle_scale = 0.0`) | ✅ preservada |
+| Determinismo / O(1) / sin `malloc` / sin bloqueo | ✅ verificado |
+| Casos extremos (desconexión DS18B20, timeout LiDAR, pérdida de tramas CAN, EMI) | ✅ degradación segura |
+
+#### Contratos preservados
+
+- CAN v1.3 sin cambios: IDs, DLC, bytes, cadencia.
+- `Safety_*`, pipeline PWM, BREAK2, watchdog IWDG — intactos.
+- `OBSTACLE_CONFIRM_MS` (200 ms), `OBSTACLE_CLEAR_MS` (1000 ms), `OBSTACLE_TIMEOUT_MS` (500 ms) — sin cambios.
+- Toda la lógica nueva es O(1), sin `malloc`, sin llamadas bloqueantes.
+
+#### Impacto de seguridad
+
+- **Parada de emergencia antes:** 500 mm en lugar de 200 mm → mayor margen de frenado.
+- **Sin falsos picos de temperatura al arranque:** sólo muestras validadas por la ventana bootstrap llegan a 0x206; −127 °C / NaN / Inf quedan siempre bloqueadas.
+- **Comportamiento estable bajo EMI:** EMA de zona + histéresis 250 mm eliminan oscilación en el límite de 500 mm; reset por topología impide quedar atrapado en el filtro step tras un remap.
+
+- **Impacto global:** integración lista para producción; el sistema permanece determinista, eléctricamente seguro y compatible con el contrato CAN existente.
+
 ### PR — fix(can_handler): Harden DS18B20 boot filtering — R-1 plausibility window + R-2 topology reset
 - **Fecha:** 2026-04-21
 - **Autor:** Copilot
