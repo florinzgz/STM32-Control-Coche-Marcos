@@ -530,11 +530,11 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 
 | Zona | Rango | Factor de escala de velocidad |
 |------|-------|-------------------------------|
-| Emergency | <200 mm | 0.0 (parada total) |
-| Critical | 200–500 mm | 0.3 |
-| Warning | 500–1000 mm | 0.7 |
-| Caution | 1000–1500 mm | 0.85 |
-| Alert | 1500–4000 mm | 0.95 |
+| Emergency | <500 mm | 0.0 (parada total) |
+| Critical | 500–1000 mm | 0.3 |
+| Warning | 1000–1500 mm | 0.7 |
+| Caution | 1500–2000 mm | 0.85 |
+| Alert | 2000–4000 mm | 0.95 |
 
 ### Resistencias y protección
 

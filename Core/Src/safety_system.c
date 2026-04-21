@@ -334,7 +334,11 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 /* Temporal hysteresis */
 #define OBSTACLE_CONFIRM_MS         200     /* Confirm obstacle before acting  */
 #define OBSTACLE_CLEAR_MS           1000    /* Confirm clearance before reset  */
-#define OBSTACLE_RECOVERY_MM        500     /* Min distance to start clearing  */
+/* Spatial hysteresis: obstacle is considered cleared only above
+ * OBSTACLE_RECOVERY_MM, which is deliberately set well beyond
+ * OBSTACLE_EMERGENCY_MM (500 mm) to prevent zone oscillation at the
+ * boundary under LiDAR noise or EMI.  Band = 250 mm. */
+#define OBSTACLE_RECOVERY_MM        750     /* Min distance to start clearing  */
 
 /* CAN timeout — advisory.  When exceeded:
  *   - If obstacle was active: hold last scale (≤ OBSTACLE_FAULT_SCALE)
@@ -376,7 +380,7 @@ static inline float obstacle_preemptive_scale(float target)
 /* ---- CAN advisory state ---- */
 static uint32_t obstacle_last_rx_tick    = 0;      /* Last 0x208 reception     */
 static uint16_t obstacle_distance_mm     = 0xFFFF; /* Last reported distance   */
-static uint8_t  obstacle_zone            = 0;      /* Last zone (0–5)          */
+static uint8_t  obstacle_zone            = 0;      /* Last zone (0–4)          */
 static uint8_t  obstacle_sensor_healthy  = 0;      /* Health flag from ESP32   */
 static uint8_t  obstacle_last_counter    = 0;      /* Rolling counter          */
 static uint8_t  obstacle_stale_count     = 0;      /* Consecutive stale frames */

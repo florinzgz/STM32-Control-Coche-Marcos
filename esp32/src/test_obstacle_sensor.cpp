@@ -262,7 +262,7 @@ static void test_minimum_distance_used() {
     ASSERT_EQ(rd.minDist_mm, 750);
     ASSERT_EQ(rd.maxDist_mm, 2000);
     ASSERT_EQ(rd.validCount, 64);
-    ASSERT_EQ(rd.zone, 2);  // 500–1000 mm = warning
+    ASSERT_EQ(rd.zone, 3);  // 750 mm → 500–1000 = critical (new 50 cm policy)
 }
 
 // Test 8: Invalid pixels skipped
@@ -334,7 +334,7 @@ static void test_bad_checksum_rejected() {
     ASSERT_EQ(rd.distance_mm, 0);  // No valid frame
 }
 
-// Test 12: Emergency zone (< 200 mm)
+// Test 12: Emergency zone (< 500 mm)
 static void test_emergency_zone() {
     printf("  test_emergency_zone...\n");
     uint8_t frame[MP_FRAME_LEN];
@@ -346,49 +346,102 @@ static void test_emergency_zone() {
     ASSERT_EQ(rd.healthy, true);
 }
 
-// Test 13: Zone boundary tests
+// Test 13: Zone boundary tests — 50 cm minimum-distance policy
+//   < 500  → 4 emergency
+//   500–1000  → 3 critical
+//   1000–1500 → 2 warning
+//   1500–2000 → 1 caution
+//   ≥ 2000    → 0 alert/normal
+// Note: each call re-inits the driver, which reseeds the EMA filter to
+// the first measured value, so the mapping is deterministic per test.
 static void test_zone_boundaries() {
     printf("  test_zone_boundaries...\n");
 
-    // 200 mm → zone 3 (critical)
+    // 200 mm → zone 4 (emergency, < 500)
     {
         uint8_t frame[MP_FRAME_LEN];
         buildMPFrame(frame, 200000, 30);
         obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
         ASSERT_EQ(rd.distance_mm, 200);
-        ASSERT_EQ(rd.zone, 3);
+        ASSERT_EQ(rd.zone, 4);
     }
-    // 500 mm → zone 2 (warning)
+    // 500 mm → zone 3 (critical, 500–1000, boundary belongs to farther zone)
     {
         uint8_t frame[MP_FRAME_LEN];
         buildMPFrame(frame, 500000, 30);
         obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
         ASSERT_EQ(rd.distance_mm, 500);
-        ASSERT_EQ(rd.zone, 2);
+        ASSERT_EQ(rd.zone, 3);
     }
-    // 1000 mm → zone 1 (caution)
+    // 1000 mm → zone 2 (warning, 1000–1500)
     {
         uint8_t frame[MP_FRAME_LEN];
         buildMPFrame(frame, 1000000, 30);
         obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
         ASSERT_EQ(rd.distance_mm, 1000);
-        ASSERT_EQ(rd.zone, 1);
+        ASSERT_EQ(rd.zone, 2);
     }
-    // 1500 mm → zone 0 (normal)
+    // 1500 mm → zone 1 (caution, 1500–2000)
     {
         uint8_t frame[MP_FRAME_LEN];
         buildMPFrame(frame, 1500000, 30);
         obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
         ASSERT_EQ(rd.distance_mm, 1500);
-        ASSERT_EQ(rd.zone, 0);
+        ASSERT_EQ(rd.zone, 1);
     }
-    // < 200 mm → zone 4 (emergency)
+    // 2000 mm → zone 0 (alert/normal, ≥ 2000)
     {
         uint8_t frame[MP_FRAME_LEN];
-        buildMPFrame(frame, 199000, 30);
+        buildMPFrame(frame, 2000000, 30);
         obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
-        ASSERT_EQ(rd.distance_mm, 199);
+        ASSERT_EQ(rd.distance_mm, 2000);
+        ASSERT_EQ(rd.zone, 0);
+    }
+    // 499 mm → zone 4 (emergency, just below 500 boundary)
+    {
+        uint8_t frame[MP_FRAME_LEN];
+        buildMPFrame(frame, 499000, 30);
+        obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+        ASSERT_EQ(rd.distance_mm, 499);
         ASSERT_EQ(rd.zone, 4);
+    }
+}
+
+// Test 13b: Exhaustive boundary regression — 50 cm policy
+// Verifies no off-by-one at any zone boundary and that the boundary
+// value itself belongs to the *farther* (safer) zone.
+static void test_zone_boundaries_exhaustive() {
+    printf("  test_zone_boundaries_exhaustive...\n");
+
+    struct Case { uint32_t um; uint16_t mm; uint8_t zone; const char* name; };
+    const Case cases[] = {
+        { 499000,  499,  4, "499 mm → emergency" },
+        { 500000,  500,  3, "500 mm → critical (boundary)" },
+        { 501000,  501,  3, "501 mm → critical" },
+        { 999000,  999,  3, "999 mm → critical" },
+        { 1000000, 1000, 2, "1000 mm → warning (boundary)" },
+        { 1001000, 1001, 2, "1001 mm → warning" },
+        { 1499000, 1499, 2, "1499 mm → warning" },
+        { 1500000, 1500, 1, "1500 mm → caution (boundary)" },
+        { 1501000, 1501, 1, "1501 mm → caution" },
+        { 1999000, 1999, 1, "1999 mm → caution" },
+        { 2000000, 2000, 0, "2000 mm → alert/normal (boundary)" },
+        { 2001000, 2001, 0, "2001 mm → alert/normal" },
+        { 3999000, 3999, 0, "3999 mm → alert/normal" },
+        { 4000000, 4000, 0, "4000 mm → alert/normal" },
+    };
+
+    for (const auto& c : cases) {
+        uint8_t frame[MP_FRAME_LEN];
+        buildMPFrame(frame, c.um, 30);
+        obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
+        if (rd.distance_mm != c.mm || rd.zone != c.zone) {
+            printf("    [%s]: got distance=%u zone=%u, expected %u/%u\n",
+                   c.name, (unsigned)rd.distance_mm, (unsigned)rd.zone,
+                   (unsigned)c.mm, (unsigned)c.zone);
+        }
+        ASSERT_EQ(rd.distance_mm, c.mm);
+        ASSERT_EQ(rd.zone, c.zone);
     }
 }
 
@@ -565,7 +618,7 @@ static void test_mixed_validity() {
 
     obstacle_sensor::Reading rd = injectMPFrameAndUpdate(frame);
     ASSERT_EQ(rd.distance_mm, 400);
-    ASSERT_EQ(rd.zone, 3);  // 200–500 = critical
+    ASSERT_EQ(rd.zone, 4);  // 400 mm < 500 = emergency (50 cm policy)
     ASSERT_EQ(rd.validCount, 61); // 64 - 2 invalid - 1 zero
 }
 
@@ -1112,7 +1165,7 @@ static void test_pixel_various_distances() {
     ASSERT_EQ(rd.distance_mm, 300);   // min
     ASSERT_EQ(rd.maxDist_mm, 2000);   // max
     ASSERT_EQ(rd.validCount, 64);
-    ASSERT_EQ(rd.zone, 3);            // 200–500 = critical
+    ASSERT_EQ(rd.zone, 4);            // 300 mm < 500 = emergency (new 50 cm policy)
 }
 
 // Test 49: Resync ignores false 0x57 in pixel data (requires 0x57+0x01 pair)
@@ -1235,7 +1288,7 @@ static void test_tfmini_valid_frame() {
     ASSERT_EQ(rd.distance_mm, 1500);
     ASSERT_EQ(rd.healthy, true);
     ASSERT(rd.status == obstacle_sensor::SensorStatus::VALID);
-    ASSERT_EQ(rd.zone, 0);   // >= 1500 → normal zone 0
+    ASSERT_EQ(rd.zone, 1);   // 1500 mm = caution boundary (50 cm policy)
     ASSERT_EQ(rd.validCount, 1);
     ASSERT_EQ(rd.dispersion_mm, 0);
 }
@@ -1299,10 +1352,46 @@ static void test_tfmini_range_clamping() {
 
 static void test_tfmini_zone_emergency() {
     printf("  test_tfmini_zone_emergency\n");
-    // 15 cm = 150 mm → zone 4 (emergency, < 200 mm)
+    // 15 cm = 150 mm → zone 4 (emergency, < 500 mm, 50 cm policy)
     obstacle_sensor::Reading rd = injectTfMiniAndUpdate(15, 500);
     ASSERT_EQ(rd.distance_mm, 150);
     ASSERT_EQ(rd.zone, 4);
+}
+
+// TF-Mini Plus exhaustive boundary regression — 50 cm policy.
+// TF-Mini Plus has cm granularity, so we use multiples of 10 mm for
+// the non-exact boundaries (49.9 / 50.0 / 50.1 cm etc.).
+static void test_tfmini_zone_boundaries_exhaustive() {
+    printf("  test_tfmini_zone_boundaries_exhaustive\n");
+
+    struct Case { uint16_t cm; uint16_t mm; uint8_t zone; const char* name; };
+    const Case cases[] = {
+        { 49,  490,  4, "490 mm → emergency" },
+        { 50,  500,  3, "500 mm → critical (boundary)" },
+        { 51,  510,  3, "510 mm → critical" },
+        { 99,  990,  3, "990 mm → critical" },
+        { 100, 1000, 2, "1000 mm → warning (boundary)" },
+        { 101, 1010, 2, "1010 mm → warning" },
+        { 149, 1490, 2, "1490 mm → warning" },
+        { 150, 1500, 1, "1500 mm → caution (boundary)" },
+        { 151, 1510, 1, "1510 mm → caution" },
+        { 199, 1990, 1, "1990 mm → caution" },
+        { 200, 2000, 0, "2000 mm → alert/normal (boundary)" },
+        { 201, 2010, 0, "2010 mm → alert/normal" },
+        { 399, 3990, 0, "3990 mm → alert/normal" },
+        { 400, 4000, 0, "4000 mm → alert/normal" },
+    };
+
+    for (const auto& c : cases) {
+        obstacle_sensor::Reading rd = injectTfMiniAndUpdate(c.cm, 500);
+        if (rd.distance_mm != c.mm || rd.zone != c.zone) {
+            printf("    [%s]: got distance=%u zone=%u, expected %u/%u\n",
+                   c.name, (unsigned)rd.distance_mm, (unsigned)rd.zone,
+                   (unsigned)c.mm, (unsigned)c.zone);
+        }
+        ASSERT_EQ(rd.distance_mm, c.mm);
+        ASSERT_EQ(rd.zone, c.zone);
+    }
 }
 
 static void test_tfmini_config_defaults() {
@@ -1689,6 +1778,7 @@ int main() {
     test_tfmini_bad_checksum_rejected();
     test_tfmini_range_clamping();
     test_tfmini_zone_emergency();
+    test_tfmini_zone_boundaries_exhaustive();
     test_tfmini_non_blocking_cap();
     test_tfmini_resync_on_bad_header();
     test_tfmini_stuck_detection();
@@ -1726,6 +1816,7 @@ int main() {
     test_bad_checksum_rejected();
     test_emergency_zone();
     test_zone_boundaries();
+    test_zone_boundaries_exhaustive();
     test_above_max_range_clamped();
     test_below_min_range_clamped();
     test_small_distance_um_to_mm();

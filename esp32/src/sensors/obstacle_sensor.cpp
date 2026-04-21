@@ -157,11 +157,16 @@ static uint16_t diagUartHWM_         = 0;  // UART available() high-water mark
 
 // -------------------------------------------------------------------------
 // Zone mapping — matches STM32 distance tiers (safety_system.c)
-//   < 500 mm  → zone 4 (emergency, scale=0.0)
-//   500–1000  → zone 3 (critical,  scale=0.3)
-//   1000–1500 → zone 2 (warning,   scale=0.7)
-//   1500–2000 → zone 1 (caution,   scale=0.85)
-//   > 2000    → zone 0 (normal,    scale=1.0)
+// 50 cm minimum-distance policy (updated: emergency now < 500 mm, was 200 mm)
+//   < 500 mm       → zone 4 (emergency, scale=0.0, forward blocked)
+//   500–1000 mm    → zone 3 (critical,  scale=0.3)
+//   1000–1500 mm   → zone 2 (warning,   scale=0.7)
+//   1500–2000 mm   → zone 1 (caution,   scale=0.85)
+//   ≥ 2000 mm      → zone 0 (alert/normal, scale=0.95–1.0)
+//
+// Boundaries use "<" so exactly 500 / 1000 / 1500 / 2000 mm fall into the
+// *farther* (safer) zone — matches STM32 `if (dist < threshold)` semantics
+// in safety_system.c::Obstacle_Update().
 // -------------------------------------------------------------------------
 static constexpr uint16_t ZONE_EMERGENCY_MM = 500;
 static constexpr uint16_t ZONE_CRITICAL_MM  = 1000;
@@ -174,6 +179,37 @@ static uint8_t distanceToZone(uint16_t mm) {
     if (mm < ZONE_WARNING_MM)   return 2;
     if (mm < ZONE_CAUTION_MM)   return 1;
     return 0;
+}
+
+// -------------------------------------------------------------------------
+// EMA filter for zone-classification stability near boundaries.
+//
+// TF-Mini Plus / TOFSense-M readings exhibit ±cm-scale jitter; without
+// filtering, a value oscillating around e.g. 500 mm can toggle between
+// zones 3 (critical) and 4 (emergency) every frame.
+//
+// Integer EMA, alpha = 0.3:   filtered = (3·new + 7·prev) / 10
+//   - O(1), no malloc, deterministic
+//   - Time constant ≈ 3.3 samples ≈ 33 ms at 100 Hz (negligible latency vs
+//     CONFIRM_MS = 200 ms on STM32).
+//   - Reset to 0 whenever the sensor transitions to INVALID (timeout) so
+//     that the first valid reading after a gap is not biased by stale data.
+//
+// Applied to *zone classification only* — the raw `measuredMm` is still
+// reported in `reading_.distance_mm` (and hence CAN 0x208) so STM32
+// sanity checks and telemetry continue to see unfiltered distance.
+// -------------------------------------------------------------------------
+static uint16_t zoneFilterMm_ = 0;   // 0 = uninitialized, reseed on next frame
+
+static uint16_t updateZoneFilter(uint16_t measuredMm) {
+    if (zoneFilterMm_ == 0) {
+        zoneFilterMm_ = measuredMm;
+    } else {
+        // (3*new + 7*prev) / 10, with u32 accumulation to avoid overflow
+        zoneFilterMm_ = static_cast<uint16_t>(
+            ((uint32_t)measuredMm * 3u + (uint32_t)zoneFilterMm_ * 7u) / 10u);
+    }
+    return zoneFilterMm_;
 }
 
 #if SENSOR_TYPE == SENSOR_TYPE_TFMINI
@@ -364,6 +400,7 @@ void init(const Config& cfg) {
     diagUartHWM_        = 0;
 
     reading_ = Reading{};  // Reset to defaults
+    zoneFilterMm_ = 0;     // Reseed EMA on next valid frame
 
 #if SENSOR_TYPE == SENSOR_TYPE_TFMINI
     Serial.printf("[OBSTACLE] TF-Mini Plus init (UART1, %lu bps, rxBuf %u, "
@@ -693,6 +730,7 @@ void update(float vehicleSpeedKmh) {
             reading_.healthy     = false;
             reading_.distance_mm = 0;  // Clear stale value (defense-in-depth)
             reading_.zone        = 0;  // Reset zone to safe default
+            zoneFilterMm_        = 0;  // Reseed EMA on next valid frame
         }
         return;
     }
@@ -706,8 +744,11 @@ void update(float vehicleSpeedKmh) {
     }
 
     // Valid reading — update state
+    // Raw measuredMm is used for reading_.distance_mm (unchanged CAN telemetry
+    // semantics) and pixel statistics. Zone classification is done on an
+    // EMA-filtered value to prevent oscillation at boundaries under noise.
     reading_.distance_mm  = measuredMm;
-    reading_.zone         = distanceToZone(measuredMm);
+    reading_.zone         = distanceToZone(updateZoneFilter(measuredMm));
 #if SENSOR_TYPE == SENSOR_TYPE_TFMINI
     // TF-Mini Plus: single-point sensor — all pixel statistics report the
     // same single distance value.

@@ -710,10 +710,11 @@ struct ObstacleState {
 
 | Zone | Distance | Color | Audio | Safety Action (STM32) |
 |------|----------|-------|-------|----------------------|
-| SAFE (0) | > 1000 mm | Green | None | No speed limit |
-| CAUTION (1) | 500–1000 mm | Yellow | None | 70% power limit |
-| WARNING (2) | 200–500 mm | Orange | AUDIO_OBSTACULO (54) | 30% power limit |
-| CRITICAL (3) | < 200 mm | Red (flashing) | AUDIO_EMERGENCIA (31) | SAFE state (emergency stop) |
+| SAFE (0) | ≥ 2000 mm | Green | None | No speed limit |
+| CAUTION (1) | 1500–2000 mm | Cyan | None | 85% power limit |
+| WARNING (2) | 1000–1500 mm | Yellow | None | 70% power limit |
+| CRITICAL (3) | 500–1000 mm | Orange | AUDIO_OBSTACULO (54) | 30% power limit |
+| EMERGENCY (4) | < 500 mm | Red (flashing) | AUDIO_EMERGENCIA (31) | SAFE state (emergency stop, 50 cm policy) |
 
 ### 5.5 Display Integration
 
@@ -759,7 +760,7 @@ The overlay system (used for heartbeat loss, degraded mode, and fault flags) now
 | Overlay | Trigger | Display | Priority |
 |---------|---------|---------|----------|
 | Heartbeat loss | No 0x001 for >250 ms | Red bar: "STM32 HEARTBEAT LOST" | Highest |
-| Obstacle CRITICAL | zone == 3, distance < 200 mm | Red bar: "OBSTACLE ⚠ 0.15m" | High |
+| Obstacle CRITICAL | zone == 4, distance < 500 mm | Red bar: "OBSTACLE ⚠ 0.15m" | High |
 | Fault flags | fault_flags ≠ 0 | Amber bar with fault description | Medium |
 | Degraded mode | system_state == 3 | Amber bar: "DEGRADED MODE" | Low |
 
@@ -2102,13 +2103,15 @@ File: Core/Src/safety_system.c, lines 1181–1311 — Safety_CheckObstacle() (pe
 ```
 
 Safety logic:
-- Distance < 200 mm → `obstacle_scale = 0.0`, SAFE state
-- Distance 200–500 mm → `obstacle_scale = 0.3`
-- Distance 500–1000 mm → `obstacle_scale = 0.7`
-- Distance > 1000 mm → `obstacle_scale = 1.0` (no reduction)
+- Distance < 500 mm → `obstacle_scale = 0.0`, SAFE state (50 cm policy)
+- Distance 500–1000 mm → `obstacle_scale = 0.3`
+- Distance 1000–1500 mm → `obstacle_scale = 0.7`
+- Distance 1500–2000 mm → `obstacle_scale = 0.85`
+- Distance 2000–4000 mm → `obstacle_scale = 0.95`
+- Distance > 4000 mm → `obstacle_scale = 1.0` (no reduction)
 - CAN timeout > 500 ms → `obstacle_scale = 0.0`, SAFE state
 - Stale data (counter frozen ≥ 3) → `obstacle_scale = 0.0`, SAFE state
-- Recovery: distance > 500 mm for > 1 second
+- Recovery: distance > 750 mm for > 1 second
 
 #### E.2.5 Timeout Configuration
 

@@ -15,7 +15,7 @@ El sensor TOFSense-M S (LiDAR de tiempo de vuelo) cumple una **función de segur
 |-------|---------|-------------|
 | **Asistencia al conductor** | Muestra distancia frontal al obstáculo en pantalla TFT con zonas de color (verde >1.5 m, amarillo 0.5–1.5 m, rojo <0.5 m) | ESP32-S3 (HMI) |
 | **Seguridad primaria** | Lógica de 5 zonas con reducción progresiva de velocidad, detección de reacción de niño, frenado de emergencia ESP32 | ESP32-S3 (lógica de obstáculo) |
-| **Seguridad secundaria (backstop)** | Limitador de par de 3 niveles basado en distancia CAN: <200 mm → parada total + estado SAFE; 200–500 mm → 30% potencia; 500–1000 mm → 70% potencia | STM32G474RE (safety_system.c) |
+| **Seguridad secundaria (backstop)** | Limitador de par de 5 niveles basado en distancia CAN (50 cm policy): <500 mm → parada total + estado SAFE; 500–1000 mm → 30% potencia; 1000–1500 mm → 70% potencia; 1500–2000 mm → 85% potencia; 2000–4000 mm → 95% potencia | STM32G474RE (safety_system.c) |
 | **Seguridad terciaria** | Máquina de estados de seguridad: transición a SAFE, corte de relés, watchdog independiente | STM32G474RE (relés + IWDG) |
 
 El sensor **no es solo informativo ni solo de telemetría**: participa directamente en la cadena de decisiones de movimiento del vehículo a través de la variable `obstacle_scale` que multiplica el PWM base de todos los motores de tracción en `Traction_Update()`.

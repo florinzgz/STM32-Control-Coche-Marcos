@@ -31,7 +31,7 @@ Un corte duro por proximidad directa en la STM32 **no viola esta separación** p
 
 2. **No introduce dependencia cruzada.** El corte duro usaría exactamente el mismo campo `distance_mm` ya recibido por CAN (mensaje 0x208, bytes 0–1). No requiere datos adicionales de la ESP32.
 
-3. **Fortalece el principio de autoridad final.** Actualmente la STM32 *ya* aplica `obstacle_scale = 0.0` cuando `distance < 200 mm` (línea 1269 de `safety_system.c`), pero lo hace **dentro** de `Obstacle_Update()`, que depende de varias precondiciones:
+3. **Fortalece el principio de autoridad final.** Actualmente la STM32 *ya* aplica `obstacle_scale = 0.0` cuando `distance < 500 mm` (50 cm policy, en `safety_system.c::Obstacle_Update()`), pero lo hace **dentro** de `Obstacle_Update()`, que depende de varias precondiciones:
    - Que el módulo de obstáculo esté habilitado (service mode check, línea 1217).
    - Que `obstacle_data_valid == 1` (primera trama ya recibida, línea 1237).
    - Que no haya timeout CAN previo que ya haya disparado SAFE por otra vía (línea 1225).
@@ -62,7 +62,7 @@ CAN 0x208 → Obstacle_ProcessCAN() → obstacle_distance_mm actualizado
                               ¿primera trama recibida? → skip (scale = 1.0)
                               ¿datos stale? → SAFE
                               ¿sensor unhealthy? → SAFE
-                              ¿distancia < 200 mm? → scale = 0.0 + SAFE
+                              ¿distancia < 500 mm? (50 cm policy) → scale = 0.0 + SAFE
                                           ↓
                               safety_status.obstacle_scale = scale
                                           ↓
@@ -88,7 +88,7 @@ CAN 0x208 → distance_mm actualizado
 |---------|---------------|--------------------------|
 | **Dependency on service mode** | Si `MODULE_OBSTACLE_DETECT` está deshabilitado, `Obstacle_Update()` fuerza `obstacle_scale = 1.0` y **no evalúa distancia**. Un obstáculo a 100 mm no provocaría parada. | El corte duro operaría **independientemente del service mode**. Incluso con el módulo deshabilitado, una proximidad extrema seguiría provocando corte de tracción. |
 | **Dependency on SAFE state machine** | El corte por distancia dispara `Safety_SetState(SYS_STATE_SAFE)` + `Safety_SetError(SAFETY_ERROR_OBSTACLE)`. Si la máquina de estados tuviera un bug (e.g., transición bloqueada, error code ya ocupado por otra falla), el efecto podría no ser inmediato. | El corte duro actuaría directamente sobre el PWM o sobre un flag que `Traction_Update()` respeta incondicionalmente, sin pasar por la máquina de estados. |
-| **First-message grace period** | Antes de recibir el primer 0x208, `obstacle_data_valid == 0` → `obstacle_scale = 1.0`. Si la ESP32 enviara un primer mensaje con distancia < 200 mm, ese mensaje se procesaría normalmente. Pero si la variable no estuviera correctamente inicializada, habría una ventana. | El corte duro dependería solo de `distance_mm < umbral` con un valor por defecto seguro (e.g., `0xFFFF` = sin obstáculo). |
+| **First-message grace period** | Antes de recibir el primer 0x208, `obstacle_data_valid == 0` → `obstacle_scale = 1.0`. Si la ESP32 enviara un primer mensaje con distancia < 500 mm (50 cm policy), ese mensaje se procesaría normalmente. Pero si la variable no estuviera correctamente inicializada, habría una ventana. | El corte duro dependería solo de `distance_mm < umbral` con un valor por defecto seguro (e.g., `0xFFFF` = sin obstáculo). |
 | **Latencia de actuación** | `Obstacle_Update()` se ejecuta cada 10 ms. En el peor caso, el CAN RX ocurre 1 µs después de la última invocación → 10 ms hasta evaluar la distancia. | Si el corte duro se evaluara en el ISR de CAN o directamente en `Traction_Update()`, la latencia sería ≤ 10 ms (igual o menor). |
 
 La diferencia clave es de **independencia**: el corte duro no dependería de la correcta operación de la máquina de estados SAFE, de los flags de error, del service mode, ni del flujo de `Obstacle_Update()`. Es un **disyuntor de último recurso** que reduce la superficie de fallo del propio firmware de la STM32.

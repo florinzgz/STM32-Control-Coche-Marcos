@@ -94,7 +94,7 @@ Each state has strict entry/exit conditions:
 
 | Zone | Distance | Torque Scale | Behavior |
 |---|---|---|---|
-| Emergency | <200mm | 0.0 | Forward completely blocked |
+| Emergency | <500mm | 0.0 | Forward completely blocked |
 | Critical | 200–500mm | 0.3 | Heavy reduction |
 | Warning | 500–1000mm | 0.7 | Moderate reduction |
 | Caution | 1000–1500mm | 0.85 | Gentle slowdown |

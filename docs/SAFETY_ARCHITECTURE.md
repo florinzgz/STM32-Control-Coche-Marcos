@@ -638,11 +638,11 @@ consultiva recibida del ESP32 por CAN. La detección se basa en distancia al obs
 
 | Zona | Distancia | Factor (`wheel_scale`) |
 |------|-----------|------------------------|
-| Emergency | < 200 mm | 0.0 (parada total) |
-| Critical | 200 – 500 mm | 0.3 |
-| Warning | 500 – 1000 mm | 0.7 |
-| Caution | 1000 – 1500 mm | 0.85 |
-| Alert | 1500 – 4000 mm | 0.95 |
+| Emergency | < 500 mm | 0.0 (parada total) |
+| Critical | 500 – 1000 mm | 0.3 |
+| Warning | 1000 – 1500 mm | 0.7 |
+| Caution | 1500 – 2000 mm | 0.85 |
+| Alert | 2000 – 4000 mm | 0.95 |
 | Clear | > 4000 mm | 1.0 (sin restricción) |
 
 ### Temporizaciones
@@ -655,7 +655,7 @@ consultiva recibida del ESP32 por CAN. La detección se basa en distancia al obs
 ### ⚙️ Qué hace
 
 El factor `wheel_scale` multiplica el comando de torque de las ruedas en la dirección
-del obstáculo. En zona Emergency (< 200 mm), el factor es 0.0: torque cero, parada
+del obstáculo. En zona Emergency (< 500 mm), el factor es 0.0: torque cero, parada
 completa en esa dirección.
 
 ### Escape en reversa

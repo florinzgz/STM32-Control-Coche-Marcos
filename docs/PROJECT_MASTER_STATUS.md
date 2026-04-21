@@ -230,10 +230,10 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | CAN bus-off detection and recovery (non-blocking, retry-limited) | `CAN_CheckBusOff()` | `Core/Src/can_handler.c` |
 | Sensor plausibility (temperature range, current range, wheel speed range) | `Safety_CheckSensors()` | `Core/Src/safety_system.c` |
 | Encoder health (range, jump, frozen-value detection) | `Encoder_CheckHealth()` | `Core/Src/motor_control.c` |
-| Obstacle backstop limiter (5-zone: <200mm→0%, 200–500→30%, 500–1000→70%, 1000–1500→85%, 1500–4000→95%) | `Obstacle_Update()` | `Core/Src/safety_system.c` |
+| Obstacle backstop limiter (5-zone, 50 cm policy: <500mm→0%, 500–1000→30%, 1000–1500→70%, 1500–2000→85%, 2000–4000→95%) | `Obstacle_Update()` | `Core/Src/safety_system.c` |
 | Child reaction detection (>10% pedal drop in 500ms tightens warning→0.5, caution→0.7 for 2s) | `Obstacle_Update()` child reaction block | `Core/Src/safety_system.c` |
 | Obstacle stale-data detection (rolling counter, 3-frame freeze) | `Obstacle_ProcessCAN()` stale counter logic | `Core/Src/safety_system.c` |
-| Obstacle recovery hysteresis (>500 mm for >1 s) | Recovery logic in `Obstacle_Update()` | `Core/Src/safety_system.c` |
+| Obstacle recovery hysteresis (>750 mm for >1 s) | Recovery logic in `Obstacle_Update()` | `Core/Src/safety_system.c` |
 | Non-blocking relay power sequencing (Main 50 ms → Traction 20 ms → Direction) | `Relay_SequencerUpdate()` state machine | `Core/Src/safety_system.c` |
 | Command validation gate (throttle clamp, steering rate limit, mode speed gate) | `Safety_ValidateThrottle()`, `Safety_ValidateSteering()`, `Safety_ValidateModeChange()` | `Core/Src/safety_system.c` |
 | Fail-safe action (emergency stop + center steering if encoder healthy) | `Safety_FailSafe()` | `Core/Src/safety_system.c` |

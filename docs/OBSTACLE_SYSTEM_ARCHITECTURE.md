@@ -44,7 +44,7 @@ The obstacle system is split between the ESP32-S3 (sensor + logic) and STM32G474
 |------|-------|------|------|-------|-------------|
 | 0 | distance_LSB | uint8 | mm | — | Low byte of minimum obstacle distance |
 | 1 | distance_MSB | uint8 | mm | — | High byte of minimum obstacle distance |
-| 2 | zone | uint8 | — | 0–5 | Obstacle proximity zone |
+| 2 | zone | uint8 | — | 0–4 | Obstacle proximity zone (50 cm policy) |
 | 3 | sensor_health | uint8 | — | 0–1 | 0 = unhealthy, 1 = healthy |
 | 4 | counter | uint8 | — | 0–255 | Rolling counter (must increment) |
 
@@ -58,7 +58,7 @@ The obstacle system is split between the ESP32-S3 (sensor + logic) and STM32G474
 | 0 | speedReductionFactor | uint8 | ×100 (0–100). Informational only. |
 | 1 | emergencyBrakeApplied | uint8 | 1 = ESP32 emergency brake active |
 | 2 | collisionImminent | uint8 | 1 = ESP32 collision risk detected |
-| 3 | obstacleZone | uint8 | ESP32 zone (0–5) |
+| 3 | obstacleZone | uint8 | ESP32 zone (0–4) |
 | 4 | childReactionDetected | uint8 | 1 = child reaction detected |
 | 5–7 | reserved | uint8 | Always 0x00 |
 
@@ -78,13 +78,13 @@ The obstacle system integrates into the existing STM32 safety state machine:
 BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR
 
 Obstacle triggers:
-  Distance < 200 mm         → ACTIVE/DEGRADED → SAFE
+  Distance < 500 mm         → ACTIVE/DEGRADED → SAFE
   CAN timeout (> 500 ms)    → ACTIVE/DEGRADED → SAFE
   Sensor unhealthy           → ACTIVE/DEGRADED → SAFE
   Stale data (≥ 3 frames)   → ACTIVE/DEGRADED → SAFE
 
 Recovery:
-  Distance > 500 mm for > 1 s + healthy sensor → SAFE → ACTIVE
+  Distance > 750 mm for > 1 s + healthy sensor → SAFE → ACTIVE
 ```
 
 ### Interaction with Existing Safety Checks
@@ -106,7 +106,7 @@ Recovery:
 | Sensor UART failure | ESP32 reports `sensor_health = 0` in 0x208 | obstacle_scale = 0.0, SAFE state | Auto-recover when ESP32 reports healthy sensor |
 | Stale data (frozen counter) | Counter not incrementing for ≥ 3 frames | obstacle_scale = 0.0, SAFE state | Auto-recover when counter resumes incrementing |
 | CAN spoofing (false distance) | Not directly detectable | Rolling counter provides sequence integrity | CAN bus is point-to-point; physical access required |
-| Distance near boundary (200 mm) | Hysteresis: trigger at 200 mm, recover at 500 mm | Prevents oscillation | 1 s debounce before recovery |
+| Distance near boundary (500 mm) | Hysteresis: trigger at 500 mm, recover at 750 mm | Prevents oscillation | 1 s debounce before recovery |
 | ESP32 sends cached data | Counter frozen detection | SAFE state after 3 stale frames | Counter must resume incrementing |
 
 ### CAN Spoofing Mitigation
@@ -149,10 +149,10 @@ Before the first 0x208 message is received, the STM32 sets `obstacle_scale = 1.0
 
 | Condition | Threshold | Debounce |
 |-----------|-----------|----------|
-| Trigger emergency | distance < 200 mm | Immediate |
-| Recovery from emergency | distance > 500 mm | 1 second sustained |
+| Trigger emergency | distance < 500 mm | Immediate |
+| Recovery from emergency | distance > 750 mm | 1 second sustained |
 
-The 200 mm → 500 mm hysteresis band (300 mm gap) prevents oscillation when an obstacle is near the trigger boundary. The 1-second debounce ensures the obstacle has truly cleared before resuming motor operation.
+The 500 mm → 750 mm hysteresis band (250 mm gap) prevents oscillation when an obstacle is near the trigger boundary. The 1-second debounce ensures the obstacle has truly cleared before resuming motor operation.
 
 ### CAN Timeout Recovery
 
@@ -160,7 +160,7 @@ When obstacle CAN messages resume after a timeout:
 1. `obstacle_data_valid` is set to 1
 2. `obstacle_last_rx_tick` is updated
 3. Rolling counter stale detection is reset
-4. If distance > 500 mm and sensor healthy, recovery debounce starts
+4. If distance > 750 mm and sensor healthy, recovery debounce starts
 5. After 1 second of sustained clearance, obstacle_scale returns to 1.0
 
 ### Service Mode Override
@@ -198,10 +198,12 @@ Where:
 
   --- Obstacle Scale (uniform, all wheels) ---
   obstacle_scale  = f(CAN_distance):
-    distance < 200 mm   → 0.0 + SAFE state
-    distance 200-500    → 0.3
-    distance 500-1000   → 0.7
-    distance > 1000     → 1.0
+    distance < 500 mm   → 0.0 + SAFE state
+    distance 500-1000   → 0.3
+    distance 1000-1500  → 0.7
+    distance 1500-2000  → 0.85
+    distance 2000-4000  → 0.95
+    distance ≥ 4000     → 1.0
     CAN timeout         → 0.0 + SAFE state
     sensor unhealthy    → 0.0 + SAFE state
 
