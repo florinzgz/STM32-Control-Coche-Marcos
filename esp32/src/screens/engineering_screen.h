@@ -111,6 +111,10 @@ private:
     // Working copies of mapping arrays (edited in-place, saved on "SAVE")
     uint8_t     inaMap_[config_store::NUM_INA226_CH]  = {0,1,2,3,4,5};
     uint8_t     tempMap_[config_store::NUM_TEMP_SENS] = {0,1,2,3,4};
+    // Live raw temperatures by physical sensor index (from STATUS_TEMP 0x202)
+    // Used in the temp mapping editor so the user can identify sensors by
+    // touching them (warmth increases the displayed reading for that index).
+    int8_t      rawTempC_[config_store::NUM_TEMP_SENS] = {};
 
     // DTC log CLEAR confirmation state (§4.1 — prevent accidental clear)
     bool        clearLogPending_ = false;  // true after first tap on CLEAR; awaiting confirm

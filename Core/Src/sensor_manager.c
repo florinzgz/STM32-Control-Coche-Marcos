@@ -20,6 +20,8 @@
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "main.h"
+#include <string.h>    /* memcmp / memcpy — topology change detection */
+#include <math.h>      /* fabsf — stale detection epsilon              */
 
 /* =========================================================================
  *  Wheel Speed Sensors – EXTI pulse counting
@@ -741,6 +743,53 @@ static float temperatures[NUM_DS18B20] = {0};
 static uint8_t  ds18b20_rom[NUM_DS18B20][8];
 static uint8_t  ds18b20_count = 0;
 
+/* ----------------------------------------------------------------------
+ * Sensor topology & staleness tracking (diagnostics — NOT on CAN)
+ *
+ * These are purely internal flags exposed via dedicated getters.  They
+ * do NOT affect the existing safety system, the CAN protocol, or the
+ * sensor-map frame (0x206).  They allow higher-level code (e.g. UI,
+ * future diagnostic frame) to detect:
+ *   - Missing sensors         (topology_invalid)
+ *   - Frozen / dead sensors   (temp_stale[i])
+ * without changing any existing public API.
+ * -------------------------------------------------------------------- */
+
+/* Minimum discovered sensor count required for a physically valid
+ * topology.  If fewer than NUM_DS18B20 sensors are found the saved
+ * physIdx→role map can no longer be guaranteed to be correct (a sensor
+ * may have disappeared and shifted the discovery order).             */
+#define DS18B20_MIN_REQUIRED    NUM_DS18B20
+
+/* A sensor whose reading has not changed for this many milliseconds is
+ * declared "stale".  DS18B20 at 1/16 °C resolution normally fluctuates
+ * at least one LSB within a few seconds of ambient noise; a truly
+ * frozen value is a strong indicator of a disconnected or dead sensor
+ * (or a stuck 1-Wire bus).                                            */
+#define DS18B20_STALE_TIMEOUT_MS 2000U
+
+/* Minimum temperature delta (°C) considered a "real" change for stale
+ * detection.  Anything smaller is treated as bus/ADC quantisation noise
+ * and does NOT refresh the last-change timestamp.  0.01 °C is well below
+ * the DS18B20 1/16 °C (≈0.0625 °C) native resolution, so any genuine
+ * reading variation exceeds it — but a perfectly stuck sensor stays
+ * detectable because its value is bit-identical cycle after cycle.   */
+#define DS18B20_EPSILON         0.01f
+
+static bool     topology_invalid = true;                    /* until first scan */
+static bool     topology_changed = false;                   /* edge on ROM-set change */
+static uint32_t temp_last_change_tick[NUM_DS18B20] = {0};
+static float    temp_prev_value[NUM_DS18B20] = {0};
+static bool     temp_stale[NUM_DS18B20] = {false};
+
+/* Previous ROM snapshot — used to detect topology *changes* (reconnect,
+ * re-order, swap) independently of the count-based `topology_invalid`.
+ * Initialised to all-zero so the first discovered ROM set is always
+ * reported as a change (fires once at boot, which is correct: the upper
+ * layer may want to re-validate the persisted mapping after boot).   */
+static uint8_t  ds18b20_rom_prev[NUM_DS18B20][8] = {{0}};
+static uint8_t  ds18b20_count_prev = 0;
+
 /* Hot-plug rescan interval (ms) — re-enumerate OneWire bus periodically */
 #define OW_RESCAN_INTERVAL_MS  10000   /* 10 seconds between rescans */
 
@@ -960,7 +1009,61 @@ static void OW_SearchAll(void)
      * that are no longer present after re-enumeration.              */
     for (uint8_t i = ds18b20_count; i < prev_count && i < NUM_DS18B20; i++) {
         temperatures[i] = 0.0f;
+        /* Reset stale tracking for slots that disappeared so that a
+         * later re-discovery starts from a clean baseline rather than
+         * inheriting a frozen timestamp from a dead sensor.          */
+        temp_stale[i]            = false;
+        temp_prev_value[i]       = 0.0f;
+        temp_last_change_tick[i] = HAL_GetTick();
     }
+
+    /* -----------------------------------------------------------------
+     * TASK 1 — sensor topology validity.
+     *
+     * The persisted physIdx→role map is bound to the exact 1-Wire
+     * discovery order in effect when the user performed the mapping.
+     * If a sensor later disappears, Search ROM returns fewer entries
+     * AND the surviving sensors may have shifted positions — so the
+     * stored map can no longer be trusted.
+     *
+     * We expose this as a read-only flag (`topology_invalid`).  No CAN
+     * frame is altered; higher layers (UI / future diagnostic frame)
+     * may query it via Temperature_IsTopologyValid().
+     * --------------------------------------------------------------- */
+    topology_invalid = (ds18b20_count < DS18B20_MIN_REQUIRED);
+
+    /* -----------------------------------------------------------------
+     * TASK 1 (extension) — topology CHANGE detection.
+     *
+     * Independently of the count-based validity check, flag any change
+     * in the discovered ROM set (reconnect, replacement, re-ordering,
+     * swap).  We compare the full fixed-size ROM table — both the
+     * active and the unused entries — so that a sensor added to a
+     * previously-empty slot is correctly reported as a change.
+     *
+     * The flag is latched: once set, it stays true until the caller
+     * explicitly acknowledges via Temperature_ClearTopologyChanged().
+     * This matches the idiomatic "edge-triggered, host-cleared" style
+     * used elsewhere in the safety subsystem and avoids missing a
+     * transient change between two polls from the host.
+     *
+     * Note on first-boot: `ds18b20_rom_prev` is zero-initialised, so
+     * the very first scan almost always produces topology_changed=true.
+     * That is intentional — the upper layer (ESP32 / UI) can treat
+     * this as "recheck the saved mapping is still coherent".
+     * --------------------------------------------------------------- */
+    if (ds18b20_count != ds18b20_count_prev ||
+        memcmp(ds18b20_rom_prev, ds18b20_rom,
+               sizeof(ds18b20_rom)) != 0) {
+        topology_changed = true;
+    }
+
+    /* Snapshot current ROM table for the next rescan comparison.
+     * memcpy over the full fixed-size buffer (not just the live
+     * prefix) so stale slots beyond `ds18b20_count` don't leak into
+     * the next comparison.                                          */
+    memcpy(ds18b20_rom_prev, ds18b20_rom, sizeof(ds18b20_rom));
+    ds18b20_count_prev = ds18b20_count;
 }
 
 /**
@@ -1041,6 +1144,50 @@ void Temperature_ReadAll(void)
     for (uint8_t i = 0; i < ds18b20_count; i++) {
         temperatures[i] = OW_ReadTemperature(i);
     }
+
+    /* -----------------------------------------------------------------
+     * TASK 2 — stale detection with noise-tolerant epsilon.
+     *
+     * A real DS18B20 at 1/16 °C (≈0.0625 °C) resolution typically jitters
+     * by at least one LSB over a 2 s window due to ambient noise and
+     * self-heating micro-variations.  However, a temporarily-stable
+     * sensor (e.g. thermal equilibrium reached) can stay at bit-exact
+     * the same value for a short period without being faulty.
+     *
+     * We therefore treat a change as "real" only when it exceeds
+     * DS18B20_EPSILON (0.01 °C).  That threshold is well below the
+     * sensor's native LSB, so any genuine quantised movement still
+     * counts as activity — while a perfectly frozen reading (CRC-pegged,
+     * dead sensor, stuck bus) remains detectable because its value is
+     * bit-identical cycle after cycle.
+     *
+     * This is informational only.  The Safety_SetError() calls inside
+     * OW_ReadTemperature() remain the authoritative safety path.
+     * --------------------------------------------------------------- */
+    {
+        uint32_t now = HAL_GetTick();
+        for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+            if (i >= ds18b20_count) {
+                /* Not discovered — not applicable. Keep flag false so
+                 * UI does not confuse "missing" with "stale"; the
+                 * topology flag covers the missing case.  Also clear
+                 * per-sensor tracking so a later re-discovery starts
+                 * from a clean baseline.                                */
+                temp_stale[i]            = false;
+                temp_prev_value[i]       = 0.0f;
+                temp_last_change_tick[i] = now;
+                continue;
+            }
+            if (fabsf(temperatures[i] - temp_prev_value[i]) > DS18B20_EPSILON) {
+                temp_prev_value[i]       = temperatures[i];
+                temp_last_change_tick[i] = now;
+                temp_stale[i]            = false;
+            } else if ((uint32_t)(now - temp_last_change_tick[i])
+                       >= DS18B20_STALE_TIMEOUT_MS) {
+                temp_stale[i] = true;
+            }
+        }
+    }
 }
 
 float Temperature_Get(uint8_t index)
@@ -1052,6 +1199,95 @@ float Temperature_Get(uint8_t index)
 uint8_t Temperature_GetCount(void)
 {
     return ds18b20_count;
+}
+
+/* -----------------------------------------------------------------------
+ * DS18B20 diagnostic accessors (TASK 1 / 2 / 4)
+ *
+ * These getters are the ONLY way external code queries topology /
+ * staleness state.  They do not allocate, do not block, and must not
+ * mutate any shared state — they are safe to call from any tier of the
+ * main cooperative loop.  No CAN frame format is altered.
+ * -----------------------------------------------------------------------*/
+
+/**
+ * @brief  True when the discovered sensor count matches expectations.
+ *         False if any sensor is missing after the latest Search ROM.
+ *         When false, the persisted physIdx→role mapping is potentially
+ *         misaligned with physical positions.
+ */
+bool Temperature_IsTopologyValid(void)
+{
+    return !topology_invalid;
+}
+
+/**
+ * @brief  True when the discovered ROM set has changed since the
+ *         previous rescan (sensor added, removed, replaced, or
+ *         re-ordered by the 1-Wire bus).
+ *
+ *         The flag is *latched*: once raised it stays true until the
+ *         caller explicitly acknowledges via
+ *         Temperature_ClearTopologyChanged().  This guarantees the
+ *         host cannot miss a transient change that happened between
+ *         two polls.  After boot it is almost always true on the first
+ *         scan — by design, so the host can re-check that the
+ *         persisted physIdx→role mapping is still coherent.
+ */
+bool Temperature_HasTopologyChanged(void)
+{
+    return topology_changed;
+}
+
+/**
+ * @brief  Acknowledge and clear the `topology_changed` latch.
+ *         Intended for UI/host use after it has reconciled the new
+ *         topology with the stored mapping.  Does NOT clear
+ *         `topology_invalid` — that flag reflects the current count
+ *         and is recomputed on every scan.
+ */
+void Temperature_ClearTopologyChanged(void)
+{
+    topology_changed = false;
+}
+
+/**
+ * @brief  True if sensor @p idx has produced the same value for at
+ *         least DS18B20_STALE_TIMEOUT_MS — a strong indicator of a
+ *         frozen, dead, or disconnected sensor.
+ *         Returns false for out-of-range indices or sensors that have
+ *         not yet been discovered.
+ */
+bool Temperature_IsStale(uint8_t idx)
+{
+    if (idx >= NUM_DS18B20) return false;
+    return temp_stale[idx];
+}
+
+/**
+ * @brief  Packed snapshot of DS18B20 diagnostic state.
+ *
+ * Layout (uint16_t):
+ *   bits  0..2  — discovered sensor count (0..5, masked to 3 bits)
+ *   bit   3     — topology_invalid  (1 = missing sensors)
+ *   bit   4     — topology_changed  (1 = ROM set changed since ack)
+ *   bits  5..7  — reserved (must read 0)
+ *   bits  8..12 — stale bitmask, one bit per physIdx (bit 8 = physIdx 0)
+ *   bits 13..15 — reserved (must read 0)
+ *
+ * Intended for internal logging / future diagnostic frame.  This
+ * function does not transmit anything by itself and does not clear
+ * the latched topology_changed bit.
+ */
+uint16_t Temperature_GetDiagnosticFlags(void)
+{
+    uint16_t flags = (uint16_t)(ds18b20_count & 0x07U);
+    if (topology_invalid) flags |= (uint16_t)(1U << 3);
+    if (topology_changed) flags |= (uint16_t)(1U << 4);
+    for (uint8_t i = 0; i < NUM_DS18B20 && i < 5U; i++) {
+        if (temp_stale[i]) flags |= (uint16_t)(1U << (8U + i));
+    }
+    return flags;
 }
 
 /* ---- DS18B20 hot-plug detection ----

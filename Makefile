@@ -29,6 +29,7 @@ C_SOURCES = \
   $(CORE_SRC)/eps_params.c \
   $(CORE_SRC)/error_log.c \
   $(CORE_SRC)/steering_cal_store.c \
+  $(CORE_SRC)/sensor_map_store.c \
   $(CORE_SRC)/math_safety.c \
   $(CORE_SRC)/stm32g4xx_it.c \
   $(CORE_SRC)/stm32g4xx_hal_msp.c \

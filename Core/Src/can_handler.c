@@ -17,7 +17,9 @@
 #include "service_mode.h"
 #include "math_safety.h"
 #include "error_log.h"
+#include "sensor_map_store.h"
 #include <math.h>
+#include <string.h>
 
 /* ---- Defensive declarations ----
  * These symbols are normally provided by main.h (included via
@@ -66,6 +68,28 @@ static uint8_t  heartbeat_counter = 0;
 /* LED relay states — front (PB10) and rear (PB11) — default OFF */
 static bool led_relay_front = false;
 static bool led_relay_rear  = false;
+
+/* ---- DS18B20 sanity-filter thresholds (STATUS_TEMP_MAP) ----
+ * Practical operating window used by CAN_SendStatusTempMap() to reject
+ * glitched readings (disconnect sentinel -127 °C, NaN/Inf, CRC errors).
+ * Tighter than the datasheet -55..+125 °C so that any implausible in-
+ * vehicle reading is also filtered.                                   */
+#define TEMP_MIN_VALID_C   (-30.0f)
+#define TEMP_MAX_VALID_C   (120.0f)
+
+/* ---- Boot-time plausibility window (R-1) ----
+ * Narrower than the steady-state sanity window above.  Used ONLY during
+ * the 2-sample bootstrap in CAN_SendStatusTempMap() to reject EMI-corrupted
+ * samples that happen to be in-range-but-unrealistic at startup (e.g. a
+ * pair of coherent 90 °C readings while the cabin is at 25 °C).  Chosen
+ * to cover every realistic ambient / warm-bench condition (0..60 °C) but
+ * exclude values that a motor winding would only reach under sustained
+ * load — which cannot occur in the first few seconds after boot, before
+ * any drive command has been executed.  Has NO effect after the role is
+ * armed; the broader TEMP_MIN_VALID_C / TEMP_MAX_VALID_C window continues
+ * to gate steady-state samples exactly as before.                       */
+#define BOOT_MIN_VALID_C   (0.0f)
+#define BOOT_MAX_VALID_C   (60.0f)
 
 /* SAFETY FIX: ESP32 heartbeat alive-counter freeze detection.
  * Track the rolling counter sent in byte 0 of the ESP32 heartbeat (0x011).
@@ -541,29 +565,297 @@ void CAN_SendStatusTraction(void) {
 /**
  * @brief  Send explicit temperature sensor mapping to ESP32.
  *
- * Uses the same DS18B20 readings already acquired by Temperature_ReadAll().
- * The payload assigns an unambiguous meaning to each byte:
+ * Applies the physIdx→role map stored in flash (via sensor_map_store) so
+ * that each byte in the frame corresponds to the labelled motor position:
  *
- *   Byte 0: Motor FL temperature (°C, int8_t)
- *   Byte 1: Motor FR temperature (°C, int8_t)
- *   Byte 2: Motor RL temperature (°C, int8_t)
- *   Byte 3: Motor RR temperature (°C, int8_t)
- *   Byte 4: Ambient temperature  (°C, int8_t)
+ *   Byte 0: FL motor temperature  (°C, int8_t)
+ *   Byte 1: FR motor temperature  (°C, int8_t)
+ *   Byte 2: RL motor temperature  (°C, int8_t)
+ *   Byte 3: RR motor temperature  (°C, int8_t)
+ *   Byte 4: Ambient temperature   (°C, int8_t)
  *
- * Sensor index mapping: 0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient.
- * Values are not filtered or recalculated — raw DS18B20 readings.
- * If a sensor is disabled in Service Mode the value is still reported.
+ * The mapping is set by the user via the engineering menu on the ESP32
+ * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 125.
+ * If no valid mapping has been saved, discovery order is used (index 0=FL, etc.)
+ *
+ * ---- Sanity filter (production hardening) ----
+ * DS18B20 readings can briefly become invalid when a sensor is physically
+ * disconnected, mid-conversion, or producing a CRC error.  Rather than
+ * propagating garbage to the ESP32 HMI, we filter each sample:
+ *   - NaN / ±Inf                      → rejected
+ *   - ≤ -30 °C or ≥ +120 °C            → rejected (outside practical range;
+ *                                        -127 sentinel from OneWire
+ *                                        read errors is also covered)
+ * Rejected samples are replaced with the last-known-good value for that
+ * role (or 0 at cold-boot when nothing has been seen yet), so a brief
+ * glitch never shows up as a wild spike on the dashboard.  The filter
+ * is strictly informational — it does NOT touch Safety_* or the
+ * overheat supervision path, which operate on the raw reading.
  *
  * CAN ID: 0x206   DLC: 5   Rate: 1000 ms (1 Hz)
  */
 void CAN_SendStatusTempMap(void) {
-    uint8_t data[5];
+    /* Last-known-good °C per role (index = role 0..4).  Cold-start value
+     * of 0 is safe — it is the same neutral default the frame already
+     * used before this filter was added.                               */
+    static int8_t last_good_temp[5] = {0, 0, 0, 0, 0};
 
-    data[0] = (uint8_t)(int8_t)Temperature_Get(0);  /* FL  */
-    data[1] = (uint8_t)(int8_t)Temperature_Get(1);  /* FR  */
-    data[2] = (uint8_t)(int8_t)Temperature_Get(2);  /* RL  */
-    data[3] = (uint8_t)(int8_t)Temperature_Get(3);  /* RR  */
-    data[4] = (uint8_t)(int8_t)Temperature_Get(4);  /* AMB */
+    /* Float mirror of last_good_temp[] used ONLY for the TEMP_MAX_STEP_C
+     * comparison.  Storing the value in int8 for the CAN payload (which
+     * is unchanged) introduces up to ±1 °C of truncation error in the
+     * step check; the float mirror removes that bias so the 20 °C
+     * threshold is honoured exactly.  The int8 array remains the source
+     * of truth for the frame — this mirror is internal only.           */
+    static float last_good_temp_f[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+    /* Tracks whether `last_good_temp[role]` holds a *validated* sampled
+     * value (true) or not (false).  Used by the anti-EMI step-filter
+     * (TASK 3) so no sample is rejected against a neutral default, and
+     * by the boot-time bootstrap phase below so `last_good_valid` is
+     * only raised once two consecutive samples have agreed.            */
+    static bool last_good_valid[5] = {false, false, false, false, false};
+
+    /* --------------------------------------------------------------------
+     * Boot-time / post-disconnect bootstrap state.
+     *
+     * Rationale: in a real vehicle the *first* post-boot sample coincides
+     * with the worst EMI burst of the whole duty cycle (motors + BTS7960
+     * + relays all energising).  A corrupted-but-in-range first sample
+     * (e.g. 90 °C when the real reading is 25 °C) would otherwise be
+     * accepted unconditionally, arming `last_good_valid`.  Every later
+     * real sample would then exceed TEMP_MAX_STEP_C and get rejected
+     * forever (stuck until reboot).
+     *
+     * Fix: require the first *two consecutive* valid samples to agree
+     * within ±BOOT_REF_TOLERANCE_C (a single EMI glitch will not pass
+     * this gate, because the next undistorted sample lands tens of
+     * degrees away and resets the reference) before promoting the role
+     * to the steady-state EMI step filter.  While bootstrapping we
+     * still emit `current_temp` directly (after the existing sanity
+     * tests), so the dashboard sees a live value from the very first
+     * valid reading — only the *filter's* memory is withheld until
+     * the candidate has been corroborated.  O(1), deterministic, no
+     * heap, no blocking.                                                */
+    static float   bootstrap_ref[5]   = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    static uint8_t bootstrap_count[5] = {0, 0, 0, 0, 0};
+
+    /* Tolerance between the bootstrap reference and the next sample
+     * required to accept them as agreeing.  Chosen tighter than
+     * TEMP_MAX_STEP_C (20 °C) so that a large, transient EMI glitch
+     * cannot slip through the bootstrap as a "plausible step". */
+    #define BOOT_REF_TOLERANCE_C  10.0f
+
+    /* Maximum plausible single-frame step (°C).  Temperature physics
+     * of the motor phase windings is dominated by thermal mass —
+     * even under a short-circuit fault, the reading cannot realistically
+     * jump by tens of degrees inside a 1 Hz frame window.  A jump
+     * larger than this threshold is therefore attributed to EMI on the
+     * 1-Wire line (the DS18B20 CRC catches most of it, but intermittent
+     * ground-bounce glitches can produce in-range garbage that
+     * nevertheless decodes cleanly).  We reject such samples and keep
+     * reporting the last-known-good value for the affected role.      */
+    #define TEMP_MAX_STEP_C    20.0f
+
+    /* Sanity thresholds are defined at file scope (TEMP_MIN_VALID_C /
+     * TEMP_MAX_VALID_C) so they can be shared with other temperature
+     * code paths if needed.                                            */
+
+    /* ----------------------------------------------------------------
+     * R-2 — Topology change reset.
+     *
+     * When the 1-Wire bus changes physically (a DS18B20 reconnects, a
+     * new ROM appears, or the enumerated sensor order changes), the
+     * armed per-role references above now describe *different* sensors
+     * than the ones currently being sampled.  Comparing a fresh reading
+     * from a newly-attached motor probe against the previous motor's
+     * last_good_temp_f would either (a) wrongly reject a legitimate new
+     * sensor via the TEMP_MAX_STEP_C filter, or (b) mask a real fault.
+     *
+     * `Temperature_HasTopologyChanged()` is a sticky latch raised by
+     * `sensor_manager` on any enumeration/ROM-set change; we ack it
+     * here so the filter relearns from scratch via the bootstrap
+     * phase.  The reset is strictly state-only — no CAN behaviour is
+     * altered and the frame is still emitted on this cycle.
+     * ---------------------------------------------------------------- */
+    if (Temperature_HasTopologyChanged()) {
+        memset(last_good_valid,  0, sizeof(last_good_valid));
+        memset(bootstrap_count,  0, sizeof(bootstrap_count));
+        memset(bootstrap_ref,    0, sizeof(bootstrap_ref));
+        memset(last_good_temp_f, 0, sizeof(last_good_temp_f));
+        Temperature_ClearTopologyChanged();
+    }
+
+    uint8_t data[5] = {0};
+
+    const uint8_t *map = SensorMapStore_GetMap();
+    for (uint8_t physIdx = 0; physIdx < 5U; physIdx++) {
+        uint8_t role = map[physIdx];
+        if (role >= 5U) {
+            /* Unset / out-of-range role — shouldn't happen because the
+             * RX handler enforces strict mode, but stay defensive.     */
+            continue;
+        }
+
+        float raw = Temperature_Get(physIdx);
+
+        /* ----------------------------------------------------------------
+         * TASK 4 — explicit DS18B20 disconnect sentinel check.
+         *
+         * A disconnected DS18B20 (pull-up floating high / parasite lost)
+         * typically reads as all-ones on the scratchpad, which decodes
+         * to exactly -127 °C (0xFC90 / 16 = -127.9375, rounded).  We
+         * test this explicitly BEFORE the generic range check so that
+         * the log/telemetry layer can later distinguish "disconnected"
+         * from "out-of-range glitch" without changing the range constants.
+         *
+         * The comparison is one-sided (`raw <= -126`): any reading at or
+         * below -126 °C is definitionally outside the DS18B20 operating
+         * range (-55 °C per datasheet), so it is always a disconnect /
+         * bus fault.  This covers both the -127.0 and the -127.9375
+         * variants.  The subsequent range test would also catch these,
+         * but the named check makes intent obvious.
+         * -------------------------------------------------------------- */
+        #define DS18B20_DISCONNECT_SENTINEL   (-127.0f)
+        bool disconnected = (raw <= (DS18B20_DISCONNECT_SENTINEL + 1.0f));
+
+        /* Accept sample only if it is a finite number inside the window
+         * AND not the disconnect sentinel.  isnan / isinf are standard
+         * <math.h> checks.                                              */
+        bool sample_ok = !disconnected
+                      && !isnan(raw) && !isinf(raw)
+                      && (raw >= TEMP_MIN_VALID_C)
+                      && (raw <= TEMP_MAX_VALID_C);
+
+        /* Snapshot the "hard invalid" verdict (NaN / Inf / out-of-range
+         * / -127 °C sentinel) before the step filter can soft-reject a
+         * physically plausible but EMI-corrupted sample below.  Only a
+         * hard-invalid sample is allowed to tear down the steady-state
+         * reference and force a new bootstrap — a single step-filter
+         * rejection must NOT demote an armed role, otherwise one EMI
+         * spike would cost two extra cycles of unfiltered output.     */
+        bool hard_invalid = !sample_ok;
+
+        /* ----------------------------------------------------------------
+         * TASK 3 — anti-EMI plausibility filter (steady-state phase).
+         *
+         * Even in-range samples can be corrupted by electromagnetic
+         * interference on the 1-Wire line.  Compare against the last
+         * accepted value for this ROLE and reject samples that jump
+         * by more than TEMP_MAX_STEP_C between two 1 Hz frames.
+         *
+         * Applied only when the role has completed the boot-time
+         * bootstrap (`last_good_valid`) — during bootstrap the step
+         * filter is intentionally bypassed so a corrupted first sample
+         * cannot latch the filter memory and lock out every subsequent
+         * real reading.  Comparison uses the float mirror of the last
+         * good value to avoid the ±1 °C truncation error introduced by
+         * the int8 CAN representation.
+         *
+         * The filter runs *after* the basic sanity tests so that a
+         * sensor coming back online with a large but plausible new
+         * reading is not mistaken for an EMI glitch; a definitively
+         * bad reading (NaN, out-of-range, disconnect) is already
+         * rejected by `sample_ok` above.
+         * -------------------------------------------------------------- */
+        if (sample_ok && last_good_valid[role]) {
+            if (fabsf(raw - last_good_temp_f[role]) > TEMP_MAX_STEP_C) {
+                sample_ok = false;
+            }
+        }
+
+        int8_t reported;
+        if (hard_invalid) {
+            /* Hard-invalid sample (NaN / Inf / out-of-range / -127 °C
+             * sentinel). Reset bootstrap and drop any armed steady-
+             * state reference so the next time the sensor returns
+             * coherent data it has to re-prove itself via the 2-sample
+             * bootstrap. This is the only path that resets per spec;
+             * a mere step-filter rejection (below) keeps the armed
+             * reference intact.                                        */
+            last_good_valid[role] = false;
+            bootstrap_count[role] = 0;
+
+            /* Fall back to the last valid reading for this ROLE (not
+             * physIdx): if the user re-maps sensors the last-good value
+             * rightly follows the role, so a freshly-assigned sensor
+             * inherits the previous motor's last reading for one
+             * frame rather than flashing 0 °C.                         */
+            reported = last_good_temp[role];
+        } else if (!sample_ok) {
+            /* Soft rejection: sample was in range but failed the EMI
+             * step filter. Keep the armed reference, just report the
+             * last-known-good value for this frame.                   */
+            reported = last_good_temp[role];
+        } else if (last_good_valid[role]) {
+            /* Steady-state: sample passed EMI step filter. Accept it
+             * as the new reference for both the CAN payload (int8)
+             * and the filter comparator (float).                       */
+            reported              = (int8_t)raw;
+            last_good_temp[role]  = reported;
+            last_good_temp_f[role] = raw;
+        } else {
+            /* ------------------------------------------------------------
+             * Bootstrap phase.
+             *
+             * The role has no validated reference yet (cold boot, or
+             * a previous reset after an invalid sample).  Emit the
+             * current raw reading directly so the dashboard is not
+             * blanked — but only promote the role to the steady-state
+             * filter once two consecutive samples agree within
+             * BOOT_REF_TOLERANCE_C.  A single EMI glitch therefore
+             * cannot arm the filter with a bogus reference.
+             * --------------------------------------------------------- */
+
+            /* R-1 — boot-time plausibility window.
+             *
+             * The 2-sample consensus filter below protects against a
+             * single transient glitch, but a sustained EMI pattern
+             * (two back-to-back readings both biased the same way,
+             * e.g. 90 °C while the true value is 25 °C) could still
+             * sneak past the 10 °C agreement tolerance.  Clamp the
+             * physically plausible boot range to 0..60 °C: anything
+             * outside this window at cold-start is treated as noise,
+             * the bootstrap counter is reset, and the sample is NOT
+             * emitted this cycle (data[role] stays at its zeroed
+             * default, identical to a cold-boot frame).  This has
+             * no effect once the role is armed — steady-state samples
+             * still use the broader TEMP_MIN_VALID_C/TEMP_MAX_VALID_C
+             * window and the TEMP_MAX_STEP_C step filter.            */
+            if (raw < BOOT_MIN_VALID_C || raw > BOOT_MAX_VALID_C) {
+                bootstrap_count[role] = 0U;
+                continue;
+            }
+
+            if (bootstrap_count[role] == 0U) {
+                /* First valid sample — candidate reference. */
+                bootstrap_ref[role]   = raw;
+                bootstrap_count[role] = 1U;
+            } else if (fabsf(raw - bootstrap_ref[role]) <= BOOT_REF_TOLERANCE_C) {
+                /* Corroborating sample — candidate confirmed. */
+                bootstrap_count[role]++;
+            } else {
+                /* Disagreement — previous reference was likely a glitch.
+                 * Start over with the new sample as the candidate. */
+                bootstrap_ref[role]   = raw;
+                bootstrap_count[role] = 1U;
+            }
+
+            reported = (int8_t)raw;
+
+            if (bootstrap_count[role] >= 2U) {
+                /* Two consecutive agreeing samples — arm the steady-
+                 * state filter.  From the next cycle onwards the
+                 * TEMP_MAX_STEP_C check protects the role.          */
+                last_good_temp[role]   = reported;
+                last_good_temp_f[role] = raw;
+                last_good_valid[role]  = true;
+                /* bootstrap_count stays; it will be reset on the next
+                 * invalid sample.  Leaving it non-zero is harmless —
+                 * the bootstrap branch is gated by last_good_valid. */
+            }
+        }
+        data[role] = (uint8_t)reported;
+    }
 
     TransmitFrame(CAN_ID_STATUS_TEMP_MAP, data, 5);
 }
@@ -1200,7 +1492,87 @@ void CAN_ProcessMessages(void) {
                     CAN_SendCommandAck(CAN_ID_CMD_LED & 0xFF, ACK_INVALID);
                 }
                 break;
-                
+
+            case CAN_ID_CMD_SENSOR_MAP_TEMP:
+                /* DS18B20 physIdx→role mapping from ESP32 engineering menu.
+                 *   DLC:    5 (one byte per physical sensor index 0-4)
+                 *   Byte i: role assigned to physical sensor i
+                 *            0=FL, 1=FR, 2=RL, 3=RR, 4=Ambient
+                 *            0xFF reserved for "unset" (not accepted in
+                 *            strict mode — see below).
+                 *
+                 * ---- STRICT VALIDATION (production hardening) ----
+                 * To guarantee that every motor position has an
+                 * unambiguous temperature source, we REQUIRE a complete
+                 * permutation of roles 0..4: each role must appear
+                 * exactly once.  This rejects:
+                 *   - payloads shorter than 5 bytes        (DLC check)
+                 *   - values outside the 0..4 range        (includes 0xFF)
+                 *   - duplicated roles (e.g. two sensors claim FL motor)
+                 *   - missing roles (implied by the two above rules)
+                 *
+                 * The ESP32 engineering UI always sends a full 5-byte
+                 * permutation, so strict mode is transparent in normal
+                 * operation and only catches genuinely broken payloads.
+                 *
+                 * ---- ACK SEMANTICS (format UNCHANGED) ----
+                 *   ACK_OK       → map validated AND flash write succeeded
+                 *   ACK_INVALID  → payload rejected at validation (never
+                 *                  reached flash, never touched any state)
+                 *   ACK_REJECTED → payload was valid but flash write
+                 *                  failed (unlock/erase/program error) OR
+                 *                  rate-limited (too many writes).  State
+                 *                  unchanged — previous mapping still
+                 *                  active.
+                 * The frame format is untouched; only the meaning of
+                 * each code on this specific command is clarified.      */
+                if (msg_len < 5) {
+                    sat_inc_u32(&can_stats.rx_errors);
+                    CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF, ACK_INVALID);
+                    break;
+                }
+                {
+                    bool    map_valid = true;
+                    uint8_t role_seen = 0;  /* bitmask of roles 0..4 seen */
+                    for (uint8_t i = 0; i < 5U; i++) {
+                        uint8_t role = rx_payload[i];
+                        /* Strict mode: 0xFF (unset) is NOT accepted.  The
+                         * ESP32 always provides a complete permutation.   */
+                        if (role >= 5U) { map_valid = false; break; }
+                        uint8_t bit = (uint8_t)(1U << role);
+                        if (role_seen & bit) { map_valid = false; break; }
+                        role_seen |= bit;
+                    }
+                    /* All five bits (0b00011111 = 0x1F) must be set — this
+                     * proves every role is assigned at least once and,
+                     * combined with the duplicate check above, exactly
+                     * once.  Redundant with the per-iteration checks but
+                     * kept as an explicit, self-documenting invariant.   */
+                    if (map_valid && role_seen != 0x1FU) {
+                        map_valid = false;
+                    }
+                    if (!map_valid) {
+                        sat_inc_u32(&can_stats.rx_errors);
+                        CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF, ACK_INVALID);
+                        break;
+                    }
+                    /* Valid payload — attempt to persist.  The store
+                     * performs its own no-op elision and wear-rate
+                     * limiting; on either a true write error or a
+                     * rate-limited rejection we report ACK_REJECTED so
+                     * the UI can distinguish "bad data" from "busy".   */
+                    bool saved = SensorMapStore_Save(rx_payload);
+                    CAN_SendCommandAck(CAN_ID_CMD_SENSOR_MAP_TEMP & 0xFF,
+                                       saved ? ACK_OK : ACK_REJECTED);
+                    /* Post-save consistency:  SensorMapStore_Save()
+                     * updated the in-RAM active map BEFORE returning
+                     * (both on no-op elision and on successful write),
+                     * so the very next CAN_SendStatusTempMap() tick at
+                     * the 1 Hz slow-tier will naturally reflect the
+                     * new mapping — no extra CAN frame needed.          */
+                }
+                break;
+
             default:
                 /* Unknown message ID – filtered out by hardware,
                  * should never reach here.                        */

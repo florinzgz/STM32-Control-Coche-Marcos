@@ -80,6 +80,51 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — fix(can_handler): Harden DS18B20 boot filtering — R-1 plausibility window + R-2 topology reset
+- **Fecha:** 2026-04-21
+- **Autor:** Copilot
+- **Rama:** `copilot/connect-temperature-sensors`
+- **Commit:** `e5c77c8`
+- **Descripción del cambio:** Refuerza el filtro de bootstrap de 2 muestras ya existente en `CAN_SendStatusTempMap()` cerrando dos riesgos residuales sin modificar formato de trama, APIs ni lógica de seguridad.
+
+#### Riesgos cerrados
+
+| ID | Riesgo | Mitigación |
+|----|--------|-----------|
+| **R-1** | Bootstrap falso consenso: dos muestras EMI consistentes dentro de ±`BOOT_REF_TOLERANCE_C` (10 °C) podían armar el filtro con una referencia errónea (ej. 90 °C con ambiente a 25 °C). | Ventana de plausibilidad 0–60 °C durante bootstrap: muestra fuera de rango → `bootstrap_count[role]=0` + `continue` (no se emite en ese ciclo). |
+| **R-2** | Desincronización por cambio de topología 1-Wire (reconexión o reordenación de sensores): `last_good_valid[]` quedaba armado comparando un sensor nuevo contra la referencia del anterior → rechazo silencioso por `TEMP_MAX_STEP_C`. | Al inicio de `CAN_SendStatusTempMap()`, si `Temperature_HasTopologyChanged()` → `memset(0)` de `last_good_valid[]`, `bootstrap_count[]`, `bootstrap_ref[]`, `last_good_temp_f[]` + `Temperature_ClearTopologyChanged()`. |
+
+#### Cambios en archivos
+
+| Archivo | Cambios |
+|---------|---------|
+| `Core/Src/can_handler.c` | +61/−0 líneas: `#include <string.h>`, `BOOT_MIN_VALID_C=0.0f` / `BOOT_MAX_VALID_C=60.0f` a ámbito de archivo junto a `TEMP_MIN_VALID_C`, bloque de reset por topología al inicio de la función (después de las declaraciones `static`), early-`continue` de plausibilidad como primera instrucción de la rama de bootstrap. |
+
+#### Contratos preservados
+
+- CAN ID `0x206` (STATUS_TEMP_MAP), DLC 5 y layout de payload — **sin cambios**.
+- Filtros existentes (NaN/Inf, rango `-30..120 °C`, centinela `-127 °C` de desconexión, `TEMP_MAX_STEP_C=20 °C`) — **intactos**.
+- `Safety_*`, firma de función, planificación 1 Hz — **sin cambios**.
+- O(1) por rol, sin `malloc`, sin bucles nuevos, sin bloqueo.
+
+#### Criterios de aceptación (verificados en harness independiente)
+
+| AC | Escenario | Resultado |
+|----|-----------|-----------|
+| 1 | Pico EMI al boot (90 °C) → luego 25 °C, 25 °C | Pico rechazado por R-1, converge en ≤ 2 muestras válidas, `armed=1` ✅ |
+| 2 | Valores consistentes pero irreales fuera de ventana (p.ej. 80 °C / 82 °C) | Ambos rechazados, `armed=0` ✅ |
+| 3 | Arranque normal (25 °C, 25 °C) | Bootstrap completa normalmente ✅ |
+| 4 | Cambio de topología tras armado | Estado purgado, re-bootstrap correcto desde el siguiente ciclo ✅ |
+| 5 | Sin regresiones: trama 0x206, `Safety_*`, timing 1 Hz, pico EMI post-armado sigue rechazado por `TEMP_MAX_STEP_C`, desconexión `-127` sigue reseteando | ✅ |
+
+- **Safety validation summary:**
+  - ✅ Sin cambios en máquina de estados de seguridad ni en `Safety_*`.
+  - ✅ Sin cambios en protocolo CAN (IDs, DLC, payload).
+  - ✅ Las dos ventanas añadidas **solo** actúan mientras `last_good_valid[role]==false`; tras el armado el comportamiento es idéntico al anterior.
+  - ✅ CodeQL: 0 alertas.
+
+- **Impacto:** Convergencia determinista del filtro de temperatura bajo EMI sostenido al boot y ante reconexiones/reordenación de sensores DS18B20, sin ningún efecto observable en régimen permanente.
+
 ### PR — feat: Front LED Bar Turn Signals + Rear LED Premium Improvements
 - **Fecha:** 2026-04-17
 - **Autor:** Copilot

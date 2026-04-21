@@ -72,6 +72,12 @@ static const char* const TEMP_POS_NAMES[config_store::NUM_TEMP_SENS] = {
     "FL Wheel", "FR Wheel", "RL Wheel", "RR Wheel", "Ambient"
 };
 
+// Display helper literals — UTF-8 degree symbol and arrow for sensor map rows.
+// TFT_eSPI's built-in font renders byte 0x1A as a right-pointing arrow glyph;
+// this is a font-specific glyph, NOT the ASCII control character SUB.
+static constexpr const char TEMP_DEGREE_STR[] = "\xC2\xB0" "C";   // "°C" in UTF-8
+static constexpr const char TEMP_ARROW_STR[]  = "\x1A ";           // TFT_eSPI glyph 0x1A = right arrow
+
 // ---- Module control layout ----
 static constexpr int16_t MOD_ROW_X   = 10;
 static constexpr int16_t MOD_ROW_W   = 460;
@@ -285,6 +291,21 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         steeringAngle_ = data.steering().angleRaw;
         steeringCal_   = data.steering().calibrated;
         encoderDataChanged_ = changed;
+    }
+
+    // Cache raw physical-index temperatures for the temp sensor mapping editor.
+    // data.temp() is populated from STATUS_TEMP (0x202) which sends sensors in
+    // discovery order — exactly the physical indices shown in the mapping table.
+    if (currentMenu_ == SubMenu::SENSOR_MAP_TEMP) {
+        bool changed = false;
+        for (uint8_t i = 0; i < config_store::NUM_TEMP_SENS; ++i) {
+            int8_t t = data.temp().temps[i];
+            if (rawTempC_[i] != t) {
+                rawTempC_[i] = t;
+                changed = true;
+            }
+        }
+        if (changed) needsRedraw_ = true;
     }
 }
 
@@ -539,6 +560,20 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         } else {
             config_store::setTempSensorMap(tempMap_);
             Serial.println("[ENG] Temp sensor map saved");
+            /* Send the mapping to STM32 via CAN (0x112) so it can apply it
+             * to STATUS_TEMP_MAP (0x206) frames immediately without reboot.
+             * The STM32 will also persist it to flash page 125.             */
+            {
+                CanFrame frame = {};
+                frame.identifier       = can::CMD_SENSOR_MAP_TEMP;
+                frame.extd             = 0;
+                frame.data_length_code = config_store::NUM_TEMP_SENS;
+                for (uint8_t i = 0; i < config_store::NUM_TEMP_SENS; ++i) {
+                    frame.data[i] = tempMap_[i];
+                }
+                ESP32Can.writeFrame(frame, 0);
+                Serial.println("[ENG] Temp sensor map sent to STM32 via CAN 0x112");
+            }
         }
         config_store::flush();
         // Return to main
@@ -1285,9 +1320,12 @@ void EngineeringScreen::drawSensorMapIna() {
 // drawSensorMapTemp — DS18B20 sensor-to-position mapping editor
 //
 // Displays a table: each row = one discovered DS18B20 index (0-4).
-// Column A = sensor index (fixed), Column B = assigned position (editable).
-// Tap a row to cycle the position through all 5 options.
-// Tap SAVE to persist. Tap BACK to discard changes.
+// Column A = sensor index + live °C reading (from STATUS_TEMP 0x202, physical order)
+// Column B = assigned position (editable, tap to cycle through options).
+// Tap SAVE to persist and send to STM32. Tap BACK to discard changes.
+//
+// The live temperature helps identify which sensor is which physically:
+// touch a sensor to warm it up and watch which row changes.
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawSensorMapTemp() {
     RTRACE_BEGIN_SCREEN("eng_temp_map");
@@ -1306,9 +1344,9 @@ void EngineeringScreen::drawSensorMapTemp() {
     // Column headers
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString("Sensor", MAP_ROW_X + 4, 30);
-    tft.drawString("Assigned Position  (tap to change)", MAP_ROW_X + 90, 30);
-    RTRACE_TEXT(MAP_ROW_X + 4, 30, "Sensor", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("Sensor  Temp", MAP_ROW_X + 4, 30);
+    tft.drawString("Assigned Position  (tap to change)", MAP_ROW_X + 130, 30);
+    RTRACE_TEXT(MAP_ROW_X + 4, 30, "Sensor  Temp", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
 
     char buf[ui::FMT_BUF_LARGE];
 
@@ -1319,17 +1357,18 @@ void EngineeringScreen::drawSensorMapTemp() {
         tft.fillRect(MAP_ROW_X, rowY, MAP_ROW_W, MAP_ROW_H, ui::COL_DARK_GRAY);
         tft.drawRect(MAP_ROW_X, rowY, MAP_ROW_W, MAP_ROW_H, ui::COL_GRAY);
 
-        // Sensor index (left column)
-        tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+        // Sensor index + live raw temperature (left column)
         tft.setTextDatum(ML_DATUM);
-        tft.drawString(TEMP_IDX_NAMES[i], MAP_ROW_X + 4, rowY + MAP_ROW_H / 2);
+        snprintf(buf, sizeof(buf), "%s %3d%s", TEMP_IDX_NAMES[i], (int)rawTempC_[i], TEMP_DEGREE_STR);
+        tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+        tft.drawString(buf, MAP_ROW_X + 4, rowY + MAP_ROW_H / 2);
 
         // Assigned position (right column)
         uint8_t posIdx = tempMap_[i];
         if (posIdx >= config_store::NUM_TEMP_SENS) posIdx = 0;
-        snprintf(buf, sizeof(buf), "→ %s", TEMP_POS_NAMES[posIdx]);
+        snprintf(buf, sizeof(buf), "%s%s", TEMP_ARROW_STR, TEMP_POS_NAMES[posIdx]);
         tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
-        tft.drawString(buf, MAP_ROW_X + 90, rowY + MAP_ROW_H / 2);
+        tft.drawString(buf, MAP_ROW_X + 130, rowY + MAP_ROW_H / 2);
     }
 
     tft.setTextDatum(TL_DATUM);
