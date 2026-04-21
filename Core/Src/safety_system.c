@@ -325,11 +325,11 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 /* Fixed distance thresholds (floor values — dynamic thresholds may
  * be larger at higher speeds due to stopping-distance calculation).
  * 5 zones: emergency, critical, warning, caution, alert.              */
-#define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0         */
-#define OBSTACLE_CRITICAL_MM        500     /* 200–500 mm → scale = 0.3       */
-#define OBSTACLE_WARNING_MM         1000    /* 500–1000 mm → scale = 0.7      */
-#define OBSTACLE_CAUTION_MM         1500    /* 1000–1500 mm → scale = 0.85    */
-#define OBSTACLE_ALERT_MM           4000    /* 1500–4000 mm → scale = 0.95    */
+#define OBSTACLE_EMERGENCY_MM       500     /* < 500 mm (50 cm) → scale = 0.0 */
+#define OBSTACLE_CRITICAL_MM        1000    /* 500–1000 mm → scale = 0.3      */
+#define OBSTACLE_WARNING_MM         1500    /* 1000–1500 mm → scale = 0.7     */
+#define OBSTACLE_CAUTION_MM         2000    /* 1500–2000 mm → scale = 0.85    */
+#define OBSTACLE_ALERT_MM           4000    /* 2000–4000 mm → scale = 0.95    */
 
 /* Temporal hysteresis */
 #define OBSTACLE_CONFIRM_MS         200     /* Confirm obstacle before acting  */

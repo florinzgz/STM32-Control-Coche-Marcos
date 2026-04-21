@@ -360,8 +360,8 @@ bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
  * stopping distance, and temporal hysteresis.                              */
 
 /* Obstacle distance zone thresholds (mm) — 5 zones */
-#define OBSTACLE_CAUTION_MM_PUB     1500    /* 1000–1500 mm → scale = 0.85    */
-#define OBSTACLE_ALERT_MM_PUB       4000    /* 1500–4000 mm → scale = 0.95    */
+#define OBSTACLE_CAUTION_MM_PUB     2000    /* 1500–2000 mm → scale = 0.85    */
+#define OBSTACLE_ALERT_MM_PUB       4000    /* 2000–4000 mm → scale = 0.95    */
 
 /* Child reaction detection — tighten obstacle factors when child
  * releases pedal rapidly (instinctive reaction to obstacle).               */
