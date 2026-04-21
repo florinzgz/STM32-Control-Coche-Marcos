@@ -325,16 +325,20 @@ static uint8_t  abs_pulse_phase[4];     /* 1 = ON (reduced), 0 = OFF      */
 /* Fixed distance thresholds (floor values — dynamic thresholds may
  * be larger at higher speeds due to stopping-distance calculation).
  * 5 zones: emergency, critical, warning, caution, alert.              */
-#define OBSTACLE_EMERGENCY_MM       200     /* < 200 mm → scale = 0.0         */
-#define OBSTACLE_CRITICAL_MM        500     /* 200–500 mm → scale = 0.3       */
-#define OBSTACLE_WARNING_MM         1000    /* 500–1000 mm → scale = 0.7      */
-#define OBSTACLE_CAUTION_MM         1500    /* 1000–1500 mm → scale = 0.85    */
-#define OBSTACLE_ALERT_MM           4000    /* 1500–4000 mm → scale = 0.95    */
+#define OBSTACLE_EMERGENCY_MM       500     /* < 500 mm (50 cm) → scale = 0.0 */
+#define OBSTACLE_CRITICAL_MM        1000    /* 500–1000 mm → scale = 0.3      */
+#define OBSTACLE_WARNING_MM         1500    /* 1000–1500 mm → scale = 0.7     */
+#define OBSTACLE_CAUTION_MM         2000    /* 1500–2000 mm → scale = 0.85    */
+#define OBSTACLE_ALERT_MM           4000    /* 2000–4000 mm → scale = 0.95    */
 
 /* Temporal hysteresis */
 #define OBSTACLE_CONFIRM_MS         200     /* Confirm obstacle before acting  */
 #define OBSTACLE_CLEAR_MS           1000    /* Confirm clearance before reset  */
-#define OBSTACLE_RECOVERY_MM        500     /* Min distance to start clearing  */
+/* Spatial hysteresis: obstacle is considered cleared only above
+ * OBSTACLE_RECOVERY_MM, which is deliberately set well beyond
+ * OBSTACLE_EMERGENCY_MM (500 mm) to prevent zone oscillation at the
+ * boundary under LiDAR noise or EMI.  Band = 250 mm. */
+#define OBSTACLE_RECOVERY_MM        750     /* Min distance to start clearing  */
 
 /* CAN timeout — advisory.  When exceeded:
  *   - If obstacle was active: hold last scale (≤ OBSTACLE_FAULT_SCALE)
@@ -376,7 +380,7 @@ static inline float obstacle_preemptive_scale(float target)
 /* ---- CAN advisory state ---- */
 static uint32_t obstacle_last_rx_tick    = 0;      /* Last 0x208 reception     */
 static uint16_t obstacle_distance_mm     = 0xFFFF; /* Last reported distance   */
-static uint8_t  obstacle_zone            = 0;      /* Last zone (0–5)          */
+static uint8_t  obstacle_zone            = 0;      /* Last zone (0–4)          */
 static uint8_t  obstacle_sensor_healthy  = 0;      /* Health flag from ESP32   */
 static uint8_t  obstacle_last_counter    = 0;      /* Rolling counter          */
 static uint8_t  obstacle_stale_count     = 0;      /* Consecutive stale frames */
@@ -2265,7 +2269,7 @@ static uint16_t Obstacle_StoppingDistance(float speed_kmh)
  *
  * Payload (DLC ≥ 5):
  *   Byte 0-1: minimum distance (mm, uint16 LE)
- *   Byte 2:   zone level (0–5)
+ *   Byte 2:   zone level (0–4)
  *   Byte 3:   sensor health (0/1)
  *   Byte 4:   rolling counter
  */

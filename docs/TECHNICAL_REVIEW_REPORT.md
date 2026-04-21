@@ -94,11 +94,11 @@ Each state has strict entry/exit conditions:
 
 | Zone | Distance | Torque Scale | Behavior |
 |---|---|---|---|
-| Emergency | <200mm | 0.0 | Forward completely blocked |
-| Critical | 200–500mm | 0.3 | Heavy reduction |
-| Warning | 500–1000mm | 0.7 | Moderate reduction |
-| Caution | 1000–1500mm | 0.85 | Gentle slowdown |
-| Alert | 1500–4000mm | 0.95 | Minimal deceleration |
+| Emergency | <500mm | 0.0 | Forward completely blocked (50 cm policy) |
+| Critical | 500–1000mm | 0.3 | Heavy reduction |
+| Warning | 1000–1500mm | 0.7 | Moderate reduction |
+| Caution | 1500–2000mm | 0.85 | Gentle slowdown |
+| Alert | 2000–4000mm | 0.95 | Minimal deceleration |
 
 The obstacle controller runs entirely on the STM32. CAN obstacle data from the ESP32 is **advisory** — the STM32 applies its own plausibility checks:
 - Maximum approach rate: 8 m/s (vehicle + obstacle combined)

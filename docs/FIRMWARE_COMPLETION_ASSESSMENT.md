@@ -34,7 +34,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 | Sistema de seguridad (7 estados) | ✅ Completo | 100% | BOOT→STANDBY→ACTIVE↔DEGRADED→SAFE→ERROR + LIMP_HOME |
 | ABS (anti-bloqueo) | ✅ Completo | 100% | Slip 15%, modulación pulsada 80 ms, per-wheel |
 | TCS (control de tracción) | ✅ Completo | 100% | Slip 15%, reducción progresiva, recovery 25%/s |
-| Detector de obstáculos (5 zonas) | ✅ Completo | 100% | Emergencia (<200mm) a Alerta (<4000mm), speed-dependent |
+| Detector de obstáculos (5 zonas) | ✅ Completo | 100% | Emergencia (<500mm, 50 cm policy) a Alerta (<4000mm), speed-dependent |
 | Detección reacción niño | ✅ Completo | 100% | Caída pedal >10% → zonas más estrictas 2 s |
 | CAN 500 kbps (todos los IDs) | ✅ Completo | 100% | 0x001-0x303, heartbeat 100 ms, bus-off recovery |
 | Relé de potencia secuenciado | ✅ Completo | 100% | MAIN→TRACTION→DIR, no-blocking |

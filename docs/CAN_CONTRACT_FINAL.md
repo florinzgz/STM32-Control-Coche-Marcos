@@ -317,10 +317,12 @@ Source: `CAN_SendError()` in `can_handler.c`
 Decoding: `uint16_t distance_mm = byte[0] | (byte[1] << 8)`
 
 The STM32 uses distance_mm to compute an independent `obstacle_scale` factor (0.0–1.0):
-- distance < 200 mm → scale = 0.0, transitions to SAFE state
-- distance 200–500 mm → scale = 0.3
-- distance 500–1000 mm → scale = 0.7
-- distance > 1000 mm → scale = 1.0
+- distance < 500 mm → scale = 0.0, transitions to SAFE state
+- distance 500–1000 mm → scale = 0.3
+- distance 1000–1500 mm → scale = 0.7
+- distance 1500–2000 mm → scale = 0.85
+- distance 2000–4000 mm → scale = 0.95
+- distance ≥ 4000 mm → scale = 1.0
 
 The rolling counter is checked for stale-data detection. If the counter does not change for 3 consecutive frames, the data is considered frozen and the STM32 triggers SAFE state (obstacle_scale = 0.0).
 
@@ -503,7 +505,7 @@ Source: `Safety_CheckCANTimeout()` in `safety_system.c`
 | 9 | SAFETY_ERROR_BATTERY_UV_WARNING | Battery bus voltage < 20.0 V → DEGRADED (40 % power limit). Recovery requires > 20.5 V (0.5 V hysteresis). |
 | 10 | SAFETY_ERROR_BATTERY_UV_CRITICAL | Battery bus voltage < 18.0 V or sensor failure → SAFE (actuators inhibited). No auto-recovery; operator must recharge and reset. |
 | 11 | SAFETY_ERROR_I2C_FAILURE | I2C bus locked / unrecoverable |
-| 12 | SAFETY_ERROR_OBSTACLE | Obstacle emergency (distance < 200 mm), obstacle CAN timeout (> 500 ms), sensor unhealthy, or stale data detected → SAFE (actuators inhibited). Auto-recovery when distance > 500 mm for > 1 s with healthy sensor. |
+| 12 | SAFETY_ERROR_OBSTACLE | Obstacle emergency (distance < 500 mm), obstacle CAN timeout (> 500 ms), sensor unhealthy, or stale data detected → SAFE (actuators inhibited). Auto-recovery when distance > 750 mm for > 1 s with healthy sensor. |
 
 Source: `Safety_Error_t` in `safety_system.h`, threshold defines in `safety_system.c`
 
@@ -559,7 +561,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | Current out of range | < 0 A or > 50 A | `Safety_CheckSensors()` |
 | Wheel speed out of range | < 0 or > 25 km/h | `Safety_CheckSensors()` |
 | Battery critical undervoltage | < 18.0 V or sensor failure | `Safety_CheckBatteryVoltage()` |
-| Obstacle emergency distance | < 200 mm reported via CAN 0x208 | `Obstacle_Update()` |
+| Obstacle emergency distance | < 500 mm reported via CAN 0x208 | `Obstacle_Update()` |
 | Obstacle CAN timeout | > 500 ms without 0x208 message (after first reception) | `Obstacle_Update()` |
 | Obstacle sensor unhealthy | Sensor health = 0 in CAN 0x208 | `Obstacle_Update()` |
 | Obstacle stale data | Rolling counter frozen for ≥ 3 frames | `Obstacle_Update()` |

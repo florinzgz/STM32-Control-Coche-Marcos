@@ -132,11 +132,11 @@ El firmware (`obstacle_sensor.cpp`) aplica las siguientes validaciones:
 
 | Zona | Distancia | Color HMI | Escala potencia | Descripción |
 |------|-----------|-----------|-----------------|-------------|
-| 4 | < 200 mm | 🔴 Rojo | 0.0 (parada total) | Emergencia |
-| 3 | 200–500 mm | 🟠 Naranja | 0.3 (30%) | Crítico |
-| 2 | 500–1000 mm | 🟡 Amarillo | 0.7 (70%) | Advertencia |
-| 1 | 1000–1500 mm | 🟢 Verde claro | 0.85 (85%) | Precaución |
-| 0 | > 1500 mm | 🟢 Verde | 1.0 (100%) | Normal |
+| 4 | < 500 mm | 🔴 Rojo | 0.0 (parada total) | Emergencia (50 cm policy) |
+| 3 | 500–1000 mm | 🟠 Naranja | 0.3 (30%) | Crítico |
+| 2 | 1000–1500 mm | 🟡 Amarillo | 0.7 (70%) | Advertencia |
+| 1 | 1500–2000 mm | 🟢 Verde claro | 0.85 (85%) | Precaución |
+| 0 | ≥ 2000 mm | 🟢 Verde | 0.95–1.0 | Normal / Alerta |
 
 ---
 

@@ -825,7 +825,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 4. Apply throttle in reverse.
 
 **Expected vehicle behavior:**
-- Forward motion limited by obstacle_scale (approaching 0.3 as distance drops below 500 mm).
+- Forward motion limited by obstacle_scale (approaching 0.3 as distance drops below 1000 mm; 0.0 below 500 mm).
 - Reverse direction: obstacle_scale does not apply (forward blocked flag does not inhibit reverse).
 - Vehicle reverses freely at commanded speed.
 
@@ -922,13 +922,13 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 2. Place obstacle at 15 cm from front sensor while vehicle is moving.
 
 **Expected vehicle behavior:**
-- Distance drops below OBSTACLE_EMERGENCY_MM (200 mm) after temporal confirmation (200 ms).
+- Distance drops below OBSTACLE_EMERGENCY_MM (500 mm, 50 cm policy) after temporal confirmation (200 ms).
 - obstacle_scale → 0.0. Vehicle stops.
 - CAN 0x205 all wheels → 0%.
 - Obstacle cleared (moved away): after 1000 ms confirmation, obstacle_scale returns to 1.0.
 - Vehicle resumes motion when pedal pressed.
 
-**Pass criteria:** Vehicle stops within 200 ms of obstacle distance dropping below 200 mm. Clean restart after obstacle removed.
+**Pass criteria:** Vehicle stops within 200 ms of obstacle distance dropping below 500 mm. Clean restart after obstacle removed.
 
 ---
 
@@ -1094,10 +1094,11 @@ The ESP32 zone field matches the STM32 distance tiers defined in `safety_system.
 
 | Zone | Distance | STM32 Scale | STM32 State |
 |------|----------|-------------|-------------|
-| 0 | > 1000 mm | 1.0 | NORMAL |
-| 1 | 500–1000 mm | 0.7 | CONFIRMING → ACTIVE |
-| 2 | 200–500 mm | 0.3 | ACTIVE |
-| 3 | < 200 mm | 0.0 | ACTIVE (emergency) |
+| 0 | ≥ 2000 mm | 0.95–1.0 | NORMAL |
+| 1 | 1500–2000 mm | 0.85 | CONFIRMING → ACTIVE |
+| 2 | 1000–1500 mm | 0.7 | ACTIVE |
+| 3 | 500–1000 mm | 0.3 | ACTIVE |
+| 4 | < 500 mm | 0.0 | ACTIVE (emergency, 50 cm policy) |
 
 Note: The STM32 re-derives the zone from `distance_mm` internally; the zone byte is informational and used for logging only.
 
@@ -1114,6 +1115,6 @@ This implementation adds ESP32-side code only.  No changes are made to:
 | ID | Scenario | Expected Behavior | Mechanism |
 |----|----------|-------------------|-----------|
 | A | Power on with sensor disconnected | STM32 remains in OBS_STATE_NO_SENSOR (scale=1.0); no 0x208 frames on bus. | ESP32 sensor timeout → no CAN TX; STM32 CAN timeout → NO_SENSOR. |
-| B | Valid obstacle at 50 cm | STM32 receives distance_mm=500, zone=2, health=1. Braking triggered (scale=0.3). | Sensor reads 500 mm, frame transmitted, STM32 CONFIRMING→ACTIVE. |
+| B | Valid obstacle at 50 cm | STM32 receives distance_mm=500, zone=3 (critical), health=1. Braking triggered (scale=0.3). | Sensor reads 500 mm, frame transmitted, STM32 CONFIRMING→ACTIVE. |
 | C | Constant value while moving | Stuck flag set after 1 s; sensor_health=0 in frame. | ESP32 stuck detection; STM32 independent stuck detection confirms. |
 | D | ESP32 reset while moving | 0x208 stops; STM32 CAN timeout (500 ms) applies safety response. | ESP32 reboot suppresses frames during warmup; STM32 timeout path. |

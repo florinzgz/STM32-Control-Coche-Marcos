@@ -12,8 +12,16 @@
 //   - 64 pixels, per-pixel statistics, quality gates
 //
 // The driver computes:
-//   - distance_mm: validated distance to nearest obstacle
-//   - zone:        0–4 mapping matching STM32 safety tiers
+//   - distance_mm: validated distance to nearest obstacle (raw, not filtered)
+//   - zone:        0–4 classification matching STM32 safety tiers
+//                  (50 cm minimum-distance policy):
+//                    < 500 mm   → 4 emergency (scale 0.0, forward blocked)
+//                    500–1000   → 3 critical  (scale 0.3)
+//                    1000–1500  → 2 warning   (scale 0.7)
+//                    1500–2000  → 1 caution   (scale 0.85)
+//                    ≥ 2000     → 0 alert / normal
+//                  An EMA filter (α=0.3) is applied before classification
+//                  to suppress boundary flicker under LiDAR noise.
 //   - stuck:       sensor-stuck detection (unchanged distance while moving)
 //   - healthy:     composite health flag for CAN reporting
 //
@@ -87,7 +95,9 @@ enum class SensorStatus : uint8_t {
 // -------------------------------------------------------------------------
 struct Reading {
     uint16_t     distance_mm  = 0;      // Minimum valid-pixel distance (mm), 0 = no reading
-    uint8_t      zone         = 0;      // Distance zone (0–4): 0=far, 1=caution, 2=warn, 3=crit, 4=emergency
+    uint8_t      zone         = 0;      // Distance zone (0–4): 0=alert/normal (≥2000 mm),
+                                        // 1=caution (1500–2000), 2=warning (1000–1500),
+                                        // 3=critical (500–1000), 4=emergency (<500 mm, 50 cm policy)
     bool         healthy      = false;  // true if reading is valid and plausible
     bool         stuck        = false;  // true if stuck-sensor condition detected
     SensorStatus status       = SensorStatus::WAITING;
