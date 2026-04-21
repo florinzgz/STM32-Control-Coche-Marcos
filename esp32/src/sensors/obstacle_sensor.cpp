@@ -199,15 +199,21 @@ static uint8_t distanceToZone(uint16_t mm) {
 // reported in `reading_.distance_mm` (and hence CAN 0x208) so STM32
 // sanity checks and telemetry continue to see unfiltered distance.
 // -------------------------------------------------------------------------
+// EMA coefficients for alpha = 0.3:  filtered = (NUM·new + (DEN-NUM)·prev) / DEN
+static constexpr uint32_t ZONE_EMA_NUM = 3;   // alpha numerator
+static constexpr uint32_t ZONE_EMA_DEN = 10;  // alpha denominator
+
 static uint16_t zoneFilterMm_ = 0;   // 0 = uninitialized, reseed on next frame
 
 static uint16_t updateZoneFilter(uint16_t measuredMm) {
     if (zoneFilterMm_ == 0) {
         zoneFilterMm_ = measuredMm;
     } else {
-        // (3*new + 7*prev) / 10, with u32 accumulation to avoid overflow
+        // (NUM*new + (DEN-NUM)*prev) / DEN, u32 accumulator to avoid overflow
         zoneFilterMm_ = static_cast<uint16_t>(
-            ((uint32_t)measuredMm * 3u + (uint32_t)zoneFilterMm_ * 7u) / 10u);
+            ((uint32_t)measuredMm * ZONE_EMA_NUM
+             + (uint32_t)zoneFilterMm_ * (ZONE_EMA_DEN - ZONE_EMA_NUM))
+            / ZONE_EMA_DEN);
     }
     return zoneFilterMm_;
 }
