@@ -19,6 +19,7 @@
 #include "error_log.h"
 #include "sensor_map_store.h"
 #include <math.h>
+#include <string.h>
 
 /* ---- Defensive declarations ----
  * These symbols are normally provided by main.h (included via
@@ -75,6 +76,20 @@ static bool led_relay_rear  = false;
  * vehicle reading is also filtered.                                   */
 #define TEMP_MIN_VALID_C   (-30.0f)
 #define TEMP_MAX_VALID_C   (120.0f)
+
+/* ---- Boot-time plausibility window (R-1) ----
+ * Narrower than the steady-state sanity window above.  Used ONLY during
+ * the 2-sample bootstrap in CAN_SendStatusTempMap() to reject EMI-corrupted
+ * samples that happen to be in-range-but-unrealistic at startup (e.g. a
+ * pair of coherent 90 °C readings while the cabin is at 25 °C).  Chosen
+ * to cover every realistic ambient / warm-bench condition (0..60 °C) but
+ * exclude values that a motor winding would only reach under sustained
+ * load — which cannot occur in the first few seconds after boot, before
+ * any drive command has been executed.  Has NO effect after the role is
+ * armed; the broader TEMP_MIN_VALID_C / TEMP_MAX_VALID_C window continues
+ * to gate steady-state samples exactly as before.                       */
+#define BOOT_MIN_VALID_C   (0.0f)
+#define BOOT_MAX_VALID_C   (60.0f)
 
 /* SAFETY FIX: ESP32 heartbeat alive-counter freeze detection.
  * Track the rolling counter sent in byte 0 of the ESP32 heartbeat (0x011).
@@ -645,6 +660,31 @@ void CAN_SendStatusTempMap(void) {
      * TEMP_MAX_VALID_C) so they can be shared with other temperature
      * code paths if needed.                                            */
 
+    /* ----------------------------------------------------------------
+     * R-2 — Topology change reset.
+     *
+     * When the 1-Wire bus changes physically (a DS18B20 reconnects, a
+     * new ROM appears, or the enumerated sensor order changes), the
+     * armed per-role references above now describe *different* sensors
+     * than the ones currently being sampled.  Comparing a fresh reading
+     * from a newly-attached motor probe against the previous motor's
+     * last_good_temp_f would either (a) wrongly reject a legitimate new
+     * sensor via the TEMP_MAX_STEP_C filter, or (b) mask a real fault.
+     *
+     * `Temperature_HasTopologyChanged()` is a sticky latch raised by
+     * `sensor_manager` on any enumeration/ROM-set change; we ack it
+     * here so the filter relearns from scratch via the bootstrap
+     * phase.  The reset is strictly state-only — no CAN behaviour is
+     * altered and the frame is still emitted on this cycle.
+     * ---------------------------------------------------------------- */
+    if (Temperature_HasTopologyChanged()) {
+        memset(last_good_valid,  0, sizeof(last_good_valid));
+        memset(bootstrap_count,  0, sizeof(bootstrap_count));
+        memset(bootstrap_ref,    0, sizeof(bootstrap_ref));
+        memset(last_good_temp_f, 0, sizeof(last_good_temp_f));
+        Temperature_ClearTopologyChanged();
+    }
+
     uint8_t data[5] = {0};
 
     const uint8_t *map = SensorMapStore_GetMap();
@@ -765,6 +805,27 @@ void CAN_SendStatusTempMap(void) {
              * BOOT_REF_TOLERANCE_C.  A single EMI glitch therefore
              * cannot arm the filter with a bogus reference.
              * --------------------------------------------------------- */
+
+            /* R-1 — boot-time plausibility window.
+             *
+             * The 2-sample consensus filter below protects against a
+             * single transient glitch, but a sustained EMI pattern
+             * (two back-to-back readings both biased the same way,
+             * e.g. 90 °C while the true value is 25 °C) could still
+             * sneak past the 10 °C agreement tolerance.  Clamp the
+             * physically plausible boot range to 0..60 °C: anything
+             * outside this window at cold-start is treated as noise,
+             * the bootstrap counter is reset, and the sample is NOT
+             * emitted this cycle (data[role] stays at its zeroed
+             * default, identical to a cold-boot frame).  This has
+             * no effect once the role is armed — steady-state samples
+             * still use the broader TEMP_MIN_VALID_C/TEMP_MAX_VALID_C
+             * window and the TEMP_MAX_STEP_C step filter.            */
+            if (raw < BOOT_MIN_VALID_C || raw > BOOT_MAX_VALID_C) {
+                bootstrap_count[role] = 0U;
+                continue;
+            }
+
             if (bootstrap_count[role] == 0U) {
                 /* First valid sample — candidate reference. */
                 bootstrap_ref[role]   = raw;
