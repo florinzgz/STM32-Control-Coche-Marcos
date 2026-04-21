@@ -602,11 +602,32 @@ void CAN_SendStatusTempMap(void) {
 
         float raw = Temperature_Get(physIdx);
 
-        /* Accept sample only if it is a finite number inside the window.
-         * isnan / isinf are the standard <math.h> checks; together with
-         * the range test they reject ±Inf, NaN, -127 (disconnect) and
-         * any other obviously-wrong reading.                           */
-        bool sample_ok = !isnan(raw) && !isinf(raw)
+        /* ----------------------------------------------------------------
+         * TASK 3 — explicit DS18B20 disconnect sentinel check.
+         *
+         * A disconnected DS18B20 (pull-up floating high / parasite lost)
+         * typically reads as all-ones on the scratchpad, which decodes
+         * to exactly -127 °C (0xFC90 / 16 = -127.9375, rounded).  We
+         * test this explicitly BEFORE the generic range check so that
+         * the log/telemetry layer can later distinguish "disconnected"
+         * from "out-of-range glitch" without changing the range constants.
+         *
+         * The comparison is one-sided (`raw <= sentinel + 1`): any
+         * reading at or below -126 °C is definitionally outside the
+         * DS18B20 operating range (-55 °C per datasheet), so it is
+         * always a disconnect / bus fault.  This covers both the
+         * -127.0 and the -127.9375 variants that different DS18B20
+         * revisions produce.  The subsequent range test would also
+         * catch these, but the named check makes intent obvious.
+         * -------------------------------------------------------------- */
+        const float DS18B20_DISCONNECT_SENTINEL = -127.0f;
+        bool disconnected = (raw <= (DS18B20_DISCONNECT_SENTINEL + 1.0f));
+
+        /* Accept sample only if it is a finite number inside the window
+         * AND not the disconnect sentinel.  isnan / isinf are standard
+         * <math.h> checks.                                              */
+        bool sample_ok = !disconnected
+                      && !isnan(raw) && !isinf(raw)
                       && (raw >= TEMP_MIN_VALID_C)
                       && (raw <= TEMP_MAX_VALID_C);
 

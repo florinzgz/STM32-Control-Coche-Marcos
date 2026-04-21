@@ -55,6 +55,14 @@ void Temperature_PeriodicRescan(void);
 float Temperature_Get(uint8_t index);
 uint8_t Temperature_GetCount(void);
 
+/* ---- DS18B20 diagnostic accessors (no CAN impact) ----
+ * Report-only: consumed by UI / future diagnostic frame.  Do NOT gate
+ * any existing safety path on these — they complement, not replace,
+ * the Safety_SetError() calls inside OW_ReadTemperature().            */
+bool     Temperature_IsTopologyValid(void);      /* all sensors present */
+bool     Temperature_IsStale(uint8_t idx);       /* frozen/dead sensor  */
+uint16_t Temperature_GetDiagnosticFlags(void);   /* packed bitmask      */
+
 /* ---- INA226 Current (I2C via TCA9548A) ---- */
 void Current_ReadAll(void);
 float Current_GetAmps(uint8_t index);
