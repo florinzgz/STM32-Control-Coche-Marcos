@@ -585,11 +585,50 @@ void CAN_SendStatusTempMap(void) {
      * used before this filter was added.                               */
     static int8_t last_good_temp[5] = {0, 0, 0, 0, 0};
 
-    /* Tracks whether `last_good_temp[role]` holds an actual sampled
-     * value (true) or the cold-boot default 0 (false).  Needed by the
-     * anti-EMI step-filter (TASK 3) so the first valid reading is never
-     * rejected for being "too far" from the 0 default.                 */
+    /* Float mirror of last_good_temp[] used ONLY for the TEMP_MAX_STEP_C
+     * comparison.  Storing the value in int8 for the CAN payload (which
+     * is unchanged) introduces up to ±1 °C of truncation error in the
+     * step check; the float mirror removes that bias so the 20 °C
+     * threshold is honoured exactly.  The int8 array remains the source
+     * of truth for the frame — this mirror is internal only.           */
+    static float last_good_temp_f[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+    /* Tracks whether `last_good_temp[role]` holds a *validated* sampled
+     * value (true) or not (false).  Used by the anti-EMI step-filter
+     * (TASK 3) so no sample is rejected against a neutral default, and
+     * by the boot-time bootstrap phase below so `last_good_valid` is
+     * only raised once two consecutive samples have agreed.            */
     static bool last_good_valid[5] = {false, false, false, false, false};
+
+    /* --------------------------------------------------------------------
+     * Boot-time / post-disconnect bootstrap state.
+     *
+     * Rationale: in a real vehicle the *first* post-boot sample coincides
+     * with the worst EMI burst of the whole duty cycle (motors + BTS7960
+     * + relays all energising).  A corrupted-but-in-range first sample
+     * (e.g. 90 °C when the real reading is 25 °C) would otherwise be
+     * accepted unconditionally, arming `last_good_valid`.  Every later
+     * real sample would then exceed TEMP_MAX_STEP_C and get rejected
+     * forever (stuck until reboot).
+     *
+     * Fix: require the first *two consecutive* valid samples to agree
+     * within ±BOOT_REF_TOLERANCE_C (a single EMI glitch will not pass
+     * this gate, because the next undistorted sample lands tens of
+     * degrees away and resets the reference) before promoting the role
+     * to the steady-state EMI step filter.  While bootstrapping we
+     * still emit `current_temp` directly (after the existing sanity
+     * tests), so the dashboard sees a live value from the very first
+     * valid reading — only the *filter's* memory is withheld until
+     * the candidate has been corroborated.  O(1), deterministic, no
+     * heap, no blocking.                                                */
+    static float   bootstrap_ref[5]   = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    static uint8_t bootstrap_count[5] = {0, 0, 0, 0, 0};
+
+    /* Tolerance between the bootstrap reference and the next sample
+     * required to accept them as agreeing.  Chosen tighter than
+     * TEMP_MAX_STEP_C (20 °C) so that a large, transient EMI glitch
+     * cannot slip through the bootstrap as a "plausible step". */
+    #define BOOT_REF_TOLERANCE_C  10.0f
 
     /* Maximum plausible single-frame step (°C).  Temperature physics
      * of the motor phase windings is dominated by thermal mass —
@@ -647,18 +686,30 @@ void CAN_SendStatusTempMap(void) {
                       && (raw >= TEMP_MIN_VALID_C)
                       && (raw <= TEMP_MAX_VALID_C);
 
+        /* Snapshot the "hard invalid" verdict (NaN / Inf / out-of-range
+         * / -127 °C sentinel) before the step filter can soft-reject a
+         * physically plausible but EMI-corrupted sample below.  Only a
+         * hard-invalid sample is allowed to tear down the steady-state
+         * reference and force a new bootstrap — a single step-filter
+         * rejection must NOT demote an armed role, otherwise one EMI
+         * spike would cost two extra cycles of unfiltered output.     */
+        bool hard_invalid = !sample_ok;
+
         /* ----------------------------------------------------------------
-         * TASK 3 — anti-EMI plausibility filter.
+         * TASK 3 — anti-EMI plausibility filter (steady-state phase).
          *
          * Even in-range samples can be corrupted by electromagnetic
          * interference on the 1-Wire line.  Compare against the last
          * accepted value for this ROLE and reject samples that jump
          * by more than TEMP_MAX_STEP_C between two 1 Hz frames.
          *
-         * Applied only when a previous good sample exists for the role
-         * (`last_good_valid`) — otherwise the first post-boot sample,
-         * or a sample right after the role was freshly remapped, would
-         * be falsely rejected against the neutral 0 default.
+         * Applied only when the role has completed the boot-time
+         * bootstrap (`last_good_valid`) — during bootstrap the step
+         * filter is intentionally bypassed so a corrupted first sample
+         * cannot latch the filter memory and lock out every subsequent
+         * real reading.  Comparison uses the float mirror of the last
+         * good value to avoid the ±1 °C truncation error introduced by
+         * the int8 CAN representation.
          *
          * The filter runs *after* the basic sanity tests so that a
          * sensor coming back online with a large but plausible new
@@ -667,24 +718,80 @@ void CAN_SendStatusTempMap(void) {
          * rejected by `sample_ok` above.
          * -------------------------------------------------------------- */
         if (sample_ok && last_good_valid[role]) {
-            if (fabsf(raw - (float)last_good_temp[role]) > TEMP_MAX_STEP_C) {
+            if (fabsf(raw - last_good_temp_f[role]) > TEMP_MAX_STEP_C) {
                 sample_ok = false;
             }
         }
 
         int8_t reported;
-        if (sample_ok) {
-            /* Safe to truncate to int8_t: range is bounded above.      */
-            reported = (int8_t)raw;
-            last_good_temp[role]  = reported;
-            last_good_valid[role] = true;
-        } else {
+        if (hard_invalid) {
+            /* Hard-invalid sample (NaN / Inf / out-of-range / -127 °C
+             * sentinel). Reset bootstrap and drop any armed steady-
+             * state reference so the next time the sensor returns
+             * coherent data it has to re-prove itself via the 2-sample
+             * bootstrap. This is the only path that resets per spec;
+             * a mere step-filter rejection (below) keeps the armed
+             * reference intact.                                        */
+            last_good_valid[role] = false;
+            bootstrap_count[role] = 0;
+
             /* Fall back to the last valid reading for this ROLE (not
              * physIdx): if the user re-maps sensors the last-good value
              * rightly follows the role, so a freshly-assigned sensor
              * inherits the previous motor's last reading for one
              * frame rather than flashing 0 °C.                         */
             reported = last_good_temp[role];
+        } else if (!sample_ok) {
+            /* Soft rejection: sample was in range but failed the EMI
+             * step filter. Keep the armed reference, just report the
+             * last-known-good value for this frame.                   */
+            reported = last_good_temp[role];
+        } else if (last_good_valid[role]) {
+            /* Steady-state: sample passed EMI step filter. Accept it
+             * as the new reference for both the CAN payload (int8)
+             * and the filter comparator (float).                       */
+            reported              = (int8_t)raw;
+            last_good_temp[role]  = reported;
+            last_good_temp_f[role] = raw;
+        } else {
+            /* ------------------------------------------------------------
+             * Bootstrap phase.
+             *
+             * The role has no validated reference yet (cold boot, or
+             * a previous reset after an invalid sample).  Emit the
+             * current raw reading directly so the dashboard is not
+             * blanked — but only promote the role to the steady-state
+             * filter once two consecutive samples agree within
+             * BOOT_REF_TOLERANCE_C.  A single EMI glitch therefore
+             * cannot arm the filter with a bogus reference.
+             * --------------------------------------------------------- */
+            if (bootstrap_count[role] == 0U) {
+                /* First valid sample — candidate reference. */
+                bootstrap_ref[role]   = raw;
+                bootstrap_count[role] = 1U;
+            } else if (fabsf(raw - bootstrap_ref[role]) <= BOOT_REF_TOLERANCE_C) {
+                /* Corroborating sample — candidate confirmed. */
+                bootstrap_count[role]++;
+            } else {
+                /* Disagreement — previous reference was likely a glitch.
+                 * Start over with the new sample as the candidate. */
+                bootstrap_ref[role]   = raw;
+                bootstrap_count[role] = 1U;
+            }
+
+            reported = (int8_t)raw;
+
+            if (bootstrap_count[role] >= 2U) {
+                /* Two consecutive agreeing samples — arm the steady-
+                 * state filter.  From the next cycle onwards the
+                 * TEMP_MAX_STEP_C check protects the role.          */
+                last_good_temp[role]   = reported;
+                last_good_temp_f[role] = raw;
+                last_good_valid[role]  = true;
+                /* bootstrap_count stays; it will be reset on the next
+                 * invalid sample.  Leaving it non-zero is harmless —
+                 * the bootstrap branch is gated by last_good_valid. */
+            }
         }
         data[role] = (uint8_t)reported;
     }
