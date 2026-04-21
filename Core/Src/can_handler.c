@@ -585,6 +585,23 @@ void CAN_SendStatusTempMap(void) {
      * used before this filter was added.                               */
     static int8_t last_good_temp[5] = {0, 0, 0, 0, 0};
 
+    /* Tracks whether `last_good_temp[role]` holds an actual sampled
+     * value (true) or the cold-boot default 0 (false).  Needed by the
+     * anti-EMI step-filter (TASK 3) so the first valid reading is never
+     * rejected for being "too far" from the 0 default.                 */
+    static bool last_good_valid[5] = {false, false, false, false, false};
+
+    /* Maximum plausible single-frame step (°C).  Temperature physics
+     * of the motor phase windings is dominated by thermal mass —
+     * even under a short-circuit fault, the reading cannot realistically
+     * jump by tens of degrees inside a 1 Hz frame window.  A jump
+     * larger than this threshold is therefore attributed to EMI on the
+     * 1-Wire line (the DS18B20 CRC catches most of it, but intermittent
+     * ground-bounce glitches can produce in-range garbage that
+     * nevertheless decodes cleanly).  We reject such samples and keep
+     * reporting the last-known-good value for the affected role.      */
+    #define TEMP_MAX_STEP_C    20.0f
+
     /* Sanity thresholds are defined at file scope (TEMP_MIN_VALID_C /
      * TEMP_MAX_VALID_C) so they can be shared with other temperature
      * code paths if needed.                                            */
@@ -603,7 +620,7 @@ void CAN_SendStatusTempMap(void) {
         float raw = Temperature_Get(physIdx);
 
         /* ----------------------------------------------------------------
-         * TASK 3 — explicit DS18B20 disconnect sentinel check.
+         * TASK 4 — explicit DS18B20 disconnect sentinel check.
          *
          * A disconnected DS18B20 (pull-up floating high / parasite lost)
          * typically reads as all-ones on the scratchpad, which decodes
@@ -612,15 +629,14 @@ void CAN_SendStatusTempMap(void) {
          * the log/telemetry layer can later distinguish "disconnected"
          * from "out-of-range glitch" without changing the range constants.
          *
-         * The comparison is one-sided (`raw <= sentinel + 1`): any
-         * reading at or below -126 °C is definitionally outside the
-         * DS18B20 operating range (-55 °C per datasheet), so it is
-         * always a disconnect / bus fault.  This covers both the
-         * -127.0 and the -127.9375 variants that different DS18B20
-         * revisions produce.  The subsequent range test would also
-         * catch these, but the named check makes intent obvious.
+         * The comparison is one-sided (`raw <= -126`): any reading at or
+         * below -126 °C is definitionally outside the DS18B20 operating
+         * range (-55 °C per datasheet), so it is always a disconnect /
+         * bus fault.  This covers both the -127.0 and the -127.9375
+         * variants.  The subsequent range test would also catch these,
+         * but the named check makes intent obvious.
          * -------------------------------------------------------------- */
-        const float DS18B20_DISCONNECT_SENTINEL = -127.0f;
+        #define DS18B20_DISCONNECT_SENTINEL   (-127.0f)
         bool disconnected = (raw <= (DS18B20_DISCONNECT_SENTINEL + 1.0f));
 
         /* Accept sample only if it is a finite number inside the window
@@ -631,11 +647,37 @@ void CAN_SendStatusTempMap(void) {
                       && (raw >= TEMP_MIN_VALID_C)
                       && (raw <= TEMP_MAX_VALID_C);
 
+        /* ----------------------------------------------------------------
+         * TASK 3 — anti-EMI plausibility filter.
+         *
+         * Even in-range samples can be corrupted by electromagnetic
+         * interference on the 1-Wire line.  Compare against the last
+         * accepted value for this ROLE and reject samples that jump
+         * by more than TEMP_MAX_STEP_C between two 1 Hz frames.
+         *
+         * Applied only when a previous good sample exists for the role
+         * (`last_good_valid`) — otherwise the first post-boot sample,
+         * or a sample right after the role was freshly remapped, would
+         * be falsely rejected against the neutral 0 default.
+         *
+         * The filter runs *after* the basic sanity tests so that a
+         * sensor coming back online with a large but plausible new
+         * reading is not mistaken for an EMI glitch; a definitively
+         * bad reading (NaN, out-of-range, disconnect) is already
+         * rejected by `sample_ok` above.
+         * -------------------------------------------------------------- */
+        if (sample_ok && last_good_valid[role]) {
+            if (fabsf(raw - (float)last_good_temp[role]) > TEMP_MAX_STEP_C) {
+                sample_ok = false;
+            }
+        }
+
         int8_t reported;
         if (sample_ok) {
             /* Safe to truncate to int8_t: range is bounded above.      */
             reported = (int8_t)raw;
-            last_good_temp[role] = reported;
+            last_good_temp[role]  = reported;
+            last_good_valid[role] = true;
         } else {
             /* Fall back to the last valid reading for this ROLE (not
              * physIdx): if the user re-maps sensors the last-good value

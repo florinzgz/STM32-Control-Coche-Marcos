@@ -60,6 +60,8 @@ uint8_t Temperature_GetCount(void);
  * any existing safety path on these — they complement, not replace,
  * the Safety_SetError() calls inside OW_ReadTemperature().            */
 bool     Temperature_IsTopologyValid(void);      /* all sensors present */
+bool     Temperature_HasTopologyChanged(void);   /* ROM set changed     */
+void     Temperature_ClearTopologyChanged(void); /* ack the latch       */
 bool     Temperature_IsStale(uint8_t idx);       /* frozen/dead sensor  */
 uint16_t Temperature_GetDiagnosticFlags(void);   /* packed bitmask      */
 
