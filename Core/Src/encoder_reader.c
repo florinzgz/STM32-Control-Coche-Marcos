@@ -122,7 +122,11 @@ void EncoderZ_IRQHandler(void)
 {
     uint32_t now = HAL_GetTick();
 
-    /* 1. Debounce — reject EMI spike trains */
+    /* 1. Debounce — reject EMI spike trains.
+     * uint32_t subtraction wraps correctly (C99 §6.2.5 ¶9), so this
+     * comparison is safe across HAL_GetTick() rollover every ~49.7 days.
+     * This is the same pattern used for wheel speed debouncing in
+     * sensor_manager.c.                                                  */
     if ((now - enc_z_last_tick) < ENC_Z_MIN_INTERVAL_MS)
         return;
     enc_z_last_tick = now;
@@ -137,16 +141,18 @@ void EncoderZ_IRQHandler(void)
         int32_t delta = pos - enc_z_last_pos;
 
         /* Normalise delta to the nearest integer multiple of ENCODER_CPR.
-         * remainder = delta mod ENCODER_CPR, adjusted to [-CPR/2, +CPR/2].
-         * A remainder of 0 means the pulse arrived exactly on schedule.    */
-        int32_t cpr = (int32_t)ENCODER_CPR;
-        int32_t remainder = delta % cpr;
-        if (remainder >  cpr / 2) remainder -= cpr;
-        if (remainder < -cpr / 2) remainder += cpr;
+         * Operate on the absolute value to avoid signed-modulo ambiguity,
+         * then restore the sign for the error field.
+         *   remainder = |delta| mod CPR, clamped to [0, CPR/2].
+         *   A remainder of 0 means the pulse arrived exactly on schedule. */
+        int32_t cpr       = (int32_t)ENCODER_CPR;
+        int32_t abs_delta = (delta < 0) ? -delta : delta;
+        int32_t remainder = abs_delta % cpr;          /* always ≥ 0      */
+        if (remainder > cpr / 2) remainder = cpr - remainder;  /* nearest multiple */
 
-        enc_z_last_error = remainder;
+        /* Record signed error: positive = ahead, negative = behind */
+        enc_z_last_error = (delta < 0) ? -remainder : remainder;
 
-        if (remainder < 0) remainder = -remainder;   /* |remainder| */
         if (remainder > ENC_Z_SLIP_THRESHOLD)
             enc_z_slip = 1U;
     }
