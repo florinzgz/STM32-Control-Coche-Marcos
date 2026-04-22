@@ -425,14 +425,16 @@ static float steer_fl_deg = 0.0f;
 static float steer_fr_deg = 0.0f;
 
 /* ---- Encoder fault detection state ----
- * The E6B2-CWZ6C encoder Z-index pulse (PB4/EXTI4) is intentionally NOT used:
- *   1. No EXTI4 hardware initialisation exists in MX_GPIO_Init().
- *   2. Steering uses relative positioning zeroed at Steering_Init(); an
- *      absolute index reference would require a known mechanical alignment
- *      that is not guaranteed by the chassis design.
- *   3. Fault detection is achieved through range, jump and frozen-value
- *      checks on the A/B quadrature channels, which are sufficient for
- *      safety without the Z pulse.
+ * The E6B2-CWZ6C encoder Z-index pulse (PB4/EXTI4) is used for
+ * inter-revolution drift detection (see encoder_reader.c).
+ * It does NOT control or override steering centering, which uses the
+ * inductive LJ12A3 sensor on PB5.  The Z channel:
+ *   1. Detects encoder slip / A/B noise in high-EMI environments.
+ *   2. Records TIM2 position at each index pulse for diagnostics.
+ *   3. Flags Encoder_Z_HasSlipped() when the inter-pulse delta deviates
+ *      from ±ENCODER_CPR by more than ENC_Z_SLIP_THRESHOLD counts.
+ * Steering control continues to use relative positioning zeroed at
+ * Steering_Init(); no mechanical alignment constraint is assumed.
  */
 
 /* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)

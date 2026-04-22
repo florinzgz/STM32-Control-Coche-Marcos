@@ -17,7 +17,8 @@
   *     endstop assumption).
   *   - Any fault aborts centering, neutralises the motor, and latches
   *     SAFETY_ERROR_CENTERING to prevent transition to ACTIVE.
-  *   - The encoder Z-index is NOT used.
+  *   - The encoder Z-index (PB4) is NOT used for centering; it provides
+ *     inter-revolution drift detection via encoder_reader.c.
   ****************************************************************************
   */
 

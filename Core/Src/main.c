@@ -769,12 +769,15 @@ static void MX_GPIO_Init(void)
     gpio.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOB, &gpio);
 
-    /* Encoder Z-index pulse (PB4).  The Z channel is NOT used for
-     * control (see motor_control.c rationale), but the pin must be
-     * initialised as input with pull-up to match the .ioc config and
-     * prevent the NPN open-collector output from floating.            */
+    /* Encoder Z-index pulse (PB4 / EXTI4).  The E6B2-CWZ6C Z output is NPN
+     * open-collector: with GPIO_PULLUP the idle level is HIGH and the Z
+     * pulse pulls it LOW → FALLING edge trigger.
+     *
+     * The Z channel is used for inter-revolution drift detection only.
+     * It does NOT control steering centering (that uses PB5 / LJ12A3).
+     * See encoder_reader.c — EncoderZ_IRQHandler() for the ISR logic.   */
     gpio.Pin  = PIN_ENC_Z;
-    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Mode = GPIO_MODE_IT_FALLING;
     gpio.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOB, &gpio);
 
@@ -785,7 +788,9 @@ static void MX_GPIO_Init(void)
     HAL_NVIC_EnableIRQ(EXTI1_IRQn);
     HAL_NVIC_SetPriority(EXTI2_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);   /* PB5 center sensor */
+    HAL_NVIC_SetPriority(EXTI4_IRQn, 2, 0);         /* PB4 encoder Z     */
+    HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);       /* PB5 center sensor */
     HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
     HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
