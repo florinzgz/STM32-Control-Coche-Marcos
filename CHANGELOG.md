@@ -13,10 +13,69 @@ machine-readable rollup used as the production-readiness release log.
 
 ## [Unreleased]
 
-Cross-system refinement pass on the temperature and obstacle subsystems.
+### Encoder Z (index) channel — PB4 / EXTI4 (2026-04-22)
+
+Activation of the E6B2-CWZ6C Z output for inter-revolution integrity checking
+in high-EMI environments (RS775 + BTS7960).  The channel is **diagnostic only**
+— it does not zero TIM2 or participate in any control or homing path.
+
+#### Added
+
+- **Encoder Z channel activated** (`Core/Src/encoder_reader.c`,
+  `Core/Inc/encoder_reader.h`).  PB4 reconfigured from passive GPIO input to
+  `GPIO_MODE_IT_FALLING` with `GPIO_PULLUP`.  `EXTI4_IRQn` enabled at NVIC
+  priority 2 — a dedicated vector independent from EXTI9_5 (PB5 / steering
+  centre sensor) and the wheel-speed EXTI lines.
+- **`EncoderZ_IRQHandler()`** — O(1) ISR, no malloc, no blocking:
+  1. **5 ms debounce** via `uint32_t` subtraction (overflow-safe per C99
+     §6.2.5 ¶9); rejects EMI spike trains while accepting all valid Z pulses
+     (≥ 30 ms apart at the maximum 2000 RPM steering rate).
+  2. **Direct `TIM2->CNT` register read** — single LDR instruction, atomic on
+     Cortex-M4; safe at priority 2 because TIM2 encoder mode shares the same
+     NVIC priority (non-preemptible).
+  3. **Slip detection**: inter-pulse delta normalised to the nearest
+     `ENCODER_CPR` (4800) multiple using `abs_delta % CPR`; remainder
+     > `ENC_Z_SLIP_THRESHOLD` (48 counts ≈ 1 % / 3.6°) latches `enc_z_slip`.
+  4. `enc_z_pulse_count` and `enc_z_last_pos` updated unconditionally.
+- **Public Z diagnostics API** in `encoder_reader.h`:
+  - `Encoder_Z_GetPulseCount()` — total accepted Z pulses since boot.
+  - `Encoder_Z_GetLastPosition()` — TIM2 count captured at the last Z pulse.
+  - `Encoder_Z_GetLastError()` — signed deviation from the nearest CPR multiple.
+  - `Encoder_Z_HasSlipped()` — latching slip flag.
+  - `Encoder_Z_ClearSlip()` — acknowledge and reset the latch.
+- **`EXTI4_IRQHandler`** in `Core/Src/stm32g4xx_it.c` routes to
+  `EncoderZ_IRQHandler()` after the standard HAL pending-flag clear.
+
+#### Fixed
+
+- **Signed-modulo ambiguity in slip calculation** (`encoder_reader.c`).
+  Replaced `delta % CPR` (C99 implementation-defined sign for negative
+  operands) with `abs_delta % CPR` + nearest-multiple normalisation via
+  `if (remainder > cpr/2) remainder = cpr - remainder`.  Ensures correct
+  `enc_z_last_error` sign and threshold comparison for reverse-direction
+  (negative delta) travel.
+- **`HAL_GetTick()` rollover safety** — added explicit C99 §6.2.5 ¶9
+  citation in the debounce comment, confirming the 49.7-day wraparound is
+  handled by the same `uint32_t` subtraction idiom used in
+  `sensor_manager.c` for wheel-speed debouncing.
+- **Stale comment** in `Core/Inc/project_config.h`: `PIN_ENC_Z` description
+  corrected from `GPIO polled input (index pulse)` to
+  `EXTI4 interrupt input (Z index pulse)`.
+
+#### Contracts preserved
+
+- TIM2 encoder mode (PA15 / PB3) and all A/B quadrature logic untouched.
+- No CAN IDs, DLCs, or byte layouts changed.
+- `Safety_*` state machine and motor/PWM pipeline untouched.
+- All new logic O(1), no `malloc`, no blocking calls.
+
+---
+
+### Cross-system refinement — temperature & obstacle subsystems
+
 CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
 
-### Added
+#### Added
 
 - **DS18B20 persistent physIdx→role mapping** with Flash persistence on
   STM32 (`Core/Src/sensor_map_store.c`) and UI-driven assignment on ESP32
@@ -43,7 +102,7 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
   999/1000/1001, 1499/1500/1501, 1999/2000/2001, 3999/4000 mm on both
   the TOFSense-M and TF-Mini Plus code paths.
 
-### Changed
+#### Changed
 
 - **Obstacle safety thresholds updated to the 50 cm minimum-distance
   policy**. `OBSTACLE_EMERGENCY_MM` = 500 mm (previously 200 mm):
@@ -74,7 +133,7 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
   `TFMINI_PLUS_WIRING_GUIDE.md`, `OBSTACLE_SENSOR_DESIGN_DECISION.md`,
   `OBSTACLE_HARD_CUTOFF_ANALYSIS.md`, `FIRMWARE_COMPLETION_ASSESSMENT.md`.
 
-### Fixed
+#### Fixed
 
 - **Boot-time EMI lock in temperature filtering**: R-1 plausibility
   window and R-2 topology-reset logic in `CAN_SendStatusTempMap()`
@@ -92,7 +151,7 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
   in `esp32/src/sensors/obstacle_sensor.h` (file header and
   `Reading::zone`) with the explicit 500/1000/1500/2000 mm tiers.
 
-### Safety
+#### Safety
 
 - **Earlier obstacle intervention.** Emergency stop now triggers at
   500 mm instead of 200 mm, giving a larger braking margin while
@@ -109,7 +168,7 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
   eliminate the two edge-case oscillation paths identified during the
   audit without altering any safety decision.
 
-### Contracts preserved
+#### Contracts preserved
 
 - CAN IDs unchanged: `CMD_ACK` (0x103), `SERVICE_CMD` (0x110),
   `CMD_SENSOR_MAP_TEMP` (0x112), `STATUS_TEMP_MAP` (0x206),
