@@ -762,10 +762,18 @@ static void MX_GPIO_Init(void)
     gpio.Pin  = PIN_WHEEL_RR;
     HAL_GPIO_Init(GPIOB, &gpio);
 
-    /* Steering center inductive sensor (PB5 / EXTI5) - same
-     * configuration as the wheel speed sensors (rising-edge trigger). */
+    /* Steering center inductive sensor (PB5 / EXTI5).
+     * LJ12A3 is NPN open-collector: with GPIO_PULLUP the idle level is
+     * HIGH; when the metal screw enters the sensing zone the transistor
+     * pulls the line LOW.  FALLING edge = "screw just entered center" —
+     * this is the instant at which steering_centering.c stops the motor
+     * and zeroes TIM2->CNT, so centering latches on entry rather than
+     * slightly past center (which a RISING trigger would have done).
+     * Polarity is consistent with SteeringCal_ValidateAtBoot() in
+     * steering_cal_store.c, which expects GPIO_PIN_RESET (LOW) at
+     * center on boot.                                                 */
     gpio.Pin  = PIN_STEER_CENTER;
-    gpio.Mode = GPIO_MODE_IT_RISING;
+    gpio.Mode = GPIO_MODE_IT_FALLING;
     gpio.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOB, &gpio);
 
