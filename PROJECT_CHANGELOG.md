@@ -80,6 +80,32 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — safety(relay): force full power-down when leaving ACTIVE mid-sequence
+- **Fecha:** 2026-04-23
+- **Autor:** Copilot
+- **Rama:** `copilot/add-vehicle-control-system`
+- **Estado:** Cerrada (cambios aplicados en rama; merge gestionado por el mantenedor).
+- **Descripción del cambio:** Endurecimiento final del secuenciador de relés (`Relay_SequencerUpdate()` en `safety_system.c`). El guard `if (system_state != SYS_STATE_ACTIVE) return;` ya impedía la re-energización fuera de ACTIVE, pero si el sistema abandonaba ACTIVE mientras el secuenciador estaba en `RELAY_SEQ_TRACTION_ON` (TRAC energizado, DIR aún OFF, esperando el settle de 50 ms), el hardware quedaba en un estado parcial `TRAC=ON, DIR=OFF` hasta que otra ruta apagara los relés. Ahora, cuando el guard se dispara en plena transición, se invoca `Relay_PowerDown()` para apagar ambos relés atómicamente vía BSRR y resetear el secuenciador a IDLE antes del return.
+
+#### Cambios principales (NO breaking)
+- **`Core/Src/safety_system.c`** — `Relay_SequencerUpdate()`: el early-return del guard fuera de ACTIVE detecta la condición `relay_seq_state == RELAY_SEQ_TRACTION_ON` y llama a `Relay_PowerDown()` antes de retornar. Comentario de bloque ampliado (≈28 líneas) documentando el edge-case mid-sequence y el comportamiento en cada estado del sistema (SAFE, ERROR, STANDBY, BOOT, DEGRADED, LIMP_HOME).
+- **Decisión de diseño:** fail-safe **OFF** en lugar de auto-completar la activación. Eléctricamente más seguro; evita energización inesperada del motor; comportamiento determinista bajo cualquier fallo.
+
+#### Invariante garantizada
+- No existe estado persistente `TRAC=ON ∧ DIR=OFF`. Los relés están siempre coherentes: totalmente OFF o totalmente ON (TRAC+DIR).
+- No hay re-energización fuera de ACTIVE.
+- Emergency stop permanece atómico, determinista e irreversible hasta recuperación de estado.
+- DEGRADED / LIMP_HOME tras una transición normal desde ACTIVE (secuenciador en COMPLETE) mantiene los relés ON sin tocarlos.
+
+#### Validación
+- Host tests: 195 (service_mode) + 11 529 (motor_control) pasan sin cambios.
+- gcc `-Wall -Wextra -Werror -fsyntax-only` limpio en `safety_system.c`.
+- CodeQL: 0 alerts.
+- Sin cambios en: constantes de tiempo, protocolo CAN, máquina de estados de seguridad, diagnóstico, macros de relé. Sin nuevos estados. Sin refactor arquitectónico.
+- Máscara de override (`0x06U`) verificada consistente: bit 1 = TRAC, bit 2 = DIR, bit 0 = reservado/0 — coherente con el ensamblado del status byte y las rutas de apply.
+
+---
+
 ### PR — hardware(relay): hardening post-migración (CAN compatible, 50ms settle, E-stop determinista)
 - **Fecha:** 2026-04-23
 - **Autor:** Copilot
