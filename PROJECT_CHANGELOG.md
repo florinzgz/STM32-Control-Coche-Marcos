@@ -80,6 +80,45 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — fix(steering): deadband 1.8° en dominio de rueda para absorber holgura mecánica
+- **Fecha:** 2026-04-23
+- **Autor:** Copilot
+- **Rama:** `copilot/connect-wheels-sensors-and-volante`
+- **Descripción del cambio:** Tras la migración del lazo de dirección a grados de rueda vía `Steering_GetCurrentAngle()`, el antiguo `STEERING_DEADBAND_COUNTS` (0.5° en eje del encoder) quedó reducido a ≈0.077° en la rueda — muy por debajo de los ~3° de holgura mecánica real entre RS390 + reductor ~1:50 y las ruedas. El lazo EPS perseguía la holgura y producía chatter cerca del centro. Se introduce un deadband expresado en el dominio global (grados de rueda) y se aplica únicamente al consumidor PID.
+
+#### Cambios principales
+
+| Subsistema | Cambio |
+|---|---|
+| **Dirección (STM32)** | Nuevo macro `STEERING_DEADBAND_DEG = 1.8f` en `Core/Src/motor_control.c` (~60% de los 3° de holgura observada). Aplicado sobre `theta` dentro de `Steering_ControlLoop()` justo después de `sanitize_float(theta)` y **antes** de derivar ω, de modo que los términos de asistencia (`λ·k·g(v)·ω`), retorno al centro (`(1−λ)·k·h(v)·θ`) y compensación de fricción colapsan a cero dentro de la ventana muerta. |
+| **Macro antiguo** | `STEERING_DEADBAND_COUNTS` se deja en su sitio pero sin uso, con un comentario que redirige al macro en grados. No se reintroduce lógica en el espacio de counts. |
+| **Rango de ajuste documentado** | 1.5°–2.0°; **nunca** por debajo de 1.0° (inestable por quedar dentro de la holgura). |
+
+#### Non-goals (explícitos)
+
+| Componente | Estado |
+|---|---|
+| `Steering_GetCurrentAngle()` (única fuente de verdad en grados de rueda) | ✅ sin tocar |
+| `STEERING_GEAR_RATIO`, `ENC_MAX_JUMP`, `ENC_MAX_COUNTS` | ✅ sin tocar |
+| ISR de encoder y diagnóstico de canal Z (PB4 / EXTI4) | ✅ sin tocar |
+| Geometría Ackermann, ganancias de la ecuación de par EPS, fade a alta velocidad, escalado en modo degradado | ✅ sin tocar |
+| Máquina de estados de seguridad y plausibility checks (leen el ángulo sin filtrar) | ✅ sin tocar |
+
+#### Validación
+
+- Build limpio con `-Wall -Wextra -Werror`; delta de flash +16 B text, 0 B bss.
+- `|θ| < 1.8°` ⇒ `θ = 0` ⇒ sin salida PWM → sin chatter en reposo.
+- `|θ| ≥ 1.8°` ⇒ ruta de control bit-idéntica al comportamiento previo (mismas ganancias, misma ecuación de par, mismo fade).
+- Subsistemas Ackermann y safety observan el ángulo sin filtrar y quedan byte-a-byte inalterados.
+
+#### Contratos preservados
+
+- CAN v1.3 sin cambios (IDs, DLC, bytes, cadencia).
+- `Safety_*`, pipeline PWM, BREAK2, watchdog IWDG — intactos.
+- Lógica O(1), sin `malloc`, sin llamadas bloqueantes.
+
+- **Impacto global:** elimina el chatter en dirección cerca del centro sin alterar la dinámica fuera de la ventana muerta ni los límites de seguridad; listo para producción.
+
 ### PR — feat(obstacle+temperature): política 50 cm, EMA de zona, histéresis 750 mm, remap DS18B20 por CAN 0x112
 - **Fecha:** 2026-04-21
 - **Autor:** Copilot

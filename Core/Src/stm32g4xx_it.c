@@ -8,6 +8,7 @@
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "can_handler.h"
+#include "encoder_reader.h"
 
 extern FDCAN_HandleTypeDef hfdcan1;
 extern TIM_HandleTypeDef htim1, htim2, htim3, htim8;
@@ -144,6 +145,12 @@ void EXTI2_IRQHandler(void)
 {
     HAL_GPIO_EXTI_IRQHandler(PIN_WHEEL_RL);
     Wheel_RL_IRQHandler();
+}
+
+void EXTI4_IRQHandler(void)
+{
+    HAL_GPIO_EXTI_IRQHandler(PIN_ENC_Z);
+    EncoderZ_IRQHandler();
 }
 
 void EXTI15_10_IRQHandler(void)

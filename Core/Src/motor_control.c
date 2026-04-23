@@ -425,27 +425,42 @@ static float steer_fl_deg = 0.0f;
 static float steer_fr_deg = 0.0f;
 
 /* ---- Encoder fault detection state ----
- * The E6B2-CWZ6C encoder Z-index pulse (PB4/EXTI4) is intentionally NOT used:
- *   1. No EXTI4 hardware initialisation exists in MX_GPIO_Init().
- *   2. Steering uses relative positioning zeroed at Steering_Init(); an
- *      absolute index reference would require a known mechanical alignment
- *      that is not guaranteed by the chassis design.
- *   3. Fault detection is achieved through range, jump and frozen-value
- *      checks on the A/B quadrature channels, which are sufficient for
- *      safety without the Z pulse.
+ * The E6B2-CWZ6C encoder Z-index pulse (PB4/EXTI4) is used for
+ * inter-revolution drift detection (see encoder_reader.c).
+ * It does NOT control or override steering centering, which uses the
+ * inductive LJ12A3 sensor on PB5.  The Z channel:
+ *   1. Detects encoder slip / A/B noise in high-EMI environments.
+ *   2. Records TIM2 position at each index pulse for diagnostics.
+ *   3. Flags Encoder_Z_HasSlipped() when the inter-pulse delta deviates
+ *      from ±ENCODER_CPR by more than ENC_Z_SLIP_THRESHOLD counts.
+ * Steering control continues to use relative positioning zeroed at
+ * Steering_Init(); no mechanical alignment constraint is assumed.
  */
 
 /* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
- * 0.5° × 4800 counts/360° ≈ 6.67 counts */
+ * 0.5° × 4800 counts/360° ≈ 6.67 counts
+ * NOTE: kept for historical reference only; control-loop deadband is now
+ *       applied in road-wheel degrees via STEERING_DEADBAND_DEG below.    */
 #define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
-#define ENC_MAX_COUNTS       ((int32_t)((MAX_STEER_DEG + 20.0f) * (float)ENCODER_CPR / 360.0f))
-        /* Encoder is 1:1 on the steering output shaft.
-         * ±74° (54° max road-wheel + 20° margin) → ±987 counts.
-         * Any reading beyond this is mechanically impossible.            */
-#define ENC_MAX_JUMP         100
+
+/* Steering deadband in road-wheel degrees — absorbs ≈3° of mechanical
+ * backlash downstream of the motor/reductor (1.8° ≈ 60 % of the slop).
+ * Tuning: raise to 2.0° if chatter persists, lower to 1.5° if the
+ * response feels dead; do NOT go below 1.0° (below backlash = unstable). */
+#define STEERING_DEADBAND_DEG     1.8f
+#define ENC_MAX_COUNTS       ((int32_t)((MAX_STEER_DEG * STEERING_GEAR_RATIO + 20.0f) * (float)ENCODER_CPR / 360.0f))
+        /* Encoder is mounted on the steering column (volante), not on
+         * the road-wheel output shaft.  Plausible range is the full
+         * volante travel (MAX_STEER_DEG·STEERING_GEAR_RATIO ≈ ±350°)
+         * plus 20° margin.  Any reading beyond this is mechanically
+         * impossible and indicates corrupt counter / disconnect.        */
+#define ENC_MAX_JUMP         ((int32_t)(100 * STEERING_GEAR_RATIO))
         /* Maximum plausible count change per 10 ms control cycle.
-         * At 200 °/s steering rate: 200/360*4800*0.01 ≈ 27 counts.
-         * 100 counts/cycle ≈ 750 °/s — well beyond any physical rate.   */
+         * Original design intent was ~750 °/s at the controlled axis;
+         * with the encoder mounted on the volante we scale by
+         * STEERING_GEAR_RATIO so the same physical rate limit holds
+         * (~648 counts/cycle ≈ 750 °/s volante, covers 500–1000 °/s
+         * manual steering while still flagging impossible glitches).   */
 #define ENC_FROZEN_TIMEOUT_MS 200
         /* If the motor is driving above ENC_MOTOR_ACTIVE_PCT and the
          * encoder has not changed for this long, declare frozen fault.   */
@@ -1424,6 +1439,14 @@ void Traction_Update(void)
         acker_diff[3] = 1.0f;
     } else {
         compute_ackermann_differential(Steering_GetCurrentAngle(), acker_diff);
+        /* Safety: if the steering encoder has faulted, the angle read
+         * by Steering_GetCurrentAngle() is no longer trustworthy (it
+         * may be latched at the value that triggered the fault or
+         * drifting from EMI).  Neutralise the differential so traction
+         * stays symmetric while DEGRADED_L1 "drive-home" is active.   */
+        if (Encoder_HasFault()) {
+            for (int i = 0; i < 4; i++) acker_diff[i] = 1.0f;
+        }
     }
 
     int8_t dir   = (effective_demand >= 0) ? 1 : -1;
@@ -1808,10 +1831,21 @@ void Steering_ControlLoop(void)
     if (dt < 0.001f) return;
     last_time = now;
 
-    /* ---- Read encoder: angle θ (degrees) ---- */
-    int32_t encoder_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
-    float theta = (float)encoder_count * 360.0f / (float)ENCODER_CPR;
+    /* ---- Read encoder: angle θ (road-wheel degrees) ----
+     * Use Steering_GetCurrentAngle() so the STEERING_GEAR_RATIO
+     * conversion is applied in one place and EPS operates on the
+     * same scale as Ackermann and safety plausibility checks.        */
+    float theta = Steering_GetCurrentAngle();
     theta = sanitize_float(theta, 0.0f);
+
+    /* ---- Mechanical-backlash deadband (road-wheel degrees) ----
+     * Ignore sub-deadband angles so the control loop does not chase
+     * the ~3° of slop between the encoder/motor side and the road
+     * wheels.  Applied in deg (the global unit) after sanitisation,
+     * before the ω estimate so ω also sees theta clamped to 0.     */
+    if (fabsf(theta) < STEERING_DEADBAND_DEG) {
+        theta = 0.0f;
+    }
 
     /* ---- Angular velocity ω (°/s) ---- */
     float omega_raw = (theta - eps_prev_angle_deg) / dt;
@@ -1925,7 +1959,9 @@ void Steering_ControlLoop(void)
 float Steering_GetCurrentAngle(void)
 {
     int32_t cnt = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
-    return (float)cnt * 360.0f / (float)ENCODER_CPR;
+    /* Encoder mounted on steering column: divide by STEERING_GEAR_RATIO
+     * to return road-wheel degrees (single conversion point).          */
+    return ((float)cnt * 360.0f / (float)ENCODER_CPR) / STEERING_GEAR_RATIO;
 }
 
 bool Steering_IsCalibrated(void)
