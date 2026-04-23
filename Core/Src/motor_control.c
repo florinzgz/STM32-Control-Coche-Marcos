@@ -446,10 +446,13 @@ static float steer_fr_deg = 0.0f;
          * volante travel (MAX_STEER_DEG·STEERING_GEAR_RATIO ≈ ±350°)
          * plus 20° margin.  Any reading beyond this is mechanically
          * impossible and indicates corrupt counter / disconnect.        */
-#define ENC_MAX_JUMP         100
+#define ENC_MAX_JUMP         ((int32_t)(100 * STEERING_GEAR_RATIO))
         /* Maximum plausible count change per 10 ms control cycle.
-         * At 200 °/s steering rate: 200/360*4800*0.01 ≈ 27 counts.
-         * 100 counts/cycle ≈ 750 °/s — well beyond any physical rate.   */
+         * Original design intent was ~750 °/s at the controlled axis;
+         * with the encoder mounted on the volante we scale by
+         * STEERING_GEAR_RATIO so the same physical rate limit holds
+         * (~648 counts/cycle ≈ 750 °/s volante, covers 500–1000 °/s
+         * manual steering while still flagging impossible glitches).   */
 #define ENC_FROZEN_TIMEOUT_MS 200
         /* If the motor is driving above ENC_MOTOR_ACTIVE_PCT and the
          * encoder has not changed for this long, declare frozen fault.   */
