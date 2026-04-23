@@ -516,11 +516,10 @@ void SafeScreen::draw() {
 
     // ---- TILE: Relay status indicator ----
     if (tiles_.isDirty(STILE_RELAY)) {
-        // Reuse RelayIndicator widget with SafeScreen Y position
-        // CAN rev 1.4: 2-relay layout (MAIN contactor removed).
+        // 3-bit wire layout (backward-compatible): bit0 reserved, bit1=TRAC, bit2=DIR.
         const bool seqComplete = (relayStatus_ & 0x80U) != 0;
-        const bool tracOn      = (relayStatus_ & 0x01U) != 0;
-        const bool dirOn       = (relayStatus_ & 0x02U) != 0;
+        const bool tracOn      = (relayStatus_ & 0x02U) != 0;
+        const bool dirOn       = (relayStatus_ & 0x04U) != 0;
 
         // Clear background
         tft.fillRect(STILE_RELAY_X, STILE_GEAR_BAR_Y,

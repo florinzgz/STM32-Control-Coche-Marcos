@@ -128,11 +128,14 @@
  *
  * ---- RELAY VISIBILITY & TELEMETRY MODEL ----
  *
- * The relay status is exported to ESP32 via CAN heartbeat byte 5:
- *   Bit 0 = TRACTION (PC11),  Bit 1 = DIRECTION (PC12)
+ * The relay status is exported to ESP32 via CAN heartbeat byte 5 using
+ * a 3-bit wire layout (backward-compatible with CAN contract rev 1.3):
+ *   Bit 0 = reserved (legacy MAIN slot — no hardware, always 0)
+ *   Bit 1 = TRACTION  (PC11, 24 V)
+ *   Bit 2 = DIRECTION (PC12, 12 V)
  *   Bit 7 = relay sequence complete flag
  *
- * HARDWARE NOTE (CAN contract rev 1.4):
+ * HARDWARE NOTE (CAN rev 1.3 compatible (2026-04-23 clarification)):
  *   The 24 V battery only feeds a single relay (traction; supplies the
  *   four BTS7960 motor drivers).  The 12 V battery feeds the direction
  *   relay (steering actuator).  There is NO independent "Power-Hold"
@@ -171,7 +174,7 @@
  *
  * Override does NOT:
  *   - Affect Safety_IsPowerReady() (relay_seq_state stays IDLE)
- *   - Bypass relay timing sequence (20 ms traction settle)
+ *   - Bypass relay timing sequence (50 ms traction settle)
  *   - Work during motion or ACTIVE/DEGRADED/ERROR states
  *
  * Auto-disable conditions:

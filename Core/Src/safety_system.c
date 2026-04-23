@@ -124,7 +124,12 @@ static inline void sat_inc_u32(uint32_t *counter) {
  *   in < 1 µs per call.  The 10 ms loop cadence introduces up to
  *   10 ms of jitter per stage (within specification for SRD-05VDC
  *   relays with 10 ms activation time).                                */
-#define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
+#define RELAY_TRACTION_SETTLE_MS 50   /* Traction relay arc suppression +
+                                       * 4× BTS7960 inrush settling delay.
+                                       * Bumped from 20 ms → 50 ms to cover
+                                       * worst-case capacitive inrush on the
+                                       * 24 V bus before the direction relay
+                                       * and steering electronics come up.  */
 
 /* Relay health check thresholds (post-ACTIVE runtime validation).
  * Detects relay-not-closing condition using throttle demand vs motor
@@ -252,9 +257,11 @@ static uint32_t        relay_seq_timestamp = 0;
  * Override is ONLY effective in STANDBY with zero throttle, zero speed,
  * and no active safety errors.  Automatically disabled on any violation.
  *
- * relay_override_mask bit layout (2 bits — matches heartbeat byte 5):
- *   bit 0: TRACTION relay (PC11)
- *   bit 1: DIRECTION relay (PC12)                                      */
+ * relay_override_mask bit layout (3-bit, backward-compatible with
+ * legacy SERVICE_CMD 0xE0 consumers — bit 0 is reserved/ignored):
+ *   bit 0: reserved (legacy MAIN slot — no hardware, ignored)
+ *   bit 1: TRACTION  relay (PC11)
+ *   bit 2: DIRECTION relay (PC12)                                      */
 static bool    relay_override_enabled = false;
 static uint8_t relay_override_mask    = 0;
 
@@ -700,11 +707,26 @@ void Relay_SequencerUpdate(void)
 
 void Relay_PowerDown(void)
 {
-    /* Reverse order: Direction → Traction.
-     * Cancels any in-progress power-up sequence immediately.            */
-    relay_seq_state = RELAY_SEQ_IDLE;
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
+    /* Deterministic shutdown: single atomic BSRR write forces BOTH relay
+     * GPIOs to RESET in one cycle, regardless of sequencer state.
+     *
+     * Mask contains ONLY the power-relay pins (TRAC + DIR).  PC10 is
+     * reserved and is NOT touched.  Other GPIOC outputs (motor ENs,
+     * PWM channels) are untouched — those are handled separately by
+     * Traction_EmergencyStop().
+     *
+     * BSRR upper half (bits 16-31) = reset bits; lower half = set bits.
+     * Writing PIN_RELAY_TRAC|PIN_RELAY_DIR shifted left 16 atomically
+     * clears only those two outputs.                                    */
+    GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+
+    /* Cancel any in-progress power-up sequence AFTER the hardware
+     * outputs are guaranteed to be low.  Also clears override state so
+     * Safety_RelayOverrideUpdate() cannot re-energise relays on the
+     * next 10 ms tick.                                                  */
+    relay_seq_state        = RELAY_SEQ_IDLE;
+    relay_override_enabled = false;
+    relay_override_mask    = 0;
 }
 
 bool Safety_IsPowerReady(void)
@@ -747,18 +769,28 @@ uint8_t Safety_GetRelayStatusByte(void)
     uint8_t status = 0;
 
     /* Read GPIO output register — reports commanded state.
-     * CAN contract rev 1.4: 2-bit layout (MAIN contactor removed).      */
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 0);
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR))  status |= (1U << 1);
+     *
+     * CAN wire layout (backward-compatible 3-bit, bit 0 reserved):
+     *   bit 0 = 0 (reserved; legacy MAIN slot — the hardware has no
+     *              MAIN / Power-Hold contactor, so this bit is always 0)
+     *   bit 1 = TRACTION  (PC11, 24 V — the only 24 V-side switch)
+     *   bit 2 = DIRECTION (PC12, 12 V — steering actuator)
+     *   bit 7 = SEQ_COMPLETE
+     *
+     * This layout preserves the original 3-bit contract so existing
+     * ESP32 consumers that decode bit 1 = TRAC and bit 2 = DIR continue
+     * to work unchanged.                                                 */
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 1);
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR))  status |= (1U << 2);
 
     /* Sequence complete flag */
     if (relay_seq_state == RELAY_SEQ_COMPLETE) status |= (1U << 7);
 
 #ifdef DEBUG
     /* Consistency assertion: COMPLETE implies both relays ON.
-     * If this fires, the relay sequencer or power-down has a bug.
-     * No runtime side-effect — debug diagnostic only.                 */
-    if ((relay_seq_state == RELAY_SEQ_COMPLETE) && ((status & 0x03U) != 0x03U)) {
+     * Checks bits 1 and 2 (0b0110 = 0x06).  If this fires, the relay
+     * sequencer or power-down has a bug.  No runtime side-effect.       */
+    if ((relay_seq_state == RELAY_SEQ_COMPLETE) && ((status & 0x06U) != 0x06U)) {
         /* Breakpoint trap for SWD debugger — NOP in release builds */
         __NOP();
     }
@@ -809,7 +841,7 @@ void Safety_SetRelayOverride(bool enabled, uint8_t mask)
             return;
         }
         relay_override_enabled = true;
-        relay_override_mask    = mask & 0x03U;  /* Only bits 0-1 valid */
+        relay_override_mask    = mask & 0x06U;  /* Only bits 1-2 valid (bit 0 reserved) */
     } else {
         /* Disable override — turn off all relay GPIOs that were set by override */
         if (relay_override_enabled) {
@@ -855,11 +887,11 @@ void Safety_RelayOverrideUpdate(void)
         return;
     }
 
-    /* Apply override mask to relay GPIOs */
+    /* Apply override mask to relay GPIOs (bit 0 reserved/ignored) */
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC,
-                      (relay_override_mask & 0x01U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,
                       (relay_override_mask & 0x02U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,
+                      (relay_override_mask & 0x04U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
 /* ================================================================== */
@@ -2167,11 +2199,16 @@ void Safety_EmergencyStop(void)
 {
     emergency_stopped = 1;
     Traction_EmergencyStop();
-    /* Transition to ERROR which calls Safety_PowerDown → Relay_PowerDown.
-     * Safety_PowerDown is safe to call after Traction_EmergencyStop
-     * (actuators are already inhibited; relays are de-energised).       */
-    system_state = SYS_STATE_ERROR;
+
+    /* Deterministic relay shutdown: Relay_PowerDown() performs an atomic
+     * BSRR write that forces TRAC and DIR OFF in a single cycle,
+     * independent of relay_seq_state or any previous relay state. This
+     * guarantees both 24 V and 12 V power rails are cut even if the
+     * sequencer was mid-transition or override was active.              */
     Relay_PowerDown();
+
+    /* Transition to ERROR AFTER actuators and relays are inhibited. */
+    system_state = SYS_STATE_ERROR;
 }
 
 void Safety_FailSafe(void)

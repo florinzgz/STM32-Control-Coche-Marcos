@@ -1480,7 +1480,7 @@ static void test_fault_handler_en_first_order(void)
     ASSERT_TRUE(en_pins != 0U);
 
     /* EN pins must not overlap with relay pins.
-     * Rev 1.4: MAIN contactor removed — only TRAC (PC11) and DIR (PC12). */
+     * MAIN contactor removed — only TRAC (PC11) and DIR (PC12). */
     uint16_t relay_pins = PIN_RELAY_TRAC | PIN_RELAY_DIR;
     ASSERT_TRUE((en_pins & relay_pins) == 0U);
 

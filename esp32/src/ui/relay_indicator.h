@@ -2,10 +2,13 @@
 // ESP32-S3 HMI — Relay Status Indicator Widget
 //
 // Compact 2-letter indicator showing real-time relay GPIO command state:
-//   T = TRACTION (PC11, 24 V)   D = DIRECTION (PC12, 12 V)
+//   T = TRACTION (PC11, 24 V — bit 1)   D = DIRECTION (PC12, 12 V — bit 2)
 //
 // The 24 V battery has only the traction relay — there is no independent
-// MAIN/Power-Hold contactor (CAN contract rev 1.4).
+// MAIN/Power-Hold contactor. Bit 0 of the relay-status byte is reserved
+// (legacy MAIN slot, always 0) and is ignored by this widget. The 3-bit
+// wire layout is preserved for backward compatibility with existing
+// consumers.
 //
 // Color logic:
 //   Green  — relay commanded ON and sequence complete
@@ -40,13 +43,14 @@ namespace cfg {
 class RelayIndicator {
 public:
     /// Draw relay indicator.  Only redraws if relayStatus byte changed.
-    /// relayStatus: bit0=TRAC, bit1=DIR, bit7=SEQ_COMPLETE (CAN rev 1.4)
+    /// relayStatus: bit0=reserved(0), bit1=TRAC, bit2=DIR, bit7=SEQ_COMPLETE
+    /// (3-bit wire layout preserved for backward compatibility).
     static void draw(TFT_eSPI& tft, uint8_t relayStatus, uint8_t prevRelayStatus) {
         if (relayStatus == prevRelayStatus) return;
 
         const bool seqComplete = (relayStatus & 0x80U) != 0;
-        const bool tracOn      = (relayStatus & 0x01U) != 0;
-        const bool dirOn       = (relayStatus & 0x02U) != 0;
+        const bool tracOn      = (relayStatus & 0x02U) != 0;
+        const bool dirOn       = (relayStatus & 0x04U) != 0;
 
         // Clear background
         tft.fillRect(cfg::REL_IND_X, cfg::REL_IND_Y,
