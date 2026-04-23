@@ -13,6 +13,61 @@ machine-readable rollup used as the production-readiness release log.
 
 ## [Unreleased]
 
+### Steering deadband — mechanical-backlash correction (2026-04-23)
+
+Surgical fix for the post-gear-ratio refactor: after the global switch to
+road-wheel degrees via `Steering_GetCurrentAngle()`, the legacy
+`STEERING_DEADBAND_COUNTS` (0.5 ° on the encoder shaft) collapsed to
+≈ 0.077 ° at the road wheel — well below the ~3 ° of measured mechanical
+slop downstream of the RS390 motor + ~1:50 reductor.  The EPS loop was
+therefore chasing the backlash and chattering near centre.
+
+#### Changed
+
+- **New macro `STEERING_DEADBAND_DEG = 1.8 f`** in
+  `Core/Src/motor_control.c` — expressed in the global unit (road-wheel
+  degrees), sized at ≈ 60 % of the observed 3 ° backlash.  Tuning range
+  documented inline: raise to 2.0 ° if chatter persists, lower to 1.5 °
+  if the response feels dead; **never** below 1.0 ° (below backlash ⇒
+  unstable).
+- **Deadband applied to `theta` inside `Steering_ControlLoop()`**,
+  immediately after `sanitize_float(theta)` and **before** ω is derived,
+  so the assist term (`λ·k·g(v)·ω`), the return-to-centre term
+  (`(1 − λ)·k·h(v)·θ`) and the friction-comp heuristic all collapse to
+  zero inside the dead window:
+  ```c
+  if (fabsf(theta) < STEERING_DEADBAND_DEG) {
+      theta = 0.0f;
+  }
+  ```
+- `STEERING_DEADBAND_COUNTS` **left in place (unused)** with a comment
+  redirecting readers to the degree-domain macro; no count-space logic
+  was reintroduced.
+
+#### Unchanged (explicit non-goals of this patch)
+
+- `Steering_GetCurrentAngle()` — single source of truth for road-wheel
+  degrees.
+- `STEERING_GEAR_RATIO`, `ENC_MAX_JUMP`, `ENC_MAX_COUNTS`, encoder ISR
+  and Z-channel diagnostics.
+- Ackermann geometry, EPS torque-equation gains, high-speed fade,
+  degraded-mode scaling.
+- Safety state machine and plausibility checks — they keep reading the
+  raw `Steering_GetCurrentAngle()`; the deadband affects **only** the
+  PID consumer inside `Steering_ControlLoop()`.
+
+#### Validation
+
+- Firmware builds clean (`make` with `-Wall -Wextra -Werror`), flash
+  delta +16 B text, 0 B bss.
+- `|θ| < 1.8 °` ⇒ `θ = 0` ⇒ no PWM output → no chatter in reposo.
+- `|θ| ≥ 1.8 °` ⇒ control path is bit-identical to the previous
+  behaviour (same gains, same torque equation, same high-speed fade).
+- Ackermann and safety subsystems observe the unfiltered angle and are
+  byte-for-byte unchanged.
+
+---
+
 ### Encoder Z (index) channel — PB4 / EXTI4 (2026-04-22)
 
 Activation of the E6B2-CWZ6C Z output for inter-revolution integrity checking
