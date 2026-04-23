@@ -688,6 +688,27 @@ void Relay_SequencerUpdate(void)
      * Progresses through the power-up sequence using timestamps:
      *   TRACTION_ON  →  (RELAY_TRACTION_SETTLE_MS)  →  COMPLETE (DIR on)
      * IDLE and COMPLETE are no-ops.                                     */
+
+    /* Hard gate: NEVER energise relays unless the system is in the
+     * fully operational ACTIVE state.  This is a defence-in-depth
+     * safeguard that prevents the direction relay from being turned ON
+     * by this 10 ms tick if a fault, SAFE, ERROR, or emergency stop
+     * occurred between Relay_PowerUp() and the next sequencer tick.
+     *
+     * Degenerate cases handled safely:
+     *   - SAFE / ERROR / STANDBY / BOOT: sequencer cannot advance;
+     *     Relay_PowerDown() (called by Safety_FailSafe / Safety_PowerDown
+     *     / Safety_EmergencyStop) has already forced both relays OFF
+     *     atomically and reset the sequencer to IDLE.
+     *   - DEGRADED / LIMP_HOME: Relay_PowerUp() is called only from the
+     *     ACTIVE→{DEGRADED,LIMP_HOME} path where the sequencer was
+     *     already COMPLETE (re-entry-safe PowerUp is a no-op). The
+     *     COMPLETE branch is a no-op here too, so blocking the
+     *     TRACTION_ON branch in these states is safe.                   */
+    if (system_state != SYS_STATE_ACTIVE) {
+        return;
+    }
+
     uint32_t now = HAL_GetTick();
 
     switch (relay_seq_state) {
