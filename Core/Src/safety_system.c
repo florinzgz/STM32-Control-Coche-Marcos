@@ -695,17 +695,33 @@ void Relay_SequencerUpdate(void)
      * by this 10 ms tick if a fault, SAFE, ERROR, or emergency stop
      * occurred between Relay_PowerUp() and the next sequencer tick.
      *
+     * Edge case — mid-sequence state transition:
+     *   If the system leaves ACTIVE while the sequencer is in
+     *   RELAY_SEQ_TRACTION_ON (TRAC already energised, DIR still OFF,
+     *   waiting for the 50 ms settle delay), a plain early-return would
+     *   leave the hardware in an inconsistent partial state
+     *   (TRAC=ON, DIR=OFF) until something else powers down.
+     *   Force a full, atomic power-down here so the relays are always
+     *   in a coherent state — either fully OFF or fully ON (TRAC+DIR).
+     *
      * Degenerate cases handled safely:
-     *   - SAFE / ERROR / STANDBY / BOOT: sequencer cannot advance;
-     *     Relay_PowerDown() (called by Safety_FailSafe / Safety_PowerDown
-     *     / Safety_EmergencyStop) has already forced both relays OFF
-     *     atomically and reset the sequencer to IDLE.
-     *   - DEGRADED / LIMP_HOME: Relay_PowerUp() is called only from the
-     *     ACTIVE→{DEGRADED,LIMP_HOME} path where the sequencer was
-     *     already COMPLETE (re-entry-safe PowerUp is a no-op). The
-     *     COMPLETE branch is a no-op here too, so blocking the
-     *     TRACTION_ON branch in these states is safe.                   */
+     *   - SAFE / ERROR: Safety_FailSafe / Safety_PowerDown /
+     *     Safety_EmergencyStop already called Relay_PowerDown() before
+     *     this tick; relay_seq_state == IDLE, so the mid-sequence check
+     *     below is a no-op and we simply return.
+     *   - STANDBY / BOOT: sequencer is IDLE by construction; no-op.
+     *   - DEGRADED / LIMP_HOME: Relay_PowerUp() is only called on the
+     *     ACTIVE→{DEGRADED,LIMP_HOME} transition where the sequencer is
+     *     already COMPLETE (re-entry-safe PowerUp is a no-op), so relays
+     *     stay fully ON and this path returns without touching them.
+     *     If the transition happens mid-sequence, we intentionally
+     *     power-down to avoid a partial (TRAC=ON, DIR=OFF) state rather
+     *     than silently leaving the vehicle half-energised.            */
     if (system_state != SYS_STATE_ACTIVE) {
+        /* Never leave a partially-energised relay state behind. */
+        if (relay_seq_state == RELAY_SEQ_TRACTION_ON) {
+            Relay_PowerDown();
+        }
         return;
     }
 
