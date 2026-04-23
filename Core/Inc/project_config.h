@@ -30,6 +30,13 @@
 #define ENCODER_PPR        1200
 #define ENCODER_CPR        (ENCODER_PPR * 4)  /* 4800 counts/rev */
 
+/* Steering gear ratio: volante (±350°) → rueda (±MAX_STEER_DEG ≈ ±54°).
+ * Encoder is mounted on the steering column (volante), not on the road
+ * wheel.  All angle consumers (Ackermann, EPS, safety plausibility)
+ * operate in road-wheel degrees, so divide the raw encoder angle by
+ * this ratio at the single getter Steering_GetCurrentAngle().          */
+#define STEERING_GEAR_RATIO  6.48f
+
 /* ========================================================================== */
 /*                       MOTOR PWM PIN MAPPING                                */
 /* ========================================================================== */
