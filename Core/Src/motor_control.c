@@ -438,8 +438,16 @@ static float steer_fr_deg = 0.0f;
  */
 
 /* Steering deadband in encoder counts (steering_motor.cpp: kDeadbandDeg = 0.5f)
- * 0.5° × 4800 counts/360° ≈ 6.67 counts */
+ * 0.5° × 4800 counts/360° ≈ 6.67 counts
+ * NOTE: kept for historical reference only; control-loop deadband is now
+ *       applied in road-wheel degrees via STEERING_DEADBAND_DEG below.    */
 #define STEERING_DEADBAND_COUNTS  (0.5f * (float)ENCODER_CPR / 360.0f)
+
+/* Steering deadband in road-wheel degrees — absorbs ≈3° of mechanical
+ * backlash downstream of the motor/reductor (1.8° ≈ 60 % of the slop).
+ * Tuning: raise to 2.0° if chatter persists, lower to 1.5° if the
+ * response feels dead; do NOT go below 1.0° (below backlash = unstable). */
+#define STEERING_DEADBAND_DEG     1.8f
 #define ENC_MAX_COUNTS       ((int32_t)((MAX_STEER_DEG * STEERING_GEAR_RATIO + 20.0f) * (float)ENCODER_CPR / 360.0f))
         /* Encoder is mounted on the steering column (volante), not on
          * the road-wheel output shaft.  Plausible range is the full
@@ -1829,6 +1837,15 @@ void Steering_ControlLoop(void)
      * same scale as Ackermann and safety plausibility checks.        */
     float theta = Steering_GetCurrentAngle();
     theta = sanitize_float(theta, 0.0f);
+
+    /* ---- Mechanical-backlash deadband (road-wheel degrees) ----
+     * Ignore sub-deadband angles so the control loop does not chase
+     * the ~3° of slop between the encoder/motor side and the road
+     * wheels.  Applied in deg (the global unit) after sanitisation,
+     * before the ω estimate so ω also sees theta clamped to 0.     */
+    if (fabsf(theta) < STEERING_DEADBAND_DEG) {
+        theta = 0.0f;
+    }
 
     /* ---- Angular velocity ω (°/s) ---- */
     float omega_raw = (theta - eps_prev_angle_deg) / dt;
