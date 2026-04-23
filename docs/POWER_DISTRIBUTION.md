@@ -1,5 +1,7 @@
 # Distribución de Potencia — Arquitectura Eléctrica
 
+> ⚠ **ACTUALIZACIÓN CAN rev 1.4 (2026-04-23):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. El byte 5 del heartbeat (CAN 0x001) pasa de 3 a 2 bits útiles: bit 0 = TRAC, bit 1 = DIR, bit 7 = SEQ_COMPLETE. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+
 Documentación completa de la distribución de potencia del vehículo controlado por STM32G474RE + ESP32-S3.
 Todos los valores proceden exclusivamente del firmware y de la especificación hardware existente.
 

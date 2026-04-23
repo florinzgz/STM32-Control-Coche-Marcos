@@ -1,6 +1,8 @@
 # INFORME DE REVISIÓN TÉCNICA — Módulo relay_audio
 ## Seguridad Funcional y Estabilidad del Sistema
 
+> ⚠ **ACTUALIZACIÓN CAN rev 1.4 (2026-04-23):** El subsistema de relés de potencia pasó de 3 relés (MAIN/TRAC/DIR) a **2 relés reales** (TRAC/DIR). El relé MAIN y el pin PC10 se han eliminado del firmware y del bitmap CAN de relés. Este informe se actualiza a nivel arquitectónico; los detalles de `relay_audio` (relé de altavoz) no cambian. Ver `CAN_CONTRACT_FINAL.md`.
+
 **Versión revisada:** commit `f0db14a` + test suite  
 **Entorno:** ESP32-S3-DevKitC-1 (N16R8), Arduino/PlatformIO  
 **Fecha:** 2026-02-25  

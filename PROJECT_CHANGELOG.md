@@ -57,7 +57,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) + Relay Control submenu. SafeScreen incluye visualización pasiva extendida (gear, obstacle, LEDs, relay, steering visual). |
 
 ### Comunicación CAN
-- **Protocolo**: 27 tipos de mensaje, contrato congelado v1.3.
+- **Protocolo**: 27 tipos de mensaje, contrato **v1.4** (2026-04-23 — ver `docs/CAN_CONTRACT_FINAL.md`).
 - **STM32→ESP32**: Heartbeat (0x001), telemetría (0x200–0x20A), service (0x301–0x305).
 - **ESP32→STM32**: Heartbeat (0x011), throttle (0x100), steering (0x101), mode (0x102), service (0x110), LEDs (0x120), obstacle (0x208–0x209).
 - **Filtrado STM32**: MASK accept-all (index 0), filtrado real en `CAN_ProcessMessages()` switch/case.
@@ -79,6 +79,34 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR — hardware(relay): eliminar relé MAIN inexistente (24 V solo tiene un relé)
+- **Fecha:** 2026-04-23
+- **Autor:** Copilot
+- **Rama:** `copilot/add-vehicle-control-system`
+- **Descripción del cambio:** El hardware real del coche solo tiene **un relé de 24 V** (tracción, alimenta los 4 BTS7960) y **un relé de 12 V** (dirección). **NO existe un contactor MAIN / Power-Hold** independiente que justificase el tercer relé `PIN_RELAY_MAIN` (PC10) que había en firmware. Se elimina toda la lógica asociada y el byte CAN de estado de relés pasa de 3 a 2 bits útiles — **cambio breaking**, bump del contrato CAN a **rev 1.4**.
+
+#### Cambios principales (BREAKING CHANGE — contrato CAN)
+- **CAN**: `HEARTBEAT_STM32` (0x001) byte 5 `relay_status` cambia de 3 bits (MAIN/TRAC/DIR) a **2 bits (TRAC=bit0, DIR=bit1)**; bit 7 = `SEQ_COMPLETE` sigue igual. Contrato bump 1.3 → 1.4. Consumidores deben actualizarse en lockstep.
+- **Firmware STM32**:
+  - `project_config.h`: `PIN_RELAY_MAIN` eliminado; PC10 queda **reservado/libre**. `PIN_RELAY_TRAC` (PC11) y `PIN_RELAY_DIR` (PC12) se mantienen.
+  - `safety_system.c`: secuenciador pasa de 3 fases (MAIN→TRAC→DIR) a **2 fases** (TRAC→DIR, ~20 ms). `RELAY_MAIN_SETTLE_MS` eliminado; `RELAY_SEQ_MAIN_ON` eliminado. `Safety_GetRelayStatusByte()` reporta layout de 2 bits. Override mask (SERVICE_CMD 0xE0) pasa a 2 bits. Diagnóstico de "stuck open" referido ahora a `MODULE_RELAY_TRAC`.
+  - `main.c` / `stm32g4xx_it.c`: GPIO init y máscara BSRR del *emergency stop* sin `PIN_RELAY_MAIN`.
+  - `service_mode`: `MODULE_RELAY_MAIN` **renombrado a `MODULE_RELAY_TRAC`** (ID 3 preservado — no rompe IDs de CAN ni métricas históricas).
+- **Firmware ESP32 (HMI)**:
+  - `vehicle_data.h`, `relay_indicator.h`, `safe_screen.cpp`, `engineering_screen.cpp/h`: layout de 2 bits; widget pasa de `M T D` a `T D`. La pantalla de Relay Control en Engineering pasa de 4 filas (Override / MAIN / TRAC / DIR) a 3 (Override / TRAC / DIR).
+  - `can_ids.h`: bump de referencia a rev 1.4.
+- **`.ioc`**: PC10 eliminado como `GPIO_Output` (edición manual — sin regeneración CubeMX).
+- **Tests**: `test_service_mode.c` y `test_motor_control.c` actualizados a `MODULE_RELAY_TRAC` y a la nueva máscara de relés (5 motores + **2 relés** + 2 LED relays = 9 salidas). **195 + 11 529 tests pasan.**
+- **Docs**: banners de actualización en `POWER_DISTRIBUTION.md`, `HARDWARE_WIRING_MANUAL.md`, `LISTADO_PINES_COMPLETO.md`, `CONEXIONES_COMPLETAS.md`, `SAFETY_SYSTEMS.md`, `SAFETY_ARCHITECTURE.md`, `INFORME_REVISION_TECNICA_RELAY.md`, `INA226_RELAY_SAFETY_AUDIT.md`, `AUDIO_RELAY_INTEGRATION.md`, `PINOUT.md`.
+
+#### Lo que NO cambia
+- Lógica de BTS7960, PWM, encoders, FDCAN de telemetría, ESP32 HMI (salvo el widget de relés).
+- Timings/umbrales de otros subsistemas de seguridad.
+- IDs de módulo del Service Mode (al renombrar, el ID=3 se conserva).
+- `relay_audio` (módulo de audio en ESP32) es independiente — no afectado.
+
+---
 
 ### PR — fix(steering): deadband 1.8° en dominio de rueda para absorber holgura mecánica
 - **Fecha:** 2026-04-23

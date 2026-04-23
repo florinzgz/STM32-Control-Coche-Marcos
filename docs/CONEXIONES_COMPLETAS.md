@@ -1,5 +1,7 @@
 # ESQUEMA COMPLETO DE CONEXIONES — Guía Cable por Cable
 
+> ⚠ **ACTUALIZACIÓN CAN rev 1.4 (2026-04-23):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+
 **Fecha:** 2026-04-10
 **Propósito:** Referencia de taller para conectar todo el hardware y validar Phase 1
 **Fuente:** Extraído directamente del firmware (`project_config.h`, `main.c`, `stm32g4xx_hal_msp.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`, `can_handler.c`, `steering_centering.c`, `obstacle_sensor.h`, `audio_manager.h`, `led_controller.h`, `shifter_input.h`, `relay_audio.h`)

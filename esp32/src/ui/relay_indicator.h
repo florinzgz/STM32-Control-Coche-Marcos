@@ -1,8 +1,11 @@
 // =============================================================================
 // ESP32-S3 HMI — Relay Status Indicator Widget
 //
-// Compact 3-letter indicator showing real-time relay GPIO command state:
-//   M = MAIN (PC10), T = TRACTION (PC11), D = DIRECTION (PC12)
+// Compact 2-letter indicator showing real-time relay GPIO command state:
+//   T = TRACTION (PC11, 24 V)   D = DIRECTION (PC12, 12 V)
+//
+// The 24 V battery has only the traction relay — there is no independent
+// MAIN/Power-Hold contactor (CAN contract rev 1.4).
 //
 // Color logic:
 //   Green  — relay commanded ON and sequence complete
@@ -12,7 +15,7 @@
 // Displayed in DriveScreen gear bar zone (right side).
 // Data source: HeartbeatData.relayStatus (CAN 0x001, byte 5).
 //
-// Rendering cost: single text call with 3 colored characters.
+// Rendering cost: single text call with 2 colored characters.
 // No dynamic allocation, O(1) per frame.
 // =============================================================================
 
@@ -37,14 +40,13 @@ namespace cfg {
 class RelayIndicator {
 public:
     /// Draw relay indicator.  Only redraws if relayStatus byte changed.
-    /// relayStatus: bit0=MAIN, bit1=TRAC, bit2=DIR, bit7=SEQ_COMPLETE
+    /// relayStatus: bit0=TRAC, bit1=DIR, bit7=SEQ_COMPLETE (CAN rev 1.4)
     static void draw(TFT_eSPI& tft, uint8_t relayStatus, uint8_t prevRelayStatus) {
         if (relayStatus == prevRelayStatus) return;
 
         const bool seqComplete = (relayStatus & 0x80U) != 0;
-        const bool mainOn      = (relayStatus & 0x01U) != 0;
-        const bool tracOn      = (relayStatus & 0x02U) != 0;
-        const bool dirOn       = (relayStatus & 0x04U) != 0;
+        const bool tracOn      = (relayStatus & 0x01U) != 0;
+        const bool dirOn       = (relayStatus & 0x02U) != 0;
 
         // Clear background
         tft.fillRect(cfg::REL_IND_X, cfg::REL_IND_Y,
@@ -56,21 +58,17 @@ public:
         // Y center (text size 1 is 8px high, bar is 20px, so offset by 6)
         const int16_t textY = cfg::REL_IND_Y + (cfg::REL_IND_H - 8) / 2;
 
-        // Draw "M" for MAIN relay
-        tft.setTextColor(relayColor(mainOn, seqComplete), COL_BG);
-        tft.drawChar('M', cfg::REL_IND_X, textY);
-
         // Draw "T" for TRACTION relay
         tft.setTextColor(relayColor(tracOn, seqComplete), COL_BG);
-        tft.drawChar('T', cfg::REL_IND_X + 14, textY);
+        tft.drawChar('T', cfg::REL_IND_X, textY);
 
         // Draw "D" for DIRECTION relay
         tft.setTextColor(relayColor(dirOn, seqComplete), COL_BG);
-        tft.drawChar('D', cfg::REL_IND_X + 28, textY);
+        tft.drawChar('D', cfg::REL_IND_X + 14, textY);
     }
 
     /// Static label — draw "REL" prefix (call once on screen enter).
-    /// Intentionally empty: M/T/D letters are self-explanatory in the gear bar
+    /// Intentionally empty: T/D letters are self-explanatory in the gear bar
     /// context. Kept for API parity with GearDisplay, ModeIcons, etc.
     static void drawStatic(TFT_eSPI& /* tft */) {}
 

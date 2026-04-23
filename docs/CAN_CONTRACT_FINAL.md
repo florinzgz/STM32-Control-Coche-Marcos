@@ -1,8 +1,8 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.3
-**Status:** ACTIVE — Added command acknowledgment layer (Phase 13)
-**Date:** 2026-02-13
+**Revision:** 1.4
+**Status:** ACTIVE — Removed non-existent MAIN relay (hardware reality)
+**Date:** 2026-04-23
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
 Any change to this contract requires a new numbered revision and a corresponding firmware release.
@@ -12,6 +12,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
 - **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
 - **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
+- **1.4** (2026-04-23): **BREAKING** — Removed non-existent MAIN power relay. The 24 V battery hardware only has the traction relay; there is no independent MAIN/Power-Hold contactor. HEARTBEAT_STM32 (0x001) byte 5 `relay_status` now uses a 2-bit layout: bit 0 = TRAC (PC11), bit 1 = DIR (PC12), bit 7 = SEQ_COMPLETE. Bits 2–6 are reserved and always 0. STM32 `MODULE_RELAY_MAIN` renamed to `MODULE_RELAY_TRAC` (ID 3 preserved). Service override mask (SERVICE_CMD 0xE0 byte 1) is now 2 bits instead of 3. Power-up sequence simplified from 3-stage (MAIN→TRAC→DIR) to 2-stage (TRAC→DIR, ~20 ms).
 
 ---
 
@@ -82,7 +83,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 
 | CAN ID | Name | DLC | Rate | Description | Source file |
 |--------|------|-----|------|-------------|-------------|
-| 0x001 | HEARTBEAT_STM32 | 5 | 100 ms | System alive, state, fault flags, error code, status flags | `can_handler.c` |
+| 0x001 | HEARTBEAT_STM32 | 6 | 100 ms | System alive, state, fault flags, error code, status flags, relay status | `can_handler.c` |
 | 0x200 | STATUS_SPEED | 8 | 100 ms | Four wheel speeds | `can_handler.c`, `main.c` |
 | 0x201 | STATUS_CURRENT | 8 | 100 ms | Four motor currents | `can_handler.c`, `main.c` |
 | 0x202 | STATUS_TEMP | 5 | 1000 ms | Five temperature sensors | `can_handler.c`, `main.c` |
@@ -127,7 +128,13 @@ ACK is sent only after:
 | 0 | alive_counter | uint8 | Incrementing counter, 0–255, intentional rollover |
 | 1 | system_state | uint8 | Current system state (see section 6) |
 | 2 | fault_flags | uint8 | Bitmask of active faults (see section 6) |
-| 3 | error_code | uint8 | Current safety error code (Safety_Error_t, 0–12; see section 7) |
+| 3 | error_code | uint8 | Current safety error code (Safety_Error_t, 0–13; see section 7) |
+| 4 | status_flags | uint8 | bit 0: startup inhibit, bit 1: 4×4, bit 2: tank turn, bits 3–5: DS18B20 count |
+| 5 | relay_status | uint8 | Power relay command state (CAN rev 1.4): bit 0 = TRAC (PC11, 24 V), bit 1 = DIR (PC12, 12 V), bits 2–6 reserved (0), bit 7 = SEQ_COMPLETE |
+
+**Hardware note (rev 1.4):** The 24 V battery has only ONE power relay (traction). There is no independent MAIN / Power-Hold contactor. PC10 on the STM32 is reserved/unused.
+
+**Backward compatibility:** ESP32 receivers that decode this byte with the old 3-bit layout (bit 0 = MAIN, bit 1 = TRAC, bit 2 = DIR) will display the TRAC/DIR states in the MAIN/TRAC slots and always show DIR as OFF. This is a breaking change — consumers must be updated to rev 1.4.
 
 Source: `CAN_SendHeartbeat()` in `can_handler.c`
 
@@ -599,15 +606,15 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.4 removes the non-existent MAIN power relay from the heartbeat byte 5 layout (breaking change — the 24 V hardware only has the traction relay).
 
 | Property | Value |
 |----------|-------|
-| Contract revision | 1.3 |
-| Previous revision | 1.2 |
+| Contract revision | 1.4 |
+| Previous revision | 1.3 |
 | Contract status | ACTIVE |
 | Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
-| Backward compatibility | Revision 1.3 is backward-compatible with 1.2, 1.1, and 1.0. No existing CAN IDs, payload layouts, or timing changed. New CMD_ACK (0x103) is additive only — ESP32 firmware without ACK support will silently ignore the new message. |
+| Backward compatibility | Revision 1.4 is **NOT** backward-compatible with 1.3 for consumers of HEARTBEAT_STM32 byte 5 (`relay_status`). The bit layout changed from 3 relays (MAIN/TRAC/DIR) to 2 relays (TRAC/DIR). All other messages and IDs are unchanged. ESP32 firmware must be updated in lockstep with STM32 firmware. |
 
 The source files that define this contract are:
 

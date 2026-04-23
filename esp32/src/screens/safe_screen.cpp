@@ -517,10 +517,10 @@ void SafeScreen::draw() {
     // ---- TILE: Relay status indicator ----
     if (tiles_.isDirty(STILE_RELAY)) {
         // Reuse RelayIndicator widget with SafeScreen Y position
+        // CAN rev 1.4: 2-relay layout (MAIN contactor removed).
         const bool seqComplete = (relayStatus_ & 0x80U) != 0;
-        const bool mainOn      = (relayStatus_ & 0x01U) != 0;
-        const bool tracOn      = (relayStatus_ & 0x02U) != 0;
-        const bool dirOn       = (relayStatus_ & 0x04U) != 0;
+        const bool tracOn      = (relayStatus_ & 0x01U) != 0;
+        const bool dirOn       = (relayStatus_ & 0x02U) != 0;
 
         // Clear background
         tft.fillRect(STILE_RELAY_X, STILE_GEAR_BAR_Y,
@@ -536,14 +536,11 @@ void SafeScreen::draw() {
             return seq ? ui::COL_GREEN : ui::COL_AMBER;
         };
 
-        tft.setTextColor(relayCol(mainOn, seqComplete), ui::COL_BG);
-        tft.drawChar('M', STILE_RELAY_X, textY);
-
         tft.setTextColor(relayCol(tracOn, seqComplete), ui::COL_BG);
-        tft.drawChar('T', STILE_RELAY_X + 14, textY);
+        tft.drawChar('T', STILE_RELAY_X, textY);
 
         tft.setTextColor(relayCol(dirOn, seqComplete), ui::COL_BG);
-        tft.drawChar('D', STILE_RELAY_X + 28, textY);
+        tft.drawChar('D', STILE_RELAY_X + 14, textY);
 
         prevRelayStatus_ = relayStatus_;
         tiles_.markClean(STILE_RELAY);
