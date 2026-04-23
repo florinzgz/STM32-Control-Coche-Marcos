@@ -124,7 +124,6 @@ static inline void sat_inc_u32(uint32_t *counter) {
  *   in < 1 µs per call.  The 10 ms loop cadence introduces up to
  *   10 ms of jitter per stage (within specification for SRD-05VDC
  *   relays with 10 ms activation time).                                */
-#define RELAY_MAIN_SETTLE_MS     50   /* inrush current settling time      */
 #define RELAY_TRACTION_SETTLE_MS 20   /* contactor arc suppression delay   */
 
 /* Relay health check thresholds (post-ACTIVE runtime validation).
@@ -231,11 +230,17 @@ static uint8_t  steering_timed_out  = 0;
 static uint8_t  consecutive_errors      = 0;
 static uint32_t last_error_tick         = 0;
 
-/* ---- Non-blocking relay sequencer state machine ---- */
+/* ---- Non-blocking relay sequencer state machine ----
+ *
+ * The 24 V battery has only ONE relay (traction, PC11).  The 12 V
+ * battery has the direction relay (PC12).  There is no independent
+ * MAIN/Power-Hold contactor — the historical 3-stage sequence
+ * (MAIN → TRAC → DIR) has been collapsed to a 2-stage sequence:
+ *   TRACTION_ON → (RELAY_TRACTION_SETTLE_MS) → COMPLETE (direction on)
+ * Power-down order is reversed: DIR off, then TRAC off.               */
 typedef enum {
-    RELAY_SEQ_IDLE = 0,     /* All relays off, no sequence in progress   */
-    RELAY_SEQ_MAIN_ON,      /* Main relay energised, waiting settle      */
-    RELAY_SEQ_TRACTION_ON,  /* Traction relay energised, waiting settle  */
+    RELAY_SEQ_IDLE = 0,      /* All relays off, no sequence in progress   */
+    RELAY_SEQ_TRACTION_ON,   /* Traction relay energised, waiting settle  */
     RELAY_SEQ_COMPLETE       /* All relays on, sequence finished          */
 } RelaySeqState_t;
 
@@ -247,10 +252,9 @@ static uint32_t        relay_seq_timestamp = 0;
  * Override is ONLY effective in STANDBY with zero throttle, zero speed,
  * and no active safety errors.  Automatically disabled on any violation.
  *
- * relay_override_mask bit layout:
- *   bit 0: MAIN relay (PC10)
- *   bit 1: TRACTION relay (PC11)
- *   bit 2: DIRECTION relay (PC12)                                       */
+ * relay_override_mask bit layout (2 bits — matches heartbeat byte 5):
+ *   bit 0: TRACTION relay (PC11)
+ *   bit 1: DIRECTION relay (PC12)                                      */
 static bool    relay_override_enabled = false;
 static uint8_t relay_override_mask    = 0;
 
@@ -663,9 +667,11 @@ void Relay_PowerUp(void)
         return;  /* Sequence already in progress or complete */
     }
 
-    /* Step 1: Energise main relay and record timestamp */
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_SET);
-    relay_seq_state     = RELAY_SEQ_MAIN_ON;
+    /* Step 1: Energise traction relay and record timestamp.
+     * (The 24 V bus has no independent MAIN contactor — the traction
+     *  relay is the first and only 24 V-side switch.)                  */
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
+    relay_seq_state     = RELAY_SEQ_TRACTION_ON;
     relay_seq_timestamp = HAL_GetTick();
 }
 
@@ -673,19 +679,11 @@ void Relay_SequencerUpdate(void)
 {
     /* Non-blocking relay sequencer — call from the 10 ms safety loop.
      * Progresses through the power-up sequence using timestamps:
-     *   MAIN_ON  →  (50 ms)  →  TRACTION_ON  →  (20 ms)  →  COMPLETE
+     *   TRACTION_ON  →  (RELAY_TRACTION_SETTLE_MS)  →  COMPLETE (DIR on)
      * IDLE and COMPLETE are no-ops.                                     */
     uint32_t now = HAL_GetTick();
 
     switch (relay_seq_state) {
-        case RELAY_SEQ_MAIN_ON:
-            if ((now - relay_seq_timestamp) >= RELAY_MAIN_SETTLE_MS) {
-                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
-                relay_seq_state     = RELAY_SEQ_TRACTION_ON;
-                relay_seq_timestamp = now;
-            }
-            break;
-
         case RELAY_SEQ_TRACTION_ON:
             if ((now - relay_seq_timestamp) >= RELAY_TRACTION_SETTLE_MS) {
                 HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR, GPIO_PIN_SET);
@@ -702,12 +700,11 @@ void Relay_SequencerUpdate(void)
 
 void Relay_PowerDown(void)
 {
-    /* Reverse order: Direction → Traction → Main.
+    /* Reverse order: Direction → Traction.
      * Cancels any in-progress power-up sequence immediately.            */
     relay_seq_state = RELAY_SEQ_IDLE;
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);
 }
 
 bool Safety_IsPowerReady(void)
@@ -717,8 +714,7 @@ bool Safety_IsPowerReady(void)
 
 bool Relay_IsSequenceInProgress(void)
 {
-    return (relay_seq_state == RELAY_SEQ_MAIN_ON ||
-            relay_seq_state == RELAY_SEQ_TRACTION_ON);
+    return (relay_seq_state == RELAY_SEQ_TRACTION_ON);
 }
 
 /* ================================================================== */
@@ -750,19 +746,19 @@ uint8_t Safety_GetRelayStatusByte(void)
 {
     uint8_t status = 0;
 
-    /* Read GPIO output register — reports commanded state */
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_MAIN)) status |= (1U << 0);
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 1);
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR))  status |= (1U << 2);
+    /* Read GPIO output register — reports commanded state.
+     * CAN contract rev 1.4: 2-bit layout (MAIN contactor removed).      */
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 0);
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR))  status |= (1U << 1);
 
     /* Sequence complete flag */
     if (relay_seq_state == RELAY_SEQ_COMPLETE) status |= (1U << 7);
 
 #ifdef DEBUG
-    /* Consistency assertion: COMPLETE implies all three relays ON.
+    /* Consistency assertion: COMPLETE implies both relays ON.
      * If this fires, the relay sequencer or power-down has a bug.
      * No runtime side-effect — debug diagnostic only.                 */
-    if ((relay_seq_state == RELAY_SEQ_COMPLETE) && ((status & 0x07U) != 0x07U)) {
+    if ((relay_seq_state == RELAY_SEQ_COMPLETE) && ((status & 0x03U) != 0x03U)) {
         /* Breakpoint trap for SWD debugger — NOP in release builds */
         __NOP();
     }
@@ -813,11 +809,10 @@ void Safety_SetRelayOverride(bool enabled, uint8_t mask)
             return;
         }
         relay_override_enabled = true;
-        relay_override_mask    = mask & 0x07U;  /* Only bits 0-2 valid */
+        relay_override_mask    = mask & 0x03U;  /* Only bits 0-1 valid */
     } else {
         /* Disable override — turn off all relay GPIOs that were set by override */
         if (relay_override_enabled) {
-            HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
         }
@@ -861,12 +856,10 @@ void Safety_RelayOverrideUpdate(void)
     }
 
     /* Apply override mask to relay GPIOs */
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN,
-                      (relay_override_mask & 0x01U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC,
-                      (relay_override_mask & 0x02U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+                      (relay_override_mask & 0x01U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,
-                      (relay_override_mask & 0x04U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+                      (relay_override_mask & 0x02U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
 /* ================================================================== */
@@ -1299,7 +1292,7 @@ void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wh
  *   2. ≥2 consecutive → DEGRADED L3 (more restrictive limits)
  *   3. ≥3 consecutive → SAFE → Safety_FailSafe():
  *        – Traction_EmergencyStop() disables all motor PWM + H-bridge EN
- *        – Relay_PowerDown() de-energises main/traction/direction relays
+ *        – Relay_PowerDown() de-energises traction and direction relays
  *        – Steering centred or neutralised
  *   Hardware fuses and BTS7960 internal current limiting handle sub-ms
  *   transients; this software path protects against sustained faults.  */
@@ -2103,7 +2096,7 @@ void Safety_CheckRelayHealth(void)
                 if (ts != (void *)0 && ts->demandPct > 0.0f &&
                     any_wheel_moving) {
                     /* Confirmed relay-open fault */
-                    ServiceMode_SetFault(MODULE_RELAY_MAIN,
+                    ServiceMode_SetFault(MODULE_RELAY_TRAC,
                                          MODULE_FAULT_ERROR);
                     Safety_SetError(SAFETY_ERROR_RELAY_OPEN);
                     Safety_SetState(SYS_STATE_DEGRADED);
@@ -2148,7 +2141,7 @@ void Safety_CheckRelayHealth(void)
                 } else if ((now - relay_chk_recovery_tick) >=
                            RELAY_CHK_RECOVERY_MS) {
                     /* Sustained healthy current confirmed — clear fault */
-                    ServiceMode_ClearFault(MODULE_RELAY_MAIN);
+                    ServiceMode_ClearFault(MODULE_RELAY_TRAC);
                     Safety_ClearError(SAFETY_ERROR_RELAY_OPEN);
                     relay_chk_recovery_tick  = 0;
                     relay_chk_fault_set_tick = 0;

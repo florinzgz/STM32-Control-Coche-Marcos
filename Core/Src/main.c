@@ -716,8 +716,9 @@ static void MX_GPIO_Init(void)
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* Relay outputs (GPIOC) */
-    gpio.Pin = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
+    /* Relay outputs (GPIOC): PC11 = traction, PC12 = direction.
+     * PC10 reserved — no MAIN contactor in the hardware.               */
+    gpio.Pin = PIN_RELAY_TRAC | PIN_RELAY_DIR;
     HAL_GPIO_Init(GPIOC, &gpio);
 
     /* Nucleo-64 user LED LD2 (PA5) — soldered on the board.
@@ -1220,7 +1221,7 @@ void Error_Handler(void)
      * Uses direct register access because HAL may be inconsistent.    */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
                   | PIN_EN_STEER
-                  | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+                  | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     /* LED power relays on GPIOB — also force OFF (both front and rear) */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM1 PWM outputs (FL, FR)   */

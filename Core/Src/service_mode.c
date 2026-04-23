@@ -30,7 +30,7 @@ static const ModuleClass_t module_class[MODULE_COUNT] = {
     [MODULE_CAN_TIMEOUT]      = MODULE_CLASS_CRITICAL,
     [MODULE_EMERGENCY_STOP]   = MODULE_CLASS_CRITICAL,
     [MODULE_WATCHDOG]         = MODULE_CLASS_CRITICAL,
-    [MODULE_RELAY_MAIN]       = MODULE_CLASS_CRITICAL,
+    [MODULE_RELAY_TRAC]       = MODULE_CLASS_CRITICAL,
 
     /* NON-CRITICAL — temperature sensors (base: cfg.tempSensorsEnabled) */
     [MODULE_TEMP_SENSOR_0]    = MODULE_CLASS_NON_CRITICAL,

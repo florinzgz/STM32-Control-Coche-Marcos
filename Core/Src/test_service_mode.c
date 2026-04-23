@@ -76,19 +76,19 @@ static void test_critical_modules_not_disableable(void)
     ASSERT_FALSE(ServiceMode_DisableModule(MODULE_CAN_TIMEOUT));
     ASSERT_FALSE(ServiceMode_DisableModule(MODULE_EMERGENCY_STOP));
     ASSERT_FALSE(ServiceMode_DisableModule(MODULE_WATCHDOG));
-    ASSERT_FALSE(ServiceMode_DisableModule(MODULE_RELAY_MAIN));
+    ASSERT_FALSE(ServiceMode_DisableModule(MODULE_RELAY_TRAC));
 
     /* Verify they remain enabled after disable attempt */
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_CAN_TIMEOUT));
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_EMERGENCY_STOP));
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_WATCHDOG));
-    ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_RELAY_MAIN));
+    ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_RELAY_TRAC));
 
     /* Verify classification is indeed CRITICAL */
     ASSERT_EQ_U8(ServiceMode_GetClass(MODULE_CAN_TIMEOUT),    MODULE_CLASS_CRITICAL);
     ASSERT_EQ_U8(ServiceMode_GetClass(MODULE_EMERGENCY_STOP), MODULE_CLASS_CRITICAL);
     ASSERT_EQ_U8(ServiceMode_GetClass(MODULE_WATCHDOG),       MODULE_CLASS_CRITICAL);
-    ASSERT_EQ_U8(ServiceMode_GetClass(MODULE_RELAY_MAIN),     MODULE_CLASS_CRITICAL);
+    ASSERT_EQ_U8(ServiceMode_GetClass(MODULE_RELAY_TRAC),     MODULE_CLASS_CRITICAL);
 }
 
 /* ================================================================== */
@@ -249,7 +249,7 @@ static void test_critical_always_enabled(void)
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_CAN_TIMEOUT));
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_EMERGENCY_STOP));
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_WATCHDOG));
-    ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_RELAY_MAIN));
+    ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_RELAY_TRAC));
 }
 
 /* ================================================================== */
@@ -301,7 +301,7 @@ static void test_multi_disable_consistency(void)
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_CAN_TIMEOUT));
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_EMERGENCY_STOP));
     ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_WATCHDOG));
-    ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_RELAY_MAIN));
+    ASSERT_TRUE(ServiceMode_IsEnabled(MODULE_RELAY_TRAC));
 
     /* Verify no critical faults reported from disable operations */
     ASSERT_FALSE(ServiceMode_HasCriticalFault());

@@ -50,7 +50,7 @@ typedef enum {
     MODULE_CAN_TIMEOUT      = 0,   /* CAN heartbeat watchdog           */
     MODULE_EMERGENCY_STOP   = 1,   /* Hardware emergency stop           */
     MODULE_WATCHDOG         = 2,   /* IWDG watchdog                     */
-    MODULE_RELAY_MAIN       = 3,   /* Main power relay                  */
+    MODULE_RELAY_TRAC       = 3,   /* 24 V traction power relay (PC11)  */
 
     /* --- NON-CRITICAL modules (disableable) --- */
     MODULE_TEMP_SENSOR_0    = 4,   /* DS18B20 temperature sensor 0      */
