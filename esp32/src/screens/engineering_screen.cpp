@@ -336,8 +336,8 @@ void EngineeringScreen::draw() {
     if (currentMenu_ == SubMenu::MAIN && relayStatus_ != prevRelayStatus_) {
         const int16_t relX = 120;
         const int16_t relY = BACK_Y;
+        // 3-bit wire layout (backward-compatible): bit0 reserved, bit1=TRAC, bit2=DIR.
         const bool seqComplete = (relayStatus_ & 0x80U) != 0;
-        const bool mainOn   = (relayStatus_ & 0x01U) != 0;
         const bool tracOn   = (relayStatus_ & 0x02U) != 0;
         const bool dirOn    = (relayStatus_ & 0x04U) != 0;
 
@@ -348,8 +348,8 @@ void EngineeringScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
-        snprintf(buf, sizeof(buf), "M:%s T:%s D:%s",
-                 mainOn ? "ON " : "OFF", tracOn ? "ON " : "OFF",
+        snprintf(buf, sizeof(buf), "T:%s D:%s",
+                 tracOn ? "ON " : "OFF",
                  dirOn  ? "ON " : "OFF");
         uint16_t col = seqComplete ? ui::COL_GREEN : ui::COL_AMBER;
         tft.setTextColor(col, ui::COL_BG);
@@ -784,7 +784,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         static constexpr int16_t RC_ROW_SPC = 36;
         static constexpr int16_t RC_ROW_H = 30;
 
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 3; ++i) {
             int16_t rowY = RC_ROW_Y0 + i * RC_ROW_SPC;
             if (x >= MENU_X && x <= MENU_X + MENU_W &&
                 y >= rowY && y <= rowY + RC_ROW_H) {
@@ -894,14 +894,13 @@ void EngineeringScreen::drawMainMenu() {
         tft.drawString("RELAY STATUS", relX, relY);
 
         const bool seqComplete = (relayStatus_ & 0x80U) != 0;
-        const bool mainOn   = (relayStatus_ & 0x01U) != 0;
         const bool tracOn   = (relayStatus_ & 0x02U) != 0;
         const bool dirOn    = (relayStatus_ & 0x04U) != 0;
 
-        // Row 1: individual relays
+        // Row 1: individual relays (3-bit wire layout, bit0 reserved)
         char buf[40];
-        snprintf(buf, sizeof(buf), "M:%s T:%s D:%s",
-                 mainOn ? "ON " : "OFF", tracOn ? "ON " : "OFF",
+        snprintf(buf, sizeof(buf), "T:%s D:%s",
+                 tracOn ? "ON " : "OFF",
                  dirOn  ? "ON " : "OFF");
         uint16_t col = seqComplete ? ui::COL_GREEN : ui::COL_AMBER;
         tft.setTextColor(col, ui::COL_BG);
@@ -1778,31 +1777,29 @@ void EngineeringScreen::drawRelayControl() {
         tft.setTextDatum(TL_DATUM);
     }
 
-    // Button rows: Override Enable, MAIN, TRACTION, DIRECTION
+    // Button rows: Override Enable, TRACTION, DIRECTION (CAN rev 1.3 compatible (2026-04-23 clarification))
     static constexpr int16_t RC_ROW_Y0 = 80;
     static constexpr int16_t RC_ROW_SPC = 36;
     static constexpr int16_t RC_ROW_H = 30;
 
-    static const char* const rowLabels[4] = {
+    static const char* const rowLabels[3] = {
         "Override Enable",
-        "MAIN      (PC10)",
         "TRACTION  (PC11)",
         "DIRECTION (PC12)"
     };
 
-    // Real relay state from CAN heartbeat byte 5
-    const bool realMain = (relayStatus_ & 0x01U) != 0;
+    // Real relay state from CAN heartbeat byte 5 (3-bit wire layout).
+    // bit 0 = reserved (legacy MAIN, always 0), bit 1 = TRAC, bit 2 = DIR.
     const bool realTrac = (relayStatus_ & 0x02U) != 0;
     const bool realDir  = (relayStatus_ & 0x04U) != 0;
-    const bool realState[4] = {
+    const bool realState[3] = {
         relayOverrideEnabled_,
-        realMain,
         realTrac,
         realDir
     };
 
     tft.setTextSize(1);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 3; ++i) {
         int16_t rowY = RC_ROW_Y0 + i * RC_ROW_SPC;
 
         // Button background
@@ -1842,14 +1839,13 @@ void EngineeringScreen::drawRelayControl() {
     {
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
-        const int16_t infoY = RC_ROW_Y0 + 4 * RC_ROW_SPC + 10;
+        const int16_t infoY = RC_ROW_Y0 + 3 * RC_ROW_SPC + 10;
 
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
         tft.drawString("CAN RELAY STATUS (real)", MENU_X, infoY);
 
         char buf[48];
-        snprintf(buf, sizeof(buf), "M:%s T:%s D:%s  SEQ:%s  [0x%02X]",
-                 realMain ? "ON " : "OFF",
+        snprintf(buf, sizeof(buf), "T:%s D:%s  SEQ:%s  [0x%02X]",
                  realTrac ? "ON " : "OFF",
                  realDir  ? "ON " : "OFF",
                  (relayStatus_ & 0x80U) ? "COMPLETE" : "IDLE    ",

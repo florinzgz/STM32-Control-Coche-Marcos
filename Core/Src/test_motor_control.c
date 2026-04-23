@@ -1479,8 +1479,9 @@ static void test_fault_handler_en_first_order(void)
                      | PIN_EN_STEER;
     ASSERT_TRUE(en_pins != 0U);
 
-    /* EN pins must not overlap with relay pins */
-    uint16_t relay_pins = PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR;
+    /* EN pins must not overlap with relay pins.
+     * MAIN contactor removed — only TRAC (PC11) and DIR (PC12). */
+    uint16_t relay_pins = PIN_RELAY_TRAC | PIN_RELAY_DIR;
     ASSERT_TRUE((en_pins & relay_pins) == 0U);
 
     /* BSRR reset-half: shifting left by 16 puts bits in the reset field.
@@ -1493,9 +1494,9 @@ static void test_fault_handler_en_first_order(void)
     uint16_t led_relay_pins = PIN_RELAY_LED | PIN_RELAY_LED_REAR;
     ASSERT_TRUE(led_relay_pins != 0U);
 
-    /* Verify shutdown covers all 5 motors + 3 relays + 2 LED relays = 10 outputs */
-    int total_outputs = 5 + 3 + 2;
-    ASSERT_EQ_INT(total_outputs, 10);
+    /* Verify shutdown covers all 5 motors + 2 relays + 2 LED relays = 9 outputs */
+    int total_outputs = 5 + 2 + 2;
+    ASSERT_EQ_INT(total_outputs, 9);
 
     /* Advanced timers (TIM1, TIM8) have MOE — cleared second */
     int advanced_timers = 2;

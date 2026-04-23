@@ -1,5 +1,7 @@
 # INA226 & Relay Safety Audit Report
 
+> ⚠ **CAN rev 1.3 compatible (2026-04-23 clarification):** The 24 V battery has only the **traction** power relay (PC11). There is no independent MAIN / Power-Hold contactor. The direction relay (PC12) is on the 12 V bus. PC10 is reserved. The relay-status byte in heartbeat 0x001 byte 5 keeps the rev 1.3 3-bit wire layout: **bit 0 = reserved (legacy MAIN, always 0)**, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE — same size, same ID, no protocol bump. `MODULE_RELAY_MAIN` has been renamed to `MODULE_RELAY_TRAC` (module ID 3 preserved). See `CAN_CONTRACT_FINAL.md`.
+
 **Date:** 2026-03-21
 **MCU:** STM32G474RE (Cortex-M4, 170 MHz)
 **System:** Safety-critical vehicle power & motor control

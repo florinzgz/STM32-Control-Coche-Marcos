@@ -38,7 +38,7 @@ inline constexpr uint32_t CMD_ACK               = 0x103;    // DLC 3, on-demand 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  Status / Heartbeat (§3.2)
 // -------------------------------------------------------------------------
-inline constexpr uint32_t HEARTBEAT_STM32       = 0x001;    // DLC 6, 100 ms (byte5=relay status)
+inline constexpr uint32_t HEARTBEAT_STM32       = 0x001;    // DLC 6, 100 ms (byte5=relay status; 3-bit layout: bit0=reserved/legacy MAIN, bit1=TRAC, bit2=DIR, bit7=SEQ)
 inline constexpr uint32_t STATUS_SPEED          = 0x200;    // DLC 8, 100 ms
 inline constexpr uint32_t STATUS_CURRENT        = 0x201;    // DLC 8, 100 ms
 inline constexpr uint32_t STATUS_TEMP           = 0x202;    // DLC 5, 1000 ms

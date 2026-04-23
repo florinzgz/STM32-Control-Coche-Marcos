@@ -128,9 +128,18 @@
  *
  * ---- RELAY VISIBILITY & TELEMETRY MODEL ----
  *
- * The relay status is exported to ESP32 via CAN heartbeat byte 5:
- *   Bit 0 = MAIN (PC10),  Bit 1 = TRACTION (PC11),  Bit 2 = DIRECTION (PC12)
+ * The relay status is exported to ESP32 via CAN heartbeat byte 5 using
+ * a 3-bit wire layout (backward-compatible with CAN contract rev 1.3):
+ *   Bit 0 = reserved (legacy MAIN slot — no hardware, always 0)
+ *   Bit 1 = TRACTION  (PC11, 24 V)
+ *   Bit 2 = DIRECTION (PC12, 12 V)
  *   Bit 7 = relay sequence complete flag
+ *
+ * HARDWARE NOTE (CAN rev 1.3 compatible (2026-04-23 clarification)):
+ *   The 24 V battery only feeds a single relay (traction; supplies the
+ *   four BTS7960 motor drivers).  The 12 V battery feeds the direction
+ *   relay (steering actuator).  There is NO independent "Power-Hold"
+ *   / MAIN contactor — PC10 is reserved (see below).
  *
  * Three-level verification:
  *   Level 1: GPIO output register — what firmware COMMANDED
@@ -165,7 +174,7 @@
  *
  * Override does NOT:
  *   - Affect Safety_IsPowerReady() (relay_seq_state stays IDLE)
- *   - Bypass relay timing sequence (50ms + 20ms)
+ *   - Bypass relay timing sequence (50 ms traction settle)
  *   - Work during motion or ACTIVE/DEGRADED/ERROR states
  *
  * Auto-disable conditions:
@@ -175,9 +184,13 @@
  *   - ESP32 exits engineering screen (sends disable command)
  *   - CAN timeout (STM32 state change → auto-disable)
  */
-#define PIN_RELAY_MAIN     GPIO_PIN_10  /* PC10 */
-#define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 */
-#define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 */
+/* Relay GPIO outputs (GPIOC).
+ * PC10 is RESERVED/unused — historically labelled RELAY_MAIN but the
+ * physical "Power-Hold"/MAIN contactor does not exist in the hardware
+ * (24 V battery feeds only the traction relay).  The pin is left as
+ * a plain GPIO input by default until reassigned.                      */
+#define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 — 24V traction relay (BTS7960 x4) */
+#define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 — 12V direction relay (steering)  */
 
 /* ========================================================================== */
 /*                       LED POWER RELAYS (GPIOB)                             */

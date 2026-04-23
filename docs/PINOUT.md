@@ -3,6 +3,7 @@
 > ## ⛔ DOCUMENTO OBSOLETO — NO USAR PARA CABLEADO
 >
 > **Este documento NO refleja la arquitectura actual del firmware (RPWM/LPWM directo, PR #120).**
+> **Actualización CAN rev 1.3 compatible (2026-04-23):** PC10 queda reservado/libre — no existe relé MAIN.
 > Contiene asignaciones de pines incorrectas que pueden causar daño al hardware si se siguen.
 >
 > **Errores críticos en este documento:**

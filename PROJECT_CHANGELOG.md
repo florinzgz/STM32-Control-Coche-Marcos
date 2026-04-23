@@ -57,7 +57,7 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) + Relay Control submenu. SafeScreen incluye visualización pasiva extendida (gear, obstacle, LEDs, relay, steering visual). |
 
 ### Comunicación CAN
-- **Protocolo**: 27 tipos de mensaje, contrato congelado v1.3.
+- **Protocolo**: 27 tipos de mensaje, contrato **v1.3** (2026-02-13, con aclaración 2026-04-23 sobre `relay_status` byte 5 — ver `docs/CAN_CONTRACT_FINAL.md`).
 - **STM32→ESP32**: Heartbeat (0x001), telemetría (0x200–0x20A), service (0x301–0x305).
 - **ESP32→STM32**: Heartbeat (0x011), throttle (0x100), steering (0x101), mode (0x102), service (0x110), LEDs (0x120), obstacle (0x208–0x209).
 - **Filtrado STM32**: MASK accept-all (index 0), filtrado real en `CAN_ProcessMessages()` switch/case.
@@ -79,6 +79,82 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR — safety(relay): force full power-down when leaving ACTIVE mid-sequence
+- **Fecha:** 2026-04-23
+- **Autor:** Copilot
+- **Rama:** `copilot/add-vehicle-control-system`
+- **Estado:** Cerrada (cambios aplicados en rama; merge gestionado por el mantenedor).
+- **Descripción del cambio:** Endurecimiento final del secuenciador de relés (`Relay_SequencerUpdate()` en `safety_system.c`). El guard `if (system_state != SYS_STATE_ACTIVE) return;` ya impedía la re-energización fuera de ACTIVE, pero si el sistema abandonaba ACTIVE mientras el secuenciador estaba en `RELAY_SEQ_TRACTION_ON` (TRAC energizado, DIR aún OFF, esperando el settle de 50 ms), el hardware quedaba en un estado parcial `TRAC=ON, DIR=OFF` hasta que otra ruta apagara los relés. Ahora, cuando el guard se dispara en plena transición, se invoca `Relay_PowerDown()` para apagar ambos relés atómicamente vía BSRR y resetear el secuenciador a IDLE antes del return.
+
+#### Cambios principales (NO breaking)
+- **`Core/Src/safety_system.c`** — `Relay_SequencerUpdate()`: el early-return del guard fuera de ACTIVE detecta la condición `relay_seq_state == RELAY_SEQ_TRACTION_ON` y llama a `Relay_PowerDown()` antes de retornar. Comentario de bloque ampliado (≈28 líneas) documentando el edge-case mid-sequence y el comportamiento en cada estado del sistema (SAFE, ERROR, STANDBY, BOOT, DEGRADED, LIMP_HOME).
+- **Decisión de diseño:** fail-safe **OFF** en lugar de auto-completar la activación. Eléctricamente más seguro; evita energización inesperada del motor; comportamiento determinista bajo cualquier fallo.
+
+#### Invariante garantizada
+- No existe estado persistente `TRAC=ON ∧ DIR=OFF`. Los relés están siempre coherentes: totalmente OFF o totalmente ON (TRAC+DIR).
+- No hay re-energización fuera de ACTIVE.
+- Emergency stop permanece atómico, determinista e irreversible hasta recuperación de estado.
+- DEGRADED / LIMP_HOME tras una transición normal desde ACTIVE (secuenciador en COMPLETE) mantiene los relés ON sin tocarlos.
+
+#### Validación
+- Host tests: 195 (service_mode) + 11 529 (motor_control) pasan sin cambios.
+- gcc `-Wall -Wextra -Werror -fsyntax-only` limpio en `safety_system.c`.
+- CodeQL: 0 alerts.
+- Sin cambios en: constantes de tiempo, protocolo CAN, máquina de estados de seguridad, diagnóstico, macros de relé. Sin nuevos estados. Sin refactor arquitectónico.
+- Máscara de override (`0x06U`) verificada consistente: bit 1 = TRAC, bit 2 = DIR, bit 0 = reservado/0 — coherente con el ensamblado del status byte y las rutas de apply.
+
+---
+
+### PR — hardware(relay): hardening post-migración (CAN compatible, 50ms settle, E-stop determinista)
+- **Fecha:** 2026-04-23
+- **Autor:** Copilot
+- **Rama:** `copilot/add-vehicle-control-system`
+- **Descripción del cambio:** Pase de endurecimiento sobre la migración previa a 2 relés. Restaura compatibilidad hacia atrás del contrato CAN (layout de 3 bits con bit 0 reservado/always‑0), aumenta el tiempo de settle del relé de tracción de 20 ms a 50 ms, y hace la parada de emergencia totalmente determinista con escritura atómica BSRR. **Arquitectura de 2 relés (TRAC + DIR) se mantiene; no se reintroduce MAIN.**
+
+#### Cambios principales (NO breaking, compatible con rev 1.3)
+- **CAN**: `HEARTBEAT_STM32` (0x001) byte 5 `relay_status` vuelve a **layout de 3 bits** — bit 0 = reservado (hueco legacy MAIN, siempre 0), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE. Sin cambio de tamaño ni de ID. **Sin bump de protocolo**; contrato sigue siendo rev 1.3.
+- **Override** (SERVICE_CMD 0xE0 byte 1): vuelve al formato legacy de 3 bits (bit 0 reservado, bit 1 = TRAC, bit 2 = DIR).
+- **Settle time**: `RELAY_TRACTION_SETTLE_MS` 20 ms → **50 ms** para cubrir inrush del bus de 24 V + 4× BTS7960.
+- **Emergency stop determinista**: `Relay_PowerDown()` usa escritura atómica `GPIOC->BSRR = (TRAC|DIR) << 16` que fuerza ambos relés OFF en un ciclo, independientemente del estado del secuenciador u override. `Safety_EmergencyStop()` invoca `Relay_PowerDown()` antes de la transición a ERROR (antes lo hacía después). La máscara BSRR solo incluye TRAC + DIR (PC10 intacto).
+- **Diagnóstico**: validado que `MODULE_RELAY_TRAC` (stuck‑open) sigue usando INA226 real (corriente total de motores) + tensión de batería + velocidad de ruedas — no solo GPIO readback. Sin redesign.
+- **ESP32 HMI**: decoders actualizados a bit 1 = TRAC, bit 2 = DIR en `vehicle_data.h`, `relay_indicator.h`, `safe_screen.cpp`, `engineering_screen.{h,cpp}`. Corregido bucle táctil del menú Relay Control (4 → 3 filas) para coincidir con el render.
+- **Docs**: `CAN_CONTRACT_FINAL.md` revertido a **rev 1.3** con aclaración de 2026‑04‑23 (bit 0 reservado). `can_ids.h` comentario bump revertido. Banners de los 10 docs de hardware actualizados a "CAN rev 1.3 compatible".
+
+#### Validación
+- Host tests: 195 (service_mode) + 11 529 (motor_control) pasan.
+- gcc `-Wall -Wextra -Werror` limpio en `safety_system.c`, `main.c`, `stm32g4xx_it.c`, `service_mode.c`, `can_handler.c`, `motor_control.c`.
+- grep confirma 0 referencias a `PIN_RELAY_MAIN`, `MODULE_RELAY_MAIN`, `RELAY_SEQ_MAIN_*`.
+
+---
+
+### PR — hardware(relay): eliminar relé MAIN inexistente (24 V solo tiene un relé)
+- **Fecha:** 2026-04-23
+- **Autor:** Copilot
+- **Rama:** `copilot/add-vehicle-control-system`
+- **Descripción del cambio:** El hardware real del coche solo tiene **un relé de 24 V** (tracción, alimenta los 4 BTS7960) y **un relé de 12 V** (dirección). **NO existe un contactor MAIN / Power-Hold** independiente que justificase el tercer relé `PIN_RELAY_MAIN` (PC10) que había en firmware. Se elimina toda la lógica asociada. *(Nota: el bump a rev 1.4 de esta PR fue posteriormente revertido en el pase de hardening — el contrato CAN se mantiene en rev 1.3 con bit 0 reservado/0).*
+
+#### Cambios principales (a nivel firmware — cambio CAN posteriormente revertido a compatible)
+- **CAN**: `HEARTBEAT_STM32` (0x001) byte 5 `relay_status` cambia de 3 bits (MAIN/TRAC/DIR) a **2 bits (TRAC=bit0, DIR=bit1)**; bit 7 = `SEQ_COMPLETE` sigue igual. Contrato bump 1.3 → 1.4. Consumidores deben actualizarse en lockstep.
+- **Firmware STM32**:
+  - `project_config.h`: `PIN_RELAY_MAIN` eliminado; PC10 queda **reservado/libre**. `PIN_RELAY_TRAC` (PC11) y `PIN_RELAY_DIR` (PC12) se mantienen.
+  - `safety_system.c`: secuenciador pasa de 3 fases (MAIN→TRAC→DIR) a **2 fases** (TRAC→DIR, ~20 ms — posteriormente ajustado a 50 ms en el hardening). `RELAY_MAIN_SETTLE_MS` eliminado; `RELAY_SEQ_MAIN_ON` eliminado. `Safety_GetRelayStatusByte()` reporta layout de 2 bits internos (bit 0 = TRAC, bit 1 = DIR) — *en el pase de hardening posterior se restauró el layout de 3 bits rev 1.3 compatible con bit 0 = reservado/0*. Override mask (SERVICE_CMD 0xE0) pasa a 2 bits — *también restaurado a 3 bits en el hardening*. Diagnóstico de "stuck open" referido ahora a `MODULE_RELAY_TRAC`.
+  - `main.c` / `stm32g4xx_it.c`: GPIO init y máscara BSRR del *emergency stop* sin `PIN_RELAY_MAIN`.
+  - `service_mode`: `MODULE_RELAY_MAIN` **renombrado a `MODULE_RELAY_TRAC`** (ID 3 preservado — no rompe IDs de CAN ni métricas históricas).
+- **Firmware ESP32 (HMI)**:
+  - `vehicle_data.h`, `relay_indicator.h`, `safe_screen.cpp`, `engineering_screen.cpp/h`: layout de 2 bits (posteriormente restaurado a 3 bits compatibles rev 1.3 en el hardening); widget pasa de `M T D` a `T D`. La pantalla de Relay Control en Engineering pasa de 4 filas (Override / MAIN / TRAC / DIR) a 3 (Override / TRAC / DIR).
+  - `can_ids.h`: referencia al contrato CAN (rev 1.3 se mantiene tras hardening).
+- **`.ioc`**: PC10 eliminado como `GPIO_Output` (edición manual — sin regeneración CubeMX).
+- **Tests**: `test_service_mode.c` y `test_motor_control.c` actualizados a `MODULE_RELAY_TRAC` y a la nueva máscara de relés (5 motores + **2 relés** + 2 LED relays = 9 salidas). **195 + 11 529 tests pasan.**
+- **Docs**: banners de actualización en `POWER_DISTRIBUTION.md`, `HARDWARE_WIRING_MANUAL.md`, `LISTADO_PINES_COMPLETO.md`, `CONEXIONES_COMPLETAS.md`, `SAFETY_SYSTEMS.md`, `SAFETY_ARCHITECTURE.md`, `INFORME_REVISION_TECNICA_RELAY.md`, `INA226_RELAY_SAFETY_AUDIT.md`, `AUDIO_RELAY_INTEGRATION.md`, `PINOUT.md`.
+
+#### Lo que NO cambia
+- Lógica de BTS7960, PWM, encoders, FDCAN de telemetría, ESP32 HMI (salvo el widget de relés).
+- Timings/umbrales de otros subsistemas de seguridad.
+- IDs de módulo del Service Mode (al renombrar, el ID=3 se conserva).
+- `relay_audio` (módulo de audio en ESP32) es independiente — no afectado.
+
+---
 
 ### PR — fix(steering): deadband 1.8° en dominio de rueda para absorber holgura mecánica
 - **Fecha:** 2026-04-23

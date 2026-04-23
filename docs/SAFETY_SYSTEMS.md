@@ -1,5 +1,7 @@
 # 🛡️ Sistemas de Seguridad - ABS/TCS
 
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** La secuencia de relés pasa de 3 fases (MAIN→TRAC→DIR) a **2 fases (TRAC→DIR, 50 ms settle)**. El hardware real no tiene contactor MAIN/Power-Hold. Bitmap de `relay_status` en heartbeat 0x001 byte 5 (layout 3 bits preservado): bit 0 = reservado/0, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE. `MODULE_RELAY_MAIN` renombrado a `MODULE_RELAY_TRAC` (ID 3 preservado). Ver `CAN_CONTRACT_FINAL.md`.
+
 **Seguridad Funcional y Protección del Vehículo**
 
 ---

@@ -1,5 +1,7 @@
 # LISTADO COMPLETO DE PINES — ESP32-S3 y STM32G474RE
 
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre** (sin asignación en firmware). Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+
 **Proyecto:** Control Coche Marcos  
 **Fecha:** 2026-02-28  
 **Fuente:** Firmware (`main.h`, `main.c`, `platformio.ini`, `User_Setup.h`) y documentación técnica del proyecto

@@ -24,7 +24,7 @@
 // Power relay on STM32 (PB10) must be ON for LEDs to light.
 //
 // ---- FUTURE: RELAY-BASED VISUAL DIAGNOSTICS ----
-// The motor relay command state (MAIN/TRACTION/DIRECTION) is now available
+// The motor relay command state (TRACTION/DIRECTION) is now available
 // in VehicleData::heartbeat().relayStatus (CAN 0x001 byte 5).
 // This can be used to:
 //   - Flash LED strips during relay power-up sequence as visual feedback

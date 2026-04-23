@@ -1,5 +1,7 @@
 # 🛡️ Arquitectura de Seguridad — STM32G474RE + ESP32-S3
 
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** Secuencia de relés simplificada a **2 fases** (`TRAC`→`DIR`, 50 ms settle). El hardware real **NO tiene un relé MAIN / Power-Hold** en la batería de 24 V; solo hay el relé de tracción. PC10 queda reservado. `Safety_GetRelayStatusByte()` conserva el layout de 3 bits de rev 1.3: bit 0 = reservado/0 (hueco legacy MAIN), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+
 > Documento de referencia para todos los mecanismos de seguridad implementados en el
 > firmware del vehículo eléctrico. Cada sección describe **qué activa** la protección,
 > **qué hace**, **qué ocurre con motores y relés**, **cómo se recupera** y **por qué**
