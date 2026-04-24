@@ -102,18 +102,25 @@
  * They are now repurposed as EN_FR, EN_RL, EN_STEER respectively, giving
  * every motor driver identical 5-wire control (RPWM, LPWM, EN, GND, VCC)
  * and eliminating the brake/coast asymmetry between GPIO-EN and tied-HIGH
- * motors.  PC2 and PC3 remain freed/unused.
+ * motors.  PC3 remains freed/unused.
  *
  * ⚠ INIT SAFETY: All EN pins are forced LOW in MX_GPIO_Init() (main.c)
  *   via GPIOC->BSRR atomic write BEFORE the GPIO is configured as output.
  *   This guarantees no transient motor activation after warm reset or
  *   watchdog reset where ODR may retain its previous value.
  *   No EN pin is left floating — all are configured as push-pull output
- *   with no pull resistor (the push-pull driver actively holds the level). */
+ *   with no pull resistor (the push-pull driver actively holds the level).
+ *
+ * EN_RR moved from PC13 → PC2 to avoid conflict with USER button (B1).
+ * PC13 must not be used as output on NUCLEO-G474RE: it is hardwired to
+ * the USER button (B1) via SB17, so driving it as push-pull output
+ * fights the button and pressing B1 would force EN_RR LOW, disabling
+ * the rear-right motor unexpectedly.  PC13 is therefore left unused
+ * (default input state is fine). */
 #define PIN_EN_FR          GPIO_PIN_0   /* PC0  — GPIO output, active HIGH (was DIR_FL) */
 #define PIN_EN_RL          GPIO_PIN_1   /* PC1  — GPIO output, active HIGH (was DIR_FR) */
 #define PIN_EN_FL          GPIO_PIN_5   /* PC5  — GPIO output, active HIGH */
-#define PIN_EN_RR          GPIO_PIN_13  /* PC13 — GPIO output, active HIGH */
+#define PIN_EN_RR          GPIO_PIN_2   /* PC2  — GPIO output, active HIGH (moved from PC13 to avoid USER button B1) */
 #define PIN_EN_STEER       GPIO_PIN_4   /* PC4  — GPIO output, active HIGH (was DIR_STEER) */
 
 /* ========================================================================== */
@@ -377,7 +384,7 @@
  *        directly (requires PCB modification)
  *
  * ⚠ EN PIN SAFETY:
- *   All five EN pins (PC0, PC1, PC4, PC5, PC13) are forced LOW via
+ *   All five EN pins (PC0, PC1, PC2, PC4, PC5) are forced LOW via
  *   GPIOC->BSRR atomic write at the TOP of MX_GPIO_Init(), before
  *   the GPIO mode is configured.  No floating inputs are possible —
  *   push-pull drivers actively hold the level.

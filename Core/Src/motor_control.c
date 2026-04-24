@@ -595,7 +595,7 @@ void Motor_Init(void)
     /* Both channels on TIM8 → same UEV → overlap = 0                    */
     motor_rr.rpwm_timer   = &htim8;  motor_rr.rpwm_channel = TIM_CHANNEL_3;
     motor_rr.lpwm_timer   = &htim8;  motor_rr.lpwm_channel = TIM_CHANNEL_4;
-    motor_rr.en_port      = GPIOC;   motor_rr.en_pin       = PIN_EN_RR; /* PC13 */
+    motor_rr.en_port      = GPIOC;   motor_rr.en_pin       = PIN_EN_RR; /* PC2 */
     motor_rr.direction    = 0;
 
     /* ---- motor_steer: RPWM = TIM3_CH1 (PA6), LPWM = TIM3_CH2 (PA7) ---- */

@@ -709,7 +709,9 @@ static void MX_GPIO_Init(void)
     /* GPIO enable outputs for all five BTS7960 modules (GPIOC).
      * All motors now have dedicated GPIO EN pins for symmetric
      * coast/brake behaviour.  PC0 (EN_FR), PC1 (EN_RL), PC4 (EN_STEER)
-     * were freed direction pins; PC5 (EN_FL), PC13 (EN_RR) unchanged.  */
+     * were freed direction pins; PC5 (EN_FL) unchanged; EN_RR moved
+     * from PC13 → PC2 to avoid conflict with the NUCLEO-G474RE USER
+     * button (B1 on PC13).                                            */
     gpio.Pin   = PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR | PIN_EN_STEER;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
