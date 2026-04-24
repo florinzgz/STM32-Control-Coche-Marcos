@@ -3,7 +3,7 @@
 > ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 > ⚠ **MODIFICACIONES DE HARDWARE REQUERIDAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
-> 1. **SB17** en la NUCLEO-G474RE **debe desoldarse** para aislar el botón B1 del pin **PC13** (usado como `EN_RR`). Sin esta modificación, pulsar B1 desactiva involuntariamente el motor trasero derecho.
+> 1. **EN_RR cableado en PC2** (reasignado desde PC13 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado por el botón USER y no se usa como salida.
 > 2. Los enables **EN_FR (PC0)** y **EN_RL (PC1)** están en el conector **Morpho CN7** (pines 38 y 36) — **no** en el header Arduino CN9.
 > 3. El encoder de dirección requiere las tres señales **PA15 (A), PB3 (B), PB4 (Z)** cableadas a través del adaptador 5 V → 3.3 V.
 
@@ -26,7 +26,7 @@
   │  TIM3 (20kHz) ──► STEER RPWM/LPWM (PA6/PA7)                                │
   │  TIM2 (encoder) ◄── Encoder dirección (PA15/PB3)                             │
   │  FDCAN1 ──► PA12 TX / PA11 RX ──► TJA1051 ──► CAN Bus ──► ESP32-S3         │
-  │  GPIO out ──► 5× EN GPIO (PC5/PC0/PC1/PC13/PC4) + 3+2 RELAY               │
+  │  GPIO out ──► 5× EN GPIO (PC5/PC0/PC1/PC2/PC4) + 3+2 RELAY               │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z                   │
   │  I2C1 ──► TCA9548A ──► 6× INA226                                            │
   │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PA3)     │
@@ -94,7 +94,7 @@ Cada motor de tracción tiene **2 cables PWM (RPWM + LPWM)** del STM32 al BTS796
 |-------|-----------|----------------|---------|
 | 10 | **PC8** (TIM8_CH3, AF4) | RPWM | PWM 20 kHz — adelante |
 | 11 | **PC9** (TIM8_CH4, AF4) | LPWM | PWM 20 kHz — atrás |
-| 12 | **PC13** (GPIO output) | R_EN + L_EN (unidos) | Enable: HIGH=activado, LOW=apagado |
+| 12 | **PC2** (GPIO output) | R_EN + L_EN (unidos) | Enable: HIGH=activado, LOW=apagado (reasignado desde PC13) |
 
 > ✅ RPWM y LPWM en el **mismo** timer (TIM8). Con OCPreload activo, overlap = 0 µs.
 
@@ -781,7 +781,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 23 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
 | 24 | **PC0** | GPIOC | Output | GPIO | BTS7960 FR → R_EN + L_EN | HIGH = motor habilitado — Morpho **CN7 pin 38** |
 | 25 | **PC1** | GPIOC | Output | GPIO | BTS7960 RL → R_EN + L_EN | HIGH = motor habilitado — Morpho **CN7 pin 36** |
-| 26 | **PC2** | GPIOC | — | **LIBRE** | ~~DIR_RL~~ — desconectado | Pin liberado |
+| 26 | **PC2** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado — reasignado desde PC13 (conflicto con USER button B1) |
 | 27 | **PC3** | GPIOC | **AF2** | **TIM1_CH4** | BTS7960 FR → **LPWM** | ⚠️ PWM 20 kHz — atrás (ya NO es LIBRE) |
 | 28 | **PC4** | GPIOC | Output | GPIO | BTS7960 STEER → R_EN + L_EN | HIGH = motor habilitado |
 | 29 | **PC5** | GPIOC | Output | GPIO | BTS7960 FL → R_EN + L_EN | HIGH = motor habilitado |
@@ -792,7 +792,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 34 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
 | 35 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
 | 36 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
-| 37 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado — ⚠ **SB17 desoldado** (aislar B1). Ver `hardware_modifications.md` §1 |
+| 37 | **PC13** | GPIOC | — | **RESERVADO** | USER button B1 (on-board) | No usar como salida. Conectado al botón B1 del NUCLEO-G474RE vía SB17. EN_RR reasignado a PC2 |
 
 ### Conexiones hardware (no GPIO)
 
@@ -1067,7 +1067,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 3. **PC12** → Módulo relé DIRECCIÓN
 4. **PB10** → Módulo relé LED frontal
 5. **PB11** → Módulo relé LED trasero
-6. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC13**, STEER: EN → **PC4** (todos GPIO)
+6. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC2**, STEER: EN → **PC4** (todos GPIO)
 8. Condensadores bulk + bypass en cada BTS7960
 
 **⚠️ NO conectar los motores todavía.** Solo verificar que los relés conmutan.

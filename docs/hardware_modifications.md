@@ -10,18 +10,17 @@ harness for the first time.
 
 ---
 
-## 1. SB17 — MUST BE OPEN (PC13 / EN_RR)
+## 1. PC13 — RESERVED (USER button B1); EN_RR moved to PC2
 
-### Problem
+### Problem (historical)
 
-The firmware uses **PC13** as `PIN_EN_RR` (enable output for the rear-right
-BTS7960 driver, see `project_config.h:116`).
+Earlier versions of the firmware used **PC13** as `PIN_EN_RR` (enable
+output for the rear-right BTS7960 driver).
 
-On the NUCLEO-G474RE (MB1367C), PC13 is **also routed by default to the
-on-board USER button B1** through solder bridge **SB17** (see ST user
-manual UM2505, §6.4 *Push-buttons*).
-
-If SB17 is left in its factory configuration:
+On the NUCLEO-G474RE (MB1367C), PC13 is **hardwired to the on-board
+USER button B1** through solder bridge **SB17** (see ST user manual
+UM2505, §6.4 *Push-buttons*).  Driving PC13 as a push-pull output on
+this board is therefore unsafe:
 
 - Pressing B1 shorts PC13 to GND through the button.
 - When firmware drives PC13 HIGH (EN_RR active), the push-pull output
@@ -31,34 +30,36 @@ If SB17 is left in its factory configuration:
   put the RR wheel in coast mode without any software fault being
   raised.
 
-### Required modification
+### Resolution (current firmware)
 
-**Desolder the SB17 solder bridge** on the NUCLEO-G474RE board.
+**`EN_RR` has been reassigned from PC13 to PC2.**  PC2 is a free GPIO
+on the NUCLEO-G474RE with no conflicting on-board function, so no
+board modification is required.
 
-> **SB17 must be OPEN (desoldered) to use PC13 as EN_RR.
-> This disconnects USER button B1 from PC13 and prevents unintended
-> motor disable.**
+> **PC13 is reserved due to the USER button (B1); it is not suitable
+> for output control on NUCLEO-G474RE.**  The firmware no longer drives
+> PC13 — it is left in its default (input) state.  SB17 may remain in
+> its factory configuration.
 
-After desoldering:
+### Required wiring change
 
-- B1 becomes functionally disconnected (acceptable — B1 is not used
-  by this firmware).
-- PC13 behaves as a normal GPIO output and can safely drive the
-  BTS7960 EN input.
+Route the rear-right BTS7960 enable signal (R_EN + L_EN tied together)
+to **CN7 pin 35 (PC2)** instead of CN7 pin 23 (PC13).  All other
+rear-right connections (RPWM on PC8, LPWM on PC9, GND, VCC, encoder)
+are unchanged.
 
 ### Verification
 
 1. Power the Nucleo via ST-LINK only (no motor power).
 2. Command `PIN_EN_RR` HIGH from the engineering menu (relay override
-   path) or via SWD by writing `GPIOC->BSRR = (1U << 13)`.
-3. Measure PC13 with a multimeter — must read ≈ 3.3 V stable.
-4. Press B1 — PC13 must **stay** at ≈ 3.3 V (SB17 is open).
-5. If PC13 drops to 0 V on press, SB17 is still closed → repeat the
-   desolder step.
+   path) or via SWD by writing `GPIOC->BSRR = (1U << 2)`.
+3. Measure PC2 with a multimeter — must read ≈ 3.3 V stable.
+4. Press B1 — PC2 must remain at ≈ 3.3 V (B1 is wired to PC13, not PC2).
+5. Command `PIN_EN_RR` LOW — PC2 must read ≈ 0 V.
 
 ### Firmware reference
 
-- `Core/Inc/project_config.h`: `#define PIN_EN_RR  GPIO_PIN_13`
+- `Core/Inc/project_config.h`: `#define PIN_EN_RR  GPIO_PIN_2` (port `GPIOC`).
 - Init-safety comment block in the same file documents that all EN
   pins are forced LOW via `GPIOC->BSRR` atomic write before the GPIO
   mode is configured, so no transient activation can occur at reset.
@@ -143,7 +144,7 @@ Arduino-format CN9 header — they are only available on the
 
 ## Summary checklist (before first power-up with real motors)
 
-- [ ] SB17 desoldered on NUCLEO-G474RE (PC13/EN_RR isolated from B1).
+- [ ] Rear-right EN wired to **CN7 pin 35 (PC2)** — not PC13. PC13 is reserved (USER button B1) and must not be used as output.
 - [ ] Encoder A wired from encoder white wire → level shifter → **PA15**.
 - [ ] Encoder B wired from encoder green wire → level shifter → **PB3**.
 - [ ] Encoder Z wired from encoder yellow wire → level shifter → **PB4**.

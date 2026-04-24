@@ -3,7 +3,7 @@
 > ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 > ⚠ **MODIFICACIONES DE HARDWARE OBLIGATORIAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
-> - **SB17** en la NUCLEO-G474RE **debe estar desoldado** para aislar el botón B1 del pin **PC13** (`EN_RR`).
+> - **EN_RR en PC2** (se movió de PC13 a PC2 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado y no debe usarse como salida.
 > - Enables **EN_FR (PC0)** y **EN_RL (PC1)** salen por **Morpho CN7** (pines 38 y 36), no por CN9.
 > - Encoder completo: **PA15 (A), PB3 (B), PB4 (Z)** con adaptación 5 V → 3.3 V.
 
@@ -250,7 +250,7 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 | **FL** (Frontal izq.) | PA8 | TIM1_CH1 | PA9 | TIM1_CH2 | *(freed)* | PC5 (GPIO) | PA0 (EXTI0) | 0 | 0 |
 | **FR** (Frontal der.) | PA10 | TIM1_CH3 | PC3 | TIM1_CH4 | *(freed → EN)* | PC0 (GPIO) | PA1 (EXTI1) | 1 | 1 |
 | **RL** (Trasera izq.) | PC6 | TIM8_CH1 | PC7 | TIM8_CH2 | *(freed → EN)* | PC1 (GPIO) | PA2 (EXTI2) | 2 | 2 |
-| **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | *(freed)* | PC13 (GPIO) | PB15 (EXTI15) | 3 | 3 |
+| **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | *(freed)* | PC2 (GPIO) | PB15 (EXTI15) | 3 | 3 |
 
 > **Nota**: DIR pins (PC0–PC2, PC4) ya no son controlados por el firmware — la dirección se
 > determina por la elección de RPWM vs LPWM. PC3 (ex-DIR_RR) fue reasignado a LPWM_FR (TIM1_CH4).
@@ -311,7 +311,7 @@ PC5  (GPIO EN_FL)          ─────────────────�
 
 > **Motor FR**: PA10 (TIM1_CH3 → RPWM), PC3 (TIM1_CH4 → LPWM, AF2). EN: PC0 (GPIO output).
 > **Motor RL**: PC6 (TIM8_CH1 → RPWM), PC7 (TIM8_CH2 → LPWM). EN: PC1 (GPIO output).
-> **Motor RR**: PC8 (TIM8_CH3 → RPWM), PC9 (TIM8_CH4 → LPWM). EN: PC13 GPIO.
+> **Motor RR**: PC8 (TIM8_CH3 → RPWM), PC9 (TIM8_CH4 → LPWM). EN: PC2 GPIO.
 > **Motor STEER**: PA6 (TIM3_CH1 → RPWM), PA7 (TIM3_CH2 → LPWM). EN: PC4 (GPIO output).
 
 ### ⚡ Condensadores obligatorios por BTS7960 de tracción (4× motores)
@@ -701,24 +701,30 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 22 | **PB15** | GPIOB | Sensor velocidad RR | Inductivo (LJ12A3) | EXTI15 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_RR` |
 | 23 | **PC0** | GPIOC | Enable motor FR | BTS7960 FR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FR` — Morpho **CN7 pin 38** |
 | 24 | **PC1** | GPIOC | Enable motor RL | BTS7960 RL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RL` — Morpho **CN7 pin 36** |
-| 25 | **PC4** | GPIOC | Enable motor STEER | BTS7960 STEER (EN) | GPIO Output | 3.3 V digital | `PIN_EN_STEER` |
-| 26 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
-| 27 | **PC6** | GPIOC | RPWM motor RL | BTS7960 RL | TIM8_CH1 (AF4) | 3.3 V PWM | `PIN_PWM_RL` |
-| 28 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
-| 29 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
-| 30 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
-| 31 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
-| 32 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
-| 33 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
-| 34 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` — ⚠ **SB17 must be OPEN** (disconnect B1). See `hardware_modifications.md` §1 |
+| 25 | **PC2** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` — reasignado desde PC13 (conflicto con USER button B1) |
+| 26 | **PC4** | GPIOC | Enable motor STEER | BTS7960 STEER (EN) | GPIO Output | 3.3 V digital | `PIN_EN_STEER` |
+| 27 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
+| 28 | **PC6** | GPIOC | RPWM motor RL | BTS7960 RL | TIM8_CH1 (AF4) | 3.3 V PWM | `PIN_PWM_RL` |
+| 29 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
+| 30 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
+| 31 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
+| 32 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
+| 33 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
+| 34 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
 
-> **Nota:** Los pines de dirección antiguos (PC0, PC1, PC4) han sido reasignados como EN (enable)
-> para FR, RL y STEER respectivamente. RPWM/LPWM se generan directamente desde los timers hardware.
+> **Nota PC13:** PC13 está conectado al botón USER (B1) en la NUCLEO-G474RE
+> mediante el puente SB17. No debe usarse como salida. `EN_RR` se ha reasignado
+> a **PC2** para eliminar este conflicto. PC13 queda sin usar (estado por defecto
+> como entrada).
+
+> **Nota:** Los pines de dirección antiguos (PC0, PC1, PC2, PC4) han sido reasignados como EN (enable)
+> para FR, RL, RR y STEER respectivamente. RPWM/LPWM se generan directamente desde los timers hardware.
 > Todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO.
 >
-> ⚠ **NUCLEO-G474RE hardware modifications required before first power-up** —
+> ⚠ **NUCLEO-G474RE wiring requirements before first power-up** —
 > see [`docs/hardware_modifications.md`](hardware_modifications.md):
->  1. **SB17 must be desoldered** so that PC13 (EN_RR) is isolated from USER button B1.
+>  1. EN_RR is on **PC2** (not PC13). PC13 is reserved by the on-board USER button B1
+>     and is not used as an output by this firmware.
 >  2. EN_FR (PC0) and EN_RL (PC1) are exposed on the **Morpho CN7** header
 >     (pins 38 and 36). They are **not** on the Arduino-format CN9 header.
 
@@ -817,12 +823,13 @@ siguiente período del timer (no hay glitch entre transiciones).
 | FL (front-left)  | PA8 — TIM1_CH1   | PA9 — TIM1_CH2           | PC5 (GPIO out)  |
 | FR (front-right) | PA10 — TIM1_CH3  | PC3 — TIM1_CH4 (AF2)    | PC0 (GPIO out)  |
 | RL (rear-left)   | PC6 — TIM8_CH1   | PC7 — TIM8_CH2           | PC1 (GPIO out)  |
-| RR (rear-right)  | PC8 — TIM8_CH3   | PC9 — TIM8_CH4           | PC13 (GPIO out) |
+| RR (rear-right)  | PC8 — TIM8_CH3   | PC9 — TIM8_CH4           | PC2 (GPIO out)  |
 | STEER            | PA6 — TIM3_CH1   | PA7 — TIM3_CH2           | PC4 (GPIO out)  |
 
 > **Nota EN**: Todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO:
-> PC5 (FL), PC0 (FR), PC1 (RL), PC13 (RR), PC4 (STEER).
+> PC5 (FL), PC0 (FR), PC1 (RL), PC2 (RR), PC4 (STEER).
 > NO conectar R_EN/L_EN a 3.3V fijo — el firmware controla el enable.
+> PC13 está reservado por el botón USER (B1) y no se usa como salida.
 
 ### Conexión directa — motor FL (ejemplo)
 
@@ -850,7 +857,7 @@ STM32 PC0  (GPIO EN_FR) ──────────────────�
                                                       BTS7960 FR: L_EN  ─┘
 ```
 
-> Lo mismo aplica para RL (PC6/PC7), RR (PC8/PC9, con PC13 como EN GPIO) y STEER (PA6/PA7).
+> Lo mismo aplica para RL (PC6/PC7), RR (PC8/PC9, con PC2 como EN GPIO) y STEER (PA6/PA7).
 
 ### Tabla de funcionamiento RPWM/LPWM
 
@@ -866,7 +873,7 @@ STM32 PC0  (GPIO EN_FR) ──────────────────�
 |-------------|---------------|--------------------------|
 | PC0         | DIR_FL GPIO   | **EN_FR** — GPIO output  |
 | PC1         | DIR_FR GPIO   | **EN_RL** — GPIO output  |
-| PC2         | DIR_RL GPIO   | Libre — no conectar      |
+| PC2         | DIR_RL GPIO   | **EN_RR** — GPIO output (reasignado desde PC13) |
 | PC3         | DIR_RR GPIO   | LPWM_FR — TIM1_CH4 (AF2) |
 | PC4         | DIR_STEER GPIO| **EN_STEER** — GPIO output |
 

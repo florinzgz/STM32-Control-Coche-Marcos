@@ -17,7 +17,7 @@
 > **Usar en su lugar:**
 > - [`docs/CONEXIONES_COMPLETAS.md`](CONEXIONES_COMPLETAS.md) — Guía cable por cable actualizada
 > - [`docs/HARDWARE_WIRING_MANUAL.md`](HARDWARE_WIRING_MANUAL.md) — Manual eléctrico completo
-> - [`docs/hardware_modifications.md`](hardware_modifications.md) — **Modificaciones obligatorias en la Nucleo** (SB17 desoldar para PC13/EN_RR, encoder PA15/PB3/PB4, EN_FR/EN_RL en CN7)
+> - [`docs/hardware_modifications.md`](hardware_modifications.md) — **Modificaciones obligatorias en la Nucleo** (EN_RR reasignado a PC2 por conflicto con USER button B1 en PC13, encoder PA15/PB3/PB4, EN_FR/EN_RL en CN7)
 > - [`Core/Inc/main.h`](../Core/Inc/main.h) — Definiciones de pines en firmware (fuente de verdad)
 
 **Firmware de Control Vehicular - Asignación de Pines Definitiva**
