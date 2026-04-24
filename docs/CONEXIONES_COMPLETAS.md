@@ -2,6 +2,11 @@
 
 > ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
+> ⚠ **MODIFICACIONES DE HARDWARE REQUERIDAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
+> 1. **SB17** en la NUCLEO-G474RE **debe desoldarse** para aislar el botón B1 del pin **PC13** (usado como `EN_RR`). Sin esta modificación, pulsar B1 desactiva involuntariamente el motor trasero derecho.
+> 2. Los enables **EN_FR (PC0)** y **EN_RL (PC1)** están en el conector **Morpho CN7** (pines 38 y 36) — **no** en el header Arduino CN9.
+> 3. El encoder de dirección requiere las tres señales **PA15 (A), PB3 (B), PB4 (Z)** cableadas a través del adaptador 5 V → 3.3 V.
+
 **Fecha:** 2026-04-10
 **Propósito:** Referencia de taller para conectar todo el hardware y validar Phase 1
 **Fuente:** Extraído directamente del firmware (`project_config.h`, `main.c`, `stm32g4xx_hal_msp.c`, `motor_control.c`, `sensor_manager.c`, `safety_system.c`, `can_handler.c`, `steering_centering.c`, `obstacle_sensor.h`, `audio_manager.h`, `led_controller.h`, `shifter_input.h`, `relay_audio.h`)
@@ -774,8 +779,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 21 | **PB11** | GPIOB | Output | GPIO | Módulo relé LED trasero | HIGH = ON (tira WS2812B 16 LEDs) |
 | 22 | **PB14** | GPIOB | Output | GPIO | **LED_DIAG** (externo) | LED + 330Ω en Morpho CN10 pin 28. CAN OK=ON, FAIL=OFF |
 | 23 | **PB15** | GPIOB | Input | EXTI15 | Sensor velocidad rueda RR | Pull-up, flanco subida |
-| 24 | **PC0** | GPIOC | Output | GPIO | BTS7960 FR → R_EN + L_EN | HIGH = motor habilitado |
-| 25 | **PC1** | GPIOC | Output | GPIO | BTS7960 RL → R_EN + L_EN | HIGH = motor habilitado |
+| 24 | **PC0** | GPIOC | Output | GPIO | BTS7960 FR → R_EN + L_EN | HIGH = motor habilitado — Morpho **CN7 pin 38** |
+| 25 | **PC1** | GPIOC | Output | GPIO | BTS7960 RL → R_EN + L_EN | HIGH = motor habilitado — Morpho **CN7 pin 36** |
 | 26 | **PC2** | GPIOC | — | **LIBRE** | ~~DIR_RL~~ — desconectado | Pin liberado |
 | 27 | **PC3** | GPIOC | **AF2** | **TIM1_CH4** | BTS7960 FR → **LPWM** | ⚠️ PWM 20 kHz — atrás (ya NO es LIBRE) |
 | 28 | **PC4** | GPIOC | Output | GPIO | BTS7960 STEER → R_EN + L_EN | HIGH = motor habilitado |
@@ -787,7 +792,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 34 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
 | 35 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
 | 36 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
-| 37 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado |
+| 37 | **PC13** | GPIOC | Output | GPIO | BTS7960 RR → R_EN + L_EN | HIGH = motor habilitado — ⚠ **SB17 desoldado** (aislar B1). Ver `hardware_modifications.md` §1 |
 
 ### Conexiones hardware (no GPIO)
 

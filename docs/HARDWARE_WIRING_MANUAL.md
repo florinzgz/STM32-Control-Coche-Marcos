@@ -2,6 +2,11 @@
 
 > ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
+> ⚠ **MODIFICACIONES DE HARDWARE OBLIGATORIAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
+> - **SB17** en la NUCLEO-G474RE **debe estar desoldado** para aislar el botón B1 del pin **PC13** (`EN_RR`).
+> - Enables **EN_FR (PC0)** y **EN_RL (PC1)** salen por **Morpho CN7** (pines 38 y 36), no por CN9.
+> - Encoder completo: **PA15 (A), PB3 (B), PB4 (Z)** con adaptación 5 V → 3.3 V.
+
 **Documento de referencia para taller — Solo conexiones reales**
 
 > **IMPORTANTE**: Todo lo documentado aquí está trazado directamente al código fuente del firmware
@@ -694,8 +699,8 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 20 | **PB10** | GPIOB | Relé LED frontal | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED` |
 | 21 | **PB11** | GPIOB | Relé LED trasero | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED_REAR` |
 | 22 | **PB15** | GPIOB | Sensor velocidad RR | Inductivo (LJ12A3) | EXTI15 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_RR` |
-| 23 | **PC0** | GPIOC | Enable motor FR | BTS7960 FR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FR` |
-| 24 | **PC1** | GPIOC | Enable motor RL | BTS7960 RL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RL` |
+| 23 | **PC0** | GPIOC | Enable motor FR | BTS7960 FR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FR` — Morpho **CN7 pin 38** |
+| 24 | **PC1** | GPIOC | Enable motor RL | BTS7960 RL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RL` — Morpho **CN7 pin 36** |
 | 25 | **PC4** | GPIOC | Enable motor STEER | BTS7960 STEER (EN) | GPIO Output | 3.3 V digital | `PIN_EN_STEER` |
 | 26 | **PC5** | GPIOC | Enable motor FL | BTS7960 FL (EN) | GPIO Output | 3.3 V digital | `PIN_EN_FL` |
 | 27 | **PC6** | GPIOC | RPWM motor RL | BTS7960 RL | TIM8_CH1 (AF4) | 3.3 V PWM | `PIN_PWM_RL` |
@@ -705,11 +710,17 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 31 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
 | 32 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
 | 33 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
-| 34 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` |
+| 34 | **PC13** | GPIOC | Enable motor RR | BTS7960 RR (EN) | GPIO Output | 3.3 V digital | `PIN_EN_RR` — ⚠ **SB17 must be OPEN** (disconnect B1). See `hardware_modifications.md` §1 |
 
 > **Nota:** Los pines de dirección antiguos (PC0, PC1, PC4) han sido reasignados como EN (enable)
 > para FR, RL y STEER respectivamente. RPWM/LPWM se generan directamente desde los timers hardware.
 > Todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO.
+>
+> ⚠ **NUCLEO-G474RE hardware modifications required before first power-up** —
+> see [`docs/hardware_modifications.md`](hardware_modifications.md):
+>  1. **SB17 must be desoldered** so that PC13 (EN_RR) is isolated from USER button B1.
+>  2. EN_FR (PC0) and EN_RL (PC1) are exposed on the **Morpho CN7** header
+>     (pins 38 and 36). They are **not** on the Arduino-format CN9 header.
 
 **Total: 34 pines del STM32 en uso.**
 
