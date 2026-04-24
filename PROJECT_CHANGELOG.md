@@ -80,6 +80,38 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — hardware(pinout): reassign EN_RR from PC13 to PC2 (USER button B1 conflict)
+- **Fecha:** 2026-04-24
+- **Autor:** Copilot
+- **Rama:** `copilot/connect-e6b2-cwz6c-to-esp32`
+- **Estado:** En curso (rama activa; merge gestionado por el mantenedor).
+- **Descripción del cambio:** En la NUCLEO-G474RE (MB1367C), PC13 está cableado por hardware al botón USER B1 vía SB17 (ver UM2505 §6.4). Configurar PC13 como `GPIO_MODE_OUTPUT_PP` para `EN_RR` generaba dos problemas: (a) pulsar B1 cortocircuita PC13 a GND y fuerza `EN_RR` LOW → el motor trasero derecho se desactiva silenciosamente; (b) la salida push-pull pelea contra la pull-up externa del circuito del botón. Se reasigna `PIN_EN_RR` a **PC2** (GPIO libre tras la migración DIR→RPWM/LPWM), quedando PC13 sin uso (estado por defecto de reset, input flotante). El puerto `GPIOC` y la máscara de inicialización siguen siendo los mismos; como el firmware usa el macro `PIN_EN_RR` en todos los sitios (init, BSRR pre-config en `MX_GPIO_Init()`, `Error_Handler`, `Fault_MotorShutdown` en HardFault/MemFault/BusFault/UsageFault, `motor_rr.en_pin`, la defensa C2 antes de `HAL_TIM_PWM_Start`), el cambio propaga automáticamente a todas las rutas de seguridad.
+
+#### Cambios principales (NO breaking)
+- **`Core/Inc/project_config.h`**: `PIN_EN_RR` → `GPIO_PIN_2` (`PC2`); bloque de comentario del safety contract actualizado al nuevo conjunto `{PC0, PC1, PC2, PC4, PC5}`.
+- **`Core/Src/main.c`, `Core/Src/motor_control.c`**: sólo refresco de comentarios (el código ya usaba el macro).
+- **`STM32-Control-Coche-Marcos.ioc`**: `Mcu.Pin29=PC2`, bloque `PC13.*` sustituido por `PC2.*` con la misma etiqueta `EN_RR`. Previene que una regeneración futura desde STM32CubeMX restaure la asignación vieja a PC13.
+- **`docs/hardware_modifications.md`**: §1 reescrita — la antigua mandato de desoldar SB17 se reemplaza por la justificación de la reasignación a PC2 + pasos de verificación; checklist pre-power-up actualizado.
+- **`docs/HARDWARE_WIRING_MANUAL.md`**: fila EN_RR en tablas de pinout (PC2), resumen de cableado por motor, listado maestro de 64 pines, notas adicionales sobre PC13 reservado; línea-resumen (antes decía "PC13 (RR)") corregida a "PC2 (RR)"; nota de DIR pins liberados ajustada a `{PC0, PC1, PC4}` (PC2 ya no está libre).
+- **`docs/CONEXIONES_COMPLETAS.md`**: banner del top, diagrama ASCII del sistema, tabla de cableado por driver, tabla maestra de 64 pines, checklist final de cableado; la sección "Pines liberados (PC2) — ya no se cablean" se renombró a "Pines ex-DIR reasignados — cableado actual", con la fila de PC2 corrigida de "LIBRE" a "EN_RR" (alineada con la tabla maestra que ya lo indicaba).
+- **`docs/PINOUT.md`**: nota de migración actualizada con la referencia al conflicto con USER button B1.
+
+#### Invariantes preservadas
+- `EN_RR` se inicializa LOW antes de `HAL_GPIO_Init()` (defensa C1 Hardening) — mismo BSRR que los otros 4 EN pins.
+- Todas las rutas de apagado de emergencia (`Error_Handler`, 4× fault handlers) incluyen la máscara `PIN_EN_RR` sin cambios, al usar el mismo macro.
+- La máscara combinada del grupo EN sobre `GPIOC` pasa de `0x2033` (bits 0,1,4,5,13) a `0x0037` (bits 0,1,2,4,5); disjunta de la máscara PWM en GPIOC (`0x03C8`, bits 3/6/7/8/9) y de la máscara de relés (`0x1C00`, bits 10/11/12).
+- PC2 y PA2 comparten el valor literal `GPIO_PIN_2` pero pertenecen a puertos distintos; EXTI2 permanece ligada a PA2 (input con pull-up, detección de flanco de rueda). PC2 está configurado como `OUTPUT_PP` — sin conflicto EXTI.
+- Sin cambios en: EPS, Ackermann, PID de dirección, máquina de estados de seguridad, relés, CAN, timers, encoder, sensores, Flash, Service Mode, protocolo CAN, dependencias.
+
+#### Validación
+- `make -j4` (host previamente verificado): `text=60560 data=88 bss=7984` — sin regresiones de tamaño.
+- gcc `-Wall -Wextra -Werror` limpio sobre `main.c`, `motor_control.c`, `stm32g4xx_it.c`, `project_config.h` (consumers).
+- `grep -R "GPIO_PIN_13" Core/` → 0 matches activos (sólo comentarios explicativos referenciando la migración).
+- Re-auditoría documental: todos los PC13 restantes en los 5 archivos de scope son contexto histórico legítimo ("reasignado desde PC13", "PC13 reservado por B1"). 0 aserciones activas residuales de `EN_RR = PC13` en el scope obligatorio.
+- Deuda documental conocida (fuera de scope, no afecta al firmware): ~22 documentos históricos de `docs/` aún mencionan la asignación antigua; serán corregidos en un barrido dedicado posterior.
+
+---
+
 ### PR — safety(relay): force full power-down when leaving ACTIVE mid-sequence
 - **Fecha:** 2026-04-23
 - **Autor:** Copilot

@@ -896,15 +896,15 @@ PB14 ──►[330Ω]──►[LED]──► GND
 >
 > ⚠️ El condensador snubber en los terminales del motor de dirección (M+/M-) es especialmente crítico porque el encoder E6B2-CWZ6C está físicamente cerca: sin él, la contra-EMF puede corromper los pulsos del encoder y provocar `SAFETY_ERROR_CENTERING`.
 
-### Pines liberados (PC2) — ya no se cablean
+### Pines ex-DIR reasignados — cableado actual
 
-> ⚠️ **PC3 ya NO está libre** — ahora es LPWM_FR (TIM1_CH4, AF2). PC0, PC1 y PC4 se reutilizan como EN_FR, EN_RL y EN_STEER respectivamente. Solo queda 1 pin libre.
+> ⚠️ **Ninguno de los pines ex-DIR (PC0–PC4) está libre.** PC3 es LPWM_FR (TIM1_CH4, AF2), y PC0/PC1/PC2/PC4 se reutilizan como EN_FR/EN_RL/EN_RR/EN_STEER respectivamente. PC2 (EN_RR) fue reasignado desde PC13 para evitar el conflicto con el USER button B1 de la NUCLEO-G474RE.
 
 | Pin | Uso anterior | Estado actual |
 |-----|-------------|---------------|
 | PC0 | DIR_FL (GPIO OUT) | **EN_FR** — GPIO output, conectar a R_EN + L_EN del BTS7960 FR |
 | PC1 | DIR_FR (GPIO OUT) | **EN_RL** — GPIO output, conectar a R_EN + L_EN del BTS7960 RL |
-| PC2 | DIR_RL (GPIO OUT) | **LIBRE** — dejar desconectado o como GPIO output LOW |
+| PC2 | DIR_RL (GPIO OUT) | **EN_RR** — GPIO output, conectar a R_EN + L_EN del BTS7960 RR (reasignado desde PC13) |
 | PC3 | DIR_RR (GPIO OUT) | **⚠️ REUTILIZADO:** Ahora es **LPWM_FR** (TIM1_CH4, AF2) — PWM activo, NO desconectar |
 | PC4 | DIR_STEER (GPIO OUT) | **EN_STEER** — GPIO output, conectar a R_EN + L_EN del BTS7960 dirección |
 

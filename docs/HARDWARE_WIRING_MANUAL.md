@@ -252,11 +252,12 @@ Cada BTS7960 de tracción recibe **2 señales PWM + 1 señal Enable** del STM32:
 | **RL** (Trasera izq.) | PC6 | TIM8_CH1 | PC7 | TIM8_CH2 | *(freed → EN)* | PC1 (GPIO) | PA2 (EXTI2) | 2 | 2 |
 | **RR** (Trasera der.) | PC8 | TIM8_CH3 | PC9 | TIM8_CH4 | *(freed)* | PC2 (GPIO) | PB15 (EXTI15) | 3 | 3 |
 
-> **Nota**: DIR pins (PC0–PC2, PC4) ya no son controlados por el firmware — la dirección se
+> **Nota**: DIR pins (PC0, PC1, PC4) ya no son controlados por el firmware — la dirección se
 > determina por la elección de RPWM vs LPWM. PC3 (ex-DIR_RR) fue reasignado a LPWM_FR (TIM1_CH4).
+> PC2 (ex-DIR_RL) fue reasignado a EN_RR (desde PC13, por conflicto con USER button B1).
 > Los demás DIR pins deben dejarse desconectados o configurados como GPIO output LOW.
 > EN pins: todos los motores (FL, FR, RL, RR, STEER) tienen EN controlado por GPIO:
-> PC5 (FL), PC0 (FR), PC1 (RL), PC13 (RR), PC4 (STEER).
+> PC5 (FL), PC0 (FR), PC1 (RL), PC2 (RR), PC4 (STEER).
 > NO conectar R_EN/L_EN a 3.3V fijo — el firmware controla el enable.
 
 > **Nota sobre índices INA226 y DS18B20**: El firmware usa indexación 0–5 para INA226
