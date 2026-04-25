@@ -57,9 +57,9 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 | **Screen Manager** | ✅ Operativo | 6 estados: Boot/Standby/Drive/Error/Safe/Degraded + Engineering (8989) + Relay Control submenu. SafeScreen incluye visualización pasiva extendida (gear, obstacle, LEDs, relay, steering visual). |
 
 ### Comunicación CAN
-- **Protocolo**: 27 tipos de mensaje, contrato **v1.3** (2026-02-13, con aclaración 2026-04-23 sobre `relay_status` byte 5 — ver `docs/CAN_CONTRACT_FINAL.md`).
+- **Protocolo**: 28 tipos de mensaje, contrato **v1.3** (2026-02-13, con aclaración 2026-04-23 sobre `relay_status` byte 5 — ver `docs/CAN_CONTRACT_FINAL.md`). El mensaje `SYSTEM_SHUTDOWN` (0x130) es un añadido aditivo/no-breaking posterior.
 - **STM32→ESP32**: Heartbeat (0x001), telemetría (0x200–0x20A), service (0x301–0x305).
-- **ESP32→STM32**: Heartbeat (0x011), throttle (0x100), steering (0x101), mode (0x102), service (0x110), LEDs (0x120), obstacle (0x208–0x209).
+- **ESP32→STM32**: Heartbeat (0x011), throttle (0x100), steering (0x101), mode (0x102), service (0x110), LEDs (0x120), SYSTEM_SHUTDOWN (0x130), obstacle (0x208–0x209).
 - **Filtrado STM32**: MASK accept-all (index 0), filtrado real en `CAN_ProcessMessages()` switch/case.
 - **Timeout**: 250 ms → transición a LIMP_HOME (20% torque máximo).
 
@@ -79,6 +79,57 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 ---
 
 ## 3. Cambios Recientes (últimos PR)
+
+### PR — feat(shutdown): handshake CAN 0x130 SYSTEM_SHUTDOWN — estado seguro determinista pre-corte de potencia
+- **Fecha:** 2026-04-25
+- **Autor:** Copilot
+- **Rama:** `copilot/complete-technical-audit-esp32-s3`
+- **Estado:** En curso (rama activa; merge gestionado por el mantenedor).
+- **Descripción del cambio:** El STM32 transitaba a estado seguro de forma **pasiva**, únicamente cuando el módulo retardo cortaba físicamente los 5 V — sin participar en la secuencia de apagado. Esta PR añade un handshake determinista y no destructivo: el ESP32 envía el nuevo mensaje CAN `SYSTEM_SHUTDOWN` (0x130, DLC 0) al entrar en `SHUTTING_DOWN`, y el STM32 ejecuta de inmediato la parada segura (PWM=0, EN=LOW, relés OFF) **antes** del corte físico. Si la trama se pierde en el bus, el comportamiento anterior se preserva íntegramente (cero regresión).
+
+#### Cambios principales
+
+**STM32**
+- **`Core/Inc/can_handler.h`**: nuevo `#define CAN_ID_CMD_SYSTEM_SHUTDOWN 0x130` (aditivo — sin modificar ningún ID existente).
+- **`Core/Inc/safety_system.h`**: declaración de `void Safety_RequestShutdown(void)`.
+- **`Core/Src/safety_system.c`**: implementación de `Safety_RequestShutdown()` — envuelve primitivas ya validadas:
+  - `Traction_EmergencyStop()` → PWM=0 + EN=LOW en los 4 motores de tracción.
+  - `Steering_Neutralize()` → PWM=0 + `eps_motor_effort=0` + EN=LOW en dirección.
+  - `Relay_PowerDown()` → escritura atómica BSRR: TRAC + DIR OFF en un ciclo.
+  - `system_state = SYS_STATE_SAFE` si no estaba ya en SAFE/ERROR (preserva contexto diagnóstico).
+  - **Idempotente, no bloqueante, sin delays ni bucles ni nuevos estados.**
+- **`Core/Src/can_handler.c`**: nuevo `case CAN_ID_CMD_SYSTEM_SHUTDOWN:` en el switch del dispatcher — llama a `Safety_RequestShutdown()`. Sin ACK (la ruta es no bloqueante por diseño; el ESP32 no lo necesita en el cierre).
+
+**ESP32**
+- **`esp32/include/can_ids.h`**: `inline constexpr uint32_t CMD_SYSTEM_SHUTDOWN = 0x130` en el namespace `can`.
+- **`esp32/src/main.cpp`**: nuevo helper `sendSystemShutdown()` (DLC 0, no bloqueante, sin ACK wait), llamado **una sola vez** al entrar en `SHUTTING_DOWN`, seguido de `delay(100)` para dar ventana de reacción al STM32. Precedido por la lógica existente de farewell/flush/LED-OFF. `SHUTDOWN_DELAY_MS`, GPIO 41 y CAN 0x120 LED-OFF permanecen intactos.
+
+**Documentación**
+- **`docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`** §8: tabla de secuencia de apagado ampliada de 10 a 13 pasos — se incluye el nuevo paso 0x130 con timing (t~50 ms), la pausa de 100 ms de reacción y la nota de compatibilidad hacia atrás.
+
+#### Garantías de seguridad (post-recepción del frame)
+- PWM = 0 en todos los canales (TIM1/TIM8/TIM3).
+- EN pins = LOW en todos los motores (tracción + dirección).
+- Relés TRAC + DIR = OFF (escritura BSRR atómica).
+- `system_state = SYS_STATE_SAFE` bloquea cualquier re-energización posterior.
+- Ninguna ruta puede re-habilitar salidas (secuenciador guardado por estado).
+
+#### Invariantes preservadas
+- Sin modificación de ningún CAN frame existente (IDs, DLC, cadencia).
+- Sin bump de versión del contrato CAN.
+- Sin nuevas tareas, hilos, interrupciones ni cambios en el watchdog IWDG.
+- Sin cambios en lógica PWM (TIM1/TIM8/TIM3), encoder, EPS, Ackermann ni secuenciador de relés.
+- `Safety_GetRelayStatusByte()` sin regresión.
+- Único punto de entrada nuevo: `Safety_RequestShutdown()` (STM32) / `sendSystemShutdown()` (ESP32).
+
+#### Validación
+- **Build STM32**: 20 ficheros fuente pasan `arm-none-eabi-gcc -Wall -Wextra -Werror -fsyntax-only` (mismos flags del CI `firmware-validation.yml`).
+- **Code Review**: ✅ — feedback de review incorporado (tabla de doc actualizada + nota de threading context en la asignación de `system_state`).
+- **CodeQL**: ✅ — 0 alertas.
+- **Grep**: 0 rutas de apagado duplicadas; `Safety_RequestShutdown` es el único nuevo entry point.
+- **Backward compatibility**: sin el frame CAN, el comportamiento es bit-idéntico al estado anterior — el módulo retardo hardware sigue cortando potencia con el mismo timing.
+
+---
 
 ### PR — docs(relay): completar diagrama eléctrico LLAVE_CONTACTO — 4 módulos de relé + módulo 5 V LED
 - **Fecha:** 2026-04-25
