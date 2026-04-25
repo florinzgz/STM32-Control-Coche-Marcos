@@ -1,550 +1,404 @@
 # Llave de Contacto — Encendido y Apagado del Sistema
 
-**Documento de referencia para taller — Circuito completo de la llave de contacto**
+**Documento de referencia para taller — Cómo conectar los cables**
 
-> **Fuente:** Extraído directamente del firmware ESP32-S3 (`power_manager.h`,
-> `power_manager.cpp`, `main.cpp`) y STM32G474RE (`safety_system.c`,
-> `safety_system.h`, `main.h`, `main.c`), y de la documentación existente
-> (`POWER_DISTRIBUTION.md`, `HARDWARE_WIRING_MANUAL.md`, `LISTADO_PINES_COMPLETO.md`).
-> No se ha inventado ningún componente ni conexión.
+> **Fuente verificada:** `esp32/src/power_manager.h`, `esp32/src/power_manager.cpp`,
+> `esp32/src/main.cpp`, `Core/Src/safety_system.c`, `Core/Inc/project_config.h`,
+> `Core/Src/main.c`. No se ha inventado ningún componente ni conexión.
+>
+> **Revisión:** Se elimina el circuito discreto de transistores y diodos OR.
+> El apagado con retardo se realiza con un **módulo relé con retardo hardware**
+> (temporizador autónomo con potenciómetro). No hacen falta Q1, Q2, R4,
+> R_base, D_OR1, D_OR2 ni ningún transistor adicional.
 
 ---
 
 ## Índice
 
 1. [Resumen General](#1-resumen-general)
-2. [Conexión Física de la Llave de Contacto](#2-conexión-física-de-la-llave-de-contacto)
-3. [Circuito de Alimentación Permanente y Retención](#3-circuito-de-alimentación-permanente-y-retención)
+2. [Conexión de la Llave — Cableado Exacto](#2-conexión-de-la-llave--cableado-exacto)
+3. [Módulo Relé con Retardo Hardware](#3-módulo-relé-con-retardo-hardware)
 4. [Secuencia Completa de Encendido](#4-secuencia-completa-de-encendido)
-5. [Flujo de Corriente hacia los Motores de Tracción](#5-flujo-de-corriente-hacia-los-motores-de-tracción)
+5. [Flujo de Corriente hacia los Motores](#5-flujo-de-corriente-hacia-los-motores)
 6. [Secuencia Completa de Apagado](#6-secuencia-completa-de-apagado)
 7. [Diagrama Eléctrico Completo](#7-diagrama-eléctrico-completo)
-8. [Lista de Componentes del Circuito de Llave](#8-lista-de-componentes-del-circuito-de-llave)
+8. [Lista de Componentes](#8-lista-de-componentes)
 9. [Preguntas Frecuentes](#9-preguntas-frecuentes)
 
 ---
 
 ## 1. Resumen General
 
-La llave de contacto es el **interruptor maestro** que inicia y detiene todo el
-sistema del vehículo. Su señal la lee el **ESP32-S3** (no el STM32).
+### ¿Cómo funciona el encendido y apagado?
 
-```
- Llave de           ESP32-S3               CAN Bus              STM32G474RE
- Contacto         (HMI / Control)       (500 kbps)          (Autoridad de Seguridad)
- ─────────         ──────────────        ──────────           ───────────────────────
-                                         
-  Posición  ──►  GPIO 40 detecta   ──►  Heartbeat   ──►   Estado ACTIVE
-  ON / OFF       estado de llave        0x011 cada          │
-                      │                 100 ms              ▼
-                      │                                  Relay_PowerUp()
-                      ▼                                     │
-                  GPIO 41 activa                            ▼
-                  retención de                         RELAY_MAIN → RELAY_TRAC → RELAY_DIR
-                  alimentación                              │
-                                                            ▼
-                                                      4× motores tracción (24 V)
-                                                      1× motor dirección (12 V)
-```
+El sistema usa dos mecanismos que trabajan juntos:
 
-**Roles de cada microcontrolador:**
+1. **Módulo relé con retardo hardware** (temporizador con potenciómetro):
+   mantiene la alimentación encendida durante N segundos después de girar la
+   llave a OFF. Esto da tiempo al ESP32 para reproducir el audio de despedida
+   y guardar la configuración. Funciona 100% en hardware, sin código.
 
-| Función | Responsable | Pin / Mecanismo |
-|---------|-------------|-----------------|
-| Detectar posición de la llave | **ESP32-S3** | GPIO 40 (entrada con pull-down) |
-| Mantener alimentación durante apagado | **ESP32-S3** | GPIO 41 (salida, activo HIGH) |
-| Reproducir audio de bienvenida / despedida | **ESP32-S3** | DFPlayer Mini (UART2) |
-| Activar relés de potencia | **STM32G474RE** | PC10, PC11, PC12 (GPIO salida) |
-| Controlar motores | **STM32G474RE** | TIM1/TIM8/TIM3 (PWM 20 kHz) |
+2. **GPIO 40 del ESP32** (`IGNITION_SENSE`): la llave envía una señal al
+   ESP32 a través de un divisor de tensión. Cuando el ESP32 detecta llave OFF,
+   inicia su propia secuencia de apagado (audio de despedida, guardar flash).
+
+### ¿Qué hace el GPIO 41 del ESP32?
+
+El firmware del ESP32 pone el GPIO 41 (`POWER_HOLD`) en HIGH cuando detecta
+la llave ON y en LOW cuando completa el apagado. Este pin **no controla el
+módulo relé con retardo** — el módulo es autónomo. GPIO 41 puede dejarse sin
+conectar o conectarse al trigger del módulo como señal adicional.
+
+### Pines reales del STM32
+
+| Pin STM32 | Función | Tensión |
+|-----------|---------|---------|
+| PC11 | RELAY_TRAC — relé tracción motores | 24 V |
+| PC12 | RELAY_DIR — relé dirección | 12 V |
+| PC10 | **RESERVADO** — sin uso en firmware | — |
+
+> PC10 aparece como `RESERVED/unused` en `project_config.h:195`. No existe
+> RELAY_MAIN en el firmware. Solo hay dos relés controlados: TRAC y DIR.
 
 ---
 
-## 2. Conexión Física de la Llave de Contacto
+## 2. Conexión de la Llave — Cableado Exacto
 
-### 2.1 ¿Dónde se conecta la llave?
+### 2.1 ¿Qué necesita la llave?
 
-La llave de contacto se conecta **al ESP32-S3**, en el pin **GPIO 40**
-(`PIN_IGNITION_SENSE`). El ESP32 la lee como entrada digital con pull-down
-interno.
+La llave de contacto necesita conectarse a **dos sitios**:
 
-```
-                           ┌─────────────────────────────────┐
-  LLAVE DE CONTACTO        │        ESP32-S3 DevKitC-1       │
-  (interruptor ON/OFF)     │                                 │
-                           │                                 │
-  Terminal (+) ─── R1 ──┬──┤ GPIO 40 (IGNITION_SENSE)       │
-                        │  │   INPUT_PULLDOWN                │
-                       R2  │                                 │
-                        │  │ GPIO 41 (POWER_HOLD) ──────────►│── A relé de retención
-                       GND │                                 │
-                           │                                 │
-  Terminal (−) ──── GND ───┤ GND                             │
-                           └─────────────────────────────────┘
-```
+1. Al **trigger del módulo relé con retardo** (para controlar la alimentación).
+2. Al **GPIO 40 del ESP32** a través de un divisor de tensión (para que el
+   firmware sepa cuándo se apaga).
 
-### 2.2 Adaptación de nivel de tensión
+### 2.2 Divisor de tensión para GPIO 40 (obligatorio)
 
-La llave de contacto puede estar conectada a la batería de 12 V o 24 V.
-Como el ESP32-S3 opera a **3.3 V**, es necesario un **divisor de tensión
-resistivo** para reducir la señal:
+El ESP32-S3 opera a **3.3 V máximo** en sus pines GPIO. Si la llave conmuta
+12 V, el divisor reduce la tensión a un nivel seguro.
 
-**Si la llave conmuta 12 V:**
-
-> ⚠️ **EJEMPLO INCORRECTO — NO USAR estos valores:**
+**Valores correctos (verificados):**
 
 | Componente | Valor | Función |
 |------------|-------|---------|
-| R1 | 10 kΩ | Resistencia superior del divisor |
-| R2 | 10 kΩ | Resistencia inferior (a GND) + pull-down |
+| R1 | 33 kΩ, ¼ W | Resistencia superior del divisor |
+| R2 | 10 kΩ, ¼ W | Resistencia inferior (a GND) |
 
-Cálculo: V_GPIO40 = 12 V × 10k / (10k + 10k) = **6 V** → ❌ **PELIGROSO: supera 3.3 V, destruiría el pin GPIO del ESP32.**
+Cálculo: `V_GPIO40 = 12 V × 10k / (33k + 10k) = 2.79 V` — seguro para el
+ESP32-S3 (< 3.3 V absoluto; > 2.48 V umbral HIGH).
 
-> ⚠️ **EJEMPLO INCORRECTO — NO USAR estos valores:**
+Corriente por el divisor: `12 V / 43 kΩ ≈ 0.28 mA` — negligible.
 
-| Componente | Valor | Función |
-|------------|-------|---------|
-| R1 | 22 kΩ | Resistencia superior del divisor |
-| R2 | 10 kΩ | Resistencia inferior (a GND) |
+> **Referencia firmware:** `power_manager.cpp:56` — `pinMode(PIN_IGNITION_SENSE, INPUT_PULLDOWN)`
+> `power_manager.h:26` — `inline constexpr int PIN_IGNITION_SENSE = 40`
 
-Cálculo: V_GPIO40 = 12 V × 10k / (22k + 10k) = **3.75 V** → ❌ **INSEGURO: sigue superando 3.3 V máximo absoluto del ESP32.**
-
-**✅ Valores recomendados (margen seguro):**
-
-| Componente | Valor | Función |
-|------------|-------|---------|
-| R1 | 33 kΩ | Resistencia superior del divisor |
-| R2 | 10 kΩ | Resistencia inferior (a GND) |
-
-Cálculo: V_GPIO40 = 12 V × 10k / (33k + 10k) = **2.79 V** ✅ (< 3.3 V máximo absoluto; > 2.48 V umbral HIGH típico del ESP32-S3, ~0.75 × VDD según datasheet)
-
-> **Referencia firmware:** `power_manager.h` línea 10: `PIN_IGNITION_SENSE = 40`  
-> **Referencia docs:** `LISTADO_PINES_COMPLETO.md` líneas 145-153
-
-### 2.3 Esquema de cableado físico de la llave
+### 2.3 Esquema de cableado de la señal de llave
 
 ```
   Batería 12 V (+)
        │
-       │  Cable rojo (min 0.5 mm²)
-       ▼
-  ┌──────────┐
-  │  LLAVE   │  ← Interruptor de contacto (llave física del vehículo)
-  │ CONTACTO │     Tipo: SPST (Single Pole, Single Throw)
-  │          │     Posición ON: circuito cerrado
-  │          │     Posición OFF: circuito abierto
-  └────┬─────┘
+       ├────────────────────────────────────────────► al trigger (X1) del
+       │                                              módulo relé retardo
        │
-       │  Cable naranja (señal, 0.5 mm²)
-       ▼
-  ┌─────────┐
+  ┌────┴─────┐
+  │  LLAVE   │  Interruptor de contacto (SPST)
+  │ CONTACTO │  ON = cerrado, OFF = abierto
+  └────┬─────┘
+       │  Señal ACC 12V (solo con llave en ON)
+       │
+  ┌────┴────┐
   │  R1     │  33 kΩ, ¼ W
   └────┬────┘
        │
-       ├──────────────────► ESP32-S3 GPIO 40
-       │
+       ├──────────────────────────────────────────► GPIO 40 ESP32-S3
+       │                                             (IGNITION_SENSE)
   ┌────┴────┐
   │  R2     │  10 kΩ, ¼ W
   └────┬────┘
        │
-      GND ────────────────► ESP32-S3 GND
+      GND ────────────────────────────────────────► GND ESP32-S3
 ```
 
-**Lógica de la señal:**
-- **Llave ON** → GPIO 40 = HIGH (≈ 2.79 V con divisor) → ESP32 detecta encendido
-- **Llave OFF** → GPIO 40 = LOW (pull-down interno a GND) → ESP32 detecta apagado
+**Señal lógica resultante:**
+- **Llave ON** → GPIO 40 = HIGH (≈ 2.79 V) → ESP32 detecta encendido
+- **Llave OFF** → GPIO 40 = LOW (pull-down interno) → ESP32 detecta apagado
 
 ---
 
-## 3. Circuito de Alimentación Permanente y Retención
+## 3. Módulo Relé con Retardo Hardware
 
-### 3.1 ¿Cómo se alimenta el ESP32-S3?
+### 3.1 ¿Qué es?
 
-El ESP32-S3 necesita alimentación **antes** de que la llave se gire y
-**después** de que se apague (para reproducir el audio de despedida y guardar
-datos). Esto se consigue con un **relé de retención** (delay relay) externo:
+Un módulo de relé con temporizador ajustable por potenciómetro (habitualmente
+0–120 s). Cuando su entrada de trigger recibe tensión y luego la pierde,
+mantiene el relé cerrado durante el tiempo ajustado y después lo abre. Ejemplo
+de módulo: SRD-12VDC-SL-C con circuito temporizador NE555 o similar.
 
-```
-  Batería 12 V (+)
-       │
-       ├──────────────────────────────────────────────────────────┐
-       │                                                          │
-       ▼                                                          ▼
-  ┌──────────┐                                              ┌──────────┐
-  │  LLAVE   │                                              │  RELÉ DE │
-  │ CONTACTO │                                              │RETENCIÓN │
-  └────┬─────┘                                              │ (externo)│
-       │                                                    └────┬─────┘
-       │  Señal ON/OFF                                           │
-       │  (vía divisor)                                          │ 12 V controlado
-       ▼                                                         ▼
-  ESP32 GPIO 40                                          ┌──────────────┐
-  (IGNITION_SENSE)                                       │  Regulador   │
-                                                         │  12V → 5V    │
-  ESP32 GPIO 41 ──────────► Bobina del relé              │  (LM7805 o   │
-  (POWER_HOLD)               de retención               │   buck)      │
-                                                         └──────┬───────┘
-                                                                │ 5 V
-                                                                ▼
-                                                         ESP32-S3 (5V pin)
-                                                         STM32 Nucleo (5V→3.3V LDO)
-```
-
-### 3.2 Funcionamiento del circuito de retención
-
-1. **Llave ON** → La llave conecta 12 V directamente al relé de retención,
-   que cierra y alimenta al ESP32 y STM32.
-2. **ESP32 arranca** → GPIO 41 (`POWER_HOLD`) se pone HIGH → mantiene el
-   relé de retención energizado **independientemente** de la llave.
-3. **Llave OFF** → La llave se abre, pero GPIO 41 sigue HIGH → el relé
-   permanece cerrado → el sistema sigue con alimentación.
-4. **Audio de despedida** → El ESP32 reproduce el sonido de apagado (3 s).
-5. **GPIO 41 LOW** → El ESP32 libera `POWER_HOLD` → el relé se abre →
-   alimentación cortada → sistema completamente apagado.
-
-> **Referencia firmware:** `power_manager.cpp` líneas 84, 127-128
-
-### 3.3 Esquema del relé de retención
-
-> **⚠️ IMPORTANTE:** El diodo flyback D2 (1N4007) debe estar en **PARALELO** con
-> la bobina del relé (cátodo a bobina+, ánodo a bobina−/GND), **nunca en serie**.
-> Un diodo en serie NO protege contra el pico inductivo al desconectar la bobina.
-> Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md)
-> para la validación eléctrica completa y las correcciones de diseño.
+### 3.2 Cómo conectar el módulo
 
 ```
-  Bat 12V (+) ──┬─── Llave contacto ────────────────────────────┐
-                │                                                │
-                │   ┌──────────────────────────────────┐         │
-                │   │   RELÉ RETENCIÓN                 │         │
-                │   │   (12V DC, contactos ≥ 5A)       │         │
-                │   │                                  │         │
-                │   │         ┌────────┐               │         │
-                │   │  Bobina(+) ◄──┤ D2     │◄── Bobina(−)│    │
-                │   │     │         │ 1N4007 │       │     │     │
-                │   │     │         │flyback │       │     │     │
-                │   │     │         │PARALELO│       │     │     │
-                │   │     │         └────────┘       │     │     │
-                │   │     │                          │     │     │
-                │   │     │◄───── D_OR1 ◄── R4 ◄────┤─────┘     │
-                │   │     │       (1N4148)  (4.7kΩ)   │  (llave)  │
-                │   │     │                          │           │
-                │   │     │◄───── D_OR2 ◄── Q2_col   │           │
-                │   │     │       (1N4148)     ▲     │           │
-                │   │     │                    │     │           │
-                │   │     │              Q1 NPN(2N2222)│           │
-                │   │     │              Base ◄── R_base (1kΩ) ◄── ESP32 GPIO 41
-                │   │     │              Emisor ──► GND│           │
-                │   │     │                          │           │
-                │   │     └──── bobina(−) ──► GND    │           │
-                │   │                                  │           │
-                │   │  COM ◄───────────────────────────┘ (Bat 12V+)
-                │   │  NO  ──────────────────► Regulador 5V → ESP32 + STM32
-                │   │  NC  ── (sin conectar)  │
-                │   └──────────────────────────────────┘
-                │
-               GND
+  Batería 12 V (permanente) ─────────────────────► DC+ del módulo
+  GND ────────────────────────────────────────────► DC- del módulo
+  Línea ACC de la llave (12V solo con llave ON) ──► X1 del módulo (trigger)
+
+  COM del relé del módulo ────────────────────────► 12V batería (permanente)
+  NO  del relé del módulo ────────────────────────► entrada del regulador 5V
+                                                    (que alimenta ESP32 + STM32)
+  NC  del relé del módulo ────────────────────────► sin conectar
 ```
 
-**Nota:** La bobina del relé se activa por **dos caminos en paralelo** (diodo OR):
-1. Desde la llave de contacto vía **R4 (4.7kΩ) + Q1 transistor NPN (2N2222)** (encendido inicial).
-   La llave **no acciona la bobina directamente** — solo alimenta la base del transistor
-   (~1.13 mA), evitando arco eléctrico y desgaste de los contactos de la llave.
-2. Desde el GPIO 41 del ESP32 vía transistor NPN Q2 (retención durante apagado).
+### 3.3 Ajuste del temporizador
 
-Ambos caminos se combinan con diodos OR (1N4148 × 2) para evitar retroalimentación.
-El diodo flyback D2 (1N4007) en **paralelo** con la bobina absorbe los picos inductivos
-al desconectar.
+Ajusta el potenciómetro del módulo a **30–60 segundos** (suficiente para que
+el audio de despedida del ESP32 termine y se guarden los datos en flash).
+El firmware del ESP32 usa 3 s de retardo (`SHUTDOWN_DELAY_MS = 3000` en
+`power_manager.h:31`), así que con 30 s sobra margen.
+
+### 3.4 Funcionamiento paso a paso
+
+| Situación | Módulo relé retardo | GPIO 40 ESP32 |
+|-----------|--------------------|----|
+| Llave ON | Trigger recibe 12V → relé cierra → sistema alimentado | HIGH → ESP32 en RUNNING |
+| Llave OFF | Trigger cae a 0V → módulo inicia cuenta atrás T seg | LOW → ESP32 en SHUTTING_DOWN |
+| Durante T segundos | Relé sigue cerrado (cuenta atrás activa) | ESP32 reproduce audio despedida, guarda flash |
+| Pasados T segundos | Relé abre → alimentación cortada | ESP32 pierde tensión → apagado |
+
+> **Nota GPIO 41:** El firmware pone GPIO 41 HIGH al encender y LOW al
+> terminar el apagado (`power_manager.cpp:84, 127`). Este pin no está conectado
+> al módulo relé — el módulo no lo necesita. Puede dejarse libre.
 
 ---
 
 ## 4. Secuencia Completa de Encendido
 
-### 4.1 Línea temporal del encendido
+### 4.1 Línea temporal
 
 ```
-  t=0        t~100ms      t~300ms       t~600ms       t~800ms      t~850ms    t~870ms
-   │            │            │             │             │            │          │
-   ▼            ▼            ▼             ▼             ▼            ▼          ▼
- LLAVE ON → ESP32      → ESP32         → ESP32       → STM32      → STM32    → STM32
-             detecta     POWER_HOLD     RUNNING        recibe       Relay      relés
-             GPIO 40     HIGH           Audio          heartbeat    PowerUp()  completos
-             HIGH        (retención)    bienvenida     ESP32                   ACTIVE
-                                                       → STANDBY
-                                                       → ACTIVE
+  t=0         t~50ms       t~300ms      t~600ms      t~680ms    t~730ms
+   │             │             │            │            │           │
+   ▼             ▼             ▼            ▼            ▼           ▼
+  LLAVE ON    Módulo        ESP32         ESP32        STM32       STM32
+              relé cierra   GPIO 40       RUNNING      recibe      relés
+              5V llega      detecta HIGH  audio        heartbeat   completos
+              a ESP32/STM32 GPIO 41=HIGH  bienvenida   → ACTIVE    TRAC+DIR ON
 ```
 
 ### 4.2 Detalle paso a paso
 
 | Paso | Tiempo | Componente | Acción | Referencia código |
-|------|--------|------------|--------|-------------------|
-| 1 | t=0 | **Llave** | Usuario gira llave a ON → 12 V al relé de retención | Hardware |
-| 2 | t=0 | **Relé retención** | Cierra contactos → 12 V llega al regulador 5 V | Hardware |
-| 3 | t=0 | **Regulador 5 V** | Convierte 12 V → 5 V → alimenta ESP32 y STM32 | Hardware |
-| 4 | t~50 ms | **ESP32-S3** | Arranca, ejecuta `setup()` (510 ms de inicialización) | `main.cpp:285-330` |
-| 5 | t~50 ms | **STM32G474RE** | Arranca simultáneamente, ejecuta `HAL_Init()`, `SystemClock_Config()` | `main.c:117-130` |
-| 6 | t~60 ms | **STM32** | Lee causa de reset, inicia periféricos (ADC, CAN, I2C, timers) | `main.c:120-180` |
-| 7 | t~100 ms | **ESP32** | `power_mgr::init()` → lee GPIO 40 (HIGH) → llave detectada | `power_manager.cpp:52-73` |
-| 8 | t~100 ms | **ESP32** | Estado → `POWER_HOLD` → GPIO 41 HIGH (retiene alimentación) | `power_manager.cpp:83-88` |
-| 9 | t~100 ms | **ESP32** | Estado → `STARTING` (inmediato desde POWER_HOLD) | `power_manager.cpp:91-95` |
-| 10 | t~300 ms | **ESP32** | Estado → `RUNNING` (tras 200 ms de STARTUP_DELAY) | `power_manager.cpp:98-104` |
-| 11 | t~300 ms | **ESP32** | Reproduce audio de bienvenida vía DFPlayer | `main.cpp:593-596` |
-| 12 | t~560 ms | **ESP32** | `setup()` completo → entra en `loop()` → envía heartbeat 0x011 | `main.cpp:560-590` |
-| 13 | continuo | **ESP32** | Heartbeat CAN 0x011 cada 100 ms al STM32 | `main.cpp` |
-| 14 | — | **STM32** | Recibe primer heartbeat → estado BOOT → STANDBY → ACTIVE | `safety_system.c:252-264` |
-| 15 | — | **STM32** | `Relay_PowerUp()` invocado → inicia secuencia de relés | `safety_system.c:264` |
-| 16 | t+0 ms | **STM32** | `RELAY_MAIN` ON (PC10 → HIGH) | `safety_system.c:467` |
-| 17 | t+50 ms | **STM32** | Espera 50 ms (asentamiento corriente inrush) → `RELAY_TRAC` ON (PC11) | `safety_system.c:482-484` |
-| 18 | t+70 ms | **STM32** | Espera 20 ms (supresión de arco) → `RELAY_DIR` ON (PC12) | `safety_system.c:490-492` |
-| 19 | — | **STM32** | Sistema en estado ACTIVE → motores habilitados, esperando demanda | — |
-| 20 | — | **STM32** | `startup_inhibit` activo → espera pedal < 3% durante 400 ms para desbloquear | `main.c:94-96` |
+|------|--------|-----------|--------|-------------------|
+| 1 | t=0 | **Llave** | Usuario gira llave ON → 12V al trigger del módulo | Hardware |
+| 2 | t=0 | **Módulo relé** | Cierra el relé NO → 12V llega al regulador 5V | Hardware |
+| 3 | t=0 | **Regulador 5V** | 12V → 5V → alimenta ESP32-S3 y STM32 Nucleo | Hardware |
+| 4 | t~50ms | **STM32** | Arranca, `HAL_Init()`, `SystemClock_Config()`, periféricos | `main.c:143-230` |
+| 5 | t~50ms | **STM32** | 3 blinks LD2 (~2.3s), inicia CAN bus | `main.c:186-223` |
+| 6 | t~50ms | **ESP32** | Arranca `setup()`, `power_mgr::init()` | `main.cpp:633` |
+| 7 | t~100ms | **ESP32** | GPIO 40 lee HIGH → llave detectada → GPIO 41=HIGH → POWER_HOLD | `power_manager.cpp:83-88` |
+| 8 | t~100ms | **ESP32** | Estado → STARTING (inmediato desde POWER_HOLD) | `power_manager.cpp:91-95` |
+| 9 | t~300ms | **ESP32** | Estado → RUNNING (tras 200ms STARTUP_DELAY) | `power_manager.cpp:98-104` |
+| 10 | t~300ms | **ESP32** | Audio bienvenida vía DFPlayer | `main.cpp:942` |
+| 11 | t~600ms | **ESP32** | `loop()` activo → envía heartbeat CAN 0x011 cada 100ms | `main.cpp:936` |
+| 12 | — | **STM32** | Recibe primer heartbeat → BOOT → STANDBY → chequeos boot | `safety_system.c` |
+| 13 | — | **STM32** | Centrado dirección completo + BootValidation OK → ACTIVE | `safety_system.c:1546` |
+| 14 | — | **STM32** | `Relay_PowerUp()` → PC11 HIGH (RELAY_TRAC ON, 24V) | `safety_system.c:680` |
+| 15 | t+50ms | **STM32** | Espera 50ms asentamiento → PC12 HIGH (RELAY_DIR ON, 12V) | `safety_system.c:732-734` |
+| 16 | — | **STM32** | `RELAY_SEQ_COMPLETE` → motores disponibles | `safety_system.c:769` |
+| 17 | — | **STM32** | `startup_inhibit` activo hasta que pedal < 3% durante 400ms | `main.c:408-417` |
 
 ### 4.3 Protecciones durante el encendido
 
-- **Inhibición de pedal al arranque:** Si el pedal está pisado al encender, los
-  motores permanecen bloqueados hasta que el pedal se suelte (< 3 %) durante
-  400 ms continuos.
-- **Validación de boot:** 6 chequeos obligatorios de sensores antes de permitir
-  estado ACTIVE.
-- **Centrado de dirección:** El motor de dirección busca la posición central
-  usando el sensor inductivo LJ12A3 + encoder.
+- **Inhibición de pedal:** Si el pedal está pisado al encender, los motores
+  permanecen bloqueados hasta que el pedal se suelte (< 3%) durante 400 ms.
+- **Boot Validation:** 6 chequeos obligatorios de sensores antes de ACTIVE.
+- **Centrado de dirección:** El motor de dirección busca posición central
+  usando el sensor inductivo LJ12A3 + encoder antes de permitir ACTIVE.
 
 ---
 
-## 5. Flujo de Corriente hacia los Motores de Tracción
+## 5. Flujo de Corriente hacia los Motores
 
-### 5.1 Cadena de potencia completa
-
-Una vez que los relés están cerrados, la corriente fluye así:
+### 5.1 Cadena de potencia tracción (24 V)
 
 ```
- ┌─────────────┐                                                     ┌──────────┐
- │ Batería 24V │                                                     │ 4× Motor │
- │   Tracción  │                                                     │ Tracción │
- └──────┬──────┘                                                     └────▲─────┘
-        │                                                                  │
-        │ 4 mm²                                                           │ 2.5 mm²
-        ▼                                                                  │
-   INA226 ch4 ← mide tensión de batería (incluso con relé abierto)       │
-   (0.75 mΩ)                                                               │
-        │                                                                  │
-        ▼                                                                  │
-   ┌─────────┐     ┌─────────┐     ┌────┬────┬────┬────┐     ┌──────────┐│
-   │RELAY_MAIN│ →  │RELAY_TRAC│ →  │INA │INA │INA │INA │ →  │4×BTS7960 │┘
-   │ (PC10)  │     │ (PC11)  │     │ch0 │ch1 │ch2 │ch3 │     │ drivers  │
-   │ 60A fuse│     │ 50A fuse│     │1.5m│1.5m│1.5m│1.5m│     │          │
-   └─────────┘     └─────────┘     └────┴────┴────┴────┘     └──────────┘
-                                                                    ▲
-                                                                    │ PWM 20 kHz
-                                                               STM32 TIM1/TIM8
-                                                               (PA8-PA10+PC3, PC6-PC9)
+  ┌─────────┐       ┌────────────────┐      ┌────┬────┬────┬────┐     ┌──────────┐
+  │Bat 24V  │──────►│ RELAY_TRAC     │─────►│INA │INA │INA │INA │────►│4×BTS7960 │
+  │         │       │ PC11, STM32    │      │ch0 │ch1 │ch2 │ch3 │     │ drivers  │
+  └─────────┘       │ (50A fuse)     │      │1.5m│1.5m│1.5m│1.5m│     └────┬─────┘
+                    └────────────────┘      └────┴────┴────┴────┘          │
+                                                                            ▼
+                                                                      4× Motores
+                                                                      tracción
+
+  PWM 20 kHz: STM32 TIM1 (PA8-PA10 + PC3) → FL, FR
+               STM32 TIM8 (PC6-PC9)         → RL, RR
 ```
 
-### 5.2 Cadena de potencia de dirección
+La batería 24V también pasa por un INA226 (canal 4, shunt 0.75 mΩ) antes del
+relé, para que el STM32 lea la tensión de batería en todo momento.
+
+### 5.2 Cadena de potencia dirección (12 V)
 
 ```
- ┌─────────────┐
- │ Batería 12V │
- │  Dirección  │
- └──────┬──────┘
-        │ 4 mm²
-        ▼
-   ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-   │RELAY_DIR │ →  │INA226 ch5│ →  │ BTS7960  │ →  │  Motor   │
-   │ (PC12)   │     │(1.5 mΩ) │     │ steering │     │Dirección │
-   │ 20A fuse │     │          │     │          │     │          │
-   └──────────┘     └──────────┘     └──────────┘     └──────────┘
-                                          ▲
-                                          │ PWM 20 kHz
-                                     STM32 TIM3
-                                     (PA6, PA7)
+  ┌─────────┐       ┌────────────────┐      ┌──────────┐      ┌──────────┐
+  │Bat 12V  │──────►│ RELAY_DIR      │─────►│INA226 ch5│─────►│ BTS7960  │───► Motor
+  │         │       │ PC12, STM32    │      │ (1.5 mΩ) │      │ steering │     dirección
+  └─────────┘       │ (20A fuse)     │      └──────────┘      └──────────┘
+                    └────────────────┘
+  PWM 20 kHz: STM32 TIM3 (PA6, PA7) → RPWM, LPWM dirección
 ```
 
-### 5.3 Alimentación lógica (3.3 V / 5 V)
+### 5.3 Alimentación lógica (5V / 3.3V)
 
 ```
- Regulador 5 V (desde relé de retención / 12 V)
-        │
-        ├──► ESP32-S3 (pin 5V)
-        │
-        ├──► DC-DC 24→5V (LM2596) ──► Lógica BTS7960 (VCC) + WS2812B LEDs
-        │
-        └──► LDO 3.3 V (integrado en Nucleo-64)
-                │
-                ├──► STM32G474RE (MCU, 170 MHz)
-                ├──► TCA9548A + 6× INA226 (I²C)
-                ├──► Transceiver CAN TJA1051T/3 (VCC=5V, VIO=3.3V)
-                └──► Señales digitales (PWM, GPIO, encoder)
+  Módulo relé retardo → regulador 5V
+         │
+         ├──► ESP32-S3 (pin 5V)
+         │
+         └──► Nucleo-64 (pin 5V) → LDO interno → 3.3V para STM32 y periféricos
 ```
 
 ---
 
 ## 6. Secuencia Completa de Apagado
 
-### 6.1 Línea temporal del apagado
+### 6.1 Línea temporal
 
 ```
-  t=0          t~50ms        t~3000ms       t~3050ms       t~3100ms
-   │              │              │              │              │
-   ▼              ▼              ▼              ▼              ▼
- LLAVE OFF →  ESP32          → ESP32         → ESP32        → Relé de
-              detecta          3 s audio       GPIO 41        retención
-              GPIO 40 LOW      despedida       LOW            se abre
-              → SHUTTING_DOWN  completado     (POWER_HOLD    → SIN
-                               guardar datos   liberado)      ALIMENTACIÓN
+  t=0         t~50ms          t~3050ms        t~3100ms         t+T seg
+   │              │               │               │               │
+   ▼              ▼               ▼               ▼               ▼
+  LLAVE OFF    ESP32            ESP32           Módulo relé     Sistema
+               GPIO 40=LOW      audio           sigue           apagado
+               → SHUTTING_DOWN  despedida       contando
+               guarda flash     termina         atrás
+               (config_store)   GPIO 41=LOW
 ```
 
 ### 6.2 Detalle paso a paso
 
 | Paso | Tiempo | Componente | Acción | Referencia código |
-|------|--------|------------|--------|-------------------|
-| 1 | t=0 | **Usuario** | Gira la llave a OFF → 12 V cortado a la llave | Hardware |
-| 2 | t~50 ms | **ESP32** | GPIO 40 lee LOW (debounce 50 ms) → `SHUTTING_DOWN` | `power_manager.cpp:115-118` |
-| 3 | t~50 ms | **ESP32** | `config_store::flush()` → guarda configuración en flash | `main.cpp:602` |
-| 4 | t~50 ms | **ESP32** | Reproduce audio de despedida (`FAREWELL`) | `main.cpp:603` |
-| 5 | t~50 ms | **ESP32** | GPIO 41 sigue HIGH → relé de retención mantiene 12 V | `power_manager.cpp` |
-| 6 | t~3050 ms | **ESP32** | Han pasado 3000 ms (`SHUTDOWN_DELAY_MS`) | `power_manager.cpp:126` |
-| 7 | t~3050 ms | **ESP32** | GPIO 41 → LOW → `POWER_HOLD` liberado | `power_manager.cpp:127` |
-| 8 | t~3050 ms | **ESP32** | Estado → `OFF` | `power_manager.cpp:128-129` |
-| 9 | t~3100 ms | **Relé retención** | Se abre (ya no tiene ni llave ni POWER_HOLD) | Hardware |
-| 10 | t~3100 ms | **Regulador 5V** | Sin entrada → 5 V cae a 0 V | Hardware |
-| 11 | inmediato | **STM32** | Pierde alimentación → periféricos se apagan | Hardware |
-| 12 | inmediato | **ESP32** | Pierde alimentación → se apaga | Hardware |
+|------|--------|-----------|--------|-------------------|
+| 1 | t=0 | **Usuario** | Gira llave a OFF → trigger del módulo relé cae a 0V | Hardware |
+| 2 | t=0 | **Módulo relé** | Inicia cuenta atrás T segundos (mantiene alimentación) | Hardware |
+| 3 | t~50ms | **ESP32** | GPIO 40 lee LOW (debounce 50ms) → SHUTTING_DOWN | `power_manager.cpp:115-118` |
+| 4 | t~50ms | **ESP32** | `config_store::flush()` → guarda configuración en flash | `main.cpp:952` |
+| 5 | t~50ms | **ESP32** | Reproduce audio de despedida (FAREWELL) | `main.cpp:953` |
+| 6 | t~50ms | **ESP32** | LEDs apagados durante shutdown | `main.cpp:957-961` |
+| 7 | t~3050ms | **ESP32** | Han pasado 3000ms (SHUTDOWN_DELAY_MS) | `power_manager.h:31` |
+| 8 | t~3050ms | **ESP32** | GPIO 41 → LOW (firmware termina secuencia) | `power_manager.cpp:127` |
+| 9 | t~3050ms | **ESP32** | Estado → OFF | `power_manager.cpp:128-129` |
+| 10 | t+T seg | **Módulo relé** | Cuenta atrás completa → relé abre → corta alimentación | Hardware |
+| 11 | inmediato | **STM32** | Pierde alimentación → todos GPIOs a LOW → relés TRAC+DIR se abren | Hardware |
+| 12 | inmediato | **ESP32** | Pierde alimentación → apagado total | Hardware |
 
 ### 6.3 ¿Qué pasa con los relés de potencia del STM32?
 
-Cuando el STM32 pierde alimentación, **todos los GPIOs caen a LOW**, lo que
-significa que los relés RELAY_MAIN, RELAY_TRAC y RELAY_DIR se abren
-automáticamente por pérdida de señal. Este es un comportamiento **fail-safe**:
+Cuando el STM32 pierde alimentación, todos sus GPIOs caen a LOW. Esto abre
+RELAY_TRAC (PC11) y RELAY_DIR (PC12) automáticamente. Los motores quedan
+desconectados de las baterías sin intervención del firmware.
 
-- Los motores se desconectan de las baterías instantáneamente.
-- No hay riesgo de que un relé quede "pegado" en ON por software.
-- Los diodos flyback (1N4007) en las bobinas de los relés absorben los picos
-  inductivos generados al cortar.
+### 6.4 Apagado por fallo del STM32 (SAFE/ERROR)
 
-### 6.4 Apagado por software (estados SAFE/ERROR del STM32)
-
-Si el STM32 detecta una condición peligrosa **antes** de que se apague la llave,
-realiza su propia secuencia de apagado por software:
+Si el STM32 detecta una condición peligrosa antes del apagado normal:
 
 ```c
-void Safety_PowerDown(void)       // safety_system.c:1343
+// safety_system.c — apagado de emergencia
+void Safety_PowerDown(void)
 {
-    Traction_EmergencyStop();     // Todos los PWM a 0%
-    Relay_PowerDown();            // Relés en orden inverso
+    Traction_EmergencyStop();   // Todos los PWM a 0%
+    Relay_PowerDown();          // RELAY_TRAC y RELAY_DIR OFF atómico (BSRR)
 }
 
-void Relay_PowerDown(void)        // safety_system.c:503
+void Relay_PowerDown(void)
 {
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);  // Dirección OFF
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);  // Tracción OFF
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);  // Principal OFF
+    // BSRR: apaga PC11 (TRAC) y PC12 (DIR) en un solo ciclo de reloj
+    GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
 }
 ```
 
-Orden de apagado: **DIR → TRAC → MAIN** (inverso al encendido).
+Esto ocurre en fallo de overcurrent, overtemp, watchdog, etc. No está
+relacionado con la llave — es una protección independiente.
 
 ---
 
 ## 7. Diagrama Eléctrico Completo
 
-### 7.1 Circuito completo desde la llave hasta los motores
-
 ```
-                                    ┌────────────────────────────────────────────────────────────┐
-                                    │                    STM32G474RE                              │
-                                    │                                                            │
-                   ┌────────────────┤ PC10 (RELAY_MAIN) ──► Opto ──► Relé MAIN (60A fuse)       │
-                   │                │ PC11 (RELAY_TRAC) ──► Opto ──► Relé TRAC (50A fuse)       │
-  ┌─────────┐      │                │ PC12 (RELAY_DIR)  ──► Opto ──► Relé DIR  (20A fuse)       │
-  │Bat 12 V │──┐   │                │                                                            │
-  └─────────┘  │   │                │ TIM1 CH1-CH3 (PA8-PA10) + CH4 (PC3) ──► BTS7960 FL/FR          │
-               │   │                │ TIM8 CH1-CH4 (PC6-PC9)  ──► BTS7960 RL/RR                 │
-               │   │                │ TIM3 CH1-CH2 (PA6-PA7)  ──► BTS7960 Dirección              │
-               │   │                └────────────────────────────────────────────────────────────┘
-               │   │                                    ▲ 3.3V (LDO)
-               │   │                                    │
-               │   │                              ┌─────┴──────┐
-               │   │           ┌─────────────────►│ Regulador  │◄─── DC-DC 24→5V (LM2596)
-               │   │           │                  │  5V → 3.3V │     desde bus 24V (tras RELAY_MAIN)
-               │   │           │                  └────────────┘
-               │   │           │
-               │   │    ┌──────┴────────────────────────────────────────────────────────┐
-               │   │    │                      ESP32-S3                                  │
-               │   │    │                                                                │
-               │   │    │  GPIO 40 (IGNITION_SENSE) ◄── R1=33kΩ ── Llave contacto      │
-               │   │    │  GPIO 41 (POWER_HOLD)     ──► Transistor ──► Relé retención   │
-               │   │    │  GPIO 4/5 (CAN TX/RX)     ──► TJA1051T/3 ──► CAN Bus ──► STM32  │
-               │   │    └───────────────────────────────────────────────────────────────┘
-               │   │                                    ▲ 5V
-               │   │                                    │
-               │   │                              ┌─────┴──────┐
-               │   └────── Llave contacto ──────►│ RELÉ DE    │
-               │                                  │ RETENCIÓN  │
-               └──── (alimentación directa) ────►│ (12V→5V    │
-                                                  │  regulador)│
-                                                  └────────────┘
-                                                        │ 5V
-                                                        ▼
-                                                  ESP32 + STM32
-                                                  alimentados
+  ┌──────────┐
+  │ Bat 12V  │──────────────────────────────────────────────────┐
+  │(acc/perm)│                                                  │ (permanente)
+  └──────────┘                                                  │
+       │                                                        ▼
+       │  Línea ACC                                    ┌──────────────────┐
+       │  (solo con llave ON)                          │  Módulo relé     │
+       │                                               │  con retardo     │
+  ┌────┴─────┐                                         │  hardware        │
+  │  LLAVE   │────── línea ACC ───────────────────────►│  Trigger (X1)    │
+  │ CONTACTO │                                         │  DC+ ← 12V perm  │
+  └────┬─────┘                                         │  DC- ← GND       │
+       │                                               │                  │
+       │  Señal para ESP32                             │  COM ← 12V perm  │
+       │                                               │  NO ──────────────┼────► Regulador 5V
+  ┌────┴────┐                                          │  NC (libre)      │         │
+  │ R1 33kΩ │                                          └──────────────────┘         │
+  └────┬────┘                                                                        │
+       │                                                                             ▼
+       ├────────────────────────────────────────► GPIO 40 ESP32-S3           ┌──────────────┐
+       │                                          (IGNITION_SENSE)           │ ESP32-S3 +   │
+  ┌────┴────┐                                                                 │ STM32 Nucleo │
+  │ R2 10kΩ │                                                                 │  (5V input)  │
+  └────┬────┘                                                                 └──────┬───────┘
+       │                                                                             │
+      GND ────────────────────────────────────────────────────────────────────► GND│
 
-  ┌─────────┐
-  │Bat 24 V │──► INA226 ch4 ──► RELAY_MAIN ──► RELAY_TRAC ──┬── INA226 ch0 ── BTS7960 ── Motor FL
-  └─────────┘    (0.75mΩ)      (PC10)         (PC11)        ├── INA226 ch1 ── BTS7960 ── Motor FR
-                                                              ├── INA226 ch2 ── BTS7960 ── Motor RL
-                                                              └── INA226 ch3 ── BTS7960 ── Motor RR
+  ESP32-S3 GPIO 41 (POWER_HOLD) ── no conectado al módulo (firmware interno)
 
-  ┌─────────┐
-  │Bat 12 V │──► RELAY_DIR ──► INA226 ch5 ── BTS7960 ── Motor Dirección
-  └─────────┘    (PC12)        (1.5mΩ)
+
+  ┌──────────┐
+  │ Bat 24V  │──► INA226 ch4 ──► RELAY_TRAC (PC11) ──┬── INA226 ch0 ──► BTS7960 ──► Motor FL
+  │ tracción │    (0.75 mΩ)      STM32, 50A fuse      ├── INA226 ch1 ──► BTS7960 ──► Motor FR
+  └──────────┘                                        ├── INA226 ch2 ──► BTS7960 ──► Motor RL
+                                                       └── INA226 ch3 ──► BTS7960 ──► Motor RR
+
+  ┌──────────┐
+  │ Bat 12V  │──► RELAY_DIR (PC12) ──► INA226 ch5 ──► BTS7960 ──► Motor Dirección
+  │ dirección│    STM32, 20A fuse      (1.5 mΩ)
+  └──────────┘
 ```
 
 ---
 
-## 8. Lista de Componentes del Circuito de Llave
+## 8. Lista de Componentes
 
-### 8.1 Circuito de detección de llave (ESP32 GPIO 40)
-
-| Componente | Valor | Función |
-|------------|-------|---------|
-| Llave de contacto | SPST, rated ≥ 12 V / 1 A | Interruptor maestro ON/OFF (2 terminales) |
-| R1 (divisor) | 33 kΩ, ¼ W, metal film | Resistencia superior del divisor de tensión |
-| R2 (divisor) | 10 kΩ, ¼ W, metal film | Resistencia inferior + pull-down |
-| R3 (serie GPIO) | 10 kΩ, ¼ W | Protección anti-transitorio + parte del filtro RC |
-| C1 (filtro) | 100 nF (0.1 µF), 50 V, X7R | Filtro RC anti-ruido (τ = R3×C1 = 1 ms) |
-| Cable señal | 0.5 mm², apantallado recomendado | De la llave al divisor |
-
-> **Mejora opcional:** añadir zener 3.3 V (**1N4728**, disponible en inventario) entre GPIO 40 y GND para
-> clamp de protección contra transitorios automotrices.
-> Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md) §8.
-
-### 8.2 Circuito de retención de alimentación (ESP32 GPIO 41)
+### 8.1 Circuito de señal de llave (GPIO 40 del ESP32)
 
 | Componente | Valor | Función |
 |------------|-------|---------|
-| Q1 (transistor NPN) | **2N2222** (camino llave) — **disponible en inventario** | Driver de bobina desde señal de llave |
-| Q2 (transistor NPN) | **2N2222** (camino GPIO 41) — **disponible en inventario** | Driver de bobina desde POWER_HOLD |
-| R4 (base Q1) | 4.7 kΩ, ¼ W | Limita corriente de base Q1 (~2.4 mA) desde llave |
-| R_base (Q2) | 1 kΩ, ¼ W | Limita corriente de base Q2 desde GPIO 41 (3.3V) |
-| D2 (flyback) | **1N4007** — en **PARALELO** con bobina | Protección contra pico inductivo (cátodo→bobina+, ánodo→bobina−) |
-| D_OR1, D_OR2 | 1N4148 × 2 | Combina señal de llave + POWER_HOLD sin retroalimentación |
-| Relé de retención | 12 V DC, contactos ≥ 5 A | Mantiene alimentación durante apagado |
-| Regulador 5 V | LM7805 o módulo buck 12 V→5 V | Alimentación de ESP32-S3 y STM32 |
+| R1 | 33 kΩ, ¼ W, metal film | Resistencia superior del divisor de tensión |
+| R2 | 10 kΩ, ¼ W, metal film | Resistencia inferior + punto de referencia a GND |
+| Cable señal | 0.5 mm², apantallado recomendado | De la llave al divisor resistivo |
 
-> ⚠️ **CRÍTICO:** El diodo flyback D2 debe estar en **PARALELO** con la bobina
-> del relé, **no en serie**. Un diodo en serie no protege contra kickback inductivo.
-> Ver [IGNITION_KEY_CIRCUIT_VALIDATION.md](IGNITION_KEY_CIRCUIT_VALIDATION.md) §3.1 y §7.1.
+### 8.2 Módulo relé con retardo hardware
+
+| Componente | Especificación | Función |
+|------------|---------------|---------|
+| Módulo relé retardo | 12V DC, contactos ≥ 5A, potenciómetro 0-120s | Mantiene alimentación T segundos tras llave OFF |
+| Regulador 5V | LM7805 o módulo buck 12V→5V, ≥ 1A | Convierte 12V del módulo relé a 5V para ESP32+STM32 |
+
+> El módulo relé incluye su propio circuito de protección. No necesita diodo
+> flyback externo, transistores ni diodos OR adicionales.
 
 ### 8.3 Relés de potencia (controlados por STM32)
 
 | Componente | Pin STM32 | Fusible | Función |
 |------------|-----------|---------|---------|
-| RELAY_MAIN | PC10 | 60 A | Alimentación general 24 V |
-| RELAY_TRAC | PC11 | 50 A | Motores de tracción 24 V |
-| RELAY_DIR | PC12 | 20 A | Motor de dirección 12 V |
+| RELAY_TRAC | PC11 | 50 A | Motores de tracción 24 V (4× BTS7960) |
+| RELAY_DIR | PC12 | 20 A | Motor de dirección 12 V (1× BTS7960) |
 
-Cada relé de potencia incluye: diodo flyback 1N4007 + snubber RC (100 Ω + 100 nF / 250 V) en contactos.
-El módulo intermedio 4-ch opto relé (SRD-12VDC-SL-C, 12V) incluye su propia protección interna.
+Cada relé de potencia lleva: diodo flyback 1N4007 en paralelo con la bobina
++ snubber RC (100 Ω + 100 nF / 250 V) en los contactos.
+El módulo optoacoplador 4ch (SRD-12VDC-SL-C) entre STM32 y relés incluye
+protección interna.
 
 ---
 
@@ -552,44 +406,42 @@ El módulo intermedio 4-ch opto relé (SRD-12VDC-SL-C, 12V) incluye su propia pr
 
 ### ¿Por qué la llave va al ESP32 y no al STM32?
 
-La llave de contacto es una función de **interfaz de usuario** (encender/apagar
-el vehículo). El ESP32-S3 es el controlador de HMI que gestiona la pantalla,
-el audio y la interacción con el usuario. El STM32 es la **autoridad de
-seguridad** que controla motores y relés, pero no necesita leer la llave
-directamente — recibe la información del estado del sistema a través del bus CAN.
+El ESP32-S3 gestiona la HMI (pantalla, audio, interacción de usuario). Es el
+responsable de la secuencia de encendido/apagado del vehículo. El STM32 es la
+autoridad de seguridad de motores y relés — no necesita leer la llave
+directamente, recibe el estado del sistema via CAN (heartbeat del ESP32).
 
-### ¿Qué pasa si el ESP32 se desconecta o falla?
+### ¿Qué pasa si el ESP32 falla?
 
 Si el STM32 deja de recibir heartbeats CAN del ESP32 durante más de 250 ms,
-entra en modo **LIMP_HOME** (20 % de potencia máxima, 5 km/h). El vehículo
-permanece operable a velocidad de peatón usando solo el pedal local, sin
-necesidad del ESP32.
+entra en modo LIMP_HOME (20% de potencia, ~5 km/h). El vehículo sigue siendo
+operable con el pedal local sin el ESP32.
 
 ### ¿Qué pasa si giro la llave a OFF mientras conduzco?
 
-1. El ESP32 detecta llave OFF y entra en `SHUTTING_DOWN`.
-2. Deja de enviar heartbeats CAN.
-3. El STM32 detecta timeout CAN (250 ms) y entra en LIMP_HOME.
-4. Tras 3 segundos, el ESP32 libera `POWER_HOLD` y el sistema se apaga.
-5. El STM32 pierde alimentación → todos los GPIOs a LOW → relés se abren →
-   motores desconectados.
+1. El módulo relé inicia su cuenta atrás (T segundos de alimentación).
+2. El ESP32 detecta GPIO 40 LOW → SHUTTING_DOWN → audio despedida → guarda config.
+3. El STM32 detecta pérdida de heartbeat CAN → entra en LIMP_HOME.
+4. Pasados T segundos → módulo relé abre → alimentación cortada → STM32 pierde tensión → relés TRAC+DIR se abren → motores desconectados.
 
-### ¿Se puede encender sin la llave (bypass)?
+### ¿Se puede probar sin la llave (banco de trabajo)?
 
-Sí, para pruebas en banco: conectar GPIO 40 del ESP32 directamente a 3.3 V
-(sin divisor). Esto simula la llave en posición ON permanente.
+Sí: conectar 3.3V directamente a GPIO 40 del ESP32 (sin divisor). Esto
+simula llave ON permanente. El módulo relé se puede alimentar manualmente
+desde una fuente 12V en sus bornes DC+/DC-.
 
-### ¿Qué corriente consume la llave?
+### ¿Qué corriente pasa por la llave?
 
-La corriente por el divisor es mínima: I = 12 V / (33 kΩ + 10 kΩ) ≈ 0.28 mA.
-La llave no necesita soportar más que esa corriente para la señal de detección.
-La corriente de potencia pasa por el relé de retención, no por la llave
-directamente (excepto para accionar la bobina del relé: ~70 mA).
+Solo la corriente del divisor resistivo hacia GPIO 40:
+`I = 12V / (33k + 10k) ≈ 0.28 mA`
+
+La corriente de potencia para ESP32+STM32 pasa por el módulo relé (relé NO),
+no por los contactos de la llave. La llave solo conmuta la señal al trigger.
 
 ---
 
-> **Documento generado a partir del firmware (`esp32/src/power_manager.h`,
-> `esp32/src/power_manager.cpp`, `esp32/src/main.cpp`, `Core/Src/safety_system.c`,
-> `Core/Inc/main.h`, `Core/Src/main.c`) y de la documentación existente
-> (`POWER_DISTRIBUTION.md`, `HARDWARE_WIRING_MANUAL.md`,
-> `LISTADO_PINES_COMPLETO.md`). No contiene hardware inventado.**
+> **Documento generado a partir del firmware verificado:**
+> `esp32/src/power_manager.h`, `esp32/src/power_manager.cpp`,
+> `esp32/src/main.cpp`, `Core/Src/safety_system.c`,
+> `Core/Inc/project_config.h`, `Core/Src/main.c`.
+> No contiene hardware inventado ni estimado.
