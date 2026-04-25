@@ -80,6 +80,36 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — docs(relay): completar diagrama eléctrico LLAVE_CONTACTO — 4 módulos de relé + módulo 5 V LED
+- **Fecha:** 2026-04-25
+- **Autor:** Copilot
+- **Rama:** `copilot/complete-technical-audit-esp32-s3`
+- **Estado:** En curso (rama activa; merge gestionado por el mantenedor).
+- **Descripción del cambio:** El documento `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` describía sólo 3 módulos de relé y no incluía el módulo de 5 V que alimenta las tiras LED WS2812B. Se añade una sección dedicada al **módulo relé 2 canales SRD-05VDC-SL-C** (PB10/PB11), se actualiza el resumen general a 4 módulos, se completan los diagramas eléctricos, la secuencia de encendido/apagado, la lista de componentes y el índice de secciones. Adicionalmente, la sección de detección de llave (GPIO 40 del ESP32-S3) se amplía con una tabla comparativa de las 3 opciones de cableado (R1+R2, puente 3.3 V, optoacoplador adicional) y el cálculo del divisor de tensión verificado.
+
+#### Cambios principales (sólo documentación — sin cambios de firmware)
+- **`docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`** — 351 líneas añadidas, 340 eliminadas/reorganizadas:
+  - **Resumen general**: tabla de 3 módulos → **4 módulos** (`Módulo retardo 12 V`, `Módulo 2ch SRD-12VDC-SL-C`, `Módulo 2ch SRD-05VDC-SL-C`).
+  - **Índice**: secciones renumeradas; nueva sección 5 `Módulo Relé 2 Canales 5 V — Alimentación Tiras LED` añadida entre las secciones de módulo 12 V y la secuencia de encendido.
+  - **Tabla de pines STM32 verificados**: ampliada con `PB10` (RELAY_LED, frontal 28 WS2812B) y `PB11` (RELAY_LED_REAR, trasera 16 WS2812B), referencias a `project_config.h:210-211` y `can_handler.c:1477-1494`.
+  - **Sección 2 — GPIO 40 ESP32-S3**: nuevo sub-apartado 2.2/2.3 con tabla comparativa de opciones A/B/C (R1+R2 recomendada, puente, opto adicional) y cálculo `V_GPIO40 = 2.79 V`.
+  - **Sección 4 — Módulo 12 V** (antes §4): cableado VCC/JD-VCC/GND, posición del jumper H, aviso de retirada del jumper VCC-JD-VCC, cálculo de corriente `I = 2.1 mA` con optoacoplador PC817.
+  - **Sección 5 — Módulo 5 V** (nueva): misma estructura que §4 pero para `SRD-05VDC-SL-C`; IN1←PB10 (frontal), IN2←PB11 (trasera); VCC→3.3 V, JD-VCC→5 V (sin quitar jumper porque VCC y JD-VCC son del mismo nivel); tabla de salidas hacia las tiras LED.
+  - **Diagrama eléctrico completo** (§9): actualizado con los 4 módulos en el esquema ASCII y los nodos `5V_LED_SUPPLY_F/R`.
+  - **Lista de componentes** (§10): añadidos el módulo SRD-05VDC-SL-C y el divisor R1/R2.
+  - **Preguntas frecuentes** (§11): nueva FAQ sobre si hace falta resistencia entre STM32 y módulo de 5 V (respuesta: no).
+
+#### Invariantes preservadas
+- Sin cambios de firmware, hardware, ni protocolo CAN.
+- La asignación de pines `PB10`/`PB11` ya existía en `project_config.h` y `can_handler.c`; el documento se limita a reflejar la realidad del código.
+- El contrato CAN (rev 1.3) y todos los IDs de mensajes son idénticos.
+
+#### Validación
+- Revisión cruzada con `project_config.h` (líneas 199, 200, 210, 211) y `can_handler.c` (líneas 1477–1494): todos los pines y valores documentados coinciden con el firmware.
+- Ningún test de firmware afectado (cambio exclusivamente documental).
+
+---
+
 ### PR — hardware(pinout): reassign EN_RR from PC13 to PC2 (USER button B1 conflict)
 - **Fecha:** 2026-04-24
 - **Autor:** Copilot
