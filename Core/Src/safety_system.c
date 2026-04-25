@@ -2305,7 +2305,14 @@ void Safety_RequestShutdown(void)
     /* Mark the system as in a commanded safe state.  No further motion
      * commands will be honoured (Safety_IsMotionAllowed gates on state).
      * If we are already in SAFE/ERROR, leave the existing state alone
-     * to preserve any earlier diagnostic context.                      */
+     * to preserve any earlier diagnostic context.
+     *
+     * Threading note: this function is only invoked from the CAN dispatch
+     * inside CAN_ProcessMessages(), which runs in main-loop context (see
+     * main.c:304 / main.c:620) — never from an ISR.  All other writers
+     * of system_state (Safety_SetState, Safety_EmergencyStop, Safety_Init)
+     * also run in main-loop context, so a single-word write on Cortex-M4
+     * is safe here without an explicit critical section.                 */
     if (system_state != SYS_STATE_SAFE && system_state != SYS_STATE_ERROR) {
         system_state = SYS_STATE_SAFE;
     }

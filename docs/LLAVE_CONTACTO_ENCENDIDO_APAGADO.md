@@ -308,13 +308,18 @@ El regulador 5 V debe ser capaz de suministrar la corriente total de LEDs
 | 1 | t=0 | **Usuario** | Gira llave OFF → trigger módulo retardo = 0V | Hardware |
 | 2 | t=0 | **Módulo retardo** | Inicia cuenta atrás T seg | Hardware |
 | 3 | t~50ms | **ESP32** | GPIO 40 LOW → SHUTTING_DOWN | `power_manager.cpp:115-118` |
-| 4 | t~50ms | **ESP32** | CAN 0x120 Byte0=0,Byte1=0 → STM32 apaga PB10+PB11 | `can_handler.c:1477` |
-| 5 | t~50ms | **STM32** | PB10/PB11 LOW → módulo 5V abre → tiras LED sin alimentación | Módulo 5V |
-| 6 | t~50ms | **ESP32** | `config_store::flush()` → flash / audio despedida | `main.cpp:952-961` |
-| 7 | t~3050ms | **ESP32** | 3000ms cumplidos → GPIO 41=LOW → estado OFF | `power_manager.cpp:127-129` |
-| 8 | t+T seg | **Módulo retardo** | Cuenta atrás completa → relé abre → 5V cortado | Hardware |
-| 9 | inmediato | **STM32** | Pierde 5V → PC11/PC12 LOW → módulo 12V abre → bobinas relés potencia OFF | Hardware |
-| 10 | inmediato | **Relés potencia** | Contactos abren → motores desconectados | Hardware |
+| 4 | t~50ms | **ESP32→STM32** | CAN 0x130 SYSTEM_SHUTDOWN (DLC 0) → handshake pre-corte | `main.cpp` `sendSystemShutdown()` |
+| 5 | t~50ms | **STM32** | `Safety_RequestShutdown()`: PWM=0, EN=LOW, relés TRAC+DIR OFF (BSRR atómico), `system_state=SAFE` | `safety_system.c` `Safety_RequestShutdown()` |
+| 6 | t~150ms | **ESP32** | Pausa 100 ms tras 0x130 (ventana de reacción del STM32) | `main.cpp` SHUTTING_DOWN |
+| 7 | t~150ms | **ESP32** | CAN 0x120 Byte0=0,Byte1=0 → STM32 apaga PB10+PB11 | `can_handler.c:1477` |
+| 8 | t~150ms | **STM32** | PB10/PB11 LOW → módulo 5V abre → tiras LED sin alimentación | Módulo 5V |
+| 9 | t~150ms | **ESP32** | `config_store::flush()` → flash / audio despedida | `main.cpp` SHUTTING_DOWN |
+| 10 | t~3150ms | **ESP32** | 3000 ms (`SHUTDOWN_DELAY_MS`) cumplidos → GPIO 41=LOW → estado OFF | `power_manager.cpp:127-129` |
+| 11 | t+T seg | **Módulo retardo** | Cuenta atrás completa → relé abre → 5V cortado | Hardware |
+| 12 | inmediato | **STM32** | Pierde 5V → PC11/PC12 LOW → módulo 12V abre → bobinas relés potencia OFF | Hardware |
+| 13 | inmediato | **Relés potencia** | Contactos abren → motores desconectados | Hardware |
+
+> **Nota sobre el handshake CAN 0x130:** es aditivo y no rompe compatibilidad. Si la trama se pierde en el bus, la secuencia continúa exactamente como antes — el módulo retardo hardware sigue cortando la alimentación con el mismo timing. La única diferencia funcional es que el STM32 entra en estado seguro de forma determinista ~3 s antes del corte físico de potencia, en lugar de hacerlo pasivamente al perder los 5 V.
 
 ### Apagado de emergencia STM32 (fallo seguridad)
 
