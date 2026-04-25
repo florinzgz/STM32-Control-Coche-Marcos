@@ -29,6 +29,11 @@ inline constexpr uint32_t CMD_THROTTLE          = 0x100;    // DLC 1, 50 ms
 inline constexpr uint32_t CMD_STEERING          = 0x101;    // DLC 2, 50 ms
 inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 2 (byte0=mode flags, byte1=gear), on-demand
 inline constexpr uint32_t CMD_LED               = 0x120;    // DLC 2 (byte0=front relay, byte1=rear relay), on-demand
+inline constexpr uint32_t CMD_SYSTEM_SHUTDOWN   = 0x130;    // DLC 0 or 1, on-demand
+                                                            // Pre-power-cut safe-state handshake.
+                                                            // Sent once when ignition key is turned OFF,
+                                                            // before the external delay relay cuts power.
+                                                            // Idempotent on the STM32 side. No ACK.
 
 // -------------------------------------------------------------------------
 // STM32 → ESP32  Command Acknowledgment (§3.5)

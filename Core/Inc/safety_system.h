@@ -257,6 +257,10 @@ void Safety_CheckRelayHealth(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);
 void Safety_PowerDown(void);
+void Safety_RequestShutdown(void);   /* Deterministic pre-power-cut safe state.
+                                       * Reuses Traction_EmergencyStop,
+                                       * Steering_Neutralize and Relay_PowerDown.
+                                       * Idempotent, non-blocking, no new logic. */
 void Safety_SetError(Safety_Error_t error);
 void Safety_ClearError(Safety_Error_t error);
 Safety_Error_t Safety_GetError(void);

@@ -2271,6 +2271,53 @@ void Safety_PowerDown(void)
     Relay_PowerDown();
 }
 
+/**
+ * @brief  Deterministic pre-power-cut safe state, requested by the ESP32
+ *         via CAN_ID_CMD_SYSTEM_SHUTDOWN (0x130) when the ignition key is
+ *         turned OFF, before the external delay relay physically removes
+ *         power.
+ *
+ * Reuses already-validated primitives — no duplicated shutdown logic:
+ *   - Traction_EmergencyStop() : zeroes all traction PWM, drops EN.
+ *   - Steering_Neutralize()    : zeroes steering PWM + eps_motor_effort,
+ *                                disables steering H-bridge.
+ *   - Relay_PowerDown()        : atomic BSRR → TRAC + DIR relays OFF.
+ *
+ * Idempotent: safe to call multiple times.  Non-blocking: no delays,
+ * no loops, no waits.  Does not alter the relay sequencer state machine
+ * beyond what Relay_PowerDown() already does.
+ *
+ * If the ESP32 never sends the frame, system behaviour is unchanged —
+ * the hardware delay-relay cutoff still works exactly as before.
+ *
+ * State is set to SYS_STATE_SAFE (not ERROR) so this is treated as a
+ * commanded safe stop, not an unrecoverable fault.
+ */
+void Safety_RequestShutdown(void)
+{
+    /* Cut all motor outputs first (deterministic, no current draw). */
+    Traction_EmergencyStop();
+    Steering_Neutralize();
+
+    /* Atomic BSRR-based relay shutdown — independent of sequencer state. */
+    Relay_PowerDown();
+
+    /* Mark the system as in a commanded safe state.  No further motion
+     * commands will be honoured (Safety_IsMotionAllowed gates on state).
+     * If we are already in SAFE/ERROR, leave the existing state alone
+     * to preserve any earlier diagnostic context.
+     *
+     * Threading note: this function is only invoked from the CAN dispatch
+     * inside CAN_ProcessMessages(), which runs in main-loop context (see
+     * main.c:304 / main.c:620) — never from an ISR.  All other writers
+     * of system_state (Safety_SetState, Safety_EmergencyStop, Safety_Init)
+     * also run in main-loop context, so a single-word write on Cortex-M4
+     * is safe here without an explicit critical section.                 */
+    if (system_state != SYS_STATE_SAFE && system_state != SYS_STATE_ERROR) {
+        system_state = SYS_STATE_SAFE;
+    }
+}
+
 /* ---- Error tracking ---------------------------------------------- */
 
 void Safety_SetError(Safety_Error_t error)
