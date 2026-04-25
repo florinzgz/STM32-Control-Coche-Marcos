@@ -1493,6 +1493,24 @@ void CAN_ProcessMessages(void) {
                 }
                 break;
 
+            case CAN_ID_CMD_SYSTEM_SHUTDOWN:
+                /* Deterministic pre-power-cut safe-state request from ESP32
+                 * (0x130).  Sent when the ignition key is turned OFF, before
+                 * the external delay relay physically removes power.
+                 *
+                 * Payload is empty or one byte (ignored).  The frame is
+                 * accepted unconditionally — even if msg_len == 0 — because
+                 * forcing the safe state is always a non-destructive action
+                 * and is idempotent (Safety_RequestShutdown is safe to call
+                 * multiple times).
+                 *
+                 * No ACK is sent: by the time this frame is received the
+                 * ESP32 is preparing for power loss and will not consume
+                 * the ACK.  Avoiding the ACK keeps the path entirely
+                 * non-blocking on the STM32 side.                        */
+                Safety_RequestShutdown();
+                break;
+
             case CAN_ID_CMD_SENSOR_MAP_TEMP:
                 /* DS18B20 physIdx→role mapping from ESP32 engineering menu.
                  *   DLC:    5 (one byte per physical sensor index 0-4)

@@ -28,6 +28,12 @@ extern "C" {
 #define CAN_ID_CMD_STEERING       0x101  // ESP32 → STM32 (50ms)
 #define CAN_ID_CMD_MODE           0x102  // ESP32 → STM32 (on-demand)
 #define CAN_ID_CMD_LED            0x120  // ESP32 → STM32 (on-demand) LED relay control
+#define CAN_ID_CMD_SYSTEM_SHUTDOWN 0x130 // ESP32 → STM32 (on-demand) pre-power-cut safe-state request
+                                          // Payload: empty or 1 byte (ignored).
+                                          // Idempotent. Reuses existing safety primitives;
+                                          // forces PWM=0, EN=LOW, relays OFF, state=SAFE.
+                                          // If the frame never arrives, behaviour is unchanged
+                                          // (hardware delay relay still cuts power).
 #define CAN_ID_STATUS_SPEED       0x200  // STM32 → ESP32 (100ms)
 #define CAN_ID_STATUS_CURRENT     0x201  // STM32 → ESP32 (100ms)
 #define CAN_ID_STATUS_TEMP        0x202  // STM32 → ESP32 (1000ms)

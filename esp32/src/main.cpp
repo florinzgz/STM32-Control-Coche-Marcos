@@ -332,6 +332,21 @@ static void sendLedCommand(bool front, bool rear) {
     ackBeginWait(can::CMD_LED & 0xFF);  // Low byte of 0x120 = 0x20
 }
 
+/// Send pre-power-cut safe-state request to STM32 via CAN 0x130.
+/// Called once on entry to SHUTTING_DOWN, before the external delay
+/// relay physically removes power.  The STM32 reuses existing primitives
+/// (Traction_EmergencyStop / Steering_Neutralize / Relay_PowerDown) to
+/// force PWM=0, EN=LOW, relays OFF.  No ACK is expected.  If the frame
+/// is lost on the bus, behaviour is unchanged — the hardware delay
+/// relay still cuts power exactly as before.
+static void sendSystemShutdown() {
+    CanFrame frame = {};
+    frame.identifier       = can::CMD_SYSTEM_SHUTDOWN;
+    frame.extd             = 0;
+    frame.data_length_code = 0;     // Empty payload (STM32 ignores any byte)
+    ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
+}
+
 /// Send gear change command to STM32 via CAN 0x102 (CMD_MODE).
 /// @param gear  Gear value (0=P, 1=R, 2=N, 3=D1, 4=D2)
 static void sendGearCommand(uint8_t gear) {
@@ -949,6 +964,16 @@ void loop() {
     // Farewell audio on shutdown
     if (power_mgr::getState() == power_mgr::PowerState::SHUTTING_DOWN &&
         !farewellPlayed) {
+        // Pre-power-cut safe-state handshake: tell the STM32 to enter a
+        // commanded safe state (PWM=0, EN=LOW, relays OFF) BEFORE the
+        // external delay relay physically removes power.  The 100 ms
+        // pause gives the STM32 a deterministic window to react before
+        // we continue with the existing shutdown sequence.  This does
+        // NOT alter SHUTDOWN_DELAY_MS, GPIO 41, or the LED-OFF below;
+        // if the frame is lost on the bus, behaviour is unchanged.
+        sendSystemShutdown();
+        delay(100);
+
         config_store::flush();  // Persist any unsaved changes before shutdown
         audio::play(audio::Sound::FAREWELL, audio::Priority::HI);
         farewellPlayed = true;
