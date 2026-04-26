@@ -703,6 +703,18 @@ La palanca de cambios usa un expansor de I/O **MCP23017** conectado por I2C al E
 | — | **3.3V** | VCC | Alimentación (3.3V) |
 | — | **GND** | GND + A0 + A1 + A2 | GND común + Dirección I2C = **0x20** |
 
+> ⚠️ **Condensadores de desacoplo obligatorios en VDD del MCP23017:** Montar en paralelo entre pin VDD (9) y VSS (10):
+> - **100 nF cerámico** — filtro de alta frecuencia (ruido MHz)
+> - **10 µF / 16V electrolítico** — reserva bulk frente a los picos de corriente del radio WiFi/BT del ESP32-S3 (200–400 mA en µs). Sin él, el rail 3.3V se hunde brevemente y el MCP23017 puede perder el ACK I²C, poniendo la palanca en PARK de forma espuria.
+>
+> ```
+> 3.3V ──┬──────┬── VDD (pin 9)
+>        │      │
+>      10µF   100nF
+>        │      │
+> GND ───┴──────┴── VSS (pin 10)
+> ```
+
 ### Conexiones de la palanca al MCP23017 Puerto A
 
 | Pin MCP23017 | Posición | Conexión |
