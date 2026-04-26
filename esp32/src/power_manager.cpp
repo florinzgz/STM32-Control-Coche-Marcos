@@ -57,18 +57,26 @@ void init() {
     // (1 channel of the 8-channel sensor isolation board). The optocoupler
     // inverts the signal:
     //   Key ON  (+12 V on input side, LED conducts) → collector pulled LOW.
-    //   Key OFF (no current through LED)            → collector floats HIGH
-    //                                                 via the module's
-    //                                                 onboard ~10 kΩ pull-up
-    //                                                 to 3.3 V.
-    // No internal pull is configured: the PC817 board's onboard pull-up to
-    // 3.3 V is the sole termination. While the 3.3 V rail is present (which
-    // it always is during normal operation, since GND/3.3 V are shared with
-    // the rest of the system) this guarantees a defined HIGH (= key OFF,
-    // safe default). If the 3.3 V rail itself were lost, the ESP32 would
-    // also lose power, so the floating condition is not an operational
-    // concern.
-    pinMode(PIN_IGNITION_SENSE, INPUT);
+    //   Key OFF (no current through LED)            → collector HIGH via the
+    //                                                 external pull-up resistor.
+    //
+    // The PC817 8-channel board used in this build has NO onboard pull-up on
+    // the output side (verified by measurement: open circuit between OUT and
+    // VCC with board disconnected). Two complementary measures are required:
+    //
+    //   1. Hardware (mandatory): solder a 10 kΩ ¼ W resistor between GPIO 40
+    //      and the ESP32 3.3 V rail. This provides a low-impedance, noise-
+    //      immune pull-up suitable for the automotive environment.
+    //
+    //   2. Firmware (safety net, this line): INPUT_PULLUP activates the
+    //      ESP32-S3 internal pull-up (~45 kΩ) so the line is never left
+    //      floating even if the external resistor is not yet fitted. Without
+    //      at least one pull-up the collector would float when the key is OFF,
+    //      causing random false-ON detection.
+    //
+    // Once the 10 kΩ external resistor is in place, both pull-ups operate in
+    // parallel (10 kΩ ‖ 45 kΩ ≈ 8.2 kΩ effective), which is acceptable.
+    pinMode(PIN_IGNITION_SENSE, INPUT_PULLUP);
     pinMode(PIN_POWER_HOLD, OUTPUT);
     digitalWrite(PIN_POWER_HOLD, LOW);
 

@@ -318,15 +318,18 @@ en el cable del sensor antes de la entrada de la placa.
 
 **Pull-up en el lado lógico (salida PC817 → STM32 EXTI):**
 
-El firmware configura los pines EXTI con `GPIO_PULLUP` (pull-up interno STM32 ≈ 40 kΩ).
-Esto es suficiente para el colector del PC817:
-- PC817 transistor ON → colector a GND → línea LOW → EXTI detecta LOW
-- PC817 transistor OFF → línea HIGH (vía 40 kΩ interno) → EXTI detecta HIGH ✅
+> **⚠️ VERIFICADO (medición con polímetro):** la placa PC817 de 8 canales utilizada en este proyecto **NO incluye pull-up onboard** en la salida (circuito abierto entre OUT y VCC con la placa desalimentada).
 
-Si la placa PC817 incluye pull-up externo en la salida (común en módulos industriales),
-deshabilitar el `GPIO_PULLUP` del firmware o usar la configuración `GPIO_NOPULL` y dejar
-actuar el pull-up de la placa. **Ambas opciones son válidas sin cambios de firmware
-funcionales.**
+Por tanto se requieren **pull-ups externos** en cada canal activo:
+
+- **STM32 (ruedas + centrado):** El firmware ya configura los pines EXTI con `GPIO_PULLUP` (pull-up interno STM32 ≈ 40 kΩ). Esto es aceptable para los canales del STM32 — el colector del PC817 tiene una carga definida y la lógica es correcta. Para mayor inmunidad al ruido se puede añadir opcionalmente un 10 kΩ externo entre cada pin STM32 y 3.3 V.
+
+- **ESP32-S3 (IGN_SENSE, GPIO 40):** El firmware usa `INPUT_PULLUP` (~45 kΩ interno). **Adicionalmente, soldar un 10 kΩ externo entre GPIO 40 y 3.3 V es obligatorio** para buena inmunidad en entorno automoción.
+
+| Canal activo PC817 | Pull-up lógico | Modo de operación |
+|---|---|---|
+| A1–A5 (ruedas + centrado → STM32) | `GPIO_PULLUP` interno STM32 ~40 kΩ ✅ | + 10 kΩ ext. opcional |
+| A7 (IGN_SENSE → GPIO 40 ESP32) | `INPUT_PULLUP` interno ESP32 ~45 kΩ + **10 kΩ ext. obligatorio** | Ver `power_manager.h` |
 
 ---
 
@@ -487,7 +490,7 @@ El firmware en `MX_TIM2_Init()` configura:
 
 El firmware en `MX_GPIO_Init()` configura:
 - `GPIO_MODE_IT_RISING` para PA0/PA1/PA2/PB15 — la polaridad se conserva a través del PC817 ✅
-- `GPIO_PULLUP` — el pull-up interno de 40 kΩ es suficiente para el colector del PC817 ✅
+- `GPIO_PULLUP` — pull-up interno de 40 kΩ es suficiente para los pines STM32 ✅ (la placa PC817 verificada no tiene pull-up onboard, así que el pull-up interno es el único activo)
 
 El debounce de 1 ms en `Wheel_IRQDebounced()` no queda afectado por el retardo de 4–6 µs
 del PC817. **Ningún cambio de firmware necesario.**

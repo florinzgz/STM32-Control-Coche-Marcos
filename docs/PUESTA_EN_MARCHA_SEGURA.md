@@ -303,7 +303,7 @@ Encoder CH_Z ──┐                   │
 | 4 | Sensores inductivos LJ12A3-4-Z/BX | NPN NO, 6-36V, para ruedas |
 | 1 | Sensor inductivo LJ12A3 | NPN NO, para centrado dirección |
 | 5 | Resistencia LED | **1 kΩ ¼ W** (lado sensor, en serie con el LED del PC817) |
-| 5 | Resistencia pull-up | **10 kΩ** a 3.3 V — **comprobar primero** si la placa PC817 ya la trae onboard antes de añadir externa |
+| 5 | Resistencia pull-up | **5× 10 kΩ ¼ W** — una por canal (PA0, PA1, PA2, PB15, PB5): entre cada pin STM32 y 3.3 V. **Obligatorias**: la placa PC817 verificada NO tiene pull-up onboard |
 
 > **Nota de diseño — por qué 1 kΩ y no 330 Ω:**
 > A 12 V, 330 Ω fuerza ~33 mA continuos por el LED del PC817 cuando el opto está conduciendo. Eso supera la corriente nominal del PC817 (típ. 20 mA) y degrada el CTR a largo plazo.
@@ -318,9 +318,9 @@ Encoder CH_Z ──┐                   │
 LADO SENSOR (12-24V)                 │  LADO STM32 (3.3V)
                                      │
 +12V_sensor ──┬──→ Marrón LJ12A3     │
-              │                      │       10 kΩ (onboard placa PC817)
-              └─→ 1 kΩ ──→ Pin 1     │  3.3V─┤
-                          (Ánodo)    │       │
+              │                      │  10 kΩ (externo, obligatorio — NO
+              └─→ 1 kΩ ──→ Pin 1     │  onboard)  3.3V─┤
+                          (Ánodo)    │                  │
                           PC817      │  Pin 4 (Colector) ──→ PAx / PBx (EXTI)
                                      │  PC817
 LJ12A3 Negro ─────────→ Pin 2        │  Pin 3 (Emisor) ──→ GND STM32
@@ -376,15 +376,15 @@ El firmware `power_manager.cpp` ya contempla esta inversión (`raw = (digitalRea
 | 1 | Resistencia limitadora LED | **1 kΩ ¼ W** — obligatoria por uso continuo |
 | 1 | Fusible en línea | **1 A rápido** entre ACC/IGN del bombín y la resistencia |
 | 1 | Cable apantallado o trenzado | 0.5 mm², desde la llave hasta el PC817 |
-| 0 | Resistencia pull-up | NO añadir si la placa PC817 ya trae onboard ~10 kΩ (verificar — ver más abajo) |
+| 1 | Resistencia pull-up | **1× 10 kΩ ¼ W** entre GPIO 40 y 3.3 V — **obligatoria**: la placa PC817 verificada NO tiene pull-up onboard |
 
 ### Circuito
 
 ```
 LADO 12 V VEHÍCULO                    │  LADO 3.3 V (común STM32 ↔ ESP32)
                                       │
-+12V IGNITION ──[1 A]── 1 kΩ ──→ Pin 1│        10 kΩ (onboard placa PC817)
-(llave)                       (Ánodo) │  3.3V ─┤
++12V IGNITION ──[1 A]── 1 kΩ ──→ Pin 1│  10 kΩ (externo, ver §pull-up)
+                              (Ánodo) │  3.3V ─┤
                                PC817  │        │
                                       │  Pin 4 (Colector) ──→ GPIO 40 ESP32
 GND_vehículo ──────────────→ Pin 2    │  PC817
@@ -393,12 +393,20 @@ GND_vehículo ──────────────→ Pin 2    │  PC817
 ─────────── BARRERA GALVÁNICA ────────│──────────────────────────────────────
 ```
 
-### Verificación de pull-up onboard (importante)
+### Verificación de pull-up onboard — **RESULTADO: NO HAY PULL-UP**
 
-Antes de conectar nada, **mide con polímetro entre el pin OUT del canal y el pin VCC** del lado salida de la placa PC817 (con la placa desalimentada):
+> **✅ Medición realizada.** Se midió con polímetro entre el pin OUT y el pin VCC del lado de salida de la placa PC817 (placa desalimentada) → **circuito abierto / infinito**. La placa **NO** tiene pull-up onboard en ningún canal.
 
-- **Lectura ≈ 10 kΩ** → la placa ya trae pull-up. **No añadas resistencia externa**, conecta OUT directamente a GPIO 40.
-- **Lectura > 1 MΩ / infinito** → la placa NO trae pull-up. Suelda **10 kΩ entre GPIO 40 y 3.3 V** (la mayoría de placas PC817 8ch comerciales sí lo traen, así que este caso es raro).
+**Acción obligatoria — doble pull-up (hardware + firmware):**
+
+| Medida | Qué | Dónde | Por qué |
+|---|---|---|---|
+| **Hardware (obligatorio)** | Soldar **10 kΩ ¼ W** entre GPIO 40 y pin 3.3 V del ESP32-S3 | En la PCB o en el propio cable | Pull-up bajo para señal limpia y buena inmunidad al ruido en entorno automoción |
+| **Firmware (red de seguridad)** | `pinMode(GPIO40, INPUT_PULLUP)` — ya en `power_manager.cpp` | Código | Previene flotante si el resistor externo no está aún montado o falla la conexión (~45 kΩ interno ESP32-S3) |
+
+Sin ninguno de los dos, la salida del colector del PC817 **flota** cuando la llave está OFF → lecturas erráticas → falsos arranques/apagados.
+
+> **Nota sobre pull-ups en todos los demás canales:** si los canales de ruedas y centrado de dirección usan la misma placa PC817 sin pull-up onboard, también necesitan 10 kΩ externos entre cada pin de salida y 3.3 V (5 resistencias adicionales: PA0, PA1, PA2, PB15, PB5). Verificar igualmente con polímetro.
 
 > Las placas PC817 de 8 canales (LU-PC817 y similares) **comparten una sola GND y una sola VCC en el lado de salida** para los 8 canales. Como GND_STM32 = GND_ESP32 (ya unidas por CAN/UART), el lado de salida del PC817 puede compartirse sin problema entre ambas MCUs. La barrera galvánica sigue intacta porque sólo separa el dominio +12 V del vehículo del dominio 3.3 V común.
 

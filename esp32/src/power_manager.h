@@ -8,18 +8,21 @@
 //
 // GPIO 40: Ignition key sense via PC817 optocoupler — INVERTED logic
 //          LOW  = key ON  (LED conducts → transistor saturated)
-//          HIGH = key OFF (LED off, line pulled up by PC817 board, ~10 kΩ)
+//          HIGH = key OFF (LED off, line pulled HIGH via pull-up)
+//          ⚠️ PC817 board has NO onboard pull-up (verified by measurement).
+//             Firmware uses INPUT_PULLUP (~45 kΩ internal) as safety net.
+//             External 10 kΩ from GPIO 40 to 3.3 V is MANDATORY (better
+//             noise immunity in automotive environment).
 // GPIO 41: Power hold output  (HIGH = request power stay on)
 //
-// External wiring (PC817 8-channel isolation board, 1 free channel):
-//   +12 V (ignition key) ── 1 kΩ ¼ W ──→ IN+ (LED anode) of PC817 channel
+// External wiring (PC817 8-channel isolation board, channel A7):
+//   +12 V (ignition key) ── 1 kΩ ¼ W ──→ IN+ (LED anode)   of PC817 ch A7
 //   GND  (vehicle)        ─────────────→ IN- (LED cathode)
-//   OUT  (collector)      ─────────────→ GPIO 40 (already pulled up to 3.3 V
-//                                          on the module by an onboard ~10 kΩ)
+//   OUT  (collector)      ─────────────→ GPIO 40
+//                            also ──→ 10 kΩ ──→ 3.3 V  ← solder externally
 //   GND  (3.3 V side)     ──── shared with ESP32 / STM32 GND
-// The 1 kΩ resistor (NOT the 330 Ω used for the LJ12A3 wheel sensors) is
-// mandatory for continuous-duty operation: at 12 V it limits LED current to
-// ~10.8 mA, well within the PC817 nominal 20 mA, preserving CTR over time.
+// The 1 kΩ input resistor (NOT 330 Ω) is required for continuous-duty:
+//   I_LED = (12 V − 1.2 V) / 1 kΩ ≈ 10.8 mA (below PC817 20 mA nominal).
 //
 // State machine:
 //   OFF → POWER_HOLD → STARTING → RUNNING → SHUTTING_DOWN → OFF
