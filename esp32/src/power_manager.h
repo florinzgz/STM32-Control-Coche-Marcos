@@ -6,8 +6,23 @@
 // configurable window after the ignition key is turned off, allowing
 // the audio system to play a farewell sound before final power-down.
 //
-// GPIO 40: Ignition key sense (HIGH = key ON, LOW = key OFF)
+// GPIO 40: Ignition key sense via PC817 optocoupler — INVERTED logic
+//          LOW  = key ON  (LED conducts → transistor saturated)
+//          HIGH = key OFF (LED off, line pulled HIGH via pull-up)
+//          ⚠️ PC817 board has NO onboard pull-up (verified by measurement).
+//             Firmware uses INPUT_PULLUP (~45 kΩ internal) as safety net.
+//             External 10 kΩ from GPIO 40 to 3.3 V is MANDATORY (better
+//             noise immunity in automotive environment).
 // GPIO 41: Power hold output  (HIGH = request power stay on)
+//
+// External wiring (PC817 8-channel isolation board, channel A7):
+//   +12 V (ignition key) ── 1 kΩ ¼ W ──→ IN+ (LED anode)   of PC817 ch A7
+//   GND  (vehicle)        ─────────────→ IN- (LED cathode)
+//   OUT  (collector)      ─────────────→ GPIO 40
+//                            also ──→ 10 kΩ ──→ 3.3 V  ← solder externally
+//   GND  (3.3 V side)     ──── shared with ESP32 / STM32 GND
+// The 1 kΩ input resistor (NOT 330 Ω) is required for continuous-duty:
+//   I_LED = (12 V − 1.2 V) / 1 kΩ ≈ 10.8 mA (below PC817 20 mA nominal).
 //
 // State machine:
 //   OFF → POWER_HOLD → STARTING → RUNNING → SHUTTING_DOWN → OFF

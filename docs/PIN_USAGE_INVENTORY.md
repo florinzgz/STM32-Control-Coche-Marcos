@@ -413,7 +413,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 | Señal | GPIO | Función | Lógica |
 |-------|------|---------|--------|
-| Ignition Sense | **GPIO40** | Llave de contacto (input, PULLDOWN) | HIGH = contacto ON |
+| Ignition Sense | **GPIO40** | Llave de contacto via PC817 opto (input, INPUT_PULLUP) | LOW = contacto ON (PC817 invierte) |
 | Power Hold | **GPIO41** | Mantiene alimentación (output) | HIGH = mantener encendido |
 | | | **Subtotal:** | **2 pines** |
 
@@ -454,7 +454,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 12 | GPIO21 | Panel táctil | TOUCH_CS (chip select touch) |
 | 13 | GPIO38 | Display TFT | RST (Reset display) |
 | 14 | GPIO39 | Display TFT | DC (Data/Command) |
-| 15 | GPIO40 | Encendido | Ignition Key Sense (input, PULLDOWN) |
+| 15 | GPIO40 | Encendido | Ignition Key Sense via PC817 (input, INPUT_PULLUP, LOW=ON) |
 | 16 | GPIO41 | Encendido | Power Hold Output (active HIGH) |
 | 17 | GPIO42 | Display TFT | BL (Backlight) |
 | 18 | GPIO43 | DFPlayer Mini | UART2 TX (comandos audio) |

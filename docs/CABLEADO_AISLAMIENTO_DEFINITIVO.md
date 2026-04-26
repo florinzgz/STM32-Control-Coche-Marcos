@@ -189,7 +189,7 @@ Sección 11 para usos potenciales. **No conectar por ahora.**
 | **A4** | WHEEL_RR | PB15 | EXTI15 | LJ12A3 cubo rueda RR |
 | **A5** | STEER_CENTER | PB5 | EXTI5 | LJ12A3 cremallera dirección |
 | **A6** | ENC_Z | PB4 | EXTI4 *(inactivo)* | E6B2-CWZ6C canal Z |
-| A7 | *(libre)* | — | — | Reservado |
+| **A7** | **IGN_SENSE** | **GPIO 40 ESP32-S3** | **GPIO INPUT (lógica invertida)** | **Llave de contacto +12 V (ACC/IGN)** |
 | A8 | *(libre)* | — | — | Reservado |
 
 ---
@@ -232,6 +232,7 @@ Tabla completa de todas las señales aisladas, lista para ejecutar en taller.
 | 8 | **ENC_Z** | E6B2-CWZ6C salida Z (NPN OC, 5–24 V) | PB4 / EXTI4 *(†)* | **PC817** | Placa-A, canal A6 | VCC_encoder dominio | 3.3 V STM32 | < 50 Hz; pulso 41.7 µs >> 6 µs PC817; EXTI no activo en firmware actual |
 | 9 | **CAN_TX** | STM32G474RE PA12 (FDCAN1_TX) | PA12 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
 | 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PA11 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
+| 11 | **IGN_SENSE** | Bombín de llave (línea ACC/IGN +12 V) | **GPIO 40 ESP32-S3** | **PC817** | Placa-A, canal A7 | +12 V vehículo + GND chasis | 3.3 V (común STM32 ↔ ESP32) | Aislar +12 V automoción del 3.3 V; uso continuo → R_LED = **1 kΩ** (no 330 Ω); lógica invertida (LOW = llave ON), ya contemplada en `power_manager.cpp` |
 
 *(†) ENC_Z: no activo en el firmware actual. Requiere configurar EXTI4 y añadir ISR cuando
 se decida activar. Ver Sección 10.5.*
@@ -291,8 +292,8 @@ de la resistencia de la placa antes de conectar. Configuración típica de módu
 
   VCC_sensor ─── R_placa ──────────── Ánodo LED PC817
                  (resistencia        │
-                 de la placa)        │           Colector ──── VCC_3.3V (pull-up de la placa
-                                     │                         o pull-up interno STM32)
+                 de la placa)        │           Colector ──── VCC_3.3V (pull-up interno STM32
+                                     │                         GPIO_PULLUP ~40 kΩ)
   Sensor LJ12A3                      │
   salida NPN OC ─────────────────── Cátodo LED
                                      │
@@ -317,15 +318,18 @@ en el cable del sensor antes de la entrada de la placa.
 
 **Pull-up en el lado lógico (salida PC817 → STM32 EXTI):**
 
-El firmware configura los pines EXTI con `GPIO_PULLUP` (pull-up interno STM32 ≈ 40 kΩ).
-Esto es suficiente para el colector del PC817:
-- PC817 transistor ON → colector a GND → línea LOW → EXTI detecta LOW
-- PC817 transistor OFF → línea HIGH (vía 40 kΩ interno) → EXTI detecta HIGH ✅
+> **⚠️ VERIFICADO (medición con polímetro):** la placa PC817 de 8 canales utilizada en este proyecto **NO incluye pull-up onboard** en la salida (circuito abierto entre OUT y VCC con la placa desalimentada).
 
-Si la placa PC817 incluye pull-up externo en la salida (común en módulos industriales),
-deshabilitar el `GPIO_PULLUP` del firmware o usar la configuración `GPIO_NOPULL` y dejar
-actuar el pull-up de la placa. **Ambas opciones son válidas sin cambios de firmware
-funcionales.**
+Por tanto se requieren **pull-ups externos** en cada canal activo:
+
+- **STM32 (ruedas + centrado):** El firmware ya configura los pines EXTI con `GPIO_PULLUP` (pull-up interno STM32 ≈ 40 kΩ). Esto es aceptable para los canales del STM32 — el colector del PC817 tiene una carga definida y la lógica es correcta. Para mayor inmunidad al ruido se puede añadir opcionalmente un 10 kΩ externo entre cada pin STM32 y 3.3 V.
+
+- **ESP32-S3 (IGN_SENSE, GPIO 40):** El firmware usa `INPUT_PULLUP` (~45 kΩ interno). **Adicionalmente, soldar un 10 kΩ externo entre GPIO 40 y 3.3 V es obligatorio** para buena inmunidad en entorno automoción.
+
+| Canal activo PC817 | Pull-up lógico | Modo de operación |
+|---|---|---|
+| A1–A5 (ruedas + centrado → STM32) | `GPIO_PULLUP` interno STM32 ~40 kΩ ✅ | + 10 kΩ ext. opcional |
+| A7 (IGN_SENSE → GPIO 40 ESP32) | `INPUT_PULLUP` interno ESP32 ~45 kΩ + **10 kΩ ext. obligatorio** | Ver `power_manager.h` |
 
 ---
 
@@ -486,7 +490,7 @@ El firmware en `MX_TIM2_Init()` configura:
 
 El firmware en `MX_GPIO_Init()` configura:
 - `GPIO_MODE_IT_RISING` para PA0/PA1/PA2/PB15 — la polaridad se conserva a través del PC817 ✅
-- `GPIO_PULLUP` — el pull-up interno de 40 kΩ es suficiente para el colector del PC817 ✅
+- `GPIO_PULLUP` — pull-up interno de 40 kΩ es suficiente para los pines STM32 ✅ (la placa PC817 verificada no tiene pull-up onboard, así que el pull-up interno es el único activo)
 
 El debounce de 1 ms en `Wheel_IRQDebounced()` no queda afectado por el retardo de 4–6 µs
 del PC817. **Ningún cambio de firmware necesario.**
