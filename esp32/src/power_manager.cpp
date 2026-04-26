@@ -31,8 +31,9 @@ static unsigned long stateEntryMs = 0;
 // -------------------------------------------------------------------------
 static bool readKeyDebounced() {
     // PC817 optocoupler inverts the signal: collector is pulled HIGH by the
-    // module's onboard pull-up when the LED is OFF (key OFF), and is pulled
-    // LOW when the LED conducts (key ON / +12V on input side).
+    // external 10 kΩ pull-up (+ INPUT_PULLUP ~45 kΩ internal) when the LED
+    // is OFF (key OFF), and is pulled LOW when the LED conducts (key ON / +12V
+    // on input side). The PC817 board has NO onboard pull-up (verified).
     bool raw = (digitalRead(PIN_IGNITION_SENSE) == LOW);
     unsigned long now = millis();
 

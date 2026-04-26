@@ -292,8 +292,8 @@ de la resistencia de la placa antes de conectar. Configuración típica de módu
 
   VCC_sensor ─── R_placa ──────────── Ánodo LED PC817
                  (resistencia        │
-                 de la placa)        │           Colector ──── VCC_3.3V (pull-up de la placa
-                                     │                         o pull-up interno STM32)
+                 de la placa)        │           Colector ──── VCC_3.3V (pull-up interno STM32
+                                     │                         GPIO_PULLUP ~40 kΩ)
   Sensor LJ12A3                      │
   salida NPN OC ─────────────────── Cátodo LED
                                      │

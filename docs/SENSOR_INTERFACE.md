@@ -740,68 +740,57 @@ Interruptor simple que selecciona el modo de tracción. Gestionado por el ESP32-
 ## 10. Sensor de Contacto (Ignition Sense)
 
 Entrada digital que detecta si la llave de contacto está en posición ON. Gestionada por el ESP32-S3.
+La señal llega **aislada galvánicamente** a través del canal A7 de la placa PC817 de 8 canales.
 
 ### Tabla de pines
 
 | Señal | Pin ESP32-S3 | Configuración | Nota |
 |-------|-------------|---------------|------|
-| Contacto | GPIO40 | INPUT_PULLDOWN | HIGH = Llave ON |
+| Contacto | GPIO40 | INPUT_PULLUP | LOW = Llave ON (PC817 invierte la señal) |
 
-### Resistencias y protección
+### Lógica y pull-up
 
-- **Pull-down interno:** activado en el ESP32-S3 (~45 kΩ a GND). Cuando la llave está desconectada, GPIO40 = LOW.
-- **Señal de contacto:** la llave de contacto del vehículo proporciona 3.3 V (o señal regulada a 3.3 V desde un divisor resistivo si la fuente es 12/24 V).
-- **Si la señal de contacto proviene de 12 V:** usar divisor 10 kΩ + 4.7 kΩ (ratio 4.7/14.7 = 0.32 → 12 V × 0.32 = 3.84 V; ajustar a 10 kΩ + 3.9 kΩ para 3.36 V) o regulador LDO.
-- **Diodo de protección:** Zener de 3.3 V en GPIO40 a GND (cátodo a GPIO40) para proteger contra sobretensión del circuito de ignición.
+El PC817 **invierte** la señal del vehículo (+12 V ACC):
+
+| Estado llave | LED PC817 | GPIO 40 |
+|---|---|---|
+| ON (+12 V en entrada) | Conduce → colector a GND | **LOW** |
+| OFF (sin corriente) | Apagado → colector flotante | **HIGH** (pull-up externo 10 kΩ + INPUT_PULLUP ~45 kΩ) |
+
+> ⚠️ **La placa PC817 NO tiene pull-up onboard** (verificado por medición). Son necesarios:
+> - **Pull-up externo 10 kΩ ¼ W** entre GPIO 40 y 3.3 V (soldar en PCB — obligatorio)
+> - **INPUT_PULLUP** en firmware (~45 kΩ interno ESP32-S3 — ya configurado, red de seguridad)
+
+### Resistencia LED de entrada (lado 12 V)
+
+- **1 kΩ ¼ W** entre +12 V ACC y ánodo del PC817:
+  `I_LED = (12 V − 1.2 V) / 1 kΩ ≈ 10.8 mA` → seguro (<20 mA, ciclo de trabajo ~100%)
+- **NO usar 330 Ω** (33 mA continuo → excede corriente nominal → degrada CTR)
 
 ### Alimentación
 
-- La señal de contacto viene del circuito de llave del vehículo.
-- No alimenta nada; es solo una señal de lectura.
-
-### Motivo técnico
-
-- **INPUT_PULLDOWN (no pull-up):** semántica natural — sin llave la entrada está en LOW (sistema apagado); con llave se suministra un HIGH activo.
-- **GPIO40:** pin disponible en el ESP32-S3 sin conflicto con otros periféricos asignados (pantalla, CAN, I2C).
-- **Detección por ESP32-S3 (no STM32):** el ESP32-S3 gestiona el HMI y la secuencia de encendido; necesita saber primero si hay contacto para inicializar la pantalla y comunicarse con el STM32.
+- La señal de contacto viene del circuito ACC (+12 V cuando llave ON).
+- El lado de salida del PC817 usa 3.3 V del ESP32/STM32 (compartido).
 
 ### Qué ocurre si falla
 
-- **Cable roto (pin siempre LOW):** el sistema no arranca (fail-safe). El ESP32-S3 interpreta como llave OFF y no habilita la secuencia de encendido.
-- **Cortocircuito a alto (pin siempre HIGH):** el sistema cree que la llave está siempre puesta. El apagado dependerá de un timeout o de la lógica de parada por CAN desde el STM32.
-- **Ruido en la línea de ignición:** picos de tensión del arranque del motor → el Zener de 3.3 V y un filtro RC (10 kΩ + 100 nF, fc ~159 Hz) protegen el GPIO y eliminan transitorios.
+- **Cable roto / desconectado (pin en HIGH):** el firmware ve llave OFF → SHUTTING_DOWN (fail-safe seguro).
+- **Cortocircuito a GND (pin siempre LOW):** el sistema cree que la llave está siempre puesta. El apagado depende de timeout o lógica CAN del STM32.
+- **Ruido en la línea de ignición:** el debounce de 50 ms en `power_manager.cpp` absorbe transitorios mecánicos. Añadir condensador 100 nF entre GPIO 40 y GND para filtrar picos EMI del arranque.
 
 ### Esquema de conexión
 
 ```
-  Circuito de llave del vehículo
-         │
-         │  12V (cuando llave ON)
-         │
-      10kΩ (divisor)
-         │
-  ESP32 GPIO40 ──────────┤
-  (INPUT_PULLDOWN)        │
-                       3.9kΩ (a GND)
-                          │
-                         GND
+  +12V ACC (llave ON) ──[1 A]── 1 kΩ ──→ IN+ (ánodo LED PC817 ch A7)
+  GND vehículo        ─────────────────→ IN- (cátodo LED)
 
-  Protección:
-  GPIO40 ──┤Zener 3.3V├── GND
-            (cátodo a GPIO40)
+  3.3V ──[10 kΩ ext.]──┬──→ OUT (colector PC817) ──→ GPIO 40 (INPUT_PULLUP)
+                       │
+                      GND (3.3V ESP32)
 
-  Filtro anti-transitorio:
-  Divisor ──┤10kΩ├──┬── GPIO40
-                    │
-                  100nF
-                    │
-                   GND
-
-  HIGH = Llave ON (~3.36V)
-  LOW  = Llave OFF (0V, pull-down)
+  LOW  = Llave ON
+  HIGH = Llave OFF (estado seguro)
 ```
-
----
 
 ## Resumen de buses y pines
 
@@ -830,7 +819,7 @@ Entrada digital que detecta si la llave de contacto está en posición ON. Gesti
 | GPIO8 | I2C SDA | MCP23017 (shifter) |
 | GPIO9 | I2C SCL | MCP23017 (shifter) |
 | GPIO15 | Entrada pull-up | Interruptor 2WD/4WD |
-| GPIO40 | Entrada pull-down | Sensor de contacto |
+| GPIO40 | Entrada INPUT_PULLUP | Sensor de contacto via PC817 (LOW=ON) |
 
 ### Dispositivos I2C
 

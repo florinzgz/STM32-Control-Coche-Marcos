@@ -64,41 +64,40 @@ El sistema usa cuatro módulos de relé que trabajan juntos:
 GPIO 40 (`IGNITION_SENSE`) informa al firmware del ESP32 si la llave está ON u OFF.
 Cuando detecta OFF, el firmware reproduce el audio de despedida y guarda config en flash.
 
-> `power_manager.cpp:56` — `pinMode(PIN_IGNITION_SENSE, INPUT_PULLDOWN)`
-> `power_manager.h:26` — `PIN_IGNITION_SENSE = 40`
+> `power_manager.cpp` — `pinMode(PIN_IGNITION_SENSE, INPUT_PULLUP)`
+> `power_manager.h`   — `PIN_IGNITION_SENSE = 40`
 
-### 2.2 Opciones para GPIO 40 del ESP32-S3
+### 2.2 Opción implementada — Canal A7 de la placa PC817 de 8 canales
 
-| Opción | Piezas | ¿Audio despedida? |
-|--------|--------|-------------------|
-| **A** — R1 (33 kΩ) + R2 (10 kΩ) entre ACC y GND | 2 resistencias €0.05 | ✅ Sí — **recomendada** |
-| **B** — Puente 3.3V → GPIO40 | Ninguna | ❌ Siempre ve "llave ON" |
-| **C** — Módulo opto 1 canal adicional | ~€0.80 | ✅ Sí — aislamiento total |
+Se utiliza un canal libre (A7) de la placa PC817 de 8 canales que ya está montada en el
+sistema para los sensores de rueda. **No se necesita ningún módulo adicional.**
 
-### 2.3 Opción A — R1+R2 (más simple)
+La señal de la llave (+12 V ACC) pasa por el optoacoplador → el colector del PC817 se
+conecta a GPIO 40. La lógica es **INVERTIDA** respecto a un divisor resistivo directo:
+
+| Llave | LED PC817 | Fototransistor | GPIO 40 | Estado firmware |
+|-------|-----------|----------------|---------|-----------------|
+| **ON** | Conduce (10.8 mA) | Saturado → colector a GND | **LOW** | → RUNNING |
+| **OFF** | Apagado | Abierto | **HIGH** (pull-up externo 10 kΩ + INPUT_PULLUP ~45 kΩ) | → SHUTTING_DOWN |
+
+> ⚠️ **La placa PC817 usada NO tiene pull-up onboard** (verificado con polímetro: circuito abierto).
+> Son obligatorios dos pull-ups: **10 kΩ externo** entre GPIO 40 y 3.3 V (soldar en PCB) +
+> **INPUT_PULLUP** en firmware (ya configurado en `power_manager.cpp` — red de seguridad ~45 kΩ).
+
+### 2.3 Cableado GPIO 40 via PC817 (canal A7)
 
 ```
-  Batería 12 V (+)
-       │
-       ├──────────────────────────────────► Trigger (X1) módulo retardo
-       │
-  ┌────┴─────┐
-  │  LLAVE   │  SPST — ON=cerrado, OFF=abierto
-  └────┬─────┘
-       │  ACC 12 V (solo con llave ON)
-  ┌────┴────┐
-  │ R1 33kΩ │  ¼ W
-  └────┬────┘
-       ├──────────────────────────────────► GPIO 40 ESP32-S3 (IGNITION_SENSE)
-  ┌────┴────┐
-  │ R2 10kΩ │  ¼ W
-  └────┬────┘
-      GND ──────────────────────────────► GND ESP32-S3
+  +12V ACC (llave ON) ──[1 A]── 1 kΩ ──→ IN+ (ánodo LED)
+  GND vehículo        ─────────────────→ IN- (cátodo LED)
+
+                                          3.3V ──[10 kΩ ext.]──┐
+                                          OUT (colector) ───────┤──→ GPIO 40
+                                          GND (3.3V side) ──────────→ GND ESP32
 ```
 
-`V_GPIO40 = 12V × 10k / (33k+10k) = 2.79 V` → seguro y superior al umbral HIGH (2.48 V)
-
----
+- **Resistencia serie LED: 1 kΩ** (no 330 Ω):
+  `I_LED = (12 V − 1.2 V) / 1 kΩ = 10.8 mA` ← seguro (<20 mA nominal PC817, ciclo de trabajo ~100%)
+- **Pull-up externo 10 kΩ ¼ W**: soldar entre GPIO 40 y pin 3.3 V del ESP32 — **obligatorio**
 
 ## 3. Módulo Relé con Retardo Hardware (alimentación)
 
@@ -119,10 +118,10 @@ Funciona 100 % en hardware, sin código.
   NC  ──────────────────────────► Sin conectar
 ```
 
-| Situación | Módulo retardo | GPIO 40 (con R1+R2) |
+| Situación | Módulo retardo | GPIO 40 (via PC817) |
 |-----------|---------------|---------------------|
-| Llave ON | Trigger 12 V → relé cierra → 5V llega a ESP32+STM32 | HIGH → RUNNING |
-| Llave OFF | Trigger 0 V → cuenta atrás T seg | LOW → SHUTTING_DOWN |
+| Llave ON | Trigger 12 V → relé cierra → 5V llega a ESP32+STM32 | LOW → RUNNING |
+| Llave OFF | Trigger 0 V → cuenta atrás T seg | HIGH → SHUTTING_DOWN |
 | Durante T seg | Relé sigue cerrado | ESP32 despedida + guarda flash |
 | Pasados T seg | Relé abre → alimentación cortada | ESP32 se apaga |
 

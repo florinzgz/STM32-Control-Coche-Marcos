@@ -363,7 +363,7 @@ El PC817 invierte la señal:
 
 | Estado de la llave | LED PC817 | Fototransistor | GPIO 40 ESP32 |
 |---|---|---|---|
-| **OFF** | Apagado | Abierto | **HIGH** (pull-up onboard a 3.3 V) |
+| **OFF** | Apagado | Abierto | **HIGH** (pull-up externo 10 kΩ + INPUT_PULLUP ~45 kΩ) |
 | **ON**  | Conduce | Saturado | **LOW** |
 
 El firmware `power_manager.cpp` ya contempla esta inversión (`raw = (digitalRead == LOW)`). **No tocar** el firmware salvo si se cambiase la topología del aislamiento.
