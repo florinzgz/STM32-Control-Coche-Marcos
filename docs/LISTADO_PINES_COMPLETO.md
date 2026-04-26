@@ -315,22 +315,26 @@
 
 | Pin LQFP | GPIO | Timer/EXTI | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 50 | PA15 | TIM2_CH1 | ENC_A | Encoder canal A (cable blanco) | Adaptador de nivel 5 V → 3.3 V (divisor o level shifter) |
-| 55 | PB3 | TIM2_CH2 | ENC_B | Encoder canal B (cable negro) | Adaptador de nivel 5 V → 3.3 V |
-| 56 | PB4 | EXTI4 | ENC_Z | Encoder pulso índice Z (cable naranja) | Adaptador de nivel 5 V → 3.3 V |
+| 50 | PA15 | TIM2_CH1 | ENC_A | TXS0108E A1 → Encoder A (cable negro) | TXS0108E (5V→3.3V) |
+| 55 | PB3 | TIM2_CH2 | ENC_B | TXS0108E A2 → Encoder B (cable blanco) | TXS0108E (5V→3.3V) |
+| 56 | PB4 | EXTI4 | ENC_Z | TXS0108E A3 → Encoder Z (cable naranja) | TXS0108E (5V→3.3V) |
 
-**Componentes necesarios (adaptador de nivel por canal A, B, Z):**
+**Componentes necesarios (level-shifter TXS0108E):**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| R1 (divisor) | 10 kΩ | Entre señal encoder (5 V) y punto medio | Divisor 5 V → 3.3 V |
-| R2 (divisor) | 20 kΩ | Entre punto medio y GND | Divisor 5 V → 3.3 V |
+| TXS0108E | CI o módulo breakout | Entre encoder y STM32 | Convierte 5V push-pull → 3.3V (canales A, B, Z) |
+| C (desacoplo VA) | 100 nF cerámico | Junto al TXS0108E, VA–GND | Estabilidad lado 3.3V |
+| C (desacoplo VB) | 100 nF cerámico | Junto al TXS0108E, VB–GND | Estabilidad lado 5V |
+| C (bulk encoder) | 10 µF electrolítico | Línea +5V del encoder | Filtro bulk |
 
-> ⚠️ El encoder E6B2 tiene salida 5 V (open-collector NPN). Conectar 5 V directo al STM32 puede dañar los pines.
+> ⚠️ El encoder E6B2-CWZ6C opera a 5 V. Conectar 5 V directamente al STM32 puede dañar los pines. Usar **TXS0108E** como level-shifter (no divisores resistivos — introducen impedancia y deforman los flancos).
+>
+> ℹ️ El E6B2-CWZ**6C** tiene salida **push-pull (voltage output)**, no NPN open-collector. **No se necesitan pull-ups.** Ver `docs/ENCODER_WIRING_TXS0108E.md`.
 
 **Alimentación encoder:**
-- Cable rojo → 5 V (NO conectar a 3.3 V)
-- Cable azul (shield/0V) → GND
+- Cable marrón → +5 V (NO conectar a 3.3 V)
+- Cable azul → GND (masa común)
 
 ---
 

@@ -224,16 +224,19 @@
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, open-collector NPN, cable de 1–2 m | Omron o compatible |
-| 3 | Optoacoplador 6N137 | High-speed (10 Mbps, 75–120 ns) | Uno por canal (A, B, Z); **no usar PC817** (demasiado lento para el encoder a alta velocidad) |
-| 3 | Resistencia LED 6N137 | **220 Ω / ¼W** | En serie con el ánodo del LED del 6N137 |
-| 3 | Resistencia pull-up salida 6N137 | **1 kΩ / ¼W** | Entre pin Vo (pin 6) del 6N137 y 3.3V; activa la salida open-collector |
-| 3 | Cable apantallado | 28 AWG apantallado, ≥ 30 cm | Del 6N137 al STM32 (PA15, PB3, PB4); separado de los cables de potencia |
+| 1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, **push-pull (voltage output)**, cable de 1–2 m | Omron o compatible |
+| 1 | Level-shifter | **TXS0108E** (8 canales, 1.2–3.6 V / 1.65–5.5 V) | Módulo breakout o CI SOIC-20; convierte 5V→3.3V para los 3 canales A, B, Z |
+| 2 | Condensador cerámico 100 nF | X7R / 10V | Desacoplo VA y VB del TXS0108E (uno junto a cada rail) |
+| 1 | Condensador electrolítico 10 µF | 10V | Bulk en línea 5V del encoder |
+| 1 | Ferrita SMD | 100 Ω @ 100 MHz | En serie con +5V del encoder (p.ej. BLM18AG121SN1) — recomendable en entorno con motores |
+| 1 | Cable apantallado | 28 AWG apantallado, ≥ 30 cm | Del TXS0108E al STM32 (PA15, PB3, PB4); separado de los cables de potencia |
 | 1 | Fuente 5V | Existente en el sistema | Alimentación del encoder (VCC marrón) |
 
-> **⚠️ Crítico:** La señal del encoder es de 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. El 6N137 proporciona tanto el aislamiento galvánico como el level shifting. El PC817 no es válido aquí: su retardo de 4–6 µs provoca pérdida de flancos a alta velocidad.
+> **⚠️ Crítico:** La señal del encoder es de 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. El TXS0108E proporciona el level shifting de 5V → 3.3V de forma transparente.
 >
-> **⚠️ Los transistores del inventario (2N2222, BC337, 2N3904, etc.) y los diodos zener (1N4728~1N4737) NO son válidos como sustitutos** para la interfaz del encoder. El nivel de señal 5V→3.3V del encoder en cuadratura exige componentes con retardo de propagación simétrico y bajo (<120 ns) — los transistores TO-92 genéricos no garantizan esto y corromperían el conteo. Se **deben usar** los 6N137 (o BSS138 como alternativa sin aislamiento).
+> **ℹ️ Sin pull-up:** El E6B2-CWZ**6C** tiene salida **push-pull**, no NPN open-collector. No se necesitan resistencias pull-up en ningún lado. La salida activa fuerza el nivel HIGH o LOW en todo momento.
+>
+> **Ver esquema completo en:** `docs/ENCODER_WIRING_TXS0108E.md`
 
 ---
 
@@ -466,8 +469,8 @@
 | 2 | R_I2C | **4.7 kΩ** | ¼W | Pull-up I2C (PB6, PB7) |
 | 2 | R_I2C_ESP | **4.7 kΩ** | ¼W | Pull-up I2C ESP32 (GPIO8, GPIO9 para MCP23017) |
 | 1 | R_OW | **4.7 kΩ** | ¼W | Pull-up OneWire (PB0) |
-| 3 | R_6N137_IF | **220 Ω** | ¼W | Serie LED del 6N137 encoder (canales A, B, Z) |
-| 3 | R_6N137_PU | **1 kΩ** | ¼W | Pull-up salida Vo del 6N137 |
+| 3 | R_6N137_IF | ~~220 Ω~~ — **N/A** | — | ~~Serie LED del 6N137 encoder~~ → sustituido por TXS0108E |
+| 3 | R_6N137_PU | ~~1 kΩ~~ — **N/A** | — | ~~Pull-up salida 6N137~~ → sustituido por TXS0108E |
 | 4 | R_PC817_IF | **820 Ω** | ¼W | Serie LED del PC817 (sensores velocidad + centrado) |
 | 5 | R_MOSFET_PD | **10 kΩ** | ¼W | Pull-down gate MOSFET relé |
 | 2 | R_CAN | **120 Ω** | ¼W | Terminación CAN (extremos del bus) |
@@ -488,7 +491,7 @@
 | 2 | TVS_CAN | TVS diodo bus CAN | PESD2CAN |
 | 5 | TVS_B+1–5 | TVS diodo B+ BTS7960 (opcional) | SMBJ30A (30V) |
 | 1 | Q_ANTI | MOSFET protección antipolarity | P-channel ≥ 40V, ≥ 80A |
-| 3 | OPT_ENC1–3 | Optoacoplador encoder | 6N137 |
+| 1 | U_TXS0108E | Level-shifter encoder | TXS0108E (sustituye a los 3× 6N137) |
 | 5 | OPT_WS1–5 | Optoacoplador sensores | PC817 |
 
 ### Resistencias shunt

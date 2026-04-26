@@ -2,7 +2,7 @@
 
 > **Fecha:** 2026-02-15  
 > **Tipo:** Auditoría de solo lectura — sin cambios en el código  
-> **Encoder:** Omron E6B2-CWZ6C (1200 PPR, NPN open-collector)  
+> **Encoder:** Omron E6B2-CWZ6C (1200 PPR, salida push-pull / voltage output)  
 > **MCU:** STM32G474RETx (Cortex-M4, 170 MHz)
 
 ---
@@ -115,7 +115,7 @@ El modo `TIM_ENCODERMODE_TI12` (Encoder Mode 3) cuenta en **ambos flancos de amb
 
 ### Observaciones sobre pull-up
 
-Los pines PA15 y PB3 están configurados como `GPIO_NOPULL`. El encoder E6B2-CWZ6C tiene salida NPN open-collector, por lo que **requiere resistencias pull-up externas** en la PCB. El firmware no proporciona pull-up interno.
+Los pines PA15 y PB3 están configurados como `GPIO_NOPULL`. El encoder E6B2-CWZ6C tiene salida **push-pull (voltage output)**, por lo que **no requiere resistencias pull-up externas**: el driver activo del encoder define el nivel en todo momento (HIGH = 5 V / LOW = 0 V a través del TXS0108E → 3.3 V / 0 V al STM32). La ausencia de pull-up interno en el firmware es correcta. Ver `docs/ENCODER_WIRING_TXS0108E.md` para el esquema completo de conexión.
 
 ---
 
@@ -269,8 +269,8 @@ Los filtros de input capture del TIM2 están configurados con valor **6** en amb
 
 ```c
 // main.c:380-384
-enc.IC1Filter    = 6;  /* Digital filter: 6 × fDTS rejects noise from
-                        * NPN open-collector outputs (E6B2-CWZ6C).
+enc.IC1Filter    = 6;  /* Digital filter: 6 × fDTS rejects glitches from
+                        * push-pull outputs (E6B2-CWZ6C via TXS0108E).
                         * At 170 MHz ≈ 35 ns per sample → ~210 ns
                         * glitch rejection.  Sufficient for 1200 PPR
                         * at typical steering rates.                */
@@ -491,11 +491,11 @@ float dt = (float)(now - last_time) / 1000.0f;
 
 El impacto es limitado porque el PID es proporcional puro (Kp=0.09, Ki=0, Kd=0) — sin término integral ni derivativo que amplifiquen el jitter temporal.
 
-### R6: Falta de pull-up interno — Riesgo MEDIO
+### R6: ~~Falta de pull-up interno~~ — Riesgo ELIMINADO ✅
 
-Los pines PA15 y PB3 tienen `GPIO_NOPULL` (`stm32g4xx_hal_msp.c:155,162`). El E6B2-CWZ6C tiene salida NPN open-collector que **requiere** pull-up. Si las resistencias pull-up externas no están en la PCB o se desconectan, las señales flotarán y el encoder contará erróneamente.
+~~Los pines PA15 y PB3 tienen `GPIO_NOPULL`. El E6B2-CWZ6C tiene salida NPN open-collector que requiere pull-up.~~
 
-El filtro IC (valor 6) mitiga parcialmente el ruido, pero no sustituye un pull-up adecuado.
+**Corrección (2026-04-26):** El E6B2-CWZ**6C** tiene salida **push-pull (voltage output)**, no NPN open-collector. El driver activo define el nivel HIGH y LOW en todo momento a través del TXS0108E. `GPIO_NOPULL` es correcto: no se necesitan pull-ups externas. Este riesgo no aplica. Ver `docs/ENCODER_WIRING_TXS0108E.md`.
 
 ### R7: Canal Z no utilizado — Riesgo INFORMATIVO
 

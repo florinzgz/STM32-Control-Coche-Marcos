@@ -183,15 +183,17 @@ Instalar lo más cerca posible del módulo BTS7960 de dirección (bus 12V):
 
 ## 3) ENCODER DE DIRECCIÓN — E6B2-CWZ6C (1200 PPR)
 
-| Cable | De (Encoder) | A (STM32) | Función | Notas |
-|-------|-------------|-----------|---------|-------|
-| 16 | Cable A (blanco) | **PA15** | Cuadratura canal A (TIM2_CH1) | ⚠️ Adaptador 5V→3.3V necesario |
-| 17 | Cable B (negro) | **PB3** | Cuadratura canal B (TIM2_CH2) | ⚠️ Adaptador 5V→3.3V necesario |
-| 18 | Cable Z (naranja) | **PB4** | Pulso de índice (EXTI4) | 1 pulso por vuelta |
-| — | Cable rojo (+) | 5V | Alimentación encoder | NO conectar a 3.3V |
-| — | Cable azul (shield/0V) | GND | Masa encoder | GND común |
+| Cable | De (Encoder) | Intermedio | A (STM32) | Función | Notas |
+|-------|-------------|-----------|-----------|---------|-------|
+| 16 | Cable A (negro) | TXS0108E B1→A1 | **PA15** | Cuadratura canal A (TIM2_CH1) | Level-shift 5V→3.3V |
+| 17 | Cable B (blanco) | TXS0108E B2→A2 | **PB3** | Cuadratura canal B (TIM2_CH2) | Level-shift 5V→3.3V |
+| 18 | Cable Z (naranja) | TXS0108E B3→A3 | **PB4** | Pulso de índice (EXTI4) | 1 pulso por vuelta |
+| — | Cable marrón (+) | VB (TXS0108E) | +5V | Alimentación encoder y lado 5V del TXS0108E | NO conectar a 3.3V |
+| — | Cable azul (GND) | GND (TXS0108E) | GND | Masa encoder | GND común |
 
-> ⚠️ **CRÍTICO:** El encoder E6B2 es de salida 5V (open-collector NPN). Las señales A y B necesitan un adaptador de nivel 5V→3.3V (o un divisor de tensión con resistencias) antes de conectar a PA15 y PB3. Conectar 5V directo al STM32 puede dañar los pines.
+> ⚠️ **CRÍTICO:** El encoder E6B2-CWZ6C opera a 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. Se usa **TXS0108E** como level-shifter (VB=5V, VA=3.3V, OE=3.3V).
+>
+> ℹ️ **Sin pull-up:** El E6B2-CWZ**6C** tiene salida **push-pull**, no NPN open-collector. No se necesitan resistencias pull-up en ningún punto. Ver esquema completo en `docs/ENCODER_WIRING_TXS0108E.md`.
 
 **Resolución resultante:** 1200 PPR × 4 (cuadratura) = **4800 cuentas por vuelta** = 0.075° por cuenta
 
