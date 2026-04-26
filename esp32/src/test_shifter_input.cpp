@@ -105,16 +105,34 @@ static void test_read_park() {
 }
 
 /* ====================================================================== */
-/* TEST 4 — Normal gear read: Reverse (GPA1 active-low = 0xFD)           */
+/* TEST 4 — Normal gear read: Reverse (GPA3 active-low = 0xF7)           */
+/* Blue+white wire → GPA3.                                                */
 /* ====================================================================== */
 static void test_read_reverse() {
     printf("  test_read_reverse...\n");
     reset_and_init(true);
 
-    g_wire_read_value = 0xFD;
+    // GPA3 active-low: bit 3 = 0 → Reverse.  Port value = 0b11110111 = 0xF7
+    g_wire_read_value = 0xF7;
     tick(100);
 
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::REVERSE);
+}
+
+/* ====================================================================== */
+/* TEST 4b — Neutral is implicit (all contacts open = 0xFF in low nibble) */
+/* Lever in N position: no contact closes, all GPA0-3 remain HIGH.       */
+/* ====================================================================== */
+static void test_read_neutral_implicit() {
+    printf("  test_read_neutral_implicit...\n");
+    reset_and_init(true);
+
+    // All pins HIGH (0xFF) — lever in N, no contact active
+    g_wire_read_value = 0xFF;
+    tick(100);
+
+    ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::NEUTRAL);
+    ASSERT(shifter::isConnected());
 }
 
 /* ====================================================================== */
@@ -173,7 +191,7 @@ static void test_recovery() {
 
     // Device comes back
     g_wire_end_result     = 0;
-    g_wire_read_value     = 0xF7;  // Forward (GPA3 active-low)
+    g_wire_read_value     = 0xFB;  // Forward/D1 (GPA2 active-low)
     g_wire_request_result = 1;
 
     tick(1250);  // backoff expired
@@ -229,9 +247,9 @@ static void test_init_failure_backoff() {
     tick(500);  // too soon for backoff poll
     ASSERT(!shifter::isConnected());
 
-    // Device appears after backoff
+    // Device appears after backoff — lever in N (no contact active)
     g_wire_end_result     = 0;
-    g_wire_read_value     = 0xFB;  // Neutral (GPA2 active-low)
+    g_wire_read_value     = 0xFF;  // Neutral (no contact closed — all pins HIGH)
     g_wire_request_result = 1;
     tick(1000);  // backoff expired
     ASSERT(shifter::isConnected());
@@ -249,6 +267,7 @@ int main(void) {
     test_init_failure();
     test_read_park();
     test_read_reverse();
+    test_read_neutral_implicit();
     test_error_backoff();
     test_recovery();
     test_neutral_on_error();

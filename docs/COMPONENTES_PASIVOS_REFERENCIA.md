@@ -9,7 +9,7 @@
 
 ## 📋 Índice
 
-1. [Condensadores Electrolíticos](#1-condensadores-electrolíticos)
+1. [Condensadores Electrolíticos](#1-condensadores-electrolíticos) — 470 µF / 1000 µF / 10 µF / **10 µF 16V (MCP23017)**
 2. [Condensadores Cerámicos](#2-condensadores-cerámicos)
 3. [Condensadores de Polipropileno (Snubbers)](#3-condensadores-de-polipropileno-snubbers)
 4. [Resistencias](#4-resistencias)
@@ -67,6 +67,30 @@
 |---|-----------------|----------|---------|
 | 1 | STM32G474RE — pin **VDD / VDDA** | Entre **3.3V y GND** junto al STM32, en paralelo con los cerámicos de 100 nF | Desacoplo de media frecuencia (1 kHz – 100 kHz). Los ADC internos del STM32 son muy sensibles al ruido de la propia alimentación; sin este condensador las lecturas del pedal y sensores tienen jitter excesivo |
 | 2 | ESP32-S3 / TJA1051 — pin **VCC** | Entre **3.3V y GND** junto al ESP32 o al transceptor CAN | Ídem: estabiliza la alimentación del ESP32 (que tiene picos cuando transmite WiFi/BT) y del transceptor CAN |
+
+---
+
+### 1.5 → 10 µF / 16V — **1 unidad (MCP23017 VDD)**
+
+**¿Por qué 16V y no 10V?** Aunque el rail es 3.3V, los electrolíticos trabajan mejor (menor ESR, mayor vida útil) cuando la tensión de trabajo es ≤1/3 de la nominal. Con 16V el margen es suficiente para pasar a VDD=3.3V y es el valor comercial estándar por encima del 10V con disponibilidad garantizada.
+
+**¿Por qué hace falta aquí?** El ESP32-S3 tiene WiFi/BT integrado. Cuando la radio transmite, genera picos de corriente de 200–400 mA en el rail de 3.3V que duran decenas de microsegundos. Sin un condensador bulk local en el MCP23017, ese hundimiento del rail provoca lecturas I²C erróneas o pérdida de ACK, haciendo que el driver entre en backoff y la palanca se quede en PARK de forma espuria. El 100 nF cerámico ya presente cubre las frecuencias altas (>1 MHz), pero es insuficiente para la energía de esos picos de WiFi/BT; el 10 µF electrolítico cubre la franja 1 kHz–1 MHz y actúa como reserva de carga local.
+
+| # | Ubicación exacta | Conexión | Función |
+|---|-----------------|----------|---------|
+| 1 | **MCP23017** — pin **VDD** (pin 9) | Entre **3.3V y GND** (pin 10 VSS), en paralelo con el 100 nF cerámico, lo más cerca posible del IC | Reserva de carga bulk para los picos de corriente del radio WiFi/BT del ESP32-S3. Evita el hundimiento del rail 3.3V que causa lecturas I²C erróneas en el expansor de GPIO de la palanca de cambios |
+
+**Esquema de conexión:**
+
+```
+3.3V ──┬──────┬── VDD (pin 9 del MCP23017)
+       │      │
+     10µF   100nF   ← el 100nF cerámico ya está montado
+       │      │
+GND ───┴──────┴── VSS (pin 10 del MCP23017)
+```
+
+**Orientación:** Electrolítico polarizado → patilla **larga (+)** a 3.3V, **corta (–) o banda blanca** a GND.
 
 ---
 
@@ -291,8 +315,10 @@ BATERÍA 24V
               │       STM32 CAN lado ──[120Ω terminación]── bus
               │
               ├── ESP32-S3 ─── [10µF] ── [100nF]
-              │       └── TJA1051 CAN ESP32 ──[PESD2CAN]── bus CAN
-              │               ESP32 CAN lado ──[120Ω terminación]── bus
+              │       ├── TJA1051 CAN ESP32 ──[PESD2CAN]── bus CAN
+              │       │       ESP32 CAN lado ──[120Ω terminación]── bus
+              │       └── MCP23017 (palanca) ── [10µF/16V + 100nF en VDD] ── [10kΩ pull-up RESET]
+              │               SDA/SCL ──[4.7kΩ pull-up ×2]── GPIO8/GPIO9 ESP32
               │
               ├── ToF VL53L1X ── [100nF en AVDD]
               │
@@ -329,6 +355,6 @@ BATERÍA 24V
 
 ---
 
-**Última actualización:** 2026-04-22  
+**Última actualización:** 2026-04-26  
 **Autor:** florinzgz (documentado por Copilot Agent)  
 **Proyecto:** STM32-Control-Coche-Marcos

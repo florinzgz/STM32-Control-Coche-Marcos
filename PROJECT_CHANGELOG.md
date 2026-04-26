@@ -80,6 +80,53 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — fix(shifter): la posición N no tiene contacto físico — 4 cables de señal + 1 común, N implícita
+- **Fecha:** 2026-04-26
+- **Autor:** Copilot
+- **Rama:** `copilot/connectar-palanca-de-cambios`
+- **Estado:** En curso (rama activa; merge gestionado por el mantenedor).
+- **Descripción del cambio:** Tras verificar la palanca con multímetro, el usuario confirmó que **solo existen 4 contactos físicos** (P, D2, D1, R) compartiendo un cable común (azul → GND). La posición **N (Neutral) no dispone de contacto propio** — es el estado de reposo de la palanca cuando ningún interruptor está cerrado. El firmware previo asumía 5 contactos one-hot (`GPA0=P, GPA1=R, GPA2=N, GPA3=D1, GPA4=D2`) con `GEAR_MASK = 0x1F`, lo que era incorrecto y nunca habría detectado la marcha N (al no existir continuidad nadie podía cerrar `GPA2`). Esta PR corrige el mapeo del firmware al cableado real, ajusta la decodificación para tratar "ningún pin activo" como NEUTRAL, y propaga los cambios a toda la documentación de la palanca.
+
+#### Mapeo definitivo confirmado por continuidad
+```
+Cable común AZUL ──────────── GND del MCP23017
+GPA0 (pin 21) ──── azul + morado    → P  (Park)
+GPA1 (pin 22) ──── azul + verde     → D2 (Drive 2)
+GPA2 (pin 23) ──── azul + amarillo  → D1 (Drive 1)
+GPA3 (pin 24) ──── azul + blanco    → R  (Reverse)
+GPA4 (pin 25) ──── (sin uso, dejar al aire)
+N (Neutral)   ──── (sin contacto físico — todos GPA0-3 en HIGH por pull-ups)
+```
+
+#### Firmware (`esp32/src/shifter_input.cpp`)
+- `GEAR_MASK` reducido de `0x1F` (5 bits) → `0x0F` (4 bits, GPA0–GPA3).
+- Eliminada la constante `PIN_NEUTRAL` y su rama en `decodeGear()` — ahora `__builtin_popcount(active) == 0` cae al `return Gear::NEUTRAL` por defecto.
+- `PIN_REVERSE` reasignado de GPA4 → GPA3; `PIN_FORWARD` (D1) reasignado de GPA3 → GPA2 — coincide con los colores de cable medidos.
+- Actualizado el comentario de cabecera con los colores reales y la nota explícita "N has no contact wire — detected when no pin is active".
+
+#### Tests (`esp32/src/test_shifter_input.cpp`)
+- `test_read_reverse`: byte de puerto corregido `0xEF` (GPA4) → `0xF7` (GPA3).
+- `test_init_failure_backoff`: byte de Neutral corregido `0xF7` → `0xFF` (todos los pines en HIGH ⇒ ningún contacto).
+- **Nuevo test** `test_read_neutral_implicit`: comprueba que un valor de puerto `0xFF` (todos los contactos abiertos) decodifica a `Gear::NEUTRAL` y que `isConnected()` permanece `true`.
+- Resultado final: **28/28 tests pasan** (`g++ -std=c++17 ... && /tmp/test_shifter_input`).
+
+#### Documentación actualizada
+| Archivo | Cambio |
+|---------|--------|
+| `docs/PALANCA_CAMBIOS_IMPLEMENTACION.md` | Diagrama arquitectura (4 contactos + común), esquema MCP23017 (GPA0=P, GPA1=D2, GPA2=D1, GPA3=R, GPA4 sin uso), tabla de lógica con colores de cables, paso 4 de cableado físico, tabla multímetro, casos 9.1/9.2/9.3 de troubleshooting (incluido "palanca como interruptor simple"), FAQ ("5 posiciones" → "4 posiciones físicas + N implícita") |
+| `docs/SENSOR_INTERFACE.md` | Tabla GPA→marcha + columna de colores de cable; diagrama ASCII del cableado |
+| `docs/CONEXIONES_COMPLETAS.md` | Tabla de pines del MCP23017 (GPA1=D2, GPA2=D1, GPA3=R, GPA4 sin uso) con colores de cable |
+| `docs/MATERIALES_POR_MODULO.md` | BOM palanca: "1 común + 4 señal", aclaración "N implícita" |
+| `docs/PROJECT_MASTER_STATUS.md` | Línea de feature gear shifter actualizada (`GPA0-3 one-hot P/D2/D1/R; N implícito`) |
+| `docs/TECHNICAL_REVIEW_REPORT.md` | Descripción del driver: "GPA0–GPA3 → P/D2/D1/R; N detected implicitly when no pin is active" |
+
+#### Validación
+- 28/28 tests unitarios pasan sin warnings en código de producción.
+- No hay cambios en la API pública (`shifter_input.h`) — los valores del enum `Gear` y la firma de `getGearRaw()` se mantienen, por lo que el contrato CAN (0x102, byte 1 = gear) **no cambia**.
+- No se altera la lógica de backoff I2C ni la detección de reconexión.
+
+---
+
 ### PR — docs(encoder): migración completa de conexión E6B2-CWZ6C a 3× 6N137 — eliminación de TXS0108E y divisores resistivos
 - **Fecha:** 2026-04-26
 - **Autor:** Copilot
@@ -1598,3 +1645,4 @@ Diagnostics only — allows individual relay GPIO toggling from the ESP32 engine
 | 2026-04-11 | **Motor Control Advanced Hardening + Validation Final** — (1) Coast↔brake hysteresis: `COAST_SPEED_HYSTERESIS_KMH=0.5` prevents oscillation at speed threshold. (2) Brake design decision documented: passive brake (EN=HIGH, RPWM=0, LPWM=0) validated as sufficient; optional `BRAKE_ACTIVE_FALLBACK` ifdef added for field override (~5% min duty). (3) Motor_SetMode BRAKE case updated with `#if BRAKE_ACTIVE_FALLBACK` support. (4) Thread safety documented on Motor_SetMode/Motor_SetSigned: main-loop-only restriction, not re-entrant. (5) Motor_SetSigned mode-tracking caveat documented. (6) Stale comment fix: BTS7960_BRAKE_PWM (4249)→(0). (7) 6 new tests: 1000-cycle stress test, exhaustive glitch immunity, direction reversal detection, coast speed hysteresis, brake PWM validation, INT16_MIN clamping detail. Tests: 194→2965 assertions, 0 failures. 2 files modified. | — |
 | 2026-04-12 | **Suppress third-party library warnings** — (1) `-Wno-cpp` suppresses FastLED `clockless_i2s_esp32s3.cpp` benign `#warning` about `esp_memory_utils.h` on ESP-IDF 4. (2) `-Wno-unused-value` suppresses ESP32-TWAI-CAN.hpp comma-operator warnings at lines 102/113. Both flags in `build_flags` (applies to libraries); project source re-enables via `-Wall` + `-Wcpp` in `build_src_flags`. 1 file modified (`esp32/platformio.ini`). | — |
 | 2026-04-26 | **PC817 pull-up verification + IGNITION sense fix** — Verificación física con polímetro confirma que la placa PC817 de 8 canales NO tiene pull-up onboard en el lado de salida (circuito abierto OUT↔VCC con placa desalimentada). Impacto: sin corrección, el colector del PC817 flota cuando la llave está OFF → lecturas erróneas / falsos arranques. **Firmware:** `INPUT` → `INPUT_PULLUP` en `power_manager.cpp` (red de seguridad ~45 kΩ interno ESP32-S3). **Hardware obligatorio:** soldar resistencia 10 kΩ ¼ W entre GPIO 40 y 3.3 V (pull-up externo de baja impedancia para entorno automoción; 10 kΩ ‖ 45 kΩ ≈ 8.2 kΩ resultante — aceptable). **Docs actualizados (7 archivos):** `power_manager.h`, `power_manager.cpp`, `PUESTA_EN_MARCHA_SEGURA.md`, `CABLEADO_AISLAMIENTO_DEFINITIVO.md`, `LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`, `SENSOR_INTERFACE.md`, `PIN_USAGE_INVENTORY.md` — eliminadas todas las referencias obsoletas a INPUT_PULLDOWN, HIGH=llave ON y pull-up onboard. | copilot/start-cableado-puesta-en-marcha |
+| 2026-04-26 | **Documentación condensador 10 µF / 16V en VDD del MCP23017** — El rail de 3.3V del MCP23017 (expansor GPIO de la palanca de cambios) carece de desacoplo bulk documentado. Los picos de corriente del radio WiFi/BT del ESP32-S3 (200–400 mA, decenas de µs) hunden el rail y provocan pérdidas de ACK I²C que ponen la palanca en PARK de forma espuria. El condensador 10 µF / 16V electrolítico (en paralelo con el 100 nF cerámico ya existente) actúa como reserva de carga local cubriendo la franja 1 kHz–1 MHz que el cerámico no puede abastecer. **Se documenta en:** `COMPONENTES_PASIVOS_REFERENCIA.md` (nueva sección 1.5 con esquema de conexión), `CONEXIONES_COMPLETAS.md` (nota ⚠️ en sección 12e MCP23017), `MATERIALES_POR_MODULO.md` (sección 16 palanca + BOM condensadores C_MCP_BULK / C_MCP_BP). | copilot/connectar-palanca-de-cambios |

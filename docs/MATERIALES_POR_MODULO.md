@@ -368,7 +368,9 @@
 | 1 | MCP23017 | Expansor I2C 16 GPIO, 3.3V, dirección 0x20 | Conectado a I2C del ESP32 (GPIO8 SDA, GPIO9 SCL) |
 | 2 | Resistencia pull-up I2C | **4.7 kΩ / ¼W** | En GPIO8 y GPIO9 del ESP32 a 3.3V |
 | 1 | Resistencia pull-up RESET | **10 kΩ / ¼W** | Entre pin RESET del MCP23017 y 3.3V; mantiene fuera de reset |
-| 5 | Conector/cable palanca | Según diseño físico de la palanca | GPA0–GPA4: PARK, REVERSE, NEUTRAL, FORWARD_D1, FORWARD_D2 (active LOW con pull-up interno del MCP23017) |
+| 1 | Condensador bulk VDD | **10 µF / 16V electrolítico** | Entre VDD (pin 9) y GND (pin 10) del MCP23017, en paralelo con el 100 nF cerámico. Evita hundimientos del rail 3.3V por picos WiFi/BT del ESP32-S3 que causan lecturas I²C erróneas |
+| 1 | Condensador bypass VDD | **100 nF cerámico** | En paralelo con el 10 µF, lo más cerca posible del pin VDD (pin 9) del MCP23017 |
+| 5 | Conector/cable palanca | 1 común + 4 señal | GPA0=P, GPA1=D2, GPA2=D1, GPA3=R (active LOW con pull-up interno). N es implícito (sin contacto físico). Cable común a GND. |
 
 ---
 
@@ -461,6 +463,8 @@
 | 1 | C_12V_REL | **470 µF** | 25V | Electrolítico | Bus 12V junto a relé DIR |
 | 2 | C_LED | **1000 µF** | 10V | Electrolítico | Conector 5V de cada tira LED |
 | 1 | C_TOF_VCC | **100 nF** | 10V | Cerámico X7R | VCC del TOFSense-M S |
+| 1 | C_MCP_BULK | **10 µF** | 16V | Electrolítico | VDD (pin 9) del MCP23017, en paralelo con C_MCP_BP |
+| 1 | C_MCP_BP | **100 nF** | 16V | Cerámico X7R | VDD (pin 9) del MCP23017, en paralelo con C_MCP_BULK |
 
 ### Componentes pasivos — Resistencias
 

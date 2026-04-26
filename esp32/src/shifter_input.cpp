@@ -2,11 +2,20 @@
 // ESP32-S3 — Shifter Input Driver (MCP23017 I2C) — Implementation
 //
 // Reads gear selector position from MCP23017 Port A pins (active-low).
-// Pin mapping:
-//   GPA0 = Park, GPA1 = Reverse, GPA2 = Neutral,
-//   GPA3 = Drive (D1), GPA4 = Drive2 (D2)
 //
-// If no pin is active or multiple pins are active, defaults to Neutral.
+// The lever has DRY CONTACTS (no internal voltage) and 5 wires:
+//   1 common wire (blue) — connect to GND
+//   4 signal wires       — connect to MCP23017 GPA pins (pull-ups provide bias)
+//
+// Physical lever order (top → bottom) and confirmed wire colours:
+//   GPA0 — P  (Park)    — blue + purple
+//   GPA1 — D2 (Drive 2) — blue + green
+//   GPA2 — D1 (Drive 1) — blue + yellow
+//   GPA3 — R  (Reverse) — blue + white
+//
+// NEUTRAL has NO dedicated contact wire.  It is detected implicitly:
+// when none of the four contacts are closed all four GPA pins stay HIGH
+// (pulled up) and decodeGear() returns NEUTRAL.
 //
 // Reference: docs/CAN_CONTRACT_FINAL.md §4.5
 // =============================================================================
@@ -22,13 +31,14 @@ static constexpr uint8_t REG_IODIRA   = 0x00;  // I/O Direction A
 static constexpr uint8_t REG_GPPUA    = 0x0C;  // Pull-Up A
 static constexpr uint8_t REG_GPIOA    = 0x12;  // GPIO A read
 
-// Pin masks for each gear position on Port A
-static constexpr uint8_t PIN_PARK     = (1 << 0);  // GPA0
-static constexpr uint8_t PIN_REVERSE  = (1 << 1);  // GPA1
-static constexpr uint8_t PIN_NEUTRAL  = (1 << 2);  // GPA2
-static constexpr uint8_t PIN_FORWARD  = (1 << 3);  // GPA3
-static constexpr uint8_t PIN_FWD_D2   = (1 << 4);  // GPA4
-static constexpr uint8_t GEAR_MASK    = 0x1F;       // Bits 0-4
+// Pin masks for each gear position on Port A — confirmed wire colours
+// Common wire (blue) → GND.  Signal wires → GPA0-GPA3 with pull-ups.
+static constexpr uint8_t PIN_PARK     = (1 << 0);  // GPA0 — blue+purple  (P)
+static constexpr uint8_t PIN_FWD_D2   = (1 << 1);  // GPA1 — blue+green   (D2)
+static constexpr uint8_t PIN_FORWARD  = (1 << 2);  // GPA2 — blue+yellow  (D1)
+static constexpr uint8_t PIN_REVERSE  = (1 << 3);  // GPA3 — blue+white   (R)
+// Neutral has no contact wire — detected when no pin is active (see decodeGear)
+static constexpr uint8_t GEAR_MASK    = 0x0F;       // Bits 0-3 only
 
 // I2C error handling constants
 static constexpr uint8_t  ERROR_THRESHOLD  = 5;     // Consecutive errors before backoff
@@ -73,22 +83,24 @@ static uint8_t readReg(uint8_t reg) {
 
 // -------------------------------------------------------------------------
 // Decode gear from port value (active-low, one-hot)
+//
+// Returns NEUTRAL when no pin is active — this is the normal resting state
+// for the N position (no physical contact wire).
 // -------------------------------------------------------------------------
 static Gear decodeGear(uint8_t portVal) {
     // Invert (active-low) and mask relevant bits
     uint8_t active = (~portVal) & GEAR_MASK;
 
-    // Require exactly one bit set (valid one-hot encoding)
-    // __builtin_popcount works for single byte via implicit int promotion
+    // Zero active bits = Neutral (lever in N, no contact closed)
+    // More than one active bit = invalid/transition → default to Neutral
     if (__builtin_popcount(active) != 1) {
-        return Gear::NEUTRAL;  // Invalid or ambiguous → default Neutral
+        return Gear::NEUTRAL;
     }
 
     if (active & PIN_PARK)    return Gear::PARK;
-    if (active & PIN_REVERSE) return Gear::REVERSE;
-    if (active & PIN_NEUTRAL) return Gear::NEUTRAL;
-    if (active & PIN_FORWARD) return Gear::FORWARD;
     if (active & PIN_FWD_D2)  return Gear::FORWARD_D2;
+    if (active & PIN_FORWARD) return Gear::FORWARD;
+    if (active & PIN_REVERSE) return Gear::REVERSE;
 
     return Gear::NEUTRAL;
 }

@@ -617,13 +617,14 @@ Expansor de I/O I2C que lee la posición del selector de marchas (P, R, N, D1, D
 
 ### Entradas del MCP23017 (Puerto A)
 
-| Pin MCP23017 | Bit | Marcha |
-|--------------|-----|--------|
-| GPA0 | 0 | P (Park) |
-| GPA1 | 1 | R (Reverse) |
-| GPA2 | 2 | N (Neutral) |
-| GPA3 | 3 | D1 (Drive 1) |
-| GPA4 | 4 | D2 (Drive 2) |
+| Pin MCP23017 | Bit | Marcha | Cable de la palanca |
+|--------------|-----|--------|---------------------|
+| GPA0 | 0 | P (Park)      | azul + morado    |
+| GPA1 | 1 | D2 (Drive 2)  | azul + verde     |
+| GPA2 | 2 | D1 (Drive 1)  | azul + amarillo  |
+| GPA3 | 3 | R (Reverse)   | azul + blanco    |
+| —    | — | N (Neutral)   | *(sin contacto físico — estado de reposo)* |
+| GPA4 | — | sin uso       | — |
 
 ### Resistencias y protección
 
@@ -663,11 +664,11 @@ Expansor de I/O I2C que lee la posición del selector de marchas (P, R, N, D1, D
                     │  VSS ────────┼─── GND
                     │  A0,A1,A2 ───┼─── GND
                     │              │
-                    │  GPA0 ───────┼──── SW P  ──── GND
-                    │  GPA1 ───────┼──── SW R  ──── GND
-                    │  GPA2 ───────┼──── SW N  ──── GND
-                    │  GPA3 ───────┼──── SW D1 ──── GND
-                    │  GPA4 ───────┼──── SW D2 ──── GND
+                    │  GPA0 ───────┼──── SW P  ──── COM ──── GND
+                    │  GPA1 ───────┼──── SW D2 ──── COM ──── GND
+                    │  GPA2 ───────┼──── SW D1 ──── COM ──── GND
+                    │  GPA3 ───────┼──── SW R  ──── COM ──── GND
+                    │  GPA4 ───────┼──── (sin uso, dejar al aire)
                     │              │
                     │  GPPU habilitado (100kΩ int.)│
                     └──────────────┘
