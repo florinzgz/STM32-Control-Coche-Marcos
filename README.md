@@ -76,9 +76,9 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 ### Encoder Interface
 | Pin | Function | Type | Specification |
 |-----|----------|------|---------------|
-| PA15 | ENC_A | TIM2_CH1 | E6B2-CWZ6C 1200 PPR |
-| PB3  | ENC_B | TIM2_CH2 | Quadrature 4800 counts/rev |
-| PB4  | ENC_Z | EXTI4 | Index pulse (LJ12A3-4-Z/BX) |
+| PA15 | ENC_A | TIM2_CH1 | E6B2-CWZ6C 1200 PPR — vía 6N137 (aislamiento galvánico) |
+| PB3  | ENC_B | TIM2_CH2 | Quadrature 4800 counts/rev — vía 6N137 |
+| PB4  | ENC_Z | EXTI4 | Index pulse — vía 6N137 |
 
 ### Communication
 | Pin | Function | Protocol |

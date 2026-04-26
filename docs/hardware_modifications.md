@@ -82,10 +82,11 @@ Early versions of the wiring diagram only listed the index channel
 | Channel **B** (green) | **PB3**  | TIM2_CH2 (AF1) | `PIN_ENC_B` |
 | Channel **Z** (yellow, index) | **PB4** | GPIO / EXTI4 | `PIN_ENC_Z` |
 
-All three signals must be level-shifted from the 5 V open-collector
-output of the E6B2-CWZ6C encoder to 3.3 V before reaching the MCU
-(BSS138 level shifter or resistive divider — see
-`HARDWARE_WIRING_MANUAL.md` §12).
+All three signals must be isolated and level-shifted from the 5 V push-pull
+output of the E6B2-CWZ6C encoder to 3.3 V before reaching the MCU.
+Use **3× 6N137 optocouplers** (one per channel: A, B, Z) — they provide
+galvanic isolation (2500 V) and 5 V → 3.3 V conversion simultaneously.
+See `docs/ENCODER_WIRING_6N137.md` for the complete schematic.
 
 ### Verification
 
@@ -145,9 +146,9 @@ Arduino-format CN9 header — they are only available on the
 ## Summary checklist (before first power-up with real motors)
 
 - [ ] Rear-right EN wired to **CN7 pin 35 (PC2)** — not PC13. PC13 is reserved (USER button B1) and must not be used as output.
-- [ ] Encoder A wired from encoder white wire → level shifter → **PA15**.
-- [ ] Encoder B wired from encoder green wire → level shifter → **PB3**.
-- [ ] Encoder Z wired from encoder yellow wire → level shifter → **PB4**.
+- [ ] Encoder A wired from encoder black wire → R_IN 330Ω → 6N137 #1 → pull-up 4.7kΩ → **PA15**.
+- [ ] Encoder B wired from encoder white wire → R_IN 330Ω → 6N137 #2 → pull-up 4.7kΩ → **PB3**.
+- [ ] Encoder Z wired from encoder orange wire → R_IN 330Ω → 6N137 #3 → pull-up 4.7kΩ → **PB4**.
 - [ ] EN_FR cable lands on **CN7 pin 38 (PC0)** — not CN9.
 - [ ] EN_RL cable lands on **CN7 pin 36 (PC1)** — not CN9.
 - [ ] All EN lines read ≈ 0 V immediately after reset (safety latch).

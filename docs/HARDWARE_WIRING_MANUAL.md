@@ -52,7 +52,7 @@
 | Bus 12 V (dirección) | Condensador electrolítico | 470 µF / 25 V | Absorción inrush | Sobretensión al activar motor dirección |
 | Cada bobina de relé | Diodo 1N4007 | 1 A / 1 000 V | Flyback (anti-pico inductivo) | Pico de -100 V destruye GPIO del STM32 |
 | Cada terminal de motor | Condensador cerámico | 100 nF / 50 V | Snubber EMI | Ruido RF en señales I2C / CAN / ADC |
-| Encoder → STM32 (PA15, PB3) | Divisor resistivo o BSS138 | ver §12 | Limitación 5 V → 3,3 V | Destrucción permanente del pin STM32 |
+| Encoder → STM32 (PA15, PB3, PB4) | 3× 6N137 optoacoplador | ver §12 | Aislamiento galvánico + 5 V → 3,3 V | Destrucción permanente del pin STM32 + daño por picos inductivos |
 | Sensor LJ12A3 → STM32 (EXTI) | Optoacoplador PC817 / 6N137 | ver `CABLEADO_AISLAMIENTO_DEFINITIVO.md` | Aislamiento 6–36 V → 3,3 V | Pico inductivo destruye pin STM32 |
 | Pedal Hall → PA3 (ADC) | Divisor 10 kΩ + 6,8 kΩ | ver §6.5 | Escalado 5 V → 2 V | Destrucción ADC si supera 3,6 V |
 | CAN bus | Resistencia terminación | 120 Ω × 2 | Terminación diferencial | Errores CAN, STM32 entra en SAFE |
@@ -1094,46 +1094,32 @@ Para impedir que el ruido de los PWM de 20 kHz se propague por la alimentación:
 
 ### 12.5 Protección de pines de entrada contra sobretensión
 
-#### Encoder E6B2-CWZ6C (salida 5 V → pines PA15, PB3, PB4 a 3,3 V)
+#### Encoder E6B2-CWZ6C (salida push-pull 5 V → pines PA15, PB3, PB4 a 3,3 V)
 
-**⚠️ Conectar 5 V directamente a un pin STM32 lo destruye permanentemente.**
+**⚠️ Conectar 5 V directamente a un pin STM32 lo destruye permanentemente. Además, el encoder está físicamente próximo al motor de dirección (BTS7960, 20 kHz, hasta 10 A) — los picos inductivos y el ruido EMI requieren aislamiento galvánico real.**
 
-Usar un **divisor resistivo de baja impedancia** para cada canal (A, B, Z):
-
-```
-Encoder señal (5 V, OC con pull-up 10 kΩ interno)
-    │
-   [R1 = 1 kΩ]
-    │
-    ├─────────────────────────► PA15 (o PB3, PB4)
-    │
-   [R2 = 2,2 kΩ]
-    │
-   GND
-
-Tensión en el pin = 5 V × (2,2 / (1 + 2,2)) = 3,44 V   ← dentro del rango 3,3 V ± 10 %
-```
-
-> Nota: el resistor R1 (1 kΩ) también protege el pin en caso de que la señal suba por encima
-> de VDD por un transitorio. La corriente máxima de clamp del diodo interno del STM32 es 5 mA.
-> Con R1 = 1 kΩ y Vtrans = 5 V: I = (5 – 3,3) / 1 kΩ = 1,7 mA < 5 mA ✅
-
-Alternativa más limpia: **BSS138 bidirectional level shifter** (módulo breakout común):
+Usar **3× optoacoplador 6N137** — uno por canal (A, B, Z). El 6N137 proporciona aislamiento galvánico de 2500 V y conversión 5 V → 3,3 V simultáneamente:
 
 ```
-3,3V ──────────────────────────────────────── 3,3V_side
-                                                    │
-                                              [BSS138 MOSFET]
-                                                    │
-5V ──── Pull-up 10 kΩ ──┬── Encoder señal (5 V)  5V_side
-                         │
-                    (esto es el nodo LV del BSS138)
+Lado encoder (5 V)                   6N137                   Lado STM32 (3,3 V)
+─────────────────                ┌─────────┐              ─────────────────────
+Encoder A push-pull (5 V)        │         │
+  ──[R_IN 330Ω]──── Pin 2 (A)   │  6N137  │   Pin 6 (Vo) ──[4,7 kΩ]──┬── +3,3V
+                    Pin 3 (K) ───┤         │                           └── PA15
+GND_encoder ────────────────────┘         │   Pin 7 (EN) ──────────────── +3,3V
+                                           │   Pin 5 (GND) ─────────────── GND_STM32
+                                           └─────────┘
 
-PA15 ◄──── LV_side (salida del BSS138)
+(repetir para canal B → PB3, canal Z → PB4)
 ```
 
-Los módulos de conversión de nivel I2C bidireccionales basados en BSS138 (muy comunes en
-Arduino/Nucleo) son exactamente esta topología. Un módulo de 4 canales cubre A, B, Z.
+**Cálculo R_IN:**
+```
+VCC_encoder = 5 V,  V_LED ≈ 1,5 V (típico 6N137)
+R_IN = (5 − 1,5) / 10 mA = 330 Ω → I_F = 10,6 mA ✅ (rango 6N137: 2–15 mA)
+```
+
+> **Nota:** La salida del 6N137 es lógicamente invertida. Al invertir A y B simultáneamente, la cuadratura se preserva; solo cambia el sentido del conteo. Si es incorrecto, intercambiar A↔B en el conector STM32. Ver `docs/ENCODER_WIRING_6N137.md`.
 
 #### Sensor de pedal Hall (5 V → PA3 ADC)
 
@@ -1157,8 +1143,8 @@ Antes de conectar la placa Nucleo, medir con multímetro en modo DC:
 |-----------------|-----------------|-------------|
 | 3,3 V (alimentación Nucleo) | 3,25 – 3,35 V | No encender hasta corregir la fuente |
 | 5 V (fuente lógica) | 4,85 – 5,15 V | Ajustar la fuente |
-| PA15 con encoder girando (max) | ≤ 3,5 V | Revisar divisor resistivo |
-| PB3 con encoder girando (max) | ≤ 3,5 V | Revisar divisor resistivo |
+| PA15 con encoder girando (max) | ≤ 3,3 V | Revisar 6N137 y pull-up 4,7 kΩ |
+| PB3 con encoder girando (max) | ≤ 3,3 V | Revisar 6N137 y pull-up 4,7 kΩ |
 | PA3 con pedal a fondo (max) | ≤ 2,1 V | Revisar divisor 10 kΩ + 6,8 kΩ |
 | Salida optoacoplador PA0-PA2, PB15 | 3,3 V en reposo, 0 V al detectar | Revisar PC817 |
 | PA11 (CAN RX) con bus activo | 0,5 – 2,5 V oscilante | Normal, señal CAN diferencial convertida |
@@ -1206,8 +1192,9 @@ Seguir este orden estrictamente:
 | — | ~~Resistencia 10 kΩ pull-down~~ | — | ~~Pull-down base transistor~~ **NO necesaria**: el módulo 4-ch integra todo el driver |
 | 5 | Resistencia | 100 Ω / 1/2 W | Snubber RC contactos relé (R del RC, 5 relés) |
 | 5 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC, 5 relés) |
-| 3 | Resistencia | 1 kΩ / 1/4 W | R1 divisor encoder (A, B, Z) 5 V→3,3 V |
-| 3 | Resistencia | 2,2 kΩ / 1/4 W | R2 divisor encoder (A, B, Z) a GND |
+| 3 | Optoacoplador 6N137 | DIP-8 o módulo breakout | Encoder A/B/Z (aislamiento galvánico + 5 V→3,3 V) |
+| 3 | Resistencia 330 Ω / ¼ W | — | R_IN serie LED 6N137 encoder (A, B, Z) |
+| 3 | Resistencia 4,7 kΩ / ¼ W | — | Pull-up salida Vo 6N137 a +3,3 V (A, B, Z) |
 
 > **Nota:** Los CI SN74HC08N (AND) y SN74HC04N (NOT) han sido **eliminados del BOM**.
 > El firmware genera RPWM/LPWM directamente desde los timers. Ver [Sección 10](#10-conexión-directa-bts7960--rpwmlpwm-desde-stm32-sin-lógica-externa).

@@ -115,7 +115,7 @@ El modo `TIM_ENCODERMODE_TI12` (Encoder Mode 3) cuenta en **ambos flancos de amb
 
 ### Observaciones sobre pull-up
 
-Los pines PA15 y PB3 están configurados como `GPIO_NOPULL`. El encoder E6B2-CWZ6C tiene salida **push-pull (voltage output)**, por lo que **no requiere resistencias pull-up externas**: el driver activo del encoder define el nivel en todo momento (HIGH = 5 V / LOW = 0 V a través del TXS0108E → 3.3 V / 0 V al STM32). La ausencia de pull-up interno en el firmware es correcta. Ver `docs/ENCODER_WIRING_TXS0108E.md` para el esquema completo de conexión.
+Los pines PA15 y PB3 están configurados como `GPIO_NOPULL`. El encoder E6B2-CWZ6C tiene salida **push-pull (voltage output)**, por lo que **no requiere resistencias pull-up externas**: el driver activo del encoder define el nivel en todo momento (HIGH = 5 V / LOW = 0 V a través de los 6N137 → 3.3 V / 0 V al STM32). El pull-up de 4.7 kΩ está en la salida Vo del 6N137, no en el STM32. La ausencia de pull-up interno en el firmware es correcta. Ver `docs/ENCODER_WIRING_6N137.md` para el esquema completo de conexión.
 
 ---
 
@@ -270,7 +270,7 @@ Los filtros de input capture del TIM2 están configurados con valor **6** en amb
 ```c
 // main.c:380-384
 enc.IC1Filter    = 6;  /* Digital filter: 6 × fDTS rejects glitches from
-                        * push-pull outputs (E6B2-CWZ6C via TXS0108E).
+                        * push-pull outputs (E6B2-CWZ6C via 3x 6N137).
                         * At 170 MHz ≈ 35 ns per sample → ~210 ns
                         * glitch rejection.  Sufficient for 1200 PPR
                         * at typical steering rates.                */
@@ -495,7 +495,7 @@ El impacto es limitado porque el PID es proporcional puro (Kp=0.09, Ki=0, Kd=0) 
 
 ~~Los pines PA15 y PB3 tienen `GPIO_NOPULL`. El E6B2-CWZ6C tiene salida NPN open-collector que requiere pull-up.~~
 
-**Corrección (2026-04-26):** El E6B2-CWZ**6C** tiene salida **push-pull (voltage output)**, no NPN open-collector. El driver activo define el nivel HIGH y LOW en todo momento a través del TXS0108E. `GPIO_NOPULL` es correcto: no se necesitan pull-ups externas. Este riesgo no aplica. Ver `docs/ENCODER_WIRING_TXS0108E.md`.
+**Corrección (2026-04-26):** El E6B2-CWZ**6C** tiene salida **push-pull (voltage output)**, no NPN open-collector. El driver activo define el nivel HIGH y LOW en todo momento a través de los 3x 6N137. `GPIO_NOPULL` es correcto: no se necesitan pull-ups externas. Este riesgo no aplica. Ver `docs/ENCODER_WIRING_6N137.md`.
 
 ### R7: Canal Z no utilizado — Riesgo INFORMATIVO
 

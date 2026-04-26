@@ -315,22 +315,23 @@
 
 | Pin LQFP | GPIO | Timer/EXTI | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 50 | PA15 | TIM2_CH1 | ENC_A | TXS0108E A1 → Encoder A (cable negro) | TXS0108E (5V→3.3V) |
-| 55 | PB3 | TIM2_CH2 | ENC_B | TXS0108E A2 → Encoder B (cable blanco) | TXS0108E (5V→3.3V) |
-| 56 | PB4 | EXTI4 | ENC_Z | TXS0108E A3 → Encoder Z (cable naranja) | TXS0108E (5V→3.3V) |
+| 50 | PA15 | TIM2_CH1 | ENC_A | 6N137 #1 Vo → Encoder A (cable negro) | 6N137 (aislamiento galvánico + 5V→3.3V) |
+| 55 | PB3 | TIM2_CH2 | ENC_B | 6N137 #2 Vo → Encoder B (cable blanco) | 6N137 (aislamiento galvánico + 5V→3.3V) |
+| 56 | PB4 | EXTI4 | ENC_Z | 6N137 #3 Vo → Encoder Z (cable naranja) | 6N137 (aislamiento galvánico + 5V→3.3V) |
 
-**Componentes necesarios (level-shifter TXS0108E):**
+**Componentes necesarios (3× 6N137):**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| TXS0108E | CI o módulo breakout | Entre encoder y STM32 | Convierte 5V push-pull → 3.3V (canales A, B, Z) |
-| C (desacoplo VA) | 100 nF cerámico | Junto al TXS0108E, VA–GND | Estabilidad lado 3.3V |
-| C (desacoplo VB) | 100 nF cerámico | Junto al TXS0108E, VB–GND | Estabilidad lado 5V |
+| 6N137 × 3 | DIP-8 o módulo breakout | Entre encoder y STM32 | Aislamiento galvánico 2500 V + conversión 5V push-pull → 3.3V (canales A, B, Z) |
+| R_IN × 3 | 330 Ω / ¼W | Serie con LED de cada 6N137 | Limita I_F ≈ 10.6 mA con encoder a 5V |
+| R_PU × 3 | 4.7 kΩ / ¼W | Vo de cada 6N137 a +3.3V | Pull-up salida open-collector del 6N137 |
+| C (desacoplo) × 3 | 100 nF cerámico | Junto a cada 6N137, VCC–GND (lado 3.3V) | Estabilidad lado lógico |
 | C (bulk encoder) | 10 µF electrolítico | Línea +5V del encoder | Filtro bulk |
 
-> ⚠️ El encoder E6B2-CWZ6C opera a 5 V. Conectar 5 V directamente al STM32 puede dañar los pines. Usar **TXS0108E** como level-shifter (no divisores resistivos — introducen impedancia y deforman los flancos).
+> ⚠️ El encoder E6B2-CWZ6C opera a 5 V. Conectar 5 V directamente al STM32 puede dañar los pines. Usar **3× 6N137** como barrera galvánica y level-shifter (no divisores resistivos ni TXS0108E — no proporcionan aislamiento galvánico).
 >
-> ℹ️ El E6B2-CWZ**6C** tiene salida **push-pull (voltage output)**, no NPN open-collector. **No se necesitan pull-ups.** Ver `docs/ENCODER_WIRING_TXS0108E.md`.
+> ℹ️ La salida del 6N137 es **invertida** respecto a la entrada del encoder. Al invertirse A y B simultáneamente, la cuadratura se preserva. El sentido del conteo cambia: si es incorrecto, intercambiar A↔B en el conector STM32. Ver `docs/ENCODER_WIRING_6N137.md`.
 
 **Alimentación encoder:**
 - Cable marrón → +5 V (NO conectar a 3.3 V)
@@ -586,8 +587,8 @@
 | 2 | 120 Ω ¼W | 5% | Terminación CAN Bus (cada extremo) |
 | 1 | 10 kΩ | 1% | Divisor pedal R1 |
 | 1 | 6.8 kΩ | 1% | Divisor pedal R2 |
-| 3 | 10 kΩ | 5% | Divisores 5 V→3.3 V encoder (A, B, Z) — parte alta |
-| 3 | 20 kΩ | 5% | Divisores 5 V→3.3 V encoder (A, B, Z) — parte baja |
+| 3 | 330 Ω | 5% | R_IN serie LED 6N137 encoder (A, B, Z) |
+| 3 | 4.7 kΩ | 5% | Pull-up salida Vo 6N137 encoder a +3.3V (A, B, Z) |
 | 5 | 100 Ω ¼W | 5% | Snubber motores |
 | 2 | 330 Ω | 5% | Línea datos WS2812B (frontal, trasera) |
 | 1 | 1 kΩ | 5% | Serie TX DFPlayer |

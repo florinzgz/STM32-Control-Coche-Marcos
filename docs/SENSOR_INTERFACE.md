@@ -379,17 +379,18 @@ Encoder incremental de 1200 PPR que mide la posición angular del volante median
 
 ### Resistencias y protección
 
-- **Level shifter 5 V → 3.3 V:** obligatorio. El E6B2-CWZ6C tiene salida de 5 V (line driver o open-collector según versión).
-  - **Opción 1 — BSS138 MOSFET:** level shifter bidireccional con pull-ups de 10 kΩ a cada lado (3.3 V y 5 V). Se necesitan 3 canales (A, B, Z).
-  - **Opción 2 — Divisor resistivo:** 10 kΩ (serie) + 15 kΩ (a GND), ratio 0.6 → 5 V × 0.6 = 3.0 V. Más simple pero añade impedancia.
-  - **Opción 3 (preferida) — 6N137 optoacopladores:** alta velocidad (10 Mbps), aislamiento galvánico + level shifting simultáneo. Ver `docs/MATERIALES_POR_MODULO.md` §7.
-  - **⚠️ NO usar transistores genéricos** (2N2222, BC337, 2N3904, etc.) ni diodos zener (1N4728~1N4737) del inventario como level shifters del encoder. La asimetría en tiempo de propagación entre canales A y B corrompe la decodificación en cuadratura. Estos componentes están disponibles en inventario para otros circuitos (driver de relé, protección GPIO — ver `docs/IGNITION_KEY_CIRCUIT_VALIDATION.md`), pero NO son aptos aquí.
-- **Filtro fDTS (hardware TIM2):** 6 muestras consecutivas a frecuencia de reloj del timer; rechaza pulsos <210 ns (ruido electromagnético de los motores).
+- **Aislamiento y conversión de nivel 5 V → 3.3 V:** obligatorio. El E6B2-CWZ6C tiene salida push-pull de 5 V; conectar directamente a los pines 3.3 V del STM32 los destruye.
+  - **✅ Solución adoptada — 3× 6N137 optoacopladores:** aislamiento galvánico 2500 V + conversión 5 V→3.3 V simultáneos. 10 Mbps — margen ×500 respecto a la frecuencia máxima del encoder (~20 kHz). Protege el STM32 de picos inductivos del motor de dirección adyacente. Ver esquema completo en `docs/ENCODER_WIRING_6N137.md`.
+  - **❌ NO usar TXS0108E:** no proporciona aislamiento galvánico. El motor de dirección (BTS7960, 20 kHz) genera picos inductivos y bucles de masa que corrompan los pulsos de cuadratura.
+  - **❌ NO usar divisor resistivo:** sin aislamiento, deforma flancos, no protege contra picos inductivos.
+  - **❌ NO usar BSS138:** sin aislamiento galvánico.
+  - **⚠️ NO usar transistores genéricos** (2N2222, BC337, 2N3904, etc.) ni diodos zener del inventario como level shifters del encoder. La asimetría en tiempo de propagación entre canales A y B corrompe la decodificación en cuadratura.
+- **Filtro fDTS (hardware TIM2):** 6 muestras consecutivas a frecuencia de reloj del timer; rechaza pulsos <282 ns (ruido electromagnético de los motores). Compatible con el retardo del 6N137 (120 ns máx < 282 ns).
 
 ### Alimentación
 
 - Encoder E6B2-CWZ6C: **5 V** DC (consumo ~80 mA con line driver).
-- Level shifters: 3.3 V y 5 V.
+- Optoacopladores 6N137: lado lógico 3.3 V (STM32); lado encoder 5 V (aislado).
 
 ### Motivo técnico
 
@@ -408,30 +409,26 @@ Encoder incremental de 1200 PPR que mide la posición angular del volante median
 ### Esquema de conexión
 
 ```
-             Encoder E6B2-CWZ6C
-            ┌──────────────────┐
-   5V ──────┤ VCC (marrón)     │
-   GND ─────┤ GND (azul)      │
+             Encoder E6B2-CWZ6C                 3× 6N137                   STM32G474RE
+            ┌──────────────────┐                                             (3.3 V)
+   5V ──────┤ VCC (marrón)     │    Lado encoder (5V)   Lado lógico (3.3V)
+   GND ─────┤ GND (azul)       │    ────────────────     ──────────────────
             │                  │
-            │ Fase A (blanco) ─┤──┐
-            │ Fase B (negro) ──┤──┼──┐
-            │ Z (naranja) ─────┤──┼──┼──┐
-            └──────────────────┘  │  │  │
-                                  │  │  │
-         Level Shift 5V→3.3V     │  │  │
-         (BSS138 × 3 canales)    │  │  │
-              ┌───────┐          │  │  │
-   5V─┤10kΩ├─┤       ├─┤10kΩ├─3.3V  │  │
-              │BSS138 │          │  │  │
-   Encoder A──┤S    D├──────── PA15 (TIM2_CH1)
-              └───────┘             │  │
-              ┌───────┐             │  │
-   Encoder B──┤BSS138 ├──────── PB3  (TIM2_CH2)
-              └───────┘                │
-              ┌───────┐                │
-   Encoder Z──┤BSS138 ├──────── PB4  (EXTI4)
-              └───────┘
+            │ Fase A (negro) ──┤──[330Ω]──▷|── 6N137 #1 ──[4.7kΩ]──┬── +3.3V
+            │                  │    R_IN    LED           Vo         └── PA15 (TIM2_CH1)
+            │                  │                          EN ──────────── +3.3V
+            │ Fase B (blanco) ─┤──[330Ω]──▷|── 6N137 #2 ──[4.7kΩ]──┬── +3.3V
+            │                  │                          Vo         └── PB3  (TIM2_CH2)
+            │                  │                          EN ──────────── +3.3V
+            │ Z (naranja) ─────┤──[330Ω]──▷|── 6N137 #3 ──[4.7kΩ]──┬── +3.3V
+            └──────────────────┘                          Vo         └── PB4  (EXTI4)
+                                                          EN ──────────── +3.3V
+                                              GND_encoder ─ K (todos)
+                                                          GND_lógico ─── GND_STM32
 ```
+
+> ⚠️ GND_encoder y GND_STM32 son eléctricamente independientes (aislamiento galvánico). No unirlos en este punto.
+> ℹ️ La salida del 6N137 es invertida. Al invertir A y B a la vez, la cuadratura se preserva. Si el sentido de conteo es incorrecto, intercambiar A↔B en el conector STM32.
 
 ---
 
