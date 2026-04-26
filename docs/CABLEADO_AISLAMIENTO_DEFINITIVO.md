@@ -189,7 +189,7 @@ Sección 11 para usos potenciales. **No conectar por ahora.**
 | **A4** | WHEEL_RR | PB15 | EXTI15 | LJ12A3 cubo rueda RR |
 | **A5** | STEER_CENTER | PB5 | EXTI5 | LJ12A3 cremallera dirección |
 | **A6** | ENC_Z | PB4 | EXTI4 *(inactivo)* | E6B2-CWZ6C canal Z |
-| A7 | *(libre)* | — | — | Reservado |
+| **A7** | **IGN_SENSE** | **GPIO 40 ESP32-S3** | **GPIO INPUT (lógica invertida)** | **Llave de contacto +12 V (ACC/IGN)** |
 | A8 | *(libre)* | — | — | Reservado |
 
 ---
@@ -232,6 +232,7 @@ Tabla completa de todas las señales aisladas, lista para ejecutar en taller.
 | 8 | **ENC_Z** | E6B2-CWZ6C salida Z (NPN OC, 5–24 V) | PB4 / EXTI4 *(†)* | **PC817** | Placa-A, canal A6 | VCC_encoder dominio | 3.3 V STM32 | < 50 Hz; pulso 41.7 µs >> 6 µs PC817; EXTI no activo en firmware actual |
 | 9 | **CAN_TX** | STM32G474RE PA12 (FDCAN1_TX) | PA12 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
 | 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PA11 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
+| 11 | **IGN_SENSE** | Bombín de llave (línea ACC/IGN +12 V) | **GPIO 40 ESP32-S3** | **PC817** | Placa-A, canal A7 | +12 V vehículo + GND chasis | 3.3 V (común STM32 ↔ ESP32) | Aislar +12 V automoción del 3.3 V; uso continuo → R_LED = **1 kΩ** (no 330 Ω); lógica invertida (LOW = llave ON), ya contemplada en `power_manager.cpp` |
 
 *(†) ENC_Z: no activo en el firmware actual. Requiere configurar EXTI4 y añadir ISR cuando
 se decida activar. Ver Sección 10.5.*

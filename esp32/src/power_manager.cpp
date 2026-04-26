@@ -30,7 +30,10 @@ static unsigned long stateEntryMs = 0;
 // Debounced key reading
 // -------------------------------------------------------------------------
 static bool readKeyDebounced() {
-    bool raw = (digitalRead(PIN_IGNITION_SENSE) == HIGH);
+    // PC817 optocoupler inverts the signal: collector is pulled HIGH by the
+    // module's onboard pull-up when the LED is OFF (key OFF), and is pulled
+    // LOW when the LED conducts (key ON / +12V on input side).
+    bool raw = (digitalRead(PIN_IGNITION_SENSE) == LOW);
     unsigned long now = millis();
 
     if (raw != keyRawLast) {
@@ -50,10 +53,20 @@ static bool readKeyDebounced() {
 // -------------------------------------------------------------------------
 
 void init() {
-    // Hardware assumption: ignition signal is active-high.
-    // GPIO 40 reads HIGH when key is in ON position, LOW when OFF.
-    // Internal pull-down ensures LOW when disconnected (safe default = OFF).
-    pinMode(PIN_IGNITION_SENSE, INPUT_PULLDOWN);
+    // Hardware assumption: ignition signal goes through a PC817 optocoupler
+    // (1 channel of the 8-channel sensor isolation board). The optocoupler
+    // inverts the signal:
+    //   Key ON  (+12 V on input side, LED conducts) → collector pulled LOW.
+    //   Key OFF (no current through LED)            → collector floats HIGH
+    //                                                 via the module's
+    //                                                 onboard ~10 kΩ pull-up
+    //                                                 to 3.3 V.
+    // No internal pull is configured: the external pull-up on the PC817
+    // board is the only termination, which guarantees a defined HIGH (= key
+    // OFF, safe default) even if the board is disconnected from 3.3 V — in
+    // that case the line is left floating and the debounce filter keeps the
+    // last valid state until the wiring is restored.
+    pinMode(PIN_IGNITION_SENSE, INPUT);
     pinMode(PIN_POWER_HOLD, OUTPUT);
     digitalWrite(PIN_POWER_HOLD, LOW);
 
@@ -63,8 +76,9 @@ void init() {
     keyDebounced = false;
     keyChangeMs  = millis();
 
-    // Check if key is already on at boot (power-on with key turned)
-    if (digitalRead(PIN_IGNITION_SENSE) == HIGH) {
+    // Check if key is already on at boot (power-on with key turned).
+    // PC817 → LOW means the LED is conducting → key is in ON position.
+    if (digitalRead(PIN_IGNITION_SENSE) == LOW) {
         keyDebounced = true;
         keyRawLast   = true;
     }

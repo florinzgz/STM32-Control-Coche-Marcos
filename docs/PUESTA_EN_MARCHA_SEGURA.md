@@ -302,22 +302,34 @@ Encoder CH_Z ──┐                   │
 | 5 | Canales PC817 | De las 2 placas de 8 canales que tienes |
 | 4 | Sensores inductivos LJ12A3-4-Z/BX | NPN NO, 6-36V, para ruedas |
 | 1 | Sensor inductivo LJ12A3 | NPN NO, para centrado dirección |
-| 5 | Resistencia LED | **330 Ω** (lado sensor, alimentación del sensor) |
-| 5 | Resistencia pull-up | **10 kΩ** (lado STM32, 3.3V) |
+| 5 | Resistencia LED | **1 kΩ ¼ W** (lado sensor, en serie con el LED del PC817) |
+| 5 | Resistencia pull-up | **10 kΩ** a 3.3 V — **comprobar primero** si la placa PC817 ya la trae onboard antes de añadir externa |
 
-### Circuito tipo (para cada sensor inductivo LJ12A3 → PC817 → STM32)
+> **Nota de diseño — por qué 1 kΩ y no 330 Ω:**
+> A 12 V, 330 Ω fuerza ~33 mA continuos por el LED del PC817 cuando el opto está conduciendo. Eso supera la corriente nominal del PC817 (típ. 20 mA) y degrada el CTR a largo plazo.
+> A `WHEEL_MAX_FREQ_HZ = 200 Hz` con sensores LJ12A3-NPN-NO detectando 6 tornillos por revolución a velocidad máxima del coche, el ciclo de trabajo del LED se aproxima al 30–50 % en periodos sostenidos (no son pulsos cortos como un encoder mecánico). En condiciones de uso intensivo el régimen es prácticamente continuo, por lo que se especifica **1 kΩ** que limita la corriente a ~10.8 mA — bien dentro de la zona segura de por vida.
+> El centrado de dirección sí es de pulso muy corto (sólo activo al pasar por el centro), pero se usa el mismo valor por uniformidad y simplicidad de stock.
+
+### Circuito tipo (para cada sensor inductivo LJ12A3-NPN-NO → PC817 → STM32)
+
+> **Importante — cableado del LJ12A3 NPN open-collector:** la salida (cable negro) **sólo puede sumir corriente a GND** cuando detecta metal; nunca entrega tensión positiva. Por eso el LED del PC817 se alimenta desde +12 V a través de la resistencia limitadora, y la salida NPN se conecta al **cátodo** del LED (no al ánodo). De este modo el LED conduce cuando el sensor detecta metal y la NPN cierra a GND.
 
 ```
-LADO SENSOR (12-24V)               │  LADO STM32 (3.3V)
-                                   │
-LJ12A3 salida NPN ──┐             │
-                     │             │       10 kΩ
-                    330 Ω          │  3.3V──┤
-                     │             │        │
-                     └──→ Ánodo    │  Colector ──→ PAx / PBx (EXTI)
-                          PC817    │  PC817
-  GND_sensor ──────→ Cátodo       │  Emisor ──→ GND STM32
+LADO SENSOR (12-24V)                 │  LADO STM32 (3.3V)
+                                     │
++12V_sensor ──┬──→ Marrón LJ12A3     │
+              │                      │       10 kΩ (onboard placa PC817)
+              └─→ 1 kΩ ──→ Pin 1     │  3.3V─┤
+                          (Ánodo)    │       │
+                          PC817      │  Pin 4 (Colector) ──→ PAx / PBx (EXTI)
+                                     │  PC817
+LJ12A3 Negro ─────────→ Pin 2        │  Pin 3 (Emisor) ──→ GND STM32
+(salida NPN)             (Cátodo)    │
+                                     │
+GND_sensor ──→ Azul LJ12A3           │
 ```
+
+**Lógica resultante:** sensor detecta metal → NPN cierra → LED conduce → fototransistor del PC817 satura → **EXTI ve flanco de bajada (LOW)**. Es la convención que ya espera el firmware (`wheel_speed.c` cuenta flancos sin importar polaridad).
 
 ### Asignación de pines
 
@@ -328,6 +340,7 @@ LJ12A3 salida NPN ──┐             │
 | Rueda RL | PA2 | EXTI2 | PC817 placa 1, canal 3 |
 | Rueda RR | PB15 | EXTI15 | PC817 placa 1, canal 4 |
 | Centro dirección | PB5 | EXTI5 | PC817 placa 1, canal 5 |
+| **IGNITION (ESP32)** | **GPIO 40 ESP32-S3** | — | **PC817 placa 1, canal 7** (libre) |
 
 ### Verificación
 
@@ -335,6 +348,80 @@ LJ12A3 salida NPN ──┐             │
 2. Acerca un objeto metálico al sensor — el LED del PC817 debe encenderse
 3. La pantalla ESP32 debería registrar pulsos en CAN 0x200 (wheel speeds)
 4. Repite para los otros 4 sensores
+
+---
+
+## Fase 5b — Llave de contacto (IGNITION) vía PC817 al ESP32-S3
+
+**Objetivo:** Aislar galvánicamente la línea de llave de +12 V del bus 3.3 V del ESP32-S3 reutilizando un canal libre de la placa PC817 ya instalada.
+
+**Referencia firmware:** `esp32/src/power_manager.{h,cpp}` — `PIN_IGNITION_SENSE = GPIO 40`.
+
+### ⚠️ Lógica INVERTIDA
+
+El PC817 invierte la señal:
+
+| Estado de la llave | LED PC817 | Fototransistor | GPIO 40 ESP32 |
+|---|---|---|---|
+| **OFF** | Apagado | Abierto | **HIGH** (pull-up onboard a 3.3 V) |
+| **ON**  | Conduce | Saturado | **LOW** |
+
+El firmware `power_manager.cpp` ya contempla esta inversión (`raw = (digitalRead == LOW)`). **No tocar** el firmware salvo si se cambiase la topología del aislamiento.
+
+### Materiales
+
+| Qty | Componente | Especificación |
+|-----|-----------|---------------|
+| 1 | Canal libre PC817 | Placa 1, canal 7 (canal 6 = ENC_Z reservado, ver `CABLEADO_AISLAMIENTO_DEFINITIVO.md`) |
+| 1 | Resistencia limitadora LED | **1 kΩ ¼ W** — obligatoria por uso continuo |
+| 1 | Fusible en línea | **1 A rápido** entre ACC/IGN del bombín y la resistencia |
+| 1 | Cable apantallado o trenzado | 0.5 mm², desde la llave hasta el PC817 |
+| 0 | Resistencia pull-up | NO añadir si la placa PC817 ya trae onboard ~10 kΩ (verificar — ver más abajo) |
+
+### Circuito
+
+```
+LADO 12 V VEHÍCULO                    │  LADO 3.3 V (común STM32 ↔ ESP32)
+                                      │
++12V IGNITION ──[1 A]── 1 kΩ ──→ Pin 1│        10 kΩ (onboard placa PC817)
+(llave)                       (Ánodo) │  3.3V ─┤
+                               PC817  │        │
+                                      │  Pin 4 (Colector) ──→ GPIO 40 ESP32
+GND_vehículo ──────────────→ Pin 2    │  PC817
+                            (Cátodo)  │  Pin 3 (Emisor) ──→ GND ESP32 (= GND STM32)
+                                      │
+─────────── BARRERA GALVÁNICA ────────│──────────────────────────────────────
+```
+
+### Verificación de pull-up onboard (importante)
+
+Antes de conectar nada, **mide con polímetro entre el pin OUT del canal y el pin VCC** del lado salida de la placa PC817 (con la placa desalimentada):
+
+- **Lectura ≈ 10 kΩ** → la placa ya trae pull-up. **No añadas resistencia externa**, conecta OUT directamente a GPIO 40.
+- **Lectura > 1 MΩ / infinito** → la placa NO trae pull-up. Suelda **10 kΩ entre GPIO 40 y 3.3 V** (la mayoría de placas PC817 8ch comerciales sí lo traen, así que este caso es raro).
+
+> Las placas PC817 de 8 canales (LU-PC817 y similares) **comparten una sola GND y una sola VCC en el lado de salida** para los 8 canales. Como GND_STM32 = GND_ESP32 (ya unidas por CAN/UART), el lado de salida del PC817 puede compartirse sin problema entre ambas MCUs. La barrera galvánica sigue intacta porque sólo separa el dominio +12 V del vehículo del dominio 3.3 V común.
+
+### Cálculo de corriente del LED (justificación de la 1 kΩ)
+
+```
+I_LED = (V_BAT - V_F) / R_serie
+      = (12 V - 1.2 V) / 1 000 Ω
+      = 10.8 mA  → ✅ <20 mA nominal PC817, CTR estable de por vida
+```
+
+| R_serie | I_LED a 12 V | Veredicto |
+|---|---|---|
+| 330 Ω | 33 mA continuos | ❌ Excede I_F nominal, degrada CTR (NO usar para IGNITION) |
+| **1 kΩ** | **10.8 mA** | ✅ **Recomendada** |
+| 2.2 kΩ | 4.9 mA | ⚠️ CTR justa, menos margen frente a tolerancia de placa |
+
+### Verificación funcional
+
+1. Llave en **OFF** → `digitalRead(40) == HIGH` (multímetro: ~3.3 V) → estado `OFF`.
+2. Gira llave a **ON** → `digitalRead(40) == LOW` (multímetro: ~0.2 V) → en ≤50 ms (debounce) entra en `POWER_HOLD` → `STARTING` → `RUNNING`.
+3. Gira llave a **OFF** → en ≤50 ms (debounce) entra en `SHUTTING_DOWN` durante 3 s (audio de despedida) → `OFF`. Verifica que el relé de retardo de 12 V mantiene la alimentación durante > 3 s.
+4. **No deben aparecer rebotes**: el debounce (`DEBOUNCE_MS = 50`) absorbe el rebote típico de una llave (≤20 ms).
 
 ---
 
