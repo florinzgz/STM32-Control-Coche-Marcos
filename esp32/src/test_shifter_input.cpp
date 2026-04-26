@@ -105,13 +105,15 @@ static void test_read_park() {
 }
 
 /* ====================================================================== */
-/* TEST 4 — Normal gear read: Reverse (GPA1 active-low = 0xFD)           */
+/* TEST 4 — Normal gear read: Reverse (GPA4 active-low = 0xEF)           */
+/* New pin mapping: GPA4 = R (bottom of lever)                            */
 /* ====================================================================== */
 static void test_read_reverse() {
     printf("  test_read_reverse...\n");
     reset_and_init(true);
 
-    g_wire_read_value = 0xFD;
+    // GPA4 active-low: bit 4 = 0 → Reverse.  Port value = 0b11101111 = 0xEF
+    g_wire_read_value = 0xEF;
     tick(100);
 
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::REVERSE);
@@ -173,7 +175,7 @@ static void test_recovery() {
 
     // Device comes back
     g_wire_end_result     = 0;
-    g_wire_read_value     = 0xF7;  // Forward (GPA3 active-low)
+    g_wire_read_value     = 0xFB;  // Forward/D1 (GPA2 active-low)
     g_wire_request_result = 1;
 
     tick(1250);  // backoff expired
@@ -231,7 +233,7 @@ static void test_init_failure_backoff() {
 
     // Device appears after backoff
     g_wire_end_result     = 0;
-    g_wire_read_value     = 0xFB;  // Neutral (GPA2 active-low)
+    g_wire_read_value     = 0xF7;  // Neutral (GPA3 active-low)
     g_wire_request_result = 1;
     tick(1000);  // backoff expired
     ASSERT(shifter::isConnected());

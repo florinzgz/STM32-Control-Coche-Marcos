@@ -2,9 +2,17 @@
 // ESP32-S3 — Shifter Input Driver (MCP23017 I2C) — Implementation
 //
 // Reads gear selector position from MCP23017 Port A pins (active-low).
-// Pin mapping:
-//   GPA0 = Park, GPA1 = Reverse, GPA2 = Neutral,
-//   GPA3 = Drive (D1), GPA4 = Drive2 (D2)
+// Pin mapping matches the physical lever order top → bottom:
+//   GPA0 = Park (P)       — position 1 (top)
+//   GPA1 = Drive2 (D2)    — position 2
+//   GPA2 = Drive1 (D1)    — position 3
+//   GPA3 = Neutral (N)    — position 4
+//   GPA4 = Reverse (R)    — position 5 (bottom)
+//
+// The lever uses dry contacts (no internal voltage).  Each signal pin is
+// held high by the MCP23017 internal pull-up and pulled to GND when the
+// corresponding position is selected (active-low, one-hot encoding).
+// The common return wire of the lever must be connected to GND.
 //
 // If no pin is active or multiple pins are active, defaults to Neutral.
 //
@@ -22,12 +30,12 @@ static constexpr uint8_t REG_IODIRA   = 0x00;  // I/O Direction A
 static constexpr uint8_t REG_GPPUA    = 0x0C;  // Pull-Up A
 static constexpr uint8_t REG_GPIOA    = 0x12;  // GPIO A read
 
-// Pin masks for each gear position on Port A
-static constexpr uint8_t PIN_PARK     = (1 << 0);  // GPA0
-static constexpr uint8_t PIN_REVERSE  = (1 << 1);  // GPA1
-static constexpr uint8_t PIN_NEUTRAL  = (1 << 2);  // GPA2
-static constexpr uint8_t PIN_FORWARD  = (1 << 3);  // GPA3
-static constexpr uint8_t PIN_FWD_D2   = (1 << 4);  // GPA4
+// Pin masks for each gear position on Port A — physical lever order top→bottom
+static constexpr uint8_t PIN_PARK     = (1 << 0);  // GPA0 — P  (top)
+static constexpr uint8_t PIN_FWD_D2   = (1 << 1);  // GPA1 — D2
+static constexpr uint8_t PIN_FORWARD  = (1 << 2);  // GPA2 — D1
+static constexpr uint8_t PIN_NEUTRAL  = (1 << 3);  // GPA3 — N
+static constexpr uint8_t PIN_REVERSE  = (1 << 4);  // GPA4 — R  (bottom)
 static constexpr uint8_t GEAR_MASK    = 0x1F;       // Bits 0-4
 
 // I2C error handling constants
