@@ -353,7 +353,7 @@ STM32 I²C1
 
 | Componente                    | Valor / Tipo        | Ubicación                               |
 |-------------------------------|---------------------|-----------------------------------------|
-| Level shifter o divisor resistivo | BSS138 o divisor R | Conversión 5 V → 3.3 V en señales encoder |
+| 3× 6N137 optoacoplador | R_IN 330 Ω + pull-up 4,7 kΩ | Aislamiento galvánico + conversión 5 V → 3.3 V en señales encoder (A, B, Z) |
 
 ---
 

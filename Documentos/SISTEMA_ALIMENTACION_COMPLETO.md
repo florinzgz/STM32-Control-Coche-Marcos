@@ -73,7 +73,7 @@ Comunicación inter-MCU: **FDCAN / TWAI a 500 kbps** (23 IDs de mensaje).
              ├── TCA9548A (I2C mux)
              ├── 6× INA226 (vía TCA9548A)
              ├── Sensores inductivos (vía optoacopladores)
-             └── Encoder E6B2-CWZ6C (vía divisor/level-shifter)
+             └── Encoder E6B2-CWZ6C (vía 3× 6N137)
 ```
 
 ---
@@ -497,7 +497,7 @@ Cada relé incluye:
 
 | Entrada | Sensor | Peligro | Solución |
 |---------|--------|---------|----------|
-| PA15, PB3, PB4 | Encoder E6B2-CWZ6C (5V) | 5V destruye pin 3.3V | Divisor: R1=1kΩ + R2=2.2kΩ → 3.44V |
+| PA15, PB3, PB4 | Encoder E6B2-CWZ6C (5V) | 5V destruye pin 3.3V + picos inductivos motor | 3× 6N137 (R_IN 330Ω, pull-up 4.7kΩ a 3.3V) — aislamiento galvánico 2500 V |
 | PA3 | Pedal Hall SS1324 (5V) | Sobretensión ADC | Divisor: 10kΩ + 6.8kΩ → máx 2.0V |
 | PA0/PA1/PA2/PB15 | LJ12A3 inductivos (6–36V) | Pico inductivo | Optoacoplador PC817 obligatorio |
 | PA11/PA12 | Bus CAN | Sobretensión diferencial | Solo conectar al SN65HVD230 (nunca directo) |
@@ -545,7 +545,7 @@ El sistema de seguridad (`safety_system.c`) monitoriza la tensión de batería 2
 |----------------|----------------|----------|
 | 3.3V (Nucleo) | 3.25–3.35 V | No encender hasta corregir |
 | 5V (lógica) | 4.85–5.15 V | Ajustar fuente |
-| PA15 encoder (máx) | ≤3.5 V | Revisar divisor 1kΩ+2.2kΩ |
+| PA15 encoder (máx) | ≤3.3 V | Revisar 6N137 y pull-up 4.7kΩ |
 | PA3 pedal (máx) | ≤2.1 V | Revisar divisor 10kΩ+6.8kΩ |
 | GND–GND (STM32 vs BTS7960) | <0.1 V | Si >0.3V revisar cableado masa |
 
@@ -624,10 +624,10 @@ Todas las masas (GND) del sistema convergen en un **único punto central** llama
 | 9 | PA10 | GPIOA | RPWM FR | BTS7960 FR | TIM1_CH3 | 3.3V PWM |
 | 10 | PA11 | GPIOA | FDCAN1_RX | SN65HVD230 | FDCAN1 AF9 | 3.3V lógico |
 | 11 | PA12 | GPIOA | FDCAN1_TX | SN65HVD230 | FDCAN1 AF9 | 3.3V lógico |
-| 12 | PA15 | GPIOA | Encoder A | E6B2-CWZ6C | TIM2_CH1 | 3.3V (con divisor) |
+| 12 | PA15 | GPIOA | Encoder A | E6B2-CWZ6C | TIM2_CH1 | 3.3V (vía 6N137) |
 | 13 | PB0 | GPIOB | OneWire | DS18B20 ×5 | GPIO bit-bang | 3.3V |
-| 14 | PB3 | GPIOB | Encoder B | E6B2-CWZ6C | TIM2_CH2 | 3.3V (con divisor) |
-| 15 | PB4 | GPIOB | Encoder Z | E6B2-CWZ6C | EXTI4 | 3.3V (con divisor) |
+| 14 | PB3 | GPIOB | Encoder B | E6B2-CWZ6C | TIM2_CH2 | 3.3V (vía 6N137) |
+| 15 | PB4 | GPIOB | Encoder Z | E6B2-CWZ6C | EXTI4 | 3.3V (vía 6N137) |
 | 16 | PB5 | GPIOB | Centro dirección | LJ12A3 | EXTI5 | 3.3V (vía PC817) |
 | 17 | PB6 | GPIOB | I2C SCL | TCA9548A | I2C1_SCL | 3.3V open-drain |
 | 18 | PB7 | GPIOB | I2C SDA | TCA9548A | I2C1_SDA | 3.3V open-drain |
@@ -787,13 +787,12 @@ BOOT ──► STANDBY ──► ACTIVE ⇄ DEGRADED ──► SAFE ──► ER
 | 1 | 10 kΩ ±1% | R2 divisor llave contacto |
 | 1 | 10 kΩ ±1% | R1 divisor pedal (5V→2.0V) |
 | 1 | 6.8 kΩ ±1% | R2 divisor pedal |
-| 3 | 1 kΩ ±5% | R1 divisor encoder (5V→3.44V) |
-| 3 | 2.2 kΩ ±5% | R2 divisor encoder |
+| 3 | 330 Ω ±5% | R_IN serie LED 6N137 encoder (A, B, Z) |
+| 3 | 4.7 kΩ ±5% | Pull-up salida Vo 6N137 encoder a +3.3V |
 | 4 | 4.7 kΩ ±5% | Pull-up I2C (SCL+SDA ×2 buses) |
 | 1 | 4.7 kΩ ±5% | Pull-up OneWire (PB0) |
 | 5 | 10 kΩ ±5% | Pull-down base transistor/relé |
 | 4 | 820 Ω ±5% | Corriente LED optoacoplador PC817 |
-| 3 | 220 Ω ±5% | Corriente LED optoacoplador 6N137 (encoder) |
 | 2 | 330 Ω ±5% | Serie datos WS2812B (frontal + trasero) |
 | 1 | 1 kΩ ±5% | Base transistor BC547 (relé retención) |
 | 1 | 1 kΩ ±5% | Serie TX DFPlayer |
