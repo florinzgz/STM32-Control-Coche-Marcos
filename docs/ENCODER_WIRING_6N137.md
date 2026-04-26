@@ -1,10 +1,11 @@
 # Guía de Conexión: Encoder E6B2-CWZ6C → 3× 6N137 → STM32G474RE
 
-> **Versión:** 2.0
+> **Versión:** 3.0
 > **Fecha:** 2026-04-26
 > **Hardware:** 1× Omron E6B2-CWZ6C (1200 PPR, salida push-pull 5 V)
-> **Interfaz:** 3× optoacoplador 6N137 (aislamiento galvánico + conversión 5 V → 3.3 V)
+> **Interfaz:** 3× módulo breakout 6N137 canal único (flyelectronic, Taobao/AliExpress)
 > **MCU:** STM32G474RE (3.3 V, TIM2 encoder mode)
+> **Módulo confirmado:** 6N137 breakout single-channel — R_IN, R_PU y C_BP ya incluidos en PCB
 
 ---
 
@@ -108,28 +109,55 @@ Z (naranja) ──[330Ω]──► A (pin 2) │6N137 #3│ Vo (pin 6) ──[4.
 
 ## 5. Lista de componentes necesarios
 
-| Ref | Componente | Valor / Referencia | Cantidad | Obligatorio |
-|-----|------------|-------------------|----------|-------------|
-| U_ENC_A | Optoacoplador | **6N137** (DIP-8 o módulo breakout) | 1 | ✅ Sí |
-| U_ENC_B | Optoacoplador | **6N137** (DIP-8 o módulo breakout) | 1 | ✅ Sí |
-| U_ENC_Z | Optoacoplador | **6N137** (DIP-8 o módulo breakout) | 1 | ✅ Sí |
-| R_IN_A | Resistencia serie LED | **330 Ω** / ¼W | 1 | ✅ Sí |
-| R_IN_B | Resistencia serie LED | **330 Ω** / ¼W | 1 | ✅ Sí |
-| R_IN_Z | Resistencia serie LED | **330 Ω** / ¼W | 1 | ✅ Sí |
-| R_PU_A | Resistencia pull-up salida | **4.7 kΩ** / ¼W | 1 | ✅ Sí |
-| R_PU_B | Resistencia pull-up salida | **4.7 kΩ** / ¼W | 1 | ✅ Sí |
-| R_PU_Z | Resistencia pull-up salida | **4.7 kΩ** / ¼W | 1 | ✅ Sí |
-| C_BULK | Condensador electrolítico | **10 µF / 10 V** | 1 | ✅ Sí (bulk 5 V encoder) |
-| C_BP | Condensador cerámico | **100 nF / 10 V** (X7R) | 3 | ✅ Sí (desacoplo VCC de cada 6N137, lado 3.3V) |
-| FB1 | Ferrita SMD | 100 Ω @ 100 MHz | 1 | ⚠️ Recomendable (en serie +5V encoder) |
+### 5.1 Módulo breakout 6N137 (canal único) — componentes YA INCLUIDOS en PCB
 
-> **Nota sobre módulos breakout:** Los módulos "6N137 dual" o "5 módulos dobles" ya incluyen los resistores de serie y pull-up en placa. Verificar los valores en el módulo específico; si traen R_IN < 220 Ω o > 560 Ω, sustituir por 330 Ω.
+Se utilizan **3 módulos breakout individuales 6N137** (proveedor: flyelectronic, Taobao/AliExpress). La PCB de cada módulo ya incorpora todos los componentes discretos necesarios:
+
+| Componente en módulo | Marcado SMD | Valor real | Función | Estado |
+|----------------------|-------------|-----------|---------|--------|
+| R_IN (resistencia serie LED) | **5600** | 560 Ω | Limita I_F: (5V−1.5V)/560Ω = **6.25 mA** ✅ (rango 2–15 mA) | ✅ Incluido |
+| R_PU (pull-up salida) | **472** | 4.7 kΩ | Pull-up pin 6 (Vo) → +3.3 V | ✅ Incluido |
+| C_BP (desacoplo VCC) | componente amarillo | ~100 nF cerámica | Desacoplo VCC del 6N137 lado 3.3 V | ✅ Incluido |
+| 6N137 (IC optoacoplador) | **6N137** (DIP-8) | — | Aislamiento galvánico + conversión 5V→3.3V | ✅ Incluido |
+
+> **Nota sobre R_IN = 560 Ω:** El valor de 560 Ω (frente a 330 Ω nominal) da I_F = 6.25 mA, dentro del rango nominal del 6N137 (2–15 mA). La velocidad de conmutación es ligeramente inferior pero completamente irrelevante a 20 kHz frente al límite de 10 Mbps del 6N137. **No es necesario sustituir esta resistencia.**
+
+### 5.2 Componentes EXTERNOS aún necesarios (no incluidos en el módulo)
+
+| Ref | Componente | Valor | Cantidad | Obligatorio | Dónde va |
+|-----|------------|-------|----------|-------------|----------|
+| C_BULK | Condensador electrolítico | **10 µF / 25 V** | 1 | ✅ Sí | Rail +5V encoder, junto al conector de alimentación |
+| FB1 | Ferrita SMD | 100 Ω @ 100 MHz | 1 | ⚠️ Recomendable | En serie en el rail +5V encoder antes del C_BULK |
+
+> ✅ **Conclusión:** Con los 3 módulos breakout 6N137 y el condensador de 10 µF en el rail de 5 V del encoder, el circuito de aislamiento está **completamente equipado**. No hace falta ninguna resistencia adicional externa.
 
 **Resistencias pull-up en encoder:** ❌ **No necesarias** — la salida push-pull del CWZ6C define activamente el nivel HIGH y LOW; el 6N137 solo necesita corriente de LED, que provee la salida activa del encoder.
 
 ---
 
-## 6. Verificación de fiabilidad con 6N137
+## 5.3 Pinout y conexión del módulo breakout 6N137
+
+El módulo breakout tiene pads/pines en ambos extremos. La nomenclatura típica es:
+
+```
+┌──────────────────────────────────────────────────────┐
+│  Lado ENTRADA (encoder 5 V)    │  Lado SALIDA (STM32 3.3 V)  │
+│                                │                              │
+│  IN  ─── señal encoder (A/B/Z) │  OUT ─── PA15 / PB3 / PB4   │
+│  GND ─── GND_encoder           │  VCC ─── +3.3 V (STM32)      │
+│  VCC ─── +5 V encoder          │  GND ─── GND_STM32           │
+└──────────────────────────────────────────────────────┘
+        [R_IN 560Ω incluido]  [R_PU 4.7kΩ incluido]
+                              [C_BP 100nF incluido]
+```
+
+> **⚠️ Crítico:** Los pads GND de cada lado deben ir a masas **separadas** (GND_encoder y GND_STM32 respectivamente). No conectar GND_encoder directamente a GND_STM32 — eso cortocircuitaría el aislamiento galvánico.
+
+> **⚠️ Pin ENABLE (EN, pin 7):** En los módulos breakout ya suele estar conectado internamente a VCC del lado lógico. Si no, conectar al pad VCC del lado STM32 (+3.3 V).
+
+---
+
+
 
 ### 6.1 Análisis de frecuencia
 
