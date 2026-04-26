@@ -80,6 +80,74 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — docs(encoder): migración completa de conexión E6B2-CWZ6C a 3× 6N137 — eliminación de TXS0108E y divisores resistivos
+- **Fecha:** 2026-04-26
+- **Autor:** Copilot
+- **Rama:** `copilot/e6b2-cwz6c-encoder-implementation`
+- **Estado:** En curso (rama activa; merge gestionado por el mantenedor).
+- **Descripción del cambio:** Toda la documentación del proyecto describía la interfaz del encoder E6B2-CWZ6C con el STM32 usando un level-shifter TXS0108E o un divisor resistivo (R1=1kΩ + R2=2.2kΩ), soluciones que **no proporcionan aislamiento galvánico**. Dado que el encoder está físicamente próximo al motor de dirección (BTS7960, conmutando a 20 kHz, corrientes de hasta 10 A), los picos inductivos y los bucles de masa representan un riesgo real de corrupción de los conteos de cuadratura y de daño permanente a los pines PA15/PB3/PB4. Esta PR migra **toda la documentación** a la solución definitiva: **3× optoacopladores 6N137** (uno por canal A, B, Z), que proporcionan aislamiento galvánico de 2500 V y conversión 5 V→3.3 V simultáneamente, con 120 ns de propagación máxima (< umbral del filtro TIM2 de 282 ns).
+
+#### Circuito definitivo E6B2-CWZ6C → STM32G474RE
+
+```
+Encoder A/B/Z (push-pull 5V) → [330Ω R_IN] → LED 6N137 → GND_encoder (aislado)
+                                              Vo 6N137 → [4.7kΩ pull-up a 3.3V] → PA15 / PB3 / PB4
+                                              EN (pin 7) → +3.3V
+```
+
+| Canal | R_IN | Destino STM32 | Pull-up | Periférico |
+|-------|------|---------------|---------|-----------|
+| A (negro) | 330 Ω | PA15 | 4.7 kΩ a 3.3V | TIM2_CH1 (AF1) |
+| B (blanco) | 330 Ω | PB3 | 4.7 kΩ a 3.3V | TIM2_CH2 (AF1) |
+| Z (naranja) | 330 Ω | PB4 | 4.7 kΩ a 3.3V | EXTI4 |
+
+#### Archivos modificados (solo documentación — sin cambios de firmware)
+
+| Archivo | Tipo de cambio |
+|---------|----------------|
+| `docs/ENCODER_WIRING_TXS0108E.md` | ❌ **Eliminado** |
+| `docs/ENCODER_WIRING_6N137.md` | ✅ **Creado** — guía completa: esquema, BOM, análisis de frecuencia/timing, verificación hardware |
+| `docs/CONEXIONES_COMPLETAS.md` | Sección encoder (tabla cableado, BOM, etapa 5 instalación, columnas de pines) |
+| `docs/MATERIALES_POR_MODULO.md` | §7 BOM encoder (TXS0108E → 3× 6N137, R_IN, pull-up); tabla de resistencias |
+| `docs/LISTADO_PINES_COMPLETO.md` | Sección 2.8 encoder (TXS0108E → 6N137, componentes); resistencias divisor → R_IN + pull-up |
+| `docs/HARDWARE.md` | Level-shifter, BOM principal, referencia datasheet, enlace a doc |
+| `docs/HARDWARE_WIRING_MANUAL.md` | §12.5 (divisor/BSS138 → 6N137 con esquema y cálculo); BOM final; tabla multímetro |
+| `docs/SENSOR_INTERFACE.md` | Opciones level-shifter (6N137 = ✅ elegida; TXS0108E/BSS138/divisor = ❌); esquema conexión ASCII |
+| `docs/ENCODER_CURRENT_STATE.md` | Comentario IC1Filter (210 ns → 282 ns corregido), pull-up rationale, referencias TXS0108E → 6N137 |
+| `docs/hardware_modifications.md` | Descripción de cableado encoder; checklist instalación |
+| `docs/POWER_DISTRIBUTION.md` | §8 protección encoders (BSS138/divisor → 6N137) |
+| `docs/IGNITION_KEY_CIRCUIT_VALIDATION.md` | Exclusión encoder: eliminada BSS138 como opción válida; 6N137 como solución definitiva |
+| `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md` | Diagrama de alimentación, tabla protección pines, tabla multímetro, tabla pinout, BOM resistencias |
+| `README.md` | Tabla Encoder Interface |
+
+#### Motivo técnico
+
+| Opción | Estado | Razón |
+|--------|--------|-------|
+| **3× 6N137** | ✅ Elegida | Aislamiento galvánico 2500 V + 5V→3.3V. 10 Mbps (×500 de margen). Protege STM32 de picos inductivos del BTS7960 adyacente. |
+| TXS0108E | ❌ Descartada | Sin aislamiento galvánico. Bucles de masa y picos inductivos del motor de dirección degradan los pulsos de cuadratura. |
+| Divisor R1/R2 | ❌ Descartada | Sin aislamiento. Deforma flancos. No protege contra picos inductivos. |
+| BSS138 | ❌ Descartada | Sin aislamiento galvánico. Mismo problema que TXS0108E. |
+
+#### Verificaciones de compatibilidad
+
+| Criterio | Resultado |
+|----------|-----------|
+| Propagación 6N137 (120 ns máx) vs. filtro TIM2 (282 ns) | ✅ Flancos reales pasan, glitches rechazados |
+| f_max encoder a 20 kHz vs. 6N137 límite 10 Mbps | ✅ Margen ×500 |
+| GPIO_NOPULL (PA15, PB3) en firmware | ✅ Correcto — pull-up externo 4.7kΩ en Vo del 6N137 |
+| Señal invertida A y B simultáneamente | ✅ Cuadratura preservada — solo cambia sentido de conteo |
+| Código firmware (encoder_reader.c, main.c) | ✅ Sin cambios — el hardware es transparente al firmware |
+
+#### Invariantes preservadas
+
+- Sin cambios en firmware (STM32 ni ESP32).
+- Sin cambios en protocolo CAN (IDs, DLC, cadencia).
+- Sin cambios en lógica de control (PID, Ackermann, safety).
+- `GPIO_NOPULL` en PA15/PB3 es correcto con pull-up externo 4.7kΩ.
+
+---
+
 ### PR — feat(shutdown): handshake CAN 0x130 SYSTEM_SHUTDOWN — estado seguro determinista pre-corte de potencia
 - **Fecha:** 2026-04-25
 - **Autor:** Copilot

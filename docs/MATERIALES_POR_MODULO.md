@@ -224,16 +224,21 @@
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, open-collector NPN, cable de 1–2 m | Omron o compatible |
-| 3 | Optoacoplador 6N137 | High-speed (10 Mbps, 75–120 ns) | Uno por canal (A, B, Z); **no usar PC817** (demasiado lento para el encoder a alta velocidad) |
-| 3 | Resistencia LED 6N137 | **220 Ω / ¼W** | En serie con el ánodo del LED del 6N137 |
-| 3 | Resistencia pull-up salida 6N137 | **1 kΩ / ¼W** | Entre pin Vo (pin 6) del 6N137 y 3.3V; activa la salida open-collector |
-| 3 | Cable apantallado | 28 AWG apantallado, ≥ 30 cm | Del 6N137 al STM32 (PA15, PB3, PB4); separado de los cables de potencia |
-| 1 | Fuente 5V | Existente en el sistema | Alimentación del encoder (VCC marrón) |
+| 1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, **push-pull (voltage output)**, cable de 1–2 m | Omron o compatible |
+| 3 | Optoacoplador 6N137 | DIP-8 o módulo breakout doble; uno por canal (A, B, Z) | Aislamiento galvánico 2500 V + conversión 5V→3.3V. Máx 10 Mbps — margen ×500 a 20 kHz |
+| 3 | Resistencia serie LED | **330 Ω** / ¼W | R_IN para I_F ≈ 10.6 mA con encoder a 5V: (5V−1.5V)/330Ω |
+| 3 | Resistencia pull-up salida | **4.7 kΩ** / ¼W | Pull-up Vo del 6N137 a +3.3V (lógico STM32) |
+| 1 | Condensador electrolítico 10 µF | 10V | Bulk en línea 5V del encoder |
+| 3 | Condensador cerámico 100 nF | X7R / 10V | Desacoplo VCC lado lógico de cada 6N137 (junto al CI) |
+| 1 | Ferrita SMD | 100 Ω @ 100 MHz | En serie con +5V del encoder (p.ej. BLM18AG121SN1) — recomendable en entorno con motores |
+| 1 | Cable apantallado | 28 AWG apantallado, ≥ 30 cm | Del 6N137 al STM32 (PA15, PB3, PB4); separado de los cables de potencia |
+| 1 | Fuente 5V | Existente en el sistema | Alimentación del encoder y lado LED de los 6N137 |
 
-> **⚠️ Crítico:** La señal del encoder es de 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. El 6N137 proporciona tanto el aislamiento galvánico como el level shifting. El PC817 no es válido aquí: su retardo de 4–6 µs provoca pérdida de flancos a alta velocidad.
+> **⚠️ Crítico:** La señal del encoder es de 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. Los **3× 6N137** proporcionan aislamiento galvánico (2500 V) y conversión 5V→3.3V simultáneamente, protegiéndolo también de picos inductivos del motor de dirección adyacente.
 >
-> **⚠️ Los transistores del inventario (2N2222, BC337, 2N3904, etc.) y los diodos zener (1N4728~1N4737) NO son válidos como sustitutos** para la interfaz del encoder. El nivel de señal 5V→3.3V del encoder en cuadratura exige componentes con retardo de propagación simétrico y bajo (<120 ns) — los transistores TO-92 genéricos no garantizan esto y corromperían el conteo. Se **deben usar** los 6N137 (o BSS138 como alternativa sin aislamiento).
+> **ℹ️ Señal invertida:** La salida del 6N137 es lógicamente invertida. Al invertirse A y B a la vez, la cuadratura se preserva; solo el sentido del conteo cambia. Si es necesario, intercambiar A↔B en el conector STM32.
+>
+> **Ver esquema completo en:** `docs/ENCODER_WIRING_6N137.md`
 
 ---
 
@@ -420,7 +425,7 @@
 | 5 | DRV1–DRV5 | Módulo driver BTS7960 (IBT-2) | 4 tracción + 1 dirección |
 | 4 | M1–M4 | Motor DC 24V tracción | Brushed DC, 4 ruedas |
 | 1 | M5 | Motor DC 12V dirección | Brushed DC, dirección |
-| 1 | ENC1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, open-collector |
+| 1 | ENC1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, push-pull |
 | 1 | PEDAL | Sensor Hall SS1324LUA-T | 5V supply, 0.3–4.8V output |
 | 1 | MOD_RELAY | Módulo 4-ch opto relé SRD-12VDC-SL-C | 12V, 4 canales, trigger 3.3V (etapa 1 relés potencia) |
 | 3 | REL1–REL3 | Relé de potencia (bobina 12V) | ≥50A MAIN, ≥50A TRAC, ≥20A DIR (etapa 2) |
@@ -466,8 +471,8 @@
 | 2 | R_I2C | **4.7 kΩ** | ¼W | Pull-up I2C (PB6, PB7) |
 | 2 | R_I2C_ESP | **4.7 kΩ** | ¼W | Pull-up I2C ESP32 (GPIO8, GPIO9 para MCP23017) |
 | 1 | R_OW | **4.7 kΩ** | ¼W | Pull-up OneWire (PB0) |
-| 3 | R_6N137_IF | **220 Ω** | ¼W | Serie LED del 6N137 encoder (canales A, B, Z) |
-| 3 | R_6N137_PU | **1 kΩ** | ¼W | Pull-up salida Vo del 6N137 |
+| 3 | R_6N137_IF | **330 Ω** | ¼W | Resistencia serie LED del 6N137 encoder (canales A, B, Z) |
+| 3 | R_6N137_PU | **4.7 kΩ** | ¼W | Pull-up salida Vo del 6N137 a +3.3V (canales A, B, Z) |
 | 4 | R_PC817_IF | **820 Ω** | ¼W | Serie LED del PC817 (sensores velocidad + centrado) |
 | 5 | R_MOSFET_PD | **10 kΩ** | ¼W | Pull-down gate MOSFET relé |
 | 2 | R_CAN | **120 Ω** | ¼W | Terminación CAN (extremos del bus) |
@@ -488,7 +493,7 @@
 | 2 | TVS_CAN | TVS diodo bus CAN | PESD2CAN |
 | 5 | TVS_B+1–5 | TVS diodo B+ BTS7960 (opcional) | SMBJ30A (30V) |
 | 1 | Q_ANTI | MOSFET protección antipolarity | P-channel ≥ 40V, ≥ 80A |
-| 3 | OPT_ENC1–3 | Optoacoplador encoder | 6N137 |
+| 3 | U_6N137_ENC | Optoacoplador encoder | 6N137 (canales A, B, Z — aislamiento galvánico + 5V→3.3V) |
 | 5 | OPT_WS1–5 | Optoacoplador sensores | PC817 |
 
 ### Resistencias shunt

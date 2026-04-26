@@ -141,7 +141,8 @@ Sensor → Pull-up 10kΩ a 3.3V → STM32 GPIO
 | **Conteos/rev** | 4800 (1200 × 4 en quadrature) |
 | **Resolución angular** | 0.075° por count (360° / 4800) |
 | **Tensión** | 5V - 12V |
-| **Salida** | Line driver (compatible 3.3V) |
+| **Salida** | **Push-pull (voltage output)** — 0 V / VCC activo |
+| **Level-shifter / Aislamiento** | 3× 6N137 (optoacoplador, aislamiento galvánico 2500 V + 5 V → 3.3 V) — obligatorio entre encoder y STM32 |
 | **Pines STM32** | PA15 (A), PB3 (B), PB4 (Z) |
 
 **Resolución Angular:**
@@ -416,6 +417,7 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 | 5 | Driver BTS7960 | BTS7960 H-Bridge | €15 (5×) |
 | 5 | Motor DC 24V 250W | - | €100 (5×) |
 | 1 | Encoder E6B2-CWZ6C | E6B2-CWZ6C-1200P/R | €40 |
+| 3 | Optoacoplador encoder | 6N137 (aislamiento galvánico + 5V→3.3V) | €3 (3×) |
 | 6 | INA226 breakout | INA226 | €12 (6×) |
 | 1 | TCA9548A multiplexor | TCA9548A | €3 |
 | 5 | DS18B20 temperatura | DS18B20 | €5 (5×) |
@@ -427,7 +429,7 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 | 1 | DC-DC 24V→5V 3A | LM2596 | €5 |
 | 1 | LDO 5V→3.3V 1A | AMS1117-3.3 | €1 |
 
-**Total aproximado:** ~€400 (sin incluir chasis, ruedas, estructura)
+**Total aproximado:** ~€402 (sin incluir chasis, ruedas, estructura)
 
 ### Componentes Pasivos
 
@@ -441,8 +443,11 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 | 10 | Pull-up GPIO | 10kΩ 1/4W |
 | 5 | Diodo flyback (relés) | 1N4007 |
 | 5 | Transistor NPN (relés) | 2N2222 |
-| 10 | Condensador bypass | 100nF cerámico |
-| 5 | Condensador bulk | 100µF electrolítico |
+| 3 | Resistencia R_IN 6N137 | 330 Ω / ¼W |
+| 3 | Resistencia pull-up 6N137 | 4.7 kΩ / ¼W |
+| 1 | Condensador bulk encoder | 10µF electrolítico / 10V |
+| 10 | Condensador bypass (resto) | 100nF cerámico |
+| 5 | Condensador bulk (resto) | 100µF electrolítico |
 
 ---
 
@@ -451,12 +456,14 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 - [STM32G474RE Datasheet](https://www.st.com/resource/en/datasheet/stm32g474re.pdf)
 - [BTS7960 Datasheet](https://www.infineon.com/dgdl/Infineon-BTS7960-DS-v01_00-EN.pdf)
 - [E6B2-CWZ6C Manual](https://www.ia.omron.com/products/family/487/)
+- [6N137 Datasheet](https://www.broadcom.com/products/optocouplers/industrial-plastic/optocouplers/logic-gate-output/6n137)
 - [INA226 Datasheet](https://www.ti.com/lit/ds/symlink/ina226.pdf)
 - [TJA1051T/3 Datasheet](https://www.nxp.com/docs/en/data-sheet/TJA1051.pdf)
 - [DS18B20 Datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS18B20.pdf)
+- `docs/ENCODER_WIRING_6N137.md` — esquema completo de conexión del encoder (3× 6N137)
 
 ---
 
-**Última actualización:** 2026-02-01  
+**Última actualización:** 2026-04-26  
 **Autor:** florinzgz  
 **Proyecto:** STM32-Control-Coche-Marcos

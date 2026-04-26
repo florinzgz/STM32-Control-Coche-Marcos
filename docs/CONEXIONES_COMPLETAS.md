@@ -5,7 +5,7 @@
 > ⚠ **MODIFICACIONES DE HARDWARE REQUERIDAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
 > 1. **EN_RR cableado en PC2** (reasignado desde PC13 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado por el botón USER y no se usa como salida.
 > 2. Los enables **EN_FR (PC0)** y **EN_RL (PC1)** están en el conector **Morpho CN7** (pines 38 y 36) — **no** en el header Arduino CN9.
-> 3. El encoder de dirección requiere las tres señales **PA15 (A), PB3 (B), PB4 (Z)** cableadas a través del adaptador 5 V → 3.3 V.
+> 3. El encoder de dirección requiere las tres señales **PA15 (A), PB3 (B), PB4 (Z)** cableadas a través de **3× optoacopladores 6N137** (aislamiento galvánico + conversión 5 V → 3.3 V).
 
 **Fecha:** 2026-04-10
 **Propósito:** Referencia de taller para conectar todo el hardware y validar Phase 1
@@ -183,15 +183,17 @@ Instalar lo más cerca posible del módulo BTS7960 de dirección (bus 12V):
 
 ## 3) ENCODER DE DIRECCIÓN — E6B2-CWZ6C (1200 PPR)
 
-| Cable | De (Encoder) | A (STM32) | Función | Notas |
-|-------|-------------|-----------|---------|-------|
-| 16 | Cable A (blanco) | **PA15** | Cuadratura canal A (TIM2_CH1) | ⚠️ Adaptador 5V→3.3V necesario |
-| 17 | Cable B (negro) | **PB3** | Cuadratura canal B (TIM2_CH2) | ⚠️ Adaptador 5V→3.3V necesario |
-| 18 | Cable Z (naranja) | **PB4** | Pulso de índice (EXTI4) | 1 pulso por vuelta |
-| — | Cable rojo (+) | 5V | Alimentación encoder | NO conectar a 3.3V |
-| — | Cable azul (shield/0V) | GND | Masa encoder | GND común |
+| Cable | De (Encoder) | Intermedio | A (STM32) | Función | Notas |
+|-------|-------------|-----------|-----------|---------|-------|
+| 16 | Cable A (negro) | 6N137 #1 (LED→Vo) | **PA15** | Cuadratura canal A (TIM2_CH1) | Aislamiento galvánico + 5V→3.3V |
+| 17 | Cable B (blanco) | 6N137 #2 (LED→Vo) | **PB3** | Cuadratura canal B (TIM2_CH2) | Aislamiento galvánico + 5V→3.3V |
+| 18 | Cable Z (naranja) | 6N137 #3 (LED→Vo) | **PB4** | Pulso de índice (EXTI4) | Aislamiento galvánico + 5V→3.3V |
+| — | Cable marrón (+) | VCC_encoder | +5V | Alimentación encoder (lado ruidoso 6N137) | NO conectar a 3.3V |
+| — | Cable azul (GND) | GND_encoder | GND encoder | Masa encoder (aislada de GND STM32) | No compartir con GND lógico |
 
-> ⚠️ **CRÍTICO:** El encoder E6B2 es de salida 5V (open-collector NPN). Las señales A y B necesitan un adaptador de nivel 5V→3.3V (o un divisor de tensión con resistencias) antes de conectar a PA15 y PB3. Conectar 5V directo al STM32 puede dañar los pines.
+> ⚠️ **CRÍTICO:** El encoder E6B2-CWZ6C opera a 5V. Conectar 5V directamente a PA15/PB3 (pines 3.3V) destruye el STM32. Se usan **3× optoacopladores 6N137** como barrera galvánica y level-shifter simultáneos (VCC_encoder = 5V en el lado LED; pull-up a 3.3V en el lado Vo→STM32).
+>
+> ℹ️ **Señal invertida:** La salida del 6N137 es lógicamente invertida. Como A y B se invierten a la vez, la cuadratura se preserva; solo cambia el sentido de conteo. Si es necesario, intercambiar A↔B en el conector STM32. Ver esquema completo en `docs/ENCODER_WIRING_6N137.md`.
 
 **Resolución resultante:** 1200 PPR × 4 (cuadratura) = **4800 cuentas por vuelta** = 0.075° por cuenta
 
@@ -768,10 +770,10 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 10 | **PA10** | GPIOA | AF6 | TIM1_CH3 | BTS7960 FR → **RPWM** | PWM 20 kHz — adelante |
 | 11 | **PA11** | GPIOA | AF9 | **FDCAN1_RX** | TJA1051 #1 → **RXD** | ⚠️ CAN RX — Morpho CN10 pin 14 |
 | 12 | **PA12** | GPIOA | AF9 | **FDCAN1_TX** | TJA1051 #1 → **TXD** | ⚠️ CAN TX — Morpho CN10 pin 12 |
-| 13 | **PA15** | GPIOA | AF1 | TIM2_CH1 | Encoder E6B2 canal A | ⚠️ Adaptador 5V→3.3V |
+| 13 | **PA15** | GPIOA | AF1 | TIM2_CH1 | Encoder E6B2 canal A | ⚠️ Vía 6N137 (aislamiento galvánico)
 | 14 | **PB0** | GPIOB | Output OD | Bit-bang | Bus OneWire (5× DS18B20) | Pull-up 4.7kΩ a 3.3V |
-| 15 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Adaptador 5V→3.3V |
-| 16 | **PB4** | GPIOB | Input | GPIO (polled) | Encoder E6B2 índice Z | Pull-up, 1 pulso/vuelta |
+| 15 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Vía 6N137 (aislamiento galvánico)
+| 16 | **PB4** | GPIOB | Input | GPIO (polled) | Encoder E6B2 índice Z | Vía 6N137, pull-up 4.7kΩ a 3.3V
 | 17 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
 | 18 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
 | 19 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
@@ -835,7 +837,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 5 | BTS7960 módulo driver | Drivers motores | 4 tracción + 1 dirección |
 | 4 | Motor DC 24V | Motores tracción | Brushed DC |
 | 1 | Motor DC 12V | Motor dirección | Brushed DC |
-| 1 | Encoder E6B2-CWZ6C | Encoder dirección | 1200 PPR, 5V, open-collector |
+| 1 | Encoder E6B2-CWZ6C | Encoder dirección | 1200 PPR, 5V, push-pull |
 | 1 | Sensor Hall SS1324LUA-T | Pedal acelerador | Salida 0.3–4.8V (5V supply) |
 | 1 | Resistencia 10 kΩ (1%) | Divisor pedal R1 | Canal primario ADC, ¼W |
 | 1 | Resistencia 6.8 kΩ (1%) | Divisor pedal R2 | Canal primario ADC, ¼W |
@@ -848,7 +850,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 5 | Módulo 4-ch opto relé + relés potencia | Relés potencia y LED | Módulo SRD-12VDC-SL-C 4-ch (etapa 1) + relés potencia bobina 12V (etapa 2) + 2× relé LED |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
 | 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB6, PB7, PB0 |
-| 1 | Adaptador nivel 5V→3.3V | Encoder A/B | 2 canales mín (PA15, PB3) |
+| 3 | 6N137 optoacoplador | Encoder A/B/Z (aislamiento galvánico + 5V→3.3V) | DIP-8 o módulo breakout |
 | 6 | Resistencia shunt | INA226 | 5× 1.5 mΩ (50A/75mV, motores+dirección) + 1× 0.75 mΩ (100A/75mV, batería) |
 | 1 | Fuente 24V | Tracción | ≥20A capacidad |
 | 1 | Fuente 12V | Dirección | ≥5A capacidad |
@@ -926,7 +928,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### ⚠️ ANTES DE ENCENDER
 
 1. **Verificar GND común** — STM32, ESP32, BTS7960, fuentes de alimentación, y sensores deben compartir el mismo GND
-2. **Verificar tensiones** — PA15/PB3 (encoder) ≤ 3.3V, PA3 (pedal divisor) ≤ 2.1V. PA6/PA7/PA8/PA9/PA10/PC3/PC6/PC7/PC8/PC9 son salidas PWM (NO conectar a señales externas). El pedal 5V va al divisor resistivo, NO directamente al STM32
+2. Verificar tensiones — PA15/PB3 (encoder) ≤ 3.3V (salida 6N137 con pull-up). PA3 (pedal divisor) ≤ 2.1V.
 3. **No conectar motores todavía** — Para Phase 1, se puede probar sin motores conectados (solo verificar señales RPWM/LPWM con osciloscopio o LED en PA8/PA9/PA10/PC3/PC6/PC7/PC8/PC9/PA6/PA7)
 4. **Conectar CAN con transceivers** — NUNCA conectar PA11/PA12 directo a cables CAN. Necesitan transceiver TJA1051
 5. **Poner resistencias pull-up** — I2C (PB6, PB7) y OneWire (PB0) no funcionan sin pull-ups
@@ -1012,15 +1014,18 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### 🟢 ETAPA 5 — Encoder de dirección
 
 **Qué conectar:**
-1. Adaptador nivel 5V→3.3V en canales A y B
-2. Encoder A → Adaptador → **PA15** (TIM2_CH1)
-3. Encoder B → Adaptador → **PB3** (TIM2_CH2)
-4. Encoder Z → **PB4** (pull-up interno)
-5. Encoder VCC → 5V, GND → GND
+1. 3× optoacoplador 6N137: uno para canal A, uno para B, uno para Z
+2. Encoder A (negro) → R_IN 330Ω → LED 6N137 #1 → Vo → **PA15** (TIM2_CH1)
+3. Encoder B (blanco) → R_IN 330Ω → LED 6N137 #2 → Vo → **PB3** (TIM2_CH2)
+4. Encoder Z (naranja) → R_IN 330Ω → LED 6N137 #3 → Vo → **PB4** (EXTI4)
+5. Encoder VCC (marrón) → +5V (lado LED de cada 6N137)
+6. Encoder GND (azul) → GND_encoder (lado LED, aislado del GND STM32)
+7. Pull-up 4.7kΩ a 3.3V en cada salida Vo de 6N137
+8. Pin ENABLE (pin 7) de cada 6N137 → +3.3V
 
 **⚠️ PUNTOS CRÍTICOS:**
-- ⚠️ **OBLIGATORIO el adaptador 5V→3.3V** — el encoder E6B2 genera señales de 5V que dañarán PA15/PB3
-- Verificar con multímetro que la salida del adaptador no supera 3.3V
+- ⚠️ **OBLIGATORIO usar 6N137** — el encoder E6B2 genera señales de 5V que dañarán PA15/PB3 si se conectan directamente. El 6N137 aporta aislamiento galvánico 2500 V y convierte 5V→3.3V simultáneamente
+- La señal de salida del 6N137 es **invertida** — si el conteo va al revés, intercambiar A↔B
 
 **Verificar:**
 - [ ] Girar dirección manualmente → valor de encoder cambia en CAN 0x204
