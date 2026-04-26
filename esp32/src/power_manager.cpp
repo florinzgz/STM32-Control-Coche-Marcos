@@ -61,11 +61,13 @@ void init() {
     //                                                 via the module's
     //                                                 onboard ~10 kΩ pull-up
     //                                                 to 3.3 V.
-    // No internal pull is configured: the external pull-up on the PC817
-    // board is the only termination, which guarantees a defined HIGH (= key
-    // OFF, safe default) even if the board is disconnected from 3.3 V — in
-    // that case the line is left floating and the debounce filter keeps the
-    // last valid state until the wiring is restored.
+    // No internal pull is configured: the PC817 board's onboard pull-up to
+    // 3.3 V is the sole termination. While the 3.3 V rail is present (which
+    // it always is during normal operation, since GND/3.3 V are shared with
+    // the rest of the system) this guarantees a defined HIGH (= key OFF,
+    // safe default). If the 3.3 V rail itself were lost, the ESP32 would
+    // also lose power, so the floating condition is not an operational
+    // concern.
     pinMode(PIN_IGNITION_SENSE, INPUT);
     pinMode(PIN_POWER_HOLD, OUTPUT);
     digitalWrite(PIN_POWER_HOLD, LOW);

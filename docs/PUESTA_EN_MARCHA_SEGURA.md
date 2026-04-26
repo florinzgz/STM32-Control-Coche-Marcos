@@ -412,7 +412,7 @@ I_LED = (V_BAT - V_F) / R_serie
 
 | R_serie | I_LED a 12 V | Veredicto |
 |---|---|---|
-| 330 Ω | 33 mA continuos | ❌ Excede I_F nominal, degrada CTR (NO usar para IGNITION) |
+| 330 Ω | ~32.7 mA continuos | ❌ Excede I_F nominal, degrada CTR (NO usar para IGNITION) |
 | **1 kΩ** | **10.8 mA** | ✅ **Recomendada** |
 | 2.2 kΩ | 4.9 mA | ⚠️ CTR justa, menos margen frente a tolerancia de placa |
 
