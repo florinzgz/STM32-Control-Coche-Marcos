@@ -80,6 +80,53 @@ Sistema de control embebido para vehículo eléctrico de 4 ruedas con tracción 
 
 ## 3. Cambios Recientes (últimos PR)
 
+### PR — fix(shifter): la posición N no tiene contacto físico — 4 cables de señal + 1 común, N implícita
+- **Fecha:** 2026-04-26
+- **Autor:** Copilot
+- **Rama:** `copilot/connectar-palanca-de-cambios`
+- **Estado:** En curso (rama activa; merge gestionado por el mantenedor).
+- **Descripción del cambio:** Tras verificar la palanca con multímetro, el usuario confirmó que **solo existen 4 contactos físicos** (P, D2, D1, R) compartiendo un cable común (azul → GND). La posición **N (Neutral) no dispone de contacto propio** — es el estado de reposo de la palanca cuando ningún interruptor está cerrado. El firmware previo asumía 5 contactos one-hot (`GPA0=P, GPA1=R, GPA2=N, GPA3=D1, GPA4=D2`) con `GEAR_MASK = 0x1F`, lo que era incorrecto y nunca habría detectado la marcha N (al no existir continuidad nadie podía cerrar `GPA2`). Esta PR corrige el mapeo del firmware al cableado real, ajusta la decodificación para tratar "ningún pin activo" como NEUTRAL, y propaga los cambios a toda la documentación de la palanca.
+
+#### Mapeo definitivo confirmado por continuidad
+```
+Cable común AZUL ──────────── GND del MCP23017
+GPA0 (pin 21) ──── azul + morado    → P  (Park)
+GPA1 (pin 22) ──── azul + verde     → D2 (Drive 2)
+GPA2 (pin 23) ──── azul + amarillo  → D1 (Drive 1)
+GPA3 (pin 24) ──── azul + blanco    → R  (Reverse)
+GPA4 (pin 25) ──── (sin uso, dejar al aire)
+N (Neutral)   ──── (sin contacto físico — todos GPA0-3 en HIGH por pull-ups)
+```
+
+#### Firmware (`esp32/src/shifter_input.cpp`)
+- `GEAR_MASK` reducido de `0x1F` (5 bits) → `0x0F` (4 bits, GPA0–GPA3).
+- Eliminada la constante `PIN_NEUTRAL` y su rama en `decodeGear()` — ahora `__builtin_popcount(active) == 0` cae al `return Gear::NEUTRAL` por defecto.
+- `PIN_REVERSE` reasignado de GPA4 → GPA3; `PIN_FORWARD` (D1) reasignado de GPA3 → GPA2 — coincide con los colores de cable medidos.
+- Actualizado el comentario de cabecera con los colores reales y la nota explícita "N has no contact wire — detected when no pin is active".
+
+#### Tests (`esp32/src/test_shifter_input.cpp`)
+- `test_read_reverse`: byte de puerto corregido `0xEF` (GPA4) → `0xF7` (GPA3).
+- `test_init_failure_backoff`: byte de Neutral corregido `0xF7` → `0xFF` (todos los pines en HIGH ⇒ ningún contacto).
+- **Nuevo test** `test_read_neutral_implicit`: comprueba que un valor de puerto `0xFF` (todos los contactos abiertos) decodifica a `Gear::NEUTRAL` y que `isConnected()` permanece `true`.
+- Resultado final: **28/28 tests pasan** (`g++ -std=c++17 ... && /tmp/test_shifter_input`).
+
+#### Documentación actualizada
+| Archivo | Cambio |
+|---------|--------|
+| `docs/PALANCA_CAMBIOS_IMPLEMENTACION.md` | Diagrama arquitectura (4 contactos + común), esquema MCP23017 (GPA0=P, GPA1=D2, GPA2=D1, GPA3=R, GPA4 sin uso), tabla de lógica con colores de cables, paso 4 de cableado físico, tabla multímetro, casos 9.1/9.2/9.3 de troubleshooting (incluido "palanca como interruptor simple"), FAQ ("5 posiciones" → "4 posiciones físicas + N implícita") |
+| `docs/SENSOR_INTERFACE.md` | Tabla GPA→marcha + columna de colores de cable; diagrama ASCII del cableado |
+| `docs/CONEXIONES_COMPLETAS.md` | Tabla de pines del MCP23017 (GPA1=D2, GPA2=D1, GPA3=R, GPA4 sin uso) con colores de cable |
+| `docs/MATERIALES_POR_MODULO.md` | BOM palanca: "1 común + 4 señal", aclaración "N implícita" |
+| `docs/PROJECT_MASTER_STATUS.md` | Línea de feature gear shifter actualizada (`GPA0-3 one-hot P/D2/D1/R; N implícito`) |
+| `docs/TECHNICAL_REVIEW_REPORT.md` | Descripción del driver: "GPA0–GPA3 → P/D2/D1/R; N detected implicitly when no pin is active" |
+
+#### Validación
+- 28/28 tests unitarios pasan sin warnings en código de producción.
+- No hay cambios en la API pública (`shifter_input.h`) — los valores del enum `Gear` y la firma de `getGearRaw()` se mantienen, por lo que el contrato CAN (0x102, byte 1 = gear) **no cambia**.
+- No se altera la lógica de backoff I2C ni la detección de reconexión.
+
+---
+
 ### PR — docs(encoder): migración completa de conexión E6B2-CWZ6C a 3× 6N137 — eliminación de TXS0108E y divisores resistivos
 - **Fecha:** 2026-04-26
 - **Autor:** Copilot

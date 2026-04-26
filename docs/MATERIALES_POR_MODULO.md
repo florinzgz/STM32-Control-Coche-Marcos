@@ -368,7 +368,7 @@
 | 1 | MCP23017 | Expansor I2C 16 GPIO, 3.3V, dirección 0x20 | Conectado a I2C del ESP32 (GPIO8 SDA, GPIO9 SCL) |
 | 2 | Resistencia pull-up I2C | **4.7 kΩ / ¼W** | En GPIO8 y GPIO9 del ESP32 a 3.3V |
 | 1 | Resistencia pull-up RESET | **10 kΩ / ¼W** | Entre pin RESET del MCP23017 y 3.3V; mantiene fuera de reset |
-| 5 | Conector/cable palanca | Según diseño físico de la palanca | GPA0–GPA4: PARK, REVERSE, NEUTRAL, FORWARD_D1, FORWARD_D2 (active LOW con pull-up interno del MCP23017) |
+| 5 | Conector/cable palanca | 1 común + 4 señal | GPA0=P, GPA1=D2, GPA2=D1, GPA3=R (active LOW con pull-up interno). N es implícito (sin contacto físico). Cable común a GND. |
 
 ---
 

@@ -71,16 +71,18 @@ simples (contactos secos) que se leen con lógica digital a 3.3 V.
 
 ```
   Palanca Física         MCP23017           ESP32-S3           CAN Bus         STM32G474RE
-  (5 interruptores)      (I2C, 3.3V)        (HMI)              (500 kbps)      (Control)
+  (4 contactos+común)    (I2C, 3.3V)        (HMI)              (500 kbps)      (Control)
   ─────────────────      ──────────         ─────────          ──────────      ───────────
 
-  ┌─ SW P  ──GND         GPA0 ◄──┐         GPIO 8 (SDA)                        
-  ├─ SW R  ──GND         GPA1 ◄──┤ I2C     GPIO 9 (SCL)       0x102           Traction_SetGear()
-  ├─ SW N  ──GND   →     GPA2 ◄──┼────►    shifter::          CMD_MODE   →    motor_control.c
-  ├─ SW D1 ──GND         GPA3 ◄──┤         update()           byte 1          Aplica escalado
-  └─ SW D2 ──GND         GPA4 ◄──┘         getGearRaw()                       de potencia
-                          (pull-ups                                             por marcha
-                           100kΩ int.)
+  ┌─ SW P  ──┐           GPA0 ◄──┐         GPIO 8 (SDA)
+  ├─ SW D2 ──┤   común   GPA1 ◄──┤ I2C     GPIO 9 (SCL)       0x102           Traction_SetGear()
+  ├─ SW D1 ──┼── GND →   GPA2 ◄──┼────►    shifter::          CMD_MODE   →    motor_control.c
+  └─ SW R  ──┘           GPA3 ◄──┘         update()           byte 1          Aplica escalado
+                          (pull-ups                            getGearRaw()    de potencia
+                           100kΩ int.)                                          por marcha
+
+  N (Neutral) NO TIENE CONTACTO FÍSICO — se detecta cuando ningún SW está cerrado
+  (todos los GPA0-GPA3 quedan en HIGH por los pull-ups internos del MCP23017).
 ```
 
 ### 2.2 ¿Por qué un MCP23017 en vez de GPIOs directos?
@@ -135,15 +137,15 @@ pines netos (5 − 2 = 3 pines liberados).
                      │  A1 (pin 16)  ───────────────┼───── GND    │ → dirección 0x20
                      │  A2 (pin 17)  ───────────────┼───── GND    │
                      │                              │              │
-                     │  GPA0 (pin 21) ──────────────┼──── SW P  ──── GND
-                     │  GPA1 (pin 22) ──────────────┼──── SW R  ──── GND
-                     │  GPA2 (pin 23) ──────────────┼──── SW N  ──── GND
-                     │  GPA3 (pin 24) ──────────────┼──── SW D1 ──── GND
-                     │  GPA4 (pin 25) ──────────────┼──── SW D2 ──── GND
+                     │  GPA0 (pin 21) ──────────────┼──── SW P  ──── COM ──── GND
+                     │  GPA1 (pin 22) ──────────────┼──── SW D2 ──── COM ──── GND
+                     │  GPA2 (pin 23) ──────────────┼──── SW D1 ──── COM ──── GND
+                     │  GPA3 (pin 24) ──────────────┼──── SW R  ──── COM ──── GND
+                     │  GPA4 (pin 25) ── (sin uso, dejar al aire)
                      │                              │
                      │  GPPU (reg 0x0C):            │
                      │  Pull-ups internos 100kΩ     │
-                     │  habilitados en GPA0-GPA4    │
+                     │  habilitados en GPA0-GPA3    │
                      └──────────────────────────────┘
 
   Desacoplo: 100 nF cerámico entre VDD (pin 9) y VSS (pin 10)
@@ -151,29 +153,31 @@ pines netos (5 − 2 = 3 pines liberados).
 
 ### 3.2 Lógica de las señales
 
-| Posición de la palanca | Interruptor | Estado GPA | Lectura (invertida) | Valor CAN |
-|------------------------|-------------|------------|---------------------|-----------|
-| **Park (P)** | SW P cerrado | GPA0 = LOW | bit 0 = 1 | 0 |
-| **Reverse (R)** | SW R cerrado | GPA1 = LOW | bit 1 = 1 | 1 |
-| **Neutral (N)** | SW N cerrado | GPA2 = LOW | bit 2 = 1 | 2 |
-| **Drive 1 (D1)** | SW D1 cerrado | GPA3 = LOW | bit 3 = 1 | 3 |
-| **Drive 2 (D2)** | SW D2 cerrado | GPA4 = LOW | bit 4 = 1 | 4 |
-| **Ninguno / Error** | — | Todos HIGH | ningún bit | 2 (Neutral) |
+| Posición de la palanca | Cable de la palanca | Estado GPA | Lectura (invertida) | Valor CAN |
+|------------------------|---------------------|------------|---------------------|-----------|
+| **Park (P)** | azul + morado (SW P cerrado) | GPA0 = LOW | bit 0 = 1 | 0 |
+| **Drive 2 (D2)** | azul + verde (SW D2 cerrado) | GPA1 = LOW | bit 1 = 1 | 4 |
+| **Drive 1 (D1)** | azul + amarillo (SW D1 cerrado) | GPA2 = LOW | bit 2 = 1 | 3 |
+| **Reverse (R)** | azul + blanco (SW R cerrado) | GPA3 = LOW | bit 3 = 1 | 1 |
+| **Neutral (N)** | *(sin contacto físico)* | Todos HIGH | ningún bit | 2 |
 | **Varios a la vez** | — | Varios LOW | múltiples bits | 2 (Neutral) |
+
+> **Cable común (azul):** terminal compartido por los 4 contactos; va siempre a GND del MCP23017.
+> **Neutral:** es el estado de reposo de la palanca — no existe un cable "SW N". Cuando la palanca está en N, ningún contacto está cerrado y los 4 pines GPA permanecen en HIGH por los pull-ups internos.
 
 **Lógica activa-baja (active-low):**
 - Sin pulsar: pull-up interno → GPA = HIGH (3.3 V)
 - Pulsado: interruptor cierra a GND → GPA = LOW (0 V)
 
-> **Referencia firmware:** `shifter_input.cpp` líneas 66-83 — función `decodeGear()`
+> **Referencia firmware:** `shifter_input.cpp` líneas 84-106 — función `decodeGear()`
 
 ### 3.3 Tensiones en cada punto
 
 | Punto del circuito | Tensión | Corriente |
 |---------------------|---------|-----------|
 | VDD del MCP23017 | **3.3 V** | ~1 mA (quiescent) |
-| GPA0-GPA4 (sin pulsar) | **3.3 V** (pull-up) | ~0 µA (estático) |
-| GPA0-GPA4 (pulsado) | **0 V** (GND) | ~33 µA (3.3V / 100kΩ) |
+| GPA0-GPA3 (sin pulsar) | **3.3 V** (pull-up) | ~0 µA (estático) |
+| GPA0-GPA3 (pulsado) | **0 V** (GND) | ~33 µA (3.3V / 100kΩ) |
 | SDA/SCL (activo) | **0–3.3 V** | ~0.7 mA (4.7kΩ pull-up) |
 | Interruptores de la palanca | **0 V** (contacto a GND) | ~33 µA |
 
@@ -219,14 +223,31 @@ ESP32 GPIO 9  ──► SCL (pin 12) del MCP23017
 ```
 > Si se usa un módulo breakout, los pull-ups suelen estar incluidos.
 
-**Paso 4: Conectar interruptores de la palanca**
+**Paso 4: Conectar los cables de la palanca**
+
+La palanca tiene **5 cables** en total: 1 común (azul) + 4 cables de señal.
+Verificación con multímetro (continuidad palanca → cable común al mover la palanca):
+
+| Posición | Cable de señal | Conectar a |
+|---|---|---|
+| P  | azul + morado    | GPA0 (pin 21) |
+| D2 | azul + verde     | GPA1 (pin 22) |
+| D1 | azul + amarillo  | GPA2 (pin 23) |
+| R  | azul + blanco    | GPA3 (pin 24) |
+| N  | *(sin cable)*    | — (estado de reposo, ningún contacto) |
+
 ```
-GPA0 (pin 21) ──── cable ──── SW P  ──── cable ──── GND
-GPA1 (pin 22) ──── cable ──── SW R  ──── cable ──── GND
-GPA2 (pin 23) ──── cable ──── SW N  ──── cable ──── GND
-GPA3 (pin 24) ──── cable ──── SW D1 ──── cable ──── GND
-GPA4 (pin 25) ──── cable ──── SW D2 ──── cable ──── GND
+Cable común AZUL ────────────────────────────────────── GND del MCP23017
+GPA0 (pin 21) ──── cable ──── SW P  ──── (cable azul+morado)
+GPA1 (pin 22) ──── cable ──── SW D2 ──── (cable azul+verde)
+GPA2 (pin 23) ──── cable ──── SW D1 ──── (cable azul+amarillo)
+GPA3 (pin 24) ──── cable ──── SW R  ──── (cable azul+blanco)
+GPA4 (pin 25) ──── sin uso (dejar al aire o a GND mediante 10 kΩ opcional)
 ```
+
+> **N no tiene cable propio** — si al medir continuidad no encuentras un par
+> de cables que cierre cuando la palanca está en N, **es normal**. La posición
+> Neutral se detecta por ausencia de señal en los otros cuatro contactos.
 
 **Paso 5: Desacoplo**
 ```
@@ -238,8 +259,8 @@ GPA4 (pin 25) ──── cable ──── SW D2 ──── cable ───
 | Medición | Valor esperado | Si no coincide |
 |----------|---------------|----------------|
 | VDD − VSS | 3.3 V ± 5% | Verificar alimentación |
-| GPA0 sin pulsar − GND | ~3.3 V | Pull-ups no habilitados (revisar firmware) |
-| GPA0 pulsado − GND | <0.3 V | OK: interruptor cerrado a GND |
+| GPA0-GPA3 sin pulsar − GND | ~3.3 V | Pull-ups no habilitados (revisar firmware) |
+| GPA0-GPA3 pulsado − GND | <0.3 V | OK: interruptor cerrado a GND |
 | SDA sin actividad − GND | ~3.3 V | Pull-up I2C OK |
 | SCL sin actividad − GND | ~3.3 V | Pull-up I2C OK |
 
@@ -440,7 +461,7 @@ polaridad ni tensión propia).
   Palanca original:
   
   ¿Tiene cables que van a interruptores/microswitches? → SÍ → Desconectar
-  de la batería 12V y reconectar entre GPA0-GPA4 y GND del MCP23017.
+  de la batería 12V y reconectar entre GPA0-GPA3 y el cable común a GND del MCP23017.
   Los interruptores son idénticos sin importar la tensión del sistema original.
 ```
 
@@ -453,7 +474,7 @@ solenoides de bloqueo, placa de circuito impreso), hay dos opciones:
 
 **Opción A — Separar señales de potencia:**
 - Alimentar los LEDs/solenoide desde 12 V por un circuito independiente.
-- Conectar solo los contactos de posición al MCP23017 (GPA0-GPA4 → GND).
+- Conectar solo los contactos de posición al MCP23017 (GPA0-GPA3 → SW → cable común → GND).
 
 **Opción B — Optoacoplador (aislamiento galvánico):**
 ```
@@ -476,11 +497,11 @@ Si la palanca original solo tiene "Forward / Reverse" (sin P/N/D2):
 
 | Terminal original | Conectar a |
 |-------------------|------------|
-| Forward | GPA3 (D1) — y GND |
-| Reverse | GPA1 (R) — y GND |
-| GPA0 (P) | Interruptor independiente (botón) |
-| GPA2 (N) | Conectar permanentemente a GND (Neutral por defecto) o botón |
-| GPA4 (D2) | No conectar (se ignora) |
+| Forward | GPA2 (D1) — y al cable común (a GND) |
+| Reverse | GPA3 (R)  — y al cable común (a GND) |
+| GPA0 (P) | Interruptor independiente (botón) — segundo terminal a GND |
+| GPA1 (D2) | No conectar (se ignora) |
+| Neutral | No requiere cable: estado por defecto cuando ningún SW está cerrado |
 
 ---
 
@@ -526,7 +547,8 @@ Porque el ESP32-S3 ya tiene **la mayoría de sus GPIOs ocupados** por:
 - MCP23017 I2C: 2 pines (GPIO 8, 9)
 
 Total: 18 pines. Usando GPIOs directos para la palanca serían 23.
-El MCP23017 permite leer 5 posiciones con solo 2 pines I2C.
+El MCP23017 permite leer las 4 posiciones físicas (P, D2, D1, R) con solo 2 pines I2C.
+La posición N es implícita (estado de reposo, no requiere pin).
 
 ### ¿El STM32 lee la palanca?
 

@@ -707,11 +707,11 @@ La palanca de cambios usa un expansor de I/O **MCP23017** conectado por I2C al E
 
 | Pin MCP23017 | Posición | Conexión |
 |-------------|----------|----------|
-| GPA0 | Park (P) | Contacto de la palanca → GND cuando activo |
-| GPA1 | Reverse (R) | Contacto de la palanca → GND cuando activo |
-| GPA2 | Neutral (N) | Contacto de la palanca → GND cuando activo |
-| GPA3 | Forward D1 | Contacto de la palanca → GND cuando activo |
-| GPA4 | Forward D2 | Contacto de la palanca → GND cuando activo |
+| GPA0 | Park (P)       | SW de la palanca → cable común → GND (cable azul+morado)   |
+| GPA1 | Drive 2 (D2)   | SW de la palanca → cable común → GND (cable azul+verde)    |
+| GPA2 | Drive 1 (D1)   | SW de la palanca → cable común → GND (cable azul+amarillo) |
+| GPA3 | Reverse (R)    | SW de la palanca → cable común → GND (cable azul+blanco)   |
+| GPA4 | *(sin uso)*    | Dejar al aire — N es estado implícito (sin contacto físico) |
 
 > ⚠️ Los pull-ups internos del MCP23017 están activados por firmware. **NO añadir pull-ups externos** en los pines del Puerto A — podrían interferir.
 >

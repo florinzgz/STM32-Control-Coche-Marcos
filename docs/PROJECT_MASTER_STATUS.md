@@ -287,7 +287,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 
 | Feature | Evidence | Files |
 |---|---|---|
-| Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-4 one-hot, P/R/N/D1/D2) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
+| Gear shifter (MCP23017 I2C, GPIO 8/9, GPA0-3 one-hot P/D2/D1/R; N implícito sin contacto físico) | `shifter::init()`, `shifter::update()`, `shifter::getGearRaw()` | `esp32/src/shifter_input.cpp` |
 | Centralized touch handler (TAP/LONG_PRESS/RELEASE, 200 ms debounce) | `touch::init()`, `touch::update()`, `touch::getEvent()` | `esp32/src/touch_handler.cpp` |
 | NVS config store (CRC32 validated, driveMode/brightness/LED/volume, dirty-flag deferred writes) | `config_store::init()`, `config_store::save()`, `config_store::flush()` | `esp32/src/config_store.cpp` |
 | Obstacle sensor multi-type driver (TF-Mini Plus ACTIVE: 115200 bps, GPIO 18 UART1 RX, SENSOR_TYPE_TFMINI, 5-zone mapping, stuck detection, uint16 overflow guard, stale data clearing on timeout. TOFSense-M also supported at compile time.) | `obstacle_sensor::init()`, `obstacle_sensor::update()` | `esp32/src/sensors/obstacle_sensor.cpp` |

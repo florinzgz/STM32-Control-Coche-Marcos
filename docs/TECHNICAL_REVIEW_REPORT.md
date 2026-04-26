@@ -170,7 +170,7 @@ Non-blocking retry at configurable intervals. On bus-off: Stop → DeInit → In
 **What it does:**
 Reads a physical 5-position gear lever (P/R/N/D1/D2) through an MCP23017 I2C GPIO expander connected to the ESP32 on GPIO 8 (SDA) / GPIO 9 (SCL) at 400 kHz.
 
-Each gear position connects one GPIO pin to ground (active-low). Port A pins GPA0–GPA4 map to P/R/N/D1/D2. The driver validates one-hot encoding (exactly one pin active) and defaults to Neutral on invalid states.
+Each gear position closes one switch between its dedicated MCP23017 GPA pin and a shared common wire tied to GND (active-low). Port A pins **GPA0–GPA3** map to **P / D2 / D1 / R**. Neutral (N) has **no physical contact wire** — it is detected implicitly when no pin is active (all GPA0–GPA3 remain HIGH via internal pull-ups). The driver validates one-hot encoding (exactly one or zero pins active) and defaults to Neutral on invalid (multi-bit) states.
 
 **Why this design:**
 - The MCP23017 provides 8 additional GPIO pins without consuming scarce ESP32 pins. The ESP32-S3 has limited free GPIOs after TFT (5 pins), CAN (2), touch (1), LEDs (1), audio (2), power (2), obstacle sensor (2).
