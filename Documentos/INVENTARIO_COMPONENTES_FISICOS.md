@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.4 (añadidos módulos PC817 8-ch ×2, módulos 6N137 5V ×5, módulos 6N137 12V ×5; ferrita CAN confirmada NO disponible)  
+> Versión: 1.5 (añadidos 1N4007 ×10 en mano, 1N4148 ×150 en pedido; recordatorio protección 6N137 con 1N4148 antiparalelo)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -38,6 +38,8 @@
 | D2 | TVS bidireccional DO-15 | **P6KE24CA** (24 V) | 20 uds | ✅ EN MANO |
 | D3 | Diodo rectificador DO-27 | **1N5408** (3 A / 1000 V) | 50 uds | ✅ EN MANO |
 | D4 | Diodo Zener DO-35 | **Kit 1N4728–1N4737** (3.3 V–13 V, 10 valores) | ~200 uds | ✅ EN MANO |
+| D5 | Diodo rectificador DO-41 | **1N4007** (1 A / 1000 V) | 10 uds | ✅ EN MANO |
+| D6 | Diodo conmutación rápida DO-35 | **1N4148** (200 mA / 100 V, trr 4 ns) | 150 uds | 🛒 **EN PEDIDO** |
 | C4 | Condensador film CBB22 | **100 nF / 250 V** (código 104J, paso P10) | 20 uds | ✅ EN MANO |
 | T1 | Transistor **NPN** TO-92 | **2N2222** (40 V / 600 mA) | 10 uds | ✅ EN MANO |
 | T2 | Transistor **NPN** TO-92 | **BC337-40** (45 V / 800 mA) | 3 uds | ✅ EN MANO |
@@ -299,7 +301,89 @@ Usar: **5 diodos** para los 5 módulos de relé + **1** para relé retención = 
 
 **No se necesita ningún diodo en paralelo con el PC817.** El PC817 tiene un LED en su entrada (no una bobina inductiva), por lo que no genera picos de back-EMF. Lo único que necesita la entrada del PC817 es una **resistencia en serie** para limitar la corriente al LED (~5–20 mA). Los diodos Zener son innecesarios en esa posición.
 
-**Conclusión:** Los Zener **no se soldan junto al PC817**. Sí puedes usar cualquiera de ellos en **polarización directa** para el OR de activación del relé de retención, eliminando la necesidad de comprar 1N4148.
+**Conclusión:** Los Zener **no se soldan junto al PC817** como protección ESD. Sí pueden usarse en **polarización directa** para el OR de activación del relé de retención. **Decisión 2026-04-28:** se pide caja de **1N4148 ×150** porque es el componente "correcto" para protección antiparalelo del LED de PC817 y 6N137 (más rápido que el Zener, más versátil, sin riesgo de elegir Vz incorrecta). Los Zener quedan como reserva polivalente.
+
+---
+
+### 5.5 — 1N4007 — Diodo rectificador 1A/1000V
+
+| Campo | Dato |
+|-------|------|
+| Referencia bolsa | `120000505899990295` |
+| Fabricante | Shenzhen HuiJiong Electronic Technology Co., Ltd. |
+| Item | "10/50/100PCS 1N4007 4007 1A 1000V DO-41 High quality Rectifier Diode IN4007 1n4007" |
+| Corriente continua | 1 A |
+| Tensión inversa | 1000 V |
+| Encapsulado | DO-41 (axial pequeño, cuerpo negro con banda blanca) |
+| Cantidad | **10 piezas** |
+
+**Uso en el proyecto:**
+- **Redundante con 1N5408** (que ya tienes ×50, 3A/1000V, mismas características eléctricas pero más robusto). El 1N5408 sustituye perfectamente al 1N4007 en TODAS las posiciones.
+- Quedan como **reserva** para flyback de relés/bobinas de bajo consumo (≤500 mA) si se acaban los 1N5408.
+- También válidos como diodo OR de retención (mejor que el Zener, peor que el 1N4148 — Vf ≈ 0.9 V, trr ≈ 30 µs).
+
+**No los uses para:** protección antiparalelo del LED de PC817 / 6N137 → muy lentos (trr 30 µs) frente al 1N4148 (trr 4 ns). Para ese uso esperar al 1N4148 pedido.
+
+---
+
+### 5.6 — 1N4148 — Diodo conmutación rápida 200mA/100V (EN PEDIDO)
+
+| Campo | Dato |
+|-------|------|
+| Referencia | 1N4148 (caja de 150 piezas) |
+| Estado | 🛒 **EN PEDIDO** (decisión 2026-04-28) |
+| Corriente continua | 200 mA |
+| Tensión inversa | 100 V |
+| Vf típica | 0.7 V @ 10 mA |
+| Tiempo recuperación inversa (trr) | **4 ns** (rapidísimo) |
+| Encapsulado | DO-35 (cristal pequeño, banda negra = cátodo) |
+| Cantidad | **150 piezas** |
+
+**¿Para qué se pide si los Zener servirían?**
+- Es el diodo más universal y versátil del taller. A precio de 150 unidades (<3 €) la inversión por pieza es ridícula.
+- **Polaridad uniforme:** todos los 1N4148 son intercambiables; no hay que pensar en "qué Vz elegir" como con el kit Zener (donde solo Vz≥6.2V vale).
+- Libera al kit Zener para su función real (regulación / referencias).
+- **Velocidad 4 ns** vs 1 µs típico de un Zener: relevante para 6N137 (encoder a alta frecuencia) — un Zener lento podría dejar pasar parte del transitorio inverso antes de empezar a conducir.
+
+**Usos previstos en este proyecto:**
+
+| Aplicación | Cantidad estimada |
+|-----------|-------------------|
+| Protección antiparalelo LED PC817 (5 canales LJ12A3) | 5 |
+| Protección antiparalelo LED 6N137 (3 canales encoder A/B/Z) | 3 |
+| Diodos OR retención relé MAIN/TRAC/DIR | 6–9 |
+| Flyback de relés pequeños de señal (si se añaden, bobina <100 mA) | reserva |
+| Clamps protección entradas digitales STM32 (3.3V/GND) | reserva |
+| Repuesto general / prototipado | resto |
+
+**Total uso inmediato estimado: 14–17 unidades. Sobran ~135 de reserva.**
+
+#### Cómo se solda — IMPORTANTE
+
+⚠️ **NO se solda entre VCC y GND del lado 3.3V.** Eso lo cortocircuitaría y quemaría el diodo o la fuente. Se solda en **antiparalelo al LED del optoacoplador**, en el **lado de ENTRADA** (lado del sensor a 12-24 V).
+
+**Polaridad (regla mnemotécnica):**
+- **Banda negra = cátodo (K)** → al **POSITIVO de la entrada (IN+)**
+- Lado **sin banda = ánodo (A)** → al **NEGATIVO/GND de la entrada (IN−)**
+
+Esto es **al revés** que el LED interno del optoacoplador → por eso se llama "antiparalelo".
+
+**Verificación con multímetro antes de soldar (modo diodo):**
+- Punta roja al ánodo (lado liso) + punta negra al cátodo (banda) → debe leer **~0.6–0.7 V**
+- Al revés → debe leer **OL** (abierto)
+
+**Precauciones de soldadura:**
+- Soldador a **320–340 °C**, máximo 3 s por pin
+- Dejar **3–4 mm de patilla** entre el cuerpo del diodo y el punto de soldadura (la patilla disipa calor y protege el cristal interno)
+- No recortar la patilla demasiado corta antes de soldar — riesgo de microfracturas
+
+#### Cuándo NO usar 1N4148
+
+| Aplicación | Componente correcto |
+|-----------|--------------------|
+| Corrientes >200 mA continuas | 1N5408 (ya en mano ×50) |
+| Picos de energía grandes / TVS | P6KE18CA / P6KE24CA (ya en mano ×40) |
+| Velocidades >100 MHz / RF | Schottky BAT (no necesario en este proyecto) |
 
 ---
 
@@ -507,16 +591,18 @@ Kit AUKENIEN 1/8W:
 | Componente | Especificación | Para qué | Qty |
 |-----------|---------------|----------|-----|
 | Ferrita/bobina | BLM18AG601SN1D o 100µH | Filtro bus CAN (5V sucio → limpio) | 1 |
+| 🛒 1N4148 (EN PEDIDO) | DO-35, 200mA/100V, trr 4ns | Protección antiparalelo LED PC817 + 6N137 + OR retención + reserva | 150 |
 
 > **Optoacopladores PC817 y 6N137 ya NO hacen falta comprar:**
 > - PC817 → **2 módulos de 8 canales en mano = 16 canales** (solo se usan 5) ✅
 > - 6N137 encoder → **10 módulos en mano** (5×5V + 5×12V) ✅ sobra ampliamente
 >
-> **Transistor NPN y 1N4148 ya NO hacen falta comprar:**
+> **Transistor NPN ya en mano:**
 > - Transistor para relé retención → **2N2222 ×10 en mano** ✅
-> - Diodos OR retención (1N4148) → **Zener 1N4728–1N4737 en polarización directa** funcionan igual ✅
 >
-> **Único componente pendiente de pedir:** ferrita/bobina filtro CAN (1 unidad).
+> **1N4148 — pedido 2026-04-28 (caja 150 uds):** sustituye a la solución provisional de Zener en antiparalelo. Más rápido, más versátil, polaridad uniforme. Hasta que llegue se puede usar 1N4735/4736/4737 (Vz≥6.2V) en su lugar (solución equivalente, ya documentada).
+>
+> **Pendientes de pedir:** ferrita CAN (1 unidad).
 
 ### 9.3 Estado COMPLETAMENTE CUBIERTO por inventario actual
 
@@ -536,10 +622,11 @@ Kit AUKENIEN 1/8W:
 | Serie WS2812B datos (330Ω) | Kit 1/4W (330Ω ×20) — **mejor que 1/8W aquí** | ✅ |
 | Snubber RC relés (100Ω) | Kit 1/4W (100Ω ×20) — **1/4W mejor que 1/8W** | ✅ |
 | **Transistor relé retención** | **2N2222 ×10** en mano | ✅ |
-| **OR diodos retención** | **Zener 1N4728–1N4737** en polarización directa | ✅ |
+| **OR diodos retención** | **1N4148 (pedido)** o Zener 1N4728–1N4737 directo | ✅ |
 | **Aislamiento sensores LJ12A3 (×5 ch)** | **Módulos PC817 8-ch ×2** (16 canales) | ✅ |
 | **Aislamiento encoder A/B/Z (×3 ch)** | **Módulos 6N137 5V ×5** | ✅ |
-| **Protección polaridad inversa LED PC817** | **Zener 1N4735/4736/4737** en antiparalelo | ✅ |
+| **Protección polaridad inversa LED PC817** | **1N4148 (pedido) ×5** o Zener 1N4735/4736/4737 antiparalelo | ✅ |
+| **Protección polaridad inversa LED 6N137** | **1N4148 (pedido) ×3** antiparalelo en cada canal A/B/Z | 🛒 al recibir 1N4148 |
 
 ---
 
@@ -753,6 +840,42 @@ En las regletas de **entrada (lado IN)** del módulo:
 
 ---
 
+### 11.3.1 — ⚠️ **RECORDATORIO IMPORTANTE — Protección antiparalelo al montar 6N137**
+
+> **Cuando montes los módulos 6N137 (encoder A/B/Z) acuérdate de soldar un 1N4148 en antiparalelo al LED de entrada en cada canal**, **igual que en el PC817**.
+
+**Por qué:**
+- El LED interno del 6N137 tiene **Vr_max ≈ 5 V**. Si la línea de salida del encoder (open-collector NPN, alimentado a 5 V) sufre un transitorio inverso (ruido EMI del motor, pulso de retorno, mal cableado), el LED se quema.
+- Es exactamente el mismo razonamiento que con el PC817 — solo cambia el LED y el encapsulado del optoacoplador.
+- Velocidad importa más aquí: el encoder E6B2-CWZ6C @ 4800 cpr puede generar pulsos a varios kHz. El 1N4148 (trr = 4 ns) protege sin afectar la señal; un Zener (trr ≈ 1 µs) ya empieza a notarse en el flanco.
+
+**Esquema de conexión (uno por cada canal A/B/Z, 3 en total):**
+
+```
+   Salida encoder (5V open collector NPN) ───[R serie]──┬─── IN+ módulo 6N137
+                                                         │
+                                                         ▼ banda (cátodo)
+                                                      1N4148
+                                                         │ (ánodo, sin banda)
+                                                         │
+   GND encoder ─────────────────────────────────────────┴─── IN− módulo 6N137
+```
+
+**Polaridad (igual que en PC817):**
+- **Banda negra (cátodo) → IN+** (lado positivo, mismo nodo que el ánodo del LED interno)
+- Lado **sin banda (ánodo) → IN−** (GND, mismo nodo que el cátodo del LED interno)
+
+**Antes de soldar:**
+1. Verifica si el módulo 6N137 ya trae diodo de protección integrado (algunos los traen como SMD junto al optoacoplador). Si lo trae → **no hace falta añadir nada**.
+2. Si no lo trae → soldar 1N4148 en cada uno de los 3 canales (A, B, Z) entre IN+ e IN−.
+3. Multímetro modo diodo: punta roja al lado liso, negra a la banda → debe leer ~0.65 V. Al revés OL.
+
+**Cantidad necesaria al montar 6N137:** **3 unidades** (una por canal A/B/Z) si los módulos no traen protección integrada.
+
+> **Estado pedido 1N4148:** EN PEDIDO 2026-04-28 (caja de 150 uds). Hasta que lleguen, si quieres avanzar el montaje del encoder puedes usar **1N4735/4736/4737** (Vz ≥ 6.2 V) del kit Zener — funcionan igual aunque más lentos. Para encoder a frecuencia alta, mejor esperar al 1N4148.
+
+---
+
 ## Apéndice — Historial de sesiones
 
 | Fecha | Qué se añadió al inventario |
@@ -765,6 +888,7 @@ En las regletas de **entrada (lado IN)** del módulo:
 | Anterior | R1 kit 3W metal film (bolsa 120Ω confirmada) |
 | 2026-04-28 | **v1.3:** D4 kit Zener 1N4728–1N4737 ×~200; C4 CBB22 250V/100nF ×20; T1 2N2222×10, T2 BC337-40×3, T3 C1815×3, T4 A1015×4; eliminados de "falta comprar": transistor NPN y 1N4148 |
 | 2026-04-28 | **v1.4:** M1 módulos PC817 8ch ×2 (16 canales totales); M2 módulos 6N137 5V ×5; M3 módulos 6N137 12V ×5; F1 ferrita CAN confirmada NO disponible (única pieza pendiente). Documentado cableado Zener antiparalelo en PC817 (usar Vz ≥ 6.2 V: 1N4735/4736/4737) |
+| 2026-04-28 | **v1.5:** D5 1N4007 ×10 en mano (DO-41, 1A/1000V, redundante con 1N5408 — queda como reserva); D6 1N4148 ×150 EN PEDIDO (caja completa, decisión: protección antiparalelo PC817+6N137 con componente correcto y polivalente, sustituye solución provisional con Zener). Añadido §11.3.1 con recordatorio explícito de soldar 1N4148 antiparalelo al montar los módulos 6N137 (Vr_max LED ≈ 5V, mismo principio que PC817). |
 
 ---
 
