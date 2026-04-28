@@ -364,31 +364,165 @@ Pedal señal (0.3V–4.8V)
 
 ## 9) CAN BUS — STM32 ↔ ESP32
 
-### Lado STM32 → TJA1051T/3 #1
+### ⚠️ Alimentación del TJA1051T/3 — especificación vs. instalación real
+
+| Parámetro | Datasheet NXP TJA1051T/3 | Instalación real actual | Estado |
+|-----------|--------------------------|------------------------|--------|
+| **VCC** (alimentación transceiver) | 4.5–5.5 V | **3.3 V** | ⚠️ Fuera de spec. — funcional en práctica, sin garantía |
+| **VIO** (nivel lógico I/O) | 2.8–5.5 V | **3.3 V** | ✅ Dentro de spec. |
+
+> **El sistema funciona actualmente con VCC = 3.3 V.** Esta tensión está fuera del rango
+> especificado por NXP, lo que implica:
+> - Margen de ruido diferencial reducido en el bus CAN
+> - Posible inestabilidad con cables largos o en entorno con motores DC de 24 V
+> - Sin garantía de funcionamiento en rango extendido de temperatura (−40 °C a +150 °C)
+>
+> **Para banco de pruebas:** la Configuración A (3.3 V) es suficiente y está verificada.
+> **Para instalación definitiva en vehículo:** usar Configuración B (5 V + aislamiento galvánico).
+
+---
+
+### Configuración A — Actual (3.3 V, sin aislamiento galvánico)
+
+> ✅ **Configuración instalada y funcional.** Sin barrera galvánica — GND del STM32,
+> ESP32 y transceivers CAN comparten el mismo nodo (GND_logic).
+
+#### Lado STM32 → TJA1051T/3 #1
 
 | Cable | De (STM32) | A (TJA1051 #1) | Función |
 |-------|-----------|----------------|---------|
 | 28 | **PA12** | TXD (pin 1) | Transmitir datos CAN (FDCAN1_TX, AF9) |
 | 29 | **PA11** | RXD (pin 4) | Recibir datos CAN (FDCAN1_RX, AF9) |
-| — | 5V | VCC (pin 3) | Alimentación transceiver (**5 V obligatorio**) |
-| — | 3.3V | **VIO (pin 5)** | **Nivel lógico I/O — conectar a 3.3 V del STM32** |
-| — | GND | GND (pin 2) | GND común |
+| — | **3.3V** | VCC (pin 3) | ⚠️ Fuera de spec. (4.5–5.5 V); funcional en práctica |
+| — | **3.3V** | **VIO (pin 5)** | ✅ Correcto — nivel lógico 3.3 V |
+| — | GND | GND (pin 2) | GND_logic |
 | — | GND | S (pin 8) | Modo normal (NO conectar a VCC) |
 
-> ⚠️ **CAMBIO CRÍTICO vs. versiones anteriores del documento:** Los pines CAN del STM32 ya **NO** son PB8/PB9. Son **PA11 (RX)** y **PA12 (TX)** — confirmado en `stm32g4xx_hal_msp.c` y `project_config.h`. Conectar PB8/PB9 al transceiver CAN **no funcionará** y dejará la comunicación CAN completamente inoperativa.
+> ⚠️ **CAMBIO CRÍTICO vs. versiones anteriores:** Los pines CAN del STM32 ya **NO** son PB8/PB9.
+> Son **PA11 (RX)** y **PA12 (TX)** — confirmado en `stm32g4xx_hal_msp.c` y `project_config.h`.
 >
-> ⚠️ PA11 está en el conector Morpho **CN10 pin 14**. PA12 está en **CN10 pin 12**.
+> ⚠️ PA11 → Morpho **CN10 pin 14**. PA12 → **CN10 pin 12**.
 
-### Lado ESP32-S3 → TJA1051T/3 #2
+#### Lado ESP32-S3 → TJA1051T/3 #2
 
 | Cable | De (ESP32) | A (TJA1051 #2) | Función |
 |-------|-----------|----------------|---------|
-| — | **GPIO4** | TXD (pin 1) | Transmitir datos CAN |
-| — | **GPIO5** | RXD (pin 4) | Recibir datos CAN |
-| — | 5V | VCC (pin 3) | Alimentación transceiver (**5 V obligatorio**) |
-| — | **3.3V** | **VIO (pin 5)** | ⚠️ **OBLIGATORIO** — nivel lógico I/O. Sin VIO=3.3V, RXD=5V → destruye ESP32 |
-| — | GND | GND (pin 2) | GND común |
+| — | **GPIO4** | TXD (pin 1) | TWAI TX |
+| — | **GPIO5** | RXD (pin 4) | TWAI RX |
+| — | **3.3V** | VCC (pin 3) | ⚠️ Fuera de spec. (4.5–5.5 V); funcional en práctica |
+| — | **3.3V** | **VIO (pin 5)** | ⚠️ **OBLIGATORIO** — sin VIO=3.3V, RXD=5V destruiría los GPIO del ESP32 |
+| — | GND | GND (pin 2) | GND_logic (compartido con STM32) |
 | — | GND | S (pin 8) | Modo normal |
+
+#### Estrategia de GND — Configuración A
+
+```
+GND_logic ──────┬──── STM32 GND
+                ├──── ESP32 GND
+                ├──── TJA1051 #1 GND
+                └──── TJA1051 #2 GND
+(todos los GND son el mismo nodo — sin aislamiento galvánico)
+```
+
+#### Diagrama Configuración A
+
+```
+STM32 Nucleo      TJA1051 #1          Bus CAN         TJA1051 #2       ESP32-S3
+┌─────────┐    ┌──────────────┐   ┌───────────┐   ┌──────────────┐   ┌─────────┐
+│PA12(TX)─┼───►│TXD    CANH──┼───┼──CANH─────┼───┼─CANH   TXD  │◄──┼─GPIO4  │
+│PA11(RX)◄┼────│RXD    CANL──┼───┼──CANL─────┼───┼─CANL   RXD  │──►┼─GPIO5  │
+│3.3V─────┼────│VCC          │   │ [120Ω R1] │   │        VCC ─┼───┼─3.3V   │
+│3.3V─────┼────│VIO          │   │ [120Ω R2] │   │        VIO ─┼───┼─3.3V   │
+│GND──────┼────│GND  S──►GND │   └───────────┘   │GND◄──S GND ─┼───┼─GND    │
+└─────────┘    └──────────────┘                   └──────────────┘   └─────────┘
+GND_logic ────────────────────────────────────────────────────────── GND_logic
+```
+
+---
+
+### Configuración B — Recomendada para vehículo (5 V + aislamiento galvánico ADuM1201)
+
+> 🔵 Recomendada para instalación en vehículo con motores DC de 24 V. Proporciona barrera
+> galvánica de **2500 V** entre GND_logic (STM32/ESP32) y GND_CAN (chasis del vehículo).
+> **El firmware no cambia. FDCAN1 opera exactamente igual.**
+
+#### Estrategia de GND — Configuración B
+
+```
+GND_logic ──────┬──── STM32 GND
+                └──── ESP32 GND
+                         ← ═══ BARRERA GALVÁNICA ADuM1201 ═══ →
+GND_CAN ────────┬──── TJA1051 #1 GND  (lado aislado)
+                └──── Bus CAN (chasis / referencia del vehículo)
+
+⚠️ GND_logic y GND_CAN NO deben conectarse directamente en Configuración B.
+```
+
+#### Pinout del módulo ADuM1201 (breakout ShengYang) — verificado sin inversiones de señal
+
+| Pin módulo | Pin ADuM1201 | Sentido de señal | Conectar a |
+|-----------|-------------|------------------|-----------|
+| **V1** | VDD1 (pin 1) | Alim. lado STM32 | 3.3V STM32 |
+| **G1** | GND1 (pin 2) | Masa lado STM32 | GND_logic |
+| **AI** | VIA (pin 3) | **Entrada** — STM32→CAN | STM32 **PA12** (FDCAN1_TX) |
+| **BO** | VOB (pin 4) | **Salida** — CAN→STM32 | STM32 **PA11** (FDCAN1_RX) |
+| **V2** | VDD2 (pin 5) | Alim. lado CAN | 3.3V_aislada |
+| **G2** | GND2 (pin 6) | Masa lado CAN | GND_CAN |
+| **AO** | VOA (pin 7) | **Salida** — STM32→CAN | TJA1051T/3 #1 **TXD** |
+| **BI** | VIB (pin 8) | **Entrada** — CAN→STM32 | TJA1051T/3 #1 **RXD** |
+
+> ✅ Verificación de canales (sin inversiones de señal):
+> - TX: STM32 PA12 → ADuM **AI** (entrada ch.A, lado 1) → ADuM **AO** (salida ch.A, lado 2) → TJA1051 **TXD** ✓
+> - RX: TJA1051 **RXD** → ADuM **BI** (entrada ch.B, lado 2) → ADuM **BO** (salida ch.B, lado 1) → STM32 PA11 ✓
+
+#### Conexiones Configuración B
+
+| Cable | De | A | Función |
+|-------|---|---|---------|
+| 28 | STM32 **PA12** | ADuM1201 **AI** | FDCAN1_TX → barrera galvánica |
+| 29 | STM32 **PA11** | ADuM1201 **BO** | Salida de barrera → FDCAN1_RX |
+| — | **3.3V** STM32 | ADuM1201 **V1** | Alimentación lado STM32 del ADuM |
+| — | **GND** STM32 | ADuM1201 **G1** | GND_logic lado STM32 del ADuM |
+| — | ADuM1201 **AO** | TJA1051 #1 **TXD** | TX a través de barrera |
+| — | ADuM1201 **BI** | TJA1051 #1 **RXD** | RX a través de barrera |
+| — | **5V_aislada** | TJA1051 #1 **VCC** | ✅ Dentro de spec. (4.5–5.5 V) |
+| — | **3.3V_aislada** | TJA1051 #1 **VIO** | Nivel lógico del lado aislado |
+| — | **GND_CAN** | TJA1051 #1 **GND** | Masa aislada del vehículo |
+| — | **GND_CAN** | TJA1051 #1 **S** | Modo normal |
+
+**Generación de alimentación aislada:**
+```
+3.3V (o 5V) rail ──► DC-DC aislado ──► 5V_aislada ──► TJA1051 #1 VCC
+                                          └──► LDO 3.3V ──► 3.3V_aislada ──► ADuM1201 V2
+```
+
+**DC-DC aislado recomendado:** RECOM RxxP5.0S (5V/200mA) o Murata MEE1S0505SC.
+⚠️ No usar convertidores no aislados (p. ej., RECOM R-78E5.0) — anulan la barrera galvánica.
+
+#### Esquema Configuración B
+
+```
+Lado STM32 (GND_logic)       Barrera 2500V     Lado CAN (GND_CAN)
+──────────────────────       ─────────────     ──────────────────────
+
+STM32 PA12 (TX) ──► ADuM AI │═════════│ AO ──► TJA1051 #1 TXD ──► CANH/CANL
+STM32 PA11 (RX) ◄── ADuM BO │═════════│ BI ◄── TJA1051 #1 RXD ◄── CANH/CANL
+
+3.3V_STM32 ─── ADuM V1      │         │ V2 ─── 3.3V_aislada
+GND_logic ──── ADuM G1      │         │ G2 ─── GND_CAN
+                             │         │
+          DC-DC aislado ─────┘         └──► 5V_aislada ──► TJA1051 #1 VCC
+                                       └──► LDO ──► 3.3V_aislada ──► ADuM V2
+```
+
+#### Lado ESP32-S3 en Configuración B (sin cambios respecto a Configuración A)
+
+El TJA1051T/3 #2 del lado ESP32 no requiere aislamiento adicional en la mayoría
+de instalaciones. Si se dispone de 5 V estable en el ESP32, alimentar VCC del
+TJA1051 #2 desde 5 V (✅ dentro de spec.); si no, continuar con 3.3 V.
+VIO siempre a **3.3 V** (obligatorio para proteger los GPIO del ESP32).
+
+---
 
 ### Bus CAN entre los dos transceivers
 
@@ -397,82 +531,37 @@ Pedal señal (0.3V–4.8V)
 | 30 | CANH (pin 7) | CANH (pin 7) | **Par trenzado** recomendado |
 | 31 | CANL (pin 6) | CANL (pin 6) | **Par trenzado** recomendado |
 
-### Terminación CAN
+### Terminación y desacoplo CAN
 
 | Componente | Ubicación | Valor |
 |-----------|-----------|-------|
-| Resistencia R1 | CANH↔CANL en TJA1051 #1 (STM32) | **120 Ω** |
-| Resistencia R2 | CANH↔CANL en TJA1051 #2 (ESP32) | **120 Ω** |
+| Resistencia R1 | CANH↔CANL junto a TJA1051 #1 | **120 Ω ¼W** |
+| Resistencia R2 | CANH↔CANL junto a TJA1051 #2 | **120 Ω ¼W** |
+| C_bypass #1 | Entre VCC y GND del TJA1051 #1, lo más cerca posible del IC | **100 nF X7R 50V** |
+| C_bypass #2 | Entre VCC y GND del TJA1051 #2, lo más cerca posible del IC | **100 nF X7R 50V** |
 
-```
-STM32 Nucleo          TJA1051 #1           Bus CAN           TJA1051 #2          ESP32-S3
-┌─────────┐       ┌──────────────┐    ┌─────────────┐    ┌──────────────┐       ┌─────────┐
-│PA12(TX) ─┼──────►│ TXD    CANH ─┼────┼── CANH ─────┼────┼─ CANH    TXD│◄──────┼─ GPIO4  │
-│PA11(RX) ◄┼──────│ RXD    CANL ─┼────┼── CANL ─────┼────┼─ CANL    RXD│──────►│  GPIO5  │
-│ 5V ──────┼──────│ VCC         │    │  120Ω      │    │         VCC│──────┼── 5V     │
-│ GND ─────┼──────│ GND     S──►GND │    │  120Ω      │    │ GND◄──S GND│──────┼── GND    │
-└─────────┘       └──────────────┘    └─────────────┘    └──────────────┘       └─────────┘
-```
+> ✅ Verificar con multímetro (sin alimentar): CANH↔CANL = ~60 Ω (dos 120 Ω en paralelo).
+> ⚠️ Sin las resistencias de terminación, las reflexiones en el bus degradan la señal CAN.
 
-> ⚠️ **NUNCA** conectar PA11/PA12 directamente a CANH/CANL. El transceiver TJA1051 es OBLIGATORIO. Sin él, el CAN no funciona y puedes dañar los pines.
+### Protección opcional — Diodo TVS en líneas CAN
 
-### Aislamiento galvánico opcional — Módulo ADuM1201 + DC-DC aislado
+> Recomendado para instalación definitiva en vehículo. Protege CANH/CANL frente a transitorios
+> de la red eléctrica del vehículo (ISO 7637-2). No obligatorio en banco de pruebas.
 
-> El módulo **ADuM1201ARZ** (ShengYang o equivalente) es un aislador digital de 2 canales
-> de Analog Devices que proporciona barrera galvánica de 2500 V entre el dominio lógico
-> del STM32 (GND_logic) y el dominio del bus CAN (GND_CAN / chasis del vehículo).
-> Se coloca **entre el STM32 y el TJA1051T/3 #1** — el firmware no necesita ningún cambio.
+| Componente | Valor recomendado | Montaje |
+|-----------|------------------|---------|
+| TVS CAN integrado | **PESD2CAN** (NXP) | Entre CANH y CANL, cerca del conector de bus |
+| Alternativa discreta | 2× **SMBJ12CA** bidireccional | Uno por línea (CANH↔GND, CANL↔GND) |
 
-#### Cuándo añadirlo
+### Impacto en el firmware
 
-| Situación | Recomendación |
-|-----------|---------------|
-| Banco de pruebas limpio, sin motores | No necesario |
-| Instalación en vehículo con motores DC 24V y masa de chasis compartida | **Recomendado** |
-| Diferencial de masa medida STM32↔chasis > 0.5 V | **Obligatorio** |
+**Ningún cambio de firmware** en Configuración A ni en Configuración B.
+La interfaz FDCAN1 (PA11/PA12) es idéntica. El ADuM1201 es completamente transparente:
+retardo 10–50 ns << 2 µs/bit a 500 kbps.
 
-#### Pinout del módulo ADuM1201 (breakout ShengYang)
+> ⚠️ **NUNCA** conectar PA11/PA12 directamente a CANH/CANL. El transceiver TJA1051 es OBLIGATORIO.
 
-| Pin módulo | Pin ADuM1201 | Función | Conectar a |
-|-----------|-------------|---------|-----------|
-| **V1** | VDD1 | Alimentación lado STM32 | 3.3V STM32 |
-| **G1** | GND1 | Masa lado STM32 | GND_logic (STM32) |
-| **AI** | VIA (pin 3) | Entrada canal A (STM32→CAN) | STM32 **PA12** (FDCAN1_TX) |
-| **BO** | VOB (pin 4) | Salida canal B (CAN→STM32) | STM32 **PA11** (FDCAN1_RX) |
-| **V2** | VDD2 | Alimentación lado CAN | 3.3V_aislada (del DC-DC) |
-| **G2** | GND2 | Masa lado CAN | GND_CAN (aislado del STM32) |
-| **AO** | VOA (pin 7) | Salida canal A (STM32→CAN) | TJA1051T/3 #1 **TXD** |
-| **BI** | VIB (pin 8) | Entrada canal B (CAN→STM32) | TJA1051T/3 #1 **RXD** |
-
-> ⚠️ El TJA1051T/3 requiere **VCC = 4.5–5.5 V**. Necesita un DC-DC aislado de 5V
-> para el lado CAN además de los 3.3V aislados para el ADuM1201.
-
-#### Esquema de conexión con ADUM1201
-
-```
-Lado STM32 (GND_logic)              Barrera 2500V              Lado CAN (GND_CAN)
-─────────────────────               ─────────────               ─────────────────────
-
-STM32 PA12 (TX) ──────────► ADuM1201 AI │══════│ AO ──────────► TJA1051T/3 #1 TXD
-STM32 PA11 (RX) ◄────────── ADuM1201 BO │══════│ BI ◄────────── TJA1051T/3 #1 RXD
-
-3.3V_STM32 ─────────────── ADuM1201 V1  │      │ V2 ─── 3.3V_aislada (DC-DC)
-GND_logic ──────────────── ADuM1201 G1  │      │ G2 ─── GND_CAN
-
-5V_rail ──► DC-DC aislado ──► 5V_aislada ──────────────── TJA1051T/3 #1 VCC (5V)
-                            └──► 3.3V_aislada ─────────── ADuM1201 V2
-```
-
-**DC-DC aislado recomendado:** RECOM RxxP5.0S (5V/200mA) o Murata MEE1S0505SC.
-No usar convertidores no aislados (p. ej., RECOM R-78E5.0) — anulan la barrera galvánica.
-
-#### Impacto en el firmware
-
-**Ningún cambio de firmware necesario.** La interfaz FDCAN1 (PA11/PA12) es idéntica.
-El ADuM1201 es transparente al protocolo: retardo de propagación 10–50 ns << 2 µs/bit CAN.
-
-Ver documentación detallada: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md §9` y
-`docs/VALIDACION_ELECTRICA_AISLAMIENTO.md §1.4`.
+Ver especificación técnica completa: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md §9`.
 
 ---
 

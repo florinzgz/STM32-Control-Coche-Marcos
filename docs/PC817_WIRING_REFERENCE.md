@@ -332,21 +332,44 @@ GND_logic   (3.3V) ──────────── STM32 GND ─┤
 ## BUS CAN (PA11/PA12) — NO usa PC817 ni 6N137
 
 El bus CAN del STM32 (FDCAN1) **no se aisla con optoacopladores PC817 ni 6N137**.
-Los pines PA11 (RX) y PA12 (TX) van al transceiver **TJA1051T/3** directamente,
-o a través del módulo **ADuM1201** si se requiere barrera galvánica completa:
+Usa el transceiver **TJA1051T/3** en una de estas dos configuraciones:
+
+### Configuración A — Actual (3.3 V, sin aislamiento galvánico) ✅ Funcional
+
+| Pin TJA1051T/3 | Valor actual | Estado vs. datasheet |
+|----------------|-------------|----------------------|
+| **VCC** | **3.3 V** | ⚠️ Fuera de spec. (4.5–5.5 V) — funciona en práctica |
+| **VIO** | **3.3 V** | ✅ Dentro de spec. (2.8–5.5 V) |
+| **TXD** ← STM32 PA12 | Conexión directa | ✅ |
+| **RXD** → STM32 PA11 | Conexión directa | ✅ |
+
+**Riesgos de VCC = 3.3 V:** margen de ruido reducido, sin garantía en temperatura extendida,
+posible inestabilidad en entorno con motores DC de 24 V.
+
+**GND:** STM32, ESP32 y ambos TJA1051 comparten el mismo GND_logic (sin barrera galvánica).
+
+### Configuración B — Recomendada para vehículo (5 V + ADuM1201) 🔵
+
+Añade barrera galvánica de **2500 V** entre GND_logic (STM32/ESP32) y GND_CAN (chasis):
 
 ```
 STM32 PA12 ──► ADuM1201 AI │══════│ AO ──► TJA1051T/3 TXD ──► Bus CAN
 STM32 PA11 ◄── ADuM1201 BO │══════│ BI ◄── TJA1051T/3 RXD ◄── Bus CAN
 ```
 
-El módulo ADuM1201 necesita:
-- **V1/G1** → 3.3V_STM32 / GND_logic (lado STM32)
-- **V2/G2** → 3.3V_aislada / GND_CAN (del DC-DC aislado, lado CAN)
-- DC-DC aislado de **5V** adicional para alimentar el TJA1051T/3 (VCC = 4.5–5.5 V)
+> ✅ Verificación de canales sin inversiones:
+> TX: PA12 → ADuM **AI** → **AO** → TJA TXD ✓ | RX: TJA RXD → ADuM **BI** → **BO** → PA11 ✓
 
-**Ningún cambio de firmware.** Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema
-completo y `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md §9` para la especificación técnica.
+Alimentación Configuración B:
+- ADuM1201 **V1/G1** → 3.3V_STM32 / GND_logic (lado STM32)
+- ADuM1201 **V2/G2** → 3.3V_aislada / GND_CAN (lado CAN, del DC-DC aislado + LDO)
+- TJA1051 **VCC** → **5V_aislada** (DC-DC aislado) — ✅ dentro de spec.
+- ⚠️ GND_logic y GND_CAN **NO deben conectarse directamente** en Configuración B
+
+**DC-DC aislado:** RECOM RxxP5.0S o Murata MEE1S0505SC. No usar convertidores no aislados.
+
+**Ningún cambio de firmware** en ninguna configuración.
+Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de conexión detalladas.
 
 ---
 
