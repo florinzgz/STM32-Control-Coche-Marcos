@@ -67,37 +67,41 @@ Cuando detecta OFF, el firmware reproduce el audio de despedida y guarda config 
 > `power_manager.cpp` — `pinMode(PIN_IGNITION_SENSE, INPUT_PULLUP)`
 > `power_manager.h`   — `PIN_IGNITION_SENSE = 40`
 
-### 2.2 Opción implementada — Canal A7 de la placa PC817 de 8 canales
+### 2.2 Opción implementada — Canal `IN5` del módulo HY-M158 (PC817 ×8)
 
-Se utiliza un canal libre (A7) de la placa PC817 de 8 canales que ya está montada en el
-sistema para los sensores de rueda. **No se necesita ningún módulo adicional.**
+Se utiliza un canal libre (`IN5`) del módulo HY-M158 de 8 canales PC817 que ya está montado
+en el sistema para los sensores de rueda. **No se necesita ningún módulo adicional.**
 
 La señal de la llave (+12 V ACC) pasa por el optoacoplador → el colector del PC817 se
 conecta a GPIO 40. La lógica es **INVERTIDA** respecto a un divisor resistivo directo:
 
 | Llave | LED PC817 | Fototransistor | GPIO 40 | Estado firmware |
 |-------|-----------|----------------|---------|-----------------|
-| **ON** | Conduce (10.8 mA) | Saturado → colector a GND | **LOW** | → RUNNING |
+| **ON** | Conduce (~3.6 mA con la 3 kΩ integrada del HY-M158) | Saturado → colector a GND | **LOW** | → RUNNING |
 | **OFF** | Apagado | Abierto | **HIGH** (pull-up externo 10 kΩ + INPUT_PULLUP ~45 kΩ) | → SHUTTING_DOWN |
 
-> ⚠️ **La placa PC817 usada NO tiene pull-up onboard** (verificado con polímetro: circuito abierto).
+> ⚠️ **El HY-M158 NO tiene pull-up onboard** en la salida (verificado con polímetro: circuito abierto).
 > Son obligatorios dos pull-ups: **10 kΩ externo** entre GPIO 40 y 3.3 V (soldar en PCB) +
 > **INPUT_PULLUP** en firmware (ya configurado en `power_manager.cpp` — red de seguridad ~45 kΩ).
+>
+> ⚠️ **Jumpers rojos del HY-M158: retirados** (los 8). Con ellos puestos cortocircuitan
+> `G(V)` con `G(IN)` y se pierde el aislamiento galvánico.
 
-### 2.3 Cableado GPIO 40 via PC817 (canal A7)
+### 2.3 Cableado GPIO 40 vía HY-M158 (canal `IN5`)
 
 ```
-  +12V ACC (llave ON) ──[1 A]── 1 kΩ ──→ IN+ (ánodo LED)
-  GND vehículo        ─────────────────→ IN- (cátodo LED)
+  +12V ACC (llave ON) ──[fusible 1 A]──► HY-M158 V5 (3 kΩ on-board en serie con LED PC817)
+  GND vehículo        ─────────────────► HY-M158 G (lado V)
 
                                           3.3V ──[10 kΩ ext.]──┐
-                                          OUT (colector) ───────┤──→ GPIO 40
-                                          GND (3.3V side) ──────────→ GND ESP32
+                                          HY-M158 IN5 ──────────┤──► GPIO 40 ESP32
+                                          HY-M158 G (lado IN) ──────► GND_logic ESP32 (común con STM32)
 ```
 
-- **Resistencia serie LED: 1 kΩ** (no 330 Ω):
-  `I_LED = (12 V − 1.2 V) / 1 kΩ = 10.8 mA` ← seguro (<20 mA nominal PC817, ciclo de trabajo ~100%)
-- **Pull-up externo 10 kΩ ¼ W**: soldar entre GPIO 40 y pin 3.3 V del ESP32 — **obligatorio**
+- **Resistencia serie LED:** ya integrada en el HY-M158 (3 kΩ SMD `302`).
+  `I_LED = (12 V − 1.2 V) / 3 kΩ ≈ 3.6 mA` ← dentro del rango nominal del PC817, CTR ≥ 50 % satura el fototransistor contra el pull-up de 10 kΩ a 3,3 V.
+- **Pull-up externo 10 kΩ ¼ W**: soldar entre GPIO 40 y pin 3.3 V del ESP32 — **obligatorio**.
+- **No añadir resistencia de entrada externa** — la 3 kΩ on-board ya cumple la función.
 
 ## 3. Módulo Relé con Retardo Hardware (alimentación)
 

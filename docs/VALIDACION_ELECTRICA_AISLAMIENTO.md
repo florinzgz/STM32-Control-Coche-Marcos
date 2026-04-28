@@ -147,7 +147,8 @@ El canal Z está **inactivo en el firmware actual**. Confirmado desde el código
 - `steering_centering.c`: el centrado usa `SteeringCenter_Detected()` (PB5/EXTI5, sensor
   inductivo LJ12A3), **no usa el canal Z del encoder en absoluto**
 
-El cableado del PC817 en el canal A6 de la Placa-A puede instalarse ahora sin consecuencias.
+El cableado del canal Z del encoder se ha trasladado al **6N137** junto con A y B
+(ver `docs/ENCODER_WIRING_6N137.md`); ya no pasa por el módulo PC817.
 
 ---
 
@@ -290,12 +291,12 @@ La dirección convencional es consistente con el firmware existente. ✅
 |---|-------|-----------|----------|-----------------------|------------------------|--------------------------|--------------------------|----------------------------------|
 | 1 | **ENC_A** | PA15 / TIM2_CH1 | 6N137 | Pull-up interno del encoder (5–12 V a VCC_encoder, ~1 kΩ) | **4.7 kΩ externo a 3.3 V** (OBLIGATORIO — `GPIO_NOPULL` en MSP) | HIGH (3.3 V) | LOW (≈0 V) | Flanco RISING y FALLING (TIM2 cuadratura — ambos flancos) |
 | 2 | **ENC_B** | PB3 / TIM2_CH2 | 6N137 | Pull-up interno del encoder (5–12 V a VCC_encoder, ~1 kΩ) | **4.7 kΩ externo a 3.3 V** (OBLIGATORIO — `GPIO_NOPULL` en MSP) | HIGH (3.3 V) | LOW (≈0 V) | Flanco RISING y FALLING (TIM2 cuadratura — ambos flancos) |
-| 3 | **WHEEL_FL** | PA0 / EXTI0 | PC817 | Pull-up en VCC_sensor (resistencia en placa PC817, ~1–2.2 kΩ) | ~40 kΩ interno STM32 (`GPIO_PULLUP`) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
-| 4 | **WHEEL_FR** | PA1 / EXTI1 | PC817 | Pull-up en VCC_sensor (resistencia en placa PC817) | ~40 kΩ interno STM32 (`GPIO_PULLUP`) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
-| 5 | **WHEEL_RL** | PA2 / EXTI2 | PC817 | Pull-up en VCC_sensor (resistencia en placa PC817) | ~40 kΩ interno STM32 (`GPIO_PULLUP`) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
-| 6 | **WHEEL_RR** | PB15 / EXTI15 | PC817 | Pull-up en VCC_sensor (resistencia en placa PC817) | ~40 kΩ interno STM32 (`GPIO_PULLUP`) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
-| 7 | **STEER_CENTER** | PB5 / EXTI5 | PC817 | Pull-up en VCC_sensor (resistencia en placa PC817) | ~40 kΩ interno STM32 (`GPIO_PULLUP`) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar (= el tornillo abandona la zona de detección) |
-| 8 | **ENC_Z** *(inactivo)* | PB4 / EXTI4 | PC817 | Pull-up en VCC_encoder (resistencia en placa PC817) | 40 kΩ interno (cuando se configure `GPIO_PULLUP`) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` (cuando se active en firmware) |
+| 3 | **WHEEL_FR** | PA1 / EXTI1 | PC817 (HY-M158 `IN1`) | 3 kΩ on-board (SMD `302`) en serie con LED | **4.7 kΩ externo** entre `IN1` y 3.3 V (obligatorio) | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
+| 4 | **WHEEL_FL** | PA0 / EXTI0 | PC817 (HY-M158 `IN2`) | 3 kΩ on-board | **4.7 kΩ externo** entre `IN2` y 3.3 V | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
+| 5 | **WHEEL_RR** | PB15 / EXTI15 | PC817 (HY-M158 `IN3`) | 3 kΩ on-board | **4.7 kΩ externo** entre `IN3` y 3.3 V | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
+| 6 | **WHEEL_RL** | PA2 / EXTI2 | PC817 (HY-M158 `IN4`) | 3 kΩ on-board | **4.7 kΩ externo** entre `IN4` y 3.3 V | HIGH (3.3 V) | LOW (≈0 V) | `IT_RISING` → disparo cuando sensor deja de detectar |
+| 7 | **STEER_CENTER** *(opcional)* | PB5 / EXTI5 | PC817 (canal libre `IN6`–`IN8` del HY-M158, **si se mantiene físicamente**) | 3 kΩ on-board | 4.7 kΩ externo si se cablea | HIGH (3.3 V) | LOW (≈0 V) | Función ahora cubierta por ENC_Z aislado por 6N137 — no obligatorio cablear |
+| 8 | **ENC_Z** | PB4 (GPIO sondeado) | **6N137** (junto con A y B — ya no PC817) | R_IN 330 Ω en placa 6N137 | 4.7 kΩ externo a 3.3 V | HIGH (3.3 V) | LOW (≈0 V) | Polled a baja frecuencia para detectar centro mecánico |
 
 **Notas críticas:**
 
@@ -434,7 +435,7 @@ DOMINIOS AISLADOS (barrera mediante optoacoplador/aislador)
   (encoder 5–12V)               (A y B)                   (STM32 3.3V)
 
   GND_sensores  ─────────────► [PC817     ──────────────► GND_STM32
-  (= GND_chasis)                Placa-A]                  (STM32 3.3V)
+  (= GND_chasis)                HY-M158]                  (STM32 3.3V)
   LJ12A3 × 5                   (6 canales)
 
   GND_CAN       ─────────────► [Aislador  ──────────────► GND_STM32
@@ -456,9 +457,9 @@ DOMINIO UNIFICADO (sin barrera — compartido por diseño)
 |------------|------------------------|--------|----------------|
 | **TJA1051T/3_A** (lado STM32, si se aísla CAN) | **SÍ** | Necesita 5 V en GND_CAN, que es galvánicamente diferente de 5V_STM32 | 5 V / ≥ 200 mA |
 | 6N137 M1 (lado primario) | **No** | Se alimenta de VCC_encoder (ya existente, misma fuente que el encoder) | VCC_encoder (5–12 V) |
-| PC817 Placa-A (lado primario) | **No** | Se alimenta de VCC_sensor (misma fuente que los LJ12A3) | VCC_sensor (6–36 V) |
+| PC817 (HY-M158) (lado primario) | **No** | Se alimenta de VCC_sensor (misma fuente que los LJ12A3) | VCC_sensor (6–36 V) |
 | 6N137 M1 (lado secundario) | **No** | Se alimenta de 3.3 V del STM32 | 3.3 V (GND_STM32) |
-| PC817 Placa-A (lado secundario) | **No** | Se alimenta de 3.3 V del STM32 | 3.3 V (GND_STM32) |
+| PC817 (HY-M158) (lado secundario) | **No** | Se alimenta de 3.3 V del STM32 | 3.3 V (GND_STM32) |
 
 #### Especificación del DC-DC aislado para CAN
 
@@ -496,7 +497,7 @@ Batería 24 V ─── Terminal negativo ────────────�
                      (alimenta E6B2-CWZ6C y primario de 6N137)
 
 VCC_sensor (del 12V o 24V del vehículo):
-  → Alimenta primario de PC817 Placa-A (a través de resistencias de la placa)
+  → Alimenta primario de PC817 (HY-M158) (a través de resistencias de la placa)
   → GND_sensor = GND_chasis (sensores montados en chasis)
 ```
 

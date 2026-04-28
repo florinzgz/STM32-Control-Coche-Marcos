@@ -738,7 +738,7 @@ Interruptor simple que selecciona el modo de tracción. Gestionado por el ESP32-
 ## 10. Sensor de Contacto (Ignition Sense)
 
 Entrada digital que detecta si la llave de contacto está en posición ON. Gestionada por el ESP32-S3.
-La señal llega **aislada galvánicamente** a través del canal A7 de la placa PC817 de 8 canales.
+La señal llega **aislada galvánicamente** a través del canal `IN5` del módulo HY-M158 (PC817 ×8).
 
 ### Tabla de pines
 
@@ -761,9 +761,9 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 
 ### Resistencia LED de entrada (lado 12 V)
 
-- **1 kΩ ¼ W** entre +12 V ACC y ánodo del PC817:
-  `I_LED = (12 V − 1.2 V) / 1 kΩ ≈ 10.8 mA` → seguro (<20 mA, ciclo de trabajo ~100%)
-- **NO usar 330 Ω** (33 mA continuo → excede corriente nominal → degrada CTR)
+- **No añadir** — el módulo HY-M158 ya integra **3 kΩ SMD `302`** en serie con el LED de cada canal:
+  `I_LED = (12 V − 1.2 V) / 3 kΩ ≈ 3.6 mA` → dentro del rango nominal del PC817, CTR ≥ 50 % satura el fototransistor.
+- Antiguamente este documento pedía 1 kΩ externa, pero con el HY-M158 confirmado **no es necesaria**.
 
 ### Alimentación
 
@@ -779,12 +779,12 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 ### Esquema de conexión
 
 ```
-  +12V ACC (llave ON) ──[1 A]── 1 kΩ ──→ IN+ (ánodo LED PC817 ch A7)
-  GND vehículo        ─────────────────→ IN- (cátodo LED)
+  +12V ACC (llave ON) ──[fusible 1 A]──► HY-M158 V5 (3 kΩ on-board en serie con LED PC817)
+  GND vehículo        ─────────────────► HY-M158 G (lado V)
 
-  3.3V ──[10 kΩ ext.]──┬──→ OUT (colector PC817) ──→ GPIO 40 (INPUT_PULLUP)
+  3.3V ──[10 kΩ ext.]──┬──► HY-M158 IN5 (colector PC817) ──► GPIO 40 (INPUT_PULLUP)
                        │
-                      GND (3.3V ESP32)
+                      HY-M158 G (lado IN) ──► GND (3.3V ESP32, común con STM32)
 
   LOW  = Llave ON
   HIGH = Llave OFF (estado seguro)
