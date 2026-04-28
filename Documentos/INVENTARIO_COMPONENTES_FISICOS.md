@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.3 (añadidos transistores 2N2222/BC337/C1815/A1015, Zener kit 1N4728–1N4737, CBB22 250V/100nF)  
+> Versión: 1.4 (añadidos módulos PC817 8-ch ×2, módulos 6N137 5V ×5, módulos 6N137 12V ×5; ferrita CAN confirmada NO disponible)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -20,6 +20,7 @@
 8. [Mapa de montaje — dónde va cada resistencia](#8-mapa-de-montaje--dónde-va-cada-resistencia)
 9. [Qué falta comprar](#9-qué-falta-comprar)
 10. [Transistores](#10-transistores)
+11. [Módulos optoacopladores (PC817 / 6N137)](#11-módulos-optoacopladores-pc817--6n137)
 
 ---
 
@@ -42,6 +43,10 @@
 | T2 | Transistor **NPN** TO-92 | **BC337-40** (45 V / 800 mA) | 3 uds | ✅ EN MANO |
 | T3 | Transistor **NPN** TO-92 | **C1815** (50 V / 150 mA) | 3 uds | ✅ EN MANO |
 | T4 | Transistor **PNP** TO-92 | **A1015** (50 V / 150 mA) | 4 uds | ✅ EN MANO |
+| M1 | **Módulo PC817 8 canales** | Optoacoplador 8-ch en placa | 2 uds (= 16 ch) | ✅ EN MANO |
+| M2 | **Módulo 6N137 (5 V lado MCU)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
+| M3 | **Módulo 6N137 (12 V lado sensor)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
+| F1 | Ferrita / bobina CAN | BLM18AG601SN1D / 100 µH | 0 uds | ❌ **FALTA — pedir** |
 
 ---
 
@@ -502,12 +507,16 @@ Kit AUKENIEN 1/8W:
 | Componente | Especificación | Para qué | Qty |
 |-----------|---------------|----------|-----|
 | Ferrita/bobina | BLM18AG601SN1D o 100µH | Filtro bus CAN (5V sucio → limpio) | 1 |
-| Optoacoplador | **PC817** | 5 canales: 4× rueda + 1× centro dirección | 5 |
-| Optoacoplador | **6N137** | Encoder E6B2-CWZ6C (×3 canales: A, B, Z) | 3 |
 
+> **Optoacopladores PC817 y 6N137 ya NO hacen falta comprar:**
+> - PC817 → **2 módulos de 8 canales en mano = 16 canales** (solo se usan 5) ✅
+> - 6N137 encoder → **10 módulos en mano** (5×5V + 5×12V) ✅ sobra ampliamente
+>
 > **Transistor NPN y 1N4148 ya NO hacen falta comprar:**
 > - Transistor para relé retención → **2N2222 ×10 en mano** ✅
 > - Diodos OR retención (1N4148) → **Zener 1N4728–1N4737 en polarización directa** funcionan igual ✅
+>
+> **Único componente pendiente de pedir:** ferrita/bobina filtro CAN (1 unidad).
 
 ### 9.3 Estado COMPLETAMENTE CUBIERTO por inventario actual
 
@@ -528,6 +537,9 @@ Kit AUKENIEN 1/8W:
 | Snubber RC relés (100Ω) | Kit 1/4W (100Ω ×20) — **1/4W mejor que 1/8W** | ✅ |
 | **Transistor relé retención** | **2N2222 ×10** en mano | ✅ |
 | **OR diodos retención** | **Zener 1N4728–1N4737** en polarización directa | ✅ |
+| **Aislamiento sensores LJ12A3 (×5 ch)** | **Módulos PC817 8-ch ×2** (16 canales) | ✅ |
+| **Aislamiento encoder A/B/Z (×3 ch)** | **Módulos 6N137 5V ×5** | ✅ |
+| **Protección polaridad inversa LED PC817** | **Zener 1N4735/4736/4737** en antiparalelo | ✅ |
 
 ---
 
@@ -614,6 +626,133 @@ Kit AUKENIEN 1/8W:
 
 ---
 
+## 11. Módulos optoacopladores (PC817 / 6N137)
+
+### 11.1 — Módulo PC817 8 canales (×2 unidades)
+
+| Campo | Dato |
+|-------|------|
+| Tipo | Placa con 8× PC817 ya montados |
+| Canales totales | 8 ch/módulo × 2 módulos = **16 canales** |
+| Aislamiento | 5 000 V (PC817 estándar) |
+| Velocidad | Baja (BW ≈ 80 kHz) — ideal para LJ12A3 inductivos |
+| Cantidad | **2 módulos** |
+
+**Uso en el proyecto (5 canales necesarios):**
+- 4× sensores LJ12A3 velocidad rueda → PA0, PA1, PA2, PB15
+- 1× sensor LJ12A3 centro dirección → PB5
+- Sobran 11 canales (más de un módulo entero de reserva)
+
+**Recomendación de reparto:**
+- Módulo #1: usar 5 canales para los sensores LJ12A3 (4 ruedas + centro dirección)
+- Módulo #2: 100 % reserva (futuras señales digitales aisladas: pulsador externo, fin de carrera, etc.)
+
+---
+
+### 11.2 — ¿Sirve el Zener kit (1N4728–1N4737) para el PC817? **SÍ, igual que un 1N4148**
+
+#### Por qué es necesario un diodo de protección en la entrada del PC817
+
+El diodo LED interno del PC817 tiene:
+- **Vf típica:** 1.2 V (en directa, conducción)
+- **Vr máxima:** **6 V** ← si llega más voltaje en inverso, **se destruye**
+
+Los sensores **LJ12A3** son inductivos PNP a 12-24 V. Si por error de cableado, ruido inductivo o pulso de retorno la señal se invierte (la línea cae por debajo de GND), el LED del PC817 recibe tensión inversa y se quema.
+
+**Solución estándar:** un diodo en **antiparalelo** al LED del PC817 que se polariza al revés que el LED. Cuando entra una tensión positiva (normal) el LED conduce y el diodo de protección está en inverso (no afecta). Cuando entra tensión inversa, el diodo de protección conduce en directa (Vf ≈ 0.7 V) y "cortocircuita" el LED protegiéndolo.
+
+#### Esquema de conexión — Zener en antiparalelo
+
+```
+                            R_serie 820Ω-2.2kΩ
+   Señal sensor LJ12A3 ──────[ R ]──────┬─────► PIN 1 (Anodo LED PC817)
+   (12-24 V PNP)                         │
+                                         │
+                              ╔══════════╪══════════╗
+                              ║          │   K  A   ║
+                              ║   LED    ↓   ←──┐   ║   ← Zener en antiparalelo
+                              ║   ────►  │      │   ║      cátodo al ánodo del LED
+                              ║   PC817  │      │   ║      ánodo  al cátodo del LED
+                              ╚══════════╪══════╪═══╝
+                                         │      │
+   GND sensor ───────────────────────────┴──────┴─────► PIN 2 (Cátodo LED PC817)
+```
+
+**¿Cómo identificar la polaridad del Zener?**
+- **Banda negra** = cátodo (K)
+- Lado **sin banda** = ánodo (A)
+
+**Conexión correcta:**
+- **Cátodo del Zener (banda)** → conectar al **PIN 1 del PC817 (lado positivo de la entrada)** = mismo nodo que el ánodo del LED
+- **Ánodo del Zener (sin banda)** → conectar al **PIN 2 del PC817 (lado GND de la entrada)** = mismo nodo que el cátodo del LED
+
+> En condiciones normales (señal positiva), el Zener queda polarizado en INVERSO. Como las tensiones de trabajo (5-24 V según el divisor R_serie) son **menores que la Vz mínima del kit (3.3 V)**, **¡cuidado!**: el Zener 1N4728 (3.3 V) podría empezar a conducir en inverso si la tensión en el LED supera 3.3 V → **NO USAR el 1N4728**.
+>
+> **Usa cualquiera de los siguientes valores que tienes en mano (Vz ≥ 6.2 V):**
+> - **1N4735 (6.2 V)** ✅ recomendado — Vz alta, no interfiere
+> - **1N4736 (6.8 V)** ✅
+> - **1N4737 (7.5 V)** ✅
+>
+> Estos NO conducirán en inverso porque la caída en el LED del PC817 es ~1.2 V (siempre muy por debajo de 6.2 V). Solo conducirán en **directa** cuando haya inversión de polaridad accidental, exactamente como un 1N4148.
+
+#### ¿Y si el módulo PC817 8 canales ya trae diodo de protección integrado?
+
+La mayoría de módulos comerciales chinos de PC817 8-ch **YA incluyen** el diodo antiparalelo en la placa (suele ser un 1N4148 SMD junto a cada canal). **Verifica visualmente la placa antes de añadir Zener externos:**
+
+| Caso | Acción |
+|------|--------|
+| Módulo trae diodo SMD junto al PC817 | ✅ **NO necesitas añadir nada** — los Zener quedan de reserva |
+| Módulo SIN diodo de protección | ✅ Añade 1N4735/4736/4737 en antiparalelo a la entrada de cada canal usado (5 unidades) |
+
+#### ¿Dónde se sueldan en el módulo si hace falta?
+
+En las regletas de **entrada (lado IN)** del módulo:
+- Cada canal tiene 2 pines (IN+ e IN−)
+- El Zener se suelda **directamente entre IN+ e IN−**, con la **banda (cátodo) hacia IN+**
+
+```
+   Borna IN+ canal X ●──────┬───── (al PC817 anodo LED)
+                            │
+                            ▼ banda (cátodo)
+                          Zener 1N4735 (6.2 V)
+                            │ (ánodo, sin banda)
+                            │
+   Borna IN− canal X ●──────┴───── (al PC817 cátodo LED, GND sensor)
+```
+
+**Conclusión final:**
+- ✅ **SÍ te sirven los Zener que tienes**, usados en antiparalelo igual que un 1N4148
+- ✅ Usa **1N4735 (6.2 V)** o superior — **no** uses los de Vz baja (1N4728 3.3 V)
+- ⚠️ Antes de soldar, comprueba si tu módulo 8-ch ya lleva diodo de protección integrado; en ese caso no hace falta añadir nada
+
+---
+
+### 11.3 — Módulos 6N137 (×10 unidades: 5×5V + 5×12V)
+
+| Campo | Dato |
+|-------|------|
+| Tipo | Placas con 6N137 ya montados |
+| Velocidad | Alta (10 Mbit/s) — apropiado para encoder E6B2-CWZ6C |
+| Aislamiento | 2 500 V típico |
+| Variantes en mano | **5 módulos lado 5 V** + **5 módulos lado 12 V** |
+| Cantidad total | **10 módulos** |
+
+**Uso en el proyecto (3 canales necesarios):**
+- 1× canal A encoder → PA15 (TIM2_CH1)
+- 1× canal B encoder → PB3 (TIM2_CH2)
+- 1× canal Z encoder → PB4 (EXTI4)
+
+**¿5V o 12V?** El encoder Omron E6B2-CWZ6C es alimentado a **5 V** (open collector NPN), por lo tanto la entrada del 6N137 ve picos a 5 V.
+- **Usar los 5 módulos de 5 V** → coinciden exactamente con la tensión de salida del encoder
+- Los 5 módulos de 12 V quedan como **reserva** o para futuros sensores con salida 12 V
+
+**Distribución recomendada:**
+- 3 módulos de 5 V → encoder A/B/Z (lado MCU)
+- 2 módulos de 5 V → reserva
+- 5 módulos de 12 V → reserva total para futuros canales digitales aislados a 12 V
+
+---
+
 ## Apéndice — Historial de sesiones
 
 | Fecha | Qué se añadió al inventario |
@@ -625,6 +764,7 @@ Kit AUKENIEN 1/8W:
 | Anterior | D1 P6KE18CA ×20, D2 P6KE24CA ×20, D3 1N5408 ×50 |
 | Anterior | R1 kit 3W metal film (bolsa 120Ω confirmada) |
 | 2026-04-28 | **v1.3:** D4 kit Zener 1N4728–1N4737 ×~200; C4 CBB22 250V/100nF ×20; T1 2N2222×10, T2 BC337-40×3, T3 C1815×3, T4 A1015×4; eliminados de "falta comprar": transistor NPN y 1N4148 |
+| 2026-04-28 | **v1.4:** M1 módulos PC817 8ch ×2 (16 canales totales); M2 módulos 6N137 5V ×5; M3 módulos 6N137 12V ×5; F1 ferrita CAN confirmada NO disponible (única pieza pendiente). Documentado cableado Zener antiparalelo en PC817 (usar Vz ≥ 6.2 V: 1N4735/4736/4737) |
 
 ---
 
