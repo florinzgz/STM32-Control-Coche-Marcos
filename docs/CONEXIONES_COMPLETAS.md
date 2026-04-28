@@ -416,6 +416,64 @@ STM32 Nucleo          TJA1051 #1           Bus CAN           TJA1051 #2         
 
 > ⚠️ **NUNCA** conectar PA11/PA12 directamente a CANH/CANL. El transceiver TJA1051 es OBLIGATORIO. Sin él, el CAN no funciona y puedes dañar los pines.
 
+### Aislamiento galvánico opcional — Módulo ADuM1201 + DC-DC aislado
+
+> El módulo **ADuM1201ARZ** (ShengYang o equivalente) es un aislador digital de 2 canales
+> de Analog Devices que proporciona barrera galvánica de 2500 V entre el dominio lógico
+> del STM32 (GND_logic) y el dominio del bus CAN (GND_CAN / chasis del vehículo).
+> Se coloca **entre el STM32 y el TJA1051T/3 #1** — el firmware no necesita ningún cambio.
+
+#### Cuándo añadirlo
+
+| Situación | Recomendación |
+|-----------|---------------|
+| Banco de pruebas limpio, sin motores | No necesario |
+| Instalación en vehículo con motores DC 24V y masa de chasis compartida | **Recomendado** |
+| Diferencial de masa medida STM32↔chasis > 0.5 V | **Obligatorio** |
+
+#### Pinout del módulo ADuM1201 (breakout ShengYang)
+
+| Pin módulo | Pin ADuM1201 | Función | Conectar a |
+|-----------|-------------|---------|-----------|
+| **V1** | VDD1 | Alimentación lado STM32 | 3.3V STM32 |
+| **G1** | GND1 | Masa lado STM32 | GND_logic (STM32) |
+| **AI** | VIA (pin 3) | Entrada canal A (STM32→CAN) | STM32 **PA12** (FDCAN1_TX) |
+| **BO** | VOB (pin 4) | Salida canal B (CAN→STM32) | STM32 **PA11** (FDCAN1_RX) |
+| **V2** | VDD2 | Alimentación lado CAN | 3.3V_aislada (del DC-DC) |
+| **G2** | GND2 | Masa lado CAN | GND_CAN (aislado del STM32) |
+| **AO** | VOA (pin 7) | Salida canal A (STM32→CAN) | TJA1051T/3 #1 **TXD** |
+| **BI** | VIB (pin 8) | Entrada canal B (CAN→STM32) | TJA1051T/3 #1 **RXD** |
+
+> ⚠️ El TJA1051T/3 requiere **VCC = 4.5–5.5 V**. Necesita un DC-DC aislado de 5V
+> para el lado CAN además de los 3.3V aislados para el ADuM1201.
+
+#### Esquema de conexión con ADUM1201
+
+```
+Lado STM32 (GND_logic)              Barrera 2500V              Lado CAN (GND_CAN)
+─────────────────────               ─────────────               ─────────────────────
+
+STM32 PA12 (TX) ──────────► ADuM1201 AI │══════│ AO ──────────► TJA1051T/3 #1 TXD
+STM32 PA11 (RX) ◄────────── ADuM1201 BO │══════│ BI ◄────────── TJA1051T/3 #1 RXD
+
+3.3V_STM32 ─────────────── ADuM1201 V1  │      │ V2 ─── 3.3V_aislada (DC-DC)
+GND_logic ──────────────── ADuM1201 G1  │      │ G2 ─── GND_CAN
+
+5V_rail ──► DC-DC aislado ──► 5V_aislada ──────────────── TJA1051T/3 #1 VCC (5V)
+                            └──► 3.3V_aislada ─────────── ADuM1201 V2
+```
+
+**DC-DC aislado recomendado:** RECOM RxxP5.0S (5V/200mA) o Murata MEE1S0505SC.
+No usar convertidores no aislados (p. ej., RECOM R-78E5.0) — anulan la barrera galvánica.
+
+#### Impacto en el firmware
+
+**Ningún cambio de firmware necesario.** La interfaz FDCAN1 (PA11/PA12) es idéntica.
+El ADuM1201 es transparente al protocolo: retardo de propagación 10–50 ns << 2 µs/bit CAN.
+
+Ver documentación detallada: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md §9` y
+`docs/VALIDACION_ELECTRICA_AISLAMIENTO.md §1.4`.
+
 ---
 
 ## 10) RELÉS DE POTENCIA — 3× Relé + Circuito de protección
@@ -858,6 +916,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
 | 2 | TJA1051T/3 módulo | Transceivers CAN | VCC=5V, VIO=3.3V |
+| 1 *(opcional)* | **Módulo ADuM1201ARZ** (ShengYang o equiv.) | Aislador digital galvánico CAN — entre STM32 y TJA1051T/3 #1 | 2 canales, 2500V aislamiento, 3.3V ambos lados |
+| 1 *(opcional)* | **DC-DC aislado 5V / ≥200 mA** (p. ej. RECOM RxxP5.0S) | Alimentación aislada del TJA1051T/3 #1 cuando se usa el ADuM1201 | Aislamiento ≥1000V rms; NO usar convertidores no aislados |
 | 1 | TF-Mini Plus (Benewake) | Sensor obstáculos LiDAR punto único | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, 115200 bps, conexión directa 3.3V |
 | 5 | Módulo 4-ch opto relé + relés potencia | Relés potencia y LED | Módulo SRD-12VDC-SL-C 4-ch (etapa 1) + relés potencia bobina 12V (etapa 2) + 2× relé LED |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
@@ -983,6 +1043,11 @@ PB14 ──►[330Ω]──►[LED]──► GND
 2. TJA1051 #2: **GPIO4** → TXD, **GPIO5** → RXD, 5V→VCC, **3.3V→VIO** ⚠️, GND, S→GND
 3. CANH↔CANH, CANL↔CANL (par trenzado recomendado)
 4. **Resistencia 120Ω** entre CANH y CANL en **cada** extremo
+
+> 💡 **Si usas el módulo ADuM1201 (aislamiento galvánico):** interponerlo entre STM32 PA12/PA11
+> y el TJA1051T/3 #1 según el esquema de §9 antes de conectar el transceiver.
+> Necesita además un DC-DC aislado de 5V (para TJA1051 VCC) y 3.3V (para ADuM1201 V2).
+> El firmware no cambia.
 
 **⚠️ PUNTOS CRÍTICOS:**
 - **PA11 es CAN RX, NO LPWM_FR** — si lo conectas al BTS7960 FR, la comunicación CAN muere

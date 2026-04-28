@@ -329,6 +329,25 @@ GND_logic   (3.3V) ──────────── STM32 GND ─┤
 4. Los diodos 1N4148 antiparalelo se sueldan junto a cada resistencia de 1 kΩ
    en el lado 12V del módulo.
 
+## BUS CAN (PA11/PA12) — NO usa PC817 ni 6N137
+
+El bus CAN del STM32 (FDCAN1) **no se aisla con optoacopladores PC817 ni 6N137**.
+Los pines PA11 (RX) y PA12 (TX) van al transceiver **TJA1051T/3** directamente,
+o a través del módulo **ADuM1201** si se requiere barrera galvánica completa:
+
+```
+STM32 PA12 ──► ADuM1201 AI │══════│ AO ──► TJA1051T/3 TXD ──► Bus CAN
+STM32 PA11 ◄── ADuM1201 BO │══════│ BI ◄── TJA1051T/3 RXD ◄── Bus CAN
+```
+
+El módulo ADuM1201 necesita:
+- **V1/G1** → 3.3V_STM32 / GND_logic (lado STM32)
+- **V2/G2** → 3.3V_aislada / GND_CAN (del DC-DC aislado, lado CAN)
+- DC-DC aislado de **5V** adicional para alimentar el TJA1051T/3 (VCC = 4.5–5.5 V)
+
+**Ningún cambio de firmware.** Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema
+completo y `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md §9` para la especificación técnica.
+
 ---
 
 *Documento creado a partir de `power_manager.h`, `project_config.h` y*
