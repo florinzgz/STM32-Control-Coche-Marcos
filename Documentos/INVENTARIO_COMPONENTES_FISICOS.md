@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.2 (corregido R3 kit 1/4W, añadido análisis kit ALLECIN condensadores)  
+> Versión: 1.3 (añadidos transistores 2N2222/BC337/C1815/A1015, Zener kit 1N4728–1N4737, CBB22 250V/100nF)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -19,6 +19,7 @@
 7. [Mapa de montaje — dónde va cada condensador](#7-mapa-de-montaje--dónde-va-cada-condensador)
 8. [Mapa de montaje — dónde va cada resistencia](#8-mapa-de-montaje--dónde-va-cada-resistencia)
 9. [Qué falta comprar](#9-qué-falta-comprar)
+10. [Transistores](#10-transistores)
 
 ---
 
@@ -35,6 +36,12 @@
 | D1 | TVS bidireccional DO-15 | **P6KE18CA** (18 V) | 20 uds | ✅ EN MANO |
 | D2 | TVS bidireccional DO-15 | **P6KE24CA** (24 V) | 20 uds | ✅ EN MANO |
 | D3 | Diodo rectificador DO-27 | **1N5408** (3 A / 1000 V) | 50 uds | ✅ EN MANO |
+| D4 | Diodo Zener DO-35 | **Kit 1N4728–1N4737** (3.3 V–13 V, 10 valores) | ~200 uds | ✅ EN MANO |
+| C4 | Condensador film CBB22 | **100 nF / 250 V** (código 104J, paso P10) | 20 uds | ✅ EN MANO |
+| T1 | Transistor **NPN** TO-92 | **2N2222** (40 V / 600 mA) | 10 uds | ✅ EN MANO |
+| T2 | Transistor **NPN** TO-92 | **BC337-40** (45 V / 800 mA) | 3 uds | ✅ EN MANO |
+| T3 | Transistor **NPN** TO-92 | **C1815** (50 V / 150 mA) | 3 uds | ✅ EN MANO |
+| T4 | Transistor **PNP** TO-92 | **A1015** (50 V / 150 mA) | 4 uds | ✅ EN MANO |
 
 ---
 
@@ -71,7 +78,27 @@
 
 ---
 
-## 3. Condensadores electrolíticos
+### 2.3 — CBB22 100 nF / 250 V (código **104J**, paso P10) — 20 piezas
+
+| Campo | Dato |
+|-------|------|
+| Referencia bolsa | `EU-HBC-Cap-CBB22-250V104J-P10-20PCS` (B11) |
+| Código | **104J** → 100 nF, tolerancia ±5% (J) |
+| Tensión nominal | **250 V AC** (≈350 V DC pico) |
+| Tipo | Film polipropileno metalizado (CBB22) — no polarizado |
+| Paso pines | **P10 = 10 mm** |
+| Cantidad | **20 piezas** |
+
+**¿Qué diferencia hay con los cerámicos 104 de C1?**
+- C1 (cerámica 50V) → bypass rápido de señal, junto a ICs en rail de 3.3V/5V
+- CBB22 (film 250V) → aguanta alta tensión AC; va en circuitos conectados a red 230V o en snubber de relés con bobinas de 24V donde hay picos de tensión altos
+
+**Uso en el proyecto:**
+- **Snubber RC de relés** → los contactos de RELAY_MAIN/TRAC/DIR generan arcos → 100nF en serie con 100Ω paralelo a los contactos. La tensión de trabajo es 24V, pero los picos de conmutación pueden llegar a 100-200V; la CBB22 a 250V aguanta esto mejor que la cerámica 50V
+- **Recomendado:** usar las CBB22 preferentemente en las 3 posiciones de snubber de relé, y guardar las cerámicas 50V para los bypass de ICs
+- Sobran 17 de reserva
+
+---
 
 ### 3.1 — 2200 µF / 35 V (16×25 mm)
 
@@ -244,9 +271,32 @@ Usar: **5 diodos** para los 5 módulos de relé + **1** para relé retención = 
 
 ---
 
----
+### 5.4 — Kit Zener 1N4728–1N4737 — 10 valores / ~200 piezas
 
-## 6. Análisis kit ALLECIN 240PCS electrolíticos
+| Campo | Dato |
+|-------|------|
+| Referencia | "10 Value Zener Diode Assorted Kit" |
+| Valores incluidos | 1N4728 (3.3V), 1N4729 (3.6V), 1N4730 (3.9V), 1N4731 (4.3V), 1N4732 (4.7V), 1N4733 (5.1V), 1N4734 (5.6V), 1N4735 (6.2V), 1N4736 (6.8V), 1N4737 (7.5V) |
+| Tensión Zener | 3.3 V → 7.5 V (modo inverso) |
+| Corriente Zener max | 500 mW / Vz (típico 75–150 mA) |
+| Encapsulado | DO-35 (similar a 1N4148) |
+| Cantidad estimada | ~20 piezas × 10 valores = **~200 piezas** |
+
+#### ¿Para qué sirven en este proyecto?
+
+| Uso | En modo directo (Vf ≈ 0.65 V) | Resultado |
+|-----|-------------------------------|-----------|
+| **Flyback bobina relé** (en antiparalelo) | ✅ actúa como diodo normal | **Funciona perfectamente** — sobran 1N5408 pero estos también valen |
+| **OR lógico retención** (sustituto 1N4148) | ✅ para señales DC lentas | **Sí sirve** — más lento que 1N4148 pero irrelevante en control de relé |
+| Protección ESD entrada PC817 | ❌ no es el componente adecuado | Usar P6KE18CA ya disponible |
+
+#### ¿Sirven para el PC817?
+
+**No se necesita ningún diodo en paralelo con el PC817.** El PC817 tiene un LED en su entrada (no una bobina inductiva), por lo que no genera picos de back-EMF. Lo único que necesita la entrada del PC817 es una **resistencia en serie** para limitar la corriente al LED (~5–20 mA). Los diodos Zener son innecesarios en esa posición.
+
+**Conclusión:** Los Zener **no se soldan junto al PC817**. Sí puedes usar cualquiera de ellos en **polarización directa** para el OR de activación del relé de retención, eliminando la necesidad de comprar 1N4148.
+
+---
 
 > **Estado:** Kit a comprar — imagen referencia `913b0f6f-de4c-49f0-b911-53bc022b7e3e`  
 > **Marca:** ALLECIN  
@@ -451,28 +501,116 @@ Kit AUKENIEN 1/8W:
 
 | Componente | Especificación | Para qué | Qty |
 |-----------|---------------|----------|-----|
-| Transistor NPN | BC547 o 2N2222 | Relé de retención (GPIO41 ESP32 → bobina) | 1 |
-| Diodo | 1N4148 (×2 en OR) | Activación bobina relé retención | 2 |
 | Ferrita/bobina | BLM18AG601SN1D o 100µH | Filtro bus CAN (5V sucio → limpio) | 1 |
 | Optoacoplador | **PC817** | 5 canales: 4× rueda + 1× centro dirección | 5 |
 | Optoacoplador | **6N137** | Encoder E6B2-CWZ6C (×3 canales: A, B, Z) | 3 |
+
+> **Transistor NPN y 1N4148 ya NO hacen falta comprar:**
+> - Transistor para relé retención → **2N2222 ×10 en mano** ✅
+> - Diodos OR retención (1N4148) → **Zener 1N4728–1N4737 en polarización directa** funcionan igual ✅
 
 ### 9.3 Estado COMPLETAMENTE CUBIERTO por inventario actual
 
 | Función | Componente disponible | ✅ |
 |---------|----------------------|---|
 | Terminación CAN (2×120Ω) | Kit 3W 120Ω | ✅ |
-| Flyback todos los relés (×6) | 1N5408 ×50 | ✅ |
+| Flyback todos los relés (×6) | 1N5408 ×50 (o Zener en directa) | ✅ |
 | TVS protección PC817 (×5 canales) | P6KE18CA ×20 | ✅ |
 | TVS protección 24V rail | P6KE24CA ×20 | ✅ |
 | Bypass 100nF todos módulos | Cerámica 104 ×100 | ✅ |
+| Snubber RC relés (100nF alta tensión) | CBB22 250V/100nF ×20 — **preferir sobre cerámica 50V** | ✅ |
 | Bypass 1µF ICs sensores | Cerámica 105 ×100 | ✅ |
 | Bulk 2200µF BTS7960 ×5 | Electrolítico 2200µF/35V ×5 | ✅ |
 | Pull-up 4.7kΩ I2C + encoder | Kit 1/4W (4.7kΩ ×20) o Kit 1/8W (4.7kΩ ×10) | ✅ |
 | Divisor pedal + llave | Kit 1/4W (10kΩ, 33kΩ) o Kit 1/8W | ✅ |
-| Base BC547 retención (1kΩ) | Kit 1/4W (1kΩ ×20) o Kit 1/8W (1kΩ ×10) | ✅ |
+| Base transistor retención (1kΩ) | Kit 1/4W (1kΩ ×20) o Kit 1/8W (1kΩ ×10) | ✅ |
 | Serie WS2812B datos (330Ω) | Kit 1/4W (330Ω ×20) — **mejor que 1/8W aquí** | ✅ |
 | Snubber RC relés (100Ω) | Kit 1/4W (100Ω ×20) — **1/4W mejor que 1/8W** | ✅ |
+| **Transistor relé retención** | **2N2222 ×10** en mano | ✅ |
+| **OR diodos retención** | **Zener 1N4728–1N4737** en polarización directa | ✅ |
+
+---
+
+## 10. Transistores
+
+### 10.1 — 2N2222 — NPN 40V/600mA (×10)
+
+| Campo | Dato |
+|-------|------|
+| Referencia | 2N2222 |
+| Tipo | NPN BJT |
+| Vceo (tensión colector-emisor) | 40 V |
+| Ic max (corriente colector) | 600 mA |
+| hFE típico | 100–300 |
+| Encapsulado | TO-92 |
+| Cantidad | **10 piezas** |
+
+**Uso en el proyecto:**
+- **Driver relé retención** (GPIO41 ESP32 → R_base=1kΩ → base, colector → bobina relé → 5V): 1 pieza
+- Pueden usarse como driver para cualquier relé de 5V en el circuito
+- Sobran 9 en reserva
+
+---
+
+### 10.2 — BC337-40 — NPN 45V/800mA (×3)
+
+| Campo | Dato |
+|-------|------|
+| Referencia | BC337-40 (sufijo -40 indica hFE grupo 3: 250–630) |
+| Tipo | NPN BJT |
+| Vceo | 45 V |
+| Ic max | 800 mA |
+| hFE | 250–630 (grupo "40") |
+| Encapsulado | TO-92 |
+| Cantidad | **3 piezas** |
+
+**Uso en el proyecto:** Alternativa al 2N2222 con mayor ganancia y corriente. Idóneo para driver de relés con bobinas de mayor consumo.
+
+---
+
+### 10.3 — C1815 — NPN 50V/150mA (×3)
+
+| Campo | Dato |
+|-------|------|
+| Referencia | C1815 GR (hFE grupo GR: 200–400) |
+| Tipo | NPN BJT |
+| Vceo | 50 V |
+| Ic max | 150 mA |
+| hFE | 200–400 (grupo GR) |
+| Encapsulado | TO-92 |
+| Cantidad | **3 piezas** |
+
+**Uso en el proyecto:** Señales de control de baja corriente, buffer de lógica, activación de optoacopladores. No recomendado para drivers de relé (150 mA < bobinas típicas 360 mA a 5V).
+
+---
+
+### 10.4 — A1015 — PNP 50V/150mA (×4)
+
+| Campo | Dato |
+|-------|------|
+| Referencia | A1015 GR (complementario del C1815) |
+| Tipo | **PNP** BJT |
+| Vceo | 50 V |
+| Ic max | 150 mA |
+| hFE | 200–400 (grupo GR) |
+| Encapsulado | TO-92 |
+| Cantidad | **4 piezas** |
+| Pinout | **EBC** (Emisor–Base–Colector, de izquierda a derecha con texto al frente) |
+
+**⚠️ ATENCIÓN — Es PNP:** El transistor conduce cuando la base está a tensión INFERIOR al emisor (lógica invertida respecto a los NPN). Para conmutar desde un GPIO de 3.3V (nivel bajo activo), se usa en conmutación de alto lado (high-side switch).
+
+**Uso en el proyecto:** Conmutación de alto lado en líneas de 5V o 12V donde se necesita activación a nivel bajo. No es el transistor principal para los relés (esos usan NPN a bajo lado).
+
+---
+
+### 10.5 — Tabla resumen de disponibilidad
+
+| Transistor | Tipo | Qty | Driver relé 5V | Driver PC817 | Señal lógica | Observación |
+|-----------|------|-----|---------------|-------------|-------------|-------------|
+| **2N2222** | NPN | 10 | ✅ **Primario** | ✅ | ✅ | Usar este para relé retención |
+| **BC337-40** | NPN | 3 | ✅ (mejor Ic) | ✅ | ✅ | Reserva o relés de mayor bobina |
+| **C1815** | NPN | 3 | ⚠️ Ic=150mA (límite) | ✅ | ✅ | Para señales, no relés de potencia |
+| **A1015** | PNP | 4 | ⚠️ high-side only | ⚠️ invertido | ✅ | Lógica PNP, diferente conexión |
 
 ---
 
@@ -486,6 +624,7 @@ Kit AUKENIEN 1/8W:
 | 2026-04-28 | Análisis kit ALLECIN 240PCS electrolíticos: cubre 6/7 posiciones, no válido para bulk 24V |
 | Anterior | D1 P6KE18CA ×20, D2 P6KE24CA ×20, D3 1N5408 ×50 |
 | Anterior | R1 kit 3W metal film (bolsa 120Ω confirmada) |
+| 2026-04-28 | **v1.3:** D4 kit Zener 1N4728–1N4737 ×~200; C4 CBB22 250V/100nF ×20; T1 2N2222×10, T2 BC337-40×3, T3 C1815×3, T4 A1015×4; eliminados de "falta comprar": transistor NPN y 1N4148 |
 
 ---
 
