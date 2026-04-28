@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.1 (actualizado con kit resistencias 1/8W y conectores)  
+> Versión: 1.2 (corregido R3 kit 1/4W, añadido análisis kit ALLECIN condensadores)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -15,7 +15,7 @@
 3. [Condensadores electrolíticos](#3-condensadores-electrolíticos)
 4. [Resistencias](#4-resistencias)
 5. [Diodos](#5-diodos)
-6. [Conectores y cableado](#6-conectores-y-cableado)
+6. [Análisis kit ALLECIN 240PCS electrolíticos](#6-análisis-kit-allecin-240pcs-electrolíticos)
 7. [Mapa de montaje — dónde va cada condensador](#7-mapa-de-montaje--dónde-va-cada-condensador)
 8. [Mapa de montaje — dónde va cada resistencia](#8-mapa-de-montaje--dónde-va-cada-resistencia)
 9. [Qué falta comprar](#9-qué-falta-comprar)
@@ -30,11 +30,11 @@
 | C2 | Cerámico monolítico 50V | **1 µF** (código 105) | 100 uds | ✅ EN MANO |
 | C3 | Electrolítico 35V −40+105°C | **2200 µF** (16×25 mm) | ~5 uds | ✅ EN MANO |
 | R1 | Resistencia metal film **3W** 1% | **120 Ω** | 20 uds | ✅ EN MANO |
-| R2 | Resistencia metal film **1/8W** ±5% | Kit **400 uds / 40 valores** | 400 uds | ✅ EN MANO |
+| R2 | Resistencia metal film **1/8W** ±5% | Kit **400 uds / 40 valores** (AUKENIEN) | 400 uds | ✅ EN MANO |
+| R3 | Resistencia metal film **1/4W** 1% | Kit **600 uds / 30 valores** (10Ω → 1MΩ) | 600 uds | ✅ EN MANO |
 | D1 | TVS bidireccional DO-15 | **P6KE18CA** (18 V) | 20 uds | ✅ EN MANO |
 | D2 | TVS bidireccional DO-15 | **P6KE24CA** (24 V) | 20 uds | ✅ EN MANO |
 | D3 | Diodo rectificador DO-27 | **1N5408** (3 A / 1000 V) | 50 uds | ✅ EN MANO |
-| CN1 | Conectores en cajas (varios tamaños) | Tipo a identificar | varios | ✅ EN MANO |
 
 ---
 
@@ -153,6 +153,45 @@
 | Datos WS2812B serie | **330 Ω** | Protección LED DIN (×2) | 2 |
 | Snubber RC relé | **100 Ω** | Paralelo contactos (×3) | 3 |
 
+### 4.2 — Kit 1/4W Metal Film 1% — AUKENIEN estilo, 600 piezas / 30 valores (10Ω → 1MΩ)
+
+| Campo | Dato |
+|-------|------|
+| Referencia imagen | `fbdbbc5f-b78b-4984-9e67-0e78b8a4a9bd` |
+| Potencia | **1/4 W (0.25 W)** |
+| Tolerancia | **1%** |
+| Total piezas | **600 (20 piezas × 30 valores)** |
+| Tipo | Metal film de 5 bandas (4ª banda multiplicador, 5ª tolerancia) |
+| Presentación | Cajas compartimentadas, cada valor en su compartimento |
+
+**Valores incluidos (20 piezas de cada uno):**
+
+| Col A | Col B | Col C | Col D | Col E |
+|-------|-------|-------|-------|-------|
+| 10 Ω | 150 Ω | 2 kΩ | 20 kΩ | 220 kΩ |
+| 22 Ω | 200 Ω | 2.2 kΩ | 22 kΩ | 300 kΩ |
+| 47 Ω | 220 Ω | 3.3 kΩ | 33 kΩ | 470 kΩ |
+| 100 Ω | 270 Ω | 4.7 kΩ | 47 kΩ | 680 kΩ |
+| 120 Ω | 330 Ω | 5.1 kΩ | 51 kΩ | 1 MΩ |
+| 150 Ω | 470 Ω | 6.8 kΩ | 68 kΩ | |
+| | 510 Ω | 10 kΩ | 100 kΩ | |
+| | 680 Ω | | | |
+| | 1 kΩ | | | |
+| | 1.5 kΩ | | | |
+
+**Ventaja frente al kit 1/8W:** doble potencia (0.25 W vs 0.125 W). Para snubbers de relé y cualquier posición con cierta disipación, usar estas en lugar de las 1/8W.
+
+**Valores críticos disponibles en este kit (complementan al 1/8W):**
+
+| Resistencia | Valor | Función en proyecto | Qty necesaria | ¿En 1/8W también? |
+|-------------|-------|---------------------|--------------|-------------------|
+| Snubber RC relé | **100 Ω / 0.25W** | Paralelo contactos MAIN/TRAC/DIR | 3 | ⚠️ En 1/8W es 0.125W — **USAR ESTE 1/4W** |
+| Serie datos WS2812B | **330 Ω / 0.25W** | Protección DIN LED (×2) | 2 | ✅ suficiente en 1/8W también |
+| Pull-up I2C / encoder | **4.7 kΩ** | SCL/SDA + salida 6N137 | 7 | ✅ En ambos kits |
+| Divisor pedal Hall | **10 kΩ** | PA3 ADC pedal | 1 | ✅ En ambos kits |
+| Divisor llave R1 | **33 kΩ** | GPIO40 ESP32 | 1 | ✅ En 1/8W (33kΩ existe) |
+| Base BC547 | **1 kΩ** | GPIO41 ESP32 | 1 | ✅ En ambos kits |
+
 ---
 
 ## 5. Diodos
@@ -205,27 +244,78 @@ Usar: **5 diodos** para los 5 módulos de relé + **1** para relé retención = 
 
 ---
 
-## 6. Conectores y cableado
+---
 
-### 6.1 — Conectores en cajas (varios tamaños) — A IDENTIFICAR
+## 6. Análisis kit ALLECIN 240PCS electrolíticos
 
-| Campo | Dato |
-|-------|------|
-| Imagen de referencia | `fbdbbc5f-b78b-4984-9e67-0e78b8a4a9bd` |
-| Descripción | Vienen en cajas, varios tamaños |
-| Tipo probable | Conectores Dupont/JST/terminales o similares |
-| Estado | ✅ EN MANO — **pendiente identificar tamaños exactos** |
+> **Estado:** Kit a comprar — imagen referencia `913b0f6f-de4c-49f0-b911-53bc022b7e3e`  
+> **Marca:** ALLECIN  
+> **Descripción:** 24 Values Kit Surtido de Condensadores Electrolíticos 0.1µF → 1000µF, tensiones 10V/16V/25V/50V
 
-**Nota:** Cuando se identifiquen, actualizar esta sección con:
-- Tipo de conector (JST-XH, Dupont 2.54mm, etc.)
-- Paso (pitch) en mm
-- Número de pines por conector
-- Colores disponibles
+### 6.1 — Contenido completo del kit (24 valores × 10 piezas = 240 total)
 
-**Posible uso en proyecto:**
-- Conectores Dupont 2.54mm → cables de señal STM32/ESP32 a módulos
-- JST-XH 2.54mm → sensores (LJ12A3, encoder, pedal Hall)
-- Terminales de tornillo → conexiones de potencia BTS7960
+| Valor | Tensión | Tamaño | Qty |
+|-------|---------|--------|-----|
+| 0.1 µF | 50 V | 4×7 | 10 |
+| 0.22 µF | 50 V | 5×11 | 10 |
+| 0.47 µF | 50 V | 5×11 | 10 |
+| 1 µF | 50 V | 5×11 | 10 |
+| 2.2 µF | 50 V | 4×7 | 10 |
+| 3.3 µF | 50 V | 4×7 | 10 |
+| 4.7 µF | 50 V | 4×7 | 10 |
+| 10 µF | 25 V | 4×7 | 10 |
+| 10 µF | 50 V | 5×11 | 10 |
+| 22 µF | 16 V | 4×7 | 10 |
+| 22 µF | 25 V | 4×7 | 10 |
+| 33 µF | 16 V | 4×7 | 10 |
+| **47 µF** | **10 V** | 4×7 | **10** |
+| **47 µF** | **25 V** | 5×11 | **10** |
+| 47 µF | 50 V | 6×11 | 10 |
+| 100 µF | 16 V | 5×11 | 10 |
+| 100 µF | 25 V | 5×11 | 10 |
+| 220 µF | 10 V | 5×11 | 10 |
+| 220 µF | 25 V | 6×11 | 10 |
+| 330 µF | 25 V | 8×12 | 10 |
+| 470 µF | 10 V | 6×11 | 10 |
+| 470 µF | 16 V | 8×12 | 10 |
+| 680 µF | 16 V | 8×12 | 10 |
+| **1000 µF** | **16 V** | 10×16 | **10** |
+
+### 6.2 — ¿Te sirve para el proyecto? Análisis posición a posición
+
+| Posición | Valor necesario | ¿En el kit? | Resultado | Notas |
+|----------|----------------|-------------|-----------|-------|
+| Bulk 5V LEDs frontal (PB10) | 1000 µF / ≥6V | 1000µF / **16V** ✅ | ✅ **CUBIERTO** | 16V > 5V, correcto |
+| Bulk 5V LEDs trasero (PB11) | 1000 µF / ≥6V | 1000µF / **16V** ✅ | ✅ **CUBIERTO** | 16V > 5V, correcto |
+| Bulk salida LM2596 (5V) | 47 µF / ≥6V | 47µF / **10V** ✅ | ✅ **CUBIERTO** | 10V > 5V, perfecto |
+| Bulk 3.3V STM32 Nucleo | 10 µF / ≥4V | 10µF / **25V** ✅ | ✅ **CUBIERTO** | 25V > 3.3V, correcto |
+| Bulk CAN lado ESP32 | 10 µF / ≥6V | 10µF / **25V** ✅ | ✅ **CUBIERTO** | 25V > 5V, correcto |
+| Bulk bus 12V dirección | 470 µF / ≥14V | 470µF / **16V** ✅ | ✅ **CUBIERTO** | 16V > 12V, justo pero OK |
+| **Bulk bus 24V relés** | **1000 µF / ≥26V** | 1000µF / **16V** ❌ | ❌ **NO VÁLIDO** | 16V < 24V → **PELIGRO** |
+
+### 6.3 — Veredicto
+
+**✅ SÍ TE SIRVE para 6 de las 7 posiciones faltantes.**
+
+**❌ LA ÚNICA POSICIÓN NO CUBIERTA:** Bulk bus 24V junto a relés (necesita ≥26V).
+
+**Solución para la posición 24V:** Usa uno de los **2200 µF / 35V que ya tienes en mano** para esa posición. Si los 5 están ocupados en los BTS7960, puedes comprar uno suelto extra o verificar si tienes alguno de sobra.
+
+### 6.4 — Posiciones cubierta vs. no cubierta — Resumen visual
+
+```
+Con el kit ALLECIN:
+
+  Rail 5V  ──[1000µF/16V]──► RELAY_LED frontal (PB10)  ✅ kit
+  Rail 5V  ──[1000µF/16V]──► RELAY_LED trasero (PB11)  ✅ kit
+  Rail 5V  ──[47µF/10V]───► Salida LM2596 (bulk)        ✅ kit
+  Rail 3.3V──[10µF/25V]───► STM32 Nucleo bulk           ✅ kit
+  Rail 5V  ──[10µF/25V]───► SN65HVD230 CAN (ESP32)     ✅ kit
+  Rail 12V ──[470µF/16V]──► BTS7960 STEER bulk          ✅ kit
+
+  Rail 24V ──[1000µF/16V]─► Bulk relés MAIN/TRAC        ❌ NO USAR
+               └── Usar en cambio: [2200µF/35V] ya en mano ✅
+```
 
 ---
 
@@ -341,17 +431,21 @@ Kit AUKENIEN 1/8W:
 
 ## 9. Qué falta comprar
 
-### 9.1 Condensadores — FALTA
+### 9.1 Condensadores electrolíticos — ESTADO CON KIT ALLECIN
 
-| Componente | Valor | Para qué | Qty |
-|-----------|-------|----------|-----|
-| Electrolítico | **1000 µF / 10V** | 5V rail antes relé LED frontal (PB10) | 1 |
-| Electrolítico | **1000 µF / 10V** | 5V rail antes relé LED trasero (PB11) | 1 |
-| Electrolítico | **47 µF / 10V** | Bulk salida LM2596 (5V) | 1 |
-| Electrolítico | **10 µF / 10V** | Bulk CAN lado ESP32 (×2) | 2 |
-| Electrolítico | **10 µF / 10V** | Bulk 3.3V Nucleo STM32 | 1 |
+> Si compras el kit ALLECIN 240PCS, las posiciones de abajo quedan cubiertas:
 
-> **Nota:** Los 2200 µF/35V disponibles cubren los 5 BTS7960. Las posiciones de 1000 µF (LEDs) y 47 µF (fuente 5V) necesitan piezas adicionales. Sin embargo, se puede usar los 2200µF/35V en lugar de 1000µF/10V si sobran — la tensión 35V es suficiente para rail de 5V, el valor mayor es mejor.
+| Posición | Valor | Para qué | Qty | Con ALLECIN | Sin ALLECIN |
+|----------|-------|----------|-----|-------------|-------------|
+| Bulk 5V LEDs WS2812B frontal | 1000 µF / 16V | Rail 5V → RELAY_LED (PB10) | 1 | ✅ En kit | ❌ Falta |
+| Bulk 5V LEDs WS2812B trasero | 1000 µF / 16V | Rail 5V → RELAY_LED_REAR (PB11) | 1 | ✅ En kit | ❌ Falta |
+| Bulk salida LM2596 | 47 µF / 10V | Salida regulador 5V | 1 | ✅ En kit | ❌ Falta |
+| Bulk 3.3V STM32 | 10 µF / 25V | Rail 3.3V Nucleo | 1 | ✅ En kit | ❌ Falta |
+| Bulk CAN ESP32 | 10 µF / 25V | SN65HVD230 lado ESP32 | 1 | ✅ En kit | ❌ Falta |
+| Bulk bus 12V dirección | 470 µF / 16V | BTS7960 STEER B+(12V) | 1 | ✅ En kit | ❌ Falta |
+| **Bulk bus 24V relés** | **≥1000 µF / 35V** | Rail 24V junto a RELAY_MAIN/TRAC | 1 | ❌ **No cubre (16V insuficiente)** | ❌ Falta |
+
+> **Para el bulk 24V:** Usar uno de los **2200µF/35V ya en mano** (si sobra uno de los 5 para BTS7960). Si no, comprar 1 pieza suelta de 1000µF/35V o 2200µF/35V.
 
 ### 9.2 Componentes — FALTAN (no en inventario actual)
 
@@ -360,7 +454,6 @@ Kit AUKENIEN 1/8W:
 | Transistor NPN | BC547 o 2N2222 | Relé de retención (GPIO41 ESP32 → bobina) | 1 |
 | Diodo | 1N4148 (×2 en OR) | Activación bobina relé retención | 2 |
 | Ferrita/bobina | BLM18AG601SN1D o 100µH | Filtro bus CAN (5V sucio → limpio) | 1 |
-| Resistencia snubber | **100 Ω / 0.25W** | RC en relés (los del kit 1/8W pueden no ser suficientes en potencia) | 3 |
 | Optoacoplador | **PC817** | 5 canales: 4× rueda + 1× centro dirección | 5 |
 | Optoacoplador | **6N137** | Encoder E6B2-CWZ6C (×3 canales: A, B, Z) | 3 |
 
@@ -375,10 +468,11 @@ Kit AUKENIEN 1/8W:
 | Bypass 100nF todos módulos | Cerámica 104 ×100 | ✅ |
 | Bypass 1µF ICs sensores | Cerámica 105 ×100 | ✅ |
 | Bulk 2200µF BTS7960 ×5 | Electrolítico 2200µF/35V ×5 | ✅ |
-| Pull-up 4.7kΩ I2C + encoder | Kit 1/8W (4.7kΩ ×10) | ✅ |
-| Divisor pedal + llave | Kit 1/8W (10kΩ, 33kΩ) | ✅ |
-| Base BC547 retención (1kΩ) | Kit 1/8W (1kΩ ×10) | ✅ |
-| Serie WS2812B datos (330Ω) | Kit 1/8W (330Ω ×10) | ✅ |
+| Pull-up 4.7kΩ I2C + encoder | Kit 1/4W (4.7kΩ ×20) o Kit 1/8W (4.7kΩ ×10) | ✅ |
+| Divisor pedal + llave | Kit 1/4W (10kΩ, 33kΩ) o Kit 1/8W | ✅ |
+| Base BC547 retención (1kΩ) | Kit 1/4W (1kΩ ×20) o Kit 1/8W (1kΩ ×10) | ✅ |
+| Serie WS2812B datos (330Ω) | Kit 1/4W (330Ω ×20) — **mejor que 1/8W aquí** | ✅ |
+| Snubber RC relés (100Ω) | Kit 1/4W (100Ω ×20) — **1/4W mejor que 1/8W** | ✅ |
 
 ---
 
@@ -388,7 +482,8 @@ Kit AUKENIEN 1/8W:
 |-------|-----------------------------|
 | 2026-04-28 | C1 (100nF/50V ×100), C2 (1µF/50V ×100), C3 (2200µF/35V ×~5) |
 | 2026-04-28 | R1 (3W 120Ω ×20), R2 (1/8W kit AUKENIEN 400pcs/40valores) |
-| 2026-04-28 | CN1 (conectores en cajas, varios tamaños — pendiente identificar) |
+| 2026-04-28 | R3 (1/4W 1% kit Metal Film 600pcs/30valores, 10Ω→1MΩ) — corregido CN1 que era este kit |
+| 2026-04-28 | Análisis kit ALLECIN 240PCS electrolíticos: cubre 6/7 posiciones, no válido para bulk 24V |
 | Anterior | D1 P6KE18CA ×20, D2 P6KE24CA ×20, D3 1N5408 ×50 |
 | Anterior | R1 kit 3W metal film (bolsa 120Ω confirmada) |
 
