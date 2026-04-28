@@ -179,18 +179,27 @@ Sección 11 para usos potenciales. **No conectar por ahora.**
 
 ---
 
-### PC817 Placa-A (8 canales) — señales activas del vehículo
+### PC817 Placa-A (8 canales, **módulo HY-M158**) — señales activas del vehículo
 
-| Canal | Señal | Pin STM32 | Periférico | Sensor origen |
-|-------|-------|-----------|------------|---------------|
-| **A1** | WHEEL_FL | PA0 | EXTI0 | LJ12A3 cubo rueda FL |
-| **A2** | WHEEL_FR | PA1 | EXTI1 | LJ12A3 cubo rueda FR |
-| **A3** | WHEEL_RL | PA2 | EXTI2 | LJ12A3 cubo rueda RL |
-| **A4** | WHEEL_RR | PB15 | EXTI15 | LJ12A3 cubo rueda RR |
-| **A5** | STEER_CENTER | PB5 | EXTI5 | LJ12A3 cremallera dirección |
-| **A6** | ENC_Z | PB4 | EXTI4 *(inactivo)* | E6B2-CWZ6C canal Z |
-| **A7** | **IGN_SENSE** | **GPIO 40 ESP32-S3** | **GPIO INPUT (lógica invertida)** | **Llave de contacto +12 V (ACC/IGN)** |
-| A8 | *(libre)* | — | — | Reservado |
+> **Asignación física rev. 2026-04-28b** — empezando por el pin **`IN1`** (parte inferior
+> del módulo, junto al texto `817 Module`) y subiendo hasta `IN5`. El encoder Z se ha
+> trasladado al **6N137** y el LJ12A3 de centro de dirección ya **no se cablea por este
+> módulo** (su función la cubre el pulso Z aislado por 6N137). Ver `docs/PC817_WIRING_REFERENCE.md`.
+
+| Canal | Señal | Pin STM32 / ESP32 | Periférico | Sensor origen |
+|-------|-------|-------------------|------------|---------------|
+| **IN1** | WHEEL_FR | PA1 | EXTI1 | LJ12A3 cubo rueda FR |
+| **IN2** | WHEEL_FL | PA0 | EXTI0 | LJ12A3 cubo rueda FL |
+| **IN3** | WHEEL_RR | PB15 | EXTI15 | LJ12A3 cubo rueda RR |
+| **IN4** | WHEEL_RL | PA2 | EXTI2 | LJ12A3 cubo rueda RL |
+| **IN5** | **IGN_SENSE** | **GPIO 40 ESP32-S3** | **GPIO INPUT (lógica invertida)** | **Llave de contacto +12 V (ACC/IGN)** |
+| IN6 / IN7 / IN8 | *(libres)* | — | — | Reservados |
+
+> **ENC_Z** ya no usa el PC817: se ha movido al **6N137** junto con ENC_A y ENC_B
+> (ver `docs/ENCODER_WIRING_6N137.md`).
+> **STEER_CENTER (PB5)** ya no se cablea por este módulo en la configuración de 5
+> canales; si se mantiene físicamente debe ir a un canal libre (`IN6`–`IN8`) o a un
+> PC817 aparte.
 
 ---
 
@@ -224,15 +233,15 @@ Tabla completa de todas las señales aisladas, lista para ejecutar en taller.
 |---|-------|--------------|-----------|---------------|-----------------|-------------|-------------|----------------|
 | 1 | **ENC_A** | E6B2-CWZ6C salida A (NPN OC, 5–24 V) | PA15 / TIM2_CH1 | **6N137** | M1, canal A | VCC_encoder dominio | 3.3 V STM32 | Cuadratura 20 kHz; TIM2 IC filter 282 ns < PC817 4 µs → PC817 sería rechazado |
 | 2 | **ENC_B** | E6B2-CWZ6C salida B (NPN OC, 5–24 V) | PB3 / TIM2_CH2 | **6N137** | M1, canal B | VCC_encoder dominio | 3.3 V STM32 | ídem canal A |
-| 3 | **WHEEL_FL** | LJ12A3 cubo rueda FL (NPN OC, 6–36 V) | PA0 / EXTI0 | **PC817** | Placa-A, canal A1 | 12–24 V sensor + GND chasis | 3.3 V STM32 | 151 Hz máx; periodo 6.6 ms >> 6 µs PC817; bucle de masa en cubo rueda |
-| 4 | **WHEEL_FR** | LJ12A3 cubo rueda FR (NPN OC, 6–36 V) | PA1 / EXTI1 | **PC817** | Placa-A, canal A2 | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FL |
-| 5 | **WHEEL_RL** | LJ12A3 cubo rueda RL (NPN OC, 6–36 V) | PA2 / EXTI2 | **PC817** | Placa-A, canal A3 | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FL |
-| 6 | **WHEEL_RR** | LJ12A3 cubo rueda RR (NPN OC, 6–36 V) | PB15 / EXTI15 | **PC817** | Placa-A, canal A4 | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FL |
-| 7 | **STEER_CENTER** | LJ12A3 cremallera dirección (NPN OC, 6–36 V) | PB5 / EXTI5 | **PC817** | Placa-A, canal A5 | 12–24 V sensor, cerca motor dirección | 3.3 V STM32 | Pulso único en arranque; falsa detección → cero encoder incorrecto; picos inductivos relé DIR |
-| 8 | **ENC_Z** | E6B2-CWZ6C salida Z (NPN OC, 5–24 V) | PB4 / EXTI4 *(†)* | **PC817** | Placa-A, canal A6 | VCC_encoder dominio | 3.3 V STM32 | < 50 Hz; pulso 41.7 µs >> 6 µs PC817; EXTI no activo en firmware actual |
+| 3 | **WHEEL_FR** | LJ12A3 cubo rueda FR (NPN OC, 6–36 V) | PA1 / EXTI1 | **PC817** | HY-M158, canal `IN1` | 12–24 V sensor + GND chasis | 3.3 V STM32 | 151 Hz máx; periodo 6.6 ms >> 6 µs PC817; bucle de masa en cubo rueda |
+| 4 | **WHEEL_FL** | LJ12A3 cubo rueda FL (NPN OC, 6–36 V) | PA0 / EXTI0 | **PC817** | HY-M158, canal `IN2` | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FR |
+| 5 | **WHEEL_RR** | LJ12A3 cubo rueda RR (NPN OC, 6–36 V) | PB15 / EXTI15 | **PC817** | HY-M158, canal `IN3` | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FR |
+| 6 | **WHEEL_RL** | LJ12A3 cubo rueda RL (NPN OC, 6–36 V) | PA2 / EXTI2 | **PC817** | HY-M158, canal `IN4` | 12–24 V sensor + GND chasis | 3.3 V STM32 | ídem WHEEL_FR |
+| 7 | **STEER_CENTER** *(opcional)* | LJ12A3 cremallera dirección (NPN OC, 6–36 V) | PB5 / EXTI5 | **PC817** | HY-M158, canal libre `IN6`–`IN8` *(si se mantiene físicamente)* | 12–24 V sensor, cerca motor dirección | 3.3 V STM32 | Pulso único en arranque; función ahora cubierta por ENC_Z aislado por 6N137 — **no obligatorio cablear** |
+| 8 | **ENC_Z** | E6B2-CWZ6C salida Z (push-pull 5 V) | PB4 (GPIO sondeado) | **6N137** | M1, canal Z | VCC_encoder dominio | 3.3 V STM32 | Movido del PC817 al 6N137 junto con ENC_A/B; mismo aislamiento de calidad cerca del BTS7960 |
 | 9 | **CAN_TX** | STM32G474RE PA12 (FDCAN1_TX) | PA12 | **Aislador digital** | ISO canal 1 | 3.3 V STM32 dominio | VCC_transceiver aislado | Aislamiento galvánico entre GND STM32 y GND ESP32 |
 | 10 | **CAN_RX** | Transceiver CAN lado ESP32 | PA11 | **Aislador digital** | ISO canal 2 | VCC_transceiver aislado | 3.3 V STM32 dominio | Ídem CAN_TX |
-| 11 | **IGN_SENSE** | Bombín de llave (línea ACC/IGN +12 V) | **GPIO 40 ESP32-S3** | **PC817** | Placa-A, canal A7 | +12 V vehículo + GND chasis | 3.3 V (común STM32 ↔ ESP32) | Aislar +12 V automoción del 3.3 V; uso continuo → R_LED = **1 kΩ** (no 330 Ω); lógica invertida (LOW = llave ON), ya contemplada en `power_manager.cpp` |
+| 11 | **IGN_SENSE** | Bombín de llave (línea ACC/IGN +12 V) | **GPIO 40 ESP32-S3** | **PC817** | HY-M158, canal `IN5` | +12 V vehículo + GND chasis | 3.3 V (común STM32 ↔ ESP32) | Aislar +12 V automoción del 3.3 V; con HY-M158 la R_LED de 3 kΩ ya está integrada (I_LED ≈ 3.6 mA); lógica invertida (LOW = llave ON), ya contemplada en `power_manager.cpp` |
 
 *(†) ENC_Z: no activo en el firmware actual. Requiere configurar EXTI4 y añadir ISR cuando
 se decida activar. Ver Sección 10.5.*
@@ -281,55 +290,52 @@ La tensión de alimentación del encoder puede ser 5 V o 12 V (verificar etiquet
 
 ---
 
-### 7.2 Circuito PC817 para sensores LJ12A3 (ruedas + centrado + ENC_Z)
+### 7.2 Circuito PC817 para sensores LJ12A3 de rueda + llave (módulo HY-M158)
 
-Las placas de 8 canales PC817 incluyen resistencias serie en la entrada. Verificar el valor
-de la resistencia de la placa antes de conectar. Configuración típica de módulo industrial:
+> **Módulo confirmado:** **HY-M158** de 8 canales PC817. Trae integradas resistencias serie
+> SMD `302` (= **3 kΩ**) en cada entrada, y **8 jumpers rojos que cortocircuitan el GND
+> del lado V con el GND del lado IN — deben quitarse los 8** para preservar el aislamiento
+> galvánico. Ver `docs/PC817_WIRING_REFERENCE.md` para la guía detallada.
 
 ```
-  LADO RUIDOSO (VCC_sensor, 6–36 V)         BARRERA         LADO LÓGICO (3.3 V STM32)
-  ────────────────────────────────           PC817           ─────────────────────────
+  LADO RUIDOSO (12 V vehículo, lado V_n del HY-M158)        BARRERA         LADO LÓGICO (3.3 V STM32/ESP32, lado IN_n)
+  ─────────────────────────────────────────────────         PC817            ─────────────────────────────────────────
 
-  VCC_sensor ─── R_placa ──────────── Ánodo LED PC817
-                 (resistencia        │
-                 de la placa)        │           Colector ──── VCC_3.3V (pull-up interno STM32
-                                     │                         GPIO_PULLUP ~40 kΩ)
-  Sensor LJ12A3                      │
-  salida NPN OC ─────────────────── Cátodo LED
-                                     │
-  GND_sensor ─────────────────────── GND_primario   GND_secundario ──── GND_STM32
+  +12V ─── 3 kΩ on-board (SMD 302) ─────────── Ánodo LED PC817
+                                                │
+                                                │           Colector ──── pull-up externo (4.7 kΩ ruedas / 10 kΩ llave) a +3.3V
+                                                │                         ──► STM32 GPIO (PA0/PA1/PA2/PB15) o ESP32 GPIO 40
+  Sensor LJ12A3 / línea ACC                     │
+  salida NPN OC / contacto +12V ────────────── Cátodo LED
+                                                │
+  GND_vehicle ──────────────── G(V)             │             G(IN) ──────── GND_logic (común STM32 + ESP32)
 
-  NOTA: GND_sensor y GND_STM32 son ELÉCTRICAMENTE SEPARADOS.
+  GND_vehicle y GND_logic ELÉCTRICAMENTE SEPARADOS — jumpers rojos retirados.
 ```
 
-**Verificación de la resistencia de entrada de la placa PC817 según tensión del sensor:**
+**Cálculo de corriente del LED con la 3 kΩ integrada del HY-M158:**
 
-| VCC_sensor | R_placa típica | I_F resultante | ¿OK? |
-|------------|---------------|----------------|------|
-| 12 V | 1 kΩ | (12 – 1.5) / 1000 = 10.5 mA | ✅ |
-| 12 V | 510 Ω | (12 – 1.5) / 510 = 20.6 mA | ✅ (dentro de If_max = 50 mA) |
-| 24 V | 1 kΩ | (24 – 1.5) / 1000 = 22.5 mA | ✅ |
-| 24 V | 510 Ω | (24 – 1.5) / 510 = 44.1 mA | ⚠️ Límite — preferir 2.2 kΩ a 24 V |
-| 36 V | 1 kΩ | (36 – 1.5) / 1000 = 34.5 mA | ✅ |
-| 36 V | 510 Ω | 68.6 mA | ❌ Excede If_max — añadir R serie |
+| VCC_sensor | R integrada | I_F resultante | ¿OK? |
+|------------|-------------|----------------|------|
+| 12 V | 3 kΩ | (12 – 1.2) / 3 000 = 3.6 mA | ✅ (rango nominal PC817 1–20 mA, CTR ≥ 50 %) |
+| 24 V | 3 kΩ | (24 – 1.2) / 3 000 = 7.6 mA | ✅ |
+| 5 V | 3 kΩ | (5 – 1.2) / 3 000 = 1.27 mA | ⚠️ Límite inferior — no recomendado para sensores LJ12A3 alimentados a 5 V |
 
-**Si VCC_sensor = 24 V y la placa incluye R = 510 Ω:** añadir resistencia serie de 1 kΩ
-en el cable del sensor antes de la entrada de la placa.
+> **No hace falta añadir resistencia de entrada externa** con el módulo HY-M158 para 12 V o 24 V.
 
-**Pull-up en el lado lógico (salida PC817 → STM32 EXTI):**
+**Pull-up en el lado lógico (salida PC817 → STM32 / ESP32):**
 
-> **⚠️ VERIFICADO (medición con polímetro):** la placa PC817 de 8 canales utilizada en este proyecto **NO incluye pull-up onboard** en la salida (circuito abierto entre OUT y VCC con la placa desalimentada).
+> **⚠️ VERIFICADO (medición con polímetro):** la HY-M158 **NO incluye pull-up onboard** en
+> la salida `IN_n` (circuito abierto entre `IN_n` y VCC con la placa desalimentada).
 
-Por tanto se requieren **pull-ups externos** en cada canal activo:
+Pull-ups externos **obligatorios**:
 
-- **STM32 (ruedas + centrado):** El firmware ya configura los pines EXTI con `GPIO_PULLUP` (pull-up interno STM32 ≈ 40 kΩ). Esto es aceptable para los canales del STM32 — el colector del PC817 tiene una carga definida y la lógica es correcta. Para mayor inmunidad al ruido se puede añadir opcionalmente un 10 kΩ externo entre cada pin STM32 y 3.3 V.
-
-- **ESP32-S3 (IGN_SENSE, GPIO 40):** El firmware usa `INPUT_PULLUP` (~45 kΩ interno). **Adicionalmente, soldar un 10 kΩ externo entre GPIO 40 y 3.3 V es obligatorio** para buena inmunidad en entorno automoción.
-
-| Canal activo PC817 | Pull-up lógico | Modo de operación |
+| Canal HY-M158 | Señal | Pull-up externo |
 |---|---|---|
-| A1–A5 (ruedas + centrado → STM32) | `GPIO_PULLUP` interno STM32 ~40 kΩ ✅ | + 10 kΩ ext. opcional |
-| A7 (IGN_SENSE → GPIO 40 ESP32) | `INPUT_PULLUP` interno ESP32 ~45 kΩ + **10 kΩ ext. obligatorio** | Ver `power_manager.h` |
+| `IN1`–`IN4` (4 ruedas → STM32) | WHEEL_FR/FL/RR/RL | **4.7 kΩ** a +3.3V (rapidez de flanco con cable largo) |
+| `IN5` (IGN_SENSE → ESP32 GPIO 40) | Llave de contacto | **10 kΩ** a +3.3V (ahorro de corriente, baja frecuencia) |
+
+El pull-up interno del STM32 (~40 kΩ) y del ESP32 (~45 kΩ) se mantienen activos como respaldo.
 
 ---
 
@@ -372,28 +378,30 @@ de flanco de EXTI.** ✅
 - El GND del encoder NO debe conectarse al GND del STM32. Conectar solo al GND_primario del 6N137.
 - Los resistores de 4.7 kΩ de pull-up del lado secundario deben situarse físicamente cerca de los pines PA15 y PB3 del STM32.
 
-### 8.2 WHEEL_FL / FR / RL / RR (PC817 Placa-A, A1–A4)
+### 8.2 WHEEL_FR / FL / RR / RL (HY-M158, canales `IN1`–`IN4`)
 
 - Los 4 sensores LJ12A3 comparten el mismo dominio de tensión (alimentados todos a 12 V o todos a 24 V).
-- Los GND de los sensores de rueda se unen a la masa del chasis/bastidor del vehículo.
-- Esta masa de chasis puede diferir de la GND de la placa STM32 (especialmente en bobinados de motor). El optoacoplador rompe este bucle.
+- Los GND de los sensores de rueda se unen a la masa del chasis/bastidor del vehículo (`G` del lado V del HY-M158).
+- Esta masa de chasis puede diferir de la GND de la placa STM32 (especialmente en bobinados de motor). El optoacoplador rompe este bucle — **siempre que los jumpers rojos estén retirados**.
 - Los cables de los sensores de rueda deben discurrir alejados (> 10 cm) de los cables de potencia de los motores de tracción.
 - Si no es posible separar, usar cable apantallado con la pantalla conectada a GND_chasis en un solo extremo.
+- Asignación física (de abajo a arriba en el módulo): `IN1`=FR, `IN2`=FL, `IN3`=RR, `IN4`=RL.
 
-### 8.3 STEER_CENTER (PC817 Placa-A, A5)
+### 8.3 STEER_CENTER (PB5) — ya no va por este módulo
 
-- Este sensor detecta un tornillo físico en la cremallera durante el barrido de calibración al arranque.
-- Solo genera un pulso en la secuencia de inicio (`SteeringCentering_Step()` en el firmware).
-- El aislamiento previene que un transitorio inductivo del relé RELAY_DIR (PC12) o del BTS7960
-  de dirección se propague por el cable del sensor y dispare EXTI5 erróneamente durante la calibración.
+- En la configuración acordada (5 canales del HY-M158: 4 ruedas + llave) **el LJ12A3 de
+  centro de dirección no se cablea por el HY-M158**. Su función la cubre el pulso Z del
+  encoder ya aislado por **6N137**.
+- Si por algún motivo se decide mantener el sensor físico, ir a uno de los canales libres
+  `IN6`–`IN8` o a un PC817 aparte. El firmware sigue admitiendo PB5/EXTI5.
 
-### 8.4 ENC_Z (PC817 Placa-A, A6) — SEÑAL INACTIVA EN FIRMWARE ACTUAL
+### 8.4 ENC_Z — movido al 6N137 (ya **no** usa PC817)
 
-- El canal Z está físicamente conectado a PB4 y en el plan de cableado pasa por el PC817.
-- **En el firmware actual, PB4 no está inicializado como EXTI ni tiene ISR asociada.**
-  Si se conecta el PC817 con salida a PB4 ahora, no ocurrirá nada (señal ignorada).
-- Cuando se active en el firmware (ver Sección 10.5), el cableado ya estará listo.
-- El PC817 es adecuado (Z pulsa a < 50 Hz en uso normal de dirección).
+- ENC_Z (PB4) ahora pasa por el **tercer canal del 6N137** junto con ENC_A y ENC_B.
+- Ver `docs/ENCODER_WIRING_6N137.md` para el esquema completo (3 canales 6N137: A, B, Z).
+- Motivo: el encoder está físicamente próximo al BTS7960 de dirección y conviene mantener
+  el mismo aislamiento de alta calidad (2 500 V, sin bucles de masa) en los tres canales del
+  encoder. PB4 sigue siendo GPIO sondeado a baja frecuencia.
 
 ### 8.5 Alimentación de los módulos
 
@@ -558,9 +566,10 @@ Estos módulos se reservan para señales de alta velocidad que puedan añadirse 
 > que los PWM de salida no están en el plan actual. Si se decide hacerlo, es un cambio
 > localizado en `MX_TIM1_Init()` y `MX_TIM8_Init()`.
 
-### PC817 Placa-A A7–A8 (2 canales libres)
+### HY-M158 — canales libres `IN6`–`IN8` (3 canales libres)
 
-Reservados para señales externas adicionales del entorno del motor de dirección o cremallera.
+Reservados para señales externas adicionales del entorno del motor de dirección o cremallera,
+o para reubicar el LJ12A3 de centro de dirección si se decidiera mantenerlo físicamente.
 
 ### PC817 Placa-B B1–B8 (8 canales libres)
 
@@ -576,14 +585,14 @@ Disponibles para expansión del sistema. Candidatos prioritarios:
 ## 12. Lista de comprobación antes del montaje
 
 - [ ] Medir VCC_encoder con multímetro — determinar valor de R_entrada para 6N137
-- [ ] Medir VCC_sensores LJ12A3 — verificar R de la placa PC817 es adecuada para esa tensión
+- [ ] Medir VCC_sensores LJ12A3 — confirmar 12 V (la R integrada de 3 kΩ del HY-M158 cubre 12–24 V sin añadir nada)
+- [ ] **Retirar los 8 jumpers rojos del HY-M158** y verificar con polímetro que `G(V)` y `G(IN)` quedan abiertos entre sí
 - [ ] Confirmar que GND_encoder NO está conectado a GND_STM32 en ningún otro punto del sistema
 - [ ] Confirmar que GND_sensor (LJ12A3) NO está conectado a GND_STM32 (puede estar a GND_chasis)
-- [ ] Preparar 2× resistencias 4.7 kΩ para pull-up secundario de 6N137 (PA15 y PB3)
+- [ ] Preparar 3× resistencias 4.7 kΩ para pull-up secundario de 6N137 (PA15, PB3 y PB4 para A/B/Z)
+- [ ] Preparar 4× resistencias 4.7 kΩ + 1× 10 kΩ para pull-ups del HY-M158 (`IN1`–`IN5` → 3.3 V)
 - [ ] Preparar condensadores de desacoplo 100 nF para cada módulo de aislamiento
-- [ ] Verificar el valor de la resistencia serie de la placa PC817 antes de conectar sensores de 24 V
 - [ ] Para el CAN: decidir entre Opción A (ADuM1201 + DC-DC) u Opción B (ISO1050)
-- [ ] Verificar que el cable de ENC_Z está conectado al canal A6 de Placa-A pero que el firmware no lo activará hasta que se decida hacerlo
 
 ---
 

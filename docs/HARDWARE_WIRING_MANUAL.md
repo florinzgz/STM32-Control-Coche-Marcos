@@ -741,7 +741,7 @@ Están gestionadas por el ESP32 o simplemente no existen en el sistema:
 | Función | Estado | Explicación |
 |---------|--------|-------------|
 | **Palanca de cambios (F/N/R)** | **En el ESP32** | El ESP32 lee la palanca física y envía el modo al STM32 via CAN (ID 0x102). No hay pines GPIO en el STM32 para la palanca. Los pines PB12/PB13 mencionados en documentación anterior **no están inicializados** en `MX_GPIO_Init()`. PB14 ahora es LED_DIAG (GPIO_Output). |
-| **Llave de contacto** | **En el ESP32** (vía PC817) | El ESP32-S3 lee la llave por GPIO 40 a través de un canal del PC817 8ch (placa-A, canal A7). Lógica invertida (LOW = ON). Ver `docs/PUESTA_EN_MARCHA_SEGURA.md` Fase 5b y `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` §6 fila 11. No hay pin GPIO ni lógica de llave en el STM32. |
+| **Llave de contacto** | **En el ESP32** (vía PC817) | El ESP32-S3 lee la llave por GPIO 40 a través del módulo **HY-M158** (PC817 ×8), canal **`IN5`**. Lógica invertida (LOW = ON). Ver `docs/PUESTA_EN_MARCHA_SEGURA.md` Fase 5b y `docs/PC817_WIRING_REFERENCE.md`. No hay pin GPIO ni lógica de llave en el STM32. |
 | **Pantalla / Display** | **En el ESP32** | No hay periféricos SPI/paralelo para display en el STM32. La interfaz HMI reside en el ESP32. |
 | **Audio / Buzzer** | **No implementado en STM32** | No hay salida DAC, I2S ni PWM para audio. |
 | **Sensores de obstáculos / Ultrasonidos** | **En el ESP32 o no implementado** | No hay lecturas de ultrasonidos ni sensores de distancia en el firmware STM32. |

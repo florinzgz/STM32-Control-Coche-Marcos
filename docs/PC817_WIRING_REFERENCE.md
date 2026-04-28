@@ -17,7 +17,7 @@
 | C4 | **Canal A6 (señal Z) MOVIDO al 6N137** — ya no usa PC817. Ver `docs/ENCODER_WIRING_6N137.md` | **Cambio de cableado** |
 | C5 | Módulo físico identificado: **HY-M158** de 8 canales — los SMD `302` (3 kΩ) ya están a bordo en serie con cada LED → **no hace falta añadir la 1 kΩ externa de entrada** | Simplificación |
 | C6 | **Jumpers rojos del módulo: QUITAR todos.** Con ellos puestos cortocircuitan GND_vehicle con GND_logic y anulan el aislamiento galvánico | **Crítico** — montaje |
-| C7 | Reasignación de canales (5 en uso, 3 libres): de arriba abajo FR-FL-RR-RL-Llave | Cableado |
+| C7 | Reasignación de canales (5 en uso, 3 libres): de **abajo a arriba** FR-FL-RR-RL-Llave (`IN1`→`IN5`); `IN6`–`IN8` reserva | Cableado |
 
 ---
 
@@ -27,25 +27,31 @@
 > el bloque de terminales del lado **izquierdo** (`V1…V8` + `G`, junto a los jumpers rojos) es el
 > **lado de 12 V** (entrada, ánodo del LED). El bloque del lado **derecho** (`IN1…IN8` + `G`)
 > es el **lado lógico de 3,3 V** (salida, colector del fototransistor).
-> Numeración: `IN1` queda en la parte **inferior** del módulo, `IN8` en la **superior**.
+> Numeración: `IN1` queda en la parte **inferior** del módulo (junto al texto `817 Module`),
+> `IN8` en la **superior** (junto al texto `HY-M158`). **Empezamos a cablear por `IN1`** y
+> subimos hasta `IN5`; `IN6`–`IN8` quedan libres.
 
-### Asignación de canales (de arriba a abajo, lado IN)
+### Asignación de canales (de abajo a arriba, lado IN — empezando por `IN1`)
+
+> Numeración del módulo HY-M158: el pin `1` del PC817 corresponde al canal **`IN1`**
+> (terminal inferior del módulo en la foto). Cableamos secuencialmente desde `IN1`
+> hacia arriba; los canales sin uso quedan en la parte superior (`IN6`–`IN8`).
 
 | Canal módulo | Señal | Destino | Pull-up salida |
 |--------------|-------|---------|----------------|
-| **IN8 (arriba)** | Sensor rueda **FR** | STM32 **PA1** (EXTI1) | **4.7 kΩ** a 3.3V |
-| **IN7** | Sensor rueda **FL** | STM32 **PA0** (EXTI0) | **4.7 kΩ** a 3.3V |
-| **IN6** | Sensor rueda **RR** | STM32 **PB15** (EXTI15) | **4.7 kΩ** a 3.3V |
-| **IN5** | Sensor rueda **RL** | STM32 **PA2** (EXTI2) | **4.7 kΩ** a 3.3V |
-| **IN4** | **Llave de contacto** | ESP32 **GPIO 40** | **10 kΩ** a 3.3V |
-| IN3 / IN2 / IN1 | *libre — reserva* | — | — |
+| **IN1 (abajo)** | Sensor rueda **FR** | STM32 **PA1** (EXTI1) | **4.7 kΩ** a 3.3V |
+| **IN2** | Sensor rueda **FL** | STM32 **PA0** (EXTI0) | **4.7 kΩ** a 3.3V |
+| **IN3** | Sensor rueda **RR** | STM32 **PB15** (EXTI15) | **4.7 kΩ** a 3.3V |
+| **IN4** | Sensor rueda **RL** | STM32 **PA2** (EXTI2) | **4.7 kΩ** a 3.3V |
+| **IN5** | **Llave de contacto** | ESP32 **GPIO 40** | **10 kΩ** a 3.3V |
+| IN6 / IN7 / IN8 | *libre — reserva* | — | — |
 
 **Señales que ya NO usan este módulo PC817:**
 
 | Señal | Motivo | Va a |
 |-------|--------|------|
 | Encoder Z (PB4) | Aislamiento galvánico de mejor calidad necesario por proximidad al BTS7960 de dirección | **6N137** — ver `docs/ENCODER_WIRING_6N137.md` |
-| Sensor centro dirección LJ12A3 (PB5) | Función cubierta por el pulso Z del encoder ya aislado por 6N137 | **No se cablea por este módulo.** Si se mantiene físicamente, requeriría un canal PC817 propio o un canal libre (IN1–IN3) |
+| Sensor centro dirección LJ12A3 (PB5) | Función cubierta por el pulso Z del encoder ya aislado por 6N137 | **No se cablea por este módulo.** Si se mantiene físicamente, requeriría un canal PC817 propio o un canal libre (`IN6`–`IN8`) |
 
 > **Resistencia de entrada (lado 12 V):** **NO añadir resistencia externa.**
 > El módulo HY-M158 ya integra **3 kΩ (SMD `302`)** en serie con cada LED del PC817.
@@ -169,7 +175,7 @@ esto puede ser suficiente, pero se recomienda el 1N4148 como medida de robustez 
 
 ---
 
-## ESQUEMA DE CONEXIÓN — Sensores LJ12A3 de rueda (canales `IN5`–`IN8`)
+## ESQUEMA DE CONEXIÓN — Sensores LJ12A3 de rueda (canales `IN1`–`IN4`)
 
 > ⚠️ **CORRECCIÓN CRÍTICA respecto a versión anterior:**
 > El cable NEGRO del LJ12A3 es la **salida NPN**, no el GND.
@@ -236,12 +242,12 @@ Topología correcta para excitar el LED del PC817 (módulo HY-M158, **resistenci
 > El pin del firmware no cambia: `PIN_ENC_Z` sigue siendo **PB4** (entrada GPIO sondeada
 > a baja frecuencia para detectar el centro mecánico del volante).
 
-## ESQUEMA CANAL DE LLAVE DE CONTACTO (ESP32) — IN4 del HY-M158
+## ESQUEMA CANAL DE LLAVE DE CONTACTO (ESP32) — `IN5` del HY-M158
 
 ```
-════════════ LADO 12V (entrada — terminal V4 del HY-M158) ════════════
+════════════ LADO 12V (entrada — terminal V5 del HY-M158) ════════════
 
-  Terminal ON del contacto (+12 V cuando llave en ON) ──► HY-M158 V4
+  Terminal ON del contacto (+12 V cuando llave en ON) ──► HY-M158 V5
                                                               │
                                                           [3kΩ on-board]
                                                               │
@@ -250,11 +256,11 @@ Topología correcta para excitar el LED del PC817 (módulo HY-M158, **resistenci
                                                               │
                                                               └──► HY-M158 G (lado V) ──► GND_vehicle
 
-  [1N4148 antiparalelo opcional: cátodo → V4, ánodo → G del lado V]   ← RECOMENDADO
+  [1N4148 antiparalelo opcional: cátodo → V5, ánodo → G del lado V]   ← RECOMENDADO
 
-════════════ LADO 3.3V (salida — terminal IN4 del HY-M158) ════════════
+════════════ LADO 3.3V (salida — terminal IN5 del HY-M158) ════════════
 
-  +3.3V ──[10kΩ 1/8W]──┬──► HY-M158 IN4 (colector del fototransistor)
+  +3.3V ──[10kΩ 1/8W]──┬──► HY-M158 IN5 (colector del fototransistor)
                          │
                     ──►  ESP32 GPIO 40
 
@@ -273,7 +279,7 @@ Topología correcta para excitar el LED del PC817 (módulo HY-M158, **resistenci
 
 El firmware configura estos pines como `GPIO_PULLUP` + `EXTI` en flanco de bajada.
 
-### Llave de contacto (IN4 → ESP32 GPIO 40):
+### Llave de contacto (`IN5` → ESP32 GPIO 40):
 | Posición llave | LED PC817 | GPIO 40 ESP32 | Interpretación firmware |
 |----------------|-----------|---------------|------------------------|
 | **ON** (+12V) | Encendido | **LOW** | Llave encendida ✅ |
@@ -292,7 +298,7 @@ Ver `docs/ENCODER_WIRING_6N137.md` para la tabla de niveles lógicos del Z.
 
 ### Sensor LJ12A3 de centro de dirección (PB5) — fuera de este módulo
 Si se decide mantener este sensor en el coche, debe cablearse aparte (otro PC817
-suelto, otro 6N137, o uno de los canales libres `IN1`–`IN3` del HY-M158).
+suelto, otro 6N137, o uno de los canales libres `IN6`–`IN8` del HY-M158).
 En la configuración acordada de 5 canales (4 ruedas + llave) **no se cablea por
 este módulo**, y la función de "centro mecánico" la cubre el pulso Z del encoder
 ya aislado por 6N137.
@@ -331,8 +337,8 @@ Ver `docs/ENCODER_WIRING_6N137.md` para el circuito completo del encoder.
 | Cant. | Valor | Tipo | Para |
 |-------|-------|------|------|
 | ~~5~~ | ~~1 kΩ ¼W~~ | — | **NO necesarias** — la HY-M158 ya integra 3 kΩ (SMD `302`) en cada canal |
-| 4 | **4.7 kΩ 1/8W** | Film metal | Pull-up salida `IN5`–`IN8` (4 ruedas → STM32) |
-| 1 | **10 kΩ 1/8W** | Film metal | Pull-up salida `IN4` (llave → ESP32 GPIO 40) |
+| 4 | **4.7 kΩ 1/8 W** | Film metal | Pull-up salida `IN1`–`IN4` (4 ruedas → STM32) |
+| 1 | **10 kΩ 1/8 W** | Film metal | Pull-up salida `IN5` (llave → ESP32 GPIO 40) |
 | 5 | **1N4148** | Diodo señal 100V/200mA | Antiparalelo LED PC817, protección automotriz *(recomendado, 1 por canal en uso)* |
 
 *(Para el divisor del pedal: 1× 10 kΩ + 1× 6.8 kΩ — pedido por separado)*
@@ -381,7 +387,7 @@ GND_logic   (3.3V) ─── G del lado IN del HY-M158 ─┤
    pull-ups externos. Usar el LDO externo AMS1117-3.3, no el pin 3.3V de la Nucleo-64.
 5. Los diodos 1N4148 antiparalelo se sueldan junto a cada terminal de entrada
    `V_n` del lado 12 V del módulo (cátodo a `V_n`, ánodo a `G` del lado V).
-6. Los 3 canales libres (`IN1`, `IN2`, `IN3`) se dejan **sin cablear** por ambos
+6. Los 3 canales libres (`IN6`, `IN7`, `IN8`) se dejan **sin cablear** por ambos
    lados (ni en V ni en IN). Constituyen reserva para futuras señales aisladas
    12 V → 3,3 V (p. ej. luces de freno, sensor de marcha atrás, etc.).
 
@@ -434,4 +440,5 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 *Cambios rev. 2026-04-28b: módulo identificado como **HY-M158** (PC817 ×8); jumpers rojos*
 *marcados como **a quitar**; resistencia de entrada externa eliminada (3 kΩ SMD ya en placa);*
 *canal Z del encoder retirado del PC817 y movido al 6N137 (ver `ENCODER_WIRING_6N137.md`);*
-*reasignación física: IN8=FR, IN7=FL, IN6=RR, IN5=RL, IN4=Llave; IN1–IN3 reserva.*
+*reasignación física (de abajo a arriba): IN1=FR, IN2=FL, IN3=RR, IN4=RL, IN5=Llave;*
+*IN6–IN8 reserva.*
