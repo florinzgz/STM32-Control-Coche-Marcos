@@ -72,7 +72,7 @@
 | ~~Resistencia entrada~~ | ~~1 kΩ ¼W~~ | ~~lado 12V~~ — **NO añadir, ya integrada en placa (3 kΩ SMD `302`)** |
 | **Pull-up salida** (4 ruedas FR/FL/RR/RL) | **4.7 kΩ 1/8W** | Entre `IN_n` (colector) y **+3.3V**, lado lógico |
 | **Pull-up salida** (Llave de contacto) | **10 kΩ 1/8W** | Entre `IN_n` (colector) y **+3.3V**, lado ESP32 |
-| **1N4148** *(recomendado)* | Diodo señal 100V/200mA | Antiparalelo con el LED PC817, protección automotriz |
+| **P6KE18CA** *(obligatorio)* | TVS bidireccional 600 W, DO-15/DO-201 | Entre `V_n` y `G` del lado V — protección automotriz (sustituye al 1N4148) |
 
 ### Por qué la 3 kΩ integrada del HY-M158 es suficiente para 12 V:
 ```
@@ -206,6 +206,98 @@ LADO 12V — entre V_n del HY-M158 y GND_vehicle (G del lado V):
 > El TVS P6KE18CA cubre tanto los transitorios positivos (load dump) como los
 > negativos con mayor margen de energía (600 W de pico) y con un único componente.
 > El 1N4148 solo cubría transitorios negativos y únicamente hasta 200 mA de pico.
+
+---
+
+## UBICACIÓN FÍSICA DEL TVS — MONTAJE REAL EN EL MÓDULO HY-M158
+
+> Esta sección describe dónde y cómo soldar físicamente los TVS P6KE18CA.
+> Seguir estas instrucciones garantiza protección correcta sin riesgo
+> de cortocircuito entre dominios de masa.
+
+### Posición de soldadura
+
+Los TVS se sueldan en la **cara trasera del módulo HY-M158**, es decir,
+en el lado del PCB que no tiene los componentes visibles (flip del módulo).
+
+```
+Vista frontal del módulo HY-M158 (posición normal, texto arriba):
+┌─────────────────────────────────────────────┐
+│  HY-M158          (texto superior)          │
+│  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ │ ← jumpers rojos (RETIRADOS)
+│  │ 8 │ │ 7 │ │ 6 │ │ 5 │ │ 4 │ │ 3 │ │ 2 │ │  V8–V2 (terminales lado 12V)
+│  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ │
+│  ┌───┐                                       │
+│  │ 1 │  ← V1 (fondo, lado 12V)              │
+│  └───┘  G (masa lado V, abajo izquierda)     │
+│                                               │
+│  ┌───┐ ... ┌───┐   IN8–IN1 (terminales       │
+│  │IN8│     │IN1│   lado lógico 3.3V)          │
+│  └───┘     └───┘                             │
+│  817 Module       (texto inferior)           │
+└─────────────────────────────────────────────┘
+
+Vista trasera (cara de soldadura del TVS):
+┌─────────────────────────────────────────────┐
+│                                             │
+│   V1 ●───[P6KE18CA]───● G(lado V)          │
+│   V2 ●───[P6KE18CA]───● G(lado V)          │
+│   V3 ●───[P6KE18CA]───● G(lado V)          │
+│   V4 ●───[P6KE18CA]───● G(lado V)          │
+│   V5 ●───[P6KE18CA]───● G(lado V)          │
+│                                             │
+│   (V6, V7, V8 → sin TVS — canales libres)  │
+└─────────────────────────────────────────────┘
+```
+
+### Reglas de soldadura
+
+| Regla | Descripción |
+|-------|-------------|
+| **Pata 1** | Soldada al pad del terminal V_n del canal correspondiente |
+| **Pata 2** | Soldada al pad del terminal G del **lado V** (12V, izquierdo) |
+| **NO** cruzar masas | Nunca conectar al G del lado IN (3.3V, derecho) |
+| **Polaridad** | No importa — el P6KE18CA es bidireccional |
+| **Longitud de pata** | Cortar al mínimo posible (< 3 mm desde cuerpo) para reducir inductancia de pico |
+| **Punto G común** | Varios TVS pueden compartir el mismo pad G del lado V — es el mismo nodo |
+
+### Diagrama eléctrico del TVS en circuito
+
+```
+  Batería 12V permanente
+        │
+        ├──[fusible 1A]──► Terminal V_n del HY-M158
+        │                         │
+        │                  [3kΩ on-board]
+        │                         │
+        │                       PC817 LED
+        │                         │
+        │                  Terminal G (lado V) ←── GND_vehicle
+        │
+        └── [P6KE18CA] ──┘
+             │         │
+           V_n (pad)  G lado V (pad)
+           (cara trasera PCB)
+
+  Función:
+  - En régimen (12V): I_fuga < 1µA → circuito abierto efectivo ✅
+  - Pico +40V (load dump): TVS conduce → clampea a 29.2V → protege LED ✅
+  - Pico negativo: TVS conduce en sentido inverso → clampea → LED protegido ✅
+```
+
+### Regla crítica: referencia de masa
+
+```
+✅ CORRECTO:
+   TVS P6KE18CA entre V_n  ←→  G del LADO V (GND_vehicle, lado 12V)
+
+❌ INCORRECTO (destruye el aislamiento galvánico):
+   TVS P6KE18CA entre V_n  ←→  G del LADO IN (GND_logic, lado 3.3V)
+```
+
+> **Si el TVS se conecta al G del lado IN, se crea un camino de baja impedancia
+> entre GND_vehicle y GND_logic durante cualquier transitorio, anulando el
+> aislamiento galvánico del PC817.**
 
 ---
 
@@ -469,6 +561,42 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 
 ---
 
+## REGLAS DE ORO HY-M158
+
+> Estas reglas resumen los puntos más críticos de montaje. Si alguna no se
+> cumple, el módulo puede no funcionar o dañar otros componentes.
+
+| # | Regla | Consecuencia si se incumple |
+|---|-------|----------------------------|
+| **ORO-1** | Todos los TVS P6KE18CA referenciados al **mismo GND_vehicle** (G lado V) | Si van al G lado IN → se pierde el aislamiento galvánico en cada transitorio |
+| **ORO-2** | Ningún componente del lado 12V debe tocar el GND lógico | Cortocircuito entre dominios → daño posible al STM32 o ESP32 |
+| **ORO-3** | Los 8 jumpers rojos **SIEMPRE retirados** antes de alimentar | Con jumpers puestos: GND_vehicle = GND_logic → inutiliza el aislamiento |
+| **ORO-4** | Verificación con polímetro **obligatoria** antes del primer encendido | Un módulo defectuoso puede tener pistas internas que unen los GND |
+| **ORO-5** | NO añadir resistencia externa en el lado 12V de entrada | La 3 kΩ on-board ya limita la corriente → añadir otra reduciría I_LED y podría impedir la saturación |
+| **ORO-6** | Pull-ups **solo en el lado lógico** (IN_n) — nunca en el lado 12V | Pull-up en V_n fijaría la línea alta e impediría la detección del sensor |
+| **ORO-7** | Canales libres (IN6–IN8 / V6–V8) → sin cablear por **ambos lados** | Dejar una pata del PC817 al aire no es riesgo, pero dejar V6–V8 conectados a 12V sin carga podría inducir acoplamiento |
+
+### Verificación rápida pre-encendido (30 segundos con polímetro)
+
+```
+1. Polímetro en modo CONTINUIDAD (pitido):
+   → Sondas entre G(lado V) y G(lado IN)
+   → Resultado esperado: ABIERTO (sin pitido)
+   → Si pita: no alimentar — revisar jumpers y pistas del PCB
+
+2. Polímetro en modo RESISTENCIA:
+   → Sondas entre V1 y G(lado V)
+   → Resultado esperado: ≥ 18 kΩ (TVS no conduce a tensión de medición del polímetro)
+   → Si mide < 1 kΩ: el TVS está en cortocircuito — reemplazar
+
+3. Polímetro en modo RESISTENCIA:
+   → Sondas entre IN1 y G(lado IN)
+   → Resultado esperado: 4.7 kΩ (pull-up soldado correctamente)
+   → Para IN5: 10 kΩ
+```
+
+---
+
 *Documento creado a partir de `power_manager.h`, `project_config.h` y*
 *`docs/VALIDACION_CAN_PULLUP_PC817.md`. Revisado y corregido: 2026-04-28b.*
 *Cambios rev. 2026-04-28b: módulo identificado como **HY-M158** (PC817 ×8); jumpers rojos*
@@ -476,3 +604,5 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 *canal Z del encoder retirado del PC817 y movido al 6N137 (ver `ENCODER_WIRING_6N137.md`);*
 *reasignación física (de abajo a arriba): IN1=FR, IN2=FL, IN3=RR, IN4=RL, IN5=Llave;*
 *IN6–IN8 reserva.*
+*Cambios rev. 2026-04-29: TVS P6KE18CA sustituye al 1N4148; añadidas sección de*
+*ubicación física del TVS y REGLAS DE ORO HY-M158.*
