@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.5 (añadidos 1N4007 ×10 en mano, 1N4148 ×150 en pedido; recordatorio protección 6N137 con 1N4148 antiparalelo)  
+> Versión: 1.6 (añadidos M4 módulo relé 2ch 5VDC TONGLING JQC-3FF-S-Z ×1 y M5 módulo relé 2ch 12VDC SONGLE SRD-12VDC-SL-C ×1; corregidos docs VCC/JD-VCC → DC+/DC−; explicado jumper amarillo HIGH/LOW trigger)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -21,6 +21,7 @@
 9. [Qué falta comprar](#9-qué-falta-comprar)
 10. [Transistores](#10-transistores)
 11. [Módulos optoacopladores (PC817 / 6N137)](#11-módulos-optoacopladores-pc817--6n137)
+12. [Módulos de relé de 2 canales](#12-módulos-de-relé-de-2-canales)
 
 ---
 
@@ -48,6 +49,8 @@
 | M1 | **Módulo PC817 8 canales** | Optoacoplador 8-ch en placa | 2 uds (= 16 ch) | ✅ EN MANO |
 | M2 | **Módulo 6N137 (5 V lado MCU)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
 | M3 | **Módulo 6N137 (12 V lado sensor)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
+| M4 | **Módulo relé 2ch 5VDC** | TONGLING JQC-3FF-S-Z, 10A 250VAC | 1 ud | ✅ EN MANO |
+| M5 | **Módulo relé 2ch 12VDC** | SONGLE SRD-12VDC-SL-C, 10A 250VAC | 1 ud | ✅ EN MANO |
 | F1 | Ferrita / bobina CAN | BLM18AG601SN1D / 100 µH | 0 uds | ❌ **FALTA — pedir** |
 
 ---
@@ -876,6 +879,108 @@ En las regletas de **entrada (lado IN)** del módulo:
 
 ---
 
+## 12. Módulos de relé de 2 canales
+
+### 12.1 — M4: TONGLING JQC-3FF-S-Z — 5VDC (tiras LED)
+
+| Campo | Dato |
+|-------|------|
+| Fabricante / modelo | TONGLING JQC-3FF-S-Z |
+| Tensión de bobina | **5 V DC** |
+| Contactos | 10 A / 250 VAC — 15 A / 125 VAC |
+| Aislamiento | Optoacoplador interno (PC817 o equivalente) |
+| Cantidad | **1 unidad** |
+
+**Pines del conector de control (regleta izquierda de 4 bornes):**
+
+| Borne | Conectar a | Descripción |
+|-------|-----------|-------------|
+| DC+   | **5 V** (buck 3A ESP32+STM32) | Alimentación bobinas de los relés internos |
+| DC−   | GND (masa común) | Masa |
+| IN1   | **PB10** STM32 (3.3 V) | RELAY_LED — tira frontal |
+| IN2   | **PB11** STM32 (3.3 V) | RELAY_LED_REAR — tira trasera |
+
+**Jumper amarillo (S1 / S2):**
+
+```
+  S1 (HIGH trigger) ← USAR ESTA POSICIÓN
+    → El relé cierra cuando IN recibe 3.3 V (HIGH del STM32) ✅
+
+  S2 (LOW trigger)  ← NO usar
+    → El relé cierra cuando IN está a 0 V (activación inversa)
+```
+
+**Contactos de salida (regleta derecha):**
+
+```
+  CH1 COM → 5 V (buck 5A LEDs)        CH2 COM → 5 V (buck 5A LEDs)
+  CH1 NO  → + tira LED frontal (28×)  CH2 NO  → + tira LED trasera (16×)
+  CH1 NC  → Sin conectar              CH2 NC  → Sin conectar
+  GND módulo ─── GND tiras LED ─── GND ESP32
+```
+
+> ✅ **Flyback interno.** El PCB ya tiene un diodo en paralelo con cada bobina interna
+> (visible como SMD junto a cada relé). No se necesita diodo externo para este módulo.
+>
+> ✅ **La señal de 3.3 V del STM32 es suficiente.** I = (3.3−1.2)/1000 ≈ 2.1 mA ≥ 1 mA mínimo.
+>
+> ✅ **No hay ningún jumper VCC/JD-VCC en este módulo.** Ese concepto es de otro modelo
+> diferente. El único jumper es el amarillo S1/S2 (selector de nivel de disparo).
+
+---
+
+### 12.2 — M5: SONGLE SRD-12VDC-SL-C — 12VDC (relés de potencia)
+
+| Campo | Dato |
+|-------|------|
+| Fabricante / modelo | SONGLE SRD-12VDC-SL-C |
+| Tensión de bobina | **12 V DC** |
+| Contactos | 10 A / 250 VAC — 10 A / 30 VDC |
+| Aislamiento | Optoacoplador interno |
+| Cantidad | **1 unidad** |
+
+**Pines del conector de control (regleta izquierda de 4 bornes):**
+
+| Borne | Conectar a | Descripción |
+|-------|-----------|-------------|
+| DC+   | **12 V** batería | Alimentación bobinas de los relés internos |
+| DC−   | GND (masa común) | Masa |
+| IN1   | **PC11** STM32 (3.3 V) | RELAY_TRAC — contactor tracción 50A |
+| IN2   | **PC12** STM32 (3.3 V) | RELAY_DIR — contactor dirección 20A |
+
+**Jumper amarillo (HIGH / LOW):**
+
+```
+  HIGH ← USAR ESTA POSICIÓN
+    → El relé cierra cuando IN recibe 3.3 V (HIGH del STM32) ✅
+
+  LOW  ← NO usar aquí
+```
+
+**Contactos de salida (regleta derecha):**
+
+```
+  CH1 COM → 12 V batería                 CH2 COM → 12 V batería
+  CH1 NO  → Bobina contactor 50A/24V     CH2 NO  → Bobina contactor 20A/12V
+  CH1 NC  → Sin conectar                 CH2 NC  → Sin conectar
+```
+
+> ✅ **Flyback interno.** El PCB ya lleva diodo en paralelo con cada bobina interna.
+>
+> ⚠️ **Flyback EXTERNO obligatorio en los contactores de potencia.**
+> Los contactos CH1 NO / CH2 NO accionan las bobinas de los GRANDES contactores
+> (50 A tracción y 20 A dirección). ESAS bobinas externas sí necesitan diodo flyback
+> externo: **1N4007 en paralelo** (cátodo a +12V, ánodo a bobina−/GND de cada contactor).
+> Tienes 10× 1N4007 en mano — úsalos aquí.
+>
+> ✅ **La señal de 3.3 V del STM32 funciona con DC+ = 12 V** gracias al optoacoplador
+> que aísla eléctricamente el lado de señal del lado de potencia.
+>
+> ✅ **No hay ningún jumper VCC/JD-VCC en este módulo.** Solo existe el selector amarillo
+> HIGH/LOW — ponlo en HIGH.
+
+---
+
 ## Apéndice — Historial de sesiones
 
 | Fecha | Qué se añadió al inventario |
@@ -889,6 +994,7 @@ En las regletas de **entrada (lado IN)** del módulo:
 | 2026-04-28 | **v1.3:** D4 kit Zener 1N4728–1N4737 ×~200; C4 CBB22 250V/100nF ×20; T1 2N2222×10, T2 BC337-40×3, T3 C1815×3, T4 A1015×4; eliminados de "falta comprar": transistor NPN y 1N4148 |
 | 2026-04-28 | **v1.4:** M1 módulos PC817 8ch ×2 (16 canales totales); M2 módulos 6N137 5V ×5; M3 módulos 6N137 12V ×5; F1 ferrita CAN confirmada NO disponible (única pieza pendiente). Documentado cableado Zener antiparalelo en PC817 (usar Vz ≥ 6.2 V: 1N4735/4736/4737) |
 | 2026-04-28 | **v1.5:** D5 1N4007 ×10 en mano (DO-41, 1A/1000V, redundante con 1N5408 — queda como reserva); D6 1N4148 ×150 EN PEDIDO (caja completa, decisión: protección antiparalelo PC817+6N137 con componente correcto y polivalente, sustituye solución provisional con Zener). Añadido §11.3.1 con recordatorio explícito de soldar 1N4148 antiparalelo al montar los módulos 6N137 (Vr_max LED ≈ 5V, mismo principio que PC817). |
+| 2026-04-29 | **v1.6:** M4 módulo relé 2ch 5VDC TONGLING JQC-3FF-S-Z ×1 en mano; M5 módulo relé 2ch 12VDC SONGLE SRD-12VDC-SL-C ×1 en mano (verificados por foto). Corregida documentación LLAVE_CONTACTO_ENCENDIDO_APAGADO.md: reemplazados pines VCC/JD-VCC (de otro modelo) por DC+/DC− que corresponden a los módulos reales; aclarado que el jumper amarillo S1/S2 (o HIGH/LOW) es selector de nivel de disparo, no un puente de alimentación. |
 
 ---
 

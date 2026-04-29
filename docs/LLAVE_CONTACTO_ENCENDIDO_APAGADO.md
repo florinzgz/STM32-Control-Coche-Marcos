@@ -145,28 +145,46 @@ Permite que los 3.3 V del STM32 accionen las bobinas de los relés de potencia
 El módulo ya tiene optoacopladores con resistencias integradas (~1 kΩ).
 Con 3.3 V del STM32: `I = (3.3 − 1.2) / 1000 = 2.1 mA` — suficiente (PC817 ≥ 1 mA).
 
-### 4.3 Cableado del módulo 12 V
+### 4.3 Identificación del módulo real (SONGLE SRD-12VDC-SL-C)
+
+Este módulo tiene **un único raíl de alimentación DC+/DC−** (no VCC/JD-VCC separados).
+El jumper amarillo que lleva soldado es el **selector de nivel de disparo** (HIGH / LOW trigger),
+**no** un puente de alimentación.
 
 ```
-  MÓDULO 2 CANALES SRD-12VDC-SL-C
-  ─────────────────────────────────────
-  VCC    → 3.3 V   (del regulador 3.3V del STM32 Nucleo)
-  JD-VCC → 12 V    (batería — QUITA el jumper entre VCC y JD-VCC)
-  GND    → GND
+  MÓDULO 2 CANALES SRD-12VDC-SL-C  (SONGLE)
+  ─────────────────────────────────────────────────────────────────
+  Regleta izquierda (4 bornes de control):
 
-  Jumper trigger → posición H  (HIGH = relé ON)
+    DC+  → 12 V batería   ← alimenta las BOBINAS de los relés internos
+    DC−  → GND            ← masa común (misma que STM32/ESP32)
+    IN1  ←── PC11 STM32   (RELAY_TRAC, señal 3.3 V — funciona directo)
+    IN2  ←── PC12 STM32   (RELAY_DIR,  señal 3.3 V — funciona directo)
 
-  IN1 ←── PC11 STM32  (RELAY_TRAC, 3.3V directo)
-  IN2 ←── PC12 STM32  (RELAY_DIR,  3.3V directo)
+  Jumper amarillo (selector de disparo) → posición HIGH (S1)
+    HIGH = relé se activa cuando IN está a nivel ALTO (3.3 V del STM32) ✅
+    LOW  = relé se activa cuando IN está a nivel BAJO — NO usar aquí
 
-  CH1 COM → 12 V batería
-  CH1 NO  → Bobina relé potencia tracción 50A/24V
-  CH2 COM → 12 V batería
-  CH2 NO  → Bobina relé potencia dirección 20A/12V
+  Regleta derecha (contactos del relé):
+    CH1 COM → 12 V batería
+    CH1 NO  → Bobina relé potencia tracción 50A/24V
+    CH2 COM → 12 V batería
+    CH2 NO  → Bobina relé potencia dirección 20A/12V
+    NC      → Sin conectar
 ```
 
-> ⚠️ **IMPORTANTE — Quita el jumper VCC/JD-VCC** antes de conectar.
-> Si lo dejas puesto, los 12 V entran al pin VCC de 3.3 V → daño.
+> ✅ **Señal 3.3 V del STM32 funciona directamente con DC+ = 12 V** porque el optoacoplador
+> interno (PC817) aísla los dos circuitos. La señal solo mueve el LED del optoacoplador
+> (I = 2.1 mA), sin contacto eléctrico con los 12 V de la bobina.
+>
+> ✅ **No hay jumper VCC/JD-VCC en este módulo.** El aviso anterior era para un modelo
+> diferente. El único jumper que tiene es el selector amarillo HIGH/LOW — ponlo en HIGH.
+>
+> ✅ **Flyback interno.** El PCB del módulo ya lleva un diodo en paralelo con cada bobina
+> interna (se ve como componente SMD junto al relé). No hace falta añadir diodo externo
+> para proteger los relés dentro del módulo.
+> Los diodos 1N4007 externos se ponen en las bobinas de los GRANDES contactores de
+> potencia (50 A tracción, 20 A dirección) que se conectan a CH1 NO / CH2 NO.
 
 ### 4.4 ¿Qué activan esos relés de potencia?
 
@@ -203,33 +221,42 @@ Mismo razonamiento que el módulo 12 V: el PC817 interno del módulo 5 V necesit
 
 **Conexión directa PB10/PB11 → IN1/IN2. No hace falta ninguna resistencia.**
 
-### 5.3 Cableado del módulo 5 V
+### 5.3 Identificación del módulo real (TONGLING JQC-3FF-S-Z 5VDC)
+
+Este módulo también tiene **un único raíl DC+/DC−** y el mismo jumper amarillo
+selector HIGH/LOW trigger (etiquetado S1 / S2 en la placa).
 
 ```
-  MÓDULO 2 CANALES SRD-05VDC-SL-C
-  ─────────────────────────────────────
-  VCC    → 3.3 V   (del STM32 Nucleo — mismo raíl que el módulo 12V)
-  JD-VCC → 5 V     (del regulador 5V — QUITA el jumper entre VCC y JD-VCC)
-  GND    → GND
+  MÓDULO 2 CANALES TONGLING JQC-3FF-S-Z  (5VDC)
+  ─────────────────────────────────────────────────────────────────
+  Regleta izquierda (4 bornes de control):
 
-  Jumper trigger → posición H  (HIGH = relé ON)
+    DC+  → 5 V (buck 3A que alimenta ESP32+STM32)
+             ← alimenta las BOBINAS de los relés internos
+    DC−  → GND
+    IN1  ←── PB10 STM32   (RELAY_LED,      señal 3.3 V — funciona directo)
+    IN2  ←── PB11 STM32   (RELAY_LED_REAR, señal 3.3 V — funciona directo)
 
-  IN1 ←── PB10 STM32  (RELAY_LED,      3.3V directo)
-  IN2 ←── PB11 STM32  (RELAY_LED_REAR, 3.3V directo)
+  Jumper amarillo (S1 / S2) → posición S1 = HIGH trigger
+    HIGH (S1) = relé se activa con IN a 3.3 V ✅
 
-  CH1 COM → 5 V (del regulador)
-  CH1 NO  → + de la tira LED frontal  (28× WS2812B)
-  CH1 NC  → Sin conectar
+  Regleta derecha (contactos del relé):
+    CH1 COM → 5 V (buck 5A de LEDs)
+    CH1 NO  → + de la tira LED frontal  (28× WS2812B)
+    CH1 NC  → Sin conectar
 
-  CH2 COM → 5 V (del regulador)
-  CH2 NO  → + de la tira LED trasera  (16× WS2812B)
-  CH2 NC  → Sin conectar
+    CH2 COM → 5 V (buck 5A de LEDs)
+    CH2 NO  → + de la tira LED trasera  (16× WS2812B)
+    CH2 NC  → Sin conectar
 
-  GND del módulo ─── GND tiras LED ─── GND ESP32 (dato WS2812B)
+    GND del módulo ─── GND tiras LED ─── GND ESP32 (dato WS2812B)
 ```
 
-> ⚠️ **IMPORTANTE — Quita el jumper VCC/JD-VCC** antes de conectar.
-> Si lo dejas puesto, los 5 V entran al pin VCC de 3.3 V → daño.
+> ✅ **No hay jumper VCC/JD-VCC en este módulo.** El aviso anterior era para un modelo
+> diferente de módulo de relé. Solo existe el jumper amarillo selector S1/S2 — ponlo en S1 (HIGH).
+>
+> ✅ **El PCB ya tiene diodos flyback internos** en paralelo con cada bobina. No se necesita
+> nada externo para las bobinas dentro del módulo.
 
 ### 5.4 Corriente que consumen las tiras
 
