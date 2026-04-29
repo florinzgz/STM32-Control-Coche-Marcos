@@ -1,8 +1,30 @@
-# Relé de Retardo (Retención) — Puesta en Marcha y Apagado
+# ~~Relé de Retardo (Retención) — Puesta en Marcha y Apagado~~
 
-**Resumen de referencia rápida — Circuito y lógica completa**
+> # ⛔ DOCUMENTO OBSOLETO
+>
+> **Este documento describe un circuito discreto con transistores NPN (Q1, Q2 tipo
+> 2N2222), diodos OR (1N4148) y diodo flyback (1N4007) para controlar la bobina
+> del relé de retención desde la llave y desde GPIO 41 (POWER_HOLD).**
+>
+> **DECISIÓN DE ARQUITECTURA ADOPTADA (2026-04-29): OPCIÓN A — MÓDULO TEMPORIZADOR AUTÓNOMO**
+>
+> El circuito discreto descrito en este documento ha sido **reemplazado por un módulo de
+> retardo hardware autónomo** (potenciómetro, delay-OFF). El módulo funciona completamente
+> en hardware sin componentes discretos adicionales:
+>
+> - `GPIO 41 (POWER_HOLD)` — uso **interno del firmware** únicamente. NO se conecta a ningún relé físico externo.
+> - NO se construye ningún circuito con Q1, Q2, R4, R_base, D_OR1, D_OR2.
+>
+> **Referencia válida:** `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` §3 (módulo retardo hardware).
+>
+> El contenido siguiente se conserva solo como referencia histórica del diseño anterior.
+> **NO implementar.**
 
-> **Fuentes:**
+---
+
+~~**Resumen de referencia rápida — Circuito y lógica completa**~~
+
+> **Fuentes (históricas):**
 > - `esp32/src/power_manager.h` / `power_manager.cpp` (GPIO 40/41, state machine)
 > - `Core/Src/safety_system.c` (Relay_PowerUp / Relay_PowerDown)
 > - `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` (circuito completo + diagramas)
@@ -313,8 +335,10 @@ void Relay_PowerDown(void) {
 
 ## 11. Documentos relacionados
 
-- `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` — Circuito completo con diagramas detallados
-- `docs/IGNITION_KEY_CIRCUIT_VALIDATION.md` — Validación eléctrica y correcciones (flyback, transistor driver)
+> ⛔ Este documento es OBSOLETO. Ver el banner al inicio.
+
+- `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` — **Referencia válida** (módulo retardo autónomo)
+- ~~`docs/IGNITION_KEY_CIRCUIT_VALIDATION.md`~~ — **OBSOLETO** (diseño discreto Q1/Q2 supersedido)
 - `docs/POWER_DISTRIBUTION.md` — Distribución de potencia y temporizaciones de relés
 - `docs/ALIMENTACION_BUCK_INRUSH_PROTECTION.md` — Protección inrush para Bucks 5V lógica y LEDs
 - `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md` — BOM completo del sistema de alimentación

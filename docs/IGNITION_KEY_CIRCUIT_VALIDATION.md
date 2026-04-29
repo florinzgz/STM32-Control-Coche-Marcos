@@ -1,9 +1,34 @@
-# 🔧 Validación Eléctrica y Optimización — Circuito Llave de Contacto + Relé de Retención
+# ~~🔧 Validación Eléctrica y Optimización — Circuito Llave de Contacto + Relé de Retención~~
 
-**Documento técnico de revisión, corrección y mejora del circuito de entrada de llave de contacto 12 V.**
+> # ⛔ DOCUMENTO OBSOLETO
+>
+> **Este documento analiza y propone un circuito discreto con divisor resistivo
+> (R1/R2/R3/C1) y transistores NPN (Q1/Q2 tipo 2N2222) para controlar la bobina
+> del relé de retención.**
+>
+> **DECISIÓN DE ARQUITECTURA ADOPTADA (2026-04-29): OPCIÓN A — MÓDULO TEMPORIZADOR AUTÓNOMO**
+>
+> - El circuito GPIO (etapa A) descrito en este documento **ha sido reemplazado** por el
+>   canal IN5 del módulo HY-M158 (PC817). La señal de la llave llega al ESP32 GPIO 40
+>   mediante aislamiento galvánico optoacoplador — no mediante divisor resistivo directo.
+> - El circuito de control de relé (etapa B, Q1/Q2) **ha sido reemplazado** por el módulo
+>   de retardo hardware autónomo. No se construye ningún circuito discreto.
+> - `GPIO 41 (POWER_HOLD)` es **interno del firmware** únicamente. NO se conecta a ningún
+>   relé físico externo.
+>
+> **Referencia válida:**
+> - Para llave → GPIO 40: `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` §2 + `docs/PC817_WIRING_REFERENCE.md` §CANAL LLAVE
+> - Para módulo retardo: `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md` §3
+>
+> El contenido siguiente se conserva solo como referencia histórica.
+> **NO implementar.**
 
-> **Versión:** 1.0  
-> **Fecha:** 2026-04-14  
+---
+
+~~**Documento técnico de revisión, corrección y mejora del circuito de entrada de llave de contacto 12 V.**~~
+
+> **Versión:** 1.0 (OBSOLETA)
+> **Fecha:** 2026-04-14
 > **Fuentes:** `power_manager.h`, `power_manager.cpp`, `LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`, `SISTEMA_ALIMENTACION_COMPLETO.md`
 
 ---
