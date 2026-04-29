@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.5 (añadidos 1N4007 ×10 en mano, 1N4148 ×150 en pedido; recordatorio protección 6N137 con 1N4148 antiparalelo)  
+> Versión: 1.6 (1N4148 ×150 RECIBIDOS → EN MANO; kit ALLECIN 240PCS electrolíticos RECIBIDO → EN MANO)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -39,7 +39,7 @@
 | D3 | Diodo rectificador DO-27 | **1N5408** (3 A / 1000 V) | 50 uds | ✅ EN MANO |
 | D4 | Diodo Zener DO-35 | **Kit 1N4728–1N4737** (3.3 V–13 V, 10 valores) | ~200 uds | ✅ EN MANO |
 | D5 | Diodo rectificador DO-41 | **1N4007** (1 A / 1000 V) | 10 uds | ✅ EN MANO |
-| D6 | Diodo conmutación rápida DO-35 | **1N4148** (200 mA / 100 V, trr 4 ns) | 150 uds | 🛒 **EN PEDIDO** |
+| D6 | Diodo conmutación rápida DO-35 | **1N4148** (200 mA / 100 V, trr 4 ns) | 150 uds | ✅ EN MANO |
 | C4 | Condensador film CBB22 | **100 nF / 250 V** (código 104J, paso P10) | 20 uds | ✅ EN MANO |
 | T1 | Transistor **NPN** TO-92 | **2N2222** (40 V / 600 mA) | 10 uds | ✅ EN MANO |
 | T2 | Transistor **NPN** TO-92 | **BC337-40** (45 V / 800 mA) | 3 uds | ✅ EN MANO |
@@ -48,6 +48,7 @@
 | M1 | **Módulo PC817 8 canales** | Optoacoplador 8-ch en placa | 2 uds (= 16 ch) | ✅ EN MANO |
 | M2 | **Módulo 6N137 (5 V lado MCU)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
 | M3 | **Módulo 6N137 (12 V lado sensor)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
+| C5 | Kit electrolíticos ALLECIN 240PCS | **24 valores** 0.1µF–1000µF, 10V/16V/25V/50V | 240 uds | ✅ EN MANO |
 | F1 | Ferrita / bobina CAN | BLM18AG601SN1D / 100 µH | 0 uds | ❌ **FALTA — pedir** |
 
 ---
@@ -326,12 +327,13 @@ Usar: **5 diodos** para los 5 módulos de relé + **1** para relé retención = 
 
 ---
 
-### 5.6 — 1N4148 — Diodo conmutación rápida 200mA/100V (EN PEDIDO)
+### 5.6 — 1N4148 — Diodo conmutación rápida 200mA/100V ✅ EN MANO
 
 | Campo | Dato |
 |-------|------|
 | Referencia | 1N4148 (caja de 150 piezas) |
-| Estado | 🛒 **EN PEDIDO** (decisión 2026-04-28) |
+| Marca | **ALLECIN** |
+| Estado | ✅ **EN MANO** (recibidos 2026-04-29) |
 | Corriente continua | 200 mA |
 | Tensión inversa | 100 V |
 | Vf típica | 0.7 V @ 10 mA |
@@ -387,7 +389,7 @@ Esto es **al revés** que el LED interno del optoacoplador → por eso se llama 
 
 ---
 
-> **Estado:** Kit a comprar — imagen referencia `913b0f6f-de4c-49f0-b911-53bc022b7e3e`  
+> **Estado:** ✅ **EN MANO** — Kit recibido 2026-04-29 (ALLECIN 240PCS)  
 > **Marca:** ALLECIN  
 > **Descripción:** 24 Values Kit Surtido de Condensadores Electrolíticos 0.1µF → 1000µF, tensiones 10V/16V/25V/50V
 
@@ -570,19 +572,19 @@ Kit AUKENIEN 1/8W:
 
 ## 9. Qué falta comprar
 
-### 9.1 Condensadores electrolíticos — ESTADO CON KIT ALLECIN
+### 9.1 Condensadores electrolíticos — ESTADO CON KIT ALLECIN ✅ EN MANO
 
-> Si compras el kit ALLECIN 240PCS, las posiciones de abajo quedan cubiertas:
+> El kit ALLECIN 240PCS ha llegado (2026-04-29). Las posiciones de abajo quedan cubiertas:
 
-| Posición | Valor | Para qué | Qty | Con ALLECIN | Sin ALLECIN |
-|----------|-------|----------|-----|-------------|-------------|
-| Bulk 5V LEDs WS2812B frontal | 1000 µF / 16V | Rail 5V → RELAY_LED (PB10) | 1 | ✅ En kit | ❌ Falta |
-| Bulk 5V LEDs WS2812B trasero | 1000 µF / 16V | Rail 5V → RELAY_LED_REAR (PB11) | 1 | ✅ En kit | ❌ Falta |
-| Bulk salida LM2596 | 47 µF / 10V | Salida regulador 5V | 1 | ✅ En kit | ❌ Falta |
-| Bulk 3.3V STM32 | 10 µF / 25V | Rail 3.3V Nucleo | 1 | ✅ En kit | ❌ Falta |
-| Bulk CAN ESP32 | 10 µF / 25V | SN65HVD230 lado ESP32 | 1 | ✅ En kit | ❌ Falta |
-| Bulk bus 12V dirección | 470 µF / 16V | BTS7960 STEER B+(12V) | 1 | ✅ En kit | ❌ Falta |
-| **Bulk bus 24V relés** | **≥1000 µF / 35V** | Rail 24V junto a RELAY_MAIN/TRAC | 1 | ❌ **No cubre (16V insuficiente)** | ❌ Falta |
+| Posición | Valor | Para qué | Qty | Estado |
+|----------|-------|----------|-----|--------|
+| Bulk 5V LEDs WS2812B frontal | 1000 µF / 16V | Rail 5V → RELAY_LED (PB10) | 1 | ✅ EN MANO (kit) |
+| Bulk 5V LEDs WS2812B trasero | 1000 µF / 16V | Rail 5V → RELAY_LED_REAR (PB11) | 1 | ✅ EN MANO (kit) |
+| Bulk salida LM2596 | 47 µF / 10V | Salida regulador 5V | 1 | ✅ EN MANO (kit) |
+| Bulk 3.3V STM32 | 10 µF / 25V | Rail 3.3V Nucleo | 1 | ✅ EN MANO (kit) |
+| Bulk CAN ESP32 | 10 µF / 25V | SN65HVD230 lado ESP32 | 1 | ✅ EN MANO (kit) |
+| Bulk bus 12V dirección | 470 µF / 16V | BTS7960 STEER B+(12V) | 1 | ✅ EN MANO (kit) |
+| **Bulk bus 24V relés** | **≥1000 µF / 35V** | Rail 24V junto a RELAY_MAIN/TRAC | 1 | ⚠️ **Usar 2200µF/35V en mano** |
 
 > **Para el bulk 24V:** Usar uno de los **2200µF/35V ya en mano** (si sobra uno de los 5 para BTS7960). Si no, comprar 1 pieza suelta de 1000µF/35V o 2200µF/35V.
 
@@ -591,7 +593,6 @@ Kit AUKENIEN 1/8W:
 | Componente | Especificación | Para qué | Qty |
 |-----------|---------------|----------|-----|
 | Ferrita/bobina | BLM18AG601SN1D o 100µH | Filtro bus CAN (5V sucio → limpio) | 1 |
-| 🛒 1N4148 (EN PEDIDO) | DO-35, 200mA/100V, trr 4ns | Protección antiparalelo LED PC817 + 6N137 + OR retención + reserva | 150 |
 
 > **Optoacopladores PC817 y 6N137 ya NO hacen falta comprar:**
 > - PC817 → **2 módulos de 8 canales en mano = 16 canales** (solo se usan 5) ✅
@@ -600,7 +601,7 @@ Kit AUKENIEN 1/8W:
 > **Transistor NPN ya en mano:**
 > - Transistor para relé retención → **2N2222 ×10 en mano** ✅
 >
-> **1N4148 — pedido 2026-04-28 (caja 150 uds):** sustituye a la solución provisional de Zener en antiparalelo. Más rápido, más versátil, polaridad uniforme. Hasta que llegue se puede usar 1N4735/4736/4737 (Vz≥6.2V) en su lugar (solución equivalente, ya documentada).
+> **1N4148 ×150 — EN MANO (recibidos 2026-04-29):** sustituye a la solución provisional de Zener en antiparalelo. Más rápido, más versátil, polaridad uniforme. Ya se puede soldar en todas las posiciones documentadas.
 >
 > **Pendientes de pedir:** ferrita CAN (1 unidad).
 
@@ -622,11 +623,11 @@ Kit AUKENIEN 1/8W:
 | Serie WS2812B datos (330Ω) | Kit 1/4W (330Ω ×20) — **mejor que 1/8W aquí** | ✅ |
 | Snubber RC relés (100Ω) | Kit 1/4W (100Ω ×20) — **1/4W mejor que 1/8W** | ✅ |
 | **Transistor relé retención** | **2N2222 ×10** en mano | ✅ |
-| **OR diodos retención** | **1N4148 (pedido)** o Zener 1N4728–1N4737 directo | ✅ |
+| **OR diodos retención** | **1N4148 ×150 EN MANO** o Zener 1N4728–1N4737 directo | ✅ |
 | **Aislamiento sensores LJ12A3 (×5 ch)** | **Módulos PC817 8-ch ×2** (16 canales) | ✅ |
 | **Aislamiento encoder A/B/Z (×3 ch)** | **Módulos 6N137 5V ×5** | ✅ |
-| **Protección polaridad inversa LED PC817** | **1N4148 (pedido) ×5** o Zener 1N4735/4736/4737 antiparalelo | ✅ |
-| **Protección polaridad inversa LED 6N137** | **1N4148 (pedido) ×3** antiparalelo en cada canal A/B/Z | 🛒 al recibir 1N4148 |
+| **Protección polaridad inversa LED PC817** | **1N4148 ×150 EN MANO ×5** | ✅ |
+| **Protección polaridad inversa LED 6N137** | **1N4148 ×150 EN MANO ×3** antiparalelo en cada canal A/B/Z | ✅ |
 
 ---
 
