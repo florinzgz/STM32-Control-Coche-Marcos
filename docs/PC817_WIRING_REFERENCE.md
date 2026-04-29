@@ -299,6 +299,37 @@ Vista trasera (cara de soldadura del TVS):
 > entre GND_vehicle y GND_logic durante cualquier transitorio, anulando el
 > aislamiento galvánico del PC817.**
 
+### UBICACIÓN ÓPTIMA (CRITERIO EMI)
+
+El TVS debe colocarse **físicamente lo más cerca posible del terminal V_n**,
+es decir, directamente en los pads del conector del módulo (cara trasera PCB).
+
+**Por qué importa la ubicación:**
+Un TVS absorbe el transitorio de forma efectiva solo si lo intercepta **antes** de
+que se propague por las pistas del PCB hacia el circuito activo (LED, PC817).
+Si el TVS se aleja del punto de entrada del cable, el pulso de alta tensión
+ya habrá recorrido centímetros de pista — y en esos centímetros, la inductancia
+parásita puede inducir sobretensiones locales que dañan el LED del PC817.
+
+```
+CORRECTO — TVS en el punto de entrada:
+  [Cable 12V del sensor/llave]──►[TVS inmediatamente en V_n]──►[pista PCB]──►[3kΩ]──►[PC817 LED]
+
+INCORRECTO — TVS lejos del conector:
+  [Cable 12V del sensor/llave]──►[pista PCB larga]──►[3kΩ]──►[PC817 LED]
+                                         │
+                                      [TVS aquí]   ← demasiado tarde, el ruido ya entró
+```
+
+**Reglas de ubicación:**
+
+| Regla | Descripción |
+|-------|-------------|
+| **Proximidad** | El cuerpo del TVS a ≤ 5 mm del pad del terminal V_n |
+| **Patas cortas** | Recortar patas a < 3 mm desde el cuerpo — la inductancia de pata reduce la eficacia del clampeo |
+| **No prolongar** | No usar cable volante para alejar el TVS del conector |
+| **Cara trasera** | Soldar siempre en los pads de la cara trasera, no en un punto arbitrario de la pista |
+
 ---
 
 ## ESQUEMA DE CONEXIÓN — Sensores LJ12A3 de rueda (canales `IN1`–`IN4`)
@@ -575,6 +606,7 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 | **ORO-5** | NO añadir resistencia externa en el lado 12V de entrada | La 3 kΩ on-board ya limita la corriente → añadir otra reduciría I_LED y podría impedir la saturación |
 | **ORO-6** | Pull-ups **solo en el lado lógico** (IN_n) — nunca en el lado 12V | Pull-up en V_n fijaría la línea alta e impediría la detección del sensor |
 | **ORO-7** | Canales libres (IN6–IN8 / V6–V8) → sin cablear por **ambos lados** | Dejar una pata del PC817 al aire no es riesgo, pero dejar V6–V8 conectados a 12V sin carga podría inducir acoplamiento |
+| **ORO-8** | GND_vehicle (lado 12V) y GND_logic (lado 3.3V) **NO deben unirse** en ningún punto externo al módulo | El único acoplamiento eléctrico permitido entre dominios es a través del PC817 — cualquier unión externa crea un bucle de masa que destruye el aislamiento galvánico y puede generar fallos erráticos o daño en la MCU |
 
 ### Verificación rápida pre-encendido (30 segundos con polímetro)
 
@@ -605,4 +637,4 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 *reasignación física (de abajo a arriba): IN1=FR, IN2=FL, IN3=RR, IN4=RL, IN5=Llave;*
 *IN6–IN8 reserva.*
 *Cambios rev. 2026-04-29: TVS P6KE18CA sustituye al 1N4148; añadidas sección de*
-*ubicación física del TVS y REGLAS DE ORO HY-M158.*
+*ubicación física del TVS (con subsección CRITERIO EMI) y REGLAS DE ORO HY-M158 (incluye ORO-8 aislamiento de masas).*

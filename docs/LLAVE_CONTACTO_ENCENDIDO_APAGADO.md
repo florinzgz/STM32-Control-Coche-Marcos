@@ -827,6 +827,26 @@ HY-M158 G(lado V) ────────────────────�
 - [ ] A7.2. Medir +5V vs GND (regulador desconectado de carga): > 1 kΩ
 - [ ] A7.3. Medir +24V vs GND: > 100 kΩ
 
+**A8 — Verificación de aislamiento galvánico HY-M158** *(obligatoria — no alimentar sin completar)*
+
+> ⛔ Este punto es el último escudo antes de encender. Un módulo con aislamiento roto
+> puede dañar la MCU en el primer encendido.
+
+- [ ] A8.1. Polímetro en modo **CONTINUIDAD** (modo con pitido/buzzer)
+- [ ] A8.2. Sonda roja → **G del lado V** (terminal de masa del bloque 12V, lado izquierdo del módulo)
+- [ ] A8.3. Sonda negra → **G del lado IN** (terminal de masa del bloque lógico, lado derecho del módulo)
+- [ ] A8.4. Resultado esperado: **CIRCUITO ABIERTO — sin pitido, sin continuidad** ✅
+
+| Resultado | Interpretación | Acción |
+|-----------|---------------|--------|
+| Sin pitido (abierto) | Aislamiento galvánico **correcto** | Continuar a FASE B |
+| Pitido (continuidad) | **ERROR CRÍTICO** — jumpers no retirados, o pista interna del PCB une los GND | **NO alimentar. Revisar y corregir antes de continuar** |
+
+> **Si hay continuidad entre G(lado V) y G(lado IN):**
+> 1. Verificar que los 8 jumpers rojos están físicamente retirados (no solo sueltos)
+> 2. Con jumpers retirados y continuidad persistente → hay una pista del PCB que une los dos GND
+>    (algunas variantes del HY-M158 la tienen). En ese caso: cortar la pista o usar otro módulo.
+
 ---
 
 ### FASE B — PRIMER ENCENDIDO
@@ -866,5 +886,4 @@ HY-M158 G(lado V) ────────────────────�
 > `esp32/src/main.cpp`, `Core/Src/safety_system.c`,
 > `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/can_handler.c`.
 > No contiene hardware inventado ni estimado.
-> **Última revisión:** 2026-04-29 (rev 2) — Procedimiento verificación pull-down interno §4.2b/§5.2b,
-> diagrama estrella de masas y reglas obligatorias §12, checklist reestructurado en 3 fases §14.
+> **Última revisión:** 2026-04-29 (rev 3) — Subsección CRITERIO EMI en TVS, punto A8 verificación aislamiento galvánico en FASE A, regla ORO-8 en REGLAS DE ORO HY-M158.
