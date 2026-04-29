@@ -2,7 +2,7 @@
 
 > **Documento de inventario real del material disponible en mano.**  
 > Fecha creación: 2026-04-28  
-> Versión: 1.6 (añadidos M4 módulo relé 2ch 5VDC TONGLING JQC-3FF-S-Z ×1 y M5 módulo relé 2ch 12VDC SONGLE SRD-12VDC-SL-C ×1; corregidos docs VCC/JD-VCC → DC+/DC−; explicado jumper amarillo HIGH/LOW trigger)  
+> Versión: 1.7 (añadido M6 módulo relé retardo 12VDC PCB negra SONGLE SRD-12VDC-SL-C timer 0-120s FUNCTION 1-4 ×1; actualizada §3 LLAVE_CONTACTO con descripción exacta del módulo real: terminales X1 DC+/DC-/trigger, TRM01 NC/COM/NO, selector FUNCTION, potenciómetro)  
 > Fuente: fotografías del material real + verificación contra firmware  
 > Referencia firmware: `Core/Inc/project_config.h`, `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`
 
@@ -22,6 +22,7 @@
 10. [Transistores](#10-transistores)
 11. [Módulos optoacopladores (PC817 / 6N137)](#11-módulos-optoacopladores-pc817--6n137)
 12. [Módulos de relé de 2 canales](#12-módulos-de-relé-de-2-canales)
+13. [Módulo relé con retardo (temporizador)](#13-módulo-relé-con-retardo-temporizador)
 
 ---
 
@@ -51,6 +52,7 @@
 | M3 | **Módulo 6N137 (12 V lado sensor)** | Optoacoplador alta velocidad en placa | 5 uds | ✅ EN MANO |
 | M4 | **Módulo relé 2ch 5VDC** | TONGLING JQC-3FF-S-Z, 10A 250VAC | 1 ud | ✅ EN MANO |
 | M5 | **Módulo relé 2ch 12VDC** | SONGLE SRD-12VDC-SL-C, 10A 250VAC | 1 ud | ✅ EN MANO |
+| M6 | **Módulo relé retardo 12VDC** | PCB negra, SONGLE SRD-12VDC, timer 0-120s, FUNCTION 1-4 | 1 ud | ✅ EN MANO |
 | F1 | Ferrita / bobina CAN | BLM18AG601SN1D / 100 µH | 0 uds | ❌ **FALTA — pedir** |
 
 ---
@@ -995,6 +997,68 @@ En las regletas de **entrada (lado IN)** del módulo:
 | 2026-04-28 | **v1.4:** M1 módulos PC817 8ch ×2 (16 canales totales); M2 módulos 6N137 5V ×5; M3 módulos 6N137 12V ×5; F1 ferrita CAN confirmada NO disponible (única pieza pendiente). Documentado cableado Zener antiparalelo en PC817 (usar Vz ≥ 6.2 V: 1N4735/4736/4737) |
 | 2026-04-28 | **v1.5:** D5 1N4007 ×10 en mano (DO-41, 1A/1000V, redundante con 1N5408 — queda como reserva); D6 1N4148 ×150 EN PEDIDO (caja completa, decisión: protección antiparalelo PC817+6N137 con componente correcto y polivalente, sustituye solución provisional con Zener). Añadido §11.3.1 con recordatorio explícito de soldar 1N4148 antiparalelo al montar los módulos 6N137 (Vr_max LED ≈ 5V, mismo principio que PC817). |
 | 2026-04-29 | **v1.6:** M4 módulo relé 2ch 5VDC TONGLING JQC-3FF-S-Z ×1 en mano; M5 módulo relé 2ch 12VDC SONGLE SRD-12VDC-SL-C ×1 en mano (verificados por foto). Corregida documentación LLAVE_CONTACTO_ENCENDIDO_APAGADO.md: reemplazados pines VCC/JD-VCC (de otro modelo) por DC+/DC− que corresponden a los módulos reales; aclarado que el jumper amarillo S1/S2 (o HIGH/LOW) es selector de nivel de disparo, no un puente de alimentación. |
+| 2026-04-29 | **v1.7:** M6 módulo relé retardo 12VDC PCB negra (SONGLE SRD-12VDC-SL-C + IC temporizador, potenciómetro 0-120s, FUNCTION 1-4) ×1 en mano, verificado por 4 fotos. Actualizada §3 LLAVE_CONTACTO con descripción completa del módulo real. Confirmado que el módulo es autónomo (todos los componentes SMD en placa, no se necesita nada externo). |
+
+---
+
+## 13. Módulo relé con retardo (temporizador)
+
+### 13.1 — M6: Módulo temporizador PCB negra — 12VDC
+
+| Campo | Dato |
+|-------|------|
+| PCB | **Negra** (~70 × 40 mm), 4 agujeros de fijación |
+| Relé | **SONGLE SRD-12VDC-SL-C** (10A/250VAC, bobina 12 V) |
+| Microcontrolador | IC SMD 16 pines (temporizador programable) |
+| Rango tiempo | **0 — 60 — 120 segundos** (potenciómetro azul, escala en PCB) |
+| Modos | **FUNCTION 1 / 2 / 3 / 4** (4 micro-jumpers azules con LED indicador) |
+| Botón | **SET** (confirmar/programar) |
+| Cantidad | **1 unidad** |
+
+### 13.2 Terminales
+
+**Regleta inferior (verde, 3 tornillos) — CONTROL y ALIMENTACIÓN:**
+
+| Borne | Etiqueta PCB | Conectar a |
+|-------|-------------|-----------|
+| 1 | DC+ | 12 V batería **permanente** |
+| 2 | DC− | GND (masa común) |
+| 3 | X1  | ACC llave (12 V cuando llave ON, 0 V cuando OFF) — trigger del temporizador |
+
+**Regleta superior (verde, 3 tornillos) — CONTACTOS del relé:**
+
+| Borne | Etiqueta PCB | Conectar a |
+|-------|-------------|-----------|
+| 1 | NC  | Sin conectar |
+| 2 | COM | 12 V batería permanente |
+| 3 | NO  | Entrada regulador buck 12V→5V (ESP32 + STM32) |
+
+### 13.3 Selector FUNCTION — qué modo usar
+
+| Modo | Comportamiento | Usar |
+|------|---------------|------|
+| **FUNCTION 1** | Delay-ON: relé cierra T seg DESPUÉS de recibir trigger | ❌ |
+| **FUNCTION 2** | Delay-OFF: relé abre T seg DESPUÉS de perder trigger | ✅ **ESTE** |
+| **FUNCTION 3** | Ciclo: alterna ON/OFF en bucle | ❌ |
+| **FUNCTION 4** | Trigger externo con retardo | ❌ |
+
+**FUNCTION 2** es el modo correcto: cuando la llave se apaga (trigger cae a 0V) el relé permanece cerrado durante T segundos y luego abre, cortando la alimentación del ESP32 y del STM32.
+
+### 13.4 Potenciómetro de tiempo
+
+```
+  Rango:    0 → 60 → 120 segundos
+  Ajuste:   30 a 60 segundos (margen holgado para el apagado del firmware)
+  Herramienta: destornillador pequeño de punta plana
+  Sentido:  a la derecha = más tiempo
+```
+
+### 13.5 Componentes externos necesarios
+
+> ✅ **NINGUNO.** El módulo lleva en SMD todos los componentes necesarios:
+> resistencias de polarización, condensadores de filtrado, diodo flyback de la bobina del relé,
+> e IC temporizador. No hay que añadir resistencias, diodos ni ningún componente externo
+> al propio módulo.
 
 ---
 

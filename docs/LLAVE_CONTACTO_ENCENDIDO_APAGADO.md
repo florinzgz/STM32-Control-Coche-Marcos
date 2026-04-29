@@ -105,31 +105,101 @@ conecta a GPIO 40. La lógica es **INVERTIDA** respecto a un divisor resistivo d
 
 ## 3. Módulo Relé con Retardo Hardware (alimentación)
 
-Mantiene la alimentación 5 V del ESP32+STM32 durante N segundos tras girar la llave OFF.
-Funciona 100 % en hardware, sin código.
+### 3.1 Identificación del módulo real
 
-**Ajusta el potenciómetro a 30–60 s** (firmware usa 3 s de retardo interno).
+**PCB negra — Módulo temporizador con SONGLE SRD-12VDC-SL-C**
 
-### Conexionado
+| Campo | Dato |
+|-------|------|
+| PCB | Negra, ~70 × 40 mm con agujeros de fijación en las 4 esquinas |
+| Relé | SONGLE SRD-12VDC-SL-C (10A / 250VAC, bobina 12 V) |
+| Microcontrolador | IC SMD de 16 pines (temporizador programable) |
+| Rango de tiempo | **0 – 120 segundos** (potenciómetro azul) |
+| Modos | FUNCTION 1 / 2 / 3 / 4 (4 micro-jumpers azules) |
+| Inventario | **M6** (1 unidad en mano) |
+
+El módulo lleva **todos los componentes internos ya soldados en SMD**: resistencias, condensadores, diodos flyback, el IC temporizador. No hace falta añadir ningún componente externo para el propio módulo.
+
+### 3.2 Terminales del módulo (lo que ves en las fotos)
+
+**Regleta inferior (4 tornillos) — lado CONTROL y ALIMENTACIÓN:**
 
 ```
-  Batería 12 V permanente ──────► DC+ del módulo retardo
-  GND ──────────────────────────► DC- del módulo retardo
-  ACC llave (12V, llave ON) ────► X1 / Trigger del módulo
-
-  COM del relé ─────────────────► 12 V batería (permanente)
-  NO  del relé ─────────────────► Entrada regulador 5 V → ESP32-S3 + STM32 Nucleo
-  NC  ──────────────────────────► Sin conectar
+  Etiqueta en PCB: X1 · DC- DC+
+  ──────────────────────────────
+  DC+  → 12 V batería permanente  (alimenta todo el módulo)
+  DC−  → GND (masa común)
+  X1   → ACC llave (12 V cuando llave ON, 0 V cuando llave OFF)
+            ← esta es la señal de trigger del temporizador
+  (el 4º borne, si lo hay, es un segundo canal de trigger — dejar sin conectar)
 ```
 
-| Situación | Módulo retardo | GPIO 40 (via PC817) |
+**Regleta superior (3 tornillos) — lado CONTACTOS del relé:**
+
+```
+  Etiqueta en PCB: RV02 / TRM01
+  ──────────────────────────────
+  NC   → Sin conectar
+  COM  → 12 V batería permanente
+  NO   → Entrada del regulador buck 12V→5V (que alimenta ESP32 + STM32)
+```
+
+### 3.3 Selector de modo FUNCTION (4 micro-jumpers azules)
+
+```
+  FUNCTION 1: Delay-ON  — el relé cierra T seg DESPUÉS de recibir trigger
+  FUNCTION 2: Delay-OFF — el relé abre T seg DESPUÉS de perder trigger   ← USAR ESTE
+  FUNCTION 3: Ciclo     — alterna abierto/cerrado en bucle
+  FUNCTION 4: Trigger   — variante de disparo externo
+```
+
+**Para este proyecto → selecciona FUNCTION 2 (Delay-OFF):**
+- Llave ON → trigger 12 V → relé cierra INMEDIATAMENTE → 5V a ESP32+STM32
+- Llave OFF → trigger cae a 0 V → relé SIGUE CERRADO durante T segundos → ESP32 hace su apagado limpio
+- Pasados T segundos → relé abre → corta alimentación
+
+### 3.4 Potenciómetro azul (tiempo de retardo)
+
+```
+  Rango: 0 — 60 — 120 segundos  (escala marcada en el PCB)
+  
+  Ajustar a:  30 – 60 segundos
+  (el firmware usa 3 s internos; con 30-60 s hay margen más que suficiente)
+  
+  Cómo ajustar: con destornillador pequeño. Girar a la derecha = más tiempo.
+```
+
+### 3.5 Botón SET
+
+Sirve para confirmar/guardar la configuración de tiempo en algunos modos.
+En modo FUNCTION 2 con potenciómetro analógico **no hace falta pulsarlo** — el tiempo se lee directamente del potenciómetro.
+
+### 3.6 Cableado completo
+
+```
+  Batería 12 V permanente ─────────► DC+ (regleta inferior)
+  GND vehículo ────────────────────► DC− (regleta inferior)
+  ACC llave (12V, llave ON) ───────► X1  (regleta inferior)
+
+  COM (regleta superior) ──────────► 12 V batería permanente
+  NO  (regleta superior) ──────────► Entrada regulador 5 V → ESP32-S3 + STM32 Nucleo
+  NC  (regleta superior) ──────────► Sin conectar
+```
+
+### 3.7 Tabla de estados
+
+| Situación | Módulo retardo | GPIO 40 (vía PC817) |
 |-----------|---------------|---------------------|
 | Llave ON | Trigger 12 V → relé cierra → 5V llega a ESP32+STM32 | LOW → RUNNING |
-| Llave OFF | Trigger 0 V → cuenta atrás T seg | HIGH → SHUTTING_DOWN |
+| Llave OFF | Trigger 0 V → cuenta atrás T seg (relé sigue cerrado) | HIGH → SHUTTING_DOWN |
 | Durante T seg | Relé sigue cerrado | ESP32 despedida + guarda flash |
 | Pasados T seg | Relé abre → alimentación cortada | ESP32 se apaga |
 
 > **GPIO 41 ESP32 (POWER_HOLD):** uso interno firmware. **No conectar al módulo retardo.**
+>
+> ✅ **El módulo es totalmente autónomo.** Todo lo que necesita (resistencias, diodos flyback,
+> condensadores de filtrado, IC temporizador) ya viene soldado en el PCB negro. No se añade
+> ningún componente externo al propio módulo.
 
 ---
 
