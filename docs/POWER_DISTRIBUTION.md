@@ -37,7 +37,6 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
         │
         ▼
  ┌──────────────┐  PC10
- │  RELAY_MAIN  │──────── STM32 (vía módulo 4-ch opto relé SRD-12VDC-SL-C)
  └──────┬───────┘
         │
    ┌────┴─────────────────────────────────────────┐
@@ -182,11 +181,12 @@ Todas las masas del sistema **deben** converger en un único punto de conexión 
 
 | Función          | Pin STM32 | Puerto | Carga controlada                | Fusible |
 |------------------|-----------|--------|---------------------------------|---------|
-| `RELAY_MAIN`     | PC10      | GPIOC  | Potencia general 24 V           | 60 A    |
 | `RELAY_TRAC`     | PC11      | GPIOC  | Motores de tracción 24 V        | 50 A    |
 | `RELAY_DIR`      | PC12      | GPIOC  | Motor de dirección 12 V         | 20 A    |
 | `RELAY_LED`      | PB10      | GPIOB  | Tira WS2812B frontal (5 V)      | —       |
 | `RELAY_LED_REAR` | PB11      | GPIOB  | Tira WS2812B trasera (5 V)      | —       |
+
+> **Nota:** **PC10 está DISPONIBLE (libre).** No hay relé MAIN / Power-Hold en hardware. PC10 se configura como `GPIO_MODE_INPUT` con `GPIO_PULLDOWN` (estado seguro determinista). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
 
 Los relés de potencia se controlan en **dos etapas**:
 
@@ -204,7 +204,6 @@ Esquema de la cadena de control:
 ```
 STM32 GPIO (3.3V) ──► Módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V)
                           │
-                          ├── CH1 contacto → Bobina relé potencia MAIN (12V) → conmuta 24V general
                           ├── CH2 contacto → Bobina relé potencia TRAC (12V) → conmuta 24V tracción
                           └── CH3 contacto → Bobina relé potencia DIR  (12V) → conmuta 12V dirección
 ```
@@ -217,12 +216,11 @@ Implementada en `Core/Src/safety_system.c` como máquina de estados no bloqueant
  t=0 ms        t=50 ms           t=70 ms
    │              │                 │
    ▼              ▼                 ▼
- RELAY_MAIN ON → espera 50 ms → RELAY_TRAC ON → espera 20 ms → RELAY_DIR ON
- (PC10 SET)      (settle)       (PC11 SET)      (settle)       (PC12 SET)
+  RELAY_TRAC ON → espera 50 ms → RELAY_DIR ON
+  (PC11 SET)      (settle)       (PC12 SET)
 ```
 
 ```c
-#define RELAY_MAIN_SETTLE_MS     50   /* tiempo de asentamiento corriente inrush */
 #define RELAY_TRACTION_SETTLE_MS 20   /* retardo supresión de arco              */
 ```
 
@@ -231,8 +229,8 @@ Implementada en `Core/Src/safety_system.c` como máquina de estados no bloqueant
 Orden inverso, inmediato (sin retardos):
 
 ```
-RELAY_DIR OFF → RELAY_TRAC OFF → RELAY_MAIN OFF
-  (PC12)          (PC11)           (PC10)
+RELAY_DIR OFF → RELAY_TRAC OFF
+  (PC12)          (PC11)
 ```
 
 ---
@@ -265,13 +263,13 @@ STM32 I²C1
 | 1     | INA226_FR     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 FR (entre salida RELAY_TRAC y B+)     |
 | 2     | INA226_RL     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 RL (entre salida RELAY_TRAC y B+)     |
 | 3     | INA226_RR     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 RR (entre salida RELAY_TRAC y B+)     |
-| 4     | INA226_MAIN   | 0.75 mΩ | 100 A  | **ANTES** del RELAY_MAIN (entre batería + y entrada relé)   |
+| 4     | INA226_MAIN   | 0.75 mΩ | 100 A  | **ANTES** del RELAY_TRAC (mide corriente total batería 24V)   |
 | 5     | INA226_STEER  | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 DIR (entre salida RELAY_DIR y B+)     |
 
-> **Crítico — Canal 4:** El sensor de batería está colocado **antes** del relé principal. Esto permite que `Voltage_GetBus(INA226_CHANNEL_BATTERY)` lea la tensión de la batería incluso con el relé abierto. Es esencial para:
+> **Crítico — Canal 4:** El sensor de batería está colocado **antes del RELAY_TRAC**. Esto permite que `Voltage_GetBus(INA226_CHANNEL_BATTERY)` lea la tensión de la batería incluso con los relés abiertos. Es esencial para:
 > - Validación de batería en el arranque (boot validation), antes de cerrar relés.
 > - Detección de fallo de batería durante operación.
-> - Lectura de tensión en modo LIMP_HOME si el relé se abre.
+> - Lectura de tensión en modo LIMP_HOME si los relés se abren.
 
 ### Diagrama de ubicación — Cadena de potencia de tracción
 
@@ -281,15 +279,11 @@ STM32 I²C1
        ▼
   ┌──────────┐
   │ INA226   │ ← Canal 4 (0.75 mΩ, 100 A) — mide tensión y corriente total
-  │ ch4 MAIN │
+  │ ch4      │
   └────┬─────┘
        │
-  ┌────┴─────┐
-  │RELAY_MAIN│ (PC10)
-  └────┬─────┘
-       │
-  ┌────┴─────┐
-  │RELAY_TRAC│ (PC11)
+  ┌────┴──────┐
+  │RELAY_TRAC │ (PC11)
   └────┬─────┘
        │
   ┌────┼────────┬────────┬────────┐
@@ -314,7 +308,7 @@ STM32 I²C1
 | Parámetro                | Valor  | Acción                                |
 |--------------------------|--------|---------------------------------------|
 | Corriente máx. por motor | 25 A   | Sobrecorriente → DEGRADED o SAFE     |
-| Corriente máx. total bus | 50 A   | Fusible 60 A en RELAY_MAIN (margen 20 % sobre límite SW) |
+| Corriente máx. total bus | 50 A   | Fusible 60 A en línea 24V (margen 20 % sobre límite SW) |
 
 ---
 
@@ -366,14 +360,12 @@ STM32 I²C1
 | Tensión baja (< 20 V)        | INA226 ch4 lectura continua            | Estado DEGRADED, potencia reducida     |
 | Tensión crítica (< 18 V)     | INA226 ch4 lectura continua            | Estado SAFE, todos los actuadores OFF  |
 | Desconexión de batería        | INA226 ch4 lee 0 V                    | Estado SAFE inmediato                  |
-| Cortocircuito interno batería | Fusible 60 A (RELAY_MAIN) se funde    | Circuito abierto, sistema sin potencia |
+| Cortocircuito interno batería | Fusible 60 A (línea 24V) se funde    | Circuito abierto, sistema sin potencia |
 
 ### Fallo de relé
 
 | Fallo                         | Detección                              | Respuesta del sistema                  |
 |-------------------------------|----------------------------------------|----------------------------------------|
-| RELAY_MAIN no cierra          | INA226 ch0-ch3 leen 0 A con PWM activo | Detección en boot validation           |
-| RELAY_MAIN queda soldado      | Corriente no cae a 0 tras Relay_PowerDown | Requiere desconexión manual de batería |
 | RELAY_TRAC no cierra          | INA226 ch0-ch3 sin corriente           | Motores de tracción inoperativos       |
 | RELAY_DIR no cierra           | INA226 ch5 sin corriente               | Dirección inoperativa → SAFE           |
 | Bobina de relé en corto       | Módulo opto relé SRD-12VDC limita corriente | Fusible de bobina protege STM32        |
@@ -406,7 +398,7 @@ STM32 I²C1
 
 | Fusible          | Consecuencia al fundirse                                           |
 |------------------|--------------------------------------------------------------------|
-| 60 A (RELAY_MAIN)| Sistema completo sin potencia de tracción; INA226 ch4 lee 0 A     |
+| 60 A (línea 24V)| Sistema completo sin potencia de tracción; INA226 ch4 lee 0 A     |
 | 50 A (RELAY_TRAC)| Motores de tracción sin alimentación; dirección sigue operativa    |
 | 20 A (RELAY_DIR) | Dirección sin alimentación; tracción sigue operativa → SAFE       |
 

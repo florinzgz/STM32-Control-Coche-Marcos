@@ -12,7 +12,6 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
 - **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
 - **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
-- **1.3 clarification** (2026-04-23): Documented that the 24 V battery hardware has no independent MAIN/Power-Hold contactor — the MAIN bit in `relay_status` (byte 5 bit 0) and in the service override mask (SERVICE_CMD 0xE0 byte 1 bit 1) is **reserved and always 0**. The 3-bit wire layout is preserved: bit 0 = reserved (legacy MAIN, always 0), bit 1 = TRAC, bit 2 = DIR. No frame size, no ID change, no protocol bump — fully backward-compatible with 1.3 consumers. STM32 firmware internally drops MAIN logic: `PIN_RELAY_MAIN` and the 3-stage power-up sequencer were removed; relay power-up is now TRAC → DIR with a 50 ms settle; `MODULE_RELAY_MAIN` renamed to `MODULE_RELAY_TRAC` (Service Mode module ID 3 preserved).
 
 ---
 

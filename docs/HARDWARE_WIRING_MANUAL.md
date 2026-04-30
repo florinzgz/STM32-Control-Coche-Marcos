@@ -137,7 +137,7 @@ El STM32G474RE en formato Nucleo-64 se alimenta por:
 ### Protecciones
 
 > **NO DEDUCIBLE SOLO DESDE EL CÓDIGO**: El firmware no define fusibles ni protecciones
-> eléctricas explícitas. Los relés de potencia (`PIN_RELAY_MAIN`, `PIN_RELAY_TRAC`,
+> eléctricas explícitas. Los relés de potencia (`PIN_RELAY_TRAC`,
 > `PIN_RELAY_DIR`) actúan como seccionadores controlados por software, pero no sustituyen
 > a fusibles físicos. Se recomienda instalar fusibles en las líneas de 24 V y 12 V
 > según el diseño eléctrico del chasis.
@@ -609,14 +609,14 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 
 | Relé | Pin STM32 | Puerto | Función | Tensión conmutada |
 |------|-----------|--------|---------|-------------------|
-| **MAIN** (Principal) | **PC10** | GPIOC | Alimentación general del sistema de potencia | NO DEDUCIBLE SOLO DESDE EL CÓDIGO |
 | **TRAC** (Tracción) | **PC11** | GPIOC | Alimentación de los drivers de tracción (24 V) | 24 V |
 | **DIR** (Dirección) | **PC12** | GPIOC | Alimentación del driver de dirección (12 V) | 12 V |
 | **LED** (Frontal) | **PB10** | GPIOB | Alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V |
 | **LED_REAR** (Trasero) | **PB11** | GPIOB | Alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V |
 
+> **Nota:** **PC10 está DISPONIBLE (libre)**. No existe relé MAIN / Power-Hold en hardware. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro determinista).
+
 Definidos en `project_config.h`:
-- `PIN_RELAY_MAIN` = GPIO_PIN_10 (PC10)
 - `PIN_RELAY_TRAC` = GPIO_PIN_11 (PC11)
 - `PIN_RELAY_DIR`  = GPIO_PIN_12 (PC12)
 - `PIN_RELAY_LED`  = GPIO_PIN_10 (PB10)
@@ -636,11 +636,9 @@ Definidos en `project_config.h`:
 Definido en `safety_system.c` (función `Relay_PowerUp`):
 
 ```
-1. PC10 → HIGH  (RELAY_MAIN ON)
+1. PC11 → HIGH  (RELAY_TRAC ON)
 2. Esperar 50 ms                    ← settling de corriente inrush
-3. PC11 → HIGH  (RELAY_TRAC ON)
-4. Esperar 20 ms                    ← supresión de arco del contactor
-5. PC12 → HIGH  (RELAY_DIR ON)
+3. PC12 → HIGH  (RELAY_DIR ON)
 ```
 
 ### Orden de desactivación (Power-Down)
@@ -650,7 +648,6 @@ Definido en `safety_system.c` (función `Relay_PowerDown`):
 ```
 1. PC12 → LOW   (RELAY_DIR OFF)
 2. PC11 → LOW   (RELAY_TRAC OFF)
-3. PC10 → LOW   (RELAY_MAIN OFF)
 ```
 
 Orden inverso, sin retardos.
@@ -709,7 +706,7 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 29 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
 | 30 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
 | 31 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
-| 32 | **PC10** | GPIOC | Relé MAIN | Relé principal | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_MAIN` |
+| 32 | **PC10** | GPIOC | (Disponible) | *(no conectado, reservado)* | GPIO Input + Pull-down | — | — |
 | 33 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
 | 34 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
 

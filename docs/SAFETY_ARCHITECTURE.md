@@ -194,20 +194,21 @@ motores. Se activan/desactivan por software o por reset del MCU.
 
 | Pin  | Función | Tensión controlada |
 |------|---------|--------------------|
-| PC10 | RELAY_MAIN | Potencia general |
 | PC11 | RELAY_TRAC | Tracción 24 V |
 | PC12 | RELAY_DIR  | Dirección 12 V |
 | PB10 | RELAY_LED_L | Tiras LED 5 V (izquierda) |
 | PB11 | RELAY_LED_R | Tiras LED 5 V (derecha) |
 
+> **PC10 está DISPONIBLE** — Anteriormente RELAY_MAIN, ahora sin uso (simplificado a 2 relés de potencia)
+
 ### Secuencia de activación
 
 ```
-RELAY_MAIN ON → esperar 50 ms → RELAY_TRAC ON → esperar 20 ms → RELAY_DIR ON
+RELAY_TRAC ON → esperar 50 ms → RELAY_DIR ON
 ```
 
-La secuencia garantiza que la alimentación general esté estable antes de energizar
-subsistemas de potencia.
+La secuencia garantiza que la alimentación de tracción esté estable antes de energizar
+el sistema de dirección.
 
 ### ⚙️ Qué hace
 
@@ -231,7 +232,7 @@ señal PWM. Esto proporciona un corte **galvánico** (físico).
 
 ### 🔄 Cómo se recupera
 
-El firmware debe ejecutar la secuencia de activación completa (MAIN → TRAC → DIR) tras
+El firmware debe ejecutar la secuencia de activación completa (TRAC → DIR) tras
 verificar que el sistema está en condiciones seguras (estado STANDBY o superior).
 
 ### 💡 Por qué se diseñó así

@@ -27,7 +27,7 @@
 │                                                                       │
 │  ┌──────────────────┐         ┌──────────────────────────────────┐  │
 │  │   BATERÍA 24V    │────────►│        RELÉS DE POTENCIA         │  │
-│  │   (Principal)    │         │  ├─ RELAY_MAIN (Power-Hold)      │  │
+│  │   (Principal)    │         │    │
 │  └──────────────────┘         │  ├─ RELAY_TRAC (Tracción)        │  │
 │                                │  └─ RELAY_DIR (Dirección)        │  │
 │                                └──────────┬───────────────────────┘  │
@@ -376,7 +376,6 @@ STM32 ─── 120Ω ─── [CAN_H/CAN_L] ─── 120Ω ─── ESP32
 
 | Relé | Tensión Bobina | Corriente Contacto | Función |
 |------|----------------|-------------------|---------|
-| **RELAY_MAIN** | 5V | 30A | Power-hold (mantener sistema ON) |
 | **RELAY_TRAC** | 5V | 50A | Alimentación motores tracción |
 | **RELAY_DIR** | 5V | 20A | Alimentación motor dirección |
 

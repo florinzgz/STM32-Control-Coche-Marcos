@@ -245,7 +245,6 @@ void Error_Handler(void) {
     TIM3->CCR1  = 0U;               // RPWM_STEER → 0
     TIM3->CCR2  = 0U;               // LPWM_STEER → 0
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
-                  | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     while (1) { }
 }

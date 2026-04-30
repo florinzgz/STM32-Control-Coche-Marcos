@@ -112,7 +112,7 @@ INA226 shunt connections:
 
 ```
                     Shunt 0.75 mΩ
-Batería 24V+ ──────┤ IN+ ├──┤ IN- ├────→ al relé RELAY_MAIN
+Batería 24V+ ──────┤ IN+ ├──┤ IN- ├────→ al relé RELAY_TRAC
                     │  INA226  │
                     │ BUS+ BUS-│
                     │   │    │ │
@@ -487,7 +487,8 @@ Min: 0.3V × 0.404 = 0.12V
 **Objetivo:** Verificar que los relés conmutan antes de conectar motores.
 
 **Referencia firmware:**
-- `project_config.h:116-118` — `PIN_RELAY_MAIN` = PC10, `PIN_RELAY_TRAC` = PC11, `PIN_RELAY_DIR` = PC12
+- `project_config.h:116-118` — `PIN_RELAY_TRAC` = PC11, `PIN_RELAY_DIR` = PC12
+- PC10 está DISPONIBLE (sin uso)
 
 ### Materiales
 
@@ -499,19 +500,19 @@ Min: 0.3V × 0.404 = 0.12V
 ### Conexiones
 
 ```
-PC10 (RELAY_MAIN) ──→ Módulo relé #1 IN (relé principal 24V)
-PC11 (RELAY_TRAC) ──→ Módulo relé #2 IN (relé tracción 24V)
-PC12 (RELAY_DIR)  ──→ Módulo relé #3 IN (relé dirección 12V)
+PC11 (RELAY_TRAC) ──→ Módulo relé #1 IN (relé tracción 24V)
+PC12 (RELAY_DIR)  ──→ Módulo relé #2 IN (relé dirección 12V)
 
 Todos los módulos:
   VCC → 5V externo (NO del STM32 — los relés consumen 70mA cada uno)
   GND → GND común con STM32
 ```
 
+> **PC10 está DISPONIBLE** — no se usa (anteriormente RELAY_MAIN)
+
 **Secuencia del firmware:**
-1. RELAY_MAIN ON → espera 500ms
-2. RELAY_DIR ON → espera 200ms
-3. RELAY_TRAC ON → sistema listo
+1. RELAY_TRAC ON → espera 50ms
+2. RELAY_DIR ON → sistema listo
 
 ### Verificación
 

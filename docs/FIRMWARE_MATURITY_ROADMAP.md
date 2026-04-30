@@ -599,7 +599,7 @@ With all critical items addressed, the safety subsystem has achieved ADVANCED ma
 **Risk analysis:**
 - Relay activation order: unchanged — Main → Traction → Direction
 - Relay deactivation: unchanged — Direction → Traction → Main (immediate)
-- Timing preserved: RELAY_MAIN_SETTLE_MS = 50 ms, RELAY_TRACTION_SETTLE_MS = 20 ms
+- Timing preserved: RELAY_TRAC_SETTLE_MS = 50 ms
 - SAFE/ERROR states: Relay_PowerDown() immediately cancels any in-progress sequence
 - Safety checks during power-up: now active (previously blocked for ~70 ms)
 - Watchdog safety: IWDG refresh continues during relay sequence (no blocking)
@@ -776,9 +776,8 @@ verification checklist required by the safety audit process.
 **Regression verification checklist:**
 - [x] Relay activation order preserved: Main → Traction → Direction
 - [x] Relay deactivation order preserved: Direction → Traction → Main
-- [x] `RELAY_MAIN_SETTLE_MS` = 50 ms — unchanged
+- [x] `RELAY_TRAC_SETTLE_MS` = 50 ms — unchanged
 - [x] `RELAY_TRACTION_SETTLE_MS` = 20 ms — unchanged
-- [x] GPIO pins: `PIN_RELAY_MAIN`, `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` on GPIOC — unchanged
 - [x] `Safety_SetState()` logic: not modified
 - [x] CAN contract: no messages added, modified, or removed
 - [x] Watchdog timing: IWDG 500 ms timeout — not modified

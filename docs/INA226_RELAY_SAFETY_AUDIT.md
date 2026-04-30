@@ -1,6 +1,6 @@
 # INA226 & Relay Safety Audit Report
 
-> ⚠ **CAN rev 1.3 compatible (2026-04-23 clarification):** The 24 V battery has only the **traction** power relay (PC11). There is no independent MAIN / Power-Hold contactor. The direction relay (PC12) is on the 12 V bus. PC10 is reserved. The relay-status byte in heartbeat 0x001 byte 5 keeps the rev 1.3 3-bit wire layout: **bit 0 = reserved (legacy MAIN, always 0)**, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE — same size, same ID, no protocol bump. `MODULE_RELAY_MAIN` has been renamed to `MODULE_RELAY_TRAC` (module ID 3 preserved). See `CAN_CONTRACT_FINAL.md`.
+> ⚠ **CAN rev 1.3 compatible (2026-04-23 clarification):** The 24 V battery has only the **traction** power relay (PC11). There is no independent MAIN / Power-Hold contactor. The direction relay (PC12) is on the 12 V bus. PC10 (disponible/libre)` has been renamed to `MODULE_RELAY_TRAC` (module ID 3 preserved). See `CAN_CONTRACT_FINAL.md`.
 
 **Date:** 2026-03-21
 **MCU:** STM32G474RE (Cortex-M4, 170 MHz)
@@ -114,7 +114,7 @@ The code relied on power-on defaults (0x4127 = 1 sample averaging).
 
 | Pin   | Port | Function         | Mode           | Default |
 |-------|------|------------------|----------------|---------|
-| PC10  | GPIOC| PIN_RELAY_MAIN   | Push-pull, low | OFF ✅  |
+| PC10 (disponible/libre)   | Push-pull, low | OFF ✅  |
 | PC11  | GPIOC| PIN_RELAY_TRAC   | Push-pull, low | OFF ✅  |
 | PC12  | GPIOC| PIN_RELAY_DIR    | Push-pull, low | OFF ✅  |
 
@@ -178,7 +178,6 @@ LED strip power could remain energised after a CPU fault.
 | I2C1 SDA         | PB7             | ✅ main.h:115, .ioc |
 | TCA9548A addr    | 0x70            | ✅ main.h:138       |
 | INA226 addr      | 0x40            | ✅ main.h:139       |
-| RELAY_MAIN       | PC10            | ✅ main.h:84        |
 | RELAY_TRAC       | PC11            | ✅ main.h:85        |
 | RELAY_DIR        | PC12            | ✅ main.h:86        |
 | RELAY_LED        | PB10            | ✅ main.h:94        |
@@ -205,7 +204,6 @@ LED strip power could remain energised after a CPU fault.
 
 | Code Name                  | Documentation Name    | Match |
 |----------------------------|-----------------------|-------|
-| PIN_RELAY_MAIN             | Main power relay      | ✅    |
 | PIN_RELAY_TRAC             | Traction relay        | ✅    |
 | PIN_RELAY_DIR              | Direction relay       | ✅    |
 | PIN_RELAY_LED              | Front LED strip relay | ✅    |

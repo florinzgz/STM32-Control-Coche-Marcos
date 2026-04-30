@@ -340,7 +340,7 @@ The STM32G474RE operates at 3.3V logic. The BTS7960 datasheet specifies:
 
 - **GPIO:** EN_FL (PC5) and EN_RR (PC13) initialised as OUTPUT_PP → default LOW (disabled)
 - **Timers:** TIM1/TIM3/TIM8 configured with `Pulse = 0` → all CCR registers start at 0
-- **Relays:** RELAY_MAIN/TRAC/DIR initialised LOW → motor power disconnected
+- **Relays:** RELAY_TRAC/DIR initialised LOW → motor power disconnected
 
 #### Layer 2: Software Initialization
 

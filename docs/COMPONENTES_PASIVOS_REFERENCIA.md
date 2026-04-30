@@ -145,7 +145,7 @@ Esta red RC se coloca **en paralelo con los contactos de potencia** del relé (N
 
 | # | Relé | Ubicación | Función |
 |---|------|-----------|---------|
-| 1 | RELAY_MAIN (Power-Hold) | En paralelo con los contactos COM–NO del relé | Al abrir el relé, la inductancia del cableado genera un arco. El snubber RC absorbe la energía del spike (que puede llegar a 300–500V en 24V inductive) protegiendo los contactos y eliminando la EMI que afecta al STM32 y al bus CAN |
+| 1 | RELAY_TRAC (Tracción) | En paralelo con los contactos COM–NO del relé | Al abrir el relé, la inductancia del cableado genera un arco. El snubber RC absorbe la energía del spike (que puede llegar a 300–500V en 24V inductive) protegiendo los contactos y eliminando la EMI que afecta al STM32 y al bus CAN |
 | 2 | RELAY_TRAC (Tracción) | Ídem | Ídem; este relé conmuta la mayor corriente (50A), por lo que el arco es más severo |
 | 3 | RELAY_DIR (Dirección) | Ídem | Ídem |
 | 4 | Relé extra #4 | Ídem | Ídem |
@@ -294,7 +294,7 @@ BATERÍA 24V
     ├─── BTS7960 DIR ─ [SMBJ30A TVS] ── [470µF] ── [100nF×2]
     │         └──── Motor DIR ──[1.5mΩ shunt]── [100nF×2] ── [SB560]
     │
-    ├─── RELAY_MAIN ─[1N4007 flyback]─[2N2222]─[1kΩ]─ GPIO STM32
+    ├─── RELAY_TRAC ─[1N4007 flyback]─[2N2222]─[1kΩ]─ GPIO STM32
     │         └──── Snubber RC: [100nF/250V + 100Ω] en paralelo con contactos
     │
     ├─── RELAY_TRAC ─[1N4007]─[2N2222]─[1kΩ]─ GPIO STM32

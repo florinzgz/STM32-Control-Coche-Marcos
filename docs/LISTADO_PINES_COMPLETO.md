@@ -287,18 +287,18 @@
 
 | Pin LQFP | GPIO | Señal | Conecta a | Componentes externos |
 |----------|------|-------|-----------|----------------------|
-| 51 | PC10 | RELAY_MAIN | Relé principal (alimentación general, 50 A) | Módulo 4-ch opto relé SRD-12VDC-SL-C (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
-| 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Módulo 4-ch opto relé SRD-12VDC-SL-C (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
-| 53 | PC12 | RELAY_DIR | Relé dirección (alimentación dirección, 15 A) | Módulo 4-ch opto relé SRD-12VDC-SL-C (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+| 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+| 53 | PC12 | RELAY_DIR | Relé dirección (alimentación dirección, 15 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+
+> **PC10 está DISPONIBLE (INPUT_PULLDOWN, sin conexión)** — No se usa (anteriormente era RELAY_MAIN, simplificado a 2 relés)
 
 **Arquitectura de dos etapas por cada relé de potencia:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Módulo 4-ch opto relé | SRD-12VDC-SL-C (12V) | Entre GPIO STM32 y bobina del relé de potencia | Aislamiento galvánico + conmutación 12V para bobina |
-| ~~Resistencia LED opto~~ | ~~330 Ω ¼W~~ | — | No necesaria: el módulo 4-ch integra las resistencias |
+| Módulo 2-ch opto relé | Optoacoplador con relé | Entre GPIO STM32 y bobina del relé de potencia | Aislamiento galvánico + conmutación 12V para bobina |
 | Diodo volante (flyback) | 1N4007 | Antiparalelo a la bobina del **relé de potencia** (etapa 2) | Protección contra picos inductivos al cortar la bobina |
-| Fusible | 60 A / 50 A / 20 A | En serie con contacto del relé | Protección de sobrecorriente |
+| Fusible | 50 A / 20 A | En serie con contacto del relé | Protección de sobrecorriente |
 
 ---
 
@@ -564,7 +564,7 @@
 | PC7 | LPWM motor RL | TIM8_CH2 | Salida PWM |
 | PC8 | RPWM motor RR | TIM8_CH3 | Salida PWM |
 | PC9 | LPWM motor RR | TIM8_CH4 | Salida PWM |
-| PC10 | Relé principal | GPIO | Salida |
+| PC10 | **DISPONIBLE** | — | **Sin usar** (anteriormente RELAY_MAIN) |
 | PC11 | Relé tracción | GPIO | Salida |
 | PC12 | Relé dirección | GPIO | Salida |
 | PC13 | Enable motor RR | GPIO | Salida |

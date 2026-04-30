@@ -496,7 +496,7 @@ void Mode_Normal(void) {
     Motor_Enable(&steering.motor, 1);
     
     // Habilitar relés
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET); // RELAY_MAIN
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET); // RELAY_TRAC
     HAL_Delay(100);
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET); // RELAY_TRAC
     HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);  // RELAY_DIR
@@ -531,7 +531,7 @@ void Mode_Safe(void) {
     // 4. Abrir relés (cortar potencia)
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET); // RELAY_TRAC
     HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_RESET);  // RELAY_DIR
-    // RELAY_MAIN permanece ON (watchdog externo lo apaga si STM32 falla)
+    // RELAY_TRAC permanece ON (watchdog externo lo apaga si STM32 falla)
 }
 ```
 

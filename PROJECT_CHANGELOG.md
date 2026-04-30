@@ -1,5 +1,20 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-04-30
+
+### Fixed (Documentation Cleanup)
+
+- **PC10 liberated completely:** Removed all RELAY_MAIN references from documentation. The MAIN/Power-Hold contactor **never existed in hardware** — only RELAY_TRAC (PC11, 24V) and RELAY_DIR (PC12, 12V) are real. PC10 is now documented as `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (deterministic safe state).
+  
+  **Updated files:**
+  - `docs/POWER_DISTRIBUTION.md`: Removed RELAY_MAIN from relay table, power-up/power-down sequences, INA226 channel map, failure mode analysis, and diagrams. Added clarification note that PC10 is AVAILABLE (free GPIO, not connected).
+  - `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`: Removed RELAY_MAIN from power flow diagram, relay map, startup sequence, and fuse tables. Added matching clarification note.
+  - Other docs: Updated all references to reflect 2-relay architecture (TRAC→DIR, ~50ms settle).
+  
+  **No functional change:** Relay sequencer was already TRAC→DIR only (no MAIN step); `Relay_PowerDown()` already touched only TRAC+DIR pins. CAN heartbeat byte 5 layout unchanged (bit 0 = reserved legacy MAIN slot, always 0; bit 1 = TRAC; bit 2 = DIR; bit 7 = SEQ_COMPLETE) — backward-compatible with rev 1.3.
+
+---
+
 ## 1. Visión del Proyecto
 
 ### Objetivo General

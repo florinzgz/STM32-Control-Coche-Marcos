@@ -836,8 +836,7 @@ seguridad, CAN y watchdog continúen durante la secuencia de encendido.
 
 ### Garantías de Temporización
 
-- **Main → Traction:** ≥ 50 ms (RELAY_MAIN_SETTLE_MS)
-- **Traction → Direction:** ≥ 20 ms (RELAY_TRACTION_SETTLE_MS)
+- **Traction → Direction:** ≥ 50 ms (RELAY_TRAC_SETTLE_MS)
 - Resolución de temporización: 10 ms (período del bucle de seguridad)
 - Peor caso de latencia adicional: +10 ms por etapa (resolución del tick)
 
@@ -897,11 +896,10 @@ the watchdog, and processes CAN traffic.
 
 | Aspecto | Verificación |
 |---------|-------------|
-| Orden de activación | Main → Traction → Direction — sin cambios |
-| Orden de desactivación | Direction → Traction → Main — sin cambios |
-| Temporización Main → Traction | ≥ 50 ms (`RELAY_MAIN_SETTLE_MS`) — preservado |
-| Temporización Traction → Dir | ≥ 20 ms (`RELAY_TRACTION_SETTLE_MS`) — preservado |
-| Pines GPIO utilizados | `PIN_RELAY_MAIN`, `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` en GPIOC — sin cambios |
+| Orden de activación | Traction → Direction |
+| Orden de desactivación | Direction → Traction |
+| Temporización Traction → Dir | ≥ 50 ms (`RELAY_TRAC_SETTLE_MS`) — 2 etapas solamente |
+| Pines GPIO utilizados | `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` en GPIOC; PC10 disponible |
 | Contrato CAN | Ningún mensaje añadido, modificado o eliminado |
 | Máquina de estados del sistema | `Safety_SetState()` no modificada |
 | Watchdog durante power-up | IWDG se refresca normalmente (no bloqueado) |

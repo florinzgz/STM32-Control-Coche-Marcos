@@ -142,11 +142,11 @@ Alternativa con mejor aislamiento: optoacoplador **6N137** en cada señal (A, B,
 
 ## 7. Secuencia de arranque
 
-El firmware ya gestiona la secuencia con `RELAY_MAIN_SETTLE_MS = 50 ms`:
+El firmware ya gestiona la secuencia con `RELAY_TRAC_SETTLE_MS = 50 ms`:
 
 1. Al conectar batería → los Bucks arrancan; los condensadores de entrada absorben el inrush
 2. STM32 y ESP32-S3 arrancan (~50-100 ms)
-3. Firmware espera 50 ms antes de activar RELAY_MAIN
+3. Firmware espera 50 ms antes de activar RELAY_TRAC
 4. Activa RELAY_TRAC → tracción disponible
 5. Activa RELAY_DIR → dirección disponible
 6. Activa RELAY_LED (PB10) y RELAY_LED_REAR (PB11) → LEDs disponibles
@@ -161,4 +161,4 @@ Los condensadores de salida del Buck 2 (1000 µF × 2) absorben el inrush de las
 - `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md` — BOM completo y esquemas detallados
 - `docs/ENCODER_CURRENT_STATE.md` — Estado del encoder E6B2-CWZ6C
 - `Core/Src/safety_system.c` — Umbrales de batería y lógica de seguridad
-- `Core/Inc/project_config.h` — `RELAY_MAIN_SETTLE_MS = 50`
+- `Core/Inc/project_config.h` — `RELAY_TRAC_SETTLE_MS = 50`

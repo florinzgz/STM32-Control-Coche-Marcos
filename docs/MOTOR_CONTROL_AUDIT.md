@@ -235,7 +235,6 @@ TIM8->BDTR &= ~TIM_BDTR_MOE;   /* Disable TIM8: RPWM_RL, LPWM_RL, RPWM_RR, LPWM_
 TIM3->CCR1  = 0U;               /* RPWM_STEER → 0 */
 TIM3->CCR2  = 0U;               /* LPWM_STEER → 0 */
 GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_RR
-              | PIN_RELAY_MAIN | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
 ```
 
 | Señal            | Acción                                          |

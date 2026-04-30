@@ -571,18 +571,19 @@ Ver especificación técnica completa: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md 
 
 | Cable | De (STM32) | A (Módulo relé) | Función |
 |-------|-----------|-----------------|---------|
-| 32 | **PC10** | IN (RELAY_MAIN) | Relé principal: alimentación general |
-| 33 | **PC11** | IN (RELAY_TRAC) | Relé tracción: alimentación motores 24V |
-| 34 | **PC12** | IN (RELAY_DIR) | Relé dirección: alimentación motor 12V |
+| 32 | **PC11** | IN (RELAY_TRAC) | Relé tracción: alimentación motores 24V |
+| 33 | **PC12** | IN (RELAY_DIR) | Relé dirección: alimentación motor 12V |
+
+> **PC10 está DISPONIBLE y sin usar** (reservado en rev anterior, ahora libre para expansión)
 
 **Secuencia de encendido (automática en firmware):**
 ```
-Boot → PC10=HIGH (MAIN on) → espera 50ms → PC11=HIGH (TRAC on) → espera 20ms → PC12=HIGH (DIR on)
+Boot → PC11=HIGH (TRAC on) → espera 50ms → PC12=HIGH (DIR on)
 ```
 
 **Apagado (cualquier fallo → SAFE/ERROR):**
 ```
-PC12=LOW → PC11=LOW → PC10=LOW (todo OFF inmediato)
+PC12=LOW → PC11=LOW (todo OFF inmediato)
 ```
 
 ### Circuito de protección del driver de relé (por cada relé)
@@ -950,10 +951,9 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 31 | **PC7** | GPIOC | AF4 | TIM8_CH2 | BTS7960 RL → **LPWM** | PWM 20 kHz — atrás |
 | 32 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
 | 33 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
-| 34 | **PC10** | GPIOC | Output | GPIO | Módulo relé MAIN | HIGH = ON (vía optoacoplador) |
-| 35 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
-| 36 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
-| 37 | **PC13** | GPIOC | — | **RESERVADO** | USER button B1 (on-board) | No usar como salida. Conectado al botón B1 del NUCLEO-G474RE vía SB17. EN_RR reasignado a PC2 |
+| 33 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
+| 34 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
+| 35 | **PC13** | GPIOC | — | **RESERVADO** | USER button B1 (on-board) | No usar como salida. Conectado al botón B1 del NUCLEO-G474RE vía SB17. EN_RR reasignado a PC2 |
 
 ### Conexiones hardware (no GPIO)
 
@@ -1233,13 +1233,14 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### 🟠 ETAPA 9 — Relés de potencia (SIN motores conectados)
 
 **Qué conectar:**
-1. **PC10** → Módulo relé MAIN
-2. **PC11** → Módulo relé TRACCIÓN
-3. **PC12** → Módulo relé DIRECCIÓN
-4. **PB10** → Módulo relé LED frontal
-5. **PB11** → Módulo relé LED trasero
-6. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC2**, STEER: EN → **PC4** (todos GPIO)
-8. Condensadores bulk + bypass en cada BTS7960
+1. **PC11** → Módulo relé TRACCIÓN
+2. **PC12** → Módulo relé DIRECCIÓN
+3. **PB10** → Módulo relé LED frontal
+4. **PB11** → Módulo relé LED trasero
+5. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC2**, STEER: EN → **PC4** (todos GPIO)
+6. Condensadores bulk + bypass en cada BTS7960
+
+> **PC10 está DISPONIBLE, sin uso.** Anteriormente era RELAY_MAIN, ahora queda libre para expansión futura.
 
 **⚠️ NO conectar los motores todavía.** Solo verificar que los relés conmutan.
 
