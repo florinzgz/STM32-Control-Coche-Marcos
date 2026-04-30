@@ -165,43 +165,39 @@ L_EN = EN_PIN;
 
 | Función | Pin | Corriente | Protección | Control intermedio |
 |---------|-----|-----------|------------|---------------------|
-| RELAY_MAIN | PC10 | 50A | Fusible 60A | Módulo 4-ch opto relé SRD-12VDC |
-| RELAY_TRAC | PC11 | 40A | Fusible 50A | Módulo 4-ch opto relé SRD-12VDC |
-| RELAY_DIR  | PC12 | 15A | Fusible 20A | Módulo 4-ch opto relé SRD-12VDC |
+| RELAY_TRAC | PC11 | 40A | Fusible 50A | Módulo 2-ch opto relé |
+| RELAY_DIR  | PC12 | 15A | Fusible 20A | Módulo 2-ch opto relé |
+
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
 
 **Arquitectura de dos etapas:**
-- **Etapa 1 (módulo intermedio):** Módulo 4-ch con optoacopladores y relés
-  SRD-12VDC-SL-C (bobina 12V, contactos 10A). STM32 GPIO activa las entradas IN.
+- **Etapa 1 (módulo intermedio):** Módulo 2-ch con optoacopladores y relés
+  (bobina 12V, contactos 10A). STM32 GPIO activa las entradas IN.
 - **Etapa 2 (relés de potencia):** Relés de alta corriente con bobina 12V DC.
   Sus bobinas están alimentadas a través de los contactos de la etapa 1.
 
 **Características etapa 1 (módulo intermedio):**
-- Bobina relé módulo: 12V DC (SRD-12VDC-SL-C)
+- Bobina relé módulo: 12V DC
 - Contactos módulo: 10A @ 30V DC / 10A @ 250V AC
 - Trigger: High/Low level seleccionable, compatible 3.3V STM32
 - Optoacopladores integrados en placa
 
 **Características etapa 2 (relés de potencia):**
 - Bobina: 12V DC
-- Contactos: según carga (50A MAIN, 40A TRAC, 15A DIR)
+- Contactos: según carga (40A TRAC, 15A DIR)
 
 ### Secuencia de Activación Segura
 
 ```
 Startup:
-1. RELAY_MAIN = ON (alimentación general)
-2. Esperar 500ms (estabilización)
+1. RELAY_TRAC = ON (tracción habilitada) 
+2. Esperar 50ms (estabilización)
 3. RELAY_DIR = ON (dirección habilitada)
-4. Esperar 200ms
-5. RELAY_TRAC = ON (tracción habilitada)
-6. Sistema listo
+4. Sistema listo
 
 Shutdown:
-1. RELAY_TRAC = OFF (desactivar tracción primero)
-2. Esperar 100ms
-3. RELAY_DIR = OFF (desactivar dirección)
-4. Esperar 100ms
-5. RELAY_MAIN = OFF (corte total)
+1. RELAY_DIR = OFF (desactivar dirección primero)
+2. RELAY_TRAC = OFF (corte tracción)
 ```
 
 ### Esquema Módulo 4-ch Opto Relé (SRD-12VDC-SL-C)

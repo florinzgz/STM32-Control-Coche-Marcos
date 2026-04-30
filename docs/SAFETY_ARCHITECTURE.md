@@ -1,6 +1,6 @@
 # 🛡️ Arquitectura de Seguridad — STM32G474RE + ESP32-S3
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** Secuencia de relés simplificada a **2 fases** (`TRAC`→`DIR`, 50 ms settle). El hardware real **NO tiene un relé MAIN / Power-Hold** en la batería de 24 V; solo hay el relé de tracción. PC10 queda reservado. `Safety_GetRelayStatusByte()` conserva el layout de 3 bits de rev 1.3: bit 0 = reservado/0 (hueco legacy MAIN), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** Secuencia de relés simplificada a **2 fases** (`TRAC`→`DIR`, 50 ms settle). El hardware real **NO tiene un relé MAIN / Power-Hold** en la batería de 24 V; solo hay el relé de tracción. PC10 queda DISPONIBLE / libre (`GPIO_Input` + `Pull-down`). `Safety_GetRelayStatusByte()` conserva el layout de 3 bits de rev 1.3: bit 0 = reservado/0 (hueco legacy MAIN), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 > Documento de referencia para todos los mecanismos de seguridad implementados en el
 > firmware del vehículo eléctrico. Cada sección describe **qué activa** la protección,
@@ -194,20 +194,21 @@ motores. Se activan/desactivan por software o por reset del MCU.
 
 | Pin  | Función | Tensión controlada |
 |------|---------|--------------------|
-| PC10 | RELAY_MAIN | Potencia general |
 | PC11 | RELAY_TRAC | Tracción 24 V |
 | PC12 | RELAY_DIR  | Dirección 12 V |
 | PB10 | RELAY_LED_L | Tiras LED 5 V (izquierda) |
 | PB11 | RELAY_LED_R | Tiras LED 5 V (derecha) |
 
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). Solo dos relés de potencia: TRAC (PC11) y DIR (PC12).
+
 ### Secuencia de activación
 
 ```
-RELAY_MAIN ON → esperar 50 ms → RELAY_TRAC ON → esperar 20 ms → RELAY_DIR ON
+RELAY_TRAC ON → esperar 50 ms → RELAY_DIR ON
 ```
 
-La secuencia garantiza que la alimentación general esté estable antes de energizar
-subsistemas de potencia.
+La secuencia garantiza que la alimentación de tracción esté estable antes de energizar
+el sistema de dirección.
 
 ### ⚙️ Qué hace
 
@@ -231,7 +232,7 @@ señal PWM. Esto proporciona un corte **galvánico** (físico).
 
 ### 🔄 Cómo se recupera
 
-El firmware debe ejecutar la secuencia de activación completa (MAIN → TRAC → DIR) tras
+El firmware debe ejecutar la secuencia de activación completa (TRAC → DIR) tras
 verificar que el sistema está en condiciones seguras (estado STANDBY o superior).
 
 ### 💡 Por qué se diseñó así

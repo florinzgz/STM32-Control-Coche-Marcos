@@ -151,17 +151,18 @@
 - **File(s):** `sensor_manager.c` (ADC read), `motor_control.c` (EMA filter + ramp limiter).
 - **Not a service module** — no dedicated service mode entry.
 
-### 1.3 Relays (3 total)
+### 1.3 Relays (2 total)
 
 | Relay | Pin | Port | Function | Power-up Order | Service Module ID |
 |-------|-----|------|----------|----------------|-------------------|
-| RELAY_MAIN | PC10 | GPIOC | Main power | 1st (50 ms settle) | `MODULE_RELAY_MAIN` (3) — CRITICAL |
-| RELAY_TRAC | PC11 | GPIOC | Traction motor power | 2nd (20 ms settle) | — |
-| RELAY_DIR | PC12 | GPIOC | Steering motor power | 3rd | — |
+| RELAY_TRAC | PC11 | GPIOC | Traction motor power | 1st (50 ms settle) | `MODULE_RELAY_TRAC` (3) — CRITICAL |
+| RELAY_DIR | PC12 | GPIOC | Steering motor power | 2nd | — |
+
+> **PC10 is AVAILABLE** — Free GPIO, not connected (`INPUT_PULLDOWN`).
 
 - **Interface:** GPIO push-pull output, active HIGH = relay energized.
 - **Default state:** LOW (de-energized, fail-safe open).
-- **Power-down order:** DIR → TRAC → MAIN (reverse of power-up).
+- **Power-down order:** DIR → TRAC (reverse of power-up).
 - **File(s):** `safety_system.c` (`Relay_PowerUp`, `Relay_PowerDown`), `main.c` (GPIO init).
 
 ### 1.4 Communication
@@ -463,7 +464,7 @@ Complete module registry with classification, mapped hardware, and CAN bitmask p
 | 0 | `MODULE_CAN_TIMEOUT` | **CRITICAL** | FDCAN1 heartbeat watchdog | bit 0 |
 | 1 | `MODULE_EMERGENCY_STOP` | **CRITICAL** | Hardware emergency stop | bit 1 |
 | 2 | `MODULE_WATCHDOG` | **CRITICAL** | IWDG (500 ms) | bit 2 |
-| 3 | `MODULE_RELAY_MAIN` | **CRITICAL** | Main power relay (PC10) | bit 3 |
+| 3 | `MODULE_RELAY_TRAC` | **CRITICAL** | Traction power relay (PC11) | bit 3 |
 | 4 | `MODULE_TEMP_SENSOR_0` | NON-CRITICAL | DS18B20 index 0 → Motor FL | bit 4 |
 | 5 | `MODULE_TEMP_SENSOR_1` | NON-CRITICAL | DS18B20 index 1 → Motor FR | bit 5 |
 | 6 | `MODULE_TEMP_SENSOR_2` | NON-CRITICAL | DS18B20 index 2 → Motor RL | bit 6 |

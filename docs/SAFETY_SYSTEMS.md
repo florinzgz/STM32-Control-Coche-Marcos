@@ -1,6 +1,6 @@
 # 🛡️ Sistemas de Seguridad - ABS/TCS
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** La secuencia de relés pasa de 3 fases (MAIN→TRAC→DIR) a **2 fases (TRAC→DIR, 50 ms settle)**. El hardware real no tiene contactor MAIN/Power-Hold. Bitmap de `relay_status` en heartbeat 0x001 byte 5 (layout 3 bits preservado): bit 0 = reservado/0, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE. `MODULE_RELAY_MAIN` renombrado a `MODULE_RELAY_TRAC` (ID 3 preservado). Ver `CAN_CONTRACT_FINAL.md`.
+> ⚠ **Secuencia de relés (CAN rev 1.3 compatible, 2026-04-23):** Power-up en **2 fases (TRAC → DIR, 50 ms settle)**. Solo existen dos relés de potencia: `RELAY_TRAC` (PC11, 24 V tracción) y `RELAY_DIR` (PC12, 12 V dirección). Bitmap de `relay_status` en heartbeat 0x001 byte 5 (layout 3 bits preservado): bit 0 = reservado/0, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE. Ver `CAN_CONTRACT_FINAL.md`.
 
 **Seguridad Funcional y Protección del Vehículo**
 
@@ -836,8 +836,7 @@ seguridad, CAN y watchdog continúen durante la secuencia de encendido.
 
 ### Garantías de Temporización
 
-- **Main → Traction:** ≥ 50 ms (RELAY_MAIN_SETTLE_MS)
-- **Traction → Direction:** ≥ 20 ms (RELAY_TRACTION_SETTLE_MS)
+- **Traction → Direction:** ≥ 50 ms (RELAY_TRAC_SETTLE_MS)
 - Resolución de temporización: 10 ms (período del bucle de seguridad)
 - Peor caso de latencia adicional: +10 ms por etapa (resolución del tick)
 
@@ -897,11 +896,10 @@ the watchdog, and processes CAN traffic.
 
 | Aspecto | Verificación |
 |---------|-------------|
-| Orden de activación | Main → Traction → Direction — sin cambios |
-| Orden de desactivación | Direction → Traction → Main — sin cambios |
-| Temporización Main → Traction | ≥ 50 ms (`RELAY_MAIN_SETTLE_MS`) — preservado |
-| Temporización Traction → Dir | ≥ 20 ms (`RELAY_TRACTION_SETTLE_MS`) — preservado |
-| Pines GPIO utilizados | `PIN_RELAY_MAIN`, `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` en GPIOC — sin cambios |
+| Orden de activación | Traction → Direction |
+| Orden de desactivación | Direction → Traction |
+| Temporización Traction → Dir | ≥ 50 ms (`RELAY_TRAC_SETTLE_MS`) — 2 etapas solamente |
+| Pines GPIO utilizados | `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` en GPIOC; PC10 disponible |
 | Contrato CAN | Ningún mensaje añadido, modificado o eliminado |
 | Máquina de estados del sistema | `Safety_SetState()` no modificada |
 | Watchdog durante power-up | IWDG se refresca normalmente (no bloqueado) |

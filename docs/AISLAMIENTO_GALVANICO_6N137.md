@@ -232,7 +232,6 @@ añadir módulos dedicados de salida.
 
 | Señal | Pin | Función |
 |-------|-----|---------|
-| RELAY_MAIN | PC10 | Relé principal |
 | RELAY_TRAC | PC11 | Relé tracción 24 V |
 | RELAY_DIR | PC12 | Relé dirección 12 V |
 
@@ -418,7 +417,7 @@ bootloader ni a la programación** del STM32. ✅
 | **OneWire (PB0)** | Protocolo bidireccional de un solo cable. Incompatible con optoacopladores estándar. Los DS18B20 operan a 3.3 V en zona de baja tensión. | Si hubiera ruido, mover DS18B20 fuera del bus OneWire a I2C (MCP9808). |
 | **Pedal ADC (PA3)** | Señal analógica continua; los optoacopladores digitales no pueden aislarla. El circuito ya tiene protección: divisor de tensión + ADS1115 plausibilidad. | AMC1200, ISO124 (sigma-delta aislados). |
 | **PWM/DIR/EN → BTS7960** | 15 canales necesarios (5 motores × 3 señales) superan los canales disponibles. El riesgo es inyección inversa desde BTS7960, ya mitigada por el Schmitt interno del driver. | Módulos adicionales en iteración futura; prioridad si se detectan latch-ups. |
-| **Relés (PC10/11/12)** | Señales de salida hacia drivers con diodo flyback. No existe camino de retorno de ruido al MCU con un diseño correcto del driver. | No necesario en condiciones normales. |
+| **Relés (PC11/12)** | Señales de salida hacia drivers con diodo flyback. No existe camino de retorno de ruido al MCU con un diseño correcto del driver. | No necesario en condiciones normales. |
 
 ---
 
@@ -547,7 +546,7 @@ rango operativo del 6N137 (máximo 15 mA continuo). ✅
 | OneWire | PB0 | Protocolo bidireccional, tensión 3.3 V, baja criticidad | — |
 | Pedal ADC | PA3 | Señal analógica; 6N137 es digital | AMC1200, ISO124 |
 | PWM/DIR/EN | PA8–PA11, PC0–PC9, PC13 | 15 canales necesarios; excede presupuesto; BTS7960 tiene protección interna | Módulos adicionales, iteración futura |
-| Relés | PC10–PC12 | Salidas con driver de transistor + flyback; sin camino de retorno de ruido | — |
+| Relés | PC11–PC12 | Salidas con driver de transistor + flyback; sin camino de retorno de ruido | — |
 
 ---
 

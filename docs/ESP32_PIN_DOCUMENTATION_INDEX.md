@@ -94,7 +94,7 @@ Este directorio contiene documentación completa sobre las conexiones de pines d
 - ✅ Divisor de tensión para adaptar 12 V → 3.3 V
 - ✅ Circuito de retención de alimentación (delay relay)
 - ✅ Secuencia completa de encendido paso a paso
-- ✅ Secuencia de relés STM32 (MAIN → TRAC → DIR)
+- ✅ Secuencia de relés STM32 (TRAC → DIR)
 - ✅ Flujo de corriente hasta los motores de tracción
 - ✅ Secuencia completa de apagado
 - ✅ Lista de componentes del circuito de llave

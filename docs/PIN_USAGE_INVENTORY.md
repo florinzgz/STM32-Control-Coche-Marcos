@@ -81,18 +81,19 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habili
 > PC9 fue reasignado a TIM8_CH4 (LPWM_RR). PC4 se usa ahora como EN_STEER (GPIO output).
 > TIM3 no tiene entrada BREAK; los fault handlers escriben CCR1=0, CCR2=0 por software.
 
-### 2.3 Relés de potencia (5 pines)
+### 2.3 Relés de potencia (3 pines)
 
 | Relé | Pin | Función |
 |------|-----|---------|
-| RELAY_MAIN | **PC10** | Alimentación general |
 | RELAY_TRAC | **PC11** | Alimentación motores 24V |
 | RELAY_DIR | **PC12** | Alimentación motor dirección 12V |
 | RELAY_LED (front) | **PB10** | Alimentación 5V tira LED frontal WS2812B |
 | RELAY_LED_REAR | **PB11** | Alimentación 5V tira LED trasera WS2812B |
-| | **Subtotal:** | **5 pines** |
+| | **Subtotal:** | **4 pines** |
 
-- PC10–PC12: controlados vía módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V), activo HIGH
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
+
+- PC11–PC12: controlados vía módulo 2-ch opto relé, activo HIGH
 - PB10/PB11: controlados vía CAN (ID 0x120); el ESP32 genera la señal WS2812B, el STM32 controla el relé de alimentación
 
 ### 2.4 Sensores de velocidad de rueda — 4× inductivos LJ12A3 (4 pines)

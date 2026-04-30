@@ -1,6 +1,6 @@
 # AUDIO RELAY INTEGRATION — Módulo relay_audio
 
-> ⚠ **CAN rev 1.3 compatible (2026-04-23 clarification):** El relé de audio (módulo `relay_audio` en ESP32) es **independiente** del subsistema de relés de potencia del STM32 y **no se ve afectado** por la eliminación del relé MAIN. El bitmap de estado de relés en heartbeat 0x001 byte 5 conserva el layout rev 1.3 de 3 bits (bit 0 = reservado/0, bit 1 = TRAC, bit 2 = DIR) — este documento sigue siendo válido tal cual para `relay_audio`.
+> ⚠ **CAN rev 1.3 compatible:** El relé de audio (módulo `relay_audio` en ESP32) es **independiente** del subsistema de relés de potencia del STM32. El bitmap de estado de relés en heartbeat 0x001 byte 5 conserva el layout de 3 bits (bit 0 = reservado/0, bit 1 = TRAC, bit 2 = DIR) — este documento sigue siendo válido tal cual para `relay_audio`.
 
 ## Objetivo
 

@@ -98,7 +98,6 @@
 ### Relay Control (GPIO Output - Active HIGH)
 | Pin | GPIO  | Function    | Description |
 |-----|-------|-------------|-------------|
-| 51  | PC10  | RELAY_MAIN  | Relé Principal (alimentación general) |
 | 52  | PC11  | RELAY_TRAC  | Relé Tracción (alimentación motores) |
 | 53  | PC12  | RELAY_DIR   | Relé Dirección (alimentación dirección) |
 

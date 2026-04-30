@@ -131,8 +131,8 @@ t = 0        t ~ 50ms     t ~ 100ms    t ~ 300ms    t ~ 560ms    t ~ 800ms    t 
 LLAVE ON     Relé de       ESP32 y      ESP32       ESP32       STM32        STM32
              retención     STM32        GPIO 41     RUNNING     Relay        relés
              cierra        arrancan     HIGH        Audio       PowerUp()    completos
-             → 5 V OK      (HW reset)   (retención  bienvenida  MAIN→TRAC    ACTIVE
-                                        activa)                 →DIR
+             → 5 V OK      (HW reset)   (retención  bienvenida  TRAC→DIR     ACTIVE
+                                        activa)
 ```
 
 ### Paso a paso
@@ -151,9 +151,8 @@ LLAVE ON     Relé de       ESP32 y      ESP32       ESP32       STM32        ST
 | 10 | ~300 ms | ESP32 | Reproduce audio de bienvenida via DFPlayer Mini |
 | 11 | ~560 ms | ESP32 | Entra en `loop()` → envía heartbeat CAN 0x011 (cada 100 ms) |
 | 12 | — | STM32 | Recibe primer heartbeat → BOOT → STANDBY → ACTIVE |
-| 13 | +0 ms | STM32 | `Relay_PowerUp()` → **RELAY_MAIN ON** (PC10 HIGH) |
-| 14 | +50 ms | STM32 | Espera 50 ms inrush → **RELAY_TRAC ON** (PC11 HIGH) |
-| 15 | +70 ms | STM32 | Espera 20 ms supresión arco → **RELAY_DIR ON** (PC12 HIGH) |
+| 13 | +0 ms | STM32 | `Relay_PowerUp()` → **RELAY_TRAC ON** (PC11 HIGH) |
+| 14 | +50 ms | STM32 | Espera 50 ms inrush → **RELAY_DIR ON** (PC12 HIGH) |
 | 16 | — | STM32 | Estado ACTIVE → motores disponibles |
 
 ### Protecciones durante el encendido
@@ -197,18 +196,17 @@ LLAVE OFF    ESP32            ESP32       ESP32        Relé
 | 10 | ~3100 ms | Relé | Sin señal en ningún camino → bobina se desenerga → D2 absorbe kickback |
 | 11 | ~3100 ms | Relé | Contactos COM→NO se abren → 12 V cortado al regulador |
 | 12 | ~3100 ms | Regulador | 5 V cae a 0 V → ESP32 y STM32 pierden alimentación |
-| 13 | inmediato | STM32 | GPIOs a LOW → RELAY_MAIN/TRAC/DIR se abren → motores desconectados (**fail-safe**) |
+| 13 | inmediato | STM32 | GPIOs a LOW → RELAY_TRAC/DIR se abren → motores desconectados (**fail-safe**) |
 
 ### Apagado de relés de potencia (orden inverso)
 
 ```c
-// safety_system.c:503
+// safety_system.c
 void Relay_PowerDown(void) {
     GPIO_RESET(PIN_RELAY_DIR);   // PC12 → Dirección OFF primero
-    GPIO_RESET(PIN_RELAY_TRAC);  // PC11 → Tracción OFF
-    GPIO_RESET(PIN_RELAY_MAIN);  // PC10 → Principal OFF último
+    GPIO_RESET(PIN_RELAY_TRAC);  // PC11 → Tracción OFF último
 }
-// Orden INVERSO al encendido: DIR → TRAC → MAIN (sin retardos entre ellos)
+// Orden INVERSO al encendido: DIR → TRAC (sin retardos entre ellos)
 ```
 
 ### ¿Qué pasa si se apaga con la llave durante la marcha?
@@ -265,7 +263,7 @@ void Relay_PowerDown(void) {
 | `STARTUP_DELAY_MS` | 200 ms | `power_manager.cpp` | Delay ESP32 entre POWER_HOLD y RUNNING |
 | `SHUTDOWN_DELAY_MS` | 3000 ms | `power_manager.cpp` | Tiempo retención tras llave OFF (audio despedida) |
 | Debounce llave | 50 ms | `power_manager.cpp` | Filtro software anti-rebote en GPIO 40 |
-| `RELAY_MAIN_SETTLE_MS` | 50 ms | `project_config.h` | Espera inrush tras RELAY_MAIN antes de activar RELAY_TRAC |
+| `RELAY_TRAC_SETTLE_MS` | 50 ms | `project_config.h` | Espera inrush antes de activar RELAY_DIR |
 | `RELAY_TRACTION_SETTLE_MS` | 20 ms | `project_config.h` | Espera supresión arco entre RELAY_TRAC y RELAY_DIR |
 | Timeout heartbeat CAN | 250 ms | `safety_system.c` | Sin heartbeat ESP32 → LIMP_HOME |
 
@@ -325,11 +323,11 @@ void Relay_PowerDown(void) {
 | `esp32/src/power_manager.cpp` | 126–129 | GPIO 41 LOW → estado OFF |
 | `esp32/src/main.cpp` | 593–596 | Reproducción audio bienvenida |
 | `esp32/src/main.cpp` | 602–603 | flush config + audio despedida |
-| `Core/Src/safety_system.c` | 467 | `RELAY_MAIN` ON |
+| `Core/Src/safety_system.c` | 467 | `RELAY_TRAC` ON |
 | `Core/Src/safety_system.c` | 482–484 | Espera 50 ms → `RELAY_TRAC` ON |
 | `Core/Src/safety_system.c` | 490–492 | Espera 20 ms → `RELAY_DIR` ON |
 | `Core/Src/safety_system.c` | 503 | `Relay_PowerDown()` — orden inverso DIR→TRAC→MAIN |
-| `Core/Inc/project_config.h` | — | `RELAY_MAIN_SETTLE_MS = 50`, `RELAY_TRACTION_SETTLE_MS = 20` |
+| `Core/Inc/project_config.h` | — | `RELAY_TRAC_SETTLE_MS = 50`, `RELAY_DIR_SETTLE_MS = 20` |
 
 ---
 

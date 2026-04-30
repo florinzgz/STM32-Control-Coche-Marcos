@@ -144,7 +144,6 @@ Los siguientes nombres **NO existen** en el firmware STM32:
 
 | Archivo | Función | Puerto/Pin | Propósito |
 |---|---|---|---|
-| `safety_system.c` | Relay power sequencing | GPIOC / PIN_RELAY_MAIN, TRAC, DIR | Relés de tracción/dirección |
 | `sensor_manager.c` | I2C bus recovery | GPIOB / PIN_I2C_SCL | Recuperación del bus I2C |
 | `sensor_manager.c` | OneWire protocol | GPIOB / PIN_ONEWIRE | Protocolo DS18B20 |
 

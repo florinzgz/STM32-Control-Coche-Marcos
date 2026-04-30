@@ -164,7 +164,8 @@ Pinout & Configuration:
 │  └─ IN1: PA0 (PEDAL)
 └─ GPIOs
    ├─ PB0-PB2, PB10 (Sensores rueda)
-   ├─ PC0-PC7, PC9-PC10 (Control motores)
+   ├─ PC0-PC9 (Control motores)
+   ├─ PC10 (Disponible/libre)
    ├─ PC11-PC12, PD2 (Relés)
    ├─ PB12-PB13 (Shifter), PB14 (LED_DIAG)
    └─ PB5 (OneWire temperatura)

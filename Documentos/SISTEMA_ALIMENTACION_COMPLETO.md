@@ -55,7 +55,7 @@ Comunicación inter-MCU: **FDCAN / TWAI a 500 kbps** (23 IDs de mensaje).
 ### 1.3 Diagrama de bloques
 
 ```
- BAT 24V ──►[Fusible 60A]──►[RELAY_MAIN PC10]──►┬──►[RELAY_TRAC PC11]──►[Fusible 50A]──► 4× BTS7960 tracción
+ BAT 24V ──►[Fusible 60A]──►[RELAY_TRAC PC11]──►[Fusible 50A]──► 4× BTS7960 tracción
              │                                    │
              │                                    └──►[INA226 ch4 (0.75mΩ)]──► Monitoreo batería
              │
@@ -88,7 +88,6 @@ BAT 24V (+)
    ├──► Fusible maxi 60 A (slow-blow)
    │       │
    │       ▼
-   │    RELAY_MAIN (PC10, GPIOC)  ←── STM32 safety_system.c
    │       │
    │       ├──► INA226 canal 4 (shunt 0.75 mΩ, 100 A) ──► Lectura tensión/corriente batería
    │       │
@@ -191,21 +190,22 @@ BAT 12V (−) ──► PUNTO ESTRELLA
 
 | Relé | Pin STM32 | Puerto | Función | Fusible | Corriente máx |
 |------|-----------|--------|---------|---------|---------------|
-| **RELAY_MAIN** | PC10 | GPIOC | Alimentación general 24V | 60 A maxi | 100 A (batería) |
 | **RELAY_TRAC** | PC11 | GPIOC | Motores tracción 24V | 50 A (4×30 A indiv.) | 4×25 A = 100 A |
 | **RELAY_DIR** | PC12 | GPIOC | Motor dirección 12V | 15 A blade | 25 A |
 | **RELAY_LED** | PB10 | GPIOB | Tira WS2812B frontal 5V | — | ~1.7 A |
 | **RELAY_LED_REAR** | PB11 | GPIOB | Tira WS2812B trasera 5V | — | ~1 A |
+
+> **Nota:** **PC10 está DISPONIBLE (libre).** PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro). El firmware solo controla los dos relés de potencia: **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
 
 ### 3.2 Secuencia de encendido de relés (no bloqueante)
 
 La función `Relay_PowerUp()` en `Core/Src/safety_system.c` implementa una máquina de estados no bloqueante:
 
 ```
-t=0 ms:        RELAY_MAIN ON  (PC10 → HIGH)
-               HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_SET)
+t=0 ms:        RELAY_TRAC ON  (PC11 → HIGH)
+               HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
 
-t=0..50 ms:    Espera RELAY_MAIN_SETTLE_MS = 50 ms  (asentamiento inrush)
+t=0..50 ms:    Espera RELAY_TRAC_SETTLE_MS = 50 ms  (asentamiento inrush)
 
 t=50 ms:       RELAY_TRAC ON  (PC11 → HIGH)
                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET)
@@ -220,7 +220,7 @@ t=70 ms:       RELAY_DIR ON  (PC12 → HIGH)
 
 **Constantes de temporización (safety_system.c):**
 ```c
-#define RELAY_MAIN_SETTLE_MS      50   /* Asentamiento corriente inrush 24V */
+#define RELAY_TRAC_SETTLE_MS      50   /* Asentamiento corriente inrush 24V */
 #define RELAY_TRACTION_SETTLE_MS  20   /* Supresión arco en contactos */
 ```
 
@@ -230,7 +230,6 @@ t=70 ms:       RELAY_DIR ON  (PC12 → HIGH)
 void Relay_PowerDown(void) {
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);  // Primero dirección
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);  // Segundo tracción
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_MAIN, GPIO_PIN_RESET);  // Último principal
 }
 ```
 
@@ -238,7 +237,7 @@ El apagado es **inmediato y en orden inverso** (LIFO) para garantizar que los mo
 
 ### 3.4 Circuito de activación de relés
 
-Cada relé de potencia (MAIN, TRAC, DIR) se controla mediante una **arquitectura de dos etapas**:
+Cada relé de potencia (TRAC, DIR) se controla mediante una **arquitectura de dos etapas**:
 
 ```
 STM32 GPIO (3.3V) ──► Módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V)
@@ -460,7 +459,6 @@ Cuando el STM32 pierde alimentación (apagado), los pines PB10/PB11 quedan en **
 
 | Fusible | Tipo | Corriente | Ubicación | Consecuencia al fundirse |
 |---------|------|-----------|-----------|--------------------------|
-| **F1** | Maxi slow-blow | 60 A | BAT 24V → RELAY_MAIN | Sistema completo sin tracción; INA226 ch4 lee 0A |
 | **F2** | Midi slow-blow | 30 A ×4 | RELAY_TRAC → cada BTS7960 | Motor individual desconectado |
 | **F3** | Blade slow-blow | 15 A | BAT 12V → RELAY_DIR | Dirección sin alimentación → estado SAFE |
 | **F4** | Blade slow-blow | 5 A | 5V → lógica | Sistema lógico sin alimentación |
@@ -640,7 +638,6 @@ Todas las masas (GND) del sistema convergen en un **único punto central** llama
 | 25 | PC7 | GPIOC | LPWM RL | BTS7960 RL | TIM8_CH2 | 3.3V PWM |
 | 26 | PC8 | GPIOC | RPWM RR | BTS7960 RR | TIM8_CH3 | 3.3V PWM |
 | 27 | PC9 | GPIOC | LPWM RR | BTS7960 RR | TIM8_CH4 | 3.3V PWM |
-| 28 | PC10 | GPIOC | RELAY_MAIN | Relé potencia | GPIO Output | 3.3V (driver) |
 | 29 | PC11 | GPIOC | RELAY_TRAC | Relé potencia | GPIO Output | 3.3V (driver) |
 | 30 | PC12 | GPIOC | RELAY_DIR | Relé potencia | GPIO Output | 3.3V (driver) |
 | 31 | PC13 | GPIOC | Enable RR | BTS7960 RR | GPIO Output | 3.3V digital |
@@ -679,7 +676,7 @@ STM32 PB7 (SDA) ──┬──[4.7kΩ pull-up]──► 3.3V
      50 A         50 A         50 A         50 A      100 A       50 A
 ```
 
-> **Nota crítica (Canal 4):** El sensor de batería está ubicado **ANTES** del RELAY_MAIN, lo que permite leer tensión/corriente incluso con el relé abierto. Esto es esencial para validación de arranque y operación LIMP_HOME.
+> **Nota crítica (Canal 4):** El sensor de batería está ubicado **ANTES del RELAY_TRAC**, lo que permite leer tensión/corriente incluso con los relés abiertos. Esto es esencial para validación de arranque y operación LIMP_HOME.
 
 ### 8.4 Configuración FDCAN (500 kbps)
 
@@ -773,8 +770,8 @@ BOOT ──► STANDBY ──► ACTIVE ⇄ DEGRADED ──► SAFE ──► ER
 
 | Qty | Componente | Referencia | Función |
 |-----|-----------|------------|---------|
-| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C | Etapa 1: MAIN, TRAC, DIR (CH4 disponible) |
-| 3 | Relé de potencia (bobina 12V) | Alta corriente | Etapa 2: MAIN (50A), TRAC (40A), DIR (15A) |
+| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C | Etapa 1: TRAC, DIR (CH3, CH4 disponibles) |
+| 2 | Relé de potencia (bobina 12V) | Alta corriente | Etapa 2: TRAC (40A), DIR (15A) |
 | 2 | Módulo relé con optoacoplador | SRD-05VDC o similar | LED, LED_REAR |
 | 1 | Relé retención 12V | SRD-05VDC o similar | Mantiene alimentación post-llave |
 | 1 | Módulo relé audio | Con optoacoplador | Control altavoz DFPlayer |
@@ -870,7 +867,6 @@ BOOT ──► STANDBY ──► ACTIVE ⇄ DEGRADED ──► SAFE ──► ER
 
 | Qty | Tipo | Corriente | Función |
 |-----|------|-----------|---------|
-| 1 | Maxi slow-blow | 60 A | Protección BAT 24V → RELAY_MAIN |
 | 4 | Midi slow-blow | 30 A | Protección individual motor tracción |
 | 1 | Blade slow-blow | 15 A | Protección motor dirección |
 | 1 | Blade slow-blow | 5 A | Protección 5V lógica |
@@ -925,7 +921,6 @@ Solo después de pasar las 6 comprobaciones, el sistema transiciona de BOOT → 
 
 | Circuito | Tensión | Corriente máx | Fusible | Protección |
 |----------|---------|---------------|---------|------------|
-| Tracción total | 24V | 100 A | 60 A (main) | INA226 ch4 + RELAY_MAIN |
 | Motor individual | 24V | 25 A | 30 A | INA226 ch0–3 |
 | Dirección | 12V | 25 A | 15 A | INA226 ch5 |
 | Lógica 5V | 5V | ~3.5 A | 5 A | Regulador LM2596 |

@@ -718,9 +718,22 @@ static void MX_GPIO_Init(void)
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* Relay outputs (GPIOC): PC11 = traction, PC12 = direction.
-     * PC10 reserved — no MAIN contactor in the hardware.               */
+    /* Relay outputs (GPIOC): PC11 = traction, PC12 = direction. */
     gpio.Pin = PIN_RELAY_TRAC | PIN_RELAY_DIR;
+    HAL_GPIO_Init(GPIOC, &gpio);
+
+    /* PC10 — AVAILABLE / not connected to any hardware.
+     * Configured as digital input with internal pull-down so the pin
+     * sits in a deterministic logic-LOW state instead of floating.
+     * Rationale:
+     *   - prevents indeterminate readings / spurious EXTI noise
+     *   - eliminates leakage current through floating CMOS input
+     *   - keeps the pin safe for future reassignment
+     * No firmware logic depends on this pin.                            */
+    gpio.Pin   = GPIO_PIN_10;
+    gpio.Mode  = GPIO_MODE_INPUT;
+    gpio.Pull  = GPIO_PULLDOWN;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOC, &gpio);
 
     /* Nucleo-64 user LED LD2 (PA5) — soldered on the board.

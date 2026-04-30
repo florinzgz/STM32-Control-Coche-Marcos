@@ -41,7 +41,7 @@ struct HeartbeatData {
     uint8_t           faultFlags   = 0;
     uint8_t           errorCode    = 0;
     uint8_t           statusFlags  = 0;   // bit 0: startup inhibit, bit 1: 4x4, bit 2: tank, bits 3-5: DS18B20 count
-    uint8_t           relayStatus  = 0;   // bit 0: reserved (legacy MAIN, always 0), bit 1: TRAC, bit 2: DIR, bit 7: SEQ_COMPLETE
+    uint8_t           relayStatus  = 0;   // bit 0: reserved (always 0), bit 1: TRAC, bit 2: DIR, bit 7: SEQ_COMPLETE
     unsigned long     timestampMs  = 0;
 };
 

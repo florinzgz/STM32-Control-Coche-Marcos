@@ -195,10 +195,10 @@
 |-----|-----------|---------------|-------|
 | 6 | Módulo INA226 | Breakout board (Adafruit 4226 o compatible) | Todos a dirección 0x40 (A0/A1 a GND); se diferencian por el canal del TCA9548A |
 | 5 | Resistencia shunt motores | **1.5 mΩ** ±1%, 5W, footprint 2512 | CH0–CH3 (motores tracción) y CH5 (motor dirección); shunt en el cable positivo ANTES del BTS7960; P_max=3.75W @ 50A → 5W da margen 1.33× |
-| 1 | Resistencia shunt batería | **0.75 mΩ** ±1%, 10W, footprint 2512 | CH4 (batería 24V); shunt ANTES del relé MAIN (entre borne + batería y COM del relé); P_max=7.5W @ 100A → 10W da margen 1.33× |
+| 1 | Resistencia shunt batería | **0.75 mΩ** ±1%, 10W, footprint 2512 | CH4 (batería 24V); shunt ANTES del relé TRAC (entre borne + batería y COM del relé); P_max=7.5W @ 100A → 10W da margen 1.33× |
 | 6 | Cable I2C corto | 24 AWG | Canal CHx del TCA9548A a SDA/SCL de cada INA226 |
 
-> **Posición del shunt de batería (CH4):** ANTES del relé MAIN, para que la lectura de tensión de batería esté disponible incluso con el relé abierto (sin alimentación a los motores). Si se coloca después del relé, el firmware detectará 0V como fallo crítico.
+> **Posición del shunt de batería (CH4):** ANTES del relé TRAC, para que la lectura de tensión de batería esté disponible incluso con el relé abierto (sin alimentación a los motores). Si se coloca después del relé, el firmware detectará 0V como fallo crítico.
 
 ---
 
@@ -395,7 +395,7 @@
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 1 | Batería 24V | ≥ 20Ah, ≥ 30A descarga continua | Batería principal del vehículo |
-| 1 | Fusible principal | **60A** slow-blow (tipo maxi) | En el positivo de batería antes del relé MAIN |
+| 1 | Fusible principal | **60A** slow-blow (tipo maxi) | En el positivo de batería antes del relé TRAC |
 | 1 | Portafusible tipo maxi | Para 60A | |
 | 1 | MOSFET de protección antipolarity (P-MOSFET) | P-channel, ≥ 40V, ≥ 80A (p. ej. SQP100P06) | O diodo ideal; protege toda la electrónica si la batería se conecta al revés |
 | 1 | Fuente 12V regulada | ≥ 5A | Para el motor de dirección y otros accesorios 12V |
@@ -511,7 +511,7 @@
 
 | Qty | Tipo | Valor | Ubicación |
 |-----|------|-------|-----------|
-| 1 | Maxi slow-blow | **60A** | Positivo batería → relé MAIN |
+| 1 | Maxi slow-blow | **60A** | Positivo batería → relé TRAC |
 | 4 | Midi/blade slow-blow | **30A** | Positivo 24V → shunt INA226 → BTS7960 (uno por motor de tracción) |
 | 1 | Blade slow-blow | **15A** | Positivo 12V → shunt INA226 → BTS7960 STEER |
 | 1 | Blade slow-blow | **5A** | Línea 5V para electrónica y LEDs |
@@ -520,7 +520,7 @@
 
 | Tipo | Sección / AWG | Uso |
 |------|--------------|-----|
-| Potencia | **4 mm²** (12 AWG) | Batería → relé MAIN; positivo y negativo principales |
+| Potencia | **4 mm²** (12 AWG) | Batería → relé TRAC; positivo y negativo principales |
 | Potencia motores | **2.5 mm²** (14 AWG) | De relés a shunts INA226 y a BTS7960 B+ |
 | Potencia motor STEER | **1.5 mm²** (16 AWG) | 12V → BTS7960 STEER |
 | Motor | **1.5 mm²** (16 AWG) | M+/M- de cada BTS7960 al motor |

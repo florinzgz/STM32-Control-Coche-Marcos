@@ -12,7 +12,6 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
 - **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
 - **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
-- **1.3 clarification** (2026-04-23): Documented that the 24 V battery hardware has no independent MAIN/Power-Hold contactor — the MAIN bit in `relay_status` (byte 5 bit 0) and in the service override mask (SERVICE_CMD 0xE0 byte 1 bit 1) is **reserved and always 0**. The 3-bit wire layout is preserved: bit 0 = reserved (legacy MAIN, always 0), bit 1 = TRAC, bit 2 = DIR. No frame size, no ID change, no protocol bump — fully backward-compatible with 1.3 consumers. STM32 firmware internally drops MAIN logic: `PIN_RELAY_MAIN` and the 3-stage power-up sequencer were removed; relay power-up is now TRAC → DIR with a 50 ms settle; `MODULE_RELAY_MAIN` renamed to `MODULE_RELAY_TRAC` (Service Mode module ID 3 preserved).
 
 ---
 
@@ -130,11 +129,11 @@ ACK is sent only after:
 | 2 | fault_flags | uint8 | Bitmask of active faults (see section 6) |
 | 3 | error_code | uint8 | Current safety error code (Safety_Error_t, 0–13; see section 7) |
 | 4 | status_flags | uint8 | bit 0: startup inhibit, bit 1: 4×4, bit 2: tank turn, bits 3–5: DS18B20 count |
-| 5 | relay_status | uint8 | Power relay command state (3-bit wire layout — backward-compatible with rev 1.3): bit 0 = reserved (legacy MAIN slot, always 0 — the 24 V bus has no independent MAIN/Power-Hold contactor), bit 1 = TRAC (PC11, 24 V), bit 2 = DIR (PC12, 12 V), bits 3–6 reserved (0), bit 7 = SEQ_COMPLETE |
+| 5 | relay_status | uint8 | Power relay command state (3-bit wire layout — backward-compatible): bit 0 = reserved (always 0), bit 1 = TRAC (PC11, 24 V), bit 2 = DIR (PC12, 12 V), bits 3–6 reserved (0), bit 7 = SEQ_COMPLETE |
 
-**Hardware note:** The 24 V battery has only ONE power relay (traction). There is no independent MAIN / Power-Hold contactor. PC10 on the STM32 is reserved/unused. Bit 0 of `relay_status` is kept in the wire format so that rev 1.3 consumers continue to decode this byte unchanged.
+**Hardware note:** PC10 on the STM32 is available/unused. Bit 0 of `relay_status` is kept in the wire format for backward compatibility.
 
-**Backward compatibility:** The byte layout is unchanged relative to rev 1.3 (bit 0 was MAIN, is now reserved/0; bits 1–2 are still TRAC/DIR; bit 7 is still SEQ). Consumers that check bit 0 for the MAIN relay will simply observe it as permanently 0 — safe degradation.
+**Backward compatibility:** Consumers that check bit 0 will observe it as permanently 0 — safe degradation.
 
 Source: `CAN_SendHeartbeat()` in `can_handler.c`
 
@@ -606,7 +605,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged. The 2026-04-23 clarification further confirms that the 3-bit `relay_status` layout is preserved: the legacy MAIN bit is now reserved/0 (no hardware), but no frame size, ID, or bit positions changed.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged. The 3-bit `relay_status` layout is preserved: bit 0 is now reserved/0, but no frame size, ID, or bit positions changed.
 
 | Property | Value |
 |----------|-------|

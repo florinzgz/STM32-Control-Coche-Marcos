@@ -17,7 +17,7 @@ additional read-only operator information alongside the existing telemetry:
 | **Steering Visual** | Direction indicator (`<< LEFT`, `RIGHT >>`, `\| CENTER`) added to numeric angle |
 | **Obstacle Sensor Bar** | Color-coded proximity bar with distance and state (CLEAR/NEAR/DANGER) |
 | **LED System Status** | Front/Rear relay state (ON/OFF) and turn signal state (LEFT/RIGHT/HAZARD/OFF) |
-| **Relay Status** | M T D indicators (MAIN/TRACTION/DIRECTION) with color coding |
+| **Relay Status** | T D indicators (TRACTION/DIRECTION) with color coding |
 
 ## Data Sources
 

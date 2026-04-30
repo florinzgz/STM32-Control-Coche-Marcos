@@ -3,7 +3,7 @@
 > ## ⛔ DOCUMENTO OBSOLETO — NO USAR PARA CABLEADO
 >
 > **Este documento NO refleja la arquitectura actual del firmware (RPWM/LPWM directo, PR #120).**
-> **Actualización CAN rev 1.3 compatible (2026-04-23):** PC10 queda reservado/libre — no existe relé MAIN.
+> **Actualización:** PC10 queda DISPONIBLE / libre (`GPIO_Input` + `Pull-down`).
 > Contiene asignaciones de pines incorrectas que pueden causar daño al hardware si se siguen.
 >
 > **Errores críticos en este documento:**
@@ -321,13 +321,14 @@ else
 
 ## 🔌 Relés de Potencia
 
-### 3 Relés Fail-Safe (Activo ALTO)
+### 2 Relés Fail-Safe (Activo ALTO)
 
 | Relé | Pin | Estado por Defecto | Función |
 |------|-----|--------------------|---------|
-| **RELAY_MAIN** | **PC11** | LOW (abierto) | Relé principal (power-hold) |
-| **RELAY_TRAC** | **PC12** | LOW (abierto) | Alimentación motores tracción |
-| **RELAY_DIR** | **PD2** | LOW (abierto) | Alimentación motor dirección |
+| **RELAY_TRAC** | **PC11** | LOW (abierto) | Alimentación motores tracción |
+| **RELAY_DIR** | **PC12** | LOW (abierto) | Alimentación motor dirección |
+
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). Disponible para futuras expansiones.
 
 **Configuración:**
 - Modo: GPIO Output Push-Pull
@@ -337,16 +338,12 @@ else
 
 **Secuencia de Encendido:**
 ```c
-// 1. Relé principal (esperar estabilización)
+// 1. Relé tracción
 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET);
-HAL_Delay(100);
-
-// 2. Relé tracción
-HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);
 HAL_Delay(50);
 
-// 3. Relé dirección
-HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
+// 2. Relé dirección
+HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);
 ```
 
 ---
@@ -389,10 +386,9 @@ HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);
 | **PC7** | 38 | EN_RR | GPIO Output | Enable motor RR |
 | **PC8** | 39 | PWM_STEER | TIM8_CH3 | Motor dirección |
 | **PC9** | 40 | DIR_STEER | GPIO Output | Dirección steering |
-| **PC10** | 51 | EN_STEER | GPIO Output | Enable steering |
-| **PC11** | 52 | RELAY_MAIN | GPIO Output | Relé principal |
-| **PC12** | 53 | RELAY_TRAC | GPIO Output | Relé tracción |
-| **PD2** | 54 | RELAY_DIR | GPIO Output | Relé dirección |
+| **PC10** | 51 | AVAILABLE | — | GPIO libre, no conectado (`INPUT_PULLDOWN`) |
+| **PC11** | 52 | RELAY_TRAC | GPIO Output | Relé tracción |
+| **PC12** | 53 | RELAY_DIR | GPIO Output | Relé dirección |
 
 ### Resumen de Periféricos
 

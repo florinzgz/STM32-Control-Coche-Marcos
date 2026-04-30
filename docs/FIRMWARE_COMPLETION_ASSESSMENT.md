@@ -37,7 +37,7 @@ El firmware está **funcionalmente completo** en todos los sistemas críticos de
 | Detector de obstáculos (5 zonas) | ✅ Completo | 100% | Emergencia (<500mm, 50 cm policy) a Alerta (<4000mm), speed-dependent |
 | Detección reacción niño | ✅ Completo | 100% | Caída pedal >10% → zonas más estrictas 2 s |
 | CAN 500 kbps (todos los IDs) | ✅ Completo | 100% | 0x001-0x303, heartbeat 100 ms, bus-off recovery |
-| Relé de potencia secuenciado | ✅ Completo | 100% | MAIN→TRACTION→DIR, no-blocking |
+| Relé de potencia secuenciado | ✅ Completo | 100% | TRAC→DIR, no-blocking |
 | Frenado dinámico | ✅ Completo | 100% | 0.5%/(%/s), máx 60%, ramp 80%/s |
 | Freno de estacionamiento | ✅ Completo | 100% | H-bridge short-circuit, derating por corriente/temp |
 | Modo servicio (25 módulos) | ✅ Completo | 100% | 4 críticos no-desactivables + 21 no-críticos |

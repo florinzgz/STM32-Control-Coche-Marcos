@@ -80,7 +80,6 @@
 | PA7 | LPWM_STEER (TIM3_CH2) | `PIN_LPWM_STEER = GPIO_PIN_7` | `main.h:37` | ✅ |
 | PC5 | EN_FL | `PIN_EN_FL = GPIO_PIN_5` | `main.h:53` | ✅ |
 | PC13 | EN_RR | `PIN_EN_RR = GPIO_PIN_13` | `main.h:56` | ✅ |
-| PC10 | RELAY_MAIN | `PIN_RELAY_MAIN = GPIO_PIN_10` | `main.h:60` | ✅ |
 | PC11 | RELAY_TRAC | `PIN_RELAY_TRAC = GPIO_PIN_11` | `main.h:61` | ✅ |
 | PC12 | RELAY_DIR | `PIN_RELAY_DIR = GPIO_PIN_12` | `main.h:62` | ✅ |
 | PB10 | RELAY_LED (frontal) | `PIN_RELAY_LED = GPIO_PIN_10` | `main.h:70` | ✅ |

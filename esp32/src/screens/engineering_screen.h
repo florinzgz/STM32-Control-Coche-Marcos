@@ -120,12 +120,12 @@ private:
     bool        clearLogPending_ = false;  // true after first tap on CLEAR; awaiting confirm
 
     // Relay status for main menu header display
-    uint8_t     relayStatus_     = 0;      // heartbeat byte 5 (bit0=reserved/MAIN-legacy, bit1=T, bit2=D, bit7=SEQ)
+    uint8_t     relayStatus_     = 0;      // heartbeat byte 5 (bit0=reserved, bit1=T, bit2=D, bit7=SEQ)
     uint8_t     prevRelayStatus_ = 0xFF;   // force initial draw
 
     // Relay override (engineering diagnostic mode)
     bool        relayOverrideEnabled_ = false;   // local UI toggle state
-    uint8_t     relayOverrideMask_    = 0;       // bit0=MAIN, bit1=TRAC, bit2=DIR
+    uint8_t     relayOverrideMask_    = 0;       // bit0=reserved, bit1=TRAC, bit2=DIR
     bool        relayOverrideChanged_ = false;   // true when real CAN state changed
 };
 
