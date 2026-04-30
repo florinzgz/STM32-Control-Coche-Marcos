@@ -1363,7 +1363,7 @@ void CAN_ProcessMessages(void) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask
                          *   bit 0: override enable (1=on, 0=off)
-                         *   bit 1: MAIN relay
+                         *   bit 1: reserved (legacy MAIN slot — PC10 not connected)
                          *   bit 2: TRACTION relay
                          *   bit 3: DIRECTION relay
                          *

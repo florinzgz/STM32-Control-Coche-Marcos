@@ -1,6 +1,6 @@
 # MANUAL ELÉCTRICO DE CABLEADO — STM32G474RE
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, no conectado a hardware). Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 > ⚠ **MODIFICACIONES DE HARDWARE OBLIGATORIAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
 > - **EN_RR en PC2** (se movió de PC13 a PC2 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado y no debe usarse como salida.
@@ -706,7 +706,7 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 29 | **PC7** | GPIOC | LPWM motor RL | BTS7960 RL | TIM8_CH2 (AF4) | 3.3 V PWM | `PIN_LPWM_RL` |
 | 30 | **PC8** | GPIOC | RPWM motor RR | BTS7960 RR | TIM8_CH3 (AF4) | 3.3 V PWM | `PIN_PWM_RR` |
 | 31 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
-| 32 | **PC10** | GPIOC | (Disponible) | *(no conectado, reservado)* | GPIO Input + Pull-down | — | — |
+| 32 | **PC10** | GPIOC | (Disponible) | *(no conectado, GPIO libre)* | GPIO Input + Pull-down | — | — |
 | 33 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
 | 34 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
 

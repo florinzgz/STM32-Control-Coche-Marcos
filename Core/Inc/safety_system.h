@@ -337,7 +337,7 @@ bool Relay_IsSequenceInProgress(void);
 
 /* Relay telemetry byte — packed bitmask of relay COMMAND states.
  *
- *   Bit 0: MAIN relay GPIO (PC10)      — 1 = commanded ON
+ *   Bit 0: reserved (legacy MAIN slot — always 0; PC10 is a free GPIO)
  *   Bit 1: TRACTION relay GPIO (PC11)  — 1 = commanded ON
  *   Bit 2: DIRECTION relay GPIO (PC12) — 1 = commanded ON
  *   Bit 7: Sequence complete flag       — 1 = RELAY_SEQ_COMPLETE

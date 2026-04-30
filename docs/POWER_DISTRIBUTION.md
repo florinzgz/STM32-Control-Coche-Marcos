@@ -1,6 +1,6 @@
 # Distribución de Potencia — Arquitectura Eléctrica
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. El byte 5 del heartbeat (CAN 0x001) conserva el layout de 3 bits de rev 1.3: **bit 0 = reservado (hueco legacy MAIN, siempre 0)**, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE — sin cambio de tamaño ni de ID, sin bump de protocolo. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, no conectado a hardware). El byte 5 del heartbeat (CAN 0x001) conserva el layout de 3 bits de rev 1.3: **bit 0 = reservado (hueco legacy MAIN, siempre 0)**, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE — sin cambio de tamaño ni de ID, sin bump de protocolo. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 Documentación completa de la distribución de potencia del vehículo controlado por STM32G474RE + ESP32-S3.
 Todos los valores proceden exclusivamente del firmware y de la especificación hardware existente.

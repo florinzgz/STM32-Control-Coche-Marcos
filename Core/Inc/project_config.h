@@ -146,7 +146,7 @@
  *   The 24 V battery only feeds a single relay (traction; supplies the
  *   four BTS7960 motor drivers).  The 12 V battery feeds the direction
  *   relay (steering actuator).  There is NO independent "Power-Hold"
- *   / MAIN contactor — PC10 is reserved (see below).
+ *   / MAIN contactor.  PC10 is a free GPIO (INPUT_PULLDOWN, see below).
  *
  * Three-level verification:
  *   Level 1: GPIO output register — what firmware COMMANDED
@@ -192,10 +192,11 @@
  *   - CAN timeout (STM32 state change → auto-disable)
  */
 /* Relay GPIO outputs (GPIOC).
- * PC10 is RESERVED/unused — historically labelled RELAY_MAIN but the
- * physical "Power-Hold"/MAIN contactor does not exist in the hardware
- * (24 V battery feeds only the traction relay).  The pin is left as
- * a plain GPIO input by default until reassigned.                      */
+ * PC10 is AVAILABLE — free GPIO, NOT connected to any hardware.
+ * Configured in MX_GPIO_Init() as GPIO_MODE_INPUT with GPIO_PULLDOWN
+ * so the pin sits at a deterministic logic-LOW level (no floating
+ * input, no leakage current, no spurious EXTI activity).
+ * No firmware logic references PC10.                                   */
 #define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 — 24V traction relay (BTS7960 x4) */
 #define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 — 12V direction relay (steering)  */
 

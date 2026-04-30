@@ -67,11 +67,13 @@ STM32G474RE-based vehicle control system with 4-wheel independent traction, stee
 ### Relays
 | Pin | Function |
 |-----|----------|
-| PC10 | RELAY_MAIN |
 | PC11 | RELAY_TRAC |
 | PC12 | RELAY_DIR |
 | PB10 | RELAY_LED (front WS2812B 5 V supply) |
 | PB11 | RELAY_LED_REAR (rear WS2812B 5 V supply) |
+
+> Only two power relays exist: `RELAY_TRAC` (PC11, 24 V → 4× BTS7960) and `RELAY_DIR` (PC12, 12 V → steering BTS7960).
+> PC10 is **AVAILABLE** (free GPIO, not connected to any hardware — configured as `INPUT_PULLDOWN` for a deterministic safe state).
 
 ### Encoder Interface
 | Pin | Function | Type | Specification |

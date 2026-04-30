@@ -97,7 +97,7 @@ static inline void sat_inc_u32(uint32_t *counter) {
  *   TRACTION ON  ──(50 ms)──▸  DIRECTION ON
  *   (PC11)                      (PC12)
  *
- * NOTE: PC10 is RESERVED/unused. There is no physical MAIN contactor —
+ * NOTE: PC10 is a free GPIO (INPUT_PULLDOWN) — no physical MAIN contactor —
  * the 24 V battery feeds RELAY_TRAC (PC11) directly.
  *
  * Total sequence: ~50 ms (deterministic, jitter ≤ 10 ms from loop cadence).
@@ -751,9 +751,9 @@ void Relay_PowerDown(void)
      * GPIOs to RESET in one cycle, regardless of sequencer state.
      *
      * Mask contains ONLY the power-relay pins (TRAC + DIR).  PC10 is
-     * reserved and is NOT touched.  Other GPIOC outputs (motor ENs,
-     * PWM channels) are untouched — those are handled separately by
-     * Traction_EmergencyStop().
+     * a free GPIO (input + pull-down) and is NOT touched.  Other GPIOC
+     * outputs (motor ENs, PWM channels) are untouched — those are
+     * handled separately by Traction_EmergencyStop().
      *
      * BSRR upper half (bits 16-31) = reset bits; lower half = set bits.
      * Writing PIN_RELAY_TRAC|PIN_RELAY_DIR shifted left 16 atomically
@@ -811,8 +811,8 @@ uint8_t Safety_GetRelayStatusByte(void)
     /* Read GPIO output register — reports commanded state.
      *
      * CAN wire layout (backward-compatible 3-bit, bit 0 reserved):
-     *   bit 0 = 0 (reserved; legacy MAIN slot — the hardware has no
-     *              MAIN / Power-Hold contactor, so this bit is always 0)
+     *   bit 0 = 0 (reserved; legacy MAIN slot — PC10 is a free GPIO,
+     *              no MAIN / Power-Hold contactor exists, always 0)
      *   bit 1 = TRACTION  (PC11, 24 V — the only 24 V-side switch)
      *   bit 2 = DIRECTION (PC12, 12 V — steering actuator)
      *   bit 7 = SEQ_COMPLETE

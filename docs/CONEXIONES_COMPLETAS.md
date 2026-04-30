@@ -1,6 +1,6 @@
 # ESQUEMA COMPLETO DE CONEXIONES — Guía Cable por Cable
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **reservado/libre**. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, no conectado a hardware). Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 > ⚠ **MODIFICACIONES DE HARDWARE REQUERIDAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
 > 1. **EN_RR cableado en PC2** (reasignado desde PC13 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado por el botón USER y no se usa como salida.
@@ -574,7 +574,7 @@ Ver especificación técnica completa: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md 
 | 32 | **PC11** | IN (RELAY_TRAC) | Relé tracción: alimentación motores 24V |
 | 33 | **PC12** | IN (RELAY_DIR) | Relé dirección: alimentación motor 12V |
 
-> **PC10 está DISPONIBLE y sin usar** (reservado en rev anterior, ahora libre para expansión)
+> **PC10 está DISPONIBLE y sin usar** (configurado como `GPIO_Input` + `Pull-down`; libre para expansión)
 
 **Secuencia de encendido (automática en firmware):**
 ```
