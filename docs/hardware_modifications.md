@@ -143,6 +143,110 @@ Arduino-format CN9 header — they are only available on the
 
 ---
 
+## 4. Filtrado adicional del rail de alimentación — 2200 µF / 35 V + 100 nF (104)
+
+### Problema
+
+El rail principal de alimentación (entrada de los convertidores Buck, lado
+batería) puede sufrir caídas de tensión y ruido cuando los motores DC
+arrancan o frenan: la corriente de inrush y los picos de conmutación de
+los BTS7960 inyectan ruido de baja y alta frecuencia en el bus común.
+
+Aunque el diseño actual ya incluye condensadores de entrada en cada Buck
+(ver `docs/ALIMENTACION_BUCK_INRUSH_PROTECTION.md` — 470 µF / 1000 µF
+electrolíticos + 100 nF cerámicos), se añade una etapa de filtrado
+**bulk** adicional aguas arriba para mejorar la estabilidad del bus
+cuando los cuatro motores arrancan simultáneamente.
+
+### Modificación
+
+Añadir, **en paralelo** entre **VBAT (+)** y **GND** del rail de entrada
+común (antes de los Buck, en el mismo nodo donde ya están los
+condensadores de entrada existentes):
+
+| Componente | Valor | Función |
+|---|---|---|
+| Condensador electrolítico | **2200 µF / 35 V**, ESR bajo (105 °C, p. ej. Panasonic FR / Nichicon UPW) | Reserva de carga "bulk" para amortiguar la caída de tensión durante el arranque/freno de los motores |
+| Condensador cerámico | **100 nF / 50 V X7R** (marcado **104**) | Filtro de alta frecuencia (>1 MHz) en paralelo con el electrolítico, anula la inductancia parásita del cuerpo del electrolítico |
+
+### Reglas de montaje
+
+1. **Polaridad del electrolítico:** la banda blanca / patilla corta es
+   **GND**. Invertir la polaridad **destruye el condensador y puede
+   provocar explosión** al alimentar.
+2. **Tensión nominal 35 V:** sobrada para una batería de 7,4 V o 12 V.
+   No bajar por debajo de 25 V aunque la batería sea de 12 V (margen
+   para picos de back-EMF y transitorios del motor).
+3. **Cercanía:** el cerámico de 100 nF debe ir **lo más cerca posible**
+   del electrolítico (patillas <10 mm), del mismo lado del rail.
+4. **Cables cortos:** las patillas hasta el rail deben ser **<3 cm** en
+   total. Cables largos añaden inductancia y anulan el filtrado HF.
+5. **Mismo nodo de GND** que los condensadores de entrada existentes de
+   los Buck — no usar un retorno de masa por un cable largo.
+
+### Riesgo de inrush al conectar la batería
+
+El condensador de 2200 µF se carga muy rápido al conectar la batería y
+puede:
+
+- Producir una pequeña chispa en el conector de la batería (normal).
+- Disparar la protección de sobrecorriente de la fuente si es de
+  laboratorio con límite bajo.
+- Estresar el contacto del interruptor general si éste es de baja
+  calidad.
+
+Mitigaciones aceptables (cualquiera de las dos es suficiente):
+
+- Usar el **interruptor / fusible principal** ya descrito en
+  `docs/ALIMENTACION_BUCK_INRUSH_PROTECTION.md` (incluye limitador NTC
+  o resistencia de pre-carga).
+- Conectar la batería con un movimiento **firme y rápido** del
+  conector — los rebotes prolongados son lo que daña los contactos.
+
+### Impacto en el firmware
+
+**Ninguno.** Esta modificación es 100 % pasiva entre VBAT y GND:
+
+- No conecta a ningún GPIO del STM32.
+- No altera ningún periférico (ADC / PWM / I²C / SPI / UART / FDCAN / TIM).
+- No modifica ningún pin documentado en `Core/Inc/project_config.h`.
+- No requiere recompilar ni reflashear.
+
+El firmware actual sigue funcionando idéntico; el único efecto observable
+es una **alimentación más estable** (menos resets espurios al arrancar
+motores, menos jitter en lecturas ADC del pedal/sensores, menos
+desconexiones del módulo CAN/Bluetooth durante transitorios).
+
+### Verificación
+
+1. **Antes de alimentar** (multímetro en modo continuidad):
+   - Polaridad del electrolítico: patilla larga (+) al rail VBAT,
+     banda blanca (−) a GND.
+   - Sin cortocircuito entre VBAT y GND (medir resistencia en modo Ω;
+     debe subir progresivamente desde unos pocos Ω hasta abierto a
+     medida que el condensador se carga con la pila del multímetro).
+2. **Al alimentar por primera vez** (sin motores conectados):
+   - Tensión de VBAT estable, sin oscilaciones.
+   - El electrolítico **no debe calentarse** ni "silbar". Si lo hace,
+     desconectar inmediatamente y revisar polaridad.
+3. **Con motores conectados** y arranque/freno repetido:
+   - Medir VBAT con osciloscopio: la caída de tensión durante el
+     arranque debe ser visiblemente menor que sin estos condensadores.
+   - El STM32 no debe resetear durante transitorios (LED de estado del
+     firmware permanece estable).
+
+### Referencias del firmware
+
+- Ninguna. Esta modificación no requiere ningún cambio en
+  `Core/`, `Drivers/`, `Makefile`, `STM32G474RETX_FLASH.ld` ni en el
+  archivo `.ioc`. Documentación relacionada (sólo lectura):
+  - `docs/ALIMENTACION_BUCK_INRUSH_PROTECTION.md` — esquema completo de
+    los Buck y condensadores existentes en el rail de entrada.
+  - `docs/COMPONENTES_PASIVOS_REFERENCIA.md` — convenciones de
+    desacoplo del proyecto.
+
+---
+
 ## Summary checklist (before first power-up with real motors)
 
 - [ ] Rear-right EN wired to **CN7 pin 35 (PC2)** — not PC13. PC13 is reserved (USER button B1) and must not be used as output.
@@ -152,6 +256,7 @@ Arduino-format CN9 header — they are only available on the
 - [ ] EN_FR cable lands on **CN7 pin 38 (PC0)** — not CN9.
 - [ ] EN_RL cable lands on **CN7 pin 36 (PC1)** — not CN9.
 - [ ] All EN lines read ≈ 0 V immediately after reset (safety latch).
+- [ ] Filtrado bulk adicional **2200 µF / 35 V + 100 nF (104)** soldado en paralelo entre VBAT y GND, polaridad del electrolítico verificada (banda blanca a GND), patillas <3 cm, cerámico <10 mm del electrolítico.
 
 Once all six items are checked, the board is electrically aligned with
 the firmware and safe to connect to the traction and direction relays.
