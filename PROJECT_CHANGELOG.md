@@ -2,16 +2,63 @@
 
 ## [unreleased] — 2026-04-30
 
-### Fixed (Documentation Cleanup)
+### Changed — PC10 Released + RELAY_MAIN Fully Removed
 
-- **PC10 liberated completely:** Removed all RELAY_MAIN references from documentation. The MAIN/Power-Hold contactor **never existed in hardware** — only RELAY_TRAC (PC11, 24V) and RELAY_DIR (PC12, 12V) are real. PC10 is now documented as `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (deterministic safe state).
-  
-  **Updated files:**
-  - `docs/POWER_DISTRIBUTION.md`: Removed RELAY_MAIN from relay table, power-up/power-down sequences, INA226 channel map, failure mode analysis, and diagrams. Added clarification note that PC10 is AVAILABLE (free GPIO, not connected).
-  - `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`: Removed RELAY_MAIN from power flow diagram, relay map, startup sequence, and fuse tables. Added matching clarification note.
-  - Other docs: Updated all references to reflect 2-relay architecture (TRAC→DIR, ~50ms settle).
-  
-  **No functional change:** Relay sequencer was already TRAC→DIR only (no MAIN step); `Relay_PowerDown()` already touched only TRAC+DIR pins. CAN heartbeat byte 5 layout unchanged (bit 0 = reserved legacy MAIN slot, always 0; bit 1 = TRAC; bit 2 = DIR; bit 7 = SEQ_COMPLETE) — backward-compatible with rev 1.3.
+**Context.** The MAIN / Power-Hold contactor (historically associated with PC10) **never existed in real hardware**. Only two power relays are physically wired: `RELAY_TRAC` on PC11 (24 V, BTS7960 traction stage) and `RELAY_DIR` on PC12 (12 V, steering). This PR aligns firmware, `.ioc` and documentation with that ground truth and leaves PC10 in a deterministic, electrically-safe state.
+
+#### Firmware (`Core/`)
+
+- **`Core/Src/main.c` — `MX_GPIO_Init()`:** Added explicit PC10 init block that configures the pin as `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` + `GPIO_SPEED_FREQ_LOW`. Rationale documented inline: prevents indeterminate readings / spurious EXTI noise, eliminates leakage current through floating CMOS input, keeps the pin safe for future reassignment. Removed the obsolete `"PC10 reserved — no MAIN contactor in the hardware"` comment from the relay-output block.
+- **`Core/Src/safety_system.c`:**
+  - Sequencer header diagram updated from the legacy 3-stage `MAIN → TRAC → DIR (~70 ms)` to the real 2-stage `TRAC → (50 ms) → DIR (~50 ms)`. Added explicit note that PC10 is a free GPIO (input + pull-down, not connected) and that 24 V feeds RELAY_TRAC directly.
+  - `Relay_PowerUp()` / `Relay_PowerDown()` comments cleaned: BSRR mask still contains **only** `PIN_RELAY_TRAC | PIN_RELAY_DIR`; PC10 is explicitly described as a free GPIO that is NOT touched on power-down.
+  - `relay_override_mask` bit-0 documented as “reserved (always 0)” for forward compatibility with rev 1.3 SERVICE_CMD 0xE0 consumers (no behavioural change).
+  - `Safety_GetRelayStatusByte()` comment updated: bit 0 = 0 (reserved; PC10 free GPIO), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE.
+- **`Core/Src/can_handler.c`:** Heartbeat (0x001) byte 5 doc-comment and SERVICE_CMD 0xE0 relay-override doc-comment updated — bit 0 relabelled from `MAIN relay GPIO ON` to `reserved (always 0; PC10 not connected)`. **Wire layout unchanged** — fully backward-compatible with the rev 1.3 CAN contract.
+- **`Core/Src/test_motor_control.c`:** Comment-only refresh to match the new architecture.
+
+#### `.ioc` (STM32CubeMX project)
+
+- **`STM32-Control-Coche-Marcos.ioc`:** PC10 explicitly registered (`Mcu.Pin27=PC10`, `PinsNb` bumped from 39 → 40) with:
+  - `PC10.Signal=GPIO_Input`
+  - `PC10.GPIO_PuPd=GPIO_PULLDOWN`
+  - `PC10.GPIO_Label=UNUSED_PC10`
+  - `PC10.Locked=true` (protects the configuration against any future CubeMX regeneration).
+  No peripheral is assigned to PC10. `MX_GPIO_Init()` in `main.c` matches the `.ioc` byte-for-byte.
+
+#### Documentation (39 files)
+
+All active references to `RELAY_MAIN` / `MAIN relay` / `MAIN contactor` / `MAIN→TRAC` / `Power-Hold` removed from technical docs; PC10 uniformly described as **“AVAILABLE / GPIO libre / INPUT_PULLDOWN / no conectado”**.
+
+- `README.md`
+- `docs/POWER_DISTRIBUTION.md`, `docs/PINOUT.md`, `docs/PINOUT_DEFINITIVO.md`, `docs/LISTADO_PINES_COMPLETO.md`, `docs/PIN_USAGE_INVENTORY.md`, `docs/COMPARACION_PINES_DOC_VS_FIRMWARE.md`
+- `docs/HARDWARE.md`, `docs/HARDWARE_AND_SENSOR_MAP.md`, `docs/HARDWARE_SPECIFICATION.md`, `docs/HARDWARE_WIRING_MANUAL.md`, `docs/CONEXIONES_COMPLETAS.md`
+- `docs/SAFETY_ARCHITECTURE.md`, `docs/SAFETY_SYSTEMS.md`, `docs/PUESTA_EN_MARCHA_SEGURA.md`
+- `docs/CAN_CONTRACT_FINAL.md`
+- `docs/INA226_RELAY_SAFETY_AUDIT.md`, `docs/INFORME_REVISION_TECNICA_RELAY.md`, `docs/RELE_RETARDO_ENCENDIDO_APAGADO.md`, `docs/AUDIO_RELAY_INTEGRATION.md`
+- `docs/AISLAMIENTO_AUDIO_DFPLAYER.md`, `docs/AISLAMIENTO_GALVANICO_6N137.md`, `docs/ALIMENTACION_BUCK_INRUSH_PROTECTION.md`
+- `docs/BTS7960_MOTOR_DRIVER_AUDIT.md`, `docs/MOTOR_CONTROL.md`, `docs/MOTOR_CONTROL_AUDIT.md`, `docs/LED_SYSTEM_ANALYSIS.md`
+- `docs/BUILD_GUIDE.md`, `docs/COMPONENTES_PASIVOS_REFERENCIA.md`, `docs/MATERIALES_POR_MODULO.md`, `docs/ESP32_PIN_DOCUMENTATION_INDEX.md`
+- `docs/FIRMWARE_AUDIT_REPORT.md`, `docs/FIRMWARE_COMPLETION_ASSESSMENT.md`, `docs/FIRMWARE_MATURITY_ROADMAP.md`
+- `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`, `Documentos/INVENTARIO_COMPONENTES_FISICOS.md`, `Documentos/RELAY_STATUS_VISUALIZATION.md`, `Documentos/SAFE_MODE_UI_EXTENSION.md`
+
+#### ESP32 (HMI) — comment-only / cosmetic
+
+- `esp32/include/can_ids.h`, `esp32/src/vehicle_data.h`, `esp32/src/ui/relay_indicator.h`, `esp32/src/screens/engineering_screen.{h,cpp}`: comments / labels updated to reflect 2-relay architecture. UI rendering, CAN parsing and override semantics unchanged (bit 0 still reserved/0).
+
+### No functional or wire-protocol change
+
+- Relay sequencer was already TRAC → DIR only (no MAIN step) — code paths unchanged.
+- `Relay_PowerDown()` and the BSRR emergency-stop masks in `main.c` and `stm32g4xx_it.c` already touched **only** PC11 + PC12.
+- CAN heartbeat 0x001 byte 5 wire layout is **identical** to rev 1.3 (bit 0 reserved/0, bit 1 TRAC, bit 2 DIR, bit 7 SEQ_COMPLETE) — existing ESP32 / external consumers continue to work unchanged.
+- No new peripherals, no new IRQs, no new timing dependencies.
+
+### Final audit (post-change verification)
+
+- ✔ `grep -E 'RELAY_MAIN|PIN_RELAY_MAIN|MODULE_RELAY_MAIN|RELAY_SEQ_MAIN|MAIN_SETTLE'` over `Core/`, `esp32/`, `docs/`, `Documentos/`, `*.ioc` → **0 hits** (this changelog excluded by design as historical record).
+- ✔ All 40 `.ioc` pins coherent with `Core/Inc/project_config.h`; **0** duplicates, **0** floating inputs, **0** unconfigured outputs.
+- ✔ PC10 = `Input` + `PULLDOWN` + `Locked=true` in `.ioc` and matches `MX_GPIO_Init()` byte-for-byte.
+- ✔ Eléctricamente seguro: sin pines flotantes, sin salidas activas sin carga, sin GPIO en estado indeterminado en boot.
 
 ---
 
