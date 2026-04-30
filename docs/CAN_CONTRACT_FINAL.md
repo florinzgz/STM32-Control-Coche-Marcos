@@ -129,11 +129,11 @@ ACK is sent only after:
 | 2 | fault_flags | uint8 | Bitmask of active faults (see section 6) |
 | 3 | error_code | uint8 | Current safety error code (Safety_Error_t, 0–13; see section 7) |
 | 4 | status_flags | uint8 | bit 0: startup inhibit, bit 1: 4×4, bit 2: tank turn, bits 3–5: DS18B20 count |
-| 5 | relay_status | uint8 | Power relay command state (3-bit wire layout — backward-compatible with rev 1.3): bit 0 = reserved (legacy MAIN slot, always 0 — the 24 V bus has no independent MAIN/Power-Hold contactor), bit 1 = TRAC (PC11, 24 V), bit 2 = DIR (PC12, 12 V), bits 3–6 reserved (0), bit 7 = SEQ_COMPLETE |
+| 5 | relay_status | uint8 | Power relay command state (3-bit wire layout — backward-compatible): bit 0 = reserved (always 0), bit 1 = TRAC (PC11, 24 V), bit 2 = DIR (PC12, 12 V), bits 3–6 reserved (0), bit 7 = SEQ_COMPLETE |
 
-**Hardware note:** The 24 V battery has only ONE power relay (traction). There is no independent MAIN / Power-Hold contactor. PC10 on the STM32 is reserved/unused. Bit 0 of `relay_status` is kept in the wire format so that rev 1.3 consumers continue to decode this byte unchanged.
+**Hardware note:** PC10 on the STM32 is available/unused. Bit 0 of `relay_status` is kept in the wire format for backward compatibility.
 
-**Backward compatibility:** The byte layout is unchanged relative to rev 1.3 (bit 0 was MAIN, is now reserved/0; bits 1–2 are still TRAC/DIR; bit 7 is still SEQ). Consumers that check bit 0 for the MAIN relay will simply observe it as permanently 0 — safe degradation.
+**Backward compatibility:** Consumers that check bit 0 will observe it as permanently 0 — safe degradation.
 
 Source: `CAN_SendHeartbeat()` in `can_handler.c`
 
@@ -605,7 +605,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 
 ## 10. Versioning and Stability
 
-This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged. The 2026-04-23 clarification further confirms that the 3-bit `relay_status` layout is preserved: the legacy MAIN bit is now reserved/0 (no hardware), but no frame size, ID, or bit positions changed.
+This document describes the CAN protocol as implemented in the current firmware. Revision 1.3 adds command acknowledgment (CMD_ACK 0x103) while maintaining backward compatibility with previous revisions — existing messages are unchanged. The 3-bit `relay_status` layout is preserved: bit 0 is now reserved/0, but no frame size, ID, or bit positions changed.
 
 | Property | Value |
 |----------|-------|

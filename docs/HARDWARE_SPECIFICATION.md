@@ -168,7 +168,7 @@ L_EN = EN_PIN;
 | RELAY_TRAC | PC11 | 40A | Fusible 50A | Módulo 2-ch opto relé |
 | RELAY_DIR  | PC12 | 15A | Fusible 20A | Módulo 2-ch opto relé |
 
-> **PC10 está DISPONIBLE** — No se usa (anteriormente RELAY_MAIN, simplificado)
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
 
 **Arquitectura de dos etapas:**
 - **Etapa 1 (módulo intermedio):** Módulo 2-ch con optoacopladores y relés

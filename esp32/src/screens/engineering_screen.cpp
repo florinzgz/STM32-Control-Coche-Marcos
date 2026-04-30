@@ -1789,7 +1789,7 @@ void EngineeringScreen::drawRelayControl() {
     };
 
     // Real relay state from CAN heartbeat byte 5 (3-bit wire layout).
-    // bit 0 = reserved (legacy MAIN, always 0), bit 1 = TRAC, bit 2 = DIR.
+    // bit 0 = reserved (always 0), bit 1 = TRAC, bit 2 = DIR.
     const bool realTrac = (relayStatus_ & 0x02U) != 0;
     const bool realDir  = (relayStatus_ & 0x04U) != 0;
     const bool realState[3] = {

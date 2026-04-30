@@ -477,7 +477,7 @@ Con el kit ALLECIN:
 ├─────────────────────────────────────────────────────────────────────┤
 │  RELAY_TRAC (PC11)       │  1   │ Paralelo contactos NO (+ R=100Ω) │
 │  RELAY_DIR  (PC12)       │  1   │ Paralelo contactos NO (+ R=100Ω) │
-│  (RELAY_MAIN no existe — PC10 disponible, INPUT_PULLDOWN, sin uso)  │
+│  (PC10 disponible — GPIO libre, INPUT_PULLDOWN, sin uso)            │
 ├─────────────────────────────────────────────────────────────────────┤
 │  SN65HVD230 CAN STM32    │  1   │ Pin VCC → GND (junto al IC)      │
 │  SN65HVD230 CAN ESP32    │  1   │ Pin VCC → GND (junto al IC)      │

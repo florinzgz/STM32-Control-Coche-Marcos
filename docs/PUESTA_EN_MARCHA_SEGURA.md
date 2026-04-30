@@ -508,7 +508,7 @@ Todos los módulos:
   GND → GND común con STM32
 ```
 
-> **PC10 está DISPONIBLE** — no se usa (anteriormente RELAY_MAIN)
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
 
 **Secuencia del firmware:**
 1. RELAY_TRAC ON → espera 50ms

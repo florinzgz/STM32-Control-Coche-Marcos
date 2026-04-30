@@ -158,11 +158,11 @@
 | RELAY_TRAC | PC11 | GPIOC | Traction motor power | 1st (50 ms settle) | `MODULE_RELAY_TRAC` (3) — CRITICAL |
 | RELAY_DIR | PC12 | GPIOC | Steering motor power | 2nd | — |
 
-> **PC10 is AVAILABLE** — Not used (previously RELAY_MAIN, simplified to 2 relays)
+> **PC10 is AVAILABLE** — Free GPIO, not connected (`INPUT_PULLDOWN`).
 
 - **Interface:** GPIO push-pull output, active HIGH = relay energized.
 - **Default state:** LOW (de-energized, fail-safe open).
-- **Power-down order:** DIR → TRAC → MAIN (reverse of power-up).
+- **Power-down order:** DIR → TRAC (reverse of power-up).
 - **File(s):** `safety_system.c` (`Relay_PowerUp`, `Relay_PowerDown`), `main.c` (GPIO init).
 
 ### 1.4 Communication

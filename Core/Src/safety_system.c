@@ -97,8 +97,8 @@ static inline void sat_inc_u32(uint32_t *counter) {
  *   TRACTION ON  ──(50 ms)──▸  DIRECTION ON
  *   (PC11)                      (PC12)
  *
- * NOTE: PC10 is a free GPIO (INPUT_PULLDOWN) — no physical MAIN contactor —
- * the 24 V battery feeds RELAY_TRAC (PC11) directly.
+ * NOTE: PC10 is a free GPIO (INPUT_PULLDOWN, not connected) — the 24 V
+ * battery feeds RELAY_TRAC (PC11) directly.  Only two power relays exist.
  *
  * Total sequence: ~50 ms (deterministic, jitter ≤ 10 ms from loop cadence).
  *
@@ -241,9 +241,7 @@ static uint32_t last_error_tick         = 0;
 /* ---- Non-blocking relay sequencer state machine ----
  *
  * The 24 V battery has only ONE relay (traction, PC11).  The 12 V
- * battery has the direction relay (PC12).  There is no independent
- * MAIN/Power-Hold contactor — the historical 3-stage sequence
- * (MAIN → TRAC → DIR) has been collapsed to a 2-stage sequence:
+ * battery has the direction relay (PC12).  Two-stage power-up sequence:
  *   TRACTION_ON → (RELAY_TRACTION_SETTLE_MS) → COMPLETE (direction on)
  * Power-down order is reversed: DIR off, then TRAC off.               */
 typedef enum {
@@ -260,9 +258,10 @@ static uint32_t        relay_seq_timestamp = 0;
  * Override is ONLY effective in STANDBY with zero throttle, zero speed,
  * and no active safety errors.  Automatically disabled on any violation.
  *
- * relay_override_mask bit layout (3-bit, backward-compatible with
- * legacy SERVICE_CMD 0xE0 consumers — bit 0 is reserved/ignored):
- *   bit 0: reserved (legacy MAIN slot — no hardware, ignored)
+ * relay_override_mask bit layout (3-bit, backward-compatible with the
+ * SERVICE_CMD 0xE0 wire contract — bit 0 is reserved/ignored for
+ * forward compatibility with rev 1.3 consumers):
+ *   bit 0: reserved (always 0)
  *   bit 1: TRACTION  relay (PC11)
  *   bit 2: DIRECTION relay (PC12)                                      */
 static bool    relay_override_enabled = false;
@@ -678,8 +677,8 @@ void Relay_PowerUp(void)
     }
 
     /* Step 1: Energise traction relay and record timestamp.
-     * (The 24 V bus has no independent MAIN contactor — the traction
-     *  relay is the first and only 24 V-side switch.)                  */
+     * (The 24 V bus has only one switch — the traction relay
+     *  is the first and only 24 V-side contact.)                       */
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_SET);
     relay_seq_state     = RELAY_SEQ_TRACTION_ON;
     relay_seq_timestamp = HAL_GetTick();
@@ -811,8 +810,7 @@ uint8_t Safety_GetRelayStatusByte(void)
     /* Read GPIO output register — reports commanded state.
      *
      * CAN wire layout (backward-compatible 3-bit, bit 0 reserved):
-     *   bit 0 = 0 (reserved; legacy MAIN slot — PC10 is a free GPIO,
-     *              no MAIN / Power-Hold contactor exists, always 0)
+     *   bit 0 = 0 (reserved; PC10 is a free GPIO, always 0)
      *   bit 1 = TRACTION  (PC11, 24 V — the only 24 V-side switch)
      *   bit 2 = DIRECTION (PC12, 12 V — steering actuator)
      *   bit 7 = SEQ_COMPLETE

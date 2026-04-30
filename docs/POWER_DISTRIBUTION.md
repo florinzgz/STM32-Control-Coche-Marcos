@@ -1,7 +1,5 @@
 # Distribución de Potencia — Arquitectura Eléctrica
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, no conectado a hardware). El byte 5 del heartbeat (CAN 0x001) conserva el layout de 3 bits de rev 1.3: **bit 0 = reservado (hueco legacy MAIN, siempre 0)**, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE — sin cambio de tamaño ni de ID, sin bump de protocolo. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
-
 Documentación completa de la distribución de potencia del vehículo controlado por STM32G474RE + ESP32-S3.
 Todos los valores proceden exclusivamente del firmware y de la especificación hardware existente.
 
@@ -163,7 +161,7 @@ Todas las masas del sistema **deben** converger en un único punto de conexión 
 
 | Tramo                        | Sección mínima | Justificación                         |
 |------------------------------|----------------|---------------------------------------|
-| Batería 24 V → Relé MAIN    | 4 mm²          | Corriente máxima de bus ≤ 100 A       |
+| Batería 24 V → Relé TRAC    | 4 mm²          | Corriente máxima de bus ≤ 100 A       |
 | Relé TRAC → BTS7960 motores | 2.5 mm²        | Corriente por motor ≤ 25 A            |
 | BTS7960 → Motor              | 2.5 mm²        | Corriente por motor ≤ 25 A            |
 | Batería 12 V → Relé DIR     | 4 mm²          | Corriente de arranque dirección       |
@@ -186,7 +184,7 @@ Todas las masas del sistema **deben** converger en un único punto de conexión 
 | `RELAY_LED`      | PB10      | GPIOB  | Tira WS2812B frontal (5 V)      | —       |
 | `RELAY_LED_REAR` | PB11      | GPIOB  | Tira WS2812B trasera (5 V)      | —       |
 
-> **Nota:** **PC10 está DISPONIBLE (libre).** No hay relé MAIN / Power-Hold en hardware. PC10 se configura como `GPIO_MODE_INPUT` con `GPIO_PULLDOWN` (estado seguro determinista). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
+> **Nota:** **PC10 está DISPONIBLE (libre).** PC10 se configura como `GPIO_MODE_INPUT` con `GPIO_PULLDOWN` (estado seguro determinista). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
 
 Los relés de potencia se controlan en **dos etapas**:
 

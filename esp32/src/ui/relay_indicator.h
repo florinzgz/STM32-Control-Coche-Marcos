@@ -4,11 +4,8 @@
 // Compact 2-letter indicator showing real-time relay GPIO command state:
 //   T = TRACTION (PC11, 24 V — bit 1)   D = DIRECTION (PC12, 12 V — bit 2)
 //
-// The 24 V battery has only the traction relay — there is no independent
-// MAIN/Power-Hold contactor. Bit 0 of the relay-status byte is reserved
-// (legacy MAIN slot, always 0) and is ignored by this widget. The 3-bit
-// wire layout is preserved for backward compatibility with existing
-// consumers.
+// Bit 0 of the relay-status byte is reserved (always 0) and is ignored by
+// this widget. The 3-bit wire layout is preserved for backward compatibility.
 //
 // Color logic:
 //   Green  — relay commanded ON and sequence complete

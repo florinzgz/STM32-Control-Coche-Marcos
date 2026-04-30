@@ -131,8 +131,8 @@ t = 0        t ~ 50ms     t ~ 100ms    t ~ 300ms    t ~ 560ms    t ~ 800ms    t 
 LLAVE ON     Relé de       ESP32 y      ESP32       ESP32       STM32        STM32
              retención     STM32        GPIO 41     RUNNING     Relay        relés
              cierra        arrancan     HIGH        Audio       PowerUp()    completos
-             → 5 V OK      (HW reset)   (retención  bienvenida  MAIN→TRAC    ACTIVE
-                                        activa)                 →DIR
+             → 5 V OK      (HW reset)   (retención  bienvenida  TRAC→DIR     ACTIVE
+                                        activa)
 ```
 
 ### Paso a paso

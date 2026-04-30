@@ -313,7 +313,7 @@ void Relay_SequencerUpdate(void);
  *
  * CAN interface: SERVICE_CMD (0x110) action 0xE0, byte1 = relay mask:
  *   bit 0: override enable
- *   bit 1: reserved (legacy MAIN slot — PC10 not connected, always ignored)
+ *   bit 1: reserved (always 0; PC10 not connected)
  *   bit 2: TRACTION relay
  *   bit 3: DIRECTION relay                                               */
 void Safety_SetRelayOverride(bool enabled, uint8_t mask);
@@ -321,7 +321,7 @@ bool Safety_IsRelayOverrideActive(void);
 void Safety_RelayOverrideUpdate(void);
 
 /* Returns true only when the relay power-up sequence has completed
- * and all three relays (MAIN, TRACTION, DIRECTION) are physically
+ * and both relays (TRACTION, DIRECTION) are physically
  * closed.  Subsystems that depend on relay power being available
  * should gate on this instead of checking system state alone.
  *
@@ -337,7 +337,7 @@ bool Relay_IsSequenceInProgress(void);
 
 /* Relay telemetry byte — packed bitmask of relay COMMAND states.
  *
- *   Bit 0: reserved (legacy MAIN slot — always 0; PC10 is a free GPIO)
+ *   Bit 0: reserved (always 0; PC10 is a free GPIO)
  *   Bit 1: TRACTION relay GPIO (PC11)  — 1 = commanded ON
  *   Bit 2: DIRECTION relay GPIO (PC12) — 1 = commanded ON
  *   Bit 7: Sequence complete flag       — 1 = RELAY_SEQ_COMPLETE

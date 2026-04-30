@@ -434,7 +434,7 @@ void CAN_SendHeartbeat(void) {
          *            bit 2: Tank turn active  (echo of mode applied by STM32)
          *            bit 3-5: DS18B20 sensor count (0-5)
          *   Byte 5: relay_status   (bitmask, added for relay visibility)
-         *            bit 0: MAIN relay GPIO ON
+         *            bit 0: reserved (always 0; PC10 not connected)
          *            bit 1: TRACTION relay GPIO ON
          *            bit 2: DIRECTION relay GPIO ON
          *            bit 7: relay sequence complete
@@ -1363,7 +1363,7 @@ void CAN_ProcessMessages(void) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask
                          *   bit 0: override enable (1=on, 0=off)
-                         *   bit 1: reserved (legacy MAIN slot — PC10 not connected)
+                         *   bit 1: reserved (always 0; PC10 not connected)
                          *   bit 2: TRACTION relay
                          *   bit 3: DIRECTION relay
                          *

@@ -1,6 +1,6 @@
 # INA226 & Relay Safety Audit Report
 
-> ⚠ **CAN rev 1.3 compatible (2026-04-23 clarification):** The 24 V battery has only the **traction** power relay (PC11). There is no independent MAIN / Power-Hold contactor. The direction relay (PC12) is on the 12 V bus. PC10 (disponible/libre)` has been renamed to `MODULE_RELAY_TRAC` (module ID 3 preserved). See `CAN_CONTRACT_FINAL.md`.
+> ⚠ **Hardware configuration:** The 24 V battery uses the traction relay (PC11). The direction relay (PC12) is on the 12 V bus. PC10 is available/unused. See `CAN_CONTRACT_FINAL.md`.
 
 **Date:** 2026-03-21
 **MCU:** STM32G474RE (Cortex-M4, 170 MHz)
@@ -37,7 +37,7 @@ CI pipeline failure also fixed (cppcheck false-positive on ISR handlers).
 | 1       | Front-Right Motor| 1.5        | 50 A        | Before BTS7960 driver  |
 | 2       | Rear-Left Motor  | 1.5        | 50 A        | Before BTS7960 driver  |
 | 3       | Rear-Right Motor | 1.5        | 50 A        | Before BTS7960 driver  |
-| 4       | 24V Battery Bus  | 0.75       | 100 A       | Before main relay      |
+| 4       | 24V Battery Bus  | 0.75       | 100 A       | Before traction relay  |
 | 5       | Steering Motor   | 1.5        | 50 A        | Before steering driver |
 
 No duplicate I2C addresses — multiplexer prevents conflicts. ✅
@@ -114,18 +114,17 @@ The code relied on power-on defaults (0x4127 = 1 sample averaging).
 
 | Pin   | Port | Function         | Mode           | Default |
 |-------|------|------------------|----------------|---------|
-| PC10 (disponible/libre)   | Push-pull, low | OFF ✅  |
+| PC10  | GPIOC| (disponible/libre)   | Input, pull-down | N/A  |
 | PC11  | GPIOC| PIN_RELAY_TRAC   | Push-pull, low | OFF ✅  |
 | PC12  | GPIOC| PIN_RELAY_DIR    | Push-pull, low | OFF ✅  |
 
 **Power-up sequencing:** Non-blocking state machine
-1. MAIN relay ON → wait 50 ms (inrush settling)
-2. TRACTION relay ON → wait 20 ms (arc suppression)
-3. DIRECTION relay ON → sequence complete
+1. TRACTION relay ON → wait 50 ms (inrush settling)
+2. DIRECTION relay ON → sequence complete
 
-**Power-down:** Reverse order (DIR → TRAC → MAIN), immediate, cancels in-progress sequence ✅
+**Power-down:** Reverse order (DIR → TRAC), immediate, cancels in-progress sequence ✅
 
-**Control determinism:** Relay state machine with 4 explicit states (IDLE, MAIN_ON, TRACTION_ON, COMPLETE) ✅
+**Control determinism:** Relay state machine with explicit states (IDLE, TRAC_ON, DIR_ON, COMPLETE) ✅
 
 ### LED Relays
 

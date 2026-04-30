@@ -105,9 +105,8 @@ REL_IND_H = GEAR_H = 20
 TextSize 1, Datum TL_DATUM
 textY = REL_IND_Y + (REL_IND_H - 8) / 2 = 300 + (20 - 8) / 2 = 300 + 6 = 306
 
-'M' at (430, 306)      — MAIN relay
-'T' at (430 + 14, 306) = (444, 306)  — TRACTION relay
-'D' at (430 + 28, 306) = (458, 306)  — DIRECTION relay
+'T' at (430, 306)      — TRACTION relay
+'D' at (430 + 14, 306) = (444, 306)  — DIRECTION relay
 ```
 
 **Color logic** (from `relayColor()` line 79-82):
@@ -119,9 +118,9 @@ textY = REL_IND_Y + (REL_IND_H - 8) / 2 = 300 + (20 - 8) / 2 = 300 + 6 = 306
 
 Where:
 - `seqComplete = (relayStatus & 0x80) != 0`
-- `mainOn      = (relayStatus & 0x01) != 0`
 - `tracOn      = (relayStatus & 0x02) != 0`
 - `dirOn       = (relayStatus & 0x04) != 0`
+- bit 0 is reserved (always 0; PC10 not connected)
 
 **Background clear:** `fillRect(430, 300, 50, 20, COL_BG)` before each redraw
 
@@ -129,17 +128,15 @@ Where:
 ```
      X=0                                          X=430  X=444  X=458  X=480
       |                                            |      |      |      |
-Y=300 |  [P] [R] [N] [D1] [D2]                    |  M   T   D  |      |
-      |  ← Gear Display →                         | ← Relay →   |      |
+Y=300 |  [P] [R] [N] [D1] [D2]                    |    T     D    |      |
+      |  ← Gear Display →                         | ← Relay →    |      |
 Y=320 |____________________________________________|______________|______|
 
-Colors (example — all relays ON, sequence complete):
-  M = GREEN (0x07E0)
+Colors (example — both relays ON, sequence complete):
   T = GREEN (0x07E0)
   D = GREEN (0x07E0)
 
-Colors (example — sequencing, MAIN+TRAC ON, DIR still OFF):
-  M = AMBER (0xFBE0)
+Colors (example — sequencing, TRAC ON, DIR still OFF):
   T = AMBER (0xFBE0)
   D = GRAY  (0x8410)
 ```
@@ -196,8 +193,8 @@ relY = BACK_Y = 280
 **Initial draw (drawMainMenu):**
 ```
 (120, 280):    "RELAY STATUS"           — TextSize 1, COL_CYAN
-(120, 292):    "M:ON  T:ON  D:OFF"      — TextSize 1, color depends on SEQ
-(120, 302):    "SEQ:COMPLETE   [0x87]"  — TextSize 1, color depends on SEQ
+(120, 292):    "T:ON  D:OFF"            — TextSize 1, color depends on SEQ
+(120, 302):    "SEQ:COMPLETE   [0x86]"  — TextSize 1, color depends on SEQ
 ```
 
 **Color logic:**
@@ -209,7 +206,7 @@ seqComplete (bit7=0):  text color = COL_AMBER (0xFBE0)
 **Format strings (exact from code):**
 ```c
 // Row 1 (line 277):
-"M:%s T:%s D:%s"
+"T:%s D:%s"
   where each %s = "ON " or "OFF"
 
 // Row 2 (line 284):
@@ -229,32 +226,32 @@ seqComplete (bit7=0):  text color = COL_AMBER (0xFBE0)
       |            |      |                                    |        |
 Y=274 |            |      | ← Menu btn 8: MAINTENANCE         |        |
 Y=280 | [  EXIT  ] |      | RELAY STATUS  (CYAN)              |        |
-Y=292 |            |      | M:ON  T:ON  D:ON  (GREEN/AMBER)   |        |
-Y=302 |            |      | SEQ:COMPLETE   [0x87]  (GREEN)    |        |
+Y=292 |            |      | T:ON  D:ON         (GREEN/AMBER)  |        |
+Y=302 |            |      | SEQ:COMPLETE   [0x86]  (GREEN)    |        |
 Y=310 |            |      |                                    |        |
 Y=320 |____________|______|____________________________________|________|
 ```
 
 ### Engineering Screen Relay Data Examples
 
-**All relays ON, sequence complete** (`relayStatus_ = 0x87`):
+**Both relays ON, sequence complete** (`relayStatus_ = 0x86`):
 ```
 RELAY STATUS              ← CYAN
-M:ON  T:ON  D:ON          ← GREEN (seqComplete=true)
-SEQ:COMPLETE    [0x87]    ← GREEN
+T:ON  D:ON                ← GREEN (seqComplete=true)
+SEQ:COMPLETE    [0x86]    ← GREEN
 ```
 
-**Sequencing (MAIN on, TRACTION on, DIR pending)** (`relayStatus_ = 0x03`):
+**Sequencing (TRACTION ON, DIR pending)** (`relayStatus_ = 0x02`):
 ```
 RELAY STATUS              ← CYAN
-M:ON  T:ON  D:OFF         ← AMBER (seqComplete=false)
-SEQ:IN PROGRESS [0x03]    ← AMBER
+T:ON  D:OFF               ← AMBER (seqComplete=false)
+SEQ:IN PROGRESS [0x02]    ← AMBER
 ```
 
 **All off (power down / pre-sequence)** (`relayStatus_ = 0x00`):
 ```
 RELAY STATUS              ← CYAN
-M:OFF T:OFF D:OFF         ← AMBER (seqComplete=false)
+T:OFF D:OFF               ← AMBER (seqComplete=false)
 SEQ:IN PROGRESS [0x00]    ← AMBER
 ```
 
@@ -299,7 +296,7 @@ Frame: 0x001, DLC=6, every 100 ms
   [2] fault_flags
   [3] error_code
   [4] status_flags
-  [5] relay_status ← bit0=MAIN, bit1=TRAC, bit2=DIR, bit7=SEQ_COMPLETE
+  [5] relay_status ← bit0=reserved/0, bit1=TRAC, bit2=DIR, bit7=SEQ_COMPLETE
 ```
 
 ### ESP32 Side
@@ -369,9 +366,9 @@ Frame: 0x001, DLC=6, every 100 ms
 │  hash check     if changed                                          │
 │     │              │                                                │
 │     ▼              ▼                                                │
-│  M T D          RELAY STATUS                                        │
-│  (colored)      M:ON T:ON D:ON                                      │
-│  @ (430,306)    SEQ:COMPLETE [0x87]                                 │
+│  T D            RELAY STATUS                                        │
+│  (colored)      T:ON D:ON                                           │
+│  @ (430,306)    SEQ:COMPLETE [0x86]                                 │
 │                 @ (120,280)                                         │
 └──────────────────────────────────────────────────────────────────────┘
 ```

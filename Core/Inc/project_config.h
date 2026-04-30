@@ -137,7 +137,7 @@
  *
  * The relay status is exported to ESP32 via CAN heartbeat byte 5 using
  * a 3-bit wire layout (backward-compatible with CAN contract rev 1.3):
- *   Bit 0 = reserved (legacy MAIN slot — no hardware, always 0)
+ *   Bit 0 = reserved (always 0)
  *   Bit 1 = TRACTION  (PC11, 24 V)
  *   Bit 2 = DIRECTION (PC12, 12 V)
  *   Bit 7 = relay sequence complete flag
@@ -145,8 +145,8 @@
  * HARDWARE NOTE (CAN rev 1.3 compatible (2026-04-23 clarification)):
  *   The 24 V battery only feeds a single relay (traction; supplies the
  *   four BTS7960 motor drivers).  The 12 V battery feeds the direction
- *   relay (steering actuator).  There is NO independent "Power-Hold"
- *   / MAIN contactor.  PC10 is a free GPIO (INPUT_PULLDOWN, see below).
+ *   relay (steering actuator).  Only TWO power relays exist.
+ *   PC10 is a free GPIO (INPUT_PULLDOWN, not connected — see below).
  *
  * Three-level verification:
  *   Level 1: GPIO output register — what firmware COMMANDED

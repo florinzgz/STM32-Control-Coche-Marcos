@@ -1,7 +1,5 @@
 # LISTADO COMPLETO DE PINES — ESP32-S3 y STM32G474RE
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, sin asignación en firmware). Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
-
 **Proyecto:** Control Coche Marcos  
 **Fecha:** 2026-02-28  
 **Fuente:** Firmware (`main.h`, `main.c`, `platformio.ini`, `User_Setup.h`) y documentación técnica del proyecto
@@ -290,7 +288,7 @@
 | 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
 | 53 | PC12 | RELAY_DIR | Relé dirección (alimentación dirección, 15 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
 
-> **PC10 está DISPONIBLE (INPUT_PULLDOWN, sin conexión)** — No se usa (anteriormente era RELAY_MAIN, simplificado a 2 relés)
+> **PC10 está DISPONIBLE (`INPUT_PULLDOWN`, sin conexión)** — GPIO libre, no conectado a hardware.
 
 **Arquitectura de dos etapas por cada relé de potencia:**
 
@@ -564,7 +562,7 @@
 | PC7 | LPWM motor RL | TIM8_CH2 | Salida PWM |
 | PC8 | RPWM motor RR | TIM8_CH3 | Salida PWM |
 | PC9 | LPWM motor RR | TIM8_CH4 | Salida PWM |
-| PC10 | **DISPONIBLE** | — | **Sin usar** (anteriormente RELAY_MAIN) |
+| PC10 | **DISPONIBLE** | — | **GPIO libre, no conectado** (`INPUT_PULLDOWN`) |
 | PC11 | Relé tracción | GPIO | Salida |
 | PC12 | Relé dirección | GPIO | Salida |
 | PC13 | Enable motor RR | GPIO | Salida |
@@ -610,14 +608,14 @@
 | Cantidad | Modelo | Ubicación |
 |----------|--------|-----------|
 | 5 | 1N4148 | Snubber antiparalelo en los 5 motores |
-| 5 | 1N4007 | Diodo volante (flyback) en bobinas de relés (MAIN, TRAC, DIR, LED_F, LED_R) |
+| 4 | 1N4007 | Diodo volante (flyback) en bobinas de relés (TRAC, DIR, LED_F, LED_R) |
 
 ### Optoacopladores
 
 | Cantidad | Modelo | Ubicación |
 |----------|--------|-----------|
 | 10 | HY-M158 | Aislamiento señales PWM (10 canales) |
-| 1 | Módulo 4-ch opto relé SRD-12VDC-SL-C | Etapa intermedia relés potencia (MAIN, TRAC, DIR) |
+| 1 | Módulo 4-ch opto relé SRD-12VDC-SL-C | Etapa intermedia relés potencia (TRAC, DIR) — canales no utilizados disponibles |
 
 ### Otros
 

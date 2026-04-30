@@ -195,7 +195,7 @@ BAT 12V (−) ──► PUNTO ESTRELLA
 | **RELAY_LED** | PB10 | GPIOB | Tira WS2812B frontal 5V | — | ~1.7 A |
 | **RELAY_LED_REAR** | PB11 | GPIOB | Tira WS2812B trasera 5V | — | ~1 A |
 
-> **Nota:** **PC10 está DISPONIBLE (libre).** No hay relé MAIN / Power-Hold en hardware. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
+> **Nota:** **PC10 está DISPONIBLE (libre).** PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro). El firmware solo controla los dos relés de potencia: **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
 
 ### 3.2 Secuencia de encendido de relés (no bloqueante)
 
@@ -237,7 +237,7 @@ El apagado es **inmediato y en orden inverso** (LIFO) para garantizar que los mo
 
 ### 3.4 Circuito de activación de relés
 
-Cada relé de potencia (MAIN, TRAC, DIR) se controla mediante una **arquitectura de dos etapas**:
+Cada relé de potencia (TRAC, DIR) se controla mediante una **arquitectura de dos etapas**:
 
 ```
 STM32 GPIO (3.3V) ──► Módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V)
@@ -770,8 +770,8 @@ BOOT ──► STANDBY ──► ACTIVE ⇄ DEGRADED ──► SAFE ──► ER
 
 | Qty | Componente | Referencia | Función |
 |-----|-----------|------------|---------|
-| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C | Etapa 1: MAIN, TRAC, DIR (CH4 disponible) |
-| 3 | Relé de potencia (bobina 12V) | Alta corriente | Etapa 2: MAIN (50A), TRAC (40A), DIR (15A) |
+| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C | Etapa 1: TRAC, DIR (CH3, CH4 disponibles) |
+| 2 | Relé de potencia (bobina 12V) | Alta corriente | Etapa 2: TRAC (40A), DIR (15A) |
 | 2 | Módulo relé con optoacoplador | SRD-05VDC o similar | LED, LED_REAR |
 | 1 | Relé retención 12V | SRD-05VDC o similar | Mantiene alimentación post-llave |
 | 1 | Módulo relé audio | Con optoacoplador | Control altavoz DFPlayer |

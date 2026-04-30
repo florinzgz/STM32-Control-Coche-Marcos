@@ -3,7 +3,7 @@
 > ## ⛔ DOCUMENTO OBSOLETO — NO USAR PARA CABLEADO
 >
 > **Este documento NO refleja la arquitectura actual del firmware (RPWM/LPWM directo, PR #120).**
-> **Actualización CAN rev 1.3 compatible (2026-04-23):** PC10 queda DISPONIBLE / libre (`GPIO_Input` + `Pull-down`) — no existe relé MAIN.
+> **Actualización:** PC10 queda DISPONIBLE / libre (`GPIO_Input` + `Pull-down`).
 > Contiene asignaciones de pines incorrectas que pueden causar daño al hardware si se siguen.
 >
 > **Errores críticos en este documento:**
@@ -328,7 +328,7 @@ else
 | **RELAY_TRAC** | **PC11** | LOW (abierto) | Alimentación motores tracción |
 | **RELAY_DIR** | **PC12** | LOW (abierto) | Alimentación motor dirección |
 
-> **PC10 está DISPONIBLE** — anteriormente era RELAY_MAIN, ahora no se usa (quedó libre tras simplificación de relés)
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). Disponible para futuras expansiones.
 
 **Configuración:**
 - Modo: GPIO Output Push-Pull
@@ -386,7 +386,7 @@ HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);
 | **PC7** | 38 | EN_RR | GPIO Output | Enable motor RR |
 | **PC8** | 39 | PWM_STEER | TIM8_CH3 | Motor dirección |
 | **PC9** | 40 | DIR_STEER | GPIO Output | Dirección steering |
-| **PC10** | 51 | AVAILABLE | — | PC10 no se usa (anteriormente RELAY_MAIN) |
+| **PC10** | 51 | AVAILABLE | — | GPIO libre, no conectado (`INPUT_PULLDOWN`) |
 | **PC11** | 52 | RELAY_TRAC | GPIO Output | Relé tracción |
 | **PC12** | 53 | RELAY_DIR | GPIO Output | Relé dirección |
 

@@ -1,7 +1,5 @@
 # ESQUEMA COMPLETO DE CONEXIONES — Guía Cable por Cable
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, no conectado a hardware). Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
-
 > ⚠ **MODIFICACIONES DE HARDWARE REQUERIDAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
 > 1. **EN_RR cableado en PC2** (reasignado desde PC13 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado por el botón USER y no se usa como salida.
 > 2. Los enables **EN_FR (PC0)** y **EN_RL (PC1)** están en el conector **Morpho CN7** (pines 38 y 36) — **no** en el header Arduino CN9.
@@ -334,8 +332,6 @@ Pedal señal (0.3V–4.8V)
 | — | GND | A0, A1 | Dirección = 0x40 (ambos a GND) |
 
 > **Nota:** Los INA226 de motor (CH0-CH3) y dirección (CH5) se conectan en SERIE con el cable de potencia **ANTES del driver BTS7960** (entre la salida del relé y la entrada B+ del BTS7960). La resistencia shunt va en el cable positivo entre el relé y el driver.
->
-> **Nota IMPORTANTE — INA226 batería (CH4):** El INA226 de batería se conecta **ANTES del relé principal** (entre el borne + de la batería y la entrada COM del relé MAIN). Esto permite leer el voltaje de la batería en todo momento, incluso cuando el relé está abierto (sistema apagado). Si el shunt de batería se colocara después del relé, al abrir el relé se leería 0V y el firmware lo interpretaría como fallo crítico.
 
 ---
 
@@ -614,13 +610,12 @@ Condensador snubber (100 nF, 250V) en paralelo con los contactos del relé
 
 | Cable | De | A | Notas |
 |-------|-----|---|-------|
-| — | Batería 24V+ | **INA226 #4 (shunt batería)** | Cable grueso ≥4 mm², shunt ANTES del relé |
-| — | INA226 #4 (salida shunt) | Relé MAIN (COM) | Cable grueso ≥4 mm² |
-| — | Relé MAIN (NO) | Relé TRAC (COM) + Relé DIR (COM) | Se bifurca |
+| — | Batería 24V+ | **INA226 #4 (shunt batería)** | Cable grueso ≥4 mm², shunt ANTES del relé TRAC |
+| — | INA226 #4 (salida shunt) | Relé TRAC (COM) + Relé DIR (COM) | Se bifurca |
 | — | Relé TRAC (NO) | **INA226 #0-#3 (shunts motor)** → BTS7960 tracción VCC (×4) | Shunts ANTES de los drivers |
 | — | Relé DIR (NO) | **INA226 #5 (shunt dirección)** → BTS7960 dirección VCC | Shunt ANTES del driver (con conversor si aplica) |
 
-> **Nota:** Los relés de potencia se controlan en dos etapas: STM32 GPIO (3.3V) → módulo 4-ch opto relé SRD-12VDC-SL-C (12V) → bobina relé de potencia (12V) → contactos de alta corriente. El módulo intermedio aísla la lógica 3.3V del STM32 de los circuitos de potencia.
+> **Nota:** Los relés de potencia se controlan en dos etapas: STM32 GPIO (3.3V) → módulo 4-ch opto relé SRD-12VDC-SL-C (12V) → bobina relé de potencia (12V) → contactos de alta corriente. El módulo intermedio aísla la lógica 3.3V del STM32 de los circuitos de potencia (canales no utilizados disponibles).
 
 ### Condensadores de desacoplo en BTS7960 (por cada driver)
 
@@ -1043,7 +1038,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 | Qty | Componente | Valor | Uso | Notas |
 |-----|-----------|-------|-----|-------|
-| 5 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé de potencia (MAIN, TRAC, DIR) + relés LED (LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; el módulo SRD-12VDC-SL-C ya incluye flyback para sus relés internos |
+| 4 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé de potencia (TRAC, DIR) + relés LED (LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; el módulo SRD-12VDC-SL-C ya incluye flyback para sus relés internos |
 | 5 | Condensador snubber contacto relé | **100 nF / 250 V** (polipropileno) | En paralelo con contactos COM–NO de cada relé (5 relés) | Reduce arcos en conmutación; 250V para margen ante picos inductivos |
 | 5 | Resistencia snubber contacto relé | **100 Ω / 0.5 W** | En serie con el condensador snubber de contacto (RC snubber) | Limita corriente de descarga del condensador |
 
@@ -1240,13 +1235,12 @@ PB14 ──►[330Ω]──►[LED]──► GND
 5. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC2**, STEER: EN → **PC4** (todos GPIO)
 6. Condensadores bulk + bypass en cada BTS7960
 
-> **PC10 está DISPONIBLE, sin uso.** Anteriormente era RELAY_MAIN, ahora queda libre para expansión futura.
+> **PC10 está DISPONIBLE, sin uso.** GPIO libre, no conectado a hardware (`INPUT_PULLDOWN`).
 
 **⚠️ NO conectar los motores todavía.** Solo verificar que los relés conmutan.
 
 **Verificar:**
-- [ ] Con multímetro: relé MAIN conmuta cuando STM32 arranca
-- [ ] Secuencia: MAIN → TRAC → DIR se activan en orden
+- [ ] Secuencia: TRAC → DIR se activan en orden
 
 ### 🔴 ETAPA 10 — Motores (ÚLTIMA ETAPA)
 

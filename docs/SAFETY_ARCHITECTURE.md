@@ -199,7 +199,7 @@ motores. Se activan/desactivan por software o por reset del MCU.
 | PB10 | RELAY_LED_L | Tiras LED 5 V (izquierda) |
 | PB11 | RELAY_LED_R | Tiras LED 5 V (derecha) |
 
-> **PC10 está DISPONIBLE** — Anteriormente RELAY_MAIN, ahora sin uso (simplificado a 2 relés de potencia)
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). Solo dos relés de potencia: TRAC (PC11) y DIR (PC12).
 
 ### Secuencia de activación
 

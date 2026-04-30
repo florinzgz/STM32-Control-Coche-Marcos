@@ -1,7 +1,5 @@
 # MANUAL ELÉCTRICO DE CABLEADO — STM32G474RE
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** El hardware real solo tiene **un relé de 24 V (tracción, PC11)** y **un relé de 12 V (dirección, PC12)**. **NO existe un relé MAIN / Power-Hold** independiente. El pin **PC10** queda **DISPONIBLE / libre** (configurado como `GPIO_Input` + `Pull-down`, no conectado a hardware). Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
-
 > ⚠ **MODIFICACIONES DE HARDWARE OBLIGATORIAS antes del primer arranque** — ver [`hardware_modifications.md`](hardware_modifications.md):
 > - **EN_RR en PC2** (se movió de PC13 a PC2 para evitar el conflicto con el botón USER B1 del NUCLEO-G474RE). PC13 queda reservado y no debe usarse como salida.
 > - Enables **EN_FR (PC0)** y **EN_RL (PC1)** salen por **Morpho CN7** (pines 38 y 36), no por CN9.
@@ -74,7 +72,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 - Lectura de 5 sensores de temperatura DS18B20 (OneWire, PB0)
 - Lectura del pedal de acelerador (ADC1, PA3)
 - Detección del sensor inductivo de centrado de dirección (EXTI5)
-- Control de 3 relés de potencia (MAIN, TRACCIÓN, DIRECCIÓN)
+- Control de 2 relés de potencia (TRACCIÓN, DIRECCIÓN)
 - Comunicación CAN con el ESP32 (FDCAN1, 500 kbps)
 - Sistemas de seguridad: ABS, TCS, límites de corriente/temperatura
 - Watchdog independiente (IWDG, ~500 ms)
@@ -566,12 +564,12 @@ antes de cada lectura.
 | 1 | CH1 | Motor FR | ANTES del BTS7960 FR (entre relé TRAC y B+ del driver) |
 | 2 | CH2 | Motor RL | ANTES del BTS7960 RL (entre relé TRAC y B+ del driver) |
 | 3 | CH3 | Motor RR | ANTES del BTS7960 RR (entre relé TRAC y B+ del driver) |
-| 4 | CH4 | Batería 24V (corriente+tensión) | **ANTES del relé MAIN** (entre borne + batería y COM del relé) |
+| 4 | CH4 | Batería 24V (corriente+tensión) | **ANTES del relé TRAC** (entre borne + batería y COM del relé) |
 | 5 | CH5 | Motor dirección | ANTES del BTS7960 STEER (entre relé DIR y B+ del driver) |
 
 > **IMPORTANTE — Colocación del shunt de batería (índice 4):** El INA226 de batería debe
-> estar **ANTES del relé principal** (entre el borne + de la batería y la entrada del relé
-> MAIN). Esto garantiza que `Voltage_GetBus()` pueda leer el voltaje de la batería en todo
+> estar **ANTES del relé de tracción** (entre el borne + de la batería y la entrada del relé
+> TRAC). Esto garantiza que `Voltage_GetBus()` pueda leer el voltaje de la batería en todo
 > momento, incluso cuando el relé está abierto. Si se colocara después del relé, al abrir
 > el relé se leería 0 V y el firmware lo trataría como fallo crítico de subtensión.
 >
@@ -614,7 +612,7 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 | **LED** (Frontal) | **PB10** | GPIOB | Alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V |
 | **LED_REAR** (Trasero) | **PB11** | GPIOB | Alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V |
 
-> **Nota:** **PC10 está DISPONIBLE (libre)**. No existe relé MAIN / Power-Hold en hardware. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro determinista).
+> **Nota:** **PC10 está DISPONIBLE (libre)**. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro determinista).
 
 Definidos en `project_config.h`:
 - `PIN_RELAY_TRAC` = GPIO_PIN_11 (PC11)
@@ -931,7 +929,7 @@ La solución utiliza una **arquitectura de dos etapas**:
 
 2. **Etapa 2 — Relés de potencia:**
    - Bobina: 12V DC (alimentada a través de los contactos del módulo intermedio)
-   - Contactos: alta corriente (50A MAIN, 40A TRAC, 15A DIR)
+   - Contactos: alta corriente (40A TRAC, 15A DIR)
 
 ### Esquema completo (dos etapas, un canal)
 
@@ -999,9 +997,8 @@ Contacto COM ──[R = 100 Ω, 1/2 W] ──┬── Contacto NO
 
 | Componente | Diodo | Ubicación |
 |-----------|-------|-----------|
-| Relé MAIN (bobina 5 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
-| Relé TRAC (bobina 5 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
-| Relé DIR (bobina 5 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
+| Relé TRAC (bobina 12 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
+| Relé DIR (bobina 12 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
 | BTS7960 VCC lógica (enable signals) | 1N4148 en R_EN/L_EN (opcional) | Serie de protección en señales EN |
 
 ---
@@ -1043,20 +1040,20 @@ Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (TJ
 
 ### 12.3 Condensadores de bulk en los buses de potencia
 
-Cuando el relé MAIN cierra, el condensador vacío del bus de 24 V genera un inrush
+Cuando el relé TRAC cierra, el condensador vacío del bus de 24 V genera un inrush
 que puede superar 100 A en 10 µs. Esto colapsa momentáneamente la tensión del bus
 y, por acoplamiento, puede afectar a la alimentación lógica.
 
 **Solución: condensador de bulk en el bus de potencia:**
 
 ```
-Relé MAIN NO ──┬──────────────────────────── Bus 24 V (a BTS7960 y relés)
+Relé TRAC NO ──┬──────────────────────────── Bus 24 V (a BTS7960 y relés)
                │
            [1 000 µF / 35 V electrolítico]
                │
               GND potencia (GND común)
 
-UBICACIÓN: lo más cerca posible del relé MAIN, en el bus de 24 V.
+UBICACIÓN: lo más cerca posible del relé TRAC, en el bus de 24 V.
 NOTA: este condensador también absorbe la energía cinética del motor al frenar
 (CEMF regenerativa), reduciendo la sobretensión en el bus.
 ```
@@ -1166,7 +1163,7 @@ Seguir este orden estrictamente:
 11. Conectar fuente 12 V SIN conectar motor dirección
 12. Con el firmware en estado STANDBY (ESP32 conectado, sistema en espera),
     dar comando de arranque desde el ESP32 → los relés deben activar en secuencia:
-    MAIN (50 ms) → TRAC (20 ms) → DIR
+    TRAC (50 ms settle) → DIR
 13. Verificar tensión en bus 24 V y 12 V tras cierre de relés
 14. Conectar motores de tracción y verificar giro suave al dar acelerador
 15. Conectar motor de dirección y verificar centrado automático al arrancar
