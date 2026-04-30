@@ -29,6 +29,9 @@
 9. [Diagrama Eléctrico Completo](#9-diagrama-eléctrico-completo)
 10. [Lista de Componentes](#10-lista-de-componentes)
 11. [Preguntas Frecuentes](#11-preguntas-frecuentes)
+12. [STAR GROUND — Punto único de masa](#12-star-ground--punto-único-de-masa-obligatorio)
+13. [BUS CAN — Estado y riesgo](#13-bus-can--estado-y-riesgo-tja1051t3)
+14. [CHECKLIST DE MONTAJE — Tres fases obligatorias](#14-checklist-de-montaje--tres-fases-obligatorias)
 
 ---
 
@@ -145,6 +148,52 @@ Permite que los 3.3 V del STM32 accionen las bobinas de los relés de potencia
 El módulo ya tiene optoacopladores con resistencias integradas (~1 kΩ).
 Con 3.3 V del STM32: `I = (3.3 − 1.2) / 1000 = 2.1 mA` — suficiente (PC817 ≥ 1 mA).
 
+### 4.2b Pull-down externo 10 kΩ en pines IN (OBLIGATORIO)
+
+> ⚠️ **El pin IN del módulo SRD puede flotar** si el STM32 GPIO está en alta impedancia
+> durante el arranque (~50 ms antes de que `main.c` configure los GPIO a LOW).
+> Sin pull-down, los relés de potencia (tracción 24 V y dirección 12 V) podrían
+> activarse de forma espuria en el momento del encendido.
+
+#### Verificación del pull-down interno del módulo
+
+Algunos módulos SRD incluyen una resistencia pull-down interna (~10 kΩ) entre el
+pin IN y GND. **No está garantizado en todos los modelos ni variantes.** Antes de
+instalar el pull-down externo, verificar:
+
+**Procedimiento (módulo SIN alimentar):**
+
+1. Conectar el polímetro en modo **RESISTENCIA (Ω)**.
+2. Sonda roja → pin IN (IN1 o IN2).
+3. Sonda negra → GND del módulo (pin GND del conector lógico).
+4. Leer el resultado:
+
+| Lectura | Interpretación | Acción |
+|---------|---------------|--------|
+| ~10 kΩ (7–13 kΩ) | Pull-down interno **presente** | No es estrictamente necesario el externo, pero añadirlo aumenta la robustez (quedan en paralelo: ~5 kΩ) |
+| Circuito abierto (> 1 MΩ) | Pull-down interno **NO presente** | **Instalar pull-down externo 10 kΩ obligatorio** |
+| < 1 kΩ | Pin IN cortocircuitado a GND — módulo defectuoso | Reemplazar módulo |
+
+> **Regla de oro:** Si no se ha verificado físicamente → instalar pull-down externo
+> 10 kΩ siempre. El coste es despreciable y elimina el riesgo de activación espuria.
+
+Añadir **1 resistencia de 10 kΩ** entre cada pin IN y GND del lado lógico:
+
+```
+STM32 PC11 ──────────────────────────► IN1 del módulo 12V
+                  │
+               [10 kΩ]  ← pull-down externo
+               (obligatorio si no verificado pull-down interno)
+                  │
+                 GND (mismo GND lógico que VCC del módulo)
+
+STM32 PC12 ──────────────────────────► IN2 del módulo 12V
+                  │
+               [10 kΩ]
+                  │
+                 GND
+```
+
 ### 4.3 Cableado del módulo 12 V
 
 ```
@@ -201,7 +250,39 @@ el STM32 activa/desactiva PB10 y PB11.
 Mismo razonamiento que el módulo 12 V: el PC817 interno del módulo 5 V necesita
 ≥ 1 mA. Con 3.3 V del STM32: `I = (3.3 − 1.2) / 1000 = 2.1 mA` → OK.
 
-**Conexión directa PB10/PB11 → IN1/IN2. No hace falta ninguna resistencia.**
+**Conexión directa PB10/PB11 → IN1/IN2. No hace falta ninguna resistencia de corriente.**
+
+### 5.2b Pull-down externo 10 kΩ en pines IN (OBLIGATORIO — misma razón que módulo 12V)
+
+> ⚠️ Mismo riesgo que el módulo 12V: el STM32 tarda ~50 ms en configurar
+> PB10/PB11 como salida LOW. Durante ese tiempo, las tiras LED podrían
+> encenderse brevemente si no hay pull-down.
+
+#### Verificación del pull-down interno (mismo procedimiento que §4.2b)
+
+Con el módulo SIN alimentar:
+
+| Lectura IN→GND | Interpretación | Acción |
+|----------------|---------------|--------|
+| ~10 kΩ | Pull-down interno presente | Externo opcional (recomendado para mayor robustez) |
+| > 1 MΩ (abierto) | Pull-down interno ausente | **Instalar externo 10 kΩ obligatorio** |
+
+> **Regla:** Si no se ha verificado → instalar pull-down externo 10 kΩ siempre.
+
+```
+STM32 PB10 ──────────────────────────► IN1 del módulo 5V
+                  │
+               [10 kΩ]  ← pull-down externo
+               (obligatorio si no verificado pull-down interno)
+                  │
+                 GND
+
+STM32 PB11 ──────────────────────────► IN2 del módulo 5V
+                  │
+               [10 kΩ]
+                  │
+                 GND
+```
 
 ### 5.3 Cableado del módulo 5 V
 
@@ -461,6 +542,8 @@ void LED_Relay_Emergency_Off(void)
 | Módulo 2ch SRD-12VDC-SL-C | High/low trigger, opto, 10A/250VAC | VCC=3.3V, JD-VCC=12V, jumper H, jumper VCC/JD-VCC QUITADO |
 | IN1 | PC11 STM32 (3.3V directo) | Activa bobina relé tracción 24V |
 | IN2 | PC12 STM32 (3.3V directo) | Activa bobina relé dirección 12V |
+| Pull-down IN1 | 10 kΩ entre IN1 y GND | Evita activación espuria en boot del STM32 |
+| Pull-down IN2 | 10 kΩ entre IN2 y GND | Ídem |
 
 ### 10.4 Módulo relé 2 canales 5 V (alimentación LEDs)
 
@@ -469,6 +552,8 @@ void LED_Relay_Emergency_Off(void)
 | Módulo 2ch SRD-05VDC-SL-C | High/low trigger, opto, 10A/250VAC | VCC=3.3V, JD-VCC=5V, jumper H, jumper VCC/JD-VCC QUITADO |
 | IN1 | PB10 STM32 (3.3V directo) | Conecta 5V a tira LED frontal (28× WS2812B) |
 | IN2 | PB11 STM32 (3.3V directo) | Conecta 5V a tira LED trasera (16× WS2812B) |
+| Pull-down IN1 | 10 kΩ entre IN1 y GND | Evita activación espuria en boot del STM32 |
+| Pull-down IN2 | 10 kΩ entre IN2 y GND | Ídem |
 
 ### 10.5 Relés de potencia (accionados por módulo 12V)
 
@@ -488,9 +573,10 @@ void LED_Relay_Emergency_Off(void)
 | 4 | Módulo buck 12V→5V ≥ 3A | 1 |
 | 5 | Relé automotriz 50A 12V (tracción) | 1 |
 | 6 | Relé automotriz 20A 12V (dirección) | 1 |
-| 7 | Diodo 1N4007 | 2 |
-| 8 | Resistencia 33 kΩ ¼W (R1) | 1 |
-| 9 | Resistencia 10 kΩ ¼W (R2) | 1 |
+| 7 | Diodo 1N4007 (flyback contactores) | 2 |
+| 8 | Resistencia 33 kΩ ¼W (R1 divisor llave) | 1 |
+| 9 | Resistencia 10 kΩ ¼W (R2 divisor llave) | 1 |
+| 10 | Resistencia 10 kΩ ¼W (pull-down pines IN relés) | 4 |
 
 ---
 
@@ -531,8 +617,273 @@ fuerza PB10/PB11 LOW vía BSRR (`stm32g4xx_it.c:61`).
 
 ---
 
+## 12. STAR GROUND — Punto único de masa (OBLIGATORIO)
+
+> ⚠️ **Sin star ground, el ruido PWM de los BTS7960 (20 kHz, 24 V) se propaga
+> por la impedancia del cable de retorno hacia el STM32, degradando el ADC del
+> pedal (PA3), la lectura de los INA226 y el bus I2C (PB6/PB7).**
+
+### Principio
+
+Todas las corrientes de retorno deben converger en un **único punto físico**
+antes de llegar al polo negativo de la batería. No se permiten cadenas de GND
+(A → B → C → batería), solo conexiones en estrella (A, B, C → punto estrella
+→ batería).
+
+### Definición del punto estrella
+
+| Parámetro | Valor |
+|-----------|-------|
+| Punto de unión | Terminal negativo de la batería (o borne de GND del bus de barras principal) |
+| Sección mínima del cable principal | ≥ 4 mm² (retorno de corrientes de motor) |
+| Sección ramales lógica | ≥ 0.5 mm² (STM32, ESP32, módulos) |
+
+### Conexiones al punto estrella
+
+```
+                    ┌─── PUNTO ESTRELLA (BAT−) ───┐
+                    │                             │
+         ┌──────────┴─────┐              ┌────────┴──────────┐
+         │  GND POTENCIA  │              │   GND LÓGICA      │
+         │                │              │                   │
+     BTS7960 FL       BTS7960 FR     STM32 GND           ESP32 GND
+     BTS7960 RL       BTS7960 RR     Módulo 12V GND      Módulo 5V GND
+     BTS7960 steering               HY-M158 G(lado IN)  Buck 5V GND−
+     Relé potencia tracción         INA226 GND
+     Relé potencia dirección
+     Buck 24V→5V GND−
+```
+
+> **Regla de GND_vehicle (HY-M158 lado V):** el G del lado V del HY-M158
+> (masa de los sensores LJ12A3 y de la llave) se conecta también al punto estrella,
+> pero **a través de una conexión independiente directa**, no encadenada a través
+> de ningún otro componente lógico. Esto evita que las corrientes de sensor compartan
+> el mismo camino que las corrientes de motor.
+
+```
+HY-M158 G(lado V) ──────────────────────────► PUNTO ESTRELLA (BAT−)
+                                               (conexión directa, cable independiente)
+```
+
+### Lo que está PROHIBIDO
+
+```
+❌  STM32 GND ─── Módulo 12V GND ─── BTS7960 GND ─── BAT−  (cadena)
+✅  STM32 GND ─────────────────────────────────────► BAT−  (estrella)
+    Módulo 12V GND ─────────────────────────────────► BAT−
+    BTS7960 GND ────────────────────────────────────► BAT−
+```
+
+### Reglas obligatorias de cableado
+
+| Regla | Descripción |
+|-------|-------------|
+| **R1** | GND_vehicle (HY-M158 lado V) va **directo** al punto estrella — no pasa por ningún otro módulo |
+| **R2** | GND_logic (STM32 + ESP32 + módulos relé) va **directo** al punto estrella |
+| **R3** | Los retornos de corriente de los BTS7960 van **directo** al punto estrella con cable ≥ 4 mm² |
+| **R4** | **NO** usar la carrocería del vehículo como camino de retorno para corrientes de motor |
+| **R5** | La sección del cable de estrella hasta BAT− debe ser ≥ 4 mm² (corriente total de tracción) |
+| **R6** | GND_logic y GND_vehicle **nunca deben unirse** salvo en el punto estrella y a través del PC817 |
+
+### Diagrama de estrella de masas — vista de cableado real
+
+```
+                           BAT− (polo negativo batería)
+                                       │
+                        ┌──────────────┼──────────────────┐
+                        │              │                   │
+               ┌────────┴────────┐     │          ┌────────┴────────┐
+               │  POTENCIA ≥4mm² │     │          │  LÓGICA ≥0.5mm² │
+               │                 │     │          │                  │
+        ┌──────┴──────┐   ┌──────┴──────┐   ┌────┴─────┐   ┌────────┴────┐
+     BTS7960 FL    BTS7960 FR         BTS7960 RL  STM32 GND   ESP32 GND
+     BTS7960 RR    BTS7960 steering             Módulo 12V GND  Módulo 5V GND
+     Relé tracción  Relé dirección              HY-M158 G(IN)   Buck 5V GND−
+     Buck 24V GND−                              INA226 GND
+
+     ↑                                           ↑
+     Cables gruesos (≥4mm²)             Cables finos (≥0.5mm²)
+     Corriente de motor hasta 50A       Corriente lógica < 1A
+
+     APARTE (conexión directa independiente al BAT−):
+     HY-M158 G(lado V) ──────────────────────────────────► BAT−
+     (no encadenado con nada lógico)
+```
+
+> **Nota de instalación:** El "punto estrella" puede ser físicamente una barra de
+> distribución de GND (busbar) o directamente el terminal negativo de la batería.
+> Lo importante es que **todos los cables lleguen al mismo punto metálico físico**
+> sin usar el chasis como conductor intermedio.
+
+---
+
+## 13. BUS CAN — Estado y riesgo (TJA1051T/3)
+
+> ### ⚠️ ESTADO ACTUAL: FUERA DE ESPECIFICACIÓN
+>
+> El transceiver TJA1051T/3 está alimentado a **3.3 V** en la instalación actual.
+> La hoja de datos especifica **VCC = 4.5 V a 5.5 V**.
+>
+> | Parámetro | Spec | Actual | Estado |
+> |-----------|------|--------|--------|
+> | VCC | 4.5–5.5 V | 3.3 V | ⚠️ Fuera de spec |
+> | VIO | 2.8–5.5 V | 3.3 V | ✅ Dentro de spec |
+>
+> **Riesgos conocidos:**
+> - Margen de ruido reducido en entornos con motores DC de 24 V
+> - Sin garantía de funcionamiento a temperatura extendida (−40°C a +125°C)
+> - Posible inestabilidad con transitorios de masa en carrocería de vehículo real
+>
+> **Para banco de pruebas:** funcional con esta configuración.
+>
+> **Para vehículo real:** migrar a Configuración B (5 V + aislador ADuM1201).
+> Ver `docs/PC817_WIRING_REFERENCE.md` §BUS CAN para el esquema detallado.
+> Sin cambio de firmware necesario.
+
+---
+
+## 14. CHECKLIST DE MONTAJE — Tres fases obligatorias
+
+> Completar en orden estricto. Marcar cada punto **antes** de pasar al siguiente.
+> No alimentar el sistema hasta que la FASE A esté completa al 100%.
+
+---
+
+### FASE A — ANTES DE ALIMENTAR
+
+*Verificaciones en frío con polímetro. El sistema NO debe estar conectado a ninguna fuente de alimentación.*
+
+**A1 — Módulo HY-M158 (PC817)**
+
+- [ ] A1.1. Los 8 jumpers rojos están **retirados físicamente** del módulo
+- [ ] A1.2. Polímetro modo CONTINUIDAD: entre G(lado V) y G(lado IN) → **ABIERTO** (sin pitido). Si pita: no continuar — revisar pistas del PCB
+- [ ] A1.3. TVS P6KE18CA soldado entre V1 y G(lado V) — cara trasera PCB — canal WHEEL_FR
+- [ ] A1.4. TVS P6KE18CA soldado entre V2 y G(lado V) — canal WHEEL_FL
+- [ ] A1.5. TVS P6KE18CA soldado entre V3 y G(lado V) — canal WHEEL_RR
+- [ ] A1.6. TVS P6KE18CA soldado entre V4 y G(lado V) — canal WHEEL_RL
+- [ ] A1.7. TVS P6KE18CA soldado entre V5 y G(lado V) — canal llave ACC
+- [ ] A1.8. Pull-up 4.7 kΩ soldado entre IN1 y +3.3V
+- [ ] A1.9. Pull-up 4.7 kΩ soldado entre IN2 y +3.3V
+- [ ] A1.10. Pull-up 4.7 kΩ soldado entre IN3 y +3.3V
+- [ ] A1.11. Pull-up 4.7 kΩ soldado entre IN4 y +3.3V
+- [ ] A1.12. Pull-up 10 kΩ soldado entre IN5 y +3.3V
+- [ ] A1.13. G(lado IN) conectado a GND_logic (STM32 + ESP32 — mismo nodo)
+
+**A2 — Módulo relé con retardo hardware (alimentación)**
+
+- [ ] A2.1. DC+ conectado a +12V batería **permanente** (no ACC)
+- [ ] A2.2. DC− conectado a GND
+- [ ] A2.3. X1 / Trigger conectado a línea ACC (llave ON = +12V)
+- [ ] A2.4. COM conectado a +12V batería permanente
+- [ ] A2.5. NO conectado a entrada del regulador 5V
+- [ ] A2.6. NC sin conectar
+- [ ] A2.7. Potenciómetro ajustado a **30–60 segundos**
+- [ ] A2.8. **GPIO 41 ESP32 NO conectado** al módulo retardo ni a ningún componente externo
+
+**A3 — Módulo relé 2 canales SRD-12VDC-SL-C (tracción + dirección)**
+
+- [ ] A3.1. Jumper VCC/JD-VCC **retirado**
+- [ ] A3.2. VCC → 3.3V lógica
+- [ ] A3.3. JD-VCC → 12V batería
+- [ ] A3.4. GND → GND lógica
+- [ ] A3.5. Jumper trigger en posición **H** (HIGH = relé ON)
+- [ ] A3.6. IN1 ← STM32 PC11 (RELAY_TRAC)
+- [ ] A3.7. IN2 ← STM32 PC12 (RELAY_DIR)
+- [ ] A3.8. Verificar pull-down IN1: medir IN1→GND. Si > 1 MΩ → soldar 10 kΩ externo
+- [ ] A3.9. Verificar pull-down IN2: medir IN2→GND. Si > 1 MΩ → soldar 10 kΩ externo
+
+**A4 — Módulo relé 2 canales SRD-05VDC-SL-C (LEDs)**
+
+- [ ] A4.1. Jumper VCC/JD-VCC **retirado**
+- [ ] A4.2. VCC → 3.3V lógica
+- [ ] A4.3. JD-VCC → 5V regulador
+- [ ] A4.4. GND → GND lógica
+- [ ] A4.5. Jumper trigger en posición **H**
+- [ ] A4.6. IN1 ← STM32 PB10 (RELAY_LED)
+- [ ] A4.7. IN2 ← STM32 PB11 (RELAY_LED_REAR)
+- [ ] A4.8. Verificar pull-down IN1: medir IN1→GND. Si > 1 MΩ → soldar 10 kΩ externo
+- [ ] A4.9. Verificar pull-down IN2: medir IN2→GND. Si > 1 MΩ → soldar 10 kΩ externo
+
+**A5 — Contactores de potencia externos**
+
+- [ ] A5.1. Diodo flyback 1N4007 en paralelo con bobina del contactor tracción: **cátodo → bobina+, ánodo → bobina−/GND**
+- [ ] A5.2. Diodo flyback 1N4007 en paralelo con bobina del contactor dirección: **cátodo → bobina+, ánodo → bobina−/GND**
+- [ ] A5.3. Snubber RC (100 nF + 100 Ω en serie) en paralelo con contactos COM–NO de cada contactor
+- [ ] A5.4. Verificar polaridad con polímetro: cátodo del 1N4007 (banda) en el lado + de la bobina
+
+**A6 — Star Ground**
+
+- [ ] A6.1. Un único punto de estrella físico (busbar GND o terminal batería−)
+- [ ] A6.2. STM32 GND → punto estrella (cable directo, sin cadena)
+- [ ] A6.3. ESP32 GND → punto estrella (cable directo)
+- [ ] A6.4. BTS7960 GND (todos) → punto estrella (cable ≥ 4 mm²)
+- [ ] A6.5. HY-M158 G(lado V) → punto estrella (cable directo independiente, NO encadenado)
+- [ ] A6.6. Módulos relé GND → punto estrella
+- [ ] A6.7. Buck 5V GND− → punto estrella
+
+**A7 — Verificación final pre-encendido (resistencias)**
+
+- [ ] A7.1. Medir +12V vs GND (con llave OFF): > 100 kΩ (sin cortocircuitos)
+- [ ] A7.2. Medir +5V vs GND (regulador desconectado de carga): > 1 kΩ
+- [ ] A7.3. Medir +24V vs GND: > 100 kΩ
+
+**A8 — Verificación de aislamiento galvánico HY-M158** *(obligatoria — no alimentar sin completar)*
+
+> ⛔ Este punto es el último escudo antes de encender. Un módulo con aislamiento roto
+> puede dañar la MCU en el primer encendido.
+
+- [ ] A8.1. Polímetro en modo **CONTINUIDAD** (modo con pitido/buzzer)
+- [ ] A8.2. Sonda roja → **G del lado V** (terminal de masa del bloque 12V, lado izquierdo del módulo)
+- [ ] A8.3. Sonda negra → **G del lado IN** (terminal de masa del bloque lógico, lado derecho del módulo)
+- [ ] A8.4. Resultado esperado: **CIRCUITO ABIERTO — sin pitido, sin continuidad** ✅
+
+| Resultado | Interpretación | Acción |
+|-----------|---------------|--------|
+| Sin pitido (abierto) | Aislamiento galvánico **correcto** | Continuar a FASE B |
+| Pitido (continuidad) | **ERROR CRÍTICO** — jumpers no retirados, o pista interna del PCB une los GND | **NO alimentar. Revisar y corregir antes de continuar** |
+
+> **Si hay continuidad entre G(lado V) y G(lado IN):**
+> 1. Verificar que los 8 jumpers rojos están físicamente retirados (no solo sueltos)
+> 2. Con jumpers retirados y continuidad persistente → hay una pista del PCB que une los dos GND
+>    (algunas variantes del HY-M158 la tienen). En ese caso: cortar la pista o usar otro módulo.
+
+---
+
+### FASE B — PRIMER ENCENDIDO
+
+*Alimentar CON CARGAS DESCONECTADAS (sin BTS7960, sin motores, sin relés de potencia).*
+
+- [ ] B1. Llave en ON → módulo retardo cierra → 5V disponible en salida del regulador buck
+- [ ] B2. Medir tensión en salida buck: **4.9 V a 5.1 V** ✅
+- [ ] B3. STM32 arranca (LED de heartbeat o UART visible)
+- [ ] B4. ESP32 arranca (audio de bienvenida o LED de status)
+- [ ] B5. Medir tensión +3.3V en raíl lógico: **3.2 V a 3.4 V** ✅
+- [ ] B6. Medir tensión +12V en JD-VCC de módulos relé: **10.8 V a 14.4 V** ✅
+- [ ] B7. **Relés SRD-12VDC-SL-C NO se activan solos** durante el arranque del STM32
+- [ ] B8. **Relés SRD-05VDC-SL-C NO se activan solos** durante el arranque
+- [ ] B9. Girar llave OFF → GPIO 40 ESP32 cambia a HIGH (medir o verificar por UART)
+- [ ] B10. Módulo retardo inicia cuenta atrás T seg — relé permanece cerrado durante ese tiempo
+- [ ] B11. Pasados T seg → relé abre → 5V cortado → STM32 y ESP32 se apagan
+- [ ] B12. Sin calentamientos anómalos en regulador buck, módulos relé o STM32
+
+---
+
+### FASE C — VERIFICACIÓN FUNCIONAL COMPLETA
+
+*Con todas las cargas conectadas. Llave en ON.*
+
+- [ ] C1. Sensores LJ12A3 generan pulsos → STM32 los lee (verificar por CAN o UART)
+- [ ] C2. Llave ACC detectada correctamente por ESP32 GPIO 40 (LOW = llave ON)
+- [ ] C3. Relés de potencia (PC11/PC12) responden a las órdenes del STM32 — se oye el click
+- [ ] C4. Relés LED (PB10/PB11) responden a las órdenes del STM32 — tiras LED se encienden
+- [ ] C5. Sin calentamiento anómalo en BTS7960, relés, reguladores o cables tras 5 minutos de operación
+- [ ] C6. Al girar llave OFF: ESP32 inicia secuencia de apagado, STM32 entra en SAFE, motores OFF antes del corte de alimentación
+
+---
+
 > **Documento generado a partir del firmware verificado:**
 > `esp32/src/power_manager.h`, `esp32/src/power_manager.cpp`,
 > `esp32/src/main.cpp`, `Core/Src/safety_system.c`,
 > `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/can_handler.c`.
 > No contiene hardware inventado ni estimado.
+> **Última revisión:** 2026-04-29 (rev 3) — Subsección CRITERIO EMI en TVS, punto A8 verificación aislamiento galvánico en FASE A, regla ORO-8 en REGLAS DE ORO HY-M158.

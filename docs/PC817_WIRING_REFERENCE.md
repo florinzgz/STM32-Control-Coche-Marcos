@@ -13,7 +13,7 @@
 |---|-----------|---------|
 | C1 | Topología de entrada LJ12A3 corregida — el cable NEGRO (señal NPN) va a IN-, no a GND | **Crítico** — error de cableado que impediría funcionar |
 | C2 | Descripción de aislamiento GND corregida — STM32 y ESP32 **comparten GND lógico** | Importante |
-| C3 | Diodo 1N4148 antiparalelo añadido como protección automotriz | Recomendado |
+| C3 | Diodo 1N4148 antiparalelo → **reemplazado por TVS P6KE18CA** (mayor protección) | Actualización |
 | C4 | **Canal A6 (señal Z) MOVIDO al 6N137** — ya no usa PC817. Ver `docs/ENCODER_WIRING_6N137.md` | **Cambio de cableado** |
 | C5 | Módulo físico identificado: **HY-M158** de 8 canales — los SMD `302` (3 kΩ) ya están a bordo en serie con cada LED → **no hace falta añadir la 1 kΩ externa de entrada** | Simplificación |
 | C6 | **Jumpers rojos del módulo: QUITAR todos.** Con ellos puestos cortocircuitan GND_vehicle con GND_logic y anulan el aislamiento galvánico | **Crítico** — montaje |
@@ -72,7 +72,7 @@
 | ~~Resistencia entrada~~ | ~~1 kΩ ¼W~~ | ~~lado 12V~~ — **NO añadir, ya integrada en placa (3 kΩ SMD `302`)** |
 | **Pull-up salida** (4 ruedas FR/FL/RR/RL) | **4.7 kΩ 1/8W** | Entre `IN_n` (colector) y **+3.3V**, lado lógico |
 | **Pull-up salida** (Llave de contacto) | **10 kΩ 1/8W** | Entre `IN_n` (colector) y **+3.3V**, lado ESP32 |
-| **1N4148** *(recomendado)* | Diodo señal 100V/200mA | Antiparalelo con el LED PC817, protección automotriz |
+| **P6KE18CA** *(obligatorio)* | TVS bidireccional 600 W, DO-15/DO-201 | Entre `V_n` y `G` del lado V — protección automotriz (sustituye al 1N4148) |
 
 ### Por qué la 3 kΩ integrada del HY-M158 es suficiente para 12 V:
 ```
@@ -141,37 +141,194 @@ LADO 3.3 V (terminales IN1…IN8 + sus G del MISMO lado):
 
 ---
 
-## PROTECCIÓN AUTOMOTRIZ — DIODO 1N4148 *(RECOMENDADO)*
+## PROTECCIÓN AUTOMOTRIZ — TVS P6KE18CA *(OBLIGATORIO)*
 
-> ⚠️ **RECOMENDADO para entornos automotrices.** Los transitorios negativos en
-> el bus de 12V (arranque de motor, cargas inductivas) pueden superar −1V en la
-> línea de señal del sensor, lo que dañaría el LED del PC817 por corriente inversa.
+> ⚠️ **OBLIGATORIO para entornos automotrices.** El bus de 12 V del vehículo
+> presenta transitorios de alta energía en ambas polaridades:
+>
+> - **Transitorios positivos (load dump, ISO 7637-2 pulso 5a):** +40 V / 400 ms
+>   al desconectar la batería con el alternador en marcha.
+> - **Transitorios negativos:** picos por debajo de 0 V por cargas inductivas
+>   (arranque de motor, bobinas de relé).
+>
+> La resistencia integrada de 3 kΩ limita la corriente pero **no la tensión**.
+> Sin TVS, un transitorio de +40 V daría `I_LED = (40−1.2)/3000 ≈ 12.9 mA`
+> con la tensión de pico directamente sobre el LED — el PC817 tiene
+> `V_R_máx = 6 V` y `V_F_abs_máx = 3 V`. El TVS clampea ambas polaridades antes
+> de que lleguen al LED.
 
-Añadir **1 diodo 1N4148 en antiparalelo** con el LED del PC817 por canal:
+### Especificación del TVS
+
+| Parámetro | Valor |
+|-----------|-------|
+| Tipo | **P6KE18CA** (bidireccional) |
+| Tensión de clamping (Vc a I_pp = 5 A) | 29.2 V |
+| Potencia de disipación de pico | 600 W (10/1000 µs) |
+| Corriente de fuga a 12 V | < 1 µA (no afecta al sensor) |
+| Polaridad | **Bidireccional — no importa la orientación** |
+| Encapsulado | DO-15 / DO-201 |
+
+> **Nota:** Un TVS bidireccional (CA = "bidireccional") protege simultáneamente
+> contra picos positivos Y negativos con un único componente por canal.
+
+### Posición de montaje
 
 ```
-       Ánodo LED (IN+)
-           │
-           ▼  LED
-           │  PC817
-           │
-       Cátodo LED (IN-)
-           │
+LADO 12V — entre V_n del HY-M158 y GND_vehicle (G del lado V):
 
-Diodo 1N4148 antiparalelo:
-  Cátodo 1N4148 → IN+ (mismo nodo que ánodo LED)
-  Ánodo  1N4148 → IN- (mismo nodo que cátodo LED)
+  +12V ─────────────────────────────────► HY-M158 V_n
+                     │
+                 [P6KE18CA]   ← TVS bidireccional
+                 (DO-15/DO-201)
+                     │
+  GND_vehicle ──────────────────────────► HY-M158 G (lado V)
 
-  Corriente directa PC817: normal (LED conduce)
-  Transición negativa:     1N4148 conduce → limita V_inversa a ~0.7V → LED protegido ✅
+  El TVS va en paralelo con la entrada del canal.
+  Cuando la tensión en V_n supera ±18 V respecto a GND_vehicle,
+  el TVS conduce y clampea el pico. A 12 V nominal es prácticamente
+  circuito abierto (I_fuga < 1 µA).
 ```
 
-| Componente | Valor | Montaje | Propósito |
-|-----------|-------|---------|-----------|
-| 1N4148 × 7 | Diodo de señal 100V/200mA | Antiparalelo con el LED PC817 | Protección contra picos negativos automotrices |
+### Una unidad por canal activo
 
-*Si no se añade: el PC817 admite V_R máx. = 6V (datasheet). En entorno automotriz limpio
-esto puede ser suficiente, pero se recomienda el 1N4148 como medida de robustez de bajo costo.*
+| Canal | Señal | TVS |
+|-------|-------|-----|
+| V1 | Sensor rueda FR (LJ12A3) | P6KE18CA × 1 |
+| V2 | Sensor rueda FL (LJ12A3) | P6KE18CA × 1 |
+| V3 | Sensor rueda RR (LJ12A3) | P6KE18CA × 1 |
+| V4 | Sensor rueda RL (LJ12A3) | P6KE18CA × 1 |
+| V5 | Llave de contacto (ACC) | P6KE18CA × 1 |
+| V6–V8 | *Libres — no conectados* | No necesario |
+
+**Total: 5 × P6KE18CA**
+
+> ~~NOTA: La recomendación anterior de diodo 1N4148 antiparalelo ha sido eliminada.~~
+> El TVS P6KE18CA cubre tanto los transitorios positivos (load dump) como los
+> negativos con mayor margen de energía (600 W de pico) y con un único componente.
+> El 1N4148 solo cubría transitorios negativos y únicamente hasta 200 mA de pico.
+
+---
+
+## UBICACIÓN FÍSICA DEL TVS — MONTAJE REAL EN EL MÓDULO HY-M158
+
+> Esta sección describe dónde y cómo soldar físicamente los TVS P6KE18CA.
+> Seguir estas instrucciones garantiza protección correcta sin riesgo
+> de cortocircuito entre dominios de masa.
+
+### Posición de soldadura
+
+Los TVS se sueldan en la **cara trasera del módulo HY-M158**, es decir,
+en el lado del PCB que no tiene los componentes visibles (flip del módulo).
+
+```
+Vista frontal del módulo HY-M158 (posición normal, texto arriba):
+┌─────────────────────────────────────────────┐
+│  HY-M158          (texto superior)          │
+│  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ │ ← jumpers rojos (RETIRADOS)
+│  │ 8 │ │ 7 │ │ 6 │ │ 5 │ │ 4 │ │ 3 │ │ 2 │ │  V8–V2 (terminales lado 12V)
+│  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ │
+│  ┌───┐                                       │
+│  │ 1 │  ← V1 (fondo, lado 12V)              │
+│  └───┘  G (masa lado V, abajo izquierda)     │
+│                                               │
+│  ┌───┐ ... ┌───┐   IN8–IN1 (terminales       │
+│  │IN8│     │IN1│   lado lógico 3.3V)          │
+│  └───┘     └───┘                             │
+│  817 Module       (texto inferior)           │
+└─────────────────────────────────────────────┘
+
+Vista trasera (cara de soldadura del TVS):
+┌─────────────────────────────────────────────┐
+│                                             │
+│   V1 ●───[P6KE18CA]───● G(lado V)          │
+│   V2 ●───[P6KE18CA]───● G(lado V)          │
+│   V3 ●───[P6KE18CA]───● G(lado V)          │
+│   V4 ●───[P6KE18CA]───● G(lado V)          │
+│   V5 ●───[P6KE18CA]───● G(lado V)          │
+│                                             │
+│   (V6, V7, V8 → sin TVS — canales libres)  │
+└─────────────────────────────────────────────┘
+```
+
+### Reglas de soldadura
+
+| Regla | Descripción |
+|-------|-------------|
+| **Pata 1** | Soldada al pad del terminal V_n del canal correspondiente |
+| **Pata 2** | Soldada al pad del terminal G del **lado V** (12V, izquierdo) |
+| **NO** cruzar masas | Nunca conectar al G del lado IN (3.3V, derecho) |
+| **Polaridad** | No importa — el P6KE18CA es bidireccional |
+| **Longitud de pata** | Cortar al mínimo posible (< 3 mm desde cuerpo) para reducir inductancia de pico |
+| **Punto G común** | Varios TVS pueden compartir el mismo pad G del lado V — es el mismo nodo |
+
+### Diagrama eléctrico del TVS en circuito
+
+```
+  Batería 12V permanente
+        │
+        ├──[fusible 1A]──► Terminal V_n del HY-M158
+        │                         │
+        │                  [3kΩ on-board]
+        │                         │
+        │                       PC817 LED
+        │                         │
+        │                  Terminal G (lado V) ←── GND_vehicle
+        │
+        └── [P6KE18CA] ──┘
+             │         │
+           V_n (pad)  G lado V (pad)
+           (cara trasera PCB)
+
+  Función:
+  - En régimen (12V): I_fuga < 1µA → circuito abierto efectivo ✅
+  - Pico +40V (load dump): TVS conduce → clampea a 29.2V → protege LED ✅
+  - Pico negativo: TVS conduce en sentido inverso → clampea → LED protegido ✅
+```
+
+### Regla crítica: referencia de masa
+
+```
+✅ CORRECTO:
+   TVS P6KE18CA entre V_n  ←→  G del LADO V (GND_vehicle, lado 12V)
+
+❌ INCORRECTO (destruye el aislamiento galvánico):
+   TVS P6KE18CA entre V_n  ←→  G del LADO IN (GND_logic, lado 3.3V)
+```
+
+> **Si el TVS se conecta al G del lado IN, se crea un camino de baja impedancia
+> entre GND_vehicle y GND_logic durante cualquier transitorio, anulando el
+> aislamiento galvánico del PC817.**
+
+### UBICACIÓN ÓPTIMA (CRITERIO EMI)
+
+El TVS debe colocarse **físicamente lo más cerca posible del terminal V_n**,
+es decir, directamente en los pads del conector del módulo (cara trasera PCB).
+
+**Por qué importa la ubicación:**
+Un TVS absorbe el transitorio de forma efectiva solo si lo intercepta **antes** de
+que se propague por las pistas del PCB hacia el circuito activo (LED, PC817).
+Si el TVS se aleja del punto de entrada del cable, el pulso de alta tensión
+ya habrá recorrido centímetros de pista — y en esos centímetros, la inductancia
+parásita puede inducir sobretensiones locales que dañan el LED del PC817.
+
+```
+CORRECTO — TVS en el punto de entrada:
+  [Cable 12V del sensor/llave]──►[TVS inmediatamente en V_n]──►[pista PCB]──►[3kΩ]──►[PC817 LED]
+
+INCORRECTO — TVS lejos del conector:
+  [Cable 12V del sensor/llave]──►[pista PCB larga]──►[3kΩ]──►[PC817 LED]
+                                         │
+                                      [TVS aquí]   ← demasiado tarde, el ruido ya entró
+```
+
+**Reglas de ubicación:**
+
+| Regla | Descripción |
+|-------|-------------|
+| **Proximidad** | El cuerpo del TVS a ≤ 5 mm del pad del terminal V_n |
+| **Patas cortas** | Recortar patas a < 3 mm desde el cuerpo — la inductancia de pata reduce la eficacia del clampeo |
+| **No prolongar** | No usar cable volante para alejar el TVS del conector |
+| **Cara trasera** | Soldar siempre en los pads de la cara trasera, no en un punto arbitrario de la pista |
 
 ---
 
@@ -209,7 +366,7 @@ Topología correcta para excitar el LED del PC817 (módulo HY-M158, **resistenci
   GND_vehicle ──────────────────────────────────────────────────────────────► AZUL (GND sensor LJ12A3)
                        (mismo nodo que `G` del lado V del HY-M158, **NUNCA** unido a `G` del lado IN)
 
-  [1N4148 antiparalelo opcional: cátodo → V_n, ánodo → G del lado V]   ← RECOMENDADO
+  [P6KE18CA entre V_n y G del lado V]   ← OBLIGATORIO (TVS bidireccional)
 
 ════════════ LADO 3.3V (salida — terminal IN_n del HY-M158) ════════════
 
@@ -256,7 +413,7 @@ Topología correcta para excitar el LED del PC817 (módulo HY-M158, **resistenci
                                                               │
                                                               └──► HY-M158 G (lado V) ──► GND_vehicle
 
-  [1N4148 antiparalelo opcional: cátodo → V5, ánodo → G del lado V]   ← RECOMENDADO
+  [P6KE18CA entre V5 y G del lado V]   ← OBLIGATORIO (TVS bidireccional)
 
 ════════════ LADO 3.3V (salida — terminal IN5 del HY-M158) ════════════
 
@@ -339,7 +496,7 @@ Ver `docs/ENCODER_WIRING_6N137.md` para el circuito completo del encoder.
 | ~~5~~ | ~~1 kΩ ¼W~~ | — | **NO necesarias** — la HY-M158 ya integra 3 kΩ (SMD `302`) en cada canal |
 | 4 | **4.7 kΩ 1/8 W** | Film metal | Pull-up salida `IN1`–`IN4` (4 ruedas → STM32) |
 | 1 | **10 kΩ 1/8 W** | Film metal | Pull-up salida `IN5` (llave → ESP32 GPIO 40) |
-| 5 | **1N4148** | Diodo señal 100V/200mA | Antiparalelo LED PC817, protección automotriz *(recomendado, 1 por canal en uso)* |
+| 5 | **P6KE18CA** | TVS bidireccional 600W | Entre V_n y GND_vehicle — protección automotriz *(obligatorio, 1 por canal en uso)* |
 
 *(Para el divisor del pedal: 1× 10 kΩ + 1× 6.8 kΩ — pedido por separado)*
 *(Para el encoder E6B2-CWZ6C ver `docs/ENCODER_WIRING_6N137.md` — usa 3× 6N137 con sus propias R_IN y pull-ups)*
@@ -385,8 +542,8 @@ GND_logic   (3.3V) ─── G del lado IN del HY-M158 ─┤
    (3 kΩ SMD `302` por canal).
 4. El módulo necesita **alimentación 3.3V en el lado lógico** (no 5V) para los
    pull-ups externos. Usar el LDO externo AMS1117-3.3, no el pin 3.3V de la Nucleo-64.
-5. Los diodos 1N4148 antiparalelo se sueldan junto a cada terminal de entrada
-   `V_n` del lado 12 V del módulo (cátodo a `V_n`, ánodo a `G` del lado V).
+5. Los TVS P6KE18CA se sueldan entre cada terminal `V_n` y el terminal `G` del lado V
+   del módulo. Polaridad no importa (bidireccional). Un TVS por canal activo (V1–V5).
 6. Los 3 canales libres (`IN6`, `IN7`, `IN8`) se dejan **sin cablear** por ambos
    lados (ni en V ni en IN). Constituyen reserva para futuras señales aisladas
    12 V → 3,3 V (p. ej. luces de freno, sensor de marcha atrás, etc.).
@@ -435,6 +592,43 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 
 ---
 
+## REGLAS DE ORO HY-M158
+
+> Estas reglas resumen los puntos más críticos de montaje. Si alguna no se
+> cumple, el módulo puede no funcionar o dañar otros componentes.
+
+| # | Regla | Consecuencia si se incumple |
+|---|-------|----------------------------|
+| **ORO-1** | Todos los TVS P6KE18CA referenciados al **mismo GND_vehicle** (G lado V) | Si van al G lado IN → se pierde el aislamiento galvánico en cada transitorio |
+| **ORO-2** | Ningún componente del lado 12V debe tocar el GND lógico | Cortocircuito entre dominios → daño posible al STM32 o ESP32 |
+| **ORO-3** | Los 8 jumpers rojos **SIEMPRE retirados** antes de alimentar | Con jumpers puestos: GND_vehicle = GND_logic → inutiliza el aislamiento |
+| **ORO-4** | Verificación con polímetro **obligatoria** antes del primer encendido | Un módulo defectuoso puede tener pistas internas que unen los GND |
+| **ORO-5** | NO añadir resistencia externa en el lado 12V de entrada | La 3 kΩ on-board ya limita la corriente → añadir otra reduciría I_LED y podría impedir la saturación |
+| **ORO-6** | Pull-ups **solo en el lado lógico** (IN_n) — nunca en el lado 12V | Pull-up en V_n fijaría la línea alta e impediría la detección del sensor |
+| **ORO-7** | Canales libres (IN6–IN8 / V6–V8) → sin cablear por **ambos lados** | Dejar una pata del PC817 al aire no es riesgo, pero dejar V6–V8 conectados a 12V sin carga podría inducir acoplamiento |
+| **ORO-8** | GND_vehicle (lado 12V) y GND_logic (lado 3.3V) **NO deben unirse** en ningún punto externo al módulo | El único acoplamiento eléctrico permitido entre dominios es a través del PC817 — cualquier unión externa crea un bucle de masa que destruye el aislamiento galvánico y puede generar fallos erráticos o daño en la MCU |
+
+### Verificación rápida pre-encendido (30 segundos con polímetro)
+
+```
+1. Polímetro en modo CONTINUIDAD (pitido):
+   → Sondas entre G(lado V) y G(lado IN)
+   → Resultado esperado: ABIERTO (sin pitido)
+   → Si pita: no alimentar — revisar jumpers y pistas del PCB
+
+2. Polímetro en modo RESISTENCIA:
+   → Sondas entre V1 y G(lado V)
+   → Resultado esperado: ≥ 18 kΩ (TVS no conduce a tensión de medición del polímetro)
+   → Si mide < 1 kΩ: el TVS está en cortocircuito — reemplazar
+
+3. Polímetro en modo RESISTENCIA:
+   → Sondas entre IN1 y G(lado IN)
+   → Resultado esperado: 4.7 kΩ (pull-up soldado correctamente)
+   → Para IN5: 10 kΩ
+```
+
+---
+
 *Documento creado a partir de `power_manager.h`, `project_config.h` y*
 *`docs/VALIDACION_CAN_PULLUP_PC817.md`. Revisado y corregido: 2026-04-28b.*
 *Cambios rev. 2026-04-28b: módulo identificado como **HY-M158** (PC817 ×8); jumpers rojos*
@@ -442,3 +636,5 @@ Ver `docs/CONEXIONES_COMPLETAS.md §9` para el esquema completo y tablas de cone
 *canal Z del encoder retirado del PC817 y movido al 6N137 (ver `ENCODER_WIRING_6N137.md`);*
 *reasignación física (de abajo a arriba): IN1=FR, IN2=FL, IN3=RR, IN4=RL, IN5=Llave;*
 *IN6–IN8 reserva.*
+*Cambios rev. 2026-04-29: TVS P6KE18CA sustituye al 1N4148; añadidas sección de*
+*ubicación física del TVS (con subsección CRITERIO EMI) y REGLAS DE ORO HY-M158 (incluye ORO-8 aislamiento de masas).*
