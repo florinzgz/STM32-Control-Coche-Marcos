@@ -94,10 +94,13 @@ static inline void sat_inc_u32(uint32_t *counter) {
  * (Relay_SequencerUpdate) is called every 10 ms from the main safety loop
  * and uses HAL_GetTick() timestamps to progress through the sequence:
  *
- *   MAIN ON  ──(50 ms)──▸  TRACTION ON  ──(20 ms)──▸  DIRECTION ON
- *   (PC10)                  (PC11)                      (PC12)
+ *   TRACTION ON  ──(50 ms)──▸  DIRECTION ON
+ *   (PC11)                      (PC12)
  *
- * Total sequence: ~70 ms (deterministic, jitter ≤ 10 ms from loop cadence).
+ * NOTE: PC10 is RESERVED/unused. There is no physical MAIN contactor —
+ * the 24 V battery feeds RELAY_TRAC (PC11) directly.
+ *
+ * Total sequence: ~50 ms (deterministic, jitter ≤ 10 ms from loop cadence).
  *
  * ⚠ EXTERNAL DELAY RELAY MODULES (if present in the power path):
  *   External "delay relay" modules (5V/12V/24V timer relays) used to

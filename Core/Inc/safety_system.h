@@ -313,7 +313,7 @@ void Relay_SequencerUpdate(void);
  *
  * CAN interface: SERVICE_CMD (0x110) action 0xE0, byte1 = relay mask:
  *   bit 0: override enable
- *   bit 1: MAIN relay
+ *   bit 1: reserved (legacy MAIN slot — PC10 not connected, always ignored)
  *   bit 2: TRACTION relay
  *   bit 3: DIRECTION relay                                               */
 void Safety_SetRelayOverride(bool enabled, uint8_t mask);

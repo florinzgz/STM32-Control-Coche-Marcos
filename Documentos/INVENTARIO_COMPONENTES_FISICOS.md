@@ -102,9 +102,9 @@
 - CBB22 (film 250V) → aguanta alta tensión AC; va en circuitos conectados a red 230V o en snubber de relés con bobinas de 24V donde hay picos de tensión altos
 
 **Uso en el proyecto:**
-- **Snubber RC de relés** → los contactos de RELAY_MAIN/TRAC/DIR generan arcos → 100nF en serie con 100Ω paralelo a los contactos. La tensión de trabajo es 24V, pero los picos de conmutación pueden llegar a 100-200V; la CBB22 a 250V aguanta esto mejor que la cerámica 50V
-- **Recomendado:** usar las CBB22 preferentemente en las 3 posiciones de snubber de relé, y guardar las cerámicas 50V para los bypass de ICs
-- Sobran 17 de reserva
+- **Snubber RC de relés** → los contactos de RELAY_TRAC/DIR generan arcos → 100nF en serie con 100Ω paralelo a los contactos. La tensión de trabajo es 24V (TRAC) y 12V (DIR), pero los picos de conmutación pueden llegar a 100-200V; la CBB22 a 250V aguanta esto mejor que la cerámica 50V
+- **Recomendado:** usar las CBB22 en las 2 posiciones de snubber de relé (RELAY_TRAC y RELAY_DIR), y guardar las cerámicas 50V para los bypass de ICs
+- Sobran 18 de reserva (20 − 2 snubbers)
 
 ---
 
@@ -186,7 +186,7 @@
 | Base BC547 retención | **1 kΩ** | GPIO41 ESP32 → transistor | 1 |
 | Entrada 6N137 encoder | **330 Ω** | R_IN encoder (×3) | 3 |
 | Datos WS2812B serie | **330 Ω** | Protección LED DIN (×2) | 2 |
-| Snubber RC relé | **100 Ω** | Paralelo contactos (×3) | 3 |
+| Snubber RC relé | **100 Ω** | Paralelo contactos (×2) | 2 |
 
 ### 4.2 — Kit 1/4W Metal Film 1% — AUKENIEN estilo, 600 piezas / 30 valores (10Ω → 1MΩ)
 
@@ -220,7 +220,7 @@
 
 | Resistencia | Valor | Función en proyecto | Qty necesaria | ¿En 1/8W también? |
 |-------------|-------|---------------------|--------------|-------------------|
-| Snubber RC relé | **100 Ω / 0.25W** | Paralelo contactos MAIN/TRAC/DIR | 3 | ⚠️ En 1/8W es 0.125W — **USAR ESTE 1/4W** |
+| Snubber RC relé | **100 Ω / 0.25W** | Paralelo contactos TRAC/DIR | 2 | ⚠️ En 1/8W es 0.125W — **USAR ESTE 1/4W** |
 | Serie datos WS2812B | **330 Ω / 0.25W** | Protección DIN LED (×2) | 2 | ✅ suficiente en 1/8W también |
 | Pull-up I2C / encoder | **4.7 kΩ** | SCL/SDA + salida 6N137 | 7 | ✅ En ambos kits |
 | Divisor pedal Hall | **10 kΩ** | PA3 ADC pedal | 1 | ✅ En ambos kits |
@@ -259,7 +259,7 @@
 | Encapsulado | DO-15 |
 | Cantidad | **20 piezas** |
 
-**Uso:** Protección en líneas de 24 V (baterías de tracción), protección de contactos relés MAIN/TRAC/DIR.
+**Uso:** Protección en líneas de 24 V (baterías de tracción), protección de contactos relés TRAC/DIR.
 
 ---
 
@@ -273,9 +273,9 @@
 | Encapsulado | DO-27 |
 | Cantidad | **50 piezas** |
 
-**Uso:** Flyback antiparalelo con bobinas de relés (MAIN, TRAC, DIR, LED, LED_REAR, audio).  
+**Uso:** Flyback antiparalelo con bobinas de relés (TRAC, DIR, LED, LED_REAR, audio).  
 Sustituye perfectamente al 1N4007 (3A > 1A, 1000V = igual) — **más seguro, mismo coste**.  
-Usar: **5 diodos** para los 5 módulos de relé + **1** para relé retención = **6 en total**, sobran 44.
+Usar: **5 diodos** para los 5 módulos de relé (TRAC, DIR, LED, LED_REAR, audio) + **1** para relé retención = **6 en total**, sobran 44.
 
 ---
 
@@ -353,7 +353,7 @@ Usar: **5 diodos** para los 5 módulos de relé + **1** para relé retención = 
 |-----------|-------------------|
 | Protección antiparalelo LED PC817 (5 canales LJ12A3) | 5 |
 | Protección antiparalelo LED 6N137 (3 canales encoder A/B/Z) | 3 |
-| Diodos OR retención relé MAIN/TRAC/DIR | 6–9 |
+| Diodos OR retención relé TRAC/DIR | 4–6 |
 | Flyback de relés pequeños de señal (si se añaden, bobina <100 mA) | reserva |
 | Clamps protección entradas digitales STM32 (3.3V/GND) | reserva |
 | Repuesto general / prototipado | resto |
@@ -454,7 +454,7 @@ Con el kit ALLECIN:
   Rail 5V  ──[10µF/25V]───► SN65HVD230 CAN (ESP32)     ✅ kit
   Rail 12V ──[470µF/16V]──► BTS7960 STEER bulk          ✅ kit
 
-  Rail 24V ──[1000µF/16V]─► Bulk relés MAIN/TRAC        ❌ NO USAR
+  Rail 24V ──[1000µF/16V]─► Bulk relé TRAC               ❌ NO USAR
                └── Usar en cambio: [2200µF/35V] ya en mano ✅
 ```
 
@@ -462,7 +462,7 @@ Con el kit ALLECIN:
 
 ## 7. Mapa de montaje — dónde va cada condensador
 
-### ✅ Condensadores 100 nF / 50 V (código 104) — TIENES 100, NECESITAS ~22
+### ✅ Condensadores 100 nF / 50 V (código 104) — TIENES 100, NECESITAS ~21
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -475,16 +475,16 @@ Con el kit ALLECIN:
 │  BTS7960 RR (motor RR)   │  3   │ igual que FL                      │
 │  BTS7960 STEER (dirección│  3   │ igual que FL                      │
 ├─────────────────────────────────────────────────────────────────────┤
-│  RELAY_MAIN (PC10)       │  1   │ Paralelo contactos NO (+ R=100Ω) │
 │  RELAY_TRAC (PC11)       │  1   │ Paralelo contactos NO (+ R=100Ω) │
 │  RELAY_DIR  (PC12)       │  1   │ Paralelo contactos NO (+ R=100Ω) │
+│  (RELAY_MAIN no existe — PC10 reservado, sin contactor físico)      │
 ├─────────────────────────────────────────────────────────────────────┤
 │  SN65HVD230 CAN STM32    │  1   │ Pin VCC → GND (junto al IC)      │
 │  SN65HVD230 CAN ESP32    │  1   │ Pin VCC → GND (junto al IC)      │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Nucleo STM32 (3.3V)     │  2   │ Pin 3V3 → GND (×2, cerca Nucleo) │
 ├─────────────────────────────────────────────────────────────────────┤
-│  TOTAL USADOS            │ 22   │ Quedan 78 de reserva ✅           │
+│  TOTAL USADOS            │ 21   │ Quedan 79 de reserva ✅           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -559,7 +559,7 @@ Kit 3W 120Ω:
 Kit AUKENIEN 1/8W:
   ├── 330Ω × 3 → Entrada 6N137 encoder (R_IN: PA15, PB3, PB4)
   ├── 330Ω × 2 → Datos WS2812B serie (protección DIN antes del primer LED)
-  ├── 100Ω × 3 → Snubber RC relés (serie con 100nF en contactos MAIN/TRAC/DIR)
+  ├── 100Ω × 2 → Snubber RC relés (serie con 100nF en contactos TRAC/DIR)
   ├── 4.7kΩ × 3 → Pull-up salida 6N137 (a 3.3V: PA15, PB3, PB4)
   ├── 4.7kΩ × 4 → Pull-up bus I2C (PB6 SCL × 2 + PB7 SDA × 2)
   ├── 10kΩ × 1 → Divisor pedal Hall R2 (PA3, mitad inferior del divisor)
@@ -584,7 +584,7 @@ Kit AUKENIEN 1/8W:
 | Bulk 3.3V STM32 | 10 µF / 25V | Rail 3.3V Nucleo | 1 | ✅ EN MANO (kit) |
 | Bulk CAN ESP32 | 10 µF / 25V | SN65HVD230 lado ESP32 | 1 | ✅ EN MANO (kit) |
 | Bulk bus 12V dirección | 470 µF / 16V | BTS7960 STEER B+(12V) | 1 | ✅ EN MANO (kit) |
-| **Bulk bus 24V relés** | **≥1000 µF / 35V** | Rail 24V junto a RELAY_MAIN/TRAC | 1 | ⚠️ **Usar 2200µF/35V en mano** |
+| **Bulk bus 24V relés** | **≥1000 µF / 35V** | Rail 24V junto a RELAY_TRAC | 1 | ⚠️ **Usar 2200µF/35V en mano** |
 
 > **Para el bulk 24V:** Usar uno de los **2200µF/35V ya en mano** (si sobra uno de los 5 para BTS7960). Si no, comprar 1 pieza suelta de 1000µF/35V o 2200µF/35V.
 
