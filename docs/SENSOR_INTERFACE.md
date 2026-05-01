@@ -199,7 +199,36 @@ Cuatro sensores inductivos de proximidad LJ12A3-4-Z/BX (NPN NO) detectan los pul
 | Pulsos por revolución | 6 |
 | Circunferencia de rueda | 1.1 m |
 | Velocidad máx. válida | 25 km/h |
-| Debounce | 1 ms (software) |
+| Debounce µs (DWT, pre-filtro EMI) | **200 µs** (`SENSOR_DEBOUNCE_US`) |
+| Debounce ms (HAL_GetTick, filtro secundario) | 1 ms (`WHEEL_MIN_PULSE_INTERVAL_MS`) |
+
+### FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)
+
+**Problema:** Los optoacopladores EL817 introducen jitter en los flancos de salida cuando el LED se aproxima al umbral de saturación. Además, en entornos automotrices con motores de CC conmutados (PWM 20 kHz), los transitorios EMI inducidos en el cableado pueden generar flancos espurios adicionales. Ambos fenómenos producen el mismo síntoma: pulsos extra dentro de una ventana de microsegundos alrededor del flanco real.
+
+**Solución:** Se implementa un filtro temporal de **dos capas** en el handler de EXTI:
+
+| Capa | Mecanismo | Ventana | Propósito |
+|------|-----------|---------|-----------|
+| **Pre-filtro µs** | DWT->CYCCNT (170 ciclos/µs) | **200 µs** | Elimina bursts EMI y jitter del EL817 |
+| Filtro ms | HAL_GetTick (1 ms resolución) | 1 ms | Rechaza rebotes mecánicos residuales |
+
+**Implementación (en `sensor_manager.c`, función `Wheel_IRQDebounced`):**
+```c
+// Pre-filtro EMI — PRIMER CHECK en el handler, antes de cualquier procesamiento
+uint32_t cyc_now = DWT->CYCCNT;
+if ((cyc_now - wheel_last_edge_cyc[idx]) < sensor_debounce_cycles)
+    return;
+wheel_last_edge_cyc[idx] = cyc_now;
+```
+
+**Validación:**
+- A 25 km/h (máximo), período de pulso ≈ 26 ms → 200 µs = **0,77 %** del período → sin riesgo de pérdida de pulsos reales
+- Los bursts EMI típicos duran 1–50 µs → completamente absorbidos por la ventana de 200 µs
+- `sensor_debounce_cycles` = `SENSOR_DEBOUNCE_US × (SystemCoreClock / 1.000.000)` = `200 × 170` = **34 000 ciclos** (precomputado en `Sensor_Init()`)
+- Variables de estado por canal: `wheel_last_edge_cyc[0..3]` y `steer_last_edge_cyc` — nunca compartidas
+
+**Impacto funcional:** Ninguno en condiciones nominales. Solo filtra pulsos separados < 200 µs entre sí, lo que es físicamente imposible en este sistema a cualquier velocidad real.
 
 ### Resistencias y protección
 
@@ -217,14 +246,15 @@ Cuatro sensores inductivos de proximidad LJ12A3-4-Z/BX (NPN NO) detectan los pul
 ### Motivo técnico
 
 - **6 pulsos/rev:** con circunferencia 1.1 m, a 25 km/h (6.94 m/s) se generan ~37.8 pulsos/s, suficiente resolución sin saturar la ISR.
-- **Debounce 1 ms:** a frecuencia máxima (~38 Hz), el período es ~26 ms; 1 ms de debounce es <4 % del período, filtra rebotes sin perder pulsos.
+- **Pre-filtro 200 µs (DWT):** elimina jitter EL817 y EMI antes de actualizar cualquier contador. Sin impacto en velocidad de cómputo.
+- **Filtro ms (1 ms):** segundo nivel de rechazo para rebotes residuales; período mínimo de pulso real es 26 ms → sin pérdida.
 - **EXTI (interrupciones):** captura exacta del instante del pulso sin polling, crítico para cálculo preciso de velocidad.
 - **EL817 Board 1:** el pull-up integrado de 2,7 kΩ da un τ ≈ 3,2 µs con 1 nF de cable — más rápido que la resistencia externa de 4,7 kΩ usada anteriormente.
 
 ### Qué ocurre si falla
 
 - **Sin pulsos (sensor desconectado o cable roto):** velocidad calculada = 0 km/h. Si los otros 3 sensores reportan movimiento, se detecta fallo de sensor individual.
-- **Pulsos espurios (interferencia):** el debounce de 1 ms los filtra. Si la velocidad calculada supera 25 km/h, se descarta como lectura inválida.
+- **Pulsos espurios (interferencia):** el pre-filtro DWT (200 µs) los absorbe antes de que lleguen al contador. El filtro ms (1 ms) actúa como segunda barrera. Si la velocidad calculada supera 25 km/h, se descarta como lectura inválida.
 - **Cortocircuito a GND permanente:** se interpreta como velocidad infinita → el filtro de velocidad máxima (25 km/h) lo detecta y marca como fallo.
 
 ### Esquema de conexión (con EL817 Board 1)
@@ -246,6 +276,9 @@ Cuatro sensores inductivos de proximidad LJ12A3-4-Z/BX (NPN NO) detectan los pul
   ────────────────── LADO LÓGICO ──────────────────
   +3,3V ──[2,7kΩ on-board]──► colector EL817 ──[470Ω]──► On ──► STM32 PAx
   GND_logic ──────────────────────────────────────────────────── G EL817
+
+  Flujo de señal (en ISR):
+  Flanco EXTI → pre-filtro 200 µs DWT → filtro 1 ms HAL_GetTick → flood-check → wheel_pulse++
 ```
 
 ---
@@ -455,6 +488,17 @@ Sensor inductivo que detecta un tornillo de referencia en el centro mecánico de
 > **Flanco FALLING (bajada), no RISING:** el EL817 invierte la señal.
 > Cuando el tornillo entra en el campo del sensor, el NPN conduce → EL817 output va LOW → FALLING edge.
 > El firmware captura este flanco descendente como el instante exacto del centro (`GPIO_MODE_IT_FALLING`).
+
+### FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)
+
+La señal de centro de dirección es especialmente sensible: un flanco espurio produce una recalibración incorrecta del encoder. El pre-filtro DWT de 200 µs en `SteeringCenter_IRQHandler` elimina cualquier transitorio EMI antes de activar el flag.
+
+| Parámetro | Valor |
+|-----------|-------|
+| Ventana debounce | **200 µs** (`SENSOR_DEBOUNCE_US`) |
+| Mecanismo | DWT->CYCCNT (pre-filtro ISR) |
+| Variable de estado | `steer_last_edge_cyc` (exclusiva, no compartida) |
+| Impacto funcional | Ninguno — el rack tarda >100 ms en recorrer la zona del sensor |
 
 ### Resistencias y protección
 

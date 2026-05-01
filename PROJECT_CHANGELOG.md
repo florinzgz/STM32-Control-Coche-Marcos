@@ -1,5 +1,46 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-01
+
+### [NEW] Sensor debounce + EMI hardening (EL817 optocoupler interface)
+
+Added software debounce (200 µs) to all EXTI sensor inputs connected through EL817 optocouplers, and confirmed hardware protection with P6KE18CA TVS diodes.
+
+#### [NEW] Sensor debounce — Firmware (`Core/`)
+
+- **`Core/Inc/project_config.h`:** Added `SENSOR_DEBOUNCE_US 200U` macro — microsecond-resolution pre-filter threshold for all EXTI sensor channels. Accompanies the existing `WHEEL_MIN_PULSE_INTERVAL_MS 1U` (ms-level secondary filter). Rationale documented inline.
+- **`Core/Src/sensor_manager.c`:**
+  - Added per-channel DWT cycle-counter timestamps:
+    - `wheel_last_edge_cyc[NUM_WHEELS]` — one per wheel, never shared
+    - `steer_last_edge_cyc` — exclusive to steering center channel
+  - Added `sensor_debounce_cycles` (precomputed from `SENSOR_DEBOUNCE_US × SystemCoreClock / 1e6` in `Sensor_Init()`).
+  - `Sensor_Init()`: enables DWT->CYCCNT (idempotent if Motor_Init already did it), precomputes `sensor_debounce_cycles`.
+  - `Wheel_IRQDebounced()`: DWT pre-filter runs as **step 0**, before HAL_GetTick ms-filter and flood-detection. Rejects any edge arriving within 200 µs of the previous accepted edge. No impact on nominal behaviour (pulse period ≥ 26 ms at max speed).
+  - `SteeringCenter_IRQHandler()`: expanded from single-line to include DWT pre-filter (200 µs) before setting `steer_center_flag`. Eliminates EMI-induced spurious re-calibrations of the steering encoder center point.
+
+Filters pulses occurring within < 200 µs — a window in which no real sensor event can occur at any operating speed of this vehicle. Eliminates false triggers caused by EMI and EL817 optocoupler switching noise. No impact on nominal signal processing. No blocking delays, no polling, no architecture changes.
+
+#### [HARDWARE VALIDATION] TVS P6KE18CA
+
+- Confirmed use of **P6KE18CA** TVS diodes (bidireccional, 600 W, DO-15) on the vehicle-side input of each active EL817 channel.
+- Verified correct placement: between `n+` and `n−` of each channel (before the LED), one per active channel (6 total: 4× Board 1, 2× Board 2).
+- **Bidireccional:** adecuado para señales no polarizadas.
+- **V_clamping 29,2 V @ 5 A:** protects EL817 LED against automotive load-dump transients (up to 40 V per ISO 7637-2 level III).
+- **600 W peak power:** sufficient for automotive transient requirements.
+- **DO-15 format:** robust for field installation.
+- Protection aligned with automotive transient requirements. TVS protects the optocoupler LED against voltage spikes induced by inductive loads (motors, relays).
+
+#### [DOCS] Documentation updated
+
+- **`docs/SENSOR_INTERFACE.md`:**
+  - Section 3 (wheel sensors): updated parameter table, added `FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)` subsection with implementation code, validation calculations, and updated ISR flow diagram.
+  - Section 6 (steering center): added `FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)` subsection.
+- **`docs/EL817_WIRING_REFERENCE.md`:**
+  - Section 11 (firmware verification): updated table with debounce column; added `FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)` block with implementation detail, parameter table, and per-channel variable table.
+  - Section 12 (new): `PROTECCIÓN TVS — JUSTIFICACIÓN TÉCNICA` — full technical justification for P6KE18CA including bidirectional rationale, clamping voltage, power rating, format, and numerical comparison with/without TVS.
+
+---
+
 ## [unreleased] — 2026-04-30
 
 ### Changed — PC10 Released + RELAY_MAIN Fully Removed

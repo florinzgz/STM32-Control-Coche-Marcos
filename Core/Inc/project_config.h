@@ -219,11 +219,28 @@
 #define PIN_WHEEL_RL       GPIO_PIN_2   /* PA2 - EXTI2 */
 #define PIN_WHEEL_RR       GPIO_PIN_15  /* PB15 - EXTI15 */
 
+/* High-resolution EMI debounce: minimum microseconds between two accepted
+ * EXTI edges on any sensor channel (wheel or steering-center).
+ * Implemented using the Cortex-M4 DWT cycle counter (170 cycles/µs at
+ * 170 MHz), which gives sub-microsecond resolution — independent of the
+ * 1 ms HAL_GetTick granularity used by the secondary ms-level filter.
+ *
+ * 200 µs rationale:
+ *   - At 25 km/h max speed: pulse period ≈ 26 ms → 200 µs = 0.77 % of
+ *     the period → zero risk of rejecting valid pulses.
+ *   - EL817 opto switching noise / load-transient EMI bursts typically
+ *     last 1–50 µs → 200 µs safely covers the entire noise burst.
+ *   - Reducing to 100 µs also acceptable if richer signal is needed.
+ *     Never increase beyond 500 µs without re-validating pulse loss.    */
+#define SENSOR_DEBOUNCE_US           200U
+
 /* Software debounce: minimum ms between accepted EXTI pulses per wheel.
- * At 25 km/h (max plausible speed), 1.1 m circumference, 6 pulses/rev:
- *   freq = (25/3.6)/1.1 × 6 ≈ 38 Hz → period ≈ 26 ms.
- * 1 ms blanking (HAL_GetTick resolution) safely rejects contact bounce
- * without attenuating valid pulses at any realistic speed.               */
+ * Secondary filter (coarser than SENSOR_DEBOUNCE_US) — HAL_GetTick
+ * resolution is 1 ms.  Catches any residual noise not eliminated by the
+ * 200 µs DWT pre-filter, and sets the hard floor for the flood-detection
+ * window.  At 25 km/h (max plausible speed), 1.1 m circumference,
+ * 6 pulses/rev:  freq ≈ 38 Hz → period ≈ 26 ms.
+ * 1 ms blanking is < 4 % of the period — no valid pulses are rejected.  */
 #define WHEEL_MIN_PULSE_INTERVAL_MS  1U
 
 /* Stale detection: if no new pulse arrives within this window the wheel

@@ -365,24 +365,93 @@ GND_logic   (3,3 V) ─── G del módulo   ────┤
 
 ## 11. VERIFICACIÓN DE FIRMWARE
 
-El firmware **no requiere modificaciones**. Los pines y modos EXTI ya configurados son
-plenamente compatibles con la salida de colector abierto del EL817:
+Los pines y modos EXTI son plenamente compatibles con la salida de colector abierto del EL817.
+Se ha añadido debounce por software de alta resolución (DWT, 200 µs) como capa adicional de protección frente a EMI y jitter del EL817:
 
-| Señal | Pin STM32 | Modo EXTI firmware | Compatible con EL817 |
-|-------|-----------|-------------------|----------------------|
-| Rueda FR | PA1 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | ✅ |
-| Rueda FL | PA0 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | ✅ |
-| Rueda RR | PB15 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | ✅ |
-| Rueda RL | PA2 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | ✅ |
-| Centro volante | PB5 | `GPIO_MODE_IT_FALLING` + `GPIO_PULLUP` | ✅ |
-| Llave contacto | ESP32 GPIO 40 | `INPUT_PULLUP`, LOW = ON | ✅ |
+| Señal | Pin STM32 | Modo EXTI firmware | Debounce µs | Compatible con EL817 |
+|-------|-----------|-------------------|-------------|----------------------|
+| Rueda FR | PA1 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | 200 µs DWT | ✅ |
+| Rueda FL | PA0 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | 200 µs DWT | ✅ |
+| Rueda RR | PB15 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | 200 µs DWT | ✅ |
+| Rueda RL | PA2 | `GPIO_MODE_IT_RISING` + `GPIO_PULLUP` | 200 µs DWT | ✅ |
+| Centro volante | PB5 | `GPIO_MODE_IT_FALLING` + `GPIO_PULLUP` | 200 µs DWT | ✅ |
+| Llave contacto | ESP32 GPIO 40 | `INPUT_PULLUP`, LOW = ON | — | ✅ |
 
 > El pull-up interno del STM32 (~40 kΩ) puede permanecer habilitado sin problema;
 > el pull-up integrado de 2,7 kΩ de la placa EL817 domina y garantiza flancos rápidos.
 
+### FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)
+
+**Problema (EMI + opto):** El EL817, al commutarse cerca del umbral, genera flancos con jitter de 1–50 µs. Los motores de CC controlados por PWM (20 kHz, corrientes >10 A) crean bursts inductivos que pueden inducir falsas conmutaciones en el cableado de sensores, especialmente en instalaciones sin separación de cableado de señal y potencia.
+
+**Solución (filtro temporal por software):**
+
+```
+Cada EXTI handler ejecuta al inicio:
+
+  uint32_t cyc_now = DWT->CYCCNT;
+  if ((cyc_now - last_edge_cyc[canal]) < sensor_debounce_cycles)
+      return;           ← pulso descartado — demasiado rápido (EMI)
+  last_edge_cyc[canal] = cyc_now;
+  // ... procesar pulso válido
+```
+
+**Valor:** 200 µs (`#define SENSOR_DEBOUNCE_US 200U` en `project_config.h`)
+
+**Impacto:** Ninguno en funcionamiento nominal.
+- Período mínimo de pulso real: ~26 ms (a 25 km/h)
+- 200 µs = 0,77 % del período → sin riesgo de pérdida de pulsos reales
+- Bursts EMI típicos: 1–50 µs → completamente absorbidos
+
+**Variables por canal (nunca compartidas):**
+
+| Canal | Variable |
+|-------|---------|
+| Rueda FL (PA0) | `wheel_last_edge_cyc[0]` |
+| Rueda FR (PA1) | `wheel_last_edge_cyc[1]` |
+| Rueda RL (PA2) | `wheel_last_edge_cyc[2]` |
+| Rueda RR (PB15) | `wheel_last_edge_cyc[3]` |
+| Centro volante (PB5) | `steer_last_edge_cyc` |
+
 ---
 
-## 12. DIFERENCIAS CLAVE RESPECTO AL MÓDULO HY-M158 ANTERIOR
+---
+
+## 12. PROTECCIÓN TVS — JUSTIFICACIÓN TÉCNICA
+
+**Componente:** P6KE18CA
+
+El TVS protege el LED del optoacoplador EL817 frente a picos de tensión inducidos por cargas inductivas (motores, relés). En un sistema con 4 motores de CC controlados por BTS7960 (corrientes de hasta 50 A por motor, conmutación a 20 kHz) y relés de potencia, los transitorios inductivos en la línea de 12 V pueden superar fácilmente los 40 V (pulso ISO 7637-2 nivel III).
+
+| Característica | P6KE18CA | Justificación |
+|---------------|----------|---------------|
+| **Tipo** | **Bidireccional** (CA) | Adecuado para señales no polarizadas — no importa la polaridad de conexión |
+| **V_clamping @ 5 A** | **29,2 V** | Protege frente a picos en sistemas 12 V (load dump hasta 40 V según ISO 7637-2) |
+| **Potencia pico** | **600 W** (10/1000 µs) | Suficiente para transitorios automotrices estándar |
+| **Formato** | **DO-15** (axial) | Robusto para montaje en PCB o regleta de bornes; fácil instalación en campo |
+| **V_standoff** | 18 V | Por encima del nominal de 12 V + 50 % de margen → sin fuga en operación normal |
+| **Corriente de fuga @ 12 V** | < 1 µA | No interfiere con la señal del sensor |
+
+**Ubicación:** entre `n+` y `n−` de cada canal activo (lado vehículo, antes del LED EL817), uno por canal.
+
+**Sin TVS:**
+```
+  Pico 40 V → I_LED = (40 − 1,2) / 2800 ≈ 13,9 mA transitorio
+  V_LED_abs_max = 3 V → el LED puede degradarse o destruirse
+```
+
+**Con P6KE18CA:**
+```
+  Pico 40 V → TVS clampea a 29,2 V
+  I_LED = (29,2 − 1,2) / 2800 ≈ 10 mA → dentro de spec del EL817 ✅
+  Energía transitoria absorbida por el TVS, no por el LED ✅
+```
+
+**Nota crítica:** El TVS protege el LED del optoacoplador frente a picos de tensión inducidos por cargas inductivas (motores, relés). Es el único componente externo obligatorio que debe añadirse en el lado de 12 V de cada placa EL817.
+
+---
+
+## 13. DIFERENCIAS CLAVE RESPECTO AL MÓDULO HY-M158 ANTERIOR
 
 | Aspecto | HY-M158 (PC817 ×8) | EL817 4CH ×2 (nuevo) |
 |---------|--------------------|-----------------------|
