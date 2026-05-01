@@ -56,24 +56,57 @@ static volatile uint32_t wheel_prev_pulse_tick[NUM_WHEELS] = {0};
 static volatile uint32_t wheel_flood_count[NUM_WHEELS]     = {0};
 static volatile uint32_t wheel_flood_window_start[NUM_WHEELS] = {0};
 
+/* -------------------------------------------------------------------------
+ * DWT-based high-resolution EMI debounce (SENSOR_DEBOUNCE_US = 200 µs)
+ *
+ * Software debounce added to mitigate EMI and optocoupler jitter (EL817).
+ * Does not alter nominal behaviour.  Only filters pulses occurring within
+ * < 200 µs — a window in which no real sensor event can occur at the
+ * operating speed of this vehicle (period ≈ 26 ms at 25 km/h).
+ *
+ * Implementation: DWT->CYCCNT is a free-running 32-bit counter ticking at
+ * the CPU clock (170 MHz on STM32G474RE).  Unsigned subtraction handles
+ * wrap-around correctly (C99 §6.2.5 ¶9), identical to the HAL_GetTick
+ * pattern used in the ms-level filter below.
+ *
+ * sensor_debounce_cycles is precomputed once in Sensor_Init() from
+ * SystemCoreClock, avoiding any division in the ISR hot path.
+ * It is initialised from the main context before EXTI is enabled, so no
+ * memory barrier beyond C's sequence-point rules is needed for correctness.
+ * -------------------------------------------------------------------------*/
+static volatile uint32_t wheel_last_edge_cyc[NUM_WHEELS] = {0};  /* DWT CYCCNT at last accepted edge */
+static volatile uint32_t steer_last_edge_cyc              = 0;   /* DWT CYCCNT at last steering edge */
+static uint32_t          sensor_debounce_cycles           = 0;   /* SENSOR_DEBOUNCE_US × cycles/µs  */
+
 /* Precomputed flood ceiling: max accepted pulses per 1-second window */
 #define WHEEL_FLOOD_WINDOW_MS    1000U
 
 /* ISR-safe debounce + flood filter.
  * Called from EXTI vectors — must be minimal and non-blocking.
  *
- * 1. Debounce: reject pulses arriving faster than
- *    WHEEL_MIN_PULSE_INTERVAL_MS (contact bounce rejection).
+ * 0. µs-level DWT pre-filter (FIRST): reject pulses within SENSOR_DEBOUNCE_US
+ *    (200 µs).  Eliminates EMI bursts and EL817 switching noise before any
+ *    other processing — does not alter nominal signal handling.
+ * 1. ms-level debounce: reject pulses arriving faster than
+ *    WHEEL_MIN_PULSE_INTERVAL_MS (coarser, HAL_GetTick resolution).
  * 2. Flood detection: count pulses within a 1-second sliding window.
  *    If the count exceeds WHEEL_MAX_FREQ_HZ, further pulses are
  *    silently dropped until the window rolls over.  This caps CPU
  *    load even under sensor noise / wiring fault conditions.
  *
- * Performance: worst-case ISR body is ~20 instructions (read tick,
- * two comparisons, one increment, one store).  At max accepted rate
+ * Performance: worst-case ISR body is ~25 instructions (two DWT reads,
+ * three comparisons, two increments, two stores).  At max accepted rate
  * of 200 Hz, CPU overhead is < 0.01% at 170 MHz.                     */
 static inline void Wheel_IRQDebounced(uint8_t idx)
 {
+    /* 0. µs-level DWT pre-filter — EMI / EL817 jitter rejection.
+     *    Runs FIRST, before any other processing.
+     *    Unsigned subtraction wraps correctly on CYCCNT rollover (~25 s). */
+    uint32_t cyc_now = DWT->CYCCNT;
+    if ((cyc_now - wheel_last_edge_cyc[idx]) < sensor_debounce_cycles)
+        return;
+    wheel_last_edge_cyc[idx] = cyc_now;
+
     uint32_t now = HAL_GetTick();
 
     /* 1. Time-based debounce — reject contact bounce */
@@ -105,13 +138,30 @@ void Wheel_RR_IRQHandler(void) { Wheel_IRQDebounced(3); }
  *  Steering Center Inductive Sensor – EXTI pulse detection
  *
  *  An LJ12A3-type inductive proximity sensor detects a physical screw
- *  at the mechanical center of the steering rack.  A single rising edge
+ *  at the mechanical center of the steering rack.  A single falling edge
  *  on PIN_STEER_CENTER (PB5 / EXTI5) indicates the rack is at center.
+ *
+ *  DWT pre-filter (200 µs): the steering rack moves slowly (< 1 Hz for
+ *  center-to-center events).  The 200 µs window eliminates EL817 switching
+ *  noise and any EMI transients on this safety-critical signal without any
+ *  risk of rejecting a real edge.
  * ========================================================================= */
 
 static volatile uint8_t steer_center_flag = 0;
 
-void SteeringCenter_IRQHandler(void) { steer_center_flag = 1; }
+void SteeringCenter_IRQHandler(void)
+{
+    /* DWT pre-filter: reject EMI spikes / EL817 opto jitter within 200 µs.
+     * Software debounce added to mitigate EMI and optocoupler jitter (EL817).
+     * Does not alter nominal behaviour.  Only filters pulses occurring within
+     * < 200 µs of the previous accepted edge.                              */
+    uint32_t cyc_now = DWT->CYCCNT;
+    if ((cyc_now - steer_last_edge_cyc) < sensor_debounce_cycles)
+        return;
+    steer_last_edge_cyc = cyc_now;
+
+    steer_center_flag = 1;
+}
 
 bool SteeringCenter_Detected(void) { return (steer_center_flag != 0); }
 
@@ -1312,6 +1362,44 @@ void Temperature_PeriodicRescan(void)
 
 void Sensor_Init(void)
 {
+    /* ---- DWT high-resolution debounce setup (defensive / hardened) ----
+     * This block is FULLY INDEPENDENT of Motor_Init():
+     *   - Idempotent — if DWT is already running, CYCCNT is NOT reset
+     *     (preserves any in-flight DWT-based delay in motor_control.c).
+     *   - Self-contained — works correctly if Sensor_Init() is called
+     *     before Motor_Init(), after it, or instead of it.
+     *   - Order-independent — does not rely on any prior init step
+     *     other than SystemClock_Config() (for SystemCoreClock).
+     *
+     * Pattern:
+     *   1. If trace unit not enabled → enable it.
+     *   2. If cycle counter not running → reset CYCCNT and start it.
+     *      (CYCCNT is only reset on a cold start; if Motor_Init() already
+     *      enabled CYCCNT we leave the running counter untouched.)
+     *
+     * After this block, DWT->CYCCNT is guaranteed to be ticking at
+     * SystemCoreClock and safe to read from any context (main or ISR).   */
+    if (!(CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk)) {
+        CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    }
+    if (!(DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk)) {
+        DWT->CYCCNT = 0U;
+        DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+    }
+    __DSB();  /* Ensure CYCCNTENA write is visible before first CYCCNT read */
+
+    /* Precompute cycle threshold once.  SystemCoreClock = 170 MHz on
+     * STM32G474RE → 200 µs × 170 = 34 000 cycles.  No division in ISR.   */
+    sensor_debounce_cycles = SENSOR_DEBOUNCE_US * (SystemCoreClock / 1000000U);
+
+    /* Initialise per-channel DWT timestamps to 0; first edge always
+     * accepted because (cyc_now - 0) = cyc_now ≫ 34 000 by the time
+     * any sensor edge can fire (Sensor_Init runs ms after reset).        */
+    for (uint8_t i = 0; i < NUM_WHEELS; i++) {
+        wheel_last_edge_cyc[i] = 0;
+    }
+    steer_last_edge_cyc = 0;
+
     for (uint8_t i = 0; i < NUM_WHEELS; i++) {
         wheel_pulse[i]              = 0;
         wheel_pulse_prev[i]         = 0;

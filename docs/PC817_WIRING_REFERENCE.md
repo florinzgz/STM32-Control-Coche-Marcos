@@ -1,5 +1,20 @@
-# REFERENCIA COMPLETA DE CABLEADO PC817
+# ~~REFERENCIA COMPLETA DE CABLEADO PC817~~ — ⚠️ SUPERSEDIDO
 ## Sistema de Control Vehicular — STM32G474RE + ESP32-S3
+
+> ## ⛔ ESTE DOCUMENTO HA SIDO SUPERSEDIDO — NO USAR PARA MONTAJE
+>
+> A partir del **2026-05-01**, los sensores de rueda, el sensor de centro de volante
+> y la llave de contacto se conectan mediante **2× placas EL817 de 4 canales**
+> en lugar del módulo HY-M158 PC817 de 8 canales descrito en este documento.
+>
+> **Documento vigente: [`docs/EL817_WIRING_REFERENCE.md`](EL817_WIRING_REFERENCE.md)**
+>
+> Este archivo se conserva únicamente como referencia histórica y técnica.
+> **No debe usarse como guía de montaje** — el hardware físico ya no corresponde
+> a lo descrito aquí.
+
+---
+
 ### Fuente de verdad: `project_config.h` y `power_manager.h`
 
 > **Este documento es la referencia consolidada para conectar el módulo PC817

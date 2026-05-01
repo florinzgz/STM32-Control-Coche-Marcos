@@ -178,14 +178,18 @@ Cinco sensores Dallas DS18B20 en un único bus OneWire para monitorizar la tempe
 
 Cuatro sensores inductivos de proximidad LJ12A3-4-Z/BX (NPN NO) detectan los pulsos de los dientes de engranaje montados en cada rueda.
 
+> **Adaptación de señal:** los sensores operan a 12 V y sus señales pasan por el
+> **Board 1 de la placa EL817 de 4 canales** (aislamiento galvánico + adaptación de nivel 12 V → 3,3 V).
+> Ver `docs/EL817_WIRING_REFERENCE.md` para el cableado completo.
+
 ### Tabla de pines
 
-| Rueda | Pin STM32 | Línea EXTI | Flanco |
-|-------|-----------|------------|--------|
-| FL | PA0 | EXTI0 | Subida (rising) |
-| FR | PA1 | EXTI1 | Subida (rising) |
-| RL | PA2 | EXTI2 | Subida (rising) |
-| RR | PB15 | EXTI15 | Subida (rising) |
+| Rueda | Pin STM32 | Línea EXTI | Flanco | Canal EL817 Board 1 |
+|-------|-----------|------------|--------|---------------------|
+| FL | PA0 | EXTI0 | Subida (rising) | CH2 |
+| FR | PA1 | EXTI1 | Subida (rising) | CH1 |
+| RL | PA2 | EXTI2 | Subida (rising) | CH4 |
+| RR | PB15 | EXTI15 | Subida (rising) | CH3 |
 
 ### Parámetros
 
@@ -195,51 +199,110 @@ Cuatro sensores inductivos de proximidad LJ12A3-4-Z/BX (NPN NO) detectan los pul
 | Pulsos por revolución | 6 |
 | Circunferencia de rueda | 1.1 m |
 | Velocidad máx. válida | 25 km/h |
-| Debounce | 1 ms (software) |
+| Debounce µs (DWT, pre-filtro EMI) | **200 µs** (`SENSOR_DEBOUNCE_US`) |
+| Debounce ms (HAL_GetTick, filtro secundario) | 1 ms (`WHEEL_MIN_PULSE_INTERVAL_MS`) |
+
+### FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)
+
+**Problema:** Los optoacopladores EL817 introducen jitter en los flancos de salida cuando el LED se aproxima al umbral de saturación. Además, en entornos automotrices con motores de CC conmutados (PWM 20 kHz), los transitorios EMI inducidos en el cableado pueden generar flancos espurios adicionales. Ambos fenómenos producen el mismo síntoma: pulsos extra dentro de una ventana de microsegundos alrededor del flanco real.
+
+**Solución:** Se implementa un filtro temporal de **dos capas** en el handler de EXTI:
+
+| Capa | Mecanismo | Ventana | Propósito |
+|------|-----------|---------|-----------|
+| **Pre-filtro µs** | DWT->CYCCNT (170 ciclos/µs) | **200 µs** | Elimina bursts EMI y jitter del EL817 |
+| Filtro ms | HAL_GetTick (1 ms resolución) | 1 ms | Rechaza rebotes mecánicos residuales |
+
+**Implementación (en `sensor_manager.c`, función `Wheel_IRQDebounced`):**
+```c
+// Pre-filtro EMI — PRIMER CHECK en el handler, antes de cualquier procesamiento
+uint32_t cyc_now = DWT->CYCCNT;
+if ((cyc_now - wheel_last_edge_cyc[idx]) < sensor_debounce_cycles)
+    return;
+wheel_last_edge_cyc[idx] = cyc_now;
+```
+
+**Validación:**
+- A 25 km/h (máximo), período de pulso ≈ 26 ms → 200 µs = **0,77 %** del período → sin riesgo de pérdida de pulsos reales
+- Los bursts EMI típicos duran 1–50 µs → completamente absorbidos por la ventana de 200 µs
+- `sensor_debounce_cycles` = `SENSOR_DEBOUNCE_US × (SystemCoreClock / 1 000 000)` = `200 × 170` = **34 000 ciclos** (precomputado en `Sensor_Init()`)
+- Variables de estado por canal: `wheel_last_edge_cyc[0..3]` y `steer_last_edge_cyc` — nunca compartidas
+
+**Impacto funcional:** Ninguno en condiciones nominales. Solo filtra pulsos separados < 200 µs entre sí, lo que es físicamente imposible en este sistema a cualquier velocidad real.
+
+#### Validación matemática (auditoría — frecuencias reales)
+
+| Métrica | Valor | Cálculo |
+|---------|-------|---------|
+| Velocidad máx. del sistema | 25 km/h | Especificación de seguridad |
+| Velocidad lineal máx. | 6,944 m/s | 25 / 3,6 |
+| Circunferencia de rueda | 1,1 m | Hardware |
+| Pulsos por revolución | 6 | Diente de engranaje |
+| **Frecuencia máx. de pulsos** | **37,9 Hz** | (6,944 / 1,1) × 6 |
+| **Período mínimo entre pulsos** | **26 316 µs** | 1 / 37,9 × 1 000 000 |
+| Ventana debounce | 200 µs | `SENSOR_DEBOUNCE_US` |
+| **Margen relativo** | **0,76 %** | 200 / 26 316 |
+
+**Criterio de auditoría:**
+- margen > 5 % → conservador (riesgo si el sistema cambia)
+- 1 % ≤ margen ≤ 5 % → adecuado
+- margen < 1 % → **óptimo** ✅
+
+**Decisión final:** mantener **200 µs**.
+- Margen actual (0,76 %) ya está por debajo del 1 % → categoría óptima.
+- Reducir a 100 µs no aporta beneficio funcional medible (margen pasaría a 0,38 %, irrelevante a 38 Hz).
+- Reducir a 100 µs aumentaría la exposición a bursts EL817 prolongados (datasheet: t_off típico ~10 µs, hasta 50 µs en saturación marginal). 200 µs absorbe **2× el peor caso documentado**.
+- Aumentar > 200 µs está prohibido por la especificación.
 
 ### Resistencias y protección
 
-- **Pull-up interno:** activado en el STM32 (~40 kΩ). La salida NPN NO tira a GND al detectar metal; el pull-up lleva la línea a 3.3 V en reposo.
-- **Si la tensión de salida del sensor supera 3.3 V:** usar divisor resistivo (10 kΩ + 6.8 kΩ) o level shifter. El LJ12A3 típicamente opera a 6–36 V DC; la salida NPN con pull-up a 3.3 V del MCU es segura si la tensión de colector no excede VDD+0.3 V.
-- **Diodo de clamp:** BAT54 entre pin y 3.3 V (ánodo al pin, cátodo a 3.3 V) para proteger contra transitorios inductivos.
+- **Pull-up salida EL817:** 2,7 kΩ integrado on-board + 470 Ω serie (pull-up efectivo 3,17 kΩ). No se añade pull-up externo.
+- **Pull-up interno STM32:** (~40 kΩ) puede permanecer habilitado — el pull-up externo on-board domina.
+- **R entrada EL817:** 100 Ω + 2,7 kΩ integrados on-board — no se añade resistencia externa.
+- **Protección automotriz:** TVS **P6KE18CA** entre `n+` y `n-` de cada canal (4× en Board 1). Sustituye al BAT54 y al 1N4148 anteriores.
 
 ### Alimentación
 
-- LJ12A3: 6–36 V DC (alimentado desde 12 V o 24 V del vehículo).
-- La señal NPN NO no necesita alimentación propia al pin del MCU; el pull-up del STM32 proporciona el nivel alto.
+- LJ12A3: 12 V del vehículo (marrón = VCC, azul = GND_vehicle, negro = NPN out).
+- La señal adaptada a 3,3 V sale del pin `O1`–`O4` de la placa EL817.
+- EL817 Board 1: `V` → +3,3 V (regulador externo AMS1117-3.3), `G` → GND_logic.
 
 ### Motivo técnico
 
 - **6 pulsos/rev:** con circunferencia 1.1 m, a 25 km/h (6.94 m/s) se generan ~37.8 pulsos/s, suficiente resolución sin saturar la ISR.
-- **Debounce 1 ms:** a frecuencia máxima (~38 Hz), el período es ~26 ms; 1 ms de debounce es <4 % del período, filtra rebotes sin perder pulsos.
+- **Pre-filtro 200 µs (DWT):** elimina jitter EL817 y EMI antes de actualizar cualquier contador. Sin impacto en velocidad de cómputo.
+- **Filtro ms (1 ms):** segundo nivel de rechazo para rebotes residuales; período mínimo de pulso real es 26 ms → sin pérdida.
 - **EXTI (interrupciones):** captura exacta del instante del pulso sin polling, crítico para cálculo preciso de velocidad.
+- **EL817 Board 1:** el pull-up integrado de 2,7 kΩ da un τ ≈ 3,2 µs con 1 nF de cable — más rápido que la resistencia externa de 4,7 kΩ usada anteriormente.
 
 ### Qué ocurre si falla
 
 - **Sin pulsos (sensor desconectado o cable roto):** velocidad calculada = 0 km/h. Si los otros 3 sensores reportan movimiento, se detecta fallo de sensor individual.
-- **Pulsos espurios (interferencia):** el debounce de 1 ms los filtra. Si la velocidad calculada supera 25 km/h, se descarta como lectura inválida.
+- **Pulsos espurios (interferencia):** el pre-filtro DWT (200 µs) los absorbe antes de que lleguen al contador. El filtro ms (1 ms) actúa como segunda barrera. Si la velocidad calculada supera 25 km/h, se descarta como lectura inválida.
 - **Cortocircuito a GND permanente:** se interpreta como velocidad infinita → el filtro de velocidad máxima (25 km/h) lo detecta y marca como fallo.
 
-### Esquema de conexión
+### Esquema de conexión (con EL817 Board 1)
 
 ```
-  24V ───────────────┐
-                     │
-               ┌─────┴─────┐
-               │  LJ12A3   │
-               │  (NPN NO) │
-               │            │
-               │  Marrón=V+ │── 24V
-               │  Azul=GND  │── GND
-               │  Negro=OUT │──┐
-               └────────────┘  │
-                               │  (colector abierto, tira a GND)
-                               │
-  STM32 PAx ──────────────────┘
-    (pull-up interno ~40kΩ a 3.3V)
+  12V ──────────────────────────────────────────────────► Marrón (VCC LJ12A3)
+  12V ────────────────────────────────► n+  EL817 Board 1 (CHn)
+                                         │
+                                  [100Ω + 2,7kΩ on-board]
+                                         │
+                                      EL817 LED
+                                         │
+                                         └──► n-  ──► Negro (NPN out LJ12A3)
+                                                            │ (NPN tira a GND cuando activo)
+  GND_vehicle ──────────────────────────────────────────► Azul (GND LJ12A3)
 
-  Protección opcional:
-  PAx ──┤BAT54├── 3.3V  (clamp contra sobretensión)
+  [P6KE18CA entre n+ y n-]  ← protección automotriz (obligatorio)
+
+  ────────────────── LADO LÓGICO ──────────────────
+  +3,3V ──[2,7kΩ on-board]──► colector EL817 ──[470Ω]──► On ──► STM32 PAx
+  GND_logic ──────────────────────────────────────────────────── G EL817
+
+  Flujo de señal (en ISR):
+  Flanco EXTI → pre-filtro 200 µs DWT → filtro 1 ms HAL_GetTick → flood-check → wheel_pulse++
 ```
 
 ---
@@ -436,53 +499,75 @@ Encoder incremental de 1200 PPR que mide la posición angular del volante median
 
 Sensor inductivo que detecta un tornillo de referencia en el centro mecánico de la cremallera de dirección.
 
+> **Adaptación de señal:** el sensor opera a 12 V y su señal pasa por el
+> **Board 2, CH1 de la placa EL817 de 4 canales** (aislamiento galvánico + adaptación de nivel 12 V → 3,3 V).
+> Ver `docs/EL817_WIRING_REFERENCE.md` §9 para el cableado completo.
+
 ### Tabla de pines
 
-| Señal | Pin STM32 | Periférico | Nota |
-|-------|-----------|------------|------|
-| Salida | PB5 | EXTI5 | Flanco de subida, pull-up |
+| Señal | Pin STM32 | Periférico | Flanco | Canal EL817 Board 2 |
+|-------|-----------|------------|--------|---------------------|
+| Salida | PB5 | EXTI5 | **Bajada (falling)** | CH1 |
+
+> **Flanco FALLING (bajada), no RISING:** el EL817 invierte la señal.
+> Cuando el tornillo entra en el campo del sensor, el NPN conduce → EL817 output va LOW → FALLING edge.
+> El firmware captura este flanco descendente como el instante exacto del centro (`GPIO_MODE_IT_FALLING`).
+
+### FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)
+
+La señal de centro de dirección es especialmente sensible: un flanco espurio produce una recalibración incorrecta del encoder. El pre-filtro DWT de 200 µs en `SteeringCenter_IRQHandler` elimina cualquier transitorio EMI antes de activar el flag.
+
+| Parámetro | Valor |
+|-----------|-------|
+| Ventana debounce | **200 µs** (`SENSOR_DEBOUNCE_US`) |
+| Mecanismo | DWT->CYCCNT (pre-filtro ISR) |
+| Variable de estado | `steer_last_edge_cyc` (exclusiva, no compartida) |
+| Impacto funcional | Ninguno — el rack tarda >100 ms en recorrer la zona del sensor |
 
 ### Resistencias y protección
 
-- **Pull-up interno:** activado en STM32 (~40 kΩ a 3.3 V). Mismo principio que los sensores de velocidad (NPN NO, colector abierto).
-- **Diodo de clamp:** BAT54 entre PB5 y 3.3 V si la tensión del colector puede exceder 3.6 V.
+- **Pull-up salida EL817:** 2,7 kΩ on-board + 470 Ω serie. No se añade pull-up externo.
+- **Pull-up interno STM32:** (~40 kΩ) puede permanecer habilitado — el pull-up externo on-board domina.
+- **Protección automotriz:** TVS **P6KE18CA** entre `n+` y `n-` del CH1 del Board 2 (obligatorio).
 
 ### Alimentación
 
-- LJ12A3: 6–36 V DC (desde 12 V o 24 V del vehículo).
+- LJ12A3: 12 V del vehículo (marrón = VCC, azul = GND_vehicle, negro = NPN out).
+- EL817 Board 2: `V` → +3,3 V, `G` → GND_logic.
 
 ### Motivo técnico
 
 - **Sensor inductivo (no mecánico):** sin desgaste, sin contacto, funciona en entornos sucios/húmedos del chasis.
 - **Detección de tornillo:** un tornillo de acero en la cremallera activa el sensor inductivo al pasar por el centro; solución robusta y barata.
-- **EXTI5 con flanco de subida:** captura el instante exacto del paso por centro para resetear el contador del encoder de dirección.
+- **EXTI5 con flanco de bajada:** captura el instante exacto del paso por centro para resetear el contador del encoder de dirección. El flanco de bajada (inicio del pulso) es más preciso que el de subida (fin del pulso) para la detección del punto central.
+- **Aislamiento galvánico EL817:** protege el STM32 de la masa del vehículo y de los transitorios inductivos generados por el motor de dirección adyacente.
 
 ### Qué ocurre si falla
 
-- **Sensor desconectado:** la línea queda en alto por pull-up; no se genera interrupción de centro. El firmware no puede recalibrar el punto cero → se marca la calibración como no válida y se depende únicamente del encoder. El sistema entra en modo LIMP HOME si no hay calibración previa almacenada.
-- **Activación permanente (cortocircuito a GND):** interrupciones constantes en EXTI5 → el firmware detecta frecuencia anómala y deshabilita la entrada, usando la última calibración conocida.
+- **Sensor desconectado:** la línea queda en alto por pull-up on-board; no se genera interrupción de centro. El firmware no puede recalibrar el punto cero → se marca la calibración como no válida y se depende únicamente del encoder. El sistema entra en modo LIMP HOME si no hay calibración previa almacenada.
+- **Activación permanente (cortocircuito a GND en lado sensor):** interrupciones constantes en EXTI5 → el firmware detecta frecuencia anómala y deshabilita la entrada, usando la última calibración conocida.
 
-### Esquema de conexión
+### Esquema de conexión (con EL817 Board 2, CH1)
 
 ```
-  24V ──────────────┐
-                    │
-              ┌─────┴─────┐
-              │  LJ12A3   │
-              │  (NPN NO) │
-              │            │
-              │  Marrón=V+ │── 24V
-              │  Azul=GND  │── GND
-              │  Negro=OUT │──┐
-              └────────────┘  │
-                              │ (colector abierto)
-                              │
-  STM32 PB5 (EXTI5) ─────────┘
-    (pull-up interno ~40kΩ a 3.3V)
-    Flanco de subida → ISR resetea contador TIM2
+  12V ──────────────────────────────────────────────────► Marrón (VCC LJ12A3 centro)
+  12V ────────────────────────────────► n+  EL817 Board 2 CH1
+                                         │
+                                  [100Ω + 2,7kΩ on-board]
+                                         │
+                                      EL817 LED
+                                         │
+                                         └──► n-  ──► Negro (NPN out LJ12A3)
+                                                            │ (NPN tira a GND cuando activo)
+  GND_vehicle ──────────────────────────────────────────► Azul (GND LJ12A3)
 
-  Protección:
-  PB5 ──┤BAT54├── 3.3V
+  [P6KE18CA entre n+ y n-]  ← protección automotriz (obligatorio)
+
+  ────────────────── LADO LÓGICO ──────────────────
+  +3,3V ──[2,7kΩ on-board]──► colector EL817 ──[470Ω]──► O1 ──► STM32 PB5 (EXTI5)
+  GND_logic ────────────────────────────────────────────────────── G EL817 Board 2
+
+  Firmware: GPIO_MODE_IT_FALLING + GPIO_PULLUP → ISR llama SteeringCenter_IRQHandler()
 ```
 
 ---
