@@ -230,6 +230,30 @@ wheel_last_edge_cyc[idx] = cyc_now;
 
 **Impacto funcional:** Ninguno en condiciones nominales. Solo filtra pulsos separados < 200 µs entre sí, lo que es físicamente imposible en este sistema a cualquier velocidad real.
 
+#### Validación matemática (auditoría — frecuencias reales)
+
+| Métrica | Valor | Cálculo |
+|---------|-------|---------|
+| Velocidad máx. del sistema | 25 km/h | Especificación de seguridad |
+| Velocidad lineal máx. | 6,944 m/s | 25 / 3,6 |
+| Circunferencia de rueda | 1,1 m | Hardware |
+| Pulsos por revolución | 6 | Diente de engranaje |
+| **Frecuencia máx. de pulsos** | **37,9 Hz** | (6,944 / 1,1) × 6 |
+| **Período mínimo entre pulsos** | **26 316 µs** | 1 / 37,9 × 1 000 000 |
+| Ventana debounce | 200 µs | `SENSOR_DEBOUNCE_US` |
+| **Margen relativo** | **0,76 %** | 200 / 26 316 |
+
+**Criterio de auditoría:**
+- margen > 5 % → conservador (riesgo si el sistema cambia)
+- 1 % ≤ margen ≤ 5 % → adecuado
+- margen < 1 % → **óptimo** ✅
+
+**Decisión final:** mantener **200 µs**.
+- Margen actual (0,76 %) ya está por debajo del 1 % → categoría óptima.
+- Reducir a 100 µs no aporta beneficio funcional medible (margen pasaría a 0,38 %, irrelevante a 38 Hz).
+- Reducir a 100 µs aumentaría la exposición a bursts EL817 prolongados (datasheet: t_off típico ~10 µs, hasta 50 µs en saturación marginal). 200 µs absorbe **2× el peor caso documentado**.
+- Aumentar > 200 µs está prohibido por la especificación.
+
 ### Resistencias y protección
 
 - **Pull-up salida EL817:** 2,7 kΩ integrado on-board + 470 Ω serie (pull-up efectivo 3,17 kΩ). No se añade pull-up externo.

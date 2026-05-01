@@ -1362,16 +1362,39 @@ void Temperature_PeriodicRescan(void)
 
 void Sensor_Init(void)
 {
-    /* ---- DWT high-resolution debounce setup ----
-     * Precompute cycle threshold once from SystemCoreClock (set by
-     * SystemClock_Config() before Sensor_Init() is called).
-     * Also ensures DWT->CYCCNT is running — idempotent if Motor_Init()
-     * already enabled it.                                               */
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;  /* Enable trace unit */
-    DWT->CTRL        |= DWT_CTRL_CYCCNTENA_Msk;       /* Start cycle counter */
+    /* ---- DWT high-resolution debounce setup (defensive / hardened) ----
+     * This block is FULLY INDEPENDENT of Motor_Init():
+     *   - Idempotent — if DWT is already running, CYCCNT is NOT reset
+     *     (preserves any in-flight DWT-based delay in motor_control.c).
+     *   - Self-contained — works correctly if Sensor_Init() is called
+     *     before Motor_Init(), after it, or instead of it.
+     *   - Order-independent — does not rely on any prior init step
+     *     other than SystemClock_Config() (for SystemCoreClock).
+     *
+     * Pattern:
+     *   1. If trace unit not enabled → enable it.
+     *   2. If cycle counter not running → reset CYCCNT and start it.
+     *      (CYCCNT is only reset on a cold start; if Motor_Init() already
+     *      enabled CYCCNT we leave the running counter untouched.)
+     *
+     * After this block, DWT->CYCCNT is guaranteed to be ticking at
+     * SystemCoreClock and safe to read from any context (main or ISR).   */
+    if (!(CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk)) {
+        CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    }
+    if (!(DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk)) {
+        DWT->CYCCNT = 0U;
+        DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+    }
     __DSB();  /* Ensure CYCCNTENA write is visible before first CYCCNT read */
+
+    /* Precompute cycle threshold once.  SystemCoreClock = 170 MHz on
+     * STM32G474RE → 200 µs × 170 = 34 000 cycles.  No division in ISR.   */
     sensor_debounce_cycles = SENSOR_DEBOUNCE_US * (SystemCoreClock / 1000000U);
-    /* Initialise per-channel DWT timestamps to 0; first edge always accepted */
+
+    /* Initialise per-channel DWT timestamps to 0; first edge always
+     * accepted because (cyc_now - 0) = cyc_now ≫ 34 000 by the time
+     * any sensor edge can fire (Sensor_Init runs ms after reset).        */
     for (uint8_t i = 0; i < NUM_WHEELS; i++) {
         wheel_last_edge_cyc[i] = 0;
     }

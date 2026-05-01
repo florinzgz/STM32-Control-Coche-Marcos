@@ -413,7 +413,22 @@ Cada EXTI handler ejecuta al inicio:
 | Rueda RR (PB15) | `wheel_last_edge_cyc[3]` |
 | Centro volante (PB5) | `steer_last_edge_cyc` |
 
----
+#### Mitigación EMI completa — defensa en profundidad
+
+La protección frente a EMI / transitorios se aplica en **tres capas sucesivas**, cada una más selectiva que la anterior:
+
+| Capa | Mecanismo | Donde actúa | Qué bloquea |
+|------|-----------|-------------|-------------|
+| **1. Hardware (TVS)** | P6KE18CA | Lado 12 V, antes del LED del EL817 | Picos > 18 V (load-dump, transitorios inductivos > V_standoff) |
+| **2. Optoacoplador** | EL817 (aislamiento galvánico) | Frontera 12 V ↔ 3,3 V | Acoplo de masa, ruido de modo común, tierras flotantes |
+| **3. Software (DWT)** | Filtro temporal 200 µs | EXTI ISR, lado 3,3 V | Jitter del EL817 (< 50 µs) y bursts EMI residuales |
+
+Cada capa cubre un fenómeno físico distinto. Ninguna por sí sola es suficiente:
+- Sin TVS: una sobretensión transitoria destruye el LED del EL817 → ya no hay señal que filtrar.
+- Sin opto: el ruido del cableado del vehículo se acopla directamente a la lógica del MCU.
+- Sin debounce software: el jitter inherente al opto en condiciones marginales produce dobles flancos.
+
+El debounce de 200 µs **no sustituye** al TVS — son complementarios.
 
 ---
 
@@ -447,7 +462,9 @@ El TVS protege el LED del optoacoplador EL817 frente a picos de tensión inducid
   Energía transitoria absorbida por el TVS, no por el LED ✅
 ```
 
-**Nota crítica:** El TVS protege el LED del optoacoplador frente a picos de tensión inducidos por cargas inductivas (motores, relés). Es el único componente externo obligatorio que debe añadirse en el lado de 12 V de cada placa EL817.
+**Nota crítica:** El TVS **protege frente a transitorios inductivos antes de que alcancen el optoacoplador**. Es decir, intercepta los picos de tensión generados por cargas inductivas (motores BTS7960, relés RELAY_TRAC / RELAY_DIR) en el lado de 12 V del vehículo, **antes** de que estresen el LED del EL817. Sin este componente, ningún filtro software puede compensar la degradación física del LED.
+
+Es el único componente externo obligatorio que debe añadirse en el lado de 12 V de cada placa EL817.
 
 ---
 

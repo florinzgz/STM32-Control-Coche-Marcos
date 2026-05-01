@@ -2,6 +2,47 @@
 
 ## [unreleased] — 2026-05-01
 
+### [AUDIT] Sensor debounce verification
+
+- Verified DWT-based debounce implementation against task specification.
+- Confirmed all per-channel state variables are `uint32_t` and use unsigned subtraction (overflow-safe across the ~25 s CYCCNT wrap-around at 170 MHz, per C99 §6.2.5 ¶9).
+- Confirmed the DWT pre-filter executes as **step 0** of every EXTI handler (`Wheel_IRQDebounced`, `SteeringCenter_IRQHandler`), before HAL_GetTick filter, before flood-detection, before counter increment.
+- Confirmed full per-channel isolation: 4× `wheel_last_edge_cyc[]` + 1× `steer_last_edge_cyc` — no shared state between channels.
+- Confirmed EXTI edge configuration is unchanged: PA0/PA1/PA2/PB15 RISING (wheels), PB5 FALLING (steering center). EL817 inversion correctly handled — PB5 is configured FALLING because the EL817 NPN output goes LOW when the proximity sensor activates.
+
+### [VALIDATION] Timing margin against real signal frequencies
+
+- Wheel sensors: max realistic frequency = (25/3,6) / 1,1 × 6 = **37,9 Hz** → minimum period = **26 316 µs**.
+- Margin = 200 µs / 26 316 µs = **0,76 %** → falls in the **óptimo** category (< 1 %).
+- Steering center: < 1 Hz operating frequency → margin = 0,02 % (negligible).
+- **Decision:** retain `SENSOR_DEBOUNCE_US = 200`. No reduction to 100 µs because:
+  1. No measurable functional benefit at 38 Hz (margin already < 1 %).
+  2. EL817 t_off can reach 50 µs in marginal saturation; 200 µs absorbs 2× this worst case.
+
+### [HARDENING] Independent and idempotent DWT initialisation
+
+- `Core/Src/sensor_manager.c — Sensor_Init()`: refactored DWT enable block to use the defensive conditional pattern recommended by the audit specification:
+  - Trace-unit enable only if `CoreDebug->DEMCR & TRCENA_Msk` is clear.
+  - Cycle counter enable only if `DWT->CTRL & CYCCNTENA_Msk` is clear; **`DWT->CYCCNT` is no longer reset unconditionally** — preserves any in-flight DWT-based delay started by `Motor_Init()` / `delay_us()` in `motor_control.c`.
+- The block is now **fully independent of `Motor_Init()`** and **order-independent** with respect to it. `Sensor_Init()` can be safely invoked before, after, or instead of `Motor_Init()` and DWT will be running.
+- `__DSB()` retained to ensure the CYCCNTENA write is observable before the first CYCCNT read.
+
+### [VALIDATION] P6KE18CA TVS — confirmed
+
+- Confirmed component selection: **P6KE18CA**, bidireccional, V_clamping ≈ 29,2 V @ 5 A, 600 W peak (10/1000 µs), DO-15 axial.
+- Confirmed placement: between `n+` and `n−` of each active EL817 channel, on the 12 V (vehicle) side, before the LED. 6 units total (4× Board 1 + 2× Board 2).
+- Confirmed protection effectiveness: clamps 40 V load-dump transients (ISO 7637-2 level III) to 29,2 V → I_LED = (29,2 − 1,2) / 2 800 ≈ 10 mA, within EL817 datasheet limits.
+- Hardware + firmware EMI mitigation aligned: TVS (capa 1) + optoacoplador (capa 2) + DWT 200 µs (capa 3) — three-layer defense-in-depth.
+
+#### Documentation
+
+- **`docs/SENSOR_INTERFACE.md`:** §3 — added `Validación matemática (auditoría — frecuencias reales)` subsection with full numerical breakdown and decision rationale.
+- **`docs/EL817_WIRING_REFERENCE.md`:** §11 — added `Mitigación EMI completa — defensa en profundidad` table (TVS + opto + DWT layers); §12 — strengthened critical note to explicitly state that the TVS *"protege frente a transitorios inductivos antes de que alcancen el optoacoplador"*.
+
+---
+
+## [unreleased] — 2026-05-01
+
 ### [NEW] Sensor debounce + EMI hardening (EL817 optocoupler interface)
 
 Added software debounce (200 µs) to all EXTI sensor inputs connected through EL817 optocouplers, and confirmed hardware protection with P6KE18CA TVS diodes.
