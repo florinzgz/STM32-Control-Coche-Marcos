@@ -1,11 +1,11 @@
 // =============================================================================
 // ESP32-S3 HMI — CAN RX Module (implementation)
 //
-// Decodes CAN frames EXACTLY as specified in CAN_CONTRACT_FINAL.md rev 1.3.
+// Decodes CAN frames EXACTLY as specified in CAN_CONTRACT_FINAL.md rev 1.4.
 // Pushes decoded values into the VehicleData store.
 // Unknown CAN IDs are silently ignored.
 //
-// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.3
+// Reference: docs/CAN_CONTRACT_FINAL.md rev 1.4
 //            docs/SERVICE_MODE.md (0x301–0x303)
 // =============================================================================
 
@@ -178,6 +178,25 @@ static void decodeLights(const CanFrame& f, vehicle::VehicleData& data) {
     data.setLights(ld);
 }
 
+static void decodeDebounceDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::DebounceDiagData dd = data.debounceDiag();   // preserve steer count
+    dd.wheelFiltered[0] = readU16LE(&f.data[0]);   // FL
+    dd.wheelFiltered[1] = readU16LE(&f.data[2]);   // FR
+    dd.wheelFiltered[2] = readU16LE(&f.data[4]);   // RL
+    dd.wheelFiltered[3] = readU16LE(&f.data[6]);   // RR
+    dd.timestampMs      = millis();
+    data.setDebounceDiag(dd);
+}
+
+static void decodeDebounceDiagSteer(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 4) return;
+    vehicle::DebounceDiagData dd = data.debounceDiag();   // preserve wheel counts
+    dd.steerFiltered = readU32LE(&f.data[0]);
+    dd.timestampMs   = millis();
+    data.setDebounceDiag(dd);
+}
+
 // -------------------------------------------------------------------------
 // Debug: RX frame counter and first-frame logging
 // -------------------------------------------------------------------------
@@ -228,6 +247,8 @@ void poll(vehicle::VehicleData& data) {
             case can::SERVICE_FAULTS:   decodeServiceFaults(frame, data);  break;
             case can::SERVICE_ENABLED:  decodeServiceEnabled(frame, data); break;
             case can::SERVICE_DISABLED: decodeServiceDisabled(frame, data);break;
+            case can::DIAG_DEBOUNCE:        decodeDebounceDiag(frame, data);      break;
+            case can::DIAG_DEBOUNCE_STEER:  decodeDebounceDiagSteer(frame, data); break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;

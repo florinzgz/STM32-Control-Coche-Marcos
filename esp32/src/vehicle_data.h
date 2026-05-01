@@ -165,6 +165,17 @@ struct LightsData {
 };
 
 // -------------------------------------------------------------------------
+// Debounce EMI diagnostic counters (0x306 + 0x307) — report-only
+// Counters of edge pulses rejected by the STM32 DWT 200 µs pre-filter.
+// Wheel counters arrive truncated/saturated to uint16; steering is full uint32.
+// -------------------------------------------------------------------------
+struct DebounceDiagData {
+    std::array<uint16_t, NUM_WHEELS> wheelFiltered{};   // FL, FR, RL, RR (saturated u16)
+    uint32_t      steerFiltered = 0;
+    unsigned long timestampMs   = 0;
+};
+
+// -------------------------------------------------------------------------
 // Active drive mode — set locally by ESP32 touch (eventually from STM32 CAN echo)
 // -------------------------------------------------------------------------
 struct ModeData {
@@ -193,6 +204,7 @@ public:
     void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
     void setLights(const LightsData& d)        { lights_ = d; }
     void setMode(const ModeData& d)            { mode_ = d; }
+    void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -215,6 +227,7 @@ public:
     const ObstacleData&  obstacle()  const { return obstacle_; }
     const LightsData&    lights()    const { return lights_; }
     const ModeData&      mode()      const { return mode_; }
+    const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -233,6 +246,7 @@ private:
     ObstacleData  obstacle_;
     LightsData    lights_;
     ModeData      mode_;
+    DebounceDiagData debounceDiag_;
 };
 
 } // namespace vehicle

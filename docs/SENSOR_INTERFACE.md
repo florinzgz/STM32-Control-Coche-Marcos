@@ -911,3 +911,63 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 | TCA9548A | 0x70 | I2C1 (PB6/PB7) | STM32 |
 | INA226 (×6) | 0x40 (via mux) | I2C1 (via TCA9548A) | STM32 |
 | MCP23017 | 0x20 | I2C (GPIO8/9) | ESP32-S3 |
+
+---
+
+## 11. Debounce Diagnostics Counters (DWT 200 µs filter)
+
+Contadores de instrumentación añadidos para validar empíricamente la cadena de mitigación EMI hardware (TVS → optoacoplador EL817) **sin alterar el comportamiento funcional** del sistema.
+
+### Qué miden
+
+Cada canal con filtro DWT (Step 0 del debounce, ventana de **200 µs**) mantiene un contador 32-bit del número de **flancos rechazados** por ese filtro:
+
+- 4 contadores por rueda: `sensor_dbg_filtered_count[0..3]` (FL, FR, RL, RR), incrementados sólo desde `Wheel_IRQDebounced`.
+- 1 contador para el sensor de centro de dirección: `steer_dbg_filtered_count`, incrementado sólo desde `SteeringCenter_IRQHandler`.
+
+Los contadores se incrementan dentro del bloque de rechazo del filtro DWT, antes del `return`. **El camino aceptado no cambia ni un ciclo.**
+
+### Garantías de seguridad / timing
+
+- **ISR sigue O(1)**: añade ~4 instrucciones (load + compare + add + store, Cortex-M4). Coste a 200 Hz @ 170 MHz: < 0.012 % de CPU.
+- **Sin condiciones de carrera**: cada contador es escrito únicamente desde su propia EXTI. No hay reentrada en una misma EXTI line. Lectura de `volatile uint32_t` desde el getter es atómica en M4 → no se necesita `__disable_irq` ni `LDREX/STREX`.
+- **Sin overflow**: incremento clamped (`if (count < 0xFFFFFFFF) count++;`). Si el sistema se inunda de EMI durante días, el contador queda saturado en `0xFFFFFFFF` — comportamiento estable y observable.
+- **Diagnóstico puro**: ninguna ruta de control / safety consulta estos contadores.
+
+### API expuesta
+
+```c
+uint32_t Sensor_GetFilteredCount(uint8_t idx);   /* idx 0..3, fuera de rango → 0 */
+uint32_t Sensor_GetSteerFilteredCount(void);
+```
+
+### Exposición CAN (1 Hz, aditivo)
+
+Dos frames diagnósticos nuevos, sin impacto en IDs existentes:
+
+| ID | DLC | Layout | Notas |
+|----|-----|--------|-------|
+| `0x306` (`CAN_ID_DIAG_DEBOUNCE`) | 8 | `u16 LE` × 4: FL, FR, RL, RR | Ruedas truncadas/saturadas a `0xFFFF` |
+| `0x307` (`CAN_ID_DIAG_DEBOUNCE_STEER`) | 4 | `u32 LE` | Volante completo |
+
+Periodicidad: 1000 ms, sentido STM32 → ESP32. Carga de bus añadida ≈ 220 bps sobre 500 kbps (0.044 %).
+
+### Cómo interpretar los valores
+
+| Valor observado | Interpretación |
+|---|---|
+| `0` constante | Ambiente limpio. Cadena hardware (TVS + opto) está absorbiendo todo el ruido o no hay ruido. |
+| Pequeño spike puntual (< 5) en un evento (relé, arranque de tracción) | Normal. El filtro está haciendo su trabajo. |
+| Crecimiento lineal sostenido (cuentas/segundo) | EMI persistente o jitter del optoacoplador EL817. Revisar cableado, blindaje, masa común. |
+| `65535+` mostrado en pantalla (rueda) | Contador interno > 65 535. El valor real sigue disponible vía `Sensor_GetFilteredCount`. Indica problema crónico que requiere intervención hardware. |
+| `0xFFFFFFFF` (saturado) | Inundación EMI extrema o sensor "ladrando". Inspección física requerida. |
+
+### Ejemplos reales esperados
+
+- **Arranque de motor de tracción** (transitorio inductivo): típicamente 1–3 cuentas en la rueda más cercana al BTS7960 activo. Aceptable.
+- **Conmutación de relé sin TVS bidireccional** (regresión hardware): decenas a centenas de cuentas por evento, escalando con la frecuencia de conmutación.
+- **Cable EL817 sin par trenzado, &gt; 30 cm en el bus de motores**: cuentas/segundo crecientes — corregir trenzando o acortando.
+
+### Visualización en HMI
+
+Los valores son visibles en el menú oculto del ESP32 (PIN `8989` → submenú **DEBOUNCE DEBUG**). Render simple: una fila por canal con el contador decimal alineado a la derecha. Re-render natural a 1 Hz (cadencia CAN). Sin animaciones, sin sprites, no toca pantallas principales (`drive_screen`, etc.).

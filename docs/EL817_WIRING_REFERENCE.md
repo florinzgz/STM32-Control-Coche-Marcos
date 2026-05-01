@@ -482,3 +482,46 @@ Es el único componente externo obligatorio que debe añadirse en el lado de 12 
 | Polaridad entrada | Implícita (INn / G) | **Explícita (n+ / n-)** |
 | Sensor volante (PB5) | No conectado | **✅ Conectado CH1 Board 2** |
 | TVS P6KE18CA | 5× (4 ruedas + llave) | **6× (4 ruedas + volante + llave)** |
+
+---
+
+## TVS + Opto + Debounce Counters — Closing the Loop
+
+La cadena de mitigación EMI para los sensores inductivos es de **tres etapas**:
+
+```
+┌─────────┐  flanco bruto  ┌──────────────┐  flanco limpio  ┌────────────────────┐
+│  TVS    │ ─────────────▶ │   EL817      │ ──────────────▶ │ DWT 200 µs filter  │ ─▶ ISR
+│ P6KE18  │   (clipping)   │ (galvanic    │   (digital)     │ (rejects re-edges  │
+│  CA     │                │   isolation) │                 │   within 200 µs)   │
+└─────────┘                └──────────────┘                 └────────────────────┘
+                                                                      │
+                                                                      ▼
+                                                          sensor_dbg_filtered_count[idx]++
+```
+
+Cada etapa atenúa el ruido en una banda distinta:
+
+| Etapa | Ataque | Reside en |
+|---|---|---|
+| **TVS bidireccional P6KE18CA** | Picos de tensión > ±18 V (descargas inductivas, ESD) | Hardware (placa) |
+| **Optoacoplador EL817** | Ruido de modo común, lazos de masa, transientes RF | Hardware (módulo) |
+| **Filtro DWT 200 µs** | Re-flancos / rebote / EMI residual que aún conmuta el opto | Firmware (`sensor_manager.c`) |
+
+### Por qué los contadores cierran el bucle
+
+Antes de los contadores, no había forma **empírica** de comprobar que las dos primeras etapas (hardware) estuviesen funcionando: si TVS o optoacoplador absorbían todo el ruido, el filtro DWT nunca veía nada y el sistema parecía estable; si en cambio dejaban pasar mucho ruido, el filtro DWT lo rechazaba silenciosamente y el sistema **también** parecía estable. **Mismo síntoma observable, dos hardware muy distintos.**
+
+Los contadores `sensor_dbg_filtered_count[]` y `steer_dbg_filtered_count` son la **medida directa** de cuánto ruido llega al firmware *después* del TVS y el optoacoplador. Es decir:
+
+- Contador alto y creciente → el ruido está saturando o evitando la cadena hardware. Acción: revisar TVS, masa, cableado del módulo EL817 (apartado anterior).
+- Contador estable en 0 / valores muy bajos → cadena hardware está cumpliendo su función. El filtro DWT es seguro de margen.
+
+### Procedimiento de validación recomendado
+
+1. Vehículo en reposo, ignición ON, motores de tracción **sin** alimentar — anotar contadores tras 10 s. **Esperado: 0 en todas las ruedas.**
+2. Activar motor de tracción al ralentí — esperar 10 s. **Esperado: spike puntual < 5 en la rueda eléctricamente más cercana.**
+3. Conmutar relé de tracción 5 veces — **esperado: < 25 cuentas acumuladas distribuidas por canal.**
+4. Si cualquier paso supera el límite **3× el esperado**, revisar el módulo EL817 según el apartado [Modos de fallo](#modos-de-fallo) y verificar polaridad de TVS.
+
+Los valores se leen en tiempo real desde el HMI (PIN `8989` → **DEBOUNCE DEBUG**) o por sniffer CAN en los frames `0x306` (ruedas, u16 LE × 4) y `0x307` (volante, u32 LE).

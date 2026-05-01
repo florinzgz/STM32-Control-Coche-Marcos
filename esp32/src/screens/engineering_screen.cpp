@@ -20,11 +20,11 @@ extern TFT_eSPI tft;
 // ---- Menu button layout ----
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
-static constexpr int16_t MENU_BTN_H   = 26;
-static constexpr int16_t MENU_START_Y = 50;
-static constexpr int16_t MENU_SPACING = 28;
+static constexpr int16_t MENU_BTN_H   = 23;
+static constexpr int16_t MENU_START_Y = 46;
+static constexpr int16_t MENU_SPACING = 25;
 
-static constexpr int     NUM_MAIN_ITEMS = 10;
+static constexpr int     NUM_MAIN_ITEMS = 11;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -35,7 +35,8 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FACTORY DEFAULTS",
     "DTC ERROR LOG",
     "MAINTENANCE",
-    "RELAY CONTROL (DEBUG)"
+    "RELAY CONTROL (DEBUG)",
+    "DEBOUNCE DEBUG"
 };
 
 // ---- Back / Save buttons ----
@@ -307,6 +308,19 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         }
         if (changed) needsRedraw_ = true;
     }
+
+    // Cache debounce DWT EMI counters (1 Hz update via 0x306/0x307)
+    if (currentMenu_ == SubMenu::DEBOUNCE_DIAG) {
+        const auto& dd = data.debounceDiag();
+        if (dd.timestampMs != debounceLastTs_) {
+            debounceLastTs_ = dd.timestampMs;
+            for (uint8_t i = 0; i < 4; ++i) {
+                debounceWheelFiltered_[i] = dd.wheelFiltered[i];
+            }
+            debounceSteerFiltered_ = dd.steerFiltered;
+            debounceDataChanged_   = true;
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -329,6 +343,7 @@ void EngineeringScreen::draw() {
             case SubMenu::DTC_LOG_VIEWER:   drawDtcLogViewer();        break;
             case SubMenu::MAINTENANCE:      drawMaintenance();         break;
             case SubMenu::RELAY_CONTROL:    drawRelayControl();        break;
+            case SubMenu::DEBOUNCE_DIAG:    drawDebounceDiag();        break;
         }
     }
 
@@ -516,6 +531,63 @@ void EngineeringScreen::draw() {
         tft.fillRect(indicatorX - 3, gaugeY + 2, 7, gaugeH - 4, ui::COL_AMBER);
     }
 
+    // Partial redraw for debounce DWT EMI counters (1 Hz)
+    if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && debounceDataChanged_) {
+        debounceDataChanged_ = false;
+
+        char buf[ui::FMT_BUF_LARGE];
+        const int16_t valX = 320;
+        const int16_t rowY0 = 80;
+        const int16_t rowH  = 28;
+
+        RTRACE_SET_LAYER(2);
+        tft.setTextSize(2);
+        tft.setTextDatum(TR_DATUM);
+
+        static const char* const labels[5] = { "FL", "FR", "RL", "RR", "STEER" };
+        for (uint8_t i = 0; i < 5; ++i) {
+            const int16_t y = rowY0 + i * rowH;
+            uint32_t v = (i < 4) ? (uint32_t)debounceWheelFiltered_[i]
+                                 : debounceSteerFiltered_;
+
+            // Saturated u16 rendered as "65535+" so users notice the cap.
+            // Steer (full u32) shown as decimal up to 9 digits.
+            bool wheelSaturated = (i < 4) && (v == 0xFFFFU);
+
+            // Clear value cell
+            tft.fillRect(valX - 140, y, 140, 22, ui::COL_BG);
+
+            uint16_t color = ui::COL_GREEN;
+            if (v == 0) {
+                color = ui::COL_GRAY;
+            } else if (wheelSaturated) {
+                color = ui::COL_RED;
+            } else if (v >= 100) {
+                color = ui::COL_AMBER;
+            }
+            tft.setTextColor(color, ui::COL_BG);
+
+            if (wheelSaturated) {
+                snprintf(buf, sizeof(buf), "65535+");
+            } else {
+                snprintf(buf, sizeof(buf), "%lu", (unsigned long)v);
+            }
+            tft.drawString(buf, valX, y);
+            RTRACE_TEXT(valX, y, buf, color, ui::COL_BG, 2, TR_DATUM);
+
+            // Label (drawn once is fine but repaint cheap; helps detect first frame)
+            tft.setTextDatum(TL_DATUM);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            tft.fillRect(40, y, 100, 22, ui::COL_BG);
+            tft.drawString(labels[i], 40, y);
+            RTRACE_TEXT(40, y, labels[i], ui::COL_WHITE, ui::COL_BG, 2, TL_DATUM);
+            tft.setTextDatum(TR_DATUM);
+        }
+
+        tft.setTextDatum(TL_DATUM);
+        tft.setTextSize(1);
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
 
@@ -625,6 +697,11 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                         case 9:
                             // Open Relay Control (debug)
                             currentMenu_ = SubMenu::RELAY_CONTROL;
+                            break;
+                        case 10:
+                            // Open Debounce DWT EMI counter viewer
+                            debounceDataChanged_ = true;   // force first paint
+                            currentMenu_ = SubMenu::DEBOUNCE_DIAG;
                             break;
                         default:
                             break;
@@ -1855,6 +1932,73 @@ void EngineeringScreen::drawRelayControl() {
         tft.setTextColor(relCol, ui::COL_BG);
         tft.drawString(buf, MENU_X, infoY + 14);
     }
+
+    // BACK button (bottom-left)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// =========================================================================
+// Debounce DWT EMI counters viewer (DEBOUNCE_DIAG submenu)
+//
+// Reads the per-channel filtered counts populated by 0x306/0x307 frames
+// into VehicleData.debounceDiag().  Pure read-only display — no commands
+// transmitted, no state changes anywhere in the system.
+//
+// Layout: title, 5 rows (FL/FR/RL/RR/STEER) with right-aligned decimal
+// counter, BACK button.  Values are repainted by the partial-redraw branch
+// in draw() at the natural 1 Hz CAN cadence.
+// =========================================================================
+void EngineeringScreen::drawDebounceDiag() {
+    RTRACE_BEGIN_SCREEN("eng_debounce");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("DEBOUNCE DIAGNOSTICS", ui::SCREEN_W / 2, 22);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 22, "DEBOUNCE DIAGNOSTICS",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
+
+    // Sub-header
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("DWT 200us pre-filter rejected pulses",
+                   ui::SCREEN_W / 2, 50);
+
+    // Column titles (CHANNEL — COUNT)
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.drawString("CHANNEL", 40, 64);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString("FILTERED COUNT", 320, 64);
+    tft.setTextDatum(TL_DATUM);
+
+    // Row baseline.  Real values are painted by the partial-redraw branch
+    // in draw() as soon as debounceDataChanged_ is set; here we render
+    // a "---" placeholder so the screen never looks blank on entry.
+    tft.setTextSize(2);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+    static const char* const labels[5] = { "FL", "FR", "RL", "RR", "STEER" };
+    const int16_t rowY0 = 80;
+    const int16_t rowH  = 28;
+    for (uint8_t i = 0; i < 5; ++i) {
+        const int16_t y = rowY0 + i * rowH;
+        tft.drawString(labels[i], 40, y);
+        tft.setTextDatum(TR_DATUM);
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString("---", 320, y);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.setTextDatum(TL_DATUM);
+    }
+    tft.setTextSize(1);
 
     // BACK button (bottom-left)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);

@@ -53,7 +53,8 @@ private:
         FACTORY_DEFAULTS,  // Individual factory-default reset options
         DTC_LOG_VIEWER,    // Persistent DTC fault log viewer
         MAINTENANCE,       // Maintenance counter reset + status
-        RELAY_CONTROL      // Manual relay override (engineering diagnostic)
+        RELAY_CONTROL,     // Manual relay override (engineering diagnostic)
+        DEBOUNCE_DIAG      // DWT-debounce EMI filtered counters viewer
     };
 
     void drawMainMenu();
@@ -67,6 +68,7 @@ private:
     void drawDtcLogViewer();
     void drawMaintenance();
     void drawRelayControl();
+    void drawDebounceDiag();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -127,6 +129,12 @@ private:
     bool        relayOverrideEnabled_ = false;   // local UI toggle state
     uint8_t     relayOverrideMask_    = 0;       // bit0=reserved, bit1=TRAC, bit2=DIR
     bool        relayOverrideChanged_ = false;   // true when real CAN state changed
+
+    // Debounce DWT EMI counters cache (DEBOUNCE_DIAG submenu)
+    uint16_t      debounceWheelFiltered_[4] = {};
+    uint32_t      debounceSteerFiltered_    = 0;
+    unsigned long debounceLastTs_           = 0;       // last timestamp consumed
+    bool          debounceDataChanged_      = false;
 };
 
 #endif // ENGINEERING_SCREEN_H
