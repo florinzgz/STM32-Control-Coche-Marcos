@@ -1006,12 +1006,11 @@ void CAN_SendDebounceDiag(void) {
     uint8_t  data8[8];
     uint8_t  data4[4];
     uint32_t v;
-    uint16_t v16;
 
     /* 0x306 — wheel filtered counts (FL, FR, RL, RR) */
     for (uint8_t i = 0; i < 4; i++) {
         v = Sensor_GetFilteredCount(i);
-        v16 = (v > 0xFFFFU) ? 0xFFFFU : (uint16_t)v;
+        uint16_t v16 = (v > 0xFFFFU) ? 0xFFFFU : (uint16_t)v;
         data8[2 * i]     = (uint8_t)(v16 & 0xFF);
         data8[2 * i + 1] = (uint8_t)((v16 >> 8) & 0xFF);
     }
