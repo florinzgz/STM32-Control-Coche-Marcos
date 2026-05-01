@@ -24,7 +24,7 @@ Filters pulses occurring within < 200 µs — a window in which no real sensor e
 
 - Confirmed use of **P6KE18CA** TVS diodes (bidireccional, 600 W, DO-15) on the vehicle-side input of each active EL817 channel.
 - Verified correct placement: between `n+` and `n−` of each channel (before the LED), one per active channel (6 total: 4× Board 1, 2× Board 2).
-- **Bidireccional:** adecuado para señales no polarizadas.
+- **bidireccional:** adecuado para señales no polarizadas.
 - **V_clamping 29,2 V @ 5 A:** protects EL817 LED against automotive load-dump transients (up to 40 V per ISO 7637-2 level III).
 - **600 W peak power:** sufficient for automotive transient requirements.
 - **DO-15 format:** robust for field installation.

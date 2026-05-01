@@ -382,7 +382,7 @@ Se ha añadido debounce por software de alta resolución (DWT, 200 µs) como cap
 
 ### FILTRADO DE SEÑAL (DEBOUNCE SOFTWARE)
 
-**Problema (EMI + opto):** El EL817, al commutarse cerca del umbral, genera flancos con jitter de 1–50 µs. Los motores de CC controlados por PWM (20 kHz, corrientes >10 A) crean bursts inductivos que pueden inducir falsas conmutaciones en el cableado de sensores, especialmente en instalaciones sin separación de cableado de señal y potencia.
+**Problema (EMI + opto):** El EL817, al conmutarse cerca del umbral, genera flancos con jitter de 1–50 µs. Los motores de CC controlados por PWM (20 kHz, corrientes >10 A) crean bursts inductivos que pueden inducir falsas conmutaciones en el cableado de sensores, especialmente en instalaciones sin separación de cableado de señal y potencia.
 
 **Solución (filtro temporal por software):**
 
@@ -425,7 +425,7 @@ El TVS protege el LED del optoacoplador EL817 frente a picos de tensión inducid
 
 | Característica | P6KE18CA | Justificación |
 |---------------|----------|---------------|
-| **Tipo** | **Bidireccional** (CA) | Adecuado para señales no polarizadas — no importa la polaridad de conexión |
+| **Tipo** | **bidireccional** (CA) | Adecuado para señales no polarizadas — no importa la polaridad de conexión |
 | **V_clamping @ 5 A** | **29,2 V** | Protege frente a picos en sistemas 12 V (load dump hasta 40 V según ISO 7637-2) |
 | **Potencia pico** | **600 W** (10/1000 µs) | Suficiente para transitorios automotrices estándar |
 | **Formato** | **DO-15** (axial) | Robusto para montaje en PCB o regleta de bornes; fácil instalación en campo |

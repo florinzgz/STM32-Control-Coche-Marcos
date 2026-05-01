@@ -225,7 +225,7 @@ wheel_last_edge_cyc[idx] = cyc_now;
 **Validación:**
 - A 25 km/h (máximo), período de pulso ≈ 26 ms → 200 µs = **0,77 %** del período → sin riesgo de pérdida de pulsos reales
 - Los bursts EMI típicos duran 1–50 µs → completamente absorbidos por la ventana de 200 µs
-- `sensor_debounce_cycles` = `SENSOR_DEBOUNCE_US × (SystemCoreClock / 1.000.000)` = `200 × 170` = **34 000 ciclos** (precomputado en `Sensor_Init()`)
+- `sensor_debounce_cycles` = `SENSOR_DEBOUNCE_US × (SystemCoreClock / 1 000 000)` = `200 × 170` = **34 000 ciclos** (precomputado en `Sensor_Init()`)
 - Variables de estado por canal: `wheel_last_edge_cyc[0..3]` y `steer_last_edge_cyc` — nunca compartidas
 
 **Impacto funcional:** Ninguno en condiciones nominales. Solo filtra pulsos separados < 200 µs entre sí, lo que es físicamente imposible en este sistema a cualquier velocidad real.
