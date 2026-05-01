@@ -548,6 +548,11 @@ int main(void)
              * to ESP32 for the diagnostic/service menu.               */
             CAN_SendServiceStatus();
 
+            /* Debounce EMI diagnostic counters (0x306 + 0x307) for the
+             * ESP32 engineering "DEBOUNCE DEBUG" submenu.  Diagnostic
+             * only — does not gate any control or safety path.        */
+            CAN_SendDebounceDiag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

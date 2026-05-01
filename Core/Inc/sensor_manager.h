@@ -40,6 +40,13 @@ void SteeringCenter_IRQHandler(void);
 bool SteeringCenter_Detected(void);
 void SteeringCenter_ClearFlag(void);
 
+/* ---- Debounce EMI diagnostic counters (report-only) ----
+ * Count edge pulses rejected by the µs-level DWT pre-filter (Step 0,
+ * SENSOR_DEBOUNCE_US = 200 µs).  Counters saturate at 0xFFFFFFFF.
+ * Diagnostic only — must NOT gate any control/safety path.             */
+uint32_t Sensor_GetFilteredCount(uint8_t idx);   /* idx 0..3 (FL,FR,RL,RR), out-of-range returns 0 */
+uint32_t Sensor_GetSteerFilteredCount(void);
+
 /* ---- Pedal (internal ADC dual-sample + software plausibility) ---- */
 void  Pedal_Update(void);
 float Pedal_GetValue(void);       /* ADC raw value                         */
