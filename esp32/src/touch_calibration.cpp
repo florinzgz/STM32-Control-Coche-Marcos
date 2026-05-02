@@ -153,6 +153,7 @@ bool save(const uint16_t data[CAL_DATA_LEN]) {
     rec.yMax     = data[3];
     rec.rotation = static_cast<uint8_t>(data[4]);
     rec._pad     = 0;
+    rec._pad2    = 0;     // explicit (already zeroed by value-init above; kept for clarity)
     rec.crc32    = 0;
     rec.crc32    = computeCrc32(rec);
 
