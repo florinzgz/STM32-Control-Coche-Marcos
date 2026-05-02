@@ -15,7 +15,7 @@
 4. [Pedal Acelerador — Doble Canal Redundante](#4-pedal-acelerador--doble-canal-redundante)
 5. [E6B2-CWZ6C — Encoder de Dirección (Cuadratura)](#5-e6b2-cwz6c--encoder-de-dirección-cuadratura)
 6. [LJ12A3 — Sensor de Centro de Dirección](#6-lj12a3--sensor-de-centro-de-dirección)
-7. [TOFSense-M — Sensor LiDAR de Obstáculos (Nooploop)](#7-tofsense-m--sensor-lidar-de-obstáculos-nooploop)
+7. [TF-Mini Plus — Sensor LiDAR de Obstáculos (Benewake)](#7-tf-mini-plus--sensor-lidar-de-obstáculos-benewake)
 8. [MCP23017 — Selector de Marchas (Shifter)](#8-mcp23017--selector-de-marchas-shifter)
 9. [Interruptor de Tracción 2WD/4WD](#9-interruptor-de-tracción-2wd4wd)
 10. [Sensor de Contacto (Ignition Sense)](#10-sensor-de-contacto-ignition-sense)
@@ -572,11 +572,14 @@ La señal de centro de dirección es especialmente sensible: un flanco espurio p
 
 ---
 
-## 7. TOFSense-M — Sensor LiDAR de Obstáculos (Nooploop)
+## 7. TF-Mini Plus — Sensor LiDAR de Obstáculos (Benewake)
 
-Sensor LiDAR frontal 8×8 (Time-of-Flight) gestionado por el ESP32-S3 para detección de obstáculos con 5 zonas de distancia. Comunicación UART a 921600 bps, protocolo NLink_TOFSense_M_Frame0.
+Sensor LiDAR frontal de un único punto (Time-of-Flight) gestionado por el ESP32-S3 para detección de obstáculos con 5 zonas de distancia. Comunicación UART a 115200 bps, tramas de 9 bytes.
 
-Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tofsense/TOFSense-M_User_Manual_V3.0_en.pdf)
+> **Sensor activo en firmware**: Benewake TF-Mini Plus (`SENSOR_TYPE = SENSOR_TYPE_TFMINI`).
+> El driver también soporta en tiempo de compilación el TOFSense-M 8×8 de Nooploop
+> (`SENSOR_TYPE_TOFSENSE`), actualmente deshabilitado. Intercambiar únicamente requiere
+> cambiar el `#define SENSOR_TYPE` en `obstacle_sensor.h` y ajustar el cableado de alimentación.
 
 ### Tabla de pines
 
@@ -585,106 +588,79 @@ Referencia: [TOFSense-M User Manual V3.0](https://ftp.nooploop.com/downloads/tof
 | UART1 RX | GPIO18 | Entrada | Sensor TX → ESP32 RX (datos del sensor) |
 | UART1 TX | — | — | No conectado (recepción unidireccional) |
 
-### Conector del sensor (GH1.25 4 pines)
+### Conector del sensor (JST-GH 4 pines)
 
-| Pin | Señal (modo UART) | Conexión |
-|-----|-------------------|----------|
-| 1 | VCC | **5 V** (obligatorio, el sensor no funciona a 3.3 V) |
+| Pin | Señal | Conexión |
+|-----|-------|----------|
+| 1 | VCC | **5 V** (obligatorio, ~140 mA pico) |
 | 2 | GND | GND común |
-| 3 | RX | No conectado (recepción unidireccional) |
-| 4 | TX | ESP32 GPIO18 (UART1 RX) vía divisor de tensión o level shifter BSS138 |
+| 3 | TX | ESP32 GPIO18 (UART1 RX) — **conexión directa, sin divisor** |
+| 4 | RX | No conectado (recepción unidireccional) |
 
-> **Nota sobre niveles lógicos:** Aunque el datasheet V3.0 indica UART TTL 3.3 V, las mediciones reales muestran **3.5–3.6 V** en el pin TX. El ESP32-S3 tiene un máximo absoluto de **3.6 V** en GPIO → se requiere **protección obligatoria**: divisor de tensión (R1=1 kΩ + R2=4.7 kΩ) o level shifter BSS138 (ver sección "Resistencias y protección" más abajo).  
-> **Nota sobre alimentación:** El sensor requiere 5 V en VCC. Alimentar a 3.3 V provocará funcionamiento inestable o ausencia de datos (estado INVALID).
+> **Niveles lógicos:** El TF-Mini Plus emite UART a **3.3 V** — compatible directo con el ESP32-S3.
+> **No se requiere divisor de tensión ni level shifter.**
+> La alimentación del sensor debe ser **5 V** (no funciona a 3.3 V).
 
 ### Parámetros
 
 | Parámetro | Valor |
 |-----------|-------|
-| Rango útil | 20 – 4000 mm |
-| Frecuencia de salida | ~10 Hz (modo activo) |
-| Velocidad UART | 921600 bps, 8N1 |
-| Tamaño de trama | 400 bytes (NLink_TOFSense_M_Frame0) |
-| Píxeles | 64 (8×8 matriz) |
-| Timeout sin tramas | 500 ms → INVALID |
+| Rango útil | 100 – 12 000 mm (10 cm – 12 m) |
+| Frecuencia de salida | 100 Hz (defecto de fábrica) |
+| Velocidad UART | 115 200 bps, 8N1 |
+| Formato de trama | 9 bytes: `[0x59 0x59 DIST_L DIST_H STR_L STR_H TEMP_L TEMP_H CHK]` |
+| Unidades de distancia | cm → convertido a mm en firmware |
+| Calidad de señal (Strength) | uint16 LE; rechazado si < 100 o == 65535 (saturación) |
+| Checksum | Suma de bytes [0..7] & 0xFF == byte[8] |
+| Timeout sin tramas | 500 ms → estado INVALID |
 
 ### Zonas de distancia
 
 | Zona | Rango | Factor de escala de velocidad |
 |------|-------|-------------------------------|
-| Emergency | <500 mm | 0.0 (parada total) |
+| Emergency | < 500 mm | 0.0 (parada total) |
 | Critical | 500–1000 mm | 0.3 |
 | Warning | 1000–1500 mm | 0.7 |
 | Caution | 1500–2000 mm | 0.85 |
 | Alert | 2000–4000 mm | 0.95 |
+| Sin obstáculo | ≥ 4000 mm | 1.0 |
 
 ### Resistencias y protección
 
-- **UART RX (GPIO18):** ⚠️ **Protección obligatoria.** El TX del TOFSense-M emite 3.5–3.6 V (medido), por encima del 3.3 V nominal del datasheet. El ESP32-S3 tiene máx. absoluto de 3.6 V en GPIO. Elegir **una** de estas opciones:
-  - **Opción 1 — Divisor de tensión:** R1=1 kΩ (serie) + R2=4.7 kΩ (a GND) → ~2.9 V en GPIO 18.
-  - **Opción 2 — Level shifter BSS138:** módulo tipo SparkFun BOB-12009, Adafruit 757, o genérico "Logic Level Converter 3.3V–5V" → 3.3 V exactos en GPIO 18. ⚠️ NO usar TXS0108E (oscilaciones a 921600 bps).
-- **Condensador de desacoplo:** 100 nF en VCC del TOFSense-M cerca del sensor.
+- **UART RX (GPIO18):** conexión directa — TF-Mini Plus emite a 3.3 V TTL. Sin divisor de tensión ni level shifter.
+- **Condensador de desacoplo:** 100 nF en VCC del sensor cerca del conector.
+- **Corriente pico:** ~140 mA en la línea de 5 V — asegurar que el regulador tenga margen suficiente.
 
 ### Alimentación
 
-- TOFSense-M: **5 V obligatorio** (conector GH1.25 pin 1, consumo ~200 mA típico). El sensor no funciona a 3.3 V — la alimentación insuficiente causa estado INVALID en el firmware.
-
-> **Referencia:** TOFSense-M Datasheet V3.0 (Nooploop): "Power Supply: 5V", "Communication Interface UART and CAN, TTL signal line level 3.3V".
+- TF-Mini Plus: **5 V obligatorio** (pin 1 del conector JST-GH, consumo ~100 mA típico, 140 mA pico). El sensor no arranca correctamente a 3.3 V.
 
 ### Motivo técnico
 
-- **TOFSense-M:** sensor LiDAR 8×8 de alta precisión, mayor rango y fiabilidad que ultrasonido. No afectado por temperatura, viento ni interferencias acústicas.
-- **5 zonas con factores de escala:** reducción progresiva de velocidad en vez de parada binaria, para una conducción más suave.
-- **Mínima distancia de 64 píxeles:** se usa el valor mínimo de todos los píxeles válidos como distancia de referencia, proporcionando detección de obstáculos de campo amplio.
-- **UART 921600 bps:** alto throughput necesario para los 400 bytes/trama a ~10 Hz. Compatible con UART1 del ESP32-S3.
+- **TF-Mini Plus:** sensor LiDAR de un solo punto, compacto (42 mm × 15 mm × 16 mm), robusto frente a luz ambiental. No afectado por temperatura ni interferencias acústicas.
+- **5 zonas con factores de escala:** reducción progresiva de velocidad en lugar de parada binaria — conducción más suave y segura.
+- **Detección de sensor atascado:** si la distancia no varía más de ±10 mm durante 1000 ms con el vehículo en movimiento, se marca STUCK y el STM32 aplica factor conservador.
+- **115 200 bps / 100 Hz:** a esta cadencia, 9 bytes por trama → ~0.8 ms por trama; no hay riesgo de desbordamiento de buffer. No se necesita buffer de 4 KB — el driver usa ~256 bytes.
 
 ### Qué ocurre si falla
 
-- **Sin tramas UART (sensor desconectado):** tras 500 ms sin tramas válidas, el estado pasa a INVALID. El STM32 aplica factor conservador vía su timeout de CAN 0x208.
-- **Checksum incorrecto:** la trama se descarta silenciosamente. El sensor sigue intentando recibir la siguiente trama.
-- **Lecturas estáticas (sensor obstruido):** detección de sensor atascado — si la distancia no varía más de 10 mm durante 1000 ms mientras el vehículo se mueve, se marca como STUCK.
+- **Sin tramas UART (sensor desconectado):** tras 500 ms sin tramas válidas, el estado pasa a INVALID. El STM32 recibe health=0 en CAN 0x208 y aplica `obstacle_scale = 0.0` → modo SAFE.
+- **Checksum incorrecto o señal baja (Strength < 100):** la trama se descarta silenciosamente; se espera la siguiente.
+- **Sensor atascado (distancia no varía):** detectado como STUCK tras 1000 ms sin variación con vehículo en movimiento.
+- **Saturación (Strength == 65535):** indicativo de objetivo a muy corta distancia o luz solar directa — lectura descartada.
 
 ### Esquema de conexión
 
-**Opción 1 — Con divisor de tensión:**
-
 ```
-          TOFSense-M (GH1.25)
-         ┌──────────────┐
-  5V ────┤ VCC (pin 1)  │       ⚠ 5V obligatorio
-         │              │
-  GND ───┤ GND (pin 2)  │
-         │              │
-     n/c ┤ RX  (pin 3)  │
-         │              │
-         │ TX  (pin 4)  ├──┐     ⚠ TX medido = 3.5–3.6V
-         └──────────────┘  │
-                      ┌────┘
-                      ├── R1=1kΩ ──┬── ESP32 GPIO18 (UART1 RX)
-                      │            │
-                      │       R2=4.7kΩ  (divisor de tensión)
-                      │            │
-                      │           GND
+      TF-Mini Plus (JST-GH 4-pin)
+     ┌────────────────────┐
+5V ──┤ pin 1  VCC         │        ⚠ 5V obligatorio
+GND ─┤ pin 2  GND         │
+     │ pin 3  TX ─────────┼────────► ESP32-S3 GPIO18 (UART1 RX)
+     │ pin 4  RX  (n/c)   │          3.3V TTL — sin divisor
+     └────────────────────┘
 
-  Desacoplo: 100nF entre VCC y GND del TOFSense-M
-```
-
-**Opción 2 — Con level shifter BSS138 (alternativa sin resistencias):**
-
-```
-          TOFSense-M (GH1.25)         Level Shifter BSS138
-         ┌──────────────┐            ┌──────────────────┐
-  5V ────┤ VCC (pin 1)  ├────────────┤ HV (5V)          │
-         │              │            │                  │
-  GND ───┤ GND (pin 2)  ├────────────┤ GND              │
-         │              │            │                  │    ESP32-S3
-     n/c ┤ RX  (pin 3)  │            │       LV (3.3V) ─┼─── 3.3V
-         │              │            │                  │
-         │ TX  (pin 4)  ├────────────┤ HV1    LV1 ──────┼─── GPIO18
-         └──────────────┘            └──────────────────┘    (UART1 RX)
-
-  Desacoplo: 100nF entre VCC y GND del TOFSense-M
-  ⚠️ Usar solo BSS138 (NO TXS0108E)
+Desacoplo: 100 nF entre VCC y GND del sensor
 ```
 
 ---
@@ -884,25 +860,40 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 | PB6 | I2C1_SCL | TCA9548A → 6× INA226 |
 | PB7 | I2C1_SDA | TCA9548A → 6× INA226 |
 | PB0 | OneWire DATA | 5× DS18B20 |
-| PA0 | EXTI0 | Velocidad rueda FL |
-| PA1 | EXTI1 | Velocidad rueda FR |
-| PA2 | EXTI2 | Velocidad rueda RL |
-| PB15 | EXTI15 | Velocidad rueda RR |
-| PA3 | ADC1_IN4 | Pedal acelerador (primario) |
-| PA15 | TIM2_CH1 | Encoder dirección A |
-| PB3 | TIM2_CH2 | Encoder dirección B |
-| PB4 | EXTI4 | Encoder dirección Z |
-| PB5 | EXTI5 | Sensor centro dirección |
+| PA0 | EXTI0 rising | Velocidad rueda FL (via EL817 Board 1) |
+| PA1 | EXTI1 rising | Velocidad rueda FR (via EL817 Board 1) |
+| PA2 | EXTI2 rising | Velocidad rueda RL (via EL817 Board 1) |
+| PB15 | EXTI15 rising | Velocidad rueda RR (via EL817 Board 1) |
+| PA3 | ADC1_IN4 | Pedal acelerador (primario, divisor 10k+6.8k) |
+| PA15 | TIM2_CH1 | Encoder dirección A (via 6N137) |
+| PB3 | TIM2_CH2 | Encoder dirección B (via 6N137) |
+| PB4 | EXTI4 | Encoder dirección Z (via 6N137) |
+| PB5 | EXTI5 falling | Sensor centro dirección (via EL817 Board 2) |
+| PA11 | FDCAN1_RX (AF9) | CAN bus (transceptor SN65HVD230) |
+| PA12 | FDCAN1_TX (AF9) | CAN bus (transceptor SN65HVD230) |
+| PC11 | GPIO out | Relé tracción 24 V (activo HIGH) |
+| PC12 | GPIO out | Relé dirección 12 V (activo HIGH) |
+| PB10 | GPIO out | Relé tira LED frontal 5 V (activo HIGH) |
+| PB11 | GPIO out | Relé tira LED trasera 5 V (activo HIGH) |
+| PA5 | GPIO out | LED LD2 on-board Nucleo-G474RE |
+| PB14 | GPIO out | LED diagnóstico externo (330 Ω serie) |
 
 ### ESP32-S3
 
 | Pin | Función | Sensor/Periférico |
 |-----|---------|-------------------|
-| GPIO18 | UART1 RX | TOFSense-M LiDAR (Nooploop) |
-| GPIO8 | I2C SDA | MCP23017 (shifter) |
-| GPIO9 | I2C SCL | MCP23017 (shifter) |
-| GPIO15 | Entrada pull-up | Interruptor 2WD/4WD |
-| GPIO40 | Entrada INPUT_PULLUP | Sensor de contacto via PC817 (LOW=ON) |
+| GPIO4 | CAN TX (TWAI) | Transceptor SN65HVD230 |
+| GPIO5 | CAN RX (TWAI) | Transceptor SN65HVD230 |
+| GPIO8 | I2C SDA | MCP23017 (selector de marchas, 0x20) |
+| GPIO9 | I2C SCL | MCP23017 (selector de marchas, 0x20) |
+| GPIO15 | Entrada INPUT_PULLUP | Interruptor tracción 2WD/4WD |
+| GPIO18 | UART1 RX | TF-Mini Plus LiDAR (Benewake, 115200 bps) |
+| GPIO40 | Entrada INPUT_PULLUP | Sensor de contacto (ignición) via PC817 (LOW=ON) |
+| GPIO41 | Salida GPIO | Power hold — HIGH = mantener alimentación post-ignición |
+| GPIO43 | UART2 TX | DFPlayer Mini (audio, 9600 bps) |
+| GPIO44 | UART2 RX | DFPlayer Mini (audio, 9600 bps) |
+| GPIO47 | Data WS2812B | Tira LED frontal (28 LEDs, FastLED) |
+| GPIO48 | Data WS2812B | Tira LED trasera (16 LEDs, FastLED) |
 
 ### Dispositivos I2C
 
@@ -911,3 +902,63 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 | TCA9548A | 0x70 | I2C1 (PB6/PB7) | STM32 |
 | INA226 (×6) | 0x40 (via mux) | I2C1 (via TCA9548A) | STM32 |
 | MCP23017 | 0x20 | I2C (GPIO8/9) | ESP32-S3 |
+
+---
+
+## 11. Debounce Diagnostics Counters (DWT 200 µs filter)
+
+Contadores de instrumentación añadidos para validar empíricamente la cadena de mitigación EMI hardware (TVS → optoacoplador EL817) **sin alterar el comportamiento funcional** del sistema.
+
+### Qué miden
+
+Cada canal con filtro DWT (Step 0 del debounce, ventana de **200 µs**) mantiene un contador 32-bit del número de **flancos rechazados** por ese filtro:
+
+- 4 contadores por rueda: `sensor_dbg_filtered_count[0..3]` (FL, FR, RL, RR), incrementados sólo desde `Wheel_IRQDebounced`.
+- 1 contador para el sensor de centro de dirección: `steer_dbg_filtered_count`, incrementado sólo desde `SteeringCenter_IRQHandler`.
+
+Los contadores se incrementan dentro del bloque de rechazo del filtro DWT, antes del `return`. **El camino aceptado no cambia ni un ciclo.**
+
+### Garantías de seguridad / timing
+
+- **ISR sigue O(1)**: añade ~4 instrucciones (load + compare + add + store, Cortex-M4). Coste a 200 Hz @ 170 MHz: < 0.012 % de CPU.
+- **Sin condiciones de carrera**: cada contador es escrito únicamente desde su propia EXTI. No hay reentrada en una misma EXTI line. Lectura de `volatile uint32_t` desde el getter es atómica en M4 → no se necesita `__disable_irq` ni `LDREX/STREX`.
+- **Sin overflow**: incremento clamped (`if (count < 0xFFFFFFFF) count++;`). Si el sistema se inunda de EMI durante días, el contador queda saturado en `0xFFFFFFFF` — comportamiento estable y observable.
+- **Diagnóstico puro**: ninguna ruta de control / safety consulta estos contadores.
+
+### API expuesta
+
+```c
+uint32_t Sensor_GetFilteredCount(uint8_t idx);   /* idx 0..3, fuera de rango → 0 */
+uint32_t Sensor_GetSteerFilteredCount(void);
+```
+
+### Exposición CAN (1 Hz, aditivo)
+
+Dos frames diagnósticos nuevos, sin impacto en IDs existentes:
+
+| ID | DLC | Layout | Notas |
+|----|-----|--------|-------|
+| `0x306` (`CAN_ID_DIAG_DEBOUNCE`) | 8 | `u16 LE` × 4: FL, FR, RL, RR | Ruedas truncadas/saturadas a `0xFFFF` |
+| `0x307` (`CAN_ID_DIAG_DEBOUNCE_STEER`) | 4 | `u32 LE` | Volante completo |
+
+Periodicidad: 1000 ms, sentido STM32 → ESP32. Carga de bus añadida ≈ 220 bps sobre 500 kbps (0.044 %).
+
+### Cómo interpretar los valores
+
+| Valor observado | Interpretación |
+|---|---|
+| `0` constante | Ambiente limpio. Cadena hardware (TVS + opto) está absorbiendo todo el ruido o no hay ruido. |
+| Pequeño spike puntual (< 5) en un evento (relé, arranque de tracción) | Normal. El filtro está haciendo su trabajo. |
+| Crecimiento lineal sostenido (cuentas/segundo) | EMI persistente o jitter del optoacoplador EL817. Revisar cableado, blindaje, masa común. |
+| `65535+` mostrado en pantalla (rueda) | Contador interno > 65 535. El valor real sigue disponible vía `Sensor_GetFilteredCount`. Indica problema crónico que requiere intervención hardware. |
+| `0xFFFFFFFF` (saturado) | Inundación EMI extrema o sensor "ladrando". Inspección física requerida. |
+
+### Ejemplos reales esperados
+
+- **Arranque de motor de tracción** (transitorio inductivo): típicamente 1–3 cuentas en la rueda más cercana al BTS7960 activo. Aceptable.
+- **Conmutación de relé sin TVS bidireccional** (regresión hardware): decenas a centenas de cuentas por evento, escalando con la frecuencia de conmutación.
+- **Cable EL817 sin par trenzado, &gt; 30 cm en el bus de motores**: cuentas/segundo crecientes — corregir trenzando o acortando.
+
+### Visualización en HMI
+
+Los valores son visibles en el menú oculto del ESP32 (PIN `8989` → submenú **DEBOUNCE DEBUG**). Render simple: una fila por canal con el contador decimal alineado a la derecha. Re-render natural a 1 Hz (cadencia CAN). Sin animaciones, sin sprites, no toca pantallas principales (`drive_screen`, etc.).

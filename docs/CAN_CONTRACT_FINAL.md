@@ -1,8 +1,8 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.3
-**Status:** ACTIVE — Added command acknowledgment layer (Phase 13)
-**Date:** 2026-04-23
+**Revision:** 1.4
+**Status:** ACTIVE — Added DWT-debounce EMI diagnostic counters (additive)
+**Date:** 2026-05-01
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
 Any change to this contract requires a new numbered revision and a corresponding firmware release.
@@ -12,6 +12,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.1** (2026-02-13): Added obstacle CAN IDs (0x208, 0x209). Added CAN RX filter bank 3. Added `SAFETY_ERROR_OBSTACLE` (code 12). Updated RX filter table.
 - **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
 - **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
+- **1.4** (2026-05-01): Added DWT-debounce EMI diagnostic counters: `DIAG_DEBOUNCE` (0x306, DLC 8, 1000 ms) and `DIAG_DEBOUNCE_STEER` (0x307, DLC 4, 1000 ms). Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes these values. ESP32 firmware without DEBOUNCE_DIAG submenu silently ignores the new IDs (backward-compatible).
 
 ---
 
@@ -98,6 +99,8 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | CAN ID | Name | DLC | Rate | Description | Source file |
 |--------|------|-----|------|-------------|-------------|
 | 0x300 | DIAG_ERROR | 2 | On-demand | Error code and subsystem identifier | `can_handler.c` |
+| 0x306 | DIAG_DEBOUNCE | 8 | 1000 ms | DWT-debounce filtered counts: 4× wheel u16 LE (FL,FR,RL,RR) saturated to 0xFFFF | `can_handler.c`, `sensor_manager.c` |
+| 0x307 | DIAG_DEBOUNCE_STEER | 4 | 1000 ms | DWT-debounce filtered count for steering center: u32 LE | `can_handler.c`, `sensor_manager.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -309,6 +312,33 @@ Source: `CAN_SendStatusBattery()` in `can_handler.c`, called from `main.c`
 | 1 | subsystem | uint8 | 0 = Global, 1 = Motor, 2 = Sensor, 3 = CAN |
 
 Source: `CAN_SendError()` in `can_handler.c`
+
+### 4.14a DIAG_DEBOUNCE (0x306) — STM32 → ESP32 (rev 1.4, additive)
+
+DWT-debounce EMI diagnostic counters for the four wheel-speed channels. Each counter records the number of edge pulses rejected by the µs-level DWT pre-filter (Step 0 of `Wheel_IRQDebounced`, `SENSOR_DEBOUNCE_US = 200 µs`). Internal counters are 32-bit saturated; this frame truncates to uint16 with saturation to `0xFFFF`.
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0–1 | filtered_FL | uint16 LE | Wheel 0 (FL) filtered-pulse count, saturated to 0xFFFF |
+| 2–3 | filtered_FR | uint16 LE | Wheel 1 (FR) filtered-pulse count, saturated to 0xFFFF |
+| 4–5 | filtered_RL | uint16 LE | Wheel 2 (RL) filtered-pulse count, saturated to 0xFFFF |
+| 6–7 | filtered_RR | uint16 LE | Wheel 3 (RR) filtered-pulse count, saturated to 0xFFFF |
+
+**Diagnostic only** — must NOT gate any control or safety path on these values. Used by the ESP32 hidden engineering menu (`DEBOUNCE DEBUG` submenu, PIN 8989) for empirical validation of the EMI mitigation chain (TVS → EL817 opto → DWT 200 µs filter).
+
+Source: `CAN_SendDebounceDiag()` in `can_handler.c` calling `Sensor_GetFilteredCount()` from `sensor_manager.c`.
+
+### 4.14b DIAG_DEBOUNCE_STEER (0x307) — STM32 → ESP32 (rev 1.4, additive)
+
+DWT-debounce EMI diagnostic counter for the steering-center inductive sensor (PB5/EXTI5). Full 32-bit value (no truncation) because steering events are extremely rare.
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0–3 | filtered_steer | uint32 LE | Steering-center filtered-pulse count, saturated to `0xFFFFFFFF` |
+
+**Diagnostic only** — same constraints as 0x306.
+
+Source: `CAN_SendDebounceDiag()` in `can_handler.c` calling `Sensor_GetSteerFilteredCount()` from `sensor_manager.c`.
 
 ### 4.15 OBSTACLE_DISTANCE (0x208) — ESP32 → STM32
 
@@ -613,7 +643,7 @@ This document describes the CAN protocol as implemented in the current firmware.
 | Previous revision | 1.2 |
 | Contract status | ACTIVE |
 | Change policy | Any modification to CAN IDs, payloads, timing, or behavior requires a new contract revision number and a corresponding firmware release tag. |
-| Backward compatibility | Revision 1.3 is backward-compatible with 1.2, 1.1, and 1.0. No existing CAN IDs, payload layouts, or timing changed. The 2026-04-23 firmware hardening retains the 3-bit `relay_status` layout — rev 1.3 consumers continue to decode byte 5 unchanged (the former MAIN bit is simply always 0 now). New CMD_ACK (0x103) is additive only — ESP32 firmware without ACK support will silently ignore the new message. |
+| Backward compatibility | Revision 1.4 is backward-compatible with 1.3, 1.2, 1.1, and 1.0. No existing CAN IDs, payload layouts, or timing changed. New `DIAG_DEBOUNCE` (0x306) and `DIAG_DEBOUNCE_STEER` (0x307) are diagnostic-only and additive — ESP32 firmware without DEBOUNCE_DIAG submenu silently ignores the new IDs (`default: break` in `can_rx.cpp`). The 2026-04-23 firmware hardening retains the 3-bit `relay_status` layout — rev 1.3+ consumers continue to decode byte 5 unchanged (the former MAIN bit is simply always 0 now). CMD_ACK (0x103) added in 1.3 is additive only — ESP32 firmware without ACK support will silently ignore the message. |
 
 The source files that define this contract are:
 

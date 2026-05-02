@@ -1,8 +1,8 @@
 # LISTADO COMPLETO DE PINES — ESP32-S3 y STM32G474RE
 
 **Proyecto:** Control Coche Marcos  
-**Fecha:** 2026-02-28  
-**Fuente:** Firmware (`main.h`, `main.c`, `platformio.ini`, `User_Setup.h`) y documentación técnica del proyecto
+**Fecha:** 2026-05-01 (revisado y verificado contra firmware)  
+**Fuente:** Firmware (`main.h`, `main.c`, `project_config.h`, `platformio.ini`, `User_Setup.h`) y documentación técnica del proyecto
 
 ---
 
@@ -55,6 +55,8 @@
 - Pin 7 (CANH) → Bus CAN alto
 - Pin 8 (S) → GND (modo normal)
 
+> ⚠️ **Nota sobre transceiver:** El comentario de `main.cpp` menciona SN65HVD230 (alimentado a 3.3 V directo, sin pin VIO). Ambos transceivers son funcionalmente compatibles pero el cableado difiere. Si se usa **SN65HVD230**: VCC → 3.3 V, no conectar VIO. Si se usa **TJA1051T/3**: seguir las conexiones de arriba (VCC → 5 V + VIO → 3.3 V obligatorio).
+
 ---
 
 ### 1.3 Tiras LED WS2812B (FastLED)
@@ -95,26 +97,21 @@
 
 ---
 
-### 1.5 Sensor de Obstáculos — TOFSense-M (UART1 — 921600 baud)
+### 1.5 Sensor de Obstáculos — TF-Mini Plus (UART1 — 115200 baud)
 
 | GPIO | Señal | Conecta a | Dirección | Componentes externos |
 |------|-------|-----------|-----------|----------------------|
-| 18 | OBSTACLE_RX | TOFSense-M pin TX (pin 4) | Entrada | Divisor de tensión si sensor sale 5 V (ver abajo) |
+| 18 | OBSTACLE_RX | TF-Mini Plus pin TX | Entrada | — (salida 3.3 V TTL, conexión directa) |
 
-**Conexiones del sensor TOFSense-M:**
-- Pin 1 (VCC) → 5 V
-- Pin 2 (GND) → GND
-- Pin 3 (RX) → No conectar (solo recepción)
-- Pin 4 (TX) → GPIO 18
+**Conexiones del sensor TF-Mini Plus:**
+- Pin 1 (VCC, rojo) → 5 V
+- Pin 2 (GND, negro) → GND
+- Pin 3 (TX, verde) → GPIO 18 ← señal 3.3 V TTL, **sin divisor**
+- Pin 4 (RX, blanco) → No conectar (solo recepción)
 
-**Componentes necesarios si la salida del sensor es 5 V:**
-
-| Componente | Valor | Ubicación | Propósito |
-|-----------|-------|-----------|-----------|
-| R1 (divisor) | 10 kΩ | Entre sensor TX y nodo medio | Divisor 5 V → 3.3 V |
-| R2 (divisor) | 20 kΩ | Entre nodo medio y GND | Divisor 5 V → 3.3 V |
-
-> Verificar nivel de salida del sensor antes de conectar. Si ya es 3.3 V, no hace falta divisor.
+> ✅ La salida TX del TF-Mini Plus es 3.3 V TTL. **No hace falta divisor de tensión.**
+>
+> ℹ️ El driver (`obstacle_sensor.h`) también soporta el sensor TOFSense-M (921600 baud, 400-byte frames). Si se usa TOFSense-M en lugar de TF-Mini Plus, cambiar `OBSTACLE_SENSOR_ENABLED` y el baudrate en la configuración del driver. El GPIO (18) y la conexión física son iguales.
 
 ---
 
@@ -146,15 +143,31 @@
 
 | GPIO | Señal | Conecta a | Dirección | Componentes externos |
 |------|-------|-----------|-----------|----------------------|
-| 40 | IGNITION_SENSE | Señal de llave de contacto | Entrada (pull-down) | Divisor de tensión si señal > 3.3 V |
+| 40 | IGNITION_SENSE | Señal de llave vía optoacoplador PC817 | Entrada (pull-up interno + externo) | Optoacoplador PC817, R 1 kΩ lado entrada, R 10 kΩ pull-up externo |
 | 41 | POWER_HOLD | Control de mantenimiento de alimentación | Salida (activo HIGH) | — |
 
-**Componentes necesarios:**
+**Circuito GPIO40 — lógica INVERTIDA vía PC817:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| R1 (divisor ignición) | 10 kΩ | Entre señal de llave y GPIO 40 | Adaptar nivel si > 3.3 V |
-| R2 (divisor ignición) | 10 kΩ | Entre GPIO 40 y GND | Pull-down + divisor |
+| Resistencia limitadora LED | 1 kΩ ¼W | En serie con LED del PC817 (IN+) | Limita I_LED ≈ 10.8 mA con 12 V de llave. NO usar 330 Ω (excede corriente continua) |
+| Resistencia pull-up externa | **10 kΩ** | Entre GPIO 40 y **3.3 V** (OBLIGATORIA) | Pull-up colector PC817. El board de 8 canales PC817 NO tiene pull-up propio |
+
+**Conexión completa:**
+```
++12 V (llave)  ── 1 kΩ ──→ IN+ (ánodo LED)   PC817
+GND (coche)    ─────────→ IN- (cátodo LED)
+                           OUT (colector) ────→ GPIO 40
+                           OUT (colector) ─── 10 kΩ ──→ 3.3 V  ← resistencia externa OBLIGATORIA
+GND (ESP32)    ─────────→ GND PC817
+```
+
+**Lógica invertida (firmware `power_manager.cpp`):**
+- GPIO 40 = LOW → LED conduce → transistor saturado → **llave encendida (ON)**
+- GPIO 40 = HIGH → LED apagado → pull-up activo → **llave apagada (OFF)**
+- Firmware: `pinMode(40, INPUT_PULLUP)` + pull-up externo 10 kΩ a 3.3 V
+
+> ⚠️ **IMPORTANTE:** GPIO 40 usa `INPUT_PULLUP` (no pull-down). La resistencia externa va de GPIO 40 a **3.3 V**, **no a GND**. Un divisor de tensión convencional NO es compatible con este circuito.
 
 ---
 
@@ -189,7 +202,7 @@
 | 21 | Touch CS | SPI | Salida |
 | 38 | Display RST | GPIO | Salida |
 | 39 | Display DC | GPIO | Salida |
-| 40 | Ignición sense | GPIO | Entrada (pull-down) |
+| 40 | Ignición sense (PC817, lógica invertida) | GPIO | Entrada (pull-up) |
 | 41 | Power hold | GPIO | Salida |
 | 42 | Display backlight | GPIO/PWM | Salida |
 | 43 | DFPlayer TX | UART2 | Salida |
@@ -217,7 +230,7 @@
 
 > Control de motores, sensores, relés, CAN  
 > Alimentación: 3.3 V (VDD) / VDDA analógico  
-> Clock: 170 MHz (HSE 8 MHz + PLL)
+> Clock: 170 MHz (HSI 16 MHz + PLL, **sin cristal externo**)
 
 ### 2.1 PWM Motores de Tracción — TIM1 (20 kHz, centro-alineado)
 
@@ -226,8 +239,9 @@
 | 41 | PA8 | TIM1_CH1 | RPWM_FL | BTS7960 FL → pin RPWM | Optoacoplador HY-M158 + R 330 Ω en serie (LED del opto) |
 | 42 | PA9 | TIM1_CH2 | LPWM_FL | BTS7960 FL → pin LPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
 | 43 | PA10 | TIM1_CH3 | RPWM_FR | BTS7960 FR → pin RPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
+| 18 | PC3 | TIM1_CH4 (AF2) | LPWM_FR | BTS7960 FR → pin LPWM | Optoacoplador HY-M158 + R 330 Ω en serie |
 
-> **Nota:** PA11 se reasignó a FDCAN1_RX (CAN bus). LPWM_FR ahora usa TIM1_CH4 en PC3 (AF2).
+> **Nota:** PA11 se reasignó a FDCAN1_RX (CAN bus). LPWM_FR se movió de PB14/TIM15_CH1 → **PC3/TIM1_CH4 (AF2)** para mantener todos los canales FL/FR en el mismo timer.
 > PB14 queda libre y se configura como GPIO_Output para LED diagnóstico (LED_DIAG).
 
 **Configuración TIM1:** Prescaler = 0, Period = 4249, Center-Aligned, BREAK2 armado a Cortex LOCKUP
@@ -270,14 +284,19 @@
 
 ---
 
-### 2.5 Enable de Motores (GPIO Salida)
+### 2.5 Enable de Motores (GPIO Salida — GPIOC, activo HIGH)
 
 | Pin LQFP | GPIO | Señal | Conecta a | Componentes externos |
 |----------|------|-------|-----------|----------------------|
+| 15 | PC0 | EN_FR | BTS7960 FR → R_EN + L_EN (unidos) | — |
+| 16 | PC1 | EN_RL | BTS7960 RL → R_EN + L_EN (unidos) | — |
+| 17 | PC2 | EN_RR | BTS7960 RR → R_EN + L_EN (unidos) | — |
+| 34 | PC4 | EN_STEER | BTS7960 STEER → R_EN + L_EN (unidos) | — |
 | 35 | PC5 | EN_FL | BTS7960 FL → R_EN + L_EN (unidos) | — |
-| 2 | PC13 | EN_RR | BTS7960 RR → R_EN + L_EN (unidos) | — |
 
-**Motores FR, RL, STEER:** R_EN y L_EN conectados directamente a 3.3 V (siempre habilitados; los pines PC6, PC7, PC9 fueron reasignados a TIM8).
+> **Todos los EN son GPIO salida push-pull, activo HIGH.** El firmware los inicializa a LOW (deshabilitado) antes de configurar los timers PWM.
+>
+> ⚠️ **PC13 NO se usa como EN_RR.** En la NUCLEO-G474RE PC13 está conectado al botón USER (B1). EN_RR fue movido de PC13 → PC2 para evitar que pulsar el botón físico desconecte el motor trasero-derecho. No conectar nada a PC13.
 
 ---
 
@@ -482,8 +501,8 @@
 | Pin LQFP | Función | Conecta a | Componentes externos |
 |----------|---------|-----------|----------------------|
 | 1 | VBAT | 3.3 V (backup) | Condensador 100 nF cerámico |
-| 5 | PH0/OSC_IN | Cristal 8 MHz (entrada) | Cristal + 2× condensadores de carga (típico 20 pF) |
-| 6 | PH1/OSC_OUT | Cristal 8 MHz (salida) | Cristal + condensador de carga |
+| 5 | PH0/OSC_IN | **Sin conexión** (HSI activo) | — |
+| 6 | PH1/OSC_OUT | **Sin conexión** (HSI activo) | — |
 | 7 | NRST | Reset (activo bajo) | Condensador 100 nF a GND + resistencia pull-up 10 kΩ a 3.3 V (opcional) |
 | 8 | VSSA | GND analógico | Conectar a plano de GND |
 | 9 | VDDA | 3.3 V analógico | Condensador tantalio 10 µF/6.3 V + cerámico 100 nF |
@@ -495,6 +514,8 @@
 | 49 | VDD | 3.3 V digital | Condensador cerámico 100 nF + 4.7 µF |
 | 64 | VSS | GND digital | Conectar a plano de GND |
 
+> ℹ️ **Oscilador:** El firmware usa el **HSI interno de 16 MHz** + PLL → 170 MHz (`SystemClock_Config` en `main.c`). Los pines PH0/PH1 (HSE) **no están activos**. La NUCLEO-G474RE tiene un cristal de 8 MHz soldado en placa, pero no se usa. En un diseño propio, los condensadores de cristal (20 pF) **no son necesarios**.
+
 **Condensadores de alimentación (resumen):**
 
 | Componente | Valor | Ubicación | Propósito |
@@ -502,7 +523,6 @@
 | Bulk capacitor | 1000 µF / 25 V electrolítico | Entrada de alimentación principal | Estabilización general |
 | Bypass caps | 100 nF cerámico × 4 | Uno junto a cada pin VDD | Desacoplo de alta frecuencia |
 | Tantalio VDDA | 10 µF / 6.3 V | Junto al pin VDDA (pin 9) | Estabilidad ADC analógico |
-| Condensadores cristal | 20 pF × 2 | Entre cada pin del cristal y GND | Carga del oscilador |
 
 ---
 
@@ -519,13 +539,11 @@
 
 | Pin LQFP | GPIO | Estado original | Estado actual |
 |----------|------|----------------|---------------|
-| 15 | PC0 | DIR_FL | Libre — dejar desconectado o GPIO LOW |
-| 16 | PC1 | DIR_FR | Libre — dejar desconectado o GPIO LOW |
-| 17 | PC2 | DIR_RL | Libre — dejar desconectado o GPIO LOW |
-| 18 | PC3 | LPWM_FR | TIM1_CH4 (AF2) — PWM motor FR reverso |
-| 34 | PC4 | DIR_STEER | Libre — dejar desconectado o GPIO LOW |
+| 18 | PC3 | LPWM_FR (TIM15_CH1/PB14) | **TIM1_CH4 (AF2) — activo** — PWM motor FR reverso |
 
-> Estos pines fueron liberados por la migración a la arquitectura RPWM/LPWM (PR #120).
+> ℹ️ PC0 (EN_FR), PC1 (EN_RL), PC2 (EN_RR), PC4 (EN_STEER) **no son libres**: se reasignaron como salidas GPIO de enable de motor (ver sección 2.5). Solo PC3 aparece en esta sección porque refleja un cambio de timer, no una liberación de pin.
+
+> Estos pines fueron reubicados por la migración a la arquitectura RPWM/LPWM simétrica.
 
 ---
 
@@ -557,6 +575,11 @@
 | PB11 | Relé LED trasero | GPIO | Salida |
 | PB14 | LED_DIAG | GPIO_Output | Salida digital |
 | PB15 | Velocidad rueda RR | EXTI15 | Entrada (pull-up) |
+| PC0 | Enable motor FR | GPIO | Salida |
+| PC1 | Enable motor RL | GPIO | Salida |
+| PC2 | Enable motor RR | GPIO | Salida |
+| PC3 | LPWM motor FR | TIM1_CH4 (AF2) | Salida PWM |
+| PC4 | Enable motor STEER | GPIO | Salida |
 | PC5 | Enable motor FL | GPIO | Salida |
 | PC6 | RPWM motor RL | TIM8_CH1 | Salida PWM |
 | PC7 | LPWM motor RL | TIM8_CH2 | Salida PWM |
@@ -565,9 +588,9 @@
 | PC10 | **DISPONIBLE** | — | **GPIO libre, no conectado** (`INPUT_PULLDOWN`) |
 | PC11 | Relé tracción | GPIO | Salida |
 | PC12 | Relé dirección | GPIO | Salida |
-| PC13 | Enable motor RR | GPIO | Salida |
+| PC13 | **NO USAR** (botón USER B1) | — | Reservado por hardware Nucleo |
 
-**GPIO usados:** 33 de 51 disponibles
+**GPIO usados:** 36 de 51 disponibles
 
 ---
 ---
@@ -589,7 +612,9 @@
 | 3 | 4.7 kΩ | 5% | Pull-up salida Vo 6N137 encoder a +3.3V (A, B, Z) |
 | 5 | 100 Ω ¼W | 5% | Snubber motores |
 | 2 | 330 Ω | 5% | Línea datos WS2812B (frontal, trasera) |
-| 1 | 1 kΩ | 5% | Serie TX DFPlayer |
+| 1 | 1 kΩ ¼W | 5% | Serie TX DFPlayer Mini (GPIO43 → DFPlayer RX) |
+| 1 | 1 kΩ ¼W | 5% | Limitadora LED PC817 ignición (+12V → IN+). NO usar 330 Ω |
+| 1 | 10 kΩ | 5% | Pull-up externo GPIO40 a 3.3 V (colector PC817 ignición, OBLIGATORIA) |
 
 ### Condensadores
 
@@ -599,7 +624,6 @@
 | 2 | 1000 µF / 6.3 V | Electrolítico | Alimentación tiras LED (una por tira) |
 | 4 | 100 nF | Cerámico | Junto a cada pin VDD del STM32 |
 | 1 | 10 µF / 6.3 V | Tantalio | Pin VDDA (analógico) del STM32 |
-| 2 | 20 pF | Cerámico | Condensadores de carga del cristal 8 MHz |
 | 5 | 100 nF / 50 V | Cerámico | Snubber motores |
 | ~8 | 100 nF | Cerámico | Desacoplo de módulos (TCA9548A, INA226, TJA1051T/3, etc.) |
 
@@ -621,13 +645,13 @@
 
 | Cantidad | Componente | Ubicación |
 |----------|-----------|-----------|
-| 1 | Cristal 8 MHz | Oscilador externo STM32 (PH0/PH1) |
-| 2 | TJA1051T/3 | Transceiver CAN (uno por MCU) — VCC=5V, VIO=3.3V |
+| 2 | TJA1051T/3 (o SN65HVD230) | Transceiver CAN (uno por MCU). TJA1051T/3: VCC=5V + VIO=3.3V. SN65HVD230: VCC=3.3V directo, sin VIO |
 | 1 | TCA9548A | Multiplexor I2C |
 | 6 | INA226 | Sensores de corriente/tensión |
 | 1 | MCP23017 | I/O expander para shifter |
+| 1 | PC817 (módulo 8 canales) | Aislamiento señal ignición (GPIO40). Requiere pull-up externo 10 kΩ a 3.3 V |
 
 ---
 
 _Documento generado a partir del firmware y documentación del proyecto Control Coche Marcos._  
-_Versión: 1.0_
+_Versión: 1.1 — Revisión y correcciones verificadas contra firmware (2026-05-01)_

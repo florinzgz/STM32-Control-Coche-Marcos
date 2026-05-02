@@ -989,6 +989,43 @@ void CAN_SendServiceStatus(void) {
 }
 
 /**
+ * @brief  Send DWT-debounce EMI diagnostic counters to ESP32.
+ *
+ * Two aditive frames (1000 ms cadence, low priority):
+ *   0x306 — DLC 8: FL/FR/RL/RR filtered counts, uint16 LE saturated to 0xFFFF
+ *   0x307 — DLC 4: steering-center filtered count, uint32 LE
+ *
+ * The internal counters in sensor_manager.c are 32-bit saturated; this frame
+ * truncates the 4 wheel counters to 16 bits for compactness.  Truncation is
+ * acceptable because the values are diagnostic only and "saturated" is a
+ * meaningful UI state.
+ *
+ * Diagnostic only — no control / safety path consumes these.
+ */
+void CAN_SendDebounceDiag(void) {
+    uint8_t  data8[8];
+    uint8_t  data4[4];
+    uint32_t v;
+
+    /* 0x306 — wheel filtered counts (FL, FR, RL, RR) */
+    for (uint8_t i = 0; i < 4; i++) {
+        v = Sensor_GetFilteredCount(i);
+        uint16_t v16 = (v > 0xFFFFU) ? 0xFFFFU : (uint16_t)v;
+        data8[2 * i]     = (uint8_t)(v16 & 0xFF);
+        data8[2 * i + 1] = (uint8_t)((v16 >> 8) & 0xFF);
+    }
+    TransmitFrame(CAN_ID_DIAG_DEBOUNCE, data8, 8);
+
+    /* 0x307 — steering filtered count (uint32 LE, no truncation) */
+    v = Sensor_GetSteerFilteredCount();
+    data4[0] = (uint8_t)(v & 0xFF);
+    data4[1] = (uint8_t)((v >> 8) & 0xFF);
+    data4[2] = (uint8_t)((v >> 16) & 0xFF);
+    data4[3] = (uint8_t)((v >> 24) & 0xFF);
+    TransmitFrame(CAN_ID_DIAG_DEBOUNCE_STEER, data4, 4);
+}
+
+/**
  * @brief  Transmit error log header (entry count + total events).
  *         Sent periodically (1000 ms) so the ESP32 engineering menu
  *         knows how many log entries are available.

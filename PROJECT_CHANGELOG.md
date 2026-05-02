@@ -2,6 +2,32 @@
 
 ## [unreleased] — 2026-05-01
 
+### [DEBUG] Debounce EMI diagnostic counters
+
+Instrumentación purely-additive del filtro debounce DWT (200 µs) para auditar la cadena de mitigación EMI hardware (TVS → opto EL817 → filtro DWT) sin cambiar comportamiento funcional ni timing.
+
+- **Firmware STM32**:
+  - `Core/Src/sensor_manager.c`: nuevas variables `static volatile uint32_t sensor_dbg_filtered_count[NUM_WHEELS]` y `steer_dbg_filtered_count`, incrementadas con clamp a `0xFFFFFFFF` dentro del bloque de rechazo del Step 0 (DWT) en `Wheel_IRQDebounced` y `SteeringCenter_IRQHandler`. Sin tocar el camino aceptado.
+  - Getters `Sensor_GetFilteredCount(idx)` / `Sensor_GetSteerFilteredCount()` añadidos en `Core/Inc/sensor_manager.h`. Comentario explícito: "Diagnostic only — must NOT gate any control/safety path."
+  - Dos frames CAN nuevos aditivos (1 Hz, STM32 → ESP32, sin conflicto con IDs existentes):
+    - `0x306` (`CAN_ID_DIAG_DEBOUNCE`, DLC 8): 4× contador rueda u16 LE saturado a 0xFFFF.
+    - `0x307` (`CAN_ID_DIAG_DEBOUNCE_STEER`, DLC 4): contador volante u32 LE.
+  - `CAN_SendDebounceDiag()` añadida en `Core/Src/can_handler.c`, invocada desde el bloque `tick_1000ms` ya existente en `Core/Src/main.c`.
+  - **Coste ISR**: ~4 instrucciones extra (load + cmp + add + store, M4) → < 0.012 % de CPU adicional a 200 Hz @ 170 MHz. ISR sigue O(1).
+  - **Carga de bus**: 2 frames × 1 Hz ≈ 220 bps sobre 500 kbps (0.044 %). Despreciable.
+- **UI ESP32**:
+  - `esp32/include/can_ids.h`: constantes `DIAG_DEBOUNCE` / `DIAG_DEBOUNCE_STEER`.
+  - `esp32/src/vehicle_data.h`: nuevo struct `DebounceDiagData` (cero impacto en estructuras existentes), setter / getter / miembro siguiendo el patrón habitual.
+  - `esp32/src/can_rx.cpp`: dos decoders nuevos (`decodeDebounceDiag`, `decodeDebounceDiagSteer`) y dos casos en el `switch (frame.identifier)`. ESP32 antiguos siguen funcionando — IDs desconocidos se ignoran silenciosamente.
+  - `esp32/src/screens/engineering_screen.{h,cpp}`: nuevo submenú `DEBOUNCE_DIAG` accesible **sólo** desde el Engineering Screen (PIN `8989`), entrada "DEBOUNCE DEBUG" en el menú principal del menú oculto. Render mínimo (5 filas FL/FR/RL/RR/STEER, contador decimal alineado a la derecha, BACK button), repaint a 1 Hz natural por cadencia CAN. Ajuste menor de constantes de layout del menú principal (`MENU_START_Y` 50→46, `MENU_SPACING` 28→25, `MENU_BTN_H` 26→23) para dar cabida al 11º item. Sin animaciones, sin sprites.
+  - **Pantallas principales no tocadas**: `drive_screen`, `safe_screen`, `boot_screen`, `pin_screen`, `error_screen`, `standby_screen` intactos.
+- **Documentación**:
+  - `docs/SENSOR_INTERFACE.md`: nueva sección **§11 "Debounce Diagnostics Counters (DWT 200 µs filter)"** con qué miden, garantías de seguridad / timing, API, layout CAN, tabla de interpretación de valores y ejemplos reales esperados.
+  - `docs/EL817_WIRING_REFERENCE.md`: nueva sección **"TVS + Opto + Debounce Counters — Closing the Loop"** correlacionando las tres etapas de la cadena de mitigación con el procedimiento empírico de validación (4 pasos).
+  - `docs/CAN_CONTRACT_FINAL.md`: bump de revisión (1.3 → 1.4) con sección de los nuevos IDs `0x306` / `0x307` documentados como diagnóstico aditivo (cero cambios en payload / timing / IDs existentes).
+
+**Invariantes preservadas**: `SENSOR_DEBOUNCE_US = 200` intacto, IDs CAN existentes intactos, timers / PWM / relés / motor_control / safety_system / encoder no tocados, sin nuevas dependencias o librerías, compatibilidad hacia atrás garantizada en ambos sentidos del bus CAN.
+
 ### [AUDIT] Sensor debounce verification
 
 - Verified DWT-based debounce implementation against task specification.

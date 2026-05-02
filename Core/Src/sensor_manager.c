@@ -78,6 +78,18 @@ static volatile uint32_t wheel_last_edge_cyc[NUM_WHEELS] = {0};  /* DWT CYCCNT a
 static volatile uint32_t steer_last_edge_cyc              = 0;   /* DWT CYCCNT at last steering edge */
 static uint32_t          sensor_debounce_cycles           = 0;   /* SENSOR_DEBOUNCE_US × cycles/µs  */
 
+/* ---- Debounce EMI diagnostic counters (report-only, ISR-incremented) ----
+ * Count the number of edge pulses rejected by the µs-level DWT pre-filter
+ * (Step 0 of Wheel_IRQDebounced / SteeringCenter_IRQHandler).  Each ISR
+ * writes ONLY its own counter — no cross-channel sharing, no race conditions.
+ *
+ * Saturation: incremented up to 0xFFFFFFFF (clamped, never wraps).
+ *             A saturated counter indicates sustained EMI / opto jitter.
+ *
+ * Diagnostic only — must NOT gate any control or safety path.            */
+static volatile uint32_t sensor_dbg_filtered_count[NUM_WHEELS] = {0};
+static volatile uint32_t steer_dbg_filtered_count              = 0;
+
 /* Precomputed flood ceiling: max accepted pulses per 1-second window */
 #define WHEEL_FLOOD_WINDOW_MS    1000U
 
@@ -104,7 +116,13 @@ static inline void Wheel_IRQDebounced(uint8_t idx)
      *    Unsigned subtraction wraps correctly on CYCCNT rollover (~25 s). */
     uint32_t cyc_now = DWT->CYCCNT;
     if ((cyc_now - wheel_last_edge_cyc[idx]) < sensor_debounce_cycles)
+    {
+        /* Diagnostic: count rejected edges (saturated 32-bit, no wrap).
+         * Single-writer (this EXTI), so no atomic / barrier needed.       */
+        if (sensor_dbg_filtered_count[idx] < 0xFFFFFFFFU)
+            sensor_dbg_filtered_count[idx]++;
         return;
+    }
     wheel_last_edge_cyc[idx] = cyc_now;
 
     uint32_t now = HAL_GetTick();
@@ -157,7 +175,13 @@ void SteeringCenter_IRQHandler(void)
      * < 200 µs of the previous accepted edge.                              */
     uint32_t cyc_now = DWT->CYCCNT;
     if ((cyc_now - steer_last_edge_cyc) < sensor_debounce_cycles)
+    {
+        /* Diagnostic: count rejected edges (saturated 32-bit, no wrap).
+         * Single-writer (this EXTI), so no atomic / barrier needed.       */
+        if (steer_dbg_filtered_count < 0xFFFFFFFFU)
+            steer_dbg_filtered_count++;
         return;
+    }
     steer_last_edge_cyc = cyc_now;
 
     steer_center_flag = 1;
@@ -166,6 +190,20 @@ void SteeringCenter_IRQHandler(void)
 bool SteeringCenter_Detected(void) { return (steer_center_flag != 0); }
 
 void SteeringCenter_ClearFlag(void) { steer_center_flag = 0; }
+
+/* ---- Debounce diagnostic getters (report-only) ---------------------------
+ * Atomic 32-bit reads on Cortex-M4 — no critical section needed.
+ * NOT safety-critical: do NOT gate any control path on these values.       */
+uint32_t Sensor_GetFilteredCount(uint8_t idx)
+{
+    if (idx >= NUM_WHEELS) return 0U;
+    return sensor_dbg_filtered_count[idx];
+}
+
+uint32_t Sensor_GetSteerFilteredCount(void)
+{
+    return steer_dbg_filtered_count;
+}
 
 /**
  * @brief  Compute speed for one wheel from accumulated pulses.
