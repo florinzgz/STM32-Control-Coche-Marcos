@@ -905,9 +905,14 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                         relayOverrideMask_ = 0;
                     }
                 } else {
-                    // Toggle individual relay bit (only when override enabled)
+                    // Toggle individual relay bit (only when override enabled).
+                    // Wire layout: bit1=TRACTION(PC11), bit2=DIRECTION(PC12).
+                    // i=1→TRAC: 1U<<1=0x02; i=2→DIR: 1U<<2=0x04.
+                    // After the << 1 shift in the CAN encoding below, STM32
+                    // decode (mask = (ctl>>1)&0x07, then &0x06) sees the
+                    // correct bit-1/bit-2 relay assignment.
                     if (relayOverrideEnabled_) {
-                        uint8_t bit = (uint8_t)(1U << (i - 1));
+                        uint8_t bit = (uint8_t)(1U << i);
                         relayOverrideMask_ ^= bit;
                     }
                 }
@@ -962,6 +967,7 @@ void EngineeringScreen::drawMainMenu() {
                           (i == 7) ? ui::COL_CYAN :         // DTC Error Log
                           (i == 8) ? ui::COL_GREEN :        // Maintenance
                           (i == 9) ? ui::COL_RED :          // Relay Control (debug)
+                          (i == 10) ? ui::COL_CYAN :        // Debounce Debug (diagnostic)
                           (i == 11) ? ui::COL_CYAN :        // Touch Calibration wizard
                           (i == 12) ? ui::COL_AMBER :       // Reset Touch Cal
                           ui::COL_WHITE;

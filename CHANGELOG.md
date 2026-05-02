@@ -33,6 +33,21 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
   `esp32/src/screens/touch_calibration_screen.{h,cpp}`.  Engineering
   menu gains two entries: `TOUCH CALIBRATION` and `RESET TOUCH CAL`.
 
+- **[DEBUG] DWT debounce EMI diagnostic counters**
+  - Two additive CAN frames (1 Hz, STM32 → ESP32): `0x306`
+    `DIAG_DEBOUNCE` (DLC 8, 4× wheel u16 LE saturated counters) and
+    `0x307` `DIAG_DEBOUNCE_STEER` (DLC 4, steering u32 LE counter).
+  - STM32: `sensor_dbg_filtered_count[NUM_WHEELS]` and
+    `steer_dbg_filtered_count` incremented exclusively on the rejection
+    path of the DWT 200 µs debounce filter. Saturated at `0xFFFFFFFF`,
+    O(1) ISR overhead, < 0.012 % CPU.
+  - ESP32: new `DEBOUNCE_DIAG` submenu in the engineering screen
+    (PIN 8989), read-only display of FL/FR/RL/RR/STEER counters at 1 Hz.
+    All existing screens untouched.
+  - CAN bus overhead: 2 frames × 1 Hz ≈ 220 bps over 500 kbps (0.044 %).
+  - No functional, timing, or safety-path changes; all existing CAN IDs,
+    DLCs and byte layouts preserved.
+
 - **DS18B20 persistent physIdx→role mapping** with Flash persistence on
   STM32 (`Core/Src/sensor_map_store.c`) and UI-driven assignment on ESP32
   engineering screen. Consumed by `CAN_SendStatusTempMap()` so the

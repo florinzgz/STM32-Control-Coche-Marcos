@@ -86,7 +86,7 @@ static void decodeTemp(const CanFrame& f, vehicle::VehicleData& data) {
 }
 
 static void decodeSafety(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 3) return;
+    if (f.data_length_code < 5) return;
     vehicle::SafetyData sd;
     sd.absActive  = f.data[0];
     sd.tcsActive  = f.data[1];
