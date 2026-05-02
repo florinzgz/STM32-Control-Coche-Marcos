@@ -603,16 +603,17 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 
 ## 7. Relés
 
-### Relés controlados por el STM32
+### Relés controlados por el STM32 y ESP32
 
-| Relé | Pin STM32 | Puerto | Función | Tensión conmutada |
-|------|-----------|--------|---------|-------------------|
-| **TRAC** (Tracción) | **PC11** | GPIOC | Alimentación de los drivers de tracción (24 V) | 24 V |
-| **DIR** (Dirección) | **PC12** | GPIOC | Alimentación del driver de dirección (12 V) | 12 V |
-| **LED** (Frontal) | **PB10** | GPIOB | Alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V |
-| **LED_REAR** (Trasero) | **PB11** | GPIOB | Alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V |
+| Relé | Pin | Puerto | Función | Tensión conmutada | Módulo físico |
+|------|-----|--------|---------|-------------------|---------------|
+| **TRAC** (Tracción) | **PC11** (STM32) | GPIOC | Driver relé potencia 24V motores (etapa 1 → etapa 2) | 24 V | Módulo 4-ch CH1 |
+| **DIR** (Dirección) | **PC12** (STM32) | GPIOC | Driver relé potencia 12V dirección (etapa 1 → etapa 2) | 12 V | Módulo 4-ch CH2 |
+| **AUDIO** | **GPIO11** (ESP32) | — | Conmuta altavoz DFPlayer/Radio (activo LOW) | señal audio | **Módulo 4-ch CH3** |
+| **LED_F** (Frontal) | **PB10** (STM32) | GPIOB | Corte alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V | Módulo 2-ch CH1 |
+| **LED_R** (Trasero) | **PB11** (STM32) | GPIOB | Corte alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V | Módulo 2-ch CH2 |
 
-> **Nota:** **PC10 está DISPONIBLE (libre)**. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro determinista).
+> **Nota:** **PC10 está DISPONIBLE (libre)**. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro determinista). No se conecta ningún relé a PC10.
 
 Definidos en `project_config.h`:
 - `PIN_RELAY_TRAC` = GPIO_PIN_11 (PC11)
@@ -915,68 +916,89 @@ el control de motores BTS7960 en este proyecto:
 
 ## 11. Circuito completo de driver de relé — arquitectura de dos etapas
 
-### Por qué se necesitan dos etapas
+### Por qué se necesitan dos etapas (para TRAC y DIR)
 
 Los pines GPIO del STM32 operan a 3,3 V y pueden suministrar máximo 20 mA.
 Las bobinas de los relés de potencia requieren 12 V DC y corrientes de 70–150 mA.
-La solución utiliza una **arquitectura de dos etapas**:
+La solución utiliza una **arquitectura de dos etapas** para los canales de potencia:
 
-1. **Etapa 1 — Módulo 4-ch opto relé (SRD-12VDC-SL-C):**
-   - Módulo con 4 relés SRD-12VDC-SL-C (bobina 12V DC) y optoacopladores integrados
-   - Entradas IN1–IN4 compatibles con 3.3V del STM32 (high/low level trigger)
-   - Contactos: 10A @ 30V DC (suficiente para conmutar bobinas de relés de potencia)
-   - Alimentación: 12V DC (DC+ / DC−)
+1. **Etapa 1 — Módulo 4-ch opto relé (SRD-05VDC-SL-C):**
+   - Módulo con 4 relés SRD-**05**VDC-SL-C (bobina **5V** DC) y optoacopladores integrados
+   - Entradas IN1–IN4 compatibles con 3.3V del STM32 y ESP32 (high/low level trigger)
+   - Contactos: 10A @ 30V DC (suficiente para conmutar bobinas de relés de potencia ≤500mA)
+   - Alimentación: **5V** DC (VCC / GND)
+   - Asignación de canales:
+     - **CH1 → PC11 (STM32)** — driver relé potencia TRAC 50A
+     - **CH2 → PC12 (STM32)** — driver relé potencia DIR 20A
+     - **CH3 → GPIO11 (ESP32)** — relé audio DFPlayer (activo LOW, sin etapa 2)
+     - CH4 → libre (reserva)
+   - **PC10 NO se conecta** (GPIO libre, `INPUT_PULLDOWN`)
 
-2. **Etapa 2 — Relés de potencia:**
-   - Bobina: 12V DC (alimentada a través de los contactos del módulo intermedio)
-   - Contactos: alta corriente (40A TRAC, 15A DIR)
+2. **Etapa 2 — Relés de potencia (solo CH1/CH2):**
+   - Bobina: 12V DC (alimentada a través de los contactos CH1/CH2 del módulo)
+   - Contactos: alta corriente (50A TRAC, 20A DIR)
 
-### Esquema completo (dos etapas, un canal)
+3. **Módulo 2-ch opto relé (SRD-05VDC-SL-C) — LED strips:**
+   - CH1 → PB10 (LED_F frontal) · CH2 → PB11 (LED_R trasero)
+   - Contactos conmutan directamente la alimentación 5V de las tiras WS2812B (sin etapa 2)
+
+### Esquema completo (dos etapas, canal TRAC/DIR)
 
 ```
-  STM32 (3,3 V)                    Módulo 4-ch opto relé (12V)      Relé de potencia (12V bobina)
-  ─────────────                    ────────────────────────────      ────────────────────────────
+  STM32 (3,3 V)                    Módulo 4-ch opto relé (5V)      Relé de potencia (12V bobina)
+  ─────────────                    ──────────────────────────      ────────────────────────────
 
-  PC10/11/12 ──────► IN1/2/3       DC+ ◄── 12V (batería)           COM ──── Carga (24V / 12V)
-                                   DC- ◄── GND                      │
-              Dentro del módulo:                                     │  (cerrado cuando
-              Optoacoplador ──►     Relé SRD-12VDC                  NO     relé activo)
-              Transistor ──►        cierra contacto                  │
-                                        │                           NC ──── (normalmente cerrado)
+  PC11/PC12 ──────► IN1/IN2        VCC ◄── 5V                     COM ──── Carga (24V / 12V)
+                                   GND ◄── GND                     │
+              Dentro del módulo:                                    │  (cerrado cuando
+              Optoacoplador ──►     Relé SRD-05VDC                 NO     relé activo)
+              Transistor ──►        cierra contacto                 │
+                                        │                          NC ──── (normalmente cerrado)
                                    Contacto COM ── 12V
                                    Contacto NO ────────────► Bobina relé potencia (+)
-                                                              │
-                                                         [1N4007] (flyback)
-                                                              │
-                                                    Bobina relé potencia (−) ── GND
+                                                               │
+                                                          [1N4007] (flyback)
+                                                               │
+                                                     Bobina relé potencia (−) ── GND
 ```
 
 **En forma compacta:**
 
 ```
 STM32 GPIO (3.3V) ──► IN módulo opto relé ──► Contacto 10A cierra ──► 12V → Bobina potencia → GND
-                      (SRD-12VDC-SL-C)                                       ↑ [1N4007 flyback]
+                       (SRD-05VDC-SL-C)                                       ↑ [1N4007 flyback]
 ```
 
-> **Nota:** El módulo 4-ch opto relé (SRD-12VDC-SL-C) incluye internamente el optoacoplador,
+### Esquema canal AUDIO CH3 (sin etapa 2)
+
+```
+ESP32 GPIO11 (LOW = relé ON, activo LOW) ──► IN3 módulo 4-ch
+                                              │
+                                         Contacto CH3:
+                                         COM  ──────────► Altavoz +
+                                         NO   ──────────► DFPlayer SPKR
+                                         NC   ──────────► Radio (normalmente conectado)
+```
+
+> **Nota:** El módulo 4-ch opto relé (SRD-05VDC-SL-C) incluye internamente el optoacoplador,
 > transistor driver, diodo flyback y resistencia de limitación. NO se necesita circuito
 > discreto adicional para la etapa 1. El diodo flyback externo 1N4007 es necesario para
 > las bobinas de los relés de potencia (etapa 2).
 
-### Verificación del módulo 4-ch opto relé (SRD-12VDC-SL-C)
+### Verificación del módulo 4-ch opto relé (SRD-05VDC-SL-C)
 
 Si se usan módulos prefabricados:
 
 1. **Medir con multímetro** la tensión mínima que activa el relé en el pin "IN".
-   - Si activa con 3,3 V: conectar directamente al GPIO del STM32.
+   - Si activa con 3,3 V: conectar directamente al GPIO del STM32/ESP32.
    - Si requiere 5 V: interponer un transistor BSS138 (level shifter) para elevar el nivel.
 
 2. **Verificar el diodo flyback**: los módulos industriales suelen incluirlo ya montado.
    Si no está, soldar un 1N4007 entre los terminales de la bobina (ver esquema anterior).
 
 3. **Verificar la lógica de activación**:
-   - Módulos con lógica positiva ("active HIGH"): STM32 GPIO HIGH → relé ON. ✅ Compatible con el firmware.
-   - Módulos con lógica negativa ("active LOW"): STM32 GPIO HIGH → relé OFF. ❌ Requiere invertir la lógica del firmware o invertir la lógica en el firmware.
+   - Módulos con lógica positiva ("active HIGH"): STM32 GPIO HIGH → relé ON. ✅ Compatible con el firmware STM32.
+   - Módulos con lógica negativa ("active LOW"): GPIO LOW → relé ON. ✅ Compatible con el canal de audio ESP32 GPIO11. ❌ Para canales STM32 TRAC/DIR, verificar el jumper JD-VCC del módulo.
 
 ### Snubber en los contactos del relé
 
@@ -1000,7 +1022,6 @@ Contacto COM ──[R = 100 Ω, 1/2 W] ──┬── Contacto NO
 | Relé TRAC (bobina 12 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
 | Relé DIR (bobina 12 V) | 1N4007 | Entre terminales de bobina, cátodo al + |
 | BTS7960 VCC lógica (enable signals) | 1N4148 en R_EN/L_EN (opcional) | Serie de protección en señales EN |
-
 ---
 
 ## 12. Protección anti-reinicios y anti-sobretensiones
@@ -1180,10 +1201,10 @@ Seguir este orden estrictamente:
 | 1 | Condensador electrolítico | 1 000 µF / 35 V | Bulk bus 24 V |
 | 1 | Condensador electrolítico | 470 µF / 25 V | Bulk bus 12 V |
 | 1 | Condensador electrolítico | 47 µF / 10 V | Bulk 5 V lógica |
-| 5 | Diodo 1N4007 | 1 A / 1 000 V | Flyback bobinas relés potencia (3 relés) + bobinas relés LED (2 relés). El módulo 4-ch SRD-12VDC-SL-C incluye flyback para sus relés internos |
+| 4 | Diodo 1N4007 | 1 A / 1 000 V | Flyback: 2× bobinas relés potencia (TRAC, DIR) + 2× bobinas módulo 2-ch relés LED (LED_F, LED_R). El módulo 4-ch SRD-05VDC-SL-C incluye flyback para sus relés internos |
 | 5 | Diodo 1N5408 | 3 A / 1 000 V | Anti-CEMF en terminales de motor |
-| — | ~~Resistencia 330 Ω~~ | — | ~~Serie LED optoacoplador~~ **NO necesaria**: el módulo 4-ch SRD-12VDC-SL-C integra optoacopladores con sus resistencias |
-| — | ~~Resistencia 10 kΩ pull-down~~ | — | ~~Pull-down base transistor~~ **NO necesaria**: el módulo 4-ch integra todo el driver |
+| — | ~~Resistencia 330 Ω~~ | — | ~~Serie LED optoacoplador~~ **NO necesaria**: los módulos SRD-05VDC-SL-C (4-ch y 2-ch) integran optoacopladores con sus resistencias |
+| — | ~~Resistencia 10 kΩ pull-down~~ | — | ~~Pull-down base transistor~~ **NO necesaria**: los módulos de relé integran todo el driver |
 | 5 | Resistencia | 100 Ω / 1/2 W | Snubber RC contactos relé (R del RC, 5 relés) |
 | 5 | Condensador cerámico | 100 nF / 250 V ac | Snubber RC contactos relé (C del RC, 5 relés) |
 | 3 | Optoacoplador 6N137 | DIP-8 o módulo breakout | Encoder A/B/Z (aislamiento galvánico + 5 V→3,3 V) |

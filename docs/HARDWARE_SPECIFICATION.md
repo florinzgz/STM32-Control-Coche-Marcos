@@ -140,12 +140,17 @@ L_EN = EN_PIN;
 
 ### Protecciones Implementadas en Hardware
 
-1. **Módulo 4-ch opto relé (SRD-12VDC-SL-C)** (aislamiento óptico)
-   - Módulo: 4 canales con optoacopladores, relés SRD-12VDC-SL-C
-   - Alimentación módulo: 12 V DC (DC+ / DC−)
-   - Trigger: High/Low level (compatible 3.3 V STM32)
+1. **Módulo 4-ch opto relé (SRD-05VDC-SL-C)** — driver de relés de potencia + relé de audio
+   - Módulo: 4 canales con optoacopladores, relés SRD-**05**VDC-SL-C (bobina **5V** DC)
+   - Alimentación módulo: **5V** DC (VCC / GND)
+   - Trigger: High/Low level (compatible 3.3V STM32 y ESP32)
    - Contactos: 10A 250VAC / 10A 30VDC por canal
-   - Función: etapa intermedia que conmuta las bobinas (12V) de los relés de potencia
+   - Asignación de canales:
+     - CH1 → PC11 STM32 — driver relé potencia TRAC (24V, 50A)
+     - CH2 → PC12 STM32 — driver relé potencia DIR (12V, 20A)
+     - **CH3 → GPIO11 ESP32 — relé de audio DFPlayer (activo LOW)**
+     - CH4 → libre (reserva)
+   - PC10 **no se conecta** (GPIO libre, `INPUT_PULLDOWN`)
 
 2. **Snubber Circuits** (protección contra picos)
    - Diodo: 1N4148 o similar
@@ -161,28 +166,36 @@ L_EN = EN_PIN;
 
 ### Especificación Relés
 
-**Modelo relé de potencia**: Relé de alta corriente con bobina 12 V DC
+**Modelo módulo driver:** SRD-05VDC-SL-C, 5V, optoacoplado, 3 canales usados (CH1–CH3 del módulo 4-ch)  
+**Modelo relé de potencia:** Relé de alta corriente con bobina 12V DC (accionado por el contacto del módulo 4-ch)
 
-| Función | Pin | Corriente | Protección | Control intermedio |
-|---------|-----|-----------|------------|---------------------|
-| RELAY_TRAC | PC11 | 40A | Fusible 50A | Módulo 2-ch opto relé |
-| RELAY_DIR  | PC12 | 15A | Fusible 20A | Módulo 2-ch opto relé |
+| Función | Pin | Corriente | Protección | Canal módulo |
+|---------|-----|-----------|------------|--------------|
+| RELAY_TRAC | PC11 (STM32) | 40A | Fusible 50A | Módulo 4-ch CH1 |
+| RELAY_DIR  | PC12 (STM32) | 15A | Fusible 20A | Módulo 4-ch CH2 |
+| **RELAY_AUDIO** | **GPIO11 (ESP32)** | señal audio | — | **Módulo 4-ch CH3** (activo LOW) |
+| RELAY_LED_F | PB10 (STM32) | 3A LED 5V | Fusible 5A | Módulo 2-ch CH1 |
+| RELAY_LED_R | PB11 (STM32) | 2A LED 5V | Fusible 5A | Módulo 2-ch CH2 |
 
 > **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
 
-**Arquitectura de dos etapas:**
-- **Etapa 1 (módulo intermedio):** Módulo 2-ch con optoacopladores y relés
-  (bobina 12V, contactos 10A). STM32 GPIO activa las entradas IN.
-- **Etapa 2 (relés de potencia):** Relés de alta corriente con bobina 12V DC.
-  Sus bobinas están alimentadas a través de los contactos de la etapa 1.
+**Arquitectura de dos etapas (para TRAC y DIR):**
+- **Etapa 1 (módulo 4-ch intermedio):** CH1 y CH2 del módulo 5V optoacoplado. GPIO del STM32 activa las entradas IN.
+- **Etapa 2 (relés de potencia):** Relés de alta corriente con bobina 12V DC. Sus bobinas están alimentadas a través de los contactos de la etapa 1.
 
-**Características etapa 1 (módulo intermedio):**
-- Bobina relé módulo: 12V DC
+**Canal audio (un solo paso — sin etapa 2):**
+- CH3 del módulo 4-ch conmuta directamente la señal del altavoz (corriente de señal, no de potencia). No hay relé de potencia adicional.
+
+**Módulo 2-ch (LED strips):**
+- CH1 y CH2 del módulo 2-ch controlan directamente el corte de alimentación 5V de las tiras LED. No hay etapa 2 (corriente ≤ 3A por tira, dentro del límite del módulo).
+
+**Características módulo driver (etapa 1 y LED):**
+- Bobina módulo: **5V** DC
 - Contactos módulo: 10A @ 30V DC / 10A @ 250V AC
-- Trigger: High/Low level seleccionable, compatible 3.3V STM32
+- Trigger: High/Low level seleccionable, compatible 3.3V STM32 / ESP32
 - Optoacopladores integrados en placa
 
-**Características etapa 2 (relés de potencia):**
+**Características relés de potencia (etapa 2 — solo TRAC/DIR):**
 - Bobina: 12V DC
 - Contactos: según carga (40A TRAC, 15A DIR)
 
@@ -200,30 +213,47 @@ Shutdown:
 2. RELAY_TRAC = OFF (corte tracción)
 ```
 
-### Esquema Módulo 4-ch Opto Relé (SRD-12VDC-SL-C)
+### Esquema Módulo 4-ch Opto Relé (SRD-05VDC-SL-C) — canales TRAC/DIR + AUDIO
 
 ```
-STM32 (3.3V)                Módulo 4-ch opto relé (12V)       Relé de potencia
-    GPIO ──────► IN1        DC+ ◄── 12V                     ┌── Bobina (+)
-                            DC- ◄── GND                     │
-              Optoacoplador                                  │
-              interno del    ──► Relé SRD-12VDC  ──► COM ──── 12V
-              módulo              (contacto 10A)    NO ─────┤
-                                                            └── Bobina (-)
-                                                                  │
-                                                            Diodo 1N4007
-                                                            (Flyback)
+STM32/ESP32 (3.3V)          Módulo 4-ch opto relé (5V)        Relé de potencia (bobina 12V)
+──────────────────          ──────────────────────────        ──────────────────────────────
+
+PC11 ──────────► IN1        VCC ◄── 5V                     ┌── Bobina TRAC (+) 12V
+PC12 ──────────► IN2        GND ◄── GND                    │
+GPIO11 ─────► IN3 (ESP32)                                  │   (contacto 10A cierra cuando
+                                                            │    relé del módulo activo)
+               Optoacoplador                                │
+               interno del    ──► Relé SRD-05VDC ──► COM ──┤
+               módulo              (contacto 10A)    NO ────┴── Bobina TRAC (−) → GND
+                                                       ↑
+                                                  [1N4007] flyback externo
+
+CH3 (IN3, GPIO11): COM directamente al altavoz; NO → DFPlayer; NC → Radio
+CH4 (IN4): libre
 ```
 
-**Cadena completa de un canal:**
+**Cadena completa canal TRAC (CH1):**
 ```
-STM32 GPIO (3.3V HIGH)
+STM32 PC11 (3.3V HIGH)
     │
     ▼
-Módulo opto relé IN1 → Optoacoplador LED → relé SRD-12VDC-SL-C cierra
+Módulo opto relé CH1 → Optoacoplador LED → relé SRD-05VDC cierra
     │
     ▼ (contacto 10A del módulo pasa 12V a la bobina del relé de potencia)
-Relé de potencia cierra → carga de alta corriente conmutada
+Relé de potencia cierra → 24V llega a BTS7960 tracción
+```
+
+**Canal audio (CH3) — sin relé de potencia de etapa 2:**
+```
+ESP32 GPIO11 (LOW = relé ON, activo LOW)
+    │
+    ▼
+Módulo opto relé CH3 → contacto COM—NO cierra
+    │
+COM → Altavoz +
+NO  → DFPlayer SPKR
+NC  → Radio (normalmente conectado)
 ```
 
 ## Sensores de Temperatura - DS18B20
@@ -488,17 +518,18 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | E6B2-CWZ6C | 1 | 1200 PPR Encoder | Encoder dirección |
 | LJ12A3-4-Z/BX | 4 | 4mm Inductive | Sensores velocidad |
 | A1324LUA-T | 1 | Hall Effect Linear | Sensor pedal |
-| Módulo 4-ch opto relé | 1 | SRD-12VDC-SL-C, 4 canales | Control intermedio relés potencia |
-| Relé potencia (bobina 12V) | 3 | Alta corriente (≥50A contacto) | Relés MAIN, TRAC, DIR |
+| Módulo 4-ch opto relé | 1 | **SRD-05VDC-SL-C, 5V, 4 canales**; CH1=PC11(TRAC), CH2=PC12(DIR), CH3=GPIO11(audio), CH4=libre | Driver relés potencia + relé audio |
+| Relé potencia (bobina 12V) | 2 | Alta corriente (≥50A TRAC, ≥20A DIR) | Accionados por CH1/CH2 del módulo 4-ch |
 | TJA1051T/3 | 2 | CAN Transceiver (NXP) | VCC=5V, VIO=3.3V — uno por nodo |
-| Relé SRD-05VDC (LED) | 2 | 10A, 5V coil | Relés LED WS2812B |
+| B0505S-1W | 1 | DC-DC aislado 5V→5V, 1W, 1kV | Alimentación lado aislado bus CAN (Opción A ADuM1201+DC-DC) |
+| Módulo 2-ch opto relé | 1 | **SRD-05VDC-SL-C, 5V, 2 canales**; CH1=PB10(LED_F), CH2=PB11(LED_R) | Control alimentación tiras LED |
 | Shunt 1.5 mΩ | 5 | 50A/75mV, 3W | INA226 motores (ch 0–3, 5) |
 | Shunt 0.75 mΩ | 1 | 100A/75mV, 3W | INA226 batería (ch 4) |
 | Resistor 10kΩ | 20 | 1/4W | Pull-ups |
 | Resistor 120Ω | 2 | 1/4W | Terminación CAN |
 | Capacitor 100nF | 30 | Cerámico X7R | Desacoplo |
 | Capacitor 1000μF | 1 | 25V Electrolítico | Bulk capacitor |
-| Diodo 1N4007 | 5 | 1A, 1000V | Flyback relés |
+| Diodo 1N4007 | 4 | 1A, 1000V | Flyback relés potencia (TRAC, DIR) y LED (LED_F, LED_R) |
 
 ---
 

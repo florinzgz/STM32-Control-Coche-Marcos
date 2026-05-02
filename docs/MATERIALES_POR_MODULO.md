@@ -64,7 +64,7 @@
 | PC1 EN_RL | PC1 | BTS7960 RL R_EN + L_EN | 24 AWG |
 | PC13 EN_RR | PC13 | BTS7960 RR R_EN + L_EN | 24 AWG |
 | PC4 EN_STEER | PC4 | BTS7960 STEER R_EN + L_EN | 24 AWG |
-| PC10/11/12 RELAY | PC10, PC11, PC12 | Módulos relé (opto) | 24 AWG |
+| PC11/PC12 RELAY (TRAC/DIR) | PC11, PC12 | Módulo 4-ch relé 5V (CH1, CH2) | 24 AWG |
 | PB10/11 LED RELAY | PB10, PB11 | Módulos relé LED | 24 AWG |
 | PA11/PA12 CAN | PA11, PA12 | Transceiver TJA1051T/3 | 24 AWG |
 | PB6/PB7 I2C | PB6, PB7 | TCA9548A SCL/SDA | 24 AWG |
@@ -287,23 +287,36 @@
 
 ---
 
-## 11. Relés de potencia — 5 módulos
+## 11. Relés de potencia — 2 módulos + relés de alta corriente
 
-**Función:** Conmutar la alimentación de los circuitos de potencia (MAIN 24V, TRAC 24V, DIR 12V, LED 5V frontal, LED 5V trasero).
+**Función:** Conmutar la alimentación de los circuitos de potencia (TRAC 24V, DIR 12V) y de los LEDs (5V frontal y trasero), más aislamiento del altavoz de audio.
 
-### Materiales por módulo de relé (×5)
+### Asignación de módulos (hardware real disponible)
+
+| Módulo | Canales | Asignación de canales |
+|--------|---------|----------------------|
+| **Módulo 4-ch relé 5V** (SRD-05VDC) | CH1–CH4 | CH1 → PC11 TRAC · CH2 → PC12 DIR · **CH3 → ESP32 GPIO11 AUDIO** · CH4 libre |
+| **Módulo 2-ch relé 5V** (SRD-05VDC) | CH1–CH2 | CH1 → PB10 LED_F · CH2 → PB11 LED_R |
+
+> **PC10 está LIBRE** — no se conecta ningún relé a PC10. El firmware lo configura como `INPUT_PULLDOWN` (estado seguro).
+
+> **CH3 del módulo 4-ch** es controlado por el ESP32 (GPIO11, activo LOW). Se monta en el mismo módulo físico que los canales de tracción y dirección. La GND del ESP32 y la del STM32 están unidas en el punto de estrella GND del sistema, por lo que comparten VCC/GND del módulo sin problema.
+
+### Materiales por módulo de relé
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 1 | Módulo 4-ch opto relé | SRD-12VDC-SL-C, 12V, trigger 3.3V, contacto 10A/30VDC | Módulo intermedio para MAIN (PC10), TRAC (PC11), DIR (PC12). CH4 disponible |
-| 3 | Relé de potencia (bobina 12V) | Alta corriente: ≥50A (MAIN/TRAC), ≥20A (DIR) | Relés de potencia controlados por contactos del módulo intermedio |
-| 2 | Módulo relé con optoacoplador | SRD-05VDC o similar, trigger 3.3V, contacto 10A | Para LED_F (PB10), LED_R (PB11) |
-| 5 | Diodo flyback bobina | **1N4007** (1A, 1000V) | En paralelo con la bobina del relé, cátodo al polo positivo; verificar si el módulo ya lo incluye |
-| 5 | Condensador snubber contacto | **100 nF / 250V** (polipropileno) | Entre COM y NO del relé; amortigua el arco al conmutar cargas inductivas |
+| 1 | **Módulo 4-ch opto relé** | **SRD-05VDC-SL-C, 5V**, trigger 3.3V compatible, contacto 10A/30VDC, active LOW | CH1=PC11(TRAC driver), CH2=PC12(DIR driver), CH3=GPIO11 ESP32(audio), CH4=libre |
+| 1 | **Módulo 2-ch opto relé** | **SRD-05VDC-SL-C, 5V**, trigger 3.3V compatible, contacto 10A/30VDC, active LOW | CH1=PB10 LED_F (corte 5V tira frontal); CH2=PB11 LED_R (corte 5V tira trasera) |
+| 2 | Relé de potencia (bobina 12V) | Alta corriente: ≥50A (TRAC), ≥20A (DIR) | Relés de potencia controlados por los contactos del módulo 4-ch (CH1/CH2) |
+| 4 | Diodo flyback bobina | **1N4007** (1A, 1000V) | En paralelo con cada bobina de relé; verificar si el módulo ya lo incluye para los canales de lógica |
+| 2 | Diodo flyback relé potencia | **1N4007** | En paralelo con la bobina del relé de potencia TRAC y DIR |
+| 5 | Condensador snubber contacto | **100 nF / 250V** (polipropileno) | Entre COM y NO del relé de potencia; amortigua arcos al conmutar cargas inductivas |
 | 5 | Resistencia snubber | **100 Ω / 0.5W** | En serie con el condensador snubber de contacto (red RC snubber) |
-| 5 | Resistencia pull-down gate MOSFET | **10 kΩ / ¼W** | Entre gate y GND del MOSFET driver; mantiene el relé apagado durante el reset del STM32 |
-| 1 | Condensador bus 24V (junto a relés) | **1000 µF / 35V** (electrolítico) | En el bus 24V cerca de los relés; absorbe el inrush al cerrar el relé de tracción |
-| 1 | Condensador bus 12V (junto a relé DIR) | **470 µF / 25V** (electrolítico) | En el bus 12V cerca del relé DIR; absorbe inrush del motor de dirección |
+| 1 | Condensador bus 24V (junto a relés) | **1000 µF / 35V** (electrolítico) | En el bus 24V cerca del relé TRAC; absorbe el inrush al cerrar |
+| 1 | Condensador bus 12V (junto a relé DIR) | **470 µF / 25V** (electrolítico) | En el bus 12V cerca del relé DIR |
+
+> **⚠️ Lógica de activación.** Los módulos SRD-05VDC optoacoplados típicos son **active LOW** (GPIO LOW = relé ON). El firmware del STM32 usa lógica positiva (HIGH = relé ON). **Verificar el jumper de lógica del módulo** o asegurarse de que el módulo sea HIGH-level trigger antes de conectar, para no invertir la acción. Si el módulo es active-LOW por defecto, se puede cambiar el jumper JD-VCC presente en la mayoría de módulos de 4 y 2 canales.
 
 > **⚠️ El diodo flyback es crítico.** Sin él, al abrir el relé se genera un pico de –100V que destruye el transistor del módulo driver.
 
@@ -384,7 +397,7 @@
 | 1 | DFPlayer Mini | UART 9600 bps, 5V, entrada microSD | Conectado a UART2 del ESP32 (GPIO43 TX, GPIO44 RX) |
 | 1 | Resistencia serie TX | **1 kΩ / ¼W** | Entre GPIO43 (ESP32 TX) y RX del DFPlayer; protege el GPIO |
 | 1 | Altavoz | 4–8 Ω, ≥ 2W | Conectado a SPK1 y SPK2 del DFPlayer |
-| 1 | Relé de audio (opcional) | Activo LOW, GPIO11 ESP32 | Corta el altavoz cuando no hay audio; evita ruido de fondo |
+| 1 | **Relé de audio** | **Activo LOW, ESP32 GPIO11 → CH3 del módulo 4-ch relé 5V** | Corta el altavoz cuando no hay audio; evita ruido de fondo del DFPlayer. Integrado en el mismo módulo físico 4-ch junto con los canales TRAC/DIR. Ver `docs/AUDIO_RELAY_INTEGRATION.md` |
 | 1 | Tarjeta microSD | ≥ 1GB, clase 10 | Con los archivos MP3/WAV de sonidos del sistema |
 
 ---
@@ -430,9 +443,9 @@
 | 1 | M5 | Motor DC 12V dirección | Brushed DC, dirección |
 | 1 | ENC1 | Encoder E6B2-CWZ6C | 1200 PPR, 5V, push-pull |
 | 1 | PEDAL | Sensor Hall SS1324LUA-T | 5V supply, 0.3–4.8V output |
-| 1 | MOD_RELAY | Módulo 4-ch opto relé SRD-12VDC-SL-C | 12V, 4 canales, trigger 3.3V (etapa 1 relés potencia) |
-| 3 | REL1–REL3 | Relé de potencia (bobina 12V) | ≥50A MAIN, ≥50A TRAC, ≥20A DIR (etapa 2) |
-| 2 | REL4–REL5 | Módulo relé SRD-05VDC o similar | 5V coil, LED_F (PB10), LED_R (PB11) |
+| 1 | MOD_RELAY_4CH | Módulo 4-ch opto relé SRD-05VDC-SL-C | **5V**, 4 canales; CH1=PC11(TRAC driver), CH2=PC12(DIR driver), CH3=GPIO11(audio), CH4=libre |
+| 2 | REL1–REL2 | Relé de potencia (bobina 12V) | ≥50A TRAC, ≥20A DIR — contactos de alta corriente accionados por CH1/CH2 del módulo 4-ch |
+| 1 | MOD_RELAY_2CH | Módulo 2-ch opto relé SRD-05VDC-SL-C | **5V**, 2 canales; CH1=PB10(LED_F), CH2=PB11(LED_R) |
 | 6 | INA1–INA6 | Módulo INA226 | Breakout board (Adafruit 4226) |
 | 1 | MUX1 | Módulo TCA9548A | Multiplexor I2C 8-canal |
 | 5 | TEMP1–TEMP5 | DS18B20 | Waterproof, OneWire |
@@ -494,7 +507,7 @@
 
 | Qty | Referencia | Componente | Especificación |
 |-----|-----------|-----------|---------------|
-| 5 | D_FLY1–D_FLY5 | Diodo flyback relés | 1N4007 (1A, 1000V) |
+| 4 | D_FLY1–D_FLY4 | Diodo flyback relés | 1N4007 (1A, 1000V) — 2 para bobinas relés potencia TRAC/DIR; 2 para bobinas LED módulo 2-ch |
 | 5 | D_SCH1–D_SCH5 | Diodo Schottky volante motor (opcional) | SB560 (5A, 60V) |
 | 2 | TVS_CAN | TVS diodo bus CAN | PESD2CAN |
 | 5 | TVS_B+1–5 | TVS diodo B+ BTS7960 (opcional) | SMBJ30A (30V) |
