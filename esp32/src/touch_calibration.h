@@ -9,24 +9,24 @@
 // Storage layout (single NVS blob `data` (20 bytes), plus boolean flag
 // `first_done`):
 //   - magic     uint32   0x54434C31 ("TCL1")
-//   - xMin      uint16   touch_x_min  (XPT2046 raw 0..4095)
-//   - xMax      uint16   touch_x_max  (XPT2046 raw 0..4095)
-//   - yMin      uint16   touch_y_min  (XPT2046 raw 0..4095)
-//   - yMax      uint16   touch_y_max  (XPT2046 raw 0..4095)
-//   - rotation  uint8    must equal TFT_ROTATION (User_Setup.h)
+//   - xMin      uint16   touch_x_offset (XPT2046 raw minimum X, 0..4095)
+//   - xMax      uint16   touch_x_range  (XPT2046 raw span = max_X - min_X)
+//   - yMin      uint16   touch_y_offset (XPT2046 raw minimum Y, 0..4095)
+//   - yMax      uint16   touch_y_range  (XPT2046 raw span = max_Y - min_Y)
+//   - rotation  uint8    TFT_eSPI axis-flags bitmask (bit0=rotate, bit1=inv_x, bit2=inv_y; range 0-7)
 //   - _pad      uint8    structure padding (zeroed)
 //   - _pad2     uint16   structure padding (zeroed)
 //   - crc32     uint32   CRC-32/ISO-HDLC over preceding fields
 //
 // The blob is loaded into the `uint16_t calData[5]` format expected by
-// TFT_eSPI::setTouch(), namely { xMin, xMax, yMin, yMax, rotation }.
+// TFT_eSPI::setTouch(), namely { x_offset, x_range, y_offset, y_range, flags }.
 //
 // Validation (all must hold to accept stored calibration):
 //   1. magic == 0x54434C31
 //   2. crc32 matches recomputed value
-//   3. xMax > xMin + MIN_RANGE  &&  yMax > yMin + MIN_RANGE
-//   4. all raw values in [0, 4095]
-//   5. rotation == TFT_ROTATION
+//   3. x_range >= MIN_RANGE  &&  y_range >= MIN_RANGE
+//   4. x_offset and y_offset in [0, 4095]
+//   5. flags in [0, 7] (valid 3-bit bitmask)
 //
 // Reference: docs/TOUCH_CALIBRATION_SYSTEM.md
 // =============================================================================
@@ -51,7 +51,7 @@ inline constexpr uint16_t MIN_RANGE   = 1000;
 void init();
 
 /// Load and validate persisted calibration into `out` (5 elements, in the
-/// TFT_eSPI calData order { xMin, xMax, yMin, yMax, rotation }).
+/// TFT_eSPI calData order { x_offset, x_range, y_offset, y_range, flags }).
 /// Returns true if a fully valid calibration was found, false otherwise.
 /// On false, `out` is left untouched.
 bool loadValid(uint16_t out[CAL_DATA_LEN]);
