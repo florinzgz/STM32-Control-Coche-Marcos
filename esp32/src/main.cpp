@@ -33,6 +33,7 @@
 #include "audio_manager.h"
 #include "shifter_input.h"
 #include "touch_handler.h"
+#include "touch_calibration.h"
 #include "config_store.h"
 #include "traction_switch.h"
 
@@ -393,11 +394,29 @@ static void sendModeCommand(uint8_t modeFlags) {
 static void renderTask(void* /*param*/) {
     vehicle::VehicleData localVD;
 
+    // First-boot policy: if the touch-calibration wizard has never been
+    // completed on this device, launch it once on the very first render
+    // tick.  After SAVE the `first_done` NVS flag prevents this from
+    // firing again — the wizard is reachable only via the engineering
+    // menu thereafter.  The check is cheap (single NVS read) and runs
+    // exactly once per boot.
+    bool firstBootCheckPending = !touch_calibration::firstBootDone();
+
     for (;;) {
         // 1. Copy latest vehicle data from main loop
         if (xSemaphoreTake(vdMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             localVD = renderVD;
             xSemaphoreGive(vdMutex);
+        }
+
+        // First-boot wizard trigger (executed at most once per boot, on
+        // the first iteration after the screen manager is alive).  The
+        // engineering-menu "TOUCH CALIBRATION" entry is handled atomically
+        // inside ScreenManager::update() (right after engineering exit)
+        // so we don't need to poll for it here.
+        if (firstBootCheckPending) {
+            firstBootCheckPending = false;
+            screenManager.requestTouchWizard(/*firstBoot=*/true);
         }
 
         // 2. Update & render screen (frame limiter inside screenManager)
@@ -569,6 +588,11 @@ void setup() {
     // Initialize NVS config store
     config_store::init();
 
+    // Initialize persistent touch-calibration NVS namespace.  Must be done
+    // BEFORE tft.setTouch() so the loaded calibration (if valid) takes
+    // precedence over the compile-time TOUCH_CALIBRATION fallback.
+    touch_calibration::init();
+
     // Initialize PSRAM
     if (psramInit()) {
         // Give system a moment to complete PSRAM initialization
@@ -585,10 +609,23 @@ void setup() {
     tft.init();
     tft.setRotation(1);  // Landscape mode (480×320)
 
-    // Apply touch calibration (XPT2046) — values from User_Setup.h
-    // Run TFT_eSPI/examples/Generic/Touch_calibrate to get your own values.
-    uint16_t calData[5] = TOUCH_CALIBRATION;
-    tft.setTouch(calData);
+    // Apply touch calibration (XPT2046).
+    // Order of preference:
+    //   1. Persistent calibration from NVS (touch_calibration namespace)
+    //      — set by the wizard on first boot or recalibration.
+    //   2. Compile-time TOUCH_CALIBRATION from User_Setup.h — used as the
+    //      safe fallback so the display ALWAYS boots with a working touch
+    //      mapping (the wizard itself relies on this fallback while
+    //      capturing new corners on the very first boot).
+    {
+        uint16_t calData[5] = TOUCH_CALIBRATION;
+        if (touch_calibration::loadValid(calData)) {
+            Serial.println("[BOOT][INFO] Touch calibration: NVS (persistent)");
+        } else {
+            Serial.println("[BOOT][INFO] Touch calibration: User_Setup.h fallback");
+        }
+        tft.setTouch(calData);
+    }
 
     tft.fillScreen(0x2104);  // Dark gray background
     tft.setTextColor(0xFFFF, 0x2104);
@@ -1120,6 +1157,18 @@ void loop() {
                         break;
                     case can::SafetyError::OBSTACLE:
                         playWarning(audio::Sound::OBSTACLE_WARN, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::BATTERY_OV_WARN:
+                        // No dedicated overvoltage sound exists; BATTERY_LOW is the
+                        // closest available warning tone.  A future audio track can be
+                        // added and this mapping updated without any logic change.
+                        playWarning(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::BATTERY_OV_CRIT:
+                        playWarning(audio::Sound::BATTERY_CRITICAL, audio::Priority::HI);
+                        break;
+                    case can::SafetyError::RELAY_OPEN:
+                        playWarning(audio::Sound::ERROR_GENERAL, audio::Priority::HI);
                         break;
                     default:
                         break;

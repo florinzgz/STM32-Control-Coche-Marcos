@@ -131,7 +131,10 @@ enum class SafetyError : uint8_t {
     BATTERY_UV_CRIT  = 10,      // Battery voltage < 18.0 V
     I2C_FAILURE      = 11,      // I2C bus locked / unrecoverable
     OBSTACLE         = 12,      // Obstacle emergency or CAN timeout
-    CAN_BUSOFF       = 13       // FDCAN bus-off condition detected
+    CAN_BUSOFF       = 13,      // FDCAN bus-off condition detected
+    BATTERY_OV_WARN  = 14,      // Battery voltage > 30.0 V
+    BATTERY_OV_CRIT  = 15,      // Battery voltage > 35.0 V
+    RELAY_OPEN       = 16       // Relay health: insufficient motor current
 };
 
 // -------------------------------------------------------------------------

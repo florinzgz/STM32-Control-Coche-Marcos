@@ -1,5 +1,64 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-02
+
+### [FEATURE] Sistema de calibración táctil persistente (ESP32 HMI)
+
+Implementación completa del sistema de calibración del touch XPT2046 con persistencia en NVS, wizard interactivo de primer arranque y acceso desde el menú oculto de ingeniería. **Cero impacto en STM32, CAN y pantallas principales.**
+
+- **Módulo nuevo `touch_calibration` (`esp32/src/touch_calibration.{h,cpp}`)**:
+  - Namespace NVS dedicado `"touch_cal"`, independiente de `"hmi_cfg"` (evita invalidar la configuración existente en caso de escritura parcial o cambio de esquema).
+  - Registro binario de 20 bytes: `magic (0x54434C31 "TCL1") + xMin + xMax + yMin + yMax + rotation + _pad + _pad2 + crc32`, todo bajo una sola clave NVS `"data"`.
+  - Flag booleano `"first_done"` independiente de los datos: protege contra el bucle wizard-en-cada-boot cuando los datos están corruptos.
+  - Validación en 5 condiciones: magic correcto, CRC-32 válido, valores ∈ [0, 4095], rango mínimo > 1000 LSB en ambos ejes, `rotation == TFT_ROTATION`. Cualquier fallo hace fallback silencioso al `TOUCH_CALIBRATION` compile-time de `User_Setup.h`.
+  - API pública: `init()`, `loadValid(out[5])`, `save(data[5])`, `clear()`, `factoryReset()`, `firstBootDone()`, `markFirstBootDone()`.
+  - Dos `static_assert` sobre `sizeof(Record) == 20` y `offsetof(Record, crc32) == 16` garantizan la estabilidad del layout en futuros compiladores/plataformas.
+
+- **Wizard de calibración (`esp32/src/screens/touch_calibration_screen.{h,cpp}`)**:
+  - Máquina de estados: `INTRO → COLLECT → CONFIRM → DONE | FAILED`.
+  - `INTRO`: pantalla con instrucciones, botón `EMPEZAR` siempre visible, botón `CANCELAR` sólo en modo menú oculto (ocultado en first-boot para forzar completar la calibración inicial).
+  - `COLLECT`: delega en `TFT_eSPI::calibrateTouch()` que dibuja las 4 cruces esquina con feedback visual de aceptación por punto (nativo de la librería, rotation-aware, sin reimplementar la aritmética de calibración).
+  - `CONFIRM`: muestra los 4 valores capturados (`xMin`, `xMax`, `yMin`, `yMax`) y el número de rotación; botones `GUARDAR` / `REINTENTAR` (y `CANCELAR` si no es first-boot).
+  - `FAILED`: si el rango capturado es < 1000 LSB en algún eje, rechaza la calibración y ofrece `REINTENTAR` (y `CANCELAR` si no es first-boot).
+  - `DONE`: guarda en NVS, aplica `tft.setTouch()` en caliente y devuelve el control al `ScreenManager`.
+
+- **Integración en `ScreenManager` (`esp32/src/screen_manager.{h,cpp}`)**:
+  - Nueva bandera `touchCalActive_` (análoga a `pinActive_` / `engineeringActive_`) con prioridad máxima: cuando el wizard está activo, la state-machine normal del CAN, la detección de pérdida de CAN y todas las pantallas subyacentes quedan completamente fuera del flujo táctil.
+  - Nuevo método `requestTouchWizard(bool firstBoot)` llamado desde `main.cpp` en el primer tick del `renderTask` y desde el menú de ingeniería.
+  - `isBlockingInput()` actualizado para incluir `touchCalActive_`.
+  - `onLongPress()` actualizado para ignorar pulsaciones largas mientras el wizard está activo.
+  - Transición engineering→wizard atómica (mismo frame, sin flash de pantalla intermedia): `ScreenManager::update()` consume el flag `consumeTouchCalRequest()` justo después del exit del menú de ingeniería.
+
+- **Menú de ingeniería (`esp32/src/screens/engineering_screen.{h,cpp}`)**:
+  - Dos nuevas entradas en el menú principal: `TOUCH CALIBRATION` (lanza el wizard, ítem 12, color cian) y `RESET TOUCH CAL` (borra NVS + re-arma el wizard de first-boot, ítem 13, color ámbar).
+  - `NUM_MAIN_ITEMS` 11 → 13.
+  - Constantes de layout ajustadas para acomodar 13 ítems en 320 px: `MENU_BTN_H` 23→19, `MENU_SPACING` 25→21, `MENU_START_Y` 46→42.
+  - Nuevo flag `touchCalRequested_` y método `consumeTouchCalRequest()` — desacoplamiento limpio con `ScreenManager`.
+  - Include de `touch_calibration.h` añadido (para `factoryReset()` en "Reset Touch Cal").
+
+- **`esp32/src/main.cpp`**:
+  - `touch_calibration::init()` llamado en `setup()` después de `config_store::init()` y antes de `tft.init()`.
+  - Bloque `tft.setTouch()` reemplazado: intenta `touch_calibration::loadValid(calData)` primero; si falla, usa el fallback compile-time. Log claro en Serial de qué fuente se usó.
+  - Primera iteración de `renderTask`: si `!touch_calibration::firstBootDone()`, llama `screenManager.requestTouchWizard(true)`.
+  - Include de `touch_calibration.h` añadido.
+
+- **Política de arranque (boot policy)**:
+  - La pantalla arranca **siempre** con un mapeo táctil válido (fallback garantiza touch funcional incluso sin calibración guardada).
+  - El wizard de first-boot se lanza dentro del `renderTask` (Core 0), sin bloquear `setup()` ni el task CAN (Core 1).
+  - Una vez completado (`SAVE`), `first_done = true` persiste indefinidamente: el wizard nunca vuelve a lanzarse automáticamente.
+  - `RESET TOUCH CAL` borra `first_done` además de los datos, re-armando el wizard para el siguiente arranque (acción consciente del técnico).
+  - Cancelar el wizard desde el menú oculto NO re-arma el wizard automático (`markFirstBootDone()` se llama en el path de cancel para preservar la invariante).
+
+- **Documentación**:
+  - Nuevo `docs/TOUCH_CALIBRATION_SYSTEM.md`: flujo de arranque, layout NVS (claves lógicas `touch_x_min/max`, `touch_y_min/max`), instrucciones de recalibración y reset, comportamiento de fallback, tabla de compatibilidad, checklist de validación.
+  - `docs/ENGINEERING_MENU.md`: tabla de ítems del menú principal ampliada con ítems 8–13.
+  - `docs/ESP32_FIRMWARE_DESIGN.md`: §3.1 y §3.2 actualizados — la fila "NVS persistence not required" reemplazada por descripción de los namespaces `hmi_cfg` y `touch_cal`.
+  - `CHANGELOG.md`: entrada `[FEATURE] Persistent touch calibration system (ESP32 HMI)` en sección `[Unreleased] / Added`.
+
+**Invariantes preservadas**: STM32 intacto, protocolo CAN intacto (sin IDs nuevos, sin cambios de DLC/timing), `User_Setup.h` intacto (sigue siendo fallback compile-time), `touch_handler.{h,cpp}` intacto, `boot_screen` / `drive_screen` / `safe_screen` / `error_screen` / `standby_screen` / `pin_screen` intactos, sin nuevas librerías externas.
+
+---
+
 ## [unreleased] — 2026-05-01
 
 ### [DEBUG] Debounce EMI diagnostic counters

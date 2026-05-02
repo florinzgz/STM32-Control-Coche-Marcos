@@ -86,11 +86,15 @@ static void decodeTemp(const CanFrame& f, vehicle::VehicleData& data) {
 }
 
 static void decodeSafety(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 3) return;
+    if (f.data_length_code < 5) return;
     vehicle::SafetyData sd;
     sd.absActive  = f.data[0];
     sd.tcsActive  = f.data[1];
     sd.errorCode  = f.data[2];
+    // Byte 3 (STM32 system state): intentionally not stored — state is already
+    // available in HeartbeatData::systemState (0x200) which is more authoritative.
+    // Byte 4 (rx_errors counter): intentionally not stored — no ESP32 consumer
+    // currently requires per-packet CAN error counts from this frame.
     sd.timestampMs = millis();
     data.setSafety(sd);
 }

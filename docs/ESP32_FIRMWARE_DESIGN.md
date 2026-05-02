@@ -108,6 +108,7 @@ The original base firmware ([FULL-FIRMWARE-Coche-Marcos](https://github.com/flor
 | **Startup / shutdown behavior** | Boot splash → ready → active progression | HMI starts at Boot screen, transitions to Standby on first heartbeat, then follows `system_state` exclusively |
 | **"Degraded but driveable" concept** | `limp_mode.cpp`: NORMAL → DEGRADED → LIMP → CRITICAL states | ESP32 displays degraded status when non-critical modules are faulted/disabled. Power is limited by STM32 (40% power, 50% speed). The ESP32 only shows the state — it never computes it. |
 | **Service mode / module viewer** | `car_sensors.cpp`: per-subsystem enable flags; `temperature.cpp`: `sensorOk[]` | Service viewer screen shows per-module status from CAN IDs 0x301–0x303 and allows enable/disable via 0x110. All safety decisions remain on STM32. |
+| **NVS persistence (HMI-local settings)** | _New ESP32 module_ — `esp32/src/config_store.{h,cpp}` and `esp32/src/touch_calibration.{h,cpp}` | The HMI persists local-only settings (drive mode, brightness, LED toggles, audio volume, sensor mappings, fault log, **touch calibration**) in ESP32 NVS via the Arduino `Preferences` API.  Two dedicated namespaces: `hmi_cfg` (config + fault log) and `touch_cal` (XPT2046 calibration with magic + CRC32 + first-boot flag).  Touch calibration is captured by a dedicated wizard reachable from the engineering menu and on first boot; see [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md).  STM32 firmware and the CAN protocol are unaffected. |
 
 ### 3.2 What Was NOT Taken
 
@@ -117,7 +118,7 @@ The original base firmware ([FULL-FIRMWARE-Coche-Marcos](https://github.com/flor
 | Sensor reading code | ESP32 has no vehicle sensors — all data arrives via CAN |
 | Motor control / PWM logic | Actuator control is exclusively STM32 domain |
 | FreeRTOS task architecture | ESP32 Arduino firmware uses cooperative `loop()` — no RTOS tasks |
-| NVS/persistent storage of settings | Not required for HMI; settings reset on power cycle |
+| NVS/persistent storage of settings | _Originally not required for HMI; now used for local-only HMI settings (config, fault log, touch calibration) — see §3.1 row "NVS persistence (HMI-local settings)". STM32 and CAN unaffected._ |
 | Direct CAN driver code (TWAI) | ESP32 uses Arduino-compatible CAN library abstraction only |
 
 ### 3.3 Explicit Confirmations

@@ -57,6 +57,15 @@ private:
         DEBOUNCE_DIAG      // DWT-debounce EMI filtered counters viewer
     };
 
+    /// Returns true (and clears the flag) if the user selected the
+    /// "TOUCH CALIBRATION" menu entry on this frame.  ScreenManager polls
+    /// this and launches the wizard accordingly.
+    bool consumeTouchCalRequest() {
+        bool v = touchCalRequested_;
+        touchCalRequested_ = false;
+        return v;
+    }
+
     void drawMainMenu();
     void drawFaultViewer();
     void drawModuleControl();
@@ -135,6 +144,12 @@ private:
     uint32_t      debounceSteerFiltered_    = 0;
     unsigned long debounceLastTs_           = 0;       // last timestamp consumed
     bool          debounceDataChanged_      = false;
+
+    // Touch-calibration menu entry — when the user taps "TOUCH CALIBRATION"
+    // we cannot launch the wizard from inside EngineeringScreen (it does
+    // not own the ScreenManager flags).  Instead we set this flag and the
+    // ScreenManager polls it via `consumeTouchCalRequest()` each frame.
+    bool          touchCalRequested_ = false;
 };
 
 #endif // ENGINEERING_SCREEN_H
