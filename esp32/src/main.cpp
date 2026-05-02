@@ -1159,6 +1159,9 @@ void loop() {
                         playWarning(audio::Sound::OBSTACLE_WARN, audio::Priority::MEDIUM);
                         break;
                     case can::SafetyError::BATTERY_OV_WARN:
+                        // No dedicated overvoltage sound exists; BATTERY_LOW is the
+                        // closest available warning tone.  A future audio track can be
+                        // added and this mapping updated without any logic change.
                         playWarning(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
                         break;
                     case can::SafetyError::BATTERY_OV_CRIT:
