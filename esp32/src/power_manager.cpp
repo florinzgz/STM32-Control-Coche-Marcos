@@ -30,10 +30,10 @@ static unsigned long stateEntryMs = 0;
 // Debounced key reading
 // -------------------------------------------------------------------------
 static bool readKeyDebounced() {
-    // PC817 optocoupler inverts the signal: collector is pulled HIGH by the
-    // external 10 kΩ pull-up (+ INPUT_PULLUP ~45 kΩ internal) when the LED
+    // PC817/NPN optocoupler inverts the signal: collector is pulled HIGH by the
+    // onboard pull-up (2.7 kΩ to V) and optional external 10 kΩ when the LED
     // is OFF (key OFF), and is pulled LOW when the LED conducts (key ON / +12V
-    // on input side). The PC817 board has NO onboard pull-up (verified).
+    // on input side). Use the NPN Output (Active Low) variant of the module.
     bool raw = (digitalRead(PIN_IGNITION_SENSE) == LOW);
     unsigned long now = millis();
 
@@ -54,29 +54,15 @@ static bool readKeyDebounced() {
 // -------------------------------------------------------------------------
 
 void init() {
-    // Hardware assumption: ignition signal goes through a PC817 optocoupler
-    // (1 channel of the 8-channel sensor isolation board). The optocoupler
-    // inverts the signal:
-    //   Key ON  (+12 V on input side, LED conducts) → collector pulled LOW.
-    //   Key OFF (no current through LED)            → collector HIGH via the
-    //                                                 external pull-up resistor.
+    // Hardware assumption: ignition signal goes through an NPN optocoupler
+    // (4-channel Active Low module, channel 1). The NPN output inverts the signal:
+    //   Key ON  (+12 V on input side, LED conducts) → NPN saturates → collector LOW.
+    //   Key OFF (no current through LED)            → NPN open → output HIGH via
+    //                                                  onboard pull-up + external.
     //
-    // The PC817 8-channel board used in this build has NO onboard pull-up on
-    // the output side (verified by measurement: open circuit between OUT and
-    // VCC with board disconnected). Two complementary measures are required:
-    //
-    //   1. Hardware (mandatory): solder a 10 kΩ ¼ W resistor between GPIO 40
-    //      and the ESP32 3.3 V rail. This provides a low-impedance, noise-
-    //      immune pull-up suitable for the automotive environment.
-    //
-    //   2. Firmware (safety net, this line): INPUT_PULLUP activates the
-    //      ESP32-S3 internal pull-up (~45 kΩ) so the line is never left
-    //      floating even if the external resistor is not yet fitted. Without
-    //      at least one pull-up the collector would float when the key is OFF,
-    //      causing random false-ON detection.
-    //
-    // Once the 10 kΩ external resistor is in place, both pull-ups operate in
-    // parallel (10 kΩ ‖ 45 kΩ ≈ 8.2 kΩ effective), which is acceptable.
+    // The 4-channel NPN module used in this build has an onboard pull-up (2.7 kΩ
+    // to V pin, which is tied to 3.3 V). An additional external 10 kΩ between
+    // GPIO 40 and 3.3 V is recommended for improved noise immunity.
     pinMode(PIN_IGNITION_SENSE, INPUT_PULLUP);
     pinMode(PIN_POWER_HOLD, OUTPUT);
     digitalWrite(PIN_POWER_HOLD, LOW);
@@ -88,7 +74,7 @@ void init() {
     keyChangeMs  = millis();
 
     // Check if key is already on at boot (power-on with key turned).
-    // PC817 → LOW means the LED is conducting → key is in ON position.
+    // NPN optocoupler → LOW means the LED is conducting → key is in ON position.
     if (digitalRead(PIN_IGNITION_SENSE) == LOW) {
         keyDebounced = true;
         keyRawLast   = true;

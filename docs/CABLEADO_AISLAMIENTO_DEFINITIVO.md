@@ -4,6 +4,13 @@
 **Documento base:** `AISLAMIENTO_GALVANICO_6N137.md`
 **Estado: Plan listo para montar — Firmware SIN modificar**
 
+> ⚠️ **NOTA DE HARDWARE ACTUALIZADA:** Este documento describe el cableado de aislamiento
+> con el módulo HY-M158 (PC817 ×8) como placa de optoacopladores.
+> El hardware físico actual usa **2× módulos NPN 4 canales (Active Low)** en su lugar.
+> **Referencia válida:** `docs/EL817_WIRING_REFERENCE.md`
+> El contenido de este documento sigue siendo válido a nivel de principios de señal
+> y cálculo — solo cambia la referencia al módulo físico.
+
 ---
 
 ## Índice
