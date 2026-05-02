@@ -41,6 +41,15 @@ public:
     /// Clear the exit-requested flag (called by ScreenManager after handling).
     void clearExitRequest() { exitRequested_ = false; }
 
+    /// Returns true (and clears the flag) if the user selected the
+    /// "TOUCH CALIBRATION" menu entry on this frame.  ScreenManager polls
+    /// this and launches the wizard accordingly.
+    bool consumeTouchCalRequest() {
+        bool v = touchCalRequested_;
+        touchCalRequested_ = false;
+        return v;
+    }
+
 private:
     enum class SubMenu : uint8_t {
         MAIN = 0,
@@ -56,15 +65,6 @@ private:
         RELAY_CONTROL,     // Manual relay override (engineering diagnostic)
         DEBOUNCE_DIAG      // DWT-debounce EMI filtered counters viewer
     };
-
-    /// Returns true (and clears the flag) if the user selected the
-    /// "TOUCH CALIBRATION" menu entry on this frame.  ScreenManager polls
-    /// this and launches the wizard accordingly.
-    bool consumeTouchCalRequest() {
-        bool v = touchCalRequested_;
-        touchCalRequested_ = false;
-        return v;
-    }
 
     void drawMainMenu();
     void drawFaultViewer();
@@ -148,7 +148,7 @@ private:
     // Touch-calibration menu entry — when the user taps "TOUCH CALIBRATION"
     // we cannot launch the wizard from inside EngineeringScreen (it does
     // not own the ScreenManager flags).  Instead we set this flag and the
-    // ScreenManager polls it via `consumeTouchCalRequest()` each frame.
+    // ScreenManager polls it via consumeTouchCalRequest() each frame.
     bool          touchCalRequested_ = false;
 };
 
