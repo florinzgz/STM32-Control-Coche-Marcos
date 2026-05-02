@@ -70,41 +70,42 @@ Cuando detecta OFF, el firmware reproduce el audio de despedida y guarda config 
 > `power_manager.cpp` — `pinMode(PIN_IGNITION_SENSE, INPUT_PULLUP)`
 > `power_manager.h`   — `PIN_IGNITION_SENSE = 40`
 
-### 2.2 Opción implementada — Canal `IN5` del módulo HY-M158 (PC817 ×8)
+### 2.2 Hardware utilizado — Módulo NPN optoacoplador 4 canales (Active Low)
 
-Se utiliza un canal libre (`IN5`) del módulo HY-M158 de 8 canales PC817 que ya está montado
-en el sistema para los sensores de rueda. **No se necesita ningún módulo adicional.**
+Se utiliza el canal 2 del **Board 2** del módulo NPN 4 canales (EL817 / PC817 equivalente,
+salida NPN open-collector Active Low). El mismo Board 2 lleva en el canal 1 el sensor de
+centro de dirección. La lógica es **INVERTIDA**:
 
-La señal de la llave (+12 V ACC) pasa por el optoacoplador → el colector del PC817 se
-conecta a GPIO 40. La lógica es **INVERTIDA** respecto a un divisor resistivo directo:
+| Llave | LED opto | Transistor NPN | GPIO 40 | Estado firmware |
+|-------|----------|----------------|---------|-----------------|
+| **ON** | Conduce (~3.9 mA, R integrada ~2.8 kΩ) | Saturado → colector a GND | **LOW** | → RUNNING |
+| **OFF** | Apagado | Abierto | **HIGH** (pull-up onboard 2.7 kΩ + INPUT_PULLUP ~45 kΩ) | → SHUTTING_DOWN |
 
-| Llave | LED PC817 | Fototransistor | GPIO 40 | Estado firmware |
-|-------|-----------|----------------|---------|-----------------|
-| **ON** | Conduce (~3.6 mA con la 3 kΩ integrada del HY-M158) | Saturado → colector a GND | **LOW** | → RUNNING |
-| **OFF** | Apagado | Abierto | **HIGH** (pull-up externo 10 kΩ + INPUT_PULLUP ~45 kΩ) | → SHUTTING_DOWN |
-
-> ⚠️ **El HY-M158 NO tiene pull-up onboard** en la salida (verificado con polímetro: circuito abierto).
-> Son obligatorios dos pull-ups: **10 kΩ externo** entre GPIO 40 y 3.3 V (soldar en PCB) +
-> **INPUT_PULLUP** en firmware (ya configurado en `power_manager.cpp` — red de seguridad ~45 kΩ).
+> ⚠️ **Usar SIEMPRE el módulo NPN Output (Active Low)**, NUNCA el PNP (Active High).
+> Con el PNP la lógica se invierte (llave ON → GPIO HIGH → firmware lo detecta como OFF).
 >
-> ⚠️ **Jumpers rojos del HY-M158: retirados** (los 8). Con ellos puestos cortocircuitan
-> `G(V)` con `G(IN)` y se pierde el aislamiento galvánico.
+> ✅ El módulo NPN ya tiene pull-up onboard (~2.7 kΩ a V). Se recomienda además un
+> **10 kΩ externo** entre GPIO 40 y 3.3 V para mayor inmunidad al ruido automotriz.
+>
+> Referencia completa: `docs/EL817_WIRING_REFERENCE.md` (Board 2, canal 2).
 
-### 2.3 Cableado GPIO 40 vía HY-M158 (canal `IN5`)
+### 2.3 Cableado GPIO 40 vía módulo NPN 4ch (Board 2, canal 2)
 
 ```
-  +12V ACC (llave ON) ──[fusible 1 A]──► HY-M158 V5 (3 kΩ on-board en serie con LED PC817)
-  GND vehículo        ─────────────────► HY-M158 G (lado V)
+  +12V ACC (llave ON) ──[fusible 1 A]──► 2+ del módulo NPN 4ch Board 2
+  GND vehículo        ─────────────────► 2- del módulo NPN 4ch Board 2
+  V del módulo        ─────────────────► 3.3 V lógica
+  G del módulo        ─────────────────► GND_logic ESP32 (= GND STM32)
 
-                                          3.3V ──[10 kΩ ext.]──┐
-                                          HY-M158 IN5 ──────────┤──► GPIO 40 ESP32
-                                          HY-M158 G (lado IN) ──────► GND_logic ESP32 (común con STM32)
+                                          3.3V ──[10 kΩ ext. recomendado]──┐
+                                          O2 del módulo ────────────────────┤──► GPIO 40 ESP32
 ```
 
-- **Resistencia serie LED:** ya integrada en el HY-M158 (3 kΩ SMD `302`).
-  `I_LED = (12 V − 1.2 V) / 3 kΩ ≈ 3.6 mA` ← dentro del rango nominal del PC817, CTR ≥ 50 % satura el fototransistor contra el pull-up de 10 kΩ a 3,3 V.
-- **Pull-up externo 10 kΩ ¼ W**: soldar entre GPIO 40 y pin 3.3 V del ESP32 — **obligatorio**.
-- **No añadir resistencia de entrada externa** — la 3 kΩ on-board ya cumple la función.
+- **Resistencias integradas:** ~2.8 kΩ en serie con el LED.
+  `I_LED = (12 V − 1.2 V) / 2800 Ω ≈ 3.9 mA` ✅
+- **Pull-up onboard:** ~2.7 kΩ desde colector a V (3.3 V) ya en el módulo.
+- **Pull-up externo 10 kΩ ¼ W** entre GPIO 40 y 3.3 V — recomendado (más inmunidad a ruido).
+- **No añadir resistencia de entrada adicional** — las integradas ya son suficientes.
 
 ## 3. Módulo Relé con Retardo Hardware (alimentación)
 
@@ -125,8 +126,8 @@ Funciona 100 % en hardware, sin código.
   NC  ──────────────────────────► Sin conectar
 ```
 
-| Situación | Módulo retardo | GPIO 40 (via PC817) |
-|-----------|---------------|---------------------|
+| Situación | Módulo retardo | GPIO 40 (via NPN opto) |
+|-----------|---------------|------------------------|
 | Llave ON | Trigger 12 V → relé cierra → 5V llega a ESP32+STM32 | LOW → RUNNING |
 | Llave OFF | Trigger 0 V → cuenta atrás T seg | HIGH → SHUTTING_DOWN |
 | Durante T seg | Relé sigue cerrado | ESP32 despedida + guarda flash |

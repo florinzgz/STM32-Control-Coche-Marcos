@@ -6,23 +6,27 @@
 // configurable window after the ignition key is turned off, allowing
 // the audio system to play a farewell sound before final power-down.
 //
-// GPIO 40: Ignition key sense via PC817 optocoupler — INVERTED logic
-//          LOW  = key ON  (LED conducts → transistor saturated)
+// GPIO 40: Ignition key sense via NPN optocoupler (4-ch module, Active Low) — INVERTED logic
+//          LOW  = key ON  (LED conducts → NPN transistor saturated → output pulled to GND)
 //          HIGH = key OFF (LED off, line pulled HIGH via pull-up)
-//          ⚠️ PC817 board has NO onboard pull-up (verified by measurement).
-//             Firmware uses INPUT_PULLUP (~45 kΩ internal) as safety net.
-//             External 10 kΩ from GPIO 40 to 3.3 V is MANDATORY (better
-//             noise immunity in automotive environment).
+//          ⚠️ Module has onboard pull-up on output side (integrated ~2.7 kΩ to V).
+//             Firmware also uses INPUT_PULLUP (~45 kΩ internal) as safety net.
+//             External 10 kΩ from GPIO 40 to 3.3 V is RECOMMENDED for extra
+//             noise immunity in automotive environment.
+//          ⚠️ Use NPN Output (Active Low) variant — NOT PNP (Active High).
+//             PNP would give reversed logic (key ON → GPIO HIGH → firmware reads OFF).
 // GPIO 41: Power hold output  (HIGH = request power stay on)
 //
-// External wiring (PC817 8-channel isolation board, channel A7):
-//   +12 V (ignition key) ── 1 kΩ ¼ W ──→ IN+ (LED anode)   of PC817 ch A7
-//   GND  (vehicle)        ─────────────→ IN- (LED cathode)
-//   OUT  (collector)      ─────────────→ GPIO 40
-//                            also ──→ 10 kΩ ──→ 3.3 V  ← solder externally
-//   GND  (3.3 V side)     ──── shared with ESP32 / STM32 GND
-// The 1 kΩ input resistor (NOT 330 Ω) is required for continuous-duty:
-//   I_LED = (12 V − 1.2 V) / 1 kΩ ≈ 10.8 mA (below PC817 20 mA nominal).
+// External wiring (4-channel NPN optocoupler module, channel 1):
+//   +12 V (ignition key) ──[fusible 1 A]──→ IN+ (1+) of channel 1
+//   GND  (vehicle)        ──────────────→ IN- (1-) of channel 1
+//   V    (module)         ──────────────→ 3.3 V (logic supply)
+//   G    (module)         ──────────────→ GND_logic (ESP32 / STM32 shared GND)
+//   O1   (collector out)  ──────────────→ GPIO 40
+//                            also ──→ 10 kΩ ──→ 3.3 V  ← recommended external pull-up
+// Input resistors already integrated on board (~2.8 kΩ total per channel):
+//   I_LED = (12 V − 1.2 V) / 2800 Ω ≈ 3.9 mA — within nominal range.
+// Reference: docs/EL817_WIRING_REFERENCE.md (Board 2, channel 2).
 //
 // State machine:
 //   OFF → POWER_HOLD → STARTING → RUNNING → SHUTTING_DOWN → OFF

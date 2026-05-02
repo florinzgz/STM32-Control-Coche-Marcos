@@ -304,7 +304,7 @@ The `esp32/` directory contains the HMI firmware for the ESP32-S3, which communi
 
 **Display:** TFT ST7796 480×320 (GPIO 10, 12–14, 21, 38, 39, 42)  
 **CAN-Bus:** SN65HVD230 transceiver (GPIO 4, 5)  
-**Audio:** DFPlayer Mini (GPIO 43 TX, 44 RX) + audio relay (GPIO 11)  
+**Audio:** DFPlayer Mini (GPIO 43 TX, 44 RX) + audio relay (GPIO 11) — driver integrated, SD card with MP3s required  
 **Traction switch (2WD/4WD):** GPIO 15  
 **Shifter:** MCP23017 I2C (GPIO 8 SDA, 9 SCL)  
 **LEDs:** WS2812B front (GPIO 47, 28 LEDs), rear (GPIO 48, 16 LEDs)  
@@ -334,12 +334,12 @@ See [`docs/ESP32_FIRMWARE_DESIGN.md`](docs/ESP32_FIRMWARE_DESIGN.md) for the ful
 ✅ Pedal plausibility (dual-sample ADC + software cross-check: EMA filter, range, rate-of-change)
 ✅ Persistent error log in Flash (250 entries, ring buffer, CRC32, post-mortem diagnosis)
 ✅ I2C bus recovery (NXP AN10216 clock cycling, auto-recovery on SDA stuck)
+✅ DFPlayer Mini audio system (UART2 GPIO 43/44, priority queue, CAN-triggered events: welcome/farewell, gear changes, ABS/TCS, obstacle warning, battery low, error alert, traction mode, lights)
 
 ### Features Pending (vs Original Firmware)
-⬜ Regenerative braking with AI-based optimization
-⬜ Adaptive cruise control
-⬜ Touch calibration wizard with persistent storage
-⬜ DFPlayer audio error/warning sounds (ESP32 audio hardware present, integration pending)
+⬜ Regenerative braking with AI-based optimization (dynamic braking foundation in place via BTS7960 H-bridge; AI regen logic and energy recovery not implemented)
+⬜ Adaptive cruise control (obstacle distance + speed coordination not implemented)
+⬜ Touch calibration wizard with persistent storage (touch calibration currently uses compile-time constants from User_Setup.h; no interactive wizard)
 
 ## Author
 **Florin Zgureanu** (@florinzgz)

@@ -5,6 +5,12 @@
 **Referencia firmware:** `Core/Inc/project_config.h`, `Core/Inc/boot_validation.h`, `Core/Src/main.c`  
 **Documentos relacionados:** `MATERIALES_POR_MODULO.md`, `CABLEADO_AISLAMIENTO_DEFINITIVO.md`, `HARDWARE_VALIDATION_PROCEDURE.md`
 
+> ⚠️ **NOTA DE HARDWARE:** Las referencias a **HY-M158** en este documento corresponden
+> al módulo de 8 canales PC817 que fue el diseño original. El hardware físico actual usa
+> **2× módulos NPN 4 canales (Active Low)** equivalentes.
+> Referencia válida: `docs/EL817_WIRING_REFERENCE.md`.
+> La lógica eléctrica es idéntica (NPN open-collector, salida Active Low, llave ON = LOW).
+
 > **Filosofía:** Cada paso se verifica de forma aislada ANTES de conectar el siguiente módulo. Nunca conectes todo a la vez. El sistema de seguridad del firmware te protege — el SAFE MODE es tu amigo.
 
 ---

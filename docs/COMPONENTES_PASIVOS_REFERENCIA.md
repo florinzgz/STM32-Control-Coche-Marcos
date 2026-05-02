@@ -17,6 +17,7 @@
 6. [Transistores de Control de Relés](#6-transistores-de-control-de-relés)
 7. [Mapa Visual del Sistema](#7-mapa-visual-del-sistema)
 8. [Reglas de Montaje](#8-reglas-de-montaje)
+9. [Convertidores DC-DC Aislados](#9-convertidores-dc-dc-aislados) — **B0505S-1W** (aislamiento bus CAN)
 
 ---
 
@@ -355,6 +356,73 @@ BATERÍA 24V
 
 ---
 
-**Última actualización:** 2026-04-26  
+## 9. Convertidores DC-DC Aislados
+
+### 9.1 → B0505S-1W — **10 unidades compradas**
+
+**¿Qué es el B0505S-1W?**  
+Convertidor DC-DC aislado en encapsulado SIP-4 (4 pines, montaje vertical).  
+- **Entrada:** 5V DC (rango nominal 4.5–5.5V)  
+- **Salida:** 5V DC **aislada galvánicamente** (GND de entrada y GND de salida son eléctricamente independientes)  
+- **Potencia:** 1W → corriente de salida máxima **200 mA** a 5V  
+- **Aislamiento galvánico:** ≥ **1000 V** entre entrada y salida (barrera dieléctrica interna)  
+- **Encapsulado:** SIP-4 (Single In-line Package, 4 pines, 7.62 mm pitch)  
+- **Fabricante:** BOSHIDA / múltiples fuentes compatibles (serie B05xxS de varios fabricantes es intercambiable)
+
+**Pinout SIP-4:**
+
+```
+Pin 1 → +Vin  (5V entrada)
+Pin 2 → -Vin  (GND entrada / GND_STM32)
+Pin 3 → -Vout (GND salida / GND_CAN — ¡dominio aislado!)
+Pin 4 → +Vout (5V salida aislada)
+```
+
+---
+
+**¿Para qué sirve en este proyecto?**
+
+Proporciona la alimentación aislada necesaria para la **barrera galvánica del bus CAN** (Opción A: ADuM1201 + DC-DC separado, descrita en `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` sección 9.4).
+
+El TJA1051T/3 requiere **VCC = 4.5–5.5V** (no funciona a 3.3V). El lado aislado del aislador digital (ADuM1201 pin Vdd2) necesita su propia alimentación en el dominio GND_CAN, aislado de GND_STM32. El B0505S-1W resuelve ambas necesidades con un único componente:
+
+```
+Lado STM32 (GND_STM32)              Barrera B0505S-1W              Lado CAN (GND_CAN)
+───────────────────────              ─────────────────              ──────────────────
+
+5V_rail  ── Pin1(+Vin)  [B0505S-1W]  Pin4(+Vout) ──► 5V_aislada ──► TJA1051T/3 VCC
+GND      ── Pin2(-Vin)               Pin3(-Vout) ──► GND_CAN    ──► TJA1051T/3 GND
+
+                                                  ──► ADuM1201 Vdd2 (via LDO 3.3V opcional)
+```
+
+> ⚠️ **GND_CAN ≠ GND_STM32.** Una vez instalado el B0505S-1W, los dominios de tierra están separados. NO conectar GND_CAN a GND_STM32 en ningún punto; eso cortocircuitaría la barrera galvánica.
+
+---
+
+**¿Cuántas unidades se necesitan?**
+
+| # | Uso | Notas |
+|---|-----|-------|
+| 1 | Aislamiento del bus CAN (barrera STM32 ↔ ESP32, Opción A) | 1 B0505S-1W por barrera galvánica de bus CAN |
+| 9 | **Stock / reserva** | Recambios y posibles usos futuros en otras barreras de aislamiento |
+
+> **Nota:** Si en el futuro se añade aislamiento galvánico en otros buses (p.ej. I2C de sensores en zona de alta tensión), cada barrera adicional requeriría 1 unidad más. Con 10 unidades hay margen amplio.
+
+---
+
+**Consumo del lado aislado (verificación de potencia):**
+
+| Componente | Corriente típica |
+|-----------|-----------------|
+| TJA1051T/3 VCC (standby/activo) | ~5–50 mA |
+| ADuM1201 Vdd2 (a 5V o 3.3V via LDO) | ~1–5 mA |
+| **Total estimado** | **< 60 mA** |
+| **Capacidad B0505S-1W** | **200 mA** |
+| **Margen disponible** | ≈ 140 mA (factor 3×) ✅ |
+
+---
+
+**Última actualización:** 2026-05-02  
 **Autor:** florinzgz (documentado por Copilot Agent)  
 **Proyecto:** STM32-Control-Coche-Marcos
