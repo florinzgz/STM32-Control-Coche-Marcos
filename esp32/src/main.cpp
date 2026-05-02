@@ -1158,6 +1158,15 @@ void loop() {
                     case can::SafetyError::OBSTACLE:
                         playWarning(audio::Sound::OBSTACLE_WARN, audio::Priority::MEDIUM);
                         break;
+                    case can::SafetyError::BATTERY_OV_WARN:
+                        playWarning(audio::Sound::BATTERY_LOW, audio::Priority::MEDIUM);
+                        break;
+                    case can::SafetyError::BATTERY_OV_CRIT:
+                        playWarning(audio::Sound::BATTERY_CRITICAL, audio::Priority::HI);
+                        break;
+                    case can::SafetyError::RELAY_OPEN:
+                        playWarning(audio::Sound::ERROR_GENERAL, audio::Priority::HI);
+                        break;
                     default:
                         break;
                 }

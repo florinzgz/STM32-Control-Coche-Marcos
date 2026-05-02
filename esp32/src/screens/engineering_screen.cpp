@@ -1928,7 +1928,8 @@ void EngineeringScreen::drawRelayControl() {
             bgCol = relayOverrideEnabled_ ? ui::COL_RED : ui::COL_DARK_GRAY;
             borderCol = relayOverrideEnabled_ ? ui::COL_WHITE : ui::COL_GRAY;
         } else if (relayOverrideEnabled_) {
-            bgCol = (relayOverrideMask_ & (1U << (i - 1)))
+            // Wire layout: bit1=TRAC (i=1), bit2=DIR (i=2) — use 1U<<i, not 1U<<(i-1).
+            bgCol = (relayOverrideMask_ & (1U << i))
                     ? ui::COL_GREEN : ui::COL_DARK_GRAY;
             borderCol = ui::COL_WHITE;
         }
