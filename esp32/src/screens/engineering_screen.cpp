@@ -10,6 +10,7 @@
 #include "ui/render_trace.h"
 #include "can_ids.h"
 #include "config_store.h"
+#include "touch_calibration.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <cstdio>
@@ -18,13 +19,20 @@
 extern TFT_eSPI tft;
 
 // ---- Menu button layout ----
+// MENU_BTN_H/MENU_SPACING/MENU_START_Y are sized so that all 13 main-menu
+// entries fit between the title bar and the bottom EXIT/BACK row.  The
+// last few items overlap the EXIT button on the left edge (x=10..90) but
+// their text is centred at x≈240 so the visible overlap is only the
+// border outline; touch hit-testing handles EXIT first so there is no
+// dispatch ambiguity.  The same constants are reused by the
+// FACTORY_DEFAULTS submenu (only 6 items — fits trivially).
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
-static constexpr int16_t MENU_BTN_H   = 23;
-static constexpr int16_t MENU_START_Y = 46;
-static constexpr int16_t MENU_SPACING = 25;
+static constexpr int16_t MENU_BTN_H   = 19;
+static constexpr int16_t MENU_START_Y = 42;
+static constexpr int16_t MENU_SPACING = 21;
 
-static constexpr int     NUM_MAIN_ITEMS = 11;
+static constexpr int     NUM_MAIN_ITEMS = 13;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -36,7 +44,9 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "DTC ERROR LOG",
     "MAINTENANCE",
     "RELAY CONTROL (DEBUG)",
-    "DEBOUNCE DEBUG"
+    "DEBOUNCE DEBUG",
+    "TOUCH CALIBRATION",   // Launch persistent touch calibration wizard
+    "RESET TOUCH CAL"      // Erase NVS calibration + re-arm first-boot wizard
 };
 
 // ---- Back / Save buttons ----
@@ -703,6 +713,29 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             debounceDataChanged_ = true;   // force first paint
                             currentMenu_ = SubMenu::DEBOUNCE_DIAG;
                             break;
+                        case 11:
+                            // Launch persistent touch calibration wizard.
+                            // We cannot open the wizard from inside this
+                            // screen (it does not own the ScreenManager
+                            // flags); ScreenManager polls
+                            // consumeTouchCalRequest() each frame and
+                            // launches the wizard accordingly.  We exit
+                            // the engineering screen so the wizard fully
+                            // takes over the display.
+                            touchCalRequested_ = true;
+                            exitRequested_     = true;
+                            break;
+                        case 12:
+                            // Reset persistent touch calibration: erase
+                            // the NVS data AND clear the first_done flag
+                            // so the next reboot will re-launch the wizard
+                            // automatically.  This is the dedicated reset
+                            // path documented in TOUCH_CALIBRATION_SYSTEM.md.
+                            touch_calibration::factoryReset();
+                            Serial.println(
+                                "[ENG] Touch calibration NVS erased; "
+                                "wizard will re-arm on next boot");
+                            break;
                         default:
                             break;
                     }
@@ -929,6 +962,8 @@ void EngineeringScreen::drawMainMenu() {
                           (i == 7) ? ui::COL_CYAN :         // DTC Error Log
                           (i == 8) ? ui::COL_GREEN :        // Maintenance
                           (i == 9) ? ui::COL_RED :          // Relay Control (debug)
+                          (i == 11) ? ui::COL_CYAN :        // Touch Calibration wizard
+                          (i == 12) ? ui::COL_AMBER :       // Reset Touch Cal
                           ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);

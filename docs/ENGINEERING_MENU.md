@@ -19,6 +19,12 @@ for use during development and maintenance.
 | 5 | INA226 SENSOR MAPPING | `SENSOR_MAP_INA` | Map INA226 I2C channels to vehicle positions (FL/FR/RL/RR/Battery/Steering) |
 | 6 | TEMP SENSOR MAPPING | `SENSOR_MAP_TEMP` | Map DS18B20 sensors to vehicle positions (FL/FR/RL/RR/Ambient) |
 | 7 | FACTORY DEFAULTS | `FACTORY_DEFAULTS` | Individual factory-default reset options (see below), includes full factory restore |
+| 8 | DTC ERROR LOG | `DTC_LOG_VIEWER` | Persistent NVS-backed DTC fault log viewer |
+| 9 | MAINTENANCE | `MAINTENANCE` | Maintenance counter status / acknowledge / reset |
+| 10 | RELAY CONTROL (DEBUG) | `RELAY_CONTROL` | Manual relay override for engineering diagnostics |
+| 11 | DEBOUNCE DEBUG | `DEBOUNCE_DIAG` | DWT-debounce EMI filtered counters viewer |
+| 12 | TOUCH CALIBRATION | _wizard_ | Launch the persistent touch-calibration wizard. See [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md). |
+| 13 | RESET TOUCH CAL | _action_ | Erase persisted touch calibration in NVS and re-arm the first-boot wizard for the next reboot. |
 
 ## Submenu Details
 

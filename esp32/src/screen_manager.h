@@ -51,6 +51,7 @@
 #include "screens/error_screen.h"
 #include "screens/engineering_screen.h"
 #include "screens/pin_screen.h"
+#include "screens/touch_calibration_screen.h"
 #include "ui/frame_limiter.h"
 
 class ScreenManager {
@@ -70,7 +71,19 @@ public:
 
     /// Returns true while PIN entry or engineering screen is showing.
     /// Use to suppress normal top-bar touch handling in main loop.
-    bool isBlockingInput() const { return pinActive_ || engineeringActive_; }
+    bool isBlockingInput() const { return pinActive_ || engineeringActive_ || touchCalActive_; }
+
+    /// Returns true while the touch-calibration wizard is active.  When
+    /// true, main.cpp must NOT feed taps from the (potentially miscalibrated)
+    /// touch driver into the normal touch_handler/screen pipeline — the
+    /// wizard owns the touch flow exclusively.
+    bool isTouchCalActive() const { return touchCalActive_; }
+
+    /// Launch the touch-calibration wizard.  Called automatically once on
+    /// first boot from main.cpp, and on demand from the engineering menu.
+    /// @param firstBoot  When true, the wizard hides the CANCEL button and
+    ///                   forces the user to complete a calibration.
+    void requestTouchWizard(bool firstBoot);
 
     /// Returns true when the current screen is the initial boot screen
     /// (COCHE MARCOS / HMI v1.0 / CAN: WAITING / SENSOR: WAITING).
@@ -97,6 +110,7 @@ private:
     ErrorScreen        errorScreen_;
     EngineeringScreen  engineeringScreen_;
     PinScreen          pinScreen_;
+    TouchCalibrationScreen touchCalScreen_;
 
     Screen*           currentScreen_;
     can::SystemState  currentState_;
@@ -104,6 +118,7 @@ private:
 
     bool pinActive_         = false;  // true while PIN screen is shown
     bool engineeringActive_ = false;  // true while engineering screen is shown
+    bool touchCalActive_    = false;  // true while touch-calibration wizard is shown
     bool canLost_           = false;  // true when STM32 heartbeat lost > CAN_LOSS_TIMEOUT_MS
 
     // Frame time monotonicity tracking (V10 contract)

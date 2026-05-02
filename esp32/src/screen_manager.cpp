@@ -13,7 +13,11 @@
 #include "screen_manager.h"
 #include "ui/runtime_monitor.h"
 #include "ui/ui_common.h"
+#include "touch_calibration.h"
+#include <TFT_eSPI.h>
 #include <Arduino.h>
+
+extern TFT_eSPI tft;
 
 ScreenManager::ScreenManager()
     : currentScreen_(&bootScreen_)
@@ -45,6 +49,45 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 #endif
     prevFrameTimeMs_ = frameTimeMs;
 
+    // ---- Touch-calibration wizard active ----
+    // Highest priority: when the wizard is up, no other screen logic runs.
+    // The wizard owns the entire touch & display pipeline until SAVE/CANCEL.
+    if (touchCalActive_) {
+        RTMON_UI_BEGIN();
+        touchCalScreen_.update(data, frameTimeMs);
+        RTMON_UI_END();
+        if (frameLimiter_.shouldDraw()) {
+            RTMON_FRAME_BEGIN();
+            RTMON_RENDER_BEGIN();
+            touchCalScreen_.draw();
+            RTMON_RENDER_END();
+            RTMON_FRAME_END();
+        }
+        if (touchCalScreen_.isSaved()) {
+            // Apply the new calibration to the live driver in-place.
+            // Cast away const because TFT_eSPI::setTouch takes a non-const
+            // pointer despite not modifying the data.
+            uint16_t cal[touch_calibration::CAL_DATA_LEN];
+            memcpy(cal, touchCalScreen_.result(), sizeof(cal));
+            tft.setTouch(cal);
+            Serial.println("[TOUCH_CAL] New calibration applied to TFT_eSPI");
+            touchCalActive_ = false;
+            touchCalScreen_.clearResultFlags();
+            currentScreen_->onEnter();    // force full redraw of underlying screen
+            frameLimiter_.forceNextFrame();
+        } else if (touchCalScreen_.isCancelled()) {
+            // Mark first-boot done even on cancel from the engineering menu
+            // so the wizard never auto-launches again — only by request.
+            touch_calibration::markFirstBootDone();
+            touchCalActive_ = false;
+            touchCalScreen_.clearResultFlags();
+            currentScreen_->onEnter();
+            frameLimiter_.forceNextFrame();
+            Serial.println("[TOUCH_CAL] Wizard exited without saving");
+        }
+        return;
+    }
+
     // ---- Engineering screen active ----
     if (engineeringActive_) {
         RTMON_UI_BEGIN();
@@ -66,6 +109,13 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
             currentScreen_->onEnter();
             frameLimiter_.forceNextFrame();
             Serial.println("[ENG] Engineering menu deactivated");
+
+            // If the exit was triggered by the "TOUCH CALIBRATION" entry,
+            // launch the wizard immediately (same frame) so the user does
+            // not see a flash of the underlying screen.
+            if (engineeringScreen_.consumeTouchCalRequest()) {
+                requestTouchWizard(/*firstBoot=*/false);
+            }
         }
         return;
     }
@@ -152,6 +202,11 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
 }
 
 void ScreenManager::onTouch(int16_t x, int16_t y) {
+    if (touchCalActive_) {
+        touchCalScreen_.handleTouch(x, y);
+        return;
+    }
+
     if (engineeringActive_) {
         engineeringScreen_.handleTouch(x, y);
         return;
@@ -168,8 +223,8 @@ void ScreenManager::onTouch(int16_t x, int16_t y) {
 }
 
 void ScreenManager::onLongPress(int16_t x, int16_t y) {
-    // Only activate when neither overlay is already shown
-    if (engineeringActive_ || pinActive_) return;
+    // Only activate when no overlay is already shown
+    if (engineeringActive_ || pinActive_ || touchCalActive_) return;
 
     // Hit-test the battery icon (ui::BAT_X, BAT_Y, BAT_W, BAT_H)
     if (x >= ui::BAT_X && x <= ui::BAT_X + ui::BAT_W &&
@@ -183,6 +238,19 @@ void ScreenManager::activatePinScreen() {
     pinScreen_.onEnter();
     frameLimiter_.forceNextFrame();
     Serial.println("[PIN] Battery long press → PIN screen");
+}
+
+void ScreenManager::requestTouchWizard(bool firstBoot) {
+    if (touchCalActive_) return;   // already active — idempotent
+
+    // Fully replace the active screen with the wizard.  The previous
+    // screen is paused; on wizard exit we re-enter it (forces a redraw).
+    touchCalActive_ = true;
+    touchCalScreen_.setFirstBoot(firstBoot);
+    touchCalScreen_.onEnter();
+    frameLimiter_.forceNextFrame();
+    Serial.printf("[TOUCH_CAL] Wizard requested (firstBoot=%d)\n",
+                  static_cast<int>(firstBoot));
 }
 
 bool ScreenManager::isInitialScreen() const {
