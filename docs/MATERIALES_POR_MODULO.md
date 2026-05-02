@@ -174,6 +174,7 @@
 | 2 | Diodo TVS bus CAN | **PESD2CAN** (línea diferencial) | Uno por nodo, entre CANH y CANL; protección ESD del bus |
 | 1 | Cable par trenzado apantallado | **22 AWG**, longitud ≤ 5 m | Par trenzado CANH + CANL; apantallar el cable |
 | — | Cable drenaje (shield) | — | Conectar a GND solo en el lado STM32; deja el extremo ESP32 flotante |
+| 1 | Convertidor DC-DC aislado **B0505S-1W** | 5V in → 5V out aislada, 1W (200mA), 1kV isolación, SIP-4 | Alimenta el lado aislado de la barrera CAN (Opción A: ADuM1201 + DC-DC): `5V_rail → B0505S-1W → 5V_aislada → TJA1051T/3 VCC`. Ver `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` sección 9.4 |
 
 ---
 
@@ -437,6 +438,7 @@
 | 5 | TEMP1–TEMP5 | DS18B20 | Waterproof, OneWire |
 | 5 | WS1–WS5 | Sensor inductivo LJ12A3 | NPN, NO (4× velocidad rueda + 1× centrado) |
 | 2 | CAN1–CAN2 | Transceiver CAN TJA1051T/3 | 3.3V compatible |
+| 1 | DCDC_CAN | Convertidor DC-DC aislado B0505S-1W | 5V→5V aislada, 1W, 1kV; alimentación del lado aislado del bus CAN (Opción A) |
 | 1 | DISP1 | Display TFT ST7796 480×320 | Con XPT2046 touch |
 | 1 | TOF1 | TOFSense-M S (Nooploop) | LiDAR 8×8, 5V, UART 921600 bps |
 | 1 | MCP1 | MCP23017 | Expansor I2C para palanca de cambios |
