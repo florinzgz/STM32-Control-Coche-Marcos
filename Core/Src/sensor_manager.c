@@ -908,6 +908,11 @@ static bool     temp_read_invalid[NUM_DS18B20] = {false};
  *     of invalid reads (avoids inflated dT from initial zero baseline).
  * -------------------------------------------------------------------- */
 #define TEMP_RATE_WARN_C_PER_S   5.0f
+/* Rationale for 5 °C/s threshold: DS18B20 ambient self-heating and
+ * 50 ms sample cadence can produce spikes up to ~1–2 °C/s under normal
+ * thermal transients.  5 °C/s is well above that floor yet captures
+ * any genuine thermal runaway (motor windings reaching T_warn in
+ * < 20 s) before the absolute thresholds in safety_system.c trip.    */
 #define TEMP_RATE_MIN_DT_MS      100U  /* drop very short windows (noise) */
 /* How long the rate-of-change WARNING latches after the most recent
  * trip.  Necessary because Safety_CheckTemperature() unconditionally

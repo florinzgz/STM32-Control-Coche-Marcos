@@ -210,6 +210,15 @@ static inline void sat_inc_u32(uint32_t *counter) {
                                              * suppressed to avoid FP.      */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
+/* Roadmap 1.4 — temperature cross-validation: per-sensor deviation
+ * (°C) from the median of the OTHER enabled, valid DS18B20s above
+ * which the sensor is tagged MODULE_FAULT_WARNING.  Diagnostic only.   */
+#define TEMP_CROSS_DEV_C      30.0f
+/* Roadmap 1.4 — wheel-speed median outlier: minimum per-wheel speed
+ * required for the median check to run.  Below this, pulse-period
+ * extrapolation dominates and small absolute deltas inflate the
+ * relative deviation.                                                  */
+#define WHEEL_MEDIAN_MIN_KMH   5.0f
 #define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
 #define SENSOR_CURRENT_MAX_BATT_A 100.0f   /* battery channel: 100A sensor range  */
 #define SENSOR_SPEED_MAX_KMH 25.0f    /* RS775 20000RPM / 1:75 gear → ~266 wheel RPM
@@ -1687,7 +1696,6 @@ void Safety_CheckSensors(void)
      * is never downgraded to WARNING.
      * ------------------------------------------------------------------ */
     {
-        const float TEMP_CROSS_DEV_C = 30.0f;
         float    samples[NUM_DS18B20];
         uint8_t  sample_idx[NUM_DS18B20];
         uint8_t  n = 0;
@@ -1816,10 +1824,9 @@ void Safety_CheckSensors(void)
      * 1 Hz SERVICE_FAULTS frame even if the deviation is transient.
      * ------------------------------------------------------------------ */
     {
-        const float MIN_MOTION_KMH = 5.0f;
         bool all_moving = true;
         for (uint8_t i = 0; i < 4; i++) {
-            if (isnan(spd[i]) || isinf(spd[i]) || spd[i] < MIN_MOTION_KMH) {
+            if (isnan(spd[i]) || isinf(spd[i]) || spd[i] < WHEEL_MEDIAN_MIN_KMH) {
                 all_moving = false;
                 break;
             }
@@ -1843,7 +1850,7 @@ void Safety_CheckSensors(void)
                 float min3 = (a < b) ? ((a < c) ? a : c) : ((b < c) ? b : c);
                 float max3 = (a > b) ? ((a > c) ? a : c) : ((b > c) ? b : c);
                 float med3 = (a + b + c) - (min3 + max3);
-                if (med3 < MIN_MOTION_KMH) continue;  /* defensive */
+                if (med3 < WHEEL_MEDIAN_MIN_KMH) continue;  /* defensive */
                 float dev    = spd[i] - med3;
                 float absdev = (dev < 0.0f) ? -dev : dev;
                 if ((absdev / med3) > 0.5f) {
