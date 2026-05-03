@@ -36,7 +36,7 @@ static void test_initial_zero(void) {
     ASSERT_EQ(LoopDiag_GetAndResetPeak100us(), 0U);
 }
 
-/* Single record, value < 100 µs → 100us-units = 0. */
+/* Single record, value < 100 µs → 100 µs units = 0. */
 static void test_sub_100us(void) {
     reset_state();
     LoopDiag_RecordTaskUs(50U);
@@ -63,7 +63,7 @@ static void test_peak_hold_max(void) {
 /* Conversion µs → 100 µs: integer-division truncation. */
 static void test_unit_conversion(void) {
     reset_state();
-    LoopDiag_RecordTaskUs(199U);       /* 1.99 ms → 1 unit (truncates) */
+    LoopDiag_RecordTaskUs(199U);       /* 199 µs → 1 unit (truncates) */
     ASSERT_EQ(LoopDiag_GetAndResetPeak100us(), 1U);
     LoopDiag_RecordTaskUs(200U);       /* exact 2 units */
     ASSERT_EQ(LoopDiag_GetAndResetPeak100us(), 2U);
