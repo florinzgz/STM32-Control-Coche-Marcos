@@ -71,6 +71,7 @@ bool     Temperature_HasTopologyChanged(void);   /* ROM set changed     */
 void     Temperature_ClearTopologyChanged(void); /* ack the latch       */
 bool     Temperature_IsStale(uint8_t idx);       /* frozen/dead sensor  */
 uint16_t Temperature_GetDiagnosticFlags(void);   /* packed bitmask      */
+bool     Temperature_IsValid(uint8_t idx);       /* Roadmap 1.5: CRC/range OK */
 
 /* ---- INA226 Current (I2C via TCA9548A) ---- */
 void Current_ReadAll(void);

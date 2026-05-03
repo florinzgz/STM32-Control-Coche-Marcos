@@ -1447,6 +1447,13 @@ void Safety_CheckTemperature(void)
         ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
 
+        /* Roadmap 1.5: skip sensors whose most recent read failed CRC
+         * or returned out-of-range data.  The per-sensor MODULE_FAULT
+         * is already raised by Temperature_ReadAll(); evaluating an
+         * invalid sample here would either mask other sensors with a
+         * bogus reading or trigger spurious overtemp via stale data.  */
+        if (!Temperature_IsValid(i)) continue;
+
         float t = Temperature_Get(i);
         /* NaN/Inf hardening: invalid reading → treat as critical overtemp
          * (safe side — prefer actuator shutdown over silent pass-through). */
@@ -1476,6 +1483,13 @@ void Safety_CheckTemperature(void)
         for (uint8_t i = 0; i < NUM_DS18B20; i++) {
             ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
             if (!ServiceMode_IsEnabled(mod)) continue;
+            /* Roadmap 1.5: invalid sample cannot confirm hysteresis
+             * recovery; treat as "not yet below" so the safety_error
+             * remains latched until a valid reading is available.    */
+            if (!Temperature_IsValid(i)) {
+                all_below_hysteresis = false;
+                break;
+            }
             float ht = Temperature_Get(i);
             /* NaN/Inf blocks hysteresis recovery (safe side) */
             if (isnan(ht) || isinf(ht) || ht > (TEMP_WARNING_C - 5.0f)) {
@@ -1640,6 +1654,11 @@ void Safety_CheckSensors(void)
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
+        /* Roadmap 1.5: skip sensors with an invalid most-recent read.
+         * The per-sensor MODULE_FAULT_ERROR is already set by
+         * Temperature_ReadAll(); counting it again here would compound
+         * fault_count and falsely escalate to DEGRADED L3.            */
+        if (!Temperature_IsValid(i)) continue;
         float t = Temperature_Get(i);
         /* NaN/Inf hardening: invalid sensor reading → plausibility fault */
         if (isnan(t) || isinf(t) || t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
@@ -1697,6 +1716,72 @@ void Safety_CheckSensors(void)
             if (any_moving) {
                 ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
                 fault_count++;
+            }
+        }
+    }
+
+    /* ------------------------------------------------------------------
+     * Roadmap 1.4 (warning subset) — Wheel-speed median outlier.
+     *
+     * When all four wheels are reporting genuine motion (> 5 km/h each),
+     * a single wheel that deviates by more than 50 % from the median of
+     * the OTHER three is flagged with MODULE_FAULT_WARNING.  This is a
+     * pure-diagnostic signal: it does NOT increment fault_count and
+     * therefore CANNOT escalate the system to DEGRADED.  Reasoning:
+     *
+     *   - The vehicle has independent reasons (TCS, ABS) for its
+     *     control-loop response; this check is post-hoc and used to
+     *     surface a flaky sensor to the operator before it fails hard.
+     *   - The 5 km/h floor avoids the noisy quantisation regime where
+     *     pulse-period extrapolation dominates and small absolute
+     *     deltas inflate the relative deviation.
+     *   - "All four > 5 km/h" prevents misfires on a stopped/dragging
+     *     wheel — that case is already handled by the stale-detection
+     *     path above.
+     *
+     * Auto-clear is intentionally left to ServiceMode (factory restore /
+     * service screen).  The latch makes the warning visible across the
+     * 1 Hz SERVICE_FAULTS frame even if the deviation is transient.
+     * ------------------------------------------------------------------ */
+    {
+        const float MIN_MOTION_KMH = 5.0f;
+        bool all_moving = true;
+        for (uint8_t i = 0; i < 4; i++) {
+            if (isnan(spd[i]) || isinf(spd[i]) || spd[i] < MIN_MOTION_KMH) {
+                all_moving = false;
+                break;
+            }
+        }
+        if (all_moving) {
+            for (uint8_t i = 0; i < 4; i++) {
+                ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+                if (!ServiceMode_IsEnabled(mod)) continue;
+                /* Median of the OTHER three wheels = the middle value
+                 * of a 3-element set, i.e. (max+min) subtracted from
+                 * the sum.                                              */
+                float a = 0.0f, b = 0.0f, c = 0.0f;
+                uint8_t k = 0;
+                for (uint8_t j = 0; j < 4; j++) {
+                    if (j == i) continue;
+                    if (k == 0)      a = spd[j];
+                    else if (k == 1) b = spd[j];
+                    else             c = spd[j];
+                    k++;
+                }
+                float min3 = (a < b) ? ((a < c) ? a : c) : ((b < c) ? b : c);
+                float max3 = (a > b) ? ((a > c) ? a : c) : ((b > c) ? b : c);
+                float med3 = (a + b + c) - (min3 + max3);
+                if (med3 < MIN_MOTION_KMH) continue;  /* defensive */
+                float dev    = spd[i] - med3;
+                float absdev = (dev < 0.0f) ? -dev : dev;
+                if ((absdev / med3) > 0.5f) {
+                    /* Do NOT clobber a more severe ERROR potentially set
+                     * by the loop above.  WARNING is strictly less.     */
+                    if (ServiceMode_GetFault(mod) != MODULE_FAULT_ERROR) {
+                        ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                    }
+                    /* fault_count NOT incremented — diagnostic only.    */
+                }
             }
         }
     }
