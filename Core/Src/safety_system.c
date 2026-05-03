@@ -1667,6 +1667,78 @@ void Safety_CheckSensors(void)
         }
     }
 
+    /* ------------------------------------------------------------------
+     * Roadmap 1.4 (warning subset) — Temperature cross-validation.
+     *
+     * Compare each enabled, valid DS18B20 against the median of the
+     * other enabled, valid DS18B20s.  When the absolute deviation
+     * exceeds TEMP_CROSS_DEV_C (30 °C) the offending
+     * MODULE_TEMP_SENSOR_i is tagged MODULE_FAULT_WARNING.  Diagnostic
+     * only — does NOT increment fault_count and therefore CANNOT
+     * escalate the system to DEGRADED.  The absolute thresholds in
+     * Safety_CheckTemperature() (warning 80 °C, critical 90 °C) remain
+     * the authoritative overtemp detector.
+     *
+     * Requires at least 3 enabled, valid sensors so the "other" set
+     * after removing the candidate still has a meaningful median (≥2
+     * samples).  With fewer than 3 there is no reliable reference.
+     *
+     * Severity ordering preserved: a pre-existing MODULE_FAULT_ERROR
+     * is never downgraded to WARNING.
+     * ------------------------------------------------------------------ */
+    {
+        const float TEMP_CROSS_DEV_C = 30.0f;
+        float    samples[NUM_DS18B20];
+        uint8_t  sample_idx[NUM_DS18B20];
+        uint8_t  n = 0;
+        for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+            ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+            if (!ServiceMode_IsEnabled(mod)) continue;
+            if (!Temperature_IsValid(i)) continue;
+            float t = Temperature_Get(i);
+            if (isnan(t) || isinf(t) ||
+                t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) continue;
+            samples[n]    = t;
+            sample_idx[n] = i;
+            n++;
+        }
+        if (n >= 3) {
+            for (uint8_t k = 0; k < n; k++) {
+                /* Build the "other" set by copying every sample except k. */
+                float others[NUM_DS18B20 - 1];
+                uint8_t m = 0;
+                for (uint8_t j = 0; j < n; j++) {
+                    if (j != k) others[m++] = samples[j];
+                }
+                /* Insertion sort — m ≤ NUM_DS18B20-1 = 4, trivial cost. */
+                for (uint8_t a = 1; a < m; a++) {
+                    float key = others[a];
+                    int8_t b = (int8_t)a - 1;
+                    while (b >= 0 && others[b] > key) {
+                        others[b + 1] = others[b];
+                        b--;
+                    }
+                    others[b + 1] = key;
+                }
+                float median;
+                if ((m & 1U) == 1U) {
+                    median = others[m / 2U];
+                } else {
+                    median = 0.5f * (others[m / 2U - 1U] + others[m / 2U]);
+                }
+                float dev    = samples[k] - median;
+                float absdev = (dev < 0.0f) ? -dev : dev;
+                if (absdev > TEMP_CROSS_DEV_C) {
+                    ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + sample_idx[k]);
+                    if (ServiceMode_GetFault(mod) != MODULE_FAULT_ERROR) {
+                        ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                    }
+                    /* fault_count NOT incremented — diagnostic only. */
+                }
+            }
+        }
+    }
+
     /* Current plausibility: significantly negative or extremely high = fault.
      * A small negative reading (> −1 A) is expected due to INA226 offset
      * and inductive motor flyback during deceleration — not a fault.
