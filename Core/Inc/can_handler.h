@@ -132,7 +132,8 @@ void CAN_SendHeartbeat(void);
 void CAN_SendStatusSpeed(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
 void CAN_SendStatusCurrent(uint16_t fl, uint16_t fr, uint16_t rl, uint16_t rr);
 void CAN_SendStatusTemp(int8_t t1, int8_t t2, int8_t t3, int8_t t4, int8_t t5);
-void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code);
+void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code,
+                          uint8_t loop_peak_100us);
 void CAN_SendStatusSteering(int16_t angle, bool calibrated);
 void CAN_SendStatusTraction(void);
 void CAN_SendStatusTempMap(void);

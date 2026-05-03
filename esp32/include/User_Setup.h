@@ -101,8 +101,19 @@
 #define TFT_ROTATION 1
 
 // --- XPT2046 touch calibration ---
-// Default values.  Run TFT_eSPI/Touch_calibrate example to obtain
-// values specific to your panel, then replace these.
-#define TOUCH_CALIBRATION  { 256, 3643, 182, 3672, 1 }
+// Format: { x_offset, x_range, y_offset, y_range, flags } as produced by
+// TFT_eSPI::calibrateTouch().  parameters[1] and [3] are pre-computed
+// RANGES (raw_max - raw_min), NOT raw maximum values.  parameters[4] is
+// a 3-bit flags bitmask: bit0=rotate(swap X/Y), bit1=invert_x, bit2=invert_y
+// (so flags=0x07 means rotate + invert both axes — the common combination
+// for this 480x320 ST7796 panel mounted in landscape rotation 1).
+//
+// These values are the boot-time fallback used when no valid calibration
+// is found in NVS (first boot, after factory reset, or if NVS is corrupt).
+// They are an averaged approximation of multiple real captures from the
+// production panel — accurate enough for the user to reliably hit the
+// wizard buttons (EMPEZAR / GUARDAR) so a precise per-unit calibration
+// can be captured and persisted to NVS.  Once saved, NVS takes precedence.
+#define TOUCH_CALIBRATION  { 320, 3470, 230, 3280, 7 }
 
 #endif // USER_SETUP_H

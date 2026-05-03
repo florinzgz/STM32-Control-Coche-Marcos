@@ -95,6 +95,12 @@ static void decodeSafety(const CanFrame& f, vehicle::VehicleData& data) {
     // available in HeartbeatData::systemState (0x200) which is more authoritative.
     // Byte 4 (rx_errors counter): intentionally not stored — no ESP32 consumer
     // currently requires per-packet CAN error counts from this frame.
+    // Byte 5 (peak 100 Hz task duration ×100 µs): forward-compatible — only
+    // populated when DLC ≥ 6.  Pre-extension STM32 firmware (DLC 5) leaves
+    // peakLoop100us at zero, which the HMI renders as "n/a".
+    if (f.data_length_code >= 6) {
+        sd.peakLoop100us = f.data[5];
+    }
     sd.timestampMs = millis();
     data.setSafety(sd);
 }

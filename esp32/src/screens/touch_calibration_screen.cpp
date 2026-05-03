@@ -241,14 +241,14 @@ void TouchCalibrationScreen::drawConfirm() {
                    ui::SCREEN_W / 2, BODY_Y);
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "x_min=%u   x_max=%u",
+    snprintf(buf, sizeof(buf), "x_off=%u   x_rng=%u",
              calData_[0], calData_[1]);
     tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
     tft.drawString(buf, ui::SCREEN_W / 2, BODY_Y + 2 * LINE_GAP);
-    snprintf(buf, sizeof(buf), "y_min=%u   y_max=%u",
+    snprintf(buf, sizeof(buf), "y_off=%u   y_rng=%u",
              calData_[2], calData_[3]);
     tft.drawString(buf, ui::SCREEN_W / 2, BODY_Y + 3 * LINE_GAP);
-    snprintf(buf, sizeof(buf), "rotation=%u", calData_[4]);
+    snprintf(buf, sizeof(buf), "flags=0x%02X", calData_[4]);
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.drawString(buf, ui::SCREEN_W / 2, BODY_Y + 4 * LINE_GAP);
 
@@ -338,11 +338,10 @@ void TouchCalibrationScreen::runCollection() {
                   cal[0], cal[1], cal[2], cal[3], cal[4]);
 
     // Sanity check the captured data before letting the user save it.
-    // We reuse the validation logic in touch_calibration::save() but only
-    // run it once we reach SAVE — here we apply a minimal range check so
-    // a totally degenerate capture jumps directly to FAILED.
-    const uint16_t xRange = (cal[1] > cal[0]) ? (cal[1] - cal[0]) : 0;
-    const uint16_t yRange = (cal[3] > cal[2]) ? (cal[3] - cal[2]) : 0;
+    // calibrateTouch() stores the pre-computed axis ranges in cal[1] and cal[3]
+    // (not the raw max values), so the range check is a direct comparison.
+    const uint16_t xRange = cal[1];
+    const uint16_t yRange = cal[3];
     if (xRange < touch_calibration::MIN_RANGE ||
         yRange < touch_calibration::MIN_RANGE) {
         Serial.println("[TOUCH_CAL] Capture range too small — FAILED");

@@ -88,19 +88,23 @@ static bool isValid(const Record& rec) {
     copy.crc32  = 0;
     if (computeCrc32(copy) != rec.crc32) return false;
 
-    if (rec.xMin > RAW_MAX || rec.xMax > RAW_MAX ||
-        rec.yMin > RAW_MAX || rec.yMax > RAW_MAX) {
-        return false;
-    }
-    if (rec.xMax <= rec.xMin || rec.yMax <= rec.yMin) return false;
-    if ((rec.xMax - rec.xMin) < MIN_RANGE) return false;
-    if ((rec.yMax - rec.yMin) < MIN_RANGE) return false;
+    // xMin/yMin are raw XPT2046 ADC values (0-4095).
+    // xMax/yMax store the pre-computed axis RANGES (max_raw - min_raw) as
+    // returned by TFT_eSPI::calibrateTouch() in parameters[1] and [3].
+    // They are NOT the raw maximum values, so we only bound-check xMin/yMin.
+    if (rec.xMin > RAW_MAX || rec.yMin > RAW_MAX) return false;
 
-    // Rotation must match the compile-time display rotation.  The XPT2046
-    // mapping is rotation-dependent inside TFT_eSPI; loading a calibration
-    // captured for a different rotation would produce mirrored/swapped
-    // coordinates.
-    if (rec.rotation != TFT_ROTATION) return false;
+    // Range must be large enough to be a meaningful calibration.
+    if (rec.xMax < MIN_RANGE || rec.yMax < MIN_RANGE) return false;
+
+    // rec.rotation stores the TFT_eSPI calibration flags bitmask returned in
+    // parameters[4] by calibrateTouch():
+    //   bit 0 = rotate (swap X/Y axes)
+    //   bit 1 = invert_x
+    //   bit 2 = invert_y
+    // Valid range is 0-7 (3 bits).  This is NOT the display rotation mode
+    // (TFT_ROTATION) — do not compare against it.
+    if (rec.rotation > 7) return false;
 
     return true;
 }

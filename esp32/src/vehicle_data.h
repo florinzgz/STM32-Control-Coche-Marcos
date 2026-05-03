@@ -76,6 +76,7 @@ struct SafetyData {
     uint8_t absActive  = 0;
     uint8_t tcsActive  = 0;
     uint8_t errorCode  = 0;
+    uint8_t peakLoop100us = 0;   // 0x203 byte 5 — STM32 100 Hz task peak (×100 µs, sat. 255 = 25.5 ms)
     unsigned long timestampMs = 0;
 };
 

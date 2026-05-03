@@ -19,6 +19,7 @@
 
 #include "sensor_manager.h"
 #include "safety_system.h"
+#include "service_mode.h"  /* per-module fault tagging (1.5 / 2.3)    */
 #include "main.h"
 #include <string.h>    /* memcmp / memcpy — topology change detection */
 #include <math.h>      /* fabsf — stale detection epsilon              */
@@ -870,6 +871,62 @@ static uint32_t temp_last_change_tick[NUM_DS18B20] = {0};
 static float    temp_prev_value[NUM_DS18B20] = {0};
 static bool     temp_stale[NUM_DS18B20] = {false};
 
+/* ----------------------------------------------------------------------
+ * Roadmap 1.5 — DS18B20 fault tolerance.
+ *
+ * Per-sensor read-validity flag.  Set to true whenever the most recent
+ * scratchpad read failed CRC or returned a value outside the physical
+ * −55…+125 °C operating range (clamped to −40…+125 °C plausibility).
+ * When set:
+ *   - Temperature_ReadAll() does NOT overwrite temperatures[i] (last
+ *     known good value is preserved instead of stamping 0.0).
+ *   - The corresponding MODULE_TEMP_SENSOR_i is tagged
+ *     MODULE_FAULT_ERROR via service_mode so the operator can see
+ *     which physical sensor is misbehaving.
+ *   - Safety_Check{Temperature,Sensors} skip the sensor so a single
+ *     transient glitch does not cascade into spurious overtemp /
+ *     plausibility fault counts on top of the per-sensor flag.
+ * The pre-existing global Safety_SetError(SAFETY_ERROR_SENSOR_FAULT)
+ * is preserved so the safety envelope is never weakened.
+ * -------------------------------------------------------------------- */
+static bool     temp_read_invalid[NUM_DS18B20] = {false};
+
+/* ----------------------------------------------------------------------
+ * Roadmap 2.3 — Temperature rate-of-change diagnostic (warning-only).
+ *
+ * Tracks dT/dt per DS18B20 between successive valid samples.  When the
+ * absolute slope exceeds TEMP_RATE_WARN_C_PER_S the corresponding
+ * MODULE_TEMP_SENSOR_i is tagged MODULE_FAULT_WARNING.  This complements
+ * (does not replace) the absolute TEMP_WARNING_C / TEMP_CRITICAL_C
+ * thresholds in safety_system.c — it surfaces an early-warning signal
+ * for thermal events that have not yet reached an absolute threshold.
+ *
+ * Scope guarantees (purely informational):
+ *   - No state-machine transition.
+ *   - No fault_count contribution (does not trigger DEGRADED).
+ *   - Skipped on the first sample after boot / re-discovery / a span
+ *     of invalid reads (avoids inflated dT from initial zero baseline).
+ * -------------------------------------------------------------------- */
+#define TEMP_RATE_WARN_C_PER_S   5.0f
+/* Rationale for 5 °C/s threshold: DS18B20 ambient self-heating and
+ * 50 ms sample cadence can produce spikes up to ~1–2 °C/s under normal
+ * thermal transients.  5 °C/s is well above that floor yet captures
+ * any genuine thermal runaway (motor windings reaching T_warn in
+ * < 20 s) before the absolute thresholds in safety_system.c trip.    */
+#define TEMP_RATE_MIN_DT_MS      100U  /* drop very short windows (noise) */
+/* How long the rate-of-change WARNING latches after the most recent
+ * trip.  Necessary because Safety_CheckTemperature() unconditionally
+ * calls ServiceMode_ClearFault() on every in-range sample (which runs
+ * at 100 Hz, faster than the 20 Hz Temperature_ReadAll cycle), so a
+ * single transient spike would otherwise be wiped before the 1 Hz
+ * SERVICE_FAULTS (0x301) frame can publish it.  Re-asserted every
+ * Temperature_ReadAll() while latched.                                 */
+#define TEMP_RATE_WARN_LATCH_MS  2000U
+static float    temp_rate_prev_value[NUM_DS18B20] = {0};
+static uint32_t temp_rate_prev_tick[NUM_DS18B20]  = {0};
+static bool     temp_rate_init[NUM_DS18B20]       = {false};
+static uint32_t temp_rate_latch_until[NUM_DS18B20] = {0};
+
 /* Previous ROM snapshot — used to detect topology *changes* (reconnect,
  * re-order, swap) independently of the count-based `topology_invalid`.
  * Initialised to all-zero so the first discovered ROM set is always
@@ -1163,7 +1220,13 @@ static float OW_ReadTemperature(uint8_t idx)
 {
     if (idx >= ds18b20_count) return 0.0f;
 
-    if (!OW_Reset()) return 0.0f;
+    /* Roadmap 1.5: assume valid until a check fails. */
+    temp_read_invalid[idx] = false;
+
+    if (!OW_Reset()) {
+        temp_read_invalid[idx] = true;
+        return 0.0f;
+    }
 
     OW_WriteByte(0x55);                      /* Match ROM */
     for (uint8_t i = 0; i < 8; i++) {
@@ -1178,6 +1241,7 @@ static float OW_ReadTemperature(uint8_t idx)
 
     /* CRC check on scratchpad */
     if (OW_CRC8(scratch, 8) != scratch[8]) {
+        temp_read_invalid[idx] = true;       /* Roadmap 1.5: per-sensor tag */
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         return 0.0f;
     }
@@ -1188,6 +1252,7 @@ static float OW_ReadTemperature(uint8_t idx)
     /* DS18B20 operating range: −55 °C to +125 °C.
      * Values outside this range indicate corrupted data.            */
     if (temp < -55.0f || temp > 125.0f) {
+        temp_read_invalid[idx] = true;       /* Roadmap 1.5: per-sensor tag */
         Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         return 0.0f;
     }
@@ -1228,9 +1293,77 @@ void Temperature_ReadAll(void)
         return;
     }
 
-    /* Read each discovered sensor individually via Match ROM */
+    /* Read each discovered sensor individually via Match ROM.
+     *
+     * Roadmap 1.5: when OW_ReadTemperature() flags the sample invalid
+     * (CRC failure or out-of-range), preserve the previous good value
+     * in temperatures[i] instead of overwriting it with 0.0 and tag
+     * the offending sensor via service_mode so downstream consumers
+     * (and the operator) can identify which physical channel is bad.
+     *
+     * Roadmap 2.3: only valid samples feed the rate-of-change tracker;
+     * gaps caused by a few invalid reads are bridged by re-arming the
+     * tracker on the next valid sample.                              */
     for (uint8_t i = 0; i < ds18b20_count; i++) {
-        temperatures[i] = OW_ReadTemperature(i);
+        float t = OW_ReadTemperature(i);
+        ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+
+        if (temp_read_invalid[i]) {
+            /* Keep last known good value in temperatures[i].          */
+            ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
+            /* Re-arm rate tracker so the gap is not counted as a
+             * spurious large dT once the sensor recovers.              */
+            temp_rate_init[i] = false;
+            continue;
+        }
+
+        temperatures[i] = t;
+
+        /* Roadmap 2.3: rate-of-change diagnostic.
+         * Only raises a WARNING fault — never elevated to ERROR by
+         * this path; the absolute thresholds in safety_system.c remain
+         * the authoritative overtemp detector.                        */
+        uint32_t now_rate = HAL_GetTick();
+        if (!temp_rate_init[i]) {
+            temp_rate_prev_value[i] = t;
+            temp_rate_prev_tick[i]  = now_rate;
+            temp_rate_init[i]       = true;
+        } else {
+            uint32_t dt_ms = now_rate - temp_rate_prev_tick[i];
+            if (dt_ms >= TEMP_RATE_MIN_DT_MS) {
+                float dT = t - temp_rate_prev_value[i];
+                /* |dT| / dt   in °C/s  =  |dT| * 1000 / dt_ms          */
+                float abs_dT = (dT < 0.0f) ? -dT : dT;
+                float rate_c_s = abs_dT * 1000.0f / (float)dt_ms;
+                if (rate_c_s > TEMP_RATE_WARN_C_PER_S) {
+                    temp_rate_latch_until[i] = now_rate + TEMP_RATE_WARN_LATCH_MS;
+                }
+                temp_rate_prev_value[i] = t;
+                temp_rate_prev_tick[i]  = now_rate;
+            }
+        }
+        /* Re-assert WARNING while the rate-trip latch is active so the
+         * 1 Hz SERVICE_FAULTS frame can publish it even though
+         * Safety_CheckTemperature() clears the fault every cycle.
+         * Never overrides a higher-severity ERROR/DISABLED state.      */
+        if (temp_rate_latch_until[i] != 0U &&
+            (int32_t)(temp_rate_latch_until[i] - now_rate) > 0) {
+            ModuleFault_t cur = ServiceMode_GetFault(mod);
+            if (cur == MODULE_FAULT_NONE) {
+                ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+            }
+        } else {
+            temp_rate_latch_until[i] = 0U;
+        }
+    }
+
+    /* Clear the per-sensor invalid flag and stale tracker for any
+     * physical slot beyond the discovered count so a later re-discovery
+     * starts from a clean baseline.                                   */
+    for (uint8_t i = ds18b20_count; i < NUM_DS18B20; i++) {
+        temp_read_invalid[i]     = false;
+        temp_rate_init[i]        = false;
+        temp_rate_latch_until[i] = 0U;
     }
 
     /* -----------------------------------------------------------------
@@ -1287,6 +1420,24 @@ float Temperature_Get(uint8_t index)
 uint8_t Temperature_GetCount(void)
 {
     return ds18b20_count;
+}
+
+/**
+ * @brief  Roadmap 1.5: per-DS18B20 read validity.
+ *         Returns true when the most recent OW_ReadTemperature() for
+ *         the given index passed CRC and was within the −55…+125 °C
+ *         operating range.  Returns false otherwise — callers should
+ *         exclude invalid sensors from cross-validation, plausibility,
+ *         and aggregate calculations.
+ *
+ *         Sensors beyond the discovered count are reported as invalid
+ *         (no physical reading is available).
+ */
+bool Temperature_IsValid(uint8_t index)
+{
+    if (index >= NUM_DS18B20) return false;
+    if (index >= ds18b20_count) return false;
+    return !temp_read_invalid[index];
 }
 
 /* -----------------------------------------------------------------------

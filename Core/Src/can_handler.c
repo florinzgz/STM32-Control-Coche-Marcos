@@ -507,21 +507,26 @@ void CAN_SendStatusTemp(int8_t t1, int8_t t2, int8_t t3, int8_t t4, int8_t t5) {
     TransmitFrame(CAN_ID_STATUS_TEMP, temp_data, 5);
 }
 
-void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code) {
-    uint8_t safety_data[5];
-    
+void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code,
+                          uint8_t loop_peak_100us) {
+    uint8_t safety_data[6];
+
     safety_data[0] = abs ? 1 : 0;
     safety_data[1] = tcs ? 1 : 0;
     safety_data[2] = error_code;
     /* Byte 3: system state (SYS_STATE_*) for HMI display.
      * Byte 4: saturated CAN RX error count for diagnostics.
+     * Byte 5: peak 100 Hz task duration in 100 µs units, saturated
+     *         at 255 (= 25.5 ms).  Pure observational; resets each
+     *         TX cycle.  Roadmap additive item #1.
      * Backward compatible: ESP32 parsers that only read bytes 0–2
-     * will ignore the additional payload (DLC ≥ 3 check passes).  */
+     * will ignore the additional payload (DLC ≥ 5 check passes).  */
     safety_data[3] = (uint8_t)Safety_GetState();
     safety_data[4] = (can_stats.rx_errors > 255) ? 255
                      : (uint8_t)can_stats.rx_errors;
-    
-    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 5);
+    safety_data[5] = loop_peak_100us;
+
+    TransmitFrame(CAN_ID_STATUS_SAFETY, safety_data, 6);
 }
 
 void CAN_SendStatusSteering(int16_t angle, bool calibrated) {

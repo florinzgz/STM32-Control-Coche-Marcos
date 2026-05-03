@@ -210,6 +210,15 @@ static inline void sat_inc_u32(uint32_t *counter) {
                                              * suppressed to avoid FP.      */
 #define SENSOR_TEMP_MIN_C    (-40.0f)
 #define SENSOR_TEMP_MAX_C    125.0f   /* DS18B20 absolute range */
+/* Roadmap 1.4 — temperature cross-validation: per-sensor deviation
+ * (°C) from the median of the OTHER enabled, valid DS18B20s above
+ * which the sensor is tagged MODULE_FAULT_WARNING.  Diagnostic only.   */
+#define TEMP_CROSS_DEV_C      30.0f
+/* Roadmap 1.4 — wheel-speed median outlier: minimum per-wheel speed
+ * required for the median check to run.  Below this, pulse-period
+ * extrapolation dominates and small absolute deltas inflate the
+ * relative deviation.                                                  */
+#define WHEEL_MEDIAN_MIN_KMH   5.0f
 #define SENSOR_CURRENT_MAX_A       50.0f    /* motor channel plausibility ceiling  */
 #define SENSOR_CURRENT_MAX_BATT_A 100.0f   /* battery channel: 100A sensor range  */
 #define SENSOR_SPEED_MAX_KMH 25.0f    /* RS775 20000RPM / 1:75 gear → ~266 wheel RPM
@@ -1447,6 +1456,13 @@ void Safety_CheckTemperature(void)
         ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
 
+        /* Roadmap 1.5: skip sensors whose most recent read failed CRC
+         * or returned out-of-range data.  The per-sensor MODULE_FAULT
+         * is already raised by Temperature_ReadAll(); evaluating an
+         * invalid sample here would either mask other sensors with a
+         * bogus reading or trigger spurious overtemp via stale data.  */
+        if (!Temperature_IsValid(i)) continue;
+
         float t = Temperature_Get(i);
         /* NaN/Inf hardening: invalid reading → treat as critical overtemp
          * (safe side — prefer actuator shutdown over silent pass-through). */
@@ -1476,6 +1492,13 @@ void Safety_CheckTemperature(void)
         for (uint8_t i = 0; i < NUM_DS18B20; i++) {
             ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
             if (!ServiceMode_IsEnabled(mod)) continue;
+            /* Roadmap 1.5: invalid sample cannot confirm hysteresis
+             * recovery; treat as "not yet below" so the safety_error
+             * remains latched until a valid reading is available.    */
+            if (!Temperature_IsValid(i)) {
+                all_below_hysteresis = false;
+                break;
+            }
             float ht = Temperature_Get(i);
             /* NaN/Inf blocks hysteresis recovery (safe side) */
             if (isnan(ht) || isinf(ht) || ht > (TEMP_WARNING_C - 5.0f)) {
@@ -1640,11 +1663,87 @@ void Safety_CheckSensors(void)
     for (uint8_t i = 0; i < NUM_DS18B20; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
+        /* Roadmap 1.5: skip sensors with an invalid most-recent read.
+         * The per-sensor MODULE_FAULT_ERROR is already set by
+         * Temperature_ReadAll(); counting it again here would compound
+         * fault_count and falsely escalate to DEGRADED L3.            */
+        if (!Temperature_IsValid(i)) continue;
         float t = Temperature_Get(i);
         /* NaN/Inf hardening: invalid sensor reading → plausibility fault */
         if (isnan(t) || isinf(t) || t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
+        }
+    }
+
+    /* ------------------------------------------------------------------
+     * Roadmap 1.4 (warning subset) — Temperature cross-validation.
+     *
+     * Compare each enabled, valid DS18B20 against the median of the
+     * other enabled, valid DS18B20s.  When the absolute deviation
+     * exceeds TEMP_CROSS_DEV_C (30 °C) the offending
+     * MODULE_TEMP_SENSOR_i is tagged MODULE_FAULT_WARNING.  Diagnostic
+     * only — does NOT increment fault_count and therefore CANNOT
+     * escalate the system to DEGRADED.  The absolute thresholds in
+     * Safety_CheckTemperature() (warning 80 °C, critical 90 °C) remain
+     * the authoritative overtemp detector.
+     *
+     * Requires at least 3 enabled, valid sensors so the "other" set
+     * after removing the candidate still has a meaningful median (≥2
+     * samples).  With fewer than 3 there is no reliable reference.
+     *
+     * Severity ordering preserved: a pre-existing MODULE_FAULT_ERROR
+     * is never downgraded to WARNING.
+     * ------------------------------------------------------------------ */
+    {
+        float    samples[NUM_DS18B20];
+        uint8_t  sample_idx[NUM_DS18B20];
+        uint8_t  n = 0;
+        for (uint8_t i = 0; i < NUM_DS18B20; i++) {
+            ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + i);
+            if (!ServiceMode_IsEnabled(mod)) continue;
+            if (!Temperature_IsValid(i)) continue;
+            float t = Temperature_Get(i);
+            if (isnan(t) || isinf(t) ||
+                t < SENSOR_TEMP_MIN_C || t > SENSOR_TEMP_MAX_C) continue;
+            samples[n]    = t;
+            sample_idx[n] = i;
+            n++;
+        }
+        if (n >= 3) {
+            for (uint8_t k = 0; k < n; k++) {
+                /* Build the "other" set by copying every sample except k. */
+                float others[NUM_DS18B20 - 1];
+                uint8_t m = 0;
+                for (uint8_t j = 0; j < n; j++) {
+                    if (j != k) others[m++] = samples[j];
+                }
+                /* Insertion sort — m ≤ NUM_DS18B20-1 = 4, trivial cost. */
+                for (uint8_t a = 1; a < m; a++) {
+                    float key = others[a];
+                    int8_t b = (int8_t)a - 1;
+                    while (b >= 0 && others[b] > key) {
+                        others[b + 1] = others[b];
+                        b--;
+                    }
+                    others[b + 1] = key;
+                }
+                float median;
+                if ((m & 1U) == 1U) {
+                    median = others[m / 2U];
+                } else {
+                    median = 0.5f * (others[m / 2U - 1U] + others[m / 2U]);
+                }
+                float dev    = samples[k] - median;
+                float absdev = (dev < 0.0f) ? -dev : dev;
+                if (absdev > TEMP_CROSS_DEV_C) {
+                    ModuleID_t mod = (ModuleID_t)(MODULE_TEMP_SENSOR_0 + sample_idx[k]);
+                    if (ServiceMode_GetFault(mod) != MODULE_FAULT_ERROR) {
+                        ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                    }
+                    /* fault_count NOT incremented — diagnostic only. */
+                }
+            }
         }
     }
 
@@ -1697,6 +1796,71 @@ void Safety_CheckSensors(void)
             if (any_moving) {
                 ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
                 fault_count++;
+            }
+        }
+    }
+
+    /* ------------------------------------------------------------------
+     * Roadmap 1.4 (warning subset) — Wheel-speed median outlier.
+     *
+     * When all four wheels are reporting genuine motion (> 5 km/h each),
+     * a single wheel that deviates by more than 50 % from the median of
+     * the OTHER three is flagged with MODULE_FAULT_WARNING.  This is a
+     * pure-diagnostic signal: it does NOT increment fault_count and
+     * therefore CANNOT escalate the system to DEGRADED.  Reasoning:
+     *
+     *   - The vehicle has independent reasons (TCS, ABS) for its
+     *     control-loop response; this check is post-hoc and used to
+     *     surface a flaky sensor to the operator before it fails hard.
+     *   - The 5 km/h floor avoids the noisy quantisation regime where
+     *     pulse-period extrapolation dominates and small absolute
+     *     deltas inflate the relative deviation.
+     *   - "All four > 5 km/h" prevents misfires on a stopped/dragging
+     *     wheel — that case is already handled by the stale-detection
+     *     path above.
+     *
+     * Auto-clear is intentionally left to ServiceMode (factory restore /
+     * service screen).  The latch makes the warning visible across the
+     * 1 Hz SERVICE_FAULTS frame even if the deviation is transient.
+     * ------------------------------------------------------------------ */
+    {
+        bool all_moving = true;
+        for (uint8_t i = 0; i < 4; i++) {
+            if (isnan(spd[i]) || isinf(spd[i]) || spd[i] < WHEEL_MEDIAN_MIN_KMH) {
+                all_moving = false;
+                break;
+            }
+        }
+        if (all_moving) {
+            for (uint8_t i = 0; i < 4; i++) {
+                ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+                if (!ServiceMode_IsEnabled(mod)) continue;
+                /* Median of the OTHER three wheels = the middle value
+                 * of a 3-element set, i.e. (max+min) subtracted from
+                 * the sum.                                              */
+                float a = 0.0f, b = 0.0f, c = 0.0f;
+                uint8_t k = 0;
+                for (uint8_t j = 0; j < 4; j++) {
+                    if (j == i) continue;
+                    if (k == 0)      a = spd[j];
+                    else if (k == 1) b = spd[j];
+                    else             c = spd[j];
+                    k++;
+                }
+                float min3 = (a < b) ? ((a < c) ? a : c) : ((b < c) ? b : c);
+                float max3 = (a > b) ? ((a > c) ? a : c) : ((b > c) ? b : c);
+                float med3 = (a + b + c) - (min3 + max3);
+                if (med3 < WHEEL_MEDIAN_MIN_KMH) continue;  /* defensive */
+                float dev    = spd[i] - med3;
+                float absdev = (dev < 0.0f) ? -dev : dev;
+                if ((absdev / med3) > 0.5f) {
+                    /* Do NOT clobber a more severe ERROR potentially set
+                     * by the loop above.  WARNING is strictly less.     */
+                    if (ServiceMode_GetFault(mod) != MODULE_FAULT_ERROR) {
+                        ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                    }
+                    /* fault_count NOT incremented — diagnostic only.    */
+                }
             }
         }
     }

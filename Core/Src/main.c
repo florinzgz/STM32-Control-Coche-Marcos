@@ -27,6 +27,7 @@
 #include "steering_cal_store.h"
 #include "sensor_map_store.h"
 #include "error_log.h"
+#include "loop_diag.h"
 #include <math.h>
 #include "build_sanity_checks.h"
 
@@ -332,6 +333,12 @@ int main(void)
         if ((now - tick_10ms) >= 10) {
             tick_10ms = now;
 
+            /* Loop-time diagnostic — capture DWT cycle count at task
+             * entry so we can publish the peak 100 Hz task duration in
+             * STATUS_SAFETY byte 5.  Pure observational; SystemCoreClock
+             * tick rate (170 MHz on STM32G474) gives µs = cycles/170.   */
+            uint32_t loop_diag_cyc_start = DWT->CYCCNT;
+
             /* Batch-update wheel speeds FIRST — all safety/traction
              * consumers in this cycle see identical, consistent values.
              * Must precede ABS/TCS/Safety which read Wheel_GetSpeed_*().*/
@@ -388,6 +395,17 @@ int main(void)
 
             Steering_ControlLoop();
             Traction_Update();
+
+            /* Loop-time diagnostic — record duration of this 100 Hz
+             * task block.  DWT cycle counter is monotonic 32-bit; the
+             * unsigned subtraction wraps correctly across rollover.
+             * Conversion: µs = cycles / cycles_per_us (170 at 170 MHz). */
+            {
+                uint32_t cyc_per_us = SystemCoreClock / 1000000U;
+                if (cyc_per_us == 0U) cyc_per_us = 170U;  /* Safe default */
+                uint32_t elapsed_cyc = DWT->CYCCNT - loop_diag_cyc_start;
+                LoopDiag_RecordTaskUs(elapsed_cyc / cyc_per_us);
+            }
         }
 
         /* ---- 50 ms tasks (20 Hz): sensors + pedal ---- */
@@ -524,7 +542,8 @@ int main(void)
                 float_to_u16_clamped(Current_GetAmps(3) * 100));
             CAN_SendStatusSafety(
                 ABS_IsActive(), TCS_IsActive(),
-                (uint8_t)Safety_GetError());
+                (uint8_t)Safety_GetError(),
+                LoopDiag_GetAndResetPeak100us());
             CAN_SendStatusSteering(
                 (int16_t)(Steering_GetCurrentAngle() * 10),
                 Steering_IsCalibrated());
