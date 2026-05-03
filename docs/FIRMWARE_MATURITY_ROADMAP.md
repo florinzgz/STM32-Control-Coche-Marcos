@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.2 |
-| **Date** | 2026-02-13 |
+| **Document Version** | 1.3 |
+| **Date** | 2026-05-03 |
 | **Current Repository** | STM32-Control-Coche-Marcos (STM32G474RE + ESP32-S3 HMI) |
 | **Reference Repository** | FULL-FIRMWARE-Coche-Marcos (ESP32-S3 monolithic, v2.17.1 PHASE 14) |
 | **Scope** | Analysis & Documentation only — no code changes |
@@ -75,7 +75,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Battery Protection** | FULL | Battery bus current/voltage monitored via INA226 (channel 4, 0.75 mΩ shunt). CAN message 0x207 reports values. Undervoltage protection: warning at 20.0 V (DEGRADED, 40% power limit), critical at 18.0 V (SAFE, actuators inhibited). 0.5 V hysteresis. No auto-recovery from SAFE. Sensor failure treated as critical. No SOC estimation, no charge protection logic. |
 | **Encoder Handling** | FULL | E6B2-CWZ6C quadrature encoder via TIM2 (4800 CPR). Range check (±987 counts = ±74°), jump detection (>100 counts/cycle), frozen detection (>200 ms with motor active >10%). |
 | **Wheel Speed Processing** | FULL | 4× LJ12A3 inductive sensors via EXTI interrupts, 1 ms debounce, speed = (pulses/CPR) × circumference × 3.6. 6 pulses/rev, 1.1 m circumference. |
-| **CAN Protocol** | FULL | Contract revision 1.3 *(Updated 2026-02-13)*. 500 kbps, 11-bit IDs. Hardware RX white-list filters (4 filter banks). 13 TX message types (0x001, 0x103, 0x200–0x207, 0x301–0x303). 6 RX message types (0x011, 0x100–0x102, 0x110, 0x208–0x209). TX/RX statistics tracking. Obstacle CAN messages added in rev 1.1. Command ACK (0x103) added in rev 1.3 *(Phase 13)*. |
+| **CAN Protocol** | FULL | Contract revision 1.4 *(Updated 2026-05-03)*. 500 kbps, 11-bit IDs. Hardware RX white-list filters (4 filter banks). 13 TX message types (0x001, 0x103, 0x200–0x207, 0x301–0x303). 6 RX message types (0x011, 0x100–0x102, 0x110, 0x208–0x209). TX/RX statistics tracking. Obstacle CAN messages added in rev 1.1. Command ACK (0x103) added in rev 1.3 *(Phase 13)*. `STATUS_SAFETY` (0x203) extended to DLC 6 with loop-time telemetry byte added in rev 1.4 *(Phase 14)*. |
 | **HMI Integration Model** | FULL | ESP32-S3 connected via CAN. Screen states (Boot/Standby/Drive/Safe/Error) driven by STM32 system state. Stub screen implementations ready for TFT graphics library. CAN contract frozen. |
 | **Service Mode** | FULL | 25 modules classified as CRITICAL (4) or NON-CRITICAL (21). Per-module fault tracking (NONE/WARNING/ERROR/DISABLED). CAN commands (0x110) for enable/disable/factory-restore. Status broadcast (0x301–0x303). |
 | **Degraded / Limp Mode** | PARTIAL | DEGRADED state exists with 40% power limit and 40% steering assist reduction. Basic concept implemented. Missing: granular speed limiting per degradation level, drive-home prioritization logic, diagnostic struct as in reference LimpMode. |
@@ -994,9 +994,107 @@ signals (heartbeat state, status messages) — which could lag or be ambiguous.
 - ESP32 HMI screen rendering
 - ESP32 TX commands (0x100, 0x101, 0x102)
 - Config persistence / EEPROM
-- Audio/LED systems
+- ~~Loop-time telemetry via CAN~~ ✅ Implemented *(2026-05-03 — Phase 14)*
+- Audio/LED systems (brake-light progressive, degraded-mode indicator, welcome/goodbye sequence, relay-status visual)
+- Pedal-vs-speed plausibility WARNING
+- Steering motor stall detector + tau×0.3 derate
+- Black-box circular log (NVS, 30 s)
+- Valet mode (configurable PWM/speed limit by PIN)
 
 ---
+
+### Phase 14 — Diagnostic Telemetry & Observational Sensor Improvements
+
+Phase 14 adds pure-additive, observational improvements. **No state-machine, relay, or PWM behavior is changed.** All new features can be disabled without risk to vehicle safety.
+
+#### 14.1 — DS18B20 Fault Tolerance & Temperature Cross-Validation
+
+Extended `sensor_manager` with per-sensor fault isolation and rate-of-change monitoring:
+
+- Per-sensor `invalid` flag; last-good-value preserved so other consumers are unaffected when one sensor fails.
+- Per-sensor `|dT/dt|` rate monitor: fires `MODULE_FAULT_WARNING` (subsystem `SUBSYS_TEMPERATURE`) after 1 s of rate > 5 °C/s, latching for 2 s.
+- Temperature cross-validation among ≥ 3 valid sensors: `MODULE_FAULT_WARNING` when any sensor deviates > 30 °C from the median of the rest.
+- All thresholds are file-scope `#define` constants (`TEMP_CROSS_DEV_C`, `TEMP_RATE_WARN_CELSIUS_PER_SEC`, etc.) for easy calibration.
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `Core/Src/sensor_manager.c` | Per-sensor invalid flag, `|dT/dt|` rate warning, median cross-validation |
+
+#### 14.2 — Wheel Speed Median-Outlier Warning
+
+Detects a sensor stuck at zero or wildly off-range while the other three sensors agree:
+
+- Fires `MODULE_FAULT_WARNING` when one wheel's speed deviates > 50 % from the median of the four wheels, only when all four report > 5 km/h (to suppress false alarms at low speed).
+- Warning-only — does not trigger SAFE state or modify traction output.
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `Core/Src/sensor_manager.c` | `Safety_CheckWheelSpeedPlausibility()` cross-validation |
+
+#### 14.3 — Loop-Time Telemetry via CAN
+
+Publishes the worst-case 100 Hz task duration to the ESP32 HMI every 100 ms:
+
+- New `loop_diag` module (`Core/Inc/loop_diag.h`, `Core/Src/loop_diag.c`): 32-bit windowed peak in µs; `LoopDiag_GetAndResetPeak100us()` returns 100 µs units, saturated at 255 (= 25.5 ms).
+- `DWT->CYCCNT` capture wraps the 100 Hz task block in `main.c`. Conversion: `SystemCoreClock / 1 000 000` (170 cycles/µs on STM32G474); fallback `170` if uninitialised.
+- `STATUS_SAFETY` (0x203) DLC extended **5 → 6**. Byte 5 = peak loop time (×100 µs). Forward-compatible: `decodeSafety` in ESP32 keeps its `DLC < 5` guard; byte 5 only read when `DLC ≥ 6`. Pre-extension STM32 firmware reports 0 ("n/a").
+- `CAN_SendStatusSafety()` gains `uint8_t loop_peak_100us` parameter; sole caller in `main.c` updated.
+- ESP32 `SafetyData::peakLoop100us` field added.
+- CAN contract updated to revision 1.4.
+- 18-assertion host-test `test_loop_diag.c`.
+
+**Files modified / created:**
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `Core/Inc/loop_diag.h` | +55 | New module header |
+| `Core/Src/loop_diag.c` | +43 | Peak-hold implementation |
+| `Core/Src/test_loop_diag.c` | +130 | 18-assertion host tests |
+| `Core/Src/main.c` | +15 | DWT capture + `LoopDiag_RecordTaskUs()` call |
+| `Core/Inc/can_handler.h` | +1 | `loop_peak_100us` parameter |
+| `Core/Src/can_handler.c` | +6 | Extend DLC 5→6, pack byte 5 |
+| `esp32/include/can_ids.h` | +1 | DLC comment update |
+| `esp32/src/vehicle_data.h` | +1 | `SafetyData::peakLoop100us` field |
+| `esp32/src/can_rx.cpp` | +5 | `peakLoop100us` decode |
+
+**Regression analysis:**
+
+| Subsystem | Impact |
+|-----------|--------|
+| 100 Hz task timing | Negligible — two register reads and one branch per cycle |
+| STATUS_SAFETY (0x203) | DLC 5→6; backward-compatible; existing `DLC < 5` guard passes |
+| All other CAN frames | Unchanged |
+| Safety state machine | Unchanged — purely observational |
+| Motor PWM | Unchanged |
+| Relay sequencing | Unchanged |
+
+**Audit of remaining additive/observational backlog:**
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Loop-time telemetry on CAN | ✅ Done (§14.3) |
+| 2 | Pedal-vs-speed plausibility WARNING | Deferred — separate PR |
+| 3 | Steering stall WARNING + tau×0.3 derate | Deferred — separate PR |
+| 4 | Black-box circular NVS 30 s | Deferred — separate PR |
+| 5 | LED brake-light progressive | Partially done (`BRAKE`/`BRAKE_EMERGENCY` modes) |
+| 6 | LED degraded-mode indicator | Deferred — separate PR |
+| 7 | LED welcome/goodbye sequence | Deferred — separate PR |
+| 8 | LED relay-status visual | TODO documented (`led_controller.h:26-34`) |
+| 9 | Audit 17 SafetyError + bus-off + heartbeat | ✅ Verified; no code change needed |
+| 10 | Valet mode (PWM/speed cap by PIN) | Deferred — separate PR |
+
+**Updated implementation percentage:**
+
+| Component | Before | After | Change |
+|-----------|--------|-------|--------|
+| CAN protocol layer | 99% | 99% | Rev 1.4 — loop-time byte |
+| CAN contract | 1.3 | 1.4 | New byte 5 in STATUS_SAFETY |
+| Sensor diagnostics | 97% | 99% | DS18B20 fault tolerance, cross-validation, wheel outlier |
+| **Overall STM32 firmware** | **~99%** | **~99%** | Phase 14 observational additions |
 
 *Document generated: 2026-02-12*
 *Updated: 2026-02-13 — Obstacle safety integration implemented, integration audit completed*
@@ -1009,3 +1107,4 @@ signals (heartbeat state, status messages) — which could lag or be ambiguous.
 *Updated: 2026-02-13 — Phase 10: Non-blocking relay sequencing refactor documentation*
 *Updated: 2026-02-13 — Phase 12: Granular limp mode (multi-level degradation)*
 *Updated: 2026-02-13 — Phase 13: CAN command acknowledgment layer (CMD_ACK 0x103, CAN contract rev 1.3)*
+*Updated: 2026-05-03 — Phase 14: Diagnostic telemetry (DS18B20 fault tolerance, wheel-speed outlier, loop-time telemetry DLC 5→6, CAN contract rev 1.4)*
