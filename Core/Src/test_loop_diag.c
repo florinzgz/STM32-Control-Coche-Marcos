@@ -5,7 +5,14 @@
  * Compile:
  *   gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
  *       Core/Src/test_loop_diag.c Core/Src/loop_diag.c -o /tmp/test_loop_diag
+ *
+ * This file defines main() and is intended ONLY for host-side unit testing.
+ * It is excluded from the STM32 firmware build via the HOST_TEST guard so
+ * that its main() does not collide with the firmware's main() in
+ * Core/Src/main.c at link time.
  */
+#ifdef HOST_TEST
+
 #include "loop_diag.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -106,3 +113,5 @@ int main(void) {
            tests_run, tests_failed);
     return (tests_failed == 0) ? 0 : 1;
 }
+
+#endif /* HOST_TEST */
