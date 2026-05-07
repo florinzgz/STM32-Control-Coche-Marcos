@@ -151,6 +151,7 @@ static inline float sanitize_float(float val, float safe_default)
 #define AXIS_ROT_SCALE_MIN       0.75f
 #define AXIS_ROT_SCALE_MED       0.90f
 #define AXIS_ROT_EMA_ALPHA       0.15f
+#define AXIS_ROT_EMA_COMPLEMENT  (1.0f - AXIS_ROT_EMA_ALPHA)
 #define AXIS_ROT_MIN_CURRENT_A   0.5f
 #define AXIS_ROT_MIN_CUR_RATIO   0.2f
 #define AXIS_ROT_MIN_RPM_AVG     0.01f
@@ -716,11 +717,10 @@ static void axis_rotation_update_scale(void)
     float rpm_avg = rpm_sum * inv_count;
     float cur_avg = cur_sum * inv_count;
 
-    if (rpm_avg <= AXIS_ROT_MIN_RPM_AVG || cur_avg < AXIS_ROT_MIN_CURRENT_A) {
+    if (rpm_avg < AXIS_ROT_MIN_RPM_AVG || cur_avg < AXIS_ROT_MIN_CURRENT_A) {
         return;
     }
 
-    const float ema_complement = 1.0f - AXIS_ROT_EMA_ALPHA;
     for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
         if (Wheel_IsStale(i)) {
             continue;
@@ -738,7 +738,7 @@ static void axis_rotation_update_scale(void)
         }
 
         axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
-                          + ema_complement * axis_rot_scale[i];
+                          + AXIS_ROT_EMA_COMPLEMENT * axis_rot_scale[i];
 
         axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
     }
