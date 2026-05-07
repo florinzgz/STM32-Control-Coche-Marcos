@@ -153,8 +153,10 @@ static inline float sanitize_float(float val, float safe_default)
 #define AXIS_ROT_EMA_ALPHA       0.15f
 #define AXIS_ROT_MIN_CURRENT_A   0.5f
 #define AXIS_ROT_MIN_CUR_RATIO   0.2f
+#define AXIS_ROT_MIN_RPM_AVG     0.01f
 #define AXIS_ROT_SLIP_HI         1.35f
 #define AXIS_ROT_SLIP_MED        1.15f
+#define AXIS_ROT_WHEEL_COUNT     4U
 
 /* ---- Dynamic braking configuration ----
  *
@@ -672,7 +674,7 @@ void Motor_Init(void)
 static void axis_rotation_reset_scale(void)
 {
     axis_rot_update_ctr = 0U;
-    for (uint8_t i = 0; i < 4U; i++) {
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
         axis_rot_scale[i] = 1.0f;
     }
 }
@@ -685,8 +687,8 @@ static void axis_rotation_update_scale(void)
     }
     axis_rot_update_ctr = 0U;
 
-    float rpm[4];
-    float cur[4];
+    float rpm[AXIS_ROT_WHEEL_COUNT];
+    float cur[AXIS_ROT_WHEEL_COUNT];
     uint8_t valid_count = 0U;
     float rpm_sum = 0.0f;
     float cur_sum = 0.0f;
@@ -696,7 +698,7 @@ static void axis_rotation_update_scale(void)
     rpm[MOTOR_RL] = Wheel_GetSpeed_RL();
     rpm[MOTOR_RR] = Wheel_GetSpeed_RR();
 
-    for (uint8_t i = 0; i < 4U; i++) {
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
         cur[i] = Current_GetAmps(i);
         if (Wheel_IsStale(i)) {
             continue;
@@ -714,30 +716,33 @@ static void axis_rotation_update_scale(void)
     float rpm_avg = rpm_sum * inv_count;
     float cur_avg = cur_sum * inv_count;
 
-    if (rpm_avg <= 0.01f || cur_avg < AXIS_ROT_MIN_CURRENT_A) {
+    if (rpm_avg <= AXIS_ROT_MIN_RPM_AVG || cur_avg < AXIS_ROT_MIN_CURRENT_A) {
         return;
     }
 
-    for (uint8_t i = 0; i < 4U; i++) {
-        if (Wheel_IsStale(i)) {
-            continue;
+    {
+        const float ema_complement = 1.0f - AXIS_ROT_EMA_ALPHA;
+        for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+            if (Wheel_IsStale(i)) {
+                continue;
+            }
+
+            float rpm_ratio = rpm[i] / rpm_avg;
+            float cur_ratio = cur[i] / cur_avg;
+            float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
+
+            float target_scale = 1.0f;
+            if (slip_metric > AXIS_ROT_SLIP_HI) {
+                target_scale = AXIS_ROT_SCALE_MIN;
+            } else if (slip_metric > AXIS_ROT_SLIP_MED) {
+                target_scale = AXIS_ROT_SCALE_MED;
+            }
+
+            axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
+                              + ema_complement * axis_rot_scale[i];
+
+            axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
         }
-
-        float rpm_ratio = rpm[i] / rpm_avg;
-        float cur_ratio = cur[i] / cur_avg;
-        float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
-
-        float target_scale = 1.0f;
-        if (slip_metric > AXIS_ROT_SLIP_HI) {
-            target_scale = AXIS_ROT_SCALE_MIN;
-        } else if (slip_metric > AXIS_ROT_SLIP_MED) {
-            target_scale = AXIS_ROT_SCALE_MED;
-        }
-
-        axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
-                          + (1.0f - AXIS_ROT_EMA_ALPHA) * axis_rot_scale[i];
-
-        axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
     }
 }
 
