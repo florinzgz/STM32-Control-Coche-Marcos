@@ -137,6 +137,28 @@ static inline float sanitize_float(float val, float safe_default)
 #define CREEP_DEMAND_SMOOTHING_ALPHA 0.08f  /* Extra EMA below creep zone     */
 #define CREEP_ZONE_PCT               15.0f  /* Demand% threshold for creep    */
 
+/* ---- Axis-rotation dynamic force distribution ----
+ *
+ * Applies a per-wheel PWM reduction factor in tank-turn mode only.
+ * Update cadence is 50 ms (5 × 10 ms control cycles) to match INA226
+ * current refresh and avoid oscillations from stale current samples.
+ *
+ * The scale is reduction-only:
+ *   1.0  = no reduction
+ *   0.75 = max reduction for a "free-spinning" wheel
+ */
+#define AXIS_ROT_UPDATE_CYCLES   5U
+#define AXIS_ROT_SCALE_MIN       0.75f
+#define AXIS_ROT_SCALE_MED       0.90f
+#define AXIS_ROT_EMA_ALPHA       0.15f
+#define AXIS_ROT_EMA_COMPLEMENT  (1.0f - AXIS_ROT_EMA_ALPHA)
+#define AXIS_ROT_MIN_CURRENT_A   0.5f
+#define AXIS_ROT_MIN_CUR_RATIO   0.2f
+#define AXIS_ROT_MIN_RPM_AVG     0.01f
+#define AXIS_ROT_SLIP_HI         1.35f
+#define AXIS_ROT_SLIP_MED        1.15f
+#define AXIS_ROT_WHEEL_COUNT     4U
+
 /* ---- Dynamic braking configuration ----
  *
  * When the driver releases the throttle rapidly, the vehicle decelerates
@@ -392,6 +414,8 @@ static uint16_t        prev_output_pwm[4] = {0};  /* Previous PWM per motor
 static float           brake_release_pct = 0.0f;  /* Ramp during brake→drive */
 static float           creep_smooth_pct  = 0.0f;  /* Extra EMA for creep zone*/
 static uint8_t         creep_smooth_init = 0;      /* First sample flag       */
+static float           axis_rot_scale[AXIS_ROT_WHEEL_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f};
+static uint8_t         axis_rot_update_ctr = 0;
 
 /* ---- Neutral ramp-down state ----
  * When entering GEAR_NEUTRAL, PWM ramps down gradually instead of
@@ -479,6 +503,8 @@ static void Motor_SetSigned(Motor_t *motor, int16_t signed_pwm);
 static void Motor_SetMode(Motor_t *motor, motor_mode_t mode, int16_t signed_pwm);
 static float __attribute__((unused)) PID_Compute(PID_t *pid, float measured, float dt);
 static void compute_ackermann_differential(float steer_deg, float diff_out[4]);
+static void axis_rotation_reset_scale(void);
+static void axis_rotation_update_scale(void);
 
 /* ---- Microsecond busy-wait helper ----
  * Uses the Cortex-M4 DWT cycle counter (CYCCNT) for deterministic,
@@ -646,6 +672,89 @@ void Motor_Init(void)
     Motor_SetMode(&motor_steer, MOTOR_MODE_COAST, 0);
 }
 
+static void axis_rotation_reset_scale(void)
+{
+    axis_rot_update_ctr = 0U;
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+        axis_rot_scale[i] = 1.0f;
+    }
+}
+
+static void axis_rotation_update_scale(void)
+{
+    axis_rot_update_ctr++;
+    if (axis_rot_update_ctr < AXIS_ROT_UPDATE_CYCLES) {
+        return;
+    }
+    axis_rot_update_ctr = 0U;
+
+    /* ---- Fail-safe: if any wheel sensor is stale, do NOT compute partial
+     * averages that would bias the reference.  Instead relax all scales
+     * smoothly toward 1.0 via EMA and return early.  This prevents a stale
+     * wheel's frozen scale from creating persistent lateral torque asymmetry. */
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+        if (Wheel_IsStale(i)) {
+            for (uint8_t j = 0; j < AXIS_ROT_WHEEL_COUNT; j++) {
+                axis_rot_scale[j] = AXIS_ROT_EMA_ALPHA * 1.0f
+                                  + AXIS_ROT_EMA_COMPLEMENT * axis_rot_scale[j];
+            }
+            return;
+        }
+    }
+
+    float rpm[AXIS_ROT_WHEEL_COUNT];
+    float cur[AXIS_ROT_WHEEL_COUNT];
+    float rpm_sum = 0.0f;
+    float cur_sum = 0.0f;
+
+    rpm[MOTOR_FL] = Wheel_GetSpeed_FL();
+    rpm[MOTOR_FR] = Wheel_GetSpeed_FR();
+    rpm[MOTOR_RL] = Wheel_GetSpeed_RL();
+    rpm[MOTOR_RR] = Wheel_GetSpeed_RR();
+
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+        cur[i] = Current_GetAmps(i);
+        rpm_sum += rpm[i];
+        cur_sum += cur[i];
+    }
+
+    float inv_count = 1.0f / (float)AXIS_ROT_WHEEL_COUNT;
+    float rpm_avg = rpm_sum * inv_count;
+    float cur_avg = cur_sum * inv_count;
+
+    if (rpm_avg < AXIS_ROT_MIN_RPM_AVG || cur_avg < AXIS_ROT_MIN_CURRENT_A) {
+        /* Low-demand state: relax all scales smoothly toward 1.0 via EMA
+         * instead of returning without update.  This prevents scales from
+         * freezing at a reduced value (e.g. 0.75) when current or RPM drops
+         * during throttle easing, slow rotation entry, or load transitions. */
+        for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+            axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * 1.0f
+                              + AXIS_ROT_EMA_COMPLEMENT * axis_rot_scale[i];
+        }
+        return;
+    }
+
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+        float rpm_ratio = rpm[i] / rpm_avg;
+        float cur_ratio = cur[i] / cur_avg;
+        /* Higher slip_metric => wheel spins faster relative to load current
+         * (free-spinning / lower traction), therefore reduce PWM scale. */
+        float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
+
+        float target_scale = 1.0f;
+        if (slip_metric > AXIS_ROT_SLIP_HI) {
+            target_scale = AXIS_ROT_SCALE_MIN;
+        } else if (slip_metric > AXIS_ROT_SLIP_MED) {
+            target_scale = AXIS_ROT_SCALE_MED;
+        }
+
+        axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
+                          + AXIS_ROT_EMA_COMPLEMENT * axis_rot_scale[i];
+
+        axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
+    }
+}
+
 void Traction_Init(void)
 {
     traction_state.mode4x4      = false;
@@ -679,6 +788,7 @@ void Traction_Init(void)
     for (uint8_t j = 0; j < 4; j++) {
         prev_output_pwm[j] = 0;
     }
+    axis_rotation_reset_scale();
 
     /* Reset demand anomaly detection state */
     prev_raw_demand      = 0.0f;
@@ -857,6 +967,9 @@ void Traction_SetMode4x4(bool enable)
 
 void Traction_SetAxisRotation(bool enable)
 {
+    if (!enable && traction_state.axisRotation) {
+        axis_rotation_reset_scale();
+    }
     traction_state.axisRotation = enable;
 }
 
@@ -1595,8 +1708,10 @@ void Traction_Update(void)
     } else {
         /* DRIVE phase — normal traction with smooth driving features */
         if (traction_state.axisRotation) {
+            axis_rotation_update_scale();
             for (uint8_t i = 0; i < 4; i++) {
-                desired_pwm[i] = (uint16_t)(base_pwm * safety_status.wheel_scale[i]);
+                desired_pwm[i] = (uint16_t)(base_pwm * axis_rot_scale[i]
+                                            * safety_status.wheel_scale[i]);
                 desired_dir[i] = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
                 desired_en[i]  = 1;
             }
@@ -1754,6 +1869,7 @@ void Traction_EmergencyStop(void)
     for (uint8_t i = 0; i < 4; i++) {
         prev_output_pwm[i] = 0;
     }
+    axis_rotation_reset_scale();
 }
 
 const TractionState_t* Traction_GetState(void)
