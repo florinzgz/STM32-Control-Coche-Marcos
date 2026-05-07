@@ -149,8 +149,10 @@ static inline float sanitize_float(float val, float safe_default)
  */
 #define AXIS_ROT_UPDATE_CYCLES   5U
 #define AXIS_ROT_SCALE_MIN       0.75f
+#define AXIS_ROT_SCALE_MED       0.90f
 #define AXIS_ROT_EMA_ALPHA       0.15f
 #define AXIS_ROT_MIN_CURRENT_A   0.5f
+#define AXIS_ROT_MIN_CUR_RATIO   0.2f
 #define AXIS_ROT_SLIP_HI         1.35f
 #define AXIS_ROT_SLIP_MED        1.15f
 
@@ -723,20 +725,19 @@ static void axis_rotation_update_scale(void)
 
         float rpm_ratio = rpm[i] / rpm_avg;
         float cur_ratio = cur[i] / cur_avg;
-        float slip_metric = rpm_ratio / fmaxf(cur_ratio, 0.2f);
+        float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
 
         float target_scale = 1.0f;
         if (slip_metric > AXIS_ROT_SLIP_HI) {
             target_scale = AXIS_ROT_SCALE_MIN;
         } else if (slip_metric > AXIS_ROT_SLIP_MED) {
-            target_scale = 0.90f;
+            target_scale = AXIS_ROT_SCALE_MED;
         }
 
         axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
                           + (1.0f - AXIS_ROT_EMA_ALPHA) * axis_rot_scale[i];
 
-        if (axis_rot_scale[i] < AXIS_ROT_SCALE_MIN) axis_rot_scale[i] = AXIS_ROT_SCALE_MIN;
-        if (axis_rot_scale[i] > 1.0f) axis_rot_scale[i] = 1.0f;
+        axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
     }
 }
 
