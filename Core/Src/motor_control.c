@@ -715,9 +715,6 @@ static void axis_rotation_update_scale(void)
 
     for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
         cur[i] = Current_GetAmps(i);
-        if (Wheel_IsStale(i)) {
-            continue;
-        }
         rpm_sum += rpm[i];
         cur_sum += cur[i];
         valid_count++;
@@ -744,10 +741,6 @@ static void axis_rotation_update_scale(void)
     }
 
     for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
-        if (Wheel_IsStale(i)) {
-            continue;
-        }
-
         float rpm_ratio = rpm[i] / rpm_avg;
         float cur_ratio = cur[i] / cur_avg;
         /* Higher slip_metric => wheel spins faster relative to load current
