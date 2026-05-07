@@ -704,7 +704,6 @@ static void axis_rotation_update_scale(void)
 
     float rpm[AXIS_ROT_WHEEL_COUNT];
     float cur[AXIS_ROT_WHEEL_COUNT];
-    uint8_t valid_count = 0U;
     float rpm_sum = 0.0f;
     float cur_sum = 0.0f;
 
@@ -717,18 +716,13 @@ static void axis_rotation_update_scale(void)
         cur[i] = Current_GetAmps(i);
         rpm_sum += rpm[i];
         cur_sum += cur[i];
-        valid_count++;
     }
 
-    if (valid_count == 0U) {
-        return;
-    }
-
-    float inv_count = 1.0f / (float)valid_count;
+    float inv_count = 1.0f / (float)AXIS_ROT_WHEEL_COUNT;
     float rpm_avg = rpm_sum * inv_count;
     float cur_avg = cur_sum * inv_count;
 
-    if (rpm_avg <= AXIS_ROT_MIN_RPM_AVG || cur_avg <= AXIS_ROT_MIN_CURRENT_A) {
+    if (rpm_avg < AXIS_ROT_MIN_RPM_AVG || cur_avg < AXIS_ROT_MIN_CURRENT_A) {
         /* Low-demand state: relax all scales smoothly toward 1.0 via EMA
          * instead of returning without update.  This prevents scales from
          * freezing at a reduced value (e.g. 0.75) when current or RPM drops
