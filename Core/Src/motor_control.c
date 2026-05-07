@@ -688,6 +688,20 @@ static void axis_rotation_update_scale(void)
     }
     axis_rot_update_ctr = 0U;
 
+    /* ---- Fail-safe: if any wheel sensor is stale, do NOT compute partial
+     * averages that would bias the reference.  Instead relax all scales
+     * smoothly toward 1.0 via EMA and return early.  This prevents a stale
+     * wheel's frozen scale from creating persistent lateral torque asymmetry. */
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+        if (Wheel_IsStale(i)) {
+            for (uint8_t j = 0; j < AXIS_ROT_WHEEL_COUNT; j++) {
+                axis_rot_scale[j] = AXIS_ROT_EMA_ALPHA * 1.0f
+                                  + AXIS_ROT_EMA_COMPLEMENT * axis_rot_scale[j];
+            }
+            return;
+        }
+    }
+
     float rpm[AXIS_ROT_WHEEL_COUNT];
     float cur[AXIS_ROT_WHEEL_COUNT];
     uint8_t valid_count = 0U;
@@ -718,6 +732,14 @@ static void axis_rotation_update_scale(void)
     float cur_avg = cur_sum * inv_count;
 
     if (rpm_avg <= AXIS_ROT_MIN_RPM_AVG || cur_avg <= AXIS_ROT_MIN_CURRENT_A) {
+        /* Low-demand state: relax all scales smoothly toward 1.0 via EMA
+         * instead of returning without update.  This prevents scales from
+         * freezing at a reduced value (e.g. 0.75) when current or RPM drops
+         * during throttle easing, slow rotation entry, or load transitions. */
+        for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+            axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * 1.0f
+                              + AXIS_ROT_EMA_COMPLEMENT * axis_rot_scale[i];
+        }
         return;
     }
 
