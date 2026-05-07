@@ -728,6 +728,8 @@ static void axis_rotation_update_scale(void)
 
         float rpm_ratio = rpm[i] / rpm_avg;
         float cur_ratio = cur[i] / cur_avg;
+        /* Higher slip_metric => wheel spins faster relative to load current
+         * (free-spinning / lower traction), therefore reduce PWM scale. */
         float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
 
         float target_scale = 1.0f;
@@ -1699,8 +1701,8 @@ void Traction_Update(void)
         if (traction_state.axisRotation) {
             axis_rotation_update_scale();
             for (uint8_t i = 0; i < 4; i++) {
-                desired_pwm[i] = (uint16_t)(base_pwm * axis_rot_scale[i]
-                                            * safety_status.wheel_scale[i]);
+                desired_pwm[i] = (uint16_t)(base_pwm * (axis_rot_scale[i]
+                                            * safety_status.wheel_scale[i]));
                 desired_dir[i] = ((i == MOTOR_FL) || (i == MOTOR_RL)) ? (int8_t)-dir : dir;
                 desired_en[i]  = 1;
             }
