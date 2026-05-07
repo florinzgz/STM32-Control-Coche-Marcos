@@ -413,7 +413,7 @@ static uint16_t        prev_output_pwm[4] = {0};  /* Previous PWM per motor
 static float           brake_release_pct = 0.0f;  /* Ramp during brake→drive */
 static float           creep_smooth_pct  = 0.0f;  /* Extra EMA for creep zone*/
 static uint8_t         creep_smooth_init = 0;      /* First sample flag       */
-static float           axis_rot_scale[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+static float           axis_rot_scale[AXIS_ROT_WHEEL_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f};
 static uint8_t         axis_rot_update_ctr = 0;
 
 /* ---- Neutral ramp-down state ----
@@ -720,29 +720,27 @@ static void axis_rotation_update_scale(void)
         return;
     }
 
-    {
-        const float ema_complement = 1.0f - AXIS_ROT_EMA_ALPHA;
-        for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
-            if (Wheel_IsStale(i)) {
-                continue;
-            }
-
-            float rpm_ratio = rpm[i] / rpm_avg;
-            float cur_ratio = cur[i] / cur_avg;
-            float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
-
-            float target_scale = 1.0f;
-            if (slip_metric > AXIS_ROT_SLIP_HI) {
-                target_scale = AXIS_ROT_SCALE_MIN;
-            } else if (slip_metric > AXIS_ROT_SLIP_MED) {
-                target_scale = AXIS_ROT_SCALE_MED;
-            }
-
-            axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
-                              + ema_complement * axis_rot_scale[i];
-
-            axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
+    const float ema_complement = 1.0f - AXIS_ROT_EMA_ALPHA;
+    for (uint8_t i = 0; i < AXIS_ROT_WHEEL_COUNT; i++) {
+        if (Wheel_IsStale(i)) {
+            continue;
         }
+
+        float rpm_ratio = rpm[i] / rpm_avg;
+        float cur_ratio = cur[i] / cur_avg;
+        float slip_metric = rpm_ratio / fmaxf(cur_ratio, AXIS_ROT_MIN_CUR_RATIO);
+
+        float target_scale = 1.0f;
+        if (slip_metric > AXIS_ROT_SLIP_HI) {
+            target_scale = AXIS_ROT_SCALE_MIN;
+        } else if (slip_metric > AXIS_ROT_SLIP_MED) {
+            target_scale = AXIS_ROT_SCALE_MED;
+        }
+
+        axis_rot_scale[i] = AXIS_ROT_EMA_ALPHA * target_scale
+                          + ema_complement * axis_rot_scale[i];
+
+        axis_rot_scale[i] = fminf(fmaxf(axis_rot_scale[i], AXIS_ROT_SCALE_MIN), 1.0f);
     }
 }
 
