@@ -1261,7 +1261,7 @@ pio device monitor --baud 115200
 | Relay health check (INA226) | ✅ Implemented | `SAFETY_ERROR_RELAY_OPEN` |
 | CMD_ACK acknowledgment | ✅ Implemented | CAN 0x103, after CMD_MODE/SERVICE_CMD |
 | **Regenerative energy recovery to battery** | ❌ Not implemented | Dynamic braking dissipates energy as heat. No energy path to battery. BTS7960 topology does not support regeneration. |
-| **AI-based regen optimisation** | ❌ Not implemented | No neural/ML logic anywhere in the codebase |
+| **AI-based regen optimization** | ❌ Not implemented | No neural/ML logic anywhere in the codebase |
 | **Adaptive cruise control** | ❌ Not implemented | Referenced in `docs/FIRMWARE_MATURITY_ROADMAP.md` as future work. Obstacle scale adjusts torque but does not maintain a set following distance. |
 
 ---
