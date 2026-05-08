@@ -1228,6 +1228,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 **Pinout recomendado de relés de potencia (automoción):**
 7. **Control 12V:** Batería 12V (+) → **fusible 5A** → VCC módulo relé 12V (rojo). Batería 12V (−) → GND común.
+   - Este fusible es del circuito de control (bobinas), no del circuito de potencia de motores.
 8. **Relé TRAC 200A (30/87/85/86):**
    - CH1 NO (PC11/TRAC) del módulo rojo → pin **86**
    - Pin **85** → GND
@@ -1240,7 +1241,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
    - Pin **87** → salida al shunt INA226 #5 y BTS7960 STEER
    - Pin **87a** (si existe) = contacto NC
 
-> **No usar 87a para cargar el coche apagado.** Para carga segura: conector de carga dedicado + fusible dedicado + contactor/relé de carga + bloqueo de marcha.
+> **No usar 87a para cargar el coche apagado:** al ser contacto NC puede dejar una ruta energizada en reposo y provocar retroalimentación no controlada. Para carga segura: conector de carga dedicado + fusible dedicado + contactor/relé de carga + interbloqueo de marcha.
 >
 > **Diodo flyback:** si el relé de potencia no lo integra, montar **1N4007** en paralelo con cada bobina (cátodo al +12V, ánodo a GND).
 

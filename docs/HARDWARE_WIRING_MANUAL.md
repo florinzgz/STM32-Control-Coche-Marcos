@@ -976,6 +976,7 @@ Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
 1. **Control 12V (etapa 1, módulo rojo SRD-12V):**
    - Batería 12V (+) → **fusible 5A** → VCC módulo SRD-12V.
    - Batería 12V (−) → GND común (STM32 + módulo SRD + bobinas relés potencia).
+   - El fusible de 5A protege el mazo de control (bobinas de relé); no es el fusible de potencia de motores.
 2. **Relé TRAC 200A (etapa 2):**
    - Salida NO del CH1 (PC11/TRAC) del módulo SRD-12V → pin **86** (bobina +) del relé 200A.
    - Pin **85** (bobina −) del relé 200A → GND.
@@ -986,7 +987,7 @@ Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
    - Contacto potencia: pin **30** = entrada +12V de dirección; pin **87** = salida hacia shunt INA226 #5 y BTS7960 STEER.
    - Si existe quinto pin, normalmente es **87a (NC)**.
 
-> **No usar 87a para carga del vehículo:** para carga con vehículo apagado usar línea dedicada de carga (conector de carga + fusible dedicado + contactor/relé de carga + enclavamiento de marcha).
+> **No usar 87a para carga del vehículo:** al ser contacto NC, puede quedar unido en reposo y crear rutas de energía no controladas. Para carga con vehículo apagado usar línea dedicada de carga (conector de carga + fusible dedicado + contactor/relé de carga + interbloqueo de marcha).
 >
 > **Flyback de bobina:** si el relé de potencia no integra supresión interna, montar **1N4007** en paralelo con cada bobina (cátodo al +12V, ánodo a GND).
 
