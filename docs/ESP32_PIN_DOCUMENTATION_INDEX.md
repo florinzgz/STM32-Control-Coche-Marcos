@@ -1,216 +1,155 @@
 # Índice de Documentación - Conexiones ESP32-S3
 
-Este directorio contiene documentación completa sobre las conexiones de pines del ESP32-S3 para el sistema HMI del Control Coche Marcos.
+Índice consolidado de los documentos de montaje del **ESP32-S3 HMI**.
 
-## 📄 Documentos Disponibles
-
-### 0. **PINES_PANTALLA.md** 📌 LISTADO DETALLADO DE PINES DEL DISPLAY
-**Listado definitivo y detallado** de todos los pines de la pantalla TFT y touch.
-
-**Contenido:**
-- ✅ Tabla completa de conexiones display + touch (pines verificados con User_Setup.h)
-- ✅ Resumen rápido por GPIO
-- ✅ Diagrama de conexión física ASCII
-- ✅ Configuración SPI completa
-- ✅ Definiciones exactas del firmware
-- ✅ Aviso sobre pines PELIGROSOS de documentación antigua
-- ✅ Verificación con multímetro
-- ✅ Solución de problemas específica del display
-
-**Ideal para:** Primera consulta de pines, referencia definitiva, montaje del display
+> Fuente verificada:
+> `esp32/include/User_Setup.h`, `esp32/platformio.ini`, `esp32/src/main.cpp`,
+> `esp32/src/audio_manager.h`, `esp32/src/relay_audio.h`, `esp32/src/shifter_input.h`,
+> `esp32/src/power_manager.h`, `esp32/src/sensors/obstacle_sensor.h`
 
 ---
 
-### 1. **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** ⭐ DOCUMENTO PRINCIPAL
-**Guía completa y detallada** de todas las conexiones ESP32-S3.
+## 📄 Documentos disponibles
 
-**Contenido:**
-- ✅ Mapa completo de pines de pantalla TFT (ST7796)
-- ✅ Conexiones del touch panel
-- ✅ Configuración SPI detallada
-- ✅ Diagrama completo de CAN-Bus
-- ✅ Conexión ESP32-S3 ↔ TJA1051 ↔ STM32
-- ✅ Especificaciones técnicas
-- ✅ Lista de materiales
-- ✅ Procedimiento paso a paso
-- ✅ Solución de problemas
-- ✅ Referencias y datasheets
+### 1. `ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md` ⭐ DOCUMENTO PRINCIPAL
+Guía detallada del lado ESP32:
 
-**Ideal para:** Montaje completo, troubleshooting avanzado, especificaciones técnicas
+- ✅ Pantalla ST7796 + touch XPT2046
+- ✅ CAN lado ESP32 con **SN65HVD230** (GPIO4/GPIO5)
+- ✅ Audio DFPlayer + relé GPIO11
+- ✅ Sensor actual **TF-Mini Plus** (GPIO18, 115200 bps)
+- ✅ Verificaciones y troubleshooting
+
+**Usar para:** montaje completo del ESP32-S3.
 
 ---
 
-### 2. **DIAGRAMA_PINES_VISUAL.md** 📊 DIAGRAMAS VISUALES
-**Guía visual con diagramas ASCII** de las conexiones.
+### 2. `CONEXIONES_RAPIDAS_ESP32.md` ⚡ REFERENCIA RÁPIDA
+Resumen compacto de:
 
-**Contenido:**
-- ✅ Diagramas de conexión física
-- ✅ Esquemas del display y transceiver
-- ✅ Mapa visual de GPIOs en DevKitC-1
-- ✅ Código de colores para cables
-- ✅ Checklist de verificación
-- ✅ Vista general del sistema
+- ✅ Display + touch
+- ✅ CAN con **SN65HVD230**
+- ✅ TF-Mini Plus
+- ✅ Relé audio GPIO11
+- ✅ MCP23017 en GPIO8/GPIO9
+- ✅ GPIO40/GPIO41 (ignición / power hold)
 
-**Ideal para:** Conexión física paso a paso, verificación visual, montaje de cables
-
----
-
-### 3. **CONEXIONES_RAPIDAS_ESP32.md** ⚡ REFERENCIA RÁPIDA
-**Guía de consulta rápida** en formato tabla.
-
-**Contenido:**
-- ✅ Tablas compactas de pines
-- ✅ Display: pines principales + touch
-- ✅ CAN-Bus: ESP32 ↔ TJA1051
-- ✅ TOFSense-M: sensor obstáculos (GPIO 18, UART1)
-- ✅ Valores de verificación con multímetro
-- ✅ Diagnóstico rápido de problemas
-- ✅ Diagrama simplificado
-
-**Ideal para:** Consulta rápida durante el montaje, verificación con multímetro
+**Usar para:** consulta rápida en banco o taller.
 
 ---
 
-### 4. **TOFSENSE_M_WIRING_GUIDE.md** 🎯 GUÍA SENSOR OBSTÁCULOS
-**Guía completa de conexión del TOFSense-M S** (Nooploop LiDAR 8×8).
+### 3. `PINES_PANTALLA.md`
+Listado detallado del display y touch.
 
-**Contenido:**
-- ✅ Alimentación correcta (5V obligatorio)
-- ✅ Cableado UART (sensor TX → ESP32 GPIO18)
-- ✅ Especificaciones del protocolo NLink_TOFSense_M_Frame0
-- ✅ Diagnóstico de estado INVALID
-- ✅ Diagrama de conexión detallado
-- ✅ Referencias oficiales del fabricante
-
-**Ideal para:** Conexión y troubleshooting del sensor de obstáculos
+**Usar para:** cableado fino de pantalla.
 
 ---
 
-### 5. **LLAVE_CONTACTO_ENCENDIDO_APAGADO.md** 🔑 CIRCUITO LLAVE DE CONTACTO
-**Guía completa del circuito de la llave de contacto** (encendido y apagado del sistema).
+### 4. `TFMINI_PLUS_WIRING_GUIDE.md` 🎯 SENSOR ACTUAL
+Guía del sensor de obstáculos **actual** en firmware:
 
-**Contenido:**
-- ✅ Conexión física de la llave al ESP32-S3 (GPIO 40/41)
-- ✅ Divisor de tensión para adaptar 12 V → 3.3 V
-- ✅ Circuito de retención de alimentación (delay relay)
-- ✅ Secuencia completa de encendido paso a paso
-- ✅ Secuencia de relés STM32 (TRAC → DIR)
-- ✅ Flujo de corriente hasta los motores de tracción
-- ✅ Secuencia completa de apagado
-- ✅ Lista de componentes del circuito de llave
-- ✅ Preguntas frecuentes
+- ✅ TF-Mini Plus
+- ✅ GPIO18 / UART1 RX
+- ✅ 115200 bps
+- ✅ **Sin divisor de tensión**
 
-**Ideal para:** Entender cómo encender y apagar el sistema, cablear la llave de contacto
+**Usar para:** montaje del sensor de obstáculos actual.
 
 ---
 
-## 🎯 ¿Qué Documento Usar?
+### 5. `TOFSENSE_M_WIRING_GUIDE.md` / `CONEXION_TOF_SENSE_M_LIDAR.md` ⚠ HISTÓRICO / OPCIONAL
+Documentación mantenida como referencia del sensor anterior / alternativo:
 
-### Para Montar desde Cero
-1. Consultar **PINES_PANTALLA.md** (listado definitivo de pines del display)
-2. Leer **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** (completo, incluye CAN)
-3. Seguir **DIAGRAMA_PINES_VISUAL.md** (paso a paso con diagramas)
-4. Tener **CONEXIONES_RAPIDAS_ESP32.md** a mano (referencia rápida)
-5. Leer **LLAVE_CONTACTO_ENCENDIDO_APAGADO.md** para el circuito de la llave
+- TOFSense-M
+- GPIO18
+- 921600 bps
+- divisor o level shifter
 
-### Para Verificar Conexiones
-- Usar **CONEXIONES_RAPIDAS_ESP32.md** (tablas de pines y valores)
-
-### Para Solucionar Problemas
-- Ver sección de troubleshooting en **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md**
-
-### Para Comprar Materiales
-- Ver lista en **ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md** → Sección 3
+> **No es el sensor activo del firmware actual.** El firmware actual usa **TF-Mini Plus**.
 
 ---
 
-## 📌 Resumen de Pines
+### 6. `LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`
+Circuito de llave de contacto y apagado ordenado.
 
-### Display TFT ST7796 (480×320)
-| Pin Display | GPIO ESP32 | Función |
-|-------------|------------|---------|
-| CS | 10 | Chip Select |
-| RESET | 38 | Reset |
-| DC/RS | 39 | Data/Command |
-| MOSI (SDI) | 13 | Datos SPI |
-| SCK | 14 | Reloj SPI |
-| MISO (SDO) | 12 | Datos SPI / Touch DO |
-| LED | 42 | Backlight |
-| T_CS | 21 | Touch CS |
+- ✅ GPIO40 = `IGNITION_SENSE`
+- ✅ GPIO41 = `POWER_HOLD`
+- ✅ Entrada vía **módulo NPN optoacoplador / EL817**
+- ✅ Pull-up externo 10 kΩ recomendado en GPIO40
 
-### CAN-Bus TJA1051
-| ESP32 | TJA1051 |
-|-------|---------|
-| GPIO 4 | Pin 1 (TXD) |
-| GPIO 5 | Pin 4 (RXD) |
-| 5V | Pin 3 (VCC) |
-| GND | Pin 2, 8 (GND, S) |
-
-### TOFSense-M S (Sensor Obstáculos)
-| TOFSense-M | ESP32 |
-|------------|-------|
-| Pin 4 (TX) | GPIO 18 (UART1 RX) |
-| Pin 1 (VCC) | 5V |
-| Pin 2 (GND) | GND |
+> La solución actual **no** es un divisor resistivo directo 12V→3.3V; es una entrada
+> optoacoplada de lógica invertida.
 
 ---
 
-## 🔗 Documentos Relacionados
+### 7. `EL817_WIRING_REFERENCE.md`
+Referencia del módulo optoacoplador NPN:
 
-- `ESP32_STM32_CAN_CONNECTION.md` - Conexión CAN entre ESP32 y STM32
-- `PINOUT_DEFINITIVO.md` - Pinout completo del STM32G474RE
-- `CONEXIONES_COMPLETAS.md` - Conexiones del sistema completo
-- `esp32/platformio.ini` - Configuración de compilación con defines de pines
-- `esp32/src/main.cpp` - Código fuente principal del firmware ESP32
-
----
-
-## 📦 Para Convertir a PDF
-
-Estos documentos están en formato Markdown y pueden convertirse a PDF usando:
-
-### Opción 1: Pandoc (Linux/Mac/Windows)
-```bash
-pandoc ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md -o conexiones_esp32.pdf
-pandoc DIAGRAMA_PINES_VISUAL.md -o diagramas_visuales.pdf
-pandoc CONEXIONES_RAPIDAS_ESP32.md -o referencia_rapida.pdf
-```
-
-### Opción 2: Herramientas Online
-- [Markdown to PDF](https://www.markdowntopdf.com/)
-- [Dillinger.io](https://dillinger.io/) (exportar como PDF)
-- [CloudConvert](https://cloudconvert.com/md-to-pdf)
-
-### Opción 3: Visual Studio Code
-1. Instalar extensión "Markdown PDF"
-2. Abrir archivo .md
-3. Ctrl+Shift+P → "Markdown PDF: Export (pdf)"
+- ✅ llave de contacto a GPIO40
+- ✅ lógica invertida LOW=ON
+- ✅ pinout del módulo
 
 ---
 
-## ✅ Estado de la Documentación
-
-- [x] Conexiones de Display TFT documentadas
-- [x] Conexiones de Touch Panel documentadas
-- [x] Configuración SPI documentada
-- [x] Conexiones CAN-Bus documentadas
-- [x] Conexiones TOFSense-M documentadas
-- [x] Diagramas visuales creados
-- [x] Referencia rápida creada
-- [x] Lista de materiales incluida
-- [x] Procedimiento de verificación incluido
-- [x] Troubleshooting incluido
-- [x] Circuito de llave de contacto documentado (encendido/apagado)
+### 8. `DIAGRAMA_PINES_VISUAL.md`
+Diagramas ASCII y vista general de cableado.
 
 ---
 
-## 📞 Soporte
+## 🎯 ¿Qué documento usar?
 
-**Repositorio:** [florinzgz/STM32-Control-Coche-Marcos](https://github.com/florinzgz/STM32-Control-Coche-Marcos)
+### Para montar desde cero
+1. `ESP32_S3_DISPLAY_Y_CAN_CONEXIONES.md`
+2. `PINES_PANTALLA.md`
+3. `TFMINI_PLUS_WIRING_GUIDE.md`
+4. `LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`
+5. `CONEXIONES_RAPIDAS_ESP32.md`
 
-**Issues:** Para reportar problemas o solicitar aclaraciones sobre la documentación
+### Para verificación rápida
+- `CONEXIONES_RAPIDAS_ESP32.md`
+
+### Para la llave / alimentación
+- `LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`
+- `EL817_WIRING_REFERENCE.md`
+
+### Para el sensor antiguo / alternativo
+- `TOFSENSE_M_WIRING_GUIDE.md`
+- `CONEXION_TOF_SENSE_M_LIDAR.md`
 
 ---
 
-_Última actualización: 2026-02-19_  
-_Versión: 1.0_
+## 📌 Resumen de GPIO ESP32-S3
+
+| GPIO | Uso |
+|------|-----|
+| 4 | CAN TX |
+| 5 | CAN RX |
+| 8 | MCP23017 SDA |
+| 9 | MCP23017 SCL |
+| 10 | TFT CS |
+| 11 | Relé audio |
+| 12 | TFT MISO + Touch T_DO |
+| 13 | TFT MOSI + Touch T_DIN |
+| 14 | TFT SCK + Touch T_CLK |
+| 18 | TF-Mini Plus TX → UART1 RX |
+| 21 | TOUCH_CS |
+| 38 | TFT_RST |
+| 39 | TFT_DC |
+| 40 | IGNITION_SENSE |
+| 41 | POWER_HOLD |
+| 42 | TFT_BL |
+| 43 | DFPlayer RX |
+| 44 | DFPlayer TX |
+| 47 | WS2812B frontal |
+| 48 | WS2812B trasera |
+
+---
+
+## ⚠️ Reglas rápidas
+
+- ESP32 CAN: **SN65HVD230**, no TJA1051
+- Sensor actual: **TF-Mini Plus**, no TOFSense-M
+- GPIO18: UART1 RX del sensor de obstáculos
+- GPIO40: entrada optoacoplada invertida (`LOW = llave ON`)
+- GPIO41: uso interno firmware, no cablear a ciegas
+- MCP23017: GPIO8/GPIO9, dirección I2C `0x20`

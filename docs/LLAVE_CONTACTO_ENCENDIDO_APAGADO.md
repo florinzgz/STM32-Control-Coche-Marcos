@@ -7,10 +7,10 @@
 > `Core/Src/main.c`, `Core/Src/can_handler.c`.
 > No se ha inventado ningún componente ni conexión.
 >
-> **Revisión actual:** Cuatro módulos de relé en total:
+> **Revisión actual:** Cuatro módulos de relé / control en total:
 > - **Módulo retardo** (12 V): mantiene alimentación al apagar la llave
-> - **Módulo 2ch SRD-12VDC-SL-C**: STM32 controla relés de potencia (tracción + dirección)
-> - **Módulo 2ch SRD-05VDC-SL-C**: STM32 controla relés alimentación tiras LED WS2812B
+> - **Módulo 4ch SRD-12VDC-SL-C**: STM32 usa **CH1/CH2** para relés de potencia (tracción + dirección)
+> - **Módulo 4ch SRD-05VDC-SL-C**: STM32 usa **CH1/CH2** para LED y ESP32 usa **CH3** para relé de audio
 >
 > No hacen falta transistores, resistencias adicionales ni circuitos discretos.
 
@@ -42,8 +42,8 @@ El sistema usa cuatro módulos de relé que trabajan juntos:
 | Módulo | Tipo | Función |
 |--------|------|---------|
 | **Módulo retardo hardware** | 12 V, temporizador | Mantiene alimentación T seg tras llave OFF |
-| **Módulo 2ch SRD-12VDC-SL-C** | 12 V bobinas, opto | STM32 PC11/PC12 → relés potencia tracción+dirección |
-| **Módulo 2ch SRD-05VDC-SL-C** | 5 V bobinas, opto | STM32 PB10/PB11 → alimentación tiras LED WS2812B |
+| **Módulo 4ch SRD-12VDC-SL-C** | 12 V bobinas, opto | STM32 PC11/PC12 → **CH1/CH2** → relés potencia tracción+dirección |
+| **Módulo 4ch SRD-05VDC-SL-C** | 5 V bobinas, opto | STM32 PB10/PB11 → **CH1/CH2** LED, ESP32 GPIO11 → **CH3** audio |
 
 > El módulo de 5 V es igual al de 12 V de la foto — mismo PCB, misma disposición
 > de pines — pero con relés marcados SRD-**05**VDC-SL-C en lugar de SRD-**12**VDC-SL-C.
@@ -137,7 +137,7 @@ Funciona 100 % en hardware, sin código.
 
 ---
 
-## 4. Módulo Relé 2 Canales 12 V — Relés de Potencia
+## 4. Módulo Relé 4 Canales 12 V — Relés de Potencia (CH1/CH2 usados)
 
 ### 4.1 ¿Para qué sirve?
 
@@ -230,7 +230,7 @@ en paralelo con su bobina (cátodo al +12V, ánodo a GND de bobina).
 
 ---
 
-## 5. Módulo Relé 2 Canales 5 V — Alimentación Tiras LED
+## 5. Módulo Relé 4 Canales 5 V — Alimentación Tiras LED (CH1/CH2 usados)
 
 ### 5.1 ¿Para qué sirve?
 
@@ -540,7 +540,7 @@ void LED_Relay_Emergency_Off(void)
 
 | Componente | Especificación | Configuración |
 |------------|---------------|---------------|
-| Módulo 2ch SRD-12VDC-SL-C | High/low trigger, opto, 10A/250VAC | VCC=3.3V, JD-VCC=12V, jumper H, jumper VCC/JD-VCC QUITADO |
+| Módulo 4ch SRD-12VDC-SL-C | High/low trigger, opto, 10A/250VAC | Usar **CH1/CH2**; VCC=3.3V, JD-VCC=12V, jumper H, jumper VCC/JD-VCC QUITADO |
 | IN1 | PC11 STM32 (3.3V directo) | Activa bobina relé tracción 24V |
 | IN2 | PC12 STM32 (3.3V directo) | Activa bobina relé dirección 12V |
 | Pull-down IN1 | 10 kΩ entre IN1 y GND | Evita activación espuria en boot del STM32 |
@@ -550,7 +550,7 @@ void LED_Relay_Emergency_Off(void)
 
 | Componente | Especificación | Configuración |
 |------------|---------------|---------------|
-| Módulo 2ch SRD-05VDC-SL-C | High/low trigger, opto, 10A/250VAC | VCC=3.3V, JD-VCC=5V, jumper H, jumper VCC/JD-VCC QUITADO |
+| Módulo 4ch SRD-05VDC-SL-C | High/low trigger, opto, 10A/250VAC | Usar **CH1/CH2** para LED y **CH3** para audio; VCC=3.3V, JD-VCC=5V, jumper H, jumper VCC/JD-VCC QUITADO |
 | IN1 | PB10 STM32 (3.3V directo) | Conecta 5V a tira LED frontal (28× WS2812B) |
 | IN2 | PB11 STM32 (3.3V directo) | Conecta 5V a tira LED trasera (16× WS2812B) |
 | Pull-down IN1 | 10 kΩ entre IN1 y GND | Evita activación espuria en boot del STM32 |

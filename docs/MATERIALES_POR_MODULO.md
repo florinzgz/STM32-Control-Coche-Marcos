@@ -23,7 +23,7 @@
 11. [Relés de potencia — 5 módulos](#11-relés-de-potencia--5-módulos)
 12. [ESP32-S3 DevKitC-1 (HMI)](#12-esp32-s3-devkitc-1-hmi)
 13. [Display TFT ST7796 480×320](#13-display-tft-st7796-480320)
-14. [Sensor de obstáculos TOFSense-M S (ESP32)](#14-sensor-de-obstáculos-tofsense-m-s-esp32)
+14. [Sensor de obstáculos TF-Mini Plus (ESP32)](#14-sensor-de-obstáculos-tf-mini-plus-esp32)
 15. [Tiras LED WS2812B (frontal y trasera)](#15-tiras-led-ws2812b-frontal-y-trasera)
 16. [Palanca de cambios — MCP23017 (ESP32)](#16-palanca-de-cambios--mcp23017-esp32)
 17. [Audio — DFPlayer Mini (ESP32)](#17-audio--dfplayer-mini-esp32)
@@ -62,7 +62,7 @@
 | PC5 EN_FL | PC5 | BTS7960 FL R_EN + L_EN | 24 AWG |
 | PC0 EN_FR | PC0 | BTS7960 FR R_EN + L_EN | 24 AWG |
 | PC1 EN_RL | PC1 | BTS7960 RL R_EN + L_EN | 24 AWG |
-| PC13 EN_RR | PC13 | BTS7960 RR R_EN + L_EN | 24 AWG |
+| PC2 EN_RR | PC2 | BTS7960 RR R_EN + L_EN | 24 AWG |
 | PC4 EN_STEER | PC4 | BTS7960 STEER R_EN + L_EN | 24 AWG |
 | PC11/PC12 RELAY (TRAC/DIR) | PC11, PC12 | Módulo 4-ch relé 12V (CH1, CH2) | 24 AWG |
 | PB10/11 LED RELAY | PB10, PB11 | Módulos relé LED | 24 AWG |
@@ -144,7 +144,7 @@
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 2 | Cable señal (RPWM + LPWM) | 24 AWG, ~30–50 cm | PA6 → RPWM, PA7 → LPWM del BTS7960 STEER |
-| — | Puente 3.3V → R_EN + L_EN | 24 AWG, 5 cm | R_EN y L_EN del BTS7960 STEER siempre a 3.3V (no hay GPIO de enable) |
+| 1 | Cable EN_STEER | 24 AWG, ~30–50 cm | **PC4** → R_EN + L_EN del BTS7960 STEER |
 | 1 | Cable VCC lógico | 24 AWG | 3.3V al VCC del módulo |
 | 1 | Cable GND lógico | 24 AWG | GND común |
 
@@ -167,14 +167,23 @@
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 2 | Transceiver CAN | **TJA1051T/3** (3.3V compatible) | Uno por nodo (STM32 y ESP32) |
+| 1 | Transceiver CAN nodo STM32 | **TJA1051T/3** | VCC=5V, VIO=3.3V |
+| 1 | Transceiver CAN nodo ESP32 | **SN65HVD230** | VCC=3.3V, sin VIO |
 | 2 | Resistencia de terminación CAN | **120 Ω / ¼ W** | Una en cada extremo del bus (CANH↔CANL) |
-| 2 | Condensador desacoplo VCC transceiver | **100 nF / 10V** X7R | Junto al pin VCC de cada TJA1051 |
-| 1 | Condensador bulk VCC transceiver ESP32 | **10 µF / 10V** | En paralelo con el 100nF del lado ESP32 |
+| 2 | Condensador desacoplo VCC transceiver | **100 nF / 10V** X7R | Junto al pin VCC de cada transceiver |
+| 1 | Condensador bulk VCC transceiver ESP32 | **10 µF / 10V** | En paralelo con el 100nF del lado ESP32 / SN65HVD230 |
 | 2 | Diodo TVS bus CAN | **PESD2CAN** (línea diferencial) | Uno por nodo, entre CANH y CANL; protección ESD del bus |
 | 1 | Cable par trenzado apantallado | **22 AWG**, longitud ≤ 5 m | Par trenzado CANH + CANL; apantallar el cable |
 | — | Cable drenaje (shield) | — | Conectar a GND solo en el lado STM32; deja el extremo ESP32 flotante |
 | 1 | Convertidor DC-DC aislado **B0505S-1W** | 5V in → 5V out aislada, 1W (200mA), 1kV isolación, SIP-4 | Alimenta el lado aislado de la barrera CAN (Opción A: ADuM1201 + DC-DC): `5V_rail → B0505S-1W → 5V_aislada → TJA1051T/3 VCC`. Ver `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` sección 9.4 |
+
+> **Por qué se usan dos transceivers distintos:** el `TJA1051T/3` encaja con el lado STM32 y su
+> esquema con `VIO=3.3V`, mientras que el `SN65HVD230` simplifica el lado ESP32 porque trabaja a
+> **3.3V nativos** y no necesita pin `VIO`.
+>
+> **Tensión VCC:** `TJA1051T/3` está especificado para **VCC=5V** (o 3.3V solo como caso de
+> banco/documentación fuera de spec, ver `CONEXIONES_COMPLETAS.md`), mientras que `SN65HVD230`
+> requiere **VCC=3.3V**.
 
 ---
 
@@ -344,17 +353,18 @@
 
 ---
 
-## 14. Sensor de obstáculos TOFSense-M S (ESP32)
+## 14. Sensor de obstáculos TF-Mini Plus (ESP32)
 
-**Función:** LiDAR ToF 8×8 para detección de obstáculos. Conectado a ESP32 UART1 (GPIO18 RX).
+**Función:** LiDAR ToF de punto único para detección de obstáculos. Conectado a ESP32 UART1 (GPIO18 RX).
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 1 | TOFSense-M S (Nooploop) | LiDAR 8×8, UART 921600 bps, 5V, conector GH1.25 | Rango 20–4000 mm; requiere 5V en VCC |
-| 1 | Resistencia divisor R1 | **1 kΩ / ¼W** | En serie entre TX del sensor y GPIO18 del ESP32; nivel 3.5–3.6V → 2.9V |
-| 1 | Resistencia divisor R2 | **4.7 kΩ / ¼W** | Entre el nodo medio y GND; escala la señal UART al nivel 3.3V del ESP32 |
-| 1 | Condensador desacoplo VCC sensor | **100 nF / 10V** X7R | Entre VCC (5V) y GND del sensor, junto al conector GH1.25 |
-| 1 | Cable con conector GH1.25 | 4 pines, ≤ 50 cm | VCC (5V), GND, RX sensor (no conectar), TX sensor → divisor → GPIO18 |
+| 1 | TF-Mini Plus (Benewake) | LiDAR punto único, UART **115200 bps**, 5V | Rango 100–12000 mm |
+| 1 | Condensador desacoplo VCC sensor | **100 nF / 10V** X7R | Entre VCC (5V) y GND del sensor |
+| 1 | Cable 3 hilos | ≤ 50 cm | VCC (5V), GND, TX sensor → **GPIO18** |
+
+> El firmware activo usa **TF-Mini Plus** con **conexión directa** a GPIO18.
+> **No requiere divisor de tensión** ni level shifter.
 
 ---
 
@@ -449,10 +459,11 @@
 | 1 | MUX1 | Módulo TCA9548A | Multiplexor I2C 8-canal |
 | 5 | TEMP1–TEMP5 | DS18B20 | Waterproof, OneWire |
 | 5 | WS1–WS5 | Sensor inductivo LJ12A3 | NPN, NO (4× velocidad rueda + 1× centrado) |
-| 2 | CAN1–CAN2 | Transceiver CAN TJA1051T/3 | 3.3V compatible |
+| 1 | CAN1 | Transceiver CAN TJA1051T/3 | Nodo STM32, VCC=5V, VIO=3.3V |
+| 1 | CAN2 | Transceiver CAN SN65HVD230 | Nodo ESP32, VCC=3.3V |
 | 1 | DCDC_CAN | Convertidor DC-DC aislado B0505S-1W | 5V→5V aislada, 1W, 1kV; alimentación del lado aislado del bus CAN (Opción A) |
 | 1 | DISP1 | Display TFT ST7796 480×320 | Con XPT2046 touch |
-| 1 | TOF1 | TOFSense-M S (Nooploop) | LiDAR 8×8, 5V, UART 921600 bps |
+| 1 | TOF1 | TF-Mini Plus (Benewake) | LiDAR punto único, 5V, UART 115200 bps |
 | 1 | MCP1 | MCP23017 | Expansor I2C para palanca de cambios |
 | 1 | DFP1 | DFPlayer Mini | Reproductor MP3/WAV |
 | 1 | LED_F | Tira WS2812B frontal | 28 LEDs, 5V |
@@ -476,7 +487,7 @@
 | 1 | C_24V_REL | **1000 µF** | 35V | Electrolítico | Bus 24V junto a relés |
 | 1 | C_12V_REL | **470 µF** | 25V | Electrolítico | Bus 12V junto a relé DIR |
 | 2 | C_LED | **1000 µF** | 10V | Electrolítico | Conector 5V de cada tira LED |
-| 1 | C_TOF_VCC | **100 nF** | 10V | Cerámico X7R | VCC del TOFSense-M S |
+| 1 | C_TOF_VCC | **100 nF** | 10V | Cerámico X7R | VCC del TF-Mini Plus |
 | 1 | C_MCP_BULK | **10 µF** | 16V | Electrolítico | VDD (pin 9) del MCP23017, en paralelo con C_MCP_BP |
 | 1 | C_MCP_BP | **100 nF** | 16V | Cerámico X7R | VDD (pin 9) del MCP23017, en paralelo con C_MCP_BULK |
 
@@ -495,8 +506,6 @@
 | 5 | R_MOSFET_PD | **10 kΩ** | ¼W | Pull-down gate MOSFET relé |
 | 2 | R_CAN | **120 Ω** | ¼W | Terminación CAN (extremos del bus) |
 | 5 | R_REL_SNB | **100 Ω** | ½W | Snubber RC de contactos de relé |
-| 1 | R_TOF_R1 | **1 kΩ** | ¼W | Divisor UART TOFSense (R1 serie) |
-| 1 | R_TOF_R2 | **4.7 kΩ** | ¼W | Divisor UART TOFSense (R2 a GND) |
 | 1 | R_DFP | **1 kΩ** | ¼W | Serie TX DFPlayer |
 | 2 | R_LED_DATA | **330 Ω** | ¼W | Serie datos WS2812B (GPIO47, GPIO48) |
 | 1 | R_MCP_RST | **10 kΩ** | ¼W | Pull-up RESET del MCP23017 |

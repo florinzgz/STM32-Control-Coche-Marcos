@@ -220,8 +220,8 @@ Cualquier otro ID CAN es **rechazado** (política de seguridad).
 ### Tipo de driver
 
 Cada motor de tracción usa un driver **BTS7960** (H-bridge, Infineon). La documentación del
-proyecto (`HARDWARE_SPECIFICATION.md`) especifica este modelo. El firmware los controla
-genéricamente como H-bridge: un pin PWM + un pin DIR + un pin EN por motor.
+proyecto (`HARDWARE_SPECIFICATION.md`) especifica este modelo. El firmware los controla con
+arquitectura **RPWM + LPWM + EN** por motor (sin pin DIR dedicado).
 
 ### Tensión de alimentación
 
