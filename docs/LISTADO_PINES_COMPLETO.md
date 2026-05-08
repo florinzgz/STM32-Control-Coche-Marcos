@@ -48,14 +48,15 @@
 **Conexiones del TJA1051T/3 (lado ESP32):**
 - Pin 1 (TXD) ← GPIO4
 - Pin 2 (GND) → GND
-- Pin 3 (VCC) → **5 V** (4.5–5.5 V obligatorio)
+- Pin 3 (VCC) → **3.3 V** (instalación actual)
 - Pin 4 (RXD) → GPIO5
 - Pin 5 (VIO) → **3.3 V** ⚠️ OBLIGATORIO — sin VIO, RXD = 5 V → destruye ESP32-S3
 - Pin 6 (CANL) → Bus CAN bajo
 - Pin 7 (CANH) → Bus CAN alto
 - Pin 8 (S) → GND (modo normal)
 
-> ⚠️ **Nota sobre transceiver:** El comentario de `main.cpp` menciona SN65HVD230 (alimentado a 3.3 V directo, sin pin VIO). Ambos transceivers son funcionalmente compatibles pero el cableado difiere. Si se usa **SN65HVD230**: VCC → 3.3 V, no conectar VIO. Si se usa **TJA1051T/3**: seguir las conexiones de arriba (VCC → 5 V + VIO → 3.3 V obligatorio).
+> ⚠️ **Nota sobre transceiver:** En la instalación actual del proyecto se usa **TJA1051T/3 en ambos nodos**
+> (STM32 y ESP32), con **VCC=3.3 V** y **VIO=3.3 V**.
 
 ---
 
@@ -645,7 +646,7 @@ GND (ESP32)    ─────────→ GND PC817
 
 | Cantidad | Componente | Ubicación |
 |----------|-----------|-----------|
-| 2 | TJA1051T/3 (o SN65HVD230) | Transceiver CAN (uno por MCU). TJA1051T/3: VCC=5V + VIO=3.3V. SN65HVD230: VCC=3.3V directo, sin VIO |
+| 2 | TJA1051T/3 | Transceiver CAN (uno por MCU), VCC=3.3V + VIO=3.3V |
 | 1 | TCA9548A | Multiplexor I2C |
 | 6 | INA226 | Sensores de corriente/tensión |
 | 1 | MCP23017 | I/O expander para shifter |

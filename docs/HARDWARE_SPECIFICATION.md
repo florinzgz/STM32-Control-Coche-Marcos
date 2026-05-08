@@ -17,7 +17,7 @@
 │  │  OneWire → DS18B20 (×5)                                  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
-         ↓ PWM/DIR/EN              ↓ CAN              ↓ Sensores
+         ↓ PWM/EN                  ↓ CAN              ↓ Sensores
     ┌────────────┐          ┌──────────────┐    ┌─────────────────┐
     │ BTS7960 ×5 │          │   ESP32-S3   │    │ INA226 + DS18B20│
     └────────────┘          └──────────────┘    └─────────────────┘
@@ -108,7 +108,7 @@ PC1  (EN_RL)    → R_EN + L_EN
 STM32              BTS7960_RR
 PC8  (TIM8_CH3) → RPWM
 PC9  (TIM8_CH4) → LPWM
-PC13 (EN_RR)    → R_EN + L_EN
+PC2  (EN_RR)    → R_EN + L_EN
 ```
 
 #### Motor de Dirección (STEER)
@@ -123,14 +123,12 @@ PC4  (EN_STEER) → R_EN + L_EN
 
 ```c
 // Pseudocódigo de control
-if (reverse) {
-    RPWM = 0;        // Canal forward desactivado
-    LPWM = pwm_value; // Canal reverse con PWM
-    DIR_PIN = 1;     // Indicador dirección
+if (retroceso) {
+    RPWM = 0;         // Canal avance desactivado
+    LPWM = pwm_value; // Canal retroceso con PWM
 } else {
-    RPWM = pwm_value; // Canal forward con PWM
-    LPWM = 0;         // Canal reverse desactivado
-    DIR_PIN = 0;      // Indicador dirección
+    RPWM = pwm_value; // Canal avance con PWM
+    LPWM = 0;         // Canal retroceso desactivado
 }
 
 // Habilitación global
@@ -512,16 +510,12 @@ float speed_kmh = speed_ms * 3.6f;  // 18.9 km/h
 
 ### Hardware CAN
 
-**Transceiver**: TJA1051T/3 (NXP) — VCC = 5 V, VIO = 3.3 V (ver `ESP32_STM32_CAN_CONNECTION.md`)
+**Nodo STM32**: TJA1051T/3 (NXP) — VCC = 3.3 V, VIO = 3.3 V  
+**Nodo ESP32**: TJA1051T/3 (NXP) — VCC = 3.3 V, VIO = 3.3 V
 **Terminación**: 120Ω en cada extremo
 
 ```
-STM32_PA11 (RX) ──┐
-                  │    ┌───────────┐
-STM32_PA12 (TX) ──┼────┤ TJA1051T/3├──── CAN_H ── 120Ω ── CAN_L
-                  │    └───────────┘
-                 GND                    │
-                                     Bus CAN
+STM32 PA11/PA12 ── TJA1051T/3 ── CAN_H / CAN_L ── TJA1051T/3 ── ESP32 GPIO5/GPIO4
 ```
 
 **Configuración:**
@@ -550,8 +544,8 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | Módulo 4-ch opto relé 12V | 1 | **SRD-12VDC-SL-C, 12V, 4 canales**; CH1=PC11(TRAC), CH2=PC12(DIR), CH3/CH4=libres | Driver etapa 1 relés potencia |
 | Módulo 4-ch opto relé 5V | 1 | **SRD-05VDC-SL-C, 5V, 4 canales**; CH1=PB10(LED_F), CH2=PB11(LED_R), CH3=GPIO11(audio), CH4=libre | Corte alimentación LED strips + relé audio |
 | Relé potencia (bobina 12V) | 2 | Alta corriente (≥50A TRAC, ≥20A DIR) | Accionados por CH1/CH2 del módulo 4-ch |
-| TJA1051T/3 | 2 | CAN Transceiver (NXP) | VCC=5V, VIO=3.3V — uno por nodo |
-| B0505S-1W | 1 | DC-DC aislado 5V→5V, 1W, 1kV | Alimentación lado aislado bus CAN (Opción A ADuM1201+DC-DC) |
+| TJA1051T/3 | 2 | CAN transceiver nodos STM32 y ESP32 | VCC=3.3V, VIO=3.3V |
+| DC-DC aislado 3.3V→3.3V | 1 | ≥200mA, aislamiento ≥1kV | Alimentación lado aislado bus CAN (Opción A ADuM1201+DC-DC) |
 
 | Shunt 1.5 mΩ | 5 | 50A/75mV, 3W | INA226 motores (ch 0–3, 5) |
 | Shunt 0.75 mΩ | 1 | 100A/75mV, 3W | INA226 batería (ch 4) |

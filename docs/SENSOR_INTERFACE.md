@@ -869,8 +869,8 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 | PB3 | TIM2_CH2 | Encoder dirección B (via 6N137) |
 | PB4 | EXTI4 | Encoder dirección Z (via 6N137) |
 | PB5 | EXTI5 falling | Sensor centro dirección (via EL817 Board 2) |
-| PA11 | FDCAN1_RX (AF9) | CAN bus (transceptor SN65HVD230) |
-| PA12 | FDCAN1_TX (AF9) | CAN bus (transceptor SN65HVD230) |
+| PA11 | FDCAN1_RX (AF9) | CAN bus (transceptor TJA1051T/3) |
+| PA12 | FDCAN1_TX (AF9) | CAN bus (transceptor TJA1051T/3) |
 | PC11 | GPIO out | Relé tracción 24 V (activo HIGH) |
 | PC12 | GPIO out | Relé dirección 12 V (activo HIGH) |
 | PB10 | GPIO out | Relé tira LED frontal 5 V (activo HIGH) |
@@ -882,8 +882,8 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 
 | Pin | Función | Sensor/Periférico |
 |-----|---------|-------------------|
-| GPIO4 | CAN TX (TWAI) | Transceptor SN65HVD230 |
-| GPIO5 | CAN RX (TWAI) | Transceptor SN65HVD230 |
+| GPIO4 | CAN TX (TWAI) | Transceptor TJA1051T/3 |
+| GPIO5 | CAN RX (TWAI) | Transceptor TJA1051T/3 |
 | GPIO8 | I2C SDA | MCP23017 (selector de marchas, 0x20) |
 | GPIO9 | I2C SCL | MCP23017 (selector de marchas, 0x20) |
 | GPIO15 | Entrada INPUT_PULLUP | Interruptor tracción 2WD/4WD |

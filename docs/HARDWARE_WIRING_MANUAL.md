@@ -157,7 +157,7 @@ Configuración en `stm32g4xx_hal_msp.c`: GPIO modo AF push-pull, velocidad alta,
 
 **PA11 y PA12 son salidas lógicas CMOS a 3.3 V. NO son señales CAN.**
 
-Es **obligatorio** un transceiver CAN externo. Este proyecto usa el **TJA1051T/3** (NXP) con VCC=5V y VIO=3.3V.
+Es **obligatorio** un transceiver CAN externo. Este proyecto usa el **TJA1051T/3** (NXP) con VCC=3.3V y VIO=3.3V en la instalación actual.
 Ver `ESP32_STM32_CAN_CONNECTION.md` para detalles completos de conexión.
 
 ### Esquema de conexión
@@ -220,8 +220,8 @@ Cualquier otro ID CAN es **rechazado** (política de seguridad).
 ### Tipo de driver
 
 Cada motor de tracción usa un driver **BTS7960** (H-bridge, Infineon). La documentación del
-proyecto (`HARDWARE_SPECIFICATION.md`) especifica este modelo. El firmware los controla
-genéricamente como H-bridge: un pin PWM + un pin DIR + un pin EN por motor.
+proyecto (`HARDWARE_SPECIFICATION.md`) especifica este modelo. El firmware los controla con
+arquitectura **RPWM + LPWM + EN** por motor (sin pin DIR dedicado).
 
 ### Tensión de alimentación
 
@@ -1066,12 +1066,12 @@ UBICACIÓN: soldar lo más cerca posible de los pines CN7/CN10 de la Nucleo-64.
 Si se usa protoboard, colocar entre los raíles de alimentación adyacentes al MCU.
 ```
 
-Adicionalmente, en la alimentación 5 V que alimenta a los módulos lógicos (TJA1051, BTS7960 VCC):
+Adicionalmente, en la alimentación lógica 3.3 V que alimenta a los módulos lógicos (TJA1051, BTS7960 VCC):
 
 ```
-5 V ──┬──[100 nF cerámico]──┬── GND   (junto a cada CI, una por chip)
+3.3 V ──┬──[100 nF cerámico]──┬── GND   (junto a cada CI, una por chip)
        │                     │
-       └──[47 µF electrolítico]── GND  (uno en el punto de entrada de la fuente 5 V)
+         └──[47 µF electrolítico]── GND  (uno en el punto de entrada de la fuente 3.3 V)
 ```
 
 ### 12.3 Condensadores de bulk en los buses de potencia
@@ -1109,17 +1109,18 @@ Relé DIR NO ──┬────── Bus 12 V
 Para impedir que el ruido de los PWM de 20 kHz se propague por la alimentación:
 
 ```
-5 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 5 V_limpio ──► TJA1051
-                                                              └── [10 µF] a GND
+3.3 V_sucio ──[Ferrita BLM18AG601SN1D o 100 µH]── 3.3 V_limpio ──► TJA1051
+                                                                  └── [10 µF] a GND
 
 3.3 V_MCU ────────────────────────────────────── 3.3 V ──► BTS7960 VCC (lógica)
                                                          └── [100 nF] a GND (por módulo)
 ```
 
-> **Nota:** El TJA1051 requiere 5V. Los módulos BTS7960 (IBT-2) se alimentan desde 3.3V
+> **Nota:** En esta instalación el TJA1051 se alimenta desde 3.3V y VIO=3.3V.
+> Los módulos BTS7960 (IBT-2) también se alimentan desde 3.3V
 > (ver §10 para justificación del 74HC244).
 
-> Si no se dispone de ferrita, un fusible reseteable (PTC) de 500 mA en la línea 5 V_limpio
+> Si no se dispone de ferrita, un fusible reseteable (PTC) de 500 mA en la línea 3.3 V_limpio
 > actúa también como filtro de baja frecuencia y protege contra cortocircuitos.
 
 ### 12.5 Protección de pines de entrada contra sobretensión
