@@ -1226,6 +1226,24 @@ PB14 ──►[330Ω]──►[LED]──► GND
 5. BTS7960 FL: EN → **PC5**, FR: EN → **PC0**, RL: EN → **PC1**, RR: EN → **PC2**, STEER: EN → **PC4** (todos GPIO)
 6. Condensadores bulk + bypass en cada BTS7960
 
+**Pinout recomendado de relés de potencia (automoción):**
+7. **Control 12V:** Batería 12V (+) → **fusible 5A** → VCC módulo relé 12V (rojo). Batería 12V (−) → GND común.
+8. **Relé TRAC 200A (30/87/85/86):**
+   - CH1 NO (PC11/TRAC) del módulo rojo → pin **86**
+   - Pin **85** → GND
+   - Batería tracción (+) → **mega fusible** → pin **30**
+   - Pin **87** → barra positiva de los 4 BTS7960 de tracción
+9. **Relé DIR 5 pines:**
+   - CH2 NO (PC12/DIR) del módulo rojo → pin **86**
+   - Pin **85** → GND
+   - Pin **30** → entrada +12V dirección
+   - Pin **87** → salida al shunt INA226 #5 y BTS7960 STEER
+   - Pin **87a** (si existe) = contacto NC
+
+> **No usar 87a para cargar el coche apagado.** Para carga segura: conector de carga dedicado + fusible dedicado + contactor/relé de carga + bloqueo de marcha.
+>
+> **Diodo flyback:** si el relé de potencia no lo integra, montar **1N4007** en paralelo con cada bobina (cátodo al +12V, ánodo a GND).
+
 > **PC10 está DISPONIBLE, sin uso.** GPIO libre, no conectado a hardware (`INPUT_PULLDOWN`).
 
 **⚠️ NO conectar los motores todavía.** Solo verificar que los relés conmutan.

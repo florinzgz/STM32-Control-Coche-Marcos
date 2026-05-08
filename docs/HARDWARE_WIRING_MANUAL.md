@@ -969,6 +969,27 @@ STM32 GPIO (3.3V) ──► IN módulo opto relé ──► Contacto 10A cierra 
                        (SRD-12VDC-SL-C)                                       ↑ [1N4007 flyback]
 ```
 
+### Cableado práctico con relé automoción 200A (TRAC) y relé 5 pines (DIR)
+
+Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
+
+1. **Control 12V (etapa 1, módulo rojo SRD-12V):**
+   - Batería 12V (+) → **fusible 5A** → VCC módulo SRD-12V.
+   - Batería 12V (−) → GND común (STM32 + módulo SRD + bobinas relés potencia).
+2. **Relé TRAC 200A (etapa 2):**
+   - Salida NO del CH1 (PC11/TRAC) del módulo SRD-12V → pin **86** (bobina +) del relé 200A.
+   - Pin **85** (bobina −) del relé 200A → GND.
+   - Contacto potencia: batería tracción (+) → **mega fusible** → pin **30**; pin **87** → barra positiva de los 4 BTS7960 de tracción.
+3. **Relé DIR 5 pines (etapa 2):**
+   - Salida NO del CH2 (PC12/DIR) del módulo SRD-12V → pin **86**.
+   - Pin **85** → GND.
+   - Contacto potencia: pin **30** = entrada +12V de dirección; pin **87** = salida hacia shunt INA226 #5 y BTS7960 STEER.
+   - Si existe quinto pin, normalmente es **87a (NC)**.
+
+> **No usar 87a para carga del vehículo:** para carga con vehículo apagado usar línea dedicada de carga (conector de carga + fusible dedicado + contactor/relé de carga + enclavamiento de marcha).
+>
+> **Flyback de bobina:** si el relé de potencia no integra supresión interna, montar **1N4007** en paralelo con cada bobina (cátodo al +12V, ánodo a GND).
+
 ### Esquema módulo 4-ch 5V (LED + audio — sin etapa 2)
 
 ```
