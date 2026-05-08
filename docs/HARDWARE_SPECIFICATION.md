@@ -510,12 +510,12 @@ float speed_kmh = speed_ms * 3.6f;  // 18.9 km/h
 
 ### Hardware CAN
 
-**Nodo STM32**: TJA1051T/3 (NXP) — VCC = 5 V, VIO = 3.3 V  
-**Nodo ESP32**: SN65HVD230 — VCC = 3.3 V (sin pin VIO)
+**Nodo STM32**: TJA1051T/3 (NXP) — VCC = 3.3 V, VIO = 3.3 V  
+**Nodo ESP32**: TJA1051T/3 (NXP) — VCC = 3.3 V, VIO = 3.3 V
 **Terminación**: 120Ω en cada extremo
 
 ```
-STM32 PA11/PA12 ── TJA1051T/3 ── CAN_H / CAN_L ── SN65HVD230 ── ESP32 GPIO5/GPIO4
+STM32 PA11/PA12 ── TJA1051T/3 ── CAN_H / CAN_L ── TJA1051T/3 ── ESP32 GPIO5/GPIO4
 ```
 
 **Configuración:**
@@ -544,9 +544,8 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | Módulo 4-ch opto relé 12V | 1 | **SRD-12VDC-SL-C, 12V, 4 canales**; CH1=PC11(TRAC), CH2=PC12(DIR), CH3/CH4=libres | Driver etapa 1 relés potencia |
 | Módulo 4-ch opto relé 5V | 1 | **SRD-05VDC-SL-C, 5V, 4 canales**; CH1=PB10(LED_F), CH2=PB11(LED_R), CH3=GPIO11(audio), CH4=libre | Corte alimentación LED strips + relé audio |
 | Relé potencia (bobina 12V) | 2 | Alta corriente (≥50A TRAC, ≥20A DIR) | Accionados por CH1/CH2 del módulo 4-ch |
-| TJA1051T/3 | 1 | CAN transceiver nodo STM32 | VCC=5V, VIO=3.3V |
-| SN65HVD230 | 1 | CAN transceiver nodo ESP32 | VCC=3.3V, sin VIO |
-| B0505S-1W | 1 | DC-DC aislado 5V→5V, 1W, 1kV | Alimentación lado aislado bus CAN (Opción A ADuM1201+DC-DC) |
+| TJA1051T/3 | 2 | CAN transceiver nodos STM32 y ESP32 | VCC=3.3V, VIO=3.3V |
+| DC-DC aislado 3.3V→3.3V | 1 | ≥200mA, aislamiento ≥1kV | Alimentación lado aislado bus CAN (Opción A ADuM1201+DC-DC) |
 
 | Shunt 1.5 mΩ | 5 | 50A/75mV, 3W | INA226 motores (ch 0–3, 5) |
 | Shunt 0.75 mΩ | 1 | 100A/75mV, 3W | INA226 batería (ch 4) |

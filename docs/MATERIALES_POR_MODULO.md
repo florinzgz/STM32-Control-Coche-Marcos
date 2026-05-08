@@ -167,23 +167,17 @@
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
-| 1 | Transceiver CAN nodo STM32 | **TJA1051T/3** | VCC=5V, VIO=3.3V |
-| 1 | Transceiver CAN nodo ESP32 | **SN65HVD230** | VCC=3.3V, sin VIO |
+| 2 | Transceiver CAN | **TJA1051T/3** | Uno por nodo (STM32 + ESP32), VCC=3.3V, VIO=3.3V |
 | 2 | Resistencia de terminación CAN | **120 Ω / ¼ W** | Una en cada extremo del bus (CANH↔CANL) |
 | 2 | Condensador desacoplo VCC transceiver | **100 nF / 10V** X7R | Junto al pin VCC de cada transceiver |
-| 1 | Condensador bulk VCC transceiver ESP32 | **10 µF / 10V** | En paralelo con el 100nF del lado ESP32 / SN65HVD230 |
+| 1 | Condensador bulk VCC transceiver ESP32 | **10 µF / 10V** | En paralelo con el 100nF del lado ESP32 / TJA1051T/3 |
 | 2 | Diodo TVS bus CAN | **PESD2CAN** (línea diferencial) | Uno por nodo, entre CANH y CANL; protección ESD del bus |
 | 1 | Cable par trenzado apantallado | **22 AWG**, longitud ≤ 5 m | Par trenzado CANH + CANL; apantallar el cable |
 | — | Cable drenaje (shield) | — | Conectar a GND solo en el lado STM32; deja el extremo ESP32 flotante |
-| 1 | Convertidor DC-DC aislado **B0505S-1W** | 5V in → 5V out aislada, 1W (200mA), 1kV isolación, SIP-4 | Alimenta el lado aislado de la barrera CAN (Opción A: ADuM1201 + DC-DC): `5V_rail → B0505S-1W → 5V_aislada → TJA1051T/3 VCC`. Ver `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` sección 9.4 |
+| 1 | Convertidor DC-DC aislado 3.3V→3.3V | ≥200mA, aislamiento ≥1kV | Alimenta el lado aislado de la barrera CAN (Opción A: ADuM1201 + DC-DC): `3.3V_rail → DC-DC aislado → 3.3V_aislada → TJA1051T/3 VCC/VIO`. Ver `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` sección 9.4 |
 
-> **Por qué se usan dos transceivers distintos:** el `TJA1051T/3` encaja con el lado STM32 y su
-> esquema con `VIO=3.3V`, mientras que el `SN65HVD230` simplifica el lado ESP32 porque trabaja a
-> **3.3V nativos** y no necesita pin `VIO`.
->
-> **Tensión VCC:** `TJA1051T/3` está especificado para **VCC=5V** (o 3.3V solo como caso de
-> banco/documentación fuera de spec, ver `CONEXIONES_COMPLETAS.md`), mientras que `SN65HVD230`
-> requiere **VCC=3.3V**.
+> **Transceiver CAN actual en ambos nodos:** `TJA1051T/3` (STM32 y ESP32), con
+> `VCC=3.3V` y `VIO=3.3V` en la instalación documentada del proyecto.
 
 ---
 
@@ -459,8 +453,7 @@
 | 1 | MUX1 | Módulo TCA9548A | Multiplexor I2C 8-canal |
 | 5 | TEMP1–TEMP5 | DS18B20 | Waterproof, OneWire |
 | 5 | WS1–WS5 | Sensor inductivo LJ12A3 | NPN, NO (4× velocidad rueda + 1× centrado) |
-| 1 | CAN1 | Transceiver CAN TJA1051T/3 | Nodo STM32, VCC=5V, VIO=3.3V |
-| 1 | CAN2 | Transceiver CAN SN65HVD230 | Nodo ESP32, VCC=3.3V |
+| 2 | CAN1–CAN2 | Transceiver CAN TJA1051T/3 | Nodos STM32 y ESP32, VCC=3.3V, VIO=3.3V |
 | 1 | DCDC_CAN | Convertidor DC-DC aislado B0505S-1W | 5V→5V aislada, 1W, 1kV; alimentación del lado aislado del bus CAN (Opción A) |
 | 1 | DISP1 | Display TFT ST7796 480×320 | Con XPT2046 touch |
 | 1 | TOF1 | TF-Mini Plus (Benewake) | LiDAR punto único, 5V, UART 115200 bps |

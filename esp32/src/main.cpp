@@ -97,7 +97,7 @@ static void draw_runtime_overlay(TFT_eSPI& tft, uint32_t frameTimeMs) {
     tft.drawString(line, 4, 36);
 }
 
-// CAN transceiver pins (SN65HVD230, 3.3V — module Rs/SLNT pin tied to GND)
+// CAN transceiver pins (TJA1051T/3, 3.3V logic with VIO=3.3V)
 static constexpr int CAN_TX_PIN = 4;
 static constexpr int CAN_RX_PIN = 5;
 

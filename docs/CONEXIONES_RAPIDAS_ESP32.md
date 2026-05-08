@@ -40,24 +40,25 @@
 
 ### Transceiver usado en el lado ESP32
 
-- **SN65HVD230**
+- **TJA1051T/3**
 - Alimentación **3.3 V**
 - Bus clásico CAN 2.0A a **500 kbps**
 
-> El lado STM32 usa `TJA1051T/3` con `PA11/PA12`. En el lado ESP32 la referencia correcta es
-> **SN65HVD230**, no TJA1051.
+> El lado STM32 usa `TJA1051T/3` con `PA11/PA12`. En el lado ESP32 también se usa
+> `TJA1051T/3` con `GPIO4/GPIO5`, alimentado a 3.3V.
 
-### Conexiones ESP32 ↔ SN65HVD230
+### Conexiones ESP32 ↔ TJA1051T/3
 
-| ESP32-S3 | → | SN65HVD230 | Función |
+| ESP32-S3 | → | TJA1051T/3 | Función |
 |----------|---|------------|---------|
-| GPIO 4 | → | TXD | CAN TX |
-| GPIO 5 | → | RXD | CAN RX |
-| 3.3V | → | VCC | Alimentación lógica |
-| GND | → | GND | Tierra |
-| GND | → | RS / Slope control | Modo alta velocidad |
-| CANH | ↔ | CANH | Bus CAN alto |
-| CANL | ↔ | CANL | Bus CAN bajo |
+| GPIO 4 | → | TXD (pin 1) | CAN TX |
+| GPIO 5 | → | RXD (pin 4) | CAN RX |
+| 3.3V | → | VCC (pin 3) | Alimentación |
+| 3.3V | → | VIO (pin 5) | Nivel lógico |
+| GND | → | GND (pin 2) | Tierra |
+| GND | → | S (pin 8) | Modo normal |
+| CANH | ↔ | CANH (pin 7) | Bus CAN alto |
+| CANL | ↔ | CANL (pin 6) | Bus CAN bajo |
 
 ### Bus físico
 
@@ -176,7 +177,7 @@
 
 1. 3.3V ESP32 → GND: **3.30V ±0.1V**
 2. TFT VCC → GND: **3.30V ±0.1V**
-3. SN65HVD230 VCC → GND: **3.30V ±0.1V**
+3. TJA1051T/3 VCC → GND: **3.30V ±0.1V**
 4. TF-Mini Plus VCC → GND: **5.00V ±0.2V**
 5. CANH → GND (idle): **~2.5V**
 6. CANL → GND (idle): **~2.5V**
@@ -206,9 +207,9 @@
 │ GPIO21 ─────┼── Touch CS
 │ GPIO42 ─────┼── Backlight
 │             │
-│ GPIO4  ─────┼── SN65HVD230 TXD
-│ GPIO5  ◄────┼── SN65HVD230 RXD
-│ 3.3V   ─────┼── SN65HVD230 VCC
+│ GPIO4  ─────┼── TJA1051T/3 TXD
+│ GPIO5  ◄────┼── TJA1051T/3 RXD
+│ 3.3V   ─────┼── TJA1051T/3 VCC + VIO
 │             │
 │ GPIO18 ◄────┼── TF-Mini Plus TX
 │ GPIO11 ─────┼── Relé audio IN (active LOW)

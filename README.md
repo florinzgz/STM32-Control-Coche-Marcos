@@ -80,7 +80,7 @@ The system is split into two independent microcontroller subsystems that communi
     │  6× INA226 (I2C)    │                   │  MCP23017 (gear shifter)│
     │  5× DS18B20 (1W)    │                   │  TF-Mini Plus LiDAR     │
     │  4× EL817 wheel spd │                   │  WS2812B LED strips ×2  │
-    │  E6B2-CWZ6C encoder │                   │  SN65HVD230 CAN xcvr    │
+    │  E6B2-CWZ6C encoder │                   │  TJA1051T/3 CAN xcvr    │
     │  LJ12A3 steer center│                   └─────────────────────────┘
     │  TJA1051T/3 CAN xcvr│
     └─────────────────────┘
@@ -102,7 +102,7 @@ The system is split into two independent microcontroller subsystems that communi
 | LJ12A3 inductive sensor | 1 | Steering mechanical center detection |
 | Benewake TF-Mini Plus | 1 | Forward obstacle LiDAR (100–12 000 mm, 100 Hz UART) |
 | TJA1051T/3 CAN transceiver | 1 | CAN PHY (STM32 side) |
-| SN65HVD230 CAN transceiver | 1 | CAN PHY (ESP32 side) |
+| TJA1051T/3 CAN transceiver | 2 | CAN PHY (STM32 + ESP32 sides) |
 | ST7796 TFT 480×320 | 1 | Main display (SPI 40 MHz, HSPI/SPI3) |
 | XPT2046 touch controller | 1 | Resistive touch (SPI 2.5 MHz, shared MISO) |
 | DFPlayer Mini | 1 | MP3 audio playback (UART 9600 bps, 68 tracks) |
@@ -425,7 +425,7 @@ Obstacle scale is applied uniformly to all wheels in `Traction_Update()`.
 - **Standard:** CAN 2.0A (classic, 11-bit IDs)
 - **Bitrate:** 500 kbps
 - **Peripheral:** STM32 FDCAN1 (PA11 RX, PA12 TX, AF9). ESP32 uses ESP32-TWAI-CAN library.
-- **Transceivers:** TJA1051T/3 (STM32 side), SN65HVD230 (ESP32 side)
+- **Transceivers:** TJA1051T/3 on both nodes (STM32 and ESP32), powered at 3.3V in current installation
 - **Termination:** 120 Ω at each end
 - **Contract:** `docs/CAN_CONTRACT_FINAL.md` rev 1.4 (2026-05-01) — frozen, versioned
 
@@ -1014,7 +1014,7 @@ Flash page 125 ring buffer. Survives power cycles, brownouts, and watchdog reset
 |------|--------|-------|
 | 21 | TOUCH_CS | XPT2046 chip select |
 
-### CAN Bus (SN65HVD230, ESP32-TWAI)
+### CAN Bus (TJA1051T/3, ESP32-TWAI)
 
 | GPIO | Signal |
 |------|--------|

@@ -77,23 +77,24 @@
 
 ### Transceiver correcto
 
-- **ESP32-S3:** `SN65HVD230`
+- **ESP32-S3:** `TJA1051T/3`
 - **STM32:** `TJA1051T/3`
 
-> El lado ESP32 **no** usa TJA1051 en la configuración actual del firmware.
-> La referencia correcta es `SN65HVD230` alimentado a **3.3 V**.
+> En la instalación documentada del proyecto se usa `TJA1051T/3` en ambos nodos,
+> con alimentación a **3.3 V** en el lado ESP32 y STM32.
 
-### Conexiones ESP32 ↔ SN65HVD230
+### Conexiones ESP32 ↔ TJA1051T/3
 
-| ESP32 | SN65HVD230 | Función |
+| ESP32 | TJA1051T/3 | Función |
 |-------|------------|---------|
-| GPIO 4 | TXD | CAN TX |
-| GPIO 5 | RXD | CAN RX |
-| 3.3V | VCC | Alimentación |
-| GND | GND | Tierra |
-| GND | RS / slope control | Modo alta velocidad |
-| CANH | CANH | Bus CAN alto |
-| CANL | CANL | Bus CAN bajo |
+| GPIO 4 | TXD (pin 1) | CAN TX |
+| GPIO 5 | RXD (pin 4) | CAN RX |
+| 3.3V | VCC (pin 3) | Alimentación |
+| 3.3V | VIO (pin 5) | Nivel lógico |
+| GND | GND (pin 2) | Tierra |
+| GND | S (pin 8) | Modo normal |
+| CANH | CANH (pin 7) | Bus CAN alto |
+| CANL | CANL (pin 6) | Bus CAN bajo |
 
 ### Reglas del bus
 
@@ -201,7 +202,7 @@
 |----------|------------|-------|
 | 1 | ESP32-S3 DevKitC-1 N16R8 | MCU HMI |
 | 1 | Display ST7796 + XPT2046 | 480×320 |
-| 1 | SN65HVD230 | Transceiver CAN ESP32 |
+| 1 | TJA1051T/3 | Transceiver CAN ESP32 |
 | 1 | TF-Mini Plus | Sensor de obstáculos actual |
 | 1 | DFPlayer Mini | Audio |
 | 1 | Relé audio | GPIO11, active LOW |
@@ -212,8 +213,8 @@
 | 2 | Resistencias 330 Ω | Datos WS2812B |
 | 2 | Capacitores 1000 µF | Tiras LED |
 | 1 | Capacitor 100 nF | VCC TF-Mini Plus |
-| 1 | Capacitor 100 nF | VCC SN65HVD230 |
-| 1 | Capacitor 10 µF | VCC SN65HVD230 / rail ESP32 CAN |
+| 1 | Capacitor 100 nF | VCC TJA1051T/3 (ESP32) |
+| 1 | Capacitor 10 µF | VCC TJA1051T/3 / rail ESP32 CAN |
 | 1 | Capacitor 10 µF | VDD MCP23017 |
 | 1 | Capacitor 100 nF | VDD MCP23017 |
 
@@ -226,7 +227,7 @@
 | Punto | Valor esperado |
 |-------|----------------|
 | 3.3V ESP32 → GND | 3.30V ±0.1V |
-| VCC SN65HVD230 → GND | 3.30V ±0.1V |
+| VCC TJA1051T/3 → GND | 3.30V ±0.1V |
 | VCC TFT → GND | 3.30V ±0.1V |
 | VCC TF-Mini Plus → GND | 5.00V ±0.2V |
 | CANH ↔ CANL (sin alimentar) | ~60 Ω |
@@ -244,7 +245,7 @@
 
 ```
 ESP32-S3
-├── GPIO4 / GPIO5 ── SN65HVD230 ── CANH/CANL ── TJA1051T/3 ── STM32 PA12/PA11
+├── GPIO4 / GPIO5 ── TJA1051T/3 ── CANH/CANL ── TJA1051T/3 ── STM32 PA12/PA11
 ├── GPIO10/12/13/14/21/38/39/42 ── ST7796 + XPT2046
 ├── GPIO18 ── TF-Mini Plus TX
 ├── GPIO43 / GPIO44 ── DFPlayer Mini

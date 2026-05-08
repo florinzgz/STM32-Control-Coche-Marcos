@@ -36,7 +36,7 @@
   │                        ESP32-S3 DevKitC-1 (HMI)                              │
   │                          240 MHz, 3.3V                                       │
   │                                                                              │
-  │  CAN ──► SN65HVD230 ──► CAN Bus ──► STM32 (GPIO4 TX, GPIO5 RX)             │
+  │  CAN ──► TJA1051T/3 ──► CAN Bus ──► STM32 (GPIO4 TX, GPIO5 RX)             │
   │  SPI ──► Display TFT ST7796 480×320 (GPIO10/12/13/14/21/38/39/42)           │
   │  UART1 RX (GPIO18) ◄── TF-Mini Plus (sensor obstáculos, 115200 bps)        │
   │  UART2 ──► DFPlayer Mini (audio, GPIO43 TX / GPIO44 RX, 9600 bps)          │
@@ -48,7 +48,7 @@
 ```
 
 **Total cables del STM32:** GPIO + alimentación + I2C + CAN
-**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 5 relés (3 potencia + 2 LED), **1 TJA1051T/3 (STM32) + 1 SN65HVD230 (ESP32)**, 1 LED_DIAG externo, 1 TF-Mini Plus (en ESP32), 1 DFPlayer Mini (en ESP32), 1 MCP23017 + palanca de cambios (en ESP32), 1 relé audio (en ESP32), 2 tiras WS2812B (en ESP32)
+**Componentes a conectar:** 5 BTS7960, 1 encoder, 1 divisor resistivo + 1 pedal, 4 sensores rueda, 1 sensor centrado, 6 INA226, 1 TCA9548A, 5 DS18B20, 5 relés (3 potencia + 2 LED), **2 TJA1051T/3 (STM32 + ESP32)**, 1 LED_DIAG externo, 1 TF-Mini Plus (en ESP32), 1 DFPlayer Mini (en ESP32), 1 MCP23017 + palanca de cambios (en ESP32), 1 relé audio (en ESP32), 2 tiras WS2812B (en ESP32)
 
 > ⚠️ **CAMBIO ARQUITECTURA (PR #120):** Los motores ya NO usan un pin DIR + un solo PWM. Ahora cada motor recibe **RPWM y LPWM directos** desde el mismo timer. **Eliminar** el cableado DIR (PC0–PC4). Los antiguos pines DIR (PC0, PC1, PC4) se reutilizan ahora como EN_FR (PC0), EN_RL (PC1), EN_STEER (PC4) — GPIO output controlado por firmware. **NO** conectar R_EN/L_EN directamente a 3.3 V.
 
@@ -364,13 +364,11 @@ Pedal señal (0.3V–4.8V)
 
 | Nodo | Transceiver | Alimentación | Nivel lógico |
 |------|-------------|--------------|--------------|
-| **STM32** | **TJA1051T/3** | VCC = 5 V *(o 3.3 V en banco, fuera de spec)* | VIO = 3.3 V |
-| **ESP32-S3** | **SN65HVD230** | VCC = 3.3 V | 3.3 V nativo, sin pin VIO |
+| **STM32** | **TJA1051T/3** | VCC = 3.3 V | VIO = 3.3 V |
+| **ESP32-S3** | **TJA1051T/3** | VCC = 3.3 V | VIO = 3.3 V |
 
-> **Configuración actual documentada en firmware:** el lado ESP32 usa **SN65HVD230**  
-> (`esp32/platformio.ini` comentario de cabecera CAN, `esp32/src/main.cpp` `CAN_TX_PIN=4`,
-> `CAN_RX_PIN=5`). El lado STM32 mantiene el
-> `TJA1051T/3` documentado en el hardware del proyecto.
+> **Configuración de instalación actual:** se usa **TJA1051T/3** en ambos nodos
+> (STM32 y ESP32) con `GPIO4/GPIO5` en ESP32 y `PA12/PA11` en STM32.
 
 ---
 
@@ -395,15 +393,16 @@ Pedal señal (0.3V–4.8V)
 >
 > ⚠️ PA11 → Morpho **CN10 pin 14**. PA12 → **CN10 pin 12**.
 
-#### Lado ESP32-S3 → SN65HVD230
+#### Lado ESP32-S3 → TJA1051T/3 #2
 
-| Cable | De (ESP32) | A (SN65HVD230) | Función |
+| Cable | De (ESP32) | A (TJA1051 #2) | Función |
 |-------|-----------|----------------|---------|
-| — | **GPIO4** | TXD | TWAI TX |
-| — | **GPIO5** | RXD | TWAI RX |
-| — | **3.3V** | VCC | Alimentación correcta del transceiver ESP32 |
-| — | GND | GND | GND_logic (compartido con STM32) |
-| — | GND | RS / Slope | Modo alta velocidad |
+| — | **GPIO4** | TXD (pin 1) | TWAI TX |
+| — | **GPIO5** | RXD (pin 4) | TWAI RX |
+| — | **3.3V** | VCC (pin 3) | Alimentación del transceiver ESP32 |
+| — | **3.3V** | VIO (pin 5) | Nivel lógico |
+| — | GND | GND (pin 2) | GND_logic (compartido con STM32) |
+| — | GND | S (pin 8) | Modo normal |
 
 #### Estrategia de GND — Configuración A
 
@@ -411,20 +410,20 @@ Pedal señal (0.3V–4.8V)
 GND_logic ──────┬──── STM32 GND
                 ├──── ESP32 GND
                 ├──── TJA1051 #1 GND
-                └──── SN65HVD230 GND
+                └──── TJA1051 #2 GND
 (todos los GND son el mismo nodo — sin aislamiento galvánico)
 ```
 
 #### Diagrama Configuración A
 
 ```
-STM32 Nucleo      TJA1051 #1          Bus CAN         SN65HVD230       ESP32-S3
+STM32 Nucleo      TJA1051 #1          Bus CAN         TJA1051 #2       ESP32-S3
 ┌─────────┐    ┌──────────────┐   ┌───────────┐   ┌──────────────┐   ┌─────────┐
 │PA12(TX)─┼───►│TXD    CANH──┼───┼──CANH─────┼───┼─CANH   TXD  │◄──┼─GPIO4  │
 │PA11(RX)◄┼────│RXD    CANL──┼───┼──CANL─────┼───┼─CANL   RXD  │──►┼─GPIO5  │
 │3.3V─────┼────│VIO          │   │ [120Ω R1] │   │        VCC ─┼───┼─3.3V   │
-│5V/3.3V──┼────│VCC          │   │ [120Ω R2] │   │              │   │        │
-│GND──────┼────│GND  S──►GND │   └───────────┘   │GND  RS──GND ─┼───┼─GND    │
+│3.3V─────┼────│VCC          │   │ [120Ω R2] │   │        VCC ─┼───┼─3.3V   │
+│GND──────┼────│GND  S──►GND │   └───────────┘   │GND  S ──►GND┼───┼─GND    │
 └─────────┘    └──────────────┘                   └──────────────┘   └─────────┘
 GND_logic ────────────────────────────────────────────────────────── GND_logic
 ```
@@ -476,19 +475,18 @@ GND_CAN ────────┬──── TJA1051 #1 GND  (lado aislado)
 | — | **GND** STM32 | ADuM1201 **G1** | GND_logic lado STM32 del ADuM |
 | — | ADuM1201 **AO** | TJA1051 #1 **TXD** | TX a través de barrera |
 | — | ADuM1201 **BI** | TJA1051 #1 **RXD** | RX a través de barrera |
-| — | **5V_aislada** | TJA1051 #1 **VCC** | ✅ Dentro de spec. (4.5–5.5 V) |
+| — | **3.3V_aislada** | TJA1051 #1 **VCC** | Alimentación CAN aislada (configuración actual) |
 | — | **3.3V_aislada** | TJA1051 #1 **VIO** | Nivel lógico del lado aislado |
 | — | **GND_CAN** | TJA1051 #1 **GND** | Masa aislada del vehículo |
 | — | **GND_CAN** | TJA1051 #1 **S** | Modo normal |
 
 **Generación de alimentación aislada:**
 ```
-3.3V (o 5V) rail ──► DC-DC aislado ──► 5V_aislada ──► TJA1051 #1 VCC
-                                          └──► LDO 3.3V ──► 3.3V_aislada ──► ADuM1201 V2
+3.3V rail ──► DC-DC aislado 3.3V→3.3V ──► 3.3V_aislada ──► TJA1051 #1 VCC/VIO y ADuM1201 V2
 ```
 
-**DC-DC aislado recomendado:** RECOM RxxP5.0S (5V/200mA) o Murata MEE1S0505SC.
-⚠️ No usar convertidores no aislados (p. ej., RECOM R-78E5.0) — anulan la barrera galvánica.
+**DC-DC aislado recomendado:** módulo 3.3V→3.3V aislado (≥200 mA).
+⚠️ No usar convertidores no aislados — anulan la barrera galvánica.
 
 #### Esquema Configuración B
 
@@ -502,20 +500,19 @@ STM32 PA11 (RX) ◄── ADuM BO │═════════│ BI ◄──
 3.3V_STM32 ─── ADuM V1      │         │ V2 ─── 3.3V_aislada
 GND_logic ──── ADuM G1      │         │ G2 ─── GND_CAN
                              │         │
-          DC-DC aislado ─────┘         └──► 5V_aislada ──► TJA1051 #1 VCC
-                                       └──► LDO ──► 3.3V_aislada ──► ADuM V2
+           DC-DC aislado ─────┘         └──► 3.3V_aislada ──► TJA1051 #1 VCC/VIO + ADuM V2
 ```
 
 #### Lado ESP32-S3 en Configuración B (sin cambios respecto a Configuración A)
 
-El **SN65HVD230** del lado ESP32 no requiere aislamiento adicional en la mayoría
-de instalaciones. Mantener **VCC = 3.3 V** y `RS/Slope → GND`.
+El **TJA1051T/3 #2** del lado ESP32 no requiere aislamiento adicional en la mayoría
+de instalaciones. Mantener **VCC = 3.3 V**, **VIO = 3.3 V** y `S → GND`.
 
 ---
 
 ### Bus CAN entre los dos transceivers
 
-| Cable | De (TJA1051 #1) | A (SN65HVD230) | Notas |
+| Cable | De (TJA1051 #1) | A (TJA1051 #2) | Notas |
 |-------|-----------------|----------------|-------|
 | 30 | CANH (pin 7) | CANH (pin 7) | **Par trenzado** recomendado |
 | 31 | CANL (pin 6) | CANL (pin 6) | **Par trenzado** recomendado |
@@ -525,9 +522,9 @@ de instalaciones. Mantener **VCC = 3.3 V** y `RS/Slope → GND`.
 | Componente | Ubicación | Valor |
 |-----------|-----------|-------|
 | Resistencia R1 | CANH↔CANL junto a TJA1051 #1 | **120 Ω ¼W** |
-| Resistencia R2 | CANH↔CANL junto al SN65HVD230 | **120 Ω ¼W** |
+| Resistencia R2 | CANH↔CANL junto a TJA1051 #2 | **120 Ω ¼W** |
 | C_bypass #1 | Entre VCC y GND del TJA1051 #1, lo más cerca posible del IC | **100 nF X7R 50V** |
-| C_bypass #2 | Entre VCC y GND del SN65HVD230, lo más cerca posible del IC | **100 nF X7R 50V** |
+| C_bypass #2 | Entre VCC y GND del TJA1051 #2, lo más cerca posible del IC | **100 nF X7R 50V** |
 
 > ✅ Verificar con multímetro (sin alimentar): CANH↔CANL = ~60 Ω (dos 120 Ω en paralelo).
 > ⚠️ Sin las resistencias de terminación, las reflexiones en el bus degradan la señal CAN.
@@ -951,8 +948,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 | # | Pin ESP32-S3 | Tipo | Periférico | Conectar a | Notas |
 |---|-------------|------|------------|-----------|-------|
-| 1 | **GPIO4** | Output | TWAI TX | SN65HVD230 → TXD | CAN TX |
-| 2 | **GPIO5** | Input | TWAI RX | SN65HVD230 → RXD | CAN RX |
+| 1 | **GPIO4** | Output | TWAI TX | TJA1051 #2 → TXD | CAN TX |
+| 2 | **GPIO5** | Input | TWAI RX | TJA1051 #2 → RXD | CAN RX |
 | 3 | **GPIO8** | I2C SDA | Wire | MCP23017 SDA | Palanca de cambios, 400 kHz |
 | 4 | **GPIO9** | I2C SCL | Wire | MCP23017 SCL | Palanca de cambios, 400 kHz |
 | 5 | **GPIO10** | SPI CS | TFT_CS | Display TFT CS | |
@@ -992,10 +989,10 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 6 | INA226 módulo | Sensores corriente | Breakout boards |
 | 1 | TCA9548A módulo | Multiplexor I2C | Breakout board |
 | 5 | DS18B20 | Sensores temperatura | Versión cable (waterproof) |
-| 1 | TJA1051T/3 módulo | Transceiver CAN nodo STM32 | VCC=5V, VIO=3.3V |
-| 1 | SN65HVD230 módulo | Transceiver CAN nodo ESP32 | VCC=3.3V |
+| 1 | TJA1051T/3 módulo | Transceiver CAN nodo STM32 | VCC=3.3V, VIO=3.3V |
+| 1 | TJA1051T/3 módulo #2 | Transceiver CAN nodo ESP32 | VCC=3.3V, VIO=3.3V |
 | 1 *(opcional)* | **Módulo ADuM1201ARZ** (ShengYang o equiv.) | Aislador digital galvánico CAN — entre STM32 y TJA1051T/3 #1 | 2 canales, 2500V aislamiento, 3.3V ambos lados |
-| 1 *(opcional)* | **DC-DC aislado 5V / ≥200 mA** (p. ej. RECOM RxxP5.0S) | Alimentación aislada del TJA1051T/3 #1 cuando se usa el ADuM1201 | Aislamiento ≥1000V rms; NO usar convertidores no aislados |
+| 1 *(opcional)* | **DC-DC aislado 3.3V / ≥200 mA** | Alimentación aislada del TJA1051T/3 #1 cuando se usa el ADuM1201 | Aislamiento ≥1000V rms; NO usar convertidores no aislados |
 | 1 | TF-Mini Plus (Benewake) | Sensor obstáculos LiDAR punto único | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, 115200 bps, conexión directa 3.3V |
 | 5 | Módulo 4-ch opto relé + relés potencia | Relés potencia y LED | Módulo SRD-12VDC-SL-C 4-ch (etapa 1) + relés potencia bobina 12V (etapa 2) + 2× relé LED |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
@@ -1117,14 +1114,14 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### 🟡 ETAPA 2 — Bus CAN (comunicación entre MCUs)
 
 **Qué conectar:**
-1. TJA1051 #1: **PA12** → TXD, **PA11** → RXD, 5V→VCC, **3.3V→VIO**, GND, S→GND
-2. SN65HVD230: **GPIO4** → TXD, **GPIO5** → RXD, **3.3V→VCC**, GND, RS→GND
+1. TJA1051 #1: **PA12** → TXD, **PA11** → RXD, **3.3V→VCC**, **3.3V→VIO**, GND, S→GND
+2. TJA1051 #2: **GPIO4** → TXD, **GPIO5** → RXD, **3.3V→VCC**, **3.3V→VIO**, GND, S→GND
 3. CANH↔CANH, CANL↔CANL (par trenzado recomendado)
 4. **Resistencia 120Ω** entre CANH y CANL en **cada** extremo
 
 > 💡 **Si usas el módulo ADuM1201 (aislamiento galvánico):** interponerlo entre STM32 PA12/PA11
 > y el TJA1051T/3 #1 según el esquema de §9 antes de conectar el transceiver.
-> Necesita además un DC-DC aislado de 5V (para TJA1051 VCC) y 3.3V (para ADuM1201 V2).
+> Necesita además un DC-DC aislado de 3.3V para el lado CAN aislado.
 > El firmware no cambia.
 
 **⚠️ PUNTOS CRÍTICOS:**

@@ -21,7 +21,7 @@
 
 - Pedal real: **PA3 / ADC1_IN4**
 - Palanca real: **MCP23017 en ESP32 GPIO8 / GPIO9**
-- CAN lado ESP32: **SN65HVD230**
+- CAN lado ESP32: **TJA1051T/3**
 - CAN lado STM32: **TJA1051T/3**
 - Sensor de obstáculos actual: **TF-Mini Plus en GPIO18**
 - BTS7960: **RPWM/LPWM + EN** (sin pin DIR dedicado)

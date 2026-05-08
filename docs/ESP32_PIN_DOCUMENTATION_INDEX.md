@@ -15,7 +15,7 @@
 Guía detallada del lado ESP32:
 
 - ✅ Pantalla ST7796 + touch XPT2046
-- ✅ CAN lado ESP32 con **SN65HVD230** (GPIO4/GPIO5)
+- ✅ CAN lado ESP32 con **TJA1051T/3** (GPIO4/GPIO5)
 - ✅ Audio DFPlayer + relé GPIO11
 - ✅ Sensor actual **TF-Mini Plus** (GPIO18, 115200 bps)
 - ✅ Verificaciones y troubleshooting
@@ -28,7 +28,7 @@ Guía detallada del lado ESP32:
 Resumen compacto de:
 
 - ✅ Display + touch
-- ✅ CAN con **SN65HVD230**
+- ✅ CAN con **TJA1051T/3**
 - ✅ TF-Mini Plus
 - ✅ Relé audio GPIO11
 - ✅ MCP23017 en GPIO8/GPIO9
@@ -147,7 +147,7 @@ Diagramas ASCII y vista general de cableado.
 
 ## ⚠️ Reglas rápidas
 
-- ESP32 CAN: **SN65HVD230**, no TJA1051
+- ESP32 CAN: **TJA1051T/3**
 - Sensor actual: **TF-Mini Plus**, no TOFSense-M
 - GPIO18: UART1 RX del sensor de obstáculos
 - GPIO40: entrada optoacoplada invertida (`LOW = llave ON`)

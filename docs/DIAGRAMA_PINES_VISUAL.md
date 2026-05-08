@@ -16,7 +16,7 @@
 │     ESP32-S3       │                     │   STM32G474RE      │
 │                    │                     │                    │
 │ GPIO4/GPIO5        │                     │ PA12 / PA11        │
-│  └─ SN65HVD230 ────┼──── CAN BUS ────────┼─ TJA1051T/3        │
+│  └─ TJA1051T/3 ────┼──── CAN BUS ────────┼─ TJA1051T/3        │
 │                    │                     │                    │
 │ TFT ST7796         │                     │ BTS7960 x5         │
 │ XPT2046 touch      │                     │ INA226 x6          │
@@ -50,7 +50,7 @@ GND     ────────────────► GND
 ## 3. ESP32-S3 — CAN correcto
 
 ```
-ESP32-S3                 SN65HVD230                  Bus CAN
+ESP32-S3                 TJA1051T/3                  Bus CAN
 ────────                 ──────────                  ───────
 GPIO4   ───────────────► TXD
 GPIO5   ◄────────────── RXD
@@ -61,7 +61,7 @@ GND     ───────────────► RS / slope
                          CANL ─────────────────────► CANL
 ```
 
-> El lado ESP32 usa **SN65HVD230**.  
+> El lado ESP32 usa **TJA1051T/3**.  
 > El lado STM32 usa **TJA1051T/3**.
 
 ---
@@ -132,7 +132,7 @@ PB6 / PB7              ── I2C INA226 / TCA9548A
 
 ## 7. Checklist visual rápido
 
-- [ ] ESP32 CAN en **SN65HVD230**, no en TJA1051
+- [ ] ESP32 CAN en **TJA1051T/3**
 - [ ] STM32 CAN en **PA11/PA12**
 - [ ] `EN_RR` en **PC2**, no en PC13
 - [ ] Sensor de obstáculos actual = **TF-Mini Plus** en **GPIO18**
