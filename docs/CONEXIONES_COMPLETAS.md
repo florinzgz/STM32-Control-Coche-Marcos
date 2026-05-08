@@ -1241,7 +1241,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
    - Pin **87** → salida al shunt INA226 #5 y BTS7960 STEER
    - Pin **87a** (si existe) = contacto NC
 
-> **No usar 87a para cargar el coche apagado:** al ser contacto NC puede dejar una ruta energizada en reposo y provocar retroalimentación no controlada. Para carga segura: conector de carga dedicado + fusible dedicado + contactor/relé de carga + interbloqueo de marcha.
+> **No usar 87a para cargar el vehículo apagado:** al ser contacto NC puede quedar unido en reposo y crear rutas de energía no controladas. Para carga segura usar línea dedicada de carga (conector de carga + fusible dedicado + contactor/relé de carga + interbloqueo de marcha).
 >
 > **Diodo flyback:** si el relé de potencia no lo integra, montar **1N4007** en paralelo con cada bobina (cátodo al +12V, ánodo a GND).
 

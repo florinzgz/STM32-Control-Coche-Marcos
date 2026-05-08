@@ -987,7 +987,7 @@ Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
    - Contacto potencia: pin **30** = entrada +12V de dirección; pin **87** = salida hacia shunt INA226 #5 y BTS7960 STEER.
    - Si existe quinto pin, normalmente es **87a (NC)**.
 
-> **No usar 87a para carga del vehículo:** al ser contacto NC, puede quedar unido en reposo y crear rutas de energía no controladas. Para carga con vehículo apagado usar línea dedicada de carga (conector de carga + fusible dedicado + contactor/relé de carga + interbloqueo de marcha).
+> **No usar 87a para cargar el vehículo apagado:** al ser contacto NC, puede quedar unido en reposo y crear rutas de energía no controladas. Para carga segura usar línea dedicada de carga (conector de carga + fusible dedicado + contactor/relé de carga + interbloqueo de marcha).
 >
 > **Flyback de bobina:** si el relé de potencia no integra supresión interna, montar **1N4007** en paralelo con cada bobina (cátodo al +12V, ánodo a GND).
 
