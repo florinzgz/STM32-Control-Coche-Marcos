@@ -30,8 +30,8 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
 
 | Señal | Pin STM32 | Periférico | Nota |
 |-------|-----------|------------|------|
-| SCL | PB6 | I2C1_SCL | 400 kHz Fast-Mode |
-| SDA | PB7 | I2C1_SDA | 400 kHz Fast-Mode |
+| SCL | PB6 | I2C1_SCL | 100 kHz Standard Mode |
+| SDA | PB7 | I2C1_SDA | 100 kHz Standard Mode |
 
 ### Canales TCA9548A (dirección 0x70)
 
@@ -58,7 +58,7 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
 
 ### Motivo técnico
 
-- **400 kHz:** necesario para leer 6 sensores dentro de la ventana de control de 10 ms.
+- **100 kHz Standard Mode:** suficiente para leer 6 sensores en el ciclo de 50 ms (lectura I2C completa ≈ 6–7 ms a 100 kHz, margen amplio). Velocidad reducida desde 400 kHz para mayor robustez EMI en entorno automotriz.
 - **TCA9548A:** permite que todos los INA226 tengan la misma dirección 0x40, simplificando el PCB y el firmware.
 - **Shunt 0.75 mΩ para batería:** reduce la caída de tensión a 75 mV @ 100 A (aceptable).
 - **Shunt 1.5 mΩ para motores:** maximiza la resolución del ADC del INA226 (LSB = 2.5 µV → 1.67 A/bit a 1.5 mΩ).
