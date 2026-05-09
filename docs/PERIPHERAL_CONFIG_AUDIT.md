@@ -207,7 +207,8 @@ HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE);
 ### 5.3 Velocidad 100 kHz Standard Mode: Implementado
 
 - Reducido de 400 kHz a 100 kHz Standard Mode para mayor inmunidad EMI en entorno automotriz.
-- Con 6 INA226 × 3 registros × ~8 ms por lectura ≈ 48–50 ms ciclo completo.
+- Frecuencia efectiva ≈ 86 kHz (conservadora dentro del rango SM ≤ 100 kHz).
+- Con 6 INA226 × ~1.4 ms por sensor ≈ 8–9 ms ciclo completo de lectura.
 - Dentro del presupuesto de 50 ms. No hay riesgo de starvation del scheduler.
 
 ---
