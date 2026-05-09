@@ -25,7 +25,7 @@ CI pipeline failure also fixed (cppcheck false-positive on ISR handlers).
 
 ### Architecture
 - **6 × INA226** sensors connected via **TCA9548A** I2C multiplexer (address 0x70)
-- **I2C1** at 400 kHz on PB6 (SCL) / PB7 (SDA), 7-bit addressing mode
+- **I2C1** at 100 kHz Standard Mode on PB6 (SCL) / PB7 (SDA), 7-bit addressing mode
 - All INA226 share address **0x40** — no conflicts (TCA9548A isolates each)
 - Read cycle: every **50 ms** (20 Hz) from main loop
 

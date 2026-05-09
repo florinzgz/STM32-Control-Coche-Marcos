@@ -525,7 +525,7 @@ enumeración del algoritmo de búsqueda OneWire.
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
 | Cantidad | **6** | `NUM_INA226` (`project_config.h:238`) |
-| Bus | **I2C1** (400 kHz, Fast Mode) | `main.c`: `MX_I2C1_Init` |
+| Bus | **I2C1** (100 kHz, Standard Mode) | `main.c`: `MX_I2C1_Init` |
 | Pin SCL | **PB6** | `PIN_I2C_SCL` (`project_config.h:174`) |
 | Pin SDA | **PB7** | `PIN_I2C_SDA` (`project_config.h:175`) |
 | Dirección INA226 | **0x40** | `I2C_ADDR_INA226` (`project_config.h:233`) |
@@ -777,7 +777,7 @@ automáticamente.
 | Bus | Pines | Velocidad | Dispositivos |
 |-----|-------|-----------|-------------|
 | **FDCAN1** | PA11 (RX), PA12 (TX) | 500 kbps | ESP32 (vía transceiver) |
-| **I2C1** | PB6 (SCL), PB7 (SDA) | 400 kHz | TCA9548A (0x70) → 6× INA226 (0x40) |
+| **I2C1** | PB6 (SCL), PB7 (SDA) | 100 kHz | TCA9548A (0x70) → 6× INA226 (0x40) |
 | **OneWire** | PB0 | ~16 kbps (bit-bang) | 5× DS18B20 |
 | **ADC1** | PA3 | N/A (polling) | Pedal acelerador |
 

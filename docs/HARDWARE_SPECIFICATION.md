@@ -327,7 +327,7 @@ Cada DS18B20:
 
 **Bus I2C1**: PB6 (SCL), PB7 (SDA)  
 **Multiplexor**: TCA9548A @ 0x70  
-**Velocidad**: 400 kHz (Fast Mode)
+**Velocidad**: 100 kHz (Standard Mode)
 
 **Distribución canales:**
 ```

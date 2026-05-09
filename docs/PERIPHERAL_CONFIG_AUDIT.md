@@ -179,7 +179,7 @@ SamplingTime = ADC_SAMPLETIME_247CYCLES_5  // 5.8 µs (antes 1.1 µs)
 
 **Configuración anterior:**
 ```
-Timing: 0x10909CEC (400 kHz Fast Mode @ 170 MHz)
+Timing: 0x30F0EDFF (100 kHz Standard Mode @ 170 MHz)
 Sin digital noise filter (DNF=0)
 Analog filter: habilitado por defecto
 ```
@@ -204,11 +204,12 @@ HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE);
 - Filtro analógico explícitamente habilitado como defensa contra regeneración CubeMX.
 - Bus recovery ya implementado (NXP AN10216) en sensor_manager.c.
 
-### 5.3 Velocidad 400 kHz: Aceptable con precaución
+### 5.3 Velocidad 100 kHz Standard Mode: Implementado
 
-- 400 kHz Fast Mode funciona pero es más susceptible a EMI que 100 kHz Standard Mode.
-- Con 6 INA226 × 3 registros × ~2 ms por lectura ≈ 54 ms ciclo completo.
-- Reducir a 100 kHz duplicaría el tiempo de ciclo a ~108 ms, reduciendo la tasa de actualización de corriente. El filtro digital es un mejor compromiso.
+- Reducido de 400 kHz a 100 kHz Standard Mode para mayor inmunidad EMI en entorno automotriz.
+- Frecuencia efectiva ≈ 86 kHz (conservadora dentro del rango SM ≤ 100 kHz).
+- Con 6 INA226 × ~1.4 ms por sensor ≈ 8–9 ms ciclo completo de lectura.
+- Dentro del presupuesto de 50 ms. No hay riesgo de starvation del scheduler.
 
 ---
 

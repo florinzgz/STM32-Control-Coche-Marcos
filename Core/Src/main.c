@@ -959,7 +959,14 @@ static void MX_FDCAN1_Init(void)
 static void MX_I2C1_Init(void)
 {
     hi2c1.Instance              = I2C1;
-    hi2c1.Init.Timing           = 0x10909CEC;  /* 400 kHz Fast Mode @ 170 MHz */
+    hi2c1.Init.Timing           = 0x30F0EDFF;  /* 100 kHz Standard Mode @ 170 MHz
+                                                 * PRESC=3 → t_PRESC=23.53 ns
+                                                 * SCLH=237 → t_SCLH≈5600 ns (min 4000 ns ✓)
+                                                 * SCLL=255 → t_SCLL≈6023 ns (min 4700 ns ✓)
+                                                 * Actual f_SCL ≈ 86 kHz — within SM spec
+                                                 * (I2C Standard Mode = ≤ 100 kHz; 86 kHz is
+                                                 * deliberately conservative for automotive EMI).
+                                                 * Reduced from 400 kHz Fast Mode. */
     hi2c1.Init.OwnAddress1      = 0;
     hi2c1.Init.AddressingMode   = I2C_ADDRESSINGMODE_7BIT;
     hi2c1.Init.DualAddressMode  = I2C_DUALADDRESS_DISABLE;
