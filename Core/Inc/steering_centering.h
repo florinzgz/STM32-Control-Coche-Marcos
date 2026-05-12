@@ -32,13 +32,18 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
-/* ---- Centering state machine ---- */
+/* ---- Centering state machine ----
+ *
+ * Note: CENTERING_WAIT_RAIL is appended at the end of the enum on purpose
+ * so the CAN-visible numeric values of the pre-existing states (IDLE=0,
+ * SWEEP_LEFT=1, SWEEP_RIGHT=2, DONE=3, FAULT=4) remain stable.            */
 typedef enum {
     CENTERING_IDLE = 0,       /* Not started yet                        */
     CENTERING_SWEEP_LEFT,     /* Moving left at low PWM                 */
     CENTERING_SWEEP_RIGHT,    /* Moving right at low PWM                */
     CENTERING_DONE,           /* Center found, calibrated               */
-    CENTERING_FAULT           /* Failed — motor neutralised, fault set  */
+    CENTERING_FAULT,          /* Failed — motor neutralised, fault set  */
+    CENTERING_WAIT_RAIL       /* DIR relay energised, waiting settle    */
 } CenteringState_t;
 
 /* ---- Public API ---- */
