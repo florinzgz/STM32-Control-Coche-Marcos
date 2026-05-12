@@ -1,5 +1,30 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-12
+
+### [FIX] Homing de dirección en BOOT/STANDBY con relay DIR sin energizar
+
+Corrección de condición de alimentación en el centrado automático (`SteeringCentering_Step`) para evitar fallo determinista de homing cuando el sistema aún no está en `SYS_STATE_ACTIVE`.
+
+- **Problema corregido**:
+  - El homing corría en `BOOT/STANDBY`, pero `Relay_SequencerUpdate()` sólo energiza relés en `ACTIVE`.
+  - Resultado previo: el BTS7960 de dirección podía recibir PWM sin rail de 12V (`PIN_RELAY_DIR` OFF), terminando en `STALL/TIMEOUT` y degradación.
+
+- **Cambios aplicados**:
+  - `Core/Inc/steering_centering.h`:
+    - Nuevo estado `CENTERING_WAIT_RAIL` añadido al final del enum para conservar los valores numéricos existentes (`0..4`) de estados previos.
+  - `Core/Src/steering_centering.c`:
+    - Nuevo `STEERING_RAIL_SETTLE_MS = 50U`.
+    - En `CENTERING_IDLE`, se energiza `PIN_RELAY_DIR` y se registra timestamp de asentamiento.
+    - Nuevo estado `CENTERING_WAIT_RAIL` que espera 50 ms antes de emitir el primer PWM de barrido.
+    - Comentarios de seguridad/idempotencia con `Relay_PowerUp()` y apagado forzado en rutas SAFE/ERROR mediante BSRR atómico en `safety_system.c`.
+
+- **Impacto y compatibilidad**:
+  - Cambio mínimo y localizado (2 archivos, sin tocar scheduler, CAN IDs/DLC, ni lógica central de `safety_system`).
+  - Compatible con rutas `ACTIVE/LIMP_HOME` (reescritura de DIR idempotente).
+  - `Safety_FailSafe/Safety_PowerDown` siguen apagando ambos relés de forma atómica.
+  - Coste: +4 B de BSS y espera one-shot de 50 ms al inicio del homing.
+
 ## [unreleased] — 2026-05-02
 
 ### [FEATURE] Sistema de calibración táctil persistente (ESP32 HMI)
