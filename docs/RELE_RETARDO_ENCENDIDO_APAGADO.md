@@ -203,7 +203,7 @@ LLAVE OFF    ESP32            ESP32       ESP32        Relé
 ```c
 // safety_system.c
 void Relay_PowerDown(void) {
-    GPIO_RESET(PIN_RELAY_DIR);   // PC12 → Dirección OFF primero
+    GPIO_RESET(PIN_RELAY_STEER_PWR);   // PC12 → Dirección OFF primero
     GPIO_RESET(PIN_RELAY_TRAC);  // PC11 → Tracción OFF último
 }
 // Orden INVERSO al encendido: DIR → TRAC (sin retardos entre ellos)

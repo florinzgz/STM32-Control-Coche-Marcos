@@ -136,7 +136,7 @@ El STM32G474RE en formato Nucleo-64 se alimenta por:
 
 > **NO DEDUCIBLE SOLO DESDE EL CÓDIGO**: El firmware no define fusibles ni protecciones
 > eléctricas explícitas. Los relés de potencia (`PIN_RELAY_TRAC`,
-> `PIN_RELAY_DIR`) actúan como seccionadores controlados por software, pero no sustituyen
+> `PIN_RELAY_STEER_PWR`) actúan como seccionadores controlados por software, pero no sustituyen
 > a fusibles físicos. Se recomienda instalar fusibles en las líneas de 24 V y 12 V
 > según el diseño eléctrico del chasis.
 
@@ -617,7 +617,7 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 
 Definidos en `project_config.h`:
 - `PIN_RELAY_TRAC` = GPIO_PIN_11 (PC11)
-- `PIN_RELAY_DIR`  = GPIO_PIN_12 (PC12)
+- `PIN_RELAY_STEER_PWR`  = GPIO_PIN_12 (PC12)
 - `PIN_RELAY_LED`  = GPIO_PIN_10 (PB10)
 - `PIN_RELAY_LED_REAR` = GPIO_PIN_11 (PB11)
 
@@ -707,7 +707,7 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 31 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
 | 32 | **PC10** | GPIOC | (Disponible) | *(no conectado, GPIO libre)* | GPIO Input + Pull-down | — | — |
 | 33 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
-| 34 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_DIR` |
+| 34 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_STEER_PWR` |
 
 > **Nota PC13:** PC13 está conectado al botón USER (B1) en la NUCLEO-G474RE
 > mediante el puente SB17. No debe usarse como salida. `EN_RR` se ha reasignado

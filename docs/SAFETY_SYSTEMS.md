@@ -899,7 +899,7 @@ the watchdog, and processes CAN traffic.
 | Orden de activación | Traction → Direction |
 | Orden de desactivación | Direction → Traction |
 | Temporización Traction → Dir | ≥ 50 ms (`RELAY_TRAC_SETTLE_MS`) — 2 etapas solamente |
-| Pines GPIO utilizados | `PIN_RELAY_TRAC`, `PIN_RELAY_DIR` en GPIOC; PC10 disponible |
+| Pines GPIO utilizados | `PIN_RELAY_TRAC`, `PIN_RELAY_STEER_PWR` en GPIOC; PC10 disponible |
 | Contrato CAN | Ningún mensaje añadido, modificado o eliminado |
 | Máquina de estados del sistema | `Safety_SetState()` no modificada |
 | Watchdog durante power-up | IWDG se refresca normalmente (no bloqueado) |

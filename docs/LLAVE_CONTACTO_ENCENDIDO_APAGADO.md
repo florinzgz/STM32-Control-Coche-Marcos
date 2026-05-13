@@ -413,7 +413,7 @@ El regulador 5 V debe ser capaz de suministrar la corriente total de LEDs
 void Relay_PowerDown(void)
 {
     // Apaga PC11 (TRAC) y PC12 (DIR) en un solo ciclo de reloj
-    GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+    GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR) << 16U;
 }
 
 // main.c / stm32g4xx_it.c

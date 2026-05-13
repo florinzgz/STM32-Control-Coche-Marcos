@@ -116,7 +116,7 @@ The code relied on power-on defaults (0x4127 = 1 sample averaging).
 |-------|------|------------------|----------------|---------|
 | PC10  | GPIOC| (disponible/libre)   | Input, pull-down | N/A  |
 | PC11  | GPIOC| PIN_RELAY_TRAC   | Push-pull, low | OFF ✅  |
-| PC12  | GPIOC| PIN_RELAY_DIR    | Push-pull, low | OFF ✅  |
+| PC12  | GPIOC| PIN_RELAY_STEER_PWR    | Push-pull, low | OFF ✅  |
 
 **Power-up sequencing:** Non-blocking state machine
 1. TRACTION relay ON → wait 50 ms (inrush settling)
@@ -204,7 +204,7 @@ LED strip power could remain energised after a CPU fault.
 | Code Name                  | Documentation Name    | Match |
 |----------------------------|-----------------------|-------|
 | PIN_RELAY_TRAC             | Traction relay        | ✅    |
-| PIN_RELAY_DIR              | Direction relay       | ✅    |
+| PIN_RELAY_STEER_PWR              | Direction relay       | ✅    |
 | PIN_RELAY_LED              | Front LED strip relay | ✅    |
 | PIN_RELAY_LED_REAR         | Rear LED strip relay  | ✅    |
 | I2C_ADDR_INA226            | INA226 sensor address | ✅    |

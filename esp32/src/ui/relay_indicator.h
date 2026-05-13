@@ -2,7 +2,10 @@
 // ESP32-S3 HMI — Relay Status Indicator Widget
 //
 // Compact 2-letter indicator showing real-time relay GPIO command state:
-//   T = TRACTION (PC11, 24 V — bit 1)   D = DIRECTION (PC12, 12 V — bit 2)
+//   T = TRACTION (PC11, 24 V — bit 1)
+//   S = STEER_PWR (PC12, 12 V steering actuator supply — bit 2;
+//                  legacy name "DIRECTION relay" — it powers the steering
+//                  actuator, it does NOT select drive direction)
 //
 // Bit 0 of the relay-status byte is reserved (always 0) and is ignored by
 // this widget. The 3-bit wire layout is preserved for backward compatibility.
@@ -40,14 +43,14 @@ namespace cfg {
 class RelayIndicator {
 public:
     /// Draw relay indicator.  Only redraws if relayStatus byte changed.
-    /// relayStatus: bit0=reserved(0), bit1=TRAC, bit2=DIR, bit7=SEQ_COMPLETE
+    /// relayStatus: bit0=reserved(0), bit1=TRAC, bit2=STEER_PWR, bit7=SEQ_COMPLETE
     /// (3-bit wire layout preserved for backward compatibility).
     static void draw(TFT_eSPI& tft, uint8_t relayStatus, uint8_t prevRelayStatus) {
         if (relayStatus == prevRelayStatus) return;
 
         const bool seqComplete = (relayStatus & 0x80U) != 0;
         const bool tracOn      = (relayStatus & 0x02U) != 0;
-        const bool dirOn       = (relayStatus & 0x04U) != 0;
+        const bool steerPwrOn  = (relayStatus & 0x04U) != 0;
 
         // Clear background
         tft.fillRect(cfg::REL_IND_X, cfg::REL_IND_Y,
@@ -63,13 +66,15 @@ public:
         tft.setTextColor(relayColor(tracOn, seqComplete), COL_BG);
         tft.drawChar('T', cfg::REL_IND_X, textY);
 
-        // Draw "D" for DIRECTION relay
-        tft.setTextColor(relayColor(dirOn, seqComplete), COL_BG);
-        tft.drawChar('D', cfg::REL_IND_X + 14, textY);
+        // Draw "S" for STEER_PWR relay (steering actuator power supply;
+        // legacy display char was "D" for "DIRECTION" — replaced to avoid
+        // confusion with drive direction).
+        tft.setTextColor(relayColor(steerPwrOn, seqComplete), COL_BG);
+        tft.drawChar('S', cfg::REL_IND_X + 14, textY);
     }
 
     /// Static label — draw "REL" prefix (call once on screen enter).
-    /// Intentionally empty: T/D letters are self-explanatory in the gear bar
+    /// Intentionally empty: T/S letters are self-explanatory in the gear bar
     /// context. Kept for API parity with GearDisplay, ModeIcons, etc.
     static void drawStatic(TFT_eSPI& /* tft */) {}
 

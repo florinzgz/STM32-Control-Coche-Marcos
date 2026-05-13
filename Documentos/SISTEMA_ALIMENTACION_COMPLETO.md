@@ -213,7 +213,7 @@ t=50 ms:       RELAY_TRAC ON  (PC11 → HIGH)
 t=50..70 ms:   Espera RELAY_TRACTION_SETTLE_MS = 20 ms  (supresión de arco)
 
 t=70 ms:       RELAY_DIR ON  (PC12 → HIGH)
-               HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR, GPIO_PIN_SET)
+               HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET)
 
                ✅ Todos los relés activos → motores alimentados
 ```
@@ -228,7 +228,7 @@ t=70 ms:       RELAY_DIR ON  (PC12 → HIGH)
 
 ```c
 void Relay_PowerDown(void) {
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);  // Primero dirección
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR,  GPIO_PIN_RESET);  // Primero dirección
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);  // Segundo tracción
 }
 ```

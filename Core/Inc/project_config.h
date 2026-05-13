@@ -138,15 +138,15 @@
  * The relay status is exported to ESP32 via CAN heartbeat byte 5 using
  * a 3-bit wire layout (backward-compatible with CAN contract rev 1.3):
  *   Bit 0 = reserved (always 0)
- *   Bit 1 = TRACTION  (PC11, 24 V)
- *   Bit 2 = DIRECTION (PC12, 12 V)
+ *   Bit 1 = TRACTION    (PC11, 24 V)
+ *   Bit 2 = STEER_PWR   (PC12, 12 V steering actuator power)
  *   Bit 7 = relay sequence complete flag
  *
- * HARDWARE NOTE (CAN rev 1.3 compatible (2026-04-23 clarification)):
+ *   HARDWARE NOTE (CAN rev 1.3 compatible (2026-04-23 clarification)):
  *   The 24 V battery only feeds a single relay (traction; supplies the
- *   four BTS7960 motor drivers).  The 12 V battery feeds the direction
- *   relay (steering actuator).  Only TWO power relays exist.
- *   PC10 is a free GPIO (INPUT_PULLDOWN, not connected — see below).
+ *   four BTS7960 motor drivers).  The 12 V battery feeds the steering
+ *   actuator power relay (PIN_RELAY_STEER_PWR).  Only TWO power relays
+ *   exist.  PC10 is a free GPIO (INPUT_PULLDOWN, not connected).
  *
  * Three-level verification:
  *   Level 1: GPIO output register — what firmware COMMANDED
@@ -197,8 +197,14 @@
  * so the pin sits at a deterministic logic-LOW level (no floating
  * input, no leakage current, no spurious EXTI activity).
  * No firmware logic references PC10.                                   */
-#define PIN_RELAY_TRAC     GPIO_PIN_11  /* PC11 — 24V traction relay (BTS7960 x4) */
-#define PIN_RELAY_DIR      GPIO_PIN_12  /* PC12 — 12V direction relay (steering)  */
+#define PIN_RELAY_TRAC          GPIO_PIN_11  /* PC11 — 24V traction relay (BTS7960 x4) */
+/* PC12 — 12V relay that supplies POWER to the steering BTS7960 H-bridge.
+ * Renamed from the legacy "PIN_RELAY_DIR" to remove the ambiguity with
+ * drive direction (FORWARD/REVERSE).  This relay does NOT control the
+ * direction of motion; it only gates the 12 V power rail of the steering
+ * actuator.  Drive direction is selected in software by Traction_SetGear()
+ * and applied via motor PWM sign — see motor_control.c.                 */
+#define PIN_RELAY_STEER_PWR     GPIO_PIN_12  /* PC12 — 12V steering actuator power relay */
 
 /* ========================================================================== */
 /*                       LED POWER RELAYS (GPIOB)                             */

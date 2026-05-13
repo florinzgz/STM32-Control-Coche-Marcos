@@ -906,8 +906,10 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                     }
                 } else {
                     // Toggle individual relay bit (only when override enabled).
-                    // Wire layout: bit1=TRACTION(PC11), bit2=DIRECTION(PC12).
-                    // i=1→TRAC: 1U<<1=0x02; i=2→DIR: 1U<<2=0x04.
+                    // Wire layout: bit1=TRACTION(PC11), bit2=STEER_PWR(PC12)
+                    // (legacy name "DIRECTION relay" — steering actuator
+                    //  power supply; does NOT select drive direction).
+                    // i=1→TRAC: 1U<<1=0x02; i=2→STEER_PWR: 1U<<2=0x04.
                     // After the << 1 shift in the CAN encoding below, STM32
                     // decode (mask = (ctl>>1)&0x07, then &0x06) sees the
                     // correct bit-1/bit-2 relay assignment.
@@ -1895,7 +1897,8 @@ void EngineeringScreen::drawRelayControl() {
         tft.setTextDatum(TL_DATUM);
     }
 
-    // Button rows: Override Enable, TRACTION, DIRECTION (CAN rev 1.3 compatible (2026-04-23 clarification))
+    // Button rows: Override Enable, TRACTION, STEER_PWR (CAN rev 1.3
+    // compatible — legacy "DIRECTION" relay = steering actuator power)
     static constexpr int16_t RC_ROW_Y0 = 80;
     static constexpr int16_t RC_ROW_SPC = 36;
     static constexpr int16_t RC_ROW_H = 30;
@@ -1903,13 +1906,13 @@ void EngineeringScreen::drawRelayControl() {
     static const char* const rowLabels[3] = {
         "Override Enable",
         "TRACTION  (PC11)",
-        "DIRECTION (PC12)"
+        "STEER PWR (PC12)"
     };
 
     // Real relay state from CAN heartbeat byte 5 (3-bit wire layout).
-    // bit 0 = reserved (always 0), bit 1 = TRAC, bit 2 = DIR.
-    const bool realTrac = (relayStatus_ & 0x02U) != 0;
-    const bool realDir  = (relayStatus_ & 0x04U) != 0;
+    // bit 0 = reserved (always 0), bit 1 = TRAC, bit 2 = STEER_PWR.
+    const bool realTrac    = (relayStatus_ & 0x02U) != 0;
+    const bool realDir     = (relayStatus_ & 0x04U) != 0;  /* STEER_PWR */
     const bool realState[3] = {
         relayOverrideEnabled_,
         realTrac,

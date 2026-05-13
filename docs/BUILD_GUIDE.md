@@ -167,7 +167,7 @@ Pinout & Configuration:
    ├─ PC0-PC9 (Control motores)
    ├─ PC10 (Disponible/libre)
    ├─ PC11-PC12, PD2 (Relés)
-   ├─ PB12-PB13 (Shifter), PB14 (LED_DIAG)
+   ├─ PB12-PB13 (LIBRES — el shifter NO va aquí, va en MCP23017 del ESP32), PB14 (LED_DIAG)
    └─ PB5 (OneWire temperatura)
 ```
 

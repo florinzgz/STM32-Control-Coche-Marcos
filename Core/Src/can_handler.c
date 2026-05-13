@@ -436,7 +436,7 @@ void CAN_SendHeartbeat(void) {
          *   Byte 5: relay_status   (bitmask, added for relay visibility)
          *            bit 0: reserved (always 0; PC10 not connected)
          *            bit 1: TRACTION relay GPIO ON
-         *            bit 2: DIRECTION relay GPIO ON
+         *            bit 2: STEER_PWR relay GPIO ON (12 V steering actuator supply)
          *            bit 7: relay sequence complete
          *
          * DLC extended from 5 to 6.  ESP32 parsers that check DLC >= 5
@@ -1458,7 +1458,8 @@ void CAN_ProcessMessages(void) {
                          *   bit 0: override enable (1=on, 0=off)
                          *   bit 1: reserved (always 0; PC10 not connected)
                          *   bit 2: TRACTION relay
-                         *   bit 3: DIRECTION relay
+                         *   bit 3: STEER_PWR relay (12 V steering actuator supply;
+                         *          legacy name "DIRECTION relay")
                          *
                          * Safety gating is enforced by Safety_SetRelayOverride():
                          *   - System must be in STANDBY
