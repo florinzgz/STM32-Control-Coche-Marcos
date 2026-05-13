@@ -67,13 +67,13 @@
 #define TOTAL_TIMEOUT_MS           10000U  /* Absolute deadline (ms)    */
 #define MAX_CENTERING_COUNTS       6000    /* Safety range limit        */
 
-/* Steering BTS7960 power rail settle after energising PIN_RELAY_DIR.
+/* Steering BTS7960 power rail settle after energising PIN_RELAY_STEER_PWR.
  * Matches RELAY_TRACTION_SETTLE_MS used by Relay_SequencerUpdate
  * (safety_system.c) for arc suppression on SRD-style relays.
  * Reason: SteeringCentering_Step() runs in BOOT/STANDBY, but the main
- * relay sequencer only energises PIN_RELAY_DIR in SYS_STATE_ACTIVE,
+ * relay sequencer only energises PIN_RELAY_STEER_PWR in SYS_STATE_ACTIVE,
  * so the BTS7960 steering rail would otherwise be unpowered during
- * the homing sweep.  We drive PIN_RELAY_DIR locally and wait this
+ * the homing sweep.  We drive PIN_RELAY_STEER_PWR locally and wait this
  * settle window before emitting any PWM to the BTS7960.                */
 #define STEERING_RAIL_SETTLE_MS    50U     /* DIR relay settle (ms)     */
 
@@ -189,7 +189,7 @@ void SteeringCentering_Step(void)
 
     /* ---- IDLE: first call energises steering power rail ----
      *
-     * The BTS7960 steering H-bridge gets its 12 V from PIN_RELAY_DIR
+     * The BTS7960 steering H-bridge gets its 12 V from PIN_RELAY_STEER_PWR
      * (PC12).  In BOOT/STANDBY the main relay sequencer does NOT
      * energise this relay (its hard gate requires SYS_STATE_ACTIVE,
      * see safety_system.c:Relay_SequencerUpdate).  We therefore drive
@@ -198,14 +198,14 @@ void SteeringCentering_Step(void)
      *
      * Idempotent w.r.t. Relay_PowerUp/Relay_SequencerUpdate: when the
      * system later transitions to ACTIVE, the sequencer re-writes
-     * PIN_RELAY_DIR to SET (same value) — no glitch.  On any path that
+     * PIN_RELAY_STEER_PWR to SET (same value) — no glitch.  On any path that
      * powers the vehicle down (Safety_FailSafe / Safety_PowerDown /
      * Safety_EmergencyStop / Relay_PowerDown), the atomic BSRR reset
      * in safety_system.c forces this relay back OFF, so steering can
      * never remain energised in SAFE/ERROR.                            */
     case CENTERING_IDLE:
         SteeringCenter_ClearFlag();
-        HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
         rail_settle_tick = now;
         centering_state  = CENTERING_WAIT_RAIL;
         break;

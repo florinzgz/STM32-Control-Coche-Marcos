@@ -116,7 +116,7 @@ The code relied on power-on defaults (0x4127 = 1 sample averaging).
 |-------|------|------------------|----------------|---------|
 | PC10  | GPIOC| (disponible/libre)   | Input, pull-down | N/A  |
 | PC11  | GPIOC| PIN_RELAY_TRAC   | Push-pull, low | OFF ✅  |
-| PC12  | GPIOC| PIN_RELAY_DIR    | Push-pull, low | OFF ✅  |
+| PC12  | GPIOC| PIN_RELAY_STEER_PWR    | Push-pull, low | OFF ✅  |
 
 **Power-up sequencing:** Non-blocking state machine
 1. TRACTION relay ON → wait 50 ms (inrush settling)
@@ -178,7 +178,7 @@ LED strip power could remain energised after a CPU fault.
 | TCA9548A addr    | 0x70            | ✅ main.h:138       |
 | INA226 addr      | 0x40            | ✅ main.h:139       |
 | RELAY_TRAC       | PC11            | ✅ main.h:85        |
-| RELAY_DIR        | PC12            | ✅ main.h:86        |
+| RELAY_STEER_PWR  | PC12            | ✅ main.h:86 (legacy: RELAY_DIR) |
 | RELAY_LED        | PB10            | ✅ main.h:94        |
 | RELAY_LED_REAR   | PB11            | ✅ main.h:95        |
 | Motor FL RPWM    | PA8 (TIM1_CH1)  | ✅ main.h:45        |
@@ -204,7 +204,7 @@ LED strip power could remain energised after a CPU fault.
 | Code Name                  | Documentation Name    | Match |
 |----------------------------|-----------------------|-------|
 | PIN_RELAY_TRAC             | Traction relay        | ✅    |
-| PIN_RELAY_DIR              | Direction relay       | ✅    |
+| PIN_RELAY_STEER_PWR        | Steering power relay (legacy "Direction relay") | ✅    |
 | PIN_RELAY_LED              | Front LED strip relay | ✅    |
 | PIN_RELAY_LED_REAR         | Rear LED strip relay  | ✅    |
 | I2C_ADDR_INA226            | INA226 sensor address | ✅    |

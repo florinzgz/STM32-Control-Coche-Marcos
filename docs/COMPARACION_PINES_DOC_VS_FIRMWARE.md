@@ -81,7 +81,7 @@
 | PC5 | EN_FL | `PIN_EN_FL = GPIO_PIN_5` | `main.h:53` | ✅ |
 | PC13 | EN_RR | `PIN_EN_RR = GPIO_PIN_13` | `main.h:56` | ✅ |
 | PC11 | RELAY_TRAC | `PIN_RELAY_TRAC = GPIO_PIN_11` | `main.h:61` | ✅ |
-| PC12 | RELAY_DIR | `PIN_RELAY_DIR = GPIO_PIN_12` | `main.h:62` | ✅ |
+| PC12 | RELAY_STEER_PWR (legacy: RELAY_DIR) | `PIN_RELAY_STEER_PWR = GPIO_PIN_12` | `main.h:62` | ✅ |
 | PB10 | RELAY_LED (frontal) | `PIN_RELAY_LED = GPIO_PIN_10` | `main.h:70` | ✅ |
 | PB11 | RELAY_LED_REAR | `PIN_RELAY_LED_REAR = GPIO_PIN_11` | `main.h:71` | ✅ |
 | PA0 | WHEEL_FL (EXTI0) | `PIN_WHEEL_FL = GPIO_PIN_0` | `main.h:74` | ✅ |

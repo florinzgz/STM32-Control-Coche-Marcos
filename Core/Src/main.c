@@ -742,8 +742,8 @@ static void MX_GPIO_Init(void)
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* Relay outputs (GPIOC): PC11 = traction, PC12 = direction. */
-    gpio.Pin = PIN_RELAY_TRAC | PIN_RELAY_DIR;
+    /* Relay outputs (GPIOC): PC11 = traction, PC12 = steering actuator power. */
+    gpio.Pin = PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR;
     HAL_GPIO_Init(GPIOC, &gpio);
 
     /* PC10 — AVAILABLE / not connected to any hardware.
@@ -1267,7 +1267,7 @@ void Error_Handler(void)
      * Uses direct register access because HAL may be inconsistent.    */
     GPIOC->BSRR = (uint32_t)(PIN_EN_FL | PIN_EN_FR | PIN_EN_RL | PIN_EN_RR
                   | PIN_EN_STEER
-                  | PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+                  | PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR) << 16U;
     /* LED power relays on GPIOB — also force OFF (both front and rear) */
     GPIOB->BSRR = (uint32_t)(PIN_RELAY_LED | PIN_RELAY_LED_REAR) << 16U;
     TIM1->BDTR &= ~TIM_BDTR_MOE;   /* Disable all TIM1 PWM outputs (FL, FR)   */

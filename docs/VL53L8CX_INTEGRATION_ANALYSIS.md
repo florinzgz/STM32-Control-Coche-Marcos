@@ -399,7 +399,8 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 | PB3–PB5 | 3 | Encoder B, encoder Z-index, steering center |
 | PB6–PB7 | 2 | I2C1_SCL, I2C1_SDA |
 | PB10–PB11 | 2 | LED relay front/rear |
-| PB12–PB13 | 2 | Shifter FWD/NEU (PB14 reasignado a LED_DIAG) |
+| PB12–PB13 | 2 | **LIBRES** — sin asignación en `MX_GPIO_Init()` (la antigua palanca PB12/PB13 NO existe; el shifter está en MCP23017 sobre ESP32, ver `docs/HARDWARE_AND_SENSOR_MAP.md` §6.3) |
+| PB14 | 1 | LED_DIAG (GPIO_Output) |
 | PB15 | 1 | Wheel speed RR (EXTI15) |
 | PC0–PC1 | 2 | EN_FR, EN_RL |
 | PC3–PC5 | 3 | LPWM_FR (TIM1_CH4), EN_STEER, EN_FL |

@@ -436,7 +436,7 @@ void CAN_SendHeartbeat(void) {
          *   Byte 5: relay_status   (bitmask, added for relay visibility)
          *            bit 0: reserved (always 0; PC10 not connected)
          *            bit 1: TRACTION relay GPIO ON
-         *            bit 2: DIRECTION relay GPIO ON
+         *            bit 2: STEER_PWR relay GPIO ON (12 V steering actuator supply)
          *            bit 7: relay sequence complete
          *
          * DLC extended from 5 to 6.  ESP32 parsers that check DLC >= 5
@@ -1262,43 +1262,100 @@ void CAN_ProcessMessages(void) {
                     break;
                 }
                 {
+                    /* ====================================================
+                     * F3 — Atomic CMD_MODE validation:
+                     *   1) Decode requested mode and (optional) gear.
+                     *   2) Run ALL safety validations first.
+                     *   3) Commit BOTH mode and gear only if EVERY check
+                     *      passes; otherwise commit NOTHING and return a
+                     *      proper ACK (REJECTED / BLOCKED_BY_SAFETY /
+                     *      INVALID).
+                     *   This prevents partial application (mode applied
+                     *   while gear rejected) that previously left the
+                     *   system in an inconsistent half-committed state.
+                     *
+                     * F4 — Safe direction transition:
+                     *   When switching between FORWARD/FORWARD_D2 and
+                     *   REVERSE, require EITHER a transition through
+                     *   NEUTRAL (current gear == NEUTRAL or requested ==
+                     *   NEUTRAL) OR that the pedal is released below
+                     *   CMD_MODE_PEDAL_REST_PCT.  The ≤1 km/h speed gate
+                     *   is preserved and stacks with this check.
+                     * ==================================================== */
+
+                    /* Pedal-release threshold for D↔R transition (% of full).
+                     * Intentionally a local constant — mirrors the value of
+                     * main.c STARTUP_PEDAL_REST_PCT (3 %) without creating
+                     * a cross-module dependency in this safety-critical TU.
+                     * KEEP IN SYNC: if STARTUP_PEDAL_REST_PCT in main.c is
+                     * tuned, update this constant too.                     */
+                    static const float CMD_MODE_PEDAL_REST_PCT = 3.0f;
+
                     uint8_t mode_flags = rx_payload[0];
                     bool enable_4x4 = (mode_flags & 0x01) != 0;
                     bool tank_turn  = (mode_flags & 0x02) != 0;
-                    bool mode_ok = false;
-                    /* STM32 decides: mode change only allowed at low speed */
-                    if (Safety_ValidateModeChange(enable_4x4, tank_turn)) {
-                        Traction_SetMode4x4(enable_4x4);
-                        Traction_SetAxisRotation(tank_turn);
-                        mode_ok = true;
-                    }
 
-                    /* Byte 1 (optional): gear position (P/R/N/D).
-                     * Backward compatible: if only 1 byte is sent, gear
-                     * remains unchanged (defaults to FORWARD on init).
-                     * Gear changes are only accepted at very low speed
-                     * (same constraint as mode changes).                  */
-                    bool gear_ok = true;
-                    if (msg_len >= 2) {
+                    /* --- Decode optional gear byte (msg_len >= 2) ------ */
+                    bool gear_present = (msg_len >= 2);
+                    GearPosition_t requested_gear = Traction_GetGear();
+                    bool gear_range_ok = true;
+                    if (gear_present) {
                         uint8_t gear_raw = rx_payload[1];
                         if (gear_raw <= (uint8_t)GEAR_FORWARD_D2) {
-                            GearPosition_t requested = (GearPosition_t)gear_raw;
-                            /* Gear change only allowed near standstill */
-                            float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
-                                             Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
-                            avg_spd = sanitize_float(avg_spd, SANITIZE_SPEED_DEFAULT);
-                            if (avg_spd <= 1.0f) {
-                                Traction_SetGear(requested);
-                            } else {
-                                gear_ok = false;
-                            }
+                            requested_gear = (GearPosition_t)gear_raw;
                         } else {
-                            gear_ok = false;
+                            gear_range_ok = false;
                         }
                     }
 
+                    /* --- Validate mode change (low-speed gate) --------- */
+                    bool mode_ok = Safety_ValidateModeChange(enable_4x4, tank_turn);
+
+                    /* --- Validate gear change (low-speed + D↔R safety) - */
+                    bool gear_ok = gear_range_ok;
+                    if (gear_present && gear_ok) {
+                        float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                                         Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+                        avg_spd = sanitize_float(avg_spd, SANITIZE_SPEED_DEFAULT);
+                        if (avg_spd > 1.0f) {
+                            gear_ok = false;            /* preserves ≤1 km/h gate */
+                        } else {
+                            /* F4: forbid direct D↔R without NEUTRAL or
+                             * pedal-released confirmation.                */
+                            GearPosition_t cur = Traction_GetGear();
+                            bool cur_is_fwd = (cur == GEAR_FORWARD ||
+                                               cur == GEAR_FORWARD_D2);
+                            bool req_is_fwd = (requested_gear == GEAR_FORWARD ||
+                                               requested_gear == GEAR_FORWARD_D2);
+                            bool cur_is_rev = (cur == GEAR_REVERSE);
+                            bool req_is_rev = (requested_gear == GEAR_REVERSE);
+                            bool direction_swap = (cur_is_fwd && req_is_rev) ||
+                                                  (cur_is_rev && req_is_fwd);
+                            if (direction_swap) {
+                                float pedal = Pedal_GetPercent();
+                                pedal = sanitize_float(pedal, 0.0f);
+                                if (pedal > CMD_MODE_PEDAL_REST_PCT) {
+                                    /* Direct D↔R swap requested while the
+                                     * pedal is not released — reject.
+                                     * (The NEUTRAL path is implicitly
+                                     *  handled: direction_swap is false
+                                     *  whenever either side is NEUTRAL.) */
+                                    gear_ok = false;
+                                }
+                            }
+                        }
+                    }
+
+                    /* --- Atomic commit (all-or-nothing) ---------------- */
                     if (mode_ok && gear_ok) {
+                        Traction_SetMode4x4(enable_4x4);
+                        Traction_SetAxisRotation(tank_turn);
+                        if (gear_present) {
+                            Traction_SetGear(requested_gear);
+                        }
                         CAN_SendCommandAck(0x02, ACK_OK);
+                    } else if (!gear_range_ok) {
+                        CAN_SendCommandAck(0x02, ACK_INVALID);
                     } else {
                         CAN_SendCommandAck(0x02, ACK_REJECTED);
                     }
@@ -1407,7 +1464,8 @@ void CAN_ProcessMessages(void) {
                          *   bit 0: override enable (1=on, 0=off)
                          *   bit 1: reserved (always 0; PC10 not connected)
                          *   bit 2: TRACTION relay
-                         *   bit 3: DIRECTION relay
+                         *   bit 3: STEER_PWR relay (12 V steering actuator supply;
+                         *          legacy name "DIRECTION relay")
                          *
                          * Safety gating is enforced by Safety_SetRelayOverride():
                          *   - System must be in STANDBY

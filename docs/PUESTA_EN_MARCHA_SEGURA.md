@@ -493,7 +493,7 @@ Min: 0.3V × 0.404 = 0.12V
 **Objetivo:** Verificar que los relés conmutan antes de conectar motores.
 
 **Referencia firmware:**
-- `project_config.h:116-118` — `PIN_RELAY_TRAC` = PC11, `PIN_RELAY_DIR` = PC12
+- `project_config.h:116-118` — `PIN_RELAY_TRAC` = PC11, `PIN_RELAY_STEER_PWR` = PC12
 - PC10 está DISPONIBLE (sin uso)
 
 ### Materiales

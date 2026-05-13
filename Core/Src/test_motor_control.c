@@ -1481,7 +1481,7 @@ static void test_fault_handler_en_first_order(void)
 
     /* EN pins must not overlap with relay pins.
      * Only two power relays exist: TRAC (PC11) and DIR (PC12). */
-    uint16_t relay_pins = PIN_RELAY_TRAC | PIN_RELAY_DIR;
+    uint16_t relay_pins = PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR;
     ASSERT_TRUE((en_pins & relay_pins) == 0U);
 
     /* BSRR reset-half: shifting left by 16 puts bits in the reset field.

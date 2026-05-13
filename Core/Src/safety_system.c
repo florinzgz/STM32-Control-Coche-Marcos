@@ -131,7 +131,7 @@ static inline void sat_inc_u32(uint32_t *counter) {
                                        * 4× BTS7960 inrush settling delay.
                                        * Bumped from 20 ms → 50 ms to cover
                                        * worst-case capacitive inrush on the
-                                       * 24 V bus before the direction relay
+                                       * 24 V bus before the steering power relay
                                        * and steering electronics come up.  */
 
 /* Relay health check thresholds (post-ACTIVE runtime validation).
@@ -250,7 +250,7 @@ static uint32_t last_error_tick         = 0;
 /* ---- Non-blocking relay sequencer state machine ----
  *
  * The 24 V battery has only ONE relay (traction, PC11).  The 12 V
- * battery has the direction relay (PC12).  Two-stage power-up sequence:
+ * battery feeds the steering actuator power relay (PC12).  Two-stage power-up sequence:
  *   TRACTION_ON → (RELAY_TRACTION_SETTLE_MS) → COMPLETE (direction on)
  * Power-down order is reversed: DIR off, then TRAC off.               */
 typedef enum {
@@ -272,7 +272,7 @@ static uint32_t        relay_seq_timestamp = 0;
  * forward compatibility with rev 1.3 consumers):
  *   bit 0: reserved (always 0)
  *   bit 1: TRACTION  relay (PC11)
- *   bit 2: DIRECTION relay (PC12)                                      */
+ *   bit 2: STEER_PWR relay (PC12, 12 V steering actuator power)         */
 static bool    relay_override_enabled = false;
 static uint8_t relay_override_mask    = 0;
 
@@ -702,7 +702,7 @@ void Relay_SequencerUpdate(void)
 
     /* Hard gate: NEVER energise relays unless the system is in the
      * fully operational ACTIVE state.  This is a defence-in-depth
-     * safeguard that prevents the direction relay from being turned ON
+     * safeguard that prevents the steering power relay from being turned ON
      * by this 10 ms tick if a fault, SAFE, ERROR, or emergency stop
      * occurred between Relay_PowerUp() and the next sequencer tick.
      *
@@ -741,7 +741,7 @@ void Relay_SequencerUpdate(void)
     switch (relay_seq_state) {
         case RELAY_SEQ_TRACTION_ON:
             if ((now - relay_seq_timestamp) >= RELAY_TRACTION_SETTLE_MS) {
-                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR, GPIO_PIN_SET);
+                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
                 relay_seq_state = RELAY_SEQ_COMPLETE;
             }
             break;
@@ -764,9 +764,9 @@ void Relay_PowerDown(void)
      * handled separately by Traction_EmergencyStop().
      *
      * BSRR upper half (bits 16-31) = reset bits; lower half = set bits.
-     * Writing PIN_RELAY_TRAC|PIN_RELAY_DIR shifted left 16 atomically
+     * Writing PIN_RELAY_TRAC|PIN_RELAY_STEER_PWR shifted left 16 atomically
      * clears only those two outputs.                                    */
-    GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_DIR) << 16U;
+    GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR) << 16U;
 
     /* Cancel any in-progress power-up sequence AFTER the hardware
      * outputs are guaranteed to be low.  Also clears override state so
@@ -821,14 +821,15 @@ uint8_t Safety_GetRelayStatusByte(void)
      * CAN wire layout (backward-compatible 3-bit, bit 0 reserved):
      *   bit 0 = 0 (reserved; PC10 is a free GPIO, always 0)
      *   bit 1 = TRACTION  (PC11, 24 V — the only 24 V-side switch)
-     *   bit 2 = DIRECTION (PC12, 12 V — steering actuator)
+     *   bit 2 = STEER_PWR (PC12, 12 V — steering actuator supply; legacy
+     *                       name "DIRECTION relay")
      *   bit 7 = SEQ_COMPLETE
      *
      * This layout preserves the original 3-bit contract so existing
      * ESP32 consumers that decode bit 1 = TRAC and bit 2 = DIR continue
      * to work unchanged.                                                 */
     if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 1);
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR))  status |= (1U << 2);
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR))  status |= (1U << 2);
 
     /* Sequence complete flag */
     if (relay_seq_state == RELAY_SEQ_COMPLETE) status |= (1U << 7);
@@ -893,7 +894,7 @@ void Safety_SetRelayOverride(bool enabled, uint8_t mask)
         /* Disable override — turn off all relay GPIOs that were set by override */
         if (relay_override_enabled) {
             HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,  GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR,  GPIO_PIN_RESET);
         }
         relay_override_enabled = false;
         relay_override_mask    = 0;
@@ -937,7 +938,7 @@ void Safety_RelayOverrideUpdate(void)
     /* Apply override mask to relay GPIOs (bit 0 reserved/ignored) */
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_TRAC,
                       (relay_override_mask & 0x02U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_DIR,
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR,
                       (relay_override_mask & 0x04U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
@@ -1371,7 +1372,7 @@ void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wh
  *   2. ≥2 consecutive → DEGRADED L3 (more restrictive limits)
  *   3. ≥3 consecutive → SAFE → Safety_FailSafe():
  *        – Traction_EmergencyStop() disables all motor PWM + H-bridge EN
- *        – Relay_PowerDown() de-energises traction and direction relays
+ *        – Relay_PowerDown() de-energises traction and steering-power relays
  *        – Steering centred or neutralised
  *   Hardware fuses and BTS7960 internal current limiting handle sub-ms
  *   transients; this software path protects against sustained faults.  */
@@ -1601,6 +1602,14 @@ void Safety_CheckCANTimeout(void)
                     limphome_recovery_pending = 0;
                 } else {
                     limphome_recovery_pending = 0;
+                    /* SAFETY (F2): force gear to NEUTRAL before re-enabling
+                     * motion so that any stale `current_gear` latched during
+                     * the outage is invalidated.  The ESP32 will retransmit
+                     * the real shifter position on the next CMD_MODE update,
+                     * which is the authoritative source.  While gear stays
+                     * in NEUTRAL the demand pipeline in main.c/Traction_Update
+                     * already clamps traction demand to 0.                 */
+                    Traction_SetGear(GEAR_NEUTRAL);
                     Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
                     Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
                     Safety_SetState(SYS_STATE_ACTIVE);
@@ -1621,6 +1630,10 @@ void Safety_CheckCANTimeout(void)
         if (system_state == SYS_STATE_SAFE &&
             (safety_error == SAFETY_ERROR_CAN_TIMEOUT ||
              safety_error == SAFETY_ERROR_CAN_BUSOFF)) {
+            /* SAFETY (F2): also clear any stale gear latch on this path,
+             * since SAFE→LIMP_HOME re-enables some motion (limited power).
+             * The ESP32 will refresh the gear via CMD_MODE.               */
+            Traction_SetGear(GEAR_NEUTRAL);
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
             Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
             Safety_SetState(SYS_STATE_LIMP_HOME);

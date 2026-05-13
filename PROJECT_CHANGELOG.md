@@ -1,5 +1,171 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-13
+
+### Critical Safety Remediation & Documentation Alignment (F1–F7)
+
+Surgical remediation pass targeting gear-synchronization safety, CAN
+state consistency, debounce robustness, naming clarity and documentation
+correctness in the shifter/traction subsystem.  No architectural change,
+no new dependencies, no scheduler/PWM/CAN-bitrate/watchdog timing change.
+
+#### F1 — Safe default gear on STM32
+
+- **File**: `Core/Src/motor_control.c`
+- **Change**: `static GearPosition_t current_gear` default and the value
+  assigned by `Traction_Init()` are now `GEAR_NEUTRAL` (was
+  `GEAR_FORWARD`).  Header comment updated accordingly.
+- **Rationale**: the ESP32 shifter driver (`esp32/src/shifter_input.cpp`
+  `currentGear_`) also boots in `NEUTRAL`.  Booting both nodes in the
+  same fail-safe state eliminates the cross-node mismatch window that
+  existed between STM32 boot and the first CMD_MODE resync from the
+  ESP32.  While `current_gear == GEAR_NEUTRAL`, `main.c` already forces
+  traction demand to 0 (lines 483–484), so this is the strictest
+  fail-safe.
+- **Safety impact**: removes the residual "default-FORWARD vs lever in
+  REVERSE" mismatch during pre-resync boot windows.
+
+#### F2 — Force gear resync after CAN-timeout recovery
+
+- **File**: `Core/Src/safety_system.c`
+- **Change**: in both code paths that clear `SAFETY_ERROR_CAN_TIMEOUT`
+  (the `LIMP_HOME → ACTIVE` debounced transition and the
+  `SAFE → LIMP_HOME` transition), `Traction_SetGear(GEAR_NEUTRAL)` is
+  invoked **before** clearing the error and re-enabling motion.
+- **Rationale**: before this fix, `current_gear` survived a CAN outage
+  as a latched value.  If the shifter changed during the outage, the
+  STM32 would resume operation with stale gear state until the ESP32
+  re-sent a different value.  Forcing `NEUTRAL` on recovery makes the
+  ESP32's CMD_MODE the authoritative resync source.
+- **Safety impact**: eliminates stale gear state across CAN recovery.
+  No timing impact (one atomic write on a transition that already
+  happens at most once per outage).
+
+#### F3 — Atomic CMD_MODE application
+
+- **File**: `Core/Src/can_handler.c` (case `CAN_ID_CMD_MODE`)
+- **Change**: the case has been refactored into a two-phase flow:
+  1. **Validate** — decode mode flags and (optional) gear, run
+     `Safety_ValidateModeChange()` and the `≤ 1 km/h` gear gate with
+     `sanitize_float`, and the new F4 D↔R check.
+  2. **Commit** — only if **every** validation passes, apply mode
+     (`Traction_SetMode4x4`, `Traction_SetAxisRotation`) and gear
+     (`Traction_SetGear`) atomically; otherwise apply nothing.
+- **ACK semantics**:
+  - All-OK → `ACK_OK`
+  - Gear byte out of range → `ACK_INVALID`
+  - Any safety/speed/transition rejection → `ACK_REJECTED`
+  - System not in `ACTIVE/DEGRADED` → `ACK_BLOCKED_BY_SAFETY`
+  - DLC < 1 → `ACK_INVALID`
+- **Rationale**: previously, mode could be committed while gear was
+  rejected, producing a partial application and a misleading
+  `REJECTED` ACK.  All existing safety gates (`Safety_IsCommandAllowed`,
+  `Safety_ValidateModeChange`, `≤ 1 km/h`, `sanitize_float`) are
+  preserved unchanged.
+- **CAN protocol**: untouched — same frame structure, same DLC, same
+  byte layout (byte 0 = mode flags, byte 1 = optional gear).
+
+#### F4 — Safe direction transition (D ↔ R)
+
+- **File**: `Core/Src/can_handler.c` (inside the refactored CMD_MODE
+  validation)
+- **Change**: a direct gear change between `FORWARD / FORWARD_D2` and
+  `REVERSE` is rejected unless **one** of the following holds:
+  1. the transition goes through `NEUTRAL` (either the current or the
+     requested gear is `NEUTRAL`), or
+  2. the pedal is released below `CMD_MODE_PEDAL_REST_PCT = 3.0 %`
+     (matches the spirit of `main.c` `STARTUP_PEDAL_REST_PCT`).
+- **Rationale**: stacks on top of the existing `≤ 1 km/h` low-speed
+  gate to make D ↔ R unconditionally safe (no torque inversion under
+  load).
+- **CPU/RAM impact**: negligible — a few additional comparisons and
+  one `Pedal_GetPercent()` read per CMD_MODE frame (≤ 10 Hz typical).
+- **Safety impact**: removes the residual "shift D ↔ R while crawling
+  with throttle applied" hazard.
+
+#### F5 — True shifter debounce
+
+- **File**: `esp32/src/shifter_input.cpp`
+- **Change**: `shifter::update()` now requires
+  `DEBOUNCE_SAMPLES = 2` consecutive identical decoded samples before
+  `currentGear_` is updated.  Two new static module-scope variables
+  (`pendingGear_`, `pendingCount_`) hold the candidate and counter.
+  Total RAM cost: **2 bytes**, no heap allocation, no behavioural
+  change to the 50 ms polling cadence, the one-hot fail-safe in
+  `decodeGear()`, or the NEUTRAL fallback in I²C error / backoff paths
+  (those paths also reset the debounce state, never publishing a
+  non-NEUTRAL gear on a single post-recovery sample).
+- **Rationale**: previous behaviour was an inter-transmission interval
+  (≥ 100 ms between CAN sends) but no per-sample stability filtering.
+- **CPU impact**: one extra comparison and conditional store per poll
+  (≤ 1 µs on ESP32-S3).
+
+#### F6 — Rename `PIN_RELAY_DIR` → `PIN_RELAY_STEER_PWR`
+
+- **Files**:
+  - `Core/Inc/project_config.h` — macro definition with explicit
+    comment explaining that this relay supplies 12 V power to the
+    steering BTS7960 H-bridge and does **not** select drive direction.
+  - `Core/Src/main.c`, `Core/Src/safety_system.c`,
+    `Core/Src/can_handler.c`, `Core/Src/steering_centering.c`,
+    `Core/Src/stm32g4xx_it.c`, `Core/Src/test_motor_control.c` — all
+    references renamed; misleading "DIRECTION relay" comments updated
+    to "STEER_PWR relay (12 V steering actuator supply)".
+  - ESP32 telemetry and UI:
+    - `esp32/src/ui/relay_indicator.h` — comment and on-screen char
+      updated from "D" to "S" (single character, same layout).
+    - `esp32/src/screens/engineering_screen.cpp` — button label
+      `"DIRECTION (PC12)"` → `"STEER PWR (PC12)"`; surrounding
+      comments updated.
+    - `esp32/src/led_controller.h` — header comment updated.
+  - Documentation: `docs/SAFETY_SYSTEMS.md`,
+    `docs/PUESTA_EN_MARCHA_SEGURA.md`,
+    `docs/INA226_RELAY_SAFETY_AUDIT.md`,
+    `docs/LLAVE_CONTACTO_ENCENDIDO_APAGADO.md`,
+    `docs/HARDWARE_WIRING_MANUAL.md`,
+    `docs/COMPARACION_PINES_DOC_VS_FIRMWARE.md`,
+    `docs/RELE_RETARDO_ENCENDIDO_APAGADO.md`,
+    `Documentos/RELAY_STATUS_VISUALIZATION.md`,
+    `Documentos/SISTEMA_ALIMENTACION_COMPLETO.md`,
+    `PROJECT_CHANGELOG.md` — global token replacement.
+- **Functional impact**: zero — same GPIO (PC12), same bit position
+  (bit 2 of relay-status byte), same CAN-protocol behaviour.  This is
+  exclusively a naming/clarity change.
+
+#### F7 — Purge obsolete shifter documentation
+
+- **Files**:
+  - `docs/HARDWARE.md` — legacy redirect page rewritten: now states
+    that the shifter is on the MCP23017 (I²C @ 400 kHz, SDA = GPIO8,
+    SCL = GPIO9, address `0x20`), one-hot active-LOW dry contacts,
+    NEUTRAL = no closed contact, gear in `CMD_MODE` (CAN 0x102) byte 1,
+    `PB12/PB13` free, `PB14 = LED_DIAG`; stale `HARDWARE_SPECIFICATION.md`
+    link removed.
+  - `docs/VL53L8CX_INTEGRATION_ANALYSIS.md` — false claim
+    "`PB12–PB13`: Shifter FWD/NEU" replaced with explicit "LIBRES" +
+    cross-reference to `docs/HARDWARE_AND_SENSOR_MAP.md` §6.3.
+  - `docs/BUILD_GUIDE.md` — false STM32CubeMX pin-assignment hint
+    replaced with explicit "PB12-PB13 LIBRES — el shifter NO va aquí".
+  - `docs/PINOUT_DEFINITIVO.md` is already marked entirely obsolete by
+    its own two-banner header (kept as historical record).
+- **Result**: no document in the repository still claims that the
+  shifter is wired to STM32 pins.  The authoritative description is
+  `docs/HARDWARE_AND_SENSOR_MAP.md` §6.3.
+
+### Compatibility statement
+
+- CAN frame IDs, DLCs, byte layouts and bitrate: **unchanged**.
+- Scheduler cadence, PWM timing, relay sequencing, watchdog semantics,
+  MCP23017 topology, I²C bus configuration: **unchanged**.
+- No new third-party dependencies introduced; no dynamic allocation
+  added (debounce state is a 2-byte static module variable).
+- ESP32 telemetry bit layout (heartbeat byte 5) is preserved: bit 1
+  = TRACTION, bit 2 = STEER_PWR (formerly named "DIRECTION").  Older
+  ESP32 builds that still display the legacy "D" character will keep
+  working; new builds display "S".
+
+---
+
 ## [unreleased] — 2026-05-12
 
 ### [FIX] Homing de dirección en BOOT/STANDBY con relay DIR sin energizar
@@ -8,14 +174,14 @@ Corrección de condición de alimentación en el centrado automático (`Steering
 
 - **Problema corregido**:
   - El homing corría en `BOOT/STANDBY`, pero `Relay_SequencerUpdate()` sólo energiza relés en `ACTIVE`.
-  - Resultado previo: el BTS7960 de dirección podía recibir PWM sin rail de 12V (`PIN_RELAY_DIR` OFF), terminando en `STALL/TIMEOUT` y degradación.
+  - Resultado previo: el BTS7960 de dirección podía recibir PWM sin rail de 12V (`PIN_RELAY_STEER_PWR` OFF), terminando en `STALL/TIMEOUT` y degradación.
 
 - **Cambios aplicados**:
   - `Core/Inc/steering_centering.h`:
     - Nuevo estado `CENTERING_WAIT_RAIL` añadido al final del enum para conservar los valores numéricos existentes (`0..4`) de estados previos.
   - `Core/Src/steering_centering.c`:
     - Nuevo `STEERING_RAIL_SETTLE_MS = 50U`.
-    - En `CENTERING_IDLE`, se energiza `PIN_RELAY_DIR` y se registra timestamp de asentamiento.
+    - En `CENTERING_IDLE`, se energiza `PIN_RELAY_STEER_PWR` y se registra timestamp de asentamiento.
     - Nuevo estado `CENTERING_WAIT_RAIL` que espera 50 ms antes de emitir el primer PWM de barrido.
     - Comentarios de seguridad/idempotencia con `Relay_PowerUp()` y apagado forzado en rutas SAFE/ERROR mediante BSRR atómico en `safety_system.c`.
 
@@ -203,9 +369,9 @@ Filters pulses occurring within < 200 µs — a window in which no real sensor e
 - **`Core/Src/main.c` — `MX_GPIO_Init()`:** Added explicit PC10 init block that configures the pin as `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` + `GPIO_SPEED_FREQ_LOW`. Rationale documented inline: prevents indeterminate readings / spurious EXTI noise, eliminates leakage current through floating CMOS input, keeps the pin safe for future reassignment. Removed the obsolete `"PC10 reserved — no MAIN contactor in the hardware"` comment from the relay-output block.
 - **`Core/Src/safety_system.c`:**
   - Sequencer header diagram updated from the legacy 3-stage `MAIN → TRAC → DIR (~70 ms)` to the real 2-stage `TRAC → (50 ms) → DIR (~50 ms)`. Added explicit note that PC10 is a free GPIO (input + pull-down, not connected) and that 24 V feeds RELAY_TRAC directly.
-  - `Relay_PowerUp()` / `Relay_PowerDown()` comments cleaned: BSRR mask still contains **only** `PIN_RELAY_TRAC | PIN_RELAY_DIR`; PC10 is explicitly described as a free GPIO that is NOT touched on power-down.
+  - `Relay_PowerUp()` / `Relay_PowerDown()` comments cleaned: BSRR mask still contains **only** `PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR`; PC10 is explicitly described as a free GPIO that is NOT touched on power-down.
   - `relay_override_mask` bit-0 documented as “reserved (always 0)” for forward compatibility with rev 1.3 SERVICE_CMD 0xE0 consumers (no behavioural change).
-  - `Safety_GetRelayStatusByte()` comment updated: bit 0 = 0 (reserved; PC10 free GPIO), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE.
+  - `Safety_GetRelayStatusByte()` comment updated: bit 0 = 0 (reserved; PC10 free GPIO), bit 1 = TRAC, bit 2 = STEER_PWR (legacy DIR), bit 7 = SEQ_COMPLETE.
 - **`Core/Src/can_handler.c`:** Heartbeat (0x001) byte 5 doc-comment and SERVICE_CMD 0xE0 relay-override doc-comment updated — bit 0 relabelled from `MAIN relay GPIO ON` to `reserved (always 0; PC10 not connected)`. **Wire layout unchanged** — fully backward-compatible with the rev 1.3 CAN contract.
 - **`Core/Src/test_motor_control.c`:** Comment-only refresh to match the new architecture.
 
@@ -619,7 +785,7 @@ Encoder A/B/Z (push-pull 5V) → [330Ω R_IN] → LED 6N137 → GND_encoder (ais
 #### Cambios principales (a nivel firmware — cambio CAN posteriormente revertido a compatible)
 - **CAN**: `HEARTBEAT_STM32` (0x001) byte 5 `relay_status` cambia de 3 bits (MAIN/TRAC/DIR) a **2 bits (TRAC=bit0, DIR=bit1)**; bit 7 = `SEQ_COMPLETE` sigue igual. Contrato bump 1.3 → 1.4. Consumidores deben actualizarse en lockstep.
 - **Firmware STM32**:
-  - `project_config.h`: `PIN_RELAY_MAIN` eliminado; PC10 queda **reservado/libre**. `PIN_RELAY_TRAC` (PC11) y `PIN_RELAY_DIR` (PC12) se mantienen.
+  - `project_config.h`: `PIN_RELAY_MAIN` eliminado; PC10 queda **reservado/libre**. `PIN_RELAY_TRAC` (PC11) y `PIN_RELAY_STEER_PWR` (PC12) se mantienen.
   - `safety_system.c`: secuenciador pasa de 3 fases (MAIN→TRAC→DIR) a **2 fases** (TRAC→DIR, ~20 ms — posteriormente ajustado a 50 ms en el hardening). `RELAY_MAIN_SETTLE_MS` eliminado; `RELAY_SEQ_MAIN_ON` eliminado. `Safety_GetRelayStatusByte()` reporta layout de 2 bits internos (bit 0 = TRAC, bit 1 = DIR) — *en el pase de hardening posterior se restauró el layout de 3 bits rev 1.3 compatible con bit 0 = reservado/0*. Override mask (SERVICE_CMD 0xE0) pasa a 2 bits — *también restaurado a 3 bits en el hardening*. Diagnóstico de "stuck open" referido ahora a `MODULE_RELAY_TRAC`.
   - `main.c` / `stm32g4xx_it.c`: GPIO init y máscara BSRR del *emergency stop* sin `PIN_RELAY_MAIN`.
   - `service_mode`: `MODULE_RELAY_MAIN` **renombrado a `MODULE_RELAY_TRAC`** (ID 3 preservado — no rompe IDs de CAN ni métricas históricas).

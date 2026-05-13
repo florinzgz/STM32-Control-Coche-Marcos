@@ -315,13 +315,14 @@ void Relay_SequencerUpdate(void);
  *   bit 0: override enable
  *   bit 1: reserved (always 0; PC10 not connected)
  *   bit 2: TRACTION relay
- *   bit 3: DIRECTION relay                                               */
+ *   bit 3: STEER_PWR relay (12 V steering actuator supply; legacy name
+ *          "DIRECTION relay" — does NOT select drive direction)        */
 void Safety_SetRelayOverride(bool enabled, uint8_t mask);
 bool Safety_IsRelayOverrideActive(void);
 void Safety_RelayOverrideUpdate(void);
 
 /* Returns true only when the relay power-up sequence has completed
- * and both relays (TRACTION, DIRECTION) are physically
+ * and both relays (TRACTION, STEER_PWR) are physically
  * closed.  Subsystems that depend on relay power being available
  * should gate on this instead of checking system state alone.
  *
@@ -339,7 +340,8 @@ bool Relay_IsSequenceInProgress(void);
  *
  *   Bit 0: reserved (always 0; PC10 is a free GPIO)
  *   Bit 1: TRACTION relay GPIO (PC11)  — 1 = commanded ON
- *   Bit 2: DIRECTION relay GPIO (PC12) — 1 = commanded ON
+ *   Bit 2: STEER_PWR relay GPIO (PC12) — 1 = commanded ON
+ *          (12 V steering actuator supply; legacy name "DIRECTION relay")
  *   Bit 7: Sequence complete flag       — 1 = RELAY_SEQ_COMPLETE
  *   Bits 3-6: reserved (always 0)
  *

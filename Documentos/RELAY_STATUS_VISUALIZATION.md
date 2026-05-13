@@ -267,11 +267,11 @@ SEQ:IN PROGRESS [0x00]    ← AMBER
 1. GPIO Hardware (GPIOC output register)
    ├── PC10 (disponible/libre)  = GPIO_PIN_10)   → project_config.h:147
    ├── PC11 (PIN_RELAY_TRAC  = GPIO_PIN_11)   → project_config.h:148
-   └── PC12 (PIN_RELAY_DIR   = GPIO_PIN_12)   → project_config.h:149
+   └── PC12 (PIN_RELAY_STEER_PWR   = GPIO_PIN_12)   → project_config.h:149
 
 2. Safety_GetRelayStatusByte()                  → safety_system.c:724-747
    ├── HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)  → bit 1
-   ├── HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_DIR)   → bit 2
+   ├── HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR)   → bit 2
    ├── relay_seq_state == RELAY_SEQ_COMPLETE     → bit 7
    └── #ifdef DEBUG: NOP trap if COMPLETE but no relay GPIO ON
 
