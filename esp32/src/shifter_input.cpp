@@ -48,6 +48,9 @@ static constexpr uint32_t BACKOFF_POLL_MS  = 1000;  // Poll interval during back
 // Module state
 static Config       cfg_;
 static Gear         currentGear_   = Gear::NEUTRAL;
+static Gear         pendingGear_   = Gear::NEUTRAL;        // F5: candidate awaiting confirmation
+static uint8_t      pendingCount_  = 0;                     // F5: consecutive identical samples
+static constexpr uint8_t DEBOUNCE_SAMPLES = 2;              // F5: required identical samples
 static unsigned long lastPollMs_   = 0;
 static bool         initialized_   = false;
 static uint8_t      errorCount_    = 0;               // Consecutive I2C error counter
@@ -126,6 +129,8 @@ void init(const Config& cfg) {
     initialized_ = true;
     lastPollMs_  = 0;
     currentGear_ = Gear::NEUTRAL;
+    pendingGear_  = Gear::NEUTRAL;   // F5: reset debounce state
+    pendingCount_ = 0;
 
     if (ok) {
         Serial.println("[SHIFTER] MCP23017 initialized");
@@ -151,18 +156,27 @@ void update() {
         Wire.beginTransmission(cfg_.i2cAddr);
         if (Wire.endTransmission() != 0) {
             currentGear_ = Gear::NEUTRAL;
+            pendingGear_  = Gear::NEUTRAL;   // F5: reset debounce on fail-safe
+            pendingCount_ = 0;
             return;  // Device still absent — stay in backoff
         }
         // Device responded — re-initialize and resume
         if (!writeReg(REG_IODIRA, GEAR_MASK) || !writeReg(REG_GPPUA, GEAR_MASK)) {
             currentGear_ = Gear::NEUTRAL;
+            pendingGear_  = Gear::NEUTRAL;   // F5: reset debounce on fail-safe
+            pendingCount_ = 0;
             return;  // Re-init failed — stay in backoff
         }
         errorCount_ = 0;
         connected_  = true;
         Serial.println("[SHIFTER] MCP23017 reconnected");
         uint8_t portVal = readReg(REG_GPIOA);
-        currentGear_ = (portVal != 0xFF) ? decodeGear(portVal) : Gear::NEUTRAL;
+        // F5: after reconnect, force the NEUTRAL fail-safe and restart the
+        // debounce window — never publish a non-NEUTRAL gear on a single
+        // post-recovery sample.
+        currentGear_ = Gear::NEUTRAL;
+        pendingGear_  = (portVal != 0xFF) ? decodeGear(portVal) : Gear::NEUTRAL;
+        pendingCount_ = 1;
         return;
     }
 
@@ -178,8 +192,10 @@ void update() {
                 Serial.println("[SHIFTER] MCP23017 I2C error — backoff active");
             }
         }
-        // Set currentGear_ to NEUTRAL during error
-        currentGear_ = Gear::NEUTRAL;
+        // Set currentGear_ to NEUTRAL during error and clear debounce state
+        currentGear_  = Gear::NEUTRAL;
+        pendingGear_  = Gear::NEUTRAL;
+        pendingCount_ = 0;
         return;
     }
 
@@ -189,7 +205,26 @@ void update() {
         connected_  = true;
     }
 
-    currentGear_ = decodeGear(portVal);
+    // F5 — true debounce:
+    //   Only commit a decoded gear to currentGear_ after observing
+    //   DEBOUNCE_SAMPLES (=2) consecutive identical samples.  Any
+    //   sample that differs from the pending candidate restarts the
+    //   counter.  This filters single-poll glitches without any heap
+    //   allocation, RAM cost = 2 bytes (pendingGear_ + pendingCount_),
+    //   and preserves the 50 ms polling cadence and the one-hot
+    //   NEUTRAL fail-safe in decodeGear().
+    Gear sample = decodeGear(portVal);
+    if (sample == pendingGear_) {
+        if (pendingCount_ < DEBOUNCE_SAMPLES) {
+            pendingCount_++;
+        }
+    } else {
+        pendingGear_  = sample;
+        pendingCount_ = 1;
+    }
+    if (pendingCount_ >= DEBOUNCE_SAMPLES) {
+        currentGear_ = pendingGear_;
+    }
 }
 
 Gear getGear() {

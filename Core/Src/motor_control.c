@@ -277,8 +277,10 @@ static inline float sanitize_float(float val, float safe_default)
  * Applied once at the final demand stage in Traction_Update() so it
  * does NOT interact with ABS/TCS wheel_scale[] or the ramp limiter.
  *
- *   GEAR_FORWARD  (D1) = 60 % max power — default forward mode
+ *   GEAR_FORWARD  (D1) = 60 % max power — drive forward (low gear)
  *   GEAR_FORWARD_D2    = 100 % max power — full performance
+ *
+ * Boot default is GEAR_NEUTRAL (fail-safe) — see current_gear init.
  *   GEAR_REVERSE       = 60 % max power
  *
  * Safety_GetPowerLimitFactor() is applied separately upstream and
@@ -427,8 +429,15 @@ static uint32_t        neutral_ramp_tick  = 0;     /* Timestamp for dt calc   */
 static uint8_t         neutral_ramp_active = 0;    /* 1 = ramping down        */
 static int8_t          neutral_ramp_dir   = 1;     /* Captured travel direction*/
 
-/* ---- Gear position state ---- */
-static GearPosition_t current_gear = GEAR_FORWARD;
+/* ---- Gear position state ----
+ * Safety default: boot in NEUTRAL.  The ESP32 shifter driver also boots
+ * in NEUTRAL (esp32/src/shifter_input.cpp).  Booting both nodes in the
+ * same fail-safe state eliminates the cross-node mismatch window that
+ * existed when the STM32 defaulted to FORWARD before shifter resync.
+ * While current_gear == GEAR_NEUTRAL, Traction_Update() and main.c
+ * already force the traction demand to 0 (see main.c:483-484), so this
+ * is the strictest fail-safe boot state.                                */
+static GearPosition_t current_gear = GEAR_NEUTRAL;
 
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
@@ -798,8 +807,11 @@ void Traction_Init(void)
     frozen_pedal_speed   = 0.0f;
     anomaly_init         = 0;
 
-    /* Default gear to FORWARD */
-    current_gear = GEAR_FORWARD;
+    /* Default gear to NEUTRAL (fail-safe).
+     * The ESP32 shifter driver also boots in NEUTRAL, so both nodes
+     * start in the same state and no forward assumption exists before
+     * the first CMD_MODE gear update arrives over CAN.                 */
+    current_gear = GEAR_NEUTRAL;
 }
 
 void Steering_Init(void)

@@ -1601,6 +1601,14 @@ void Safety_CheckCANTimeout(void)
                     limphome_recovery_pending = 0;
                 } else {
                     limphome_recovery_pending = 0;
+                    /* SAFETY (F2): force gear to NEUTRAL before re-enabling
+                     * motion so that any stale `current_gear` latched during
+                     * the outage is invalidated.  The ESP32 will retransmit
+                     * the real shifter position on the next CMD_MODE update,
+                     * which is the authoritative source.  While gear stays
+                     * in NEUTRAL the demand pipeline in main.c/Traction_Update
+                     * already clamps traction demand to 0.                 */
+                    Traction_SetGear(GEAR_NEUTRAL);
                     Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
                     Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
                     Safety_SetState(SYS_STATE_ACTIVE);
@@ -1621,6 +1629,10 @@ void Safety_CheckCANTimeout(void)
         if (system_state == SYS_STATE_SAFE &&
             (safety_error == SAFETY_ERROR_CAN_TIMEOUT ||
              safety_error == SAFETY_ERROR_CAN_BUSOFF)) {
+            /* SAFETY (F2): also clear any stale gear latch on this path,
+             * since SAFE→LIMP_HOME re-enables some motion (limited power).
+             * The ESP32 will refresh the gear via CMD_MODE.               */
+            Traction_SetGear(GEAR_NEUTRAL);
             Safety_ClearError(SAFETY_ERROR_CAN_TIMEOUT);
             Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
             Safety_SetState(SYS_STATE_LIMP_HOME);
