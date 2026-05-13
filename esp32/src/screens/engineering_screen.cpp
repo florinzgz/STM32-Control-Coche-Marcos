@@ -1911,12 +1911,12 @@ void EngineeringScreen::drawRelayControl() {
 
     // Real relay state from CAN heartbeat byte 5 (3-bit wire layout).
     // bit 0 = reserved (always 0), bit 1 = TRAC, bit 2 = STEER_PWR.
-    const bool realTrac    = (relayStatus_ & 0x02U) != 0;
-    const bool realDir     = (relayStatus_ & 0x04U) != 0;  /* STEER_PWR */
+    const bool realTrac     = (relayStatus_ & 0x02U) != 0;
+    const bool realSteerPwr = (relayStatus_ & 0x04U) != 0;  /* PC12 STEER_PWR (legacy DIR) */
     const bool realState[3] = {
         relayOverrideEnabled_,
         realTrac,
-        realDir
+        realSteerPwr
     };
 
     tft.setTextSize(1);
@@ -1967,9 +1967,9 @@ void EngineeringScreen::drawRelayControl() {
         tft.drawString("CAN RELAY STATUS (real)", MENU_X, infoY);
 
         char buf[48];
-        snprintf(buf, sizeof(buf), "T:%s D:%s  SEQ:%s  [0x%02X]",
-                 realTrac ? "ON " : "OFF",
-                 realDir  ? "ON " : "OFF",
+        snprintf(buf, sizeof(buf), "T:%s S:%s  SEQ:%s  [0x%02X]",
+                 realTrac     ? "ON " : "OFF",
+                 realSteerPwr ? "ON " : "OFF",
                  (relayStatus_ & 0x80U) ? "COMPLETE" : "IDLE    ",
                  relayStatus_);
 

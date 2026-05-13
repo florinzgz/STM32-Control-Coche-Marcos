@@ -1284,8 +1284,11 @@ void CAN_ProcessMessages(void) {
                      * ==================================================== */
 
                     /* Pedal-release threshold for D↔R transition (% of full).
-                     * Matches the spirit of main.c STARTUP_PEDAL_REST_PCT
-                     * (3 %) without creating a cross-module dependency.   */
+                     * Intentionally a local constant — mirrors the value of
+                     * main.c STARTUP_PEDAL_REST_PCT (3 %) without creating
+                     * a cross-module dependency in this safety-critical TU.
+                     * KEEP IN SYNC: if STARTUP_PEDAL_REST_PCT in main.c is
+                     * tuned, update this constant too.                     */
                     static const float CMD_MODE_PEDAL_REST_PCT = 3.0f;
 
                     uint8_t mode_flags = rx_payload[0];
@@ -1332,8 +1335,11 @@ void CAN_ProcessMessages(void) {
                                 float pedal = Pedal_GetPercent();
                                 pedal = sanitize_float(pedal, 0.0f);
                                 if (pedal > CMD_MODE_PEDAL_REST_PCT) {
-                                    /* Neither path through NEUTRAL nor
-                                     * pedal release — reject.            */
+                                    /* Direct D↔R swap requested while the
+                                     * pedal is not released — reject.
+                                     * (The NEUTRAL path is implicitly
+                                     *  handled: direction_swap is false
+                                     *  whenever either side is NEUTRAL.) */
                                     gear_ok = false;
                                 }
                             }

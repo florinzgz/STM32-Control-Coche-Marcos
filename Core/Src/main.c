@@ -742,7 +742,7 @@ static void MX_GPIO_Init(void)
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* Relay outputs (GPIOC): PC11 = traction, PC12 = direction. */
+    /* Relay outputs (GPIOC): PC11 = traction, PC12 = steering actuator power. */
     gpio.Pin = PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR;
     HAL_GPIO_Init(GPIOC, &gpio);
 

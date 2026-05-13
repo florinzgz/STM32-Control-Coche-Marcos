@@ -371,7 +371,7 @@ Filters pulses occurring within < 200 µs — a window in which no real sensor e
   - Sequencer header diagram updated from the legacy 3-stage `MAIN → TRAC → DIR (~70 ms)` to the real 2-stage `TRAC → (50 ms) → DIR (~50 ms)`. Added explicit note that PC10 is a free GPIO (input + pull-down, not connected) and that 24 V feeds RELAY_TRAC directly.
   - `Relay_PowerUp()` / `Relay_PowerDown()` comments cleaned: BSRR mask still contains **only** `PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR`; PC10 is explicitly described as a free GPIO that is NOT touched on power-down.
   - `relay_override_mask` bit-0 documented as “reserved (always 0)” for forward compatibility with rev 1.3 SERVICE_CMD 0xE0 consumers (no behavioural change).
-  - `Safety_GetRelayStatusByte()` comment updated: bit 0 = 0 (reserved; PC10 free GPIO), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE.
+  - `Safety_GetRelayStatusByte()` comment updated: bit 0 = 0 (reserved; PC10 free GPIO), bit 1 = TRAC, bit 2 = STEER_PWR (legacy DIR), bit 7 = SEQ_COMPLETE.
 - **`Core/Src/can_handler.c`:** Heartbeat (0x001) byte 5 doc-comment and SERVICE_CMD 0xE0 relay-override doc-comment updated — bit 0 relabelled from `MAIN relay GPIO ON` to `reserved (always 0; PC10 not connected)`. **Wire layout unchanged** — fully backward-compatible with the rev 1.3 CAN contract.
 - **`Core/Src/test_motor_control.c`:** Comment-only refresh to match the new architecture.
 
