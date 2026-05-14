@@ -53,6 +53,7 @@ extern "C" {
 #define CAN_ID_ERROR_LOG_HEADER   0x305  // STM32 → ESP32 (1000ms) error log count + total
 #define CAN_ID_DIAG_DEBOUNCE      0x306  // STM32 → ESP32 (1000ms) DWT-debounce filtered counts (4× wheel u16 LE)
 #define CAN_ID_DIAG_DEBOUNCE_STEER 0x307 // STM32 → ESP32 (1000ms) DWT-debounce filtered count (steer u32 LE)
+#define CAN_ID_DIAG_PEDAL_CAL     0x308  // STM32 → ESP32 (on-demand, 10 Hz for 1 s after QUERY) pedal calibration telemetry
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -67,7 +68,20 @@ extern "C" {
 #define SERVICE_ACTION_RESET_TRACTION_FORCE 0xF3
 #define SERVICE_ACTION_RESET_STEERING_FORCE 0xF4
 #define SERVICE_ACTION_CLEAR_ERROR_LOG     0xFE
+#define SERVICE_ACTION_PEDAL_CAL           0xF5  /* Pedal endpoint calibration (byte1 = sub-opcode) */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
+
+/* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
+ * 0x01 CAPTURE_MIN    Capture current ADC as released endpoint (pending)
+ * 0x02 CAPTURE_MAX    Capture current ADC as pressed  endpoint (pending)
+ * 0x03 SAVE           Validate pending pair + persist to flash + apply
+ * 0x04 RESET_DEFAULTS Erase flash slot + restore 150 / 2413
+ * 0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz   */
+#define PEDAL_CAL_OP_CAPTURE_MIN    0x01U
+#define PEDAL_CAL_OP_CAPTURE_MAX    0x02U
+#define PEDAL_CAL_OP_SAVE           0x03U
+#define PEDAL_CAL_OP_RESET_DEFAULTS 0x04U
+#define PEDAL_CAL_OP_QUERY          0x05U
 
 /* Command ACK result codes (uint8_t) */
 typedef enum {
@@ -151,6 +165,12 @@ bool CAN_IsGlobalSilent(void);
 void CAN_CheckBusOff(void);
 bool CAN_IsBusOff(void);
 void CAN_UpdateFrameRate(void);     /* Call every ~1 s to compute rx FPS  */
+
+/* Drives the on-demand 0x308 pedal-calibration telemetry burst.
+ * Call once per 100 ms tick — the function is a no-op while no
+ * burst is in progress, so it is safe to call unconditionally and
+ * has zero impact on backward-compatible nodes that ignore 0x308. */
+void CAN_PedalCalBurstUpdate(void);
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */

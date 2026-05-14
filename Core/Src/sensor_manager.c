@@ -414,9 +414,22 @@ extern I2C_HandleTypeDef hi2c1;
 /* ADC calibration (voltage divider 10kΩ + 6.8kΩ, 12-bit, 3.3V ref)
  * Divider ratio: 6.8/(10+6.8) = 0.4048
  * Pedal 0.3V released → 0.3 × 0.4048 = 0.121V → 0.121/3.3 × 4095 ≈ 150
- * Pedal 4.8V pressed  → 4.8 × 0.4048 = 1.943V → 1.943/3.3 × 4095 ≈ 2413 */
-#define PEDAL_ADC_MIN   150U     /* ~0.3V (pedal released), after divider */
-#define PEDAL_ADC_MAX   2413U    /* ~4.8V (pedal fully pressed), after divider */
+ * Pedal 4.8V pressed  → 4.8 × 0.4048 = 1.943V → 1.943/3.3 × 4095 ≈ 2413
+ *
+ * Runtime calibration:
+ *   The active endpoints used by Pedal_RawToPercent() are kept in
+ *   `pedal_adc_min` / `pedal_adc_max` (file-scope statics).  At boot
+ *   they start at the compile-time defaults below and may be
+ *   replaced via Pedal_ApplyCalibration() with values loaded from
+ *   flash (Core/Src/pedal_cal_store.c).  All other pedal-pipeline
+ *   thresholds (FAULT_LO/HI, sample tolerance, rate limit, EMA α,
+ *   plausibility window) remain compile-time constants and are NOT
+ *   affected by runtime calibration.                                  */
+#define PEDAL_ADC_MIN_DEFAULT   150U   /* ~0.3V (pedal released), after divider */
+#define PEDAL_ADC_MAX_DEFAULT   2413U  /* ~4.8V (pedal fully pressed), after divider */
+
+static uint16_t pedal_adc_min = PEDAL_ADC_MIN_DEFAULT;
+static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
 
 /* Fault detection thresholds — values outside this band indicate
  * open/short circuit (wider margin than calibrated range).
@@ -470,10 +483,10 @@ static void Pedal_ReadDualSample(void)
  */
 static float Pedal_RawToPercent(uint16_t raw)
 {
-    if (raw <= PEDAL_ADC_MIN) return 0.0f;
-    if (raw >= PEDAL_ADC_MAX) return 100.0f;
-    return (float)(raw - PEDAL_ADC_MIN) * 100.0f
-         / (float)(PEDAL_ADC_MAX - PEDAL_ADC_MIN);
+    if (raw <= pedal_adc_min) return 0.0f;
+    if (raw >= pedal_adc_max) return 100.0f;
+    return (float)(raw - pedal_adc_min) * 100.0f
+         / (float)(pedal_adc_max - pedal_adc_min);
 }
 
 void Pedal_Update(void)
@@ -538,6 +551,31 @@ float Pedal_GetPercent(void)        { return pedal_pct; }
 bool  Pedal_IsPlausible(void)       { return pedal_plausible; }
 bool  Pedal_IsContradictory(void)   { return pedal_channels_contradict; }
 float Pedal_GetRawPercent(void)    { return pedal_pct_raw; }
+
+/* ---- Runtime calibration accessors ----
+ * Pedal_ApplyCalibration() replaces the raw→% endpoints used by
+ * Pedal_RawToPercent().  The caller is responsible for range-
+ * validating (adc_min, adc_max) before invoking this function —
+ * pedal_cal_store.c does that via PedalCal_Validate().
+ *
+ * Safety: this function only changes the linear-interpolation
+ * endpoints.  It does NOT alter EMA state, plausibility flags,
+ * FAULT_LO/HI thresholds, dual-sample tolerance, rate limit, or
+ * any other safety gate.  After the call, the next Pedal_Update()
+ * cycle will report the recalibrated percentage; transient outputs
+ * during the cycle are still bounded by the existing rate-limit
+ * (PEDAL_MAX_RATE_PCT) so no instantaneous output jump bypasses
+ * Safety_ValidateThrottle().                                       */
+void Pedal_ApplyCalibration(uint16_t adc_min, uint16_t adc_max)
+{
+    pedal_adc_min = adc_min;
+    pedal_adc_max = adc_max;
+}
+
+uint16_t Pedal_GetRawADC(void)
+{
+    return pedal_raw_adc;
+}
 
 /* =========================================================================
  *  INA226 Current Sensors via TCA9548A I2C multiplexer
