@@ -248,7 +248,17 @@ void ErrorLog_Record(uint8_t error_code, uint8_t subsystem,
     /* Auto-save to flash, rate-limited to protect page 125 from wear.
      * The RAM ring buffer was already updated above, so an elided
      * write is recovered on the next call past the cool-down window
-     * (which re-flushes the complete RAM image including this entry). */
+     * (which re-flushes the complete RAM image including this entry).
+     *
+     * Wraparound notes:
+     *   - The very first call (log_has_flushed_once == false) is
+     *     forced through the gate, so the initial value of
+     *     log_last_flash_tick is irrelevant on the first call.
+     *   - For all subsequent calls the unsigned 32-bit subtraction
+     *     (now - log_last_flash_tick) is intentionally modular: it
+     *     stays correct across the HAL_GetTick() 32-bit wrap (~49.7
+     *     days) as long as the cool-down interval is far below 2^31
+     *     ms, which it trivially is at 100 ms.                        */
     uint32_t now = HAL_GetTick();
     if (!log_has_flushed_once ||
         (uint32_t)(now - log_last_flash_tick) >= ERRLOG_WRITE_MIN_INTERVAL_MS) {
