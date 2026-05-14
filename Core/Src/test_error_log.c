@@ -168,6 +168,108 @@ static void sim_clear(void) {
     memset(sim_entries, 0, sizeof(sim_entries));
 }
 
+/* ---- Rate-limit simulator -------------------------------------------------
+ * Mirrors the ErrorLog_Record() flash-write rate-limit logic in error_log.c:
+ *
+ *   - RAM ring buffer is always updated.
+ *   - Flash flush is throttled to ERRLOG_FLASH_MIN_INTERVAL_MS (100 ms).
+ *   - The first record after Init bypasses the gate (has_flushed_once=false).
+ *   - HAL_GetTick wraparound is handled by unsigned subtraction.
+ *   - ErrorLog_Init() resets the rate-limit bookkeeping (last_tick and
+ *     has_flushed_once) so a freshly reformatted log can flush immediately.
+ * ------------------------------------------------------------------------- */
+#define ERRLOG_FLASH_MIN_INTERVAL_MS  100U
+
+static uint32_t rl_last_flash_tick   = 0;
+static bool     rl_has_flushed_once  = false;
+static uint32_t rl_flash_write_count = 0;
+
+static void rl_init(void) {
+    rl_last_flash_tick   = 0;
+    rl_has_flushed_once  = false;
+    rl_flash_write_count = 0;
+    sim_init();
+}
+
+/* Replicates the gate in ErrorLog_Record(): RAM updates always, flash
+ * write only when (!has_flushed_once || elapsed >= MIN_INTERVAL_MS). */
+static void rl_record(uint32_t now_ms, uint8_t code) {
+    sim_tick = now_ms;
+    sim_record(code, 0, 2, 0);    /* RAM always */
+    bool first = !rl_has_flushed_once;
+    bool elapsed = ((uint32_t)(now_ms - rl_last_flash_tick) >= ERRLOG_FLASH_MIN_INTERVAL_MS);
+    if (first || elapsed) {
+        rl_flash_write_count++;
+        rl_last_flash_tick  = now_ms;
+        rl_has_flushed_once = true;
+    }
+}
+
+/* ---- Rate-limit tests (mirror the ErrorLog_Record gate) ---- */
+
+static void test_rate_limit_first_call_always_flushes(void)
+{
+    rl_init();
+    /* First record at t=0: has_flushed_once is false, so flash flush runs
+     * unconditionally regardless of the tick value. */
+    rl_record(0, 1);
+    ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 1);
+    ASSERT_TRUE(rl_has_flushed_once);
+}
+
+static void test_rate_limit_blocks_within_window(void)
+{
+    rl_init();
+    rl_record(0, 1);     /* flush #1 (first call) */
+    rl_record(10, 2);    /* +10 ms — blocked */
+    rl_record(50, 3);    /* +50 ms — blocked */
+    rl_record(99, 4);    /* +99 ms — blocked (strict < 100) */
+    ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 1);
+    /* RAM ring buffer received every record */
+    ASSERT_EQ_U16(sim_header.entry_count, 4);
+}
+
+static void test_rate_limit_releases_after_window(void)
+{
+    rl_init();
+    rl_record(0, 1);     /* flush #1 */
+    rl_record(50, 2);    /* blocked */
+    rl_record(100, 3);   /* flush #2 (exactly at boundary) */
+    rl_record(200, 4);   /* flush #3 */
+    ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 3);
+}
+
+static void test_rate_limit_tick_wraparound(void)
+{
+    rl_init();
+    /* Force a state where last_tick is near UINT32_MAX and the next
+     * "now" wraps past zero.  Unsigned subtraction must still yield
+     * the correct elapsed delta (50 ms here). */
+    rl_record(0xFFFFFFFFU - 49U, 1);  /* flush #1: first call, sets last */
+    rl_record(0U, 2);                  /* +50 ms across wrap — blocked */
+    rl_record(50U, 3);                 /* +100 ms across wrap — flush #2 */
+    ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 2);
+}
+
+static void test_init_resets_rate_limit_state(void)
+{
+    /* Replicates ErrorLog_Init() resetting log_last_flash_tick and
+     * log_has_flushed_once.  Without this, a reformat after a recent
+     * flush would skip the first post-init flush. */
+    rl_init();
+    rl_record(0, 1);
+    rl_record(50, 2);    /* blocked: too soon */
+    ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 1);
+
+    /* Now simulate Init() — must reset both the tick and the
+     * has_flushed_once flag so the very next record flushes. */
+    rl_init();
+    rl_record(60, 3);    /* tick 60 < 100 ms after previous, but Init
+                          * reset cleared has_flushed_once: must flush */
+    ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 1);  /* counter was zeroed by rl_init */
+    ASSERT_TRUE(rl_has_flushed_once);
+}
+
 /* ---- Tests ---- */
 
 static void test_entry_size(void)
@@ -365,6 +467,13 @@ int main(void)
     test_total_events_counter();
     test_header_crc();
     test_header_validation();
+
+    /* Flash-write rate-limit coverage (mirrors ErrorLog_Record gate) */
+    test_rate_limit_first_call_always_flushes();
+    test_rate_limit_blocks_within_window();
+    test_rate_limit_releases_after_window();
+    test_rate_limit_tick_wraparound();
+    test_init_resets_rate_limit_state();
 
     printf("--- error_log tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

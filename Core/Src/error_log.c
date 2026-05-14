@@ -29,6 +29,9 @@
 
 #include "error_log.h"
 #include "stm32g4xx_hal.h"
+#ifndef HOST_TEST
+#include "safety_system.h"
+#endif
 #include <string.h>
 #include <stddef.h>
 
@@ -294,16 +297,45 @@ bool ErrorLog_GetEntry(uint16_t index, error_log_entry_t *out)
 
 bool ErrorLog_Clear(void)
 {
+    /* ----------------------------------------------------------------------
+     * Safety guard — STANDBY-only.
+     *
+     * Clearing the error log triggers a full page erase (~22 ms CPU
+     * stall) and a re-program of the header.  Doing that while the
+     * vehicle is driving would lose two 100 Hz control iterations
+     * and is never a legitimate user action — the engineering UI
+     * always asks the user to stop the vehicle before issuing a
+     * factory-reset / clear-log command.
+     *
+     * This gate is pure defense-in-depth: a stray, replayed or
+     * spoofed factory-reset 0x10/0xFE frame cannot stall the control
+     * loop mid-drive.  Refusing both the RAM clear and the flash
+     * write keeps the operation atomic: either everything happens
+     * (in STANDBY) or nothing does (otherwise) — preserving evidence
+     * in the in-RAM ring buffer for the technician.
+     *
+     * Consistent with the other NVM-write entry points.  The CAN
+     * dispatcher path is updated to send ACK_OK on success and
+     * ACK_REJECTED on this guard or on a flash error.
+     *
+     * Compiled out in host tests (test_error_log.c) which exercise
+     * a self-contained simulator and link the real error_log.c
+     * without the Safety subsystem.                                 */
+#ifndef HOST_TEST
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
+#endif
+
     log_header.magic       = ERRLOG_MAGIC;
     log_header.entry_count = 0;
     log_header.write_index = 0;
     /* Preserve total_events as lifetime counter */
     memset(log_entries, 0, sizeof(log_entries));
 
-    /* User-initiated clear bypasses the rate-limit (it is the whole
-     * purpose of the call), but we still record the resulting flush
-     * timestamp so a subsequent ErrorLog_Record() respects the
-     * cool-down window relative to *this* write.                    */
+    /* User-initiated clear bypasses the Record() rate-limit (it is
+     * the whole purpose of the call), but we still record the
+     * resulting flush timestamp so a subsequent ErrorLog_Record()
+     * respects the cool-down window relative to *this* write.       */
     bool ok = errlog_write_flash();
     if (ok) {
         log_last_flash_tick  = HAL_GetTick();
