@@ -180,6 +180,14 @@ static bool errlog_write_flash(void)
 
 void ErrorLog_Init(void)
 {
+    /* Reset the rate-limit bookkeeping on every init so a re-init
+     * (or a fresh boot after a reformat) starts with the cool-down
+     * window collapsed — the first ErrorLog_Record() call will
+     * always reach flash, which is mandatory after a reformat to
+     * commit a valid header.                                      */
+    log_last_flash_tick  = 0;
+    log_has_flushed_once = false;
+
     const errlog_flash_header_t *flash_hdr =
         (const errlog_flash_header_t *)ERRLOG_FLASH_BASE;
 
