@@ -1268,7 +1268,13 @@ static void MX_IWDG_Init(void)
 {
     hiwdg.Instance       = IWDG;
     hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
-    hiwdg.Init.Reload    = 4095;           /* ~4.1 s timeout (nominal 4.095 s; LSI ~32 kHz has ±5% tolerance per RM0440 → real-world ~3.9–4.3 s). LSI/32 = 1 kHz tick × 4095 counts. */
+    /* Reload = 4095 → ~4.1 s timeout.
+     * Nominal calculation: LSI / 32 = 1 kHz tick × 4095 counts = 4.095 s.
+     * The "~" reflects LSI tolerance: per RM0440 the internal LSI is rated
+     * ±5 % across temperature and supply, so the real-world reload range is
+     * approximately 3.9–4.3 s.  All time-critical software loops are sized
+     * with margin for the worst-case (shortest) bound.                     */
+    hiwdg.Init.Reload    = 4095;
     hiwdg.Init.Window    = IWDG_WINDOW_DISABLE;
     if (HAL_IWDG_Init(&hiwdg) != HAL_OK) {
         Error_Handler();

@@ -260,12 +260,22 @@ static void test_rate_limit_releases_after_window(void)
 static void test_rate_limit_tick_wraparound(void)
 {
     rl_init();
-    /* Force a state where last_tick is near UINT32_MAX and the next
-     * "now" wraps past zero.  Unsigned subtraction must still yield
-     * the correct elapsed delta (50 ms here). */
-    rl_record(0xFFFFFFFFU - 49U, 1);  /* flush #1: first call, sets last */
-    rl_record(0U, 2);                  /* +50 ms across wrap — blocked */
-    rl_record(50U, 3);                 /* +100 ms across wrap — flush #2 */
+    /* HAL_GetTick is a uint32_t millisecond counter that wraps from
+     * 0xFFFFFFFF back to 0 every ~49.7 days.  The rate-limit gate uses
+     * the unsigned-subtraction idiom  (now - last_tick) >= MIN_INTERVAL
+     * which stays correct across the wrap as long as the interval is
+     * far below 2^31 ms.  This test exercises the wrap explicitly:
+     *
+     *   tick sequence:  0xFFFFFFCE  →  0  →  50
+     *   elapsed:        first call  +50ms  +100ms (across the wrap)
+     *
+     * Expected:        flush  blocked  flush
+     * Without the unsigned-modular subtraction (e.g. signed compare or
+     * absolute subtraction), the second record would falsely appear to
+     * be ~4 billion ms in the future / past, breaking the gate.         */
+    rl_record(0xFFFFFFFFU - 49U, 1);  /* tick = 0xFFFFFFCE — first call, flush #1, sets last_tick here */
+    rl_record(0U, 2);                  /* tick wrapped to 0 → elapsed = 50 ms → still within 100 ms window → blocked */
+    rl_record(50U, 3);                 /* elapsed = 100 ms total since last flush → flush #2 */
     ASSERT_EQ_U16((uint16_t)rl_flash_write_count, 2);
 }
 
