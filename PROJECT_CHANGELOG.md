@@ -146,6 +146,126 @@ missing/invalid.
   (`SERVICE_ACTION_RELAY_OVERRIDE` path) and integrate with the same
   ACK feedback pipeline.
 
+#### Final validation pass (FASE FINAL — 2026-05-14)
+
+End-of-feature surgical validation. **No functional code was touched**
+in this pass; the only edits are documentation closures and this
+changelog entry. All thresholds, safety logic, timing, CAN contracts,
+`startup_inhibit`, `LIMP_HOME`, watchdog handling, and
+`Pedal_RawToPercent()` semantics are byte-identical to the pre-pass
+state.
+
+**A — Build verification**
+
+- STM32 (`make clean && make all`, `arm-none-eabi-gcc 13.2.1`):
+  build succeeds with `-Wall -Wextra -Werror`. No new warnings.
+  `arm-none-eabi-size` reports:
+
+  ```
+     text	   data	    bss	    dec	    hex	filename
+    65152	    108	   8136	  73396	  11eb4	build/STM32G474RE.elf
+  ```
+
+  ELF section layout (`objdump -h`):
+  `.isr_vector` `0x08000000`, `.text` `0x080001D8` (size `0x0F814`),
+  `.rodata` `0x0800F9EC`, `.data` LMA ends at `0x0800FEEC`.
+  Page 124 (`0x0807C000`) is **442 KB** above the last code byte —
+  no risk of code spilling into NVM pages.
+
+- ESP32 (`pio run -d esp32`): the sandbox cannot reach `dl.espressif.com`,
+  so PlatformIO aborts before invoking the toolchain. Static review
+  of the touched files (`esp32/src/screens/engineering_screen.cpp/.h`,
+  `esp32/src/can_rx.cpp`, `esp32/include/can_ids.h`,
+  `esp32/src/vehicle_data.h`) confirms:
+  * All four sub-opcodes (`CAPTURE_MIN/MAX/SAVE/RESET_DEFAULTS/QUERY`)
+    mirror the STM32 constants exactly (verified by grep on both
+    `Core/Inc/can_handler.h` and `esp32/include/can_ids.h`).
+  * `DIAG_PEDAL_CAL = 0x308` is identical on both ends.
+  * No new includes pull in headers that were not already used by the
+    engineering screen.
+
+**B — STM32 functional validation (static)**
+
+- Flash-virgin path: `pcal_slot_integrity_ok()` returns `false` for
+  the `0xFFFFFFFF` magic word, so `PedalCal_Init()` silently exits
+  with `pcal_flash_valid = false` and the runtime keeps the
+  compile-time `150 / 2413` endpoints. Boot is not blocked.
+- CRC-corrupt path: same fallback — `crc != slot->checksum` triggers
+  the early return.
+- Save path: validated via `PedalCal_Validate()` (range gate) *before*
+  any flash unlock or erase. Out-of-range pairs return `false` without
+  touching flash.
+- Hard limits: `PEDAL_CAL_MIN_LIMIT = 50`, `PEDAL_CAL_MAX_LIMIT = 2600`,
+  `PEDAL_CAL_RANGE_MIN = 800` (`pedal_cal_store.h:51-53`). Confirmed:
+  `max > 2600`, `range < 800`, `min < 50` all return `INVALID`.
+- Safety gates (in `can_handler.c` `SERVICE_ACTION_PEDAL_CAL` branch):
+  the SAVE / CAPTURE handlers require
+  `Safety_GetState() == SYS_STATE_STANDBY` and `Startup_IsInhibited()`,
+  plus `Pedal_GetPercent() < 3.0f`, `Pedal_IsPlausible()`, and all
+  wheel speeds below the threshold — anything else returns
+  `BLOCKED_BY_SAFETY`.
+- Loop / watchdog: `pedal_cal_store.c` uses synchronous
+  `HAL_FLASH_Program(DOUBLEWORD)` (≈ 80–100 µs per dword × 2). It runs
+  only in `STANDBY` from a CAN command path, well below the IWDG
+  ~500 ms timeout, and the existing per-iteration `HAL_IWDG_Refresh()`
+  in `main.c` is not modified.
+
+**C — CAN protocol validation (static)**
+
+- `QUERY` (`0xF5 0x05`) sets up the 10 × 100 ms `0x308` burst window;
+  outside that window, `CAN_PedalCalBurstUpdate()` is a no-op so the
+  bus stays clean.
+- `SERVICE_CMD_ACK` envelope unchanged (DLC 3); legacy nodes ignoring
+  `0xF5` see no new ACK class.
+- `0x308` payload (alternating PENDING / STORED variants) confirmed
+  byte-for-byte by the ESP32 decoder in `esp32/src/can_rx.cpp`.
+- Worst-case bus impact: 10 frames × 100 ms × 8 B ≈ 0.7 % @ 500 kbit/s,
+  and only while a workshop QUERY is active.
+
+**D — ESP32 / UI validation (static)**
+
+- `drawPedalCalibration()` renders Raw ADC / Pedal % / Stable /
+  Plausible / Safety on the left column and Stored / Pending / Validation
+  on the right; SAVE button is disabled (`drawButton(..., enabled=false)`)
+  when `validateOk == false`.
+- All five buttons (`CAPTURE MIN / CAPTURE MAX / SAVE / RESET / BACK`)
+  emit the matching `SERVICE_ACTION_PEDAL_CAL` sub-opcode.
+- 500 ms `QUERY` poll while the screen is active is gated by the
+  screen-id and stops naturally on BACK.
+- Touch routing outside the new buttons is unchanged.
+
+**E — Documentation closures**
+
+- `docs/ENGINEERING_SCREEN.md` — added as a stub pointing at the
+  canonical [`ENGINEERING_MENU.md`](docs/ENGINEERING_MENU.md), to
+  satisfy historical cross-references.
+- `docs/HARDWARE_AND_SENSOR_MAP.md` — new section §1.6 with the
+  full STM32G474 flash NVM map (pages 124–127, owners, addresses)
+  and the on-flash pedal-calibration slot layout.
+- `PROJECT_CHANGELOG.md` — this section.
+
+**Backward compatibility (final check)**
+
+- A node that ignores `0x308` and `0xF5` sees zero new traffic and zero
+  new ACK classes — pre-existing CAN contracts are unchanged.
+- A unit that never runs the wizard keeps `pcal_flash_valid = false`
+  and behaves bit-identically to firmware predating the feature.
+- `Pedal_RawToPercent()` algorithm (clamp → linear → EMA → fault
+  windows) is unchanged; only the two named limits become runtime
+  variables seeded with the same defaults.
+
+**Outstanding risks**
+
+- ESP32 firmware was not rebuilt in this sandbox (no network for
+  `platform-espressif32` install). The C++ side mirrors the verified
+  STM32 constants and follows existing engineering-screen patterns,
+  but a final on-bench build/flash on real hardware is recommended
+  before tag.
+
+**Status: merge-ready** for the STM32 side; ESP32 side is
+build-verified statically and requires a bench rebuild as the only
+non-software-equivalent residual check.
+
 ---
 
 ## [unreleased] — 2026-05-13
