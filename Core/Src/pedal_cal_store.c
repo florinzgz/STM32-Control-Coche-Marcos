@@ -9,8 +9,9 @@
   * proven steering_cal_store.c implementation.
   *
   * Page 124 is reserved for pedal calibration only and is separate
-  * from page 125 (error log), 126 (steering calibration), and 127
-  * (EPS parameters), so each NVM slot can be erased independently.
+  * from page 123 (sensor map), 125 (error log), 126 (steering
+  * calibration), and 127 (EPS parameters), so each NVM slot can be
+  * erased independently.
   *
   * Safety invariants:
   *   - Flash data alone NEVER authorises ACTIVE or clears

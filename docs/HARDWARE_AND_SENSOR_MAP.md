@@ -190,26 +190,25 @@
 
 ### 1.6 Flash NVM Map (STM32G474RE — 512 KB, 128 × 4 KB pages)
 
-The linker script (`STM32G474RETX_FLASH.ld`) reserves the last four pages
-(124–127, 16 KB total) for non-volatile data. Each page is single-owner
+The linker script (`STM32G474RETX_FLASH.ld`) reserves the last five pages
+(123–127, 20 KB total) for non-volatile data. Each page is single-owner
 so any store can be erased independently without disturbing the others.
 The `FLASH` region for code/`.text`/`.rodata`/`.data` is therefore
-trimmed to **496 KB** and ends at `0x0807C000`.
+trimmed to **492 KB** and ends at `0x0807B000`.
 
 | Page | Address     | Owner / store                                     | Module / file                                 |
 |------|-------------|---------------------------------------------------|-----------------------------------------------|
+| 123  | `0x0807B000` | **DS18B20 sensor map** (physIdx → role)           | `Core/Src/sensor_map_store.c`                 |
 | 124  | `0x0807C000` | **Persistent pedal calibration** (adc_min/max)    | `Core/Src/pedal_cal_store.c`                  |
-| 125  | `0x0807D000` | Error log ring buffer **/** DS18B20 sensor map ⚠️ | `Core/Src/error_log.c` **/** `Core/Src/sensor_map_store.c` |
+| 125  | `0x0807D000` | Error log ring buffer                             | `Core/Src/error_log.c`                        |
 | 126  | `0x0807E000` | Steering centring calibration                     | `Core/Src/steering_cal_store.c`               |
 | 127  | `0x0807F000` | EPS / torque-assist parameters                    | `Core/Src/eps_params.c`                       |
 
-> ⚠️ **Known issue:** `error_log.c` and `sensor_map_store.c` both
-> currently target page 125 at `0x0807D000`.  Saving the sensor map
-> erases the error log and vice-versa.  Until the remediation PR
-> lands (separate flash page + linker update), workshop operators
-> must avoid invoking *Save Sensor Map* while error-log persistence
-> matters.  Tracking entry: `PROJECT_CHANGELOG.md` → *Known issue —
-> page 125 ownership conflict*.
+> The previous page-125 ownership conflict between `error_log.c` and
+> `sensor_map_store.c` has been resolved: the sensor map now lives on
+> the dedicated page 123 (`0x0807B000`).  `SensorMapStore_Save()` and
+> `ErrorLog_Record()` are independent and may be invoked in any order.
+> See `PROJECT_CHANGELOG.md` for the remediation entry.
 
 **Pedal calibration slot (page 124, 16 B):**
 

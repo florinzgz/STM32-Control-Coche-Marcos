@@ -3,16 +3,18 @@
   * @file    sensor_map_store.c
   * @brief   Persistent DS18B20 temperature sensor mapping storage
   *
-  * Stores a 5-byte physIdx→role array in the third-to-last flash page
-  * of the STM32G474RE (page 125, 4 KB at 0x0807D000).
+  * Stores a 5-byte physIdx→role array in flash page 123
+  * of the STM32G474RE (4 KB at 0x0807B000).
   * A 32-bit CRC32 checksum and a 32-bit magic word provide integrity.
   *
   * Flash page allocation:
   *   Page 127 (0x0807F000) — EPS parameters  (eps_params.c)
   *   Page 126 (0x0807E000) — Steering cal     (steering_cal_store.c)
-  *   Page 125 (0x0807D000) — Sensor map       (this file)
+  *   Page 125 (0x0807D000) — Error log        (error_log.c)
+  *   Page 124 (0x0807C000) — Pedal cal        (pedal_cal_store.c)
+  *   Page 123 (0x0807B000) — Sensor map       (this file)
   *
-  * Writing one page never erases either of the other two.
+  * Writing one page never erases any of the other four.
   ****************************************************************************
   */
 
@@ -22,8 +24,8 @@
 #include <stddef.h>
 
 /* ---- Flash layout -------------------------------------------------------- */
-#define SMAP_FLASH_PAGE     125U
-#define SMAP_FLASH_BASE     0x0807D000U
+#define SMAP_FLASH_PAGE     123U
+#define SMAP_FLASH_BASE     0x0807B000U
 
 #define SMAP_MAGIC          0x534D4150U   /* "SMAP" */
 #define SMAP_VALID_FLAG     0xA5U
@@ -154,7 +156,7 @@ bool SensorMapStore_Save(const uint8_t map[SMAP_NUM_SENSORS])
     if (status != HAL_OK)
         return false;
 
-    /* Erase page 125 */
+    /* Erase page 123 */
     FLASH_EraseInitTypeDef erase;
     erase.TypeErase = FLASH_TYPEERASE_PAGES;
     erase.Banks     = FLASH_BANK_1;

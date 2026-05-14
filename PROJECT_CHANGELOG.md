@@ -1,5 +1,84 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-14 (page-125 ownership conflict — resolved)
+
+### Sensor map relocated to flash page 123 (`0x0807B000`)
+
+Functional change that **removes** the long-standing page-125 ownership
+conflict between `error_log.c` and `sensor_map_store.c`.  After this
+change every NVM page is single-owner and the corresponding store can
+be erased independently without disturbing the others.
+
+#### Files touched
+
+- `STM32G474RETX_FLASH.ld` — `FLASH` region reduced **496 KB → 492 KB**
+  (firmware ceiling moved from `0x0807C000` down to `0x0807B000`) so
+  that page 123 is now reserved for NVM.  The reserved-pages comment
+  was extended to list page 123 (`sensor_map_store.c`) alongside the
+  existing pages 124–127.
+- `Core/Src/sensor_map_store.c` — `SMAP_FLASH_PAGE` changed
+  `125U → 123U`, `SMAP_FLASH_BASE` changed `0x0807D000U → 0x0807B000U`.
+  File-header comment now describes the five-page NVM layout
+  (123 sensor map, 124 pedal cal, 125 error log, 126 steering cal,
+  127 EPS).  Inline *"Erase page 125"* comment updated to *"Erase
+  page 123"*.
+- `Core/Inc/sensor_map_store.h` — flash-layout block and
+  `SensorMapStore_Init()` doxygen now reference page 123 at
+  `0x0807B000`.
+- `Core/Src/pedal_cal_store.c` — header comment listing the
+  neighbour pages now includes page 123 (sensor map) for completeness.
+- `Core/Src/can_handler.c` — comment near
+  `Apply_TempSensorMap_From_Store()` changed *"persisted in flash
+  page 125"* → *"persisted in flash page 123"*.
+- `Core/Src/main.c` — comment in `SystemClock_Config()` prologue
+  changed *"from flash page 125"* → *"from flash page 123"*.
+- `README.md` § 21 (*Subsystems*) and § 24 (*Persistent Storage*) —
+  table now lists all five reserved pages, removes the
+  *⚠️ shared page* annotation, and the
+  *"DS18B20 sensor map (Flash page 125, shared section)"* heading
+  was rewritten as *"DS18B20 sensor map (Flash page 123)"*.
+- `docs/CALIBRATION.md` — five-row flash-layout table, removed
+  *Known issue (page 125 ownership conflict)* admonition and replaced
+  it with a one-line note documenting the remediation.
+- `docs/HARDWARE_AND_SENSOR_MAP.md` § 1.6 — same treatment: five-row
+  table (pages 123–127), `FLASH` region updated to 492 KB ending at
+  `0x0807B000`, and the *Known issue* admonition replaced by a
+  remediation note.
+- `docs/INTEGRATION_PLAN.md` Apéndice A — table now lists page 123,
+  the firmware region is `0–122` (`0x08000000–0x0807AFFF`, 492 KB),
+  and the post-table rule names every reserved page (123–127).
+
+#### Verification
+
+- `SMAP_FLASH_PAGE` (123) and the `Page` field of the
+  `FLASH_EraseInitTypeDef` passed to `HAL_FLASHEx_Erase()` resolve
+  to bank 1, single-bank STM32G474RE layout — same recipe as
+  `pedal_cal_store.c` page 124 and `error_log.c` page 125.
+- `SMAP_FLASH_BASE = 0x0807B000` is exactly `4 KB` below
+  `PCAL_FLASH_BASE = 0x0807C000`, matching the new linker reservation.
+- A repository-wide search for `0x0807D000` no longer returns any
+  reference owned by `sensor_map_store`; the only remaining
+  references are owned by `error_log.c` (which legitimately owns
+  page 125).
+- `grep -rn "shared page\|ownership conflict\|page 125 ownership"`
+  returns nothing outside this changelog entry.
+
+#### Compatibility / migration
+
+- The on-flash slot format (`smap_flash_slot_t`) is unchanged: same
+  magic (`0x534D4150` "SMAP"), same 5-byte `tempMap`, same
+  `valid_flag`, same CRC32 over the slot prefix.  Only the base
+  address moves.
+- Units flashed before this change will see a CRC-invalid sensor map
+  on page 123 (the new owner) and fall back silently to the identity
+  mapping (`0,1,2,3,4`), exactly as the design already specified for
+  blank / corrupt slots.  The workshop must re-save the sensor map
+  once after upgrading; no other user action is required.
+- The error-log page (125) is untouched by this change, so historical
+  fault entries survive the firmware upgrade.
+
+---
+
 ## [unreleased] — 2026-05-14 (doc sync follow-up)
 
 ### Documentation consistency pass for the persistent-pedal-calibration feature
@@ -48,16 +127,23 @@ the firmware binary is bit-identical to the previous commit.
 - Page 124 ownership (`pedal_cal_store.c`, `0x0807C000`) and pages
   126/127 ownership are unchanged and consistent across all files.
 
-#### Known issue — page 125 ownership conflict (NOT fixed here)
+#### Known issue — page 125 ownership conflict (RESOLVED in the entry above)
+
+> **Status:** RESOLVED in the *page-125 ownership conflict — resolved*
+> entry at the top of this changelog (sensor map relocated to flash
+> page 123 at `0x0807B000`, `FLASH` shrunk 496 KB → 492 KB).  The text
+> below is retained only as historical record of the issue that was
+> tracked through this doc-sync pass.
 
 `Core/Src/error_log.c` (`ERRLOG_FLASH_BASE = 0x0807D000`, page 125) and
-`Core/Src/sensor_map_store.c` (`SMAP_FLASH_BASE = 0x0807D000`, page
-125) currently target the **same** flash page.  In practice this means
-that calling `SensorMapStore_Save()` will erase the error-log page,
-and vice-versa, silently corrupting whichever store was written last.
+`Core/Src/sensor_map_store.c` (originally `SMAP_FLASH_BASE = 0x0807D000`,
+page 125) used to target the **same** flash page.  In practice this
+meant that calling `SensorMapStore_Save()` would erase the error-log
+page, and vice-versa, silently corrupting whichever store was written
+last.
 
-This collision is **out of scope** for the doc-sync pass because
-resolving it requires either:
+The collision was deliberately left **out of scope** for the doc-sync
+pass because resolving it required either:
 
   1. Carving an additional NVM page out of `FLASH` in
      `STM32G474RETX_FLASH.ld` (moving the firmware ceiling from

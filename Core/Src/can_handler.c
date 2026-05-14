@@ -581,7 +581,7 @@ void CAN_SendStatusTraction(void) {
  *   Byte 4: Ambient temperature   (°C, int8_t)
  *
  * The mapping is set by the user via the engineering menu on the ESP32
- * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 125.
+ * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 123.
  * If no valid mapping has been saved, discovery order is used (index 0=FL, etc.)
  *
  * ---- Sanity filter (production hardening) ----

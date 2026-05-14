@@ -287,7 +287,7 @@ int main(void)
     }
 
     /* ---- Persistent DS18B20 sensor mapping ----
-     * Load the user-assigned physIdx→role mapping from flash page 125.
+     * Load the user-assigned physIdx→role mapping from flash page 123.
      * If no valid mapping has been saved yet the identity mapping
      * (index 0=FL, 1=FR, 2=RL, 3=RR, 4=AMB) is used as fall-back.    */
     SensorMapStore_Init();

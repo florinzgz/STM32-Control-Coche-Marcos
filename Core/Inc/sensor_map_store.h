@@ -13,7 +13,7 @@
   * temperatures.
   *
   * Flash layout:
-  *   Page 125 (0x0807D000, 4 KB) — dedicated to sensor mapping.
+  *   Page 123 (0x0807B000, 4 KB) — dedicated to sensor mapping.
   *   Single slot with magic + CRC32 integrity check.
   *
   * Roles (position indices):
@@ -47,7 +47,7 @@ extern "C" {
 
 /**
  * @brief  Initialise the sensor map store module.
- *         Reads flash page 125 and validates CRC / magic.
+ *         Reads flash page 123 and validates CRC / magic.
  *         If valid, the loaded mapping is immediately active.
  *         If invalid or absent, the identity mapping (0,1,2,3,4) is used.
  */
