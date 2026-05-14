@@ -199,9 +199,17 @@ trimmed to **496 KB** and ends at `0x0807C000`.
 | Page | Address     | Owner / store                                     | Module / file                                 |
 |------|-------------|---------------------------------------------------|-----------------------------------------------|
 | 124  | `0x0807C000` | **Persistent pedal calibration** (adc_min/max)    | `Core/Src/pedal_cal_store.c`                  |
-| 125  | `0x0807D000` | DS18B20 / INA226 sensor index map                 | `Core/Src/sensor_map_store.c` / `error_log.c` |
+| 125  | `0x0807D000` | Error log ring buffer **/** DS18B20 sensor map ⚠️ | `Core/Src/error_log.c` **/** `Core/Src/sensor_map_store.c` |
 | 126  | `0x0807E000` | Steering centring calibration                     | `Core/Src/steering_cal_store.c`               |
 | 127  | `0x0807F000` | EPS / torque-assist parameters                    | `Core/Src/eps_params.c`                       |
+
+> ⚠️ **Known issue:** `error_log.c` and `sensor_map_store.c` both
+> currently target page 125 at `0x0807D000`.  Saving the sensor map
+> erases the error log and vice-versa.  Until the remediation PR
+> lands (separate flash page + linker update), workshop operators
+> must avoid invoking *Save Sensor Map* while error-log persistence
+> matters.  Tracking entry: `PROJECT_CHANGELOG.md` → *Known issue —
+> page 125 ownership conflict*.
 
 **Pedal calibration slot (page 124, 16 B):**
 

@@ -8,9 +8,16 @@ limited to 496 KB, leaving 16 KB exclusively for NVM).
 | Page | Address      | Slot                          | Module                           |
 |-----:|:-------------|:------------------------------|:---------------------------------|
 | 124  | `0x0807C000` | **Pedal endpoint calibration**| `Core/Src/pedal_cal_store.c`     |
-| 125  | `0x0807D000` | DS18B20 sensor-to-position map| `Core/Src/sensor_map_store.c`    |
+| 125  | `0x0807D000` | Error log ring buffer **/** DS18B20 sensor-to-position map ⚠️ | `Core/Src/error_log.c` **/** `Core/Src/sensor_map_store.c` |
 | 126  | `0x0807E000` | Steering centring             | `Core/Src/steering_cal_store.c`  |
 | 127  | `0x0807F000` | EPS parameters                | `Core/Src/eps_params.c`          |
+
+> ⚠️ **Known issue (page 125 ownership conflict):** both `error_log.c`
+> and `sensor_map_store.c` currently address page 125 at
+> `0x0807D000`.  Writing one store erases the other.  Treat
+> `SensorMapStore_Save()` and `ErrorLog_Record()` as mutually
+> exclusive until the dedicated remediation PR lands — see
+> `PROJECT_CHANGELOG.md` *Known issue — page 125 ownership conflict*.
 
 All four stores follow the same on-flash layout (magic + payload + CRC32 +
 `valid_flag` byte) and the same write recipe — unlock → erase page →

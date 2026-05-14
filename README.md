@@ -788,7 +788,7 @@ The physical gear selector (P/R/N/D1/D2) uses an MCP23017 I2C GPIO expander.
 
 | Flash page | Address | Size | Content |
 |-----------|---------|------|---------|
-| Page 125 | 0x0807D000 | 4 KB | Error log ring buffer (250 × 16-byte entries + CRC32 header) |
+| Page 125 | 0x0807D000 | 4 KB | Error log ring buffer (250 × 16-byte entries + CRC32 header) ⚠️ shares page with `sensor_map_store.c` — see `PROJECT_CHANGELOG.md` *Known issue — page 125 ownership conflict* |
 | Page 126 | 0x0807E000 | 4 KB | Steering calibration (magic + encoder center + CRC32) |
 
 Both use magic numbers and CRC32 integrity checks. Flash is erased and reformatted if magic or CRC fails at boot.
