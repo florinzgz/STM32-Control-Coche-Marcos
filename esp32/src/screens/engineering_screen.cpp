@@ -60,6 +60,18 @@ static constexpr int16_t SAVE_Y = 280;
 static constexpr int16_t SAVE_W = 80;
 static constexpr int16_t SAVE_H = 30;
 
+// ---- Pedal calibration submenu button layout (480×320) ----
+// Two rows of buttons centred under the live telemetry block.  BACK reuses
+// the global BACK_X/Y above; the four action buttons are below the
+// instructional row to maximise touch separation.
+static constexpr int16_t PED_BTN_Y       = 232;
+static constexpr int16_t PED_BTN_H       = 36;
+static constexpr int16_t PED_BTN_W       = 110;
+static constexpr int16_t PED_BTN_CAPMIN_X  = 10;
+static constexpr int16_t PED_BTN_CAPMAX_X  = 125;
+static constexpr int16_t PED_BTN_SAVE_X    = 245;
+static constexpr int16_t PED_BTN_RESET_X   = 360;
+
 // ---- Sensor mapping row layout ----
 static constexpr int16_t MAP_ROW_X   = 10;
 static constexpr int16_t MAP_ROW_W   = 460;
@@ -272,25 +284,40 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         }
     }
 
-    // Cache pedal calibration telemetry
+    // Cache pedal calibration telemetry (0x308 + live ADC stability ring)
     if (currentMenu_ == SubMenu::PEDAL_CAL) {
+        const vehicle::PedalCalData& pc = data.pedalCal();
         bool changed = false;
-        for (uint8_t i = 0; i < 4; ++i) {
-            if (wheelSpeed_[i] != data.speed().raw[i])     changed = true;
-            if (motorCurrent_[i] != data.current().raw[i]) changed = true;
-            if (tractionScale_[i] != data.traction().scale[i]) changed = true;
-            wheelSpeed_[i]    = data.speed().raw[i];
-            motorCurrent_[i]  = data.current().raw[i];
-            tractionScale_[i] = data.traction().scale[i];
+        if (pc.timestampMs != 0 && pc.timestampMs != pedalCalLastTs_) {
+            pedalCalLastTs_ = pc.timestampMs;
+            if (pedalCalFlags_      != pc.flags)        changed = true;
+            if (pedalCalRawAdc_     != pc.rawAdc)       changed = true;
+            if (pedalCalStoredMin_  != pc.storedMin)    changed = true;
+            if (pedalCalStoredMax_  != pc.storedMax)    changed = true;
+            if (pedalCalPendingMin_ != pc.pendingMin)   changed = true;
+            if (pedalCalPendingMax_ != pc.pendingMax)   changed = true;
+            if (pedalCalPercent_    != pc.pedalPercent) changed = true;
+            pedalCalFlags_      = pc.flags;
+            pedalCalRawAdc_     = pc.rawAdc;
+            pedalCalStoredMin_  = pc.storedMin;
+            pedalCalStoredMax_  = pc.storedMax;
+            pedalCalPendingMin_ = pc.pendingMin;
+            pedalCalPendingMax_ = pc.pendingMax;
+            pedalCalPercent_    = pc.pedalPercent;
+            // Push rawAdc into the stability ring.
+            pedalStabRing_[pedalStabHead_] = pc.rawAdc;
+            pedalStabHead_ = (pedalStabHead_ + 1U) % PEDAL_STAB_N;
+            if (pedalStabCount_ < PEDAL_STAB_N) pedalStabCount_++;
         }
-        if (batteryVoltage_ != data.battery().voltageRaw) changed = true;
-        if (batteryCurrent_ != data.battery().currentRaw) changed = true;
-        if (absActive_ != data.safety().absActive)        changed = true;
-        if (tcsActive_ != data.safety().tcsActive)        changed = true;
-        batteryVoltage_ = data.battery().voltageRaw;
-        batteryCurrent_ = data.battery().currentRaw;
-        absActive_      = data.safety().absActive;
-        tcsActive_      = data.safety().tcsActive;
+        // Periodic QUERY (every ~500 ms) so the STM32 keeps emitting the
+        // 1 s burst while the operator stays on the calibration screen.
+        // Backward-compatibility: nodes that ignore 0x308 / 0xF5 are
+        // unaffected.  Stops immediately on exit (BACK).
+        constexpr unsigned long PEDAL_QUERY_PERIOD_MS = 500;
+        if ((frameTimeMs - pedalCalLastQueryMs_) >= PEDAL_QUERY_PERIOD_MS) {
+            sendPedalCalOp(can::PEDAL_CAL_OP_QUERY);
+            pedalCalLastQueryMs_ = frameTimeMs;
+        }
         pedalDataChanged_ = changed;
     }
 
@@ -436,7 +463,7 @@ void EngineeringScreen::draw() {
         }
     }
 
-    // Partial redraw for pedal calibration (live telemetry values)
+    // Partial redraw for pedal calibration (live 0x308 telemetry values)
     if (currentMenu_ == SubMenu::PEDAL_CAL && pedalDataChanged_) {
         pedalDataChanged_ = false;
 
@@ -446,51 +473,129 @@ void EngineeringScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
-        for (uint8_t i = 0; i < 4; ++i) {
-            int16_t rowY = 75 + i * 22;
-
-            // Speed value
-            tft.fillRect(130, rowY, 80, 16, ui::COL_BG);
-            snprintf(buf, sizeof(buf), "%u.%u km/h",
-                     wheelSpeed_[i] / 10, wheelSpeed_[i] % 10);
-            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-            tft.drawString(buf, 130, rowY);
-
-            // Current value
-            tft.fillRect(250, rowY, 80, 16, ui::COL_BG);
-            snprintf(buf, sizeof(buf), "%u.%02u A",
-                     motorCurrent_[i] / 100, motorCurrent_[i] % 100);
-            // Current color: green < 15A, yellow 15–25A, red > 25A (BTS7960 safe limits)
-            uint16_t curCol = (motorCurrent_[i] > 2500) ? ui::COL_RED :
-                              (motorCurrent_[i] > 1500) ? ui::COL_YELLOW : ui::COL_GREEN;
-            tft.setTextColor(curCol, ui::COL_BG);
-            tft.drawString(buf, 250, rowY);
-
-            // Traction scale
-            tft.fillRect(370, rowY, 60, 16, ui::COL_BG);
-            snprintf(buf, sizeof(buf), "%u%%", tractionScale_[i]);
-            tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-            tft.drawString(buf, 370, rowY);
+        // Local stability check — last PEDAL_STAB_N rawAdc samples within
+        // PEDAL_STAB_LOCAL_TOL counts of each other.  This is a UI hint
+        // only; the actual stability gate runs server-side on STM32
+        // synchronously during CAPTURE with the same tolerance.
+        static constexpr uint16_t PEDAL_STAB_LOCAL_TOL = 8;
+        bool stable = false;
+        if (pedalStabCount_ >= PEDAL_STAB_N) {
+            uint16_t mn = pedalStabRing_[0], mx = pedalStabRing_[0];
+            for (uint8_t k = 1; k < PEDAL_STAB_N; ++k) {
+                if (pedalStabRing_[k] < mn) mn = pedalStabRing_[k];
+                if (pedalStabRing_[k] > mx) mx = pedalStabRing_[k];
+            }
+            stable = ((uint32_t)(mx - mn) <= PEDAL_STAB_LOCAL_TOL);
         }
 
-        // Battery row
-        int16_t batY = 170;
-        tft.fillRect(130, batY, 160, 16, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "%u.%02u V  %u.%02u A",
-                 (unsigned)(batteryVoltage_ / 100), (unsigned)(batteryVoltage_ % 100),
-                 (unsigned)(batteryCurrent_ / 100), (unsigned)(batteryCurrent_ % 100));
-        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-        tft.drawString(buf, 130, batY);
+        const bool plausible   = (pedalCalFlags_ & 0x20U) != 0;
+        const bool safety_ok   = (pedalCalFlags_ & 0x10U) != 0;
+        const bool stored_ok   = (pedalCalFlags_ & 0x08U) != 0;
+        const bool valid_pair  = (pedalCalFlags_ & 0x04U) != 0;
+        const bool have_min    = (pedalCalFlags_ & 0x01U) != 0;
+        const bool have_max    = (pedalCalFlags_ & 0x02U) != 0;
 
-        // ABS/TCS row
-        int16_t safeY = 192;
-        tft.fillRect(130, safeY, 200, 16, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "ABS:%s  TCS:%s",
-                 absActive_ ? "ON" : "off", tcsActive_ ? "ON" : "off");
-        tft.setTextColor(
-            (absActive_ || tcsActive_) ? ui::COL_AMBER : ui::COL_GREEN,
-            ui::COL_BG);
-        tft.drawString(buf, 130, safeY);
+        // ---- Left column (live) ----
+        // Raw ADC
+        tft.fillRect(110, 55, 130, 16, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "%u", (unsigned)pedalCalRawAdc_);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, 110, 55);
+
+        // Pedal %
+        tft.fillRect(110, 80, 130, 16, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "%u%%", (unsigned)pedalCalPercent_);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, 110, 80);
+
+        // Stable yes/no
+        tft.fillRect(110, 105, 130, 16, ui::COL_BG);
+        tft.setTextColor(stable ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+        tft.drawString(stable ? "YES" : "no", 110, 105);
+
+        // Plausible
+        tft.fillRect(110, 130, 130, 16, ui::COL_BG);
+        tft.setTextColor(plausible ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(plausible ? "YES" : "NO", 110, 130);
+
+        // Safety gate
+        tft.fillRect(110, 155, 130, 16, ui::COL_BG);
+        tft.setTextColor(safety_ok ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(safety_ok ? "OK" : "BLOCKED", 110, 155);
+
+        // ---- Right column (stored + pending + validation) ----
+        // Stored MIN
+        tft.fillRect(360, 55, 110, 16, ui::COL_BG);
+        if (stored_ok) {
+            snprintf(buf, sizeof(buf), "%u", (unsigned)pedalCalStoredMin_);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        } else {
+            snprintf(buf, sizeof(buf), "default");
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        }
+        tft.drawString(buf, 360, 55);
+
+        // Stored MAX
+        tft.fillRect(360, 80, 110, 16, ui::COL_BG);
+        if (stored_ok) {
+            snprintf(buf, sizeof(buf), "%u", (unsigned)pedalCalStoredMax_);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        } else {
+            snprintf(buf, sizeof(buf), "default");
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        }
+        tft.drawString(buf, 360, 80);
+
+        // Pending MIN
+        tft.fillRect(360, 105, 110, 16, ui::COL_BG);
+        if (have_min) {
+            snprintf(buf, sizeof(buf), "%u", (unsigned)pedalCalPendingMin_);
+            tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        } else {
+            snprintf(buf, sizeof(buf), "--");
+            tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+        }
+        tft.drawString(buf, 360, 105);
+
+        // Pending MAX
+        tft.fillRect(360, 130, 110, 16, ui::COL_BG);
+        if (have_max) {
+            snprintf(buf, sizeof(buf), "%u", (unsigned)pedalCalPendingMax_);
+            tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        } else {
+            snprintf(buf, sizeof(buf), "--");
+            tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+        }
+        tft.drawString(buf, 360, 130);
+
+        // Validation
+        tft.fillRect(360, 155, 110, 16, ui::COL_BG);
+        const char* v_text;
+        uint16_t    v_col;
+        if (!have_min || !have_max) {
+            v_text = "incomplete";
+            v_col  = ui::COL_GRAY;
+        } else if (valid_pair) {
+            v_text = "OK";
+            v_col  = ui::COL_GREEN;
+        } else {
+            v_text = "OUT OF RANGE";
+            v_col  = ui::COL_RED;
+        }
+        tft.setTextColor(v_col, ui::COL_BG);
+        tft.drawString(v_text, 360, 155);
+
+        // ---- SAVE button colour reflects validation + safety gate ----
+        const bool save_enabled = valid_pair && safety_ok;
+        uint16_t   save_fill    = save_enabled ? ui::COL_GREEN : ui::COL_DARK_GRAY;
+        tft.fillRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, save_fill);
+        tft.drawRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, ui::COL_GRAY);
+        tft.setTextColor(ui::COL_WHITE, save_fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("SAVE",
+                       PED_BTN_SAVE_X + PED_BTN_W / 2,
+                       PED_BTN_Y + PED_BTN_H / 2);
+        tft.setTextDatum(TL_DATUM);
     }
 
     // Partial redraw for encoder calibration (live steering angle)
@@ -676,7 +781,17 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             moduleCtrlPage_ = 0;
                             currentMenu_ = SubMenu::MODULE_CONTROL;
                             break;
-                        case 2: currentMenu_ = SubMenu::PEDAL_CAL;      break;
+                        case 2:
+                            // Reset pedal-cal local state so the screen
+                            // shows clean defaults until the first 0x308
+                            // burst frame arrives.
+                            pedalCalLastTs_      = 0;
+                            pedalCalLastQueryMs_ = 0;
+                            pedalCalFlags_       = 0;
+                            pedalStabCount_      = 0;
+                            pedalStabHead_       = 0;
+                            currentMenu_ = SubMenu::PEDAL_CAL;
+                            break;
                         case 3: currentMenu_ = SubMenu::ENCODER_CAL;    break;
                         case 4:
                             // Load fresh copy before entering INA mapping
@@ -783,6 +898,47 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                                   currentlyEnabled ? "DISABLE" : "ENABLE");
                     needsRedraw_ = true;
                 }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Pedal calibration submenu: 4 action buttons + back (back handled above).
+    if (currentMenu_ == SubMenu::PEDAL_CAL) {
+        if (y >= PED_BTN_Y && y <= PED_BTN_Y + PED_BTN_H) {
+            // CAPTURE MIN
+            if (x >= PED_BTN_CAPMIN_X && x <= PED_BTN_CAPMIN_X + PED_BTN_W) {
+                sendPedalCalOp(can::PEDAL_CAL_OP_CAPTURE_MIN);
+                Serial.println("[ENG] Pedal CAPTURE MIN");
+                return true;
+            }
+            // CAPTURE MAX
+            if (x >= PED_BTN_CAPMAX_X && x <= PED_BTN_CAPMAX_X + PED_BTN_W) {
+                sendPedalCalOp(can::PEDAL_CAL_OP_CAPTURE_MAX);
+                Serial.println("[ENG] Pedal CAPTURE MAX");
+                return true;
+            }
+            // SAVE — only forward when the local view believes validation
+            // passes (the STM32 re-validates anyway, but blocking the wire
+            // when we know it would be rejected reduces user-visible
+            // ACK_REJECTED churn).  When the local view shows invalid the
+            // tap is silently ignored.
+            if (x >= PED_BTN_SAVE_X && x <= PED_BTN_SAVE_X + PED_BTN_W) {
+                const bool valid_pair = (pedalCalFlags_ & 0x04U) != 0;
+                const bool safety_ok  = (pedalCalFlags_ & 0x10U) != 0;
+                if (valid_pair && safety_ok) {
+                    sendPedalCalOp(can::PEDAL_CAL_OP_SAVE);
+                    Serial.println("[ENG] Pedal SAVE");
+                } else {
+                    Serial.println("[ENG] Pedal SAVE blocked (local validation)");
+                }
+                return true;
+            }
+            // RESET DEFAULTS
+            if (x >= PED_BTN_RESET_X && x <= PED_BTN_RESET_X + PED_BTN_W) {
+                sendPedalCalOp(can::PEDAL_CAL_OP_RESET_DEFAULTS);
+                Serial.println("[ENG] Pedal RESET DEFAULTS");
                 return true;
             }
         }
@@ -1207,10 +1363,18 @@ void EngineeringScreen::drawModuleControl() {
 }
 
 // -------------------------------------------------------------------------
-// drawPedalCalibration — Live pedal response verification
+// drawPedalCalibration — Persistent pedal endpoint calibration
 //
-// Shows real-time wheel speeds, motor currents, traction scale, battery
-// data, and ABS/TCS status.  Updated via partial redraw in draw().
+// Operator UI for capturing the ADC counts corresponding to the released
+// (MIN) and fully-pressed (MAX) accelerator positions and persisting them
+// to STM32 flash page 124.  All operator actions are routed through the
+// SERVICE_CMD 0x110 / 0xF5 sub-protocol and are gated server-side by the
+// STM32 safety state machine (STANDBY + startup_inhibit + pedal<3% +
+// plausible + wheels<0.3 km/h).  See docs/CALIBRATION.md.
+//
+// Live values are driven from the on-demand 0x308 burst that this screen
+// requests (QUERY) every ~500 ms while active.  The burst stops 1 s after
+// the screen is left → no CAN flooding when the screen is not in use.
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawPedalCalibration() {
     RTRACE_BEGIN_SCREEN("eng_pedal_cal");
@@ -1228,48 +1392,48 @@ void EngineeringScreen::drawPedalCalibration() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
-    // Column headers
+    // Static labels — left column (live), right column (stored / pending)
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Wheel", 40, 55);
-    RTRACE_TEXT(40, 55, "Wheel", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Speed", 130, 55);
-    RTRACE_TEXT(130, 55, "Speed", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Current", 250, 55);
-    RTRACE_TEXT(250, 55, "Current", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Traction", 370, 55);
-    RTRACE_TEXT(370, 55, "Traction", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("Raw ADC:",    20, 55);
+    tft.drawString("Pedal %:",    20, 80);
+    tft.drawString("Stable:",     20, 105);
+    tft.drawString("Plausible:",  20, 130);
+    tft.drawString("Safety gate:",20, 155);
 
-    // Wheel labels (static)
-    static const char* const wheelNames[4] = {"FL", "FR", "RL", "RR"};
-    for (uint8_t i = 0; i < 4; ++i) {
-        int16_t rowY = 75 + i * 22;
-        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-        tft.drawString(wheelNames[i], 40, rowY);
-        RTRACE_TEXT(40, rowY, wheelNames[i], ui::COL_CYAN, ui::COL_BG, 1, TL_DATUM);
-    }
+    tft.drawString("Stored MIN:", 260, 55);
+    tft.drawString("Stored MAX:", 260, 80);
+    tft.drawString("Pending MIN:",260, 105);
+    tft.drawString("Pending MAX:",260, 130);
+    tft.drawString("Validation:", 260, 155);
 
-    // Battery label
-    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Battery:", 40, 170);
-    RTRACE_TEXT(40, 170, "Battery:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    // Hint line
+    tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+    tft.drawString("Release pedal → CAPTURE MIN. Press fully → CAPTURE MAX. Then SAVE.",
+                   10, 195);
 
-    // Safety label
-    tft.drawString("Safety:", 40, 192);
-    RTRACE_TEXT(40, 192, "Safety:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-
-    // Instruction text
-    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Operate pedal to verify motor response.", 40, 230);
-    RTRACE_TEXT(40, 230, "Operate pedal to verify motor response.",
-                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Values update in real-time from CAN telemetry.", 40, 248);
-    RTRACE_TEXT(40, 248, "Values update in real-time from CAN telemetry.",
-                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-
-    // Force initial partial redraw of values
+    // Force initial partial redraw of value cells
     pedalDataChanged_ = true;
 
-    // Back button
+    // ---- Action buttons ----
+    auto drawBtn = [&](int16_t x, const char* label, uint16_t fill) {
+        tft.fillRect(x, PED_BTN_Y, PED_BTN_W, PED_BTN_H, fill);
+        RTRACE_FILL_RECT(x, PED_BTN_Y, PED_BTN_W, PED_BTN_H, fill);
+        tft.drawRect(x, PED_BTN_Y, PED_BTN_W, PED_BTN_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(x, PED_BTN_Y, PED_BTN_W, PED_BTN_H, ui::COL_GRAY);
+        tft.setTextColor(ui::COL_WHITE, fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(label, x + PED_BTN_W / 2, PED_BTN_Y + PED_BTN_H / 2);
+        RTRACE_TEXT(x + PED_BTN_W / 2, PED_BTN_Y + PED_BTN_H / 2, label,
+                    ui::COL_WHITE, fill, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    };
+    drawBtn(PED_BTN_CAPMIN_X, "CAPTURE MIN", ui::COL_DARK_GRAY);
+    drawBtn(PED_BTN_CAPMAX_X, "CAPTURE MAX", ui::COL_DARK_GRAY);
+    // SAVE button colour reflects validation status on partial-redraw pass.
+    drawBtn(PED_BTN_SAVE_X,   "SAVE",        ui::COL_DARK_GRAY);
+    drawBtn(PED_BTN_RESET_X,  "RESET DEF.",  ui::COL_DARK_GRAY);
+
+    // Back button (engineering convention — top-left)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
@@ -2052,4 +2216,21 @@ void EngineeringScreen::drawDebounceDiag() {
     tft.setTextDatum(MC_DATUM);
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// sendPedalCalOp — emit a SERVICE_CMD (0x110) with byte0 = 0xF5
+// (SERVICE_ACTION_PEDAL_CAL) and byte1 = sub-opcode.  The STM32 replies
+// with a CMD_ACK (0x103, byte0 = 0x10) which is picked up by the
+// existing ackData() pipeline and shown in the standard ack feedback
+// banner.  Safety gates and validation are enforced server-side.
+// -------------------------------------------------------------------------
+void EngineeringScreen::sendPedalCalOp(uint8_t op) {
+    CanFrame frame = {};
+    frame.identifier       = can::SERVICE_CMD;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+    frame.data[0]          = can::SERVICE_ACTION_PEDAL_CAL;
+    frame.data[1]          = op;
+    ESP32Can.writeFrame(frame, 0);
 }

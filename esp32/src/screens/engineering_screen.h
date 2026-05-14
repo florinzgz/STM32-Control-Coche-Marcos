@@ -91,7 +91,10 @@ private:
     uint32_t    prevEnabledBits_ = 0xFFFFFFFF;
     uint32_t    prevDisabledBits_ = 0xFFFFFFFF;
 
-    // Cached data for pedal calibration (live telemetry)
+    // Cached data for pedal calibration (live telemetry verification and
+    // persistent endpoint calibration UI — 0x308 telemetry burst).
+    // Legacy fields below preserved for backward compatibility with the
+    // old verification panel but no longer rendered on the new UI.
     uint16_t    wheelSpeed_[4]   = {};     // 0.1 km/h units
     uint16_t    motorCurrent_[4] = {};     // 0.01 A units
     uint8_t     tractionScale_[4] = {};    // 0–100 %
@@ -100,6 +103,26 @@ private:
     uint8_t     absActive_       = 0;
     uint8_t     tcsActive_       = 0;
     bool        pedalDataChanged_ = false;
+
+    // Pedal endpoint calibration state (mirrors latest 0x308 frame).
+    uint8_t       pedalCalFlags_      = 0;
+    uint16_t      pedalCalRawAdc_     = 0;
+    uint16_t      pedalCalStoredMin_  = 0;
+    uint16_t      pedalCalStoredMax_  = 0;
+    uint16_t      pedalCalPendingMin_ = 0;
+    uint16_t      pedalCalPendingMax_ = 0;
+    uint8_t       pedalCalPercent_    = 0;
+    unsigned long pedalCalLastTs_     = 0;       // last accepted 0x308 timestamp
+    unsigned long pedalCalLastQueryMs_ = 0;      // last QUERY tx (ms)
+    // Local stability ring: last 8 rawAdc samples; UI shows "stable" when
+    // (max-min) within tolerance.  Independent from the STM32-side stability
+    // check that runs synchronously during CAPTURE.
+    static constexpr uint8_t PEDAL_STAB_N = 8;
+    uint16_t      pedalStabRing_[PEDAL_STAB_N] = {};
+    uint8_t       pedalStabCount_   = 0;
+    uint8_t       pedalStabHead_    = 0;
+    // Helper: send a SERVICE_CMD (0x110) with byte0=0xF5 (PEDAL_CAL) + sub-opcode.
+    void sendPedalCalOp(uint8_t op);
 
     // Cached data for encoder calibration (live steering)
     int16_t     steeringAngle_   = 0;      // 0.1° units

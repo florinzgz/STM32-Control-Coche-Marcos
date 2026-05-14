@@ -1209,24 +1209,34 @@ static bool pedalcal_sample_stable(uint16_t *out_adc)
 
 /* Emit one 0x308 frame.
  *
- * Layout (DLC 8, little-endian):
- *   byte 0   : status flags
+ * Layout (DLC 8, little-endian).  To fit both stored AND pending
+ * endpoints in 8 bytes the STM32 alternates two frame variants
+ * within the 10-frame burst (5 of each variant per burst):
+ *
+ *   byte 0   : flags
  *              bit 0: pending MIN captured
  *              bit 1: pending MAX captured
- *              bit 2: validation OK for (pending_min, pending_max)
- *              bit 3: stored slot is valid (PedalCal_IsValid())
- *              bit 4: safety gates currently satisfied
- *              bit 5: pedal currently plausible
- *              bits 6-7: reserved (0)
+ *              bit 2: pending pair validates OK
+ *              bit 3: stored slot valid (PedalCal_IsValid())
+ *              bit 4: safety gates satisfied
+ *              bit 5: pedal plausible
+ *              bit 6: 0 = bytes 3-6 carry PENDING pair
+ *                     1 = bytes 3-6 carry STORED pair
+ *              bit 7: reserved (0)
  *   bytes 1-2: raw ADC live (u16 LE)
- *   bytes 3-4: pending MIN (u16 LE)  — 0 if not captured
- *   bytes 5-6: pending MAX (u16 LE)  — 0 if not captured
- *   byte 7   : pedal percent (0..100, saturating)                    */
+ *   bytes 3-4: MIN (pending or stored — see bit 6) (u16 LE)
+ *   bytes 5-6: MAX (pending or stored — see bit 6) (u16 LE)
+ *   byte 7   : pedal percent (0..100 saturating)                    */
 static void pedalcal_send_status(void)
 {
+    /* Alternate variant on each transmission so the ESP32 sees both
+     * stored and pending pairs at ~5 Hz each.  At burst start
+     * pedalcal_burst_left == PEDALCAL_BURST_FRAMES (10) — the first
+     * frame goes out as PENDING (bit 6 == 0).                       */
+    bool send_stored = ((pedalcal_burst_left & 0x01U) == 0U);
+
     uint16_t stored_min = 0, stored_max = 0;
     PedalCal_GetStored(&stored_min, &stored_max);
-    (void)stored_min; (void)stored_max;  /* not transmitted — fits in 8 B  */
 
     uint8_t  flags = 0;
     if (pedalcal_have_min)  flags |= 0x01U;
@@ -1234,23 +1244,27 @@ static void pedalcal_send_status(void)
     if (pedalcal_have_min && pedalcal_have_max &&
         PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max))
         flags |= 0x04U;
-    if (PedalCal_IsValid()) flags |= 0x08U;
-    if (pedalcal_safety_ok())     flags |= 0x10U;
-    if (Pedal_IsPlausible())      flags |= 0x20U;
+    if (PedalCal_IsValid())   flags |= 0x08U;
+    if (pedalcal_safety_ok()) flags |= 0x10U;
+    if (Pedal_IsPlausible())  flags |= 0x20U;
+    if (send_stored)          flags |= 0x40U;
 
     uint16_t raw_adc = Pedal_GetRawADC();
     float    pct_f   = Pedal_GetPercent();
     if (pct_f < 0.0f)   pct_f = 0.0f;
     if (pct_f > 100.0f) pct_f = 100.0f;
 
+    uint16_t mn = send_stored ? stored_min : pedalcal_pending_min;
+    uint16_t mx = send_stored ? stored_max : pedalcal_pending_max;
+
     uint8_t payload[8];
     payload[0] = flags;
     payload[1] = (uint8_t)(raw_adc & 0xFFU);
     payload[2] = (uint8_t)((raw_adc >> 8) & 0xFFU);
-    payload[3] = (uint8_t)(pedalcal_pending_min & 0xFFU);
-    payload[4] = (uint8_t)((pedalcal_pending_min >> 8) & 0xFFU);
-    payload[5] = (uint8_t)(pedalcal_pending_max & 0xFFU);
-    payload[6] = (uint8_t)((pedalcal_pending_max >> 8) & 0xFFU);
+    payload[3] = (uint8_t)(mn & 0xFFU);
+    payload[4] = (uint8_t)((mn >> 8) & 0xFFU);
+    payload[5] = (uint8_t)(mx & 0xFFU);
+    payload[6] = (uint8_t)((mx >> 8) & 0xFFU);
     payload[7] = (uint8_t)pct_f;
 
     (void)TransmitFrame(CAN_ID_DIAG_PEDAL_CAL, payload, sizeof(payload));
@@ -1341,23 +1355,15 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         return;
     }
     case PEDAL_CAL_OP_RESET_DEFAULTS: {
-        /* Saving an out-of-range pair would be rejected by validation,
-         * so we instead restore the compile-time endpoints in RAM and
-         * mark the flash slot invalid by writing a clearly-invalid
-         * placeholder.  We accept that the next reboot will still see
-         * the (now-stale but CRC-valid) slot — but the application
-         * range-check in PedalCal_Init() does NOT load it if it falls
-         * outside the limits, which the default 150/2413 satisfies.
-         *
-         * Pragmatic implementation: persist the compile-time defaults
-         * so the slot stays consistent with applied endpoints across
-         * reboots.  This keeps the system on documented defaults
-         * without requiring a dedicated erase-only flash primitive.   */
-        if (!PedalCal_Save(150U, 2413U)) {
+        /* Persist the compile-time defaults so the slot stays consistent
+         * with applied endpoints across reboots.  Defaults are sourced
+         * from pedal_cal_store.h (PEDAL_CAL_DEFAULT_MIN/MAX) to keep a
+         * single source of truth shared with sensor_manager.c.        */
+        if (!PedalCal_Save(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX)) {
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
-        Pedal_ApplyCalibration(150U, 2413U);
+        Pedal_ApplyCalibration(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX);
         pedalcal_have_min = false;
         pedalcal_have_max = false;
         CAN_SendCommandAck(0x10, ACK_OK);

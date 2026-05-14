@@ -52,6 +52,14 @@ extern "C" {
 #define PEDAL_CAL_MAX_LIMIT    2600U   /* adc_max <= 2600            */
 #define PEDAL_CAL_RANGE_MIN    800U    /* (adc_max - adc_min) >= 800 */
 
+/* ---- Compile-time fallback endpoints ----
+ * These mirror the PEDAL_ADC_MIN_DEFAULT / PEDAL_ADC_MAX_DEFAULT
+ * constants in sensor_manager.c.  Re-exported here so callers that
+ * need to persist or re-apply the defaults (e.g. the CAN RESET
+ * sub-opcode handler) reference a single source of truth.            */
+#define PEDAL_CAL_DEFAULT_MIN  150U
+#define PEDAL_CAL_DEFAULT_MAX  2413U
+
 /**
  * @brief  Initialise the pedal calibration store module.
  *         Reads flash and validates CRC / magic / range.  Does NOT

@@ -1,5 +1,153 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-14
+
+### Persistent Pedal-Endpoint Calibration (Lotes 1–7)
+
+End-to-end addition of a workshop-driven calibration store for the
+accelerator-pedal raw ADC endpoints, so the runtime mapping in
+`Pedal_RawToPercent()` no longer depends on hard-coded constants. The
+work is strictly surgical: no change to the 100 Hz loop, watchdog, EMA,
+plausibility, fault thresholds, LIMP_HOME, startup_inhibit, ABS/TCS, or
+the existing CAN contracts.
+
+#### Rationale
+
+`Core/Src/sensor_manager.c` previously baked `PEDAL_ADC_MIN = 150` and
+`PEDAL_ADC_MAX = 2413` at compile time. Real-world pedal assemblies
+drift mechanically across units and over service life; the only
+remediation path used to be a firmware re-flash. This change moves the
+endpoints into a persistent slot (flash page 124, `0x0807C000`) while
+keeping the same numbers as the silent fallback when the slot is
+missing/invalid.
+
+#### Risks mitigated
+
+- **Boot brick** — fully prevented by silent fallback to compile-time
+  defaults when CRC/magic/range is invalid.  Boot is never blocked.
+- **Pedal becomes unusable** — `Pedal_ApplyCalibration()` re-runs the
+  same range-check inline; out-of-range values are rejected and the
+  active endpoints are left untouched.
+- **CAN flood** — the new `0x308` telemetry is on-demand only (1 s
+  burst of 10 frames at 10 Hz after each QUERY).
+- **CMD_ACK contract break** — DLC of `0x103` is preserved at 3 bytes;
+  the new sub-protocol reuses existing `ACK_OK / ACK_INVALID /
+  ACK_REJECTED / ACK_BLOCKED_BY_SAFETY` codes.
+- **Unsafe persistence** — every sub-opcode except `QUERY` requires
+  the full safety gate (STANDBY + `startup_inhibit` + pedal < 3% +
+  plausible + all wheels < 0.3 km/h) plus the hard validators
+  (`min ≥ 50`, `max ≤ 2600`, `max > min`, `max − min ≥ 800`).
+
+#### Safety invariants preserved
+
+- `motor_control.c`, `safety_system.c`, ABS/TCS logic, watchdog handling,
+  pedal EMA, pedal plausibility, fault thresholds (FAULT_LO / FAULT_HI),
+  startup_inhibit, LIMP_HOME, the loop-100 Hz scheduler and the existing
+  CAN DLC contracts are **not modified**.
+- `Pedal_RawToPercent()` keeps the same signature, the same EMA pipeline
+  and the same fault handling. The only change is that the two endpoints
+  now come from runtime variables that default to the compile-time
+  constants.
+
+#### Fallback behaviour
+
+- Virgin flash, CRC mismatch, magic mismatch, or out-of-range pair →
+  `PedalCal_Init()` returns *invalid*, the runtime endpoints stay at
+  `PEDAL_ADC_MIN_DEFAULT = 150` / `PEDAL_ADC_MAX_DEFAULT = 2413`.
+- `RESET DEFAULTS` button re-persists those exact defaults so the slot
+  stays consistent across reboots.
+
+#### Backward compatibility
+
+- ESP32 firmware that predates the feature ignores the new `0x308` ID
+  and the new `0xF5` sub-opcode without any error path engaged.
+- Other CAN nodes that do not subscribe to `0x308` see no change in
+  traffic — the burst is silent until a QUERY is issued.
+- The compile-time defaults remain `150` / `2413`, identical to the
+  previous firmware: a board that never runs the calibration wizard
+  behaves bit-identically.
+
+#### Flash reservation (Lote 1)
+
+- `STM32G474RETX_FLASH.ld` — `FLASH` region trimmed from `500K → 496K`.
+  Pages 124–127 (16 KB) are now exclusively NVM:
+  - 124 `0x0807C000` — pedal calibration (this change)
+  - 125 `0x0807D000` — DS18B20 sensor map
+  - 126 `0x0807E000` — steering centring
+  - 127 `0x0807F000` — EPS parameters
+
+#### Files added
+
+- `Core/Inc/pedal_cal_store.h` — public API (`PedalCal_Init`,
+  `PedalCal_IsValid`, `PedalCal_GetStored`, `PedalCal_Validate`,
+  `PedalCal_Save`, defaults).
+- `Core/Src/pedal_cal_store.c` — flash store modelled 1:1 on
+  `steering_cal_store.c` (magic `0x50434C31` (`"PCL1"`), 16-byte
+  payload, CRC32 polynomial `0xEDB88320`, `valid_flag = 0xA5`, page 124
+  erase + double-word program + lock, no IRQ disable, no RTOS, no
+  watchdog change).
+- `docs/CALIBRATION.md` — operator-facing reference for the new store.
+
+#### Files modified
+
+- `STM32G474RETX_FLASH.ld` — `FLASH = 496K`, NVM pages 124–127 documented.
+- `Makefile` — `pedal_cal_store.c` added to `CORE_SRC` (and the
+  pre-existing missing `loop_diag.c` reference was also added so the
+  command-line build links cleanly).
+- `Core/Inc/can_handler.h` — new IDs and constants
+  (`CAN_ID_DIAG_PEDAL_CAL = 0x308`, `SERVICE_ACTION_PEDAL_CAL = 0xF5`,
+  `PEDAL_CAL_OP_*`) and `CAN_PedalCalBurstUpdate()` prototype.
+- `Core/Src/can_handler.c` — `0xF5` sub-protocol handler with stability
+  check, hard validators, full safety-gate check, and the on-demand
+  `0x308` burst emitter (10 frames × 100 ms).  STM32 alternates two
+  payload variants in the burst (`PENDING` vs `STORED`) so all four
+  endpoints fit in 8 bytes.
+- `Core/Inc/sensor_manager.h` — new public helpers
+  `Pedal_ApplyCalibration()`, `Pedal_GetRawADC()`.
+- `Core/Src/sensor_manager.c` — `PEDAL_ADC_MIN/MAX` defines renamed to
+  `_DEFAULT` and shadowed by runtime variables. `Pedal_RawToPercent()`
+  is *byte-identical* in semantics — only the two named constants are
+  replaced by the runtime statics. All other branches (FAULT_LO,
+  FAULT_HI, EMA, plausibility, rate-limit) untouched.
+- `Core/Src/main.c` — calls `PedalCal_Init()` after
+  `SteeringCal_Init()`, applies the stored endpoints if valid, otherwise
+  leaves the runtime defaults active. Also adds the 100 ms call to
+  `CAN_PedalCalBurstUpdate()` in the existing status batch.
+- `esp32/include/can_ids.h` — mirror constants
+  (`DIAG_PEDAL_CAL = 0x308`, `SERVICE_ACTION_PEDAL_CAL = 0xF5`,
+  `PEDAL_CAL_OP_*`).
+- `esp32/src/vehicle_data.h` — new `PedalCalData` slot in
+  `VehicleData`.
+- `esp32/src/can_rx.cpp` — `0x308` decoder that preserves the
+  unselected pair across alternating frame variants.
+- `esp32/src/screens/engineering_screen.{h,cpp}` — `drawPedalCalibration()`
+  fully rewritten with the new layout (Raw ADC / Pedal % / Stable /
+  Plausible / Safety gate on the left, Stored MIN/MAX / Pending MIN/MAX /
+  Validation on the right) and five buttons (CAPTURE MIN, CAPTURE MAX,
+  SAVE, RESET DEFAULTS, BACK). Touch routing for the rest of the screen
+  is unchanged; only the new buttons are added. ESP32 polls `QUERY`
+  every 500 ms while the screen is active so the 1 s STM32 burst keeps
+  refreshing; the burst stops naturally when the screen is closed.
+- `docs/CAN_PROTOCOL.md`, `docs/ENGINEERING_MENU.md` — documentation
+  updated for `0x308`, the `0xF5` sub-opcodes, and the new operator
+  procedure.
+
+#### Verification
+
+- STM32 firmware builds clean (`make`, `-Wall -Wextra -Werror`).
+  `text = 65 KB` — well below the new 496 KB `FLASH` region; the
+  linker confirms `.text` / `.rodata` never spill into pages 124–127.
+- Pre-existing `loop_diag.c` symbol was missing from the Makefile
+  source list — added so the command-line build links. This is
+  unrelated to the calibration feature but blocked verification of it.
+- ESP32 firmware build verification was attempted with PlatformIO; the
+  platform install was blocked by the offline sandbox and could not
+  complete in this session. The C++ changes follow existing patterns
+  (`SERVICE_ACTION_RELAY_OVERRIDE` path) and integrate with the same
+  ACK feedback pipeline.
+
+---
+
 ## [unreleased] — 2026-05-13
 
 ### Critical Safety Remediation & Documentation Alignment (F1–F7)

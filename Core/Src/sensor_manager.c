@@ -18,6 +18,7 @@
   */
 
 #include "sensor_manager.h"
+#include "pedal_cal_store.h"  /* PEDAL_CAL_DEFAULT_MIN / MAX — single source of truth for compile-time endpoints */
 #include "safety_system.h"
 #include "service_mode.h"  /* per-module fault tagging (1.5 / 2.3)    */
 #include "main.h"
@@ -425,8 +426,8 @@ extern I2C_HandleTypeDef hi2c1;
  *   thresholds (FAULT_LO/HI, sample tolerance, rate limit, EMA α,
  *   plausibility window) remain compile-time constants and are NOT
  *   affected by runtime calibration.                                  */
-#define PEDAL_ADC_MIN_DEFAULT   150U   /* ~0.3V (pedal released), after divider */
-#define PEDAL_ADC_MAX_DEFAULT   2413U  /* ~4.8V (pedal fully pressed), after divider */
+#define PEDAL_ADC_MIN_DEFAULT   PEDAL_CAL_DEFAULT_MIN   /* ~0.3V (pedal released), after divider */
+#define PEDAL_ADC_MAX_DEFAULT   PEDAL_CAL_DEFAULT_MAX   /* ~4.8V (pedal fully pressed), after divider */
 
 static uint16_t pedal_adc_min = PEDAL_ADC_MIN_DEFAULT;
 static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
