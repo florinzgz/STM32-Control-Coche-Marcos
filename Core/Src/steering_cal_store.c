@@ -21,6 +21,7 @@
 #include "stm32g4xx_hal.h"
 #include "main.h"
 #include "sensor_manager.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -146,6 +147,15 @@ int32_t SteeringCal_GetStoredCenter(void)
 
 bool SteeringCal_Save(int32_t encoder_count_at_center)
 {
+    /* Defense in depth: never erase page 126 while the vehicle is
+     * driving.  The only legitimate caller (SteeringCentering_Step)
+     * runs in BOOT / STANDBY, so this guard rejects ACTIVE /
+     * DEGRADED / SAFE / LIMP_HOME and is permissive everywhere the
+     * centering routine can legitimately complete.                  */
+    SystemState_t st = Safety_GetState();
+    if (st != SYS_STATE_BOOT && st != SYS_STATE_STANDBY)
+        return false;
+
     /* Build the slot in RAM */
     stcal_flash_slot_t slot;
     memset(&slot, 0, sizeof(slot));

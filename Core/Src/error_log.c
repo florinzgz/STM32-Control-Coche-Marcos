@@ -59,6 +59,22 @@ static error_log_entry_t     log_entries[ERROR_LOG_MAX_ENTRIES];
 static uint8_t               log_reset_cause = 0;
 static bool                  log_initialized = false;
 
+/* ---- Flash-wear guard ---------------------------------------------------
+ * Minimum interval between consecutive flash writes.  RAM ring buffer
+ * is always updated; only the persistence call is deferred.  After the
+ * cool-down window passes the next ErrorLog_Record() call flushes the
+ * full RAM image (header + all accumulated entries) to flash, so no
+ * entry is lost as long as the system keeps running.  A power loss
+ * inside the cool-down loses the un-flushed entries — that is the
+ * same trade-off documented in the file header (the underlying fault
+ * is re-asserted and re-recorded after the reboot).
+ *
+ * Sized below the 100 Hz main-loop tick (10 ms) × ~10, so a fault
+ * flap of order kHz cannot wear the page.                                */
+#define ERRLOG_WRITE_MIN_INTERVAL_MS  100U
+static uint32_t log_last_flash_tick   = 0;
+static bool     log_has_flushed_once  = false;
+
 /* ---- CRC32 (same polynomial as steering_cal_store.c / eps_params.c) ---- */
 static uint32_t errlog_crc32(const void *data, uint32_t len)
 {
@@ -221,8 +237,18 @@ void ErrorLog_Record(uint8_t error_code, uint8_t subsystem,
         log_header.total_events++;
     }
 
-    /* Auto-save to flash */
-    errlog_write_flash();
+    /* Auto-save to flash, rate-limited to protect page 125 from wear.
+     * The RAM ring buffer was already updated above, so an elided
+     * write is recovered on the next call past the cool-down window
+     * (which re-flushes the complete RAM image including this entry). */
+    uint32_t now = HAL_GetTick();
+    if (!log_has_flushed_once ||
+        (uint32_t)(now - log_last_flash_tick) >= ERRLOG_WRITE_MIN_INTERVAL_MS) {
+        if (errlog_write_flash()) {
+            log_last_flash_tick  = now;
+            log_has_flushed_once = true;
+        }
+    }
 }
 
 uint16_t ErrorLog_GetCount(void)
@@ -256,7 +282,16 @@ bool ErrorLog_Clear(void)
     /* Preserve total_events as lifetime counter */
     memset(log_entries, 0, sizeof(log_entries));
 
-    return errlog_write_flash();
+    /* User-initiated clear bypasses the rate-limit (it is the whole
+     * purpose of the call), but we still record the resulting flush
+     * timestamp so a subsequent ErrorLog_Record() respects the
+     * cool-down window relative to *this* write.                    */
+    bool ok = errlog_write_flash();
+    if (ok) {
+        log_last_flash_tick  = HAL_GetTick();
+        log_has_flushed_once = true;
+    }
+    return ok;
 }
 
 const error_log_entry_t *ErrorLog_GetEntries(void)
