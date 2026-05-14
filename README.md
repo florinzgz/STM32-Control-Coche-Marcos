@@ -132,7 +132,7 @@ The system is split into two independent microcontroller subsystems that communi
 | `encoder_reader.c/h` | TIM2 quadrature counter read + Z-index drift detection |
 | `service_mode.c/h` | 25-module enable/disable, fault classification, factory restore |
 | `error_log.c/h` | Flash page 125 ring buffer (250 entries, CRC32, post-mortem) |
-| `sensor_map_store.c/h` | Flash page 125 (shared section): DS18B20 physical→role mapping |
+| `sensor_map_store.c/h` | Flash page 123 (dedicated): DS18B20 physical→role mapping |
 | `boot_validation.c/h` | Pre-ACTIVE gate: sensor plausibility, battery, encoder health |
 | `loop_diag.c/h` | Peak-hold 100 Hz task duration (DWT cycles → µs → 100 µs units) |
 | `math_safety.c/h` | float-safe helpers (`sanitize_float`, clamped int conversions) |
@@ -788,10 +788,13 @@ The physical gear selector (P/R/N/D1/D2) uses an MCP23017 I2C GPIO expander.
 
 | Flash page | Address | Size | Content |
 |-----------|---------|------|---------|
-| Page 125 | 0x0807C000 | 4 KB | Error log ring buffer (250 × 16-byte entries + CRC32 header) |
+| Page 123 | 0x0807B000 | 4 KB | DS18B20 sensor map (`sensor_map_store.c`) |
+| Page 124 | 0x0807C000 | 4 KB | Persistent pedal calibration (`pedal_cal_store.c`) |
+| Page 125 | 0x0807D000 | 4 KB | Error log ring buffer (250 × 16-byte entries + CRC32 header) |
 | Page 126 | 0x0807E000 | 4 KB | Steering calibration (magic + encoder center + CRC32) |
+| Page 127 | 0x0807F000 | 4 KB | EPS / torque-assist parameters (`eps_params.c`) |
 
-Both use magic numbers and CRC32 integrity checks. Flash is erased and reformatted if magic or CRC fails at boot.
+Each page is single-owner.  All five use magic numbers and CRC32 integrity checks; flash is erased and reformatted if magic or CRC fails at boot.
 
 **Steering calibration (Flash page 126):**
 - `SteeringCal_Save(encoder_count_at_center)` — called once centering completes
@@ -799,7 +802,7 @@ Both use magic numbers and CRC32 integrity checks. Flash is erased and reformatt
 - On success: centering sweep is skipped at boot (fast startup)
 - Safety invariant: flash alone never authorises ACTIVE — the center sensor must also agree
 
-**DS18B20 sensor map (Flash page 125, shared section):**
+**DS18B20 sensor map (Flash page 123):**
 - Stores user-assigned physical index → role mapping (FL/FR/RL/RR/Ambient)
 - Configured via engineering menu → CAN CMD_SENSOR_MAP_TEMP (0x112)
 - Identity mapping used as fallback if no valid map is stored

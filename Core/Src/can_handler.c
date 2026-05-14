@@ -18,6 +18,7 @@
 #include "math_safety.h"
 #include "error_log.h"
 #include "sensor_map_store.h"
+#include "pedal_cal_store.h"
 #include <math.h>
 #include <string.h>
 
@@ -580,7 +581,7 @@ void CAN_SendStatusTraction(void) {
  *   Byte 4: Ambient temperature   (°C, int8_t)
  *
  * The mapping is set by the user via the engineering menu on the ESP32
- * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 125.
+ * display (CAN_ID_CMD_SENSOR_MAP_TEMP, 0x112) and persisted in flash page 123.
  * If no valid mapping has been saved, discovery order is used (index 0=FL, etc.)
  *
  * ---- Sanity filter (production hardening) ----
@@ -1116,6 +1117,264 @@ static uint8_t ExtractDLC(uint32_t dlc_code) {
     }
 }
 
+/* ==================================================================
+ *  Pedal calibration state (0xF5 sub-protocol + 0x308 telemetry)
+ *
+ *  Persistent endpoint calibration for the accelerator pedal.  All
+ *  state changes live entirely in this CAN module; the underlying
+ *  pedal pipeline (sensor_manager) is touched only via the public
+ *  Pedal_ApplyCalibration() / Pedal_GetRawADC() helpers and the
+ *  flash store (pedal_cal_store.c).
+ *
+ *  Safety invariants (enforced by pedalcal_safety_ok()):
+ *    - Safety_GetState() == SYS_STATE_STANDBY
+ *    - Startup_IsInhibited() == true
+ *    - Pedal_GetPercent() < 3.0f  (pedal released)
+ *    - Pedal_IsPlausible() == true
+ *    - All four wheel speeds < 0.3 km/h
+ *
+ *  Stability check (CAPTURE_MIN / CAPTURE_MAX):
+ *    8 samples over 400 ms (50 ms cadence — caller is the 100 Hz
+ *    loop reaching the 50 ms branch).  All eight raw ADC samples
+ *    must lie within PEDALCAL_STABLE_TOL counts of each other.
+ *
+ *  0x308 telemetry burst (DLC 8):
+ *    Emitted only on demand: after a QUERY sub-opcode, 10 frames
+ *    spaced 100 ms apart (1 second total), then silence.  No
+ *    continuous flooding — backward-compatible for nodes that ignore
+ *    0x308 entirely.
+ * ================================================================== */
+
+/* ---- Stability ---- */
+#define PEDALCAL_STABLE_SAMPLES   8U
+#define PEDALCAL_STABLE_TOL       8U     /* max spread (counts) for "stable" */
+
+/* ---- 0x308 burst ---- */
+#define PEDALCAL_BURST_FRAMES     10U    /* 10 × 100 ms = 1 s             */
+#define PEDALCAL_BURST_PERIOD_MS  100U
+
+/* ---- Pending endpoints (RAM-only until SAVE) ---- */
+static bool      pedalcal_have_min      = false;
+static bool      pedalcal_have_max      = false;
+static uint16_t  pedalcal_pending_min   = 0;
+static uint16_t  pedalcal_pending_max   = 0;
+
+/* ---- 0x308 telemetry burst state ---- */
+static uint8_t   pedalcal_burst_left    = 0;
+static uint32_t  pedalcal_next_tx_ms    = 0;
+
+static inline bool pedalcal_safety_ok(void)
+{
+    if (Safety_GetState() != SYS_STATE_STANDBY) return false;
+    if (!Startup_IsInhibited())                 return false;
+    if (Pedal_GetPercent() >= 3.0f)             return false;
+    if (!Pedal_IsPlausible())                   return false;
+    if (Wheel_GetSpeed_FL() >= 0.3f)            return false;
+    if (Wheel_GetSpeed_FR() >= 0.3f)            return false;
+    if (Wheel_GetSpeed_RL() >= 0.3f)            return false;
+    if (Wheel_GetSpeed_RR() >= 0.3f)            return false;
+    return true;
+}
+
+/* Sample a stable raw ADC value over PEDALCAL_STABLE_SAMPLES × 50 ms.
+ * Uses HAL_Delay so this MUST only run from CAN_ProcessMessages()
+ * context where the rest of the 100 Hz loop is paused — same pattern
+ * as steering_cal_store invocation.  Total worst-case duration
+ * 7 × 50 ms = 350 ms (8 samples, 7 delays in between).  The IWDG
+ * reload window in this project is well above this bound.            */
+static bool pedalcal_sample_stable(uint16_t *out_adc)
+{
+    uint16_t samples[PEDALCAL_STABLE_SAMPLES];
+    samples[0] = Pedal_GetRawADC();
+    uint16_t mn = samples[0];
+    uint16_t mx = samples[0];
+
+    for (uint8_t i = 1; i < PEDALCAL_STABLE_SAMPLES; i++) {
+        HAL_Delay(50);
+        samples[i] = Pedal_GetRawADC();
+        if (samples[i] < mn) mn = samples[i];
+        if (samples[i] > mx) mx = samples[i];
+    }
+
+    if ((uint32_t)(mx - mn) > PEDALCAL_STABLE_TOL)
+        return false;
+
+    /* Mean (rounded) of the 8 samples */
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < PEDALCAL_STABLE_SAMPLES; i++) sum += samples[i];
+    *out_adc = (uint16_t)((sum + (PEDALCAL_STABLE_SAMPLES / 2U))
+                          / PEDALCAL_STABLE_SAMPLES);
+    return true;
+}
+
+/* Emit one 0x308 frame.
+ *
+ * Layout (DLC 8, little-endian).  To fit both stored AND pending
+ * endpoints in 8 bytes the STM32 alternates two frame variants
+ * within the 10-frame burst (5 of each variant per burst):
+ *
+ *   byte 0   : flags
+ *              bit 0: pending MIN captured
+ *              bit 1: pending MAX captured
+ *              bit 2: pending pair validates OK
+ *              bit 3: stored slot valid (PedalCal_IsValid())
+ *              bit 4: safety gates satisfied
+ *              bit 5: pedal plausible
+ *              bit 6: 0 = bytes 3-6 carry PENDING pair
+ *                     1 = bytes 3-6 carry STORED pair
+ *              bit 7: reserved (0)
+ *   bytes 1-2: raw ADC live (u16 LE)
+ *   bytes 3-4: MIN (pending or stored — see bit 6) (u16 LE)
+ *   bytes 5-6: MAX (pending or stored — see bit 6) (u16 LE)
+ *   byte 7   : pedal percent (0..100 saturating)                    */
+static void pedalcal_send_status(void)
+{
+    /* Alternate variant on each transmission so the ESP32 sees both
+     * stored and pending pairs at ~5 Hz each.  At burst start
+     * pedalcal_burst_left == PEDALCAL_BURST_FRAMES (10) — the first
+     * frame goes out as PENDING (bit 6 == 0).                       */
+    bool send_stored = ((pedalcal_burst_left & 0x01U) == 0U);
+
+    uint16_t stored_min = 0, stored_max = 0;
+    PedalCal_GetStored(&stored_min, &stored_max);
+
+    uint8_t  flags = 0;
+    if (pedalcal_have_min)  flags |= 0x01U;
+    if (pedalcal_have_max)  flags |= 0x02U;
+    if (pedalcal_have_min && pedalcal_have_max &&
+        PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max))
+        flags |= 0x04U;
+    if (PedalCal_IsValid())   flags |= 0x08U;
+    if (pedalcal_safety_ok()) flags |= 0x10U;
+    if (Pedal_IsPlausible())  flags |= 0x20U;
+    if (send_stored)          flags |= 0x40U;
+
+    uint16_t raw_adc = Pedal_GetRawADC();
+    float    pct_f   = Pedal_GetPercent();
+    if (pct_f < 0.0f)   pct_f = 0.0f;
+    if (pct_f > 100.0f) pct_f = 100.0f;
+
+    uint16_t mn = send_stored ? stored_min : pedalcal_pending_min;
+    uint16_t mx = send_stored ? stored_max : pedalcal_pending_max;
+
+    uint8_t payload[8];
+    payload[0] = flags;
+    payload[1] = (uint8_t)(raw_adc & 0xFFU);
+    payload[2] = (uint8_t)((raw_adc >> 8) & 0xFFU);
+    payload[3] = (uint8_t)(mn & 0xFFU);
+    payload[4] = (uint8_t)((mn >> 8) & 0xFFU);
+    payload[5] = (uint8_t)(mx & 0xFFU);
+    payload[6] = (uint8_t)((mx >> 8) & 0xFFU);
+    payload[7] = (uint8_t)pct_f;
+
+    (void)TransmitFrame(CAN_ID_DIAG_PEDAL_CAL, payload, sizeof(payload));
+}
+
+/* Public: drive the 0x308 burst from the 100 Hz main-loop tick.
+ * Must be called whenever main.c emits its 100 ms status batch.
+ * No effect when no burst is in progress.                            */
+void CAN_PedalCalBurstUpdate(void)
+{
+    if (pedalcal_burst_left == 0U) return;
+    uint32_t now = HAL_GetTick();
+    if ((int32_t)(now - pedalcal_next_tx_ms) < 0) return;
+    pedalcal_send_status();
+    pedalcal_burst_left--;
+    pedalcal_next_tx_ms = now + PEDALCAL_BURST_PERIOD_MS;
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_PEDAL_CAL.
+ * Always replies with one CAN_SendCommandAck(0x10, ...) — DLC 3 of
+ * CMD_ACK is preserved, no contract change.                          */
+static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    uint8_t op = payload[1];
+
+    /* QUERY is the only sub-opcode that does NOT need safety gates —
+     * it just requests a 1 s telemetry burst.                        */
+    if (op == PEDAL_CAL_OP_QUERY) {
+        pedalcal_burst_left = PEDALCAL_BURST_FRAMES;
+        pedalcal_next_tx_ms = HAL_GetTick();   /* emit immediately on next tick */
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+
+    /* All other sub-opcodes require the full safety gate. */
+    if (!pedalcal_safety_ok()) {
+        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+        return;
+    }
+
+    switch (op) {
+    case PEDAL_CAL_OP_CAPTURE_MIN: {
+        uint16_t v = 0;
+        if (!pedalcal_sample_stable(&v)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        pedalcal_pending_min = v;
+        pedalcal_have_min    = true;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case PEDAL_CAL_OP_CAPTURE_MAX: {
+        uint16_t v = 0;
+        if (!pedalcal_sample_stable(&v)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        pedalcal_pending_max = v;
+        pedalcal_have_max    = true;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case PEDAL_CAL_OP_SAVE: {
+        if (!pedalcal_have_min || !pedalcal_have_max) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        if (!PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        if (!PedalCal_Save(pedalcal_pending_min, pedalcal_pending_max)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        /* Apply immediately so the next Pedal_Update() cycle uses the
+         * new endpoints.  Safety: rate-limit inside Pedal_Update()
+         * still bounds the percent output across the change.         */
+        Pedal_ApplyCalibration(pedalcal_pending_min, pedalcal_pending_max);
+        pedalcal_have_min = false;
+        pedalcal_have_max = false;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case PEDAL_CAL_OP_RESET_DEFAULTS: {
+        /* Persist the compile-time defaults so the slot stays consistent
+         * with applied endpoints across reboots.  Defaults are sourced
+         * from pedal_cal_store.h (PEDAL_CAL_DEFAULT_MIN/MAX) to keep a
+         * single source of truth shared with sensor_manager.c.        */
+        if (!PedalCal_Save(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        Pedal_ApplyCalibration(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX);
+        pedalcal_have_min = false;
+        pedalcal_have_max = false;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+}
+
 void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
@@ -1458,6 +1717,15 @@ void CAN_ProcessMessages(void) {
                                 break;
                         }
                         CAN_SendCommandAck(0x10, ACK_OK);
+                    } else if (cmd == SERVICE_ACTION_PEDAL_CAL) {
+                        /* ---- PEDAL ENDPOINT CALIBRATION ----
+                         * Byte 1 = sub-opcode (0x01..0x05).  See
+                         * PEDAL_CAL_OP_* macros in can_handler.h and
+                         * docs/CALIBRATION.md.  The handler enforces
+                         * safety gates internally and replies on the
+                         * standard CMD_ACK (0x103) channel — DLC of
+                         * CMD_ACK is preserved at 3 bytes.            */
+                        pedalcal_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == 0xE0) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask

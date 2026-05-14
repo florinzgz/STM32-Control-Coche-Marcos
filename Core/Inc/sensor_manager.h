@@ -55,6 +55,16 @@ bool  Pedal_IsPlausible(void);    /* Software plausibility checks pass     */
 bool  Pedal_IsContradictory(void); /* Dual samples active but disagree     */
 float Pedal_GetRawPercent(void);    /* Unfiltered instantaneous 0–100%   */
 
+/* ---- Runtime endpoint calibration (pedal_cal_store) ----
+ * Pedal_ApplyCalibration() replaces the raw→% endpoints used by
+ * Pedal_RawToPercent().  The caller MUST range-validate the inputs
+ * (see PedalCal_Validate()).  This function does not touch EMA,
+ * plausibility, fault thresholds, or any other safety gate.
+ * Pedal_GetRawADC() returns the most recent raw ADC reading
+ * (12-bit) — used by the calibration UI to capture endpoints.       */
+void     Pedal_ApplyCalibration(uint16_t adc_min, uint16_t adc_max);
+uint16_t Pedal_GetRawADC(void);
+
 /* ---- DS18B20 Temperature (OneWire) ---- */
 void Temperature_StartConversion(void);
 void Temperature_ReadAll(void);

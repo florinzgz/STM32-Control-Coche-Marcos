@@ -18,6 +18,7 @@
    - [1.3 Relays](#13-relays-3-total)
    - [1.4 Communication](#14-communication)
    - [1.5 Watchdog](#15-watchdog)
+   - [1.6 Flash NVM Map](#16-flash-nvm-map-stm32g474re--512-kb-128--4-kb-pages)
 2. [Sensor Index Mapping](#2-sensor-index-mapping)
    - [2.1 INA226 Current Sensors](#21-ina226-current-sensor-index-mapping)
    - [2.2 DS18B20 Temperature Sensors](#22-ds18b20-temperature-sensor-index-mapping)
@@ -186,6 +187,58 @@
 
 - **Classification:** CRITICAL (`MODULE_WATCHDOG`, ID 2).
 - Fed every main-loop iteration via `HAL_IWDG_Refresh()`.
+
+### 1.6 Flash NVM Map (STM32G474RE — 512 KB, 128 × 4 KB pages)
+
+The linker script (`STM32G474RETX_FLASH.ld`) reserves the last five pages
+(123–127, 20 KB total) for non-volatile data. Each page is single-owner
+so any store can be erased independently without disturbing the others.
+The `FLASH` region for code/`.text`/`.rodata`/`.data` is therefore
+trimmed to **492 KB** and ends at `0x0807B000`.
+
+| Page | Address     | Owner / store                                     | Module / file                                 |
+|------|-------------|---------------------------------------------------|-----------------------------------------------|
+| 123  | `0x0807B000` | **DS18B20 sensor map** (physIdx → role)           | `Core/Src/sensor_map_store.c`                 |
+| 124  | `0x0807C000` | **Persistent pedal calibration** (adc_min/max)    | `Core/Src/pedal_cal_store.c`                  |
+| 125  | `0x0807D000` | Error log ring buffer                             | `Core/Src/error_log.c`                        |
+| 126  | `0x0807E000` | Steering centring calibration                     | `Core/Src/steering_cal_store.c`               |
+| 127  | `0x0807F000` | EPS / torque-assist parameters                    | `Core/Src/eps_params.c`                       |
+
+> The previous page-125 ownership conflict between `error_log.c` and
+> `sensor_map_store.c` has been resolved: the sensor map now lives on
+> the dedicated page 123 (`0x0807B000`).  `SensorMapStore_Save()` and
+> `ErrorLog_Record()` are independent and may be invoked in any order.
+> See `PROJECT_CHANGELOG.md` for the remediation entry.
+
+**Pedal calibration slot (page 124, 16 B):**
+
+| Offset | Size | Field          | Notes                                                            |
+|-------:|-----:|----------------|------------------------------------------------------------------|
+| 0      | 4 B  | `magic`        | `0x50434C31` (`"PCL1"`)                                          |
+| 4      | 2 B  | `adc_min`      | Released-pedal ADC count (50 ≤ adc_min, range ≥ 800)             |
+| 6      | 2 B  | `adc_max`      | Pressed-pedal ADC count (≤ 2600)                                 |
+| 8      | 1 B  | `validity_flag`| `0xA5` when slot is committed                                    |
+| 9      | 3 B  | `reserved`     | Padding, written as `0x00`                                       |
+| 12     | 4 B  | `checksum`     | CRC32 (poly `0xEDB88320`) over the first 12 bytes                |
+
+**Fallback behaviour:** if the slot is blank (`0xFFFFFFFF`), CRC-invalid,
+or stores values outside the hard range, `PedalCal_Init()` silently
+leaves `pcal_flash_valid = false` and `Pedal_RawToPercent()` keeps the
+compile-time `150 / 2413` defaults. Boot is **never** blocked by a
+missing or corrupt calibration slot.
+
+**CAN protocol surface:**
+
+- Service command `SERVICE_ACTION_PEDAL_CAL = 0xF5` on the existing
+  `SERVICE_CMD` ID, with sub-opcodes
+  `CAPTURE_MIN / CAPTURE_MAX / SAVE / RESET_DEFAULTS / QUERY`
+  (`0x01…0x05`).
+- On-demand telemetry `CAN_ID_DIAG_PEDAL_CAL = 0x308` (DLC 8, 10 Hz for
+  ~1 s after `QUERY`, silent the rest of the time).
+- All ACKs reuse the existing `SERVICE_CMD_ACK` envelope (`DLC = 3`).
+
+See [`CALIBRATION.md`](CALIBRATION.md) and [`CAN_PROTOCOL.md`](CAN_PROTOCOL.md)
+for the full operator workflow and the on-the-wire frame layout.
 
 ---
 

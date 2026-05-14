@@ -1,5 +1,437 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-14 (page-125 ownership conflict — resolved)
+
+### Sensor map relocated to flash page 123 (`0x0807B000`)
+
+Functional change that **removes** the long-standing page-125 ownership
+conflict between `error_log.c` and `sensor_map_store.c`.  After this
+change every NVM page is single-owner and the corresponding store can
+be erased independently without disturbing the others.
+
+#### Files touched
+
+- `STM32G474RETX_FLASH.ld` — `FLASH` region reduced **496 KB → 492 KB**
+  (firmware ceiling moved from `0x0807C000` down to `0x0807B000`) so
+  that page 123 is now reserved for NVM.  The reserved-pages comment
+  was extended to list page 123 (`sensor_map_store.c`) alongside the
+  existing pages 124–127.
+- `Core/Src/sensor_map_store.c` — `SMAP_FLASH_PAGE` changed
+  `125U → 123U`, `SMAP_FLASH_BASE` changed `0x0807D000U → 0x0807B000U`.
+  File-header comment now describes the five-page NVM layout
+  (123 sensor map, 124 pedal cal, 125 error log, 126 steering cal,
+  127 EPS).  Inline *"Erase page 125"* comment updated to *"Erase
+  page 123"*.
+- `Core/Inc/sensor_map_store.h` — flash-layout block and
+  `SensorMapStore_Init()` doxygen now reference page 123 at
+  `0x0807B000`.
+- `Core/Src/pedal_cal_store.c` — header comment listing the
+  neighbour pages now includes page 123 (sensor map) for completeness.
+- `Core/Src/can_handler.c` — comment near
+  `Apply_TempSensorMap_From_Store()` changed *"persisted in flash
+  page 125"* → *"persisted in flash page 123"*.
+- `Core/Src/main.c` — comment in `SystemClock_Config()` prologue
+  changed *"from flash page 125"* → *"from flash page 123"*.
+- `README.md` § 21 (*Subsystems*) and § 24 (*Persistent Storage*) —
+  table now lists all five reserved pages, removes the
+  *⚠️ shared page* annotation, and the
+  *"DS18B20 sensor map (Flash page 125, shared section)"* heading
+  was rewritten as *"DS18B20 sensor map (Flash page 123)"*.
+- `docs/CALIBRATION.md` — five-row flash-layout table, removed
+  *Known issue (page 125 ownership conflict)* admonition and replaced
+  it with a one-line note documenting the remediation.
+- `docs/HARDWARE_AND_SENSOR_MAP.md` § 1.6 — same treatment: five-row
+  table (pages 123–127), `FLASH` region updated to 492 KB ending at
+  `0x0807B000`, and the *Known issue* admonition replaced by a
+  remediation note.
+- `docs/INTEGRATION_PLAN.md` Apéndice A — table now lists page 123,
+  the firmware region is `0–122` (`0x08000000–0x0807AFFF`, 492 KB),
+  and the post-table rule names every reserved page (123–127).
+
+#### Verification
+
+- `SMAP_FLASH_PAGE` (123) and the `Page` field of the
+  `FLASH_EraseInitTypeDef` passed to `HAL_FLASHEx_Erase()` resolve
+  to bank 1, single-bank STM32G474RE layout — same recipe as
+  `pedal_cal_store.c` page 124 and `error_log.c` page 125.
+- `SMAP_FLASH_BASE = 0x0807B000` is exactly `4 KB` below
+  `PCAL_FLASH_BASE = 0x0807C000`, matching the new linker reservation.
+- A repository-wide search for `0x0807D000` no longer returns any
+  reference owned by `sensor_map_store`; the only remaining
+  references are owned by `error_log.c` (which legitimately owns
+  page 125).
+- `grep -rn "shared page\|ownership conflict\|page 125 ownership"`
+  returns nothing outside this changelog entry.
+
+#### Compatibility / migration
+
+- The on-flash slot format (`smap_flash_slot_t`) is unchanged: same
+  magic (`0x534D4150` "SMAP"), same 5-byte `tempMap`, same
+  `valid_flag`, same CRC32 over the slot prefix.  Only the base
+  address moves.
+- Units flashed before this change will see a CRC-invalid sensor map
+  on page 123 (the new owner) and fall back silently to the identity
+  mapping (`0,1,2,3,4`), exactly as the design already specified for
+  blank / corrupt slots.  The workshop must re-save the sensor map
+  once after upgrading; no other user action is required.
+- The error-log page (125) is untouched by this change, so historical
+  fault entries survive the firmware upgrade.
+
+---
+
+## [unreleased] — 2026-05-14 (doc sync follow-up)
+
+### Documentation consistency pass for the persistent-pedal-calibration feature
+
+Surgical documentation pass with no functional changes.  Aligns every
+file that references the STM32G474RE flash NVM map (pages 124–127) so
+the addresses and ownership match the source of truth (the actual
+constants in `Core/Src/*.c` and the linker script
+`STM32G474RETX_FLASH.ld`).  No C, C++, or linker file was modified —
+the firmware binary is bit-identical to the previous commit.
+
+#### Files touched
+
+- `Core/Src/error_log.c` — file-header comment now reads
+  *page 125 (`0x0807D000`, 4 KB)* (was `0x0807C000`, the address of
+  page 124).  The `ERRLOG_FLASH_BASE` macro at line 36 was already
+  correct; only the documentation comment was misleading.
+- `Core/Inc/error_log.h` — same two-line comment fix: page-125
+  address corrected to `0x0807D000` in both the brief description
+  and the "Flash layout" block.
+- `README.md` § 24 (*Persistent Storage*) — corrected page 125
+  address from `0x0807C000` to `0x0807D000` in the *STM32 Flash
+  Layout* table.
+- `docs/INTEGRATION_PLAN.md` Apéndice A — corrected the page 125
+  address (`0x0807C000` → `0x0807D000`), restored the firmware
+  region to pages `0–123` and rewrote the post-table rule to point
+  to page 124 (`0x0807C000`, `pedal_cal_store.c`) instead of the
+  non-existent `0x0807A000`.
+- `docs/CALIBRATION.md` § *On-flash layout (page 124)* — slot table
+  rewritten to match the actual `pcal_flash_slot_t` struct: 16 bytes
+  total with `validity_flag` (1 B, offset 8), `reserved[3]` (offset
+  9–11), and `checksum` (4 B, offset 12).  The previous table
+  erroneously placed `valid_flag` at offset 16 (off-the-end of the
+  16-byte struct) and listed `_reserved` as a 4-byte uint32.
+
+#### Verification
+
+- `pedal_cal_store.c` slot layout (`magic / adc_min / adc_max /
+  validity_flag / reserved[3] / checksum`, 16 B total, double-word
+  aligned) is now reflected verbatim in both `docs/CALIBRATION.md`
+  and `docs/HARDWARE_AND_SENSOR_MAP.md` § 1.6.
+- Every page-125 address reference in the repository
+  (`error_log.c`, `error_log.h`, `README.md`,
+  `docs/INTEGRATION_PLAN.md`, `STM32G474RETX_FLASH.ld`) now reads
+  `0x0807D000`.
+- Page 124 ownership (`pedal_cal_store.c`, `0x0807C000`) and pages
+  126/127 ownership are unchanged and consistent across all files.
+
+#### Known issue — page 125 ownership conflict (RESOLVED in the entry above)
+
+> **Status:** RESOLVED in the *page-125 ownership conflict — resolved*
+> entry at the top of this changelog (sensor map relocated to flash
+> page 123 at `0x0807B000`, `FLASH` shrunk 496 KB → 492 KB).  The text
+> below is retained only as historical record of the issue that was
+> tracked through this doc-sync pass.
+
+`Core/Src/error_log.c` (`ERRLOG_FLASH_BASE = 0x0807D000`, page 125) and
+`Core/Src/sensor_map_store.c` (originally `SMAP_FLASH_BASE = 0x0807D000`,
+page 125) used to target the **same** flash page.  In practice this
+meant that calling `SensorMapStore_Save()` would erase the error-log
+page, and vice-versa, silently corrupting whichever store was written
+last.
+
+The collision was deliberately left **out of scope** for the doc-sync
+pass because resolving it required either:
+
+  1. Carving an additional NVM page out of `FLASH` in
+     `STM32G474RETX_FLASH.ld` (moving the firmware ceiling from
+     `0x0807C000` down to `0x0807B000`) so the sensor map can live on
+     a brand-new page (e.g. page 123 at `0x0807B000`), **or**
+  2. Re-using one of the four existing reserved pages with a strict
+     ownership policy that has to be approved by the safety review
+     (the engineering-screen sensor mapping is currently the only
+     "soft" persistence in the four reserved pages).
+
+The dedicated remediation PR must update the linker script, the file
+headers of `error_log.c` / `sensor_map_store.c`, and the four
+documentation tables (`README.md`, `docs/CALIBRATION.md`,
+`docs/HARDWARE_AND_SENSOR_MAP.md`, `docs/INTEGRATION_PLAN.md`) in one
+single change so the map stays consistent.  Until then, callers must
+treat `SensorMapStore_Save()` and `ErrorLog_Record()` as mutually
+exclusive at the workshop/engineering-screen level.
+
+---
+
+## [unreleased] — 2026-05-14
+
+### Persistent Pedal-Endpoint Calibration (Lotes 1–7)
+
+End-to-end addition of a workshop-driven calibration store for the
+accelerator-pedal raw ADC endpoints, so the runtime mapping in
+`Pedal_RawToPercent()` no longer depends on hard-coded constants. The
+work is strictly surgical: no change to the 100 Hz loop, watchdog, EMA,
+plausibility, fault thresholds, LIMP_HOME, startup_inhibit, ABS/TCS, or
+the existing CAN contracts.
+
+#### Rationale
+
+`Core/Src/sensor_manager.c` previously baked `PEDAL_ADC_MIN = 150` and
+`PEDAL_ADC_MAX = 2413` at compile time. Real-world pedal assemblies
+drift mechanically across units and over service life; the only
+remediation path used to be a firmware re-flash. This change moves the
+endpoints into a persistent slot (flash page 124, `0x0807C000`) while
+keeping the same numbers as the silent fallback when the slot is
+missing/invalid.
+
+#### Risks mitigated
+
+- **Boot brick** — fully prevented by silent fallback to compile-time
+  defaults when CRC/magic/range is invalid.  Boot is never blocked.
+- **Pedal becomes unusable** — `Pedal_ApplyCalibration()` re-runs the
+  same range-check inline; out-of-range values are rejected and the
+  active endpoints are left untouched.
+- **CAN flood** — the new `0x308` telemetry is on-demand only (1 s
+  burst of 10 frames at 10 Hz after each QUERY).
+- **CMD_ACK contract break** — DLC of `0x103` is preserved at 3 bytes;
+  the new sub-protocol reuses existing `ACK_OK / ACK_INVALID /
+  ACK_REJECTED / ACK_BLOCKED_BY_SAFETY` codes.
+- **Unsafe persistence** — every sub-opcode except `QUERY` requires
+  the full safety gate (STANDBY + `startup_inhibit` + pedal < 3% +
+  plausible + all wheels < 0.3 km/h) plus the hard validators
+  (`min ≥ 50`, `max ≤ 2600`, `max > min`, `max − min ≥ 800`).
+
+#### Safety invariants preserved
+
+- `motor_control.c`, `safety_system.c`, ABS/TCS logic, watchdog handling,
+  pedal EMA, pedal plausibility, fault thresholds (FAULT_LO / FAULT_HI),
+  startup_inhibit, LIMP_HOME, the loop-100 Hz scheduler and the existing
+  CAN DLC contracts are **not modified**.
+- `Pedal_RawToPercent()` keeps the same signature, the same EMA pipeline
+  and the same fault handling. The only change is that the two endpoints
+  now come from runtime variables that default to the compile-time
+  constants.
+
+#### Fallback behaviour
+
+- Virgin flash, CRC mismatch, magic mismatch, or out-of-range pair →
+  `PedalCal_Init()` returns *invalid*, the runtime endpoints stay at
+  `PEDAL_ADC_MIN_DEFAULT = 150` / `PEDAL_ADC_MAX_DEFAULT = 2413`.
+- `RESET DEFAULTS` button re-persists those exact defaults so the slot
+  stays consistent across reboots.
+
+#### Backward compatibility
+
+- ESP32 firmware that predates the feature ignores the new `0x308` ID
+  and the new `0xF5` sub-opcode without any error path engaged.
+- Other CAN nodes that do not subscribe to `0x308` see no change in
+  traffic — the burst is silent until a QUERY is issued.
+- The compile-time defaults remain `150` / `2413`, identical to the
+  previous firmware: a board that never runs the calibration wizard
+  behaves bit-identically.
+
+#### Flash reservation (Lote 1)
+
+- `STM32G474RETX_FLASH.ld` — `FLASH` region trimmed from `500K → 496K`.
+  Pages 124–127 (16 KB) are now exclusively NVM:
+  - 124 `0x0807C000` — pedal calibration (this change)
+  - 125 `0x0807D000` — DS18B20 sensor map
+  - 126 `0x0807E000` — steering centring
+  - 127 `0x0807F000` — EPS parameters
+
+#### Files added
+
+- `Core/Inc/pedal_cal_store.h` — public API (`PedalCal_Init`,
+  `PedalCal_IsValid`, `PedalCal_GetStored`, `PedalCal_Validate`,
+  `PedalCal_Save`, defaults).
+- `Core/Src/pedal_cal_store.c` — flash store modelled 1:1 on
+  `steering_cal_store.c` (magic `0x50434C31` (`"PCL1"`), 16-byte
+  payload, CRC32 polynomial `0xEDB88320`, `valid_flag = 0xA5`, page 124
+  erase + double-word program + lock, no IRQ disable, no RTOS, no
+  watchdog change).
+- `docs/CALIBRATION.md` — operator-facing reference for the new store.
+
+#### Files modified
+
+- `STM32G474RETX_FLASH.ld` — `FLASH = 496K`, NVM pages 124–127 documented.
+- `Makefile` — `pedal_cal_store.c` added to `CORE_SRC` (and the
+  pre-existing missing `loop_diag.c` reference was also added so the
+  command-line build links cleanly).
+- `Core/Inc/can_handler.h` — new IDs and constants
+  (`CAN_ID_DIAG_PEDAL_CAL = 0x308`, `SERVICE_ACTION_PEDAL_CAL = 0xF5`,
+  `PEDAL_CAL_OP_*`) and `CAN_PedalCalBurstUpdate()` prototype.
+- `Core/Src/can_handler.c` — `0xF5` sub-protocol handler with stability
+  check, hard validators, full safety-gate check, and the on-demand
+  `0x308` burst emitter (10 frames × 100 ms).  STM32 alternates two
+  payload variants in the burst (`PENDING` vs `STORED`) so all four
+  endpoints fit in 8 bytes.
+- `Core/Inc/sensor_manager.h` — new public helpers
+  `Pedal_ApplyCalibration()`, `Pedal_GetRawADC()`.
+- `Core/Src/sensor_manager.c` — `PEDAL_ADC_MIN/MAX` defines renamed to
+  `_DEFAULT` and shadowed by runtime variables. `Pedal_RawToPercent()`
+  is *byte-identical* in semantics — only the two named constants are
+  replaced by the runtime statics. All other branches (FAULT_LO,
+  FAULT_HI, EMA, plausibility, rate-limit) untouched.
+- `Core/Src/main.c` — calls `PedalCal_Init()` after
+  `SteeringCal_Init()`, applies the stored endpoints if valid, otherwise
+  leaves the runtime defaults active. Also adds the 100 ms call to
+  `CAN_PedalCalBurstUpdate()` in the existing status batch.
+- `esp32/include/can_ids.h` — mirror constants
+  (`DIAG_PEDAL_CAL = 0x308`, `SERVICE_ACTION_PEDAL_CAL = 0xF5`,
+  `PEDAL_CAL_OP_*`).
+- `esp32/src/vehicle_data.h` — new `PedalCalData` slot in
+  `VehicleData`.
+- `esp32/src/can_rx.cpp` — `0x308` decoder that preserves the
+  unselected pair across alternating frame variants.
+- `esp32/src/screens/engineering_screen.{h,cpp}` — `drawPedalCalibration()`
+  fully rewritten with the new layout (Raw ADC / Pedal % / Stable /
+  Plausible / Safety gate on the left, Stored MIN/MAX / Pending MIN/MAX /
+  Validation on the right) and five buttons (CAPTURE MIN, CAPTURE MAX,
+  SAVE, RESET DEFAULTS, BACK). Touch routing for the rest of the screen
+  is unchanged; only the new buttons are added. ESP32 polls `QUERY`
+  every 500 ms while the screen is active so the 1 s STM32 burst keeps
+  refreshing; the burst stops naturally when the screen is closed.
+- `docs/CAN_PROTOCOL.md`, `docs/ENGINEERING_MENU.md` — documentation
+  updated for `0x308`, the `0xF5` sub-opcodes, and the new operator
+  procedure.
+
+#### Verification
+
+- STM32 firmware builds clean (`make`, `-Wall -Wextra -Werror`).
+  `text = 65 KB` — well below the new 496 KB `FLASH` region; the
+  linker confirms `.text` / `.rodata` never spill into pages 124–127.
+- Pre-existing `loop_diag.c` symbol was missing from the Makefile
+  source list — added so the command-line build links. This is
+  unrelated to the calibration feature but blocked verification of it.
+- ESP32 firmware build verification was attempted with PlatformIO; the
+  platform install was blocked by the offline sandbox and could not
+  complete in this session. The C++ changes follow existing patterns
+  (`SERVICE_ACTION_RELAY_OVERRIDE` path) and integrate with the same
+  ACK feedback pipeline.
+
+#### Final validation pass (FASE FINAL — 2026-05-14)
+
+End-of-feature surgical validation. **No functional code was touched**
+in this pass; the only edits are documentation closures and this
+changelog entry. All thresholds, safety logic, timing, CAN contracts,
+`startup_inhibit`, `LIMP_HOME`, watchdog handling, and
+`Pedal_RawToPercent()` semantics are byte-identical to the pre-pass
+state.
+
+**A — Build verification**
+
+- STM32 (`make clean && make all`, `arm-none-eabi-gcc 13.2.1`):
+  build succeeds with `-Wall -Wextra -Werror`. No new warnings.
+  `arm-none-eabi-size` reports:
+
+  ```
+     text	   data	    bss	    dec	    hex	filename
+    65152	    108	   8136	  73396	  11eb4	build/STM32G474RE.elf
+  ```
+
+  ELF section layout (`objdump -h`):
+  `.isr_vector` `0x08000000`, `.text` `0x080001D8` (size `0x0F814`),
+  `.rodata` `0x0800F9EC`, `.data` LMA ends at `0x0800FEEC`.
+  Page 124 (`0x0807C000`) is **442 KB** above the last code byte —
+  no risk of code spilling into NVM pages.
+
+- ESP32 (`pio run -d esp32`): the sandbox cannot reach `dl.espressif.com`,
+  so PlatformIO aborts before invoking the toolchain. Static review
+  of the touched files (`esp32/src/screens/engineering_screen.cpp/.h`,
+  `esp32/src/can_rx.cpp`, `esp32/include/can_ids.h`,
+  `esp32/src/vehicle_data.h`) confirms:
+  * All four sub-opcodes (`CAPTURE_MIN/MAX/SAVE/RESET_DEFAULTS/QUERY`)
+    mirror the STM32 constants exactly (verified by grep on both
+    `Core/Inc/can_handler.h` and `esp32/include/can_ids.h`).
+  * `DIAG_PEDAL_CAL = 0x308` is identical on both ends.
+  * No new includes pull in headers that were not already used by the
+    engineering screen.
+
+**B — STM32 functional validation (static)**
+
+- Flash-virgin path: `pcal_slot_integrity_ok()` returns `false` for
+  the `0xFFFFFFFF` magic word, so `PedalCal_Init()` silently exits
+  with `pcal_flash_valid = false` and the runtime keeps the
+  compile-time `150 / 2413` endpoints. Boot is not blocked.
+- CRC-corrupt path: same fallback — `crc != slot->checksum` triggers
+  the early return.
+- Save path: validated via `PedalCal_Validate()` (range gate) *before*
+  any flash unlock or erase. Out-of-range pairs return `false` without
+  touching flash.
+- Hard limits: `PEDAL_CAL_MIN_LIMIT = 50`, `PEDAL_CAL_MAX_LIMIT = 2600`,
+  `PEDAL_CAL_RANGE_MIN = 800` (`pedal_cal_store.h:51-53`). Confirmed:
+  `max > 2600`, `range < 800`, `min < 50` all return `INVALID`.
+- Safety gates (in `can_handler.c` `SERVICE_ACTION_PEDAL_CAL` branch):
+  the SAVE / CAPTURE handlers require
+  `Safety_GetState() == SYS_STATE_STANDBY` and `Startup_IsInhibited()`,
+  plus `Pedal_GetPercent() < 3.0f`, `Pedal_IsPlausible()`, and all
+  wheel speeds below the threshold — anything else returns
+  `BLOCKED_BY_SAFETY`.
+- Loop / watchdog: `pedal_cal_store.c` uses synchronous
+  `HAL_FLASH_Program(DOUBLEWORD)` (≈ 80–100 µs per dword × 2). It runs
+  only in `STANDBY` from a CAN command path, well below the IWDG
+  ~500 ms timeout, and the existing per-iteration `HAL_IWDG_Refresh()`
+  in `main.c` is not modified.
+
+**C — CAN protocol validation (static)**
+
+- `QUERY` (`0xF5 0x05`) sets up the 10 × 100 ms `0x308` burst window;
+  outside that window, `CAN_PedalCalBurstUpdate()` is a no-op so the
+  bus stays clean.
+- `SERVICE_CMD_ACK` envelope unchanged (DLC 3); legacy nodes ignoring
+  `0xF5` see no new ACK class.
+- `0x308` payload (alternating PENDING / STORED variants) confirmed
+  byte-for-byte by the ESP32 decoder in `esp32/src/can_rx.cpp`.
+- Worst-case bus impact: 10 frames × 100 ms × 8 B ≈ 0.7 % @ 500 kbit/s,
+  and only while a workshop QUERY is active.
+
+**D — ESP32 / UI validation (static)**
+
+- `drawPedalCalibration()` renders Raw ADC / Pedal % / Stable /
+  Plausible / Safety on the left column and Stored / Pending / Validation
+  on the right; SAVE button is disabled (`drawButton(..., enabled=false)`)
+  when `validateOk == false`.
+- All five buttons (`CAPTURE MIN / CAPTURE MAX / SAVE / RESET / BACK`)
+  emit the matching `SERVICE_ACTION_PEDAL_CAL` sub-opcode.
+- 500 ms `QUERY` poll while the screen is active is gated by the
+  screen-id and stops naturally on BACK.
+- Touch routing outside the new buttons is unchanged.
+
+**E — Documentation closures**
+
+- `docs/ENGINEERING_SCREEN.md` — added as a stub pointing at the
+  canonical [`ENGINEERING_MENU.md`](docs/ENGINEERING_MENU.md), to
+  satisfy historical cross-references.
+- `docs/HARDWARE_AND_SENSOR_MAP.md` — new section §1.6 with the
+  full STM32G474 flash NVM map (pages 124–127, owners, addresses)
+  and the on-flash pedal-calibration slot layout.
+- `PROJECT_CHANGELOG.md` — this section.
+
+**Backward compatibility (final check)**
+
+- A node that ignores `0x308` and `0xF5` sees zero new traffic and zero
+  new ACK classes — pre-existing CAN contracts are unchanged.
+- A unit that never runs the wizard keeps `pcal_flash_valid = false`
+  and behaves bit-identically to firmware predating the feature.
+- `Pedal_RawToPercent()` algorithm (clamp → linear → EMA → fault
+  windows) is unchanged; only the two named limits become runtime
+  variables seeded with the same defaults.
+
+**Outstanding risks**
+
+- ESP32 firmware was not rebuilt in this sandbox (no network for
+  `platform-espressif32` install). The C++ side mirrors the verified
+  STM32 constants and follows existing engineering-screen patterns,
+  but a final on-bench build/flash on real hardware is recommended
+  before tag.
+
+**Status: merge-ready** for the STM32 side; ESP32 side is
+build-verified statically and requires a bench rebuild as the only
+non-software-equivalent residual check.
+
+---
+
 ## [unreleased] — 2026-05-13
 
 ### Critical Safety Remediation & Documentation Alignment (F1–F7)

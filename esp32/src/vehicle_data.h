@@ -166,6 +166,35 @@ struct LightsData {
 };
 
 // -------------------------------------------------------------------------
+// Pedal calibration telemetry (0x308) — on-demand burst from STM32 after
+// SERVICE_ACTION_PEDAL_CAL/QUERY.  Decoded layout matches can_handler.c
+// pedalcal_send_status().  STM32 alternates PENDING / STORED frame
+// variants within the burst (bit 6 of flags selects the variant); the
+// decoder maintains separate slots for each.
+//   flags bit 0: pending MIN captured
+//   flags bit 1: pending MAX captured
+//   flags bit 2: pending pair validates OK (range + Δ)
+//   flags bit 3: stored slot valid
+//   flags bit 4: safety gates satisfied (STANDBY + inhibited + pedal<3% + …)
+//   flags bit 5: pedal currently plausible
+//   flags bit 6: 0 = bytes 3-6 are PENDING; 1 = bytes 3-6 are STORED
+//   rawAdc:      live 12-bit ADC reading (post EMA)
+//   storedMin/Max:  endpoints currently held in STM32 flash
+//   pendingMin/Max: STM32 RAM-only pending endpoints (0 when not set)
+//   pedalPercent:   0..100 saturating
+// -------------------------------------------------------------------------
+struct PedalCalData {
+    uint8_t  flags        = 0;
+    uint16_t rawAdc       = 0;
+    uint16_t storedMin    = 0;
+    uint16_t storedMax    = 0;
+    uint16_t pendingMin   = 0;
+    uint16_t pendingMax   = 0;
+    uint8_t  pedalPercent = 0;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Debounce EMI diagnostic counters (0x306 + 0x307) — report-only
 // Counters of edge pulses rejected by the STM32 DWT 200 µs pre-filter.
 // Wheel counters arrive truncated/saturated to uint16; steering is full uint32.
@@ -206,6 +235,7 @@ public:
     void setLights(const LightsData& d)        { lights_ = d; }
     void setMode(const ModeData& d)            { mode_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
+    void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -229,6 +259,7 @@ public:
     const LightsData&    lights()    const { return lights_; }
     const ModeData&      mode()      const { return mode_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
+    const PedalCalData&     pedalCal()     const { return pedalCal_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -248,6 +279,7 @@ private:
     LightsData    lights_;
     ModeData      mode_;
     DebounceDiagData debounceDiag_;
+    PedalCalData     pedalCal_;
 };
 
 } // namespace vehicle

@@ -84,6 +84,7 @@ inline constexpr uint32_t ERROR_LOG_ENTRY        = 0x304;   // STM32→ESP32, DL
 inline constexpr uint32_t ERROR_LOG_HEADER       = 0x305;   // STM32→ESP32, DLC 8, 1000 ms
 inline constexpr uint32_t DIAG_DEBOUNCE          = 0x306;   // STM32→ESP32, DLC 8, 1000 ms — DWT-debounce filtered counts (4× wheel u16 LE)
 inline constexpr uint32_t DIAG_DEBOUNCE_STEER    = 0x307;   // STM32→ESP32, DLC 4, 1000 ms — DWT-debounce filtered count (steer u32 LE)
+inline constexpr uint32_t DIAG_PEDAL_CAL         = 0x308;   // STM32→ESP32, DLC 8, on-demand (10 Hz × 1 s after QUERY) — pedal calibration telemetry
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
 inline constexpr uint32_t CMD_SENSOR_MAP_TEMP    = 0x112;   // ESP32→STM32, DLC 5, on-demand  DS18B20 physIdx→role mapping
 
@@ -192,7 +193,20 @@ inline constexpr uint8_t SERVICE_ACTION_RESET_WHEEL_SENSORS  = 0xF1;
 inline constexpr uint8_t SERVICE_ACTION_RESET_INA226_SHUNTS  = 0xF2;
 inline constexpr uint8_t SERVICE_ACTION_RESET_TRACTION_FORCE = 0xF3;
 inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_FORCE = 0xF4;
+inline constexpr uint8_t SERVICE_ACTION_PEDAL_CAL            = 0xF5;  // Persistent pedal endpoint calibration (byte 1 = sub-opcode)
 inline constexpr uint8_t SERVICE_ACTION_CLEAR_ERROR_LOG      = 0xFE;
+
+// Pedal-calibration sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_PEDAL_CAL
+//   0x01 CAPTURE_MIN    Capture pedal-released ADC into pending MIN
+//   0x02 CAPTURE_MAX    Capture pedal-pressed  ADC into pending MAX
+//   0x03 SAVE           Validate pending pair + persist to STM32 flash
+//   0x04 RESET_DEFAULTS Restore compile-time defaults (150 / 2413)
+//   0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz
+inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MIN    = 0x01;
+inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MAX    = 0x02;
+inline constexpr uint8_t PEDAL_CAL_OP_SAVE           = 0x03;
+inline constexpr uint8_t PEDAL_CAL_OP_RESET_DEFAULTS = 0x04;
+inline constexpr uint8_t PEDAL_CAL_OP_QUERY          = 0x05;
 
 } // namespace can
 

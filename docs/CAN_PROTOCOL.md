@@ -202,16 +202,32 @@ ID: 0x102  DLC: 2  Data: [0x01, 0x03]  // 4×4 activo, marcha Forward
 
 ### 0x110 - SERVICE_CMD (ESP32→STM32)
 
-**Propósito:** Comando de Service Mode para habilitar/deshabilitar módulos individuales.
+**Propósito:** Comando de Service Mode para habilitar/deshabilitar módulos individuales y disparar calibraciones persistentes.
 
 | Byte | Campo | Tipo | Rango | Notas |
 |------|-------|------|-------|-------|
-| 0 | `action` | uint8_t | 0/1/0xFF | 0=Disable, 1=Enable, 0xFF=Factory_Restore |
-| 1 | `module_id` | uint8_t | 0-N | ID del módulo |
+| 0 | `action` | uint8_t | 0/1/0xE0/0xF0–0xF5/0xFE/0xFF | 0=Disable, 1=Enable, 0xE0=Relay override, 0xF0–0xF4=Factory resets parciales, 0xF5=**Pedal calibration**, 0xFE=Clear error log, 0xFF=Factory_Restore |
+| 1 | `module_id` / `sub-opcode` / `mask` | uint8_t | 0-N | Significado dependiente de `action` |
 
 **DLC:** 2
 
 **Frecuencia:** On-demand
+
+#### 0xF5 — Calibración persistente del pedal acelerador
+
+Cuando `action == 0xF5`, el byte 1 es un sub-opcode que selecciona la operación.
+
+| Sub-opcode | Nombre | Efecto | Gates de seguridad |
+|-----------:|--------|--------|--------------------|
+| `0x01` | `CAPTURE_MIN` | Muestrea 8 lecturas ADC del pedal a 50 ms y guarda la media en *pending MIN* si la dispersión ≤ 8 cuentas. | STANDBY + startup_inhibit + pedal<3% + plausible + rueda<0.3 km/h |
+| `0x02` | `CAPTURE_MAX` | Idem para *pending MAX*. | Mismas gates |
+| `0x03` | `SAVE` | Valida el par pendiente y persiste en página 124 (0x0807C000). Aplica los endpoints inmediatamente. | Mismas gates + validación dura: `min ≥ 50`, `max ≤ 2600`, `max > min`, `max − min ≥ 800` |
+| `0x04` | `RESET_DEFAULTS` | Persiste los defaults de fábrica (150 / 2413) y los aplica. | Mismas gates |
+| `0x05` | `QUERY` | Solicita un burst de 10 frames `0x308` a 10 Hz (1 segundo). | Sin gates |
+
+Cada sub-opcode responde con `CAN_ID_CMD_ACK (0x103)` y los resultados estándar `OK`/`INVALID`/`REJECTED`/`BLOCKED_BY_SAFETY`. **DLC de CMD_ACK preservado (3 bytes)** — sin cambios de contrato.
+
+**Fallback:** Si la página 124 contiene CRC/magic inválido o un par fuera de rango, el STM32 carga los defaults compile-time (150 / 2413) silenciosamente — el boot nunca se bloquea y el pedal nunca queda inutilizable.
 
 ---
 
@@ -664,6 +680,26 @@ ID: 0x300  DLC: 2  Data: [0x02, 0x01]
 
 ---
 
+### 0x308 - DIAG_PEDAL_CAL (STM32→ESP32)
+
+**Propósito:** Telemetría de calibración del pedal (lectura cruda, endpoints almacenados, endpoints pendientes, gates de seguridad). El STM32 emite ráfagas de 10 frames a 10 Hz (1 s) **solo bajo demanda** tras `SERVICE_CMD/0xF5/QUERY` — sin tráfico permanente en el bus.
+
+El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 de flags) para enviar el par almacenado y el par pendiente en sólo 8 bytes:
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0    | `flags` | uint8_t bitmask | bit0=pending MIN capturado, bit1=pending MAX capturado, bit2=par pendiente válido, bit3=slot flash válido, bit4=gates de seguridad OK, bit5=plausible, **bit6=0 → bytes 3-6 son PENDING; bit6=1 → bytes 3-6 son STORED**, bit7=reservado |
+| 1-2  | `raw_adc` | uint16_t LE | Lectura cruda 12-bit post-EMA |
+| 3-4  | `min` | uint16_t LE | MIN almacenado o pendiente (según bit 6) |
+| 5-6  | `max` | uint16_t LE | MAX almacenado o pendiente (según bit 6) |
+| 7    | `pedal_percent` | uint8_t | 0..100 saturante |
+
+**DLC:** 8 · **Frecuencia:** On-demand, 10 Hz durante 1 s tras QUERY · **Timeout:** 1 s (10 frames × 100 ms)
+
+**Compatibilidad backward:** nodos que ignoren 0x308 no se ven afectados — la trama no se emite si no hay QUERY pendiente.
+
+---
+
 ## ⚙️ Gestión de Errores
 
 ### Prioridades de Mensajes
@@ -683,6 +719,8 @@ ID: 0x300  DLC: 2  Data: [0x02, 0x01]
 | 0x20A | STATUS_LIGHTS | Baja | Telemetría LED |
 | 0x300 | DIAG_ERROR | **Alta** | Errores críticos |
 | 0x301-0x303 | SERVICE_* | Baja | Diagnóstico Service Mode |
+| 0x304-0x307 | DIAG_* | Baja | Diagnóstico (error log, debounce) |
+| 0x308 | DIAG_PEDAL_CAL | Baja | Telemetría calibración pedal (on-demand, 1 s tras QUERY) |
 
 ### Retransmisión Automática
 

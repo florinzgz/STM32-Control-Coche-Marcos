@@ -26,6 +26,7 @@
 #include "math_safety.h"
 #include "steering_cal_store.h"
 #include "sensor_map_store.h"
+#include "pedal_cal_store.h"
 #include "error_log.h"
 #include "loop_diag.h"
 #include <math.h>
@@ -286,10 +287,27 @@ int main(void)
     }
 
     /* ---- Persistent DS18B20 sensor mapping ----
-     * Load the user-assigned physIdx→role mapping from flash page 125.
+     * Load the user-assigned physIdx→role mapping from flash page 123.
      * If no valid mapping has been saved yet the identity mapping
      * (index 0=FL, 1=FR, 2=RL, 3=RR, 4=AMB) is used as fall-back.    */
     SensorMapStore_Init();
+
+    /* ---- Persistent pedal endpoint calibration ----
+     * Page 124 stores the per-vehicle ADC counts for released (MIN)
+     * and fully pressed (MAX) pedal positions.  On CRC / magic /
+     * range failure the call is a no-op — Pedal_RawToPercent() keeps
+     * its compile-time defaults (150 / 2413).  Boot is never blocked
+     * by a missing or corrupt calibration slot.
+     *
+     * Safety: this only changes the linear interpolation endpoints.
+     * It does NOT clear startup_inhibit, change EMA state, alter
+     * plausibility or FAULT_LO/HI thresholds, or authorise ACTIVE.   */
+    PedalCal_Init();
+    if (PedalCal_IsValid()) {
+        uint16_t pmin = 0, pmax = 0;
+        PedalCal_GetStored(&pmin, &pmax);
+        Pedal_ApplyCalibration(pmin, pmax);
+    }
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
     Safety_SetState(SYS_STATE_STANDBY);
@@ -549,6 +567,11 @@ int main(void)
                 Steering_IsCalibrated());
             CAN_SendStatusTraction();
             CAN_SendStatusBattery();
+
+            /* Pedal calibration telemetry burst (0x308) — emits only
+             * while an explicit QUERY is active (1 s, 10 Hz).  No-op
+             * otherwise.  Does not affect backward-compatible nodes. */
+            CAN_PedalCalBurstUpdate();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */

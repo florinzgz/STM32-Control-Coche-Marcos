@@ -3,7 +3,7 @@
   * @file    error_log.c
   * @brief   Persistent error log — flash NVM ring buffer implementation
   *
-  * Stores error log entries in flash page 125 (0x0807C000, 4 KB).
+  * Stores error log entries in flash page 125 (0x0807D000, 4 KB).
   * Uses a ring buffer with a flash header for integrity checking.
   *
   * Write strategy:

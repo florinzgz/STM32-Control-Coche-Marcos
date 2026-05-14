@@ -4,11 +4,11 @@
   * @brief   Persistent error log — flash NVM ring buffer
   *
   * Stores safety errors, faults, and system events in a non-volatile ring
-  * buffer on flash page 125 (0x0807C000, 4 KB).  Survives power cycles,
+  * buffer on flash page 125 (0x0807D000, 4 KB).  Survives power cycles,
   * watchdog resets, and brownouts.  Enables post-mortem diagnosis.
   *
   * Flash layout:
-  *   Page 125 (0x0807C000, 4 KB) — dedicated to error log.
+  *   Page 125 (0x0807D000, 4 KB) — dedicated to error log.
   *   Header:  16 bytes (magic, entry count, write index, CRC32)
   *   Entries: up to ERROR_LOG_MAX_ENTRIES × 16 bytes each
   *
