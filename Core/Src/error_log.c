@@ -265,8 +265,15 @@ void ErrorLog_Record(uint8_t error_code, uint8_t subsystem,
     uint32_t now = HAL_GetTick();
     if (!log_has_flushed_once ||
         (uint32_t)(now - log_last_flash_tick) >= ERRLOG_WRITE_MIN_INTERVAL_MS) {
+        /* Always update the timestamp before attempting the write, so a
+         * persistent flash failure (e.g. sector locked, supply brown-out)
+         * cannot trigger a retry storm on every subsequent record — the
+         * next retry is throttled to the same 100 ms cool-down.  We still
+         * latch has_flushed_once only on success, so a failure leaves the
+         * "first call always flushes" semantic intact for the next call
+         * after Init/reformat (Init explicitly clears both).               */
+        log_last_flash_tick = now;
         if (errlog_write_flash()) {
-            log_last_flash_tick  = now;
             log_has_flushed_once = true;
         }
     }
