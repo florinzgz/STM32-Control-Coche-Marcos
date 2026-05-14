@@ -1,5 +1,83 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-14 (doc sync follow-up)
+
+### Documentation consistency pass for the persistent-pedal-calibration feature
+
+Surgical documentation pass with no functional changes.  Aligns every
+file that references the STM32G474RE flash NVM map (pages 124–127) so
+the addresses and ownership match the source of truth (the actual
+constants in `Core/Src/*.c` and the linker script
+`STM32G474RETX_FLASH.ld`).  No C, C++, or linker file was modified —
+the firmware binary is bit-identical to the previous commit.
+
+#### Files touched
+
+- `Core/Src/error_log.c` — file-header comment now reads
+  *page 125 (`0x0807D000`, 4 KB)* (was `0x0807C000`, the address of
+  page 124).  The `ERRLOG_FLASH_BASE` macro at line 36 was already
+  correct; only the documentation comment was misleading.
+- `Core/Inc/error_log.h` — same two-line comment fix: page-125
+  address corrected to `0x0807D000` in both the brief description
+  and the "Flash layout" block.
+- `README.md` § 24 (*Persistent Storage*) — corrected page 125
+  address from `0x0807C000` to `0x0807D000` in the *STM32 Flash
+  Layout* table.
+- `docs/INTEGRATION_PLAN.md` Apéndice A — corrected the page 125
+  address (`0x0807C000` → `0x0807D000`), restored the firmware
+  region to pages `0–123` and rewrote the post-table rule to point
+  to page 124 (`0x0807C000`, `pedal_cal_store.c`) instead of the
+  non-existent `0x0807A000`.
+- `docs/CALIBRATION.md` § *On-flash layout (page 124)* — slot table
+  rewritten to match the actual `pcal_flash_slot_t` struct: 16 bytes
+  total with `validity_flag` (1 B, offset 8), `reserved[3]` (offset
+  9–11), and `checksum` (4 B, offset 12).  The previous table
+  erroneously placed `valid_flag` at offset 16 (off-the-end of the
+  16-byte struct) and listed `_reserved` as a 4-byte uint32.
+
+#### Verification
+
+- `pedal_cal_store.c` slot layout (`magic / adc_min / adc_max /
+  validity_flag / reserved[3] / checksum`, 16 B total, double-word
+  aligned) is now reflected verbatim in both `docs/CALIBRATION.md`
+  and `docs/HARDWARE_AND_SENSOR_MAP.md` § 1.6.
+- Every page-125 address reference in the repository
+  (`error_log.c`, `error_log.h`, `README.md`,
+  `docs/INTEGRATION_PLAN.md`, `STM32G474RETX_FLASH.ld`) now reads
+  `0x0807D000`.
+- Page 124 ownership (`pedal_cal_store.c`, `0x0807C000`) and pages
+  126/127 ownership are unchanged and consistent across all files.
+
+#### Known issue — page 125 ownership conflict (NOT fixed here)
+
+`Core/Src/error_log.c` (`ERRLOG_FLASH_BASE = 0x0807D000`, page 125) and
+`Core/Src/sensor_map_store.c` (`SMAP_FLASH_BASE = 0x0807D000`, page
+125) currently target the **same** flash page.  In practice this means
+that calling `SensorMapStore_Save()` will erase the error-log page,
+and vice-versa, silently corrupting whichever store was written last.
+
+This collision is **out of scope** for the doc-sync pass because
+resolving it requires either:
+
+  1. Carving an additional NVM page out of `FLASH` in
+     `STM32G474RETX_FLASH.ld` (moving the firmware ceiling from
+     `0x0807C000` down to `0x0807B000`) so the sensor map can live on
+     a brand-new page (e.g. page 123 at `0x0807B000`), **or**
+  2. Re-using one of the four existing reserved pages with a strict
+     ownership policy that has to be approved by the safety review
+     (the engineering-screen sensor mapping is currently the only
+     "soft" persistence in the four reserved pages).
+
+The dedicated remediation PR must update the linker script, the file
+headers of `error_log.c` / `sensor_map_store.c`, and the four
+documentation tables (`README.md`, `docs/CALIBRATION.md`,
+`docs/HARDWARE_AND_SENSOR_MAP.md`, `docs/INTEGRATION_PLAN.md`) in one
+single change so the map stays consistent.  Until then, callers must
+treat `SensorMapStore_Save()` and `ErrorLog_Record()` as mutually
+exclusive at the workshop/engineering-screen level.
+
+---
+
 ## [unreleased] — 2026-05-14
 
 ### Persistent Pedal-Endpoint Calibration (Lotes 1–7)

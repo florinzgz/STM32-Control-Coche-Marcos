@@ -848,12 +848,12 @@ Una etapa se considera **ESTABLE** cuando cumple **TODOS** estos criterios simul
 
 | Página | Dirección | Tamaño | Uso | Módulo |
 |--------|-----------|--------|-----|--------|
-| 125 | 0x0807C000 | 4 KB | Error log (ring buffer) | `error_log.c` |
+| 125 | 0x0807D000 | 4 KB | Error log (ring buffer) | `error_log.c` |
 | 126 | 0x0807E000 | 4 KB | Calibración dirección | `steering_cal_store.c` |
 | 127 | 0x0807F000 | 4 KB | Parámetros EPS (double-buffer) | `eps_params.c` |
-| 0–124 | 0x08000000–0x0807BFFF | 496 KB | Firmware | Linker script |
+| 0–123 | 0x08000000–0x0807BFFF | 496 KB | Firmware | Linker script |
 
-> **REGLA**: No usar páginas 125–127 para datos nuevos. Si se necesita almacenamiento Flash adicional, usar página 124 (0x0807A000) con el mismo patrón de magic + CRC32.
+> **REGLA**: No usar páginas 125–127 para datos nuevos. Página 124 (`0x0807C000`) está reservada para la calibración persistente del pedal (`pedal_cal_store.c`).
 
 ## Apéndice B: Referencia rápida de AF (Alternate Functions) para pines libres
 

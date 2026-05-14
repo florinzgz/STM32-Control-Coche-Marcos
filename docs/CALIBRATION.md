@@ -31,14 +31,14 @@ actual hardware endpoints instead of the compile-time defaults
 
 ### On-flash layout (page 124 — 16 B used out of 4 KB)
 
-| Offset | Field        | Type     | Notes                                      |
-|-------:|:-------------|:---------|:-------------------------------------------|
-| 0      | `magic`      | uint32_t | `0x50434C31` (`"PCL1"`)                     |
-| 4      | `adc_min`    | uint16_t | Released-pedal endpoint (raw ADC counts)   |
-| 6      | `adc_max`    | uint16_t | Pressed-pedal endpoint (raw ADC counts)    |
-| 8      | `_reserved`  | uint32_t | Zero — kept for forward compatibility      |
-| 12     | `crc32`      | uint32_t | Polynomial 0xEDB88320, identical to steering |
-| 16     | `valid_flag` | uint8_t  | `0xA5` if the slot is committed             |
+| Offset | Size | Field          | Type     | Notes                                       |
+|-------:|-----:|:---------------|:---------|:--------------------------------------------|
+| 0      | 4 B  | `magic`        | uint32_t | `0x50434C31` (`"PCL1"`)                     |
+| 4      | 2 B  | `adc_min`      | uint16_t | Released-pedal endpoint (raw ADC counts)    |
+| 6      | 2 B  | `adc_max`      | uint16_t | Pressed-pedal endpoint (raw ADC counts)     |
+| 8      | 1 B  | `validity_flag`| uint8_t  | `0xA5` when slot is committed               |
+| 9      | 3 B  | `reserved`     | uint8[3] | Padding, written as `0x00`                  |
+| 12     | 4 B  | `checksum`     | uint32_t | CRC32 (poly `0xEDB88320`) over first 12 B   |
 
 ### Hard validators
 
