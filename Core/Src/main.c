@@ -1268,7 +1268,7 @@ static void MX_IWDG_Init(void)
 {
     hiwdg.Instance       = IWDG;
     hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
-    hiwdg.Init.Reload    = 4095;           /* ~500 ms at 32 kHz / 32 */
+    hiwdg.Init.Reload    = 4095;           /* ~4.1 s timeout: LSI 32 kHz / 32 = 1 kHz tick * 4095 = 4095 ms */
     hiwdg.Init.Window    = IWDG_WINDOW_DISABLE;
     if (HAL_IWDG_Init(&hiwdg) != HAL_OK) {
         Error_Handler();

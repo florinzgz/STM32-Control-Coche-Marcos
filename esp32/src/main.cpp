@@ -248,7 +248,13 @@ static constexpr unsigned long NVS_FLUSH_INTERVAL_MS = 10000;  // 10 seconds
 // the main loop running) would keep sending the same counter value.
 // After STM32_HB_FREEZE_COUNT consecutive identical counter values the ESP32
 // considers the STM32 non-responsive and inhibits further motion commands.
-static constexpr uint8_t  STM32_HB_FREEZE_COUNT = 5;   // 5 × 100 ms = 500 ms
+static constexpr uint8_t  STM32_HB_FREEZE_COUNT = 5;   // 5 × HEARTBEAT_INTERVAL_MS = 500 ms
+// Tie the freeze-detection window to the heartbeat period at compile time so
+// that changing one constant cannot silently desynchronise the other.
+static constexpr uint32_t STM32_HB_FREEZE_TIME_MS =
+    (uint32_t)STM32_HB_FREEZE_COUNT * can::HEARTBEAT_INTERVAL_MS;
+static_assert(STM32_HB_FREEZE_TIME_MS < can::CAN_LOSS_TIMEOUT_MS,
+              "STM32 freeze detection must trigger before CAN-loss timeout");
 static uint8_t  stm32HbLastCounter   = 0xFFU;           // Init to impossible value
 static uint8_t  stm32HbSameCount     = 0;
 static bool     stm32IsAlive         = false;

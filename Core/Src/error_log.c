@@ -15,11 +15,15 @@
   *     error recording only happens during fault transitions, not
   *     every cycle.
   *
-  * Safety:
-  *   - If power is lost during write, the header CRC will be invalid
-  *     on next boot and the log will be reformatted (entries lost).
-  *   - This is acceptable: the error that caused the power loss is
-  *     the one we care about, and it will be re-recorded on boot.
+  * Safety (power-loss):
+  *   - Entries are programmed FIRST, header LAST (commit-pointer
+  *     pattern).  Until the header magic+CRC are committed to flash,
+  *     errlog_header_valid() rejects the slot on the next boot and
+  *     the log is silently reformatted.  This prevents partial writes
+  *     from being read back as a valid header pointing at 0xFF-filled
+  *     "ghost" entries.
+  *   - Losing the in-progress record is acceptable: the underlying
+  *     fault will be re-asserted and re-recorded after boot.
   ****************************************************************************
   */
 
@@ -82,7 +86,22 @@ static bool errlog_header_valid(const errlog_flash_header_t *hdr)
     return (crc == hdr->checksum);
 }
 
-/* ---- Write the entire log (header + entries) to flash ---- */
+/* ---- Write the entire log (entries first, header last) to flash ----
+ *
+ * Power-loss safety:
+ *   The header is written LAST so it acts as a commit pointer.  After
+ *   erase, every byte in page 125 reads as 0xFF; if power is lost
+ *   while writing the entries the header bytes remain 0xFF, the magic
+ *   word does not match ERRLOG_MAGIC on the next boot, and
+ *   errlog_header_valid() rejects the slot — the log is silently
+ *   reformatted (entries lost) instead of being read back as a mix of
+ *   real entries and 0xFF garbage.
+ *
+ *   Writing the header first (the previous order) was unsafe: a
+ *   partial entry write would still leave a *valid* header on flash
+ *   whose entry_count was larger than the number of entries actually
+ *   committed, causing ErrorLog_GetEntry() to return 0xFF-filled
+ *   pseudo-entries on the next boot.                                  */
 static bool errlog_write_flash(void)
 {
     /* Update header checksum */
@@ -107,18 +126,8 @@ static bool errlog_write_flash(void)
         return false;
     }
 
-    /* Write header (16 bytes = 2 double-words) */
-    const uint64_t *hdr_src = (const uint64_t *)&log_header;
-    for (uint32_t i = 0; i < (sizeof(errlog_flash_header_t) / 8U); i++) {
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                   ERRLOG_FLASH_BASE + (i * 8U), hdr_src[i]);
-        if (status != HAL_OK) {
-            HAL_FLASH_Lock();
-            return false;
-        }
-    }
-
-    /* Write entries (entry_count × 16 bytes, starting after header) */
+    /* 1) Write entries FIRST (entry_count × 16 bytes, immediately after
+     *    the reserved header slot).                                    */
     uint32_t entries_offset = sizeof(errlog_flash_header_t);
     uint32_t entries_bytes  = (uint32_t)log_header.entry_count * sizeof(error_log_entry_t);
     uint32_t dword_count    = (entries_bytes + 7U) / 8U;
@@ -128,6 +137,19 @@ static bool errlog_write_flash(void)
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
                                    ERRLOG_FLASH_BASE + entries_offset + (i * 8U),
                                    ent_src[i]);
+        if (status != HAL_OK) {
+            HAL_FLASH_Lock();
+            return false;
+        }
+    }
+
+    /* 2) Write header LAST (16 bytes = 2 double-words).  This is the
+     *    commit point: until the header magic + CRC are on flash the
+     *    slot is invisible to errlog_header_valid() on the next boot. */
+    const uint64_t *hdr_src = (const uint64_t *)&log_header;
+    for (uint32_t i = 0; i < (sizeof(errlog_flash_header_t) / 8U); i++) {
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+                                   ERRLOG_FLASH_BASE + (i * 8U), hdr_src[i]);
         if (status != HAL_OK) {
             HAL_FLASH_Lock();
             return false;
