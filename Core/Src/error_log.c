@@ -10,10 +10,12 @@
   *   - Full page erase + rewrite on every ErrorLog_Record() call.
   *   - Error events are infrequent (seconds to minutes apart),
   *     so flash endurance (10K cycles) is not a concern.
-  *   - Write time: ~5 ms for erase + ~2 ms for writes = ~7 ms total.
-  *     This fits within the 10 ms main loop tick budget because
-  *     error recording only happens during fault transitions, not
-  *     every cycle.
+  *   - Write time: ~22 ms for page erase + a few µs for the
+  *     doubleword writes ≈ 22 ms total.  This skips ~2 main-loop
+  *     ticks (10 ms each), which is acceptable because Record is
+  *     only called on fault transitions, not every cycle, and the
+  *     100 ms ERRLOG_WRITE_MIN_INTERVAL_MS rate-limit below
+  *     prevents back-to-back stalls.
   *
   * Safety (power-loss):
   *   - Entries are programmed FIRST, header LAST (commit-pointer

@@ -1181,17 +1181,26 @@ static inline bool pedalcal_safety_ok(void)
  * context where the rest of the 100 Hz loop is paused — same pattern
  * as steering_cal_store invocation.  Total worst-case duration
  * 7 × 50 ms = 350 ms (8 samples, 7 delays in between).  The IWDG
- * reload window in this project is well above this bound.            */
+ * reload window in this project is well above this bound.
+ *
+ * NOTE: uses Pedal_SampleRawNow() (fresh ADC conversion) instead of
+ * Pedal_GetRawADC() (cached value).  While this function is running,
+ * the 50 ms Pedal_Update() branch of the main loop is blocked, so
+ * pedal_raw_adc would not refresh — Pedal_GetRawADC() would return
+ * the same value 8 times and the stability check would be a no-op.
+ * Pedal_SampleRawNow() forces a hardware acquisition each call and
+ * does NOT mutate the pedal pipeline (no EMA, plausibility, or
+ * dual-sample state change).                                          */
 static bool pedalcal_sample_stable(uint16_t *out_adc)
 {
     uint16_t samples[PEDALCAL_STABLE_SAMPLES];
-    samples[0] = Pedal_GetRawADC();
+    samples[0] = Pedal_SampleRawNow();
     uint16_t mn = samples[0];
     uint16_t mx = samples[0];
 
     for (uint8_t i = 1; i < PEDALCAL_STABLE_SAMPLES; i++) {
         HAL_Delay(50);
-        samples[i] = Pedal_GetRawADC();
+        samples[i] = Pedal_SampleRawNow();
         if (samples[i] < mn) mn = samples[i];
         if (samples[i] > mx) mx = samples[i];
     }
