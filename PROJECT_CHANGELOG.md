@@ -1,5 +1,74 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-15 (hardening quirúrgico de pedal, I2C, stack y flash)
+
+### Resumen ejecutivo
+
+Entrada de consolidación para dejar constancia del endurecimiento
+quirúrgico aplicado tras la ronda de auditoría.  El objetivo fue quitar
+latencias bloqueantes del camino crítico, acotar tiempos máximos en I2C,
+mejorar la visibilidad de margen de stack en ESP32 y alinear la
+persistencia en flash con guardas de desgaste ya usadas en otros stores.
+
+#### Cambios principales
+
+- `Core/Src/can_handler.c` + `Core/Inc/can_handler.h`
+  - La captura de calibración del pedal deja de ejecutarse como rutina
+    bloqueante y pasa a una FSM cooperativa.
+  - La captura MIN/MAX sigue tomando las mismas muestras estables, pero
+    ahora reparte el trabajo entre iteraciones del bucle principal en
+    vez de congelar lazo, heartbeat y resto de tareas durante ~350 ms.
+  - Se añaden manejos explícitos para:
+    - rechazo de capturas solapadas mientras hay una en curso
+    - aborto si el safety gate cae a mitad de la calibración
+    - timeout duro de la FSM si la captura no termina a tiempo
+  - El ACK final de `CAPTURE_MIN` / `CAPTURE_MAX` se emite cuando la FSM
+    concluye, conservando el resultado real de la operación.
+
+- `Core/Src/sensor_manager.c`
+  - El hot path de INA226/TCA9548A pasa a usar
+    `INA226_I2C_TIMEOUT_MS = 10U` en lugar de los timeouts largos
+    anteriores.
+  - Se añaden guardas de compilación para impedir que ese timeout vuelva
+    a crecer sin revisión.
+  - No cambia el contrato funcional del monitor de corriente; solo se
+    acota el peor caso de bloqueo del bus.
+
+- `esp32/src/main.cpp`
+  - Se conserva el `TaskHandle_t` de render en vez de descartarlo.
+  - Se añade telemetría periódica `[STACK] loop_hwm=... render_hwm=...`
+    para observar margen real de stack tanto en el loop principal como
+    en la tarea de render.
+
+- `Core/Src/steering_cal_store.c`
+  - Se añaden guardas de desgaste equivalentes a las de
+    `pedal_cal_store.c`: no-op elision y rate-limit mínimo entre
+    escrituras.
+
+- `Core/Src/eps_params.c`
+  - Se aplica el mismo patrón de protección contra desgaste flash:
+    evitar escrituras si no hay cambios reales y limitar frecuencia de
+    persistencia.
+
+- `Core/Src/main.c`
+  - Ajuste menor de integración para que la nueva FSM cooperativa de
+    pedal se procese dentro del flujo normal del sistema.
+
+#### Estado / verificación
+
+- El cambio deja documentado el trabajo ya integrado en el commit
+  `caedefc` (*Hardening quirúrgico: pedalcal FSM, I2C 10ms, ESP32 HWM,
+  flash guards*).
+- En este entorno no se pudo ejecutar la validación automática completa
+  porque faltan las herramientas del sistema:
+  - `make` falla por ausencia de `arm-none-eabi-gcc`
+  - `pio run` falla por ausencia de `pio`
+- Por tanto, lo pendiente no es una corrección funcional nueva en este
+  archivo, sino volver a correr la build STM32 y la build ESP32 en un
+  entorno que sí tenga esos toolchains instalados.
+
+---
+
 ## [unreleased] — 2026-05-14 (page-125 ownership conflict — resolved)
 
 ### Sensor map relocated to flash page 123 (`0x0807B000`)
