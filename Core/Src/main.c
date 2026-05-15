@@ -431,6 +431,7 @@ int main(void)
             tick_50ms = now;
 
             Pedal_Update();
+            CAN_PedalCalCaptureTick();   /* R-1: cooperative pedalcal FSM */
             Current_ReadAll();
             Temperature_StartConversion();
             Temperature_ReadAll();

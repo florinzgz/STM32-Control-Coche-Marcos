@@ -39,6 +39,14 @@
 
 #define EPS_MAGIC            0x45505331U   /* "EPS1" */
 
+/* ---- Flash-wear rate limit (Fase 4 hardening) -----------------------
+ * Mirrors PCAL_WRITE_MIN_INTERVAL_MS / STCAL_WRITE_MIN_INTERVAL_MS.
+ * EPS_Params_Save() is a public API reserved for future EPS-cal
+ * tooling; rate-limiting it here pre-empts CAN-frame-storm wear of
+ * page 127 once the API is wired up.  First call after boot is
+ * exempt so a future cal flow can persist its first write.          */
+#define EPS_WRITE_MIN_INTERVAL_MS  1000U
+
 /* ---- On-flash slot format ---- */
 typedef struct {
     uint32_t     magic;       /* Must equal EPS_MAGIC                */
@@ -62,6 +70,18 @@ static const eps_params_t eps_defaults = {
 /* ---- RAM state ---- */
 static eps_params_t  eps_active;
 static uint32_t      eps_sequence = 0;
+
+/* ---- Flash-wear rate-limit + no-op elision bookkeeping (Fase 4) ----
+ * eps_persisted is a snapshot of what is committed to flash; it is
+ * loaded from flash in EPS_Params_Init() (or seeded from defaults if
+ * no slot is valid) and refreshed on every successful Save.  This
+ * lets EPS_Params_Save() short-circuit when the active params
+ * already match the persisted slot — same pattern as
+ * pedal_cal_store.c (PedalCal_Save no-op elision).                  */
+static eps_params_t eps_persisted;
+static bool         eps_persisted_valid    = false;
+static bool         eps_has_written_once   = false;
+static uint32_t     eps_last_write_tick    = 0U;
 
 /* ---- CRC32 (software, no HW CRC unit dependency) ---- */
 static uint32_t eps_crc32(const void *data, uint32_t len)
@@ -108,16 +128,24 @@ void EPS_Params_Init(void)
             memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
             eps_sequence = slotA->sequence;
         }
+        memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+        eps_persisted_valid = true;
     } else if (a_ok) {
         memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
         eps_sequence = slotA->sequence;
+        memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+        eps_persisted_valid = true;
     } else if (b_ok) {
         memcpy(&eps_active, &slotB->params, sizeof(eps_params_t));
         eps_sequence = slotB->sequence;
+        memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+        eps_persisted_valid = true;
     } else {
         /* No valid data — use compiled defaults */
         memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
         eps_sequence = 0;
+        /* No persisted slot — Save() must not elide; leave invalid. */
+        eps_persisted_valid = false;
     }
 }
 
@@ -171,6 +199,35 @@ bool EPS_Params_Save(void)
 #ifndef HOST_TEST
     if (Safety_GetState() != SYS_STATE_STANDBY)
         return false;
+#endif
+
+    /* Flash-wear guard #1 — no-op elision (Fase 4).
+     *
+     * If the active params already match the slot persisted in flash,
+     * the caller's desired state is already on disk; return success
+     * without erasing the page.  Consistent with
+     * pedal_cal_store.c::PedalCal_Save and
+     * sensor_map_store.c::SensorMapStore_Save.                       */
+    if (eps_persisted_valid &&
+        memcmp(&eps_active, &eps_persisted, sizeof(eps_params_t)) == 0) {
+        return true;
+    }
+
+    /* Flash-wear guard #2 — minimum write interval (Fase 4).
+     *
+     * Reject successive writes that arrive closer together than
+     * EPS_WRITE_MIN_INTERVAL_MS (1 s).  First call after boot
+     * (eps_has_written_once == false) is exempt.  HAL_GetTick()
+     * wraps at ~49.7 days; unsigned modular subtraction is safe.
+     * Compiled out in host tests which have no HAL_GetTick().      */
+#ifndef HOST_TEST
+    {
+        uint32_t now_tick = HAL_GetTick();
+        if (eps_has_written_once &&
+            (uint32_t)(now_tick - eps_last_write_tick) < EPS_WRITE_MIN_INTERVAL_MS) {
+            return false;
+        }
+    }
 #endif
 
     /* Read the previous slot from flash before erasing (if valid).
@@ -253,5 +310,15 @@ bool EPS_Params_Save(void)
     }
 
     HAL_FLASH_Lock();
+
+    /* Fase 4: refresh no-op / rate-limit bookkeeping on success.
+     * Capture the persisted snapshot AFTER the page commit so a
+     * future Save() with identical params is correctly elided.    */
+    memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+    eps_persisted_valid  = true;
+    eps_has_written_once = true;
+#ifndef HOST_TEST
+    eps_last_write_tick  = HAL_GetTick();
+#endif
     return true;
 }

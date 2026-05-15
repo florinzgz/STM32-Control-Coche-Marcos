@@ -172,6 +172,15 @@ void CAN_UpdateFrameRate(void);     /* Call every ~1 s to compute rx FPS  */
  * has zero impact on backward-compatible nodes that ignore 0x308. */
 void CAN_PedalCalBurstUpdate(void);
 
+/* Drives the cooperative non-blocking pedalcal capture FSM (R-1).
+ * Call once per 50 ms main-loop tick, immediately after Pedal_Update().
+ * No-op while the FSM is idle; while a CAPTURE_MIN/MAX is in flight
+ * it takes one sample per tick (8 samples total), re-validates
+ * safety, enforces a hard 450 ms timeout, and emits the deferred
+ * ACK on completion.  Replaces the previous blocking HAL_Delay-based
+ * sampler that starved CAN heartbeat TX and Safety_CheckCANTimeout(). */
+void CAN_PedalCalCaptureTick(void);
+
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */
 bool LED_Relay_Get(void);             /* front relay state */
