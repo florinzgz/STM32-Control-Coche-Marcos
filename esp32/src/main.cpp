@@ -273,6 +273,10 @@ static bool     tempMapResyncPending = false;  // true = need to re-send DS18B20
 static SemaphoreHandle_t vdMutex = nullptr;
 static vehicle::VehicleData renderVD;  // shared copy for render task
 static QueueHandle_t touchActionQueue = nullptr;
+// R-3 hardening: capture the render task handle so loop() can query
+// its stack high-watermark via uxTaskGetStackHighWaterMark().  Was
+// previously discarded (nullptr passed as 6th arg of xTaskCreate*).
+static TaskHandle_t renderTaskHandle = nullptr;
 
 enum class TouchAction : uint8_t {
     FRONT_LED_TOGGLE,
@@ -731,7 +735,7 @@ void setup() {
         // System is still safe (CAN, safety, LEDs continue on Core 1).
     } else {
         BaseType_t rc = xTaskCreatePinnedToCore(
-            renderTask, "Render", 16384, nullptr, 1, nullptr, 0);
+            renderTask, "Render", 16384, nullptr, 1, &renderTaskHandle, 0);
         if (rc != pdPASS) {
             Serial.println("[BOOT][ERR] Failed to create render task");
         } else {
@@ -746,6 +750,24 @@ void setup() {
 void loop() {
     RTMON_LOOP_BEGIN();
     unsigned long now = millis();
+
+    // R-3 hardening: emit stack high-watermark for both FreeRTOS tasks
+    // every 5 s.  Pure instrumentation — uxTaskGetStackHighWaterMark
+    // is non-blocking and reports the minimum free stack (in words on
+    // ESP-IDF FreeRTOS) seen since task creation.  No stack sizes are
+    // changed; this only makes silent overflow risk observable.
+    {
+        static uint32_t s_lastStackHwmLogMs = 0;
+        if ((now - s_lastStackHwmLogMs) >= 5000UL) {
+            s_lastStackHwmLogMs = now;
+            UBaseType_t loopHwm   = uxTaskGetStackHighWaterMark(nullptr);
+            UBaseType_t renderHwm = (renderTaskHandle != nullptr)
+                                  ? uxTaskGetStackHighWaterMark(renderTaskHandle)
+                                  : 0;
+            Serial.printf("[STACK] loop_hwm=%u render_hwm=%u\n",
+                          (unsigned)loopHwm, (unsigned)renderHwm);
+        }
+    }
 
     // Poll CAN RX and decode incoming frames
     RTMON_CAN_BEGIN();

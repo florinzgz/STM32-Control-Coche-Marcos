@@ -626,6 +626,29 @@ extern I2C_HandleTypeDef hi2c1;
 #define I2C_FAIL_THRESHOLD       3   /* consecutive failures before recovery */
 #define I2C_RECOVERY_MAX_ATTEMPTS 2  /* max recovery tries before safe-state */
 
+/* ---- Hot-path I2C timeout (R-2 hardening) ----
+ * Bounds the worst-case main-loop stall when an INA226/TCA9548A
+ * transaction fails (cable cut, sensor dead, EMI burst).  The
+ * previous value of 50 ms × up to 6 mux selects × 2 reads could
+ * accumulate to ~600 ms — over the 250 ms ESP32 heartbeat
+ * timeout, risking false-positive disconnect events.
+ *
+ * 10 ms still leaves >> 25× margin over the real per-byte time
+ * on the bus (~370 µs for a 4-byte transfer at the configured
+ * 86 kHz Standard Mode timing) so legitimate transactions never
+ * hit it; clock-stretching from the INA226 ADC is bounded by the
+ * 1.1 ms VBUSCT/VSHCT × 4 averaging = 8.8 ms conversion time,
+ * also under the 10 ms bound.
+ *
+ * Existing recovery (I2C_FAIL_THRESHOLD = 3 + I2C_BusRecovery)
+ * is unchanged: 3 consecutive timeouts still trigger a graceful
+ * bus reset.  Worst-case stall is now bounded at
+ *   3 × (10 ms transmit + 10 ms read) ≈ 60 ms per recovery
+ * cycle — well below the 250 ms CAN heartbeat threshold.        */
+#define INA226_I2C_TIMEOUT_MS    10U
+_Static_assert(INA226_I2C_TIMEOUT_MS <= 50U,
+               "Hot-path I2C timeout must stay below the CAN heartbeat bound");
+
 static uint8_t i2c_fail_count       = 0;
 static uint8_t i2c_recovery_attempts = 0;
 
@@ -741,7 +764,7 @@ static HAL_StatusTypeDef TCA9548A_SelectChannel(uint8_t channel)
 {
     if (channel > 7) return HAL_ERROR;
     uint8_t data = (uint8_t)(1U << channel);
-    HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_TCA9548A << 1), &data, 1, 50);
+    HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(&hi2c1, (I2C_ADDR_TCA9548A << 1), &data, 1, INA226_I2C_TIMEOUT_MS);
     if (status != HAL_OK) {
         i2c_fail_count++;
     }
@@ -756,7 +779,7 @@ static int16_t INA226_ReadReg(uint8_t reg)
 {
     uint8_t buf[2] = {0};
     HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c1, (I2C_ADDR_INA226 << 1), reg,
-                                                 I2C_MEMADD_SIZE_8BIT, buf, 2, 50);
+                                                 I2C_MEMADD_SIZE_8BIT, buf, 2, INA226_I2C_TIMEOUT_MS);
     if (status != HAL_OK) {
         i2c_fail_count++;
         return 0;
@@ -774,7 +797,7 @@ static HAL_StatusTypeDef INA226_WriteReg(uint8_t reg, uint16_t value)
     buf[0] = (uint8_t)(value >> 8);
     buf[1] = (uint8_t)(value & 0xFF);
     HAL_StatusTypeDef status = HAL_I2C_Mem_Write(&hi2c1, (I2C_ADDR_INA226 << 1), reg,
-                                                  I2C_MEMADD_SIZE_8BIT, buf, 2, 50);
+                                                  I2C_MEMADD_SIZE_8BIT, buf, 2, INA226_I2C_TIMEOUT_MS);
     if (status != HAL_OK) {
         i2c_fail_count++;
     }

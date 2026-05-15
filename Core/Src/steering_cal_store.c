@@ -35,6 +35,16 @@
 #define STCAL_MAGIC            0x53544331U   /* "STC1" */
 #define STCAL_VALID_FLAG       0xA5U
 
+/* ---- Flash-wear rate limit (Fase 4 hardening) -----------------------
+ * Mirrors PCAL_WRITE_MIN_INTERVAL_MS in pedal_cal_store.c and
+ * SMAP_WRITE_MIN_INTERVAL_MS in sensor_map_store.c (single project
+ * pattern).  Steering recentre + save is a human-driven operation in
+ * BOOT/STANDBY, so 1 s is far above any legitimate cadence yet still
+ * permits an immediate retry after a failed save.  The very first
+ * save after boot is exempt (stcal_has_written_once == false) so a
+ * fresh device can always persist its first calibration.            */
+#define STCAL_WRITE_MIN_INTERVAL_MS  1000U
+
 /* ---- On-flash slot format ---- */
 typedef struct {
     uint32_t magic;                     /* Must equal STCAL_MAGIC          */
@@ -48,6 +58,16 @@ typedef struct {
 static bool    stcal_flash_valid   = false;   /* Flash slot passed CRC   */
 static bool    stcal_boot_valid    = false;   /* Boot validation passed  */
 static int32_t stcal_stored_center = 0;
+
+/* ---- Flash-wear rate-limit bookkeeping (Fase 4) ----
+ * Same scheme as pedal_cal_store.c: first call after boot is exempt
+ * (stcal_has_written_once == false) so a fresh device always
+ * accepts its first persistence; subsequent calls within
+ * STCAL_WRITE_MIN_INTERVAL_MS are rejected.  HAL_GetTick() is
+ * monotonic with ~49.7 day wrap; unsigned modular subtraction is
+ * safe across the wrap.                                              */
+static bool     stcal_has_written_once = false;
+static uint32_t stcal_last_write_tick  = 0U;
 
 /* ---- CRC32 (same polynomial as eps_params.c, software) ---- */
 static uint32_t stcal_crc32(const void *data, uint32_t len)
@@ -156,6 +176,29 @@ bool SteeringCal_Save(int32_t encoder_count_at_center)
     if (st != SYS_STATE_BOOT && st != SYS_STATE_STANDBY)
         return false;
 
+    /* Flash-wear guard #1 — no-op elision.
+     *
+     * If the slot already in flash matches the requested center,
+     * the caller's desired state is already persisted; return
+     * success without erasing the page.  Mirrors
+     * pedal_cal_store.c::PedalCal_Save and
+     * sensor_map_store.c::SensorMapStore_Save.                       */
+    if (stcal_flash_valid && stcal_stored_center == encoder_count_at_center) {
+        return true;
+    }
+
+    /* Flash-wear guard #2 — minimum write interval.
+     *
+     * Reject successive writes that arrive closer together than
+     * STCAL_WRITE_MIN_INTERVAL_MS (1 s).  The first call after
+     * boot (stcal_has_written_once == false) is exempt so a
+     * freshly booted unit always accepts its first calibration.    */
+    uint32_t now_tick = HAL_GetTick();
+    if (stcal_has_written_once &&
+        (uint32_t)(now_tick - stcal_last_write_tick) < STCAL_WRITE_MIN_INTERVAL_MS) {
+        return false;
+    }
+
     /* Build the slot in RAM */
     stcal_flash_slot_t slot;
     memset(&slot, 0, sizeof(slot));
@@ -201,8 +244,14 @@ bool SteeringCal_Save(int32_t encoder_count_at_center)
 
     HAL_FLASH_Lock();
 
-    /* Update RAM state */
-    stcal_flash_valid   = true;
-    stcal_stored_center = encoder_count_at_center;
+    /* Update RAM state.
+     * Refresh the rate-limit timestamp with HAL_GetTick() at
+     * completion (not the `now_tick` captured before the erase) so
+     * the cool-down window starts from the moment the page is
+     * actually committed (page erase + program ≈ 25 ms).            */
+    stcal_flash_valid     = true;
+    stcal_stored_center   = encoder_count_at_center;
+    stcal_has_written_once = true;
+    stcal_last_write_tick = HAL_GetTick();
     return true;
 }

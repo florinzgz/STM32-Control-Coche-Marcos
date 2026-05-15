@@ -1176,41 +1176,89 @@ static inline bool pedalcal_safety_ok(void)
     return true;
 }
 
-/* Sample a stable raw ADC value over PEDALCAL_STABLE_SAMPLES × 50 ms.
- * Uses HAL_Delay so this MUST only run from CAN_ProcessMessages()
- * context where the rest of the 100 Hz loop is paused — same pattern
- * as steering_cal_store invocation.  Total worst-case duration
- * 7 × 50 ms = 350 ms (8 samples, 7 delays in between).  The IWDG
- * reload window in this project is well above this bound.
+/* ------------------------------------------------------------------
+ *  Cooperative pedalcal capture FSM (R-1 hardening)
  *
- * NOTE: uses Pedal_SampleRawNow() (fresh ADC conversion) instead of
- * Pedal_GetRawADC() (cached value).  While this function is running,
- * the 50 ms Pedal_Update() branch of the main loop is blocked, so
- * pedal_raw_adc would not refresh — Pedal_GetRawADC() would return
- * the same value 8 times and the stability check would be a no-op.
- * Pedal_SampleRawNow() forces a hardware acquisition each call and
- * does NOT mutate the pedal pipeline (no EMA, plausibility, or
- * dual-sample state change).                                          */
-static bool pedalcal_sample_stable(uint16_t *out_adc)
+ *  Replaces the previous blocking pedalcal_sample_stable() which held
+ *  the main loop for ~350 ms via HAL_Delay(50) × 7.  That blackout
+ *  starved CAN heartbeat TX, Safety_CheckCANTimeout() and the IWDG
+ *  refresh path; the ESP32 250 ms heartbeat watchdog could fire.
+ *
+ *  Design — strictly non-blocking, no new RTOS / timers / DMA:
+ *    - One sample per 50 ms tick of the main loop (driven from
+ *      main.c after Pedal_Update()).
+ *    - 8 samples total → ~350 ms total window, identical to the
+ *      original.  Sample[0] is taken synchronously when the FSM
+ *      arms (in the command handler) so the elapsed time of the
+ *      window is preserved exactly (7 intervals × 50 ms).
+ *    - PEDALCAL_STABLE_SAMPLES and PEDALCAL_STABLE_TOL unchanged.
+ *    - Same sampling primitive: Pedal_SampleRawNow() (fresh ADC,
+ *      no pipeline side-effects).  Now safe because the 50 ms
+ *      Pedal_Update() branch still runs between ticks.
+ *
+ *  ACK semantics:
+ *    - Original: synchronous ACK after 350 ms blocking sample.
+ *    - New     : synchronous-with-result, deferred to FSM end.
+ *                Worst-case ACK latency ≈ 450 ms (hard timeout).
+ *                ESP32 ACK_FEEDBACK_TIMEOUT_MS = 2000 ms — tolerates.
+ *    - A second CAPTURE_MIN/MAX while busy → ACK_REJECTED immediate.
+ *    - Safety gate re-validated every tick → if it fails mid-window,
+ *      abort and emit ACK_BLOCKED_BY_SAFETY (matches project
+ *      convention: safety-state gates use ACK_BLOCKED_BY_SAFETY).
+ *    - Hard watchdog: if FSM hasn't completed within
+ *      PEDALCAL_FSM_TIMEOUT_MS (450 ms) → ACK_REJECTED, reset.
+ *      Protects against any future tick desynchronisation.
+ * ------------------------------------------------------------------ */
+
+typedef enum {
+    PCAL_FSM_IDLE = 0,
+    PCAL_FSM_CAPTURING_MIN,
+    PCAL_FSM_CAPTURING_MAX,
+} pedalcal_fsm_state_t;
+
+/* Hard watchdog for the capture window.
+ * Expected duration is ~350 ms (7 intervals × 50 ms); 450 ms gives
+ * one full tick of slack against jitter in the 50 ms branch.        */
+#define PEDALCAL_FSM_TIMEOUT_MS  450U
+
+_Static_assert(PEDALCAL_STABLE_SAMPLES == 8U,
+               "FSM design assumes 8 samples (~350 ms window)");
+_Static_assert(PEDALCAL_FSM_TIMEOUT_MS >= 400U,
+               "FSM hard timeout must exceed nominal capture window");
+
+static pedalcal_fsm_state_t pedalcal_fsm_state    = PCAL_FSM_IDLE;
+static uint16_t             pedalcal_fsm_samples[PEDALCAL_STABLE_SAMPLES];
+static uint8_t              pedalcal_fsm_count    = 0U;
+static uint32_t             pedalcal_fsm_start_ms = 0U;
+
+/* Forward declaration so the command handler can arm the FSM. */
+static void pedalcal_fsm_reset(void);
+static bool pedalcal_fsm_finalize(uint16_t *out_adc);
+
+static void pedalcal_fsm_reset(void)
 {
-    uint16_t samples[PEDALCAL_STABLE_SAMPLES];
-    samples[0] = Pedal_SampleRawNow();
-    uint16_t mn = samples[0];
-    uint16_t mx = samples[0];
+    pedalcal_fsm_state    = PCAL_FSM_IDLE;
+    pedalcal_fsm_count    = 0U;
+    pedalcal_fsm_start_ms = 0U;
+}
 
-    for (uint8_t i = 1; i < PEDALCAL_STABLE_SAMPLES; i++) {
-        HAL_Delay(50);
-        samples[i] = Pedal_SampleRawNow();
-        if (samples[i] < mn) mn = samples[i];
-        if (samples[i] > mx) mx = samples[i];
+/* Compute spread and mean over the 8 captured samples.
+ * Returns true and writes mean into *out_adc on success; false if
+ * the spread exceeds PEDALCAL_STABLE_TOL (caller maps to ACK_REJECTED).
+ * Identical math to the original pedalcal_sample_stable().            */
+static bool pedalcal_fsm_finalize(uint16_t *out_adc)
+{
+    uint16_t mn = pedalcal_fsm_samples[0];
+    uint16_t mx = pedalcal_fsm_samples[0];
+    uint32_t sum = pedalcal_fsm_samples[0];
+    for (uint8_t i = 1U; i < PEDALCAL_STABLE_SAMPLES; i++) {
+        uint16_t v = pedalcal_fsm_samples[i];
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+        sum += v;
     }
-
     if ((uint32_t)(mx - mn) > PEDALCAL_STABLE_TOL)
         return false;
-
-    /* Mean (rounded) of the 8 samples */
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < PEDALCAL_STABLE_SAMPLES; i++) sum += samples[i];
     *out_adc = (uint16_t)((sum + (PEDALCAL_STABLE_SAMPLES / 2U))
                           / PEDALCAL_STABLE_SAMPLES);
     return true;
@@ -1320,25 +1368,35 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
 
     switch (op) {
     case PEDAL_CAL_OP_CAPTURE_MIN: {
-        uint16_t v = 0;
-        if (!pedalcal_sample_stable(&v)) {
+        /* R-1: non-blocking capture.  If a previous capture is still
+         * in progress we cannot start a second one without losing
+         * the in-flight samples, so reject immediately.  The previous
+         * blocking implementation could not see this condition because
+         * CAN_ProcessMessages() was held inside HAL_Delay for ~350 ms;
+         * with the FSM the contract becomes explicit.                 */
+        if (pedalcal_fsm_state != PCAL_FSM_IDLE) {
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
-        pedalcal_pending_min = v;
-        pedalcal_have_min    = true;
-        CAN_SendCommandAck(0x10, ACK_OK);
+        /* Arm the FSM and capture sample[0] now, mirroring the
+         * original timing (sample[0] at t=0, then 7 ticks × 50 ms). */
+        pedalcal_fsm_state    = PCAL_FSM_CAPTURING_MIN;
+        pedalcal_fsm_samples[0] = Pedal_SampleRawNow();
+        pedalcal_fsm_count    = 1U;
+        pedalcal_fsm_start_ms = HAL_GetTick();
+        /* ACK deferred — emitted by CAN_PedalCalCaptureTick() when
+         * the 8-sample window completes (~350 ms later).             */
         return;
     }
     case PEDAL_CAL_OP_CAPTURE_MAX: {
-        uint16_t v = 0;
-        if (!pedalcal_sample_stable(&v)) {
+        if (pedalcal_fsm_state != PCAL_FSM_IDLE) {
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
-        pedalcal_pending_max = v;
-        pedalcal_have_max    = true;
-        CAN_SendCommandAck(0x10, ACK_OK);
+        pedalcal_fsm_state    = PCAL_FSM_CAPTURING_MAX;
+        pedalcal_fsm_samples[0] = Pedal_SampleRawNow();
+        pedalcal_fsm_count    = 1U;
+        pedalcal_fsm_start_ms = HAL_GetTick();
         return;
     }
     case PEDAL_CAL_OP_SAVE: {
@@ -1381,6 +1439,84 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     default:
         CAN_SendCommandAck(0x10, ACK_INVALID);
         return;
+    }
+}
+
+/* R-1: 50 ms-cadence driver for the cooperative pedalcal capture FSM.
+ *
+ * Called from the main loop's 50 ms branch (main.c) immediately after
+ * Pedal_Update().  This function is a no-op while the FSM is IDLE,
+ * so it is safe to call unconditionally and adds zero runtime cost
+ * to nodes that never request a calibration.
+ *
+ * Per tick (only while CAPTURING_MIN or CAPTURING_MAX):
+ *   1. Re-validate pedalcal_safety_ok().  If any gate has dropped
+ *      since arming → abort with ACK_BLOCKED_BY_SAFETY.
+ *   2. Enforce hard timeout PEDALCAL_FSM_TIMEOUT_MS → ACK_REJECTED.
+ *   3. Take one sample via Pedal_SampleRawNow() (fresh ADC; no
+ *      pipeline side-effects).
+ *   4. When 8 samples are collected, validate spread ≤ tolerance:
+ *        - OK   → commit to pending_min / pending_max, ACK_OK.
+ *        - FAIL → ACK_REJECTED.
+ *      Reset FSM to IDLE either way.
+ *
+ * Invariants preserved:
+ *   - PEDALCAL_STABLE_SAMPLES = 8.
+ *   - 50 ms inter-sample cadence.
+ *   - Total window ≈ 350 ms (sample[0] taken at arm, then 7 ticks).
+ *   - PEDALCAL_STABLE_TOL unchanged.
+ *   - One ACK per command (synchronous-with-result), DLC 3 of
+ *     CMD_ACK unchanged.
+ *   - CAN heartbeat TX, Safety_CheckCANTimeout(), IWDG refresh and
+ *     the rest of the main loop run normally between ticks.
+ */
+void CAN_PedalCalCaptureTick(void)
+{
+    if (pedalcal_fsm_state == PCAL_FSM_IDLE) return;
+
+    /* Re-validate safety on every tick — if any gate dropped (e.g.
+     * driver pressed pedal mid-capture, system left STANDBY, brake
+     * released) abort cleanly and report the safety-gate cause.  */
+    if (!pedalcal_safety_ok()) {
+        pedalcal_fsm_reset();
+        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+        return;
+    }
+
+    /* Hard watchdog — guards against any future desync of the 50 ms
+     * branch.  Nominal completion is ~350 ms; 450 ms gives one tick
+     * of slack while still ensuring the ACK lands well below the
+     * 2 s ACK_FEEDBACK_TIMEOUT_MS on the ESP32 UI side.            */
+    if ((uint32_t)(HAL_GetTick() - pedalcal_fsm_start_ms)
+            > PEDALCAL_FSM_TIMEOUT_MS) {
+        pedalcal_fsm_reset();
+        CAN_SendCommandAck(0x10, ACK_REJECTED);
+        return;
+    }
+
+    /* Take one sample this tick. */
+    if (pedalcal_fsm_count < PEDALCAL_STABLE_SAMPLES) {
+        pedalcal_fsm_samples[pedalcal_fsm_count++] = Pedal_SampleRawNow();
+    }
+
+    /* 8 samples collected → finalize and ACK. */
+    if (pedalcal_fsm_count >= PEDALCAL_STABLE_SAMPLES) {
+        uint16_t v = 0;
+        bool ok = pedalcal_fsm_finalize(&v);
+        pedalcal_fsm_state_t finished_state = pedalcal_fsm_state;
+        pedalcal_fsm_reset();
+        if (!ok) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        if (finished_state == PCAL_FSM_CAPTURING_MIN) {
+            pedalcal_pending_min = v;
+            pedalcal_have_min    = true;
+        } else { /* PCAL_FSM_CAPTURING_MAX */
+            pedalcal_pending_max = v;
+            pedalcal_have_max    = true;
+        }
+        CAN_SendCommandAck(0x10, ACK_OK);
     }
 }
 
