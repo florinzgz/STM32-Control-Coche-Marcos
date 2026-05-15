@@ -17,6 +17,9 @@
 
 #include "eps_params.h"
 #include "stm32g4xx_hal.h"
+#ifndef HOST_TEST
+#include "safety_system.h"
+#endif
 #include <string.h>
 #include <math.h>
 
@@ -153,6 +156,23 @@ void EPS_Params_ResetDefaults(void)
 
 bool EPS_Params_Save(void)
 {
+    /* Defense in depth: never erase page 127 while the vehicle is
+     * driving.  EPS_Params_Save() currently has no live callers in
+     * the firmware (it is a public API reserved for future EPS-cal
+     * tooling), so this gate is pure future-proofing: any future
+     * caller that forgets to gate to STANDBY will be rejected here
+     * instead of corrupting the EPS slot during ACTIVE/DEGRADED
+     * driving.  Consistent with PedalCal_Save() (STANDBY only) and
+     * SteeringCal_Save() (BOOT/STANDBY).
+     *
+     * Compiled out in host tests (test_eps_params.c) which exercise
+     * the Set/NaN-rejection paths only and have no Safety subsystem
+     * linked in.                                                     */
+#ifndef HOST_TEST
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
+#endif
+
     /* Read the previous slot from flash before erasing (if valid).
      * After page erase, both slots are lost, so we must rewrite
      * the backup slot to maintain double-buffer safety.             */

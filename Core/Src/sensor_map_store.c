@@ -20,6 +20,7 @@
 
 #include "sensor_map_store.h"
 #include "stm32g4xx_hal.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -104,6 +105,28 @@ void SensorMapStore_Init(void)
 
 bool SensorMapStore_Save(const uint8_t map[SMAP_NUM_SENSORS])
 {
+    /* ----------------------------------------------------------------------
+     * Safety guard — STANDBY-only.
+     *
+     * HAL_FLASHEx_Erase() on STM32G4 stalls the CPU for ~22 ms while
+     * the page is wiped, then the eight doubleword writes each block
+     * for another few microseconds.  Doing that while the vehicle is
+     * driving would skip two full 100 Hz control-loop iterations,
+     * breaking pedal/steering response and watchdog timing.
+     *
+     * The CAN dispatcher already gates engineering commands on the
+     * ESP32 side, but this defense-in-depth check guarantees that a
+     * stray, replayed or spoofed CAN_ID_CMD_SENSOR_MAP_TEMP frame
+     * cannot erase a flash page mid-drive even if the upstream gate
+     * is bypassed.  The caller already maps a `false` return to
+     * ACK_REJECTED, so the UI naturally distinguishes "busy / wrong
+     * state" from "bad data" (ACK_INVALID).
+     *
+     * Consistent with PedalCal_Save / SteeringCal_Save / EPS_Params_Save.
+     * --------------------------------------------------------------------*/
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
+
     /* ----------------------------------------------------------------------
      * Flash-wear guard #1 — no-op elision.
      *

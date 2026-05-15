@@ -15,16 +15,23 @@
   *     error recording only happens during fault transitions, not
   *     every cycle.
   *
-  * Safety:
-  *   - If power is lost during write, the header CRC will be invalid
-  *     on next boot and the log will be reformatted (entries lost).
-  *   - This is acceptable: the error that caused the power loss is
-  *     the one we care about, and it will be re-recorded on boot.
+  * Safety (power-loss):
+  *   - Entries are programmed FIRST, header LAST (commit-pointer
+  *     pattern).  Until the header magic+CRC are committed to flash,
+  *     errlog_header_valid() rejects the slot on the next boot and
+  *     the log is silently reformatted.  This prevents partial writes
+  *     from being read back as a valid header pointing at 0xFF-filled
+  *     "ghost" entries.
+  *   - Losing the in-progress record is acceptable: the underlying
+  *     fault will be re-asserted and re-recorded after boot.
   ****************************************************************************
   */
 
 #include "error_log.h"
 #include "stm32g4xx_hal.h"
+#ifndef HOST_TEST
+#include "safety_system.h"
+#endif
 #include <string.h>
 #include <stddef.h>
 
@@ -55,6 +62,22 @@ static error_log_entry_t     log_entries[ERROR_LOG_MAX_ENTRIES];
 static uint8_t               log_reset_cause = 0;
 static bool                  log_initialized = false;
 
+/* ---- Flash-wear guard ---------------------------------------------------
+ * Minimum interval between consecutive flash writes.  RAM ring buffer
+ * is always updated; only the persistence call is deferred.  After the
+ * cool-down window passes the next ErrorLog_Record() call flushes the
+ * full RAM image (header + all accumulated entries) to flash, so no
+ * entry is lost as long as the system keeps running.  A power loss
+ * inside the cool-down loses the un-flushed entries — that is the
+ * same trade-off documented in the file header (the underlying fault
+ * is re-asserted and re-recorded after the reboot).
+ *
+ * Sized below the 100 Hz main-loop tick (10 ms) × ~10, so a fault
+ * flap of order kHz cannot wear the page.                                */
+#define ERRLOG_WRITE_MIN_INTERVAL_MS  100U
+static uint32_t log_last_flash_tick   = 0;
+static bool     log_has_flushed_once  = false;
+
 /* ---- CRC32 (same polynomial as steering_cal_store.c / eps_params.c) ---- */
 static uint32_t errlog_crc32(const void *data, uint32_t len)
 {
@@ -82,7 +105,22 @@ static bool errlog_header_valid(const errlog_flash_header_t *hdr)
     return (crc == hdr->checksum);
 }
 
-/* ---- Write the entire log (header + entries) to flash ---- */
+/* ---- Write the entire log (entries first, header last) to flash ----
+ *
+ * Power-loss safety:
+ *   The header is written LAST so it acts as a commit pointer.  After
+ *   erase, every byte in page 125 reads as 0xFF; if power is lost
+ *   while writing the entries the header bytes remain 0xFF, the magic
+ *   word does not match ERRLOG_MAGIC on the next boot, and
+ *   errlog_header_valid() rejects the slot — the log is silently
+ *   reformatted (entries lost) instead of being read back as a mix of
+ *   real entries and 0xFF garbage.
+ *
+ *   Writing the header first (the previous order) was unsafe: a
+ *   partial entry write would still leave a *valid* header on flash
+ *   whose entry_count was larger than the number of entries actually
+ *   committed, causing ErrorLog_GetEntry() to return 0xFF-filled
+ *   pseudo-entries on the next boot.                                  */
 static bool errlog_write_flash(void)
 {
     /* Update header checksum */
@@ -107,18 +145,8 @@ static bool errlog_write_flash(void)
         return false;
     }
 
-    /* Write header (16 bytes = 2 double-words) */
-    const uint64_t *hdr_src = (const uint64_t *)&log_header;
-    for (uint32_t i = 0; i < (sizeof(errlog_flash_header_t) / 8U); i++) {
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                   ERRLOG_FLASH_BASE + (i * 8U), hdr_src[i]);
-        if (status != HAL_OK) {
-            HAL_FLASH_Lock();
-            return false;
-        }
-    }
-
-    /* Write entries (entry_count × 16 bytes, starting after header) */
+    /* 1) Write entries FIRST (entry_count × 16 bytes, immediately after
+     *    the reserved header slot).                                    */
     uint32_t entries_offset = sizeof(errlog_flash_header_t);
     uint32_t entries_bytes  = (uint32_t)log_header.entry_count * sizeof(error_log_entry_t);
     uint32_t dword_count    = (entries_bytes + 7U) / 8U;
@@ -134,6 +162,19 @@ static bool errlog_write_flash(void)
         }
     }
 
+    /* 2) Write header LAST (16 bytes = 2 double-words).  This is the
+     *    commit point: until the header magic + CRC are on flash the
+     *    slot is invisible to errlog_header_valid() on the next boot. */
+    const uint64_t *hdr_src = (const uint64_t *)&log_header;
+    for (uint32_t i = 0; i < (sizeof(errlog_flash_header_t) / 8U); i++) {
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+                                   ERRLOG_FLASH_BASE + (i * 8U), hdr_src[i]);
+        if (status != HAL_OK) {
+            HAL_FLASH_Lock();
+            return false;
+        }
+    }
+
     HAL_FLASH_Lock();
     return true;
 }
@@ -142,6 +183,14 @@ static bool errlog_write_flash(void)
 
 void ErrorLog_Init(void)
 {
+    /* Reset the rate-limit bookkeeping on every init so a re-init
+     * (or a fresh boot after a reformat) starts with the cool-down
+     * window collapsed — the first ErrorLog_Record() call will
+     * always reach flash, which is mandatory after a reformat to
+     * commit a valid header.                                      */
+    log_last_flash_tick  = 0;
+    log_has_flushed_once = false;
+
     const errlog_flash_header_t *flash_hdr =
         (const errlog_flash_header_t *)ERRLOG_FLASH_BASE;
 
@@ -199,8 +248,35 @@ void ErrorLog_Record(uint8_t error_code, uint8_t subsystem,
         log_header.total_events++;
     }
 
-    /* Auto-save to flash */
-    errlog_write_flash();
+    /* Auto-save to flash, rate-limited to protect page 125 from wear.
+     * The RAM ring buffer was already updated above, so an elided
+     * write is recovered on the next call past the cool-down window
+     * (which re-flushes the complete RAM image including this entry).
+     *
+     * Wraparound notes:
+     *   - The very first call (log_has_flushed_once == false) is
+     *     forced through the gate, so the initial value of
+     *     log_last_flash_tick is irrelevant on the first call.
+     *   - For all subsequent calls the unsigned 32-bit subtraction
+     *     (now - log_last_flash_tick) is intentionally modular: it
+     *     stays correct across the HAL_GetTick() 32-bit wrap (~49.7
+     *     days) as long as the cool-down interval is far below 2^31
+     *     ms, which it trivially is at 100 ms.                        */
+    uint32_t now = HAL_GetTick();
+    if (!log_has_flushed_once ||
+        (uint32_t)(now - log_last_flash_tick) >= ERRLOG_WRITE_MIN_INTERVAL_MS) {
+        /* Always update the timestamp before attempting the write, so a
+         * persistent flash failure (e.g. sector locked, supply brown-out)
+         * cannot trigger a retry storm on every subsequent record — the
+         * next retry is throttled to the same 100 ms cool-down.  We still
+         * latch has_flushed_once only on success, so a failure leaves the
+         * "first call always flushes" semantic intact for the next call
+         * after Init/reformat (Init explicitly clears both).               */
+        log_last_flash_tick = now;
+        if (errlog_write_flash()) {
+            log_has_flushed_once = true;
+        }
+    }
 }
 
 uint16_t ErrorLog_GetCount(void)
@@ -228,13 +304,51 @@ bool ErrorLog_GetEntry(uint16_t index, error_log_entry_t *out)
 
 bool ErrorLog_Clear(void)
 {
+    /* ----------------------------------------------------------------------
+     * Safety guard — STANDBY-only.
+     *
+     * Clearing the error log triggers a full page erase (~22 ms CPU
+     * stall) and a re-program of the header.  Doing that while the
+     * vehicle is driving would lose two 100 Hz control iterations
+     * and is never a legitimate user action — the engineering UI
+     * always asks the user to stop the vehicle before issuing a
+     * factory-reset / clear-log command.
+     *
+     * This gate is pure defense-in-depth: a stray, replayed or
+     * spoofed factory-reset 0x10/0xFE frame cannot stall the control
+     * loop mid-drive.  Refusing both the RAM clear and the flash
+     * write keeps the operation atomic: either everything happens
+     * (in STANDBY) or nothing does (otherwise) — preserving evidence
+     * in the in-RAM ring buffer for the technician.
+     *
+     * Consistent with the other NVM-write entry points.  The CAN
+     * dispatcher path is updated to send ACK_OK on success and
+     * ACK_REJECTED on this guard or on a flash error.
+     *
+     * Compiled out in host tests (test_error_log.c) which exercise
+     * a self-contained simulator and link the real error_log.c
+     * without the Safety subsystem.                                 */
+#ifndef HOST_TEST
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
+#endif
+
     log_header.magic       = ERRLOG_MAGIC;
     log_header.entry_count = 0;
     log_header.write_index = 0;
     /* Preserve total_events as lifetime counter */
     memset(log_entries, 0, sizeof(log_entries));
 
-    return errlog_write_flash();
+    /* User-initiated clear bypasses the Record() rate-limit (it is
+     * the whole purpose of the call), but we still record the
+     * resulting flush timestamp so a subsequent ErrorLog_Record()
+     * respects the cool-down window relative to *this* write.       */
+    bool ok = errlog_write_flash();
+    if (ok) {
+        log_last_flash_tick  = HAL_GetTick();
+        log_has_flushed_once = true;
+    }
+    return ok;
 }
 
 const error_log_entry_t *ErrorLog_GetEntries(void)

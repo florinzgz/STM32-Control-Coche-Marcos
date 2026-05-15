@@ -1664,9 +1664,13 @@ void CAN_ProcessMessages(void) {
                         ServiceMode_FactoryRestore();
                         CAN_SendCommandAck(0x10, ACK_OK);
                     } else if (cmd == 0xFE) {
-                        /* Clear error log (always safe) */
-                        ErrorLog_Clear();
-                        CAN_SendCommandAck(0x10, ACK_OK);
+                        /* Clear error log.  Gated to STANDBY in
+                         * ErrorLog_Clear(); propagate its return
+                         * code so the engineering UI distinguishes
+                         * "cleared OK" from "rejected: not in
+                         * standby / flash error".                  */
+                        bool cleared = ErrorLog_Clear();
+                        CAN_SendCommandAck(0x10, cleared ? ACK_OK : ACK_REJECTED);
                     } else if (cmd >= 0xF0 && cmd <= 0xF4) {
                         /* Individual factory-default reset commands (always safe).
                          * These reset specific calibration categories to defaults.

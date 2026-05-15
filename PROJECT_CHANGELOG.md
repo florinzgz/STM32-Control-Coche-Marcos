@@ -1902,6 +1902,19 @@ Diagnostics only — allows individual relay GPIO toggling from the ESP32 engine
 - **Archivos modificados:** `esp32/src/sensors/obstacle_sensor.h`, `esp32/src/sensors/obstacle_sensor.cpp`, `esp32/src/main.cpp`, `esp32/src/test_obstacle_sensor.cpp`, `docs/TFMINI_PLUS_WIRING_GUIDE.md`, `PROJECT_CHANGELOG.md`
 - **Tests:** 74 TF-Mini Plus + 135 TOFSense-M = 209 tests, 0 failures. STM32 build limpio (56496 text).
 
+### PR-293 — fix(review): error-log retry throttling follow-up + IWDG / wraparound clarification
+- **Fecha:** 2026-05-14
+- **Autor:** Copilot
+- **Descripción del cambio:** Actualización de seguimiento tras la revisión del PR para dejar cerrados los dos puntos pendientes del `error_log` y documentar con precisión los detalles temporales del watchdog. Se consolida el comportamiento del rate-limit ante fallos de flash persistentes y se aclaran los comentarios de soporte para futuras auditorías.
+- **Root cause:** La revisión detectó dos áreas mejorables: (1) si una escritura a flash fallaba repetidamente, el gate temporal del `error_log` debía dejar explícito y probado que el timestamp se actualiza antes del intento para evitar reintentos back-to-back en cada nuevo evento; (2) la nota inline del IWDG y el comentario del test de wraparound eran demasiado compactos y dejaban margen a interpretación durante la revisión.
+- **Solución aplicada:**
+  1. `Core/Src/error_log.c`: el comentario del gate de auto-guardado documenta de forma explícita que `log_last_flash_tick` se actualiza antes del intento de escritura, de modo que un fallo persistente de flash no genere un retry storm y siga respetando la ventana de 100 ms.
+  2. `Core/Src/test_error_log.c`: el simulador deja claro que `ERRLOG_FLASH_MIN_INTERVAL_MS` debe mantenerse sincronizado con `ERRLOG_WRITE_MIN_INTERVAL_MS`, y el caso `test_rate_limit_tick_wraparound()` ahora explica paso a paso el wrap de `HAL_GetTick()` (`0xFFFFFFFF → 0`) y por qué la resta modular unsigned sigue siendo correcta.
+  3. `Core/Src/main.c`: la nota del IWDG se separa en bloque multilínea y documenta el cálculo nominal de 4.095 s junto con el rango real aproximado de 3.9–4.3 s derivado de la tolerancia ±5 % del LSI.
+- **Impacto en el sistema:** Sí hay cambios observables para los llamadores: `CAN_ProcessMessages()` modifica el ACK devuelto para el comando de servicio `0xFE`, y las APIs públicas de persistencia `PedalCal_Save`, `SensorMapStore_Save`, `EPS_Params_Save`, `SteeringCal_Save` y `ErrorLog_Clear` pasan a poder fallar según el estado del sistema. En `error_log`, además, queda explícitamente documentado que el rate-limit sigue evitando ráfagas de reintento ante fallos persistentes de flash. La actualización del IWDG en `main.c` es documental y no modifica registros ni timing de ejecución.
+- **Archivos modificados:** `Core/Src/error_log.c`, `Core/Src/test_error_log.c`, `Core/Src/main.c`, `PROJECT_CHANGELOG.md`
+- **Tests / validación:** La cobertura del rate-limit en `Core/Src/test_error_log.c` deja documentados los casos de primera escritura, ventana de 100 ms, liberación exacta en el borde, wraparound de tick y reset del estado tras `Init()`. El cambio del IWDG en `main.c` es solo de comentario.
+
 ### PR-292 — feat: LD2 now shows CAN status in main loop (no external LED needed)
 - **Fecha:** 2026-04-09
 - **Autor:** Copilot

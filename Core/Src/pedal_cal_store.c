@@ -32,6 +32,7 @@
 
 #include "pedal_cal_store.h"
 #include "stm32g4xx_hal.h"
+#include "safety_system.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -142,6 +143,16 @@ void PedalCal_GetStored(uint16_t *adc_min, uint16_t *adc_max)
 
 bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
 {
+    /* Defense in depth: never persist while actuators may be live.
+     * The CAN dispatcher (pedalcal_safety_ok in can_handler.c) already
+     * blocks any caller path outside SYS_STATE_STANDBY, but the same
+     * gate is re-asserted at the persistence boundary so that any
+     * future caller (service-mode shortcut, host test fixture, etc.)
+     * cannot accidentally erase page 124 while the vehicle is in
+     * ACTIVE / DEGRADED / LIMP_HOME state.                            */
+    if (Safety_GetState() != SYS_STATE_STANDBY)
+        return false;
+
     /* Hard validation gate — never persist out-of-range endpoints. */
     if (!PedalCal_Validate(adc_min, adc_max))
         return false;
