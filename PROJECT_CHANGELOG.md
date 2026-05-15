@@ -233,12 +233,16 @@ missing/invalid.
 
 #### Flash reservation (Lote 1)
 
-- `STM32G474RETX_FLASH.ld` — `FLASH` region trimmed from `500K → 496K`.
-  Pages 124–127 (16 KB) are now exclusively NVM:
+- `STM32G474RETX_FLASH.ld` — `FLASH` region trimmed from `500K → 492K`
+  (the original `500K → 496K` reservation for the pedal page was later
+  reduced once more to `496K → 492K` when the DS18B20 sensor-map page
+  was added — see history of the linker file for both steps).
+  Pages 123–127 (20 KB) are now exclusively NVM:
+  - 123 `0x0807B000` — DS18B20 sensor map (`sensor_map_store.c`)
   - 124 `0x0807C000` — pedal calibration (this change)
-  - 125 `0x0807D000` — DS18B20 sensor map
-  - 126 `0x0807E000` — steering centring
-  - 127 `0x0807F000` — EPS parameters
+  - 125 `0x0807D000` — error log (`error_log.c`)
+  - 126 `0x0807E000` — steering centring (`steering_cal_store.c`)
+  - 127 `0x0807F000` — EPS parameters (`eps_params.c`)
 
 #### Files added
 
@@ -254,7 +258,7 @@ missing/invalid.
 
 #### Files modified
 
-- `STM32G474RETX_FLASH.ld` — `FLASH = 496K`, NVM pages 124–127 documented.
+- `STM32G474RETX_FLASH.ld` — `FLASH = 492K`, NVM pages 123–127 documented.
 - `Makefile` — `pedal_cal_store.c` added to `CORE_SRC` (and the
   pre-existing missing `loop_diag.c` reference was also added so the
   command-line build links cleanly).

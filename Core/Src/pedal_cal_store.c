@@ -46,6 +46,16 @@
 #define PCAL_MAGIC             0x50434C31U   /* "PCL1" */
 #define PCAL_VALID_FLAG        0xA5U
 
+/* ---- Flash-wear rate limit ---------------------------------------
+ * Minimum interval between consecutive successful flash writes on
+ * page 124.  Protects the page from wear caused by a CAN-frame
+ * storm or a buggy/malicious caller spamming PEDAL_CAL_OP_SAVE /
+ * PEDAL_CAL_OP_RESET_DEFAULTS.  Mirrors the SMAP_WRITE_MIN_INTERVAL_MS
+ * guard in sensor_map_store.c (single source of truth pattern).
+ * 1 s is far slower than any human-driven calibration cadence yet
+ * still permits the legitimate SAVE-then-RESET test flow.          */
+#define PCAL_WRITE_MIN_INTERVAL_MS  1000U
+
 /* ---- On-flash slot format ----
  * Exactly 16 bytes, double-word aligned, identical structure pattern
  * to stcal_flash_slot_t.                                              */
@@ -67,6 +77,15 @@ typedef char pcal_size_check_[(sizeof(pcal_flash_slot_t) == 16) ? 1 : -1];
 static bool     pcal_flash_valid   = false;   /* Flash slot passed CRC + range */
 static uint16_t pcal_stored_min    = 0;
 static uint16_t pcal_stored_max    = 0;
+
+/* ---- Flash-wear rate-limit bookkeeping ----
+ * pcal_has_written_once stays false until the first successful flash
+ * write, so the very first PedalCal_Save() call after boot is never
+ * gated by the timestamp (matches sensor_map_store.c semantics).
+ * pcal_last_write_tick uses HAL_GetTick() and is compared with
+ * unsigned modular subtraction so wrap-around at ~49.7 days is safe. */
+static bool     pcal_has_written_once = false;
+static uint32_t pcal_last_write_tick  = 0U;
 
 /* ---- CRC32 (same polynomial as steering_cal_store / eps_params) ---- */
 static uint32_t pcal_crc32(const void *data, uint32_t len)
@@ -113,6 +132,13 @@ void PedalCal_Init(void)
     pcal_stored_min  = 0;
     pcal_stored_max  = 0;
 
+    /* Reset the rate-limit bookkeeping on every init so a re-init
+     * never starts inside a cool-down window collapsed across reboot
+     * — the first PedalCal_Save() call will always be allowed.
+     * Matches sensor_map_store.c semantics.                          */
+    pcal_has_written_once = false;
+    pcal_last_write_tick  = 0U;
+
     const pcal_flash_slot_t *slot =
         (const pcal_flash_slot_t *)PCAL_FLASH_BASE;
 
@@ -157,8 +183,49 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
     if (!PedalCal_Validate(adc_min, adc_max))
         return false;
 
-    /* Build the slot in RAM */
-    pcal_flash_slot_t slot;
+    /* ----------------------------------------------------------------------
+     * Flash-wear guard #1 — no-op elision.
+     *
+     * If the requested endpoints exactly match the slot currently held in
+     * flash (validated at boot or by the last successful Save), the caller's
+     * desired state is already persisted.  Return success without erasing
+     * the page.  This is what makes PEDAL_CAL_OP_RESET_DEFAULTS idempotent:
+     * after the first RESET_DEFAULTS, subsequent RESET_DEFAULTS frames
+     * cannot wear page 124 because the slot already contains the defaults.
+     *
+     * Consistent with sensor_map_store.c::SensorMapStore_Save.
+     * --------------------------------------------------------------------*/
+    if (pcal_flash_valid &&
+        pcal_stored_min == adc_min &&
+        pcal_stored_max == adc_max) {
+        return true;
+    }
+
+    /* ----------------------------------------------------------------------
+     * Flash-wear guard #2 — minimum write interval.
+     *
+     * Reject successive writes that arrive closer together than
+     * PCAL_WRITE_MIN_INTERVAL_MS (1 s).  Pedal calibration is strictly
+     * user-driven (UI button press); writes faster than 1 Hz can only
+     * come from a bug, replay, or injected traffic.  The first call
+     * (pcal_has_written_once == false) is exempt so a freshly booted
+     * unit can always persist its first calibration.
+     * HAL_GetTick() is monotonic and wraps every ~49.7 days; the
+     * unsigned modular subtraction below is correct across the wrap.
+     * --------------------------------------------------------------------*/
+    uint32_t now = HAL_GetTick();
+    if (pcal_has_written_once &&
+        (uint32_t)(now - pcal_last_write_tick) < PCAL_WRITE_MIN_INTERVAL_MS) {
+        return false;
+    }
+
+    /* Build the slot in RAM.
+     * Aligned to 8 bytes so the (uint64_t *)&slot cast below performs
+     * naturally-aligned doubleword loads (required by ARMv7-M LDRD and
+     * safe for HAL_FLASH_Program's FLASH_TYPEPROGRAM_DOUBLEWORD).
+     * _Alignas is the C11 standard keyword (same as _Static_assert
+     * used elsewhere in this project) — no compiler-specific syntax. */
+    _Alignas(8) pcal_flash_slot_t slot;
     memset(&slot, 0, sizeof(slot));
     slot.magic         = PCAL_MAGIC;
     slot.adc_min       = adc_min;
@@ -204,9 +271,15 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
 
     HAL_FLASH_Lock();
 
-    /* Update RAM state */
-    pcal_flash_valid = true;
-    pcal_stored_min  = adc_min;
-    pcal_stored_max  = adc_max;
+    /* Update RAM state + rate-limit bookkeeping (matches the pattern
+     * in sensor_map_store.c::SensorMapStore_Save).  Refresh the
+     * timestamp to HAL_GetTick() at completion rather than reusing
+     * `now`, so the cool-down window starts from the moment the page
+     * is actually committed (page erase + program ≈ 25 ms).         */
+    pcal_flash_valid      = true;
+    pcal_stored_min       = adc_min;
+    pcal_stored_max       = adc_max;
+    pcal_has_written_once = true;
+    pcal_last_write_tick  = HAL_GetTick();
     return true;
 }

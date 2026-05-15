@@ -578,6 +578,41 @@ uint16_t Pedal_GetRawADC(void)
     return pedal_raw_adc;
 }
 
+/* ---- Fresh-conversion sampler ------------------------------------
+ * Forces a hardware ADC conversion and returns the raw 12-bit count
+ * WITHOUT mutating any pedal pipeline state.
+ *
+ * Rationale:
+ *   pedalcal_sample_stable() (can_handler.c) runs inside
+ *   CAN_ProcessMessages() which executes from the main loop.  While
+ *   it loops with HAL_Delay(50), the 50 ms Pedal_Update() branch
+ *   does NOT run, so pedal_raw_adc stays frozen.  Using
+ *   Pedal_GetRawADC() inside the loop would therefore return the
+ *   same cached value 8 times in a row, defeating the stability
+ *   check.  This helper bypasses the cache by issuing a fresh
+ *   conversion every call.
+ *
+ * Safety invariants preserved (NONE of the following are touched):
+ *   - pedal_raw_adc / pedal_raw_adc2 (Pedal_Update cache)
+ *   - pedal_pct / pedal_pct_raw / pedal_ema / pedal_ema_primed
+ *   - pedal_plausible / pedal_channels_contradict
+ *   - dual-sample tolerance / rate-of-change / FAULT_LO/HI gates
+ *   - runtime calibration endpoints (pedal_adc_min/max)
+ *
+ * Identical Start/Poll/GetValue/Stop sequence as
+ * Pedal_ReadDualSample(), so the HAL ADC state machine is left
+ * in the same well-defined idle state.                              */
+uint16_t Pedal_SampleRawNow(void)
+{
+    uint16_t raw = 0;
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 2) == HAL_OK) {
+        raw = (uint16_t)HAL_ADC_GetValue(&hadc1);
+    }
+    HAL_ADC_Stop(&hadc1);
+    return raw;
+}
+
 /* =========================================================================
  *  INA226 Current Sensors via TCA9548A I2C multiplexer
  * ========================================================================= */

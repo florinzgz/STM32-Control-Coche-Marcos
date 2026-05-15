@@ -65,6 +65,23 @@ float Pedal_GetRawPercent(void);    /* Unfiltered instantaneous 0–100%   */
 void     Pedal_ApplyCalibration(uint16_t adc_min, uint16_t adc_max);
 uint16_t Pedal_GetRawADC(void);
 
+/* ---- Fresh-conversion sampler for calibration stability check ----
+ * Triggers a brand-new ADC conversion and returns the raw 12-bit count.
+ * Unlike Pedal_GetRawADC() (which returns the value cached by the last
+ * Pedal_Update() cycle), this helper forces hardware acquisition every
+ * time it is called.  This is required by the pedal calibration
+ * stability check (can_handler.c::pedalcal_sample_stable) which runs
+ * inside CAN_ProcessMessages() — a context where the main 100 Hz loop
+ * is paused, so the cached value would not refresh between samples.
+ *
+ * Safety: this function does NOT mutate any pedal pipeline state.
+ * It does NOT touch pedal_raw_adc, pedal_raw_adc2, pedal_pct, EMA,
+ * plausibility flags, dual-sample logic, fault thresholds, or rate
+ * limiting.  It is a pure read with side-effects limited to the ADC
+ * peripheral (Start/Poll/GetValue/Stop) — same sequence used inside
+ * Pedal_ReadDualSample(), so HAL state machine remains consistent.   */
+uint16_t Pedal_SampleRawNow(void);
+
 /* ---- DS18B20 Temperature (OneWire) ---- */
 void Temperature_StartConversion(void);
 void Temperature_ReadAll(void);

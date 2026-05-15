@@ -60,6 +60,21 @@ extern "C" {
 #define PEDAL_CAL_DEFAULT_MIN  150U
 #define PEDAL_CAL_DEFAULT_MAX  2413U
 
+/* ---- Defensive coherence checks ----------------------------------
+ * Guarantee at compile time that the compile-time defaults satisfy
+ * the same hard validation that PedalCal_Validate() enforces at
+ * runtime.  Without these, a future tweak of any of the four macros
+ * above could silently make PEDAL_CAL_OP_RESET_DEFAULTS impossible
+ * (PedalCal_Save(150,2413) → Validate(150,2413) → false → ACK_REJECTED)
+ * which would only surface as a runtime failure during service.    */
+_Static_assert(PEDAL_CAL_DEFAULT_MIN >= PEDAL_CAL_MIN_LIMIT,
+               "PEDAL_CAL_DEFAULT_MIN must clear PEDAL_CAL_MIN_LIMIT");
+_Static_assert(PEDAL_CAL_DEFAULT_MAX <= PEDAL_CAL_MAX_LIMIT,
+               "PEDAL_CAL_DEFAULT_MAX must stay below PEDAL_CAL_MAX_LIMIT");
+_Static_assert((PEDAL_CAL_DEFAULT_MAX - PEDAL_CAL_DEFAULT_MIN)
+                   >= PEDAL_CAL_RANGE_MIN,
+               "Default pedal range below PEDAL_CAL_RANGE_MIN");
+
 /**
  * @brief  Initialise the pedal calibration store module.
  *         Reads flash and validates CRC / magic / range.  Does NOT
