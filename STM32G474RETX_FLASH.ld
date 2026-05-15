@@ -183,7 +183,7 @@ SECTIONS
 }
 
 /* ----------------------------------------------------------------------
- * Defence-in-depth: guarantee that the FLASH-resident image (code +
+ * Defense-in-depth: guarantee that the FLASH-resident image (code +
  * rodata + .data init image) never overflows into the NVM region that
  * starts at page 123 (0x0807B000).  The MEMORY region `LENGTH = 492K`
  * above already enforces this, but the explicit ASSERT below produces

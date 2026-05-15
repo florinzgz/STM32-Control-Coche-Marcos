@@ -222,8 +222,10 @@ bool PedalCal_Save(uint16_t adc_min, uint16_t adc_max)
     /* Build the slot in RAM.
      * Aligned to 8 bytes so the (uint64_t *)&slot cast below performs
      * naturally-aligned doubleword loads (required by ARMv7-M LDRD and
-     * safe for HAL_FLASH_Program's FLASH_TYPEPROGRAM_DOUBLEWORD).      */
-    __attribute__((aligned(8))) pcal_flash_slot_t slot;
+     * safe for HAL_FLASH_Program's FLASH_TYPEPROGRAM_DOUBLEWORD).
+     * _Alignas is the C11 standard keyword (same as _Static_assert
+     * used elsewhere in this project) — no compiler-specific syntax. */
+    _Alignas(8) pcal_flash_slot_t slot;
     memset(&slot, 0, sizeof(slot));
     slot.magic         = PCAL_MAGIC;
     slot.adc_min       = adc_min;
