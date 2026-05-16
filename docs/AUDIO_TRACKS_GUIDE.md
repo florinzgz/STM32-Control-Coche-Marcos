@@ -38,9 +38,20 @@ Debes grabarlos tú y copiarlos a la tarjeta SD del DFPlayer Mini.
 2. Seleccionar idioma: **Español (España)**
 3. Elegir una voz clara e infantil o amable
 4. Copiar el texto de la columna **"Texto Sugerido"** de las tablas de abajo
-5. Clic en **"Start to Convert"**
-6. Descargar el MP3
-7. Renombrar el archivo a `XXXX.mp3` (ejemplo: `0001.mp3`, `0039.mp3`)
+5. Configurar las opciones de exportación exactamente así:
+
+| Opción en TTSMaker | ✅ Valor correcto | ❌ Evitar |
+|---|---|---|
+| **Formato** | **MP3** | WAV (el DFPlayer usa `0001.mp3`…`0068.mp3`) |
+| **MP3 Audio Quality** | **Standard (128 kbps)** | High Quality (large size, slow sync) |
+| **Voice Speed** | **1.0x (Default)** | — |
+| **Voice Volume** | **100% (Default)** | — |
+| **Pitch Adjustment** | **Default (normal pitch)** | — |
+| **Pause per paragraph** | **0 ms** (mínimo disponible) | Default 300 ms (añade silencio al final) |
+
+6. Clic en **"Start to Convert"**
+7. Descargar el MP3
+8. Renombrar el archivo a `XXXX.mp3` (ejemplo: `0001.mp3`, `0039.mp3`)
 
 **Ejemplos para copiar y pegar:**
 
