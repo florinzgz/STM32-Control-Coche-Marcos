@@ -78,183 +78,183 @@ SD Card (FAT32)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0001 | `0001.mp3` | `WELCOME` | "Bienvenido Marcos. El sistema está listo para comenzar." |
-| 0002 | `0002.mp3` | `FAREWELL` | "Cerrando sistemas. Hasta pronto." |
-| 0003 | `0003.mp3` | `ERROR_GENERAL` | "Atención. Se ha detectado un error general." |
+| 0001 | `0001.mp3` | `WELCOME` | "¡Hola Marcos, piloto estrella! Tu coche está listo para la aventura." |
+| 0002 | `0002.mp3` | `FAREWELL` | "Misión cumplida, Marcos. Guardamos el coche y descansamos." |
+| 0003 | `0003.mp3` | `ERROR_GENERAL` | "Ups, algo no va bien. Vamos a revisarlo juntos, campeón." |
 
 ### Calibración de Pedal (Tracks 4-5)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0004 | `0004.mp3` | `PEDAL_OK` | "Calibración del pedal completada correctamente." |
-| 0005 | `0005.mp3` | `PEDAL_ERROR` | "Error en el sensor del pedal. Revise la conexión." |
+| 0004 | `0004.mp3` | `PEDAL_OK` | "¡Genial! Pedal calibrado y listo para jugar en modo seguro." |
+| 0005 | `0005.mp3` | `PEDAL_ERROR` | "El pedal necesita ayuda. Revisemos la conexión con calma." |
 
 ### Sensores de Corriente (Tracks 6-7)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0006 | `0006.mp3` | `INA_OK` | "Calibración de sensores de corriente finalizada." |
-| 0007 | `0007.mp3` | `INA_ERROR` | "Error en sensores de corriente o shunt desconectado." |
+| 0006 | `0006.mp3` | `INA_OK` | "Sensores de energía listos. ¡Equipo preparado!" |
+| 0007 | `0007.mp3` | `INA_ERROR` | "No leo bien la energía. Comprobemos sensores y cables." |
 
 ### Encoder de Dirección (Tracks 8-9)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0008 | `0008.mp3` | `ENCODER_OK` | "Encoder sincronizado correctamente." |
-| 0009 | `0009.mp3` | `ENCODER_ERROR` | "Error en el sensor de dirección. Compruebe el encoder." |
+| 0008 | `0008.mp3` | `ENCODER_OK` | "Volante sincronizado. ¡Dirección perfecta, piloto!" |
+| 0009 | `0009.mp3` | `ENCODER_ERROR` | "La dirección está confundida. Revisemos el encoder." |
 
 ### Temperatura (Tracks 10-11)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0010 | `0010.mp3` | `TEMP_HIGH` | "Temperatura del motor elevada. Reduzca la velocidad." |
-| 0011 | `0011.mp3` | `TEMP_NORMAL` | "Temperatura del motor normalizada." |
+| 0010 | `0010.mp3` | `TEMP_HIGH` | "Motor calentito. Bajamos ritmo para cuidarlo." |
+| 0011 | `0011.mp3` | `TEMP_NORMAL` | "¡Perfecto! Temperatura del motor en zona segura." |
 
 ### Batería (Tracks 12-13)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0012 | `0012.mp3` | `BATTERY_LOW` | "Nivel de batería bajo. Conecte el cargador, por favor." |
-| 0013 | `0013.mp3` | `BATTERY_CRITICAL` | "Advertencia. Batería en nivel crítico. Desconectando tracción." |
+| 0012 | `0012.mp3` | `BATTERY_LOW` | "Batería bajita. Hora de recargar para seguir jugando." |
+| 0013 | `0013.mp3` | `BATTERY_CRITICAL` | "Batería súper baja. Paramos tracción para proteger el coche." |
 
 ### Freno de Estacionamiento (Tracks 14-15)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0014 | `0014.mp3` | `PARKING_BRAKE_ON` | "Freno de estacionamiento activado." |
-| 0015 | `0015.mp3` | `PARKING_BRAKE_OFF` | "Freno de estacionamiento desactivado." |
+| 0014 | `0014.mp3` | `PARKING_BRAKE_ON` | "Freno puesto. Coche quieto y seguro." |
+| 0015 | `0015.mp3` | `PARKING_BRAKE_OFF` | "Freno liberado. Listos para movernos con cuidado." |
 
 ### Luces (Tracks 16-17)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0016 | `0016.mp3` | `LIGHTS_ON` | "Luces encendidas." |
-| 0017 | `0017.mp3` | `LIGHTS_OFF` | "Luces apagadas." |
+| 0016 | `0016.mp3` | `LIGHTS_ON` | "Luces encendidas. ¡Brilla, mini piloto!" |
+| 0017 | `0017.mp3` | `LIGHTS_OFF` | "Luces apagadas. Ahorro de energía activado." |
 
 ### Radio/Multimedia (Tracks 18-19)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0018 | `0018.mp3` | `RADIO_ON` | "Sistema multimedia activado." |
-| 0019 | `0019.mp3` | `RADIO_OFF` | "Sistema multimedia desactivado." |
+| 0018 | `0018.mp3` | `RADIO_ON` | "Multimedia encendida. ¡Que empiece la diversión!" |
+| 0019 | `0019.mp3` | `RADIO_OFF` | "Multimedia apagada. Nos centramos en conducir." |
 
 ### Marchas (Tracks 20-24)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0020 | `0020.mp3` | `GEAR_D1` | "Marcha D uno activada." |
-| 0021 | `0021.mp3` | `GEAR_D2` | "Marcha D dos activada." |
-| 0022 | `0022.mp3` | `GEAR_REVERSE` | "Marcha atrás activada." |
-| 0023 | `0023.mp3` | `GEAR_NEUTRAL` | "Punto muerto." |
-| 0024 | `0024.mp3` | `GEAR_PARK` | "Vehículo en posición de estacionamiento." |
+| 0020 | `0020.mp3` | `GEAR_D1` | "Marcha D1 activada. Salida suave de campeón." |
+| 0021 | `0021.mp3` | `GEAR_D2` | "Marcha D2 activada. Un poquito más de alegría." |
+| 0022 | `0022.mp3` | `GEAR_REVERSE` | "Marcha atrás activada. Miramos bien y vamos despacio." |
+| 0023 | `0023.mp3` | `GEAR_NEUTRAL` | "Punto muerto activado. Coche relajado." |
+| 0024 | `0024.mp3` | `GEAR_PARK` | "Modo parking activado. Coche aparcado con seguridad." |
 
 ### Menú Oculto y Calibración (Tracks 25-28)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0025 | `0025.mp3` | `MENU_HIDDEN` | "Menú de calibración avanzado activado." |
-| 0026 | `0026.mp3` | `CAL_PEDAL` | "Iniciando calibración del pedal. Presione lentamente hasta el fondo." |
-| 0027 | `0027.mp3` | `CAL_INA` | "Calibrando sensores de corriente. Espere unos segundos." |
-| 0028 | `0028.mp3` | `CAL_ENCODER` | "Calibrando el punto central del volante. Manténgalo recto." |
+| 0025 | `0025.mp3` | `MENU_HIDDEN` | "Menú secreto abierto. ¡Modo ingeniero Marcos!" |
+| 0026 | `0026.mp3` | `CAL_PEDAL` | "Empezamos calibración de pedal. Pisa suave hasta el final." |
+| 0027 | `0027.mp3` | `CAL_INA` | "Calibrando energía. Espera un poquito, casi está." |
+| 0028 | `0028.mp3` | `CAL_ENCODER` | "Buscando centro del volante. Déjalo rectito, por favor." |
 
 ### Test del Sistema (Tracks 29-30)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0029 | `0029.mp3` | `TEST_SYSTEM` | "Iniciando comprobación completa del sistema." |
-| 0030 | `0030.mp3` | `TEST_OK` | "Comprobación finalizada. Todos los módulos operativos." |
+| 0029 | `0029.mp3` | `TEST_SYSTEM` | "Comienza revisión total. ¡Chequeo de súper coche!" |
+| 0030 | `0030.mp3` | `TEST_OK` | "¡Todo correcto! Sistemas listos para rodar." |
 
 ### Emergencia y Seguridad (Tracks 31-32)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0031 | `0031.mp3` | `EMERGENCY` | "Modo de emergencia activado. Motor deshabilitado." |
-| 0032 | `0032.mp3` | `SAFETY_RESET` | "Reinicio de seguridad completado." |
+| 0031 | `0031.mp3` | `EMERGENCY` | "Modo emergencia activado. Motor parado para protegerte." |
+| 0032 | `0032.mp3` | `SAFETY_RESET` | "Seguridad reiniciada. Volvemos al control." |
 
 ### Errores de Sensores Específicos (Tracks 33-35)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0033 | `0033.mp3` | `SENSOR_TEMP_ERROR` | "Error en sensor de temperatura." |
-| 0034 | `0034.mp3` | `SENSOR_CURRENT_ERROR` | "Anomalía en lectura de corriente." |
-| 0035 | `0035.mp3` | `SENSOR_SPEED_ERROR` | "Sin señal de velocidad. Revise sensores de rueda." |
+| 0033 | `0033.mp3` | `SENSOR_TEMP_ERROR` | "El sensor de temperatura no responde. Hay que revisarlo." |
+| 0034 | `0034.mp3` | `SENSOR_CURRENT_ERROR` | "Lectura de corriente rara. Revisemos el sistema." |
+| 0035 | `0035.mp3` | `SENSOR_SPEED_ERROR` | "No veo velocidad. Comprobemos sensores de rueda." |
 
 ### Estado de Módulos (Track 36)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0036 | `0036.mp3` | `MODULE_OK` | "Módulo verificado correctamente." |
+| 0036 | `0036.mp3` | `MODULE_OK` | "Módulo comprobado. ¡Funciona perfecto!" |
 
 ### Tracción 4x4/4x2 (Tracks 37-38)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0037 | `0037.mp3` | `TRACTION_4X4` | "Tracción 4x4 inteligente activada." |
-| 0038 | `0038.mp3` | `TRACTION_4X2` | "Tracción 4x2 inteligente activada." |
+| 0037 | `0037.mp3` | `TRACTION_4X4` | "Tracción 4x4 activada. Máximo agarre para la aventura." |
+| 0038 | `0038.mp3` | `TRACTION_4X2` | "Tracción 4x2 activada. Conducción suave y eficiente." |
 
 ### Sistemas de Seguridad Avanzados (Tracks 39-44)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0039 | `0039.mp3` | `ABS_ON` | "Sistema antibloqueo de frenos activado." |
-| 0040 | `0040.mp3` | `ABS_OFF` | "Sistema antibloqueo de frenos desactivado." |
-| 0041 | `0041.mp3` | `TCS_ON` | "Control de tracción activado." |
-| 0042 | `0042.mp3` | `TCS_OFF` | "Control de tracción desactivado." |
-| 0043 | `0043.mp3` | `REGEN_ON` | "Frenado regenerativo activado." |
-| 0044 | `0044.mp3` | `REGEN_OFF` | "Frenado regenerativo desactivado." |
+| 0039 | `0039.mp3` | `ABS_ON` | "ABS activado. Frenadas más seguras." |
+| 0040 | `0040.mp3` | `ABS_OFF` | "ABS desactivado. Conduce con extra cuidado." |
+| 0041 | `0041.mp3` | `TCS_ON` | "Control de tracción activado. Ruedas bajo control." |
+| 0042 | `0042.mp3` | `TCS_OFF` | "Control de tracción desactivado. Suavidad al acelerar." |
+| 0043 | `0043.mp3` | `REGEN_ON` | "Regeneración activada. ¡Recuperamos energía!" |
+| 0044 | `0044.mp3` | `REGEN_OFF` | "Regeneración desactivada." |
 
 ### WiFi y Conectividad (Tracks 45-48) — Reservado
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0045 | `0045.mp3` | `WIFI_CONNECTED` | "Conexión WiFi establecida." |
-| 0046 | `0046.mp3` | `WIFI_DISCONNECTED` | "Conexión WiFi perdida." |
-| 0047 | `0047.mp3` | `OTA_STARTED` | "Actualización remota iniciada. No desconecte el vehículo." |
-| 0048 | `0048.mp3` | `OTA_COMPLETED` | "Actualización completada. Reiniciando sistema." |
+| 0045 | `0045.mp3` | `WIFI_CONNECTED` | "WiFi conectado. ¡Listos para comunicar!" |
+| 0046 | `0046.mp3` | `WIFI_DISCONNECTED` | "WiFi desconectado. Seguimos en modo local." |
+| 0047 | `0047.mp3` | `OTA_STARTED` | "Actualización iniciada. No apagues el coche, por favor." |
+| 0048 | `0048.mp3` | `OTA_COMPLETED` | "Actualización completada. Reiniciando para seguir." |
 
 ### Bluetooth (Tracks 49-51) — Reservado
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0049 | `0049.mp3` | `BT_CONNECTED` | "Mando Bluetooth conectado." |
+| 0049 | `0049.mp3` | `BT_CONNECTED` | "Mando Bluetooth conectado. ¡A jugar!" |
 | 0050 | `0050.mp3` | `BT_DISCONNECTED` | "Mando Bluetooth desconectado." |
-| 0051 | `0051.mp3` | `BT_PAIRING` | "Buscando mando Bluetooth. Mantenga pulsado el botón de emparejamiento." |
+| 0051 | `0051.mp3` | `BT_PAIRING` | "Buscando mando Bluetooth. Mantén pulsado emparejar." |
 
 ### Estados del Vehículo (Tracks 52-56)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0052 | `0052.mp3` | `MAX_SPEED` | "Velocidad máxima alcanzada." |
-| 0053 | `0053.mp3` | `OVERCURRENT` | "Advertencia. Corriente excesiva detectada." |
-| 0054 | `0054.mp3` | `OBSTACLE_WARN` | "Atención. Obstáculo detectado." |
-| 0055 | `0055.mp3` | `PARKING_ASSIST` | "Modo asistencia de estacionamiento activado." |
-| 0056 | `0056.mp3` | `SOFT_START` | "Iniciando arranque suave de motores." |
+| 0052 | `0052.mp3` | `MAX_SPEED` | "Velocidad máxima alcanzada. ¡Muy bien, piloto!" |
+| 0053 | `0053.mp3` | `OVERCURRENT` | "Corriente alta detectada. Bajamos fuerza para cuidar el sistema." |
+| 0054 | `0054.mp3` | `OBSTACLE_WARN` | "¡Cuidado! Obstáculo delante. Frenamos suave." |
+| 0055 | `0055.mp3` | `PARKING_ASSIST` | "Asistente de parking activado. Te ayudo a aparcar." |
+| 0056 | `0056.mp3` | `SOFT_START` | "Arranque suave activado. Salida tranquila." |
 
 ### Información de Telemetría (Tracks 57-60)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0057 | `0057.mp3` | `BATTERY_50` | "Nivel de batería al 50 por ciento." |
-| 0058 | `0058.mp3` | `BATTERY_25` | "Nivel de batería al 25 por ciento. Considere recargar." |
-| 0059 | `0059.mp3` | `DISTANCE_1KM` | "Ha recorrido un kilómetro en esta sesión." |
-| 0060 | `0060.mp3` | `ENERGY_SAVE` | "Modo ahorro de energía activado." |
+| 0057 | `0057.mp3` | `BATTERY_50` | "Batería al 50%. ¡Vamos muy bien!" |
+| 0058 | `0058.mp3` | `BATTERY_25` | "Batería al 25%. Mejor recargar pronto." |
+| 0059 | `0059.mp3` | `DISTANCE_1KM` | "¡Ya hiciste 1 kilómetro, Marcos!" |
+| 0060 | `0060.mp3` | `ENERGY_SAVE` | "Modo ahorro activado. Cuidamos la batería." |
 
 ### Modos de Conducción (Tracks 61-63)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0061 | `0061.mp3` | `MODE_ECO` | "Modo eco activado. Máxima eficiencia." |
-| 0062 | `0062.mp3` | `MODE_NORMAL` | "Modo normal activado." |
-| 0063 | `0063.mp3` | `MODE_SPORT` | "Modo deportivo activado. Máxima potencia." |
+| 0061 | `0061.mp3` | `MODE_ECO` | "Modo Eco activado. Conducción suave y eficiente." |
+| 0062 | `0062.mp3` | `MODE_NORMAL` | "Modo Normal activado. Equilibrio perfecto." |
+| 0063 | `0063.mp3` | `MODE_SPORT` | "Modo Sport activado. Respuesta más rápida, siempre con control." |
 
 ### Feedback de Configuración (Tracks 64-68)
 
 | Track | Archivo | Constante Firmware | Texto Sugerido |
 |-------|---------|-------------------|----------------|
-| 0064 | `0064.mp3` | `CONFIG_SAVED` | "Configuración guardada correctamente." |
-| 0065 | `0065.mp3` | `CONFIG_RESTORED` | "Configuración de fábrica restaurada." |
-| 0066 | `0066.mp3` | `ERRORS_CLEARED` | "Registro de errores borrado." |
-| 0067 | `0067.mp3` | `REGEN_ADJUSTED` | "Nivel de regeneración ajustado." |
+| 0064 | `0064.mp3` | `CONFIG_SAVED` | "Configuración guardada. ¡Buen trabajo, ingeniero!" |
+| 0065 | `0065.mp3` | `CONFIG_RESTORED` | "Ajustes de fábrica restaurados." |
+| 0066 | `0066.mp3` | `ERRORS_CLEARED` | "Registro de errores limpio." |
+| 0067 | `0067.mp3` | `REGEN_ADJUSTED` | "Nivel de regeneración actualizado." |
 | 0068 | `0068.mp3` | `BEEP` | *(Sonido corto de confirmación — buscar "beep sound" en YouTube o generar un tono de 800 Hz, 200 ms)* |
 
 ---
@@ -297,7 +297,7 @@ Cada sonido tiene un cooldown individual de 4 segundos. Si el mismo sonido inten
 - **HIGH** (2): Errores, emergencia, bienvenida, despedida — siempre se reproducen
 
 ### Colapso de errores múltiples
-Si más de 1 error/aviso se produce en una ventana de 2 segundos, el sistema reproduce automáticamente `0003.mp3` (ERROR_GENERAL: "Atención. Se ha detectado un error general.") en lugar de apilar avisos individuales. Esto evita un bombardeo de mensajes consecutivos que serían confusos.
+Si más de 1 error/aviso se produce en una ventana de 2 segundos, el sistema reproduce automáticamente `0003.mp3` (ERROR_GENERAL: "Ups, algo no va bien. Vamos a revisarlo juntos, campeón.") en lugar de apilar avisos individuales. Esto evita un bombardeo de mensajes consecutivos que serían confusos.
 
 ---
 
@@ -307,73 +307,73 @@ Si más de 1 error/aviso se produce en una ventana de 2 segundos, el sistema rep
 from gtts import gTTS
 
 textos = {
-    "0001": "Bienvenido Marcos. El sistema está listo para comenzar.",
-    "0002": "Cerrando sistemas. Hasta pronto.",
-    "0003": "Atención. Se ha detectado un error general.",
-    "0004": "Calibración del pedal completada correctamente.",
-    "0005": "Error en el sensor del pedal. Revise la conexión.",
-    "0006": "Calibración de sensores de corriente finalizada.",
-    "0007": "Error en sensores de corriente o shunt desconectado.",
-    "0008": "Encoder sincronizado correctamente.",
-    "0009": "Error en el sensor de dirección. Compruebe el encoder.",
-    "0010": "Temperatura del motor elevada. Reduzca la velocidad.",
-    "0011": "Temperatura del motor normalizada.",
-    "0012": "Nivel de batería bajo. Conecte el cargador, por favor.",
-    "0013": "Advertencia. Batería en nivel crítico. Desconectando tracción.",
-    "0014": "Freno de estacionamiento activado.",
-    "0015": "Freno de estacionamiento desactivado.",
-    "0016": "Luces encendidas.",
-    "0017": "Luces apagadas.",
-    "0018": "Sistema multimedia activado.",
-    "0019": "Sistema multimedia desactivado.",
-    "0020": "Marcha D uno activada.",
-    "0021": "Marcha D dos activada.",
-    "0022": "Marcha atrás activada.",
-    "0023": "Punto muerto.",
-    "0024": "Vehículo en posición de estacionamiento.",
-    "0025": "Menú de calibración avanzado activado.",
-    "0026": "Iniciando calibración del pedal. Presione lentamente hasta el fondo.",
-    "0027": "Calibrando sensores de corriente. Espere unos segundos.",
-    "0028": "Calibrando el punto central del volante. Manténgalo recto.",
-    "0029": "Iniciando comprobación completa del sistema.",
-    "0030": "Comprobación finalizada. Todos los módulos operativos.",
-    "0031": "Modo de emergencia activado. Motor deshabilitado.",
-    "0032": "Reinicio de seguridad completado.",
-    "0033": "Error en sensor de temperatura.",
-    "0034": "Anomalía en lectura de corriente.",
-    "0035": "Sin señal de velocidad. Revise sensores de rueda.",
-    "0036": "Módulo verificado correctamente.",
-    "0037": "Tracción 4x4 inteligente activada.",
-    "0038": "Tracción 4x2 inteligente activada.",
-    "0039": "Sistema antibloqueo de frenos activado.",
-    "0040": "Sistema antibloqueo de frenos desactivado.",
-    "0041": "Control de tracción activado.",
-    "0042": "Control de tracción desactivado.",
-    "0043": "Frenado regenerativo activado.",
-    "0044": "Frenado regenerativo desactivado.",
-    "0045": "Conexión WiFi establecida.",
-    "0046": "Conexión WiFi perdida.",
-    "0047": "Actualización remota iniciada. No desconecte el vehículo.",
-    "0048": "Actualización completada. Reiniciando sistema.",
-    "0049": "Mando Bluetooth conectado.",
+    "0001": "¡Hola Marcos, piloto estrella! Tu coche está listo para la aventura.",
+    "0002": "Misión cumplida, Marcos. Guardamos el coche y descansamos.",
+    "0003": "Ups, algo no va bien. Vamos a revisarlo juntos, campeón.",
+    "0004": "¡Genial! Pedal calibrado y listo para jugar en modo seguro.",
+    "0005": "El pedal necesita ayuda. Revisemos la conexión con calma.",
+    "0006": "Sensores de energía listos. ¡Equipo preparado!",
+    "0007": "No leo bien la energía. Comprobemos sensores y cables.",
+    "0008": "Volante sincronizado. ¡Dirección perfecta, piloto!",
+    "0009": "La dirección está confundida. Revisemos el encoder.",
+    "0010": "Motor calentito. Bajamos ritmo para cuidarlo.",
+    "0011": "¡Perfecto! Temperatura del motor en zona segura.",
+    "0012": "Batería bajita. Hora de recargar para seguir jugando.",
+    "0013": "Batería súper baja. Paramos tracción para proteger el coche.",
+    "0014": "Freno puesto. Coche quieto y seguro.",
+    "0015": "Freno liberado. Listos para movernos con cuidado.",
+    "0016": "Luces encendidas. ¡Brilla, mini piloto!",
+    "0017": "Luces apagadas. Ahorro de energía activado.",
+    "0018": "Multimedia encendida. ¡Que empiece la diversión!",
+    "0019": "Multimedia apagada. Nos centramos en conducir.",
+    "0020": "Marcha D1 activada. Salida suave de campeón.",
+    "0021": "Marcha D2 activada. Un poquito más de alegría.",
+    "0022": "Marcha atrás activada. Miramos bien y vamos despacio.",
+    "0023": "Punto muerto activado. Coche relajado.",
+    "0024": "Modo parking activado. Coche aparcado con seguridad.",
+    "0025": "Menú secreto abierto. ¡Modo ingeniero Marcos!",
+    "0026": "Empezamos calibración de pedal. Pisa suave hasta el final.",
+    "0027": "Calibrando energía. Espera un poquito, casi está.",
+    "0028": "Buscando centro del volante. Déjalo rectito, por favor.",
+    "0029": "Comienza revisión total. ¡Chequeo de súper coche!",
+    "0030": "¡Todo correcto! Sistemas listos para rodar.",
+    "0031": "Modo emergencia activado. Motor parado para protegerte.",
+    "0032": "Seguridad reiniciada. Volvemos al control.",
+    "0033": "El sensor de temperatura no responde. Hay que revisarlo.",
+    "0034": "Lectura de corriente rara. Revisemos el sistema.",
+    "0035": "No veo velocidad. Comprobemos sensores de rueda.",
+    "0036": "Módulo comprobado. ¡Funciona perfecto!",
+    "0037": "Tracción 4x4 activada. Máximo agarre para la aventura.",
+    "0038": "Tracción 4x2 activada. Conducción suave y eficiente.",
+    "0039": "ABS activado. Frenadas más seguras.",
+    "0040": "ABS desactivado. Conduce con extra cuidado.",
+    "0041": "Control de tracción activado. Ruedas bajo control.",
+    "0042": "Control de tracción desactivado. Suavidad al acelerar.",
+    "0043": "Regeneración activada. ¡Recuperamos energía!",
+    "0044": "Regeneración desactivada.",
+    "0045": "WiFi conectado. ¡Listos para comunicar!",
+    "0046": "WiFi desconectado. Seguimos en modo local.",
+    "0047": "Actualización iniciada. No apagues el coche, por favor.",
+    "0048": "Actualización completada. Reiniciando para seguir.",
+    "0049": "Mando Bluetooth conectado. ¡A jugar!",
     "0050": "Mando Bluetooth desconectado.",
-    "0051": "Buscando mando Bluetooth. Mantenga pulsado el botón de emparejamiento.",
-    "0052": "Velocidad máxima alcanzada.",
-    "0053": "Advertencia. Corriente excesiva detectada.",
-    "0054": "Atención. Obstáculo detectado.",
-    "0055": "Modo asistencia de estacionamiento activado.",
-    "0056": "Iniciando arranque suave de motores.",
-    "0057": "Nivel de batería al 50 por ciento.",
-    "0058": "Nivel de batería al 25 por ciento. Considere recargar.",
-    "0059": "Ha recorrido un kilómetro en esta sesión.",
-    "0060": "Modo ahorro de energía activado.",
-    "0061": "Modo eco activado. Máxima eficiencia.",
-    "0062": "Modo normal activado.",
-    "0063": "Modo deportivo activado. Máxima potencia.",
-    "0064": "Configuración guardada correctamente.",
-    "0065": "Configuración de fábrica restaurada.",
-    "0066": "Registro de errores borrado.",
-    "0067": "Nivel de regeneración ajustado.",
+    "0051": "Buscando mando Bluetooth. Mantén pulsado emparejar.",
+    "0052": "Velocidad máxima alcanzada. ¡Muy bien, piloto!",
+    "0053": "Corriente alta detectada. Bajamos fuerza para cuidar el sistema.",
+    "0054": "¡Cuidado! Obstáculo delante. Frenamos suave.",
+    "0055": "Asistente de parking activado. Te ayudo a aparcar.",
+    "0056": "Arranque suave activado. Salida tranquila.",
+    "0057": "Batería al 50%. ¡Vamos muy bien!",
+    "0058": "Batería al 25%. Mejor recargar pronto.",
+    "0059": "¡Ya hiciste 1 kilómetro, Marcos!",
+    "0060": "Modo ahorro activado. Cuidamos la batería.",
+    "0061": "Modo Eco activado. Conducción suave y eficiente.",
+    "0062": "Modo Normal activado. Equilibrio perfecto.",
+    "0063": "Modo Sport activado. Respuesta más rápida, siempre con control.",
+    "0064": "Configuración guardada. ¡Buen trabajo, ingeniero!",
+    "0065": "Ajustes de fábrica restaurados.",
+    "0066": "Registro de errores limpio.",
+    "0067": "Nivel de regeneración actualizado.",
     # 0068 es un beep - descargar de internet
 }
 
