@@ -16,16 +16,50 @@ Debes grabarlos tú y copiarlos a la tarjeta SD del DFPlayer Mini.
 
 ### 1. Grabar los audios
 
-**Opción A — TTSMaker (RECOMENDADO, gratis):**
+#### Recomendación rápida
+
+- **Mejor opción general:** **[TTSMaker](https://ttsmaker.com/)** → gratis, rápido y suficiente para todo el proyecto.
+- **Mejor calidad de voz:** **[ElevenLabs](https://elevenlabs.io/)** → suele sonar más natural, pero normalmente requiere cuenta o plan de pago.
+- **Mejor opción si quieres una voz humana real:** grabar con micrófono en una sala silenciosa y editar después con **Audacity**.
+
+#### Opciones para grabar las frases
+
+| Opción | Sitio / herramienta | Cuándo usarla | Ventajas | Inconvenientes |
+|---|---|---|---|---|
+| A | **[TTSMaker](https://ttsmaker.com/)** | Si quieres hacerlo rápido y gratis | Fácil, online, sin complicarte | Voz menos natural que opciones premium |
+| B | **[ElevenLabs](https://elevenlabs.io/)** | Si buscas la mejor calidad | Voz muy natural, buena entonación | Puede requerir pago |
+| C | **[Narakeet](https://www.narakeet.com/)** o **[PlayHT](https://play.ht/)** | Si quieres comparar varias voces | Buenas voces y exportación simple | Menos directo que TTSMaker |
+| D | **Script Python con gTTS** | Si quieres generar muchos audios de golpe | Automatizable, repetible | Voz bastante robótica |
+| E | **Micrófono + Audacity** | Si prefieres voz humana personalizada | Resultado muy personal | Requiere más tiempo y edición |
+
+#### Opción A — TTSMaker (recomendada)
 
 1. Ir a **[ttsmaker.com](https://ttsmaker.com/)**
 2. Seleccionar idioma: **Español (España)**
-3. Copiar el texto de la columna "Texto Sugerido" de las tablas de abajo
-4. Clic en **"Start to Convert"**
-5. Descargar el MP3
-6. Renombrar el archivo a `XXXX.mp3` (ejemplo: `0001.mp3`, `0039.mp3`)
+3. Elegir una voz clara e infantil o amable
+4. Copiar el texto de la columna **"Texto Sugerido"** de las tablas de abajo
+5. Clic en **"Start to Convert"**
+6. Descargar el MP3
+7. Renombrar el archivo a `XXXX.mp3` (ejemplo: `0001.mp3`, `0039.mp3`)
 
-**Opción B — Script Python con gTTS (automatizado):**
+**Ejemplos para copiar y pegar:**
+
+- `0001.mp3` → **"¡Hola Marcos, piloto estrella! Tu coche está listo para la aventura."**
+- `0014.mp3` → **"Freno puesto. Coche quieto y seguro."**
+- `0031.mp3` → **"Modo emergencia activado. Motor parado para protegerte."**
+
+#### Opción B — ElevenLabs (mejor calidad)
+
+1. Ir a **[elevenlabs.io](https://elevenlabs.io/)**
+2. Elegir una voz en español o una voz neutra clara
+3. Pegar una frase de la tabla
+4. Generar el audio
+5. Descargarlo en MP3
+6. Renombrarlo con el número de track correspondiente
+
+**Consejo:** úsalo para las frases más importantes (`0001`, `0002`, `0031`, `0054`) si quieres que el sistema suene más profesional.
+
+#### Opción C — Script Python con gTTS (automatizado)
 
 ```bash
 pip install gTTS
@@ -34,12 +68,35 @@ python3 generar_audios.py
 
 El script Python completo se encuentra al final de este documento.
 
-**Opción C — Grabación con micrófono:**
+#### Opción D — Grabación con micrófono
 
 - Usar micrófono de buena calidad
-- Grabar en ambiente silencioso
+- Grabar en ambiente silencioso, con cortinas o material blando alrededor
+- Hablar a unos **10–15 cm** del micrófono
 - Exportar a MP3: **mono, 128 kbps, 22050 Hz**
 - Normalizar volumen entre archivos
+- Recortar silencios al inicio y al final
+
+#### Mejor sitio para grabar las frases
+
+Si vas a usar **voz humana real**, el mejor sitio es:
+
+- **una habitación pequeña, silenciosa y con poca reverberación**
+- con **cortinas, sofá, colchón, ropa o paneles blandos**
+- lejos de calle, ventiladores, aire acondicionado y eco
+
+**Ejemplos de buen sitio:**
+
+- un dormitorio con cortinas y cama
+- un armario vestidor con ropa alrededor
+- una oficina pequeña con alfombra y puerta cerrada
+
+**Evitar:**
+
+- cocina
+- garaje vacío
+- salón grande con paredes desnudas
+- grabar al aire libre con viento
 
 ### 2. Preparar la tarjeta SD
 
