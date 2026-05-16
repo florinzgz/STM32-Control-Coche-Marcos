@@ -129,6 +129,52 @@ SD Card (FAT32)
 
 ---
 
+## ✅ Pistas que SÍ usa el firmware ahora (generar primero)
+
+Revisado directamente contra firmware:
+
+- `esp32/src/main.cpp` (llamadas reales a `audio::play(...)`)
+- `esp32/src/audio_manager.h` (mapeo oficial `Sound -> track`)
+
+Si quieres ir a lo seguro y **no generar de más**, empieza por estas pistas:
+
+| Track | Archivo | Constante Firmware | Cuándo suena (resumen real) | Texto divertido para Marcos |
+|---|---|---|---|---|
+| 0001 | `0001.mp3` | `WELCOME` | Arranque del sistema | "¡Hola Marcos, piloto estrella! Tu coche está listo para la aventura." |
+| 0002 | `0002.mp3` | `FAREWELL` | Apagado del sistema | "Misión cumplida, Marcos. Guardamos el coche y descansamos." |
+| 0003 | `0003.mp3` | `ERROR_GENERAL` | DEGRADED/LIMP_HOME y fallos genéricos | "Ups, algo no va bien. Vamos a revisarlo juntos, campeón." |
+| 0009 | `0009.mp3` | `ENCODER_ERROR` | Error de centrado/dirección (`CENTERING`) | "La dirección está confundida. Revisemos el encoder." |
+| 0010 | `0010.mp3` | `TEMP_HIGH` | Temperatura alta | "Motor calentito. Bajamos ritmo para cuidarlo." |
+| 0011 | `0011.mp3` | `TEMP_NORMAL` | Temperatura vuelve a normal | "¡Perfecto! Temperatura del motor en zona segura." |
+| 0012 | `0012.mp3` | `BATTERY_LOW` | Batería baja o `BATTERY_OV_WARN` | "Batería bajita. Hora de recargar para seguir jugando." |
+| 0013 | `0013.mp3` | `BATTERY_CRITICAL` | Batería crítica o `BATTERY_OV_CRIT` | "Batería súper baja. Paramos tracción para proteger el coche." |
+| 0016 | `0016.mp3` | `LIGHTS_ON` | Luces ON (touch o eco CAN) | "Luces encendidas. ¡Brilla, mini piloto!" |
+| 0017 | `0017.mp3` | `LIGHTS_OFF` | Luces OFF (touch o eco CAN) | "Luces apagadas. Ahorro de energía activado." |
+| 0020 | `0020.mp3` | `GEAR_D1` | Cambio a D1 | "Marcha D1 activada. Salida suave de campeón." |
+| 0021 | `0021.mp3` | `GEAR_D2` | Cambio a D2 | "Marcha D2 activada. Un poquito más de alegría." |
+| 0022 | `0022.mp3` | `GEAR_REVERSE` | Cambio a R | "Marcha atrás activada. Miramos bien y vamos despacio." |
+| 0023 | `0023.mp3` | `GEAR_NEUTRAL` | Cambio a N | "Punto muerto activado. Coche relajado." |
+| 0024 | `0024.mp3` | `GEAR_PARK` | Cambio a P | "Modo parking activado. Coche aparcado con seguridad." |
+| 0029 | `0029.mp3` | `TEST_SYSTEM` | Recordatorio de mantenimiento | "Comienza revisión total. ¡Chequeo de súper coche!" |
+| 0031 | `0031.mp3` | `EMERGENCY` | SAFE/ERROR | "Modo emergencia activado. Motor parado para protegerte." |
+| 0032 | `0032.mp3` | `SAFETY_RESET` | Recuperación SAFE/ERROR -> ACTIVE | "Seguridad reiniciada. Volvemos al control." |
+| 0033 | `0033.mp3` | `SENSOR_TEMP_ERROR` | `OVERTEMP` como error de sensor | "El sensor de temperatura no responde. Hay que revisarlo." |
+| 0034 | `0034.mp3` | `SENSOR_CURRENT_ERROR` | `I2C_FAILURE` | "Lectura de corriente rara. Revisemos el sistema." |
+| 0035 | `0035.mp3` | `SENSOR_SPEED_ERROR` | `SENSOR_FAULT` | "No veo velocidad. Comprobemos sensores de rueda." |
+| 0037 | `0037.mp3` | `TRACTION_4X4` | Cambio modo tracción 4x4 | "Tracción 4x4 activada. Máximo agarre para la aventura." |
+| 0038 | `0038.mp3` | `TRACTION_4X2` | Cambio modo tracción 4x2 | "Tracción 4x2 activada. Conducción suave y eficiente." |
+| 0039 | `0039.mp3` | `ABS_ON` | ABS ON | "ABS activado. Frenadas más seguras." |
+| 0040 | `0040.mp3` | `ABS_OFF` | ABS OFF | "ABS desactivado. Conduce con extra cuidado." |
+| 0041 | `0041.mp3` | `TCS_ON` | TCS ON | "Control de tracción activado. Ruedas bajo control." |
+| 0042 | `0042.mp3` | `TCS_OFF` | TCS OFF | "Control de tracción desactivado. Suavidad al acelerar." |
+| 0053 | `0053.mp3` | `OVERCURRENT` | `OVERCURRENT` | "Corriente alta detectada. Bajamos fuerza para cuidar el sistema." |
+| 0054 | `0054.mp3` | `OBSTACLE_WARN` | Obstáculo crítico / error obstacle | "¡Cuidado! Obstáculo delante. Frenamos suave." |
+| 0068 | `0068.mp3` | `BEEP` | Confirmación de cambio en modo tanque | *(beep corto de confirmación)* |
+
+👉 **Total mínimo real para firmware actual: 30 pistas.**
+
+---
+
 ## 📋 Lista Completa de Audios (68 Tracks)
 
 ### Sistema Principal (Tracks 1-3)
