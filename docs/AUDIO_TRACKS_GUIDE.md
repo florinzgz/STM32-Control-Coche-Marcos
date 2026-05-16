@@ -184,6 +184,23 @@ Si quieres ir a lo seguro y **no generar de más**, empieza por estas pistas:
 
 👉 **Total mínimo real para firmware actual: 30 pistas.**
 
+## 🔎 Verificación pedida (cuándo se activa y qué tocar)
+
+Comprobado contra firmware real (`esp32/src/main.cpp` + `esp32/src/audio_manager.h`), sin asumir funciones no implementadas:
+
+| Track | Constante | ¿Se dispara hoy? | Cuándo se activa (verificado) | Qué tocar / acción real |
+|---|---|---|---|---|
+| 0018 | `RADIO_ON` | ❌ No | No hay ninguna llamada `audio::play(Sound::RADIO_ON)` en runtime | No existe botón/acción de pantalla para esto en el firmware actual |
+| 0019 | `RADIO_OFF` | ❌ No | No hay ninguna llamada `audio::play(Sound::RADIO_OFF)` en runtime | No existe botón/acción de pantalla para activar/desactivar “radio” en el firmware actual |
+| 0043 | `REGEN_ON` | ❌ No | No hay ninguna llamada `audio::play(Sound::REGEN_ON)` en runtime | No hay control táctil ni evento CAN que dispare este audio actualmente |
+| 0044 | `REGEN_OFF` | ❌ No | No hay ninguna llamada `audio::play(Sound::REGEN_OFF)` en runtime | No hay control táctil ni evento CAN que dispare este audio actualmente |
+
+### Ejemplos reales de “qué tocar” (sí implementados)
+
+- `0016.mp3` `LIGHTS_ON` (**se activa al tocar el icono de luz delantera o trasera y dejarlas en ON**).
+- `0017.mp3` `LIGHTS_OFF` (**se activa al tocar el icono de luz delantera o trasera y dejarlas en OFF**).
+- `0068.mp3` `BEEP` (**se activa al confirmar el cambio de modo tanque desde el diálogo de confirmación en pantalla**).
+
 ---
 
 ## 📋 Lista Completa de Audios (68 Tracks)
