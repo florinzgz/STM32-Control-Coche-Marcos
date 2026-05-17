@@ -1,0 +1,8 @@
+# Dependencias OEM Audio Pack — instala con:  pip install -r requirements.txt
+# El sistema (no pip): ffmpeg y ffprobe (apt install ffmpeg).
+
+# HTTP client usado por los proveedores ElevenLabs y OpenAI.
+requests>=2.31,<3
+
+# Fallback offline-friendly (no requiere API key).
+gTTS>=2.5,<3

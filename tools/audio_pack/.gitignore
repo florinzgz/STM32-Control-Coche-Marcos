@@ -1,0 +1,6 @@
+# Audio pack pipeline artifacts (no se commitean)
+output_sd/
+.cache_tts/
+__pycache__/
+*.pyc
+.venv/
