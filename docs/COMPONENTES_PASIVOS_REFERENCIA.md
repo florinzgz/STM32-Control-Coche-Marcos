@@ -18,6 +18,7 @@
 7. [Mapa Visual del Sistema](#7-mapa-visual-del-sistema)
 8. [Reglas de Montaje](#8-reglas-de-montaje)
 9. [Convertidores DC-DC Aislados](#9-convertidores-dc-dc-aislados) — **B0505S-1W** (aislamiento bus CAN)
+10. [Inventario de condensadores recibidos](#10-inventario-de-condensadores-recibidos)
 
 ---
 
@@ -423,6 +424,28 @@ GND      ── Pin2(-Vin)               Pin3(-Vout) ──► GND_CAN    ──
 
 ---
 
-**Última actualización:** 2026-05-02  
+## 10. Inventario de condensadores recibidos
+
+> Estado actualizado para dejar trazado en la **lista de componentes que ya tenemos** y recordar
+> rápidamente **dónde va cada condensador** en el montaje real.
+
+| Estado | Condensador | Dónde se usa |
+|---|---|---|
+| ✅ En inventario | **470 µF / 35V** (electrolítico) | Bulk de potencia en BTS7960 (tracción y dirección) y refuerzo en bus 24V |
+| ✅ En inventario | **1000 µF / 35V** (electrolítico) | Bus 24V principal junto a relés (en paralelo al bulk existente) |
+| ✅ En inventario | **1000 µF / 10V** (electrolítico) | Entrada de alimentación de tiras WS2812B (una por tira) |
+| ✅ En inventario | **10 µF / 10V** (electrolítico) | Rail 3.3V del STM32 y alimentación local ESP32/transceiver CAN |
+| ✅ En inventario | **10 µF / 16V** (electrolítico) | VDD del MCP23017 (palanca), en paralelo con 100 nF |
+| ✅ En inventario | **100 nF / 50V** (cerámico X7R) | Bypass en B+ y VCC de cada BTS7960, y snubber en terminales de motor |
+| ✅ En inventario | **100 nF / 16V** (cerámico X7R) | Desacoplo STM32/ESP32, filtro ADC pedal, desacoplos lógicos varios |
+| ✅ En inventario | **100 nF / 250V** (polipropileno) | Snubber RC de contactos COM–NO en relés de potencia |
+
+**Ubicación de detalle por componente:**
+- Ver **§1, §2 y §3** de este mismo documento para posición exacta de montaje.
+- Ver `docs/MATERIALES_POR_MODULO.md` (secciones **2, 3, 11 y 19**) para el BOM consolidado por módulo.
+
+---
+
+**Última actualización:** 2026-05-18  
 **Autor:** florinzgz (documentado por Copilot Agent)  
 **Proyecto:** STM32-Control-Coche-Marcos
