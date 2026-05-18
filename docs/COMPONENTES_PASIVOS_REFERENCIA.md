@@ -9,7 +9,7 @@
 
 ## 📋 Índice
 
-1. [Condensadores Electrolíticos](#1-condensadores-electrolíticos) — 470 µF / 1000 µF / 10 µF / **10 µF 16V (MCP23017)**
+1. [Condensadores Electrolíticos](#1-condensadores-electrolíticos) — 470 µF / 1000 µF (35V y 50V) / 10 µF / **10 µF 16V (MCP23017)**
 2. [Condensadores Cerámicos](#2-condensadores-cerámicos)
 3. [Condensadores de Polipropileno (Snubbers)](#3-condensadores-de-polipropileno-snubbers)
 4. [Resistencias](#4-resistencias)
@@ -18,7 +18,6 @@
 7. [Mapa Visual del Sistema](#7-mapa-visual-del-sistema)
 8. [Reglas de Montaje](#8-reglas-de-montaje)
 9. [Convertidores DC-DC Aislados](#9-convertidores-dc-dc-aislados) — **B0505S-1W** (aislamiento bus CAN)
-10. [Inventario de condensadores recibidos](#10-inventario-de-condensadores-recibidos)
 
 ---
 
@@ -43,12 +42,22 @@
 
 ---
 
-### 1.2 → 1000 µF / 35V — **2 unidades compradas**
+### 1.2 → 1000 µF / 35V y 1000 µF / 50V — **2 + 10 unidades**
+
+**Verificación del componente recibido:** en la foto aportada se lee la etiqueta
+`50V1000UF-13x25` (bolsa de **10 uds**), por tanto se añade como variante compatible
+del mismo valor de capacidad.
+
+**¿Para qué sirve?** Igual que el 1000 µF/35V: condensador bulk de bus para reducir
+caídas de tensión e inrush en el rail de 24V (cierre de relé y picos de demanda de motores).
+
+**¿Dónde va?** Mismo punto que el 1000 µF/35V: bus 24V principal, en paralelo con el
+bulk existente (470 µF).
 
 | # | Ubicación exacta | Conexión | Función |
 |---|-----------------|----------|---------|
-| 1 | Bus 24V principal | En **paralelo** con el 470 µF del bus principal (mismo punto, mismos pines) | Aumenta la capacidad bulk total a ≈1470 µF. A mayor capacidad, menor caída de tensión en arranques simultáneos: ΔV = I·Δt / C |
-| 2 | **Stock / recambio** | — | Reserva |
+| 1 | Bus 24V principal | En **paralelo** con el 470 µF del bus principal (mismo punto, mismos pines) | Aumenta la capacidad bulk total del bus. A mayor capacidad, menor caída de tensión en arranques simultáneos: ΔV = I·Δt / C |
+| 2 | **Stock / recambio** | — | Reserva (válido tanto para 35V como para 50V) |
 
 ---
 
@@ -421,28 +430,6 @@ GND      ── Pin2(-Vin)               Pin3(-Vout) ──► GND_CAN    ──
 | **Total estimado** | **< 60 mA** |
 | **Capacidad B0505S-1W** | **200 mA** |
 | **Margen disponible** | ≈ 140 mA (factor 3×) ✅ |
-
----
-
-## 10. Inventario de condensadores recibidos
-
-> Estado actualizado para dejar trazado en la **lista de componentes que ya tenemos** y recordar
-> rápidamente **dónde va cada condensador** en el montaje real.
-
-| Estado | Condensador | Dónde se usa |
-|---|---|---|
-| ✅ En inventario | **470 µF / 35V** (electrolítico) | Bulk de potencia en BTS7960 (tracción y dirección) y refuerzo en bus 24V |
-| ✅ En inventario | **1000 µF / 35V** (electrolítico) | Bus 24V principal junto a relés (en paralelo al bulk existente) |
-| ✅ En inventario | **1000 µF / 10V** (electrolítico) | Entrada de alimentación de tiras WS2812B (una por tira) |
-| ✅ En inventario | **10 µF / 10V** (electrolítico) | Rail 3.3V del STM32 y alimentación local ESP32/transceiver CAN |
-| ✅ En inventario | **10 µF / 16V** (electrolítico) | VDD del MCP23017 (palanca), en paralelo con 100 nF |
-| ✅ En inventario | **100 nF / 50V** (cerámico X7R) | Bypass en B+ y VCC de cada BTS7960, y snubber en terminales de motor |
-| ✅ En inventario | **100 nF / 16V** (cerámico X7R) | Desacoplo STM32/ESP32, filtro ADC pedal, desacoplos lógicos varios |
-| ✅ En inventario | **100 nF / 250V** (polipropileno) | Snubber RC de contactos COM–NO en relés de potencia |
-
-**Ubicación de detalle por componente:**
-- Ver **§1, §2 y §3** de este mismo documento para posición exacta de montaje.
-- Ver `docs/MATERIALES_POR_MODULO.md` (secciones **2, 3, 11 y 19**) para el BOM consolidado por módulo.
 
 ---
 

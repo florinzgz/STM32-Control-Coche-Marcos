@@ -315,7 +315,7 @@
 | 2 | Diodo flyback relé potencia | **1N4007** (1A, 1000V) | En paralelo con la bobina del relé de potencia TRAC y DIR |
 | 5 | Condensador snubber contacto | **100 nF / 250V** (polipropileno) | Entre COM y NO de cada relé de potencia; amortigua arcos al conmutar cargas inductivas |
 | 5 | Resistencia snubber | **100 Ω / 0.5W** | En serie con el condensador snubber (red RC snubber) |
-| 1 | Condensador bus 24V (junto a relés) | **1000 µF / 35V** (electrolítico) | En el bus 24V cerca del relé TRAC; absorbe el inrush al cerrar |
+| 1 | Condensador bus 24V (junto a relés) | **1000 µF / 35V (o 50V)** (electrolítico) | En el bus 24V cerca del relé TRAC; absorbe el inrush al cerrar |
 | 1 | Condensador bus 12V (junto a relé DIR) | **470 µF / 25V** (electrolítico) | En el bus 12V cerca del relé DIR |
 
 > **⚠️ Lógica de activación del módulo 5V.** Los módulos SRD-05VDC optoacoplados típicos son **active LOW** (GPIO LOW = relé ON). El canal de audio (ESP32 GPIO11) ya usa lógica activo LOW — compatible directo. Para los canales LED (PB10/PB11), el firmware STM32 usa HIGH = relé ON: **verificar el jumper JD-VCC del módulo** y configurarlo como HIGH-level trigger.
@@ -477,7 +477,7 @@
 | 2 | C_CAN | **100 nF** | 10V | Cerámico X7R | VCC de cada transceiver CAN |
 | 1 | C_CAN_ESP | **10 µF** | 10V | Electrolítico | VCC del transceiver CAN ESP32 |
 | 1 | C_ADC | **100 nF** | 16V | Cerámico X7R | PA3 (pedal ADC) a GND |
-| 1 | C_24V_REL | **1000 µF** | 35V | Electrolítico | Bus 24V junto a relés |
+| 1 | C_24V_REL | **1000 µF** | 35V mín. (50V compatible) | Electrolítico | Bus 24V junto a relés |
 | 1 | C_12V_REL | **470 µF** | 25V | Electrolítico | Bus 12V junto a relé DIR |
 | 2 | C_LED | **1000 µF** | 10V | Electrolítico | Conector 5V de cada tira LED |
 | 1 | C_TOF_VCC | **100 nF** | 10V | Cerámico X7R | VCC del TF-Mini Plus |
