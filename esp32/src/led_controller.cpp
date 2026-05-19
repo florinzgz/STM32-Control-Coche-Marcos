@@ -2,19 +2,20 @@
 // ESP32-S3 HMI — LED Controller Implementation (WS2812B via FastLED)
 //
 // Two independent strips driven by separate GPIOs:
-//   Front (GPIO 47, 28 LEDs): KITT scanner, throttle-reactive chase, alerts,
-//                              turn signals (5 LEDs each side)
-//   Rear  (GPIO 48, 16 LEDs): tail, brake, reverse, turn signals, regen
+//   Front (GPIO 47, 70 LEDs): KITT scanner, throttle-reactive chase, alerts,
+//                              turn signals (10 LEDs each side)
+//   Rear  (GPIO 48, 72 LEDs): tail, brake, reverse, turn signals, regen
+//                              (10 LEDs each side)
 //
 // Front LED zone mapping:
-//   [0–4]   Left turn-signal indicator  (5 LEDs)
-//   [5–22]  Centre: KITT / throttle / alert effects (18 LEDs)
-//   [23–27] Right turn-signal indicator (5 LEDs)
+//   [0–9]    Left  turn-signal indicator (10 LEDs)
+//   [10–59]  Centre: KITT / throttle / alert effects (50 LEDs)
+//   [60–69]  Right turn-signal indicator (10 LEDs)
 //
 // Rear LED zone mapping:
-//   [0–2]   Left turn-signal indicator (sequential sweep, non-destructive overlay)
-//   [3–12]  Centre: position / brake / reverse / regen
-//   [13–15] Right turn-signal indicator (sequential sweep, non-destructive overlay)
+//   [0–9]    Left  turn-signal indicator (sequential sweep, non-destructive overlay)
+//   [10–61]  Centre: position / brake / reverse / regen (52 LEDs)
+//   [62–71]  Right turn-signal indicator (sequential sweep, non-destructive overlay)
 //
 // Both front and rear turn-signal overlays are non-destructive:
 //   - AMBER is written ONLY during blink-ON
@@ -149,8 +150,8 @@ static void updateFlash(CRGB* leds, int count, CRGB c1, CRGB c2) {
 // Front LED pattern dispatch
 //
 // ZONE NOTE (Task 4 — KITT zone isolation):
-//   Effects render across the full 28-LED strip to provide full-bar KITT
-//   when no turn signal is active.  Side zones [0–4] and [23–27] are
+//   Effects render across the full 70-LED strip to provide full-bar KITT
+//   when no turn signal is active.  Side zones [0–9] and [60–69] are
 //   conditionally overridden by updateFrontTurnSignals() (called next).
 //   The overlay writes ONLY during blink-ON, so KITT remains the visual
 //   base during blink-OFF — no explicit zone clipping is needed here.
@@ -189,15 +190,15 @@ static void updateFrontLEDs() {
 }
 
 // =====================================================================
-// Rear base layer (ALL 16 LEDs)
+// Rear base layer (ALL 72 LEDs)
 //
 // Paints the entire rear strip with the current rear mode (position,
 // brake, reverse, regen, etc.).  This provides a visible base on the
-// side zones [0–2] and [13–15] so that the turn-signal overlay can be
+// side zones [0–9] and [62–71] so that the turn-signal overlay can be
 // non-destructive — matching the front strip's KITT-under-blink design.
 //
 // Without this full-strip base, side zones would be black whenever no
-// turn signal is active, wasting 6 LEDs that could show tail/brake.
+// turn signal is active, wasting 20 LEDs that could show tail/brake.
 // =====================================================================
 
 static void updateRearBase() {
@@ -236,14 +237,14 @@ static void updateRearBase() {
 }
 
 // =====================================================================
-// Front turn-signal zones (LEDs 0–4, 23–27)
+// Front turn-signal zones (LEDs 0–9, 60–69)
 //
 // OVERLAY PRIORITY:
 //   1. updateFrontLEDs()        — renders KITT / base effect on full strip
 //   2. updateFrontTurnSignals() — overlays turn signals on side zones ONLY
 //
 // ZONE CONTRACT (Task 4 — KITT zone isolation):
-//   KITT / base effects render across the full 28-LED strip.  When no turn
+//   KITT / base effects render across the full 70-LED strip.  When no turn
 //   signal is active the full-bar KITT ("coche fantástico") is visible.
 //   When a turn signal is active, this overlay writes AMBER over the side
 //   zones during blink-ON only.  During blink-OFF the overlay does NOT
@@ -293,14 +294,14 @@ static void updateFrontTurnSignals() {
 }
 
 // =====================================================================
-// Rear turn-signal zones (LEDs 0–2, 13–15)
+// Rear turn-signal zones (LEDs 0–9, 62–71)
 //
 // OVERLAY PRIORITY:
-//   1. updateRearBase()          — renders tail/brake/reverse on ALL 16 LEDs
+//   1. updateRearBase()          — renders tail/brake/reverse on ALL 72 LEDs
 //   2. updateRearTurnSignals()   — overlays turn signals on side zones ONLY
 //
 // ZONE CONTRACT (matching front strip design):
-//   The rear base paints all 16 LEDs with the current mode (position,
+//   The rear base paints all 72 LEDs with the current mode (position,
 //   brake, etc.).  When a turn signal is active, this overlay writes
 //   AMBER over the side zones during blink-ON only.  During blink-OFF
 //   the overlay does NOT write, so the underlying base (dim red, brake
@@ -308,9 +309,9 @@ static void updateFrontTurnSignals() {
 //
 // SEQUENTIAL ANIMATION:
 //   During blink-ON, LEDs fill progressively outward from centre:
-//     Left  [0–2]:   LED 2 → 1 → 0  (centre-adjacent first)
-//     Right [13–15]: LED 13 → 14 → 15 (centre-adjacent first)
-//   The 500 ms blink-ON window is divided into 3 equal steps (~167 ms
+//     Left  [0–9]:   LED 9 → 8 → … → 0    (centre-adjacent first)
+//     Right [62–71]: LED 62 → 63 → … → 71 (centre-adjacent first)
+//   The 500 ms blink-ON window is divided into 10 equal steps (~50 ms
 //   each).  Each step lights one additional LED.
 //
 // SAFE MODE:

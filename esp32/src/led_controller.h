@@ -2,19 +2,20 @@
 // ESP32-S3 HMI — LED Controller (WS2812B)
 //
 // Drives two independent addressable WS2812B LED strips:
-//   Front strip (GPIO 47): 28 LEDs — KITT scanner, throttle-reactive effects,
-//                           turn signals (5 LEDs each side)
-//   Rear  strip (GPIO 48): 16 LEDs — tail, brake, reverse, turn signals
+//   Front strip (GPIO 47): 70 LEDs — KITT scanner, throttle-reactive effects,
+//                           turn signals (10 LEDs each side)
+//   Rear  strip (GPIO 48): 72 LEDs — tail, brake, reverse, turn signals
+//                           (10 LEDs each side)
 //
-// Front LED zones (28 LEDs):
-//   [0–4]   Left turn-signal indicator  (amber blink 500 ms, 5 LEDs)
-//   [5–22]  Centre KITT scanner / throttle-reactive / alert effects
-//   [23–27] Right turn-signal indicator (amber blink 500 ms, 5 LEDs)
+// Front LED zones (70 LEDs):
+//   [0–9]    Left  turn-signal indicator (amber blink 500 ms, 10 LEDs)
+//   [10–59]  Centre KITT scanner / throttle-reactive / alert effects (50 LEDs)
+//   [60–69]  Right turn-signal indicator (amber blink 500 ms, 10 LEDs)
 //
-// Rear LED zones (16 LEDs):
-//   [0–2]   Left turn-signal indicator  (amber blink 500 ms)
-//   [3–12]  Centre tail / brake / reverse / regen lights
-//   [13–15] Right turn-signal indicator (amber blink 500 ms)
+// Rear LED zones (72 LEDs):
+//   [0–9]    Left  turn-signal indicator (amber blink 500 ms, 10 LEDs)
+//   [10–61]  Centre tail / brake / reverse / regen lights (52 LEDs)
+//   [62–71]  Right turn-signal indicator (amber blink 500 ms, 10 LEDs)
 //
 // Architecture ported from FULL-FIRMWARE-Coche-Marcos (florinzgz):
 //   src/lighting/led_controller.cpp + include/led_controller.h
@@ -48,8 +49,8 @@ namespace led_ctrl {
 // ---- Strip hardware configuration ----
 inline constexpr int LED_FRONT_PIN   = 47;   // GPIO 47 — front strip data
 inline constexpr int LED_REAR_PIN    = 48;   // GPIO 48 — rear strip data
-inline constexpr int NUM_LEDS_FRONT  = 28;
-inline constexpr int NUM_LEDS_REAR   = 16;
+inline constexpr int NUM_LEDS_FRONT  = 70;
+inline constexpr int NUM_LEDS_REAR   = 72;
 
 // ---- Front strip zone boundaries ----
 //
@@ -60,13 +61,13 @@ inline constexpr int NUM_LEDS_REAR   = 16;
 //
 //   FRONT VIEW (looking at the front of the vehicle):
 //
-//     DATA IN →  [0] [1] [2] [3] [4] [5] ... [22] [23] [24] [25] [26] [27]
-//                ├──── LEFT ────┤  ├──── CENTRE ────┤  ├───── RIGHT ─────┤
-//                5 LEDs              18 LEDs              5 LEDs
+//     DATA IN →  [0] [1] ... [9] [10] [11] ... [58] [59] [60] [61] ... [69]
+//                ├──── LEFT ────┤  ├────── CENTRE ──────┤  ├───── RIGHT ─────┤
+//                  10 LEDs                 50 LEDs              10 LEDs
 //
 // LED_STRIP_REVERSED effect on front strip:
-//   0 (default): LED[0-4]=LEFT,  LED[23-27]=RIGHT  (normal)
-//   1 (swapped): LED[0-4]=RIGHT, LED[23-27]=LEFT   (reversed data cable)
+//   0 (default): LED[0-9]=LEFT,  LED[60-69]=RIGHT  (normal)
+//   1 (swapped): LED[0-9]=RIGHT, LED[60-69]=LEFT   (reversed data cable)
 //
 // ---- Rear strip zone boundaries ----
 //
@@ -77,9 +78,9 @@ inline constexpr int NUM_LEDS_REAR   = 16;
 //
 //   REAR VIEW (looking at the back of the vehicle):
 //
-//     DATA IN →  [0] [1] [2] [3] ... [12] [13] [14] [15]
-//                ├─ LEFT ─┤  ├──── CENTRE ────┤  ├─ RIGHT ─┤
-//                3 LEDs        10 LEDs             3 LEDs
+//     DATA IN →  [0] [1] ... [9] [10] [11] ... [60] [61] [62] [63] ... [71]
+//                ├──── LEFT ────┤  ├────── CENTRE ──────┤  ├───── RIGHT ─────┤
+//                  10 LEDs                 52 LEDs              10 LEDs
 //
 // If the installer routes the data cable from the RIGHT side instead,
 // define LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
@@ -87,40 +88,40 @@ inline constexpr int NUM_LEDS_REAR   = 16;
 // cost.  Centre zone indices are unchanged in both orientations.
 //
 // LED_STRIP_REVERSED effect:
-//   0 (default): LED[0-2]=LEFT,  LED[13-15]=RIGHT  (normal)
-//   1 (swapped): LED[0-2]=RIGHT, LED[13-15]=LEFT   (reversed data cable)
+//   0 (default): LED[0-9]=LEFT,  LED[62-71]=RIGHT  (normal)
+//   1 (swapped): LED[0-9]=RIGHT, LED[62-71]=LEFT   (reversed data cable)
 #ifndef LED_STRIP_REVERSED
 #define LED_STRIP_REVERSED 0
 #endif
 
 #if LED_STRIP_REVERSED
-inline constexpr int FRONT_IND_LEFT_START  = 23;   // Swapped: physical right = logical left
-inline constexpr int FRONT_IND_LEFT_COUNT  = 5;
-inline constexpr int FRONT_CENTRE_START    = 5;    // Centre unchanged
-inline constexpr int FRONT_CENTRE_COUNT    = 18;
+inline constexpr int FRONT_IND_LEFT_START  = 60;   // Swapped: physical right = logical left
+inline constexpr int FRONT_IND_LEFT_COUNT  = 10;
+inline constexpr int FRONT_CENTRE_START    = 10;   // Centre unchanged
+inline constexpr int FRONT_CENTRE_COUNT    = 50;
 inline constexpr int FRONT_IND_RIGHT_START = 0;    // Swapped: physical left = logical right
-inline constexpr int FRONT_IND_RIGHT_COUNT = 5;
+inline constexpr int FRONT_IND_RIGHT_COUNT = 10;
 
-inline constexpr int REAR_IND_LEFT_START  = 13;   // Swapped: physical right = logical left
-inline constexpr int REAR_IND_LEFT_COUNT  = 3;
-inline constexpr int REAR_CENTRE_START    = 3;    // Centre unchanged
-inline constexpr int REAR_CENTRE_COUNT    = 10;
+inline constexpr int REAR_IND_LEFT_START  = 62;   // Swapped: physical right = logical left
+inline constexpr int REAR_IND_LEFT_COUNT  = 10;
+inline constexpr int REAR_CENTRE_START    = 10;   // Centre unchanged
+inline constexpr int REAR_CENTRE_COUNT    = 52;
 inline constexpr int REAR_IND_RIGHT_START = 0;    // Swapped: physical left = logical right
-inline constexpr int REAR_IND_RIGHT_COUNT = 3;
+inline constexpr int REAR_IND_RIGHT_COUNT = 10;
 #else
-inline constexpr int FRONT_IND_LEFT_START  = 0;    // LEDs 0-4: left turn
-inline constexpr int FRONT_IND_LEFT_COUNT  = 5;
-inline constexpr int FRONT_CENTRE_START    = 5;    // LEDs 5-22: centre
-inline constexpr int FRONT_CENTRE_COUNT    = 18;
-inline constexpr int FRONT_IND_RIGHT_START = 23;   // LEDs 23-27: right turn
-inline constexpr int FRONT_IND_RIGHT_COUNT = 5;
+inline constexpr int FRONT_IND_LEFT_START  = 0;    // LEDs 0-9:   left turn
+inline constexpr int FRONT_IND_LEFT_COUNT  = 10;
+inline constexpr int FRONT_CENTRE_START    = 10;   // LEDs 10-59: centre
+inline constexpr int FRONT_CENTRE_COUNT    = 50;
+inline constexpr int FRONT_IND_RIGHT_START = 60;   // LEDs 60-69: right turn
+inline constexpr int FRONT_IND_RIGHT_COUNT = 10;
 
-inline constexpr int REAR_IND_LEFT_START  = 0;    // LEDs 0-2: left turn
-inline constexpr int REAR_IND_LEFT_COUNT  = 3;
-inline constexpr int REAR_CENTRE_START    = 3;    // LEDs 3-12: centre
-inline constexpr int REAR_CENTRE_COUNT    = 10;
-inline constexpr int REAR_IND_RIGHT_START = 13;   // LEDs 13-15: right turn
-inline constexpr int REAR_IND_RIGHT_COUNT = 3;
+inline constexpr int REAR_IND_LEFT_START  = 0;    // LEDs 0-9:   left turn
+inline constexpr int REAR_IND_LEFT_COUNT  = 10;
+inline constexpr int REAR_CENTRE_START    = 10;   // LEDs 10-61: centre
+inline constexpr int REAR_CENTRE_COUNT    = 52;
+inline constexpr int REAR_IND_RIGHT_START = 62;   // LEDs 62-71: right turn
+inline constexpr int REAR_IND_RIGHT_COUNT = 10;
 #endif
 
 // ---- Animation / brightness constants ----
