@@ -9,7 +9,7 @@
 
 ## 📋 Índice
 
-1. [Condensadores Electrolíticos](#1-condensadores-electrolíticos) — 470 µF / 1000 µF / 10 µF / **10 µF 16V (MCP23017)**
+1. [Condensadores Electrolíticos](#1-condensadores-electrolíticos) — 470 µF / 1000 µF (35V y 50V) / 10 µF / **10 µF 16V (MCP23017)**
 2. [Condensadores Cerámicos](#2-condensadores-cerámicos)
 3. [Condensadores de Polipropileno (Snubbers)](#3-condensadores-de-polipropileno-snubbers)
 4. [Resistencias](#4-resistencias)
@@ -42,12 +42,22 @@
 
 ---
 
-### 1.2 → 1000 µF / 35V — **2 unidades compradas**
+### 1.2 → 1000 µF / 35V y 1000 µF / 50V — **2 + 10 unidades**
+
+**Verificación del componente recibido:** en la foto aportada se lee la etiqueta
+`50V1000UF-13x25` (bolsa de **10 uds**), por tanto se añade como variante compatible
+del mismo valor de capacidad.
+
+**¿Para qué sirve?** Igual que el 1000 µF/35V: condensador bulk de bus para reducir
+caídas de tensión e inrush en el rail de 24V (cierre de relé y picos de demanda de motores).
+
+**¿Dónde va?** Mismo punto que el 1000 µF/35V: bus 24V principal, en paralelo con el
+bulk existente (470 µF).
 
 | # | Ubicación exacta | Conexión | Función |
 |---|-----------------|----------|---------|
-| 1 | Bus 24V principal | En **paralelo** con el 470 µF del bus principal (mismo punto, mismos pines) | Aumenta la capacidad bulk total a ≈1470 µF. A mayor capacidad, menor caída de tensión en arranques simultáneos: ΔV = I·Δt / C |
-| 2 | **Stock / recambio** | — | Reserva |
+| 1 | Bus 24V principal | En **paralelo** con el 470 µF del bus principal (mismo punto, mismos pines) | Aumenta la capacidad bulk total del bus. A mayor capacidad, menor caída de tensión en arranques simultáneos: ΔV = I·Δt / C |
+| 2 | **Stock / recambio** | — | Reserva (válido tanto para 35V como para 50V) |
 
 ---
 
@@ -423,6 +433,6 @@ GND      ── Pin2(-Vin)               Pin3(-Vout) ──► GND_CAN    ──
 
 ---
 
-**Última actualización:** 2026-05-02  
+**Última actualización:** 2026-05-18  
 **Autor:** florinzgz (documentado por Copilot Agent)  
 **Proyecto:** STM32-Control-Coche-Marcos
