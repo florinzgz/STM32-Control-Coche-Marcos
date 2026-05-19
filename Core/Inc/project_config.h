@@ -209,8 +209,8 @@
 /* ========================================================================== */
 /*                       LED POWER RELAYS (GPIOB)                             */
 /* ========================================================================== */
-/* Front relay (PB10): controls 5V supply to front WS2812B LED strip (28 LEDs).
- * Rear  relay (PB11): controls 5V supply to rear  WS2812B LED strip (16 LEDs).
+/* Front relay (PB10): controls 5V supply to front WS2812B LED strip (70 LEDs).
+ * Rear  relay (PB11): controls 5V supply to rear  WS2812B LED strip (72 LEDs).
  * The ESP32 drives the WS2812B data lines; the STM32 controls the
  * power relays for safety cutoff.  Toggled via CAN command 0x120.
  *   Byte 0 = front relay, Byte 1 = rear relay.                              */
