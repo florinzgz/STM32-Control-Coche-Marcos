@@ -1,5 +1,60 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-19 (reconfiguración quirúrgica del sistema LED HMI)
+
+### Resumen ejecutivo
+
+Actualización quirúrgica del sistema LED del HMI ESP32-S3 para adaptar la
+distribución física a **70 LEDs delante** y **72 LEDs detrás**, con
+**intermitentes de 10 LEDs por extremo** en ambas tiras, preservando la
+orientación física existente (entrada de datos por el lado izquierdo,
+mirando el coche desde atrás) y sin alterar arquitectura ni temporizaciones.
+
+#### Cambios principales
+
+- `esp32/src/led_controller.h`
+  - `NUM_LEDS_FRONT`: `28 -> 70`
+  - `NUM_LEDS_REAR`: `16 -> 72`
+  - Segmentación nueva (modo normal):
+    - Front: izquierda `[0..9]`, centro `[10..59]`, derecha `[60..69]`
+    - Rear: izquierda `[0..9]`, centro `[10..61]`, derecha `[62..71]`
+  - Segmentación equivalente en `LED_STRIP_REVERSED=1` manteniendo centro
+    intacto e invirtiendo solo extremos izquierda/derecha.
+  - Actualización de diagramas y comentarios de orientación física.
+
+- `esp32/src/led_controller.cpp`
+  - Sin cambios de lógica funcional; actualización de comentarios para
+    reflejar los nuevos tamaños y rangos de zona.
+  - El comportamiento permanece parametrizado por `NUM_LEDS_*` y por las
+    constantes de zona (`FRONT_IND_*`, `REAR_IND_*`, `*_CENTRE_*`).
+
+- `Core/Inc/project_config.h`
+  - Actualización documental de comentario de relés LED:
+    - tira frontal: 70 LEDs
+    - tira trasera: 72 LEDs
+
+#### Verificación lógica
+
+- Cobertura completa sin huecos ni solapes:
+  - Front: `10 + 50 + 10 = 70`
+  - Rear: `10 + 52 + 10 = 72`
+- Sin riesgo de out-of-bounds en overlays:
+  - front máximo índice `69`
+  - rear máximo índice `71`
+- `sweepFill()` trasero mantiene barrido outward-from-centre correcto en
+  orientación normal y en `LED_STRIP_REVERSED`.
+- Timings y comportamiento base preservados:
+  - `TURN_SIGNAL_BLINK_MS`, `UPDATE_RATE_MS`, overlays no destructivos,
+    efectos KITT/chase/rainbow/flash y emergency flash sin cambios de código.
+
+#### Alcance / compatibilidad
+
+- No se modificaron: scheduler, FreeRTOS tasks, ISR, CAN, audio, sensores,
+  INA226, encoder, tracción, seguridad, boot ni gestión de potencia.
+- Cambio limitado a constantes y documentación asociada del sistema LED.
+
+---
+
 ## [unreleased] — 2026-05-15 (hardening quirúrgico de pedal, I2C, stack y flash)
 
 ### Resumen ejecutivo
