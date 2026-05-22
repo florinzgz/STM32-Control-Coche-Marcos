@@ -14,14 +14,14 @@ DFPlayer Mini que cuelga del ESP32-S3 en MarcosDashboard v10 Final.
 
 ```
 tools/audio_pack/output_sd/
-├── 0001.mp3   WELCOME            "Bienvenido, Marcos. Sistema listo."
-├── 0002.mp3   FAREWELL           "Cerrando sistemas. Hasta pronto."
+├── 0001.mp3   WELCOME            "Bienvenido, Marcos, piloto estrella. Sistema listo. ¡A disfrutar!"
+├── 0002.mp3   FAREWELL           "Hasta pronto, Marcos. Buen viaje, campeón."
 ├── ...
 ├── 0044.mp3   REGEN_OFF          "Frenado regenerativo desactivado."
 ├── 0045.mp3   WIFI_CONNECTED     (dummy · 100 ms silencio)
 ├── ...
 ├── 0051.mp3   BT_PAIRING         (dummy · 100 ms silencio)
-├── 0052.mp3   MAX_SPEED          "Velocidad máxima alcanzada."
+├── 0052.mp3   MAX_SPEED          "Velocidad máxima. ¡Qué rápido, Marcos!"
 ├── ...
 ├── 0067.mp3   REGEN_ADJUSTED     "Nivel de regeneración ajustado."
 └── 0068.mp3   BEEP               (sine 1 kHz · 200 ms · fade 10 ms)
@@ -209,14 +209,15 @@ ffmpeg -y -f lavfi -i "anullsrc=channel_layout=mono:sample_rate=44100" \
 
 Las 68 frases viven en `config_audio.py → TRACKS`. Cumplen:
 
-- estilo OEM premium (Tesla / Mercedes / BMW),
-- breves (1–2 s típico, máximo 4.5 s),
-- sin infantilismos, sin chistes, sin frases largas,
-- sin repetición machacona,
-- con **toques motivacionales puntuales** y nunca spam:
-  - `0036 MODULE_OK`     → "Módulo verificado. Buen trabajo."
-  - `0059 DISTANCE_1KM`  → "Un kilómetro recorrido. Buen ritmo, Marcos."
-  - `0030 TEST_OK`       → "Comprobación finalizada. Todo operativo."
+- estilo cercano y amigable, dirigido a Marcos como "piloto estrella",
+- breves (1–3 s típico, máximo 4.5 s),
+- sin frases excesivamente largas ni infantilismos,
+- con **toques motivacionales** que dan ganas de conducir:
+  - `0001 WELCOME`       → "Bienvenido, Marcos, piloto estrella. Sistema listo. ¡A disfrutar!"
+  - `0030 TEST_OK`       → "Todo perfecto. Vamos a rodar, campeón."
+  - `0036 MODULE_OK`     → "Módulo verificado. ¡Genial, Marcos!"
+  - `0059 DISTANCE_1KM`  → "Un kilómetro recorrido. ¡Qué crack, Marcos!"
+  - `0063 MODE_SPORT`    → "Modo deportivo. ¡A todo gas, Marcos!"
 
 Banco adicional de motivacionales en
 `config_audio.py → MOTIVATIONAL_PHRASES`, listo para sustituir manualmente la
