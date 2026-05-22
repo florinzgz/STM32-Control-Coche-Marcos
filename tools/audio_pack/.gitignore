@@ -1,5 +1,7 @@
 # Audio pack pipeline artifacts
 .cache_tts/
+.env.audio
+.env
 # output_sd/ sí se versiona para distribución directa a SD
 !output_sd/
 !output_sd/*.mp3

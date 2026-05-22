@@ -124,79 +124,79 @@ CACHE_DIR: str = ".cache_tts"   # TTS crudo antes de procesar (re-uso entre runs
 # text: frase OEM definitiva (estilo Tesla/Mercedes, breve, premium).
 
 TRACKS: Dict[int, Dict[str, str]] = {
-    # Sistema principal (1-3)
-    1:  {"kind": "tts",   "name": "WELCOME",              "text": "Bienvenido, Marcos. Sistema listo."},
-    2:  {"kind": "tts",   "name": "FAREWELL",             "text": "Cerrando sistemas. Hasta pronto."},
-    3:  {"kind": "tts",   "name": "ERROR_GENERAL",        "text": "Atención. Error general detectado."},
+    # Sistema principal (1-3) — bienvenida cálida, despedida amable.
+    1:  {"kind": "tts",   "name": "WELCOME",              "text": "Bienvenido, Marcos, piloto estrella. Sistema listo. ¡A disfrutar!"},
+    2:  {"kind": "tts",   "name": "FAREWELL",             "text": "Hasta pronto, Marcos. Buen viaje, campeón."},
+    3:  {"kind": "tts",   "name": "ERROR_GENERAL",        "text": "Atención, Marcos. Revisemos el sistema."},
 
     # Calibración pedal (4-5)
-    4:  {"kind": "tts",   "name": "PEDAL_OK",             "text": "Pedal calibrado."},
-    5:  {"kind": "tts",   "name": "PEDAL_ERROR",          "text": "Error en sensor de pedal."},
+    4:  {"kind": "tts",   "name": "PEDAL_OK",             "text": "Pedal calibrado. Listos para rodar."},
+    5:  {"kind": "tts",   "name": "PEDAL_ERROR",          "text": "Revisar pedal, Marcos. Sin prisa."},
 
     # INA226 corriente (6-7)
     6:  {"kind": "tts",   "name": "INA_OK",               "text": "Sensores de corriente listos."},
-    7:  {"kind": "tts",   "name": "INA_ERROR",            "text": "Error en sensores de corriente."},
+    7:  {"kind": "tts",   "name": "INA_ERROR",            "text": "Revisar sensores de corriente."},
 
     # Encoder dirección (8-9)
-    8:  {"kind": "tts",   "name": "ENCODER_OK",           "text": "Dirección sincronizada."},
-    9:  {"kind": "tts",   "name": "ENCODER_ERROR",        "text": "Error en sensor de dirección."},
+    8:  {"kind": "tts",   "name": "ENCODER_OK",           "text": "Volante centrado y sincronizado."},
+    9:  {"kind": "tts",   "name": "ENCODER_ERROR",        "text": "Revisar sensor de dirección."},
 
     # Temperatura (10-11)
-    10: {"kind": "tts",   "name": "TEMP_HIGH",            "text": "Temperatura del motor elevada."},
-    11: {"kind": "tts",   "name": "TEMP_NORMAL",          "text": "Temperatura normalizada."},
+    10: {"kind": "tts",   "name": "TEMP_HIGH",            "text": "Motor algo caliente. Suaviza un poco."},
+    11: {"kind": "tts",   "name": "TEMP_NORMAL",          "text": "Temperatura perfecta. Sigue así."},
 
     # Batería (12-13)
-    12: {"kind": "tts",   "name": "BATTERY_LOW",          "text": "Batería baja."},
-    13: {"kind": "tts",   "name": "BATTERY_CRITICAL",     "text": "Batería crítica. Desconectando tracción."},
+    12: {"kind": "tts",   "name": "BATTERY_LOW",          "text": "Batería baja, Marcos. Volvamos al garaje."},
+    13: {"kind": "tts",   "name": "BATTERY_CRITICAL",     "text": "Batería crítica. Tracción en pausa."},
 
     # Freno estacionamiento (14-15)
-    14: {"kind": "tts",   "name": "PARKING_BRAKE_ON",     "text": "Freno de estacionamiento activado."},
-    15: {"kind": "tts",   "name": "PARKING_BRAKE_OFF",    "text": "Freno de estacionamiento desactivado."},
+    14: {"kind": "tts",   "name": "PARKING_BRAKE_ON",     "text": "Freno de mano puesto."},
+    15: {"kind": "tts",   "name": "PARKING_BRAKE_OFF",    "text": "Freno de mano quitado. Vía libre."},
 
     # Luces (16-17)
-    16: {"kind": "tts",   "name": "LIGHTS_ON",            "text": "Luces encendidas."},
+    16: {"kind": "tts",   "name": "LIGHTS_ON",            "text": "Luces encendidas. Te vamos a ver brillar."},
     17: {"kind": "tts",   "name": "LIGHTS_OFF",           "text": "Luces apagadas."},
 
     # Multimedia (18-19)
-    18: {"kind": "tts",   "name": "RADIO_ON",             "text": "Sistema multimedia activado."},
-    19: {"kind": "tts",   "name": "RADIO_OFF",            "text": "Sistema multimedia desactivado."},
+    18: {"kind": "tts",   "name": "RADIO_ON",             "text": "Música encendida. A disfrutar, Marcos."},
+    19: {"kind": "tts",   "name": "RADIO_OFF",            "text": "Música apagada."},
 
     # Marchas (20-24)
-    20: {"kind": "tts",   "name": "GEAR_D1",              "text": "Marcha D uno."},
-    21: {"kind": "tts",   "name": "GEAR_D2",              "text": "Marcha D dos."},
-    22: {"kind": "tts",   "name": "GEAR_REVERSE",         "text": "Marcha atrás."},
+    20: {"kind": "tts",   "name": "GEAR_D1",              "text": "Marcha uno. Salida suave."},
+    21: {"kind": "tts",   "name": "GEAR_D2",              "text": "Marcha dos. A toda potencia."},
+    22: {"kind": "tts",   "name": "GEAR_REVERSE",         "text": "Marcha atrás. Despacito, Marcos."},
     23: {"kind": "tts",   "name": "GEAR_NEUTRAL",         "text": "Punto muerto."},
-    24: {"kind": "tts",   "name": "GEAR_PARK",            "text": "Vehículo estacionado."},
+    24: {"kind": "tts",   "name": "GEAR_PARK",            "text": "Coche aparcado. Buen trabajo."},
 
     # Menú oculto / calibración (25-28)
     25: {"kind": "tts",   "name": "MENU_HIDDEN",          "text": "Menú avanzado activado."},
-    26: {"kind": "tts",   "name": "CAL_PEDAL",            "text": "Calibrando pedal."},
+    26: {"kind": "tts",   "name": "CAL_PEDAL",            "text": "Calibrando pedal. Un momento."},
     27: {"kind": "tts",   "name": "CAL_INA",              "text": "Calibrando sensores de corriente."},
     28: {"kind": "tts",   "name": "CAL_ENCODER",          "text": "Calibrando centro del volante."},
 
     # Test sistema (29-30)
-    29: {"kind": "tts",   "name": "TEST_SYSTEM",          "text": "Iniciando comprobación del sistema."},
-    30: {"kind": "tts",   "name": "TEST_OK",              "text": "Comprobación finalizada. Todo operativo."},
+    29: {"kind": "tts",   "name": "TEST_SYSTEM",          "text": "Comprobando sistemas. Un momento, Marcos."},
+    30: {"kind": "tts",   "name": "TEST_OK",              "text": "Todo perfecto. Vamos a rodar, campeón."},
 
     # Emergencia / seguridad (31-32)
-    31: {"kind": "tts",   "name": "EMERGENCY",            "text": "Emergencia. Motor deshabilitado."},
-    32: {"kind": "tts",   "name": "SAFETY_RESET",         "text": "Reinicio de seguridad completado."},
+    31: {"kind": "tts",   "name": "EMERGENCY",            "text": "Emergencia, Marcos. Motor en pausa."},
+    32: {"kind": "tts",   "name": "SAFETY_RESET",         "text": "Sistema reiniciado. Listos otra vez."},
 
     # Errores sensores específicos (33-35)
-    33: {"kind": "tts",   "name": "SENSOR_TEMP_ERROR",    "text": "Error en sensor de temperatura."},
-    34: {"kind": "tts",   "name": "SENSOR_CURRENT_ERROR", "text": "Anomalía en lectura de corriente."},
+    33: {"kind": "tts",   "name": "SENSOR_TEMP_ERROR",    "text": "Revisar sensor de temperatura."},
+    34: {"kind": "tts",   "name": "SENSOR_CURRENT_ERROR", "text": "Revisar lectura de corriente."},
     35: {"kind": "tts",   "name": "SENSOR_SPEED_ERROR",   "text": "Sin señal de velocidad."},
 
-    # Módulo OK (36) — usado como confirmación motivadora
-    36: {"kind": "tts",   "name": "MODULE_OK",            "text": "Módulo verificado. Buen trabajo."},
+    # Módulo OK (36) — confirmación motivadora
+    36: {"kind": "tts",   "name": "MODULE_OK",            "text": "Módulo verificado. ¡Genial, Marcos!"},
 
     # Tracción (37-38)
-    37: {"kind": "tts",   "name": "TRACTION_4X4",         "text": "Tracción cuatro por cuatro activada."},
-    38: {"kind": "tts",   "name": "TRACTION_4X2",         "text": "Tracción cuatro por dos activada."},
+    37: {"kind": "tts",   "name": "TRACTION_4X4",         "text": "Tracción total. ¡A por todas, Marcos!"},
+    38: {"kind": "tts",   "name": "TRACTION_4X2",         "text": "Tracción dos ruedas. Conducción suave."},
 
     # Seguridad avanzada (39-44)
-    39: {"kind": "tts",   "name": "ABS_ON",               "text": "Antibloqueo de frenos activado."},
-    40: {"kind": "tts",   "name": "ABS_OFF",              "text": "Antibloqueo de frenos desactivado."},
+    39: {"kind": "tts",   "name": "ABS_ON",               "text": "Frenos inteligentes activados."},
+    40: {"kind": "tts",   "name": "ABS_OFF",              "text": "Frenos inteligentes desactivados."},
     41: {"kind": "tts",   "name": "TCS_ON",               "text": "Control de tracción activado."},
     42: {"kind": "tts",   "name": "TCS_OFF",              "text": "Control de tracción desactivado."},
     43: {"kind": "tts",   "name": "REGEN_ON",             "text": "Frenado regenerativo activado."},
@@ -214,27 +214,27 @@ TRACKS: Dict[int, Dict[str, str]] = {
     51: {"kind": "dummy", "name": "BT_PAIRING",           "text": ""},
 
     # Estado vehículo (52-56)
-    52: {"kind": "tts",   "name": "MAX_SPEED",            "text": "Velocidad máxima alcanzada."},
-    53: {"kind": "tts",   "name": "OVERCURRENT",          "text": "Corriente excesiva detectada."},
-    54: {"kind": "tts",   "name": "OBSTACLE_WARN",        "text": "Atención. Obstáculo detectado."},
-    55: {"kind": "tts",   "name": "PARKING_ASSIST",       "text": "Asistencia de estacionamiento activada."},
-    56: {"kind": "tts",   "name": "SOFT_START",           "text": "Arranque suave en curso."},
+    52: {"kind": "tts",   "name": "MAX_SPEED",            "text": "Velocidad máxima. ¡Qué rápido, Marcos!"},
+    53: {"kind": "tts",   "name": "OVERCURRENT",          "text": "Corriente alta. Suaviza un poco."},
+    54: {"kind": "tts",   "name": "OBSTACLE_WARN",        "text": "Ojo, Marcos. Obstáculo cerca."},
+    55: {"kind": "tts",   "name": "PARKING_ASSIST",       "text": "Asistente de aparcamiento activado."},
+    56: {"kind": "tts",   "name": "SOFT_START",           "text": "Arranque suavecito. Tú decides, Marcos."},
 
-    # Telemetría (57-60) — con toque motivacional ocasional
-    57: {"kind": "tts",   "name": "BATTERY_50",           "text": "Batería al cincuenta por ciento."},
-    58: {"kind": "tts",   "name": "BATTERY_25",           "text": "Batería al veinticinco por ciento."},
-    59: {"kind": "tts",   "name": "DISTANCE_1KM",         "text": "Un kilómetro recorrido. Buen ritmo, Marcos."},
-    60: {"kind": "tts",   "name": "ENERGY_SAVE",          "text": "Modo ahorro de energía."},
+    # Telemetría (57-60) — con toque motivacional
+    57: {"kind": "tts",   "name": "BATTERY_50",           "text": "Batería al cincuenta. Vamos genial."},
+    58: {"kind": "tts",   "name": "BATTERY_25",           "text": "Batería al veinticinco. Vuelta tranquila."},
+    59: {"kind": "tts",   "name": "DISTANCE_1KM",         "text": "Un kilómetro recorrido. ¡Qué crack, Marcos!"},
+    60: {"kind": "tts",   "name": "ENERGY_SAVE",          "text": "Modo ahorro. Energía bajo control."},
 
     # Modos conducción (61-63)
-    61: {"kind": "tts",   "name": "MODE_ECO",             "text": "Modo eco."},
-    62: {"kind": "tts",   "name": "MODE_NORMAL",          "text": "Modo normal."},
-    63: {"kind": "tts",   "name": "MODE_SPORT",           "text": "Modo deportivo."},
+    61: {"kind": "tts",   "name": "MODE_ECO",             "text": "Modo eco. Conducción tranquila."},
+    62: {"kind": "tts",   "name": "MODE_NORMAL",          "text": "Modo normal. A disfrutar."},
+    63: {"kind": "tts",   "name": "MODE_SPORT",           "text": "Modo deportivo. ¡A todo gas, Marcos!"},
 
     # Configuración (64-67)
-    64: {"kind": "tts",   "name": "CONFIG_SAVED",         "text": "Configuración guardada."},
-    65: {"kind": "tts",   "name": "CONFIG_RESTORED",      "text": "Configuración de fábrica restaurada."},
-    66: {"kind": "tts",   "name": "ERRORS_CLEARED",       "text": "Registro de errores borrado."},
+    64: {"kind": "tts",   "name": "CONFIG_SAVED",         "text": "Ajustes guardados. Perfecto."},
+    65: {"kind": "tts",   "name": "CONFIG_RESTORED",      "text": "Ajustes de fábrica restaurados."},
+    66: {"kind": "tts",   "name": "ERRORS_CLEARED",       "text": "Registro de errores limpio. ¡Buen trabajo!"},
     67: {"kind": "tts",   "name": "REGEN_ADJUSTED",       "text": "Nivel de regeneración ajustado."},
 
     # Beep confirmación (68)
@@ -249,16 +249,16 @@ TRACKS: Dict[int, Dict[str, str]] = {
 # reemplazar puntualmente alguna frase corta (p.ej. DISTANCE_1KM, MODULE_OK)
 # manteniendo el catálogo de 68 pistas estable.
 MOTIVATIONAL_PHRASES = (
-    "Excelente conducción, Marcos.",
-    "Todo funcionando correctamente.",
-    "Buen trabajo, piloto.",
-    "Conducción suave y estable.",
-    "Ruta perfecta.",
-    "Muy buena maniobra.",
-    "Todo bajo control.",
-    "Sistema estable.",
-    "Buen giro.",
-    "Conducción eficiente.",
+    "¡Genial, Marcos! Conduces de cine.",
+    "Piloto estrella en pista.",
+    "Buen ritmo, campeón.",
+    "Vas como un profesional.",
+    "Maniobra perfecta, Marcos.",
+    "¡Qué bien lo haces!",
+    "Todo bajo control, piloto.",
+    "Conducción suave y precisa.",
+    "Sigue así, Marcos. ¡Imparable!",
+    "Eres un crack al volante.",
 )
 
 
