@@ -1,0 +1,58 @@
+name: Generate OEM Audio Pack (ElevenLabs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'TTS provider (elevenlabs, openai, espeak, gtts)'
+        required: false
+        default: 'elevenlabs'
+
+jobs:
+  generate-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r tools/audio_pack/requirements.txt
+
+      - name: Generate audio pack
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          TTS_PROVIDER: ${{ github.event.inputs.provider }}
+        working-directory: tools/audio_pack
+        run: |
+          python3 generar_pack_oem.py --provider ${{ github.event.inputs.provider }}
+
+      - name: Upload audio pack as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oem-audio-pack-${{ github.event.inputs.provider }}
+          path: tools/audio_pack/output_sd/
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## 🎵 Audio Pack Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Provider: **${{ github.event.inputs.provider }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Files generated:" >> $GITHUB_STEP_SUMMARY
+          ls -la tools/audio_pack/output_sd/ | tail -n +2 >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Total tracks: $(ls tools/audio_pack/output_sd/*.mp3 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
