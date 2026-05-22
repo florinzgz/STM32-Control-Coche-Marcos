@@ -8,6 +8,9 @@ on:
         required: false
         default: 'elevenlabs'
 
+permissions:
+  contents: read
+
 jobs:
   generate-audio:
     runs-on: ubuntu-latest
