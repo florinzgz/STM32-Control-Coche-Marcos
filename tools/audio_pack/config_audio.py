@@ -20,7 +20,7 @@ from typing import Dict, Optional
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. PROVEEDOR TTS
 # ─────────────────────────────────────────────────────────────────────────────
-# Prioridad: elevenlabs (premium) > openai > gtts (fallback offline-friendly).
+# Prioridad: elevenlabs (premium) > openai > espeak (offline local) > gtts.
 # Cambia aquí o vía variable de entorno TTS_PROVIDER.
 TTS_PROVIDER: str = os.environ.get("TTS_PROVIDER", "elevenlabs").lower()
 
@@ -57,6 +57,12 @@ OPENAI_SPEED: float = 0.95  # ligeramente lenta
 GTTS_LANG: str = "es"
 GTTS_TLD: str = "es"
 GTTS_SLOW: bool = False
+
+# eSpeak NG: fallback totalmente local, sin API ni red.
+ESPEAK_VOICE: str = os.environ.get("ESPEAK_VOICE", "es")
+ESPEAK_SPEED_WPM: int = int(os.environ.get("ESPEAK_SPEED_WPM", "145"))
+ESPEAK_PITCH: int = int(os.environ.get("ESPEAK_PITCH", "45"))
+ESPEAK_AMPLITUDE: int = int(os.environ.get("ESPEAK_AMPLITUDE", "170"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
