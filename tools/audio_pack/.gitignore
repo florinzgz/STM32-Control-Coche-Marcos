@@ -1,6 +1,8 @@
-# Audio pack pipeline artifacts (no se commitean)
-output_sd/
+# Audio pack pipeline artifacts
 .cache_tts/
+# output_sd/ sí se versiona para distribución directa a SD
+!output_sd/
+!output_sd/*.mp3
 __pycache__/
 *.pyc
 .venv/

@@ -153,6 +153,33 @@ def _tts_gtts(text: str, out_mp3: Path) -> None:
     tts.save(str(out_mp3))
 
 
+def _tts_espeak(text: str, out_mp3: Path) -> None:
+    _require_tool("espeak-ng")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        wav_path = Path(tmp_dir) / "espeak_raw.wav"
+        _run([
+            "espeak-ng",
+            "-v", cfg.ESPEAK_VOICE,
+            "-s", str(cfg.ESPEAK_SPEED_WPM),
+            "-p", str(cfg.ESPEAK_PITCH),
+            "-a", str(cfg.ESPEAK_AMPLITUDE),
+            "-w", str(wav_path),
+            text,
+        ])
+        _run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(wav_path),
+            "-ac", str(cfg.CHANNELS),
+            "-ar", str(cfg.SAMPLE_RATE_HZ),
+            "-c:a", "libmp3lame",
+            "-b:a", cfg.MP3_BITRATE,
+            "-write_xing", "0",
+            "-id3v2_version", "0",
+            "-map_metadata", "-1",
+            str(out_mp3),
+        ])
+
+
 def _generate_tts(text: str, out_mp3: Path, provider: str) -> None:
     """Genera el MP3 TTS crudo (sin procesar). Cachea para no regenerar."""
     if out_mp3.exists() and out_mp3.stat().st_size > 0:
@@ -162,6 +189,8 @@ def _generate_tts(text: str, out_mp3: Path, provider: str) -> None:
         _tts_elevenlabs(text, out_mp3)
     elif provider == "openai":
         _tts_openai(text, out_mp3)
+    elif provider == "espeak":
+        _tts_espeak(text, out_mp3)
     elif provider == "gtts":
         _tts_gtts(text, out_mp3)
     else:
@@ -329,7 +358,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument(
         "--provider", default=cfg.TTS_PROVIDER,
-        choices=("elevenlabs", "openai", "gtts"),
+        choices=("elevenlabs", "openai", "espeak", "gtts"),
         help=f"Proveedor TTS (por defecto: {cfg.TTS_PROVIDER}).",
     )
     parser.add_argument(

@@ -60,6 +60,7 @@ tools/audio_pack/
 ```bash
 sudo apt update
 sudo apt install -y ffmpeg          # incluye ffprobe
+sudo apt install -y espeak-ng       # opcional: TTS totalmente local/offline
 ```
 
 **Python:**
@@ -76,17 +77,25 @@ pip install -r requirements.txt
 
 Edita `config_audio.py` o exporta por entorno. Prioridad recomendada:
 
-| Prioridad | Proveedor      | Calidad        | API key                 |
-|-----------|----------------|----------------|-------------------------|
-| 1         | `elevenlabs`   | premium OEM    | `ELEVENLABS_API_KEY`    |
-| 2         | `openai`       | muy buena      | `OPENAI_API_KEY`        |
-| 3         | `gtts`         | fallback libre | — (acceso a Google)     |
+| Prioridad | Proveedor      | Calidad             | API key                 |
+|-----------|----------------|---------------------|-------------------------|
+| 1         | `elevenlabs`   | premium OEM         | `ELEVENLABS_API_KEY`    |
+| 2         | `openai`       | muy buena           | `OPENAI_API_KEY`        |
+| 3         | `espeak`       | offline local       | —                       |
+| 4         | `gtts`         | fallback con red    | — (acceso a Google)     |
 
 ```bash
 export TTS_PROVIDER=elevenlabs
 export ELEVENLABS_API_KEY=sk_live_xxxxxxxxxxxxxxxxxx
 # (opcional) elegir un voice_id concreto del catálogo de tu cuenta
 export ELEVENLABS_VOICE_ID=onwK4e9ZLuTAKqWW03F9   # Daniel (es)
+```
+
+Fallback totalmente offline:
+
+```bash
+sudo apt install -y espeak-ng
+export TTS_PROVIDER=espeak
 ```
 
 Voz objetivo: **masculina, medio-grave, calmada, premium tipo Tesla/Mercedes**,
@@ -119,6 +128,9 @@ Salida típica:
 ```bash
 # Cambiar proveedor sin tocar config:
 python3 generar_pack_oem.py --provider openai
+
+# Generar sin Internet ni API:
+python3 generar_pack_oem.py --provider espeak
 
 # Regenerar solo unas pistas (rapidísimo, sin tocar el resto):
 python3 generar_pack_oem.py --only 1 2 59 68
