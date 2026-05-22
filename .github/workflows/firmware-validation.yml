@@ -26,7 +26,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install ARM GCC toolchain
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
@@ -62,7 +62,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run test_motor_control
         run: |
@@ -123,7 +123,7 @@ jobs:
   static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install analysis tools
         run: |
@@ -170,7 +170,7 @@ jobs:
     env:
       EXPECTED_HAL_VERSION: "V1.2.2"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
