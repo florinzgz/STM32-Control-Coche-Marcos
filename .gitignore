@@ -147,3 +147,9 @@ test_wheel_speed
 !.gitignore
 !README.md
 !LICENSE
+
+# ===========================
+# Firmware snapshots (binarios) — ver tools/backup/
+# ===========================
+backups/
+
