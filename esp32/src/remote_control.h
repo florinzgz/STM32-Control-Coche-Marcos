@@ -19,7 +19,7 @@
 //   CH3  → steering trim ±5°           (analog, local, NVS-persistable)
 //   CH4  → reserved (ignored)
 //   CH5  → kill switch / enable        (digital, ESP32-local gate)
-//   CH6  → drive mode ECO/NORMAL/SPORT (discrete, optional, not emitted here)
+//   CH6  → mode flags 2WD/4WD/(4WD+tank) (discrete, optional)
 //   CH7  → gear D/N/R                  (discrete, optional, coordinated w/ MCP23017 shifter)
 //   CH8  → lights ON/OFF               (digital, optional)
 //   CH9  → audio volume 0..30          (analog, ESP32 audio::setVolume)
@@ -121,8 +121,11 @@ bool isKillSwitchActive();
 /// caller MUST NOT emit CAN commands from the remote control.
 bool isRemoteSelected();
 
-/// Drive mode 0=ECO / 1=NORMAL / 2=SPORT from CH6 (three-position switch).
-/// Defaults to NORMAL when CH6 is centered.
+/// Mode flags from CH6 (three-position switch):
+///   low  -> 0x00 (2WD, tank OFF)
+///   mid  -> 0x01 (4WD, tank OFF)
+///   high -> 0x03 (4WD, tank ON)
+/// Matches CMD_MODE bit layout (bit0=4x4, bit1=tank turn).
 uint8_t getDriveMode();
 
 /// Requested gear from CH7 three-position switch.  0=PARK, 1=REVERSE,
@@ -153,7 +156,7 @@ inline float    getThrottlePct()            { return 0.0f; }
 inline float    getSteeringDeg()            { return 0.0f; }
 inline bool     isKillSwitchActive()        { return true; }   // Fail-safe default
 inline bool     isRemoteSelected()          { return false; }
-inline uint8_t  getDriveMode()              { return 1; }      // NORMAL
+inline uint8_t  getDriveMode()              { return 0; }      // 2WD + tank OFF
 inline uint8_t  getRequestedGear()          { return 2; }      // NEUTRAL
 inline bool     isLightsOn()                { return false; }
 inline uint8_t  getAudioVolume()            { return 0; }
