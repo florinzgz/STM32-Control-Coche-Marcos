@@ -19,6 +19,7 @@
 #include "error_log.h"
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
+#include "rc_arbiter.h"
 #include <math.h>
 #include <string.h>
 
@@ -1645,14 +1646,37 @@ void CAN_ProcessMessages(void) {
                 break;
                 
             case CAN_ID_CMD_STEERING:
+                /* 0x101 carries the LOCAL steering demand (driven by the
+                 * STM32 from the child's physical steering input via the
+                 * ESP32 sensor path).  When the RC override is active
+                 * (CAN_ID_CMD_RC_OVERRIDE 0x10A fresh AND override flag
+                 * set), this local value must NOT reach Steering_SetAngle
+                 * — the arbiter's last validated RC angle takes over.
+                 * Routing through RcArbiter_GetSteering() gives a single
+                 * point of truth: local in, arbitrated out.              */
                 if (msg_len >= 2) {
                     int16_t angle_raw = (int16_t)(rx_payload[0] | (rx_payload[1] << 8));
                     float requested_deg = (float)angle_raw / 10.0f;
-                    float validated_deg = Safety_ValidateSteering(requested_deg);
+                    float arbitrated_deg = RcArbiter_GetSteering(requested_deg, HAL_GetTick());
+                    float validated_deg = Safety_ValidateSteering(arbitrated_deg);
                     Steering_SetAngle(validated_deg);
                 } else {
                     sat_inc_u32(&can_stats.rx_errors);
                 }
+                break;
+
+            case CAN_ID_CMD_RC_OVERRIDE:
+                /* RC override demand from ESP32 / FlySky iBUS bridge.
+                 * The handler ONLY updates the arbiter's internal state
+                 * + watchdog timestamp.  It never calls Traction_SetDemand
+                 * or Steering_SetAngle directly: the 50 ms main scheduler
+                 * (throttle) and the 0x101 handler above (steering) apply
+                 * the value through Safety_Validate* downstream.
+                 *
+                 * Failsafe: if frames stop arriving, RcArbiter_IsActive()
+                 * returns false within RC_OVERRIDE_TIMEOUT_MS (200 ms)
+                 * and local control resumes automatically.                */
+                RcArbiter_OnFrame(rx_payload, msg_len, HAL_GetTick());
                 break;
                 
             case CAN_ID_CMD_MODE:
