@@ -32,6 +32,7 @@
 #include "power_manager.h"
 #include "audio_manager.h"
 #include "shifter_input.h"
+#include "remote_control.h"
 #include "touch_handler.h"
 #include "touch_calibration.h"
 #include "config_store.h"
@@ -700,6 +701,11 @@ void setup() {
     // Initialize MCP23017 shifter input (I2C on GPIO 8/9)
     shifter::init();
 
+    // Initialize remote control parser (FlySky FS-iA6B iBUS, GPIO 16 RX).
+    // Inlined no-op when REMOTE_CONTROL_ENABLED=0 (default).  See
+    // docs/REMOTE_CONTROL_IMPLEMENTATION_PLAN.md Phase 2.
+    remote_control::init();
+
     // Initialize traction switch (DPDT rocker on GPIO 15)
     traction_sw::init();
 
@@ -906,6 +912,8 @@ void loop() {
     // commands to execute when the node recovers.
     {
         shifter::update();
+        // Poll iBUS parser (no-op when REMOTE_CONTROL_ENABLED=0).
+        remote_control::update();
         uint8_t gear = shifter::getGearRaw();
         if (gear != lastSentGear &&
             (now - lastGearSendMs) >= GEAR_SEND_DEBOUNCE_MS &&
@@ -1483,6 +1491,52 @@ void loop() {
 
         ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     }
+
+#if REMOTE_CONTROL_ENABLED
+    // ------------------------------------------------------------------
+    // Remote control → CAN bridge (Phase 2/3 of REMOTE_CONTROL plan).
+    //
+    // Emits CMD_THROTTLE (0x100) / CMD_STEERING (0x101) at the same rate
+    // as the pedal pipeline (50 ms) when ALL of the following hold:
+    //   - parser is ACTIVE (valid frames within 150 ms)
+    //   - CH5 kill switch is OFF
+    //   - CH10 selector is in REMOTE
+    //   - STM32 heartbeat is alive
+    // The STM32 sees normal CMD frames and applies its existing
+    // Safety_ValidateThrottle / Safety_ValidateSteering pipeline.  No
+    // STM32 firmware change is required — the safety authority stays
+    // entirely on the STM32 (docs/REMOTE_CONTROL_ARCHITECTURE.md §7).
+    // ------------------------------------------------------------------
+    static uint32_t lastRcCmdMs = 0;
+    if ((now - lastRcCmdMs) >= can::CMD_THROTTLE_RATE_MS) {
+        lastRcCmdMs = now;
+        if (remote_control::isActive() && stm32IsAlive) {
+            // CMD_THROTTLE (0x100) — 1 byte 0..100
+            float thrPct = remote_control::getThrottlePct();
+            if (thrPct < 0.0f)   thrPct = 0.0f;
+            if (thrPct > 100.0f) thrPct = 100.0f;
+            CanFrame frThr = {};
+            frThr.identifier       = can::CMD_THROTTLE;
+            frThr.extd             = 0;
+            frThr.data_length_code = 1;
+            frThr.data[0]          = static_cast<uint8_t>(thrPct + 0.5f);
+            ESP32Can.writeFrame(frThr, 0);
+
+            // CMD_STEERING (0x101) — int16 LE in 1/10° (matches existing format)
+            float strDeg = remote_control::getSteeringDeg();
+            if (strDeg < -30.0f) strDeg = -30.0f;
+            if (strDeg >  30.0f) strDeg =  30.0f;
+            int16_t deg10 = static_cast<int16_t>(strDeg * 10.0f);
+            CanFrame frStr = {};
+            frStr.identifier       = can::CMD_STEERING;
+            frStr.extd             = 0;
+            frStr.data_length_code = 2;
+            frStr.data[0]          = static_cast<uint8_t>(deg10 & 0xFF);
+            frStr.data[1]          = static_cast<uint8_t>((deg10 >> 8) & 0xFF);
+            ESP32Can.writeFrame(frStr, 0);
+        }
+    }
+#endif // REMOTE_CONTROL_ENABLED
 
     // Serial heartbeat every ~1 second
     if (now - lastSerialMs >= 1000) {
