@@ -1,5 +1,150 @@
 # PROJECT_CHANGELOG
 
+## [unreleased] — 2026-05-24 (RC override arbiter `0x10A` con failsafe estricto de 200 ms)
+
+### Resumen ejecutivo
+
+Continuación de las Fases 1+2 del mando RC. Esta entrega elimina la
+co-emisión del ESP32 a los CAN IDs `0x100`/`0x101` (que eran exclusivos
+del pedal/dirección locales) y la sustituye por un **árbitro
+multiplexor** en el STM32 alimentado por un único frame nuevo
+`0x10A CMD_RC_OVERRIDE`. La política es la pedida por el usuario y se
+implementa en un único punto de decisión:
+
+```
+if (now - last_0x10A_rx_ms) < 200 ms  &&  flag_override_activo
+    → el coche obedece 100 % al RC
+else
+    → el coche obedece 100 % al pedal y al volante físicos del niño
+```
+
+Todas las funciones de seguridad existentes (`Safety_ValidateThrottle`,
+`Safety_ValidateSteering`, `Startup_IsInhibited`, gate de marcha
+PARK/NEUTRAL, step-rate detector, LIMP_HOME, IWDG ~4.1 s) se aplican
+**aguas abajo del árbitro**, por lo que el RC no puede saltarse ningún
+gate de seguridad existente.
+
+El comportamiento de producción permanece igual hasta que se compile el
+ESP32 con `-DREMOTE_CONTROL_ENABLED=1` (sigue OFF por defecto en
+`platformio.ini`).
+
+### Cambios en el STM32 (`Core/`)
+
+- **`Core/Inc/can_handler.h`** — nuevo ID `CAN_ID_CMD_RC_OVERRIDE 0x10A`
+  documentado en cabecera (DLC 5, 50 ms, watchdog 200 ms → failsafe a
+  pedal local).
+- **`Core/Inc/rc_arbiter.h`** *(nuevo, ~110 LoC)* — API del árbitro:
+  - `RcArbiter_Init()`
+  - `RcArbiter_OnFrame(payload, len, now_ms)` — llamado por
+    `CAN_ProcessMessages` para cada frame `0x10A`. Sólo guarda estado +
+    timestamp; **nunca** llama a `Traction_SetDemand` ni a
+    `Steering_SetAngle`.
+  - `RcArbiter_IsActive(now_ms)` — true sólo si trama fresca
+    (`< 200 ms`) Y bit0 del byte de flags está a 1.
+  - `RcArbiter_GetThrottle(local_pct, now_ms)` — devuelve RC o local.
+  - `RcArbiter_GetSteering(local_deg, now_ms)` — devuelve RC o local.
+  - `RcArbiter_GetStats(out)` — diagnóstico (accepted/rejected, último
+    valor, último seq).
+  - Constantes: `RC_OVERRIDE_TIMEOUT_MS = 200`, `RC_OVERRIDE_DLC = 5`.
+- **`Core/Src/rc_arbiter.c`** *(nuevo, ~120 LoC)* — implementación con
+  watchdog wrap-safe `(uint32_t)(now − last) < 200` y validación
+  estricta de rangos en ingreso:
+  - DLC corta (< 5)              → rechazada, watchdog **no** se refresca.
+  - `throttle > 100`             → rechazada.
+  - `steer` fuera de `±300` (±30°) → rechazada.
+  - Bits reservados del byte 0 ignorados (forward-compat).
+  - Tramas válidas: `last_rx_ms = now`, contadores acumulados,
+    `throttle_pct`, `steer_deg` y `seq` guardados.
+- **`Core/Src/can_handler.c`** — incluye `rc_arbiter.h`; añade:
+  - `case CAN_ID_CMD_RC_OVERRIDE:` → `RcArbiter_OnFrame(...)`.
+  - `case CAN_ID_CMD_STEERING:` ahora arbitra: el ángulo local recibido
+    pasa por `RcArbiter_GetSteering(...)` antes de
+    `Safety_ValidateSteering` y `Steering_SetAngle`.
+- **`Core/Src/main.c`** — incluye `rc_arbiter.h`; llama
+  `RcArbiter_Init()` tras `CAN_Init()`; en el tick de 50 ms (rama
+  ACTIVE, fuera de PARK/NEUTRAL y de `startup_inhibit`):
+  - `float demand = RcArbiter_GetThrottle(Pedal_GetPercent(), now);`
+  - `Traction_SetDemand(Safety_ValidateThrottle(demand));`
+  - La rama `LIMP_HOME` se deja intacta a propósito: LIMP_HOME significa
+    que el bus CAN está caído, por lo que el árbitro nunca puede estar
+    fresco en ese estado.
+- **`Makefile`** — `Core/Src/rc_arbiter.c` añadido a `C_SOURCES`.
+
+### Cambios en el ESP32 (`esp32/`)
+
+- **`esp32/include/can_ids.h`** — nuevo `inline constexpr uint32_t`
+  `CMD_RC_OVERRIDE = 0x10A` con la descripción de los 5 bytes.
+- **`esp32/src/main.cpp`** — **se elimina** la emisión directa de
+  `CMD_THROTTLE (0x100)` y `CMD_STEERING (0x101)` desde el bloque del
+  mando RC. Se reemplaza por un único emisor cada 50 ms del frame
+  `0x10A` con:
+  - `byte0`: flag `override_active` = `remote_control::isActive() &&
+    !isKillSwitchActive() && isRemoteSelected() && stm32IsAlive`
+  - `byte1`: throttle 0..100 (uint8) — saneado siempre, vaya o no
+    activo el flag.
+  - `byte2..3`: int16 LE, steer × 10 (1/10°), clampado a ±30°.
+  - `byte4`: seq rolling counter de 1 byte.
+
+### Formato del frame `0x10A CMD_RC_OVERRIDE`
+
+| Byte | Campo            | Significado                                    |
+|------|------------------|------------------------------------------------|
+| 0    | `flags`          | bit0 = `override_active` (CH10 = REMOTE)       |
+| 1    | `throttle_pct`   | 0..100 (uint8). > 100 ⇒ frame rechazada.       |
+| 2..3 | `steer_deg×10`   | int16 LE, 1/10°. Fuera de ±300 ⇒ rechazada.   |
+| 4    | `seq`            | Contador rotativo informativo                  |
+
+Cadencia: 50 ms (igual que el pedal). Timeout STM32: 200 ms (4× cadencia
+nominal, tolera 3 frames perdidos antes de revertir a local).
+
+### Cómo responderá el coche (matriz funcional verificada en código)
+
+| Situación | Origen del control | Por qué |
+|---|---|---|
+| **CH10 en LOCAL (niño conduce)** | Pedal + volante físicos | ESP32 envía `0x10A` con `flag = 0` → `RcArbiter_IsActive() = false`. |
+| **CH10 en REMOTE, RC OK** | RC (mando) | `flag = 1` y trama fresca → árbitro devuelve valores del RC. Validaciones (`Safety_ValidateThrottle/Steering`) se aplican igual. |
+| **Mando apagado / sin batería / fuera de RF** | Pedal + volante físicos en ≤ 200 ms | ESP32 marca `flag = 0` (parser no ACTIVE / kill) o deja de emitir → árbitro caduca → fallback automático. |
+| **ESP32 muerto / CAN bus-off** | Pedal + volante físicos | No llegan tramas `0x10A` → árbitro inactivo. Adicionalmente el watchdog de heartbeat dispara `LIMP_HOME` como antes. |
+| **Trama `0x10A` corrupta** (DLC corta, throttle > 100, steer > ±30°) | Local | Frame rechazado sin refrescar timestamp; contador `rejected_frames` incrementado. |
+| **`startup_inhibit` activo** (recién encendido, pedal no liberado) | Demanda 0 | `Traction_SetDemand(0)` se fuerza **antes** del árbitro: el RC no puede arrancar el coche en encendido. |
+| **Marcha en PARK o NEUTRAL** | Demanda 0 | Gate gear se fuerza antes del árbitro: ni pedal ni RC mueven el coche en N/P. |
+| **`LIMP_HOME`** (CAN caído) | Pedal local con clamp 20 % | Rama LIMP_HOME no toca al árbitro: pedal local manda. |
+
+### Garantías de seguridad
+
+- IDs `0x100` y `0x101` nunca son sobrescritos por el ESP32 cuando
+  `REMOTE_CONTROL_ENABLED = 1` (la emisión directa se ha **eliminado**
+  del código).
+- Failsafe estricto de 200 ms wrap-safe en el árbitro.
+- El árbitro **no** llama a `Traction_SetDemand` ni a
+  `Steering_SetAngle`: sólo devuelve el valor; toda la cadena
+  `Safety_Validate*` → actuadores permanece **aguas abajo** sin cambios.
+- `Startup_IsInhibited`, gate PARK/NEUTRAL, step-rate detector,
+  LIMP_HOME (clamp 20 %) e IWDG ~4.1 s se aplican igual con o sin RC.
+- Validación de rango en ingreso (throttle ≤ 100, steer ±30°) además de
+  `Safety_Validate*` aguas abajo.
+- Smoke-test host del árbitro ejecutado durante el desarrollo: timeout
+  de 200 ms, flag de override, rechazo de DLC corto, rechazo de
+  throttle > 100, rechazo de steer fuera de ±30°.
+- `REMOTE_CONTROL_ENABLED` sigue **OFF por defecto** en
+  `platformio.ini`. El binario de producción es idéntico hasta que se
+  active y se valide en banco.
+
+### Archivos modificados / creados
+
+```
+Core/Inc/can_handler.h            (+ CAN_ID_CMD_RC_OVERRIDE 0x10A)
+Core/Inc/rc_arbiter.h             (NUEVO)
+Core/Src/rc_arbiter.c             (NUEVO)
+Core/Src/can_handler.c            (+ include, + case 0x10A, 0x101 arbitra)
+Core/Src/main.c                   (+ include, + Init, + arbitro en 50 ms ACTIVE)
+Makefile                          (+ Core/Src/rc_arbiter.c en C_SOURCES)
+esp32/include/can_ids.h           (+ CMD_RC_OVERRIDE 0x10A)
+esp32/src/main.cpp                (− emisión 0x100/0x101 RC, + emisión 0x10A)
+```
+
+---
+
 ## [unreleased] — 2026-05-24 (mando RC FlySky FS-i6X — Fases 1 y 2, módulo aislado, desactivado por defecto)
 
 ### Resumen ejecutivo
