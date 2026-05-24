@@ -17,6 +17,7 @@
 #include "main.h"
 #include "motor_control.h"
 #include "can_handler.h"
+#include "rc_arbiter.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "steering_centering.h"
@@ -187,6 +188,7 @@ int main(void)
      * ================================================================ */
     MX_FDCAN1_Init();
     CAN_Init();
+    RcArbiter_Init();
 
     boot_phase = 1;  /* GPIO + FDCAN done, CAN bus active */
 
@@ -502,7 +504,18 @@ int main(void)
                 if (gear == GEAR_PARK || gear == GEAR_NEUTRAL) {
                     Traction_SetDemand(0.0f);
                 } else {
-                    float validated = Safety_ValidateThrottle(Pedal_GetPercent());
+                    /* RC override arbiter (Modo Control Remoto Clásico):
+                     * if a fresh 0x10A frame says override_active, use RC
+                     * throttle; otherwise use the physical pedal.  The
+                     * arbiter has a strict 200 ms watchdog → if the ESP32
+                     * or the RC link dies, control returns to the pedal
+                     * automatically.  Safety_ValidateThrottle stays
+                     * DOWNSTREAM so all existing safety gates (state,
+                     * step-rate, gear, limits) apply equally to local and
+                     * RC demands.                                          */
+                    float local_pct = Pedal_GetPercent();
+                    float demand_pct = RcArbiter_GetThrottle(local_pct, now);
+                    float validated = Safety_ValidateThrottle(demand_pct);
                     Traction_SetDemand(validated);
                 }
             } else if (Safety_IsLimpHome()) {

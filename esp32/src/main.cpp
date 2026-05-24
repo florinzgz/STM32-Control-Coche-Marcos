@@ -1494,47 +1494,57 @@ void loop() {
 
 #if REMOTE_CONTROL_ENABLED
     // ------------------------------------------------------------------
-    // Remote control → CAN bridge (Phase 2/3 of REMOTE_CONTROL plan).
+    // Remote control → CAN bridge — Modo Control Remoto Clásico
     //
-    // Emits CMD_THROTTLE (0x100) / CMD_STEERING (0x101) at the same rate
-    // as the pedal pipeline (50 ms) when ALL of the following hold:
-    //   - parser is ACTIVE (valid frames within 150 ms)
-    //   - CH5 kill switch is OFF
-    //   - CH10 selector is in REMOTE
-    //   - STM32 heartbeat is alive
-    // The STM32 sees normal CMD frames and applies its existing
-    // Safety_ValidateThrottle / Safety_ValidateSteering pipeline.  No
-    // STM32 firmware change is required — the safety authority stays
-    // entirely on the STM32 (docs/REMOTE_CONTROL_ARCHITECTURE.md §7).
+    // The ESP32 NEVER writes to 0x100/0x101 on behalf of the RC: those
+    // IDs remain reserved for the local pedal/steering pipeline.
+    //
+    // Instead, every 50 ms the ESP32 emits CMD_RC_OVERRIDE (0x10A) with
+    // raw stick values and a flag indicating whether the operator wants
+    // RC to take control (CH10 == REMOTE && parser ACTIVE && CH5 not
+    // killed).  The STM32 arbiter (rc_arbiter.c) decides which source
+    // feeds Safety_ValidateThrottle / Safety_ValidateSteering using a
+    // strict 200 ms watchdog.  Failsafe is automatic: if we stop sending
+    // 0x10A (RC off, RF lost, ESP32 dead), the STM32 reverts to local
+    // pedal control within 200 ms with no further action.
     // ------------------------------------------------------------------
     static uint32_t lastRcCmdMs = 0;
+    static uint8_t  rcOverrideSeq = 0;
     if ((now - lastRcCmdMs) >= can::CMD_THROTTLE_RATE_MS) {
         lastRcCmdMs = now;
-        if (remote_control::isActive() && stm32IsAlive) {
-            // CMD_THROTTLE (0x100) — 1 byte 0..100
-            float thrPct = remote_control::getThrottlePct();
-            if (thrPct < 0.0f)   thrPct = 0.0f;
-            if (thrPct > 100.0f) thrPct = 100.0f;
-            CanFrame frThr = {};
-            frThr.identifier       = can::CMD_THROTTLE;
-            frThr.extd             = 0;
-            frThr.data_length_code = 1;
-            frThr.data[0]          = static_cast<uint8_t>(thrPct + 0.5f);
-            ESP32Can.writeFrame(frThr, 0);
 
-            // CMD_STEERING (0x101) — int16 LE in 1/10° (matches existing format)
-            float strDeg = remote_control::getSteeringDeg();
-            if (strDeg < -30.0f) strDeg = -30.0f;
-            if (strDeg >  30.0f) strDeg =  30.0f;
-            int16_t deg10 = static_cast<int16_t>(strDeg * 10.0f);
-            CanFrame frStr = {};
-            frStr.identifier       = can::CMD_STEERING;
-            frStr.extd             = 0;
-            frStr.data_length_code = 2;
-            frStr.data[0]          = static_cast<uint8_t>(deg10 & 0xFF);
-            frStr.data[1]          = static_cast<uint8_t>((deg10 >> 8) & 0xFF);
-            ESP32Can.writeFrame(frStr, 0);
-        }
+        // Override-active gate combines: parser fresh (≤150 ms),
+        // CH5 kill switch released, CH10 selector in REMOTE, and STM32
+        // alive.  Anything failing here → override_flag=0 → STM32
+        // returns control to the pedal at the next arbiter check.
+        bool overrideActive =
+            remote_control::isActive() &&
+            !remote_control::isKillSwitchActive() &&
+            remote_control::isRemoteSelected() &&
+            stm32IsAlive;
+
+        // Sanitize stick values regardless of override gate so the
+        // STM32 always sees in-range numbers (avoids spurious arbiter
+        // rejections when override_flag=0).
+        float thrPct = remote_control::getThrottlePct();
+        if (thrPct < 0.0f)   thrPct = 0.0f;
+        if (thrPct > 100.0f) thrPct = 100.0f;
+
+        float strDeg = remote_control::getSteeringDeg();
+        if (strDeg < -30.0f) strDeg = -30.0f;
+        if (strDeg >  30.0f) strDeg =  30.0f;
+        int16_t deg10 = static_cast<int16_t>(strDeg * 10.0f);
+
+        CanFrame frRc = {};
+        frRc.identifier       = can::CMD_RC_OVERRIDE;
+        frRc.extd             = 0;
+        frRc.data_length_code = 5;
+        frRc.data[0]          = overrideActive ? 0x01 : 0x00;
+        frRc.data[1]          = static_cast<uint8_t>(thrPct + 0.5f);
+        frRc.data[2]          = static_cast<uint8_t>(deg10 & 0xFF);
+        frRc.data[3]          = static_cast<uint8_t>((deg10 >> 8) & 0xFF);
+        frRc.data[4]          = rcOverrideSeq++;
+        ESP32Can.writeFrame(frRc, 0);
     }
 #endif // REMOTE_CONTROL_ENABLED
 

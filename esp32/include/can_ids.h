@@ -28,6 +28,13 @@ inline constexpr uint32_t HEARTBEAT_ESP32       = 0x011;    // DLC 1, 100 ms
 inline constexpr uint32_t CMD_THROTTLE          = 0x100;    // DLC 1, 50 ms
 inline constexpr uint32_t CMD_STEERING          = 0x101;    // DLC 2, 50 ms
 inline constexpr uint32_t CMD_MODE              = 0x102;    // DLC 2 (byte0=mode flags, byte1=gear), on-demand
+inline constexpr uint32_t CMD_RC_OVERRIDE       = 0x10A;    // DLC 5, 50 ms
+                                                            // ESP32 → STM32 RC override demand.
+                                                            // byte0: flags (bit0=override_active / CH10=REMOTE)
+                                                            // byte1: throttle 0..100
+                                                            // byte2..3: int16 LE steering 1/10°
+                                                            // byte4: seq rolling counter
+                                                            // 200 ms STM32-side watchdog → failsafe to local pedal.
 inline constexpr uint32_t CMD_LED               = 0x120;    // DLC 2 (byte0=front relay, byte1=rear relay), on-demand
 inline constexpr uint32_t CMD_SYSTEM_SHUTDOWN   = 0x130;    // DLC 0 or 1, on-demand
                                                             // Pre-power-cut safe-state handshake.

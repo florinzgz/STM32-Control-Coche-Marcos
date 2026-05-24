@@ -27,6 +27,11 @@ extern "C" {
 #define CAN_ID_CMD_THROTTLE       0x100  // ESP32 → STM32 (50ms)
 #define CAN_ID_CMD_STEERING       0x101  // ESP32 → STM32 (50ms)
 #define CAN_ID_CMD_MODE           0x102  // ESP32 → STM32 (on-demand)
+#define CAN_ID_CMD_RC_OVERRIDE    0x10A  // ESP32 → STM32 (50ms) RC override demand
+                                          // DLC 5: byte0=flags (bit0=override_active),
+                                          // byte1=throttle 0..100, byte2..3=int16 LE
+                                          // steer 1/10°, byte4=seq.  See rc_arbiter.h.
+                                          // 200 ms watchdog → failsafe to local pedal.
 #define CAN_ID_CMD_LED            0x120  // ESP32 → STM32 (on-demand) LED relay control
 #define CAN_ID_CMD_SYSTEM_SHUTDOWN 0x130 // ESP32 → STM32 (on-demand) pre-power-cut safe-state request
                                           // Payload: empty or 1 byte (ignored).
