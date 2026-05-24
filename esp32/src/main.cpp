@@ -706,7 +706,8 @@ void setup() {
     shifter::init();
 
     // Initialize remote control parser (FlySky FS-iA6B iBUS, GPIO 16 RX).
-    // Inlined no-op when REMOTE_CONTROL_ENABLED=0 (default).  See
+    // Enabled by default (REMOTE_CONTROL_ENABLED=1 in platformio.ini);
+    // compiles to an inline no-op when the flag is set to 0.  See
     // docs/REMOTE_CONTROL_IMPLEMENTATION_PLAN.md Phase 2.
     remote_control::init();
 
@@ -909,7 +910,7 @@ void loop() {
         xSemaphoreGive(vdMutex);
     }
 
-    // Poll iBUS parser (no-op when REMOTE_CONTROL_ENABLED=0) and compute
+    // Poll iBUS parser (no-op only when REMOTE_CONTROL_ENABLED=0) and compute
     // unified LOCAL/REMOTE arbitration gates for all RC-driven subsystems.
     remote_control::update();
     const bool remoteAuthorityActive =

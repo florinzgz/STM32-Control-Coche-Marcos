@@ -25,11 +25,11 @@
 //   CH9  → audio volume 0..30          (analog, ESP32 audio::setVolume)
 //   CH10 → LOCAL / REMOTE sovereignty  (master gate: LOCAL ⇒ no CAN emission)
 //
-// **Disabled by default** via REMOTE_CONTROL_ENABLED=0.  When disabled this
-// header still compiles and exposes stub-safe inline no-ops so main.cpp can
-// reference the API without conditional compilation everywhere.  When enabled
-// at build time (-DREMOTE_CONTROL_ENABLED=1), the real implementation in
-// remote_control.cpp links in.
+// **Enabled by default** via REMOTE_CONTROL_ENABLED=1 in platformio.ini.
+// When compiled with `-DREMOTE_CONTROL_ENABLED=0` this header still compiles
+// and exposes stub-safe inline no-ops so main.cpp can reference the API
+// without conditional compilation everywhere.  The real implementation in
+// remote_control.cpp links in whenever the flag is non-zero.
 //
 // **STM32 invariants preserved**: this module never sends frames out of range,
 // never modifies STM32 firmware, never changes safety paths.  The STM32
