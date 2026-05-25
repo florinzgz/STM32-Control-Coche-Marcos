@@ -29,8 +29,8 @@
 | **CH6** | Interruptor 3 posiciones | **Modo tracción** | LOW = 2WD · MID = 4WD · HIGH = 4WD+Tank | `CMD_MODE` 0x102, flags byte: 0x00 / 0x01 / 0x03 |
 | **CH7** | Interruptor 3 posiciones | **Marcha** | LOW = Reversa(1) · MID = Neutro(2) · HIGH = Adelante(3) | `CMD_MODE` 0x102, byte1 = gear; confirma con audio GEAR_* |
 | **CH8** | Interruptor 2 posiciones | **Luces** ON/OFF | HIGH = ON · LOW = OFF | `CMD_LED` 0x120, bytes 0-1 = front/rear; confirma con audio LIGHTS_ON/OFF |
-| **CH9** | Potenciómetro rotativo | **Volumen de audio** | 0…30 (rango DFPlayer) | `audio::setVolume()` local en ESP32; debounce 200 ms, histeresis 1 nivel |
-| **CH10** | Interruptor 2 posiciones | **Soberanía LOCAL / REMOTE** (palanca maestra) | HIGH (>1700) = REMOTE (mando activo) · LOW = LOCAL (coche físico manda) | Gate global: si LOW, no se emite ningún CAN desde el mando |
+| **CH9** | Potenciómetro rotativo | **Volumen de audio** | 0…30 (rango DFPlayer) | `audio::setVolume()` local en ESP32; debounce 250 ms, histeresis 2 niveles |
+| **CH10** | Interruptor 2 posiciones | **Soberanía LOCAL / REMOTE** (palanca maestra) | HIGH (>1700) = REMOTE (mando activo) · LOW = LOCAL (coche físico manda) | Gate global: si LOW se anula la autoridad RC; el ESP32 sigue emitiendo `0x10A` con `override_flag=0` para que el STM32 vuelva al pedal físico |
 
 ### Notas de seguridad (firmware verificado)
 

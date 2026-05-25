@@ -23,7 +23,9 @@
 //   CH7  → gear D/N/R                  (discrete, optional, coordinated w/ MCP23017 shifter)
 //   CH8  → lights ON/OFF               (digital, optional)
 //   CH9  → audio volume 0..30          (analog, ESP32 audio::setVolume)
-//   CH10 → LOCAL / REMOTE sovereignty  (master gate: LOCAL ⇒ no CAN emission)
+//   CH10 → LOCAL / REMOTE sovereignty  (master gate: LOCAL disables RC authority;
+//                                       CAN status / 0x10A override frames may still
+//                                       be emitted with override_flag=0)
 //
 // **Enabled by default** via REMOTE_CONTROL_ENABLED=1 in platformio.ini.
 // When compiled with `-DREMOTE_CONTROL_ENABLED=0` this header still compiles
@@ -156,7 +158,7 @@ inline float    getThrottlePct()            { return 0.0f; }
 inline float    getSteeringDeg()            { return 0.0f; }
 inline bool     isKillSwitchActive()        { return true; }   // Fail-safe default
 inline bool     isRemoteSelected()          { return false; }
-inline uint8_t  getDriveMode()              { return 0; }      // 2WD + tank OFF
+inline uint8_t  getDriveMode()              { return 0; }      // 2WD + tank OFF (safe default when RC disabled)
 inline uint8_t  getRequestedGear()          { return 2; }      // NEUTRAL
 inline bool     isLightsOn()                { return false; }
 inline uint8_t  getAudioVolume()            { return 0; }

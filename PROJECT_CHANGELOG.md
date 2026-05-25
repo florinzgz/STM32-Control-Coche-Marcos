@@ -1,6 +1,6 @@
 # PROJECT_CHANGELOG
 
-## [unreleased] — 2026-05-24 (mando RC — soberanía LOCAL/REMOTE unificada + activación por defecto)
+## [2026-05-24c] — mando RC — soberanía LOCAL/REMOTE unificada + activación por defecto
 
 ### Resumen ejecutivo
 
@@ -150,7 +150,7 @@ esp32/src/test_remote_control.cpp (+ asserts CH6 mid y high)
 
 ---
 
-## [unreleased] — 2026-05-24 (RC override arbiter `0x10A` con failsafe estricto de 200 ms)
+## [2026-05-24b] — RC override arbiter `0x10A` con failsafe estricto de 200 ms
 
 ### Resumen ejecutivo
 
@@ -295,7 +295,7 @@ esp32/src/main.cpp                (− emisión 0x100/0x101 RC, + emisión 0x10A
 
 ---
 
-## [unreleased] — 2026-05-24 (mando RC FlySky FS-i6X — Fases 1 y 2, módulo aislado, desactivado por defecto)
+## [2026-05-24a] — mando RC FlySky FS-i6X — Fases 1 y 2, módulo aislado, desactivado por defecto
 
 ### Resumen ejecutivo
 
