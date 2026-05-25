@@ -1,6 +1,156 @@
 # PROJECT_CHANGELOG
 
-## [unreleased] — 2026-05-24 (RC override arbiter `0x10A` con failsafe estricto de 200 ms)
+## [2026-05-24c] — mando RC — soberanía LOCAL/REMOTE unificada + activación por defecto
+
+### Resumen ejecutivo
+
+Extensión funcional del mando RC más allá del eje aceleración + dirección
+(`0x10A`). El ESP32 ahora puede manejar también **marcha (CH7)**,
+**modos 4x2/4x4/tank-turn (CH6)**, **luces (CH8)** y **volumen de audio
+(CH9)** desde el mando, bajo un único modelo de **arbitraje LOCAL/REMOTE
+unificado** gobernado por **CH10**. El selector LOCAL/REMOTE pasa a ser
+soberano de **todas** las entradas que se han enlazado al mando, en vez
+de cubrir sólo dirección/tracción.
+
+Además, **se activa por defecto** la compilación con
+`REMOTE_CONTROL_ENABLED=1` en `esp32/platformio.ini`. El binario de
+producción ya incluye el parser iBUS y los enlaces a las cuatro
+subsistemas extra. El STM32 **no requiere cambios**; toda la lógica nueva
+vive en el ESP32 y reutiliza CAN IDs ya soportados (`0x102`, `0x120`,
+`0x10A`).
+
+### Modelo de autoridad
+
+Dos puertas de autoridad calculadas cada vuelta del `loop()` en
+`esp32/src/main.cpp`:
+
+```cpp
+remoteAuthorityActive       = stm32IsAlive
+                              && remote_control::isRemoteSelected()  // CH10
+                              && remote_control::getState() == ACTIVE;
+remoteMotionAuthorityActive = remoteAuthorityActive
+                              && !remote_control::isKillSwitchActive(); // CH5
+```
+
+- `remoteMotionAuthorityActive` decide marcha (CH7) y modos (CH6) — son
+  comandos que mueven el coche, por lo que CH5 (kill) los gatea.
+- `remoteAuthorityActive` decide luces (CH8) y volumen (CH9) — son
+  comandos no críticos para el movimiento, basta con que CH10 esté en
+  REMOTE y el parser ACTIVE.
+- Cuando cualquiera de las puertas cae, el subsistema correspondiente
+  vuelve automáticamente al control local (palanca MCP23017, rocker DPDT
+  de tracción, UI táctil de luces/tank, volumen guardado en NVS) en
+  ≤ 200 ms.
+
+### Mapeo de canales y subsistemas
+
+| Canal | Función | Camino actual                                                           |
+|-------|---------|--------------------------------------------------------------------------|
+| CH1   | Volante (±30°) | `0x10A` byte 2–3, validado en STM32 (`Safety_ValidateSteering`) |
+| CH2   | Acelerador (0–100 %) | `0x10A` byte 1, validado en STM32 (`Safety_ValidateThrottle`) |
+| CH3   | Trim de volante (±5°) | sumado al CH1 antes del clamp ±30°                          |
+| CH5   | Kill switch | gate de `remoteMotionAuthorityActive`                                |
+| **CH6** | **Modos: 2WD/4WD/4WD+tank** | flags `CMD_MODE` (`0x00`, `0x01`, `0x03`), enviados con `sendModeCommand()` (`0x102` byte 0) |
+| **CH7** | **Marcha P/R/N/D/D2** | enviada con `sendGearCommand()` (`0x102` byte 1) cuando manda el mando, MCP23017 cuando no |
+| **CH8** | **Luces front+rear** | enviado con `sendLedCommand()` (`0x120` bytes 0,1) y persistido en NVS |
+| **CH9** | **Volumen DFPlayer (0–30)** | aplicado vía `audio::setVolume()` + `config_store::setAudioVolume()` con histéresis 2 pasos + debounce 250 ms |
+| CH10  | LOCAL / REMOTE | soberanía global; arriba del umbral ⇒ mando dueño de todo lo anterior |
+
+### Cambios en el ESP32 (`esp32/`)
+
+- **`esp32/platformio.ini`** — `build_flags` incluye `-DREMOTE_CONTROL_ENABLED=1`
+  por defecto; comentario explicativo añadido. Para volver al binario
+  pre-mando basta con poner `0`.
+- **`esp32/src/remote_control.h`** — re-documentado CH6 como
+  *mode flags* (no ECO/NORMAL/SPORT). Stub disabled actualizado a `0x00`.
+- **`esp32/src/remote_control.cpp`** — `getDriveMode()` re-mapeada:
+  - low  → `0x00` (2WD, tank OFF)
+  - mid  → `0x01` (4WD, tank OFF)
+  - high → `0x03` (4WD, tank ON)
+  Coincide bit-a-bit con `MODE_FLAG_4X4` y `MODE_FLAG_TANK_TURN` que ya
+  procesa el STM32 en `0x102`.
+- **`esp32/src/main.cpp`** — un único `remote_control::update()` por
+  iteración, cálculo de las dos puertas de autoridad y arbitraje:
+  - Marcha (`sendGearCommand`, `0x102` byte 1) escoge entre CH7 y la
+    palanca MCP23017.
+  - Modos (`sendModeCommand`, `0x102` byte 0) escogen entre CH6 y el
+    rocker DPDT físico (`traction_sw`).
+  - Luces (`sendLedCommand`, `0x120`) gateadas para no aceptar toques
+    de la UI táctil cuando el mando es soberano; CH8 fuerza front+rear.
+  - Volumen aplica CH9 con histéresis (≥ 2 pasos) y debounce (≥ 250 ms)
+    para evitar “baile” por jitter del potenciómetro.
+  - `overrideActive` del frame `0x10A` ahora se calcula con la misma
+    puerta `remoteMotionAuthorityActive`.
+- **`esp32/src/test_remote_control.cpp`** — añadidos sub-casos para
+  CH6 mid (`0x01`) y CH6 high (`0x03`). Total: **40 asserts, 0 fallos**.
+
+### STM32 (`Core/`)
+
+Sin cambios. Todas las rutas siguen recibiendo:
+- `0x102` con (modeFlags, gear) — `CAN_HandleCmdMode()` ya soportaba este DLC.
+- `0x120` con (front, rear) — `CAN_HandleCmdLed()` ya soportaba este formato.
+- `0x10A` — árbitro `rc_arbiter.c` con failsafe estricto de 200 ms (sin cambios).
+
+### Cómo conectar el mando y los módulos
+
+Conexionado eléctrico (resumen): receptor **FlySky FS-iA6B** (port
+`SENS/iBUS`) → ESP32-S3 según `docs/REMOTE_CONTROL_WIRING.md`:
+
+| FS-iA6B `SENS/iBUS` | Cable | Destino                                  |
+|---------------------|-------|------------------------------------------|
+| `S` (3.3 V TTL)     | 1     | **GPIO 16** del ESP32-S3 (RX, INPUT)      |
+| `+` (VCC)           | 2     | Rail **+5 V** del proyecto                |
+| `−` (GND)           | 3     | GND común                                  |
+
+Filtros recomendados: ferrita snap-on en el cable de alimentación,
+100 nF + 10 µF cerca del pin VCC del receptor.
+
+Flujo lógico con los demás módulos:
+
+```
+FS-iA6B (RF)
+   └─► iBUS UART (GPIO 16) ─► remote_control::update() (ESP32)
+                                  │
+              ┌────── CH10 = REMOTE & ACTIVE & !kill ──────┐
+              ▼                                            ▼
+   sendGearCommand (CAN 0x102 b1)          sendLedCommand   (CAN 0x120)
+   sendModeCommand (CAN 0x102 b0)          audio::setVolume (local DFPlayer)
+              │                                            │
+              ▼                                            ▼
+      STM32 motor + relés                  ESP32 GPIO relés luces + audio
+        (sin cambios)                                  (sin cambios)
+```
+
+Si CH10 está en LOCAL, los datos físicos siguen mandando: palanca
+MCP23017 (`shifter::getGearRaw`), rocker DPDT (`traction_sw`), UI táctil
+de luces, volumen NVS — exactamente como antes.
+
+### Verificación
+
+- Tests host `test_remote_control.cpp` ejecutados con
+  `-DREMOTE_CONTROL_ENABLED=1 -DREMOTE_CONTROL_TEST_HOOKS`: **40 run,
+  0 failed** (parser iBUS, FSM failsafe, CH5/CH10 gates, sub-mapeo
+  CH6 low/mid/high).
+- `grep` de coherencia: el módulo se incluye igual en ambos lados de
+  `#if REMOTE_CONTROL_ENABLED`; los stubs siguen vivos para mantener
+  reversibilidad.
+- STM32 no se ha tocado: `safety_system.c`, `motor_control.c`, IWDG,
+  steering centering, ABS/TCS, `rc_arbiter.c`, `can_handler.c` quedan
+  inalterados.
+
+### Archivos modificados
+
+```
+esp32/platformio.ini             (+ -DREMOTE_CONTROL_ENABLED=1 por defecto)
+esp32/src/main.cpp               (+ arbitraje unificado CH6/CH7/CH8/CH9)
+esp32/src/remote_control.cpp     (CH6 → flags 0x00/0x01/0x03)
+esp32/src/remote_control.h       (doc CH6 + stub default 0x00)
+esp32/src/test_remote_control.cpp (+ asserts CH6 mid y high)
+```
+
+---
+
+## [2026-05-24b] — RC override arbiter `0x10A` con failsafe estricto de 200 ms
 
 ### Resumen ejecutivo
 
@@ -145,7 +295,7 @@ esp32/src/main.cpp                (− emisión 0x100/0x101 RC, + emisión 0x10A
 
 ---
 
-## [unreleased] — 2026-05-24 (mando RC FlySky FS-i6X — Fases 1 y 2, módulo aislado, desactivado por defecto)
+## [2026-05-24a] — mando RC FlySky FS-i6X — Fases 1 y 2, módulo aislado, desactivado por defecto
 
 ### Resumen ejecutivo
 

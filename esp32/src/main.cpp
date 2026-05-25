@@ -151,6 +151,10 @@ static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, b
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
 static bool     farewellPlayed    = false;
+static uint8_t  lastAppliedAudioVolume = 15;
+static unsigned long lastRemoteVolumeSetMs = 0;
+static constexpr unsigned long REMOTE_VOLUME_DEBOUNCE_MS = 250;
+static constexpr uint8_t       REMOTE_VOLUME_HYSTERESIS  = 2;
 // Brownout/reboot guard: minimum interval between WELCOME sounds.
 // On rapid MCU resets (brownout, watchdog) the ESP32 may restart
 // multiple times in quick succession.  This timestamp prevents audio
@@ -702,7 +706,8 @@ void setup() {
     shifter::init();
 
     // Initialize remote control parser (FlySky FS-iA6B iBUS, GPIO 16 RX).
-    // Inlined no-op when REMOTE_CONTROL_ENABLED=0 (default).  See
+    // Enabled by default (REMOTE_CONTROL_ENABLED=1 in platformio.ini);
+    // compiles to an inline no-op when the flag is set to 0.  See
     // docs/REMOTE_CONTROL_IMPLEMENTATION_PLAN.md Phase 2.
     remote_control::init();
 
@@ -723,6 +728,7 @@ void setup() {
 
         // Apply saved audio volume to DFPlayer
         audio::setVolume(cfg.audioVolume);
+        lastAppliedAudioVolume = cfg.audioVolume;
 
         // Populate vehicleData with initial mode flags
         vehicle::ModeData md;
@@ -904,17 +910,23 @@ void loop() {
         xSemaphoreGive(vdMutex);
     }
 
+    // Poll iBUS parser (no-op only when REMOTE_CONTROL_ENABLED=0) and compute
+    // unified LOCAL/REMOTE arbitration gates for all RC-driven subsystems.
+    remote_control::update();
+    const bool remoteAuthorityActive =
+        stm32IsAlive &&
+        remote_control::isRemoteSelected() &&
+        remote_control::getState() == remote_control::State::ACTIVE;
+    const bool remoteMotionAuthorityActive =
+        remoteAuthorityActive && !remote_control::isKillSwitchActive();
+
     // ---- Shifter gear update ----
-    // Poll MCP23017, send CAN 0x102 on gear change.
-    // SAFETY FIX: Gate gear commands on STM32 liveness.  If the STM32
-    // heartbeat counter is frozen the vehicle controller is not responsive;
-    // sending gear changes to a non-responding node could cause stale
-    // commands to execute when the node recovers.
+    // Poll shifter + RC CH7 and send CAN 0x102 on authoritative source change.
     {
         shifter::update();
-        // Poll iBUS parser (no-op when REMOTE_CONTROL_ENABLED=0).
-        remote_control::update();
-        uint8_t gear = shifter::getGearRaw();
+        uint8_t gear = remoteMotionAuthorityActive
+                     ? remote_control::getRequestedGear()
+                     : shifter::getGearRaw();
         if (gear != lastSentGear &&
             (now - lastGearSendMs) >= GEAR_SEND_DEBOUNCE_MS &&
             stm32IsAlive) {
@@ -929,7 +941,10 @@ void loop() {
                 case shifter::Gear::FORWARD:    audio::play(audio::Sound::GEAR_D1,      audio::Priority::LO); break;
                 case shifter::Gear::FORWARD_D2: audio::play(audio::Sound::GEAR_D2,      audio::Priority::LO); break;
             }
-            Serial.printf("[SHIFTER] Gear → %u\n", gear);
+            Serial.printf(remoteMotionAuthorityActive
+                              ? "[REMOTE] Gear(CH7) → %u\n"
+                              : "[SHIFTER] Gear → %u\n",
+                          gear);
         }
     }
 
@@ -947,7 +962,18 @@ void loop() {
 
         traction_sw::update(swSpeedKmh);
 
-        if (traction_sw::hasChanged() && stm32IsAlive) {
+        if (remoteMotionAuthorityActive) {
+            uint8_t remoteModeFlags = remote_control::getDriveMode();
+            if (remoteModeFlags != currentModeFlags && stm32IsAlive) {
+                currentModeFlags = remoteModeFlags;
+                sendModeCommand(currentModeFlags);
+                vehicle::ModeData md;
+                md.modeFlags   = currentModeFlags;
+                md.timestampMs = millis();
+                vehicleData.setMode(md);
+                Serial.printf("[REMOTE] Mode(CH6) → flags=0x%02X\n", currentModeFlags);
+            }
+        } else if (traction_sw::hasChanged() && stm32IsAlive) {
             // Update mode flags: preserve tank turn bit, set 4x4 from switch
             uint8_t tractionBit = traction_sw::getModeFlag();
             currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
@@ -982,6 +1008,7 @@ void loop() {
         while (xQueueReceive(touchActionQueue, &act, 0) == pdTRUE) {
             switch (act) {
                 case TouchAction::FRONT_LED_TOGGLE:
+                    if (remoteAuthorityActive) break;
                     frontLedLocalState = !frontLedLocalState;
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     config_store::setFrontLedEnabled(frontLedLocalState);
@@ -993,6 +1020,7 @@ void loop() {
                     break;
 
                 case TouchAction::REAR_LED_TOGGLE:
+                    if (remoteAuthorityActive) break;
                     rearLedLocalState = !rearLedLocalState;
                     sendLedCommand(frontLedLocalState, rearLedLocalState);
                     config_store::setRearLedEnabled(rearLedLocalState);
@@ -1004,7 +1032,7 @@ void loop() {
                     break;
 
                 case TouchAction::TANK_MODE_TOGGLE:
-                    if (stm32IsAlive) {
+                    if (stm32IsAlive && !remoteAuthorityActive) {
                         currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
                         audio::play(audio::Sound::BEEP, audio::Priority::LO);
                         sendModeCommand(currentModeFlags);
@@ -1017,6 +1045,41 @@ void loop() {
                     }
                     break;
             }
+        }
+
+    }
+
+    // ---- Remote lights (CH8) ----
+    // In REMOTE authority mode, CH8 owns both front/rear light relays.
+    if (remoteAuthorityActive) {
+        bool lightsOn = remote_control::isLightsOn();
+        if (frontLedLocalState != lightsOn || rearLedLocalState != lightsOn) {
+            frontLedLocalState = lightsOn;
+            rearLedLocalState  = lightsOn;
+            sendLedCommand(frontLedLocalState, rearLedLocalState);
+            config_store::setFrontLedEnabled(frontLedLocalState);
+            config_store::setRearLedEnabled(rearLedLocalState);
+            audio::play(lightsOn ? audio::Sound::LIGHTS_ON
+                                 : audio::Sound::LIGHTS_OFF,
+                        audio::Priority::LO);
+            Serial.printf("[REMOTE] Lights(CH8) → %s\n", lightsOn ? "ON" : "OFF");
+        }
+    }
+
+    // ---- Remote audio volume (CH9) ----
+    // Debounce + hysteresis to avoid rapid volume chatter from RC jitter.
+    if (remoteAuthorityActive) {
+        uint8_t remoteVolume = remote_control::getAudioVolume();
+        uint8_t delta = (remoteVolume > lastAppliedAudioVolume)
+                      ? (remoteVolume - lastAppliedAudioVolume)
+                      : (lastAppliedAudioVolume - remoteVolume);
+        if (delta >= REMOTE_VOLUME_HYSTERESIS &&
+            (now - lastRemoteVolumeSetMs) >= REMOTE_VOLUME_DEBOUNCE_MS) {
+            audio::setVolume(remoteVolume);
+            config_store::setAudioVolume(remoteVolume);
+            lastAppliedAudioVolume = remoteVolume;
+            lastRemoteVolumeSetMs  = now;
+            Serial.printf("[REMOTE] Volume(CH9) → %u\n", remoteVolume);
         }
     }
 
@@ -1517,11 +1580,7 @@ void loop() {
         // CH5 kill switch released, CH10 selector in REMOTE, and STM32
         // alive.  Anything failing here → override_flag=0 → STM32
         // returns control to the pedal at the next arbiter check.
-        bool overrideActive =
-            remote_control::isActive() &&
-            !remote_control::isKillSwitchActive() &&
-            remote_control::isRemoteSelected() &&
-            stm32IsAlive;
+        bool overrideActive = remoteMotionAuthorityActive;
 
         // Sanitize stick values regardless of override gate so the
         // STM32 always sees in-range numbers (avoids spurious arbiter

@@ -325,11 +325,12 @@ bool isRemoteSelected() {
 }
 
 uint8_t getDriveMode() {
-    // CH6 three-position: low=ECO(0), mid=NORMAL(1), high=SPORT(2)
-    if (!s_haveFrame) return 1;
-    if (s_ch[5] < SW_LOW_THR)  return 0;
-    if (s_ch[5] > SW_HIGH_THR) return 2;
-    return 1;
+    // CH6 three-position mapped to CMD_MODE flags:
+    // low=2WD (0x00), mid=4WD (0x01), high=4WD+tank (0x03)
+    if (!s_haveFrame) return 0x00;
+    if (s_ch[5] < SW_LOW_THR)  return 0x00;
+    if (s_ch[5] > SW_HIGH_THR) return 0x03;
+    return 0x01;
 }
 
 uint8_t getRequestedGear() {

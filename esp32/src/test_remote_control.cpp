@@ -302,7 +302,7 @@ static void test_discrete_channels() {
 
     uint16_t channels[14];
     defaultChannels(channels);
-    channels[5] = 1000;   // CH6 low → ECO
+    channels[5] = 1000;   // CH6 low → 2WD (0x00)
     channels[6] = 2000;   // CH7 high → FORWARD
     channels[7] = 1900;   // CH8 high → lights ON
     channels[8] = 1500;   // CH9 mid → volume ~15
@@ -317,6 +317,22 @@ static void test_discrete_channels() {
     ASSERT(isLightsOn());
     uint8_t v = getAudioVolume();
     ASSERT(v >= 14 && v <= 16);
+
+    // CH6 mid → 4WD (0x01)
+    channels[5] = 1500;
+    test::buildFrame(channels, f);
+    test::setNowMs(30);
+    test::feedBytes(f, 32);
+    update();
+    ASSERT_EQ(getDriveMode(), 1);
+
+    // CH6 high → 4WD + tank-turn (0x03)
+    channels[5] = 2000;
+    test::buildFrame(channels, f);
+    test::setNowMs(50);
+    test::feedBytes(f, 32);
+    update();
+    ASSERT_EQ(getDriveMode(), 3);
 }
 
 static void test_sanity_reject_out_of_range() {
