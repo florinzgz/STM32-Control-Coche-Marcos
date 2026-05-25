@@ -17,23 +17,6 @@
 //   [10–61]  Centre tail / brake / reverse / regen lights (52 LEDs)
 //   [62–71]  Right turn-signal indicator (amber blink 500 ms, 10 LEDs)
 //
-// Architecture ported from FULL-FIRMWARE-Coche-Marcos (florinzgz):
-//   src/lighting/led_controller.cpp + include/led_controller.h
-// Adapted for CAN-based VehicleData model (no direct sensor reads).
-//
-// Turn signals are managed locally on the ESP32 (no STM32 CAN involvement).
-// Power relay on STM32 (PB10) must be ON for LEDs to light.
-//
-// ---- FUTURE: RELAY-BASED VISUAL DIAGNOSTICS ----
-// The motor relay command state (TRACTION/STEER_PWR) is now available
-// in VehicleData::heartbeat().relayStatus (CAN 0x001 byte 5).
-// This can be used to:
-//   - Flash LED strips during relay power-up sequence as visual feedback
-//   - Show relay failure state via LED color changes
-//   - Provide non-UI relay diagnostics for installations without a display
-// Currently NOT implemented — relay state is display-only (DriveScreen +
-// EngineeringScreen).  LED controller remains purely lighting-focused.
-//
 // Reference: docs/PIN_USAGE_INVENTORY.md §5.6
 //            github.com/florinzgz/FULL-FIRMWARE-Coche-Marcos
 // =============================================================================
@@ -52,46 +35,16 @@ inline constexpr int LED_REAR_PIN    = 48;   // GPIO 48 — rear strip data
 inline constexpr int NUM_LEDS_FRONT  = 70;
 inline constexpr int NUM_LEDS_REAR   = 72;
 
-// ---- Front strip zone boundaries ----
+// ---- Front and Rear installation direction ----
 //
-// ⚠ PHYSICAL INSTALLATION CONTRACT:
+// ⚠️ PHYSICAL INSTALLATION CONTRACT (ACTUALIZADO MAY 2026):
+// Las dos tiras deben conectarse con DATA IN por el lado DERECHO mirando el coche de frente
+// (o, desde atrás hacia adelante, el lado izquierdo del coche). LED_STRIP_REVERSED=1.
+// No se ha alterado ninguna otra lógica ni hardware, solo el sentido de conexión física.
 //
-// DATA IN of the front WS2812B strip must start from the LEFT side of
-// the vehicle (standing in front of the vehicle, looking backward).
-//
-//   FRONT VIEW (looking at the front of the vehicle):
-//
-//     DATA IN →  [0] [1] ... [9] [10] [11] ... [58] [59] [60] [61] ... [69]
-//                ├──── LEFT ────┤  ├────── CENTRE ──────┤  ├───── RIGHT ─────┤
-//                  10 LEDs                 50 LEDs              10 LEDs
-//
-// LED_STRIP_REVERSED effect on front strip:
-//   0 (default): LED[0-9]=LEFT,  LED[60-69]=RIGHT  (normal)
-//   1 (swapped): LED[0-9]=RIGHT, LED[60-69]=LEFT   (reversed data cable)
-//
-// ---- Rear strip zone boundaries ----
-//
-// ⚠ PHYSICAL INSTALLATION CONTRACT:
-//
-// DATA IN of the rear WS2812B strip must start from the LEFT side of the
-// vehicle (standing behind the vehicle, looking forward toward the front).
-//
-//   REAR VIEW (looking at the back of the vehicle):
-//
-//     DATA IN →  [0] [1] ... [9] [10] [11] ... [60] [61] [62] [63] ... [71]
-//                ├──── LEFT ────┤  ├────── CENTRE ──────┤  ├───── RIGHT ─────┤
-//                  10 LEDs                 52 LEDs              10 LEDs
-//
-// If the installer routes the data cable from the RIGHT side instead,
-// define LED_STRIP_REVERSED=1 at compile time to swap LEFT/RIGHT zones
-// without editing hardware.  The swap is compile-time only — zero runtime
-// cost.  Centre zone indices are unchanged in both orientations.
-//
-// LED_STRIP_REVERSED effect:
-//   0 (default): LED[0-9]=LEFT,  LED[62-71]=RIGHT  (normal)
-//   1 (swapped): LED[0-9]=RIGHT, LED[62-71]=LEFT   (reversed data cable)
+//  #define LED_STRIP_REVERSED 1
 #ifndef LED_STRIP_REVERSED
-#define LED_STRIP_REVERSED 0
+#define LED_STRIP_REVERSED 1
 #endif
 
 #if LED_STRIP_REVERSED
@@ -197,3 +150,4 @@ bool isEmergencyFlashActive();
 } // namespace led_ctrl
 
 #endif // LED_CONTROLLER_H
+
