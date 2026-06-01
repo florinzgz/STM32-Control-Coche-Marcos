@@ -1,5 +1,56 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-01] — Safe Mode I2C: `0x309` STALE + pistas de causa para `NO DATA` (3 archivos)
+
+### Resumen ejecutivo
+
+Esta PR amplía el bloque de diagnóstico I2C ya existente en la pantalla
+**Safe Mode** del ESP32 para que el operario pueda distinguir tres casos:
+
+- **`0x309: NO DATA`** cuando nunca llegó la trama de diagnóstico.
+- **`STM32 FW: no 0x309`** si hay heartbeat STM32 pero no existe esa trama
+  (firmware antiguo o sin esta extensión).
+- **`0x309 STALE Ns`** si la trama llegó una vez pero dejó de refrescarse
+  durante más de 2 s.
+
+Además, cuando el diagnóstico queda **stale**, la UI conserva la última
+topología conocida de canales I2C en gris para indicar que es información
+histórica y ya no confiable. Todo el cambio es **pasivo**: no modifica lógica
+de seguridad, CAN Tx, control motor ni relés.
+
+### Archivos modificados (3)
+
+1. `Documentos/SAFE_MODE_UI_EXTENSION.md`
+2. `esp32/src/screens/safe_screen.cpp`
+3. `esp32/src/screens/safe_screen.h`
+
+### Cambios principales
+
+- `esp32/src/screens/safe_screen.cpp`
+  - Añade detección de edad del frame `0x309` y marca **STALE** a partir de
+    2000 ms.
+  - Usa el timestamp del heartbeat para diferenciar **firmware STM32 sin
+    `0x309`** frente a **posible caída del enlace CAN**.
+  - Renderiza nuevos textos: `0x309: NO DATA`, `STM32 FW: no 0x309`,
+    `CAN link?`, `0x309 STALE Ns` y `last data stale`.
+  - Mantiene visibles los labels `FL FR RL RR BT ST` en gris cuando los datos
+    son históricos.
+
+- `esp32/src/screens/safe_screen.h`
+  - Añade estado interno para la UI: `i2cAgeMs_`, `i2cStale_` e
+    `i2cHbAlive_`.
+
+- `Documentos/SAFE_MODE_UI_EXTENSION.md`
+  - Documenta los nuevos estados **NO DATA** y **STALE**.
+  - Amplía la leyenda de colores y la tabla de troubleshooting para cubrir
+    firmware STM32 antiguo, caída de CAN y diagnóstico detenido.
+
+### Nota para rollback
+
+Para volver al comportamiento anterior de este bloque, revertir juntos estos
+3 archivos para mantener coherencia entre la implementación de la tile I2C y
+su documentación.
+
 ## [2026-06-01] — DIAG_I2C (0x309) + bloque I2C en Safe Mode (15 archivos)
 
 ### Resumen ejecutivo
