@@ -1,5 +1,37 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-01] — DIAG_I2C (0x309) + bloque I2C en Safe Mode (15 archivos)
+
+### Resumen ejecutivo
+
+Se añadió diagnóstico I2C end-to-end para localizar rápidamente fallos que
+provocan SAFE MODE por bus I2C: nueva trama CAN `0x309` desde STM32,
+decodificación en ESP32 y renderizado en pantalla Safe Mode.
+
+### Archivos modificados (15)
+
+1. `Core/Inc/can_handler.h`
+2. `Core/Inc/sensor_manager.h`
+3. `Core/Src/can_handler.c`
+4. `Core/Src/main.c`
+5. `Core/Src/sensor_manager.c`
+6. `Documentos/SAFE_MODE_UI_EXTENSION.md`
+7. `docs/CAN_CONTRACT_FINAL.md`
+8. `docs/CAN_PROTOCOL.md`
+9. `docs/SENSOR_INTERFACE.md`
+10. `esp32/include/can_ids.h`
+11. `esp32/src/can_rx.cpp`
+12. `esp32/src/screens/safe_screen.cpp`
+13. `esp32/src/screens/safe_screen.h`
+14. `esp32/src/ui/ui_config.h`
+15. `esp32/src/vehicle_data.h`
+
+### Nota para rollback
+
+Para volver al estado anterior a este bloque de cambios, revertir este grupo
+completo de 15 archivos en una sola operación para mantener coherencia entre:
+firmware STM32, parser CAN en ESP32, UI Safe Mode y documentación.
+
 ## [2026-06-01] — Migración I2C1 de PB6/PB7 a PB8/PB9
 
 ### Resumen ejecutivo
