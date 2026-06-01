@@ -1,5 +1,43 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-01] — Acceso al menú Engineering por long-press global (ESP32/HMI)
+
+### Resumen
+
+Se cambia el gesto de acceso al menú oculto **Engineering** del ESP32-S3. Hasta
+ahora era obligatorio mantener pulsado el **icono de batería** para abrir la
+pantalla de PIN; en algunos estados (p. ej. **Safe Mode**) ese icono no es
+visible/accesible, impidiendo entrar al diagnóstico.
+
+- **Antes:** long-press (3 s) **sobre el icono de batería** → PIN → 8989 → Engineering.
+- **Ahora:** long-press (3 s) sobre **cualquier zona libre de la pantalla** → PIN → 8989 → Engineering.
+
+El flujo posterior (pantalla PIN existente, código **8989**, entrada a
+Engineering) **no cambia**. El gesto antiguo del icono de batería **se conserva**
+como compatibilidad, ya que la región del icono es un subconjunto de la pantalla
+completa (no requiere código aparte).
+
+### Detalle técnico (sólo ESP32/HMI)
+
+- **`esp32/src/screen_manager.cpp` / `.h`**: `onLongPress()` deja de hacer
+  hit-test del icono de batería y llama a `activatePinScreen()` para un
+  long-press en cualquier punto. Sigue ignorándose si ya está activa la pantalla
+  PIN, Engineering o el asistente de calibración. El despacho del evento no está
+  condicionado por estado, por lo que **funciona también en Safe Mode**.
+- **`esp32/src/touch_handler.cpp` / `.h`**: el detector de long-press (ya basado
+  en `millis()`, sin `delay()` bloqueante) añade una **guarda anti-falsos
+  positivos**: si el dedo se desplaza más de `moveCancelPx` (~40 px) respecto al
+  punto inicial, el temporizador se reancla/reinicia. Levantar el dedo antes de
+  3 s sigue cancelando el gesto. No bloquea render ni touch; respeta colas/tareas
+  y `screen_manager`.
+
+### Impacto
+
+- **No afecta al firmware STM32**, ni a motor, CAN, seguridad, watchdog, relés,
+  I2C, ni al diagnóstico `0x309`. Cambio estrictamente ESP32/HMI.
+- **Recompilar y subir el firmware de la ESP32-S3.** No es necesario recompilar
+  ni reprogramar la STM32 (salvo otros cambios pendientes ajenos a este).
+
 ## [2026-06-01] — Observabilidad de entrega CAN 0x309: meta-diagnóstico 0x30A/0x30B/0x30C + modo servicio I2C (0xF6)
 
 ### Resumen ejecutivo
