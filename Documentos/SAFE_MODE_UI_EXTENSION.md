@@ -18,7 +18,7 @@ additional read-only operator information alongside the existing telemetry:
 | **Obstacle Sensor Bar** | Color-coded proximity bar with distance and state (CLEAR/NEAR/DANGER) |
 | **LED System Status** | Front/Rear relay state (ON/OFF) and turn signal state (LEFT/RIGHT/HAZARD/OFF) |
 | **Relay Status** | T D indicators (TRACTION/DIRECTION) with color coding |
-| **I2C Bus Diagnostic** | Live TCA9548A (mux) presence + per-channel INA226 health + fail/recovery counters (helps locate I2C wiring faults) |
+| **I2C Bus Diagnostic** | Live TCA9548A (mux) presence + per-channel INA226 health + fail/recovery counters; distinguishes `NO DATA` (never received) from `STALE` (stopped refreshing) and hints at STM32-firmware-too-old vs CAN-link-down (helps locate I2C wiring/firmware faults) |
 
 ## Data Sources
 
@@ -212,6 +212,19 @@ FL FR RL RR BT ST      ← per-channel INA226 health (green/red/gray)
 fail:N rec:M           ← failed transactions this cycle / sticky recovery attempts
 ```
 
+When no fresh `0x309` is available the same block instead shows one of:
+
+```
+0x309: NO DATA         ← no 0x309 frame ever received
+STM32 FW: no 0x309     ←   cause hint when the STM32 heartbeat IS alive
+CAN link?              ←   cause hint when no heartbeat either
+```
+```
+0x309 STALE 7s         ← a 0x309 was received once but stopped refreshing
+FL FR RL RR BT ST      ←   last-known topology, dimmed gray (not trusted)
+last data stale
+```
+
 ### Data flow
 
 ```
@@ -248,7 +261,10 @@ channels gray = unknown), while a present mux with a dead sensor shows
 | Channel (FL…ST) | gray | mux absent → per-channel state unknown |
 | `fail:/rec:` | amber | failures or recovery attempts present | 
 | `fail:/rec:` | gray | clean (0/0) |
-| Whole block | gray `NO DATA` | no 0x309 frame received yet (does **not** invent OK) |
+| Whole block | gray `0x309: NO DATA` | no 0x309 frame received yet (does **not** invent OK) |
+| `STM32 FW: no 0x309` | amber | NO DATA **and** STM32 heartbeat alive → STM32 firmware too old/not emitting 0x309 |
+| `CAN link?` | gray | NO DATA **and** no heartbeat → CAN link STM32↔ESP32 down |
+| `0x309 STALE Ns` | amber | a 0x309 arrived before but stopped refreshing for > 2 s (STM32 stalled/reset) |
 
 Channel labels map to: `FL FR RL RR BT(=BAT) ST(=STEER)` = mux channels 0..5.
 
@@ -260,7 +276,9 @@ Channel labels map to: `FL FR RL RR BT(=BAT) ST(=STEER)` = mux channels 0..5.
 | `MUX OK` + **all** channels red | INA226 power or common wiring | INA226 VS/VCC supply, that all INAs sit behind the mux (not on the main bus), shared SDA/SCL on the mux side |
 | `MUX OK` + **one** channel red | That single INA226 / its channel wiring | INA226 on that mux channel: power, SDA/SCL of that channel, address must be 0x40 (a channel with two INAs at 0x40 conflicts) |
 | `fail:`/`rec:` climbing intermittently | Weak pull-up, noise, loose terminal | Pull-up value, cable shielding, screw-terminal tightness on the MJK02 module |
-| `NO DATA` | No 0x309 received | CAN link STM32↔ESP32, that the STM32 reached `Sensor_Init()` / 1 Hz task |
+| `0x309: NO DATA` + `STM32 FW: no 0x309` | STM32 firmware too old (pre-0x309) or not running the 1 Hz diag task | Reflash STM32 with current firmware; confirm `CAN_SendI2CDiag()` runs (`main.c` 1 Hz block) |
+| `0x309: NO DATA` + `CAN link?` | CAN bus down both directions | CAN wiring/transceiver STM32↔ESP32, 120 Ω termination, that STM32 reached `Sensor_Init()` |
+| `0x309 STALE Ns` | STM32 stopped sending (reset/hang) after once working | STM32 watchdog resets, power glitch; the dimmed labels show the last-known topology before it stalled |
 
 > **Important:** this block does **not** fix a physical fault — it only helps
 > locate it. If the mux never reports OK, the cause is almost certainly

@@ -27,6 +27,10 @@ extern TFT_eSPI tft;
 // Layout constants — centralized in ui_config.h (namespace ui::cfg::STILE_*)
 using namespace ui::cfg;
 
+// Phase 1 I2C diagnostic: a 0x309 frame older than this is shown as STALE,
+// meaning the STM32 once sent diagnostics but has now stopped (or died).
+static constexpr unsigned long I2C_DIAG_STALE_MS = 2000;
+
 void SafeScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("safe");
     needsRedraw_ = true;
@@ -65,6 +69,9 @@ void SafeScreen::onEnter() {
     i2cFailCount_   = 0;
     i2cRecovery_    = 0;
     i2cEverOk_      = false;
+    i2cAgeMs_       = 0;
+    i2cStale_       = false;
+    i2cHbAlive_     = false;
     previ2cValid_      = true;
     previ2cMuxPresent_ = true;
     previ2cInaMask_    = 0xFF;
@@ -95,7 +102,6 @@ void SafeScreen::onEnter() {
 void SafeScreen::onExit() {}
 
 void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
-    (void)frameTimeMs;  // Not used in SafeScreen — no timing-dependent logic
     faultFlags_ = data.heartbeat().faultFlags;
     errorCode_  = data.safety().errorCode;
 
@@ -145,6 +151,22 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         i2cFailCount_  = id.failCount;
         i2cRecovery_   = id.recoveryCount;
         i2cEverOk_     = id.everOk;
+
+        // Frame-age / STALE detection (Phase 1).  Uses the injected frame
+        // time for deterministic behaviour, mirroring the CAN-loss check in
+        // screen_manager.cpp.  Age is only meaningful once a frame arrived.
+        if (id.valid && frameTimeMs >= id.timestampMs) {
+            i2cAgeMs_ = frameTimeMs - id.timestampMs;
+        } else {
+            i2cAgeMs_ = 0;
+        }
+        i2cStale_ = id.valid && (i2cAgeMs_ > I2C_DIAG_STALE_MS);
+
+        // Heartbeat liveness — distinguishes "STM32 firmware too old to send
+        // 0x309" (heartbeat alive, no 0x309) from a dead CAN link.
+        const unsigned long hbTs = data.heartbeat().timestampMs;
+        i2cHbAlive_ = (hbTs > 0) &&
+                      ((frameTimeMs - hbTs) <= can::CAN_LOSS_TIMEOUT_MS);
     }
 
     // ---- Compute tile hashes ----
@@ -180,6 +202,11 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         ih = ui::tileHashFeed(ih, i2cFailCount_);
         ih = ui::tileHashFeed(ih, i2cRecovery_);
         ih = ui::tileHashFeed(ih, i2cEverOk_);
+        ih = ui::tileHashFeed(ih, i2cStale_);
+        ih = ui::tileHashFeed(ih, i2cHbAlive_);
+        // Quantize age to whole seconds so the STALE "(Xs)" counter only
+        // redraws once per second, not on every frame.
+        ih = ui::tileHashFeed(ih, (uint8_t)(i2cAgeMs_ / 1000U));
         tiles_.updateHash(STILE_I2C, ih);
     }
 }
@@ -608,11 +635,61 @@ void SafeScreen::draw() {
             // No 0x309 frame received yet — do not invent OK state.
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
             tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_MUX);
-            tft.drawString("NO DATA", ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_MUX_Y);
+            tft.drawString("0x309: NO DATA",
+                           ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_MUX_Y);
+
+            // Cause hint: if the STM32 heartbeat is alive but no 0x309 has
+            // ever arrived, the STM32 firmware is too old (or not emitting
+            // the diagnostic).  Otherwise the CAN link itself looks down.
+            if (i2cHbAlive_) {
+                tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+                tft.drawString("STM32 FW: no 0x309",
+                               ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y);
+            } else {
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                tft.drawString("CAN link?",
+                               ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y);
+            }
             tft.setTextPadding(0);
-            // Clear the channel + counter rows
+            // Clear the counters row
+            tft.fillRect(ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_CNT_Y,
+                         236, 12, ui::COL_BG);
+        } else if (i2cStale_) {
+            // A 0x309 frame was received once but has not refreshed within
+            // the STALE window — the STM32 stopped sending diagnostics.
+            // Keep the last-known topology visible but flag it as unreliable.
+            char muxBuf[ui::FMT_BUF_MED];
+            // Clamp the displayed age so the formatted string always fits.
+            unsigned long ageSec = i2cAgeMs_ / 1000U;
+            if (ageSec > 999U) ageSec = 999U;
+            snprintf(muxBuf, sizeof(muxBuf), "0x309 STALE %lus", ageSec);
+            tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+            tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_MUX);
+            tft.drawString(muxBuf, ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_MUX_Y);
+            tft.setTextPadding(0);
+
+            // Last-known per-channel labels, dimmed (data no longer trusted).
+            constexpr uint8_t kI2cChannels = 6;
+            static const char* chLabels[kI2cChannels] =
+                { "FL", "FR", "RL", "RR", "BT", "ST" };
+            // Clear the whole INA row first: per-cell labels do not cover the
+            // inter-cell gaps, so a previous full-width hint could linger.
             tft.fillRect(ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y,
-                         236, 24, ui::COL_BG);
+                         236, 12, ui::COL_BG);
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            for (uint8_t i = 0; i < kI2cChannels; ++i) {
+                tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_CH);
+                tft.drawString(chLabels[i],
+                               ui::cfg::STILE_I2C_X + i * ui::cfg::STILE_I2C_CH_SPACING,
+                               ui::cfg::STILE_I2C_INA_Y);
+                tft.setTextPadding(0);
+            }
+
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_CNT);
+            tft.drawString("last data stale",
+                           ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_CNT_Y);
+            tft.setTextPadding(0);
         } else {
             // MUX presence line
             char muxBuf[ui::FMT_BUF_MED];
@@ -627,6 +704,10 @@ void SafeScreen::draw() {
             constexpr uint8_t kI2cChannels = 6;
             static const char* chLabels[kI2cChannels] =
                 { "FL", "FR", "RL", "RR", "BT", "ST" };
+            // Clear the whole INA row first: per-cell labels do not cover the
+            // inter-cell gaps, so a previous full-width hint could linger.
+            tft.fillRect(ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y,
+                         236, 12, ui::COL_BG);
             for (uint8_t i = 0; i < kI2cChannels; ++i) {
                 const bool ok = (i2cInaMask_ & (1U << i)) != 0;
                 // Green = INA acked. If mux is present but the INA did not

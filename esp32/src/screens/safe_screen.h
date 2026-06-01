@@ -98,6 +98,14 @@ private:
     uint8_t  i2cFailCount_    = 0;
     uint8_t  i2cRecovery_     = 0;
     bool     i2cEverOk_       = false;
+    // Phase 1 diagnostic: age of the last 0x309 frame + derived flags.
+    // `i2cStale_` is true when a frame was once received but is now older
+    // than the STALE threshold (STM32 stopped sending).  `i2cHbAlive_`
+    // tells a "STM32 firmware too old to send 0x309" case (heartbeat
+    // alive, no 0x309) apart from a dead CAN link.
+    unsigned long i2cAgeMs_   = 0;
+    bool     i2cStale_        = false;
+    bool     i2cHbAlive_      = false;
     // Force initial draw with mismatched previous-state snapshot
     bool     previ2cValid_      = true;
     bool     previ2cMuxPresent_ = true;
