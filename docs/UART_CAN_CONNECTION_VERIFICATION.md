@@ -114,7 +114,7 @@ JP7 en la NUCLEO‑G474RE controla la señal **BOOT0**:
 | BOOT0 medido = 0.00 V | ☐ sí / ☐ no |
 
 > **Nota:** Los pines CAN del STM32 son **PA11 (RX)** y **PA12 (TX)**, NO PB8/PB9.
-> PB8/PB9 se encuentran libres. JP7 no afecta al bus CAN.
+> PB8/PB9 ahora se usan para el bus I2C1 (SCL/SDA). JP7 no afecta al bus CAN.
 
 ---
 

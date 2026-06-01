@@ -50,7 +50,7 @@ Según las pruebas anteriores, esto ya funciona:
 **Objetivo:** Conseguir que boot_validation pase `BOOT_CHECK_BATTERY_OK` y el sistema pueda transicionar de SAFE → STANDBY → LIMP_HOME.
 
 **Referencia firmware:**
-- `project_config.h:182-183` — `PIN_I2C_SCL` = PB6, `PIN_I2C_SDA` = PB7
+- `project_config.h:182-183` — `PIN_I2C_SCL` = PB8, `PIN_I2C_SDA` = PB9
 - `project_config.h:240` — `I2C_ADDR_TCA9548A` = 0x70
 - `project_config.h:241` — `I2C_ADDR_INA226` = 0x40
 - `project_config.h:266-267` — Shunt batería = 0.75 mΩ, canal 4
@@ -74,8 +74,8 @@ Según las pruebas anteriores, esto ya funciona:
 ```
 STM32 Nucleo-64                TCA9548A
 ─────────────────              ────────
-PB6 (I2C1_SCL) ─────────────→ SCL
-PB7 (I2C1_SDA) ─────────────→ SDA
+PB8 (I2C1_SCL) ─────────────→ SCL
+PB9 (I2C1_SDA) ─────────────→ SDA
 3.3V            ─────────────→ VCC
 GND             ─────────────→ GND
 GND             ─────────────→ A0 (addr bit 0 = 0)
@@ -84,8 +84,8 @@ GND             ─────────────→ A2 (addr bit 2 = 0)
                                → Dirección resultante: 0x70 ✅
 
 Pull-ups I2C (OBLIGATORIOS si no están en el breakout):
-  - 4.7 kΩ entre SCL (PB6) y 3.3V
-  - 4.7 kΩ entre SDA (PB7) y 3.3V
+  - 4.7 kΩ entre SCL (PB8) y 3.3V
+  - 4.7 kΩ entre SDA (PB9) y 3.3V
   (Muchos breakout boards ya los incluyen — mide con multímetro
    entre SCL/SDA y VCC: si lees ~4.7kΩ, ya están)
 ```

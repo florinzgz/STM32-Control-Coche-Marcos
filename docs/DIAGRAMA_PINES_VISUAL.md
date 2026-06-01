@@ -125,7 +125,7 @@ PA15 / PB3 / PB4       ── encoder A / B / Z
 PB5                    ── sensor centrado
 PA3                    ── pedal ADC
 PB0                    ── OneWire DS18B20
-PB6 / PB7              ── I2C INA226 / TCA9548A
+PB8 / PB9              ── I2C INA226 / TCA9548A
 ```
 
 ---

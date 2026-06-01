@@ -67,7 +67,7 @@
 | PC11/PC12 RELAY (TRAC/DIR) | PC11, PC12 | Módulo 4-ch relé 12V (CH1, CH2) | 24 AWG |
 | PB10/11 LED RELAY | PB10, PB11 | Módulos relé LED | 24 AWG |
 | PA11/PA12 CAN | PA11, PA12 | Transceiver TJA1051T/3 | 24 AWG |
-| PB6/PB7 I2C | PB6, PB7 | TCA9548A SCL/SDA | 24 AWG |
+| PB8/PB9 I2C | PB8, PB9 | TCA9548A SCL/SDA | 24 AWG |
 | PB0 OneWire | PB0 | Bus DS18B20 | 24 AWG |
 | PA3 ADC Pedal | PA3 | Divisor resistivo pedal | 28 AWG apantallado |
 | PA0–PA2 / PB15 Wheel | PA0, PA1, PA2, PB15 | Sensores inductivos rueda | 24 AWG |
@@ -190,8 +190,8 @@
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 1 | Módulo TCA9548A | Breakout board con pull-ups incluidos (Adafruit 2717 o compatible) | Dirección 0x70 (A0/A1/A2 a GND) |
-| 2 | Resistencia pull-up I2C | **4.7 kΩ / ¼W** | En PB6 (SCL) y PB7 (SDA), a 3.3V; verificar si el módulo ya las incluye |
-| 2 | Cable I2C | 24 AWG, ~10–20 cm | PB6 → SCL y PB7 → SDA del TCA9548A |
+| 2 | Resistencia pull-up I2C | **4.7 kΩ / ¼W** | En PB8 (SCL) y PB9 (SDA), a 3.3V; verificar si el módulo ya las incluye |
+| 2 | Cable I2C | 24 AWG, ~10–20 cm | PB8 → SCL y PB9 → SDA del TCA9548A |
 
 ### Materiales por cada INA226 (×6 sensores)
 
@@ -490,7 +490,7 @@
 |-----|-----------|-------|---------|-----|
 | 1 | R_PED_R1 | **10 kΩ** ±1% | ¼W | Divisor pedal (R1) |
 | 1 | R_PED_R2 | **6.8 kΩ** ±1% | ¼W | Divisor pedal (R2) |
-| 2 | R_I2C | **4.7 kΩ** | ¼W | Pull-up I2C (PB6, PB7) |
+| 2 | R_I2C | **4.7 kΩ** | ¼W | Pull-up I2C (PB8, PB9) |
 | 2 | R_I2C_ESP | **4.7 kΩ** | ¼W | Pull-up I2C ESP32 (GPIO8, GPIO9 para MCP23017) |
 | 1 | R_OW | **4.7 kΩ** | ¼W | Pull-up OneWire (PB0) |
 | 3 | R_6N137_IF | **330 Ω** | ¼W | Resistencia serie LED del 6N137 encoder (canales A, B, Z) |

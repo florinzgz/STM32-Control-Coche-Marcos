@@ -418,8 +418,8 @@ GND (ESP32)    ─────────→ GND PC817
 
 | Pin LQFP | GPIO | Periférico | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 58 | PB6 | I2C1_SCL | SCL | Bus I2C compartido (TCA9548A, INA226) | Resistencia pull-up 4.7 kΩ a 3.3 V |
-| 59 | PB7 | I2C1_SDA | SDA | Bus I2C compartido | Resistencia pull-up 4.7 kΩ a 3.3 V |
+| 61 | PB8 | I2C1_SCL | SCL | Bus I2C compartido (TCA9548A, INA226) | Resistencia pull-up 4.7 kΩ a 3.3 V |
+| 62 | PB9 | I2C1_SDA | SDA | Bus I2C compartido | Resistencia pull-up 4.7 kΩ a 3.3 V |
 
 **Configuración I2C:** 400 kHz (Fast Mode), Open-Drain, AF4
 
@@ -427,8 +427,8 @@ GND (ESP32)    ─────────→ GND PC817
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Pull-up SCL | 4.7 kΩ | De PB6 a 3.3 V | Pull-up bus I2C |
-| Pull-up SDA | 4.7 kΩ | De PB7 a 3.3 V | Pull-up bus I2C |
+| Pull-up SCL | 4.7 kΩ | De PB8 a 3.3 V | Pull-up bus I2C |
+| Pull-up SDA | 4.7 kΩ | De PB9 a 3.3 V | Pull-up bus I2C |
 | Condensador de desacoplo (TCA9548A) | 100 nF cerámico | Entre VCC y GND | Filtrado |
 
 **Dispositivos en el bus:**
@@ -570,8 +570,8 @@ GND (ESP32)    ─────────→ GND PC817
 | PB3 | Encoder canal B | TIM2_CH2 | Entrada |
 | PB4 | Encoder índice Z | EXTI4 | Entrada |
 | PB5 | Sensor centrado dirección | EXTI5 | Entrada (pull-up) |
-| PB6 | I2C SCL | I2C1_SCL | Bidireccional (OD) |
-| PB7 | I2C SDA | I2C1_SDA | Bidireccional (OD) |
+| PB8 | I2C SCL | I2C1_SCL | Bidireccional (OD) |
+| PB9 | I2C SDA | I2C1_SDA | Bidireccional (OD) |
 | PB10 | Relé LED frontal | GPIO | Salida |
 | PB11 | Relé LED trasero | GPIO | Salida |
 | PB14 | LED_DIAG | GPIO_Output | Salida digital |
@@ -603,7 +603,7 @@ GND (ESP32)    ─────────→ GND PC817
 | Cantidad | Valor | Tolerancia | Ubicación |
 |----------|-------|------------|-----------|
 | 10 | 330 Ω ¼W | 5% | LED de optoacopladores HY-M158 (PWM señales BTS7960). Relés de potencia ya NO necesitan — usan módulo 4-ch SRD-12VDC-SL-C |
-| 2 | 4.7 kΩ | 5% | Pull-up I2C (PB6, PB7 del STM32) |
+| 2 | 4.7 kΩ | 5% | Pull-up I2C (PB8, PB9 del STM32) |
 | 2 | 4.7 kΩ | 5% | Pull-up I2C (GPIO 8, 9 del ESP32) — si no están en módulo |
 | 1 | 4.7 kΩ | 5% | Pull-up OneWire (PB0) |
 | 2 | 120 Ω ¼W | 5% | Terminación CAN Bus (cada extremo) |

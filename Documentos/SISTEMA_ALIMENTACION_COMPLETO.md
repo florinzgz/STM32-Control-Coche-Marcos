@@ -627,8 +627,8 @@ Todas las masas (GND) del sistema convergen en un **único punto central** llama
 | 14 | PB3 | GPIOB | Encoder B | E6B2-CWZ6C | TIM2_CH2 | 3.3V (vía 6N137) |
 | 15 | PB4 | GPIOB | Encoder Z | E6B2-CWZ6C | EXTI4 | 3.3V (vía 6N137) |
 | 16 | PB5 | GPIOB | Centro dirección | LJ12A3 | EXTI5 | 3.3V (vía PC817) |
-| 17 | PB6 | GPIOB | I2C SCL | TCA9548A | I2C1_SCL | 3.3V open-drain |
-| 18 | PB7 | GPIOB | I2C SDA | TCA9548A | I2C1_SDA | 3.3V open-drain |
+| 17 | PB8 | GPIOB | I2C SCL | TCA9548A | I2C1_SCL | 3.3V open-drain |
+| 18 | PB9 | GPIOB | I2C SDA | TCA9548A | I2C1_SDA | 3.3V open-drain |
 | 19 | PB10 | GPIOB | Relay LED frontal | WS2812B | GPIO Output | 3.3V (driver) |
 | 20 | PB11 | GPIOB | Relay LED trasero | WS2812B | GPIO Output | 3.3V (driver) |
 | 21 | PC3 | GPIOC | LPWM FR | BTS7960 FR | TIM1_CH4 | 3.3V PWM |
@@ -657,9 +657,9 @@ Todas las masas (GND) del sistema convergen en un **único punto central** llama
 ### 8.3 Bus I2C — Sensores de corriente
 
 ```
-STM32 PB6 (SCL) ──┬──[4.7kΩ pull-up]──► 3.3V
+STM32 PB8 (SCL) ──┬──[4.7kΩ pull-up]──► 3.3V
                     │
-STM32 PB7 (SDA) ──┬──[4.7kΩ pull-up]──► 3.3V
+STM32 PB9 (SDA) ──┬──[4.7kΩ pull-up]──► 3.3V
                     │
                     ▼
                TCA9548A (0x70) ── 400 kHz

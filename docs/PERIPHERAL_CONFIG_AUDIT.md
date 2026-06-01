@@ -185,7 +185,7 @@ Analog filter: habilitado por defecto
 ```
 
 **Por qué es problemático:**
-- El bus I2C (PB6/PB7) comparte la PCB con las líneas PWM del motor y las conexiones CAN.
+- El bus I2C (PB8/PB9) comparte la PCB con las líneas PWM del motor y las conexiones CAN.
 - Sin filtro digital, glitches EMI de >50 ns en SCL/SDA pueden causar:
   - NACK falsos → lectura INA226 fallida
   - Estado bus stuck (SDA held LOW) → requiere bus recovery

@@ -157,8 +157,8 @@
 ### Sensores INA226 (I2C1 via TCA9548A)
 | Pin | GPIO | I2C     | Function | Description |
 |-----|------|---------|----------|-------------|
-| 58  | PB6  | I2C1_SCL | SCL     | Clock I2C |
-| 59  | PB7  | I2C1_SDA | SDA     | Datos I2C |
+| 61  | PB8  | I2C1_SCL | SCL     | Clock I2C |
+| 62  | PB9  | I2C1_SDA | SDA     | Datos I2C |
 
 **Configuración I2C:**
 - Velocidad: 400 kHz (Fast Mode)

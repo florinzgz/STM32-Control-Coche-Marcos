@@ -39,7 +39,7 @@ El firmware actual ejecuta 18 módulos C compilados con ARM GCC (`arm-none-eabi-
 | **TIM2** | Encoder cuadratura | PA15, PB3 | 32-bit, 4800 CPR |
 | **ADC1** | Pedal acelerador | PA3 | 12-bit, IN4, muestreo ~1.1 µs |
 | **FDCAN1** | Comunicación ESP32 | PA11 (RX), PA12 (TX) | 500 kbps, prescaler 17, AF9 |
-| **I2C1** | Sensores corriente/ADC | PB6 (SCL), PB7 (SDA) | 400 kHz fast mode, open-drain |
+| **I2C1** | Sensores corriente/ADC | PB8 (SCL), PB9 (SDA) | 400 kHz fast mode, open-drain |
 | **IWDG** | Watchdog independiente | — | ~500 ms (prescaler 32, reload 4095) |
 | **OneWire** | DS18B20 temperaturas | PB0 | Bit-bang GPIO |
 | **EXTI** | Ruedas + encoder | PA0, PA1, PA2, PB15, PB4, PB5 | Rising edge, prioridad 2 |
@@ -165,10 +165,10 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PB3 | **OCUPADO** | TIM2_CH2 — Encoder B | AF1 | — |
 | PB4 | **OCUPADO** | EXTI4 — Encoder Z | — | — |
 | PB5 | **OCUPADO** | EXTI5 — Steering center | — | — |
-| PB6 | **OCUPADO** | I2C1_SCL | AF4 | — |
-| PB7 | **OCUPADO** | I2C1_SDA | AF4 | — |
-| PB8 | **LIBRE** | — | AF9: FDCAN1_RX, AF4: I2C1_SCL | GPIO disponible |
-| PB9 | **LIBRE** | — | AF9: FDCAN1_TX, AF4: I2C1_SDA | GPIO disponible |
+| PB8 | **OCUPADO** | I2C1_SCL | AF4 | — |
+| PB9 | **OCUPADO** | I2C1_SDA | AF4 | — |
+| PB6 | **LIBRE** | — (liberado, antes I2C1_SCL) | AF4: I2C1_SCL | GPIO disponible |
+| PB7 | **LIBRE** | — (liberado, antes I2C1_SDA) | AF4: I2C1_SDA | GPIO disponible |
 | PB10 | **OCUPADO** | Relay LED Front | GPIO | — |
 | PB11 | **OCUPADO** | Relay LED Rear | GPIO | — |
 | PB12 | **LIBRE** | — | AF5: SPI2_NSS, AF6: I2C2_SMBA | SPI2 NSS candidato |
@@ -291,7 +291,7 @@ Antes de asignar cualquier pin libre:
 ### 5.1 Sensor INA226 adicional (I2C, Prioridad 1a)
 
 #### Conexión física
-- Conectar al bus I2C1 existente (PB6/PB7) **a través del TCA9548A** en canal 6 o 7 (actualmente canales 0–5 ocupados)
+- Conectar al bus I2C1 existente (PB8/PB9) **a través del TCA9548A** en canal 6 o 7 (actualmente canales 0–5 ocupados)
 - Configurar dirección I2C del nuevo INA226 a **0x40** (misma que los demás — el TCA9548A aísla)
 - Shunt resistor según corriente: 1.5 mΩ (motores, ≤50 A) o 0.75 mΩ (batería, ≤100 A)
 - Condensador desacoplo 100 nF entre VDD-GND del INA226

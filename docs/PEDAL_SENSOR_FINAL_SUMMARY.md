@@ -160,7 +160,7 @@ if (!Pedal_IsPlausible()) {
 |-----------|---------|------------|-------|
 | **PA3** | ADC1_IN4 | ADC1 | Pedal (0.12V–1.94V vía divisor) |
 
-> **Nota:** PB6/PB7 (I2C1) ya NO se usan para el pedal. El bus I2C
+> **Nota:** PB8/PB9 (I2C1) ya NO se usan para el pedal. El bus I2C
 > queda dedicado exclusivamente a INA226/TCA9548A.
 
 ---

@@ -179,8 +179,8 @@ Esta red RC se coloca **en paralelo con los contactos de potencia** del relé (N
 
 | # | Ubicación | Conexión | Función |
 |---|-----------|----------|---------|
-| 1 | Bus I²C | Entre **SCL (PB6) y 3.3V** | Mantiene la línea en HIGH cuando ningún dispositivo la está tirando a LOW. Obligatorio en I²C open-drain |
-| 2 | Bus I²C | Entre **SDA (PB7) y 3.3V** | Ídem para SDA |
+| 1 | Bus I²C | Entre **SCL (PB8) y 3.3V** | Mantiene la línea en HIGH cuando ningún dispositivo la está tirando a LOW. Obligatorio en I²C open-drain |
+| 2 | Bus I²C | Entre **SDA (PB9) y 3.3V** | Ídem para SDA |
 
 ### 4.3 Pull-up OneWire — 4.7 kΩ / 0.25W
 

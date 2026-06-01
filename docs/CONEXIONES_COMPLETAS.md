@@ -300,13 +300,13 @@ Pedal señal (0.3V–4.8V)
 
 | Cable | De (STM32) | A (TCA9548A) | Función |
 |-------|-----------|-------------|---------|
-| 25 | **PB6** | SCL | Reloj I2C (400 kHz, AF4) |
-| 26 | **PB7** | SDA | Datos I2C (AF4) |
+| 25 | **PB8** | SCL | Reloj I2C (400 kHz, AF4) |
+| 26 | **PB9** | SDA | Datos I2C (AF4) |
 | — | 3.3V | VCC | Alimentación del multiplexor |
 | — | GND | GND | GND común |
 | — | GND | A0, A1, A2 | Dirección I2C = **0x70** |
 
-**Resistencias pull-up:** 4.7 kΩ de PB6 a 3.3V + 4.7 kΩ de PB7 a 3.3V
+**Resistencias pull-up:** 4.7 kΩ de PB8 a 3.3V + 4.7 kΩ de PB9 a 3.3V
 (Necesarias si no están en la placa del TCA9548A)
 
 ### Canales del TCA9548A → INA226
@@ -920,8 +920,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 15 | **PB3** | GPIOB | AF1 | TIM2_CH2 | Encoder E6B2 canal B | ⚠️ Vía 6N137 (aislamiento galvánico)
 | 16 | **PB4** | GPIOB | Input | GPIO (polled) | Encoder E6B2 índice Z | Vía 6N137, pull-up 4.7kΩ a 3.3V
 | 17 | **PB5** | GPIOB | Input | EXTI5 | Sensor inductivo centrado | Pull-up, flanco subida |
-| 18 | **PB6** | GPIOB | AF4 | I2C1_SCL | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
-| 19 | **PB7** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
+| 18 | **PB8** | GPIOB | AF4 | I2C1_SCL | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
+| 19 | **PB9** | GPIOB | AF4 | I2C1_SDA | TCA9548A (INA226) | Pull-up 4.7kΩ, 400 kHz |
 | 20 | **PB10** | GPIOB | Output | GPIO | Módulo relé LED frontal | HIGH = ON (tira WS2812B 28 LEDs) |
 | 21 | **PB11** | GPIOB | Output | GPIO | Módulo relé LED trasero | HIGH = ON (tira WS2812B 16 LEDs) |
 | 22 | **PB14** | GPIOB | Output | GPIO | **LED_DIAG** (externo) | LED + 330Ω en Morpho CN10 pin 28. CAN OK=ON, FAIL=OFF |
@@ -996,7 +996,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 1 | TF-Mini Plus (Benewake) | Sensor obstáculos LiDAR punto único | Conectado a ESP32-S3 GPIO18 (UART1), VCC=5V, 115200 bps, conexión directa 3.3V |
 | 5 | Módulo 4-ch opto relé + relés potencia | Relés potencia y LED | Módulo SRD-12VDC-SL-C 4-ch (etapa 1) + relés potencia bobina 12V (etapa 2) + 2× relé LED |
 | 2 | Resistencia 120 Ω | Terminación CAN | ¼W mínimo |
-| 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB6, PB7, PB0 |
+| 3 | Resistencia 4.7 kΩ | Pull-ups (I2C + OneWire) | PB8, PB9, PB0 |
 | 3 | 6N137 optoacoplador | Encoder A/B/Z (aislamiento galvánico + 5V→3.3V) | DIP-8 o módulo breakout |
 | 6 | Resistencia shunt | INA226 | 5× 1.5 mΩ (50A/75mV, motores+dirección) + 1× 0.75 mΩ (100A/75mV, batería) |
 | 1 | Fuente 24V | Tracción | ≥20A capacidad |
@@ -1078,7 +1078,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 2. Verificar tensiones — PA15/PB3 (encoder) ≤ 3.3V (salida 6N137 con pull-up). PA3 (pedal divisor) ≤ 2.1V.
 3. **No conectar motores todavía** — Para Phase 1, se puede probar sin motores conectados (solo verificar señales RPWM/LPWM con osciloscopio o LED en PA8/PA9/PA10/PC3/PC6/PC7/PC8/PC9/PA6/PA7)
 4. **Conectar CAN con transceivers** — NUNCA conectar PA11/PA12 directo a cables CAN. Necesitan transceiver TJA1051
-5. **Poner resistencias pull-up** — I2C (PB6, PB7) y OneWire (PB0) no funcionan sin pull-ups
+5. **Poner resistencias pull-up** — I2C (PB8, PB9) y OneWire (PB0) no funcionan sin pull-ups
 
 ---
 
@@ -1140,8 +1140,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### 🟢 ETAPA 3 — Sensores I2C (INA226 + TCA9548A)
 
 **Qué conectar:**
-1. **PB6** → SCL del TCA9548A, **PB7** → SDA del TCA9548A
-2. Pull-ups: **4.7kΩ** de PB6 a 3.3V + **4.7kΩ** de PB7 a 3.3V
+1. **PB8** → SCL del TCA9548A, **PB9** → SDA del TCA9548A
+2. Pull-ups: **4.7kΩ** de PB8 a 3.3V + **4.7kΩ** de PB9 a 3.3V
 3. TCA9548A: A0/A1/A2 → GND (dirección 0x70)
 4. INA226 módulos en cada canal del TCA9548A (A0/A1 → GND = 0x40)
 

@@ -325,7 +325,7 @@ Cada DS18B20:
 
 ### Configuración I2C con Multiplexor TCA9548A
 
-**Bus I2C1**: PB6 (SCL), PB7 (SDA)  
+**Bus I2C1**: PB8 (SCL), PB9 (SDA)  
 **Multiplexor**: TCA9548A @ 0x70  
 **Velocidad**: 100 kHz (Standard Mode)
 
