@@ -100,6 +100,13 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
   SCL ──┤4.7kΩ├── 3.3V
 ```
 
+> **Diagnóstico en vivo (Error Code 11 / I2C):** la pantalla **Safe Mode** del
+> HMI muestra un bloque "I2C BUS DIAG" alimentado por la trama CAN `0x309`
+> (DIAG_I2C, 1 Hz). Indica si el TCA9548A (0x70) responde y, canal por canal,
+> si cada INA226 (0x40) contesta — para distinguir un mux ausente de un INA
+> muerto. Guía de interpretación: `Documentos/SAFE_MODE_UI_EXTENSION.md`
+> (sección "I2C Bus Diagnostic Block").
+
 ---
 
 ## 2. DS18B20 — Sensores de Temperatura (×5)

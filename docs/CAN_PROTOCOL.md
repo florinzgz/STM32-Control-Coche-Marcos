@@ -700,6 +700,24 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 
 ---
 
+### 0x309 - DIAG_I2C (STM32→ESP32)
+
+**Propósito:** Diagnóstico de topología del bus I2C para la pantalla **Safe Mode**. Permite distinguir un TCA9548A (mux, 0x70) ausente de un INA226 (0x40) muerto/ausente detrás de un canal concreto, y ver si los fallos son intermitentes (mala pull-up / borne flojo) o permanentes (no conectado). Sólo informativo — ningún camino de control o seguridad lo consume.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0    | `mux_present` | uint8_t | 0 = TCA9548A 0x70 no responde, 1 = presente |
+| 1    | `ina_ok_mask` | uint8_t bitmask | bit i = INA226 respondió tras seleccionar canal i del mux. bit0=FL, bit1=FR, bit2=RL, bit3=RR, bit4=BAT, bit5=STEER |
+| 2    | `i2c_fail_count` | uint8_t | Transacciones I2C fallidas en el último ciclo de lectura |
+| 3    | `i2c_recovery_attempts` | uint8_t | Intentos de recuperación de bus (persistente, se resetea en un ciclo OK) |
+| 4    | `flags` | uint8_t bitmask | bit0 = "ever OK" (al menos un INA226 visto sano desde el arranque) |
+
+**DLC:** 5 · **Frecuencia:** 1000 ms (1 Hz) · **Prioridad:** Baja
+
+**Compatibilidad backward:** nodos que ignoren 0x309 no se ven afectados (aditivo, STM32 → ESP32).
+
+---
+
 ## ⚙️ Gestión de Errores
 
 ### Prioridades de Mensajes
@@ -721,6 +739,7 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 | 0x301-0x303 | SERVICE_* | Baja | Diagnóstico Service Mode |
 | 0x304-0x307 | DIAG_* | Baja | Diagnóstico (error log, debounce) |
 | 0x308 | DIAG_PEDAL_CAL | Baja | Telemetría calibración pedal (on-demand, 1 s tras QUERY) |
+| 0x309 | DIAG_I2C | Baja | Diagnóstico bus I2C (mux + INA226 por canal, 1 Hz) |
 
 ### Retransmisión Automática
 
