@@ -60,6 +60,9 @@ extern "C" {
 #define CAN_ID_DIAG_DEBOUNCE_STEER 0x307 // STM32 → ESP32 (1000ms) DWT-debounce filtered count (steer u32 LE)
 #define CAN_ID_DIAG_PEDAL_CAL     0x308  // STM32 → ESP32 (on-demand, 10 Hz for 1 s after QUERY) pedal calibration telemetry
 #define CAN_ID_DIAG_I2C           0x309  // STM32 → ESP32 (1000ms) I2C topology diag: mux + per-channel INA226 health
+#define CAN_ID_DIAG_CAN_META      0x30A  // STM32 → ESP32 (1000ms) CAN/0x309 delivery meta-diagnostic (additive)
+#define CAN_ID_DIAG_I2C_SCAN      0x30B  // STM32 → ESP32 (on-demand) I2C service-mode scan report (additive)
+#define CAN_ID_DIAG_FDCAN         0x30C  // STM32 → ESP32 (on-demand) FDCAN error-counter dump (additive)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -75,6 +78,7 @@ extern "C" {
 #define SERVICE_ACTION_RESET_STEERING_FORCE 0xF4
 #define SERVICE_ACTION_CLEAR_ERROR_LOG     0xFE
 #define SERVICE_ACTION_PEDAL_CAL           0xF5  /* Pedal endpoint calibration (byte1 = sub-opcode) */
+#define SERVICE_ACTION_I2C_SERVICE         0xF6  /* I2C service-mode scan: probe mux/INA, SDA/SCL levels, recovery */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
@@ -141,6 +145,22 @@ typedef struct {
     uint8_t  tx_consec_fail;    /* Consecutive TX failures (0-255)      */
 } CAN_Diag_t;
 
+/* ---- CAN/0x309 delivery meta-diagnostic (additive, report-only) ----
+ * Answers the observability questions A–D from the 0x309 audit without
+ * touching any control or safety path:
+ *   A) diag309_call_count   — times CAN_SendI2CDiag() actually ran
+ *   B) tick_1000ms_count    — iterations of the main-loop 1 Hz block
+ *   C) diag309_tx_ok / err  — TransmitFrame() result for 0x309 specifically
+ *   D) tx_fifo_full_drops   — frames dropped because the TX FIFO was full
+ * All counters saturate; never wrap to 0.  Surfaced on CAN 0x30A.        */
+typedef struct {
+    uint32_t diag309_call_count;   /* A: CAN_SendI2CDiag() invocations     */
+    uint32_t tick_1000ms_count;    /* B: 1 Hz scheduler-block iterations   */
+    uint32_t diag309_tx_ok;        /* C: 0x309 queued to TX FIFO OK        */
+    uint32_t diag309_tx_err;       /* C: 0x309 TransmitFrame() != HAL_OK   */
+    uint32_t tx_fifo_full_drops;   /* D: any frame dropped (FIFO full)     */
+} CAN_TxMeta_t;
+
 /* CAN_InitDiag_t is defined in can_init_diag.h (included above) to allow
  * stm32g4xx_hal_msp.c to record MspInit diagnostics without depending on
  * the full CAN handler API.                                              */
@@ -166,6 +186,9 @@ void CAN_SendServiceStatus(void);
 void CAN_SendErrorLogHeader(void);
 void CAN_SendDebounceDiag(void);    /* 1 Hz DWT-debounce filter EMI counters (0x306 + 0x307) */
 void CAN_SendI2CDiag(void);         /* 1 Hz I2C topology diagnostic (0x309): mux + per-channel INA226 */
+void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (0x30A) */
+void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
+void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
 bool CAN_IsGlobalSilent(void);
@@ -196,6 +219,7 @@ bool LED_Relay_Rear_Get(void);        /* rear relay state */
 
 extern CAN_Stats_t    can_stats;
 extern CAN_Diag_t     can_diag;
+extern CAN_TxMeta_t   can_txmeta;
 extern FDCAN_HandleTypeDef hfdcan1;
 
 /* Debug-visible global CAN buffers (volatile for debugger inspection) */

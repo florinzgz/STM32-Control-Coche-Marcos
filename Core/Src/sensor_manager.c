@@ -974,6 +974,55 @@ bool Sensor_GetI2cEverOk(void) {
     return i2c_ever_ok;
 }
 
+/* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) --------------
+ * Active probe of the I2C topology.  Reads the idle SDA/SCL levels directly
+ * from the GPIO pins (a low idle level points at a stuck slave or missing
+ * pull-up), probes the TCA9548A (0x70) and each INA226 (0x40) behind the mux
+ * channels with HAL_I2C_IsDeviceReady(), and runs I2C_BusRecovery() if SDA is
+ * stuck low.  The mux channels are restored to the safe default afterwards.
+ *
+ * Report-only: never gates any control or safety path.  Runs synchronously
+ * on receipt of SERVICE_CMD 0xF6, mirroring the existing on-demand handlers. */
+Sensor_I2cScanResult_t Sensor_RunI2CServiceScan(void) {
+    Sensor_I2cScanResult_t r = {0};
+
+    /* Idle line levels (pull-ups should hold both high when the bus is free). */
+    r.scl_idle_high = (HAL_GPIO_ReadPin(GPIOB, PIN_I2C_SCL) == GPIO_PIN_SET);
+    r.sda_idle_high = (HAL_GPIO_ReadPin(GPIOB, PIN_I2C_SDA) == GPIO_PIN_SET);
+
+    /* If SDA is stuck low, a slave is mid-transaction — try to clock it out. */
+    if (!r.sda_idle_high) {
+        r.recovery_attempted = true;
+        I2C_BusRecovery();
+        r.recovery_attempts  = ++i2c_recovery_attempts;
+        r.sda_idle_high      = (HAL_GPIO_ReadPin(GPIOB, PIN_I2C_SDA) == GPIO_PIN_SET);
+        r.recovery_success   = r.sda_idle_high;
+    } else {
+        r.recovery_attempts  = i2c_recovery_attempts;
+    }
+
+    /* Probe the multiplexer. */
+    r.mux_present = (HAL_I2C_IsDeviceReady(&hi2c1, (I2C_ADDR_TCA9548A << 1),
+                                           TCA9548A_PRESENCE_TRIALS,
+                                           TCA9548A_PRESENCE_TIMEOUT_MS) == HAL_OK);
+
+    /* Probe each INA226 behind the mux channels (only if the mux answers). */
+    if (r.mux_present) {
+        for (uint8_t i = 0; i < NUM_INA226; i++) {
+            if (TCA9548A_SelectChannel(i) != HAL_OK) continue;
+            if (HAL_I2C_IsDeviceReady(&hi2c1, (I2C_ADDR_INA226 << 1),
+                                      2, INA226_I2C_TIMEOUT_MS) == HAL_OK) {
+                r.ina_present_mask |= (uint8_t)(1U << i);
+            }
+        }
+        /* Restore mux to channel 0 (safe known default). */
+        (void)TCA9548A_SelectChannel(0);
+    }
+
+    r.fail_count = i2c_fail_count;
+    return r;
+}
+
 /* =========================================================================
  *  DS18B20 Temperature Sensors (OneWire bit-bang on PB0)
  * ========================================================================= */

@@ -222,6 +222,55 @@ struct I2cDiagData {
 };
 
 // -------------------------------------------------------------------------
+// CAN/0x309 delivery meta-diagnostic (0x30A) — report-only
+// Proves whether the 0x309 frame is generated, queued and accepted by the
+// FDCAN TX FIFO, independent of the I2C bus state (audit questions A–D).
+// -------------------------------------------------------------------------
+struct CanMetaData {
+    uint16_t diag309CallCount = 0;   // [A] CAN_SendI2CDiag() invocations (saturated)
+    uint16_t tick1000msCount  = 0;   // [B] 1 Hz scheduler-block iterations (saturated)
+    uint8_t  diag309TxOk      = 0;   // [C] 0x309 queued OK (saturated)
+    uint8_t  diag309TxErr     = 0;   // [C] 0x309 TransmitFrame() failed (saturated)
+    uint8_t  txFifoFullDrops  = 0;   // [D] frames dropped, TX FIFO full (saturated)
+    bool     fdcanInitOk      = false;
+    bool     valid            = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// I2C service-mode scan report (0x30B) — report-only, on-demand
+// Active probe of the I2C topology triggered by SERVICE_CMD 0xF6.
+// -------------------------------------------------------------------------
+struct I2cScanData {
+    bool     sclIdleHigh       = false;  // SCL line idle high (pull-up OK)
+    bool     sdaIdleHigh       = false;  // SDA line idle high (not stuck)
+    bool     recoveryAttempted = false;  // bus recovery was run
+    bool     recoverySuccess   = false;  // SDA released after recovery
+    bool     muxPresent        = false;  // TCA9548A 0x70 acked
+    uint8_t  inaPresentMask    = 0;      // bit0..5 = INA226 0x40 acked behind ch0..5
+    uint8_t  failCount         = 0;
+    uint8_t  recoveryAttempts  = 0;
+    bool     valid             = false;
+    unsigned long timestampMs  = 0;
+};
+
+// -------------------------------------------------------------------------
+// FDCAN error-counter dump (0x30C) — report-only, on-demand
+// -------------------------------------------------------------------------
+struct FdcanDiagData {
+    uint8_t  lastErrorCode = 0;   // PSR.LEC
+    bool     errorPassive  = false;
+    bool     busOff        = false;
+    bool     warning       = false;
+    uint8_t  tec           = 0;    // Transmit Error Counter
+    uint8_t  rec           = 0;    // Receive Error Counter
+    uint8_t  txNackFlag    = 0;
+    uint8_t  txConsecFail  = 0;
+    bool     valid         = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Active drive mode — set locally by ESP32 touch (eventually from STM32 CAN echo)
 // -------------------------------------------------------------------------
 struct ModeData {
@@ -253,6 +302,9 @@ public:
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
+    void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
+    void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
+    void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -278,6 +330,9 @@ public:
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
+    const CanMetaData&      canMeta()      const { return canMeta_; }
+    const I2cScanData&      i2cScan()      const { return i2cScan_; }
+    const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -299,6 +354,9 @@ private:
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
     I2cDiagData      i2cDiag_;
+    CanMetaData      canMeta_;
+    I2cScanData      i2cScan_;
+    FdcanDiagData    fdcanDiag_;
 };
 
 } // namespace vehicle

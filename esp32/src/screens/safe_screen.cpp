@@ -19,6 +19,7 @@
 #include "ui/render_trace.h"
 #include "ui/relay_indicator.h"
 #include "shifter_input.h"
+#include "can_rx.h"
 #include <TFT_eSPI.h>
 #include <cstdio>
 
@@ -204,6 +205,11 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         ih = ui::tileHashFeed(ih, i2cEverOk_);
         ih = ui::tileHashFeed(ih, i2cStale_);
         ih = ui::tileHashFeed(ih, i2cHbAlive_);
+        // Feed the 0x309 DLC-error sub-state so the cause hint refreshes when
+        // invalid-DLC frames start arriving even though `valid` stays false.
+        ih = ui::tileHashFeed(ih,
+            (uint8_t)((can_rx::dropped0x309Dlc() > 0 &&
+                       can_rx::rx0x309Count() > 0) ? 1U : 0U));
         // Quantize age to whole seconds so the STALE "(Xs)" counter only
         // redraws once per second, not on every frame.
         ih = ui::tileHashFeed(ih, (uint8_t)(i2cAgeMs_ / 1000U));
@@ -638,12 +644,22 @@ void SafeScreen::draw() {
             tft.drawString("0x309: NO DATA",
                            ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_MUX_Y);
 
-            // Cause hint: if the STM32 heartbeat is alive but no 0x309 has
-            // ever arrived, the STM32 firmware is too old (or not emitting
-            // the diagnostic).  Otherwise the CAN link itself looks down.
-            if (i2cHbAlive_) {
+            // Cause hint: if the STM32 heartbeat is alive but no usable 0x309
+            // has ever arrived, distinguish three sub-cases without claiming a
+            // specific (and possibly wrong) root cause:
+            //   - 0x309 frames ARE arriving but with an invalid DLC → decode
+            //     rejects them: "0x309 DLC err".
+            //   - heartbeat alive, zero 0x309 frames ever seen on the bus:
+            //     "0x309 ausente" (could be old FW, FIFO drops, or filtering —
+            //     not necessarily "firmware too old").
+            //   - heartbeat itself not alive → the CAN link looks down.
+            if (can_rx::dropped0x309Dlc() > 0 && can_rx::rx0x309Count() > 0) {
                 tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
-                tft.drawString("STM32 FW: no 0x309",
+                tft.drawString("0x309 DLC err",
+                               ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y);
+            } else if (i2cHbAlive_) {
+                tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+                tft.drawString("0x309 ausente",
                                ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y);
             } else {
                 tft.setTextColor(ui::COL_GRAY, ui::COL_BG);

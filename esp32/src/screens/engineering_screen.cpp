@@ -9,6 +9,7 @@
 #include "ui/ui_common.h"
 #include "ui/render_trace.h"
 #include "can_ids.h"
+#include "can_rx.h"
 #include "config_store.h"
 #include "touch_calibration.h"
 #include <TFT_eSPI.h>
@@ -44,7 +45,7 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "DTC ERROR LOG",
     "MAINTENANCE",
     "RELAY CONTROL (DEBUG)",
-    "DEBOUNCE DEBUG",
+    "DEBOUNCE / CAN DIAG",
     "TOUCH CALIBRATION",   // Launch persistent touch calibration wizard
     "RESET TOUCH CAL"      // Erase NVS calibration + re-arm first-boot wizard
 };
@@ -357,6 +358,24 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             debounceSteerFiltered_ = dd.steerFiltered;
             debounceDataChanged_   = true;
         }
+
+        // Cache CAN/0x309 delivery meta (0x30A, 1 Hz), latest I2C scan (0x30B)
+        // and FDCAN dump (0x30C), plus the can_rx per-ID 0x309 counters.
+        const auto& cm = data.canMeta();
+        const uint32_t rx   = can_rx::rx0x309Count();
+        const uint32_t drop = can_rx::dropped0x309Dlc();
+        const uint8_t  dlc  = can_rx::last0x309Dlc();
+        if (cm.timestampMs != canDiagLastTs_ ||
+            rx != rx0x309Count_ || drop != drop0x309Dlc_ || dlc != last0x309Dlc_) {
+            canDiagLastTs_  = cm.timestampMs;
+            canMeta_        = cm;
+            i2cScan_        = data.i2cScan();
+            fdcanDiag_      = data.fdcanDiag();
+            rx0x309Count_   = rx;
+            drop0x309Dlc_   = drop;
+            last0x309Dlc_   = dlc;
+            canDiagChanged_ = true;
+        }
     }
 }
 
@@ -652,8 +671,8 @@ void EngineeringScreen::draw() {
 
         char buf[ui::FMT_BUF_LARGE];
         const int16_t valX = 320;
-        const int16_t rowY0 = 80;
-        const int16_t rowH  = 28;
+        const int16_t rowY0 = 62;
+        const int16_t rowH  = 22;
 
         RTRACE_SET_LAYER(2);
         tft.setTextSize(2);
@@ -701,6 +720,81 @@ void EngineeringScreen::draw() {
 
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
+    }
+
+    // Partial redraw for the CAN/0x309 delivery diagnostic block (1 Hz).
+    if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && canDiagChanged_) {
+        canDiagChanged_ = false;
+
+        char buf[80];
+        const int16_t x   = 10;
+        const int16_t y0  = 194;
+        const int16_t lh  = 12;   // line height (size-1 font)
+
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        // L1: per-ID 0x309 RX counters (audit E/F).
+        tft.fillRect(x, y0, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        tft.setTextColor(rx0x309Count_ ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "0x309 rx=%lu lastDLC=%u dlcDrop=%lu",
+                 (unsigned long)rx0x309Count_, (unsigned)last0x309Dlc_,
+                 (unsigned long)drop0x309Dlc_);
+        tft.drawString(buf, x, y0);
+
+        // L2: STM32 meta counters (audit A–D) from 0x30A.
+        tft.fillRect(x, y0 + lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        if (canMeta_.valid) {
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            snprintf(buf, sizeof(buf),
+                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u init=%u",
+                     (unsigned)canMeta_.diag309CallCount,
+                     (unsigned)canMeta_.tick1000msCount,
+                     (unsigned)canMeta_.diag309TxOk,
+                     (unsigned)canMeta_.diag309TxErr,
+                     (unsigned)canMeta_.txFifoFullDrops,
+                     (unsigned)(canMeta_.fdcanInitOk ? 1 : 0));
+        } else {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            snprintf(buf, sizeof(buf), "0x30A meta: no data");
+        }
+        tft.drawString(buf, x, y0 + lh);
+
+        // L3: latest I2C service-scan result from 0x30B.
+        tft.fillRect(x, y0 + 2 * lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        if (i2cScan_.valid) {
+            tft.setTextColor(i2cScan_.muxPresent ? ui::COL_GREEN : ui::COL_AMBER,
+                             ui::COL_BG);
+            snprintf(buf, sizeof(buf),
+                     "scan mux=%u ina=0x%02X sda=%u scl=%u rec=%u/%u",
+                     (unsigned)(i2cScan_.muxPresent ? 1 : 0),
+                     (unsigned)i2cScan_.inaPresentMask,
+                     (unsigned)(i2cScan_.sdaIdleHigh ? 1 : 0),
+                     (unsigned)(i2cScan_.sclIdleHigh ? 1 : 0),
+                     (unsigned)i2cScan_.recoveryAttempts,
+                     (unsigned)i2cScan_.failCount);
+        } else {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            snprintf(buf, sizeof(buf), "scan: tap RUN I2C SCAN");
+        }
+        tft.drawString(buf, x, y0 + 2 * lh);
+
+        // L4: FDCAN error counters from 0x30C.
+        tft.fillRect(x, y0 + 3 * lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        if (fdcanDiag_.valid) {
+            tft.setTextColor((fdcanDiag_.busOff || fdcanDiag_.errorPassive)
+                                 ? ui::COL_RED : ui::COL_WHITE, ui::COL_BG);
+            snprintf(buf, sizeof(buf),
+                     "fdcan tec=%u rec=%u lec=%u %s%s",
+                     (unsigned)fdcanDiag_.tec, (unsigned)fdcanDiag_.rec,
+                     (unsigned)fdcanDiag_.lastErrorCode,
+                     fdcanDiag_.busOff ? "BUSOFF " : "",
+                     fdcanDiag_.errorPassive ? "EPASS" : "");
+        } else {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            snprintf(buf, sizeof(buf), "fdcan: tap RUN I2C SCAN");
+        }
+        tft.drawString(buf, x, y0 + 3 * lh);
     }
 
     RTRACE_DUMP_IF_PENDING();
@@ -1096,7 +1190,36 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         return false;
     }
 
+    // DEBOUNCE / CAN DIAG submenu — single action: RUN I2C SCAN button, which
+    // emits SERVICE_CMD 0xF6 so the STM32 runs an active I2C probe and replies
+    // with 0x30B (scan) + 0x30C (FDCAN).  Read-only otherwise.
+    if (currentMenu_ == SubMenu::DEBOUNCE_DIAG) {
+        const int16_t bx = SAVE_X - 70;
+        const int16_t bw = BACK_W + 70;
+        if (x >= bx && x <= bx + bw && y >= BACK_Y && y <= BACK_Y + BACK_H) {
+            sendI2cServiceScan();
+            return true;
+        }
+        return false;
+    }
+
     return false;
+}
+
+// -------------------------------------------------------------------------
+// sendI2cServiceScan — emit a SERVICE_CMD (0x110) with byte0 = 0xF6
+// (SERVICE_ACTION_I2C_SERVICE).  The STM32 runs an active I2C topology probe
+// (mux/INA presence, SDA/SCL idle levels, optional bus recovery) and replies
+// with 0x30B (scan report) + 0x30C (FDCAN dump) plus a CMD_ACK.  Read-only
+// diagnostic — does not change any STM32 control or safety state.
+// -------------------------------------------------------------------------
+void EngineeringScreen::sendI2cServiceScan() {
+    CanFrame frame = {};
+    frame.identifier       = can::SERVICE_CMD;
+    frame.extd             = 0;
+    frame.data_length_code = 1;
+    frame.data[0]          = can::SERVICE_ACTION_I2C_SERVICE;
+    ESP32Can.writeFrame(frame, 0);  // Non-blocking
 }
 
 // -------------------------------------------------------------------------
@@ -2172,22 +2295,22 @@ void EngineeringScreen::drawDebounceDiag() {
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("DEBOUNCE DIAGNOSTICS", ui::SCREEN_W / 2, 22);
-    RTRACE_TEXT(ui::SCREEN_W / 2, 22, "DEBOUNCE DIAGNOSTICS",
+    tft.drawString("DEBOUNCE / CAN DIAG", ui::SCREEN_W / 2, 16);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 16, "DEBOUNCE / CAN DIAG",
                 ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
 
     // Sub-header
     tft.setTextSize(1);
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.drawString("DWT 200us pre-filter rejected pulses",
-                   ui::SCREEN_W / 2, 50);
+                   ui::SCREEN_W / 2, 36);
 
     // Column titles (CHANNEL — COUNT)
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-    tft.drawString("CHANNEL", 40, 64);
+    tft.drawString("CHANNEL", 40, 48);
     tft.setTextDatum(TR_DATUM);
-    tft.drawString("FILTERED COUNT", 320, 64);
+    tft.drawString("FILTERED COUNT", 320, 48);
     tft.setTextDatum(TL_DATUM);
 
     // Row baseline.  Real values are painted by the partial-redraw branch
@@ -2196,8 +2319,8 @@ void EngineeringScreen::drawDebounceDiag() {
     tft.setTextSize(2);
     tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
     static const char* const labels[5] = { "FL", "FR", "RL", "RR", "STEER" };
-    const int16_t rowY0 = 80;
-    const int16_t rowH  = 28;
+    const int16_t rowY0 = 62;
+    const int16_t rowH  = 22;
     for (uint8_t i = 0; i < 5; ++i) {
         const int16_t y = rowY0 + i * rowH;
         tft.drawString(labels[i], 40, y);
@@ -2208,6 +2331,24 @@ void EngineeringScreen::drawDebounceDiag() {
         tft.setTextDatum(TL_DATUM);
     }
     tft.setTextSize(1);
+
+    // ---- CAN / 0x309 delivery diagnostic section (audit A–J) ----
+    // Static labels; live values painted by the canDiagChanged_ partial
+    // redraw branch in draw().  Header line acts as a visual separator.
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.drawString("CAN 0x309 DELIVERY (0x30A/0x30B/0x30C)", 10, 180);
+
+    // RUN I2C SCAN button (emits SERVICE_CMD 0xF6 → 0x30B + 0x30C).
+    tft.fillRect(SAVE_X - 70, BACK_Y, BACK_W + 70, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(SAVE_X - 70, BACK_Y, BACK_W + 70, BACK_H, ui::COL_CYAN);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("RUN I2C SCAN", SAVE_X - 70 + (BACK_W + 70) / 2,
+                   BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Force a first paint of the CAN diag values on entry.
+    canDiagChanged_ = true;
 
     // BACK button (bottom-left)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);

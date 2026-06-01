@@ -19,6 +19,13 @@ namespace can_rx {
 /// Call this from loop(). Non-blocking — returns immediately if no frames.
 void poll(vehicle::VehicleData& data);
 
+/// Per-ID 0x309 RX counters (audit questions E/F).  Permanent counters that
+/// let the HMI tell "no 0x309 frame ever arrived" apart from "0x309 frames
+/// arrive but are rejected for an invalid DLC".
+uint32_t rx0x309Count();      ///< total 0x309 frames seen on the bus (any DLC)
+uint32_t dropped0x309Dlc();   ///< 0x309 frames rejected for DLC < 5
+uint8_t  last0x309Dlc();      ///< DLC of the most recent 0x309 frame
+
 } // namespace can_rx
 
 #endif // CAN_RX_H

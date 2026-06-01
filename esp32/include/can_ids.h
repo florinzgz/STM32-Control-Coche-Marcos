@@ -93,6 +93,9 @@ inline constexpr uint32_t DIAG_DEBOUNCE          = 0x306;   // STM32→ESP32, DL
 inline constexpr uint32_t DIAG_DEBOUNCE_STEER    = 0x307;   // STM32→ESP32, DLC 4, 1000 ms — DWT-debounce filtered count (steer u32 LE)
 inline constexpr uint32_t DIAG_PEDAL_CAL         = 0x308;   // STM32→ESP32, DLC 8, on-demand (10 Hz × 1 s after QUERY) — pedal calibration telemetry
 inline constexpr uint32_t DIAG_I2C               = 0x309;   // STM32→ESP32, DLC 5, 1000 ms — I2C topology diag: mux present + per-channel INA226 health
+inline constexpr uint32_t DIAG_CAN_META          = 0x30A;   // STM32→ESP32, DLC 8, 1000 ms — CAN/0x309 delivery meta-diag (call/tick/tx-ok/err/fifo-drops)
+inline constexpr uint32_t DIAG_I2C_SCAN          = 0x30B;   // STM32→ESP32, DLC 8, on-demand — I2C service-mode scan (mux/INA probe, SDA/SCL levels, recovery)
+inline constexpr uint32_t DIAG_FDCAN             = 0x30C;   // STM32→ESP32, DLC 6, on-demand — FDCAN error-counter dump (TEC/REC/LEC/state)
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
 inline constexpr uint32_t CMD_SENSOR_MAP_TEMP    = 0x112;   // ESP32→STM32, DLC 5, on-demand  DS18B20 physIdx→role mapping
 
@@ -202,6 +205,7 @@ inline constexpr uint8_t SERVICE_ACTION_RESET_INA226_SHUNTS  = 0xF2;
 inline constexpr uint8_t SERVICE_ACTION_RESET_TRACTION_FORCE = 0xF3;
 inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_FORCE = 0xF4;
 inline constexpr uint8_t SERVICE_ACTION_PEDAL_CAL            = 0xF5;  // Persistent pedal endpoint calibration (byte 1 = sub-opcode)
+inline constexpr uint8_t SERVICE_ACTION_I2C_SERVICE         = 0xF6;  // I2C service-mode scan (probe mux/INA, SDA/SCL levels, recovery) → 0x30B + 0x30C
 inline constexpr uint8_t SERVICE_ACTION_CLEAR_ERROR_LOG      = 0xFE;
 
 // Pedal-calibration sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_PEDAL_CAL

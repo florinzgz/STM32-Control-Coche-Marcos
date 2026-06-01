@@ -592,6 +592,11 @@ int main(void)
         if ((now - tick_1000ms) >= 1000) {
             tick_1000ms = now;
 
+            /* Observability B: count 1 Hz scheduler-block iterations so the
+             * 0x30A meta-frame can prove the diagnostic block runs.  Saturates. */
+            if (can_txmeta.tick_1000ms_count < UINT32_MAX)
+                can_txmeta.tick_1000ms_count++;
+
             CAN_SendStatusTemp(
                 (int8_t)Temperature_Get(0),
                 (int8_t)Temperature_Get(1),
@@ -614,6 +619,12 @@ int main(void)
              * mux apart from a missing/dead INA226.  Diagnostic only — does
              * not gate any control or safety path.                        */
             CAN_SendI2CDiag();
+
+            /* CAN/0x309 delivery meta-diagnostic (0x30A): call/tick/TX-ok/err
+             * and FIFO-full drop counters, so the ESP32 can tell apart "0x309
+             * never generated" from "generated but never reached the bus".
+             * Diagnostic only — does not gate any control or safety path.   */
+            CAN_SendCanMetaDiag();
 
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();

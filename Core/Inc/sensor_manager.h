@@ -116,6 +116,24 @@ uint8_t Sensor_GetI2cFailCount(void);         /* failed transactions this cycle 
 uint8_t Sensor_GetI2cRecoveryAttempts(void);  /* bus-recovery attempts (sticky) */
 bool    Sensor_GetI2cEverOk(void);            /* latched: any INA seen OK ever  */
 
+/* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) ----
+ * Active probe used by SERVICE_CMD 0xF6 → CAN 0x30B.  Reads SDA/SCL idle
+ * levels, probes the TCA9548A (0x70) and each INA226 (0x40) behind the mux
+ * channels, and attempts a bus recovery if SDA is held low.  Report-only —
+ * never gates any control or safety path.                                  */
+typedef struct {
+    bool    scl_idle_high;       /* SCL line read high while idle           */
+    bool    sda_idle_high;       /* SDA line read high while idle           */
+    bool    recovery_attempted;  /* bus recovery was run (SDA stuck low)    */
+    bool    recovery_success;    /* SDA released high after recovery         */
+    bool    mux_present;         /* TCA9548A 0x70 acked                      */
+    uint8_t ina_present_mask;    /* bit0..5 = INA226 0x40 acked behind ch0..5 */
+    uint8_t fail_count;          /* i2c_fail_count after the scan            */
+    uint8_t recovery_attempts;   /* sticky bus-recovery attempt counter      */
+} Sensor_I2cScanResult_t;
+
+Sensor_I2cScanResult_t Sensor_RunI2CServiceScan(void);
+
 #ifdef __cplusplus
 }
 #endif
