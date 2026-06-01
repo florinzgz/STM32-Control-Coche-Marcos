@@ -397,7 +397,7 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 | PA15 | 1 | TIM2_CH1 (encoder A) |
 | PB0 | 1 | OneWire DS18B20 |
 | PB3–PB5 | 3 | Encoder B, encoder Z-index, steering center |
-| PB6–PB7 | 2 | I2C1_SCL, I2C1_SDA |
+| PB8–PB9 | 2 | I2C1_SCL, I2C1_SDA |
 | PB10–PB11 | 2 | LED relay front/rear |
 | PB12–PB13 | 2 | **LIBRES** — sin asignación en `MX_GPIO_Init()` (la antigua palanca PB12/PB13 NO existe; el shifter está en MCP23017 sobre ESP32, ver `docs/HARDWARE_AND_SENSOR_MAP.md` §6.3) |
 | PB14 | 1 | LED_DIAG (GPIO_Output) |
@@ -446,13 +446,13 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 
 | Periférico | Pines posibles | ¿Libres? | Conflictos |
 |------------|---------------|----------|------------|
-| **I2C1** | PB6/PB7 | ❌ Ya usado | TCA9548A + INA226 + ADS1115 |
+| **I2C1** | PB8/PB9 | ❌ Ya usado | TCA9548A + INA226 + ADS1115 |
 | **I2C2** | PA9/PA10 | ❌ TIM1_CH2/CH3 | PWM motores FR/RL |
 | **I2C2** | PB10/PB11 (AF4) | PB10 ⚠️ / PB11 ✅ | PB10 posible conflicto wheel sensor |
 | **I2C3** | PA8/PC9 (AF2/AF8) | ❌ / ❌ | TIM1_CH1 (PWM FL) / EN_STEER |
 | **I2C3** | PC8/PC9 | ❌ / ❌ | TIM8_CH3 (PWM steering) / EN_STEER |
 | **I2C4** | PA13/PA14 | ❌ | Debug SWD |
-| **I2C4** | PB6/PB7 | ❌ | Ya I2C1 |
+| **I2C4** | PB8/PB9 | ❌ | Ya I2C1 |
 
 ### Solución recomendada: **I2C2 con bit-bang de SCL** o **pines alternativos de I2C2**
 
@@ -587,7 +587,7 @@ Esto es **inaceptable** para un sistema de seguridad.
 ### Solución: aislamiento por periférico I2C separado
 
 ```
-Bus I2C1 (PB6/PB7)                    Bus I2C2 o Soft-I2C (PB10/PB11 o PA4/PA5)
+Bus I2C1 (PB8/PB9)                    Bus I2C2 o Soft-I2C (PB10/PB11 o PA4/PA5)
 ┌──────────────────────┐               ┌──────────────────────┐
 │ TCA9548A (0x70)      │               │ VL53L8CX (0x29)      │
 │  ├─ INA226 ×6        │               │                      │

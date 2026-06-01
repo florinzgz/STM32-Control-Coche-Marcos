@@ -30,8 +30,8 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
 
 | Señal | Pin STM32 | Periférico | Nota |
 |-------|-----------|------------|------|
-| SCL | PB6 | I2C1_SCL | 100 kHz Standard Mode |
-| SDA | PB7 | I2C1_SDA | 100 kHz Standard Mode |
+| SCL | PB8 | I2C1_SCL | 100 kHz Standard Mode |
+| SDA | PB9 | I2C1_SDA | 100 kHz Standard Mode |
 
 ### Canales TCA9548A (dirección 0x70)
 
@@ -73,12 +73,12 @@ Seis sensores INA226 miden corriente y tensión de los cuatro motores, la bater�
 ### Esquema de conexión
 
 ```
-                    Bus I2C (PB6/PB7)
+                    Bus I2C (PB8/PB9)
                          │
            ┌─────────────┴─────────────┐
            │       TCA9548A (0x70)      │
            │  3.3V ── VCC    GND ── GND │
-           │  PB6 ── SCL    SDA ── PB7  │
+           │  PB8 ── SCL    SDA ── PB9  │
            │  A0=A1=A2=GND → 0x70       │
            ├────────────────────────────┤
            │ CH0  CH1  CH2  CH3  CH4  CH5│
@@ -857,8 +857,8 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 
 | Pin | Función | Sensor/Periférico |
 |-----|---------|-------------------|
-| PB6 | I2C1_SCL | TCA9548A → 6× INA226 |
-| PB7 | I2C1_SDA | TCA9548A → 6× INA226 |
+| PB8 | I2C1_SCL | TCA9548A → 6× INA226 |
+| PB9 | I2C1_SDA | TCA9548A → 6× INA226 |
 | PB0 | OneWire DATA | 5× DS18B20 |
 | PA0 | EXTI0 rising | Velocidad rueda FL (via EL817 Board 1) |
 | PA1 | EXTI1 rising | Velocidad rueda FR (via EL817 Board 1) |
@@ -899,7 +899,7 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 
 | Dispositivo | Dirección | Bus | MCU |
 |-------------|-----------|-----|-----|
-| TCA9548A | 0x70 | I2C1 (PB6/PB7) | STM32 |
+| TCA9548A | 0x70 | I2C1 (PB8/PB9) | STM32 |
 | INA226 (×6) | 0x40 (via mux) | I2C1 (via TCA9548A) | STM32 |
 | MCP23017 | 0x20 | I2C (GPIO8/9) | ESP32-S3 |
 

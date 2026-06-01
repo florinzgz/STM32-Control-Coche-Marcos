@@ -143,8 +143,8 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habili
 
 | Señal | Pin | Periférico | Función |
 |-------|-----|-----------|---------|
-| SCL | **PB6** | I2C1_SCL | Reloj I2C 400 kHz |
-| SDA | **PB7** | I2C1_SDA | Datos I2C 400 kHz |
+| SCL | **PB8** | I2C1_SCL | Reloj I2C 400 kHz |
+| SDA | **PB9** | I2C1_SDA | Datos I2C 400 kHz |
 | | **Subtotal:** | | **2 pines** |
 
 Dispositivos en el bus I2C (solo 2 pines para todos):
@@ -211,8 +211,8 @@ Sensores en el bus (un solo pin):
 | 13 | PB3 | GPIOB | Encoder dirección | TIM2_CH2, canal B cuadratura |
 | 14 | PB4 | GPIOB | Encoder dirección | EXTI4, índice Z |
 | 15 | PB5 | GPIOB | Centrado dirección | EXTI5, sensor inductivo |
-| 16 | PB6 | GPIOB | I2C (corriente/pedal) | I2C1_SCL, 400 kHz |
-| 17 | PB7 | GPIOB | I2C (corriente/pedal) | I2C1_SDA, 400 kHz |
+| 16 | PB8 | GPIOB | I2C (corriente/pedal) | I2C1_SCL, 400 kHz |
+| 17 | PB9 | GPIOB | I2C (corriente/pedal) | I2C1_SDA, 400 kHz |
 | 18 | PA11 | GPIOA | CAN bus | FDCAN1_RX, 500 kbps |
 | 19 | PA12 | GPIOA | CAN bus | FDCAN1_TX, 500 kbps |
 | 20 | PB10 | GPIOB | Relé LED frontal | Alimentación 5V tira WS2812B frontal |
@@ -569,8 +569,8 @@ La señal del pedal se lee por **dos muestras ADC consecutivas** con validación
         │     STM32G474RE      │
         │                      │
         │  PA3: ADC1_IN4       │ ◄── 0.12V–1.94V (dividida)
-        │  PB6: I2C1_SCL      │ ◄──► TCA9548A/INA226
-        │  PB7: I2C1_SDA      │ ◄──► TCA9548A/INA226
+        │  PB8: I2C1_SCL      │ ◄──► TCA9548A/INA226
+        │  PB9: I2C1_SDA      │ ◄──► TCA9548A/INA226
         └──────────────────────┘
 ```
 
@@ -652,10 +652,10 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 | Pin | Función | ¿Exclusivo del pedal? |
 |-----|---------|----------------------|
 | **PA3** | ADC1_IN4 (canal primario + plausibilidad dual-sample) | ✅ Sí, exclusivo |
-| **PB6** | I2C1_SCL (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
-| **PB7** | I2C1_SDA (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
+| **PB8** | I2C1_SCL (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
+| **PB9** | I2C1_SDA (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
 
-> **Resultado: Solo 1 pin GPIO adicional** (PA3) es exclusivo del pedal. La plausibilidad se realiza por software (dual-sample ADC) sin necesidad de hardware externo adicional. El bus I2C (PB6/PB7) se usa exclusivamente para los sensores de corriente INA226 y el multiplexor TCA9548A.
+> **Resultado: Solo 1 pin GPIO adicional** (PA3) es exclusivo del pedal. La plausibilidad se realiza por software (dual-sample ADC) sin necesidad de hardware externo adicional. El bus I2C (PB8/PB9) se usa exclusivamente para los sensores de corriente INA226 y el multiplexor TCA9548A.
 
 ---
 

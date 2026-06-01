@@ -25,7 +25,7 @@ CI pipeline failure also fixed (cppcheck false-positive on ISR handlers).
 
 ### Architecture
 - **6 × INA226** sensors connected via **TCA9548A** I2C multiplexer (address 0x70)
-- **I2C1** at 100 kHz Standard Mode on PB6 (SCL) / PB7 (SDA), 7-bit addressing mode
+- **I2C1** at 100 kHz Standard Mode on PB8 (SCL) / PB9 (SDA), 7-bit addressing mode
 - All INA226 share address **0x40** — no conflicts (TCA9548A isolates each)
 - Read cycle: every **50 ms** (20 Hz) from main loop
 
@@ -173,8 +173,8 @@ LED strip power could remain energised after a CPU fault.
 
 | Component        | Firmware Pin    | Documentation Match |
 |------------------|-----------------|---------------------|
-| I2C1 SCL         | PB6             | ✅ main.h:114, .ioc |
-| I2C1 SDA         | PB7             | ✅ main.h:115, .ioc |
+| I2C1 SCL         | PB8             | ✅ main.h:114, .ioc |
+| I2C1 SDA         | PB9             | ✅ main.h:115, .ioc |
 | TCA9548A addr    | 0x70            | ✅ main.h:138       |
 | INA226 addr      | 0x40            | ✅ main.h:139       |
 | RELAY_TRAC       | PC11            | ✅ main.h:85        |

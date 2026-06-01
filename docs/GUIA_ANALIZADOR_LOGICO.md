@@ -77,8 +77,8 @@ La placa NUCLEO-G474RE tiene dos filas de pines a cada lado llamadas **Morpho co
 
 | Pin STM32 | Función en el coche | Conector Morpho |
 |-----------|---------------------|-----------------|
-| **PB6** | I2C1_SCL (reloj) | CN10 pin 17 |
-| **PB7** | I2C1_SDA (datos) | CN7 pin 21 |
+| **PB8** | I2C1_SCL (reloj) | CN10 pin 3 |
+| **PB9** | I2C1_SDA (datos) | CN10 pin 5 |
 | **PB0** | OneWire (temperatura) | CN7 pin 34 |
 | **PA15** | Encoder Fase A | CN7 pin 38 |
 | **PB3** | Encoder Fase B | CN10 pin 31 |
@@ -107,8 +107,8 @@ El TCA9548A es como un **interruptor con 8 salidas**: el STM32 le dice
 ```
                     ┌─────────────┐
   STM32 ──I2C──────┤  TCA9548A   ├──Canal 0──→ INA226 (motor FL)
-  PB6=SCL          │  (0x70)     ├──Canal 1──→ INA226 (motor FR)
-  PB7=SDA          │             ├──Canal 2──→ INA226 (motor RL)
+  PB8=SCL          │  (0x70)     ├──Canal 1──→ INA226 (motor FR)
+  PB9=SDA          │             ├──Canal 2──→ INA226 (motor RL)
                    │             ├──Canal 3──→ INA226 (motor RR)
                    │             ├──Canal 4──→ INA226 (batería 24V)
                    │             ├──Canal 5──→ INA226 (dirección)
@@ -122,8 +122,8 @@ El TCA9548A es como un **interruptor con 8 salidas**: el STM32 le dice
 ```
 ANALIZADOR          NUCLEO
 ──────────          ──────
-  CH0  ──────────→  PB6  (SCL)    Morpho CN10 pin 17
-  CH1  ──────────→  PB7  (SDA)    Morpho CN7  pin 21
+  CH0  ──────────→  PB8  (SCL)    Morpho CN10 pin 3
+  CH1  ──────────→  PB9  (SDA)    Morpho CN10 pin 5
   GND  ──────────→  GND           Morpho CN7  pin 8
 ```
 

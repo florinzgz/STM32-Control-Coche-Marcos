@@ -152,12 +152,12 @@ del bus CAN o el entorno eléctrico lo requirieran en el futuro, usar ISO1050.
 
 ---
 
-#### 2.1.5 Bus I2C (INA226 + TCA9548A — PB6/PB7)
+#### 2.1.5 Bus I2C (INA226 + TCA9548A — PB8/PB9)
 
 | Señal | Pin STM32 | Periférico | Velocidad |
 |-------|-----------|------------|-----------|
-| I2C_SCL | PB6 | I2C1_SCL | 400 kHz |
-| I2C_SDA | PB7 | I2C1_SDA | 400 kHz |
+| I2C_SCL | PB8 | I2C1_SCL | 400 kHz |
+| I2C_SDA | PB9 | I2C1_SDA | 400 kHz |
 
 **Análisis:** El protocolo I2C es open-drain bidireccional. El 6N137 es unidireccional.
 Aislar I2C con 6N137 requiere 4 optoacopladores (2 por línea, en configuración push-pull
@@ -413,7 +413,7 @@ bootloader ni a la programación** del STM32. ✅
 | Señal | Razón técnica | Alternativa futura si fuera necesario |
 |-------|--------------|---------------------------------------|
 | **CAN Bus (PA11/PA12)** | Protocolo diferencial con transceiver TJA1051T/3. El 6N137 por sí solo no aporta aislamiento galvánico completo (necesita también convertidor DC-DC aislado). La solución adecuada es un chip integrado (ISO1050, ADuM1191). | ISO1050 o ADuM1191 |
-| **I2C Bus (PB6/PB7)** | Protocolo open-drain bidireccional. El 6N137 es unidireccional. Aislar I2C requiere chips dedicados (ADUM1250, ISO1540). | ADUM1250 o ISO1540 |
+| **I2C Bus (PB8/PB9)** | Protocolo open-drain bidireccional. El 6N137 es unidireccional. Aislar I2C requiere chips dedicados (ADUM1250, ISO1540). | ADUM1250 o ISO1540 |
 | **OneWire (PB0)** | Protocolo bidireccional de un solo cable. Incompatible con optoacopladores estándar. Los DS18B20 operan a 3.3 V en zona de baja tensión. | Si hubiera ruido, mover DS18B20 fuera del bus OneWire a I2C (MCP9808). |
 | **Pedal ADC (PA3)** | Señal analógica continua; los optoacopladores digitales no pueden aislarla. El circuito ya tiene protección: divisor de tensión + ADS1115 plausibilidad. | AMC1200, ISO124 (sigma-delta aislados). |
 | **PWM/DIR/EN → BTS7960** | 15 canales necesarios (5 motores × 3 señales) superan los canales disponibles. El riesgo es inyección inversa desde BTS7960, ya mitigada por el Schmitt interno del driver. | Módulos adicionales en iteración futura; prioridad si se detectan latch-ups. |
@@ -542,7 +542,7 @@ rango operativo del 6N137 (máximo 15 mA continuo). ✅
 | Señal | Pins | Razón de exclusión | Solución alternativa si se requiere |
 |-------|------|--------------------|-------------------------------------|
 | CAN TX/RX | PA11/PA12 | Diferencial TJA1051T/3; 6N137 solo no basta (necesita DC-DC aislado) | ISO1050, ADuM1191 |
-| I2C SCL/SDA | PB6/PB7 | Protocolo bidireccional open-drain, incompatible con 6N137 | ADUM1250, ISO1540 |
+| I2C SCL/SDA | PB8/PB9 | Protocolo bidireccional open-drain, incompatible con 6N137 | ADUM1250, ISO1540 |
 | OneWire | PB0 | Protocolo bidireccional, tensión 3.3 V, baja criticidad | — |
 | Pedal ADC | PA3 | Señal analógica; 6N137 es digital | AMC1200, ISO124 |
 | PWM/DIR/EN | PA8–PA11, PC0–PC9, PC13 | 15 canales necesarios; excede presupuesto; BTS7960 tiene protección interna | Módulos adicionales, iteración futura |

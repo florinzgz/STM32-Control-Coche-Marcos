@@ -114,14 +114,14 @@ SEÑAL STM32              PIN   FUNCIÓN PROYECTO
                        ┌──────────────────────┐
 PA9  LPWM_FL TIM1_2 ───┤ ●1  D8               │
 PC7  LPWM_RL TIM8_2 ───┤ ●2  D9               │
-PB6  I2C1_SCL     ─────┤ ●3  D10 (SPI CS)     │
+PB6  libre        ─────┤ ●3  D10 (SPI CS)     │
 PA7  LPWM_STEER T3_2 ──┤ ●4  D11 (SPI MOSI)   │
 PA6  RPWM_STEER T3_1 ──┤ ●5  D12 (SPI MISO)   │
 PA5  LED_LD2 verde ────┤ ●6  D13 (SPI SCK)    │
 GND               ─────┤ ●7  GND              │
 AREF              ─────┤ ●8  AREF             │
-PB7  I2C1_SDA     ─────┤ ●9  D14 / SDA        │
-PB6  I2C1_SCL     ─────┤ ●10 D15 / SCL        │
+PB9  I2C1_SDA     ─────┤ ●9  D14 / SDA        │
+PB8  I2C1_SCL     ─────┤ ●10 D15 / SCL        │
                        └──────────────────────┘
                                CN8
 ```
@@ -143,7 +143,7 @@ SWDIO depurador  PA13 ──┤13●   ●14 ├── NRST   reset
 SWCLK depurador  PA14 ──┤15●   ●16 ├── +3V3   salida 3.3V
 ENC_A  TIM2_CH1  PA15 ──┤17●   ●18 ├── +5V    salida 5V
                    GND ──┤19●   ●20 ├── GND
-I2C1_SDA           PB7 ──┤21●   ●22 ├── GND
+libre              PB7 ──┤21●   ●22 ├── GND
 botón USER        PC13 ──┤23●   ●24 ├── VIN    alimentación ext.
 OSC32_IN          PC14 ──┤25●   ●26 ├── NC
 OSC32_OUT         PC15 ──┤27●   ●28 ├── PA0    WHEEL_FL ↑EXTI0
@@ -164,14 +164,14 @@ LPWM_FR TIM1_CH4   PC3 ──┤37●   ●38 ├── PC0    EN_FR enable
 FUNCIÓN PROYECTO              CN10              FUNCIÓN PROYECTO
                          ┌──────────┐
 LPWM_RR TIM8_CH4   PC9 ──┤ 1●    ●2 ├── PC8    RPWM_RR TIM8_CH3
-libre              PB8 ──┤ 3●    ●4 ├── PC6    RPWM_RL TIM8_CH1
-libre              PB9 ──┤ 5●    ●6 ├── PC5    EN_FL enable
+I2C1_SCL           PB8 ──┤ 3●    ●4 ├── PC6    RPWM_RL TIM8_CH1
+I2C1_SDA           PB9 ──┤ 5●    ●6 ├── PC5    EN_FL enable
 VREF analógico   VREFP ──┤ 7●    ●8 ├── 5VUSB  St-Link (no usar)
                    GND ──┤ 9●   ●10 ├── NC
 LED verde LD2      PA5 ──┤11●   ●12 ├── PA12   CAN_TX → ESP32
 RPWM_STEER TIM3_1  PA6 ──┤13●   ●14 ├── PA11   CAN_RX ← ESP32
 LPWM_STEER TIM3_2  PA7 ──┤15●   ●16 ├── PB12   libre
-I2C1_SCL           PB6 ──┤17●   ●18 ├── PB11   RELAY_LED_TRASERO
+libre              PB6 ──┤17●   ●18 ├── PB11   RELAY_LED_TRASERO
 LPWM_RL TIM8_CH2   PC7 ──┤19●   ●20 ├── GND
 LPWM_FL TIM1_CH2   PA9 ──┤21●   ●22 ├── PB2    libre
 RPWM_FL TIM1_CH1   PA8 ──┤23●   ●24 ├── PB1    libre
@@ -223,8 +223,8 @@ PEDAL ADC1_IN4     PA3 ──┤37●   ●38 ├── NC
 | EN_STEER             | PC4       | CN10     |  34  | GPIO OUT          |
 | PEDAL_ADC            | PA3       | CN10     |  37  | ADC1_IN4          |
 | 1-Wire DS18B20       | PB0       | CN7      |  34  | GPIO OD           |
-| I2C1_SCL             | PB6       | CN10     |  17  | I2C1_SCL          |
-| I2C1_SDA             | PB7       | CN7      |  21  | I2C1_SDA          |
+| I2C1_SCL             | PB8       | CN10     |   3  | I2C1_SCL          |
+| I2C1_SDA             | PB9       | CN10     |   5  | I2C1_SDA          |
 | SWDIO depurador      | PA13      | CN7      |  13  | SWD               |
 | SWCLK depurador      | PA14      | CN7      |  15  | SWD               |
 | LED_LD2 verde        | PA5       | CN10     |  11  | GPIO OUT          |

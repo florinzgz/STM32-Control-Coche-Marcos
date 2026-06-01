@@ -622,7 +622,7 @@ fuerza PB10/PB11 LOW vía BSRR (`stm32g4xx_it.c:61`).
 
 > ⚠️ **Sin star ground, el ruido PWM de los BTS7960 (20 kHz, 24 V) se propaga
 > por la impedancia del cable de retorno hacia el STM32, degradando el ADC del
-> pedal (PA3), la lectura de los INA226 y el bus I2C (PB6/PB7).**
+> pedal (PA3), la lectura de los INA226 y el bus I2C (PB8/PB9).**
 
 ### Principio
 

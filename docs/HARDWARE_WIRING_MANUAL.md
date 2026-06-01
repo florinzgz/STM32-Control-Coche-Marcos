@@ -526,8 +526,8 @@ enumeración del algoritmo de búsqueda OneWire.
 |-----------|-------|------------|
 | Cantidad | **6** | `NUM_INA226` (`project_config.h:238`) |
 | Bus | **I2C1** (100 kHz, Standard Mode) | `main.c`: `MX_I2C1_Init` |
-| Pin SCL | **PB6** | `PIN_I2C_SCL` (`project_config.h:174`) |
-| Pin SDA | **PB7** | `PIN_I2C_SDA` (`project_config.h:175`) |
+| Pin SCL | **PB8** | `PIN_I2C_SCL` (`project_config.h:174`) |
+| Pin SDA | **PB9** | `PIN_I2C_SDA` (`project_config.h:175`) |
 | Dirección INA226 | **0x40** | `I2C_ADDR_INA226` (`project_config.h:233`) |
 | Multiplexor | **TCA9548A** en dirección **0x70** | `I2C_ADDR_TCA9548A` (`project_config.h:232`) |
 | Resistencia shunt (motor) | **1.5 mΩ** (50A/75mV) | `INA226_SHUNT_MOHM_MOTOR` (`project_config.h:257`) |
@@ -538,8 +538,8 @@ enumeración del algoritmo de búsqueda OneWire.
 ```
 STM32                TCA9548A (0x70)           INA226 (0x40 cada uno)
 ┌──────┐            ┌──────────────┐
-│  PB6 ├──SCL───────┤ SCL      CH0 ├───SCL/SDA──► INA226 #0
-│  PB7 ├──SDA───────┤ SDA      CH1 ├───SCL/SDA──► INA226 #1
+│  PB8 ├──SCL───────┤ SCL      CH0 ├───SCL/SDA──► INA226 #0
+│  PB9 ├──SDA───────┤ SDA      CH1 ├───SCL/SDA──► INA226 #1
 │      │            │          CH2 ├───SCL/SDA──► INA226 #2
 │      │            │          CH3 ├───SCL/SDA──► INA226 #3
 │      │            │          CH4 ├───SCL/SDA──► INA226 #4
@@ -689,8 +689,8 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 13 | **PB3** | GPIOB | Encoder dirección B | E6B2-CWZ6C CH-B | TIM2_CH2 (AF1) | 3.3 V o 5 V (con adaptación) | `PIN_ENC_B` |
 | 14 | **PB4** | GPIOB | Encoder índice Z | E6B2-CWZ6C CH-Z | EXTI4 | 3.3 V o 5 V (con adaptación) | `PIN_ENC_Z` |
 | 15 | **PB5** | GPIOB | Sensor centro dirección | LJ12A3 inductivo | EXTI5 | 3.3 V (con adaptación si necesario) | `PIN_STEER_CENTER` |
-| 16 | **PB6** | GPIOB | I2C SCL | TCA9548A + INA226 | I2C1_SCL (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SCL` |
-| 17 | **PB7** | GPIOB | I2C SDA | TCA9548A + INA226 | I2C1_SDA (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SDA` |
+| 16 | **PB8** | GPIOB | I2C SCL | TCA9548A + INA226 | I2C1_SCL (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SCL` |
+| 17 | **PB9** | GPIOB | I2C SDA | TCA9548A + INA226 | I2C1_SDA (AF4) | 3.3 V (open-drain, pull-up ext.) | `PIN_I2C_SDA` |
 | 18 | **PA11** | GPIOA | CAN RX | Transceiver CAN | FDCAN1_RX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_RX` |
 | 19 | **PA12** | GPIOA | CAN TX | Transceiver CAN | FDCAN1_TX (AF9) | 3.3 V lógico (NO conectar a CANH/CANL) | `PIN_CAN_TX` |
 | 20 | **PB10** | GPIOB | Relé LED frontal | Relé 5V tira WS2812B | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_LED` |
@@ -777,7 +777,7 @@ automáticamente.
 | Bus | Pines | Velocidad | Dispositivos |
 |-----|-------|-----------|-------------|
 | **FDCAN1** | PA11 (RX), PA12 (TX) | 500 kbps | ESP32 (vía transceiver) |
-| **I2C1** | PB6 (SCL), PB7 (SDA) | 100 kHz | TCA9548A (0x70) → 6× INA226 (0x40) |
+| **I2C1** | PB8 (SCL), PB9 (SDA) | 100 kHz | TCA9548A (0x70) → 6× INA226 (0x40) |
 | **OneWire** | PB0 | ~16 kbps (bit-bang) | 5× DS18B20 |
 | **ADC1** | PA3 | N/A (polling) | Pedal acelerador |
 

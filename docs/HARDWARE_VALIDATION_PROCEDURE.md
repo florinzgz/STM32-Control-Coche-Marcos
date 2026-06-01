@@ -26,7 +26,7 @@
 | Steering motor with H-bridge driver | TIM8 CH3 PWM output | Connected to physical steering rack |
 | E6B2-CWZ6C rotary encoder (4800 CPR) | TIM2 CH1 (PA0) / CH2 (PA1) quadrature inputs | Mechanically coupled to steering column |
 | Inductive center sensor | PB5 (EXTI5) | Mounted at steering center position |
-| 6× INA226 current sensors via TCA9548A I2C mux | I2C1 (PB6 SDA / PB7 SCL) | 4 motor channels + 1 battery + 1 spare |
+| 6× INA226 current sensors via TCA9548A I2C mux | I2C1 (PB8 SDA / PB9 SCL) | 4 motor channels + 1 battery + 1 spare |
 | 5× DS18B20 temperature sensors | OneWire bus on PB0 | Placed on motors and ambient |
 | Pedal potentiometer | PA3 (ADC1_IN4) | 0–3.3 V analog input |
 | 4× wheel speed sensors (hall/reed) | EXTI pins (PA4, PA6, PA7, PB1) | One per wheel, pulse output |
@@ -135,7 +135,7 @@
 
 **Procedure:**
 
-1. Disconnect all I2C devices (INA226 sensors, TCA9548A mux) from the I2C1 bus (PB6/PB7).
+1. Disconnect all I2C devices (INA226 sensors, TCA9548A mux) from the I2C1 bus (PB8/PB9).
 2. Power on the STM32.
 3. Observe via serial or SWD debugger that the system reaches the main loop.
 4. Verify the watchdog does not reset the system.
@@ -529,7 +529,7 @@
 **Procedure:**
 
 1. Start with the system running normally in ACTIVE state (all sensors responding).
-2. Momentarily hold SDA low (connect PB6 to GND through a 100 Ω resistor for approximately 500 ms, then release).
+2. Momentarily hold SDA low (connect PB8 to GND through a 100 Ω resistor for approximately 500 ms, then release).
 3. This should cause I2C failures, triggering the bus recovery mechanism.
 4. After release, verify I2C communication resumes:
    - CAN 0x201 shows valid current readings again.

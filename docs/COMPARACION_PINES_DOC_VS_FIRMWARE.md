@@ -92,8 +92,8 @@
 | PB3 | ENC_B (TIM2_CH2) | `PIN_ENC_B = GPIO_PIN_3` | `main.h:81` | ✅ |
 | PB4 | ENC_Z (EXTI4) | `PIN_ENC_Z = GPIO_PIN_4` | `main.h:82` | ✅ |
 | PB5 | STEER_CENTER (EXTI5) | `PIN_STEER_CENTER = GPIO_PIN_5` | `main.h:87` | ✅ |
-| PB6 | I2C_SCL | `PIN_I2C_SCL = GPIO_PIN_6` | `main.h:90` | ✅ |
-| PB7 | I2C_SDA | `PIN_I2C_SDA = GPIO_PIN_7` | `main.h:91` | ✅ |
+| PB8 | I2C_SCL | `PIN_I2C_SCL = GPIO_PIN_8` | `main.h:90` | ✅ |
+| PB9 | I2C_SDA | `PIN_I2C_SDA = GPIO_PIN_9` | `main.h:91` | ✅ |
 | PB0 | ONEWIRE | `PIN_ONEWIRE = GPIO_PIN_0` | `main.h:94` | ✅ |
 | PA3 | PEDAL (ADC1_IN4) | `PIN_PEDAL = GPIO_PIN_3` | `main.h:99` | ✅ |
 | PA11 | CAN_RX (FDCAN1_RX) | `PIN_CAN_RX = GPIO_PIN_11` | `project_config.h:227` | ✅ |
@@ -147,7 +147,7 @@
 | Componente | LISTADO | Firmware/código | Estado |
 |-----------|---------|-----------------|--------|
 | Pull-up OneWire 4.7 kΩ (PB0) | ✅ | No en firmware (hardware externo) | ✅ Documentación hardware correcta |
-| Pull-up I2C 4.7 kΩ (PB6/PB7) | ✅ | `GPIO_NOPULL` en MSP → pull-up externo necesario | ✅ |
+| Pull-up I2C 4.7 kΩ (PB8/PB9) | ✅ | `GPIO_NOPULL` en MSP → pull-up externo necesario | ✅ |
 | CAN terminación 120 Ω | ✅ | No en firmware (hardware externo) | ✅ |
 | Pedal divisor 10kΩ / 6.8kΩ | ✅ | `sensor_manager.c:147-148` confirma | ✅ |
 | HY-M158 optoacopladores (aislamiento PWM BTS7960) | ✅ | Documentación de hardware | ✅ |

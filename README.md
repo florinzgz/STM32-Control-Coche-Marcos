@@ -555,7 +555,7 @@ The E6B2-CWZ6C encoder (1200 PPR) is mounted on the steering column and galvanic
 
 ## 14. Current Sensing — INA226
 
-Six INA226 power monitors connected to I2C1 (PB6/PB7) through a TCA9548A I2C multiplexer (address 0x70). The INA226 base address on each multiplexer channel is 0x40.
+Six INA226 power monitors connected to I2C1 (PB8/PB9) through a TCA9548A I2C multiplexer (address 0x70). The INA226 base address on each multiplexer channel is 0x40.
 
 | Channel | Role | Shunt | Full scale |
 |---------|------|-------|-----------|
@@ -957,8 +957,8 @@ Flash page 125 ring buffer. Survives power cycles, brownouts, and watchdog reset
 
 | GPIO | Peripheral | Signal |
 |------|-----------|--------|
-| PB6 | I2C1_SCL | I2C clock |
-| PB7 | I2C1_SDA | I2C data |
+| PB8 | I2C1_SCL | I2C clock |
+| PB9 | I2C1_SDA | I2C data |
 
 ### OneWire (DS18B20)
 

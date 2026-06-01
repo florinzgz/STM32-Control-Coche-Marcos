@@ -158,8 +158,8 @@ Pinout & Configuration:
 │  ├─ TX: PA12
 │  └─ RX: PA11
 ├─ I2C1
-│  ├─ SCL: PB6
-│  └─ SDA: PB7
+│  ├─ SCL: PB8
+│  └─ SDA: PB9
 ├─ ADC1
 │  └─ IN1: PA0 (PEDAL)
 └─ GPIOs

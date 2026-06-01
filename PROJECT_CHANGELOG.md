@@ -1,5 +1,67 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-01] — Migración I2C1 de PB6/PB7 a PB8/PB9
+
+### Resumen ejecutivo
+
+Migración completa del bus I2C1 (TCA9548A → INA226 × 6 canales) desde los
+pines PB6 (SCL) / PB7 (SDA) a **PB8 (SCL) / PB9 (SDA)**, manteniendo
+AF4 y modo Open-Drain. El cambio libera PB6/PB7 para uso futuro y
+resuelve un conflicto de enrutamiento en la PCB.
+
+### Cambios en firmware (`Core/`)
+
+- `Core/Inc/project_config.h`
+  - `PIN_I2C_SCL` → `GPIO_PIN_8` (PB8)
+  - `PIN_I2C_SDA` → `GPIO_PIN_9` (PB9)
+
+- `Core/Src/stm32g4xx_hal_msp.c`
+  - `HAL_GPIO_Init(GPIOB, ...)` ahora inicializa PB8|PB9 con AF4_I2C1,
+    Open-Drain, sin pull-up interno (pull-ups externos de 4.7 kΩ en PCB).
+
+- `STM32-Control-Coche-Marcos.ioc`
+  - Asignación CubeMX actualizada: I2C1_SCL=PB8, I2C1_SDA=PB9.
+  - PB6/PB7 liberados (sin función asignada).
+
+- `Core/Src/sensor_manager.c`
+  - Rutina de recovery I2C actualizada para referenciar los nuevos pines
+    en caso de reinicio del bus por timeout.
+
+### Cambios en documentación (29 archivos)
+
+Actualización global de todas las referencias a PB6/PB7 → PB8/PB9 en:
+
+- Diagramas de pines (`PINOUT_DEFINITIVO`, `NUCLEO_G474RE_PINOUT_CROQUIS`,
+  `PIN_USAGE_INVENTORY`, `LISTADO_PINES_COMPLETO`)
+- Guías de hardware (`HARDWARE_WIRING_MANUAL`, `CONEXIONES_COMPLETAS`,
+  `HARDWARE_SPECIFICATION`, `HARDWARE_VALIDATION_PROCEDURE`)
+- Documentación de sensores (`SENSOR_INTERFACE`, `INA226_RELAY_SAFETY_AUDIT`,
+  `HARDWARE_AND_SENSOR_MAP`)
+- Guías de puesta en marcha y validación (`PUESTA_EN_MARCHA_SEGURA`,
+  `BUILD_GUIDE`, `GUIA_ANALIZADOR_LOGICO`)
+- Inventarios y materiales (`INVENTARIO_COMPONENTES_FISICOS`,
+  `MATERIALES_POR_MODULO`, `COMPONENTES_PASIVOS_REFERENCIA`)
+- README principal
+
+### Configuración eléctrica resultante
+
+| Señal     | Pin  | AF  | Modo       | Pull-up      |
+|-----------|------|-----|------------|--------------|
+| I2C1_SCL  | PB8  | AF4 | Open-Drain | 4.7 kΩ ext.  |
+| I2C1_SDA  | PB9  | AF4 | Open-Drain | 4.7 kΩ ext.  |
+
+Timing I2C1 sin cambios: `0x30F0EDFF` (Standard Mode ~86 kHz, DNF=2,
+filtro analógico ON).
+
+### Estado / verificación
+
+- Firmware compila sin errores con la nueva asignación de pines.
+- Documentación coherente en los 29 archivos actualizados.
+- No hay cambios funcionales en la lógica de lectura de sensores INA226
+  ni en la secuencia TCA9548A.
+
+---
+
 ## [2026-05-24c] — mando RC — soberanía LOCAL/REMOTE unificada + activación por defecto
 
 ### Resumen ejecutivo

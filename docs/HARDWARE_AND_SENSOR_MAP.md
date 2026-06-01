@@ -104,7 +104,7 @@
 | 4 | CH4 | **Battery** | `MODULE_CURRENT_SENSOR_4` (13) | NOT in STATUS_CURRENT |
 | 5 | CH5 | **Steering motor** | `MODULE_CURRENT_SENSOR_5` (14) | NOT in STATUS_CURRENT |
 
-- **Bus:** I2C1 @ 100 kHz Standard Mode (PB6 = SCL, PB7 = SDA).
+- **Bus:** I2C1 @ 100 kHz Standard Mode (PB8 = SCL, PB9 = SDA).
 - **Multiplexer:** TCA9548A at I2C address **0x70**.
 - **INA226 address:** All at **0x40** (unique per TCA9548A channel).
 - **Shunt resistor:** 1.5 mΩ motors / 0.75 mΩ battery (see `project_config.h`).
@@ -171,7 +171,7 @@
 | Bus | Peripheral | Pins | Speed | Protocol | File(s) |
 |-----|------------|------|-------|----------|---------|
 | CAN | FDCAN1 | PA11 (RX), PA12 (TX) | 500 kbps | CAN 2.0A, 11-bit IDs | `can_handler.c`, `main.c` |
-| I2C | I2C1 | PB6 (SCL), PB7 (SDA) | 100 kHz | I2C Standard Mode | `sensor_manager.c`, `main.c` |
+| I2C | I2C1 | PB8 (SCL), PB9 (SDA) | 100 kHz | I2C Standard Mode | `sensor_manager.c`, `main.c` |
 | OneWire | GPIO bit-bang | PB0 | ~16 kbps | Dallas 1-Wire | `sensor_manager.c` |
 
 **CAN bit timing (verified from `MX_FDCAN1_Init`):**

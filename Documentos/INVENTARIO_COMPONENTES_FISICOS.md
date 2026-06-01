@@ -179,7 +179,7 @@
 | Resistencia | Valor | Función en proyecto | Qty necesaria |
 |-------------|-------|---------------------|--------------|
 | Pull-up encoder 6N137 | **4.7 kΩ** | PA15, PB3, PB4 (×3) | 3 |
-| Pull-up I2C (PB6/PB7) | **4.7 kΩ** | SCL + SDA × 2 buses | 4 |
+| Pull-up I2C (PB8/PB9) | **4.7 kΩ** | SCL + SDA × 2 buses | 4 |
 | Divisor pedal Hall R2 | **10 kΩ** | PA3 (ADC pedal) | 1 |
 | Divisor llave R1 | **33 kΩ** | GPIO40 ESP32 (12V→3.3V) | 1 |
 | Divisor llave R2 | **10 kΩ** | GPIO40 ESP32 (12V→3.3V) | 1 |
@@ -561,7 +561,7 @@ Kit AUKENIEN 1/8W:
   ├── 330Ω × 2 → Datos WS2812B serie (protección DIN antes del primer LED)
   ├── 100Ω × 2 → Snubber RC relés (serie con 100nF en contactos TRAC/DIR)
   ├── 4.7kΩ × 3 → Pull-up salida 6N137 (a 3.3V: PA15, PB3, PB4)
-  ├── 4.7kΩ × 4 → Pull-up bus I2C (PB6 SCL × 2 + PB7 SDA × 2)
+  ├── 4.7kΩ × 4 → Pull-up bus I2C (PB8 SCL × 2 + PB9 SDA × 2)
   ├── 10kΩ × 1 → Divisor pedal Hall R2 (PA3, mitad inferior del divisor)
   ├── 10kΩ × 1 → Divisor llave contacto R2 (GPIO40 ESP32)
   ├── 33kΩ × 1 → Divisor llave contacto R1 (GPIO40 ESP32)

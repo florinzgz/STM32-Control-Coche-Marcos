@@ -89,10 +89,10 @@ El ESP32 ahora lee los mode flags confirmados del heartbeat y actualiza `current
 | PB3 | Encoder B | TIM2_CH2 | ✅ Único |
 | PB4 | Encoder Z index | EXTI4 | ✅ Único |
 | PB5 | Steering center | EXTI5 | ✅ Único |
-| PB6 | I2C SCL | I2C1_SCL | ✅ Único |
-| PB7 | I2C SDA | I2C1_SDA | ✅ Único |
-| PB8 | LIBRE | — | — |
-| PB9 | LIBRE | — | — |
+| PB8 | I2C SCL | I2C1_SCL | ✅ Único |
+| PB9 | I2C SDA | I2C1_SDA | ✅ Único |
+| PB6 | LIBRE (liberado, antes I2C1_SCL) | — | — |
+| PB7 | LIBRE (liberado, antes I2C1_SDA) | — | — |
 | PB10 | LED relay | GPIO output | ✅ Único |
 | PB15 | Wheel RR speed | EXTI15 | ✅ Único |
 | PC0-4 | Direction ctrl | GPIO output | ✅ Únicos |
