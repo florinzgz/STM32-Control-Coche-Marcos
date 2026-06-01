@@ -92,6 +92,7 @@ inline constexpr uint32_t ERROR_LOG_HEADER       = 0x305;   // STM32→ESP32, DL
 inline constexpr uint32_t DIAG_DEBOUNCE          = 0x306;   // STM32→ESP32, DLC 8, 1000 ms — DWT-debounce filtered counts (4× wheel u16 LE)
 inline constexpr uint32_t DIAG_DEBOUNCE_STEER    = 0x307;   // STM32→ESP32, DLC 4, 1000 ms — DWT-debounce filtered count (steer u32 LE)
 inline constexpr uint32_t DIAG_PEDAL_CAL         = 0x308;   // STM32→ESP32, DLC 8, on-demand (10 Hz × 1 s after QUERY) — pedal calibration telemetry
+inline constexpr uint32_t DIAG_I2C               = 0x309;   // STM32→ESP32, DLC 5, 1000 ms — I2C topology diag: mux present + per-channel INA226 health
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
 inline constexpr uint32_t CMD_SENSOR_MAP_TEMP    = 0x112;   // ESP32→STM32, DLC 5, on-demand  DS18B20 physIdx→role mapping
 

@@ -58,9 +58,25 @@ void SafeScreen::onEnter() {
     relayStatus_     = 0;
     prevRelayStatus_ = 0xFF;
 
-    // Initialize tile regions — existing tiles
-    tiles_.setRect(STILE_FAULTS,   STILE_COL_LABEL_X, STILE_FAULT_VALUE_Y, 460, 12);
-    tiles_.setRect(STILE_ERROR,    STILE_COL_LABEL_X, STILE_ERR_VALUE_Y,   460, 12);
+    // I2C diagnostic — force initial draw
+    i2cValid_       = false;
+    i2cMuxPresent_  = false;
+    i2cInaMask_     = 0;
+    i2cFailCount_   = 0;
+    i2cRecovery_    = 0;
+    i2cEverOk_      = false;
+    previ2cValid_      = true;
+    previ2cMuxPresent_ = true;
+    previ2cInaMask_    = 0xFF;
+    previ2cFailCount_  = 0xFF;
+    previ2cRecovery_   = 0xFF;
+    previ2cEverOk_     = true;
+
+    // Initialize tile regions — existing tiles.
+    // FAULT/ERROR values are narrowed (220 px) so the right-hand column is
+    // free for the I2C bus diagnostic block.
+    tiles_.setRect(STILE_FAULTS,   STILE_COL_LABEL_X, STILE_FAULT_VALUE_Y, 220, 12);
+    tiles_.setRect(STILE_ERROR,    STILE_COL_LABEL_X, STILE_ERR_VALUE_Y,   220, 12);
     tiles_.setRect(STILE_SPEEDS,   STILE_COL_VAL_START, STILE_SPEED_VAL_Y, 400, 14);
     tiles_.setRect(STILE_CURRENTS, STILE_COL_VAL_START, STILE_CURR_VAL_Y,  400, 14);
     tiles_.setRect(STILE_TEMPS,    STILE_COL_VAL_START, STILE_TEMP_VAL_Y,  400, 14);
@@ -71,6 +87,7 @@ void SafeScreen::onEnter() {
     tiles_.setRect(STILE_LED_STAT, STILE_COL_LABEL_X, STILE_LED_STATUS_Y, 420, 14);
     tiles_.setRect(STILE_GEAR,     0, STILE_GEAR_BAR_Y, 430, 30);
     tiles_.setRect(STILE_RELAY,    STILE_RELAY_X, STILE_GEAR_BAR_Y, 50, 30);
+    tiles_.setRect(STILE_I2C,      STILE_I2C_X, STILE_I2C_TITLE_Y, 236, 54);
 
     tiles_.invalidateAll();
 }
@@ -119,6 +136,17 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
     // Relay status (heartbeat byte 5)
     relayStatus_ = data.heartbeat().relayStatus;
 
+    // I2C bus diagnostic (passive, read-only)
+    {
+        const vehicle::I2cDiagData& id = data.i2cDiag();
+        i2cValid_      = id.valid;
+        i2cMuxPresent_ = id.muxPresent;
+        i2cInaMask_    = id.inaOkMask;
+        i2cFailCount_  = id.failCount;
+        i2cRecovery_   = id.recoveryCount;
+        i2cEverOk_     = id.everOk;
+    }
+
     // ---- Compute tile hashes ----
     tiles_.updateHash(STILE_FAULTS, ui::tileHashVal(faultFlags_));
     tiles_.updateHash(STILE_ERROR,  ui::tileHashVal(errorCode_));
@@ -145,6 +173,15 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
     }
     tiles_.updateHash(STILE_GEAR, ui::tileHashVal(curGear_));
     tiles_.updateHash(STILE_RELAY, ui::tileHashVal(relayStatus_));
+    {
+        ui::TileHash ih = ui::tileHashVal(i2cValid_);
+        ih = ui::tileHashFeed(ih, i2cMuxPresent_);
+        ih = ui::tileHashFeed(ih, i2cInaMask_);
+        ih = ui::tileHashFeed(ih, i2cFailCount_);
+        ih = ui::tileHashFeed(ih, i2cRecovery_);
+        ih = ui::tileHashFeed(ih, i2cEverOk_);
+        tiles_.updateHash(STILE_I2C, ih);
+    }
 }
 
 void SafeScreen::draw() {
@@ -220,6 +257,10 @@ void SafeScreen::draw() {
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         tft.drawString("LIGHTS:", STILE_COL_LABEL_X, STILE_LED_STATUS_Y);
 
+        // I2C bus diagnostic — static title (right-hand column)
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.drawString("I2C BUS DIAG", STILE_I2C_X, STILE_I2C_TITLE_Y);
+
         // Gear bar separator
         tft.drawFastHLine(40, STILE_GEAR_BAR_Y - 4, ui::SCREEN_W - 80, ui::COL_DARK_GRAY);
 
@@ -237,6 +278,12 @@ void SafeScreen::draw() {
         prevTurnSignal_ = (turnSignal_ == led_ctrl::TurnSignal::OFF)
                           ? led_ctrl::TurnSignal::LEFT : led_ctrl::TurnSignal::OFF;
         prevRelayStatus_ = relayStatus_ + 1;
+        previ2cValid_      = !i2cValid_;
+        previ2cMuxPresent_ = !i2cMuxPresent_;
+        previ2cInaMask_    = i2cInaMask_ + 1;
+        previ2cFailCount_  = i2cFailCount_ + 1;
+        previ2cRecovery_   = i2cRecovery_ + 1;
+        previ2cEverOk_     = !i2cEverOk_;
 
         tiles_.markAllDirty();
     }
@@ -249,7 +296,7 @@ void SafeScreen::draw() {
 
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
-        tft.setTextPadding(ui::cfg::PAD_SAFE_FULL);
+        tft.setTextPadding(ui::cfg::PAD_SAFE_DIAG_NARROW);
 
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
@@ -273,7 +320,7 @@ void SafeScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(ui::cfg::PAD_SAFE_FULL);
+        tft.setTextPadding(ui::cfg::PAD_SAFE_DIAG_NARROW);
         tft.drawString(buf, STILE_COL_LABEL_X, STILE_ERR_VALUE_Y);
         tft.setTextPadding(0);
         tiles_.markClean(STILE_ERROR);
@@ -543,6 +590,72 @@ void SafeScreen::draw() {
 
         prevRelayStatus_ = relayStatus_;
         tiles_.markClean(STILE_RELAY);
+    }
+
+    // ---- TILE: I2C bus diagnostic (mux + per-channel INA226 health) ----
+    if (tiles_.isDirty(STILE_I2C)) {
+        previ2cValid_      = i2cValid_;
+        previ2cMuxPresent_ = i2cMuxPresent_;
+        previ2cInaMask_    = i2cInaMask_;
+        previ2cFailCount_  = i2cFailCount_;
+        previ2cRecovery_   = i2cRecovery_;
+        previ2cEverOk_     = i2cEverOk_;
+
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        if (!i2cValid_) {
+            // No 0x309 frame received yet — do not invent OK state.
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_MUX);
+            tft.drawString("NO DATA", ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_MUX_Y);
+            tft.setTextPadding(0);
+            // Clear the channel + counter rows
+            tft.fillRect(ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y,
+                         236, 24, ui::COL_BG);
+        } else {
+            // MUX presence line
+            char muxBuf[ui::FMT_BUF_MED];
+            snprintf(muxBuf, sizeof(muxBuf), "MUX 0x70: %s",
+                     i2cMuxPresent_ ? "OK" : "FAIL");
+            tft.setTextColor(i2cMuxPresent_ ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+            tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_MUX);
+            tft.drawString(muxBuf, ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_MUX_Y);
+            tft.setTextPadding(0);
+
+            // Per-channel INA226 health row (FL,FR,RL,RR,BAT,ST)
+            constexpr uint8_t kI2cChannels = 6;
+            static const char* chLabels[kI2cChannels] =
+                { "FL", "FR", "RL", "RR", "BT", "ST" };
+            for (uint8_t i = 0; i < kI2cChannels; ++i) {
+                const bool ok = (i2cInaMask_ & (1U << i)) != 0;
+                // Green = INA acked. If mux is present but the INA did not
+                // answer, it is a real fault (red). If the mux itself is
+                // absent, per-channel state is unknown (gray).
+                uint16_t col = ok ? ui::COL_GREEN
+                                  : (i2cMuxPresent_ ? ui::COL_RED : ui::COL_GRAY);
+                tft.setTextColor(col, ui::COL_BG);
+                tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_CH);
+                tft.drawString(chLabels[i],
+                               ui::cfg::STILE_I2C_X + i * ui::cfg::STILE_I2C_CH_SPACING,
+                               ui::cfg::STILE_I2C_INA_Y);
+                tft.setTextPadding(0);
+            }
+
+            // Counters line: failed transactions + sticky recovery attempts
+            char cntBuf[ui::FMT_BUF_MED];
+            snprintf(cntBuf, sizeof(cntBuf), "fail:%u rec:%u",
+                     (unsigned)i2cFailCount_, (unsigned)i2cRecovery_);
+            // Amber if anything is failing or recovery has been attempted.
+            uint16_t cntCol = (i2cFailCount_ != 0 || i2cRecovery_ != 0)
+                              ? ui::COL_AMBER : ui::COL_GRAY;
+            tft.setTextColor(cntCol, ui::COL_BG);
+            tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_CNT);
+            tft.drawString(cntBuf, ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_CNT_Y);
+            tft.setTextPadding(0);
+        }
+
+        tiles_.markClean(STILE_I2C);
     }
 
     RTRACE_DUMP_IF_PENDING();

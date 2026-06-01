@@ -206,6 +206,22 @@ struct DebounceDiagData {
 };
 
 // -------------------------------------------------------------------------
+// I2C topology diagnostic (0x309) — report-only
+// Lets the HMI Safe Mode screen tell a missing TCA9548A multiplexer (0x70)
+// apart from a missing/dead INA226 (0x40) on a specific mux channel.
+// `valid` is false until the first 0x309 frame is received (show "NO DATA").
+// -------------------------------------------------------------------------
+struct I2cDiagData {
+    bool     muxPresent    = false;   // TCA9548A 0x70 acked on the STM32 side
+    uint8_t  inaOkMask     = 0;       // bit i = INA226 ch i acked (FL,FR,RL,RR,BAT,STEER)
+    uint8_t  failCount     = 0;       // failed I2C transactions in last STM32 cycle
+    uint8_t  recoveryCount = 0;       // sticky bus-recovery attempt counter
+    bool     everOk        = false;   // latched: at least one INA seen healthy
+    bool     valid         = false;   // a 0x309 frame has been received
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Active drive mode — set locally by ESP32 touch (eventually from STM32 CAN echo)
 // -------------------------------------------------------------------------
 struct ModeData {
@@ -236,6 +252,7 @@ public:
     void setMode(const ModeData& d)            { mode_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
+    void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -260,6 +277,7 @@ public:
     const ModeData&      mode()      const { return mode_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
+    const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -280,6 +298,7 @@ private:
     ModeData      mode_;
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
+    I2cDiagData      i2cDiag_;
 };
 
 } // namespace vehicle

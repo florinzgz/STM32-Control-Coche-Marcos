@@ -17,6 +17,7 @@
 //   STILE_LED_STAT  — LED system status (front/rear/turn)
 //   STILE_GEAR      — gear position bar
 //   STILE_RELAY     — relay status indicator (M T D)
+//   STILE_I2C       — I2C bus diagnostic (mux + per-channel INA226 health)
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.5
 // =============================================================================
@@ -43,6 +44,7 @@ enum SafeTile : uint8_t {
     STILE_LED_STAT,
     STILE_GEAR,
     STILE_RELAY,
+    STILE_I2C,
     STILE_COUNT
 };
 
@@ -88,6 +90,21 @@ private:
 
     uint8_t  relayStatus_     = 0;
     uint8_t  prevRelayStatus_ = 0xFF;          // Force initial draw
+
+    // I2C bus diagnostic (passive, read-only) — mux + per-channel INA226
+    bool     i2cValid_        = false;
+    bool     i2cMuxPresent_   = false;
+    uint8_t  i2cInaMask_      = 0;
+    uint8_t  i2cFailCount_    = 0;
+    uint8_t  i2cRecovery_     = 0;
+    bool     i2cEverOk_       = false;
+    // Force initial draw with mismatched previous-state snapshot
+    bool     previ2cValid_      = true;
+    bool     previ2cMuxPresent_ = true;
+    uint8_t  previ2cInaMask_    = 0xFF;
+    uint8_t  previ2cFailCount_  = 0xFF;
+    uint8_t  previ2cRecovery_   = 0xFF;
+    bool     previ2cEverOk_     = true;
 };
 
 #endif // SAFE_SCREEN_H

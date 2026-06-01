@@ -274,6 +274,21 @@ inline constexpr int16_t PAD_SAFE_STEER_VIS      = 200;
 inline constexpr int16_t PAD_SAFE_OBSTACLE_TEXT   = 120;
 inline constexpr int16_t PAD_SAFE_LED_STATUS      = 300;
 
+// I2C bus diagnostic block (SafeScreen, top-right column) — report-only.
+// Lets the operator tell a missing TCA9548A mux apart from a dead INA226.
+// Placed to the right of the FAULT/ERROR labels (which are narrowed so they
+// no longer clear the full screen width).
+inline constexpr int16_t STILE_I2C_X             = 244;  // Left edge of the I2C diag column
+inline constexpr int16_t STILE_I2C_TITLE_Y       = STILE_FAULT_LABEL_Y;  // 62
+inline constexpr int16_t STILE_I2C_MUX_Y         = STILE_FAULT_VALUE_Y;  // 74
+inline constexpr int16_t STILE_I2C_INA_Y         = STILE_ERR_LABEL_Y;    // 90
+inline constexpr int16_t STILE_I2C_CNT_Y         = STILE_ERR_VALUE_Y;    // 102
+inline constexpr int16_t STILE_I2C_CH_SPACING    = 39;   // Horizontal step between channel cells
+inline constexpr int16_t PAD_SAFE_DIAG_NARROW    = 150;  // Narrowed FAULT/ERROR value padding
+inline constexpr int16_t PAD_SAFE_I2C_MUX        = 230;  // Clear width for the MUX status line
+inline constexpr int16_t PAD_SAFE_I2C_CH         = 36;   // Clear width per channel cell
+inline constexpr int16_t PAD_SAFE_I2C_CNT        = 230;  // Clear width for the counters line
+
 // =========================================================================
 // BootScreen Diagnostic Layout Dimensions
 //
