@@ -657,7 +657,7 @@ static uint8_t i2c_recovery_attempts = 0;
  *
  * Procedure (per NXP AN10216):
  *   1. Deinitialize I2C peripheral
- *   2. Reconfigure SCL (PB6) as GPIO push-pull output
+ *   2. Reconfigure SCL (PB8) as GPIO push-pull output
  *   3. Toggle SCL 16 times while monitoring SDA
  *   4. Generate STOP condition (SDA low→high while SCL high)
  *   5. Reinitialize I2C peripheral
@@ -670,7 +670,7 @@ static void I2C_BusRecovery(void)
     /* Step 1: Deinitialize I2C peripheral */
     HAL_I2C_DeInit(&hi2c1);
 
-    /* Step 2: Configure SCL (PB6) as GPIO output, SDA (PB7) as input */
+    /* Step 2: Configure SCL (PB8) as GPIO output, SDA (PB9) as input */
     GPIO_InitTypeDef gpio = {0};
     gpio.Pin   = PIN_I2C_SCL;
     gpio.Mode  = GPIO_MODE_OUTPUT_OD;
