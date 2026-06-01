@@ -13,6 +13,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.2** (2026-02-13): Integration audit corrections. Heartbeat byte 3 documented as `error_code` (matches code). Added STATUS_BATTERY (0x207) payload definition §4.13. Fixed speed plausibility threshold (25 km/h, matches code). Renumbered §4.13–§4.16. Added fault_flags bit 7 (FAULT_CENTERING).
 - **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
 - **1.4** (2026-05-01): Added DWT-debounce EMI diagnostic counters: `DIAG_DEBOUNCE` (0x306, DLC 8, 1000 ms) and `DIAG_DEBOUNCE_STEER` (0x307, DLC 4, 1000 ms). Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes these values. ESP32 firmware without DEBOUNCE_DIAG submenu silently ignores the new IDs (backward-compatible).
+- **1.5** (2026-06-01): Added `DIAG_I2C` (0x309, DLC 5, 1000 ms) I2C topology diagnostic: TCA9548A (0x70) presence + per-channel INA226 (0x40) health mask + fail/recovery counters. Surfaced on the HMI Safe Mode screen so a missing mux can be told apart from a dead INA226. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes it (backward-compatible).
 
 ---
 
@@ -101,6 +102,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x300 | DIAG_ERROR | 2 | On-demand | Error code and subsystem identifier | `can_handler.c` |
 | 0x306 | DIAG_DEBOUNCE | 8 | 1000 ms | DWT-debounce filtered counts: 4× wheel u16 LE (FL,FR,RL,RR) saturated to 0xFFFF | `can_handler.c`, `sensor_manager.c` |
 | 0x307 | DIAG_DEBOUNCE_STEER | 4 | 1000 ms | DWT-debounce filtered count for steering center: u32 LE | `can_handler.c`, `sensor_manager.c` |
+| 0x309 | DIAG_I2C | 5 | 1000 ms | I2C topology diag: byte0=mux_present, byte1=ina_ok_mask (bit0..5=FL,FR,RL,RR,BAT,STEER), byte2=fail_count, byte3=recovery_attempts, byte4=flags(bit0=ever_ok) | `can_handler.c`, `sensor_manager.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 

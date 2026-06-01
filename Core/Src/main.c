@@ -609,6 +609,12 @@ int main(void)
              * only — does not gate any control or safety path.        */
             CAN_SendDebounceDiag();
 
+            /* I2C topology diagnostic (0x309): TCA9548A presence + per-channel
+             * INA226 health, so the HMI Safe Mode screen can tell a missing
+             * mux apart from a missing/dead INA226.  Diagnostic only — does
+             * not gate any control or safety path.                        */
+            CAN_SendI2CDiag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

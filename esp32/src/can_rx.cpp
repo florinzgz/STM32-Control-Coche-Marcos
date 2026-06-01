@@ -231,6 +231,23 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
     data.setPedalCal(pc);
 }
 
+// 0x309 DIAG_I2C — I2C topology diagnostic (DLC 5).
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CDiag().
+//   byte0=mux_present, byte1=ina_ok_mask, byte2=fail_count,
+//   byte3=recovery_attempts, byte4=flags (bit0 = ever OK).
+static void decodeI2cDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 5) return;
+    vehicle::I2cDiagData id;
+    id.muxPresent    = (f.data[0] != 0);
+    id.inaOkMask     = f.data[1];
+    id.failCount     = f.data[2];
+    id.recoveryCount = f.data[3];
+    id.everOk        = (f.data[4] & 0x01U) != 0;
+    id.valid         = true;
+    id.timestampMs   = millis();
+    data.setI2cDiag(id);
+}
+
 // -------------------------------------------------------------------------
 // Debug: RX frame counter and first-frame logging
 // -------------------------------------------------------------------------
@@ -284,6 +301,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_DEBOUNCE:        decodeDebounceDiag(frame, data);      break;
             case can::DIAG_DEBOUNCE_STEER:  decodeDebounceDiagSteer(frame, data); break;
             case can::DIAG_PEDAL_CAL:       decodePedalCal(frame, data);          break;
+            case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;

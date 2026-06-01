@@ -59,6 +59,7 @@ extern "C" {
 #define CAN_ID_DIAG_DEBOUNCE      0x306  // STM32 → ESP32 (1000ms) DWT-debounce filtered counts (4× wheel u16 LE)
 #define CAN_ID_DIAG_DEBOUNCE_STEER 0x307 // STM32 → ESP32 (1000ms) DWT-debounce filtered count (steer u32 LE)
 #define CAN_ID_DIAG_PEDAL_CAL     0x308  // STM32 → ESP32 (on-demand, 10 Hz for 1 s after QUERY) pedal calibration telemetry
+#define CAN_ID_DIAG_I2C           0x309  // STM32 → ESP32 (1000ms) I2C topology diag: mux + per-channel INA226 health
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -164,6 +165,7 @@ void CAN_SendCommandAck(uint8_t cmd_id_low, CAN_AckResult_t result);
 void CAN_SendServiceStatus(void);
 void CAN_SendErrorLogHeader(void);
 void CAN_SendDebounceDiag(void);    /* 1 Hz DWT-debounce filter EMI counters (0x306 + 0x307) */
+void CAN_SendI2CDiag(void);         /* 1 Hz I2C topology diagnostic (0x309): mux + per-channel INA226 */
 void CAN_ProcessMessages(void);
 bool CAN_IsESP32Alive(void);
 bool CAN_IsGlobalSilent(void);

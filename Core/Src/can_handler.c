@@ -1033,6 +1033,32 @@ void CAN_SendDebounceDiag(void) {
 }
 
 /**
+ * @brief  Send I2C topology diagnostic to ESP32 (HMI Safe Mode helper).
+ *
+ * Lets the operator tell apart a missing TCA9548A multiplexer (0x70) from a
+ * missing / dead INA226 (0x40) on a specific channel, and see whether the
+ * failures are intermittent (bad pull-up / loose terminal) or permanent
+ * (not connected).  Diagnostic only — no control / safety path consumes it.
+ *
+ * CAN ID: 0x309   DLC: 5   Rate: 1000 ms (1 Hz)
+ *   Byte 0: mux_present (0 = TCA9548A 0x70 not acking, 1 = present)
+ *   Byte 1: ina_ok_mask (bit i = INA226 acked behind mux channel i;
+ *           bit0=FL, bit1=FR, bit2=RL, bit3=RR, bit4=BAT, bit5=STEER)
+ *   Byte 2: i2c_fail_count        (failed transactions in the last cycle)
+ *   Byte 3: i2c_recovery_attempts (sticky bus-recovery attempt counter)
+ *   Byte 4: flags (bit0 = "ever OK" — at least one INA seen healthy since boot)
+ */
+void CAN_SendI2CDiag(void) {
+    uint8_t data[5];
+    data[0] = Sensor_GetMuxPresent() ? 1U : 0U;
+    data[1] = Sensor_GetInaOkMask();
+    data[2] = Sensor_GetI2cFailCount();
+    data[3] = Sensor_GetI2cRecoveryAttempts();
+    data[4] = Sensor_GetI2cEverOk() ? 0x01U : 0x00U;
+    TransmitFrame(CAN_ID_DIAG_I2C, data, 5);
+}
+
+/**
  * @brief  Transmit error log header (entry count + total events).
  *         Sent periodically (1000 ms) so the ESP32 engineering menu
  *         knows how many log entries are available.
