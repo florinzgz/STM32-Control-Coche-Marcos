@@ -106,6 +106,16 @@ float Current_GetAmps(uint8_t index);
 float Current_GetAmpsRaw(uint8_t index);  /* Unfiltered instantaneous reading */
 float Voltage_GetBus(uint8_t index);
 
+/* ---- I2C topology diagnostic accessors (report-only, no CAN/safety impact) ----
+ * Let the HMI / diagnostic CAN frame (0x309) distinguish a missing TCA9548A
+ * multiplexer (0x70) from a missing/dead INA226 (0x40) on a given channel.
+ * These never gate any control or safety path.                            */
+bool    Sensor_GetMuxPresent(void);           /* TCA9548A acked last cycle      */
+uint8_t Sensor_GetInaOkMask(void);            /* bit i = INA226 ch i acked      */
+uint8_t Sensor_GetI2cFailCount(void);         /* failed transactions this cycle */
+uint8_t Sensor_GetI2cRecoveryAttempts(void);  /* bus-recovery attempts (sticky) */
+bool    Sensor_GetI2cEverOk(void);            /* latched: any INA seen OK ever  */
+
 #ifdef __cplusplus
 }
 #endif

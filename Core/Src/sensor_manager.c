@@ -652,6 +652,16 @@ _Static_assert(INA226_I2C_TIMEOUT_MS <= 50U,
 static uint8_t i2c_fail_count       = 0;
 static uint8_t i2c_recovery_attempts = 0;
 
+/* ---- I2C topology diagnostic (report-only, no CAN/safety gating) ----
+ * Populated during Sensor_Init() and refreshed every Current_ReadAll().
+ * They let the HMI distinguish a missing TCA9548A multiplexer from a
+ * missing/dead INA226 behind a given channel, without changing any
+ * existing safety path (which still relies on Safety_SetError()).      */
+static bool    mux_present  = false;   /* TCA9548A (0x70) acked this cycle  */
+static uint8_t ina_ok_mask  = 0;       /* bit i = INA226 on channel i acked */
+static bool    i2c_ever_ok  = false;   /* latched: at least one INA seen OK */
+static bool    ina_last_read_ok = false; /* status of last INA226_ReadReg() */
+
 /**
  * @brief  I2C bus recovery via manual SCL clock cycling.
  *
@@ -780,6 +790,7 @@ static int16_t INA226_ReadReg(uint8_t reg)
     uint8_t buf[2] = {0};
     HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c1, (I2C_ADDR_INA226 << 1), reg,
                                                  I2C_MEMADD_SIZE_8BIT, buf, 2, INA226_I2C_TIMEOUT_MS);
+    ina_last_read_ok = (status == HAL_OK);
     if (status != HAL_OK) {
         i2c_fail_count++;
         return 0;
@@ -842,19 +853,32 @@ void Current_ReadAll(void)
     /* Reset per-cycle failure counter */
     i2c_fail_count = 0;
 
+    /* Per-cycle topology diagnostic accumulators (report-only) */
+    uint8_t new_ina_mask = 0;
+    bool    mux_seen     = false;
+
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         if (TCA9548A_SelectChannel(i) != HAL_OK) {
+            /* Mux did not ACK the channel-select write: either the mux is
+             * absent or the bus is stuck.  Leave this channel's INA bit at 0. */
             current_amps_raw[i] = 0.0f;
             current_amps[i]     = 0.0f;
             voltage_bus[i]      = 0.0f;
             continue;
         }
+        /* Mux acked at least one channel-select → mux is present. */
+        mux_seen = true;
 
         /* Shunt voltage → current:  I = V_shunt / R_shunt
          * Use correct shunt resistance per channel:
          *   Channel 4 (battery): 0.75 mΩ (100A/75mV sensor)
          *   All others:          1.5 mΩ  (50A/75mV sensors)            */
         int16_t shunt_raw = INA226_ReadReg(INA226_REG_SHUNT_VOLTAGE);
+        /* The shunt read doubles as the per-channel INA226 presence probe:
+         * if it acked, the sensor behind this mux channel is alive.       */
+        if (ina_last_read_ok) {
+            new_ina_mask |= (uint8_t)(1U << i);
+        }
         float shunt_uv    = (float)shunt_raw * INA226_SHUNT_LSB_UV;
         float shunt_mohm  = (i == INA226_CHANNEL_BATTERY)
                           ? (float)INA226_SHUNT_MOHM_BATTERY
@@ -888,6 +912,13 @@ void Current_ReadAll(void)
 
     current_ema_primed = true;
 
+    /* Publish topology diagnostic (report-only — never gates control) */
+    mux_present = mux_seen;
+    ina_ok_mask = new_ina_mask;
+    if (new_ina_mask != 0) {
+        i2c_ever_ok = true;
+    }
+
     /* I2C failure detection and recovery */
     if (i2c_fail_count >= I2C_FAIL_THRESHOLD) {
         if (i2c_recovery_attempts < I2C_RECOVERY_MAX_ATTEMPTS) {
@@ -917,6 +948,30 @@ float Current_GetAmpsRaw(uint8_t index) {
 float Voltage_GetBus(uint8_t index) {
     if (index >= NUM_INA226) return 0.0f;
     return voltage_bus[index];
+}
+
+/* ---- I2C topology diagnostic accessors (report-only, no CAN/safety impact) ----
+ * Consumed by the CAN diagnostic frame (0x309) and the HMI Safe Mode screen
+ * so the operator can tell a missing TCA9548A multiplexer apart from a
+ * missing/dead INA226 on a specific channel.  These never gate control.   */
+bool Sensor_GetMuxPresent(void) {
+    return mux_present;
+}
+
+uint8_t Sensor_GetInaOkMask(void) {
+    return ina_ok_mask;
+}
+
+uint8_t Sensor_GetI2cFailCount(void) {
+    return i2c_fail_count;
+}
+
+uint8_t Sensor_GetI2cRecoveryAttempts(void) {
+    return i2c_recovery_attempts;
+}
+
+bool Sensor_GetI2cEverOk(void) {
+    return i2c_ever_ok;
 }
 
 /* =========================================================================
@@ -1718,6 +1773,12 @@ void Sensor_Init(void)
     i2c_recovery_attempts = 0;
     current_ema_primed    = false;
 
+    /* Reset I2C topology diagnostic (report-only) to a known state. */
+    mux_present  = false;
+    ina_ok_mask  = 0;
+    i2c_ever_ok  = false;
+    ina_last_read_ok = false;
+
     /* TCA9548A multiplexer presence check (CRITICAL).
      * If the mux is absent, no INA226 channel is reachable and all
      * current/voltage readings will be zero — enter SAFE state.       */
@@ -1726,6 +1787,10 @@ void Sensor_Init(void)
         Safety_SetState(SYS_STATE_SAFE);
         /* Continue init so that DS18B20 and other sensors are still set up;
          * INA226_ConfigureAll will silently fail on each channel.         */
+    } else {
+        /* Seed the diagnostic so the HMI shows MUX present even before the
+         * first Current_ReadAll() cycle refreshes the per-channel mask.   */
+        mux_present = true;
     }
 
     /* Explicitly configure all INA226 sensors to a known state
