@@ -168,6 +168,21 @@ private:
     unsigned long debounceLastTs_           = 0;       // last timestamp consumed
     bool          debounceDataChanged_      = false;
 
+    // CAN/0x309 delivery + I2C-scan diagnostics cache (DEBOUNCE_DIAG page).
+    // Populated from 0x30A (meta), 0x30B (I2C scan), 0x30C (FDCAN) and the
+    // can_rx per-ID 0x309 counters.  Read-only display; the only action is a
+    // "RUN I2C SCAN" button that emits SERVICE_CMD 0xF6.
+    vehicle::CanMetaData   canMeta_{};
+    vehicle::I2cScanData   i2cScan_{};
+    vehicle::FdcanDiagData fdcanDiag_{};
+    uint32_t      rx0x309Count_   = 0;
+    uint32_t      drop0x309Dlc_   = 0;
+    uint8_t       last0x309Dlc_   = 0;
+    unsigned long canDiagLastTs_  = 0;     // last 0x30A timestamp consumed
+    bool          canDiagChanged_ = false;
+    // Send SERVICE_CMD 0x110 byte0=0xF6 to trigger the STM32 I2C service scan.
+    void sendI2cServiceScan();
+
     // Touch-calibration menu entry — when the user taps "TOUCH CALIBRATION"
     // we cannot launch the wizard from inside EngineeringScreen (it does
     // not own the ScreenManager flags).  Instead we set this flag and the

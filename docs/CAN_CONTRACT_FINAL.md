@@ -14,6 +14,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.3** (2026-02-13): Added CMD_ACK (0x103) command acknowledgment message (Phase 13). STM32 sends ACK after safety validation for CMD_MODE (0x102) and SERVICE_CMD (0x110). Added §3.5, §4.17. Added ACK_TIMEOUT_MS (200 ms). Backward-compatible — no existing IDs or payloads changed.
 - **1.4** (2026-05-01): Added DWT-debounce EMI diagnostic counters: `DIAG_DEBOUNCE` (0x306, DLC 8, 1000 ms) and `DIAG_DEBOUNCE_STEER` (0x307, DLC 4, 1000 ms). Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes these values. ESP32 firmware without DEBOUNCE_DIAG submenu silently ignores the new IDs (backward-compatible).
 - **1.5** (2026-06-01): Added `DIAG_I2C` (0x309, DLC 5, 1000 ms) I2C topology diagnostic: TCA9548A (0x70) presence + per-channel INA226 (0x40) health mask + fail/recovery counters. Surfaced on the HMI Safe Mode screen so a missing mux can be told apart from a dead INA226. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes it (backward-compatible).
+- **1.6** (2026-06-01): Added CAN/I2C delivery-observability diagnostics (audit "0x309: NO DATA"): `DIAG_CAN_META` (0x30A, DLC 8, 1000 ms — 0x309 call/tick/tx-ok/tx-err/fifo-drop counters), `DIAG_I2C_SCAN` (0x30B, DLC 8, on-demand) and `DIAG_FDCAN` (0x30C, DLC 6, on-demand) emitted after `SERVICE_CMD` action `0xF6` (`SERVICE_ACTION_I2C_SERVICE`). Added a `HAL_FDCAN_GetTxFifoFreeLevel()` guard in `TransmitFrame()` that counts FIFO-full drops instead of silently failing. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes these values (backward-compatible).
 
 ---
 
@@ -103,6 +104,9 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x306 | DIAG_DEBOUNCE | 8 | 1000 ms | DWT-debounce filtered counts: 4× wheel u16 LE (FL,FR,RL,RR) saturated to 0xFFFF | `can_handler.c`, `sensor_manager.c` |
 | 0x307 | DIAG_DEBOUNCE_STEER | 4 | 1000 ms | DWT-debounce filtered count for steering center: u32 LE | `can_handler.c`, `sensor_manager.c` |
 | 0x309 | DIAG_I2C | 5 | 1000 ms | I2C topology diag: byte0=mux_present, byte1=ina_ok_mask (bit0..5=FL,FR,RL,RR,BAT,STEER), byte2=fail_count, byte3=recovery_attempts, byte4=flags(bit0=ever_ok) | `can_handler.c`, `sensor_manager.c` |
+| 0x30A | DIAG_CAN_META | 8 | 1000 ms | 0x309 delivery meta: byte0-1=call_count u16 LE, byte2-3=tick_count u16 LE, byte4=tx_ok, byte5=tx_err, byte6=fifo_full_drops, byte7=flags(bit0=fdcan_init_ok) | `can_handler.c`, `main.c` |
+| 0x30B | DIAG_I2C_SCAN | 8 | on-demand | Active I2C scan (after SERVICE 0xF6): byte0=bus_flags(bit0 scl_high,bit1 sda_high,bit2 rec_attempted,bit3 rec_success), byte1=mux_present, byte2=ina_present_mask, byte3=fail_count, byte4=recovery_attempts | `can_handler.c`, `sensor_manager.c` |
+| 0x30C | DIAG_FDCAN | 6 | on-demand | FDCAN error dump (after SERVICE 0xF6): byte0=last_error_code(LEC), byte1=state_flags(bit0 epassive,bit1 busoff,bit2 warning), byte2=tec, byte3=rec, byte4=tx_nack_flag, byte5=tx_consec_fail | `can_handler.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 

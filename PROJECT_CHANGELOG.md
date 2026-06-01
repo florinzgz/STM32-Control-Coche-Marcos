@@ -1,5 +1,61 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-01] — Observabilidad de entrega CAN 0x309: meta-diagnóstico 0x30A/0x30B/0x30C + modo servicio I2C (0xF6)
+
+### Resumen ejecutivo
+
+Auditoría forense del síntoma permanente **`0x309: NO DATA / STM32 FW: no 0x309`**.
+La trama `0x309` se emite incondicionalmente en el código fuente, por lo que un
+`NO DATA` permanente demuestra que la trama **no llega al ESP32** (no es un
+problema de medición I2C). Esta PR añade observabilidad **estrictamente aditiva
+y reversible** para localizar exactamente dónde se pierde la trama, sin tocar el
+control de motor ni la lógica de seguridad y sin romper el CAN actual.
+
+**STM32 (firmware):**
+
+- **`0x30A DIAG_CAN_META`** (DLC 8, 1 Hz): contadores que responden a las
+  preguntas A–D de la auditoría — `diag309_call_count` (¿se ejecuta
+  `CAN_SendI2CDiag()`?), `tick_1000ms_count` (¿corre el bloque de 1 Hz?),
+  `diag309_tx_ok` / `diag309_tx_err` (¿`TransmitFrame()` encola o falla?) y
+  `tx_fifo_full_drops` (¿se descartan tramas por FIFO TX llena?). Todos saturan.
+- **Guarda anti-desbordamiento en `TransmitFrame()`**: comprueba
+  `HAL_FDCAN_GetTxFifoFreeLevel()` antes de encolar; si la FIFO está llena
+  cuenta el descarte y devuelve `HAL_BUSY` en vez de fallar en silencio. Mitiga
+  de raíz la causa B (ráfaga del bloque 1 Hz contra una FIFO TX de sólo 3).
+- **Modo servicio I2C** vía `SERVICE_CMD` (0x110) byte0 = `0xF6`
+  (`SERVICE_ACTION_I2C_SERVICE`): ejecuta un sondeo I2C activo
+  (`Sensor_RunI2CServiceScan()`) y responde con **`0x30B DIAG_I2C_SCAN`**
+  (presencia mux/INA, nivel reposo SDA/SCL, recovery) y **`0x30C DIAG_FDCAN`**
+  (volcado TEC/REC/LEC/estado). Cubre las preguntas G/H/I/J. Sólo lectura.
+
+**ESP32 (HMI):**
+
+- Contadores RX permanentes por-ID de `0x309` (`rx`, `last_dlc`, `dlc_drop`) y
+  decodificación de `0x30A/0x30B/0x30C`.
+- Texto heurístico `STM32 FW: no 0x309` cambiado a **`0x309 ausente`** (no
+  concluyente) para no inducir el diagnóstico equivocado de "firmware viejo", y
+  nueva distinción **`0x309 DLC err`** (tramas recibidas pero con DLC inválido).
+- El submenú de ingeniería `DEBOUNCE DIAG` pasa a **`DEBOUNCE / CAN DIAG`** y
+  muestra los contadores de entrega + un botón **`RUN I2C SCAN`** que dispara el
+  comando 0xF6.
+
+Todo es aditivo (IDs y contadores nuevos), reversible y backward-compatible: un
+nodo que ignore las nuevas tramas no se ve afectado.
+
+### Archivos modificados
+
+**STM32:** `Core/Inc/can_handler.h`, `Core/Src/can_handler.c`, `Core/Src/main.c`,
+`Core/Inc/sensor_manager.h`, `Core/Src/sensor_manager.c`,
+`analysis_artifacts/stubs/stm32g4xx_hal.h`.
+
+**ESP32:** `esp32/include/can_ids.h`, `esp32/src/vehicle_data.h`,
+`esp32/src/can_rx.cpp`, `esp32/src/can_rx.h`, `esp32/src/screens/safe_screen.cpp`,
+`esp32/src/screens/engineering_screen.h`, `esp32/src/screens/engineering_screen.cpp`.
+
+**Docs:** `docs/CAN_PROTOCOL.md`, `docs/CAN_CONTRACT_FINAL.md`, `PROJECT_CHANGELOG.md`.
+
+---
+
 ## [2026-06-01] — Safe Mode I2C: `0x309` STALE + pistas de causa para `NO DATA` (3 archivos)
 
 ### Resumen ejecutivo

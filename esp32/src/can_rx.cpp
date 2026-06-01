@@ -235,8 +235,22 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CDiag().
 //   byte0=mux_present, byte1=ina_ok_mask, byte2=fail_count,
 //   byte3=recovery_attempts, byte4=flags (bit0 = ever OK).
+//
+// Per-ID RX counters (audit questions E/F): record every 0x309 frame seen on
+// the bus and the last DLC, and count frames dropped for a short DLC.  This
+// lets the operator tell "0 frames ever" (STM32 not emitting / CAN link down)
+// apart from "frames arrive but with the wrong DLC" (decode rejects them).
+static uint32_t s_rx0x309Count      = 0;  // total 0x309 frames seen (any DLC)
+static uint32_t s_dropped0x309Dlc   = 0;  // 0x309 frames rejected for DLC < 5
+static uint8_t  s_last0x309Dlc      = 0;  // DLC of the most recent 0x309 frame
+
 static void decodeI2cDiag(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 5) return;
+    ++s_rx0x309Count;
+    s_last0x309Dlc = f.data_length_code;
+    if (f.data_length_code < 5) {
+        ++s_dropped0x309Dlc;
+        return;
+    }
     vehicle::I2cDiagData id;
     id.muxPresent    = (f.data[0] != 0);
     id.inaOkMask     = f.data[1];
@@ -246,6 +260,58 @@ static void decodeI2cDiag(const CanFrame& f, vehicle::VehicleData& data) {
     id.valid         = true;
     id.timestampMs   = millis();
     data.setI2cDiag(id);
+}
+
+// 0x30A DIAG_CAN_META — CAN/0x309 delivery meta-diagnostic (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendCanMetaDiag().
+static void decodeCanMeta(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::CanMetaData m;
+    m.diag309CallCount = (uint16_t)(f.data[0] | (f.data[1] << 8));
+    m.tick1000msCount  = (uint16_t)(f.data[2] | (f.data[3] << 8));
+    m.diag309TxOk      = f.data[4];
+    m.diag309TxErr     = f.data[5];
+    m.txFifoFullDrops  = f.data[6];
+    m.fdcanInitOk      = (f.data[7] & 0x01U) != 0;
+    m.valid            = true;
+    m.timestampMs      = millis();
+    data.setCanMeta(m);
+}
+
+// 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
+static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 5) return;
+    vehicle::I2cScanData s;
+    s.sclIdleHigh       = (f.data[0] & 0x01U) != 0;
+    s.sdaIdleHigh       = (f.data[0] & 0x02U) != 0;
+    s.recoveryAttempted = (f.data[0] & 0x04U) != 0;
+    s.recoverySuccess   = (f.data[0] & 0x08U) != 0;
+    s.muxPresent        = (f.data[1] != 0);
+    s.inaPresentMask    = f.data[2];
+    s.failCount         = f.data[3];
+    s.recoveryAttempts  = f.data[4];
+    s.valid             = true;
+    s.timestampMs       = millis();
+    data.setI2cScan(s);
+}
+
+// 0x30C DIAG_FDCAN — FDCAN error-counter dump (DLC 6).
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendFdcanDiag().
+static void decodeFdcanDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 6) return;
+    vehicle::FdcanDiagData d;
+    d.lastErrorCode = f.data[0];
+    d.errorPassive  = (f.data[1] & 0x01U) != 0;
+    d.busOff        = (f.data[1] & 0x02U) != 0;
+    d.warning       = (f.data[1] & 0x04U) != 0;
+    d.tec           = f.data[2];
+    d.rec           = f.data[3];
+    d.txNackFlag    = f.data[4];
+    d.txConsecFail  = f.data[5];
+    d.valid         = true;
+    d.timestampMs   = millis();
+    data.setFdcanDiag(d);
 }
 
 // -------------------------------------------------------------------------
@@ -302,6 +368,9 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_DEBOUNCE_STEER:  decodeDebounceDiagSteer(frame, data); break;
             case can::DIAG_PEDAL_CAL:       decodePedalCal(frame, data);          break;
             case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
+            case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
+            case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
+            case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;
@@ -317,5 +386,13 @@ void poll(vehicle::VehicleData& data) {
                       (unsigned long)rxFrameCount);
     }
 }
+
+// -------------------------------------------------------------------------
+// Per-ID 0x309 RX counters (audit questions E/F) — exposed for the
+// engineering CAN/I2C diagnostic submenu and the Safe Mode hint logic.
+// -------------------------------------------------------------------------
+uint32_t rx0x309Count()       { return s_rx0x309Count; }
+uint32_t dropped0x309Dlc()    { return s_dropped0x309Dlc; }
+uint8_t  last0x309Dlc()       { return s_last0x309Dlc; }
 
 } // namespace can_rx

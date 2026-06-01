@@ -206,7 +206,7 @@ ID: 0x102  DLC: 2  Data: [0x01, 0x03]  // 4×4 activo, marcha Forward
 
 | Byte | Campo | Tipo | Rango | Notas |
 |------|-------|------|-------|-------|
-| 0 | `action` | uint8_t | 0/1/0xE0/0xF0–0xF5/0xFE/0xFF | 0=Disable, 1=Enable, 0xE0=Relay override, 0xF0–0xF4=Factory resets parciales, 0xF5=**Pedal calibration**, 0xFE=Clear error log, 0xFF=Factory_Restore |
+| 0 | `action` | uint8_t | 0/1/0xE0/0xF0–0xF6/0xFE/0xFF | 0=Disable, 1=Enable, 0xE0=Relay override, 0xF0–0xF4=Factory resets parciales, 0xF5=**Pedal calibration**, 0xF6=**I2C service scan**, 0xFE=Clear error log, 0xFF=Factory_Restore |
 | 1 | `module_id` / `sub-opcode` / `mask` | uint8_t | 0-N | Significado dependiente de `action` |
 
 **DLC:** 2
@@ -228,6 +228,15 @@ Cuando `action == 0xF5`, el byte 1 es un sub-opcode que selecciona la operación
 Cada sub-opcode responde con `CAN_ID_CMD_ACK (0x103)` y los resultados estándar `OK`/`INVALID`/`REJECTED`/`BLOCKED_BY_SAFETY`. **DLC de CMD_ACK preservado (3 bytes)** — sin cambios de contrato.
 
 **Fallback:** Si la página 124 contiene CRC/magic inválido o un par fuera de rango, el STM32 carga los defaults compile-time (150 / 2413) silenciosamente — el boot nunca se bloquea y el pedal nunca queda inutilizable.
+
+#### 0xF6 — Barrido I2C de modo servicio (diagnóstico)
+
+Cuando `action == 0xF6` (sin sub-opcode), el STM32 ejecuta un sondeo I2C **activo** (`Sensor_RunI2CServiceScan()`) y responde con dos tramas de diagnóstico además del `CMD_ACK` estándar:
+
+- **0x30B DIAG_I2C_SCAN** — presencia de mux/INA226, nivel de reposo SDA/SCL y resultado de `I2C_BusRecovery()`.
+- **0x30C DIAG_FDCAN** — volcado de contadores de error FDCAN (TEC/REC/LEC/estado).
+
+Sólo lectura: no altera ningún estado de control ni de seguridad. Pensado para localizar fallos del lado I2C (dirección incorrecta, SDA/SCL bloqueadas, mux/INA muertos) — preguntas G/H/I/J de la auditoría.
 
 ---
 
@@ -718,7 +727,62 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 
 ---
 
-## ⚙️ Gestión de Errores
+### 0x30A - DIAG_CAN_META (STM32→ESP32)
+
+**Propósito:** Meta-diagnóstico de la *entrega* de la trama 0x309. Responde a las preguntas A–D de la auditoría "0x309: NO DATA": ¿se ejecuta `CAN_SendI2CDiag()`?, ¿corre el bloque de 1 Hz?, ¿`TransmitFrame()` encola bien o falla?, ¿se descartan tramas por FIFO TX llena? Todos los contadores saturan (no hacen wrap). Sólo informativo.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0-1  | `diag309_call_count` | uint16_t LE | [A] nº de invocaciones a `CAN_SendI2CDiag()` (satura a 0xFFFF) |
+| 2-3  | `tick_1000ms_count` | uint16_t LE | [B] nº de iteraciones del bloque scheduler de 1 Hz (satura) |
+| 4    | `diag309_tx_ok` | uint8_t | [C] 0x309 encolada OK en FDCAN (satura a 0xFF) |
+| 5    | `diag309_tx_err` | uint8_t | [C] `TransmitFrame()` de 0x309 devolvió error (satura) |
+| 6    | `tx_fifo_full_drops` | uint8_t | [D] tramas descartadas por FIFO TX llena (satura) |
+| 7    | `flags` | uint8_t bitmask | bit0 = `fdcan_init_ok` |
+
+**DLC:** 8 · **Frecuencia:** 1000 ms (1 Hz, junto a 0x309) · **Prioridad:** Baja
+
+**Compatibilidad backward:** aditivo, STM32 → ESP32; nodos que la ignoren no se ven afectados.
+
+---
+
+### 0x30B - DIAG_I2C_SCAN (STM32→ESP32, on-demand)
+
+**Propósito:** Reporte de un barrido I2C *activo* disparado por `SERVICE_CMD` (0x110) byte0 = `SERVICE_ACTION_I2C_SERVICE` (0xF6). Sondea presencia de mux/INA226, nivel de reposo de SDA/SCL e intenta `I2C_BusRecovery()` si SDA está atascada. Cubre las preguntas G/H/I/J (dirección incorrecta, líneas bloqueadas). Sólo se emite tras el comando; sólo informativo.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0    | `bus_flags` | uint8_t bitmask | bit0 SCL idle high, bit1 SDA idle high, bit2 recovery intentado, bit3 recovery con éxito |
+| 1    | `mux_present` | uint8_t | TCA9548A 0x70 respondió |
+| 2    | `ina_present_mask` | uint8_t bitmask | bit0..5 = INA226 0x40 respondió tras seleccionar canal 0..5 |
+| 3    | `i2c_fail_count` | uint8_t | Contador de fallos I2C del último ciclo |
+| 4    | `i2c_recovery_attempts` | uint8_t | Intentos de recuperación de bus (persistente) |
+| 5-7  | reservado | — | 0 |
+
+**DLC:** 8 · **Frecuencia:** on-demand (tras 0xF6) · **Prioridad:** Baja
+
+**Compatibilidad backward:** aditivo, STM32 → ESP32; nodos que la ignoren no se ven afectados.
+
+---
+
+### 0x30C - DIAG_FDCAN (STM32→ESP32, on-demand)
+
+**Propósito:** Volcado de los contadores de error del periférico FDCAN (TEC/REC/LEC/estado) para confirmar la salud física del bus desde el lado STM32. Se emite junto a 0x30B tras el comando 0xF6. Espeja el bloque `can_diag`. Sólo informativo.
+
+| Byte | Campo | Tipo | Notas |
+|------|-------|------|-------|
+| 0    | `last_error_code` | uint8_t | PSR.LEC (0=none, 1=stuff, 2=form, 3=ack, 4=bit1, 5=bit0, 6=CRC) |
+| 1    | `state_flags` | uint8_t bitmask | bit0 error_passive, bit1 bus_off, bit2 warning |
+| 2    | `tec` | uint8_t | Transmit Error Counter |
+| 3    | `rec` | uint8_t | Receive Error Counter |
+| 4    | `tx_nack_flag` | uint8_t | 1 = fallos TX repetidos detectados |
+| 5    | `tx_consec_fail` | uint8_t | Fallos TX consecutivos (0-255) |
+
+**DLC:** 6 · **Frecuencia:** on-demand (tras 0xF6) · **Prioridad:** Baja
+
+**Compatibilidad backward:** aditivo, STM32 → ESP32; nodos que la ignoren no se ven afectados.
+
+---
 
 ### Prioridades de Mensajes
 
@@ -740,6 +804,9 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 | 0x304-0x307 | DIAG_* | Baja | Diagnóstico (error log, debounce) |
 | 0x308 | DIAG_PEDAL_CAL | Baja | Telemetría calibración pedal (on-demand, 1 s tras QUERY) |
 | 0x309 | DIAG_I2C | Baja | Diagnóstico bus I2C (mux + INA226 por canal, 1 Hz) |
+| 0x30A | DIAG_CAN_META | Baja | Meta-diagnóstico de entrega de 0x309 (call/tick/tx/fifo, 1 Hz) |
+| 0x30B | DIAG_I2C_SCAN | Baja | Barrido I2C activo (on-demand, tras SERVICE 0xF6) |
+| 0x30C | DIAG_FDCAN | Baja | Volcado contadores error FDCAN (on-demand, tras SERVICE 0xF6) |
 
 ### Retransmisión Automática
 
