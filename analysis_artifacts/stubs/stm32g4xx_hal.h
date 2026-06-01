@@ -1509,6 +1509,11 @@ static inline uint32_t HAL_FDCAN_GetRxFifoFillLevel(FDCAN_HandleTypeDef *hfdcan,
     (void)hfdcan; (void)RxFifo; return 0U;
 }
 
+static inline uint32_t HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_HandleTypeDef *hfdcan)
+{
+    (void)hfdcan; return 3U;
+}
+
 static inline HAL_StatusTypeDef HAL_FDCAN_ActivateNotification(FDCAN_HandleTypeDef *hfdcan,
     uint32_t ActiveITs, uint32_t BufferIndexes)
 {

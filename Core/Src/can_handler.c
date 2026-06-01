@@ -45,6 +45,7 @@ extern bool Startup_IsInhibited(void);
 extern FDCAN_HandleTypeDef hfdcan1;
 CAN_Stats_t    can_stats     = {0};
 CAN_Diag_t     can_diag      = {0};
+CAN_TxMeta_t   can_txmeta    = {0};
 /* volatile: written once at init, read only via SWD debugger — volatile
  * ensures -O2 never optimises away the stores (same rationale as
  * g_CAN_RxData / g_CAN_RxHeader / g_CAN_TxData below).                */
@@ -161,6 +162,25 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     tx_hdr.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_hdr.MessageMarker = 0;
     
+    /* TX FIFO overflow guard (additive diagnostic + burst mitigation).
+     * The STM32G4 FDCAN TX FIFO holds only 3 elements.  The 1 Hz scheduler
+     * block can enqueue a burst of frames in a single iteration; if the FIFO
+     * is already full, HAL_FDCAN_AddMessageToTxFifoQ() would return HAL_ERROR
+     * and the frame would be lost silently.  Detect a full FIFO up-front so
+     * the loss is counted (CAN 0x30A byte "tx_fifo_full_drops") instead of
+     * being invisible.  This neither changes frame priorities/IDs nor gates
+     * any control or safety path — it only makes an existing failure mode
+     * observable and avoids issuing a doomed enqueue call.                  */
+    if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) == 0U) {
+        sat_inc_u32(&can_stats.tx_errors);
+        sat_inc_u32(&can_txmeta.tx_fifo_full_drops);
+        if (can_diag.tx_consec_fail < 255U)
+            can_diag.tx_consec_fail++;
+        if (can_diag.tx_consec_fail >= CAN_TX_NACK_THRESHOLD)
+            can_diag.tx_nack_flag = 1;
+        return HAL_BUSY;
+    }
+
     HAL_StatusTypeDef result = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_hdr, payload);
     
     if (result == HAL_OK) {
@@ -1055,7 +1075,105 @@ void CAN_SendI2CDiag(void) {
     data[2] = Sensor_GetI2cFailCount();
     data[3] = Sensor_GetI2cRecoveryAttempts();
     data[4] = Sensor_GetI2cEverOk() ? 0x01U : 0x00U;
-    TransmitFrame(CAN_ID_DIAG_I2C, data, 5);
+
+    /* Observability A/C: count every invocation and the TX outcome so the
+     * 0x30A meta-frame can prove whether 0x309 reaches the FDCAN TX FIFO. */
+    sat_inc_u32(&can_txmeta.diag309_call_count);
+    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 5) == HAL_OK) {
+        sat_inc_u32(&can_txmeta.diag309_tx_ok);
+    } else {
+        sat_inc_u32(&can_txmeta.diag309_tx_err);
+    }
+}
+
+/**
+ * @brief  CAN/0x309 delivery meta-diagnostic (additive, report-only).
+ *
+ * Surfaces the counters from CAN_TxMeta_t so an operator can tell, from the
+ * ESP32 alone, whether the 0x309 diagnostic frame is being generated, queued
+ * and accepted by the FDCAN TX FIFO — independent of the I2C bus state.
+ * Diagnostic only — no control / safety path consumes it.
+ *
+ * CAN ID: 0x30A   DLC: 8   Rate: 1000 ms (1 Hz)
+ *   Byte 0-1: diag309_call_count  (uint16 LE, saturated)  [A]
+ *   Byte 2-3: tick_1000ms_count   (uint16 LE, saturated)  [B]
+ *   Byte 4:   diag309_tx_ok       (uint8, saturated)      [C]
+ *   Byte 5:   diag309_tx_err      (uint8, saturated)      [C]
+ *   Byte 6:   tx_fifo_full_drops  (uint8, saturated)      [D]
+ *   Byte 7:   flags (bit0 = fdcan_init_ok)
+ */
+void CAN_SendCanMetaDiag(void) {
+    extern bool fdcan_init_ok;
+    uint8_t data[8];
+    uint16_t calls = (can_txmeta.diag309_call_count > 0xFFFFU)
+                   ? 0xFFFFU : (uint16_t)can_txmeta.diag309_call_count;
+    uint16_t ticks = (can_txmeta.tick_1000ms_count > 0xFFFFU)
+                   ? 0xFFFFU : (uint16_t)can_txmeta.tick_1000ms_count;
+    data[0] = (uint8_t)(calls & 0xFF);
+    data[1] = (uint8_t)((calls >> 8) & 0xFF);
+    data[2] = (uint8_t)(ticks & 0xFF);
+    data[3] = (uint8_t)((ticks >> 8) & 0xFF);
+    data[4] = (can_txmeta.diag309_tx_ok      > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.diag309_tx_ok;
+    data[5] = (can_txmeta.diag309_tx_err     > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.diag309_tx_err;
+    data[6] = (can_txmeta.tx_fifo_full_drops > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.tx_fifo_full_drops;
+    data[7] = fdcan_init_ok ? 0x01U : 0x00U;
+    TransmitFrame(CAN_ID_DIAG_CAN_META, data, 8);
+}
+
+/**
+ * @brief  I2C service-mode scan report (additive, on-demand, report-only).
+ *
+ * Triggered by SERVICE_CMD 0x110 byte0 = SERVICE_ACTION_I2C_SERVICE (0xF6).
+ * Runs an active I2C probe (Sensor_RunI2CServiceScan) and reports the result
+ * so the operator can localise an I2C-side fault (wrong address, stuck SDA/
+ * SCL, dead mux/INA) — covers diagnostic questions G/H/I/J.  Diagnostic only.
+ *
+ * CAN ID: 0x30B   DLC: 8
+ *   Byte 0: bus flags — bit0 SCL idle high, bit1 SDA idle high,
+ *           bit2 recovery attempted, bit3 recovery succeeded
+ *   Byte 1: mux_present (TCA9548A 0x70 acked)
+ *   Byte 2: ina_present_mask (bit0..5 = INA226 0x40 acked behind ch0..5)
+ *   Byte 3: i2c_fail_count
+ *   Byte 4: i2c_recovery_attempts
+ *   Byte 5-7: reserved (0)
+ */
+void CAN_SendI2CScanReport(void) {
+    Sensor_I2cScanResult_t r = Sensor_RunI2CServiceScan();
+    uint8_t data[8] = {0};
+    data[0] = (uint8_t)((r.scl_idle_high ? 0x01U : 0U)
+                      | (r.sda_idle_high ? 0x02U : 0U)
+                      | (r.recovery_attempted ? 0x04U : 0U)
+                      | (r.recovery_success ? 0x08U : 0U));
+    data[1] = r.mux_present ? 1U : 0U;
+    data[2] = r.ina_present_mask;
+    data[3] = r.fail_count;
+    data[4] = r.recovery_attempts;
+    TransmitFrame(CAN_ID_DIAG_I2C_SCAN, data, 8);
+}
+
+/**
+ * @brief  FDCAN error-counter dump (additive, on-demand, report-only).
+ *
+ * Mirrors the can_diag block (TEC/REC/LEC/state) so the operator can confirm
+ * the physical CAN bus health from the ESP32 side.  Diagnostic only.
+ *
+ * CAN ID: 0x30C   DLC: 6
+ *   Byte 0: last_error_code (PSR.LEC)
+ *   Byte 1: state flags — bit0 error_passive, bit1 bus_off, bit2 warning
+ *   Byte 2: tec   Byte 3: rec
+ *   Byte 4: tx_nack_flag   Byte 5: tx_consec_fail
+ */
+void CAN_SendFdcanDiag(void) {
+    uint8_t data[6];
+    data[0] = can_diag.last_error_code;
+    data[1] = (uint8_t)((can_diag.error_passive ? 0x01U : 0U)
+                      | (can_diag.bus_off ? 0x02U : 0U)
+                      | (can_diag.warning ? 0x04U : 0U));
+    data[2] = can_diag.tec;
+    data[3] = can_diag.rec;
+    data[4] = can_diag.tx_nack_flag;
+    data[5] = can_diag.tx_consec_fail;
+    TransmitFrame(CAN_ID_DIAG_FDCAN, data, 6);
 }
 
 /**
@@ -1915,6 +2033,16 @@ void CAN_ProcessMessages(void) {
                             default:
                                 break;
                         }
+                        CAN_SendCommandAck(0x10, ACK_OK);
+                    } else if (cmd == SERVICE_ACTION_I2C_SERVICE) {
+                        /* ---- I2C SERVICE-MODE SCAN (Level 3 diagnostic) ----
+                         * Active probe of the I2C topology: mux/INA presence,
+                         * SDA/SCL idle levels and a bus-recovery attempt if
+                         * SDA is stuck low.  Reports on 0x30B and also dumps
+                         * the FDCAN error counters on 0x30C.  Diagnostic only
+                         * — does not gate any control or safety path.        */
+                        CAN_SendI2CScanReport();
+                        CAN_SendFdcanDiag();
                         CAN_SendCommandAck(0x10, ACK_OK);
                     } else if (cmd == SERVICE_ACTION_PEDAL_CAL) {
                         /* ---- PEDAL ENDPOINT CALIBRATION ----
