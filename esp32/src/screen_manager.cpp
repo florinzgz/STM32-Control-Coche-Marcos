@@ -7,7 +7,8 @@
 // immediate redraw.
 //
 // Engineering menu access flow:
-//   Long-press (3 s) on battery icon → PIN screen → enter 8989 → engineering.
+//   Long-press (3 s) on any free screen area → PIN screen → enter 8989 → engineering.
+//   (Long-pressing the battery icon still works — it is a subset of the screen.)
 // =============================================================================
 
 #include "screen_manager.h"
@@ -223,21 +224,25 @@ void ScreenManager::onTouch(int16_t x, int16_t y) {
 }
 
 void ScreenManager::onLongPress(int16_t x, int16_t y) {
-    // Only activate when no overlay is already shown
+    // Only activate when no overlay is already shown (ignore long-press while
+    // the PIN, engineering or touch-calibration screens own the pipeline).
     if (engineeringActive_ || pinActive_ || touchCalActive_) return;
 
-    // Hit-test the battery icon (ui::BAT_X, BAT_Y, BAT_W, BAT_H)
-    if (x >= ui::BAT_X && x <= ui::BAT_X + ui::BAT_W &&
-        y >= ui::BAT_Y && y <= ui::BAT_Y + ui::BAT_H) {
-        activatePinScreen();
-    }
+    // Global gesture: a 3 s long-press on ANY free area of the screen opens the
+    // PIN entry.  The battery-icon region is a subset of the full screen, so
+    // the previous "long-press the battery icon" gesture still works for
+    // backward compatibility.  Because dispatch is not state-gated, this also
+    // works in Safe Mode where the battery icon may not be visible/accessible.
+    (void)x;
+    (void)y;
+    activatePinScreen();
 }
 
 void ScreenManager::activatePinScreen() {
     pinActive_ = true;
     pinScreen_.onEnter();
     frameLimiter_.forceNextFrame();
-    Serial.println("[PIN] Battery long press → PIN screen");
+    Serial.println("[PIN] Global long press → PIN screen");
 }
 
 void ScreenManager::requestTouchWizard(bool firstBoot) {

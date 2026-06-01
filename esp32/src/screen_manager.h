@@ -30,7 +30,9 @@
 //   - Overlay tiles restore underlying tiles when dismissed
 //
 // Engineering menu access:
-//   1. Long-press (3 s) on the battery icon → PIN entry screen.
+//   1. Long-press (3 s) on any free area of the screen → PIN entry screen.
+//      (The battery icon remains a valid long-press target for compatibility,
+//       and the gesture also works in Safe Mode.)
 //   2. Enter the correct 4-digit PIN (8989) on the keypad.
 //   3. On success → EngineeringScreen.
 //
@@ -66,7 +68,8 @@ public:
     /// Forward a TAP event.  Routes to PIN / engineering screen when active.
     void onTouch(int16_t x, int16_t y);
 
-    /// Forward a LONG_PRESS event.  Activates PIN screen if battery icon pressed.
+    /// Forward a LONG_PRESS event.  Activates the PIN screen on a 3 s
+    /// long-press anywhere on the screen (battery icon included).
     void onLongPress(int16_t x, int16_t y);
 
     /// Returns true while PIN entry or engineering screen is showing.

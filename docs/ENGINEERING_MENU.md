@@ -2,9 +2,22 @@
 
 ## Access
 
-The engineering menu is a hidden screen in the ESP32-S3 HMI, accessed by entering the
-secret code **"8989"** on the touch screen. It provides diagnostic and calibration tools
-for use during development and maintenance.
+The engineering menu is a hidden screen in the ESP32-S3 HMI. To open it:
+
+1. **Long-press (hold ~3 s) on any free area of the touch screen.** This opens
+   the PIN entry screen. The gesture works from any normal screen — including
+   **Safe Mode** — and is guarded against accidental activation: lifting the
+   finger before 3 s, or dragging it more than ~40 px, cancels/restarts the
+   timer (no false positives).
+2. Enter the secret code **"8989"** on the PIN keypad.
+3. On the correct PIN the Engineering menu opens.
+
+> **Compatibility:** long-pressing the battery icon still works, because the icon
+> region is simply a subset of the full-screen gesture. No separate handling is
+> required.
+
+It provides diagnostic and calibration tools for use during development and
+maintenance.
 
 **File**: `esp32/src/screens/engineering_screen.cpp/h`
 

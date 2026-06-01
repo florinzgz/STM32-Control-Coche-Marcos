@@ -38,8 +38,12 @@ struct TouchEvent {
 // Configuration
 // -------------------------------------------------------------------------
 struct Config {
-    uint32_t debounceMs   = 200;    // Minimum ms between taps
-    uint32_t longPressMs  = 3000;   // Duration for long press detection
+    uint32_t debounceMs    = 200;    // Minimum ms between taps
+    uint32_t longPressMs   = 3000;   // Duration for long press detection
+    int16_t  moveCancelPx  = 40;     // Max finger drift (px) before the
+                                     // long-press timer restarts. Guards the
+                                     // global long-press gesture against
+                                     // accidental swipes / false positives.
 };
 
 /// Initialize touch handler.  Call once from setup().
