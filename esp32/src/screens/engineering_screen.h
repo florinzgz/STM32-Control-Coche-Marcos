@@ -63,6 +63,7 @@ private:
         DTC_LOG_VIEWER,    // Persistent DTC fault log viewer
         MAINTENANCE,       // Maintenance counter reset + status
         RELAY_CONTROL,     // Manual relay override (engineering diagnostic)
+        INA226_LIVE_DIAG,  // Live INA226/current diagnostic viewer
         DEBOUNCE_DIAG      // DWT-debounce EMI filtered counters viewer
     };
 
@@ -77,6 +78,7 @@ private:
     void drawDtcLogViewer();
     void drawMaintenance();
     void drawRelayControl();
+    void drawInaLiveDiag();
     void drawDebounceDiag();
 
     bool        needsRedraw_ = true;
@@ -167,6 +169,21 @@ private:
     uint32_t      debounceSteerFiltered_    = 0;
     unsigned long debounceLastTs_           = 0;       // last timestamp consumed
     bool          debounceDataChanged_      = false;
+
+    // INA226 live diagnostic cache (INA226_LIVE_DIAG submenu)
+    uint16_t      inaLiveMotorCurrentRaw_[4] = {};  // CH0..CH3, 0.01 A units
+    uint16_t      inaLiveBtCurrentRaw_       = 0;   // CH4 (battery), 0.01 A
+    uint16_t      inaLiveBtVoltageRaw_       = 0;   // CH4 (battery), 0.01 V
+    bool          inaLiveMuxPresent_         = false;
+    uint8_t       inaLiveOkMask_             = 0;
+    uint8_t       inaLiveExpectedMask_       = 0x3F;
+    uint8_t       inaLiveFailCount_          = 0;
+    uint8_t       inaLiveRecoveryCount_      = 0;
+    bool          inaLiveValid_              = false;
+    bool          inaLiveStale_              = false;
+    unsigned long inaLiveAgeMs_              = 0;
+    unsigned long inaLiveLastAgeSec_         = 0;
+    bool          inaLiveDataChanged_        = false;
 
     // CAN/0x309 delivery + I2C-scan diagnostics cache (DEBOUNCE_DIAG page).
     // Populated from 0x30A (meta), 0x30B (I2C scan), 0x30C (FDCAN) and the

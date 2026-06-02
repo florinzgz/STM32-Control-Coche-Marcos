@@ -21,7 +21,7 @@
 extern TFT_eSPI tft;
 
 // ---- Menu button layout ----
-// MENU_BTN_H/MENU_SPACING/MENU_START_Y are sized so that all 13 main-menu
+// MENU_BTN_H/MENU_SPACING/MENU_START_Y are sized so that all 14 main-menu
 // entries fit between the title bar and the bottom EXIT/BACK row.  The
 // last few items overlap the EXIT button on the left edge (x=10..90) but
 // their text is centred at x≈240 so the visible overlap is only the
@@ -30,11 +30,11 @@ extern TFT_eSPI tft;
 // FACTORY_DEFAULTS submenu (only 6 items — fits trivially).
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
-static constexpr int16_t MENU_BTN_H   = 19;
+static constexpr int16_t MENU_BTN_H   = 17;
 static constexpr int16_t MENU_START_Y = 42;
-static constexpr int16_t MENU_SPACING = 21;
+static constexpr int16_t MENU_SPACING = 19;
 
-static constexpr int     NUM_MAIN_ITEMS = 13;
+static constexpr int     NUM_MAIN_ITEMS = 14;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -46,10 +46,14 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "DTC ERROR LOG",
     "MAINTENANCE",
     "RELAY CONTROL (DEBUG)",
+    "INA226 LIVE DIAG",
     "DEBOUNCE / CAN DIAG",
     "TOUCH CALIBRATION",   // Launch persistent touch calibration wizard
     "RESET TOUCH CAL"      // Erase NVS calibration + re-arm first-boot wizard
 };
+
+// Mirror Safe Screen 0x309 staleness threshold.
+static constexpr unsigned long ENG_I2C_DIAG_STALE_MS = 2000;
 
 // ---- Back / Save buttons ----
 static constexpr int16_t BACK_X = 10;
@@ -359,6 +363,53 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         if (changed) needsRedraw_ = true;
     }
 
+    // Cache INA226/current telemetry for the live diagnostic submenu.
+    if (currentMenu_ == SubMenu::INA226_LIVE_DIAG) {
+        bool changed = false;
+
+        const auto& cur = data.current();
+        for (uint8_t i = 0; i < 4; ++i) {
+            const uint16_t raw = cur.raw[i];
+            if (inaLiveMotorCurrentRaw_[i] != raw) changed = true;
+            inaLiveMotorCurrentRaw_[i] = raw;
+        }
+
+        const auto& bat = data.battery();
+        if (inaLiveBtCurrentRaw_ != bat.currentRaw) changed = true;
+        if (inaLiveBtVoltageRaw_ != bat.voltageRaw) changed = true;
+        inaLiveBtCurrentRaw_ = bat.currentRaw;
+        inaLiveBtVoltageRaw_ = bat.voltageRaw;
+
+        const auto& id = data.i2cDiag();
+        unsigned long ageMs = 0;
+        if (id.valid && frameTimeMs >= id.timestampMs) {
+            ageMs = frameTimeMs - id.timestampMs;
+        }
+        const bool stale = id.valid && (ageMs > ENG_I2C_DIAG_STALE_MS);
+        const unsigned long ageSec = ageMs / 1000U;
+
+        if (inaLiveMuxPresent_    != id.muxPresent)     changed = true;
+        if (inaLiveOkMask_        != id.inaOkMask)      changed = true;
+        if (inaLiveExpectedMask_  != id.inaExpectedMask) changed = true;
+        if (inaLiveFailCount_     != id.failCount)      changed = true;
+        if (inaLiveRecoveryCount_ != id.recoveryCount)  changed = true;
+        if (inaLiveValid_         != id.valid)          changed = true;
+        if (inaLiveStale_         != stale)             changed = true;
+        if (inaLiveLastAgeSec_    != ageSec)            changed = true;
+
+        inaLiveMuxPresent_    = id.muxPresent;
+        inaLiveOkMask_        = id.inaOkMask;
+        inaLiveExpectedMask_  = id.inaExpectedMask;
+        inaLiveFailCount_     = id.failCount;
+        inaLiveRecoveryCount_ = id.recoveryCount;
+        inaLiveValid_         = id.valid;
+        inaLiveStale_         = stale;
+        inaLiveAgeMs_         = ageMs;
+        inaLiveLastAgeSec_    = ageSec;
+
+        inaLiveDataChanged_ = changed;
+    }
+
     // Cache debounce DWT EMI counters (1 Hz update via 0x306/0x307)
     if (currentMenu_ == SubMenu::DEBOUNCE_DIAG) {
         const auto& dd = data.debounceDiag();
@@ -451,6 +502,7 @@ void EngineeringScreen::draw() {
             case SubMenu::DTC_LOG_VIEWER:   drawDtcLogViewer();        break;
             case SubMenu::MAINTENANCE:      drawMaintenance();         break;
             case SubMenu::RELAY_CONTROL:    drawRelayControl();        break;
+            case SubMenu::INA226_LIVE_DIAG: drawInaLiveDiag();         break;
             case SubMenu::DEBOUNCE_DIAG:    drawDebounceDiag();        break;
         }
     }
@@ -715,6 +767,109 @@ void EngineeringScreen::draw() {
         if (clampedAngle < -450) clampedAngle = -450;
         int16_t indicatorX = centerX + (int32_t)clampedAngle * gaugeW / 900;
         tft.fillRect(indicatorX - 3, gaugeY + 2, 7, gaugeH - 4, ui::COL_AMBER);
+    }
+
+    // Partial redraw for INA226/current live diagnostic values.
+    if (currentMenu_ == SubMenu::INA226_LIVE_DIAG && inaLiveDataChanged_) {
+        inaLiveDataChanged_ = false;
+
+        auto fmtA = [](char* out, size_t n, uint16_t raw) {
+            snprintf(out, n, "%u.%u A",
+                     (unsigned)(raw / 100U),
+                     (unsigned)((raw / 10U) % 10U));
+        };
+        auto fmtV = [](char* out, size_t n, uint16_t raw) {
+            snprintf(out, n, "%u.%u V",
+                     (unsigned)(raw / 100U),
+                     (unsigned)((raw / 10U) % 10U));
+        };
+
+        char buf[ui::FMT_BUF_LARGE];
+        const int16_t x = 10;
+        const int16_t y0 = 44;
+        const int16_t lh = 16;
+
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+        tft.fillRect(0, y0, ui::SCREEN_W, BACK_Y - y0 - 4, ui::COL_BG);
+
+        static const char* const chNames[4] = {"CH0 FL", "CH1 FR", "CH2 RL", "CH3 RR"};
+        for (uint8_t i = 0; i < 4; ++i) {
+            char aBuf[20];
+            fmtA(aBuf, sizeof(aBuf), inaLiveMotorCurrentRaw_[i]);
+            snprintf(buf, sizeof(buf), "%s: %s", chNames[i], aBuf);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            tft.drawString(buf, x, y0 + i * lh);
+        }
+
+        char btABuf[20];
+        char btVBuf[20];
+        fmtA(btABuf, sizeof(btABuf), inaLiveBtCurrentRaw_);
+        fmtV(btVBuf, sizeof(btVBuf), inaLiveBtVoltageRaw_);
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "CH4 BT: %s   %s", btABuf, btVBuf);
+        tft.drawString(buf, x, y0 + 4 * lh);
+
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString("CH5 ST: --.- A (n/d)", x, y0 + 5 * lh);
+        // CH5 steering current is not present on CAN today (0x201/0x207/0x309 only).
+        // Could be added in the future by extending 0x201 or adding a new ID.
+
+        const int16_t bx = 10;
+        const int16_t by = y0 + 6 * lh + 4;
+        tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+        tft.drawString("BATTERY INA DIAG", bx, by);
+
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "BT volts = %s", btVBuf);
+        tft.drawString(buf, bx, by + lh);
+        snprintf(buf, sizeof(buf), "BT amps  = %s", btABuf);
+        tft.drawString(buf, bx, by + 2 * lh);
+
+        const bool btOk = (inaLiveOkMask_ & (1U << 4)) != 0;
+        const bool btExpected = (inaLiveExpectedMask_ & (1U << 4)) != 0;
+        tft.setTextColor(btOk ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "BT INA   = %s", btOk ? "OK" : "FAIL");
+        tft.drawString(buf, bx, by + 3 * lh);
+
+        tft.setTextColor(btExpected ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "BT expected = %s", btExpected ? "YES" : "NO");
+        tft.drawString(buf, bx, by + 4 * lh);
+
+        const int16_t gx = 250;
+        const int16_t gy = by;
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.drawString("I2C TOPOLOGY", gx, gy);
+
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "INA OK: 0x%02X", (unsigned)inaLiveOkMask_);
+        tft.drawString(buf, gx, gy + lh);
+        snprintf(buf, sizeof(buf), "EXPECTED: 0x%02X", (unsigned)inaLiveExpectedMask_);
+        tft.drawString(buf, gx, gy + 2 * lh);
+
+        snprintf(buf, sizeof(buf), "MUX: %s", inaLiveMuxPresent_ ? "PRESENT" : "MISSING");
+        tft.setTextColor(inaLiveMuxPresent_ ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(buf, gx, gy + 3 * lh);
+
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "fail:%u rec:%u",
+                 (unsigned)inaLiveFailCount_, (unsigned)inaLiveRecoveryCount_);
+        tft.drawString(buf, gx, gy + 4 * lh);
+
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        if (!inaLiveValid_) {
+            tft.drawString("0x309: NO DATA", gx, gy + 5 * lh);
+        } else if (inaLiveStale_) {
+            snprintf(buf, sizeof(buf), "0x309 STALE %lus", inaLiveAgeMs_ / 1000U);
+            tft.drawString(buf, gx, gy + 5 * lh);
+        } else {
+            snprintf(buf, sizeof(buf), "0x309 age %lus", inaLiveAgeMs_ / 1000U);
+            tft.drawString(buf, gx, gy + 5 * lh);
+        }
+
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString("Legend: rest~0A OK | rest~100A suspect shunt/sense", 10, 260);
+        tft.drawString("Volts OK + amps wrong => current path/shunt issue", 10, 272);
     }
 
     // Partial redraw for debounce DWT EMI counters (1 Hz)
@@ -994,11 +1149,16 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             currentMenu_ = SubMenu::RELAY_CONTROL;
                             break;
                         case 10:
+                            // Open INA226/current live diagnostic viewer
+                            inaLiveDataChanged_ = true;    // force first paint
+                            currentMenu_ = SubMenu::INA226_LIVE_DIAG;
+                            break;
+                        case 11:
                             // Open Debounce DWT EMI counter viewer
                             debounceDataChanged_ = true;   // force first paint
                             currentMenu_ = SubMenu::DEBOUNCE_DIAG;
                             break;
-                        case 11:
+                        case 12:
                             // Launch persistent touch calibration wizard.
                             // We cannot open the wizard from inside this
                             // screen (it does not own the ScreenManager
@@ -1010,7 +1170,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             touchCalRequested_ = true;
                             exitRequested_     = true;
                             break;
-                        case 12:
+                        case 13:
                             // Reset persistent touch calibration: erase
                             // the NVS data AND clear the first_done flag
                             // so the next reboot will re-launch the wizard
@@ -1345,9 +1505,10 @@ void EngineeringScreen::drawMainMenu() {
                           (i == 7) ? ui::COL_CYAN :         // DTC Error Log
                           (i == 8) ? ui::COL_GREEN :        // Maintenance
                           (i == 9) ? ui::COL_RED :          // Relay Control (debug)
-                          (i == 10) ? ui::COL_CYAN :        // Debounce Debug (diagnostic)
-                          (i == 11) ? ui::COL_CYAN :        // Touch Calibration wizard
-                          (i == 12) ? ui::COL_AMBER :       // Reset Touch Cal
+                          (i == 10) ? ui::COL_CYAN :        // INA226 Live Diag
+                          (i == 11) ? ui::COL_CYAN :        // Debounce/CAN diag
+                          (i == 12) ? ui::COL_CYAN :        // Touch Calibration wizard
+                          (i == 13) ? ui::COL_AMBER :       // Reset Touch Cal
                           ui::COL_WHITE;
 
         tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
@@ -2361,6 +2522,41 @@ void EngineeringScreen::drawRelayControl() {
         tft.setTextColor(relCol, ui::COL_BG);
         tft.drawString(buf, MENU_X, infoY + 14);
     }
+
+    // BACK button (bottom-left)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// =========================================================================
+// INA226 live diagnostic viewer (INA226_LIVE_DIAG submenu)
+//
+// Read-only HMI page for live currents + battery INA status from existing CAN
+// frames: 0x201 (CH0..CH3 currents), 0x207 (CH4 battery current/voltage),
+// 0x309 (MUX + INA masks + fail/recovery counters).
+// =========================================================================
+void EngineeringScreen::drawInaLiveDiag() {
+    RTRACE_BEGIN_SCREEN("eng_ina_live");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("INA226 LIVE DIAG", ui::SCREEN_W / 2, 16);
+
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("Read-only: 0x201 + 0x207 + 0x309 telemetry", ui::SCREEN_W / 2, 34);
+    tft.setTextDatum(TL_DATUM);
+
+    // Dynamic lines are repainted by the partial-redraw branch in draw().
+    inaLiveDataChanged_ = true;
 
     // BACK button (bottom-left)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
