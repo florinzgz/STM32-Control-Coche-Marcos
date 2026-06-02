@@ -1,7 +1,9 @@
 // =============================================================================
 // ESP32-S3 HMI — Debug Overlay
 //
-// Hidden debug overlay activated by holding touch for 3 seconds.
+// Hidden debug overlay toggled explicitly from the Engineering menu
+// (DEBOUNCE / CAN DIAG → "DEBUG OVERLAY" button).  It is NOT bound to the
+// global 3 s long-press gesture (that gesture opens ONLY the PIN screen).
 // Displays runtime performance stats over the current screen.
 // Uses existing TFT — no new libraries, no sprites.
 //
@@ -24,7 +26,9 @@ namespace rtmon {
 class DebugOverlay {
 public:
     /// Call every loop iteration with current touch state.
-    /// touchDown: true if screen is currently being touched
+    /// touchDown: retained for ABI compatibility — the overlay is no longer
+    ///            toggled by touch (it is controlled explicitly from the
+    ///            Engineering menu via toggle()/setVisible()).
     /// frameTimeMs: injected frame time (same value used by all screens)
     /// Returns true if overlay is currently visible.
     static bool update(bool touchDown, uint32_t frameTimeMs);
@@ -37,6 +41,12 @@ public:
     /// Returns true if overlay is currently visible
     static bool isVisible();
 
+    /// Explicitly set overlay visibility (called from the Engineering menu).
+    static void setVisible(bool v);
+
+    /// Flip overlay visibility (called from the Engineering menu button).
+    static void toggle();
+
 private:
     // Overlay dimensions
     static constexpr int16_t OVL_X      = 80;
@@ -47,11 +57,8 @@ private:
     static constexpr int16_t MARGIN     = 10;
 
     static bool     visible_;
-    static bool     prevTouchDown_;
-    static uint32_t touchStartMs_;
     static uint32_t lastUpdateMs_;
 
-    static constexpr uint32_t HOLD_THRESHOLD_MS = 3000;  // 3 seconds
     static constexpr uint32_t REFRESH_MS        = 500;   // Update every 500 ms
     static constexpr uint16_t FULL_REDRAW_WARN  = 1;     // Warn if full redraws exceed this
 };
@@ -61,12 +68,14 @@ private:
 #define RTMON_OVERLAY_UPDATE(touch, ft)   rtmon::DebugOverlay::update(touch, ft)
 #define RTMON_OVERLAY_DRAW(tft, ft)       rtmon::DebugOverlay::draw(tft, ft)
 #define RTMON_OVERLAY_VISIBLE()           rtmon::DebugOverlay::isVisible()
+#define RTMON_OVERLAY_TOGGLE()            rtmon::DebugOverlay::toggle()
 
 #else  // RUNTIME_MONITOR == 0
 
 #define RTMON_OVERLAY_UPDATE(touch, ft)   (false)
 #define RTMON_OVERLAY_DRAW(tft, ft)       ((void)0)
 #define RTMON_OVERLAY_VISIBLE()       (false)
+#define RTMON_OVERLAY_TOGGLE()            ((void)0)
 
 #endif // RUNTIME_MONITOR
 

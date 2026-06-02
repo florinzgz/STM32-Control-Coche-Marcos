@@ -19,32 +19,32 @@ namespace rtmon {
 // Static member definitions
 // -------------------------------------------------------------------------
 bool     DebugOverlay::visible_        = false;
-bool     DebugOverlay::prevTouchDown_  = false;
-uint32_t DebugOverlay::touchStartMs_   = 0;
 uint32_t DebugOverlay::lastUpdateMs_   = 0;
 
 // -------------------------------------------------------------------------
-// Update — detect long-press to toggle overlay
+// Update — bookkeeping only.  Visibility is controlled explicitly from the
+// Engineering menu (toggle()/setVisible()); the overlay deliberately does
+// NOT react to the global long-press gesture, which is reserved for opening
+// the PIN/Engineering screen.
 // -------------------------------------------------------------------------
 bool DebugOverlay::update(bool touchDown, uint32_t frameTimeMs) {
-    uint32_t now = frameTimeMs;
-
-    if (touchDown && !prevTouchDown_) {
-        // Touch just started
-        touchStartMs_ = now;
-    }
-
-    if (touchDown && (now - touchStartMs_ >= HOLD_THRESHOLD_MS)) {
-        // Long press detected — toggle visibility
-        visible_ = !visible_;
-        touchStartMs_ = now + HOLD_THRESHOLD_MS;  // Prevent re-trigger
-        if (visible_) {
-            lastUpdateMs_ = 0;  // Force immediate draw
-        }
-    }
-
-    prevTouchDown_ = touchDown;
+    (void)touchDown;
+    (void)frameTimeMs;
     return visible_;
+}
+
+// -------------------------------------------------------------------------
+// Explicit visibility control (Engineering menu)
+// -------------------------------------------------------------------------
+void DebugOverlay::setVisible(bool v) {
+    visible_ = v;
+    if (visible_) {
+        lastUpdateMs_ = 0;  // Force immediate draw on next draw() call
+    }
+}
+
+void DebugOverlay::toggle() {
+    setVisible(!visible_);
 }
 
 // -------------------------------------------------------------------------

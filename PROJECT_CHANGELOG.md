@@ -1,5 +1,52 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-01] — Fix: DEBUG OVERLAY ya no se abre con el long-press global (ESP32/HMI)
+
+### Resumen
+
+Tras introducir el acceso global por long-press de 3 s (ver entrada siguiente),
+al mantener pulsada la pantalla aparecía **también** el `=== DEBUG OVERLAY ===`
+(FPS / AVG frame / MAX frame / CAN max / Render max) **superpuesto** a la pantalla
+PIN/Engineering (e incluso desde Safe Mode).
+
+**Causa raíz:** el overlay tenía su **propio** detector de long-press de 3 s
+(`DebugOverlay::update()` recibía el touch crudo `isTouched` y conmutaba su
+visibilidad al cumplirse el mismo umbral de 3 s). Era, de hecho, un **doble
+dispatch** del gesto: el `touch_handler` abría PIN y, en paralelo, el overlay se
+auto-activaba con el mismo toque sostenido.
+
+- **Antes:** long-press (3 s) → PIN **+** DEBUG OVERLAY encima.
+- **Ahora:** long-press (3 s) → **sólo** PIN → 8989 → Engineering (sin overlay).
+
+### Detalle técnico (sólo ESP32/HMI)
+
+- **`esp32/src/ui/debug_overlay.h` / `.cpp`**: se elimina la detección de
+  long-press del overlay. `update()` pasa a ser sólo de mantenimiento (devuelve
+  la visibilidad) y se añade control explícito `setVisible()` / `toggle()` (más
+  la macro `RTMON_OVERLAY_TOGGLE()`). Se quitan los miembros ya inservibles
+  (`prevTouchDown_`, `touchStartMs_`, `HOLD_THRESHOLD_MS`).
+- **`esp32/src/main.cpp`**: el `update`/`draw` del overlay queda **vetado**
+  mientras hay una pantalla de bloqueo activa (`isBlockingInput()` = PIN /
+  Engineering / asistente de calibración), de modo que **nunca** se superpone a
+  esos menús ni puede dispararse desde el gesto global. Sigue usando
+  `lastFrameStart` (sin `millis()` directo ni `delay()`).
+- **`esp32/src/screens/engineering_screen.cpp`**: el overlay queda accesible
+  **sólo** desde Engineering mediante un botón claro **"DEBUG OVERLAY: ON/OFF"**
+  en el submenú **DEBOUNCE / CAN DIAG** (toggle explícito, repinta su estado).
+
+### Resultado esperado
+
+Mantener pulsado 3 s cualquier zona → abre PIN 8989 → entra Engineering →
+**NO** aparece DEBUG OVERLAY. El overlay de rendimiento sólo se muestra si se
+activa a propósito desde Engineering → DEBOUNCE / CAN DIAG.
+
+### Impacto
+
+- **No afecta al firmware STM32**, ni a motor, CAN, seguridad, watchdog, relés,
+  I2C, ni al diagnóstico `0x309`. Cambio estrictamente ESP32/HMI.
+- **Recompilar y subir únicamente el firmware de la ESP32-S3.** No es necesario
+  recompilar ni reprogramar la STM32.
+
 ## [2026-06-01] — Acceso al menú Engineering por long-press global (ESP32/HMI)
 
 ### Resumen
