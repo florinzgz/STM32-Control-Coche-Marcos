@@ -183,6 +183,26 @@ private:
     // Send SERVICE_CMD 0x110 byte0=0xF6 to trigger the STM32 I2C service scan.
     void sendI2cServiceScan();
 
+    // RUN I2C SCAN button feedback.  The command path itself was already
+    // correctly wired (0x110/0xF6 → STM32 → 0x30B/0x30C), but the button gave
+    // no visual confirmation, so it looked unresponsive.  These fields drive an
+    // immediate "SCAN CMD SENT/FAILED" banner plus a 2 s "SCAN TIMEOUT" if no
+    // 0x30B/0x30C reply arrives.  Pure HMI feedback — no protocol change.
+    // All time-based transitions happen in update() (frame-time contract: no
+    // direct millis() in the UI path); the touch handler only latches intent.
+    enum class ScanFb : uint8_t { NONE = 0, SENT, FAILED, TIMEOUT };
+    ScanFb        scanFb_            = ScanFb::NONE;
+    bool          scanFbChanged_     = false;  // repaint just the status banner
+    bool          scanFbArm_         = false;  // stamp scanFbMs_ next update()
+    bool          scanArmReply_      = false;  // start reply watchdog next update()
+    bool          scanAwaitingReply_ = false;  // waiting for 0x30B/0x30C
+    unsigned long scanSentMs_        = 0;       // frameTimeMs at command tx
+    unsigned long scanFbMs_          = 0;       // frameTimeMs when banner set
+    unsigned long scanBaseI2cTs_     = 0;       // i2cScan ts at send (detect reply)
+    unsigned long scanBaseFdcanTs_   = 0;       // fdcanDiag ts at send
+    static constexpr unsigned long SCAN_TIMEOUT_MS  = 2000;
+    static constexpr unsigned long SCAN_FB_CLEAR_MS = 4000;
+
     // Touch-calibration menu entry — when the user taps "TOUCH CALIBRATION"
     // we cannot launch the wizard from inside EngineeringScreen (it does
     // not own the ScreenManager flags).  Instead we set this flag and the

@@ -388,6 +388,46 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             last0x309Dlc_   = dlc;
             canDiagChanged_ = true;
         }
+
+        // ---- RUN I2C SCAN feedback state machine ----
+        // Latched intent from the touch handler is processed here so all
+        // timestamps use the injected frameTimeMs (deterministic, no millis()).
+        if (scanFbArm_) {
+            scanFbArm_ = false;
+            scanFbMs_  = frameTimeMs;     // stamp for banner auto-clear
+        }
+        if (scanArmReply_) {
+            scanArmReply_      = false;
+            scanAwaitingReply_ = true;
+            scanSentMs_        = frameTimeMs;
+            scanBaseI2cTs_     = data.i2cScan().timestampMs;
+            scanBaseFdcanTs_   = data.fdcanDiag().timestampMs;
+        }
+        if (scanAwaitingReply_) {
+            const auto& sc = data.i2cScan();
+            const auto& fd = data.fdcanDiag();
+            const bool gotI2c   = sc.valid && sc.timestampMs != scanBaseI2cTs_;
+            const bool gotFdcan = fd.valid && fd.timestampMs != scanBaseFdcanTs_;
+            if (gotI2c || gotFdcan) {
+                // Fresh 0x30B/0x30C reply: drop the transient banner so the
+                // live result lines below speak for themselves.
+                scanAwaitingReply_ = false;
+                scanFb_            = ScanFb::NONE;
+                scanFbChanged_     = true;
+            } else if (frameTimeMs - scanSentMs_ >= SCAN_TIMEOUT_MS) {
+                scanAwaitingReply_ = false;
+                scanFb_            = ScanFb::TIMEOUT;
+                scanFbMs_          = frameTimeMs;
+                scanFbChanged_     = true;
+            }
+        }
+        // Auto-clear a settled banner (FAILED/TIMEOUT held a few seconds) so the
+        // line does not linger forever.  SENT persists while awaiting a reply.
+        if (!scanAwaitingReply_ && scanFb_ != ScanFb::NONE &&
+            (frameTimeMs - scanFbMs_) >= SCAN_FB_CLEAR_MS) {
+            scanFb_        = ScanFb::NONE;
+            scanFbChanged_ = true;
+        }
     }
 }
 
@@ -807,6 +847,30 @@ void EngineeringScreen::draw() {
             snprintf(buf, sizeof(buf), "fdcan: tap RUN I2C SCAN");
         }
         tft.drawString(buf, x, y0 + 3 * lh);
+    }
+
+    // Partial redraw for the RUN I2C SCAN status banner (immediate feedback).
+    if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && scanFbChanged_) {
+        scanFbChanged_ = false;
+        const int16_t bx = 10;
+        const int16_t by = 250;
+        tft.fillRect(bx, by, ui::SCREEN_W - 2 * bx, 18, ui::COL_BG);
+        const char* msg = nullptr;
+        uint16_t    col = ui::COL_GRAY;
+        switch (scanFb_) {
+            case ScanFb::SENT:    msg = "SCAN CMD SENT";   col = ui::COL_CYAN;  break;
+            case ScanFb::FAILED:  msg = "SCAN CMD FAILED"; col = ui::COL_RED;   break;
+            case ScanFb::TIMEOUT: msg = "SCAN TIMEOUT";    col = ui::COL_AMBER; break;
+            case ScanFb::NONE:
+            default:              break;
+        }
+        if (msg) {
+            tft.setTextSize(2);
+            tft.setTextDatum(TL_DATUM);
+            tft.setTextColor(col, ui::COL_BG);
+            tft.drawString(msg, bx, by);
+            tft.setTextSize(1);
+        }
     }
 
     RTRACE_DUMP_IF_PENDING();
@@ -1242,7 +1306,17 @@ void EngineeringScreen::sendI2cServiceScan() {
     frame.extd             = 0;
     frame.data_length_code = 1;
     frame.data[0]          = can::SERVICE_ACTION_I2C_SERVICE;
-    ESP32Can.writeFrame(frame, 0);  // Non-blocking
+    const bool ok = ESP32Can.writeFrame(frame, 0);  // Non-blocking
+
+    // Immediate visual confirmation: the previous implementation transmitted
+    // the frame silently, so a missing/blank STM32 reply made the button look
+    // dead.  Latch the result here and defer all timing to update() (frame-time
+    // contract: no millis() in the UI path).
+    scanFb_        = ok ? ScanFb::SENT : ScanFb::FAILED;
+    scanFbChanged_ = true;     // repaint the banner next draw()
+    scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
+    scanArmReply_  = ok;       // update() arms the 2 s reply watchdog
+    Serial.printf("[ENG] RUN I2C SCAN tap -> 0xF6 tx %s\n", ok ? "OK" : "FAILED");
 }
 
 // -------------------------------------------------------------------------
@@ -2372,6 +2446,9 @@ void EngineeringScreen::drawDebounceDiag() {
 
     // Force a first paint of the CAN diag values on entry.
     canDiagChanged_ = true;
+    // Repaint the RUN I2C SCAN status banner too (blank unless a scan is mid-
+    // flight when the user re-enters the page).
+    scanFbChanged_ = true;
 
 #if RUNTIME_MONITOR
     // DEBUG OVERLAY toggle button — the only entry point for the runtime
