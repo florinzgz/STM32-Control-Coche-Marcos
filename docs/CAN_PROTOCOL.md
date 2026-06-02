@@ -720,10 +720,13 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 | 2    | `i2c_fail_count` | uint8_t | Transacciones I2C fallidas en el último ciclo de lectura |
 | 3    | `i2c_recovery_attempts` | uint8_t | Intentos de recuperación de bus (persistente, se resetea en un ciclo OK) |
 | 4    | `flags` | uint8_t bitmask | bit0 = "ever OK" (al menos un INA226 visto sano desde el arranque) |
+| 5    | `ina_expected_mask` | uint8_t bitmask | bit i = la rama de alimentación del canal i está energizada esta fase, por lo que su INA226 **debe** responder. Mismo orden de bits que `ina_ok_mask`. Permite a la HMI mostrar una rama sin alimentar como **WAIT PWR** (cian) en vez de FAIL (rojo). Aditivo: firmware previo (DLC 5) omite este byte |
 
-**DLC:** 5 · **Frecuencia:** 1000 ms (1 Hz) · **Prioridad:** Baja
+**DLC:** 6 · **Frecuencia:** 1000 ms (1 Hz) · **Prioridad:** Baja
 
-**Compatibilidad backward:** nodos que ignoren 0x309 no se ven afectados (aditivo, STM32 → ESP32).
+**Diagnóstico por fases de alimentación:** los INA226 de motores (canales 0..3 = FL/FR/RL/RR) están cableados *detrás* del relé de tracción y el de dirección (canal 5) detrás del relé de potencia de dirección. En SAFE/STANDBY esas ramas no tienen alimentación, por lo que sus INA226 no responden por I2C — esto es **normal**. El STM32 sólo cuenta como fallo de bus (recuperación / Error Code 11) los timeouts de canales cuyo bit está activo en `ina_expected_mask`. El INA de batería (canal 4) está siempre alimentado y sigue siendo obligatorio.
+
+**Compatibilidad backward:** nodos que ignoren 0x309 no se ven afectados (aditivo, STM32 → ESP32). Consumidores DLC 5 previos ignoran el byte 5 (la HMI usa máscara por defecto = todos los canales → comportamiento FAIL heredado).
 
 ---
 

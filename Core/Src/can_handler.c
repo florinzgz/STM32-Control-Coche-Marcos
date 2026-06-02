@@ -1131,26 +1131,31 @@ void CAN_SendDebounceDiag(void) {
  * failures are intermittent (bad pull-up / loose terminal) or permanent
  * (not connected).  Diagnostic only — no control / safety path consumes it.
  *
- * CAN ID: 0x309   DLC: 5   Rate: 1000 ms (1 Hz)
+ * CAN ID: 0x309   DLC: 6   Rate: 1000 ms (1 Hz)
  *   Byte 0: mux_present (0 = TCA9548A 0x70 not acking, 1 = present)
  *   Byte 1: ina_ok_mask (bit i = INA226 acked behind mux channel i;
  *           bit0=FL, bit1=FR, bit2=RL, bit3=RR, bit4=BAT, bit5=STEER)
  *   Byte 2: i2c_fail_count        (failed transactions in the last cycle)
  *   Byte 3: i2c_recovery_attempts (sticky bus-recovery attempt counter)
  *   Byte 4: flags (bit0 = "ever OK" — at least one INA seen healthy since boot)
+ *   Byte 5: ina_expected_mask (bit i = channel i's power branch is energised,
+ *           so its INA226 SHOULD answer this phase; same bit order as byte1).
+ *           Lets the HMI show an unpowered branch as "WAIT PWR" instead of a
+ *           red FAIL.  Additive — pre-extension consumers (DLC 5) ignore it.
  */
 void CAN_SendI2CDiag(void) {
-    uint8_t data[5];
+    uint8_t data[6];
     data[0] = Sensor_GetMuxPresent() ? 1U : 0U;
     data[1] = Sensor_GetInaOkMask();
     data[2] = Sensor_GetI2cFailCount();
     data[3] = Sensor_GetI2cRecoveryAttempts();
     data[4] = Sensor_GetI2cEverOk() ? 0x01U : 0x00U;
+    data[5] = Sensor_GetInaExpectedMask();
 
     /* Observability A/C: count every invocation and the TX outcome so the
      * 0x30A meta-frame can prove whether 0x309 reaches the FDCAN TX FIFO. */
     sat_inc_u32(&can_txmeta.diag309_call_count);
-    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 5) == HAL_OK) {
+    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 6) == HAL_OK) {
         sat_inc_u32(&can_txmeta.diag309_tx_ok);
     } else {
         sat_inc_u32(&can_txmeta.diag309_tx_err);

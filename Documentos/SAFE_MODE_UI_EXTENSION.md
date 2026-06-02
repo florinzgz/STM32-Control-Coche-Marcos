@@ -208,9 +208,18 @@ A dedicated block in the top-right column of the SAFE MODE screen:
 ```
 I2C BUS DIAG
 MUX 0x70: OK | FAIL
-FL FR RL RR BT ST      ← per-channel INA226 health (green/red/gray)
+FL FR RL RR BT ST      ← per-channel INA226 health (green/cyan/red/gray)
 fail:N rec:M           ← failed transactions this cycle / sticky recovery attempts
+                         (or "WAIT PWR xN" while N branches are simply un-powered)
 ```
+
+**Phase-based power gating:** the motor INA226s (channels 0..3 = FL/FR/RL/RR)
+are wired *after* the traction relay and the steering INA226 (channel 5) after
+the steering power relay. In SAFE/STANDBY those branches are un-powered, so their
+INA226s cannot answer — this is **normal**. The STM32 sends `ina_expected_mask`
+(0x309 byte5) marking which branches are energised this phase; un-powered
+branches render as **WAIT PWR** (cyan), not red FAIL, and never trigger a false
+Error Code 11. The battery INA (channel 4) is always expected and obligatory.
 
 When no fresh `0x309` is available the same block instead shows one of:
 
@@ -232,7 +241,7 @@ STM32 sensor_manager.c (Current_ReadAll / Sensor_Init)
    mux_present, ina_ok_mask, i2c_fail_count, i2c_recovery_attempts, i2c_ever_ok
         │  Sensor_GetMuxPresent() / Sensor_GetInaOkMask() / ...
         ▼
-STM32 can_handler.c  CAN_SendI2CDiag()  → CAN 0x309 (DLC 5, 1 Hz)
+STM32 can_handler.c  CAN_SendI2CDiag()  → CAN 0x309 (DLC 6, 1 Hz)
         ▼
 ESP32 can_rx.cpp  decodeI2cDiag()  → VehicleData::I2cDiagData
         ▼
@@ -251,16 +260,24 @@ So a missing mux makes every channel-select fail (`MUX 0x70: FAIL`, all
 channels gray = unknown), while a present mux with a dead sensor shows
 `MUX 0x70: OK` and that channel red.
 
+For motor/steering branches the INA226 read is **skipped entirely** until the
+relevant relay energises the branch (`ina_expected_mask`); those un-powered
+channels render cyan (WAIT PWR) and their timeouts are never counted as bus
+faults, so they cannot raise a false Error Code 11 in SAFE/STANDBY. A channel
+only turns red once its branch is powered (expected) yet still does not answer.
+
 ### Color legend
 
 | Element | Color | Meaning |
 |---------|-------|---------|
 | `MUX 0x70` | green `OK` / red `FAIL` | TCA9548A acked / did not ack on the STM32 side |
 | Channel (FL…ST) | green | INA226 acked behind that mux channel |
-| Channel (FL…ST) | red | mux present but INA226 did not answer → that sensor/wiring |
+| Channel (FL…ST) | cyan | mux present, branch not yet powered this phase (e.g. motor INAs pre-relay) → **WAIT PWR**, normal, not a fault |
+| Channel (FL…ST) | red | mux present and branch should be powered but INA226 did not answer → real sensor/wiring fault |
 | Channel (FL…ST) | gray | mux absent → per-channel state unknown |
 | `fail:/rec:` | amber | failures or recovery attempts present | 
 | `fail:/rec:` | gray | clean (0/0) |
+| `WAIT PWR xN` | cyan | N branches are un-powered this phase (clean bus, no fault) |
 | Whole block | gray `0x309: NO DATA` | no 0x309 frame received yet (does **not** invent OK) |
 | `STM32 FW: no 0x309` | amber | NO DATA **and** STM32 heartbeat alive → STM32 firmware too old/not emitting 0x309 |
 | `CAN link?` | gray | NO DATA **and** no heartbeat → CAN link STM32↔ESP32 down |

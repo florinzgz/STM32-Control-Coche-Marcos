@@ -231,10 +231,14 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
     data.setPedalCal(pc);
 }
 
-// 0x309 DIAG_I2C — I2C topology diagnostic (DLC 5).
+// 0x309 DIAG_I2C — I2C topology diagnostic (DLC 5, extended to DLC 6).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CDiag().
 //   byte0=mux_present, byte1=ina_ok_mask, byte2=fail_count,
-//   byte3=recovery_attempts, byte4=flags (bit0 = ever OK).
+//   byte3=recovery_attempts, byte4=flags (bit0 = ever OK),
+//   byte5=ina_expected_mask (bit i = ch i's branch powered this phase).
+//   byte5 is populated when DLC >= 6.  Pre-extension STM32 firmware (DLC 5)
+//   leaves the expected mask at its default (all channels) so the legacy
+//   FAIL-on-missing rendering is preserved.
 //
 // Per-ID RX counters (audit questions E/F): record every 0x309 frame seen on
 // the bus and the last DLC, and count frames dropped for a short DLC.  This
@@ -257,6 +261,12 @@ static void decodeI2cDiag(const CanFrame& f, vehicle::VehicleData& data) {
     id.failCount     = f.data[2];
     id.recoveryCount = f.data[3];
     id.everOk        = (f.data[4] & 0x01U) != 0;
+    // byte5 (DLC >= 6): per-channel "expected powered" mask.  When absent
+    // (legacy DLC-5 firmware), keep the default all-channels mask so a missing
+    // INA still renders as FAIL rather than being silently hidden.
+    if (f.data_length_code >= 6) {
+        id.inaExpectedMask = f.data[5];
+    }
     id.valid         = true;
     id.timestampMs   = millis();
     data.setI2cDiag(id);

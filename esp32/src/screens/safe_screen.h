@@ -95,6 +95,7 @@ private:
     bool     i2cValid_        = false;
     bool     i2cMuxPresent_   = false;
     uint8_t  i2cInaMask_      = 0;
+    uint8_t  i2cInaExpected_  = 0x3F;  // bit i = ch i's branch powered this phase
     uint8_t  i2cFailCount_    = 0;
     uint8_t  i2cRecovery_     = 0;
     bool     i2cEverOk_       = false;

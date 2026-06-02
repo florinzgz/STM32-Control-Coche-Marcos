@@ -112,6 +112,7 @@ float Voltage_GetBus(uint8_t index);
  * These never gate any control or safety path.                            */
 bool    Sensor_GetMuxPresent(void);           /* TCA9548A acked last cycle      */
 uint8_t Sensor_GetInaOkMask(void);            /* bit i = INA226 ch i acked      */
+uint8_t Sensor_GetInaExpectedMask(void);      /* bit i = ch i expected powered  */
 uint8_t Sensor_GetI2cFailCount(void);         /* failed transactions this cycle */
 uint8_t Sensor_GetI2cRecoveryAttempts(void);  /* bus-recovery attempts (sticky) */
 bool    Sensor_GetI2cEverOk(void);            /* latched: any INA seen OK ever  */

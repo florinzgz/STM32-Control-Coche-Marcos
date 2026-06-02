@@ -149,6 +149,7 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         i2cValid_      = id.valid;
         i2cMuxPresent_ = id.muxPresent;
         i2cInaMask_    = id.inaOkMask;
+        i2cInaExpected_ = id.inaExpectedMask;
         i2cFailCount_  = id.failCount;
         i2cRecovery_   = id.recoveryCount;
         i2cEverOk_     = id.everOk;
@@ -200,6 +201,7 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         ui::TileHash ih = ui::tileHashVal(i2cValid_);
         ih = ui::tileHashFeed(ih, i2cMuxPresent_);
         ih = ui::tileHashFeed(ih, i2cInaMask_);
+        ih = ui::tileHashFeed(ih, i2cInaExpected_);
         ih = ui::tileHashFeed(ih, i2cFailCount_);
         ih = ui::tileHashFeed(ih, i2cRecovery_);
         ih = ui::tileHashFeed(ih, i2cEverOk_);
@@ -725,12 +727,26 @@ void SafeScreen::draw() {
             tft.fillRect(ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_INA_Y,
                          236, 12, ui::COL_BG);
             for (uint8_t i = 0; i < kI2cChannels; ++i) {
-                const bool ok = (i2cInaMask_ & (1U << i)) != 0;
-                // Green = INA acked. If mux is present but the INA did not
-                // answer, it is a real fault (red). If the mux itself is
-                // absent, per-channel state is unknown (gray).
-                uint16_t col = ok ? ui::COL_GREEN
-                                  : (i2cMuxPresent_ ? ui::COL_RED : ui::COL_GRAY);
+                const bool ok       = (i2cInaMask_      & (1U << i)) != 0;
+                const bool expected = (i2cInaExpected_  & (1U << i)) != 0;
+                // Colour priority:
+                //   Green  = INA acked (healthy).
+                //   Cyan   = branch not yet powered for this phase (mux present
+                //            but this INA is not expected to answer): WAIT PWR,
+                //            a normal pre-relay state, NOT a fault.
+                //   Red    = mux present and the INA *should* be powered but did
+                //            not answer: a real fault.
+                //   Gray   = mux absent → per-channel state unknown.
+                uint16_t col;
+                if (ok) {
+                    col = ui::COL_GREEN;
+                } else if (!i2cMuxPresent_) {
+                    col = ui::COL_GRAY;
+                } else if (!expected) {
+                    col = ui::COL_CYAN;
+                } else {
+                    col = ui::COL_RED;
+                }
                 tft.setTextColor(col, ui::COL_BG);
                 tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_CH);
                 tft.drawString(chLabels[i],
@@ -739,13 +755,31 @@ void SafeScreen::draw() {
                 tft.setTextPadding(0);
             }
 
-            // Counters line: failed transactions + sticky recovery attempts
+            // Count branches still waiting for power (mux present, not powered
+            // yet, not acking) so the operator sees WAIT PWR is expected.
+            uint8_t waitCount = 0;
+            if (i2cMuxPresent_) {
+                for (uint8_t i = 0; i < kI2cChannels; ++i) {
+                    const bool ok       = (i2cInaMask_     & (1U << i)) != 0;
+                    const bool expected = (i2cInaExpected_ & (1U << i)) != 0;
+                    if (!ok && !expected) ++waitCount;
+                }
+            }
+
+            // Counters line: failed transactions + sticky recovery attempts,
+            // plus a WAIT-PWR hint when some branches are simply not energised.
             char cntBuf[ui::FMT_BUF_MED];
-            snprintf(cntBuf, sizeof(cntBuf), "fail:%u rec:%u",
-                     (unsigned)i2cFailCount_, (unsigned)i2cRecovery_);
-            // Amber if anything is failing or recovery has been attempted.
-            uint16_t cntCol = (i2cFailCount_ != 0 || i2cRecovery_ != 0)
-                              ? ui::COL_AMBER : ui::COL_GRAY;
+            uint16_t cntCol;
+            if (waitCount > 0 && i2cFailCount_ == 0 && i2cRecovery_ == 0) {
+                snprintf(cntBuf, sizeof(cntBuf), "WAIT PWR x%u", (unsigned)waitCount);
+                cntCol = ui::COL_CYAN;
+            } else {
+                snprintf(cntBuf, sizeof(cntBuf), "fail:%u rec:%u",
+                         (unsigned)i2cFailCount_, (unsigned)i2cRecovery_);
+                // Amber if anything is failing or recovery has been attempted.
+                cntCol = (i2cFailCount_ != 0 || i2cRecovery_ != 0)
+                         ? ui::COL_AMBER : ui::COL_GRAY;
+            }
             tft.setTextColor(cntCol, ui::COL_BG);
             tft.setTextPadding(ui::cfg::PAD_SAFE_I2C_CNT);
             tft.drawString(cntBuf, ui::cfg::STILE_I2C_X, ui::cfg::STILE_I2C_CNT_Y);

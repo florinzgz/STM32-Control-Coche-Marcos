@@ -1,5 +1,88 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-02] — Fix: Error Code 11 falso por INA226 de motores sin alimentar (diagnóstico I2C por fases — STM32 + ESP32)
+
+### Síntoma observado
+
+En **Safe Mode** el mux `MUX 0x70` salía OK, a veces `BT` (batería) verde, pero
+`FL/FR/RL/RR` aparecían en rojo (FAIL) y aparecía **Error Code 11**
+(`SAFETY_ERROR_I2C_FAILURE`) — aunque el coche estaba en SAFE/STANDBY con sólo el
+INA de batería alimentado, que es el estado normal antes de validar y cerrar el
+relé de tracción.
+
+### Causa exacta
+
+Los INA226 de motores (canales 0..3 = FL/FR/RL/RR) están cableados **detrás del
+relé de tracción** y el de dirección (canal 5) detrás del relé de potencia de
+dirección (ver `project_config.h` §INA226). En SAFE/STANDBY esos relés están
+abiertos → esos INA226 **no tienen alimentación** y no pueden responder (ACK) por
+I2C.
+
+En `Current_ReadAll()` el mux sí selecciona el canal (el mux está alimentado),
+pero las dos lecturas de registro del INA (shunt + bus) hacen *timeout* e
+incrementan `i2c_fail_count` (2 fallos por canal apagado → 8 por ciclo con los 4
+motores). Como `I2C_FAIL_THRESHOLD = 3`, esto disparaba la recuperación de bus y,
+agotados los `I2C_RECOVERY_MAX_ATTEMPTS`, forzaba
+`Safety_SetError(SAFETY_ERROR_I2C_FAILURE)` (Error Code 11) y SAFE. Es decir, una
+rama intencionadamente apagada se contaba como fallo de bus real.
+
+### Matriz de requisitos por estado/fase
+
+| Fase | Relé tracción | Relé dirección | INA esperados (deben responder) | INA en WAIT PWR (cian, normal) | Bloquea ACTIVE si falta |
+|------|---------------|----------------|---------------------------------|--------------------------------|--------------------------|
+| BOOT / STANDBY / SAFE (pre-relé) | OFF | OFF | **BAT (ch4)** + MUX 0x70 | FL,FR,RL,RR,STEER | BAT, MUX |
+| Tracción energizada | ON | OFF/settle | BAT + **FL,FR,RL,RR (ch0..3)** | STEER | BAT, FL,FR,RL,RR |
+| Secuencia completa (ACTIVE) | ON | ON | BAT + FL,FR,RL,RR + **STEER (ch5)** | — | todos los de la fase |
+
+El INA de batería (ch4) está cableado **antes** del relé principal → siempre
+alimentado y **siempre obligatorio** (su timeout sí cuenta y sigue pudiendo
+elevar Error Code 11; el MUX 0x70 sigue siendo obligatorio igual que antes).
+
+### Corrección (mínima y aditiva)
+
+**STM32:**
+- `project_config.h`: nuevas constantes `INA226_CHANNEL_STEER`,
+  `INA226_MASK_BATTERY/MOTORS/STEER`.
+- `sensor_manager.c`: `Current_ReadAll()` calcula una máscara
+  `ina_expected_mask` por fase leyendo el estado de relés
+  (`Safety_GetRelayStatusByte()`, sin tocar el I2C). Los canales **no
+  esperados** (rama sin alimentar) se **saltan** (sin lecturas → sin timeouts),
+  por lo que ya **no cuentan como fallo de bus** ni pueden disparar Error Code 11.
+  Configuración **perezosa**: cada rama se (re)configura la primera vez que
+  responde tras energizarse su relé (`ina_configured_mask`), para que los INA de
+  motor no queden con los valores por defecto de POR. Nuevo accesor
+  `Sensor_GetInaExpectedMask()`.
+- `can_handler.c`: `CAN_SendI2CDiag()` extiende 0x309 a **DLC 6** con
+  `byte5 = ina_expected_mask` (retrocompatible: consumidores DLC 5 lo ignoran).
+
+**ESP32:**
+- `vehicle_data.h` / `can_rx.cpp`: decodifica `byte5` (con DLC ≥ 6); por defecto
+  `0x3F` (todos) si llega firmware antiguo, preservando el comportamiento previo.
+- `safe_screen.cpp` / `safe_screen.h`: render por canal —
+  verde OK / **cian WAIT PWR** (rama no alimentada esta fase) / rojo FAIL (rama
+  alimentada que no responde) / gris (mux ausente). Línea de contadores muestra
+  `WAIT PWR xN` cuando sólo hay ramas apagadas.
+
+No se tocó motor, safety, watchdog, CAN (transporte) ni la lógica de relés. La
+seguridad no se relaja: BAT y MUX siguen siendo obligatorios y ACTIVE sigue
+exigiendo `SAFETY_ERROR_NONE`.
+
+### Comportamiento esperado en pantalla
+
+- Pre-relé (SAFE/STANDBY): `MUX 0x70: OK`, `BT` verde, `FL FR RL RR ST` cian
+  (WAIT PWR), `WAIT PWR x5`, **sin Error Code 11**.
+- Tras cerrar tracción: `FL FR RL RR` pasan a verde cuando responden; si alguno
+  no responde estando alimentado → rojo FAIL (fallo real).
+
+### Qué recompilar y flashear
+
+**Ambas placas.** El cambio de DLC y el byte5 son del STM32; el render WAIT PWR
+es del ESP32. Recompilar y flashear **STM32 (firmware Core)** y **ESP32 (HMI)**.
+Si sólo se flashea el STM32, el ESP32 antiguo ignora el byte5 y seguiría
+mostrando FAIL en rojo para las ramas apagadas (pero ya **no** habría Error Code
+11). Si sólo se flashea el ESP32, sin el byte5 del STM32 usa la máscara por
+defecto y tampoco mostraría WAIT PWR.
+
 ## [2026-06-02] — Fix: 0x309/0x30A/0x30B/0x30C nunca llegaban al ESP32 (saturación FIFO TX FDCAN — STM32)
 
 ### Resumen

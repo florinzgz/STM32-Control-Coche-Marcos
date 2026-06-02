@@ -371,6 +371,20 @@
 #define INA226_SHUNT_MOHM_MOTOR    1.5f   /* 1.5 mΩ for 50A/75mV sensors  */
 #define INA226_SHUNT_MOHM_BATTERY  0.75f  /* 0.75 mΩ for 100A/75mV sensor */
 #define INA226_CHANNEL_BATTERY     4      /* TCA9548A channel index        */
+#define INA226_CHANNEL_STEER       5      /* TCA9548A channel index        */
+
+/* Per-phase INA226 "expected to be powered" masks (bit i = TCA9548A channel i).
+ * The diagnostic logic in Current_ReadAll() uses these to tell a genuinely
+ * missing/dead INA226 apart from one whose power branch is simply not yet
+ * energised, so that an unpowered branch never triggers a false I2C bus
+ * fault (Error Code 11):
+ *   - Battery INA (ch4) is wired BEFORE the main relay → always powered.
+ *   - Motor INAs (ch0..3 = FL,FR,RL,RR) sit AFTER the traction relay →
+ *     only powered once the traction relay is energised.
+ *   - Steering INA (ch5) sits AFTER the steering power relay.            */
+#define INA226_MASK_BATTERY        (1U << INA226_CHANNEL_BATTERY)
+#define INA226_MASK_MOTORS         ((1U << 0) | (1U << 1) | (1U << 2) | (1U << 3))
+#define INA226_MASK_STEER          (1U << INA226_CHANNEL_STEER)
 
 /* ========================================================================== */
 /*               SYSTEM-LEVEL ELECTRICAL INTEGRATION NOTES                    */
