@@ -214,6 +214,10 @@ struct DebounceDiagData {
 struct I2cDiagData {
     bool     muxPresent    = false;   // TCA9548A 0x70 acked on the STM32 side
     uint8_t  inaOkMask     = 0;       // bit i = INA226 ch i acked (FL,FR,RL,RR,BAT,STEER)
+    uint8_t  inaExpectedMask = 0x3F;  // bit i = ch i's branch is powered this phase,
+                                      // so its INA226 should answer. Defaults to all
+                                      // channels (pre-extension STM32 FW with DLC 5
+                                      // omits this byte → keep legacy FAIL behaviour).
     uint8_t  failCount     = 0;       // failed I2C transactions in last STM32 cycle
     uint8_t  recoveryCount = 0;       // sticky bus-recovery attempt counter
     bool     everOk        = false;   // latched: at least one INA seen healthy

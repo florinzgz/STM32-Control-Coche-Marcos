@@ -289,6 +289,34 @@ inline constexpr int16_t PAD_SAFE_I2C_MUX        = 230;  // Clear width for the 
 inline constexpr int16_t PAD_SAFE_I2C_CH         = 36;   // Clear width per channel cell
 inline constexpr int16_t PAD_SAFE_I2C_CNT        = 230;  // Clear width for the counters line
 
+// -------------------------------------------------------------------------
+// Main battery indicator (Safe Mode) — middle diagnostic column between the
+// FAULT/ERROR column (left, x=10) and the I2C BUS DIAG column (right, x=244).
+// Lives in the x=165..241 gap so it never overlaps the I2C tile.  Voltage is
+// sourced from CAN 0x207 (STATUS_BATTERY); INA-BAT health from CAN 0x309.
+// -------------------------------------------------------------------------
+inline constexpr int16_t STILE_BAT_X       = 165;
+inline constexpr int16_t STILE_BAT_TITLE_Y = STILE_FAULT_LABEL_Y;  // 62
+inline constexpr int16_t STILE_BAT_VOLT_Y  = STILE_FAULT_VALUE_Y;  // 74
+inline constexpr int16_t STILE_BAT_STAT_Y  = STILE_ERR_LABEL_Y;    // 90
+inline constexpr int16_t STILE_BAT_SAFE_Y  = STILE_ERR_VALUE_Y;    // 102
+inline constexpr int16_t PAD_SAFE_BAT      = 76;  // Clear width (165..241), left of I2C col
+
+// Main-battery freshness window: 0x207 arrives every 100 ms; treat >2 s old as
+// stale (same threshold used for the I2C 0x309 diagnostic).
+inline constexpr unsigned long BAT_DIAG_STALE_MS = 2000;
+
+// Battery voltage thresholds (0.01 V units) mirroring the STM32 firmware limits
+// reported via SafetyError codes (BATTERY_UV_WARN/CRIT, BATTERY_OV_WARN/CRIT).
+inline constexpr uint16_t BATT_UV_WARN_RAW = 2000;  // < 20.0 V → LOW  (amber)
+inline constexpr uint16_t BATT_UV_CRIT_RAW = 1800;  // < 18.0 V → CRITICAL (red)
+inline constexpr uint16_t BATT_OV_WARN_RAW = 3000;  // > 30.0 V → HIGH (amber)
+inline constexpr uint16_t BATT_OV_CRIT_RAW = 3500;  // > 35.0 V → CRITICAL (red)
+
+// INA226 channel bit (in CAN 0x309 inaOkMask) for the always-powered main
+// battery shunt (FL,FR,RL,RR,BAT,STEER = bits 0..5).
+inline constexpr uint8_t INA_BAT_BIT = 4;
+
 // =========================================================================
 // BootScreen Diagnostic Layout Dimensions
 //

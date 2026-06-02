@@ -662,6 +662,19 @@ static uint8_t ina_ok_mask  = 0;       /* bit i = INA226 on channel i acked */
 static bool    i2c_ever_ok  = false;   /* latched: at least one INA seen OK */
 static bool    ina_last_read_ok = false; /* status of last INA226_ReadReg() */
 
+/* ---- Phase-based INA226 power expectation (additive, no new safety path) ----
+ * Motor INA226s (ch0..3) are wired AFTER the traction relay and the steering
+ * INA226 (ch5) AFTER the steering power relay, so they cannot ACK on I2C until
+ * their branch is energised.  Only INAs whose branch SHOULD be powered for the
+ * current phase are allowed to count an I2C timeout toward the bus-fault /
+ * recovery / Error-Code-11 logic.  The battery INA (ch4) is always expected.
+ *   ina_expected_mask  — channels expected to be powered this cycle (report).
+ *   ina_configured_mask — channels already configured since their last power-up;
+ *                         cleared when a channel drops out of the expected mask
+ *                         so a freshly-energised branch is (re)configured.       */
+static uint8_t ina_expected_mask   = INA226_MASK_BATTERY;
+static uint8_t ina_configured_mask = 0;
+
 /**
  * @brief  I2C bus recovery via manual SCL clock cycling.
  *
@@ -839,12 +852,20 @@ static bool TCA9548A_IsPresent(void)
  * Writes the configuration register (0x00) on each channel to ensure
  * a known state (averaging, conversion time, continuous mode) rather
  * than relying on power-on defaults.  Called once during Sensor_Init().
+ *
+ * At init only the battery branch is powered (motor/steering relays are
+ * open), so only that INA226 ACKs here; the unpowered branches are
+ * (re)configured lazily by Current_ReadAll() once their relay energises
+ * them.  Channels that ACK are recorded in ina_configured_mask so the
+ * lazy path does not write them a second time.
  */
 static void INA226_ConfigureAll(void)
 {
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         if (TCA9548A_SelectChannel(i) != HAL_OK) continue;
-        INA226_WriteReg(INA226_REG_CONFIG, INA226_CONFIG_VALUE);
+        if (INA226_WriteReg(INA226_REG_CONFIG, INA226_CONFIG_VALUE) == HAL_OK) {
+            ina_configured_mask |= (uint8_t)(1U << i);
+        }
     }
 }
 
@@ -852,6 +873,25 @@ void Current_ReadAll(void)
 {
     /* Reset per-cycle failure counter */
     i2c_fail_count = 0;
+
+    /* ---- Phase gate: which INA226 branches should be powered right now? ----
+     * Read the relay command state (GPIO-backed, no I2C) and build the set of
+     * channels that are expected to ACK.  Battery (ch4) is always expected.
+     * Motor channels (ch0..3) require the traction relay; steering (ch5)
+     * requires the steering power relay.  Timeouts from channels NOT in this
+     * mask are normal (branch unpowered) and must NOT count as bus faults.   */
+    uint8_t expected = INA226_MASK_BATTERY;
+    uint8_t relay    = Safety_GetRelayStatusByte();
+    if (relay & (1U << 1)) {            /* bit1 = traction relay energised   */
+        expected |= INA226_MASK_MOTORS;
+    }
+    if (relay & (1U << 2)) {            /* bit2 = steering power relay on     */
+        expected |= INA226_MASK_STEER;
+    }
+    ina_expected_mask = expected;
+    /* Drop "configured" bits for any branch that is no longer powered so it is
+     * re-configured the next time its relay energises it.                    */
+    ina_configured_mask &= expected;
 
     /* Per-cycle topology diagnostic accumulators (report-only) */
     uint8_t new_ina_mask = 0;
@@ -869,6 +909,17 @@ void Current_ReadAll(void)
         /* Mux acked at least one channel-select → mux is present. */
         mux_seen = true;
 
+        /* Branch not yet powered (e.g. motor INAs in SAFE/STANDBY before the
+         * traction relay closes): skip the INA reads entirely.  This avoids
+         * accumulating I2C timeouts that would otherwise trip the bus-fault
+         * recovery and force Error Code 11 on a perfectly healthy bus.       */
+        if ((expected & (1U << i)) == 0U) {
+            current_amps_raw[i] = 0.0f;
+            current_amps[i]     = 0.0f;
+            voltage_bus[i]      = 0.0f;
+            continue;
+        }
+
         /* Shunt voltage → current:  I = V_shunt / R_shunt
          * Use correct shunt resistance per channel:
          *   Channel 4 (battery): 0.75 mΩ (100A/75mV sensor)
@@ -878,6 +929,16 @@ void Current_ReadAll(void)
          * if it acked, the sensor behind this mux channel is alive.       */
         if (ina_last_read_ok) {
             new_ina_mask |= (uint8_t)(1U << i);
+            /* Lazy configuration: a branch that was unpowered at Sensor_Init()
+             * (e.g. the motor INAs) powers up with the chip's POR defaults.
+             * Configure it the first time it is seen alive after its branch is
+             * energised so its averaging / conversion-time settings match the
+             * rest of the array.  Idempotent — only written once per power-up. */
+            if ((ina_configured_mask & (1U << i)) == 0U) {
+                if (INA226_WriteReg(INA226_REG_CONFIG, INA226_CONFIG_VALUE) == HAL_OK) {
+                    ina_configured_mask |= (uint8_t)(1U << i);
+                }
+            }
         }
         float shunt_uv    = (float)shunt_raw * INA226_SHUNT_LSB_UV;
         float shunt_mohm  = (i == INA226_CHANNEL_BATTERY)
@@ -960,6 +1021,10 @@ bool Sensor_GetMuxPresent(void) {
 
 uint8_t Sensor_GetInaOkMask(void) {
     return ina_ok_mask;
+}
+
+uint8_t Sensor_GetInaExpectedMask(void) {
+    return ina_expected_mask;
 }
 
 uint8_t Sensor_GetI2cFailCount(void) {
@@ -1827,6 +1892,8 @@ void Sensor_Init(void)
     ina_ok_mask  = 0;
     i2c_ever_ok  = false;
     ina_last_read_ok = false;
+    ina_expected_mask   = INA226_MASK_BATTERY;  /* only BAT powered pre-relay */
+    ina_configured_mask = 0;
 
     /* TCA9548A multiplexer presence check (CRITICAL).
      * If the mux is absent, no INA226 channel is reachable and all
