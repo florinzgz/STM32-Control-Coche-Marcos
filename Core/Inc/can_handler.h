@@ -190,6 +190,10 @@ void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);
+/* Drain the software TX queue into the FDCAN hardware FIFO.  Non-blocking;
+ * call once per main-loop iteration so queued frames keep flowing even when
+ * no new frames are produced.  Additive — never blocks or gates safety.    */
+void CAN_TxPump(void);
 bool CAN_IsESP32Alive(void);
 bool CAN_IsGlobalSilent(void);
 void CAN_CheckBusOff(void);
