@@ -35,9 +35,10 @@ maintenance.
 | 8 | DTC ERROR LOG | `DTC_LOG_VIEWER` | Persistent NVS-backed DTC fault log viewer |
 | 9 | MAINTENANCE | `MAINTENANCE` | Maintenance counter status / acknowledge / reset |
 | 10 | RELAY CONTROL (DEBUG) | `RELAY_CONTROL` | Manual relay override for engineering diagnostics |
-| 11 | DEBOUNCE DEBUG | `DEBOUNCE_DIAG` | DWT-debounce EMI filtered counters viewer |
-| 12 | TOUCH CALIBRATION | _wizard_ | Launch the persistent touch-calibration wizard. See [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md). |
-| 13 | RESET TOUCH CAL | _action_ | Erase persisted touch calibration in NVS and re-arm the first-boot wizard for the next reboot. |
+| 11 | INA226 LIVE DIAG | `INA226_LIVE_DIAG` | Live INA226 diagnostics: CH0-3 amps, CH4 battery amps/volts, CH4 INA OK/expected, masks, mux, fail/recovery, 0x309 stale/no-data |
+| 12 | DEBOUNCE DEBUG | `DEBOUNCE_DIAG` | DWT-debounce EMI filtered counters viewer |
+| 13 | TOUCH CALIBRATION | _wizard_ | Launch the persistent touch-calibration wizard. See [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md). |
+| 14 | RESET TOUCH CAL | _action_ | Erase persisted touch calibration in NVS and re-arm the first-boot wizard for the next reboot. |
 
 ## Submenu Details
 
@@ -118,7 +119,25 @@ Table editor for mapping DS18B20 sensors to vehicle positions:
 - 5 sensors (Sens0–Sens4) → 5 positions (FL Wheel, FR Wheel, RL Wheel, RR Wheel, Ambient)
 - Same tap-to-cycle and SAVE/BACK behavior as INA226 mapping
 
-### 7. Factory Defaults
+### 7. INA226 Live Diag
+
+Read-only diagnostic page driven by existing CAN telemetry only:
+- `0x201` → CH0 FL, CH1 FR, CH2 RL, CH3 RR currents (0.01 A)
+- `0x207` → CH4 BT current + voltage (0.01 A / 0.01 V)
+- `0x309` → MUX state, INA OK mask, expected mask, fail/recovery counters, stale/no-data status
+
+Displayed values:
+- `CH0..CH3: xx.x A`
+- `CH4 BT: xx.x A   xx.x V` (highlighted)
+- `CH5 ST: --.- A (n/d)` (not on CAN yet)
+- `BT volts`, `BT amps`, `BT INA = OK/FAIL`, `BT expected = YES/NO`
+- `INA OK` / `EXPECTED` masks (hex), MUX state, fail/recovery counters, `0x309` staleness
+
+Interpretation hint:
+- rest current ~0 A → expected sensor behavior
+- rest current ~100 A with volts OK → suspect shunt/sense path or calibration/wiring issue
+
+### 8. Factory Defaults
 
 Individual reset options for specific calibration categories:
 
