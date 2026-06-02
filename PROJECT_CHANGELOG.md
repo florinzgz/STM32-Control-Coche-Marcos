@@ -1,5 +1,117 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-02] — Fix: botón "RUN I2C SCAN" sin feedback en DEBOUNCE / CAN DIAG (ESP32/HMI)
+
+### Resumen
+
+En **Engineering → DEBOUNCE / CAN DIAG**, al pulsar el botón **"RUN I2C SCAN"**
+aparentemente *no pasaba nada*. La auditoría completa del recorrido (hitbox →
+touch → comando CAN → handler STM32 → respuesta 0x30B/0x30C → decodificación
+ESP32) confirmó que **toda la cadena estaba correctamente cableada**:
+
+- **Hitbox correcta:** el botón se dibuja y se detecta en la misma zona
+  (`x = 320..470`, `y = 280..310`); sin escalado/rotación táctil divergente.
+- **Touch entregado:** `ScreenManager::onTouch()` enruta a
+  `EngineeringScreen::handleTouch()`; ninguna otra pantalla ni el overlay/
+  long-press consume el evento (el bloque `DEBOUNCE_DIAG` está aislado por
+  `currentMenu_`). El botón **BACK** usa su propia hitbox (`x = 10..90`) y sigue
+  intacto.
+- **Comando correcto:** `sendI2cServiceScan()` emite `SERVICE_CMD 0x110`,
+  `byte0 = 0xF6` (`SERVICE_ACTION_I2C_SERVICE`), DLC 1, destino STM32.
+- **Lado STM32 correcto:** el handler de `CAN_ID_SERVICE_CMD` acepta `0xF6`
+  (`msg_len >= 1`), llama a `Sensor_RunI2CServiceScan()` y transmite
+  `0x30B (DIAG_I2C_SCAN)` + `0x30C (DIAG_FDCAN)` + `CMD_ACK`. **No** está
+  bloqueado por SAFE MODE (es diagnóstico, no toca control ni seguridad).
+- **Recepción ESP32 correcta:** `can_rx.cpp` decodifica `0x30A/0x30B/0x30C` y
+  actualiza `VehicleData`; la pantalla repinta al cambiar los datos.
+
+**Causa exacta del fallo:** el botón **no daba ninguna confirmación visual**. La
+transmisión del frame era *silenciosa* y el único efecto en pantalla era la
+actualización de dos líneas de texto pequeñas (`scan …` / `fdcan …`) que **sólo**
+cambian *si y cuando* llega la respuesta asíncrona del STM32. Si el STM32 no
+respondía (o el usuario no se fijaba en el cambio mínimo de texto), el botón
+*parecía muerto*. No había feedback de envío ni indicación de timeout.
+
+### Detalle técnico (sólo ESP32/HMI — el STM32 no se toca)
+
+- **`esp32/src/screens/engineering_screen.cpp` / `.h`**:
+  - `sendI2cServiceScan()` ahora captura el `bool` de retorno de
+    `ESP32Can.writeFrame()` y **engancha** el feedback: `SCAN CMD SENT` (envío OK)
+    o `SCAN CMD FAILED` (cola TX llena). No usa `millis()` ni `delay()`: sólo
+    *latching* de intención; el tiempo se gestiona en `update()`.
+  - **Máquina de estados** en `update()` (usa el `frameTimeMs` inyectado, según
+    el *frame-time contract*): arma un *watchdog* de **2 s**; si no llega un
+    `0x30B/0x30C` *fresco* (timestamp distinto al de envío) muestra
+    **`SCAN TIMEOUT`**; si llega, retira el banner y deja ver los resultados ya
+    decodificados. Los banners `FAILED`/`TIMEOUT` se auto-borran tras unos
+    segundos.
+  - Nuevo *banner* de estado (repintado parcial, sin `fillScreen`) sobre el botón
+    (`y = 250`), de modo que el botón siempre confirma su acción de inmediato.
+- **Sin cambios** en motor, safety, watchdog, PWM, relés ni en el protocolo CAN.
+
+### Qué recompilar/subir
+
+- **Sólo ESP32/HMI.** El firmware **STM32 no necesita cambios ni reflasheo**: ya
+  implementaba el handler `0xF6` y las respuestas `0x30B/0x30C` correctamente.
+- Recompilar y subir únicamente el proyecto `esp32/` (PlatformIO, env `esp32s3`).
+
+### Flujo final del botón
+
+1. Tap en **RUN I2C SCAN** → se envía `0x110/0xF6` → banner inmediato
+   **`SCAN CMD SENT`** (o **`SCAN CMD FAILED`** si la cola TX está llena).
+2. El STM32 ejecuta el sondeo I2C y responde `0x30B` + `0x30C`.
+3. Si llega respuesta (≤ 2 s) → desaparece el banner y se muestran los resultados
+   (`scan mux=… ina=… sda=… scl=…` y `fdcan tec=… rec=…`).
+4. Si **no** llega en 2 s → banner **`SCAN TIMEOUT`**.
+5. **BACK** sigue funcionando con su hitbox propia; sin impacto en seguridad.
+
+## [2026-06-01] — Fix: DEBUG OVERLAY ya no se abre con el long-press global (ESP32/HMI)
+
+### Resumen
+
+Tras introducir el acceso global por long-press de 3 s (ver entrada siguiente),
+al mantener pulsada la pantalla aparecía **también** el `=== DEBUG OVERLAY ===`
+(FPS / AVG frame / MAX frame / CAN max / Render max) **superpuesto** a la pantalla
+PIN/Engineering (e incluso desde Safe Mode).
+
+**Causa raíz:** el overlay tenía su **propio** detector de long-press de 3 s
+(`DebugOverlay::update()` recibía el touch crudo `isTouched` y conmutaba su
+visibilidad al cumplirse el mismo umbral de 3 s). Era, de hecho, un **doble
+dispatch** del gesto: el `touch_handler` abría PIN y, en paralelo, el overlay se
+auto-activaba con el mismo toque sostenido.
+
+- **Antes:** long-press (3 s) → PIN **+** DEBUG OVERLAY encima.
+- **Ahora:** long-press (3 s) → **sólo** PIN → 8989 → Engineering (sin overlay).
+
+### Detalle técnico (sólo ESP32/HMI)
+
+- **`esp32/src/ui/debug_overlay.h` / `.cpp`**: se elimina la detección de
+  long-press del overlay. `update()` pasa a ser sólo de mantenimiento (devuelve
+  la visibilidad) y se añade control explícito `setVisible()` / `toggle()` (más
+  la macro `RTMON_OVERLAY_TOGGLE()`). Se quitan los miembros ya inservibles
+  (`prevTouchDown_`, `touchStartMs_`, `HOLD_THRESHOLD_MS`).
+- **`esp32/src/main.cpp`**: el `update`/`draw` del overlay queda **vetado**
+  mientras hay una pantalla de bloqueo activa (`isBlockingInput()` = PIN /
+  Engineering / asistente de calibración), de modo que **nunca** se superpone a
+  esos menús ni puede dispararse desde el gesto global. Sigue usando
+  `lastFrameStart` (sin `millis()` directo ni `delay()`).
+- **`esp32/src/screens/engineering_screen.cpp`**: el overlay queda accesible
+  **sólo** desde Engineering mediante un botón claro **"DEBUG OVERLAY: ON/OFF"**
+  en el submenú **DEBOUNCE / CAN DIAG** (toggle explícito, repinta su estado).
+
+### Resultado esperado
+
+Mantener pulsado 3 s cualquier zona → abre PIN 8989 → entra Engineering →
+**NO** aparece DEBUG OVERLAY. El overlay de rendimiento sólo se muestra si se
+activa a propósito desde Engineering → DEBOUNCE / CAN DIAG.
+
+### Impacto
+
+- **No afecta al firmware STM32**, ni a motor, CAN, seguridad, watchdog, relés,
+  I2C, ni al diagnóstico `0x309`. Cambio estrictamente ESP32/HMI.
+- **Recompilar y subir únicamente el firmware de la ESP32-S3.** No es necesario
+  recompilar ni reprogramar la STM32.
+
 ## [2026-06-01] — Acceso al menú Engineering por long-press global (ESP32/HMI)
 
 ### Resumen

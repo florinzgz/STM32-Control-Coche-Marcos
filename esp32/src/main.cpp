@@ -499,11 +499,16 @@ static void renderTask(void* /*param*/) {
             }
 
 #if RUNTIME_MONITOR
-            // Debug overlay toggle (3 s hold) and draw
+            // Debug overlay (perf stats) — toggled explicitly from the
+            // Engineering menu, NOT from the global long-press gesture.
+            // Never paint it over a blocking screen (PIN / Engineering /
+            // touch-cal) so it can't be superimposed on those menus.
             // Uses lastFrameStart (captured once per frame at line 367)
             // to comply with frame time contract — no direct millis() in UI.
-            RTMON_OVERLAY_UPDATE(isTouched, lastFrameStart);
-            RTMON_OVERLAY_DRAW(tft, lastFrameStart);
+            if (!screenManager.isBlockingInput()) {
+                RTMON_OVERLAY_UPDATE(isTouched, lastFrameStart);
+                RTMON_OVERLAY_DRAW(tft, lastFrameStart);
+            }
 #endif
         }
 

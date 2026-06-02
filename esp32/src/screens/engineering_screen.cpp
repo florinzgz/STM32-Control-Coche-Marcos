@@ -12,6 +12,7 @@
 #include "can_rx.h"
 #include "config_store.h"
 #include "touch_calibration.h"
+#include "ui/debug_overlay.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <cstdio>
@@ -60,6 +61,17 @@ static constexpr int16_t SAVE_X = 390;
 static constexpr int16_t SAVE_Y = 280;
 static constexpr int16_t SAVE_W = 80;
 static constexpr int16_t SAVE_H = 30;
+
+// ---- DEBUG OVERLAY toggle button (DEBOUNCE / CAN DIAG submenu only) ----
+// Bottom centre, between BACK (x=10..90) and RUN I2C SCAN (x=320..470).
+// This is the ONLY way to show the runtime performance overlay — it is no
+// longer bound to the global long-press gesture.
+#if RUNTIME_MONITOR
+static constexpr int16_t DBGOVL_X = 110;
+static constexpr int16_t DBGOVL_Y = 280;
+static constexpr int16_t DBGOVL_W = 150;
+static constexpr int16_t DBGOVL_H = 30;
+#endif
 
 // ---- Pedal calibration submenu button layout (480×320) ----
 // Two rows of buttons centred under the live telemetry block.  BACK reuses
@@ -375,6 +387,46 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             drop0x309Dlc_   = drop;
             last0x309Dlc_   = dlc;
             canDiagChanged_ = true;
+        }
+
+        // ---- RUN I2C SCAN feedback state machine ----
+        // Latched intent from the touch handler is processed here so all
+        // timestamps use the injected frameTimeMs (deterministic, no millis()).
+        if (scanFbArm_) {
+            scanFbArm_ = false;
+            scanFbMs_  = frameTimeMs;     // stamp for banner auto-clear
+        }
+        if (scanArmReply_) {
+            scanArmReply_      = false;
+            scanAwaitingReply_ = true;
+            scanSentMs_        = frameTimeMs;
+            scanBaseI2cTs_     = data.i2cScan().timestampMs;
+            scanBaseFdcanTs_   = data.fdcanDiag().timestampMs;
+        }
+        if (scanAwaitingReply_) {
+            const auto& sc = data.i2cScan();
+            const auto& fd = data.fdcanDiag();
+            const bool gotI2c   = sc.valid && sc.timestampMs != scanBaseI2cTs_;
+            const bool gotFdcan = fd.valid && fd.timestampMs != scanBaseFdcanTs_;
+            if (gotI2c || gotFdcan) {
+                // Fresh 0x30B/0x30C reply: drop the transient banner so the
+                // live result lines below speak for themselves.
+                scanAwaitingReply_ = false;
+                scanFb_            = ScanFb::NONE;
+                scanFbChanged_     = true;
+            } else if (frameTimeMs - scanSentMs_ >= SCAN_TIMEOUT_MS) {
+                scanAwaitingReply_ = false;
+                scanFb_            = ScanFb::TIMEOUT;
+                scanFbMs_          = frameTimeMs;
+                scanFbChanged_     = true;
+            }
+        }
+        // Auto-clear a settled banner (FAILED/TIMEOUT held a few seconds) so the
+        // line does not linger forever.  SENT persists while awaiting a reply.
+        if (!scanAwaitingReply_ && scanFb_ != ScanFb::NONE &&
+            (frameTimeMs - scanFbMs_) >= SCAN_FB_CLEAR_MS) {
+            scanFb_        = ScanFb::NONE;
+            scanFbChanged_ = true;
         }
     }
 }
@@ -797,6 +849,30 @@ void EngineeringScreen::draw() {
         tft.drawString(buf, x, y0 + 3 * lh);
     }
 
+    // Partial redraw for the RUN I2C SCAN status banner (immediate feedback).
+    if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && scanFbChanged_) {
+        scanFbChanged_ = false;
+        const int16_t bx = 10;
+        const int16_t by = 250;
+        tft.fillRect(bx, by, ui::SCREEN_W - 2 * bx, 18, ui::COL_BG);
+        const char* msg = nullptr;
+        uint16_t    col = ui::COL_GRAY;
+        switch (scanFb_) {
+            case ScanFb::SENT:    msg = "SCAN CMD SENT";   col = ui::COL_CYAN;  break;
+            case ScanFb::FAILED:  msg = "SCAN CMD FAILED"; col = ui::COL_RED;   break;
+            case ScanFb::TIMEOUT: msg = "SCAN TIMEOUT";    col = ui::COL_AMBER; break;
+            case ScanFb::NONE:
+            default:              break;
+        }
+        if (msg) {
+            tft.setTextSize(2);
+            tft.setTextDatum(TL_DATUM);
+            tft.setTextColor(col, ui::COL_BG);
+            tft.drawString(msg, bx, by);
+            tft.setTextSize(1);
+        }
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
 
@@ -1200,6 +1276,17 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             sendI2cServiceScan();
             return true;
         }
+#if RUNTIME_MONITOR
+        // DEBUG OVERLAY toggle button
+        if (x >= DBGOVL_X && x <= DBGOVL_X + DBGOVL_W &&
+            y >= DBGOVL_Y && y <= DBGOVL_Y + DBGOVL_H) {
+            RTMON_OVERLAY_TOGGLE();
+            needsRedraw_ = true;   // repaint button label (ON/OFF)
+            Serial.printf("[ENG] Debug overlay %s\n",
+                          RTMON_OVERLAY_VISIBLE() ? "ON" : "OFF");
+            return true;
+        }
+#endif
         return false;
     }
 
@@ -1219,7 +1306,17 @@ void EngineeringScreen::sendI2cServiceScan() {
     frame.extd             = 0;
     frame.data_length_code = 1;
     frame.data[0]          = can::SERVICE_ACTION_I2C_SERVICE;
-    ESP32Can.writeFrame(frame, 0);  // Non-blocking
+    const bool ok = ESP32Can.writeFrame(frame, 0);  // Non-blocking
+
+    // Immediate visual confirmation: the previous implementation transmitted
+    // the frame silently, so a missing/blank STM32 reply made the button look
+    // dead.  Latch the result here and defer all timing to update() (frame-time
+    // contract: no millis() in the UI path).
+    scanFb_        = ok ? ScanFb::SENT : ScanFb::FAILED;
+    scanFbChanged_ = true;     // repaint the banner next draw()
+    scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
+    scanArmReply_  = ok;       // update() arms the 2 s reply watchdog
+    Serial.printf("[ENG] RUN I2C SCAN tap -> 0xF6 tx %s\n", ok ? "OK" : "FAILED");
 }
 
 // -------------------------------------------------------------------------
@@ -2349,6 +2446,27 @@ void EngineeringScreen::drawDebounceDiag() {
 
     // Force a first paint of the CAN diag values on entry.
     canDiagChanged_ = true;
+    // Repaint the RUN I2C SCAN status banner too (blank unless a scan is mid-
+    // flight when the user re-enters the page).
+    scanFbChanged_ = true;
+
+#if RUNTIME_MONITOR
+    // DEBUG OVERLAY toggle button — the only entry point for the runtime
+    // performance overlay (FPS / frame timing).  Shows current state so the
+    // user knows whether it is armed.
+    {
+        const bool ovlOn = RTMON_OVERLAY_VISIBLE();
+        const uint16_t bg = ovlOn ? ui::COL_GREEN : ui::COL_DARK_GRAY;
+        const uint16_t fg = ovlOn ? ui::COL_BLACK : ui::COL_CYAN;
+        tft.fillRect(DBGOVL_X, DBGOVL_Y, DBGOVL_W, DBGOVL_H, bg);
+        tft.drawRect(DBGOVL_X, DBGOVL_Y, DBGOVL_W, DBGOVL_H, ui::COL_CYAN);
+        tft.setTextColor(fg, bg);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(ovlOn ? "DEBUG OVERLAY: ON" : "DEBUG OVERLAY: OFF",
+                       DBGOVL_X + DBGOVL_W / 2, DBGOVL_Y + DBGOVL_H / 2);
+        tft.setTextDatum(TL_DATUM);
+    }
+#endif
 
     // BACK button (bottom-left)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
