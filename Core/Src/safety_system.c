@@ -2982,9 +2982,23 @@ void Obstacle_Update(void)
         break;
 
     case OBS_STATE_SENSOR_FAULT:
-        /* Handled above — should not reach here.  Fallback: */
-        safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
+        /* Sensor path recovered (sensor_fault == 0) — rejoin normal flow. */
+        obstacle_confirm_tick = 0;
+        obstacle_clear_tick   = 0;
+        if (target_scale < 1.0f) {
+            /* Valid sensor but obstacle still in range: confirm before ACTIVE. */
+            obstacle_state = OBS_STATE_CONFIRMING;
+            obstacle_confirm_tick = now;
+            safety_status.obstacle_scale = obstacle_preemptive_scale(target_scale);
+        } else {
+            obstacle_state = OBS_STATE_NORMAL;
+            safety_status.obstacle_scale = 1.0f;
+        }
         obstacle_forward_blocked = 0;
+        ServiceMode_ClearFault(MODULE_OBSTACLE_DETECT);
+        if (safety_error == SAFETY_ERROR_OBSTACLE) {
+            Safety_ClearError(SAFETY_ERROR_OBSTACLE);
+        }
         break;
 
     default:
