@@ -214,7 +214,7 @@ void CAN_TxPump(void) {
             break;  /* hardware FIFO full — retry on next pass */
         }
 
-        CanTxItem_t *it = &can_txq[can_txq_tail];
+        const CanTxItem_t *it = &can_txq[can_txq_tail];
         HAL_StatusTypeDef result = CAN_TxHwSend(it->id, it->data, it->len);
 
         if (result == HAL_OK) {
