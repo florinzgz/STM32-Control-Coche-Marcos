@@ -1,5 +1,60 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-02] — HMI: Indicador de batería principal en Safe Mode (sólo ESP32)
+
+### Objetivo
+
+Mostrar de forma clara en **Safe Mode** el estado de la **batería principal**
+(24 V) usando datos de telemetría ya existentes, sin tocar el STM32 ni relajar
+seguridad, y sin tapar el tile `I2C BUS DIAG` ni romper el nuevo `WAIT PWR`.
+
+### Fuente exacta del dato
+
+- **Voltaje principal:** CAN `0x207` `STATUS_BATTERY` → `decodeBattery()` en
+  `esp32/src/can_rx.cpp` → `VehicleData::battery().voltageRaw` (unidades 0.01 V)
+  y `battery().timestampMs` para frescura. No se inventa voltaje: si no hay
+  trama fresca se muestra `NO DATA` / `STALE`.
+- **Salud INA de batería:** CAN `0x309` `DIAG_I2C` → `inaOkMask` bit 4 (BAT,
+  canal siempre alimentado). Si el mux responde pero el INA BAT no hace ACK →
+  `INA FAIL`.
+- **SAFE por batería:** `VehicleData::safety().errorCode` con los códigos
+  `BATTERY_UV_WARN(9)`, `BATTERY_UV_CRIT(10)`, `BATTERY_OV_WARN(14)`,
+  `BATTERY_OV_CRIT(15)`.
+
+### Estados visuales implementados
+
+Nueva tile `STILE_BAT` (columna intermedia x=165, entre la columna
+FAULT/ERROR y `I2C BUS DIAG` en x=244 — no la solapa). Título estático
+`MAIN BAT`, luego voltaje, estado y, si aplica, banner `SAFE:BAT`:
+
+| Estado | Color | Texto | Condición |
+|--------|-------|-------|-----------|
+| OK | Verde | `24.6V` / `OK` | Trama fresca y dentro de límites |
+| LOW | Ámbar | `18.2V` / `LOW` | < 20.0 V o > 30.0 V (o código UV/OV WARN) |
+| CRITICAL | Rojo | `0.0V` / `CRITICAL` | 0 V, < 18.0 V o > 35.0 V (o código UV/OV CRIT) |
+| INA FAIL | Rojo | `INA FAIL` | mux OK pero INA BAT (ch4) sin ACK |
+| STALE | Gris | último V / `STALE` | `0x207` > 2 s sin refrescar |
+| NO DATA | Gris | `--.-V` / `NO DATA` | Nunca se recibió `0x207` |
+
+Umbrales (0.01 V) reflejan los límites del firmware STM32:
+`BATT_UV_WARN_RAW=2000`, `BATT_UV_CRIT_RAW=1800`, `BATT_OV_WARN_RAW=3000`,
+`BATT_OV_CRIT_RAW=3500`.
+
+### Archivos modificados
+
+- `esp32/src/ui/ui_config.h` — constantes de layout `STILE_BAT_*`, `PAD_SAFE_BAT`,
+  `BAT_DIAG_STALE_MS`, umbrales `BATT_*_RAW`, `INA_BAT_BIT`.
+- `esp32/src/screens/safe_screen.h` — tile `STILE_BAT`, enum `BatState`, campos
+  de estado de batería.
+- `esp32/src/screens/safe_screen.cpp` — cálculo de estado (read-only) en
+  `update()`, hash de tile y dibujo de la tile `STILE_BAT` en `draw()`.
+
+### Alcance / compilación
+
+Cambio **sólo de HMI**: no se toca STM32 (motor, relés, watchdog, PWM, pedal,
+encoder ni safety) porque la telemetría necesaria (`0x207` voltaje y `0x309`
+máscara INA) ya existe. **Recompilar y subir únicamente la placa ESP32.**
+
 ## [2026-06-02] — Fix: Error Code 11 falso por INA226 de motores sin alimentar (diagnóstico I2C por fases — STM32 + ESP32)
 
 ### Síntoma observado

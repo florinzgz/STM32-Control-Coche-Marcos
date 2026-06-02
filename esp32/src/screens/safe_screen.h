@@ -18,6 +18,7 @@
 //   STILE_GEAR      — gear position bar
 //   STILE_RELAY     — relay status indicator (M T D)
 //   STILE_I2C       — I2C bus diagnostic (mux + per-channel INA226 health)
+//   STILE_BAT       — main battery indicator (voltage + state, CAN 0x207/0x309)
 //
 // Reference: docs/HMI_STATE_MODEL.md §2.5
 // =============================================================================
@@ -45,7 +46,18 @@ enum SafeTile : uint8_t {
     STILE_GEAR,
     STILE_RELAY,
     STILE_I2C,
+    STILE_BAT,
     STILE_COUNT
+};
+
+/// Main-battery visual state (Safe Mode BAT tile).  Priority order, worst-first.
+enum class BatState : uint8_t {
+    NoData = 0,   // gray  — never received 0x207
+    Stale,        // gray  — 0x207 too old
+    InaFail,      // red   — mux present but BAT INA226 (ch4) not acking
+    Critical,     // red   — 0 V / under- or over-voltage critical
+    Low,          // amber — under- or over-voltage warning
+    Ok            // green — valid and within limits
 };
 
 class SafeScreen : public Screen {
@@ -114,6 +126,14 @@ private:
     uint8_t  previ2cFailCount_  = 0xFF;
     uint8_t  previ2cRecovery_   = 0xFF;
     bool     previ2cEverOk_     = true;
+
+    // Main battery indicator (passive, read-only) — voltage from CAN 0x207,
+    // INA-BAT health from CAN 0x309.  State computed in update() so draw() and
+    // the tile hash stay deterministic for a given (VehicleData, frameTimeMs).
+    uint16_t batVoltRaw_     = 0;            // 0.01 V units (display only)
+    BatState batState_       = BatState::NoData;
+    bool     batSafe_        = false;        // SAFE forced by a battery error code
+    unsigned long batAgeMs_  = 0;            // age of last 0x207 frame
 };
 
 #endif // SAFE_SCREEN_H

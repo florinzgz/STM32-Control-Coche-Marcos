@@ -96,7 +96,7 @@ void SafeScreen::onEnter() {
     tiles_.setRect(STILE_GEAR,     0, STILE_GEAR_BAR_Y, 430, 30);
     tiles_.setRect(STILE_RELAY,    STILE_RELAY_X, STILE_GEAR_BAR_Y, 50, 30);
     tiles_.setRect(STILE_I2C,      STILE_I2C_X, STILE_I2C_TITLE_Y, 236, 54);
-
+    tiles_.setRect(STILE_BAT,      STILE_BAT_X, STILE_BAT_TITLE_Y, 80, 54);
     tiles_.invalidateAll();
 }
 
@@ -171,6 +171,56 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
                       ((frameTimeMs - hbTs) <= can::CAN_LOSS_TIMEOUT_MS);
     }
 
+    // Main battery (passive, read-only).  Voltage from CAN 0x207; INA-BAT
+    // health from CAN 0x309 (always-powered ch4).  Do NOT invent a voltage
+    // when no fresh frame exists — fall back to NO DATA / STALE instead.
+    {
+        const vehicle::BatteryData& bd = data.battery();
+        batVoltRaw_ = bd.voltageRaw;
+
+        const bool haveFrame = (bd.timestampMs > 0);
+        if (haveFrame && frameTimeMs >= bd.timestampMs) {
+            batAgeMs_ = frameTimeMs - bd.timestampMs;
+        } else {
+            batAgeMs_ = 0;
+        }
+        const bool stale = haveFrame && (batAgeMs_ > BAT_DIAG_STALE_MS);
+
+        // INA-BAT failure: the mux answered but the battery shunt (ch4) did
+        // not ACK.  BAT is always powered, so a missing bit is a real fault.
+        const bool inaBatFail = i2cValid_ && i2cMuxPresent_ &&
+                                ((i2cInaMask_ & (1U << INA_BAT_BIT)) == 0);
+
+        // SAFE forced by a battery error code (UV/OV warn/crit).
+        batSafe_ =
+            (errorCode_ == (uint8_t)can::SafetyError::BATTERY_UV_WARN) ||
+            (errorCode_ == (uint8_t)can::SafetyError::BATTERY_UV_CRIT) ||
+            (errorCode_ == (uint8_t)can::SafetyError::BATTERY_OV_WARN) ||
+            (errorCode_ == (uint8_t)can::SafetyError::BATTERY_OV_CRIT);
+
+        // Classify, worst-first.
+        if (!haveFrame) {
+            batState_ = BatState::NoData;
+        } else if (stale) {
+            batState_ = BatState::Stale;
+        } else if (inaBatFail) {
+            batState_ = BatState::InaFail;
+        } else if (batVoltRaw_ == 0 ||
+                   batVoltRaw_ < BATT_UV_CRIT_RAW ||
+                   batVoltRaw_ > BATT_OV_CRIT_RAW ||
+                   errorCode_ == (uint8_t)can::SafetyError::BATTERY_UV_CRIT ||
+                   errorCode_ == (uint8_t)can::SafetyError::BATTERY_OV_CRIT) {
+            batState_ = BatState::Critical;
+        } else if (batVoltRaw_ < BATT_UV_WARN_RAW ||
+                   batVoltRaw_ > BATT_OV_WARN_RAW ||
+                   errorCode_ == (uint8_t)can::SafetyError::BATTERY_UV_WARN ||
+                   errorCode_ == (uint8_t)can::SafetyError::BATTERY_OV_WARN) {
+            batState_ = BatState::Low;
+        } else {
+            batState_ = BatState::Ok;
+        }
+    }
+
     // ---- Compute tile hashes ----
     tiles_.updateHash(STILE_FAULTS, ui::tileHashVal(faultFlags_));
     tiles_.updateHash(STILE_ERROR,  ui::tileHashVal(errorCode_));
@@ -216,6 +266,16 @@ void SafeScreen::update(const vehicle::VehicleData& data, unsigned long frameTim
         // redraws once per second, not on every frame.
         ih = ui::tileHashFeed(ih, (uint8_t)(i2cAgeMs_ / 1000U));
         tiles_.updateHash(STILE_I2C, ih);
+    }
+
+    // Battery tile hash — redraw when state, displayed voltage (0.1 V
+    // granularity), SAFE-by-battery flag or the quantized stale age changes.
+    {
+        ui::TileHash bh = ui::tileHashVal((uint8_t)batState_);
+        bh = ui::tileHashFeed(bh, (uint16_t)(batVoltRaw_ / 10U));
+        bh = ui::tileHashFeed(bh, batSafe_);
+        bh = ui::tileHashFeed(bh, (uint8_t)(batAgeMs_ / 1000U));
+        tiles_.updateHash(STILE_BAT, bh);
     }
 }
 
@@ -295,6 +355,10 @@ void SafeScreen::draw() {
         // I2C bus diagnostic — static title (right-hand column)
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
         tft.drawString("I2C BUS DIAG", STILE_I2C_X, STILE_I2C_TITLE_Y);
+
+        // Main battery — static title (middle diagnostic column)
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.drawString("MAIN BAT", STILE_BAT_X, STILE_BAT_TITLE_Y);
 
         // Gear bar separator
         tft.drawFastHLine(40, STILE_GEAR_BAR_Y - 4, ui::SCREEN_W - 80, ui::COL_DARK_GRAY);
@@ -787,6 +851,59 @@ void SafeScreen::draw() {
         }
 
         tiles_.markClean(STILE_I2C);
+    }
+
+    // ---- TILE: Main battery indicator (voltage + state) ----
+    if (tiles_.isDirty(STILE_BAT)) {
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        // Resolve colour + status word from the state computed in update().
+        uint16_t col;
+        const char* statusStr;
+        switch (batState_) {
+            case BatState::Ok:       col = ui::COL_GREEN; statusStr = "OK";       break;
+            case BatState::Low:      col = ui::COL_AMBER; statusStr = "LOW";      break;
+            case BatState::Critical: col = ui::COL_RED;   statusStr = "CRITICAL"; break;
+            case BatState::InaFail:  col = ui::COL_RED;   statusStr = "INA FAIL"; break;
+            case BatState::Stale:    col = ui::COL_GRAY;  statusStr = "STALE";    break;
+            case BatState::NoData:
+            default:                 col = ui::COL_GRAY;  statusStr = "NO DATA";  break;
+        }
+
+        // Voltage line — only show a number when we have a usable reading; do
+        // not invent a voltage for NO DATA / STALE.
+        char voltBuf[ui::FMT_BUF_SMALL];
+        if (batState_ == BatState::NoData) {
+            snprintf(voltBuf, sizeof(voltBuf), "--.-V");
+        } else {
+            snprintf(voltBuf, sizeof(voltBuf), "%u.%uV",
+                     (unsigned)(batVoltRaw_ / 100U),
+                     (unsigned)((batVoltRaw_ / 10U) % 10U));
+        }
+        tft.setTextColor(col, ui::COL_BG);
+        tft.setTextPadding(PAD_SAFE_BAT);
+        tft.drawString(voltBuf, STILE_BAT_X, STILE_BAT_VOLT_Y);
+        tft.setTextPadding(0);
+
+        // Status word.
+        tft.setTextColor(col, ui::COL_BG);
+        tft.setTextPadding(PAD_SAFE_BAT);
+        tft.drawString(statusStr, STILE_BAT_X, STILE_BAT_STAT_Y);
+        tft.setTextPadding(0);
+
+        // SAFE-by-battery banner line: only when a battery error code forced
+        // SAFE.  Cleared otherwise so it never lingers.
+        tft.setTextPadding(PAD_SAFE_BAT);
+        if (batSafe_) {
+            tft.setTextColor(ui::COL_RED, ui::COL_BG);
+            tft.drawString("SAFE:BAT", STILE_BAT_X, STILE_BAT_SAFE_Y);
+        } else {
+            tft.fillRect(STILE_BAT_X, STILE_BAT_SAFE_Y, PAD_SAFE_BAT, 12, ui::COL_BG);
+        }
+        tft.setTextPadding(0);
+
+        tiles_.markClean(STILE_BAT);
     }
 
     RTRACE_DUMP_IF_PENDING();
