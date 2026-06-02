@@ -1,5 +1,73 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-02] — Fix: 0x309/0x30A/0x30B/0x30C nunca llegaban al ESP32 (saturación FIFO TX FDCAN — STM32)
+
+### Resumen
+
+Tras recompilar y flashear ambas placas, en **Engineering → DEBOUNCE / CAN DIAG**
+seguían apareciendo `0x309 rx=0`, `0x30A meta: no data` y, al pulsar **RUN I2C
+SCAN**, `SCAN CMD SENT` → `SCAN TIMEOUT`. La auditoría del lado STM32 confirmó
+que **todo el código fuente estaba correcto y cableado** (las funciones existen,
+se llaman, los filtros FDCAN aceptan `0x110`, el handler `0xF6` ejecuta
+`Sensor_RunI2CServiceScan()` y los símbolos están en el `.elf`).
+
+**Causa exacta:** **saturación de la FIFO TX del FDCAN**. La FIFO TX hardware del
+STM32G4 sólo tiene **3 ranuras**. El bloque de 1 Hz en `main.c` encola ~11 tramas
+en una sola iteración del main loop (microsegundos), muchísimo más rápido de lo
+que el bus drena (~250 µs/trama a 500 kbit/s). El guard previo en
+`TransmitFrame()` descartaba **silenciosamente** toda trama que llegaba con la
+FIFO ya llena (`HAL_FDCAN_GetTxFifoFreeLevel()==0 → return HAL_BUSY`). Como
+`0x309` (posición ~8 del bloque) y `0x30A` (~9) iban al final de la ráfaga, se
+perdían **en cada ciclo**. La respuesta on-demand del scan (`0x30B/0x30C/ACK`)
+chocaba con la misma FIFO llena cuando coincidía con la ráfaga → `SCAN TIMEOUT`.
+
+La prueba diagnóstica sugerida (mover `CAN_SendI2CDiag/CanMetaDiag` al principio
+del bloque) confirmaría el síntoma, pero sólo desplazaría el problema a las
+tramas que quedaran al final. Por eso se implementó una solución robusta en lugar
+de reordenar líneas.
+
+### Corrección (sólo STM32 — `can_handler.c`, `can_handler.h`, `main.c`)
+
+Se añadió una **cola TX software** (ring buffer de 32 entradas) que absorbe las
+ráfagas y se drena hacia la FIFO hardware una trama a la vez:
+
+- **`TransmitFrame()`** ya no escribe directamente en la FIFO: encola la trama
+  (preservando ID, DLC y orden de envío) y hace un *pump* oportunista.
+- **`CAN_TxPump()`** (nueva, pública, **no bloqueante**) mueve tramas de la cola
+  software a la FIFO hardware mientras haya ranura libre; lo que no cabe queda
+  encolado y se reintenta en la siguiente pasada. Si la FIFO está llena, **no
+  pierde la trama**: la deja para el próximo ciclo.
+- Se llama **`CAN_TxPump()` una vez por iteración del main loop** (junto a
+  `CAN_ProcessMessages()`), de modo que el backlog se vacía al ritmo del bus
+  (~2–5 ms) dentro de cada ventana de 100 ms / 1 s.
+- Una trama **sólo** se descarta (y se cuenta en `can_txmeta.tx_fifo_full_drops`)
+  ante un **desbordamiento real de la cola software**, que no ocurre a las tasas
+  actuales. Los contadores `diag309_tx_ok` / `diag309_tx_err` / `tx_fifo_full_drops`
+  pasan a reflejar la realidad (`0x309` ahora se acepta y transmite).
+
+**Garantías:** aditivo y reversible; no toca motor, PWM, relés, watchdog, pedal,
+encoder ni safety; no usa `delay()`; no bloquea el main loop; mantiene IDs, DLCs
+y orden de las tramas (compatibilidad CAN intacta). Productor y consumidor único,
+ambos en contexto main-loop (ninguna ISR llama a `TransmitFrame()`), por lo que no
+requiere bloqueos.
+
+**Verificación:** compila limpio con `-Werror` (`make`); el `.elf` contiene
+`CAN_SendI2CDiag`, `CAN_SendCanMetaDiag`, `CAN_SendI2CScanReport`,
+`CAN_SendFdcanDiag`, `Sensor_RunI2CServiceScan` y la nueva `CAN_TxPump`.
+
+### Qué recompilar/subir
+
+- **STM32: SÍ** — recompilar y flashear (`make` → `build/STM32G474RE.hex/.bin`).
+- **ESP32: NO** — sin cambios; el firmware ESP32 ya decodifica
+  `0x309/0x30A/0x30B/0x30C` correctamente y empezará a mostrar datos reales en
+  cuanto el STM32 emita las tramas.
+
+### Resultado esperado tras flashear el STM32
+
+En **DEBOUNCE / CAN DIAG**: `0x309 rx > 0`, `0x30A meta: datos`. Al pulsar **RUN
+I2C SCAN**: `SCAN CMD SENT` seguido de `scan mux=…` / `fdcan tec=… rec=…` (o el
+diagnóstico de fallo físico I2C), sin quedarse en `SCAN TIMEOUT`.
+
 ## [2026-06-02] — Fix: botón "RUN I2C SCAN" sin feedback en DEBOUNCE / CAN DIAG (ESP32/HMI)
 
 ### Resumen

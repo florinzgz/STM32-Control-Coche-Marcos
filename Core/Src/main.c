@@ -697,6 +697,15 @@ int main(void)
         /* Process incoming CAN commands from ESP32 */
         CAN_ProcessMessages();
 
+        /* Drain the software CAN TX queue into the FDCAN hardware FIFO.
+         * The 100 ms / 1 s status blocks enqueue bursts far faster than the
+         * 3-slot hardware FIFO can drain at the bus rate; pumping every
+         * iteration moves the backlog out one frame at a time as slots free,
+         * so diagnostic frames (0x309/0x30A/0x30B/0x30C) are never dropped to
+         * a momentarily-full FIFO.  Non-blocking — returns as soon as the
+         * FIFO is full or the queue is empty.                              */
+        CAN_TxPump();
+
         /* Kick the watchdog */
         HAL_IWDG_Refresh(&hiwdg);
     }

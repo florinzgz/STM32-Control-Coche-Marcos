@@ -133,10 +133,44 @@ static inline void sat_inc_u32(uint32_t *counter) {
     if (*counter < UINT32_MAX) (*counter)++;
 }
 
-/* Internal helper to send a CAN frame */
-static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
+/* ---- Software TX queue (additive burst-absorber) -------------------------
+ * The STM32G4 FDCAN hardware TX FIFO holds only 3 elements.  Both the 1 Hz
+ * diagnostic block and the 100 ms status block in main.c enqueue many frames
+ * in a single (microsecond-fast) main-loop pass, far quicker than the bus can
+ * drain them (~250 us/frame at 500 kbit/s).  The previous implementation
+ * dropped every frame that arrived once the 3-slot FIFO was full, which
+ * reliably killed the diagnostic frames emitted last in the burst (0x309,
+ * 0x30A) and the on-demand scan replies (0x30B/0x30C/ACK) that collided with
+ * a full FIFO — observed as "0x309 rx=0", "0x30A no data" and "SCAN TIMEOUT".
+ *
+ * Instead, every frame is appended to this software ring buffer and drained
+ * one-by-one into the hardware FIFO by CAN_TxPump() as slots free up (called
+ * on every TransmitFrame() and once per main-loop iteration).  Frames are
+ * therefore never lost to a momentarily-full hardware FIFO; they are merely
+ * transmitted a few milliseconds later, well inside their 100 ms / 1 s window.
+ * A frame is only dropped (and counted in tx_fifo_full_drops) on a true
+ * software-queue overflow, which cannot happen at the current frame rates.
+ *
+ * Additive + report-only: frame IDs, DLCs and send order are preserved, the
+ * main loop never blocks, and no control/safety path depends on this queue.
+ * Single producer + single consumer, both in main-loop context (no ISR ever
+ * calls TransmitFrame), so no locking is required.                          */
+#define CAN_TXQ_SIZE 32U   /* power of two; absorbs the worst 100ms+1Hz burst */
+
+typedef struct {
+    uint32_t id;
+    uint8_t  len;
+    uint8_t  data[8];
+} CanTxItem_t;
+
+static CanTxItem_t can_txq[CAN_TXQ_SIZE];
+static uint8_t      can_txq_head;   /* next slot to write */
+static uint8_t      can_txq_tail;   /* next slot to read  */
+
+/* Push a frame onto the hardware TX FIFO.  Returns the HAL status. */
+static HAL_StatusTypeDef CAN_TxHwSend(uint32_t msg_id, const uint8_t *payload, uint8_t len) {
     FDCAN_TxHeaderTypeDef tx_hdr = {0};
-    
+
     /* Map byte count to FDCAN DLC code */
     uint32_t dlc_code;
     switch (len) {
@@ -151,7 +185,7 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
         case 8:  dlc_code = FDCAN_DLC_BYTES_8; break;
         default: dlc_code = FDCAN_DLC_BYTES_8; break; /* Clamp to max */
     }
-    
+
     tx_hdr.Identifier = msg_id;
     tx_hdr.IdType = FDCAN_STANDARD_ID;
     tx_hdr.TxFrameType = FDCAN_DATA_FRAME;
@@ -161,43 +195,80 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     tx_hdr.FDFormat = FDCAN_CLASSIC_CAN;
     tx_hdr.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_hdr.MessageMarker = 0;
-    
-    /* TX FIFO overflow guard (additive diagnostic + burst mitigation).
-     * The STM32G4 FDCAN TX FIFO holds only 3 elements.  The 1 Hz scheduler
-     * block can enqueue a burst of frames in a single iteration; if the FIFO
-     * is already full, HAL_FDCAN_AddMessageToTxFifoQ() would return HAL_ERROR
-     * and the frame would be lost silently.  Detect a full FIFO up-front so
-     * the loss is counted (CAN 0x30A byte "tx_fifo_full_drops") instead of
-     * being invisible.  This neither changes frame priorities/IDs nor gates
-     * any control or safety path — it only makes an existing failure mode
-     * observable and avoids issuing a doomed enqueue call.                  */
-    if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) == 0U) {
+
+    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_hdr, (uint8_t *)payload);
+}
+
+/**
+ * @brief  Drain the software TX queue into the hardware TX FIFO.
+ *
+ * Non-blocking: moves frames from the ring buffer to the FDCAN FIFO while a
+ * hardware slot is free, then returns.  Whatever does not fit stays queued
+ * and is retried on the next call.  Must be called frequently — on every
+ * TransmitFrame() (opportunistic) and once per main-loop iteration so the
+ * queue keeps draining even when no new frames are being produced.
+ */
+void CAN_TxPump(void) {
+    while (can_txq_head != can_txq_tail) {
+        if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) == 0U) {
+            break;  /* hardware FIFO full — retry on next pass */
+        }
+
+        const CanTxItem_t *it = &can_txq[can_txq_tail];
+        HAL_StatusTypeDef result = CAN_TxHwSend(it->id, it->data, it->len);
+
+        if (result == HAL_OK) {
+            sat_inc_u32(&can_stats.tx_count);
+            can_diag.tx_consec_fail = 0;
+            can_diag.tx_nack_flag   = 0;
+            can_txq_tail = (uint8_t)((can_txq_tail + 1U) & (CAN_TXQ_SIZE - 1U));
+        } else {
+            /* Transient HAL error (e.g. peripheral not ready): leave the frame
+             * queued, count the failure and retry next pass.  Do not spin. */
+            sat_inc_u32(&can_stats.tx_errors);
+            if (can_diag.tx_consec_fail < 255U)
+                can_diag.tx_consec_fail++;
+            if (can_diag.tx_consec_fail >= CAN_TX_NACK_THRESHOLD)
+                can_diag.tx_nack_flag = 1;
+            break;
+        }
+    }
+}
+
+/* Internal helper to send a CAN frame.
+ *
+ * Appends the frame to the software TX queue (preserving submission order) and
+ * opportunistically pumps the queue into the hardware FIFO.  Returns HAL_OK
+ * when the frame was accepted for transmission (queued) and HAL_BUSY only on a
+ * genuine software-queue overflow, which is then counted in tx_fifo_full_drops.
+ */
+static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
+    uint8_t l = (len > 8U) ? 8U : (uint8_t)len;
+    uint8_t next = (uint8_t)((can_txq_head + 1U) & (CAN_TXQ_SIZE - 1U));
+
+    if (next == can_txq_tail) {
+        /* Software queue full — true overflow (producer outran the bus for an
+         * extended period).  Record the drop so 0x30A "tx_fifo_full_drops"
+         * stays meaningful; never silently lose a frame without counting. */
         sat_inc_u32(&can_stats.tx_errors);
         sat_inc_u32(&can_txmeta.tx_fifo_full_drops);
         if (can_diag.tx_consec_fail < 255U)
             can_diag.tx_consec_fail++;
         if (can_diag.tx_consec_fail >= CAN_TX_NACK_THRESHOLD)
             can_diag.tx_nack_flag = 1;
+        /* Still try to make room for next time. */
+        CAN_TxPump();
         return HAL_BUSY;
     }
 
-    HAL_StatusTypeDef result = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx_hdr, payload);
-    
-    if (result == HAL_OK) {
-        sat_inc_u32(&can_stats.tx_count);
-        /* TX success — reset consecutive failure tracker */
-        can_diag.tx_consec_fail = 0;
-        can_diag.tx_nack_flag   = 0;
-    } else {
-        sat_inc_u32(&can_stats.tx_errors);
-        /* TX failure — track consecutive failures for NACK detection */
-        if (can_diag.tx_consec_fail < 255U)
-            can_diag.tx_consec_fail++;
-        if (can_diag.tx_consec_fail >= CAN_TX_NACK_THRESHOLD)
-            can_diag.tx_nack_flag = 1;
-    }
-    
-    return result;
+    can_txq[can_txq_head].id  = msg_id;
+    can_txq[can_txq_head].len = l;
+    memcpy(can_txq[can_txq_head].data, payload, l);
+    can_txq_head = next;
+
+    /* Opportunistically drain so low-rate single frames go out immediately. */
+    CAN_TxPump();
+    return HAL_OK;
 }
 
 /* ================================================================== */
