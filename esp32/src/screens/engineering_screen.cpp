@@ -826,15 +826,21 @@ void EngineeringScreen::draw() {
         snprintf(buf, sizeof(buf), "BT amps  = %s", btABuf);
         tft.drawString(buf, bx, by + 2 * lh);
 
-        const bool btOk = (inaLiveOkMask_ & (1U << 4)) != 0;
-        const bool btExpected = (inaLiveExpectedMask_ & (1U << 4)) != 0;
-        tft.setTextColor(btOk ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "BT INA   = %s", btOk ? "OK" : "FAIL");
-        tft.drawString(buf, bx, by + 3 * lh);
+        if (!inaLiveValid_) {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            tft.drawString("BT INA   = N/D", bx, by + 3 * lh);
+            tft.drawString("BT expected = N/D", bx, by + 4 * lh);
+        } else {
+            const bool btOk = (inaLiveOkMask_ & (1U << 4)) != 0;
+            const bool btExpected = (inaLiveExpectedMask_ & (1U << 4)) != 0;
+            tft.setTextColor(btOk ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+            snprintf(buf, sizeof(buf), "BT INA   = %s", btOk ? "OK" : "FAIL");
+            tft.drawString(buf, bx, by + 3 * lh);
 
-        tft.setTextColor(btExpected ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "BT expected = %s", btExpected ? "YES" : "NO");
-        tft.drawString(buf, bx, by + 4 * lh);
+            tft.setTextColor(btExpected ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+            snprintf(buf, sizeof(buf), "BT expected = %s", btExpected ? "YES" : "NO");
+            tft.drawString(buf, bx, by + 4 * lh);
+        }
 
         const int16_t gx = 250;
         const int16_t gy = by;
