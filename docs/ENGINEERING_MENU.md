@@ -119,25 +119,7 @@ Table editor for mapping DS18B20 sensors to vehicle positions:
 - 5 sensors (Sens0–Sens4) → 5 positions (FL Wheel, FR Wheel, RL Wheel, RR Wheel, Ambient)
 - Same tap-to-cycle and SAVE/BACK behavior as INA226 mapping
 
-### 7. INA226 Live Diag
-
-Read-only diagnostic page driven by existing CAN telemetry only:
-- `0x201` → CH0 FL, CH1 FR, CH2 RL, CH3 RR currents (0.01 A)
-- `0x207` → CH4 BT current + voltage (0.01 A / 0.01 V)
-- `0x309` → MUX state, INA OK mask, expected mask, fail/recovery counters, stale/no-data status
-
-Displayed values:
-- `CH0..CH3: xx.x A`
-- `CH4 BT: xx.x A   xx.x V` (highlighted)
-- `CH5 ST: --.- A (n/d)` (not on CAN yet)
-- `BT volts`, `BT amps`, `BT INA = OK/FAIL`, `BT expected = YES/NO`
-- `INA OK` / `EXPECTED` masks (hex), MUX state, fail/recovery counters, `0x309` staleness
-
-Interpretation hint:
-- rest current ~0 A → expected sensor behavior
-- rest current ~100 A with volts OK → suspect shunt/sense path or calibration/wiring issue
-
-### 8. Factory Defaults
+### 7. Factory Defaults
 
 Individual reset options for specific calibration categories:
 
@@ -154,6 +136,24 @@ Each option sends a SERVICE_CMD (0x110) via CAN to the STM32, which re-enables t
 affected modules and clears their faults.
 
 **Warning text**: "Vehicle must be stationary. Reboot may be required."
+
+### 11. INA226 Live Diag
+
+Read-only diagnostic page driven by existing CAN telemetry only:
+- `0x201` → CH0 FL, CH1 FR, CH2 RL, CH3 RR currents (0.01 A)
+- `0x207` → CH4 BT current + voltage (0.01 A / 0.01 V)
+- `0x309` → MUX state, INA OK mask, expected mask, fail/recovery counters, stale/no-data status
+
+Displayed values:
+- `CH0..CH3: xx.x A`
+- `CH4 BT: xx.x A   xx.x V` (highlighted)
+- `CH5 ST: --.- A (n/d)` (not on CAN yet)
+- `BT volts`, `BT amps`, `BT INA = OK/FAIL`, `BT expected = YES/NO` (or `N/D` when `0x309` has no data)
+- `INA OK` / `EXPECTED` masks (hex), MUX state, fail/recovery counters, `0x309` staleness
+
+Interpretation hint:
+- rest current ~0 A → expected sensor behavior
+- rest current ~100 A with volts OK → suspect shunt/sense path or calibration/wiring issue
 
 ## Navigation
 

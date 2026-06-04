@@ -1,5 +1,43 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-04] — ESP32 HMI: INA226 LIVE DIAG no confunde NO DATA con FAIL + docs Engineering Menu alineadas
+
+### Objetivo
+
+Corregir un falso mensaje de fallo en la pantalla **INA226 LIVE DIAG** cuando aún
+no llegó `0x309`, y alinear la numeración/orden de secciones en
+`docs/ENGINEERING_MENU.md` con la tabla principal del menú.
+
+### Corrección aplicada (ESP32)
+
+- Archivo: `esp32/src/screens/engineering_screen.cpp`
+- En el bloque **BATTERY INA DIAG**:
+  - Si `inaLiveValid_ == false` ahora se pinta en **gris**:
+    - `BT INA = N/D`
+    - `BT expected = N/D`
+  - Solo cuando `inaLiveValid_ == true` se usan `inaLiveOkMask_` e
+    `inaLiveExpectedMask_` para renderizar:
+    - `BT INA = OK/FAIL`
+    - `BT expected = YES/NO`
+
+Con esto, un caso de telemetría ausente (`0x309: NO DATA`) ya no se interpreta
+como fallo real del INA de batería.
+
+### Documentación actualizada
+
+- Archivo: `docs/ENGINEERING_MENU.md`
+- Se corrigió la correspondencia tabla ↔ detalles:
+  - **Factory Defaults** pasó a sección `### 7` (como en la tabla principal).
+  - **INA226 Live Diag** pasó a sección `### 11` (como en la tabla principal).
+  - Se dejó explícito en el detalle de INA Live Diag que, con no-data de `0x309`,
+    `BT INA` y `BT expected` se muestran como `N/D`.
+
+### Alcance / compilación
+
+Cambio **solo ESP32/HMI + documentación**. No se toca STM32, safety, protocolo CAN,
+motor, relés ni watchdog. Para desplegar el cambio de código basta recompilar y
+subir **solo ESP32**.
+
 ## [2026-06-02] — HMI: Indicador de batería principal en Safe Mode (sólo ESP32)
 
 ### Objetivo
