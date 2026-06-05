@@ -97,8 +97,10 @@ static void test_read_park() {
     reset_and_init(true);
 
     // GPA0 active-low: bit 0 = 0 → Park.  Port value = 0b11111110 = 0xFE
+    // Debounce (F5) requires DEBOUNCE_SAMPLES=2 identical samples to commit.
     g_wire_read_value = 0xFE;
     tick(100);
+    tick(150);
 
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::PARK);
     ASSERT(shifter::isConnected());
@@ -115,6 +117,7 @@ static void test_read_reverse() {
     // GPA3 active-low: bit 3 = 0 → Reverse.  Port value = 0b11110111 = 0xF7
     g_wire_read_value = 0xF7;
     tick(100);
+    tick(150);   // F5 debounce: second identical sample commits the gear
 
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::REVERSE);
 }
@@ -169,6 +172,7 @@ static void test_error_backoff() {
 
     tick(1250);  // 250 + 1000 = 1250, backoff expired
     ASSERT(shifter::isConnected());  // recovered
+    tick(1300);  // F5: reconnect arms debounce; second sample commits the gear
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::PARK);
 }
 
@@ -196,6 +200,7 @@ static void test_recovery() {
 
     tick(1250);  // backoff expired
     ASSERT(shifter::isConnected());
+    tick(1300);  // F5: second identical sample commits the decoded gear
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::FORWARD);
 }
 
@@ -206,15 +211,16 @@ static void test_neutral_on_error() {
     printf("  test_neutral_on_error...\n");
     reset_and_init(true);
 
-    // First set a valid gear
+    // First set a valid gear (F5 debounce needs 2 identical samples)
     g_wire_read_value = 0xFE;  // Park
     tick(50);
+    tick(100);
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::PARK);
 
     // Now I2C fails
     g_wire_end_result     = 2;
     g_wire_request_result = 0;
-    tick(100);
+    tick(150);
 
     // Gear should revert to NEUTRAL
     ASSERT_EQ((int)shifter::getGear(), (int)shifter::Gear::NEUTRAL);
@@ -257,6 +263,63 @@ static void test_init_failure_backoff() {
 }
 
 /* ====================================================================== */
+/* TEST 10 — getDiag() instrumentation: valid read counters + pattern     */
+/* ====================================================================== */
+static void test_diag_valid_counters() {
+    printf("  test_diag_valid_counters...\n");
+    reset_and_init(true);
+
+    g_wire_read_value = 0xFE;  // Park pattern
+    tick(50);                  // 1st valid GPIOA read (+ GPIOB refresh)
+
+    shifter::Diag d = shifter::getDiag();
+    ASSERT(d.validReads >= 1);
+    ASSERT_EQ((int)d.invalidReads, 0);
+    ASSERT_EQ((int)d.lastValidPattern, 0xFE);
+    ASSERT_EQ((int)d.rejectReason, (int)shifter::RejectReason::NONE);
+    ASSERT(d.lastValidMs != 0);  // Last valid is NOT "never" once a read succeeds
+}
+
+/* ====================================================================== */
+/* TEST 11 — getDiag() pinpoints ADDR_NACK as the exact rejection reason   */
+/* This reproduces the field symptom: address ACKs at init but the GPIOA   */
+/* register read NACKs, so a valid read is never recorded (Last valid =    */
+/* never) even though Init/Online report YES.                              */
+/* ====================================================================== */
+static void test_diag_reject_addr_nack() {
+    printf("  test_diag_reject_addr_nack...\n");
+    reset_and_init(true);
+
+    // GPIOA read now NACKs on the register-pointer write (endTransmission!=0).
+    g_wire_end_result     = 2;   // NACK
+    g_wire_request_result = 0;
+    tick(50);
+
+    shifter::Diag d = shifter::getDiag();
+    ASSERT_EQ((int)d.gpioRaw, 0xFF);
+    ASSERT(d.invalidReads >= 1);
+    ASSERT_EQ((int)d.rejectReason, (int)shifter::RejectReason::ADDR_NACK);
+    ASSERT_EQ((int)d.lastValidMs, 0);  // never — exact condition reproduced
+}
+
+/* ====================================================================== */
+/* TEST 12 — getDiag() reports NO_DATA when requestFrom returns no byte     */
+/* ====================================================================== */
+static void test_diag_reject_no_data() {
+    printf("  test_diag_reject_no_data...\n");
+    reset_and_init(true);
+
+    // Register-pointer write ACKs, but the data phase returns no byte.
+    g_wire_end_result     = 0;
+    g_wire_request_result = 0;   // requestFrom → 0 bytes
+    tick(50);
+
+    shifter::Diag d = shifter::getDiag();
+    ASSERT_EQ((int)d.gpioRaw, 0xFF);
+    ASSERT_EQ((int)d.rejectReason, (int)shifter::RejectReason::NO_DATA);
+}
+
+/* ====================================================================== */
 /* Main                                                                    */
 /* ====================================================================== */
 
@@ -273,6 +336,9 @@ int main(void) {
     test_neutral_on_error();
     test_connected_reflects_init();
     test_init_failure_backoff();
+    test_diag_valid_counters();
+    test_diag_reject_addr_nack();
+    test_diag_reject_no_data();
 
     printf("\n--- shifter_input tests: %d run, %d failed ---\n",
            s_tests_run, s_tests_failed);

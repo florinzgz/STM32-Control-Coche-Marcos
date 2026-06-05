@@ -30,6 +30,7 @@ namespace shifter {
 static constexpr uint8_t REG_IODIRA   = 0x00;  // I/O Direction A
 static constexpr uint8_t REG_GPPUA    = 0x0C;  // Pull-Up A
 static constexpr uint8_t REG_GPIOA    = 0x12;  // GPIO A read
+static constexpr uint8_t REG_GPIOB    = 0x13;  // GPIO B read (diagnostic only)
 
 // Pin masks for each gear position on Port A — confirmed wire colours
 // Common wire (blue) → GND.  Signal wires → GPA0-GPA3 with pull-ups.
@@ -71,6 +72,18 @@ static uint16_t      recoveryCount_ = 0;               // I2C bus-recovery attem
 static uint8_t       cfgIodirA_     = 0;               // Last IODIRA value written
 static uint8_t       cfgGppuA_      = 0;               // Last GPPUA value written
 
+// Extended instrumentation (problem statement §1.F/§1.G).  Written only on
+// the main loop alongside the existing diagnostic snapshot; read by getDiag().
+static uint8_t       lastGpiobRaw_     = 0xFF;         // Last raw GPIOB read (0xFF = not read/error)
+static uint16_t      validReads_       = 0;            // Count of valid GPIOA reads
+static uint16_t      invalidReads_     = 0;            // Count of rejected GPIOA reads
+static uint8_t       lastValidPattern_ = 0xFF;         // Last GPIOA byte from a valid read
+static RejectReason  rejectReason_     = RejectReason::NONE; // Why the last read was rejected
+
+// Failure stage of the most recent readReg() call.  Set inside readReg() and
+// consumed by update() to publish the exact rejection reason without guessing.
+static RejectReason  lastReadStage_    = RejectReason::NONE;
+
 // -------------------------------------------------------------------------
 // Write a single register to MCP23017
 // -------------------------------------------------------------------------
@@ -84,18 +97,27 @@ static bool writeReg(uint8_t reg, uint8_t val) {
 // -------------------------------------------------------------------------
 // Read a single register from MCP23017
 // Returns 0xFF on error.  Sets connected_ to false on I2C failure.
+//
+// Records the exact transaction stage that failed in lastReadStage_ so the
+// caller can publish the precise rejection reason (problem statement §1.F):
+//   ADDR_NACK — the register-pointer write was not ACKed (endTransmission!=0)
+//   NO_DATA   — requestFrom returned no byte (slave did not clock out data)
+//   NONE      — success
 // -------------------------------------------------------------------------
 static uint8_t readReg(uint8_t reg) {
     Wire.beginTransmission(cfg_.i2cAddr);
     Wire.write(reg);
     uint8_t err = Wire.endTransmission(false);
     if (err != 0) {
+        lastReadStage_ = RejectReason::ADDR_NACK;
         return 0xFF;  // Error — skip requestFrom to avoid log spam
     }
     uint8_t n = Wire.requestFrom(cfg_.i2cAddr, (uint8_t)1);
     if (n == 0 || !Wire.available()) {
+        lastReadStage_ = RejectReason::NO_DATA;
         return 0xFF;  // Error — no data received
     }
+    lastReadStage_ = RejectReason::NONE;
     return Wire.read();
 }
 
@@ -205,6 +227,12 @@ void init(const Config& cfg) {
     lastPollMs_  = 0;
     lastGpioRaw_ = 0xFF;
     lastValidMs_ = 0;
+    lastGpiobRaw_     = 0xFF;
+    validReads_       = 0;
+    invalidReads_     = 0;
+    lastValidPattern_ = 0xFF;
+    rejectReason_     = RejectReason::NONE;
+    lastReadStage_    = RejectReason::NONE;
     currentGear_ = Gear::NEUTRAL;
     pendingGear_  = Gear::NEUTRAL;   // F5: reset debounce state
     pendingCount_ = 0;
@@ -213,6 +241,29 @@ void init(const Config& cfg) {
         Serial.println("[SHIFTER] MCP23017 initialized");
     } else {
         Serial.println("[SHIFTER] MCP23017 NOT detected — backoff active");
+    }
+}
+
+// -------------------------------------------------------------------------
+// Record the outcome of a GPIOA read for the diagnostic snapshot.
+//
+// On a valid read: bump the valid counter, latch the bit pattern, clear the
+// reject reason and refresh GPIOB (one extra transaction, only when the bus
+// is already known good so it never adds load during an error/backoff).
+// On a rejected read: bump the invalid counter and publish the exact stage
+// that failed (captured by readReg in lastReadStage_).
+// -------------------------------------------------------------------------
+static void recordRead(uint8_t portVal) {
+    lastGpioRaw_ = portVal;
+    if (portVal != 0xFF) {
+        if (validReads_ < 0xFFFF) validReads_++;
+        lastValidPattern_ = portVal;
+        rejectReason_     = RejectReason::NONE;
+        // Refresh GPIOB only after a good GPIOA read (bus confirmed healthy).
+        lastGpiobRaw_ = readReg(REG_GPIOB);
+    } else {
+        if (invalidReads_ < 0xFFFF) invalidReads_++;
+        rejectReason_ = lastReadStage_;  // ADDR_NACK or NO_DATA
     }
 }
 
@@ -235,6 +286,7 @@ void update() {
             currentGear_ = Gear::NEUTRAL;
             pendingGear_  = Gear::NEUTRAL;   // F5: reset debounce on fail-safe
             pendingCount_ = 0;
+            rejectReason_ = RejectReason::BACKOFF;  // device absent — no read attempted
             return;  // Device still absent — stay in backoff
         }
         // Device responded — re-initialize and resume
@@ -248,7 +300,7 @@ void update() {
         connected_  = true;
         Serial.println("[SHIFTER] MCP23017 reconnected");
         uint8_t portVal = readReg(REG_GPIOA);
-        lastGpioRaw_ = portVal;
+        recordRead(portVal);
         if (portVal != 0xFF) lastValidMs_ = now;
         // F5: after reconnect, force the NEUTRAL fail-safe and restart the
         // debounce window — never publish a non-NEUTRAL gear on a single
@@ -260,7 +312,7 @@ void update() {
     }
 
     uint8_t portVal = readReg(REG_GPIOA);
-    lastGpioRaw_ = portVal;   // cache raw read for diagnostics (0xFF = error)
+    recordRead(portVal);   // cache raw read + counters/pattern/reason for diag
 
     if (portVal == 0xFF) {
         // I2C read failed
@@ -338,6 +390,11 @@ Diag getDiag() {
     d.errorCount    = errorCount_;
     d.recoveryCount = recoveryCount_;
     d.lastValidMs   = lastValidMs_;
+    d.gpiobRaw         = lastGpiobRaw_;
+    d.validReads       = validReads_;
+    d.invalidReads     = invalidReads_;
+    d.lastValidPattern = lastValidPattern_;
+    d.rejectReason     = rejectReason_;
     return d;
 }
 

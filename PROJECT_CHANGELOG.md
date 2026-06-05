@@ -1,5 +1,147 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-05] — Auditoría final: instrumentación MCP23017 (palanca) + contexto INA226 batería + documentación (sólo ESP32/HMI/docs)
+
+### Objetivo
+
+Auditar de forma quirúrgica los dos problemas pendientes tras la PR anterior
+—la palanca de cambios (MCP23017) que nunca registra una lectura válida y el
+INA226 de batería que muestra `0.0 A` constantes— **sin tocar STM32, control de
+motor, BTS7960, PWM, relés, watchdog ni safety crítico**. Se añade
+instrumentación de diagnóstico para obtener evidencia exacta (no hipótesis) y se
+documenta tanto esta intervención como la PR anterior, que no estaba registrada.
+
+### Causa raíz — MCP23017 / palanca (`Last valid = never`)
+
+- **Condición exacta:** `lastValidMs_` (y por tanto "Last valid") sólo se
+  actualiza cuando `readReg(REG_GPIOA)` devuelve un valor `!= 0xFF`. En campo,
+  el MCP23017 hace ACK de su dirección (los writes a `IODIRA`/`GPPUA` y el sondeo
+  de dirección tienen éxito → `Init: YES`, `Online: YES`), pero **la transacción
+  de lectura del registro `GPIOA` falla siempre**, de modo que nunca se registra
+  una lectura válida y `GPIOA raw` queda en `0xFF`.
+- `readReg()` puede fallar en dos etapas distintas, antes indistinguibles:
+  1. `ADDR_NACK` — el write del puntero de registro no recibe ACK
+     (`Wire.endTransmission(false) != 0`).
+  2. `NO_DATA` — `Wire.requestFrom()` no devuelve ningún byte.
+- La nueva instrumentación expone **en la HMI la etapa exacta** que falla, lo que
+  permite confirmar si el problema es el repeated-start de la lectura, el
+  cableado o el módulo, con evidencia en pantalla en lugar de suposiciones.
+
+### Causa raíz — INA226 batería (`0.0 A` constantes)
+
+- El firmware STM32 calcula la corriente como
+  `I = (shunt_raw · 2.5 µV) / R_shunt`, con `R_shunt = 0.75 mΩ` para batería
+  (`INA226_SHUNT_MOHM_BATTERY`, `INA226_SHUNT_LSB_UV` en
+  `Core/Inc/project_config.h` / `Core/Src/sensor_manager.c`).
+- **Resolución resultante:** `2.5 µV / 0.75 mΩ ≈ 3.33 A por LSB`. Cualquier
+  corriente de batería por debajo de ~1.6 A se redondea a 0 LSB. Además el canal
+  de batería **satura a 0 las lecturas negativas** (sin ruta de regeneración),
+  por lo que el offset/ruido sub-LSB también queda en 0.
+- **Conclusión basada en registros:** con el vehículo en reposo (sin tracción)
+  `0.0 A` es el valor **correctamente sensado**, no un fallo de sensado. El shunt
+  configurado (`0.75 mΩ`) es el esperado y el canal CH4 corresponde al INA de
+  batería (`INA226_CHANNEL_BATTERY = 4`, máscara `0x10` = bit 4, confirmado por
+  `INA OK: 0x10`). El anterior `109 A` constante era basura de una lectura de bus
+  saturada/errónea, ya resuelta.
+- **Limitación honesta:** los registros crudos `SHUNT (0x01)` y `BUS (0x02)` del
+  INA226 viven en el STM32 y **no** viajan por CAN. Mostrarlos en la HMI exigiría
+  modificar firmware STM32, prohibido por las restricciones absolutas de esta
+  intervención. Por ello la evidencia se aporta de forma analítica + el dato que
+  sí llega (`currentRaw` en unidades 0.01 A) y las constantes de shunt/resolución
+  reflejadas en pantalla.
+
+### Cambios aplicados (sólo ESP32 / HMI)
+
+**`esp32/src/shifter_input.h` + `esp32/src/shifter_input.cpp`** — instrumentación
+del driver de la palanca (sin afectar al control del vehículo):
+
+- Nuevo `enum class RejectReason { NONE, ADDR_NACK, NO_DATA, BACKOFF }`.
+- `readReg()` registra la **etapa exacta** de fallo en `lastReadStage_`.
+- Nuevos campos en `Diag`: `gpiobRaw`, `validReads`, `invalidReads`,
+  `lastValidPattern`, `rejectReason`.
+- `update()` cachea, vía el helper `recordRead()`: contador de lecturas válidas,
+  contador de lecturas inválidas, último patrón válido de `GPIOA`, motivo exacto
+  de rechazo y una lectura de `GPIOB` (sólo tras una lectura buena de `GPIOA`,
+  para no añadir carga al bus en error/backoff). Todo cacheado en el bucle
+  principal; `getDiag()` sigue **sin tocar I2C**.
+
+**`esp32/src/screens/engineering_screen.cpp`** — visualización:
+
+- **MCP23017 LIVE**: además de lo anterior, ahora muestra `GPIOB raw`, el estado
+  por pin `P(0)/D2(1)/D1(2)/R(3)` (H/L, activo-bajo), el **motivo exacto de
+  rechazo** de la última lectura, los contadores `Reads OK / BAD` y el último
+  patrón válido.
+- **INA226 LIVE DIAG**: nuevas líneas de contexto de batería
+  `Shunt(BAT)=0.75mOhm  Res~3.33A/LSB` y `BT raw(CAN)=N (0.01A units)`, que
+  explican por qué `CH4` lee `0.0 A` en reposo. Las constantes reflejan
+  (espejo, sólo lectura) los valores del firmware STM32; no se modifica el STM32.
+
+**`esp32/src/test_shifter_input.cpp`** — pruebas host:
+
+- Corregidas 5 pruebas que habían quedado desfasadas con el debounce F5
+  (`DEBOUNCE_SAMPLES = 2`): ahora aplican el segundo `tick` necesario para
+  confirmar la marcha.
+- Añadidas 3 pruebas nuevas para la instrumentación: contadores de lecturas
+  válidas + patrón, reproducción de `ADDR_NACK` (con `Last valid = never`) y de
+  `NO_DATA`.
+
+### CAN LOST (verificación, sin cambios de lógica)
+
+- El timeout por transacción del MCP23017 (`Wire.setTimeOut(25 ms)`) más el
+  `recoverBus()` acotan el peor caso del bucle Core-1 muy por debajo del periodo
+  de heartbeat, por lo que un stall de I2C **no puede** bloquear la recepción CAN
+  ni provocar el falso `CAN LINK LOST`. `getDiag()` no realiza I2C. No se tocó
+  lógica CAN; los contadores ya existentes (`I2C errors`, `Bus recoveries`) y los
+  nuevos (`Reads OK/BAD`) bastan como estadística de diagnóstico.
+
+### Archivos modificados
+
+- `esp32/src/shifter_input.h`
+- `esp32/src/shifter_input.cpp`
+- `esp32/src/screens/engineering_screen.cpp`
+- `esp32/src/test_shifter_input.cpp`
+- `PROJECT_CHANGELOG.md`
+
+### Validación realizada
+
+- `g++ -std=c++17 -Wall -Wextra` compila `shifter_input.cpp` sin avisos propios.
+- Suite host `test_shifter_input`: **39 asserts, 0 fallos** (10 previas corregidas
+  + 3 nuevas de instrumentación).
+- Revisión de longitudes de buffer en las nuevas líneas de la HMI (buffer del
+  bloque MCP ampliado a 64 bytes; líneas INA dentro de su buffer).
+
+### Alcance / compilación
+
+Cambio **solo ESP32/HMI + documentación**. No se toca STM32, safety, protocolo
+CAN, motor, BTS7960, PWM, relés ni watchdog. Para desplegar basta recompilar y
+subir **solo ESP32**.
+
+---
+
+## [2026-06-04 / retroactivo] — PR anterior: robustez I2C del MCP23017 (palanca) + acceso Engineering + diagnósticos LIVE
+
+> Registro retroactivo de la PR anterior, que no estaba documentada en este
+> archivo. Sólo ESP32/HMI (salvo el diagnóstico por fases I2C, ya registrado
+> aparte el 2026-06-02).
+
+- **Timeout I2C del MCP23017**: `Wire.setTimeOut(25 ms)` por transacción en
+  `shifter_input.cpp`, de modo que ninguna lectura de la palanca pueda estancar
+  el bucle Core-1 más que el periodo de heartbeat.
+- **Bus recovery**: `recoverBus()` libera el bus (9 pulsos de SCL + STOP manual)
+  cuando los errores consecutivos cruzan el umbral, antes de entrar en backoff.
+- **Stale handling / error screen stale**: el tile `I2C BUS DIAG` de Safe Mode y
+  el diagnóstico distinguen datos `0x309` frescos, `STALE` y `NO DATA`
+  (ver entradas 2026-06-01 y 2026-06-04).
+- **Acceso Engineering**: long-press de 3 s en la esquina superior derecha abre
+  la pantalla PIN incluso en LIMP_HOME / CAN-LOST (ver entrada 2026-06-01).
+- **MCP23017 LIVE**: nuevo submenú de diagnóstico en vivo de la palanca
+  (`getDiag()` cacheado, sin I2C en Core 0): dirección, Init/Online,
+  `IODIRA`/`GPPUA`, `GPIOA raw`, marcha decodificada, contadores de error y
+  recuperación, y antigüedad de la última lectura válida.
+- **INA226 LIVE**: submenú de diagnóstico en vivo del INA con corrección del
+  falso `109 A` y manejo de `STALE`/`NO DATA` (ver entrada 2026-06-04).
+
+
 ## [2026-06-04] — ESP32 HMI: INA226 LIVE DIAG no confunde NO DATA con FAIL + docs Engineering Menu alineadas
 
 ### Objetivo
