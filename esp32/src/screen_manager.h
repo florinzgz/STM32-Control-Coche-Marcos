@@ -72,6 +72,12 @@ public:
     /// long-press anywhere on the screen (battery icon included).
     void onLongPress(int16_t x, int16_t y);
 
+    /// Forward a CORNER_LONG_PRESS event (robust top-right / battery-icon
+    /// gesture).  Opens the PIN screen even in LIMP_HOME / CAN-LOST, but only
+    /// when the vehicle is stopped (or speed is unknown because CAN is lost,
+    /// in which case diagnostic access is allowed for safety).
+    void onCornerLongPress(int16_t x, int16_t y);
+
     /// Returns true while PIN entry or engineering screen is showing.
     /// Use to suppress normal top-bar touch handling in main loop.
     bool isBlockingInput() const { return pinActive_ || engineeringActive_ || touchCalActive_; }
@@ -123,6 +129,10 @@ private:
     bool engineeringActive_ = false;  // true while engineering screen is shown
     bool touchCalActive_    = false;  // true while touch-calibration wizard is shown
     bool canLost_           = false;  // true when STM32 heartbeat lost > CAN_LOSS_TIMEOUT_MS
+
+    // Latest average wheel speed (raw, 0.1 km/h units) captured each update().
+    // Used by onCornerLongPress() to gate Engineering access to "parked only".
+    uint16_t lastSpeedAvgRaw_ = 0;
 
     // Frame time monotonicity tracking (V10 contract)
     unsigned long prevFrameTimeMs_ = 0;

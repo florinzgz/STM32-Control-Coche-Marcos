@@ -22,7 +22,9 @@ inline uint8_t g_wire_request_result  = 1;
 /* ---- Minimal TwoWire stub ---------------------------------------------- */
 struct TwoWire {
     void begin(int, int)                          {}
+    void end()                                    {}
     void setClock(uint32_t)                       {}
+    void setTimeOut(uint16_t)                     {}
     void beginTransmission(uint8_t)               {}
     size_t write(uint8_t)                         { return 1; }
     uint8_t endTransmission(bool = true)          { return g_wire_end_result; }

@@ -22,6 +22,8 @@ enum class EventType : uint8_t {
     NONE = 0,
     TAP,           // Short press and release
     LONG_PRESS,    // Press held > LONG_PRESS_MS
+    CORNER_LONG_PRESS, // Press held inside the top-right corner zone (robust
+                       // Engineering-access fallback; see Config corner fields)
     RELEASE        // Finger lifted
 };
 
@@ -44,6 +46,19 @@ struct Config {
                                      // long-press timer restarts. Guards the
                                      // global long-press gesture against
                                      // accidental swipes / false positives.
+
+    // ---- Robust corner long-press (Engineering-access fallback) ----
+    // A touch that REMAINS inside this top-right rectangle (screen coords)
+    // for cornerLongPressMs emits CORNER_LONG_PRESS.  Unlike the global
+    // long-press, it re-anchors to the zone instead of the initial contact
+    // point, so finger drift / resistive-panel noise inside the corner never
+    // cancels it — only leaving the zone does.  The default zone covers the
+    // battery icon (BAT_X=405..470, BAT_Y=6..34) plus margin.
+    int16_t  cornerX0          = 380;   // left   edge of corner zone
+    int16_t  cornerY0          = 0;     // top    edge of corner zone
+    int16_t  cornerX1          = 480;   // right  edge of corner zone
+    int16_t  cornerY1          = 80;    // bottom edge of corner zone
+    uint32_t cornerLongPressMs = 3000;  // hold duration inside the zone
 };
 
 /// Initialize touch handler.  Call once from setup().

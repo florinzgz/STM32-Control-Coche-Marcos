@@ -45,6 +45,12 @@ static constexpr uint8_t  ERROR_THRESHOLD  = 5;     // Consecutive errors before
                                                      // (5 × 50ms pollMs = 250ms to trigger)
 static constexpr uint32_t BACKOFF_POLL_MS  = 1000;  // Poll interval during backoff (ms)
 
+// Hard per-transaction I2C timeout.  Bounds the worst-case time the main
+// (Core-1) loop can spend inside a single MCP23017 access so that a stuck or
+// floating bus can never block CAN reception longer than the heartbeat
+// period — preventing the false "CAN LINK LOST" caused by an I2C stall.
+static constexpr uint16_t WIRE_TIMEOUT_MS  = 25;
+
 // Module state
 static Config       cfg_;
 static Gear         currentGear_   = Gear::NEUTRAL;
@@ -55,6 +61,15 @@ static unsigned long lastPollMs_   = 0;
 static bool         initialized_   = false;
 static uint8_t      errorCount_    = 0;               // Consecutive I2C error counter
 static bool         connected_     = false;            // MCP23017 responding on I2C
+
+// Diagnostic snapshot state (cached on the main loop, read by Engineering UI).
+// None of these are touched by getDiag(); they are written only here so the
+// Engineering screen never has to drive the shared Wire bus itself.
+static uint8_t       lastGpioRaw_   = 0xFF;            // Last raw GPIOA read (0xFF = error)
+static unsigned long lastValidMs_   = 0;               // millis() of last good GPIOA read
+static uint16_t      recoveryCount_ = 0;               // I2C bus-recovery attempts
+static uint8_t       cfgIodirA_     = 0;               // Last IODIRA value written
+static uint8_t       cfgGppuA_      = 0;               // Last GPPUA value written
 
 // -------------------------------------------------------------------------
 // Write a single register to MCP23017
@@ -82,6 +97,54 @@ static uint8_t readReg(uint8_t reg) {
         return 0xFF;  // Error — no data received
     }
     return Wire.read();
+}
+
+// -------------------------------------------------------------------------
+// I2C bus recovery — free a bus stuck because a slave (or a shorted/floating
+// shifter input) is holding SDA low.
+//
+// Technique (per the I2C-bus specification, §3.1.16): release SDA and pulse
+// SCL up to 9 times so the slave finishes its byte and releases SDA, then
+// issue a manual STOP condition.  Finally the Wire driver is re-initialised.
+//
+// This is intentionally short (≈9 × 10 µs ≪ the CAN heartbeat period) so it
+// can never starve CAN reception on the shared Core-1 loop, and it is only
+// invoked when the device first crosses the consecutive-error threshold.
+// -------------------------------------------------------------------------
+static void recoverBus() {
+    Wire.end();
+
+    // Drive SCL, let SDA float high (external/internal pull-up restores it).
+    pinMode(cfg_.sdaPin, INPUT_PULLUP);
+    pinMode(cfg_.sclPin, OUTPUT);
+    digitalWrite(cfg_.sclPin, HIGH);
+    delayMicroseconds(5);
+
+    for (int i = 0; i < 9; ++i) {
+        digitalWrite(cfg_.sclPin, LOW);
+        delayMicroseconds(5);
+        digitalWrite(cfg_.sclPin, HIGH);
+        delayMicroseconds(5);
+        if (digitalRead(cfg_.sdaPin) == HIGH) {
+            break;  // Slave released SDA — bus is free
+        }
+    }
+
+    // Manual STOP: SDA low→high while SCL is high.
+    pinMode(cfg_.sdaPin, OUTPUT);
+    digitalWrite(cfg_.sdaPin, LOW);
+    delayMicroseconds(5);
+    digitalWrite(cfg_.sclPin, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(cfg_.sdaPin, HIGH);
+    delayMicroseconds(5);
+
+    // Re-arm the Wire driver with the project timing/timeout.
+    Wire.begin(cfg_.sdaPin, cfg_.sclPin);
+    Wire.setClock(400000);
+    Wire.setTimeOut(WIRE_TIMEOUT_MS);
+
+    if (recoveryCount_ < 0xFFFF) recoveryCount_++;
 }
 
 // -------------------------------------------------------------------------
@@ -117,6 +180,9 @@ void init(const Config& cfg) {
 
     Wire.begin(cfg_.sdaPin, cfg_.sclPin);
     Wire.setClock(400000);  // 400 kHz I2C (Fast Mode)
+    // Hard timeout so no single MCP23017 transaction can stall the Core-1
+    // loop (and therefore CAN reception) longer than the heartbeat period.
+    Wire.setTimeOut(WIRE_TIMEOUT_MS);
 
     // Probe the MCP23017: try to configure Port A
     bool ok = writeReg(REG_IODIRA, GEAR_MASK);
@@ -124,10 +190,21 @@ void init(const Config& cfg) {
         ok = writeReg(REG_GPPUA, GEAR_MASK);
     }
 
+    // Cache the configured register values for the Engineering diagnostic.
+    // GPPUA = GEAR_MASK enables the MCP23017 internal pull-ups on GPA0-3, so
+    // an open contact (and the implicit NEUTRAL position) reads HIGH and a
+    // closed contact (common wire → GND) reads LOW (active-low). decodeGear()
+    // enforces a one-hot result and falls back to NEUTRAL for 0 or >1 active
+    // bits, so a floating/shorted input can never latch a spurious gear.
+    cfgIodirA_ = GEAR_MASK;
+    cfgGppuA_  = GEAR_MASK;
+
     connected_   = ok;
     errorCount_  = ok ? 0 : ERROR_THRESHOLD;
     initialized_ = true;
     lastPollMs_  = 0;
+    lastGpioRaw_ = 0xFF;
+    lastValidMs_ = 0;
     currentGear_ = Gear::NEUTRAL;
     pendingGear_  = Gear::NEUTRAL;   // F5: reset debounce state
     pendingCount_ = 0;
@@ -171,6 +248,8 @@ void update() {
         connected_  = true;
         Serial.println("[SHIFTER] MCP23017 reconnected");
         uint8_t portVal = readReg(REG_GPIOA);
+        lastGpioRaw_ = portVal;
+        if (portVal != 0xFF) lastValidMs_ = now;
         // F5: after reconnect, force the NEUTRAL fail-safe and restart the
         // debounce window — never publish a non-NEUTRAL gear on a single
         // post-recovery sample.
@@ -181,6 +260,7 @@ void update() {
     }
 
     uint8_t portVal = readReg(REG_GPIOA);
+    lastGpioRaw_ = portVal;   // cache raw read for diagnostics (0xFF = error)
 
     if (portVal == 0xFF) {
         // I2C read failed
@@ -189,7 +269,11 @@ void update() {
             if (errorCount_ == ERROR_THRESHOLD) {
                 // Transition to disconnected — log once
                 connected_ = false;
-                Serial.println("[SHIFTER] MCP23017 I2C error — backoff active");
+                // Attempt a one-shot bus recovery before entering backoff:
+                // frees SDA if a shorted/floating shifter input or an
+                // unresponsive MCP23017 is clamping the line low.
+                recoverBus();
+                Serial.println("[SHIFTER] MCP23017 I2C error — bus recovery + backoff");
             }
         }
         // Set currentGear_ to NEUTRAL during error and clear debounce state
@@ -200,6 +284,7 @@ void update() {
     }
 
     // Successful read — recover from minor error streak
+    lastValidMs_ = now;
     if (errorCount_ > 0) {
         errorCount_ = 0;
         connected_  = true;
@@ -239,6 +324,21 @@ uint8_t getGearRaw() {
 
 bool isConnected() {
     return initialized_ && connected_;
+}
+
+Diag getDiag() {
+    Diag d;
+    d.i2cAddr       = cfg_.i2cAddr;
+    d.initialized   = initialized_;
+    d.connected     = initialized_ && connected_;
+    d.iodirA        = cfgIodirA_;
+    d.gppuA         = cfgGppuA_;
+    d.gpioRaw       = lastGpioRaw_;
+    d.gearDecoded   = static_cast<uint8_t>(currentGear_);
+    d.errorCount    = errorCount_;
+    d.recoveryCount = recoveryCount_;
+    d.lastValidMs   = lastValidMs_;
+    return d;
 }
 
 } // namespace shifter

@@ -106,6 +106,10 @@ private:
     bool     curRearLedOn_       = false;
     uint8_t  curRelayStatus_     = 0;
 
+    // Battery reading staleness (0x207 older than CAN-loss timeout → show "--")
+    bool     curBattStale_       = false;
+    bool     prevBattStale_      = false;
+
     bool     needsFullRedraw_    = true;
 
     // Precomputed wheel draw values (threshold-filtered in update phase)

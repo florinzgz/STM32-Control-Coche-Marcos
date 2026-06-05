@@ -21,7 +21,12 @@ public:
     static void drawStatic(TFT_eSPI& tft);
 
     /// Update battery percentage display. Only redraws if value changed.
-    static void draw(TFT_eSPI& tft, uint16_t voltageRaw, uint16_t prevVoltageRaw);
+    /// When `stale` is true the pack reading is older than the CAN-loss
+    /// timeout (or never received): the gauge shows "--" instead of a
+    /// misleading frozen percentage.  `prevStale` is the previous frame's
+    /// stale flag, used to force a redraw across stale⇆fresh transitions.
+    static void draw(TFT_eSPI& tft, uint16_t voltageRaw, uint16_t prevVoltageRaw,
+                     bool stale = false, bool prevStale = false);
 
     /// Convert raw voltage (0.01V units) to percentage (0–100)
     static uint8_t voltageToPercent(uint16_t voltageRaw);

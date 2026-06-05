@@ -156,6 +156,17 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
     // ---- Normal state-machine ----
     can::SystemState newState = data.heartbeat().systemState;
 
+    // Capture latest average wheel speed (raw 0.1 km/h units) for the
+    // "parked only" gate used by the corner Engineering-access gesture.
+    {
+        uint32_t sum = 0;
+        for (size_t i = 0; i < data.speed().raw.size(); ++i) {
+            sum += data.speed().raw[i];
+        }
+        lastSpeedAvgRaw_ = static_cast<uint16_t>(
+            sum / (data.speed().raw.empty() ? 1 : data.speed().raw.size()));
+    }
+
     // ---- CAN-loss detection ----
     // If the STM32 heartbeat was once received (timestampMs > 0) but is now
     // older than CAN_LOSS_TIMEOUT_MS, the CAN cable is likely disconnected.
@@ -235,6 +246,31 @@ void ScreenManager::onLongPress(int16_t x, int16_t y) {
     // works in Safe Mode where the battery icon may not be visible/accessible.
     (void)x;
     (void)y;
+    activatePinScreen();
+}
+
+void ScreenManager::onCornerLongPress(int16_t x, int16_t y) {
+    // Robust Engineering-access fallback (top-right / battery-icon corner).
+    // Only meaningful when no overlay already owns the input pipeline.
+    if (engineeringActive_ || pinActive_ || touchCalActive_) return;
+
+    // "Parked only" safety gate.  Allow Engineering access when:
+    //   - the vehicle is effectively stopped (avg wheel speed ~0), OR
+    //   - CAN is lost (speed data is stale/unreliable) — in that case we MUST
+    //     still allow diagnostic access so the user can inspect the fault.
+    // SPEED_PARKED_RAW is in 0.1 km/h units: 5 ≈ 0.5 km/h (mirrors the
+    // traction-switch speed gate threshold).
+    constexpr uint16_t SPEED_PARKED_RAW = 5;
+    bool parked = (lastSpeedAvgRaw_ <= SPEED_PARKED_RAW);
+    if (!parked && !canLost_) {
+        Serial.printf("[ENG] Corner long-press ignored — vehicle moving "
+                      "(avg raw=%u)\n", (unsigned)lastSpeedAvgRaw_);
+        return;
+    }
+
+    (void)x;
+    (void)y;
+    Serial.println("[PIN] Corner long press → PIN screen");
     activatePinScreen();
 }
 

@@ -464,6 +464,15 @@ static void renderTask(void* /*param*/) {
                 }
             }
 
+            if (evt.type == touch::EventType::CORNER_LONG_PRESS) {
+                // Robust Engineering-access fallback (top-right / battery icon).
+                // Works even in LIMP_HOME / CAN-LOST; gated to parked vehicle
+                // inside the screen manager.  Suppressed during tank confirm.
+                if (!screenManager.isTankConfirmActive()) {
+                    screenManager.onCornerLongPress(evt.x, evt.y);
+                }
+            }
+
             if (evt.type == touch::EventType::TAP) {
                 screenManager.onTouch(evt.x, evt.y);
 
