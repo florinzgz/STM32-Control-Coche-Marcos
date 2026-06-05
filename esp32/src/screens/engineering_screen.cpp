@@ -30,11 +30,11 @@ extern TFT_eSPI tft;
 // FACTORY_DEFAULTS submenu (only 6 items — fits trivially).
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
-static constexpr int16_t MENU_BTN_H   = 17;
-static constexpr int16_t MENU_START_Y = 42;
-static constexpr int16_t MENU_SPACING = 19;
+static constexpr int16_t MENU_BTN_H   = 16;
+static constexpr int16_t MENU_START_Y = 40;
+static constexpr int16_t MENU_SPACING = 17;
 
-static constexpr int     NUM_MAIN_ITEMS = 14;
+static constexpr int     NUM_MAIN_ITEMS = 15;
 static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "FAULT VIEWER",
     "MODULE ENABLE/DISABLE",
@@ -49,7 +49,8 @@ static const char* const mainLabels[NUM_MAIN_ITEMS] = {
     "INA226 LIVE DIAG",
     "DEBOUNCE / CAN DIAG",
     "TOUCH CALIBRATION",   // Launch persistent touch calibration wizard
-    "RESET TOUCH CAL"      // Erase NVS calibration + re-arm first-boot wizard
+    "RESET TOUCH CAL",     // Erase NVS calibration + re-arm first-boot wizard
+    "MCP23017 LIVE (SHIFTER)"  // ESP32-local I2C expander live diagnostic
 };
 
 // Mirror Safe Screen 0x309 staleness threshold.
@@ -480,6 +481,29 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             scanFbChanged_ = true;
         }
     }
+
+    // Cache MCP23017 shifter live diagnostic (read-only snapshot — NO I2C here)
+    if (currentMenu_ == SubMenu::MCP23017_LIVE) {
+        shifter::Diag d = shifter::getDiag();
+        unsigned long ageMs = 0;
+        if (d.lastValidMs != 0 && frameTimeMs >= d.lastValidMs) {
+            ageMs = frameTimeMs - d.lastValidMs;
+        }
+        // Coarse signature: repaint on any counter/state change or once a
+        // second as the age ticks (keeps the TFT writes bounded).
+        uint32_t sig = static_cast<uint32_t>(d.gpioRaw)
+                     | (static_cast<uint32_t>(d.gearDecoded) << 8)
+                     | (static_cast<uint32_t>(d.errorCount)  << 12)
+                     | (static_cast<uint32_t>(d.connected ? 1u : 0u) << 20)
+                     | (static_cast<uint32_t>(d.recoveryCount & 0x7FF) << 21);
+        sig ^= static_cast<uint32_t>(ageMs / 1000U);
+        if (sig != mcpDiagSig_) {
+            mcpDiagSig_     = sig;
+            mcpDiag_        = d;
+            mcpAgeMs_       = ageMs;
+            mcpDataChanged_ = true;
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -504,6 +528,7 @@ void EngineeringScreen::draw() {
             case SubMenu::RELAY_CONTROL:    drawRelayControl();        break;
             case SubMenu::INA226_LIVE_DIAG: drawInaLiveDiag();         break;
             case SubMenu::DEBOUNCE_DIAG:    drawDebounceDiag();        break;
+            case SubMenu::MCP23017_LIVE:    drawMcpLiveDiag();         break;
         }
     }
 
@@ -1035,9 +1060,73 @@ void EngineeringScreen::draw() {
         }
     }
 
+    // Partial redraw for MCP23017 shifter live diagnostic (~1 Hz / on change).
+    if (currentMenu_ == SubMenu::MCP23017_LIVE && mcpDataChanged_) {
+        mcpDataChanged_ = false;
+
+        const int16_t x  = 10;
+        const int16_t y0 = 44;
+        const int16_t lh = 18;
+        char buf[ui::FMT_BUF_LARGE];
+
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+        tft.fillRect(0, y0, ui::SCREEN_W, BACK_Y - y0 - 4, ui::COL_BG);
+
+        const shifter::Diag& d = mcpDiag_;
+
+        // Address + connection state
+        snprintf(buf, sizeof(buf), "Addr: 0x%02X   Init: %s   Online: %s",
+                 (unsigned)d.i2cAddr,
+                 d.initialized ? "YES" : "NO",
+                 d.connected   ? "YES" : "NO");
+        tft.setTextColor(d.connected ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(buf, x, y0);
+
+        // Config registers
+        snprintf(buf, sizeof(buf),
+                 "IODIRA: 0x%02X (exp 0x0F)   GPPUA: 0x%02X (exp 0x0F)",
+                 (unsigned)d.iodirA, (unsigned)d.gppuA);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, x, y0 + lh);
+
+        // Raw GPIOA (active-low pull-ups: 0xFF = all open / error)
+        snprintf(buf, sizeof(buf), "GPIOA raw: 0x%02X", (unsigned)d.gpioRaw);
+        tft.setTextColor(d.gpioRaw == 0xFF ? ui::COL_AMBER : ui::COL_CYAN,
+                         ui::COL_BG);
+        tft.drawString(buf, x, y0 + 2 * lh);
+
+        // Decoded gear
+        static const char* const gearNames[5] =
+            { "PARK", "REVERSE", "NEUTRAL", "FORWARD(D1)", "FORWARD(D2)" };
+        const char* gn = (d.gearDecoded < 5) ? gearNames[d.gearDecoded] : "?";
+        snprintf(buf, sizeof(buf), "Gear decoded: %u (%s)",
+                 (unsigned)d.gearDecoded, gn);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, x, y0 + 3 * lh);
+
+        // I2C error + bus-recovery counters
+        snprintf(buf, sizeof(buf), "I2C errors: %u   Bus recoveries: %u",
+                 (unsigned)d.errorCount, (unsigned)d.recoveryCount);
+        tft.setTextColor(d.errorCount ? ui::COL_AMBER : ui::COL_GREEN,
+                         ui::COL_BG);
+        tft.drawString(buf, x, y0 + 4 * lh);
+
+        // Age of last valid read
+        if (d.lastValidMs == 0) {
+            snprintf(buf, sizeof(buf), "Last valid: never");
+            tft.setTextColor(ui::COL_RED, ui::COL_BG);
+        } else {
+            snprintf(buf, sizeof(buf), "Last valid: %lu ms ago",
+                     (unsigned long)mcpAgeMs_);
+            tft.setTextColor(mcpAgeMs_ > 1000UL ? ui::COL_AMBER : ui::COL_GREEN,
+                             ui::COL_BG);
+        }
+        tft.drawString(buf, x, y0 + 5 * lh);
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
-
 // -------------------------------------------------------------------------
 // Touch handling
 // -------------------------------------------------------------------------
@@ -1187,6 +1276,12 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             Serial.println(
                                 "[ENG] Touch calibration NVS erased; "
                                 "wizard will re-arm on next boot");
+                            break;
+                        case 14:
+                            // Open MCP23017 (shifter) live I2C diagnostic
+                            mcpDiagSig_     = 0xFFFFFFFFu;  // force first cache
+                            mcpDataChanged_ = true;         // force first paint
+                            currentMenu_ = SubMenu::MCP23017_LIVE;
                             break;
                         default:
                             break;
@@ -2695,4 +2790,50 @@ void EngineeringScreen::sendPedalCalOp(uint8_t op) {
     frame.data[0]          = can::SERVICE_ACTION_PEDAL_CAL;
     frame.data[1]          = op;
     ESP32Can.writeFrame(frame, 0);
+}
+
+// =========================================================================
+// MCP23017 LIVE (shifter) diagnostic viewer (MCP23017_LIVE submenu)
+//
+// Reads shifter::getDiag() — a cached, read-only snapshot maintained by the
+// shifter poller on the main loop (Core 1).  This method performs NO I2C of
+// its own, so the Core-0 render path never touches the shared Wire bus,
+// avoiding any cross-core race with the shifter poller.
+//
+// Shows: I2C address + online state, IODIRA/GPPUA config registers, raw
+// GPIOA byte, decoded gear, I2C error + bus-recovery counters, and the age
+// of the last valid read.  Dynamic lines are repainted by the partial-redraw
+// branch in draw().  Pure read-only display — no commands, no state changes.
+// =========================================================================
+void EngineeringScreen::drawMcpLiveDiag() {
+    RTRACE_BEGIN_SCREEN("eng_mcp_live");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("MCP23017 LIVE", ui::SCREEN_W / 2, 16);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 16, "MCP23017 LIVE",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
+
+    // Sub-header
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("Read-only ESP32 shifter I2C snapshot",
+                   ui::SCREEN_W / 2, 34);
+    tft.setTextDatum(TL_DATUM);
+
+    // Dynamic lines are repainted by the partial-redraw branch in draw().
+    mcpDataChanged_ = true;
+
+    // BACK button (bottom-left)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
 }
