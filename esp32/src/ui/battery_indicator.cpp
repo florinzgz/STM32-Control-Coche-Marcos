@@ -61,18 +61,25 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     uint8_t pct     = voltageToPercent(voltageRaw);
     uint8_t prevPct = voltageToPercent(prevVoltageRaw);
 
-    // On a stale→fresh transition the interior was cleared and held "--", so
-    // the cached prevPct is meaningless: force a full redraw of the bar.
-    if (prevStale) {
-        int16_t innerW = BAT_W - 10;
-        tft.fillRect(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
-        RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
-        prevPct = (pct == 0) ? 1 : 0;   // guarantee pct != prevPct below
-    } else if (pct == prevPct) {
+    // Nothing changed and we were already fresh: keep the pixels as-is.  This
+    // is the key anti-flicker guard — the interior is only ever touched when
+    // the displayed integer percentage actually changes (or on a stale edge).
+    if (!prevStale && pct == prevPct) {
         return;
     }
 
-    // Choose color based on level
+    // ---- Single clean pass (no overlapping partial fills) ----------------
+    // The previous differential renderer layered several rectangles over the
+    // centred "%" text, which produced partial repaints, momentary blanking of
+    // the number and flicker.  Here the whole interior is rebuilt once per
+    // change: clear → coloured fill → text.  Calculation is unchanged.
+    int16_t innerX = BAT_X + 2;
+    int16_t innerY = BAT_Y + 2;
+    int16_t innerW = BAT_W - 10;
+    int16_t innerH = BAT_H - 4;
+    int16_t barInner = innerW - 4;
+
+    // Colour by level.
     uint16_t col;
     if (pct > cfg::BATT_COLOR_MID) {
         col = COL_GREEN;
@@ -82,72 +89,26 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
         col = COL_RED;
     }
 
-    // Previous color for threshold detection
-    uint16_t prevCol;
-    if (prevPct > cfg::BATT_COLOR_MID) {
-        prevCol = COL_GREEN;
-    } else if (prevPct > cfg::BATT_COLOR_LOW) {
-        prevCol = COL_YELLOW;
-    } else {
-        prevCol = COL_RED;
-    }
-
-    // Fill interior — differential update
-    int16_t innerW = BAT_W - 10;
-    int16_t barInner = innerW - 4;
     int16_t fillW = static_cast<int16_t>(
-        (static_cast<int32_t>(pct)     * barInner) / 100);
-    int16_t prevFW = static_cast<int16_t>(
-        (static_cast<int32_t>(prevPct) * barInner) / 100);
+        (static_cast<int32_t>(pct) * barInner) / 100);
 
-    if (col != prevCol) {
-        // Color threshold crossed — redraw entire bar
-        if (prevFW > fillW) {
-            tft.fillRect(BAT_X + 2 + fillW, BAT_Y + 2,
-                         prevFW - fillW, BAT_H - 4, COL_BG);
-        }
-        if (fillW > 0) {
-            tft.fillRect(BAT_X + 2, BAT_Y + 2, fillW, BAT_H - 4, col);
-            RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, fillW, BAT_H - 4, col);
-        }
-    } else if (fillW > prevFW) {
-        // Bar grew — fill only the new portion
-        if (prevFW < 0) prevFW = 0;
-        tft.fillRect(BAT_X + 2 + prevFW, BAT_Y + 2,
-                     fillW - prevFW, BAT_H - 4, col);
-        RTRACE_FILL_RECT(BAT_X + 2 + prevFW, BAT_Y + 2,
-                         fillW - prevFW, BAT_H - 4, col);
-    } else if (fillW < prevFW) {
-        // Bar shrank — clear only the removed portion
-        tft.fillRect(BAT_X + 2 + fillW, BAT_Y + 2,
-                     prevFW - fillW, BAT_H - 4, COL_BG);
-        RTRACE_FILL_RECT(BAT_X + 2 + fillW, BAT_Y + 2,
-                         prevFW - fillW, BAT_H - 4, COL_BG);
+    // Clear the whole interior, then paint the charge fill in one pass.
+    tft.fillRect(innerX, innerY, innerW, innerH, COL_BG);
+    RTRACE_FILL_RECT(innerX, innerY, innerW, innerH, COL_BG);
+    if (fillW > 0) {
+        tft.fillRect(innerX, innerY, fillW + 2, innerH, col);
+        RTRACE_FILL_RECT(innerX, innerY, fillW + 2, innerH, col);
     }
 
-    // Percentage text centered in battery
-    // Deterministic hysteresis: switch to dark text at BATT_HYSTERESIS_HIGH,
-    // switch back at BATT_HYSTERESIS_LOW. The decision depends only on the
-    // current fill level relative to the thresholds, not on previous frame state.
-    // In the hysteresis band [LOW, HIGH), the previous fill level determines
-    // the outcome: if the bar was already past the high threshold last frame,
-    // dark text is retained; otherwise light text is used.
+    // Percentage text centred over the bar.  Dark glyphs once the fill reaches
+    // past the text centre, light glyphs otherwise (deterministic, no
+    // cross-frame state needed because the interior is fully rebuilt here).
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%u%%", pct);
-    int16_t highThresh = barInner * cfg::BATT_HYSTERESIS_HIGH / 100;
-    int16_t lowThresh  = barInner * cfg::BATT_HYSTERESIS_LOW  / 100;
-    bool curUseDark;
-    if (fillW >= highThresh) {
-        curUseDark = true;
-    } else if (fillW < lowThresh) {
-        curUseDark = false;
-    } else {
-        // In hysteresis band — retain dark text only if previous fill
-        // was already above the high threshold (was in dark mode).
-        curUseDark = (prevFW >= highThresh);
-    }
-    uint16_t txtBg = curUseDark ? col : COL_BG;
-    uint16_t txtFg = curUseDark ? COL_BLACK : col;
+    int16_t textCentre = (BAT_W - 6) / 2;     // relative to BAT_X below
+    bool useDark = (fillW + 2) >= textCentre;
+    uint16_t txtBg = useDark ? col : COL_BG;
+    uint16_t txtFg = useDark ? COL_BLACK : COL_WHITE;
     tft.setTextColor(txtFg, txtBg);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);

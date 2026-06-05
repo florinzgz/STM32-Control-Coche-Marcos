@@ -66,6 +66,7 @@ enum DriveTile : uint8_t {
     DTILE_ACK,
     DTILE_RPM,
     DTILE_CAN,
+    DTILE_AMBIENT,
     DTILE_COUNT
 };
 
@@ -140,6 +141,10 @@ private:
     bool curCanOk_  = true;
     bool prevCanOk_ = true;
 
+    // Ambient temperature (TempMapData.temps[4], CAN 0x206) — top-bar read-out.
+    int8_t curAmbientTemp_  = 0;
+    int8_t prevAmbientTemp_ = 0;
+
     // Overlay visibility tracking for invalidation chain.
     // When an overlay transitions from visible→invisible, underlying
     // tiles are marked dirty to restore their content.
@@ -170,6 +175,7 @@ private:
     void drawSpeedDial();
     void drawRpmDial();
     void drawCanStatus();
+    void drawAmbientTemp();
     void drawAmgBar();
     void drawAckIndicator();
     void drawDegradedOverlay();

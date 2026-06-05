@@ -116,10 +116,64 @@ inline constexpr int16_t WHL_RL_Y       = 180;
 inline constexpr int16_t WHL_RR_X       = 306;
 inline constexpr int16_t WHL_RR_Y       = 180;
 
-// Steering indicator (circular gauge, right side of car area)
-inline constexpr int16_t STEER_CX       = 410;
-inline constexpr int16_t STEER_CY       = 160;
-inline constexpr int16_t STEER_RADIUS   = 24;
+// -------------------------------------------------------------------------
+// FASE 3.5 — Premium cockpit (Hummer EV 70% / AMG 30%)
+//
+// Single functional steering system: ONE large Mercedes-style 3-spoke wheel
+// at the driver position inside the vehicle.  It rotates with the visually
+// reconstructed steering-wheel angle and replaces both the old decorative
+// hub wheel and the separate circular gauge (no duplicate steering UI).
+//
+// Steering magnitudes (presentation only — firmware/CAN unchanged):
+//   * Wheel Angle    = angleRaw × 0.1°  (real road-wheel, firmware ±54°)
+//   * Steering Wheel = WheelAngle × 6.48 (reconstructed column, ≈ ±350°)
+// -------------------------------------------------------------------------
+inline constexpr int16_t STEER_MAX_WHEEL_DEG = 54;    // firmware MAX_STEER_DEG (road wheel)
+inline constexpr int16_t STEER_RATIO_X100    = 648;   // STEERING_GEAR_RATIO 6.48 ×100
+
+// Big steering wheel "driver pod" (the visual hero), centre-front of the body.
+inline constexpr int16_t SWHEEL_CX    = 240;
+inline constexpr int16_t SWHEEL_CY    = 128;
+inline constexpr int16_t SWHEEL_R     = 30;    // outer rim radius (large)
+inline constexpr int16_t SWHEEL_POD_R = 38;    // dark pod disc behind the wheel
+
+// Steering read-out text rows (below the pod).  The two magnitudes are kept
+// visually separate — never mixed (Steering Wheel ≈±350°, Wheel Angle ±54°).
+inline constexpr int16_t SWHEEL_TXT_Y1 = 170;  // caption "STEERING WHEEL"
+inline constexpr int16_t SWHEEL_VAL_Y  = 184;  // big reconstructed column angle
+inline constexpr int16_t SWHEEL_TXT_Y2 = 208;  // "WHEEL ANGLE" + real road-wheel °
+
+// Central steering tile (dynamic, repainted on angle change).  Sits between the
+// left/right wheel capsules so the two never overlap.
+inline constexpr int16_t STEER_TILE_X = 156;
+inline constexpr int16_t STEER_TILE_W = 168;   // 156..324
+
+// Legacy aliases retained so any compatibility stub still resolves; the old
+// separate gauge is no longer drawn.
+inline constexpr int16_t STEER_CX       = SWHEEL_CX;
+inline constexpr int16_t STEER_CY       = SWHEEL_CY;
+inline constexpr int16_t STEER_RADIUS   = SWHEEL_R;
+
+// -------------------------------------------------------------------------
+// Wheel capsules (FL/FR/RL/RR) — the wheels are the protagonists.  Each
+// capsule shows a shaded tyre, % torque, °C and a relative 4-segment load
+// bar; the hardest-working wheel is highlighted so it reads instantly.
+// -------------------------------------------------------------------------
+inline constexpr int16_t WCAP_W     = 132;
+inline constexpr int16_t WCAP_H     = 62;
+inline constexpr int16_t WCAP_L_X   = 8;                        // left column (FL/RL)
+inline constexpr int16_t WCAP_R_X   = SCREEN_W - WCAP_W - 8;    // right column (FR/RR) = 340
+inline constexpr int16_t WCAP_TOP_Y = 90;                       // FL / FR row
+inline constexpr int16_t WCAP_BOT_Y = 162;                      // RL / RR row
+
+// -------------------------------------------------------------------------
+// Ambient temperature read-out (top bar, just left of the battery).
+// Source: TempMapData.temps[4] (already provided by CAN 0x206).
+// -------------------------------------------------------------------------
+inline constexpr int16_t AMB_X = 348;
+inline constexpr int16_t AMB_Y = 6;
+inline constexpr int16_t AMB_W = 54;
+inline constexpr int16_t AMB_H = 28;
 
 // -------------------------------------------------------------------------
 // Obstacle sensor (frontal) layout — centered in 480px width
@@ -201,22 +255,26 @@ inline constexpr int16_t DGEAR_CELL_W    = 40;
 inline constexpr int16_t DGEAR_CELL_GAP  = 5;
 inline constexpr int16_t DGEAR_START_X   = 110;  // first cell left edge
 
-// Throttle micro-bar (below the gears).
+// Throttle bar (FASE 3.5) — real THROTTLE read-out replacing the decorative
+// AMG strip.  Label + percentage above a gradient bar (green→yellow→orange→
+// red).  Spans the centre cluster, between the two analog dials.
 inline constexpr int16_t DTHR_X          = 110;
-inline constexpr int16_t DTHR_Y          = 274;
-inline constexpr int16_t DTHR_W          = 220;
-inline constexpr int16_t DTHR_H          = 8;
+inline constexpr int16_t DTHR_Y          = 294;   // gradient bar top
+inline constexpr int16_t DTHR_W          = 256;
+inline constexpr int16_t DTHR_H          = 18;
+inline constexpr int16_t DTHR_LABEL_Y    = 276;   // "THROTTLE" + percentage row
 
-// AMG accent bar (bottom of the centre cluster).
+// AMG accent bar (bottom of the centre cluster).  Retained only as legacy
+// geometry; FASE 3.5 no longer draws it (replaced by the THROTTLE bar).
 inline constexpr int16_t AMG_X           = 104;
 inline constexpr int16_t AMG_Y           = 292;
 inline constexpr int16_t AMG_W           = 272;
 inline constexpr int16_t AMG_H           = 24;
 
-// CAN link status indicator (top-bar gap between LED toggles and battery).
-inline constexpr int16_t CAN_IND_X       = 312;
+// CAN link status indicator (top-bar gap between LED toggles and ambient temp).
+inline constexpr int16_t CAN_IND_X       = 286;
 inline constexpr int16_t CAN_IND_Y       = 8;
-inline constexpr int16_t CAN_IND_W       = 86;
+inline constexpr int16_t CAN_IND_W       = 60;
 inline constexpr int16_t CAN_IND_H       = 24;
 
 // -------------------------------------------------------------------------
@@ -269,6 +327,47 @@ inline uint16_t proximityColor(uint16_t distanceCm) {
     if (distanceCm < 150)  return COL_YELLOW;  // 1.0–1.5 m: warning
     if (distanceCm < 200)  return COL_CYAN;    // 1.5–2.0 m: caution
     return COL_GREEN;                          // ≥ 2.0 m: alert / safe
+}
+
+// -------------------------------------------------------------------------
+// FASE 3.5 helpers (presentation only) — RGB565 interpolation, throttle
+// gradient, steering reconstruction.  All integer math, no heap/floats kept.
+// -------------------------------------------------------------------------
+
+/// Linear interpolation between two RGB565 colours (t = 0..255).
+inline uint16_t lerp565(uint16_t a, uint16_t b, uint8_t t) {
+    int ar = (a >> 11) & 0x1F, ag = (a >> 5) & 0x3F, ab = a & 0x1F;
+    int br = (b >> 11) & 0x1F, bg = (b >> 5) & 0x3F, bb = b & 0x1F;
+    int r = ar + ((br - ar) * t) / 255;
+    int g = ag + ((bg - ag) * t) / 255;
+    int bl = ab + ((bb - ab) * t) / 255;
+    return static_cast<uint16_t>((r << 11) | (g << 5) | bl);
+}
+
+/// Throttle gradient colour for a position 0..100 % along the bar:
+/// green → yellow → orange → red (4-stop smooth gradient).
+inline uint16_t throttleGradColor(uint8_t posPct) {
+    if (posPct >= 100) return COL_RED;
+    // Stops: 0→green, 50→yellow, 75→orange, 100→red.
+    if (posPct < 50) {
+        return lerp565(COL_GREEN, COL_YELLOW,
+                       static_cast<uint8_t>(posPct * 255 / 50));
+    } else if (posPct < 75) {
+        return lerp565(COL_YELLOW, COL_ORANGE,
+                       static_cast<uint8_t>((posPct - 50) * 255 / 25));
+    } else {
+        return lerp565(COL_ORANGE, COL_RED,
+                       static_cast<uint8_t>((posPct - 75) * 255 / 25));
+    }
+}
+
+/// Reconstruct the visual steering-wheel (column) angle from the real
+/// road-wheel angle.  Presentation only — never affects CAN/control.
+///   wheelTenthDeg : road-wheel angle in 0.1° units (CAN 0x204)
+///   returns         : steering-wheel angle in whole degrees (≈ ±350)
+inline int16_t steeringWheelDeg(int16_t wheelTenthDeg) {
+    return static_cast<int16_t>(
+        static_cast<int32_t>(wheelTenthDeg) * STEER_RATIO_X100 / 1000);
 }
 
 } // namespace ui

@@ -90,12 +90,13 @@ void DriveScreen::onEnter() {
                                    2 * ui::DIAL_R + 4, 2 * ui::DIAL_R + 4);
     tiles_.setRect(DTILE_OBSTACLE,   0,   ui::SENSOR_Y, ui::SCREEN_W, ui::SENSOR_H);
     tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y,
-                   ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H);
-    tiles_.setRect(DTILE_STEERING,   ui::cfg::DTILE_STEERING_X, ui::CAR_AREA_Y,
-                   ui::cfg::DTILE_STEERING_W, ui::CAR_AREA_H);
+                   ui::SCREEN_W, ui::CAR_AREA_H);
+    tiles_.setRect(DTILE_STEERING,   ui::STEER_TILE_X, ui::CAR_AREA_Y,
+                   ui::STEER_TILE_W, ui::CAR_AREA_H);
     tiles_.setRect(DTILE_BATTERY,    ui::BAT_X, 0,
                    ui::cfg::DTILE_BATTERY_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_CAN,        ui::CAN_IND_X, 0, ui::CAN_IND_W, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_AMBIENT,    ui::AMB_X, 0, ui::AMB_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_GEAR,       ui::CLUSTER_X, ui::DGEAR_Y - 2,
                                      ui::CLUSTER_W, ui::DGEAR_H + 4);
     tiles_.setRect(DTILE_PEDAL,      ui::DTHR_X - 14, ui::DTHR_Y - 2,
@@ -122,6 +123,7 @@ void DriveScreen::onEnter() {
     prevBattVoltRaw_ = 0;
     prevBattStale_   = false;
     prevCanOk_       = true;
+    prevAmbientTemp_ = 0;
     prevPedalPct_    = 0;
     prevGear_        = ui::Gear::P;
     prevMode_        = {};
@@ -183,6 +185,9 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     for (uint8_t i = 0; i < 4; ++i) {
         curTemp_[i] = data.tempMap().temps[i];
     }
+
+    // Ambient temperature (TempMapData.temps[4], CAN 0x206) — top-bar read-out.
+    curAmbientTemp_ = data.tempMap().temps[4];
 
     // Wheel telemetry staleness: a never-received (timestampMs==0) or expired
     // traction/temp frame must not be shown as a real reading.  When stale the
@@ -343,6 +348,13 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // CAN link tile
     tiles_.updateHash(DTILE_CAN, ui::tileHashVal(curCanOk_ ? 1u : 0u));
 
+    // AMBIENT temperature tile (value + staleness of the temp-map frame)
+    {
+        ui::TileHash ah = ui::tileHashVal(static_cast<uint8_t>(curAmbientTemp_));
+        ah = ui::tileHashFeed(ah, curTempStale_ ? 1u : 0u);
+        tiles_.updateHash(DTILE_AMBIENT, ah);
+    }
+
     // OBSTACLE tile
     tiles_.updateHash(DTILE_OBSTACLE, ui::tileHashVal(curObstacleCm_));
 
@@ -480,23 +492,12 @@ void DriveScreen::draw() {
         ui::DialGauge::drawStatic(tft, ui::SPEED_DIAL_CX, ui::SPEED_DIAL_CY, ui::DIAL_R);
         ui::DialGauge::drawStatic(tft, ui::RPM_DIAL_CX,   ui::RPM_DIAL_CY,   ui::DIAL_R);
 
-        // AMG performance accent bar (bottom-centre, purely decorative).
-        drawAmgBar();
-
-        // "360°" label centered above steering gauge
-        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-        tft.setTextSize(1);
-        tft.setTextDatum(TC_DATUM);
-        tft.drawString("360", ui::STEER_CX, ui::STEER_CY - ui::STEER_RADIUS - 12);
-        RTRACE_TEXT(ui::STEER_CX, ui::STEER_CY - ui::STEER_RADIUS - 12, "360",
-                    ui::COL_CYAN, ui::COL_BG, 1, TC_DATUM);
-        tft.setTextDatum(TL_DATUM);
-
         // Force all prev_* to differ from cur_* so every tile renders
         prevSpeedAvgRaw_ = curSpeedAvgRaw_ + 1;
         prevRpmAvg_      = curRpmAvg_ + 1;
         prevBattVoltRaw_ = curBattVoltRaw_ + 1;
         prevCanOk_       = !curCanOk_;
+        prevAmbientTemp_ = curAmbientTemp_ + 1;
         prevPedalPct_    = curPedalPct_ + 1;
         prevGear_        = (curGear_ == ui::Gear::P) ? ui::Gear::N : ui::Gear::P;
         prevSteeringRaw_ = curSteeringRaw_ + 10;
@@ -539,6 +540,14 @@ void DriveScreen::draw() {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
         drawCanStatus();
         tiles_.markClean(DTILE_CAN);
+    }
+
+    // TILE: Ambient temperature (top bar)
+    if (tiles_.isDirty(DTILE_AMBIENT)) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+        drawAmbientTemp();
+        prevAmbientTemp_ = curAmbientTemp_;
+        tiles_.markClean(DTILE_AMBIENT);
     }
 
     // TILE: Obstacle sensor (40–85px)
@@ -742,7 +751,33 @@ void DriveScreen::drawCanStatus() {
 }
 
 // -------------------------------------------------------------------------
-// AMG performance accent bar (static) — bottom-centre decorative strip.
+// Ambient temperature read-out (top bar) — TempMapData.temps[4] (CAN 0x206).
+// Presentation only: shows "NN°C" colour-coded, or "--" when the temp-map
+// frame is stale.  The static "AMB" label is drawn once in the full redraw.
+// -------------------------------------------------------------------------
+void DriveScreen::drawAmbientTemp() {
+    int16_t cy = ui::AMB_Y + ui::AMB_H / 2;
+
+    char buf[8];
+    uint16_t col;
+    if (curTempStale_) {
+        snprintf(buf, sizeof(buf), "--\xC2\xB0""C");
+        col = ui::COL_GRAY;
+    } else {
+        snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", static_cast<int>(curAmbientTemp_));
+        col = ui::tempColorFull(curAmbientTemp_);
+    }
+
+    tft.setTextColor(col, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextPadding(ui::AMB_W);
+    tft.drawString(buf, ui::AMB_X, cy);
+    RTRACE_TEXT(ui::AMB_X, cy, buf, col, ui::COL_BG, 2, ML_DATUM);
+    tft.setTextPadding(0);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+}
 // A dark rounded bar with a deep-red accent block and silver "AMG" wordmark,
 // echoing OEM AMG / performance clusters.  Pure presentation.
 // -------------------------------------------------------------------------

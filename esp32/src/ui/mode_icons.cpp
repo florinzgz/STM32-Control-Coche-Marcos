@@ -54,25 +54,75 @@ uint8_t ModeIcons::hitTest(int16_t touchX, int16_t touchY) {
 }
 
 // -------------------------------------------------------------------------
-// Draw a single icon
+// Draw a single icon.
+//
+// Two visual languages, same geometry (touch zones unchanged):
+//   * 4x4 / 4x2  → drivetrain STATUS BADGES (rounded, flat, a left accent
+//                  stripe when active).  Deliberately do NOT look pressable.
+//   * 360        → interactive BUTTON (persistent accent outline + a small
+//                  rotation glyph) so it clearly reads as tappable.
 // -------------------------------------------------------------------------
 void ModeIcons::drawIcon(TFT_eSPI& tft, int16_t x, const char* label,
                          bool active) {
-    uint16_t bgCol   = active ? COL_CYAN : COL_BG;
-    uint16_t txtCol  = active ? COL_BLACK : COL_GRAY;
-    uint16_t bordCol = active ? COL_WHITE : COL_GRAY;
+    const bool isButton = (label[0] == '3');   // only the "360" icon
 
-    tft.fillRect(x, ICON_Y, ICON_W, ICON_H, bgCol);
-    RTRACE_FILL_RECT(x, ICON_Y, ICON_W, ICON_H, bgCol);
-    tft.drawRect(x, ICON_Y, ICON_W, ICON_H, bordCol);
-    RTRACE_DRAW_RECT(x, ICON_Y, ICON_W, ICON_H, bordCol);
+    // Always clear the full icon cell first (prevents stale pixels when the
+    // rounded styles leave the square corners untouched).
+    tft.fillRect(x, ICON_Y, ICON_W, ICON_H, COL_BG);
+    RTRACE_FILL_RECT(x, ICON_Y, ICON_W, ICON_H, COL_BG);
 
-    tft.setTextColor(txtCol, bgCol);
+    if (isButton) {
+        // ---- Interactive 360° button ----
+        uint16_t face   = active ? COL_CYAN : COL_GEAR_OFF;
+        uint16_t txtCol = active ? COL_BLACK : COL_CYAN;
+
+        tft.fillRoundRect(x, ICON_Y, ICON_W, ICON_H, 5, face);
+        RTRACE_FILL_RECT(x, ICON_Y, ICON_W, ICON_H, face);
+        // Persistent accent outline = "this is tappable".
+        tft.drawRoundRect(x, ICON_Y, ICON_W, ICON_H, 5, COL_CYAN);
+        RTRACE_DRAW_RECT(x, ICON_Y, ICON_W, ICON_H, COL_CYAN);
+        tft.drawRoundRect(x + 1, ICON_Y + 1, ICON_W - 2, ICON_H - 2, 4,
+                          active ? COL_WHITE : COL_DIAL_RING);
+
+        // Small rotation arc hint on the left, then the "360" label.
+        int16_t gx = x + 9;
+        int16_t gy = ICON_Y + ICON_H / 2;
+        tft.drawCircle(gx, gy, 5, txtCol);
+        tft.drawCircle(gx, gy, 4, txtCol);
+        RTRACE_CIRCLE(gx, gy, 5, txtCol);
+        tft.fillTriangle(gx + 5, gy - 6, gx + 5, gy, gx + 9, gy - 3, txtCol);
+
+        tft.setTextColor(txtCol, face);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("360", x + ICON_W / 2 + 6, gy);
+        RTRACE_TEXT(x + ICON_W / 2 + 6, gy, "360", txtCol, face, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+        return;
+    }
+
+    // ---- Drivetrain status badge (4x4 / 4x2) ----
+    uint16_t face   = active ? COL_DIAL_FACE : COL_BG;
+    uint16_t txtCol = active ? COL_WHITE : COL_DARK_GRAY;
+    uint16_t edge   = active ? COL_GREEN : COL_DIAL_RING;
+
+    tft.fillRoundRect(x, ICON_Y, ICON_W, ICON_H, 4, face);
+    RTRACE_FILL_RECT(x, ICON_Y, ICON_W, ICON_H, face);
+    tft.drawRoundRect(x, ICON_Y, ICON_W, ICON_H, 4, edge);
+    RTRACE_DRAW_RECT(x, ICON_Y, ICON_W, ICON_H, edge);
+
+    // Left accent stripe marks the active drivetrain mode (status, not button).
+    if (active) {
+        tft.fillRect(x + 2, ICON_Y + 3, 3, ICON_H - 6, COL_GREEN);
+        RTRACE_FILL_RECT(x + 2, ICON_Y + 3, 3, ICON_H - 6, COL_GREEN);
+    }
+
+    tft.setTextColor(txtCol, face);
     tft.setTextSize(1);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(label, x + ICON_W / 2, ICON_Y + ICON_H / 2);
-    RTRACE_TEXT(x + ICON_W / 2, ICON_Y + ICON_H / 2, label,
-                txtCol, bgCol, 1, MC_DATUM);
+    tft.drawString(label, x + ICON_W / 2 + 2, ICON_Y + ICON_H / 2);
+    RTRACE_TEXT(x + ICON_W / 2 + 2, ICON_Y + ICON_H / 2, label,
+                txtCol, face, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 
