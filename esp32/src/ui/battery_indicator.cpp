@@ -33,11 +33,44 @@ void BatteryIndicator::drawStatic(TFT_eSPI& tft) {
 // -------------------------------------------------------------------------
 void BatteryIndicator::draw(TFT_eSPI& tft,
                             uint16_t voltageRaw,
-                            uint16_t prevVoltageRaw) {
+                            uint16_t prevVoltageRaw,
+                            bool stale,
+                            bool prevStale) {
+    // ---- Stale / unknown reading ----
+    // When the battery frame (0x207) is older than the CAN-loss timeout, the
+    // last voltage is no longer trustworthy.  Show "--" rather than a frozen
+    // value (e.g. a stuck "100%").  Redraw only on the fresh→stale edge.
+    if (stale) {
+        if (!prevStale) {
+            int16_t innerW = BAT_W - 10;
+            tft.fillRect(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
+            RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
+            tft.setTextColor(COL_GRAY, COL_BG);
+            tft.setTextSize(1);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextPadding(innerW - 4);
+            tft.drawString("--", BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2);
+            RTRACE_TEXT(BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2, "--",
+                        COL_GRAY, COL_BG, 1, MC_DATUM);
+            tft.setTextPadding(0);
+            tft.setTextDatum(TL_DATUM);
+        }
+        return;
+    }
+
     uint8_t pct     = voltageToPercent(voltageRaw);
     uint8_t prevPct = voltageToPercent(prevVoltageRaw);
 
-    if (pct == prevPct) return;
+    // On a stale→fresh transition the interior was cleared and held "--", so
+    // the cached prevPct is meaningless: force a full redraw of the bar.
+    if (prevStale) {
+        int16_t innerW = BAT_W - 10;
+        tft.fillRect(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
+        RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
+        prevPct = (pct == 0) ? 1 : 0;   // guarantee pct != prevPct below
+    } else if (pct == prevPct) {
+        return;
+    }
 
     // Choose color based on level
     uint16_t col;

@@ -110,6 +110,7 @@ void DriveScreen::onEnter() {
     prevSteeringRaw_ = 0;
     prevSpeedAvgRaw_ = 0;
     prevBattVoltRaw_ = 0;
+    prevBattStale_   = false;
     prevPedalPct_    = 0;
     prevGear_        = ui::Gear::P;
     prevMode_        = {};
@@ -202,6 +203,16 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // Battery voltage
     curBattVoltRaw_ = data.battery().voltageRaw;
 
+    // Battery staleness: the 0x207 frame is no longer trustworthy if it was
+    // never received or is older than the CAN-loss timeout.  A stale reading
+    // is shown as "--" (see BatteryIndicator::draw) instead of a frozen value
+    // such as a misleading "100%" left over from before the link dropped.
+    {
+        unsigned long bts = data.battery().timestampMs;
+        curBattStale_ = (bts == 0) ||
+                        ((frameTimeMs - bts) > can::CAN_LOSS_TIMEOUT_MS);
+    }
+
     // Pedal/throttle — derived from traction average as display hint
     // (actual throttle command is sent separately via CMD_THROTTLE)
     uint16_t tractionSum = 0;
@@ -234,9 +245,19 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // Obstacle sensor
     curObstacleCm_ = data.obstacle().distanceCm;
 
-    // LED relay states from STM32
-    curFrontLedOn_ = data.lights().frontRelayOn;
-    curRearLedOn_  = data.lights().rearRelayOn;
+    // LED relay states from STM32 (0x20A).  When the lights frame is stale
+    // (never received or older than the CAN-loss timeout) we must NOT keep
+    // showing the last "ON" state — a frozen indicator made the dash look
+    // like the lights were energised when they were not.  Fall back to the
+    // de-energised (OFF) representation, which is the safe assumption when
+    // the relay state is unknown.
+    {
+        unsigned long lts = data.lights().timestampMs;
+        bool lightsStale = (lts == 0) ||
+                           ((frameTimeMs - lts) > can::CAN_LOSS_TIMEOUT_MS);
+        curFrontLedOn_ = lightsStale ? false : data.lights().frontRelayOn;
+        curRearLedOn_  = lightsStale ? false : data.lights().rearRelayOn;
+    }
 
     // Relay status (heartbeat byte 5)
     curRelayStatus_ = data.heartbeat().relayStatus;
@@ -303,7 +324,11 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     tiles_.updateHash(DTILE_STEERING, ui::tileHashVal(curSteeringRaw_));
 
     // BATTERY tile
-    tiles_.updateHash(DTILE_BATTERY, ui::tileHashVal(curBattVoltRaw_));
+    {
+        ui::TileHash bh = ui::tileHashVal(curBattVoltRaw_);
+        bh = ui::tileHashFeed(bh, curBattStale_ ? 1u : 0u);
+        tiles_.updateHash(DTILE_BATTERY, bh);
+    }
 
     // GEAR tile (includes relay indicator — they share the same vertical strip)
     {
@@ -479,7 +504,9 @@ void DriveScreen::draw() {
     // TILE: Battery (top-right)
     if (tiles_.isDirty(DTILE_BATTERY)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
-        ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_);
+        ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_,
+                                   curBattStale_, prevBattStale_);
+        prevBattStale_ = curBattStale_;
         tiles_.markClean(DTILE_BATTERY);
     }
 

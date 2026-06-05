@@ -26,6 +26,12 @@ static unsigned long lastTapMs_     = 0;
 static bool         longPressEmitted_ = false;
 static TouchEvent   pendingEvent_   = {};
 
+// Corner long-press tracker (anchored to the zone, independent of the global
+// long-press drift logic). See touch_handler.h Config corner fields.
+static unsigned long cornerStartMs_ = 0;
+static bool          cornerTracking_ = false;
+static bool          cornerEmitted_  = false;
+
 void init(const Config& cfg) {
     cfg_             = cfg;
     initialized_     = true;
@@ -39,6 +45,9 @@ void init(const Config& cfg) {
     lastTapMs_       = 0;
     longPressEmitted_ = false;
     pendingEvent_    = {};
+    cornerStartMs_   = 0;
+    cornerTracking_  = false;
+    cornerEmitted_   = false;
     Serial.println("[TOUCH] Handler initialized");
 }
 
@@ -60,6 +69,10 @@ void update(bool isTouched, int16_t rawX, int16_t rawY) {
         pressStartX_      = rawX;
         pressStartY_      = rawY;
         longPressEmitted_ = false;
+        // Reset corner tracker on every fresh contact so its emitted-latch
+        // (used to suppress the tap-on-release) only spans a single press.
+        cornerTracking_   = false;
+        cornerEmitted_    = false;
     }
 
     // Held — check for long press
@@ -83,9 +96,37 @@ void update(bool isTouched, int16_t rawX, int16_t rawY) {
         }
     }
 
+    // Robust corner long-press (Engineering-access fallback).
+    // Anchored to the top-right zone: drift INSIDE the zone never cancels it,
+    // only leaving the zone (or releasing) does.  This survives noisy or
+    // miscalibrated resistive panels that keep resetting the global gesture.
+    // Guarded so it never overwrites a LONG_PRESS already produced this frame.
+    {
+        bool inCorner = isTouched &&
+            curX_ >= cfg_.cornerX0 && curX_ <= cfg_.cornerX1 &&
+            curY_ >= cfg_.cornerY0 && curY_ <= cfg_.cornerY1;
+        if (inCorner) {
+            if (!cornerTracking_) {
+                cornerTracking_ = true;
+                cornerStartMs_  = now;
+            } else if (!cornerEmitted_ &&
+                       (now - cornerStartMs_) >= cfg_.cornerLongPressMs) {
+                if (pendingEvent_.type == EventType::NONE) {
+                    pendingEvent_ = { EventType::CORNER_LONG_PRESS, curX_, curY_ };
+                }
+                cornerEmitted_ = true;
+            }
+        } else {
+            // Left the zone — allow the timer to restart on re-entry.  Do NOT
+            // clear cornerEmitted_ here: it must stay latched until the next
+            // finger-down so the release below can suppress a spurious tap.
+            cornerTracking_ = false;
+        }
+    }
+
     // Falling edge — finger up
     if (!isTouched && prevPressed_) {
-        if (!longPressEmitted_) {
+        if (!longPressEmitted_ && !cornerEmitted_) {
             // Short tap — apply debounce
             if ((now - lastTapMs_) >= cfg_.debounceMs) {
                 pendingEvent_ = { EventType::TAP, curX_, curY_ };

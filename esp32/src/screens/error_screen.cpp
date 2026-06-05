@@ -124,12 +124,25 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     diagSubsystem_ = data.diag().subsystem;
 
     // ---- Compute tile hashes ----
+    // Feed canLost_ into the fault/safety/diag hashes so the "(STALE)" marker
+    // appears/clears correctly: on CAN loss these values are the last frame
+    // received before the link dropped and may be mutually inconsistent
+    // (e.g. faultFlags=0 "No active faults" yet a cached Safety Code 4).
     tiles_.updateHash(ETILE_BANNER, ui::tileHashVal(canLost_));
-    tiles_.updateHash(ETILE_FAULTS, ui::tileHashVal(faultFlags_));
-    tiles_.updateHash(ETILE_SAFETY, ui::tileHashVal(errorCode_));
+    {
+        ui::TileHash fh = ui::tileHashVal(faultFlags_);
+        fh = ui::tileHashFeed(fh, canLost_ ? 1u : 0u);
+        tiles_.updateHash(ETILE_FAULTS, fh);
+    }
+    {
+        ui::TileHash sh = ui::tileHashVal(errorCode_);
+        sh = ui::tileHashFeed(sh, canLost_ ? 1u : 0u);
+        tiles_.updateHash(ETILE_SAFETY, sh);
+    }
     {
         ui::TileHash dh = ui::tileHashVal(diagCode_);
         dh = ui::tileHashFeed(dh, diagSubsystem_);
+        dh = ui::tileHashFeed(dh, canLost_ ? 1u : 0u);
         tiles_.updateHash(ETILE_DIAG, dh);
     }
     // Elapsed time — computed once here, used in both hash and draw()
@@ -246,7 +259,7 @@ void ErrorScreen::draw() {
         tft.setTextSize(1);
         if (faultFlags_ == 0) {
             tft.setTextColor(ui::COL_GREEN, ui::COL_RED);
-            tft.drawString("No active faults", 20, 98);
+            tft.drawString(canLost_ ? "No active faults (STALE)" : "No active faults", 20, 98);
         } else {
             tft.setTextColor(ui::COL_YELLOW, ui::COL_RED);
             int16_t flagY = 98;
@@ -262,6 +275,11 @@ void ErrorScreen::draw() {
                     }
                 }
             }
+            // CAN down → these flags are a frozen snapshot, not live faults.
+            if (canLost_) {
+                tft.setTextColor(ui::COL_AMBER, ui::COL_RED);
+                tft.drawString("(STALE — last seen before CAN loss)", 20, 150);
+            }
         }
         tiles_.markClean(ETILE_FAULTS);
     }
@@ -271,8 +289,8 @@ void ErrorScreen::draw() {
         prevErrorCode_ = errorCode_;
 
         char buf[64];
-        snprintf(buf, sizeof(buf), "Code %u: %s", errorCode_,
-                 safetyErrorName(errorCode_));
+        snprintf(buf, sizeof(buf), canLost_ ? "Code %u: %s (STALE)" : "Code %u: %s",
+                 errorCode_, safetyErrorName(errorCode_));
 
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
         tft.setTextSize(2);
@@ -290,7 +308,8 @@ void ErrorScreen::draw() {
         prevDiagSubsystem_ = diagSubsystem_;
 
         char buf[64];
-        snprintf(buf, sizeof(buf), "Error %u  Subsystem: %s",
+        snprintf(buf, sizeof(buf), canLost_ ? "Error %u  Subsystem: %s (STALE)"
+                                             : "Error %u  Subsystem: %s",
                  diagCode_, diagSubsystemName(diagSubsystem_));
 
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);

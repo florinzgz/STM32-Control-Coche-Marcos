@@ -23,6 +23,7 @@
 
 #include "screen.h"
 #include "config_store.h"
+#include "../shifter_input.h"
 #include <cstdint>
 
 class EngineeringScreen : public Screen {
@@ -64,7 +65,8 @@ private:
         MAINTENANCE,       // Maintenance counter reset + status
         RELAY_CONTROL,     // Manual relay override (engineering diagnostic)
         INA226_LIVE_DIAG,  // Live INA226/current diagnostic viewer
-        DEBOUNCE_DIAG      // DWT-debounce EMI filtered counters viewer
+        DEBOUNCE_DIAG,     // DWT-debounce EMI filtered counters viewer
+        MCP23017_LIVE      // ESP32-local MCP23017 shifter I2C live diagnostic
     };
 
     void drawMainMenu();
@@ -80,6 +82,7 @@ private:
     void drawRelayControl();
     void drawInaLiveDiag();
     void drawDebounceDiag();
+    void drawMcpLiveDiag();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -225,6 +228,16 @@ private:
     // not own the ScreenManager flags).  Instead we set this flag and the
     // ScreenManager polls it via consumeTouchCalRequest() each frame.
     bool          touchCalRequested_ = false;
+
+    // MCP23017 LIVE (shifter) diagnostic cache.  Populated in update() from
+    // shifter::getDiag() (a cached, read-only snapshot — performs NO I2C of
+    // its own, so the Core-0 render path never touches the shared Wire bus).
+    shifter::Diag mcpDiag_{};
+    unsigned long mcpAgeMs_        = 0;     // age of last valid GPIOA read
+    bool          mcpDataChanged_  = false; // repaint trigger
+    // Coarse change-detection signature so the page repaints ~1 Hz / on change
+    // without thrashing the TFT.  Combines counters + raw + age (seconds).
+    uint32_t      mcpDiagSig_      = 0xFFFFFFFFu;
 };
 
 #endif // ENGINEERING_SCREEN_H
