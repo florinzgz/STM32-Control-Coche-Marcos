@@ -46,6 +46,7 @@
 #include "ui/mode_icons.h"
 #include "ui/led_toggle.h"
 #include "ui/relay_indicator.h"
+#include "ui/dial_gauge.h"
 #include "can_ids.h"
 #include <cstdint>
 
@@ -63,6 +64,8 @@ enum DriveTile : uint8_t {
     DTILE_DEGRADED,
     DTILE_FAULTS,
     DTILE_ACK,
+    DTILE_RPM,
+    DTILE_CAN,
     DTILE_COUNT
 };
 
@@ -97,6 +100,7 @@ private:
     int16_t  curSteeringRaw_     = 0;
     uint16_t curSpeedAvgRaw_     = 0;
     uint16_t curRpmAvg_          = 0;
+    uint16_t prevRpmAvg_         = 0;
     uint16_t curBattVoltRaw_     = 0;
     uint8_t  curPedalPct_        = 0;
     ui::Gear curGear_            = ui::Gear::P;
@@ -132,6 +136,10 @@ private:
     uint8_t curFaultFlags_  = 0;
     uint8_t prevFaultFlags_ = 0;
 
+    // CAN-link health (top-bar indicator). Derived from heartbeat staleness.
+    bool curCanOk_  = true;
+    bool prevCanOk_ = true;
+
     // Overlay visibility tracking for invalidation chain.
     // When an overlay transitions from visible→invisible, underlying
     // tiles are marked dirty to restore their content.
@@ -159,7 +167,10 @@ private:
     bool     tankConfirmVisible_  = false;   // true while confirm bar is shown
     bool     tankConfirmDirty_    = true;    // needs redraw
 
-    void drawSpeed();
+    void drawSpeedDial();
+    void drawRpmDial();
+    void drawCanStatus();
+    void drawAmgBar();
     void drawAckIndicator();
     void drawDegradedOverlay();
     void drawFaultOverlays();
