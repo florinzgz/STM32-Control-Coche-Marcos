@@ -24,6 +24,7 @@
 9. [¿Qué pasa si mi palanca original es de 12 V?](#9-qué-pasa-si-mi-palanca-original-es-de-12-v)
 10. [Lista de Componentes](#10-lista-de-componentes)
 11. [Preguntas Frecuentes](#11-preguntas-frecuentes)
+12. [Diagnóstico: errores al conectar el MCP23017](#12-diagnóstico-errores-al-conectar-el-mcp23017)
 
 ---
 
@@ -587,6 +588,59 @@ No se recomienda porque el firmware actual está diseñado para MCP23017.
   (byte 0 = modo, byte 1 = marcha).
 
 > **Referencia:** `TRACTION_GEAR_SHIFTER_AUDIT.md` sección 1.5
+
+---
+
+## 12. Diagnóstico: errores al conectar el MCP23017
+
+Si al **conectar** el módulo MCP23017 aparecen `CAN LINK LOST`, `SENSOR FAULT`
+o `BATT UV CRIT` y al **desconectarlo** desaparecen, el problema es de
+**acoplamiento eléctrico**, no de lógica del firmware. El driver de la palanca
+ya es no bloqueante (`Wire.setTimeOut(25)` + `recoverBus()` bit-bang de 9
+pulsos SCL), por lo que un módulo sano no puede arrastrar al sistema a SAFE.
+
+### 12.1 Requisitos de alimentación y masa (verificar primero)
+
+- **Rail dedicado:** alimentar el MCP23017 desde el 3.3 V del ESP32, **no**
+  desde el dominio de sensores del STM32. Un sag al conectar el módulo puede
+  hacer caer la lectura de los INA226 del STM32.
+- **Masa en estrella:** una sola masa común. Evitar bucles de masa entre el
+  módulo y el bus de sensores del STM32.
+- **Aislamiento de buses:** el cableado del MCP23017 (I2C GPIO8/GPIO9 del
+  ESP32, addr 0x20) **no** debe tocar el bus I2C del STM32 (PB8/PB9) ni las
+  líneas CAN (GPIO4 TX / GPIO5 RX del ESP32). Son buses físicamente
+  independientes.
+- **Desacoplo y pull-ups:** condensador cerámico de 100 nF entre VDD (pin 9) y
+  VSS (pin 10), y pull-ups de 4.7 kΩ en SDA/SCL (ver §3.1). `RESET` (pin 18) a
+  3.3 V permanente; A0/A1/A2 a GND.
+
+### 12.2 Clasificación con el menú Engineering
+
+El menú Engineering muestra una instantánea cacheada de `getDiag()` (sin I2C
+propio). Usar los campos para clasificar la causa raíz:
+
+| Síntoma en Engineering | Causa probable | Acción |
+|------------------------|----------------|--------|
+| `Last reject = ADDR_NACK` + `Bus recoveries` subiendo | Bus/masa compartidos o pull-ups ausentes; el MCP23017 no hace ACK | Revisar §12.1: separar masa, añadir pull-ups 4.7 kΩ y desacoplo |
+| `Last reject = NO_DATA` | El módulo hace ACK de dirección pero la lectura de registro falla (ruido/EMI en SDA) | Acortar/apantallar cableado I2C; confirmar 100 nF de desacoplo |
+| `Last reject = BACKOFF` | El driver está en backoff tras `errorCount` ≥ umbral; lectura no intentada | Es consecuencia, no causa: resolver el ADDR_NACK/NO_DATA subyacente |
+| `Reads OK` sube pero el **STM32** entra en SAFE | Sag de alimentación del STM32 al conectar el módulo | Alimentar el MCP23017 desde rail dedicado del ESP32 (§12.1) |
+
+> **Referencia firmware:** `esp32/src/shifter_input.h` (enum `RejectReason`,
+> struct `Diag`), `esp32/src/shifter_input.cpp` (`recoverBus()`,
+> `Wire.setTimeOut`, disparo de recuperación al alcanzar `ERROR_THRESHOLD`).
+
+### 12.3 Errores derivados (no son la causa raíz)
+
+- **`BATT UV CRIT` (Code 10):** una lectura de 0 V del INA226 de batería —que
+  cuelga del TCA9548A— casi siempre significa que el canal del mux no hizo ACK
+  por el problema I2C, no que la batería esté agotada. El firmware distingue
+  ambos casos (`Safety_CheckBatteryVoltage`): si el INA de batería no hace ACK
+  reporta `I2C_FAILURE` (Code 11) en vez de enmascarar la causa real.
+- **`SENSOR FAULT` por DS18B20:** un CRC/rango inválido de un sensor de
+  temperatura ya **no** eleva el fallo global de seguridad; se marca como
+  "temperatura no disponible" por sensor. El sobrecalentamiento real lo sigue
+  vigilando `Safety_CheckTemperature` con umbrales absolutos.
 
 ---
 
