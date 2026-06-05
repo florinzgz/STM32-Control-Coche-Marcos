@@ -496,6 +496,14 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
                      | (static_cast<uint32_t>(d.errorCount)  << 12)
                      | (static_cast<uint32_t>(d.connected ? 1u : 0u) << 20)
                      | (static_cast<uint32_t>(d.recoveryCount & 0x7FF) << 21);
+        // Fold in the extended instrumentation so the panel repaints when the
+        // GPIOB byte, valid/invalid counters, last pattern or reject reason
+        // change (problem statement §1.F/§1.G).
+        sig ^= (static_cast<uint32_t>(d.gpiobRaw) << 3)
+             ^ (static_cast<uint32_t>(d.lastValidPattern) << 11)
+             ^ (static_cast<uint32_t>(d.validReads) << 1)
+             ^ (static_cast<uint32_t>(d.invalidReads) << 5)
+             ^ (static_cast<uint32_t>(static_cast<uint8_t>(d.rejectReason)) << 17);
         sig ^= static_cast<uint32_t>(ageMs / 1000U);
         if (sig != mcpDiagSig_) {
             mcpDiagSig_     = sig;
@@ -868,6 +876,21 @@ void EngineeringScreen::draw() {
             tft.drawString(buf, bx, by + 4 * lh);
         }
 
+        // Battery INA RAW context (problem statement §2.C/§2.E).
+        // The ESP32 only receives the final current over CAN (0.01 A units); the
+        // raw INA226 shunt/bus registers live on the STM32 and are not on the
+        // bus.  These two constants MIRROR the STM32 firmware values in
+        // Core/Inc/project_config.h (INA226_SHUNT_MOHM_BATTERY = 0.75 mΩ) and
+        // sensor_manager.c (INA226_SHUNT_LSB_UV = 2.5 µV).  With a 0.75 mΩ shunt
+        // the current resolution is 2.5 µV / 0.75 mΩ ≈ 3.33 A per LSB, so any
+        // battery current below ~1.6 A rounds to 0 — this is why CH4 reads 0.0 A
+        // at rest and is sensing evidence, not a fault.
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString("Shunt(BAT)=0.75mOhm  Res~3.33A/LSB", bx, by + 5 * lh);
+        snprintf(buf, sizeof(buf), "BT raw(CAN)=%u (0.01A units)",
+                 (unsigned)inaLiveBtCurrentRaw_);
+        tft.drawString(buf, bx, by + 6 * lh);
+
         const int16_t gx = 250;
         const int16_t gy = by;
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
@@ -1067,7 +1090,7 @@ void EngineeringScreen::draw() {
         const int16_t x  = 10;
         const int16_t y0 = 44;
         const int16_t lh = 18;
-        char buf[ui::FMT_BUF_LARGE];
+        char buf[64];   // wider than FMT_BUF_LARGE: several diag lines exceed 32 chars
 
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
@@ -1090,11 +1113,30 @@ void EngineeringScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.drawString(buf, x, y0 + lh);
 
-        // Raw GPIOA (active-low pull-ups: 0xFF = all open / error)
+        // Raw GPIOA + per-pin state (active-low pull-ups: 0xFF = all open / error)
         snprintf(buf, sizeof(buf), "GPIOA raw: 0x%02X", (unsigned)d.gpioRaw);
         tft.setTextColor(d.gpioRaw == 0xFF ? ui::COL_AMBER : ui::COL_CYAN,
                          ui::COL_BG);
         tft.drawString(buf, x, y0 + 2 * lh);
+
+        // Per-pin contact state.  When GPIOA is in error (0xFF) fall back to the
+        // last valid pattern so the technician still sees the real wiring.
+        // Active-low: bit=0 → contact CLOSED (common→GND); bit=1 → OPEN (pulled up).
+        const uint8_t pat = (d.gpioRaw != 0xFF) ? d.gpioRaw : d.lastValidPattern;
+        snprintf(buf, sizeof(buf),
+                 "Pins: P(0)=%c D2(1)=%c D1(2)=%c R(3)=%c",
+                 (pat & 0x01) ? 'H' : 'L',
+                 (pat & 0x02) ? 'H' : 'L',
+                 (pat & 0x04) ? 'H' : 'L',
+                 (pat & 0x08) ? 'H' : 'L');
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, x, y0 + 3 * lh);
+
+        // Raw GPIOB (unused by the lever — shown for completeness / wiring sanity)
+        snprintf(buf, sizeof(buf), "GPIOB raw: 0x%02X", (unsigned)d.gpiobRaw);
+        tft.setTextColor(d.gpiobRaw == 0xFF ? ui::COL_AMBER : ui::COL_CYAN,
+                         ui::COL_BG);
+        tft.drawString(buf, x, y0 + 4 * lh);
 
         // Decoded gear
         static const char* const gearNames[5] =
@@ -1103,14 +1145,32 @@ void EngineeringScreen::draw() {
         snprintf(buf, sizeof(buf), "Gear decoded: %u (%s)",
                  (unsigned)d.gearDecoded, gn);
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-        tft.drawString(buf, x, y0 + 3 * lh);
+        tft.drawString(buf, x, y0 + 5 * lh);
+
+        // Exact reason the last GPIOA read was rejected (problem statement §1.F/§1.G)
+        static const char* const rejNames[4] =
+            { "NONE (read OK)", "ADDR_NACK (reg ptr)", "NO_DATA (requestFrom)",
+              "BACKOFF (absent)" };
+        const uint8_t rj = static_cast<uint8_t>(d.rejectReason);
+        const char* rjs = (rj < 4) ? rejNames[rj] : "?";
+        snprintf(buf, sizeof(buf), "Last reject: %s", rjs);
+        tft.setTextColor(d.rejectReason == shifter::RejectReason::NONE
+                             ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(buf, x, y0 + 6 * lh);
+
+        // Valid / invalid read counters + last valid pattern
+        snprintf(buf, sizeof(buf), "Reads OK: %u   BAD: %u   LastPat: 0x%02X",
+                 (unsigned)d.validReads, (unsigned)d.invalidReads,
+                 (unsigned)d.lastValidPattern);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, x, y0 + 7 * lh);
 
         // I2C error + bus-recovery counters
         snprintf(buf, sizeof(buf), "I2C errors: %u   Bus recoveries: %u",
                  (unsigned)d.errorCount, (unsigned)d.recoveryCount);
         tft.setTextColor(d.errorCount ? ui::COL_AMBER : ui::COL_GREEN,
                          ui::COL_BG);
-        tft.drawString(buf, x, y0 + 4 * lh);
+        tft.drawString(buf, x, y0 + 8 * lh);
 
         // Age of last valid read
         if (d.lastValidMs == 0) {
@@ -1122,7 +1182,7 @@ void EngineeringScreen::draw() {
             tft.setTextColor(mcpAgeMs_ > 1000UL ? ui::COL_AMBER : ui::COL_GREEN,
                              ui::COL_BG);
         }
-        tft.drawString(buf, x, y0 + 5 * lh);
+        tft.drawString(buf, x, y0 + 9 * lh);
     }
 
     RTRACE_DUMP_IF_PENDING();
@@ -2801,9 +2861,11 @@ void EngineeringScreen::sendPedalCalOp(uint8_t op) {
 // avoiding any cross-core race with the shifter poller.
 //
 // Shows: I2C address + online state, IODIRA/GPPUA config registers, raw
-// GPIOA byte, decoded gear, I2C error + bus-recovery counters, and the age
-// of the last valid read.  Dynamic lines are repainted by the partial-redraw
-// branch in draw().  Pure read-only display — no commands, no state changes.
+// GPIOA/GPIOB bytes, per-pin contact state, decoded gear, the exact reason
+// the last read was rejected, valid/invalid read counters + last valid
+// pattern, I2C error + bus-recovery counters, and the age of the last valid
+// read.  Dynamic lines are repainted by the partial-redraw branch in draw().
+// Pure read-only display — no commands, no state changes.
 // =========================================================================
 void EngineeringScreen::drawMcpLiveDiag() {
     RTRACE_BEGIN_SCREEN("eng_mcp_live");

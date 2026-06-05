@@ -54,6 +54,21 @@ uint8_t getGearRaw();
 bool isConnected();
 
 // -------------------------------------------------------------------------
+// Exact reason a GPIOA read was rejected (cached for the Engineering menu).
+//
+// This is the precise condition that prevents a valid read from being
+// recorded.  When NONE, the last read succeeded; otherwise it pinpoints the
+// I2C transaction stage that failed so the root cause can be confirmed from
+// the HMI without guessing (problem statement §1.F/§1.G).
+// -------------------------------------------------------------------------
+enum class RejectReason : uint8_t {
+    NONE         = 0,  // last GPIOA read succeeded
+    ADDR_NACK    = 1,  // register-pointer write NACKed (endTransmission != 0)
+    NO_DATA      = 2,  // requestFrom returned 0 bytes / no data available
+    BACKOFF      = 3   // device absent during backoff — read not attempted
+};
+
+// -------------------------------------------------------------------------
 // Live diagnostic snapshot (read-only, cached) — for the Engineering menu.
 //
 // IMPORTANT: getDiag() performs NO I2C of its own.  It returns a snapshot of
@@ -68,10 +83,16 @@ struct Diag {
     uint8_t       iodirA       = 0x00;   // configured Port A direction (0x0F expected)
     uint8_t       gppuA        = 0x00;   // configured Port A pull-ups  (0x0F expected)
     uint8_t       gpioRaw      = 0xFF;   // last raw GPIOA read (0xFF = error/no data)
+    uint8_t       gpiobRaw     = 0xFF;   // last raw GPIOB read (0xFF = error/not read)
     uint8_t       gearDecoded  = 2;      // current decoded gear (Gear as uint8_t)
     uint8_t       errorCount   = 0;      // consecutive I2C error counter
     uint16_t      recoveryCount = 0;     // number of I2C bus-recovery attempts
     unsigned long lastValidMs  = 0;      // millis() of last successful GPIOA read (0 = never)
+    // ---- Instrumentation (problem statement §1.F/§1.G) ------------------
+    uint16_t      validReads   = 0;      // total valid GPIOA reads since init
+    uint16_t      invalidReads = 0;      // total rejected GPIOA reads since init
+    uint8_t       lastValidPattern = 0xFF; // last GPIOA byte from a valid read
+    RejectReason  rejectReason = RejectReason::NONE; // why last read was rejected
 };
 
 /// Get a cached, read-only diagnostic snapshot of the MCP23017 shifter.
