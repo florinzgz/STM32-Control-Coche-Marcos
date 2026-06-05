@@ -807,8 +807,9 @@ void EngineeringScreen::draw() {
         fmtA(btABuf, sizeof(btABuf), inaLiveBtCurrentRaw_);
         fmtV(btVBuf, sizeof(btVBuf), inaLiveBtVoltageRaw_);
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "CH4 BT: %s   %s", btABuf, btVBuf);
-        tft.drawString(buf, x, y0 + 4 * lh);
+        char btLineBuf[52]; // "CH4 BT: "(8) + btABuf(≤19) + "   "(3) + btVBuf(≤19) + NUL = 50
+        snprintf(btLineBuf, sizeof(btLineBuf), "CH4 BT: %s   %s", btABuf, btVBuf);
+        tft.drawString(btLineBuf, x, y0 + 4 * lh);
 
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         tft.drawString("CH5 ST: --.- A (n/d)", x, y0 + 5 * lh);
