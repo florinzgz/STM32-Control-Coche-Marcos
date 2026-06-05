@@ -1,5 +1,12 @@
 // =============================================================================
-// ESP32-S3 HMI — Gear Display Implementation
+// ESP32-S3 HMI — Gear Display Implementation (premium centre cluster)
+//
+// Renders the P / R / N / D1 / D2 selector as a row of compact, rounded
+// "pills" centred between the two analog dials.  The active gear is shown as a
+// bright filled pill with a glow border and a colour matched to its role:
+//   P -> cyan, R -> red, N -> amber, D1/D2 -> green.
+// Inactive gears are dim dark pills with grey lettering, so the active gear
+// reads instantly from across the cabin (OEM cluster behaviour).
 // =============================================================================
 
 #include "gear_display.h"
@@ -9,73 +16,74 @@ namespace ui {
 
 constexpr const char* GearDisplay::GEAR_LABELS[NUM_GEARS];
 
+// File-local copy of the labels for the free-function pill renderer
+// (GearDisplay::GEAR_LABELS is private).
+static const char* const PILL_LABELS[NUM_GEARS] = { "P", "R", "N", "D1", "D2" };
+
+// Per-gear accent colour for the active pill.
+static inline uint16_t gearAccent(uint8_t idx) {
+    switch (idx) {
+        case 0: return COL_CYAN;    // P
+        case 1: return COL_RED;     // R
+        case 2: return COL_AMBER;   // N
+        default: return COL_GREEN;  // D1 / D2
+    }
+}
+
+// Left edge of pill i.
+static inline int16_t gearCellX(uint8_t i) {
+    return DGEAR_START_X + i * (DGEAR_CELL_W + DGEAR_CELL_GAP);
+}
+
 // -------------------------------------------------------------------------
-// Draw all gear labels in inactive state
+// Draw a single gear pill in active or inactive style.
 // -------------------------------------------------------------------------
-void GearDisplay::drawStatic(TFT_eSPI& tft) {
+static void drawGearPill(TFT_eSPI& tft, uint8_t idx, bool active) {
+    int16_t x  = gearCellX(idx);
+    int16_t cx = x + DGEAR_CELL_W / 2;
+    int16_t cy = DGEAR_Y + DGEAR_H / 2;
+
+    uint16_t fill   = active ? gearAccent(idx) : COL_GEAR_OFF;
+    uint16_t border = active ? COL_WHITE : COL_GEAR_EDGE;
+    uint16_t text   = active ? COL_BLACK : COL_GRAY;
+
+    tft.fillRoundRect(x, DGEAR_Y, DGEAR_CELL_W, DGEAR_H, 6, fill);
+    RTRACE_FILL_RECT(x, DGEAR_Y, DGEAR_CELL_W, DGEAR_H, fill);
+    tft.drawRoundRect(x, DGEAR_Y, DGEAR_CELL_W, DGEAR_H, 6, border);
+    RTRACE_DRAW_RECT(x, DGEAR_Y, DGEAR_CELL_W, DGEAR_H, border);
+
+    tft.setTextColor(text, fill);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
+    tft.drawString(PILL_LABELS[idx], cx, cy);
+    RTRACE_TEXT(cx, cy, PILL_LABELS[idx], text, fill, 2, MC_DATUM);
+}
 
+// -------------------------------------------------------------------------
+// Draw all gear pills in inactive state (call once on screen enter).
+// -------------------------------------------------------------------------
+void GearDisplay::drawStatic(TFT_eSPI& tft) {
     for (uint8_t i = 0; i < NUM_GEARS; ++i) {
-        int16_t x = GEAR_START_X + i * GEAR_SPACING + GEAR_LABEL_W / 2;
-        int16_t y = GEAR_Y + GEAR_LABEL_H / 2;
-
-        tft.fillRect(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
-                     GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
-        RTRACE_FILL_RECT(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
-                         GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
-        tft.drawRect(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
-                     GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
-        RTRACE_DRAW_RECT(GEAR_START_X + i * GEAR_SPACING, GEAR_Y,
-                         GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
-        tft.setTextColor(COL_GRAY, COL_BG);
-        tft.drawString(GEAR_LABELS[i], x, y);
-        RTRACE_TEXT(x, y, GEAR_LABELS[i], COL_GRAY, COL_BG, 2, MC_DATUM);
+        drawGearPill(tft, i, false);
     }
-
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 }
 
 // -------------------------------------------------------------------------
-// Update highlighted gear
+// Update highlighted gear — only the two changed pills are repainted.
 // -------------------------------------------------------------------------
 void GearDisplay::draw(TFT_eSPI& tft, Gear current, Gear previous) {
     if (current == previous) return;
 
-    tft.setTextSize(2);
-    tft.setTextDatum(MC_DATUM);
-
-    // Unhighlight previous gear
     uint8_t prevIdx = static_cast<uint8_t>(previous);
     if (prevIdx < NUM_GEARS) {
-        int16_t px = GEAR_START_X + prevIdx * GEAR_SPACING;
-        int16_t cx = px + GEAR_LABEL_W / 2;
-        int16_t cy = GEAR_Y + GEAR_LABEL_H / 2;
-
-        tft.fillRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
-        RTRACE_FILL_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_BG);
-        tft.drawRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
-        RTRACE_DRAW_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GRAY);
-        tft.setTextColor(COL_GRAY, COL_BG);
-        tft.drawString(GEAR_LABELS[prevIdx], cx, cy);
-        RTRACE_TEXT(cx, cy, GEAR_LABELS[prevIdx], COL_GRAY, COL_BG, 2, MC_DATUM);
+        drawGearPill(tft, prevIdx, false);
     }
 
-    // Highlight current gear
     uint8_t curIdx = static_cast<uint8_t>(current);
     if (curIdx < NUM_GEARS) {
-        int16_t px = GEAR_START_X + curIdx * GEAR_SPACING;
-        int16_t cx = px + GEAR_LABEL_W / 2;
-        int16_t cy = GEAR_Y + GEAR_LABEL_H / 2;
-
-        tft.fillRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GREEN);
-        RTRACE_FILL_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_GREEN);
-        tft.drawRect(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_WHITE);
-        RTRACE_DRAW_RECT(px, GEAR_Y, GEAR_LABEL_W, GEAR_LABEL_H, COL_WHITE);
-        tft.setTextColor(COL_BLACK, COL_GREEN);
-        tft.drawString(GEAR_LABELS[curIdx], cx, cy);
-        RTRACE_TEXT(cx, cy, GEAR_LABELS[curIdx], COL_BLACK, COL_GREEN, 2, MC_DATUM);
+        drawGearPill(tft, curIdx, true);
     }
 
     tft.setTextDatum(TL_DATUM);

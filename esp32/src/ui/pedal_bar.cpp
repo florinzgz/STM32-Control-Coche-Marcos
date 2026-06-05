@@ -1,117 +1,77 @@
 // =============================================================================
-// ESP32-S3 HMI — Pedal Bar Implementation
+// ESP32-S3 HMI — Throttle Micro-Bar Implementation
+//
+// Slim, label-free throttle indicator centred in the bottom cluster, below the
+// gear pills.  A small ">>" glyph hints at "accelerate"; the bar itself fills
+// green -> yellow -> red with the live throttle demand.  No numeric text keeps
+// the premium cluster clean (favours graphics over digits).
 // =============================================================================
 
 #include "pedal_bar.h"
 #include "render_trace.h"
 #include "ui_config.h"
-#include <cstdio>
 
 namespace ui {
 
 // -------------------------------------------------------------------------
-// Static outline
+// Static frame: throttle glyph + bar outline.
 // -------------------------------------------------------------------------
 void PedalBar::drawStatic(TFT_eSPI& tft) {
-    // Label
-    tft.setTextColor(COL_WHITE, COL_BG);
-    tft.setTextSize(1);
-    tft.setTextDatum(TL_DATUM);
-    tft.drawString("PEDAL", PEDAL_BAR_X, PEDAL_Y);
-    RTRACE_TEXT(PEDAL_BAR_X, PEDAL_Y, "PEDAL", COL_WHITE, COL_BG, 1, TL_DATUM);
+    // Small ">" accelerate glyph to the left of the bar (iconographic).
+    int16_t gy = DTHR_Y + DTHR_H / 2;
+    tft.fillTriangle(DTHR_X - 12, gy - 4, DTHR_X - 12, gy + 4,
+                     DTHR_X - 6, gy, COL_GRAY);
+    RTRACE_LINE(DTHR_X - 12, gy - 4, DTHR_X - 6, gy, COL_GRAY);
 
-    // Bar outline
-    int16_t barY = PEDAL_Y + 12;
-    tft.drawRect(PEDAL_BAR_X, barY, PEDAL_BAR_W, PEDAL_BAR_H, COL_WHITE);
-    RTRACE_DRAW_RECT(PEDAL_BAR_X, barY, PEDAL_BAR_W, PEDAL_BAR_H, COL_WHITE);
+    // Bar trough.
+    tft.fillRoundRect(DTHR_X, DTHR_Y, DTHR_W, DTHR_H, 3, COL_GEAR_OFF);
+    RTRACE_FILL_RECT(DTHR_X, DTHR_Y, DTHR_W, DTHR_H, COL_GEAR_OFF);
+    tft.drawRoundRect(DTHR_X, DTHR_Y, DTHR_W, DTHR_H, 3, COL_GEAR_EDGE);
+    RTRACE_DRAW_RECT(DTHR_X, DTHR_Y, DTHR_W, DTHR_H, COL_GEAR_EDGE);
 }
 
 // -------------------------------------------------------------------------
-// Update pedal bar fill and text
-//
-// Anti-flicker differential update: instead of clearing the entire bar
-// interior and redrawing, we only update the changed portion.
-// If the bar grew, fill the new portion. If it shrank, clear the old tail.
-// This eliminates the visible flash from fillRect→fillRect sequences.
+// Update fill — differential redraw (only the changed portion).
 // -------------------------------------------------------------------------
 void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     if (pedalPct == prevPct) return;
 
-    int16_t barY = PEDAL_Y + 12;
+    uint8_t pct    = (pedalPct > 100) ? 100 : pedalPct;
+    uint8_t prevCl = (prevPct  > 100) ? 100 : prevPct;
 
-    // Clamp to 100
-    uint8_t pct     = (pedalPct > 100) ? 100 : pedalPct;
-    uint8_t prevCl  = (prevPct > 100)  ? 100 : prevPct;
+    int16_t innerW = DTHR_W - 4;
+    int16_t fillW  = static_cast<int16_t>((static_cast<int32_t>(pct)    * innerW) / 100);
+    int16_t prevFW = static_cast<int16_t>((static_cast<int32_t>(prevCl) * innerW) / 100);
 
-    // Calculate fill widths
-    int16_t innerW  = PEDAL_BAR_W - 4;
-    int16_t fillW   = static_cast<int16_t>((static_cast<int32_t>(pct)    * innerW) / 100);
-    int16_t prevFW  = static_cast<int16_t>((static_cast<int32_t>(prevCl) * innerW) / 100);
-
-    // Choose color based on new percentage
     uint16_t fillCol;
-    if (pct <= cfg::PEDAL_COLOR_LOW) {
-        fillCol = COL_GREEN;
-    } else if (pct <= cfg::PEDAL_COLOR_MID) {
-        fillCol = COL_YELLOW;
-    } else {
-        fillCol = COL_RED;
-    }
+    if (pct <= cfg::PEDAL_COLOR_LOW)      fillCol = COL_GREEN;
+    else if (pct <= cfg::PEDAL_COLOR_MID) fillCol = COL_YELLOW;
+    else                                  fillCol = COL_RED;
 
-    // Determine previous color to check if a color boundary was crossed
     uint16_t prevCol;
-    if (prevCl <= cfg::PEDAL_COLOR_LOW) {
-        prevCol = COL_GREEN;
-    } else if (prevCl <= cfg::PEDAL_COLOR_MID) {
-        prevCol = COL_YELLOW;
-    } else {
-        prevCol = COL_RED;
-    }
+    if (prevCl <= cfg::PEDAL_COLOR_LOW)      prevCol = COL_GREEN;
+    else if (prevCl <= cfg::PEDAL_COLOR_MID) prevCol = COL_YELLOW;
+    else                                     prevCol = COL_RED;
+
+    int16_t y = DTHR_Y + 2;
+    int16_t h = DTHR_H - 4;
 
     if (fillCol != prevCol) {
-        // Color threshold crossed — must redraw entire bar to change color
-        // Clear the old fill area and draw new one in one pass
         if (prevFW > fillW) {
-            // Bar shrank: clear the tail first
-            tft.fillRect(PEDAL_BAR_X + 2 + fillW, barY + 2,
-                         prevFW - fillW, PEDAL_BAR_H - 4, COL_BG);
+            tft.fillRect(DTHR_X + 2 + fillW, y, prevFW - fillW, h, COL_GEAR_OFF);
         }
-        // Redraw entire filled portion in new color
         if (fillW > 0) {
-            tft.fillRect(PEDAL_BAR_X + 2, barY + 2,
-                         fillW, PEDAL_BAR_H - 4, fillCol);
-            RTRACE_FILL_RECT(PEDAL_BAR_X + 2, barY + 2,
-                             fillW, PEDAL_BAR_H - 4, fillCol);
+            tft.fillRect(DTHR_X + 2, y, fillW, h, fillCol);
+            RTRACE_FILL_RECT(DTHR_X + 2, y, fillW, h, fillCol);
         }
     } else if (fillW > prevFW) {
-        // Bar grew — fill only the new portion (differential)
         if (prevFW < 0) prevFW = 0;
-        tft.fillRect(PEDAL_BAR_X + 2 + prevFW, barY + 2,
-                     fillW - prevFW, PEDAL_BAR_H - 4, fillCol);
-        RTRACE_FILL_RECT(PEDAL_BAR_X + 2 + prevFW, barY + 2,
-                         fillW - prevFW, PEDAL_BAR_H - 4, fillCol);
+        tft.fillRect(DTHR_X + 2 + prevFW, y, fillW - prevFW, h, fillCol);
+        RTRACE_FILL_RECT(DTHR_X + 2 + prevFW, y, fillW - prevFW, h, fillCol);
     } else if (fillW < prevFW) {
-        // Bar shrank — clear only the removed portion
-        tft.fillRect(PEDAL_BAR_X + 2 + fillW, barY + 2,
-                     prevFW - fillW, PEDAL_BAR_H - 4, COL_BG);
-        RTRACE_FILL_RECT(PEDAL_BAR_X + 2 + fillW, barY + 2,
-                         prevFW - fillW, PEDAL_BAR_H - 4, COL_BG);
+        tft.fillRect(DTHR_X + 2 + fillW, y, prevFW - fillW, h, COL_GEAR_OFF);
+        RTRACE_FILL_RECT(DTHR_X + 2 + fillW, y, prevFW - fillW, h, COL_GEAR_OFF);
     }
-
-    // Percentage text (right of bar) — anti-flicker: padding instead of fillRect
-    char buf[FMT_BUF_SMALL];
-    snprintf(buf, sizeof(buf), "%3u%%", pct);
-    tft.setTextColor(COL_WHITE, COL_BG);
-    tft.setTextSize(2);
-    tft.setTextDatum(ML_DATUM);
-    tft.setTextPadding(cfg::PAD_PEDAL_TEXT);
-    tft.drawString(buf, PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2);
-    RTRACE_TEXT(PEDAL_TEXT_X, barY + PEDAL_BAR_H / 2, buf,
-                COL_WHITE, COL_BG, 2, ML_DATUM);
-    tft.setTextPadding(0);
-
-    tft.setTextDatum(TL_DATUM);  // Reset
-    tft.setTextSize(1);
 }
 
 } // namespace ui

@@ -80,8 +80,14 @@ void DriveScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("drive");
     needsFullRedraw_ = true;
 
-    // ---- Initialize tile regions (dimensions from ui_config.h) ----
-    tiles_.setRect(DTILE_SPEED,      0,   ui::SPEED_Y,  ui::SCREEN_W, ui::SPEED_H);
+    // ---- Initialize tile regions (dimensions from ui_common.h) ----
+    // Speed & RPM analog dials live in the bottom corners.
+    tiles_.setRect(DTILE_SPEED,    ui::SPEED_DIAL_CX - ui::DIAL_R - 2,
+                                   ui::SPEED_DIAL_CY - ui::DIAL_R - 2,
+                                   2 * ui::DIAL_R + 4, 2 * ui::DIAL_R + 4);
+    tiles_.setRect(DTILE_RPM,      ui::RPM_DIAL_CX - ui::DIAL_R - 2,
+                                   ui::RPM_DIAL_CY - ui::DIAL_R - 2,
+                                   2 * ui::DIAL_R + 4, 2 * ui::DIAL_R + 4);
     tiles_.setRect(DTILE_OBSTACLE,   0,   ui::SENSOR_Y, ui::SCREEN_W, ui::SENSOR_H);
     tiles_.setRect(DTILE_WHEELS,     0,   ui::CAR_AREA_Y,
                    ui::cfg::DTILE_WHEELS_W, ui::CAR_AREA_H);
@@ -89,8 +95,11 @@ void DriveScreen::onEnter() {
                    ui::cfg::DTILE_STEERING_W, ui::CAR_AREA_H);
     tiles_.setRect(DTILE_BATTERY,    ui::BAT_X, 0,
                    ui::cfg::DTILE_BATTERY_W, ui::TOP_BAR_H);
-    tiles_.setRect(DTILE_GEAR,       0,   ui::GEAR_Y, ui::SCREEN_W, ui::GEAR_H);
-    tiles_.setRect(DTILE_PEDAL,      0,   ui::PEDAL_Y, ui::SCREEN_W, ui::PEDAL_H);
+    tiles_.setRect(DTILE_CAN,        ui::CAN_IND_X, 0, ui::CAN_IND_W, ui::TOP_BAR_H);
+    tiles_.setRect(DTILE_GEAR,       ui::CLUSTER_X, ui::DGEAR_Y - 2,
+                                     ui::CLUSTER_W, ui::DGEAR_H + 4);
+    tiles_.setRect(DTILE_PEDAL,      ui::DTHR_X - 14, ui::DTHR_Y - 2,
+                                     ui::DTHR_W + 20, ui::DTHR_H + 4);
     tiles_.setRect(DTILE_MODE_ICONS, ui::cfg::DTILE_MODE_ICONS_X, 0,
                    ui::cfg::DTILE_MODE_ICONS_W, ui::TOP_BAR_H);
     tiles_.setRect(DTILE_LED_TOGGLE, ui::cfg::DTILE_LED_TOGGLE_X, 0,
@@ -109,8 +118,10 @@ void DriveScreen::onEnter() {
     memset(prevTemp_, 0, sizeof(prevTemp_));
     prevSteeringRaw_ = 0;
     prevSpeedAvgRaw_ = 0;
+    prevRpmAvg_      = 0;
     prevBattVoltRaw_ = 0;
     prevBattStale_   = false;
+    prevCanOk_       = true;
     prevPedalPct_    = 0;
     prevGear_        = ui::Gear::P;
     prevMode_        = {};
@@ -281,6 +292,16 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // Fault flags for visual overlays (HMI_STATE_MODEL §4.1)
     curFaultFlags_ = data.heartbeat().faultFlags;
 
+    // CAN-link health for the top-bar indicator: the heartbeat (0x001) is the
+    // STM32 liveness beacon.  A never-received or expired heartbeat means the
+    // CAN link is down — shown as a red "CAN" indicator (presentation only;
+    // no control logic is derived from this).
+    {
+        unsigned long hts = data.heartbeat().timestampMs;
+        curCanOk_ = (hts != 0) &&
+                    ((frameTimeMs - hts) <= can::CAN_LOSS_TIMEOUT_MS);
+    }
+
     // ACK visual feedback: detect new ACK or timeout events
     {
         const auto& ad = data.ack();
@@ -315,6 +336,12 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
 
     // SPEED tile
     tiles_.updateHash(DTILE_SPEED, ui::tileHashVal(curSpeedAvgRaw_));
+
+    // RPM tile (derived from average speed)
+    tiles_.updateHash(DTILE_RPM, ui::tileHashVal(curRpmAvg_));
+
+    // CAN link tile
+    tiles_.updateHash(DTILE_CAN, ui::tileHashVal(curCanOk_ ? 1u : 0u));
 
     // OBSTACLE tile
     tiles_.updateHash(DTILE_OBSTACLE, ui::tileHashVal(curObstacleCm_));
@@ -436,14 +463,25 @@ void DriveScreen::draw() {
         ui::PedalBar::drawStatic(tft);
         ui::GearDisplay::drawStatic(tft);
 
-        // Speed label (below speed value, centered)
+        // Top-bar accent separator (thin cyan rule under the status row).
+        tft.drawLine(0, ui::TOP_BAR_H - 1, ui::SCREEN_W - 1, ui::TOP_BAR_H - 1, ui::COL_ACCENT);
+        RTRACE_LINE(0, ui::TOP_BAR_H - 1, ui::SCREEN_W - 1, ui::TOP_BAR_H - 1, ui::COL_ACCENT);
+
+        // CAN link indicator static label.
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         tft.setTextSize(1);
-        tft.setTextDatum(TC_DATUM);
-        tft.drawString("km/h", ui::SCREEN_W / 2, ui::SPEED_Y + 26);
-        RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y + 26, "km/h",
-                    ui::COL_GRAY, ui::COL_BG, 1, TC_DATUM);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString("CAN", ui::CAN_IND_X + 12, ui::CAN_IND_Y + ui::CAN_IND_H / 2);
+        RTRACE_TEXT(ui::CAN_IND_X + 12, ui::CAN_IND_Y + ui::CAN_IND_H / 2, "CAN",
+                    ui::COL_GRAY, ui::COL_BG, 1, ML_DATUM);
         tft.setTextDatum(TL_DATUM);
+
+        // Analog dial bezels (face + ring + ticks). Needles/values are dynamic.
+        ui::DialGauge::drawStatic(tft, ui::SPEED_DIAL_CX, ui::SPEED_DIAL_CY, ui::DIAL_R);
+        ui::DialGauge::drawStatic(tft, ui::RPM_DIAL_CX,   ui::RPM_DIAL_CY,   ui::DIAL_R);
+
+        // AMG performance accent bar (bottom-centre, purely decorative).
+        drawAmgBar();
 
         // "360°" label centered above steering gauge
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
@@ -456,7 +494,9 @@ void DriveScreen::draw() {
 
         // Force all prev_* to differ from cur_* so every tile renders
         prevSpeedAvgRaw_ = curSpeedAvgRaw_ + 1;
+        prevRpmAvg_      = curRpmAvg_ + 1;
         prevBattVoltRaw_ = curBattVoltRaw_ + 1;
+        prevCanOk_       = !curCanOk_;
         prevPedalPct_    = curPedalPct_ + 1;
         prevGear_        = (curGear_ == ui::Gear::P) ? ui::Gear::N : ui::Gear::P;
         prevSteeringRaw_ = curSteeringRaw_ + 10;
@@ -480,11 +520,25 @@ void DriveScreen::draw() {
     // ---- DYNAMIC LAYER — tile-based dirty region rendering ----
     RTRACE_SET_LAYER(2);
 
-    // TILE: Speed (230–270px)
+    // TILE: Speed analog dial (bottom-left)
     if (tiles_.isDirty(DTILE_SPEED)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::SPEED);
-        drawSpeed();
+        drawSpeedDial();
         tiles_.markClean(DTILE_SPEED);
+    }
+
+    // TILE: RPM analog dial (bottom-right)
+    if (tiles_.isDirty(DTILE_RPM)) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::SPEED);
+        drawRpmDial();
+        tiles_.markClean(DTILE_RPM);
+    }
+
+    // TILE: CAN link status (top bar)
+    if (tiles_.isDirty(DTILE_CAN)) {
+        RTMON_ZONE_REDRAW(rtmon::Zone::TOP_BAR);
+        drawCanStatus();
+        tiles_.markClean(DTILE_CAN);
     }
 
     // TILE: Obstacle sensor (40–85px)
@@ -613,6 +667,8 @@ void DriveScreen::draw() {
     // (traction/temp prev values managed in the wheel tile above — threshold logic)
     prevSteeringRaw_ = curSteeringRaw_;
     prevSpeedAvgRaw_ = curSpeedAvgRaw_;
+    prevRpmAvg_      = curRpmAvg_;
+    prevCanOk_       = curCanOk_;
     prevBattVoltRaw_ = curBattVoltRaw_;
     prevPedalPct_    = curPedalPct_;
     prevGear_        = curGear_;
@@ -634,41 +690,88 @@ void DriveScreen::draw() {
 }
 
 // -------------------------------------------------------------------------
-// Speed display helper — in its own zone (230–270px), NOT inside car
-//
-// Anti-flicker: uses setTextPadding() to overwrite previous text in a
-// single SPI transaction instead of fillRect+drawString (which causes
-// a visible blank flash between clear and redraw).
+// Speed analog dial — needle + digital read-out (bottom-left).
+// The dial fully clears and repaints its interior, so no prev_* is needed.
 // -------------------------------------------------------------------------
-void DriveScreen::drawSpeed() {
-    // Convert raw (0.1 km/h) to display
-    uint16_t intPart  = curSpeedAvgRaw_ / 10;
-    uint16_t fracPart = curSpeedAvgRaw_ % 10;
+void DriveScreen::drawSpeedDial() {
+    // Raw is 0.1 km/h; the dial scales 0..SPEED_DIAL_MAX (=40.0 km/h).
+    char buf[ui::FMT_BUF_SMALL];
+    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(curSpeedAvgRaw_ / 10));
+    ui::DialGauge::draw(tft, ui::SPEED_DIAL_CX, ui::SPEED_DIAL_CY, ui::DIAL_R,
+                        curSpeedAvgRaw_, ui::SPEED_DIAL_MAX,
+                        ui::COL_NEEDLE, /*zoned=*/false, buf, "km/h");
+}
 
-    char buf[ui::FMT_BUF_MED];
-    snprintf(buf, sizeof(buf), "%u.%u", intPart, fracPart);
+// -------------------------------------------------------------------------
+// RPM analog dial — needle + digital read-out (bottom-right).
+// Progress arc is zoned (green→amber→red) like an OEM tachometer.
+// -------------------------------------------------------------------------
+void DriveScreen::drawRpmDial() {
+    char buf[ui::FMT_BUF_SMALL];
+    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(curRpmAvg_));
+    ui::DialGauge::draw(tft, ui::RPM_DIAL_CX, ui::RPM_DIAL_CY, ui::DIAL_R,
+                        curRpmAvg_, ui::cfg::RPM_DISPLAY_MAX,
+                        ui::COL_NEEDLE_RPM, /*zoned=*/true, buf, "rpm");
+}
 
-    // Draw speed value — padded to fixed width eliminates flicker
-    tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-    tft.setTextSize(3);
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(ui::cfg::PAD_SPEED);
-    tft.drawString(buf, ui::SCREEN_W / 2, ui::SPEED_Y);
-    RTRACE_TEXT(ui::SCREEN_W / 2, ui::SPEED_Y, buf,
-                ui::COL_WHITE, ui::COL_BG, 3, TC_DATUM);
-    tft.setTextPadding(0);
+// -------------------------------------------------------------------------
+// CAN link status — colored dot next to the static "CAN" label (top bar).
+// Green = heartbeat fresh, red = link lost.  Iconographic, minimal text.
+// -------------------------------------------------------------------------
+void DriveScreen::drawCanStatus() {
+    uint16_t col = curCanOk_ ? ui::COL_GREEN : ui::COL_RED;
+    int16_t cx = ui::CAN_IND_X + 4;
+    int16_t cy = ui::CAN_IND_Y + ui::CAN_IND_H / 2;
 
-    // Draw RPM value (right of speed area, same baseline as "km/h" label)
-    char rpmBuf[ui::FMT_BUF_SMALL];
-    snprintf(rpmBuf, sizeof(rpmBuf), "%u rpm", curRpmAvg_);
-    tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+    // Status dot.
+    tft.fillCircle(cx, cy, 4, col);
+    RTRACE_FILL_CIRCLE(cx, cy, 4, col);
+    tft.drawCircle(cx, cy, 4, ui::COL_WHITE);
+    RTRACE_CIRCLE(cx, cy, 4, ui::COL_WHITE);
+
+    // Compact link state to the right of the "CAN" label.
+    const char* txt = curCanOk_ ? "OK" : "--";
+    tft.setTextColor(col, ui::COL_BG);
     tft.setTextSize(1);
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(ui::cfg::PAD_RPM);
-    tft.drawString(rpmBuf, ui::cfg::RPM_LABEL_X, ui::SPEED_Y + 26);
-    RTRACE_TEXT(ui::cfg::RPM_LABEL_X, ui::SPEED_Y + 26, rpmBuf,
-                ui::COL_WHITE, ui::COL_BG, 1, TC_DATUM);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextPadding(ui::cfg::PAD_CAN_STATE);
+    tft.drawString(txt, ui::CAN_IND_X + 38, cy);
+    RTRACE_TEXT(ui::CAN_IND_X + 38, cy, txt, col, ui::COL_BG, 1, ML_DATUM);
     tft.setTextPadding(0);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// AMG performance accent bar (static) — bottom-centre decorative strip.
+// A dark rounded bar with a deep-red accent block and silver "AMG" wordmark,
+// echoing OEM AMG / performance clusters.  Pure presentation.
+// -------------------------------------------------------------------------
+void DriveScreen::drawAmgBar() {
+    // Bar body.
+    tft.fillRoundRect(ui::AMG_X, ui::AMG_Y, ui::AMG_W, ui::AMG_H, 5, ui::COL_GEAR_OFF);
+    RTRACE_FILL_RECT(ui::AMG_X, ui::AMG_Y, ui::AMG_W, ui::AMG_H, ui::COL_GEAR_OFF);
+    tft.drawRoundRect(ui::AMG_X, ui::AMG_Y, ui::AMG_W, ui::AMG_H, 5, ui::COL_GEAR_EDGE);
+    RTRACE_DRAW_RECT(ui::AMG_X, ui::AMG_Y, ui::AMG_W, ui::AMG_H, ui::COL_GEAR_EDGE);
+
+    // Red accent block on the left edge.
+    tft.fillRect(ui::AMG_X + 3, ui::AMG_Y + 3, 6, ui::AMG_H - 6, ui::COL_AMG_RED);
+    RTRACE_FILL_RECT(ui::AMG_X + 3, ui::AMG_Y + 3, 6, ui::AMG_H - 6, ui::COL_AMG_RED);
+
+    // Silver wordmark.
+    tft.setTextColor(ui::COL_AMG_SILVER, ui::COL_GEAR_OFF);
+    tft.setTextSize(2);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString("AMG", ui::AMG_X + 18, ui::AMG_Y + ui::AMG_H / 2);
+    RTRACE_TEXT(ui::AMG_X + 18, ui::AMG_Y + ui::AMG_H / 2, "AMG",
+                ui::COL_AMG_SILVER, ui::COL_GEAR_OFF, 2, ML_DATUM);
+
+    // Small "4MATIC" tag to the right (subtle).
+    tft.setTextColor(ui::COL_GRAY, ui::COL_GEAR_OFF);
+    tft.setTextSize(1);
+    tft.setTextDatum(MR_DATUM);
+    tft.drawString("4MATIC", ui::AMG_X + ui::AMG_W - 8, ui::AMG_Y + ui::AMG_H / 2);
+    RTRACE_TEXT(ui::AMG_X + ui::AMG_W - 8, ui::AMG_Y + ui::AMG_H / 2, "4MATIC",
+                ui::COL_GRAY, ui::COL_GEAR_OFF, 1, MR_DATUM);
 
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
@@ -686,22 +789,33 @@ void DriveScreen::drawAckIndicator() {
     const char* text = "";
     uint16_t color = ui::COL_BG;
     switch (ackDisplayResult_) {
-        case 1:  text = "OK";       color = ui::COL_GREEN;  break;
-        case 2:  text = "REJECTED"; color = ui::COL_RED;    break;
-        case 3:  text = "TIMEOUT";  color = ui::COL_YELLOW; break;
-        default: text = "";         color = ui::COL_BG;     break;
+        case 1:  text = "OK";  color = ui::COL_GREEN;  break;
+        case 2:  text = "REJ"; color = ui::COL_RED;    break;
+        case 3:  text = "TMO"; color = ui::COL_YELLOW; break;
+        default: text = "";    color = ui::COL_BG;     break;
     }
 
-    // Anti-flicker: setTextPadding overwrites the previous text in one pass
-    tft.setTextColor(color, ui::COL_BG);
-    tft.setTextSize(1);
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(ui::cfg::PAD_ACK);
-    tft.drawString(text, ui::cfg::ACK_X + ui::cfg::ACK_W / 2, ui::cfg::ACK_Y + 2);
-    RTRACE_TEXT(ui::cfg::ACK_X + ui::cfg::ACK_W / 2, ui::cfg::ACK_Y + 2, text,
-                color, ui::COL_BG, 1, TC_DATUM);
-    tft.setTextPadding(0);
-    tft.setTextDatum(TL_DATUM);
+    const int16_t bx = ui::cfg::ACK_X;
+    const int16_t by = ui::cfg::ACK_Y;
+    const int16_t bw = ui::cfg::ACK_W;
+    const int16_t bh = ui::cfg::ACK_H;
+    const int16_t cy = by + bh / 2;
+
+    // Always clear the pill area first (single background fill, no flash).
+    tft.fillRect(bx, by, bw, bh, ui::COL_BG);
+    RTRACE_FILL_RECT(bx, by, bw, bh, ui::COL_BG);
+
+    if (ackDisplayResult_ != 0) {
+        // Colored rounded pill conveys status iconographically.
+        tft.fillRoundRect(bx, by, bw, bh, bh / 2, color);
+        RTRACE_FILL_RECT(bx, by, bw, bh, color);
+        tft.setTextColor(ui::COL_BLACK, color);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(text, bx + bw / 2, cy);
+        RTRACE_TEXT(bx + bw / 2, cy, text, ui::COL_BLACK, color, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -719,27 +833,47 @@ void DriveScreen::drawDegradedOverlay() {
                      ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_BG);
 
     const char* bannerText = nullptr;
+    uint16_t bannerCol = ui::COL_AMBER;
 
     if (curSystemState_ == can::SystemState::DEGRADED) {
-        bannerText = "DEGRADED MODE - 40% POWER";
+        bannerText = "DEGRADED  40%";
+        bannerCol  = ui::COL_AMBER;
     } else if (curSystemState_ == can::SystemState::LIMP_HOME) {
-        bannerText = "LIMP HOME - REDUCED SPEED";
+        bannerText = "LIMP HOME";
+        bannerCol  = ui::COL_RED;
     }
 
     if (bannerText != nullptr) {
-        tft.fillRect(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
-                     ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_AMBER);
-        RTRACE_FILL_RECT(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
-                         ui::cfg::OVL_DEGRADED_W, ui::cfg::OVL_DEGRADED_H, ui::COL_AMBER);
-        tft.setTextColor(ui::COL_BLACK, ui::COL_AMBER);
+        const int16_t bx = ui::cfg::OVL_DEGRADED_X;
+        const int16_t by = ui::cfg::OVL_DEGRADED_Y;
+        const int16_t bw = ui::cfg::OVL_DEGRADED_W;
+        const int16_t bh = ui::cfg::OVL_DEGRADED_H;
+        const int16_t cy = by + bh / 2;
+
+        // Rounded banner body with a colored border for an OEM look.
+        tft.fillRoundRect(bx, by, bw, bh, 6, ui::COL_GEAR_OFF);
+        RTRACE_FILL_RECT(bx, by, bw, bh, ui::COL_GEAR_OFF);
+        tft.drawRoundRect(bx, by, bw, bh, 6, bannerCol);
+        RTRACE_DRAW_RECT(bx, by, bw, bh, bannerCol);
+
+        // Warning triangle icon (left).
+        const int16_t ix = bx + 16;
+        tft.fillTriangle(ix, cy - 8, ix - 8, cy + 7, ix + 8, cy + 7, bannerCol);
+        RTRACE_LINE(ix, cy - 8, ix - 8, cy + 7, bannerCol);
+        tft.setTextColor(ui::COL_BLACK, bannerCol);
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString(bannerText, ui::cfg::OVL_DEGRADED_W / 2,
-                        ui::cfg::OVL_DEGRADED_Y + ui::cfg::OVL_DEGRADED_H / 2);
-        RTRACE_TEXT(ui::cfg::OVL_DEGRADED_W / 2,
-                    ui::cfg::OVL_DEGRADED_Y + ui::cfg::OVL_DEGRADED_H / 2, bannerText,
-                    ui::COL_BLACK, ui::COL_AMBER, 1, MC_DATUM);
+        tft.drawString("!", ix, cy + 1);
+        RTRACE_TEXT(ix, cy + 1, "!", ui::COL_BLACK, bannerCol, 1, MC_DATUM);
+
+        // Banner text.
+        tft.setTextColor(bannerCol, ui::COL_GEAR_OFF);
+        tft.setTextSize(2);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(bannerText, bx + 32, cy);
+        RTRACE_TEXT(bx + 32, cy, bannerText, bannerCol, ui::COL_GEAR_OFF, 2, ML_DATUM);
         tft.setTextDatum(TL_DATUM);
+        tft.setTextSize(1);
     }
 }
 

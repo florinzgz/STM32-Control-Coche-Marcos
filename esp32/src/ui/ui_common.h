@@ -50,6 +50,19 @@ inline constexpr uint16_t COL_BODY_MID    = 0x2945;  // Vehicle body mid band
 inline constexpr uint16_t COL_BODY_LIGHT  = 0x4A8B;  // Vehicle body upper band (sheen)
 inline constexpr uint16_t COL_BODY_EDGE   = 0x6B6D;  // Body top reflective edge
 
+// Premium OEM cluster accent palette (RGB565) — used by the analog dials,
+// the gear selector and the AMG accent bar.  Pure presentation, no extra RAM.
+inline constexpr uint16_t COL_DIAL_FACE   = 0x18E3;  // Dial interior (slightly darker than BG)
+inline constexpr uint16_t COL_DIAL_TICK   = 0x6B4D;  // Inactive tick / bezel marks
+inline constexpr uint16_t COL_DIAL_RING   = 0x4A69;  // Bezel ring
+inline constexpr uint16_t COL_NEEDLE      = 0xFD20;  // Needle (warm amber/orange)
+inline constexpr uint16_t COL_NEEDLE_RPM  = 0x07FF;  // RPM needle (cyan)
+inline constexpr uint16_t COL_AMG_RED     = 0xC000;  // AMG accent red (deep)
+inline constexpr uint16_t COL_AMG_SILVER  = 0xC618;  // AMG silver lettering
+inline constexpr uint16_t COL_GEAR_OFF    = 0x10A2;  // Inactive gear cell fill
+inline constexpr uint16_t COL_GEAR_EDGE   = 0x4A69;  // Inactive gear cell border
+inline constexpr uint16_t COL_ACCENT      = 0x05BF;  // Cool cyan accent (separators)
+
 // -------------------------------------------------------------------------
 // Layout zones (Y coordinates, 480×320 landscape)
 // -------------------------------------------------------------------------
@@ -149,6 +162,62 @@ inline constexpr int16_t PEDAL_BAR_X    = 10;
 inline constexpr int16_t PEDAL_BAR_W    = 380;
 inline constexpr int16_t PEDAL_BAR_H    = 16;
 inline constexpr int16_t PEDAL_TEXT_X   = 400;
+
+// -------------------------------------------------------------------------
+// Premium OEM instrument cluster — bottom zone (Y: 232–320)
+//
+// Layout (keeps the central vehicle/wheels/steering arc above, Y 85–230):
+//   * Analog SPEED dial with needle   — bottom-left  corner
+//   * Analog RPM dial with needle     — bottom-right corner
+//   * Gear selector P/R/N/D1/D2       — centred between the dials
+//   * Throttle micro-bar              — centred, below the gears
+//   * AMG accent bar                  — centred, bottom
+// All geometry uses only TFT_eSPI primitives (no sprites, no heap).
+// -------------------------------------------------------------------------
+
+// Analog dials (270° sweep, gap at the bottom; needle pivots at centre).
+inline constexpr int16_t DIAL_R          = 40;   // outer radius
+inline constexpr int16_t SPEED_DIAL_CX   = 58;
+inline constexpr int16_t SPEED_DIAL_CY   = 278;
+inline constexpr int16_t RPM_DIAL_CX     = 422;
+inline constexpr int16_t RPM_DIAL_CY     = 278;
+
+// Sweep angles, degrees, 0 = up, clockwise positive.  225°→495°(=135°) is a
+// 270° arc with a 90° gap centred at the bottom (180°).
+inline constexpr int16_t DIAL_START_DEG  = 225;
+inline constexpr int16_t DIAL_SWEEP_DEG  = 270;
+
+// Display scaling for the dials.
+inline constexpr uint16_t SPEED_DIAL_MAX = 400;  // 40.0 km/h full-scale (raw 0.1 km/h → /10)
+
+// Centre cluster (between the two dials).
+inline constexpr int16_t CLUSTER_X       = 104;
+inline constexpr int16_t CLUSTER_W       = 272;  // 104..376
+
+// Gear selector — 5 compact pills + relay status letters on the right.
+inline constexpr int16_t DGEAR_Y         = 240;
+inline constexpr int16_t DGEAR_H         = 26;
+inline constexpr int16_t DGEAR_CELL_W    = 40;
+inline constexpr int16_t DGEAR_CELL_GAP  = 5;
+inline constexpr int16_t DGEAR_START_X   = 110;  // first cell left edge
+
+// Throttle micro-bar (below the gears).
+inline constexpr int16_t DTHR_X          = 110;
+inline constexpr int16_t DTHR_Y          = 274;
+inline constexpr int16_t DTHR_W          = 220;
+inline constexpr int16_t DTHR_H          = 8;
+
+// AMG accent bar (bottom of the centre cluster).
+inline constexpr int16_t AMG_X           = 104;
+inline constexpr int16_t AMG_Y           = 292;
+inline constexpr int16_t AMG_W           = 272;
+inline constexpr int16_t AMG_H           = 24;
+
+// CAN link status indicator (top-bar gap between LED toggles and battery).
+inline constexpr int16_t CAN_IND_X       = 312;
+inline constexpr int16_t CAN_IND_Y       = 8;
+inline constexpr int16_t CAN_IND_W       = 86;
+inline constexpr int16_t CAN_IND_H       = 24;
 
 // -------------------------------------------------------------------------
 // Format buffer sizes (all on stack, no heap)

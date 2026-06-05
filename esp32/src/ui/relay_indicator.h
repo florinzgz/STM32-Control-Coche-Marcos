@@ -32,12 +32,13 @@
 
 namespace ui {
 
-// Layout constants for relay indicator in DriveScreen gear bar
+// Layout constants for relay indicator — to the right of the premium gear
+// pills, inside the centre cluster (DriveScreen DTILE_GEAR region).
 namespace cfg {
-    inline constexpr int16_t REL_IND_X     = 430;   // Right side of gear bar
-    inline constexpr int16_t REL_IND_Y     = GEAR_Y;
-    inline constexpr int16_t REL_IND_W     = 50;
-    inline constexpr int16_t REL_IND_H     = GEAR_H;
+    inline constexpr int16_t REL_IND_X     = 344;   // Right of the gear pills
+    inline constexpr int16_t REL_IND_Y     = DGEAR_Y;
+    inline constexpr int16_t REL_IND_W     = 32;
+    inline constexpr int16_t REL_IND_H     = DGEAR_H;
 } // namespace cfg
 
 class RelayIndicator {

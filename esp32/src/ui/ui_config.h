@@ -36,6 +36,9 @@ inline constexpr int16_t PAD_SPEED           = 120;
 // DriveScreen — RPM display (size 1, max "400 rpm")
 inline constexpr int16_t PAD_RPM             = 60;
 
+// DriveScreen — CAN link state (size 1, "OK"/"--")
+inline constexpr int16_t PAD_CAN_STATE       = 16;
+
 // DriveScreen — ACK indicator (size 1, max "REJECTED")
 inline constexpr int16_t PAD_ACK             = 80;
 
