@@ -254,7 +254,9 @@ void CarRenderer::drawWheels(TFT_eSPI& tft,
                              const vehicle::TractionData& traction,
                              const vehicle::TempMapData& tempMap,
                              const uint8_t prevTraction[4],
-                             const int8_t prevTemp[4]) {
+                             const int8_t prevTemp[4],
+                             bool tractionValid,
+                             bool tempValid) {
     static constexpr int16_t wx[4] = { WHL_FL_X, WHL_FR_X, WHL_RL_X, WHL_RR_X };
     static constexpr int16_t wy[4] = { WHL_FL_Y, WHL_FR_Y, WHL_RL_Y, WHL_RR_Y };
     // rightSide: FR(1) and RR(3) have labels on the right
@@ -263,9 +265,11 @@ void CarRenderer::drawWheels(TFT_eSPI& tft,
     for (uint8_t i = 0; i < 4; ++i) {
         if (traction.scale[i] != prevTraction[i] ||
             tempMap.temps[i] != prevTemp[i]) {
-            drawWheel(tft, wx[i], wy[i], traction.scale[i], tempMap.temps[i]);
+            drawWheel(tft, wx[i], wy[i], traction.scale[i], tempMap.temps[i],
+                      tractionValid);
             drawWheelLabel(tft, wx[i], wy[i],
-                           traction.scale[i], tempMap.temps[i], rs[i]);
+                           traction.scale[i], tempMap.temps[i], rs[i],
+                           tractionValid, tempValid);
         }
     }
 }
@@ -282,8 +286,10 @@ void CarRenderer::drawWheels(TFT_eSPI& tft,
 // -------------------------------------------------------------------------
 void CarRenderer::drawWheel(TFT_eSPI& tft,
                             int16_t x, int16_t y,
-                            uint8_t torquePct, int8_t tempC) {
-    uint16_t treadCol = torqueColor(torquePct);
+                            uint8_t torquePct, int8_t tempC,
+                            bool tractionValid) {
+    // Stale/never-received traction → neutral gray tread (do not imply torque)
+    uint16_t treadCol = tractionValid ? torqueColor(torquePct) : COL_GRAY;
 
     // Clear entire wheel + label area
     // Labels sit to the left or right of the wheel (see drawWheels)
@@ -333,8 +339,12 @@ void CarRenderer::drawWheel(TFT_eSPI& tft,
 void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
                                  int16_t wx, int16_t wy,
                                  uint8_t torquePct, int8_t tempC,
-                                 bool rightSide) {
-    uint16_t torqueCol = torqueColor(torquePct);
+                                 bool rightSide,
+                                 bool tractionValid,
+                                 bool tempValid) {
+    // Stale telemetry must not be rendered as a real value (e.g. "100%" /
+    // "0°C"): show a neutral placeholder and a muted colour instead.
+    uint16_t torqueCol = tractionValid ? torqueColor(torquePct) : COL_GRAY;
     char buf[FMT_BUF_SMALL];
 
     if (rightSide) {
@@ -342,7 +352,8 @@ void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
         int16_t lx = wx + WHEEL_W + 4;
         int16_t ly = wy + 4;
         // Torque %
-        snprintf(buf, sizeof(buf), "%u%%", torquePct);
+        if (tractionValid) snprintf(buf, sizeof(buf), "%u%%", torquePct);
+        else               snprintf(buf, sizeof(buf), "--");
         tft.setTextColor(torqueCol, COL_BG);
         tft.setTextSize(2);
         tft.setTextDatum(TL_DATUM);
@@ -350,8 +361,9 @@ void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
         tft.drawString(buf, lx, ly);
         RTRACE_TEXT(lx, ly, buf, torqueCol, COL_BG, 2, TL_DATUM);
         // Temperature
-        snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
-        tft.setTextColor(COL_CYAN, COL_BG);
+        if (tempValid) snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
+        else           snprintf(buf, sizeof(buf), "N/A");
+        tft.setTextColor(tempValid ? COL_CYAN : COL_GRAY, COL_BG);
         tft.setTextSize(1);
         tft.setTextPadding(cfg::PAD_WHEEL_LABEL);
         tft.drawString(buf, lx + 2, ly + 18);
@@ -362,7 +374,8 @@ void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
         int16_t lx = wx - 50;
         int16_t ly = wy + 4;
         // Torque %
-        snprintf(buf, sizeof(buf), "%u%%", torquePct);
+        if (tractionValid) snprintf(buf, sizeof(buf), "%u%%", torquePct);
+        else               snprintf(buf, sizeof(buf), "--");
         tft.setTextColor(torqueCol, COL_BG);
         tft.setTextSize(2);
         tft.setTextDatum(TR_DATUM);
@@ -370,8 +383,9 @@ void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
         tft.drawString(buf, lx + 46, ly);
         RTRACE_TEXT(lx + 46, ly, buf, torqueCol, COL_BG, 2, TR_DATUM);
         // Temperature
-        snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
-        tft.setTextColor(COL_CYAN, COL_BG);
+        if (tempValid) snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
+        else           snprintf(buf, sizeof(buf), "N/A");
+        tft.setTextColor(tempValid ? COL_CYAN : COL_GRAY, COL_BG);
         tft.setTextSize(1);
         tft.setTextPadding(cfg::PAD_WHEEL_LABEL);
         tft.drawString(buf, lx + 44, ly + 18);

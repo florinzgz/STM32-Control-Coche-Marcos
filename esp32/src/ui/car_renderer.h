@@ -29,11 +29,17 @@ public:
 
     /// Update wheel displays with current data.
     /// Only redraws elements that have changed.
+    /// tractionValid / tempValid: when false the corresponding telemetry is
+    /// stale or never received — the label shows "--" / "N/A" instead of a
+    /// misleading default (e.g. 100% torque or 0 °C) and the prev* caches are
+    /// invalidated by the caller so the placeholder is drawn.
     static void drawWheels(TFT_eSPI& tft,
                            const vehicle::TractionData& traction,
                            const vehicle::TempMapData& tempMap,
                            const uint8_t prevTraction[4],
-                           const int8_t prevTemp[4]);
+                           const int8_t prevTemp[4],
+                           bool tractionValid = true,
+                           bool tempValid = true);
 
     /// Draw steering angle indicator.
     /// Only redraws if angle changed.
@@ -45,13 +51,16 @@ private:
     /// Draw a single wheel tyre graphic at given position
     static void drawWheel(TFT_eSPI& tft,
                           int16_t x, int16_t y,
-                          uint8_t torquePct, int8_t tempC);
+                          uint8_t torquePct, int8_t tempC,
+                          bool tractionValid = true);
 
     /// Draw torque/temp label text next to a wheel
     static void drawWheelLabel(TFT_eSPI& tft,
                                int16_t wx, int16_t wy,
                                uint8_t torquePct, int8_t tempC,
-                               bool rightSide);
+                               bool rightSide,
+                               bool tractionValid = true,
+                               bool tempValid = true);
 
     /// Clear and redraw steering rotation line
     static void drawSteerLine(TFT_eSPI& tft,

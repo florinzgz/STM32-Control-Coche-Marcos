@@ -1152,8 +1152,11 @@ static bool     temp_stale[NUM_DS18B20] = {false};
  *   - Safety_Check{Temperature,Sensors} skip the sensor so a single
  *     transient glitch does not cascade into spurious overtemp /
  *     plausibility fault counts on top of the per-sensor flag.
- * The pre-existing global Safety_SetError(SAFETY_ERROR_SENSOR_FAULT)
- * is preserved so the safety envelope is never weakened.
+ * A failed read tags temp_read_invalid[] + ServiceMode only; it no longer
+ * raises the global Safety_SetError(SAFETY_ERROR_SENSOR_FAULT), so a
+ * disconnected or EMI-glitched DS18B20 cannot force DEGRADED/LIMP.  The
+ * absolute-threshold overtemp check in Safety_CheckTemperature() (which
+ * skips invalid samples) remains the authoritative safety envelope.
  * -------------------------------------------------------------------- */
 static bool     temp_read_invalid[NUM_DS18B20] = {false};
 
@@ -1505,10 +1508,19 @@ static float OW_ReadTemperature(uint8_t idx)
         scratch[i] = OW_ReadByte();
     }
 
-    /* CRC check on scratchpad */
+    /* CRC check on scratchpad.
+     *
+     * A CRC failure is informational only — it must NOT raise the GLOBAL
+     * SAFETY_ERROR_SENSOR_FAULT (which forces DEGRADED/LIMP).  A transient
+     * 1-Wire glitch (EMI ground-bounce) or a physically disconnected DS18B20
+     * is flagged per-sensor via temp_read_invalid[idx] and ServiceMode (in
+     * Temperature_ReadAll); the last-known-good value is preserved.  The
+     * authoritative overtemp detector, Safety_CheckTemperature(), uses the
+     * absolute thresholds and already skips invalid samples — so dropping the
+     * global escalation here removes the spurious SENSOR FAULT without
+     * weakening overtemp protection. */
     if (OW_CRC8(scratch, 8) != scratch[8]) {
         temp_read_invalid[idx] = true;       /* Roadmap 1.5: per-sensor tag */
-        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         return 0.0f;
     }
 
@@ -1516,10 +1528,10 @@ static float OW_ReadTemperature(uint8_t idx)
     float temp = (float)raw / 16.0f;
 
     /* DS18B20 operating range: −55 °C to +125 °C.
-     * Values outside this range indicate corrupted data.            */
+     * Values outside this range indicate corrupted data.
+     * Informational only — see CRC note above (no global SENSOR_FAULT). */
     if (temp < -55.0f || temp > 125.0f) {
         temp_read_invalid[idx] = true;       /* Roadmap 1.5: per-sensor tag */
-        Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
         return 0.0f;
     }
 
@@ -1549,9 +1561,12 @@ void Temperature_ReadAll(void)
 
         /* DS18B20 operating range: −55 °C to +125 °C.
          * Values outside this range indicate corrupted data.
-         * Must match the validation in OW_ReadTemperature().        */
+         * No sensor is mapped/present in this fallback path (count == 0),
+         * so an invalid reading must NOT raise the global SENSOR_FAULT —
+         * treat the temperature as simply unavailable (0 °C neutral) and
+         * leave safety gating to Safety_CheckTemperature() once a real
+         * sensor is discovered.  Must match OW_ReadTemperature(). */
         if (temp < -55.0f || temp > 125.0f) {
-            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
             temperatures[0] = 0.0f;
         } else {
             temperatures[0] = temp;
@@ -1648,8 +1663,10 @@ void Temperature_ReadAll(void)
      * dead sensor, stuck bus) remains detectable because its value is
      * bit-identical cycle after cycle.
      *
-     * This is informational only.  The Safety_SetError() calls inside
-     * OW_ReadTemperature() remain the authoritative safety path.
+     * This is informational only.  Authoritative overtemp gating lives in
+     * Safety_CheckTemperature() (absolute thresholds, skips invalid samples);
+     * OW_ReadTemperature() only tags temp_read_invalid[] / ServiceMode and no
+     * longer raises a global SENSOR_FAULT on CRC / out-of-range reads.
      * --------------------------------------------------------------- */
     {
         uint32_t now = HAL_GetTick();

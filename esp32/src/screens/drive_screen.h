@@ -110,6 +110,14 @@ private:
     bool     curBattStale_       = false;
     bool     prevBattStale_      = false;
 
+    // Wheel telemetry staleness: traction (0x205) and temp map (0x206) older
+    // than the CAN-loss timeout → render "--" / "N/A" instead of a frozen
+    // default (e.g. 100% torque or 0 °C) that misrepresents the motors.
+    bool     curTractionStale_   = false;
+    bool     prevTractionStale_  = false;
+    bool     curTempStale_       = false;
+    bool     prevTempStale_      = false;
+
     bool     needsFullRedraw_    = true;
 
     // Precomputed wheel draw values (threshold-filtered in update phase)

@@ -173,6 +173,19 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         curTemp_[i] = data.tempMap().temps[i];
     }
 
+    // Wheel telemetry staleness: a never-received (timestampMs==0) or expired
+    // traction/temp frame must not be shown as a real reading.  When stale the
+    // WHEELS tile renders "--" / "N/A" instead of leftover defaults (the 0x205
+    // scale defaults to 100 and tempMap to 0 °C before any frame arrives).
+    {
+        unsigned long tts = data.traction().timestampMs;
+        curTractionStale_ = (tts == 0) ||
+                            ((frameTimeMs - tts) > can::CAN_LOSS_TIMEOUT_MS);
+        unsigned long mts = data.tempMap().timestampMs;
+        curTempStale_ = (mts == 0) ||
+                        ((frameTimeMs - mts) > can::CAN_LOSS_TIMEOUT_MS);
+    }
+
     // Steering angle
     curSteeringRaw_ = data.steering().angleRaw;
 
@@ -317,6 +330,8 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
             wh = ui::tileHashFeed(wh, drawTraction_[i]);
             wh = ui::tileHashFeed(wh, drawTemp_[i]);
         }
+        wh = ui::tileHashFeed(wh, curTractionStale_ ? 1u : 0u);
+        wh = ui::tileHashFeed(wh, curTempStale_ ? 1u : 0u);
         tiles_.updateHash(DTILE_WHEELS, wh);
     }
 
@@ -483,15 +498,30 @@ void DriveScreen::draw() {
     if (tiles_.isDirty(DTILE_WHEELS)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
 
+        // A stale↔live transition can keep identical scale/temp values, which
+        // the per-wheel guard inside drawWheels would otherwise skip.  Force a
+        // full wheel repaint by invalidating the prev caches so the "--"/"N/A"
+        // placeholder (or the restored live value) is actually painted.
+        if (curTractionStale_ != prevTractionStale_ ||
+            curTempStale_ != prevTempStale_) {
+            for (uint8_t i = 0; i < 4; ++i) {
+                prevTraction_[i] = static_cast<uint8_t>(~drawTraction_[i]);
+                prevTemp_[i] = static_cast<int8_t>(~drawTemp_[i]);
+            }
+        }
+
         ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
             {drawTraction_[0], drawTraction_[1], drawTraction_[2], drawTraction_[3]}, 0},
             vehicle::TempMapData{
             {drawTemp_[0], drawTemp_[1], drawTemp_[2], drawTemp_[3], 0}, 0},
-            prevTraction_, prevTemp_);
+            prevTraction_, prevTemp_,
+            !curTractionStale_, !curTempStale_);
 
         // Update prev to what was actually drawn (not raw CAN values)
         memcpy(prevTraction_, drawTraction_, sizeof(prevTraction_));
         memcpy(prevTemp_, drawTemp_, sizeof(prevTemp_));
+        prevTractionStale_ = curTractionStale_;
+        prevTempStale_ = curTempStale_;
         tiles_.markClean(DTILE_WHEELS);
     }
 
