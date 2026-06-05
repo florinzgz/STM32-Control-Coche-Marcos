@@ -2025,11 +2025,21 @@ void Safety_CheckBatteryVoltage(void)
 {
     float voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
 
-    /* Sensor failure: 0.0 V means TCA9548A channel select failed or
-     * INA226 returned zero — treat as critical (fail-safe).
-     * NaN/Inf hardening: invalid ADC reading → critical sensor failure. */
+    /* Invalid reading (0.0 V / NaN / Inf): on this topology the battery
+     * INA226 sits behind the TCA9548A multiplexer, so a 0 V reading almost
+     * always means the mux channel-select or the INA226 read did NOT ACK on
+     * I2C — NOT that the pack is critically depleted.  Mapping that case to
+     * BATT UV CRIT (Code 10) masks the real cause and contradicts the I2C
+     * topology diagnostic.  Distinguish the two with the report-only
+     * mux_present / ina_ok_mask accumulators (updated by Current_ReadAll):
+     *   - battery INA did NOT ACK  → genuine I2C/sensor fault (Code 11)
+     *   - battery INA DID ACK but still reads ~0 V → real critical UV
+     * Both still enter SAFE (fail-safe), only the reported error differs. */
     if (isnan(voltage) || isinf(voltage) || voltage <= 0.0f) {
-        Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
+        bool batt_ina_ok = Sensor_GetMuxPresent() &&
+                           ((Sensor_GetInaOkMask() & INA226_MASK_BATTERY) != 0U);
+        Safety_SetError(batt_ina_ok ? SAFETY_ERROR_BATTERY_UV_CRITICAL
+                                    : SAFETY_ERROR_I2C_FAILURE);
         Safety_SetState(SYS_STATE_SAFE);
         return;
     }
