@@ -36,6 +36,19 @@ inline constexpr uint16_t COL_DARK_GRAY   = 0x4208;
 inline constexpr uint16_t COL_ORANGE      = 0xFD20;
 inline constexpr uint16_t COL_AMBER       = 0xFBE0;
 inline constexpr uint16_t COL_HEADLIGHT   = 0xFE60;  // Warm orange-yellow for headlight housing
+inline constexpr uint16_t COL_BLUE        = 0x041F;  // Cold (low temperature) blue
+
+// Premium top-down vehicle shading palette (RGB565).
+// Layered greys fake the cylindrical volume of a tyre; the body bands fake
+// a metallic gradient.  Pure presentation — no extra RAM, no sprites.
+inline constexpr uint16_t COL_TYRE_DARK   = 0x18C3;  // Tyre core / contact shadow
+inline constexpr uint16_t COL_TYRE_MID    = 0x39E7;  // Tyre sidewall mid tone
+inline constexpr uint16_t COL_TYRE_LIGHT  = 0x52AA;  // Tyre highlight band
+inline constexpr uint16_t COL_RIM         = 0x9CD3;  // Alloy rim
+inline constexpr uint16_t COL_BODY_DARK   = 0x10A4;  // Vehicle body lower band (shadow)
+inline constexpr uint16_t COL_BODY_MID    = 0x2945;  // Vehicle body mid band
+inline constexpr uint16_t COL_BODY_LIGHT  = 0x4A8B;  // Vehicle body upper band (sheen)
+inline constexpr uint16_t COL_BODY_EDGE   = 0x6B6D;  // Body top reflective edge
 
 // -------------------------------------------------------------------------
 // Layout zones (Y coordinates, 480×320 landscape)
@@ -150,6 +163,24 @@ inline constexpr int FMT_BUF_LARGE  = 32;   // Longer labels
 inline uint16_t torqueColor(uint8_t pct) {
     if (pct <= 50)  return COL_GREEN;
     if (pct <= 80)  return COL_YELLOW;
+    return COL_RED;
+}
+
+// -------------------------------------------------------------------------
+// Helper: motor / sensor temperature to a 5-level "smart" color.
+//   < 25 °C  → BLUE   (cold)
+//   25–49    → GREEN  (normal)
+//   50–64    → YELLOW (warm)
+//   65–79    → ORANGE (hot)
+//   ≥ 80     → RED    (critical)
+// Applied to both motor and ambient temperatures so the whole dash speaks
+// the same color language.
+// -------------------------------------------------------------------------
+inline uint16_t tempColorFull(int8_t tempC) {
+    if (tempC < 25)  return COL_BLUE;
+    if (tempC < 50)  return COL_GREEN;
+    if (tempC < 65)  return COL_YELLOW;
+    if (tempC < 80)  return COL_ORANGE;
     return COL_RED;
 }
 
