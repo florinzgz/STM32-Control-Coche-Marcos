@@ -91,10 +91,10 @@ static void drawMercedesEmblem(int16_t cx, int16_t cy, int16_t radius) {
     }
 
     // Three-pointed star spokes
-    constexpr float DEG_TO_RAD = 3.14159265f / 180.0f;
+    constexpr float kDegToRad = 3.14159265f / 180.0f;
     constexpr int angles[3] = {-90, 30, 150};
     for (int i = 0; i < 3; ++i) {
-        float ang = angles[i] * DEG_TO_RAD;
+        float ang = angles[i] * kDegToRad;
         int16_t ex = cx + static_cast<int16_t>(std::cos(ang) * (radius - 10));
         int16_t ey = cy + static_cast<int16_t>(std::sin(ang) * (radius - 10));
         float nx = -std::sin(ang);
