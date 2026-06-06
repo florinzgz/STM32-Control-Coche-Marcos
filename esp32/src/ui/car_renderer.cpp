@@ -110,13 +110,8 @@ void CarRenderer::drawStatic(TFT_eSPI& tft) {
 void CarRenderer::drawWheels(TFT_eSPI& tft,
                              const vehicle::TractionData& traction,
                              const vehicle::TempMapData& tempMap,
-                             const uint8_t prevTraction[4],
-                             const int8_t prevTemp[4],
                              bool tractionValid,
                              bool tempValid) {
-    (void)prevTraction;
-    (void)prevTemp;
-
     static constexpr int16_t cx[4]   = { WCAP_L_X, WCAP_R_X, WCAP_L_X, WCAP_R_X };
     static constexpr int16_t cy[4]   = { WCAP_TOP_Y, WCAP_TOP_Y, WCAP_BOT_Y, WCAP_BOT_Y };
     static constexpr bool    left[4] = { true, false, true, false };
@@ -272,10 +267,7 @@ void CarRenderer::drawSteering(TFT_eSPI& tft,
 // -------------------------------------------------------------------------
 void CarRenderer::drawSteeringWheelDynamic(TFT_eSPI& tft, int16_t angleRaw) {
     // Clamp the road-wheel angle to the firmware envelope (+-54 deg).
-    int16_t wheelTenth = angleRaw;
-    int16_t lim = static_cast<int16_t>(STEER_MAX_WHEEL_DEG * 10);   // 540
-    if (wheelTenth >  lim) wheelTenth =  lim;
-    if (wheelTenth < -lim) wheelTenth = -lim;
+    int16_t wheelTenth = clampRoadWheelTenths(angleRaw);
 
     // Reconstructed steering-wheel (column) angle, clamped for display.
     int16_t colDeg = steeringWheelDeg(wheelTenth);

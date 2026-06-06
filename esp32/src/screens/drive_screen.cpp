@@ -561,30 +561,18 @@ void DriveScreen::draw() {
     if (tiles_.isDirty(DTILE_WHEELS)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::CAR);
 
-        // A stale↔live transition can keep identical scale/temp values, which
-        // the per-wheel guard inside drawWheels would otherwise skip.  Force a
-        // full wheel repaint by invalidating the prev caches so the "--"/"N/A"
-        // placeholder (or the restored live value) is actually painted.
-        if (curTractionStale_ != prevTractionStale_ ||
-            curTempStale_ != prevTempStale_) {
-            for (uint8_t i = 0; i < 4; ++i) {
-                prevTraction_[i] = static_cast<uint8_t>(~drawTraction_[i]);
-                prevTemp_[i] = static_cast<int8_t>(~drawTemp_[i]);
-            }
-        }
-
+        // drawWheels always repaints all four capsules, and the tile hash folds
+        // in the stale flags, so a stale↔live transition is already a guaranteed
+        // redraw — no prev-cache invalidation needed here.
         ui::CarRenderer::drawWheels(tft, vehicle::TractionData{
             {drawTraction_[0], drawTraction_[1], drawTraction_[2], drawTraction_[3]}, 0},
             vehicle::TempMapData{
             {drawTemp_[0], drawTemp_[1], drawTemp_[2], drawTemp_[3], 0}, 0},
-            prevTraction_, prevTemp_,
             !curTractionStale_, !curTempStale_);
 
         // Update prev to what was actually drawn (not raw CAN values)
         memcpy(prevTraction_, drawTraction_, sizeof(prevTraction_));
         memcpy(prevTemp_, drawTemp_, sizeof(prevTemp_));
-        prevTractionStale_ = curTractionStale_;
-        prevTempStale_ = curTempStale_;
         tiles_.markClean(DTILE_WHEELS);
     }
 
@@ -753,7 +741,8 @@ void DriveScreen::drawCanStatus() {
 // -------------------------------------------------------------------------
 // Ambient temperature read-out (top bar) — TempMapData.temps[4] (CAN 0x206).
 // Presentation only: shows "NN°C" colour-coded, or "--" when the temp-map
-// frame is stale.  The static "AMB" label is drawn once in the full redraw.
+// frame is stale.  No separate "AMB" caption is drawn — the °C suffix and the
+// top-bar position make the ambient reading self-explanatory.
 // -------------------------------------------------------------------------
 void DriveScreen::drawAmbientTemp() {
     int16_t cy = ui::AMB_Y + ui::AMB_H / 2;

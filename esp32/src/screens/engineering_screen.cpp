@@ -772,9 +772,7 @@ void EngineeringScreen::draw() {
         const float   d2r = 3.14159265f / 180.0f;
 
         // Real road-wheel angle (0.1°, clamped to firmware envelope ±54°).
-        int16_t wheelTenth = steeringAngle_;
-        if (wheelTenth >  540) wheelTenth =  540;
-        if (wheelTenth < -540) wheelTenth = -540;
+        int16_t wheelTenth = ui::clampRoadWheelTenths(steeringAngle_);
         // Reconstructed steering-wheel (column) angle, clamped for display.
         int16_t colDeg = ui::steeringWheelDeg(wheelTenth);
         if (colDeg >  350) colDeg =  350;
@@ -792,6 +790,9 @@ void EngineeringScreen::draw() {
         int16_t rIn = R - 6;
         tft.fillCircle(cx, cy, rIn, ui::COL_DIAL_FACE);
         RTRACE_FILL_CIRCLE(cx, cy, rIn, ui::COL_DIAL_FACE);
+
+        // Redraw the static ticks/labels the clear just erased.
+        drawEncoderGaugeTicks();
 
         // ---- Progressive arc from top, proportional to the column angle ----
         float visEnd = static_cast<float>(colDeg) * 150.0f / 350.0f;
@@ -2086,7 +2087,6 @@ void EngineeringScreen::drawEncoderCalibration() {
     const int16_t cx = ECAL_GAUGE_CX;
     const int16_t cy = ECAL_GAUGE_CY;
     const int16_t R  = ECAL_GAUGE_R;
-    const float   d2r = 3.14159265f / 180.0f;
 
     // Recessed face + metallic outer ring.
     tft.fillCircle(cx, cy, R, ui::COL_DIAL_FACE);
@@ -2097,27 +2097,9 @@ void EngineeringScreen::drawEncoderCalibration() {
     RTRACE_CIRCLE(cx, cy, R, ui::COL_RIM);
 
     // Major ticks every 87.5° of column travel across the ±150° visual arc,
-    // with end + centre labels.  Top (12 o'clock) = 0°.
-    for (int t = -4; t <= 4; ++t) {
-        float colDeg = t * 87.5f;
-        float vis    = colDeg * 150.0f / 350.0f;     // ±150° visual sweep
-        float a      = (vis - 90.0f) * d2r;
-        bool  major  = (t == -4 || t == 0 || t == 4);
-        int16_t r1   = R - (major ? 14 : 9);
-        int16_t x1 = cx + static_cast<int16_t>(cosf(a) * r1);
-        int16_t y1 = cy + static_cast<int16_t>(sinf(a) * r1);
-        int16_t x2 = cx + static_cast<int16_t>(cosf(a) * (R - 4));
-        int16_t y2 = cy + static_cast<int16_t>(sinf(a) * (R - 4));
-        tft.drawLine(x1, y1, x2, y2, major ? ui::COL_WHITE : ui::COL_DIAL_RING);
-        RTRACE_LINE(x1, y1, x2, y2, major ? ui::COL_WHITE : ui::COL_DIAL_RING);
-    }
-    // Scale end labels.
-    tft.setTextColor(ui::COL_GRAY, ui::COL_DIAL_FACE);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("0", cx, cy - R + 16);
-    tft.drawString("-350", cx - R + 22, cy + 20);
-    tft.drawString("+350", cx + R - 22, cy + 20);
-    RTRACE_TEXT(cx, cy - R + 16, "0", ui::COL_GRAY, ui::COL_DIAL_FACE, 1, MC_DATUM);
+    // with end + centre labels.  Top (12 o'clock) = 0°.  Shared with the
+    // partial redraw so the interior clear never leaves the ticks erased.
+    drawEncoderGaugeTicks();
     tft.setTextDatum(TL_DATUM);
 
     // ---- Right-hand read-out panel (static captions) ----
@@ -2156,6 +2138,44 @@ void EngineeringScreen::drawEncoderCalibration() {
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
                 ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawEncoderGaugeTicks — major/minor tick marks + scale labels.
+//
+// Shared by the static draw and the live partial redraw: the partial redraw
+// clears the gauge interior (radius R-6), which would otherwise erase the
+// ticks (whose inner ends reach R-14 / R-9) and the centre/end labels.  Call
+// this after clearing so the ticks always stay visible.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawEncoderGaugeTicks() {
+    const int16_t cx = ECAL_GAUGE_CX;
+    const int16_t cy = ECAL_GAUGE_CY;
+    const int16_t R  = ECAL_GAUGE_R;
+    const float   d2r = 3.14159265f / 180.0f;
+
+    for (int t = -4; t <= 4; ++t) {
+        float colDeg = t * 87.5f;
+        float vis    = colDeg * 150.0f / 350.0f;     // ±150° visual sweep
+        float a      = (vis - 90.0f) * d2r;
+        bool  major  = (t == -4 || t == 0 || t == 4);
+        int16_t r1   = R - (major ? 14 : 9);
+        int16_t x1 = cx + static_cast<int16_t>(cosf(a) * r1);
+        int16_t y1 = cy + static_cast<int16_t>(sinf(a) * r1);
+        int16_t x2 = cx + static_cast<int16_t>(cosf(a) * (R - 4));
+        int16_t y2 = cy + static_cast<int16_t>(sinf(a) * (R - 4));
+        tft.drawLine(x1, y1, x2, y2, major ? ui::COL_WHITE : ui::COL_DIAL_RING);
+        RTRACE_LINE(x1, y1, x2, y2, major ? ui::COL_WHITE : ui::COL_DIAL_RING);
+    }
+    // Scale end labels.
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_DIAL_FACE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("0", cx, cy - R + 16);
+    tft.drawString("-350", cx - R + 22, cy + 20);
+    tft.drawString("+350", cx + R - 22, cy + 20);
+    RTRACE_TEXT(cx, cy - R + 16, "0", ui::COL_GRAY, ui::COL_DIAL_FACE, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 

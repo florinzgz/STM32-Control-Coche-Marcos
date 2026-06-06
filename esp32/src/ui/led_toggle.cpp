@@ -79,9 +79,7 @@ void LedToggle::drawFrontButton(TFT_eSPI& tft, bool active) {
     // headlight without any label.
     int16_t lx = LED_FRONT_X + 12;
     int16_t cy = LED_FRONT_Y + LED_FRONT_H / 2;
-    for (int16_t r = 7; r >= 1; --r) {
-        tft.drawCircle(lx, cy, r, houseCol);
-    }
+    tft.fillCircle(lx, cy, 7, houseCol);          // filled disc (matches trace)
     tft.fillRect(lx - 8, cy - 7, 8, 15, bgCol);   // flatten the left side → "D"
     tft.drawLine(lx, cy - 7, lx, cy + 7, houseCol);
     RTRACE_FILL_CIRCLE(lx, cy, 7, houseCol);

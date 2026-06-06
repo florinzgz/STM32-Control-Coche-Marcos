@@ -361,6 +361,18 @@ inline uint16_t throttleGradColor(uint8_t posPct) {
     }
 }
 
+/// Clamp a raw road-wheel angle (0.1° units, CAN 0x204) to the firmware
+/// steering envelope (±STEER_MAX_WHEEL_DEG).  Presentation only — keeps the
+/// drive screen and the engineering calibration gauge consistent.
+///   wheelTenthDeg : road-wheel angle in 0.1° units
+///   returns         : the same value clamped to ±STEER_MAX_WHEEL_DEG×10
+inline int16_t clampRoadWheelTenths(int16_t wheelTenthDeg) {
+    constexpr int16_t lim = STEER_MAX_WHEEL_DEG * 10;   // ±540 (0.1°)
+    if (wheelTenthDeg >  lim) return  lim;
+    if (wheelTenthDeg < -lim) return -lim;
+    return wheelTenthDeg;
+}
+
 /// Reconstruct the visual steering-wheel (column) angle from the real
 /// road-wheel angle.  Presentation only — never affects CAN/control.
 ///   wheelTenthDeg : road-wheel angle in 0.1° units (CAN 0x204)

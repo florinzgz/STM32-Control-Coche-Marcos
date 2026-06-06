@@ -74,6 +74,7 @@ private:
     void drawModuleControl();
     void drawPedalCalibration();
     void drawEncoderCalibration();
+    void drawEncoderGaugeTicks();   // static ticks + scale labels (shared)
     void drawSensorMapIna();
     void drawSensorMapTemp();
     void drawFactoryDefaults();

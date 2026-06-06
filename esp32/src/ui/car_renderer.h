@@ -50,8 +50,6 @@ public:
     static void drawWheels(TFT_eSPI& tft,
                            const vehicle::TractionData& traction,
                            const vehicle::TempMapData& tempMap,
-                           const uint8_t prevTraction[4],
-                           const int8_t prevTemp[4],
                            bool tractionValid = true,
                            bool tempValid = true);
 

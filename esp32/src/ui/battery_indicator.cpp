@@ -103,9 +103,11 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     // Percentage text centred over the bar.  Dark glyphs once the fill reaches
     // past the text centre, light glyphs otherwise (deterministic, no
     // cross-frame state needed because the interior is fully rebuilt here).
+    // textCentre is measured in the inner-bar frame (from innerX) so it matches
+    // the coordinate system fillW is computed in.
     char buf[FMT_BUF_SMALL];
     snprintf(buf, sizeof(buf), "%u%%", pct);
-    int16_t textCentre = (BAT_W - 6) / 2;     // relative to BAT_X below
+    int16_t textCentre = innerW / 2;          // relative to innerX (== fill origin)
     bool useDark = (fillW + 2) >= textCentre;
     uint16_t txtBg = useDark ? col : COL_BG;
     uint16_t txtFg = useDark ? COL_BLACK : COL_WHITE;

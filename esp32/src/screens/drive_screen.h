@@ -119,9 +119,7 @@ private:
     // than the CAN-loss timeout → render "--" / "N/A" instead of a frozen
     // default (e.g. 100% torque or 0 °C) that misrepresents the motors.
     bool     curTractionStale_   = false;
-    bool     prevTractionStale_  = false;
     bool     curTempStale_       = false;
-    bool     prevTempStale_      = false;
 
     bool     needsFullRedraw_    = true;
 
