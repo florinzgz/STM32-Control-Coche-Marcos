@@ -17,6 +17,7 @@
 #include <ESP32-TWAI-CAN.hpp>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 
 extern TFT_eSPI tft;
 
@@ -61,6 +62,12 @@ static constexpr int16_t BACK_X = 10;
 static constexpr int16_t BACK_Y = 280;
 static constexpr int16_t BACK_W = 80;
 static constexpr int16_t BACK_H = 30;
+
+// Steering calibration gauge + read-out panel geometry (FASE 3.5).
+static constexpr int16_t ECAL_GAUGE_CX = 132;
+static constexpr int16_t ECAL_GAUGE_CY = 178;
+static constexpr int16_t ECAL_GAUGE_R  = 96;
+static constexpr int16_t ECAL_PANEL_X  = 270;
 
 static constexpr int16_t SAVE_X = 390;
 static constexpr int16_t SAVE_Y = 280;
@@ -754,52 +761,115 @@ void EngineeringScreen::draw() {
         tft.setTextDatum(TL_DATUM);
     }
 
-    // Partial redraw for encoder calibration (live steering angle)
+    // Partial redraw for encoder calibration (live steering angle gauge)
     if (currentMenu_ == SubMenu::ENCODER_CAL && encoderDataChanged_) {
         encoderDataChanged_ = false;
 
         char buf[ui::FMT_BUF_LARGE];
+        const int16_t cx = ECAL_GAUGE_CX;
+        const int16_t cy = ECAL_GAUGE_CY;
+        const int16_t R  = ECAL_GAUGE_R;
+        const float   d2r = 3.14159265f / 180.0f;
+
+        // Real road-wheel angle (0.1°, clamped to firmware envelope ±54°).
+        int16_t wheelTenth = ui::clampRoadWheelTenths(steeringAngle_);
+        // Reconstructed steering-wheel (column) angle, clamped for display.
+        int16_t colDeg = ui::steeringWheelDeg(wheelTenth);
+        if (colDeg >  350) colDeg =  350;
+        if (colDeg < -350) colDeg = -350;
+
+        // Turn-intensity colour shared across the gauge + read-out.
+        int16_t absWheelDeg = (wheelTenth < 0 ? -wheelTenth : wheelTenth) / 10;
+        uint16_t turnCol = (absWheelDeg <= 3)  ? ui::COL_GREEN
+                         : (absWheelDeg <= 30) ? ui::COL_AMBER
+                                               : ui::COL_ORANGE;
 
         RTRACE_SET_LAYER(2);
-        tft.setTextSize(1);
-        tft.setTextDatum(TL_DATUM);
 
-        // Steering angle
-        tft.fillRect(180, 80, 160, 16, ui::COL_BG);
-        int16_t absAngle = steeringAngle_ < 0 ? -steeringAngle_ : steeringAngle_;
-        snprintf(buf, sizeof(buf), "%s%d.%d deg",
-                 steeringAngle_ < 0 ? "-" : "+",
-                 absAngle / 10, absAngle % 10);
-        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-        tft.drawString(buf, 180, 80);
+        // ---- Re-clear the gauge interior (erases old needle/arc/value) ----
+        int16_t rIn = R - 6;
+        tft.fillCircle(cx, cy, rIn, ui::COL_DIAL_FACE);
+        RTRACE_FILL_CIRCLE(cx, cy, rIn, ui::COL_DIAL_FACE);
 
-        // Calibration status
-        tft.fillRect(180, 100, 160, 16, ui::COL_BG);
-        if (steeringCal_) {
-            tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
-            tft.drawString("CALIBRATED", 180, 100);
-        } else {
-            tft.setTextColor(ui::COL_RED, ui::COL_BG);
-            tft.drawString("NOT CALIBRATED", 180, 100);
+        // Redraw the static ticks/labels the clear just erased.
+        drawEncoderGaugeTicks();
+
+        // ---- Progressive arc from top, proportional to the column angle ----
+        float visEnd = static_cast<float>(colDeg) * 150.0f / 350.0f;
+        int16_t step = (visEnd < 0) ? -3 : 3;
+        int16_t rA1 = R - 10, rA2 = R - 6;
+        for (int16_t v = 0; (step > 0) ? (v <= static_cast<int16_t>(visEnd))
+                                       : (v >= static_cast<int16_t>(visEnd)); v += step) {
+            float a = (static_cast<float>(v) - 90.0f) * d2r;
+            int16_t x1 = cx + static_cast<int16_t>(cosf(a) * rA1);
+            int16_t y1 = cy + static_cast<int16_t>(sinf(a) * rA1);
+            int16_t x2 = cx + static_cast<int16_t>(cosf(a) * rA2);
+            int16_t y2 = cy + static_cast<int16_t>(sinf(a) * rA2);
+            tft.drawLine(x1, y1, x2, y2, turnCol);
         }
+        RTRACE_LINE(cx, cy, cx, cy - rA2, turnCol);
 
-        // Visual angle bar (centered gauge)
-        int16_t gaugeY = 140;
-        int16_t gaugeW = 300;
-        int16_t gaugeH = 20;
-        int16_t gaugeX = (ui::SCREEN_W - gaugeW) / 2;
+        // ---- Needle (direction arrow) toward the column angle ----
+        float na  = (visEnd - 90.0f) * d2r;
+        float ca = cosf(na), sa = sinf(na);
+        int16_t nx = cx + static_cast<int16_t>(ca * (R - 22));
+        int16_t ny = cy + static_cast<int16_t>(sa * (R - 22));
+        // Perpendicular base for a tapered needle.
+        int16_t px = static_cast<int16_t>(-sa * 5.0f);
+        int16_t py = static_cast<int16_t>( ca * 5.0f);
+        tft.fillTriangle(cx + px, cy + py, cx - px, cy - py, nx, ny, turnCol);
+        RTRACE_LINE(cx, cy, nx, ny, turnCol);
 
-        tft.fillRect(gaugeX, gaugeY, gaugeW, gaugeH, ui::COL_DARK_GRAY);
-        // Center line
-        int16_t centerX = gaugeX + gaugeW / 2;
-        tft.drawFastVLine(centerX, gaugeY, gaugeH, ui::COL_GRAY);
+        // Hub.
+        tft.fillCircle(cx, cy, 9, ui::COL_RIM);
+        tft.fillCircle(cx, cy, 6, ui::COL_DIAL_FACE);
+        tft.fillCircle(cx, cy, 2, turnCol);
+        RTRACE_FILL_CIRCLE(cx, cy, 9, ui::COL_RIM);
 
-        // Angle indicator (clamp to ±45°, scale to bar width)
-        int16_t clampedAngle = steeringAngle_;
-        if (clampedAngle > 450)  clampedAngle = 450;
-        if (clampedAngle < -450) clampedAngle = -450;
-        int16_t indicatorX = centerX + (int32_t)clampedAngle * gaugeW / 900;
-        tft.fillRect(indicatorX - 3, gaugeY + 2, 7, gaugeH - 4, ui::COL_AMBER);
+        // ---- Centre value inside the gauge (+128°) ----
+        snprintf(buf, sizeof(buf), "%+d\xC2\xB0", colDeg);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextSize(2);
+        tft.setTextColor(turnCol, ui::COL_DIAL_FACE);
+        tft.drawString(buf, cx, cy + R - 26);
+        RTRACE_TEXT(cx, cy + R - 26, buf, turnCol, ui::COL_DIAL_FACE, 2, MC_DATUM);
+
+        // ---- Right panel: STEERING WHEEL big value ----
+        tft.setTextDatum(TL_DATUM);
+        tft.fillRect(ECAL_PANEL_X, 82, 200, 30, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "%+d\xC2\xB0", colDeg);
+        tft.setTextColor(turnCol, ui::COL_BG);
+        tft.setTextSize(3);
+        tft.drawString(buf, ECAL_PANEL_X, 84);
+        RTRACE_TEXT(ECAL_PANEL_X, 84, buf, turnCol, ui::COL_BG, 3, TL_DATUM);
+
+        // ---- Right panel: WHEEL ANGLE real value ----
+        int16_t aw = (wheelTenth < 0 ? -wheelTenth : wheelTenth);
+        tft.fillRect(ECAL_PANEL_X, 154, 200, 26, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "%s%d.%d\xC2\xB0",
+                 wheelTenth < 0 ? "-" : "+", aw / 10, aw % 10);
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString(buf, ECAL_PANEL_X, 156);
+        RTRACE_TEXT(ECAL_PANEL_X, 156, buf, ui::COL_CYAN, ui::COL_BG, 2, TL_DATUM);
+
+        // ---- Calibration status badge ----
+        int16_t bx = ECAL_PANEL_X, by = 204, bw = 196, bh = 34;
+        uint16_t stCol = steeringCal_ ? ui::COL_GREEN : ui::COL_RED;
+        tft.fillRect(bx, by, bw, bh, ui::COL_BG);
+        tft.drawRoundRect(bx, by, bw, bh, 5, stCol);
+        tft.drawRoundRect(bx + 1, by + 1, bw - 2, bh - 2, 4, stCol);
+        RTRACE_DRAW_RECT(bx, by, bw, bh, stCol);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextColor(stCol, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString(steeringCal_ ? "CALIBRATED" : "NOT CALIBRATED",
+                       bx + bw / 2, by + bh / 2);
+        RTRACE_TEXT(bx + bw / 2, by + bh / 2,
+                    steeringCal_ ? "CALIBRATED" : "NOT CALIBRATED",
+                    stCol, ui::COL_BG, 2, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+        tft.setTextSize(1);
     }
 
     // Partial redraw for INA226/current live diagnostic values.
@@ -1992,8 +2062,10 @@ void EngineeringScreen::drawPedalCalibration() {
 // -------------------------------------------------------------------------
 // drawEncoderCalibration — Live steering encoder verification
 //
-// Shows real-time steering angle, calibration status, and a visual
-// angle gauge bar.  Updated via partial redraw in draw().
+// Premium circular gauge (FASE 3.5): a STEERING WHEEL ±350° dial with needle
+// + progressive arc, a right-hand read-out (reconstructed wheel angle and the
+// real ±54° control angle) and a CALIBRATED / NOT CALIBRATED badge.
+// Presentation only — calibration logic / flash storage are untouched.
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawEncoderCalibration() {
     RTRACE_BEGIN_SCREEN("eng_encoder_cal");
@@ -2005,49 +2077,53 @@ void EngineeringScreen::drawEncoderCalibration() {
     tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextSize(2);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("ENCODER CALIBRATION", ui::SCREEN_W / 2, 15);
-    RTRACE_TEXT(ui::SCREEN_W / 2, 15, "ENCODER CALIBRATION",
+    tft.drawString("STEERING CALIBRATION", ui::SCREEN_W / 2, 15);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 15, "STEERING CALIBRATION",
                 ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
-    // Static labels
-    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Steering Angle:", 40, 80);
-    RTRACE_TEXT(40, 80, "Steering Angle:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Calibration:", 40, 100);
-    RTRACE_TEXT(40, 100, "Calibration:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    // ---- Premium circular gauge (STEERING WHEEL ±350°) ----
+    const int16_t cx = ECAL_GAUGE_CX;
+    const int16_t cy = ECAL_GAUGE_CY;
+    const int16_t R  = ECAL_GAUGE_R;
 
-    // Gauge border
-    int16_t gaugeY = 140;
-    int16_t gaugeW = 300;
-    int16_t gaugeH = 20;
-    int16_t gaugeX = (ui::SCREEN_W - gaugeW) / 2;
-    tft.drawRect(gaugeX - 1, gaugeY - 1, gaugeW + 2, gaugeH + 2, ui::COL_GRAY);
-    RTRACE_DRAW_RECT(gaugeX - 1, gaugeY - 1, gaugeW + 2, gaugeH + 2, ui::COL_GRAY);
+    // Recessed face + metallic outer ring.
+    tft.fillCircle(cx, cy, R, ui::COL_DIAL_FACE);
+    RTRACE_FILL_CIRCLE(cx, cy, R, ui::COL_DIAL_FACE);
+    tft.drawCircle(cx, cy, R,     ui::COL_RIM);
+    tft.drawCircle(cx, cy, R - 1, ui::COL_RIM);
+    tft.drawCircle(cx, cy, R - 2, ui::COL_DIAL_RING);
+    RTRACE_CIRCLE(cx, cy, R, ui::COL_RIM);
 
-    // Scale labels
-    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("-45", gaugeX, gaugeY + gaugeH + 12);
-    tft.drawString("0", gaugeX + gaugeW / 2, gaugeY + gaugeH + 12);
-    tft.drawString("+45", gaugeX + gaugeW, gaugeY + gaugeH + 12);
-    RTRACE_TEXT(gaugeX, gaugeY + gaugeH + 12, "-45", ui::COL_GRAY, ui::COL_BG, 1, MC_DATUM);
-    RTRACE_TEXT(gaugeX + gaugeW / 2, gaugeY + gaugeH + 12, "0", ui::COL_GRAY, ui::COL_BG, 1, MC_DATUM);
-    RTRACE_TEXT(gaugeX + gaugeW, gaugeY + gaugeH + 12, "+45", ui::COL_GRAY, ui::COL_BG, 1, MC_DATUM);
+    // Major ticks every 87.5° of column travel across the ±150° visual arc,
+    // with end + centre labels.  Top (12 o'clock) = 0°.  Shared with the
+    // partial redraw so the interior clear never leaves the ticks erased.
+    drawEncoderGaugeTicks();
     tft.setTextDatum(TL_DATUM);
 
-    // Instructions
+    // ---- Right-hand read-out panel (static captions) ----
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Turn steering to verify encoder response.", 40, 200);
-    RTRACE_TEXT(40, 200, "Turn steering to verify encoder response.",
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("STEERING WHEEL", ECAL_PANEL_X, 64);
+    RTRACE_TEXT(ECAL_PANEL_X, 64, "STEERING WHEEL", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("(reconstructed  +-350)", ECAL_PANEL_X, 116);
+    RTRACE_TEXT(ECAL_PANEL_X, 116, "(reconstructed  +-350)",
                 ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Gauge range: -45 to +45 degrees.", 40, 218);
-    RTRACE_TEXT(40, 218, "Gauge range: -45 to +45 degrees.",
+    tft.drawString("WHEEL ANGLE", ECAL_PANEL_X, 138);
+    RTRACE_TEXT(ECAL_PANEL_X, 138, "WHEEL ANGLE", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("(real control  +-54)", ECAL_PANEL_X, 182);
+    RTRACE_TEXT(ECAL_PANEL_X, 182, "(real control  +-54)",
                 ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Center line = 0 degrees (straight ahead).", 40, 236);
-    RTRACE_TEXT(40, 236, "Center line = 0 degrees (straight ahead).",
-                ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+
+    // Instruction line (compact, premium — no lab wall of text).
+    tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("Turn the wheel to verify response", ui::SCREEN_W / 2, 300);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 300, "Turn the wheel to verify response",
+                ui::COL_DARK_GRAY, ui::COL_BG, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
 
     // Force initial partial redraw of values
     encoderDataChanged_ = true;
@@ -2062,6 +2138,44 @@ void EngineeringScreen::drawEncoderCalibration() {
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
                 ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawEncoderGaugeTicks — major/minor tick marks + scale labels.
+//
+// Shared by the static draw and the live partial redraw: the partial redraw
+// clears the gauge interior (radius R-6), which would otherwise erase the
+// ticks (whose inner ends reach R-14 / R-9) and the centre/end labels.  Call
+// this after clearing so the ticks always stay visible.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawEncoderGaugeTicks() {
+    const int16_t cx = ECAL_GAUGE_CX;
+    const int16_t cy = ECAL_GAUGE_CY;
+    const int16_t R  = ECAL_GAUGE_R;
+    const float   d2r = 3.14159265f / 180.0f;
+
+    for (int t = -4; t <= 4; ++t) {
+        float colDeg = t * 87.5f;
+        float vis    = colDeg * 150.0f / 350.0f;     // ±150° visual sweep
+        float a      = (vis - 90.0f) * d2r;
+        bool  major  = (t == -4 || t == 0 || t == 4);
+        int16_t r1   = R - (major ? 14 : 9);
+        int16_t x1 = cx + static_cast<int16_t>(cosf(a) * r1);
+        int16_t y1 = cy + static_cast<int16_t>(sinf(a) * r1);
+        int16_t x2 = cx + static_cast<int16_t>(cosf(a) * (R - 4));
+        int16_t y2 = cy + static_cast<int16_t>(sinf(a) * (R - 4));
+        tft.drawLine(x1, y1, x2, y2, major ? ui::COL_WHITE : ui::COL_DIAL_RING);
+        RTRACE_LINE(x1, y1, x2, y2, major ? ui::COL_WHITE : ui::COL_DIAL_RING);
+    }
+    // Scale end labels.
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_DIAL_FACE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("0", cx, cy - R + 16);
+    tft.drawString("-350", cx - R + 22, cy + 20);
+    tft.drawString("+350", cx + R - 22, cy + 20);
+    RTRACE_TEXT(cx, cy - R + 16, "0", ui::COL_GRAY, ui::COL_DIAL_FACE, 1, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 }
 

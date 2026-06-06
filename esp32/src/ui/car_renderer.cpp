@@ -1,26 +1,17 @@
 // =============================================================================
-// ESP32-S3 HMI — Car Renderer Implementation
+// ESP32-S3 HMI — Car Renderer Implementation (FASE 3.5)
 //
-// Premium top-down vehicle for the drive dashboard.  Goal: read instantly as a
-// premium 4x4 / instrument cluster, NOT as a CAD or debug schematic.
+// Premium top-down cockpit.  See car_renderer.h for the design intent.
 //
-//   * Ghost vehicle body: a rounded, gradient-shaded silhouette drawn BEHIND
-//     the wheels so the tyres protrude on the sides (wide 4x4 track).
-//   * Shaded tyres (the visual hero): each tyre is layered greys faking a
-//     cylindrical sidewall, with tread notches, a sheen band and a contact
-//     shadow.  A thin colour cap on the rim edge encodes status, so the tyre
-//     itself still looks like rubber.
-//   * Stylised steering wheel: rim + 3 spokes + hub, between the front tyres.
-//   * Faint driveline: thin, dark axles + driveshaft INSIDE the body — a
-//     subtle technical accent, never dominant.
-//   * Steering arc gauge (right side): a green→orange arc + numeric angle.
+//   * Static : solid gradient-shaded SUV body (volume + soft shadow) and the
+//              recessed cockpit pod ring.  No driveline / wireframe.
+//   * Tyres  : four shaded capsules at the corners with % / C / relative load
+//              bar; the hardest-working wheel is highlighted.
+//   * Steering: ONE large 3-spoke wheel that rotates with the reconstructed
+//              steering-wheel angle, plus a dual (Steering Wheel / Wheel Angle)
+//              read-out.  Replaces the old hub wheel AND the separate gauge.
 //
-// Body, steering wheel, driveline and the gauge bezel are STATIC (drawn once
-// on screen enter).  Only the tyres and the steering arc repaint per frame.
-//
-// All geometry uses only TFT_eSPI primitives available on every board:
-//   drawLine, drawRect, fillRect, drawRoundRect, fillRoundRect, drawCircle,
-//   fillCircle, fillTriangle.  No sprites, no heap, no String.
+// Only TFT_eSPI primitives — no sprites, no heap, no String.
 // =============================================================================
 
 #include "car_renderer.h"
@@ -32,298 +23,224 @@
 namespace ui {
 
 // =========================================================================
-// Body geometry — derived from the existing CAR_* / WHL_* layout constants so
-// the vehicle stays centred in the same car area and the wheels keep their
-// fixed positions (referenced by the WHEELS tile + side data labels).
+// Geometry (derived from ui_common.h layout constants)
 // =========================================================================
+static constexpr int16_t CX = SWHEEL_CX;                 // 240, vehicle centre
 
-// Centre X of the vehicle (matches wheel symmetry)
-static constexpr int16_t CX = CAR_BODY_X + CAR_BODY_W / 2;   // 240
+// Premium body silhouette (top-down).  Wider, solid, with rounded shoulders.
+static constexpr int16_t BODY_X   = 150;
+static constexpr int16_t BODY_W   = 180;                 // 150..330
+static constexpr int16_t BODY_TOP = 84;
+static constexpr int16_t BODY_H   = 144;                 // 84..228
+static constexpr int16_t BODY_R   = 28;
 
-// Ghost body box — narrower than the wheel track so the tyres stick out on
-// both sides (the "wide 4x4" reading).  Inner edges of the wheels are at
-// x≈174 (left) and x≈306 (right); the body lives between them.
-static constexpr int16_t BODY_W   = 116;
-static constexpr int16_t BODY_X   = CX - BODY_W / 2;          // 182
-static constexpr int16_t BODY_TOP = WHL_FL_Y - 4;            // 91  (just above front wheels)
-static constexpr int16_t BODY_BOT = WHL_RL_Y + WHEEL_H + 4;  // 228 (just below rear wheels)
-static constexpr int16_t BODY_H   = BODY_BOT - BODY_TOP;     // 137
-static constexpr int16_t BODY_R   = 22;                       // corner radius
+// Cockpit pod well (flat dark region owned by the dynamic steering tile — it
+// is re-cleared each angle change so no body gradient lives underneath).
+static constexpr int16_t PW_X = 172;
+static constexpr int16_t PW_W = 136;                     // 172..308
+static constexpr int16_t PW_Y = 88;
+static constexpr int16_t PW_H = 132;                     // 88..220
+static constexpr int16_t PW_R = 18;
 
-// Steering wheel centre — between the front tyres, on the body.
-static constexpr int16_t SW_CX = CX;
-static constexpr int16_t SW_CY = WHL_FL_Y + WHEEL_H / 2 - 5;  // 112
-static constexpr int16_t SW_R  = 15;
-
-// Axle Y positions (aligned with wheel centres so the driveline looks attached)
-static constexpr int16_t AXLE_F_Y = WHL_FL_Y + WHEEL_H / 2;   // 117
-static constexpr int16_t AXLE_R_Y = WHL_RL_Y + WHEEL_H / 2;   // 202
+static constexpr float DEG2RAD = 3.14159265f / 180.0f;
 
 // -------------------------------------------------------------------------
-// drawVehicleBody — static ghost body with a vertical metallic gradient
+// drawVehicleBody — solid, gradient-shaded premium SUV silhouette
 // -------------------------------------------------------------------------
 void CarRenderer::drawVehicleBody(TFT_eSPI& tft) {
-    // Soft drop shadow under the body (offset down/right)
-    tft.fillRoundRect(BODY_X + 3, BODY_TOP + 2, BODY_W, BODY_H, BODY_R, COL_BODY_DARK);
-    RTRACE_FILL_RECT(BODY_X + 3, BODY_TOP + 2, BODY_W, BODY_H, COL_BODY_DARK);
+    // Soft drop shadow (offset down/right) for depth.
+    tft.fillRoundRect(BODY_X + 4, BODY_TOP + 4, BODY_W, BODY_H, BODY_R, COL_BODY_DARK);
+    RTRACE_FILL_RECT(BODY_X + 4, BODY_TOP + 4, BODY_W, BODY_H, COL_BODY_DARK);
 
-    // Base body (darkest band — the lower/rear gradient)
+    // Base body (darkest band — lower/rear).
     tft.fillRoundRect(BODY_X, BODY_TOP, BODY_W, BODY_H, BODY_R, COL_BODY_DARK);
     RTRACE_FILL_RECT(BODY_X, BODY_TOP, BODY_W, BODY_H, COL_BODY_DARK);
 
-    // Mid band covering the upper ~62 % (rounded top corners match the body)
-    int16_t midH = static_cast<int16_t>(BODY_H * 62 / 100);
+    // Mid band over the upper ~64 % (metallic gradient).
+    int16_t midH = static_cast<int16_t>(BODY_H * 64 / 100);
     tft.fillRoundRect(BODY_X, BODY_TOP, BODY_W, midH, BODY_R, COL_BODY_MID);
     RTRACE_FILL_RECT(BODY_X, BODY_TOP, BODY_W, midH, COL_BODY_MID);
 
-    // Top sheen band (~32 %)
-    int16_t topH = static_cast<int16_t>(BODY_H * 32 / 100);
+    // Top sheen band (~34 %).
+    int16_t topH = static_cast<int16_t>(BODY_H * 34 / 100);
     tft.fillRoundRect(BODY_X, BODY_TOP, BODY_W, topH, BODY_R, COL_BODY_LIGHT);
     RTRACE_FILL_RECT(BODY_X, BODY_TOP, BODY_W, topH, COL_BODY_LIGHT);
 
-    // Bright reflective edge along the very top
+    // Bright reflective edge along the very top (front of the vehicle).
     tft.drawLine(BODY_X + BODY_R, BODY_TOP + 1, BODY_X + BODY_W - BODY_R, BODY_TOP + 1, COL_BODY_EDGE);
     RTRACE_LINE(BODY_X + BODY_R, BODY_TOP + 1, BODY_X + BODY_W - BODY_R, BODY_TOP + 1, COL_BODY_EDGE);
 
-    // Cabin / roof hint — a faint darker rounded panel in the middle gives the
-    // "car" reading without any technical windshield/mirror line work.
-    int16_t cabX = BODY_X + 16;
-    int16_t cabW = BODY_W - 32;
-    int16_t cabY = BODY_TOP + 34;
-    int16_t cabH = BODY_H - 70;
-    tft.fillRoundRect(cabX, cabY, cabW, cabH, 12, COL_BODY_DARK);
-    RTRACE_FILL_RECT(cabX, cabY, cabW, cabH, COL_BODY_DARK);
+    // Headlight hints near the front corners (warm accents — reads as a car,
+    // not a diagram).  Single soft blocks, no technical line work.
+    tft.fillRoundRect(BODY_X + 14, BODY_TOP + 6, 22, 8, 3, COL_HEADLIGHT);
+    RTRACE_FILL_RECT(BODY_X + 14, BODY_TOP + 6, 22, 8, COL_HEADLIGHT);
+    tft.fillRoundRect(BODY_X + BODY_W - 36, BODY_TOP + 6, 22, 8, 3, COL_HEADLIGHT);
+    RTRACE_FILL_RECT(BODY_X + BODY_W - 36, BODY_TOP + 6, 22, 8, COL_HEADLIGHT);
 
-    // Body outline for a crisp silhouette
+    // Crisp silhouette outline.
     tft.drawRoundRect(BODY_X, BODY_TOP, BODY_W, BODY_H, BODY_R, COL_RIM);
     RTRACE_DRAW_RECT(BODY_X, BODY_TOP, BODY_W, BODY_H, COL_RIM);
 }
 
 // -------------------------------------------------------------------------
-// drawDriveline — faint, de-emphasised axles + driveshaft (technical accent)
+// drawCockpitPodStatic — recessed dark well the steering wheel sits in
 // -------------------------------------------------------------------------
-void CarRenderer::drawDriveline(TFT_eSPI& tft) {
-    // Front axle (inside the body, between the front wheels)
-    tft.drawLine(BODY_X + 6, AXLE_F_Y, BODY_X + BODY_W - 6, AXLE_F_Y, COL_DARK_GRAY);
-    RTRACE_LINE(BODY_X + 6, AXLE_F_Y, BODY_X + BODY_W - 6, AXLE_F_Y, COL_DARK_GRAY);
-
-    // Rear axle
-    tft.drawLine(BODY_X + 6, AXLE_R_Y, BODY_X + BODY_W - 6, AXLE_R_Y, COL_DARK_GRAY);
-    RTRACE_LINE(BODY_X + 6, AXLE_R_Y, BODY_X + BODY_W - 6, AXLE_R_Y, COL_DARK_GRAY);
-
-    // Central driveshaft
-    tft.drawLine(CX, AXLE_F_Y, CX, AXLE_R_Y, COL_DARK_GRAY);
-    RTRACE_LINE(CX, AXLE_F_Y, CX, AXLE_R_Y, COL_DARK_GRAY);
-
-    // Subtle differential markers (small grey dots, no CAD boxes)
-    tft.fillCircle(CX, AXLE_F_Y, 3, COL_GRAY);
-    RTRACE_FILL_CIRCLE(CX, AXLE_F_Y, 3, COL_GRAY);
-    tft.fillCircle(CX, AXLE_R_Y, 3, COL_GRAY);
-    RTRACE_FILL_CIRCLE(CX, AXLE_R_Y, 3, COL_GRAY);
-    tft.fillCircle(CX, (AXLE_F_Y + AXLE_R_Y) / 2, 4, COL_GRAY);   // transfer case
-    RTRACE_FILL_CIRCLE(CX, (AXLE_F_Y + AXLE_R_Y) / 2, 4, COL_GRAY);
+void CarRenderer::drawCockpitPodStatic(TFT_eSPI& tft) {
+    // Flat dark cockpit panel (the dynamic steering tile re-clears this rect).
+    tft.fillRoundRect(PW_X, PW_Y, PW_W, PW_H, PW_R, COL_DIAL_FACE);
+    RTRACE_FILL_RECT(PW_X, PW_Y, PW_W, PW_H, COL_DIAL_FACE);
+    tft.drawRoundRect(PW_X, PW_Y, PW_W, PW_H, PW_R, COL_DIAL_RING);
+    RTRACE_DRAW_RECT(PW_X, PW_Y, PW_W, PW_H, COL_DIAL_RING);
 }
 
 // -------------------------------------------------------------------------
-// drawSteeringWheel — stylised metallic wheel (rim + 3 spokes + hub)
-// -------------------------------------------------------------------------
-void CarRenderer::drawSteeringWheel(TFT_eSPI& tft) {
-    // Rim (double circle for a thicker metallic look)
-    tft.drawCircle(SW_CX, SW_CY, SW_R, COL_RIM);
-    tft.drawCircle(SW_CX, SW_CY, SW_R - 1, COL_RIM);
-    RTRACE_CIRCLE(SW_CX, SW_CY, SW_R, COL_RIM);
-
-    // Three spokes (Mercedes-like) at 90°, 210°, 330°
-    static constexpr float DEG2RAD = 3.14159265f / 180.0f;
-    static constexpr float spokeDeg[3] = { 90.0f, 210.0f, 330.0f };
-    for (float d : spokeDeg) {
-        float a = d * DEG2RAD;
-        int16_t ex = SW_CX + static_cast<int16_t>(cosf(a) * (SW_R - 3));
-        int16_t ey = SW_CY + static_cast<int16_t>(sinf(a) * (SW_R - 3));
-        tft.drawLine(SW_CX, SW_CY, ex, ey, COL_RIM);
-        RTRACE_LINE(SW_CX, SW_CY, ex, ey, COL_RIM);
-    }
-
-    // Hub
-    tft.fillCircle(SW_CX, SW_CY, 4, COL_RIM);
-    RTRACE_FILL_CIRCLE(SW_CX, SW_CY, 4, COL_RIM);
-    tft.drawCircle(SW_CX, SW_CY, 4, COL_WHITE);
-    RTRACE_CIRCLE(SW_CX, SW_CY, 4, COL_WHITE);
-}
-
-// -------------------------------------------------------------------------
-// drawStatic — static vehicle (body + driveline + steering wheel + gauge bezel)
-// Drawn once per screen enter.
+// drawStatic — static vehicle (body + cockpit pod ring).  Drawn once.
 // -------------------------------------------------------------------------
 void CarRenderer::drawStatic(TFT_eSPI& tft) {
-    // Order matters: body first, faint driveline on top of body, steering
-    // wheel on top so it is never occluded by the axle accent.
     drawVehicleBody(tft);
-    drawDriveline(tft);
-    drawSteeringWheel(tft);
-
-    // Steering arc gauge bezel (right side of the car area).  The dynamic arc
-    // + needle + numeric angle are painted by drawSteering() inside this ring.
-    tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
-    tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS + 1, COL_GRAY);
-    RTRACE_CIRCLE(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
+    drawCockpitPodStatic(tft);
 }
 
 // -------------------------------------------------------------------------
-// Draw/update all 4 wheels + their torque/temp labels
+// drawWheels — repaint all four corner capsules.
 //
-// Wheel order: 0=FL (left), 1=FR (right), 2=RL (left), 3=RR (right)
-// Labels are placed to the left for FL/RL, to the right for FR/RR.
+// Wheel order: 0=FL, 1=FR, 2=RL, 3=RR.  The relative "hardest-working" wheel
+// highlight depends on all four values, so every capsule is redrawn together.
 // -------------------------------------------------------------------------
 void CarRenderer::drawWheels(TFT_eSPI& tft,
                              const vehicle::TractionData& traction,
                              const vehicle::TempMapData& tempMap,
-                             const uint8_t prevTraction[4],
-                             const int8_t prevTemp[4],
                              bool tractionValid,
                              bool tempValid) {
-    static constexpr int16_t wx[4] = { WHL_FL_X, WHL_FR_X, WHL_RL_X, WHL_RR_X };
-    static constexpr int16_t wy[4] = { WHL_FL_Y, WHL_FR_Y, WHL_RL_Y, WHL_RR_Y };
-    // rightSide: FR(1) and RR(3) have labels on the right
-    static constexpr bool rs[4] = { false, true, false, true };
+    static constexpr int16_t cx[4]   = { WCAP_L_X, WCAP_R_X, WCAP_L_X, WCAP_R_X };
+    static constexpr int16_t cy[4]   = { WCAP_TOP_Y, WCAP_TOP_Y, WCAP_BOT_Y, WCAP_BOT_Y };
+    static constexpr bool    left[4] = { true, false, true, false };
+    static const char*       lbl[4]  = { "FL", "FR", "RL", "RR" };
+
+    // Hardest-working wheel: the max torque across valid wheels.  Ties all
+    // highlight; if all read 0 (or stale) nothing is highlighted.
+    uint8_t maxLoad = 0;
+    if (tractionValid) {
+        for (uint8_t i = 0; i < 4; ++i)
+            if (traction.scale[i] > maxLoad) maxLoad = traction.scale[i];
+    }
 
     for (uint8_t i = 0; i < 4; ++i) {
-        if (traction.scale[i] != prevTraction[i] ||
-            tempMap.temps[i] != prevTemp[i]) {
-            drawWheel(tft, wx[i], wy[i], traction.scale[i], tempMap.temps[i],
-                      tractionValid);
-            drawWheelLabel(tft, wx[i], wy[i],
-                           traction.scale[i], tempMap.temps[i], rs[i],
-                           tractionValid, tempValid);
-        }
+        bool isMax = tractionValid && maxLoad > 0 &&
+                     traction.scale[i] == maxLoad;
+        drawWheelCapsule(tft, cx[i], cy[i], lbl[i],
+                         traction.scale[i], tempMap.temps[i],
+                         left[i], isMax, tractionValid, tempValid);
     }
 }
 
 // -------------------------------------------------------------------------
-// Draw a single shaded tyre (top-down) within the WHEEL_W × WHEEL_H box.
-//
-// The tyre is drawn as a vertical rounded shape (taller than wide) centred in
-// the box, with layered greys faking a cylindrical sidewall, tread notches, a
-// sheen band and a contact shadow.  A thin colour cap on the top/bottom rim
-// edge encodes status (torque level / staleness) without colouring the rubber.
+// drawWheelCapsule — one tyre + % + C + relative 4-segment load bar.
 // -------------------------------------------------------------------------
-void CarRenderer::drawWheel(TFT_eSPI& tft,
-                            int16_t x, int16_t y,
-                            uint8_t torquePct, int8_t tempC,
-                            bool tractionValid) {
-    (void)tempC;
+void CarRenderer::drawWheelCapsule(TFT_eSPI& tft,
+                                   int16_t x, int16_t y,
+                                   const char* label,
+                                   uint8_t torquePct, int8_t tempC,
+                                   bool leftSide,
+                                   bool isMaxLoad,
+                                   bool tractionValid,
+                                   bool tempValid) {
+    // Clear the capsule region.
+    tft.fillRect(x, y, WCAP_W, WCAP_H, COL_BG);
+    RTRACE_FILL_RECT(x, y, WCAP_W, WCAP_H, COL_BG);
 
-    // Status colour: torque level when valid, neutral grey when stale/unknown.
-    uint16_t statusCol = tractionValid ? torqueColor(torquePct) : COL_GRAY;
+    uint16_t loadCol = tractionValid ? torqueColor(torquePct) : COL_GRAY;
+    uint16_t tempCol = tempValid    ? tempColorFull(tempC)    : COL_GRAY;
 
-    // Clear the whole wheel box (labels live outside this box — see drawWheels)
-    tft.fillRect(x, y, WHEEL_W, WHEEL_H, COL_BG);
-    RTRACE_FILL_RECT(x, y, WHEEL_W, WHEEL_H, COL_BG);
+    // ---- Tyre graphic (inner side of the capsule, toward the vehicle) ----
+    static constexpr int16_t TW = 26;
+    static constexpr int16_t TH = WCAP_H - 12;            // 50
+    int16_t tx = leftSide ? (x + WCAP_W - TW - 6) : (x + 6);
+    int16_t ty = y + 6;
 
-    // Tyre footprint inside the box (vertical rounded rect)
-    static constexpr int16_t TW = 26;          // tyre width
-    static constexpr int16_t TH = WHEEL_H - 2;  // tyre height (42)
-    int16_t tx = x + (WHEEL_W - TW) / 2;        // centred horizontally
-    int16_t ty = y + 1;
-
-    // Contact shadow (offset down/right, dark)
+    // Contact shadow.
     tft.fillRoundRect(tx + 2, ty + 3, TW, TH, 7, COL_TYRE_DARK);
     RTRACE_FILL_RECT(tx + 2, ty + 3, TW, TH, COL_TYRE_DARK);
-
-    // Tyre outer (dark rubber)
+    // Outer rubber.
     tft.fillRoundRect(tx, ty, TW, TH, 7, COL_TYRE_DARK);
     RTRACE_FILL_RECT(tx, ty, TW, TH, COL_TYRE_DARK);
-
-    // Sidewall mid tone
+    // Sidewall mid tone.
     tft.fillRoundRect(tx + 3, ty + 2, TW - 6, TH - 4, 5, COL_TYRE_MID);
     RTRACE_FILL_RECT(tx + 3, ty + 2, TW - 6, TH - 4, COL_TYRE_MID);
-
-    // Central sheen band (fakes the rounded cross-section highlight)
+    // Central sheen band.
     tft.fillRect(tx + (TW / 2) - 3, ty + 3, 6, TH - 6, COL_TYRE_LIGHT);
     RTRACE_FILL_RECT(tx + (TW / 2) - 3, ty + 3, 6, TH - 6, COL_TYRE_LIGHT);
-
-    // Tread notches (short dark horizontal bars across the tyre face)
+    // Tread notches.
     for (int16_t ny = ty + 5; ny < ty + TH - 4; ny += 7) {
         tft.fillRect(tx + 3, ny, TW - 6, 2, COL_TYRE_DARK);
     }
-    RTRACE_FILL_RECT(tx + 3, ty + 5, TW - 6, TH - 10, COL_TYRE_DARK);  // trace approx
+    RTRACE_FILL_RECT(tx + 3, ty + 5, TW - 6, TH - 10, COL_TYRE_DARK);
+    // Alloy hub hint.
+    tft.fillCircle(tx + TW / 2, ty + TH / 2, 3, COL_RIM);
+    RTRACE_FILL_CIRCLE(tx + TW / 2, ty + TH / 2, 3, COL_RIM);
+    // Status colour caps (top/bottom rim edge).
+    tft.fillRect(tx + 4, ty, TW - 8, 2, loadCol);
+    RTRACE_FILL_RECT(tx + 4, ty, TW - 8, 2, loadCol);
+    tft.fillRect(tx + 4, ty + TH - 2, TW - 8, 2, loadCol);
+    RTRACE_FILL_RECT(tx + 4, ty + TH - 2, TW - 8, 2, loadCol);
 
-    // Hub hint (small alloy centre)
-    int16_t hcx = x + WHEEL_W / 2;
-    int16_t hcy = y + WHEEL_H / 2;
-    tft.fillCircle(hcx, hcy, 3, COL_RIM);
-    RTRACE_FILL_CIRCLE(hcx, hcy, 3, COL_RIM);
+    // Hardest-working highlight: amber ring around the tyre + a marker dot.
+    if (isMaxLoad) {
+        tft.drawRoundRect(tx - 2, ty - 2, TW + 4, TH + 4, 8, COL_AMBER);
+        RTRACE_DRAW_RECT(tx - 2, ty - 2, TW + 4, TH + 4, COL_AMBER);
+        tft.drawRoundRect(tx - 3, ty - 3, TW + 6, TH + 6, 9, COL_AMBER);
+    }
 
-    // Status colour caps on the top and bottom rim edges
-    tft.fillRect(tx + 4, ty, TW - 8, 2, statusCol);
-    RTRACE_FILL_RECT(tx + 4, ty, TW - 8, 2, statusCol);
-    tft.fillRect(tx + 4, ty + TH - 2, TW - 8, 2, statusCol);
-    RTRACE_FILL_RECT(tx + 4, ty + TH - 2, TW - 8, 2, statusCol);
-}
+    // ---- Text block (outer side of the capsule) ----
+    int16_t txt = leftSide ? (x + 4) : (x + TW + 16);
+    uint16_t lblCol = isMaxLoad ? COL_AMBER : COL_GRAY;
 
-// -------------------------------------------------------------------------
-// Draw torque/temp label text next to a wheel
-//
-// Left-side wheels (FL, RL): label to the LEFT of the wheel
-// Right-side wheels (FR, RR): label to the RIGHT of the wheel
-// -------------------------------------------------------------------------
-void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
-                                 int16_t wx, int16_t wy,
-                                 uint8_t torquePct, int8_t tempC,
-                                 bool rightSide,
-                                 bool tractionValid,
-                                 bool tempValid) {
-    // Stale telemetry must not be rendered as a real value (e.g. "100%" /
-    // "0°C"): show a neutral placeholder and a muted colour instead.
-    uint16_t torqueCol = tractionValid ? torqueColor(torquePct) : COL_GRAY;
-    // Smart 5-level temperature colour (blue→green→yellow→orange→red).
-    uint16_t tempCol   = tempValid ? tempColorFull(tempC) : COL_GRAY;
     char buf[FMT_BUF_SMALL];
 
-    if (rightSide) {
-        // Label to the right of the wheel
-        int16_t lx = wx + WHEEL_W + 4;
-        int16_t ly = wy + 4;
-        // Torque %
-        if (tractionValid) snprintf(buf, sizeof(buf), "%u%%", torquePct);
-        else               snprintf(buf, sizeof(buf), "--");
-        tft.setTextColor(torqueCol, COL_BG);
-        tft.setTextSize(2);
-        tft.setTextDatum(TL_DATUM);
-        tft.setTextPadding(cfg::PAD_WHEEL_LABEL);
-        tft.drawString(buf, lx, ly);
-        RTRACE_TEXT(lx, ly, buf, torqueCol, COL_BG, 2, TL_DATUM);
-        // Temperature
-        if (tempValid) snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
-        else           snprintf(buf, sizeof(buf), "N/A");
-        tft.setTextColor(tempCol, COL_BG);
-        tft.setTextSize(1);
-        tft.setTextPadding(cfg::PAD_WHEEL_LABEL);
-        tft.drawString(buf, lx + 2, ly + 18);
-        RTRACE_TEXT(lx + 2, ly + 18, buf, tempCol, COL_BG, 1, TL_DATUM);
-        tft.setTextPadding(0);
-    } else {
-        // Label to the left of the wheel
-        int16_t lx = wx - 50;
-        int16_t ly = wy + 4;
-        // Torque %
-        if (tractionValid) snprintf(buf, sizeof(buf), "%u%%", torquePct);
-        else               snprintf(buf, sizeof(buf), "--");
-        tft.setTextColor(torqueCol, COL_BG);
-        tft.setTextSize(2);
-        tft.setTextDatum(TR_DATUM);
-        tft.setTextPadding(cfg::PAD_WHEEL_LABEL);
-        tft.drawString(buf, lx + 46, ly);
-        RTRACE_TEXT(lx + 46, ly, buf, torqueCol, COL_BG, 2, TR_DATUM);
-        // Temperature
-        if (tempValid) snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
-        else           snprintf(buf, sizeof(buf), "N/A");
-        tft.setTextColor(tempCol, COL_BG);
-        tft.setTextSize(1);
-        tft.setTextPadding(cfg::PAD_WHEEL_LABEL);
-        tft.drawString(buf, lx + 44, ly + 18);
-        RTRACE_TEXT(lx + 44, ly + 18, buf, tempCol, COL_BG, 1, TR_DATUM);
-        tft.setTextPadding(0);
+    // Label + (optional) MAX flag.
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(lblCol, COL_BG);
+    tft.drawString(label, txt, y + 1);
+    RTRACE_TEXT(txt, y + 1, label, lblCol, COL_BG, 1, TL_DATUM);
+    if (isMaxLoad) {
+        tft.setTextColor(COL_AMBER, COL_BG);
+        tft.drawString("MAX", txt + 20, y + 1);
+        RTRACE_TEXT(txt + 20, y + 1, "MAX", COL_AMBER, COL_BG, 1, TL_DATUM);
+    }
+
+    // Torque %.
+    if (tractionValid) snprintf(buf, sizeof(buf), "%u%%", torquePct);
+    else               snprintf(buf, sizeof(buf), "--");
+    tft.setTextColor(loadCol, COL_BG);
+    tft.setTextSize(2);
+    tft.drawString(buf, txt, y + 12);
+    RTRACE_TEXT(txt, y + 12, buf, loadCol, COL_BG, 2, TL_DATUM);
+
+    // Temperature.
+    if (tempValid) snprintf(buf, sizeof(buf), "%d\xC2\xB0""C", tempC);
+    else           snprintf(buf, sizeof(buf), "N/A");
+    tft.setTextColor(tempCol, COL_BG);
+    tft.setTextSize(1);
+    tft.drawString(buf, txt, y + 32);
+    RTRACE_TEXT(txt, y + 32, buf, tempCol, COL_BG, 1, TL_DATUM);
+
+    // ---- Relative 4-segment load bar ----
+    // Absolute %, four 25 %-segments (mirrors the approved mockup "FL ▰▰▰▱").
+    // Real data is never invented: if all read 100 %, four segments show.
+    static constexpr int16_t SEG_W = 19;
+    static constexpr int16_t SEG_H = 8;
+    static constexpr int16_t SEG_GAP = 2;
+    int16_t barY = y + WCAP_H - SEG_H - 1;
+    uint8_t filled = tractionValid
+                     ? static_cast<uint8_t>((torquePct * 4 + 50) / 100)
+                     : 0;
+    if (filled > 4) filled = 4;
+    for (uint8_t s = 0; s < 4; ++s) {
+        int16_t sx = txt + s * (SEG_W + SEG_GAP);
+        uint16_t segCol = (s < filled) ? loadCol : COL_DARK_GRAY;
+        tft.fillRoundRect(sx, barY, SEG_W, SEG_H, 2, segCol);
+        RTRACE_FILL_RECT(sx, barY, SEG_W, SEG_H, segCol);
     }
 
     tft.setTextDatum(TL_DATUM);
@@ -331,83 +248,134 @@ void CarRenderer::drawWheelLabel(TFT_eSPI& tft,
 }
 
 // -------------------------------------------------------------------------
-// Draw steering angle indicator — green→orange arc + needle + numeric angle.
-// Repaints only when the angle changed.
+// drawSteering — repaint the single rotating wheel only if the angle changed.
 // -------------------------------------------------------------------------
 void CarRenderer::drawSteering(TFT_eSPI& tft,
                                int16_t angleRaw,
                                int16_t prevAngleRaw) {
     if (angleRaw == prevAngleRaw) return;
-
-    // Colour: green when centred, orange once turning (matches the reference).
-    int16_t absDeg = static_cast<int16_t>((angleRaw < 0 ? -angleRaw : angleRaw) / 10);
-    uint16_t col = (absDeg <= 3) ? COL_GREEN : COL_ORANGE;
-
-    drawSteerArc(tft, angleRaw, col);
+    drawSteeringWheelDynamic(tft, angleRaw);
 }
 
 // -------------------------------------------------------------------------
-// drawSteerArc — clear the gauge interior, redraw bezel, then paint the arc,
-// needle and numeric angle for the given raw angle / colour.
+// drawSteeringWheelDynamic — clear the cockpit pod, draw the rotating
+// 3-spoke wheel, a progressive direction arc and the dual angle read-out.
+//
+// Presentation only.  angleRaw = road-wheel angle in 0.1 deg (CAN 0x204).
+//   Wheel Angle    = angleRaw / 10           (real, firmware +-54)
+//   Steering Wheel = WheelAngle x 6.48        (reconstructed column, ~+-350)
 // -------------------------------------------------------------------------
-void CarRenderer::drawSteerArc(TFT_eSPI& tft,
-                               int16_t angleRaw, uint16_t color) {
-    // Clear gauge interior.
-    tft.fillCircle(STEER_CX, STEER_CY, STEER_RADIUS - 1, COL_BG);
-    RTRACE_FILL_CIRCLE(STEER_CX, STEER_CY, STEER_RADIUS - 1, COL_BG);
+void CarRenderer::drawSteeringWheelDynamic(TFT_eSPI& tft, int16_t angleRaw) {
+    // Clamp the road-wheel angle to the firmware envelope (+-54 deg).
+    int16_t wheelTenth = clampRoadWheelTenths(angleRaw);
 
-    // Redraw the static bezel (fixes any erased pixels on the ring).
-    tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
-    tft.drawCircle(STEER_CX, STEER_CY, STEER_RADIUS + 1, COL_GRAY);
-    RTRACE_CIRCLE(STEER_CX, STEER_CY, STEER_RADIUS, COL_GRAY);
+    // Reconstructed steering-wheel (column) angle, clamped for display.
+    int16_t colDeg = steeringWheelDeg(wheelTenth);
+    if (colDeg >  350) colDeg =  350;
+    if (colDeg < -350) colDeg = -350;
 
-    // angleRaw is in 0.1° units; 0° = straight up, positive = right turn.
-    float angleDeg = static_cast<float>(angleRaw) * 0.1f;
-    if (angleDeg >  45.0f) angleDeg =  45.0f;
-    if (angleDeg < -45.0f) angleDeg = -45.0f;
+    const int16_t cx = SWHEEL_CX;
+    const int16_t cy = SWHEEL_CY;
+    const int16_t R  = SWHEEL_R;
 
-    static constexpr float DEG2RAD = 3.14159265f / 180.0f;
+    // ---- Re-clear the cockpit pod (flat — no gradient underneath) ----
+    tft.fillRoundRect(PW_X, PW_Y, PW_W, PW_H, PW_R, COL_DIAL_FACE);
+    RTRACE_FILL_RECT(PW_X, PW_Y, PW_W, PW_H, COL_DIAL_FACE);
+    tft.drawRoundRect(PW_X, PW_Y, PW_W, PW_H, PW_R, COL_DIAL_RING);
+    RTRACE_DRAW_RECT(PW_X, PW_Y, PW_W, PW_H, COL_DIAL_RING);
 
-    // Sweep arc from top (0°) to the current angle, as short radial ticks near
-    // the rim — reads as a filling arc without per-pixel arc math.
-    float   mag   = (angleDeg < 0.0f) ? -angleDeg : angleDeg;
-    int16_t steps = static_cast<int16_t>(mag);
-    int16_t dir   = (angleDeg < 0.0f) ? -1 : 1;
-    for (int16_t d = 0; d <= steps; d += 3) {
-        float a = (static_cast<float>(dir * d) - 90.0f) * DEG2RAD;
-        int16_t r1 = STEER_RADIUS - 5;
-        int16_t r2 = STEER_RADIUS - 1;
-        int16_t x1 = STEER_CX + static_cast<int16_t>(cosf(a) * r1);
-        int16_t y1 = STEER_CY + static_cast<int16_t>(sinf(a) * r1);
-        int16_t x2 = STEER_CX + static_cast<int16_t>(cosf(a) * r2);
-        int16_t y2 = STEER_CY + static_cast<int16_t>(sinf(a) * r2);
-        tft.drawLine(x1, y1, x2, y2, color);
-        RTRACE_LINE(x1, y1, x2, y2, color);
+    // Recessed disc behind the wheel.
+    tft.fillCircle(cx, cy, SWHEEL_POD_R, COL_BG);
+    RTRACE_FILL_CIRCLE(cx, cy, SWHEEL_POD_R, COL_BG);
+    tft.drawCircle(cx, cy, SWHEEL_POD_R, COL_DIAL_RING);
+    RTRACE_CIRCLE(cx, cy, SWHEEL_POD_R, COL_DIAL_RING);
+
+    // Turn-intensity colour (kept consistent across the read-out).
+    int16_t absWheelDeg = (wheelTenth < 0 ? -wheelTenth : wheelTenth) / 10;
+    uint16_t turnCol = (absWheelDeg <= 3)  ? COL_GREEN
+                     : (absWheelDeg <= 30) ? COL_AMBER
+                                           : COL_ORANGE;
+
+    // ---- Progressive direction arc on the disc rim ----
+    // Sweeps from top (-90 deg) by an amount proportional to the column angle
+    // (scaled into a readable +-150 deg visual arc), showing both magnitude
+    // and direction.
+    int16_t arcSpan = static_cast<int16_t>(
+        static_cast<int32_t>(colDeg) * 150 / 350);       // +-150 visual
+    int16_t arcStep = (arcSpan < 0) ? -4 : 4;
+    int16_t r1 = SWHEEL_POD_R - 4, r2 = SWHEEL_POD_R - 1;
+    for (int16_t d = 0; (arcStep > 0) ? (d <= arcSpan) : (d >= arcSpan); d += arcStep) {
+        float a = (static_cast<float>(d) - 90.0f) * DEG2RAD;
+        int16_t x1 = cx + static_cast<int16_t>(cosf(a) * r1);
+        int16_t y1 = cy + static_cast<int16_t>(sinf(a) * r1);
+        int16_t x2 = cx + static_cast<int16_t>(cosf(a) * r2);
+        int16_t y2 = cy + static_cast<int16_t>(sinf(a) * r2);
+        tft.drawLine(x1, y1, x2, y2, turnCol);
+        RTRACE_LINE(x1, y1, x2, y2, turnCol);
     }
 
-    // Needle from centre to the current angle.
-    float na = (angleDeg - 90.0f) * DEG2RAD;
-    int16_t ex = STEER_CX + static_cast<int16_t>(cosf(na) * (STEER_RADIUS - 4));
-    int16_t ey = STEER_CY + static_cast<int16_t>(sinf(na) * (STEER_RADIUS - 4));
-    tft.drawLine(STEER_CX, STEER_CY, ex, ey, color);
-    RTRACE_LINE(STEER_CX, STEER_CY, ex, ey, color);
+    // ---- Steering wheel rim (thick, metallic) ----
+    tft.drawCircle(cx, cy, R,     COL_RIM);
+    tft.drawCircle(cx, cy, R - 1, COL_RIM);
+    tft.drawCircle(cx, cy, R - 2, COL_RIM);
+    tft.drawCircle(cx, cy, R - 3, COL_TYRE_DARK);   // inner shadow groove
+    RTRACE_CIRCLE(cx, cy, R, COL_RIM);
 
-    // Centre hub
-    tft.fillCircle(STEER_CX, STEER_CY, 3, COL_WHITE);
-    RTRACE_FILL_CIRCLE(STEER_CX, STEER_CY, 3, COL_WHITE);
+    // ---- Three rotating spokes (Mercedes-style: two upper + one lower) ----
+    // Base angles in screen space (y-down): upper-left, upper-right, bottom.
+    static constexpr float spokeBase[3] = { 200.0f, 340.0f, 90.0f };
+    float rot = static_cast<float>(colDeg);             // CW positive = right
+    int16_t hubR = 7;
+    for (float base : spokeBase) {
+        float a = (base + rot) * DEG2RAD;
+        float ca = cosf(a), sa = sinf(a);
+        int16_t ex = cx + static_cast<int16_t>(ca * (R - 4));
+        int16_t ey = cy + static_cast<int16_t>(sa * (R - 4));
+        int16_t sx = cx + static_cast<int16_t>(ca * hubR);
+        int16_t sy = cy + static_cast<int16_t>(sa * hubR);
+        // Thicken the spoke with a perpendicular offset (~3 px).
+        int16_t px = static_cast<int16_t>(-sa * 1.5f);
+        int16_t py = static_cast<int16_t>( ca * 1.5f);
+        tft.fillTriangle(sx + px, sy + py, sx - px, sy - py, ex, ey, COL_RIM);
+        tft.drawLine(sx, sy, ex, ey, COL_RIM);
+        RTRACE_LINE(sx, sy, ex, ey, COL_RIM);
+    }
 
-    // Numeric angle below the gauge (0.1° → whole degrees).
-    char buf[FMT_BUF_SMALL];
-    int16_t deg = static_cast<int16_t>(angleRaw / 10);
-    snprintf(buf, sizeof(buf), "%d\xC2\xB0", deg);
-    tft.setTextColor(color, COL_BG);
-    tft.setTextSize(1);
+    // ---- Hub with AMG-style accent ----
+    tft.fillCircle(cx, cy, hubR, COL_RIM);
+    RTRACE_FILL_CIRCLE(cx, cy, hubR, COL_RIM);
+    tft.fillCircle(cx, cy, hubR - 2, COL_DIAL_FACE);
+    tft.fillCircle(cx, cy, 2, turnCol);
+
+    // ---- Dual read-out (magnitudes kept separate) ----
+    char buf[FMT_BUF_MED];
+
     tft.setTextDatum(TC_DATUM);
-    tft.setTextPadding(cfg::PAD_RPM);
-    tft.drawString(buf, STEER_CX, STEER_CY + STEER_RADIUS + 4);
-    RTRACE_TEXT(STEER_CX, STEER_CY + STEER_RADIUS + 4, buf, color, COL_BG, 1, TC_DATUM);
-    tft.setTextPadding(0);
+
+    // Caption.
+    tft.setTextSize(1);
+    tft.setTextColor(COL_GRAY, COL_DIAL_FACE);
+    tft.drawString("STEERING WHEEL", cx, SWHEEL_TXT_Y1);
+    RTRACE_TEXT(cx, SWHEEL_TXT_Y1, "STEERING WHEEL", COL_GRAY, COL_DIAL_FACE, 1, TC_DATUM);
+
+    // Reconstructed steering-wheel angle (big).
+    snprintf(buf, sizeof(buf), "%+d\xC2\xB0", colDeg);
+    tft.setTextSize(2);
+    tft.setTextColor(turnCol, COL_DIAL_FACE);
+    tft.drawString(buf, cx, SWHEEL_VAL_Y);
+    RTRACE_TEXT(cx, SWHEEL_VAL_Y, buf, turnCol, COL_DIAL_FACE, 2, TC_DATUM);
+
+    // Real road-wheel angle (secondary, one decimal).
+    int16_t aw = (wheelTenth < 0 ? -wheelTenth : wheelTenth);
+    snprintf(buf, sizeof(buf), "WHEEL ANGLE %s%d.%d\xC2\xB0",
+             wheelTenth < 0 ? "-" : "+", aw / 10, aw % 10);
+    tft.setTextSize(1);
+    tft.setTextColor(COL_CYAN, COL_DIAL_FACE);
+    tft.drawString(buf, cx, SWHEEL_TXT_Y2);
+    RTRACE_TEXT(cx, SWHEEL_TXT_Y2, buf, COL_CYAN, COL_DIAL_FACE, 1, TC_DATUM);
+
     tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
 }
 
 } // namespace ui

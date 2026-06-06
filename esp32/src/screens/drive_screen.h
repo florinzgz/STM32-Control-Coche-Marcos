@@ -66,6 +66,7 @@ enum DriveTile : uint8_t {
     DTILE_ACK,
     DTILE_RPM,
     DTILE_CAN,
+    DTILE_AMBIENT,
     DTILE_COUNT
 };
 
@@ -118,9 +119,7 @@ private:
     // than the CAN-loss timeout → render "--" / "N/A" instead of a frozen
     // default (e.g. 100% torque or 0 °C) that misrepresents the motors.
     bool     curTractionStale_   = false;
-    bool     prevTractionStale_  = false;
     bool     curTempStale_       = false;
-    bool     prevTempStale_      = false;
 
     bool     needsFullRedraw_    = true;
 
@@ -139,6 +138,10 @@ private:
     // CAN-link health (top-bar indicator). Derived from heartbeat staleness.
     bool curCanOk_  = true;
     bool prevCanOk_ = true;
+
+    // Ambient temperature (TempMapData.temps[4], CAN 0x206) — top-bar read-out.
+    int8_t curAmbientTemp_  = 0;
+    int8_t prevAmbientTemp_ = 0;
 
     // Overlay visibility tracking for invalidation chain.
     // When an overlay transitions from visible→invisible, underlying
@@ -170,6 +173,7 @@ private:
     void drawSpeedDial();
     void drawRpmDial();
     void drawCanStatus();
+    void drawAmbientTemp();
     void drawAmgBar();
     void drawAckIndicator();
     void drawDegradedOverlay();

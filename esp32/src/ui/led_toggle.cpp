@@ -61,72 +61,69 @@ bool LedToggle::hitTestRear(int16_t touchX, int16_t touchY) {
 //     3 angled lines going left    = low-beam pattern
 // -------------------------------------------------------------------------
 void LedToggle::drawFrontButton(TFT_eSPI& tft, bool active) {
-    uint16_t bgCol   = active ? COL_YELLOW   : COL_BG;
-    uint16_t bordCol = active ? COL_WHITE    : COL_GRAY;
-    uint16_t rayCol  = active ? COL_WHITE    : COL_DARK_GRAY;
-    uint16_t houseCol = active ? COL_HEADLIGHT  : COL_GRAY;  // warm yellow when on, gray when off
+    uint16_t bgCol    = active ? COL_YELLOW    : COL_GEAR_OFF;
+    uint16_t bordCol  = active ? COL_WHITE      : COL_DIAL_RING;
+    uint16_t rayCol   = active ? COL_BLACK      : COL_DARK_GRAY;
+    uint16_t houseCol = active ? COL_BLACK      : COL_GRAY;
 
-    // Background + border
-    tft.fillRect(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, bgCol);
+    // Rounded button face (clear the cell first to avoid stale corners).
+    tft.fillRect(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, COL_BG);
+    RTRACE_FILL_RECT(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, COL_BG);
+    tft.fillRoundRect(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, 5, bgCol);
     RTRACE_FILL_RECT(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, bgCol);
-    tft.drawRect(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, bordCol);
+    tft.drawRoundRect(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, 5, bordCol);
     RTRACE_DRAW_RECT(LED_FRONT_X, LED_FRONT_Y, LED_FRONT_W, LED_FRONT_H, bordCol);
 
-    // Headlight housing circle (right side of button)
-    int16_t cx = LED_FRONT_X + LED_FRONT_W - 10;
+    // Headlight = filled half-disc (the classic "D" lamp shape) on the left,
+    // projecting three beams of increasing length to the right.  Reads as a
+    // headlight without any label.
+    int16_t lx = LED_FRONT_X + 12;
     int16_t cy = LED_FRONT_Y + LED_FRONT_H / 2;
-    tft.fillCircle(cx, cy, 5, houseCol);
+    tft.fillCircle(lx, cy, 7, houseCol);          // filled disc (matches trace)
+    tft.fillRect(lx - 8, cy - 7, 8, 15, bgCol);   // flatten the left side → "D"
+    tft.drawLine(lx, cy - 7, lx, cy + 7, houseCol);
+    RTRACE_FILL_CIRCLE(lx, cy, 7, houseCol);
 
-    // Low-beam rays: 3 lines going left at angles (-15°, 0°, +15°)
-    // ray 1: straight left
-    tft.drawLine(cx - 5, cy, LED_FRONT_X + 4, cy, rayCol);
-    // ray 2: upper-left (~-15°)
-    tft.drawLine(cx - 5, cy - 1, LED_FRONT_X + 4, cy - 4, rayCol);
-    // ray 3: lower-left (~+15°)
-    tft.drawLine(cx - 5, cy + 1, LED_FRONT_X + 4, cy + 4, rayCol);
-
-    // Label "F" at bottom-right corner
-    tft.setTextColor(active ? COL_BLACK : COL_GRAY, bgCol);
-    tft.setTextSize(1);
-    tft.setTextDatum(BR_DATUM);
-    tft.drawString("F", LED_FRONT_X + LED_FRONT_W - 2, LED_FRONT_Y + LED_FRONT_H - 1);
-    tft.setTextDatum(TL_DATUM);
+    // Three projecting beams (short, medium, long).
+    int16_t bx = lx + 9;
+    tft.drawLine(bx, cy - 4, bx + 6,  cy - 4, rayCol);
+    tft.drawLine(bx, cy,     bx + 10, cy,     rayCol);
+    tft.drawLine(bx, cy + 4, bx + 6,  cy + 4, rayCol);
+    RTRACE_LINE(bx, cy, bx + 10, cy, rayCol);
 }
 
 // -------------------------------------------------------------------------
 // drawRearButton — brake / tail-light icon
-//   Layout inside LED_REAR_W×LED_REAR_H:
-//     3 horizontal bright bars stacked = tail/brake light clusters
+//   Rounded lamp cluster: a red tail-lamp block with bright horizontal
+//   segments; glows brightly when active.
 // -------------------------------------------------------------------------
 void LedToggle::drawRearButton(TFT_eSPI& tft, bool active) {
-    uint16_t bgCol   = active ? COL_RED     : COL_BG;
-    uint16_t bordCol = active ? COL_WHITE   : COL_GRAY;
-    uint16_t barCol  = active ? COL_WHITE   : COL_DARK_GRAY;
+    uint16_t bgCol   = active ? COL_RED       : COL_GEAR_OFF;
+    uint16_t bordCol = active ? COL_WHITE      : COL_DIAL_RING;
+    uint16_t barCol  = active ? COL_WHITE      : COL_DARK_GRAY;
 
-    // Background + border
-    tft.fillRect(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, bgCol);
+    // Rounded button face.
+    tft.fillRect(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, COL_BG);
+    RTRACE_FILL_RECT(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, COL_BG);
+    tft.fillRoundRect(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, 5, bgCol);
     RTRACE_FILL_RECT(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, bgCol);
-    tft.drawRect(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, bordCol);
+    tft.drawRoundRect(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, 5, bordCol);
     RTRACE_DRAW_RECT(LED_REAR_X, LED_REAR_Y, LED_REAR_W, LED_REAR_H, bordCol);
 
-    // 3 horizontal bars representing rear light clusters
-    int16_t barX = LED_REAR_X + 5;
-    int16_t barW = LED_REAR_W - 10;
-    int16_t barH = 4;
-    int16_t y1 = LED_REAR_Y + 5;
+    // Tail-lamp cluster: a rounded lamp housing with three bright bars — the
+    // universal "rear lights" read.
+    int16_t lampX = LED_REAR_X + 6;
+    int16_t lampW = LED_REAR_W - 12;
+    int16_t barH  = 4;
+    int16_t y1 = LED_REAR_Y + 6;
     int16_t y2 = LED_REAR_Y + LED_REAR_H / 2 - 2;
-    int16_t y3 = LED_REAR_Y + LED_REAR_H - 9;
-
-    tft.fillRect(barX, y1, barW, barH, barCol);
-    tft.fillRect(barX, y2, barW, barH, barCol);
-    tft.fillRect(barX, y3, barW, barH, barCol);
-
-    // Label "R" at bottom-right corner
-    tft.setTextColor(active ? COL_WHITE : COL_GRAY, bgCol);
-    tft.setTextSize(1);
-    tft.setTextDatum(BR_DATUM);
-    tft.drawString("R", LED_REAR_X + LED_REAR_W - 2, LED_REAR_Y + LED_REAR_H - 1);
-    tft.setTextDatum(TL_DATUM);
+    int16_t y3 = LED_REAR_Y + LED_REAR_H - 10;
+    tft.fillRoundRect(lampX, y1, lampW, barH, 2, barCol);
+    tft.fillRoundRect(lampX, y2, lampW, barH, 2, barCol);
+    tft.fillRoundRect(lampX, y3, lampW, barH, 2, barCol);
+    RTRACE_FILL_RECT(lampX, y1, lampW, barH, barCol);
+    RTRACE_FILL_RECT(lampX, y2, lampW, barH, barCol);
+    RTRACE_FILL_RECT(lampX, y3, lampW, barH, barCol);
 }
 
 } // namespace ui

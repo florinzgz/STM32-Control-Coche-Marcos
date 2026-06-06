@@ -1,27 +1,31 @@
 // =============================================================================
-// ESP32-S3 HMI — Throttle Micro-Bar Implementation
+// ESP32-S3 HMI — Throttle Bar Implementation (FASE 3.5)
 //
-// Slim, label-free throttle indicator centred in the bottom cluster, below the
-// gear pills.  A small ">>" glyph hints at "accelerate"; the bar itself fills
-// green -> yellow -> red with the live throttle demand.  No numeric text keeps
-// the premium cluster clean (favours graphics over digits).
+// Premium throttle read-out replacing the old decorative "AMG / 4MATIC" strip.
+// A labelled bar ("THROTTLE  NN%") that fills with a smooth
+// green -> yellow -> orange -> red gradient proportional to the live throttle
+// demand.  Presentation only — the value is the existing traction-average
+// percentage already computed by the drive screen.
 // =============================================================================
 
 #include "pedal_bar.h"
 #include "render_trace.h"
 #include "ui_config.h"
+#include <cstdio>
 
 namespace ui {
 
 // -------------------------------------------------------------------------
-// Static frame: throttle glyph + bar outline.
+// Static frame: "THROTTLE" caption + bar trough.  The live percentage and
+// the gradient fill are painted by draw().
 // -------------------------------------------------------------------------
 void PedalBar::drawStatic(TFT_eSPI& tft) {
-    // Small ">" accelerate glyph to the left of the bar (iconographic).
-    int16_t gy = DTHR_Y + DTHR_H / 2;
-    tft.fillTriangle(DTHR_X - 12, gy - 4, DTHR_X - 12, gy + 4,
-                     DTHR_X - 6, gy, COL_GRAY);
-    RTRACE_LINE(DTHR_X - 12, gy - 4, DTHR_X - 6, gy, COL_GRAY);
+    // Caption above the bar (left aligned).
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(COL_GRAY, COL_BG);
+    tft.drawString("THROTTLE", DTHR_X, DTHR_LABEL_Y);
+    RTRACE_TEXT(DTHR_X, DTHR_LABEL_Y, "THROTTLE", COL_GRAY, COL_BG, 1, TL_DATUM);
 
     // Bar trough.
     tft.fillRoundRect(DTHR_X, DTHR_Y, DTHR_W, DTHR_H, 3, COL_GEAR_OFF);
@@ -31,47 +35,49 @@ void PedalBar::drawStatic(TFT_eSPI& tft) {
 }
 
 // -------------------------------------------------------------------------
-// Update fill — differential redraw (only the changed portion).
+// Update fill + percentage.  The gradient depends on each column's position,
+// so the filled span is rebuilt as a single clean pass (no overlapping
+// partial fills → no flicker).  Only repaints when the value changes.
 // -------------------------------------------------------------------------
 void PedalBar::draw(TFT_eSPI& tft, uint8_t pedalPct, uint8_t prevPct) {
     if (pedalPct == prevPct) return;
 
-    uint8_t pct    = (pedalPct > 100) ? 100 : pedalPct;
-    uint8_t prevCl = (prevPct  > 100) ? 100 : prevPct;
+    uint8_t pct = (pedalPct > 100) ? 100 : pedalPct;
 
+    int16_t x0     = DTHR_X + 2;
+    int16_t y      = DTHR_Y + 2;
+    int16_t h      = DTHR_H - 4;
     int16_t innerW = DTHR_W - 4;
-    int16_t fillW  = static_cast<int16_t>((static_cast<int32_t>(pct)    * innerW) / 100);
-    int16_t prevFW = static_cast<int16_t>((static_cast<int32_t>(prevCl) * innerW) / 100);
+    int16_t fillW  = static_cast<int16_t>(
+        (static_cast<int32_t>(pct) * innerW) / 100);
 
-    uint16_t fillCol;
-    if (pct <= cfg::PEDAL_COLOR_LOW)      fillCol = COL_GREEN;
-    else if (pct <= cfg::PEDAL_COLOR_MID) fillCol = COL_YELLOW;
-    else                                  fillCol = COL_RED;
-
-    uint16_t prevCol;
-    if (prevCl <= cfg::PEDAL_COLOR_LOW)      prevCol = COL_GREEN;
-    else if (prevCl <= cfg::PEDAL_COLOR_MID) prevCol = COL_YELLOW;
-    else                                     prevCol = COL_RED;
-
-    int16_t y = DTHR_Y + 2;
-    int16_t h = DTHR_H - 4;
-
-    if (fillCol != prevCol) {
-        if (prevFW > fillW) {
-            tft.fillRect(DTHR_X + 2 + fillW, y, prevFW - fillW, h, COL_GEAR_OFF);
-        }
-        if (fillW > 0) {
-            tft.fillRect(DTHR_X + 2, y, fillW, h, fillCol);
-            RTRACE_FILL_RECT(DTHR_X + 2, y, fillW, h, fillCol);
-        }
-    } else if (fillW > prevFW) {
-        if (prevFW < 0) prevFW = 0;
-        tft.fillRect(DTHR_X + 2 + prevFW, y, fillW - prevFW, h, fillCol);
-        RTRACE_FILL_RECT(DTHR_X + 2 + prevFW, y, fillW - prevFW, h, fillCol);
-    } else if (fillW < prevFW) {
-        tft.fillRect(DTHR_X + 2 + fillW, y, prevFW - fillW, h, COL_GEAR_OFF);
-        RTRACE_FILL_RECT(DTHR_X + 2 + fillW, y, prevFW - fillW, h, COL_GEAR_OFF);
+    // Clear the trough interior, then paint the gradient-filled span.  Each
+    // column is shaded by its own position so the bar reads green at the
+    // bottom of travel and red near full throttle.
+    tft.fillRect(x0, y, innerW, h, COL_GEAR_OFF);
+    RTRACE_FILL_RECT(x0, y, innerW, h, COL_GEAR_OFF);
+    for (int16_t i = 0; i < fillW; ++i) {
+        uint8_t colPct = static_cast<uint8_t>(
+            (static_cast<int32_t>(i) * 100) / (innerW > 0 ? innerW : 1));
+        tft.drawFastVLine(x0 + i, y, h, throttleGradColor(colPct));
     }
+    if (fillW > 0) {
+        RTRACE_FILL_RECT(x0, y, fillW, h, throttleGradColor(pct));
+    }
+
+    // Live percentage (right-aligned, on the caption row).
+    char buf[FMT_BUF_SMALL];
+    snprintf(buf, sizeof(buf), "%u%%", pct);
+    uint16_t valCol = throttleGradColor(pct);
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(valCol, COL_BG);
+    tft.setTextPadding(64);
+    tft.drawString(buf, DTHR_X + DTHR_W, DTHR_LABEL_Y - 4);
+    RTRACE_TEXT(DTHR_X + DTHR_W, DTHR_LABEL_Y - 4, buf, valCol, COL_BG, 2, TR_DATUM);
+    tft.setTextPadding(0);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
 }
 
 } // namespace ui
