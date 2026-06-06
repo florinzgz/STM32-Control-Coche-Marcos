@@ -18,6 +18,7 @@
 #include "screen.h"
 #include "ui/tile_engine.h"
 #include "../sensors/obstacle_sensor.h"
+#include <cstdint>
 
 /// Tile indices for BootScreen
 enum BootTile : uint8_t {
@@ -35,6 +36,9 @@ public:
     void draw()    override;
 
 private:
+    static constexpr uint8_t DIAG_LINE_COUNT = 5;
+    static constexpr uint8_t DIAG_TEXT_MAX   = 64;
+
     ui::TileSet<BTILE_COUNT> tiles_;
 
     bool needsRedraw_ = true;
@@ -46,7 +50,6 @@ private:
     uint16_t prevSensorDistanceMm_ = 0;
 
     // CAN diagnostic state (captured in update, rendered in draw)
-    bool     diagNeedsRedraw_ = true;
     uint8_t  diagBusState_    = 0xFF;   // twai_state_t stored as uint8_t
     uint32_t diagTxErr_       = 0;
     uint32_t diagRxErr_       = 0;
@@ -54,7 +57,6 @@ private:
     uint32_t diagRxMiss_      = 0;
     uint32_t diagBusErr_      = 0;
     uint16_t diagRxFlags_     = 0;      // Bitmask: which STM32 frame types received
-    bool     diagObsActive_   = false;  // Obstacle sensor TX active
 
     // STM32 heartbeat diagnostic state (freeze detection + status)
     bool     diagStm32HbValid_      = false;  // Heartbeat received recently?
@@ -65,6 +67,12 @@ private:
     uint8_t  diagStm32State_        = 0xFF;   // System state from heartbeat
     uint8_t  diagStm32Faults_       = 0;      // Fault flags byte from heartbeat
     uint8_t  diagStm32Error_        = 0;      // Error code byte from heartbeat
+
+    // Throttled diagnostics + line-level dirty rectangles
+    unsigned long diagNextUpdateMs_ = 0;
+    uint8_t  diagDirtyMask_         = 0x1F;
+    char     diagLineText_[DIAG_LINE_COUNT][DIAG_TEXT_MAX] = {};
+    uint16_t diagLineColor_[DIAG_LINE_COUNT] = {};
 };
 
 #endif // BOOT_SCREEN_H
