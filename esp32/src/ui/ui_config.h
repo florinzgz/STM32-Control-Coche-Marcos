@@ -332,6 +332,12 @@ inline constexpr int16_t BTILE_DIAG_LINE_H       = 10;
 inline constexpr int16_t BTILE_DIAG_MARGIN_X     = 10;
 inline constexpr unsigned long BTILE_DIAG_RX_RECENT_MS = 2000;
 inline constexpr unsigned long BTILE_DIAG_FREEZE_MS    = 1000;
+inline constexpr unsigned long BTILE_DIAG_UPDATE_MS    = 125;  // 8 Hz
+
+// Boot splash premium emblem geometry (Mercedes-style, vector only)
+inline constexpr int16_t BOOT_EMBLEM_CENTER_Y    = 145;
+inline constexpr int16_t BOOT_EMBLEM_OFFSET_X    = 152;
+inline constexpr int16_t BOOT_EMBLEM_RADIUS      = 38;
 
 // =========================================================================
 // Hash Failsafe — Periodic Forced Redraw Interval (frames)
