@@ -638,11 +638,19 @@ void DriveScreen::draw() {
     // TILE: Fault flag visual overlays (HMI_STATE_MODEL §4.1)
     if (tiles_.isDirty(DTILE_FAULTS)) {
         drawFaultOverlays();
-        // Overlay invalidation: when faults are cleared, restore underlying top-bar tiles
+        // Overlay invalidation: the fault strip (OVL_FAULT_Y..+H) clips the
+        // lower edge of every top-bar widget.  When the faults clear, force a
+        // full repaint of the clipped widgets so no ghost pixels remain.  Mode
+        // icons and LED buttons need their force-redraw entry points (their
+        // differential draw() skips when the underlying state is unchanged);
+        // CAN, ambient and battery fully repaint whenever their tile is dirty.
         if (prevFaultsVisible_ && !curFaultsVisible_) {
-            tiles_.markDirty(DTILE_MODE_ICONS);
-            tiles_.markDirty(DTILE_LED_TOGGLE);
-            tiles_.markDirty(DTILE_BATTERY);
+            ui::ModeIcons::redraw(tft, curMode_);
+            ui::LedToggle::redraw(tft, curFrontLedOn_, curRearLedOn_);
+            drawCanStatus();
+            drawAmbientTemp();
+            ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_,
+                                       curBattStale_, prevBattStale_);
         }
         prevFaultsVisible_ = curFaultsVisible_;
         tiles_.markClean(DTILE_FAULTS);
@@ -651,9 +659,14 @@ void DriveScreen::draw() {
     // TILE: ACK visual feedback indicator (event-driven)
     if (tiles_.isDirty(DTILE_ACK)) {
         drawAckIndicator();
-        // Overlay invalidation: when ACK clears, restore underlying LED toggle tile
+        // Overlay invalidation: the ACK pill (ACK_X..ACK_X+ACK_W) paints over
+        // both LED toggle buttons.  When the pill clears it fills its area with
+        // the background, erasing the buttons underneath.  The relay state has
+        // not changed, so a plain markDirty + differential LedToggle::draw would
+        // skip the repaint and leave a ghost rectangle over the LEDs.  Force a
+        // full repaint of both buttons at their current state to restore them.
         if (prevAckVisible_ && !curAckVisible_) {
-            tiles_.markDirty(DTILE_LED_TOGGLE);
+            ui::LedToggle::redraw(tft, curFrontLedOn_, curRearLedOn_);
         }
         prevAckVisible_ = curAckVisible_;
         tiles_.markClean(DTILE_ACK);

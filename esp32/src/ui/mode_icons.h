@@ -34,6 +34,12 @@ public:
                      const ModeState& current,
                      const ModeState& previous);
 
+    /// Force a full repaint of all three icons at the given state, regardless
+    /// of any previous value.  Used to restore the icons after an overlay (the
+    /// fault strip) clipped them, where the mode state has not changed and the
+    /// differential draw() would otherwise skip the redraw.
+    static void redraw(TFT_eSPI& tft, const ModeState& current);
+
     /// Check if a touch point hits a mode icon.
     /// Returns: 0 = no hit, 3 = 360° (only 360° is touch-selectable;
     /// 4x4/4x2 are display-only, controlled by physical traction switch)

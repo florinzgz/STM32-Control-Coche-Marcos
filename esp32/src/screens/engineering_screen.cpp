@@ -265,6 +265,10 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
     // Relay status (shown on main menu header)
     relayStatus_ = data.heartbeat().relayStatus;
 
+    // Cache the system state so the relay-control page can show why override
+    // is locked (override is STANDBY-only by safety design on the STM32).
+    sysStateRaw_ = static_cast<uint8_t>(data.heartbeat().systemState);
+
     // Relay override: sync UI state with real CAN telemetry.
     // If the system state has moved away from STANDBY, the STM32 has
     // auto-disabled the override — reflect this in the UI.
@@ -597,6 +601,22 @@ void EngineeringScreen::draw() {
             char buf[ui::FMT_BUF_LARGE];
 
             RTRACE_SET_LAYER(2);
+
+            // ---- Headline status banner ----------------------------------
+            // The clearest possible read: if no fault bit is set, say so in
+            // plain language and green; otherwise warn in red.  This removes
+            // the ambiguity of staring at a raw hex mask.
+            tft.fillRect(0, 60, ui::SCREEN_W, 18, ui::COL_BG);
+            RTRACE_FILL_RECT(0, 60, ui::SCREEN_W, 18, ui::COL_BG);
+            const char* statusTxt = faultBits_ ? "ACTIVE FAULTS PRESENT" : "NO ACTIVE FAULTS";
+            uint16_t statusCol = faultBits_ ? ui::COL_RED : ui::COL_GREEN;
+            tft.setTextColor(statusCol, ui::COL_BG);
+            tft.setTextSize(1);
+            tft.setTextDatum(MC_DATUM);
+            tft.drawString(statusTxt, ui::SCREEN_W / 2, 68);
+            RTRACE_TEXT(ui::SCREEN_W / 2, 68, statusTxt,
+                        statusCol, ui::COL_BG, 1, MC_DATUM);
+            tft.setTextDatum(TL_DATUM);
 
             tft.fillRect(200, 100, 240, 16, ui::COL_BG);
             RTRACE_FILL_RECT(200, 100, 240, 16, ui::COL_BG);
@@ -1821,14 +1841,26 @@ void EngineeringScreen::drawFaultViewer() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
-    // Labels
+    // Headline status — filled in by the dynamic value pass below.  Drawn here
+    // only as a reserved row so the static layout is complete.
+
+    // Labels — spelled out so the reader can tell real faults from the
+    // informational module enable/disable bitmaps.
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Fault Bits:", 40, 100);
-    RTRACE_TEXT(40, 100, "Fault Bits:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Enabled Bits:", 40, 130);
-    RTRACE_TEXT(40, 130, "Enabled Bits:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
-    tft.drawString("Disabled Bits:", 40, 160);
-    RTRACE_TEXT(40, 160, "Disabled Bits:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("Active faults (mask):", 40, 100);
+    RTRACE_TEXT(40, 100, "Active faults (mask):", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("Enabled modules:", 40, 130);
+    RTRACE_TEXT(40, 130, "Enabled modules:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+    tft.drawString("Disabled modules:", 40, 160);
+    RTRACE_TEXT(40, 160, "Disabled modules:", ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
+
+    // Legend clarifying that only the first row represents real active faults.
+    tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+    tft.drawString("Active faults = real errors now. Enabled/Disabled = module map (info).",
+                   40, 190);
+    RTRACE_TEXT(40, 190,
+                "Active faults = real errors now. Enabled/Disabled = module map (info).",
+                ui::COL_DARK_GRAY, ui::COL_BG, 1, TL_DATUM);
 
     // Force redraw of values
     prevFaultBits_ = faultBits_ + 1;
@@ -2703,7 +2735,10 @@ void EngineeringScreen::drawRelayControl() {
     tft.drawString("RELAY CONTROL", ui::SCREEN_W / 2, 22);
     tft.setTextDatum(TL_DATUM);
 
-    // Safety warning when override is active
+    // Safety warning when override is active; otherwise explain WHY it is
+    // locked.  Relay override is STANDBY-only by safety design on the STM32 —
+    // this message makes that explicit and shows the current system state so
+    // the user understands the buttons are intentionally inert, not broken.
     if (relayOverrideEnabled_) {
         tft.setTextColor(ui::COL_RED, ui::COL_BG);
         tft.setTextSize(1);
@@ -2711,10 +2746,19 @@ void EngineeringScreen::drawRelayControl() {
         tft.drawString("!! MANUAL RELAY CONTROL ACTIVE !!", ui::SCREEN_W / 2, 48);
         tft.setTextDatum(TL_DATUM);
     } else {
-        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        const bool inStandby = (sysStateRaw_ == static_cast<uint8_t>(can::SystemState::STANDBY));
         tft.setTextSize(1);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString("Override disabled (STANDBY only)", ui::SCREEN_W / 2, 48);
+
+        tft.setTextColor(inStandby ? ui::COL_GRAY : ui::COL_AMBER, ui::COL_BG);
+        tft.drawString("Relay override only available in STANDBY",
+                       ui::SCREEN_W / 2, 44);
+
+        char stBuf[40];
+        snprintf(stBuf, sizeof(stBuf), "Current state: %s", dtcStateName(sysStateRaw_));
+        tft.setTextColor(inStandby ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(stBuf, ui::SCREEN_W / 2, 56);
+
         tft.setTextDatum(TL_DATUM);
     }
 

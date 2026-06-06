@@ -30,6 +30,12 @@ public:
                      bool curFront, bool prevFront,
                      bool curRear,  bool prevRear);
 
+    /// Force a full repaint of both buttons at the given state, regardless of
+    /// any previous value.  Used to restore the buttons after an overlay (e.g.
+    /// the ACK pill) painted over them, where the underlying relay state has
+    /// not changed and the differential draw() would otherwise skip the redraw.
+    static void redraw(TFT_eSPI& tft, bool front, bool rear);
+
     /// Check if a touch point hits the front light button.
     static bool hitTestFront(int16_t touchX, int16_t touchY);
 

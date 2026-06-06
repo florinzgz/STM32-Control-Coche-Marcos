@@ -28,56 +28,66 @@ void BatteryIndicator::drawStatic(TFT_eSPI& tft) {
 // -------------------------------------------------------------------------
 // Update percentage display
 //
-// Anti-flicker differential update: instead of clearing the entire
-// battery interior and redrawing, only the changed portion is updated.
+// Full single-pass repaint whenever the tile is invalidated (clear → frame →
+// fill → text).  Flicker is avoided upstream by the tile-hash dirty engine —
+// the battery tile is only marked dirty when the voltage/staleness actually
+// changes or when an overlay (fault strip, ACK pill, etc.) clipped the area
+// and explicitly invalidates it.  Crucially there is NO early-return here:
+// an invalidated tile must always be fully repainted, otherwise an overlay
+// that cleared the area would leave the battery blank with no text (the
+// "battery disappears" symptom).
+//
+// prevVoltageRaw / prevStale are no longer used for suppression (the hash
+// engine owns that decision); they are kept in the signature for ABI
+// compatibility with the caller.
 // -------------------------------------------------------------------------
 void BatteryIndicator::draw(TFT_eSPI& tft,
                             uint16_t voltageRaw,
                             uint16_t prevVoltageRaw,
                             bool stale,
                             bool prevStale) {
-    // ---- Stale / unknown reading ----
-    // When the battery frame (0x207) is older than the CAN-loss timeout, the
-    // last voltage is no longer trustworthy.  Show "--" rather than a frozen
-    // value (e.g. a stuck "100%").  Redraw only on the fresh→stale edge.
-    if (stale) {
-        if (!prevStale) {
-            int16_t innerW = BAT_W - 10;
-            tft.fillRect(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
-            RTRACE_FILL_RECT(BAT_X + 2, BAT_Y + 2, innerW, BAT_H - 4, COL_BG);
-            tft.setTextColor(COL_GRAY, COL_BG);
-            tft.setTextSize(1);
-            tft.setTextDatum(MC_DATUM);
-            tft.setTextPadding(innerW - 4);
-            tft.drawString("--", BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2);
-            RTRACE_TEXT(BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2, "--",
-                        COL_GRAY, COL_BG, 1, MC_DATUM);
-            tft.setTextPadding(0);
-            tft.setTextDatum(TL_DATUM);
-        }
-        return;
-    }
+    (void)prevVoltageRaw;
+    (void)prevStale;
 
-    uint8_t pct     = voltageToPercent(voltageRaw);
-    uint8_t prevPct = voltageToPercent(prevVoltageRaw);
-
-    // Nothing changed and we were already fresh: keep the pixels as-is.  This
-    // is the key anti-flicker guard — the interior is only ever touched when
-    // the displayed integer percentage actually changes (or on a stale edge).
-    if (!prevStale && pct == prevPct) {
-        return;
-    }
-
-    // ---- Single clean pass (no overlapping partial fills) ----------------
-    // The previous differential renderer layered several rectangles over the
-    // centred "%" text, which produced partial repaints, momentary blanking of
-    // the number and flicker.  Here the whole interior is rebuilt once per
-    // change: clear → coloured fill → text.  Calculation is unchanged.
     int16_t innerX = BAT_X + 2;
     int16_t innerY = BAT_Y + 2;
     int16_t innerW = BAT_W - 10;
     int16_t innerH = BAT_H - 4;
     int16_t barInner = innerW - 4;
+
+    // ---- Repair the static frame first ----
+    // An overlay (e.g. the fault strip at y28..38) can clip the lower edge of
+    // the battery outline.  Redrawing the outline + terminal nub here makes the
+    // repaint self-contained so the marco is always intact after a restore.
+    tft.drawRect(BAT_X, BAT_Y, BAT_W - 6, BAT_H, COL_WHITE);
+    RTRACE_DRAW_RECT(BAT_X, BAT_Y, BAT_W - 6, BAT_H, COL_WHITE);
+    tft.fillRect(BAT_X + BAT_W - 6, BAT_Y + 8, 6, 12, COL_WHITE);
+    RTRACE_FILL_RECT(BAT_X + BAT_W - 6, BAT_Y + 8, 6, 12, COL_WHITE);
+
+    // ---- Stale / unknown reading ----
+    // When the battery frame (0x207) is older than the CAN-loss timeout, the
+    // last voltage is no longer trustworthy.  Show "--" rather than a frozen
+    // value (e.g. a stuck "100%").
+    if (stale) {
+        tft.fillRect(innerX, innerY, innerW, innerH, COL_BG);
+        RTRACE_FILL_RECT(innerX, innerY, innerW, innerH, COL_BG);
+        tft.setTextColor(COL_GRAY, COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextPadding(innerW - 4);
+        tft.drawString("--", BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2);
+        RTRACE_TEXT(BAT_X + (BAT_W - 6) / 2, BAT_Y + BAT_H / 2, "--",
+                    COL_GRAY, COL_BG, 1, MC_DATUM);
+        tft.setTextPadding(0);
+        tft.setTextDatum(TL_DATUM);
+        return;
+    }
+
+    uint8_t pct     = voltageToPercent(voltageRaw);
+
+    // ---- Single clean pass (no overlapping partial fills) ----------------
+    // The whole interior is rebuilt once per invalidation: clear → coloured
+    // fill → text.  Calculation is unchanged.
 
     // Colour by level.
     uint16_t col;

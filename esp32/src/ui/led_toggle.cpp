@@ -35,6 +35,14 @@ void LedToggle::draw(TFT_eSPI& tft,
 }
 
 // -------------------------------------------------------------------------
+// redraw — force a full repaint of both buttons (overlay restore path)
+// -------------------------------------------------------------------------
+void LedToggle::redraw(TFT_eSPI& tft, bool front, bool rear) {
+    drawFrontButton(tft, front);
+    drawRearButton(tft, rear);
+}
+
+// -------------------------------------------------------------------------
 // hitTestFront — touch hit test for front light button
 // -------------------------------------------------------------------------
 bool LedToggle::hitTestFront(int16_t touchX, int16_t touchY) {
