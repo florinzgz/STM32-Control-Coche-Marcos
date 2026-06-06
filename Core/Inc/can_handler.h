@@ -50,6 +50,7 @@ extern "C" {
 #define CAN_ID_OBSTACLE_DISTANCE  0x208  // ESP32 → STM32 (66ms) obstacle distance + zone + health
 #define CAN_ID_OBSTACLE_SAFETY    0x209  // ESP32 → STM32 (100ms) obstacle safety state
 #define CAN_ID_STATUS_LIGHTS      0x20A  // STM32 → ESP32 (1000ms) LED relay + light state
+#define CAN_ID_STATUS_PEDAL       0x20B  // STM32 → ESP32 (100ms) Hall pedal position % (telemetry only)
 #define CAN_ID_DIAG_ERROR         0x300  // Both directions (on-demand)
 #define CAN_ID_SERVICE_FAULTS     0x301  // STM32 → ESP32 (1000ms) fault bitmask
 #define CAN_ID_SERVICE_ENABLED    0x302  // STM32 → ESP32 (1000ms) enabled bitmask
@@ -179,6 +180,7 @@ void CAN_SendStatusTraction(void);
 void CAN_SendStatusTempMap(void);
 void CAN_SendStatusBattery(void);
 void CAN_SendStatusLights(void);
+void CAN_SendStatusPedal(uint8_t pedal_pct);
 void CAN_SendError(uint8_t error_code, uint8_t subsystem);
 void CAN_SendDiagnosticEncoder(int32_t raw_count, int16_t delta);
 void CAN_SendCommandAck(uint8_t cmd_id_low, CAN_AckResult_t result);

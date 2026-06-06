@@ -96,6 +96,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x206 | STATUS_TEMP_MAP | 5 | 1000 ms | Explicit temperature sensor mapping (FL/FR/RL/RR/AMB) | `can_handler.c`, `main.c` |
 | 0x207 | STATUS_BATTERY | 4 | 100 ms | Battery bus current and voltage (INA226, 24 V bus) | `can_handler.c`, `main.c` |
 | 0x20A | STATUS_LIGHTS | 2 | 1000 ms | LED relay state (byte0=front, byte1=rear) | `can_handler.c`, `main.c` |
+| 0x20B | STATUS_PEDAL | 1 | 100 ms | Hall pedal position % (telemetry only, drives HMI THROTTLE bar) | `can_handler.c`, `main.c` |
 
 ### 3.3 Bidirectional (Diagnostic)
 

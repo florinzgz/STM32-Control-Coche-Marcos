@@ -582,6 +582,16 @@ int main(void)
             CAN_SendStatusTraction();
             CAN_SendStatusBattery();
 
+            /* Pedal position telemetry (0x20B) — real Hall pedal travel for
+             * the HMI THROTTLE bar.  Telemetry only: this read does not affect
+             * control, PID, safety or pedal logic in any way.                */
+            {
+                float pedal_tlm = Pedal_GetPercent();
+                if (pedal_tlm < 0.0f)   pedal_tlm = 0.0f;
+                if (pedal_tlm > 100.0f) pedal_tlm = 100.0f;
+                CAN_SendStatusPedal((uint8_t)(pedal_tlm + 0.5f));
+            }
+
             /* Pedal calibration telemetry burst (0x308) — emits only
              * while an explicit QUERY is active (1 s, 10 Hz).  No-op
              * otherwise.  Does not affect backward-compatible nodes. */

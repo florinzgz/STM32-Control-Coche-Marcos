@@ -162,6 +162,7 @@ private:
     // Relay status for main menu header display
     uint8_t     relayStatus_     = 0;      // heartbeat byte 5 (bit0=reserved, bit1=T, bit2=D, bit7=SEQ)
     uint8_t     prevRelayStatus_ = 0xFF;   // force initial draw
+    uint8_t     sysStateRaw_     = 0;      // cached heartbeat system state (for relay-override gating message)
 
     // Relay override (engineering diagnostic mode)
     bool        relayOverrideEnabled_ = false;   // local UI toggle state

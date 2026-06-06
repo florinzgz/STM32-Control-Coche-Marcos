@@ -70,7 +70,7 @@ inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 4, 100 ms o
 // STM32 → ESP32  LED / Lights Status (Audit Step 6)
 // -------------------------------------------------------------------------
 inline constexpr uint32_t STATUS_LIGHTS          = 0x20A;    // DLC 2, 1000 ms  byte0=front relay, byte1=rear relay
-
+inline constexpr uint32_t STATUS_PEDAL           = 0x20B;    // DLC 1, 100 ms   byte0=Hall pedal position % (telemetry only)
 // -------------------------------------------------------------------------
 // ESP32 → STM32  LED relay command (§3.1)
 //   Byte 0: front relay (0=OFF, 1=ON)

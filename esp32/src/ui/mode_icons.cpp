@@ -41,6 +41,15 @@ void ModeIcons::draw(TFT_eSPI& tft,
 }
 
 // -------------------------------------------------------------------------
+// redraw — force a full repaint of all icons (overlay restore path)
+// -------------------------------------------------------------------------
+void ModeIcons::redraw(TFT_eSPI& tft, const ModeState& current) {
+    drawIcon(tft, ICON_4X4_X, "4x4", current.is4x4);
+    drawIcon(tft, ICON_4X2_X, "4x2", !current.is4x4);
+    drawIcon(tft, ICON_360_X, "360", current.isTankTurn);
+}
+
+// -------------------------------------------------------------------------
 // Hit test for touch input — only 360° icon is touchable.
 // 4x4/4x2 are display-only (controlled by physical traction switch).
 // -------------------------------------------------------------------------

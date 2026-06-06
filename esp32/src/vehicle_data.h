@@ -166,6 +166,18 @@ struct LightsData {
 };
 
 // -------------------------------------------------------------------------
+// Pedal position telemetry (0x20B) — live Hall pedal travel from STM32.
+//   Byte 0: pedal position % (0 = released, 100 = full travel)
+// Telemetry only: drives the HMI THROTTLE bar.  This is the physical pedal
+// reading, distinct from the per-wheel torque/TCS scale in TractionData
+// (0x205), which must NOT be used as a throttle indicator.
+// -------------------------------------------------------------------------
+struct PedalData {
+    uint8_t percent         = 0;       // 0..100 Hall pedal travel
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Pedal calibration telemetry (0x308) — on-demand burst from STM32 after
 // SERVICE_ACTION_PEDAL_CAL/QUERY.  Decoded layout matches can_handler.c
 // pedalcal_send_status().  STM32 alternates PENDING / STORED frame
@@ -302,6 +314,7 @@ public:
     void setAckTimeout(unsigned long ts)       { ackTimeoutMs_ = ts; }
     void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
     void setLights(const LightsData& d)        { lights_ = d; }
+    void setPedal(const PedalData& d)          { pedal_ = d; }
     void setMode(const ModeData& d)            { mode_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
@@ -330,6 +343,7 @@ public:
     unsigned long        ackTimeoutMs() const { return ackTimeoutMs_; }
     const ObstacleData&  obstacle()  const { return obstacle_; }
     const LightsData&    lights()    const { return lights_; }
+    const PedalData&     pedal()     const { return pedal_; }
     const ModeData&      mode()      const { return mode_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
@@ -354,6 +368,7 @@ private:
     unsigned long ackTimeoutMs_ = 0;
     ObstacleData  obstacle_;
     LightsData    lights_;
+    PedalData     pedal_;
     ModeData      mode_;
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
