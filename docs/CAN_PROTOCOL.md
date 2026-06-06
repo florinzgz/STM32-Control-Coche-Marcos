@@ -579,7 +579,25 @@ ID: 0x206  DLC: 5  Data: [0x37, 0x39, 0x38, 0x36, 0x19]
 
 ---
 
-## 🔔 Mensajes de Heartbeat
+### 0x20B - STATUS_PEDAL (STM32→ESP32)
+
+**Propósito:** Posición real del pedal Hall (telemetría) para la barra THROTTLE
+del HMI. Refleja el recorrido físico del pedal (`Pedal_GetPercent()`): pedal
+suelto = 0 %, medio ≈ 50 %, a fondo = 100 %.
+
+| Byte | Campo | Tipo | Rango | Notas |
+|------|-------|------|-------|-------|
+| 0 | `pedal_percent` | uint8_t | 0–100 | % de recorrido del pedal Hall |
+
+**DLC:** 1
+
+**Frecuencia:** 100 ms (10 Hz)
+
+**Nota:** Solo telemetría. No interviene en control, PID, safety ni en la
+lógica de pedal. La barra THROTTLE debe usar este valor y **no** el factor de
+par por rueda de 0x205 (STATUS_TRACTION), que corresponde a par disponible/TCS.
+
+---
 
 ### Lógica de Heartbeat Mutuo
 
@@ -802,6 +820,7 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 | 0x200-0x207 | STATUS_* | Baja | Telemetría |
 | 0x208-0x209 | OBSTACLE_* | Media | Seguridad obstáculos |
 | 0x20A | STATUS_LIGHTS | Baja | Telemetría LED |
+| 0x20B | STATUS_PEDAL | Baja | Telemetría pedal Hall (barra THROTTLE) |
 | 0x300 | DIAG_ERROR | **Alta** | Errores críticos |
 | 0x301-0x303 | SERVICE_* | Baja | Diagnóstico Service Mode |
 | 0x304-0x307 | DIAG_* | Baja | Diagnóstico (error log, debounce) |
@@ -854,6 +873,7 @@ El STM32 alterna dos variantes de frame dentro de la ráfaga (selecciona bit 6 d
 | OBSTACLE_DISTANCE (0x208) | 15 Hz | 66 ms | Media | ESP32→STM32 |
 | OBSTACLE_SAFETY (0x209) | 10 Hz | 100 ms | Media | ESP32→STM32 |
 | STATUS_LIGHTS (0x20A) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
+| STATUS_PEDAL (0x20B) | 10 Hz | 100 ms | Baja | STM32→ESP32 |
 | DIAG_ERROR (0x300) | On-demand | - | Alta | Both |
 | SERVICE_FAULTS (0x301) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |
 | SERVICE_ENABLED (0x302) | 1 Hz | 1000 ms | Baja | STM32→ESP32 |

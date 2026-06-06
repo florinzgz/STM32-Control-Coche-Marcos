@@ -661,6 +661,24 @@ void CAN_SendStatusTraction(void) {
 }
 
 /**
+ * @brief  Send live Hall pedal position to ESP32 (telemetry only).
+ *
+ * Publishes the real pedal travel reported by Pedal_GetPercent() so the HMI
+ * THROTTLE bar reflects the physical pedal (0 % released … 100 % full) rather
+ * than the per-wheel torque/TCS scale (0x205), which is unrelated to pedal
+ * position.  This frame is strictly informational: it does NOT feed any
+ * control, PID, safety or pedal-logic path on either node.
+ *
+ *   Byte 0: pedal position %  (0 = released, 100 = full travel)
+ *
+ * CAN ID: 0x20B   DLC: 1   Rate: 100 ms (10 Hz)
+ */
+void CAN_SendStatusPedal(uint8_t pedal_pct) {
+    if (pedal_pct > 100) pedal_pct = 100;
+    TransmitFrame(CAN_ID_STATUS_PEDAL, &pedal_pct, 1);
+}
+
+/**
  * @brief  Send explicit temperature sensor mapping to ESP32.
  *
  * Applies the physIdx→role map stored in flash (via sensor_map_store) so

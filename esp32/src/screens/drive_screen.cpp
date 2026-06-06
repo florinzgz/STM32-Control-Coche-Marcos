@@ -242,13 +242,18 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
                         ((frameTimeMs - bts) > can::CAN_LOSS_TIMEOUT_MS);
     }
 
-    // Pedal/throttle — derived from traction average as display hint
-    // (actual throttle command is sent separately via CMD_THROTTLE)
-    uint16_t tractionSum = 0;
-    for (uint8_t i = 0; i < 4; ++i) {
-        tractionSum += data.traction().scale[i];
+    // Pedal/throttle — real Hall pedal travel published by the STM32 on the
+    // dedicated telemetry frame (0x20B).  This is the physical pedal position
+    // (0 % released … 100 % full), NOT the per-wheel torque/TCS scale (0x205),
+    // which is unrelated to pedal travel.  When the pedal frame is stale
+    // (never received or older than the CAN-loss timeout) we show 0 % rather
+    // than a frozen value, matching the released-pedal default.
+    {
+        unsigned long pts = data.pedal().timestampMs;
+        bool pedalStale = (pts == 0) ||
+                          ((frameTimeMs - pts) > can::CAN_LOSS_TIMEOUT_MS);
+        curPedalPct_ = pedalStale ? 0 : data.pedal().percent;
     }
-    curPedalPct_ = static_cast<uint8_t>(tractionSum / 4);
 
     // Gear — read from physical shifter via MCP23017
     {

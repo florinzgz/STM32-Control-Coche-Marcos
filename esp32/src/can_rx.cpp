@@ -188,6 +188,14 @@ static void decodeLights(const CanFrame& f, vehicle::VehicleData& data) {
     data.setLights(ld);
 }
 
+static void decodePedal(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 1) return;
+    vehicle::PedalData pd;
+    pd.percent     = (f.data[0] <= 100) ? f.data[0] : 100;
+    pd.timestampMs = millis();
+    data.setPedal(pd);
+}
+
 static void decodeDebounceDiag(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code < 8) return;
     vehicle::DebounceDiagData dd = data.debounceDiag();   // preserve steer count
@@ -371,6 +379,7 @@ void poll(vehicle::VehicleData& data) {
             case can::CMD_ACK:          decodeCommandAck(frame, data);     break;
             case can::DIAG_ERROR:       decodeDiagError(frame, data);      break;
             case can::STATUS_LIGHTS:    decodeLights(frame, data);         break;
+            case can::STATUS_PEDAL:     decodePedal(frame, data);          break;
             case can::SERVICE_FAULTS:   decodeServiceFaults(frame, data);  break;
             case can::SERVICE_ENABLED:  decodeServiceEnabled(frame, data); break;
             case can::SERVICE_DISABLED: decodeServiceDisabled(frame, data);break;
