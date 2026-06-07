@@ -652,13 +652,14 @@ _Static_assert(INA226_I2C_TIMEOUT_MS <= 50U,
 static uint8_t i2c_fail_count       = 0;
 static uint8_t i2c_recovery_attempts = 0;
 
-/* ---- I2C topology diagnostic (report-only, no CAN/safety gating) ----
+/* ---- I2C topology / sample-validity diagnostics ---------------------
  * Populated during Sensor_Init() and refreshed every Current_ReadAll().
- * They let the HMI distinguish a missing TCA9548A multiplexer from a
- * missing/dead INA226 behind a given channel, without changing any
- * existing safety path (which still relies on Safety_SetError()).      */
+ * The HMI/CAN path consumes mux_present + ina_ok_mask unchanged; the
+ * per-channel bus-read mask additionally lets Safety_CheckBatteryVoltage()
+ * tell an invalid battery sample from a genuine UV-critical reading.   */
 static bool    mux_present  = false;   /* TCA9548A (0x70) acked this cycle  */
 static uint8_t ina_ok_mask  = 0;       /* bit i = INA226 on channel i acked */
+static uint8_t ina_bus_ok_mask = 0;    /* bit i = bus-voltage read OK       */
 static bool    i2c_ever_ok  = false;   /* latched: at least one INA seen OK */
 static bool    ina_last_read_ok = false; /* status of last INA226_ReadReg() */
 
@@ -895,6 +896,7 @@ void Current_ReadAll(void)
 
     /* Per-cycle topology diagnostic accumulators (report-only) */
     uint8_t new_ina_mask = 0;
+    uint8_t new_bus_ok_mask = 0;
     bool    mux_seen     = false;
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
@@ -968,14 +970,18 @@ void Current_ReadAll(void)
 
         /* Bus voltage */
         int16_t bus_raw   = INA226_ReadReg(INA226_REG_BUS_VOLTAGE);
+        if (ina_last_read_ok) {
+            new_bus_ok_mask |= (uint8_t)(1U << i);
+        }
         voltage_bus[i]    = (float)bus_raw * INA226_BUS_LSB_MV / 1000.0f;  /* Convert mV to V */
     }
 
     current_ema_primed = true;
 
-    /* Publish topology diagnostic (report-only — never gates control) */
+    /* Publish topology / sample-validity diagnostics */
     mux_present = mux_seen;
     ina_ok_mask = new_ina_mask;
+    ina_bus_ok_mask = new_bus_ok_mask;
     if (new_ina_mask != 0) {
         i2c_ever_ok = true;
     }
@@ -1021,6 +1027,10 @@ bool Sensor_GetMuxPresent(void) {
 
 uint8_t Sensor_GetInaOkMask(void) {
     return ina_ok_mask;
+}
+
+uint8_t Sensor_GetInaBusOkMask(void) {
+    return ina_bus_ok_mask;
 }
 
 uint8_t Sensor_GetInaExpectedMask(void) {
@@ -1907,6 +1917,7 @@ void Sensor_Init(void)
     /* Reset I2C topology diagnostic (report-only) to a known state. */
     mux_present  = false;
     ina_ok_mask  = 0;
+    ina_bus_ok_mask = 0;
     i2c_ever_ok  = false;
     ina_last_read_ok = false;
     ina_expected_mask   = INA226_MASK_BATTERY;  /* only BAT powered pre-relay */

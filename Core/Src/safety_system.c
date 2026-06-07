@@ -2078,16 +2078,17 @@ void Safety_CheckBatteryVoltage(void)
      * always means the mux channel-select or the INA226 read did NOT ACK on
      * I2C — NOT that the pack is critically depleted.  Mapping that case to
      * BATT UV CRIT (Code 10) masks the real cause and contradicts the I2C
-     * topology diagnostic.  Distinguish the two with the report-only
-     * mux_present / ina_ok_mask accumulators (updated by Current_ReadAll):
-     *   - battery INA did NOT ACK  → genuine I2C/sensor fault (Code 11)
-     *   - battery INA DID ACK but still reads ~0 V → real critical UV
+     * topology diagnostic.  Distinguish the two with the mux-presence,
+     * INA-ACK, and bus-voltage-read-valid bits published by Current_ReadAll():
+     *   - battery INA/bus read did NOT ACK  → genuine I2C/sensor fault (Code 11)
+     *   - battery INA + bus read both ACKed but still read ~0 V → real critical UV
      * Both still enter SAFE (fail-safe), only the reported error differs. */
     if (isnan(voltage) || isinf(voltage) || voltage <= 0.0f) {
-        bool batt_ina_ok = Sensor_GetMuxPresent() &&
-                           ((Sensor_GetInaOkMask() & INA226_MASK_BATTERY) != 0U);
-        Safety_SetError(batt_ina_ok ? SAFETY_ERROR_BATTERY_UV_CRITICAL
-                                    : SAFETY_ERROR_I2C_FAILURE);
+        bool batt_sample_ok = Sensor_GetMuxPresent() &&
+                              ((Sensor_GetInaOkMask() & INA226_MASK_BATTERY) != 0U) &&
+                              ((Sensor_GetInaBusOkMask() & INA226_MASK_BATTERY) != 0U);
+        Safety_SetError(batt_sample_ok ? SAFETY_ERROR_BATTERY_UV_CRITICAL
+                                       : SAFETY_ERROR_I2C_FAILURE);
         Safety_SetState(SYS_STATE_SAFE);
         batt_uv_recovery_pending = 0;   /* invalid reading aborts recovery */
         return;
