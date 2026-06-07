@@ -600,6 +600,8 @@ Battery voltage is measured by INA226 channel 4 (placed before the traction rela
 
 Recovery hysteresis prevents state flapping. Battery overvoltage has no auto-recovery from SAFE — the operator must manually investigate the source (charger malfunction, dynamic braking back-EMF, regulator failure) before clearing.
 
+Battery undervoltage critical (`SAFE`) has a **gated auto-recovery**: if the pack voltage genuinely returns above the hysteresis-corrected threshold (CRITICAL + HYST = **18.5 V**) and stays there continuously for 2 s, the active fault is cleared and the system leaves `SAFE` for `STANDBY` (motion stays disabled until the normal `STANDBY` → `ACTIVE` promotion re-validates every precondition). This handles a temporary battery disconnect/reconnect without a manual reset. An invalid / I2C-failed reading never auto-recovers, and any other active fault blocks the transition.
+
 ---
 
 ## 17. Safety States

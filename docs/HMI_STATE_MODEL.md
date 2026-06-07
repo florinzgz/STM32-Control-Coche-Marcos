@@ -91,6 +91,8 @@ The STM32 reports its `system_state` in byte 1 of the heartbeat message (0x001).
 | Steering angle | Yes (read-only) | 0x204 |
 | Throttle / steering / mode controls | **Disabled** | — |
 
+> **Recovery note:** SAFE generally requires the underlying fault to be resolved and a manual reset (the HMI offers no "dismiss"/"override"; see §6 rule 3). One gated exception exists on the STM32 side: a battery undervoltage-critical latch (error code 10) auto-recovers `SAFE` → `STANDBY` once the pack voltage stays above 18.5 V for 2 s, leaving motion disabled until the normal `STANDBY` → `ACTIVE` checks pass. An I2C/sensor failure or any other active fault still blocks recovery.
+
 ### 2.6 ERROR (system_state = 5)
 
 | Element | Visible | Source |

@@ -493,7 +493,8 @@ void Safety_SetState(SystemState_t state)
     }
 
     /* Only allow forward transitions and recovery transitions:
-     *   SAFE→ACTIVE, DEGRADED→ACTIVE, LIMP_HOME→ACTIVE               */
+     *   SAFE→ACTIVE, DEGRADED→ACTIVE, LIMP_HOME→ACTIVE, and the
+     *   fault-cleared SAFE→STANDBY recovery (see SYS_STATE_STANDBY case). */
     switch (state) {
         case SYS_STATE_STANDBY:
             if (system_state == SYS_STATE_BOOT)
@@ -2113,8 +2114,9 @@ void Safety_CheckBatteryVoltage(void)
      * overwritten by a warning-band reading while still in SAFE.
      *
      * We only act on a genuine battery UV latch — an I2C/sensor failure
-     * (SAFETY_ERROR_I2C_FAILURE) keeps its own recovery path and is NOT
-     * cleared here.  The historical DTC remains in the error log; only
+     * (SAFETY_ERROR_I2C_FAILURE) is intentionally NOT cleared here and
+     * keeps the system in SAFE (it has no auto-recovery path).  The
+     * historical DTC remains in the error log; only
      * the active fault is cleared so the display can leave SAFE.  The
      * recovery target is STANDBY (motion stays disabled) — the normal
      * STANDBY -> ACTIVE promotion then re-validates every precondition
