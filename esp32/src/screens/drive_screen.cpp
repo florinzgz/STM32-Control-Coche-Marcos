@@ -526,6 +526,28 @@ void DriveScreen::draw() {
     // ---- DYNAMIC LAYER — tile-based dirty region rendering ----
     RTRACE_SET_LAYER(2);
 
+    // While the Tank-Turn confirm popup is modal it occupies the SYSTEM layer
+    // (Z-order 3) and must never be perforated by the base tiles beneath it
+    // (wheels, steering, ...).  Detect — BEFORE any tile is marked clean — if
+    // any tile scheduled to redraw this frame intersects the popup rect; if so
+    // the popup is re-asserted at the end of the frame so it stays on top.
+    bool popupOverlapDirty = false;
+    if (tankConfirmVisible_) {
+        const int16_t px = ui::cfg::TANK_CONFIRM_BAR_X;
+        const int16_t py = ui::cfg::TANK_CONFIRM_BAR_Y;
+        const int16_t pw = ui::cfg::TANK_CONFIRM_BAR_W;
+        const int16_t ph = ui::cfg::TANK_CONFIRM_BAR_H;
+        for (uint8_t i = 0; i < DTILE_COUNT; ++i) {
+            if (!tiles_.isDirty(i)) continue;
+            const ui::TileRect& r = tiles_.rect(i);
+            if (r.x < px + pw && r.x + r.w > px &&
+                r.y < py + ph && r.y + r.h > py) {
+                popupOverlapDirty = true;
+                break;
+            }
+        }
+    }
+
     // TILE: Speed analog dial (bottom-left)
     if (tiles_.isDirty(DTILE_SPEED)) {
         RTMON_ZONE_REDRAW(rtmon::Zone::SPEED);
@@ -643,19 +665,14 @@ void DriveScreen::draw() {
     // TILE: Fault flag visual overlays (HMI_STATE_MODEL §4.1)
     if (tiles_.isDirty(DTILE_FAULTS)) {
         drawFaultOverlays();
-        // Overlay invalidation: the fault strip (OVL_FAULT_Y..+H) clips the
-        // lower edge of every top-bar widget.  When the faults clear, force a
-        // full repaint of the clipped widgets so no ghost pixels remain.  Mode
-        // icons and LED buttons need their force-redraw entry points (their
-        // differential draw() skips when the underlying state is unchanged);
-        // CAN, ambient and battery fully repaint whenever their tile is dirty.
-        if (prevFaultsVisible_ && !curFaultsVisible_) {
-            ui::ModeIcons::redraw(tft, curMode_);
-            ui::LedToggle::redraw(tft, curFrontLedOn_, curRearLedOn_);
-            drawCanStatus();
-            drawAmbientTemp();
-            ui::BatteryIndicator::draw(tft, curBattVoltRaw_, prevBattVoltRaw_,
-                                       curBattStale_, prevBattStale_);
+        // Overlay invalidation: the fault strip lives in the sensor band, below
+        // the DEGRADED banner, and overlaps only DTILE_OBSTACLE.  Whenever the
+        // strip is processed with no faults shown (visible→absent transition OR
+        // the periodic hash-failsafe empty re-clear), restore the obstacle tile
+        // so the cleared strip leaves no background gap.  Mirrors the DEGRADED
+        // overlay invalidation contract above.
+        if (!curFaultsVisible_) {
+            tiles_.markDirty(DTILE_OBSTACLE);
         }
         prevFaultsVisible_ = curFaultsVisible_;
         tiles_.markClean(DTILE_FAULTS);
@@ -696,7 +713,10 @@ void DriveScreen::draw() {
     prevFaultFlags_  = curFaultFlags_;
 
     // ---- SYSTEM LAYER (Z-order 3) — confirmation dialogs ----
-    if (tankConfirmVisible_ && tankConfirmDirty_) {
+    // Re-assert the popup when first shown (tankConfirmDirty_) OR when a base
+    // tile beneath it redrew this frame (popupOverlapDirty), so wheels/steering
+    // animations can never draw through the modal bar.
+    if (tankConfirmVisible_ && (tankConfirmDirty_ || popupOverlapDirty)) {
         drawTankConfirmBar();
         tankConfirmDirty_ = false;
     }
