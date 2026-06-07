@@ -136,10 +136,17 @@ inline constexpr int16_t OVL_DEGRADED_W = 480;
 inline constexpr int16_t OVL_DEGRADED_H = 18;
 
 // =========================================================================
-// Overlay Layout — Fault Indicators (DriveScreen top bar bottom margin)
+// Overlay Layout — Fault Indicators (DriveScreen sensor band)
 // =========================================================================
-
-inline constexpr int16_t OVL_FAULT_Y = 28;
+//
+// The fault strip sits in the sensor/obstacle band (y40..85), immediately
+// below the DEGRADED banner (y40..58).  It deliberately does NOT overlap the
+// top-bar status row (icons/LEDs/CAN/battery at y6..34): overlapping that row
+// clipped the lower border of the 360° button and other widgets every time the
+// strip was cleared (incl. the periodic hash failsafe), leaving eaten borders.
+// Overlapping only DTILE_OBSTACLE lets the strip be restored cleanly, mirroring
+// the DEGRADED overlay invalidation contract.
+inline constexpr int16_t OVL_FAULT_Y = 60;
 inline constexpr int16_t OVL_FAULT_H = 10;
 
 // Gap between fault label strings (pixels)

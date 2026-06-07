@@ -56,9 +56,9 @@ void BatteryIndicator::draw(TFT_eSPI& tft,
     int16_t barInner = innerW - 4;
 
     // ---- Repair the static frame first ----
-    // An overlay (e.g. the fault strip at y28..38) can clip the lower edge of
-    // the battery outline.  Redrawing the outline + terminal nub here makes the
-    // repaint self-contained so the marco is always intact after a restore.
+    // An overlay (e.g. the ACK pill) can clip the lower edge of the battery
+    // outline.  Redrawing the outline + terminal nub here makes the repaint
+    // self-contained so the marco is always intact after a restore.
     tft.drawRect(BAT_X, BAT_Y, BAT_W - 6, BAT_H, COL_WHITE);
     RTRACE_DRAW_RECT(BAT_X, BAT_Y, BAT_W - 6, BAT_H, COL_WHITE);
     tft.fillRect(BAT_X + BAT_W - 6, BAT_Y + 8, 6, 12, COL_WHITE);

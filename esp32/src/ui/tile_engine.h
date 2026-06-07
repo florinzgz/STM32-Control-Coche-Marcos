@@ -178,7 +178,7 @@ enum class TileLayer : uint8_t {
 //
 // DriveScreen overlay registry:
 //   DTILE_DEGRADED → REPLACE, overlaps DTILE_OBSTACLE
-//   DTILE_FAULTS   → REPLACE, overlaps DTILE_MODE_ICONS + DTILE_LED_TOGGLE + DTILE_BATTERY
+//   DTILE_FAULTS   → REPLACE, overlaps DTILE_OBSTACLE
 //   DTILE_ACK      → REPLACE, overlaps DTILE_LED_TOGGLE
 //
 // ErrorScreen: no overlays (all tiles are base layer, screen is self-contained)
