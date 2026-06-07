@@ -47,11 +47,15 @@ static inline void sat_inc_u32(uint32_t *counter) {
  * Hysteresis (0.5 V) prevents oscillation when voltage sags under load
  * then recovers during coast.  This is a common pattern in automotive BMS.
  *
- * Recovery from SAFE is intentionally blocked (non-auto-recovery):
- *   A critically depleted battery cannot reliably power actuators.
- *   Operator must recharge and reset the system to clear the fault.
- *   This follows the fail-safe philosophy used for CAN timeout and
- *   emergency stop in the existing safety architecture.                  */
+ * Recovery from SAFE is gated, not blocked:
+ *   A critically depleted pack stays in SAFE while the fault persists.
+ *   When the pack voltage genuinely returns above the hysteresis
+ *   threshold (CRITICAL + HYST = 18.5 V) and stays there for a stable
+ *   window (BATTERY_UV_RECOVERY_STABLE_MS), the active fault is cleared
+ *   and the system leaves SAFE to STANDBY (motion still disabled).  This
+ *   lets a temporary battery disconnect/reconnect recover without a
+ *   manual reset, while hysteresis + stable-time prevent flapping and an
+ *   invalid / I2C-failed reading never auto-recovers (fail-safe).        */
 #define BATTERY_UV_WARNING_V    20.0f   /* Enter DEGRADED below this      */
 #define BATTERY_UV_CRITICAL_V   18.0f   /* Enter SAFE below this          */
 #define BATTERY_UV_HYST_V       0.5f    /* Hysteresis band for recovery   */
@@ -309,6 +313,32 @@ static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
 static uint32_t limphome_recovery_since = 0;
 static uint8_t  limphome_recovery_pending = 0;
 
+/* Battery critical-UV recovery debounce (SAFE → STANDBY).
+ *
+ * A critically depleted pack that is RECHARGED or RECONNECTED (the pack
+ * voltage genuinely returns to a valid, stable range) must be able to
+ * leave SAFE without a manual reset — otherwise an intermittent battery
+ * disconnect latches the vehicle in SAFE until power-cycle.
+ *
+ * Recovery is intentionally conservative:
+ *   - Voltage must rise above the hysteresis-corrected threshold
+ *     (BATTERY_UV_CRITICAL_V + BATTERY_UV_HYST_V = 18.5 V), not merely
+ *     back above the trip point, to avoid flapping at the boundary.
+ *   - It must stay there continuously for BATTERY_UV_RECOVERY_STABLE_MS.
+ *     Pack voltage rebounds slowly and can sag again under the first
+ *     load, so this window is longer than RECOVERY_HOLD_MS.
+ *   - The recovery target is STANDBY (motion disabled), NOT ACTIVE: the
+ *     normal STANDBY → ACTIVE promotion (Safety_CheckCANTimeout) then
+ *     re-enables drive only when every other precondition is met.
+ *   - An invalid / I2C-failed reading never recovers here (it returns
+ *     early and keeps the system in SAFE), preserving the distinction
+ *     between a real undervoltage and a sensor/bus fault.
+ * The historical DTC stays in the error log; only the *active* fault is
+ * cleared so the main display can leave SAFE.                           */
+#define BATTERY_UV_RECOVERY_STABLE_MS 2000U
+static uint32_t batt_uv_recovery_since   = 0;
+static uint8_t  batt_uv_recovery_pending = 0;
+
 /* ---- Granular degradation internal state (Phase 12) ----
  * These variables track the current degradation level and reason
  * internally.  The external CAN representation remains SYS_STATE_DEGRADED
@@ -468,6 +498,19 @@ void Safety_SetState(SystemState_t state)
         case SYS_STATE_STANDBY:
             if (system_state == SYS_STATE_BOOT)
                 system_state = SYS_STATE_STANDBY;
+            /* Safe recovery target after a latched fault has cleared
+             * (e.g. battery critical-UV that returned to a valid, stable
+             * range).  Only allowed when no active fault remains, so we
+             * never relax safety: relays stay down (Safety_FailSafe was
+             * already invoked on SAFE entry) and motion stays disabled
+             * until the normal STANDBY → ACTIVE promotion re-validates
+             * every precondition.                                       */
+            else if (system_state == SYS_STATE_SAFE &&
+                     safety_error == SAFETY_ERROR_NONE) {
+                system_state    = SYS_STATE_STANDBY;
+                degraded_level  = DEGRADED_LEVEL_NONE;
+                degraded_reason = DEGRADED_REASON_NONE;
+            }
             break;
 
         case SYS_STATE_ACTIVE:
@@ -1084,6 +1127,8 @@ void Safety_Init(void)
     last_error_tick    = 0;
     recovery_clean_since = 0;
     recovery_pending     = 0;
+    batt_uv_recovery_since   = 0;
+    batt_uv_recovery_pending = 0;
     obstacle_last_rx_tick    = 0;
     obstacle_distance_mm     = 0xFFFF;
     obstacle_zone            = 0;
@@ -2009,7 +2054,9 @@ void Safety_CheckEncoder(void)
  *   - All traction outputs disabled (Safety_FailSafe)
  *   - Dynamic braking and park hold disabled (SAFE state inhibits)
  *   - Steering centering preserved if encoder is healthy
- *   - NO auto-recovery: operator must recharge and reset
+ *   - Gated auto-recovery: leaves SAFE to STANDBY once the pack stays
+ *     above 18.5 V (CRITICAL + hysteresis) for BATTERY_UV_RECOVERY_STABLE_MS;
+ *     an invalid / I2C-failed reading never auto-recovers (fail-safe)
  *
  * Sensor failure (0.0 V reading indicates I2C / multiplexer fault):
  *   - Treated as CRITICAL (fail-safe default)
@@ -2041,15 +2088,64 @@ void Safety_CheckBatteryVoltage(void)
         Safety_SetError(batt_ina_ok ? SAFETY_ERROR_BATTERY_UV_CRITICAL
                                     : SAFETY_ERROR_I2C_FAILURE);
         Safety_SetState(SYS_STATE_SAFE);
+        batt_uv_recovery_pending = 0;   /* invalid reading aborts recovery */
         return;
     }
 
-    /* Critical undervoltage — SAFE state, no auto-recovery */
+    /* Critical undervoltage — SAFE state */
     if (voltage < BATTERY_UV_CRITICAL_V) {
         Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
         Safety_SetState(SYS_STATE_SAFE);
+        batt_uv_recovery_pending = 0;   /* still below trip: restart window */
         return;
     }
+
+    /* Recovery from SAFE after a critical undervoltage (Code 10).
+     *
+     * Reached only while still latched in SAFE on a genuine battery UV
+     * (voltage is already >= BATTERY_UV_CRITICAL_V here).  The pack must
+     * return above the hysteresis threshold (CRITICAL + HYST = 18.5 V)
+     * and stay there for BATTERY_UV_RECOVERY_STABLE_MS before we clear
+     * the active fault and leave SAFE to STANDBY.  This handles the real
+     * case of a temporary battery disconnect/reconnect without a manual
+     * reset; hysteresis + stable-time prevent flapping.  Handling this
+     * before the warning branch keeps the critical latch from being
+     * overwritten by a warning-band reading while still in SAFE.
+     *
+     * We only act on a genuine battery UV latch — an I2C/sensor failure
+     * (SAFETY_ERROR_I2C_FAILURE) keeps its own recovery path and is NOT
+     * cleared here.  The historical DTC remains in the error log; only
+     * the active fault is cleared so the display can leave SAFE.  The
+     * recovery target is STANDBY (motion stays disabled) — the normal
+     * STANDBY -> ACTIVE promotion then re-validates every precondition
+     * before re-enabling drive.                                          */
+    if (system_state == SYS_STATE_SAFE &&
+        safety_error == SAFETY_ERROR_BATTERY_UV_CRITICAL) {
+        if (voltage > (BATTERY_UV_CRITICAL_V + BATTERY_UV_HYST_V)) {
+            if (!batt_uv_recovery_pending) {
+                batt_uv_recovery_pending = 1;
+                batt_uv_recovery_since   = HAL_GetTick();
+            } else if ((HAL_GetTick() - batt_uv_recovery_since) >=
+                       BATTERY_UV_RECOVERY_STABLE_MS) {
+                batt_uv_recovery_pending = 0;
+                Safety_ClearError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
+                /* Leave SAFE only if no other active fault remains.  If a
+                 * different fault latched meanwhile, Safety_SetState
+                 * ignores the STANDBY request and the system stays SAFE. */
+                if (safety_error == SAFETY_ERROR_NONE) {
+                    Safety_SetState(SYS_STATE_STANDBY);
+                }
+            }
+        } else {
+            /* Above the trip point but still inside the hysteresis band:
+             * keep the SAFE/critical latch and restart the stable window. */
+            batt_uv_recovery_pending = 0;
+        }
+        return;
+    }
+    /* Not in the SAFE/critical-UV recovery scenario: make sure a stale
+     * debounce window cannot survive to a later trip.                    */
+    batt_uv_recovery_pending = 0;
 
     /* Warning undervoltage — DEGRADED state with power limiting */
     if (voltage < BATTERY_UV_WARNING_V) {
@@ -2062,11 +2158,7 @@ void Safety_CheckBatteryVoltage(void)
 
     /* Voltage OK — attempt recovery from DEGRADED if hysteresis met.
      * Recovery from DEGRADED requires voltage > WARNING + HYSTERESIS
-     * (20.5 V) to prevent oscillation under load transients.
-     *
-     * Recovery from SAFE is intentionally NOT attempted here:
-     * a critically depleted battery cannot reliably power actuators.
-     * The operator must recharge and reset the system.                 */
+     * (20.5 V) to prevent oscillation under load transients.            */
     if (system_state == SYS_STATE_DEGRADED &&
         safety_error == SAFETY_ERROR_BATTERY_UV_WARNING &&
         voltage > (BATTERY_UV_WARNING_V + BATTERY_UV_HYST_V)) {
