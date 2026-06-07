@@ -671,7 +671,17 @@ void DriveScreen::draw() {
         // the periodic hash-failsafe empty re-clear), restore the obstacle tile
         // so the cleared strip leaves no background gap.  Mirrors the DEGRADED
         // overlay invalidation contract above.
+        //
+        // The strip (OVL_FAULT_Y..+H) clips the static obstacle elements — the
+        // "SENSOR FRONTAL" label and the proximity-bar outline — which are
+        // painted only by drawStatic().  ObstacleSensor::draw() early-returns
+        // when the distance is unchanged and never repaints those static parts,
+        // so marking the tile dirty alone would leave a permanent gap in the bar
+        // border.  Repaint the static layer here (idempotent: same pixels when
+        // nothing was clipped, so it stays flicker-free) and mark the tile dirty
+        // so the dynamic distance/fill repaint on the next reading.
         if (!curFaultsVisible_) {
+            ui::ObstacleSensor::drawStatic(tft);
             tiles_.markDirty(DTILE_OBSTACLE);
         }
         prevFaultsVisible_ = curFaultsVisible_;
