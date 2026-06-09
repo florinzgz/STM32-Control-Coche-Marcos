@@ -1984,11 +1984,33 @@ void Safety_CheckSensors(void)
      * clear sensor fault to allow recovery.
      * DEGRADED: CAN timeout handler can recover to ACTIVE.
      * LIMP_HOME: pedal plausibility restored → allow ACTIVE recovery
-     * via Safety_CheckCANTimeout() when CAN is alive.                   */
+     * via Safety_CheckCANTimeout() when CAN is alive.
+     *
+     * Patch B (audit BUG-2): also allow clearing from SAFE.  Previously
+     * SAFETY_ERROR_SENSOR_FAULT was only cleared in DEGRADED/LIMP_HOME, so
+     * if a sensor/bus fault escalated to SAFE (e.g. battery disconnect that
+     * also stalls the I2C sensor reads) the SENSOR_FAULT latch survived
+     * forever and pinned the system in SAFE.  We reach this point only when
+     * EVERY sensor check of the current cycle has passed (fault_count == 0
+     * and pedal plausibility OK).  Because safety_error is single-slot,
+     * safety_error == SAFETY_ERROR_SENSOR_FAULT also guarantees no other
+     * critical fault is active.  The recovery target is STANDBY — never
+     * ACTIVE — so motion stays disabled and the normal STANDBY -> ACTIVE
+     * promotion re-validates every precondition.  The historical DTC stays
+     * in the error log (only the active fault is cleared).                */
     if (safety_error == SAFETY_ERROR_SENSOR_FAULT &&
         (system_state == SYS_STATE_DEGRADED ||
          system_state == SYS_STATE_LIMP_HOME)) {
         Safety_ClearError(SAFETY_ERROR_SENSOR_FAULT);
+    } else if (safety_error == SAFETY_ERROR_SENSOR_FAULT &&
+               system_state == SYS_STATE_SAFE) {
+        Safety_ClearError(SAFETY_ERROR_SENSOR_FAULT);
+        /* Leave SAFE only if no other active fault remains.  If a different
+         * fault latched meanwhile, Safety_SetState ignores the STANDBY
+         * request and the system stays SAFE (fail-safe).                  */
+        if (safety_error == SAFETY_ERROR_NONE) {
+            Safety_SetState(SYS_STATE_STANDBY);
+        }
     }
 }
 
@@ -2057,13 +2079,20 @@ void Safety_CheckEncoder(void)
  *   - Steering centering preserved if encoder is healthy
  *   - Gated auto-recovery: leaves SAFE to STANDBY once the pack stays
  *     above 18.5 V (CRITICAL + hysteresis) for BATTERY_UV_RECOVERY_STABLE_MS;
- *     an invalid / I2C-failed reading never auto-recovers (fail-safe)
+ *     a still-invalid / I2C-failed reading never auto-recovers (fail-safe)
  *
- * Sensor failure (0.0 V reading indicates I2C / multiplexer fault):
- *   - Treated as CRITICAL (fail-safe default)
- *   - The battery INA226 is placed BEFORE the main relay (directly at the
- *     battery terminal), so relay-off states do NOT cause 0 V readings.
- *     A 0 V reading truly means the sensor/I2C bus has failed.
+ * Sensor / I2C failure (0.0 V reading indicates I2C / multiplexer fault):
+ *   - Treated as CRITICAL (fail-safe default); reported as Code 11
+ *     (SAFETY_ERROR_I2C_FAILURE) when the mux/INA did not ACK, else as
+ *     Code 10 (SAFETY_ERROR_BATTERY_UV_CRITICAL).
+ *   - The battery INA226 normally sits at the battery terminal, but if the
+ *     main battery connector is physically removed the whole I2C sensor bus
+ *     loses power and stops ACKing — that legitimately raises Code 11.
+ *   - Patch A: once the hardware physically recovers (mux present, battery
+ *     INA ACKs + valid bus read) AND the voltage is back above 18.5 V and
+ *     stays stable for BATTERY_UV_RECOVERY_STABLE_MS, the Code 11 latch is
+ *     cleared and SAFE is left to STANDBY (never directly to ACTIVE).  An
+ *     invalid reading or a missing mux/INA aborts the recovery window.
  *
  * Works alongside overcurrent / overtemperature / CAN timeout:
  *   - Does not interfere with existing fault escalation
@@ -2115,8 +2144,9 @@ void Safety_CheckBatteryVoltage(void)
      * overwritten by a warning-band reading while still in SAFE.
      *
      * We only act on a genuine battery UV latch — an I2C/sensor failure
-     * (SAFETY_ERROR_I2C_FAILURE) is intentionally NOT cleared here and
-     * keeps the system in SAFE (it has no auto-recovery path).  The
+     * (SAFETY_ERROR_I2C_FAILURE) is intentionally NOT cleared in THIS
+     * block; it has its own dedicated recovery block below (Patch A) that
+     * additionally requires the mux/INA to be physically back.  The
      * historical DTC remains in the error log; only
      * the active fault is cleared so the display can leave SAFE.  The
      * recovery target is STANDBY (motion stays disabled) — the normal
@@ -2146,6 +2176,62 @@ void Safety_CheckBatteryVoltage(void)
         }
         return;
     }
+
+    /* Patch A — Recovery from SAFE after an I2C / sensor-bus failure
+     * (Code 11) once the hardware has physically recovered.
+     *
+     * Rationale (audit BUG-1): SAFETY_ERROR_I2C_FAILURE had NO clearing
+     * path anywhere in the firmware, so a transient loss of the I2C bus
+     * (e.g. the operator disconnects and reconnects the main battery while
+     * the STM32 logic rail stays powered) latched the system in SAFE until
+     * a full power-cycle.  The TCA9548A multiplexer and the battery INA226
+     * recover on their own (Current_ReadAll resets its per-cycle failure
+     * counters), yet safety_error/SAFE were never released.
+     *
+     * This block leaves SAFE *only* when every recovery precondition holds,
+     * preserving fail-safe behaviour:
+     *   - reached here only with a VALID battery voltage reading (the
+     *     invalid-reading branch above re-asserts the fault and returns),
+     *   - the TCA9548A mux is present again AND the battery INA226 both
+     *     ACKs and returns a valid bus-voltage read (Sensor_Get*),
+     *   - the pack is above the critical+hysteresis threshold (18.5 V),
+     *   - and it stays stable for BATTERY_UV_RECOVERY_STABLE_MS.
+     *
+     * The historical DTC is kept in the error log (only the active fault is
+     * cleared).  The recovery target is STANDBY — never ACTIVE — so motion
+     * stays disabled and the normal STANDBY -> ACTIVE promotion re-validates
+     * every precondition before drive is re-enabled.  The same stable-window
+     * timer is reused: safety_error is single-slot, so the UV-critical and
+     * I2C-failure recovery scenarios are mutually exclusive.               */
+    if (system_state == SYS_STATE_SAFE &&
+        safety_error == SAFETY_ERROR_I2C_FAILURE) {
+        bool batt_sample_ok = Sensor_GetMuxPresent() &&
+            ((Sensor_GetInaOkMask()    & INA226_MASK_BATTERY) != 0U) &&
+            ((Sensor_GetInaBusOkMask() & INA226_MASK_BATTERY) != 0U);
+        if (batt_sample_ok &&
+            voltage > (BATTERY_UV_CRITICAL_V + BATTERY_UV_HYST_V)) {
+            if (!batt_uv_recovery_pending) {
+                batt_uv_recovery_pending = 1;
+                batt_uv_recovery_since   = HAL_GetTick();
+            } else if ((HAL_GetTick() - batt_uv_recovery_since) >=
+                       BATTERY_UV_RECOVERY_STABLE_MS) {
+                batt_uv_recovery_pending = 0;
+                Safety_ClearError(SAFETY_ERROR_I2C_FAILURE);
+                /* Leave SAFE only if no other active fault remains.  If a
+                 * different fault latched meanwhile, Safety_SetState
+                 * ignores the STANDBY request and the system stays SAFE. */
+                if (safety_error == SAFETY_ERROR_NONE) {
+                    Safety_SetState(SYS_STATE_STANDBY);
+                }
+            }
+        } else {
+            /* Bus not fully back or voltage not yet stable above the
+             * hysteresis band: keep the SAFE latch, restart the window. */
+            batt_uv_recovery_pending = 0;
+        }
+        return;
+    }
+
     /* Not in the SAFE/critical-UV recovery scenario: make sure a stale
      * debounce window cannot survive to a later trip.                    */
     batt_uv_recovery_pending = 0;
