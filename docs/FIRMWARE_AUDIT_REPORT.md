@@ -432,7 +432,7 @@ For a **child-sized electric vehicle / educational platform**, the firmware is *
 
 ### Hidden Risks
 
-1. **I2C bus lockup:** If the I2C bus hangs (SDA stuck LOW), all 6 INA226 current sensors and 5 DS18B20 temperature sensors become unavailable simultaneously. The firmware handles this (`SAFETY_ERROR_I2C_FAILURE`) but a bus-reset recovery mechanism would be beneficial.
+1. **I2C bus lockup:** If the I2C bus hangs (SDA stuck LOW), all 6 INA226 current sensors and 5 DS18B20 temperature sensors become unavailable simultaneously. The firmware handles this (`SAFETY_ERROR_I2C_FAILURE`) and `Current_ReadAll()` runs an in-cycle bus-recovery (`I2C_BusRecovery`). Since Patch A, once the multiplexer and battery INA226 physically respond again and the bus voltage is valid and stable, the `SAFETY_ERROR_I2C_FAILURE` latch auto-recovers `SAFE` → `STANDBY` (gated, never directly to `ACTIVE`), so a transient bus loss (e.g. main-battery disconnect/reconnect) no longer requires a power-cycle.
 
 2. **Flash wear on steering calibration:** `SteeringCal_*` writes to flash on every calibration. If the centering cycle repeats frequently (e.g., due to a faulty center sensor), flash endurance could be exceeded.
 
