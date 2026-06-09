@@ -22,7 +22,7 @@
  *            5. forceOff() immediately deactivates relay from any state
  *            6. Timing: 20 ms guard (no premature play), 150 ms cooldown
  *            7. Idempotent requestOn(), release() on IDLE is no-op
- *            8. GPIO polarity: relay OFF = HIGH, relay ON = LOW
+ *            8. GPIO polarity: relay OFF = LOW, relay ON = HIGH
  ****************************************************************************
  */
 
@@ -77,11 +77,11 @@ static void tick(unsigned long new_ms) {
 /* ====================================================================== */
 static void test_init_forces_relay_off() {
     /* Simulate relay being ON before init (e.g. ESP32 reboot during ACTIVE) */
-    g_gpio_state[relay_audio::PIN_AUDIO_RELAY] = LOW;  /* was ON */
+    g_gpio_state[relay_audio::PIN_AUDIO_RELAY] = HIGH;  /* was ON */
     reset_and_init(500);
 
-    /* After init(), relay must be HIGH (OFF) */
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    /* After init(), relay must be LOW (OFF) */
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     /* isReady() must be false in IDLE */
     ASSERT(!relay_audio::isReady());
 }
@@ -92,9 +92,9 @@ static void test_init_forces_relay_off() {
 static void test_normal_activation() {
     reset_and_init(0);
 
-    /* requestOn → ACTIVATING, GPIO goes LOW */
+    /* requestOn → ACTIVATING, GPIO goes HIGH */
     relay_audio::requestOn();
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
     ASSERT(!relay_audio::isReady());  /* not yet ACTIVE */
 
     /* tick at 19 ms — still ACTIVATING */
@@ -104,7 +104,7 @@ static void test_normal_activation() {
     /* tick at exactly 20 ms — transitions to ACTIVE */
     tick(relay_audio::RELAY_ESTABLISH_MS);
     ASSERT(relay_audio::isReady());
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 }
 
 /* ====================================================================== */
@@ -117,18 +117,18 @@ static void test_normal_release() {
     tick(relay_audio::RELAY_ESTABLISH_MS);         /* now ACTIVE */
     ASSERT(relay_audio::isReady());
 
-    /* release() transitions ACTIVE → RELEASING; relay stays LOW */
+    /* release() transitions ACTIVE → RELEASING; relay stays HIGH */
     relay_audio::release();
     ASSERT(!relay_audio::isReady());
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 
     /* 149 ms — still RELEASING */
     tick(relay_audio::RELAY_ESTABLISH_MS + relay_audio::RELAY_RELEASE_MS - 1);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
-
-    /* 150 ms — IDLE, relay goes HIGH */
-    tick(relay_audio::RELAY_ESTABLISH_MS + relay_audio::RELAY_RELEASE_MS);
     ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+
+    /* 150 ms — IDLE, relay goes LOW */
+    tick(relay_audio::RELAY_ESTABLISH_MS + relay_audio::RELAY_RELEASE_MS);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     ASSERT(!relay_audio::isReady());
 }
 
@@ -156,8 +156,8 @@ static void test_consecutive_sounds() {
     /* Must be ACTIVE immediately (no re-establishment) */
     ASSERT(relay_audio::isReady());
 
-    /* GPIO must still be LOW (relay never opened) */
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    /* GPIO must still be HIGH (relay never opened) */
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 }
 
 /* ====================================================================== */
@@ -204,8 +204,8 @@ static void test_release_on_idle_is_noop() {
     relay_audio::release();   /* no-op */
     tick(10);
 
-    /* GPIO must not change from HIGH */
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    /* GPIO must not change from LOW */
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     /* No additional write should have occurred */
     ASSERT_EQ(
         (int)g_gpio_write_count[relay_audio::PIN_AUDIO_RELAY],
@@ -225,12 +225,12 @@ static void test_force_off_from_active() {
 
     relay_audio::forceOff();
 
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     ASSERT(!relay_audio::isReady());
 
     /* Further ticks must not re-activate the relay */
     tick(500 + relay_audio::RELAY_ESTABLISH_MS + 100);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 }
 
 /* ====================================================================== */
@@ -247,7 +247,7 @@ static void test_force_off_from_releasing() {
     tick(relay_audio::RELAY_ESTABLISH_MS + 50);
     relay_audio::forceOff();
 
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     ASSERT(!relay_audio::isReady());
 }
 
@@ -268,16 +268,16 @@ static void test_watchdog_fires() {
     /* One tick before watchdog — must still be ACTIVE */
     tick(wd_deadline - 1);
     ASSERT(relay_audio::isReady());
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 
     /* At exactly RELAY_MAX_ON_MS — watchdog fires */
     tick(wd_deadline);
     ASSERT(!relay_audio::isReady());
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 
     /* State is IDLE; further ticks must not re-activate */
     tick(wd_deadline + 1000);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 }
 
 /* ====================================================================== */
@@ -290,8 +290,8 @@ static void test_millis_overflow() {
     reset_and_init(WRAP - 5);   /* init at WRAP-5 ms */
 
     relay_audio::requestOn();   /* activationMs_ = WRAP-5, stateMs_ = WRAP-5 */
-    /* GPIO must now be LOW */
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    /* GPIO must now be HIGH */
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 
     /* Tick at WRAP (5 ms after activation) — still in ACTIVATING (need 20 ms) */
     tick(WRAP);
@@ -306,11 +306,11 @@ static void test_millis_overflow() {
 
     /* Tick 149 ms after release — still RELEASING */
     tick(WRAP + 16 + relay_audio::RELAY_RELEASE_MS - 1);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 
     /* Tick at 150 ms after release — IDLE */
     tick(WRAP + 16 + relay_audio::RELAY_RELEASE_MS);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 }
 
 /* ====================================================================== */
@@ -329,10 +329,10 @@ static void test_watchdog_overflow() {
     unsigned long wd_deadline = (unsigned long)(WRAP - 100 + relay_audio::RELAY_MAX_ON_MS);
 
     tick(wd_deadline - 1);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
 
     tick(wd_deadline);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     ASSERT(!relay_audio::isReady());
 }
 
@@ -350,32 +350,32 @@ static void test_release_during_activating() {
     ASSERT(!relay_audio::isReady());
     relay_audio::release();
 
-    /* Should now be RELEASING; relay still LOW */
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
-
-    /* After cooldown, relay goes HIGH */
-    tick(10 + relay_audio::RELAY_RELEASE_MS);
+    /* Should now be RELEASING; relay still HIGH */
     ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+
+    /* After cooldown, relay goes LOW */
+    tick(10 + relay_audio::RELAY_RELEASE_MS);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 }
 
 /* ====================================================================== */
-/* TEST 13 — GPIO polarity: ON = LOW, OFF = HIGH                          */
+/* TEST 13 — GPIO polarity: ON = HIGH, OFF = LOW                          */
 /* ====================================================================== */
 static void test_gpio_polarity() {
     reset_and_init(0);
 
-    /* After init() relay must be HIGH (off) */
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
-
-    /* After requestOn() relay must be LOW (on) */
-    relay_audio::requestOn();
+    /* After init() relay must be LOW (off) */
     ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 
-    /* After full cycle back to IDLE, relay must be HIGH again */
+    /* After requestOn() relay must be HIGH (on) */
+    relay_audio::requestOn();
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+
+    /* After full cycle back to IDLE, relay must be LOW again */
     tick(relay_audio::RELAY_ESTABLISH_MS);
     relay_audio::release();
     tick(relay_audio::RELAY_ESTABLISH_MS + relay_audio::RELAY_RELEASE_MS);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
 }
 
 /* ====================================================================== */
@@ -400,7 +400,7 @@ static void test_dfplayer_no_response() {
 
     /* After cooldown the relay must be OFF */
     tick(2000 + 5000 + relay_audio::RELAY_RELEASE_MS);
-    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], HIGH);
+    ASSERT_EQ(g_gpio_state[relay_audio::PIN_AUDIO_RELAY], LOW);
     ASSERT(!relay_audio::isReady());
 }
 
