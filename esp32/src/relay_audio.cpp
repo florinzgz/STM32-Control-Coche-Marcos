@@ -27,10 +27,10 @@ namespace relay_audio {
 // ---------------------------------------------------------------------------
 
 enum class State : uint8_t {
-    IDLE,        // Relay OFF — GPIO HIGH
-    ACTIVATING,  // Relay ON  — GPIO LOW, waiting for contact establishment
-    ACTIVE,      // Relay ON  — GPIO LOW, ready for DFPlayer audio
-    RELEASING    // Relay ON  — GPIO LOW, cooldown after audio ends
+    IDLE,        // Relay OFF — GPIO LOW
+    ACTIVATING,  // Relay ON  — GPIO HIGH, waiting for contact establishment
+    ACTIVE,      // Relay ON  — GPIO HIGH, ready for DFPlayer audio
+    RELEASING    // Relay ON  — GPIO HIGH, cooldown after audio ends
 };
 
 static State         state_        = State::IDLE;
@@ -43,18 +43,18 @@ static unsigned long activationMs_ = 0;   // millis() when relay was last energi
 
 void init() {
     pinMode(PIN_AUDIO_RELAY, OUTPUT);
-    digitalWrite(PIN_AUDIO_RELAY, HIGH);  // Relay OFF (active LOW)
+    digitalWrite(PIN_AUDIO_RELAY, LOW);  // Relay OFF (active HIGH at GPIO side with ULN2803A)
     state_        = State::IDLE;
     stateMs_      = 0;
     activationMs_ = 0;
-    Serial.println("[RELAY] Audio relay initialized (GPIO 11, active-LOW, IDLE)");
+    Serial.println("[RELAY] Audio relay initialized (GPIO 11, active-HIGH@ESP32 via ULN2803A, IDLE)");
 }
 
 void requestOn() {
     switch (state_) {
         case State::IDLE:
             // Relay was off — turn it on and start the establishment timer
-            digitalWrite(PIN_AUDIO_RELAY, LOW);
+            digitalWrite(PIN_AUDIO_RELAY, HIGH);
             state_        = State::ACTIVATING;
             stateMs_      = millis();
             activationMs_ = stateMs_;  // record when this activation cycle began
@@ -86,7 +86,7 @@ void release() {
 }
 
 void forceOff() {
-    digitalWrite(PIN_AUDIO_RELAY, HIGH);  // Relay OFF immediately
+    digitalWrite(PIN_AUDIO_RELAY, LOW);  // Relay OFF immediately
     state_        = State::IDLE;
     stateMs_      = 0;
     activationMs_ = 0;
@@ -110,7 +110,7 @@ void update() {
         activationMs_ != 0 &&
         (now - activationMs_) >= RELAY_MAX_ON_MS) {
         Serial.println("[RELAY] WATCHDOG: forced OFF (max ON time exceeded)");
-        digitalWrite(PIN_AUDIO_RELAY, HIGH);
+        digitalWrite(PIN_AUDIO_RELAY, LOW);
         state_        = State::IDLE;
         stateMs_      = 0;
         activationMs_ = 0;
@@ -134,7 +134,7 @@ void update() {
         case State::RELEASING:
             // Keep relay ON during cooldown to absorb any audio tail
             if ((now - stateMs_) >= RELAY_RELEASE_MS) {
-                digitalWrite(PIN_AUDIO_RELAY, HIGH);  // Relay OFF
+                digitalWrite(PIN_AUDIO_RELAY, LOW);  // Relay OFF
                 state_        = State::IDLE;
                 activationMs_ = 0;
             }

@@ -6,7 +6,9 @@
 //   - Normal state  (relay OFF) → Car radio output
 //   - Active state  (relay ON)  → DFPlayer Mini amplifier output
 //
-// The relay module is active-LOW: LOW = relay ON, HIGH = relay OFF.
+// The relay command path is active-HIGH at the ESP32 GPIO when using ULN2803A:
+//   GPIO HIGH -> ULN sink ON -> Songle IN3 pulled LOW -> relay ON
+//   GPIO LOW  -> ULN sink OFF -> Songle IN3 pull-up to 5V -> relay OFF
 //
 // Pin selection: GPIO 11
 //   - Not a strapping pin (only GPIO 0/3/45/46 are strapping on ESP32-S3)
@@ -42,7 +44,7 @@
 namespace relay_audio {
 
 // ---- Hardware assignment ------------------------------------------------
-/// GPIO pin for audio relay control (active LOW).
+/// GPIO pin for audio relay control (active HIGH at ESP32 side with ULN2803A).
 /// GPIO 11: safe for ESP32-S3 — see header comment for full justification.
 inline constexpr int PIN_AUDIO_RELAY = 11;
 
@@ -72,7 +74,7 @@ inline constexpr unsigned long RELAY_MAX_ON_MS = 7000;
 
 // ---- Public API ---------------------------------------------------------
 
-/// Initialise relay GPIO pin and drive it HIGH (relay OFF).
+/// Initialise relay GPIO pin and drive it LOW (relay OFF).
 /// Call once from audio::init() before the main loop begins.
 void init();
 
