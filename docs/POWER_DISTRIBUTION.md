@@ -61,7 +61,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
         │  4 mm²
         ▼
  ┌──────────────┐  PC12
- │  RELAY_DIR   │──── STM32 (vía módulo 4-ch opto relé SRD-12VDC-SL-C)
+ │ RELAY_STEER │──── STM32 (vía ULN2803A + módulo Songle 4CH)
  │  Fusible 20A │
  └──────┬───────┘
         │ 2.5 mm²
@@ -180,30 +180,29 @@ Todas las masas del sistema **deben** converger en un único punto de conexión 
 | Función          | Pin STM32 | Puerto | Carga controlada                | Fusible |
 |------------------|-----------|--------|---------------------------------|---------|
 | `RELAY_TRAC`     | PC11      | GPIOC  | Motores de tracción 24 V        | 50 A    |
-| `RELAY_DIR`      | PC12      | GPIOC  | Motor de dirección 12 V         | 20 A    |
+| `RELAY_STEER_PWR`| PC12      | GPIOC  | Motor de dirección 12 V         | 20 A    |
 | `RELAY_LED`      | PB10      | GPIOB  | Tira WS2812B frontal (5 V)      | —       |
 | `RELAY_LED_REAR` | PB11      | GPIOB  | Tira WS2812B trasera (5 V)      | —       |
 
-> **Nota:** **PC10 está DISPONIBLE (libre).** PC10 se configura como `GPIO_MODE_INPUT` con `GPIO_PULLDOWN` (estado seguro determinista). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_DIR (PC12)**.
+> **Nota:** **PC10 está DISPONIBLE (libre).** PC10 se configura como `GPIO_MODE_INPUT` con `GPIO_PULLDOWN` (estado seguro determinista). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_STEER_PWR (PC12)**.
 
-Los relés de potencia se controlan en **dos etapas**:
+Los relés de potencia y auxiliares se controlan en **dos etapas**:
 
-1. **Etapa 1 — Módulo intermedio:** Módulo de 4 canales con optoacopladores y relés
-   SRD-12VDC-SL-C (bobina 12 V DC, contactos 10 A). El STM32 activa las entradas
-   IN1–IN4 del módulo con 3.3 V (high/low level trigger). El módulo se alimenta
-   desde la línea de 12 V (DC+ / DC−).
+1. **Etapa 1 — Driver de protección:** ULN2803A (8 canales Darlington).
+   Los GPIO STM32/ESP32 entran por Bx, y las salidas Cx excitan las entradas
+   `IN1..IN4` del módulo Songle.
 
-2. **Etapa 2 — Relés de potencia:** Los contactos del módulo intermedio conmutan
+2. **Etapa 2 — Relés Songle + relés de potencia:** Los contactos del Songle conmutan
    los 12 V hacia las bobinas de los relés de potencia de alta corriente. Estos
    relés de potencia (bobina 12 V DC) conmutan la línea de 24 V (tracción) o
    la línea de 12 V (dirección) hacia los drivers BTS7960.
 
 Esquema de la cadena de control:
 ```
-STM32 GPIO (3.3V) ──► Módulo 4-ch opto relé (SRD-12VDC-SL-C, 12V)
+STM32/ESP32 GPIO (3.3V) ──► ULN2803A ──► Módulo Songle 4CH
                           │
-                          ├── CH2 contacto → Bobina relé potencia TRAC (12V) → conmuta 24V tracción
-                          └── CH3 contacto → Bobina relé potencia DIR  (12V) → conmuta 12V dirección
+                          ├── CHx contacto → Bobina relé potencia TRAC (12V) → conmuta 24V tracción
+                          └── CHx contacto → Bobina relé potencia STEER (12V) → conmuta 12V dirección
 ```
 
 ### Secuencia de encendido (`Relay_PowerUp`)
@@ -214,12 +213,12 @@ Implementada en `Core/Src/safety_system.c` como máquina de estados no bloqueant
  t=0 ms        t=50 ms           t=70 ms
    │              │                 │
    ▼              ▼                 ▼
-  RELAY_TRAC ON → espera 50 ms → RELAY_DIR ON
+  RELAY_TRAC ON → espera 50 ms → RELAY_STEER_PWR ON
   (PC11 SET)      (settle)       (PC12 SET)
 ```
 
 ```c
-#define RELAY_TRACTION_SETTLE_MS 20   /* retardo supresión de arco              */
+#define RELAY_TRACTION_SETTLE_MS 50   /* retardo supresión de arco              */
 ```
 
 ### Secuencia de apagado (`Relay_PowerDown`)
@@ -227,7 +226,7 @@ Implementada en `Core/Src/safety_system.c` como máquina de estados no bloqueant
 Orden inverso, inmediato (sin retardos):
 
 ```
-RELAY_DIR OFF → RELAY_TRAC OFF
+RELAY_STEER_PWR OFF → RELAY_TRAC OFF
   (PC12)          (PC11)
 ```
 
@@ -262,7 +261,7 @@ STM32 I²C1
 | 2     | INA226_RL     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 RL (entre salida RELAY_TRAC y B+)     |
 | 3     | INA226_RR     | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 RR (entre salida RELAY_TRAC y B+)     |
 | 4     | INA226_MAIN   | 0.75 mΩ | 100 A  | **ANTES** del RELAY_TRAC (mide corriente total batería 24V)   |
-| 5     | INA226_STEER  | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 DIR (entre salida RELAY_DIR y B+)     |
+| 5     | INA226_STEER  | 1.5 mΩ | 50 A   | **ANTES** del BTS7960 de dirección (entre salida RELAY_STEER_PWR y B+) |
 
 > **Crítico — Canal 4:** El sensor de batería está colocado **antes del RELAY_TRAC**. Esto permite que `Voltage_GetBus(INA226_CHANNEL_BATTERY)` lea la tensión de la batería incluso con los relés abiertos. Es esencial para:
 > - Validación de batería en el arranque (boot validation), antes de cerrar relés.
@@ -365,8 +364,8 @@ STM32 I²C1
 | Fallo                         | Detección                              | Respuesta del sistema                  |
 |-------------------------------|----------------------------------------|----------------------------------------|
 | RELAY_TRAC no cierra          | INA226 ch0-ch3 sin corriente           | Motores de tracción inoperativos       |
-| RELAY_DIR no cierra           | INA226 ch5 sin corriente               | Dirección inoperativa → SAFE           |
-| Bobina de relé en corto       | Módulo opto relé SRD-12VDC limita corriente | Fusible de bobina protege STM32        |
+| RELAY_STEER_PWR no cierra     | INA226 ch5 sin corriente               | Dirección inoperativa → SAFE           |
+| Bobina de relé en corto       | Cadena ULN2803A + Songle + fusible limita daño | Fusible de bobina protege MCU          |
 
 ### Fallo de BTS7960
 
@@ -398,7 +397,7 @@ STM32 I²C1
 |------------------|--------------------------------------------------------------------|
 | 60 A (línea 24V)| Sistema completo sin potencia de tracción; INA226 ch4 lee 0 A     |
 | 50 A (RELAY_TRAC)| Motores de tracción sin alimentación; dirección sigue operativa    |
-| 20 A (RELAY_DIR) | Dirección sin alimentación; tracción sigue operativa → SAFE       |
+| 20 A (RELAY_STEER_PWR) | Dirección sin alimentación; tracción sigue operativa → SAFE       |
 
 ---
 
