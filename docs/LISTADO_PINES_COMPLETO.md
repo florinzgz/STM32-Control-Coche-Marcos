@@ -305,17 +305,18 @@ GND (ESP32)    ─────────→ GND PC817
 
 | Pin LQFP | GPIO | Señal | Conecta a | Componentes externos |
 |----------|------|-------|-----------|----------------------|
-| 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
-| 53 | PC12 | RELAY_STEER_PWR | Relé potencia dirección (alimentación 12V steering, 15 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+| 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | ULN2803A CH4 → Songle IN4 (módulo 4-ch 12V) → relé potencia 24V |
+| 53 | PC12 | RELAY_STEER_PWR | Relé potencia steering (alimentación 12V steering, 15 A) | ULN2803A CH5 → Songle IN2 (módulo 4-ch 12V) → relé potencia 12V |
 
 > **PC10 está DISPONIBLE (`INPUT_PULLDOWN`, sin conexión)** — GPIO libre, no conectado a hardware.
 
-**Arquitectura de dos etapas por cada relé de potencia:**
+**Arquitectura actual de control para relés de potencia:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| Módulo 2-ch opto relé | Optoacoplador con relé | Entre GPIO STM32 y bobina del relé de potencia | Aislamiento galvánico + conmutación 12V para bobina |
-| Diodo volante (flyback) | 1N4007 | Antiparalelo a la bobina del **relé de potencia** (etapa 2) | Protección contra picos inductivos al cortar la bobina |
+| ULN2803A | 8 canales Darlington | Entre GPIO STM32/ESP32 y entradas `INx` Songle | Aislar GPIO y hundir `INx` a GND (lógica activa por inversión) |
+| Módulo Songle 4-ch (12V) | IN activo LOW + contactos relé | Etapa de mando de bobinas de relés de potencia | Conmutación de la bobina 12V de relés TRAC/STEER_PWR |
+| Relé de potencia | 24V (TRAC) / 12V (STEER_PWR) | Línea de potencia de motores | Conmutación de alta corriente |
 | Fusible | 50 A / 20 A | En serie con contacto del relé | Protección de sobrecorriente |
 
 ---
@@ -588,7 +589,7 @@ GND (ESP32)    ─────────→ GND PC817
 | PC9 | LPWM motor RR | TIM8_CH4 | Salida PWM |
 | PC10 | **DISPONIBLE** | — | **GPIO libre, no conectado** (`INPUT_PULLDOWN`) |
 | PC11 | Relé tracción | GPIO | Salida |
-| PC12 | Relé dirección | GPIO | Salida |
+| PC12 | Relé STEER_PWR | GPIO | Salida |
 | PC13 | **NO USAR** (botón USER B1) | — | Reservado por hardware Nucleo |
 
 **GPIO usados:** 36 de 51 disponibles

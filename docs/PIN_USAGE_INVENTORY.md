@@ -380,10 +380,10 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 | Señal | GPIO | Función | Lógica |
 |-------|------|---------|--------|
-| Relay Coil | **GPIO11** | Conmuta altavoz entre radio y DFPlayer | Active LOW |
+| Relay Coil | **GPIO11** | Conmuta altavoz entre radio y DFPlayer (vía ULN2803A) | GPIO HIGH = ON (`IN3` Songle LOW) |
 | | | **Subtotal:** | **1 pin** |
 
-- LOW = DFPlayer conectado al altavoz; HIGH = radio conectada
+- HIGH = DFPlayer conectado al altavoz; LOW = radio conectada
 - Tiempo de estabilización del relé: 20 ms
 
 ### 5.5b Palanca de cambios — MCP23017 vía I2C (2 pines)

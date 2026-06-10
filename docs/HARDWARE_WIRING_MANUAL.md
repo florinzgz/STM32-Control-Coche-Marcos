@@ -201,7 +201,7 @@ Cálculo: 170 MHz ÷ 17 ÷ (1 + 14 + 5) = 500 kbps, donde (1 + 14 + 5) = SyncSeg
 
 **Si falta terminación**: el bus CAN presentará errores de comunicación, reflexiones de señal,
 y el firmware detectará `CAN_TIMEOUT` (250 ms sin heartbeat del ESP32), forzando al sistema
-al estado **SAFE** (todos los actuadores desactivados, relés apagados).
+al estado **SAFE** (tracción inhibida y actuadores desactivados por firmware; los relés de potencia no se apagan automáticamente en SAFE).
 
 ### Filtros RX configurados
 
@@ -610,7 +610,7 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 | Relé | Pin | Puerto | Función | Tensión conmutada | Módulo físico |
 |------|-----|--------|---------|-------------------|---------------|
 | **TRAC** (Tracción) | **PC11** (STM32) | GPIOC | Driver relé potencia 24V motores (etapa 1 → etapa 2) | 24 V | Módulo 4-ch **12V** CH1 |
-| **DIR** (Dirección) | **PC12** (STM32) | GPIOC | Driver relé potencia 12V dirección (etapa 1 → etapa 2) | 12 V | Módulo 4-ch **12V** CH2 |
+| **STEER_PWR** (Potencia dirección) | **PC12** (STM32) | GPIOC | Driver relé potencia 12V steering (etapa 1 → etapa 2) | 12 V | Módulo 4-ch **12V** CH2 |
 | **LED_F** (Frontal) | **PB10** (STM32) | GPIOB | Corte alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V | Módulo 4-ch **5V** CH1 |
 | **LED_R** (Trasero) | **PB11** (STM32) | GPIOB | Corte alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V | Módulo 4-ch **5V** CH2 |
 | **AUDIO** | **GPIO11** (ESP32) | — | Conmuta altavoz DFPlayer/Radio vía ULN2803A (GPIO HIGH = ON; `IN3` LOW = ON) | señal audio | ULN2803A CH3 → módulo 4-ch **5V** CH3 |

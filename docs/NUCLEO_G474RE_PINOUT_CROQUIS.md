@@ -134,7 +134,7 @@ PB8  I2C1_SCL     ─────┤ ●10 D15 / SCL        │
 FUNCIÓN PROYECTO              CN7               FUNCIÓN PROYECTO
                          ┌──────────┐
 libre/GPIO_IN_PD  PC10 ──┤ 1●    ●2 ├── PC11   RELAY_TRACCIÓN
-RELAY_DIRECCIÓN   PC12 ──┤ 3●    ●4 ├── PD2    libre
+RELAY_STEER_PWR   PC12 ──┤ 3●    ●4 ├── PD2    libre
 +3V3 placa         VDD ──┤ 5●    ●6 ├── E5V    +5V ext (entrada)
 modo arranque    BOOT0 ──┤ 7●    ●8 ├── GND
                     NC ──┤ 9●   ●10 ├── NC
@@ -195,7 +195,7 @@ PEDAL ADC1_IN4     PA3 ──┤37●   ●38 ├── NC
 | CAN_TX → ESP32       | PA12      | CN10     |  12  | FDCAN1_TX         |
 | CAN_RX ← ESP32       | PA11      | CN10     |  14  | FDCAN1_RX         |
 | RELAY_TRACCIÓN       | PC11      | CN7      |   2  | GPIO OUT          |
-| RELAY_DIRECCIÓN      | PC12      | CN7      |   3  | GPIO OUT          |
+| RELAY_STEER_PWR      | PC12      | CN7      |   3  | GPIO OUT          |
 | RELAY_LED_FRONTAL    | PB10      | CN10     |  25  | GPIO OUT          |
 | RELAY_LED_TRASERO    | PB11      | CN10     |  18  | GPIO OUT          |
 | RPWM_FL              | PA8       | CN10     |  23  | TIM1_CH1          |

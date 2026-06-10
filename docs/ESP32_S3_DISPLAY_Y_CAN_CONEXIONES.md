@@ -140,7 +140,7 @@
 
 | Señal | GPIO ESP32 | Notas |
 |-------|------------|-------|
-| IN relé audio | 11 | **Active LOW** |
+| IN relé audio | 11 | **GPIO HIGH = relé ON** (ULN sink ON → `IN3` LOW) |
 
 ---
 

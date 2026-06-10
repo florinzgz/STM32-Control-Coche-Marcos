@@ -94,7 +94,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | GPIO STM32 | Función firmware | Conector breakout | Bornera exacta | Nivel activo | Observaciones |
 |---|---|---|---|---|---|
 | **PC11** | RELAY_TRAC (relé tracción 24V) | CN7 | **CN7_2** | HIGH (3.3V) → ULN → LOW a Songle | 50A fusible; sincronizado 50 ms antes de PC12 |
-| **PC12** | RELAY_STEER_PWR (relé dirección 12V) | CN7 | **CN7_3** | HIGH (3.3V) → ULN → LOW a Songle | 20A fusible; se activa 50 ms después de PC11 |
+| **PC12** | RELAY_STEER_PWR (relé potencia steering 12V) | CN7 | **CN7_3** | HIGH (3.3V) → ULN → LOW a Songle | 20A fusible; se activa 50 ms después de PC11 |
 
 ### 3.2 Relés LED (GPIOB — salida digital, activo HIGH)
 
@@ -409,7 +409,7 @@ STM32/ESP32 GPIO (3.3V salida)
 | Canal 2 | 2B | 2C | **PB11** | **CN10_18** | IN2 | RELAY_LED_REAR (tira trasera) |
 | Canal 3 | 3B | 3C | **GPIO11 ESP32** | — (ESP32, no STM32) | IN3 | RELAY_AUDIO (altavoz) |
 | Canal 4 | 4B | 4C | **PC11** | **CN7_2** | IN4 | RELAY_TRAC (tracción 24V) |
-| Canal 5 | 5B | 5C | **PC12** | **CN7_3** | Relé 12V dirección | RELAY_STEER_PWR |
+| Canal 5 | 5B | 5C | **PC12** | **CN7_3** | Relé 12V STEER_PWR | RELAY_STEER_PWR |
 | Canal 6–8 | — | — | — | — | — | Libres / sin uso actual |
 
 ### 7.2 Cableado completo STM32 breakout → ULN2803A → Songle
@@ -419,7 +419,7 @@ CN10_25 (PB10) ──────[cable]──────► ULN2803A 1B ──
 CN10_18 (PB11) ──────[cable]──────► ULN2803A 2B ──► 2C ──► Songle IN2
 ESP32 GPIO11   ──────[cable]──────► ULN2803A 3B ──► 3C ──► Songle IN3
 CN7_2  (PC11)  ──────[cable]──────► ULN2803A 4B ──► 4C ──► Songle IN4
-CN7_3  (PC12)  ──────[cable]──────► ULN2803A 5B ──► 5C ──► Bobina relé 12V DIR
+CN7_3  (PC12)  ──────[cable]──────► ULN2803A 5B ──► 5C ──► Bobina relé 12V STEER_PWR
 
 Cualquier GND breakout (ej. CN7_8) ──► ULN2803A GND (pin 9)
 ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up interno)
@@ -505,7 +505,7 @@ ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up i
 ### Conexión relés (via ULN2803A)
 
 - [ ] Conectar CN7_2 (PC11) → ULN2803A canal 4 → Songle IN4 → relé tracción
-- [ ] Conectar CN7_3 (PC12) → ULN2803A canal 5 → relé dirección
+- [ ] Conectar CN7_3 (PC12) → ULN2803A canal 5 → relé potencia steering (STEER_PWR)
 - [ ] Conectar CN10_25 (PB10) → ULN2803A canal 1 → Songle IN1 → relé LED frontal
 - [ ] Conectar CN10_18 (PB11) → ULN2803A canal 2 → Songle IN2 → relé LED trasero
 - [ ] Conectar GND ULN2803A a punto de masa estrella

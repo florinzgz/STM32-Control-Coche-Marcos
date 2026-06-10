@@ -102,7 +102,7 @@
 
 | Señal | → | ESP32-S3 | Notas |
 |-------|---|----------|-------|
-| IN relé audio | ← | GPIO 11 | **Active LOW**: LOW = relé ON |
+| IN relé audio | ← | GPIO 11 | **GPIO HIGH = relé ON** (vía ULN2803A, `IN3` LOW = ON) |
 
 ---
 

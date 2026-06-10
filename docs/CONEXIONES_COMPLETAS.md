@@ -769,7 +769,7 @@ Un relé controlado por el ESP32-S3 aísla el altavoz del DFPlayer Mini cuando n
 
 | Cable | De (ESP32-S3) | A (Módulo relé) | Función |
 |-------|-------------|-----------------|---------|
-| — | **GPIO11** | IN (señal control) | Active LOW: GPIO LOW = relé ON (audio conectado) |
+| — | **GPIO11** | IN (señal control) | GPIO HIGH = relé ON (audio conectado) |
 | — | **3.3V** | VCC módulo relé | Alimentación lógica del módulo |
 | — | **GND** | GND módulo relé | GND común |
 
@@ -786,7 +786,7 @@ ESP32 GPIO11 ──► ULN2803A CH3 ──► IN3 módulo relé
 - **IDLE:** GPIO LOW → ULN OFF → IN3 ≈ 5V → Relé OFF → Altavoz desconectado
 - **ACTIVATING:** GPIO HIGH → ULN sink ON → IN3 ≈ 0V → Relé ON
 - **ACTIVE:** Relé ON → DFPlayer reproduce audio → Altavoz suena
-- **RELEASING:** Audio terminado → Espera 200 ms → GPIO LOW → Relé OFF
+- **RELEASING:** Audio terminado → Espera 150 ms → GPIO LOW → Relé OFF
 
 > ⚠️ **GPIO 11 es seguro en ESP32-S3:** No es strapping pin (solo GPIO 0/3/45/46 lo son), no conflicta con Flash (GPIO 26-32) ni PSRAM (GPIO 33-37), ni con USB (GPIO 19/20).
 
@@ -937,7 +937,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 32 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
 | 33 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
 | 33 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
-| 34 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
+| 34 | **PC12** | GPIOC | Output | GPIO | Módulo relé STEER_PWR | HIGH = ON (vía optoacoplador) |
 | 35 | **PC13** | GPIOC | — | **RESERVADO** | USER button B1 (on-board) | No usar como salida. Conectado al botón B1 del NUCLEO-G474RE vía SB17. EN_RR reasignado a PC2 |
 
 ### Conexiones hardware (no GPIO)
@@ -953,7 +953,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 3 | **GPIO8** | I2C SDA | Wire | MCP23017 SDA | Palanca de cambios, 400 kHz |
 | 4 | **GPIO9** | I2C SCL | Wire | MCP23017 SCL | Palanca de cambios, 400 kHz |
 | 5 | **GPIO10** | SPI CS | TFT_CS | Display TFT CS | |
-| 6 | **GPIO11** | Output | GPIO | Relé audio IN | Active LOW (HIGH=OFF, LOW=ON) |
+| 6 | **GPIO11** | Output | GPIO | Relé audio IN | GPIO HIGH = ON (ULN sink ON, `IN3` LOW) |
 | 7 | **GPIO12** | SPI MISO | TFT_MISO | Display TFT SDO/T_DO | |
 | 8 | **GPIO13** | SPI MOSI | TFT_MOSI | Display TFT SDA | |
 | 9 | **GPIO14** | SPI SCLK | TFT_SCLK | Display TFT SCL | |
@@ -1005,7 +1005,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 1 | DFPlayer Mini | Audio ESP32 | Módulo reproductor MP3, UART 9600 bps |
 | 1 | Tarjeta micro SD (≤32GB FAT32) | Audio DFPlayer | Con archivos 0001.mp3 a 0068.mp3 |
 | 1 | Altavoz 3–5W / 8Ω | Audio DFPlayer | Conectado vía relé audio |
-| 1 | Módulo relé (miniatura) | Relé audio ESP32 | Active LOW, aísla altavoz del DFPlayer |
+| 1 | Módulo relé (miniatura) | Relé audio ESP32 | `IN3` activo LOW (comando final), accionado por GPIO11 HIGH vía ULN2803A |
 | 1 | MCP23017 módulo | Palanca de cambios | I2C I/O expander, 0x20, en ESP32 |
 | 1 | Palanca selectora 5 posiciones | Palanca de cambios | P/R/N/D1/D2, contactos a GND |
 | 1 | Tira WS2812B (28 LEDs) | LEDs frontales | Datos por GPIO47 ESP32-S3 |
