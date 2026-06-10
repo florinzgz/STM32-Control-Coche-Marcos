@@ -34,11 +34,7 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
         │  4 mm²
         ▼
  ┌──────────────┐    INA226 ch4 (0.75 mΩ, 100 A)
- │  Fusible 60A │    ← sensor ANTES del relé principal
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐  PC10
+ │  Fusible 60A │    ← sensor ANTES del relé de tracción
  └──────┬───────┘
         │
    ┌────┴─────────────────────────────────────────┐

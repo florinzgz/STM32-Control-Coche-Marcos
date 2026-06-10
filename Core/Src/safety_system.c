@@ -493,8 +493,10 @@ void Safety_SetState(SystemState_t state)
     }
 
     /* Only allow forward transitions and recovery transitions:
-     *   SAFE→ACTIVE, DEGRADED→ACTIVE, LIMP_HOME→ACTIVE, and the
-     *   fault-cleared SAFE→STANDBY recovery (see SYS_STATE_STANDBY case). */
+     *   DEGRADED→ACTIVE, LIMP_HOME→ACTIVE, and the
+     *   fault-cleared SAFE→STANDBY recovery (see SYS_STATE_STANDBY case).
+     * SAFE→ACTIVE direct transition is explicitly blocked: recovery from SAFE
+     * MUST go through STANDBY first (SAFE→STANDBY→ACTIVE).               */
     switch (state) {
         case SYS_STATE_STANDBY:
             if (system_state == SYS_STATE_BOOT)
@@ -515,8 +517,9 @@ void Safety_SetState(SystemState_t state)
             break;
 
         case SYS_STATE_ACTIVE:
+            /* SAFE→ACTIVE is intentionally excluded: recovery from SAFE
+             * requires passing through STANDBY (SAFE→STANDBY→ACTIVE).   */
             if (system_state == SYS_STATE_STANDBY ||
-                system_state == SYS_STATE_SAFE    ||
                 system_state == SYS_STATE_DEGRADED ||
                 system_state == SYS_STATE_LIMP_HOME) {
                 /* Require no active faults to enter ACTIVE */

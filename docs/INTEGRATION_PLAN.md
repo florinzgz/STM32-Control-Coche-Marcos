@@ -2,6 +2,8 @@
 
 > ## ⚠️ DOCUMENTO LEGACY — PLAN COMPLETADO
 >
+> **HISTÓRICO — NO CANÓNICO — NO UTILIZAR COMO REFERENCIA DE CABLEADO**
+>
 > Este fue el plan de integración de componentes. Todas las fases descritas están completadas.
 > El documento se conserva como registro histórico de las decisiones de diseño.
 > **Fuente de verdad actual:** `docs/PROJECT_MASTER_STATUS.md`, `docs/HARDWARE_WIRING_MANUAL.md`, firmware
@@ -197,7 +199,7 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PC7 | **OCUPADO** | TIM8_CH2 — LPWM RL | AF4 | — |
 | PC8 | **OCUPADO** | TIM8_CH3 — RPWM RR | AF4 | — |
 | PC9 | **OCUPADO** | TIM8_CH4 — LPWM RR | AF4 | — |
-| PC10 | **OCUPADO** | Relay Main | GPIO output | — |
+| PC10 | **LIBRE** | Libre / expansión | GPIO INPUT_PULLDOWN | — |
 | PC11 | **OCUPADO** | Relay Trac | GPIO output | — |
 | PC12 | **OCUPADO** | Relay Dir | GPIO output | — |
 | PC13 | **OCUPADO** | EN_RR | GPIO output | — |

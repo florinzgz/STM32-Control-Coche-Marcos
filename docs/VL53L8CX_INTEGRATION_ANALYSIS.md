@@ -405,7 +405,8 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 | PC0–PC1 | 2 | EN_FR, EN_RL |
 | PC3–PC5 | 3 | LPWM_FR (TIM1_CH4), EN_STEER, EN_FL |
 | PC6–PC9 | 4 | TIM8 CH1–CH4 (RL/RR RPWM/LPWM) |
-| PC10–PC13 | 4 | Relays (3), EN_RR |
+| PC10 | 1 | Libre / expansión (INPUT_PULLDOWN, no conectado) |
+| PC11–PC13 | 3 | Relays (TRAC, STEER_PWR), EN_RR |
 | **Total** | **~37** | |
 
 ### Pines libres confirmados

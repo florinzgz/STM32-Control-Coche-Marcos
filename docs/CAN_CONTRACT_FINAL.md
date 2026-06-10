@@ -360,23 +360,34 @@ Source: `CAN_SendDebounceDiag()` in `can_handler.c` calling `Sensor_GetSteerFilt
 
 Decoding: `uint16_t distance_mm = byte[0] | (byte[1] << 8)`
 
-The STM32 uses distance_mm to compute an independent `obstacle_scale` factor (0.0–1.0):
-- distance < 500 mm → scale = 0.0, transitions to SAFE state
+The STM32 uses distance_mm to compute an independent `obstacle_scale` factor (0.0–1.0) via a speed-dependent state machine with temporal hysteresis (200 ms confirmation before applying emergency scale). Base static thresholds:
+- distance < 500 mm → scale = 0.0, forward blocked (emergency zone, after 200 ms confirmation)
 - distance 500–1000 mm → scale = 0.3
 - distance 1000–1500 mm → scale = 0.7
 - distance 1500–2000 mm → scale = 0.85
 - distance 2000–4000 mm → scale = 0.95
 - distance ≥ 4000 mm → scale = 1.0
 
-The rolling counter is checked for stale-data detection. If the counter does not change for 3 consecutive frames, the data is considered frozen and the STM32 triggers SAFE state (obstacle_scale = 0.0).
+Note: scale = 0.0 inhibits forward drive but does **NOT** trigger a SAFE state transition. The system remains in ACTIVE with obstacle_forward_blocked = 1. `Safety_SetError(SAFETY_ERROR_OBSTACLE)` is set, but setting this error does NOT automatically call `Safety_SetState(SAFE)`.
 
-**Timeout behavior:** If no 0x208 message is received for > 500 ms, the STM32 applies obstacle_scale = 0.0 and transitions to SAFE state. Recovery requires 3+ valid frames with incrementing counter.
+The rolling counter is checked for stale-data detection. If the counter does not change for 3 consecutive frames, a sensor_fault is raised: `obstacle_scale = OBSTACLE_FAULT_SCALE` (0.3), state = `OBS_STATE_SENSOR_FAULT`. **No SAFE state transition.**
+
+**Timeout behavior:** If no 0x208 message is received for > 500 ms (after first reception):
+- If obstacle was actively tracked (ACTIVE or CONFIRMING state):
+  - `obstacle_scale = OBSTACLE_FAULT_SCALE` (0.3) — never relaxes to 1.0
+  - `obstacle_state = OBS_STATE_SENSOR_FAULT`
+  - **No SAFE state transition.**
+- If no obstacle was active:
+  - `obstacle_scale = 1.0`
+  - `obstacle_state = OBS_STATE_NO_SENSOR`
+  - **No SAFE state transition.**
+- `Safety_SetError(SAFETY_ERROR_OBSTACLE)` is NOT called on timeout alone.
 
 **Validation rules:**
 - DLC must be ≥ 5 (messages with DLC < 5 are silently dropped)
 - Zone must be 0–5 (values > 5 are clamped to 0)
-- Counter must increment between frames (frozen counter = stale data)
-- Sensor health = 0 triggers SAFE state regardless of distance
+- Counter must increment between frames (frozen counter = sensor_fault → scale = 0.3, no SAFE)
+- Sensor health = 0 → sensor_fault: scale = 0.3, state = OBS_STATE_SENSOR_FAULT. **No SAFE state transition.**
 
 Source: `CAN_ProcessMessages()` and `Obstacle_ProcessCAN()` in `safety_system.c`
 
@@ -549,7 +560,7 @@ Source: `Safety_CheckCANTimeout()` in `safety_system.c`
 | 9 | SAFETY_ERROR_BATTERY_UV_WARNING | Battery bus voltage < 20.0 V → DEGRADED (40 % power limit). Recovery requires > 20.5 V (0.5 V hysteresis). |
 | 10 | SAFETY_ERROR_BATTERY_UV_CRITICAL | Battery bus voltage < 18.0 V or sensor failure → SAFE (actuators inhibited). No auto-recovery; operator must recharge and reset. |
 | 11 | SAFETY_ERROR_I2C_FAILURE | I2C bus locked / unrecoverable |
-| 12 | SAFETY_ERROR_OBSTACLE | Obstacle emergency (distance < 500 mm), obstacle CAN timeout (> 500 ms), sensor unhealthy, or stale data detected → SAFE (actuators inhibited). Auto-recovery when distance > 750 mm for > 1 s with healthy sensor. |
+| 12 | SAFETY_ERROR_OBSTACLE | Obstacle emergency (distance < 500 mm confirmed for ≥ 200 ms). **Note:** obstacle CAN timeout and sensor/stale-data faults do NOT trigger this error; they set `OBS_STATE_SENSOR_FAULT` and apply `OBSTACLE_FAULT_SCALE` (0.3). Setting `SAFETY_ERROR_OBSTACLE` does NOT automatically enter SAFE state. |
 
 Source: `Safety_Error_t` in `safety_system.h`, threshold defines in `safety_system.c`
 
@@ -605,10 +616,10 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | Current out of range | < 0 A or > 50 A | `Safety_CheckSensors()` |
 | Wheel speed out of range | < 0 or > 25 km/h | `Safety_CheckSensors()` |
 | Battery critical undervoltage | < 18.0 V or sensor failure | `Safety_CheckBatteryVoltage()` |
-| Obstacle emergency distance | < 500 mm reported via CAN 0x208 | `Obstacle_Update()` |
-| Obstacle CAN timeout | > 500 ms without 0x208 message (after first reception) | `Obstacle_Update()` |
-| Obstacle sensor unhealthy | Sensor health = 0 in CAN 0x208 | `Obstacle_Update()` |
-| Obstacle stale data | Rolling counter frozen for ≥ 3 frames | `Obstacle_Update()` |
+| Obstacle emergency distance | < 500 mm confirmed for ≥ 200 ms (sets `SAFETY_ERROR_OBSTACLE` + forward block, but does NOT enter SAFE) | `Obstacle_Update()` |
+| Obstacle CAN timeout | > 500 ms: if obstacle active → scale = 0.3, `OBS_STATE_SENSOR_FAULT` (no SAFE); if not active → scale = 1.0, `OBS_STATE_NO_SENSOR` (no SAFE) | `Obstacle_Update()` |
+| Obstacle sensor unhealthy | sensor_health = 0 → scale = 0.3, `OBS_STATE_SENSOR_FAULT` (no SAFE) | `Obstacle_Update()` |
+| Obstacle stale data | Rolling counter frozen ≥ 3 frames → scale = 0.3, `OBS_STATE_SENSOR_FAULT` (no SAFE) | `Obstacle_Update()` |
 
 ### Conditions That Force ERROR State (Unrecoverable)
 

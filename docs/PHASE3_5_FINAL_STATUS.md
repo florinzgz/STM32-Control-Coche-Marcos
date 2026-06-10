@@ -2,6 +2,8 @@
 
 > ## ⚠️ DOCUMENTO LEGACY — REGISTRO HISTÓRICO
 >
+> **HISTÓRICO — NO CANÓNICO — NO UTILIZAR COMO REFERENCIA DE CABLEADO**
+>
 > Este documento recoge el estado final de las Fases 3–5 al momento de su completación (2026-02-22).
 > Las funcionalidades descritas están implementadas y operativas.
 > **Fuente de verdad actual:** `docs/PROJECT_MASTER_STATUS.md`, firmware STM32/ESP32
@@ -106,7 +108,8 @@ El ESP32 ahora lee los mode flags confirmados del heartbeat y actualiza `current
 | PC5-7,13 | Enable ctrl | GPIO output | ✅ Únicos |
 | PC8 | PWM Steering | TIM8_CH3 | ✅ Único |
 | PC9 | Enable Steering | GPIO output | ✅ Único |
-| PC10-12 | Relays | GPIO output | ✅ Únicos |
+| PC10 | Libre / expansión | INPUT_PULLDOWN | ✅ Libre |
+| PC11-12 | Relays (TRAC, STEER_PWR) | GPIO output | ✅ Únicos |
 
 **Resultado: 0 conflictos de pines en STM32.**
 
