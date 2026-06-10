@@ -5,6 +5,8 @@
 > - Enables **EN_FR (PC0)** y **EN_RL (PC1)** salen por **Morpho CN7** (pines 38 y 36), no por CN9.
 > - Encoder completo: **PA15 (A), PB3 (B), PB4 (Z)** con adaptación 5 V → 3.3 V.
 
+> 📌 **Usando la placa breakout CZH-LABS D-1686?** Ver [`STM32_BREAKOUT_BOARD_WIRING.md`](STM32_BREAKOUT_BOARD_WIRING.md) para el mapa exacto GPIO → bornera de tornillo (CN7_N / CN10_N).
+
 **Documento de referencia para taller — Solo conexiones reales**
 
 > **IMPORTANTE**: Todo lo documentado aquí está trazado directamente al código fuente del firmware
