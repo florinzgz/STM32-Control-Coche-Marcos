@@ -16,6 +16,8 @@ Todos los valores proceden exclusivamente del firmware y de la especificación h
 7. [Sensores de Corriente INA226](#7--sensores-de-corriente-ina226)
 8. [Componentes de Protección](#8--componentes-de-protección)
 9. [Análisis de Modos de Fallo](#9--análisis-de-modos-de-fallo)
+10. [Control de relés vía ULN2803A](#10--control-de-relés-vía-uln2803a)
+11. [ARQUITECTURA APROBADA Y VALIDADA](#11--arquitectura-aprobada-y-validada)
 
 ---
 
@@ -177,20 +179,21 @@ Todas las masas del sistema **deben** converger en un único punto de conexión 
 
 ### Mapa de relés
 
-| Función          | Pin STM32 | Puerto | Carga controlada                | Fusible |
-|------------------|-----------|--------|---------------------------------|---------|
-| `RELAY_TRAC`     | PC11      | GPIOC  | Motores de tracción 24 V        | 50 A    |
-| `RELAY_STEER_PWR`| PC12      | GPIOC  | Motor de dirección 12 V         | 20 A    |
-| `RELAY_LED`      | PB10      | GPIOB  | Tira WS2812B frontal (5 V)      | —       |
-| `RELAY_LED_REAR` | PB11      | GPIOB  | Tira WS2812B trasera (5 V)      | —       |
+| Función | GPIO MCU | Carga controlada | Fusible |
+|------------------|-----------|---------------------------------|---------|
+| `RELAY_TRAC` | PC11 (STM32) | Motores de tracción 24 V | 50 A |
+| `RELAY_STEER_PWR` | PC12 (STM32) | Motor de dirección 12 V | 20 A |
+| `RELAY_LED` | PB10 (STM32) | Tira WS2812B frontal (5 V) | — |
+| `RELAY_LED_REAR` | PB11 (STM32) | Tira WS2812B trasera (5 V) | — |
+| `RELAY_AUDIO` | GPIO11 (ESP32-S3) | Conmutación audio (Songle S3/IN3) | — |
 
 > **Nota:** **PC10 está DISPONIBLE (libre).** PC10 se configura como `GPIO_MODE_INPUT` con `GPIO_PULLDOWN` (estado seguro determinista). El firmware solo controla **RELAY_TRAC (PC11)** y **RELAY_STEER_PWR (PC12)**.
 
 Los relés de potencia y auxiliares se controlan en **dos etapas**:
 
-1. **Etapa 1 — Driver de protección:** ULN2803A (8 canales Darlington).
-   Los GPIO STM32/ESP32 entran por Bx, y las salidas Cx excitan las entradas
-   `IN1..IN4` del módulo Songle.
+1. **Etapa 1 — Driver de protección (único):** una sola placa ULN2803A (8 canales Darlington).
+   Los GPIO STM32/ESP32 entran por Bx, y las salidas Cx excitan entradas de relé.
+   Regla: **nunca** GPIO directo a entrada de relé.
 
 2. **Etapa 2 — Relés Songle + relés de potencia:** Los contactos del Songle conmutan
    los 12 V hacia las bobinas de los relés de potencia de alta corriente. Estos
@@ -204,6 +207,22 @@ STM32/ESP32 GPIO (3.3V) ──► ULN2803A ──► Módulo Songle 4CH
                           ├── CHx contacto → Bobina relé potencia TRAC (12V) → conmuta 24V tracción
                           └── CHx contacto → Bobina relé potencia STEER (12V) → conmuta 12V dirección
 ```
+
+Mapa oficial de canales ULN:
+
+| GPIO MCU | ULN | Destino |
+|---|---|---|
+| PB10 | 1B/1C | IN1 Songle (LED frontal) |
+| PB11 | 2B/2C | IN2 Songle (LED trasero) |
+| GPIO11 (ESP32-S3) | 3B/3C | IN3 Songle (audio S3) |
+| PC11 | 4B/4C | IN4 Songle / relé potencia tracción |
+| PC12 | 5B/5C | relé potencia steering |
+
+Notas eléctricas obligatorias:
+- `IN3` e `IN4` del Songle presentan pull-up interno a ~5V en reposo.
+- Activación por ULN: el canal hunde a GND (entrada ~0V).
+- `COM` del ULN2803A: **sin conectar** si solo controla entradas `INx`.
+- GND común obligatorio entre STM32, ESP32-S3, ULN2803A, Songle y relés externos.
 
 ### Secuencia de encendido (`Relay_PowerUp`)
 
@@ -398,6 +417,32 @@ STM32 I²C1
 | 60 A (línea 24V)| Sistema completo sin potencia de tracción; INA226 ch4 lee 0 A     |
 | 50 A (RELAY_TRAC)| Motores de tracción sin alimentación; dirección sigue operativa    |
 | 20 A (RELAY_STEER_PWR) | Dirección sin alimentación; tracción sigue operativa → SAFE       |
+
+---
+
+## 10 — Control de relés vía ULN2803A
+
+Estado de arquitectura:
+
+- PB10, PB11, PC11, PC12 y GPIO11 pasan por ULN2803A.
+- Audio usa `GPIO11 -> ULN canal 3 -> IN3`.
+- Con audio OFF: `IN3`-GND ≈ 5V (pull-up interno).
+- Con audio ON: `IN3`-GND ≈ 0V (sink ULN).
+
+No se usan como solución principal:
+- BC547.
+- PC817.
+- GPIO directo a Songle.
+
+---
+
+## 11 — ARQUITECTURA APROBADA Y VALIDADA
+
+La referencia oficial única para control de relés del proyecto es:
+
+`STM32/ESP32 -> ULN2803A -> Relés`
+
+Esta referencia sustituye y marca como **OBSOLETAS** las topologías incompatibles con ULN2803A.
 
 ---
 
