@@ -1,26 +1,66 @@
-# AUDIO_RISKS_AND_LIMITATIONS — Riesgos y límites (actualizado)
+# AUDIO_RISKS_AND_LIMITATIONS — Riesgos y límites (arquitectura final)
 
-**Versión:** 1.1  
-**Fecha:** 2026-06-09
+**Versión:** 1.2  
+**Fecha:** 2026-06-10
 
-## Riesgos críticos
+## 1) Riesgos críticos
 
-1. **Bypass del ULN2803A (prohibido):** conectar GPIO directo a `INx` Songle expone el MCU a líneas con pull-up a 5V.
-2. **Cableado GND incompleto:** sin GND común, el control de relés será inestable.
-3. **Polaridad de audio desactualizada:** tras ULN, `GPIO11 HIGH` activa el relé de audio.
-4. **Conmutar audio después de PAM8403:** no permitido; la conmutación debe ser previa al amplificador.
-5. **Eliminar la red 1k+1k + 105(1µF):** incrementa pops y distorsión.
+1. **Bypass ULN2803A (prohibido):** no conectar GPIO directo a `INx`.
+2. **Sin GND común:** control de relés errático o no funcional.
+3. **Polaridad de audio incorrecta:** en hardware final, `GPIO11 HIGH` activa y `GPIO11 LOW` desactiva.
+4. **Conmutación tras PAM8403:** no permitido; debe ser antes del amplificador.
+5. **Eliminar red analógica recomendada (1k+1k, 1µF, pull-down 100k):** aumenta ruido/pops.
 
-## Límites funcionales confirmados
+## 2) Límites funcionales confirmados
 
-- El watchdog del relé de audio (`RELAY_MAX_ON_MS=7000`) sigue activo.
-- La temporización anti-click (`RELAY_ESTABLISH_MS=20`, `RELAY_RELEASE_MS=150`) sigue activa.
-- Los relés STM32 PB10/PB11/PC11/PC12 continúan con lógica `GPIO_PIN_SET=ON`.
+- `IN3` en reposo ≈ 5V por pull-up interno (normal).
+- `IN3` activado ≈ 0V por sink del ULN (normal).
+- `COM` del ULN2803A queda sin conectar cuando solo controla entradas `INx`.
+- Watchdog y temporizaciones de `relay_audio` se mantienen (`7000/20/150 ms`).
 
-## Lista previa a energizar
+## 3) Validación obligatoria con multímetro
 
-- [ ] Verificar continuidad de 1B..5B con GPIO correctos.
-- [ ] Verificar 1C..5C a entradas correctas de relé.
-- [ ] Verificar IN3 en Songle para canal audio (S3).
-- [ ] Verificar GND común ULN/ESP32/STM32/Songle.
-- [ ] Verificar lógica de audio: reposo `GPIO11 LOW`, activo `GPIO11 HIGH`.
+### Audio OFF
+- `IN3`-GND ≈ 5V
+- continuidad `COM ↔ NC`
+
+### Audio ON
+- `IN3`-GND ≈ 0V
+- continuidad `COM ↔ NO`
+
+## 4) Prueba manual obligatoria
+
+1. Alimentar Songle a 5V.
+2. Configurar jumper de `IN3` en `LOW`.
+3. Tocar `IN3` a GND.
+4. Verificar clic.
+5. Verificar cambio `COM-NC` / `COM-NO`.
+
+## 5) Componentes no necesarios para IN3
+
+- BC547.
+- PC817.
+- Resistencias externas en IN3.
+- Diodos externos en IN3.
+
+## 6) Lista previa a energizar
+
+- [ ] Confirmar mapeo: PB10, PB11, GPIO11, PC11, PC12 -> ULN2803A -> relés.
+- [ ] Confirmar `GPIO11 -> canal 3 ULN -> IN3`.
+- [ ] Confirmar GND común STM32/ESP32-S3/ULN/Songle/relés externos.
+- [ ] Confirmar lógica audio: LOW=OFF, HIGH=ON.
+- [ ] Confirmar contactos audio: NC=Bluetooth/FM, NO=DFPlayer, COM=PAM8403.
+
+## 7) Referencias obsoletas
+
+Se marcan como **OBSOLETAS**:
+- GPIO directo a Songle.
+- BC547 o PC817 como solución principal.
+- Requisito de relé DPDT dedicado obligatorio.
+- Arquitectura anterior incompatible con ULN2803A.
+
+## 8) ARQUITECTURA APROBADA Y VALIDADA
+
+Solución oficial y única:
+
+`STM32/ESP32 -> ULN2803A -> Relés`
