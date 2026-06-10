@@ -62,12 +62,12 @@ potencia adicional.
 
 Los relés permanecen en su último estado hasta que el firmware (si se recupera) o el
 watchdog fuerce un reset. En la práctica, si LOCKUP es permanente, el IWDG expira en
-~500 ms y provoca un reset completo del MCU, lo que apaga todos los relés (estado por
+~4.1 s y provoca un reset completo del MCU, lo que apaga todos los relés (estado por
 defecto = OFF).
 
 ### 🔄 Cómo se recupera
 
-1. El IWDG expira (~500 ms) y reinicia el MCU.
+1. El IWDG expira (~4.1 s) y reinicia el MCU.
 2. Tras el reset, todos los GPIOs vuelven a su estado por defecto (relés OFF, MOE
    desactivado).
 3. El sistema arranca en estado **BOOT** y debe completar la secuencia normal para
@@ -123,7 +123,7 @@ escala a LOCKUP, el mecanismo BREAK2 + IWDG se encarga del corte completo.
 
 - Si el fault es aislado (e.g., acceso a dirección inválida puntual), el handler puede
   registrar el error y el sistema transiciona a **SAFE** o **ERROR**.
-- Si el fault es irrecuperable, el IWDG reinicia el MCU en ~500 ms.
+- Si el fault es irrecuperable, el IWDG reinicia el MCU en ~4.1 s.
 
 ### 💡 Por qué se diseñó así
 
@@ -146,8 +146,8 @@ del periodo de timeout.
 | Prescaler | 32 |
 | Reload    | 4095 |
 | Reloj     | ~32 kHz (LSI) |
-| Timeout   | **~500 ms** |
-| Refresco  | Cada **10 ms** en el bucle principal |
+| Timeout   | **~4.1 s** |
+| Refresco  | Cada ciclo en el bucle principal (~10 ms típico) |
 
 ### ⚙️ Qué hace
 
@@ -767,7 +767,7 @@ Tres niveles permiten respuesta proporcional:
 │  EmergencyStop / FailSafe / PowerDown                │
 │  Máquina de estados, detección de obstáculos         │
 ├─────────────────────────────────────────────────────┤
-│  Capa 1: Watchdog IWDG                              │ ← ~500 ms
+│  Capa 1: Watchdog IWDG                              │ ← ~4.1 s
 │  Reset completo si todo lo anterior falla            │
 ├─────────────────────────────────────────────────────┤
 │  Capa 0: Relés (corte galvánico)                    │ ← Estado por defecto

@@ -89,7 +89,7 @@ GND    ────────────────► S
 GPIO18  ◄──── TF-Mini Plus TX (115200 bps, directo, sin divisor)
 GPIO43  ───── DFPlayer RX
 GPIO44  ◄──── DFPlayer TX
-GPIO11  ───── Relé audio IN (active LOW)
+GPIO11  ───── ULN2803A canal 3 ───── Songle IN3 (GPIO HIGH = ON, IN3 LOW = ON)
 GPIO8   ───── MCP23017 SDA
 GPIO9   ───── MCP23017 SCL
 GPIO40  ◄──── IGNITION_SENSE (EL817, LOW = llave ON)
@@ -116,7 +116,7 @@ PC2 ── EN_RR
 PC4 ── EN_STEER
 
 PC11 ── RELAY_TRAC
-PC12 ── RELAY_DIR
+PC12 ── RELAY_STEER_PWR
 PB10 ── RELAY_LED_FRONT
 PB11 ── RELAY_LED_REAR
 

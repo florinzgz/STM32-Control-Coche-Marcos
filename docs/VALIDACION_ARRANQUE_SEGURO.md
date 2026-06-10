@@ -45,7 +45,7 @@
 - **Inhibición de pedal al arranque** (`startup_inhibit`): Pedal debe estar <3% durante 400 ms continuos tras encendido para desbloquear tracción.
 - **Validación de boot** (`boot_validation`): 6 chequeos obligatorios antes de transición a ACTIVE.
 - **Centrado persistente**: Posición central almacenada en flash, validada contra sensor inductivo al arranque.
-- **Watchdog IWDG**: 500 ms timeout — reset automático si el bucle principal se congela.
+- **Watchdog IWDG**: ~4.1 s timeout — reset automático si el bucle principal se congela.
 - **Secuencia de relés**: Main → 50 ms → Tracción → 20 ms → Dirección (previene picos de corriente).
 
 ### 1.4 Umbrales de Seguridad Críticos
@@ -55,7 +55,7 @@
 | Corriente motor | >25 A | → SAFE |
 | Temperatura motor | >90 °C | → SAFE |
 | Timeout CAN heartbeat | >250 ms | → SAFE |
-| Timeout watchdog | >500 ms | → BOOT (reset MCU) |
+| Timeout watchdog | >4.1 s | → BOOT (reset MCU) |
 | Batería baja (warning) | <20.0 V | → DEGRADED |
 | Batería baja (crítico) | <18.0 V | → SAFE |
 | Pedal contradictorio | Dual-sample divergen >30 counts o rango/tasa inválido | → Demand=0 |
@@ -198,7 +198,7 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 
 | Paso | Acción | Verificar | PASS | FAIL |
 |---|---|---|---|---|
-| 4B.1 | Si es posible con debugger: pausar ejecución del STM32 >500 ms | MCU se resetea automáticamente (IWDG) | Reset detectado en CAN (heartbeat se pierde y reaparece) | Sin reset |
+| 4B.1 | Si es posible con debugger: pausar ejecución del STM32 >4.1 s | MCU se resetea automáticamente (IWDG) | Reset detectado en CAN (heartbeat se pierde y reaparece) | Sin reset |
 | 4B.2 | Tras reset por watchdog, verificar `startup_inhibit` | Pedal bloqueado hasta soltar y esperar 400 ms | 0 movimiento tras reset | Movimiento inmediato |
 
 #### 4C — Centrado de Dirección
@@ -279,7 +279,7 @@ Las siguientes condiciones pueden provocar movimiento no deseado de las ruedas. 
 | Centrado de dirección (sweep completo) | 10 s |
 | Detención tras soltar pedal (en aire) | 2 s |
 | Transición a SAFE tras desconexión CAN | 500 ms |
-| Reset por watchdog | 500 ms |
+| Reset por watchdog | ~4.1 s |
 | Inhibición de pedal al arranque: desbloqueo | 400 ms tras soltar pedal |
 
 ### 4.3 Criterios Eléctricos

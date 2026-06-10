@@ -18,14 +18,14 @@
 //   - Available on the ESP32-S3-DevKitC-1 right-side header (G11)
 //   - GPIO level during boot is INPUT (high-impedance); the optocoupler's
 //     built-in current-limiting resistor keeps the relay OFF until
-//     audioRelay_init() drives it HIGH explicitly from setup()
+//     relay_audio::requestOn() drives it HIGH during playback
 //
 // State machine (non-blocking, millis-based):
-//   IDLE       → Relay OFF (GPIO HIGH), no audio pending
-//   ACTIVATING → Relay ON  (GPIO LOW),  waiting RELAY_ESTABLISH_MS for
+//   IDLE       → Relay OFF (GPIO LOW), no audio pending
+//   ACTIVATING → Relay ON  (GPIO HIGH), waiting RELAY_ESTABLISH_MS for
 //                the relay contact to fully close (~20 ms)
-//   ACTIVE     → Relay ON  (GPIO LOW),  DFPlayer output connected to speaker
-//   RELEASING  → Relay ON  (GPIO LOW),  audio ended, RELAY_RELEASE_MS
+//   ACTIVE     → Relay ON  (GPIO HIGH), DFPlayer output connected to speaker
+//   RELEASING  → Relay ON  (GPIO HIGH), audio ended, RELAY_RELEASE_MS
 //                cooldown before deactivation to prevent speaker click
 //
 // Integration:
@@ -79,7 +79,7 @@ inline constexpr unsigned long RELAY_MAX_ON_MS = 7000;
 void init();
 
 /// Request relay activation (audio playback is about to start).
-///  - IDLE      → begins ACTIVATING sequence (GPIO LOW, starts timer)
+///  - IDLE      → begins ACTIVATING sequence (GPIO HIGH, starts timer)
 ///  - RELEASING → cancels cooldown and returns to ACTIVE immediately
 ///    (relay contact is already closed — no re-establishment needed)
 ///  - ACTIVATING / ACTIVE → no-op (idempotent)
@@ -91,7 +91,7 @@ void requestOn();
 void release();
 
 /// Force relay OFF immediately, bypassing the normal RELEASING cooldown.
-/// Drives GPIO HIGH and resets the state machine to IDLE.
+/// Drives GPIO LOW and resets the state machine to IDLE.
 ///
 /// Use from emergency handlers or explicit shutdown sequences where
 /// latency is unacceptable.  A small audible click may result.

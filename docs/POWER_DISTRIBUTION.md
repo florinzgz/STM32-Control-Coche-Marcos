@@ -3,6 +3,8 @@
 Documentación completa de la distribución de potencia del vehículo controlado por STM32G474RE + ESP32-S3.
 Todos los valores proceden exclusivamente del firmware y de la especificación hardware existente.
 
+> 📌 **Usando la placa breakout CZH-LABS D-1686?** Ver [`STM32_BREAKOUT_BOARD_WIRING.md`](STM32_BREAKOUT_BOARD_WIRING.md) para el mapa exacto de borneras (VIN→CN7_24, E5V→CN7_6, +3V3→CN7_16, +5V→CN7_18, GND→CN7_8/CN10_9, AGND→CN10_32).
+
 ---
 
 ## 📋 Índice

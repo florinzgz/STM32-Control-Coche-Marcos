@@ -18,7 +18,7 @@
 
 1. `Boot_ReadResetCause()` reads `RCC->CSR` and classifies reset origin: POWERON, SOFTWARE, IWDG, WWDG, BROWNOUT, PIN. Flags are cleared immediately.
 2. `MX_FDCAN1_Init()` and `MX_I2C1_Init()` are non-fatal: if they fail, `fdcan_init_ok`/`i2c_init_ok` are set `false` and execution continues. No `Error_Handler()` called.
-3. `IWDG` is initialised at ~500 ms timeout (PRESCALER_32, RELOAD=4095, 32 kHz LSI).
+3. `IWDG` is initialised at ~4.1 s timeout (PRESCALER_32, RELOAD=4095, 32 kHz LSI).
 4. `Safety_Init()` sets `system_state = SYS_STATE_BOOT`, all wheel_scale = 1.0, obstacle_scale = 1.0, last_can_rx_time = HAL_GetTick().
 5. `SteeringCentering_Init()` starts centering in CENTERING_IDLE; actual sweep begins on the first `SteeringCentering_Step()` call.
 6. `Safety_SetState(SYS_STATE_STANDBY)` is called after all module init: `BOOT → STANDBY` transition is unconditional.
@@ -62,8 +62,9 @@ States (from `safety_system.h`):
 | Overtemperature warning | Any DS18B20 > 80°C | DEGRADED (L2) | Auto after all < 75°C (5°C hysteresis) |
 | Overtemperature critical | Any DS18B20 > 90°C | SAFE | No auto-recovery |
 | Battery warning | Voltage < 20.0 V | DEGRADED (L2) | Auto after > 20.5 V |
-| Battery critical | Voltage < 18.0 V | SAFE | No auto-recovery; operator must reset |
+| Battery critical | Voltage < 18.0 V | SAFE | Auto after > 18.5 V remains stable for 2 s |
 | Battery sensor fail | 0.0 V reading from INA226 | SAFE | No auto-recovery |
+| I2C failure | TCA9548A / INA226 access failure | SAFE | Auto after bus/sensor recovers and battery remains > 18.5 V for 2 s |
 | CAN timeout | No heartbeat from ESP32 for > 250 ms | LIMP_HOME | Auto when heartbeat resumes |
 | Sensor fault | Temperature/current/speed out of range | DEGRADED (L1 or L3) | Auto when sensors return to range |
 | Pedal implausible | Dual-sample ADC diverge o rango/tasa inválido | Throttle → 0 + DEGRADED | Auto when channels agree |
@@ -72,7 +73,7 @@ States (from `safety_system.h`):
 | Emergency stop | External call | ERROR | Permanent; IWDG reset needed |
 | CAN bus-off | `HAL_FDCAN_GetProtocolStatus()` bus-off bit | DEGRADED + recovery attempts (max 10) | Auto retry every 500 ms |
 | Demand anomaly | Step > 15%/10ms or frozen pedal + speed delta | DEGRADED (L1) | Auto after demand normalises |
-| Watchdog | IWDG fires (> 500 ms loop stall) | (hard reset, detected as IWDG reset cause) | Boot from reset |
+| Watchdog | IWDG fires (> 4.1 s loop stall) | (hard reset, detected as IWDG reset cause) | Boot from reset |
 
 #### 1.1.4 Traction Control Pipeline (per 10 ms cycle)
 
@@ -316,7 +317,7 @@ Validation passes when ALL 6 checks pass simultaneously. If validation fails, th
 | Recovery debounce | STATE_HYSTERESIS_MS = 500 ms | RECOVERY_HOLD_MS = 500 ms | MATCH |
 | Relay sequencing | MCP23017 relay control | GPIO direct: Main→50ms→Traction→20ms→Direction (non-blocking) | IMPROVED |
 | SAFE triggers relay cutoff | Not documented | SAFE does NOT cut relays. Only ERROR and EmergencyStop call Relay_PowerDown() | RISKY — see risk R1 |
-| Watchdog | Software Task WDT | IWDG hardware, 500 ms, LSI-independent | IMPROVED |
+| Watchdog | Software Task WDT | IWDG hardware, ~4.1 s, LSI-independent | IMPROVED |
 | Emergency stop → ERROR | → ESP.restart() | → SYS_STATE_ERROR (permanent, IWDG reset needed) | MATCH |
 
 ### 2.4 Boot Subsystem
@@ -706,7 +707,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 - [ ] Relay sequencing: unchanged (SAFE keeps relays ON, only ERROR cuts power)  
 - [ ] ACTIVE entry guard: `safety_error == SAFETY_ERROR_NONE` requirement preserved  
 - [ ] Emergency stop: unchanged (→ ERROR → power down)  
-- [ ] Watchdog: unchanged (IWDG 500 ms)  
+- [ ] Watchdog: unchanged (IWDG ~4.1 s)  
 - [ ] CAN message format: unchanged (no contract changes)  
 - [ ] Smooth-driving state machine: unchanged (brake/coast/drive phases)  
 - [ ] Speed cap in LIMP_HOME: 5 km/h unchanged  
@@ -876,9 +877,10 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 **Expected vehicle behavior:**
 - 0x001 byte 1 = 0x03 (DEGRADED). Power limited to 40% (L2 for battery fault).
 - Vehicle remains drivable at reduced speed.
-- At 17.5 V (below critical 18.0 V): 0x001 byte 1 = 0x04 (SAFE). Vehicle stops. NO auto-recovery.
+- At 17.5 V (below critical 18.0 V): 0x001 byte 1 = 0x04 (SAFE). Vehicle stops.
+- If battery voltage later rises above 18.5 V and remains stable for 2 s, the firmware clears the active undervoltage fault and returns SAFE → STANDBY automatically.
 
-**Pass criteria:** DEGRADED at 19 V. SAFE at 17.5 V. No motor movement in SAFE. No auto-recovery from SAFE without operator power cycle.
+**Pass criteria:** DEGRADED at 19 V. SAFE at 17.5 V. No motor movement in SAFE. Automatic recovery to STANDBY only after >18.5 V is stable for 2 s.
 
 ---
 
@@ -952,7 +954,7 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 ### Test T12 — Watchdog Recovery
 
 **Procedure:**
-1. Simulate a blocking operation > 500 ms (disconnect HAL_IWDG_Refresh by modifying test build or observing actual IWDG reset in field).
+1. Simulate a blocking operation > 4.1 s (disconnect HAL_IWDG_Refresh by modifying test build or observing actual IWDG reset in field).
 2. Power cycle.
 
 **Expected vehicle behavior:**

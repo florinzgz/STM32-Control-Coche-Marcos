@@ -80,7 +80,7 @@ El relé no puede quedar ON permanentemente por fallo del DFPlayer. Tiempo máxi
 `audio::init()` llama `relay_audio::init()` como primera operación. `init()` ejecuta:
 ```cpp
 pinMode(PIN_AUDIO_RELAY, OUTPUT);
-digitalWrite(PIN_AUDIO_RELAY, HIGH);  // fuerza relé OFF
+digitalWrite(PIN_AUDIO_RELAY, LOW);  // fuerza relé OFF (GPIO activo HIGH a través de ULN2803A)
 ```
 El relé es forzado a OFF en los primeros milisegundos de `setup()`, antes de cualquier
 inicialización de CAN, pantalla o periféricos. ✅
@@ -212,7 +212,7 @@ durante más de `RELAY_MAX_ON_MS` (7 000 ms), se fuerza la desactivación inmedi
 ```cpp
 if (state_ ∈ {ACTIVATING, ACTIVE} && activationMs_ != 0 &&
     (now - activationMs_) >= RELAY_MAX_ON_MS) {
-    digitalWrite(PIN_AUDIO_RELAY, HIGH);  // OFF forzado
+    digitalWrite(PIN_AUDIO_RELAY, LOW);  // OFF forzado (GPIO activo HIGH vía ULN2803A)
     state_ = IDLE;
     // log: "[RELAY] WATCHDOG: forced OFF"
 }

@@ -180,7 +180,7 @@ The STM32G474RE firmware runs in a **cooperative single-threaded main loop** (no
 
 #### Watchdog / Timeout
 
-- **IWDG:** 500ms timeout (`MX_IWDG_Init`, `Core/Src/main.c` line ~881)
+- **IWDG:** ~4.1 s timeout (`MX_IWDG_Init`, `Core/Src/main.c` — Prescaler=32, Reload=4095, LSI ~32 kHz)
   - Refreshed at end of main loop: `HAL_IWDG_Refresh(&hiwdg)` (line ~436)
   - If main loop stalls → IWDG reset → motor stops (boot state = all motors 0)
   - ✅ **PASS**
@@ -299,7 +299,7 @@ Additionally:
 **Mitigation already in place:**
 - BTS7960 has internal overcurrent shutdown (typ. 43A) — hardware-level protection independent of firmware
 - INA226 `MAX_CURRENT_A = 25A` threshold is well below the BTS7960's internal limit
-- IWDG watchdog provides 500ms backstop
+- IWDG watchdog provides ~4.1 s backstop
 
 **Recommendation documented in:** `Core/Inc/main.h` (audit comment block)
 

@@ -5,6 +5,8 @@
 > - Enables **EN_FR (PC0)** y **EN_RL (PC1)** salen por **Morpho CN7** (pines 38 y 36), no por CN9.
 > - Encoder completo: **PA15 (A), PB3 (B), PB4 (Z)** con adaptación 5 V → 3.3 V.
 
+> 📌 **Usando la placa breakout CZH-LABS D-1686?** Ver [`STM32_BREAKOUT_BOARD_WIRING.md`](STM32_BREAKOUT_BOARD_WIRING.md) para el mapa exacto GPIO → bornera de tornillo (CN7_N / CN10_N).
+
 **Documento de referencia para taller — Solo conexiones reales**
 
 > **IMPORTANTE**: Todo lo documentado aquí está trazado directamente al código fuente del firmware
@@ -75,7 +77,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 - Control de 2 relés de potencia (TRACCIÓN, DIRECCIÓN)
 - Comunicación CAN con el ESP32 (FDCAN1, 500 kbps)
 - Sistemas de seguridad: ABS, TCS, límites de corriente/temperatura
-- Watchdog independiente (IWDG, ~500 ms)
+- Watchdog independiente (IWDG, ~4.1 s)
 
 ### Qué NO controla el STM32 (depende del ESP32)
 
@@ -199,7 +201,7 @@ Cálculo: 170 MHz ÷ 17 ÷ (1 + 14 + 5) = 500 kbps, donde (1 + 14 + 5) = SyncSeg
 
 **Si falta terminación**: el bus CAN presentará errores de comunicación, reflexiones de señal,
 y el firmware detectará `CAN_TIMEOUT` (250 ms sin heartbeat del ESP32), forzando al sistema
-al estado **SAFE** (todos los actuadores desactivados, relés apagados).
+al estado **SAFE** (tracción inhibida y actuadores desactivados por firmware; los relés de potencia no se apagan automáticamente en SAFE).
 
 ### Filtros RX configurados
 
@@ -608,10 +610,10 @@ El pedal debe producir una señal de **0 a 3.3 V** en PA3.
 | Relé | Pin | Puerto | Función | Tensión conmutada | Módulo físico |
 |------|-----|--------|---------|-------------------|---------------|
 | **TRAC** (Tracción) | **PC11** (STM32) | GPIOC | Driver relé potencia 24V motores (etapa 1 → etapa 2) | 24 V | Módulo 4-ch **12V** CH1 |
-| **DIR** (Dirección) | **PC12** (STM32) | GPIOC | Driver relé potencia 12V dirección (etapa 1 → etapa 2) | 12 V | Módulo 4-ch **12V** CH2 |
+| **STEER_PWR** (Potencia dirección) | **PC12** (STM32) | GPIOC | Driver relé potencia 12V steering (etapa 1 → etapa 2) | 12 V | Módulo 4-ch **12V** CH2 |
 | **LED_F** (Frontal) | **PB10** (STM32) | GPIOB | Corte alimentación 5V tira WS2812B frontal (28 LEDs) | 5 V | Módulo 4-ch **5V** CH1 |
 | **LED_R** (Trasero) | **PB11** (STM32) | GPIOB | Corte alimentación 5V tira WS2812B trasera (16 LEDs) | 5 V | Módulo 4-ch **5V** CH2 |
-| **AUDIO** | **GPIO11** (ESP32) | — | Conmuta altavoz DFPlayer/Radio (activo LOW) | señal audio | Módulo 4-ch **5V** CH3 |
+| **AUDIO** | **GPIO11** (ESP32) | — | Conmuta altavoz DFPlayer/Radio vía ULN2803A (GPIO HIGH = ON; `IN3` LOW = ON) | señal audio | ULN2803A CH3 → módulo 4-ch **5V** CH3 |
 
 > **Nota:** **PC10 está DISPONIBLE (libre)**. PC10 se configura como `GPIO_MODE_INPUT` + `GPIO_PULLDOWN` (estado seguro determinista). No se conecta ningún relé a PC10.
 
@@ -637,7 +639,7 @@ Definido en `safety_system.c` (función `Relay_PowerUp`):
 ```
 1. PC11 → HIGH  (RELAY_TRAC ON)
 2. Esperar 50 ms                    ← settling de corriente inrush
-3. PC12 → HIGH  (RELAY_DIR ON)
+3. PC12 → HIGH  (RELAY_STEER_PWR ON)
 ```
 
 ### Orden de desactivación (Power-Down)
@@ -645,7 +647,7 @@ Definido en `safety_system.c` (función `Relay_PowerUp`):
 Definido en `safety_system.c` (función `Relay_PowerDown`):
 
 ```
-1. PC12 → LOW   (RELAY_DIR OFF)
+1. PC12 → LOW   (RELAY_STEER_PWR OFF)
 2. PC11 → LOW   (RELAY_TRAC OFF)
 ```
 
@@ -657,12 +659,12 @@ Orden inverso, sin retardos.
 |--------------------|-------|------------|------------|
 | **ACTIVE** | Todos ON | Operación normal, 100% potencia | `safety_system.c` |
 | **DEGRADED** | Todos ON | Potencia limitada al 40%, velocidad al 50% | `DEGRADED_POWER_LIMIT_PCT` / `DEGRADED_SPEED_LIMIT_PCT` |
-| **SAFE** | **Todos OFF** | Actuadores inhibidos, FailSafe ejecutado | `Safety_FailSafe()` |
+| **SAFE** | **Relés de potencia permanecen ON** | Tracción inhibida, `Safety_FailSafe()` ejecutado, centrado si el encoder está sano | `Safety_FailSafe()` |
 | **ERROR** | **Todos OFF** | Apagado total, requiere reinicio | `Relay_PowerDown()` |
 
-En **SAFE**: el firmware intenta centrar la dirección (si el encoder está sano) antes de
-apagar los relés, para que el vehículo ruede en línea recta. Si el encoder está fallado,
-simplemente corta PWM y desactiva los drivers.
+En **SAFE**: el firmware intenta centrar la dirección (si el encoder está sano) y pone la
+tracción a cero, pero **no corta los relés de potencia**. Si el encoder está fallado,
+simplemente corta PWM y mantiene el sistema en SAFE.
 
 En **ERROR** (emergencia): apagado inmediato de relés, sin intento de centrado.
 
@@ -707,7 +709,7 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 31 | **PC9** | GPIOC | LPWM motor RR | BTS7960 RR | TIM8_CH4 (AF4) | 3.3 V PWM | `PIN_LPWM_RR` |
 | 32 | **PC10** | GPIOC | (Disponible) | *(no conectado, GPIO libre)* | GPIO Input + Pull-down | — | — |
 | 33 | **PC11** | GPIOC | Relé TRACCIÓN | Relé tracción (24 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_TRAC` |
-| 34 | **PC12** | GPIOC | Relé DIRECCIÓN | Relé dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_STEER_PWR` |
+| 34 | **PC12** | GPIOC | Relé STEER_PWR | Relé potencia dirección (12 V) | GPIO Output | 3.3 V (vía driver) | `PIN_RELAY_STEER_PWR` |
 
 > **Nota PC13:** PC13 está conectado al botón USER (B1) en la NUCLEO-G474RE
 > mediante el puente SB17. No debe usarse como salida. `EN_RR` se ha reasignado
@@ -916,7 +918,7 @@ el control de motores BTS7960 en este proyecto:
 
 ## 11. Circuito completo de driver de relé — arquitectura de dos etapas
 
-### Por qué se necesitan dos etapas (para TRAC y DIR)
+### Por qué se necesitan dos etapas (para TRAC y STEER_PWR)
 
 Los pines GPIO del STM32 operan a 3,3 V y pueden suministrar máximo 20 mA.
 Las bobinas de los relés de potencia requieren 12 V DC y corrientes de 70–150 mA.
@@ -928,48 +930,47 @@ La solución utiliza una **arquitectura de dos etapas** para los canales de pote
    - Contactos: 10A @ 30V DC (suficiente para conmutar bobinas de relés de potencia ≤500mA)
    - Alimentación: **12V** DC (VCC / GND)
    - Asignación:
-     - **CH1 → PC11 (STM32)** — driver relé potencia TRAC 50A
-     - **CH2 → PC12 (STM32)** — driver relé potencia DIR 20A
+     - **CH1 → ULN2803A 4C (desde PC11 STM32)** — driver relé potencia TRAC 50A
+     - **CH2 → ULN2803A 5C (desde PC12 STM32)** — driver relé potencia dirección 20A
      - CH3, CH4 → libres (reserva)
    - **PC10 NO se conecta** (GPIO libre, `INPUT_PULLDOWN`)
 
 2. **Etapa 2 — Relés de potencia:**
    - Bobina: 12V DC (alimentada a través de los contactos CH1/CH2 del módulo 12V)
-   - Contactos: alta corriente (50A TRAC, 20A DIR)
+   - Contactos: alta corriente (50A TRAC, 20A STEER_PWR)
 
 3. **Módulo 4-ch opto relé 5V (SRD-05VDC-SL-C) — LED strips + audio:**
    - 4 canales con bobina 5V, para LED_F (PB10), LED_R (PB11) y AUDIO (GPIO11 ESP32)
-   - CH1 → PB10 (LED_F) · CH2 → PB11 (LED_R) · CH3 → GPIO11 ESP32 (audio, activo LOW) · CH4 libre
+   - CH1 → ULN2803A 1C (desde PB10) · CH2 → ULN2803A 2C (desde PB11) · CH3 → ULN2803A 3C (desde GPIO11 ESP32) · CH4 libre
    - Contactos conmutan directamente la alimentación 5V de las tiras WS2812B y la señal del altavoz (sin etapa 2)
 
-### Esquema completo (dos etapas, canal TRAC/DIR — módulo 12V)
+### Esquema completo (dos etapas, canal TRAC/STEER_PWR — módulo 12V)
 
 ```
-  STM32 (3,3 V)                    Módulo 4-ch opto relé (12V)     Relé de potencia (12V bobina)
-  ─────────────                    ───────────────────────────     ────────────────────────────
+  STM32 (3,3 V)      ULN2803A         Módulo 4-ch opto relé (12V)     Relé de potencia (12V bobina)
+  ─────────────      ────────         ───────────────────────────     ────────────────────────────
 
-  PC11/PC12 ──────► IN1/IN2        VCC ◄── 12V                    COM ──── Carga (24V / 12V)
-                                   GND ◄── GND                     │
-              Dentro del módulo:                                    │  (cerrado cuando
-              Optoacoplador ──►     Relé SRD-12VDC                 NO     relé activo)
-              Transistor ──►        cierra contacto                 │
-                                        │                          NC ──── (normalmente cerrado)
-                                   Contacto COM ── 12V
-                                   Contacto NO ────────────► Bobina relé potencia (+)
-                                                               │
-                                                          [1N4007] (flyback externo)
-                                                               │
-                                                     Bobina relé potencia (−) ── GND
+  PC11/PC12 ──────►  4B/5B
+                     4C/5C ──────► IN1/IN2        VCC ◄── 12V         COM ──── Carga (24V / 12V)
+                                                     GND ◄── GND       │
+                                         Dentro del módulo:             │  (cerrado cuando
+                                         Optoacoplador ──► Relé SRD-12VDC
+                                         Transistor ──►    cierra contacto
+                                                    │                   NO ────► Bobina relé potencia (+)
+                                               Contacto COM ── 12V      │
+                                                                        [1N4007] (flyback externo)
+                                                                             │
+                                                                  Bobina relé potencia (−) ── GND
 ```
 
 **En forma compacta:**
 
 ```
-STM32 GPIO (3.3V) ──► IN módulo opto relé ──► Contacto 10A cierra ──► 12V → Bobina potencia → GND
-                       (SRD-12VDC-SL-C)                                       ↑ [1N4007 flyback]
+STM32 GPIO (3.3V) ──► ULN2803A ──► IN módulo opto relé ──► Contacto 10A cierra ──► 12V → Bobina potencia → GND
+                                         (SRD-12VDC-SL-C)                                 ↑ [1N4007 flyback]
 ```
 
-### Cableado práctico con relé automoción 200A (TRAC) y relé 5 pines (DIR)
+### Cableado práctico con relé automoción 200A (TRAC) y relé 5 pines (STEER_PWR)
 
 Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
 
@@ -981,8 +982,8 @@ Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
    - Salida NO del CH1 (PC11/TRAC) del módulo SRD-12V → pin **86** (bobina +) del relé 200A.
    - Pin **85** (bobina −) del relé 200A → GND.
    - Contacto potencia: batería tracción (+) → **mega fusible** → pin **30**; pin **87** → barra positiva de los 4 BTS7960 de tracción.
-3. **Relé DIR 5 pines (etapa 2):**
-   - Salida NO del CH2 (PC12/DIR) del módulo SRD-12V → pin **86**.
+3. **Relé STEER_PWR 5 pines (etapa 2):**
+   - Salida NO del CH2 (PC12/STEER_PWR) del módulo SRD-12V → pin **86**.
    - Pin **85** → GND.
    - Contacto potencia: pin **30** = entrada +12V de dirección; pin **87** = salida hacia shunt INA226 #5 y BTS7960 STEER.
    - Si existe quinto pin, normalmente es **87a (NC)**.
@@ -994,27 +995,28 @@ Para el caso típico de taller con relé automoción tipo `30/87/85/86`:
 ### Esquema módulo 4-ch 5V (LED + audio — sin etapa 2)
 
 ```
-STM32/ESP32 (3,3 V)              Módulo 4-ch opto relé (5V)
-───────────────────              ──────────────────────────
+STM32/ESP32 (3,3 V)      ULN2803A              Módulo 4-ch opto relé (5V)
+───────────────────      ────────              ──────────────────────────
 
-PB10 ──────────► IN1             VCC ◄── 5V              COM1 ──► Alimentación 5V tira LED_F
-PB11 ──────────► IN2             GND ◄── GND             COM2 ──► Alimentación 5V tira LED_R
-GPIO11 (ESP32) ─► IN3                                    COM3 ──► Altavoz +
-                                                         NO3  ──► DFPlayer SPKR
-              Optoacoplador ──► Relé SRD-05VDC           NC3  ──► Radio (normalmente conectado)
-              Transistor ──►    cierra contacto
+PB10 ───────────────►    1B/1C ───────────► IN1      VCC ◄── 5V          COM1 ──► Alimentación 5V tira LED_F
+PB11 ───────────────►    2B/2C ───────────► IN2      GND ◄── GND         COM2 ──► Alimentación 5V tira LED_R
+GPIO11 (ESP32) ─────►    3B/3C ───────────► IN3                           COM3 ──► Altavoz +
+                                                                        NO3  ──► DFPlayer SPKR
+                                           Optoacoplador ──► Relé SRD-05VDC
+                                           Transistor ──►    cierra contacto
+                                                                        NC3  ──► Radio (normalmente conectado)
 
 IN4: libre
 ```
 
-**Canal audio (CH3) — activo LOW:**
+**Canal audio (CH3) — ULN2803A + Songle:**
 ```
-ESP32 GPIO11 (LOW = relé ON, activo LOW) ──► IN3 módulo 4-ch 5V
-                                              │
-                                         Contacto CH3:
-                                         COM  ──────────► Altavoz +
-                                         NO   ──────────► DFPlayer SPKR
-                                         NC   ──────────► Radio (normalmente conectado)
+ESP32 GPIO11 (HIGH = comando ON) ──► ULN2803A CH3 ──► IN3 módulo 4-ch 5V
+                                                       │
+                                                  Contacto CH3:
+                                                  COM  ──────────► Altavoz +
+                                                  NO   ──────────► DFPlayer SPKR
+                                                  NC   ──────────► Radio (normalmente conectado)
 ```
 
 > **Nota:** El módulo 4-ch 12V (SRD-12VDC-SL-C) y el módulo 4-ch 5V (SRD-05VDC-SL-C) incluyen
@@ -1025,17 +1027,18 @@ ESP32 GPIO11 (LOW = relé ON, activo LOW) ──► IN3 módulo 4-ch 5V
 
 Si se usan módulos prefabricados:
 
-1. **Medir con multímetro** la tensión mínima que activa el relé en el pin "IN".
-   - Si activa con 3,3 V: conectar directamente al GPIO del STM32/ESP32.
-   - Si requiere 5 V: interponer un transistor BSS138 (level shifter) para elevar el nivel.
+1. **Medir con multímetro** la tensión en el pin `IN` cuando el canal está activado.
+   - Con la arquitectura actual debe verse `INx ≈ 0V` cuando el relé está ON (sink del ULN2803A).
+   - En reposo debe verse `INx ≈ 5V` por el pull-up interno del módulo Songle/SRD.
+   - No conectar el GPIO del STM32/ESP32 directamente a `INx`; la ruta oficial es `GPIO -> ULN2803A -> INx`.
 
 2. **Verificar el diodo flyback**: los módulos industriales suelen incluirlo ya montado.
    Si no está, soldar un 1N4007 entre los terminales de la bobina.
 
 3. **Verificar la lógica de activación:**
-   - Módulo 12V (CH1/CH2 TRAC/DIR): **HIGH-level trigger** requerido (STM32 HIGH = relé ON). Verificar jumper JD-VCC.
-   - Módulo 5V CH1/CH2 (LED_F/LED_R): **HIGH-level trigger** requerido (STM32 HIGH = relé ON). Verificar jumper JD-VCC.
-   - Módulo 5V CH3 (audio): **LOW-level trigger** correcto (ESP32 GPIO11 LOW = relé ON = active LOW). Compatible directo.
+   - Módulo 12V (CH1/CH2 TRAC/STEER_PWR): `IN1/IN2` deben ser **activos LOW** porque los hunde la ULN2803A cuando PC11/PC12 están ON.
+   - Módulo 5V CH1/CH2 (LED_F/LED_R): `IN1/IN2` deben ser **activos LOW** por la misma razón (PB10/PB11 HIGH → ULN sink ON → relé ON).
+   - Módulo 5V CH3 (audio): `GPIO11 HIGH` en ESP32 → ULN sink ON → `IN3 LOW` → relé ON.
 
 ### Snubber en los contactos del relé
 
@@ -1057,7 +1060,7 @@ Contacto COM ──[R = 100 Ω, 1/2 W] ──┬── Contacto NO
 | Componente | Diodo | Ubicación |
 |-----------|-------|-----------|
 | Relé TRAC (bobina 12 V) | 1N4007 | Entre terminales de bobina del relé de potencia, cátodo al + |
-| Relé DIR (bobina 12 V) | 1N4007 | Entre terminales de bobina del relé de potencia, cátodo al + |
+| Relé STEER_PWR (bobina 12 V) | 1N4007 | Entre terminales de bobina del relé de potencia, cátodo al + |
 | BTS7960 VCC lógica (enable signals) | 1N4148 en R_EN/L_EN (opcional) | Serie de protección en señales EN |
 ---
 
@@ -1119,7 +1122,7 @@ NOTA: este condensador también absorbe la energía cinética del motor al frena
 Para el bus de 12 V (motor de dirección):
 
 ```
-Relé DIR NO ──┬────── Bus 12 V
+Relé STEER_PWR NO ──┬────── Bus 12 V
               │
           [470 µF / 25 V electrolítico]
               │

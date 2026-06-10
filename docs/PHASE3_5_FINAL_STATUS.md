@@ -1,5 +1,12 @@
 # Phase 3–5 Final Status Report
 
+> ## ⚠️ DOCUMENTO LEGACY — REGISTRO HISTÓRICO
+>
+> Este documento recoge el estado final de las Fases 3–5 al momento de su completación (2026-02-22).
+> Las funcionalidades descritas están implementadas y operativas.
+> **Fuente de verdad actual:** `docs/PROJECT_MASTER_STATUS.md`, firmware STM32/ESP32
+
+
 **Fecha:** 2026-02-22
 **Referencia:** `docs/PROJECT_MASTER_STATUS.md`, `docs/PENDING_FEATURES_SCHEDULE.md`
 
@@ -157,7 +164,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 | ADC1 IN4 | Pedal | Ninguno |
 | I2C1 | INA226/TCA9548A | Ninguno (bus compartido, muxed) |
 | FDCAN1 | CAN bus | Ninguno |
-| IWDG | Watchdog 500ms | Ninguno |
+| IWDG | Watchdog ~4.1 s | Ninguno |
 
 **Resultado: 0 conflictos de periféricos.**
 

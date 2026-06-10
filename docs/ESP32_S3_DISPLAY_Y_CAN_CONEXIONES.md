@@ -140,7 +140,7 @@
 
 | Señal | GPIO ESP32 | Notas |
 |-------|------------|-------|
-| IN relé audio | 11 | **Active LOW** |
+| IN relé audio | 11 | **GPIO HIGH = relé ON** (ULN sink ON → `IN3` LOW) |
 
 ---
 
@@ -205,7 +205,7 @@
 | 1 | TJA1051T/3 | Transceiver CAN ESP32 |
 | 1 | TF-Mini Plus | Sensor de obstáculos actual |
 | 1 | DFPlayer Mini | Audio |
-| 1 | Relé audio | GPIO11, active LOW |
+| 1 | Relé audio | GPIO11 → ULN2803A CH3 → Songle IN3 (GPIO HIGH = ON) |
 | 1 | MCP23017 | Palanca de cambios |
 | 2 | Resistencias 4.7 kΩ | Pull-up I2C |
 | 1 | Resistencia 10 kΩ | Pull-up RESET MCP23017 |

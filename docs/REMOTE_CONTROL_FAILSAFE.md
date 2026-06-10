@@ -55,7 +55,7 @@ opera de forma autónoma; ningún fallo único puede dejar el vehículo sin prot
                                   ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ CAPA 4 — IWDG hardware STM32 (ya existente, NO se modifica)        │
-│   Disparo: > 500 ms sin refresh del Independent Watchdog           │
+│   Disparo: > 4.1 s sin refresh del Independent Watchdog           │
 │   Acción: reset completo del MCU → vuelve a BOOT en SAFE           │
 │   Independiente: SÍ — periférico hardware dedicado en LSI 32 kHz   │
 └────────────────────────────────────────────────────────────────────┘
@@ -150,7 +150,7 @@ Caso peor analizado:
 |---|---|---|---|
 | 0 ms | Mando en 70 %, ESP32 cuelga sin reboot | — | Frames 0x100 dejan de llegar inmediatamente |
 | 250 ms | STM32 timeout CAN | **Capa 3** | LIMP_HOME |
-| 500 ms (si STM32 también se cuelga) | IWDG | **Capa 4** | Reset completo MCU → SAFE |
+| ~4.1 s (si STM32 también se cuelga) | IWDG | **Capa 4** | Reset completo MCU → SAFE |
 
 **Resultado:** vehículo desactiva motores en < 500 ms en el peor caso.
 
@@ -169,7 +169,7 @@ Caso peor analizado:
 | Threshold checksum consecutivos | 5 | 2 | Antes de marcar DEGRADED |
 | Rango sano canal | [900, 2100] | 2 | Fuera → descarte |
 | Heartbeat STM32 timeout | 250 ms | 3 | Ya existente, no cambia |
-| IWDG STM32 | 500 ms | 4 | Ya existente, no cambia |
+| IWDG STM32 | ~4.1 s | 4 | Ya existente, no cambia |
 | Deadzone ESP32 | ±30 cuentas (≈3 %) | (procesamiento) | Igual que pedal |
 | EMA α | 0,15 | (procesamiento) | Igual que motor_control.c |
 | Ramp up | 50 %/s | (procesamiento) | Igual que motor_control.c |

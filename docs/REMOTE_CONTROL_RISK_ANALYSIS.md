@@ -70,7 +70,7 @@ arquitectura propuesta. Forzaría:
 - Capa 1 (HW receptor) → canales a posición segura preconfigurada (~1 s).
 - Capa 2 (SW ESP32) → deja de enviar 0x100/0x101 en < 150 ms.
 - Capa 3 (CAN heartbeat) → LIMP_HOME en 250 ms si todo falla.
-- Capa 4 (IWDG) → reset en 500 ms en peor caso.
+- Capa 4 (IWDG) → reset en ~4.1 s en peor caso.
 
 **Riesgo residual:** vehículo continúa unos segundos en inercia. Aceptable a baja
 velocidad.

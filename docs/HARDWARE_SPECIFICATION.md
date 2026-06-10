@@ -145,7 +145,7 @@ L_EN = EN_PIN;
    - Contactos: 10A 250VAC / 10A 30VDC por canal
    - Asignación de canales:
      - CH1 → PC11 STM32 — driver relé potencia TRAC (24V, 50A)
-     - CH2 → PC12 STM32 — driver relé potencia DIR (12V, 20A)
+     - CH2 → PC12 STM32 — driver relé potencia STEER_PWR (12V, 20A)
      - CH3 → libre · CH4 → libre
    - PC10 **no se conecta** (GPIO libre, `INPUT_PULLDOWN`)
 
@@ -157,7 +157,7 @@ L_EN = EN_PIN;
    - Asignación de canales:
      - CH1 → PB10 STM32 — corte alimentación 5V tira LED frontal (28 LEDs)
      - CH2 → PB11 STM32 — corte alimentación 5V tira LED trasera (16 LEDs)
-     - **CH3 → GPIO11 ESP32 — relé audio DFPlayer (activo LOW)**
+     - **CH3 → ULN2803A 3C desde GPIO11 ESP32 — relé audio DFPlayer (GPIO HIGH = ON; IN3 LOW = ON)**
      - CH4 → libre (reserva)
 
 2. **Snubber Circuits** (protección contra picos)
@@ -174,29 +174,30 @@ L_EN = EN_PIN;
 
 ### Especificación Relés
 
-**Módulo driver etapa 1 (TRAC/DIR):** SRD-12VDC-SL-C, 12V, optoacoplado, 2 canales usados (CH1–CH2)
+**Módulo driver etapa 1 (TRAC/STEER_PWR):** SRD-12VDC-SL-C, 12V, optoacoplado, 2 canales usados (CH1–CH2)
 **Módulo LED + audio:** SRD-05VDC-SL-C, 5V, optoacoplado, 3 canales usados (CH1–CH3)
 **Relé de potencia:** bobina 12V DC, accionado por contacto del módulo 4-ch 12V
 
 | Función | Pin | Corriente | Protección | Módulo físico / Canal |
 |---------|-----|-----------|------------|-----------------------|
 | RELAY_TRAC | PC11 (STM32) | 40A | Fusible 50A | Módulo 4-ch **12V** CH1 |
-| RELAY_DIR  | PC12 (STM32) | 15A | Fusible 20A | Módulo 4-ch **12V** CH2 |
+| RELAY_STEER_PWR | PC12 (STM32) | 15A | Fusible 20A | Módulo 4-ch **12V** CH2 |
 | RELAY_LED_F | PB10 (STM32) | 3A LED 5V | Fusible 5A | Módulo 4-ch **5V** CH1 |
 | RELAY_LED_R | PB11 (STM32) | 2A LED 5V | Fusible 5A | Módulo 4-ch **5V** CH2 |
-| **RELAY_AUDIO** | **GPIO11 (ESP32)** | señal audio | — | Módulo 4-ch **5V** CH3 (activo LOW) |
+| **RELAY_AUDIO** | **GPIO11 (ESP32)** | señal audio | — | ULN2803A CH3 → módulo 4-ch **5V** CH3 (GPIO HIGH = ON) |
 
 > **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
 
-**Arquitectura de dos etapas (para TRAC y DIR):**
-- **Etapa 1 (módulo 4-ch 12V):** CH1 y CH2. GPIO del STM32 activa las entradas IN (3.3V compatible).
+**Arquitectura de dos etapas (para TRAC y dirección):**
+- **Etapa previa común:** GPIO del STM32/ESP32 → **ULN2803A** → entradas `INx` de los módulos Songle/SRD.
+- **Etapa 1 (módulo 4-ch 12V):** CH1 y CH2 conmutan la bobina de los relés de potencia desde las salidas del ULN2803A.
 - **Etapa 2 (relés de potencia):** Relés de alta corriente con bobina 12V DC. Sus bobinas están alimentadas a través de los contactos de etapa 1.
 
 **Módulo 4-ch 5V (LED + audio):**
-- CH1/CH2 cortan la alimentación 5V de las tiras LED (corriente ≤ 3A, sin etapa 2).
-- CH3 conmuta la señal del altavoz entre radio y DFPlayer (corriente de señal, sin etapa 2). Activo LOW, controlado por ESP32 GPIO11.
+- CH1/CH2 cortan la alimentación 5V de las tiras LED (corriente ≤ 3A, sin etapa 2) y se activan cuando PB10/PB11 ponen a ON el ULN2803A.
+- CH3 conmuta la señal del altavoz entre radio y DFPlayer (corriente de señal, sin etapa 2). En firmware, **GPIO11 HIGH = relé ON**; en el módulo Songle, **IN3 LOW = relé ON** por la inversión del ULN2803A.
 
-**Características módulo 4-ch 12V (etapa 1 TRAC/DIR):**
+**Características módulo 4-ch 12V (etapa 1 TRAC/STEER_PWR):**
 - Bobina módulo: **12V** DC
 - Contactos: 10A @ 30V DC — suficiente para bobinas de relés de potencia
 - Optoacopladores integrados, flyback de bobina incluido en el módulo
@@ -207,9 +208,9 @@ L_EN = EN_PIN;
 - Trigger: High/Low level seleccionable, compatible 3.3V STM32 y ESP32
 - Optoacopladores integrados en placa
 
-**Características relés de potencia (etapa 2 — solo TRAC/DIR):**
+**Características relés de potencia (etapa 2 — solo TRAC/STEER_PWR):**
 - Bobina: 12V DC
-- Contactos: según carga (40A TRAC, 15A DIR)
+- Contactos: según carga (40A TRAC, 15A STEER_PWR)
 
 ### Secuencia de Activación Segura
 
@@ -217,28 +218,28 @@ L_EN = EN_PIN;
 Startup:
 1. RELAY_TRAC = ON (tracción habilitada) 
 2. Esperar 50ms (estabilización)
-3. RELAY_DIR = ON (dirección habilitada)
+3. RELAY_STEER_PWR = ON (dirección habilitada)
 4. Sistema listo
 
 Shutdown:
-1. RELAY_DIR = OFF (desactivar dirección primero)
+1. RELAY_STEER_PWR = OFF (desactivar dirección primero)
 2. RELAY_TRAC = OFF (corte tracción)
 ```
 
-### Esquema Módulo 4-ch Opto Relé 12V (SRD-12VDC-SL-C) — canales TRAC/DIR
+### Esquema Módulo 4-ch Opto Relé 12V (SRD-12VDC-SL-C) — canales TRAC/STEER_PWR
 
 ```
-STM32 (3.3V)               Módulo 4-ch opto relé (12V)       Relé de potencia (bobina 12V)
-────────────               ───────────────────────────       ─────────────────────────────
+STM32 (3.3V)         ULN2803A              Módulo 4-ch opto relé (12V)       Relé de potencia (bobina 12V)
+────────────         ────────              ───────────────────────────       ─────────────────────────────
 
-PC11 ──────────► IN1       VCC ◄── 12V                    ┌── Bobina TRAC (+) 12V
-PC12 ──────────► IN2       GND ◄── GND                    │
-                                                           │   (contacto 10A cierra cuando
-               Optoacoplador                               │    relé del módulo activo)
-               interno del    ──► Relé SRD-12VDC ──► COM ──┤
-               módulo              (contacto 10A)    NO ────┴── Bobina TRAC (−) → GND
-                                                       ↑
-                                                  [1N4007] flyback externo
+PC11 ──────────►     4B/4C ───────────► IN1      VCC ◄── 12V               ┌── Bobina TRAC (+) 12V
+PC12 ──────────►     5B/5C ───────────► IN2      GND ◄── GND               │
+                                                                              │   (contacto 10A cierra cuando
+                                       Optoacoplador                          │    relé del módulo activo)
+                                       interno del    ──► Relé SRD-12VDC ──► COM ──┤
+                                       módulo              (contacto 10A) NO ────┴── Bobina TRAC (−) → GND
+                                                                        ↑
+                                                                   [1N4007] flyback externo
 
 CH3/CH4: libres (reserva)
 ```
@@ -248,7 +249,10 @@ CH3/CH4: libres (reserva)
 STM32 PC11 (3.3V HIGH)
     │
     ▼
-Módulo opto relé CH1 → Optoacoplador LED → relé SRD-12VDC cierra
+ULN2803A 4C hunde IN1 a GND
+    │
+    ▼
+Módulo opto relé CH1 cierra
     │
     ▼ (contacto 10A del módulo pasa 12V a la bobina del relé de potencia)
 Relé de potencia cierra → 24V llega a BTS7960 tracción
@@ -257,26 +261,29 @@ Relé de potencia cierra → 24V llega a BTS7960 tracción
 ### Esquema Módulo 4-ch Opto Relé 5V (SRD-05VDC-SL-C) — LED strips + AUDIO
 
 ```
-STM32/ESP32 (3.3V)         Módulo 4-ch opto relé (5V)
-──────────────────         ──────────────────────────
+STM32/ESP32 (3.3V)      ULN2803A              Módulo 4-ch opto relé (5V)
+──────────────────      ────────              ──────────────────────────
 
-PB10 ──────────► IN1       VCC ◄── 5V                    COM1 ──► Alimentación 5V tira LED_F
-PB11 ──────────► IN2       GND ◄── GND                   COM2 ──► Alimentación 5V tira LED_R
-GPIO11 (ESP32) ─► IN3                                     COM3 ──► Altavoz +
-                                                          NO3  ──► DFPlayer SPKR
-               Optoacoplador                              NC3  ──► Radio (normalmente conectado)
-               interno del    ──► Relé SRD-05VDC
-               módulo              (contacto 10A)
+PB10 ───────────────►   1B/1C ───────────► IN1      VCC ◄── 5V          COM1 ──► Alimentación 5V tira LED_F
+PB11 ───────────────►   2B/2C ───────────► IN2      GND ◄── GND         COM2 ──► Alimentación 5V tira LED_R
+GPIO11 (ESP32) ─────►   3B/3C ───────────► IN3                           COM3 ──► Altavoz +
+                                                                       NO3  ──► DFPlayer SPKR
+                                        Optoacoplador ──► Relé SRD-05VDC
+                                        interno del       (contacto 10A)
+                                                                       NC3  ──► Radio (normalmente conectado)
 
 CH4 (IN4): libre
 ```
 
-**Canal audio (CH3) — activo LOW, sin etapa 2:**
+**Canal audio (CH3) — ULN2803A + Songle, sin etapa 2:**
 ```
-ESP32 GPIO11 (LOW = relé ON, activo LOW)
+ESP32 GPIO11 (HIGH = comando ON)
     │
     ▼
-Módulo opto relé CH3 → contacto COM—NO cierra
+ULN2803A CH3 (sink ON)
+    │
+    ▼
+IN3 módulo opto relé ≈ 0V → contacto COM—NO cierra
     │
 COM → Altavoz +
 NO  → DFPlayer SPKR
@@ -553,7 +560,7 @@ Ver documento separado: `PROTOCOLO_CAN.md`
 | Resistor 120Ω | 2 | 1/4W | Terminación CAN |
 | Capacitor 100nF | 30 | Cerámico X7R | Desacoplo |
 | Capacitor 1000μF | 1 | 25V Electrolítico | Bulk capacitor |
-| Diodo 1N4007 | 4 | 1A, 1000V | Flyback relés potencia (TRAC, DIR) y LED (LED_F, LED_R) |
+| Diodo 1N4007 | 4 | 1A, 1000V | Flyback relés potencia (TRAC, STEER_PWR) y LED (LED_F, LED_R) |
 
 ---
 

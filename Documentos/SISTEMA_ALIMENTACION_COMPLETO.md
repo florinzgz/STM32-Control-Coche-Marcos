@@ -384,7 +384,7 @@ Corriente = 12V / 43kΩ ≈ 0.28 mA  (consumo despreciable)
 **Relé de audio (GPIO 11):**
 | Constante | Valor | Función |
 |-----------|-------|---------|
-| PIN_AUDIO_RELAY | GPIO 11 | Control ON/OFF amplificador (activo LOW) |
+| PIN_AUDIO_RELAY | GPIO 11 | Control ON/OFF audio vía ULN2803A (GPIO HIGH = ON) |
 | RELAY_ESTABLISH_MS | 20 ms | Tiempo para que cierre el contacto del relé |
 | RELAY_RELEASE_MS | 150 ms | Enfriamiento tras audio |
 | RELAY_MAX_ON_MS | 7000 ms | Watchdog de seguridad |
@@ -652,7 +652,7 @@ Todas las masas (GND) del sistema convergen en un **único punto central** llama
 | GPIO 41 | Output | POWER_HOLD (retención) | Base BC547 + 1kΩ |
 | GPIO 43 | Output | UART TX DFPlayer | 9600 bps |
 | GPIO 44 | Input | UART RX DFPlayer | 9600 bps |
-| GPIO 11 | Output | Relé audio (activo LOW) | Módulo relé + optoacoplador |
+| GPIO 11 | Output | Relé audio vía ULN2803A (GPIO HIGH = ON) | ULN2803A + módulo relé |
 
 ### 8.3 Bus I2C — Sensores de corriente
 

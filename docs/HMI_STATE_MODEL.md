@@ -91,7 +91,7 @@ The STM32 reports its `system_state` in byte 1 of the heartbeat message (0x001).
 | Steering angle | Yes (read-only) | 0x204 |
 | Throttle / steering / mode controls | **Disabled** | — |
 
-> **Recovery note:** SAFE generally requires the underlying fault to be resolved and a manual reset (the HMI offers no "dismiss"/"override"; see §6 rule 3). Three gated exceptions exist on the STM32 side, each of which only ever recovers `SAFE` → `STANDBY` (never directly to `ACTIVE`), leaving motion disabled until the normal `STANDBY` → `ACTIVE` checks pass:
+> **Recovery note:** En el firmware actual, los códigos **10**, **11** y **4** tienen auto-recovery gateado `SAFE` → `STANDBY` (nunca directo a `ACTIVE`), dejando el movimiento bloqueado hasta superar de nuevo los checks normales `STANDBY` → `ACTIVE`:
 > 1. **Battery undervoltage-critical (code 10):** auto-recovers once the pack voltage stays above 18.5 V for 2 s.
 > 2. **I2C / sensor-bus failure (code 11):** auto-recovers once the TCA9548A multiplexer and the battery INA226 physically respond again AND the bus voltage is valid and stays above 18.5 V for 2 s (Patch A). A still-invalid reading or a missing mux/INA aborts the recovery window.
 > 3. **Sensor plausibility fault (code 4):** auto-recovers once every sensor check of the current cycle passes (Patch B).

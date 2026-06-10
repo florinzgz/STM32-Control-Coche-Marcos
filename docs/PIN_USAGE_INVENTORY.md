@@ -380,10 +380,10 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 
 | Señal | GPIO | Función | Lógica |
 |-------|------|---------|--------|
-| Relay Coil | **GPIO11** | Conmuta altavoz entre radio y DFPlayer | Active LOW |
+| Relay Coil | **GPIO11** | Conmuta altavoz entre radio y DFPlayer (vía ULN2803A) | GPIO HIGH = ON (`IN3` Songle LOW) |
 | | | **Subtotal:** | **1 pin** |
 
-- LOW = DFPlayer conectado al altavoz; HIGH = radio conectada
+- HIGH = DFPlayer conectado al altavoz; LOW = radio conectada
 - Tiempo de estabilización del relé: 20 ms
 
 ### 5.5b Palanca de cambios — MCP23017 vía I2C (2 pines)
@@ -446,7 +446,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 3 | GPIO8 | Palanca de cambios | I2C SDA (MCP23017 @ 0x20) |
 | 4 | GPIO9 | Palanca de cambios | I2C SCL (MCP23017 @ 0x20) |
 | 5 | GPIO10 | Display TFT | SPI CS (chip select display) |
-| 6 | GPIO11 | Relé audio | Conmuta altavoz radio/DFPlayer (active LOW) |
+| 6 | GPIO11 | Relé audio | Conmuta altavoz radio/DFPlayer vía ULN2803A (GPIO HIGH = ON) |
 | 7 | GPIO12 | Display TFT | SPI MISO (datos desde display/touch) |
 | 8 | GPIO13 | Display TFT | SPI MOSI (datos al display) |
 | 9 | GPIO14 | Display TFT | SPI SCLK (reloj) |

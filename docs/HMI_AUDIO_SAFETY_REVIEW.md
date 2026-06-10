@@ -205,7 +205,7 @@ STM32 (Safety Authority)           CAN Bus           ESP32 (HMI / Audio)
 
 ### 🔴 HALLAZGO-07: Watchdog timeout — solo EMERGENCY genérico
 
-**Evento:** El IWDG de 500ms expira. El STM32 hace un hard reset. Al re-arrancar, `esp_reset_reason()` en el ESP32 puede detectar el motivo, pero el sistema arranca limpio.
+**Evento:** El IWDG de ~4.1 s expira. El STM32 hace un hard reset. Al re-arrancar, `esp_reset_reason()` en el ESP32 puede detectar el motivo, pero el sistema arranca limpio.
 
 **Audio actual:** Si el ESP32 también pierde la conexión, no hay audio. Si el STM32 re-arranca y el ESP32 sigue vivo, ve una transición ACTIVE → BOOT → STANDBY → ..., pero el audio de `EMERGENCY` sólo se dispara si ve transición a ERROR/SAFE.
 

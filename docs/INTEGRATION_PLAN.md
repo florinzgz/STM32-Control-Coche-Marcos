@@ -1,5 +1,12 @@
 # Plan de Integración de Componentes — STM32-Control-Coche-Marcos
 
+> ## ⚠️ DOCUMENTO LEGACY — PLAN COMPLETADO
+>
+> Este fue el plan de integración de componentes. Todas las fases descritas están completadas.
+> El documento se conserva como registro histórico de las decisiones de diseño.
+> **Fuente de verdad actual:** `docs/PROJECT_MASTER_STATUS.md`, `docs/HARDWARE_WIRING_MANUAL.md`, firmware
+
+
 > **Revisión:** 1.0  
 > **Fecha:** 2026-03-03  
 > **MCU Principal:** STM32G474RE (Cortex-M4F, 170 MHz, LQFP64)  
@@ -40,7 +47,7 @@ El firmware actual ejecuta 18 módulos C compilados con ARM GCC (`arm-none-eabi-
 | **ADC1** | Pedal acelerador | PA3 | 12-bit, IN4, muestreo ~1.1 µs |
 | **FDCAN1** | Comunicación ESP32 | PA11 (RX), PA12 (TX) | 500 kbps, prescaler 17, AF9 |
 | **I2C1** | Sensores corriente/ADC | PB8 (SCL), PB9 (SDA) | 400 kHz fast mode, open-drain |
-| **IWDG** | Watchdog independiente | — | ~500 ms (prescaler 32, reload 4095) |
+| **IWDG** | Watchdog independiente | — | ~4.1 s (prescaler 32, reload 4095, LSI 32 kHz) |
 | **OneWire** | DS18B20 temperaturas | PB0 | Bit-bang GPIO |
 | **EXTI** | Ruedas + encoder | PA0, PA1, PA2, PB15, PB4, PB5 | Rising edge, prioridad 2 |
 | **SWD** | Depuración | PA13, PA14 | Debug (no modificar) |
@@ -94,7 +101,7 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 - **Pines DIR (PC0–PC4) liberados**: Originalmente para señales de dirección de motor, ahora libres al usar esquema RPWM/LPWM dual-PWM con BTS7960
 - **BREAK2 armado a LOCKUP**: TIM1/TIM8 tienen BREAK2 conectado internamente a Cortex-M4 LOCKUP — cualquier hard fault corta PWM por hardware
 - **Flash pages 125–127 reservadas**: Error log (125), calibración dirección (126), parámetros EPS (127) — NO usar para otros fines
-- **Watchdog agresivo**: 500 ms timeout implica que cualquier operación bloqueante >500 ms causa reset
+- **Watchdog conservador**: ~4.1 s timeout implica que cualquier operación bloqueante >4.1 s causa reset
 - **Filtro FDCAN estricto**: Solo acepta IDs conocidos — componentes nuevos con CAN requieren actualizar el filtro
 
 ---
@@ -550,7 +557,7 @@ Antes de asignar cualquier pin libre:
 
 ### 6.1 Antes de cada integración
 
-- [ ] **Watchdog**: Confirmar que `HAL_IWDG_Refresh()` se llama cada <500 ms en todas las ramas de código
+- [ ] **Watchdog**: Confirmar que `HAL_IWDG_Refresh()` se llama cada <4.0 s en todas las ramas de código (timeout real ~4.1 s)
 - [ ] **Timeout en todas las comunicaciones**: Ninguna llamada HAL sin timeout (I2C: 50 ms, SPI: 10 ms, UART: 10 ms)
 - [ ] **No usar `HAL_Delay()` en contexto de interrupción**: Nunca — causa deadlock
 - [ ] **No usar `while(flag)` sin timeout**: Todo bucle de espera tiene `tick + TIMEOUT` como condición de salida

@@ -41,7 +41,7 @@
   │  UART1 RX (GPIO18) ◄── TF-Mini Plus (sensor obstáculos, 115200 bps)        │
   │  UART2 ──► DFPlayer Mini (audio, GPIO43 TX / GPIO44 RX, 9600 bps)          │
   │  I2C (GPIO8 SDA / GPIO9 SCL) ──► MCP23017 ──► Palanca de cambios           │
-  │  GPIO11 ──► Relé audio (active LOW, aísla altavoz)                          │
+  │  GPIO11 ──► ULN2803A CH3 ──► Relé audio IN3 (GPIO HIGH = ON; IN3 LOW = ON) │
   │  GPIO47 ──► WS2812B frontal (28 LEDs, datos)                                │
   │  GPIO48 ──► WS2812B trasero (16 LEDs, datos)                                │
   └──────────────────────────────────────────────────────────────────────────────┘
@@ -558,7 +558,7 @@ Ver especificación técnica completa: `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md 
 | Cable | De (STM32) | A (Módulo relé) | Función |
 |-------|-----------|-----------------|---------|
 | 32 | **PC11** | IN (RELAY_TRAC) | Relé tracción: alimentación motores 24V |
-| 33 | **PC12** | IN (RELAY_DIR) | Relé dirección: alimentación motor 12V |
+| 33 | **PC12** | IN (RELAY_STEER_PWR) | Relé potencia dirección: alimentación motor 12V |
 
 > **PC10 está DISPONIBLE y sin usar** (configurado como `GPIO_Input` + `Pull-down`; libre para expansión)
 
@@ -575,14 +575,14 @@ PC12=LOW → PC11=LOW (todo OFF inmediato)
 ### Circuito de protección del driver de relé (por cada relé)
 
 Los módulos de relé con optoacoplador (módulo 4-ch SRD-12VDC-SL-C) controlan las bobinas
-de los relés de potencia en una arquitectura de dos etapas:
+de los relés de potencia en una arquitectura de dos etapas, precedida por la ULN2803A:
 
 ```
-STM32 GPIO ──► Optoacoplador ──► Transistor NPN ──► Bobina relé
-                                                         │
-                         Diodo flyback (1N4007)          │
-                         Cátodo → VCC (5–12V) ◄──────── COM bobina
-                         Ánodo  → colector NPN ◄──────── COM bobina (otro terminal)
+STM32 GPIO ──► ULN2803A ──► IN módulo SRD-12VDC ──► Optoacoplador ──► Transistor NPN ──► Bobina relé
+                                                                                                 │
+                                                         Diodo flyback (1N4007)                  │
+                                                         Cátodo → VCC (5–12V) ◄──────────────── COM bobina
+                                                         Ánodo  → colector NPN ◄──────────────── COM bobina (otro terminal)
 
 Condensador snubber (100 nF, 250V) en paralelo con los contactos del relé
 (entre COM y NO/NC) para suprimir arcos durante la conmutación.
@@ -601,11 +601,11 @@ Condensador snubber (100 nF, 250V) en paralelo con los contactos del relé
 | Cable | De | A | Notas |
 |-------|-----|---|-------|
 | — | Batería 24V+ | **INA226 #4 (shunt batería)** | Cable grueso ≥4 mm², shunt ANTES del relé TRAC |
-| — | INA226 #4 (salida shunt) | Relé TRAC (COM) + Relé DIR (COM) | Se bifurca |
+| — | INA226 #4 (salida shunt) | Relé TRAC (COM) + Relé STEER_PWR (COM) | Se bifurca |
 | — | Relé TRAC (NO) | **INA226 #0-#3 (shunts motor)** → BTS7960 tracción VCC (×4) | Shunts ANTES de los drivers |
-| — | Relé DIR (NO) | **INA226 #5 (shunt dirección)** → BTS7960 dirección VCC | Shunt ANTES del driver (con conversor si aplica) |
+| — | Relé STEER_PWR (NO) | **INA226 #5 (shunt dirección)** → BTS7960 dirección VCC | Shunt ANTES del driver (con conversor si aplica) |
 
-> **Nota:** Los relés de potencia se controlan en dos etapas: STM32 GPIO (3.3V) → módulo 4-ch opto relé SRD-12VDC-SL-C (12V) → bobina relé de potencia (12V) → contactos de alta corriente. El módulo intermedio aísla la lógica 3.3V del STM32 de los circuitos de potencia (canales no utilizados disponibles).
+> **Nota:** Los relés de potencia se controlan con la cadena oficial **STM32 GPIO (3.3V) → ULN2803A → módulo 4-ch opto relé SRD-12VDC-SL-C (12V) → bobina relé de potencia (12V) → contactos de alta corriente**. El módulo intermedio aísla la lógica 3.3V del STM32 de los circuitos de potencia y la ULN2803A evita GPIO directo a `INx`.
 
 ### Condensadores de desacoplo en BTS7960 (por cada driver)
 
@@ -769,7 +769,7 @@ Un relé controlado por el ESP32-S3 aísla el altavoz del DFPlayer Mini cuando n
 
 | Cable | De (ESP32-S3) | A (Módulo relé) | Función |
 |-------|-------------|-----------------|---------|
-| — | **GPIO11** | IN (señal control) | Active LOW: GPIO LOW = relé ON (audio conectado) |
+| — | **GPIO11** | IN (señal control) | GPIO HIGH = relé ON (audio conectado) |
 | — | **3.3V** | VCC módulo relé | Alimentación lógica del módulo |
 | — | **GND** | GND módulo relé | GND común |
 
@@ -779,18 +779,18 @@ DFPlayer SPK_1 ──► Relé COM
                    Relé NO ──► Altavoz +
 DFPlayer SPK_2 ──────────────► Altavoz −
 
-ESP32 GPIO11 ──► IN módulo relé (active LOW)
+ESP32 GPIO11 ──► ULN2803A CH3 ──► IN3 módulo relé
 ```
 
 **Estado del relé:**
-- **IDLE:** GPIO HIGH → Relé OFF → Altavoz desconectado (silencio)
-- **ACTIVATING:** GPIO LOW → Relé ON → Espera 50 ms para establecimiento de contacto
+- **IDLE:** GPIO LOW → ULN OFF → IN3 ≈ 5V → Relé OFF → Altavoz desconectado
+- **ACTIVATING:** GPIO HIGH → ULN sink ON → IN3 ≈ 0V → Relé ON
 - **ACTIVE:** Relé ON → DFPlayer reproduce audio → Altavoz suena
-- **RELEASING:** Audio terminado → Espera 200 ms → GPIO HIGH → Relé OFF
+- **RELEASING:** Audio terminado → Espera 150 ms → GPIO LOW → Relé OFF
 
 > ⚠️ **GPIO 11 es seguro en ESP32-S3:** No es strapping pin (solo GPIO 0/3/45/46 lo son), no conflicta con Flash (GPIO 26-32) ni PSRAM (GPIO 33-37), ni con USB (GPIO 19/20).
 
-**Referencia firmware:** `esp32/src/relay_audio.h` — `PIN_AUDIO_RELAY = 11`, active LOW.
+**Referencia firmware:** `esp32/src/relay_audio.h` + `esp32/src/relay_audio.cpp` — `PIN_AUDIO_RELAY = 11`, GPIO HIGH = relé ON a través de ULN2803A; Songle `IN3` sigue siendo activo LOW.
 
 ---
 
@@ -937,7 +937,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 32 | **PC8** | GPIOC | AF4 | TIM8_CH3 | BTS7960 RR → **RPWM** | PWM 20 kHz — adelante |
 | 33 | **PC9** | GPIOC | AF4 | TIM8_CH4 | BTS7960 RR → **LPWM** | PWM 20 kHz — atrás |
 | 33 | **PC11** | GPIOC | Output | GPIO | Módulo relé TRACCIÓN | HIGH = ON (vía optoacoplador) |
-| 34 | **PC12** | GPIOC | Output | GPIO | Módulo relé DIRECCIÓN | HIGH = ON (vía optoacoplador) |
+| 34 | **PC12** | GPIOC | Output | GPIO | Módulo relé STEER_PWR | HIGH = ON (vía optoacoplador) |
 | 35 | **PC13** | GPIOC | — | **RESERVADO** | USER button B1 (on-board) | No usar como salida. Conectado al botón B1 del NUCLEO-G474RE vía SB17. EN_RR reasignado a PC2 |
 
 ### Conexiones hardware (no GPIO)
@@ -953,7 +953,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 3 | **GPIO8** | I2C SDA | Wire | MCP23017 SDA | Palanca de cambios, 400 kHz |
 | 4 | **GPIO9** | I2C SCL | Wire | MCP23017 SCL | Palanca de cambios, 400 kHz |
 | 5 | **GPIO10** | SPI CS | TFT_CS | Display TFT CS | |
-| 6 | **GPIO11** | Output | GPIO | Relé audio IN | Active LOW (HIGH=OFF, LOW=ON) |
+| 6 | **GPIO11** | Output | GPIO | Relé audio IN | GPIO HIGH = ON (ULN sink ON, `IN3` LOW) |
 | 7 | **GPIO12** | SPI MISO | TFT_MISO | Display TFT SDO/T_DO | |
 | 8 | **GPIO13** | SPI MOSI | TFT_MOSI | Display TFT SDA | |
 | 9 | **GPIO14** | SPI SCLK | TFT_SCLK | Display TFT SCL | |
@@ -1005,7 +1005,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 1 | DFPlayer Mini | Audio ESP32 | Módulo reproductor MP3, UART 9600 bps |
 | 1 | Tarjeta micro SD (≤32GB FAT32) | Audio DFPlayer | Con archivos 0001.mp3 a 0068.mp3 |
 | 1 | Altavoz 3–5W / 8Ω | Audio DFPlayer | Conectado vía relé audio |
-| 1 | Módulo relé (miniatura) | Relé audio ESP32 | Active LOW, aísla altavoz del DFPlayer |
+| 1 | Módulo relé (miniatura) | Relé audio ESP32 | `IN3` activo LOW (comando final), accionado por GPIO11 HIGH vía ULN2803A |
 | 1 | MCP23017 módulo | Palanca de cambios | I2C I/O expander, 0x20, en ESP32 |
 | 1 | Palanca selectora 5 posiciones | Palanca de cambios | P/R/N/D1/D2, contactos a GND |
 | 1 | Tira WS2812B (28 LEDs) | LEDs frontales | Datos por GPIO47 ESP32-S3 |
@@ -1029,7 +1029,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 | Qty | Componente | Valor | Uso | Notas |
 |-----|-----------|-------|-----|-------|
-| 4 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé de potencia (TRAC, DIR) + relés LED (LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; el módulo SRD-12VDC-SL-C ya incluye flyback para sus relés internos |
+| 4 | Diodo flyback bobina relé | **1N4007** (1A, 1000V) | Uno por bobina de relé de potencia (TRAC, STEER_PWR) + relés LED (LED_F, LED_R) | En paralelo con la bobina, polaridad inversa; el módulo SRD-12VDC-SL-C ya incluye flyback para sus relés internos |
 | 5 | Condensador snubber contacto relé | **100 nF / 250 V** (polipropileno) | En paralelo con contactos COM–NO de cada relé (5 relés) | Reduce arcos en conmutación; 250V para margen ante picos inductivos |
 | 5 | Resistencia snubber contacto relé | **100 Ω / 0.5 W** | En serie con el condensador snubber de contacto (RC snubber) | Limita corriente de descarga del condensador |
 
@@ -1234,8 +1234,8 @@ PB14 ──►[330Ω]──►[LED]──► GND
    - Pin **85** → GND
    - Batería tracción (+) → **mega fusible** → pin **30**
    - Pin **87** → barra positiva de los 4 BTS7960 de tracción
-9. **Relé DIR 5 pines:**
-   - CH2 NO (PC12/DIR) del módulo rojo → pin **86**
+9. **Relé STEER_PWR 5 pines:**
+   - CH2 NO (PC12/STEER_PWR) del módulo rojo → pin **86**
    - Pin **85** → GND
    - Pin **30** → entrada +12V dirección
    - Pin **87** → salida al shunt INA226 #5 y BTS7960 STEER
@@ -1323,6 +1323,6 @@ PB14 ──►[330Ω]──►[LED]──► GND
 - `esp32/src/main.cpp` — Pines CAN ESP32 (GPIO4 TX, GPIO5 RX)
 - `esp32/src/sensors/obstacle_sensor.h` — Configuración UART del TF-Mini Plus (GPIO18, 115200 bps)
 - `esp32/src/audio_manager.h` — Pines DFPlayer Mini (GPIO43 TX, GPIO44 RX)
-- `esp32/src/relay_audio.h` — Pin relé audio (GPIO11, active LOW)
+- `esp32/src/relay_audio.h` + `esp32/src/relay_audio.cpp` — Pin relé audio (GPIO11; comando activo HIGH en ESP32, `IN3` activo LOW vía ULN2803A)
 - `esp32/src/led_controller.h` — Pines WS2812B (GPIO47 frontal, GPIO48 trasero)
 - `esp32/src/shifter_input.h` — Pines MCP23017 (GPIO8 SDA, GPIO9 SCL, 0x20)

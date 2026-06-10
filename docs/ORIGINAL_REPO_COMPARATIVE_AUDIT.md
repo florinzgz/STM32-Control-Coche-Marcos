@@ -34,7 +34,7 @@ La separación resuelve los problemas fundamentales del original: el control saf
 | **PWM motores** | PCA9685 vía I2C (indirecto) | TIM1 CH1-4 directo (20 kHz, 8500 steps) |
 | **PWM dirección** | PCA9685 vía I2C | TIM8 CH3 directo (20 kHz) |
 | **Encoder** | Lectura por GPIO/interrupt en ESP32 | TIM2 hardware quadrature (32-bit) |
-| **Watchdog** | ESP32 Task WDT (configurable) | IWDG independiente (~500 ms, LSI) |
+| **Watchdog** | ESP32 Task WDT (configurable) | IWDG independiente (~4.1 s, Prescaler=32, Reload=4095, LSI) |
 | **Safety authority** | Ninguna clara (todo mezclado) | STM32 es la única autoridad de seguridad |
 | **Aislamiento de fallos** | Fallo de display = fallo de motores | Fallo de display ≠ fallo de motores |
 | **Bootloop risk** | ALTO (30+ documentos de diagnóstico) | BAJO (periféricos non-fatal, IWDG recovery) |
@@ -213,7 +213,7 @@ Si CUALQUIER Manager::init() falla → `handleCriticalError()` → retry 3 veces
 | **Pedal** | `pedal.cpp` → ADC | `sensor_manager.c` → ADC1 12-bit | ✅ Reimplementado + EMA filter + ramp limiter |
 | **Relays** | `relays.cpp` → MCP23017 I2C | `safety_system.c` → GPIO directo + sequencing | ✅ Mejorado: secuencia non-blocking con timing |
 | **Recovery I2C** | `i2c_recovery.cpp` | `sensor_manager.c` → `I2C_BusRecovery()` | ✅ Reimplementado: NXP AN10216 SCL cycling |
-| **Watchdog** | `watchdog.cpp` → ESP32 Task WDT | `main.c` → IWDG independiente ~500 ms | ✅ Mejorado: hardware independiente, no software |
+| **Watchdog** | `watchdog.cpp` → ESP32 Task WDT | `main.c` → IWDG independiente ~4.1 s | ✅ Mejorado: hardware independiente, no software |
 | **Boot guard** | `boot_guard.cpp` → NVS counter | `boot_validation.c` → 6-check pre-ACTIVE | ✅ Diferente enfoque: validación de subsistemas |
 | **Limp mode** | `limp_mode.cpp` | `safety_system.c` → 3-level degradation | ✅ Mejorado: L1/L2/L3 con scaling granular |
 | **Power management** | `power_mgmt.cpp` | `safety_system.c` → battery voltage checks | ✅ Parcial: undervoltage protection implementada |

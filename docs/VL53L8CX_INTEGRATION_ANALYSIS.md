@@ -449,8 +449,8 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 | **I2C1** | PB8/PB9 | ❌ Ya usado | TCA9548A + INA226 + ADS1115 |
 | **I2C2** | PA9/PA10 | ❌ TIM1_CH2/CH3 | PWM motores FR/RL |
 | **I2C2** | PB10/PB11 (AF4) | PB10 ⚠️ / PB11 ✅ | PB10 posible conflicto wheel sensor |
-| **I2C3** | PA8/PC9 (AF2/AF8) | ❌ / ❌ | TIM1_CH1 (PWM FL) / EN_STEER |
-| **I2C3** | PC8/PC9 | ❌ / ❌ | TIM8_CH3 (PWM steering) / EN_STEER |
+| **I2C3** | PA8/PC9 (AF2/AF8) | ❌ / ❌ | TIM1_CH1 (RPWM_FL) / TIM8_CH4 (LPWM_RR) |
+| **I2C3** | PC8/PC9 | ❌ / ❌ | TIM8_CH3 (RPWM_RR motor) / TIM8_CH4 (LPWM_RR motor) |
 | **I2C4** | PA13/PA14 | ❌ | Debug SWD |
 | **I2C4** | PB8/PB9 | ❌ | Ya I2C1 |
 
