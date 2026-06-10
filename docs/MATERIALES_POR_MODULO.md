@@ -303,14 +303,14 @@
 
 > **PC10 está LIBRE** — no se conecta ningún relé a PC10. El firmware lo configura como `INPUT_PULLDOWN` (estado seguro).
 
-> **CH3 del módulo 4-ch 5V** es controlado por el ESP32 (GPIO11, activo LOW). La GND del ESP32 y la del STM32 están unidas en el punto de estrella GND del sistema, por lo que comparten VCC/GND del módulo sin problema.
+> **CH3 del módulo 4-ch 5V** es controlado por el ESP32 a través de **ULN2803A CH3**. En firmware, `GPIO11 HIGH = ON`; en el módulo Songle, `IN3 LOW = ON`. La GND del ESP32 y la del STM32 están unidas en el punto de estrella GND del sistema, por lo que comparten VCC/GND del módulo sin problema.
 
 ### Materiales por módulo de relé
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 1 | **Módulo 4-ch opto relé 12V** | **SRD-12VDC-SL-C, 12V**, trigger 3.3V compatible, contacto 10A/30VDC | CH1=PC11(TRAC driver), CH2=PC12(DIR driver), CH3/CH4 libres |
-| 1 | **Módulo 4-ch opto relé 5V** | **SRD-05VDC-SL-C, 5V**, trigger 3.3V compatible, contacto 10A/30VDC, active LOW | CH1=PB10 LED_F; CH2=PB11 LED_R; CH3=GPIO11 ESP32 (audio); CH4=libre |
+| 1 | **Módulo 4-ch opto relé 5V** | **SRD-05VDC-SL-C, 5V**, entradas `INx` activas LOW vía ULN2803A, contacto 10A/30VDC | CH1=ULN1C desde PB10 (LED_F); CH2=ULN2C desde PB11 (LED_R); CH3=ULN3C desde GPIO11 ESP32 (audio); CH4=libre |
 | 2 | Relé de potencia (bobina 12V) | Alta corriente: ≥50A (TRAC), ≥20A (DIR) | Relés de potencia accionados por contactos del módulo 4-ch 12V (CH1/CH2) |
 | 2 | Diodo flyback relé potencia | **1N4007** (1A, 1000V) | En paralelo con la bobina del relé de potencia TRAC y DIR |
 | 5 | Condensador snubber contacto | **100 nF / 250V** (polipropileno) | Entre COM y NO de cada relé de potencia; amortigua arcos al conmutar cargas inductivas |
@@ -318,7 +318,7 @@
 | 1 | Condensador bus 24V (junto a relés) | **1000 µF / 35V (o 50V)** (electrolítico) | En el bus 24V cerca del relé TRAC; absorbe el inrush al cerrar |
 | 1 | Condensador bus 12V (junto a relé DIR) | **470 µF / 25V** (electrolítico) | En el bus 12V cerca del relé DIR |
 
-> **⚠️ Lógica de activación del módulo 5V.** Los módulos SRD-05VDC optoacoplados típicos son **active LOW** (GPIO LOW = relé ON). El canal de audio (ESP32 GPIO11) ya usa lógica activo LOW — compatible directo. Para los canales LED (PB10/PB11), el firmware STM32 usa HIGH = relé ON: **verificar el jumper JD-VCC del módulo** y configurarlo como HIGH-level trigger.
+> **⚠️ Lógica de activación del módulo 5V.** Los módulos SRD-05VDC optoacoplados típicos tienen `INx` **active LOW**. En la arquitectura actual ningún GPIO va directo al relé: `PB10`, `PB11` y `GPIO11` pasan antes por **ULN2803A**, por lo que el comportamiento correcto es `GPIO HIGH -> ULN sink ON -> INx LOW -> relé ON`.
 
 > **⚠️ El diodo flyback es crítico para los relés de potencia.** Sin él, al abrir el relé se genera un pico de –100V que destruye el transistor del módulo driver. El módulo SRD-12VDC ya lo incluye internamente; colocar flyback externo en las bobinas de los relés de potencia.
 

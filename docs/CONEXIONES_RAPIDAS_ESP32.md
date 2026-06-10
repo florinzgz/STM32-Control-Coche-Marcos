@@ -212,7 +212,7 @@
 │ 3.3V   ─────┼── TJA1051T/3 VCC + VIO
 │             │
 │ GPIO18 ◄────┼── TF-Mini Plus TX
-│ GPIO11 ─────┼── Relé audio IN (active LOW)
+│ GPIO11 ─────┼── ULN2803A CH3 → Relé audio IN3 (GPIO HIGH = ON)
 │ GPIO8  ─────┼── MCP23017 SDA
 │ GPIO9  ─────┼── MCP23017 SCL
 │ GPIO40 ◄────┼── IGNITION_SENSE

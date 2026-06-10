@@ -254,7 +254,9 @@ Esta red RC se coloca **en paralelo con los contactos de potencia** del relé (N
 
 ## 6. Transistores de Control de Relés
 
-### 6.1 NPN 2N2222 (o BC547) — 5 unidades (1 por relé)
+> **Nota de legado:** esta etapa discreta con 2N2222/BC547 fue reemplazada en la arquitectura actual por una **ULN2803A compartida** para las entradas `INx` de los módulos Songle/SRD. Mantener esta sección solo como referencia histórica o para circuitos discretos ajenos al bloque de relés actual.
+
+### 6.1 NPN 2N2222 (o BC547) — referencia legacy, no arquitectura actual de relés
 
 | Parámetro | Valor |
 |-----------|-------|

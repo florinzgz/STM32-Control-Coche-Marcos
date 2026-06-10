@@ -62,8 +62,9 @@ States (from `safety_system.h`):
 | Overtemperature warning | Any DS18B20 > 80°C | DEGRADED (L2) | Auto after all < 75°C (5°C hysteresis) |
 | Overtemperature critical | Any DS18B20 > 90°C | SAFE | No auto-recovery |
 | Battery warning | Voltage < 20.0 V | DEGRADED (L2) | Auto after > 20.5 V |
-| Battery critical | Voltage < 18.0 V | SAFE | No auto-recovery; operator must reset |
+| Battery critical | Voltage < 18.0 V | SAFE | Auto after > 18.5 V remains stable for 2 s |
 | Battery sensor fail | 0.0 V reading from INA226 | SAFE | No auto-recovery |
+| I2C failure | TCA9548A / INA226 access failure | SAFE | Auto after bus/sensor recovers and battery remains > 18.5 V for 2 s |
 | CAN timeout | No heartbeat from ESP32 for > 250 ms | LIMP_HOME | Auto when heartbeat resumes |
 | Sensor fault | Temperature/current/speed out of range | DEGRADED (L1 or L3) | Auto when sensors return to range |
 | Pedal implausible | Dual-sample ADC diverge o rango/tasa inválido | Throttle → 0 + DEGRADED | Auto when channels agree |
@@ -876,9 +877,10 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 **Expected vehicle behavior:**
 - 0x001 byte 1 = 0x03 (DEGRADED). Power limited to 40% (L2 for battery fault).
 - Vehicle remains drivable at reduced speed.
-- At 17.5 V (below critical 18.0 V): 0x001 byte 1 = 0x04 (SAFE). Vehicle stops. NO auto-recovery.
+- At 17.5 V (below critical 18.0 V): 0x001 byte 1 = 0x04 (SAFE). Vehicle stops.
+- If battery voltage later rises above 18.5 V and remains stable for 2 s, the firmware clears the active undervoltage fault and returns SAFE → STANDBY automatically.
 
-**Pass criteria:** DEGRADED at 19 V. SAFE at 17.5 V. No motor movement in SAFE. No auto-recovery from SAFE without operator power cycle.
+**Pass criteria:** DEGRADED at 19 V. SAFE at 17.5 V. No motor movement in SAFE. Automatic recovery to STANDBY only after >18.5 V is stable for 2 s.
 
 ---
 

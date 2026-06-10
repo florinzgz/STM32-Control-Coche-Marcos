@@ -85,7 +85,7 @@
 |------|-------|-----------|-----------|----------------------|
 | 43 | DFPLAYER_TX | DFPlayer pin RX | Salida | Resistencia 1 kΩ en serie (recomendado) |
 | 44 | DFPLAYER_RX | DFPlayer pin TX | Entrada | — |
-| 11 | AUDIO_RELAY | Relé de audio optoacoplado (activo LOW) | Salida | — |
+| 11 | AUDIO_RELAY | Relé de audio vía ULN2803A (GPIO HIGH = ON; Songle IN3 LOW = ON) | Salida | — |
 
 **Componentes necesarios:**
 
@@ -306,7 +306,7 @@ GND (ESP32)    ─────────→ GND PC817
 | Pin LQFP | GPIO | Señal | Conecta a | Componentes externos |
 |----------|------|-------|-----------|----------------------|
 | 52 | PC11 | RELAY_TRAC | Relé tracción (alimentación motores, 40 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
-| 53 | PC12 | RELAY_DIR | Relé dirección (alimentación dirección, 15 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
+| 53 | PC12 | RELAY_STEER_PWR | Relé potencia dirección (alimentación 12V steering, 15 A) | Módulo 2-ch opto relé (etapa 1) → relé potencia bobina 12V (etapa 2) + Diodo 1N4007 |
 
 > **PC10 está DISPONIBLE (`INPUT_PULLDOWN`, sin conexión)** — GPIO libre, no conectado a hardware.
 
@@ -640,7 +640,7 @@ GND (ESP32)    ─────────→ GND PC817
 | Cantidad | Modelo | Ubicación |
 |----------|--------|-----------|
 | 10 | HY-M158 | Aislamiento señales PWM (10 canales) |
-| 1 | Módulo 4-ch opto relé SRD-12VDC-SL-C | Etapa intermedia relés potencia (TRAC, DIR) — canales no utilizados disponibles |
+| 1 | Módulo 4-ch opto relé SRD-12VDC-SL-C | Etapa intermedia relés potencia (TRAC, STEER_PWR) — canales no utilizados disponibles |
 
 ### Otros
 
