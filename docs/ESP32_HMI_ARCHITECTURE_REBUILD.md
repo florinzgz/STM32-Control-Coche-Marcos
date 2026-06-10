@@ -1209,7 +1209,7 @@ loop()
 | Task WDT (Core 0) | 5 s | `yield()` or `delay()` | HIGH — FreeRTOS tasks can starve idle task | **NONE** — single-core, `loop()` returns every tick |
 | Task WDT (Core 1) | 5 s | `yield()` or `delay()` | HIGH — HUD rendering can exceed 5 s | **NONE** — not used (single-core) |
 | Interrupt WDT | 300 ms | Automatic (ISR return) | LOW — ISRs are short | **NONE** — same pattern |
-| IWDG (STM32 side) | 500 ms | `IWDG_Feed()` in main loop | N/A (STM32 firmware) | N/A |
+| IWDG (STM32 side) | ~4.1 s | `HAL_IWDG_Refresh()` in main loop | N/A (STM32 firmware) | N/A |
 
 #### Worst-Case Frame Time Analysis (Full Vehicle Feature Set)
 

@@ -183,7 +183,7 @@
 
 | Peripheral | Prescaler | Reload | Timeout | File(s) |
 |------------|-----------|--------|---------|---------|
-| IWDG | /32 | 4095 | ~500 ms | `main.c` (init + refresh in main loop) |
+| IWDG | /32 | 4095 | ~4.1 s | `main.c` (init + refresh in main loop) |
 
 - **Classification:** CRITICAL (`MODULE_WATCHDOG`, ID 2).
 - Fed every main-loop iteration via `HAL_IWDG_Refresh()`.
@@ -516,7 +516,7 @@ Complete module registry with classification, mapped hardware, and CAN bitmask p
 |----|------|----------------|----------------------|--------------------------|
 | 0 | `MODULE_CAN_TIMEOUT` | **CRITICAL** | FDCAN1 heartbeat watchdog | bit 0 |
 | 1 | `MODULE_EMERGENCY_STOP` | **CRITICAL** | Hardware emergency stop | bit 1 |
-| 2 | `MODULE_WATCHDOG` | **CRITICAL** | IWDG (500 ms) | bit 2 |
+| 2 | `MODULE_WATCHDOG` | **CRITICAL** | IWDG (~4.1 s) | bit 2 |
 | 3 | `MODULE_RELAY_TRAC` | **CRITICAL** | Traction power relay (PC11) | bit 3 |
 | 4 | `MODULE_TEMP_SENSOR_0` | NON-CRITICAL | DS18B20 index 0 → Motor FL | bit 4 |
 | 5 | `MODULE_TEMP_SENSOR_1` | NON-CRITICAL | DS18B20 index 1 → Motor FR | bit 5 |
@@ -594,7 +594,7 @@ Reference: [FULL-FIRMWARE-Coche-Marcos](https://github.com/florinzgz/FULL-FIRMWA
 |-----------|---------------|-------|
 | Steering centering (inductive sensor) | `steering_centering.c` | New: automatic center-find at startup using LJ12A3 sensor on PB5. Base firmware used manual centering or assumed known center position. |
 | Service mode (per-module disable/enable) | `service_mode.c` | New: extends base firmware's `cfg.*Enabled` flags to a full module system with CAN-reported bitmasks. |
-| IWDG watchdog | `main.c` | New: 500 ms independent watchdog. Base firmware relied on FreeRTOS task watchdog. |
+| IWDG watchdog | `main.c` | New: ~4.1 s independent watchdog (Prescaler=32, Reload=4095, LSI ~32 kHz). Base firmware relied on FreeRTOS task watchdog. |
 
 ---
 

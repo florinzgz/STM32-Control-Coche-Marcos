@@ -144,7 +144,7 @@ Sin embargo, el sensor **no es el único mecanismo de seguridad**. Aunque el sen
 - Los sistemas ABS/TCS siguen activos (independientes del obstáculo).
 - El heartbeat CAN sigue protegiendo contra crash total de la ESP32.
 - Las protecciones de sobrecorriente, sobretemperatura y batería baja siguen activas.
-- El watchdog hardware (IWDG 500 ms) reinicia la STM32 si su propio firmware se bloquea.
+- El watchdog hardware (IWDG ~4.1 s) reinicia la STM32 si su propio firmware se bloquea.
 - Los relés de potencia se abren ante estado SAFE o ERROR.
 
 ### 4.3 Modo servicio

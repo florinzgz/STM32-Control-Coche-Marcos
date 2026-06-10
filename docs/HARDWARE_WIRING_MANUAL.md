@@ -77,7 +77,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 - Control de 2 relés de potencia (TRACCIÓN, DIRECCIÓN)
 - Comunicación CAN con el ESP32 (FDCAN1, 500 kbps)
 - Sistemas de seguridad: ABS, TCS, límites de corriente/temperatura
-- Watchdog independiente (IWDG, ~500 ms)
+- Watchdog independiente (IWDG, ~4.1 s)
 
 ### Qué NO controla el STM32 (depende del ESP32)
 

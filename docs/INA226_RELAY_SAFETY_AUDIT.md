@@ -146,7 +146,7 @@ The code relied on power-on defaults (0x4127 = 1 sample averaging).
 | Emergency stop disables relays       | ✅ `Safety_EmergencyStop()` → `Relay_PowerDown()` |
 | SAFE state disables actuators        | ✅ `Safety_FailSafe()` → `Traction_EmergencyStop()` |
 | ERROR state powers down              | ✅ `Safety_PowerDown()` → `Relay_PowerDown()` |
-| Watchdog timeout → safe              | ✅ IWDG 500 ms → reset → relays default OFF |
+| Watchdog timeout → safe              | ✅ IWDG ~4.1 s → reset → relays default OFF |
 | HardFault → relays OFF               | ✅ **FIXED:** Now includes LED relays |
 | MemManage → relays OFF               | ✅ **FIXED:** Now includes LED relays |
 | BusFault → relays OFF                | ✅ **FIXED:** Now includes LED relays |
@@ -331,5 +331,5 @@ from C code. This caused the static-analysis CI job to fail.
 | Relay OFF → power disabled        | All outputs LOW        | ✅ Sequenced       |
 | LED relay ON/OFF                  | Independent of motors  | ✅ CAN 0x120       |
 | CPU fault → all relays OFF        | Immediate shutdown     | ✅ **Fixed**       |
-| Watchdog timeout → safe           | System reset → OFF     | ✅ IWDG 500 ms    |
+| Watchdog timeout → safe           | System reset → OFF     | ✅ IWDG ~4.1 s    |
 | I2C failure → recovery or SAFE    | 2 attempts then SAFE   | ✅ NXP AN10216    |

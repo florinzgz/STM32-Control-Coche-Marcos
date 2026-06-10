@@ -44,7 +44,7 @@ The STM32 is the **safety authority** and sole actuator controller. All actuator
 | I2C bus recovery (NXP AN10216 SCL clock cycling) | `I2C_BusRecovery()` | `Core/Src/sensor_manager.c` |
 | Boot validation checklist (6 pre-ACTIVE checks) | `BootValidation_Run()` | `Core/Src/boot_validation.c` |
 | Service mode (module enable/disable/fault tracking) | `ServiceMode_Init()`, `ServiceMode_DisableModule()` | `Core/Src/service_mode.c` |
-| Independent watchdog (IWDG, ~500 ms) | `MX_IWDG_Init()`, `HAL_IWDG_Refresh()` | `Core/Src/main.c` |
+| Independent watchdog (IWDG, ~4.1 s) | `MX_IWDG_Init()`, `HAL_IWDG_Refresh()` | `Core/Src/main.c` |
 | Granular 3-level degradation (L1/L2/L3 with per-level scaling) | `Safety_SetDegradedLevel()` | `Core/Src/safety_system.c` |
 | Dynamic braking (H-bridge active brake on throttle release) | Logic in `Traction_Update()` | `Core/Src/motor_control.c` |
 | BTS7960 active brake (PWM=100 % hold when demand=0) | `BTS7960_BRAKE_PWM` in `Traction_Update()`, `Steering_ControlLoop()`, `Steering_Neutralize()` | `Core/Src/motor_control.c` |
@@ -126,7 +126,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 
 ### Safety Architecture
 
-The STM32 is the sole safety authority. All incoming ESP32 commands pass through `Safety_Validate*()` gates. The state machine enforces which transitions are legal. The independent watchdog (IWDG, ~500 ms) resets the MCU if the main loop stalls. CAN timeout (250 ms) transitions to SAFE. Bus-off detection and recovery is non-blocking with retry limits. Obstacle backstop limiter (5-zone with child reaction detection) runs independently of ESP32 logic.
+The STM32 is the sole safety authority. All incoming ESP32 commands pass through `Safety_Validate*()` gates. The state machine enforces which transitions are legal. The independent watchdog (IWDG, ~4.1 s) resets the MCU if the main loop stalls. CAN timeout (250 ms) transitions to SAFE. Bus-off detection and recovery is non-blocking with retry limits. Obstacle backstop limiter (5-zone with child reaction detection) runs independently of ESP32 logic.
 
 ### CAN Bus Reliability
 
@@ -237,7 +237,7 @@ All rendering uses partial-redraw: each UI component compares current vs. previo
 | Non-blocking relay power sequencing (Main 50 ms → Traction 20 ms → Direction) | `Relay_SequencerUpdate()` state machine | `Core/Src/safety_system.c` |
 | Command validation gate (throttle clamp, steering rate limit, mode speed gate) | `Safety_ValidateThrottle()`, `Safety_ValidateSteering()`, `Safety_ValidateModeChange()` | `Core/Src/safety_system.c` |
 | Fail-safe action (emergency stop + center steering if encoder healthy) | `Safety_FailSafe()` | `Core/Src/safety_system.c` |
-| Independent watchdog (~500 ms) | `MX_IWDG_Init()`, `HAL_IWDG_Refresh()` in main loop | `Core/Src/main.c` |
+| Independent watchdog (~4.1 s) | `MX_IWDG_Init()`, `HAL_IWDG_Refresh()` in main loop | `Core/Src/main.c` |
 | `Error_Handler()` drives all GPIOC outputs LOW via direct register | `Error_Handler()` | `Core/Src/main.c` |
 
 ### CAN Communication

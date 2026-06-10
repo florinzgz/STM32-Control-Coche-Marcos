@@ -244,7 +244,7 @@ void TCS_Update(void) {
 Watchdog de hardware independiente que resetea el STM32 si no se refresca a tiempo.
 
 ```c
-#define IWDG_TIMEOUT_MS  500  // 500 ms timeout
+#define IWDG_TIMEOUT_MS  4096  // ~4.1 s timeout (prescaler 32, reload 4095)
 
 /**
  * @brief Inicializa el watchdog independiente
@@ -252,13 +252,13 @@ Watchdog de hardware independiente que resetea el STM32 si no se refresca a tiem
 void IWDG_Init(void) {
     IWDG_HandleTypeDef hiwdg;
     hiwdg.Instance = IWDG;
-    hiwdg.Init.Prescaler = IWDG_PRESCALER_64;
-    hiwdg.Init.Reload = 1250;  // 500 ms @ 32 kHz / 64
+    hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
+    hiwdg.Init.Reload = 4095;  // ~4.1 s @ 32 kHz / 32
     HAL_IWDG_Init(&hiwdg);
 }
 
 /**
- * @brief Refresca el watchdog (llamar cada <500 ms)
+ * @brief Refresca el watchdog (llamar cada ciclo del bucle principal, bien dentro del límite ~4.1 s)
  */
 void IWDG_Refresh(void) {
     HAL_IWDG_Refresh(&hiwdg);
@@ -558,7 +558,7 @@ interno; no se transmite por CAN (sin cambios de contrato).
 - **ABS/TCS**: Sin cambios — operan independientemente por rueda
 - **Obstacle scale**: Sin cambios — se aplica upstream
 - **Ackermann**: Sin cambios — se aplica downstream
-- **Watchdog**: Sin cambios — IWDG 500 ms sin bloqueo
+- **Watchdog**: Sin cambios — IWDG ~4.1 s sin bloqueo
 - **Relays**: Sin cambios — secuenciación no-bloqueante preservada
 
 ---
@@ -861,7 +861,7 @@ seguridad, CAN y watchdog continúen durante la secuencia de encendido.
 In a safety-critical embedded control loop, calling `HAL_Delay()` inside
 relay sequencing creates the following hazards:
 
-1. **Watchdog starvation** — The IWDG (500 ms timeout) is refreshed only
+1. **Watchdog starvation** — The IWDG (~4.1 s timeout) is refreshed only
    from the main loop.  A 70 ms blocking delay reduces the available
    margin and, if combined with other latencies, can trigger an
    unintended watchdog reset.

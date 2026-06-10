@@ -185,7 +185,7 @@ fragilidad ante EMI, jitter y consumo de GPIO.
 │  `Core/Src/safety_system.c` — INTACTO:                                       │
 │    - CAN timeout 250 ms (heartbeat) → LIMP_HOME                              │
 │    - Overcurrent INA226 → SAFE                                               │
-│    - IWDG 500 ms → reset                                                     │
+│    - IWDG ~4.1 s → reset                                                     │
 │    - Emergency stop → kill PWM                                               │
 │    - ABS/TCS → traction_cap_factor                                           │
 │                                                                              │
@@ -412,7 +412,7 @@ quirúrgico mínimo.
 | `Core/Src/motor_control.c` | Pipeline PWM / EMA / ramp / anomaly detector intacto |
 | `Core/Src/can_handler.c` (excepto opcionalmente añadir 1 flag) | Protocolo CAN, IDs y handlers sin cambio funcional |
 | TIM1 / TIM8 (PWM 20 kHz BTS7960) | Sin modificación de timers |
-| IWDG (500 ms) | Watchdog intacto |
+| IWDG (~4.1 s) | Watchdog intacto |
 | `Core/Src/encoder_reader.c` | Encoder steering sin cambios |
 | `Core/Src/steering_centering.c` | Centrado intacto |
 | ABS / TCS (`safety_system.c::Safety_GetTractionCapFactor`) | Modulación de seguridad intacta |

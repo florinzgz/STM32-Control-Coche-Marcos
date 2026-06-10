@@ -186,7 +186,7 @@ The INA226-based system provides **higher accuracy and bus voltage monitoring** 
 2. **INA226 overcurrent detection** (threshold: 25 A) — firmware triggers SAFE state
 3. **Per-motor temperature monitoring** (DS18B20) — firmware triggers emergency cutoff at 130°C
 4. **Hardware fuses** (30 A per motor) — ultimate protection
-5. **IWDG watchdog** (500 ms) — catches firmware stalls
+5. **IWDG watchdog** (~4.1 s) — catches firmware stalls
 6. **TIM1/TIM8 BREAK2** → Cortex LOCKUP — hardware MOE disable on CPU fault
 
 ### Recommended Enhancement (OPTIONAL — documented in main.h)

@@ -1,5 +1,12 @@
 # Phase 1 — Hardware Stability Validation Report
 
+> ## ⚠️ DOCUMENTO LEGACY — REGISTRO HISTÓRICO
+>
+> Este documento recoge los resultados de la validación de Fase 1 (estabilidad hardware).
+> Las conclusiones son históricamente válidas pero el proyecto ha evolucionado desde entonces.
+> **Fuente de verdad actual:** `docs/PROJECT_MASTER_STATUS.md`, `docs/HARDWARE_WIRING_MANUAL.md`
+
+
 ## Overview
 
 This document records the results of the Phase 1 stability validation for the
@@ -25,7 +32,7 @@ Reset vector → SystemInit() → main()
   ├── MX_TIM2_Init()               (Encoder)
   ├── MX_TIM8_Init()               (PWM steering)
   ├── MX_ADC1_Init()               (Pedal)
-  ├── MX_IWDG_Init()               (500 ms watchdog)
+  ├── MX_IWDG_Init()               (~4.1 s watchdog)
   ├── Motor_Init() / Traction_Init() / Steering_Init()
   ├── Sensor_Init()                (OneWire search — bounded)
   ├── Safety_Init() / ServiceMode_Init()
@@ -54,7 +61,7 @@ Reset → setup()
 | `MX_FDCAN1_Init()` → `Error_Handler()` | FDCAN hardware failure causes infinite loop → watchdog reset loop | **HIGH** | **PATCHED**: Returns gracefully, sets `fdcan_init_ok = false` |
 | `MX_I2C1_Init()` → `Error_Handler()` | I2C bus stuck causes infinite loop → watchdog reset loop | **HIGH** | **PATCHED**: Returns gracefully, sets `i2c_init_ok = false` |
 | `CAN_Init()` → `Error_Handler()` | FDCAN start/notification failure causes infinite loop | **HIGH** | **PATCHED**: Returns gracefully when FDCAN not initialized |
-| `Pedal_Update()` → `HAL_ADC_PollForConversion()` | ADC poll with 10 ms timeout | LOW | Acceptable — 10 ms bounded wait, well within 500 ms IWDG |
+| `Pedal_Update()` → `HAL_ADC_PollForConversion()` | ADC poll with 10 ms timeout | LOW | Acceptable — 10 ms bounded wait, well within ~4.1 s IWDG timeout |
 | `I2C_BusRecovery()` → busy-wait loops | ~160 µs total (16 × 10 µs SCL toggles) | LOW | Acceptable — sub-millisecond |
 | `OW_DelayUs()` | OneWire bit-bang busy-waits (µs range) | LOW | Acceptable — sub-millisecond per call |
 | `OW_Reset()` | 480 µs + 70 µs + 410 µs = ~960 µs per reset | LOW | Acceptable — under 1 ms |

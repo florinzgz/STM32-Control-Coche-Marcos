@@ -29,7 +29,7 @@
 **What it does:**
 The system enforces a strict split-authority architecture:
 
-- **STM32G474RE** is the sole safety authority and actuator controller. It runs at 170 MHz on a deterministic Cortex-M4 with hardware FPU, real-time interrupt priorities, and a 500 ms IWDG watchdog. It directly controls 4 traction motors (TIM1, 20 kHz PWM), 1 steering motor (TIM8), 3 power relays, and reads all safety-critical sensors (INA226 current, DS18B20 temperature, wheel speed, steering encoder, pedal ADC).
+- **STM32G474RE** is the sole safety authority and actuator controller. It runs at 170 MHz on a deterministic Cortex-M4 with hardware FPU, real-time interrupt priorities, and a ~4.1 s IWDG watchdog. It directly controls 4 traction motors (TIM1, 20 kHz PWM), 1 steering motor (TIM8), 3 power relays, and reads all safety-critical sensors (INA226 current, DS18B20 temperature, wheel speed, steering encoder, pedal ADC).
 
 - **ESP32-S3** is the user interface and peripheral controller. It runs the 480×320 TFT display, DFPlayer audio, WS2812B LEDs, TOFSense-M obstacle sensor, MCP23017 gear shifter, and XPT2046 touch input. It sends commands to the STM32 via CAN bus but has **zero direct actuator authority**.
 
@@ -327,7 +327,7 @@ The firmware implements all safety-critical paths and most user-facing features.
 **STM32 (Good):**
 - The main loop runs task tiers at 10ms/50ms/100ms/1000ms intervals using `HAL_GetTick()` differentials. This is polling-based (not timer-interrupt-driven), which means jitter depends on the worst-case execution time of the 10ms tier.
 - The 10ms tier includes: ABS/TCS update, safety checks (current, temperature, CAN timeout, sensors, encoder), obstacle update, relay sequencer, steering centering, and steering PID. Each module is non-blocking, but the aggregate execution time has not been profiled.
-- **Risk:** If the 10ms tier exceeds 10ms, subsequent tiers will be delayed. The IWDG watchdog (500ms) provides a hard backstop but doesn't prevent timing drift.
+- **Risk:** If the 10ms tier exceeds 10ms, subsequent tiers will be delayed. The IWDG watchdog (~4.1 s) provides a hard backstop but doesn't prevent timing drift.
 - All ISR-shared variables (`wheel_pulse`, `last_can_rx_time`, `steer_center_flag`) are properly declared `volatile`.
 
 **ESP32 (Adequate):**
@@ -339,7 +339,7 @@ The firmware implements all safety-critical paths and most user-facing features.
 ### 2.3 Safety Integrity
 
 **Strengths:**
-- Triple-layer protection: STM32 safety state machine → actuator validation → hardware watchdog (IWDG 500ms)
+- Triple-layer protection: STM32 safety state machine → actuator validation → hardware watchdog (IWDG ~4.1 s)
 - Overcurrent (25A) and overtemperature (80°C warn, 90°C critical, 130°C/motor emergency cutoff) with hysteresis
 - Pedal plausibility (internal ADC dual-sample + software validation: consistency, EMA, range, rate-of-change)
 - Obstacle safety is autonomous on STM32 — CAN data is advisory, not authoritative

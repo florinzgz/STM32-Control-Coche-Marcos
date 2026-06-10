@@ -55,7 +55,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 | **Safety Model** | Hardware-enforced separation | Software-only separation |
 | **Determinism** | Guaranteed (bare-metal, no preemption) | Best-effort (FreeRTOS scheduling) |
 | **PWM Generation** | Hardware TIM1/TIM8 @ 20 kHz | PCA9685 I2C external PWM (later migrated) |
-| **Watchdog** | IWDG 500 ms (hardware) | Software watchdog |
+| **Watchdog** | IWDG ~4.1 s (hardware) | Software watchdog |
 
 ### 2.2 Subsystem Comparison Table
 
@@ -141,7 +141,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] CAN heartbeat timeout (250 ms)
 - [✓] Steering encoder fault detection (range, jump, frozen)
 - [✓] Relay power sequencing (Main → Traction → Direction)
-- [✓] IWDG hardware watchdog (500 ms)
+- [✓] IWDG hardware watchdog (~4.1 s)
 - [✓] Command validation gates (throttle 0–100%, steering ±54°, rate limit 200°/s)
 - [✓] Gear change speed gate (below 1 km/h)
 - [✓] Mode change speed gate (below 1 km/h)
@@ -280,7 +280,7 @@ This section identifies safety mechanisms present in the reference firmware that
 | Area | Reference Robustness | Current Level | Assessment |
 |------|---------------------|---------------|------------|
 | **CAN bus error handling** | Robust error frame counting, bus-off detection and recovery | Complete — heartbeat timeout (250 ms) + bus-off detection via FDCAN PSR register + non-blocking peripheral recovery (500 ms retry, max 10 attempts) *(Phase 6)* | Bus-off condition triggers SAFE state and automatic recovery. No blocking delays. |
-| **Watchdog coverage** | IWDG + task-level health monitoring (FreeRTOS) | IWDG only (hardware, 500 ms) | Adequate for single-loop architecture. A stuck ISR or infinite loop in sensor read would still trigger IWDG |
+| **Watchdog coverage** | IWDG + task-level health monitoring (FreeRTOS) | IWDG only (hardware, ~4.1 s) | Adequate for single-loop architecture. A stuck ISR or infinite loop in sensor read would still trigger IWDG |
 | **Power sequencing safety** | power_mgmt.cpp: 10-state machine, ignition detection, power hold, graceful shutdown with audio | Current: 3-relay sequencing with 50 ms delays | Functional for power-up/down. Missing graceful shutdown — abrupt power loss could leave relays in inconsistent state |
 
 ---
@@ -780,7 +780,7 @@ verification checklist required by the safety audit process.
 - [x] `RELAY_TRACTION_SETTLE_MS` = 20 ms — unchanged
 - [x] `Safety_SetState()` logic: not modified
 - [x] CAN contract: no messages added, modified, or removed
-- [x] Watchdog timing: IWDG 500 ms timeout — not modified
+- [x] Watchdog timing: IWDG ~4.1 s timeout — not modified
 - [x] ABS/TCS: not modified
 - [x] Obstacle safety: not modified
 - [x] Ackermann correction: not modified
@@ -871,7 +871,7 @@ minor sensor glitch or a persistent thermal warning.
 - CAN contract version: 1.2 (unchanged)
 
 **Watchdog confirmation:**
-- IWDG 500 ms timeout: unchanged
+- IWDG ~4.1 s timeout: unchanged
 - No blocking delays added
 - All new code is O(1) switch/if statements
 

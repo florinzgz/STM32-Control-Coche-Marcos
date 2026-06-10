@@ -10,7 +10,7 @@
   *    TIM1    – PWM for FL motor + FR motor (20 kHz, PA8-PA10, PC3)
   *    TIM2    – Quadrature encoder (steering)
   *    TIM8    – PWM for RL/RR motors (20 kHz, PC6-PC9)
-  *    IWDG    – Independent watchdog (500 ms)
+  *    IWDG    – Independent watchdog (~4.1 s)
   ****************************************************************************
   */
 

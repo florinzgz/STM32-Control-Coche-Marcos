@@ -229,7 +229,7 @@ brake (EN tied HIGH); FL/RR coast freely.
 
 **Mitigation**: TIM1/TIM8 BREAK2 is linked to Cortex LOCKUP signal, which disables MOE
 (Master Output Enable), forcing all PWM outputs LOW. With EN still HIGH on FR/RL, these
-motors enter passive brake. FL/RR enter coast (EN driven LOW by GPIO reset). IWDG (500 ms)
+motors enter passive brake. FL/RR enter coast (EN driven LOW by GPIO reset). IWDG (~4.1 s)
 provides secondary reset.
 
 ### Issue 2: Brake/Coast Phase Equivalence on FL/RR
@@ -329,7 +329,7 @@ features are missing or limited:
 7. ✅ Gear-based power scaling (D1=60%, D2=100%, R=60%)
 8. ✅ Per-motor temperature cutoff (130 °C, 115 °C recovery)
 9. ✅ Ackermann differential torque distribution
-10. ✅ Hardware safety: TIM1/TIM8 BREAK2 → Cortex LOCKUP, IWDG 500 ms
+10. ✅ Hardware safety: TIM1/TIM8 BREAK2 → Cortex LOCKUP, IWDG ~4.1 s
 
 **For a child-sized electric vehicle**, the implemented control is **adequate and safe**.
 The missing H-bridge active brake is compensated by park hold and dynamic braking.

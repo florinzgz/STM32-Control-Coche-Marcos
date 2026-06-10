@@ -544,7 +544,7 @@ Source: `Safety_CheckCANTimeout()` in `safety_system.c`
 | 4 | SAFETY_ERROR_SENSOR_FAULT | Sensor plausibility check failed (temperature outside −40 to 125 °C, current negative or > 50 A, speed negative or > 25 km/h) |
 | 5 | SAFETY_ERROR_MOTOR_STALL | Reserved (not implemented in current firmware) |
 | 6 | SAFETY_ERROR_EMERGENCY_STOP | Emergency stop triggered |
-| 7 | SAFETY_ERROR_WATCHDOG | Independent watchdog timeout (IWDG, 500 ms period) |
+| 7 | SAFETY_ERROR_WATCHDOG | Independent watchdog timeout (IWDG, ~4.1 s period) |
 | 8 | SAFETY_ERROR_CENTERING | Steering centering failed during boot |
 | 9 | SAFETY_ERROR_BATTERY_UV_WARNING | Battery bus voltage < 20.0 V → DEGRADED (40 % power limit). Recovery requires > 20.5 V (0.5 V hysteresis). |
 | 10 | SAFETY_ERROR_BATTERY_UV_CRITICAL | Battery bus voltage < 18.0 V or sensor failure → SAFE (actuators inhibited). No auto-recovery; operator must recharge and reset. |
@@ -615,7 +615,7 @@ When the system enters ERROR state, `Safety_PowerDown()` executes:
 | Condition | Effect |
 |-----------|--------|
 | Emergency stop triggered | `Safety_EmergencyStop()` — motors stopped, relays de-energized, state = ERROR |
-| IWDG watchdog timeout | Hardware reset (500 ms period, fed in main loop) |
+| IWDG watchdog timeout | Hardware reset (~4.1 s period, fed in main loop) |
 | `Error_Handler()` | Interrupts disabled, all GPIOC outputs driven low, infinite loop |
 
 ### What the ESP32 Must Not Assume

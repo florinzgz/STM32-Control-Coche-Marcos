@@ -297,7 +297,7 @@ base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);  // ← NEW
 │  │ Safety State Machine                         │  │
 │  │ • SAFE state enforced for obstacle emergency │  │
 │  │ • Relay control (independent safety layer)   │  │
-│  │ • Watchdog (IWDG 500 ms)                     │  │
+│  │ • Watchdog (IWDG ~4.1 s)                     │  │
 │  └─────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────┘
 ```
