@@ -32,7 +32,7 @@
 - BTS7960: **RPWM/LPWM + EN** (sin pin DIR dedicado)
 - `EN_RR`: **PC2**
 - Relé de potencia de dirección (PC12) ahora se llama `PIN_RELAY_STEER_PWR`
-  en el firmware (antes `PIN_RELAY_DIR`).  Alimenta **el rail de 12 V del
+  en el firmware (antes `PIN_RELAY_DIR`; nombre actual: `PIN_RELAY_STEER_PWR`).  Alimenta **el rail de 12 V del
   actuador de dirección**, no selecciona sentido de marcha.
 
 ## Fuente de verdad

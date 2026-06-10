@@ -46,7 +46,7 @@ GND_ESP32 ───────────────────► GND      
 | Fuente | Frecuencia | Amplitud potencial | Mecanismo de acoplamiento |
 |--------|-----------|-------------------|--------------------------|
 | BTS7960 × 5 (tracción + dirección) | **20 kHz** PWM + armónicos | 1–5 V sobre GND_chasis | Corrientes de conmutación en GND_chasis; acoplamiento inductivo/capacitivo |
-| Relés RELAY_TRAC / RELAY_DIR | Transitorios al abrir/cerrar | Picos de 50–200 V sobre GND_chasis (sin snubber) | Acoplamiento por inductancia parásita del cableado |
+| Relés RELAY_TRAC / RELAY_STEER_PWR (legacy: RELAY_DIR) | Transitorios al abrir/cerrar | Picos de 50–200 V sobre GND_chasis (sin snubber) | Acoplamiento por inductancia parásita del cableado |
 | WS2812B (LED strips, PB10/PB11) | ~800 kHz + armónicos | Variable | Transitorios en el bus 5V de las tiras |
 | Retorno de corriente de motores 24 V | DC + AC ripple | Decenas de amperios pico | Tensión de caída en GND_chasis entre puntos de conexión |
 

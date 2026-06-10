@@ -97,28 +97,28 @@ La ESP32 envía un mensaje heartbeat (CAN ID 0x011) cada 100 ms. Si la STM32 no 
 
 Si la ESP32 deja de enviar mensajes 0x208 (OBSTACLE_DISTANCE) durante más de 500 ms tras haber recibido al menos uno:
 
-- `obstacle_scale` = 0.0 (par motor = 0%).
-- Transición al estado SAFE.
-- Recuperación automática cuando los mensajes CAN se reanuden con contador válido, distancia > 500 mm durante > 1 segundo.
+- Si había obstáculo activo (ACTIVE/CONFIRMING): `obstacle_scale = OBSTACLE_FAULT_SCALE` (0.3), `OBS_STATE_SENSOR_FAULT`. **Sin transición a SAFE.**
+- Si no había obstáculo activo: `obstacle_scale = 1.0`, `OBS_STATE_NO_SENSOR`. **Sin transición a SAFE.**
+- La red de seguridad en ambos casos es el límite de velocidad LIMP_HOME.
+- Recuperación automática cuando los mensajes CAN se reanuden con contador válido.
 
 ### 3.3 Detección de datos obsoletos (counter stale)
 
 Si la ESP32 sigue enviando mensajes pero el rolling counter no incrementa durante ≥ 3 tramas consecutivas (indicativo de datos cacheados o loop bloqueado):
 
-- `obstacle_scale` = 0.0.
-- Transición al estado SAFE.
+- `obstacle_scale = OBSTACLE_FAULT_SCALE` (0.3), `OBS_STATE_SENSOR_FAULT`. **Sin transición a SAFE.**
 
 ### 3.4 Resumen de modos de fallo
 
 | Fallo de la ESP32 | Detección más rápida | Tiempo máximo de exposición | Respuesta |
 |-------------------|---------------------|-----------------------------|-----------|
 | Crash completo (reboot) | Heartbeat timeout | 250 ms | SAFE + relés abiertos |
-| Loop bloqueado (freeze) | Counter stale (3 × 66 ms) | ~200 ms | SAFE + obstacle_scale = 0 |
+| Loop bloqueado (freeze) | Counter stale (3 × 66 ms) | ~200 ms | scale=0.3, OBS_SENSOR_FAULT (**no SAFE**) |
 | Pérdida de CAN bus | Heartbeat timeout | 250 ms | SAFE + relés abiertos |
-| Sensor UART desconectado | ESP32 reporta `health = 0` | 66 ms (siguiente trama) | SAFE + obstacle_scale = 0 |
+| Sensor UART desconectado | ESP32 reporta `health = 0` | 66 ms (siguiente trama) | scale=0.3, OBS_SENSOR_FAULT (**no SAFE**) |
 | Dato corrupto | Checksum fail en ESP32 (no se envía trama corrupta) | N/A | ESP32 descarta internamente |
 
-**Conclusión:** el vehículo se detiene de forma segura en un máximo de 250 ms ante cualquier fallo de la ESP32. La STM32 nunca depende de la disponibilidad continua de la ESP32 para garantizar la seguridad.
+**Conclusión:** ante crash completo de la ESP32, el heartbeat timeout (250 ms) activa SAFE. Ante fallos de sensor o stale data, el STM32 aplica scale=0.3 sin entrar en SAFE. La STM32 nunca depende de la disponibilidad continua de la ESP32 para garantizar la seguridad.
 
 ---
 

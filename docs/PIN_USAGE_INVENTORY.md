@@ -224,9 +224,9 @@ Sensores en el bus (un solo pin):
 | 25 | PC7 | GPIOC | Motor RL | TIM8_CH2, LPWM_RL 20 kHz |
 | 26 | PC8 | GPIOC | Motor RR | TIM8_CH3, RPWM_RR 20 kHz |
 | 27 | PC9 | GPIOC | Motor RR | TIM8_CH4, LPWM_RR 20 kHz |
-| 28 | PC10 | GPIOC | Relé MAIN | Alimentación general |
-| 29 | PC11 | GPIOC | Relé TRAC | Alimentación motores |
-| 30 | PC12 | GPIOC | Relé DIR | Alimentación dirección |
+| 28 | PC10 | GPIOC | **LIBRE** | INPUT_PULLDOWN — disponible para expansión |
+| 29 | PC11 | GPIOC | Relé TRAC | Alimentación motores (RELAY_TRAC) |
+| 30 | PC12 | GPIOC | Relé STEER_PWR | Alimentación dirección (RELAY_STEER_PWR, legacy: RELAY_DIR) |
 | 31 | PC13 | GPIOC | Motor RR | EN (habilitación), GPIO active HIGH |
 | 32 | PC0 | GPIOC | Motor FR | EN (habilitación), GPIO active HIGH |
 | 33 | PC1 | GPIOC | Motor RL | EN (habilitación), GPIO active HIGH |

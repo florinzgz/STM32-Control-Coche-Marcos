@@ -228,12 +228,12 @@ añadir módulos dedicados de salida.
 
 ---
 
-#### 2.1.9 Salidas de control de relés (PC10/PC11/PC12)
+#### 2.1.9 Salidas de control de relés (PC11/PC12; PC10 libre)
 
 | Señal | Pin | Función |
 |-------|-----|---------|
 | RELAY_TRAC | PC11 | Relé tracción 24 V |
-| RELAY_DIR | PC12 | Relé dirección 12 V |
+| RELAY_STEER_PWR | PC12 | Relé potencia dirección 12 V (legacy: RELAY_DIR) |
 
 **Análisis:** Son salidas del STM32 hacia transistores de conmutación. El circuito driver
 del relé ya incluye (o debe incluir) diodo flyback y transistor NPN, lo que protege el
@@ -493,7 +493,7 @@ rango operativo del 6N137 (máximo 15 mA continuo). ✅
 |--------|-----------|---------------------|
 | **Bucle de masa** | Diferencia de potencial entre GND del encoder (alimentado a 5/12 V) y GND STM32 → corriente circula por el cable de señal | Contador TIM2 se desvía → posición de dirección falsa → PID corrige en dirección incorrecta |
 | **Ruido de conmutación PWM 20 kHz** | El motor de dirección es controlado por BTS7960 a 20 kHz; el encoder comparte entorno electromagnético | Glitches de ~100 ns en las líneas A/B → conteos extra en TIM2 → dirección oscilante |
-| **Transitorios inductivos** | Conmutación del relé RELAY_DIR o del BTS7960 genera picos de +/- cientos de voltios en cables próximos | Daño permanente a GPIO del STM32 (tolerancia abs. máx: 4.0 V) |
+| **Transitorios inductivos** | Conmutación del relé RELAY_STEER_PWR (legacy: RELAY_DIR) o del BTS7960 genera picos de +/- cientos de voltios en cables próximos | Daño permanente a GPIO del STM32 (tolerancia abs. máx: 4.0 V) |
 | **Acoplamiento capacitivo** | Cables de señal paralelos a cables de potencia de 12 V del motor de dirección | Pulsos espúrios en flancos de conmutación del motor |
 | **Recalibración espuria del Z** | Pulso falso en ENC_Z dispararía EXTI4, posiblemente usada en futuras implementaciones de re-homing | Error de posición absoluta acumulado → deriva de la dirección |
 

@@ -2103,7 +2103,7 @@ File: Core/Src/safety_system.c, lines 1181–1311 — Safety_CheckObstacle() (pe
 ```
 
 Safety logic:
-- Distance < 500 mm → `obstacle_scale = 0.0`, SAFE state (50 cm policy)
+- Distance < 500 mm (confirmed ≥200 ms) → `obstacle_scale = 0.0`, forward blocked — `SAFETY_ERROR_OBSTACLE` set, **no SAFE state transition** (50 cm policy)
 - Distance 500–1000 mm → `obstacle_scale = 0.3`
 - Distance 1000–1500 mm → `obstacle_scale = 0.7`
 - Distance 1500–2000 mm → `obstacle_scale = 0.85`

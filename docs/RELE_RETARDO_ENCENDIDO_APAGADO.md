@@ -152,7 +152,7 @@ LLAVE ON     Relé de       ESP32 y      ESP32       ESP32       STM32        ST
 | 11 | ~560 ms | ESP32 | Entra en `loop()` → envía heartbeat CAN 0x011 (cada 100 ms) |
 | 12 | — | STM32 | Recibe primer heartbeat → BOOT → STANDBY → ACTIVE |
 | 13 | +0 ms | STM32 | `Relay_PowerUp()` → **RELAY_TRAC ON** (PC11 HIGH) |
-| 14 | +50 ms | STM32 | Espera 50 ms inrush → **RELAY_DIR ON** (PC12 HIGH) |
+| 14 | +50 ms | STM32 | Espera 50 ms inrush → **RELAY_STEER_PWR ON** (PC12 HIGH) |
 | 16 | — | STM32 | Estado ACTIVE → motores disponibles |
 
 ### Protecciones durante el encendido
@@ -263,8 +263,8 @@ void Relay_PowerDown(void) {
 | `STARTUP_DELAY_MS` | 200 ms | `power_manager.cpp` | Delay ESP32 entre POWER_HOLD y RUNNING |
 | `SHUTDOWN_DELAY_MS` | 3000 ms | `power_manager.cpp` | Tiempo retención tras llave OFF (audio despedida) |
 | Debounce llave | 50 ms | `power_manager.cpp` | Filtro software anti-rebote en GPIO 40 |
-| `RELAY_TRAC_SETTLE_MS` | 50 ms | `project_config.h` | Espera inrush antes de activar RELAY_DIR |
-| `RELAY_TRACTION_SETTLE_MS` | 20 ms | `project_config.h` | Espera supresión arco entre RELAY_TRAC y RELAY_DIR |
+| `RELAY_TRAC_SETTLE_MS` | 50 ms | `project_config.h` | Espera inrush antes de activar RELAY_STEER_PWR |
+| `RELAY_TRACTION_SETTLE_MS` | 20 ms | `project_config.h` | Espera supresión arco entre RELAY_TRAC y RELAY_STEER_PWR |
 | Timeout heartbeat CAN | 250 ms | `safety_system.c` | Sin heartbeat ESP32 → LIMP_HOME |
 
 ---
@@ -325,9 +325,9 @@ void Relay_PowerDown(void) {
 | `esp32/src/main.cpp` | 602–603 | flush config + audio despedida |
 | `Core/Src/safety_system.c` | 467 | `RELAY_TRAC` ON |
 | `Core/Src/safety_system.c` | 482–484 | Espera 50 ms → `RELAY_TRAC` ON |
-| `Core/Src/safety_system.c` | 490–492 | Espera 20 ms → `RELAY_DIR` ON |
+| `Core/Src/safety_system.c` | 490–492 | Espera 20 ms → `RELAY_STEER_PWR` ON |
 | `Core/Src/safety_system.c` | 503 | `Relay_PowerDown()` — orden inverso DIR→TRAC→MAIN |
-| `Core/Inc/project_config.h` | — | `RELAY_TRAC_SETTLE_MS = 50`, `RELAY_DIR_SETTLE_MS = 20` |
+| `Core/Inc/project_config.h` | — | `RELAY_TRAC_SETTLE_MS = 50`, `RELAY_STEER_PWR_SETTLE_MS = 20` |
 
 ---
 

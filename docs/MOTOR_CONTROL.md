@@ -499,7 +499,7 @@ void Mode_Normal(void) {
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET); // RELAY_TRAC
     HAL_Delay(100);
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET); // RELAY_TRAC
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET);  // RELAY_DIR
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);  // RELAY_STEER_PWR (PC12)
 }
 ```
 
@@ -530,7 +530,7 @@ void Mode_Safe(void) {
     
     // 4. Abrir relés (cortar potencia)
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET); // RELAY_TRAC
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_RESET);  // RELAY_DIR
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET);  // RELAY_STEER_PWR (PC12)
     // RELAY_TRAC permanece ON (watchdog externo lo apaga si STM32 falla)
 }
 ```

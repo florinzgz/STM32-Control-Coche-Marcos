@@ -651,7 +651,7 @@ Sensor LiDAR frontal de un único punto (Time-of-Flight) gestionado por el ESP32
 
 ### Qué ocurre si falla
 
-- **Sin tramas UART (sensor desconectado):** tras 500 ms sin tramas válidas, el estado pasa a INVALID. El STM32 recibe health=0 en CAN 0x208 y aplica `obstacle_scale = 0.0` → modo SAFE.
+- **Sin tramas UART (sensor desconectado):** tras 500 ms sin tramas válidas, el estado pasa a INVALID. El STM32 recibe health=0 en CAN 0x208 y aplica `obstacle_scale = OBSTACLE_FAULT_SCALE` (0.3) → `OBS_STATE_SENSOR_FAULT` (**sin transición a SAFE**).
 - **Checksum incorrecto o señal baja (Strength < 100):** la trama se descarta silenciosamente; se espera la siguiente.
 - **Sensor atascado (distancia no varía):** detectado como STUCK tras 1000 ms sin variación con vehículo en movimiento.
 - **Saturación (Strength == 65535):** indicativo de objetivo a muy corta distancia o luz solar directa — lectura descartada.

@@ -507,7 +507,7 @@ Min: 0.3V × 0.404 = 0.12V
 
 ```
 PC11 (RELAY_TRAC) ──→ Módulo relé #1 IN (relé tracción 24V)
-PC12 (RELAY_DIR)  ──→ Módulo relé #2 IN (relé dirección 12V)
+PC12 (RELAY_STEER_PWR)  ──→ Módulo relé #2 IN (relé dirección 12V)
 
 Todos los módulos:
   VCC → 5V externo (NO del STM32 — los relés consumen 70mA cada uno)
@@ -518,7 +518,7 @@ Todos los módulos:
 
 **Secuencia del firmware:**
 1. RELAY_TRAC ON → espera 50ms
-2. RELAY_DIR ON → sistema listo
+2. RELAY_STEER_PWR ON → sistema listo
 
 ### Verificación
 
@@ -599,7 +599,7 @@ Repite el mismo proceso de la Fase 8 para cada motor:
 **Todos los motores tienen EN dedicado por GPIO** — el firmware controla la habilitación.
 Conecta R_EN + L_EN de cada BTS7960 al pin EN correspondiente (PC0, PC1, PC4, PC5, PC13).
 
-**Motor de dirección:** Alimentación **12V** (no 24V) a través de RELAY_DIR (PC12).
+**Motor de dirección:** Alimentación **12V** (no 24V) a través de RELAY_STEER_PWR (PC12).
 
 ### Verificación secuencial
 

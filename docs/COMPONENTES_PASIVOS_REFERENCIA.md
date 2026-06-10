@@ -158,7 +158,7 @@ Esta red RC se coloca **en paralelo con los contactos de potencia** del relé (N
 |---|------|-----------|---------|
 | 1 | RELAY_TRAC (Tracción) | En paralelo con los contactos COM–NO del relé | Al abrir el relé, la inductancia del cableado genera un arco. El snubber RC absorbe la energía del spike (que puede llegar a 300–500V en 24V inductive) protegiendo los contactos y eliminando la EMI que afecta al STM32 y al bus CAN |
 | 2 | RELAY_TRAC (Tracción) | Ídem | Ídem; este relé conmuta la mayor corriente (50A), por lo que el arco es más severo |
-| 3 | RELAY_DIR (Dirección) | Ídem | Ídem |
+| 3 | RELAY_STEER_PWR (Dirección, legacy: RELAY_DIR) | Ídem | Ídem |
 | 4 | Relé extra #4 | Ídem | Ídem |
 | 5 | Relé extra #5 | Ídem | Ídem |
 
@@ -313,7 +313,7 @@ BATERÍA 24V
     ├─── RELAY_TRAC ─[1N4007]─[2N2222]─[1kΩ]─ GPIO STM32
     │         └──── Snubber RC: [100nF/250V + 100Ω]
     │
-    ├─── RELAY_DIR ──[1N4007]─[2N2222]─[1kΩ]─ GPIO STM32
+    ├─── RELAY_STEER_PWR ──[1N4007]─[2N2222]─[1kΩ]─ GPIO STM32
     │         └──── Snubber RC: [100nF/250V + 100Ω]
     │
     └─── Regulador DC-DC 5V → 3.3V
