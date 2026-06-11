@@ -10,8 +10,15 @@
   *            gcc -std=c11 -DHOST_TEST -Ianalysis_artifacts/stubs \
   *                -ICore/Inc -O2 -lm Core/Src/test_gear_limits.c \
   *                -o test_gear_limits
+  *
+  *          This file defines main() and is intended ONLY for host-side unit
+  *          testing.  It is excluded from the STM32 firmware build via the
+  *          HOST_TEST guard so that its main() does not collide with the
+  *          firmware's main() in Core/Src/main.c at link time.
   ****************************************************************************
   */
+
+#ifdef HOST_TEST
 
 #include <stdio.h>
 #include <stdint.h>
@@ -168,3 +175,5 @@ int main(void)
     printf("test_gear_limits: %d run, %d failed\n", tests_run, tests_failed);
     return (tests_failed == 0) ? 0 : 1;
 }
+
+#endif /* HOST_TEST */
