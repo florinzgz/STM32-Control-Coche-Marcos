@@ -44,6 +44,8 @@
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "steering_cal_store.h"
+#include "steering_z.h"
+#include "encoder_reader.h"
 #include "main.h"
 #include <math.h>
 
@@ -114,6 +116,19 @@ static void Centering_Abort(void)
 static void Centering_Complete(void)
 {
     Steering_Neutralize();
+
+    /* ---- Fase 3: PB5 + Z dual reference ----
+     * PB5 has just confirmed the physical center.  BEFORE zeroing TIM2,
+     * capture the current count (= count at center) and the last Z pulse
+     * position (captured during the sweep, same frame) so we can compute
+     * the Z↔center offset.  Z is a SECONDARY reference only — it never
+     * centers on its own and never blocks completion.                  */
+    int32_t center_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+    bool    z_seen       = (Encoder_Z_GetPulseCount() > 0U);
+    SteeringZ_OnCenterConfirmed(center_count,
+                                Encoder_Z_GetLastPosition(),
+                                z_seen);
+
     __HAL_TIM_SET_COUNTER(&htim2, 0);
     Steering_SetCalibrated();
     SteeringCenter_ClearFlag();
@@ -122,10 +137,15 @@ static void Centering_Complete(void)
     /* Persist calibration to flash.
      * Conditions: centering just succeeded, vehicle is in BOOT/STANDBY
      * (speed must be 0), and no safety errors at this point.
-     * Failure to save is non-critical — next boot will just re-sweep.  */
+     * Failure to save is non-critical — next boot will just re-sweep.
+     * The Z offset/validity is persisted alongside the PB5 center so the
+     * secondary reference survives a power cycle (Fase 4).             */
     if (Safety_GetError() == SAFETY_ERROR_NONE) {
         int32_t center = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
-        (void)SteeringCal_Save(center);
+        (void)SteeringCal_SaveWithZ(center,
+                                    SteeringZ_GetOffset(),
+                                    SteeringZ_IsValid(),
+                                    (int32_t)STEERING_Z_WINDOW_COUNTS);
     }
 }
 
@@ -166,6 +186,7 @@ static bool Centering_RangeExceeded(void)
 void SteeringCentering_Init(void)
 {
     centering_state = CENTERING_IDLE;
+    SteeringZ_Init();
     SteeringCenter_ClearFlag();
 }
 
@@ -311,5 +332,10 @@ void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
      * is typically 0.                                                */
     __HAL_TIM_SET_COUNTER(&htim2, (uint32_t)stored_center);
     Steering_SetCalibrated();
+    /* Restore the secondary Z reference from flash (Fase 5).  Z is
+     * auxiliary: an absent/invalid Z calibration never blocks the
+     * PB5-authorised restore — it is surfaced as diagnostic only.      */
+    SteeringZ_LoadFromFlash(SteeringCal_GetStoredZOffset(),
+                            SteeringCal_IsStoredZValid());
     centering_state = CENTERING_DONE;
 }

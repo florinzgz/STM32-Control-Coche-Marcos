@@ -40,7 +40,8 @@ jobs:
                    Core/Src/ackermann.c Core/Src/steering_centering.c \
                    Core/Src/boot_validation.c Core/Src/encoder_reader.c \
                    Core/Src/eps_params.c Core/Src/error_log.c \
-                   Core/Src/steering_cal_store.c Core/Src/math_safety.c \
+                   Core/Src/steering_cal_store.c Core/Src/steering_z.c \
+                   Core/Src/math_safety.c \
                    Core/Src/stm32g4xx_it.c Core/Src/stm32g4xx_hal_msp.c \
                    Core/Src/system_stm32g4xx.c Core/Src/syscalls.c \
                    Core/Src/sysmem.c \
@@ -126,6 +127,22 @@ jobs:
               Core/Src/test_gear_limits.c \
               -o /tmp/test_gear_limits
           /tmp/test_gear_limits
+
+      - name: Run test_steering_cal_store
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_steering_cal_store.c \
+              -o /tmp/test_steering_cal_store
+          /tmp/test_steering_cal_store
+
+      - name: Run test_steering_z
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_steering_z.c Core/Src/steering_z.c \
+              -o /tmp/test_steering_z
+          /tmp/test_steering_z
 
   # ── Static analysis ─────────────────────────────────────────────────
   static-analysis:

@@ -37,6 +37,24 @@
  * this ratio at the single getter Steering_GetCurrentAngle().          */
 #define STEERING_GEAR_RATIO  6.48f
 
+/* ---- Z (index) channel center-reference tolerances ----
+ * The PB5 LJ12A3 inductive sensor is the PRIMARY physical/safety center
+ * reference.  The encoder Z (index) pulse on PB4 is a SECONDARY, higher
+ * precision reference used only for verification and diagnostics — it can
+ * NEVER center the system on its own.
+ *
+ * Conversion: 4800 counts = 360°  →  1° ≈ 13.333 counts.
+ *   0.5° (volante↔encoder mech. play)  ≈ 7  counts
+ *   1.5° (PB5 inductive half-width)    ≈ 20 counts
+ *
+ * Windows (counts, encoder/volante frame — NOT divided by gear ratio):
+ *   STEERING_Z_WINDOW_COUNTS  ±25  (≈1.9°) PB5+Z agreement → high precision
+ *   STEERING_Z_STRICT_COUNTS  ±10  (≈0.75°) tight double-reference window
+ *   STEERING_Z_FAULT_COUNTS    40  (≈3.0°) beyond this = mechanical offset    */
+#define STEERING_Z_WINDOW_COUNTS   25
+#define STEERING_Z_STRICT_COUNTS   10
+#define STEERING_Z_FAULT_COUNTS    40
+
 /* ========================================================================== */
 /*                       MOTOR PWM PIN MAPPING                                */
 /* ========================================================================== */

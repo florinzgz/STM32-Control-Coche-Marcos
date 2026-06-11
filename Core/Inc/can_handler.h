@@ -65,6 +65,7 @@ extern "C" {
 #define CAN_ID_DIAG_I2C_SCAN      0x30B  // STM32 → ESP32 (on-demand) I2C service-mode scan report (additive)
 #define CAN_ID_DIAG_FDCAN         0x30C  // STM32 → ESP32 (on-demand) FDCAN error-counter dump (additive)
 #define CAN_ID_DIAG_GEAR_LIMITS   0x30D  // STM32 → ESP32 (on-demand, after QUERY) gear power-limit + accel-response telemetry (frame-kind in byte0 bit4)
+#define CAN_ID_DIAG_STEERING_Z    0x30E  // STM32 → ESP32 (on-demand, after QUERY) PB5 + encoder-Z dual center-reference diagnostic
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -82,6 +83,7 @@ extern "C" {
 #define SERVICE_ACTION_PEDAL_CAL           0xF5  /* Pedal endpoint calibration (byte1 = sub-opcode) */
 #define SERVICE_ACTION_I2C_SERVICE         0xF6  /* I2C service-mode scan: probe mux/INA, SDA/SCL levels, recovery */
 #define SERVICE_ACTION_GEAR_LIMITS         0xF7  /* Gear power-limit config (byte1 = sub-opcode, byte2 = percent) */
+#define SERVICE_ACTION_STEERING_Z          0xF8  /* PB5 + encoder-Z center diagnostic/calibration (byte1 = sub-opcode) */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
@@ -119,6 +121,17 @@ extern "C" {
 #define GEAR_LIMIT_OP_SET_D2_RESPONSE 0x07U
 #define GEAR_LIMIT_OP_SET_D1_RESPONSE 0x08U
 #define GEAR_LIMIT_OP_SET_R_RESPONSE  0x09U
+
+/* ---- Steering-Z dual-reference sub-opcodes (byte1 when byte0 == 0xF8) ----
+ * PB5 stays the primary/safety center reference; Z is secondary precision.
+ *   0x01 QUERY        Request a 1 s burst of 0x30E telemetry at 10 Hz
+ *   0x02 CALIBRATE    Recompute + persist the Z↔center offset.  Requires
+ *                     PB5 to currently detect center AND BOOT/STANDBY.
+ *   0x03 CLEAR        Clear the stored Z calibration (PB5 center kept).
+ *                     Requires BOOT/STANDBY (ESP32 enforces double-confirm).  */
+#define STEER_Z_OP_QUERY      0x01U
+#define STEER_Z_OP_CALIBRATE  0x02U
+#define STEER_Z_OP_CLEAR      0x03U
 
 /* Command ACK result codes (uint8_t) */
 typedef enum {
@@ -248,6 +261,12 @@ void CAN_PedalCalCaptureTick(void);
  * is in progress, so it is safe to call unconditionally and has zero
  * impact on backward-compatible nodes that ignore 0x30D.            */
 void CAN_GearLimitsBurstUpdate(void);
+
+/* Drives the on-demand 0x30E steering-Z center-reference telemetry burst.
+ * Call once per 100 ms tick — the function is a no-op while no burst is
+ * in progress, so it is safe to call unconditionally and has zero impact
+ * on backward-compatible nodes that ignore 0x30E.                       */
+void CAN_SteeringZBurstUpdate(void);
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */

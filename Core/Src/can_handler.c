@@ -20,6 +20,9 @@
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
 #include "gear_limits_store.h"
+#include "steering_cal_store.h"
+#include "steering_z.h"
+#include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include <math.h>
 #include <string.h>
@@ -2048,6 +2051,157 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 }
 
+/* ==================================================================
+ *  Steering PB5 + encoder-Z dual center reference (0xF8 + 0x30E)
+ *
+ *  Diagnostic + calibration sub-protocol.  PB5 (LJ12A3, EXTI5) remains
+ *  the PRIMARY physical/safety center reference; the encoder Z (index)
+ *  pulse on PB4 is a SECONDARY precision reference that can NEVER center
+ *  on its own.  A Z pulse without PB5 confirmation is NOT a center.
+ *
+ *  0x30E telemetry frame (DLC 8, little-endian) — diagnostic only:
+ *    byte 0 : flags
+ *             bit 0-2: combined status (SteeringZStatus_t 0..4)
+ *                      0 NOT_CALIBRATED, 1 OK, 2 NOT_SEEN,
+ *                      3 OUT_OF_WINDOW, 4 MECHANICAL_OFFSET
+ *             bit 3  : PB5 center detected right now (live)
+ *             bit 4  : z_center_valid (calibration validated)
+ *             bit 5  : encoder Z slip latched
+ *             bits 6-7: reserved (0)
+ *    byte 1 : Z pulse count since boot (saturated 0..255)
+ *    byte 2-3: enc_z_last_pos (int16 LE, clamped) — TIM2 count at last Z
+ *    byte 4-5: z_center_offset_counts (int16 LE) — Z↔center offset
+ *    byte 6 : enc_z_last_error (int8, clamped) — last inter-pulse error
+ *    byte 7 : z_center_tolerance (uint8, counts) — window used
+ * ================================================================== */
+#define STEERZ_BURST_FRAMES     10U    /* 10 × 100 ms = 1 s             */
+#define STEERZ_BURST_PERIOD_MS  100U
+
+static uint8_t  steerz_burst_left = 0;
+static uint32_t steerz_next_tx_ms = 0;
+
+static int16_t steerz_clamp_i16(int32_t v)
+{
+    if (v >  32767) return  32767;
+    if (v < -32768) return -32768;
+    return (int16_t)v;
+}
+
+static void steerz_send_status(void)
+{
+    SteeringZStatus_t st = SteeringZ_GetStatus();
+    bool pb5_live = SteeringCenter_Detected();
+
+    uint8_t flags = (uint8_t)(st & 0x07U);
+    if (pb5_live)            flags |= 0x08U;
+    if (SteeringZ_IsValid()) flags |= 0x10U;
+    if (Encoder_Z_HasSlipped()) flags |= 0x20U;
+
+    uint32_t pulses = Encoder_Z_GetPulseCount();
+    uint8_t  pulses8 = (pulses > 255U) ? 255U : (uint8_t)pulses;
+
+    int16_t last_pos = steerz_clamp_i16(Encoder_Z_GetLastPosition());
+    int16_t offset   = steerz_clamp_i16(SteeringZ_GetOffset());
+
+    int32_t err = Encoder_Z_GetLastError();
+    if (err >  127) err =  127;
+    if (err < -128) err = -128;
+
+    int32_t tol = SteeringCal_GetStoredZTolerance();
+    if (tol < 0)   tol = 0;
+    if (tol > 255) tol = 255;
+
+    uint8_t payload[8];
+    payload[0] = flags;
+    payload[1] = pulses8;
+    payload[2] = (uint8_t)(last_pos & 0xFFU);
+    payload[3] = (uint8_t)((last_pos >> 8) & 0xFFU);
+    payload[4] = (uint8_t)(offset & 0xFFU);
+    payload[5] = (uint8_t)((offset >> 8) & 0xFFU);
+    payload[6] = (uint8_t)((int8_t)err);
+    payload[7] = (uint8_t)tol;
+
+    (void)TransmitFrame(CAN_ID_DIAG_STEERING_Z, payload, sizeof(payload));
+}
+
+void CAN_SteeringZBurstUpdate(void)
+{
+    if (steerz_burst_left == 0U) return;
+    uint32_t now = HAL_GetTick();
+    if ((int32_t)(now - steerz_next_tx_ms) < 0) return;
+    steerz_send_status();
+    steerz_burst_left--;
+    steerz_next_tx_ms = now + STEERZ_BURST_PERIOD_MS;
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_STEERING_Z.
+ * Always replies with one CAN_SendCommandAck(0x10, ...).
+ *
+ * Safety: CALIBRATE recomputes the Z↔center offset and is only accepted
+ * when PB5 currently confirms the physical center AND the vehicle is in
+ * BOOT/STANDBY.  Z can never (re)center on its own — the offset is taken
+ * relative to the PB5-confirmed center (current TIM2 count).            */
+static void steerz_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    uint8_t op = payload[1];
+
+    /* QUERY is read-only — no safety gate, just a telemetry burst. */
+    if (op == STEER_Z_OP_QUERY) {
+        steerz_burst_left = STEERZ_BURST_FRAMES;
+        steerz_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+
+    /* CALIBRATE / CLEAR require BOOT or STANDBY (no live driving). */
+    SystemState_t state = Safety_GetState();
+    if (state != SYS_STATE_BOOT && state != SYS_STATE_STANDBY) {
+        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+        return;
+    }
+
+    switch (op) {
+    case STEER_Z_OP_CALIBRATE: {
+        /* PB5 must physically confirm center — never trust Z alone. */
+        if (HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) != GPIO_PIN_RESET) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        int32_t center = Encoder_GetRawCount();
+        bool    z_seen = (Encoder_Z_GetPulseCount() > 0U);
+        SteeringZ_OnCenterConfirmed(center,
+                                    Encoder_Z_GetLastPosition(),
+                                    z_seen);
+        bool ok = SteeringCal_SaveWithZ(center,
+                                        SteeringZ_GetOffset(),
+                                        SteeringZ_IsValid(),
+                                        (int32_t)STEERING_Z_WINDOW_COUNTS);
+        /* Refresh telemetry so the HMI sees the result immediately. */
+        steerz_burst_left = STEERZ_BURST_FRAMES;
+        steerz_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ok ? ACK_OK : ACK_REJECTED);
+        return;
+    }
+    case STEER_Z_OP_CLEAR: {
+        SteeringZ_ClearCalibration();
+        /* Persist the PB5 center with the Z reference invalidated. */
+        bool ok = SteeringCal_SaveWithZ(SteeringCal_GetStoredCenter(),
+                                        0, false, 0);
+        steerz_burst_left = STEERZ_BURST_FRAMES;
+        steerz_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ok ? ACK_OK : ACK_REJECTED);
+        return;
+    }
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+}
+
 void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
@@ -2444,6 +2598,15 @@ void CAN_ProcessMessages(void) {
                          * the STANDBY safety gate internally and replies on
                          * the standard CMD_ACK (0x103) channel.            */
                         gearlim_handle_service_cmd(rx_payload, msg_len);
+                    } else if (cmd == SERVICE_ACTION_STEERING_Z) {
+                        /* ---- PB5 + ENCODER-Z CENTER DIAGNOSTIC ----
+                         * Byte 1 = sub-opcode (QUERY/CALIBRATE/CLEAR).
+                         * PB5 stays the primary/safety reference; Z is a
+                         * secondary precision reference and can never center
+                         * on its own.  CALIBRATE requires PB5 to confirm
+                         * center and BOOT/STANDBY; the handler enforces the
+                         * gates internally and replies on CMD_ACK (0x103). */
+                        steerz_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == 0xE0) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask
