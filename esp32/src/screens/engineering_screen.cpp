@@ -21,38 +21,90 @@
 
 extern TFT_eSPI tft;
 
-// ---- Menu button layout ----
-// MENU_BTN_H/MENU_SPACING/MENU_START_Y are sized so that all 14 main-menu
-// entries fit between the title bar and the bottom EXIT/BACK row.  The
-// last few items overlap the EXIT button on the left edge (x=10..90) but
-// their text is centred at x≈240 so the visible overlap is only the
-// border outline; touch hit-testing handles EXIT first so there is no
-// dispatch ambiguity.  The same constants are reused by the
-// FACTORY_DEFAULTS submenu (only 6 items — fits trivially).
+// ---- Submenu list-button layout (FACTORY_DEFAULTS, RELAY_CONTROL) ----
+// MENU_BTN_H/MENU_SPACING/MENU_START_Y/MENU_X/MENU_W lay out the simple list
+// rows still used by the FACTORY_DEFAULTS and RELAY_CONTROL submenus.  The
+// main Engineering menu no longer uses these — it was redesigned (FASE 2) into
+// a paged grid of large touch tiles (see TILE_* constants below).
 static constexpr int16_t MENU_X       = 40;
 static constexpr int16_t MENU_W       = 400;
 static constexpr int16_t MENU_BTN_H   = 16;
 static constexpr int16_t MENU_START_Y = 40;
 static constexpr int16_t MENU_SPACING = 17;
 
+// Number of main-menu functions (unchanged — the 15 functions are preserved;
+// only their presentation changed).  Full canonical names kept in tileLabel*
+// (abbreviated, two-line) below.
 static constexpr int     NUM_MAIN_ITEMS = 15;
-static const char* const mainLabels[NUM_MAIN_ITEMS] = {
-    "FAULT VIEWER",
-    "MODULE ENABLE/DISABLE",
-    "PEDAL CALIBRATION",
-    "ENCODER CALIBRATION",
-    "INA226 SENSOR MAPPING",
-    "TEMP SENSOR MAPPING",
-    "FACTORY DEFAULTS",
-    "DTC ERROR LOG",
-    "MAINTENANCE",
-    "RELAY CONTROL (DEBUG)",
-    "INA226 LIVE DIAG",
-    "DEBOUNCE / CAN DIAG",
-    "TOUCH CALIBRATION",   // Launch persistent touch calibration wizard
-    "RESET TOUCH CAL",     // Erase NVS calibration + re-arm first-boot wizard
-    "MCP23017 LIVE (SHIFTER)"  // ESP32-local I2C expander live diagnostic
+
+// ---- FASE 2 — Professional tile layout for the main menu --------------------
+// The 15 functions are presented as large touch tiles across two pages
+// (page 1 = items 0..8, page 2 = items 9..14).  Tiles are 148x72 px with a
+// 10 px separation — well above the 44 px minimum touch target, usable with
+// gloves.  The dispatch logic is unchanged: a tile maps back to its original
+// item index and runs the exact same code path as the old list row.
+static constexpr int16_t TILE_W      = 148;
+static constexpr int16_t TILE_H      = 72;
+static constexpr int16_t TILE_GAP    = 10;
+static constexpr int16_t TILE_COL0_X = 8;     // left margin: (480-3*148-2*10)/2
+static constexpr int16_t TILE_ROW0_Y = 36;    // below the title bar
+static constexpr int     TILE_COLS   = 3;
+
+static constexpr uint8_t MAIN_PAGE_COUNT = 2;
+static constexpr int     PAGE1_ITEM_COUNT = 9;   // items 0..8
+
+// Two-line short labels (rendered at text size 2 for legibility from the
+// driver's seat / with gloves — never size 1 for these tile captions).
+static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
+    "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
+    "TEMP", "FACTORY", "DTC", "MAINT.",
+    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017"
 };
+static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
+    "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
+    "MAP", "DEFAULT", "LOG", "",
+    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER"
+};
+
+// Category accent colour per function (FASE 2 colour coding):
+//   Diagnóstico = cian, Calibración = verde, Configuración = azul,
+//   Mantenimiento = amarillo, Acciones destructivas = rojo/ámbar.
+// Captions are always rendered in white (size 2) so legibility never depends
+// on the accent hue; the accent only tints the icon and the tile border.
+static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
+    ui::COL_CYAN,    // 0  Fault Viewer        — diagnostic
+    ui::COL_BLUE,    // 1  Module En/Dis       — configuration
+    ui::COL_GREEN,   // 2  Pedal Calibration   — calibration
+    ui::COL_GREEN,   // 3  Encoder Calibration — calibration
+    ui::COL_BLUE,    // 4  INA226 Mapping      — configuration
+    ui::COL_BLUE,    // 5  Temp Mapping        — configuration
+    ui::COL_AMBER,   // 6  Factory Defaults    — destructive
+    ui::COL_CYAN,    // 7  DTC Error Log       — diagnostic
+    ui::COL_YELLOW,  // 8  Maintenance         — maintenance
+    ui::COL_RED,     // 9  Relay Control       — destructive / debug
+    ui::COL_CYAN,    // 10 INA226 Live Diag    — diagnostic
+    ui::COL_CYAN,    // 11 Debounce/CAN Diag   — diagnostic
+    ui::COL_GREEN,   // 12 Touch Calibration   — calibration
+    ui::COL_AMBER,   // 13 Reset Touch Cal     — destructive
+    ui::COL_CYAN     // 14 MCP23017 Live       — diagnostic
+};
+
+// Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
+// Always visible on both pages.  Submenus keep the global BACK button below.
+static constexpr int16_t NAV_Y    = 276;
+static constexpr int16_t NAV_H    = 36;
+static constexpr int16_t NAVP1_X  = 8;
+static constexpr int16_t NAVP1_W  = 132;
+static constexpr int16_t NAVP2_X  = 150;
+static constexpr int16_t NAVP2_W  = 132;
+static constexpr int16_t NAVEX_X  = 360;
+static constexpr int16_t NAVEX_W  = 112;
+
+// Compact relay-status read-out in the header right corner (FASE 2 keeps the
+// existing relay GPIO state visible on both menu pages without a dedicated
+// list row).  Shared by drawMainMenu() and the partial-redraw path in draw().
+static constexpr int16_t RELAY_RDX = 300;
+static constexpr int16_t RELAY_RDY = 3;
 
 // Mirror Safe Screen 0x309 staleness threshold.
 static constexpr unsigned long ENG_I2C_DIAG_STALE_MS = 2000;
@@ -204,6 +256,7 @@ void EngineeringScreen::onEnter() {
     needsRedraw_ = true;
     exitRequested_ = false;
     currentMenu_ = SubMenu::MAIN;
+    mainMenuPage_ = 0;          // FASE 2: always open on page 1
     clearLogPending_ = false;   // §5: reset confirmation state on screen enter
     factoryPendingIdx_ = -1;    // FASE 2 §1: clear factory confirm on screen enter
     modulePendingId_   = -1;    // FASE 2 §1: clear module confirm on screen enter
@@ -597,10 +650,10 @@ void EngineeringScreen::draw() {
         }
     }
 
-    // Partial redraw for main menu relay status panel
+    // Partial redraw for main menu relay status read-out (header right corner)
     if (currentMenu_ == SubMenu::MAIN && relayStatus_ != prevRelayStatus_) {
-        const int16_t relX = 120;
-        const int16_t relY = BACK_Y;
+        const int16_t relX = RELAY_RDX;
+        const int16_t relY = RELAY_RDY;
         // 3-bit wire layout (backward-compatible): bit0 reserved, bit1=TRAC, bit2=DIR.
         const bool seqComplete = (relayStatus_ & 0x80U) != 0;
         const bool tracOn   = (relayStatus_ & 0x02U) != 0;
@@ -608,8 +661,8 @@ void EngineeringScreen::draw() {
 
         char buf[40];
 
-        // Clear and redraw relay values
-        tft.fillRect(relX, relY + 12, 250, 22, ui::COL_BG);
+        // Clear and redraw relay values (two lines below the static label)
+        tft.fillRect(relX, relY + 11, 180, 22, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
@@ -618,13 +671,13 @@ void EngineeringScreen::draw() {
                  dirOn  ? "ON " : "OFF");
         uint16_t col = seqComplete ? ui::COL_GREEN : ui::COL_AMBER;
         tft.setTextColor(col, ui::COL_BG);
-        tft.drawString(buf, relX, relY + 12);
+        tft.drawString(buf, relX, relY + 11);
 
-        snprintf(buf, sizeof(buf), "SEQ:%s  [0x%02X]",
-                 seqComplete ? "COMPLETE   " : "IN PROGRESS",
+        snprintf(buf, sizeof(buf), "SEQ:%s [0x%02X]",
+                 seqComplete ? "OK " : "...",
                  relayStatus_);
         tft.setTextColor(seqComplete ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
-        tft.drawString(buf, relX, relY + 22);
+        tft.drawString(buf, relX, relY + 21);
 
         prevRelayStatus_ = relayStatus_;
     }
@@ -1327,32 +1380,31 @@ void EngineeringScreen::draw() {
 // Touch handling
 // -------------------------------------------------------------------------
 bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
-    // Back button (submenus → main) or Exit button (main → normal screens)
-    if (x >= BACK_X && x <= BACK_X + BACK_W &&
+    // Back button (submenus → main).  On the MAIN menu the same screen corner
+    // is occupied by the PAGE 1 nav tile, so EXIT/paging is handled in the
+    // MAIN block below; this BACK handler only applies inside submenus.
+    if (currentMenu_ != SubMenu::MAIN &&
+        x >= BACK_X && x <= BACK_X + BACK_W &&
         y >= BACK_Y && y <= BACK_Y + BACK_H) {
-        if (currentMenu_ != SubMenu::MAIN) {
-            // Auto-disable relay override when leaving relay control submenu
-            if (currentMenu_ == SubMenu::RELAY_CONTROL && relayOverrideEnabled_) {
-                CanFrame frame = {};
-                frame.identifier       = can::SERVICE_CMD;
-                frame.extd             = 0;
-                frame.data_length_code = 2;
-                frame.data[0]          = can::SERVICE_ACTION_RELAY_OVERRIDE;
-                frame.data[1]          = 0x00;
-                ESP32Can.writeFrame(frame, 0);
-                relayOverrideEnabled_ = false;
-                relayOverrideMask_    = 0;
-                Serial.println("[ENG] Relay override disabled on BACK");
-            }
-            clearLogPending_ = false;  // reset confirmation state on navigation (§4.1)
-            factoryPendingIdx_ = -1;   // cancel any pending factory confirm (FASE 2 §1)
-            modulePendingId_   = -1;   // cancel any pending module confirm (FASE 2 §1)
-            relayStandbyMsg_   = false;// clear relay STANDBY notice (FASE 2 §2)
-            currentMenu_ = SubMenu::MAIN;
-            needsRedraw_ = true;
-        } else {
-            exitRequested_ = true;
+        // Auto-disable relay override when leaving relay control submenu
+        if (currentMenu_ == SubMenu::RELAY_CONTROL && relayOverrideEnabled_) {
+            CanFrame frame = {};
+            frame.identifier       = can::SERVICE_CMD;
+            frame.extd             = 0;
+            frame.data_length_code = 2;
+            frame.data[0]          = can::SERVICE_ACTION_RELAY_OVERRIDE;
+            frame.data[1]          = 0x00;
+            ESP32Can.writeFrame(frame, 0);
+            relayOverrideEnabled_ = false;
+            relayOverrideMask_    = 0;
+            Serial.println("[ENG] Relay override disabled on BACK");
         }
+        clearLogPending_ = false;  // reset confirmation state on navigation (§4.1)
+        factoryPendingIdx_ = -1;   // cancel any pending factory confirm (FASE 2 §1)
+        modulePendingId_   = -1;   // cancel any pending module confirm (FASE 2 §1)
+        relayStandbyMsg_   = false;// clear relay STANDBY notice (FASE 2 §2)
+        currentMenu_ = SubMenu::MAIN;
+        needsRedraw_ = true;
         return true;
     }
 
@@ -1389,13 +1441,37 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         return true;
     }
 
-    // Main menu item selection
+    // ---- Main menu (FASE 2 tile layout) -------------------------------
     if (currentMenu_ == SubMenu::MAIN) {
-        if (x >= MENU_X && x <= MENU_X + MENU_W) {
-            for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
-                int16_t btnY = MENU_START_Y + i * MENU_SPACING;
-                if (y >= btnY && y <= btnY + MENU_BTN_H) {
-                    switch (i) {
+        // Bottom navigation bar: PAGE 1 / PAGE 2 / EXIT.
+        if (y >= NAV_Y && y <= NAV_Y + NAV_H) {
+            if (x >= NAVP1_X && x <= NAVP1_X + NAVP1_W) {
+                if (mainMenuPage_ != 0) { mainMenuPage_ = 0; needsRedraw_ = true; }
+                return true;
+            }
+            if (x >= NAVP2_X && x <= NAVP2_X + NAVP2_W) {
+                if (mainMenuPage_ != 1) { mainMenuPage_ = 1; needsRedraw_ = true; }
+                return true;
+            }
+            if (x >= NAVEX_X && x <= NAVEX_X + NAVEX_W) {
+                exitRequested_ = true;
+                return true;
+            }
+        }
+
+        // Tile hit-test → resolve the original item index `i`, then run the
+        // EXACT same dispatch as the legacy list (logic unchanged).
+        const int startItem = mainMenuPage_ * PAGE1_ITEM_COUNT;
+        const int endItem   = (mainMenuPage_ == 0) ? PAGE1_ITEM_COUNT
+                                                   : NUM_MAIN_ITEMS;
+        for (int i = startItem; i < endItem; ++i) {
+            const int idx = i - startItem;
+            const int col = idx % TILE_COLS;
+            const int row = idx / TILE_COLS;
+            const int16_t tx = TILE_COL0_X + col * (TILE_W + TILE_GAP);
+            const int16_t ty = TILE_ROW0_Y + row * (TILE_H + TILE_GAP);
+            if (x >= tx && x <= tx + TILE_W && y >= ty && y <= ty + TILE_H) {
+                switch (i) {
                         case 0: currentMenu_ = SubMenu::FAULT_VIEWER;   break;
                         case 1:
                             moduleCtrlPage_ = 0;
@@ -1489,7 +1565,6 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                     return true;
                 }
             }
-        }
         return false;
     }
 
@@ -1839,89 +1914,238 @@ void EngineeringScreen::drawMainMenu() {
     RTRACE_FILL_SCREEN(ui::COL_BG);
     RTRACE_SET_LAYER(1);
 
-    // Header
-    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    // ---- Header --------------------------------------------------------
+    // Title (left), page indicator (centre), compact relay read-out (right).
     tft.setTextSize(2);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("ENGINEERING", 8, 8);
+    RTRACE_TEXT(8, 8, "ENGINEERING", ui::COL_AMBER, ui::COL_BG, 2, TL_DATUM);
+
+    char pgBuf[16];
+    snprintf(pgBuf, sizeof(pgBuf), "PAGE %u/%u",
+             (unsigned)(mainMenuPage_ + 1), (unsigned)MAIN_PAGE_COUNT);
+    tft.setTextSize(2);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("ENGINEERING", ui::SCREEN_W / 2, 22);
-    RTRACE_TEXT(ui::SCREEN_W / 2, 22, "ENGINEERING",
-                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
+    tft.drawString(pgBuf, 232, 14);
+    RTRACE_TEXT(232, 14, pgBuf, ui::COL_WHITE, ui::COL_BG, 2, MC_DATUM);
     tft.setTextDatum(TL_DATUM);
 
-    // Menu buttons
-    for (int i = 0; i < NUM_MAIN_ITEMS; ++i) {
-        int16_t btnY = MENU_START_Y + i * MENU_SPACING;
-        uint16_t bgCol = ui::COL_DARK_GRAY;
-        uint16_t txtCol = (i == 6) ? ui::COL_AMBER :       // Factory Defaults
-                          (i == 7) ? ui::COL_CYAN :         // DTC Error Log
-                          (i == 8) ? ui::COL_GREEN :        // Maintenance
-                          (i == 9) ? ui::COL_RED :          // Relay Control (debug)
-                          (i == 10) ? ui::COL_CYAN :        // INA226 Live Diag
-                          (i == 11) ? ui::COL_CYAN :        // Debounce/CAN diag
-                          (i == 12) ? ui::COL_CYAN :        // Touch Calibration wizard
-                          (i == 13) ? ui::COL_AMBER :       // Reset Touch Cal
-                          ui::COL_WHITE;
+    // Divider under the header.
+    tft.drawFastHLine(0, 32, ui::SCREEN_W, ui::COL_DARK_GRAY);
 
-        tft.fillRect(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
-        RTRACE_FILL_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, bgCol);
-        tft.drawRect(MENU_X, btnY, MENU_W, MENU_BTN_H, ui::COL_GRAY);
-        RTRACE_DRAW_RECT(MENU_X, btnY, MENU_W, MENU_BTN_H, ui::COL_GRAY);
+    // ---- Tiles ---------------------------------------------------------
+    const int startItem = mainMenuPage_ * PAGE1_ITEM_COUNT;
+    const int endItem   = (mainMenuPage_ == 0) ? PAGE1_ITEM_COUNT
+                                               : NUM_MAIN_ITEMS;
+    for (int i = startItem; i < endItem; ++i) {
+        const int idx = i - startItem;        // 0-based index within the page
+        const int col = idx % TILE_COLS;
+        const int row = idx / TILE_COLS;
+        const int16_t tx = TILE_COL0_X + col * (TILE_W + TILE_GAP);
+        const int16_t ty = TILE_ROW0_Y + row * (TILE_H + TILE_GAP);
+        const uint16_t accent = tileColor[i];
 
-        tft.setTextColor(txtCol, bgCol);
-        tft.setTextSize(1);
+        // Card background + 2 px accent border.
+        tft.fillRoundRect(tx, ty, TILE_W, TILE_H, 6, ui::COL_DARK_GRAY);
+        RTRACE_FILL_RECT(tx, ty, TILE_W, TILE_H, ui::COL_DARK_GRAY);
+        tft.drawRoundRect(tx, ty, TILE_W, TILE_H, 6, accent);
+        tft.drawRoundRect(tx + 1, ty + 1, TILE_W - 2, TILE_H - 2, 5, accent);
+        RTRACE_DRAW_RECT(tx, ty, TILE_W, TILE_H, accent);
+
+        // Category icon (top portion of the tile).
+        drawTileIcon((uint8_t)i, tx + TILE_W / 2, ty + 22, accent);
+
+        // Two-line caption (text size 2 — never size 1 for tile captions).
+        tft.setTextSize(2);
         tft.setTextDatum(MC_DATUM);
-        tft.drawString(mainLabels[i], MENU_X + MENU_W / 2,
-                        btnY + MENU_BTN_H / 2);
-        RTRACE_TEXT(MENU_X + MENU_W / 2, btnY + MENU_BTN_H / 2, mainLabels[i],
-                    txtCol, bgCol, 1, MC_DATUM);
+        const bool twoLine = (tileLabel2[i][0] != '\0');
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        if (twoLine) {
+            tft.drawString(tileLabel1[i], tx + TILE_W / 2, ty + 46);
+            RTRACE_TEXT(tx + TILE_W / 2, ty + 46, tileLabel1[i],
+                        ui::COL_WHITE, ui::COL_DARK_GRAY, 2, MC_DATUM);
+            tft.drawString(tileLabel2[i], tx + TILE_W / 2, ty + 62);
+            RTRACE_TEXT(tx + TILE_W / 2, ty + 62, tileLabel2[i],
+                        ui::COL_WHITE, ui::COL_DARK_GRAY, 2, MC_DATUM);
+        } else {
+            tft.drawString(tileLabel1[i], tx + TILE_W / 2, ty + 54);
+            RTRACE_TEXT(tx + TILE_W / 2, ty + 54, tileLabel1[i],
+                        ui::COL_WHITE, ui::COL_DARK_GRAY, 2, MC_DATUM);
+        }
     }
     tft.setTextDatum(TL_DATUM);
 
-    // EXIT button (bottom-left — returns to normal screens)
-    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
-    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
-    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
-    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
-    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("EXIT", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
-    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "EXIT",
-                ui::COL_AMBER, ui::COL_DARK_GRAY, 1, MC_DATUM);
+    // ---- Bottom navigation bar (PAGE 1 / PAGE 2 / EXIT) ----------------
+    auto drawNavBtn = [&](int16_t bx, int16_t bw, const char* label,
+                          bool active, uint16_t accent) {
+        const uint16_t fill = active ? accent : ui::COL_DARK_GRAY;
+        const uint16_t txt  = active ? ui::COL_BLACK : accent;
+        tft.fillRoundRect(bx, NAV_Y, bw, NAV_H, 5, fill);
+        RTRACE_FILL_RECT(bx, NAV_Y, bw, NAV_H, fill);
+        tft.drawRoundRect(bx, NAV_Y, bw, NAV_H, 5, accent);
+        RTRACE_DRAW_RECT(bx, NAV_Y, bw, NAV_H, accent);
+        tft.setTextSize(2);
+        tft.setTextColor(txt, fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(label, bx + bw / 2, NAV_Y + NAV_H / 2);
+        RTRACE_TEXT(bx + bw / 2, NAV_Y + NAV_H / 2, label, txt, fill, 2, MC_DATUM);
+    };
+    drawNavBtn(NAVP1_X, NAVP1_W, "PAGE 1", mainMenuPage_ == 0, ui::COL_CYAN);
+    drawNavBtn(NAVP2_X, NAVP2_W, "PAGE 2", mainMenuPage_ == 1, ui::COL_CYAN);
+    drawNavBtn(NAVEX_X, NAVEX_W, "EXIT",   false,              ui::COL_AMBER);
     tft.setTextDatum(TL_DATUM);
 
-    // ---- Relay Status Panel (right side of bottom row) ----
-    // Shows detailed relay GPIO command state from STM32 heartbeat byte 5.
+    // ---- Compact relay status read-out (header right) ------------------
     {
-        const int16_t relX = 120;
-        const int16_t relY = BACK_Y;
-
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-        tft.drawString("RELAY STATUS", relX, relY);
+        tft.drawString("RELAY STATUS", RELAY_RDX, RELAY_RDY);
 
         const bool seqComplete = (relayStatus_ & 0x80U) != 0;
         const bool tracOn   = (relayStatus_ & 0x02U) != 0;
         const bool dirOn    = (relayStatus_ & 0x04U) != 0;
 
-        // Row 1: individual relays (3-bit wire layout, bit0 reserved)
         char buf[40];
         snprintf(buf, sizeof(buf), "T:%s D:%s",
                  tracOn ? "ON " : "OFF",
                  dirOn  ? "ON " : "OFF");
         uint16_t col = seqComplete ? ui::COL_GREEN : ui::COL_AMBER;
         tft.setTextColor(col, ui::COL_BG);
-        tft.drawString(buf, relX, relY + 12);
+        tft.drawString(buf, RELAY_RDX, RELAY_RDY + 11);
 
-        // Row 2: sequence status + raw hex
-        snprintf(buf, sizeof(buf), "SEQ:%s  [0x%02X]",
-                 seqComplete ? "COMPLETE   " : "IN PROGRESS",
+        snprintf(buf, sizeof(buf), "SEQ:%s [0x%02X]",
+                 seqComplete ? "OK " : "...",
                  relayStatus_);
         tft.setTextColor(seqComplete ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
-        tft.drawString(buf, relX, relY + 22);
+        tft.drawString(buf, RELAY_RDX, RELAY_RDY + 21);
 
         prevRelayStatus_ = relayStatus_;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Procedural category icons (FASE 2).  Drawn with TFT_eSPI primitives only —
+// no PROGMEM bitmap arrays, no heap, zero RAM cost (code lives in flash).
+// Each icon is centred on (cx,cy) and fits within roughly a 30x26 px box so it
+// sits in the upper third of a tile above the two-line caption.
+// ---------------------------------------------------------------------------
+void EngineeringScreen::drawTileIcon(uint8_t item, int16_t cx, int16_t cy,
+                                     uint16_t col) {
+    switch (item) {
+        case 0:   // Fault Viewer — warning triangle with "!"
+            tft.drawTriangle(cx, cy - 12, cx - 13, cy + 10, cx + 13, cy + 10, col);
+            tft.drawTriangle(cx, cy - 10, cx - 11, cy + 9,  cx + 11, cy + 9,  col);
+            tft.drawFastVLine(cx, cy - 4, 7, col);
+            tft.fillRect(cx - 1, cy + 5, 2, 2, col);
+            break;
+
+        case 1:   // Module Enable/Disable — ON/OFF toggle switch
+            tft.drawRoundRect(cx - 14, cy - 7, 28, 14, 7, col);
+            tft.fillCircle(cx + 7, cy, 5, col);
+            break;
+
+        case 2:   // Pedal Calibration — accelerator pedal
+            tft.fillTriangle(cx - 9, cy + 10, cx + 11, cy - 8, cx + 11, cy + 2, col);
+            tft.drawFastVLine(cx - 9, cy + 2, 8, col);
+            tft.drawFastHLine(cx - 12, cy + 10, 6, col);
+            break;
+
+        case 3:   // Encoder Calibration — steering wheel
+            tft.drawCircle(cx, cy, 12, col);
+            tft.drawCircle(cx, cy, 11, col);
+            tft.fillCircle(cx, cy, 3, col);
+            tft.drawFastVLine(cx, cy, 9, col);
+            tft.drawLine(cx, cy, cx - 8, cy - 6, col);
+            tft.drawLine(cx, cy, cx + 8, cy - 6, col);
+            break;
+
+        case 4:   // INA226 Mapping — ammeter ("A" gauge)
+        case 10:  // INA226 Live Diag — same ammeter glyph
+            tft.drawCircle(cx, cy, 12, col);
+            tft.drawLine(cx, cy, cx + 7, cy - 7, col);   // needle
+            tft.fillCircle(cx, cy, 2, col);
+            tft.drawFastHLine(cx - 3, cy + 7, 6, col);   // base mark
+            break;
+
+        case 5:   // Temp Mapping — thermometer
+            tft.drawFastVLine(cx - 2, cy - 11, 14, col);
+            tft.drawFastVLine(cx + 2, cy - 11, 14, col);
+            tft.drawFastHLine(cx - 2, cy - 11, 5, col);
+            tft.fillCircle(cx, cy + 7, 5, col);
+            tft.fillRect(cx - 1, cy - 2, 2, 9, col);
+            break;
+
+        case 6:   // Factory Defaults — circular reset arrow
+            tft.drawCircle(cx, cy, 11, col);
+            tft.drawCircle(cx, cy, 10, col);
+            tft.fillRect(cx - 1, cy - 13, 3, 6, ui::COL_DARK_GRAY);  // gap
+            tft.fillTriangle(cx + 2, cy - 13, cx + 9, cy - 11,
+                             cx + 2, cy - 7, col);                   // arrowhead
+            break;
+
+        case 7:   // DTC Error Log — clipboard
+            tft.drawRoundRect(cx - 9, cy - 11, 18, 23, 2, col);
+            tft.fillRect(cx - 4, cy - 13, 8, 4, col);    // clip
+            tft.drawFastHLine(cx - 5, cy - 3, 10, col);
+            tft.drawFastHLine(cx - 5, cy + 2, 10, col);
+            tft.drawFastHLine(cx - 5, cy + 7, 6,  col);
+            break;
+
+        case 8:   // Maintenance — wrench
+            tft.drawLine(cx - 9, cy + 9, cx + 5, cy - 5, col);
+            tft.drawLine(cx - 8, cy + 10, cx + 6, cy - 4, col);
+            tft.drawCircle(cx + 7, cy - 7, 5, col);
+            tft.fillCircle(cx - 8, cy + 9, 2, col);
+            break;
+
+        case 9:   // Relay Control — relay (coil box + contact arm)
+            tft.drawRect(cx - 12, cy - 8, 14, 16, col);
+            for (int16_t yy = cy - 6; yy <= cy + 6; yy += 3)
+                tft.drawFastHLine(cx - 12, yy, 14, col);
+            tft.drawLine(cx + 2, cy - 6, cx + 12, cy - 10, col);  // armature
+            tft.fillCircle(cx + 12, cy + 6, 2, col);              // contact
+            break;
+
+        case 11:  // Debounce / CAN Diag — network nodes + links
+            tft.fillCircle(cx, cy - 9, 3, col);
+            tft.fillCircle(cx - 11, cy + 8, 3, col);
+            tft.fillCircle(cx + 11, cy + 8, 3, col);
+            tft.drawLine(cx, cy - 9, cx - 11, cy + 8, col);
+            tft.drawLine(cx, cy - 9, cx + 11, cy + 8, col);
+            tft.drawLine(cx - 11, cy + 8, cx + 11, cy + 8, col);
+            break;
+
+        case 12:  // Touch Calibration — target / diana
+        case 13:  // Reset Touch Cal — target with reset arrow
+            tft.drawCircle(cx, cy, 11, col);
+            tft.drawCircle(cx, cy, 6, col);
+            tft.fillCircle(cx, cy, 2, col);
+            tft.drawFastHLine(cx - 14, cy, 5, col);
+            tft.drawFastHLine(cx + 9, cy, 5, col);
+            tft.drawFastVLine(cx, cy - 14, 5, col);
+            tft.drawFastVLine(cx, cy + 9, 5, col);
+            if (item == 13) {  // small reset arrowhead (top-right)
+                tft.fillTriangle(cx + 9, cy - 9, cx + 14, cy - 11,
+                                 cx + 12, cy - 5, col);
+            }
+            break;
+
+        case 14:  // MCP23017 Live — IC chip with pins
+            tft.drawRect(cx - 8, cy - 8, 16, 16, col);
+            tft.fillCircle(cx - 4, cy - 4, 1, col);      // pin-1 dot
+            for (int16_t yy = cy - 5; yy <= cy + 5; yy += 5) {
+                tft.drawFastHLine(cx - 12, yy, 4, col);  // left pins
+                tft.drawFastHLine(cx + 8,  yy, 4, col);  // right pins
+            }
+            break;
+
+        default:
+            tft.drawCircle(cx, cy, 10, col);
+            break;
     }
 }
 

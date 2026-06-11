@@ -39,6 +39,44 @@ maintenance.
 | 12 | DEBOUNCE DEBUG | `DEBOUNCE_DIAG` | DWT-debounce EMI filtered counters viewer |
 | 13 | TOUCH CALIBRATION | _wizard_ | Launch the persistent touch-calibration wizard. See [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md). |
 | 14 | RESET TOUCH CAL | _action_ | Erase persisted touch calibration in NVS and re-arm the first-boot wizard for the next reboot. |
+| 15 | MCP23017 LIVE (SHIFTER) | `MCP23017_LIVE` | ESP32-local MCP23017 shifter I2C live diagnostic (cached, no bus access from render path) |
+
+## Presentation — Professional Tile Layout (FASE 2)
+
+The main menu is rendered as a **professional, workshop-grade tile grid**
+(inspired by automotive diagnostic tools) instead of a dense list of thin
+rows. **The 15 functions, their dispatch and all submenu logic are
+unchanged** — only the presentation/touch geometry was redesigned. A tile tap
+maps back to the exact same item index and runs the exact same code path as
+the old list row.
+
+- **Two pages** of large touch tiles:
+  - **PAGE 1** (3×3, items 1–9): Fault Viewer, Module Enable/Disable, Pedal
+    Calibration, Encoder Calibration, INA226 Mapping, Temp Mapping, Factory
+    Defaults, DTC Error Log, Maintenance.
+  - **PAGE 2** (3×2, items 10–15): Relay Control, INA226 Live Diag,
+    Debounce/CAN Diag, Touch Calibration, Reset Touch Cal, MCP23017 Live.
+- **Tile size**: 148 × 72 px with a 10 px separation — well above the 44 px
+  minimum touch target, usable with gloves. No overlaps, no dead zones.
+- **Captions**: rendered at text size 2 (two short lines) for legibility from
+  the driver's seat; critical captions are never size 1.
+- **Icons**: each tile carries a category icon (warning triangle, ON/OFF
+  switch, pedal, steering wheel, ammeter, thermometer, reset, clipboard,
+  wrench, relay, CAN network, target, IC chip). Icons are drawn procedurally
+  with TFT_eSPI primitives — **no PROGMEM bitmap arrays, no heap, zero RAM**.
+- **Colour coding**: Diagnostic = cyan, Calibration = green, Configuration =
+  blue, Maintenance = yellow, Destructive (Factory Defaults / Reset Touch Cal /
+  Relay Control) = amber/red. Captions stay white so legibility never depends
+  on the accent hue.
+- **Navigation bar** (always visible on both pages): **PAGE 1**, **PAGE 2**,
+  **EXIT**. Submenus keep their existing **BACK** button.
+- The compact **RELAY STATUS** read-out moved to the header's top-right corner
+  and is shown on both pages.
+
+> **Safety unchanged (PR #385):** Factory Defaults and Module Enable/Disable
+> keep their double-tap confirmation, Relay Control stays STANDBY-only, and
+> mapping validation is intact. The redesign only changes which tile opens a
+> submenu, not what happens inside it.
 
 ## Submenu Details
 

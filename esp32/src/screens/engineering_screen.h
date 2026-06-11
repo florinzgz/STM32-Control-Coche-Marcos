@@ -70,6 +70,9 @@ private:
     };
 
     void drawMainMenu();
+    // Draw a procedural (PROGMEM-free, zero-RAM) category icon for main-menu
+    // tile `item` (0..NUM_MAIN_ITEMS-1) centred at (cx,cy) in colour `col`.
+    void drawTileIcon(uint8_t item, int16_t cx, int16_t cy, uint16_t col);
     void drawFaultViewer();
     void drawModuleControl();
     void drawPedalCalibration();
@@ -88,6 +91,12 @@ private:
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
     SubMenu     currentMenu_ = SubMenu::MAIN;
+
+    // Main-menu paging (FASE 2 tile redesign).  The 15 functions are split
+    // across two pages of large touch tiles: page 0 = items 0..8 (9 tiles),
+    // page 1 = items 9..14 (6 tiles).  The dispatch logic is unchanged — a
+    // tile simply maps back to its original item index.
+    uint8_t     mainMenuPage_ = 0;
 
     // Cached data for fault viewer
     uint32_t    faultBits_   = 0;
