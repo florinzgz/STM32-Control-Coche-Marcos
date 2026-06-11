@@ -213,14 +213,22 @@ struct PedalCalData {
 // -------------------------------------------------------------------------
 struct GearLimitsData {
     uint8_t  flags        = 0;    // bit0 stored-valid, bit1 pending-differs,
-                                  // bit2 safety-ok(STANDBY), bit3 pending-valid
-    uint8_t  activeD2     = 0;    // currently applied D2 limit (percent)
+                                  // bit2 safety-ok(STANDBY), bit3 pending-valid,
+                                  // bit4 frame-kind(0=power,1=response)
+    uint8_t  activeD2     = 0;    // currently applied D2 power limit (percent)
     uint8_t  activeD1     = 0;
     uint8_t  activeR      = 0;
-    uint8_t  pendingD2    = 0;    // staged (unsaved) D2 limit (percent)
+    uint8_t  pendingD2    = 0;    // staged (unsaved) D2 power limit (percent)
     uint8_t  pendingD1    = 0;
     uint8_t  pendingR     = 0;
     uint8_t  systemState  = 0;
+    // Accel-response profile (v2) — carried by the RESPONSE frame (flags bit4=1).
+    uint8_t  activeRespD2  = 0;   // currently applied D2 accel response (percent)
+    uint8_t  activeRespD1  = 0;
+    uint8_t  activeRespR   = 0;
+    uint8_t  pendingRespD2 = 0;   // staged (unsaved) D2 accel response (percent)
+    uint8_t  pendingRespD1 = 0;
+    uint8_t  pendingRespR  = 0;
     unsigned long timestampMs = 0;
 };
 

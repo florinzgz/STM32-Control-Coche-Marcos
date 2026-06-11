@@ -300,6 +300,15 @@ private:
     uint8_t       gearEditD2_        = can::GEAR_LIMIT_D2_DEFAULT_PCT;
     uint8_t       gearEditD1_        = can::GEAR_LIMIT_D1_DEFAULT_PCT;
     uint8_t       gearEditR_         = can::GEAR_LIMIT_R_DEFAULT_PCT;
+    // Accel-response profile (v2) — second editable group on the same screen.
+    uint8_t       gearActiveRespD2_  = can::GEAR_RESPONSE_D2_DEFAULT_PCT;
+    uint8_t       gearActiveRespD1_  = can::GEAR_RESPONSE_D1_DEFAULT_PCT;
+    uint8_t       gearActiveRespR_   = can::GEAR_RESPONSE_R_DEFAULT_PCT;
+    uint8_t       gearEditRespD2_    = can::GEAR_RESPONSE_D2_DEFAULT_PCT;
+    uint8_t       gearEditRespD1_    = can::GEAR_RESPONSE_D1_DEFAULT_PCT;
+    uint8_t       gearEditRespR_     = can::GEAR_RESPONSE_R_DEFAULT_PCT;
+    // Which group is shown: false = POWER page, true = RESPONSE page.
+    bool          gearLimitsShowResponse_ = false;
     bool          gearLimitsEditActive_ = false;   // true once the user edits
     bool          gearLimitsChanged_    = false;   // repaint trigger
     bool          gearLimitsRestoreArm_ = false;   // RESTORE double-confirm armed

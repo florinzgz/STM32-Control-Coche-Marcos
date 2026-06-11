@@ -222,22 +222,28 @@ inline constexpr uint8_t PEDAL_CAL_OP_SAVE           = 0x03;
 inline constexpr uint8_t PEDAL_CAL_OP_RESET_DEFAULTS = 0x04;
 inline constexpr uint8_t PEDAL_CAL_OP_QUERY          = 0x05;
 
-// Gear power-limit sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_GEAR_LIMITS
+// Gear power-limit + accel-response sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_GEAR_LIMITS
 //   For SET_* sub-opcodes byte 2 carries the new percentage (0..100); the
 //   value is staged in a RAM-only "pending" set and is NOT applied or
 //   persisted until SAVE.  SET/SAVE/RESET require the STM32 in STANDBY.
-//   0x01 SET_D2         Stage pending D2 limit  (byte 2 = percent)
-//   0x02 SET_D1         Stage pending D1 limit  (byte 2 = percent)
-//   0x03 SET_R          Stage pending R  limit  (byte 2 = percent)
-//   0x04 SAVE           Validate pending set + persist to STM32 flash + apply
-//   0x05 RESET_DEFAULTS Restore + persist compile-time defaults (100/60/60)
-//   0x06 QUERY          Request a 1 s burst of 0x30D telemetry at 10 Hz
-inline constexpr uint8_t GEAR_LIMIT_OP_SET_D2         = 0x01;
-inline constexpr uint8_t GEAR_LIMIT_OP_SET_D1         = 0x02;
-inline constexpr uint8_t GEAR_LIMIT_OP_SET_R          = 0x03;
-inline constexpr uint8_t GEAR_LIMIT_OP_SAVE           = 0x04;
-inline constexpr uint8_t GEAR_LIMIT_OP_RESET_DEFAULTS = 0x05;
-inline constexpr uint8_t GEAR_LIMIT_OP_QUERY          = 0x06;
+//   0x01 SET_D2          Stage pending D2 power limit  (byte 2 = percent)
+//   0x02 SET_D1          Stage pending D1 power limit  (byte 2 = percent)
+//   0x03 SET_R           Stage pending R  power limit  (byte 2 = percent)
+//   0x04 SAVE            Validate pending set + persist to STM32 flash + apply
+//   0x05 RESET_DEFAULTS  Restore defaults (power 100/60/60, response 100/70/40)
+//   0x06 QUERY           Request a burst of 0x30D telemetry (power + response)
+//   0x07 SET_D2_RESPONSE Stage pending D2 accel response (byte 2 = percent)
+//   0x08 SET_D1_RESPONSE Stage pending D1 accel response (byte 2 = percent)
+//   0x09 SET_R_RESPONSE  Stage pending R  accel response (byte 2 = percent)
+inline constexpr uint8_t GEAR_LIMIT_OP_SET_D2          = 0x01;
+inline constexpr uint8_t GEAR_LIMIT_OP_SET_D1          = 0x02;
+inline constexpr uint8_t GEAR_LIMIT_OP_SET_R           = 0x03;
+inline constexpr uint8_t GEAR_LIMIT_OP_SAVE            = 0x04;
+inline constexpr uint8_t GEAR_LIMIT_OP_RESET_DEFAULTS  = 0x05;
+inline constexpr uint8_t GEAR_LIMIT_OP_QUERY           = 0x06;
+inline constexpr uint8_t GEAR_LIMIT_OP_SET_D2_RESPONSE = 0x07;
+inline constexpr uint8_t GEAR_LIMIT_OP_SET_D1_RESPONSE = 0x08;
+inline constexpr uint8_t GEAR_LIMIT_OP_SET_R_RESPONSE  = 0x09;
 
 // Gear power-limit valid ranges (percent) — MUST mirror gear_limits_store.h
 // on the STM32 so the HMI never sends a value the firmware would reject.
@@ -250,6 +256,18 @@ inline constexpr uint8_t GEAR_LIMIT_R_MAX_PCT  = 60;
 inline constexpr uint8_t GEAR_LIMIT_D2_DEFAULT_PCT = 100;
 inline constexpr uint8_t GEAR_LIMIT_D1_DEFAULT_PCT = 60;
 inline constexpr uint8_t GEAR_LIMIT_R_DEFAULT_PCT  = 60;
+
+// Gear accel-response valid ranges (percent) — MUST mirror gear_limits_store.h.
+// The response factor softens (never amplifies) demand, so every max is <=100.
+inline constexpr uint8_t GEAR_RESPONSE_D2_MIN_PCT = 50;
+inline constexpr uint8_t GEAR_RESPONSE_D2_MAX_PCT = 100;
+inline constexpr uint8_t GEAR_RESPONSE_D1_MIN_PCT = 30;
+inline constexpr uint8_t GEAR_RESPONSE_D1_MAX_PCT = 100;
+inline constexpr uint8_t GEAR_RESPONSE_R_MIN_PCT  = 20;
+inline constexpr uint8_t GEAR_RESPONSE_R_MAX_PCT  = 80;
+inline constexpr uint8_t GEAR_RESPONSE_D2_DEFAULT_PCT = 100;
+inline constexpr uint8_t GEAR_RESPONSE_D1_DEFAULT_PCT = 70;
+inline constexpr uint8_t GEAR_RESPONSE_R_DEFAULT_PCT  = 40;
 
 } // namespace can
 

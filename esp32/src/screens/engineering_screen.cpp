@@ -153,6 +153,8 @@ static constexpr int16_t PED_BTN_RESET_X   = 360;
 // ---- Gear power-limits editor layout (GEAR_LIMITS submenu) ----
 // Three editable rows (D2/D1/R), each with a −5% / value / +5% control, plus
 // a bottom action row (SAVE / RESTORE DEF.) and the global BACK button.
+// The same screen hosts two paged groups — POWER LIMIT % and ACCEL
+// RESPONSE % — toggled by the PAGE button (top-right).
 static constexpr int16_t GL_ROW0_Y    = 70;    // first gear row top
 static constexpr int16_t GL_ROW_H     = 44;    // row pitch
 static constexpr int16_t GL_ROW_BTN_H = 36;
@@ -165,6 +167,11 @@ static constexpr int16_t GL_BTN_W     = 150;
 static constexpr int16_t GL_SAVE_X    = 175;   // SAVE x
 static constexpr int16_t GL_RESTORE_X = 330;   // RESTORE DEF. x
 static constexpr int16_t GL_STEP_PCT  = 5;     // ±5 % per tap
+// PAGE toggle (POWER <-> RESPONSE) — top-right, clear of the centred title.
+static constexpr int16_t GL_PAGE_X    = 385;
+static constexpr int16_t GL_PAGE_Y    = 4;
+static constexpr int16_t GL_PAGE_W    = 90;
+static constexpr int16_t GL_PAGE_H    = 26;
 
 // ---- Sensor mapping row layout ----
 static constexpr int16_t MAP_ROW_X   = 10;
@@ -477,18 +484,27 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             gearLimitsLastTs_ = gl.timestampMs;
             if (gearActiveD2_ != gl.activeD2 ||
                 gearActiveD1_ != gl.activeD1 ||
-                gearActiveR_  != gl.activeR) {
+                gearActiveR_  != gl.activeR  ||
+                gearActiveRespD2_ != gl.activeRespD2 ||
+                gearActiveRespD1_ != gl.activeRespD1 ||
+                gearActiveRespR_  != gl.activeRespR) {
                 changed = true;
             }
             gearActiveD2_ = gl.activeD2;
             gearActiveD1_ = gl.activeD1;
             gearActiveR_  = gl.activeR;
+            gearActiveRespD2_ = gl.activeRespD2;
+            gearActiveRespD1_ = gl.activeRespD1;
+            gearActiveRespR_  = gl.activeRespR;
             // Until the user starts editing, keep the edit buffer tracking the
             // live applied values so the screen shows reality on entry.
             if (!gearLimitsEditActive_) {
                 gearEditD2_ = gl.activeD2;
                 gearEditD1_ = gl.activeD1;
                 gearEditR_  = gl.activeR;
+                gearEditRespD2_ = gl.activeRespD2;
+                gearEditRespD1_ = gl.activeRespD1;
+                gearEditRespR_  = gl.activeRespR;
             }
         }
 
@@ -1665,6 +1681,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             gearLimitsLastTs_      = 0;
                             gearLimitsLastQueryMs_ = 0;
                             gearLimitsRestoreArm_  = false;
+                            gearLimitsShowResponse_ = false;  // start on POWER page
                             gearLimitsChanged_     = true;   // force first paint
                             currentMenu_ = SubMenu::GEAR_LIMITS;
                             break;
@@ -1787,6 +1804,17 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             if (v > (int)hi) v = hi;
             return (uint8_t)v;
         };
+        const bool showResp = gearLimitsShowResponse_;
+        // PAGE toggle (top-right) — switch POWER <-> RESPONSE group.  Does NOT
+        // discard pending edits; both groups are committed together on SAVE.
+        if (x >= GL_PAGE_X && x <= GL_PAGE_X + GL_PAGE_W &&
+            y >= GL_PAGE_Y && y <= GL_PAGE_Y + GL_PAGE_H) {
+            gearLimitsShowResponse_ = !gearLimitsShowResponse_;
+            gearLimitsRestoreArm_   = false;
+            gearLimitsChanged_      = true;
+            needsRedraw_            = true;
+            return true;
+        }
         // Three editable rows: D2 (0), D1 (1), R (2).
         for (int row = 0; row < 3; ++row) {
             const int16_t ry = GL_ROW0_Y + row * GL_ROW_H;
@@ -1797,18 +1825,34 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             const int delta = plus ? GL_STEP_PCT : -GL_STEP_PCT;
             gearLimitsEditActive_ = true;   // stop tracking live values
             gearLimitsRestoreArm_ = false;  // any edit cancels a RESTORE arm
-            if (row == 0) {
-                gearEditD2_ = clampGear((int)gearEditD2_ + delta,
-                                        can::GEAR_LIMIT_D2_MIN_PCT,
-                                        can::GEAR_LIMIT_D2_MAX_PCT);
-            } else if (row == 1) {
-                gearEditD1_ = clampGear((int)gearEditD1_ + delta,
-                                        can::GEAR_LIMIT_D1_MIN_PCT,
-                                        can::GEAR_LIMIT_D1_MAX_PCT);
+            if (!showResp) {
+                if (row == 0) {
+                    gearEditD2_ = clampGear((int)gearEditD2_ + delta,
+                                            can::GEAR_LIMIT_D2_MIN_PCT,
+                                            can::GEAR_LIMIT_D2_MAX_PCT);
+                } else if (row == 1) {
+                    gearEditD1_ = clampGear((int)gearEditD1_ + delta,
+                                            can::GEAR_LIMIT_D1_MIN_PCT,
+                                            can::GEAR_LIMIT_D1_MAX_PCT);
+                } else {
+                    gearEditR_ = clampGear((int)gearEditR_ + delta,
+                                           can::GEAR_LIMIT_R_MIN_PCT,
+                                           can::GEAR_LIMIT_R_MAX_PCT);
+                }
             } else {
-                gearEditR_ = clampGear((int)gearEditR_ + delta,
-                                       can::GEAR_LIMIT_R_MIN_PCT,
-                                       can::GEAR_LIMIT_R_MAX_PCT);
+                if (row == 0) {
+                    gearEditRespD2_ = clampGear((int)gearEditRespD2_ + delta,
+                                                can::GEAR_RESPONSE_D2_MIN_PCT,
+                                                can::GEAR_RESPONSE_D2_MAX_PCT);
+                } else if (row == 1) {
+                    gearEditRespD1_ = clampGear((int)gearEditRespD1_ + delta,
+                                                can::GEAR_RESPONSE_D1_MIN_PCT,
+                                                can::GEAR_RESPONSE_D1_MAX_PCT);
+                } else {
+                    gearEditRespR_ = clampGear((int)gearEditRespR_ + delta,
+                                               can::GEAR_RESPONSE_R_MIN_PCT,
+                                               can::GEAR_RESPONSE_R_MAX_PCT);
+                }
             }
             gearLimitsChanged_ = true;
             needsRedraw_       = true;
@@ -1816,12 +1860,16 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         }
         // Bottom action row: SAVE / RESTORE DEFAULTS.
         if (y >= GL_BTN_Y && y <= GL_BTN_Y + GL_BTN_H) {
-            // SAVE — push the three pending values, then commit.  The STM32
-            // re-validates and gates on STANDBY; the ACK drives the banner.
+            // SAVE — push ALL six pending values (power + response), then
+            // commit.  The STM32 re-validates both groups and gates on
+            // STANDBY; the single 0x10 ACK drives the banner.
             if (x >= GL_SAVE_X && x <= GL_SAVE_X + GL_BTN_W) {
                 sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D2, gearEditD2_);
                 sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D1, gearEditD1_);
                 sendGearLimitOp(can::GEAR_LIMIT_OP_SET_R,  gearEditR_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D2_RESPONSE, gearEditRespD2_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D1_RESPONSE, gearEditRespD1_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_R_RESPONSE,  gearEditRespR_);
                 sendGearLimitOp(can::GEAR_LIMIT_OP_SAVE,   0);
                 gearLimitsSaveWait_   = true;
                 gearLimitsSaveSentMs_ = lastFrameTimeMs_;
@@ -3595,6 +3643,29 @@ void EngineeringScreen::drawGearLimits() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
+    const bool showResp = gearLimitsShowResponse_;
+
+    // PAGE toggle button (top-right) — switches POWER <-> RESPONSE group.
+    {
+        tft.fillRect(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_DARK_GRAY);
+        RTRACE_FILL_RECT(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_DARK_GRAY);
+        tft.drawRect(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_GRAY);
+        const char* pageLbl = showResp ? "POWER >" : "RESPONSE >";
+        tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(pageLbl, GL_PAGE_X + GL_PAGE_W / 2, GL_PAGE_Y + GL_PAGE_H / 2);
+        RTRACE_TEXT(GL_PAGE_X + GL_PAGE_W / 2, GL_PAGE_Y + GL_PAGE_H / 2, pageLbl,
+                    ui::COL_CYAN, ui::COL_DARK_GRAY, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // Group title (which set is being edited)
+    tft.setTextColor(showResp ? ui::COL_CYAN : ui::COL_GREEN, ui::COL_BG);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(showResp ? "ACCEL RESPONSE %" : "POWER LIMIT %", 20, 40);
+    tft.setTextDatum(TL_DATUM);
+
     // Sub-header / column legend
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
     tft.drawString("Gear", 20, 52);
@@ -3603,7 +3674,7 @@ void EngineeringScreen::drawGearLimits() {
 
     struct Row { const char* name; uint8_t active; uint8_t edit;
                  uint8_t lo; uint8_t hi; };
-    const Row rows[3] = {
+    const Row powerRows[3] = {
         { "D2", gearActiveD2_, gearEditD2_,
           can::GEAR_LIMIT_D2_MIN_PCT, can::GEAR_LIMIT_D2_MAX_PCT },
         { "D1", gearActiveD1_, gearEditD1_,
@@ -3611,6 +3682,15 @@ void EngineeringScreen::drawGearLimits() {
         { "R",  gearActiveR_,  gearEditR_,
           can::GEAR_LIMIT_R_MIN_PCT,  can::GEAR_LIMIT_R_MAX_PCT },
     };
+    const Row responseRows[3] = {
+        { "D2", gearActiveRespD2_, gearEditRespD2_,
+          can::GEAR_RESPONSE_D2_MIN_PCT, can::GEAR_RESPONSE_D2_MAX_PCT },
+        { "D1", gearActiveRespD1_, gearEditRespD1_,
+          can::GEAR_RESPONSE_D1_MIN_PCT, can::GEAR_RESPONSE_D1_MAX_PCT },
+        { "R",  gearActiveRespR_,  gearEditRespR_,
+          can::GEAR_RESPONSE_R_MIN_PCT,  can::GEAR_RESPONSE_R_MAX_PCT },
+    };
+    const Row* rows = showResp ? responseRows : powerRows;
 
     char buf[24];
     for (int i = 0; i < 3; ++i) {
