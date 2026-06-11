@@ -40,6 +40,7 @@ maintenance.
 | 13 | TOUCH CALIBRATION | _wizard_ | Launch the persistent touch-calibration wizard. See [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md). |
 | 14 | RESET TOUCH CAL | _action_ | Erase persisted touch calibration in NVS and re-arm the first-boot wizard for the next reboot. |
 | 15 | MCP23017 LIVE (SHIFTER) | `MCP23017_LIVE` | ESP32-local MCP23017 shifter I2C live diagnostic (cached, no bus access from render path) |
+| 16 | GEAR LIMITS | `GEAR_LIMITS` | View/adjust per-gear traction power limits (D2/D1/R %). Edits staged locally, applied + persisted on the STM32 only on SAVE. See [`#gear-limits-screen`](#gear-limits-screen) |
 
 ## Presentation — Professional Tile Layout (FASE 2)
 
@@ -48,14 +49,16 @@ The main menu is rendered as a **professional, workshop-grade tile grid**
 rows. **The 15 functions, their dispatch and all submenu logic are
 unchanged** — only the presentation/touch geometry was redesigned. A tile tap
 maps back to the exact same item index and runs the exact same code path as
-the old list row.
+the old list row. (A 16th tile, **GEAR LIMITS**, was later appended on PAGE 2
+without altering items 1–15.)
 
 - **Two pages** of large touch tiles:
   - **PAGE 1** (3×3, items 1–9): Fault Viewer, Module Enable/Disable, Pedal
     Calibration, Encoder Calibration, INA226 Mapping, Temp Mapping, Factory
     Defaults, DTC Error Log, Maintenance.
-  - **PAGE 2** (3×2, items 10–15): Relay Control, INA226 Live Diag,
-    Debounce/CAN Diag, Touch Calibration, Reset Touch Cal, MCP23017 Live.
+  - **PAGE 2** (3×3, items 10–16): Relay Control, INA226 Live Diag,
+    Debounce/CAN Diag, Touch Calibration, Reset Touch Cal, MCP23017 Live,
+    Gear Limits.
 - **Tile size**: 148 × 72 px with a 10 px separation — well above the 44 px
   minimum touch target, usable with gloves. No overlaps; gaps intentionally
   separate tiles.
@@ -247,3 +250,52 @@ All factory defaults and module control commands use CAN ID `0x110` (SERVICE_CMD
 ACK responses received on CAN ID `0x103` (CMD_ACK):
 - Byte 0: Command ID low byte (0x10 for SERVICE_CMD)
 - Byte 1: Result (0=OK, 1=REJECTED, 2=INVALID, 3=BLOCKED_BY_SAFETY)
+
+## Gear Limits Screen
+
+The **GEAR LIMITS** sub-screen (`GEAR_LIMITS`, item 16) lets a technician view
+and adjust the per-gear traction power limits the **STM32** applies in
+`Traction_Update()` — expressed as a percentage of the pedal demand for each
+shifter position:
+
+| Gear | Default | Range | Notes |
+|------|---------|-------|-------|
+| **D2** | 100 % | 30–100 % | Maximum-power forward gear |
+| **D1** | 60 %  | 20–100 % | Reduced-power forward gear |
+| **R**  | 60 %  | 10–60 %  | Reverse. **Firmware reality is 60 %**, not 30 % — see note below |
+
+> **R discrepancy:** the original change request quoted R = 30 %, but the
+> shipped firmware applies `GEAR_POWER_REVERSE_PCT = 0.60` (60 %). To avoid
+> silently changing traction behaviour, the default is kept at the firmware
+> value (60 %); the allowed range (10–60 %) lets an operator set 30 % from this
+> screen if desired.
+
+**Controls**
+- Each gear row has a **−5 %** and **+5 %** stepper (clamped to the gear's
+  range) that edits a *local pending* value only.
+- **SAVE** transmits the three staged values (`SET_D2/D1/R`) followed by `SAVE`.
+- **RESTORE DEF.** restores factory defaults; it is destructive so it requires
+  a **double-tap confirmation** (the button turns red and reads `CONFIRM
+  RESTORE`; a 5 s timeout disarms it).
+- **BACK** discards all pending edits and returns to the main menu.
+
+**Display**
+- **ACTIVE** column = the limit the STM32 is applying right now (from the 0x30D
+  telemetry burst).
+- **EDIT** column = the pending value (highlighted amber when it differs from
+  ACTIVE).
+- Status banner: `SAVING…`, `SAVED`, `REJECTED (need STANDBY)`, `INVALID`, or
+  `TIMEOUT`.
+
+**Safety / behaviour**
+- Nothing changes until **SAVE** is pressed; `SET_*` only stages a pending value
+  on the STM32, it does not apply it.
+- `SET_*`, `SAVE` and `RESTORE DEFAULTS` are **STANDBY-only** on the STM32; a tap
+  outside STANDBY is answered with `BLOCKED_BY_SAFETY` (banner shows REJECTED).
+- The STM32 re-validates every value against its own ranges (`INVALID` on
+  failure) and only persists to flash (page 122, magic+CRC32, mirroring the
+  pedal-calibration store) when validation passes. Values survive reboot.
+- `QUERY` is read-only (no safety gate) and just triggers the telemetry burst.
+
+See the [CAN contract](CAN_CONTRACT_FINAL.md) for the `SERVICE_ACTION_GEAR_LIMITS`
+(`0xF7`) sub-opcodes and the `0x30D DIAG_GEAR_LIMITS` frame layout.

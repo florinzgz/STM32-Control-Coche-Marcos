@@ -454,8 +454,47 @@ for (uint8_t i = 0; i < 4; i++) {
 - La fórmula final es: `FinalPWM = base_pwm × obstacle_scale × ackermann_diff[i] × wheel_scale[i]`
 - La protección global de 90°C (`Safety_CheckTemperature() → SAFE`) sigue activa
 
-### Degradación de Asistencia de Dirección en Modo DEGRADED
+### Límites de Potencia por Marcha Configurables (D2/D1/R)
 
+`Traction_Update()` en `motor_control.c` escala la demanda de tracción según la
+posición de la palanca antes de calcular el PWM. Históricamente estos límites
+eran constantes de compilación (`GEAR_POWER_FORWARD_D2_PCT`,
+`GEAR_POWER_FORWARD_PCT`, `GEAR_POWER_REVERSE_PCT`). Ahora son **parámetros
+persistentes ajustables** desde el menú oculto ENGINEERING (pantalla *GEAR
+LIMITS*), sin recompilar firmware.
+
+| Marcha | Por defecto | Rango permitido |
+|--------|-------------|-----------------|
+| **D2** | 100 % | 30 – 100 % |
+| **D1** | 60 %  | 20 – 100 % |
+| **R**  | 60 %  | 10 – 60 % |
+
+> ⚠ **Aclaración R:** la petición original indicaba R = 30 %, pero el firmware
+> embarcado aplica `GEAR_POWER_REVERSE_PCT = 0.60` (60 %). Para **no** alterar
+> el comportamiento de tracción de forma silenciosa, el valor por defecto se
+> mantiene en 60 %; el rango (10–60 %) permite fijar 30 % manualmente desde la
+> pantalla si se desea.
+
+**Salvaguardas de seguridad:**
+
+- La **autoridad reside en el STM32**: la ESP32 sólo actúa como HMI/configurador.
+- Toda operación de escritura (SET/SAVE/RESET) exige `SYS_STATE_STANDBY`; fuera
+  de STANDBY el STM32 responde `ACK_BLOCKED_BY_SAFETY` y **no** modifica nada.
+- El STM32 **valida los rangos** (`Traction_ValidateGearLimits()`) antes de
+  aceptar; valores fuera de rango → `ACK_INVALID` (no se aplican ni se guardan).
+- **Nada cambia hasta SAVE**: los SET sólo preparan valores pendientes en RAM.
+- Persistencia en flash (página 122, magic `"GLM1"` + CRC32, mismo mecanismo
+  que la calibración de pedal). Los valores sobreviven al reinicio y se
+  re-aplican en arranque (`GearLimitsStore_Init()` en `main.c`).
+- Si el slot de flash está ausente o corrupto se usan los valores por defecto;
+  no se borran otras calibraciones.
+
+Estos límites coexisten con ABS/TCS, la protección térmica per-motor y la
+degradación Limp: el factor más restrictivo sigue ganando, ya que el escalado
+de marcha se aplica sobre la demanda base antes de `obstacle_scale`,
+`ackermann_diff[i]` y `wheel_scale[i]`.
+
+### Degradación de Asistencia de Dirección en Modo DEGRADED
 Cuando el sistema entra en estado `SYS_STATE_DEGRADED`, la asistencia de
 dirección se reduce automáticamente según el **nivel de degradación interno**
 (Phase 12) para disminuir la agresividad del motor de dirección y mejorar la
