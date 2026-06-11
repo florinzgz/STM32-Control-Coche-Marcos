@@ -23,6 +23,7 @@
 
 #include "screen.h"
 #include "config_store.h"
+#include "can_ids.h"
 #include "../shifter_input.h"
 #include <cstdint>
 
@@ -66,7 +67,8 @@ private:
         RELAY_CONTROL,     // Manual relay override (engineering diagnostic)
         INA226_LIVE_DIAG,  // Live INA226/current diagnostic viewer
         DEBOUNCE_DIAG,     // DWT-debounce EMI filtered counters viewer
-        MCP23017_LIVE      // ESP32-local MCP23017 shifter I2C live diagnostic
+        MCP23017_LIVE,     // ESP32-local MCP23017 shifter I2C live diagnostic
+        GEAR_LIMITS        // Configurable per-gear traction power limits (D2/D1/R)
     };
 
     void drawMainMenu();
@@ -87,6 +89,7 @@ private:
     void drawInaLiveDiag();
     void drawDebounceDiag();
     void drawMcpLiveDiag();
+    void drawGearLimits();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -285,6 +288,43 @@ private:
     // Coarse change-detection signature so the page repaints ~1 Hz / on change
     // without thrashing the TFT.  Combines counters + raw + age (seconds).
     uint32_t      mcpDiagSig_      = 0xFFFFFFFFu;
+
+    // ---- Gear power-limits editor (GEAR_LIMITS submenu, 0x30D telemetry) ----
+    // Active values = limits currently applied by the STM32 (from 0x30D).
+    // Edit values   = local pending edits (only after the user taps +/-).
+    // Nothing is sent to the STM32 until SAVE; BACK without SAVE discards.
+    enum class GearAck : uint8_t { NONE = 0, SAVED, REJECTED, INVALID, TIMEOUT };
+    uint8_t       gearActiveD2_      = can::GEAR_LIMIT_D2_DEFAULT_PCT;
+    uint8_t       gearActiveD1_      = can::GEAR_LIMIT_D1_DEFAULT_PCT;
+    uint8_t       gearActiveR_       = can::GEAR_LIMIT_R_DEFAULT_PCT;
+    uint8_t       gearEditD2_        = can::GEAR_LIMIT_D2_DEFAULT_PCT;
+    uint8_t       gearEditD1_        = can::GEAR_LIMIT_D1_DEFAULT_PCT;
+    uint8_t       gearEditR_         = can::GEAR_LIMIT_R_DEFAULT_PCT;
+    // Accel-response profile (v2) — second editable group on the same screen.
+    uint8_t       gearActiveRespD2_  = can::GEAR_RESPONSE_D2_DEFAULT_PCT;
+    uint8_t       gearActiveRespD1_  = can::GEAR_RESPONSE_D1_DEFAULT_PCT;
+    uint8_t       gearActiveRespR_   = can::GEAR_RESPONSE_R_DEFAULT_PCT;
+    uint8_t       gearEditRespD2_    = can::GEAR_RESPONSE_D2_DEFAULT_PCT;
+    uint8_t       gearEditRespD1_    = can::GEAR_RESPONSE_D1_DEFAULT_PCT;
+    uint8_t       gearEditRespR_     = can::GEAR_RESPONSE_R_DEFAULT_PCT;
+    // Which group is shown: false = POWER page, true = RESPONSE page.
+    bool          gearLimitsShowResponse_ = false;
+    bool          gearLimitsEditActive_ = false;   // true once the user edits
+    bool          gearLimitsChanged_    = false;   // repaint trigger
+    bool          gearLimitsRestoreArm_ = false;   // RESTORE double-confirm armed
+    bool          gearLimitsSaveWait_   = false;   // awaiting ACK after SAVE
+    GearAck       gearLimitsAck_        = GearAck::NONE;
+    unsigned long gearLimitsAckMs_      = 0;       // frameTimeMs when ACK shown
+    unsigned long gearLimitsSaveSentMs_ = 0;       // frameTimeMs at SAVE tx
+    unsigned long gearLimitsLastTs_     = 0;       // last consumed 0x30D ts
+    unsigned long gearLimitsLastQueryMs_ = 0;      // last QUERY tx (ms)
+    unsigned long gearLimitsRestoreArmMs_ = 0;     // frameTimeMs RESTORE armed
+    unsigned long lastFrameTimeMs_ = 0;            // cached frameTimeMs (update)
+    static constexpr unsigned long GEAR_SAVE_TIMEOUT_MS    = 2000;
+    static constexpr unsigned long GEAR_ACK_CLEAR_MS       = 3000;
+    static constexpr unsigned long GEAR_RESTORE_CONFIRM_MS = 5000;
+    // Emit SERVICE_CMD 0x110 byte0=0xF7 (GEAR_LIMITS) + sub-opcode + value.
+    void sendGearLimitOp(uint8_t op, uint8_t value);
 };
 
 #endif // ENGINEERING_SCREEN_H

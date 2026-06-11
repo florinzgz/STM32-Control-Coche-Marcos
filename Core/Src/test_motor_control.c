@@ -1525,6 +1525,74 @@ static void test_delay_us_zero(void)
     ASSERT_TRUE(1);  /* If we reach here, it didn't block */
 }
 
+/* ==================================================================
+ *  Test: per-gear acceleration RESPONSE profile (D2/D1/R)
+ *
+ *  Replicates the exact "soften only" stage from
+ *  motor_control.c::Traction_SetDemand() (applied after EMA#2, before
+ *  the ramp limiter) and verifies the safety invariants:
+ *    - D2 100 % is identity (no behaviour change for full performance)
+ *    - D1 70 % and R 40 % soften the demand target
+ *    - the factor can NEVER amplify demand (result <= input)
+ *    - dynamic braking (negative demand) is untouched
+ *    - the power limit, applied downstream, stays independent & intact
+ * ================================================================== */
+
+/* Mirror of the response stage in Traction_SetDemand(). */
+static float apply_gear_response(float ema_target, uint8_t resp_pct)
+{
+    float target = ema_target;
+    if (target > 0.0f) {
+        float resp = (float)resp_pct * 0.01f;
+        if (resp > 1.0f) resp = 1.0f;   /* never amplify   */
+        if (resp < 0.0f) resp = 0.0f;   /* defensive floor */
+        target *= resp;
+    }
+    return target;
+}
+
+static void test_gear_response_profile(void)
+{
+    const float demand = 50.0f;   /* representative positive pedal demand */
+
+    /* D2 = 100 % response → identity (no change). */
+    float d2 = apply_gear_response(demand, 100U);
+    ASSERT_TRUE(fabsf(d2 - demand) < 0.001f);
+
+    /* D1 = 70 % response → 35.0, strictly softer than D2. */
+    float d1 = apply_gear_response(demand, 70U);
+    ASSERT_TRUE(fabsf(d1 - 35.0f) < 0.001f);
+    ASSERT_TRUE(d1 < d2);
+
+    /* R = 40 % response → 20.0, softer still than D1. */
+    float r = apply_gear_response(demand, 40U);
+    ASSERT_TRUE(fabsf(r - 20.0f) < 0.001f);
+    ASSERT_TRUE(r < d1);
+
+    /* Never amplify: across the full legal range the result is <= input. */
+    for (uint8_t p = 20U; p <= 100U; p++) {
+        float out = apply_gear_response(demand, p);
+        ASSERT_TRUE(out <= demand + 0.001f);
+    }
+
+    /* Dynamic braking (negative demand) is completely untouched. */
+    float brake = apply_gear_response(-30.0f, 40U);
+    ASSERT_TRUE(fabsf(brake - (-30.0f)) < 0.001f);
+
+    /* Zero demand stays zero (no division / NaN). */
+    float zero = apply_gear_response(0.0f, 40U);
+    ASSERT_TRUE(fabsf(zero) < 0.001f);
+
+    /* Power limit independence: the response stage runs first, the power
+     * limit (e.g. D1 = 60 %) is applied downstream in Traction_Update().
+     * The two scalings compose multiplicatively and the final demand is
+     * still strictly below the original (limits remain intact).          */
+    float power_limit = 0.60f;
+    float final_demand = apply_gear_response(demand, 70U) * power_limit;
+    ASSERT_TRUE(fabsf(final_demand - (35.0f * 0.60f)) < 0.001f);
+    ASSERT_TRUE(final_demand < demand);
+}
+
 /* ---- main ------------------------------------------------------------ */
 
 int main(void)
@@ -1591,6 +1659,9 @@ int main(void)
     test_fault_handler_ccr_zero_logic();
     test_fault_handler_en_first_order();
     test_delay_us_zero();
+
+    /* ---- Per-gear acceleration response profile (D2/D1/R) ---- */
+    test_gear_response_profile();
 
     printf("\n--- motor_control M4 brake/coast/drive + hardening tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

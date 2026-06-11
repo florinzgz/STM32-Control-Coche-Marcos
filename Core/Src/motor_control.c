@@ -8,6 +8,7 @@
 #include "motor_control.h"
 #include "ackermann.h"
 #include "eps_params.h"
+#include "gear_limits_store.h"
 #include "main.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
@@ -284,7 +285,15 @@ static inline float sanitize_float(float val, float safe_default)
  *   GEAR_REVERSE       = 60 % max power
  *
  * Safety_GetPowerLimitFactor() is applied separately upstream and
- * is NOT modified by this scaling.                                     */
+ * is NOT modified by this scaling.
+ *
+ * RUNTIME-CONFIGURABLE (R-2): the three fractions below are no longer
+ * hard-coded.  They are seeded from the GEAR_LIMIT_*_DEFAULT_PCT macros
+ * (which equal the historic compile-time values, so default behaviour is
+ * unchanged) and may be overridden at runtime via Traction_SetGearLimits()
+ * — sourced either from the gear_limits_store.c flash slot at boot or from
+ * the CAN Engineering-menu service command.  The macros below are kept as
+ * the single compile-time default source for RESTORE DEFAULTS.            */
 #define GEAR_POWER_FORWARD_PCT   0.60f   /* D1: 60 % max power            */
 #define GEAR_POWER_FORWARD_D2_PCT 1.00f /* D2: 100 % max power           */
 #define GEAR_POWER_REVERSE_PCT   0.60f  /* R:  60 % max power            */
@@ -438,6 +447,25 @@ static int8_t          neutral_ramp_dir   = 1;     /* Captured travel direction*
  * already force the traction demand to 0 (see main.c:483-484), so this
  * is the strictest fail-safe boot state.                                */
 static GearPosition_t current_gear = GEAR_NEUTRAL;
+
+/* ---- Runtime-configurable gear power limits (R-2) ----
+ * Stored as percent (0..100) for an exact match with the Engineering-menu
+ * UI and the CAN/flash representation; converted to a fraction at the
+ * point of use.  Seeded from the compile-time defaults so a unit with no
+ * valid flash slot behaves identically to the historic firmware.        */
+static uint8_t gear_limit_d2_pct = GEAR_LIMIT_D2_DEFAULT_PCT;
+static uint8_t gear_limit_d1_pct = GEAR_LIMIT_D1_DEFAULT_PCT;
+static uint8_t gear_limit_r_pct  = GEAR_LIMIT_R_DEFAULT_PCT;
+
+/* ---- Runtime-configurable per-gear acceleration RESPONSE profile ----
+ * Stored as percent (0..100); applied in Traction_SetDemand() after EMA#2
+ * and before the global ramp limiter.  Softens the demand target per gear
+ * (positive demand only, clamped to <=100 % so it can never amplify).
+ * Seeded from the compile-time response defaults so a unit with no valid
+ * (or only a legacy power-only) flash slot has well-defined behaviour.   */
+static uint8_t gear_response_d2_pct = GEAR_RESPONSE_D2_DEFAULT_PCT;
+static uint8_t gear_response_d1_pct = GEAR_RESPONSE_D1_DEFAULT_PCT;
+static uint8_t gear_response_r_pct  = GEAR_RESPONSE_R_DEFAULT_PCT;
 
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
@@ -945,13 +973,40 @@ void Traction_SetDemand(float throttlePct)
                   + (1.0f - PEDAL_EMA_ALPHA) * pedal_ema;
     }
 
-    /* ---- B) Ramp rate limiter (applied after EMA) ---- */
+    /* ---- A.1) Per-gear acceleration RESPONSE profile ----
+     * Applied to the EMA output, AFTER EMA#2 and BEFORE the ramp limiter
+     * (the exact point recommended by the pedal→PWM audit).  The factor
+     * softens the demand target the ramp chases, making acceleration more
+     * progressive in the selected gear.  Strictly a "soften only" stage:
+     *   - applied to POSITIVE demand only (reverse direction is handled
+     *     downstream in Traction_Update(); demand here is always positive);
+     *   - the factor is clamped to <= 1.0 so it can NEVER amplify demand;
+     *   - the EMA state (pedal_ema) is NOT mutated, only the local target,
+     *     so the noise filter and frozen/step anomaly detection upstream
+     *     are completely unaffected.
+     * This stage does not touch dynamic braking (negative demand), ABS/TCS
+     * wheel_scale[], obstacle_scale, the power limits, SAFE or LIMP_HOME. */
+    float target = pedal_ema;
+    if (target > 0.0f) {
+        float resp;
+        if (current_gear == GEAR_FORWARD_D2) {
+            resp = (float)gear_response_d2_pct * 0.01f;
+        } else if (current_gear == GEAR_REVERSE) {
+            resp = (float)gear_response_r_pct * 0.01f;
+        } else {
+            resp = (float)gear_response_d1_pct * 0.01f;
+        }
+        if (resp > 1.0f) resp = 1.0f;   /* never amplify */
+        if (resp < 0.0f) resp = 0.0f;   /* defensive floor */
+        target *= resp;
+    }
+
+    /* ---- B) Ramp rate limiter (applied after EMA + response profile) ---- */
     uint32_t now = HAL_GetTick();
     float dt = (float)(now - pedal_last_tick) / 1000.0f;
     if (dt < 0.001f) dt = 0.001f;   /* guard against zero / tiny dt */
     pedal_last_tick = now;
 
-    float target = pedal_ema;
     float diff   = target - pedal_ramped;
 
     if (diff > 0.0f) {
@@ -993,6 +1048,64 @@ void Traction_SetGear(GearPosition_t gear)
 GearPosition_t Traction_GetGear(void)
 {
     return current_gear;
+}
+
+/* ---- Runtime-configurable gear power limits (R-2) ---------------- */
+
+bool Traction_ValidateGearLimits(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    /* Delegate to the single source of truth in gear_limits_store so the
+     * CAN handler, the flash loader and the motor controller all agree.  */
+    return GearLimitsStore_Validate(d2_pct, d1_pct, r_pct);
+}
+
+bool Traction_SetGearLimits(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    if (!Traction_ValidateGearLimits(d2_pct, d1_pct, r_pct))
+        return false;
+    /* Single-byte writes are atomic on Cortex-M4; the next Traction_Update()
+     * cycle picks up the new fractions.  No effect on ramp limiter or the
+     * ABS/TCS per-wheel scaling applied downstream.                        */
+    gear_limit_d2_pct = d2_pct;
+    gear_limit_d1_pct = d1_pct;
+    gear_limit_r_pct  = r_pct;
+    return true;
+}
+
+void Traction_GetGearLimits(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
+{
+    if (d2_pct) *d2_pct = gear_limit_d2_pct;
+    if (d1_pct) *d1_pct = gear_limit_d1_pct;
+    if (r_pct)  *r_pct  = gear_limit_r_pct;
+}
+
+/* ---- Runtime-configurable per-gear acceleration RESPONSE profile ---- */
+
+bool Traction_ValidateGearResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    /* Delegate to the single source of truth in gear_limits_store so the
+     * CAN handler, the flash loader and the motor controller all agree.  */
+    return GearLimitsStore_ValidateResponse(d2_pct, d1_pct, r_pct);
+}
+
+bool Traction_SetGearResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    if (!Traction_ValidateGearResponse(d2_pct, d1_pct, r_pct))
+        return false;
+    /* Single-byte writes are atomic on Cortex-M4; the next Traction_SetDemand()
+     * call picks up the new factors.  No effect on the EMA state, the ramp
+     * limiter constants, dynamic braking, or the ABS/TCS scaling.          */
+    gear_response_d2_pct = d2_pct;
+    gear_response_d1_pct = d1_pct;
+    gear_response_r_pct  = r_pct;
+    return true;
+}
+
+void Traction_GetGearResponse(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
+{
+    if (d2_pct) *d2_pct = gear_response_d2_pct;
+    if (d1_pct) *d1_pct = gear_response_d1_pct;
+    if (r_pct)  *r_pct  = gear_response_r_pct;
 }
 
 /* ==================================================================
@@ -1365,11 +1478,11 @@ void Traction_Update(void)
     if (effective_demand > 0.0f) {
         float gear_scale;
         if (current_gear == GEAR_FORWARD_D2) {
-            gear_scale = GEAR_POWER_FORWARD_D2_PCT;
+            gear_scale = (float)gear_limit_d2_pct * 0.01f;
         } else if (current_gear == GEAR_REVERSE) {
-            gear_scale = GEAR_POWER_REVERSE_PCT;
+            gear_scale = (float)gear_limit_r_pct * 0.01f;
         } else {
-            gear_scale = GEAR_POWER_FORWARD_PCT;
+            gear_scale = (float)gear_limit_d1_pct * 0.01f;
         }
         effective_demand *= gear_scale;
     }

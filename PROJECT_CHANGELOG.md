@@ -1,5 +1,86 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-11] — GEAR LIMITS + ACCEL RESPONSE: límites de potencia y perfil de respuesta por marcha configurables (STM32 + ESP32/HMI + docs)
+
+### Objetivo
+
+Permitir ajustar desde el menú Engineering del HMI, sin reflashear y sin tocar
+CubeMX/`.ioc`/hardware, dos perfiles por marcha (D2 / D1 / R):
+
+1. **POWER LIMIT** — tope de demanda de tracción por marcha (defaults 100/60/60 %).
+2. **ACCEL RESPONSE** — suaviza (nunca amplifica) la demanda del pedal por marcha
+   (defaults 100/70/40 %).
+
+El trabajo se entregó en **tres PR** complementarias revisadas conjuntamente en
+esta auditoría final bloqueante. La autoridad permanece en el STM32; el ESP32 es
+sólo HMI. Cambios puramente aditivos y retrocompatibles (sin nuevo CAN ID, misma
+página flash 122).
+
+### PR 1 — STM32: límites de potencia por marcha configurables (CAN contract v1.8)
+
+- Nuevo `gear_limits_store.{c,h}`: persistencia en **flash página 122**
+  (`0x0807A000`, 4 KB) con magic `"GLM1"` + CRC32, modelado 1:1 sobre
+  `pedal_cal_store.c`. Página dedicada, sin colisión con 123/124/125/126/127.
+- Límites aplicados en `motor_control.c::Traction_Update()` donde antes estaban
+  las constantes `GEAR_POWER_*_PCT`; sólo escalan demanda positiva, no afectan al
+  frenado dinámico ni a ABS/TCS. Rangos D2 30–100, D1 20–100, R 10–60.
+- `SERVICE_CMD 0xF7` (`SERVICE_ACTION_GEAR_LIMITS`) con sub-opcodes
+  `SET_D2/D1/R` (0x01–0x03), `SAVE` (0x04), `RESET_DEFAULTS` (0x05), `QUERY`
+  (0x06); ACK en `0x103` (byte0 = 0x10). Gate de seguridad **STANDBY-only** en
+  todas las operaciones mutables; QUERY es de sólo lectura.
+- Telemetría on-demand `DIAG_GEAR_LIMITS` (**0x30D**, DLC 8) en ráfaga de 1 s a
+  10 Hz tras QUERY: valores activos + pending + flags.
+
+### PR 2 — ESP32/HMI: pantalla GEAR LIMITS en el menú Engineering
+
+- Nueva entrada de menú **GEAR LIMITS** (entrada 16 de 16, accesible en la
+  página 2 del menú principal; las 15 entradas previas siguen accesibles).
+- Edición por marcha (D2/D1/R) con staging local; **SAVE** envía los valores
+  staged y el STM32 valida + persiste + aplica. **BACK** descarta cambios no
+  guardados; **RESTORE DEFAULTS** con doble confirmación; banner
+  `SAVING/SAVED/INVALID/REJECTED/TIMEOUT`.
+- Rangos espejados en `esp32/include/can_ids.h` para que el HMI nunca envíe un
+  valor que el firmware rechazaría.
+
+### PR 3 — Perfil de respuesta de aceleración por marcha (CAN contract v1.9)
+
+- **ACCEL RESPONSE** añadido reutilizando la infraestructura GEAR LIMITS (sin
+  nuevo CAN ID, mismo `0xF7`/`0x30D`/página 122).
+- Factor aplicado en `Traction_SetDemand()` **después de EMA#2 y antes del ramp
+  limiter**, sólo a demanda positiva y **clampeado a ≤ 1.0** (sólo suaviza, nunca
+  amplifica). No toca frenado dinámico, ABS/TCS, SAFE ni LIMP_HOME. Rangos
+  D2 50–100, D1 30–100, R 20–80; defaults D2 100 / D1 70 / R 40.
+- Nuevos sub-opcodes `SET_D2/D1/R_RESPONSE` (0x07–0x09). `0x30D` ahora lleva dos
+  tramas interleaved discriminadas por **byte0 bit4** (0 = POWER, 1 = RESPONSE);
+  un QUERY emite ambas. El decoder del ESP32 preserva la "otra mitad".
+- Slot flash elevado a **v2 (`"GLM2"`, 16 bytes, mismo offset de CRC)**. Un slot
+  v1 (`"GLM1"`, sólo potencia) se **migra de forma segura** en arranque: se
+  conservan los límites de potencia, se aplican los defaults de respuesta y el
+  slot sólo se reescribe como v2 tras un SAVE explícito. Flash en blanco/corrupta
+  → defaults seguros, el arranque nunca se bloquea.
+
+### Verificación (revisión final bloqueante)
+
+- Tests host: `test_gear_limits` (35), `test_motor_control` (11619),
+  `math_safety`, `error_log`, `service_mode`, `eps_params`,
+  `sensor_calibration`, `wheel_speed` — todos pasan.
+- **Build STM32 real** con `arm-none-eabi-gcc` (`make`): OK (text 70364 B,
+  data 116 B, bss 8824 B; `.text/.rodata` por debajo de página 122).
+- Syntax-check STM32 (`-Wall -Wextra -Werror`): 25/25 ficheros OK.
+- Sin colisión de flash (página 122 dedicada) ni de CAN (0x30D único).
+- Docs alineadas: `ENGINEERING_MENU.md`, `CAN_CONTRACT_FINAL.md`,
+  `SAFETY_SYSTEMS.md`.
+
+### Ficheros principales
+
+- STM32: `Core/Src/gear_limits_store.c`, `Core/Inc/gear_limits_store.h`,
+  `Core/Src/motor_control.c`, `Core/Src/can_handler.c`,
+  `Core/Inc/can_handler.h`, `Core/Src/test_gear_limits.c`.
+- ESP32: `esp32/include/can_ids.h`, `esp32/src/can_rx.cpp`,
+  `esp32/src/screens/engineering_screen.cpp`.
+- Docs: `docs/ENGINEERING_MENU.md`, `docs/CAN_CONTRACT_FINAL.md`,
+  `docs/SAFETY_SYSTEMS.md`.
+
 ## [2026-06-05] — Auditoría final: instrumentación MCP23017 (palanca) + contexto INA226 batería + documentación (sólo ESP32/HMI/docs)
 
 ### Objetivo

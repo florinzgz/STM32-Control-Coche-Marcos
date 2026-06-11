@@ -1,8 +1,8 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.4
-**Status:** ACTIVE — Added DWT-debounce EMI diagnostic counters (additive)
-**Date:** 2026-05-01
+**Revision:** 1.8
+**Status:** ACTIVE — Added configurable per-gear traction power limits (additive)
+**Date:** 2026-06-11
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
 Any change to this contract requires a new numbered revision and a corresponding firmware release.
@@ -16,6 +16,8 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.5** (2026-06-01): Added `DIAG_I2C` (0x309, DLC 5, 1000 ms) I2C topology diagnostic: TCA9548A (0x70) presence + per-channel INA226 (0x40) health mask + fail/recovery counters. Surfaced on the HMI Safe Mode screen so a missing mux can be told apart from a dead INA226. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes it (backward-compatible).
 - **1.6** (2026-06-01): Added CAN/I2C delivery-observability diagnostics (audit "0x309: NO DATA"): `DIAG_CAN_META` (0x30A, DLC 8, 1000 ms — 0x309 call/tick/tx-ok/tx-err/fifo-drop counters), `DIAG_I2C_SCAN` (0x30B, DLC 8, on-demand) and `DIAG_FDCAN` (0x30C, DLC 6, on-demand) emitted after `SERVICE_CMD` action `0xF6` (`SERVICE_ACTION_I2C_SERVICE`). Added a `HAL_FDCAN_GetTxFifoFreeLevel()` guard in `TransmitFrame()` that counts FIFO-full drops instead of silently failing. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes these values (backward-compatible).
 - **1.7** (2026-06-02): Phase-based I2C diagnostics. Extended `DIAG_I2C` (0x309) to DLC 6 with byte5 = `ina_expected_mask` (bit i = channel i's power branch is energised this phase). STM32 now only counts I2C timeouts toward the bus-fault/recovery/Error-Code-11 logic for INA226 channels whose branch should be powered, so the motor INAs (ch0..3, wired after the traction relay) and steering INA (ch5) no longer trigger a false Code 11 in SAFE/STANDBY. Battery INA (ch4) stays always-expected/obligatory. HMI Safe Mode shows un-powered branches as **WAIT PWR** (cyan) instead of FAIL (red). Purely additive, STM32 → ESP32 — DLC-5 consumers ignore byte5 (backward-compatible).
+- **1.8** (2026-06-11): Added configurable per-gear traction power limits. New `SERVICE_CMD` action `0xF7` (`SERVICE_ACTION_GEAR_LIMITS`) with sub-opcodes `SET_D2/D1/R` (0x01–0x03, byte2 = percent), `SAVE` (0x04), `RESET_DEFAULTS` (0x05) and `QUERY` (0x06); replies on the existing `CMD_ACK` (0x103, byte0 = 0x10). New telemetry `DIAG_GEAR_LIMITS` (0x30D, DLC 8, on-demand burst after QUERY) reports active + pending D2/D1/R limits and flags. The STM32 owns range validation (D2 30–100, D1 20–100, R 10–60), a STANDBY-only safety gate on all mutating ops, and flash persistence (page 122, magic+CRC32, mirroring the pedal-cal store). Purely additive, bidirectional config/diagnostic — firmware without the GEAR LIMITS screen ignores 0x30D and never sends 0xF7 (backward-compatible). The shipped reverse default is 60 % (`GEAR_POWER_REVERSE_PCT = 0.60`); the request's "R = 30 %" is achievable via the editor but is **not** the firmware default.
+- **1.9** (2026-06-11): Extended GEAR LIMITS with a per-gear **acceleration response profile** reusing the same infrastructure (no new CAN ID, same `0xF7`/`0x30D`/page 122). New sub-opcodes `SET_D2/D1/R_RESPONSE` (0x07–0x09, byte2 = percent). `0x30D` now carries two interleaved frame kinds discriminated by byte0 **bit4** (0=POWER, 1=RESPONSE); a QUERY emits both. The response factor is applied in `Traction_SetDemand()` after EMA#2 and before the global ramp limiter, to **positive demand only**, clamped ≤ 100 % so it can only soften (never amplify) demand — it does not touch ABS/TCS/dynamic-braking/SAFE/LIMP. Response ranges D2 50–100, D1 30–100, R 20–80; defaults D2 100 / D1 70 / R 40. Flash slot upgraded to v2 (`"GLM2"`, 16 bytes, same CRC offset); v1 (`"GLM1"`, power-only) slots are migrated safely on read (power kept, response defaults applied, rewritten as v2 only on next SAVE). Purely additive and backward-compatible.
 
 ---
 
@@ -109,6 +111,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x30A | DIAG_CAN_META | 8 | 1000 ms | 0x309 delivery meta: byte0-1=call_count u16 LE, byte2-3=tick_count u16 LE, byte4=tx_ok, byte5=tx_err, byte6=fifo_full_drops, byte7=flags(bit0=fdcan_init_ok) | `can_handler.c`, `main.c` |
 | 0x30B | DIAG_I2C_SCAN | 8 | on-demand | Active I2C scan (after SERVICE 0xF6): byte0=bus_flags(bit0 scl_high,bit1 sda_high,bit2 rec_attempted,bit3 rec_success), byte1=mux_present, byte2=ina_present_mask, byte3=fail_count, byte4=recovery_attempts | `can_handler.c`, `sensor_manager.c` |
 | 0x30C | DIAG_FDCAN | 6 | on-demand | FDCAN error dump (after SERVICE 0xF6): byte0=last_error_code(LEC), byte1=state_flags(bit0 epassive,bit1 busoff,bit2 warning), byte2=tec, byte3=rec, byte4=tx_nack_flag, byte5=tx_consec_fail | `can_handler.c` |
+| 0x30D | DIAG_GEAR_LIMITS | 8 | on-demand | Gear power limits + accel response (burst after SERVICE 0xF7 QUERY). Two interleaved frame kinds share this ID, selected by byte0 bit4: **bit4=0 POWER**, **bit4=1 RESPONSE**. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid,bit4 frame-kind), byte1-3=active D2/D1/R %, byte4-6=pending D2/D1/R %, byte7=system_state. A QUERY emits both frames back-to-back; a decoder must preserve the "other half" when updating. | `can_handler.c`, `motor_control.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -444,6 +447,54 @@ Source: `CAN_ProcessMessages()` in `can_handler.c`
 - No blocking delays — ACK check is polled in the main loop
 
 Source: `CAN_SendCommandAck()` in `can_handler.c`, `CAN_AckResult_t` in `can_handler.h`
+
+### 4.18 SERVICE_CMD GEAR_LIMITS (0x110 action 0xF7) — ESP32 → STM32 (rev 1.8, extended rev 1.9, additive)
+
+Configures the per-gear traction **power limits** (applied in `Traction_Update()`)
+**and** the per-gear acceleration **response profile** (applied in
+`Traction_SetDemand()` after EMA#2, before the global ramp limiter).
+The frame reuses `SERVICE_CMD` (0x110); byte 0 selects the action, byte 1 the
+sub-opcode, byte 2 the percent value (for SET ops).
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | action | uint8 | `0xF7` = `SERVICE_ACTION_GEAR_LIMITS` |
+| 1 | op | uint8 | Sub-opcode (see table) |
+| 2 | value | uint8 | Percent (SET ops only; ignored otherwise) |
+
+**Sub-opcodes (byte 1):**
+
+| Op | Name | DLC | Effect |
+|----|------|-----|--------|
+| 0x01 | GEAR_LIMIT_OP_SET_D2 | 3 | Stage pending D2 power limit = byte2 % (RAM only, not applied) |
+| 0x02 | GEAR_LIMIT_OP_SET_D1 | 3 | Stage pending D1 power limit = byte2 % |
+| 0x03 | GEAR_LIMIT_OP_SET_R  | 3 | Stage pending R power limit = byte2 % |
+| 0x04 | GEAR_LIMIT_OP_SAVE   | 2 | Validate full pending set (power + response), persist to flash, apply |
+| 0x05 | GEAR_LIMIT_OP_RESET_DEFAULTS | 2 | Persist + apply factory defaults (power D2=100/D1=60/R=60, response D2=100/D1=70/R=40) |
+| 0x06 | GEAR_LIMIT_OP_QUERY  | 2 | Emit a `DIAG_GEAR_LIMITS` (0x30D) burst — POWER **and** RESPONSE frames (read-only, no safety gate) |
+| 0x07 | GEAR_LIMIT_OP_SET_D2_RESPONSE | 3 | Stage pending D2 accel response = byte2 % (RAM only) |
+| 0x08 | GEAR_LIMIT_OP_SET_D1_RESPONSE | 3 | Stage pending D1 accel response = byte2 % |
+| 0x09 | GEAR_LIMIT_OP_SET_R_RESPONSE  | 3 | Stage pending R accel response = byte2 % |
+
+**Validation & safety (STM32-side):**
+- Power ranges: D2 30–100 %, D1 20–100 %, R 10–60 %.
+- Response ranges: D2 50–100 %, D1 30–100 %, R 20–80 %. Out-of-range → `ACK_INVALID`.
+  The response factor only **softens** demand (every max ≤ 100 %, never amplifies).
+- All mutating ops (SET/SAVE/RESET) require `SYS_STATE_STANDBY`; otherwise
+  `ACK_BLOCKED_BY_SAFETY`. QUERY is always allowed.
+- Persistence: flash page 122 (0x0807A000), CRC32-protected. The slot is
+  16 bytes; v1 (`"GLM1"`, power only) is migrated on read to v2 (`"GLM2"`,
+  power + response) — the persisted power limits are kept and the response
+  defaults (100/70/40) are applied until the next SAVE rewrites the slot as v2.
+  A blank/corrupt slot falls back to all defaults. Identical flash mechanism to
+  the pedal-calibration store (`gear_limits_store.c`). Values survive reboot and
+  are re-applied at boot.
+- Every op replies with exactly one `CMD_ACK` (0x103, cmd_id_low = 0x10).
+
+Source: `gearlim_handle_service_cmd()` in `can_handler.c`,
+`Traction_{Validate,Set,Get}GearLimits()` and
+`Traction_{Validate,Set,Get}GearResponse()` in `motor_control.c`,
+`GearLimitsStore_*` in `gear_limits_store.c`.
 
 ---
 

@@ -64,6 +64,7 @@ extern "C" {
 #define CAN_ID_DIAG_CAN_META      0x30A  // STM32 → ESP32 (1000ms) CAN/0x309 delivery meta-diagnostic (additive)
 #define CAN_ID_DIAG_I2C_SCAN      0x30B  // STM32 → ESP32 (on-demand) I2C service-mode scan report (additive)
 #define CAN_ID_DIAG_FDCAN         0x30C  // STM32 → ESP32 (on-demand) FDCAN error-counter dump (additive)
+#define CAN_ID_DIAG_GEAR_LIMITS   0x30D  // STM32 → ESP32 (on-demand, after QUERY) gear power-limit + accel-response telemetry (frame-kind in byte0 bit4)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -80,6 +81,7 @@ extern "C" {
 #define SERVICE_ACTION_CLEAR_ERROR_LOG     0xFE
 #define SERVICE_ACTION_PEDAL_CAL           0xF5  /* Pedal endpoint calibration (byte1 = sub-opcode) */
 #define SERVICE_ACTION_I2C_SERVICE         0xF6  /* I2C service-mode scan: probe mux/INA, SDA/SCL levels, recovery */
+#define SERVICE_ACTION_GEAR_LIMITS         0xF7  /* Gear power-limit config (byte1 = sub-opcode, byte2 = percent) */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
@@ -93,6 +95,30 @@ extern "C" {
 #define PEDAL_CAL_OP_SAVE           0x03U
 #define PEDAL_CAL_OP_RESET_DEFAULTS 0x04U
 #define PEDAL_CAL_OP_QUERY          0x05U
+
+/* ---- Gear power-limit + accel-response sub-opcodes (byte1 when byte0 == 0xF7) ----
+ * For SET_* sub-opcodes byte2 carries the new percentage (0..100); the
+ * value updates a RAM-only "pending" set and is NOT applied or persisted
+ * until SAVE.  All SET/SAVE/RESET sub-opcodes require SYS_STATE_STANDBY.
+ *   0x01 SET_D2          Stage pending D2 power limit  (byte2 = percent)
+ *   0x02 SET_D1          Stage pending D1 power limit  (byte2 = percent)
+ *   0x03 SET_R           Stage pending R  power limit  (byte2 = percent)
+ *   0x04 SAVE            Validate pending set + persist to flash + apply
+ *   0x05 RESET_DEFAULTS  Restore + persist compile-time defaults
+ *                        (power 100/60/60, response 100/70/40)
+ *   0x06 QUERY           Request a 1 s burst of 0x30D telemetry at 10 Hz
+ *   0x07 SET_D2_RESPONSE Stage pending D2 accel response (byte2 = percent)
+ *   0x08 SET_D1_RESPONSE Stage pending D1 accel response (byte2 = percent)
+ *   0x09 SET_R_RESPONSE  Stage pending R  accel response (byte2 = percent) */
+#define GEAR_LIMIT_OP_SET_D2          0x01U
+#define GEAR_LIMIT_OP_SET_D1          0x02U
+#define GEAR_LIMIT_OP_SET_R           0x03U
+#define GEAR_LIMIT_OP_SAVE            0x04U
+#define GEAR_LIMIT_OP_RESET_DEFAULTS  0x05U
+#define GEAR_LIMIT_OP_QUERY           0x06U
+#define GEAR_LIMIT_OP_SET_D2_RESPONSE 0x07U
+#define GEAR_LIMIT_OP_SET_D1_RESPONSE 0x08U
+#define GEAR_LIMIT_OP_SET_R_RESPONSE  0x09U
 
 /* Command ACK result codes (uint8_t) */
 typedef enum {
@@ -216,6 +242,12 @@ void CAN_PedalCalBurstUpdate(void);
  * ACK on completion.  Replaces the previous blocking HAL_Delay-based
  * sampler that starved CAN heartbeat TX and Safety_CheckCANTimeout(). */
 void CAN_PedalCalCaptureTick(void);
+
+/* Drives the on-demand 0x30D gear power-limit telemetry burst.
+ * Call once per 100 ms tick — the function is a no-op while no burst
+ * is in progress, so it is safe to call unconditionally and has zero
+ * impact on backward-compatible nodes that ignore 0x30D.            */
+void CAN_GearLimitsBurstUpdate(void);
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */

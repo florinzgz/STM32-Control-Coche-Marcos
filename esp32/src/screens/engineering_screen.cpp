@@ -35,7 +35,7 @@ static constexpr int16_t MENU_SPACING = 17;
 // Number of main-menu functions (unchanged — the 15 functions are preserved;
 // only their presentation changed).  Full canonical names kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 15;
+static constexpr int     NUM_MAIN_ITEMS = 16;
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // The 15 functions are presented as large touch tiles across two pages
@@ -58,12 +58,12 @@ static constexpr int     PAGE1_ITEM_COUNT = 9;   // items 0..8
 static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
     "TEMP", "FACTORY", "DTC", "MAINT.",
-    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017"
+    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
-    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER"
+    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -86,7 +86,8 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_CYAN,    // 11 Debounce/CAN Diag   — diagnostic
     ui::COL_GREEN,   // 12 Touch Calibration   — calibration
     ui::COL_AMBER,   // 13 Reset Touch Cal     — destructive
-    ui::COL_CYAN     // 14 MCP23017 Live       — diagnostic
+    ui::COL_CYAN,    // 14 MCP23017 Live       — diagnostic
+    ui::COL_BLUE     // 15 Gear Power Limits   — configuration
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -148,6 +149,29 @@ static constexpr int16_t PED_BTN_CAPMIN_X  = 10;
 static constexpr int16_t PED_BTN_CAPMAX_X  = 125;
 static constexpr int16_t PED_BTN_SAVE_X    = 245;
 static constexpr int16_t PED_BTN_RESET_X   = 360;
+
+// ---- Gear power-limits editor layout (GEAR_LIMITS submenu) ----
+// Three editable rows (D2/D1/R), each with a −5% / value / +5% control, plus
+// a bottom action row (SAVE / RESTORE DEF.) and the global BACK button.
+// The same screen hosts two paged groups — POWER LIMIT % and ACCEL
+// RESPONSE % — toggled by the PAGE button (top-right).
+static constexpr int16_t GL_ROW0_Y    = 70;    // first gear row top
+static constexpr int16_t GL_ROW_H     = 44;    // row pitch
+static constexpr int16_t GL_ROW_BTN_H = 36;
+static constexpr int16_t GL_MINUS_X   = 230;   // −5% button x
+static constexpr int16_t GL_PLUS_X    = 400;   // +5% button x
+static constexpr int16_t GL_STEP_W    = 60;    // step button width
+static constexpr int16_t GL_BTN_Y     = 232;   // bottom action row y
+static constexpr int16_t GL_BTN_H     = 36;
+static constexpr int16_t GL_BTN_W     = 150;
+static constexpr int16_t GL_SAVE_X    = 175;   // SAVE x
+static constexpr int16_t GL_RESTORE_X = 330;   // RESTORE DEF. x
+static constexpr int16_t GL_STEP_PCT  = 5;     // ±5 % per tap
+// PAGE toggle (POWER <-> RESPONSE) — top-right, clear of the centred title.
+static constexpr int16_t GL_PAGE_X    = 385;
+static constexpr int16_t GL_PAGE_Y    = 4;
+static constexpr int16_t GL_PAGE_W    = 90;
+static constexpr int16_t GL_PAGE_H    = 26;
 
 // ---- Sensor mapping row layout ----
 static constexpr int16_t MAP_ROW_X   = 10;
@@ -313,6 +337,7 @@ void EngineeringScreen::onExit() {
 }
 
 void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
+    lastFrameTimeMs_ = frameTimeMs;   // cached for touch-handler timestamping
     // Cache service mode data for fault viewer / module control
     faultBits_    = data.service().faultMask;
     enabledBits_  = data.service().enabledMask;
@@ -447,6 +472,89 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             pedalCalLastQueryMs_ = frameTimeMs;
         }
         pedalDataChanged_ = changed;
+    }
+
+    // Cache gear power-limits telemetry (0x30D) + track SAVE/RESET ACK
+    // (cmdIdLow = 0x10).  This submenu owns its own ACK state machine so it
+    // does not collide with MODULE_CONTROL feedback.
+    if (currentMenu_ == SubMenu::GEAR_LIMITS) {
+        const vehicle::GearLimitsData& gl = data.gearLimits();
+        bool changed = false;
+        if (gl.timestampMs != 0 && gl.timestampMs != gearLimitsLastTs_) {
+            gearLimitsLastTs_ = gl.timestampMs;
+            if (gearActiveD2_ != gl.activeD2 ||
+                gearActiveD1_ != gl.activeD1 ||
+                gearActiveR_  != gl.activeR  ||
+                gearActiveRespD2_ != gl.activeRespD2 ||
+                gearActiveRespD1_ != gl.activeRespD1 ||
+                gearActiveRespR_  != gl.activeRespR) {
+                changed = true;
+            }
+            gearActiveD2_ = gl.activeD2;
+            gearActiveD1_ = gl.activeD1;
+            gearActiveR_  = gl.activeR;
+            gearActiveRespD2_ = gl.activeRespD2;
+            gearActiveRespD1_ = gl.activeRespD1;
+            gearActiveRespR_  = gl.activeRespR;
+            // Until the user starts editing, keep the edit buffer tracking the
+            // live applied values so the screen shows reality on entry.
+            if (!gearLimitsEditActive_) {
+                gearEditD2_ = gl.activeD2;
+                gearEditD1_ = gl.activeD1;
+                gearEditR_  = gl.activeR;
+                gearEditRespD2_ = gl.activeRespD2;
+                gearEditRespD1_ = gl.activeRespD1;
+                gearEditRespR_  = gl.activeRespR;
+            }
+        }
+
+        // SERVICE_CMD ACK (0x10) — only meaningful while awaiting a SAVE/RESET.
+        const auto& ad = data.ack();
+        if (gearLimitsSaveWait_ && ad.cmdIdLow == 0x10 &&
+            ad.timestampMs != lastAckTracked_) {
+            lastAckTracked_ = ad.timestampMs;
+            if (ad.result == can::AckResult::OK) {
+                gearLimitsAck_        = GearAck::SAVED;
+                gearLimitsEditActive_ = false;   // committed → follow live again
+            } else if (ad.result == can::AckResult::BLOCKED_BY_SAFETY) {
+                gearLimitsAck_ = GearAck::REJECTED;
+            } else if (ad.result == can::AckResult::INVALID) {
+                gearLimitsAck_ = GearAck::INVALID;
+            } else {
+                gearLimitsAck_ = GearAck::REJECTED;
+            }
+            gearLimitsSaveWait_ = false;
+            gearLimitsAckMs_    = frameTimeMs;
+            changed             = true;
+        }
+        // SAVE/RESET timeout — no ACK within the window.
+        if (gearLimitsSaveWait_ &&
+            (frameTimeMs - gearLimitsSaveSentMs_) > GEAR_SAVE_TIMEOUT_MS) {
+            gearLimitsSaveWait_ = false;
+            gearLimitsAck_      = GearAck::TIMEOUT;
+            gearLimitsAckMs_    = frameTimeMs;
+            changed             = true;
+        }
+        // Auto-clear the status banner.
+        if (gearLimitsAck_ != GearAck::NONE &&
+            (frameTimeMs - gearLimitsAckMs_) > GEAR_ACK_CLEAR_MS) {
+            gearLimitsAck_ = GearAck::NONE;
+            changed        = true;
+        }
+        // Auto-cancel an armed RESTORE confirmation that timed out.
+        if (gearLimitsRestoreArm_ &&
+            (frameTimeMs - gearLimitsRestoreArmMs_) > GEAR_RESTORE_CONFIRM_MS) {
+            gearLimitsRestoreArm_ = false;
+            changed               = true;
+        }
+        // Periodic QUERY (every ~500 ms) so the STM32 keeps emitting the burst
+        // while the operator stays on the screen.  pedalCalLastQueryMs_ style.
+        constexpr unsigned long GEAR_QUERY_PERIOD_MS = 500;
+        if ((frameTimeMs - gearLimitsLastQueryMs_) >= GEAR_QUERY_PERIOD_MS) {
+            sendGearLimitOp(can::GEAR_LIMIT_OP_QUERY, 0);
+            gearLimitsLastQueryMs_ = frameTimeMs;
+        }
+        if (changed) { gearLimitsChanged_ = true; needsRedraw_ = true; }
     }
 
     // Cache encoder calibration telemetry
@@ -647,6 +755,7 @@ void EngineeringScreen::draw() {
             case SubMenu::INA226_LIVE_DIAG: drawInaLiveDiag();         break;
             case SubMenu::DEBOUNCE_DIAG:    drawDebounceDiag();        break;
             case SubMenu::MCP23017_LIVE:    drawMcpLiveDiag();         break;
+            case SubMenu::GEAR_LIMITS:      drawGearLimits();          break;
         }
     }
 
@@ -1403,6 +1512,9 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         factoryPendingIdx_ = -1;   // cancel any pending factory confirm (FASE 2 §1)
         modulePendingId_   = -1;   // cancel any pending module confirm (FASE 2 §1)
         relayStandbyMsg_   = false;// clear relay STANDBY notice (FASE 2 §2)
+        gearLimitsRestoreArm_ = false; // BACK discards gear-limit edits (FASE 2)
+        gearLimitsEditActive_ = false;
+        gearLimitsSaveWait_   = false;
         currentMenu_ = SubMenu::MAIN;
         needsRedraw_ = true;
         return true;
@@ -1558,6 +1670,21 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             mcpDataChanged_ = true;         // force first paint
                             currentMenu_ = SubMenu::MCP23017_LIVE;
                             break;
+                        case 15:
+                            // Open Gear Power Limits editor.  Reset local
+                            // edit state; update() will emit the first QUERY
+                            // (pedalCalLastQueryMs_=0 pattern) so the screen
+                            // shows the STM32's live values.
+                            gearLimitsEditActive_  = false;
+                            gearLimitsSaveWait_    = false;
+                            gearLimitsAck_         = GearAck::NONE;
+                            gearLimitsLastTs_      = 0;
+                            gearLimitsLastQueryMs_ = 0;
+                            gearLimitsRestoreArm_  = false;
+                            gearLimitsShowResponse_ = false;  // start on POWER page
+                            gearLimitsChanged_     = true;   // force first paint
+                            currentMenu_ = SubMenu::GEAR_LIMITS;
+                            break;
                         default:
                             break;
                     }
@@ -1664,6 +1791,117 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 Serial.println("[ENG] Pedal RESET DEFAULTS");
                 return true;
             }
+        }
+        return false;
+    }
+
+    // Gear power-limits editor: per-row −5%/+5% steppers + SAVE / RESTORE.
+    // Edits stay local (pending) until SAVE; BACK (handled above) discards.
+    if (currentMenu_ == SubMenu::GEAR_LIMITS) {
+        // Helper: clamp an edited value to its per-gear range.
+        auto clampGear = [](int v, uint8_t lo, uint8_t hi) -> uint8_t {
+            if (v < (int)lo) v = lo;
+            if (v > (int)hi) v = hi;
+            return (uint8_t)v;
+        };
+        const bool showResp = gearLimitsShowResponse_;
+        // PAGE toggle (top-right) — switch POWER <-> RESPONSE group.  Does NOT
+        // discard pending edits; both groups are committed together on SAVE.
+        if (x >= GL_PAGE_X && x <= GL_PAGE_X + GL_PAGE_W &&
+            y >= GL_PAGE_Y && y <= GL_PAGE_Y + GL_PAGE_H) {
+            gearLimitsShowResponse_ = !gearLimitsShowResponse_;
+            gearLimitsRestoreArm_   = false;
+            gearLimitsChanged_      = true;
+            needsRedraw_            = true;
+            return true;
+        }
+        // Three editable rows: D2 (0), D1 (1), R (2).
+        for (int row = 0; row < 3; ++row) {
+            const int16_t ry = GL_ROW0_Y + row * GL_ROW_H;
+            if (y < ry || y > ry + GL_ROW_BTN_H) continue;
+            const bool minus = (x >= GL_MINUS_X && x <= GL_MINUS_X + GL_STEP_W);
+            const bool plus  = (x >= GL_PLUS_X  && x <= GL_PLUS_X  + GL_STEP_W);
+            if (!minus && !plus) continue;
+            const int delta = plus ? GL_STEP_PCT : -GL_STEP_PCT;
+            gearLimitsEditActive_ = true;   // stop tracking live values
+            gearLimitsRestoreArm_ = false;  // any edit cancels a RESTORE arm
+            if (!showResp) {
+                if (row == 0) {
+                    gearEditD2_ = clampGear((int)gearEditD2_ + delta,
+                                            can::GEAR_LIMIT_D2_MIN_PCT,
+                                            can::GEAR_LIMIT_D2_MAX_PCT);
+                } else if (row == 1) {
+                    gearEditD1_ = clampGear((int)gearEditD1_ + delta,
+                                            can::GEAR_LIMIT_D1_MIN_PCT,
+                                            can::GEAR_LIMIT_D1_MAX_PCT);
+                } else {
+                    gearEditR_ = clampGear((int)gearEditR_ + delta,
+                                           can::GEAR_LIMIT_R_MIN_PCT,
+                                           can::GEAR_LIMIT_R_MAX_PCT);
+                }
+            } else {
+                if (row == 0) {
+                    gearEditRespD2_ = clampGear((int)gearEditRespD2_ + delta,
+                                                can::GEAR_RESPONSE_D2_MIN_PCT,
+                                                can::GEAR_RESPONSE_D2_MAX_PCT);
+                } else if (row == 1) {
+                    gearEditRespD1_ = clampGear((int)gearEditRespD1_ + delta,
+                                                can::GEAR_RESPONSE_D1_MIN_PCT,
+                                                can::GEAR_RESPONSE_D1_MAX_PCT);
+                } else {
+                    gearEditRespR_ = clampGear((int)gearEditRespR_ + delta,
+                                               can::GEAR_RESPONSE_R_MIN_PCT,
+                                               can::GEAR_RESPONSE_R_MAX_PCT);
+                }
+            }
+            gearLimitsChanged_ = true;
+            needsRedraw_       = true;
+            return true;
+        }
+        // Bottom action row: SAVE / RESTORE DEFAULTS.
+        if (y >= GL_BTN_Y && y <= GL_BTN_Y + GL_BTN_H) {
+            // SAVE — push ALL six pending values (power + response), then
+            // commit.  The STM32 re-validates both groups and gates on
+            // STANDBY; the single 0x10 ACK drives the banner.
+            if (x >= GL_SAVE_X && x <= GL_SAVE_X + GL_BTN_W) {
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D2, gearEditD2_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D1, gearEditD1_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_R,  gearEditR_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D2_RESPONSE, gearEditRespD2_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_D1_RESPONSE, gearEditRespD1_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SET_R_RESPONSE,  gearEditRespR_);
+                sendGearLimitOp(can::GEAR_LIMIT_OP_SAVE,   0);
+                gearLimitsSaveWait_   = true;
+                gearLimitsSaveSentMs_ = lastFrameTimeMs_;
+                gearLimitsAck_        = GearAck::NONE;
+                gearLimitsRestoreArm_ = false;
+                Serial.println("[ENG] Gear limits SAVE");
+                needsRedraw_ = true;
+                return true;
+            }
+            // RESTORE DEFAULTS — destructive, requires a double-confirm tap.
+            if (x >= GL_RESTORE_X && x <= GL_RESTORE_X + GL_BTN_W) {
+                if (gearLimitsRestoreArm_) {
+                    gearLimitsRestoreArm_ = false;
+                    sendGearLimitOp(can::GEAR_LIMIT_OP_RESET_DEFAULTS, 0);
+                    gearLimitsSaveWait_   = true;   // RESET also ACKs as 0x10
+                    gearLimitsSaveSentMs_ = lastFrameTimeMs_;
+                    gearLimitsAck_        = GearAck::NONE;
+                    gearLimitsEditActive_ = false;
+                    Serial.println("[ENG] Gear limits RESTORE DEFAULTS");
+                } else {
+                    gearLimitsRestoreArm_   = true;
+                    gearLimitsRestoreArmMs_ = lastFrameTimeMs_;
+                    Serial.println("[ENG] Gear RESTORE armed (confirm)");
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        // Any other touch cancels a pending RESTORE confirmation.
+        if (gearLimitsRestoreArm_) {
+            gearLimitsRestoreArm_ = false;
+            needsRedraw_ = true;
         }
         return false;
     }
@@ -2141,6 +2379,16 @@ void EngineeringScreen::drawTileIcon(uint8_t item, int16_t cx, int16_t cy,
                 tft.drawFastHLine(cx - 12, yy, 4, col);  // left pins
                 tft.drawFastHLine(cx + 8,  yy, 4, col);  // right pins
             }
+            break;
+
+        case 15:  // Gear Power Limits — gear/cog wheel
+            tft.drawCircle(cx, cy, 10, col);
+            tft.drawCircle(cx, cy, 4, col);
+            // four cog teeth (N/S/E/W)
+            tft.fillRect(cx - 2, cy - 13, 4, 4, col);
+            tft.fillRect(cx - 2, cy + 9,  4, 4, col);
+            tft.fillRect(cx - 13, cy - 2, 4, 4, col);
+            tft.fillRect(cx + 9,  cy - 2, 4, 4, col);
             break;
 
         default:
@@ -3363,6 +3611,209 @@ void EngineeringScreen::sendPedalCalOp(uint8_t op) {
     frame.data_length_code = 2;
     frame.data[0]          = can::SERVICE_ACTION_PEDAL_CAL;
     frame.data[1]          = op;
+    ESP32Can.writeFrame(frame, 0);
+}
+
+// =========================================================================
+// GEAR LIMITS editor (GEAR_LIMITS submenu)
+//
+// Lets the operator view and adjust the per-gear traction power limits the
+// STM32 applies in Traction_Update() (D2 / D1 / R, as a percentage of the
+// pedal demand).  The screen is purely an HMI: values are staged locally
+// and only sent on SAVE.  The STM32 owns range validation, the STANDBY
+// safety gate and flash persistence (gear_limits_store.c); the 0x30D burst
+// reports the live + pending values back here, and the SERVICE_CMD ACK
+// (0x103, byte0 = 0x10) drives the SAVED / REJECTED / INVALID banner.
+//
+// Defaults & ranges mirror can::GEAR_LIMIT_* (D2 30–100, D1 20–100, R 10–60).
+// =========================================================================
+void EngineeringScreen::drawGearLimits() {
+    RTRACE_BEGIN_SCREEN("eng_gear_limits");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    // Header
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("GEAR LIMITS", ui::SCREEN_W / 2, 15);
+    RTRACE_TEXT(ui::SCREEN_W / 2, 15, "GEAR LIMITS",
+                ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    const bool showResp = gearLimitsShowResponse_;
+
+    // PAGE toggle button (top-right) — switches POWER <-> RESPONSE group.
+    {
+        tft.fillRect(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_DARK_GRAY);
+        RTRACE_FILL_RECT(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_DARK_GRAY);
+        tft.drawRect(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(GL_PAGE_X, GL_PAGE_Y, GL_PAGE_W, GL_PAGE_H, ui::COL_GRAY);
+        const char* pageLbl = showResp ? "POWER >" : "RESPONSE >";
+        tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(pageLbl, GL_PAGE_X + GL_PAGE_W / 2, GL_PAGE_Y + GL_PAGE_H / 2);
+        RTRACE_TEXT(GL_PAGE_X + GL_PAGE_W / 2, GL_PAGE_Y + GL_PAGE_H / 2, pageLbl,
+                    ui::COL_CYAN, ui::COL_DARK_GRAY, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // Group title (which set is being edited)
+    tft.setTextColor(showResp ? ui::COL_CYAN : ui::COL_GREEN, ui::COL_BG);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(showResp ? "ACCEL RESPONSE %" : "POWER LIMIT %", 20, 40);
+    tft.setTextDatum(TL_DATUM);
+
+    // Sub-header / column legend
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("Gear", 20, 52);
+    tft.drawString("ACTIVE", 95, 52);
+    tft.drawString("EDIT",  170, 52);
+
+    struct Row { const char* name; uint8_t active; uint8_t edit;
+                 uint8_t lo; uint8_t hi; };
+    const Row powerRows[3] = {
+        { "D2", gearActiveD2_, gearEditD2_,
+          can::GEAR_LIMIT_D2_MIN_PCT, can::GEAR_LIMIT_D2_MAX_PCT },
+        { "D1", gearActiveD1_, gearEditD1_,
+          can::GEAR_LIMIT_D1_MIN_PCT, can::GEAR_LIMIT_D1_MAX_PCT },
+        { "R",  gearActiveR_,  gearEditR_,
+          can::GEAR_LIMIT_R_MIN_PCT,  can::GEAR_LIMIT_R_MAX_PCT },
+    };
+    const Row responseRows[3] = {
+        { "D2", gearActiveRespD2_, gearEditRespD2_,
+          can::GEAR_RESPONSE_D2_MIN_PCT, can::GEAR_RESPONSE_D2_MAX_PCT },
+        { "D1", gearActiveRespD1_, gearEditRespD1_,
+          can::GEAR_RESPONSE_D1_MIN_PCT, can::GEAR_RESPONSE_D1_MAX_PCT },
+        { "R",  gearActiveRespR_,  gearEditRespR_,
+          can::GEAR_RESPONSE_R_MIN_PCT,  can::GEAR_RESPONSE_R_MAX_PCT },
+    };
+    const Row* rows = showResp ? responseRows : powerRows;
+
+    char buf[24];
+    for (int i = 0; i < 3; ++i) {
+        const int16_t ry = GL_ROW0_Y + i * GL_ROW_H;
+        const int16_t ty = ry + GL_ROW_BTN_H / 2;
+
+        // Gear label
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(rows[i].name, 20, ty);
+        tft.setTextSize(1);
+
+        // Active value (applied now)
+        snprintf(buf, sizeof(buf), "%u%%", (unsigned)rows[i].active);
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(buf, 95, ty);
+
+        // Edited (pending) value — highlight if it differs from active
+        const bool diff = (rows[i].edit != rows[i].active);
+        snprintf(buf, sizeof(buf), "%u%%", (unsigned)rows[i].edit);
+        tft.setTextColor(diff ? ui::COL_AMBER : ui::COL_WHITE, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString(buf, 165, ty);
+        tft.setTextSize(1);
+
+        // −5% / +5% step buttons
+        auto stepBtn = [&](int16_t bx, const char* lbl) {
+            tft.fillRect(bx, ry, GL_STEP_W, GL_ROW_BTN_H, ui::COL_DARK_GRAY);
+            RTRACE_FILL_RECT(bx, ry, GL_STEP_W, GL_ROW_BTN_H, ui::COL_DARK_GRAY);
+            tft.drawRect(bx, ry, GL_STEP_W, GL_ROW_BTN_H, ui::COL_GRAY);
+            RTRACE_DRAW_RECT(bx, ry, GL_STEP_W, GL_ROW_BTN_H, ui::COL_GRAY);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextSize(2);
+            tft.drawString(lbl, bx + GL_STEP_W / 2, ry + GL_ROW_BTN_H / 2);
+            tft.setTextSize(1);
+            RTRACE_TEXT(bx + GL_STEP_W / 2, ry + GL_ROW_BTN_H / 2, lbl,
+                        ui::COL_WHITE, ui::COL_DARK_GRAY, 2, MC_DATUM);
+        };
+        stepBtn(GL_MINUS_X, "-");
+        stepBtn(GL_PLUS_X,  "+");
+
+        // Range hint between the steppers
+        snprintf(buf, sizeof(buf), "%u-%u", (unsigned)rows[i].lo,
+                 (unsigned)rows[i].hi);
+        tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(buf, (GL_MINUS_X + GL_STEP_W + GL_PLUS_X) / 2 + 5,
+                       ry + GL_ROW_BTN_H / 2);
+    }
+    tft.setTextDatum(TL_DATUM);
+
+    // ---- Status banner (SAVED / REJECTED / INVALID / TIMEOUT) ----
+    const char* statusTxt = nullptr;
+    uint16_t    statusCol = ui::COL_GRAY;
+    switch (gearLimitsAck_) {
+        case GearAck::SAVED:    statusTxt = "SAVED";    statusCol = ui::COL_GREEN;  break;
+        case GearAck::REJECTED: statusTxt = "REJECTED (need STANDBY)"; statusCol = ui::COL_RED; break;
+        case GearAck::INVALID:  statusTxt = "INVALID";  statusCol = ui::COL_RED;    break;
+        case GearAck::TIMEOUT:  statusTxt = "TIMEOUT";  statusCol = ui::COL_YELLOW; break;
+        case GearAck::NONE:     default: break;
+    }
+    if (gearLimitsSaveWait_) { statusTxt = "SAVING..."; statusCol = ui::COL_CYAN; }
+    if (statusTxt) {
+        tft.setTextColor(statusCol, ui::COL_BG);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(statusTxt, ui::SCREEN_W / 2, 210);
+        RTRACE_TEXT(ui::SCREEN_W / 2, 210, statusTxt, statusCol, ui::COL_BG,
+                    1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // ---- Action buttons: SAVE / RESTORE DEFAULTS ----
+    auto actBtn = [&](int16_t bx, const char* lbl, uint16_t fill) {
+        tft.fillRect(bx, GL_BTN_Y, GL_BTN_W, GL_BTN_H, fill);
+        RTRACE_FILL_RECT(bx, GL_BTN_Y, GL_BTN_W, GL_BTN_H, fill);
+        tft.drawRect(bx, GL_BTN_Y, GL_BTN_W, GL_BTN_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(bx, GL_BTN_Y, GL_BTN_W, GL_BTN_H, ui::COL_GRAY);
+        tft.setTextColor(ui::COL_WHITE, fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(lbl, bx + GL_BTN_W / 2, GL_BTN_Y + GL_BTN_H / 2);
+        RTRACE_TEXT(bx + GL_BTN_W / 2, GL_BTN_Y + GL_BTN_H / 2, lbl,
+                    ui::COL_WHITE, fill, 1, MC_DATUM);
+        tft.setTextDatum(TL_DATUM);
+    };
+    actBtn(GL_SAVE_X, "SAVE", ui::COL_DARK_GRAY);
+    actBtn(GL_RESTORE_X,
+           gearLimitsRestoreArm_ ? "CONFIRM RESTORE" : "RESTORE DEF.",
+           gearLimitsRestoreArm_ ? ui::COL_RED : ui::COL_DARK_GRAY);
+
+    // Back button (engineering convention — top-left)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    RTRACE_FILL_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    RTRACE_DRAW_RECT(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
+                ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
+
+    gearLimitsChanged_ = false;
+}
+
+// -------------------------------------------------------------------------
+// sendGearLimitOp — emit a SERVICE_CMD (0x110) with byte0 = 0xF7
+// (SERVICE_ACTION_GEAR_LIMITS), byte1 = sub-opcode, byte2 = percent value.
+// SET_* ops stage a pending value on the STM32; SAVE validates + persists +
+// applies; RESET_DEFAULTS restores factory limits; QUERY triggers the 0x30D
+// telemetry burst.  The STM32 replies with CMD_ACK (0x103, byte0 = 0x10).
+// Safety gating (STANDBY) and range validation are enforced server-side.
+// -------------------------------------------------------------------------
+void EngineeringScreen::sendGearLimitOp(uint8_t op, uint8_t value) {
+    CanFrame frame = {};
+    frame.identifier       = can::SERVICE_CMD;
+    frame.extd             = 0;
+    frame.data_length_code = 3;
+    frame.data[0]          = can::SERVICE_ACTION_GEAR_LIMITS;
+    frame.data[1]          = op;
+    frame.data[2]          = value;
     ESP32Can.writeFrame(frame, 0);
 }
 

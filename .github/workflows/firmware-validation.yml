@@ -119,6 +119,14 @@ jobs:
               -o /tmp/test_wheel_speed
           /tmp/test_wheel_speed
 
+      - name: Run test_gear_limits
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_gear_limits.c \
+              -o /tmp/test_gear_limits
+          /tmp/test_gear_limits
+
   # ── Static analysis ─────────────────────────────────────────────────
   static-analysis:
     runs-on: ubuntu-latest
