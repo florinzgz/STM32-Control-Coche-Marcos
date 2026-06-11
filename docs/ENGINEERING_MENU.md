@@ -59,7 +59,14 @@ Paginated list of all 25 modules (3 pages, 9 modules per page):
 - Status indicators: ENABLED (green dot), DISABLED (gray), FAULT (red), FAULT+DIS (orange)
 - ACK feedback bar shows result after toggle (OK/REJECTED/BLOCKED)
 
-**Safety gates**:
+**Double-tap confirmation (UI guard):**
+- A toggle is only sent after the operator taps the **same** non-critical module **twice**.
+- The first tap arms the row (status shows `CONFIRM? TAP`, amber) and does **not** send any CAN command.
+- The second tap on the same module sends the ENABLE/DISABLE command.
+- The pending confirmation is cancelled by: tapping a different row, the PAGE button, BACK, leaving the screen, or a 5 s timeout.
+- Critical modules (0–3) never arm a confirmation and never send a command.
+
+**Safety gates** (enforced server-side on STM32):
 - System state must be ACTIVE or DEGRADED
 - Safety-relevant modules (ABS, TCS, wheel speed, obstacle) cannot be disabled while vehicle speed > 0
 
@@ -113,11 +120,20 @@ Table editor for mapping INA226 TCA9548A channels to vehicle positions:
 - SAVE button to persist to config store
 - BACK to discard changes
 
+> **Config-store guard:** `config_store::setIna226Map()` bounds-checks every
+> entry (valid = `0..5`, or `0xFF` unset). A single out-of-range byte rejects the
+> whole update — the existing mapping and NVS blob are left untouched (no NVS
+> format change, no config wipe).
+
 ### 6. Temp Sensor Mapping
 
 Table editor for mapping DS18B20 sensors to vehicle positions:
 - 5 sensors (Sens0–Sens4) → 5 positions (FL Wheel, FR Wheel, RL Wheel, RR Wheel, Ambient)
 - Same tap-to-cycle and SAVE/BACK behavior as INA226 mapping
+
+> **Config-store guard:** `config_store::setTempSensorMap()` bounds-checks every
+> entry (valid = `0..4`, or `0xFF` unset) and rejects the whole update on any
+> out-of-range byte, leaving the existing mapping intact.
 
 ### 7. Factory Defaults
 
@@ -134,6 +150,11 @@ Individual reset options for specific calibration categories:
 
 Each option sends a SERVICE_CMD (0x110) via CAN to the STM32, which re-enables the
 affected modules and clears their faults.
+
+**Double-tap confirmation (UI guard):**
+- The first tap on an option arms it (the row turns amber and shows `CONFIRMAR? PULSA OTRA VEZ`) and does **not** send any CAN command.
+- A second tap on the **same** option sends the reset command.
+- Any other touch, BACK, leaving the screen, or a 5 s timeout cancels the pending confirmation.
 
 **Warning text**: "Vehicle must be stationary. Reboot may be required."
 
@@ -154,6 +175,21 @@ Displayed values:
 Interpretation hint:
 - rest current ~0 A → expected sensor behavior
 - rest current ~100 A with volts OK → suspect shunt/sense path or calibration/wiring issue
+
+### 10. Relay Control (Debug)
+
+Manual relay override for engineering diagnostics (TRACTION PC11, STEER PWR PC12).
+
+**STANDBY gate (UI guard, FASE 2 §2):**
+- Relay override is **STANDBY-only** by safety design on the STM32.
+- Before changing any local visual state, the HMI verifies the cached system
+  state (`sysStateRaw_`) is `STANDBY`. If it is not, the tap is refused: the
+  local UI is **not** changed and an `ONLY IN STANDBY` notice is flashed instead,
+  so the buttons never misrepresent the real relay state.
+- **Auto-off** is preserved on every exit path: the override is disabled (CAN
+  `RELAY_OVERRIDE` enable=0, mask=0) when the operator presses BACK, when the
+  engineering screen is left, and automatically when the STM32 leaves STANDBY
+  (detected from the heartbeat `systemState`).
 
 ## Navigation
 

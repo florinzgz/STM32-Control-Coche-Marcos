@@ -206,6 +206,8 @@ void EngineeringScreen::onEnter() {
     currentMenu_ = SubMenu::MAIN;
     clearLogPending_ = false;   // §5: reset confirmation state on screen enter
     factoryPendingIdx_ = -1;    // FASE 2 §1: clear factory confirm on screen enter
+    modulePendingId_   = -1;    // FASE 2 §1: clear module confirm on screen enter
+    relayStandbyMsg_   = false; // FASE 2 §2: clear standby notice on screen enter
     inaEditRow_  = 0;
     tempEditRow_ = 0;
     moduleCtrlPage_ = 0;
@@ -310,6 +312,33 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         // Expire feedback message after 2 seconds
         if (lastAckResult_ != 0 && (frameTimeMs - lastAckMs_) > ACK_FEEDBACK_TIMEOUT_MS) {
             lastAckResult_ = 0;
+            needsRedraw_ = true;
+        }
+
+        // Module Enable/Disable confirmation window (FASE 2 §1).  Latched intent
+        // from the touch handler is stamped here so the timeout uses the injected
+        // frameTimeMs (deterministic, no millis() in the UI path).
+        if (modulePendingArm_) {
+            modulePendingArm_ = false;
+            modulePendingMs_  = frameTimeMs;
+        }
+        if (modulePendingId_ >= 0 &&
+            (frameTimeMs - modulePendingMs_) >= MODULE_CONFIRM_TIMEOUT_MS) {
+            modulePendingId_ = -1;
+            needsRedraw_ = true;
+        }
+    }
+
+    // Relay control STANDBY notice window (FASE 2 §2).  Latched intent from the
+    // touch handler is stamped here; the notice auto-clears after the timeout.
+    if (currentMenu_ == SubMenu::RELAY_CONTROL) {
+        if (relayStandbyMsgArm_) {
+            relayStandbyMsgArm_ = false;
+            relayStandbyMsgMs_  = frameTimeMs;
+        }
+        if (relayStandbyMsg_ &&
+            (frameTimeMs - relayStandbyMsgMs_) >= RELAY_STANDBY_MSG_MS) {
+            relayStandbyMsg_ = false;
             needsRedraw_ = true;
         }
     }
@@ -1317,6 +1346,8 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             }
             clearLogPending_ = false;  // reset confirmation state on navigation (§4.1)
             factoryPendingIdx_ = -1;   // cancel any pending factory confirm (FASE 2 §1)
+            modulePendingId_   = -1;   // cancel any pending module confirm (FASE 2 §1)
+            relayStandbyMsg_   = false;// clear relay STANDBY notice (FASE 2 §2)
             currentMenu_ = SubMenu::MAIN;
             needsRedraw_ = true;
         } else {
@@ -1468,6 +1499,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         if (x >= PAGE_BTN_X && x <= PAGE_BTN_X + PAGE_BTN_W &&
             y >= PAGE_BTN_Y && y <= PAGE_BTN_Y + PAGE_BTN_H) {
             moduleCtrlPage_ = (moduleCtrlPage_ + 1) % MODULE_CTRL_PAGES;
+            modulePendingId_ = -1;  // changing page cancels a pending confirm
             needsRedraw_ = true;
             return true;
         }
@@ -1481,25 +1513,41 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             int16_t rowY = MOD_ROW_Y0 + rowOff * MOD_ROW_SPC;
             if (x >= MOD_ROW_X && x <= MOD_ROW_X + MOD_ROW_W &&
                 y >= rowY && y <= rowY + MOD_ROW_H) {
-                // Only toggle non-critical modules (IDs >= FIRST_NON_CRITICAL)
+                // Only toggle non-critical modules (IDs >= FIRST_NON_CRITICAL).
+                // Critical modules 0–3 are never armed nor sent (FASE 2 §1).
                 if (i >= FIRST_NON_CRITICAL) {
-                    bool currentlyEnabled = (enabledBits_ >> i) & 1U;
-                    uint8_t action = currentlyEnabled
-                        ? can::SERVICE_ACTION_DISABLE
-                        : can::SERVICE_ACTION_ENABLE;
-                    CanFrame frame = {};
-                    frame.identifier       = can::SERVICE_CMD;
-                    frame.extd             = 0;
-                    frame.data_length_code = 2;
-                    frame.data[0]          = action;
-                    frame.data[1]          = i;  // module ID
-                    ESP32Can.writeFrame(frame, 0);  // Non-blocking
-                    Serial.printf("[ENG] Module %u %s\n", i,
-                                  currentlyEnabled ? "DISABLE" : "ENABLE");
+                    if (modulePendingId_ == (int8_t)i) {
+                        // Second tap on the same module — confirmed; send toggle.
+                        bool currentlyEnabled = (enabledBits_ >> i) & 1U;
+                        uint8_t action = currentlyEnabled
+                            ? can::SERVICE_ACTION_DISABLE
+                            : can::SERVICE_ACTION_ENABLE;
+                        CanFrame frame = {};
+                        frame.identifier       = can::SERVICE_CMD;
+                        frame.extd             = 0;
+                        frame.data_length_code = 2;
+                        frame.data[0]          = action;
+                        frame.data[1]          = i;  // module ID
+                        ESP32Can.writeFrame(frame, 0);  // Non-blocking
+                        Serial.printf("[ENG] Module %u %s\n", i,
+                                      currentlyEnabled ? "DISABLE" : "ENABLE");
+                        modulePendingId_ = -1;
+                    } else {
+                        // First tap (or a different row) — arm confirmation, do
+                        // NOT send yet.  Latch the time stamp in update().
+                        modulePendingId_  = (int8_t)i;
+                        modulePendingArm_ = true;
+                        Serial.printf("[ENG] Module %u toggle armed (confirm)\n", i);
+                    }
                     needsRedraw_ = true;
                 }
                 return true;
             }
+        }
+        // Any touch outside the rows / page button cancels a pending confirm.
+        if (modulePendingId_ >= 0) {
+            modulePendingId_ = -1;
+            needsRedraw_ = true;
         }
         return false;
     }
@@ -1673,6 +1721,20 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             int16_t rowY = RC_ROW_Y0 + i * RC_ROW_SPC;
             if (x >= MENU_X && x <= MENU_X + MENU_W &&
                 y >= rowY && y <= rowY + RC_ROW_H) {
+                // FASE 2 §2: relay override is STANDBY-only by safety design on
+                // the STM32.  Before mutating the local UI state, verify the
+                // cached system state is STANDBY.  Outside STANDBY we refuse to
+                // change the visual state and flash an "ONLY IN STANDBY" notice
+                // instead, so the buttons never lie about the relay state.
+                const bool inStandby =
+                    (sysStateRaw_ == static_cast<uint8_t>(can::SystemState::STANDBY));
+                if (!inStandby) {
+                    relayStandbyMsg_    = true;
+                    relayStandbyMsgArm_ = true;
+                    needsRedraw_ = true;
+                    Serial.println("[ENG] Relay override blocked: not in STANDBY");
+                    return true;
+                }
                 if (i == 0) {
                     // Toggle override enable/disable
                     relayOverrideEnabled_ = !relayOverrideEnabled_;
@@ -1973,7 +2035,12 @@ void EngineeringScreen::drawModuleControl() {
         // Status indicator
         const char* statusText;
         uint16_t statusCol;
-        if (isCritical) {
+        const bool pendingConfirm = (modulePendingId_ == (int8_t)i);
+        if (pendingConfirm) {
+            // Armed for confirmation — prompt the user to tap again (FASE 2 §1).
+            statusText = "CONFIRM? TAP";
+            statusCol  = ui::COL_AMBER;
+        } else if (isCritical) {
             statusText = "CRITICAL";
             statusCol  = ui::COL_AMBER;
         } else if (isFaulted && isDisabled) {
@@ -2039,6 +2106,12 @@ void EngineeringScreen::drawModuleControl() {
         tft.fillRect(100, 265, 280, 14, ui::COL_BG);
         tft.setTextColor(msgCol, ui::COL_BG);
         tft.drawString(msg, ui::SCREEN_W / 2, 270);
+    } else if (modulePendingId_ >= 0) {
+        // Confirmation prompt for a pending module toggle (FASE 2 §1).
+        tft.fillRect(60, 265, 360, 14, ui::COL_BG);
+        tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+        tft.drawString("Tap the same module again to confirm",
+                       ui::SCREEN_W / 2, 270);
     }
 
     tft.setTextDatum(TL_DATUM);
@@ -2812,7 +2885,16 @@ void EngineeringScreen::drawRelayControl() {
         tft.setTextDatum(TL_DATUM);
     }
 
-    // Button rows: Override Enable, TRACTION, STEER_PWR (CAN rev 1.3
+    // Transient "ONLY IN STANDBY" notice — shown after the user taps a relay
+    // button while the system is not in STANDBY (FASE 2 §2).  The local UI
+    // state was intentionally left unchanged; this explains why.
+    if (relayStandbyMsg_) {
+        tft.setTextColor(ui::COL_RED, ui::COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("ONLY IN STANDBY", ui::SCREEN_W / 2, 68);
+        tft.setTextDatum(TL_DATUM);
+    }
     // compatible — legacy "DIRECTION" relay = steering actuator power)
     static constexpr int16_t RC_ROW_Y0 = 80;
     static constexpr int16_t RC_ROW_SPC = 36;
