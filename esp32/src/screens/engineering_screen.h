@@ -159,6 +159,18 @@ private:
     // DTC log CLEAR confirmation state (§4.1 — prevent accidental clear)
     bool        clearLogPending_ = false;  // true after first tap on CLEAR; awaiting confirm
 
+    // Factory Defaults double-tap confirmation (FASE 2 §1 — prevent accidental
+    // destructive resets, especially 0xFF FACTORY_RESTORE).  The first tap on a
+    // row arms the confirmation; the command is only sent when the SAME row is
+    // tapped again within FACTORY_CONFIRM_TIMEOUT_MS.  Any other touch, screen
+    // entry or BACK cancels.  Time transitions happen in update() (frame-time
+    // contract: no millis() in the touch/UI path); the touch handler only
+    // latches intent via factoryPendingArm_.
+    int8_t        factoryPendingIdx_ = -1;     // row awaiting confirm, -1 = none
+    bool          factoryPendingArm_ = false;  // stamp factoryPendingMs_ next update()
+    unsigned long factoryPendingMs_  = 0;      // frameTimeMs when armed
+    static constexpr unsigned long FACTORY_CONFIRM_TIMEOUT_MS = 5000;
+
     // Relay status for main menu header display
     uint8_t     relayStatus_     = 0;      // heartbeat byte 5 (bit0=reserved, bit1=T, bit2=D, bit7=SEQ)
     uint8_t     prevRelayStatus_ = 0xFF;   // force initial draw
