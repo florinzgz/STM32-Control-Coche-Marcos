@@ -27,6 +27,35 @@ power was off.
 Separate from EPS parameters (page 127) to avoid mutual destruction
 on erase.
 
+### Format v2 — PB5 + encoder-Z dual reference (`"STC2"`)
+
+Revision 1.10 adds a **v2** record that stores the secondary encoder-Z
+center reference alongside the existing primary (PB5) center. The v1
+layout above is still read for backward compatibility.
+
+| Field                     | Type     | Description                                   |
+|---------------------------|----------|-----------------------------------------------|
+| `magic`                   | uint32   | `0x53544332` ("STC2")                         |
+| `format_version`          | uint16   | `2`                                           |
+| `reserved16`              | uint16   | Padding/alignment                             |
+| `encoder_count_at_center` | int32    | TIM2 count at calibrated center (PB5)         |
+| `z_center_offset_counts`  | int32    | Normalised Z↔center offset (encoder counts)   |
+| `z_center_tolerance`      | int32    | Acceptance window used (encoder counts)       |
+| `validity_flag`           | uint8    | `0xA5` when the PB5 center is valid           |
+| `z_center_valid`          | uint8    | `1` when the Z↔center offset is validated     |
+| `reserved[2]`             | uint8[2] | Padding/alignment                             |
+| `checksum`                | uint32   | CRC32 of all preceding fields                 |
+
+**Migration (safe, non-destructive):** on init the store reads the v2 magic
+first; if it finds a v1 record it loads the PB5 center exactly as before and
+marks Z as **not valid** (no Z offset known yet). The page is only rewritten as
+v2 the next time a PB5+Z calibration is saved (`SteeringCal_SaveWithZ`). A
+blank or CRC-mismatched slot falls back to "uncalibrated" — never to a bogus
+center. No other flash page is erased or written, so existing center
+calibration, EPS params (page 127), pedal cal (page 124) and gear limits
+(page 122) are all preserved.
+
+
 ### Write Conditions
 
 Calibration is written to flash only when **all** conditions are met:

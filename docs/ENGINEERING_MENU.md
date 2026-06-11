@@ -154,6 +154,22 @@ Live steering encoder verification:
 - Visual angle gauge bar (centered, range ±45°)
 - Instructions for turning steering to verify encoder response
 
+**STEERING Z CENTER section** (PB5 + encoder-Z dual reference diagnostic):
+- PB5 state (LJ12A3 inductive sensor — the **primary** center/safety reference)
+- Z pulse count, Z last position, Z↔center offset
+- Z calibrated (YES/NO), Z slip (YES/NO), active tolerance
+- Combined status: **OK / Z NOT SEEN / Z OUT OF WINDOW / MECHANICAL OFFSET /
+  NOT CALIBRATED**
+- Actions: **QUERY Z**, **CALIBRATE Z OFFSET**, **CLEAR Z CALIBRATION** (CLEAR
+  requires a double confirmation)
+
+The encoder Z (index) pulse is a **secondary, precision-only** reference — it
+can never center on its own and a Z seen without PB5 is **not** a center. All
+actions are validated on the STM32 (the ESP32 is never the authority);
+CALIBRATE is only accepted while PB5 reads center, in BOOT/STANDBY. Telemetry
+arrives on CAN `0x30E` (see [`STEERING_Z_CENTER.md`](STEERING_Z_CENTER.md) and
+`CAN_CONTRACT_FINAL.md` §4.19).
+
 ### 5. INA226 Sensor Mapping
 
 Table editor for mapping INA226 TCA9548A channels to vehicle positions:

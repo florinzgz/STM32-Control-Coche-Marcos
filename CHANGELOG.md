@@ -18,6 +18,31 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
 
 ### Added
 
+- **[FEATURE] PB5 + encoder-Z dual steering-center reference (CAN contract v1.10)**
+  - PB5 (LJ12A3) stays the **primary** physical/safety center reference; the
+    encoder **Z** (index) pulse on PB4 is a **secondary** precision/verification
+    reference that can never center on its own. A Z pulse without PB5 is **not**
+    a center, and a Z fault never forces SAFE (diagnostic/warning only).
+  - STM32: new pure-logic module `Core/Src/steering_z.{c,h}`; tolerances in
+    `project_config.h` (`STEERING_Z_WINDOW_COUNTS=25`, `STRICT=10`, `FAULT=40`);
+    `steering_centering.c` computes/restores the Z↔center offset on PB5 center;
+    flash store upgraded to format v2 (`"STC2"`) with safe v1→v2 migration
+    (`SteeringCal_SaveWithZ` + Z getters).
+  - CAN: new telemetry `DIAG_STEERING_Z` (`0x30E`, DLC 8, on-demand burst) and
+    service action `SERVICE_ACTION_STEERING_Z` (`0xF8`) with QUERY / CALIBRATE /
+    CLEAR sub-opcodes. CALIBRATE is accepted only while PB5 reads center, in
+    BOOT/STANDBY. No CAN-ID or flash-page collision.
+  - ESP32 HMI: `STEERING Z CENTER` diagnostic section on the Encoder Calibration
+    screen (PB5 state, Z pulses/position/offset/calibrated/slip, combined status,
+    QUERY / CALIBRATE / CLEAR actions with double-confirm on CLEAR). ESP32 is
+    never the authority.
+  - Tests: new host suite `test_steering_z` (37 cases) + extended
+    `test_steering_cal_store` (v1/v2 roundtrip, bad CRC, migration). Both wired
+    into `firmware-validation.yml`.
+  - See [`docs/STEERING_Z_CENTER.md`](docs/STEERING_Z_CENTER.md),
+    [`docs/STEERING_PERSISTENT_CALIBRATION.md`](docs/STEERING_PERSISTENT_CALIBRATION.md)
+    and `docs/CAN_CONTRACT_FINAL.md` §4.19.
+
 - **[FEATURE] Persistent touch calibration system (ESP32 HMI)**
   - First-boot calibration wizard
   - NVS persistent storage

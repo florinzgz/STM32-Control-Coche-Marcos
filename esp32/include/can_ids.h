@@ -97,6 +97,7 @@ inline constexpr uint32_t DIAG_CAN_META          = 0x30A;   // STM32→ESP32, DL
 inline constexpr uint32_t DIAG_I2C_SCAN          = 0x30B;   // STM32→ESP32, DLC 8, on-demand — I2C service-mode scan (mux/INA probe, SDA/SCL levels, recovery)
 inline constexpr uint32_t DIAG_FDCAN             = 0x30C;   // STM32→ESP32, DLC 6, on-demand — FDCAN error-counter dump (TEC/REC/LEC/state)
 inline constexpr uint32_t DIAG_GEAR_LIMITS       = 0x30D;   // STM32→ESP32, DLC 8, on-demand (10 Hz × 1 s after QUERY) — gear power-limit telemetry
+inline constexpr uint32_t DIAG_STEERING_Z        = 0x30E;   // STM32→ESP32, DLC 8, on-demand (10 Hz × 1 s after QUERY) — PB5 + encoder-Z dual center-reference diagnostic
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
 inline constexpr uint32_t CMD_SENSOR_MAP_TEMP    = 0x112;   // ESP32→STM32, DLC 5, on-demand  DS18B20 physIdx→role mapping
 
@@ -208,6 +209,7 @@ inline constexpr uint8_t SERVICE_ACTION_RESET_STEERING_FORCE = 0xF4;
 inline constexpr uint8_t SERVICE_ACTION_PEDAL_CAL            = 0xF5;  // Persistent pedal endpoint calibration (byte 1 = sub-opcode)
 inline constexpr uint8_t SERVICE_ACTION_I2C_SERVICE         = 0xF6;  // I2C service-mode scan (probe mux/INA, SDA/SCL levels, recovery) → 0x30B + 0x30C
 inline constexpr uint8_t SERVICE_ACTION_GEAR_LIMITS         = 0xF7;  // Gear power-limit config (byte 1 = sub-opcode, byte 2 = percent) → 0x30D
+inline constexpr uint8_t SERVICE_ACTION_STEERING_Z          = 0xF8;  // PB5 + encoder-Z center diagnostic/calibration (byte 1 = sub-opcode) → 0x30E
 inline constexpr uint8_t SERVICE_ACTION_CLEAR_ERROR_LOG      = 0xFE;
 
 // Pedal-calibration sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_PEDAL_CAL
@@ -244,6 +246,17 @@ inline constexpr uint8_t GEAR_LIMIT_OP_QUERY           = 0x06;
 inline constexpr uint8_t GEAR_LIMIT_OP_SET_D2_RESPONSE = 0x07;
 inline constexpr uint8_t GEAR_LIMIT_OP_SET_D1_RESPONSE = 0x08;
 inline constexpr uint8_t GEAR_LIMIT_OP_SET_R_RESPONSE  = 0x09;
+
+// Steering-Z dual-reference sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_STEERING_Z
+//   PB5 stays the primary/safety center reference; Z is secondary precision.
+//   0x01 QUERY      Request a 1 s burst of 0x30E telemetry at 10 Hz
+//   0x02 CALIBRATE  Recompute + persist the Z↔center offset.  Requires PB5 to
+//                   currently detect center AND the STM32 in BOOT/STANDBY.
+//   0x03 CLEAR      Clear the stored Z calibration (PB5 center kept).  Requires
+//                   BOOT/STANDBY; the HMI must enforce a double-confirm.
+inline constexpr uint8_t STEER_Z_OP_QUERY     = 0x01;
+inline constexpr uint8_t STEER_Z_OP_CALIBRATE = 0x02;
+inline constexpr uint8_t STEER_Z_OP_CLEAR     = 0x03;
 
 // Gear power-limit valid ranges (percent) — MUST mirror gear_limits_store.h
 // on the STM32 so the HMI never sends a value the firmware would reject.

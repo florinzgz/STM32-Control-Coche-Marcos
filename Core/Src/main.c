@@ -623,6 +623,11 @@ int main(void)
             /* Gear power-limit telemetry burst (0x30D) — emits only while
              * an explicit QUERY is active (1 s, 10 Hz).  No-op otherwise. */
             CAN_GearLimitsBurstUpdate();
+
+            /* PB5 + encoder-Z center diagnostic burst (0x30E) — emits only
+             * while an explicit QUERY/CALIBRATE is active (1 s, 10 Hz).
+             * No-op otherwise; diagnostic only, never gates control.      */
+            CAN_SteeringZBurstUpdate();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */

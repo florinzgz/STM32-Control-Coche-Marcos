@@ -146,6 +146,13 @@ private:
     int16_t     steeringAngle_   = 0;      // 0.1° units
     uint8_t     steeringCal_     = 0;      // 0 = uncalibrated, 1 = calibrated
     bool        encoderDataChanged_ = false;
+    vehicle::SteeringZData steeringZ_{};   // diagnostic-only PB5/Z snapshot
+    bool        steerZDataChanged_ = false;
+    unsigned long steerZLastQueryMs_ = 0;
+    bool        steerZClearPending_ = false;
+    unsigned long steerZClearPendingMs_ = 0;
+    static constexpr unsigned long STEER_Z_CLEAR_CONFIRM_MS = 5000;
+    void sendSteerZOp(uint8_t op);
 
     // Module control page state
     uint8_t     moduleCtrlPage_  = 0;

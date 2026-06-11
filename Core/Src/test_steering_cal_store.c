@@ -59,8 +59,10 @@ static int tests_failed = 0;
 
 /* ---- Reproduce the CRC32 and slot format from steering_cal_store.c ---- */
 
-#define STCAL_MAGIC       0x53544331U
+#define STCAL_MAGIC_V1    0x53544331U   /* "STC1" legacy */
+#define STCAL_MAGIC_V2    0x53544332U   /* "STC2" with Z */
 #define STCAL_VALID_FLAG  0xA5U
+#define STCAL_FORMAT_VERSION 2U
 
 #define STEERING_CAL_TOLERANCE_COUNTS 100
 
@@ -70,7 +72,20 @@ typedef struct {
     uint8_t  validity_flag;
     uint8_t  reserved[3];
     uint32_t checksum;
-} stcal_flash_slot_t;
+} stcal_flash_slot_v1_t;
+
+typedef struct {
+    uint32_t magic;
+    uint16_t format_version;
+    uint16_t reserved16;
+    int32_t  encoder_count_at_center;
+    int32_t  z_center_offset_counts;
+    int32_t  z_center_tolerance;
+    uint8_t  validity_flag;
+    uint8_t  z_center_valid;
+    uint8_t  reserved[2];
+    uint32_t checksum;
+} stcal_flash_slot_t;          /* v2 = current */
 
 static uint32_t stcal_crc32(const void *data, uint32_t len)
 {
@@ -88,20 +103,58 @@ static uint32_t stcal_crc32(const void *data, uint32_t len)
     return crc ^ 0xFFFFFFFFU;
 }
 
-static bool stcal_slot_valid(const stcal_flash_slot_t *slot)
+static bool stcal_slot_valid_v1(const stcal_flash_slot_v1_t *slot)
 {
-    if (slot->magic != STCAL_MAGIC) return false;
+    if (slot->magic != STCAL_MAGIC_V1) return false;
+    if (slot->validity_flag != STCAL_VALID_FLAG) return false;
+    uint32_t crc = stcal_crc32(slot, offsetof(stcal_flash_slot_v1_t, checksum));
+    return (crc == slot->checksum);
+}
+
+static bool stcal_slot_valid_v2(const stcal_flash_slot_t *slot)
+{
+    if (slot->magic != STCAL_MAGIC_V2) return false;
     if (slot->validity_flag != STCAL_VALID_FLAG) return false;
     uint32_t crc = stcal_crc32(slot, offsetof(stcal_flash_slot_t, checksum));
     return (crc == slot->checksum);
 }
 
+/* The reader auto-detects v2 first, then falls back to v1 (migration). */
+static bool stcal_slot_valid(const stcal_flash_slot_t *slot)
+{
+    return stcal_slot_valid_v2(slot);
+}
+
 static void build_valid_slot(stcal_flash_slot_t *slot, int32_t center)
 {
     memset(slot, 0, sizeof(*slot));
-    slot->magic                   = STCAL_MAGIC;
+    slot->magic                   = STCAL_MAGIC_V2;
+    slot->format_version          = STCAL_FORMAT_VERSION;
     slot->encoder_count_at_center = center;
     slot->validity_flag           = STCAL_VALID_FLAG;
+    slot->checksum = stcal_crc32(slot, offsetof(stcal_flash_slot_t, checksum));
+}
+
+static void build_valid_slot_v1(stcal_flash_slot_v1_t *slot, int32_t center)
+{
+    memset(slot, 0, sizeof(*slot));
+    slot->magic                   = STCAL_MAGIC_V1;
+    slot->encoder_count_at_center = center;
+    slot->validity_flag           = STCAL_VALID_FLAG;
+    slot->checksum = stcal_crc32(slot, offsetof(stcal_flash_slot_v1_t, checksum));
+}
+
+static void build_valid_slot_z(stcal_flash_slot_t *slot, int32_t center,
+                               int32_t z_off, bool z_valid, int32_t z_tol)
+{
+    memset(slot, 0, sizeof(*slot));
+    slot->magic                   = STCAL_MAGIC_V2;
+    slot->format_version          = STCAL_FORMAT_VERSION;
+    slot->encoder_count_at_center = center;
+    slot->z_center_offset_counts  = z_off;
+    slot->z_center_tolerance      = z_tol;
+    slot->validity_flag           = STCAL_VALID_FLAG;
+    slot->z_center_valid          = z_valid ? 1U : 0U;
     slot->checksum = stcal_crc32(slot, offsetof(stcal_flash_slot_t, checksum));
 }
 
@@ -206,6 +259,67 @@ static void test_nonzero_stored_center(void)
     ASSERT_EQ_I32(slot.encoder_count_at_center, 500);
 }
 
+/* ---- v2 / Z-reference tests (Fase 4 migration) ---- */
+
+static void test_v2_z_roundtrip(void)
+{
+    stcal_flash_slot_t slot;
+    build_valid_slot_z(&slot, 0, 7, true, 25);
+    ASSERT_TRUE(stcal_slot_valid_v2(&slot));
+    ASSERT_EQ_I32(slot.z_center_offset_counts, 7);
+    ASSERT_EQ_I32(slot.z_center_tolerance, 25);
+    ASSERT_TRUE(slot.z_center_valid == 1U);
+
+    build_valid_slot_z(&slot, -1200, -30, false, 25);
+    ASSERT_TRUE(stcal_slot_valid_v2(&slot));
+    ASSERT_EQ_I32(slot.z_center_offset_counts, -30);
+    ASSERT_TRUE(slot.z_center_valid == 0U);
+}
+
+static void test_v2_bad_crc_rejected(void)
+{
+    stcal_flash_slot_t slot;
+    build_valid_slot_z(&slot, 0, 7, true, 25);
+    slot.z_center_offset_counts ^= 0x55;   /* mutate after CRC */
+    ASSERT_FALSE(stcal_slot_valid_v2(&slot));
+}
+
+static void test_v1_legacy_still_valid(void)
+{
+    /* A legacy v1 slot must still validate under the v1 reader. */
+    stcal_flash_slot_v1_t v1;
+    build_valid_slot_v1(&v1, 321);
+    ASSERT_TRUE(stcal_slot_valid_v1(&v1));
+    ASSERT_EQ_I32(v1.encoder_count_at_center, 321);
+}
+
+static void test_migration_detection(void)
+{
+    /* Reader tries v2 first, then v1.  Reproduce that decision here. */
+    uint8_t page[64];
+
+    /* Case A: page holds a valid v2 slot → v2 path wins. */
+    memset(page, 0xFF, sizeof(page));
+    build_valid_slot_z((stcal_flash_slot_t *)page, 100, 5, true, 25);
+    ASSERT_TRUE(stcal_slot_valid_v2((const stcal_flash_slot_t *)page));
+
+    /* Case B: page holds a valid v1 slot → v2 fails, v1 migrates. */
+    memset(page, 0xFF, sizeof(page));
+    build_valid_slot_v1((stcal_flash_slot_v1_t *)page, 200);
+    ASSERT_FALSE(stcal_slot_valid_v2((const stcal_flash_slot_t *)page));
+    ASSERT_TRUE(stcal_slot_valid_v1((const stcal_flash_slot_v1_t *)page));
+
+    /* Case C: erased page → neither validates → fresh centering. */
+    memset(page, 0xFF, sizeof(page));
+    ASSERT_FALSE(stcal_slot_valid_v2((const stcal_flash_slot_t *)page));
+    ASSERT_FALSE(stcal_slot_valid_v1((const stcal_flash_slot_v1_t *)page));
+
+    /* Case D: corrupt page (random) → neither validates. */
+    memset(page, 0x5A, sizeof(page));
+    ASSERT_FALSE(stcal_slot_valid_v2((const stcal_flash_slot_t *)page));
+    ASSERT_FALSE(stcal_slot_valid_v1((const stcal_flash_slot_v1_t *)page));
+}
+
 /* ---- Main ---- */
 
 int main(void)
@@ -218,6 +332,10 @@ int main(void)
     test_zero_flash_rejected();
     test_tolerance_window();
     test_nonzero_stored_center();
+    test_v2_z_roundtrip();
+    test_v2_bad_crc_rejected();
+    test_v1_legacy_still_valid();
+    test_migration_detection();
 
     printf("\n%d tests run, %d failed\n", tests_run, tests_failed);
     return (tests_failed == 0) ? 0 : 1;

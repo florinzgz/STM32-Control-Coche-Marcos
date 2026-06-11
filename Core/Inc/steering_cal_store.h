@@ -59,10 +59,31 @@ void SteeringCal_Init(void);
  *   - Vehicle speed == 0
  *   - No safety errors
  *
+ * Backward-compatible wrapper: preserves whatever Z reference is
+ * currently held (use SteeringCal_SaveWithZ to update it).
+ *
  * @param  encoder_count_at_center  The TIM2 count at calibrated center.
  * @retval true on success, false on flash write error.
  */
 bool SteeringCal_Save(int32_t encoder_count_at_center);
+
+/**
+ * @brief  Persist the PB5 center together with the secondary encoder-Z
+ *         center reference (format v2).
+ *
+ * PB5 remains the primary/safety reference; the Z fields are auxiliary
+ * (precision + diagnostics) and never authorise ACTIVE on their own.
+ *
+ * @param  encoder_count_at_center  TIM2 count at the PB5 calibrated center.
+ * @param  z_center_offset_counts   Z↔center offset (counts).
+ * @param  z_center_valid           true if Z agreed within window.
+ * @param  z_center_tolerance       Window (counts) used at calibration.
+ * @retval true on success, false on flash write error / guard rejection.
+ */
+bool SteeringCal_SaveWithZ(int32_t encoder_count_at_center,
+                           int32_t z_center_offset_counts,
+                           bool    z_center_valid,
+                           int32_t z_center_tolerance);
 
 /**
  * @brief  Boot-time validation of stored calibration.
@@ -91,6 +112,22 @@ bool SteeringCal_IsRestoredValid(void);
  *         Only meaningful when SteeringCal_IsRestoredValid() == true.
  */
 int32_t SteeringCal_GetStoredCenter(void);
+
+/**
+ * @brief  Get the stored Z↔center offset (counts).  0 if no Z reference.
+ */
+int32_t SteeringCal_GetStoredZOffset(void);
+
+/**
+ * @brief  Query whether the stored Z center reference was validated.
+ *         Always false after a v1→v2 migration until the next calibration.
+ */
+bool SteeringCal_IsStoredZValid(void);
+
+/**
+ * @brief  Get the Z tolerance window (counts) recorded at calibration.
+ */
+int32_t SteeringCal_GetStoredZTolerance(void);
 
 #ifdef __cplusplus
 }
