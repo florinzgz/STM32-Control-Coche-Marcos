@@ -8,6 +8,7 @@
 #include "motor_control.h"
 #include "ackermann.h"
 #include "eps_params.h"
+#include "gear_limits_store.h"
 #include "main.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
@@ -284,7 +285,15 @@ static inline float sanitize_float(float val, float safe_default)
  *   GEAR_REVERSE       = 60 % max power
  *
  * Safety_GetPowerLimitFactor() is applied separately upstream and
- * is NOT modified by this scaling.                                     */
+ * is NOT modified by this scaling.
+ *
+ * RUNTIME-CONFIGURABLE (R-2): the three fractions below are no longer
+ * hard-coded.  They are seeded from the GEAR_LIMIT_*_DEFAULT_PCT macros
+ * (which equal the historic compile-time values, so default behaviour is
+ * unchanged) and may be overridden at runtime via Traction_SetGearLimits()
+ * — sourced either from the gear_limits_store.c flash slot at boot or from
+ * the CAN Engineering-menu service command.  The macros below are kept as
+ * the single compile-time default source for RESTORE DEFAULTS.            */
 #define GEAR_POWER_FORWARD_PCT   0.60f   /* D1: 60 % max power            */
 #define GEAR_POWER_FORWARD_D2_PCT 1.00f /* D2: 100 % max power           */
 #define GEAR_POWER_REVERSE_PCT   0.60f  /* R:  60 % max power            */
@@ -438,6 +447,15 @@ static int8_t          neutral_ramp_dir   = 1;     /* Captured travel direction*
  * already force the traction demand to 0 (see main.c:483-484), so this
  * is the strictest fail-safe boot state.                                */
 static GearPosition_t current_gear = GEAR_NEUTRAL;
+
+/* ---- Runtime-configurable gear power limits (R-2) ----
+ * Stored as percent (0..100) for an exact match with the Engineering-menu
+ * UI and the CAN/flash representation; converted to a fraction at the
+ * point of use.  Seeded from the compile-time defaults so a unit with no
+ * valid flash slot behaves identically to the historic firmware.        */
+static uint8_t gear_limit_d2_pct = GEAR_LIMIT_D2_DEFAULT_PCT;
+static uint8_t gear_limit_d1_pct = GEAR_LIMIT_D1_DEFAULT_PCT;
+static uint8_t gear_limit_r_pct  = GEAR_LIMIT_R_DEFAULT_PCT;
 
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
@@ -995,6 +1013,35 @@ GearPosition_t Traction_GetGear(void)
     return current_gear;
 }
 
+/* ---- Runtime-configurable gear power limits (R-2) ---------------- */
+
+bool Traction_ValidateGearLimits(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    /* Delegate to the single source of truth in gear_limits_store so the
+     * CAN handler, the flash loader and the motor controller all agree.  */
+    return GearLimitsStore_Validate(d2_pct, d1_pct, r_pct);
+}
+
+bool Traction_SetGearLimits(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    if (!Traction_ValidateGearLimits(d2_pct, d1_pct, r_pct))
+        return false;
+    /* Single-byte writes are atomic on Cortex-M4; the next Traction_Update()
+     * cycle picks up the new fractions.  No effect on ramp limiter or the
+     * ABS/TCS per-wheel scaling applied downstream.                        */
+    gear_limit_d2_pct = d2_pct;
+    gear_limit_d1_pct = d1_pct;
+    gear_limit_r_pct  = r_pct;
+    return true;
+}
+
+void Traction_GetGearLimits(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
+{
+    if (d2_pct) *d2_pct = gear_limit_d2_pct;
+    if (d1_pct) *d1_pct = gear_limit_d1_pct;
+    if (r_pct)  *r_pct  = gear_limit_r_pct;
+}
+
 /* ==================================================================
  *  Ackermann Differential Torque Correction
  *
@@ -1365,11 +1412,11 @@ void Traction_Update(void)
     if (effective_demand > 0.0f) {
         float gear_scale;
         if (current_gear == GEAR_FORWARD_D2) {
-            gear_scale = GEAR_POWER_FORWARD_D2_PCT;
+            gear_scale = (float)gear_limit_d2_pct * 0.01f;
         } else if (current_gear == GEAR_REVERSE) {
-            gear_scale = GEAR_POWER_REVERSE_PCT;
+            gear_scale = (float)gear_limit_r_pct * 0.01f;
         } else {
-            gear_scale = GEAR_POWER_FORWARD_PCT;
+            gear_scale = (float)gear_limit_d1_pct * 0.01f;
         }
         effective_demand *= gear_scale;
     }

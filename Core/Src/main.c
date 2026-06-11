@@ -28,6 +28,7 @@
 #include "steering_cal_store.h"
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
+#include "gear_limits_store.h"
 #include "error_log.h"
 #include "loop_diag.h"
 #include <math.h>
@@ -309,6 +310,20 @@ int main(void)
         uint16_t pmin = 0, pmax = 0;
         PedalCal_GetStored(&pmin, &pmax);
         Pedal_ApplyCalibration(pmin, pmax);
+    }
+
+    /* ---- Gear power-limit slot (page 122) ----
+     * Load the persisted D2/D1/R traction power limits and apply them.
+     * On flash blank / CRC-invalid / out-of-range the call is a no-op:
+     * motor_control.c keeps its compile-time defaults (100/60/60 %).
+     * Boot is never blocked by a missing or corrupt slot, and this only
+     * scales an already-validated traction demand — it does NOT clear
+     * startup_inhibit or authorise ACTIVE.                              */
+    GearLimitsStore_Init();
+    if (GearLimitsStore_IsValid()) {
+        uint8_t gd2 = 0, gd1 = 0, gr = 0;
+        GearLimitsStore_GetStored(&gd2, &gd1, &gr);
+        (void)Traction_SetGearLimits(gd2, gd1, gr);
     }
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */
@@ -596,6 +611,10 @@ int main(void)
              * while an explicit QUERY is active (1 s, 10 Hz).  No-op
              * otherwise.  Does not affect backward-compatible nodes. */
             CAN_PedalCalBurstUpdate();
+
+            /* Gear power-limit telemetry burst (0x30D) — emits only while
+             * an explicit QUERY is active (1 s, 10 Hz).  No-op otherwise. */
+            CAN_GearLimitsBurstUpdate();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */

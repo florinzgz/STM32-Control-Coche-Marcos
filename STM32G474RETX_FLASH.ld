@@ -33,19 +33,19 @@ _Min_Stack_Size = 0x400;     /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
-  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 492K
-  /* Pages 123-127 reserved for NVM data — not part of FLASH region.
+  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 488K
+  /* Pages 122-127 reserved for NVM data — not part of FLASH region.
+   * Page 122 (0x0807A000): gear_limits_store.c   gear power limits (D2/D1/R)
    * Page 123 (0x0807B000): sensor_map_store.c    DS18B20 physIdx→role map
    * Page 124 (0x0807C000): pedal_cal_store.c     pedal ADC calibration
    * Page 125 (0x0807D000): error_log.c           persistent error ring buffer
    * Page 126 (0x0807E000): steering_cal_store.c  steering calibration
    * Page 127 (0x0807F000): eps_params.c          EPS tuning parameters
    *
-   * FLASH region was reduced 500K → 496K → 492K to free pages 124 and
-   * 123 for the pedal calibration NVM slot and the DS18B20 sensor map
-   * (the latter resolving the former page-125 ownership conflict with
-   * error_log.c).  .text / .rodata / .data init image are guaranteed
-   * to end below 0x0807B000.                                          */
+   * FLASH region was reduced 500K → 496K → 492K → 488K to free pages
+   * 124/123 for the pedal calibration NVM slot and the DS18B20 sensor map
+   * and page 122 for the gear power-limit NVM slot.  .text / .rodata /
+   * .data init image are guaranteed to end below 0x0807A000.          */
   EPS_PARAMS (r)  : ORIGIN = 0x0807F000,   LENGTH = 4K
 }
 
@@ -185,11 +185,11 @@ SECTIONS
 /* ----------------------------------------------------------------------
  * Defense-in-depth: guarantee that the FLASH-resident image (code +
  * rodata + .data init image) never overflows into the NVM region that
- * starts at page 123 (0x0807B000).  The MEMORY region `LENGTH = 492K`
+ * starts at page 122 (0x0807A000).  The MEMORY region `LENGTH = 488K`
  * above already enforces this, but the explicit ASSERT below produces
- * a clearer diagnostic ("Code overlaps NVM page 123") if some future
+ * a clearer diagnostic ("Code overlaps NVM page 122") if some future
  * tweak silently widens the FLASH region.  Standard GNU ld syntax,
  * no impact on the existing toolchain.
  * --------------------------------------------------------------------*/
-ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x0807B000,
-       "Code overlaps NVM page 123 (sensor_map). Reduce code size or revisit FLASH=492K reservation.")
+ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x0807A000,
+       "Code overlaps NVM page 122 (gear_limits). Reduce code size or revisit FLASH=488K reservation.")

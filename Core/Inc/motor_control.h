@@ -61,6 +61,15 @@ void Traction_SetMode4x4(bool enable);
 void Traction_SetAxisRotation(bool enable);
 void Traction_SetGear(GearPosition_t gear);
 GearPosition_t Traction_GetGear(void);
+
+/* ---- Runtime-configurable gear power limits (R-2) ----
+ * Per-gear traction power limits expressed as integer percentages
+ * (0..100).  Defaults equal the historic compile-time values
+ * (D2=100, D1=60, R=60) so behaviour is unchanged until overridden.
+ * Ranges and defaults live in gear_limits_store.h (single source).  */
+bool Traction_ValidateGearLimits(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct);
+bool Traction_SetGearLimits(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct);
+void Traction_GetGearLimits(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct);
 void Traction_Update(void);
 void Traction_EmergencyStop(void);
 const TractionState_t* Traction_GetState(void);

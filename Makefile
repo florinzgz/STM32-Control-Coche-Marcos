@@ -32,6 +32,7 @@ C_SOURCES = \
   $(CORE_SRC)/steering_cal_store.c \
   $(CORE_SRC)/sensor_map_store.c \
   $(CORE_SRC)/pedal_cal_store.c \
+  $(CORE_SRC)/gear_limits_store.c \
   $(CORE_SRC)/loop_diag.c \
   $(CORE_SRC)/math_safety.c \
   $(CORE_SRC)/stm32g4xx_it.c \
