@@ -198,11 +198,40 @@ void setAudioVolume(uint8_t volume) {
 }
 
 void setIna226Map(const uint8_t map[NUM_INA226_CH]) {
+    // Bounds-check every entry before touching the live config.  Valid values
+    // are a position index 0..NUM_INA226_CH-1, or 0xFF (unset sentinel — see
+    // Config::ina226Map doc).  A single out-of-range byte rejects the whole
+    // update so a corrupt/garbage source can never overwrite a good mapping.
+    // The NVS blob format is unchanged; nothing is erased on rejection.
+    if (map == nullptr) {
+        return;
+    }
+    for (uint8_t i = 0; i < NUM_INA226_CH; ++i) {
+        if (map[i] >= NUM_INA226_CH && map[i] != 0xFF) {
+            Serial.printf("[CFG] setIna226Map rejected: map[%u]=%u out of range\n",
+                          (unsigned)i, (unsigned)map[i]);
+            return;
+        }
+    }
     memcpy(currentCfg_.ina226Map, map, NUM_INA226_CH);
     dirty_ = true;
 }
 
 void setTempSensorMap(const uint8_t map[NUM_TEMP_SENS]) {
+    // Bounds-check every entry before touching the live config.  Valid values
+    // are a position index 0..NUM_TEMP_SENS-1, or 0xFF (unset sentinel).  A
+    // single out-of-range byte rejects the whole update; the existing mapping
+    // and NVS blob are left untouched.
+    if (map == nullptr) {
+        return;
+    }
+    for (uint8_t i = 0; i < NUM_TEMP_SENS; ++i) {
+        if (map[i] >= NUM_TEMP_SENS && map[i] != 0xFF) {
+            Serial.printf("[CFG] setTempSensorMap rejected: map[%u]=%u out of range\n",
+                          (unsigned)i, (unsigned)map[i]);
+            return;
+        }
+    }
     memcpy(currentCfg_.tempSensorMap, map, NUM_TEMP_SENS);
     dirty_ = true;
 }

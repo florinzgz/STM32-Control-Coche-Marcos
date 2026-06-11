@@ -144,6 +144,19 @@ private:
     uint32_t    lastAckMs_       = 0;      // frameTimeMs when ACK was received
     uint32_t    lastAckTracked_  = 0;      // last ack timestamp we processed
 
+    // Module Enable/Disable double-tap confirmation (FASE 2 §1 — prevent
+    // accidental enable/disable of non-critical modules).  The first tap on a
+    // non-critical row arms the confirmation; the toggle command is only sent
+    // when the SAME module is tapped again within MODULE_CONFIRM_TIMEOUT_MS.
+    // Any other touch, page change, screen entry or BACK cancels.  Critical
+    // modules (0–3) are never toggleable and never arm a confirmation.  Time
+    // transitions happen in update() (frame-time contract: no millis() in the
+    // touch/UI path); the touch handler only latches intent via modulePendingArm_.
+    int8_t        modulePendingId_  = -1;     // module ID awaiting confirm, -1 = none
+    bool          modulePendingArm_ = false;  // stamp modulePendingMs_ next update()
+    unsigned long modulePendingMs_  = 0;      // frameTimeMs when armed
+    static constexpr unsigned long MODULE_CONFIRM_TIMEOUT_MS = 5000;
+
     // Sensor mapping edit state
     // Selected row (0=none selected, 1..N = row index 1-based)
     uint8_t     inaEditRow_  = 0;
@@ -159,6 +172,18 @@ private:
     // DTC log CLEAR confirmation state (§4.1 — prevent accidental clear)
     bool        clearLogPending_ = false;  // true after first tap on CLEAR; awaiting confirm
 
+    // Factory Defaults double-tap confirmation (FASE 2 §1 — prevent accidental
+    // destructive resets, especially 0xFF FACTORY_RESTORE).  The first tap on a
+    // row arms the confirmation; the command is only sent when the SAME row is
+    // tapped again within FACTORY_CONFIRM_TIMEOUT_MS.  Any other touch, screen
+    // entry or BACK cancels.  Time transitions happen in update() (frame-time
+    // contract: no millis() in the touch/UI path); the touch handler only
+    // latches intent via factoryPendingArm_.
+    int8_t        factoryPendingIdx_ = -1;     // row awaiting confirm, -1 = none
+    bool          factoryPendingArm_ = false;  // stamp factoryPendingMs_ next update()
+    unsigned long factoryPendingMs_  = 0;      // frameTimeMs when armed
+    static constexpr unsigned long FACTORY_CONFIRM_TIMEOUT_MS = 5000;
+
     // Relay status for main menu header display
     uint8_t     relayStatus_     = 0;      // heartbeat byte 5 (bit0=reserved, bit1=T, bit2=D, bit7=SEQ)
     uint8_t     prevRelayStatus_ = 0xFF;   // force initial draw
@@ -168,6 +193,17 @@ private:
     bool        relayOverrideEnabled_ = false;   // local UI toggle state
     uint8_t     relayOverrideMask_    = 0;       // bit0=reserved, bit1=TRAC, bit2=DIR
     bool        relayOverrideChanged_ = false;   // true when real CAN state changed
+
+    // Relay control STANDBY gate (FASE 2 §2 — local UI must not change unless
+    // the STM32 is in STANDBY, mirroring the firmware's STANDBY-only override).
+    // When the user taps a relay button outside STANDBY we refuse to change the
+    // local visual state and flash an "ONLY IN STANDBY" notice instead.  Time
+    // transitions happen in update() (frame-time contract); the touch handler
+    // only latches intent via relayStandbyMsgArm_.
+    bool          relayStandbyMsg_    = false;  // true while the notice is shown
+    bool          relayStandbyMsgArm_ = false;  // stamp relayStandbyMsgMs_ next update()
+    unsigned long relayStandbyMsgMs_  = 0;      // frameTimeMs when the notice armed
+    static constexpr unsigned long RELAY_STANDBY_MSG_MS = 2500;
 
     // Debounce DWT EMI counters cache (DEBOUNCE_DIAG submenu)
     uint16_t      debounceWheelFiltered_[4] = {};
