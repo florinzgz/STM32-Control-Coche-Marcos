@@ -462,7 +462,7 @@ El TVS protege el LED del optoacoplador EL817 frente a picos de tensión inducid
   Energía transitoria absorbida por el TVS, no por el LED ✅
 ```
 
-**Nota crítica:** El TVS **protege frente a transitorios inductivos antes de que alcancen el optoacoplador**. Es decir, intercepta los picos de tensión generados por cargas inductivas (motores BTS7960, relés RELAY_TRAC / RELAY_DIR) en el lado de 12 V del vehículo, **antes** de que estresen el LED del EL817. Sin este componente, ningún filtro software puede compensar la degradación física del LED.
+**Nota crítica:** El TVS **protege frente a transitorios inductivos antes de que alcancen el optoacoplador**. Es decir, intercepta los picos de tensión generados por cargas inductivas (motores BTS7960, relés RELAY_TRAC / RELAY_STEER_PWR (legacy: RELAY_DIR)) en el lado de 12 V del vehículo, **antes** de que estresen el LED del EL817. Sin este componente, ningún filtro software puede compensar la degradación física del LED.
 
 Es el único componente externo obligatorio que debe añadirse en el lado de 12 V de cada placa EL817.
 

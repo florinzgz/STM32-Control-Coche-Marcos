@@ -96,10 +96,13 @@
 | 40  | PC9  | EN_STEER  | Habilitación Motor Dirección |
 
 ### Relay Control (GPIO Output - Active HIGH)
-| Pin | GPIO  | Function    | Description |
-|-----|-------|-------------|-------------|
-| 52  | PC11  | RELAY_TRAC  | Relé Tracción (alimentación motores) |
-| 53  | PC12  | RELAY_DIR   | Relé Dirección (alimentación dirección) |
+| Pin | GPIO  | Function          | Description |
+|-----|-------|-------------------|-------------|
+| 51  | PC10  | —                 | Libre / expansión (INPUT_PULLDOWN, no relay) |
+| 52  | PC11  | RELAY_TRAC        | Relé Tracción (alimentación 24 V motores) |
+| 53  | PC12  | RELAY_STEER_PWR   | Relé Potencia Dirección (alimentación 12 V BTS7960) |
+| —   | PB10  | RELAY_LED_FRONT   | Relé LED frontal (5 V WS2812B) |
+| —   | PB11  | RELAY_LED_REAR    | Relé LED trasero (5 V WS2812B) |
 
 **Especificación Relés (arquitectura de dos etapas):**
 - Etapa 1: Módulo 4-ch opto relé SRD-12VDC-SL-C (bobina 12V, contactos 10A)

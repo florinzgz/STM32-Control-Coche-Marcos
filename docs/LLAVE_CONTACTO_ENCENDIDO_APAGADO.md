@@ -53,7 +53,7 @@ El sistema usa cuatro módulos de relé que trabajan juntos:
 | Pin STM32 | Puerto | Función | Tensión control | Referencia código |
 |-----------|--------|---------|-----------------|-------------------|
 | PC11 | GPIOC | RELAY_TRAC — relé tracción 24 V | 3.3 V HIGH/LOW | `project_config.h:199` |
-| PC12 | GPIOC | RELAY_DIR — relé dirección 12 V | 3.3 V HIGH/LOW | `project_config.h:200` |
+| PC12 | GPIOC | RELAY_STEER_PWR — relé potencia dirección 12 V (legacy: RELAY_DIR) | 3.3 V HIGH/LOW | `project_config.h:200` |
 | PB10 | GPIOB | RELAY_LED — alimentación tira LED frontal (28 LEDs WS2812B) | 3.3 V HIGH/LOW | `project_config.h:210` |
 | PB11 | GPIOB | RELAY_LED_REAR — alimentación tira LED trasera (16 LEDs WS2812B) | 3.3 V HIGH/LOW | `project_config.h:211` |
 | PC10 | GPIOC | **RESERVADO** — sin uso en firmware | — | `project_config.h:195` |
@@ -207,7 +207,7 @@ STM32 PC12 ───────────────────────
   Jumper trigger → posición H  (HIGH = relé ON)
 
   IN1 ←── PC11 STM32  (RELAY_TRAC, 3.3V directo)
-  IN2 ←── PC12 STM32  (RELAY_DIR,  3.3V directo)
+  IN2 ←── PC12 STM32  (RELAY_STEER_PWR, 3.3V directo)
 
   CH1 COM → 12 V batería
   CH1 NO  → Bobina relé potencia tracción 50A/24V
@@ -789,7 +789,7 @@ HY-M158 G(lado V) ────────────────────�
 - [ ] A3.4. GND → GND lógica
 - [ ] A3.5. Jumper trigger en posición **H** (HIGH = relé ON)
 - [ ] A3.6. IN1 ← STM32 PC11 (RELAY_TRAC)
-- [ ] A3.7. IN2 ← STM32 PC12 (RELAY_DIR)
+- [ ] A3.7. IN2 ← STM32 PC12 (RELAY_STEER_PWR)
 - [ ] A3.8. Verificar pull-down IN1: medir IN1→GND. Si > 1 MΩ → soldar 10 kΩ externo
 - [ ] A3.9. Verificar pull-down IN2: medir IN2→GND. Si > 1 MΩ → soldar 10 kΩ externo
 

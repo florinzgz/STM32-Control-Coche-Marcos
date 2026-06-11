@@ -1,6 +1,6 @@
 # 🛡️ Sistemas de Seguridad - ABS/TCS
 
-> ⚠ **Secuencia de relés (CAN rev 1.3 compatible, 2026-04-23):** Power-up en **2 fases (TRAC → DIR, 50 ms settle)**. Solo existen dos relés de potencia: `RELAY_TRAC` (PC11, 24 V tracción) y `RELAY_DIR` (PC12, 12 V dirección). Bitmap de `relay_status` en heartbeat 0x001 byte 5 (layout 3 bits preservado): bit 0 = reservado/0, bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ_COMPLETE. Ver `CAN_CONTRACT_FINAL.md`.
+> ⚠ **Secuencia de relés (CAN rev 1.3 compatible, 2026-04-23):** Power-up en **2 fases (TRAC → STEER_PWR, 50 ms settle)**. Dos relés de potencia STM32: `RELAY_TRAC` (PC11, 24 V tracción) y `RELAY_STEER_PWR` (PC12, 12 V dirección). Más relés de iluminación: `RELAY_LED_FRONT` (PB10) y `RELAY_LED_REAR` (PB11). Audio: `AUDIO_RELAY` (ESP32 GPIO11, ULN2803A). PC10 LIBRE (INPUT_PULLDOWN). Bitmap de `relay_status` en heartbeat 0x001 byte 5 (layout 3 bits preservado): bit 0 = reservado/0, bit 1 = TRAC, bit 2 = STEER_PWR, bit 7 = SEQ_COMPLETE. Ver `CAN_CONTRACT_FINAL.md`.
 
 **Seguridad Funcional y Protección del Vehículo**
 
@@ -115,35 +115,33 @@ void ABS_Update(void) {
 }
 ```
 
-### Estado ABS en CAN
+### Estado ABS/TCS en CAN
 
-El estado ABS se reporta en el mensaje `0x203 - STATUS_SAFETY`:
+El estado ABS y TCS se reporta mediante la función `CAN_SendStatusSafety()` (en `can_handler.c`):
 
 ```c
 /**
- * @brief Envía estado de ABS por CAN
+ * @brief Envía estado de seguridad por CAN — CAN ID 0x203, DLC 6, tasa 100 ms
  */
-void CAN_SendABSStatus(void) {
-    uint8_t data[4];
-    
-    // Byte 0: Flags ABS por rueda
-    data[0] = (wheel_speed.abs_active[0] << 0) |
-              (wheel_speed.abs_active[1] << 1) |
-              (wheel_speed.abs_active[2] << 2) |
-              (wheel_speed.abs_active[3] << 3);
-    
-    // Byte 1: TCS flags (ver TCS)
-    data[1] = 0x00;
-    
-    // Byte 2: Máximo deslizamiento (%)
-    data[2] = get_max_slip_percent();
-    
-    // Byte 3: Checksum
-    data[3] = CRC8(data, 3);
-    
-    CAN_Transmit(0x203, data, 4);
-}
+void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code,
+                          uint8_t loop_peak_100us);
 ```
+
+| Byte | Campo | Tipo | Descripción |
+|------|-------|------|-------------|
+| 0 | abs | uint8 | 1 = ABS activo globalmente, 0 = inactivo |
+| 1 | tcs | uint8 | 1 = TCS activo globalmente, 0 = inactivo |
+| 2 | error_code | uint8 | Código de error activo (`Safety_Error_t`) |
+| 3 | system_state | uint8 | Estado del sistema (`SYS_STATE_*`) |
+| 4 | rx_errors | uint8 | Contador de errores CAN RX (saturado a 255) |
+| 5 | loop_peak_100us | uint8 | Pico de duración del bucle de 100 Hz en unidades de 100 µs (saturado a 255 = 25.5 ms) |
+
+- **CAN ID:** `CAN_ID_STATUS_SAFETY = 0x203`
+- **DLC:** 6
+- **Dirección:** STM32 → ESP32
+- **Tasa:** 100 ms (10 Hz)
+
+No existe CRC en este mensaje. No existe `wheel_speed.abs_active[]` ni `get_max_slip_percent()` en el payload. El estado ABS/TCS se pasa como flags booleanos escalares.
 
 ---
 

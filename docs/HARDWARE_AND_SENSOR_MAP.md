@@ -152,18 +152,21 @@
 - **File(s):** `sensor_manager.c` (ADC read), `motor_control.c` (EMA filter + ramp limiter).
 - **Not a service module** — no dedicated service mode entry.
 
-### 1.3 Relays (2 total)
+### 1.3 Relays (4 STM32 + 1 ESP32 = 5 total)
 
 | Relay | Pin | Port | Function | Power-up Order | Service Module ID |
 |-------|-----|------|----------|----------------|-------------------|
-| RELAY_TRAC | PC11 | GPIOC | Traction motor power | 1st (50 ms settle) | `MODULE_RELAY_TRAC` (3) — CRITICAL |
-| RELAY_DIR | PC12 | GPIOC | Steering motor power | 2nd | — |
+| RELAY_TRAC | PC11 | GPIOC | Traction motor power (24 V) | 1st (50 ms settle) | `MODULE_RELAY_TRAC` (3) — CRITICAL |
+| RELAY_STEER_PWR | PC12 | GPIOC | Steering BTS7960 power (12 V) | 2nd | — |
+| RELAY_LED_FRONT | PB10 | GPIOB | Front LED strip power (5 V) | — | — |
+| RELAY_LED_REAR | PB11 | GPIOB | Rear LED strip power (5 V) | — | — |
+| AUDIO_RELAY | ESP32 GPIO11 | — | Audio (via ULN2803A CH3, Songle IN3) | — | — |
 
-> **PC10 is AVAILABLE** — Free GPIO, not connected (`INPUT_PULLDOWN`).
+> **PC10 is AVAILABLE** — Free GPIO, not connected (`INPUT_PULLDOWN`). PC10 does **not** control any relay.
 
-- **Interface:** GPIO push-pull output, active HIGH = relay energized.
+- **Interface (STM32):** GPIO push-pull output, active HIGH = relay energized.
 - **Default state:** LOW (de-energized, fail-safe open).
-- **Power-down order:** DIR → TRAC (reverse of power-up).
+- **Power-down order:** STEER_PWR → TRAC (reverse of power-up).
 - **File(s):** `safety_system.c` (`Relay_PowerUp`, `Relay_PowerDown`), `main.c` (GPIO init).
 
 ### 1.4 Communication
@@ -620,9 +623,9 @@ actual firmware source code (`Core/Inc/main.h` and `Core/Src/*.c`).
 | CAN TX | **PA12 (AF9)** | PA12 ✅ | PA12 ✅ | — | PA12 ✅ |
 | DIR pins | **PC0–PC4** | Mixed ❌ | PC0–PC4 ✅ | — | PC0–PC4 ✅ |
 | EN pins | **PC5,6,7,13,9** | Mixed ❌ | PC5,6,7,PD2,9 ❌(RR) | — | PC5,6,7,PD2,9 ❌(RR) |
-| Relay MAIN | **PC10** | PC11 ❌ | PC10 ✅ | — | PC10 ✅ |
+| PC10 libre | **PC10** | PC11 ❌ | — | — | PC10 ✅ (INPUT_PULLDOWN, no relay) |
 | Relay TRAC | **PC11** | PC12 ❌ | PC11 ✅ | — | PC11 ✅ |
-| Relay DIR | **PC12** | PD2 ❌ | PC12 ✅ | — | PC12 ✅ |
+| Relay STEER_PWR | **PC12** | PD2 ❌ | PC12 ✅ | — | PC12 ✅ |
 
 ### 6.2 CAN Protocol Discrepancies
 

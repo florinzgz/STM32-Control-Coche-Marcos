@@ -148,7 +148,7 @@ El firmware ya gestiona la secuencia con `RELAY_TRAC_SETTLE_MS = 50 ms`:
 2. STM32 y ESP32-S3 arrancan (~50-100 ms)
 3. Firmware espera 50 ms antes de activar RELAY_TRAC
 4. Activa RELAY_TRAC → tracción disponible
-5. Activa RELAY_DIR → dirección disponible
+5. Activa RELAY_STEER_PWR → dirección disponible
 6. Activa RELAY_LED (PB10) y RELAY_LED_REAR (PB11) → LEDs disponibles
 
 Los condensadores de salida del Buck 2 (1000 µF × 2) absorben el inrush de las tiras LED al activar los relés.

@@ -1,6 +1,6 @@
 # 🛡️ Arquitectura de Seguridad — STM32G474RE + ESP32-S3
 
-> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** Secuencia de relés simplificada a **2 fases** (`TRAC`→`DIR`, 50 ms settle). El hardware real **NO tiene un relé MAIN / Power-Hold** en la batería de 24 V; solo hay el relé de tracción. PC10 queda DISPONIBLE / libre (`GPIO_Input` + `Pull-down`). `Safety_GetRelayStatusByte()` conserva el layout de 3 bits de rev 1.3: bit 0 = reservado/0 (hueco legacy MAIN), bit 1 = TRAC, bit 2 = DIR, bit 7 = SEQ. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
+> ⚠ **ACTUALIZACIÓN relés (2026-04-23, CAN rev 1.3 compatible):** Secuencia de relés simplificada a **2 fases** (`TRAC`→`STEER_PWR`, 50 ms settle). El hardware real **NO tiene un relé MAIN / Power-Hold** en la batería de 24 V. PC10 queda DISPONIBLE / libre (`GPIO_Input` + `Pull-down`). `Safety_GetRelayStatusByte()` conserva el layout de 3 bits de rev 1.3: bit 0 = reservado/0 (hueco legacy MAIN), bit 1 = TRAC, bit 2 = STEER_PWR, bit 7 = SEQ. Ver `CAN_CONTRACT_FINAL.md` y `PROJECT_CHANGELOG.md`.
 
 > Documento de referencia para todos los mecanismos de seguridad implementados en el
 > firmware del vehículo eléctrico. Cada sección describe **qué activa** la protección,
@@ -164,7 +164,7 @@ Tras el reset:
 
 ### 🔌 Qué ocurre con los relés
 
-Todos los pines de relé (PC10, PC11, PC12, PB10, PB11) vuelven a su estado por defecto
+Todos los pines de relé STM32 (PC11, PC12, PB10, PB11) vuelven a su estado por defecto
 (entrada / baja impedancia) → los relés se **desactivan** → se corta la alimentación
 de potencia a motores.
 
@@ -195,16 +195,23 @@ motores. Se activan/desactivan por software o por reset del MCU.
 | Pin  | Función | Tensión controlada |
 |------|---------|--------------------|
 | PC11 | RELAY_TRAC | Tracción 24 V |
-| PC12 | RELAY_DIR  | Dirección 12 V |
-| PB10 | RELAY_LED_L | Tiras LED 5 V (izquierda) |
-| PB11 | RELAY_LED_R | Tiras LED 5 V (derecha) |
+| PC12 | RELAY_STEER_PWR | Dirección 12 V (potencia BTS7960) |
+| PB10 | RELAY_LED_FRONT | Tiras LED frontales 5 V (WS2812B) |
+| PB11 | RELAY_LED_REAR | Tiras LED traseras 5 V (WS2812B) |
 
-> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). Solo dos relés de potencia: TRAC (PC11) y DIR (PC12).
+> **Audio (ESP32):** GPIO11 del ESP32-S3, mediante driver ULN2803A canal 3 → relé Songle AUDIO_RELAY.
+
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). PC10 **no controla ningún relé**; el firmware no lo referencia.
+
+**Total del sistema: 5 relés**
+- 2 de potencia: RELAY_TRAC (PC11, 24 V) + RELAY_STEER_PWR (PC12, 12 V)
+- 2 de iluminación: RELAY_LED_FRONT (PB10) + RELAY_LED_REAR (PB11)
+- 1 de audio: AUDIO_RELAY (ESP32 GPIO11, ULN2803A)
 
 ### Secuencia de activación
 
 ```
-RELAY_TRAC ON → esperar 50 ms → RELAY_DIR ON
+RELAY_TRAC ON → esperar 50 ms → RELAY_STEER_PWR ON
 ```
 
 La secuencia garantiza que la alimentación de tracción esté estable antes de energizar

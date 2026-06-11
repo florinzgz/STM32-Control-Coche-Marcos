@@ -81,17 +81,18 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habili
 > PC9 fue reasignado a TIM8_CH4 (LPWM_RR). PC4 se usa ahora como EN_STEER (GPIO output).
 > TIM3 no tiene entrada BREAK; los fault handlers escriben CCR1=0, CCR2=0 por software.
 
-### 2.3 Relés de potencia (3 pines)
+### 2.3 Relés (5 relés — 4 pines STM32 + 1 ESP32)
 
 | Relé | Pin | Función |
 |------|-----|---------|
 | RELAY_TRAC | **PC11** | Alimentación motores 24V |
-| RELAY_DIR | **PC12** | Alimentación motor dirección 12V |
-| RELAY_LED (front) | **PB10** | Alimentación 5V tira LED frontal WS2812B |
+| RELAY_STEER_PWR | **PC12** | Alimentación motor dirección 12V (potencia BTS7960) |
+| RELAY_LED_FRONT | **PB10** | Alimentación 5V tira LED frontal WS2812B |
 | RELAY_LED_REAR | **PB11** | Alimentación 5V tira LED trasera WS2812B |
-| | **Subtotal:** | **4 pines** |
+| AUDIO_RELAY | **ESP32 GPIO11** | Relé audio vía ULN2803A CH3 (Songle IN3) |
+| | **Subtotal STM32:** | **4 pines** |
 
-> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`).
+> **PC10 está DISPONIBLE** — GPIO libre, no conectado (`INPUT_PULLDOWN`). PC10 no controla ningún relé.
 
 - PC11–PC12: controlados vía módulo 2-ch opto relé, activo HIGH
 - PB10/PB11: controlados vía CAN (ID 0x120); el ESP32 genera la señal WS2812B, el STM32 controla el relé de alimentación
@@ -223,9 +224,9 @@ Sensores en el bus (un solo pin):
 | 25 | PC7 | GPIOC | Motor RL | TIM8_CH2, LPWM_RL 20 kHz |
 | 26 | PC8 | GPIOC | Motor RR | TIM8_CH3, RPWM_RR 20 kHz |
 | 27 | PC9 | GPIOC | Motor RR | TIM8_CH4, LPWM_RR 20 kHz |
-| 28 | PC10 | GPIOC | Relé MAIN | Alimentación general |
-| 29 | PC11 | GPIOC | Relé TRAC | Alimentación motores |
-| 30 | PC12 | GPIOC | Relé DIR | Alimentación dirección |
+| 28 | PC10 | GPIOC | **LIBRE** | INPUT_PULLDOWN — disponible para expansión |
+| 29 | PC11 | GPIOC | Relé TRAC | Alimentación motores (RELAY_TRAC) |
+| 30 | PC12 | GPIOC | Relé STEER_PWR | Alimentación dirección (RELAY_STEER_PWR, legacy: RELAY_DIR) |
 | 31 | PC13 | GPIOC | Motor RR | EN (habilitación), GPIO active HIGH |
 | 32 | PC0 | GPIOC | Motor FR | EN (habilitación), GPIO active HIGH |
 | 33 | PC1 | GPIOC | Motor RL | EN (habilitación), GPIO active HIGH |

@@ -13,7 +13,7 @@
 The obstacle system is split between the ESP32-S3 (sensor + logic) and STM32G474RE (safety backstop):
 
 - **ESP32-S3**: Runs the full obstacle detection stack (UART driver, TOFSense-M S sensor parsing, 8×8 matrix processing, 5-zone logic, child reaction detection, ACC PID). Transmits processed distance and zone data to the STM32 via CAN (IDs 0x208/0x209).
-- **STM32G474RE**: Receives CAN obstacle data and applies a simplified 3-tier backstop limiter through the existing torque pipeline. Enforces SAFE state for emergency distances, CAN timeouts, sensor failures, and stale data.
+- **STM32G474RE**: Receives CAN obstacle data and applies a speed-dependent obstacle scale through the existing torque pipeline. For emergency distances (< 500 mm, confirmed ≥ 200 ms), sets `obstacle_forward_blocked = 1` and `obstacle_scale = 0.0`. CAN timeouts and sensor faults apply `OBSTACLE_FAULT_SCALE` (0.3), **not SAFE state**.
 
 ### Rationale
 
@@ -77,14 +77,14 @@ The obstacle system integrates into the existing STM32 safety state machine:
 ```
 BOOT → STANDBY → ACTIVE ⇄ DEGRADED → SAFE → ERROR
 
-Obstacle triggers:
-  Distance < 500 mm         → ACTIVE/DEGRADED → SAFE
-  CAN timeout (> 500 ms)    → ACTIVE/DEGRADED → SAFE
-  Sensor unhealthy           → ACTIVE/DEGRADED → SAFE
-  Stale data (≥ 3 frames)   → ACTIVE/DEGRADED → SAFE
+Obstacle triggers (NO SAFE state transition):
+  Distance < 500 mm (≥200 ms confirmed) → forward blocked, scale=0.0, SAFETY_ERROR_OBSTACLE set
+  CAN timeout (> 500 ms, obstacle active)  → scale=OBSTACLE_FAULT_SCALE(0.3), OBS_STATE_SENSOR_FAULT
+  CAN timeout (> 500 ms, no active obst)  → scale=1.0, OBS_STATE_NO_SENSOR
+  Sensor unhealthy / stale (≥3 frames)    → scale=0.3, OBS_STATE_SENSOR_FAULT
 
 Recovery:
-  Distance > 750 mm for > 1 s + healthy sensor → SAFE → ACTIVE
+  Distance > 750 mm for > 1 s + healthy sensor → CLEARING → NORMAL (scale → 1.0)
 ```
 
 ### Interaction with Existing Safety Checks
@@ -101,13 +101,14 @@ Recovery:
 
 | Failure Mode | Detection | Response | Recovery |
 |-------------|-----------|----------|----------|
-| CAN timeout (no 0x208 for > 500 ms) | `Obstacle_Update()` timestamp check | obstacle_scale = 0.0, SAFE state | Auto-recover when 0x208 resumes with incrementing counter |
+| CAN timeout (no 0x208 for > 500 ms, obstacle active) | `Obstacle_Update()` timestamp check | obstacle_scale = OBSTACLE_FAULT_SCALE (0.3), OBS_STATE_SENSOR_FAULT — **no SAFE state** | Auto-recover when 0x208 resumes with incrementing counter |
+| CAN timeout (no 0x208 for > 500 ms, no active obstacle) | `Obstacle_Update()` timestamp check | obstacle_scale = 1.0, OBS_STATE_NO_SENSOR — **no SAFE state** | Auto-recover when 0x208 resumes |
 | ESP32 crash | Heartbeat timeout (250 ms) → SAFE | Independent of obstacle system | ESP32 must reboot and resume heartbeat |
-| Sensor UART failure | ESP32 reports `sensor_health = 0` in 0x208 | obstacle_scale = 0.0, SAFE state | Auto-recover when ESP32 reports healthy sensor |
-| Stale data (frozen counter) | Counter not incrementing for ≥ 3 frames | obstacle_scale = 0.0, SAFE state | Auto-recover when counter resumes incrementing |
+| Sensor UART failure | ESP32 reports `sensor_health = 0` in 0x208 | obstacle_scale = OBSTACLE_FAULT_SCALE (0.3), OBS_STATE_SENSOR_FAULT — **no SAFE state** | Auto-recover when ESP32 reports healthy sensor |
+| Stale data (frozen counter) | Counter not incrementing for ≥ 3 frames | obstacle_scale = OBSTACLE_FAULT_SCALE (0.3), OBS_STATE_SENSOR_FAULT — **no SAFE state** | Auto-recover when counter resumes incrementing |
 | CAN spoofing (false distance) | Not directly detectable | Rolling counter provides sequence integrity | CAN bus is point-to-point; physical access required |
-| Distance near boundary (500 mm) | Hysteresis: trigger at 500 mm, recover at 750 mm | Prevents oscillation | 1 s debounce before recovery |
-| ESP32 sends cached data | Counter frozen detection | SAFE state after 3 stale frames | Counter must resume incrementing |
+| Distance near boundary (500 mm) | Temporal hysteresis: 200 ms confirmation + 750 mm recovery threshold | Prevents oscillation | 1 s debounce before recovery |
+| ESP32 sends cached data | Counter frozen detection | scale = 0.3, SENSOR_FAULT — counter must resume incrementing | Counter must resume incrementing |
 
 ### CAN Spoofing Mitigation
 
@@ -125,8 +126,9 @@ The current design does not implement cryptographic CAN message authentication. 
 | Timeout | Value | Trigger | Response |
 |---------|-------|---------|----------|
 | ESP32 heartbeat | 250 ms | No 0x011 received | SAFE state (existing behavior) |
-| Obstacle CAN data | 500 ms | No 0x208 received (after first reception) | obstacle_scale = 0.0, SAFE state |
-| Stale data | 3 consecutive frames | Counter not changing | obstacle_scale = 0.0, SAFE state |
+| Obstacle CAN data (active) | 500 ms | No 0x208 received (after first reception), obstacle was active | scale = OBSTACLE_FAULT_SCALE (0.3), OBS_STATE_SENSOR_FAULT — **no SAFE state** |
+| Obstacle CAN data (idle) | 500 ms | No 0x208 received (after first reception), no active obstacle | scale = 1.0, OBS_STATE_NO_SENSOR — **no SAFE state** |
+| Stale data | 3 consecutive frames | Counter not changing | scale = 0.3, OBS_STATE_SENSOR_FAULT — **no SAFE state** |
 
 ### Why 500 ms for obstacle timeout?
 
@@ -198,14 +200,15 @@ Where:
 
   --- Obstacle Scale (uniform, all wheels) ---
   obstacle_scale  = f(CAN_distance):
-    distance < 500 mm   → 0.0 + SAFE state
+    distance < 500 mm (confirmed ≥200 ms) → 0.0 + forward_blocked (NO SAFE state)
     distance 500-1000   → 0.3
     distance 1000-1500  → 0.7
     distance 1500-2000  → 0.85
     distance 2000-4000  → 0.95
     distance ≥ 4000     → 1.0
-    CAN timeout         → 0.0 + SAFE state
-    sensor unhealthy    → 0.0 + SAFE state
+    CAN timeout (active)→ OBSTACLE_FAULT_SCALE (0.3), OBS_STATE_SENSOR_FAULT (NO SAFE)
+    CAN timeout (idle)  → 1.0, OBS_STATE_NO_SENSOR (NO SAFE)
+    sensor unhealthy    → 0.3, OBS_STATE_SENSOR_FAULT (NO SAFE)
 
   --- Ackermann Differential (per-wheel, based on steering angle) ---
   ackermann_diff[i] = compute_ackermann_differential(steering_angle):
@@ -295,7 +298,7 @@ base_pwm = (uint16_t)(base_pwm * safety_status.obstacle_scale);  // ← NEW
 │                                                    │
 │  ┌─────────────────────────────────────────────┐  │
 │  │ Safety State Machine                         │  │
-│  │ • SAFE state enforced for obstacle emergency │  │
+│  │ • obstacle_forward_blocked (no SAFE state)   │  │
 │  │ • Relay control (independent safety layer)   │  │
 │  │ • Watchdog (IWDG ~4.1 s)                     │  │
 │  └─────────────────────────────────────────────┘  │

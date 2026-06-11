@@ -193,7 +193,7 @@ canal Z llega mientras el contador TIM2 está en una posición esperada?
 Con el PC817 instalado, un disparo falso de EXTI4 podría ocurrir por:
 - Ruido en el cable del encoder que supere el umbral del PC817 (mucho menos probable con
   el optoacoplador que sin él, que es precisamente el objetivo del aislamiento)
-- Transitorio inductivo del relé RELAY_DIR que acopla al cable del encoder
+- Transitorio inductivo del relé RELAY_STEER_PWR (legacy: RELAY_DIR) que acopla al cable del encoder
 
 **Sin aislamiento**: cualquier transitorio de más de ~1 V en el cable llega directamente
 al GPIO PB4.
