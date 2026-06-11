@@ -662,7 +662,7 @@ void EngineeringScreen::draw() {
         char buf[40];
 
         // Clear and redraw relay values (two lines below the static label)
-        tft.fillRect(relX, relY + 11, 180, 22, ui::COL_BG);
+        tft.fillRect(relX, relY + 11, 180, 18, ui::COL_BG);
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 

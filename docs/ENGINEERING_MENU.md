@@ -57,7 +57,8 @@ the old list row.
   - **PAGE 2** (3×2, items 10–15): Relay Control, INA226 Live Diag,
     Debounce/CAN Diag, Touch Calibration, Reset Touch Cal, MCP23017 Live.
 - **Tile size**: 148 × 72 px with a 10 px separation — well above the 44 px
-  minimum touch target, usable with gloves. No overlaps, no dead zones.
+  minimum touch target, usable with gloves. No overlaps; gaps intentionally
+  separate tiles.
 - **Captions**: rendered at text size 2 (two short lines) for legibility from
   the driver's seat; critical captions are never size 1.
 - **Icons**: each tile carries a category icon (warning triangle, ON/OFF
