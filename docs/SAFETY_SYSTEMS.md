@@ -494,6 +494,54 @@ degradación Limp: el factor más restrictivo sigue ganando, ya que el escalado
 de marcha se aplica sobre la demanda base antes de `obstacle_scale`,
 `ackermann_diff[i]` y `wheel_scale[i]`.
 
+### Perfil de Respuesta de Aceleración por Marcha (D2/D1/R)
+
+Además del límite de potencia, cada marcha tiene un **perfil de respuesta de
+aceleración** configurable que controla la *agresividad* de entrega del pedal,
+**sin** alterar la potencia máxima. Se aplica en `Traction_SetDemand()`
+(`motor_control.c`) **después del filtro EMA del pedal y antes del limitador de
+rampa global** — el punto exacto recomendado por la auditoría pedal→PWM.
+
+| Marcha | Respuesta por defecto | Rango permitido |
+|--------|-----------------------|-----------------|
+| **D2** | 100 % | 50 – 100 % |
+| **D1** | 70 %  | 30 – 100 % |
+| **R**  | 40 %  | 20 – 80 % |
+
+**Invariantes de seguridad del factor de respuesta:**
+
+- El factor **sólo suaviza, nunca amplifica**: todos los máximos son ≤ 100 % y el
+  código lo limita explícitamente a `≤ 1.0` (`if (resp > 1.0f) resp = 1.0f`).
+- Se aplica **únicamente a demanda positiva** (`target > 0`); el sentido de marcha
+  atrás se gestiona aguas abajo en `Traction_Update()`.
+- **No muta el estado del EMA** (`pedal_ema`): opera sobre una copia local
+  `target`, de modo que el filtro de ruido y la detección de pedal
+  congelado/anómalo/step-rate aguas arriba quedan intactos.
+- **No afecta** al frenado dinámico (demanda negativa), ABS, TCS, `obstacle_scale`,
+  topes de velocidad, SAFE ni LIMP_HOME.
+
+**Persistencia y compatibilidad:**
+
+- La **autoridad reside en el STM32**: la ESP32 sólo actúa como HMI/configurador.
+- Toda operación de escritura (SET/SAVE/RESET) exige `SYS_STATE_STANDBY`; fuera de
+  STANDBY el STM32 responde `ACK_BLOCKED_BY_SAFETY`.
+- El STM32 valida los rangos (`Traction_ValidateGearResponse()` →
+  `GearLimitsStore_ValidateResponse()`) antes de aceptar; fuera de rango →
+  `ACK_INVALID`.
+- Se persiste en la **misma página flash 122** que los límites de potencia, en un
+  slot v2 (`"GLM2"`, 16 bytes, mismo offset de CRC). Un slot v1 antiguo
+  (`"GLM1"`, sólo potencia) se **migra de forma segura** en arranque: se
+  conservan los límites de potencia, se aplican los defaults de respuesta
+  (100/70/40) y el slot sólo se reescribe como v2 tras un SAVE explícito. Si el
+  slot está ausente o corrupto se usan todos los defaults.
+- Reutiliza por completo la infraestructura GEAR LIMITS: `SERVICE_CMD 0xF7`
+  (sub-opcodes `SET_D2/D1/R_RESPONSE` = 0x07/0x08/0x09), `CMD_ACK 0x103`, y la
+  telemetría `0x30D` (que ahora distingue trama POWER vs RESPONSE mediante el
+  bit4 del byte0). No se añade ningún CAN ID nuevo ni ninguna página flash nueva.
+
+Fuente: `Traction_SetDemand()` en `motor_control.c`, `GearLimitsStore_*` en
+`gear_limits_store.c`, `gearlim_handle_service_cmd()` en `can_handler.c`.
+
 ### Degradación de Asistencia de Dirección en Modo DEGRADED
 Cuando el sistema entra en estado `SYS_STATE_DEGRADED`, la asistencia de
 dirección se reduce automáticamente según el **nivel de degradación interno**
