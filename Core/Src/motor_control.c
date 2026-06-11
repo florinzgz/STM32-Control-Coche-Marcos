@@ -457,6 +457,16 @@ static uint8_t gear_limit_d2_pct = GEAR_LIMIT_D2_DEFAULT_PCT;
 static uint8_t gear_limit_d1_pct = GEAR_LIMIT_D1_DEFAULT_PCT;
 static uint8_t gear_limit_r_pct  = GEAR_LIMIT_R_DEFAULT_PCT;
 
+/* ---- Runtime-configurable per-gear acceleration RESPONSE profile ----
+ * Stored as percent (0..100); applied in Traction_SetDemand() after EMA#2
+ * and before the global ramp limiter.  Softens the demand target per gear
+ * (positive demand only, clamped to <=100 % so it can never amplify).
+ * Seeded from the compile-time response defaults so a unit with no valid
+ * (or only a legacy power-only) flash slot has well-defined behaviour.   */
+static uint8_t gear_response_d2_pct = GEAR_RESPONSE_D2_DEFAULT_PCT;
+static uint8_t gear_response_d1_pct = GEAR_RESPONSE_D1_DEFAULT_PCT;
+static uint8_t gear_response_r_pct  = GEAR_RESPONSE_R_DEFAULT_PCT;
+
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
 
@@ -963,13 +973,40 @@ void Traction_SetDemand(float throttlePct)
                   + (1.0f - PEDAL_EMA_ALPHA) * pedal_ema;
     }
 
-    /* ---- B) Ramp rate limiter (applied after EMA) ---- */
+    /* ---- A.1) Per-gear acceleration RESPONSE profile ----
+     * Applied to the EMA output, AFTER EMA#2 and BEFORE the ramp limiter
+     * (the exact point recommended by the pedal→PWM audit).  The factor
+     * softens the demand target the ramp chases, making acceleration more
+     * progressive in the selected gear.  Strictly a "soften only" stage:
+     *   - applied to POSITIVE demand only (reverse direction is handled
+     *     downstream in Traction_Update(); demand here is always positive);
+     *   - the factor is clamped to <= 1.0 so it can NEVER amplify demand;
+     *   - the EMA state (pedal_ema) is NOT mutated, only the local target,
+     *     so the noise filter and frozen/step anomaly detection upstream
+     *     are completely unaffected.
+     * This stage does not touch dynamic braking (negative demand), ABS/TCS
+     * wheel_scale[], obstacle_scale, the power limits, SAFE or LIMP_HOME. */
+    float target = pedal_ema;
+    if (target > 0.0f) {
+        float resp;
+        if (current_gear == GEAR_FORWARD_D2) {
+            resp = (float)gear_response_d2_pct * 0.01f;
+        } else if (current_gear == GEAR_REVERSE) {
+            resp = (float)gear_response_r_pct * 0.01f;
+        } else {
+            resp = (float)gear_response_d1_pct * 0.01f;
+        }
+        if (resp > 1.0f) resp = 1.0f;   /* never amplify */
+        if (resp < 0.0f) resp = 0.0f;   /* defensive floor */
+        target *= resp;
+    }
+
+    /* ---- B) Ramp rate limiter (applied after EMA + response profile) ---- */
     uint32_t now = HAL_GetTick();
     float dt = (float)(now - pedal_last_tick) / 1000.0f;
     if (dt < 0.001f) dt = 0.001f;   /* guard against zero / tiny dt */
     pedal_last_tick = now;
 
-    float target = pedal_ema;
     float diff   = target - pedal_ramped;
 
     if (diff > 0.0f) {
@@ -1040,6 +1077,35 @@ void Traction_GetGearLimits(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
     if (d2_pct) *d2_pct = gear_limit_d2_pct;
     if (d1_pct) *d1_pct = gear_limit_d1_pct;
     if (r_pct)  *r_pct  = gear_limit_r_pct;
+}
+
+/* ---- Runtime-configurable per-gear acceleration RESPONSE profile ---- */
+
+bool Traction_ValidateGearResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    /* Delegate to the single source of truth in gear_limits_store so the
+     * CAN handler, the flash loader and the motor controller all agree.  */
+    return GearLimitsStore_ValidateResponse(d2_pct, d1_pct, r_pct);
+}
+
+bool Traction_SetGearResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+{
+    if (!Traction_ValidateGearResponse(d2_pct, d1_pct, r_pct))
+        return false;
+    /* Single-byte writes are atomic on Cortex-M4; the next Traction_SetDemand()
+     * call picks up the new factors.  No effect on the EMA state, the ramp
+     * limiter constants, dynamic braking, or the ABS/TCS scaling.          */
+    gear_response_d2_pct = d2_pct;
+    gear_response_d1_pct = d1_pct;
+    gear_response_r_pct  = r_pct;
+    return true;
+}
+
+void Traction_GetGearResponse(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
+{
+    if (d2_pct) *d2_pct = gear_response_d2_pct;
+    if (d1_pct) *d1_pct = gear_response_d1_pct;
+    if (r_pct)  *r_pct  = gear_response_r_pct;
 }
 
 /* ==================================================================

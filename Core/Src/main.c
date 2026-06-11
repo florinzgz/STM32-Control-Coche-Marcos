@@ -312,10 +312,14 @@ int main(void)
         Pedal_ApplyCalibration(pmin, pmax);
     }
 
-    /* ---- Gear power-limit slot (page 122) ----
-     * Load the persisted D2/D1/R traction power limits and apply them.
-     * On flash blank / CRC-invalid / out-of-range the call is a no-op:
-     * motor_control.c keeps its compile-time defaults (100/60/60 %).
+    /* ---- Gear power-limit + accel-response slot (page 122) ----
+     * Load the persisted D2/D1/R traction power limits AND acceleration
+     * response profile, then apply them.  On flash blank / CRC-invalid /
+     * out-of-range the call is a no-op: motor_control.c keeps its compile-
+     * time defaults (power 100/60/60 %, response 100/70/40 %).  A legacy
+     * (power-only) slot is migrated safely: the persisted power limits are
+     * applied and the compile-time response defaults are used until the
+     * operator next SAVEs (which upgrades the slot to v2).
      * Boot is never blocked by a missing or corrupt slot, and this only
      * scales an already-validated traction demand — it does NOT clear
      * startup_inhibit or authorise ACTIVE.                              */
@@ -324,6 +328,10 @@ int main(void)
         uint8_t gd2 = 0, gd1 = 0, gr = 0;
         GearLimitsStore_GetStored(&gd2, &gd1, &gr);
         (void)Traction_SetGearLimits(gd2, gd1, gr);
+
+        uint8_t rd2 = 0, rd1 = 0, rr = 0;
+        GearLimitsStore_GetStoredResponse(&rd2, &rd1, &rr);
+        (void)Traction_SetGearResponse(rd2, rd1, rr);
     }
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */

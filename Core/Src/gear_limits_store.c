@@ -39,7 +39,13 @@
 #define GLIM_FLASH_PAGE        122U
 #define GLIM_FLASH_BASE        0x0807A000U
 
-#define GLIM_MAGIC             0x474C4D31U   /* "GLM1" */
+/* ---- On-flash format versioning ----
+ * v1 ("GLM1") stored only the power limits; the response bytes did not
+ * exist (they sat in the reserved area = 0).  v2 ("GLM2") adds the accel-
+ * response triple.  A valid v1 slot is migrated on read (power kept,
+ * response = compile-time defaults) and only rewritten as v2 on SAVE.   */
+#define GLIM_MAGIC_V1          0x474C4D31U   /* "GLM1" — power only        */
+#define GLIM_MAGIC_V2          0x474C4D32U   /* "GLM2" — power + response  */
 #define GLIM_VALID_FLAG        0xA5U
 
 /* ---- Flash-wear rate limit ----------------------------------------
@@ -49,15 +55,26 @@
 #define GLIM_WRITE_MIN_INTERVAL_MS  1000U
 
 /* ---- On-flash slot format ----
- * Exactly 16 bytes, double-word aligned, identical structure pattern
- * to pcal_flash_slot_t.                                                */
+ * Exactly 16 bytes, double-word aligned.  v2 repurposes 3 of the 4 bytes
+ * that were "reserved" in v1 to carry the accel-response triple, so the
+ * slot stays 16 bytes and page 122's layout footprint is unchanged.
+ *
+ *   v1 ("GLM1"):  magic d2 d1 r flag  [reserved x4]              crc
+ *   v2 ("GLM2"):  magic d2 d1 r flag  d2_resp d1_resp r_resp [r1] crc
+ *
+ * The CRC covers every field before `checksum`, at the same offset for
+ * both versions, so a v1 slot read through this struct still validates
+ * (its response bytes read back as 0, which is how v1 is detected).      */
 typedef struct {
-    uint32_t magic;          /* Must equal GLIM_MAGIC                   */
+    uint32_t magic;          /* GLIM_MAGIC_V1 or GLIM_MAGIC_V2          */
     uint8_t  d2_pct;         /* D2 power limit (percent)                */
     uint8_t  d1_pct;         /* D1 power limit (percent)                */
     uint8_t  r_pct;          /* R  power limit (percent)                */
     uint8_t  validity_flag;  /* GLIM_VALID_FLAG when slot is committed  */
-    uint8_t  reserved[4];    /* Padding / future use                    */
+    uint8_t  d2_resp;        /* D2 accel response (percent, v2 only)    */
+    uint8_t  d1_resp;        /* D1 accel response (percent, v2 only)    */
+    uint8_t  r_resp;         /* R  accel response (percent, v2 only)    */
+    uint8_t  reserved;       /* Padding / future use                    */
     uint32_t checksum;       /* CRC32 of all fields before this field   */
 } glim_flash_slot_t;
 
@@ -65,10 +82,14 @@ typedef struct {
 typedef char glim_size_check_[(sizeof(glim_flash_slot_t) == 16) ? 1 : -1];
 
 /* ---- RAM state ---- */
-static bool    glim_flash_valid = false;   /* Flash slot passed CRC + range */
-static uint8_t glim_stored_d2   = 0;
-static uint8_t glim_stored_d1   = 0;
-static uint8_t glim_stored_r    = 0;
+static bool    glim_flash_valid  = false;  /* Flash slot passed CRC + range */
+static bool    glim_legacy_fmt   = false;  /* Loaded a v1 (power-only) slot  */
+static uint8_t glim_stored_d2    = 0;
+static uint8_t glim_stored_d1    = 0;
+static uint8_t glim_stored_r     = 0;
+static uint8_t glim_stored_d2_resp = 0;
+static uint8_t glim_stored_d1_resp = 0;
+static uint8_t glim_stored_r_resp  = 0;
 
 /* ---- Flash-wear rate-limit bookkeeping ---- */
 static bool     glim_has_written_once = false;
@@ -91,10 +112,13 @@ static uint32_t glim_crc32(const void *data, uint32_t len)
     return crc ^ 0xFFFFFFFFU;
 }
 
-/* ---- Validate a flash slot (integrity only) ---- */
+/* ---- Validate a flash slot (CRC + flag only) ----
+ * Accepts either format magic; the caller distinguishes v1 vs v2 by the
+ * `magic` field after this passes.                                      */
 static bool glim_slot_integrity_ok(const glim_flash_slot_t *slot)
 {
-    if (slot->magic != GLIM_MAGIC) return false;
+    if (slot->magic != GLIM_MAGIC_V1 && slot->magic != GLIM_MAGIC_V2)
+        return false;
     if (slot->validity_flag != GLIM_VALID_FLAG) return false;
     uint32_t crc = glim_crc32(slot, offsetof(glim_flash_slot_t, checksum));
     return (crc == slot->checksum);
@@ -103,6 +127,18 @@ static bool glim_slot_integrity_ok(const glim_flash_slot_t *slot)
 /* ==================================================================
  *  Public API
  * ================================================================== */
+
+bool GearLimitsStore_ValidateResponse(uint8_t d2_pct, uint8_t d1_pct,
+                                      uint8_t r_pct)
+{
+    if (d2_pct < GEAR_RESPONSE_D2_MIN_PCT || d2_pct > GEAR_RESPONSE_D2_MAX_PCT)
+        return false;
+    if (d1_pct < GEAR_RESPONSE_D1_MIN_PCT || d1_pct > GEAR_RESPONSE_D1_MAX_PCT)
+        return false;
+    if (r_pct  < GEAR_RESPONSE_R_MIN_PCT  || r_pct  > GEAR_RESPONSE_R_MAX_PCT)
+        return false;
+    return true;
+}
 
 bool GearLimitsStore_Validate(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
 {
@@ -117,10 +153,14 @@ bool GearLimitsStore_Validate(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
 
 void GearLimitsStore_Init(void)
 {
-    glim_flash_valid = false;
-    glim_stored_d2   = 0;
-    glim_stored_d1   = 0;
-    glim_stored_r    = 0;
+    glim_flash_valid     = false;
+    glim_legacy_fmt      = false;
+    glim_stored_d2       = 0;
+    glim_stored_d1       = 0;
+    glim_stored_r        = 0;
+    glim_stored_d2_resp  = 0;
+    glim_stored_d1_resp  = 0;
+    glim_stored_r_resp   = 0;
 
     glim_has_written_once = false;
     glim_last_write_tick  = 0U;
@@ -137,15 +177,40 @@ void GearLimitsStore_Init(void)
     if (!GearLimitsStore_Validate(slot->d2_pct, slot->d1_pct, slot->r_pct))
         return;
 
+    /* Power limits accepted — common to both formats. */
     glim_flash_valid = true;
     glim_stored_d2   = slot->d2_pct;
     glim_stored_d1   = slot->d1_pct;
     glim_stored_r    = slot->r_pct;
+
+    if (slot->magic == GLIM_MAGIC_V2 &&
+        GearLimitsStore_ValidateResponse(slot->d2_resp, slot->d1_resp,
+                                         slot->r_resp)) {
+        /* Full v2 slot: honour the persisted accel-response profile. */
+        glim_legacy_fmt     = false;
+        glim_stored_d2_resp = slot->d2_resp;
+        glim_stored_d1_resp = slot->d1_resp;
+        glim_stored_r_resp  = slot->r_resp;
+    } else {
+        /* Legacy v1 slot (or a v2 slot whose response bytes are out of
+         * range): keep the power limits, apply the compile-time response
+         * defaults, and flag the slot as legacy.  The slot is NOT rewritten
+         * here — it is upgraded to v2 only on the next explicit SAVE.     */
+        glim_legacy_fmt     = true;
+        glim_stored_d2_resp = GEAR_RESPONSE_D2_DEFAULT_PCT;
+        glim_stored_d1_resp = GEAR_RESPONSE_D1_DEFAULT_PCT;
+        glim_stored_r_resp  = GEAR_RESPONSE_R_DEFAULT_PCT;
+    }
 }
 
 bool GearLimitsStore_IsValid(void)
 {
     return glim_flash_valid;
+}
+
+bool GearLimitsStore_IsLegacyFormat(void)
+{
+    return glim_legacy_fmt;
 }
 
 void GearLimitsStore_GetStored(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
@@ -155,7 +220,16 @@ void GearLimitsStore_GetStored(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
     if (r_pct)  *r_pct  = glim_stored_r;
 }
 
-bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
+void GearLimitsStore_GetStoredResponse(uint8_t *d2_pct, uint8_t *d1_pct,
+                                       uint8_t *r_pct)
+{
+    if (d2_pct) *d2_pct = glim_stored_d2_resp;
+    if (d1_pct) *d1_pct = glim_stored_d1_resp;
+    if (r_pct)  *r_pct  = glim_stored_r_resp;
+}
+
+bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct,
+                          uint8_t d2_resp, uint8_t d1_resp, uint8_t r_resp)
 {
     /* Defense in depth: never persist while actuators may be live.
      * The CAN dispatcher already blocks any caller path outside
@@ -168,14 +242,21 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
     /* Hard validation gate — never persist out-of-range limits. */
     if (!GearLimitsStore_Validate(d2_pct, d1_pct, r_pct))
         return false;
+    if (!GearLimitsStore_ValidateResponse(d2_resp, d1_resp, r_resp))
+        return false;
 
     /* Flash-wear guard #1 — no-op elision.  If the requested values
-     * already match the persisted slot, return success without erasing
-     * the page (makes RESET_DEFAULTS idempotent).                      */
-    if (glim_flash_valid &&
+     * already match the persisted slot AND the slot is already in the
+     * current (v2) format, return success without erasing the page
+     * (makes RESET_DEFAULTS idempotent).  A legacy slot is always
+     * rewritten so the upgrade to v2 is persisted.                     */
+    if (glim_flash_valid && !glim_legacy_fmt &&
         glim_stored_d2 == d2_pct &&
         glim_stored_d1 == d1_pct &&
-        glim_stored_r  == r_pct) {
+        glim_stored_r  == r_pct &&
+        glim_stored_d2_resp == d2_resp &&
+        glim_stored_d1_resp == d1_resp &&
+        glim_stored_r_resp  == r_resp) {
         return true;
     }
 
@@ -186,14 +267,18 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
         return false;
     }
 
-    /* Build the slot in RAM (8-byte aligned for doubleword programming). */
+    /* Build the slot in RAM (8-byte aligned for doubleword programming).
+     * Always written in the current (v2) format: power + response.       */
     _Alignas(8) glim_flash_slot_t slot;
     memset(&slot, 0, sizeof(slot));
-    slot.magic         = GLIM_MAGIC;
+    slot.magic         = GLIM_MAGIC_V2;
     slot.d2_pct        = d2_pct;
     slot.d1_pct        = d1_pct;
     slot.r_pct         = r_pct;
     slot.validity_flag = GLIM_VALID_FLAG;
+    slot.d2_resp       = d2_resp;
+    slot.d1_resp       = d1_resp;
+    slot.r_resp        = r_resp;
     slot.checksum      = glim_crc32(&slot,
                                     offsetof(glim_flash_slot_t, checksum));
 
@@ -234,9 +319,13 @@ bool GearLimitsStore_Save(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct)
 
     /* Update RAM state + rate-limit bookkeeping. */
     glim_flash_valid      = true;
+    glim_legacy_fmt       = false;   /* now persisted as v2 */
     glim_stored_d2        = d2_pct;
     glim_stored_d1        = d1_pct;
     glim_stored_r         = r_pct;
+    glim_stored_d2_resp   = d2_resp;
+    glim_stored_d1_resp   = d1_resp;
+    glim_stored_r_resp    = r_resp;
     glim_has_written_once = true;
     glim_last_write_tick  = HAL_GetTick();
     return true;

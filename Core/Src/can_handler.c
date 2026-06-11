@@ -1787,11 +1787,15 @@ void CAN_PedalCalCaptureTick(void)
 /* ---- Pending limits (RAM-only until SAVE) ----
  * Seeded lazily from the active limits the first time a SET arrives, so
  * a partial edit (e.g. only D1 touched) carries the live values for the
- * untouched gears into SAVE.                                            */
+ * untouched gears into SAVE.  Both the power limits and the accel-response
+ * profile are staged together and committed atomically on SAVE.         */
 static bool      gearlim_pending_seeded = false;
 static uint8_t   gearlim_pending_d2     = 0;
 static uint8_t   gearlim_pending_d1     = 0;
 static uint8_t   gearlim_pending_r      = 0;
+static uint8_t   gearlim_pending_d2_resp = 0;
+static uint8_t   gearlim_pending_d1_resp = 0;
+static uint8_t   gearlim_pending_r_resp  = 0;
 
 /* ---- 0x30D telemetry burst state ---- */
 static uint8_t   gearlim_burst_left     = 0;
@@ -1808,34 +1812,60 @@ static void gearlim_seed_pending_if_needed(void)
     Traction_GetGearLimits(&gearlim_pending_d2,
                            &gearlim_pending_d1,
                            &gearlim_pending_r);
+    Traction_GetGearResponse(&gearlim_pending_d2_resp,
+                             &gearlim_pending_d1_resp,
+                             &gearlim_pending_r_resp);
     gearlim_pending_seeded = true;
 }
 
 /* Emit one 0x30D frame (DLC 8, little-endian).
  *
+ * Two interleaved frame kinds share the 0x30D ID, distinguished by
+ * byte0 bit4 (0x10):
+ *   bit4 = 0  POWER   frame: bytes 1-3 active power limits, 4-6 pending
+ *   bit4 = 1  RESPONSE frame: bytes 1-3 active response %, 4-6 pending
+ * The remaining flag bits keep the same meaning in both kinds, so the
+ * ESP32 editor can drive its pending/validate UX from either frame and
+ * must preserve the "other half" of GearLimitsData when decoding.
+ *
  *   byte 0   : flags
  *              bit 0: stored slot valid (GearLimitsStore_IsValid())
- *              bit 1: pending differs from active (unsaved edit)
+ *              bit 1: pending differs from active (unsaved edit, this half)
  *              bit 2: safety gate satisfied (STANDBY)
- *              bit 3: pending set validates OK
- *              bits 4-7: reserved (0)
- *   byte 1   : active  D2 limit (percent)
- *   byte 2   : active  D1 limit (percent)
- *   byte 3   : active  R  limit (percent)
- *   byte 4   : pending D2 limit (percent)
- *   byte 5   : pending D1 limit (percent)
- *   byte 6   : pending R  limit (percent)
+ *              bit 3: pending set validates OK (this half)
+ *              bit 4: frame kind (0 = power, 1 = response)
+ *              bits 5-7: reserved (0)
+ *   byte 1   : active  D2 value (percent)
+ *   byte 2   : active  D1 value (percent)
+ *   byte 3   : active  R  value (percent)
+ *   byte 4   : pending D2 value (percent)
+ *   byte 5   : pending D1 value (percent)
+ *   byte 6   : pending R  value (percent)
  *   byte 7   : system state (Safety_GetState())                        */
-static void gearlim_send_status(void)
+static void gearlim_send_status_kind(bool response_frame)
 {
-    uint8_t act_d2 = 0, act_d1 = 0, act_r = 0;
-    Traction_GetGearLimits(&act_d2, &act_d1, &act_r);
+    uint8_t act_d2, act_d1, act_r;
+    uint8_t pend_d2, pend_d1, pend_r;
+    bool valid_ok;
 
-    uint8_t pend_d2 = act_d2, pend_d1 = act_d1, pend_r = act_r;
-    if (gearlim_pending_seeded) {
-        pend_d2 = gearlim_pending_d2;
-        pend_d1 = gearlim_pending_d1;
-        pend_r  = gearlim_pending_r;
+    if (response_frame) {
+        Traction_GetGearResponse(&act_d2, &act_d1, &act_r);
+        pend_d2 = act_d2; pend_d1 = act_d1; pend_r = act_r;
+        if (gearlim_pending_seeded) {
+            pend_d2 = gearlim_pending_d2_resp;
+            pend_d1 = gearlim_pending_d1_resp;
+            pend_r  = gearlim_pending_r_resp;
+        }
+        valid_ok = Traction_ValidateGearResponse(pend_d2, pend_d1, pend_r);
+    } else {
+        Traction_GetGearLimits(&act_d2, &act_d1, &act_r);
+        pend_d2 = act_d2; pend_d1 = act_d1; pend_r = act_r;
+        if (gearlim_pending_seeded) {
+            pend_d2 = gearlim_pending_d2;
+            pend_d1 = gearlim_pending_d1;
+            pend_r  = gearlim_pending_r;
+        }
+        valid_ok = Traction_ValidateGearLimits(pend_d2, pend_d1, pend_r);
     }
 
     uint8_t flags = 0;
@@ -1844,8 +1874,8 @@ static void gearlim_send_status(void)
         (pend_d2 != act_d2 || pend_d1 != act_d1 || pend_r != act_r))
         flags |= 0x02U;
     if (gearlim_safety_ok()) flags |= 0x04U;
-    if (Traction_ValidateGearLimits(pend_d2, pend_d1, pend_r))
-        flags |= 0x08U;
+    if (valid_ok) flags |= 0x08U;
+    if (response_frame) flags |= 0x10U;
 
     uint8_t payload[8];
     payload[0] = flags;
@@ -1858,6 +1888,14 @@ static void gearlim_send_status(void)
     payload[7] = (uint8_t)Safety_GetState();
 
     (void)TransmitFrame(CAN_ID_DIAG_GEAR_LIMITS, payload, sizeof(payload));
+}
+
+static void gearlim_send_status(void)
+{
+    /* Send both kinds back-to-back so a single QUERY refreshes the whole
+     * editor (power + response) without needing two separate requests.  */
+    gearlim_send_status_kind(false);
+    gearlim_send_status_kind(true);
 }
 
 /* Public: drive the 0x30D burst from the 100 Hz main-loop tick. */
@@ -1923,6 +1961,31 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
+    case GEAR_LIMIT_OP_SET_D2_RESPONSE:
+    case GEAR_LIMIT_OP_SET_D1_RESPONSE:
+    case GEAR_LIMIT_OP_SET_R_RESPONSE: {
+        if (len < 3) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        uint8_t val = payload[2];
+        gearlim_seed_pending_if_needed();
+        uint8_t d2 = gearlim_pending_d2_resp;
+        uint8_t d1 = gearlim_pending_d1_resp;
+        uint8_t r  = gearlim_pending_r_resp;
+        if      (op == GEAR_LIMIT_OP_SET_D2_RESPONSE) d2 = val;
+        else if (op == GEAR_LIMIT_OP_SET_D1_RESPONSE) d1 = val;
+        else                                          r  = val;
+        if (!Traction_ValidateGearResponse(d2, d1, r)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        gearlim_pending_d2_resp = d2;
+        gearlim_pending_d1_resp = d1;
+        gearlim_pending_r_resp  = r;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
     case GEAR_LIMIT_OP_SAVE: {
         if (!gearlim_pending_seeded) {
             /* Nothing staged — nothing to save. */
@@ -1931,13 +1994,19 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
         }
         if (!Traction_ValidateGearLimits(gearlim_pending_d2,
                                          gearlim_pending_d1,
-                                         gearlim_pending_r)) {
+                                         gearlim_pending_r) ||
+            !Traction_ValidateGearResponse(gearlim_pending_d2_resp,
+                                           gearlim_pending_d1_resp,
+                                           gearlim_pending_r_resp)) {
             CAN_SendCommandAck(0x10, ACK_INVALID);
             return;
         }
         if (!GearLimitsStore_Save(gearlim_pending_d2,
                                   gearlim_pending_d1,
-                                  gearlim_pending_r)) {
+                                  gearlim_pending_r,
+                                  gearlim_pending_d2_resp,
+                                  gearlim_pending_d1_resp,
+                                  gearlim_pending_r_resp)) {
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -1946,6 +2015,9 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
         (void)Traction_SetGearLimits(gearlim_pending_d2,
                                      gearlim_pending_d1,
                                      gearlim_pending_r);
+        (void)Traction_SetGearResponse(gearlim_pending_d2_resp,
+                                       gearlim_pending_d1_resp,
+                                       gearlim_pending_r_resp);
         gearlim_pending_seeded = false;   /* clear edit; reseed on next SET */
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
@@ -1953,13 +2025,19 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
     case GEAR_LIMIT_OP_RESET_DEFAULTS: {
         if (!GearLimitsStore_Save(GEAR_LIMIT_D2_DEFAULT_PCT,
                                   GEAR_LIMIT_D1_DEFAULT_PCT,
-                                  GEAR_LIMIT_R_DEFAULT_PCT)) {
+                                  GEAR_LIMIT_R_DEFAULT_PCT,
+                                  GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                  GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                  GEAR_RESPONSE_R_DEFAULT_PCT)) {
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
         (void)Traction_SetGearLimits(GEAR_LIMIT_D2_DEFAULT_PCT,
                                      GEAR_LIMIT_D1_DEFAULT_PCT,
                                      GEAR_LIMIT_R_DEFAULT_PCT);
+        (void)Traction_SetGearResponse(GEAR_RESPONSE_D2_DEFAULT_PCT,
+                                       GEAR_RESPONSE_D1_DEFAULT_PCT,
+                                       GEAR_RESPONSE_R_DEFAULT_PCT);
         gearlim_pending_seeded = false;
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
