@@ -364,6 +364,27 @@ static void decodeGearLimits(const CanFrame& f, vehicle::VehicleData& data) {
     data.setGearLimits(d);
 }
 
+// 0x30E DIAG_STEERING_Z — PB5 + encoder-Z dual center-reference diagnostic (DLC 8).
+// PB5 (LJ12A3) is the PRIMARY physical/safety center reference; the encoder Z
+// (index) pulse is a SECONDARY precision reference and can NEVER center alone.
+// Frame layout mirrors Core/Src/can_handler.c steerz_send_status().
+static void decodeSteeringZ(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::SteeringZData d;
+    d.flags       = f.data[0];
+    d.status      = (uint8_t)(f.data[0] & 0x07);
+    d.pb5Live     = (f.data[0] & 0x08) != 0;
+    d.zValid      = (f.data[0] & 0x10) != 0;
+    d.zSlip       = (f.data[0] & 0x20) != 0;
+    d.zPulseCount = f.data[1];
+    d.zLastPos    = (int16_t)((uint16_t)f.data[2] | ((uint16_t)f.data[3] << 8));
+    d.zOffset     = (int16_t)((uint16_t)f.data[4] | ((uint16_t)f.data[5] << 8));
+    d.zLastError  = (int8_t)f.data[6];
+    d.zTolerance  = f.data[7];
+    d.timestampMs = millis();
+    data.setSteeringZ(d);
+}
+
 // -------------------------------------------------------------------------
 // Debug: RX frame counter and first-frame logging
 // -------------------------------------------------------------------------
@@ -423,6 +444,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
+            case can::DIAG_STEERING_Z:      decodeSteeringZ(frame, data);         break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;

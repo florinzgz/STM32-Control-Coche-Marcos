@@ -1,6 +1,84 @@
 # PROJECT_CHANGELOG
 
+## [2026-06-11] — DOBLE REFERENCIA DE CENTRADO: PB5 (primaria/seguridad) + canal Z del encoder (secundaria/precisión) (STM32 + ESP32/HMI + docs)
+
+### Objetivo
+
+Que el centrado del volante use **dos** referencias sin sustituir ni debilitar
+la actual:
+
+1. **PB5 / LJ12A3** = referencia **primaria** de centro físico y de seguridad
+   (se mantiene intacta).
+2. **Canal Z del encoder E6B2-CWZ6C en PB4** = referencia **secundaria** de
+   precisión y verificación.
+
+Reglas absolutas respetadas: Z **nunca** centra por sí solo; un pulso Z sin PB5
+**no** es centro; un fallo de Z **no** entra en SAFE ni puede impedir ACTIVE
+(sólo diagnóstico/aviso); no se toca CubeMX/`.ioc`/hardware/ABS/TCS; no se borra
+ninguna calibración existente ni páginas flash ajenas.
+
+### Análisis del rango (encoder 1:1, volante ±355°, recorrido ≈710°)
+
+≈710° = 1,97 vueltas ⇒ existen **≈2 pulsos Z** dentro del recorrido útil. El Z
+correcto es el capturado **mientras PB5 confirma la zona de centro**; el offset
+Z↔centro se normaliza módulo una vuelta (4800 counts) al rango (−2400, +2400],
+de modo que un Z de otra vuelta se pliega al mismo offset fundamental y sólo se
+acepta porque PB5 confirma. Se eligió la opción **B (PB5 + Z con offset
+almacenado)** frente a alinear Z mecánicamente: misma precisión, sin trabajo
+mecánico, PB5 sigue siendo la única autoridad de seguridad.
+
+### STM32
+
+- Nuevo módulo de lógica pura `Core/Src/steering_z.{c,h}` (clasificación de
+  estado, normalización de offset; sin HAL/flash/ISR, testeable en host).
+- Tolerancias en `project_config.h`: `STEERING_Z_WINDOW_COUNTS=25` (≈1,9°),
+  `STEERING_Z_STRICT_COUNTS=10`, `STEERING_Z_FAULT_COUNTS=40` (≈3,0°).
+- `steering_centering.c`: al confirmar PB5 el centro, captura el último Z y
+  calcula/persiste el offset Z↔centro antes de poner TIM2 a cero; en el arranque
+  restaura el offset desde flash.
+- `steering_cal_store.c`: formato flash **v2** (`"STC2"`) con
+  `z_center_offset_counts`, `z_center_tolerance`, `z_center_valid`,
+  `format_version`; migración segura v1→v2 (Z marcado no válido hasta recalibrar)
+  y reescritura como v2 sólo en el siguiente guardado. Sólo página 126.
+
+### CAN
+
+- Telemetría nueva `DIAG_STEERING_Z` (**0x30E**, DLC 8, ráfaga bajo demanda tras
+  QUERY): estado PB5/Z, contador de pulsos Z, última posición Z, offset Z↔centro,
+  último error Z y tolerancia activa. ID libre, sin colisión.
+- Acción de servicio `SERVICE_ACTION_STEERING_Z` (**0xF8**) con sub-opcodes
+  QUERY/CALIBRATE/CLEAR; ACK en `CMD_ACK` (0x103). CALIBRATE sólo se acepta con
+  PB5 en centro y en BOOT/STANDBY.
+
+### ESP32 / HMI
+
+- Sección **STEERING Z CENTER** integrada en la pantalla Engineering → Encoder
+  Calibration: estado PB5, pulsos Z, posición Z, offset Z, Z calibrado, Z slip y
+  estado combinado (OK / Z NOT SEEN / Z OUT OF WINDOW / MECH OFFSET / NOT
+  CALIBRATED), con acciones QUERY / CALIBRATE Z / CLEAR Z (doble confirmación en
+  CLEAR). El ESP32 nunca es autoridad: todo lo valida el STM32.
+- Decodificación de 0x30E en `can_rx.cpp`, struct `SteeringZData` y accesores en
+  `vehicle_data.h`, IDs/sub-opcodes en `can_ids.h`.
+
+### Tests
+
+- Nueva suite host `test_steering_z` (37 casos) + `test_steering_cal_store`
+  ampliada (roundtrip v1/v2, CRC corrupto, migración). Ambas integradas en
+  `firmware-validation.yml`. Build STM32 ARM limpio bajo `-Werror`. Build ESP32:
+  **NO DISPONIBLE** en este entorno (plataforma PlatformIO/espressif32 no
+  instalable); validado por revisión cuidadosa contra los patrones existentes.
+
+### Documentación
+
+- Nuevo `docs/STEERING_Z_CENTER.md` (diseño, análisis, tolerancias, calibración,
+  arranque, decisión de refinamiento). Actualizados `CAN_CONTRACT_FINAL.md`
+  (rev 1.10, §4.19 + tabla 0x30E), `STEERING_PERSISTENT_CALIBRATION.md` (formato
+  v2 + migración), `ENGINEERING_MENU.md`, `ENCODER_WIRING_6N137.md`, `CHANGELOG.md`.
+
+---
+
 ## [2026-06-11] — GEAR LIMITS + ACCEL RESPONSE: límites de potencia y perfil de respuesta por marcha configurables (STM32 + ESP32/HMI + docs)
+
 
 ### Objetivo
 

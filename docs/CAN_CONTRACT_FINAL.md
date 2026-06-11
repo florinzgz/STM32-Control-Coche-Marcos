@@ -1,7 +1,7 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.8
-**Status:** ACTIVE — Added configurable per-gear traction power limits (additive)
+**Revision:** 1.10
+**Status:** ACTIVE — Added PB5 + encoder-Z dual steering-center diagnostic (additive)
 **Date:** 2026-06-11
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
@@ -18,6 +18,7 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.7** (2026-06-02): Phase-based I2C diagnostics. Extended `DIAG_I2C` (0x309) to DLC 6 with byte5 = `ina_expected_mask` (bit i = channel i's power branch is energised this phase). STM32 now only counts I2C timeouts toward the bus-fault/recovery/Error-Code-11 logic for INA226 channels whose branch should be powered, so the motor INAs (ch0..3, wired after the traction relay) and steering INA (ch5) no longer trigger a false Code 11 in SAFE/STANDBY. Battery INA (ch4) stays always-expected/obligatory. HMI Safe Mode shows un-powered branches as **WAIT PWR** (cyan) instead of FAIL (red). Purely additive, STM32 → ESP32 — DLC-5 consumers ignore byte5 (backward-compatible).
 - **1.8** (2026-06-11): Added configurable per-gear traction power limits. New `SERVICE_CMD` action `0xF7` (`SERVICE_ACTION_GEAR_LIMITS`) with sub-opcodes `SET_D2/D1/R` (0x01–0x03, byte2 = percent), `SAVE` (0x04), `RESET_DEFAULTS` (0x05) and `QUERY` (0x06); replies on the existing `CMD_ACK` (0x103, byte0 = 0x10). New telemetry `DIAG_GEAR_LIMITS` (0x30D, DLC 8, on-demand burst after QUERY) reports active + pending D2/D1/R limits and flags. The STM32 owns range validation (D2 30–100, D1 20–100, R 10–60), a STANDBY-only safety gate on all mutating ops, and flash persistence (page 122, magic+CRC32, mirroring the pedal-cal store). Purely additive, bidirectional config/diagnostic — firmware without the GEAR LIMITS screen ignores 0x30D and never sends 0xF7 (backward-compatible). The shipped reverse default is 60 % (`GEAR_POWER_REVERSE_PCT = 0.60`); the request's "R = 30 %" is achievable via the editor but is **not** the firmware default.
 - **1.9** (2026-06-11): Extended GEAR LIMITS with a per-gear **acceleration response profile** reusing the same infrastructure (no new CAN ID, same `0xF7`/`0x30D`/page 122). New sub-opcodes `SET_D2/D1/R_RESPONSE` (0x07–0x09, byte2 = percent). `0x30D` now carries two interleaved frame kinds discriminated by byte0 **bit4** (0=POWER, 1=RESPONSE); a QUERY emits both. The response factor is applied in `Traction_SetDemand()` after EMA#2 and before the global ramp limiter, to **positive demand only**, clamped ≤ 100 % so it can only soften (never amplify) demand — it does not touch ABS/TCS/dynamic-braking/SAFE/LIMP. Response ranges D2 50–100, D1 30–100, R 20–80; defaults D2 100 / D1 70 / R 40. Flash slot upgraded to v2 (`"GLM2"`, 16 bytes, same CRC offset); v1 (`"GLM1"`, power-only) slots are migrated safely on read (power kept, response defaults applied, rewritten as v2 only on next SAVE). Purely additive and backward-compatible.
+- **1.10** (2026-06-11): Added the **PB5 + encoder-Z dual steering-center reference** diagnostic. PB5 (LJ12A3 inductive sensor) remains the **primary** physical/safety center reference; the encoder **Z** (index) pulse on PB4 is a **secondary** precision/verification reference and can **never** center on its own — a Z pulse seen without PB5 confirmation is **not** a center. New telemetry `DIAG_STEERING_Z` (0x30E, DLC 8, on-demand burst after QUERY) reports PB5 live state, Z status, Z pulse count, last Z position, Z↔center offset, last Z error and the active tolerance. New `SERVICE_CMD` action `0xF8` (`SERVICE_ACTION_STEERING_Z`) with sub-opcodes `QUERY` (0x01, emits the 0x30E burst), `CALIBRATE` (0x02, recompute + store the Z↔center offset — **only accepted while PB5 reads center**) and `CLEAR` (0x03, invalidate the stored Z calibration); replies on the existing `CMD_ACK` (0x103, byte0 = 0x10). The STM32 owns all validation, the BOOT/STANDBY-only gate on CALIBRATE/CLEAR, the "PB5 must confirm center" gate on CALIBRATE, and flash persistence (steering-cal page, format v2 with safe v1→v2 migration). A Z fault never forces SAFE — it is diagnostic/warning only. Purely additive, bidirectional config/diagnostic — firmware without the STEERING Z screen ignores 0x30E and never sends 0xF8 (backward-compatible).
 
 ---
 
@@ -112,6 +113,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x30B | DIAG_I2C_SCAN | 8 | on-demand | Active I2C scan (after SERVICE 0xF6): byte0=bus_flags(bit0 scl_high,bit1 sda_high,bit2 rec_attempted,bit3 rec_success), byte1=mux_present, byte2=ina_present_mask, byte3=fail_count, byte4=recovery_attempts | `can_handler.c`, `sensor_manager.c` |
 | 0x30C | DIAG_FDCAN | 6 | on-demand | FDCAN error dump (after SERVICE 0xF6): byte0=last_error_code(LEC), byte1=state_flags(bit0 epassive,bit1 busoff,bit2 warning), byte2=tec, byte3=rec, byte4=tx_nack_flag, byte5=tx_consec_fail | `can_handler.c` |
 | 0x30D | DIAG_GEAR_LIMITS | 8 | on-demand | Gear power limits + accel response (burst after SERVICE 0xF7 QUERY). Two interleaved frame kinds share this ID, selected by byte0 bit4: **bit4=0 POWER**, **bit4=1 RESPONSE**. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid,bit4 frame-kind), byte1-3=active D2/D1/R %, byte4-6=pending D2/D1/R %, byte7=system_state. A QUERY emits both frames back-to-back; a decoder must preserve the "other half" when updating. | `can_handler.c`, `motor_control.c` |
+| 0x30E | DIAG_STEERING_Z | 8 | on-demand | PB5 + encoder-Z dual steering-center diagnostic (burst after SERVICE 0xF8 QUERY). byte0=flags(bit0-2 status: 0=NOT CALIBRATED,1=OK,2=Z NOT SEEN,3=Z OUT OF WINDOW,4=MECH OFFSET; bit3 PB5 live at center; bit4 Z calibration valid; bit5 Z slip), byte1=Z pulse count (saturating 255), byte2-3=last Z position int16 LE (TIM2 counts), byte4-5=Z↔center offset int16 LE (counts), byte6=last Z error int8, byte7=active tolerance (counts). Diagnostic-only — no control/safety path consumes it. | `can_handler.c`, `steering_z.c`, `steering_cal_store.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -495,6 +497,57 @@ Source: `gearlim_handle_service_cmd()` in `can_handler.c`,
 `Traction_{Validate,Set,Get}GearLimits()` and
 `Traction_{Validate,Set,Get}GearResponse()` in `motor_control.c`,
 `GearLimitsStore_*` in `gear_limits_store.c`.
+
+---
+
+### 4.19 SERVICE_CMD STEERING_Z (0x110 action 0xF8) — ESP32 → STM32 (rev 1.10, additive)
+
+Manages the **secondary** encoder-Z steering-center reference. PB5 (LJ12A3) is
+and remains the **primary** physical/safety center reference. The encoder Z
+(index) pulse on PB4 is a precision/verification reference **only**; it can never
+center the system on its own, and a Z pulse observed without PB5 confirmation is
+**not** treated as a center. The frame reuses `SERVICE_CMD` (0x110); byte 0
+selects the action, byte 1 the sub-opcode.
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | action | uint8 | `0xF8` = `SERVICE_ACTION_STEERING_Z` |
+| 1 | op | uint8 | Sub-opcode (see table) |
+
+**Sub-opcodes (byte 1):**
+
+| Op | Name | DLC | Effect |
+|----|------|-----|--------|
+| 0x01 | STEER_Z_OP_QUERY     | 2 | Emit a `DIAG_STEERING_Z` (0x30E) burst (read-only, no gate) |
+| 0x02 | STEER_Z_OP_CALIBRATE | 2 | Recompute the Z↔center offset relative to the current center and store it. **Only accepted while PB5 currently reads center** (never trusts Z alone) and only in BOOT/STANDBY |
+| 0x03 | STEER_Z_OP_CLEAR     | 2 | Invalidate the stored Z calibration (BOOT/STANDBY only) |
+
+**Validation & safety (STM32-side):**
+- QUERY is always allowed and only emits diagnostics.
+- CALIBRATE requires (a) `SYS_STATE_BOOT` or `SYS_STATE_STANDBY` **and**
+  (b) PB5 currently asserted at center (`PIN_STEER_CENTER` LOW). If PB5 is not at
+  center the command is rejected — Z is never accepted as a center on its own.
+- CLEAR requires BOOT/STANDBY.
+- Tolerances (encoder/volante frame, 4800 CPR = 360°, ~13.33 counts/°):
+  recommended window ±25 counts (~1.9°), strict ±10 counts, fault/mechanical
+  offset > 40 counts (~3.0°). See `STEERING_Z_WINDOW_COUNTS`,
+  `STEERING_Z_STRICT_COUNTS`, `STEERING_Z_FAULT_COUNTS` in `project_config.h`.
+- A Z fault (Z not seen / out of window / mechanical offset) **never** forces
+  SAFE — it surfaces as a diagnostic/warning only, so it can never block ACTIVE.
+- Persistence: the steering-cal flash page is upgraded to format v2
+  (`z_center_offset_counts`, `z_center_tolerance`, `z_center_valid`,
+  `format_version`). v1 slots are migrated on read (Z marked not-valid until a
+  PB5+Z calibration rewrites the page as v2); a blank/corrupt slot falls back to
+  defaults. No other flash page is touched.
+- Every op replies with exactly one `CMD_ACK` (0x103, cmd_id_low = 0x10).
+
+**Status (0x30E byte0 bits0-2):** `0` NOT CALIBRATED, `1` OK (PB5 confirmed +
+Z within window), `2` Z NOT SEEN (PB5 ok, no Z), `3` Z OUT OF WINDOW, `4`
+MECHANICAL OFFSET. `z_center_valid` (bit4) is set **only** when status == OK.
+
+Source: `steerz_handle_service_cmd()` in `can_handler.c`, `steering_z.c`
+(`SteeringZ_Classify`/`SteeringZ_NormaliseOffset`/`SteeringZ_OnCenterConfirmed`),
+`SteeringCal_SaveWithZ()` + Z getters in `steering_cal_store.c`.
 
 ---
 

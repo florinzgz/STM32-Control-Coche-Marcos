@@ -231,7 +231,7 @@ Flancos perfectamente reproducidos en el lado 3.3 V. El TIM2 ve señales limpias
 | Timer | TIM2, Encoder Mode 3 (`TIM_ENCODERMODE_TI12`) | `main.c` |
 | Canal A | PA15, AF1 (TIM2_CH1), GPIO_NOPULL | `stm32g4xx_hal_msp.c:154` |
 | Canal B | PB3, AF1 (TIM2_CH2), GPIO_NOPULL | `stm32g4xx_hal_msp.c:161` |
-| Canal Z | PB4, EXTI4 — definido, no activo en firmware v1 | `main.h:52` |
+| Canal Z | PB4, EXTI4 — capturado en `EncoderZ_IRQHandler` (referencia de centro secundaria) | `main.h:52`, `encoder_reader.c` |
 | IC1 Filter | 6 (≈ 282 ns glitch rejection) | `main.c:380` |
 | IC2 Filter | 6 (≈ 282 ns glitch rejection) | `main.c:388` |
 | ARR | 0xFFFFFFFF (TIM2 32-bit) | `main.c:369` |
@@ -241,6 +241,14 @@ Flancos perfectamente reproducidos en el lado 3.3 V. El TIM2 ve señales limpias
 **`GPIO_NOPULL` es correcto:** La señal de salida del 6N137 tiene pull-up externo de 4.7 kΩ a 3.3 V. No se necesita pull-up interno del STM32.
 
 **Nota sobre señal invertida:** Si el TIM2 cuenta en dirección opuesta a la esperada, intercambiar físicamente los cables A y B en el conector del STM32 (PA15 ↔ PB3), o ajustar el signo en `encoder_reader.c`. No se necesita cambio de configuración del periférico.
+
+**Canal Z (PB4) como referencia de centro secundaria:** El pulso de índice del
+encoder se usa como referencia de **precisión secundaria** para el centrado del
+volante. El sensor inductivo PB5 (LJ12A3) sigue siendo la referencia **primaria
+física y de seguridad**; el canal Z nunca centra por sí solo y un pulso Z sin
+PB5 **no** es un centro. Con recorrido ≈710° (encoder 1:1 con el volante)
+existen ≈2 pulsos Z dentro del rango; el Z válido es el capturado mientras PB5
+confirma la zona de centro. Ver [`STEERING_Z_CENTER.md`](STEERING_Z_CENTER.md).
 
 ---
 

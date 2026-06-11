@@ -121,6 +121,14 @@ static constexpr int16_t ECAL_GAUGE_CX = 132;
 static constexpr int16_t ECAL_GAUGE_CY = 178;
 static constexpr int16_t ECAL_GAUGE_R  = 96;
 static constexpr int16_t ECAL_PANEL_X  = 270;
+static constexpr int16_t ECAL_Z_BTN_Y  = 280;
+static constexpr int16_t ECAL_Z_BTN_H  = 30;
+static constexpr int16_t ECAL_Z_QUERY_X = 100;
+static constexpr int16_t ECAL_Z_QUERY_W = 90;
+static constexpr int16_t ECAL_Z_CAL_X   = 200;
+static constexpr int16_t ECAL_Z_CAL_W   = 120;
+static constexpr int16_t ECAL_Z_CLEAR_X = 330;
+static constexpr int16_t ECAL_Z_CLEAR_W = 140;
 
 static constexpr int16_t SAVE_X = 390;
 static constexpr int16_t SAVE_Y = 280;
@@ -293,6 +301,8 @@ void EngineeringScreen::onEnter() {
     prevDisabledBits_ = 0xFFFFFFFF;
     pedalDataChanged_   = false;
     encoderDataChanged_ = false;
+    steerZDataChanged_  = false;
+    steerZClearPending_ = false;
     lastAckResult_      = 0;
     lastAckMs_          = 0;
     lastAckTracked_     = 0;
@@ -565,6 +575,33 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         steeringAngle_ = data.steering().angleRaw;
         steeringCal_   = data.steering().calibrated;
         encoderDataChanged_ = changed;
+
+        const vehicle::SteeringZData& sz = data.steeringZ();
+        bool zChanged = false;
+        if (steeringZ_.flags       != sz.flags)       zChanged = true;
+        if (steeringZ_.status      != sz.status)      zChanged = true;
+        if (steeringZ_.pb5Live     != sz.pb5Live)     zChanged = true;
+        if (steeringZ_.zValid      != sz.zValid)      zChanged = true;
+        if (steeringZ_.zSlip       != sz.zSlip)       zChanged = true;
+        if (steeringZ_.zPulseCount != sz.zPulseCount) zChanged = true;
+        if (steeringZ_.zLastPos    != sz.zLastPos)    zChanged = true;
+        if (steeringZ_.zOffset     != sz.zOffset)     zChanged = true;
+        if (steeringZ_.zLastError  != sz.zLastError)  zChanged = true;
+        if (steeringZ_.zTolerance  != sz.zTolerance)  zChanged = true;
+        steeringZ_ = sz;
+        steerZDataChanged_ = zChanged;
+
+        if (steerZClearPending_ &&
+            (frameTimeMs - steerZClearPendingMs_) >= STEER_Z_CLEAR_CONFIRM_MS) {
+            steerZClearPending_ = false;
+            needsRedraw_ = true;
+        }
+
+        constexpr unsigned long STEER_Z_QUERY_PERIOD_MS = 500;
+        if ((frameTimeMs - steerZLastQueryMs_) >= STEER_Z_QUERY_PERIOD_MS) {
+            sendSteerZOp(can::STEER_Z_OP_QUERY);
+            steerZLastQueryMs_ = frameTimeMs;
+        }
     }
 
     // Cache raw physical-index temperatures for the temp sensor mapping editor.
@@ -989,9 +1026,11 @@ void EngineeringScreen::draw() {
         tft.setTextDatum(TL_DATUM);
     }
 
-    // Partial redraw for encoder calibration (live steering angle gauge)
-    if (currentMenu_ == SubMenu::ENCODER_CAL && encoderDataChanged_) {
+    // Partial redraw for encoder calibration (live steering angle gauge + Z diagnostic)
+    if (currentMenu_ == SubMenu::ENCODER_CAL &&
+        (encoderDataChanged_ || steerZDataChanged_)) {
         encoderDataChanged_ = false;
+        steerZDataChanged_ = false;
 
         char buf[ui::FMT_BUF_LARGE];
         const int16_t cx = ECAL_GAUGE_CX;
@@ -1081,23 +1120,74 @@ void EngineeringScreen::draw() {
         tft.drawString(buf, ECAL_PANEL_X, 156);
         RTRACE_TEXT(ECAL_PANEL_X, 156, buf, ui::COL_CYAN, ui::COL_BG, 2, TL_DATUM);
 
-        // ---- Calibration status badge ----
-        int16_t bx = ECAL_PANEL_X, by = 204, bw = 196, bh = 34;
-        uint16_t stCol = steeringCal_ ? ui::COL_GREEN : ui::COL_RED;
-        tft.fillRect(bx, by, bw, bh, ui::COL_BG);
-        tft.drawRoundRect(bx, by, bw, bh, 5, stCol);
-        tft.drawRoundRect(bx + 1, by + 1, bw - 2, bh - 2, 4, stCol);
-        RTRACE_DRAW_RECT(bx, by, bw, bh, stCol);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextColor(stCol, ui::COL_BG);
-        tft.setTextSize(2);
-        tft.drawString(steeringCal_ ? "CALIBRATED" : "NOT CALIBRATED",
-                       bx + bw / 2, by + bh / 2);
-        RTRACE_TEXT(bx + bw / 2, by + bh / 2,
-                    steeringCal_ ? "CALIBRATED" : "NOT CALIBRATED",
-                    stCol, ui::COL_BG, 2, MC_DATUM);
+        // ---- Existing encoder calibration state (compact, above Z block) ----
+        tft.fillRect(ECAL_PANEL_X, 190, 205, 12, ui::COL_BG);
+        RTRACE_FILL_RECT(ECAL_PANEL_X, 190, 205, 12, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "ENC CAL: %s", steeringCal_ ? "CALIBRATED" : "NOT CAL");
         tft.setTextDatum(TL_DATUM);
         tft.setTextSize(1);
+        tft.setTextColor(steeringCal_ ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+        tft.drawString(buf, ECAL_PANEL_X, 190);
+        RTRACE_TEXT(ECAL_PANEL_X, 190, buf,
+                    steeringCal_ ? ui::COL_GREEN : ui::COL_RED,
+                    ui::COL_BG, 1, TL_DATUM);
+
+        // ---- Steering Z diagnostic text block ----
+        const int16_t zx = ECAL_PANEL_X;
+        const int16_t zy = 204;
+        const int16_t zlh = 12;
+        tft.fillRect(zx, zy, 205, 72, ui::COL_BG);
+        RTRACE_FILL_RECT(zx, zy, 205, 72, ui::COL_BG);
+        tft.setTextDatum(TL_DATUM);
+        tft.setTextSize(1);
+
+        tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+        tft.drawString("STEERING Z CENTER", zx, zy);
+        RTRACE_TEXT(zx, zy, "STEERING Z CENTER",
+                    ui::COL_AMBER, ui::COL_BG, 1, TL_DATUM);
+
+        const char* zStatus = "NOT CALIBRATED";
+        uint16_t zStatusCol = ui::COL_GRAY;
+        switch (steeringZ_.status) {
+            case 1: zStatus = "OK";              zStatusCol = ui::COL_GREEN; break;
+            case 2: zStatus = "Z NOT SEEN";      zStatusCol = ui::COL_AMBER; break;
+            case 3: zStatus = "Z OUT OF WINDOW"; zStatusCol = ui::COL_RED;   break;
+            case 4: zStatus = "MECH OFFSET";     zStatusCol = ui::COL_RED;   break;
+            case 0: default: break;
+        }
+
+        snprintf(buf, sizeof(buf), "PB5: %s", steeringZ_.pb5Live ? "ACTIVE" : "--");
+        tft.setTextColor(steeringZ_.pb5Live ? ui::COL_GREEN : ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(buf, zx, zy + zlh);
+        RTRACE_TEXT(zx, zy + zlh, buf,
+                    steeringZ_.pb5Live ? ui::COL_GREEN : ui::COL_GRAY,
+                    ui::COL_BG, 1, TL_DATUM);
+
+        snprintf(buf, sizeof(buf), "Z STATUS: %s", zStatus);
+        tft.setTextColor(zStatusCol, ui::COL_BG);
+        tft.drawString(buf, zx, zy + 2 * zlh);
+        RTRACE_TEXT(zx, zy + 2 * zlh, buf, zStatusCol, ui::COL_BG, 1, TL_DATUM);
+
+        snprintf(buf, sizeof(buf), "Z PULSES: %u", (unsigned)steeringZ_.zPulseCount);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, zx, zy + 3 * zlh);
+        RTRACE_TEXT(zx, zy + 3 * zlh, buf, ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
+
+        snprintf(buf, sizeof(buf), "Z POS: %d  OFF: %d",
+                 (int)steeringZ_.zLastPos, (int)steeringZ_.zOffset);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+        tft.drawString(buf, zx, zy + 4 * zlh);
+        RTRACE_TEXT(zx, zy + 4 * zlh, buf, ui::COL_WHITE, ui::COL_BG, 1, TL_DATUM);
+
+        snprintf(buf, sizeof(buf), "Z CAL: %s  SLIP: %s  TOL: %u",
+                 steeringZ_.zValid ? "YES" : "NO",
+                 steeringZ_.zSlip ? "YES" : "NO",
+                 (unsigned)steeringZ_.zTolerance);
+        uint16_t zCalCol = steeringZ_.zSlip ? ui::COL_RED
+                          : (steeringZ_.zValid ? ui::COL_GREEN : ui::COL_GRAY);
+        tft.setTextColor(zCalCol, ui::COL_BG);
+        tft.drawString(buf, zx, zy + 5 * zlh);
+        RTRACE_TEXT(zx, zy + 5 * zlh, buf, zCalCol, ui::COL_BG, 1, TL_DATUM);
     }
 
     // Partial redraw for INA226/current live diagnostic values.
@@ -1513,6 +1603,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         modulePendingId_   = -1;   // cancel any pending module confirm (FASE 2 §1)
         relayStandbyMsg_   = false;// clear relay STANDBY notice (FASE 2 §2)
         gearLimitsRestoreArm_ = false; // BACK discards gear-limit edits (FASE 2)
+        steerZClearPending_ = false;   // cancel steering-Z clear confirmation
         gearLimitsEditActive_ = false;
         gearLimitsSaveWait_   = false;
         currentMenu_ = SubMenu::MAIN;
@@ -1600,7 +1691,12 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             pedalStabHead_       = 0;
                             currentMenu_ = SubMenu::PEDAL_CAL;
                             break;
-                        case 3: currentMenu_ = SubMenu::ENCODER_CAL;    break;
+                        case 3:
+                            steerZLastQueryMs_ = 0;
+                            steerZClearPending_ = false;
+                            steerZDataChanged_ = true;
+                            currentMenu_ = SubMenu::ENCODER_CAL;
+                            break;
                         case 4:
                             // Load fresh copy before entering INA mapping
                             memcpy(inaMap_, config_store::get().ina226Map,
@@ -1791,6 +1887,44 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 Serial.println("[ENG] Pedal RESET DEFAULTS");
                 return true;
             }
+        }
+        return false;
+    }
+
+    // Encoder calibration submenu: steering-Z diagnostic action buttons.
+    if (currentMenu_ == SubMenu::ENCODER_CAL) {
+        if (y >= ECAL_Z_BTN_Y && y <= ECAL_Z_BTN_Y + ECAL_Z_BTN_H) {
+            if (x >= ECAL_Z_QUERY_X && x <= ECAL_Z_QUERY_X + ECAL_Z_QUERY_W) {
+                sendSteerZOp(can::STEER_Z_OP_QUERY);
+                steerZClearPending_ = false;
+                needsRedraw_ = true;
+                Serial.println("[ENG] Steering Z QUERY");
+                return true;
+            }
+            if (x >= ECAL_Z_CAL_X && x <= ECAL_Z_CAL_X + ECAL_Z_CAL_W) {
+                sendSteerZOp(can::STEER_Z_OP_CALIBRATE);
+                steerZClearPending_ = false;
+                needsRedraw_ = true;
+                Serial.println("[ENG] Steering Z CALIBRATE");
+                return true;
+            }
+            if (x >= ECAL_Z_CLEAR_X && x <= ECAL_Z_CLEAR_X + ECAL_Z_CLEAR_W) {
+                if (steerZClearPending_) {
+                    steerZClearPending_ = false;
+                    sendSteerZOp(can::STEER_Z_OP_CLEAR);
+                    Serial.println("[ENG] Steering Z CLEAR");
+                } else {
+                    steerZClearPending_ = true;
+                    steerZClearPendingMs_ = lastFrameTimeMs_;
+                    Serial.println("[ENG] Steering Z CLEAR armed (confirm)");
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        if (steerZClearPending_) {
+            steerZClearPending_ = false;
+            needsRedraw_ = true;
         }
         return false;
     }
@@ -2731,16 +2865,17 @@ void EngineeringScreen::drawEncoderCalibration() {
     RTRACE_TEXT(ECAL_PANEL_X, 182, "(real control  +-54)",
                 ui::COL_GRAY, ui::COL_BG, 1, TL_DATUM);
 
-    // Instruction line (compact, premium — no lab wall of text).
-    tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("Turn the wheel to verify response", ui::SCREEN_W / 2, 300);
-    RTRACE_TEXT(ui::SCREEN_W / 2, 300, "Turn the wheel to verify response",
-                ui::COL_DARK_GRAY, ui::COL_BG, 1, MC_DATUM);
+    // Steering Z diagnostic section.  Values are painted by the partial redraw
+    // path below so live CAN updates refresh without redrawing the whole page.
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
     tft.setTextDatum(TL_DATUM);
+    tft.drawString("STEERING Z CENTER", ECAL_PANEL_X, 204);
+    RTRACE_TEXT(ECAL_PANEL_X, 204, "STEERING Z CENTER",
+                ui::COL_AMBER, ui::COL_BG, 1, TL_DATUM);
 
     // Force initial partial redraw of values
     encoderDataChanged_ = true;
+    steerZDataChanged_ = true;
 
     // Back button
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
@@ -2752,6 +2887,23 @@ void EngineeringScreen::drawEncoderCalibration() {
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     RTRACE_TEXT(BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2, "BACK",
                 ui::COL_WHITE, ui::COL_DARK_GRAY, 1, MC_DATUM);
+
+    auto zBtn = [](int16_t bx, int16_t bw, const char* lbl, uint16_t fill) {
+        tft.fillRect(bx, ECAL_Z_BTN_Y, bw, ECAL_Z_BTN_H, fill);
+        RTRACE_FILL_RECT(bx, ECAL_Z_BTN_Y, bw, ECAL_Z_BTN_H, fill);
+        tft.drawRect(bx, ECAL_Z_BTN_Y, bw, ECAL_Z_BTN_H, ui::COL_GRAY);
+        RTRACE_DRAW_RECT(bx, ECAL_Z_BTN_Y, bw, ECAL_Z_BTN_H, ui::COL_GRAY);
+        tft.setTextColor(ui::COL_WHITE, fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(lbl, bx + bw / 2, ECAL_Z_BTN_Y + ECAL_Z_BTN_H / 2);
+        RTRACE_TEXT(bx + bw / 2, ECAL_Z_BTN_Y + ECAL_Z_BTN_H / 2, lbl,
+                    ui::COL_WHITE, fill, 1, MC_DATUM);
+    };
+    zBtn(ECAL_Z_QUERY_X, ECAL_Z_QUERY_W, "QUERY Z", ui::COL_DARK_GRAY);
+    zBtn(ECAL_Z_CAL_X, ECAL_Z_CAL_W, "CALIBRATE Z", ui::COL_DARK_GRAY);
+    zBtn(ECAL_Z_CLEAR_X, ECAL_Z_CLEAR_W,
+         steerZClearPending_ ? "CONFIRM CLEAR" : "CLEAR Z",
+         steerZClearPending_ ? ui::COL_RED : ui::COL_DARK_GRAY);
     tft.setTextDatum(TL_DATUM);
 }
 
@@ -3610,6 +3762,21 @@ void EngineeringScreen::sendPedalCalOp(uint8_t op) {
     frame.extd             = 0;
     frame.data_length_code = 2;
     frame.data[0]          = can::SERVICE_ACTION_PEDAL_CAL;
+    frame.data[1]          = op;
+    ESP32Can.writeFrame(frame, 0);
+}
+
+// -------------------------------------------------------------------------
+// sendSteerZOp — emit a SERVICE_CMD (0x110) with byte0 = 0xF8
+// (SERVICE_ACTION_STEERING_Z) and byte1 = sub-opcode.  Diagnostic-only HMI;
+// STM32 validates PB5/Z state and owns all calibration/clear effects.
+// -------------------------------------------------------------------------
+void EngineeringScreen::sendSteerZOp(uint8_t op) {
+    CanFrame frame = {};
+    frame.identifier       = can::SERVICE_CMD;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+    frame.data[0]          = can::SERVICE_ACTION_STEERING_Z;
     frame.data[1]          = op;
     ESP32Can.writeFrame(frame, 0);
 }

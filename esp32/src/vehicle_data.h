@@ -233,7 +233,27 @@ struct GearLimitsData {
 };
 
 // -------------------------------------------------------------------------
-// Debounce EMI diagnostic counters (0x306 + 0x307) — report-only
+// Steering PB5 + encoder-Z dual center-reference diagnostic (0x30E)
+// PB5 (LJ12A3, EXTI5) is the PRIMARY physical/safety center reference; the
+// encoder Z (index) pulse on PB4 is a SECONDARY precision reference that can
+// NEVER center on its own.  Diagnostic only — never gates HMI control.
+// Frame layout mirrors Core/Src/can_handler.c steerz_send_status().
+// -------------------------------------------------------------------------
+struct SteeringZData {
+    uint8_t  flags        = 0;   // bit0-2 status, bit3 PB5 live, bit4 Z valid,
+                                 // bit5 Z slip
+    uint8_t  status       = 0;   // 0 NOT_CAL,1 OK,2 NOT_SEEN,3 OUT_OF_WINDOW,
+                                 // 4 MECH_OFFSET (== flags & 0x07)
+    bool     pb5Live      = false;
+    bool     zValid       = false;
+    bool     zSlip        = false;
+    uint8_t  zPulseCount  = 0;   // saturated 0..255
+    int16_t  zLastPos     = 0;   // TIM2 count at last Z pulse
+    int16_t  zOffset      = 0;   // Z↔center offset (counts)
+    int8_t   zLastError   = 0;   // last inter-pulse error (counts)
+    uint8_t  zTolerance   = 0;   // window used (counts)
+    unsigned long timestampMs = 0;
+};
 // Counters of edge pulses rejected by the STM32 DWT 200 µs pre-filter.
 // Wheel counters arrive truncated/saturated to uint16; steering is full uint32.
 // -------------------------------------------------------------------------
@@ -349,6 +369,7 @@ public:
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
+    void setSteeringZ(const SteeringZData& d)       { steeringZ_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -379,6 +400,7 @@ public:
     const CanMetaData&      canMeta()      const { return canMeta_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
+    const SteeringZData&    steeringZ()    const { return steeringZ_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -405,6 +427,7 @@ private:
     CanMetaData      canMeta_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;
+    SteeringZData    steeringZ_;
 };
 
 } // namespace vehicle
