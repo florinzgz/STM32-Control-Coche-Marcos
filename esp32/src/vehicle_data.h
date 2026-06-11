@@ -207,6 +207,24 @@ struct PedalCalData {
 };
 
 // -------------------------------------------------------------------------
+// Gear power-limit telemetry (0x30D) — on-demand (10 Hz × 1 s after QUERY)
+// Active = limits currently applied by the STM32 motor controller.
+// Pending = unsaved edit staged on the STM32 (mirrors the UI edit state).
+// -------------------------------------------------------------------------
+struct GearLimitsData {
+    uint8_t  flags        = 0;    // bit0 stored-valid, bit1 pending-differs,
+                                  // bit2 safety-ok(STANDBY), bit3 pending-valid
+    uint8_t  activeD2     = 0;    // currently applied D2 limit (percent)
+    uint8_t  activeD1     = 0;
+    uint8_t  activeR      = 0;
+    uint8_t  pendingD2    = 0;    // staged (unsaved) D2 limit (percent)
+    uint8_t  pendingD1    = 0;
+    uint8_t  pendingR     = 0;
+    uint8_t  systemState  = 0;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Debounce EMI diagnostic counters (0x306 + 0x307) — report-only
 // Counters of edge pulses rejected by the STM32 DWT 200 µs pre-filter.
 // Wheel counters arrive truncated/saturated to uint16; steering is full uint32.
@@ -318,6 +336,7 @@ public:
     void setMode(const ModeData& d)            { mode_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
+    void setGearLimits(const GearLimitsData& d)     { gearLimits_ = d; }
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
@@ -347,6 +366,7 @@ public:
     const ModeData&      mode()      const { return mode_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
+    const GearLimitsData&   gearLimits()   const { return gearLimits_; }
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
     const CanMetaData&      canMeta()      const { return canMeta_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
@@ -372,6 +392,7 @@ private:
     ModeData      mode_;
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
+    GearLimitsData   gearLimits_;
     I2cDiagData      i2cDiag_;
     CanMetaData      canMeta_;
     I2cScanData      i2cScan_;

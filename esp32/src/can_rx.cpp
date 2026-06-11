@@ -332,6 +332,23 @@ static void decodeFdcanDiag(const CanFrame& f, vehicle::VehicleData& data) {
     data.setFdcanDiag(d);
 }
 
+// 0x30D DIAG_GEAR_LIMITS — gear power-limit telemetry (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c gearlim_send_status().
+static void decodeGearLimits(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::GearLimitsData d;
+    d.flags       = f.data[0];
+    d.activeD2    = f.data[1];
+    d.activeD1    = f.data[2];
+    d.activeR     = f.data[3];
+    d.pendingD2   = f.data[4];
+    d.pendingD1   = f.data[5];
+    d.pendingR    = f.data[6];
+    d.systemState = f.data[7];
+    d.timestampMs = millis();
+    data.setGearLimits(d);
+}
+
 // -------------------------------------------------------------------------
 // Debug: RX frame counter and first-frame logging
 // -------------------------------------------------------------------------
@@ -390,6 +407,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
+            case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;
