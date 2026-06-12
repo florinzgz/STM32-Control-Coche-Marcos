@@ -100,7 +100,7 @@ bool load(Config& cfg) {
     prefs_.begin(NVS_NAMESPACE, true);  // Read-only
 
     cfg.driveMode       = prefs_.getUChar(KEY_MODE, 0);
-    cfg.brightness      = prefs_.getUChar(KEY_BRIGHT, 100);
+    cfg.brightness      = prefs_.getUChar(KEY_BRIGHT, 255);
     cfg.frontLedEnabled = prefs_.getBool(KEY_LED_FRONT, false);
     cfg.rearLedEnabled  = prefs_.getBool(KEY_LED_REAR, false);
     cfg.audioVolume     = prefs_.getUChar(KEY_VOLUME, 15);
