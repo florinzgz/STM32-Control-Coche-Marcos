@@ -13,6 +13,7 @@
   ****************************************************************************
   */
 
+#ifdef HOST_TEST
 #include "math_safety.h"
 #include <stdio.h>
 #include <math.h>
@@ -177,3 +178,5 @@ int main(void)
 
     return tests_failed ? 1 : 0;
 }
+
+#endif /* HOST_TEST */

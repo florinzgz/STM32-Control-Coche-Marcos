@@ -20,6 +20,7 @@
   ****************************************************************************
   */
 
+#ifdef HOST_TEST
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -340,3 +341,5 @@ int main(void)
     printf("\n%d tests run, %d failed\n", tests_run, tests_failed);
     return (tests_failed == 0) ? 0 : 1;
 }
+
+#endif /* HOST_TEST */

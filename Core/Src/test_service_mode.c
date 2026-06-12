@@ -17,6 +17,7 @@
   ****************************************************************************
   */
 
+#ifdef HOST_TEST
 #include "service_mode.h"
 #include <stdio.h>
 #include <string.h>
@@ -388,3 +389,5 @@ int main(void)
 
     return tests_failed ? 1 : 0;
 }
+
+#endif /* HOST_TEST */
