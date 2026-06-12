@@ -59,7 +59,7 @@ inline constexpr uint8_t SENSOR_POS_UNSET = 0xFF;  // not yet assigned
 // -------------------------------------------------------------------------
 struct Config {
     uint8_t  driveMode          = 0;      // Mode flags (bit 0=4x4, bit 1=tank)
-    uint8_t  brightness         = 100;    // Display brightness (0-255)
+    uint8_t  brightness         = 255;    // Display brightness (0-255)
     bool     frontLedEnabled    = false;  // Front LED relay default state
     bool     rearLedEnabled     = false;  // Rear LED relay default state
     uint8_t  audioVolume        = 15;     // DFPlayer volume (0-30)

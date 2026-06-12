@@ -323,7 +323,7 @@ void EngineeringScreen::onEnter() {
     const auto& cfg = config_store::get();
     memcpy(inaMap_,  cfg.ina226Map,      config_store::NUM_INA226_CH);
     memcpy(tempMap_, cfg.tempSensorMap,  config_store::NUM_TEMP_SENS);
-    brightnessEdit_  = display_backlight::apply(cfg.brightness);
+    brightnessEdit_  = display_backlight::current();
     brightnessDirty_ = false;
 
     // Reset relay override UI state on screen entry.
