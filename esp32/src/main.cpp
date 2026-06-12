@@ -37,6 +37,7 @@
 #include "touch_calibration.h"
 #include "config_store.h"
 #include "traction_switch.h"
+#include "display_backlight.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -637,6 +638,17 @@ void setup() {
     // Initialize TFT display
     tft.init();
     tft.setRotation(1);  // Landscape mode (480×320)
+
+    // Initialize TFT backlight PWM and apply persisted brightness (clamped to
+    // a safe visible range so the screen never appears off after reboot).
+    {
+        const auto& cfg = config_store::get();
+        const uint8_t applied = display_backlight::apply(cfg.brightness);
+        if (applied != cfg.brightness) {
+            config_store::setBrightness(applied);
+            config_store::flush();
+        }
+    }
 
     // Apply touch calibration (XPT2046).
     // Order of preference:
