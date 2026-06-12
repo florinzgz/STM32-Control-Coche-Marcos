@@ -11,6 +11,7 @@
 #include "can_ids.h"
 #include "can_rx.h"
 #include "config_store.h"
+#include "display_backlight.h"
 #include "touch_calibration.h"
 #include "ui/debug_overlay.h"
 #include <TFT_eSPI.h>
@@ -32,14 +33,13 @@ static constexpr int16_t MENU_BTN_H   = 16;
 static constexpr int16_t MENU_START_Y = 40;
 static constexpr int16_t MENU_SPACING = 17;
 
-// Number of main-menu functions (unchanged — the 15 functions are preserved;
-// only their presentation changed).  Full canonical names kept in tileLabel*
+// Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 16;
+static constexpr int     NUM_MAIN_ITEMS = 17;
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
-// The 15 functions are presented as large touch tiles across two pages
-// (page 1 = items 0..8, page 2 = items 9..14).  Tiles are 148x72 px with a
+// Functions are presented as large touch tiles across two pages
+// (page 1 = items 0..8, page 2 = items 9..16).  Tiles are 148x72 px with a
 // 10 px separation — well above the 44 px minimum touch target, usable with
 // gloves.  The dispatch logic is unchanged: a tile maps back to its original
 // item index and runs the exact same code path as the old list row.
@@ -58,12 +58,12 @@ static constexpr int     PAGE1_ITEM_COUNT = 9;   // items 0..8
 static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
     "TEMP", "FACTORY", "DTC", "MAINT.",
-    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR"
+    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
-    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS"
+    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -87,7 +87,8 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_GREEN,   // 12 Touch Calibration   — calibration
     ui::COL_AMBER,   // 13 Reset Touch Cal     — destructive
     ui::COL_CYAN,    // 14 MCP23017 Live       — diagnostic
-    ui::COL_BLUE     // 15 Gear Power Limits   — configuration
+    ui::COL_BLUE,    // 15 Gear Power Limits   — configuration
+    ui::COL_BLUE     // 16 Display Brightness  — configuration
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -180,6 +181,17 @@ static constexpr int16_t GL_PAGE_X    = 385;
 static constexpr int16_t GL_PAGE_Y    = 4;
 static constexpr int16_t GL_PAGE_W    = 90;
 static constexpr int16_t GL_PAGE_H    = 26;
+
+// ---- TFT brightness submenu layout (BRIGHTNESS) ----
+static constexpr int16_t BRI_BOX_X    = 70;
+static constexpr int16_t BRI_BOX_Y    = 78;
+static constexpr int16_t BRI_BOX_W    = 340;
+static constexpr int16_t BRI_BOX_H    = 126;
+static constexpr int16_t BRI_MINUS_X  = 120;
+static constexpr int16_t BRI_PLUS_X   = 300;
+static constexpr int16_t BRI_BTN_Y    = 228;
+static constexpr int16_t BRI_BTN_W    = 60;
+static constexpr int16_t BRI_BTN_H    = 36;
 
 // ---- Sensor mapping row layout ----
 static constexpr int16_t MAP_ROW_X   = 10;
@@ -311,6 +323,8 @@ void EngineeringScreen::onEnter() {
     const auto& cfg = config_store::get();
     memcpy(inaMap_,  cfg.ina226Map,      config_store::NUM_INA226_CH);
     memcpy(tempMap_, cfg.tempSensorMap,  config_store::NUM_TEMP_SENS);
+    brightnessEdit_  = display_backlight::apply(cfg.brightness);
+    brightnessDirty_ = false;
 
     // Reset relay override UI state on screen entry.
     // Send a disable command to ensure STM32 state is in sync in case
@@ -793,6 +807,7 @@ void EngineeringScreen::draw() {
             case SubMenu::DEBOUNCE_DIAG:    drawDebounceDiag();        break;
             case SubMenu::MCP23017_LIVE:    drawMcpLiveDiag();         break;
             case SubMenu::GEAR_LIMITS:      drawGearLimits();          break;
+            case SubMenu::BRIGHTNESS:       drawBrightness();          break;
         }
     }
 
@@ -1606,6 +1621,10 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         steerZClearPending_ = false;   // cancel steering-Z clear confirmation
         gearLimitsEditActive_ = false;
         gearLimitsSaveWait_   = false;
+        if (currentMenu_ == SubMenu::BRIGHTNESS && brightnessDirty_) {
+            config_store::flush();
+            brightnessDirty_ = false;
+        }
         currentMenu_ = SubMenu::MAIN;
         needsRedraw_ = true;
         return true;
@@ -1780,6 +1799,11 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             gearLimitsShowResponse_ = false;  // start on POWER page
                             gearLimitsChanged_     = true;   // force first paint
                             currentMenu_ = SubMenu::GEAR_LIMITS;
+                            break;
+                        case 16:
+                            brightnessEdit_  = display_backlight::current();
+                            brightnessDirty_ = false;
+                            currentMenu_ = SubMenu::BRIGHTNESS;
                             break;
                         default:
                             break;
@@ -2036,6 +2060,25 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         if (gearLimitsRestoreArm_) {
             gearLimitsRestoreArm_ = false;
             needsRedraw_ = true;
+        }
+        return false;
+    }
+
+    // TFT backlight brightness editor: immediate PWM update, persisted in NVS.
+    if (currentMenu_ == SubMenu::BRIGHTNESS) {
+        if (y >= BRI_BTN_Y && y <= BRI_BTN_Y + BRI_BTN_H) {
+            const bool minus = (x >= BRI_MINUS_X && x <= BRI_MINUS_X + BRI_BTN_W);
+            const bool plus  = (x >= BRI_PLUS_X  && x <= BRI_PLUS_X  + BRI_BTN_W);
+            if (minus || plus) {
+                int next = brightnessEdit_;
+                next += plus ? (int)display_backlight::BRIGHTNESS_STEP
+                             : -(int)display_backlight::BRIGHTNESS_STEP;
+                brightnessEdit_ = display_backlight::apply((uint8_t)next);
+                config_store::setBrightness(brightnessEdit_);
+                brightnessDirty_ = true;
+                needsRedraw_ = true;
+                return true;
+            }
         }
         return false;
     }
@@ -2523,6 +2566,19 @@ void EngineeringScreen::drawTileIcon(uint8_t item, int16_t cx, int16_t cy,
             tft.fillRect(cx - 2, cy + 9,  4, 4, col);
             tft.fillRect(cx - 13, cy - 2, 4, 4, col);
             tft.fillRect(cx + 9,  cy - 2, 4, 4, col);
+            break;
+
+        case 16:  // Display Brightness — sun icon
+            tft.drawCircle(cx, cy, 8, col);
+            tft.fillCircle(cx, cy, 3, col);
+            tft.drawFastVLine(cx, cy - 14, 4, col);
+            tft.drawFastVLine(cx, cy + 10, 4, col);
+            tft.drawFastHLine(cx - 14, cy, 4, col);
+            tft.drawFastHLine(cx + 10, cy, 4, col);
+            tft.drawLine(cx - 10, cy - 10, cx - 7, cy - 7, col);
+            tft.drawLine(cx + 10, cy - 10, cx + 7, cy - 7, col);
+            tft.drawLine(cx - 10, cy + 10, cx - 7, cy + 7, col);
+            tft.drawLine(cx + 10, cy + 10, cx + 7, cy + 7, col);
             break;
 
         default:
@@ -3963,6 +4019,60 @@ void EngineeringScreen::drawGearLimits() {
     tft.setTextDatum(TL_DATUM);
 
     gearLimitsChanged_ = false;
+}
+
+void EngineeringScreen::drawBrightness() {
+    RTRACE_BEGIN_SCREEN("eng_brightness");
+    RTRACE_SET_LAYER(0);
+    RTRACE_FILL_SCREEN(ui::COL_BG);
+    RTRACE_SET_LAYER(1);
+
+    tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("DISPLAY BRIGHTNESS", ui::SCREEN_W / 2, 20);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    tft.fillRoundRect(BRI_BOX_X, BRI_BOX_Y, BRI_BOX_W, BRI_BOX_H, 8, ui::COL_DARK_GRAY);
+    tft.drawRoundRect(BRI_BOX_X, BRI_BOX_Y, BRI_BOX_W, BRI_BOX_H, 8, ui::COL_BLUE);
+
+    char buf[32];
+    const uint8_t pct = display_backlight::toPercent(brightnessEdit_);
+    snprintf(buf, sizeof(buf), "%u%%", (unsigned)pct);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextSize(4);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(buf, ui::SCREEN_W / 2, BRI_BOX_Y + 46);
+
+    tft.setTextSize(2);
+    snprintf(buf, sizeof(buf), "PWM %u/255", (unsigned)brightnessEdit_);
+    tft.drawString(buf, ui::SCREEN_W / 2, BRI_BOX_Y + 96);
+    tft.setTextSize(1);
+
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    snprintf(buf, sizeof(buf), "RANGE %u%%-%u%%",
+             (unsigned)display_backlight::toPercent(display_backlight::BRIGHTNESS_MIN),
+             (unsigned)display_backlight::toPercent(display_backlight::BRIGHTNESS_MAX));
+    tft.drawString(buf, ui::SCREEN_W / 2, 212);
+
+    auto drawStepButton = [&](int16_t x0, const char* label) {
+        tft.fillRect(x0, BRI_BTN_Y, BRI_BTN_W, BRI_BTN_H, ui::COL_DARK_GRAY);
+        tft.drawRect(x0, BRI_BTN_Y, BRI_BTN_W, BRI_BTN_H, ui::COL_CYAN);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        tft.setTextSize(2);
+        tft.drawString(label, x0 + BRI_BTN_W / 2, BRI_BTN_Y + BRI_BTN_H / 2);
+        tft.setTextSize(1);
+    };
+    drawStepButton(BRI_MINUS_X, "-");
+    drawStepButton(BRI_PLUS_X, "+");
+
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
 }
 
 // -------------------------------------------------------------------------

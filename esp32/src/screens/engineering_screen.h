@@ -68,7 +68,8 @@ private:
         INA226_LIVE_DIAG,  // Live INA226/current diagnostic viewer
         DEBOUNCE_DIAG,     // DWT-debounce EMI filtered counters viewer
         MCP23017_LIVE,     // ESP32-local MCP23017 shifter I2C live diagnostic
-        GEAR_LIMITS        // Configurable per-gear traction power limits (D2/D1/R)
+        GEAR_LIMITS,       // Configurable per-gear traction power limits (D2/D1/R)
+        BRIGHTNESS         // TFT backlight brightness control (local PWM)
     };
 
     void drawMainMenu();
@@ -90,14 +91,15 @@ private:
     void drawDebounceDiag();
     void drawMcpLiveDiag();
     void drawGearLimits();
+    void drawBrightness();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
     SubMenu     currentMenu_ = SubMenu::MAIN;
 
-    // Main-menu paging (FASE 2 tile redesign).  The 15 functions are split
-    // across two pages of large touch tiles: page 0 = items 0..8 (9 tiles),
-    // page 1 = items 9..14 (6 tiles).  The dispatch logic is unchanged — a
+    // Main-menu paging (FASE 2 tile redesign).  Functions are split across two
+    // pages of large touch tiles: page 0 = items 0..8 (9 tiles), page 1 =
+    // items 9..16 (8 tiles).  The dispatch logic is unchanged — a
     // tile simply maps back to its original item index.
     uint8_t     mainMenuPage_ = 0;
 
@@ -332,6 +334,10 @@ private:
     static constexpr unsigned long GEAR_RESTORE_CONFIRM_MS = 5000;
     // Emit SERVICE_CMD 0x110 byte0=0xF7 (GEAR_LIMITS) + sub-opcode + value.
     void sendGearLimitOp(uint8_t op, uint8_t value);
+
+    // ---- TFT brightness editor (BRIGHTNESS submenu) ----
+    uint8_t       brightnessEdit_    = 100;
+    bool          brightnessDirty_   = false;
 };
 
 #endif // ENGINEERING_SCREEN_H
