@@ -2202,7 +2202,199 @@ static void steerz_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 }
 
-void CAN_ProcessMessages(void) {
+/* ==================================================================
+ *  EPS runtime parameter tuning (0xF9 + 0x30F telemetry)
+ *
+ *  Provides Engineering Menu access to all eps_params_t fields.
+ *  SET_PARAM takes effect immediately (no state gate) to support
+ *  real-time tuning from the Engineering Menu.
+ *  SAVE and RESET require SYS_STATE_STANDBY for flash safety.
+ *
+ *  0x30F frame layout (DLC 8):
+ *    byte 0: (kind << 4) | flags
+ *            flags bit0 = flash_valid, bit1 = sys_in_standby
+ *    kind 0: assist_strength×1000, center_strength×1000, damping×1000 (int16 LE)
+ *    kind 1: friction_comp×1000, coast_band_pct×100, min_drive_pct×100 (int16 LE)
+ *    kind 2: assist_vs_speed×10, return_vs_speed×10, deadband_deg×100 (int16 LE)
+ *    kind 3: max_pwm_pct×100, slew_rate_pct×100, center_offset_deg×100 (int16 LE)
+ *    kind 4: enc_raw(int16), angle_raw(×10, int16), motor_effort(×10, int16),
+ *            steer_state(byte: 0=uncal,1=cal,2=enc_fault)
+ *    bytes 1-2: param_a int16 LE
+ *    bytes 3-4: param_b int16 LE
+ *    bytes 5-6: param_c int16 LE
+ *    byte 7: steer_state (kind 4) or reserved (kinds 0-3)
+ * ================================================================== */
+#define EPS_BURST_FRAMES     10U    /* 10 × 100 ms = 1 s     */
+#define EPS_BURST_PERIOD_MS  100U
+#define EPS_PARAM_KINDS      5U     /* 5 frame kinds per tick */
+
+static uint8_t  eps_burst_left  = 0;
+static uint32_t eps_next_tx_ms  = 0;
+
+/* Clamp a float to int16 range */
+static int16_t eps_clamp_i16f(float v)
+{
+    if (v >  32767.0f) return  32767;
+    if (v < -32768.0f) return -32768;
+    return (int16_t)v;
+}
+
+/* Emit one complete set of 5 × 0x30F frames covering all param kinds. */
+static void eps_send_all_kinds(void)
+{
+    const eps_params_t *p    = EPS_Params_Get();
+    SystemState_t      state = Safety_GetState();
+
+    uint8_t flags = 0;
+    if (EPS_Params_IsFlashValid())         flags |= 0x01U;
+    if (state == SYS_STATE_STANDBY)        flags |= 0x02U;
+
+    uint8_t payload[8];
+
+    /* kind 0: assist_strength×1000, center_strength×1000, damping×1000 */
+    {
+        int16_t a = eps_clamp_i16f(p->assist_strength * 1000.0f);
+        int16_t b = eps_clamp_i16f(p->center_strength * 1000.0f);
+        int16_t c = eps_clamp_i16f(p->damping         * 1000.0f);
+        payload[0] = (uint8_t)((0U << 4) | (flags & 0x0FU));
+        payload[1] = (uint8_t)(a & 0xFF); payload[2] = (uint8_t)(a >> 8);
+        payload[3] = (uint8_t)(b & 0xFF); payload[4] = (uint8_t)(b >> 8);
+        payload[5] = (uint8_t)(c & 0xFF); payload[6] = (uint8_t)(c >> 8);
+        payload[7] = 0;
+        (void)TransmitFrame(CAN_ID_DIAG_EPS_PARAMS, payload, sizeof(payload));
+    }
+    /* kind 1: friction_comp×1000, coast_band_pct×100, min_drive_pct×100 */
+    {
+        int16_t a = eps_clamp_i16f(p->friction_comp  * 1000.0f);
+        int16_t b = eps_clamp_i16f(p->coast_band_pct *  100.0f);
+        int16_t c = eps_clamp_i16f(p->min_drive_pct  *  100.0f);
+        payload[0] = (uint8_t)((1U << 4) | (flags & 0x0FU));
+        payload[1] = (uint8_t)(a & 0xFF); payload[2] = (uint8_t)(a >> 8);
+        payload[3] = (uint8_t)(b & 0xFF); payload[4] = (uint8_t)(b >> 8);
+        payload[5] = (uint8_t)(c & 0xFF); payload[6] = (uint8_t)(c >> 8);
+        payload[7] = 0;
+        (void)TransmitFrame(CAN_ID_DIAG_EPS_PARAMS, payload, sizeof(payload));
+    }
+    /* kind 2: assist_vs_speed×10, return_vs_speed×10, deadband_deg×100 */
+    {
+        int16_t a = eps_clamp_i16f(p->assist_vs_speed *  10.0f);
+        int16_t b = eps_clamp_i16f(p->return_vs_speed *  10.0f);
+        int16_t c = eps_clamp_i16f(p->deadband_deg    * 100.0f);
+        payload[0] = (uint8_t)((2U << 4) | (flags & 0x0FU));
+        payload[1] = (uint8_t)(a & 0xFF); payload[2] = (uint8_t)(a >> 8);
+        payload[3] = (uint8_t)(b & 0xFF); payload[4] = (uint8_t)(b >> 8);
+        payload[5] = (uint8_t)(c & 0xFF); payload[6] = (uint8_t)(c >> 8);
+        payload[7] = 0;
+        (void)TransmitFrame(CAN_ID_DIAG_EPS_PARAMS, payload, sizeof(payload));
+    }
+    /* kind 3: max_pwm_pct×100, slew_rate_pct×100, center_offset_deg×100 */
+    {
+        int16_t a = eps_clamp_i16f(p->max_pwm_pct        * 100.0f);
+        int16_t b = eps_clamp_i16f(p->slew_rate_pct      * 100.0f);
+        int16_t c = eps_clamp_i16f(p->center_offset_deg  * 100.0f);
+        payload[0] = (uint8_t)((3U << 4) | (flags & 0x0FU));
+        payload[1] = (uint8_t)(a & 0xFF); payload[2] = (uint8_t)(a >> 8);
+        payload[3] = (uint8_t)(b & 0xFF); payload[4] = (uint8_t)(b >> 8);
+        payload[5] = (uint8_t)(c & 0xFF); payload[6] = (uint8_t)(c >> 8);
+        payload[7] = 0;
+        (void)TransmitFrame(CAN_ID_DIAG_EPS_PARAMS, payload, sizeof(payload));
+    }
+    /* kind 4: enc_raw(int16), angle×10(int16), motor_effort×10(int16),
+     *         steer_state (0=uncal, 1=cal, 2=enc_fault)             */
+    {
+        int32_t enc32 = Steering_GetEncoderRaw();
+        int16_t enc   = (enc32 >  32767) ? (int16_t) 32767 :
+                        (enc32 < -32768) ? (int16_t)-32768 : (int16_t)enc32;
+        float   ang   = Steering_GetCurrentAngle();
+        int16_t ang16 = eps_clamp_i16f(ang * 10.0f);
+        int16_t eff16 = eps_clamp_i16f(Steering_GetMotorEffortPct() * 10.0f);
+        uint8_t stst  = Steering_IsCalibrated() ? (Encoder_HasFault() ? 2U : 1U) : 0U;
+        payload[0] = (uint8_t)((4U << 4) | (flags & 0x0FU));
+        payload[1] = (uint8_t)(enc  & 0xFF); payload[2] = (uint8_t)(enc  >> 8);
+        payload[3] = (uint8_t)(ang16 & 0xFF); payload[4] = (uint8_t)(ang16 >> 8);
+        payload[5] = (uint8_t)(eff16 & 0xFF); payload[6] = (uint8_t)(eff16 >> 8);
+        payload[7] = stst;
+        (void)TransmitFrame(CAN_ID_DIAG_EPS_PARAMS, payload, sizeof(payload));
+    }
+}
+
+void CAN_EPS_ParamsBurstUpdate(void)
+{
+    if (eps_burst_left == 0U) return;
+    uint32_t now = HAL_GetTick();
+    if ((int32_t)(now - eps_next_tx_ms) < 0) return;
+    eps_send_all_kinds();
+    eps_burst_left--;
+    eps_next_tx_ms = now + EPS_BURST_PERIOD_MS;
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_EPS_PARAMS. */
+static void eps_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    uint8_t op = payload[1];
+
+    /* QUERY: read-only, no state gate */
+    if (op == EPS_PARAM_OP_QUERY) {
+        eps_burst_left = EPS_BURST_FRAMES;
+        eps_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+
+    /* SET_PARAM: immediate, no state gate — supports real-time tuning */
+    if (op == EPS_PARAM_OP_SET_PARAM) {
+        if (len < 7) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        uint8_t param_id = payload[2];
+        /* Deserialise float from bytes 3-6 (little-endian IEEE 754) */
+        float value;
+        uint8_t fb[4] = { payload[3], payload[4], payload[5], payload[6] };
+        __builtin_memcpy(&value, fb, sizeof(float));
+        if (EPS_Params_Set((eps_param_id_t)param_id, value)) {
+            /* Trigger a brief burst so the HMI sees the updated value */
+            eps_burst_left = 2U;
+            eps_next_tx_ms = HAL_GetTick();
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+        }
+        return;
+    }
+
+    /* SAVE and RESET require STANDBY */
+    SystemState_t state = Safety_GetState();
+    if (state != SYS_STATE_STANDBY) {
+        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+        return;
+    }
+
+    switch (op) {
+    case EPS_PARAM_OP_SAVE:
+        if (EPS_Params_Save()) {
+            eps_burst_left = EPS_BURST_FRAMES;
+            eps_next_tx_ms = HAL_GetTick();
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+        }
+        break;
+    case EPS_PARAM_OP_RESET:
+        EPS_Params_ResetDefaults();
+        eps_burst_left = EPS_BURST_FRAMES;
+        eps_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        break;
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        break;
+    }
+}
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
     
@@ -2607,6 +2799,13 @@ void CAN_ProcessMessages(void) {
                          * center and BOOT/STANDBY; the handler enforces the
                          * gates internally and replies on CMD_ACK (0x103). */
                         steerz_handle_service_cmd(rx_payload, msg_len);
+                    } else if (cmd == SERVICE_ACTION_EPS_PARAMS) {
+                        /* ---- EPS RUNTIME PARAMETER TUNING ----
+                         * Byte 1 = sub-opcode.  SET_PARAM takes effect
+                         * immediately to support real-time Engineering Menu
+                         * tuning; SAVE/RESET are STANDBY-gated.  Replies on
+                         * CMD_ACK (0x103); telemetry on 0x30F.            */
+                        eps_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == 0xE0) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask

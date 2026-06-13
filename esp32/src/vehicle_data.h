@@ -340,6 +340,41 @@ struct ModeData {
     unsigned long timestampMs = 0;
 };
 
+// -------------------------------------------------------------------------
+// EPS parameter telemetry (0x30F) — Engineering Menu tuning + live state
+// All float fields are decoded from the scaled int16 CAN frames.
+// -------------------------------------------------------------------------
+struct EpsParamsData {
+    // kind 0: gains A
+    float assistStrength  = 0.45f;   // assist_strength (default matches firmware)
+    float centerStrength  = 0.30f;
+    float damping         = 0.10f;
+    // kind 1: gains B
+    float frictionComp    = 0.05f;
+    float coastBandPct    = 3.0f;
+    float minDrivePct     = 8.0f;
+    // kind 2: speed params + deadband
+    float assistVsSpeed   = 18.0f;
+    float returnVsSpeed   = 35.0f;
+    float deadbandDeg     = 1.8f;
+    // kind 3: mechanical params
+    float maxPwmPct       = 60.0f;
+    float slewRatePct     = 5.883f;
+    float centerOffsetDeg = 0.0f;
+    // kind 4: live state
+    int16_t       encRaw        = 0;     // raw TIM2 count
+    float         angleDeg      = 0.0f;  // road-wheel angle (°)
+    float         motorEffortPct = 0.0f; // 0..100 %
+    uint8_t       steerState    = 0;     // 0=uncal, 1=cal, 2=enc_fault
+    // flags (present in all kinds, from most-recent frame)
+    bool          flashValid    = false;
+    bool          sysInStandby  = false;
+    bool          valid         = false;          // true after first 0x30F frame
+    unsigned long timestampMs   = 0;
+    // Track which kinds have been received (bitmask bits 0-4)
+    uint8_t       kindsReceived = 0;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -370,6 +405,7 @@ public:
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
     void setSteeringZ(const SteeringZData& d)       { steeringZ_ = d; }
+    void setEpsParams(const EpsParamsData& d)       { epsParams_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -401,6 +437,7 @@ public:
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
     const SteeringZData&    steeringZ()    const { return steeringZ_; }
+    const EpsParamsData&    epsParams()    const { return epsParams_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -428,6 +465,7 @@ private:
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;
     SteeringZData    steeringZ_;
+    EpsParamsData    epsParams_;
 };
 
 } // namespace vehicle

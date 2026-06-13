@@ -66,6 +66,7 @@ extern "C" {
 #define CAN_ID_DIAG_FDCAN         0x30C  // STM32 → ESP32 (on-demand) FDCAN error-counter dump (additive)
 #define CAN_ID_DIAG_GEAR_LIMITS   0x30D  // STM32 → ESP32 (on-demand, after QUERY) gear power-limit + accel-response telemetry (frame-kind in byte0 bit4)
 #define CAN_ID_DIAG_STEERING_Z    0x30E  // STM32 → ESP32 (on-demand, after QUERY) PB5 + encoder-Z dual center-reference diagnostic
+#define CAN_ID_DIAG_EPS_PARAMS    0x30F  // STM32 → ESP32 (on-demand, after QUERY) EPS parameter + live-state telemetry
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -84,6 +85,7 @@ extern "C" {
 #define SERVICE_ACTION_I2C_SERVICE         0xF6  /* I2C service-mode scan: probe mux/INA, SDA/SCL levels, recovery */
 #define SERVICE_ACTION_GEAR_LIMITS         0xF7  /* Gear power-limit config (byte1 = sub-opcode, byte2 = percent) */
 #define SERVICE_ACTION_STEERING_Z          0xF8  /* PB5 + encoder-Z center diagnostic/calibration (byte1 = sub-opcode) */
+#define SERVICE_ACTION_EPS_PARAMS          0xF9  /* EPS runtime parameter tuning (byte1 = sub-opcode) → 0x30F        */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
@@ -132,6 +134,27 @@ extern "C" {
 #define STEER_Z_OP_QUERY      0x01U
 #define STEER_Z_OP_CALIBRATE  0x02U
 #define STEER_Z_OP_CLEAR      0x03U
+
+/* ---- EPS runtime parameter tuning sub-opcodes (byte1 when byte0 == 0xF9) ----
+ * SET_PARAM applies immediately to the RAM active copy; no safety gate.
+ * SAVE and RESET require SYS_STATE_STANDBY.
+ *
+ * 0x30F frame kinds (byte0 bits 7-4):
+ *   kind 0: gains A   — assist_strength×1000, center_strength×1000, damping×1000
+ *   kind 1: gains B   — friction_comp×1000, coast_band_pct×100, min_drive_pct×100
+ *   kind 2: speeds    — assist_vs_speed×10, return_vs_speed×10, deadband_deg×100
+ *   kind 3: mechanical — max_pwm_pct×100, slew_rate_pct×100, center_offset_deg×100
+ *   kind 4: live state — enc_raw(int16), angle×10, motor_effort×10, steer_state
+ * byte0 bits 3-0 flags: bit0=flash_valid, bit1=sys_in_standby
+ *
+ *   0x01 SET_PARAM  Immediate: byte2=param_id(eps_param_id_t), bytes3-6=float LE
+ *   0x02 SAVE       Persist active RAM copy to flash (STANDBY only)
+ *   0x03 RESET      Revert to compiled defaults, RAM only (STANDBY only)
+ *   0x04 QUERY      Request a 1 s burst of 0x30F telemetry at 10 Hz          */
+#define EPS_PARAM_OP_SET_PARAM   0x01U
+#define EPS_PARAM_OP_SAVE        0x02U
+#define EPS_PARAM_OP_RESET       0x03U
+#define EPS_PARAM_OP_QUERY       0x04U
 
 /* Command ACK result codes (uint8_t) */
 typedef enum {
@@ -267,6 +290,11 @@ void CAN_GearLimitsBurstUpdate(void);
  * in progress, so it is safe to call unconditionally and has zero impact
  * on backward-compatible nodes that ignore 0x30E.                       */
 void CAN_SteeringZBurstUpdate(void);
+
+/* Drives the on-demand 0x30F EPS parameter + live-state telemetry burst.
+ * Call once per 100 ms tick.  No-op while no burst is in progress; has zero
+ * impact on backward-compatible nodes that ignore 0x30F.                */
+void CAN_EPS_ParamsBurstUpdate(void);
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */

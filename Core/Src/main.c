@@ -628,6 +628,11 @@ int main(void)
              * while an explicit QUERY/CALIBRATE is active (1 s, 10 Hz).
              * No-op otherwise; diagnostic only, never gates control.      */
             CAN_SteeringZBurstUpdate();
+
+            /* EPS parameter + live-state telemetry burst (0x30F) — emits
+             * only while an explicit QUERY/SET/SAVE is active (1 s, 10 Hz).
+             * No-op otherwise; zero impact on backward-compatible nodes.  */
+            CAN_EPS_ParamsBurstUpdate();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */

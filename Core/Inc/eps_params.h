@@ -30,6 +30,7 @@ extern "C" {
 
 /* ---- Calibration parameter block ---- */
 typedef struct {
+    /* ---- Torque-assist algorithm gains ---- */
     float assist_strength;   /* Assist torque gain (driver intention)       */
     float center_strength;   /* Self-centering spring gain                  */
     float damping;           /* Velocity damping coefficient                */
@@ -38,6 +39,14 @@ typedef struct {
     float min_drive_pct;     /* Dead-zone jump: min PWM% when driving      */
     float assist_vs_speed;   /* Speed sensitivity for assist: g(v)=1/(1+v/X) */
     float return_vs_speed;   /* Speed sensitivity for return: h(v)=0.3+v/X */
+    /* ---- Mechanical / output stage parameters ---- */
+    float deadband_deg;      /* Backlash deadband (road-wheel °) — angles
+                              * below this are treated as zero; default 1.8° */
+    float max_pwm_pct;       /* Maximum PWM output clamp (0..100 %)        */
+    float slew_rate_pct;     /* Slew-rate limit per control cycle (% of
+                              * full PWM range); default ≈5.88 % (250 cts) */
+    float center_offset_deg; /* Center-position correction (road-wheel °);
+                              * positive shifts the neutral point right     */
 } eps_params_t;
 
 /* ---- Parameter indices for EPS_Params_Set() ---- */
@@ -50,6 +59,10 @@ typedef enum {
     EPS_PARAM_MIN_DRIVE_PCT,
     EPS_PARAM_ASSIST_VS_SPEED,
     EPS_PARAM_RETURN_VS_SPEED,
+    EPS_PARAM_DEADBAND_DEG,
+    EPS_PARAM_MAX_PWM_PCT,
+    EPS_PARAM_SLEW_RATE_PCT,
+    EPS_PARAM_CENTER_OFFSET_DEG,
     EPS_PARAM_COUNT
 } eps_param_id_t;
 
@@ -90,6 +103,18 @@ bool EPS_Params_Save(void);
  *         Call EPS_Params_Save() afterwards to persist.
  */
 void EPS_Params_ResetDefaults(void);
+
+/**
+ * @brief  Return the compiled default parameter set.
+ * @retval Pointer to the immutable default eps_params_t (never NULL).
+ */
+const eps_params_t *EPS_Params_GetDefaults(void);
+
+/**
+ * @brief  Returns true if a valid parameter block was loaded from flash.
+ *         False means defaults were applied (no persisted calibration).
+ */
+bool EPS_Params_IsFlashValid(void);
 
 #ifdef __cplusplus
 }

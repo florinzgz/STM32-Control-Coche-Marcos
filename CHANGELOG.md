@@ -18,6 +18,21 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
 
 ### Added
 
+- **[FEATURE] EPS Steering Assist tuning system (FASE 1-8, CAN contract v1.11)**
+  - STM32: `eps_params_t` extended with 4 runtime-configurable mechanical fields:
+    `deadband_deg` (1.8 °), `max_pwm_pct` (60 %), `slew_rate_pct` (5.883 %),
+    `center_offset_deg` (0 °) — defaults reproduce previous hardcoded values exactly.
+  - `Steering_ControlLoop()` now reads all 12 EPS parameters at runtime; no
+    hardcoded constants remain in the control loop.  Backward-compatible by design.
+  - New public getters: `Steering_GetMotorEffortPct()`, `Steering_GetEncoderRaw()`.
+  - CAN `0xF9` SERVICE_ACTION + `0x30F` DIAG_EPS_PARAMS (5 frame kinds, 10 Hz burst):
+    real-time SET_PARAM (no safety gate), SAVE/RESET require STANDBY.
+  - ESP32 HMI: `EpsParamsData` struct in `vehicle_data.h`; `0x30F` decoder in
+    `can_rx.cpp`; `EPS_TUNING` and `STEER_DIAG` tiles added to Engineering Menu
+    (NUM_MAIN_ITEMS 17→19); `drawEpsTuning()` 3-page editor with real-time +/-
+    buttons, SAVE/RESET toolbar, ACK banner; `drawSteerDiag()` live telemetry view.
+  - Tests: `test_eps_params` 51→72 assertions (explicit deadband/maxPWM/slew guards).
+
 - **[FEATURE] PB5 + encoder-Z dual steering-center reference (CAN contract v1.10)**
   - PB5 (LJ12A3) stays the **primary** physical/safety center reference; the
     encoder **Z** (index) pulse on PB4 is a **secondary** precision/verification

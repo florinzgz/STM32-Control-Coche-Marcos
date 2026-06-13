@@ -69,7 +69,9 @@ private:
         DEBOUNCE_DIAG,     // DWT-debounce EMI filtered counters viewer
         MCP23017_LIVE,     // ESP32-local MCP23017 shifter I2C live diagnostic
         GEAR_LIMITS,       // Configurable per-gear traction power limits (D2/D1/R)
-        BRIGHTNESS         // TFT backlight brightness control (local PWM)
+        BRIGHTNESS,        // TFT backlight brightness control (local PWM)
+        EPS_TUNING,        // EPS steering assist parameter fine-tuning
+        STEER_DIAG         // Live steering diagnostic (encoder, PWM, state)
     };
 
     void drawMainMenu();
@@ -92,6 +94,8 @@ private:
     void drawMcpLiveDiag();
     void drawGearLimits();
     void drawBrightness();
+    void drawEpsTuning();
+    void drawSteerDiag();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -338,6 +342,42 @@ private:
     // ---- TFT brightness editor (BRIGHTNESS submenu) ----
     uint8_t       brightnessEdit_    = 100;
     bool          brightnessDirty_   = false;
+
+    // ---- EPS Steering Tuning editor (EPS_TUNING submenu) ----
+    // Working edit copy of every eps_params_t field; initialised from the
+    // most-recent 0x30F telemetry on enter.  Nothing is sent until SAVE.
+    // A SET_PARAM command IS sent immediately when the user changes a value
+    // (real-time effect), and SAVE persists to flash when in STANDBY.
+    enum class EpsAck : uint8_t { NONE = 0, SAVED, REJECTED, INVALID, TIMEOUT };
+    static constexpr uint8_t EPS_PAGES = 3;   // page0: gains A/B, page1: speed/mech, page2: read-back
+    uint8_t       epsPage_            = 0;     // currently visible page (0..EPS_PAGES-1)
+    bool          epsEditActive_      = false; // true once the user touches a +/- button
+    bool          epsDataChanged_     = false; // repaint trigger
+    EpsAck        epsAck_             = EpsAck::NONE;
+    unsigned long epsAckMs_           = 0;
+    unsigned long epsSaveSentMs_      = 0;
+    bool          epsSaveWait_        = false;
+    bool          epsRestoreArm_      = false;
+    unsigned long epsRestoreArmMs_    = 0;
+    unsigned long epsLastTs_          = 0;    // last consumed 0x30F ts
+    unsigned long epsLastQueryMs_     = 0;    // last QUERY tx
+    static constexpr unsigned long EPS_SAVE_TIMEOUT_MS    = 2000;
+    static constexpr unsigned long EPS_ACK_CLEAR_MS       = 3000;
+    static constexpr unsigned long EPS_RESTORE_CONFIRM_MS = 5000;
+    static constexpr unsigned long EPS_QUERY_INTERVAL_MS  = 500;
+    // Local edit values (floats, 12 params matching EPS_PARAM_* order)
+    float epsEdit_[12] = {
+        0.45f, 0.30f, 0.10f, 0.05f, 3.0f, 8.0f,
+        18.0f, 35.0f, 1.8f,  60.0f, 5.883f, 0.0f
+    };
+    // Helper: send SERVICE_CMD 0x110 byte0=0xF9 (EPS_PARAMS) + sub-opcode [+ payload].
+    void sendEpsParamOp(uint8_t op, uint8_t paramId, float value);
+    void sendEpsQuery();
+
+    // ---- STEER_DIAG live telemetry display ----
+    bool          steerDiagChanged_   = false;
+    unsigned long steerDiagLastTs_    = 0;
+    unsigned long steerDiagQueryMs_   = 0;
 };
 
 #endif // ENGINEERING_SCREEN_H

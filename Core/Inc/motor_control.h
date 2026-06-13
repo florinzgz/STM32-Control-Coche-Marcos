@@ -94,6 +94,10 @@ bool Steering_IsCalibrated(void);
 void Steering_SetCalibrated(void);
 void Steering_Neutralize(void);
 void Steering_GetWheelAngles(float *out_fl_deg, float *out_fr_deg);
+/** @brief Return last motor effort applied by the EPS loop (0..100 %). */
+float Steering_GetMotorEffortPct(void);
+/** @brief Return raw TIM2 encoder count (before gear-ratio division). */
+int32_t Steering_GetEncoderRaw(void);
 
 /* Encoder Health */
 void  Encoder_CheckHealth(void);
