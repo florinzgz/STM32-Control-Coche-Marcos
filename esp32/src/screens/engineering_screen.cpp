@@ -35,7 +35,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 19;
+static constexpr int     NUM_MAIN_ITEMS = 22;
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -50,8 +50,11 @@ static constexpr int16_t TILE_COL0_X = 8;     // left margin: (480-3*148-2*10)/2
 static constexpr int16_t TILE_ROW0_Y = 36;    // below the title bar
 static constexpr int     TILE_COLS   = 3;
 
-static constexpr uint8_t MAIN_PAGE_COUNT = 2;
-static constexpr int     PAGE1_ITEM_COUNT = 9;   // items 0..8
+static constexpr int     PAGE1_ITEM_COUNT = 9;   // tiles per page (3×3 grid)
+// Total number of main-menu pages, derived from the item count so adding
+// functions never overflows a page.  22 items → 3 pages (9 + 9 + 4).
+static constexpr uint8_t MAIN_PAGE_COUNT =
+    (uint8_t)((NUM_MAIN_ITEMS + PAGE1_ITEM_COUNT - 1) / PAGE1_ITEM_COUNT);
 
 // Two-line short labels (rendered at text size 2 for legibility from the
 // driver's seat / with gloves — never size 1 for these tile captions).
@@ -59,13 +62,13 @@ static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
     "TEMP", "FACTORY", "DTC", "MAINT.",
     "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
-    "EPS", "STEER"
+    "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
     "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
-    "TUNING", "DIAG"
+    "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -92,7 +95,10 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_BLUE,    // 15 Gear Power Limits   — configuration
     ui::COL_BLUE,    // 16 Display Brightness  — configuration
     ui::COL_GREEN,   // 17 EPS Tuning          — calibration
-    ui::COL_CYAN     // 18 Steer Diagnostics   — diagnostic
+    ui::COL_CYAN,    // 18 Steer Diagnostics   — diagnostic
+    ui::COL_BLUE,    // 19 Drive Tuning        — configuration
+    ui::COL_BLUE,    // 20 Battery Limits      — configuration
+    ui::COL_CYAN     // 21 Drive/Battery Diag  — diagnostic
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -860,6 +866,9 @@ void EngineeringScreen::draw() {
             case SubMenu::BRIGHTNESS:       drawBrightness();          break;
             case SubMenu::EPS_TUNING:       drawEpsTuning();           break;
             case SubMenu::STEER_DIAG:       drawSteerDiag();           break;
+            case SubMenu::DRIVE_TUNING:     drawDriveTuning();         break;
+            case SubMenu::BATTERY_LIMITS:   drawBatteryLimits();       break;
+            case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
         }
     }
 
@@ -1717,14 +1726,16 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 
     // ---- Main menu (FASE 2 tile layout) -------------------------------
     if (currentMenu_ == SubMenu::MAIN) {
-        // Bottom navigation bar: PAGE 1 / PAGE 2 / EXIT.
+        // Bottom navigation bar: < PREV / NEXT > / EXIT.
         if (y >= NAV_Y && y <= NAV_Y + NAV_H) {
             if (x >= NAVP1_X && x <= NAVP1_X + NAVP1_W) {
-                if (mainMenuPage_ != 0) { mainMenuPage_ = 0; needsRedraw_ = true; }
+                if (mainMenuPage_ > 0) { mainMenuPage_--; needsRedraw_ = true; }
                 return true;
             }
             if (x >= NAVP2_X && x <= NAVP2_X + NAVP2_W) {
-                if (mainMenuPage_ != 1) { mainMenuPage_ = 1; needsRedraw_ = true; }
+                if (mainMenuPage_ + 1 < MAIN_PAGE_COUNT) {
+                    mainMenuPage_++; needsRedraw_ = true;
+                }
                 return true;
             }
             if (x >= NAVEX_X && x <= NAVEX_X + NAVEX_W) {
@@ -1736,8 +1747,8 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         // Tile hit-test → resolve the original item index `i`, then run the
         // EXACT same dispatch as the legacy list (logic unchanged).
         const int startItem = mainMenuPage_ * PAGE1_ITEM_COUNT;
-        const int endItem   = (mainMenuPage_ == 0) ? PAGE1_ITEM_COUNT
-                                                   : NUM_MAIN_ITEMS;
+        int endItem   = startItem + PAGE1_ITEM_COUNT;
+        if (endItem > NUM_MAIN_ITEMS) endItem = NUM_MAIN_ITEMS;
         for (int i = startItem; i < endItem; ++i) {
             const int idx = i - startItem;
             const int col = idx % TILE_COLS;
@@ -1895,6 +1906,42 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             steerDiagLastTs_  = 0;
                             steerDiagQueryMs_ = 0;
                             currentMenu_ = SubMenu::STEER_DIAG;
+                            break;
+                        case 19:
+                            // Open DRIVE TUNING editor.  Reset edit state and
+                            // force an immediate QUERY so the screen shows the
+                            // STM32's live ramp/creep values.
+                            drvEditActive_  = false;
+                            drvSaveWait_    = false;
+                            drvAck_         = DrvAck::NONE;
+                            drvRestoreArm_  = false;
+                            drvLastTs_      = 0;
+                            drvLastQueryMs_ = 0;
+                            drvChanged_     = true;
+                            currentMenu_ = SubMenu::DRIVE_TUNING;
+                            break;
+                        case 20:
+                            // Open BATTERY LIMITS editor.
+                            batEditActive_   = false;
+                            batSaveWait_     = false;
+                            batAck_          = BatAck::NONE;
+                            batRestoreArm_   = false;
+                            batLocalInvalid_ = false;
+                            batLastTs_       = 0;
+                            batLastQueryMs_  = 0;
+                            batChanged_      = true;
+                            currentMenu_ = SubMenu::BATTERY_LIMITS;
+                            break;
+                        case 21:
+                            // Open DRIVE/BATTERY DIAG (read-only).  Triggers
+                            // 0xFA/0xFB QUERY bursts so the tuning values fill
+                            // in; live pedal/battery come from existing streams.
+                            driveBattDiagChanged_ = true;
+                            driveBattDiagLastSig_ = 0xFFFFFFFFu;
+                            driveBattDiagQueryMs_ = 0;
+                            drvLastQueryMs_       = 0;
+                            batLastQueryMs_       = 0;
+                            currentMenu_ = SubMenu::DRIVE_BATT_DIAG;
                             break;
                         default:
                             break;
@@ -2530,8 +2577,8 @@ void EngineeringScreen::drawMainMenu() {
 
     // ---- Tiles ---------------------------------------------------------
     const int startItem = mainMenuPage_ * PAGE1_ITEM_COUNT;
-    const int endItem   = (mainMenuPage_ == 0) ? PAGE1_ITEM_COUNT
-                                               : NUM_MAIN_ITEMS;
+    int endItem   = startItem + PAGE1_ITEM_COUNT;
+    if (endItem > NUM_MAIN_ITEMS) endItem = NUM_MAIN_ITEMS;
     for (int i = startItem; i < endItem; ++i) {
         const int idx = i - startItem;        // 0-based index within the page
         const int col = idx % TILE_COLS;
@@ -2585,9 +2632,9 @@ void EngineeringScreen::drawMainMenu() {
         tft.drawString(label, bx + bw / 2, NAV_Y + NAV_H / 2);
         RTRACE_TEXT(bx + bw / 2, NAV_Y + NAV_H / 2, label, txt, fill, 2, MC_DATUM);
     };
-    drawNavBtn(NAVP1_X, NAVP1_W, "PAGE 1", mainMenuPage_ == 0, ui::COL_CYAN);
-    drawNavBtn(NAVP2_X, NAVP2_W, "PAGE 2", mainMenuPage_ == 1, ui::COL_CYAN);
-    drawNavBtn(NAVEX_X, NAVEX_W, "EXIT",   false,              ui::COL_AMBER);
+    drawNavBtn(NAVP1_X, NAVP1_W, "< PREV", false, ui::COL_CYAN);
+    drawNavBtn(NAVP2_X, NAVP2_W, "NEXT >", false, ui::COL_CYAN);
+    drawNavBtn(NAVEX_X, NAVEX_W, "EXIT",   false, ui::COL_AMBER);
     tft.setTextDatum(TL_DATUM);
 
     // ---- Compact relay status read-out (header right) ------------------

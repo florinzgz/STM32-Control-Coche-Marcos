@@ -375,6 +375,87 @@ struct EpsParamsData {
     uint8_t       kindsReceived = 0;
 };
 
+// -------------------------------------------------------------------------
+// Drive-tuning telemetry (0x310) — on-demand field-stream burst after
+// SERVICE_ACTION_DRIVE_TUNING/QUERY (0xFA op 0x09).  One CAN frame per field;
+// the decoder preserves the other fields across frames so a QUERY (which
+// streams all 6 fields ×10) leaves the editor fully populated.  "active" =
+// the ramp/creep values the STM32 traction pipeline applies right now;
+// "pending" = an unsaved edit staged on the STM32 (RAM only).  Units mirror
+// the CAN contract: ramps %/s, CreepEnable 0/1, CreepPower %, CreepDelay ms.
+// -------------------------------------------------------------------------
+struct DriveTuningData {
+    uint8_t  flags        = 0;   // bit0 stored-valid, bit1 pending-differs,
+                                 // bit2 safety-ok(STANDBY), bit3 pending-valid
+    uint16_t accelRamp    = can::DRIVE_ACCEL_RAMP_DEFAULT;    // %/s
+    uint16_t brakeRamp    = can::DRIVE_BRAKE_RAMP_DEFAULT;    // %/s
+    uint16_t reverseRamp  = can::DRIVE_REVERSE_RAMP_DEFAULT;  // %/s
+    uint16_t creepEnable  = can::DRIVE_CREEP_ENABLE_DEFAULT;  // 0/1
+    uint16_t creepPower   = can::DRIVE_CREEP_POWER_DEFAULT;   // %
+    uint16_t creepDelay   = can::DRIVE_CREEP_DELAY_DEFAULT;   // ms
+    // Staged (unsaved) pending mirror, per field.
+    uint16_t pendAccelRamp   = can::DRIVE_ACCEL_RAMP_DEFAULT;
+    uint16_t pendBrakeRamp   = can::DRIVE_BRAKE_RAMP_DEFAULT;
+    uint16_t pendReverseRamp = can::DRIVE_REVERSE_RAMP_DEFAULT;
+    uint16_t pendCreepEnable = can::DRIVE_CREEP_ENABLE_DEFAULT;
+    uint16_t pendCreepPower  = can::DRIVE_CREEP_POWER_DEFAULT;
+    uint16_t pendCreepDelay  = can::DRIVE_CREEP_DELAY_DEFAULT;
+    uint8_t  systemState  = 0;
+    uint8_t  fieldsSeen   = 0;   // bitmask: bit (field-1) set once received
+    bool     valid        = false;  // true after first 0x310 frame
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// Battery-limit telemetry (0x311) — on-demand field-stream burst after
+// SERVICE_ACTION_BATTERY_LIMITS/QUERY (0xFB op 0x08).  Same per-field layout
+// as 0x310; values are centivolts (V×100) or ms for the filter.  Diagnostic /
+// configuration only — the STM32 safety state machine is never altered.
+// -------------------------------------------------------------------------
+struct BatteryLimitsData {
+    uint8_t  flags        = 0;   // bit0 stored-valid, bit1 pending-differs,
+                                 // bit2 safety-ok(STANDBY), bit3 pending-valid
+    uint16_t warningCv    = can::BATT_WARNING_DEFAULT_CV;   // cV
+    uint16_t limitCv      = can::BATT_LIMIT_DEFAULT_CV;     // cV
+    uint16_t cutoffCv     = can::BATT_CUTOFF_DEFAULT_CV;    // cV
+    uint16_t recoveryCv   = can::BATT_RECOVERY_DEFAULT_CV;  // cV
+    uint16_t filterMs     = can::BATT_FILTER_DEFAULT_MS;    // ms
+    uint16_t pendWarningCv  = can::BATT_WARNING_DEFAULT_CV;
+    uint16_t pendLimitCv    = can::BATT_LIMIT_DEFAULT_CV;
+    uint16_t pendCutoffCv   = can::BATT_CUTOFF_DEFAULT_CV;
+    uint16_t pendRecoveryCv = can::BATT_RECOVERY_DEFAULT_CV;
+    uint16_t pendFilterMs   = can::BATT_FILTER_DEFAULT_MS;
+    uint8_t  systemState  = 0;
+    uint8_t  fieldsSeen   = 0;
+    bool     valid        = false;  // true after first 0x311 frame
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// Drive/battery live diagnostic view (FASE 8) — read-only aggregation.
+// NOTE: the STM32 firmware does NOT emit a dedicated live drive/battery
+// operating-point stream.  This view is therefore ASSEMBLED on demand by the
+// Engineering screen from telemetry that DOES exist on the bus:
+//   - pedalPercent      ← STATUS_PEDAL (0x20B)
+//   - batteryRawVoltage ← STATUS_BATTERY (0x207)
+//   - warning/cutoff    ← STATUS_SAFETY / heartbeat error_code (9/10)
+// Every field the firmware does not transmit is marked invalid (`*Valid`
+// = false) and rendered as "N/A".  No value is ever estimated or invented.
+// -------------------------------------------------------------------------
+struct DriveBatteryDiagData {
+    uint8_t  pedalPercent          = 0;     bool pedalValid          = false;
+    uint16_t requestedPower        = 0;     bool requestedPowerValid = false;
+    uint16_t limitedPower          = 0;     bool limitedPowerValid   = false;
+    uint16_t rampOutput            = 0;     bool rampOutputValid     = false;
+    uint16_t batteryRawCv          = 0;     bool batteryRawValid     = false;  // cV
+    uint16_t batteryFilteredCv     = 0;     bool batteryFilteredValid = false; // cV
+    bool     warningActive         = false; bool warningValid        = false;
+    bool     limitingActive        = false; bool limitingValid       = false;
+    bool     cutoffActive          = false; bool cutoffValid         = false;
+    bool     recoveryActive        = false; bool recoveryValid       = false;
+    unsigned long lastUpdateAgeMs  = 0;     bool ageValid            = false;
+};
+
 // =========================================================================
 // VehicleData — central read/write store
 // =========================================================================
@@ -406,6 +487,8 @@ public:
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
     void setSteeringZ(const SteeringZData& d)       { steeringZ_ = d; }
     void setEpsParams(const EpsParamsData& d)       { epsParams_ = d; }
+    void setDriveTuning(const DriveTuningData& d)   { driveTuning_ = d; }
+    void setBatteryLimits(const BatteryLimitsData& d) { batteryLimits_ = d; }
 
     void setServiceFaults(uint32_t mask, unsigned long ts)   { service_.faultMask = mask;    service_.faultTimestampMs = ts; }
     void setServiceEnabled(uint32_t mask, unsigned long ts)  { service_.enabledMask = mask;  service_.enabledTimestampMs = ts; }
@@ -438,6 +521,8 @@ public:
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
     const SteeringZData&    steeringZ()    const { return steeringZ_; }
     const EpsParamsData&    epsParams()    const { return epsParams_; }
+    const DriveTuningData&  driveTuning()  const { return driveTuning_; }
+    const BatteryLimitsData& batteryLimits() const { return batteryLimits_; }
 
 private:
     HeartbeatData heartbeat_;
@@ -466,6 +551,8 @@ private:
     FdcanDiagData    fdcanDiag_;
     SteeringZData    steeringZ_;
     EpsParamsData    epsParams_;
+    DriveTuningData  driveTuning_;
+    BatteryLimitsData batteryLimits_;
 };
 
 } // namespace vehicle

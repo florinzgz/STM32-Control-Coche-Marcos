@@ -71,7 +71,10 @@ private:
         GEAR_LIMITS,       // Configurable per-gear traction power limits (D2/D1/R)
         BRIGHTNESS,        // TFT backlight brightness control (local PWM)
         EPS_TUNING,        // EPS steering assist parameter fine-tuning
-        STEER_DIAG         // Live steering diagnostic (encoder, PWM, state)
+        STEER_DIAG,        // Live steering diagnostic (encoder, PWM, state)
+        DRIVE_TUNING,      // Drive tuning: accel/brake/reverse ramp + creep (0xFA/0x310)
+        BATTERY_LIMITS,    // Battery voltage thresholds: warn/limit/cutoff/recovery/filter (0xFB/0x311)
+        DRIVE_BATT_DIAG    // Read-only drive/battery live diagnostic (N/A where not transmitted)
     };
 
     void drawMainMenu();
@@ -96,6 +99,9 @@ private:
     void drawBrightness();
     void drawEpsTuning();
     void drawSteerDiag();
+    void drawDriveTuning();
+    void drawBatteryLimits();
+    void drawDriveBattDiag();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -378,6 +384,75 @@ private:
     bool          steerDiagChanged_   = false;
     unsigned long steerDiagLastTs_    = 0;
     unsigned long steerDiagQueryMs_   = 0;
+
+    // ---- DRIVE TUNING editor (DRIVE_TUNING submenu, 0xFA cmd / 0x310 tlm) ----
+    // Six editable fields (accel/brake/reverse ramp, creep enable/power/delay).
+    // Active = applied by the STM32 now (from 0x310).  Edit = local pending
+    // edits.  Nothing is sent until SAVE; BACK without SAVE discards.  The 0x10
+    // CMD_ACK drives the banner exactly like the GEAR LIMITS editor.
+    enum class DrvAck : uint8_t { NONE = 0, SAVED, BLOCKED, INVALID, TIMEOUT };
+    static constexpr uint8_t DRV_FIELD_COUNT = 6;   // accel,brake,reverse,creepEn,creepPwr,creepDly
+    uint16_t      drvActive_[DRV_FIELD_COUNT] = {
+        can::DRIVE_ACCEL_RAMP_DEFAULT,  can::DRIVE_BRAKE_RAMP_DEFAULT,
+        can::DRIVE_REVERSE_RAMP_DEFAULT, can::DRIVE_CREEP_ENABLE_DEFAULT,
+        can::DRIVE_CREEP_POWER_DEFAULT, can::DRIVE_CREEP_DELAY_DEFAULT };
+    uint16_t      drvEdit_[DRV_FIELD_COUNT] = {
+        can::DRIVE_ACCEL_RAMP_DEFAULT,  can::DRIVE_BRAKE_RAMP_DEFAULT,
+        can::DRIVE_REVERSE_RAMP_DEFAULT, can::DRIVE_CREEP_ENABLE_DEFAULT,
+        can::DRIVE_CREEP_POWER_DEFAULT, can::DRIVE_CREEP_DELAY_DEFAULT };
+    bool          drvEditActive_  = false;
+    bool          drvChanged_     = false;
+    bool          drvRestoreArm_  = false;
+    bool          drvSaveWait_    = false;
+    DrvAck        drvAck_         = DrvAck::NONE;
+    unsigned long drvAckMs_       = 0;
+    unsigned long drvSaveSentMs_  = 0;
+    unsigned long drvLastTs_      = 0;
+    unsigned long drvLastQueryMs_ = 0;
+    unsigned long drvRestoreArmMs_ = 0;
+    static constexpr unsigned long DRV_SAVE_TIMEOUT_MS    = 2000;
+    static constexpr unsigned long DRV_ACK_CLEAR_MS       = 3000;
+    static constexpr unsigned long DRV_RESTORE_CONFIRM_MS = 5000;
+    static constexpr unsigned long DRV_QUERY_INTERVAL_MS  = 500;
+    // Emit SERVICE_CMD 0x110 byte0=0xFA (DRIVE_TUNING) + sub-opcode + u16 value.
+    void sendDriveTuneOp(uint8_t op, uint16_t value);
+
+    // ---- BATTERY LIMITS editor (BATTERY_LIMITS submenu, 0xFB / 0x311) ----
+    // Five editable fields (warning/limit/cutoff/recovery in cV, filter in ms).
+    enum class BatAck : uint8_t { NONE = 0, SAVED, BLOCKED, INVALID, TIMEOUT };
+    static constexpr uint8_t BAT_FIELD_COUNT = 5;   // warning,limit,cutoff,recovery,filter
+    uint16_t      batActive_[BAT_FIELD_COUNT] = {
+        can::BATT_WARNING_DEFAULT_CV, can::BATT_LIMIT_DEFAULT_CV,
+        can::BATT_CUTOFF_DEFAULT_CV,  can::BATT_RECOVERY_DEFAULT_CV,
+        can::BATT_FILTER_DEFAULT_MS };
+    uint16_t      batEdit_[BAT_FIELD_COUNT] = {
+        can::BATT_WARNING_DEFAULT_CV, can::BATT_LIMIT_DEFAULT_CV,
+        can::BATT_CUTOFF_DEFAULT_CV,  can::BATT_RECOVERY_DEFAULT_CV,
+        can::BATT_FILTER_DEFAULT_MS };
+    bool          batEditActive_  = false;
+    bool          batChanged_     = false;
+    bool          batRestoreArm_  = false;
+    bool          batSaveWait_    = false;
+    bool          batLocalInvalid_ = false;  // set when local coherence check blocks SAVE
+    BatAck        batAck_         = BatAck::NONE;
+    unsigned long batAckMs_       = 0;
+    unsigned long batSaveSentMs_  = 0;
+    unsigned long batLastTs_      = 0;
+    unsigned long batLastQueryMs_ = 0;
+    unsigned long batRestoreArmMs_ = 0;
+    static constexpr unsigned long BAT_SAVE_TIMEOUT_MS    = 2000;
+    static constexpr unsigned long BAT_ACK_CLEAR_MS       = 3000;
+    static constexpr unsigned long BAT_RESTORE_CONFIRM_MS = 5000;
+    static constexpr unsigned long BAT_QUERY_INTERVAL_MS  = 500;
+    // True iff the local edit set satisfies the firmware coherence rules.
+    bool batteryEditCoherent() const;
+    // Emit SERVICE_CMD 0x110 byte0=0xFB (BATTERY_LIMITS) + sub-opcode + u16 value.
+    void sendBattLimitOp(uint8_t op, uint16_t value);
+
+    // ---- DRIVE/BATTERY DIAG read-only viewer (DRIVE_BATT_DIAG submenu) ----
+    bool          driveBattDiagChanged_ = false;
+    unsigned long driveBattDiagLastSig_ = 0xFFFFFFFFu;
+    unsigned long driveBattDiagQueryMs_ = 0;
 };
 
 #endif // ENGINEERING_SCREEN_H
