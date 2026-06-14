@@ -311,6 +311,97 @@ inline constexpr uint8_t GEAR_RESPONSE_D2_DEFAULT_PCT = 100;
 inline constexpr uint8_t GEAR_RESPONSE_D1_DEFAULT_PCT = 70;
 inline constexpr uint8_t GEAR_RESPONSE_R_DEFAULT_PCT  = 40;
 
+// -------------------------------------------------------------------------
+// Drive-tuning configuration (CAN_CONTRACT_FINAL.md §4.20) — ESP32 → STM32
+//   SERVICE_CMD (0x110) byte0 = SERVICE_ACTION_DRIVE_TUNING (0xFA),
+//   byte1 = sub-opcode, bytes2-3 = uint16 LE value for SET_* ops.
+//   STM32 replies with CMD_ACK (0x103, cmd_id_low = 0x10) and, after QUERY,
+//   a DIAG_DRIVE_TUNING (0x310) field-stream burst.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_DRIVE_TUNING        = 0x310;  // STM32→ESP32, DLC 8, on-demand burst
+inline constexpr uint8_t  SERVICE_ACTION_DRIVE_TUNING = 0xFA;
+// Sub-opcodes (byte 1) — MUST mirror Core/Inc/can_handler.h DRIVE_TUNE_OP_*.
+inline constexpr uint8_t DRIVE_TUNE_OP_SET_ACCEL_RAMP   = 0x01;  // DLC 4
+inline constexpr uint8_t DRIVE_TUNE_OP_SET_BRAKE_RAMP   = 0x02;  // DLC 4
+inline constexpr uint8_t DRIVE_TUNE_OP_SET_REVERSE_RAMP = 0x03;  // DLC 4
+inline constexpr uint8_t DRIVE_TUNE_OP_SET_CREEP_ENABLE = 0x04;  // DLC 4
+inline constexpr uint8_t DRIVE_TUNE_OP_SET_CREEP_POWER  = 0x05;  // DLC 4
+inline constexpr uint8_t DRIVE_TUNE_OP_SET_CREEP_DELAY  = 0x06;  // DLC 4
+inline constexpr uint8_t DRIVE_TUNE_OP_SAVE             = 0x07;  // DLC 2 (STANDBY)
+inline constexpr uint8_t DRIVE_TUNE_OP_RESET_DEFAULTS   = 0x08;  // DLC 2 (STANDBY)
+inline constexpr uint8_t DRIVE_TUNE_OP_QUERY            = 0x09;  // DLC 2 (read-only)
+// Telemetry field ids (0x310 byte 1) — MUST mirror DRIVE_TUNE_FIELD_*.
+inline constexpr uint8_t DRIVE_TUNE_FIELD_ACCEL_RAMP   = 0x01;
+inline constexpr uint8_t DRIVE_TUNE_FIELD_BRAKE_RAMP   = 0x02;
+inline constexpr uint8_t DRIVE_TUNE_FIELD_REVERSE_RAMP = 0x03;
+inline constexpr uint8_t DRIVE_TUNE_FIELD_CREEP_ENABLE = 0x04;
+inline constexpr uint8_t DRIVE_TUNE_FIELD_CREEP_POWER  = 0x05;
+inline constexpr uint8_t DRIVE_TUNE_FIELD_CREEP_DELAY  = 0x06;
+inline constexpr uint8_t DRIVE_TUNE_FIELD_COUNT        = 6;
+// Hard validation ranges — MUST mirror Core/Inc/drive_tuning_store.h so the
+// HMI never sends a value the firmware would reject (reject-keep-previous).
+inline constexpr uint16_t DRIVE_ACCEL_RAMP_MIN   = 1;
+inline constexpr uint16_t DRIVE_ACCEL_RAMP_MAX   = 200;
+inline constexpr uint16_t DRIVE_BRAKE_RAMP_MIN   = 1;
+inline constexpr uint16_t DRIVE_BRAKE_RAMP_MAX   = 200;
+inline constexpr uint16_t DRIVE_REVERSE_RAMP_MIN = 1;
+inline constexpr uint16_t DRIVE_REVERSE_RAMP_MAX = 200;
+inline constexpr uint16_t DRIVE_CREEP_POWER_MIN  = 0;
+inline constexpr uint16_t DRIVE_CREEP_POWER_MAX  = 20;
+inline constexpr uint16_t DRIVE_CREEP_DELAY_MIN  = 0;
+inline constexpr uint16_t DRIVE_CREEP_DELAY_MAX  = 5000;
+inline constexpr uint16_t DRIVE_ACCEL_RAMP_DEFAULT   = 50;
+inline constexpr uint16_t DRIVE_BRAKE_RAMP_DEFAULT   = 100;
+inline constexpr uint16_t DRIVE_REVERSE_RAMP_DEFAULT = 50;
+inline constexpr uint16_t DRIVE_CREEP_ENABLE_DEFAULT = 1;
+inline constexpr uint16_t DRIVE_CREEP_POWER_DEFAULT  = 8;
+inline constexpr uint16_t DRIVE_CREEP_DELAY_DEFAULT  = 0;
+
+// -------------------------------------------------------------------------
+// Battery-limit configuration (CAN_CONTRACT_FINAL.md §4.21) — ESP32 → STM32
+//   SERVICE_CMD (0x110) byte0 = SERVICE_ACTION_BATTERY_LIMITS (0xFB),
+//   byte1 = sub-opcode, bytes2-3 = uint16 LE value (centivolts = V×100, or ms
+//   for the filter) for SET_* ops.  STM32 replies with CMD_ACK (0x103,
+//   cmd_id_low = 0x10) and, after QUERY, a DIAG_BATTERY_LIMITS (0x311) burst.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_BATTERY_LIMITS         = 0x311;  // STM32→ESP32, DLC 8, on-demand burst
+inline constexpr uint8_t  SERVICE_ACTION_BATTERY_LIMITS = 0xFB;
+// Sub-opcodes (byte 1) — MUST mirror Core/Inc/can_handler.h BATT_LIM_OP_*.
+inline constexpr uint8_t BATT_LIM_OP_SET_WARNING    = 0x01;  // DLC 4
+inline constexpr uint8_t BATT_LIM_OP_SET_LIMIT      = 0x02;  // DLC 4
+inline constexpr uint8_t BATT_LIM_OP_SET_CUTOFF     = 0x03;  // DLC 4
+inline constexpr uint8_t BATT_LIM_OP_SET_RECOVERY   = 0x04;  // DLC 4
+inline constexpr uint8_t BATT_LIM_OP_SET_FILTER     = 0x05;  // DLC 4
+inline constexpr uint8_t BATT_LIM_OP_SAVE           = 0x06;  // DLC 2 (STANDBY)
+inline constexpr uint8_t BATT_LIM_OP_RESET_DEFAULTS = 0x07;  // DLC 2 (STANDBY)
+inline constexpr uint8_t BATT_LIM_OP_QUERY          = 0x08;  // DLC 2 (read-only)
+// Telemetry field ids (0x311 byte 1) — MUST mirror BATT_LIM_FIELD_*.
+inline constexpr uint8_t BATT_LIM_FIELD_WARNING  = 0x01;
+inline constexpr uint8_t BATT_LIM_FIELD_LIMIT    = 0x02;
+inline constexpr uint8_t BATT_LIM_FIELD_CUTOFF   = 0x03;
+inline constexpr uint8_t BATT_LIM_FIELD_RECOVERY = 0x04;
+inline constexpr uint8_t BATT_LIM_FIELD_FILTER   = 0x05;
+inline constexpr uint8_t BATT_LIM_FIELD_COUNT    = 5;
+// Hard validation ranges (centivolts / ms) — MUST mirror
+// Core/Inc/battery_limits_store.h.  Coherence (Warning/Limit/Recovery > Cutoff,
+// Warning/Limit <= OV) is also enforced locally before SAVE (FASE 7).
+inline constexpr uint16_t BATT_OV_WARNING_CV   = 3000;
+inline constexpr uint16_t BATT_WARNING_MIN_CV  = 1500;
+inline constexpr uint16_t BATT_WARNING_MAX_CV  = 3000;
+inline constexpr uint16_t BATT_LIMIT_MIN_CV    = 1500;
+inline constexpr uint16_t BATT_LIMIT_MAX_CV    = 3000;
+inline constexpr uint16_t BATT_CUTOFF_MIN_CV   = 1400;
+inline constexpr uint16_t BATT_CUTOFF_MAX_CV   = 2400;
+inline constexpr uint16_t BATT_RECOVERY_MIN_CV = 1400;
+inline constexpr uint16_t BATT_RECOVERY_MAX_CV = 2900;
+inline constexpr uint16_t BATT_FILTER_MIN_MS   = 0;
+inline constexpr uint16_t BATT_FILTER_MAX_MS   = 5000;
+inline constexpr uint16_t BATT_WARNING_DEFAULT_CV  = 2000;
+inline constexpr uint16_t BATT_LIMIT_DEFAULT_CV    = 2000;
+inline constexpr uint16_t BATT_CUTOFF_DEFAULT_CV   = 1800;
+inline constexpr uint16_t BATT_RECOVERY_DEFAULT_CV = 1850;
+inline constexpr uint16_t BATT_FILTER_DEFAULT_MS   = 0;
+
 } // namespace can
 
 #endif // CAN_IDS_H

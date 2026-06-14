@@ -7,6 +7,7 @@ extern "C" {
 
 #include "main.h"
 #include "eps_params.h"
+#include "drive_tuning_store.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -81,6 +82,18 @@ void Traction_GetGearLimits(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct);
 bool Traction_ValidateGearResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct);
 bool Traction_SetGearResponse(uint8_t d2_pct, uint8_t d1_pct, uint8_t r_pct);
 void Traction_GetGearResponse(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct);
+
+/* ---- Runtime-configurable drive tuning (FASE 2) ----
+ * Pedal ramp rates and motor dead-zone (creep) compensation become runtime
+ * variables seeded with the historic compile-time values:
+ *   AccelRamp=50 %/s, BrakeRamp=100 %/s, ReverseRamp=50 %/s (reverse only),
+ *   CreepEnable=1, CreepPower=8 %, CreepDelay=0 ms.
+ * Ranges/defaults live in drive_tuning_store.h (single source of truth).
+ * The defaults reproduce the original firmware behaviour exactly; only the
+ * fórmulas' constants are replaced by these variables, nothing else.     */
+bool Traction_ValidateDriveTuning(const DriveTuning_t *t);
+bool Traction_SetDriveTuning(const DriveTuning_t *t);
+void Traction_GetDriveTuning(DriveTuning_t *out);
 void Traction_Update(void);
 void Traction_EmergencyStop(void);
 const TractionState_t* Traction_GetState(void);

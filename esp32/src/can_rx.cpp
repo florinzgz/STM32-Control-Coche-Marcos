@@ -439,6 +439,75 @@ static void decodeEpsParams(const CanFrame& f, vehicle::VehicleData& data) {
     d.timestampMs = millis();
     data.setEpsParams(d);
 }
+
+// 0x310 DIAG_DRIVE_TUNING — drive-tuning (ramp/creep) field-stream (DLC 8).
+// One CAN frame per field; a QUERY emits 10 sweeps × all 6 fields at 10 Hz.
+// Frame layout mirrors Core/Src/can_handler.c drvtune_send_field():
+//   byte0=flags, byte1=field id (1..6), byte2-3=active u16 LE,
+//   byte4-5=pending u16 LE, byte6=system_state, byte7=field count.
+// Each frame updates only its field; the others are preserved so the editor
+// stays fully populated.  Unknown field ids are ignored (partial data kept).
+static void decodeDriveTuning(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::DriveTuningData d = data.driveTuning();  // preserve other fields
+    const uint8_t  field  = f.data[1];
+    const uint16_t actVal = readU16LE(&f.data[2]);
+    const uint16_t pndVal = readU16LE(&f.data[4]);
+    switch (field) {
+    case can::DRIVE_TUNE_FIELD_ACCEL_RAMP:
+        d.accelRamp = actVal; d.pendAccelRamp = pndVal; break;
+    case can::DRIVE_TUNE_FIELD_BRAKE_RAMP:
+        d.brakeRamp = actVal; d.pendBrakeRamp = pndVal; break;
+    case can::DRIVE_TUNE_FIELD_REVERSE_RAMP:
+        d.reverseRamp = actVal; d.pendReverseRamp = pndVal; break;
+    case can::DRIVE_TUNE_FIELD_CREEP_ENABLE:
+        d.creepEnable = actVal; d.pendCreepEnable = pndVal; break;
+    case can::DRIVE_TUNE_FIELD_CREEP_POWER:
+        d.creepPower = actVal; d.pendCreepPower = pndVal; break;
+    case can::DRIVE_TUNE_FIELD_CREEP_DELAY:
+        d.creepDelay = actVal; d.pendCreepDelay = pndVal; break;
+    default:
+        return;   // unknown field — keep partial data, no timestamp bump
+    }
+    d.flags       = f.data[0];
+    d.systemState = f.data[6];
+    if (field >= 1 && field <= 8) d.fieldsSeen |= (uint8_t)(1U << (field - 1));
+    d.valid       = true;
+    d.timestampMs = millis();
+    data.setDriveTuning(d);
+}
+
+// 0x311 DIAG_BATTERY_LIMITS — battery voltage-limit field-stream (DLC 8).
+// One CAN frame per field; a QUERY emits 10 sweeps × all 5 fields at 10 Hz.
+// Same per-field layout as 0x310; values are centivolts (V×100) or ms.
+// Frame layout mirrors Core/Src/can_handler.c battlim_send_field().
+static void decodeBatteryLimits(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::BatteryLimitsData d = data.batteryLimits();  // preserve other fields
+    const uint8_t  field  = f.data[1];
+    const uint16_t actVal = readU16LE(&f.data[2]);
+    const uint16_t pndVal = readU16LE(&f.data[4]);
+    switch (field) {
+    case can::BATT_LIM_FIELD_WARNING:
+        d.warningCv = actVal; d.pendWarningCv = pndVal; break;
+    case can::BATT_LIM_FIELD_LIMIT:
+        d.limitCv = actVal; d.pendLimitCv = pndVal; break;
+    case can::BATT_LIM_FIELD_CUTOFF:
+        d.cutoffCv = actVal; d.pendCutoffCv = pndVal; break;
+    case can::BATT_LIM_FIELD_RECOVERY:
+        d.recoveryCv = actVal; d.pendRecoveryCv = pndVal; break;
+    case can::BATT_LIM_FIELD_FILTER:
+        d.filterMs = actVal; d.pendFilterMs = pndVal; break;
+    default:
+        return;   // unknown field — keep partial data
+    }
+    d.flags       = f.data[0];
+    d.systemState = f.data[6];
+    if (field >= 1 && field <= 8) d.fieldsSeen |= (uint8_t)(1U << (field - 1));
+    d.valid       = true;
+    d.timestampMs = millis();
+    data.setBatteryLimits(d);
+}
 static uint32_t rxFrameCount  = 0;  // Total CAN frames received since boot
 static uint32_t lastRxLogMs   = 0;  // Timestamp of last periodic RX log
 
@@ -497,6 +566,8 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
             case can::DIAG_STEERING_Z:      decodeSteeringZ(frame, data);         break;
             case can::DIAG_EPS_PARAMS:      decodeEpsParams(frame, data);         break;
+            case can::DIAG_DRIVE_TUNING:    decodeDriveTuning(frame, data);       break;
+            case can::DIAG_BATTERY_LIMITS:  decodeBatteryLimits(frame, data);     break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;

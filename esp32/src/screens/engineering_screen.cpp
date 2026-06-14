@@ -35,7 +35,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 19;
+static constexpr int     NUM_MAIN_ITEMS = 22;
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -50,8 +50,11 @@ static constexpr int16_t TILE_COL0_X = 8;     // left margin: (480-3*148-2*10)/2
 static constexpr int16_t TILE_ROW0_Y = 36;    // below the title bar
 static constexpr int     TILE_COLS   = 3;
 
-static constexpr uint8_t MAIN_PAGE_COUNT = 2;
-static constexpr int     PAGE1_ITEM_COUNT = 9;   // items 0..8
+static constexpr int     PAGE1_ITEM_COUNT = 9;   // tiles per page (3×3 grid)
+// Total number of main-menu pages, derived from the item count so adding
+// functions never overflows a page.  22 items → 3 pages (9 + 9 + 4).
+static constexpr uint8_t MAIN_PAGE_COUNT =
+    (uint8_t)((NUM_MAIN_ITEMS + PAGE1_ITEM_COUNT - 1) / PAGE1_ITEM_COUNT);
 
 // Two-line short labels (rendered at text size 2 for legibility from the
 // driver's seat / with gloves — never size 1 for these tile captions).
@@ -59,13 +62,13 @@ static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
     "TEMP", "FACTORY", "DTC", "MAINT.",
     "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
-    "EPS", "STEER"
+    "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
     "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
-    "TUNING", "DIAG"
+    "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -92,7 +95,10 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_BLUE,    // 15 Gear Power Limits   — configuration
     ui::COL_BLUE,    // 16 Display Brightness  — configuration
     ui::COL_GREEN,   // 17 EPS Tuning          — calibration
-    ui::COL_CYAN     // 18 Steer Diagnostics   — diagnostic
+    ui::COL_CYAN,    // 18 Steer Diagnostics   — diagnostic
+    ui::COL_BLUE,    // 19 Drive Tuning        — configuration
+    ui::COL_BLUE,    // 20 Battery Limits      — configuration
+    ui::COL_CYAN     // 21 Drive/Battery Diag  — diagnostic
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -185,6 +191,26 @@ static constexpr int16_t GL_PAGE_X    = 385;
 static constexpr int16_t GL_PAGE_Y    = 4;
 static constexpr int16_t GL_PAGE_W    = 90;
 static constexpr int16_t GL_PAGE_H    = 26;
+
+// ---- DRIVE TUNING / BATTERY LIMITS editor layout (shared, compact) ----
+// Both editors are single-page lists of value rows (drive = 6, battery = 5)
+// rendered with a label, the pending edit value, and a −/+ stepper.  The same
+// constants are used by drawDriveTuning()/drawBatteryLimits() and by their
+// touch handlers so the hit-boxes always match what is painted.
+static constexpr int16_t DT_ROW0_Y    = 40;    // first value row top
+static constexpr int16_t DT_ROW_H     = 30;    // row pitch (6 rows fit < SAVE)
+static constexpr int16_t DT_ROW_BTN_H = 26;    // stepper button height
+static constexpr int16_t DT_LABEL_X   = 10;    // row label x
+static constexpr int16_t DT_VAL_X     = 150;   // edit value x
+static constexpr int16_t DT_MINUS_X   = 300;   // − button x
+static constexpr int16_t DT_PLUS_X    = 410;   // + button x
+static constexpr int16_t DT_STEP_W    = 60;    // stepper button width
+static constexpr int16_t DT_STATUS_Y  = 236;   // ACK banner baseline
+static constexpr int16_t DT_BTN_Y     = 246;   // SAVE / RESTORE row y
+static constexpr int16_t DT_BTN_H     = 28;
+static constexpr int16_t DT_BTN_W     = 145;
+static constexpr int16_t DT_SAVE_X    = 175;   // SAVE x (BACK keeps top-left)
+static constexpr int16_t DT_RESTORE_X = 330;   // RESTORE DEF. x
 
 // ---- TFT brightness submenu layout (BRIGHTNESS) ----
 static constexpr int16_t BRI_BOX_X    = 70;
@@ -366,6 +392,7 @@ void EngineeringScreen::onExit() {
 
 void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
     lastFrameTimeMs_ = frameTimeMs;   // cached for touch-handler timestamping
+    data_ = &data;                    // cached snapshot for draw()/handleTouch()
     // Cache service mode data for fault viewer / module control
     faultBits_    = data.service().faultMask;
     enabledBits_  = data.service().enabledMask;
@@ -585,7 +612,153 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         if (changed) { gearLimitsChanged_ = true; needsRedraw_ = true; }
     }
 
-    // EPS Tuning: detect fresh telemetry and issue periodic QUERY
+    // ---- DRIVE TUNING telemetry (0x310) + SAVE/RESET ACK state machine ----
+    // Active = ramp/creep values the STM32 applies now; until the user edits,
+    // the edit buffer tracks them so the screen shows reality on entry.  The
+    // DRIVE/BATTERY DIAG page also needs these values, so it shares this sync
+    // and the periodic 0xFA QUERY (read-only — no safety impact).
+    if (currentMenu_ == SubMenu::DRIVE_TUNING ||
+        currentMenu_ == SubMenu::DRIVE_BATT_DIAG) {
+        const vehicle::DriveTuningData& dt = data.driveTuning();
+        bool changed = false;
+        if (dt.valid && dt.timestampMs != drvLastTs_) {
+            drvLastTs_ = dt.timestampMs;
+            const uint16_t live[DRV_FIELD_COUNT] = {
+                dt.accelRamp, dt.brakeRamp, dt.reverseRamp,
+                dt.creepEnable, dt.creepPower, dt.creepDelay };
+            for (uint8_t i = 0; i < DRV_FIELD_COUNT; ++i) {
+                if (drvActive_[i] != live[i]) { drvActive_[i] = live[i]; changed = true; }
+                if (!drvEditActive_) drvEdit_[i] = drvActive_[i];
+            }
+            drvSysState_ = dt.systemState;
+        }
+        // SAVE/RESET ACK (0x10) — only meaningful in the editor while waiting.
+        if (currentMenu_ == SubMenu::DRIVE_TUNING && drvSaveWait_) {
+            const auto& ad = data.ack();
+            if (ad.cmdIdLow == 0x10 && ad.timestampMs != lastAckTracked_) {
+                lastAckTracked_ = ad.timestampMs;
+                if (ad.result == can::AckResult::OK) {
+                    drvAck_        = DrvAck::SAVED;
+                    drvEditActive_ = false;   // committed → follow live again
+                } else if (ad.result == can::AckResult::BLOCKED_BY_SAFETY) {
+                    drvAck_ = DrvAck::BLOCKED;
+                } else if (ad.result == can::AckResult::INVALID) {
+                    drvAck_ = DrvAck::INVALID;
+                } else {
+                    drvAck_ = DrvAck::BLOCKED;
+                }
+                drvSaveWait_ = false;
+                drvAckMs_    = frameTimeMs;
+                changed      = true;
+            }
+        }
+        if (currentMenu_ == SubMenu::DRIVE_TUNING && drvSaveWait_ &&
+            (frameTimeMs - drvSaveSentMs_) > DRV_SAVE_TIMEOUT_MS) {
+            drvSaveWait_ = false;
+            drvAck_      = DrvAck::TIMEOUT;
+            drvAckMs_    = frameTimeMs;
+            changed      = true;
+        }
+        if (drvAck_ != DrvAck::NONE &&
+            (frameTimeMs - drvAckMs_) > DRV_ACK_CLEAR_MS) {
+            drvAck_ = DrvAck::NONE;
+            changed = true;
+        }
+        if (drvRestoreArm_ &&
+            (frameTimeMs - drvRestoreArmMs_) > DRV_RESTORE_CONFIRM_MS) {
+            drvRestoreArm_ = false;
+            changed        = true;
+        }
+        if ((frameTimeMs - drvLastQueryMs_) >= DRV_QUERY_INTERVAL_MS) {
+            sendDriveTuneOp(can::DRIVE_TUNE_OP_QUERY, 0);
+            drvLastQueryMs_ = frameTimeMs;
+        }
+        if (changed) { drvChanged_ = true; needsRedraw_ = true; }
+    }
+
+    // ---- BATTERY LIMITS telemetry (0x311) + SAVE/RESET ACK state machine ----
+    if (currentMenu_ == SubMenu::BATTERY_LIMITS ||
+        currentMenu_ == SubMenu::DRIVE_BATT_DIAG) {
+        const vehicle::BatteryLimitsData& bl = data.batteryLimits();
+        bool changed = false;
+        if (bl.valid && bl.timestampMs != batLastTs_) {
+            batLastTs_ = bl.timestampMs;
+            const uint16_t live[BAT_FIELD_COUNT] = {
+                bl.warningCv, bl.limitCv, bl.cutoffCv, bl.recoveryCv, bl.filterMs };
+            for (uint8_t i = 0; i < BAT_FIELD_COUNT; ++i) {
+                if (batActive_[i] != live[i]) { batActive_[i] = live[i]; changed = true; }
+                if (!batEditActive_) batEdit_[i] = batActive_[i];
+            }
+            batSysState_ = bl.systemState;
+        }
+        if (currentMenu_ == SubMenu::BATTERY_LIMITS && batSaveWait_) {
+            const auto& ad = data.ack();
+            if (ad.cmdIdLow == 0x10 && ad.timestampMs != lastAckTracked_) {
+                lastAckTracked_ = ad.timestampMs;
+                if (ad.result == can::AckResult::OK) {
+                    batAck_        = BatAck::SAVED;
+                    batEditActive_ = false;
+                } else if (ad.result == can::AckResult::BLOCKED_BY_SAFETY) {
+                    batAck_ = BatAck::BLOCKED;
+                } else if (ad.result == can::AckResult::INVALID) {
+                    batAck_ = BatAck::INVALID;
+                } else {
+                    batAck_ = BatAck::BLOCKED;
+                }
+                batSaveWait_ = false;
+                batAckMs_    = frameTimeMs;
+                changed      = true;
+            }
+        }
+        if (currentMenu_ == SubMenu::BATTERY_LIMITS && batSaveWait_ &&
+            (frameTimeMs - batSaveSentMs_) > BAT_SAVE_TIMEOUT_MS) {
+            batSaveWait_ = false;
+            batAck_      = BatAck::TIMEOUT;
+            batAckMs_    = frameTimeMs;
+            changed      = true;
+        }
+        if (batAck_ != BatAck::NONE &&
+            (frameTimeMs - batAckMs_) > BAT_ACK_CLEAR_MS) {
+            batAck_ = BatAck::NONE;
+            changed = true;
+        }
+        if (batRestoreArm_ &&
+            (frameTimeMs - batRestoreArmMs_) > BAT_RESTORE_CONFIRM_MS) {
+            batRestoreArm_ = false;
+            changed        = true;
+        }
+        if ((frameTimeMs - batLastQueryMs_) >= BAT_QUERY_INTERVAL_MS) {
+            sendBattLimitOp(can::BATT_LIM_OP_QUERY, 0);
+            batLastQueryMs_ = frameTimeMs;
+        }
+        if (changed) { batChanged_ = true; needsRedraw_ = true; }
+    }
+
+    // ---- DRIVE/BATTERY DIAG: cache live operating-point telemetry ----
+    // Values come from streams that already exist on the bus; nothing here is
+    // estimated.  A coarse signature drives the ~repaint so the page refreshes
+    // on real change without thrashing the TFT.
+    if (currentMenu_ == SubMenu::DRIVE_BATT_DIAG) {
+        const vehicle::PedalData&     pd = data.pedal();
+        const vehicle::BatteryData&   bd = data.battery();
+        dbgPedalValid_ = (pd.timestampMs != 0);
+        dbgPedalPct_   = pd.percent;
+        dbgBattValid_  = (bd.timestampMs != 0);
+        dbgBattCv_     = bd.voltageRaw;   // already centivolts (0.01 V units)
+        dbgErrCode_    = data.heartbeat().errorCode;
+        unsigned long sig = ((unsigned long)dbgPedalPct_)
+                          ^ ((unsigned long)dbgBattCv_ << 8)
+                          ^ ((unsigned long)dbgErrCode_ << 24)
+                          ^ ((unsigned long)drvActive_[0] << 1)
+                          ^ ((unsigned long)batActive_[0] << 3);
+        if (sig != driveBattDiagLastSig_) {
+            driveBattDiagLastSig_ = sig;
+            driveBattDiagChanged_ = true;
+            needsRedraw_ = true;
+        }
+    }
+
+
     if (currentMenu_ == SubMenu::EPS_TUNING || currentMenu_ == SubMenu::STEER_DIAG) {
         const auto& eps = data.epsParams();
         if (eps.valid && eps.timestampMs != epsLastTs_) {
@@ -860,6 +1033,15 @@ void EngineeringScreen::draw() {
             case SubMenu::BRIGHTNESS:       drawBrightness();          break;
             case SubMenu::EPS_TUNING:       drawEpsTuning();           break;
             case SubMenu::STEER_DIAG:       drawSteerDiag();           break;
+            case SubMenu::DRIVE_TUNING:     drawDriveTuning();         break;
+            case SubMenu::BATTERY_LIMITS:   drawBatteryLimits();       break;
+            case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
+            default:
+                // Unknown/unexpected submenu: fall back to the Engineering
+                // main menu instead of leaving the screen blank.
+                currentMenu_ = SubMenu::MAIN;
+                drawMainMenu();
+                break;
         }
     }
 
@@ -1673,6 +1855,15 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         steerZClearPending_ = false;   // cancel steering-Z clear confirmation
         gearLimitsEditActive_ = false;
         gearLimitsSaveWait_   = false;
+        // BACK discards any unsaved drive-tuning / battery-limit edits and
+        // cancels pending RESTORE confirmations (mirrors gear limits).
+        drvEditActive_  = false;
+        drvSaveWait_    = false;
+        drvRestoreArm_  = false;
+        batEditActive_  = false;
+        batSaveWait_    = false;
+        batRestoreArm_  = false;
+        batLocalInvalid_ = false;
         if (currentMenu_ == SubMenu::BRIGHTNESS && brightnessDirty_) {
             config_store::flush();
             brightnessDirty_ = false;
@@ -1717,14 +1908,16 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 
     // ---- Main menu (FASE 2 tile layout) -------------------------------
     if (currentMenu_ == SubMenu::MAIN) {
-        // Bottom navigation bar: PAGE 1 / PAGE 2 / EXIT.
+        // Bottom navigation bar: < PREV / NEXT > / EXIT.
         if (y >= NAV_Y && y <= NAV_Y + NAV_H) {
             if (x >= NAVP1_X && x <= NAVP1_X + NAVP1_W) {
-                if (mainMenuPage_ != 0) { mainMenuPage_ = 0; needsRedraw_ = true; }
+                if (mainMenuPage_ > 0) { mainMenuPage_--; needsRedraw_ = true; }
                 return true;
             }
             if (x >= NAVP2_X && x <= NAVP2_X + NAVP2_W) {
-                if (mainMenuPage_ != 1) { mainMenuPage_ = 1; needsRedraw_ = true; }
+                if (mainMenuPage_ + 1 < MAIN_PAGE_COUNT) {
+                    mainMenuPage_++; needsRedraw_ = true;
+                }
                 return true;
             }
             if (x >= NAVEX_X && x <= NAVEX_X + NAVEX_W) {
@@ -1736,8 +1929,8 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
         // Tile hit-test → resolve the original item index `i`, then run the
         // EXACT same dispatch as the legacy list (logic unchanged).
         const int startItem = mainMenuPage_ * PAGE1_ITEM_COUNT;
-        const int endItem   = (mainMenuPage_ == 0) ? PAGE1_ITEM_COUNT
-                                                   : NUM_MAIN_ITEMS;
+        int endItem   = startItem + PAGE1_ITEM_COUNT;
+        if (endItem > NUM_MAIN_ITEMS) endItem = NUM_MAIN_ITEMS;
         for (int i = startItem; i < endItem; ++i) {
             const int idx = i - startItem;
             const int col = idx % TILE_COLS;
@@ -1862,20 +2055,22 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             // edit array from the latest 0x30F telemetry; send
                             // a QUERY immediately so the screen fills quickly.
                             {
-                                auto& eps = data_.epsParams();
-                                if (eps.valid) {
-                                    epsEdit_[0]  = eps.assistStrength;
-                                    epsEdit_[1]  = eps.centerStrength;
-                                    epsEdit_[2]  = eps.damping;
-                                    epsEdit_[3]  = eps.frictionComp;
-                                    epsEdit_[4]  = eps.coastBandPct;
-                                    epsEdit_[5]  = eps.minDrivePct;
-                                    epsEdit_[6]  = eps.assistVsSpeed;
-                                    epsEdit_[7]  = eps.returnVsSpeed;
-                                    epsEdit_[8]  = eps.deadbandDeg;
-                                    epsEdit_[9]  = eps.maxPwmPct;
-                                    epsEdit_[10] = eps.slewRatePct;
-                                    epsEdit_[11] = eps.centerOffsetDeg;
+                                if (data_ != nullptr) {
+                                    auto& eps = data_->epsParams();
+                                    if (eps.valid) {
+                                        epsEdit_[0]  = eps.assistStrength;
+                                        epsEdit_[1]  = eps.centerStrength;
+                                        epsEdit_[2]  = eps.damping;
+                                        epsEdit_[3]  = eps.frictionComp;
+                                        epsEdit_[4]  = eps.coastBandPct;
+                                        epsEdit_[5]  = eps.minDrivePct;
+                                        epsEdit_[6]  = eps.assistVsSpeed;
+                                        epsEdit_[7]  = eps.returnVsSpeed;
+                                        epsEdit_[8]  = eps.deadbandDeg;
+                                        epsEdit_[9]  = eps.maxPwmPct;
+                                        epsEdit_[10] = eps.slewRatePct;
+                                        epsEdit_[11] = eps.centerOffsetDeg;
+                                    }
                                 }
                                 epsPage_        = 0;
                                 epsEditActive_  = false;
@@ -1895,6 +2090,42 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             steerDiagLastTs_  = 0;
                             steerDiagQueryMs_ = 0;
                             currentMenu_ = SubMenu::STEER_DIAG;
+                            break;
+                        case 19:
+                            // Open DRIVE TUNING editor.  Reset edit state and
+                            // force an immediate QUERY so the screen shows the
+                            // STM32's live ramp/creep values.
+                            drvEditActive_  = false;
+                            drvSaveWait_    = false;
+                            drvAck_         = DrvAck::NONE;
+                            drvRestoreArm_  = false;
+                            drvLastTs_      = 0;
+                            drvLastQueryMs_ = 0;
+                            drvChanged_     = true;
+                            currentMenu_ = SubMenu::DRIVE_TUNING;
+                            break;
+                        case 20:
+                            // Open BATTERY LIMITS editor.
+                            batEditActive_   = false;
+                            batSaveWait_     = false;
+                            batAck_          = BatAck::NONE;
+                            batRestoreArm_   = false;
+                            batLocalInvalid_ = false;
+                            batLastTs_       = 0;
+                            batLastQueryMs_  = 0;
+                            batChanged_      = true;
+                            currentMenu_ = SubMenu::BATTERY_LIMITS;
+                            break;
+                        case 21:
+                            // Open DRIVE/BATTERY DIAG (read-only).  Triggers
+                            // 0xFA/0xFB QUERY bursts so the tuning values fill
+                            // in; live pedal/battery come from existing streams.
+                            driveBattDiagChanged_ = true;
+                            driveBattDiagLastSig_ = 0xFFFFFFFFu;
+                            driveBattDiagQueryMs_ = 0;
+                            drvLastQueryMs_       = 0;
+                            batLastQueryMs_       = 0;
+                            currentMenu_ = SubMenu::DRIVE_BATT_DIAG;
                             break;
                         default:
                             break;
@@ -2152,6 +2383,162 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             gearLimitsRestoreArm_ = false;
             needsRedraw_ = true;
         }
+        return false;
+    }
+
+    // ---- DRIVE TUNING editor (accel/brake/reverse ramp + creep) ----------
+    // Edits stay local (pending) until SAVE; BACK (handled above) discards.
+    // SAVE pushes all six SET_* ops + SAVE; the STM32 re-validates and gates on
+    // STANDBY, replying with a single 0x10 ACK that drives the banner.
+    if (currentMenu_ == SubMenu::DRIVE_TUNING) {
+        struct DField { uint16_t step; uint16_t lo; uint16_t hi; };
+        static const DField kF[DRV_FIELD_COUNT] = {
+            { 5,   can::DRIVE_ACCEL_RAMP_MIN,   can::DRIVE_ACCEL_RAMP_MAX   },
+            { 5,   can::DRIVE_BRAKE_RAMP_MIN,   can::DRIVE_BRAKE_RAMP_MAX   },
+            { 5,   can::DRIVE_REVERSE_RAMP_MIN, can::DRIVE_REVERSE_RAMP_MAX },
+            { 1,   0,                           1                          },
+            { 1,   can::DRIVE_CREEP_POWER_MIN,  can::DRIVE_CREEP_POWER_MAX  },
+            { 100, can::DRIVE_CREEP_DELAY_MIN,  can::DRIVE_CREEP_DELAY_MAX  },
+        };
+        for (int r = 0; r < DRV_FIELD_COUNT; ++r) {
+            const int16_t ry = DT_ROW0_Y + r * DT_ROW_H;
+            if (y < ry || y > ry + DT_ROW_BTN_H) continue;
+            const bool minus = (x >= DT_MINUS_X && x <= DT_MINUS_X + DT_STEP_W);
+            const bool plus  = (x >= DT_PLUS_X  && x <= DT_PLUS_X  + DT_STEP_W);
+            if (!minus && !plus) continue;
+            const int delta = plus ? (int)kF[r].step : -(int)kF[r].step;
+            int v = (int)drvEdit_[r] + delta;
+            if (v < (int)kF[r].lo) v = kF[r].lo;
+            if (v > (int)kF[r].hi) v = kF[r].hi;
+            drvEdit_[r]    = (uint16_t)v;
+            drvEditActive_ = true;     // stop tracking live values
+            drvRestoreArm_ = false;    // any edit cancels a RESTORE arm
+            drvChanged_    = true;
+            needsRedraw_   = true;
+            return true;
+        }
+        if (y >= DT_BTN_Y && y <= DT_BTN_Y + DT_BTN_H) {
+            if (x >= DT_SAVE_X && x <= DT_SAVE_X + DT_BTN_W) {
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SET_ACCEL_RAMP,   drvEdit_[0]);
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SET_BRAKE_RAMP,   drvEdit_[1]);
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SET_REVERSE_RAMP, drvEdit_[2]);
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SET_CREEP_ENABLE, drvEdit_[3]);
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SET_CREEP_POWER,  drvEdit_[4]);
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SET_CREEP_DELAY,  drvEdit_[5]);
+                sendDriveTuneOp(can::DRIVE_TUNE_OP_SAVE, 0);
+                drvSaveWait_   = true;
+                drvSaveSentMs_ = lastFrameTimeMs_;
+                drvAck_        = DrvAck::NONE;
+                drvRestoreArm_ = false;
+                Serial.println("[ENG] Drive tuning SAVE");
+                needsRedraw_ = true;
+                return true;
+            }
+            if (x >= DT_RESTORE_X && x <= DT_RESTORE_X + DT_BTN_W) {
+                if (drvRestoreArm_) {
+                    drvRestoreArm_ = false;
+                    sendDriveTuneOp(can::DRIVE_TUNE_OP_RESET_DEFAULTS, 0);
+                    drvSaveWait_   = true;   // RESET also ACKs as 0x10
+                    drvSaveSentMs_ = lastFrameTimeMs_;
+                    drvAck_        = DrvAck::NONE;
+                    drvEditActive_ = false;
+                    Serial.println("[ENG] Drive tuning RESTORE DEFAULTS");
+                } else {
+                    drvRestoreArm_   = true;
+                    drvRestoreArmMs_ = lastFrameTimeMs_;
+                    Serial.println("[ENG] Drive RESTORE armed (confirm)");
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        if (drvRestoreArm_) { drvRestoreArm_ = false; needsRedraw_ = true; }
+        return false;
+    }
+
+    // ---- BATTERY LIMITS editor (warn/limit/cutoff/recovery/filter) --------
+    // Same edit-then-SAVE model as drive tuning.  A local coherence check
+    // (batteryEditCoherent) blocks an obviously invalid SAVE before any frame
+    // is sent; the STM32 re-validates regardless.
+    if (currentMenu_ == SubMenu::BATTERY_LIMITS) {
+        struct BField { uint16_t step; uint16_t lo; uint16_t hi; };
+        static const BField kF[BAT_FIELD_COUNT] = {
+            { 10,  can::BATT_WARNING_MIN_CV,  can::BATT_WARNING_MAX_CV  },
+            { 10,  can::BATT_LIMIT_MIN_CV,    can::BATT_LIMIT_MAX_CV    },
+            { 10,  can::BATT_CUTOFF_MIN_CV,   can::BATT_CUTOFF_MAX_CV   },
+            { 10,  can::BATT_RECOVERY_MIN_CV, can::BATT_RECOVERY_MAX_CV },
+            { 100, can::BATT_FILTER_MIN_MS,   can::BATT_FILTER_MAX_MS   },
+        };
+        for (int r = 0; r < BAT_FIELD_COUNT; ++r) {
+            const int16_t ry = DT_ROW0_Y + r * DT_ROW_H;
+            if (y < ry || y > ry + DT_ROW_BTN_H) continue;
+            const bool minus = (x >= DT_MINUS_X && x <= DT_MINUS_X + DT_STEP_W);
+            const bool plus  = (x >= DT_PLUS_X  && x <= DT_PLUS_X  + DT_STEP_W);
+            if (!minus && !plus) continue;
+            const int delta = plus ? (int)kF[r].step : -(int)kF[r].step;
+            int v = (int)batEdit_[r] + delta;
+            if (v < (int)kF[r].lo) v = kF[r].lo;
+            if (v > (int)kF[r].hi) v = kF[r].hi;
+            batEdit_[r]      = (uint16_t)v;
+            batEditActive_   = true;
+            batRestoreArm_   = false;
+            batLocalInvalid_ = false;   // a fresh edit clears the stale notice
+            batChanged_      = true;
+            needsRedraw_     = true;
+            return true;
+        }
+        if (y >= DT_BTN_Y && y <= DT_BTN_Y + DT_BTN_H) {
+            if (x >= DT_SAVE_X && x <= DT_SAVE_X + DT_BTN_W) {
+                if (!batteryEditCoherent()) {
+                    // Block the SAVE locally and surface INVALID without sending
+                    // any frame (the STM32 would reject it anyway).
+                    batLocalInvalid_ = true;
+                    batAck_          = BatAck::INVALID;
+                    batAckMs_        = lastFrameTimeMs_;
+                    Serial.println("[ENG] Battery limits SAVE blocked (incoherent)");
+                    needsRedraw_ = true;
+                    return true;
+                }
+                batLocalInvalid_ = false;
+                sendBattLimitOp(can::BATT_LIM_OP_SET_WARNING,  batEdit_[0]);
+                sendBattLimitOp(can::BATT_LIM_OP_SET_LIMIT,    batEdit_[1]);
+                sendBattLimitOp(can::BATT_LIM_OP_SET_CUTOFF,   batEdit_[2]);
+                sendBattLimitOp(can::BATT_LIM_OP_SET_RECOVERY, batEdit_[3]);
+                sendBattLimitOp(can::BATT_LIM_OP_SET_FILTER,   batEdit_[4]);
+                sendBattLimitOp(can::BATT_LIM_OP_SAVE, 0);
+                batSaveWait_   = true;
+                batSaveSentMs_ = lastFrameTimeMs_;
+                batAck_        = BatAck::NONE;
+                batRestoreArm_ = false;
+                Serial.println("[ENG] Battery limits SAVE");
+                needsRedraw_ = true;
+                return true;
+            }
+            if (x >= DT_RESTORE_X && x <= DT_RESTORE_X + DT_BTN_W) {
+                if (batRestoreArm_) {
+                    batRestoreArm_ = false;
+                    sendBattLimitOp(can::BATT_LIM_OP_RESET_DEFAULTS, 0);
+                    batSaveWait_   = true;
+                    batSaveSentMs_ = lastFrameTimeMs_;
+                    batAck_        = BatAck::NONE;
+                    batEditActive_ = false;
+                    Serial.println("[ENG] Battery limits RESTORE DEFAULTS");
+                } else {
+                    batRestoreArm_   = true;
+                    batRestoreArmMs_ = lastFrameTimeMs_;
+                    Serial.println("[ENG] Battery RESTORE armed (confirm)");
+                }
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+        if (batRestoreArm_) { batRestoreArm_ = false; needsRedraw_ = true; }
+        return false;
+    }
+
+    // ---- DRIVE/BATTERY DIAG read-only viewer — no interactive elements ----
+    // (BACK is handled by the global submenu BACK button above.)
+    if (currentMenu_ == SubMenu::DRIVE_BATT_DIAG) {
         return false;
     }
 
@@ -2530,8 +2917,8 @@ void EngineeringScreen::drawMainMenu() {
 
     // ---- Tiles ---------------------------------------------------------
     const int startItem = mainMenuPage_ * PAGE1_ITEM_COUNT;
-    const int endItem   = (mainMenuPage_ == 0) ? PAGE1_ITEM_COUNT
-                                               : NUM_MAIN_ITEMS;
+    int endItem   = startItem + PAGE1_ITEM_COUNT;
+    if (endItem > NUM_MAIN_ITEMS) endItem = NUM_MAIN_ITEMS;
     for (int i = startItem; i < endItem; ++i) {
         const int idx = i - startItem;        // 0-based index within the page
         const int col = idx % TILE_COLS;
@@ -2585,9 +2972,9 @@ void EngineeringScreen::drawMainMenu() {
         tft.drawString(label, bx + bw / 2, NAV_Y + NAV_H / 2);
         RTRACE_TEXT(bx + bw / 2, NAV_Y + NAV_H / 2, label, txt, fill, 2, MC_DATUM);
     };
-    drawNavBtn(NAVP1_X, NAVP1_W, "PAGE 1", mainMenuPage_ == 0, ui::COL_CYAN);
-    drawNavBtn(NAVP2_X, NAVP2_W, "PAGE 2", mainMenuPage_ == 1, ui::COL_CYAN);
-    drawNavBtn(NAVEX_X, NAVEX_W, "EXIT",   false,              ui::COL_AMBER);
+    drawNavBtn(NAVP1_X, NAVP1_W, "< PREV", false, ui::COL_CYAN);
+    drawNavBtn(NAVP2_X, NAVP2_W, "NEXT >", false, ui::COL_CYAN);
+    drawNavBtn(NAVEX_X, NAVEX_W, "EXIT",   false, ui::COL_AMBER);
     tft.setTextDatum(TL_DATUM);
 
     // ---- Compact relay status read-out (header right) ------------------
@@ -4290,6 +4677,449 @@ void EngineeringScreen::sendGearLimitOp(uint8_t op, uint8_t value) {
     ESP32Can.writeFrame(frame, 0);
 }
 
+// -------------------------------------------------------------------------
+// sendDriveTuneOp — emit SERVICE_CMD (0x110) byte0 = 0xFA
+// (SERVICE_ACTION_DRIVE_TUNING), byte1 = sub-opcode.  SET_* ops carry a
+// uint16 LE value in bytes 2-3 (DLC 4); SAVE / RESET / QUERY are DLC 2.
+// The STM32 stages SET_* in RAM ("pending"), validates + persists + applies on
+// SAVE, and replies with CMD_ACK (0x103, byte0 = 0x10).  STANDBY gating and
+// range/coherence validation are enforced server-side.
+// -------------------------------------------------------------------------
+void EngineeringScreen::sendDriveTuneOp(uint8_t op, uint16_t value) {
+    CanFrame frame = {};
+    frame.identifier = can::SERVICE_CMD;
+    frame.extd       = 0;
+    frame.data[0]    = can::SERVICE_ACTION_DRIVE_TUNING;
+    frame.data[1]    = op;
+    if (op >= can::DRIVE_TUNE_OP_SET_ACCEL_RAMP &&
+        op <= can::DRIVE_TUNE_OP_SET_CREEP_DELAY) {
+        frame.data_length_code = 4;
+        frame.data[2] = (uint8_t)(value & 0xFFu);
+        frame.data[3] = (uint8_t)(value >> 8);
+    } else {
+        frame.data_length_code = 2;
+    }
+    ESP32Can.writeFrame(frame, 0);
+}
+
+// -------------------------------------------------------------------------
+// sendBattLimitOp — emit SERVICE_CMD (0x110) byte0 = 0xFB
+// (SERVICE_ACTION_BATTERY_LIMITS), byte1 = sub-opcode.  SET_* ops carry a
+// uint16 LE value (centivolts, or ms for the filter) in bytes 2-3 (DLC 4);
+// SAVE / RESET / QUERY are DLC 2.  Semantics mirror sendDriveTuneOp.
+// -------------------------------------------------------------------------
+void EngineeringScreen::sendBattLimitOp(uint8_t op, uint16_t value) {
+    CanFrame frame = {};
+    frame.identifier = can::SERVICE_CMD;
+    frame.extd       = 0;
+    frame.data[0]    = can::SERVICE_ACTION_BATTERY_LIMITS;
+    frame.data[1]    = op;
+    if (op >= can::BATT_LIM_OP_SET_WARNING &&
+        op <= can::BATT_LIM_OP_SET_FILTER) {
+        frame.data_length_code = 4;
+        frame.data[2] = (uint8_t)(value & 0xFFu);
+        frame.data[3] = (uint8_t)(value >> 8);
+    } else {
+        frame.data_length_code = 2;
+    }
+    ESP32Can.writeFrame(frame, 0);
+}
+
+// Local coherence check mirroring BatteryLimitsStore_Validate() coherence
+// rules: Warning/Limit/Recovery must each be strictly above Cutoff, and
+// Warning/Limit must not exceed the over-voltage warning point.  Hard ranges
+// are already guaranteed by clamping in the touch handler.
+bool EngineeringScreen::batteryEditCoherent() const {
+    const uint16_t warning  = batEdit_[0];
+    const uint16_t limit    = batEdit_[1];
+    const uint16_t cutoff   = batEdit_[2];
+    const uint16_t recovery = batEdit_[3];
+    if (warning  <= cutoff) return false;
+    if (limit    <= cutoff) return false;
+    if (recovery <= cutoff) return false;
+    if (warning  >  can::BATT_OV_WARNING_CV) return false;
+    if (limit    >  can::BATT_OV_WARNING_CV) return false;
+    return true;
+}
+
+// =========================================================================
+// DRIVE TUNING editor (DRIVE_TUNING submenu, 0xFA cmd / 0x310 telemetry)
+//
+// Single-page list of six value rows (accel/brake/reverse ramp, creep
+// enable/power/delay).  ACTIVE = the value the STM32 traction pipeline
+// applies right now; EDIT = the local pending value.  Nothing is sent until
+// SAVE; BACK without SAVE discards.  The 0x10 CMD_ACK drives the banner.
+// =========================================================================
+void EngineeringScreen::drawDriveTuning() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("DRIVE TUNING", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    struct Row { const char* name; uint16_t active; uint16_t edit;
+                 uint16_t lo; uint16_t hi; const char* unit; bool onoff; };
+    const Row rows[DRV_FIELD_COUNT] = {
+        { "ACCEL RAMP",   drvActive_[0], drvEdit_[0],
+          can::DRIVE_ACCEL_RAMP_MIN,   can::DRIVE_ACCEL_RAMP_MAX,   "%/s", false },
+        { "BRAKE RAMP",   drvActive_[1], drvEdit_[1],
+          can::DRIVE_BRAKE_RAMP_MIN,   can::DRIVE_BRAKE_RAMP_MAX,   "%/s", false },
+        { "REVERSE RAMP", drvActive_[2], drvEdit_[2],
+          can::DRIVE_REVERSE_RAMP_MIN, can::DRIVE_REVERSE_RAMP_MAX, "%/s", false },
+        { "CREEP ENABLE", drvActive_[3], drvEdit_[3], 0, 1, "", true },
+        { "CREEP POWER",  drvActive_[4], drvEdit_[4],
+          can::DRIVE_CREEP_POWER_MIN,  can::DRIVE_CREEP_POWER_MAX,  "%", false },
+        { "CREEP DELAY",  drvActive_[5], drvEdit_[5],
+          can::DRIVE_CREEP_DELAY_MIN,  can::DRIVE_CREEP_DELAY_MAX,  "ms", false },
+    };
+
+    // Column legend
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("ACTIVE", DT_VAL_X - 70, DT_ROW0_Y - 12);
+    tft.drawString("EDIT",   DT_VAL_X,      DT_ROW0_Y - 12);
+
+    auto fmtVal = [](char* out, size_t n, const Row& rr, uint16_t v) {
+        if (rr.onoff) snprintf(out, n, "%s", v ? "ON" : "OFF");
+        else          snprintf(out, n, "%u%s", (unsigned)v, rr.unit);
+    };
+
+    char buf[28];
+    for (int r = 0; r < DRV_FIELD_COUNT; ++r) {
+        const int16_t ry = DT_ROW0_Y + r * DT_ROW_H;
+        const int16_t ty = ry + DT_ROW_BTN_H / 2;
+
+        // Label
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(rows[r].name, DT_LABEL_X, ty);
+
+        // Active value (applied now)
+        fmtVal(buf, sizeof(buf), rows[r], rows[r].active);
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(buf, DT_VAL_X - 70, ty);
+
+        // Edited (pending) value — highlight if it differs from active
+        const bool diff = (rows[r].edit != rows[r].active);
+        fmtVal(buf, sizeof(buf), rows[r], rows[r].edit);
+        tft.setTextColor(diff ? ui::COL_AMBER : ui::COL_WHITE, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString(buf, DT_VAL_X, ty);
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        // −/+ step buttons
+        auto stepBtn = [&](int16_t bx, const char* lbl) {
+            tft.fillRect(bx, ry, DT_STEP_W, DT_ROW_BTN_H, ui::COL_DARK_GRAY);
+            tft.drawRect(bx, ry, DT_STEP_W, DT_ROW_BTN_H, ui::COL_GRAY);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextSize(2);
+            tft.drawString(lbl, bx + DT_STEP_W / 2, ry + DT_ROW_BTN_H / 2);
+            tft.setTextSize(1);
+            tft.setTextDatum(TL_DATUM);
+        };
+        stepBtn(DT_MINUS_X, "-");
+        stepBtn(DT_PLUS_X,  "+");
+
+        // Range hint between the steppers
+        snprintf(buf, sizeof(buf), "%u-%u", (unsigned)rows[r].lo,
+                 (unsigned)rows[r].hi);
+        tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(buf, (DT_MINUS_X + DT_STEP_W + DT_PLUS_X) / 2,
+                       ry + DT_ROW_BTN_H / 2);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // Status banner
+    const char* statusTxt = nullptr;
+    uint16_t    statusCol = ui::COL_GRAY;
+    switch (drvAck_) {
+        case DrvAck::SAVED:   statusTxt = "SAVED";                 statusCol = ui::COL_GREEN;  break;
+        case DrvAck::BLOCKED: statusTxt = "BLOCKED (need STANDBY)"; statusCol = ui::COL_RED;   break;
+        case DrvAck::INVALID: statusTxt = "INVALID";               statusCol = ui::COL_RED;    break;
+        case DrvAck::TIMEOUT: statusTxt = "TIMEOUT";               statusCol = ui::COL_YELLOW; break;
+        case DrvAck::NONE:    default: break;
+    }
+    if (drvSaveWait_) { statusTxt = "SAVING..."; statusCol = ui::COL_CYAN; }
+    if (statusTxt) {
+        tft.setTextColor(statusCol, ui::COL_BG);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(statusTxt, ui::SCREEN_W / 2, DT_STATUS_Y);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // Action buttons: SAVE / RESTORE DEFAULTS
+    auto actBtn = [&](int16_t bx, const char* lbl, uint16_t fill) {
+        tft.fillRect(bx, DT_BTN_Y, DT_BTN_W, DT_BTN_H, fill);
+        tft.drawRect(bx, DT_BTN_Y, DT_BTN_W, DT_BTN_H, ui::COL_GRAY);
+        tft.setTextColor(ui::COL_WHITE, fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(lbl, bx + DT_BTN_W / 2, DT_BTN_Y + DT_BTN_H / 2);
+        tft.setTextDatum(TL_DATUM);
+    };
+    actBtn(DT_SAVE_X, "SAVE", ui::COL_DARK_GRAY);
+    actBtn(DT_RESTORE_X,
+           drvRestoreArm_ ? "CONFIRM RESTORE" : "RESTORE DEF.",
+           drvRestoreArm_ ? ui::COL_RED : ui::COL_DARK_GRAY);
+
+    // BACK button (engineering convention — bottom-left)
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    drvChanged_ = false;
+}
+
+// =========================================================================
+// BATTERY LIMITS editor (BATTERY_LIMITS submenu, 0xFB cmd / 0x311 telemetry)
+//
+// Single-page list of five value rows (warning/limit/cutoff/recovery in volts,
+// filter in ms).  Same edit-then-SAVE model as DRIVE TUNING; a local coherence
+// check blocks an obviously invalid SAVE before any frame is sent.
+// =========================================================================
+void EngineeringScreen::drawBatteryLimits() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BATTERY LIMITS", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    struct Row { const char* name; uint16_t active; uint16_t edit;
+                 uint16_t lo; uint16_t hi; bool isVolts; };
+    const Row rows[BAT_FIELD_COUNT] = {
+        { "WARNING",  batActive_[0], batEdit_[0],
+          can::BATT_WARNING_MIN_CV,  can::BATT_WARNING_MAX_CV,  true  },
+        { "LIMIT",    batActive_[1], batEdit_[1],
+          can::BATT_LIMIT_MIN_CV,    can::BATT_LIMIT_MAX_CV,    true  },
+        { "CUTOFF",   batActive_[2], batEdit_[2],
+          can::BATT_CUTOFF_MIN_CV,   can::BATT_CUTOFF_MAX_CV,   true  },
+        { "RECOVERY", batActive_[3], batEdit_[3],
+          can::BATT_RECOVERY_MIN_CV, can::BATT_RECOVERY_MAX_CV, true  },
+        { "FILTER",   batActive_[4], batEdit_[4],
+          can::BATT_FILTER_MIN_MS,   can::BATT_FILTER_MAX_MS,   false },
+    };
+
+    // Column legend
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("ACTIVE", DT_VAL_X - 70, DT_ROW0_Y - 12);
+    tft.drawString("EDIT",   DT_VAL_X,      DT_ROW0_Y - 12);
+
+    auto fmtVal = [](char* out, size_t n, const Row& rr, uint16_t v) {
+        if (rr.isVolts) snprintf(out, n, "%u.%02uV",
+                                 (unsigned)(v / 100u), (unsigned)(v % 100u));
+        else            snprintf(out, n, "%ums", (unsigned)v);
+    };
+
+    char buf[28];
+    for (int r = 0; r < BAT_FIELD_COUNT; ++r) {
+        const int16_t ry = DT_ROW0_Y + r * DT_ROW_H;
+        const int16_t ty = ry + DT_ROW_BTN_H / 2;
+
+        tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+        tft.setTextDatum(ML_DATUM);
+        tft.drawString(rows[r].name, DT_LABEL_X, ty);
+
+        fmtVal(buf, sizeof(buf), rows[r], rows[r].active);
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(buf, DT_VAL_X - 70, ty);
+
+        const bool diff = (rows[r].edit != rows[r].active);
+        fmtVal(buf, sizeof(buf), rows[r], rows[r].edit);
+        tft.setTextColor(diff ? ui::COL_AMBER : ui::COL_WHITE, ui::COL_BG);
+        tft.setTextSize(2);
+        tft.drawString(buf, DT_VAL_X, ty);
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+
+        auto stepBtn = [&](int16_t bx, const char* lbl) {
+            tft.fillRect(bx, ry, DT_STEP_W, DT_ROW_BTN_H, ui::COL_DARK_GRAY);
+            tft.drawRect(bx, ry, DT_STEP_W, DT_ROW_BTN_H, ui::COL_GRAY);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextSize(2);
+            tft.drawString(lbl, bx + DT_STEP_W / 2, ry + DT_ROW_BTN_H / 2);
+            tft.setTextSize(1);
+            tft.setTextDatum(TL_DATUM);
+        };
+        stepBtn(DT_MINUS_X, "-");
+        stepBtn(DT_PLUS_X,  "+");
+    }
+
+    // Status banner — local INVALID (incoherent edit) takes priority.
+    const char* statusTxt = nullptr;
+    uint16_t    statusCol = ui::COL_GRAY;
+    switch (batAck_) {
+        case BatAck::SAVED:   statusTxt = "SAVED";                  statusCol = ui::COL_GREEN;  break;
+        case BatAck::BLOCKED: statusTxt = "BLOCKED (need STANDBY)"; statusCol = ui::COL_RED;    break;
+        case BatAck::INVALID: statusTxt = batLocalInvalid_
+                                          ? "INVALID (W/L/R > CUTOFF)"
+                                          : "INVALID";              statusCol = ui::COL_RED;    break;
+        case BatAck::TIMEOUT: statusTxt = "TIMEOUT";                statusCol = ui::COL_YELLOW; break;
+        case BatAck::NONE:    default: break;
+    }
+    if (batSaveWait_) { statusTxt = "SAVING..."; statusCol = ui::COL_CYAN; }
+    if (statusTxt) {
+        tft.setTextColor(statusCol, ui::COL_BG);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(statusTxt, ui::SCREEN_W / 2, DT_STATUS_Y);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    auto actBtn = [&](int16_t bx, const char* lbl, uint16_t fill) {
+        tft.fillRect(bx, DT_BTN_Y, DT_BTN_W, DT_BTN_H, fill);
+        tft.drawRect(bx, DT_BTN_Y, DT_BTN_W, DT_BTN_H, ui::COL_GRAY);
+        tft.setTextColor(ui::COL_WHITE, fill);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(lbl, bx + DT_BTN_W / 2, DT_BTN_Y + DT_BTN_H / 2);
+        tft.setTextDatum(TL_DATUM);
+    };
+    actBtn(DT_SAVE_X, "SAVE", ui::COL_DARK_GRAY);
+    actBtn(DT_RESTORE_X,
+           batRestoreArm_ ? "CONFIRM RESTORE" : "RESTORE DEF.",
+           batRestoreArm_ ? ui::COL_RED : ui::COL_DARK_GRAY);
+
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    batChanged_ = false;
+}
+
+// =========================================================================
+// DRIVE/BATTERY DIAG read-only viewer (DRIVE_BATT_DIAG submenu)
+//
+// Aggregates data that already exists on the bus: the applied drive-tuning
+// (0x310) and battery-limit (0x311) values, the live pedal travel (0x20B) and
+// battery voltage (0x207).  Fields the firmware does not transmit are shown as
+// "N/A" — nothing here is estimated or invented.  The low-voltage status line
+// is derived locally by comparing the live voltage to the applied thresholds
+// (advisory; the STM32 safety state machine remains the sole authority).
+// =========================================================================
+void EngineeringScreen::drawDriveBattDiag() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("DRIVE/BATTERY DIAG", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    const bool drvValid = (drvLastTs_ != 0);
+    const bool batValid = (batLastTs_ != 0);
+
+    static constexpr int16_t LX = 10;
+    static constexpr int16_t VX = 200;
+    static constexpr int16_t RH = 20;
+    int16_t y = 40;
+    char buf[28];
+
+    auto row = [&](const char* label, const char* valStr, uint16_t col) {
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(label, LX, y);
+        tft.setTextColor(col, ui::COL_BG);
+        tft.drawString(valStr, VX, y);
+        y += RH;
+    };
+
+    // ---- Live operating point ----
+    if (dbgPedalValid_) {
+        snprintf(buf, sizeof(buf), "%u %%", (unsigned)dbgPedalPct_);
+        row("Pedal travel", buf, ui::COL_WHITE);
+    } else {
+        row("Pedal travel", "N/A", ui::COL_GRAY);
+    }
+
+    if (dbgBattValid_) {
+        snprintf(buf, sizeof(buf), "%u.%02u V",
+                 (unsigned)(dbgBattCv_ / 100u), (unsigned)(dbgBattCv_ % 100u));
+        row("Battery voltage", buf, ui::COL_WHITE);
+    } else {
+        row("Battery voltage", "N/A", ui::COL_GRAY);
+    }
+
+    // Derived low-voltage status (advisory) — only when both the voltage and
+    // the applied thresholds are known.
+    if (dbgBattValid_ && batValid) {
+        const char* st;  uint16_t stc;
+        if (dbgBattCv_ <= batActive_[2])      { st = "LOW-V CUTOFF"; stc = ui::COL_RED; }
+        else if (dbgBattCv_ <= batActive_[0]) { st = "LOW-V WARNING"; stc = ui::COL_AMBER; }
+        else                                  { st = "OK"; stc = ui::COL_GREEN; }
+        row("LowV status", st, stc);
+    } else {
+        row("LowV status", "N/A", ui::COL_GRAY);
+    }
+
+    // Firmware error code (heartbeat) — raw, not interpreted here.
+    snprintf(buf, sizeof(buf), "%u", (unsigned)dbgErrCode_);
+    row("Error code", buf, dbgErrCode_ ? ui::COL_AMBER : ui::COL_GRAY);
+
+    y += 4;
+
+    // ---- Applied drive tuning ----
+    if (drvValid) {
+        snprintf(buf, sizeof(buf), "%u/%u/%u %%/s",
+                 (unsigned)drvActive_[0], (unsigned)drvActive_[1],
+                 (unsigned)drvActive_[2]);
+        row("Ramp A/B/R", buf, ui::COL_CYAN);
+        snprintf(buf, sizeof(buf), "%s  %u%%  %ums",
+                 drvActive_[3] ? "ON" : "OFF",
+                 (unsigned)drvActive_[4], (unsigned)drvActive_[5]);
+        row("Creep en/pw/dl", buf, ui::COL_CYAN);
+    } else {
+        row("Ramp A/B/R",    "N/A", ui::COL_GRAY);
+        row("Creep en/pw/dl", "N/A", ui::COL_GRAY);
+    }
+
+    // ---- Applied battery thresholds ----
+    if (batValid) {
+        snprintf(buf, sizeof(buf), "%u.%02u / %u.%02u V",
+                 (unsigned)(batActive_[0] / 100u), (unsigned)(batActive_[0] % 100u),
+                 (unsigned)(batActive_[2] / 100u), (unsigned)(batActive_[2] % 100u));
+        row("Warn / Cutoff", buf, ui::COL_CYAN);
+        snprintf(buf, sizeof(buf), "%u.%02uV  %ums",
+                 (unsigned)(batActive_[3] / 100u), (unsigned)(batActive_[3] % 100u),
+                 (unsigned)batActive_[4]);
+        row("Recov / Filter", buf, ui::COL_CYAN);
+    } else {
+        row("Warn / Cutoff",  "N/A", ui::COL_GRAY);
+        row("Recov / Filter", "N/A", ui::COL_GRAY);
+    }
+
+    // Liveness indicator
+    tft.setTextColor((drvValid && batValid) ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+    tft.drawString((drvValid && batValid) ? "LIVE" : "WAITING DATA...", LX, y + 4);
+
+    // BACK button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    driveBattDiagChanged_ = false;
+}
+
 // =========================================================================
 // MCP23017 LIVE (shifter) diagnostic viewer (MCP23017_LIVE submenu)
 //
@@ -4548,7 +5378,10 @@ void EngineeringScreen::drawSteerDiag() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
-    const auto& eps = data_.epsParams();
+    if (data_ == nullptr) {
+        return;
+    }
+    const auto& eps = data_->epsParams();
     static constexpr int16_t LX = 8;
     static constexpr int16_t VX = 200;
     static constexpr int16_t RH = 18;

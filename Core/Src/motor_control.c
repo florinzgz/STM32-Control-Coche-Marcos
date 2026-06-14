@@ -9,6 +9,7 @@
 #include "ackermann.h"
 #include "eps_params.h"
 #include "gear_limits_store.h"
+#include "drive_tuning_store.h"
 #include "main.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
@@ -467,6 +468,35 @@ static uint8_t gear_response_d2_pct = GEAR_RESPONSE_D2_DEFAULT_PCT;
 static uint8_t gear_response_d1_pct = GEAR_RESPONSE_D1_DEFAULT_PCT;
 static uint8_t gear_response_r_pct  = GEAR_RESPONSE_R_DEFAULT_PCT;
 
+/* ---- Runtime-configurable drive tuning (FASE 2) ----
+ * Pedal ramp rates and motor dead-zone (creep) compensation, seeded with
+ * the compile-time values so a unit with no valid flash slot behaves
+ * EXACTLY like the historic firmware:
+ *   accel_ramp   = PEDAL_RAMP_UP_PCT_S   (50  %/s)
+ *   brake_ramp   = PEDAL_RAMP_DOWN_PCT_S (100 %/s)
+ *   reverse_ramp = accel_ramp            (50  %/s, applied in GEAR_REVERSE)
+ *   creep_enable = 1, creep_power = MOTOR_DEADZONE_PCT (8 %), creep_delay = 0 ms
+ * The ramp rates feed the rate limiter in Traction_SetDemand(); the creep
+ * fields feed the dead-zone compensation in Traction_Update().  Replacing
+ * only the constants (not the fórmulas) keeps every other behaviour intact. */
+static DriveTuning_t drive_tuning = {
+    .accel_ramp   = DRIVE_ACCEL_RAMP_DEFAULT,
+    .brake_ramp   = DRIVE_BRAKE_RAMP_DEFAULT,
+    .reverse_ramp = DRIVE_REVERSE_RAMP_DEFAULT,
+    .creep_enable = DRIVE_CREEP_ENABLE_DEFAULT,
+    .creep_power  = DRIVE_CREEP_POWER_DEFAULT,
+    .creep_delay  = DRIVE_CREEP_DELAY_DEFAULT,
+};
+
+/* ---- Creep-delay timer ----
+ * Tracks how long the (positive) demand has been continuously above zero.
+ * The dead-zone floor (creep_power) is applied only once this has exceeded
+ * creep_delay ms; before that the output uses a plain proportional mapping
+ * with no minimum floor.  With creep_delay == 0 (default) the floor is
+ * applied immediately on the first positive sample, exactly as today.    */
+static uint32_t creep_demand_start_tick = 0;
+static bool     creep_demand_active     = false;
+
 /* ---- Per-motor overtemp cutoff state ---- */
 static bool motor_overtemp_cutoff[4] = {false, false, false, false};
 
@@ -819,6 +849,8 @@ void Traction_Init(void)
     brake_release_pct = 0.0f;
     creep_smooth_pct  = 0.0f;
     creep_smooth_init = 0;
+    creep_demand_active     = false;
+    creep_demand_start_tick = 0;
     neutral_ramp_pct   = 0.0f;
     neutral_ramp_active = 0;
     neutral_ramp_dir   = 1;
@@ -1001,7 +1033,11 @@ void Traction_SetDemand(float throttlePct)
         target *= resp;
     }
 
-    /* ---- B) Ramp rate limiter (applied after EMA + response profile) ---- */
+    /* ---- B) Ramp rate limiter (applied after EMA + response profile) ----
+     * Runtime-configurable rates (FASE 2).  Ramp-up uses accel_ramp, except
+     * in GEAR_REVERSE where reverse_ramp is used instead; ramp-down always
+     * uses brake_ramp.  Defaults (50 / 100 / 50) reproduce the historic
+     * PEDAL_RAMP_UP_PCT_S / PEDAL_RAMP_DOWN_PCT_S behaviour exactly.        */
     uint32_t now = HAL_GetTick();
     float dt = (float)(now - pedal_last_tick) / 1000.0f;
     if (dt < 0.001f) dt = 0.001f;   /* guard against zero / tiny dt */
@@ -1010,12 +1046,15 @@ void Traction_SetDemand(float throttlePct)
     float diff   = target - pedal_ramped;
 
     if (diff > 0.0f) {
-        /* Accelerating: slower ramp */
-        float max_up = PEDAL_RAMP_UP_PCT_S * dt;
+        /* Accelerating: slower ramp.  Reverse gear uses its own ramp-up. */
+        float up_rate = (current_gear == GEAR_REVERSE)
+                          ? (float)drive_tuning.reverse_ramp
+                          : (float)drive_tuning.accel_ramp;
+        float max_up = up_rate * dt;
         if (diff > max_up) diff = max_up;
     } else {
         /* Decelerating: faster ramp */
-        float max_down = PEDAL_RAMP_DOWN_PCT_S * dt;
+        float max_down = (float)drive_tuning.brake_ramp * dt;
         if (diff < -max_down) diff = -max_down;
     }
     pedal_ramped += diff;
@@ -1106,6 +1145,32 @@ void Traction_GetGearResponse(uint8_t *d2_pct, uint8_t *d1_pct, uint8_t *r_pct)
     if (d2_pct) *d2_pct = gear_response_d2_pct;
     if (d1_pct) *d1_pct = gear_response_d1_pct;
     if (r_pct)  *r_pct  = gear_response_r_pct;
+}
+
+/* ---- Runtime-configurable drive tuning (FASE 2) ------------------- */
+
+bool Traction_ValidateDriveTuning(const DriveTuning_t *t)
+{
+    /* Delegate to the single source of truth in drive_tuning_store so the
+     * CAN handler, the flash loader and the motor controller all agree.   */
+    return DriveTuningStore_Validate(t);
+}
+
+bool Traction_SetDriveTuning(const DriveTuning_t *t)
+{
+    /* Reject out-of-range sets and KEEP the previous values (FASE 4). */
+    if (!Traction_ValidateDriveTuning(t))
+        return false;
+    /* The struct is small POD; the next Traction_SetDemand()/Update() cycle
+     * picks up the new values.  No effect on EMA state, ABS/TCS scaling or
+     * the gear power/response pipeline.                                     */
+    drive_tuning = *t;
+    return true;
+}
+
+void Traction_GetDriveTuning(DriveTuning_t *out)
+{
+    if (out) *out = drive_tuning;
 }
 
 /* ==================================================================
@@ -1596,13 +1661,34 @@ void Traction_Update(void)
     /* ---- B) Motor dead-zone compensation (creep) ----
      * When positive traction demand is above the drive-enter threshold,
      * remap it so the motor jumps over its physical dead zone.
-     * Linear mapping: [0, 100] → [MOTOR_DEADZONE_PCT, 100].
-     * Dynamic braking (negative demand) is not remapped.               */
+     * Linear mapping: [0, 100] -> [creep_floor, 100].
+     * Dynamic braking (negative demand) is not remapped.
+     *
+     * Runtime-configurable (FASE 2):
+     *   - creep_enable == 0 disables the floor entirely (linear mapping).
+     *   - creep_power is the floor PWM% (default 8 == MOTOR_DEADZONE_PCT).
+     *   - creep_delay (ms) suppresses the floor until the demand has been
+     *     continuously positive for that long; the timer below tracks it.
+     * Defaults (enable=1, power=8, delay=0) reproduce the historic
+     * MOTOR_DEADZONE_PCT behaviour exactly (floor applied immediately).    */
     if (effective_demand > 0.0f) {
-        float mapped = MOTOR_DEADZONE_PCT
-                     + effective_demand * (100.0f - MOTOR_DEADZONE_PCT) / 100.0f;
+        uint32_t now_creep = HAL_GetTick();
+        if (!creep_demand_active) {
+            creep_demand_active     = true;
+            creep_demand_start_tick = now_creep;
+        }
+        bool delay_elapsed =
+            ((uint32_t)(now_creep - creep_demand_start_tick) >=
+             (uint32_t)drive_tuning.creep_delay);
+        float creep_floor = 0.0f;
+        if (drive_tuning.creep_enable && delay_elapsed) {
+            creep_floor = (float)drive_tuning.creep_power;
+        }
+        float mapped = creep_floor
+                     + effective_demand * (100.0f - creep_floor) / 100.0f;
         base_pwm = (uint16_t)(mapped * PWM_PERIOD / 100.0f);
     } else {
+        creep_demand_active = false;
         base_pwm = (uint16_t)(fabsf(effective_demand) * PWM_PERIOD / 100.0f);
     }
 
@@ -1988,6 +2074,8 @@ void Traction_EmergencyStop(void)
     brake_release_pct = 0.0f;
     creep_smooth_pct  = 0.0f;
     creep_smooth_init = 0;
+    creep_demand_active     = false;
+    creep_demand_start_tick = 0;
     neutral_ramp_pct   = 0.0f;
     neutral_ramp_active = 0;
     neutral_ramp_dir   = 1;

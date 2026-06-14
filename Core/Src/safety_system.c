@@ -13,6 +13,7 @@
 
 #include "safety_system.h"
 #include "main.h"
+#include "battery_limits_store.h"
 #include "sensor_manager.h"
 #include "motor_control.h"
 #include "service_mode.h"
@@ -56,9 +57,37 @@ static inline void sat_inc_u32(uint32_t *counter) {
  *   lets a temporary battery disconnect/reconnect recover without a
  *   manual reset, while hysteresis + stable-time prevent flapping and an
  *   invalid / I2C-failed reading never auto-recovers (fail-safe).        */
-#define BATTERY_UV_WARNING_V    20.0f   /* Enter DEGRADED below this      */
-#define BATTERY_UV_CRITICAL_V   18.0f   /* Enter SAFE below this          */
+#define BATTERY_UV_WARNING_V    20.0f   /* Default derate point (now runtime) */
+#define BATTERY_UV_CRITICAL_V   18.0f   /* Default SAFE cutoff (now runtime)  */
 #define BATTERY_UV_HYST_V       0.5f    /* Hysteresis band for recovery   */
+
+/* ---- Runtime-configurable battery limits (FASE 3) ----
+ * The under-voltage thresholds compared in Safety_CheckBatteryVoltage()
+ * become runtime variables.  Seeded with battery_limits_store.h defaults,
+ * which MIRROR the historic #define values above (Limit/Warning 20.0 V,
+ * Cutoff 18.0 V, Recovery = Cutoff + HYST = 18.5 V, Filter 0 ms), so the
+ * comparisons are byte-for-byte identical until the operator re-tunes.
+ * Only the VALUES change here — the state machine is untouched.           */
+static BatteryLimits_t batt_limits = {
+    .warning_cv  = BATT_WARNING_DEFAULT_CV,
+    .limit_cv    = BATT_LIMIT_DEFAULT_CV,
+    .cutoff_cv   = BATT_CUTOFF_DEFAULT_CV,
+    .recovery_cv = BATT_RECOVERY_DEFAULT_CV,
+    .filter_ms   = BATT_FILTER_DEFAULT_MS,
+};
+
+/* ---- Optional voltage filter (EMA) state ----
+ * With filter_ms == 0 (default) the filter is bypassed and the raw bus
+ * voltage is used directly, so behaviour is identical to the original
+ * firmware.  With filter_ms > 0 a first-order EMA whose alpha = dt/(tc+dt)
+ * smooths the reading used for the threshold COMPARES only — the invalid /
+ * zero-reading fail-safe check below always runs on the raw value.        */
+static float    batt_v_filtered  = 0.0f;
+static bool     batt_v_filt_init = false;
+static uint32_t batt_v_filt_tick = 0U;
+
+/* Convert a centivolt threshold to volts. */
+static inline float batt_cv_to_v(uint16_t cv) { return (float)cv * 0.01f; }
 
 /* Battery overvoltage thresholds (24 V system).
  *
@@ -2103,7 +2132,7 @@ void Safety_CheckEncoder(void)
  */
 void Safety_CheckBatteryVoltage(void)
 {
-    float voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+    float raw_voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
 
     /* Invalid reading (0.0 V / NaN / Inf): on this topology the battery
      * INA226 sits behind the TCA9548A multiplexer, so a 0 V reading almost
@@ -2114,8 +2143,10 @@ void Safety_CheckBatteryVoltage(void)
      * INA-ACK, and bus-voltage-read-valid bits published by Current_ReadAll():
      *   - battery INA/bus read did NOT ACK  → genuine I2C/sensor fault (Code 11)
      *   - battery INA + bus read both ACKed but still read ~0 V → real critical UV
-     * Both still enter SAFE (fail-safe), only the reported error differs. */
-    if (isnan(voltage) || isinf(voltage) || voltage <= 0.0f) {
+     * Both still enter SAFE (fail-safe), only the reported error differs.
+     * This fail-safe check ALWAYS runs on the raw reading — the optional
+     * voltage filter below only smooths the numeric threshold compares.   */
+    if (isnan(raw_voltage) || isinf(raw_voltage) || raw_voltage <= 0.0f) {
         bool batt_sample_ok = Sensor_GetMuxPresent() &&
                               ((Sensor_GetInaOkMask() & INA226_MASK_BATTERY) != 0U) &&
                               ((Sensor_GetInaBusOkMask() & INA226_MASK_BATTERY) != 0U);
@@ -2123,11 +2154,42 @@ void Safety_CheckBatteryVoltage(void)
                                        : SAFETY_ERROR_I2C_FAILURE);
         Safety_SetState(SYS_STATE_SAFE);
         batt_uv_recovery_pending = 0;   /* invalid reading aborts recovery */
+        batt_v_filt_init = false;       /* invalid reading resets the filter */
         return;
     }
 
+    /* ---- Optional voltage filter (FASE 3) ----
+     * filter_ms == 0 (default): bypass — voltage == raw, identical to today.
+     * filter_ms  > 0: first-order EMA with alpha = dt/(tc+dt) so the time
+     * constant is honoured regardless of the (variable) call cadence.      */
+    float voltage;
+    uint16_t filt_ms = batt_limits.filter_ms;
+    if (filt_ms == 0U) {
+        voltage = raw_voltage;
+        batt_v_filt_init = false;
+    } else {
+        uint32_t nowf = HAL_GetTick();
+        if (!batt_v_filt_init) {
+            batt_v_filtered  = raw_voltage;
+            batt_v_filt_init = true;
+            batt_v_filt_tick = nowf;
+        } else {
+            float dt = (float)(nowf - batt_v_filt_tick);
+            if (dt < 1.0f) dt = 1.0f;
+            batt_v_filt_tick = nowf;
+            float alpha = dt / ((float)filt_ms + dt);
+            batt_v_filtered += alpha * (raw_voltage - batt_v_filtered);
+        }
+        voltage = batt_v_filtered;
+    }
+
+    /* Runtime thresholds (seeded == historic #define values). */
+    const float uv_cutoff_v   = batt_cv_to_v(batt_limits.cutoff_cv);
+    const float uv_recovery_v = batt_cv_to_v(batt_limits.recovery_cv);
+    const float uv_limit_v    = batt_cv_to_v(batt_limits.limit_cv);
+
     /* Critical undervoltage — SAFE state */
-    if (voltage < BATTERY_UV_CRITICAL_V) {
+    if (voltage < uv_cutoff_v) {
         Safety_SetError(SAFETY_ERROR_BATTERY_UV_CRITICAL);
         Safety_SetState(SYS_STATE_SAFE);
         batt_uv_recovery_pending = 0;   /* still below trip: restart window */
@@ -2157,7 +2219,7 @@ void Safety_CheckBatteryVoltage(void)
      * before re-enabling drive.                                          */
     if (system_state == SYS_STATE_SAFE &&
         safety_error == SAFETY_ERROR_BATTERY_UV_CRITICAL) {
-        if (voltage > (BATTERY_UV_CRITICAL_V + BATTERY_UV_HYST_V)) {
+        if (voltage > uv_recovery_v) {
             if (!batt_uv_recovery_pending) {
                 batt_uv_recovery_pending = 1;
                 batt_uv_recovery_since   = HAL_GetTick();
@@ -2212,7 +2274,7 @@ void Safety_CheckBatteryVoltage(void)
             ((Sensor_GetInaOkMask()    & INA226_MASK_BATTERY) != 0U) &&
             ((Sensor_GetInaBusOkMask() & INA226_MASK_BATTERY) != 0U);
         if (batt_sample_ok &&
-            voltage > (BATTERY_UV_CRITICAL_V + BATTERY_UV_HYST_V)) {
+            voltage > uv_recovery_v) {
             if (!batt_uv_recovery_pending) {
                 batt_uv_recovery_pending = 1;
                 batt_uv_recovery_since   = HAL_GetTick();
@@ -2239,8 +2301,9 @@ void Safety_CheckBatteryVoltage(void)
      * debounce window cannot survive to a later trip.                    */
     batt_uv_recovery_pending = 0;
 
-    /* Warning undervoltage — DEGRADED state with power limiting */
-    if (voltage < BATTERY_UV_WARNING_V) {
+    /* Warning undervoltage — DEGRADED state with power limiting.
+     * Uses the runtime derate (Limit) threshold; default 20.0 V.          */
+    if (voltage < uv_limit_v) {
         Safety_SetError(SAFETY_ERROR_BATTERY_UV_WARNING);
         Safety_SetState(SYS_STATE_DEGRADED);
         Safety_SetDegradedLevel(DEGRADED_L2,
@@ -2249,13 +2312,39 @@ void Safety_CheckBatteryVoltage(void)
     }
 
     /* Voltage OK — attempt recovery from DEGRADED if hysteresis met.
-     * Recovery from DEGRADED requires voltage > WARNING + HYSTERESIS
-     * (20.5 V) to prevent oscillation under load transients.            */
+     * Recovery from DEGRADED requires voltage > Limit + HYSTERESIS
+     * (default 20.5 V) to prevent oscillation under load transients.      */
     if (system_state == SYS_STATE_DEGRADED &&
         safety_error == SAFETY_ERROR_BATTERY_UV_WARNING &&
-        voltage > (BATTERY_UV_WARNING_V + BATTERY_UV_HYST_V)) {
+        voltage > (uv_limit_v + BATTERY_UV_HYST_V)) {
         Safety_ClearError(SAFETY_ERROR_BATTERY_UV_WARNING);
     }
+}
+
+/* ---- Runtime-configurable battery limits (FASE 3) ---------------- */
+
+bool Safety_ValidateBatteryLimits(const BatteryLimits_t *b)
+{
+    /* Delegate to the single source of truth in battery_limits_store so the
+     * CAN handler, the flash loader and the safety system all agree.       */
+    return BatteryLimitsStore_Validate(b);
+}
+
+bool Safety_SetBatteryLimits(const BatteryLimits_t *b)
+{
+    /* Reject out-of-range sets and KEEP the previous values (FASE 4). */
+    if (!Safety_ValidateBatteryLimits(b))
+        return false;
+    batt_limits = *b;
+    /* A new filter time-constant restarts the EMA so the next sample seeds
+     * it cleanly (avoids a stale value biasing the first compare).        */
+    batt_v_filt_init = false;
+    return true;
+}
+
+void Safety_GetBatteryLimits(BatteryLimits_t *out)
+{
+    if (out) *out = batt_limits;
 }
 
 /**
