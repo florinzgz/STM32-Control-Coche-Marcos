@@ -1036,6 +1036,12 @@ void EngineeringScreen::draw() {
             case SubMenu::DRIVE_TUNING:     drawDriveTuning();         break;
             case SubMenu::BATTERY_LIMITS:   drawBatteryLimits();       break;
             case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
+            default:
+                // Unknown/unexpected submenu: fall back to the Engineering
+                // main menu instead of leaving the screen blank.
+                currentMenu_ = SubMenu::MAIN;
+                drawMainMenu();
+                break;
         }
     }
 
@@ -2049,20 +2055,22 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             // edit array from the latest 0x30F telemetry; send
                             // a QUERY immediately so the screen fills quickly.
                             {
-                                auto& eps = data_->epsParams();
-                                if (eps.valid) {
-                                    epsEdit_[0]  = eps.assistStrength;
-                                    epsEdit_[1]  = eps.centerStrength;
-                                    epsEdit_[2]  = eps.damping;
-                                    epsEdit_[3]  = eps.frictionComp;
-                                    epsEdit_[4]  = eps.coastBandPct;
-                                    epsEdit_[5]  = eps.minDrivePct;
-                                    epsEdit_[6]  = eps.assistVsSpeed;
-                                    epsEdit_[7]  = eps.returnVsSpeed;
-                                    epsEdit_[8]  = eps.deadbandDeg;
-                                    epsEdit_[9]  = eps.maxPwmPct;
-                                    epsEdit_[10] = eps.slewRatePct;
-                                    epsEdit_[11] = eps.centerOffsetDeg;
+                                if (data_ != nullptr) {
+                                    auto& eps = data_->epsParams();
+                                    if (eps.valid) {
+                                        epsEdit_[0]  = eps.assistStrength;
+                                        epsEdit_[1]  = eps.centerStrength;
+                                        epsEdit_[2]  = eps.damping;
+                                        epsEdit_[3]  = eps.frictionComp;
+                                        epsEdit_[4]  = eps.coastBandPct;
+                                        epsEdit_[5]  = eps.minDrivePct;
+                                        epsEdit_[6]  = eps.assistVsSpeed;
+                                        epsEdit_[7]  = eps.returnVsSpeed;
+                                        epsEdit_[8]  = eps.deadbandDeg;
+                                        epsEdit_[9]  = eps.maxPwmPct;
+                                        epsEdit_[10] = eps.slewRatePct;
+                                        epsEdit_[11] = eps.centerOffsetDeg;
+                                    }
                                 }
                                 epsPage_        = 0;
                                 epsEditActive_  = false;
@@ -5370,6 +5378,9 @@ void EngineeringScreen::drawSteerDiag() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
 
+    if (data_ == nullptr) {
+        return;
+    }
     const auto& eps = data_->epsParams();
     static constexpr int16_t LX = 8;
     static constexpr int16_t VX = 200;
