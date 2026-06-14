@@ -2395,6 +2395,8 @@ static void eps_handle_service_cmd(const uint8_t *payload, uint8_t len)
         break;
     }
 }
+
+void CAN_ProcessMessages(void) {
     FDCAN_RxHeaderTypeDef rx_hdr;
     uint8_t rx_payload[8];
     
