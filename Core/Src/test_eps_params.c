@@ -64,6 +64,11 @@ static bool test_EPS_Params_Set(eps_param_id_t id, float value)
         return false;
     }
 
+    /* Mechanical parameter range guards (mirrors eps_params.c) */
+    if (id == EPS_PARAM_DEADBAND_DEG  && value <= 0.0f)               return false;
+    if (id == EPS_PARAM_MAX_PWM_PCT   && (value <= 0.0f || value > 100.0f)) return false;
+    if (id == EPS_PARAM_SLEW_RATE_PCT && value <= 0.0f)               return false;
+
     float *fields = (float *)&test_eps_active;
     fields[id] = value;
     return true;
@@ -123,6 +128,51 @@ static void test_reject_out_of_range_id(void)
     ASSERT_FALSE(test_EPS_Params_Set((eps_param_id_t)99, 1.0f));
 }
 
+static void test_reject_zero_deadband(void)
+{
+    /* deadband_deg <= 0 must be rejected (would disable deadband) */
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 0.0f));
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, -1.0f));
+    /* Positive values must be accepted */
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 1.8f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 0.1f));
+}
+
+static void test_reject_invalid_max_pwm(void)
+{
+    /* max_pwm_pct must be > 0 and <= 100 */
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 0.0f));
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, -5.0f));
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 100.1f));
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 200.0f));
+    /* Valid boundary values must be accepted */
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 60.0f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 100.0f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 1.0f));
+}
+
+static void test_reject_zero_slew(void)
+{
+    /* slew_rate_pct <= 0 must be rejected (would freeze slew) */
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 0.0f));
+    ASSERT_FALSE(test_EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, -0.1f));
+    /* Positive slew accepted */
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 5.883f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 0.1f));
+}
+
+static void test_accept_valid_mechanical(void)
+{
+    /* All four new mechanical-limit parameters accept their default values */
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_DEADBAND_DEG,     1.8f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT,      60.0f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT,    5.883f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_CENTER_OFFSET_DEG, 0.0f));
+    /* center_offset_deg has no hard ±range guard — any finite value accepted */
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_CENTER_OFFSET_DEG, -5.0f));
+    ASSERT_TRUE(test_EPS_Params_Set(EPS_PARAM_CENTER_OFFSET_DEG,  5.0f));
+}
+
 /* ---- main ---- */
 
 int main(void)
@@ -135,6 +185,10 @@ int main(void)
     test_accept_valid_divisors();
     test_accept_valid_normal();
     test_reject_out_of_range_id();
+    test_reject_zero_deadband();
+    test_reject_invalid_max_pwm();
+    test_reject_zero_slew();
+    test_accept_valid_mechanical();
 
     printf("\n--- eps_params tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

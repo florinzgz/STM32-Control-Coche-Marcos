@@ -35,7 +35,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 17;
+static constexpr int     NUM_MAIN_ITEMS = 19;
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -58,12 +58,14 @@ static constexpr int     PAGE1_ITEM_COUNT = 9;   // items 0..8
 static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
     "TEMP", "FACTORY", "DTC", "MAINT.",
-    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT"
+    "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
+    "EPS", "STEER"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
-    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY"
+    "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
+    "TUNING", "DIAG"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -88,7 +90,9 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_AMBER,   // 13 Reset Touch Cal     — destructive
     ui::COL_CYAN,    // 14 MCP23017 Live       — diagnostic
     ui::COL_BLUE,    // 15 Gear Power Limits   — configuration
-    ui::COL_BLUE     // 16 Display Brightness  — configuration
+    ui::COL_BLUE,    // 16 Display Brightness  — configuration
+    ui::COL_GREEN,   // 17 EPS Tuning          — calibration
+    ui::COL_CYAN     // 18 Steer Diagnostics   — diagnostic
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -581,6 +585,52 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         if (changed) { gearLimitsChanged_ = true; needsRedraw_ = true; }
     }
 
+    // EPS Tuning: detect fresh telemetry and issue periodic QUERY
+    if (currentMenu_ == SubMenu::EPS_TUNING || currentMenu_ == SubMenu::STEER_DIAG) {
+        const auto& eps = data.epsParams();
+        if (eps.valid && eps.timestampMs != epsLastTs_) {
+            epsLastTs_      = eps.timestampMs;
+            epsDataChanged_ = true;
+            steerDiagChanged_ = true;
+            needsRedraw_    = true;
+        }
+        if ((frameTimeMs - epsLastQueryMs_) >= EPS_QUERY_INTERVAL_MS) {
+            sendEpsQuery();
+            epsLastQueryMs_ = frameTimeMs;
+        }
+        // EPS SAVE: consume CMD_ACK if we are waiting for one
+        if (epsSaveWait_) {
+            const auto& ad = data.ack();
+            if (ad.cmdIdLow == 0x10 && ad.timestampMs != lastAckTracked_) {
+                lastAckTracked_ = ad.timestampMs;
+                if (ad.result == can::AckResult::OK) {
+                    epsAck_ = EpsAck::SAVED;
+                } else if (ad.result == can::AckResult::BLOCKED_BY_SAFETY) {
+                    epsAck_ = EpsAck::REJECTED;
+                } else if (ad.result == can::AckResult::INVALID) {
+                    epsAck_ = EpsAck::INVALID;
+                } else {
+                    epsAck_ = EpsAck::REJECTED;
+                }
+                epsSaveWait_ = false;
+                epsAckMs_    = frameTimeMs;
+                needsRedraw_ = true;
+            }
+        }
+        // EPS SAVE timeout watchdog
+        if (epsSaveWait_ && (frameTimeMs - epsSaveSentMs_) >= EPS_SAVE_TIMEOUT_MS) {
+            epsSaveWait_ = false;
+            epsAck_      = EpsAck::TIMEOUT;
+            epsAckMs_    = frameTimeMs;
+            needsRedraw_ = true;
+        }
+        // Clear ACK banner after EPS_ACK_CLEAR_MS
+        if (epsAck_ != EpsAck::NONE && (frameTimeMs - epsAckMs_) >= EPS_ACK_CLEAR_MS) {
+            epsAck_ = EpsAck::NONE;
+            needsRedraw_ = true;
+        }
+    }
+
     // Cache encoder calibration telemetry
     if (currentMenu_ == SubMenu::ENCODER_CAL) {
         bool changed = false;
@@ -808,6 +858,8 @@ void EngineeringScreen::draw() {
             case SubMenu::MCP23017_LIVE:    drawMcpLiveDiag();         break;
             case SubMenu::GEAR_LIMITS:      drawGearLimits();          break;
             case SubMenu::BRIGHTNESS:       drawBrightness();          break;
+            case SubMenu::EPS_TUNING:       drawEpsTuning();           break;
+            case SubMenu::STEER_DIAG:       drawSteerDiag();           break;
         }
     }
 
@@ -1805,6 +1857,45 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             brightnessDirty_ = false;
                             currentMenu_ = SubMenu::BRIGHTNESS;
                             break;
+                        case 17:
+                            // Open EPS Steering Tuning editor.  Pre-populate
+                            // edit array from the latest 0x30F telemetry; send
+                            // a QUERY immediately so the screen fills quickly.
+                            {
+                                auto& eps = data_.epsParams();
+                                if (eps.valid) {
+                                    epsEdit_[0]  = eps.assistStrength;
+                                    epsEdit_[1]  = eps.centerStrength;
+                                    epsEdit_[2]  = eps.damping;
+                                    epsEdit_[3]  = eps.frictionComp;
+                                    epsEdit_[4]  = eps.coastBandPct;
+                                    epsEdit_[5]  = eps.minDrivePct;
+                                    epsEdit_[6]  = eps.assistVsSpeed;
+                                    epsEdit_[7]  = eps.returnVsSpeed;
+                                    epsEdit_[8]  = eps.deadbandDeg;
+                                    epsEdit_[9]  = eps.maxPwmPct;
+                                    epsEdit_[10] = eps.slewRatePct;
+                                    epsEdit_[11] = eps.centerOffsetDeg;
+                                }
+                                epsPage_        = 0;
+                                epsEditActive_  = false;
+                                epsDataChanged_ = true;
+                                epsAck_         = EpsAck::NONE;
+                                epsSaveWait_    = false;
+                                epsRestoreArm_  = false;
+                                epsLastTs_      = 0;
+                                epsLastQueryMs_ = 0;
+                            }
+                            currentMenu_ = SubMenu::EPS_TUNING;
+                            break;
+                        case 18:
+                            // Open live steering diagnostic.  Send a QUERY
+                            // immediately; the display auto-refreshes from 0x30F.
+                            steerDiagChanged_ = true;
+                            steerDiagLastTs_  = 0;
+                            steerDiagQueryMs_ = 0;
+                            currentMenu_ = SubMenu::STEER_DIAG;
+                            break;
                         default:
                             break;
                     }
@@ -2079,6 +2170,93 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 needsRedraw_ = true;
                 return true;
             }
+        }
+        return false;
+    }
+
+    // ---- EPS TUNING touch handler ----
+    if (currentMenu_ == SubMenu::EPS_TUNING) {
+        // Row layout constants (must match drawEpsTuning)
+        static constexpr int16_t ROW_H   = 34;
+        static constexpr int16_t ROW0_Y  = 42;
+        static constexpr int16_t BTN_W   = 32;
+        static constexpr int16_t BTN_H   = 26;
+        static constexpr int16_t PLUS_X  = ui::SCREEN_W - BTN_W - 6;
+        static constexpr int16_t MINUS_X = PLUS_X - BTN_W - 4;
+        static constexpr int16_t TB_Y    = ui::SCREEN_H - 34;
+        static constexpr int16_t TB_H    = 32;
+        static constexpr int16_t TB_BW   = 74;
+
+        struct EpsRowMeta { uint8_t idx; float step; float vmin; float vmax; };
+        static constexpr EpsRowMeta kMeta[EPS_PAGES][4] = {
+            { {0,0.05f,0.0f,2.0f},{1,0.05f,0.0f,2.0f},{2,0.01f,0.0f,1.0f},{3,0.01f,0.0f,0.5f} },
+            { {4,0.5f,0.0f,20.0f},{5,1.0f,1.0f,50.0f},{6,1.0f,0.0f,100.0f},{7,1.0f,0.0f,100.0f} },
+            { {8,0.1f,0.1f,10.0f},{9,1.0f,5.0f,100.0f},{10,0.1f,0.1f,20.0f},{11,0.1f,-10.0f,10.0f} },
+        };
+
+        // Toolbar buttons (bottom row)
+        if (y >= TB_Y && y <= TB_Y + TB_H) {
+            if (x < TB_BW) {
+                // BACK
+                currentMenu_ = SubMenu::MAIN;
+                needsRedraw_ = true;
+                return true;
+            } else if (x < 2 * TB_BW + 2) {
+                // PAGE
+                epsPage_ = (epsPage_ + 1) % EPS_PAGES;
+                needsRedraw_ = true;
+                return true;
+            } else if (x < 3 * TB_BW + 4) {
+                // SAVE — send all 12 params then SAVE opcode
+                for (uint8_t i = 0; i < 12; ++i) {
+                    sendEpsParamOp(can::EPS_PARAM_OP_SET_PARAM, i, epsEdit_[i]);
+                }
+                sendEpsParamOp(can::EPS_PARAM_OP_SAVE, 0, 0.0f);
+                epsSaveWait_   = true;
+                epsSaveSentMs_ = millis();
+                needsRedraw_   = true;
+                return true;
+            } else {
+                // RESET defaults (STANDBY only — STM32 validates)
+                sendEpsParamOp(can::EPS_PARAM_OP_RESET, 0, 0.0f);
+                epsAck_    = EpsAck::NONE;
+                epsAckMs_  = millis();
+                needsRedraw_ = true;
+                return true;
+            }
+        }
+
+        // +/- buttons in parameter rows
+        for (int r = 0; r < 4; ++r) {
+            int16_t ry = ROW0_Y + r * ROW_H;
+            if (y < ry + 2 || y > ry + 2 + BTN_H) continue;
+            const auto& m = kMeta[epsPage_][r];
+            bool plus  = (x >= PLUS_X  && x <= PLUS_X  + BTN_W);
+            bool minus = (x >= MINUS_X && x <= MINUS_X + BTN_W);
+            if (!plus && !minus) continue;
+            float v = epsEdit_[m.idx];
+            v += plus ? m.step : -m.step;
+            // clamp to valid range
+            if (v < m.vmin) v = m.vmin;
+            if (v > m.vmax) v = m.vmax;
+            epsEdit_[m.idx] = v;
+            epsEditActive_ = true;
+            // Real-time SET_PARAM — STM32 applies immediately (no STANDBY gate)
+            sendEpsParamOp(can::EPS_PARAM_OP_SET_PARAM, m.idx, v);
+            needsRedraw_ = true;
+            return true;
+        }
+        return false;
+    }
+
+    // ---- STEER DIAG touch handler ----
+    if (currentMenu_ == SubMenu::STEER_DIAG) {
+        // Only BACK button is interactive
+        if (x >= BACK_X && x <= BACK_X + BACK_W &&
+            y >= BACK_Y && y <= BACK_Y + BACK_H) {
+            currentMenu_ = SubMenu::MAIN;
+            needsRedraw_ = true;
+            return true;
         }
         return false;
     }
@@ -2579,6 +2757,24 @@ void EngineeringScreen::drawTileIcon(uint8_t item, int16_t cx, int16_t cy,
             tft.drawLine(cx + 10, cy - 10, cx + 7, cy - 7, col);
             tft.drawLine(cx - 10, cy + 10, cx - 7, cy + 7, col);
             tft.drawLine(cx + 10, cy + 10, cx + 7, cy + 7, col);
+            break;
+
+        case 17:  // EPS Tuning — steering wheel with crosshair
+            tft.drawCircle(cx, cy, 11, col);
+            tft.drawCircle(cx, cy,  4, col);
+            tft.drawFastVLine(cx, cy - 14, 4, col);
+            tft.drawFastVLine(cx, cy + 10, 4, col);
+            tft.drawFastHLine(cx - 14, cy, 4, col);
+            tft.drawFastHLine(cx + 10, cy, 4, col);
+            break;
+
+        case 18:  // Steer Diagnostic — oscilloscope trace icon
+            tft.drawRect(cx - 12, cy - 8, 24, 16, col);
+            // Simple zigzag waveform inside box
+            tft.drawLine(cx - 9, cy,     cx - 5, cy - 5, col);
+            tft.drawLine(cx - 5, cy - 5, cx,     cy + 5, col);
+            tft.drawLine(cx,     cy + 5, cx + 5, cy - 5, col);
+            tft.drawLine(cx + 5, cy - 5, cx + 9, cy,     col);
             break;
 
         default:
@@ -4140,4 +4336,273 @@ void EngineeringScreen::drawMcpLiveDiag() {
     tft.setTextDatum(MC_DATUM);
     tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
     tft.setTextDatum(TL_DATUM);
+}
+
+// =========================================================================
+// sendEpsParamOp / sendEpsQuery
+//
+// sendEpsParamOp with op=EPS_PARAM_OP_SET_PARAM sends a 7-byte SERVICE_CMD:
+//   byte0 = 0xF9, byte1 = op, byte2 = paramId, bytes3-6 = float LE.
+// For SAVE / RESET / QUERY only bytes 0-1 are used (DLC 2).
+// The STM32 validates, applies, and returns CMD_ACK (0x103, byte0 = 0x10).
+// =========================================================================
+void EngineeringScreen::sendEpsParamOp(uint8_t op, uint8_t paramId, float value) {
+    CanFrame frame = {};
+    frame.identifier = can::SERVICE_CMD;
+    frame.extd       = 0;
+    if (op == can::EPS_PARAM_OP_SET_PARAM) {
+        frame.data_length_code = 7;
+        frame.data[0] = can::SERVICE_ACTION_EPS_PARAMS;
+        frame.data[1] = op;
+        frame.data[2] = paramId;
+        uint32_t bits = 0;
+        memcpy(&bits, &value, sizeof(bits));
+        frame.data[3] = (uint8_t)(bits & 0xFFu);
+        frame.data[4] = (uint8_t)((bits >>  8) & 0xFFu);
+        frame.data[5] = (uint8_t)((bits >> 16) & 0xFFu);
+        frame.data[6] = (uint8_t)((bits >> 24) & 0xFFu);
+    } else {
+        frame.data_length_code = 2;
+        frame.data[0] = can::SERVICE_ACTION_EPS_PARAMS;
+        frame.data[1] = op;
+    }
+    ESP32Can.writeFrame(frame, 0);
+}
+
+void EngineeringScreen::sendEpsQuery() {
+    sendEpsParamOp(can::EPS_PARAM_OP_QUERY, 0, 0.0f);
+}
+
+// =========================================================================
+// EPS TUNING editor (EPS_TUNING submenu)
+//
+// Three-page parameter editor with real-time SET_PARAM feedback.
+// Page 0: ASSIST/CENTER_STR/DAMPING/FRICTION — gain parameters
+// Page 1: COAST_BAND/MIN_DRIVE/ASSIST_VS_SPEED/RETURN_VS_SPEED — shaping
+// Page 2: DEADBAND/MAX_PWM/SLEW_RATE/CENTER_OFFSET — mechanical limits
+//
+// Each parameter row: label, current-edit value, +/- buttons.
+// SAVE: persists to STM32 flash (requires STANDBY, validated server-side).
+// RESET: restores STM32 defaults (STANDBY only).
+// =========================================================================
+void EngineeringScreen::drawEpsTuning() {
+    static constexpr int16_t ROW_H   = 34;
+    static constexpr int16_t ROW_X   = 6;
+    static constexpr int16_t ROW0_Y  = 42;
+    static constexpr int16_t BTN_W   = 32;
+    static constexpr int16_t BTN_H   = 26;
+    static constexpr int16_t PLUS_X  = ui::SCREEN_W - BTN_W - 6;
+    static constexpr int16_t MINUS_X = PLUS_X - BTN_W - 4;
+
+    // Parameter metadata: label, edit-array index, step, min, max, unit
+    struct EpsRow {
+        const char* label;
+        uint8_t     idx;
+        float       step;
+        float       vmin;
+        float       vmax;
+        const char* unit;
+    };
+    static constexpr EpsRow kRows[EPS_PAGES][4] = {
+        // Page 0 — gain parameters
+        {
+            { "ASSIST STR",   0, 0.05f,  0.0f,   2.0f,  "" },
+            { "CENTER STR",   1, 0.05f,  0.0f,   2.0f,  "" },
+            { "DAMPING",      2, 0.01f,  0.0f,   1.0f,  "" },
+            { "FRICTION",     3, 0.01f,  0.0f,   0.5f,  "" },
+        },
+        // Page 1 — speed / coast shaping
+        {
+            { "COAST BAND %", 4, 0.5f,   0.0f,  20.0f, "%" },
+            { "MIN DRIVE %",  5, 1.0f,   1.0f,  50.0f, "%" },
+            { "ASSISTvSPD",   6, 1.0f,   0.0f, 100.0f, "" },
+            { "RETURNvSPD",   7, 1.0f,   0.0f, 100.0f, "" },
+        },
+        // Page 2 — mechanical limits
+        {
+            { "DEADBAND",     8, 0.1f,   0.1f,  10.0f, "d" },
+            { "MAX PWM %",    9, 1.0f,   5.0f, 100.0f, "%" },
+            { "SLEW RATE %", 10, 0.1f,   0.1f,  20.0f, "%" },
+            { "CTR OFFSET",  11, 0.1f, -10.0f,  10.0f, "d" },
+        },
+    };
+
+    tft.setTextDatum(TL_DATUM);
+
+    // Header
+    tft.fillRect(0, 0, ui::SCREEN_W, 38, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_GREEN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("EPS TUNING", ui::SCREEN_W / 2, 13);
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_DARK_GRAY);
+    char pageBuf[12];
+    snprintf(pageBuf, sizeof(pageBuf), "PG %u/%u", epsPage_ + 1u, (unsigned)EPS_PAGES);
+    tft.drawString(pageBuf, ui::SCREEN_W / 2, 28);
+    tft.setTextDatum(TL_DATUM);
+
+    const auto& rows = kRows[epsPage_];
+
+    for (int r = 0; r < 4; ++r) {
+        int16_t ry  = ROW0_Y + r * ROW_H;
+        uint8_t idx = rows[r].idx;
+        float   val = epsEdit_[idx];
+
+        uint16_t bg = (r & 1) ? (uint16_t)0x1082U : ui::COL_BG;
+        tft.fillRect(0, ry, ui::SCREEN_W, ROW_H - 2, bg);
+
+        tft.setTextColor(ui::COL_CYAN, bg);
+        tft.setTextSize(1);
+        tft.drawString(rows[r].label, ROW_X, ry + 4);
+
+        char valBuf[20];
+        snprintf(valBuf, sizeof(valBuf), "%.3f%s", val, rows[r].unit);
+        tft.setTextColor(ui::COL_WHITE, bg);
+        tft.setTextSize(2);
+        tft.drawString(valBuf, ROW_X, ry + 14);
+
+        // − button
+        tft.fillRect(MINUS_X, ry + 2, BTN_W, BTN_H, ui::COL_DARK_GRAY);
+        tft.drawRect(MINUS_X, ry + 2, BTN_W, BTN_H, ui::COL_AMBER);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        tft.setTextSize(2);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("-", MINUS_X + BTN_W / 2, ry + 2 + BTN_H / 2);
+
+        // + button
+        tft.fillRect(PLUS_X, ry + 2, BTN_W, BTN_H, ui::COL_DARK_GRAY);
+        tft.drawRect(PLUS_X, ry + 2, BTN_W, BTN_H, ui::COL_GREEN);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        tft.drawString("+", PLUS_X + BTN_W / 2, ry + 2 + BTN_H / 2);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    // Bottom toolbar: BACK | PAGE | SAVE | RESET
+    static constexpr int16_t TB_Y  = ui::SCREEN_H - 34;
+    static constexpr int16_t TB_H  = 32;
+    static constexpr int16_t TB_BW = 74;
+
+    tft.setTextSize(1);
+    tft.setTextDatum(MC_DATUM);
+    tft.fillRect(0, TB_Y, TB_BW, TB_H, ui::COL_DARK_GRAY);
+    tft.drawRect(0, TB_Y, TB_BW, TB_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.drawString("BACK", TB_BW / 2, TB_Y + TB_H / 2);
+
+    tft.fillRect(TB_BW + 2, TB_Y, TB_BW, TB_H, ui::COL_DARK_GRAY);
+    tft.drawRect(TB_BW + 2, TB_Y, TB_BW, TB_H, ui::COL_CYAN);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.drawString("PAGE", TB_BW + 2 + TB_BW / 2, TB_Y + TB_H / 2);
+
+    tft.fillRect(2 * TB_BW + 4, TB_Y, TB_BW, TB_H, ui::COL_DARK_GRAY);
+    tft.drawRect(2 * TB_BW + 4, TB_Y, TB_BW, TB_H, ui::COL_GREEN);
+    tft.setTextColor(ui::COL_GREEN, ui::COL_DARK_GRAY);
+    tft.drawString("SAVE", 2 * TB_BW + 4 + TB_BW / 2, TB_Y + TB_H / 2);
+
+    int16_t rstX = 3 * TB_BW + 6;
+    int16_t rstW = ui::SCREEN_W - rstX;
+    tft.fillRect(rstX, TB_Y, rstW, TB_H, ui::COL_DARK_GRAY);
+    tft.drawRect(rstX, TB_Y, rstW, TB_H, ui::COL_RED);
+    tft.setTextColor(ui::COL_RED, ui::COL_DARK_GRAY);
+    tft.drawString("RESET", rstX + rstW / 2, TB_Y + TB_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // ACK banner
+    if (epsAck_ != EpsAck::NONE) {
+        const char* ackStr = "";
+        uint16_t    ackCol = ui::COL_WHITE;
+        switch (epsAck_) {
+        case EpsAck::SAVED:    ackStr = "SAVED OK";      ackCol = ui::COL_GREEN;  break;
+        case EpsAck::REJECTED: ackStr = "REJECTED";      ackCol = ui::COL_RED;    break;
+        case EpsAck::INVALID:  ackStr = "INVALID VALUE"; ackCol = ui::COL_AMBER;  break;
+        case EpsAck::TIMEOUT:  ackStr = "TIMEOUT";       ackCol = ui::COL_AMBER;  break;
+        default: break;
+        }
+        tft.fillRect(0, TB_Y - 18, ui::SCREEN_W, 16, ui::COL_BG);
+        tft.setTextColor(ackCol, ui::COL_BG);
+        tft.setTextSize(1);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(ackStr, ui::SCREEN_W / 2, TB_Y - 10);
+        tft.setTextDatum(TL_DATUM);
+    }
+
+    epsDataChanged_ = false;
+}
+
+// =========================================================================
+// STEER DIAG live view (STEER_DIAG submenu)
+//
+// Shows live values from the most-recent 0x30F kind-4 telemetry frame plus
+// selected gain parameters.  Auto-refreshes via epsDataChanged_.
+// =========================================================================
+void EngineeringScreen::drawSteerDiag() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header
+    tft.fillRect(0, 0, ui::SCREEN_W, 34, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("STEER DIAG", ui::SCREEN_W / 2, 16);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    const auto& eps = data_.epsParams();
+    static constexpr int16_t LX = 8;
+    static constexpr int16_t VX = 200;
+    static constexpr int16_t RH = 18;
+    int16_t y = 42;
+
+    auto row = [&](const char* label, const char* valStr, uint16_t col) {
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString(label, LX, y);
+        tft.setTextColor(col, ui::COL_BG);
+        tft.drawString(valStr, VX, y);
+        y += RH;
+    };
+
+    char buf[24];
+    if (eps.valid) {
+        snprintf(buf, sizeof(buf), "%d", (int)eps.encRaw);
+        row("Encoder Raw",    buf, ui::COL_WHITE);
+        snprintf(buf, sizeof(buf), "%.1f deg", eps.angleDeg);
+        row("Steer Angle",    buf, ui::COL_CYAN);
+        snprintf(buf, sizeof(buf), "%.1f%%", eps.motorEffortPct);
+        uint16_t efCol = (fabsf(eps.motorEffortPct) > 80.0f) ? ui::COL_RED : ui::COL_GREEN;
+        row("PWM Applied",    buf, efCol);
+        snprintf(buf, sizeof(buf), "%u", (unsigned)eps.steerState);
+        row("Steer State",    buf, ui::COL_WHITE);
+        snprintf(buf, sizeof(buf), "%.2f deg", eps.centerOffsetDeg);
+        row("Center Offset",  buf, ui::COL_AMBER);
+    } else {
+        row("Encoder Raw",    "---", ui::COL_GRAY);
+        row("Steer Angle",    "---", ui::COL_GRAY);
+        row("PWM Applied",    "---", ui::COL_GRAY);
+        row("Steer State",    "---", ui::COL_GRAY);
+        row("Center Offset",  "---", ui::COL_GRAY);
+    }
+    y += 4;
+
+    snprintf(buf, sizeof(buf), "%.3f", epsEdit_[0]);
+    row("Assist Gain",    buf, ui::COL_WHITE);
+    snprintf(buf, sizeof(buf), "%.3f", epsEdit_[2]);
+    row("Damping",        buf, ui::COL_WHITE);
+    snprintf(buf, sizeof(buf), "%.1f deg", epsEdit_[8]);
+    row("Deadband",       buf, ui::COL_WHITE);
+    snprintf(buf, sizeof(buf), "%.1f%%",   epsEdit_[10]);
+    row("Slew Rate",      buf, ui::COL_WHITE);
+
+    tft.setTextColor(eps.valid ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
+    tft.drawString(eps.valid ? "LIVE" : "NO DATA", LX, y + 4);
+
+    // BACK button
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_AMBER);
+    tft.setTextColor(ui::COL_AMBER, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    steerDiagChanged_ = false;
 }

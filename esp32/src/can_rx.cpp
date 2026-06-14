@@ -385,9 +385,60 @@ static void decodeSteeringZ(const CanFrame& f, vehicle::VehicleData& data) {
     data.setSteeringZ(d);
 }
 
-// -------------------------------------------------------------------------
-// Debug: RX frame counter and first-frame logging
-// -------------------------------------------------------------------------
+// 0x30F DIAG_EPS_PARAMS — EPS parameter + live-state telemetry (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c eps_send_all_kinds().
+// Five frame kinds share the 0x30F ID; kind is byte0 bits 7-4.
+static void decodeEpsParams(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::EpsParamsData d = data.epsParams();  // preserve other kinds
+    const uint8_t kind  = (uint8_t)(f.data[0] >> 4);
+    const uint8_t flags = (uint8_t)(f.data[0] & 0x0FU);
+    d.flashValid   = (flags & 0x01U) != 0;
+    d.sysInStandby = (flags & 0x02U) != 0;
+
+    auto rd16 = [&](int i) -> int16_t {
+        return (int16_t)((uint16_t)f.data[i] | ((uint16_t)f.data[i + 1] << 8));
+    };
+
+    switch (kind) {
+    case 0:
+        d.assistStrength = rd16(1) / 1000.0f;
+        d.centerStrength = rd16(3) / 1000.0f;
+        d.damping        = rd16(5) / 1000.0f;
+        d.kindsReceived |= 0x01U;
+        break;
+    case 1:
+        d.frictionComp = rd16(1) / 1000.0f;
+        d.coastBandPct = rd16(3) /  100.0f;
+        d.minDrivePct  = rd16(5) /  100.0f;
+        d.kindsReceived |= 0x02U;
+        break;
+    case 2:
+        d.assistVsSpeed = rd16(1) /  10.0f;
+        d.returnVsSpeed = rd16(3) /  10.0f;
+        d.deadbandDeg   = rd16(5) / 100.0f;
+        d.kindsReceived |= 0x04U;
+        break;
+    case 3:
+        d.maxPwmPct       = rd16(1) / 100.0f;
+        d.slewRatePct     = rd16(3) / 100.0f;
+        d.centerOffsetDeg = rd16(5) / 100.0f;
+        d.kindsReceived |= 0x08U;
+        break;
+    case 4:
+        d.encRaw         = rd16(1);
+        d.angleDeg       = rd16(3) / 10.0f;
+        d.motorEffortPct = rd16(5) / 10.0f;
+        d.steerState     = f.data[7];
+        d.kindsReceived |= 0x10U;
+        break;
+    default:
+        return;
+    }
+    d.valid       = true;
+    d.timestampMs = millis();
+    data.setEpsParams(d);
+}
 static uint32_t rxFrameCount  = 0;  // Total CAN frames received since boot
 static uint32_t lastRxLogMs   = 0;  // Timestamp of last periodic RX log
 
@@ -445,6 +496,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
             case can::DIAG_STEERING_Z:      decodeSteeringZ(frame, data);         break;
+            case can::DIAG_EPS_PARAMS:      decodeEpsParams(frame, data);         break;
             default:
                 // Unknown CAN ID — silently ignored
                 break;

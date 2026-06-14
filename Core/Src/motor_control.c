@@ -2084,20 +2084,20 @@ void Steering_ControlLoop(void)
      * the ~3° of slop between the encoder/motor side and the road
      * wheels.  Applied in deg (the global unit) after sanitisation,
      * before the ω estimate so ω also sees theta clamped to 0.     */
-    if (fabsf(theta) < STEERING_DEADBAND_DEG) {
-        theta = 0.0f;
+    const eps_params_t *p = EPS_Params_Get();
+
+    float eff_theta = theta - p->center_offset_deg;
+    if (fabsf(eff_theta) < p->deadband_deg) {
+        eff_theta = 0.0f;
     }
 
     /* ---- Angular velocity ω (°/s) ---- */
-    float omega_raw = (theta - eps_prev_angle_deg) / dt;
+    float omega_raw = (eff_theta - eps_prev_angle_deg) / dt;
     omega_raw = sanitize_float(omega_raw, 0.0f);
-    eps_prev_angle_deg = theta;
+    eps_prev_angle_deg = eff_theta;
 
     /* EMA filter: α = 0.3 */
     eps_omega_filt = eps_omega_filt + 0.3f * (omega_raw - eps_omega_filt);
-
-    /* ---- Load calibration parameters ---- */
-    const eps_params_t *p = EPS_Params_Get();
 
     /* ---- Vehicle speed (average of 4 wheels, km/h) ---- */
     float v_kmh = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
@@ -2127,16 +2127,16 @@ void Steering_ControlLoop(void)
      * Helps overcome static friction when the wheel is displaced and
      * nearly stopped (return-to-center scenario).                     */
     float fric_sign = 0.0f;
-    if (abs_omega < 2.0f && fabsf(theta) > 1.0f) {
-        fric_sign = (theta > 0.0f) ? -1.0f : 1.0f;
+    if (abs_omega < 2.0f && fabsf(eff_theta) > 1.0f) {
+        fric_sign = (eff_theta > 0.0f) ? -1.0f : 1.0f;
     }
 
     /* ---- Torque equation ---- */
     float tau = 0.0f;
-    tau += lambda * p->assist_strength * g_v * eps_omega_filt;       /* assist  */
-    tau -= (1.0f - lambda) * p->center_strength * h_v * theta;       /* return  */
-    tau -= p->damping * eps_omega_filt;                               /* damp    */
-    tau += p->friction_comp * fric_sign;                              /* friction*/
+    tau += lambda * p->assist_strength * g_v * eps_omega_filt;          /* assist  */
+    tau -= (1.0f - lambda) * p->center_strength * h_v * eff_theta;      /* return  */
+    tau -= p->damping * eps_omega_filt;                                  /* damp    */
+    tau += p->friction_comp * fric_sign;                                 /* friction*/
 
     /* ---- High-speed safety: gradually reduce assist above 20 km/h ----
      * Previous implementation used a hard step at 25 km/h (tau *= 0.5),
@@ -2158,10 +2158,10 @@ void Steering_ControlLoop(void)
     }
     tau = sanitize_float(tau, 0.0f);
 
-    /* ---- Torque → PWM% (clamp ±60%) ---- */
+    /* ---- Torque → PWM% (clamp to ±max_pwm_pct) ---- */
     float pwm_pct = tau;
-    if (pwm_pct >  60.0f) pwm_pct =  60.0f;
-    if (pwm_pct < -60.0f) pwm_pct = -60.0f;
+    if (pwm_pct >  p->max_pwm_pct) pwm_pct =  p->max_pwm_pct;
+    if (pwm_pct < -p->max_pwm_pct) pwm_pct = -p->max_pwm_pct;
 
     /* ---- Dead-zone compensation: jump to min_drive_pct ---- */
     float abs_pct = fabsf(pwm_pct);
@@ -2179,10 +2179,12 @@ void Steering_ControlLoop(void)
     /* ---- Convert to PWM counts ---- */
     int16_t pwm_raw = (int16_t)(pwm_pct * (float)PWM_PERIOD / 100.0f);
 
-    /* ---- Slew-rate limit: ±250 counts per cycle ---- */
+    /* ---- Slew-rate limit (from params: slew_rate_pct × PWM_PERIOD / 100) ---- */
+    int16_t slew_counts = (int16_t)(p->slew_rate_pct * (float)PWM_PERIOD / 100.0f);
+    if (slew_counts < 1) slew_counts = 1;
     int16_t delta_pwm = pwm_raw - eps_prev_pwm_raw;
-    if (delta_pwm >  250) pwm_raw = eps_prev_pwm_raw + 250;
-    if (delta_pwm < -250) pwm_raw = eps_prev_pwm_raw - 250;
+    if (delta_pwm >  slew_counts) pwm_raw = eps_prev_pwm_raw + slew_counts;
+    if (delta_pwm < -slew_counts) pwm_raw = eps_prev_pwm_raw - slew_counts;
     eps_prev_pwm_raw = pwm_raw;
 
     /* ---- Direction + absolute PWM ---- */
@@ -2203,6 +2205,16 @@ float Steering_GetCurrentAngle(void)
     /* Encoder mounted on steering column: divide by STEERING_GEAR_RATIO
      * to return road-wheel degrees (single conversion point).          */
     return ((float)cnt * 360.0f / (float)ENCODER_CPR) / STEERING_GEAR_RATIO;
+}
+
+float Steering_GetMotorEffortPct(void)
+{
+    return eps_motor_effort;
+}
+
+int32_t Steering_GetEncoderRaw(void)
+{
+    return (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
 }
 
 bool Steering_IsCalibrated(void)

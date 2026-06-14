@@ -57,14 +57,19 @@ typedef struct {
 
 /* ---- Compiled defaults ---- */
 static const eps_params_t eps_defaults = {
-    .assist_strength = 0.45f,
-    .center_strength = 0.30f,
-    .damping         = 0.10f,
-    .friction_comp   = 0.05f,
-    .coast_band_pct  = 3.0f,
-    .min_drive_pct   = 8.0f,
-    .assist_vs_speed = 18.0f,
-    .return_vs_speed = 35.0f,
+    .assist_strength  = 0.45f,
+    .center_strength  = 0.30f,
+    .damping          = 0.10f,
+    .friction_comp    = 0.05f,
+    .coast_band_pct   = 3.0f,
+    .min_drive_pct    = 8.0f,
+    .assist_vs_speed  = 18.0f,
+    .return_vs_speed  = 35.0f,
+    /* Mechanical / output stage — defaults reproduce previous hardcoded values */
+    .deadband_deg     = 1.8f,   /* STEERING_DEADBAND_DEG (motor_control.c)  */
+    .max_pwm_pct      = 60.0f,  /* Hardcoded ±60 % clamp in Steering_ControlLoop */
+    .slew_rate_pct    = 5.883f, /* 250 cts / 4249 cts_max × 100 %           */
+    .center_offset_deg = 0.0f,  /* No offset at factory                     */
 };
 
 /* ---- RAM state ---- */
@@ -172,6 +177,17 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
         return false;
     }
 
+    /* Mechanical parameter range guards.
+     * deadband_deg: must be > 0 (zero deadband causes hunting)
+     * max_pwm_pct:  must be in (0, 100] (0 would disable steering; >100 meaningless)
+     * slew_rate_pct: must be > 0 (zero slew would freeze PWM output)
+     * center_offset_deg: any finite value is accepted; extremely large offsets
+     *   are not explicitly blocked here but will be clamped in the control loop
+     *   by the ±MAX_STEER_DEG encoder guard.                         */
+    if (id == EPS_PARAM_DEADBAND_DEG && value <= 0.0f)  return false;
+    if (id == EPS_PARAM_MAX_PWM_PCT  && (value <= 0.0f || value > 100.0f)) return false;
+    if (id == EPS_PARAM_SLEW_RATE_PCT && value <= 0.0f) return false;
+
     float *fields = (float *)&eps_active;
     fields[id] = value;
     return true;
@@ -180,6 +196,16 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
 void EPS_Params_ResetDefaults(void)
 {
     memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
+}
+
+const eps_params_t *EPS_Params_GetDefaults(void)
+{
+    return &eps_defaults;
+}
+
+bool EPS_Params_IsFlashValid(void)
+{
+    return eps_persisted_valid;
 }
 
 bool EPS_Params_Save(void)

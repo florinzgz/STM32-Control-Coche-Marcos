@@ -258,6 +258,35 @@ inline constexpr uint8_t STEER_Z_OP_QUERY     = 0x01;
 inline constexpr uint8_t STEER_Z_OP_CALIBRATE = 0x02;
 inline constexpr uint8_t STEER_Z_OP_CLEAR     = 0x03;
 
+// EPS parameter tuning sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_EPS_PARAMS (0xF9)
+// SET_PARAM applies immediately to the STM32 RAM copy (real-time tuning; no state gate).
+// SAVE and RESET require the STM32 in STANDBY.
+//   0x01 SET_PARAM  Immediate: byte2=param_id, bytes3-6=float LE value
+//   0x02 SAVE       Persist active RAM copy to STM32 flash (STANDBY only)
+//   0x03 RESET      Revert to compiled defaults, RAM only (STANDBY only)
+//   0x04 QUERY      Request a 1 s burst of 0x30F telemetry at 10 Hz
+inline constexpr uint32_t DIAG_EPS_PARAMS        = 0x30F;  // STM32→ESP32, DLC 8, on-demand
+inline constexpr uint8_t  SERVICE_ACTION_EPS_PARAMS = 0xF9;
+inline constexpr uint8_t  EPS_PARAM_OP_SET_PARAM  = 0x01;
+inline constexpr uint8_t  EPS_PARAM_OP_SAVE       = 0x02;
+inline constexpr uint8_t  EPS_PARAM_OP_RESET      = 0x03;
+inline constexpr uint8_t  EPS_PARAM_OP_QUERY      = 0x04;
+
+// EPS parameter IDs (eps_param_id_t mirror — MUST match Core/Inc/eps_params.h)
+inline constexpr uint8_t EPS_PARAM_ASSIST_STRENGTH  = 0;
+inline constexpr uint8_t EPS_PARAM_CENTER_STRENGTH  = 1;
+inline constexpr uint8_t EPS_PARAM_DAMPING          = 2;
+inline constexpr uint8_t EPS_PARAM_FRICTION_COMP    = 3;
+inline constexpr uint8_t EPS_PARAM_COAST_BAND_PCT   = 4;
+inline constexpr uint8_t EPS_PARAM_MIN_DRIVE_PCT    = 5;
+inline constexpr uint8_t EPS_PARAM_ASSIST_VS_SPEED  = 6;
+inline constexpr uint8_t EPS_PARAM_RETURN_VS_SPEED  = 7;
+inline constexpr uint8_t EPS_PARAM_DEADBAND_DEG     = 8;
+inline constexpr uint8_t EPS_PARAM_MAX_PWM_PCT      = 9;
+inline constexpr uint8_t EPS_PARAM_SLEW_RATE_PCT    = 10;
+inline constexpr uint8_t EPS_PARAM_CENTER_OFFSET_DEG = 11;
+inline constexpr uint8_t EPS_PARAM_COUNT            = 12;
+
 // Gear power-limit valid ranges (percent) — MUST mirror gear_limits_store.h
 // on the STM32 so the HMI never sends a value the firmware would reject.
 inline constexpr uint8_t GEAR_LIMIT_D2_MIN_PCT = 30;
