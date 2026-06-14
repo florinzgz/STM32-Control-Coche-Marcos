@@ -2256,7 +2256,7 @@ static void eps_send_all_kinds(void)
         int16_t a = eps_clamp_i16f(p->assist_strength * 1000.0f);
         int16_t b = eps_clamp_i16f(p->center_strength * 1000.0f);
         int16_t c = eps_clamp_i16f(p->damping         * 1000.0f);
-        payload[0] = (uint8_t)((0U << 4) | (flags & 0x0FU));
+        payload[0] = (uint8_t)(flags & 0x0FU);
         payload[1] = (uint8_t)(a & 0xFF); payload[2] = (uint8_t)(a >> 8);
         payload[3] = (uint8_t)(b & 0xFF); payload[4] = (uint8_t)(b >> 8);
         payload[5] = (uint8_t)(c & 0xFF); payload[6] = (uint8_t)(c >> 8);
