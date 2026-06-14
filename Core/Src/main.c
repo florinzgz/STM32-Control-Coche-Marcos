@@ -29,6 +29,8 @@
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
 #include "gear_limits_store.h"
+#include "drive_tuning_store.h"
+#include "battery_limits_store.h"
 #include "error_log.h"
 #include "loop_diag.h"
 #include <math.h>
@@ -332,6 +334,37 @@ int main(void)
         uint8_t rd2 = 0, rd1 = 0, rr = 0;
         GearLimitsStore_GetStoredResponse(&rd2, &rd1, &rr);
         (void)Traction_SetGearResponse(rd2, rd1, rr);
+    }
+
+    /* ---- Drive-tuning slot (page 121) ----
+     * Load the persisted pedal ramp rates and creep parameters, then apply
+     * them.  On flash blank / CRC-invalid / out-of-range the call is a
+     * no-op: motor_control.c keeps its compile-time defaults (AccelRamp 50,
+     * BrakeRamp 100, ReverseRamp 50, CreepEnable on, CreepPower 8, CreepDelay
+     * 0), which reproduce the historic firmware behaviour exactly.  Boot is
+     * never blocked, and these values only shape an already-validated
+     * traction demand — they do NOT clear startup_inhibit or authorise
+     * ACTIVE.                                                              */
+    DriveTuningStore_Init();
+    if (DriveTuningStore_IsValid()) {
+        DriveTuning_t dt;
+        DriveTuningStore_GetStored(&dt);
+        (void)Traction_SetDriveTuning(&dt);
+    }
+
+    /* ---- Battery-limits slot (page 120) ----
+     * Load the persisted low-voltage warning / derate / cutoff / recovery
+     * thresholds and the optional voltage filter, then apply them.  On flash
+     * blank / CRC-invalid / out-of-range the call is a no-op: safety_system.c
+     * keeps its compile-time defaults (Limit/Warning 20.0 V, Cutoff 18.0 V,
+     * Recovery 18.5 V, Filter 0 ms), which reproduce the historic firmware
+     * behaviour exactly.  Only the threshold VALUES are loaded — the safety
+     * state machine itself is unchanged.                                   */
+    BatteryLimitsStore_Init();
+    if (BatteryLimitsStore_IsValid()) {
+        BatteryLimits_t bl;
+        BatteryLimitsStore_GetStored(&bl);
+        (void)Safety_SetBatteryLimits(&bl);
     }
 
     /* Transition: BOOT → STANDBY (peripherals ready, waiting for ESP32) */

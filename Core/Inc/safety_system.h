@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 #include "main.h"
+#include "battery_limits_store.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -253,6 +254,19 @@ void Safety_CheckSensors(void);
 void Safety_CheckEncoder(void);
 void Safety_CheckBatteryVoltage(void);
 void Safety_CheckBatteryOvervoltage(void);
+
+/* ---- Runtime-configurable battery limits (FASE 3) ----
+ * The low-voltage warning / derate / SAFE-cutoff / recovery thresholds and
+ * an optional voltage filter become runtime variables seeded with the
+ * historic compile-time values (Limit/Warning 20.0 V, Cutoff 18.0 V,
+ * Recovery 18.5 V, Filter 0 ms).  Only the threshold VALUES used by
+ * Safety_CheckBatteryVoltage() are replaced; the state machine itself is
+ * unchanged, so with the defaults behaviour is byte-for-byte identical.
+ * Ranges/defaults live in battery_limits_store.h (single source).        */
+bool Safety_ValidateBatteryLimits(const BatteryLimits_t *b);
+bool Safety_SetBatteryLimits(const BatteryLimits_t *b);
+void Safety_GetBatteryLimits(BatteryLimits_t *out);
+
 void Safety_CheckRelayHealth(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);

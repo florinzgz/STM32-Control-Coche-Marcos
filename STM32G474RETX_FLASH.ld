@@ -33,8 +33,10 @@ _Min_Stack_Size = 0x400;     /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
-  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 488K
-  /* Pages 122-127 reserved for NVM data — not part of FLASH region.
+  FLASH  (rx)     : ORIGIN = 0x08000000,   LENGTH = 480K
+  /* Pages 120-127 reserved for NVM data — not part of FLASH region.
+   * Page 120 (0x08078000): battery_limits_store.c battery V thresholds
+   * Page 121 (0x08079000): drive_tuning_store.c   ramp/creep tuning
    * Page 122 (0x0807A000): gear_limits_store.c   gear power limits (D2/D1/R)
    * Page 123 (0x0807B000): sensor_map_store.c    DS18B20 physIdx→role map
    * Page 124 (0x0807C000): pedal_cal_store.c     pedal ADC calibration
@@ -42,10 +44,11 @@ MEMORY
    * Page 126 (0x0807E000): steering_cal_store.c  steering calibration
    * Page 127 (0x0807F000): eps_params.c          EPS tuning parameters
    *
-   * FLASH region was reduced 500K → 496K → 492K → 488K to free pages
-   * 124/123 for the pedal calibration NVM slot and the DS18B20 sensor map
-   * and page 122 for the gear power-limit NVM slot.  .text / .rodata /
-   * .data init image are guaranteed to end below 0x0807A000.          */
+   * FLASH region was reduced 500K → 496K → 492K → 488K → 480K to free
+   * pages 124/123 for the pedal calibration NVM slot and the DS18B20 sensor
+   * map, page 122 for the gear power-limit NVM slot, and pages 121/120 for
+   * the drive-tuning and battery-limit NVM slots.  .text / .rodata / .data
+   * init image are guaranteed to end below 0x08078000.                 */
   EPS_PARAMS (r)  : ORIGIN = 0x0807F000,   LENGTH = 4K
 }
 
