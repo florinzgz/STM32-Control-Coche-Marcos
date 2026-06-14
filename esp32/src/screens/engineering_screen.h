@@ -339,6 +339,11 @@ private:
     unsigned long gearLimitsLastQueryMs_ = 0;      // last QUERY tx (ms)
     unsigned long gearLimitsRestoreArmMs_ = 0;     // frameTimeMs RESTORE armed
     unsigned long lastFrameTimeMs_ = 0;            // cached frameTimeMs (update)
+    // Cached pointer to the per-frame CAN snapshot passed to update().  The
+    // ScreenManager guarantees update() runs before draw()/handleTouch() each
+    // frame with a snapshot that stays valid for the whole frame, so screens
+    // that need the full VehicleData (EPS / steer diag) read it through here.
+    const vehicle::VehicleData* data_ = nullptr;
     static constexpr unsigned long GEAR_SAVE_TIMEOUT_MS    = 2000;
     static constexpr unsigned long GEAR_ACK_CLEAR_MS       = 3000;
     static constexpr unsigned long GEAR_RESTORE_CONFIRM_MS = 5000;
@@ -453,6 +458,17 @@ private:
     bool          driveBattDiagChanged_ = false;
     unsigned long driveBattDiagLastSig_ = 0xFFFFFFFFu;
     unsigned long driveBattDiagQueryMs_ = 0;
+    // Cached system state from the last 0x310 / 0x311 frame (Safety_GetState),
+    // used to show whether SAVE is currently possible (STANDBY-only).
+    uint8_t       drvSysState_ = 0;
+    uint8_t       batSysState_ = 0;
+    // Live operating-point cache for the DRIVE/BATTERY DIAG page.  These come
+    // from telemetry that already exists on the bus (pedal 0x20B, battery
+    // 0x207, heartbeat error code); fields the firmware does not transmit are
+    // rendered as "N/A" and never estimated.
+    uint8_t       dbgPedalPct_   = 0;     bool dbgPedalValid_ = false;
+    uint16_t      dbgBattCv_     = 0;     bool dbgBattValid_  = false;  // cV
+    uint8_t       dbgErrCode_    = 0;
 };
 
 #endif // ENGINEERING_SCREEN_H
