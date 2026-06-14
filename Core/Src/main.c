@@ -666,6 +666,15 @@ int main(void)
              * only while an explicit QUERY/SET/SAVE is active (1 s, 10 Hz).
              * No-op otherwise; zero impact on backward-compatible nodes.  */
             CAN_EPS_ParamsBurstUpdate();
+
+            /* Drive-tuning (ramp/creep) telemetry burst (0x310) — emits only
+             * while an explicit QUERY is active (1 s, 10 Hz).  No-op otherwise;
+             * zero impact on backward-compatible nodes that ignore 0x310.    */
+            CAN_DriveTuningBurstUpdate();
+
+            /* Battery voltage-limit telemetry burst (0x311) — emits only while
+             * an explicit QUERY is active (1 s, 10 Hz).  No-op otherwise.     */
+            CAN_BatteryLimitsBurstUpdate();
         }
 
         /* ---- 1000 ms tasks (1 Hz): temperatures + service status ---- */

@@ -114,6 +114,8 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x30C | DIAG_FDCAN | 6 | on-demand | FDCAN error dump (after SERVICE 0xF6): byte0=last_error_code(LEC), byte1=state_flags(bit0 epassive,bit1 busoff,bit2 warning), byte2=tec, byte3=rec, byte4=tx_nack_flag, byte5=tx_consec_fail | `can_handler.c` |
 | 0x30D | DIAG_GEAR_LIMITS | 8 | on-demand | Gear power limits + accel response (burst after SERVICE 0xF7 QUERY). Two interleaved frame kinds share this ID, selected by byte0 bit4: **bit4=0 POWER**, **bit4=1 RESPONSE**. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid,bit4 frame-kind), byte1-3=active D2/D1/R %, byte4-6=pending D2/D1/R %, byte7=system_state. A QUERY emits both frames back-to-back; a decoder must preserve the "other half" when updating. | `can_handler.c`, `motor_control.c` |
 | 0x30E | DIAG_STEERING_Z | 8 | on-demand | PB5 + encoder-Z dual steering-center diagnostic (burst after SERVICE 0xF8 QUERY). byte0=flags(bit0-2 status: 0=NOT CALIBRATED,1=OK,2=Z NOT SEEN,3=Z OUT OF WINDOW,4=MECH OFFSET; bit3 PB5 live at center; bit4 Z calibration valid; bit5 Z slip), byte1=Z pulse count (saturating 255), byte2-3=last Z position int16 LE (TIM2 counts), byte4-5=Z↔center offset int16 LE (counts), byte6=last Z error int8, byte7=active tolerance (counts). Diagnostic-only — no control/safety path consumes it. | `can_handler.c`, `steering_z.c`, `steering_cal_store.c` |
+| 0x310 | DIAG_DRIVE_TUNING | 8 | on-demand | Drive-tuning (ramp/creep) field-stream (burst after SERVICE 0xFA QUERY). One frame per field; a QUERY emits 10 sweeps × all 6 fields at 10 Hz. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid), byte1=field id (1=AccelRamp,2=BrakeRamp,3=ReverseRamp,4=CreepEnable,5=CreepPower,6=CreepDelay), byte2-3=active value u16 LE, byte4-5=pending value u16 LE, byte6=system_state, byte7=field count (6). Units: ramps %/s, CreepEnable 0/1, CreepPower %, CreepDelay ms. | `can_handler.c`, `motor_control.c`, `drive_tuning_store.c` |
+| 0x311 | DIAG_BATTERY_LIMITS | 8 | on-demand | Battery voltage-limit field-stream (burst after SERVICE 0xFB QUERY). One frame per field; a QUERY emits 10 sweeps × all 5 fields at 10 Hz. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid), byte1=field id (1=Warning,2=Limit/derate,3=Cutoff,4=Recovery,5=Filter), byte2-3=active value u16 LE, byte4-5=pending value u16 LE, byte6=system_state, byte7=field count (5). Units: thresholds centivolts (V×100), Filter ms. Diagnostic/config only — never alters the safety state machine. | `can_handler.c`, `safety_system.c`, `battery_limits_store.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -548,6 +550,111 @@ MECHANICAL OFFSET. `z_center_valid` (bit4) is set **only** when status == OK.
 Source: `steerz_handle_service_cmd()` in `can_handler.c`, `steering_z.c`
 (`SteeringZ_Classify`/`SteeringZ_NormaliseOffset`/`SteeringZ_OnCenterConfirmed`),
 `SteeringCal_SaveWithZ()` + Z getters in `steering_cal_store.c`.
+
+---
+
+### 4.20 SERVICE_CMD DRIVE_TUNING (0x110 action 0xFA) — ESP32 → STM32 (rev 1.11, additive)
+
+Lets the Engineering menu view and tune the traction "feel" parameters applied in
+`motor_control.c`: the pedal ramp rates (accel / brake / reverse) and the motor
+creep dead-zone (enable / power / delay). `SET_*` sub-opcodes carry a uint16
+little-endian value in bytes 2-3 and stage a RAM-only **pending** set; nothing is
+applied or persisted until `SAVE`. **With the compile-time defaults the traction
+pipeline behaves byte-for-byte as the original firmware** (AccelRamp 50 %/s,
+BrakeRamp 100 %/s, ReverseRamp 50 %/s, CreepEnable on, CreepPower 8 %, CreepDelay
+0 ms). Persistence: flash **page 121** (`DTN1` magic, CRC32) — no other page is
+touched.
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | action | uint8 | `0xFA` = `SERVICE_ACTION_DRIVE_TUNING` |
+| 1 | op | uint8 | Sub-opcode (see table) |
+| 2-3 | value | uint16 LE | New value for `SET_*` ops (ignored otherwise) |
+
+**Sub-opcodes (byte 1):**
+
+| Op | Name | DLC | Effect |
+|----|------|-----|--------|
+| 0x01 | DRIVE_TUNE_OP_SET_ACCEL_RAMP   | 4 | Stage pending accel ramp (%/s, 1–200) |
+| 0x02 | DRIVE_TUNE_OP_SET_BRAKE_RAMP   | 4 | Stage pending brake ramp (%/s, 1–200) |
+| 0x03 | DRIVE_TUNE_OP_SET_REVERSE_RAMP | 4 | Stage pending reverse ramp (%/s, 1–200; applied only in GEAR_REVERSE up-ramp) |
+| 0x04 | DRIVE_TUNE_OP_SET_CREEP_ENABLE | 4 | Stage pending creep enable (0/1) |
+| 0x05 | DRIVE_TUNE_OP_SET_CREEP_POWER  | 4 | Stage pending creep floor (%, 0–20) |
+| 0x06 | DRIVE_TUNE_OP_SET_CREEP_DELAY  | 4 | Stage pending creep delay (ms, 0–5000) |
+| 0x07 | DRIVE_TUNE_OP_SAVE             | 2 | Validate pending set + persist to flash + apply (STANDBY only) |
+| 0x08 | DRIVE_TUNE_OP_RESET_DEFAULTS   | 2 | Restore + persist compile-time defaults (STANDBY only) |
+| 0x09 | DRIVE_TUNE_OP_QUERY            | 2 | Emit a `DIAG_DRIVE_TUNING` (0x310) burst (read-only, no gate) |
+
+**Validation & safety (STM32-side):**
+- QUERY is always allowed and only emits diagnostics.
+- All `SET_*`/`SAVE`/`RESET` require `SYS_STATE_STANDBY`; otherwise rejected with
+  `ACK_BLOCKED_BY_SAFETY`.
+- Every staged `SET` re-validates the **whole** pending set
+  (`Traction_ValidateDriveTuning()`): all ramps strictly > 0, CreepPower ≤ firmware
+  cap (20 %), CreepEnable ∈ {0,1}, CreepDelay ≤ 5000 ms. A rejected value keeps the
+  previous pending value and replies `ACK_INVALID` (reject-keep-previous, FASE 4).
+- Tuning can only **shape** an already-validated demand: ramp rates limit/smooth,
+  the creep floor only raises the *minimum* drive PWM (never the maximum). Flash
+  data alone never authorises ACTIVE.
+- Every op replies with exactly one `CMD_ACK` (0x103, cmd_id_low = 0x10).
+
+Source: `drvtune_handle_service_cmd()` + `CAN_DriveTuningBurstUpdate()` in
+`can_handler.c`, `Traction_{Get,Set,Validate}DriveTuning()` in `motor_control.c`,
+`drive_tuning_store.c`.
+
+---
+
+### 4.21 SERVICE_CMD BATTERY_LIMITS (0x110 action 0xFB) — ESP32 → STM32 (rev 1.11, additive)
+
+Lets the Engineering menu view and tune the battery voltage thresholds read by
+`safety_system.c`: low-voltage warning, derate (DEGRADED) limit, SAFE cutoff,
+SAFE→STANDBY recovery and an optional voltage filter time constant. `SET_*`
+sub-opcodes carry a uint16 little-endian value (centivolts = V×100, or ms for the
+filter) in bytes 2-3 and stage a RAM-only **pending** set; nothing is applied or
+persisted until `SAVE`. **With the compile-time defaults the under-voltage
+protection behaves identically to the original firmware** (Warning/Limit 20.00 V,
+Cutoff 18.00 V, Recovery 18.50 V, Filter 0 ms = no filtering). This command path
+**never alters the safety state machine** — it only changes the numeric thresholds
+the existing machine compares against. Persistence: flash **page 120** (`BAT1`
+magic, CRC32) — no other page is touched.
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0 | action | uint8 | `0xFB` = `SERVICE_ACTION_BATTERY_LIMITS` |
+| 1 | op | uint8 | Sub-opcode (see table) |
+| 2-3 | value | uint16 LE | New value (cV or ms) for `SET_*` ops (ignored otherwise) |
+
+**Sub-opcodes (byte 1):**
+
+| Op | Name | DLC | Effect |
+|----|------|-----|--------|
+| 0x01 | BATT_LIM_OP_SET_WARNING   | 4 | Stage pending low-voltage warning (cV, 1500–3000) |
+| 0x02 | BATT_LIM_OP_SET_LIMIT     | 4 | Stage pending derate/DEGRADED threshold (cV, 1500–3000) |
+| 0x03 | BATT_LIM_OP_SET_CUTOFF    | 4 | Stage pending SAFE cutoff (cV, 1400–2400) |
+| 0x04 | BATT_LIM_OP_SET_RECOVERY  | 4 | Stage pending SAFE→STANDBY recovery (cV, 1400–2900) |
+| 0x05 | BATT_LIM_OP_SET_FILTER    | 4 | Stage pending voltage filter time constant (ms, 0–5000) |
+| 0x06 | BATT_LIM_OP_SAVE          | 2 | Validate pending set + persist to flash + apply (STANDBY only) |
+| 0x07 | BATT_LIM_OP_RESET_DEFAULTS| 2 | Restore + persist compile-time defaults (STANDBY only) |
+| 0x08 | BATT_LIM_OP_QUERY         | 2 | Emit a `DIAG_BATTERY_LIMITS` (0x311) burst (read-only, no gate) |
+
+**Validation & safety (STM32-side):**
+- QUERY is always allowed and only emits diagnostics.
+- All `SET_*`/`SAVE`/`RESET` require `SYS_STATE_STANDBY`; otherwise rejected with
+  `ACK_BLOCKED_BY_SAFETY`.
+- Every staged `SET` re-validates the **whole** pending set
+  (`Safety_ValidateBatteryLimits()`): hard ranges plus coherence rules
+  Warning > Cutoff, Limit > Cutoff, Recovery > Cutoff, Warning ≤ OV (30.00 V),
+  Limit ≤ OV. A rejected value keeps the previous pending value and replies
+  `ACK_INVALID` (reject-keep-previous, FASE 4).
+- The voltage filter is an optional EMA whose time constant honours the call
+  cadence; `Filter = 0` bypasses it so the compare is bit-identical to today. The
+  invalid/zero/out-of-range fail-safe always runs on the **raw** reading; the
+  filter only smooths the numeric threshold comparison.
+- Every op replies with exactly one `CMD_ACK` (0x103, cmd_id_low = 0x10).
+
+Source: `battlim_handle_service_cmd()` + `CAN_BatteryLimitsBurstUpdate()` in
+`can_handler.c`, `Safety_{Get,Set,Validate}BatteryLimits()` in `safety_system.c`,
+`battery_limits_store.c`.
 
 ---
 

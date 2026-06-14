@@ -20,6 +20,8 @@
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
 #include "gear_limits_store.h"
+#include "drive_tuning_store.h"
+#include "battery_limits_store.h"
 #include "steering_cal_store.h"
 #include "steering_z.h"
 #include "encoder_reader.h"
@@ -2052,6 +2054,438 @@ static void gearlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
 }
 
 /* ==================================================================
+ *  Drive-tuning configuration (0xFA sub-protocol + 0x310 telemetry)
+ *
+ *  Lets the ESP32 Engineering menu view and tune the traction "feel"
+ *  parameters (accel / brake / reverse ramp rates and the creep dead-
+ *  zone) applied in motor_control.c.  SET_* sub-opcodes stage values in
+ *  RAM ("pending"); nothing is applied or persisted until SAVE.  This
+ *  module owns all protocol/staging state and touches the traction
+ *  controller only via the public Traction_*DriveTuning() helpers and
+ *  the flash store (drive_tuning_store.c).
+ *
+ *  Safety invariant (drvtune_safety_ok()): Safety_GetState() == STANDBY.
+ *  QUERY is exempt (read-only telemetry request).
+ *
+ *  0x310 telemetry burst (DLC 8): emitted only on demand — after a QUERY,
+ *  10 sweeps spaced 100 ms apart (1 s total), each sweep streaming all
+ *  DRIVE_TUNE_FIELD_COUNT fields one frame per field.  Backward-compatible:
+ *  nodes that ignore 0x310 see no extra traffic.
+ *
+ *  0x310 frame layout (one field per frame, little-endian):
+ *    byte 0 : flags
+ *             bit0: stored slot valid (DriveTuningStore_IsValid())
+ *             bit1: pending differs from active (unsaved edit)
+ *             bit2: safety gate satisfied (STANDBY)
+ *             bit3: pending set validates OK
+ *             bits4-7: reserved (0)
+ *    byte 1 : field id (DRIVE_TUNE_FIELD_*)
+ *    byte 2-3: active  value (uint16 LE)
+ *    byte 4-5: pending value (uint16 LE)
+ *    byte 6 : system state (Safety_GetState())
+ *    byte 7 : total field count (DRIVE_TUNE_FIELD_COUNT)
+ * ================================================================== */
+
+#define DRVTUNE_BURST_SWEEPS     10U    /* 10 × 100 ms = 1 s             */
+#define DRVTUNE_BURST_PERIOD_MS  100U
+
+static bool          drvtune_pending_seeded = false;
+static DriveTuning_t drvtune_pending;            /* RAM-only until SAVE  */
+
+static uint8_t       drvtune_burst_left = 0;
+static uint32_t      drvtune_next_tx_ms = 0;
+
+static inline bool drvtune_safety_ok(void)
+{
+    return (Safety_GetState() == SYS_STATE_STANDBY);
+}
+
+static void drvtune_seed_pending_if_needed(void)
+{
+    if (drvtune_pending_seeded) return;
+    Traction_GetDriveTuning(&drvtune_pending);
+    drvtune_pending_seeded = true;
+}
+
+/* Extract the (active, pending) value pair for a telemetry field id. */
+static void drvtune_field_values(uint8_t field, const DriveTuning_t *act,
+                                 const DriveTuning_t *pend,
+                                 uint16_t *act_out, uint16_t *pend_out)
+{
+    switch (field) {
+    case DRIVE_TUNE_FIELD_ACCEL_RAMP:
+        *act_out = act->accel_ramp;   *pend_out = pend->accel_ramp;   break;
+    case DRIVE_TUNE_FIELD_BRAKE_RAMP:
+        *act_out = act->brake_ramp;   *pend_out = pend->brake_ramp;   break;
+    case DRIVE_TUNE_FIELD_REVERSE_RAMP:
+        *act_out = act->reverse_ramp; *pend_out = pend->reverse_ramp; break;
+    case DRIVE_TUNE_FIELD_CREEP_ENABLE:
+        *act_out = act->creep_enable; *pend_out = pend->creep_enable; break;
+    case DRIVE_TUNE_FIELD_CREEP_POWER:
+        *act_out = act->creep_power;  *pend_out = pend->creep_power;  break;
+    case DRIVE_TUNE_FIELD_CREEP_DELAY:
+        *act_out = act->creep_delay;  *pend_out = pend->creep_delay;  break;
+    default:
+        *act_out = 0; *pend_out = 0; break;
+    }
+}
+
+static void drvtune_send_field(uint8_t field)
+{
+    DriveTuning_t act;
+    Traction_GetDriveTuning(&act);
+
+    DriveTuning_t pend = act;
+    if (drvtune_pending_seeded) pend = drvtune_pending;
+
+    uint16_t act_v = 0, pend_v = 0;
+    drvtune_field_values(field, &act, &pend, &act_v, &pend_v);
+
+    bool valid_ok = Traction_ValidateDriveTuning(&pend);
+
+    uint8_t flags = 0;
+    if (DriveTuningStore_IsValid()) flags |= 0x01U;
+    if (drvtune_pending_seeded && (act_v != pend_v)) flags |= 0x02U;
+    if (drvtune_safety_ok()) flags |= 0x04U;
+    if (valid_ok) flags |= 0x08U;
+
+    uint8_t payload[8];
+    payload[0] = flags;
+    payload[1] = field;
+    payload[2] = (uint8_t)(act_v  & 0xFFU);
+    payload[3] = (uint8_t)(act_v  >> 8);
+    payload[4] = (uint8_t)(pend_v & 0xFFU);
+    payload[5] = (uint8_t)(pend_v >> 8);
+    payload[6] = (uint8_t)Safety_GetState();
+    payload[7] = (uint8_t)DRIVE_TUNE_FIELD_COUNT;
+
+    (void)TransmitFrame(CAN_ID_DIAG_DRIVE_TUNING, payload, sizeof(payload));
+}
+
+static void drvtune_send_sweep(void)
+{
+    for (uint8_t f = 1U; f <= DRIVE_TUNE_FIELD_COUNT; ++f) {
+        drvtune_send_field(f);
+    }
+}
+
+void CAN_DriveTuningBurstUpdate(void)
+{
+    if (drvtune_burst_left == 0U) return;
+    uint32_t now = HAL_GetTick();
+    if ((int32_t)(now - drvtune_next_tx_ms) < 0) return;
+    drvtune_send_sweep();
+    drvtune_burst_left--;
+    drvtune_next_tx_ms = now + DRVTUNE_BURST_PERIOD_MS;
+}
+
+/* Apply a SET sub-opcode to a staged copy, returning false if the field
+ * value is out of the uint16 wire range for that field.                */
+static void drvtune_apply_set(DriveTuning_t *t, uint8_t op, uint16_t val)
+{
+    switch (op) {
+    case DRIVE_TUNE_OP_SET_ACCEL_RAMP:   t->accel_ramp   = (uint8_t)val; break;
+    case DRIVE_TUNE_OP_SET_BRAKE_RAMP:   t->brake_ramp   = (uint8_t)val; break;
+    case DRIVE_TUNE_OP_SET_REVERSE_RAMP: t->reverse_ramp = (uint8_t)val; break;
+    case DRIVE_TUNE_OP_SET_CREEP_ENABLE: t->creep_enable = (uint8_t)val; break;
+    case DRIVE_TUNE_OP_SET_CREEP_POWER:  t->creep_power  = (uint8_t)val; break;
+    case DRIVE_TUNE_OP_SET_CREEP_DELAY:  t->creep_delay  = val;          break;
+    default: break;
+    }
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_DRIVE_TUNING.
+ * Always replies with one CAN_SendCommandAck(0x10, ...).               */
+static void drvtune_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    uint8_t op = payload[1];
+
+    /* QUERY is read-only — no safety gate, just a telemetry burst. */
+    if (op == DRIVE_TUNE_OP_QUERY) {
+        drvtune_burst_left = DRVTUNE_BURST_SWEEPS;
+        drvtune_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+
+    /* All other sub-opcodes require STANDBY. */
+    if (!drvtune_safety_ok()) {
+        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+        return;
+    }
+
+    switch (op) {
+    case DRIVE_TUNE_OP_SET_ACCEL_RAMP:
+    case DRIVE_TUNE_OP_SET_BRAKE_RAMP:
+    case DRIVE_TUNE_OP_SET_REVERSE_RAMP:
+    case DRIVE_TUNE_OP_SET_CREEP_ENABLE:
+    case DRIVE_TUNE_OP_SET_CREEP_POWER:
+    case DRIVE_TUNE_OP_SET_CREEP_DELAY: {
+        if (len < 4) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        uint16_t val = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
+        drvtune_seed_pending_if_needed();
+        DriveTuning_t cand = drvtune_pending;
+        drvtune_apply_set(&cand, op, val);
+        if (!Traction_ValidateDriveTuning(&cand)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        drvtune_pending = cand;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case DRIVE_TUNE_OP_SAVE: {
+        if (!drvtune_pending_seeded) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        if (!Traction_ValidateDriveTuning(&drvtune_pending)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        if (!DriveTuningStore_Save(&drvtune_pending)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        /* Apply immediately; STANDBY (gated above) means no live demand. */
+        (void)Traction_SetDriveTuning(&drvtune_pending);
+        drvtune_pending_seeded = false;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case DRIVE_TUNE_OP_RESET_DEFAULTS: {
+        DriveTuning_t def;
+        DriveTuningStore_GetDefaults(&def);
+        if (!DriveTuningStore_Save(&def)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        (void)Traction_SetDriveTuning(&def);
+        drvtune_pending_seeded = false;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+}
+
+/* ==================================================================
+ *  Battery-limit configuration (0xFB sub-protocol + 0x311 telemetry)
+ *
+ *  Lets the ESP32 Engineering menu view and tune the battery voltage
+ *  thresholds (warning / derate / cutoff / recovery) and the optional
+ *  voltage filter applied in safety_system.c.  SET_* sub-opcodes stage
+ *  values in RAM ("pending"); nothing is applied or persisted until SAVE.
+ *  This module touches the safety system only via the public
+ *  Safety_*BatteryLimits() helpers and the flash store
+ *  (battery_limits_store.c).  It NEVER changes the safety state machine.
+ *
+ *  Safety invariant (battlim_safety_ok()): Safety_GetState() == STANDBY.
+ *  QUERY is exempt (read-only telemetry request).
+ *
+ *  0x311 telemetry burst (DLC 8): same field-stream layout as 0x310 but
+ *  values are centivolts (V×100) or ms.  Frame layout:
+ *    byte 0 : flags (bit0 stored-valid, bit1 pending-differs,
+ *                    bit2 safety-ok, bit3 pending-valid)
+ *    byte 1 : field id (BATT_LIM_FIELD_*)
+ *    byte 2-3: active  value (uint16 LE, cV or ms)
+ *    byte 4-5: pending value (uint16 LE, cV or ms)
+ *    byte 6 : system state (Safety_GetState())
+ *    byte 7 : total field count (BATT_LIM_FIELD_COUNT)
+ * ================================================================== */
+
+#define BATTLIM_BURST_SWEEPS     10U
+#define BATTLIM_BURST_PERIOD_MS  100U
+
+static bool            battlim_pending_seeded = false;
+static BatteryLimits_t battlim_pending;
+
+static uint8_t         battlim_burst_left = 0;
+static uint32_t        battlim_next_tx_ms = 0;
+
+static inline bool battlim_safety_ok(void)
+{
+    return (Safety_GetState() == SYS_STATE_STANDBY);
+}
+
+static void battlim_seed_pending_if_needed(void)
+{
+    if (battlim_pending_seeded) return;
+    Safety_GetBatteryLimits(&battlim_pending);
+    battlim_pending_seeded = true;
+}
+
+static void battlim_field_values(uint8_t field, const BatteryLimits_t *act,
+                                 const BatteryLimits_t *pend,
+                                 uint16_t *act_out, uint16_t *pend_out)
+{
+    switch (field) {
+    case BATT_LIM_FIELD_WARNING:
+        *act_out = act->warning_cv;  *pend_out = pend->warning_cv;  break;
+    case BATT_LIM_FIELD_LIMIT:
+        *act_out = act->limit_cv;    *pend_out = pend->limit_cv;    break;
+    case BATT_LIM_FIELD_CUTOFF:
+        *act_out = act->cutoff_cv;   *pend_out = pend->cutoff_cv;   break;
+    case BATT_LIM_FIELD_RECOVERY:
+        *act_out = act->recovery_cv; *pend_out = pend->recovery_cv; break;
+    case BATT_LIM_FIELD_FILTER:
+        *act_out = act->filter_ms;   *pend_out = pend->filter_ms;   break;
+    default:
+        *act_out = 0; *pend_out = 0; break;
+    }
+}
+
+static void battlim_send_field(uint8_t field)
+{
+    BatteryLimits_t act;
+    Safety_GetBatteryLimits(&act);
+
+    BatteryLimits_t pend = act;
+    if (battlim_pending_seeded) pend = battlim_pending;
+
+    uint16_t act_v = 0, pend_v = 0;
+    battlim_field_values(field, &act, &pend, &act_v, &pend_v);
+
+    bool valid_ok = Safety_ValidateBatteryLimits(&pend);
+
+    uint8_t flags = 0;
+    if (BatteryLimitsStore_IsValid()) flags |= 0x01U;
+    if (battlim_pending_seeded && (act_v != pend_v)) flags |= 0x02U;
+    if (battlim_safety_ok()) flags |= 0x04U;
+    if (valid_ok) flags |= 0x08U;
+
+    uint8_t payload[8];
+    payload[0] = flags;
+    payload[1] = field;
+    payload[2] = (uint8_t)(act_v  & 0xFFU);
+    payload[3] = (uint8_t)(act_v  >> 8);
+    payload[4] = (uint8_t)(pend_v & 0xFFU);
+    payload[5] = (uint8_t)(pend_v >> 8);
+    payload[6] = (uint8_t)Safety_GetState();
+    payload[7] = (uint8_t)BATT_LIM_FIELD_COUNT;
+
+    (void)TransmitFrame(CAN_ID_DIAG_BATTERY_LIMITS, payload, sizeof(payload));
+}
+
+static void battlim_send_sweep(void)
+{
+    for (uint8_t f = 1U; f <= BATT_LIM_FIELD_COUNT; ++f) {
+        battlim_send_field(f);
+    }
+}
+
+void CAN_BatteryLimitsBurstUpdate(void)
+{
+    if (battlim_burst_left == 0U) return;
+    uint32_t now = HAL_GetTick();
+    if ((int32_t)(now - battlim_next_tx_ms) < 0) return;
+    battlim_send_sweep();
+    battlim_burst_left--;
+    battlim_next_tx_ms = now + BATTLIM_BURST_PERIOD_MS;
+}
+
+static void battlim_apply_set(BatteryLimits_t *b, uint8_t op, uint16_t val)
+{
+    switch (op) {
+    case BATT_LIM_OP_SET_WARNING:  b->warning_cv  = val; break;
+    case BATT_LIM_OP_SET_LIMIT:    b->limit_cv    = val; break;
+    case BATT_LIM_OP_SET_CUTOFF:   b->cutoff_cv   = val; break;
+    case BATT_LIM_OP_SET_RECOVERY: b->recovery_cv = val; break;
+    case BATT_LIM_OP_SET_FILTER:   b->filter_ms   = val; break;
+    default: break;
+    }
+}
+
+/* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_BATTERY_LIMITS.
+ * Always replies with one CAN_SendCommandAck(0x10, ...).               */
+static void battlim_handle_service_cmd(const uint8_t *payload, uint8_t len)
+{
+    if (len < 2) {
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+    uint8_t op = payload[1];
+
+    if (op == BATT_LIM_OP_QUERY) {
+        battlim_burst_left = BATTLIM_BURST_SWEEPS;
+        battlim_next_tx_ms = HAL_GetTick();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+
+    if (!battlim_safety_ok()) {
+        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+        return;
+    }
+
+    switch (op) {
+    case BATT_LIM_OP_SET_WARNING:
+    case BATT_LIM_OP_SET_LIMIT:
+    case BATT_LIM_OP_SET_CUTOFF:
+    case BATT_LIM_OP_SET_RECOVERY:
+    case BATT_LIM_OP_SET_FILTER: {
+        if (len < 4) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        uint16_t val = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
+        battlim_seed_pending_if_needed();
+        BatteryLimits_t cand = battlim_pending;
+        battlim_apply_set(&cand, op, val);
+        if (!Safety_ValidateBatteryLimits(&cand)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        battlim_pending = cand;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case BATT_LIM_OP_SAVE: {
+        if (!battlim_pending_seeded) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        if (!Safety_ValidateBatteryLimits(&battlim_pending)) {
+            CAN_SendCommandAck(0x10, ACK_INVALID);
+            return;
+        }
+        if (!BatteryLimitsStore_Save(&battlim_pending)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        (void)Safety_SetBatteryLimits(&battlim_pending);
+        battlim_pending_seeded = false;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    case BATT_LIM_OP_RESET_DEFAULTS: {
+        BatteryLimits_t def;
+        BatteryLimitsStore_GetDefaults(&def);
+        if (!BatteryLimitsStore_Save(&def)) {
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+            return;
+        }
+        (void)Safety_SetBatteryLimits(&def);
+        battlim_pending_seeded = false;
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+    }
+    default:
+        CAN_SendCommandAck(0x10, ACK_INVALID);
+        return;
+    }
+}
+
+/* ==================================================================
  *  Steering PB5 + encoder-Z dual center reference (0xF8 + 0x30E)
  *
  *  Diagnostic + calibration sub-protocol.  PB5 (LJ12A3, EXTI5) remains
@@ -2808,6 +3242,21 @@ void CAN_ProcessMessages(void) {
                          * tuning; SAVE/RESET are STANDBY-gated.  Replies on
                          * CMD_ACK (0x103); telemetry on 0x30F.            */
                         eps_handle_service_cmd(rx_payload, msg_len);
+                    } else if (cmd == SERVICE_ACTION_DRIVE_TUNING) {
+                        /* ---- DRIVE-TUNING (RAMP/CREEP) CONFIG ----
+                         * Byte 1 = sub-opcode; SET_* carry a uint16 LE in
+                         * bytes 2-3.  The handler enforces the STANDBY safety
+                         * gate internally and replies on CMD_ACK (0x103);
+                         * telemetry on 0x310.                              */
+                        drvtune_handle_service_cmd(rx_payload, msg_len);
+                    } else if (cmd == SERVICE_ACTION_BATTERY_LIMITS) {
+                        /* ---- BATTERY VOLTAGE-LIMIT CONFIG ----
+                         * Byte 1 = sub-opcode; SET_* carry a uint16 LE
+                         * (centivolts / ms) in bytes 2-3.  The handler
+                         * enforces the STANDBY safety gate internally and
+                         * never touches the safety state machine.  Replies on
+                         * CMD_ACK (0x103); telemetry on 0x311.             */
+                        battlim_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == 0xE0) {
                         /* ---- RELAY OVERRIDE (Engineering Diagnostic Mode) ----
                          * Byte 1: relay control mask

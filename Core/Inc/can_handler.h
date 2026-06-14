@@ -67,6 +67,8 @@ extern "C" {
 #define CAN_ID_DIAG_GEAR_LIMITS   0x30D  // STM32 → ESP32 (on-demand, after QUERY) gear power-limit + accel-response telemetry (frame-kind in byte0 bit4)
 #define CAN_ID_DIAG_STEERING_Z    0x30E  // STM32 → ESP32 (on-demand, after QUERY) PB5 + encoder-Z dual center-reference diagnostic
 #define CAN_ID_DIAG_EPS_PARAMS    0x30F  // STM32 → ESP32 (on-demand, after QUERY) EPS parameter + live-state telemetry
+#define CAN_ID_DIAG_DRIVE_TUNING  0x310  // STM32 → ESP32 (on-demand, after QUERY) drive-tuning (ramp/creep) field-stream telemetry
+#define CAN_ID_DIAG_BATTERY_LIMITS 0x311 // STM32 → ESP32 (on-demand, after QUERY) battery-limit (voltage threshold) field-stream telemetry
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -86,6 +88,8 @@ extern "C" {
 #define SERVICE_ACTION_GEAR_LIMITS         0xF7  /* Gear power-limit config (byte1 = sub-opcode, byte2 = percent) */
 #define SERVICE_ACTION_STEERING_Z          0xF8  /* PB5 + encoder-Z center diagnostic/calibration (byte1 = sub-opcode) */
 #define SERVICE_ACTION_EPS_PARAMS          0xF9  /* EPS runtime parameter tuning (byte1 = sub-opcode) → 0x30F        */
+#define SERVICE_ACTION_DRIVE_TUNING        0xFA  /* Drive-tuning ramp/creep config (byte1 = sub-opcode) → 0x310      */
+#define SERVICE_ACTION_BATTERY_LIMITS      0xFB  /* Battery voltage-threshold config (byte1 = sub-opcode) → 0x311    */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
@@ -156,7 +160,70 @@ extern "C" {
 #define EPS_PARAM_OP_RESET       0x03U
 #define EPS_PARAM_OP_QUERY       0x04U
 
-/* Command ACK result codes (uint8_t) */
+/* ---- Drive-tuning sub-opcodes (byte1 when byte0 == 0xFA) ------------
+ * For SET_* sub-opcodes the new value is carried as a uint16 little-endian
+ * in byte2 (LSB) + byte3 (MSB).  SET_* stages a RAM-only "pending" set; the
+ * value is NOT applied or persisted until SAVE.  All SET/SAVE/RESET sub-
+ * opcodes require SYS_STATE_STANDBY; QUERY is read-only and exempt.
+ *   0x01 SET_ACCEL_RAMP    Stage pending accel ramp   (%/s)
+ *   0x02 SET_BRAKE_RAMP    Stage pending brake ramp   (%/s)
+ *   0x03 SET_REVERSE_RAMP  Stage pending reverse ramp (%/s, GEAR_REVERSE only)
+ *   0x04 SET_CREEP_ENABLE  Stage pending creep enable (0/1)
+ *   0x05 SET_CREEP_POWER   Stage pending creep floor  (%)
+ *   0x06 SET_CREEP_DELAY   Stage pending creep delay  (ms)
+ *   0x07 SAVE              Validate pending set + persist to flash + apply
+ *   0x08 RESET_DEFAULTS    Restore + persist compile-time defaults
+ *   0x09 QUERY             Request a 1 s burst of 0x310 telemetry at 10 Hz   */
+#define DRIVE_TUNE_OP_SET_ACCEL_RAMP   0x01U
+#define DRIVE_TUNE_OP_SET_BRAKE_RAMP   0x02U
+#define DRIVE_TUNE_OP_SET_REVERSE_RAMP 0x03U
+#define DRIVE_TUNE_OP_SET_CREEP_ENABLE 0x04U
+#define DRIVE_TUNE_OP_SET_CREEP_POWER  0x05U
+#define DRIVE_TUNE_OP_SET_CREEP_DELAY  0x06U
+#define DRIVE_TUNE_OP_SAVE             0x07U
+#define DRIVE_TUNE_OP_RESET_DEFAULTS   0x08U
+#define DRIVE_TUNE_OP_QUERY            0x09U
+
+/* Drive-tuning telemetry (0x310) field ids — one frame per field, see
+ * the 0x310 frame layout comment in can_handler.c.                       */
+#define DRIVE_TUNE_FIELD_ACCEL_RAMP    0x01U
+#define DRIVE_TUNE_FIELD_BRAKE_RAMP    0x02U
+#define DRIVE_TUNE_FIELD_REVERSE_RAMP  0x03U
+#define DRIVE_TUNE_FIELD_CREEP_ENABLE  0x04U
+#define DRIVE_TUNE_FIELD_CREEP_POWER   0x05U
+#define DRIVE_TUNE_FIELD_CREEP_DELAY   0x06U
+#define DRIVE_TUNE_FIELD_COUNT         6U
+
+/* ---- Battery-limit sub-opcodes (byte1 when byte0 == 0xFB) -----------
+ * Values are centivolts (V×100) or ms, carried as uint16 little-endian in
+ * byte2 (LSB) + byte3 (MSB).  SET_* stages a RAM-only "pending" set; nothing
+ * is applied or persisted until SAVE.  All SET/SAVE/RESET require STANDBY.
+ *   0x01 SET_WARNING       Stage pending low-voltage warning (cV)
+ *   0x02 SET_LIMIT         Stage pending derate (DEGRADED) threshold (cV)
+ *   0x03 SET_CUTOFF        Stage pending SAFE cutoff threshold (cV)
+ *   0x04 SET_RECOVERY      Stage pending SAFE→STANDBY recovery (cV)
+ *   0x05 SET_FILTER        Stage pending voltage filter time constant (ms)
+ *   0x06 SAVE              Validate pending set + persist to flash + apply
+ *   0x07 RESET_DEFAULTS    Restore + persist compile-time defaults
+ *   0x08 QUERY             Request a 1 s burst of 0x311 telemetry at 10 Hz   */
+#define BATT_LIM_OP_SET_WARNING   0x01U
+#define BATT_LIM_OP_SET_LIMIT     0x02U
+#define BATT_LIM_OP_SET_CUTOFF    0x03U
+#define BATT_LIM_OP_SET_RECOVERY  0x04U
+#define BATT_LIM_OP_SET_FILTER    0x05U
+#define BATT_LIM_OP_SAVE          0x06U
+#define BATT_LIM_OP_RESET_DEFAULTS 0x07U
+#define BATT_LIM_OP_QUERY         0x08U
+
+/* Battery-limit telemetry (0x311) field ids — one frame per field. */
+#define BATT_LIM_FIELD_WARNING    0x01U
+#define BATT_LIM_FIELD_LIMIT      0x02U
+#define BATT_LIM_FIELD_CUTOFF     0x03U
+#define BATT_LIM_FIELD_RECOVERY   0x04U
+#define BATT_LIM_FIELD_FILTER     0x05U
+#define BATT_LIM_FIELD_COUNT      5U
+
+
 typedef enum {
     ACK_OK                  = 0,   /* Command accepted and applied           */
     ACK_REJECTED            = 1,   /* Command rejected (speed too high, etc) */
@@ -295,6 +362,16 @@ void CAN_SteeringZBurstUpdate(void);
  * Call once per 100 ms tick.  No-op while no burst is in progress; has zero
  * impact on backward-compatible nodes that ignore 0x30F.                */
 void CAN_EPS_ParamsBurstUpdate(void);
+
+/* Drives the on-demand 0x310 drive-tuning (ramp/creep) telemetry burst.
+ * Call once per 100 ms tick.  No-op while no burst is in progress; has zero
+ * impact on backward-compatible nodes that ignore 0x310.                */
+void CAN_DriveTuningBurstUpdate(void);
+
+/* Drives the on-demand 0x311 battery-limit telemetry burst.
+ * Call once per 100 ms tick.  No-op while no burst is in progress; has zero
+ * impact on backward-compatible nodes that ignore 0x311.                */
+void CAN_BatteryLimitsBurstUpdate(void);
 
 /* LED relay states — front (PB10) and rear (PB11) — toggled via CAN 0x120 */
 void LED_Relay_Set(bool on);          /* front relay */
