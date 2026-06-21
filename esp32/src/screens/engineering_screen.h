@@ -478,14 +478,13 @@ private:
     // ledModeEdit_: current mode shown in the editor (may differ from saved).
     // ledModeSaved_: true if ledModeEdit_ matches the value persisted in NVS.
     // ledModeTestActive_: set when TEST 10s button is pressed.
-    // ledModeTestStartMs_: millis() when TEST was pressed.
+    // ledModeTestStartMs_: millis() when TEST was pressed (reset by PREV/NEXT during test).
     // ledModeTestPrevMode_: mode active before the test (restored on timeout/BACK).
     uint8_t       ledModeEdit_         = 0;
     bool          ledModeSaved_        = true;
     bool          ledModeTestActive_   = false;
     unsigned long ledModeTestStartMs_  = 0;
     uint8_t       ledModeTestPrevMode_ = 0;
-    bool          ledModeChanged_      = false;
     static constexpr unsigned long LED_TEST_DURATION_MS = 10000;  // 10 s test
 };
 

@@ -82,8 +82,6 @@ static DecorMode currentDecorMode = DecorMode::NORMAL;
 // Shared phase counter for all decorative patterns (non-blocking timing)
 static uint32_t decorLastMs   = 0;
 static uint8_t  decorPhase    = 0;    // generic phase index within pattern
-static bool     decorHalf     = false; // generic boolean half-period flag
-
 // POLICE / AMBULANCE: track which side is currently lit and double-pulse step
 // Pattern: double flash on side A, pause, double flash on side B, repeat.
 // Each half-period step is DECOR_POLICE_STEP_MS long.
@@ -735,6 +733,10 @@ void update() {
     // Decorative modes (POLICE, AMBULANCE, etc.) replace the normal base.
     // Turn-signal overlays always run AFTER and have unconditional priority
     // on the indicator zones — this is the key safety requirement.
+    //
+    // SAFETY LAYER: after any decorative rear render, safety-critical rear
+    // signals (BRAKE, BRAKE_EMERGENCY, REVERSE, REGEN_ACTIVE) are always
+    // composited on top so they can NEVER be hidden by a decorative mode.
     if (currentDecorMode == DecorMode::NORMAL) {
         updateFrontLEDs();
         updateRearBase();
@@ -742,6 +744,13 @@ void update() {
         advanceDecorPhase(now);
         updateDecorativeFront();
         updateDecorativeRear();
+        // Overlay safety-critical rear states — priority beats ALL decor modes
+        if (currentRearMode == RearMode::BRAKE          ||
+            currentRearMode == RearMode::BRAKE_EMERGENCY ||
+            currentRearMode == RearMode::REVERSE         ||
+            currentRearMode == RearMode::REGEN_ACTIVE) {
+            updateRearBase();
+        }
     }
 
     // Turn-signal overlays — ALWAYS run regardless of decor mode ----
@@ -802,11 +811,15 @@ bool isEmergencyFlashActive() {
 }
 
 void setDecorMode(DecorMode mode) {
+    // Defensive range check: reject out-of-range values (e.g. from corrupt NVS cast)
+    if (static_cast<uint8_t>(mode) >= DECOR_MODE_COUNT) {
+        mode = DecorMode::NORMAL;
+        Serial.printf("[LED] setDecorMode: invalid value clamped to NORMAL\n");
+    }
     if (currentDecorMode != mode) {
         currentDecorMode = mode;
         decorPhase   = 0;
         decorLastMs  = millis();
-        decorHalf    = false;
         Serial.printf("[LED] DecorMode set to %u\n", static_cast<uint8_t>(mode));
     }
 }
