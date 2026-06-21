@@ -14,6 +14,7 @@
 #include "display_backlight.h"
 #include "touch_calibration.h"
 #include "ui/debug_overlay.h"
+#include "led_controller.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <cstdio>
@@ -35,7 +36,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 22;
+static constexpr int     NUM_MAIN_ITEMS = 23;  // +1 for LED MODE (item 22)
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -52,7 +53,7 @@ static constexpr int     TILE_COLS   = 3;
 
 static constexpr int     PAGE1_ITEM_COUNT = 9;   // tiles per page (3×3 grid)
 // Total number of main-menu pages, derived from the item count so adding
-// functions never overflows a page.  22 items → 3 pages (9 + 9 + 4).
+// functions never overflows a page.  23 items → 3 pages (9 + 9 + 5).
 static constexpr uint8_t MAIN_PAGE_COUNT =
     (uint8_t)((NUM_MAIN_ITEMS + PAGE1_ITEM_COUNT - 1) / PAGE1_ITEM_COUNT);
 
@@ -62,13 +63,15 @@ static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "FAULT", "MODULE", "PEDAL", "ENCODER", "INA226",
     "TEMP", "FACTORY", "DTC", "MAINT.",
     "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
-    "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT"
+    "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT",
+    "LED"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
     "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
-    "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG"
+    "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG",
+    "MODE"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -98,7 +101,8 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_CYAN,    // 18 Steer Diagnostics   — diagnostic
     ui::COL_BLUE,    // 19 Drive Tuning        — configuration
     ui::COL_BLUE,    // 20 Battery Limits      — configuration
-    ui::COL_CYAN     // 21 Drive/Battery Diag  — diagnostic
+    ui::COL_CYAN,    // 21 Drive/Battery Diag  — diagnostic
+    ui::COL_CYAN     // 22 LED Mode selector   — configuration
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -489,6 +493,19 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             (frameTimeMs - factoryPendingMs_) >= FACTORY_CONFIRM_TIMEOUT_MS) {
             factoryPendingIdx_ = -1;
             needsRedraw_ = true;
+        }
+    }
+
+    // LED MODE: 10 s test timeout — auto-restore previous mode when elapsed.
+    // Uses millis() directly (frameTimeMs is a relative render-loop timer,
+    // not suitable for a 10 s absolute interval in this context).
+    if (currentMenu_ == SubMenu::LED_MODE && ledModeTestActive_) {
+        uint32_t now_ms = static_cast<uint32_t>(millis());
+        if ((now_ms - static_cast<uint32_t>(ledModeTestStartMs_)) >= LED_TEST_DURATION_MS) {
+            led_ctrl::setDecorMode(
+                static_cast<led_ctrl::DecorMode>(ledModeTestPrevMode_));
+            ledModeTestActive_ = false;
+            needsRedraw_       = true;
         }
     }
 
@@ -1036,6 +1053,7 @@ void EngineeringScreen::draw() {
             case SubMenu::DRIVE_TUNING:     drawDriveTuning();         break;
             case SubMenu::BATTERY_LIMITS:   drawBatteryLimits();       break;
             case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
+            case SubMenu::LED_MODE:         drawLedMode();             break;
             default:
                 // Unknown/unexpected submenu: fall back to the Engineering
                 // main menu instead of leaving the screen blank.
@@ -1868,6 +1886,12 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             config_store::flush();
             brightnessDirty_ = false;
         }
+        // LED MODE: if a test was running, restore the previous mode on BACK
+        if (currentMenu_ == SubMenu::LED_MODE && ledModeTestActive_) {
+            led_ctrl::setDecorMode(
+                static_cast<led_ctrl::DecorMode>(ledModeTestPrevMode_));
+            ledModeTestActive_ = false;
+        }
         currentMenu_ = SubMenu::MAIN;
         needsRedraw_ = true;
         return true;
@@ -2126,6 +2150,14 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             drvLastQueryMs_       = 0;
                             batLastQueryMs_       = 0;
                             currentMenu_ = SubMenu::DRIVE_BATT_DIAG;
+                            break;
+                        case 22:
+                            // Open LED MODE selector.  Pre-populate from NVS.
+                            ledModeEdit_        = config_store::get().ledMode;
+                            ledModeSaved_       = true;
+                            ledModeTestActive_  = false;
+                            ledModeChanged_     = true;
+                            currentMenu_ = SubMenu::LED_MODE;
                             break;
                         default:
                             break;
@@ -2853,6 +2885,69 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
             return true;
         }
 #endif
+        return false;
+    }
+
+    // ---- LED MODE touch handler ----
+    // PREV / NEXT cycle the edit mode, TEST 10s starts a timed preview,
+    // SAVE persists to NVS, BACK cancels without save (restores if TEST active).
+    if (currentMenu_ == SubMenu::LED_MODE) {
+        // Button geometry (matches drawLedMode layout)
+        static constexpr int16_t LM_BTN_Y  = 230;
+        static constexpr int16_t LM_BTN_H  = 40;
+        static constexpr int16_t LM_PREV_X = 8;
+        static constexpr int16_t LM_PREV_W = 80;
+        static constexpr int16_t LM_NEXT_X = 100;
+        static constexpr int16_t LM_NEXT_W = 80;
+        static constexpr int16_t LM_SAVE_X = 200;
+        static constexpr int16_t LM_SAVE_W = 90;
+        static constexpr int16_t LM_TEST_X = 302;
+        static constexpr int16_t LM_TEST_W = 90;
+
+        if (y >= LM_BTN_Y && y <= LM_BTN_Y + LM_BTN_H) {
+            if (x >= LM_PREV_X && x <= LM_PREV_X + LM_PREV_W) {
+                // PREV: decrement mode with wrap
+                if (ledModeEdit_ == 0)
+                    ledModeEdit_ = led_ctrl::DECOR_MODE_COUNT - 1;
+                else
+                    ledModeEdit_--;
+                led_ctrl::setDecorMode(static_cast<led_ctrl::DecorMode>(ledModeEdit_));
+                ledModeSaved_  = (ledModeEdit_ == config_store::get().ledMode);
+                needsRedraw_   = true;
+                return true;
+            }
+            if (x >= LM_NEXT_X && x <= LM_NEXT_X + LM_NEXT_W) {
+                // NEXT: increment mode with wrap
+                ledModeEdit_ = (ledModeEdit_ + 1) % led_ctrl::DECOR_MODE_COUNT;
+                led_ctrl::setDecorMode(static_cast<led_ctrl::DecorMode>(ledModeEdit_));
+                ledModeSaved_  = (ledModeEdit_ == config_store::get().ledMode);
+                needsRedraw_   = true;
+                return true;
+            }
+            if (x >= LM_SAVE_X && x <= LM_SAVE_X + LM_SAVE_W) {
+                // SAVE: persist current edit mode to NVS
+                config_store::setLedMode(ledModeEdit_);
+                config_store::flush();
+                ledModeSaved_      = true;
+                ledModeTestActive_ = false;  // saved — no need to restore
+                needsRedraw_       = true;
+                Serial.printf("[ENG] LED mode saved: %u\n", ledModeEdit_);
+                return true;
+            }
+            if (x >= LM_TEST_X && x <= LM_TEST_X + LM_TEST_W) {
+                // TEST 10s: apply current mode for 10 s, then restore
+                if (!ledModeTestActive_) {
+                    ledModeTestPrevMode_ = static_cast<uint8_t>(
+                        led_ctrl::getDecorMode());
+                    ledModeTestStartMs_  = static_cast<unsigned long>(millis());
+                    ledModeTestActive_   = true;
+                }
+                led_ctrl::setDecorMode(
+                    static_cast<led_ctrl::DecorMode>(ledModeEdit_));
+                needsRedraw_ = true;
+                return true;
+            }
+        }
         return false;
     }
 
@@ -4650,6 +4745,130 @@ void EngineeringScreen::drawBrightness() {
     drawStepButton(BRI_MINUS_X, "-");
     drawStepButton(BRI_PLUS_X, "+");
 
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+}
+
+// -------------------------------------------------------------------------
+// drawLedMode — LED MODE selector submenu
+//
+// Allows selecting a decorative LED mode for the WS2812B strips.
+// These modes are for private/demo use only and do not affect relays,
+// CAN, RC, audio, traction or steering logic.
+//
+// Turn-signal indicators (amber, triggered by steering angle) always have
+// priority over any decorative mode — this is enforced in led_controller.cpp.
+//
+// Layout (480×320):
+//   Title bar (top)
+//   Mode name — large text (centre)
+//   Status line: SAVED / UNSAVED + disclaimer
+//   Buttons: PREV | NEXT | SAVE | TEST 10s  (row at y=230)
+//   BACK (bottom-left, standard engineering position)
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawLedMode() {
+    // Mode names matching led_ctrl::DecorMode enum order
+    static const char* const kModeNames[led_ctrl::DECOR_MODE_COUNT] = {
+        "NORMAL",       // 0 — default KITT / throttle behaviour
+        "OFF",          // 1
+        "POLICE USA",   // 2
+        "AMBULANCE",    // 3
+        "WARNING AMBER",// 4
+        "HAZARD RED",   // 5
+        "DEMO SHOW",    // 6
+        "CUSTOM TEST"   // 7
+    };
+
+    tft.fillScreen(ui::COL_BG);
+
+    // Title
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("LED MODE", ui::SCREEN_W / 2, 18);
+
+    // Mode index indicator
+    char idxBuf[16];
+    snprintf(idxBuf, sizeof(idxBuf), "%u / %u",
+             (unsigned)ledModeEdit_ + 1,
+             (unsigned)led_ctrl::DECOR_MODE_COUNT);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.setTextSize(1);
+    tft.drawString(idxBuf, ui::SCREEN_W / 2, 40);
+
+    // Mode name — large
+    tft.fillRoundRect(40, 60, 400, 60, 8, ui::COL_DARK_GRAY);
+    tft.drawRoundRect(40, 60, 400, 60, 8, ui::COL_CYAN);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextSize(3);
+    tft.setTextDatum(MC_DATUM);
+    const char* modeName = (ledModeEdit_ < led_ctrl::DECOR_MODE_COUNT)
+                           ? kModeNames[ledModeEdit_] : "UNKNOWN";
+    tft.drawString(modeName, ui::SCREEN_W / 2, 90);
+
+    // Saved / Unsaved status
+    tft.setTextSize(2);
+    tft.setTextColor(ledModeSaved_ ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+    tft.drawString(ledModeSaved_ ? "SAVED" : "UNSAVED", ui::SCREEN_W / 2, 145);
+
+    // Test running indicator
+    if (ledModeTestActive_) {
+        uint32_t elapsed = static_cast<uint32_t>(millis())
+                         - static_cast<uint32_t>(ledModeTestStartMs_);
+        uint32_t remaining = (elapsed < LED_TEST_DURATION_MS)
+                             ? (LED_TEST_DURATION_MS - elapsed) / 1000 + 1
+                             : 0;
+        char testBuf[24];
+        snprintf(testBuf, sizeof(testBuf), "TEST: %lus remaining",
+                 (unsigned long)remaining);
+        tft.setTextSize(1);
+        tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
+        tft.drawString(testBuf, ui::SCREEN_W / 2, 165);
+    }
+
+    // Disclaimer
+    tft.setTextSize(1);
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("Private/demo use only — no real emergency use",
+                   ui::SCREEN_W / 2, 183);
+    tft.drawString("Turn indicators always have priority",
+                   ui::SCREEN_W / 2, 196);
+
+    // ---- Action buttons (y=230, h=40) ----
+    static constexpr int16_t LM_BTN_Y  = 230;
+    static constexpr int16_t LM_BTN_H  = 40;
+    static constexpr int16_t LM_PREV_X = 8;
+    static constexpr int16_t LM_PREV_W = 80;
+    static constexpr int16_t LM_NEXT_X = 100;
+    static constexpr int16_t LM_NEXT_W = 80;
+    static constexpr int16_t LM_SAVE_X = 200;
+    static constexpr int16_t LM_SAVE_W = 90;
+    static constexpr int16_t LM_TEST_X = 302;
+    static constexpr int16_t LM_TEST_W = 90;
+
+    auto drawBtn = [&](int16_t bx, int16_t bw, const char* lbl, uint16_t border) {
+        tft.fillRect(bx, LM_BTN_Y, bw, LM_BTN_H, ui::COL_DARK_GRAY);
+        tft.drawRect(bx, LM_BTN_Y, bw, LM_BTN_H, border);
+        tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+        tft.setTextSize(2);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(lbl, bx + bw / 2, LM_BTN_Y + LM_BTN_H / 2);
+        tft.setTextSize(1);
+        tft.setTextDatum(TL_DATUM);
+    };
+
+    drawBtn(LM_PREV_X, LM_PREV_W, "PREV", ui::COL_CYAN);
+    drawBtn(LM_NEXT_X, LM_NEXT_W, "NEXT", ui::COL_CYAN);
+    drawBtn(LM_SAVE_X, LM_SAVE_W, "SAVE",
+            ledModeSaved_ ? ui::COL_GRAY : ui::COL_GREEN);
+    drawBtn(LM_TEST_X, LM_TEST_W, "TEST 10s",
+            ledModeTestActive_ ? ui::COL_AMBER : ui::COL_GRAY);
+
+    // BACK button (standard engineering position)
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
     tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
     tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);

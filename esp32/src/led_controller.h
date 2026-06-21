@@ -147,6 +147,52 @@ void startEmergencyFlash(uint8_t count);
 /// Returns true while emergency flash is in progress
 bool isEmergencyFlashActive();
 
+// =========================================================================
+// Decorative LED modes — Engineering menu / hidden menu
+//
+// These modes overlay the centre zones of front and rear strips with
+// decorative patterns (police, ambulance, warning, demo, etc.).
+// They are ALWAYS rendered BEFORE the turn-signal overlays so that amber
+// indicators retain full priority on all modes.
+//
+// PRIORITY (highest to lowest):
+//   1. Emergency flash (startEmergencyFlash)
+//   2. Turn-signal overlay (amber — unchanged by any decor mode)
+//   3. Decorative mode (centre + side zones, EXCEPT where turn signal active)
+//   4. Normal KITT / throttle-reactive base (when DecorMode::NORMAL)
+//
+// SAFETY NOTE:
+//   These modes are purely decorative for private/demo use.
+//   They do NOT affect relays, CAN, RC, audio, traction or steering.
+//   No delay() calls.  All timing via millis() in update().
+// =========================================================================
+
+/// Brightness scale factors for decorative modes (0-255)
+inline constexpr uint8_t LED_BRIGHTNESS_NORMAL    = 80;   // Normal operation
+inline constexpr uint8_t LED_BRIGHTNESS_EMERGENCY = 120;  // Police / Ambulance
+inline constexpr uint8_t LED_BRIGHTNESS_DEMO      = 60;   // Demo / Warning
+
+/// Decorative mode enum (stored in NVS via config_store)
+enum class DecorMode : uint8_t {
+    NORMAL        = 0,  // Default: existing KITT / throttle-reactive behaviour
+    OFF           = 1,  // All LEDs off
+    POLICE_US     = 2,  // US-style red/blue alternating wig-wag
+    AMBULANCE     = 3,  // Red/white alternating
+    WARNING_AMBER = 4,  // Amber blink (precaution / slow)
+    HAZARD_RED    = 5,  // Rear red double-flash
+    DEMO_SHOW     = 6,  // Rainbow sweep
+    CUSTOM_TEST   = 7   // Segment diagnostic (cycles through zones)
+};
+
+/// Number of valid DecorMode values
+inline constexpr uint8_t DECOR_MODE_COUNT = 8;
+
+/// Set the decorative LED mode.  Takes effect on next update() call.
+void setDecorMode(DecorMode mode);
+
+/// Get the currently active decorative LED mode.
+DecorMode getDecorMode();
+
 } // namespace led_ctrl
 
 #endif // LED_CONTROLLER_H

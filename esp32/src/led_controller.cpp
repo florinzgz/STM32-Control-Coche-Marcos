@@ -73,6 +73,58 @@ static bool     emergencyPhase     = false;
 // ---- Amber colour for indicators ----
 static constexpr CRGB AMBER = CRGB(255, 100, 0);
 
+// =========================================================================
+// Decorative mode state
+// =========================================================================
+
+static DecorMode currentDecorMode = DecorMode::NORMAL;
+
+// Shared phase counter for all decorative patterns (non-blocking timing)
+static uint32_t decorLastMs   = 0;
+static uint8_t  decorPhase    = 0;    // generic phase index within pattern
+static bool     decorHalf     = false; // generic boolean half-period flag
+
+// POLICE / AMBULANCE: track which side is currently lit and double-pulse step
+// Pattern: double flash on side A, pause, double flash on side B, repeat.
+// Each half-period step is DECOR_POLICE_STEP_MS long.
+//   Phase 0: side-A pulse 1 ON
+//   Phase 1: side-A pulse 1 OFF
+//   Phase 2: side-A pulse 2 ON
+//   Phase 3: side-A pulse 2 OFF (short pause)
+//   Phase 4: side-B pulse 1 ON
+//   Phase 5: side-B pulse 1 OFF
+//   Phase 6: side-B pulse 2 ON
+//   Phase 7: side-B pulse 2 OFF (longer pause)
+//   Phases 8–9: extended pause between cycles
+static constexpr uint16_t DECOR_POLICE_STEP_MS  = 80;   // ms per step
+static constexpr uint8_t  DECOR_POLICE_PHASES   = 10;   // total phases in cycle
+
+// HAZARD_RED: double-flash rear (phases 0-3), long pause (phases 4-7)
+static constexpr uint16_t DECOR_HAZARD_STEP_MS = 80;
+static constexpr uint8_t  DECOR_HAZARD_PHASES  = 8;
+
+// WARNING_AMBER: slow blink 400 ms on / 400 ms off
+static constexpr uint16_t DECOR_WARN_STEP_MS = 400;
+
+// AMBULANCE: red/white 600 ms alternating
+static constexpr uint16_t DECOR_AMBU_STEP_MS = 600;
+
+// DEMO_SHOW: rainbow speed (advance hue by 1 per step)
+static constexpr uint16_t DECOR_DEMO_STEP_MS = 60;
+
+// CUSTOM_TEST: cycle through 9 segments every 2 s
+static constexpr uint16_t DECOR_TEST_STEP_MS = 2000;
+static constexpr uint8_t  DECOR_TEST_PHASES  = 9;
+
+// Scaled brightness helpers (apply scale factor to a CRGB without FastLED API)
+static inline CRGB scaledBrightness(CRGB c, uint8_t scale) {
+    return CRGB(
+        (uint16_t)c.r * scale / 255,
+        (uint16_t)c.g * scale / 255,
+        (uint16_t)c.b * scale / 255
+    );
+}
+
 // =====================================================================
 // Helpers
 // =====================================================================
@@ -144,6 +196,270 @@ static void updateRainbow(CRGB* leds, int count, uint8_t speed) {
 // ---- Flash between two colours ----
 static void updateFlash(CRGB* leds, int count, CRGB c1, CRGB c2) {
     fill_solid(leds, count, blinkState ? c1 : c2);
+}
+
+// =====================================================================
+// Decorative mode — front and rear strip renderers
+//
+// Called from update() ONLY when currentDecorMode != DecorMode::NORMAL.
+// They paint the full strip (including indicator zones); the turn-signal
+// overlays (updateFrontTurnSignals / updateRearTurnSignals) run AFTER
+// and have absolute priority on the indicator zones.
+//
+// No delay() anywhere in this section.
+// =====================================================================
+
+static void updateDecorativeFront() {
+    const uint8_t br = LED_BRIGHTNESS_EMERGENCY;
+    const uint8_t brDemo = LED_BRIGHTNESS_DEMO;
+
+    switch (currentDecorMode) {
+        case DecorMode::OFF:
+            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
+            break;
+
+        case DecorMode::POLICE_US: {
+            // Double-pulse pattern: two flashes on left (blue), two on right (red)
+            // phases 0-3: left side, phases 4-7: right side, phases 8-9: pause
+            bool leftOn  = (decorPhase == 0 || decorPhase == 2);
+            bool rightOn = (decorPhase == 4 || decorPhase == 6);
+            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
+            if (leftOn)
+                fill_solid(&ledsFront[FRONT_IND_LEFT_START],  FRONT_IND_LEFT_COUNT,
+                           scaledBrightness(CRGB::Blue, br));
+            if (rightOn)
+                fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
+                           scaledBrightness(CRGB::Red,  br));
+            // Centre: subtle alternating blue/red
+            CRGB centreCol = leftOn  ? scaledBrightness(CRGB::Blue, br / 3) :
+                             rightOn ? scaledBrightness(CRGB::Red,  br / 3) :
+                                       CRGB::Black;
+            fill_solid(&ledsFront[FRONT_CENTRE_START], FRONT_CENTRE_COUNT, centreCol);
+            break;
+        }
+
+        case DecorMode::AMBULANCE: {
+            // Alternating red / white, slower than police
+            bool phase0 = (decorPhase == 0);
+            CRGB col = phase0 ? scaledBrightness(CRGB::Red,   br)
+                              : scaledBrightness(CRGB::White, br);
+            fill_solid(ledsFront, NUM_LEDS_FRONT, col);
+            break;
+        }
+
+        case DecorMode::WARNING_AMBER: {
+            // Slow amber blink: ON on even phases, OFF on odd
+            CRGB col = ((decorPhase & 1) == 0)
+                ? scaledBrightness(AMBER, brDemo)
+                : CRGB::Black;
+            fill_solid(ledsFront, NUM_LEDS_FRONT, col);
+            break;
+        }
+
+        case DecorMode::HAZARD_RED:
+            // Front is dim red or off when hazard rear is flashing
+            fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, 20));
+            break;
+
+        case DecorMode::DEMO_SHOW: {
+            // Slow rainbow sweep across the full front strip
+            uint8_t hue      = static_cast<uint8_t>(decorPhase * 4);
+            uint8_t deltaHue = static_cast<uint8_t>(256 / NUM_LEDS_FRONT);
+            fill_rainbow(ledsFront, NUM_LEDS_FRONT, hue, deltaHue);
+            // Apply demo brightness globally
+            for (int i = 0; i < NUM_LEDS_FRONT; ++i)
+                ledsFront[i] = scaledBrightness(ledsFront[i], brDemo);
+            break;
+        }
+
+        case DecorMode::CUSTOM_TEST: {
+            // Cycle through segments to verify wiring
+            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
+            switch (decorPhase % DECOR_TEST_PHASES) {
+                case 0: // Front-left zone — white
+                    fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT,
+                               scaledBrightness(CRGB::White, br));
+                    break;
+                case 1: // Front-right zone — white
+                    fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
+                               scaledBrightness(CRGB::White, br));
+                    break;
+                case 2: // All front — red
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, br));
+                    break;
+                case 3: // All front — blue
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Blue, br));
+                    break;
+                case 4: // All front — white
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::White, br));
+                    break;
+                case 5: // All front — amber
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(AMBER, br));
+                    break;
+                case 6: // Front centre only — green
+                    fill_solid(&ledsFront[FRONT_CENTRE_START], FRONT_CENTRE_COUNT,
+                               scaledBrightness(CRGB::Green, br));
+                    break;
+                case 7: // All front — rainbow stripe
+                    fill_rainbow(ledsFront, NUM_LEDS_FRONT, 0, 10);
+                    break;
+                case 8: // All off
+                    break;
+            }
+            break;
+        }
+
+        default:
+            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
+            break;
+    }
+}
+
+static void updateDecorativeRear() {
+    const uint8_t br = LED_BRIGHTNESS_EMERGENCY;
+    const uint8_t brDemo = LED_BRIGHTNESS_DEMO;
+
+    switch (currentDecorMode) {
+        case DecorMode::OFF:
+            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
+            break;
+
+        case DecorMode::POLICE_US: {
+            // Rear: wig-wag mirror of front — left=red, right=blue on same phases
+            bool leftOn  = (decorPhase == 0 || decorPhase == 2);
+            bool rightOn = (decorPhase == 4 || decorPhase == 6);
+            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
+            if (leftOn)
+                fill_solid(&ledsRear[REAR_IND_LEFT_START],  REAR_IND_LEFT_COUNT,
+                           scaledBrightness(CRGB::Red,  br));
+            if (rightOn)
+                fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
+                           scaledBrightness(CRGB::Blue, br));
+            CRGB centreCol = leftOn  ? scaledBrightness(CRGB::Red,  br / 3) :
+                             rightOn ? scaledBrightness(CRGB::Blue, br / 3) :
+                                       CRGB::Black;
+            fill_solid(&ledsRear[REAR_CENTRE_START], REAR_CENTRE_COUNT, centreCol);
+            break;
+        }
+
+        case DecorMode::AMBULANCE: {
+            // Rear: red dominant, occasional white pulse
+            bool phase0 = (decorPhase == 0);
+            CRGB col = phase0 ? scaledBrightness(CRGB::White, br)
+                              : scaledBrightness(CRGB::Red,   br);
+            fill_solid(ledsRear, NUM_LEDS_REAR, col);
+            break;
+        }
+
+        case DecorMode::WARNING_AMBER: {
+            // Left/right amber alternate (left on even, right on odd)
+            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
+            if ((decorPhase & 1) == 0)
+                fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT,
+                           scaledBrightness(AMBER, brDemo));
+            else
+                fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
+                           scaledBrightness(AMBER, brDemo));
+            break;
+        }
+
+        case DecorMode::HAZARD_RED: {
+            // Double flash rear red: ON at phases 0 and 2, OFF elsewhere
+            bool on = (decorPhase == 0 || decorPhase == 2);
+            CRGB col = on ? scaledBrightness(CRGB::Red, br) : CRGB::Black;
+            fill_solid(ledsRear, NUM_LEDS_REAR, col);
+            break;
+        }
+
+        case DecorMode::DEMO_SHOW: {
+            // Offset rainbow by half the hue cycle for a mirror effect
+            uint8_t hue      = static_cast<uint8_t>(decorPhase * 4 + 128);
+            uint8_t deltaHue = static_cast<uint8_t>(256 / NUM_LEDS_REAR);
+            fill_rainbow(ledsRear, NUM_LEDS_REAR, hue, deltaHue);
+            for (int i = 0; i < NUM_LEDS_REAR; ++i)
+                ledsRear[i] = scaledBrightness(ledsRear[i], brDemo);
+            break;
+        }
+
+        case DecorMode::CUSTOM_TEST: {
+            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
+            switch (decorPhase % DECOR_TEST_PHASES) {
+                case 0: // Rear-left zone — white
+                    fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT,
+                               scaledBrightness(CRGB::White, br));
+                    break;
+                case 1: // Rear-right zone — white
+                    fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
+                               scaledBrightness(CRGB::White, br));
+                    break;
+                case 2: // All rear — red
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Red, br));
+                    break;
+                case 3: // All rear — blue
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Blue, br));
+                    break;
+                case 4: // All rear — white
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::White, br));
+                    break;
+                case 5: // All rear — amber
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(AMBER, br));
+                    break;
+                case 6: // Rear centre only — green
+                    fill_solid(&ledsRear[REAR_CENTRE_START], REAR_CENTRE_COUNT,
+                               scaledBrightness(CRGB::Green, br));
+                    break;
+                case 7: // All rear — rainbow stripe
+                    fill_rainbow(ledsRear, NUM_LEDS_REAR, 128, 10);
+                    break;
+                case 8: // All off
+                    break;
+            }
+            break;
+        }
+
+        default:
+            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
+            break;
+    }
+}
+
+// Advance the shared decorative phase counter.
+// Each mode has its own step period and wrap count.
+static void advanceDecorPhase(uint32_t now) {
+    uint16_t stepMs  = DECOR_POLICE_STEP_MS;
+    uint8_t  wrapAt  = DECOR_POLICE_PHASES;
+
+    switch (currentDecorMode) {
+        case DecorMode::POLICE_US:
+            stepMs = DECOR_POLICE_STEP_MS;
+            wrapAt = DECOR_POLICE_PHASES;
+            break;
+        case DecorMode::HAZARD_RED:
+            stepMs = DECOR_HAZARD_STEP_MS;
+            wrapAt = DECOR_HAZARD_PHASES;
+            break;
+        case DecorMode::WARNING_AMBER:
+        case DecorMode::AMBULANCE:
+            stepMs = (currentDecorMode == DecorMode::AMBULANCE)
+                     ? DECOR_AMBU_STEP_MS : DECOR_WARN_STEP_MS;
+            wrapAt = 2;
+            break;
+        case DecorMode::DEMO_SHOW:
+            stepMs = DECOR_DEMO_STEP_MS;
+            wrapAt = 64;   // arbitrary wrap — drives hue evolution
+            break;
+        case DecorMode::CUSTOM_TEST:
+            stepMs = DECOR_TEST_STEP_MS;
+            wrapAt = DECOR_TEST_PHASES;
+            break;
+        default:
+            return;  // NORMAL / OFF: no phase counter needed
+    }
+
+    if (now - decorLastMs >= stepMs) {
+        decorLastMs = now;
+        decorPhase  = (decorPhase + 1) % wrapAt;
+    }
 }
 
 // =====================================================================
@@ -415,9 +731,23 @@ void update() {
         lastBlinkMs = now;
     }
 
-    updateFrontLEDs();
+    // ---- Base layer: normal KITT/throttle OR decorative mode ----
+    // Decorative modes (POLICE, AMBULANCE, etc.) replace the normal base.
+    // Turn-signal overlays always run AFTER and have unconditional priority
+    // on the indicator zones — this is the key safety requirement.
+    if (currentDecorMode == DecorMode::NORMAL) {
+        updateFrontLEDs();
+        updateRearBase();
+    } else {
+        advanceDecorPhase(now);
+        updateDecorativeFront();
+        updateDecorativeRear();
+    }
+
+    // Turn-signal overlays — ALWAYS run regardless of decor mode ----
+    // These write AMBER over the indicator zones (side 10 LEDs each) on
+    // blink-ON only.  No decorative mode may skip or suppress these calls.
     updateFrontTurnSignals();
-    updateRearBase();
     updateRearTurnSignals();
 
     FastLED.show();
@@ -469,6 +799,20 @@ void startEmergencyFlash(uint8_t count) {
 
 bool isEmergencyFlashActive() {
     return emergencyActive;
+}
+
+void setDecorMode(DecorMode mode) {
+    if (currentDecorMode != mode) {
+        currentDecorMode = mode;
+        decorPhase   = 0;
+        decorLastMs  = millis();
+        decorHalf    = false;
+        Serial.printf("[LED] DecorMode set to %u\n", static_cast<uint8_t>(mode));
+    }
+}
+
+DecorMode getDecorMode() {
+    return currentDecorMode;
 }
 
 } // namespace led_ctrl
