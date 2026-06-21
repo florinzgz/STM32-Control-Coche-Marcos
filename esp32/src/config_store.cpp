@@ -6,6 +6,7 @@
 // =============================================================================
 
 #include "config_store.h"
+#include "led_controller.h"
 #include <Preferences.h>
 #include <Arduino.h>
 #include <cstring>
@@ -255,7 +256,7 @@ void setMaintAcknowledged(uint8_t ack) {
 }
 
 void setLedMode(uint8_t mode) {
-    if (mode >= 8) mode = 0;  // clamp to valid DecorMode range (0-7)
+    if (mode >= led_ctrl::DECOR_MODE_COUNT) mode = 0;  // clamp to valid DecorMode range
     currentCfg_.ledMode = mode;
     dirty_ = true;
 }

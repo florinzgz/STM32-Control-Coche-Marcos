@@ -82,8 +82,6 @@ static DecorMode currentDecorMode = DecorMode::NORMAL;
 // Shared phase counter for all decorative patterns (non-blocking timing)
 static uint32_t decorLastMs   = 0;
 static uint8_t  decorPhase    = 0;    // generic phase index within pattern
-static bool     decorHalf     = false; // generic boolean half-period flag
-
 // POLICE / AMBULANCE: track which side is currently lit and double-pulse step
 // Pattern: double flash on side A, pause, double flash on side B, repeat.
 // Each half-period step is DECOR_POLICE_STEP_MS long.
@@ -723,6 +721,8 @@ void update() {
     if (now - lastUpdateMs < UPDATE_RATE_MS) return;
     lastUpdateMs = now;
 
+    // Keep this advancing before the decor branch: REGEN_ACTIVE pulsing uses
+    // animationStep even when rendered as a functional rear overlay.
     animationStep++;  // natural uint16_t wrap at 65536
 
     // Turn-signal blink timer (500 ms half-period)
@@ -735,6 +735,24 @@ void update() {
     // Decorative modes (POLICE, AMBULANCE, etc.) replace the normal base.
     // Turn-signal overlays always run AFTER and have unconditional priority
     // on the indicator zones — this is the key safety requirement.
+    //
+    // SAFETY LAYER: after any decorative rear render, safety-critical rear
+    // signals (BRAKE, BRAKE_EMERGENCY, REVERSE, REGEN_ACTIVE) are always
+    // composited on top so they can NEVER be hidden by a decorative mode.
+    const auto isRearFunctionalOverlay = [](RearMode mode) {
+        switch (mode) {
+            case RearMode::BRAKE:
+            case RearMode::BRAKE_EMERGENCY:
+            case RearMode::REVERSE:
+            case RearMode::REGEN_ACTIVE:
+                return true;
+            case RearMode::OFF:
+            case RearMode::POSITION:
+                return false;
+        }
+        return false;
+    };
+
     if (currentDecorMode == DecorMode::NORMAL) {
         updateFrontLEDs();
         updateRearBase();
@@ -742,6 +760,10 @@ void update() {
         advanceDecorPhase(now);
         updateDecorativeFront();
         updateDecorativeRear();
+        // Overlay safety-critical rear states — priority beats ALL decor modes
+        if (isRearFunctionalOverlay(currentRearMode)) {
+            updateRearBase();
+        }
     }
 
     // Turn-signal overlays — ALWAYS run regardless of decor mode ----
@@ -802,11 +824,15 @@ bool isEmergencyFlashActive() {
 }
 
 void setDecorMode(DecorMode mode) {
+    // Defensive range check: reject out-of-range values (e.g. from corrupt NVS cast)
+    if (static_cast<uint8_t>(mode) >= DECOR_MODE_COUNT) {
+        mode = DecorMode::NORMAL;
+        Serial.printf("[LED] setDecorMode: invalid value clamped to NORMAL\n");
+    }
     if (currentDecorMode != mode) {
         currentDecorMode = mode;
         decorPhase   = 0;
         decorLastMs  = millis();
-        decorHalf    = false;
         Serial.printf("[LED] DecorMode set to %u\n", static_cast<uint8_t>(mode));
     }
 }
