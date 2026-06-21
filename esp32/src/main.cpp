@@ -756,6 +756,9 @@ void setup() {
         audio::setVolume(cfg.audioVolume);
         lastAppliedAudioVolume = cfg.audioVolume;
 
+        // Restore saved LED decorative mode
+        led_ctrl::setDecorMode(static_cast<led_ctrl::DecorMode>(cfg.ledMode));
+
         // Populate vehicleData with initial mode flags
         vehicle::ModeData md;
         md.modeFlags   = currentModeFlags;

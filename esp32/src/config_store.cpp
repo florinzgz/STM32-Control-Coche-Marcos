@@ -24,6 +24,7 @@ static constexpr const char* KEY_TEMP_MAP    = "tmp_map";  // 5-byte blob
 static constexpr const char* KEY_RUNTIME     = "runtime";  // uint32 seconds
 static constexpr const char* KEY_MAINT_INT   = "maint_h";  // uint32 hours
 static constexpr const char* KEY_MAINT_ACK   = "maint_ack";// uint8
+static constexpr const char* KEY_LED_MODE    = "led_mode"; // uint8
 static constexpr const char* KEY_CRC         = "crc";
 
 // Fault log NVS keys (separate namespace to avoid bloating main config writes)
@@ -123,6 +124,7 @@ bool load(Config& cfg) {
     cfg.runtimeSeconds     = prefs_.getULong(KEY_RUNTIME, 0);
     cfg.maintIntervalHours = prefs_.getULong(KEY_MAINT_INT, MAINT_DEFAULT_INTERVAL_HOURS);
     cfg.maintAcknowledged  = prefs_.getUChar(KEY_MAINT_ACK, 0);
+    cfg.ledMode            = prefs_.getUChar(KEY_LED_MODE, 0);
 
     uint32_t storedCrc = prefs_.getULong(KEY_CRC, 0);
 
@@ -159,6 +161,7 @@ bool save(const Config& cfg) {
     prefs_.putULong(KEY_RUNTIME, toSave.runtimeSeconds);
     prefs_.putULong(KEY_MAINT_INT, toSave.maintIntervalHours);
     prefs_.putUChar(KEY_MAINT_ACK, toSave.maintAcknowledged);
+    prefs_.putUChar(KEY_LED_MODE, toSave.ledMode);
     prefs_.putULong(KEY_CRC, toSave.crc32);
 
     prefs_.end();
@@ -248,6 +251,12 @@ void setMaintIntervalHours(uint32_t hours) {
 
 void setMaintAcknowledged(uint8_t ack) {
     currentCfg_.maintAcknowledged = ack;
+    dirty_ = true;
+}
+
+void setLedMode(uint8_t mode) {
+    if (mode >= 8) mode = 0;  // clamp to valid DecorMode range (0-7)
+    currentCfg_.ledMode = mode;
     dirty_ = true;
 }
 

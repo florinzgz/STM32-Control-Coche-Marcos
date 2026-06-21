@@ -74,7 +74,8 @@ private:
         STEER_DIAG,        // Live steering diagnostic (encoder, PWM, state)
         DRIVE_TUNING,      // Drive tuning: accel/brake/reverse ramp + creep (0xFA/0x310)
         BATTERY_LIMITS,    // Battery voltage thresholds: warn/limit/cutoff/recovery/filter (0xFB/0x311)
-        DRIVE_BATT_DIAG    // Read-only drive/battery live diagnostic (N/A where not transmitted)
+        DRIVE_BATT_DIAG,   // Read-only drive/battery live diagnostic (N/A where not transmitted)
+        LED_MODE           // Decorative LED mode selector (private/demo use only)
     };
 
     void drawMainMenu();
@@ -102,6 +103,7 @@ private:
     void drawDriveTuning();
     void drawBatteryLimits();
     void drawDriveBattDiag();
+    void drawLedMode();
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -469,6 +471,22 @@ private:
     uint8_t       dbgPedalPct_   = 0;     bool dbgPedalValid_ = false;
     uint16_t      dbgBattCv_     = 0;     bool dbgBattValid_  = false;  // cV
     uint8_t       dbgErrCode_    = 0;
+
+    // ---- LED MODE selector (LED_MODE submenu) ----
+    // Decorative LED mode editor. NORMAL is the factory default (no change).
+    // Modes are for private/demo use only — no real emergency use.
+    // ledModeEdit_: current mode shown in the editor (may differ from saved).
+    // ledModeSaved_: true if ledModeEdit_ matches the value persisted in NVS.
+    // ledModeTestActive_: set when TEST 10s button is pressed.
+    // ledModeTestStartMs_: millis() when TEST was pressed.
+    // ledModeTestPrevMode_: mode active before the test (restored on timeout/BACK).
+    uint8_t       ledModeEdit_         = 0;
+    bool          ledModeSaved_        = true;
+    bool          ledModeTestActive_   = false;
+    unsigned long ledModeTestStartMs_  = 0;
+    uint8_t       ledModeTestPrevMode_ = 0;
+    bool          ledModeChanged_      = false;
+    static constexpr unsigned long LED_TEST_DURATION_MS = 10000;  // 10 s test
 };
 
 #endif // ENGINEERING_SCREEN_H

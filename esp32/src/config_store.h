@@ -73,6 +73,8 @@ struct Config {
     uint32_t maintIntervalHours = MAINT_DEFAULT_INTERVAL_HOURS;
     // Maintenance: whether maintenance-due has been acknowledged this cycle
     uint8_t  maintAcknowledged  = 0;
+    // LED decorative mode (0 = NORMAL / default, see led_controller.h DecorMode)
+    uint8_t  ledMode            = 0;
     uint32_t crc32              = 0;      // CRC32 validation
 };
 
@@ -99,6 +101,7 @@ void setTempSensorMap(const uint8_t map[NUM_TEMP_SENS]);
 void setRuntimeSeconds(uint32_t seconds);
 void setMaintIntervalHours(uint32_t hours);
 void setMaintAcknowledged(uint8_t ack);
+void setLedMode(uint8_t mode);
 
 /// Flush pending changes to NVS if dirty.  Call periodically from loop().
 void flush();
