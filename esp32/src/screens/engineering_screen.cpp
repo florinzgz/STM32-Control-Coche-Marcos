@@ -2914,7 +2914,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 ledModeSaved_  = (ledModeEdit_ == config_store::get().ledMode);
                 // If a test is active, restart the 10 s timer for the new mode
                 if (ledModeTestActive_)
-                    ledModeTestStartMs_ = static_cast<unsigned long>(millis());
+                    ledModeTestStartMs_ = millis();
                 needsRedraw_   = true;
                 return true;
             }
@@ -2925,7 +2925,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 ledModeSaved_  = (ledModeEdit_ == config_store::get().ledMode);
                 // If a test is active, restart the 10 s timer for the new mode
                 if (ledModeTestActive_)
-                    ledModeTestStartMs_ = static_cast<unsigned long>(millis());
+                    ledModeTestStartMs_ = millis();
                 needsRedraw_   = true;
                 return true;
             }
@@ -2944,7 +2944,7 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                 if (!ledModeTestActive_) {
                     ledModeTestPrevMode_ = static_cast<uint8_t>(
                         led_ctrl::getDecorMode());
-                    ledModeTestStartMs_  = static_cast<unsigned long>(millis());
+                    ledModeTestStartMs_  = millis();
                     ledModeTestActive_   = true;
                 }
                 led_ctrl::setDecorMode(

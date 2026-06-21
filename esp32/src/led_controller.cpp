@@ -721,6 +721,8 @@ void update() {
     if (now - lastUpdateMs < UPDATE_RATE_MS) return;
     lastUpdateMs = now;
 
+    // Keep this advancing before the decor branch: REGEN_ACTIVE pulsing uses
+    // animationStep even when rendered as a functional rear overlay.
     animationStep++;  // natural uint16_t wrap at 65536
 
     // Turn-signal blink timer (500 ms half-period)
@@ -737,6 +739,20 @@ void update() {
     // SAFETY LAYER: after any decorative rear render, safety-critical rear
     // signals (BRAKE, BRAKE_EMERGENCY, REVERSE, REGEN_ACTIVE) are always
     // composited on top so they can NEVER be hidden by a decorative mode.
+    const auto isRearFunctionalOverlay = [](RearMode mode) {
+        switch (mode) {
+            case RearMode::BRAKE:
+            case RearMode::BRAKE_EMERGENCY:
+            case RearMode::REVERSE:
+            case RearMode::REGEN_ACTIVE:
+                return true;
+            case RearMode::OFF:
+            case RearMode::POSITION:
+                return false;
+        }
+        return false;
+    };
+
     if (currentDecorMode == DecorMode::NORMAL) {
         updateFrontLEDs();
         updateRearBase();
@@ -745,10 +761,7 @@ void update() {
         updateDecorativeFront();
         updateDecorativeRear();
         // Overlay safety-critical rear states — priority beats ALL decor modes
-        if (currentRearMode == RearMode::BRAKE          ||
-            currentRearMode == RearMode::BRAKE_EMERGENCY ||
-            currentRearMode == RearMode::REVERSE         ||
-            currentRearMode == RearMode::REGEN_ACTIVE) {
+        if (isRearFunctionalOverlay(currentRearMode)) {
             updateRearBase();
         }
     }
