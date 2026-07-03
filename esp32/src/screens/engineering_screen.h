@@ -276,21 +276,39 @@ private:
 
     // RUN I2C SCAN button feedback.  The command path itself was already
     // correctly wired (0x110/0xF6 → STM32 → 0x30B/0x30C), but the button gave
-    // no visual confirmation, so it looked unresponsive.  These fields drive an
-    // immediate "SCAN CMD SENT/FAILED" banner plus a 2 s "SCAN TIMEOUT" if no
-    // 0x30B/0x30C reply arrives.  Pure HMI feedback — no protocol change.
+    // no visual confirmation, so it looked unresponsive.  These fields drive a
+    // staged banner that names exactly where the scan dialogue stops, so a CAN
+    // delivery fault (request or reply lost) is distinguished from an I2C fault
+    // (TCA missing / bus busy).  The STM32 emits an immediate CMD_ACK echo
+    // (cmdIdLow=0xF6) on request receipt, then 0x30B (with a terminal phase in
+    // byte5) + 0x30C.  Pure HMI feedback — protocol change is additive only.
     // All time-based transitions happen in update() (frame-time contract: no
     // direct millis() in the UI path); the touch handler only latches intent.
-    enum class ScanFb : uint8_t { NONE = 0, SENT, FAILED, TIMEOUT };
+    enum class ScanFb : uint8_t {
+        NONE = 0,
+        SENT,             // CAN REQUEST SENT (writeFrame ok)
+        FAILED,           // SCAN CMD FAILED (writeFrame failed)
+        STARTED,          // STM32 SCAN STARTED (0xF6 echo ACK received)
+        BUS_BUSY,         // I2C BUS BUSY (0x30B phase: SDA stuck low)
+        TCA_MISSING,      // TCA MISSING (0x30B phase: mux !ACK)
+        TCA_ACK,          // TCA ACK (0x30B phase: mux present)
+        COMPLETED,        // SCAN COMPLETED (0x30B valid, phase unknown)
+        RESPONSE,         // RESPONSE RECEIVED (0x30C but no 0x30B)
+        TIMEOUT_NO_ACK,   // TIMEOUT: NO CAN ACK (request never echoed)
+        TIMEOUT_NO_REPLY, // TIMEOUT: NO SCAN REPLY (echoed but no 0x30B/0x30C)
+        TIMEOUT           // generic timeout (fallback)
+    };
     ScanFb        scanFb_            = ScanFb::NONE;
     bool          scanFbChanged_     = false;  // repaint just the status banner
     bool          scanFbArm_         = false;  // stamp scanFbMs_ next update()
     bool          scanArmReply_      = false;  // start reply watchdog next update()
     bool          scanAwaitingReply_ = false;  // waiting for 0x30B/0x30C
+    bool          scanGotStarted_    = false;  // 0xF6 echo ACK seen this cycle
     unsigned long scanSentMs_        = 0;       // frameTimeMs at command tx
     unsigned long scanFbMs_          = 0;       // frameTimeMs when banner set
     unsigned long scanBaseI2cTs_     = 0;       // i2cScan ts at send (detect reply)
     unsigned long scanBaseFdcanTs_   = 0;       // fdcanDiag ts at send
+    unsigned long scanBaseAckTs_     = 0;       // ack ts at send (detect 0xF6 echo)
     static constexpr unsigned long SCAN_TIMEOUT_MS  = 2000;
     static constexpr unsigned long SCAN_FB_CLEAR_MS = 4000;
 

@@ -92,6 +92,16 @@ extern "C" {
 #define SERVICE_ACTION_BATTERY_LIMITS      0xFB  /* Battery voltage-threshold config (byte1 = sub-opcode) → 0x311    */
 #define SERVICE_ACTION_FACTORY_RESTORE     0xFF
 
+/* ---- I2C service-mode scan terminal phase (0x30B byte 5) ----------------
+ * Additive diagnostic: a compact code summarising the terminal I2C condition
+ * reached during Sensor_RunI2CServiceScan(), so the HMI can display "TCA
+ * MISSING" / "I2C BUS BUSY" / "TCA ACK" instead of a bare "SCAN TIMEOUT".
+ * Derived from fields already present in Sensor_I2cScanResult_t.           */
+#define I2C_SCAN_PHASE_UNKNOWN      0x00  /* not determined                        */
+#define I2C_SCAN_PHASE_BUS_BUSY     0x01  /* SDA idle low — bus stuck (recovery run)*/
+#define I2C_SCAN_PHASE_TCA_MISSING  0x02  /* bus idle OK but TCA9548A 0x70 !ACK     */
+#define I2C_SCAN_PHASE_TCA_ACK      0x03  /* TCA9548A ACKed (mux present)           */
+
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
  * 0x01 CAPTURE_MIN    Capture current ADC as released endpoint (pending)
  * 0x02 CAPTURE_MAX    Capture current ADC as pressed  endpoint (pending)

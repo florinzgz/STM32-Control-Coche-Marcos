@@ -110,7 +110,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x307 | DIAG_DEBOUNCE_STEER | 4 | 1000 ms | DWT-debounce filtered count for steering center: u32 LE | `can_handler.c`, `sensor_manager.c` |
 | 0x309 | DIAG_I2C | 6 | 1000 ms | I2C topology diag: byte0=mux_present, byte1=ina_ok_mask (bit0..5=FL,FR,RL,RR,BAT,STEER), byte2=fail_count, byte3=recovery_attempts, byte4=flags(bit0=ever_ok), byte5=ina_expected_mask (bit i = branch powered this phase) | `can_handler.c`, `sensor_manager.c` |
 | 0x30A | DIAG_CAN_META | 8 | 1000 ms | 0x309 delivery meta: byte0-1=call_count u16 LE, byte2-3=tick_count u16 LE, byte4=tx_ok, byte5=tx_err, byte6=fifo_full_drops, byte7=flags(bit0=fdcan_init_ok) | `can_handler.c`, `main.c` |
-| 0x30B | DIAG_I2C_SCAN | 8 | on-demand | Active I2C scan (after SERVICE 0xF6): byte0=bus_flags(bit0 scl_high,bit1 sda_high,bit2 rec_attempted,bit3 rec_success), byte1=mux_present, byte2=ina_present_mask, byte3=fail_count, byte4=recovery_attempts | `can_handler.c`, `sensor_manager.c` |
+| 0x30B | DIAG_I2C_SCAN | 8 | on-demand | Active I2C scan (after SERVICE 0xF6): byte0=bus_flags(bit0 scl_high,bit1 sda_high,bit2 rec_attempted,bit3 rec_success), byte1=mux_present, byte2=ina_present_mask, byte3=fail_count, byte4=recovery_attempts, byte5=scan_phase(0=unknown,1=bus_busy,2=tca_missing,3=tca_ack) | `can_handler.c`, `sensor_manager.c` |
 | 0x30C | DIAG_FDCAN | 6 | on-demand | FDCAN error dump (after SERVICE 0xF6): byte0=last_error_code(LEC), byte1=state_flags(bit0 epassive,bit1 busoff,bit2 warning), byte2=tec, byte3=rec, byte4=tx_nack_flag, byte5=tx_consec_fail | `can_handler.c` |
 | 0x30D | DIAG_GEAR_LIMITS | 8 | on-demand | Gear power limits + accel response (burst after SERVICE 0xF7 QUERY). Two interleaved frame kinds share this ID, selected by byte0 bit4: **bit4=0 POWER**, **bit4=1 RESPONSE**. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid,bit4 frame-kind), byte1-3=active D2/D1/R %, byte4-6=pending D2/D1/R %, byte7=system_state. A QUERY emits both frames back-to-back; a decoder must preserve the "other half" when updating. | `can_handler.c`, `motor_control.c` |
 | 0x30E | DIAG_STEERING_Z | 8 | on-demand | PB5 + encoder-Z dual steering-center diagnostic (burst after SERVICE 0xF8 QUERY). byte0=flags(bit0-2 status: 0=NOT CALIBRATED,1=OK,2=Z NOT SEEN,3=Z OUT OF WINDOW,4=MECH OFFSET; bit3 PB5 live at center; bit4 Z calibration valid; bit5 Z slip), byte1=Z pulse count (saturating 255), byte2-3=last Z position int16 LE (TIM2 counts), byte4-5=Z↔center offset int16 LE (counts), byte6=last Z error int8, byte7=active tolerance (counts). Diagnostic-only — no control/safety path consumes it. | `can_handler.c`, `steering_z.c`, `steering_cal_store.c` |
@@ -436,6 +436,7 @@ Source: `CAN_ProcessMessages()` in `can_handler.c`
 |---------|-----------|-----------------|
 | CMD_MODE (0x102) | 0x02 | After mode/gear validation and acceptance or rejection |
 | SERVICE_CMD (0x110) | 0x10 | After service command processing |
+| SERVICE_CMD I2C scan (0x110 byte0=0xF6) | 0xF6 | Immediate "scan started" echo sent **before** the synchronous I2C probe, so the HMI can tell a lost request (no 0xF6 echo) from a lost reply (echo but no 0x30B/0x30C). The normal post-scan ACK (cmd_id_low = 0x10) is still sent afterwards. |
 
 **Not acknowledged (high-frequency):**
 

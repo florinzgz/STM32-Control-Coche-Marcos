@@ -960,24 +960,60 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         if (scanArmReply_) {
             scanArmReply_      = false;
             scanAwaitingReply_ = true;
+            scanGotStarted_    = false;
             scanSentMs_        = frameTimeMs;
             scanBaseI2cTs_     = data.i2cScan().timestampMs;
             scanBaseFdcanTs_   = data.fdcanDiag().timestampMs;
+            scanBaseAckTs_     = data.ack().timestampMs;
         }
         if (scanAwaitingReply_) {
             const auto& sc = data.i2cScan();
             const auto& fd = data.fdcanDiag();
+            const auto& ak = data.ack();
             const bool gotI2c   = sc.valid && sc.timestampMs != scanBaseI2cTs_;
             const bool gotFdcan = fd.valid && fd.timestampMs != scanBaseFdcanTs_;
-            if (gotI2c || gotFdcan) {
-                // Fresh 0x30B/0x30C reply: drop the transient banner so the
-                // live result lines below speak for themselves.
+            // "STM32 SCAN STARTED": a fresh CMD_ACK echo carrying the scan
+            // action code (0xF6) confirms the request reached the STM32 and the
+            // probe began — this separates a lost request from a lost reply.
+            const bool gotStarted = ak.timestampMs != scanBaseAckTs_ &&
+                                    ak.cmdIdLow == can::SERVICE_ACTION_I2C_SERVICE;
+            if (gotI2c) {
+                // Terminal: the 0x30B scan report names the I2C condition via
+                // its byte5 phase.  Fall back to muxPresent if phase is absent.
                 scanAwaitingReply_ = false;
-                scanFb_            = ScanFb::NONE;
+                switch (sc.scanPhase) {
+                    case can::I2C_SCAN_PHASE_BUS_BUSY:
+                        scanFb_ = ScanFb::BUS_BUSY;    break;
+                    case can::I2C_SCAN_PHASE_TCA_MISSING:
+                        scanFb_ = ScanFb::TCA_MISSING; break;
+                    case can::I2C_SCAN_PHASE_TCA_ACK:
+                        scanFb_ = ScanFb::TCA_ACK;     break;
+                    default:
+                        scanFb_ = sc.muxPresent ? ScanFb::TCA_ACK
+                                : (!sc.sdaIdleHigh ? ScanFb::BUS_BUSY
+                                                   : ScanFb::TCA_MISSING);
+                        break;
+                }
+                scanFbMs_      = frameTimeMs;
+                scanFbChanged_ = true;
+            } else if (gotFdcan) {
+                // 0x30C arrived without the 0x30B scan report (report frame
+                // lost in transit): confirm the STM32 replied but flag the gap.
+                scanAwaitingReply_ = false;
+                scanFb_            = ScanFb::RESPONSE;
+                scanFbMs_          = frameTimeMs;
                 scanFbChanged_     = true;
+            } else if (gotStarted && !scanGotStarted_) {
+                // Intermediate banner — keep awaiting the scan report.
+                scanGotStarted_ = true;
+                scanFb_         = ScanFb::STARTED;
+                scanFbChanged_  = true;
             } else if (frameTimeMs - scanSentMs_ >= SCAN_TIMEOUT_MS) {
+                // No report within the window.  Name the failure by how far the
+                // dialogue got: no echo → request lost; echo → reply lost.
                 scanAwaitingReply_ = false;
-                scanFb_            = ScanFb::TIMEOUT;
+                scanFb_            = scanGotStarted_ ? ScanFb::TIMEOUT_NO_REPLY
+                                                     : ScanFb::TIMEOUT_NO_ACK;
                 scanFbMs_          = frameTimeMs;
                 scanFbChanged_     = true;
             }
@@ -1723,9 +1759,17 @@ void EngineeringScreen::draw() {
         const char* msg = nullptr;
         uint16_t    col = ui::COL_GRAY;
         switch (scanFb_) {
-            case ScanFb::SENT:    msg = "SCAN CMD SENT";   col = ui::COL_CYAN;  break;
-            case ScanFb::FAILED:  msg = "SCAN CMD FAILED"; col = ui::COL_RED;   break;
-            case ScanFb::TIMEOUT: msg = "SCAN TIMEOUT";    col = ui::COL_AMBER; break;
+            case ScanFb::SENT:        msg = "CAN REQUEST SENT";    col = ui::COL_CYAN;  break;
+            case ScanFb::FAILED:      msg = "SCAN CMD FAILED";     col = ui::COL_RED;   break;
+            case ScanFb::STARTED:     msg = "STM32 SCAN STARTED";  col = ui::COL_CYAN;  break;
+            case ScanFb::BUS_BUSY:    msg = "I2C BUS BUSY";        col = ui::COL_AMBER; break;
+            case ScanFb::TCA_MISSING: msg = "TCA MISSING";         col = ui::COL_RED;   break;
+            case ScanFb::TCA_ACK:     msg = "TCA ACK";             col = ui::COL_GREEN; break;
+            case ScanFb::COMPLETED:   msg = "SCAN COMPLETED";      col = ui::COL_GREEN; break;
+            case ScanFb::RESPONSE:    msg = "RESPONSE RECEIVED";   col = ui::COL_AMBER; break;
+            case ScanFb::TIMEOUT_NO_ACK:   msg = "TIMEOUT: NO CAN ACK";   col = ui::COL_RED;   break;
+            case ScanFb::TIMEOUT_NO_REPLY: msg = "TIMEOUT: NO SCAN REPLY"; col = ui::COL_AMBER; break;
+            case ScanFb::TIMEOUT:     msg = "SCAN TIMEOUT";        col = ui::COL_AMBER; break;
             case ScanFb::NONE:
             default:              break;
         }
@@ -2961,10 +3005,13 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 
 // -------------------------------------------------------------------------
 // sendI2cServiceScan — emit a SERVICE_CMD (0x110) with byte0 = 0xF6
-// (SERVICE_ACTION_I2C_SERVICE).  The STM32 runs an active I2C topology probe
-// (mux/INA presence, SDA/SCL idle levels, optional bus recovery) and replies
-// with 0x30B (scan report) + 0x30C (FDCAN dump) plus a CMD_ACK.  Read-only
-// diagnostic — does not change any STM32 control or safety state.
+// (SERVICE_ACTION_I2C_SERVICE).  The STM32 first echoes an immediate CMD_ACK
+// (cmdIdLow=0xF6) confirming the request arrived and the probe started, then
+// runs an active I2C topology probe (mux/INA presence, SDA/SCL idle levels,
+// optional bus recovery) and replies with 0x30B (scan report, terminal phase
+// in byte5) + 0x30C (FDCAN dump).  The staged banner in update() names exactly
+// where the dialogue stops.  Read-only diagnostic — does not change any STM32
+// control or safety state.
 // -------------------------------------------------------------------------
 void EngineeringScreen::sendI2cServiceScan() {
     CanFrame frame = {};
