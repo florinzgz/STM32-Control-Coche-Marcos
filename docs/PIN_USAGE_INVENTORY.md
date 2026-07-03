@@ -29,7 +29,7 @@
 | **Pines GPIO disponibles** | 47 (PA0–PA15, PB0–PB15, PC0–PC13, PD2) |
 | **Pines usados por el proyecto** | 34 |
 | **Pines reservados (SWD debug)** | 2 (PA13/SWDIO, PA14/SWCLK) |
-| **Pines libres para expansión** | **11** |
+| **Pines libres para expansión** | **6** (PA2 y PA3 quedan dañados/no usar por corto a GND) |
 
 ### Distribución de pines usados por categoría
 
@@ -49,7 +49,7 @@
 | **TOTAL USADOS** | **34** | **72.3%** |
 | Reservados SWD | 2 | 4.3% |
 | Pin DIR liberado (PC2) | 1 | 2.1% |
-| **LIBRES** | **10** | **21.3%** |
+| **LIBRES** | **6** | **12.8%** |
 
 ---
 
@@ -133,12 +133,13 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habili
 
 | Señal | Pin | Periférico | Función |
 |-------|-----|-----------|---------|
-| Posición pedal | **PA3** | ADC1_IN4 | Señal dividida 0.12V–1.94V (vía divisor 10kΩ/6.8kΩ) |
+| Posición pedal | **PB1** | ADC1_IN12 | Señal dividida 0.12V–1.94V (vía divisor 10kΩ/6.8kΩ). Movido desde PA3/ADC1_IN4 por corto a GND |
 | | **Subtotal:** | | **1 pin** |
 
 - Sensor Hall SS1324LUA-T (5V, salida 0.3V–4.8V)
 - Divisor de tensión: R1=10kΩ, R2=6.8kΩ → ratio 0.4048
 - La plausibilidad se realiza por software (dual-sample ADC, no requiere hardware adicional)
+- ⚠️ **PIN CAMBIADO:** el pedal se movió de **PA3 (ADC1_IN4, CN10_37)** a **PB1 (ADC1_IN12, CN10_24)** porque el net de PA3 hacía cortocircuito con GND. PB1 está en el mismo ADC1. PA3 queda dañado/no usar (mismo caso que WHEEL_RL PA2→PB2).
 
 ### 2.8 Bus I2C — TCA9548A + 6× INA226 (2 pines)
 
@@ -199,8 +200,8 @@ Sensores en el bus (un solo pin):
 |---|-----|--------|--------|---------|
 | 1 | PA0 | GPIOA | Sensor rueda FL | EXTI0, velocidad rueda |
 | 2 | PA1 | GPIOA | Sensor rueda FR | EXTI1, velocidad rueda |
-| 3 | PA2 | GPIOA | Sensor rueda RL | EXTI2, velocidad rueda |
-| 4 | PA3 | GPIOA | Pedal acelerador | ADC1_IN4, canal primario |
+| 3 | PB2 | GPIOB | Sensor rueda RL | EXTI2, velocidad rueda (movido desde PA2 por corto a GND; PA2 dañado) |
+| 4 | PB1 | GPIOB | Pedal acelerador | ADC1_IN12, canal primario (movido desde PA3 por corto a GND; PA3 dañado) |
 | 5 | PA6 | GPIOA | Motor STEER | TIM3_CH1, RPWM_STEER 20 kHz |
 | 6 | PA7 | GPIOA | Motor STEER | TIM3_CH2, LPWM_STEER 20 kHz |
 | 7 | PA8 | GPIOA | Motor FL | TIM1_CH1, RPWM_FL 20 kHz |
@@ -242,8 +243,8 @@ Los siguientes pines GPIO del STM32G474RE están disponibles para expansión o h
 |---|-----|--------|--------------------------------------|--------|
 | 1 | PA4 | GPIOA | DAC1_OUT1, SPI1_NSS, ADC2_IN17 | **LIBRE** |
 | 2 | PA5 | GPIOA | DAC1_OUT2, SPI1_SCK, ADC2_IN13 | **LIBRE** |
-| 3 | PB1 | GPIOB | ADC3_IN1, TIM3_CH4 | **LIBRE** |
-| 4 | PB2 | GPIOB | GPIO general | **LIBRE** |
+| 3 | PB1 | GPIOB | ADC1_IN12, ADC3_IN1, TIM3_CH4 | **PEDAL** — pedal acelerador ADC1_IN12 (movido desde PA3 por corto a GND) |
+| 4 | PB2 | GPIOB | GPIO general, EXTI2 | **WHEEL_RL** — sensor rueda RL (movido desde PA2 por corto a GND) |
 | 5 | PB12 | GPIOB | SPI2_NSS, I2S2_WS | **LIBRE** |
 | 6 | PB13 | GPIOB | SPI2_SCK, I2S2_CK | **LIBRE** |
 | 7 | PB14 | GPIOB | GPIO_Output | **LED_DIAG** |
@@ -261,7 +262,7 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 | 14 | PA13 | GPIOA | SWDIO (debug) | ⚠️ NO recomendado liberar |
 | 15 | PA14 | GPIOA | SWCLK (debug) | ⚠️ NO recomendado liberar |
 
-> **Resumen: 8 pines libres para uso inmediato** (10 si se sacrifica debug SWD, no recomendado).
+> **Resumen: 6 pines libres para uso inmediato** (8 si se sacrifica debug SWD, no recomendado).
 
 ### Posibles usos de los pines libres
 
@@ -269,8 +270,8 @@ Además, los 2 pines SWD están reservados pero podrían reutilizarse si no se n
 |-------------------|-----------------|----------|
 | UART debug serie | PB12 (TX) + PB13 (RX) | 2 |
 | SPI adicional (sensor, SD card) | PA5 (SCK) + PC2 (MISO) + PA4 (CS) | 3 |
-| ADC adicional (sensor batería, otro sensor) | PB1, PA4, PA5 | 1-3 |
-| LEDs de estado / buzzer | PB2, PB12, PB13 | 1-3 |
+| ADC adicional (sensor batería, otro sensor) | PA4, PA5 | 1-2 |
+| LEDs de estado / buzzer | PB12, PB13 | 1-2 |
 | Sensores adicionales | PC2, PB12, PB13 | 2-3 |
 
 ---
@@ -557,7 +558,7 @@ La señal del pedal se lee por **dos muestras ADC consecutivas** con validación
         │            R1    │        │ · Dual-sample ADC    │
         │         10 kΩ    │        │ · Filtro EMA α=0.3   │
         │            │     │        │ · Rango [30..2800]   │
-        │       NODO ├─────┼──► PA3 │ · Tasa máx 35%/50ms  │
+        │       NODO ├─────┼──► PB1 │ · Tasa máx 35%/50ms  │
         │            │     │        └──────────────────────┘
         │           R2     │
         │         6.8 kΩ   │
@@ -569,23 +570,23 @@ La señal del pedal se lee por **dos muestras ADC consecutivas** con validación
         ┌──────────────────────┐
         │     STM32G474RE      │
         │                      │
-        │  PA3: ADC1_IN4       │ ◄── 0.12V–1.94V (dividida)
+        │  PB1: ADC1_IN12       │ ◄── 0.12V–1.94V (dividida)
         │  PB8: I2C1_SCL      │ ◄──► TCA9548A/INA226
         │  PB9: I2C1_SDA      │ ◄──► TCA9548A/INA226
         └──────────────────────┘
 ```
 
-### 7.4 Canal 1 — Primario (ADC interno, PA3)
+### 7.4 Canal 1 — Primario (ADC interno, PB1)
 
-**Ruta de la señal:** Sensor → Divisor de tensión → PA3 (ADC1_IN4)
+**Ruta de la señal:** Sensor → Divisor de tensión → PB1 (ADC1_IN12)
 
 | Parámetro | Valor |
 |-----------|-------|
-| Pin STM32 | **PA3** |
-| Periférico | ADC1, canal IN4 |
+| Pin STM32 | **PB1** |
+| Periférico | ADC1, canal IN12 |
 | Resolución | 12 bits (0–4095) |
 | Latencia de lectura | ~1 µs |
-| Rango de entrada en PA3 | 0.12V – 1.94V |
+| Rango de entrada en PB1 | 0.12V – 1.94V |
 | Cálculo ADC mínimo | 0.121V / 3.3V × 4095 = **~150 counts** |
 | Cálculo ADC máximo | 1.943V / 3.3V × 4095 = **~2413 counts** |
 
@@ -600,7 +601,7 @@ Pedal pisado:  4.8V × 0.4048 = 1.943V  →  ADC ≈ 2413
 Máximo absoluto: 5.0V × 0.4048 = 2.024V  (bien debajo de 3.3V) ✅
 ```
 
-> ⚠️ **IMPORTANTE:** Sin el divisor de tensión, la señal de 5V del sensor dañaría el pin PA3 (máximo absoluto: 3.6V).
+> ⚠️ **IMPORTANTE:** Sin el divisor de tensión, la señal de 5V del sensor dañaría el pin PB1 (máximo absoluto: 3.6V).
 
 ### 7.5 Plausibilidad por Software (sin ADS1115)
 
@@ -624,7 +625,7 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
    - Convierte el valor ADC (150–2413) a porcentaje (0–100%)
 
 2. **Lee segunda muestra ADC** (~1 µs):
-   - Segunda lectura consecutiva del mismo canal PA3
+   - Segunda lectura consecutiva del mismo canal PB1
    - Verifica consistencia con la primera muestra
 
 3. **Valida por software:**
@@ -643,7 +644,7 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 | 1 | Sensor Pin 1 (VCC) | 5V fuente | Alimentación sensor Hall | 26 AWG |
 | 2 | Sensor Pin 2 (GND) | GND común | Masa sensor | 26 AWG |
 | 3 | Sensor Pin 3 (Señal) | R1 (10 kΩ) entrada | Señal 5V al divisor | 26 AWG |
-| 4 | Nodo R1/R2 | PA3 (STM32) | Señal dividida ~0–2V | 26 AWG, corto |
+| 4 | Nodo R1/R2 | PB1 (STM32) | Señal dividida ~0–2V | 26 AWG, corto |
 | 5 | R2 otro extremo | GND | Referencia del divisor | 26 AWG |
 
 > **Total: 5 cables** para el sistema completo del pedal (sensor + divisor resistivo).
@@ -652,11 +653,11 @@ Cada 50 ms, el firmware ejecuta `Pedal_Update()` que:
 
 | Pin | Función | ¿Exclusivo del pedal? |
 |-----|---------|----------------------|
-| **PA3** | ADC1_IN4 (canal primario + plausibilidad dual-sample) | ✅ Sí, exclusivo |
+| **PB1** | ADC1_IN12 (canal primario + plausibilidad dual-sample) | ✅ Sí, exclusivo |
 | **PB8** | I2C1_SCL (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
 | **PB9** | I2C1_SDA (TCA9548A + INA226) | ❌ Compartido con sensores de corriente |
 
-> **Resultado: Solo 1 pin GPIO adicional** (PA3) es exclusivo del pedal. La plausibilidad se realiza por software (dual-sample ADC) sin necesidad de hardware externo adicional. El bus I2C (PB8/PB9) se usa exclusivamente para los sensores de corriente INA226 y el multiplexor TCA9548A.
+> **Resultado: Solo 1 pin GPIO adicional** (PB1) es exclusivo del pedal. La plausibilidad se realiza por software (dual-sample ADC) sin necesidad de hardware externo adicional. El bus I2C (PB8/PB9) se usa exclusivamente para los sensores de corriente INA226 y el multiplexor TCA9548A.
 
 ---
 

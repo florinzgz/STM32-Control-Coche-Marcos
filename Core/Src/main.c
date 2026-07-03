@@ -4,7 +4,7 @@
   * @brief   STM32G474RE vehicle control – main entry point
   *
   *  Peripherals initialised:
-  *    ADC1    – Pedal accelerator primary channel (PA3 via voltage divider)
+  *    ADC1    – Pedal accelerator primary channel (PB1 via voltage divider)
   *    FDCAN1  – CAN bus @ 500 kbps (ESP32-S3 link, PA11 RX / PA12 TX)
   *    I2C1    – INA226 / TCA9548A sensors
   *    TIM1    – PWM for FL motor + FR motor (20 kHz, PA8-PA10, PC3)
@@ -1382,9 +1382,10 @@ static void MX_ADC1_Init(void)
     /* Calibrate ADC for single-ended mode (must be done before first conversion) */
     HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
 
-    /* Configure channel: PA3 = ADC1_IN4, single-ended */
+    /* Configure channel: PB1 = ADC1_IN12, single-ended
+     * (moved from PA3/ADC1_IN4 — original PA3 net shorted to GND). */
     ADC_ChannelConfTypeDef sConfig = {0};
-    sConfig.Channel      = ADC_CHANNEL_4;
+    sConfig.Channel      = PEDAL_ADC_CHANNEL;   /* ADC_CHANNEL_12 (PB1) */
     sConfig.Rank         = ADC_REGULAR_RANK_1;
     sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5; /* ~5.8 µs at 42.5 MHz — extended
                                                        * from 47.5 cycles (1.1 µs) for

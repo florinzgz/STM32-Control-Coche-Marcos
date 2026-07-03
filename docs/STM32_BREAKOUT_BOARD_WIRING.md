@@ -186,13 +186,15 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | **PC2** | EN_RR | CN7 | **CN7_35** | RR | Reasignado desde PC13 (PC13=botón USER) |
 | **PC4** | EN_STEER | CN10 | **CN10_34** | STEER | Enable BTS7960 dirección |
 
-### 3.11 Pedal acelerador — ADC1_IN4 (PA3)
+### 3.11 Pedal acelerador — ADC1_IN12 (PB1)
 
-> Señal del pedal Hall pasa por **divisor resistivo** (10kΩ + 6.8kΩ) antes de PA3 para escalar de 5V a ≤3.3V.
+> Señal del pedal Hall pasa por **divisor resistivo** (10kΩ + 6.8kΩ) antes de PB1 para escalar de 5V a ≤3.3V.
+>
+> ⚠️ **PIN CAMBIADO:** el pedal se movió de **PA3 (ADC1_IN4, CN10_37)** a **PB1 (ADC1_IN12, CN10_24)** porque la pista/net de PA3/CN10_37 hacía cortocircuito con GND (pita en continuidad contra masa), lo que dejaba la lectura del ADC pegada a bajo/implausible y forzaba SENSOR_FAULT → LIMP_HOME. Es el mismo motivo por el que el sensor de rueda RL se movió de PA2 a PB2. PB1 está en el mismo ADC1, así que solo cambian el canal y el pin GPIO. **PA3 queda dañado/no usar.**
 
 | GPIO STM32 | Función firmware | Conector breakout | Bornera exacta | Tipo | Observaciones |
 |---|---|---|---|---|---|
-| **PA3** | PEDAL (ADC1_IN4) | CN10 | **CN10_37** | Entrada analógica | Vmax en bornera: 3.3V; divisor obligatorio antes del pin |
+| **PB1** | PEDAL (ADC1_IN12) | CN10 | **CN10_24** | Entrada analógica | Vmax en bornera: 3.3V; divisor obligatorio antes del pin. Movido desde PA3/CN10_37 (net en corto a GND) |
 
 ### 3.12 1-Wire DS18B20 (PB0)
 
@@ -223,7 +225,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | **PB7** | Libre | CN7 | CN7_21 | Sin uso en firmware actual |
 | **PB12** | Libre | CN10 | CN10_16 | Sin uso en firmware actual |
 | **PB13** | Libre | CN10 | CN10_30 | Sin uso en firmware actual |
-| **PB1** | Libre | CN10 | CN10_24 | Sin uso en firmware actual |
+| **PB1** | PEDAL (ADC1_IN12) | CN10 | CN10_24 | Entrada analógica del pedal (reasignado desde PA3 por corto a GND) |
 | **PB2** | WHEEL_RL (EXTI2, ↑, PULLUP) | CN10 | CN10_22 | Rueda trasera izquierda (reasignado desde PA2 por corto a GND) |
 | **PC14** | OSC32_IN (cristal RTC) | CN7 | CN7_25 | Reservado para cristal; NO conectar |
 | **PC15** | OSC32_OUT (cristal RTC) | CN7 | CN7_27 | Reservado para cristal; NO conectar |
@@ -262,7 +264,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | 21 | PA9 | LPWM_FL (TIM1_CH2) | Salida PWM | 3.3V, 20kHz | Solo 3.3V |
 | 22 | PB2 | WHEEL_RL (EXTI2 ↑, PULLUP) | Entrada | 3.3V | Desde opto. Reasignado desde PA2 (corto a GND) |
 | 23 | PA8 | RPWM_FL (TIM1_CH1) | Salida PWM | 3.3V, 20kHz | Solo 3.3V |
-| 24 | PB1 | Libre | — | — | Sin uso en firmware |
+| 24 | PB1 | PEDAL (ADC1_IN12) | Entrada analógica | 0–3.3V | Divisor 10k+6.8k obligatorio (reasignado desde PA3 por corto a GND) |
 | 25 | PB10 | RELAY_LED (GPIO out) | Salida | 3.3V → ULN | Via ULN2803A canal 1 |
 | 26 | PB15 | WHEEL_RR (EXTI15, PULLUP) | Entrada | 3.3V | Desde opto PC817/6N137 |
 | 27 | PB4 | ENC_Z (EXTI4 ↓, PULLUP) | Entrada | 3.3V | Desde 6N137; índice encoder |
@@ -275,7 +277,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | 34 | PC4 | EN_STEER (GPIO out) | Salida | 3.3V activo HIGH | — |
 | 35 | PA2 | NO USAR (dañado, corto a GND) | — | — | WHEEL_RL reasignado a PB2/CN10_22 |
 | 36 | NC | Sin conexión | — | — | — |
-| 37 | PA3 | PEDAL (ADC1_IN4) | Entrada analógica | 0–3.3V | Divisor 10k+6.8k obligatorio |
+| 37 | PA3 | ⚠️ NO USAR (dañado) | — | — | Antiguo PEDAL (ADC1_IN4); net en corto a GND → pedal movido a PB1/CN10_24 |
 | 38 | NC | Sin conexión | — | — | — |
 
 ---
@@ -440,8 +442,8 @@ ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up i
 
 ### RIESGO 1 — CRÍTICO: 5V en GPIO
 **Descripción:** Cualquier señal superior a 3.6V en un pin GPIO del STM32G474RE destruye el pin de forma irreversible.  
-**Pines en riesgo:** PA0–PA2 (sensores rueda), PB3/PB4/PA15 (encoder), PB5 (centro dirección), PA3 (pedal).  
-**Solución:** Optoacoplador 6N137 o PC817 en **todas** las señales de sensores externos antes de llegar a la breakout. Divisor resistivo para PA3.  
+**Pines en riesgo:** PA0–PA1 (sensores rueda), PB2 (rueda RL), PB3/PB4/PA15 (encoder), PB5 (centro dirección), PB1 (pedal).  
+**Solución:** Optoacoplador 6N137 o PC817 en **todas** las señales de sensores externos antes de llegar a la breakout. Divisor resistivo para PB1 (pedal).  
 **Estado:** Descrito en `docs/CABLEADO_AISLAMIENTO_DEFINITIVO.md` y `docs/ENCODER_WIRING_6N137.md`.
 
 ### RIESGO 2 — CRÍTICO: Alimentación duplicada en E5V y VIN simultáneos
@@ -461,7 +463,7 @@ ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up i
 **Solución:** CN7_23 no debe conectarse a ningún hardware externo.
 
 ### RIESGO 6 — MEDIO: Masas no conectadas en punto estrella
-**Descripción:** Si AGND (CN10_32) se deja flotante o no se conecta con el GND digital, las lecturas ADC del pedal (PA3) serán erróneas y ruidosas.  
+**Descripción:** Si AGND (CN10_32) se deja flotante o no se conecta con el GND digital, las lecturas ADC del pedal (PB1) serán erróneas y ruidosas.  
 **Solución:** Conectar CN10_32 (AGND) al mismo punto de masa estrella que todos los GND del sistema.
 
 ### RIESGO 7 — MEDIO: BTS7960 VCC lógico a 5V
@@ -486,7 +488,7 @@ ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up i
 - [ ] Elegir UNA sola fuente para la Nucleo: E5V (CN7_6) o VIN (CN7_24), nunca ambas
 - [ ] Preparar optoacopladores 6N137 para encoder y sensores de rueda
 - [ ] Preparar optoacopladores PC817 para sensores LJ12A3
-- [ ] Preparar divisor resistivo 10kΩ + 6.8kΩ para la señal del pedal antes de CN10_37
+- [ ] Preparar divisor resistivo 10kΩ + 6.8kΩ para la señal del pedal antes de CN10_24 (PB1)
 
 ### Conexión de masa (imprescindible antes de nada)
 
@@ -560,8 +562,8 @@ ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up i
 
 ### Conexión pedal
 
-- [ ] Sensor pedal Hall (5V) → divisor 10kΩ + 6.8kΩ → CN10_37 (PA3)
-- [ ] Verificar que Vmax en CN10_37 no supera 3.3V
+- [ ] Sensor pedal Hall (5V) → divisor 10kΩ + 6.8kΩ → CN10_24 (PB1)
+- [ ] Verificar que Vmax en CN10_24 no supera 3.3V
 
 ---
 

@@ -7,7 +7,7 @@
   *   - 4× LJ12A3 inductive wheel speed sensors (EXTI interrupts)
   *   - 5× DS18B20 temperature sensors (OneWire on PB0)
   *   - 6× INA226 current/voltage sensors (I2C via TCA9548A multiplexer)
-  *   - 1× Hall-effect pedal: internal ADC1 on PA3 (via voltage divider)
+  *   - 1× Hall-effect pedal: internal ADC1 on PB1 (via voltage divider)
   *         Plausibility: dual-sample consistency, EMA filter,
   *                       range validation, rate-of-change detection
   *
