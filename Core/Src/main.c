@@ -301,7 +301,7 @@ int main(void)
      * Page 124 stores the per-vehicle ADC counts for released (MIN)
      * and fully pressed (MAX) pedal positions.  On CRC / magic /
      * range failure the call is a no-op — Pedal_RawToPercent() keeps
-     * its compile-time defaults (150 / 2413).  Boot is never blocked
+     * its compile-time defaults (50 / 4000).  Boot is never blocked
      * by a missing or corrupt calibration slot.
      *
      * Safety: this only changes the linear interpolation endpoints.

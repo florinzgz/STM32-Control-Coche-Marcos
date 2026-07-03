@@ -12,7 +12,7 @@
   *   - Flash data alone NEVER unblocks startup_inhibit or authorises
   *     ACTIVE.  Calibration only affects the raw→% mapping.
   *   - If flash is blank, CRC-invalid, or out-of-range, the system
-  *     falls back silently to compile-time defaults (150 / 2413).
+  *     falls back silently to compile-time defaults (50 / 4000).
   *     Boot is NEVER blocked by a missing/corrupt calibration slot.
   *   - All Pedal_Update() plausibility, EMA, rate-of-change, and
   *     FAULT_LO/HI gates remain unchanged and apply equally to the
@@ -47,18 +47,30 @@ extern "C" {
  * for the FAULT_LO open-wire detector.  adc_max must be at or below
  * PEDAL_CAL_MAX_LIMIT to stay clear of the FAULT_HI short-circuit
  * detector.  (adc_max - adc_min) must be >= PEDAL_CAL_RANGE_MIN so
- * the pedal % mapping has enough span to be useful.                 */
-#define PEDAL_CAL_MIN_LIMIT    50U     /* adc_min >= 50              */
-#define PEDAL_CAL_MAX_LIMIT    2600U   /* adc_max <= 2600            */
-#define PEDAL_CAL_RANGE_MIN    800U    /* (adc_max - adc_min) >= 800 */
+ * the pedal % mapping has enough span to be useful.
+ *
+ * Sensor wiring: the pedal output is fed DIRECTLY into the ADC pin
+ * (no voltage divider).  It is supplied from 3.3 V, so the useful
+ * signal spans almost the whole 12-bit range:
+ *   released ≈ 0 V   → ≈ 0 counts
+ *   full     ≈ 3.28 V → ≈ 4070 counts (of 4095 at 3.3 V)
+ * The limits below are widened accordingly.                          */
+#define PEDAL_CAL_MIN_LIMIT    1U      /* adc_min >= 1    (rest ≈ 0 V) */
+#define PEDAL_CAL_MAX_LIMIT    4094U   /* adc_max <= 4094 (full ≈ 3.3 V) */
+#define PEDAL_CAL_RANGE_MIN    800U    /* (adc_max - adc_min) >= 800  */
 
 /* ---- Compile-time fallback endpoints ----
  * These mirror the PEDAL_ADC_MIN_DEFAULT / PEDAL_ADC_MAX_DEFAULT
  * constants in sensor_manager.c.  Re-exported here so callers that
  * need to persist or re-apply the defaults (e.g. the CAN RESET
- * sub-opcode handler) reference a single source of truth.            */
-#define PEDAL_CAL_DEFAULT_MIN  150U
-#define PEDAL_CAL_DEFAULT_MAX  2413U
+ * sub-opcode handler) reference a single source of truth.
+ *
+ * DEFAULT_MIN leaves a small deadband above the ≈0 V rest so ADC
+ * noise cannot creep the throttle off idle.  DEFAULT_MAX sits a bit
+ * below the ≈4070-count full-press value so 100 % is comfortably
+ * reachable before the pedal bottoms out.                            */
+#define PEDAL_CAL_DEFAULT_MIN  50U     /* ≈0.04 V deadband above rest */
+#define PEDAL_CAL_DEFAULT_MAX  4000U   /* ≈3.22 V → 100 % reachable   */
 
 /* ---- Defensive coherence checks ----------------------------------
  * Guarantee at compile time that the compile-time defaults satisfy
