@@ -18,7 +18,7 @@
   *     startup_inhibit.  Calibration only changes the raw→% mapping.
   *   - On CRC / magic / range failure: silent fallback to defaults
   *     (PedalCal_IsValid() returns false; caller keeps compile-time
-  *     150 / 2413 endpoints).  Boot is never blocked.
+  *     50 / 4000 endpoints).  Boot is never blocked.
   *   - Plausibility, FAULT_LO/HI thresholds, EMA, rate-of-change,
   *     and dual-sample consistency checks in Pedal_Update() are
   *     unchanged and apply equally to default and calibrated maps.

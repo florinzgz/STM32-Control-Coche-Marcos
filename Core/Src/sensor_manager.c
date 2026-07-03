@@ -372,9 +372,11 @@ bool Wheel_IsStale(uint8_t idx)
 /* =========================================================================
  *  Pedal – Internal ADC dual-sample + software plausibility
  *
- *  The 5V pedal signal (Hall-effect SS1324LUA-T, 0.3V–4.8V) is scaled to
- *  0–3.3V via a voltage divider (10 kΩ + 6.8 kΩ → ratio 0.4048).
- *  Plausibility is ensured entirely in software:
+ *  The pedal signal is fed DIRECTLY into the ADC pin (no voltage
+ *  divider).  It is supplied from 3.3 V, so the signal swings from
+ *  ≈0 V at rest to ≈3.28 V at full travel, covering almost the whole
+ *  0–3.3 V ADC input range.  Plausibility is ensured entirely in
+ *  software:
  *
  *  1. Dual-sample consistency: two consecutive ADC reads must agree
  *     within ±PEDAL_SAMPLE_TOLERANCE counts.  Disagreement indicates
@@ -412,10 +414,10 @@ static bool     pedal_ema_primed = false; /* EMA initialized after first read */
 extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c1;
 
-/* ADC calibration (voltage divider 10kΩ + 6.8kΩ, 12-bit, 3.3V ref)
- * Divider ratio: 6.8/(10+6.8) = 0.4048
- * Pedal 0.3V released → 0.3 × 0.4048 = 0.121V → 0.121/3.3 × 4095 ≈ 150
- * Pedal 4.8V pressed  → 4.8 × 0.4048 = 1.943V → 1.943/3.3 × 4095 ≈ 2413
+/* ADC calibration (pedal fed DIRECTLY into the ADC pin, no divider)
+ * Supply 3.3 V, 12-bit, 3.3 V reference:
+ *   Pedal released ≈ 0 V    → ≈ 0 counts
+ *   Pedal pressed  ≈ 3.28 V → 3.28/3.3 × 4095 ≈ 4070 counts
  *
  * Runtime calibration:
  *   The active endpoints used by Pedal_RawToPercent() are kept in
@@ -426,18 +428,24 @@ extern I2C_HandleTypeDef hi2c1;
  *   thresholds (FAULT_LO/HI, sample tolerance, rate limit, EMA α,
  *   plausibility window) remain compile-time constants and are NOT
  *   affected by runtime calibration.                                  */
-#define PEDAL_ADC_MIN_DEFAULT   PEDAL_CAL_DEFAULT_MIN   /* ~0.3V (pedal released), after divider */
-#define PEDAL_ADC_MAX_DEFAULT   PEDAL_CAL_DEFAULT_MAX   /* ~4.8V (pedal fully pressed), after divider */
+#define PEDAL_ADC_MIN_DEFAULT   PEDAL_CAL_DEFAULT_MIN   /* ≈0 V (pedal released) */
+#define PEDAL_ADC_MAX_DEFAULT   PEDAL_CAL_DEFAULT_MAX   /* ≈3.28 V (pedal fully pressed) */
 
 static uint16_t pedal_adc_min = PEDAL_ADC_MIN_DEFAULT;
 static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
 
 /* Fault detection thresholds — values outside this band indicate
- * open/short circuit (wider margin than calibrated range).
- * Below FAULT_LO → wire open or sensor unpowered.
- * Above FAULT_HI → wire shorted to supply.                          */
-#define PEDAL_ADC_FAULT_LO   30U     /* ~0.024V — well below 0.3V rest */
-#define PEDAL_ADC_FAULT_HI   2800U   /* ~2.25V — above 4.8V full scale */
+ * open/short circuit.  With the pedal wired directly to 3.3 V the
+ * usable signal spans almost the full 12-bit range, so the band is
+* opened up to accept it while still catching the hard failure modes:
+*   rest is ≈ 0 V (a few mV), so only a literal 0-count reading (wire
+*   dead / grounded) is treated as an open fault — FAULT_LO = 1;
+*   full press is ≈ 3.28 V (≈4070 counts), so only a rail short that
+*   pins the ADC at 4095 is treated as a short fault — FAULT_HI = 4094.
+* (Both limits stay strictly inside 0..4095 so the unsigned range
+*  comparisons below are never trivially true/false under -Werror.)  */
+#define PEDAL_ADC_FAULT_LO   1U       /* rest ≈ 0 V — only 0 counts faults */
+#define PEDAL_ADC_FAULT_HI   4094U    /* full ≈ 3.28 V — only 4095 counts faults */
 
 /* Dual-sample consistency tolerance (ADC counts).
  * Two consecutive reads of the same DC signal should agree within
