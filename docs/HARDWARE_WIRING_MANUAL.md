@@ -54,7 +54,7 @@
 | Cada terminal de motor | Condensador cerámico | 100 nF / 50 V | Snubber EMI | Ruido RF en señales I2C / CAN / ADC |
 | Encoder → STM32 (PA15, PB3, PB4) | 3× 6N137 optoacoplador | ver §12 | Aislamiento galvánico + 5 V → 3,3 V | Destrucción permanente del pin STM32 + daño por picos inductivos |
 | Sensor LJ12A3 → STM32 (EXTI) | Optoacoplador PC817 / 6N137 | ver `CABLEADO_AISLAMIENTO_DEFINITIVO.md` | Aislamiento 6–36 V → 3,3 V | Pico inductivo destruye pin STM32 |
-| Pedal Hall → PA3 (ADC) | Divisor 10 kΩ + 6,8 kΩ | ver §6.5 | Escalado 5 V → 2 V | Destrucción ADC si supera 3,6 V |
+| Pedal Hall → PB1 (ADC) | Divisor 10 kΩ + 6,8 kΩ | ver §6.5 | Escalado 5 V → 2 V | Destrucción ADC si supera 3,6 V |
 | CAN bus | Resistencia terminación | 120 Ω × 2 | Terminación diferencial | Errores CAN, STM32 entra en SAFE |
 
 ---
@@ -72,7 +72,7 @@ El STM32G474RE (Nucleo-64) es el **controlador de tiempo real** del vehículo. E
 - Lectura de 4 sensores inductivos de velocidad de rueda (EXTI)
 - Lectura de 6 sensores de corriente INA226 (I2C1 vía TCA9548A)
 - Lectura de 5 sensores de temperatura DS18B20 (OneWire, PB0)
-- Lectura del pedal de acelerador (ADC1, PA3)
+- Lectura del pedal de acelerador (ADC1, PB1)
 - Detección del sensor inductivo de centrado de dirección (EXTI5)
 - Control de 2 relés de potencia (TRACCIÓN, DIRECCIÓN)
 - Comunicación CAN con el ESP32 (FDCAN1, 500 kbps)
@@ -590,8 +590,8 @@ antes de cada lectura.
 | Parámetro | Valor | Referencia |
 |-----------|-------|------------|
 | Tipo | **Analógico** (potenciómetro o sensor Hall) | `sensor_manager.c` |
-| Pin | **PA3** | `PIN_PEDAL` (`project_config.h:221`) |
-| Canal ADC | **ADC1_IN4** | `main.c`: `MX_ADC1_Init` |
+| Pin | **PB1** | `PIN_PEDAL` (`project_config.h`) |
+| Canal ADC | **ADC1_IN12** | `main.c`: `MX_ADC1_Init` |
 | Resolución | 12 bits (0–4095) | `main.c` |
 | Tiempo muestreo | 47.5 ciclos | `main.c` |
 | Disparo | Software (polling, timeout 10 ms) | `sensor_manager.c` |
@@ -599,7 +599,9 @@ antes de cada lectura.
 | Filtrado | EMA (α = 0.15) a 20 Hz | `motor_control.c` |
 | Rampa | Subida: 50%/s máx. — Bajada: 100%/s máx. | `motor_control.c` |
 
-El pedal debe producir una señal de **0 a 3.3 V** en PA3.
+El pedal debe producir una señal de **0 a 3.3 V** en PB1.
+
+> ⚠️ **PIN CAMBIADO:** el pedal se movió de **PA3 (ADC1_IN4)** a **PB1 (ADC1_IN12)** porque el net de PA3 hacía cortocircuito con GND. PB1 está en el mismo ADC1. PA3 queda dañado/no usar.
 
 ---
 
@@ -679,7 +681,7 @@ Tabla completa de **todos los pines del STM32G474RE realmente usados** en el fir
 | 1 | **PA0** | GPIOA | Sensor velocidad FL | Inductivo (LJ12A3) | EXTI0 | 3.3 V (con adaptación si necesario) | `PIN_WHEEL_FL` |
 | 2 | **PA1** | GPIOA | Sensor velocidad FR | Inductivo (LJ12A3) | EXTI1 | 3.3 V | `PIN_WHEEL_FR` |
 | 3 | **PA2** | GPIOA | Sensor velocidad RL | Inductivo (LJ12A3) | EXTI2 | 3.3 V | `PIN_WHEEL_RL` |
-| 4 | **PA3** | GPIOA | Pedal acelerador | Hall SS1324LUA-T | ADC1_IN4 | 0–3.3 V analógico (div. 10kΩ/6.8kΩ) | `PIN_PEDAL` |
+| 4 | **PB1** | GPIOB | Pedal acelerador | Hall SS1324LUA-T | ADC1_IN12 | 0–3.3 V analógico (div. 10kΩ/6.8kΩ) | `PIN_PEDAL` |
 | 5 | **PA6** | GPIOA | RPWM motor STEER | BTS7960 STEER | TIM3_CH1 (AF2) | 3.3 V PWM | `PIN_PWM_STEER` |
 | 6 | **PA7** | GPIOA | LPWM motor STEER | BTS7960 STEER | TIM3_CH2 (AF2) | 3.3 V PWM | `PIN_LPWM_STEER` |
 | 7 | **PA8** | GPIOA | RPWM motor FL | BTS7960 FL | TIM1_CH1 (AF6) | 3.3 V PWM | `PIN_PWM_FL` |
@@ -781,7 +783,7 @@ automáticamente.
 | **FDCAN1** | PA11 (RX), PA12 (TX) | 500 kbps | ESP32 (vía transceiver) |
 | **I2C1** | PB8 (SCL), PB9 (SDA) | 100 kHz | TCA9548A (0x70) → 6× INA226 (0x40) |
 | **OneWire** | PB0 | ~16 kbps (bit-bang) | 5× DS18B20 |
-| **ADC1** | PA3 | N/A (polling) | Pedal acelerador |
+| **ADC1** | PB1 | N/A (polling) | Pedal acelerador |
 
 ---
 
@@ -1177,9 +1179,9 @@ R_IN = (5 − 1,5) / 10 mA = 330 Ω → I_F = 10,6 mA ✅ (rango 6N137: 2–15 m
 
 > **Nota:** La salida del 6N137 es lógicamente invertida. Al invertir A y B simultáneamente, la cuadratura se preserva; solo cambia el sentido del conteo. Si es incorrecto, intercambiar A↔B en el conector STM32. Ver `docs/ENCODER_WIRING_6N137.md`.
 
-#### Sensor de pedal Hall (5 V → PA3 ADC)
+#### Sensor de pedal Hall (5 V → PB1 ADC)
 
-Documentado en §6.5. Usar el divisor 10 kΩ + 6,8 kΩ. El pin PA3 nunca superará 2 V.
+Documentado en §6.5. Usar el divisor 10 kΩ + 6,8 kΩ. El pin PB1 nunca superará 2 V.
 
 #### Sensores inductivos LJ12A3 (6–36 V → pines EXTI STM32)
 
@@ -1201,7 +1203,7 @@ Antes de conectar la placa Nucleo, medir con multímetro en modo DC:
 | 5 V (fuente lógica) | 4,85 – 5,15 V | Ajustar la fuente |
 | PA15 con encoder girando (max) | ≤ 3,3 V | Revisar 6N137 y pull-up 4,7 kΩ |
 | PB3 con encoder girando (max) | ≤ 3,3 V | Revisar 6N137 y pull-up 4,7 kΩ |
-| PA3 con pedal a fondo (max) | ≤ 2,1 V | Revisar divisor 10 kΩ + 6,8 kΩ |
+| PB1 con pedal a fondo (max) | ≤ 2,1 V | Revisar divisor 10 kΩ + 6,8 kΩ |
 | Salida optoacoplador PA0-PA2, PB15 | 3,3 V en reposo, 0 V al detectar | Revisar PC817 |
 | PA11 (CAN RX) con bus activo | 0,5 – 2,5 V oscilante | Normal, señal CAN diferencial convertida |
 | GND–GND entre STM32 y BTS7960 | < 0,1 V | Si hay > 0,3 V, revisar cableado de masa |

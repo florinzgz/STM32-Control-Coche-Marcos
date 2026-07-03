@@ -623,9 +623,9 @@ Un divisor de tensión la reduce a 0–3.3V para el ADC del STM32.
 ```
   Pedal (5V)          Divisor de tensión         STM32
   ──────────          ──────────────────         ─────
-  Señal ───── 10kΩ ──┬── 6.8kΩ ── GND           PA3 (ADC1_IN4)
+  Señal ───── 10kΩ ──┬── 6.8kΩ ── GND           PB1 (ADC1_IN12)
                      │
-                     └──────────────────────→ PA3
+                     └──────────────────────→ PB1
 ```
 
 > **NOTA:** El analizador lógico **NO** puede medir señales analógicas.
@@ -637,7 +637,8 @@ Un divisor de tensión la reduce a 0–3.3V para el ADC del STM32.
 ```
 ANALIZADOR          NUCLEO
 ──────────          ──────
-  CH0  ──────────→  PA3  (Pedal ADC)    CN7 pin 37
+  CH0  ──────────→  PB1  (Pedal ADC)    CN10 pin 24
+  Nota: antes PA3/ADC1_IN4/CN10_37; movido por corto a GND. PA3 dañado/no usar.
   GND  ──────────→  GND                 CN7 pin 8
 ```
 

@@ -329,8 +329,12 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
   }
 }
 
-/* ADC MSP init — primary pedal channel on PA3 (ADC1_IN4)
- * Voltage divider (10 kΩ + 6.8 kΩ) scales 5V pedal to 0–3.3V range. */
+/* ADC MSP init — primary pedal channel on PB1 (ADC1_IN12)
+ * Moved from PA3 (ADC1_IN4): the original PA3/CN10_37 net was shorted to
+ * GND, forcing a stuck-low / implausible pedal reading.  PB1 is a free
+ * pin on the SAME ADC1 instance (CN10_24), so only the GPIO port/pin and
+ * the ADC channel change.  Voltage divider (10 kΩ + 6.8 kΩ) scales the
+ * 5V pedal signal to 0–3.3V range. */
 void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -340,12 +344,12 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 
   /* USER CODE END ADC1_MspInit 0 */
     __HAL_RCC_ADC12_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    GPIO_InitStruct.Pin = GPIO_PIN_3;     /* PA3 = ADC1_IN4 */
+    GPIO_InitStruct.Pin = PIN_PEDAL;      /* PB1 = ADC1_IN12 */
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_GPIO_Init(PORT_PEDAL, &GPIO_InitStruct);
   /* USER CODE BEGIN ADC1_MspInit 1 */
 
   /* USER CODE END ADC1_MspInit 1 */

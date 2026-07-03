@@ -28,7 +28,7 @@
 | Inductive center sensor | PB5 (EXTI5) | Mounted at steering center position |
 | 6× INA226 current sensors via TCA9548A I2C mux | I2C1 (PB8 SDA / PB9 SCL) | 4 motor channels + 1 battery + 1 spare |
 | 5× DS18B20 temperature sensors | OneWire bus on PB0 | Placed on motors and ambient |
-| Pedal potentiometer | PA3 (ADC1_IN4) | 0–3.3 V analog input |
+| Pedal potentiometer | PB1 (ADC1_IN12, CN10_24) | 0–3.3 V analog input |
 | 4× wheel speed sensors (hall/reed) | EXTI pins (PA4, PA6, PA7, PB1) | One per wheel, pulse output |
 | 3× relays (Main, Traction, Direction) | GPIO outputs on GPIOC | Control power to motor drivers |
 | 24 V vehicle battery (or bench supply) | Power input | Provide adjustable voltage for undervoltage tests |

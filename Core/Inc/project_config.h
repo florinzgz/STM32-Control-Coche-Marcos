@@ -346,12 +346,23 @@
 /* ========================================================================== */
 /* The Hall-effect pedal (SS1324LUA-T) operates at 5V (0.3V–4.8V output).
  * A voltage divider (10 kΩ + 6.8 kΩ) scales the signal to 0–3.3V for
- * the STM32 internal ADC on PA3.  Plausibility is ensured by:
+ * the STM32 internal ADC.  Plausibility is ensured by:
  *   - Dual consecutive ADC samples with consistency check
  *   - EMA (Exponential Moving Average) filtering
  *   - Range validation (stuck-high / stuck-low detection)
- *   - Rate-of-change limiting (sudden jump detection)                        */
-#define PIN_PEDAL          GPIO_PIN_3   /* PA3 - ADC1_IN4 */
+ *   - Rate-of-change limiting (sudden jump detection)
+ *
+ * PIN MOVED: PA3 (ADC1_IN4, CN10_37) → PB1 (ADC1_IN12, CN10_24).
+ * The original PA3/CN10_37 net was shorted to GND (continuity beeps to
+ * GND), which pinned the ADC reading low / implausible and forced the
+ * safety state machine into SENSOR_FAULT/LIMP_HOME.  PB1 is a free pin
+ * on the SAME ADC1 instance, so only the ADC channel and the GPIO
+ * port/pin change — no new peripheral is initialised.  This mirrors the
+ * earlier WHEEL_RL move (PA2 → PB2) for the same short-to-GND reason.
+ * PA3 is now considered damaged/do-not-use.                                */
+#define PIN_PEDAL          GPIO_PIN_1   /* PB1 - ADC1_IN12 (moved from PA3/ADC1_IN4: original PA3/CN10_37 net shorted to GND) */
+#define PORT_PEDAL         GPIOB        /* Pedal ADC input now on port B (PB1). */
+#define PEDAL_ADC_CHANNEL  ADC_CHANNEL_12 /* PB1 = ADC1_IN12 (was ADC_CHANNEL_4 for PA3/ADC1_IN4) */
 
 /* ========================================================================== */
 /*                       CAN BUS (FDCAN1)                                     */

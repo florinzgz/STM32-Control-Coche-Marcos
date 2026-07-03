@@ -193,7 +193,7 @@ ___________________________________________
 
 Para probar UART requeriría:
 1. Habilitar un USART en el STM32 (ej. USART1 en PA9/PA10 o USART2 en PA2/PA3).
-   - **PA2/PA3 están en uso** (PA2 = EXTI wheel RL, PA3 = ADC pedal).
+   - **PA2/PA3 ya no son candidatos seguros**: PA2 está dañado (wheel RL movida a PB2) y PA3 queda libre pero dañado/no usar (pedal movido a PB1/ADC1_IN12 por corto a GND).
    - PA9/PA10 están en uso para TIM1 (PWM motor FR).
    - Alternativa segura: USART3 en PC10/PC11 (**pero PC11 es relay RELAY_TRAC; PC10 está libre aunque no conectado**). PC10 = INPUT_PULLDOWN, libre para expansión.
 2. Configurar un Serial1 en la ESP32 con pines libres.

@@ -195,7 +195,7 @@ LED strip power could remain energised after a CPU fault.
 | EN_RR             | PC13            | ✅ main.h:80        |
 | CAN TX            | PA12            | ✅ project_config.h:134 |
 | CAN RX            | PA11            | ✅ project_config.h:135 |
-| Pedal ADC         | PA3             | ✅ main.h:131       |
+| Pedal ADC         | PB1 (ADC1_IN12) | ✅ project_config.h |
 
 ### Consistency Score: **100%** — All firmware pins match documentation
 

@@ -49,7 +49,7 @@ FUNCIÓN PROYECTO    SEÑAL STM32
                CN3
 ```
 
-> Usado normalmente para depuración serie; en este proyecto PA2/PA3 son también las ruedas RL/PEDAL en CN10.
+> Usado normalmente para depuración serie; en este proyecto PA2/PA3 quedaron dañados (corto a GND) y las señales RL/PEDAL se movieron a PB2/PB1 en CN10.
 
 ---
 
@@ -93,8 +93,8 @@ AREF (VREF+)  ─────┤ ●8  AREF         │
 ```
 SEÑAL STM32              PIN   FUNCIÓN PROYECTO
                        ┌──────────────────────┐
-PA3  PEDAL ADC1_IN4 ───┤ ●1  D0  (UART2 RX)   │
-PA2  WHEEL_RL EXTI2 ───┤ ●2  D1  (UART2 TX)   │
+PA3  DAÑADO NO USAR ───┤ ●1  D0  (UART2 RX)   │
+PA2  DAÑADO NO USAR ───┤ ●2  D1  (UART2 TX)   │
 PA10 RPWM_FR TIM1_3 ───┤ ●3  D2               │
 PB3  ENC_B  TIM2_CH2 ──┤ ●4  D3  (TIM2 PWM)  │
 PB5  STEER_CENTER ──── ┤ ●5  D4  ↓EXTI5       │
@@ -173,15 +173,15 @@ RPWM_STEER TIM3_1  PA6 ──┤13●   ●14 ├── PA11   CAN_RX ← ESP32
 LPWM_STEER TIM3_2  PA7 ──┤15●   ●16 ├── PB12   libre
 libre              PB6 ──┤17●   ●18 ├── PB11   RELAY_LED_TRASERO
 LPWM_RL TIM8_CH2   PC7 ──┤19●   ●20 ├── GND
-LPWM_FL TIM1_CH2   PA9 ──┤21●   ●22 ├── PB2    libre
-RPWM_FL TIM1_CH1   PA8 ──┤23●   ●24 ├── PB1    libre
+LPWM_FL TIM1_CH2   PA9 ──┤21●   ●22 ├── PB2    WHEEL_RL ↑EXTI2
+RPWM_FL TIM1_CH1   PA8 ──┤23●   ●24 ├── PB1    PEDAL ADC1_IN12
 RELAY_LED_FRONTAL  PB10 ──┤25●   ●26 ├── PB15   WHEEL_RR ↑EXTI15
 ENC_Z ↓EXTI4       PB4 ──┤27●   ●28 ├── PB14   LED_DIAG
 STEER_CENTER ↓EXTI5 PB5 ──┤29●   ●30 ├── PB13   libre
 ENC_B  TIM2_CH2    PB3 ──┤31●   ●32 ├── AGND   GND analógico
 RPWM_FR TIM1_CH3  PA10 ──┤33●   ●34 ├── PC4    EN_STEER enable
-WHEEL_RL ↑EXTI2    PA2 ──┤35●   ●36 ├── NC
-PEDAL ADC1_IN4     PA3 ──┤37●   ●38 ├── NC
+DAÑADO NO USAR     PA2 ──┤35●   ●36 ├── NC
+DAÑADO NO USAR     PA3 ──┤37●   ●38 ├── NC
                          └──────────┘
                               CN10
 ```
@@ -214,14 +214,14 @@ PEDAL ADC1_IN4     PA3 ──┤37●   ●38 ├── NC
 | STEER_CENTER         | PB5       | CN10     |  29  | EXTI5 ↓           |
 | WHEEL_FL             | PA0       | CN7      |  28  | EXTI0 ↑           |
 | WHEEL_FR             | PA1       | CN7      |  30  | EXTI1 ↑           |
-| WHEEL_RL             | PA2       | CN10     |  35  | EXTI2 ↑           |
+| WHEEL_RL             | PB2       | CN10     |  22  | EXTI2 ↑ (movido desde PA2 por corto a GND) |
 | WHEEL_RR             | PB15      | CN10     |  26  | EXTI15 ↑          |
 | EN_FL                | PC5       | CN10     |   6  | GPIO OUT          |
 | EN_FR                | PC0       | CN7      |  38  | GPIO OUT          |
 | EN_RL                | PC1       | CN7      |  36  | GPIO OUT          |
 | EN_RR                | PC2       | CN7      |  35  | GPIO OUT          |
 | EN_STEER             | PC4       | CN10     |  34  | GPIO OUT          |
-| PEDAL_ADC            | PA3       | CN10     |  37  | ADC1_IN4          |
+| PEDAL_ADC            | PB1       | CN10     |  24  | ADC1_IN12 (movido desde PA3 por corto a GND) |
 | 1-Wire DS18B20       | PB0       | CN7      |  34  | GPIO OD           |
 | I2C1_SCL             | PB8       | CN10     |   3  | I2C1_SCL          |
 | I2C1_SDA             | PB9       | CN10     |   5  | I2C1_SDA          |

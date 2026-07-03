@@ -391,7 +391,7 @@ Secuencia de init: XSHUT_FRONT=LOW, XSHUT_REAR=LOW → XSHUT_FRONT=HIGH, asignar
 
 | Puerto | Pines usados | Función |
 |--------|-------------|---------|
-| PA0–PA3 | 4 | Wheel speed FL/FR/RL + Pedal ADC |
+| PA0–PA2, PB1 | 4 | Wheel speed FL/FR/RL + Pedal ADC |
 | PA6–PA10 | 5 | TIM3 CH1–CH2 (steering RPWM/LPWM), TIM1 CH1–CH3 (FL/FR RPWM) |
 | PA11–PA12 | 2 | FDCAN1_RX, FDCAN1_TX |
 | PA15 | 1 | TIM2_CH1 (encoder A) |

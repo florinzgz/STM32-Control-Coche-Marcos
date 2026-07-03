@@ -69,7 +69,7 @@
 | PA11/PA12 CAN | PA11, PA12 | Transceiver TJA1051T/3 | 24 AWG |
 | PB8/PB9 I2C | PB8, PB9 | TCA9548A SCL/SDA | 24 AWG |
 | PB0 OneWire | PB0 | Bus DS18B20 | 24 AWG |
-| PA3 ADC Pedal | PA3 | Divisor resistivo pedal | 28 AWG apantallado |
+| PB1 ADC Pedal | PB1 (CN10_24) | Divisor resistivo pedal | 28 AWG apantallado |
 | PA0–PA2 / PB15 Wheel | PA0, PA1, PA2, PB15 | Sensores inductivos rueda | 24 AWG |
 | PA15 / PB3 Encoder | PA15, PB3 | 6N137 optoacopladores | 28 AWG apantallado |
 | PB4 ENC_Z | PB4 | 6N137 optoacoplador índice Z | 28 AWG apantallado |
@@ -261,19 +261,21 @@
 
 ## 9. Pedal acelerador — Hall SS1324LUA-T
 
-**Función:** Medir la posición del pedal de acelerador (ADC1_IN4, PA3). El firmware realiza doble muestreo + filtro EMA para plausibilidad.
+**Función:** Medir la posición del pedal de acelerador (ADC1_IN12, PB1). El firmware realiza doble muestreo + filtro EMA para plausibilidad.
 
 | Qty | Componente | Especificación | Notas |
 |-----|-----------|---------------|-------|
 | 1 | Sensor Hall SS1324LUA-T | Lineal, 5V supply, salida 0.3–4.8V | Conectar VCC a 5V |
-| 1 | Resistencia divisor R1 | **10 kΩ / ¼W, 1%** | En serie entre salida del sensor y PA3 |
-| 1 | Resistencia divisor R2 | **6.8 kΩ / ¼W, 1%** | Entre el nodo medio y GND; escala 5V → 2.0V máximo en PA3 |
-| 1 | Condensador filtro ADC | **100 nF / 16V** X7R | Entre PA3 y GND (junto al STM32); filtro paso bajo RC (fc ≈ 393 Hz con R = R1‖R2 = 4.05 kΩ) |
-| 1 | Cable apantallado | 28 AWG apantallado | Del divisor al PA3 del STM32; alejado de cables de motor y PWM |
+| 1 | Resistencia divisor R1 | **10 kΩ / ¼W, 1%** | En serie entre salida del sensor y PB1 |
+| 1 | Resistencia divisor R2 | **6.8 kΩ / ¼W, 1%** | Entre el nodo medio y GND; escala 5V → 2.0V máximo en PB1 |
+| 1 | Condensador filtro ADC | **100 nF / 16V** X7R | Entre PB1 y GND (junto al STM32); filtro paso bajo RC (fc ≈ 393 Hz con R = R1‖R2 = 4.05 kΩ) |
+| 1 | Cable apantallado | 28 AWG apantallado | Del divisor al PB1 del STM32; alejado de cables de motor y PWM |
 
 > **⚠️ Usar resistencias de 1% de tolerancia.** Las de 5% introducen hasta ±3% de error de calibración del pedal.
 >
-> **⚠️ El divisor debe estar físicamente cerca del pin PA3** (no en el pedal) para minimizar la captación de ruido PWM.
+> **⚠️ El divisor debe estar físicamente cerca del pin PB1** (no en el pedal) para minimizar la captación de ruido PWM.
+>
+> Nota: pedal movido de PA3 (ADC1_IN4, CN10_37) a PB1 (ADC1_IN12, CN10_24) por corto a GND; PA3 dañado/no usar.
 
 ---
 
@@ -476,7 +478,7 @@
 | 5 | C_REL_SNB | **100 nF** | 250V | Polipropileno | Contactos COM–NO de cada relé |
 | 2 | C_CAN | **100 nF** | 10V | Cerámico X7R | VCC de cada transceiver CAN |
 | 1 | C_CAN_ESP | **10 µF** | 10V | Electrolítico | VCC del transceiver CAN ESP32 |
-| 1 | C_ADC | **100 nF** | 16V | Cerámico X7R | PA3 (pedal ADC) a GND |
+| 1 | C_ADC | **100 nF** | 16V | Cerámico X7R | PB1 (pedal ADC) a GND |
 | 1 | C_24V_REL | **1000 µF** | 35V mín. (50V compatible) | Electrolítico | Bus 24V junto a relés |
 | 1 | C_12V_REL | **470 µF** | 25V | Electrolítico | Bus 12V junto a relé DIR |
 | 2 | C_LED | **1000 µF** | 10V | Electrolítico | Conector 5V de cada tira LED |

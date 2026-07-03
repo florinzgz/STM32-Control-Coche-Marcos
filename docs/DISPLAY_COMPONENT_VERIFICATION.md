@@ -101,7 +101,7 @@ curPedalPct_ = static_cast<uint8_t>(tractionSum / 4);  // ← DERIVADO, NO REAL
 ```
 
 ### Causa raíz
-- El STM32 lee el pedal ADC real en `Pedal_Update()` (`sensor_manager.c`, ADC1, PA3)
+- El STM32 lee el pedal ADC real en `Pedal_Update()` (`sensor_manager.c`, ADC1, PB1/ADC1_IN12)
 - El STM32 usa ese valor internamente para controlar los motores
 - El STM32 **NO envía** el porcentaje de pedal al ESP32 en ningún CAN message
 - `CMD_THROTTLE` (0x100) es ESP32→STM32 (comando, no telemetría)

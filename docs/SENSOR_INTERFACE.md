@@ -322,11 +322,12 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 
 | Señal | Pin STM32 | Periférico | Nota |
 |-------|-----------|------------|------|
-| Señal escalada | PA3 | ADC1_IN4 | Divisor resistivo 10 kΩ + 6.8 kΩ |
+| Señal escalada | PB1 | ADC1_IN12 | Divisor resistivo 10 kΩ + 6.8 kΩ; CN10_24 |
 
 ### Plausibilidad por software (sin ADS1115)
 
 > ⚠️ **CAMBIO:** El ADS1115 externo ha sido eliminado. La plausibilidad se realiza por software con el ADC interno:
+> El pedal se movió de PA3 (ADC1_IN4, CN10_37) a PB1 (ADC1_IN12, CN10_24) por corto a GND en la pista PA3; PA3 queda dañado/no usar.
 > dual-sample consistencia (±30 counts), rango (30–2800 counts), tasa de cambio (35%/50ms), filtro EMA (α=0.3).
 
 ### Parámetros del sensor Hall SS1324LUA-T
@@ -336,13 +337,13 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 | Alimentación | 5 V |
 | Salida | 0.3 V – 4.8 V (ratiométrica) |
 
-### Canal primario (PA3 con divisor)
+### Canal primario (PB1 con divisor)
 
 | Parámetro | Valor |
 |-----------|-------|
 | Divisor | 10 kΩ (serie) + 6.8 kΩ (a GND) |
 | Ratio | 6.8 / (10 + 6.8) = 0.4048 |
-| Tensión en PA3 | 0.121 V – 1.943 V |
+| Tensión en PB1 | 0.121 V – 1.943 V |
 | Resolución ADC | 12 bits (0–4095) |
 | Cuentas válidas | 150 – 2413 |
 | Tiempo de muestreo | 47.5 ciclos @ 42.5 MHz (~1.1 µs) |
@@ -370,7 +371,7 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
 ### Resistencias y protección
 
 - **Divisor resistivo:** 10 kΩ (serie) + 6.8 kΩ (a GND). Precisión ≥1 % para mantener el ratio calibrado.
-- **Condensador anti-ruido:** 100 nF cerámico en PA3 a GND (filtro RC con 6.8 kΩ → fc ≈ 234 Hz, suficiente para señal de pedal <10 Hz).
+- **Condensador anti-ruido:** 100 nF cerámico en PB1 a GND (filtro RC con 6.8 kΩ → fc ≈ 234 Hz, suficiente para señal de pedal <10 Hz).
 - **Plausibilidad software:** dual-sample ADC consistencia, validación de rango, límite de tasa de cambio, filtro EMA. No requiere hardware adicional.
 
 ### Alimentación
@@ -410,7 +411,7 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
                               │
                            10kΩ (1%)
                               │
-  STM32 PA3 (ADC1_IN4) ──────┤    ← Lectura 1 + Lectura 2 (~2 µs)
+  STM32 PB1 (ADC1_IN12) ──────┤    ← Lectura 1 + Lectura 2 (~2 µs)
                               │
                            6.8kΩ (1%)
                               │
@@ -420,7 +421,7 @@ El acelerador utiliza un sensor de efecto Hall SS1324LUA-T con dos canales de le
                               │
                              GND
 
-  Tensión en PA3: 0.3V×0.4048=0.121V  a  4.8V×0.4048=1.943V
+  Tensión en PB1: 0.3V×0.4048=0.121V  a  4.8V×0.4048=1.943V
 ```
 
 ---
@@ -871,7 +872,7 @@ El PC817 **invierte** la señal del vehículo (+12 V ACC):
 | PA1 | EXTI1 rising | Velocidad rueda FR (via EL817 Board 1) |
 | PA2 | EXTI2 rising | Velocidad rueda RL (via EL817 Board 1) |
 | PB15 | EXTI15 rising | Velocidad rueda RR (via EL817 Board 1) |
-| PA3 | ADC1_IN4 | Pedal acelerador (primario, divisor 10k+6.8k) |
+| PB1 | ADC1_IN12 | Pedal acelerador (primario, divisor 10k+6.8k; CN10_24) |
 | PA15 | TIM2_CH1 | Encoder dirección A (via 6N137) |
 | PB3 | TIM2_CH2 | Encoder dirección B (via 6N137) |
 | PB4 | EXTI4 | Encoder dirección Z (via 6N137) |

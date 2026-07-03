@@ -145,7 +145,7 @@
 
 | Signal | Pin | Peripheral | Channel | Resolution |
 |--------|-----|------------|---------|------------|
-| PEDAL | PA3 | ADC1 | IN4 | 12-bit (0–4095) |
+| PEDAL | PB1 | ADC1 | IN12 | 12-bit (0–4095) |
 
 - **Conversion:** `pedal_pct = raw × 100 / 4095` (linear 0–100 %).
 - **Sampling:** Single conversion triggered every 50 ms from main loop.
@@ -617,7 +617,7 @@ actual firmware source code (`Core/Inc/main.h` and `Core/Src/*.c`).
 | Wheel RL | **PA2 / EXTI2** | PB2 / EXTI2 ❌ | PB11 / EXTI11 ❌ | — | PB11 ❌ |
 | Wheel RR | **PB15 / EXTI15** | PB10 / EXTI10 ❌ | PB12 / EXTI12 ❌ | — | PB12 ❌ |
 | OneWire | **PB0** | PB5 ❌ | PB0 ✅ | PB5 ❌ | PB0 ✅ |
-| Pedal ADC | **PA3 / ADC1_IN4** | PA0 / ADC1_IN1 ❌ | PA3 / ADC1_IN4 ✅ | PA0 / ADC1_IN1 ❌ | PA3 ✅ |
+| Pedal ADC | **PB1 / ADC1_IN12** | PA0 / ADC1_IN1 ❌ | PA3 / ADC1_IN4 ❌ (antiguo; PA3 dañado/no usar) | PA0 / ADC1_IN1 ❌ | PB1 ✅ |
 | EN_RR | **PC13** | PC7 ❌ | PD2 ❌ | — | PD2 ❌ |
 | CAN RX | **PA11 (AF9)** | PA11 ✅ | PA11 ✅ | — | PA11 ✅ |
 | CAN TX | **PA12 (AF9)** | PA12 ✅ | PA12 ✅ | — | PA12 ✅ |

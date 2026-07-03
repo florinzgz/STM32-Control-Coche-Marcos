@@ -19,8 +19,8 @@
 ## Cambios críticos respecto a documentación antigua
 
 - CAN STM32: **PA11 / PA12** (no PB8 / PB9)
-- Pedal ADC: **PA3 / ADC1_IN4** (no PA0 / ADC1_IN1)
-- Sensores de rueda: **PA0 / PA1 / PA2 / PB15** (no PB0 / PB1 / PB2 / PB10)
+- Pedal ADC: **PB1 / ADC1_IN12** (movido desde PA3 por corto a GND; PA3 dañado/no usar)
+- Sensores de rueda: **PA0 / PA1 / PB2 / PB15** (RL movido de PA2 a PB2 por corto a GND; PA2 dañado)
 - BTS7960: arquitectura **RPWM/LPWM + EN** (sin pin DIR)
 - `EN_RR`: **PC2** (no PC13)
 - `PC10`: libre / sin uso, configurado `INPUT_PULLDOWN`

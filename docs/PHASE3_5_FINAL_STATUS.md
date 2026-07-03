@@ -86,7 +86,7 @@ El ESP32 ahora lee los mode flags confirmados del heartbeat y actualiza `current
 | PA0 | Wheel FL speed | EXTI0 | ✅ Único |
 | PA1 | Wheel FR speed | EXTI1 | ✅ Único |
 | PA2 | Wheel RL speed | EXTI2 | ✅ Único |
-| PA3 | Pedal ADC | ADC1_IN4 | ✅ Único |
+| PB1 | Pedal ADC | ADC1_IN12 | ✅ Único |
 | PA8 | PWM Motor FL | TIM1_CH1 | ✅ Único |
 | PA9 | PWM Motor FR | TIM1_CH2 | ✅ Único |
 | PA10 | PWM Motor RL | TIM1_CH3 | ✅ Único |
@@ -164,7 +164,7 @@ Todos los CAN IDs son únicos entre ambos MCU:
 | TIM1 CH1-4 | Traction PWM 20kHz | Ninguno |
 | TIM2 | Encoder quadrature | Ninguno |
 | TIM8 CH3 | Steering PWM 20kHz | Ninguno |
-| ADC1 IN4 | Pedal | Ninguno |
+| ADC1 IN12 | Pedal | Ninguno |
 | I2C1 | INA226/TCA9548A | Ninguno (bus compartido, muxed) |
 | FDCAN1 | CAN bus | Ninguno |
 | IWDG | Watchdog ~4.1 s | Ninguno |
