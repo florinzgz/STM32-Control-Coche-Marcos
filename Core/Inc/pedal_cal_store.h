@@ -5,8 +5,9 @@
   *
   * Stores the per-vehicle ADC counts for the released (MIN) and fully
   * pressed (MAX) accelerator pedal positions in flash, so that the
-  * Pedal_RawToPercent() mapping is calibrated to the actual pedal /
-  * voltage-divider hardware installed on this unit.
+  * Pedal_RawToPercent() mapping is calibrated to the actual pedal
+  * hardware installed on this unit (fed directly into the ADC, no
+  * voltage divider).
   *
   * Safety invariants:
   *   - Flash data alone NEVER unblocks startup_inhibit or authorises
@@ -43,8 +44,9 @@ extern "C" {
 #include <stdint.h>
 
 /* ---- Hard validation limits (mirror sensor_manager defaults) ----
- * adc_min must be at or above PEDAL_CAL_MIN_LIMIT to leave headroom
- * for the FAULT_LO open-wire detector.  adc_max must be at or below
+ * adc_min must be at or above PEDAL_CAL_MIN_LIMIT so the calibrated
+ * released endpoint is a defined positive count (the rest deadband of
+ * PEDAL_CAL_DEFAULT_MIN sits above it).  adc_max must be at or below
  * PEDAL_CAL_MAX_LIMIT to stay clear of the FAULT_HI short-circuit
  * detector.  (adc_max - adc_min) must be >= PEDAL_CAL_RANGE_MIN so
  * the pedal % mapping has enough span to be useful.
@@ -52,11 +54,11 @@ extern "C" {
  * Sensor wiring: the pedal output is fed DIRECTLY into the ADC pin
  * (no voltage divider).  It is supplied from 3.3 V, so the useful
  * signal spans almost the whole 12-bit range:
- *   released ≈ 0 V   → ≈ 0 counts
- *   full     ≈ 3.28 V → ≈ 4070 counts (of 4095 at 3.3 V)
+ *   released ≈ 0 V   → ≈ 0 counts (measured ≈0.4 mV at rest)
+ *   full     ≈ 3.28 V → ≈ 4070 counts (4095 reserved for FAULT_HI; adc_max must be <= 4094)
  * The limits below are widened accordingly.                          */
-#define PEDAL_CAL_MIN_LIMIT    1U      /* adc_min >= 1    (rest ≈ 0 V) */
-#define PEDAL_CAL_MAX_LIMIT    4094U   /* adc_max <= 4094 (full ≈ 3.3 V) */
+#define PEDAL_CAL_MIN_LIMIT    1U      /* adc_min >= 1    (defined released endpoint) */
+#define PEDAL_CAL_MAX_LIMIT    4094U   /* adc_max <= 4094 (4095 reserved for rail-short fault) */
 #define PEDAL_CAL_RANGE_MIN    800U    /* (adc_max - adc_min) >= 800  */
 
 /* ---- Compile-time fallback endpoints ----
@@ -77,7 +79,7 @@ extern "C" {
  * the same hard validation that PedalCal_Validate() enforces at
  * runtime.  Without these, a future tweak of any of the four macros
  * above could silently make PEDAL_CAL_OP_RESET_DEFAULTS impossible
- * (PedalCal_Save(150,2413) → Validate(150,2413) → false → ACK_REJECTED)
+ * (e.g. PedalCal_Save(0,5000) → Validate(0,5000) → false → ACK_REJECTED)
  * which would only surface as a runtime failure during service.    */
 _Static_assert(PEDAL_CAL_DEFAULT_MIN >= PEDAL_CAL_MIN_LIMIT,
                "PEDAL_CAL_DEFAULT_MIN must clear PEDAL_CAL_MIN_LIMIT");
