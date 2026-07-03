@@ -240,7 +240,8 @@
 /* ========================================================================== */
 #define PIN_WHEEL_FL       GPIO_PIN_0   /* PA0 - EXTI0 */
 #define PIN_WHEEL_FR       GPIO_PIN_1   /* PA1 - EXTI1 */
-#define PIN_WHEEL_RL       GPIO_PIN_2   /* PA2 - EXTI2 */
+#define PIN_WHEEL_RL       GPIO_PIN_2   /* PB2 - EXTI2 (moved from PA2: original PA2/CN10_35 net shorted to GND) */
+#define PORT_WHEEL_RL      GPIOB        /* RL sensor now on port B (PB2). EXTI line 2 unchanged. */
 #define PIN_WHEEL_RR       GPIO_PIN_15  /* PB15 - EXTI15 */
 
 /* High-resolution EMI debounce: minimum microseconds between two accepted

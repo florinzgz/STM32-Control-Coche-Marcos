@@ -945,14 +945,20 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOB, &gpio);
     HAL_GPIO_WritePin(GPIOB, PIN_ONEWIRE, GPIO_PIN_SET);
 
-    /* Wheel speed EXTI inputs */
-    gpio.Pin  = PIN_WHEEL_FL | PIN_WHEEL_FR | PIN_WHEEL_RL;
+    /* Wheel speed EXTI inputs.
+     * FL/FR remain on port A (PA0/PA1).  RL was moved from PA2 to PB2
+     * because the original PA2 / CN10_35 net was shorted to GND (dead
+     * channel).  RL keeps EXTI line 2, so EXTI2_IRQHandler and the NVIC
+     * setup below are unchanged — only the GPIO source port differs.   */
+    gpio.Pin  = PIN_WHEEL_FL | PIN_WHEEL_FR;
     gpio.Mode = GPIO_MODE_IT_RISING;
     gpio.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOA, &gpio);
 
-    gpio.Pin  = PIN_WHEEL_RR;
-    HAL_GPIO_Init(GPIOB, &gpio);
+    /* RL (PB2, EXTI2) + RR (PB15, EXTI15) — both on port B, same
+     * rising-edge / pull-up configuration inherited from above.        */
+    gpio.Pin  = PIN_WHEEL_RL | PIN_WHEEL_RR;
+    HAL_GPIO_Init(PORT_WHEEL_RL, &gpio);   /* GPIOB */
 
     /* Steering center inductive sensor (PB5 / EXTI5).
      * LJ12A3 is NPN open-collector: with GPIO_PULLUP the idle level is
