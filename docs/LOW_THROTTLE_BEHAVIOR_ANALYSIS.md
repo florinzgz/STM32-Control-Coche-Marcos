@@ -18,7 +18,7 @@ Before analyzing the low-throttle region, it is necessary to trace the
 complete demand path from pedal to PWM register:
 
 ```
-Pedal ADC (PA3, 12-bit)
+Pedal ADC (PB1/ADC1_IN12, 12-bit)
   → Pedal_GetPercent()              [0–100 %]
   → Safety_ValidateThrottle()       [clamp, plausibility]
   → Traction_SetDemand()

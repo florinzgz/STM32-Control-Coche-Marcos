@@ -494,13 +494,15 @@ ya aislado por 6N137.
 El pedal (SS1324LUA-T, Hall-effect 5V) va directo al STM32 con divisor de tensión:
 
 ```
-Pedal OUT (0.3V–4.8V a 5V) ──[10kΩ]──┬──► PA3 STM32 (ADC1_IN4)
+Pedal OUT (0.3V–4.8V a 5V) ──[10kΩ]──┬──► PB1 STM32 (ADC1_IN12, CN10_24)
                                         │
                                      [6.8kΩ]
                                         │
                                        GND
 
-Voltaje en PA3: 0–3.3V (compatible con ADC interno de 3.3V)
+Voltaje en PB1: 0–3.3V (compatible con ADC interno de 3.3V)
+
+> Nota: el pedal se movió de PA3 (ADC1_IN4, CN10_37) a PB1 (ADC1_IN12, CN10_24) por corto a GND en la pista PA3; PA3 queda dañado/no usar.
 ```
 
 ---

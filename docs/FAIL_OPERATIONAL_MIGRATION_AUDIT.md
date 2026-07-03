@@ -555,7 +555,7 @@ if (system_state == SYS_STATE_STANDBY &&
 
 **Code facts:**
 - `Pedal_IsPlausible()` validates ADC1 dual-sample consistency (±30 counts), range (30–2800), and rate-of-change (35%/50ms).
-- No external I2C ADC dependency — plausibility is entirely software-based using the internal STM32 ADC on PA3.
+- No external I2C ADC dependency — plausibility is entirely software-based using the internal STM32 ADC on PB1/ADC1_IN12.
 - EMA filter (α=0.3) smooths readings; consecutive samples must agree within tolerance.
 - If plausibility fails, system enters LIMP_HOME with 20% torque cap.
 
@@ -666,14 +666,14 @@ In both cases ACTIVE → LIMP_HOME (not SAFE), and recovery to ACTIVE requires f
 #### Physical Test Procedure
 
 1. **Plausibility failure test (out-of-range):**  
-   a. Apply voltage outside valid range (< 30 or > 2800 counts equivalent) to PA3.  
+   a. Apply voltage outside valid range (< 30 or > 2800 counts equivalent) to PB1.  
    b. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME), byte 2 has sensor fault flag.  
    c. Press pedal.  Verify vehicle does NOT move (demand = 0, signal rejected).  
    d. Restore normal pedal signal.  Verify `Pedal_IsPlausible()` returns true.  
    e. If CAN heartbeat present: verify transition to ACTIVE (byte 1 = 0x02).  
 
 2. **Dual-sample consistency test:**  
-   a. Inject electrical noise on PA3 (simulates inconsistent consecutive samples > 30 counts).  
+   a. Inject electrical noise on PB1 (simulates inconsistent consecutive samples > 30 counts).  
    b. Verify CAN heartbeat: byte 1 = 0x06 (LIMP_HOME).  
    c. Press pedal.  Verify vehicle does NOT move (demand = 0).  
    d. Remove noise source, restore clean pedal signal.  

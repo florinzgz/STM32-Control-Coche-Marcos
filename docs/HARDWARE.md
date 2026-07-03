@@ -19,7 +19,7 @@
 
 ## Cambios críticos respecto a la versión antigua
 
-- Pedal real: **PA3 / ADC1_IN4**
+- Pedal real: **PB1 / ADC1_IN12** (CN10_24; PA3/CN10_37 dañado/no usar)
 - Palanca real: **MCP23017 en ESP32-S3 (I²C @ 400 kHz, SDA=GPIO8, SCL=GPIO9,
   dirección `0x20`)**.  Las posiciones P/R/N/D1/D2 se leen como contactos
   secos one-hot **active-LOW** con pull-ups internos del MCP23017; NEUTRAL =

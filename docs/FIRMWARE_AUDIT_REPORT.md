@@ -436,7 +436,7 @@ For a **child-sized electric vehicle / educational platform**, the firmware is *
 
 2. **Flash wear on steering calibration:** `SteeringCal_*` writes to flash on every calibration. If the centering cycle repeats frequently (e.g., due to a faulty center sensor), flash endurance could be exceeded.
 
-3. **ADC single-channel pedal:** Only one ADC channel (PA3) reads the accelerator pedal. While dual-sample consistency checks exist, a true dual-channel redundant measurement would be more robust.
+3. **ADC single-channel pedal:** Only one ADC channel (PB1/ADC1_IN12) reads the accelerator pedal. While dual-sample consistency checks exist, a true dual-channel redundant measurement would be more robust.
 
 ---
 

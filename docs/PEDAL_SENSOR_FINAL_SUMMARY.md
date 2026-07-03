@@ -27,7 +27,7 @@
                       │                R1       │
                       │            10 kΩ (1%)   │
                       │                │        │
-                      │           NODO ◄────────┼───► PA3 (ADC1_IN4)
+                      │           NODO ◄────────┼───► PB1 (ADC1_IN12, CN10_24)
                       │                │        │
                       │                R2       │
                       │            6.8 kΩ (1%)  │
@@ -39,7 +39,7 @@
                       ┌───────────────────────────┐
                       │    STM32G474RE             │
                       │                            │
-                      │    PA3 (ADC1_IN4)          │ ◄── Señal dividida: 0.12V – 1.94V
+                      │    PB1 (ADC1_IN12)          │ ◄── Señal dividida: 0.12V – 1.94V
                       │                            │
                       │    Plausibilidad software: │
                       │    · Dual-sample ADC       │
@@ -53,17 +53,19 @@
 
 ## 2. CABLES — Lista exacta
 
-### Canal único (divisor → PA3)
+### Canal único (divisor → PB1)
 
 | Nº | De | A | Función |
 |----|-----|---|---------|
 | 1 | Pedal Pin 1 (VCC) | **5V** fuente | Alimentación sensor |
 | 2 | Pedal Pin 2 (GND) | **GND** fuente | Masa sensor |
 | 3 | Pedal Pin 3 (Señal) | **R1 entrada** (10 kΩ) | Señal 0.3V–4.8V |
-| 4 | R1 salida / R2 entrada (nodo) | **PA3** (STM32) | Señal dividida ~0.12V–1.94V |
+| 4 | R1 salida / R2 entrada (nodo) | **PB1** (STM32, CN10_24) | Señal dividida ~0.12V–1.94V |
 | 5 | R2 salida | **GND** | Cierre divisor |
 
 > **Total: 5 cables** (divisor de tensión solamente — ADS1115 eliminado)
+>
+> **Nota:** El pedal se movió de PA3 (ADC1_IN4, CN10_37) a PB1 (ADC1_IN12, CN10_24) por corto a GND en la pista PA3; PA3 queda dañado/no usar.
 
 ---
 
@@ -80,7 +82,7 @@ Ratio = 6.8 / (10 + 6.8) = 0.4048
 Pedal suelto (0.3V): 0.3 × 0.4048 = 0.121V → ADC: ~150 counts
 Pedal pisado (4.8V): 4.8 × 0.4048 = 1.943V → ADC: ~2413 counts
 
-MÁXIMO absoluto en PA3: 5.0 × 0.4048 = 2.024V (muy por debajo de 3.3V)
+MÁXIMO absoluto en PB1: 5.0 × 0.4048 = 2.024V (muy por debajo de 3.3V)
 ```
 
 ---
@@ -158,7 +160,7 @@ if (!Pedal_IsPlausible()) {
 
 | Pin STM32 | Función | Periférico | Señal |
 |-----------|---------|------------|-------|
-| **PA3** | ADC1_IN4 | ADC1 | Pedal (0.12V–1.94V vía divisor) |
+| **PB1** | ADC1_IN12 | ADC1 | Pedal (0.12V–1.94V vía divisor, CN10_24) |
 
 > **Nota:** PB8/PB9 (I2C1) ya NO se usan para el pedal. El bus I2C
 > queda dedicado exclusivamente a INA226/TCA9548A.
@@ -202,7 +204,7 @@ bus I2C compartido que puede fallar.
 ## 9. NOTAS IMPORTANTES
 
 ### ⚠️ Lo que NO debes hacer:
-- **NO conectar** la señal de 5V del pedal directamente a PA3 → quemaría el STM32 (máx 3.6V)
+- **NO conectar** la señal de 5V del pedal directamente a PB1 → quemaría el STM32 (máx 3.6V)
 - **NO alimentar** el SS1324LUA-T a 3.3V → mínimo es 4.5V según datasheet Allegro
 - **NO usar** resistencias de 5% → pueden dar error de calibración de ±3%
 
@@ -227,9 +229,9 @@ Si al medir con multímetro el rango es distinto de 0.3V–4.8V, ajusta en `sens
 
 | Fichero | Qué hace |
 |---------|----------|
-| `Core/Inc/main.h` | Define PIN_PEDAL (PA3), extern hadc1 |
-| `Core/Src/main.c` | Inicializa ADC1: 12-bit, PA3 canal 4, calibración single-ended |
-| `Core/Src/stm32g4xx_hal_msp.c` | HAL_ADC_MspInit: habilita reloj ADC12, configura PA3 analógico |
+| `Core/Inc/main.h` | Define PIN_PEDAL (PB1), PORT_PEDAL GPIOB, PEDAL_ADC_CHANNEL ADC_CHANNEL_12, extern hadc1 |
+| `Core/Src/main.c` | Inicializa ADC1: 12-bit, PB1 canal 12, calibración single-ended |
+| `Core/Src/stm32g4xx_hal_msp.c` | HAL_ADC_MspInit: habilita reloj ADC12, configura PB1 analógico |
 | `Core/Inc/stm32g4xx_hal_conf.h` | HAL_ADC_MODULE_ENABLED (activa driver HAL ADC) |
 | `Core/Src/sensor_manager.c` | Pedal_Update(): dual-sample ADC + plausibilidad software |
 | `Core/Inc/sensor_manager.h` | API: Pedal_GetPercent(), Pedal_IsPlausible(), Pedal_GetRawPercent() |

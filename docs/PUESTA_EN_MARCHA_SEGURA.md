@@ -452,22 +452,22 @@ I_LED = (V_BAT - V_F) / R_serie_on-board
 **Objetivo:** Tener input de acelerador para poder mover motores.
 
 **Referencia firmware:**
-- `project_config.h:222-229` — `PIN_PEDAL` = PA3 (ADC1_IN4), divisor 10kΩ + 6.8kΩ
+- `project_config.h` — `PIN_PEDAL` = PB1 (ADC1_IN12, GPIOB), divisor 10kΩ + 6.8kΩ
 
 ### Materiales
 
 | Qty | Componente | Especificación |
 |-----|-----------|---------------|
 | 1 | Sensor Hall SS1324LUA-T | Alimentación 5V, salida 0.3-4.8V |
-| 1 | Resistencia | **10 kΩ** (R_high — entre salida pedal y PA3) |
-| 1 | Resistencia | **6.8 kΩ** (R_low — entre PA3 y GND) |
-| 1 | Condensador cerámico | **100 nF** entre PA3 y GND (filtro EMI) |
+| 1 | Resistencia | **10 kΩ** (R_high — entre salida pedal y PB1) |
+| 1 | Resistencia | **6.8 kΩ** (R_low — entre PB1 y GND) |
+| 1 | Condensador cerámico | **100 nF** entre PB1 y GND (filtro EMI) |
 | 1 | Cable apantallado | 28 AWG, para la señal del pedal |
 
 ### Circuito divisor
 
 ```
-Pedal Hall 5V out ──── 10 kΩ ────┬────→ PA3 (ADC1_IN4)
+Pedal Hall 5V out ──── 10 kΩ ────┬────→ PB1 (ADC1_IN12, CN10_24)
                                   │
                                 6.8 kΩ
                                   │
@@ -477,6 +477,8 @@ Factor: 6.8/(10+6.8) = 0.404
 Max: 4.8V × 0.404 = 1.94V (seguro para 3.3V ADC)
 Min: 0.3V × 0.404 = 0.12V
 ```
+
+> Nota: el pedal se movió desde PA3 (ADC1_IN4, CN10_37) por corto a GND; PA3 queda dañado/no usar.
 
 **⚠️ IMPORTANTÍSIMO:** El cable del pedal debe ir **apantallado** (malla a GND en un solo extremo) y **separado de los cables de potencia** de los motores. El ruido PWM de 20 kHz puede inducir falsos valores.
 

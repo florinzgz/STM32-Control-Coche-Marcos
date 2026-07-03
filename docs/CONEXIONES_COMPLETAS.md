@@ -27,7 +27,7 @@
   │  GPIO out ──► 5× EN GPIO (PC5/PC0/PC1/PC2/PC4) + 3+2 RELAY               │
   │  EXTI ◄── 4× velocidad rueda + 1× centrado + 1× encoder Z                   │
   │  I2C1 ──► TCA9548A ──► 6× INA226                                            │
-  │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PA3)     │
+  │  ADC1 ◄── Divisor ◄── Pedal (dual-sample + plausibilidad software, PB1)     │
   │  OneWire ──► 5× DS18B20 (PB0)                                                │
   │  LED_DIAG (PB14) ──► LED externo + 330Ω (diagnóstico CAN)                   │
   └──────────────────────────────────────────────────────────────────────────────┘
@@ -240,19 +240,19 @@ Instalar lo más cerca posible del módulo BTS7960 de dirección (bus 12V):
 
 El sensor Hall SS1324LUA-T opera a 5V y produce una señal de 0.3V (reposo) a 4.8V (pisado a fondo). Se usa el **ADC interno del STM32** con plausibilidad por software:
 
-- **Canal ADC (rápido):** ADC interno del STM32 en PA3, a través de un divisor de tensión resistivo (5V → 3.3V). Doble lectura en ~2 µs.
+- **Canal ADC (rápido):** ADC interno del STM32 en PB1 (ADC1_IN12, CN10_24), a través de un divisor de tensión resistivo (5V → 3.3V). Doble lectura en ~2 µs.
 - **Plausibilidad software:** Consistencia dual-sample, filtro EMA (α=0.3), validación de rango, límite de tasa de cambio.
 
 El firmware verifica plausibilidad por software: si las dos muestras ADC consecutivas divergen, el valor sale de rango, o la tasa de cambio excede el límite físico, se activa una falta de plausibilidad que fuerza el acelerador a 0%.
 
-### Canal primario: Divisor de tensión → PA3 (ADC1_IN4)
+### Canal primario: Divisor de tensión → PB1 (ADC1_IN12, CN10_24)
 
 ```
 Pedal señal (0.3V–4.8V)
         │
        [R1 = 10 kΩ]
         │
-        ├──────► PA3 (ADC1_IN4, STM32)
+        ├──────► PB1 (ADC1_IN12, STM32, CN10_24)
         │
        [R2 = 6.8 kΩ]
         │
@@ -268,12 +268,12 @@ Pedal señal (0.3V–4.8V)
 | Cable | De | A | Función |
 |-------|-----|---|---------|
 | 24f | Pedal Pin 3 (Señal) | R1 (10 kΩ) entrada | Señal 5V del sensor |
-| 24g | R1/R2 nodo medio | **PA3** (STM32) | Señal dividida ~0–2V |
+| 24g | R1/R2 nodo medio | **PB1** (STM32, CN10_24) | Señal dividida ~0–2V |
 | — | R2 otro extremo | **GND** | Referencia |
 
 > ⚠️ **USAR RESISTENCIAS DE PRECISIÓN** — Tolerancia 1% o mejor. Resistencias de 5% pueden introducir error de calibración de hasta ±3% del rango del pedal.
 
-> ⚠️ **UBICAR CERCA DEL STM32** — El divisor debe estar físicamente cerca del pin PA3 para minimizar captación de ruido PWM del motor.
+> ⚠️ **UBICAR CERCA DEL STM32** — El divisor debe estar físicamente cerca del pin PB1 para minimizar captación de ruido PWM del motor.
 
 ### Plausibilidad por software (sin ADS1115)
 
@@ -290,7 +290,7 @@ Pedal señal (0.3V–4.8V)
 - **Filtro EMA:** α=0.3 (~150 ms settling time)
 - Muestreo cada 50 ms en el loop del STM32
 
-> ⚠️ **NOTA:** PA3 ahora se usa como ADC1_IN4 (canal primario del pedal). La señal pasa por el divisor de tensión, por lo que NUNCA supera 2.1V en el pin.
+> ⚠️ **NOTA:** El pedal usa PB1 como ADC1_IN12 (canal primario). Se movió desde PA3 (ADC1_IN4, CN10_37) por corto a GND en esa pista; PA3 queda dañado/no usar. La señal pasa por el divisor de tensión, por lo que NUNCA supera 2.1V en el pin.
 
 ---
 
@@ -906,7 +906,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 | 1 | **PA0** | GPIOA | Input | EXTI0 | Sensor velocidad rueda FL | Pull-up, flanco subida |
 | 2 | **PA1** | GPIOA | Input | EXTI1 | Sensor velocidad rueda FR | Pull-up, flanco subida |
 | 3 | **PA2** | GPIOA | Input | EXTI2 | Sensor velocidad rueda RL | Pull-up, flanco subida |
-| 4 | **PA3** | GPIOA | Analog | ADC1_IN4 | Pedal (divisor) | Canal primario, señal dividida 0–2V |
+| 4 | **PB1** | GPIOB | Analog | ADC1_IN12 | Pedal (divisor) | Canal primario, señal dividida 0–2V; CN10_24 |
 | 5 | **PA5** | GPIOA | Output | GPIO | LED LD2 (en Nucleo) | Heartbeat CAN: OK=flash 50ms/2s, FAIL=blink 1Hz |
 | 6 | **PA6** | GPIOA | AF2 | TIM3_CH1 | BTS7960 STEER → **RPWM** | PWM 20 kHz — izquierda |
 | 7 | **PA7** | GPIOA | AF2 | TIM3_CH2 | BTS7960 STEER → **LPWM** | PWM 20 kHz — derecha |
@@ -1075,7 +1075,7 @@ PB14 ──►[330Ω]──►[LED]──► GND
 ### ⚠️ ANTES DE ENCENDER
 
 1. **Verificar GND común** — STM32, ESP32, BTS7960, fuentes de alimentación, y sensores deben compartir el mismo GND
-2. Verificar tensiones — PA15/PB3 (encoder) ≤ 3.3V (salida 6N137 con pull-up). PA3 (pedal divisor) ≤ 2.1V.
+2. Verificar tensiones — PA15/PB3 (encoder) ≤ 3.3V (salida 6N137 con pull-up). PB1 (pedal divisor) ≤ 2.1V.
 3. **No conectar motores todavía** — Para Phase 1, se puede probar sin motores conectados (solo verificar señales RPWM/LPWM con osciloscopio o LED en PA8/PA9/PA10/PC3/PC6/PC7/PC8/PC9/PA6/PA7)
 4. **Conectar CAN con transceivers** — NUNCA conectar PA11/PA12 directo a cables CAN. Necesitan transceiver TJA1051
 5. **Poner resistencias pull-up** — I2C (PB8, PB9) y OneWire (PB0) no funcionan sin pull-ups
@@ -1195,11 +1195,11 @@ PB14 ──►[330Ω]──►[LED]──► GND
 
 **Qué conectar:**
 1. Pedal señal → R1 (10kΩ) → nodo → R2 (6.8kΩ) → GND
-2. Nodo medio → **PA3** (ADC1_IN4)
+2. Nodo medio → **PB1** (ADC1_IN12, CN10_24)
 
 **⚠️ PUNTOS CRÍTICOS:**
-- Verificar con multímetro que PA3 **NUNCA** supera 2.1V (con pedal a fondo)
-- Si mides >2.5V en PA3, el divisor está mal calculado o las resistencias son incorrectas
+- Verificar con multímetro que PB1 **NUNCA** supera 2.1V (con pedal a fondo)
+- Si mides >2.5V en PB1, el divisor está mal calculado o las resistencias son incorrectas
 
 ### 🟢 ETAPA 8 — Periféricos ESP32 (sensor, audio, LEDs, palanca)
 

@@ -158,7 +158,7 @@ The **FULL-FIRMWARE-Coche-Marcos** reference repository is a monolithic ESP32-S3
 - [✓] 4× wheel speed sensors (LJ12A3 inductive, EXTI interrupts, 1 ms debounce)
 - [✓] Steering encoder (E6B2-CWZ6C, TIM2 quadrature, 4800 CPR)
 - [✓] Steering center inductive sensor (PB5, EXTI5)
-- [✓] Pedal ADC (PA3, ADC1_IN4, 12-bit)
+- [✓] Pedal ADC (PB1, ADC1_IN12, 12-bit)
 - [✓] 6× INA226 current sensors (I2C via TCA9548A multiplexer)
 - [✓] 5× DS18B20 temperature sensors (OneWire bit-bang, CRC-8 validation)
 - [✓] Battery bus current/voltage (INA226 channel 4)

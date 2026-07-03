@@ -190,18 +190,18 @@ es baja (usados solo para protección térmica a 1 Hz).
 
 ---
 
-#### 2.1.7 Pedal acelerador — ADC analógico (PA3)
+#### 2.1.7 Pedal acelerador — ADC analógico (PB1)
 
 | Señal | Pin STM32 | Periférico | Rango |
 |-------|-----------|------------|-------|
-| PEDAL | PA3 | ADC1_IN4 | 0–3.3 V analógico |
+| PEDAL | PB1 | ADC1_IN12 | 0–3.3 V analógico |
 
 **Análisis:** Señal analógica continua. Los optoacopladores digitales (6N137) no pueden
 aislar señales analógicas. La aislamiento analógico requiere convertidores sigma-delta
 aislados (AMC1200, ISO124) o transformadores de señal de audio. El pedal ya tiene
 doble canal redundante (ADC primario + ADS1115 I2C de plausibilidad) que detecta
 desacuerdos del 5 % y registra el fallo `pedal_plausible`. Está físicamente alejado de
-los motores (en el habitáculo del conductor).
+los motores (en el habitáculo del conductor). El pin se movió de PA3 (ADC1_IN4, CN10_37) a PB1 (ADC1_IN12, CN10_24) por corto a GND; PA3 queda dañado/no usar.
 
 **Veredicto: NO AISLAR** con los módulos 6N137.
 
@@ -415,7 +415,7 @@ bootloader ni a la programación** del STM32. ✅
 | **CAN Bus (PA11/PA12)** | Protocolo diferencial con transceiver TJA1051T/3. El 6N137 por sí solo no aporta aislamiento galvánico completo (necesita también convertidor DC-DC aislado). La solución adecuada es un chip integrado (ISO1050, ADuM1191). | ISO1050 o ADuM1191 |
 | **I2C Bus (PB8/PB9)** | Protocolo open-drain bidireccional. El 6N137 es unidireccional. Aislar I2C requiere chips dedicados (ADUM1250, ISO1540). | ADUM1250 o ISO1540 |
 | **OneWire (PB0)** | Protocolo bidireccional de un solo cable. Incompatible con optoacopladores estándar. Los DS18B20 operan a 3.3 V en zona de baja tensión. | Si hubiera ruido, mover DS18B20 fuera del bus OneWire a I2C (MCP9808). |
-| **Pedal ADC (PA3)** | Señal analógica continua; los optoacopladores digitales no pueden aislarla. El circuito ya tiene protección: divisor de tensión + ADS1115 plausibilidad. | AMC1200, ISO124 (sigma-delta aislados). |
+| **Pedal ADC (PB1)** | Señal analógica continua; los optoacopladores digitales no pueden aislarla. El circuito ya tiene protección: divisor de tensión + ADS1115 plausibilidad. | AMC1200, ISO124 (sigma-delta aislados). |
 | **PWM/DIR/EN → BTS7960** | 15 canales necesarios (5 motores × 3 señales) superan los canales disponibles. El riesgo es inyección inversa desde BTS7960, ya mitigada por el Schmitt interno del driver. | Módulos adicionales en iteración futura; prioridad si se detectan latch-ups. |
 | **Relés (PC11/12)** | Señales de salida hacia drivers con diodo flyback. No existe camino de retorno de ruido al MCU con un diseño correcto del driver. | No necesario en condiciones normales. |
 
@@ -544,7 +544,7 @@ rango operativo del 6N137 (máximo 15 mA continuo). ✅
 | CAN TX/RX | PA11/PA12 | Diferencial TJA1051T/3; 6N137 solo no basta (necesita DC-DC aislado) | ISO1050, ADuM1191 |
 | I2C SCL/SDA | PB8/PB9 | Protocolo bidireccional open-drain, incompatible con 6N137 | ADUM1250, ISO1540 |
 | OneWire | PB0 | Protocolo bidireccional, tensión 3.3 V, baja criticidad | — |
-| Pedal ADC | PA3 | Señal analógica; 6N137 es digital | AMC1200, ISO124 |
+| Pedal ADC | PB1 | Señal analógica; 6N137 es digital | AMC1200, ISO124 |
 | PWM/DIR/EN | PA8–PA11, PC0–PC9, PC13 | 15 canales necesarios; excede presupuesto; BTS7960 tiene protección interna | Módulos adicionales, iteración futura |
 | Relés | PC11–PC12 | Salidas con driver de transistor + flyback; sin camino de retorno de ruido | — |
 

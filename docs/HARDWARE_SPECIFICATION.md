@@ -427,19 +427,21 @@ float angle_deg = (TIM2->CNT - 2400) * 0.075f;
 
 **Divisor de tensión** (5V → 3.3V — ver `project_config.h`):
 ```
-5V Output ──┬── 10kΩ ──┬── PA3 (ADC1_IN4)
+5V Output ──┬── 10kΩ ──┬── PB1 (ADC1_IN12, CN10_24)
             │          │
             │         6.8kΩ
             │          │
            GND ────────┴── GND
 
 Vout_max = 5V × (6.8kΩ / (10kΩ + 6.8kΩ)) = 2.02V
-Rango pedal: 0.5V–4.5V → 0.20V–1.82V en PA3
+Rango pedal: 0.5V–4.5V → 0.20V–1.82V en PB1
 ```
 
 > **Nota:** El divisor 10 kΩ / 6.8 kΩ produce un rango más reducido (0–2.02 V) que el
 > fondo de escala del ADC (3.3 V), pero proporciona un margen de seguridad amplio:
-> incluso si la salida del sensor llega a 5.5 V, la tensión en PA3 sería 2.23 V < 3.3 V.
+> incluso si la salida del sensor llega a 5.5 V, la tensión en PB1 sería 2.23 V < 3.3 V.
+>
+> **Nota:** El pedal se movió de PA3 (ADC1_IN4, CN10_37) a PB1 (ADC1_IN12, CN10_24) por corto a GND en la pista PA3; PA3 queda dañado/no usar.
 
 **Conversión ADC:**
 ```c

@@ -46,7 +46,7 @@ El firmware actual ejecuta 18 módulos C compilados con ARM GCC (`arm-none-eabi-
 | **TIM8** | PWM motores RL/RR | PC6, PC7, PC8, PC9 | 20 kHz, center-aligned, ARR=4249 |
 | **TIM3** | PWM dirección | PA6, PA7 | 20 kHz, center-aligned |
 | **TIM2** | Encoder cuadratura | PA15, PB3 | 32-bit, 4800 CPR |
-| **ADC1** | Pedal acelerador | PA3 | 12-bit, IN4, muestreo ~1.1 µs |
+| **ADC1** | Pedal acelerador | PB1 | 12-bit, IN12, muestreo ~1.1 µs |
 | **FDCAN1** | Comunicación ESP32 | PA11 (RX), PA12 (TX) | 500 kbps, prescaler 17, AF9 |
 | **I2C1** | Sensores corriente/ADC | PB8 (SCL), PB9 (SDA) | 400 kHz fast mode, open-drain |
 | **IWDG** | Watchdog independiente | — | ~4.1 s (prescaler 32, reload 4095, LSI 32 kHz) |
@@ -150,7 +150,8 @@ El proyecto actual tiene las siguientes particularidades respecto a un proyecto 
 | PA0 | **OCUPADO** | EXTI0 — Wheel FL | — | — |
 | PA1 | **OCUPADO** | EXTI1 — Wheel FR | — | — |
 | PA2 | **OCUPADO** | EXTI2 — Wheel RL | — | — |
-| PA3 | **OCUPADO** | ADC1_IN4 — Pedal | — | — |
+| PA3 | **LIBRE (DAÑADO/NO USAR)** | Antiguo pedal ADC1_IN4; pista en corto a GND | — | — |
+| PB1 | **OCUPADO** | ADC1_IN12 — Pedal | — | — |
 | PA4 | **LIBRE** | — | AF8: USART2_TX, AF12: LPUART1_TX | UART TX candidato |
 | PA5 | **LIBRE** | — | AF8: USART2_RX, AF5: SPI1_SCK | UART RX candidato / SPI1 SCK |
 | PA6 | **OCUPADO** | TIM3_CH1 — RPWM Steer | AF2 | — |
