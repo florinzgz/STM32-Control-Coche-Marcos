@@ -7,7 +7,7 @@
   *   - 4× LJ12A3 inductive wheel speed sensors (EXTI interrupts)
   *   - 5× DS18B20 temperature sensors (OneWire on PB0)
   *   - 6× INA226 current/voltage sensors (I2C via TCA9548A multiplexer)
-  *   - 1× Hall-effect pedal: internal ADC1 on PB1 (via voltage divider)
+  *   - 1× Hall-effect pedal: internal ADC1 on PB1 (direct, no divider)
   *         Plausibility: dual-sample consistency, EMA filter,
   *                       range validation, rate-of-change detection
   *
@@ -437,13 +437,13 @@ static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
 /* Fault detection thresholds — values outside this band indicate
  * open/short circuit.  With the pedal wired directly to 3.3 V the
  * usable signal spans almost the full 12-bit range, so the band is
-* opened up to accept it while still catching the hard failure modes:
-*   rest is ≈ 0 V (a few mV), so only a literal 0-count reading (wire
-*   dead / grounded) is treated as an open fault — FAULT_LO = 1;
-*   full press is ≈ 3.28 V (≈4070 counts), so only a rail short that
-*   pins the ADC at 4095 is treated as a short fault — FAULT_HI = 4094.
-* (Both limits stay strictly inside 0..4095 so the unsigned range
-*  comparisons below are never trivially true/false under -Werror.)  */
+ * opened up to accept it while still catching the hard failure modes:
+ *   rest is ≈ 0 V (a few mV), so only a literal 0-count reading (wire
+ *   dead / grounded) is treated as an open fault — FAULT_LO = 1;
+ *   full press is ≈ 3.28 V (≈4070 counts), so only a rail short that
+ *   pins the ADC at 4095 is treated as a short fault — FAULT_HI = 4094.
+ * (Both limits stay strictly inside 0..4095 so the unsigned range
+ *  comparisons below are never trivially true/false under -Werror.)  */
 #define PEDAL_ADC_FAULT_LO   1U       /* rest ≈ 0 V — only 0 counts faults */
 #define PEDAL_ADC_FAULT_HI   4094U    /* full ≈ 3.28 V — only 4095 counts faults */
 

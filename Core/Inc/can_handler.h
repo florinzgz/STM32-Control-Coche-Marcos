@@ -96,7 +96,7 @@ extern "C" {
  * 0x01 CAPTURE_MIN    Capture current ADC as released endpoint (pending)
  * 0x02 CAPTURE_MAX    Capture current ADC as pressed  endpoint (pending)
  * 0x03 SAVE           Validate pending pair + persist to flash + apply
- * 0x04 RESET_DEFAULTS Erase flash slot + restore 50 / 4000 
+ * 0x04 RESET_DEFAULTS Erase flash slot + restore 50 / 4000
  * 0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz   */
 #define PEDAL_CAL_OP_CAPTURE_MIN    0x01U
 #define PEDAL_CAL_OP_CAPTURE_MAX    0x02U
