@@ -436,15 +436,25 @@ static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
 
 /* Fault detection thresholds — values outside this band indicate
  * open/short circuit.  With the pedal wired directly to 3.3 V the
- * usable signal spans almost the full 12-bit range, so the band is
- * opened up to accept it while still catching the hard failure modes:
- *   rest is ≈ 0 V (a few mV), so only a literal 0-count reading (wire
- *   dead / grounded) is treated as an open fault — FAULT_LO = 1;
+ * usable signal spans almost the full 12-bit range.
+ *
+ * Measured behaviour (multimeter, pedal released): the rest voltage is
+ * ≈ 0.4 mV, i.e. ≈ 0 ADC counts.  A released pedal therefore legitimately
+ * reads 0, so 0 counts must NOT be treated as an open-wire fault — doing
+ * so produced spurious "implausible pedal" faults at idle.  Because a
+ * broken signal wire on a direct-to-ADC input floats unpredictably
+ * (often noisy, not a clean 0), a low threshold cannot reliably tell
+ * "rest ≈ 0 V" apart from "open wire" anyway; gross faults are caught by
+ * the dual-sample consistency and rate-of-change checks instead.  Hence
+ * FAULT_LO = 0 (no low-side fault) and only the high-side rail short is
+ * flagged:
  *   full press is ≈ 3.28 V (≈4070 counts), so only a rail short that
  *   pins the ADC at 4095 is treated as a short fault — FAULT_HI = 4094.
- * (Both limits stay strictly inside 0..4095 so the unsigned range
- *  comparisons below are never trivially true/false under -Werror.)  */
-#define PEDAL_ADC_FAULT_LO   1U       /* rest ≈ 0 V — only 0 counts faults */
+ * (FAULT_HI stays strictly inside 0..4095 so the unsigned upper-range
+ *  comparison below is never trivially true/false under -Werror.  The
+ *  lower-range comparison is compiled out when FAULT_LO == 0 to avoid a
+ *  tautological unsigned "< 0" test.)                                  */
+#define PEDAL_ADC_FAULT_LO   0U       /* rest ≈ 0 V (≈0 counts) — 0 is a valid released reading */
 #define PEDAL_ADC_FAULT_HI   4094U    /* full ≈ 3.28 V — only 4095 counts faults */
 
 /* Dual-sample consistency tolerance (ADC counts).
@@ -521,8 +531,15 @@ void Pedal_Update(void)
     /* 3. Use average of both samples for best accuracy */
     uint16_t avg_raw = (uint16_t)(((uint32_t)pedal_raw_adc + pedal_raw_adc2) / 2U);
 
-    /* 4. Range validation — detect open/short circuit */
+    /* 4. Range validation — detect open/short circuit.
+     *    Rest reads ≈0 counts, so 0 is valid: only the high-side rail
+     *    short is flagged.  The low comparison is compiled in only when
+     *    FAULT_LO > 0 to avoid a tautological unsigned "< 0" test.      */
+#if PEDAL_ADC_FAULT_LO > 0U
     if (avg_raw < PEDAL_ADC_FAULT_LO || avg_raw > PEDAL_ADC_FAULT_HI) {
+#else
+    if (avg_raw > PEDAL_ADC_FAULT_HI) {
+#endif
         pedal_plausible = false;
         return;
     }
