@@ -604,11 +604,23 @@ void Safety_SetState(SystemState_t state)
                 system_state == SYS_STATE_ACTIVE   ||
                 system_state == SYS_STATE_DEGRADED ||
                 system_state == SYS_STATE_SAFE) {
+                SystemState_t prev_limp = system_state;
                 system_state = SYS_STATE_LIMP_HOME;
                 degraded_level  = DEGRADED_LEVEL_NONE;
                 degraded_reason = DEGRADED_REASON_NONE;
                 /* Keep relays on — vehicle must remain drivable */
                 Relay_PowerUp();
+                /* Boot-without-CAN path: gear is still at the NEUTRAL
+                 * boot default because the ESP32 never sent a CMD_MODE.
+                 * Default to GEAR_FORWARD (D1) so the vehicle can move
+                 * at walking speed without any CAN/ESP32 connection.
+                 * Not applied on ACTIVE/DEGRADED→LIMP_HOME transitions
+                 * because those keep the last real gear from the ESP32. */
+                if (prev_limp == SYS_STATE_STANDBY) {
+                    GearPosition_t g = Traction_GetGear();
+                    if (g == GEAR_NEUTRAL || g == GEAR_PARK)
+                        Traction_SetGear(GEAR_FORWARD);
+                }
             }
             break;
 

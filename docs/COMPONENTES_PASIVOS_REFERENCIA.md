@@ -5,6 +5,25 @@
 > pida instrucciones de montaje o conexión, consultar este documento primero para recordar
 > qué va dónde y por qué.
 
+> **POLÍTICA DE ACTUALIZACIÓN (obligatoria):**
+> 1. No crear inventarios paralelos; este archivo es la lista única.
+> 2. Antes de documentar como “definitivo”, cerrar validación en
+>    `docs/HARDWARE_VALIDATION_PROCEDURE.md` y registrar resultados en
+>    `docs/VERIFICATION_REPORT_TEMPLATE.md`.
+> 3. No inventar funciones: cada alta/cambio debe estar respaldado por evidencia
+>    de firmware, prueba física o ambas.
+
+---
+
+## Estado de verificación firmware (componentes pasivos)
+
+| Componente | Estado | Evidencia verificable |
+|---|---|---|
+| Pull-up I²C 4.7k (SCL/SDA) | Verificado en firmware | `Core/Src/stm32g4xx_hal_msp.c` (I2C1 con `GPIO_NOPULL` en PB8/PB9) ⇒ pull-up externo obligatorio |
+| Pull-up OneWire 4.7k (PB0) | Verificado en firmware | `Core/Inc/project_config.h` (`PIN_ONEWIRE` y comentario open-drain + pull-up requerido) |
+| Terminación CAN 120Ω extremos | Verificado por procedimiento de prueba | `docs/HARDWARE_VALIDATION_PROCEDURE.md` (entorno CAN con 120Ω en ambos extremos) |
+| Diodos/TVS/snubbers de potencia | Requiere validación física | Verificar en banco según procedimiento; no marcar “definitivo” sin evidencia de montaje/medición |
+
 ---
 
 ## 📋 Índice

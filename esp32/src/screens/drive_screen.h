@@ -131,6 +131,9 @@ private:
     can::SystemState curSystemState_  = can::SystemState::ACTIVE;
     can::SystemState prevSystemState_ = can::SystemState::ACTIVE;
 
+    // Safety error code shown in LIMP HOME banner — identifies the cause
+    uint8_t curLimpErrorCode_ = 0;
+
     // Fault flags for visual overlays (HMI_STATE_MODEL §4.1)
     uint8_t curFaultFlags_  = 0;
     uint8_t prevFaultFlags_ = 0;

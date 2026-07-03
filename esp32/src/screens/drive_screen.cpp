@@ -299,6 +299,9 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // System state for degraded/limp overlay (HMI_STATE_MODEL §2.4)
     curSystemState_ = data.heartbeat().systemState;
 
+    // Safety error code for LIMP HOME banner reason — identifies the cause
+    curLimpErrorCode_ = data.safety().errorCode;
+
     // Fault flags for visual overlays (HMI_STATE_MODEL §4.1)
     curFaultFlags_ = data.heartbeat().faultFlags;
 
@@ -419,7 +422,8 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // Visibility is precomputed here; draw() MUST NOT recompute it.
     curDegradedVisible_ = (curSystemState_ == can::SystemState::DEGRADED ||
                            curSystemState_ == can::SystemState::LIMP_HOME);
-    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(curDegradedVisible_));
+    tiles_.updateHash(DTILE_DEGRADED, ui::tileHashVal(
+        (uint32_t)curDegradedVisible_ | ((uint32_t)curLimpErrorCode_ << 8)));
 
     // FAULTS overlay tile — visibility precomputed for draw()
     curFaultsVisible_ = (curFaultFlags_ != 0);
@@ -897,6 +901,26 @@ void DriveScreen::drawAckIndicator() {
 // just below the top bar to alert the driver.
 // Called only when DTILE_DEGRADED is dirty (system state changed).
 // -------------------------------------------------------------------------
+
+// Short label for the LIMP HOME banner — identifies the cause (safety error code).
+static const char* limpHomeReasonLabel(uint8_t code) {
+    switch (code) {
+        case 1:  return "SOBRECORRIENTE";
+        case 2:  return "SOBRETEMPERATURA";
+        case 3:  return "SIN CAN";
+        case 4:  return "FALLO PEDAL";
+        case 6:  return "STOP EMERGENCIA";
+        case 7:  return "WATCHDOG";
+        case 8:  return "SIN CENTRAR";
+        case 9:  return "BATERIA BAJA";
+        case 10: return "BATERIA CRITICA";
+        case 11: return "FALLO I2C";
+        case 12: return "OBSTACULO";
+        case 13: return "CAN BUS-OFF";
+        default: return nullptr;  // no label for NONE or unknown
+    }
+}
+
 void DriveScreen::drawDegradedOverlay() {
     // Clear the banner area regardless (remove old banner if state changed)
     tft.fillRect(ui::cfg::OVL_DEGRADED_X, ui::cfg::OVL_DEGRADED_Y,
@@ -906,12 +930,19 @@ void DriveScreen::drawDegradedOverlay() {
 
     const char* bannerText = nullptr;
     uint16_t bannerCol = ui::COL_AMBER;
+    static char limpBuf[40];
 
     if (curSystemState_ == can::SystemState::DEGRADED) {
         bannerText = "DEGRADED  40%";
         bannerCol  = ui::COL_AMBER;
     } else if (curSystemState_ == can::SystemState::LIMP_HOME) {
-        bannerText = "LIMP HOME";
+        const char* reason = limpHomeReasonLabel(curLimpErrorCode_);
+        if (reason != nullptr) {
+            snprintf(limpBuf, sizeof(limpBuf), "LIMP HOME  %s", reason);
+        } else {
+            snprintf(limpBuf, sizeof(limpBuf), "LIMP HOME");
+        }
+        bannerText = limpBuf;
         bannerCol  = ui::COL_RED;
     }
 
