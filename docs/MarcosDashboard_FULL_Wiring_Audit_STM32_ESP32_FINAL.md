@@ -51,7 +51,7 @@
 - Encoder E6B2-CWZ6C A/B/Z → por 6N137 optoacopladores
 - Sensor centro dirección PB5 (LJ12A3) → por PC817 opto
 - 4× sensores rueda FL/FR/RL/RR (LJ12A3) → por PC817 opto
-- Pedal Hall ADC PA3 → divisor 10kΩ+6.8kΩ
+- Pedal Hall ADC PB1 → divisor 10kΩ+6.8kΩ
 - DS18B20 OneWire PB0 → 5 sensores en bus único
 
 ### Qué va a ESP32-S3 (NO a STM32)
@@ -171,7 +171,7 @@
 
 | Función | Pin STM32 | Macro | Borne D-1686 | Señal entrada | Tensión pín | Adaptación | Estado | Fuente |
 |---------|-----------|-------|--------------|--------------|-------------|-----------|--------|--------|
-| PEDAL ADC | PA3 | `PIN_PEDAL` ADC1_IN4 | **CN10_37** | Hall sensor 5V | 0–3.3V | 🟠 Divisor 10kΩ+6.8kΩ OBLIGATORIO | ✅ | `project_config.h:353` |
+| PEDAL ADC | PB1 | `PIN_PEDAL` ADC1_IN12 | **CN10_24** | Hall sensor 5V | 0–3.3V | 🟠 Divisor 10kΩ+6.8kΩ OBLIGATORIO | ✅ | `project_config.h` (movido desde PA3/CN10_37 por corto a GND) |
 | ENC_A | PA15 | `PIN_ENC_A` TIM2_CH1 AF1 | **CN7_17** | 6N137 salida | 3.3V | 🟠 6N137 por encoder A | ✅ | `project_config.h:292` |
 | ENC_B | PB3 | `PIN_ENC_B` TIM2_CH2 AF1 | **CN10_31** | 6N137 salida | 3.3V | 🟠 6N137 por encoder B | ✅ | `project_config.h:293` |
 | ENC_Z índice | PB4 | `PIN_ENC_Z` EXTI4 | **CN10_27** | 6N137 salida | 3.3V | 🟠 6N137 por encoder Z | ✅ | `project_config.h:294` |
@@ -434,12 +434,12 @@ Condensador 100nF/50V en paralelo con el electrolítico (mismo punto)
 ```
 Sensor Hall VCC → +5V
 Sensor Hall GND → GND común
-Señal Hall ──[10kΩ]──┬──► PA3 (CN10_37)
+Señal Hall ──[10kΩ]──┬──► PB1 (CN10_24)
                       │
                     [6.8kΩ]
                       │
                      GND
-Tensión PA3: 5V × 6.8/16.8 = 2.02V ≤ 3.3V ✅
+Tensión PB1: 5V × 6.8/16.8 = 2.02V ≤ 3.3V ✅
 Calibración: SERVICE_CMD 0xF5 (menú ingeniería ESP32) → flash página 124
 ```
 
@@ -572,7 +572,7 @@ STM32 (FDCAN1):        TJA1051 STM32:    BUS CAN:    TJA1051 ESP32:    ESP32 (TW
 ### Paso 2 — Verificar adaptaciones antes de conectar breakout
 - [ ] Verificar salida optos 6N137 (encoder): ≤3.3V con señal encoder activa
 - [ ] Verificar salida optos PC817 (ruedas/centro): ≤3.3V con sensor activo
-- [ ] Verificar divisor pedal: tensión en PA3 con pedal a fondo ≤3.3V
+- [ ] Verificar divisor pedal: tensión en PB1 con pedal a fondo ≤3.3V
 - [ ] Verificar que IN1..IN5 del módulo relé (sin STM32) muestran ~5V (pull-up activo)
 - [ ] Verificar que NO hay continuidad desde IN módulo relé hacia rail 12V/24V
 
@@ -630,7 +630,7 @@ STM32 (FDCAN1):        TJA1051 STM32:    BUS CAN:    TJA1051 ESP32:    ESP32 (TW
 2. **JP5 posición correcta:** medir que E5V llega al STM32 (CN7_6) y no hay conflicto con USB.
 3. **Diodos flyback de relés:** verificar en modo diodo que el módulo relé tiene diodo interno y en qué polaridad.
 4. **Salida optos:** con sensor activo, medir tensión en pin GPIO STM32 antes de conectar.
-5. **Divisor pedal:** con pedal a fondo, medir que tensión en CN10_37 ≤ 3.3V.
+5. **Divisor pedal:** con pedal a fondo, medir que tensión en CN10_24 ≤ 3.3V.
 6. **GND común:** continuidad entre todos los GND del sistema (buck, STM32, ESP32, relés, BTS7960).
 7. **B+ BTS7960 con relé abierto:** verificar que INA226 CH0-3 no miden tensión con RELAY_TRAC OFF.
 8. **IN módulos relé:** sin STM32 conectado, verificar que no hay tensión de 12V/24V en INx.

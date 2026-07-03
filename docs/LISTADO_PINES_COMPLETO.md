@@ -364,7 +364,7 @@ GND (ESP32)    ─────────→ GND PC817
 |----------|------|------|-------|-----------|----------------------|
 | 10 | PA0 | EXTI0 | WHEEL_FL | Sensor inductivo rueda delantera izquierda | Pull-up interno activado (3.3 V) |
 | 11 | PA1 | EXTI1 | WHEEL_FR | Sensor inductivo rueda delantera derecha | Pull-up interno activado |
-| 12 | PA2 | EXTI2 | WHEEL_RL | Sensor inductivo rueda trasera izquierda | Pull-up interno activado |
+| 22 | PB2 | EXTI2 | WHEEL_RL | Sensor rueda trasera izquierda (movido desde PA2 por corto a GND) | Pull-up interno activado |
 | 36 | PB15 | EXTI15 | WHEEL_RR | Sensor inductivo rueda trasera derecha | Pull-up interno activado |
 
 **Configuración:** Flanco de subida (rising edge), pull-up interno, prioridad NVIC 2, debounce 1 ms en firmware.
@@ -394,20 +394,22 @@ GND (ESP32)    ─────────→ GND PC817
 
 ### 2.11 Pedal Acelerador — Doble Canal Redundante
 
-#### Canal Primario: ADC interno (PA3)
+#### Canal Primario: ADC interno (PB1)
+
+> ⚠️ **PIN CAMBIADO:** movido de **PA3 (ADC1_IN4, CN10_37)** a **PB1 (ADC1_IN12, CN10_24)** por cortocircuito del net de PA3 con GND (mismo caso que WHEEL_RL PA2→PB2). PB1 está en el mismo ADC1. PA3 queda dañado/no usar.
 
 | Pin LQFP | GPIO | Periférico | Señal | Conecta a | Componentes externos |
 |----------|------|------------|-------|-----------|----------------------|
-| 13 | PA3 | ADC1_IN4 | PEDAL (primario) | Sensor Hall SS1324LUA-T (a través de divisor) | Divisor resistivo 5 V → 3.3 V |
+| 30 | PB1 | ADC1_IN12 | PEDAL (primario) | Sensor Hall SS1324LUA-T (a través de divisor) | Divisor resistivo 5 V → 3.3 V |
 
 **Componentes del divisor:**
 
 | Componente | Valor | Ubicación | Propósito |
 |-----------|-------|-----------|-----------|
-| R1 | 10 kΩ (1% precisión) | Entre señal pedal (5 V) y nodo PA3 | Divisor de tensión |
-| R2 | 6.8 kΩ (1% precisión) | Entre nodo PA3 y GND | Divisor de tensión |
+| R1 | 10 kΩ (1% precisión) | Entre señal pedal (5 V) y nodo PB1 | Divisor de tensión |
+| R2 | 6.8 kΩ (1% precisión) | Entre nodo PB1 y GND | Divisor de tensión |
 
-**Cálculo:** Ratio = 6.8/(10+6.8) = 0.4048 → 5.0 V × 0.4048 = 2.02 V (máximo absoluto en PA3, bien por debajo de 3.3 V)
+**Cálculo:** Ratio = 6.8/(10+6.8) = 0.4048 → 5.0 V × 0.4048 = 2.02 V (máximo absoluto en PB1, bien por debajo de 3.3 V)
 
 #### Plausibilidad por Software (sin ADS1115)
 
@@ -555,8 +557,8 @@ GND (ESP32)    ─────────→ GND PC817
 |------|---------|------------|-----------|
 | PA0 | Velocidad rueda FL | EXTI0 | Entrada (pull-up) |
 | PA1 | Velocidad rueda FR | EXTI1 | Entrada (pull-up) |
-| PA2 | Velocidad rueda RL | EXTI2 | Entrada (pull-up) |
-| PA3 | Pedal acelerador | ADC1_IN4 | Entrada analógica |
+| PB2 | Velocidad rueda RL | EXTI2 | Entrada (pull-up) |
+| PB1 | Pedal acelerador | ADC1_IN12 | Entrada analógica |
 | PA6 | RPWM dirección | TIM3_CH1 | Salida PWM |
 | PA7 | LPWM dirección | TIM3_CH2 | Salida PWM |
 | PA8 | RPWM motor FL | TIM1_CH1 | Salida PWM |

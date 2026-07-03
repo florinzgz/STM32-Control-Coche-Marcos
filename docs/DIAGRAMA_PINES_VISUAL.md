@@ -120,10 +120,10 @@ PC12 ── RELAY_STEER_PWR
 PB10 ── RELAY_LED_FRONT
 PB11 ── RELAY_LED_REAR
 
-PA0 / PA1 / PA2 / PB15 ── sensores rueda
+PA0 / PA1 / PB2 / PB15  ── sensores rueda (RL en PB2, movido desde PA2)
 PA15 / PB3 / PB4       ── encoder A / B / Z
 PB5                    ── sensor centrado
-PA3                    ── pedal ADC
+PB1                    ── pedal ADC (movido desde PA3 por corto a GND)
 PB0                    ── OneWire DS18B20
 PB8 / PB9              ── I2C INA226 / TCA9548A
 ```

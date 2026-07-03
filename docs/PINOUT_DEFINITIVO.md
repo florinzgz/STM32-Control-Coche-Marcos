@@ -187,7 +187,7 @@
 ### Sensor de Pedal (ADC - Analog Input)
 | Pin | GPIO | ADC      | Function | Description |
 |-----|------|----------|----------|-------------|
-| 13  | PA3  | ADC1_IN4 | PEDAL_POS | Posición pedal acelerador |
+| 30  | PB1  | ADC1_IN12 | PEDAL_POS | Posición pedal acelerador (movido desde PA3/ADC1_IN4 por corto a GND) |
 
 **Especificación Pedal:**
 - Sensor: A1324LUA-T (Hall Effect Linear)
@@ -227,14 +227,14 @@ Pedal_% = ((Voltage_ADC - 0.33) / (2.97 - 0.33)) × 100%
 |-----|-------|----------|-------------|
 | 10  | PA0   | GPIO     | Libre/Expansión |
 | 11  | PA1   | GPIO     | Libre/Expansión |
-| 12  | PA2   | GPIO     | Libre/Expansión |
+| 12  | PA2   | GPIO     | ⚠️ DAÑADO/NO USAR — net en corto a GND (antiguo WHEEL_RL, movido a PB2) |
 | 14  | PA4   | GPIO     | Libre/Expansión |
 | 15  | PA5   | GPIO     | Libre/Expansión |
 | 16  | PA6   | GPIO     | Libre/Expansión |
 | 17  | PA7   | GPIO     | Libre/Expansión |
 | 21  | PB0   | OneWire  | (Usado para DS18B20) |
-| 22  | PB1   | GPIO     | Libre/Expansión |
-| 23  | PB2   | GPIO     | Libre/Expansión |
+| 22  | PB1   | ADC1_IN12 | PEDAL_POS — pedal acelerador (movido desde PA3 por corto a GND) |
+| 23  | PB2   | GPIO     | WHEEL_RL — sensor rueda RL (movido desde PA2 por corto a GND) |
 | 60  | PB8   | GPIO     | Libre/Expansión |
 | 61  | PB9   | GPIO     | Libre/Expansión |
 | 47  | PB13  | GPIO     | Libre/Expansión |

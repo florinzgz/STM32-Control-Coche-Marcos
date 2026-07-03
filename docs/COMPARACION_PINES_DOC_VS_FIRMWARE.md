@@ -86,7 +86,7 @@
 | PB11 | RELAY_LED_REAR | `PIN_RELAY_LED_REAR = GPIO_PIN_11` | `main.h:71` | ✅ |
 | PA0 | WHEEL_FL (EXTI0) | `PIN_WHEEL_FL = GPIO_PIN_0` | `main.h:74` | ✅ |
 | PA1 | WHEEL_FR (EXTI1) | `PIN_WHEEL_FR = GPIO_PIN_1` | `main.h:75` | ✅ |
-| PA2 | WHEEL_RL (EXTI2) | `PIN_WHEEL_RL = GPIO_PIN_2` | `main.h:76` | ✅ |
+| PB2 | WHEEL_RL (EXTI2) | `PIN_WHEEL_RL = GPIO_PIN_2`, `PORT_WHEEL_RL = GPIOB` | `project_config.h` | ✅ (movido desde PA2 por corto a GND) |
 | PB15 | WHEEL_RR (EXTI15) | `PIN_WHEEL_RR = GPIO_PIN_15` | `main.h:77` | ✅ |
 | PA15 | ENC_A (TIM2_CH1) | `PIN_ENC_A = GPIO_PIN_15` | `main.h:80` | ✅ |
 | PB3 | ENC_B (TIM2_CH2) | `PIN_ENC_B = GPIO_PIN_3` | `main.h:81` | ✅ |
@@ -95,7 +95,7 @@
 | PB8 | I2C_SCL | `PIN_I2C_SCL = GPIO_PIN_8` | `main.h:90` | ✅ |
 | PB9 | I2C_SDA | `PIN_I2C_SDA = GPIO_PIN_9` | `main.h:91` | ✅ |
 | PB0 | ONEWIRE | `PIN_ONEWIRE = GPIO_PIN_0` | `main.h:94` | ✅ |
-| PA3 | PEDAL (ADC1_IN4) | `PIN_PEDAL = GPIO_PIN_3` | `main.h:99` | ✅ |
+| PB1 | PEDAL (ADC1_IN12) | `PIN_PEDAL = GPIO_PIN_1`, `PORT_PEDAL = GPIOB` | `project_config.h` | ✅ (movido desde PA3 por corto a GND) |
 | PA11 | CAN_RX (FDCAN1_RX) | `PIN_CAN_RX = GPIO_PIN_11` | `project_config.h:227` | ✅ |
 | PA12 | CAN_TX (FDCAN1_TX) | `PIN_CAN_TX = GPIO_PIN_12` | `project_config.h:226` | ✅ |
 | PA13 | SWDIO | HAL MSP debug pins | `stm32g4xx_hal_msp.c` | ✅ |
