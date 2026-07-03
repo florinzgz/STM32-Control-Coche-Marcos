@@ -143,7 +143,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 |---|---|---|---|---|---|
 | **PA0** | WHEEL_FL (EXTI0, ↑, PULLUP) | CN7 | **CN7_28** | Entrada | Rueda delantera izquierda |
 | **PA1** | WHEEL_FR (EXTI1, ↑, PULLUP) | CN7 | **CN7_30** | Entrada | Rueda delantera derecha |
-| **PA2** | WHEEL_RL (EXTI2, ↑, PULLUP) | CN10 | **CN10_35** | Entrada | Rueda trasera izquierda |
+| **PB2** | WHEEL_RL (EXTI2, ↑, PULLUP) | CN10 | **CN10_22** | Entrada | Rueda trasera izquierda (reasignado desde PA2/CN10_35 por corto a GND en PA2) |
 | **PB15** | WHEEL_RR (EXTI15, ↑, PULLUP) | CN10 | **CN10_26** | Entrada | Rueda trasera derecha |
 
 ### 3.7 Sensor centrado dirección (LJ12A3 inductivo, EXTI5)
@@ -215,6 +215,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 |---|---|---|---|---|
 | **PC10** | Input PullDown (libre, no conectado) | CN7 | CN7_1 | NO conectar; firmware lo usa como GPIO_MODE_INPUT/PULLDOWN |
 | **PC13** | Botón USER B1 de la Nucleo | CN7 | CN7_23 | NO usar como salida; conflicto con botón físico |
+| **PA2** | DAÑADO — corto a GND | CN10 | CN10_35 | NO conectar; WHEEL_RL reasignado a PB2/CN10_22 |
 | **PA13** | SWDIO (debugger) | CN7 | CN7_13 | Solo para programación/debug ST-Link |
 | **PA14** | SWCLK (debugger) | CN7 | CN7_15 | Solo para programación/debug ST-Link |
 | **PA4** | Libre (ADC disponible) | CN7 | CN7_32 | Sin uso en firmware actual |
@@ -223,7 +224,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | **PB12** | Libre | CN10 | CN10_16 | Sin uso en firmware actual |
 | **PB13** | Libre | CN10 | CN10_30 | Sin uso en firmware actual |
 | **PB1** | Libre | CN10 | CN10_24 | Sin uso en firmware actual |
-| **PB2** | Libre | CN10 | CN10_22 | Sin uso en firmware actual |
+| **PB2** | WHEEL_RL (EXTI2, ↑, PULLUP) | CN10 | CN10_22 | Rueda trasera izquierda (reasignado desde PA2 por corto a GND) |
 | **PC14** | OSC32_IN (cristal RTC) | CN7 | CN7_25 | Reservado para cristal; NO conectar |
 | **PC15** | OSC32_OUT (cristal RTC) | CN7 | CN7_27 | Reservado para cristal; NO conectar |
 | **PF0** | OSC_IN (cristal principal) | CN7 | CN7_29 | Reservado para cristal; NO conectar |
@@ -259,7 +260,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | 19 | PC7 | LPWM_RL (TIM8_CH2) | Salida PWM | 3.3V, 20kHz | Solo 3.3V |
 | 20 | GND | Masa digital | — | 0V | GND común |
 | 21 | PA9 | LPWM_FL (TIM1_CH2) | Salida PWM | 3.3V, 20kHz | Solo 3.3V |
-| 22 | PB2 | Libre | — | — | Sin uso en firmware |
+| 22 | PB2 | WHEEL_RL (EXTI2 ↑, PULLUP) | Entrada | 3.3V | Desde opto. Reasignado desde PA2 (corto a GND) |
 | 23 | PA8 | RPWM_FL (TIM1_CH1) | Salida PWM | 3.3V, 20kHz | Solo 3.3V |
 | 24 | PB1 | Libre | — | — | Sin uso en firmware |
 | 25 | PB10 | RELAY_LED (GPIO out) | Salida | 3.3V → ULN | Via ULN2803A canal 1 |
@@ -272,7 +273,7 @@ Donde **N** es el número de pin (1–38) tal como está serigrafado en la PCB d
 | 32 | AGND | Masa analógica | — | 0V | Conectar a GND estrella |
 | 33 | PA10 | RPWM_FR (TIM1_CH3) | Salida PWM | 3.3V, 20kHz | Solo 3.3V |
 | 34 | PC4 | EN_STEER (GPIO out) | Salida | 3.3V activo HIGH | — |
-| 35 | PA2 | WHEEL_RL (EXTI2 ↑, PULLUP) | Entrada | 3.3V | Desde opto |
+| 35 | PA2 | NO USAR (dañado, corto a GND) | — | — | WHEEL_RL reasignado a PB2/CN10_22 |
 | 36 | NC | Sin conexión | — | — | — |
 | 37 | PA3 | PEDAL (ADC1_IN4) | Entrada analógica | 0–3.3V | Divisor 10k+6.8k obligatorio |
 | 38 | NC | Sin conexión | — | — | — |
@@ -533,7 +534,7 @@ ULN2803A COM (pin 10): SIN CONECTAR (las entradas INx de Songle tienen pull-up i
 
 - [ ] Sensor WHEEL_FL → opto → CN7_28 (PA0)
 - [ ] Sensor WHEEL_FR → opto → CN7_30 (PA1)
-- [ ] Sensor WHEEL_RL → opto → CN10_35 (PA2)
+- [ ] Sensor WHEEL_RL → opto → CN10_22 (PB2)   ← reasignado desde CN10_35/PA2 (PA2 con corto a GND)
 - [ ] Sensor WHEEL_RR → opto → CN10_26 (PB15)
 
 ### Conexión PWM motores (solo después de verificar masas y alimentación)
