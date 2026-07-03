@@ -9,6 +9,28 @@
 > - No debugging code to be added
 > - Every test has a PASS/FAIL observable result
 > - Only tests what exists in code today
+> - Use only one results log: `docs/VERIFICATION_REPORT_TEMPLATE.md`
+> - Do not update passive component documentation until all exit criteria pass
+
+## Mandatory Execution Sequence (end-to-end)
+
+Execute this procedure strictly in this order:
+
+1. Use only these source-of-truth documents:
+   - `docs/HARDWARE_VALIDATION_PROCEDURE.md`
+   - `docs/PIN_USAGE_INVENTORY.md`
+   - `docs/COMPONENTES_PASIVOS_REFERENCIA.md`
+2. Prepare the physical test bench (`1) TEST ENVIRONMENT SETUP`).
+3. Execute all boot tests (`2.1` → `2.6`).
+4. Execute all CAN communication tests (`3.1` → `3.4`).
+5. Execute all steering tests (`4.1` → `4.7`).
+6. Execute all motor/traction safety tests (`5.1` → `5.5`).
+7. Execute all sensor fail-safe tests (`6.1` → `6.6`).
+8. Execute all display consistency tests (`7.1` → `7.5`).
+9. Complete and sign section `8) PHASE 1 EXIT CRITERIA CHECKLIST`.
+10. If any criterion fails, repeat failed sections before documenting hardware components.
+11. Record the final PASS/FAIL evidence in `docs/VERIFICATION_REPORT_TEMPLATE.md`.
+12. Only after validation passes, update passive components in `docs/COMPONENTES_PASIVOS_REFERENCIA.md` with observed behavior and verified firmware references.
 
 ---
 
@@ -24,12 +46,12 @@
 | CAN transceiver modules (×2) | One per MCU — TJA1051T/3 (NXP) | VCC=5V, VIO=3.3V. Required for physical CAN signaling |
 | 4× traction motors with H-bridge drivers | TIM1 CH1–CH4 PWM outputs | Wheels must be off the ground or on a stand |
 | Steering motor with H-bridge driver | TIM8 CH3 PWM output | Connected to physical steering rack |
-| E6B2-CWZ6C rotary encoder (4800 CPR) | TIM2 CH1 (PA0) / CH2 (PA1) quadrature inputs | Mechanically coupled to steering column |
+| E6B2-CWZ6C rotary encoder (4800 CPR) | TIM2 CH1 (PA15) / CH2 (PB3) quadrature inputs | Mechanically coupled to steering column |
 | Inductive center sensor | PB5 (EXTI5) | Mounted at steering center position |
 | 6× INA226 current sensors via TCA9548A I2C mux | I2C1 (PB8 SDA / PB9 SCL) | 4 motor channels + 1 battery + 1 spare |
 | 5× DS18B20 temperature sensors | OneWire bus on PB0 | Placed on motors and ambient |
 | Pedal potentiometer | PB1 (ADC1_IN12, CN10_24) | 0–3.3 V analog input |
-| 4× wheel speed sensors (hall/reed) | EXTI pins (PA4, PA6, PA7, PB1) | One per wheel, pulse output |
+| 4× wheel speed sensors (hall/reed) | EXTI pins (PA0, PA1, PB2, PB15) | One per wheel, pulse output |
 | 3× relays (Main, Traction, Direction) | GPIO outputs on GPIOC | Control power to motor drivers |
 | 24 V vehicle battery (or bench supply) | Power input | Provide adjustable voltage for undervoltage tests |
 
@@ -548,7 +570,7 @@
 
 **Procedure:**
 
-1. Disconnect the encoder signals (TIM2 CH1/CH2 on PA0/PA1) before power-on.
+1. Disconnect the encoder signals (TIM2 CH1/CH2 on PA15/PB3) before power-on.
 2. Power on the system.
 3. Verify the system reaches the main loop.
 4. Verify the centering procedure fails (encoder not responding → FAULT).

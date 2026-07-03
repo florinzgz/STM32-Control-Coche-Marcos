@@ -2,7 +2,7 @@
 
 > **Fecha:** 2026-02-17  
 > **Propósito:** Documentar el uso exacto de pines, cuántos se usan por módulo, y cuántos quedan libres  
-> **Fuentes:** `Core/Inc/main.h`, `esp32/platformio.ini`, `esp32/src/main.cpp`, `docs/CONEXIONES_COMPLETAS.md`
+> **Fuentes:** `Core/Inc/project_config.h`, `Core/Src/main.c`, `Core/Src/stm32g4xx_hal_msp.c`, `esp32/src/main.cpp`, `docs/CONEXIONES_COMPLETAS.md`
 
 ---
 
@@ -103,7 +103,7 @@ Cada motor de tracción necesita 2 señales PWM (RPWM + LPWM) y 1 pin EN (habili
 |--------|-----|-------------|---------|
 | Rueda FL | **PA0** | EXTI0 | 6 pulsos/vuelta |
 | Rueda FR | **PA1** | EXTI1 | 6 pulsos/vuelta |
-| Rueda RL | **PA2** | EXTI2 | 6 pulsos/vuelta |
+| Rueda RL | **PB2** | EXTI2 | 6 pulsos/vuelta (movido desde PA2 por corto a GND) |
 | Rueda RR | **PB15** | EXTI15 | 6 pulsos/vuelta |
 | | **Subtotal:** | | **4 pines** |
 
