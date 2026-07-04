@@ -17,6 +17,7 @@
 #include "led_controller.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
+#include <driver/twai.h>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -949,6 +950,12 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             last0x309Dlc_   = dlc;
             canDiagChanged_ = true;
         }
+        // Always keep heartbeat age fresh so L5 shows current data.
+        if (data.heartbeat().timestampMs != 0 &&
+            data.heartbeat().timestampMs != hbLastRxMs_) {
+            hbLastRxMs_     = data.heartbeat().timestampMs;
+            canDiagChanged_ = true;
+        }
 
         // ---- RUN I2C SCAN feedback state machine ----
         // Latched intent from the touch handler is processed here so all
@@ -1748,13 +1755,44 @@ void EngineeringScreen::draw() {
             snprintf(buf, sizeof(buf), "fdcan: tap RUN I2C SCAN");
         }
         tft.drawString(buf, x, y0 + 3 * lh);
+
+        // L5: ESP32 local TWAI status + STM32 heartbeat age.
+        tft.fillRect(x, y0 + 4 * lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        {
+            twai_status_info_t tsts;
+            const bool twaiOk = (twai_get_status_info(&tsts) == ESP_OK);
+            const unsigned long nowMs = millis();
+            const unsigned long hbAge = (hbLastRxMs_ > 0) ? (nowMs - hbLastRxMs_) : 99999UL;
+            if (twaiOk) {
+                static const char* const kState[] = {"STOP","RUN","BUSOFF","RECOV","?"};
+                const uint8_t si = (tsts.state <= TWAI_STATE_RECOVERING)
+                                   ? (uint8_t)tsts.state : 4u;
+                const uint16_t col = (tsts.state == TWAI_STATE_RUNNING)
+                    ? (hbAge < 2000 ? ui::COL_GREEN : ui::COL_AMBER)
+                    : (tsts.state == TWAI_STATE_BUS_OFF ? ui::COL_RED : ui::COL_AMBER);
+                tft.setTextColor(col, ui::COL_BG);
+                snprintf(buf, sizeof(buf),
+                         "twai %s tec=%lu rec=%lu txQ=%lu rxQ=%lu hb=%lums",
+                         kState[si],
+                         (unsigned long)tsts.tx_error_counter,
+                         (unsigned long)tsts.rx_error_counter,
+                         (unsigned long)tsts.msgs_to_tx,
+                         (unsigned long)tsts.msgs_to_rx,
+                         hbAge > 99000UL ? 99999UL : hbAge);
+            } else {
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                snprintf(buf, sizeof(buf), "twai: unavail  hb=%lums",
+                         hbAge > 99000UL ? 99999UL : hbAge);
+            }
+            tft.drawString(buf, x, y0 + 4 * lh);
+        }
     }
 
     // Partial redraw for the RUN I2C SCAN status banner (immediate feedback).
     if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && scanFbChanged_) {
         scanFbChanged_ = false;
         const int16_t bx = 10;
-        const int16_t by = 250;
+        const int16_t by = 260;
         tft.fillRect(bx, by, ui::SCREEN_W - 2 * bx, 18, ui::COL_BG);
         const char* msg = nullptr;
         uint16_t    col = ui::COL_GRAY;
@@ -4491,7 +4529,7 @@ void EngineeringScreen::drawDebounceDiag() {
     // Static labels; live values painted by the canDiagChanged_ partial
     // redraw branch in draw().  Header line acts as a visual separator.
     tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
-    tft.drawString("CAN 0x309 DELIVERY (0x30A/0x30B/0x30C)", 10, 180);
+    tft.drawString("CAN DIAG  0x30A/30B/30C | ESP32 TWAI LIVE", 10, 180);
 
     // RUN I2C SCAN button (emits SERVICE_CMD 0xF6 → 0x30B + 0x30C).
     tft.fillRect(SAVE_X - 70, BACK_Y, BACK_W + 70, BACK_H, ui::COL_DARK_GRAY);
