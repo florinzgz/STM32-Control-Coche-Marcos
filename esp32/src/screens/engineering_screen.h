@@ -271,6 +271,7 @@ private:
     uint8_t       last0x309Dlc_   = 0;
     unsigned long canDiagLastTs_  = 0;     // last 0x30A timestamp consumed
     unsigned long hbLastRxMs_     = 0;     // millis() of last received heartbeat
+    unsigned long canDiagRefreshMs_ = 0;   // periodic refresh for live TWAI/hb row
     bool          canDiagChanged_ = false;
     // Send SERVICE_CMD 0x110 byte0=0xF6 to trigger the STM32 I2C service scan.
     void sendI2cServiceScan();

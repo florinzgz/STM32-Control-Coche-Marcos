@@ -125,6 +125,7 @@ static constexpr int16_t RELAY_RDY = 3;
 
 // Mirror Safe Screen 0x309 staleness threshold.
 static constexpr unsigned long ENG_I2C_DIAG_STALE_MS = 2000;
+static constexpr unsigned long CAN_DIAG_REFRESH_MS   = 250;
 
 // ---- Back / Save buttons ----
 static constexpr int16_t BACK_X = 10;
@@ -956,6 +957,10 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             hbLastRxMs_     = data.heartbeat().timestampMs;
             canDiagChanged_ = true;
         }
+        if ((frameTimeMs - canDiagRefreshMs_) >= CAN_DIAG_REFRESH_MS) {
+            canDiagRefreshMs_ = frameTimeMs;
+            canDiagChanged_   = true;
+        }
 
         // ---- RUN I2C SCAN feedback state machine ----
         // Latched intent from the touch handler is processed here so all
@@ -1761,8 +1766,8 @@ void EngineeringScreen::draw() {
         {
             twai_status_info_t tsts;
             const bool twaiOk = (twai_get_status_info(&tsts) == ESP_OK);
-            const unsigned long nowMs = millis();
-            const unsigned long hbAge = (hbLastRxMs_ > 0) ? (nowMs - hbLastRxMs_) : 99999UL;
+            const unsigned long hbAge =
+                (hbLastRxMs_ > 0) ? (lastFrameTimeMs_ - hbLastRxMs_) : 99999UL;
             if (twaiOk) {
                 static const char* const kState[] = {"STOP","RUN","BUSOFF","RECOV","?"};
                 const uint8_t si = (tsts.state <= TWAI_STATE_RECOVERING)
