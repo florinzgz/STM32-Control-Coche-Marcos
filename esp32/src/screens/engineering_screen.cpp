@@ -937,18 +937,28 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         // Cache CAN/0x309 delivery meta (0x30A, 1 Hz), latest I2C scan (0x30B)
         // and FDCAN dump (0x30C), plus the can_rx per-ID 0x309 counters.
         const auto& cm = data.canMeta();
-        const uint32_t rx   = can_rx::rx0x309Count();
-        const uint32_t drop = can_rx::dropped0x309Dlc();
-        const uint8_t  dlc  = can_rx::last0x309Dlc();
+        const uint32_t rx309    = can_rx::rx0x309Count();
+        const uint32_t drop309  = can_rx::dropped0x309Dlc();
+        const uint8_t  dlc309   = can_rx::last0x309Dlc();
+        const uint32_t rx30b    = can_rx::rx0x30BCount();
+        const uint32_t drop30b  = can_rx::dropped0x30BDlc();
+        const uint8_t  dlc30b   = can_rx::last0x30BDlc();
+        const uint32_t rx30c    = can_rx::rx0x30CCount();
         if (cm.timestampMs != canDiagLastTs_ ||
-            rx != rx0x309Count_ || drop != drop0x309Dlc_ || dlc != last0x309Dlc_) {
+            rx309 != rx0x309Count_ || drop309 != drop0x309Dlc_ || dlc309 != last0x309Dlc_ ||
+            rx30b != rx0x30BCount_ || drop30b != drop0x30BDlc_ || dlc30b != last0x30BDlc_ ||
+            rx30c != rx0x30CCount_) {
             canDiagLastTs_  = cm.timestampMs;
             canMeta_        = cm;
             i2cScan_        = data.i2cScan();
             fdcanDiag_      = data.fdcanDiag();
-            rx0x309Count_   = rx;
-            drop0x309Dlc_   = drop;
-            last0x309Dlc_   = dlc;
+            rx0x309Count_   = rx309;
+            drop0x309Dlc_   = drop309;
+            last0x309Dlc_   = dlc309;
+            rx0x30BCount_   = rx30b;
+            drop0x30BDlc_   = drop30b;
+            last0x30BDlc_   = dlc30b;
+            rx0x30CCount_   = rx30c;
             canDiagChanged_ = true;
         }
         // Always keep heartbeat age fresh so L5 shows current data.
@@ -977,11 +987,15 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             scanBaseI2cTs_     = data.i2cScan().timestampMs;
             scanBaseFdcanTs_   = data.fdcanDiag().timestampMs;
             scanBaseAckTs_     = data.ack().timestampMs;
+            scanBase0x30BRx_   = can_rx::rx0x30BCount();
+            scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
         }
         if (scanAwaitingReply_) {
             const auto& sc = data.i2cScan();
             const auto& fd = data.fdcanDiag();
             const auto& ak = data.ack();
+            const bool gotShortDlc = (can_rx::dropped0x30BDlc() != scanBase0x30BDrop_) &&
+                                     (can_rx::rx0x30BCount() != scanBase0x30BRx_);
             const bool gotI2c   = sc.valid && sc.timestampMs != scanBaseI2cTs_;
             const bool gotFdcan = fd.valid && fd.timestampMs != scanBaseFdcanTs_;
             // "STM32 SCAN STARTED": a fresh CMD_ACK echo carrying the scan
@@ -1013,6 +1027,13 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
                 // lost in transit): confirm the STM32 replied but flag the gap.
                 scanAwaitingReply_ = false;
                 scanFb_            = ScanFb::RESPONSE;
+                scanFbMs_          = frameTimeMs;
+                scanFbChanged_     = true;
+            } else if (gotShortDlc) {
+                // 0x30B arrived with a short DLC (<5), so decodeI2cScan()
+                // rejected it. Distinguish this from "no reply".
+                scanAwaitingReply_ = false;
+                scanFb_            = ScanFb::SHORT_DLC;
                 scanFbMs_          = frameTimeMs;
                 scanFbChanged_     = true;
             } else if (gotStarted && !scanGotStarted_) {
@@ -1731,16 +1752,18 @@ void EngineeringScreen::draw() {
             tft.setTextColor(i2cScan_.muxPresent ? ui::COL_GREEN : ui::COL_AMBER,
                              ui::COL_BG);
             snprintf(buf, sizeof(buf),
-                     "scan mux=%u ina=0x%02X sda=%u scl=%u rec=%u/%u",
-                     (unsigned)(i2cScan_.muxPresent ? 1 : 0),
-                     (unsigned)i2cScan_.inaPresentMask,
-                     (unsigned)(i2cScan_.sdaIdleHigh ? 1 : 0),
-                     (unsigned)(i2cScan_.sclIdleHigh ? 1 : 0),
-                     (unsigned)i2cScan_.recoveryAttempts,
-                     (unsigned)i2cScan_.failCount);
+                     "0x30B rx=%lu dlc=%u drop=%lu ph=%u mux=%u",
+                     (unsigned long)rx0x30BCount_,
+                     (unsigned)last0x30BDlc_,
+                     (unsigned long)drop0x30BDlc_,
+                     (unsigned)i2cScan_.scanPhase,
+                     (unsigned)(i2cScan_.muxPresent ? 1 : 0));
         } else {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-            snprintf(buf, sizeof(buf), "scan: tap RUN I2C SCAN");
+            snprintf(buf, sizeof(buf), "0x30B rx=%lu dlc=%u drop=%lu",
+                     (unsigned long)rx0x30BCount_,
+                     (unsigned)last0x30BDlc_,
+                     (unsigned long)drop0x30BDlc_);
         }
         tft.drawString(buf, x, y0 + 2 * lh);
 
@@ -1750,14 +1773,16 @@ void EngineeringScreen::draw() {
             tft.setTextColor((fdcanDiag_.busOff || fdcanDiag_.errorPassive)
                                  ? ui::COL_RED : ui::COL_WHITE, ui::COL_BG);
             snprintf(buf, sizeof(buf),
-                     "fdcan tec=%u rec=%u lec=%u %s%s",
+                     "0x30C rx=%lu tec=%u rec=%u lec=%u %s%s",
+                     (unsigned long)rx0x30CCount_,
                      (unsigned)fdcanDiag_.tec, (unsigned)fdcanDiag_.rec,
                      (unsigned)fdcanDiag_.lastErrorCode,
                      fdcanDiag_.busOff ? "BUSOFF " : "",
                      fdcanDiag_.errorPassive ? "EPASS" : "");
         } else {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-            snprintf(buf, sizeof(buf), "fdcan: tap RUN I2C SCAN");
+            snprintf(buf, sizeof(buf), "0x30C rx=%lu no data",
+                     (unsigned long)rx0x30CCount_);
         }
         tft.drawString(buf, x, y0 + 3 * lh);
 
@@ -1810,6 +1835,7 @@ void EngineeringScreen::draw() {
             case ScanFb::TCA_ACK:     msg = "TCA ACK";             col = ui::COL_GREEN; break;
             case ScanFb::COMPLETED:   msg = "SCAN COMPLETED";      col = ui::COL_GREEN; break;
             case ScanFb::RESPONSE:    msg = "RESPONSE RECEIVED";   col = ui::COL_AMBER; break;
+            case ScanFb::SHORT_DLC:   msg = "SCAN SHORT DLC";      col = ui::COL_AMBER; break;
             case ScanFb::TIMEOUT_NO_ACK:   msg = "TIMEOUT: NO CAN ACK";   col = ui::COL_RED;   break;
             case ScanFb::TIMEOUT_NO_REPLY: msg = "TIMEOUT: NO SCAN REPLY"; col = ui::COL_AMBER; break;
             case ScanFb::TIMEOUT:     msg = "SCAN TIMEOUT";        col = ui::COL_AMBER; break;

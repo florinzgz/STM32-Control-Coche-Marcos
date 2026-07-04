@@ -225,7 +225,7 @@ inline constexpr uint8_t I2C_SCAN_PHASE_TCA_ACK     = 0x03;  // TCA9548A ACKed (
 //   0x01 CAPTURE_MIN    Capture pedal-released ADC into pending MIN
 //   0x02 CAPTURE_MAX    Capture pedal-pressed  ADC into pending MAX
 //   0x03 SAVE           Validate pending pair + persist to STM32 flash
-//   0x04 RESET_DEFAULTS Restore compile-time defaults (150 / 2413)
+//   0x04 RESET_DEFAULTS Restore compile-time defaults (50 / 4000)   pedal direct 0–3.3 V, no divider
 //   0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz
 inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MIN    = 0x01;
 inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MAX    = 0x02;
