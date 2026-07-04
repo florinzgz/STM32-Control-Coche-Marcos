@@ -66,6 +66,17 @@ IWDG_HandleTypeDef  hiwdg;
 #define STARTUP_PEDAL_REST_PCT   3.0f   /* Pedal % below which "at rest"  */
 #define STARTUP_PEDAL_CLEAR_MS   400U   /* Continuous rest time to clear   */
 
+/* ---- DS18B20 conversion timing ----
+ * 12-bit conversion can take up to 750 ms; wait >= 750 ms between
+ * Convert T (0x44) and Read Scratchpad (0xBE). */
+#define DS18B20_CONV_WAIT_MS     800U
+
+typedef enum {
+    TEMP_SM_START_CONVERSION = 0,
+    TEMP_SM_WAIT_CONVERSION,
+    TEMP_SM_READ_ALL
+} TempSmState_t;
+
 /* ---- Reset cause (read once at boot, before IWDG clears flags) ---- */
 static uint8_t reset_cause = 0;
 #define RESET_CAUSE_POWERON   (1U << 0)
@@ -399,6 +410,8 @@ int main(void)
     bool     limp_home_pedal_armed = false;
     uint32_t limp_pedal_rest_since = 0;
     SystemState_t prev_state_for_arm = SYS_STATE_BOOT;
+    TempSmState_t temp_sm_state = TEMP_SM_START_CONVERSION;
+    uint32_t temp_conv_start_ms = 0;
 
     /* ---- Main control loop ---- */
     boot_phase = 5;  /* Main loop entered — init complete */
@@ -491,8 +504,28 @@ int main(void)
             Pedal_Update();
             CAN_PedalCalCaptureTick();   /* R-1: cooperative pedalcal FSM */
             Current_ReadAll();
-            Temperature_StartConversion();
-            Temperature_ReadAll();
+            switch (temp_sm_state) {
+                case TEMP_SM_START_CONVERSION:
+                    Temperature_StartConversion();
+                    temp_conv_start_ms = now;
+                    temp_sm_state = TEMP_SM_WAIT_CONVERSION;
+                    break;
+
+                case TEMP_SM_WAIT_CONVERSION:
+                    if ((now - temp_conv_start_ms) >= DS18B20_CONV_WAIT_MS) {
+                        temp_sm_state = TEMP_SM_READ_ALL;
+                    }
+                    break;
+
+                case TEMP_SM_READ_ALL:
+                    Temperature_ReadAll();
+                    temp_sm_state = TEMP_SM_START_CONVERSION;
+                    break;
+
+                default:
+                    temp_sm_state = TEMP_SM_START_CONVERSION;
+                    break;
+            }
 
             /* ---- Power-On Movement Prevention latch update ----
              * While startup_inhibit is active, monitor pedal %.
