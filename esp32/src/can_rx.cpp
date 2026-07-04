@@ -309,6 +309,9 @@ static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
     s.inaPresentMask    = f.data[2];
     s.failCount         = f.data[3];
     s.recoveryAttempts  = f.data[4];
+    // Byte 5 (additive): terminal I2C scan phase.  Only present on DLC>=6
+    // frames; older/short frames leave it at the default (UNKNOWN=0).
+    s.scanPhase         = (f.data_length_code >= 6) ? f.data[5] : can::I2C_SCAN_PHASE_UNKNOWN;
     s.valid             = true;
     s.timestampMs       = millis();
     data.setI2cScan(s);

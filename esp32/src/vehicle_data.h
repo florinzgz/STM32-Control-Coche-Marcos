@@ -312,6 +312,7 @@ struct I2cScanData {
     uint8_t  inaPresentMask    = 0;      // bit0..5 = INA226 0x40 acked behind ch0..5
     uint8_t  failCount         = 0;
     uint8_t  recoveryAttempts  = 0;
+    uint8_t  scanPhase         = 0;      // 0x30B byte5 — I2C_SCAN_PHASE_* terminal phase
     bool     valid             = false;
     unsigned long timestampMs  = 0;
 };

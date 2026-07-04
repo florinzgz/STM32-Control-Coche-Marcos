@@ -212,6 +212,15 @@ inline constexpr uint8_t SERVICE_ACTION_GEAR_LIMITS         = 0xF7;  // Gear pow
 inline constexpr uint8_t SERVICE_ACTION_STEERING_Z          = 0xF8;  // PB5 + encoder-Z center diagnostic/calibration (byte 1 = sub-opcode) → 0x30E
 inline constexpr uint8_t SERVICE_ACTION_CLEAR_ERROR_LOG      = 0xFE;
 
+// I2C service-mode scan terminal phase — 0x30B (DIAG_I2C_SCAN) byte 5.
+// Additive diagnostic mirroring Core/Inc/can_handler.h I2C_SCAN_PHASE_*.
+// Lets the HMI name the fault (bus busy / TCA missing / TCA ack) instead of
+// a bare "SCAN TIMEOUT".
+inline constexpr uint8_t I2C_SCAN_PHASE_UNKNOWN     = 0x00;  // not determined
+inline constexpr uint8_t I2C_SCAN_PHASE_BUS_BUSY    = 0x01;  // SDA idle low — bus stuck
+inline constexpr uint8_t I2C_SCAN_PHASE_TCA_MISSING = 0x02;  // bus OK but TCA9548A 0x70 !ACK
+inline constexpr uint8_t I2C_SCAN_PHASE_TCA_ACK     = 0x03;  // TCA9548A ACKed (mux present)
+
 // Pedal-calibration sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_PEDAL_CAL
 //   0x01 CAPTURE_MIN    Capture pedal-released ADC into pending MIN
 //   0x02 CAPTURE_MAX    Capture pedal-pressed  ADC into pending MAX

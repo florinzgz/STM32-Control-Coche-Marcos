@@ -1235,7 +1235,10 @@ void CAN_SendCanMetaDiag(void) {
  *   Byte 2: ina_present_mask (bit0..5 = INA226 0x40 acked behind ch0..5)
  *   Byte 3: i2c_fail_count
  *   Byte 4: i2c_recovery_attempts
- *   Byte 5-7: reserved (0)
+ *   Byte 5: terminal scan phase (I2C_SCAN_PHASE_*) — additive, derived from
+ *           the fields above so the HMI can name the fault (bus busy / TCA
+ *           missing / TCA ack) instead of a bare timeout
+ *   Byte 6-7: reserved (0)
  */
 void CAN_SendI2CScanReport(void) {
     Sensor_I2cScanResult_t r = Sensor_RunI2CServiceScan();
@@ -1248,6 +1251,16 @@ void CAN_SendI2CScanReport(void) {
     data[2] = r.ina_present_mask;
     data[3] = r.fail_count;
     data[4] = r.recovery_attempts;
+    /* Byte 5: compact terminal phase.  SDA still low after the recovery
+     * attempt means the bus is physically stuck; otherwise the mux ACK
+     * (or lack of it) is the decisive condition. */
+    if (!r.sda_idle_high) {
+        data[5] = I2C_SCAN_PHASE_BUS_BUSY;
+    } else if (!r.mux_present) {
+        data[5] = I2C_SCAN_PHASE_TCA_MISSING;
+    } else {
+        data[5] = I2C_SCAN_PHASE_TCA_ACK;
+    }
     TransmitFrame(CAN_ID_DIAG_I2C_SCAN, data, 8);
 }
 
@@ -3205,7 +3218,14 @@ void CAN_ProcessMessages(void) {
                          * SDA/SCL idle levels and a bus-recovery attempt if
                          * SDA is stuck low.  Reports on 0x30B and also dumps
                          * the FDCAN error counters on 0x30C.  Diagnostic only
-                         * — does not gate any control or safety path.        */
+                         * — does not gate any control or safety path.
+                         *
+                         * Emit an immediate "scan started" echo (CMD_ACK with
+                         * cmd_id_low = 0xF6) BEFORE running the synchronous
+                         * probe.  This lets the HMI distinguish a lost request
+                         * (no echo → "TIMEOUT: NO CAN ACK") from a lost reply
+                         * (echo but no 0x30B → "TIMEOUT: NO SCAN REPLY").     */
+                        CAN_SendCommandAck(SERVICE_ACTION_I2C_SERVICE, ACK_OK);
                         CAN_SendI2CScanReport();
                         CAN_SendFdcanDiag();
                         CAN_SendCommandAck(0x10, ACK_OK);
