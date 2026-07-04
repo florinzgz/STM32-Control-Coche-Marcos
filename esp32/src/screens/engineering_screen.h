@@ -269,6 +269,10 @@ private:
     uint32_t      rx0x309Count_   = 0;
     uint32_t      drop0x309Dlc_   = 0;
     uint8_t       last0x309Dlc_   = 0;
+    uint32_t      rx0x30BCount_   = 0;
+    uint32_t      drop0x30BDlc_   = 0;
+    uint8_t       last0x30BDlc_   = 0;
+    uint32_t      rx0x30CCount_   = 0;
     unsigned long canDiagLastTs_  = 0;     // last 0x30A timestamp consumed
     unsigned long hbLastRxMs_     = 0;     // millis() of last received heartbeat
     unsigned long canDiagRefreshMs_ = 0;   // periodic refresh for live TWAI/hb row
@@ -296,6 +300,7 @@ private:
         TCA_ACK,          // TCA ACK (0x30B phase: mux present)
         COMPLETED,        // SCAN COMPLETED (0x30B valid, phase unknown)
         RESPONSE,         // RESPONSE RECEIVED (0x30C but no 0x30B)
+        SHORT_DLC,        // SHORT DLC (0x30B arrived but DLC < 5, decode rejected)
         TIMEOUT_NO_ACK,   // TIMEOUT: NO CAN ACK (request never echoed)
         TIMEOUT_NO_REPLY, // TIMEOUT: NO SCAN REPLY (echoed but no 0x30B/0x30C)
         TIMEOUT           // generic timeout (fallback)
@@ -311,6 +316,8 @@ private:
     unsigned long scanBaseI2cTs_     = 0;       // i2cScan ts at send (detect reply)
     unsigned long scanBaseFdcanTs_   = 0;       // fdcanDiag ts at send
     unsigned long scanBaseAckTs_     = 0;       // ack ts at send (detect 0xF6 echo)
+    uint32_t      scanBase0x30BRx_   = 0;       // 0x30B counter at send
+    uint32_t      scanBase0x30BDrop_ = 0;       // 0x30B short-DLC drop counter at send
     static constexpr unsigned long SCAN_TIMEOUT_MS  = 2000;
     static constexpr unsigned long SCAN_FB_CLEAR_MS = 4000;
 

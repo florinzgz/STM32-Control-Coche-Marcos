@@ -26,6 +26,14 @@ uint32_t rx0x309Count();      ///< total 0x309 frames seen on the bus (any DLC)
 uint32_t dropped0x309Dlc();   ///< 0x309 frames rejected for DLC < 5
 uint8_t  last0x309Dlc();      ///< DLC of the most recent 0x309 frame
 
+/// Per-ID 0x30B RX counters (I2C service scan report).
+uint32_t rx0x30BCount();      ///< total 0x30B frames seen on the bus (any DLC)
+uint32_t dropped0x30BDlc();   ///< 0x30B frames rejected for DLC < 5
+uint8_t  last0x30BDlc();      ///< DLC of the most recent 0x30B frame
+
+/// Per-ID 0x30C RX counter (FDCAN diagnostic dump).
+uint32_t rx0x30CCount();      ///< total 0x30C frames seen on the bus (any DLC)
+
 } // namespace can_rx
 
 #endif // CAN_RX_H

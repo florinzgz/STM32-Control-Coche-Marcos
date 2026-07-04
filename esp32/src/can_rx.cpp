@@ -255,6 +255,10 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
 static uint32_t s_rx0x309Count      = 0;  // total 0x309 frames seen (any DLC)
 static uint32_t s_dropped0x309Dlc   = 0;  // 0x309 frames rejected for DLC < 5
 static uint8_t  s_last0x309Dlc      = 0;  // DLC of the most recent 0x309 frame
+static uint32_t s_rx0x30BCount      = 0;  // total 0x30B frames seen (any DLC)
+static uint32_t s_dropped0x30BDlc   = 0;  // 0x30B frames rejected for DLC < 5
+static uint8_t  s_last0x30BDlc      = 0;  // DLC of the most recent 0x30B frame
+static uint32_t s_rx0x30CCount      = 0;  // total 0x30C frames seen (any DLC)
 
 static void decodeI2cDiag(const CanFrame& f, vehicle::VehicleData& data) {
     ++s_rx0x309Count;
@@ -299,7 +303,12 @@ static void decodeCanMeta(const CanFrame& f, vehicle::VehicleData& data) {
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
 static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 5) return;
+    ++s_rx0x30BCount;
+    s_last0x30BDlc = f.data_length_code;
+    if (f.data_length_code < 5) {
+        ++s_dropped0x30BDlc;
+        return;
+    }
     vehicle::I2cScanData s;
     s.sclIdleHigh       = (f.data[0] & 0x01U) != 0;
     s.sdaIdleHigh       = (f.data[0] & 0x02U) != 0;
@@ -320,6 +329,7 @@ static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
 // 0x30C DIAG_FDCAN — FDCAN error-counter dump (DLC 6).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendFdcanDiag().
 static void decodeFdcanDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    ++s_rx0x30CCount;
     if (f.data_length_code < 6) return;
     vehicle::FdcanDiagData d;
     d.lastErrorCode = f.data[0];
@@ -594,5 +604,9 @@ void poll(vehicle::VehicleData& data) {
 uint32_t rx0x309Count()       { return s_rx0x309Count; }
 uint32_t dropped0x309Dlc()    { return s_dropped0x309Dlc; }
 uint8_t  last0x309Dlc()       { return s_last0x309Dlc; }
+uint32_t rx0x30BCount()       { return s_rx0x30BCount; }
+uint32_t dropped0x30BDlc()    { return s_dropped0x30BDlc; }
+uint8_t  last0x30BDlc()       { return s_last0x30BDlc; }
+uint32_t rx0x30CCount()       { return s_rx0x30CCount; }
 
 } // namespace can_rx
