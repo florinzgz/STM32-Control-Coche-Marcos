@@ -1562,14 +1562,6 @@ static float OW_ReadTemperature(uint8_t idx)
     int16_t raw = (int16_t)((scratch[1] << 8) | scratch[0]);
     float temp = (float)raw / 16.0f;
 
-    /* DS18B20 power-up default value (85.0 °C, raw 0x0550).
-     * If observed here, conversion has not completed yet. Treat as
-     * INIT / invalid so it is never published as a normal reading. */
-    if (raw == (int16_t)0x0550) {
-        temp_read_invalid[idx] = true;
-        return 0.0f;
-    }
-
     /* DS18B20 operating range: −55 °C to +125 °C.
      * Values outside this range indicate corrupted data.
      * Informational only — see CRC note above (no global SENSOR_FAULT). */
@@ -1609,7 +1601,7 @@ void Temperature_ReadAll(void)
          * treat the temperature as simply unavailable (0 °C neutral) and
          * leave safety gating to Safety_CheckTemperature() once a real
          * sensor is discovered.  Must match OW_ReadTemperature(). */
-        if (raw == (int16_t)0x0550 || temp < -55.0f || temp > 125.0f) {
+        if (temp < -55.0f || temp > 125.0f) {
             temperatures[0] = 0.0f;
         } else {
             temperatures[0] = temp;
