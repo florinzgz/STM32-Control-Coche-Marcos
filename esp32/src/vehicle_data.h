@@ -302,6 +302,30 @@ struct CanMetaData {
 };
 
 // -------------------------------------------------------------------------
+// Boot/reset diagnostic (0x312) — report-only, 1 Hz
+// Uptime and RCC reset-cause bitmask captured at the last MCU reset.
+// Watching the uptime restart + cause byte identifies IWDG/brownout gaps.
+// -------------------------------------------------------------------------
+struct BootResetData {
+    uint32_t uptimeMs   = 0;    // HAL_GetTick() uptime since last reset
+    uint8_t  resetCause = 0;    // bitmask: bit0=POWERON bit1=SW bit2=IWDG bit3=WWDG bit4=BOR bit5=PIN
+    bool     valid      = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
+// Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
+// -------------------------------------------------------------------------
+struct Batt207DiagData {
+    uint32_t rxCount     = 0;   // total 0x207 frames received (wrapping)
+    uint8_t  lastDlc     = 0;   // DLC of the most recent 0x207 frame
+    uint32_t droppedDlc  = 0;   // 0x207 frames with DLC < 4 (discarded)
+    bool     valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // I2C service-mode scan report (0x30B) — report-only, on-demand
 // Active probe of the I2C topology triggered by SERVICE_CMD 0xF6.
 // -------------------------------------------------------------------------
@@ -486,6 +510,8 @@ public:
     void setGearLimits(const GearLimitsData& d)     { gearLimits_ = d; }
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
+    void setBootReset(const BootResetData& d)       { bootReset_ = d; }
+    void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
     void setSteeringZ(const SteeringZData& d)       { steeringZ_ = d; }
@@ -520,6 +546,8 @@ public:
     const GearLimitsData&   gearLimits()   const { return gearLimits_; }
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
     const CanMetaData&      canMeta()      const { return canMeta_; }
+    const BootResetData&    bootReset()    const { return bootReset_; }
+    const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
     const SteeringZData&    steeringZ()    const { return steeringZ_; }
@@ -550,6 +578,8 @@ private:
     GearLimitsData   gearLimits_;
     I2cDiagData      i2cDiag_;
     CanMetaData      canMeta_;
+    BootResetData    bootReset_;
+    Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;
     SteeringZData    steeringZ_;

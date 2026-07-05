@@ -162,13 +162,28 @@ static void decodeServiceDisabled(const CanFrame& f, vehicle::VehicleData& data)
     data.setServiceDisabled(readU32LE(&f.data[0]), millis());
 }
 
+// 0x207 STATUS_BATTERY reception counters (points 4+5 — battery diag)
+static uint32_t s_rx0x207Count     = 0;  // total 0x207 frames seen (any DLC)
+static uint32_t s_dropped0x207Dlc  = 0;  // 0x207 frames with DLC < 4 (discarded)
+static uint8_t  s_last0x207Dlc     = 0;  // DLC of the most recent 0x207 frame
+
 static void decodeBattery(const CanFrame& f, vehicle::VehicleData& data) {
-    if (f.data_length_code < 4) return;
+    ++s_rx0x207Count;
+    s_last0x207Dlc = f.data_length_code;
+    if (f.data_length_code < 4) { ++s_dropped0x207Dlc; return; }
     vehicle::BatteryData bd;
     bd.currentRaw  = readU16LE(&f.data[0]);   // 0.01 A units
     bd.voltageRaw  = readU16LE(&f.data[2]);   // 0.01 V units
     bd.timestampMs = millis();
     data.setBattery(bd);
+    /* Update 0x207 diagnostic counters every time a valid frame arrives. */
+    vehicle::Batt207DiagData diag;
+    diag.rxCount    = s_rx0x207Count;
+    diag.lastDlc    = s_last0x207Dlc;
+    diag.droppedDlc = s_dropped0x207Dlc;
+    diag.valid      = true;
+    diag.timestampMs = bd.timestampMs;
+    data.setBatt207Diag(diag);
 }
 
 static void decodeCommandAck(const CanFrame& f, vehicle::VehicleData& data) {
@@ -310,6 +325,18 @@ static void decodeCanMeta(const CanFrame& f, vehicle::VehicleData& data) {
     m.valid            = true;
     m.timestampMs      = millis();
     data.setCanMeta(m);
+}
+
+// 0x312 DIAG_BOOT_RESET — boot/reset diagnostic (DLC 8, 1 Hz).
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendBootResetDiag().
+static void decodeBootReset(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 5) return;
+    vehicle::BootResetData br;
+    br.uptimeMs   = readU32LE(&f.data[0]);  // bytes 0-3: HAL_GetTick() uptime
+    br.resetCause = f.data[4];              // byte 4: RESET_CAUSE_* bitmask
+    br.valid      = true;
+    br.timestampMs = millis();
+    data.setBootReset(br);
 }
 
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
@@ -586,6 +613,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_PEDAL_CAL:       decodePedalCal(frame, data);          break;
             case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
+            case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
@@ -622,5 +650,8 @@ uint8_t  last0x30BDlc()       { return s_last0x30BDlc; }
 uint32_t rx0x30CCount()       { return s_rx0x30CCount; }
 uint32_t rx0x001Count()       { return s_rx0x001Count; }
 uint32_t rx0x103Count()       { return s_rx0x103Count; }
+uint32_t rx0x207Count()       { return s_rx0x207Count; }
+uint32_t dropped0x207Dlc()    { return s_dropped0x207Dlc; }
+uint8_t  last0x207Dlc()       { return s_last0x207Dlc; }
 
 } // namespace can_rx

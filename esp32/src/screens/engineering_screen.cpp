@@ -7,6 +7,7 @@
 
 #include "engineering_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include "can_ids.h"
 #include "can_rx.h"
@@ -892,6 +893,22 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveBtCurrentRaw_ = bat.currentRaw;
         inaLiveBtVoltageRaw_ = bat.voltageRaw;
 
+        /* Track 0x207 staleness for 0.0 V differentiation (points 5+6). */
+        {
+            const bool batHaveFrame = (bat.timestampMs != 0);
+            const unsigned long batAge = batHaveFrame
+                ? (frameTimeMs >= bat.timestampMs ? frameTimeMs - bat.timestampMs : 0UL) : 0UL;
+            const bool newBat207Stale = batHaveFrame && (batAge > ui::BAT_DIAG_STALE_MS);
+            if (bat207Stale_ != newBat207Stale) changed = true;
+            if (bat207LastTs_ != bat.timestampMs) changed = true;
+            bat207Stale_  = newBat207Stale;
+            bat207LastTs_ = bat.timestampMs;
+        }
+        /* Cache 0x207 diag counters. */
+        const auto& b207 = data.batt207Diag();
+        if (batt207Diag_.rxCount != b207.rxCount) changed = true;
+        batt207Diag_ = b207;
+
         const auto& id = data.i2cDiag();
         unsigned long ageMs = 0;
         if (id.valid && frameTimeMs >= id.timestampMs) {
@@ -966,6 +983,21 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             rx0x001Count_   = rx001;
             rx0x103Count_   = rx103;
             canDiagChanged_ = true;
+        }
+        /* Cache boot reset data (0x312) — update restart counter when uptime resets. */
+        {
+            const auto& br = data.bootReset();
+            if (br.valid && br.timestampMs != bootResetLastTs_) {
+                /* Detect uptime restart: new uptime is less than previous by more
+                 * than 5 s (handles normal tick advance vs. a genuine reset).  */
+                if (bootResetLastTs_ != 0 && br.uptimeMs + 5000U < bootResetPrevUptime_) {
+                    ++stm32RestartCount_;
+                }
+                bootResetPrevUptime_ = br.uptimeMs;
+                bootResetLastTs_     = br.timestampMs;
+                bootReset_           = br;
+                canDiagChanged_      = true;
+            }
         }
         // Always keep heartbeat age fresh so L5 shows current data.
         if (data.heartbeat().timestampMs != 0 &&
@@ -1564,7 +1596,25 @@ void EngineeringScreen::draw() {
         char btABuf[20];
         char btVBuf[20];
         fmtA(btABuf, sizeof(btABuf), inaLiveBtCurrentRaw_);
-        fmtV(btVBuf, sizeof(btVBuf), inaLiveBtVoltageRaw_);
+
+        /* Points 5+6: Differentiate 0.0 V origins instead of blindly showing 0.0V.
+         * Priority: NO PACKET > STALE > INA CH4 MISS > MUX MISS > 0.0V RAW > normal. */
+        const bool batHavePacket = (bat207LastTs_ != 0);
+        const bool batCh4Ok = inaLiveValid_ && (inaLiveOkMask_ & (1U << 4));
+        if (!batHavePacket) {
+            snprintf(btVBuf, sizeof(btVBuf), "NO PACKET");
+        } else if (bat207Stale_) {
+            snprintf(btVBuf, sizeof(btVBuf), "STALE");
+        } else if (inaLiveBtVoltageRaw_ == 0 && !batCh4Ok && inaLiveValid_) {
+            snprintf(btVBuf, sizeof(btVBuf), "INA CH4 MISS");
+        } else if (inaLiveBtVoltageRaw_ == 0 && !inaLiveMuxPresent_ && inaLiveValid_) {
+            snprintf(btVBuf, sizeof(btVBuf), "MUX MISS");
+        } else if (inaLiveBtVoltageRaw_ == 0) {
+            snprintf(btVBuf, sizeof(btVBuf), "0.0V RAW");
+        } else {
+            fmtV(btVBuf, sizeof(btVBuf), inaLiveBtVoltageRaw_);
+        }
+
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
         char btLineBuf[52]; // "CH4 BT: "(8) + btABuf(≤19) + "   "(3) + btVBuf(≤19) + NUL = 50
         snprintf(btLineBuf, sizeof(btLineBuf), "CH4 BT: %s   %s", btABuf, btVBuf);
@@ -1617,6 +1667,19 @@ void EngineeringScreen::draw() {
                  (unsigned)inaLiveBtCurrentRaw_);
         tft.drawString(buf, bx, by + 6 * lh);
 
+        /* Point 4: 0x207 packet diagnostic counters. */
+        {
+            const auto& b207 = batt207Diag_;
+            const uint16_t b207Col = (!batHavePacket || bat207Stale_) ? ui::COL_AMBER : ui::COL_WHITE;
+            tft.setTextColor(b207Col, ui::COL_BG);
+            snprintf(buf, sizeof(buf),
+                     "0x207 rx=%lu dlc=%u drop=%lu",
+                     (unsigned long)b207.rxCount,
+                     (unsigned)b207.lastDlc,
+                     (unsigned long)b207.droppedDlc);
+            tft.drawString(buf, bx, by + 7 * lh);
+        }
+
         const int16_t gx = 250;
         const int16_t gy = by;
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
@@ -1637,11 +1700,15 @@ void EngineeringScreen::draw() {
                  (unsigned)inaLiveFailCount_, (unsigned)inaLiveRecoveryCount_);
         tft.drawString(buf, gx, gy + 4 * lh);
 
-        /* I2C read duration — amber if blocking heartbeat (>50ms). */
+        /* I2C read duration — amber if blocking heartbeat (>50ms); "255+" when saturated. */
         {
             const uint16_t rdCol = (inaLiveI2cReadMs_ > 50U) ? ui::COL_AMBER : ui::COL_WHITE;
             tft.setTextColor(rdCol, ui::COL_BG);
-            snprintf(buf, sizeof(buf), "i2cRd:%ums", (unsigned)inaLiveI2cReadMs_);
+            if (inaLiveI2cReadMs_ == 255U) {
+                snprintf(buf, sizeof(buf), "i2cRd:255+ms");
+            } else {
+                snprintf(buf, sizeof(buf), "i2cRd:%ums", (unsigned)inaLiveI2cReadMs_);
+            }
             tft.drawString(buf, gx + 100, gy + 4 * lh);
         }
 
@@ -1738,19 +1805,20 @@ void EngineeringScreen::draw() {
                  (unsigned long)drop0x309Dlc_);
         tft.drawString(buf, x, y0);
 
-        // L2: STM32 meta counters (audit A–D + HB TX err) from 0x30A.
+        // L2: STM32 meta counters (audit A–D + HB TX err + init flag) from 0x30A.
         tft.fillRect(x, y0 + lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
         if (canMeta_.valid) {
-            const uint16_t metaCol = (canMeta_.hbTxErr > 0 || canMeta_.txFifoFullDrops > 0)
+            const uint16_t metaCol = (canMeta_.hbTxErr > 0 || canMeta_.txFifoFullDrops > 0 || !canMeta_.fdcanInitOk)
                                    ? ui::COL_AMBER : ui::COL_WHITE;
             tft.setTextColor(metaCol, ui::COL_BG);
             snprintf(buf, sizeof(buf),
-                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u hbErr=%u",
+                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u i=%u hbE=%u",
                      (unsigned)canMeta_.diag309CallCount,
                      (unsigned)canMeta_.tick1000msCount,
                      (unsigned)canMeta_.diag309TxOk,
                      (unsigned)canMeta_.diag309TxErr,
                      (unsigned)canMeta_.txFifoFullDrops,
+                     (unsigned)(canMeta_.fdcanInitOk ? 1u : 0u),
                      (unsigned)canMeta_.hbTxErr);
         } else {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
@@ -1829,18 +1897,38 @@ void EngineeringScreen::draw() {
             tft.drawString(buf, x, y0 + 4 * lh);
         }
 
-        // L6: 0x001 heartbeat RX count + 0x103 CMD_ACK count.
-        // Lets the operator confirm the ESP32 actually receives heartbeats and
-        // ACKs, distinguishing "heartbeat never arrived" from "heartbeat stale".
-        // Placed at a fixed y (250) to stay clear of the scan banner at 260.
+        // L6: boot/reset diagnostic from 0x312 (1 Hz).
+        // Shows: reset reason, uptime, detected restart count, plus hb/ack RX totals.
+        // This helps confirm if 8–10 s gaps are caused by IWDG/brownout resets.
         tft.fillRect(x, 250, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
         {
-            const uint16_t hbCol = (rx0x001Count_ > 0) ? ui::COL_GREEN : ui::COL_RED;
-            tft.setTextColor(hbCol, ui::COL_BG);
-            snprintf(buf, sizeof(buf),
-                     "0x001 hb rx=%lu | 0x103 ack rx=%lu",
-                     (unsigned long)rx0x001Count_,
-                     (unsigned long)rx0x103Count_);
+            if (bootReset_.valid) {
+                const uint8_t rc = bootReset_.resetCause;
+                const char* rst =
+                    (rc & can::RESET_CAUSE_IWDG)     ? "IWDG" :
+                    (rc & can::RESET_CAUSE_BROWNOUT)  ? "BOR"  :
+                    (rc & can::RESET_CAUSE_SOFTWARE)  ? "SW"   :
+                    (rc & can::RESET_CAUSE_WWDG)      ? "WWDG" :
+                    (rc & can::RESET_CAUSE_PIN)       ? "PIN"  :
+                    (rc & can::RESET_CAUSE_POWERON)   ? "POR"  : "UNK";
+                const uint16_t rstCol = (rc & (can::RESET_CAUSE_IWDG | can::RESET_CAUSE_BROWNOUT))
+                    ? ui::COL_RED : ui::COL_GREEN;
+                tft.setTextColor(rstCol, ui::COL_BG);
+                snprintf(buf, sizeof(buf),
+                         "rst=%s up=%lus stmRst=%lu | hb=%lu ack=%lu",
+                         rst,
+                         (unsigned long)(bootReset_.uptimeMs / 1000U),
+                         (unsigned long)stm32RestartCount_,
+                         (unsigned long)rx0x001Count_,
+                         (unsigned long)rx0x103Count_);
+            } else {
+                const uint16_t hbCol = (rx0x001Count_ > 0) ? ui::COL_GREEN : ui::COL_RED;
+                tft.setTextColor(hbCol, ui::COL_BG);
+                snprintf(buf, sizeof(buf),
+                         "0x312 no data | hb=%lu ack=%lu",
+                         (unsigned long)rx0x001Count_,
+                         (unsigned long)rx0x103Count_);
+            }
             tft.drawString(buf, x, 250);
         }
     }

@@ -411,6 +411,24 @@ inline constexpr uint16_t BATT_CUTOFF_DEFAULT_CV   = 1800;
 inline constexpr uint16_t BATT_RECOVERY_DEFAULT_CV = 1850;
 inline constexpr uint16_t BATT_FILTER_DEFAULT_MS   = 0;
 
+// -------------------------------------------------------------------------
+// Boot/Reset Diagnostic (0x312) — STM32→ESP32, 1 Hz, DLC 8
+//   Byte 0-3: HAL_GetTick() uptime in ms (uint32 LE)
+//   Byte 4:   RCC reset-cause bitmask (mirrors RESET_CAUSE_* in STM32 main.h)
+//               bit0 = POWERON   bit1 = SOFTWARE  bit2 = IWDG
+//               bit3 = WWDG      bit4 = BROWNOUT  bit5 = PIN
+//   Byte 5-7: reserved (0)
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_BOOT_RESET = 0x312;  // STM32→ESP32, DLC 8, 1000 ms — boot/reset diagnostic
+
+// Reset-cause bit masks (byte 4 of DIAG_BOOT_RESET) — mirror RESET_CAUSE_* in main.h
+inline constexpr uint8_t RESET_CAUSE_POWERON   = (1U << 0);
+inline constexpr uint8_t RESET_CAUSE_SOFTWARE  = (1U << 1);
+inline constexpr uint8_t RESET_CAUSE_IWDG      = (1U << 2);
+inline constexpr uint8_t RESET_CAUSE_WWDG      = (1U << 3);
+inline constexpr uint8_t RESET_CAUSE_BROWNOUT  = (1U << 4);
+inline constexpr uint8_t RESET_CAUSE_PIN       = (1U << 5);
+
 } // namespace can
 
 #endif // CAN_IDS_H

@@ -11,6 +11,7 @@
   */
 
 #include "can_handler.h"
+#include "main.h"
 #include "motor_control.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
@@ -1231,6 +1232,37 @@ void CAN_SendCanMetaDiag(void) {
         data[7] = (fdcan_init_ok ? 0x01U : 0x00U) | (uint8_t)(hb_err_sat << 1);
     }
     TransmitFrame(CAN_ID_DIAG_CAN_META, data, 8);
+}
+
+/**
+ * @brief  Boot/reset diagnostic (additive, report-only).
+ *
+ * Surfaces the STM32 uptime and the RCC reset-cause bitmask captured at
+ * boot so the HMI can confirm whether recent 8–10 s gaps were caused by
+ * IWDG timeouts, brownout events, or software resets — independently of
+ * the main safety telemetry.  Diagnostic only; no control path consumes it.
+ *
+ * CAN ID: 0x312   DLC: 8   Rate: 1000 ms (1 Hz)
+ *   Byte 0-3: HAL_GetTick() uptime in ms (uint32 LE, wraps at ~49.7 days)
+ *   Byte 4:   reset_cause bitmask — mirrors RESET_CAUSE_* in main.h
+ *               bit0 = POWERON   (only PINRSTF set → normal power-up)
+ *               bit1 = SOFTWARE  (SFTRSTF)
+ *               bit2 = IWDG      (IWDGRSTF)
+ *               bit3 = WWDG      (WWDGRSTF)
+ *               bit4 = BROWNOUT  (BORRSTF or LPWRRSTF)
+ *               bit5 = PIN       (PINRSTF, combined with another flag)
+ *   Byte 5-7: reserved (0)
+ */
+void CAN_SendBootResetDiag(void) {
+    uint32_t uptime = HAL_GetTick();
+    uint8_t data[8] = {0};
+    data[0] = (uint8_t)( uptime        & 0xFFU);
+    data[1] = (uint8_t)((uptime >>  8) & 0xFFU);
+    data[2] = (uint8_t)((uptime >> 16) & 0xFFU);
+    data[3] = (uint8_t)((uptime >> 24) & 0xFFU);
+    data[4] = Boot_GetResetCause();
+    /* bytes 5-7 reserved */
+    TransmitFrame(CAN_ID_DIAG_BOOT_RESET, data, 8);
 }
 
 /**

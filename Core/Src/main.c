@@ -756,6 +756,12 @@ int main(void)
              * Diagnostic only — does not gate any control or safety path.   */
             CAN_SendCanMetaDiag();
 
+            /* Boot/reset diagnostic (0x312): uptime + RCC reset-cause bitmask.
+             * Lets the HMI confirm whether 8–10 s gaps are IWDG/brownout resets
+             * by watching the uptime counter restart and checking the cause byte.
+             * Diagnostic only — does not gate any control or safety path.     */
+            CAN_SendBootResetDiag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

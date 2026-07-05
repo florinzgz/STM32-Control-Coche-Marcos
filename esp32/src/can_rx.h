@@ -40,6 +40,11 @@ uint32_t rx0x001Count();      ///< total 0x001 heartbeat frames received
 /// Per-ID 0x103 RX counter (CMD_ACK).
 uint32_t rx0x103Count();      ///< total 0x103 CMD_ACK frames received
 
+/// Per-ID 0x207 RX counters (STATUS_BATTERY).  Diagnose silent 0x207 gaps.
+uint32_t rx0x207Count();      ///< total 0x207 frames seen on the bus (any DLC)
+uint32_t dropped0x207Dlc();   ///< 0x207 frames rejected for DLC < 4
+uint8_t  last0x207Dlc();      ///< DLC of the most recent 0x207 frame
+
 } // namespace can_rx
 
 #endif // CAN_RX_H

@@ -69,6 +69,12 @@ extern "C" {
 #define CAN_ID_DIAG_EPS_PARAMS    0x30F  // STM32 → ESP32 (on-demand, after QUERY) EPS parameter + live-state telemetry
 #define CAN_ID_DIAG_DRIVE_TUNING  0x310  // STM32 → ESP32 (on-demand, after QUERY) drive-tuning (ramp/creep) field-stream telemetry
 #define CAN_ID_DIAG_BATTERY_LIMITS 0x311 // STM32 → ESP32 (on-demand, after QUERY) battery-limit (voltage threshold) field-stream telemetry
+#define CAN_ID_DIAG_BOOT_RESET    0x312  // STM32 → ESP32 (1000ms) boot/reset diagnostic: uptime_ms + RCC reset-cause bitmask
+                                         //   Byte 0-3: HAL_GetTick() uptime in ms (uint32 LE)
+                                         //   Byte 4:   reset_cause bitmask (RESET_CAUSE_* from main.h)
+                                         //             bit0=POWERON  bit1=SOFTWARE bit2=IWDG
+                                         //             bit3=WWDG     bit4=BROWNOUT  bit5=PIN
+                                         //   Byte 5-7: reserved (0)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -332,6 +338,7 @@ void CAN_SendErrorLogHeader(void);
 void CAN_SendDebounceDiag(void);    /* 1 Hz DWT-debounce filter EMI counters (0x306 + 0x307) */
 void CAN_SendI2CDiag(void);         /* 1 Hz I2C topology diagnostic (0x309): mux + per-channel INA226 */
 void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (0x30A) */
+void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);
