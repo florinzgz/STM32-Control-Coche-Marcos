@@ -70,8 +70,29 @@ static uint8_t  emergencyCurrent   = 0;
 static uint32_t emergencyLastMs    = 0;
 static bool     emergencyPhase     = false;
 
-// ---- Amber colour for indicators ----
-static constexpr CRGB AMBER = CRGB(255, 100, 0);
+// =========================================================================
+// Explicit decorative / signal colour palette (documented)
+//
+// The WS2812B strips are configured GRB in init() (see FastLED.addLeds<>),
+// which is the native byte order for genuine WS2812B, so these logical RGB
+// values map correctly on hardware: red=red, green=green, blue=blue.
+// Define every decorative colour explicitly here — no ambiguous inline
+// colours in the pattern renderers.
+// =========================================================================
+static constexpr CRGB LED_COLOR_RED_EMERGENCY = CRGB(255,   0,   0);  // emergency red
+static constexpr CRGB LED_COLOR_BLUE_POLICE   = CRGB(  0,   0, 255);  // police blue
+static constexpr CRGB LED_COLOR_WHITE         = CRGB(255, 255, 255);  // pure white
+
+// ---- Amber colour for indicators and amber decorative modes ----
+// Real hardware showed the previous value CRGB(255,100,0) as too ORANGE.
+// Raising the green channel pushes the hue toward a clean amber/yellow.
+// Verified options: A(255,180,0) B(255,200,0) C(255,220,0); (255,80/100/120,0)
+// are too orange. B is the chosen default — adjust the green channel here if a
+// different amber is preferred on the installed strip.
+static constexpr CRGB LED_COLOR_AMBER = CRGB(255, 200, 0);
+
+// Backwards-compatible alias used throughout the indicator/decor renderers.
+static constexpr CRGB AMBER = LED_COLOR_AMBER;
 
 // =========================================================================
 // Decorative mode state
@@ -273,13 +294,13 @@ static void updateDecorativeFront() {
             fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
             if (leftOn)
                 fill_solid(&ledsFront[FRONT_IND_LEFT_START],  FRONT_IND_LEFT_COUNT,
-                           scaledBrightness(CRGB::Blue, br));
+                           scaledBrightness(LED_COLOR_BLUE_POLICE, br));
             if (rightOn)
                 fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
-                           scaledBrightness(CRGB::Red,  br));
+                           scaledBrightness(LED_COLOR_RED_EMERGENCY,  br));
             // Centre: subtle alternating blue/red
-            CRGB centreCol = leftOn  ? scaledBrightness(CRGB::Blue, br / 3) :
-                             rightOn ? scaledBrightness(CRGB::Red,  br / 3) :
+            CRGB centreCol = leftOn  ? scaledBrightness(LED_COLOR_BLUE_POLICE, br / 3) :
+                             rightOn ? scaledBrightness(LED_COLOR_RED_EMERGENCY,  br / 3) :
                                        CRGB::Black;
             fill_solid(&ledsFront[FRONT_CENTRE_START], FRONT_CENTRE_COUNT, centreCol);
             break;
@@ -288,8 +309,8 @@ static void updateDecorativeFront() {
         case DecorMode::AMBULANCE: {
             // Alternating red / white, slower than police
             bool phase0 = (decorPhase == 0);
-            CRGB col = phase0 ? scaledBrightness(CRGB::Red,   br)
-                              : scaledBrightness(CRGB::White, br);
+            CRGB col = phase0 ? scaledBrightness(LED_COLOR_RED_EMERGENCY, br)
+                              : scaledBrightness(LED_COLOR_WHITE,         br);
             fill_solid(ledsFront, NUM_LEDS_FRONT, col);
             break;
         }
@@ -305,7 +326,7 @@ static void updateDecorativeFront() {
 
         case DecorMode::HAZARD_RED:
             // Front is dim red or off when hazard rear is flashing
-            fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, 20));
+            fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_RED_EMERGENCY, 20));
             break;
 
         case DecorMode::KNIGHT_RIDER:
@@ -330,20 +351,20 @@ static void updateDecorativeFront() {
             switch (decorPhase % DECOR_TEST_PHASES) {
                 case 0: // Front-left zone — white
                     fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 1: // Front-right zone — white
                     fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 2: // All front — red
-                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, br));
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_RED_EMERGENCY, br));
                     break;
                 case 3: // All front — blue
-                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Blue, br));
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_BLUE_POLICE, br));
                     break;
                 case 4: // All front — white
-                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::White, br));
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 5: // All front — amber
                     fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(AMBER, br));
@@ -383,12 +404,12 @@ static void updateDecorativeRear() {
             fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
             if (leftOn)
                 fill_solid(&ledsRear[REAR_IND_LEFT_START],  REAR_IND_LEFT_COUNT,
-                           scaledBrightness(CRGB::Red,  br));
+                           scaledBrightness(LED_COLOR_RED_EMERGENCY,  br));
             if (rightOn)
                 fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
-                           scaledBrightness(CRGB::Blue, br));
-            CRGB centreCol = leftOn  ? scaledBrightness(CRGB::Red,  br / 3) :
-                             rightOn ? scaledBrightness(CRGB::Blue, br / 3) :
+                           scaledBrightness(LED_COLOR_BLUE_POLICE, br));
+            CRGB centreCol = leftOn  ? scaledBrightness(LED_COLOR_RED_EMERGENCY,  br / 3) :
+                             rightOn ? scaledBrightness(LED_COLOR_BLUE_POLICE, br / 3) :
                                        CRGB::Black;
             fill_solid(&ledsRear[REAR_CENTRE_START], REAR_CENTRE_COUNT, centreCol);
             break;
@@ -397,8 +418,8 @@ static void updateDecorativeRear() {
         case DecorMode::AMBULANCE: {
             // Rear: red dominant, occasional white pulse
             bool phase0 = (decorPhase == 0);
-            CRGB col = phase0 ? scaledBrightness(CRGB::White, br)
-                              : scaledBrightness(CRGB::Red,   br);
+            CRGB col = phase0 ? scaledBrightness(LED_COLOR_WHITE,         br)
+                              : scaledBrightness(LED_COLOR_RED_EMERGENCY, br);
             fill_solid(ledsRear, NUM_LEDS_REAR, col);
             break;
         }
@@ -418,7 +439,7 @@ static void updateDecorativeRear() {
         case DecorMode::HAZARD_RED: {
             // Double flash rear red: ON at phases 0 and 2, OFF elsewhere
             bool on = (decorPhase == 0 || decorPhase == 2);
-            CRGB col = on ? scaledBrightness(CRGB::Red, br) : CRGB::Black;
+            CRGB col = on ? scaledBrightness(LED_COLOR_RED_EMERGENCY, br) : CRGB::Black;
             fill_solid(ledsRear, NUM_LEDS_REAR, col);
             break;
         }
@@ -443,20 +464,20 @@ static void updateDecorativeRear() {
             switch (decorPhase % DECOR_TEST_PHASES) {
                 case 0: // Rear-left zone — white
                     fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 1: // Rear-right zone — white
                     fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 2: // All rear — red
-                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Red, br));
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(LED_COLOR_RED_EMERGENCY, br));
                     break;
                 case 3: // All rear — blue
-                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Blue, br));
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(LED_COLOR_BLUE_POLICE, br));
                     break;
                 case 4: // All rear — white
-                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::White, br));
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 5: // All rear — amber
                     fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(AMBER, br));
