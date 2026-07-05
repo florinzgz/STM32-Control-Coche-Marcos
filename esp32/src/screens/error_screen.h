@@ -53,6 +53,14 @@ private:
     bool     prevCanRxActive_ = false;
     uint8_t  faultFlags_     = 0;
     uint8_t  prevFaultFlags_ = 0xFF;
+
+    // Per-wheel fault-reason hint (0x313 DIAG_WHEEL_SENSOR).  When the
+    // WHEEL_SENSOR flag (bit 4 / 0x10) is active this names which wheel and why
+    // (e.g. "Wheel: FR MISMATCH").  Folded into the ETILE_FAULTS hash so the
+    // hint refreshes when the reason changes even if faultFlags_ is unchanged.
+    uint8_t  wheelReason_[5]  = {0, 0, 0, 0, 0};  // FL,FR,RL,RR,STEER
+    uint8_t  wheelFaultMask_  = 0;
+    bool     wheelDiagValid_  = false;
     uint8_t  errorCode_      = 0;
     uint8_t  prevErrorCode_  = 0xFF;
     uint8_t  diagCode_       = 0;
