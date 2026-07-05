@@ -157,6 +157,13 @@ private:
     // Helper: send a SERVICE_CMD (0x110) with byte0=0xF5 (PEDAL_CAL) + sub-opcode.
     void sendPedalCalOp(uint8_t op);
 
+    // Cached wheel-diag hint line ("WD: ...") shown under "Safety gate" on the
+    // Pedal Calibration screen.  Redraw only when text/colour changes → no
+    // flicker (partial redraw, no fillScreen).  Informational only; the safety
+    // gate itself is enforced server-side and is never relaxed here.
+    char        pedalWheelText_[48]  = {0};
+    uint16_t    pedalWheelColor_     = 0;
+
     // Cached data for encoder calibration (live steering)
     int16_t     steeringAngle_   = 0;      // 0.1° units
     uint8_t     steeringCal_     = 0;      // 0 = uncalibrated, 1 = calibrated

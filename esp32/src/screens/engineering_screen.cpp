@@ -9,6 +9,7 @@
 #include "ui/ui_common.h"
 #include "ui/ui_config.h"
 #include "ui/render_trace.h"
+#include "ui/wheel_diag_hint.h"
 #include "can_ids.h"
 #include "can_rx.h"
 #include "config_store.h"
@@ -1414,9 +1415,45 @@ void EngineeringScreen::draw() {
         tft.setTextDatum(TL_DATUM);
     }
 
-    // Partial redraw for encoder calibration (live steering angle gauge + Z diagnostic)
-    if (currentMenu_ == SubMenu::ENCODER_CAL &&
-        (encoderDataChanged_ || steerZDataChanged_)) {
+    // ---- Wheel-diag hint line (Pedal Calibration) --------------------------
+    // Non-invasive "WD: ..." line under "Safety gate" explaining a wheel-sensor
+    // related block using the already-decoded 0x313 diagnostic.  Runs every
+    // frame while the screen is active but only touches the display when the
+    // text or colour actually changes → no flicker, no fillScreen, no overlap
+    // (fixed cell at y=178, clear of the labels above and the hint at y=195).
+    // This is purely informational: it never gates or relaxes calibration.
+    if (currentMenu_ == SubMenu::PEDAL_CAL) {
+        const auto& wd = wheelSensorDiag_;
+        const unsigned long ageMs = wd.valid
+            ? (static_cast<unsigned long>(millis()) - wd.timestampMs)
+            : 0UL;
+        // A SENSOR_FAULT (0x10) DTC is latched if the service fault mask flags
+        // the wheel-sensor bit or the 0x313 frame reports its latched flag.
+        const bool hasSensorFaultDtc =
+            ((faultBits_ & 0x10UL) != 0UL) ||
+            ((wd.flags & can::WHEEL_DIAG_FLAG_LATCHED) != 0);
+
+        char wbuf[48];
+        const ui::WheelHintKind kind = ui::buildWheelBlockText(
+            wd.reason, wd.faultMask, wd.valid, ageMs, hasSensorFaultDtc,
+            wbuf, sizeof(wbuf));
+        const uint16_t wcol = ui::wheelHintColor(kind);
+
+        if (wcol != pedalWheelColor_ || strcmp(wbuf, pedalWheelText_) != 0) {
+            strncpy(pedalWheelText_, wbuf, sizeof(pedalWheelText_) - 1);
+            pedalWheelText_[sizeof(pedalWheelText_) - 1] = '\0';
+            pedalWheelColor_ = wcol;
+
+            RTRACE_SET_LAYER(2);
+            tft.setTextSize(1);
+            tft.setTextDatum(TL_DATUM);
+            tft.fillRect(20, 178, ui::SCREEN_W - 26, 16, ui::COL_BG);
+            tft.setTextColor(wcol, ui::COL_BG);
+            tft.drawString(pedalWheelText_, 20, 178);
+        }
+    }
+
+
         encoderDataChanged_ = false;
         steerZDataChanged_ = false;
 
@@ -3809,6 +3846,8 @@ void EngineeringScreen::drawPedalCalibration() {
 
     // Force initial partial redraw of value cells
     pedalDataChanged_ = true;
+    // Force the wheel-diag hint line to repaint on the next partial pass.
+    pedalWheelText_[0] = '\0';
 
     // ---- Action buttons ----
     auto drawBtn = [&](int16_t x, const char* label, uint16_t fill) {
