@@ -280,6 +280,14 @@ static uint8_t  steering_timed_out  = 0;
 static uint8_t  consecutive_errors      = 0;
 static uint32_t last_error_tick         = 0;
 
+/* ---- Per-wheel speed-sensor diagnostics (report-only) ----
+ * wheel_diag[i]         : latest WheelDiag_t reason for channel i.
+ * wheel_mismatch_since[i]: HAL_GetTick() when a mismatch first appeared
+ *                          while under traction (0 = no active mismatch).
+ *                          Used for the WHEEL_FAULT_DEBOUNCE_MS filter.  */
+static WheelDiag_t wheel_diag[NUM_WHEELS]         = {WHEEL_DIAG_OK};
+static uint32_t    wheel_mismatch_since[NUM_WHEELS] = {0};
+
 /* ---- Non-blocking relay sequencer state machine ----
  *
  * The 24 V battery has only ONE relay (traction, PC11).  The 12 V
@@ -1243,12 +1251,53 @@ void Safety_Init(void)
 #define ABS_PULSE_PERIOD_MS     80      /* total pulse cycle in ms        */
 #define ABS_PULSE_ON_RATIO      0.6f    /* 60 % of period = reduced phase */
 
+/* ---- Powertrain-engaged gate -------------------------------------------
+ * True only when the vehicle is in a drive-capable state AND actually
+ * commanding traction above WHEEL_INTERVENTION_MIN_DEMAND_PCT.
+ *
+ * ABS/TCS and the wheel-mismatch plausibility fault are meaningless when
+ * no torque is being applied: spinning a wheel by hand in STANDBY (or in
+ * ACTIVE with the pedal released) is expected and must NOT trigger an
+ * intervention or a SENSOR_FAULT.  When the powertrain is engaged a real
+ * wheel/sensor problem still produces slip under load and is caught.      */
+static bool Safety_PowertrainEngaged(void)
+{
+    const TractionState_t *ts = Traction_GetState();
+    float demand = (ts != NULL) ? ts->demandPct : 0.0f;
+    if (demand < 0.0f) demand = -demand;              /* reverse counts too */
+    if (demand < WHEEL_INTERVENTION_MIN_DEMAND_PCT) return false;
+    return (system_state == SYS_STATE_ACTIVE   ||
+            system_state == SYS_STATE_DEGRADED ||
+            system_state == SYS_STATE_LIMP_HOME);
+}
+
+WheelDiag_t Safety_GetWheelDiag(uint8_t idx)
+{
+    if (idx >= NUM_WHEELS) return WHEEL_DIAG_OK;
+    return wheel_diag[idx];
+}
+
 void ABS_Update(void)
 {
     /* Skip if ABS module is disabled (service mode) */
     if (!ServiceMode_IsEnabled(MODULE_ABS)) {
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
+        return;
+    }
+
+    /* Powertrain gate: ABS only intervenes when torque is being applied.
+     * Spinning a wheel by hand (pedal released / STANDBY) must not raise
+     * abs_active — otherwise the mismatch between the hand-spun wheel and
+     * the three stationary wheels is misread as wheel lock-up (0x20).    */
+    if (!Safety_PowertrainEngaged()) {
+        safety_status.abs_active = false;
+        safety_status.abs_wheel_mask = 0;
+        for (uint8_t i = 0; i < 4; i++) {
+            safety_status.wheel_scale[i] = 1.0f;
+            abs_pulse_timer[i] = HAL_GetTick();
+            abs_pulse_phase[i] = 0U;
+        }
         return;
     }
 
@@ -1370,6 +1419,19 @@ void TCS_Update(void)
         safety_status.tcs_wheel_mask = 0;
         for (uint8_t i = 0; i < 4; i++)
             tcs_reduction[i] = 0.0f;
+        return;
+    }
+
+    /* Powertrain gate: TCS only intervenes when torque is being applied.
+     * A wheel spun by hand with the pedal released (or in STANDBY) is not
+     * wheelspin — suppress activation so 0x40 is not raised on manual
+     * movement.  Under real load a spinning wheel is still caught.        */
+    if (!Safety_PowertrainEngaged()) {
+        safety_status.tcs_active = false;
+        safety_status.tcs_wheel_mask = 0;
+        for (uint8_t i = 0; i < 4; i++)
+            tcs_reduction[i] = 0.0f;
+        tcs_last_tick = HAL_GetTick();
         return;
     }
 
@@ -1878,28 +1940,77 @@ void Safety_CheckSensors(void)
     spd[3] = Wheel_GetSpeed_RR();
     for (uint8_t i = 0; i < 4; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
-        if (!ServiceMode_IsEnabled(mod)) continue;
-        /* NaN/Inf hardening: invalid speed reading → plausibility fault */
+        if (!ServiceMode_IsEnabled(mod)) {
+            wheel_diag[i]          = WHEEL_DIAG_DISABLED_STATE;
+            wheel_mismatch_since[i] = 0;
+            continue;
+        }
+        /* NaN/Inf hardening: invalid speed reading → plausibility fault.
+         * An impossible value is a genuine fault in any state.           */
         if (isnan(spd[i]) || isinf(spd[i]) ||
             spd[i] < 0.0f || spd[i] > SENSOR_SPEED_MAX_KMH) {
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
+            wheel_diag[i]          = WHEEL_DIAG_IMPOSSIBLE_RATE;
+            wheel_mismatch_since[i] = 0;
+            continue;
         }
-        /* Stale detection: flag sensor if no pulses within timeout.
-         * A stale wheel while other wheels report speed indicates a
-         * disconnected or failed sensor — triggers DEGRADED via the
-         * fault_count accumulator below.                                */
+
+        /* Stale-while-others-moving detection.
+         *
+         * A stale wheel (no pulses within timeout) reading 0 while other
+         * wheels report speed CAN indicate a disconnected/failed sensor —
+         * but it is ALSO exactly what happens when a single wheel is
+         * turned by hand while the car is parked (the other three stay
+         * still and a sensor sitting over a bolt emits no edge).
+         *
+         * To avoid a false SENSOR_FAULT / DEGRADED on manual movement we
+         * only escalate this mismatch to a plausibility fault when:
+         *   (a) the powertrain is actually applying torque, AND
+         *   (b) the mismatch PERSISTS for WHEEL_FAULT_DEBOUNCE_MS.
+         * Otherwise it is reported as MANUAL_MOVEMENT (diagnostic only).  */
         if (Wheel_IsStale(i) && spd[i] == 0.0f) {
-            /* Only flag if at least one other wheel has nonzero speed.
-             * All wheels stale at zero = vehicle stopped (normal).      */
             uint8_t any_moving = 0;
             for (uint8_t j = 0; j < 4; j++) {
                 if (j != i && spd[j] > 1.0f) { any_moving = 1; break; }
             }
-            if (any_moving) {
-                ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
-                fault_count++;
+            if (!any_moving) {
+                /* All-but-this stopped too → vehicle stopped, normal.    */
+                wheel_diag[i]          = WHEEL_DIAG_OK;
+                wheel_mismatch_since[i] = 0;
+            } else if (!Safety_PowertrainEngaged()) {
+                /* Others moving but no torque commanded → the motion is
+                 * manual.  Never a fault; surface it for the operator.   */
+                wheel_diag[i]          = WHEEL_DIAG_MANUAL_MOVEMENT;
+                wheel_mismatch_since[i] = 0;
+            } else {
+                /* Under load and this wheel is silent → candidate fault.
+                 * Require persistence before latching so a momentary
+                 * difference (e.g. a wheel just starting to turn) does
+                 * not force DEGRADED.                                     */
+                uint32_t now = HAL_GetTick();
+                if (wheel_mismatch_since[i] == 0) {
+                    wheel_mismatch_since[i] = now;
+                }
+                if ((now - wheel_mismatch_since[i]) >= WHEEL_FAULT_DEBOUNCE_MS) {
+                    ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                    fault_count++;
+                    /* Classify the silent channel using the raw pin level
+                     * so the operator can tell a stuck sensor apart from a
+                     * disconnected one.                                   */
+                    uint8_t lvl = Wheel_GetGpioLevel(i);
+                    if      (lvl == 1U) wheel_diag[i] = WHEEL_DIAG_STUCK_HIGH;
+                    else if (lvl == 0U) wheel_diag[i] = WHEEL_DIAG_STUCK_LOW;
+                    else                wheel_diag[i] = WHEEL_DIAG_NO_PULSE;
+                } else {
+                    /* Persisting but not yet latched — diagnostic only.  */
+                    wheel_diag[i] = WHEEL_DIAG_MISMATCH;
+                }
             }
+        } else {
+            /* Wheel is producing pulses (or vehicle stopped) — coherent. */
+            wheel_diag[i]          = WHEEL_DIAG_OK;
+            wheel_mismatch_since[i] = 0;
         }
     }
 

@@ -369,6 +369,35 @@ bool Wheel_IsStale(uint8_t idx)
     return ((HAL_GetTick() - wheel_last_pulse_tick[idx]) >= WHEEL_STALE_TIMEOUT_MS);
 }
 
+/* ---- Per-wheel diagnostics (report-only) --------------------------------
+ * Atomic 32-bit reads on Cortex-M4 — no critical section needed.
+ * These surface raw sensing state; they must NOT gate any control path.   */
+uint32_t Wheel_GetPulseCount(uint8_t idx)
+{
+    if (idx >= NUM_WHEELS) return 0U;
+    return wheel_pulse[idx];
+}
+
+uint32_t Wheel_GetLastEdgeAgeMs(uint8_t idx)
+{
+    if (idx >= NUM_WHEELS) return 0xFFFFFFFFU;
+    return (HAL_GetTick() - wheel_last_pulse_tick[idx]);
+}
+
+uint8_t Wheel_GetGpioLevel(uint8_t idx)
+{
+    GPIO_TypeDef *port;
+    uint16_t      pin;
+    switch (idx) {
+        case 0: port = GPIOA;         pin = PIN_WHEEL_FL; break;
+        case 1: port = GPIOA;         pin = PIN_WHEEL_FR; break;
+        case 2: port = PORT_WHEEL_RL; pin = PIN_WHEEL_RL; break;
+        case 3: port = GPIOB;         pin = PIN_WHEEL_RR; break;
+        default: return 0xFFU;
+    }
+    return (HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_SET) ? 1U : 0U;
+}
+
 /* =========================================================================
  *  Pedal – Internal ADC dual-sample + software plausibility
  *

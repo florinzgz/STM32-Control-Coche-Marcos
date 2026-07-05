@@ -180,6 +180,33 @@ typedef enum {
     DEGRADED_L3         = 3    /* Persistent anomaly — most restrictive  */
 } DegradedLevel_t;
 
+/* ---- Per-wheel speed-sensor diagnostic reason codes ----
+ * Surface WHY a wheel channel is (or is not) flagged, so the operator can
+ * tell a genuine sensor fault apart from expected behaviour when a wheel is
+ * turned by hand.  Only MISMATCH / IMPOSSIBLE_RATE / STUCK_* / NO_PULSE are
+ * escalating (they increment the plausibility fault_count); MANUAL_MOVEMENT
+ * and DISABLED_STATE are diagnostic-only and never raise WHEEL_SENSOR.      */
+typedef enum {
+    WHEEL_DIAG_OK              = 0,  /* Nominal — pulses coherent / vehicle stopped */
+    WHEEL_DIAG_NO_PULSE        = 1,  /* Under power + others moving, this one silent */
+    WHEEL_DIAG_STUCK_HIGH      = 2,  /* Silent under power, pin parked HIGH (on bolt) */
+    WHEEL_DIAG_STUCK_LOW       = 3,  /* Silent under power, pin parked LOW (in gap)   */
+    WHEEL_DIAG_MISMATCH        = 4,  /* Under power, wheel deviates from the others   */
+    WHEEL_DIAG_IMPOSSIBLE_RATE = 5,  /* NaN/Inf/out-of-range speed value              */
+    WHEEL_DIAG_MANUAL_MOVEMENT = 6,  /* Incoherent pulses but NOT under traction      */
+    WHEEL_DIAG_DISABLED_STATE  = 7   /* Channel disabled in service mode              */
+} WheelDiag_t;
+
+/* Time a wheel mismatch must PERSIST while under traction before it is
+ * latched as a WHEEL_SENSOR fault.  Prevents a single hand-spin or a
+ * momentary difference while turning a wheel from forcing DEGRADED.        */
+#define WHEEL_FAULT_DEBOUNCE_MS      1000U
+
+/* Minimum |traction demand| (%) that counts as "vehicle under power".
+ * Below this, ABS/TCS interventions and wheel-mismatch faults are
+ * suppressed because any wheel motion is manual, not commanded.           */
+#define WHEEL_INTERVENTION_MIN_DEMAND_PCT  3.0f
+
 /* Reason for entering a degraded level (diagnostic / telemetry) */
 typedef enum {
     DEGRADED_REASON_NONE            = 0,
@@ -289,6 +316,10 @@ bool          Safety_IsMotionAllowed(void);
 bool          Safety_IsDegraded(void);
 bool          Safety_IsLimpHome(void);
 uint8_t       Safety_GetFaultFlags(void);
+
+/* Per-wheel speed-sensor diagnostic reason (idx 0-3 = FL,FR,RL,RR).
+ * Returns WHEEL_DIAG_OK for out-of-range idx.  Report-only.            */
+WheelDiag_t   Safety_GetWheelDiag(uint8_t idx);
 
 /* Degraded-mode throttle limit (returns multiplier 0.0–1.0) */
 float         Safety_GetPowerLimitFactor(void);
