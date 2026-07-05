@@ -253,8 +253,9 @@ private:
     uint8_t       inaLiveExpectedMask_       = 0x3F;
     uint8_t       inaLiveFailCount_          = 0;
     uint8_t       inaLiveRecoveryCount_      = 0;
+    uint8_t       inaLiveI2cReadMs_          = 0;   // last Current_ReadAll() duration ms
     bool          inaLiveValid_              = false;
-    bool          inaLiveStale_              = false;
+    bool          inaLiveStale_             = false;
     unsigned long inaLiveAgeMs_              = 0;
     unsigned long inaLiveLastAgeSec_         = 0;
     bool          inaLiveDataChanged_        = false;
@@ -273,8 +274,22 @@ private:
     uint32_t      drop0x30BDlc_   = 0;
     uint8_t       last0x30BDlc_   = 0;
     uint32_t      rx0x30CCount_   = 0;
+    uint32_t      rx0x001Count_   = 0;     // 0x001 heartbeat frames received
+    uint32_t      rx0x103Count_   = 0;     // 0x103 CMD_ACK frames received
     unsigned long canDiagLastTs_  = 0;     // last 0x30A timestamp consumed
     unsigned long hbLastRxMs_     = 0;     // millis() of last received heartbeat
+
+    // Boot/reset diagnostic cache (0x312 — 1 Hz from STM32).
+    // Uptime restarts on each MCU reset; reset_cause byte identifies the reason.
+    vehicle::BootResetData bootReset_{};
+    unsigned long bootResetLastTs_  = 0;   // last 0x312 timestamp consumed
+    uint32_t      stm32RestartCount_ = 0;  // local counter: detected uptime resets
+    uint32_t      bootResetPrevUptime_ = 0; // previous uptime_ms for restart detection
+
+    // 0x207 battery diagnostic counters cache (INA226_LIVE_DIAG submenu).
+    vehicle::Batt207DiagData batt207Diag_{};
+    unsigned long bat207LastTs_   = 0;     // millis() of last 0x207 frame (from battery())
+    bool          bat207Stale_    = false; // 0x207 older than BAT_DIAG_STALE_MS
     unsigned long canDiagRefreshMs_ = 0;   // periodic refresh for live TWAI/hb row
     bool          canDiagChanged_ = false;
     // Send SERVICE_CMD 0x110 byte0=0xF6 to trigger the STM32 I2C service scan.
@@ -292,6 +307,7 @@ private:
     // direct millis() in the UI path); the touch handler only latches intent.
     enum class ScanFb : uint8_t {
         NONE = 0,
+        WAIT_DATA,        // WAIT DATA (data_ null — command suppressed, no 0xF6 sent)
         SENT,             // CAN REQUEST SENT (writeFrame ok)
         FAILED,           // SCAN CMD FAILED (writeFrame failed)
         STARTED,          // STM32 SCAN STARTED (0xF6 echo ACK received)

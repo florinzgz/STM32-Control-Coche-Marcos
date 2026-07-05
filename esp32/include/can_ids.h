@@ -92,7 +92,7 @@ inline constexpr uint32_t ERROR_LOG_HEADER       = 0x305;   // STM32→ESP32, DL
 inline constexpr uint32_t DIAG_DEBOUNCE          = 0x306;   // STM32→ESP32, DLC 8, 1000 ms — DWT-debounce filtered counts (4× wheel u16 LE)
 inline constexpr uint32_t DIAG_DEBOUNCE_STEER    = 0x307;   // STM32→ESP32, DLC 4, 1000 ms — DWT-debounce filtered count (steer u32 LE)
 inline constexpr uint32_t DIAG_PEDAL_CAL         = 0x308;   // STM32→ESP32, DLC 8, on-demand (10 Hz × 1 s after QUERY) — pedal calibration telemetry
-inline constexpr uint32_t DIAG_I2C               = 0x309;   // STM32→ESP32, DLC 5, 1000 ms — I2C topology diag: mux present + per-channel INA226 health
+inline constexpr uint32_t DIAG_I2C               = 0x309;   // STM32→ESP32, DLC 8, 1000 ms — I2C topology diag: mux + per-channel INA226 health (byte5=expected mask, byte6=i2c_last_read_ms, byte7=reserved)
 inline constexpr uint32_t DIAG_CAN_META          = 0x30A;   // STM32→ESP32, DLC 8, 1000 ms — CAN/0x309 delivery meta-diag (call/tick/tx-ok/err/fifo-drops)
 inline constexpr uint32_t DIAG_I2C_SCAN          = 0x30B;   // STM32→ESP32, DLC 8, on-demand — I2C service-mode scan (mux/INA probe, SDA/SCL levels, recovery)
 inline constexpr uint32_t DIAG_FDCAN             = 0x30C;   // STM32→ESP32, DLC 6, on-demand — FDCAN error-counter dump (TEC/REC/LEC/state)
@@ -410,6 +410,26 @@ inline constexpr uint16_t BATT_LIMIT_DEFAULT_CV    = 2000;
 inline constexpr uint16_t BATT_CUTOFF_DEFAULT_CV   = 1800;
 inline constexpr uint16_t BATT_RECOVERY_DEFAULT_CV = 1850;
 inline constexpr uint16_t BATT_FILTER_DEFAULT_MS   = 0;
+
+// -------------------------------------------------------------------------
+// Boot/Reset Diagnostic (0x312) — STM32→ESP32, 1 Hz, DLC 8
+//   Byte 0-3: HAL_GetTick() uptime in ms (uint32 LE)
+//   Byte 4:   RCC reset-cause bitmask (mirrors RESET_CAUSE_* in STM32 main.h)
+//               bit0 = POWERON   bit1 = SOFTWARE  bit2 = IWDG
+//               bit3 = WWDG      bit4 = BROWNOUT  bit5 = PIN
+//   Byte 5:   tx_queue_depth      — CAN software TX ring occupancy now (0..31)
+//   Byte 6:   tx_queue_depth_max  — CAN software TX ring high-water mark (0..31)
+//   Byte 7:   reserved (0)
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_BOOT_RESET = 0x312;  // STM32→ESP32, DLC 8, 1000 ms — boot/reset diagnostic
+
+// Reset-cause bit masks (byte 4 of DIAG_BOOT_RESET) — mirror RESET_CAUSE_* in main.h
+inline constexpr uint8_t RESET_CAUSE_POWERON   = (1U << 0);
+inline constexpr uint8_t RESET_CAUSE_SOFTWARE  = (1U << 1);
+inline constexpr uint8_t RESET_CAUSE_IWDG      = (1U << 2);
+inline constexpr uint8_t RESET_CAUSE_WWDG      = (1U << 3);
+inline constexpr uint8_t RESET_CAUSE_BROWNOUT  = (1U << 4);
+inline constexpr uint8_t RESET_CAUSE_PIN       = (1U << 5);
 
 } // namespace can
 

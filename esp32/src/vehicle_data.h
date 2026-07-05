@@ -279,6 +279,7 @@ struct I2cDiagData {
     uint8_t  failCount     = 0;       // failed I2C transactions in last STM32 cycle
     uint8_t  recoveryCount = 0;       // sticky bus-recovery attempt counter
     bool     everOk        = false;   // latched: at least one INA seen healthy
+    uint8_t  i2cReadMs     = 0;       // duration of last Current_ReadAll() in ms (0x309 b6)
     bool     valid         = false;   // a 0x309 frame has been received
     unsigned long timestampMs = 0;
 };
@@ -295,7 +296,34 @@ struct CanMetaData {
     uint8_t  diag309TxErr     = 0;   // [C] 0x309 TransmitFrame() failed (saturated)
     uint8_t  txFifoFullDrops  = 0;   // [D] frames dropped, TX FIFO full (saturated)
     bool     fdcanInitOk      = false;
+    uint8_t  hbTxErr          = 0;   // [F] heartbeat TX failures (bits 7:1 of byte 7)
     bool     valid            = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// Boot/reset diagnostic (0x312) — report-only, 1 Hz
+// Uptime and RCC reset-cause bitmask captured at the last MCU reset.
+// Watching the uptime restart + cause byte identifies IWDG/brownout gaps.
+// -------------------------------------------------------------------------
+struct BootResetData {
+    uint32_t uptimeMs   = 0;    // HAL_GetTick() uptime since last reset
+    uint8_t  resetCause = 0;    // bitmask: bit0=POWERON bit1=SW bit2=IWDG bit3=WWDG bit4=BOR bit5=PIN
+    uint8_t  txQueueDepth    = 0;  // byte 5: software TX ring occupancy now (0..31)
+    uint8_t  txQueueDepthMax = 0;  // byte 6: software TX ring high-water mark (0..31)
+    bool     valid      = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
+// Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
+// -------------------------------------------------------------------------
+struct Batt207DiagData {
+    uint32_t rxCount     = 0;   // total 0x207 frames received (wrapping)
+    uint8_t  lastDlc     = 0;   // DLC of the most recent 0x207 frame
+    uint32_t droppedDlc  = 0;   // 0x207 frames with DLC < 4 (discarded)
+    bool     valid       = false;
     unsigned long timestampMs = 0;
 };
 
@@ -484,6 +512,8 @@ public:
     void setGearLimits(const GearLimitsData& d)     { gearLimits_ = d; }
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
+    void setBootReset(const BootResetData& d)       { bootReset_ = d; }
+    void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
     void setSteeringZ(const SteeringZData& d)       { steeringZ_ = d; }
@@ -518,6 +548,8 @@ public:
     const GearLimitsData&   gearLimits()   const { return gearLimits_; }
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
     const CanMetaData&      canMeta()      const { return canMeta_; }
+    const BootResetData&    bootReset()    const { return bootReset_; }
+    const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
     const SteeringZData&    steeringZ()    const { return steeringZ_; }
@@ -548,6 +580,8 @@ private:
     GearLimitsData   gearLimits_;
     I2cDiagData      i2cDiag_;
     CanMetaData      canMeta_;
+    BootResetData    bootReset_;
+    Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;
     SteeringZData    steeringZ_;

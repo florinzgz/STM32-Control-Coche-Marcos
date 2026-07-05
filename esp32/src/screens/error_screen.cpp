@@ -76,7 +76,9 @@ void ErrorScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("error");
     needsRedraw_ = true;
     canLost_     = false;
+    canRxActive_ = false;
     prevCanLost_ = false;
+    prevCanRxActive_ = false;
     faultFlags_  = 0;
     prevFaultFlags_ = 0xFF;
     errorCode_   = 0;
@@ -118,6 +120,22 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     canLost_ = (hbTs > 0) &&
                ((frameTimeMs - hbTs) > can::CAN_LOSS_TIMEOUT_MS);
 
+    // Detect whether OTHER CAN frames (not heartbeat) have arrived recently.
+    // If so, the physical bus is alive and only the heartbeat is missing —
+    // the banner should say "STM32 HB LOST" rather than "CAN LINK LOST".
+    if (canLost_) {
+        const unsigned long kRecentMs = can::CAN_LOSS_TIMEOUT_MS;
+        const unsigned long i2cTs   = data.i2cDiag().timestampMs;
+        const unsigned long speedTs = data.speed().timestampMs;
+        const unsigned long safetyTs = data.safety().timestampMs;
+        canRxActive_ =
+            (i2cTs > 0   && (frameTimeMs - i2cTs)   < kRecentMs) ||
+            (speedTs > 0 && (frameTimeMs - speedTs)  < kRecentMs) ||
+            (safetyTs > 0 && (frameTimeMs - safetyTs) < kRecentMs);
+    } else {
+        canRxActive_ = false;
+    }
+
     faultFlags_    = data.heartbeat().faultFlags;
     errorCode_     = data.safety().errorCode;
     diagCode_      = data.diag().errorCode;
@@ -128,7 +146,11 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     // appears/clears correctly: on CAN loss these values are the last frame
     // received before the link dropped and may be mutually inconsistent
     // (e.g. faultFlags=0 "No active faults" yet a cached Safety Code 4).
-    tiles_.updateHash(ETILE_BANNER, ui::tileHashVal(canLost_));
+    {
+        ui::TileHash bh = ui::tileHashVal(canLost_);
+        bh = ui::tileHashFeed(bh, canRxActive_ ? 1u : 0u);
+        tiles_.updateHash(ETILE_BANNER, bh);
+    }
     {
         ui::TileHash fh = ui::tileHashVal(faultFlags_);
         fh = ui::tileHashFeed(fh, canLost_ ? 1u : 0u);
@@ -202,7 +224,8 @@ void ErrorScreen::draw() {
 
     // ---- TILE: Banner (CAN LOST / SYSTEM ERROR) ----
     if (tiles_.isDirty(ETILE_BANNER)) {
-        prevCanLost_ = canLost_;
+        prevCanLost_     = canLost_;
+        prevCanRxActive_ = canRxActive_;
 
         // Clear only the banner area (top 75 px), not the entire screen
         tft.fillRect(0, 0, ui::SCREEN_W, 75, ui::COL_RED);
@@ -213,14 +236,28 @@ void ErrorScreen::draw() {
         tft.setTextDatum(MC_DATUM);
 
         if (canLost_) {
-            tft.drawString("CAN LINK LOST", ui::SCREEN_W / 2, 30);
-            RTRACE_TEXT(ui::SCREEN_W / 2, 30, "CAN LINK LOST",
-                        ui::COL_WHITE, ui::COL_RED, 3, MC_DATUM);
+            // Differentiate "heartbeat lost but bus alive" from "bus down":
+            // if other CAN frames are arriving recently, the physical bus is OK
+            // and only the STM32 heartbeat (0x001) is missing.
+            if (canRxActive_) {
+                tft.drawString("STM32 HB LOST", ui::SCREEN_W / 2, 30);
+                RTRACE_TEXT(ui::SCREEN_W / 2, 30, "STM32 HB LOST",
+                            ui::COL_WHITE, ui::COL_RED, 3, MC_DATUM);
 
-            tft.setTextSize(1);
-            tft.drawString("STM32 heartbeat not received", ui::SCREEN_W / 2, 60);
-            RTRACE_TEXT(ui::SCREEN_W / 2, 60, "STM32 heartbeat not received",
-                        ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+                tft.setTextSize(1);
+                tft.drawString("CAN RX ACTIVE — STM32 heartbeat not received", ui::SCREEN_W / 2, 60);
+                RTRACE_TEXT(ui::SCREEN_W / 2, 60, "CAN RX ACTIVE — STM32 heartbeat not received",
+                            ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+            } else {
+                tft.drawString("CAN LINK LOST", ui::SCREEN_W / 2, 30);
+                RTRACE_TEXT(ui::SCREEN_W / 2, 30, "CAN LINK LOST",
+                            ui::COL_WHITE, ui::COL_RED, 3, MC_DATUM);
+
+                tft.setTextSize(1);
+                tft.drawString("STM32 heartbeat not received", ui::SCREEN_W / 2, 60);
+                RTRACE_TEXT(ui::SCREEN_W / 2, 60, "STM32 heartbeat not received",
+                            ui::COL_WHITE, ui::COL_RED, 1, MC_DATUM);
+            }
         } else {
             tft.drawString("SYSTEM ERROR", ui::SCREEN_W / 2, 30);
             RTRACE_TEXT(ui::SCREEN_W / 2, 30, "SYSTEM ERROR",

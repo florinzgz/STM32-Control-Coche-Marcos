@@ -11,6 +11,7 @@
   */
 
 #include "can_handler.h"
+#include "main.h"
 #include "motor_control.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
@@ -239,6 +240,12 @@ void CAN_TxPump(void) {
             break;
         }
     }
+
+    /* Refresh the current-occupancy gauge after draining (report-only). The
+     * high-water mark is only ever raised in TransmitFrame(); this keeps the
+     * instantaneous depth surfaced on 0x312 honest between bursts.           */
+    can_txmeta.tx_queue_depth =
+        (uint8_t)((can_txq_head - can_txq_tail) & (CAN_TXQ_SIZE - 1U));
 }
 
 /* Internal helper to send a CAN frame.
@@ -271,6 +278,17 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     can_txq[can_txq_head].len = l;
     memcpy(can_txq[can_txq_head].data, payload, l);
     can_txq_head = next;
+
+    /* Observability G: track software TX ring occupancy so a heartbeat-vs-
+     * backlog stall would be visible on 0x312.  Depth is measured after the
+     * push (before the opportunistic drain below), capturing the worst case.
+     * Report-only; never gates control or safety.                          */
+    {
+        uint8_t depth = (uint8_t)((can_txq_head - can_txq_tail) & (CAN_TXQ_SIZE - 1U));
+        can_txmeta.tx_queue_depth = depth;
+        if (depth > can_txmeta.tx_queue_depth_max)
+            can_txmeta.tx_queue_depth_max = depth;
+    }
 
     /* Opportunistically drain so low-rate single frames go out immediately. */
     CAN_TxPump();
@@ -556,7 +574,11 @@ void CAN_SendHeartbeat(void) {
         payload[4] = status_flags;
         payload[5] = Safety_GetRelayStatusByte();
 
-        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 6);
+        if (TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 6) == HAL_OK) {
+            sat_inc_u32(&can_txmeta.hb_tx_count);
+        } else {
+            sat_inc_u32(&can_txmeta.hb_tx_err);
+        }
         last_tx_heartbeat = current_time;
     }
 }
@@ -1155,7 +1177,7 @@ void CAN_SendDebounceDiag(void) {
  * failures are intermittent (bad pull-up / loose terminal) or permanent
  * (not connected).  Diagnostic only — no control / safety path consumes it.
  *
- * CAN ID: 0x309   DLC: 6   Rate: 1000 ms (1 Hz)
+ * CAN ID: 0x309   DLC: 8   Rate: 1000 ms (1 Hz)
  *   Byte 0: mux_present (0 = TCA9548A 0x70 not acking, 1 = present)
  *   Byte 1: ina_ok_mask (bit i = INA226 acked behind mux channel i;
  *           bit0=FL, bit1=FR, bit2=RL, bit3=RR, bit4=BAT, bit5=STEER)
@@ -1166,20 +1188,28 @@ void CAN_SendDebounceDiag(void) {
  *           so its INA226 SHOULD answer this phase; same bit order as byte1).
  *           Lets the HMI show an unpowered branch as "WAIT PWR" instead of a
  *           red FAIL.  Additive — pre-extension consumers (DLC 5) ignore it.
+ *   Byte 6: i2c_last_read_ms (duration of the last Current_ReadAll() in ms,
+ *           saturated at 255 → HMI shows "255+ms").  Additive — DLC-6/DLC-5
+ *           consumers ignore it.
+ *   Byte 7: reserved (0)
  */
 void CAN_SendI2CDiag(void) {
-    uint8_t data[6];
+    uint8_t data[8];
     data[0] = Sensor_GetMuxPresent() ? 1U : 0U;
     data[1] = Sensor_GetInaOkMask();
     data[2] = Sensor_GetI2cFailCount();
     data[3] = Sensor_GetI2cRecoveryAttempts();
     data[4] = Sensor_GetI2cEverOk() ? 0x01U : 0x00U;
     data[5] = Sensor_GetInaExpectedMask();
+    /* Byte 6: duration of the last Current_ReadAll() in ms (saturated at 255).
+     * Lets the operator see I2C blocking time directly on the HMI.          */
+    data[6] = Sensor_GetI2cLastReadMs();
+    data[7] = 0U;   /* reserved */
 
     /* Observability A/C: count every invocation and the TX outcome so the
      * 0x30A meta-frame can prove whether 0x309 reaches the FDCAN TX FIFO. */
     sat_inc_u32(&can_txmeta.diag309_call_count);
-    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 6) == HAL_OK) {
+    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 8) == HAL_OK) {
         sat_inc_u32(&can_txmeta.diag309_tx_ok);
     } else {
         sat_inc_u32(&can_txmeta.diag309_tx_err);
@@ -1200,7 +1230,7 @@ void CAN_SendI2CDiag(void) {
  *   Byte 4:   diag309_tx_ok       (uint8, saturated)      [C]
  *   Byte 5:   diag309_tx_err      (uint8, saturated)      [C]
  *   Byte 6:   tx_fifo_full_drops  (uint8, saturated)      [D]
- *   Byte 7:   flags (bit0 = fdcan_init_ok)
+ *   Byte 7:   bit0 = fdcan_init_ok; bits 7:1 = hb_tx_err (sat. at 127) [E/F]
  */
 void CAN_SendCanMetaDiag(void) {
     extern bool fdcan_init_ok;
@@ -1216,8 +1246,51 @@ void CAN_SendCanMetaDiag(void) {
     data[4] = (can_txmeta.diag309_tx_ok      > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.diag309_tx_ok;
     data[5] = (can_txmeta.diag309_tx_err     > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.diag309_tx_err;
     data[6] = (can_txmeta.tx_fifo_full_drops > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.tx_fifo_full_drops;
-    data[7] = fdcan_init_ok ? 0x01U : 0x00U;
+    /* bit 0: fdcan_init_ok; bits 7:1: hb_tx_err saturated at 127 */
+    {
+        uint8_t hb_err_sat = (can_txmeta.hb_tx_err > 0x7FU) ? 0x7FU
+                           : (uint8_t)can_txmeta.hb_tx_err;
+        data[7] = (fdcan_init_ok ? 0x01U : 0x00U) | (uint8_t)(hb_err_sat << 1);
+    }
     TransmitFrame(CAN_ID_DIAG_CAN_META, data, 8);
+}
+
+/**
+ * @brief  Boot/reset diagnostic (additive, report-only).
+ *
+ * Surfaces the STM32 uptime and the RCC reset-cause bitmask captured at
+ * boot so the HMI can confirm whether recent 8–10 s gaps were caused by
+ * IWDG timeouts, brownout events, or software resets — independently of
+ * the main safety telemetry.  Diagnostic only; no control path consumes it.
+ *
+ * CAN ID: 0x312   DLC: 8   Rate: 1000 ms (1 Hz)
+ *   Byte 0-3: HAL_GetTick() uptime in ms (uint32 LE, wraps at ~49.7 days)
+ *   Byte 4:   reset_cause bitmask — mirrors RESET_CAUSE_* in main.h
+ *               bit0 = POWERON   (only PINRSTF set → normal power-up)
+ *               bit1 = SOFTWARE  (SFTRSTF)
+ *               bit2 = IWDG      (IWDGRSTF)
+ *               bit3 = WWDG      (WWDGRSTF)
+ *               bit4 = BROWNOUT  (BORRSTF or LPWRRSTF)
+ *               bit5 = PIN       (PINRSTF, combined with another flag)
+ *   Byte 5:   tx_queue_depth      — software TX ring occupancy now (0..31)
+ *   Byte 6:   tx_queue_depth_max  — software TX ring high-water mark (0..31)
+ *   Byte 7:   reserved (0)
+ */
+void CAN_SendBootResetDiag(void) {
+    uint32_t uptime = HAL_GetTick();
+    uint8_t data[8] = {0};
+    data[0] = (uint8_t)( uptime        & 0xFFU);
+    data[1] = (uint8_t)((uptime >>  8) & 0xFFU);
+    data[2] = (uint8_t)((uptime >> 16) & 0xFFU);
+    data[3] = (uint8_t)((uptime >> 24) & 0xFFU);
+    data[4] = Boot_GetResetCause();
+    /* bytes 5-6: software TX queue depth (now / high-water) — lets the HMI
+     * prove the heartbeat (enqueued first each 100 ms cycle) is never sitting
+     * behind a TX backlog.  Additive/report-only; byte 7 stays reserved.    */
+    data[5] = can_txmeta.tx_queue_depth;
+    data[6] = can_txmeta.tx_queue_depth_max;
+    /* byte 7 reserved */
+    TransmitFrame(CAN_ID_DIAG_BOOT_RESET, data, 8);
 }
 
 /**

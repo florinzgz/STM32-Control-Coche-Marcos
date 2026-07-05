@@ -69,6 +69,14 @@ extern "C" {
 #define CAN_ID_DIAG_EPS_PARAMS    0x30F  // STM32 → ESP32 (on-demand, after QUERY) EPS parameter + live-state telemetry
 #define CAN_ID_DIAG_DRIVE_TUNING  0x310  // STM32 → ESP32 (on-demand, after QUERY) drive-tuning (ramp/creep) field-stream telemetry
 #define CAN_ID_DIAG_BATTERY_LIMITS 0x311 // STM32 → ESP32 (on-demand, after QUERY) battery-limit (voltage threshold) field-stream telemetry
+#define CAN_ID_DIAG_BOOT_RESET    0x312  // STM32 → ESP32 (1000ms) boot/reset diagnostic: uptime_ms + RCC reset-cause bitmask
+                                         //   Byte 0-3: HAL_GetTick() uptime in ms (uint32 LE)
+                                         //   Byte 4:   reset_cause bitmask (RESET_CAUSE_* from main.h)
+                                         //             bit0=POWERON  bit1=SOFTWARE bit2=IWDG
+                                         //             bit3=WWDG     bit4=BROWNOUT  bit5=PIN
+                                         //   Byte 5:   tx_queue_depth (software TX ring occupancy now, 0..31)
+                                         //   Byte 6:   tx_queue_depth_max (software TX ring high-water, 0..31)
+                                         //   Byte 7:   reserved (0)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -292,13 +300,20 @@ typedef struct {
  *   B) tick_1000ms_count    — iterations of the main-loop 1 Hz block
  *   C) diag309_tx_ok / err  — TransmitFrame() result for 0x309 specifically
  *   D) tx_fifo_full_drops   — frames dropped because the TX FIFO was full
- * All counters saturate; never wrap to 0.  Surfaced on CAN 0x30A.        */
+ *   E) hb_tx_count          — heartbeat (0x001) frames successfully queued (tracked locally)
+ *   F) hb_tx_err            — heartbeat frames that failed to queue (TX busy); surfaced on 0x30A byte7 bits7:1
+ *   G) tx_queue_depth[_max] — software TX ring occupancy now / high-water; surfaced on 0x312 bytes 5-6
+ * All counters saturate; never wrap to 0.  0x30A currently surfaces A–D and F. */
 typedef struct {
     uint32_t diag309_call_count;   /* A: CAN_SendI2CDiag() invocations     */
     uint32_t tick_1000ms_count;    /* B: 1 Hz scheduler-block iterations   */
     uint32_t diag309_tx_ok;        /* C: 0x309 queued to TX FIFO OK        */
     uint32_t diag309_tx_err;       /* C: 0x309 TransmitFrame() != HAL_OK   */
     uint32_t tx_fifo_full_drops;   /* D: any frame dropped (FIFO full)     */
+    uint32_t hb_tx_count;          /* E: heartbeat 0x001 frames queued OK  */
+    uint32_t hb_tx_err;            /* F: heartbeat 0x001 TX failures       */
+    uint8_t  tx_queue_depth;       /* G: software TX ring occupancy (now)  */
+    uint8_t  tx_queue_depth_max;   /* G: software TX ring high-water mark  */
 } CAN_TxMeta_t;
 
 /* CAN_InitDiag_t is defined in can_init_diag.h (included above) to allow
@@ -328,6 +343,7 @@ void CAN_SendErrorLogHeader(void);
 void CAN_SendDebounceDiag(void);    /* 1 Hz DWT-debounce filter EMI counters (0x306 + 0x307) */
 void CAN_SendI2CDiag(void);         /* 1 Hz I2C topology diagnostic (0x309): mux + per-channel INA226 */
 void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (0x30A) */
+void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);

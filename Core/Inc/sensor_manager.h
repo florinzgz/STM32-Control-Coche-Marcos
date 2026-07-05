@@ -119,6 +119,9 @@ uint8_t Sensor_GetInaExpectedMask(void);      /* bit i = ch i expected powered  
 uint8_t Sensor_GetI2cFailCount(void);         /* failed transactions this cycle */
 uint8_t Sensor_GetI2cRecoveryAttempts(void);  /* bus-recovery attempts (sticky) */
 bool    Sensor_GetI2cEverOk(void);            /* latched: any INA seen OK ever  */
+/* Duration of the most recent Current_ReadAll() call (HAL_GetTick delta, ms).
+ * Saturates at 255.  Visible on 0x309 byte 6 for field diagnostics.         */
+uint8_t Sensor_GetI2cLastReadMs(void);
 
 /* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) ----
  * Active probe used by SERVICE_CMD 0xF6 → CAN 0x30B.  Reads SDA/SCL idle

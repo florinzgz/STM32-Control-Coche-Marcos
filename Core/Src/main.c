@@ -418,6 +418,14 @@ int main(void)
     while (1) {
         uint32_t now = HAL_GetTick();
 
+        /* ---- PRIORITY: heartbeat before any blocking task ----
+         * CAN_SendHeartbeat() carries its own 100 ms guard (HAL_GetTick()
+         * fresh call inside), so calling it every iteration is safe and
+         * ensures the frame goes out even when a slow I2C/DS18B20 task has
+         * consumed several ms of the previous iteration.                   */
+        CAN_SendHeartbeat();
+        CAN_TxPump();
+
         /* ---- 10 ms tasks (100 Hz): safety + steering PID ---- */
         if ((now - tick_10ms) >= 10) {
             tick_10ms = now;
@@ -747,6 +755,12 @@ int main(void)
              * never generated" from "generated but never reached the bus".
              * Diagnostic only — does not gate any control or safety path.   */
             CAN_SendCanMetaDiag();
+
+            /* Boot/reset diagnostic (0x312): uptime + RCC reset-cause bitmask.
+             * Lets the HMI confirm whether 8–10 s gaps are IWDG/brownout resets
+             * by watching the uptime counter restart and checking the cause byte.
+             * Diagnostic only — does not gate any control or safety path.     */
+            CAN_SendBootResetDiag();
 
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();

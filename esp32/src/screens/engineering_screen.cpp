@@ -7,6 +7,7 @@
 
 #include "engineering_screen.h"
 #include "ui/ui_common.h"
+#include "ui/ui_config.h"
 #include "ui/render_trace.h"
 #include "can_ids.h"
 #include "can_rx.h"
@@ -892,6 +893,22 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveBtCurrentRaw_ = bat.currentRaw;
         inaLiveBtVoltageRaw_ = bat.voltageRaw;
 
+        /* Track 0x207 staleness for 0.0 V differentiation (points 5+6). */
+        {
+            const bool batHaveFrame = (bat.timestampMs != 0);
+            const unsigned long batAge = batHaveFrame
+                ? (frameTimeMs >= bat.timestampMs ? frameTimeMs - bat.timestampMs : 0UL) : 0UL;
+            const bool newBat207Stale = batHaveFrame && (batAge > ui::BAT_DIAG_STALE_MS);
+            if (bat207Stale_ != newBat207Stale) changed = true;
+            if (bat207LastTs_ != bat.timestampMs) changed = true;
+            bat207Stale_  = newBat207Stale;
+            bat207LastTs_ = bat.timestampMs;
+        }
+        /* Cache 0x207 diag counters. */
+        const auto& b207 = data.batt207Diag();
+        if (batt207Diag_.rxCount != b207.rxCount) changed = true;
+        batt207Diag_ = b207;
+
         const auto& id = data.i2cDiag();
         unsigned long ageMs = 0;
         if (id.valid && frameTimeMs >= id.timestampMs) {
@@ -905,6 +922,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         if (inaLiveExpectedMask_  != id.inaExpectedMask) changed = true;
         if (inaLiveFailCount_     != id.failCount)      changed = true;
         if (inaLiveRecoveryCount_ != id.recoveryCount)  changed = true;
+        if (inaLiveI2cReadMs_     != id.i2cReadMs)      changed = true;
         if (inaLiveValid_         != id.valid)          changed = true;
         if (inaLiveStale_         != stale)             changed = true;
         if (inaLiveLastAgeSec_    != ageSec)            changed = true;
@@ -914,6 +932,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveExpectedMask_  = id.inaExpectedMask;
         inaLiveFailCount_     = id.failCount;
         inaLiveRecoveryCount_ = id.recoveryCount;
+        inaLiveI2cReadMs_     = id.i2cReadMs;
         inaLiveValid_         = id.valid;
         inaLiveStale_         = stale;
         inaLiveAgeMs_         = ageMs;
@@ -944,10 +963,12 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         const uint32_t drop30b  = can_rx::dropped0x30BDlc();
         const uint8_t  dlc30b   = can_rx::last0x30BDlc();
         const uint32_t rx30c    = can_rx::rx0x30CCount();
+        const uint32_t rx001    = can_rx::rx0x001Count();
+        const uint32_t rx103    = can_rx::rx0x103Count();
         if (cm.timestampMs != canDiagLastTs_ ||
             rx309 != rx0x309Count_ || drop309 != drop0x309Dlc_ || dlc309 != last0x309Dlc_ ||
             rx30b != rx0x30BCount_ || drop30b != drop0x30BDlc_ || dlc30b != last0x30BDlc_ ||
-            rx30c != rx0x30CCount_) {
+            rx30c != rx0x30CCount_ || rx001 != rx0x001Count_ || rx103 != rx0x103Count_) {
             canDiagLastTs_  = cm.timestampMs;
             canMeta_        = cm;
             i2cScan_        = data.i2cScan();
@@ -959,7 +980,31 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             drop0x30BDlc_   = drop30b;
             last0x30BDlc_   = dlc30b;
             rx0x30CCount_   = rx30c;
+            rx0x001Count_   = rx001;
+            rx0x103Count_   = rx103;
             canDiagChanged_ = true;
+        }
+        /* Cache boot reset data (0x312) — update restart counter when uptime resets. */
+        {
+            const auto& br = data.bootReset();
+            if (br.valid && br.timestampMs != bootResetLastTs_) {
+                /* Detect uptime restart: uptime dropped by > 5 s versus the
+                 * previous 0x312 sample.  Use subtraction (overflow-safe) and
+                 * ignore the ~49.7-day HAL_GetTick() wrap, where the previous
+                 * uptime is near UINT32_MAX and the new one is a small value. */
+                if (bootResetLastTs_ != 0 && br.uptimeMs < bootResetPrevUptime_) {
+                    const uint32_t drop     = bootResetPrevUptime_ - br.uptimeMs;
+                    const bool     tickWrap = (bootResetPrevUptime_ > 0xFFFF0000UL)
+                                            && (br.uptimeMs < 60000U);
+                    if (!tickWrap && drop > 5000U) {
+                        ++stm32RestartCount_;
+                    }
+                }
+                bootResetPrevUptime_ = br.uptimeMs;
+                bootResetLastTs_     = br.timestampMs;
+                bootReset_           = br;
+                canDiagChanged_      = true;
+            }
         }
         // Always keep heartbeat age fresh so L5 shows current data.
         if (data.heartbeat().timestampMs != 0 &&
@@ -979,16 +1024,12 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             scanFbArm_ = false;
             scanFbMs_  = frameTimeMs;     // stamp for banner auto-clear
         }
+        // Note: scanArmReply_ is NO LONGER used to stamp baselines — that was
+        // a race condition.  sendI2cServiceScan() now stamps baselines immediately
+        // (before the STM32 can respond) using the cached data_ pointer.  The
+        // flag is cleared here as a no-op safety net in case it is ever set.
         if (scanArmReply_) {
-            scanArmReply_      = false;
-            scanAwaitingReply_ = true;
-            scanGotStarted_    = false;
-            scanSentMs_        = frameTimeMs;
-            scanBaseI2cTs_     = data.i2cScan().timestampMs;
-            scanBaseFdcanTs_   = data.fdcanDiag().timestampMs;
-            scanBaseAckTs_     = data.ack().timestampMs;
-            scanBase0x30BRx_   = can_rx::rx0x30BCount();
-            scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
+            scanArmReply_ = false;
         }
         if (scanAwaitingReply_) {
             const auto& sc = data.i2cScan();
@@ -1562,7 +1603,25 @@ void EngineeringScreen::draw() {
         char btABuf[20];
         char btVBuf[20];
         fmtA(btABuf, sizeof(btABuf), inaLiveBtCurrentRaw_);
-        fmtV(btVBuf, sizeof(btVBuf), inaLiveBtVoltageRaw_);
+
+        /* Points 5+6: Differentiate 0.0 V origins instead of blindly showing 0.0V.
+         * Priority: NO PACKET > STALE > INA CH4 MISS > MUX MISS > 0.0V RAW > normal. */
+        const bool batHavePacket = (bat207LastTs_ != 0);
+        const bool batCh4Ok = inaLiveValid_ && (inaLiveOkMask_ & (1U << 4));
+        if (!batHavePacket) {
+            snprintf(btVBuf, sizeof(btVBuf), "NO PACKET");
+        } else if (bat207Stale_) {
+            snprintf(btVBuf, sizeof(btVBuf), "STALE");
+        } else if (inaLiveBtVoltageRaw_ == 0 && !batCh4Ok && inaLiveValid_) {
+            snprintf(btVBuf, sizeof(btVBuf), "INA CH4 MISS");
+        } else if (inaLiveBtVoltageRaw_ == 0 && !inaLiveMuxPresent_ && inaLiveValid_) {
+            snprintf(btVBuf, sizeof(btVBuf), "MUX MISS");
+        } else if (inaLiveBtVoltageRaw_ == 0) {
+            snprintf(btVBuf, sizeof(btVBuf), "0.0V RAW");
+        } else {
+            fmtV(btVBuf, sizeof(btVBuf), inaLiveBtVoltageRaw_);
+        }
+
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
         char btLineBuf[52]; // "CH4 BT: "(8) + btABuf(≤19) + "   "(3) + btVBuf(≤19) + NUL = 50
         snprintf(btLineBuf, sizeof(btLineBuf), "CH4 BT: %s   %s", btABuf, btVBuf);
@@ -1615,6 +1674,19 @@ void EngineeringScreen::draw() {
                  (unsigned)inaLiveBtCurrentRaw_);
         tft.drawString(buf, bx, by + 6 * lh);
 
+        /* Point 4: 0x207 packet diagnostic counters. */
+        {
+            const auto& b207 = batt207Diag_;
+            const uint16_t b207Col = (!batHavePacket || bat207Stale_) ? ui::COL_AMBER : ui::COL_WHITE;
+            tft.setTextColor(b207Col, ui::COL_BG);
+            snprintf(buf, sizeof(buf),
+                     "0x207 rx=%lu dlc=%u drop=%lu",
+                     (unsigned long)b207.rxCount,
+                     (unsigned)b207.lastDlc,
+                     (unsigned long)b207.droppedDlc);
+            tft.drawString(buf, bx, by + 7 * lh);
+        }
+
         const int16_t gx = 250;
         const int16_t gy = by;
         tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
@@ -1634,6 +1706,18 @@ void EngineeringScreen::draw() {
         snprintf(buf, sizeof(buf), "fail:%u rec:%u",
                  (unsigned)inaLiveFailCount_, (unsigned)inaLiveRecoveryCount_);
         tft.drawString(buf, gx, gy + 4 * lh);
+
+        /* I2C read duration — amber if blocking heartbeat (>50ms); "255+" when saturated. */
+        {
+            const uint16_t rdCol = (inaLiveI2cReadMs_ > 50U) ? ui::COL_AMBER : ui::COL_WHITE;
+            tft.setTextColor(rdCol, ui::COL_BG);
+            if (inaLiveI2cReadMs_ == 255U) {
+                snprintf(buf, sizeof(buf), "i2cRd:255+ms");
+            } else {
+                snprintf(buf, sizeof(buf), "i2cRd:%ums", (unsigned)inaLiveI2cReadMs_);
+            }
+            tft.drawString(buf, gx + 100, gy + 4 * lh);
+        }
 
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         if (!inaLiveValid_) {
@@ -1712,7 +1796,7 @@ void EngineeringScreen::draw() {
     if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && canDiagChanged_) {
         canDiagChanged_ = false;
 
-        char buf[80];
+        char buf[96];   // several diag lines (incl. L6 with txQ) approach 80 chars
         const int16_t x   = 10;
         const int16_t y0  = 194;
         const int16_t lh  = 12;   // line height (size-1 font)
@@ -1728,18 +1812,21 @@ void EngineeringScreen::draw() {
                  (unsigned long)drop0x309Dlc_);
         tft.drawString(buf, x, y0);
 
-        // L2: STM32 meta counters (audit A–D) from 0x30A.
+        // L2: STM32 meta counters (audit A–D + HB TX err + init flag) from 0x30A.
         tft.fillRect(x, y0 + lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
         if (canMeta_.valid) {
-            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            const uint16_t metaCol = (canMeta_.hbTxErr > 0 || canMeta_.txFifoFullDrops > 0 || !canMeta_.fdcanInitOk)
+                                   ? ui::COL_AMBER : ui::COL_WHITE;
+            tft.setTextColor(metaCol, ui::COL_BG);
             snprintf(buf, sizeof(buf),
-                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u init=%u",
+                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u i=%u hbE=%u",
                      (unsigned)canMeta_.diag309CallCount,
                      (unsigned)canMeta_.tick1000msCount,
                      (unsigned)canMeta_.diag309TxOk,
                      (unsigned)canMeta_.diag309TxErr,
                      (unsigned)canMeta_.txFifoFullDrops,
-                     (unsigned)(canMeta_.fdcanInitOk ? 1 : 0));
+                     (unsigned)(canMeta_.fdcanInitOk ? 1u : 0u),
+                     (unsigned)canMeta_.hbTxErr);
         } else {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
             snprintf(buf, sizeof(buf), "0x30A meta: no data");
@@ -1816,6 +1903,43 @@ void EngineeringScreen::draw() {
             }
             tft.drawString(buf, x, y0 + 4 * lh);
         }
+
+        // L6: boot/reset diagnostic from 0x312 (1 Hz).
+        // Shows: reset reason, uptime, detected restart count, plus hb/ack RX totals.
+        // This helps confirm if 8–10 s gaps are caused by IWDG/brownout resets.
+        tft.fillRect(x, 250, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        {
+            if (bootReset_.valid) {
+                const uint8_t rc = bootReset_.resetCause;
+                const char* rst =
+                    (rc & can::RESET_CAUSE_IWDG)     ? "IWDG" :
+                    (rc & can::RESET_CAUSE_BROWNOUT)  ? "BOR"  :
+                    (rc & can::RESET_CAUSE_SOFTWARE)  ? "SW"   :
+                    (rc & can::RESET_CAUSE_WWDG)      ? "WWDG" :
+                    (rc & can::RESET_CAUSE_PIN)       ? "PIN"  :
+                    (rc & can::RESET_CAUSE_POWERON)   ? "POR"  : "UNK";
+                const uint16_t rstCol = (rc & (can::RESET_CAUSE_IWDG | can::RESET_CAUSE_BROWNOUT))
+                    ? ui::COL_RED : ui::COL_GREEN;
+                tft.setTextColor(rstCol, ui::COL_BG);
+                snprintf(buf, sizeof(buf),
+                         "rst=%s up=%lus stmRst=%lu txQ=%u/%u | hb=%lu ack=%lu",
+                         rst,
+                         (unsigned long)(bootReset_.uptimeMs / 1000U),
+                         (unsigned long)stm32RestartCount_,
+                         (unsigned)bootReset_.txQueueDepth,
+                         (unsigned)bootReset_.txQueueDepthMax,
+                         (unsigned long)rx0x001Count_,
+                         (unsigned long)rx0x103Count_);
+            } else {
+                const uint16_t hbCol = (rx0x001Count_ > 0) ? ui::COL_GREEN : ui::COL_RED;
+                tft.setTextColor(hbCol, ui::COL_BG);
+                snprintf(buf, sizeof(buf),
+                         "0x312 no data | hb=%lu ack=%lu",
+                         (unsigned long)rx0x001Count_,
+                         (unsigned long)rx0x103Count_);
+            }
+            tft.drawString(buf, x, 250);
+        }
     }
 
     // Partial redraw for the RUN I2C SCAN status banner (immediate feedback).
@@ -1827,6 +1951,7 @@ void EngineeringScreen::draw() {
         const char* msg = nullptr;
         uint16_t    col = ui::COL_GRAY;
         switch (scanFb_) {
+            case ScanFb::WAIT_DATA:   msg = "WAIT DATA";           col = ui::COL_AMBER; break;
             case ScanFb::SENT:        msg = "CAN REQUEST SENT";    col = ui::COL_CYAN;  break;
             case ScanFb::FAILED:      msg = "SCAN CMD FAILED";     col = ui::COL_RED;   break;
             case ScanFb::STARTED:     msg = "STM32 SCAN STARTED";  col = ui::COL_CYAN;  break;
@@ -3083,6 +3208,44 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 // control or safety state.
 // -------------------------------------------------------------------------
 void EngineeringScreen::sendI2cServiceScan() {
+    // Defensive guard: never emit SERVICE_CMD 0xF6 without a valid data_ cache.
+    //
+    // In the normal flow update() runs before handleTouch() within the same
+    // frame, so data_ is always set by the time this button can be tapped.
+    // But if a future refactor ever reaches this path with data_ == nullptr we
+    // could not stamp the reply baselines below — which is exactly what
+    // re-opens the "TIMEOUT: NO CAN ACK" race (responses arriving before the
+    // baselines are set).  Rather than send blind, suppress the command, show
+    // WAIT DATA and bail out so the operator simply taps again once telemetry
+    // is flowing.
+    if (data_ == nullptr) {
+        scanFb_        = ScanFb::WAIT_DATA;
+        scanFbChanged_ = true;     // repaint the banner next draw()
+        scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
+        scanArmReply_  = false;
+        Serial.println("[ENG] RUN I2C SCAN tap -> data_ null, WAIT DATA (0xF6 suppressed)");
+        return;
+    }
+
+    // data_ is valid: stamp the reply baselines NOW — BEFORE the frame goes out
+    // — so no STM32 response can arrive before the baselines are set.
+    //
+    // The previous design used scanArmReply_ to defer baseline stamping into
+    // the next update() call (~30 ms later).  The STM32 typically responds
+    // within ~10-20 ms (echo ACK + 0x30B + 0x30C + final ACK), which meant ALL
+    // responses could arrive before baselines were set.  The resulting
+    // `sc.timestampMs == scanBaseI2cTs_` comparison then returned false even
+    // though 0x30B had been received, causing the timeout path to fire with
+    // "TIMEOUT: NO CAN ACK".  Stamping here (using lastFrameTimeMs_ as the send
+    // timestamp) closes that window regardless of send outcome.
+    scanGotStarted_    = false;
+    scanSentMs_        = lastFrameTimeMs_;
+    scanBaseI2cTs_     = data_->i2cScan().timestampMs;
+    scanBaseFdcanTs_   = data_->fdcanDiag().timestampMs;
+    scanBaseAckTs_     = data_->ack().timestampMs;
+    scanBase0x30BRx_   = can_rx::rx0x30BCount();
+    scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
+
     CanFrame frame = {};
     frame.identifier       = can::SERVICE_CMD;
     frame.extd             = 0;
@@ -3093,11 +3256,14 @@ void EngineeringScreen::sendI2cServiceScan() {
     // Immediate visual confirmation: the previous implementation transmitted
     // the frame silently, so a missing/blank STM32 reply made the button look
     // dead.  Latch the result here and defer all timing to update() (frame-time
-    // contract: no millis() in the UI path).
+    // contract: no millis() in the UI path).  Only arm the reply watchdog when
+    // the frame actually went out — a failed send has no reply to wait for.
+    scanAwaitingReply_ = ok;
     scanFb_        = ok ? ScanFb::SENT : ScanFb::FAILED;
     scanFbChanged_ = true;     // repaint the banner next draw()
     scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
-    scanArmReply_  = ok;       // update() arms the 2 s reply watchdog
+    scanArmReply_  = false;    // baselines already stamped above
+
     Serial.printf("[ENG] RUN I2C SCAN tap -> 0xF6 tx %s\n", ok ? "OK" : "FAILED");
 }
 
