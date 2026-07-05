@@ -5109,7 +5109,7 @@ void EngineeringScreen::drawLedMode() {
         uint32_t remaining = (elapsed < LED_TEST_DURATION_MS)
                              ? (LED_TEST_DURATION_MS - elapsed) / 1000 + 1
                              : 0;
-        char testBuf[24];
+        char testBuf[32];
         snprintf(testBuf, sizeof(testBuf), "TEST: %lus remaining",
                  (unsigned long)remaining);
         tft.setTextSize(1);
