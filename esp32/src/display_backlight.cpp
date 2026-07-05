@@ -15,7 +15,7 @@ bool initialized_ = false;
 
 uint8_t clampBrightness(uint8_t v) {
     if (v < BRIGHTNESS_MIN) return BRIGHTNESS_MIN;
-    if (v > BRIGHTNESS_MAX) return BRIGHTNESS_MAX;
+    if (v >= BRIGHTNESS_MAX) return BRIGHTNESS_MAX;
     return v;
 }
 

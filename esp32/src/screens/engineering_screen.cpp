@@ -898,7 +898,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             const bool batHaveFrame = (bat.timestampMs != 0);
             const unsigned long batAge = batHaveFrame
                 ? (frameTimeMs >= bat.timestampMs ? frameTimeMs - bat.timestampMs : 0UL) : 0UL;
-            const bool newBat207Stale = batHaveFrame && (batAge > ui::BAT_DIAG_STALE_MS);
+            const bool newBat207Stale = batHaveFrame && (batAge > ui::cfg::BAT_DIAG_STALE_MS);
             if (bat207Stale_ != newBat207Stale) changed = true;
             if (bat207LastTs_ != bat.timestampMs) changed = true;
             bat207Stale_  = newBat207Stale;
