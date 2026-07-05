@@ -284,6 +284,11 @@ static void decodeI2cDiag(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code >= 6) {
         id.inaExpectedMask = f.data[5];
     }
+    // byte6 (DLC >= 7): duration of last Current_ReadAll() in ms (saturated 255).
+    // Zero when absent (legacy firmware with DLC <= 6).
+    if (f.data_length_code >= 7) {
+        id.i2cReadMs = f.data[6];
+    }
     id.valid         = true;
     id.timestampMs   = millis();
     data.setI2cDiag(id);
@@ -300,6 +305,8 @@ static void decodeCanMeta(const CanFrame& f, vehicle::VehicleData& data) {
     m.diag309TxErr     = f.data[5];
     m.txFifoFullDrops  = f.data[6];
     m.fdcanInitOk      = (f.data[7] & 0x01U) != 0;
+    // bits 7:1 of byte 7: hb_tx_err (heartbeat TX failures, saturated at 127)
+    m.hbTxErr          = (uint8_t)((f.data[7] >> 1) & 0x7FU);
     m.valid            = true;
     m.timestampMs      = millis();
     data.setCanMeta(m);

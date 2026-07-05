@@ -253,8 +253,9 @@ private:
     uint8_t       inaLiveExpectedMask_       = 0x3F;
     uint8_t       inaLiveFailCount_          = 0;
     uint8_t       inaLiveRecoveryCount_      = 0;
+    uint8_t       inaLiveI2cReadMs_          = 0;   // last Current_ReadAll() duration ms
     bool          inaLiveValid_              = false;
-    bool          inaLiveStale_              = false;
+    bool          inaLiveStale_             = false;
     unsigned long inaLiveAgeMs_              = 0;
     unsigned long inaLiveLastAgeSec_         = 0;
     bool          inaLiveDataChanged_        = false;

@@ -905,6 +905,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         if (inaLiveExpectedMask_  != id.inaExpectedMask) changed = true;
         if (inaLiveFailCount_     != id.failCount)      changed = true;
         if (inaLiveRecoveryCount_ != id.recoveryCount)  changed = true;
+        if (inaLiveI2cReadMs_     != id.i2cReadMs)      changed = true;
         if (inaLiveValid_         != id.valid)          changed = true;
         if (inaLiveStale_         != stale)             changed = true;
         if (inaLiveLastAgeSec_    != ageSec)            changed = true;
@@ -914,6 +915,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveExpectedMask_  = id.inaExpectedMask;
         inaLiveFailCount_     = id.failCount;
         inaLiveRecoveryCount_ = id.recoveryCount;
+        inaLiveI2cReadMs_     = id.i2cReadMs;
         inaLiveValid_         = id.valid;
         inaLiveStale_         = stale;
         inaLiveAgeMs_         = ageMs;
@@ -1635,6 +1637,14 @@ void EngineeringScreen::draw() {
                  (unsigned)inaLiveFailCount_, (unsigned)inaLiveRecoveryCount_);
         tft.drawString(buf, gx, gy + 4 * lh);
 
+        /* I2C read duration — amber if blocking heartbeat (>50ms). */
+        {
+            const uint16_t rdCol = (inaLiveI2cReadMs_ > 50U) ? ui::COL_AMBER : ui::COL_WHITE;
+            tft.setTextColor(rdCol, ui::COL_BG);
+            snprintf(buf, sizeof(buf), "i2cRd:%ums", (unsigned)inaLiveI2cReadMs_);
+            tft.drawString(buf, gx + 100, gy + 4 * lh);
+        }
+
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
         if (!inaLiveValid_) {
             tft.drawString("0x309: NO DATA", gx, gy + 5 * lh);
@@ -1728,18 +1738,20 @@ void EngineeringScreen::draw() {
                  (unsigned long)drop0x309Dlc_);
         tft.drawString(buf, x, y0);
 
-        // L2: STM32 meta counters (audit A–D) from 0x30A.
+        // L2: STM32 meta counters (audit A–D + HB TX err) from 0x30A.
         tft.fillRect(x, y0 + lh, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
         if (canMeta_.valid) {
-            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            const uint16_t metaCol = (canMeta_.hbTxErr > 0 || canMeta_.txFifoFullDrops > 0)
+                                   ? ui::COL_AMBER : ui::COL_WHITE;
+            tft.setTextColor(metaCol, ui::COL_BG);
             snprintf(buf, sizeof(buf),
-                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u init=%u",
+                     "calls=%u tick=%u txok=%u txerr=%u fifo=%u hbErr=%u",
                      (unsigned)canMeta_.diag309CallCount,
                      (unsigned)canMeta_.tick1000msCount,
                      (unsigned)canMeta_.diag309TxOk,
                      (unsigned)canMeta_.diag309TxErr,
                      (unsigned)canMeta_.txFifoFullDrops,
-                     (unsigned)(canMeta_.fdcanInitOk ? 1 : 0));
+                     (unsigned)canMeta_.hbTxErr);
         } else {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
             snprintf(buf, sizeof(buf), "0x30A meta: no data");

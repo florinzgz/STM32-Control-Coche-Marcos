@@ -676,6 +676,9 @@ _Static_assert(INA226_I2C_TIMEOUT_MS <= 50U,
 
 static uint8_t i2c_fail_count       = 0;
 static uint8_t i2c_recovery_attempts = 0;
+/* Duration of the most recent Current_ReadAll() call in ms (saturated at 255).
+ * Measured with HAL_GetTick() delta; updated at the end of every cycle.     */
+static uint8_t i2c_last_read_ms = 0;
 
 /* ---- I2C topology / sample-validity diagnostics ---------------------
  * Populated during Sensor_Init() and refreshed every Current_ReadAll().
@@ -897,6 +900,9 @@ static void INA226_ConfigureAll(void)
 
 void Current_ReadAll(void)
 {
+    /* Measure wall-clock duration for field diagnostics (0x309 byte 6). */
+    uint32_t t_start = HAL_GetTick();
+
     /* Reset per-cycle failure counter */
     i2c_fail_count = 0;
 
@@ -1025,6 +1031,12 @@ void Current_ReadAll(void)
         /* Successful cycle — reset recovery attempt counter */
         i2c_recovery_attempts = 0;
     }
+
+    /* Record cycle duration (saturated at 255 ms) for field diagnostics. */
+    {
+        uint32_t delta = HAL_GetTick() - t_start;
+        i2c_last_read_ms = (delta > 255U) ? 255U : (uint8_t)delta;
+    }
 }
 
 float Current_GetAmps(uint8_t index) {
@@ -1072,6 +1084,10 @@ uint8_t Sensor_GetI2cRecoveryAttempts(void) {
 
 bool Sensor_GetI2cEverOk(void) {
     return i2c_ever_ok;
+}
+
+uint8_t Sensor_GetI2cLastReadMs(void) {
+    return i2c_last_read_ms;
 }
 
 /* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) --------------

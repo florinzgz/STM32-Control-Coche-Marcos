@@ -279,6 +279,7 @@ struct I2cDiagData {
     uint8_t  failCount     = 0;       // failed I2C transactions in last STM32 cycle
     uint8_t  recoveryCount = 0;       // sticky bus-recovery attempt counter
     bool     everOk        = false;   // latched: at least one INA seen healthy
+    uint8_t  i2cReadMs     = 0;       // duration of last Current_ReadAll() in ms (0x309 b6)
     bool     valid         = false;   // a 0x309 frame has been received
     unsigned long timestampMs = 0;
 };
@@ -295,6 +296,7 @@ struct CanMetaData {
     uint8_t  diag309TxErr     = 0;   // [C] 0x309 TransmitFrame() failed (saturated)
     uint8_t  txFifoFullDrops  = 0;   // [D] frames dropped, TX FIFO full (saturated)
     bool     fdcanInitOk      = false;
+    uint8_t  hbTxErr          = 0;   // [F] heartbeat TX failures (bits 7:1 of byte 7)
     bool     valid            = false;
     unsigned long timestampMs = 0;
 };

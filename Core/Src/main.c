@@ -418,6 +418,14 @@ int main(void)
     while (1) {
         uint32_t now = HAL_GetTick();
 
+        /* ---- PRIORITY: heartbeat before any blocking task ----
+         * CAN_SendHeartbeat() carries its own 100 ms guard (HAL_GetTick()
+         * fresh call inside), so calling it every iteration is safe and
+         * ensures the frame goes out even when a slow I2C/DS18B20 task has
+         * consumed several ms of the previous iteration.                   */
+        CAN_SendHeartbeat();
+        CAN_TxPump();
+
         /* ---- 10 ms tasks (100 Hz): safety + steering PID ---- */
         if ((now - tick_10ms) >= 10) {
             tick_10ms = now;

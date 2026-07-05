@@ -556,7 +556,11 @@ void CAN_SendHeartbeat(void) {
         payload[4] = status_flags;
         payload[5] = Safety_GetRelayStatusByte();
 
-        TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 6);
+        if (TransmitFrame(CAN_ID_HEARTBEAT_STM32, payload, 6) == HAL_OK) {
+            sat_inc_u32(&can_txmeta.hb_tx_count);
+        } else {
+            sat_inc_u32(&can_txmeta.hb_tx_err);
+        }
         last_tx_heartbeat = current_time;
     }
 }
@@ -1168,18 +1172,22 @@ void CAN_SendDebounceDiag(void) {
  *           red FAIL.  Additive — pre-extension consumers (DLC 5) ignore it.
  */
 void CAN_SendI2CDiag(void) {
-    uint8_t data[6];
+    uint8_t data[8];
     data[0] = Sensor_GetMuxPresent() ? 1U : 0U;
     data[1] = Sensor_GetInaOkMask();
     data[2] = Sensor_GetI2cFailCount();
     data[3] = Sensor_GetI2cRecoveryAttempts();
     data[4] = Sensor_GetI2cEverOk() ? 0x01U : 0x00U;
     data[5] = Sensor_GetInaExpectedMask();
+    /* Byte 6: duration of the last Current_ReadAll() in ms (saturated at 255).
+     * Lets the operator see I2C blocking time directly on the HMI.          */
+    data[6] = Sensor_GetI2cLastReadMs();
+    data[7] = 0U;   /* reserved */
 
     /* Observability A/C: count every invocation and the TX outcome so the
      * 0x30A meta-frame can prove whether 0x309 reaches the FDCAN TX FIFO. */
     sat_inc_u32(&can_txmeta.diag309_call_count);
-    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 6) == HAL_OK) {
+    if (TransmitFrame(CAN_ID_DIAG_I2C, data, 8) == HAL_OK) {
         sat_inc_u32(&can_txmeta.diag309_tx_ok);
     } else {
         sat_inc_u32(&can_txmeta.diag309_tx_err);
@@ -1200,7 +1208,7 @@ void CAN_SendI2CDiag(void) {
  *   Byte 4:   diag309_tx_ok       (uint8, saturated)      [C]
  *   Byte 5:   diag309_tx_err      (uint8, saturated)      [C]
  *   Byte 6:   tx_fifo_full_drops  (uint8, saturated)      [D]
- *   Byte 7:   flags (bit0 = fdcan_init_ok)
+ *   Byte 7:   bit0 = fdcan_init_ok; bits 7:1 = hb_tx_err (sat. at 127) [E/F]
  */
 void CAN_SendCanMetaDiag(void) {
     extern bool fdcan_init_ok;
@@ -1216,7 +1224,12 @@ void CAN_SendCanMetaDiag(void) {
     data[4] = (can_txmeta.diag309_tx_ok      > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.diag309_tx_ok;
     data[5] = (can_txmeta.diag309_tx_err     > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.diag309_tx_err;
     data[6] = (can_txmeta.tx_fifo_full_drops > 0xFFU) ? 0xFFU : (uint8_t)can_txmeta.tx_fifo_full_drops;
-    data[7] = fdcan_init_ok ? 0x01U : 0x00U;
+    /* bit 0: fdcan_init_ok; bits 7:1: hb_tx_err saturated at 127 */
+    {
+        uint8_t hb_err_sat = (can_txmeta.hb_tx_err > 0x7FU) ? 0x7FU
+                           : (uint8_t)can_txmeta.hb_tx_err;
+        data[7] = (fdcan_init_ok ? 0x01U : 0x00U) | (uint8_t)(hb_err_sat << 1);
+    }
     TransmitFrame(CAN_ID_DIAG_CAN_META, data, 8);
 }
 

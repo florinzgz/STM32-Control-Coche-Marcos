@@ -292,6 +292,8 @@ typedef struct {
  *   B) tick_1000ms_count    — iterations of the main-loop 1 Hz block
  *   C) diag309_tx_ok / err  — TransmitFrame() result for 0x309 specifically
  *   D) tx_fifo_full_drops   — frames dropped because the TX FIFO was full
+ *   E) hb_tx_count          — heartbeat (0x001) frames successfully queued
+ *   F) hb_tx_err            — heartbeat frames that failed to queue (TX busy)
  * All counters saturate; never wrap to 0.  Surfaced on CAN 0x30A.        */
 typedef struct {
     uint32_t diag309_call_count;   /* A: CAN_SendI2CDiag() invocations     */
@@ -299,6 +301,8 @@ typedef struct {
     uint32_t diag309_tx_ok;        /* C: 0x309 queued to TX FIFO OK        */
     uint32_t diag309_tx_err;       /* C: 0x309 TransmitFrame() != HAL_OK   */
     uint32_t tx_fifo_full_drops;   /* D: any frame dropped (FIFO full)     */
+    uint32_t hb_tx_count;          /* E: heartbeat 0x001 frames queued OK  */
+    uint32_t hb_tx_err;            /* F: heartbeat 0x001 TX failures       */
 } CAN_TxMeta_t;
 
 /* CAN_InitDiag_t is defined in can_init_diag.h (included above) to allow
