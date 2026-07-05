@@ -34,6 +34,12 @@ uint8_t  last0x30BDlc();      ///< DLC of the most recent 0x30B frame
 /// Per-ID 0x30C RX counter (FDCAN diagnostic dump).
 uint32_t rx0x30CCount();      ///< total 0x30C frames seen on the bus (any DLC)
 
+/// Per-ID 0x001 RX counter (STM32 heartbeat).
+uint32_t rx0x001Count();      ///< total 0x001 heartbeat frames received
+
+/// Per-ID 0x103 RX counter (CMD_ACK).
+uint32_t rx0x103Count();      ///< total 0x103 CMD_ACK frames received
+
 } // namespace can_rx
 
 #endif // CAN_RX_H

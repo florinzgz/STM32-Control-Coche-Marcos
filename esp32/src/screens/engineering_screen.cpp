@@ -944,10 +944,12 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         const uint32_t drop30b  = can_rx::dropped0x30BDlc();
         const uint8_t  dlc30b   = can_rx::last0x30BDlc();
         const uint32_t rx30c    = can_rx::rx0x30CCount();
+        const uint32_t rx001    = can_rx::rx0x001Count();
+        const uint32_t rx103    = can_rx::rx0x103Count();
         if (cm.timestampMs != canDiagLastTs_ ||
             rx309 != rx0x309Count_ || drop309 != drop0x309Dlc_ || dlc309 != last0x309Dlc_ ||
             rx30b != rx0x30BCount_ || drop30b != drop0x30BDlc_ || dlc30b != last0x30BDlc_ ||
-            rx30c != rx0x30CCount_) {
+            rx30c != rx0x30CCount_ || rx001 != rx0x001Count_ || rx103 != rx0x103Count_) {
             canDiagLastTs_  = cm.timestampMs;
             canMeta_        = cm;
             i2cScan_        = data.i2cScan();
@@ -959,6 +961,8 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             drop0x30BDlc_   = drop30b;
             last0x30BDlc_   = dlc30b;
             rx0x30CCount_   = rx30c;
+            rx0x001Count_   = rx001;
+            rx0x103Count_   = rx103;
             canDiagChanged_ = true;
         }
         // Always keep heartbeat age fresh so L5 shows current data.
@@ -979,16 +983,12 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             scanFbArm_ = false;
             scanFbMs_  = frameTimeMs;     // stamp for banner auto-clear
         }
+        // Note: scanArmReply_ is NO LONGER used to stamp baselines — that was
+        // a race condition.  sendI2cServiceScan() now stamps baselines immediately
+        // (before the STM32 can respond) using the cached data_ pointer.  The
+        // flag is cleared here as a no-op safety net in case it is ever set.
         if (scanArmReply_) {
-            scanArmReply_      = false;
-            scanAwaitingReply_ = true;
-            scanGotStarted_    = false;
-            scanSentMs_        = frameTimeMs;
-            scanBaseI2cTs_     = data.i2cScan().timestampMs;
-            scanBaseFdcanTs_   = data.fdcanDiag().timestampMs;
-            scanBaseAckTs_     = data.ack().timestampMs;
-            scanBase0x30BRx_   = can_rx::rx0x30BCount();
-            scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
+            scanArmReply_ = false;
         }
         if (scanAwaitingReply_) {
             const auto& sc = data.i2cScan();
@@ -1815,6 +1815,21 @@ void EngineeringScreen::draw() {
                          hbAge > 99000UL ? 99999UL : hbAge);
             }
             tft.drawString(buf, x, y0 + 4 * lh);
+        }
+
+        // L6: 0x001 heartbeat RX count + 0x103 CMD_ACK count.
+        // Lets the operator confirm the ESP32 actually receives heartbeats and
+        // ACKs, distinguishing "heartbeat never arrived" from "heartbeat stale".
+        // Placed at a fixed y (250) to stay clear of the scan banner at 260.
+        tft.fillRect(x, 250, ui::SCREEN_W - 2 * x, lh, ui::COL_BG);
+        {
+            const uint16_t hbCol = (rx0x001Count_ > 0) ? ui::COL_GREEN : ui::COL_RED;
+            tft.setTextColor(hbCol, ui::COL_BG);
+            snprintf(buf, sizeof(buf),
+                     "0x001 hb rx=%lu | 0x103 ack rx=%lu",
+                     (unsigned long)rx0x001Count_,
+                     (unsigned long)rx0x103Count_);
+            tft.drawString(buf, x, 250);
         }
     }
 
@@ -3097,7 +3112,32 @@ void EngineeringScreen::sendI2cServiceScan() {
     scanFb_        = ok ? ScanFb::SENT : ScanFb::FAILED;
     scanFbChanged_ = true;     // repaint the banner next draw()
     scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
-    scanArmReply_  = ok;       // update() arms the 2 s reply watchdog
+    scanArmReply_  = false;    // baselines are stamped immediately below
+
+    if (ok && data_) {
+        // Stamp baselines NOW — before any STM32 response can arrive.
+        //
+        // The previous design used scanArmReply_ to defer baseline stamping
+        // into the next update() call (~30 ms later).  The STM32 typically
+        // responds within ~10-20 ms (echo ACK + 0x30B + 0x30C + final ACK),
+        // which meant ALL responses could arrive before baselines were set.
+        // The resulting `sc.timestampMs == scanBaseI2cTs_` comparison then
+        // returned false even though 0x30B had been received, causing the
+        // timeout path to fire with "TIMEOUT: NO CAN ACK".
+        //
+        // Using the cached data_ pointer (guaranteed valid here — update()
+        // always runs before handleTouch() within the same frame) and
+        // lastFrameTimeMs_ as the send timestamp fixes the race.
+        scanAwaitingReply_ = true;
+        scanGotStarted_    = false;
+        scanSentMs_        = lastFrameTimeMs_;
+        scanBaseI2cTs_     = data_->i2cScan().timestampMs;
+        scanBaseFdcanTs_   = data_->fdcanDiag().timestampMs;
+        scanBaseAckTs_     = data_->ack().timestampMs;
+        scanBase0x30BRx_   = can_rx::rx0x30BCount();
+        scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
+    }
+
     Serial.printf("[ENG] RUN I2C SCAN tap -> 0xF6 tx %s\n", ok ? "OK" : "FAILED");
 }
 

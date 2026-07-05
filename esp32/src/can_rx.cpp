@@ -39,7 +39,11 @@ static inline uint32_t readU32LE(const uint8_t* buf) {
 // Frame decoders — one per CAN ID
 // -------------------------------------------------------------------------
 
+static uint32_t s_rx0x001Count = 0;  // total 0x001 heartbeat frames seen
+static uint32_t s_rx0x103Count = 0;  // total 0x103 CMD_ACK frames seen
+
 static void decodeHeartbeat(const CanFrame& f, vehicle::VehicleData& data) {
+    ++s_rx0x001Count;
     if (f.data_length_code < 5) return;
     vehicle::HeartbeatData hb;
     hb.aliveCounter = f.data[0];
@@ -168,6 +172,7 @@ static void decodeBattery(const CanFrame& f, vehicle::VehicleData& data) {
 }
 
 static void decodeCommandAck(const CanFrame& f, vehicle::VehicleData& data) {
+    ++s_rx0x103Count;
     if (f.data_length_code < 3) return;
     vehicle::AckData ad;
     ad.cmdIdLow    = f.data[0];
@@ -608,5 +613,7 @@ uint32_t rx0x30BCount()       { return s_rx0x30BCount; }
 uint32_t dropped0x30BDlc()    { return s_dropped0x30BDlc; }
 uint8_t  last0x30BDlc()       { return s_last0x30BDlc; }
 uint32_t rx0x30CCount()       { return s_rx0x30CCount; }
+uint32_t rx0x001Count()       { return s_rx0x001Count; }
+uint32_t rx0x103Count()       { return s_rx0x103Count; }
 
 } // namespace can_rx

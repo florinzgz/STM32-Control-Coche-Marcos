@@ -273,6 +273,8 @@ private:
     uint32_t      drop0x30BDlc_   = 0;
     uint8_t       last0x30BDlc_   = 0;
     uint32_t      rx0x30CCount_   = 0;
+    uint32_t      rx0x001Count_   = 0;     // 0x001 heartbeat frames received
+    uint32_t      rx0x103Count_   = 0;     // 0x103 CMD_ACK frames received
     unsigned long canDiagLastTs_  = 0;     // last 0x30A timestamp consumed
     unsigned long hbLastRxMs_     = 0;     // millis() of last received heartbeat
     unsigned long canDiagRefreshMs_ = 0;   // periodic refresh for live TWAI/hb row
