@@ -1796,7 +1796,7 @@ void EngineeringScreen::draw() {
     if (currentMenu_ == SubMenu::DEBOUNCE_DIAG && canDiagChanged_) {
         canDiagChanged_ = false;
 
-        char buf[80];
+        char buf[96];   // several diag lines (incl. L6 with txQ) approach 80 chars
         const int16_t x   = 10;
         const int16_t y0  = 194;
         const int16_t lh  = 12;   // line height (size-1 font)
@@ -1922,10 +1922,12 @@ void EngineeringScreen::draw() {
                     ? ui::COL_RED : ui::COL_GREEN;
                 tft.setTextColor(rstCol, ui::COL_BG);
                 snprintf(buf, sizeof(buf),
-                         "rst=%s up=%lus stmRst=%lu | hb=%lu ack=%lu",
+                         "rst=%s up=%lus stmRst=%lu txQ=%u/%u | hb=%lu ack=%lu",
                          rst,
                          (unsigned long)(bootReset_.uptimeMs / 1000U),
                          (unsigned long)stm32RestartCount_,
+                         (unsigned)bootReset_.txQueueDepth,
+                         (unsigned)bootReset_.txQueueDepthMax,
                          (unsigned long)rx0x001Count_,
                          (unsigned long)rx0x103Count_);
             } else {
@@ -1949,6 +1951,7 @@ void EngineeringScreen::draw() {
         const char* msg = nullptr;
         uint16_t    col = ui::COL_GRAY;
         switch (scanFb_) {
+            case ScanFb::WAIT_DATA:   msg = "WAIT DATA";           col = ui::COL_AMBER; break;
             case ScanFb::SENT:        msg = "CAN REQUEST SENT";    col = ui::COL_CYAN;  break;
             case ScanFb::FAILED:      msg = "SCAN CMD FAILED";     col = ui::COL_RED;   break;
             case ScanFb::STARTED:     msg = "STM32 SCAN STARTED";  col = ui::COL_CYAN;  break;
@@ -3205,6 +3208,44 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
 // control or safety state.
 // -------------------------------------------------------------------------
 void EngineeringScreen::sendI2cServiceScan() {
+    // Defensive guard: never emit SERVICE_CMD 0xF6 without a valid data_ cache.
+    //
+    // In the normal flow update() runs before handleTouch() within the same
+    // frame, so data_ is always set by the time this button can be tapped.
+    // But if a future refactor ever reaches this path with data_ == nullptr we
+    // could not stamp the reply baselines below — which is exactly what
+    // re-opens the "TIMEOUT: NO CAN ACK" race (responses arriving before the
+    // baselines are set).  Rather than send blind, suppress the command, show
+    // WAIT DATA and bail out so the operator simply taps again once telemetry
+    // is flowing.
+    if (data_ == nullptr) {
+        scanFb_        = ScanFb::WAIT_DATA;
+        scanFbChanged_ = true;     // repaint the banner next draw()
+        scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
+        scanArmReply_  = false;
+        Serial.println("[ENG] RUN I2C SCAN tap -> data_ null, WAIT DATA (0xF6 suppressed)");
+        return;
+    }
+
+    // data_ is valid: stamp the reply baselines NOW — BEFORE the frame goes out
+    // — so no STM32 response can arrive before the baselines are set.
+    //
+    // The previous design used scanArmReply_ to defer baseline stamping into
+    // the next update() call (~30 ms later).  The STM32 typically responds
+    // within ~10-20 ms (echo ACK + 0x30B + 0x30C + final ACK), which meant ALL
+    // responses could arrive before baselines were set.  The resulting
+    // `sc.timestampMs == scanBaseI2cTs_` comparison then returned false even
+    // though 0x30B had been received, causing the timeout path to fire with
+    // "TIMEOUT: NO CAN ACK".  Stamping here (using lastFrameTimeMs_ as the send
+    // timestamp) closes that window regardless of send outcome.
+    scanGotStarted_    = false;
+    scanSentMs_        = lastFrameTimeMs_;
+    scanBaseI2cTs_     = data_->i2cScan().timestampMs;
+    scanBaseFdcanTs_   = data_->fdcanDiag().timestampMs;
+    scanBaseAckTs_     = data_->ack().timestampMs;
+    scanBase0x30BRx_   = can_rx::rx0x30BCount();
+    scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
+
     CanFrame frame = {};
     frame.identifier       = can::SERVICE_CMD;
     frame.extd             = 0;
@@ -3215,35 +3256,13 @@ void EngineeringScreen::sendI2cServiceScan() {
     // Immediate visual confirmation: the previous implementation transmitted
     // the frame silently, so a missing/blank STM32 reply made the button look
     // dead.  Latch the result here and defer all timing to update() (frame-time
-    // contract: no millis() in the UI path).
+    // contract: no millis() in the UI path).  Only arm the reply watchdog when
+    // the frame actually went out — a failed send has no reply to wait for.
+    scanAwaitingReply_ = ok;
     scanFb_        = ok ? ScanFb::SENT : ScanFb::FAILED;
     scanFbChanged_ = true;     // repaint the banner next draw()
     scanFbArm_     = true;     // update() stamps scanFbMs_ for auto-clear
-    scanArmReply_  = false;    // baselines are stamped immediately below
-
-    if (ok && data_) {
-        // Stamp baselines NOW — before any STM32 response can arrive.
-        //
-        // The previous design used scanArmReply_ to defer baseline stamping
-        // into the next update() call (~30 ms later).  The STM32 typically
-        // responds within ~10-20 ms (echo ACK + 0x30B + 0x30C + final ACK),
-        // which meant ALL responses could arrive before baselines were set.
-        // The resulting `sc.timestampMs == scanBaseI2cTs_` comparison then
-        // returned false even though 0x30B had been received, causing the
-        // timeout path to fire with "TIMEOUT: NO CAN ACK".
-        //
-        // Using the cached data_ pointer (guaranteed valid here — update()
-        // always runs before handleTouch() within the same frame) and
-        // lastFrameTimeMs_ as the send timestamp fixes the race.
-        scanAwaitingReply_ = true;
-        scanGotStarted_    = false;
-        scanSentMs_        = lastFrameTimeMs_;
-        scanBaseI2cTs_     = data_->i2cScan().timestampMs;
-        scanBaseFdcanTs_   = data_->fdcanDiag().timestampMs;
-        scanBaseAckTs_     = data_->ack().timestampMs;
-        scanBase0x30BRx_   = can_rx::rx0x30BCount();
-        scanBase0x30BDrop_ = can_rx::dropped0x30BDlc();
-    }
+    scanArmReply_  = false;    // baselines already stamped above
 
     Serial.printf("[ENG] RUN I2C SCAN tap -> 0xF6 tx %s\n", ok ? "OK" : "FAILED");
 }

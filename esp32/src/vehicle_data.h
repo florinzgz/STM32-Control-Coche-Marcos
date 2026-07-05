@@ -309,6 +309,8 @@ struct CanMetaData {
 struct BootResetData {
     uint32_t uptimeMs   = 0;    // HAL_GetTick() uptime since last reset
     uint8_t  resetCause = 0;    // bitmask: bit0=POWERON bit1=SW bit2=IWDG bit3=WWDG bit4=BOR bit5=PIN
+    uint8_t  txQueueDepth    = 0;  // byte 5: software TX ring occupancy now (0..31)
+    uint8_t  txQueueDepthMax = 0;  // byte 6: software TX ring high-water mark (0..31)
     bool     valid      = false;
     unsigned long timestampMs = 0;
 };

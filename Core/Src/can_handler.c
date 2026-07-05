@@ -240,6 +240,12 @@ void CAN_TxPump(void) {
             break;
         }
     }
+
+    /* Refresh the current-occupancy gauge after draining (report-only). The
+     * high-water mark is only ever raised in TransmitFrame(); this keeps the
+     * instantaneous depth surfaced on 0x312 honest between bursts.           */
+    can_txmeta.tx_queue_depth =
+        (uint8_t)((can_txq_head - can_txq_tail) & (CAN_TXQ_SIZE - 1U));
 }
 
 /* Internal helper to send a CAN frame.
@@ -272,6 +278,17 @@ static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32
     can_txq[can_txq_head].len = l;
     memcpy(can_txq[can_txq_head].data, payload, l);
     can_txq_head = next;
+
+    /* Observability G: track software TX ring occupancy so a heartbeat-vs-
+     * backlog stall would be visible on 0x312.  Depth is measured after the
+     * push (before the opportunistic drain below), capturing the worst case.
+     * Report-only; never gates control or safety.                          */
+    {
+        uint8_t depth = (uint8_t)((can_txq_head - can_txq_tail) & (CAN_TXQ_SIZE - 1U));
+        can_txmeta.tx_queue_depth = depth;
+        if (depth > can_txmeta.tx_queue_depth_max)
+            can_txmeta.tx_queue_depth_max = depth;
+    }
 
     /* Opportunistically drain so low-rate single frames go out immediately. */
     CAN_TxPump();
@@ -1251,7 +1268,9 @@ void CAN_SendCanMetaDiag(void) {
  *               bit3 = WWDG      (WWDGRSTF)
  *               bit4 = BROWNOUT  (BORRSTF or LPWRRSTF)
  *               bit5 = PIN       (PINRSTF, combined with another flag)
- *   Byte 5-7: reserved (0)
+ *   Byte 5:   tx_queue_depth      — software TX ring occupancy now (0..31)
+ *   Byte 6:   tx_queue_depth_max  — software TX ring high-water mark (0..31)
+ *   Byte 7:   reserved (0)
  */
 void CAN_SendBootResetDiag(void) {
     uint32_t uptime = HAL_GetTick();
@@ -1261,7 +1280,12 @@ void CAN_SendBootResetDiag(void) {
     data[2] = (uint8_t)((uptime >> 16) & 0xFFU);
     data[3] = (uint8_t)((uptime >> 24) & 0xFFU);
     data[4] = Boot_GetResetCause();
-    /* bytes 5-7 reserved */
+    /* bytes 5-6: software TX queue depth (now / high-water) — lets the HMI
+     * prove the heartbeat (enqueued first each 100 ms cycle) is never sitting
+     * behind a TX backlog.  Additive/report-only; byte 7 stays reserved.    */
+    data[5] = can_txmeta.tx_queue_depth;
+    data[6] = can_txmeta.tx_queue_depth_max;
+    /* byte 7 reserved */
     TransmitFrame(CAN_ID_DIAG_BOOT_RESET, data, 8);
 }
 

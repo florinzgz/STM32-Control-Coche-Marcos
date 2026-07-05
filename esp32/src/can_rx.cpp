@@ -341,6 +341,12 @@ static void decodeBootReset(const CanFrame& f, vehicle::VehicleData& data) {
     vehicle::BootResetData br;
     br.uptimeMs   = readU32LE(&f.data[0]);  // bytes 0-3: HAL_GetTick() uptime
     br.resetCause = f.data[4];              // byte 4: RESET_CAUSE_* bitmask
+    // bytes 5-6: software TX queue depth (now / high-water). Present only on
+    // DLC-8 frames; older/short frames leave these at their 0 defaults.
+    if (f.data_length_code >= 7) {
+        br.txQueueDepth    = f.data[5];
+        br.txQueueDepthMax = f.data[6];
+    }
     br.valid      = true;
     br.timestampMs = millis();
     data.setBootReset(br);

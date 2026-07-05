@@ -300,6 +300,7 @@ typedef struct {
  *   D) tx_fifo_full_drops   — frames dropped because the TX FIFO was full
  *   E) hb_tx_count          — heartbeat (0x001) frames successfully queued (tracked locally)
  *   F) hb_tx_err            — heartbeat frames that failed to queue (TX busy); surfaced on 0x30A byte7 bits7:1
+ *   G) tx_queue_depth[_max] — software TX ring occupancy now / high-water; surfaced on 0x312 bytes 5-6
  * All counters saturate; never wrap to 0.  0x30A currently surfaces A–D and F. */
 typedef struct {
     uint32_t diag309_call_count;   /* A: CAN_SendI2CDiag() invocations     */
@@ -309,6 +310,8 @@ typedef struct {
     uint32_t tx_fifo_full_drops;   /* D: any frame dropped (FIFO full)     */
     uint32_t hb_tx_count;          /* E: heartbeat 0x001 frames queued OK  */
     uint32_t hb_tx_err;            /* F: heartbeat 0x001 TX failures       */
+    uint8_t  tx_queue_depth;       /* G: software TX ring occupancy (now)  */
+    uint8_t  tx_queue_depth_max;   /* G: software TX ring high-water mark  */
 } CAN_TxMeta_t;
 
 /* CAN_InitDiag_t is defined in can_init_diag.h (included above) to allow

@@ -307,6 +307,7 @@ private:
     // direct millis() in the UI path); the touch handler only latches intent.
     enum class ScanFb : uint8_t {
         NONE = 0,
+        WAIT_DATA,        // WAIT DATA (data_ null — command suppressed, no 0xF6 sent)
         SENT,             // CAN REQUEST SENT (writeFrame ok)
         FAILED,           // SCAN CMD FAILED (writeFrame failed)
         STARTED,          // STM32 SCAN STARTED (0xF6 echo ACK received)
