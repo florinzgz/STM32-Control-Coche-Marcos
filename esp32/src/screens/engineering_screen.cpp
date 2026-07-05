@@ -5067,7 +5067,8 @@ void EngineeringScreen::drawLedMode() {
         "WARNING AMBER",// 4
         "HAZARD RED",   // 5
         "DEMO SHOW",    // 6
-        "CUSTOM TEST"   // 7
+        "CUSTOM TEST",  // 7
+        "KNIGHT RIDER"  // 8 — "coche fantástico" red scanner
     };
 
     tft.fillScreen(ui::COL_BG);

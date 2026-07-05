@@ -196,6 +196,55 @@ static void updateFlash(CRGB* leds, int count, CRGB c1, CRGB c2) {
     fill_solid(leds, count, blinkState ? c1 : c2);
 }
 
+// ---- Knight Rider / KITT scanner ("coche fantástico") ----
+//
+// Pure red left↔right scanner with a fading red tail on a black background.
+// Used by the decorative DecorMode::KNIGHT_RIDER.  Timing is driven by the
+// caller's monotonically-increasing `step` (animationStep, one per ~50 ms
+// update), so the effect advances smoothly without any delay() and without
+// its own timer state.
+//
+// Distinct from updateKITTScanner() (which keeps mutable scannerPos state and
+// is used for the NORMAL/idle and REVERSE front base): this variant is fully
+// stateless and derives the bounce position from `step`, so it can drive the
+// front and rear strips independently regardless of their differing lengths.
+//
+//   Background: black (buffer cleared every frame — no stale pixels).
+//   Position  : triangular bounce  0 → count-1 → 0 …
+//   Tail      : centre 255, ±1 → 120, ±2 → 50, ±3 → 15 (red only, no HSV).
+static void renderKnightRider(CRGB* leds, int count, uint16_t step) {
+    if (count <= 0) return;
+
+    // Clear background to black so nothing from previous frames lingers.
+    fill_solid(leds, count, CRGB::Black);
+
+    if (count == 1) {
+        leds[0] = CRGB(255, 0, 0);
+        return;
+    }
+
+    // Triangular bounce: pos sweeps 0..count-1 and back, always in range.
+    const int period = 2 * (count - 1);
+    const int phase  = step % period;
+    const int pos    = (phase < count) ? phase : (period - phase);
+
+    // Symmetric red tail brightness profile.
+    static constexpr uint8_t kTail[] = {255, 120, 50, 15};
+    constexpr int kTailLen = static_cast<int>(sizeof(kTail) / sizeof(kTail[0]));
+
+    for (int off = 0; off < kTailLen; ++off) {
+        const CRGB col(kTail[off], 0, 0);  // pure red, never rainbow
+        if (off == 0) {
+            leds[pos] = col;               // pos is guaranteed 0..count-1
+        } else {
+            const int lo = pos - off;
+            const int hi = pos + off;
+            if (lo >= 0 && lo < count) leds[lo] = col;
+            if (hi >= 0 && hi < count) leds[hi] = col;
+        }
+    }
+}
+
 // =====================================================================
 // Decorative mode — front and rear strip renderers
 //
@@ -257,6 +306,11 @@ static void updateDecorativeFront() {
         case DecorMode::HAZARD_RED:
             // Front is dim red or off when hazard rear is flashing
             fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, 20));
+            break;
+
+        case DecorMode::KNIGHT_RIDER:
+            // "Coche fantástico" — red scanner bounce with tail, black background
+            renderKnightRider(ledsFront, NUM_LEDS_FRONT, animationStep);
             break;
 
         case DecorMode::DEMO_SHOW: {
@@ -368,6 +422,11 @@ static void updateDecorativeRear() {
             fill_solid(ledsRear, NUM_LEDS_REAR, col);
             break;
         }
+
+        case DecorMode::KNIGHT_RIDER:
+            // "Coche fantástico" — red scanner bounce with tail, black background
+            renderKnightRider(ledsRear, NUM_LEDS_REAR, animationStep);
+            break;
 
         case DecorMode::DEMO_SHOW: {
             // Offset rainbow by half the hue cycle for a mirror effect
