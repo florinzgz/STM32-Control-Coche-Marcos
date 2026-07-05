@@ -70,8 +70,29 @@ static uint8_t  emergencyCurrent   = 0;
 static uint32_t emergencyLastMs    = 0;
 static bool     emergencyPhase     = false;
 
-// ---- Amber colour for indicators ----
-static constexpr CRGB AMBER = CRGB(255, 100, 0);
+// =========================================================================
+// Explicit decorative / signal colour palette (documented)
+//
+// The WS2812B strips are configured GRB in init() (see FastLED.addLeds<>),
+// which is the native byte order for genuine WS2812B, so these logical RGB
+// values map correctly on hardware: red=red, green=green, blue=blue.
+// Define every decorative colour explicitly here — no ambiguous inline
+// colours in the pattern renderers.
+// =========================================================================
+static constexpr CRGB LED_COLOR_RED_EMERGENCY = CRGB(255,   0,   0);  // emergency red
+static constexpr CRGB LED_COLOR_BLUE_POLICE   = CRGB(  0,   0, 255);  // police blue
+static constexpr CRGB LED_COLOR_WHITE         = CRGB(255, 255, 255);  // pure white
+
+// ---- Amber colour for indicators and amber decorative modes ----
+// Real hardware showed the previous value CRGB(255,100,0) as too ORANGE.
+// Raising the green channel pushes the hue toward a clean amber/yellow.
+// Verified options: A(255,180,0) B(255,200,0) C(255,220,0); (255,80/100/120,0)
+// are too orange. B is the chosen default — adjust the green channel here if a
+// different amber is preferred on the installed strip.
+static constexpr CRGB LED_COLOR_AMBER = CRGB(255, 200, 0);
+
+// Backwards-compatible alias used throughout the indicator/decor renderers.
+static constexpr CRGB AMBER = LED_COLOR_AMBER;
 
 // =========================================================================
 // Decorative mode state
@@ -82,20 +103,16 @@ static DecorMode currentDecorMode = DecorMode::NORMAL;
 // Shared phase counter for all decorative patterns (non-blocking timing)
 static uint32_t decorLastMs   = 0;
 static uint8_t  decorPhase    = 0;    // generic phase index within pattern
-// POLICE / AMBULANCE: track which side is currently lit and double-pulse step
-// Pattern: double flash on side A, pause, double flash on side B, repeat.
-// Each half-period step is DECOR_POLICE_STEP_MS long.
-//   Phase 0: side-A pulse 1 ON
-//   Phase 1: side-A pulse 1 OFF
-//   Phase 2: side-A pulse 2 ON
-//   Phase 3: side-A pulse 2 OFF (short pause)
-//   Phase 4: side-B pulse 1 ON
-//   Phase 5: side-B pulse 1 OFF
-//   Phase 6: side-B pulse 2 ON
-//   Phase 7: side-B pulse 2 OFF (longer pause)
-//   Phases 8–9: extended pause between cycles
-static constexpr uint16_t DECOR_POLICE_STEP_MS  = 80;   // ms per step
-static constexpr uint8_t  DECOR_POLICE_PHASES   = 10;   // total phases in cycle
+// POLICE_US: 4-phase left/right block wig-wag (red↔blue swap, documented).
+// The left HALF of the strip and the right HALF of the strip flash opposite
+// colours, then swap, giving the classic US police "wig-wag" look.  No amber,
+// no rainbow — only LED_COLOR_RED_EMERGENCY and LED_COLOR_BLUE_POLICE.
+//   Phase 0: left half RED   / right half BLUE
+//   Phase 1: brief blackout (crisp strobe edge)
+//   Phase 2: left half BLUE  / right half RED   (colours inverted)
+//   Phase 3: brief blackout
+static constexpr uint16_t DECOR_POLICE_STEP_MS  = 110;  // ms per step (~440 ms cycle)
+static constexpr uint8_t  DECOR_POLICE_PHASES   = 4;    // total phases in cycle
 
 // HAZARD_RED: double-flash rear (phases 0-3), long pause (phases 4-7)
 static constexpr uint16_t DECOR_HAZARD_STEP_MS = 80;
@@ -104,8 +121,15 @@ static constexpr uint8_t  DECOR_HAZARD_PHASES  = 8;
 // WARNING_AMBER: slow blink 400 ms on / 400 ms off
 static constexpr uint16_t DECOR_WARN_STEP_MS = 400;
 
-// AMBULANCE: red/white 600 ms alternating
-static constexpr uint16_t DECOR_AMBU_STEP_MS = 600;
+// AMBULANCE: red/white DOUBLE-FLASH — clearly distinct from POLICE_US.
+// Two quick red flashes, pause, two quick white flashes, pause, repeat.
+// Whole strip flashes (no left/right split) so it never looks like police.
+//   Phase 0: RED   ON    Phase 4: WHITE ON
+//   Phase 1: OFF         Phase 5: OFF
+//   Phase 2: RED   ON    Phase 6: WHITE ON
+//   Phase 3: OFF (pause) Phase 7: OFF (pause)
+static constexpr uint16_t DECOR_AMBU_STEP_MS = 110;  // ms per step
+static constexpr uint8_t  DECOR_AMBU_PHASES  = 8;    // total phases in cycle
 
 // DEMO_SHOW: rainbow speed (advance hue by 1 per step)
 static constexpr uint16_t DECOR_DEMO_STEP_MS = 60;
@@ -121,6 +145,16 @@ static inline CRGB scaledBrightness(CRGB c, uint8_t scale) {
         (uint16_t)c.g * scale / 255,
         (uint16_t)c.b * scale / 255
     );
+}
+
+// Fill the left half of a strip with leftCol and the right half with rightCol.
+// The split point is the geometric midpoint of the strip, so both halves are
+// large, clearly-visible blocks (used by the POLICE_US wig-wag pattern).
+static inline void fillHalves(CRGB* leds, int count, CRGB leftCol, CRGB rightCol) {
+    if (count <= 0) return;
+    const int mid = count / 2;
+    for (int i = 0; i < count; ++i)
+        leds[i] = (i < mid) ? leftCol : rightCol;
 }
 
 // =====================================================================
@@ -196,6 +230,55 @@ static void updateFlash(CRGB* leds, int count, CRGB c1, CRGB c2) {
     fill_solid(leds, count, blinkState ? c1 : c2);
 }
 
+// ---- Knight Rider / KITT scanner ("coche fantástico") ----
+//
+// Pure red left↔right scanner with a fading red tail on a black background.
+// Used by the decorative DecorMode::KNIGHT_RIDER.  Timing is driven by the
+// caller's monotonically-increasing `step` (animationStep, one per ~50 ms
+// update), so the effect advances smoothly without any delay() and without
+// its own timer state.
+//
+// Distinct from updateKITTScanner() (which keeps mutable scannerPos state and
+// is used for the NORMAL/idle and REVERSE front base): this variant is fully
+// stateless and derives the bounce position from `step`, so it can drive the
+// front and rear strips independently regardless of their differing lengths.
+//
+//   Background: black (buffer cleared every frame — no stale pixels).
+//   Position  : triangular bounce  0 → count-1 → 0 …
+//   Tail      : centre 255, ±1 → 120, ±2 → 50, ±3 → 15 (red only, no HSV).
+static void renderKnightRider(CRGB* leds, int count, uint16_t step) {
+    if (count <= 0) return;
+
+    // Clear background to black so nothing from previous frames lingers.
+    fill_solid(leds, count, CRGB::Black);
+
+    if (count == 1) {
+        leds[0] = CRGB(255, 0, 0);
+        return;
+    }
+
+    // Triangular bounce: pos sweeps 0..count-1 and back, always in range.
+    const int period = 2 * (count - 1);
+    const int phase  = step % period;
+    const int pos    = (phase < count) ? phase : (period - phase);
+
+    // Symmetric red tail brightness profile.
+    static constexpr uint8_t kTail[] = {255, 120, 50, 15};
+    constexpr int kTailLen = static_cast<int>(sizeof(kTail) / sizeof(kTail[0]));
+
+    for (int off = 0; off < kTailLen; ++off) {
+        const CRGB col(kTail[off], 0, 0);  // pure red, never rainbow
+        if (off == 0) {
+            leds[pos] = col;               // pos is guaranteed 0..count-1
+        } else {
+            const int lo = pos - off;
+            const int hi = pos + off;
+            if (lo >= 0 && lo < count) leds[lo] = col;
+            if (hi >= 0 && hi < count) leds[hi] = col;
+        }
+    }
+}
+
 // =====================================================================
 // Decorative mode — front and rear strip renderers
 //
@@ -217,30 +300,29 @@ static void updateDecorativeFront() {
             break;
 
         case DecorMode::POLICE_US: {
-            // Double-pulse pattern: two flashes on left (blue), two on right (red)
-            // phases 0-3: left side, phases 4-7: right side, phases 8-9: pause
-            bool leftOn  = (decorPhase == 0 || decorPhase == 2);
-            bool rightOn = (decorPhase == 4 || decorPhase == 6);
-            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
-            if (leftOn)
-                fill_solid(&ledsFront[FRONT_IND_LEFT_START],  FRONT_IND_LEFT_COUNT,
-                           scaledBrightness(CRGB::Blue, br));
-            if (rightOn)
-                fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
-                           scaledBrightness(CRGB::Red,  br));
-            // Centre: subtle alternating blue/red
-            CRGB centreCol = leftOn  ? scaledBrightness(CRGB::Blue, br / 3) :
-                             rightOn ? scaledBrightness(CRGB::Red,  br / 3) :
-                                       CRGB::Black;
-            fill_solid(&ledsFront[FRONT_CENTRE_START], FRONT_CENTRE_COUNT, centreCol);
+            // US wig-wag: left/right HALVES flash opposite red/blue, then swap.
+            //   Phase 0: left RED  / right BLUE
+            //   Phase 1: blackout   Phase 3: blackout
+            //   Phase 2: left BLUE / right RED  (inverted)
+            const CRGB red  = scaledBrightness(LED_COLOR_RED_EMERGENCY, br);
+            const CRGB blue = scaledBrightness(LED_COLOR_BLUE_POLICE,   br);
+            if (decorPhase == 0)
+                fillHalves(ledsFront, NUM_LEDS_FRONT, red, blue);
+            else if (decorPhase == 2)
+                fillHalves(ledsFront, NUM_LEDS_FRONT, blue, red);
+            else
+                fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
             break;
         }
 
         case DecorMode::AMBULANCE: {
-            // Alternating red / white, slower than police
-            bool phase0 = (decorPhase == 0);
-            CRGB col = phase0 ? scaledBrightness(CRGB::Red,   br)
-                              : scaledBrightness(CRGB::White, br);
+            // Red/white double-flash (whole strip) — distinct from police.
+            // Flash on even phases 0,2 (red) and 4,6 (white); off otherwise.
+            CRGB col = CRGB::Black;
+            if (decorPhase == 0 || decorPhase == 2)
+                col = scaledBrightness(LED_COLOR_RED_EMERGENCY, br);
+            else if (decorPhase == 4 || decorPhase == 6)
+                col = scaledBrightness(LED_COLOR_WHITE, br);
             fill_solid(ledsFront, NUM_LEDS_FRONT, col);
             break;
         }
@@ -256,7 +338,12 @@ static void updateDecorativeFront() {
 
         case DecorMode::HAZARD_RED:
             // Front is dim red or off when hazard rear is flashing
-            fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, 20));
+            fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_RED_EMERGENCY, 20));
+            break;
+
+        case DecorMode::KNIGHT_RIDER:
+            // "Coche fantástico" — red scanner bounce with tail, black background
+            renderKnightRider(ledsFront, NUM_LEDS_FRONT, animationStep);
             break;
 
         case DecorMode::DEMO_SHOW: {
@@ -276,20 +363,20 @@ static void updateDecorativeFront() {
             switch (decorPhase % DECOR_TEST_PHASES) {
                 case 0: // Front-left zone — white
                     fill_solid(&ledsFront[FRONT_IND_LEFT_START], FRONT_IND_LEFT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 1: // Front-right zone — white
                     fill_solid(&ledsFront[FRONT_IND_RIGHT_START], FRONT_IND_RIGHT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 2: // All front — red
-                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Red, br));
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_RED_EMERGENCY, br));
                     break;
                 case 3: // All front — blue
-                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Blue, br));
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_BLUE_POLICE, br));
                     break;
                 case 4: // All front — white
-                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::White, br));
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 5: // All front — amber
                     fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(AMBER, br));
@@ -323,28 +410,28 @@ static void updateDecorativeRear() {
             break;
 
         case DecorMode::POLICE_US: {
-            // Rear: wig-wag mirror of front — left=red, right=blue on same phases
-            bool leftOn  = (decorPhase == 0 || decorPhase == 2);
-            bool rightOn = (decorPhase == 4 || decorPhase == 6);
-            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
-            if (leftOn)
-                fill_solid(&ledsRear[REAR_IND_LEFT_START],  REAR_IND_LEFT_COUNT,
-                           scaledBrightness(CRGB::Red,  br));
-            if (rightOn)
-                fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
-                           scaledBrightness(CRGB::Blue, br));
-            CRGB centreCol = leftOn  ? scaledBrightness(CRGB::Red,  br / 3) :
-                             rightOn ? scaledBrightness(CRGB::Blue, br / 3) :
-                                       CRGB::Black;
-            fill_solid(&ledsRear[REAR_CENTRE_START], REAR_CENTRE_COUNT, centreCol);
+            // Rear wig-wag mirrors the front but swaps which half starts red,
+            // so front and rear are visually offset (classic cross-flash).
+            //   Phase 0: left BLUE / right RED
+            //   Phase 2: left RED  / right BLUE
+            const CRGB red  = scaledBrightness(LED_COLOR_RED_EMERGENCY, br);
+            const CRGB blue = scaledBrightness(LED_COLOR_BLUE_POLICE,   br);
+            if (decorPhase == 0)
+                fillHalves(ledsRear, NUM_LEDS_REAR, blue, red);
+            else if (decorPhase == 2)
+                fillHalves(ledsRear, NUM_LEDS_REAR, red, blue);
+            else
+                fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
             break;
         }
 
         case DecorMode::AMBULANCE: {
-            // Rear: red dominant, occasional white pulse
-            bool phase0 = (decorPhase == 0);
-            CRGB col = phase0 ? scaledBrightness(CRGB::White, br)
-                              : scaledBrightness(CRGB::Red,   br);
+            // Rear red/white double-flash — same timing as front.
+            CRGB col = CRGB::Black;
+            if (decorPhase == 0 || decorPhase == 2)
+                col = scaledBrightness(LED_COLOR_RED_EMERGENCY, br);
+            else if (decorPhase == 4 || decorPhase == 6)
+                col = scaledBrightness(LED_COLOR_WHITE, br);
             fill_solid(ledsRear, NUM_LEDS_REAR, col);
             break;
         }
@@ -364,10 +451,15 @@ static void updateDecorativeRear() {
         case DecorMode::HAZARD_RED: {
             // Double flash rear red: ON at phases 0 and 2, OFF elsewhere
             bool on = (decorPhase == 0 || decorPhase == 2);
-            CRGB col = on ? scaledBrightness(CRGB::Red, br) : CRGB::Black;
+            CRGB col = on ? scaledBrightness(LED_COLOR_RED_EMERGENCY, br) : CRGB::Black;
             fill_solid(ledsRear, NUM_LEDS_REAR, col);
             break;
         }
+
+        case DecorMode::KNIGHT_RIDER:
+            // "Coche fantástico" — red scanner bounce with tail, black background
+            renderKnightRider(ledsRear, NUM_LEDS_REAR, animationStep);
+            break;
 
         case DecorMode::DEMO_SHOW: {
             // Offset rainbow by half the hue cycle for a mirror effect
@@ -384,20 +476,20 @@ static void updateDecorativeRear() {
             switch (decorPhase % DECOR_TEST_PHASES) {
                 case 0: // Rear-left zone — white
                     fill_solid(&ledsRear[REAR_IND_LEFT_START], REAR_IND_LEFT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 1: // Rear-right zone — white
                     fill_solid(&ledsRear[REAR_IND_RIGHT_START], REAR_IND_RIGHT_COUNT,
-                               scaledBrightness(CRGB::White, br));
+                               scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 2: // All rear — red
-                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Red, br));
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(LED_COLOR_RED_EMERGENCY, br));
                     break;
                 case 3: // All rear — blue
-                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Blue, br));
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(LED_COLOR_BLUE_POLICE, br));
                     break;
                 case 4: // All rear — white
-                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::White, br));
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(LED_COLOR_WHITE, br));
                     break;
                 case 5: // All rear — amber
                     fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(AMBER, br));
@@ -437,10 +529,12 @@ static void advanceDecorPhase(uint32_t now) {
             wrapAt = DECOR_HAZARD_PHASES;
             break;
         case DecorMode::WARNING_AMBER:
-        case DecorMode::AMBULANCE:
-            stepMs = (currentDecorMode == DecorMode::AMBULANCE)
-                     ? DECOR_AMBU_STEP_MS : DECOR_WARN_STEP_MS;
+            stepMs = DECOR_WARN_STEP_MS;
             wrapAt = 2;
+            break;
+        case DecorMode::AMBULANCE:
+            stepMs = DECOR_AMBU_STEP_MS;
+            wrapAt = DECOR_AMBU_PHASES;
             break;
         case DecorMode::DEMO_SHOW:
             stepMs = DECOR_DEMO_STEP_MS;
