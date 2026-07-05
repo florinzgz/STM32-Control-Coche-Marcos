@@ -988,10 +988,17 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         {
             const auto& br = data.bootReset();
             if (br.valid && br.timestampMs != bootResetLastTs_) {
-                /* Detect uptime restart: new uptime is less than previous by more
-                 * than 5 s (handles normal tick advance vs. a genuine reset).  */
-                if (bootResetLastTs_ != 0 && br.uptimeMs + 5000U < bootResetPrevUptime_) {
-                    ++stm32RestartCount_;
+                /* Detect uptime restart: uptime dropped by > 5 s versus the
+                 * previous 0x312 sample.  Use subtraction (overflow-safe) and
+                 * ignore the ~49.7-day HAL_GetTick() wrap, where the previous
+                 * uptime is near UINT32_MAX and the new one is a small value. */
+                if (bootResetLastTs_ != 0 && br.uptimeMs < bootResetPrevUptime_) {
+                    const uint32_t drop     = bootResetPrevUptime_ - br.uptimeMs;
+                    const bool     tickWrap = (bootResetPrevUptime_ > 0xFFFF0000UL)
+                                            && (br.uptimeMs < 60000U);
+                    if (!tickWrap && drop > 5000U) {
+                        ++stm32RestartCount_;
+                    }
                 }
                 bootResetPrevUptime_ = br.uptimeMs;
                 bootResetLastTs_     = br.timestampMs;

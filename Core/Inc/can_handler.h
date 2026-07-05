@@ -298,9 +298,9 @@ typedef struct {
  *   B) tick_1000ms_count    — iterations of the main-loop 1 Hz block
  *   C) diag309_tx_ok / err  — TransmitFrame() result for 0x309 specifically
  *   D) tx_fifo_full_drops   — frames dropped because the TX FIFO was full
- *   E) hb_tx_count          — heartbeat (0x001) frames successfully queued
- *   F) hb_tx_err            — heartbeat frames that failed to queue (TX busy)
- * All counters saturate; never wrap to 0.  Surfaced on CAN 0x30A.        */
+ *   E) hb_tx_count          — heartbeat (0x001) frames successfully queued (tracked locally)
+ *   F) hb_tx_err            — heartbeat frames that failed to queue (TX busy); surfaced on 0x30A byte7 bits7:1
+ * All counters saturate; never wrap to 0.  0x30A currently surfaces A–D and F. */
 typedef struct {
     uint32_t diag309_call_count;   /* A: CAN_SendI2CDiag() invocations     */
     uint32_t tick_1000ms_count;    /* B: 1 Hz scheduler-block iterations   */

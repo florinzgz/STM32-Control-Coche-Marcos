@@ -168,21 +168,28 @@ static uint32_t s_dropped0x207Dlc  = 0;  // 0x207 frames with DLC < 4 (discarded
 static uint8_t  s_last0x207Dlc     = 0;  // DLC of the most recent 0x207 frame
 
 static void decodeBattery(const CanFrame& f, vehicle::VehicleData& data) {
+    const unsigned long nowMs = millis();
     ++s_rx0x207Count;
     s_last0x207Dlc = f.data_length_code;
-    if (f.data_length_code < 4) { ++s_dropped0x207Dlc; return; }
-    vehicle::BatteryData bd;
-    bd.currentRaw  = readU16LE(&f.data[0]);   // 0.01 A units
-    bd.voltageRaw  = readU16LE(&f.data[2]);   // 0.01 V units
-    bd.timestampMs = millis();
-    data.setBattery(bd);
-    /* Update 0x207 diagnostic counters every time a valid frame arrives. */
+    const bool shortDlc = (f.data_length_code < 4);
+    if (shortDlc) { ++s_dropped0x207Dlc; }
+    if (!shortDlc) {
+        vehicle::BatteryData bd;
+        bd.currentRaw  = readU16LE(&f.data[0]);   // 0.01 A units
+        bd.voltageRaw  = readU16LE(&f.data[2]);   // 0.01 V units
+        bd.timestampMs = nowMs;
+        data.setBattery(bd);
+    }
+    /* Publish 0x207 diagnostic counters on EVERY reception — including
+     * short-DLC frames that are discarded — so the HMI drop counter stays
+     * visible even when all incoming 0x207 frames are malformed (otherwise
+     * the battery screen could show NO PACKET/STALE while frames arrive).  */
     vehicle::Batt207DiagData diag;
-    diag.rxCount    = s_rx0x207Count;
-    diag.lastDlc    = s_last0x207Dlc;
-    diag.droppedDlc = s_dropped0x207Dlc;
-    diag.valid      = true;
-    diag.timestampMs = bd.timestampMs;
+    diag.rxCount     = s_rx0x207Count;
+    diag.lastDlc     = s_last0x207Dlc;
+    diag.droppedDlc  = s_dropped0x207Dlc;
+    diag.valid       = true;
+    diag.timestampMs = nowMs;
     data.setBatt207Diag(diag);
 }
 
