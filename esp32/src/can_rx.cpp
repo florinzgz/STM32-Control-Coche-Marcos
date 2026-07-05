@@ -266,14 +266,16 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
     data.setPedalCal(pc);
 }
 
-// 0x309 DIAG_I2C — I2C topology diagnostic (DLC 5, extended to DLC 6).
+// 0x309 DIAG_I2C — I2C topology diagnostic (DLC 8; legacy DLC 5/6 accepted).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CDiag().
 //   byte0=mux_present, byte1=ina_ok_mask, byte2=fail_count,
 //   byte3=recovery_attempts, byte4=flags (bit0 = ever OK),
-//   byte5=ina_expected_mask (bit i = ch i's branch powered this phase).
-//   byte5 is populated when DLC >= 6.  Pre-extension STM32 firmware (DLC 5)
-//   leaves the expected mask at its default (all channels) so the legacy
-//   FAIL-on-missing rendering is preserved.
+//   byte5=ina_expected_mask (bit i = ch i's branch powered this phase),
+//   byte6=i2c_last_read_ms (last Current_ReadAll() duration, saturated 255),
+//   byte7=reserved.
+//   byte5 is populated when DLC >= 6; byte6 when DLC >= 7.  Pre-extension STM32
+//   firmware (DLC 5) leaves the expected mask at its default (all channels) so
+//   the legacy FAIL-on-missing rendering is preserved.
 //
 // Per-ID RX counters (audit questions E/F): record every 0x309 frame seen on
 // the bus and the last DLC, and count frames dropped for a short DLC.  This

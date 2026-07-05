@@ -1177,7 +1177,7 @@ void CAN_SendDebounceDiag(void) {
  * failures are intermittent (bad pull-up / loose terminal) or permanent
  * (not connected).  Diagnostic only — no control / safety path consumes it.
  *
- * CAN ID: 0x309   DLC: 6   Rate: 1000 ms (1 Hz)
+ * CAN ID: 0x309   DLC: 8   Rate: 1000 ms (1 Hz)
  *   Byte 0: mux_present (0 = TCA9548A 0x70 not acking, 1 = present)
  *   Byte 1: ina_ok_mask (bit i = INA226 acked behind mux channel i;
  *           bit0=FL, bit1=FR, bit2=RL, bit3=RR, bit4=BAT, bit5=STEER)
@@ -1188,6 +1188,10 @@ void CAN_SendDebounceDiag(void) {
  *           so its INA226 SHOULD answer this phase; same bit order as byte1).
  *           Lets the HMI show an unpowered branch as "WAIT PWR" instead of a
  *           red FAIL.  Additive — pre-extension consumers (DLC 5) ignore it.
+ *   Byte 6: i2c_last_read_ms (duration of the last Current_ReadAll() in ms,
+ *           saturated at 255 → HMI shows "255+ms").  Additive — DLC-6/DLC-5
+ *           consumers ignore it.
+ *   Byte 7: reserved (0)
  */
 void CAN_SendI2CDiag(void) {
     uint8_t data[8];

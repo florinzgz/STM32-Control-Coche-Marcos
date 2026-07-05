@@ -74,7 +74,9 @@ extern "C" {
                                          //   Byte 4:   reset_cause bitmask (RESET_CAUSE_* from main.h)
                                          //             bit0=POWERON  bit1=SOFTWARE bit2=IWDG
                                          //             bit3=WWDG     bit4=BROWNOUT  bit5=PIN
-                                         //   Byte 5-7: reserved (0)
+                                         //   Byte 5:   tx_queue_depth (software TX ring occupancy now, 0..31)
+                                         //   Byte 6:   tx_queue_depth_max (software TX ring high-water, 0..31)
+                                         //   Byte 7:   reserved (0)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
