@@ -45,6 +45,12 @@ uint32_t rx0x207Count();      ///< total 0x207 frames seen on the bus (any DLC)
 uint32_t dropped0x207Dlc();   ///< 0x207 frames rejected for DLC < 4
 uint8_t  last0x207Dlc();      ///< DLC of the most recent 0x207 frame
 
+/// Per-ID 0x313 RX counters (DIAG_WHEEL_SENSOR).  Tell "no 0x313 frame" apart
+/// from "0x313 arrives but is rejected for a short DLC".
+uint32_t rx0x313Count();      ///< total 0x313 frames seen on the bus (any DLC)
+uint32_t dropped0x313Dlc();   ///< 0x313 frames rejected for DLC < 7
+uint8_t  last0x313Dlc();      ///< DLC of the most recent 0x313 frame
+
 } // namespace can_rx
 
 #endif // CAN_RX_H

@@ -1006,6 +1006,17 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
                 canDiagChanged_      = true;
             }
         }
+        /* Cache per-wheel fault-reason diagnostic (0x313) — repaint on change. */
+        {
+            const auto& wd = data.wheelSensorDiag();
+            const uint32_t rx313 = can_rx::rx0x313Count();
+            if (wd.timestampMs != wheelDiagLastTs_ || rx313 != rx0x313Count_) {
+                wheelDiagLastTs_ = wd.timestampMs;
+                wheelSensorDiag_ = wd;
+                rx0x313Count_    = rx313;
+                canDiagChanged_  = true;
+            }
+        }
         // Always keep heartbeat age fresh so L5 shows current data.
         if (data.heartbeat().timestampMs != 0 &&
             data.heartbeat().timestampMs != hbLastRxMs_) {
@@ -1940,6 +1951,9 @@ void EngineeringScreen::draw() {
             }
             tft.drawString(buf, x, 250);
         }
+
+        // WHEEL DIAG (0x313) — per-wheel reason labels in the right column.
+        drawWheelDiagBlock();
     }
 
     // Partial redraw for the RUN I2C SCAN status banner (immediate feedback).
@@ -4722,6 +4736,13 @@ void EngineeringScreen::drawDebounceDiag() {
     }
     tft.setTextSize(1);
 
+    // ---- WHEEL DIAG (0x313) static header — right column ----
+    // Live per-wheel reason labels are painted by the canDiagChanged_ partial
+    // redraw branch (drawWheelDiagBlock()); here we only lay down the title.
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("WHEEL DIAG 0x313", 335, 48);
+
     // ---- CAN / 0x309 delivery diagnostic section (audit A–J) ----
     // Static labels; live values painted by the canDiagChanged_ partial
     // redraw branch in draw().  Header line acts as a visual separator.
@@ -4771,7 +4792,94 @@ void EngineeringScreen::drawDebounceDiag() {
 }
 
 // -------------------------------------------------------------------------
-// sendPedalCalOp — emit a SERVICE_CMD (0x110) with byte0 = 0xF5
+// drawWheelDiagBlock — per-wheel 0x313 fault-reason labels (right column).
+//
+// Renders one compact row per channel (FL,FR,RL,RR,ST) showing the decoded
+// reason label + raw GPIO level, plus a summary flags line.  Colour rules
+// (per the HMI interpretation spec):
+//   OK                         -> green
+//   MANUAL_MOVEMENT / DISABLED -> cyan  (expected, never a red alarm)
+//   channel fault active       -> red
+//   otherwise (debouncing/etc) -> amber
+// A 0x313 frame older than 2 s (or never seen) renders the block as STALE.
+// -------------------------------------------------------------------------
+void EngineeringScreen::drawWheelDiagBlock() {
+    static const char* const kLbl[5] = { "FL", "FR", "RL", "RR", "ST" };
+    // Short reason mnemonics indexed by WHEEL_DIAG_REASON_* (0-8).
+    static const char* const kReason[9] = {
+        "OK", "NOPLS", "STKHI", "STKLO", "MISM",
+        "RATE", "MAN", "DIS", "UNK"
+    };
+
+    const int16_t x  = 335;
+    const int16_t y0 = 62;
+    const int16_t lh = 14;
+
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+
+    const auto& wd = wheelSensorDiag_;
+    const bool stale = (!wd.valid) ||
+        ((millis() - wd.timestampMs) > 2000UL);
+
+    for (uint8_t i = 0; i < 5; ++i) {
+        const int16_t y = y0 + i * lh;
+        tft.fillRect(x, y, ui::SCREEN_W - x - 6, lh, ui::COL_BG);
+
+        if (stale) {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%-2s STALE", kLbl[i]);
+            tft.drawString(buf, x, y);
+            continue;
+        }
+
+        const uint8_t r      = (wd.reason[i] < 9) ? wd.reason[i]
+                                                  : can::WHEEL_DIAG_REASON_UNKNOWN;
+        const bool    gpioHi = (wd.gpioMask  & (1U << i)) != 0;
+        const bool    fault  = (wd.faultMask & (1U << i)) != 0;
+
+        uint16_t col;
+        if (r == can::WHEEL_DIAG_REASON_OK) {
+            col = ui::COL_GREEN;
+        } else if (r == can::WHEEL_DIAG_REASON_MANUAL_MOVEMENT ||
+                   r == can::WHEEL_DIAG_REASON_DISABLED_STATE) {
+            col = ui::COL_CYAN;
+        } else if (fault) {
+            col = ui::COL_RED;
+        } else {
+            col = ui::COL_AMBER;
+        }
+
+        char buf[28];
+        snprintf(buf, sizeof(buf), "%-2s %-5s G=%u",
+                 kLbl[i], kReason[r], (unsigned)(gpioHi ? 1 : 0));
+        tft.setTextColor(col, ui::COL_BG);
+        tft.drawString(buf, x, y);
+    }
+
+    // Summary flags line under the rows.
+    const int16_t sy = y0 + 5 * lh;
+    tft.fillRect(x, sy, ui::SCREEN_W - x - 6, lh, ui::COL_BG);
+    if (stale) {
+        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+        tft.drawString("PWR- MAN- DEB- LAT-", x, sy);
+    } else {
+        const uint8_t fl = wd.flags;
+        char buf[36];
+        snprintf(buf, sizeof(buf), "PWR%u MAN%u DEB%u LAT%u",
+                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_POWERTRAIN) ? 1 : 0),
+                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_MANUAL)     ? 1 : 0),
+                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_DEBOUNCING) ? 1 : 0),
+                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_LATCHED)    ? 1 : 0));
+        // Latched fault dominates the summary colour; otherwise reflect activity.
+        const uint16_t col = (fl & can::WHEEL_DIAG_FLAG_LATCHED)    ? ui::COL_RED
+                           : (fl & can::WHEEL_DIAG_FLAG_DEBOUNCING) ? ui::COL_AMBER
+                           : ui::COL_GRAY;
+        tft.setTextColor(col, ui::COL_BG);
+        tft.drawString(buf, x, sy);
+    }
+}
 // (SERVICE_ACTION_PEDAL_CAL) and byte1 = sub-opcode.  The STM32 replies
 // with a CMD_ACK (0x103, byte0 = 0x10) which is picked up by the
 // existing ackData() pipeline and shown in the standard ack feedback

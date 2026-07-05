@@ -197,6 +197,12 @@ typedef enum {
     WHEEL_DIAG_DISABLED_STATE  = 7   /* Channel disabled in service mode              */
 } WheelDiag_t;
 
+/* Stable wire code for an unmapped/out-of-range WheelDiag_t value.  The 0-7
+ * WheelDiag_t codes are transmitted verbatim in the 0x313 DIAG_WHEEL_SENSOR
+ * frame; anything the STM32 cannot classify is sent as UNKNOWN so the HMI can
+ * render it distinctly instead of silently mapping it to OK.                 */
+#define WHEEL_DIAG_CAN_UNKNOWN       8U
+
 /* Time a wheel mismatch must PERSIST while under traction before it is
  * latched as a WHEEL_SENSOR fault.  Prevents a single hand-spin or a
  * momentary difference while turning a wheel from forcing DEGRADED.        */
@@ -320,6 +326,20 @@ uint8_t       Safety_GetFaultFlags(void);
 /* Per-wheel speed-sensor diagnostic reason (idx 0-3 = FL,FR,RL,RR).
  * Returns WHEEL_DIAG_OK for out-of-range idx.  Report-only.            */
 WheelDiag_t   Safety_GetWheelDiag(uint8_t idx);
+
+/* Map a WheelDiag_t to the stable 0x313 wire code (0-8).  Out-of-range
+ * enum values collapse to WHEEL_DIAG_CAN_UNKNOWN (8).  Report-only.    */
+uint8_t       Safety_WheelDiagToCanReason(WheelDiag_t diag);
+
+/* True when the vehicle is in a drive-capable state AND actually commanding
+ * traction above WHEEL_INTERVENTION_MIN_DEMAND_PCT.  Public wrapper used by
+ * the 0x313 diagnostic so the HMI can tell manual movement apart from a
+ * fault under load.  Report-only — does not alter any control path.    */
+bool          Safety_IsPowertrainEngaged(void);
+
+/* Bitmask of wheel channels (bit0=FL..bit3=RR) whose MODULE_WHEEL_SPEED_*
+ * service-mode fault is currently latched (WARNING or ERROR).  Report-only. */
+uint8_t       Safety_GetWheelFaultMask(void);
 
 /* Degraded-mode throttle limit (returns multiplier 0.0–1.0) */
 float         Safety_GetPowerLimitFactor(void);

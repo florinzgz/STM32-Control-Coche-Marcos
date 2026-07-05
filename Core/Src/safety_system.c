@@ -1277,6 +1277,33 @@ WheelDiag_t Safety_GetWheelDiag(uint8_t idx)
     return wheel_diag[idx];
 }
 
+uint8_t Safety_WheelDiagToCanReason(WheelDiag_t diag)
+{
+    /* WheelDiag_t codes 0-7 are transmitted verbatim; any value outside the
+     * known enum range collapses to the stable UNKNOWN wire code (8).     */
+    if ((unsigned)diag <= (unsigned)WHEEL_DIAG_DISABLED_STATE) {
+        return (uint8_t)diag;
+    }
+    return WHEEL_DIAG_CAN_UNKNOWN;
+}
+
+bool Safety_IsPowertrainEngaged(void)
+{
+    return Safety_PowertrainEngaged();
+}
+
+uint8_t Safety_GetWheelFaultMask(void)
+{
+    uint8_t mask = 0U;
+    for (uint8_t i = 0; i < NUM_WHEELS; i++) {
+        if (ServiceMode_GetFault((ModuleID_t)(MODULE_WHEEL_SPEED_FL + i))
+                != MODULE_FAULT_NONE) {
+            mask |= (uint8_t)(1U << i);
+        }
+    }
+    return mask;
+}
+
 void ABS_Update(void)
 {
     /* Skip if ABS module is disabled (service mode) */

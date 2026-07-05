@@ -762,6 +762,12 @@ int main(void)
              * Diagnostic only — does not gate any control or safety path.     */
             CAN_SendBootResetDiag();
 
+            /* Per-wheel speed-sensor fault-reason diagnostic (0x313): reason
+             * code + GPIO level + fault mask per wheel, so the HMI can name the
+             * failing wheel and tell manual movement apart from a real fault.
+             * Diagnostic only — does not gate any control or safety path.     */
+            CAN_SendWheelSensorDiag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

@@ -77,6 +77,19 @@ extern "C" {
                                          //   Byte 5:   tx_queue_depth (software TX ring occupancy now, 0..31)
                                          //   Byte 6:   tx_queue_depth_max (software TX ring high-water, 0..31)
                                          //   Byte 7:   reserved (0)
+#define CAN_ID_DIAG_WHEEL_SENSOR  0x313  // STM32 → ESP32 (1000ms) per-wheel speed-sensor fault-reason diagnostic
+                                         //   Byte 0: reason FL   (WheelDiag_t code, 0-8: see WHEEL_DIAG_*)
+                                         //   Byte 1: reason FR
+                                         //   Byte 2: reason RL
+                                         //   Byte 3: reason RR
+                                         //   Byte 4: reason STEER/CENTER (reserved, currently 0=OK)
+                                         //   Byte 5: gpio_level_mask  bit0 FL,bit1 FR,bit2 RL,bit3 RR,bit4 STEER
+                                         //   Byte 6: active_fault_mask bit0 FL,bit1 FR,bit2 RL,bit3 RR,bit4 STEER
+                                         //   Byte 7: flags/sequence bit0 powertrain_engaged, bit1 manual_movement,
+                                         //           bit2 wheel_fault_debouncing, bit3 wheel_fault_latched,
+                                         //           bits4-7 sequence counter (wraps 0-15)
+                                         //   Reason codes: 0=OK 1=NO_PULSE 2=STUCK_HIGH 3=STUCK_LOW 4=MISMATCH
+                                         //                 5=IMPOSSIBLE_RATE 6=MANUAL_MOVEMENT 7=DISABLED_STATE 8=UNKNOWN
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -344,6 +357,7 @@ void CAN_SendDebounceDiag(void);    /* 1 Hz DWT-debounce filter EMI counters (0x
 void CAN_SendI2CDiag(void);         /* 1 Hz I2C topology diagnostic (0x309): mux + per-channel INA226 */
 void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (0x30A) */
 void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
+void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason diagnostic (0x313) */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);
