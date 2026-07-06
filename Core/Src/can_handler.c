@@ -1294,6 +1294,67 @@ void CAN_SendBootResetDiag(void) {
 }
 
 /**
+ * @brief  Per-wheel speed-sensor fault-reason diagnostic (additive, report-only).
+ *
+ * Surfaces, for every wheel channel, the WheelDiag_t reason code that
+ * Safety_CheckSensors() computed, together with the raw GPIO level, the
+ * latched service-mode fault mask and a small flags nibble.  Lets the HMI
+ * tell the operator exactly WHICH wheel is silent and WHY, so a 0x10
+ * SENSOR_FAULT is no longer an unlabelled "guess with the flags" event and
+ * an expected hand-spin (MANUAL_MOVEMENT) is visibly distinct from a genuine
+ * fault under traction (NO_PULSE / STUCK_* / MISMATCH).
+ *
+ * CAN ID: 0x313   DLC: 8   Rate: 1000 ms (1 Hz)
+ *   Byte 0-3: reason FL/FR/RL/RR (WheelDiag_t wire code, 0-8)
+ *   Byte 4:   reason STEER/CENTER (reserved — no diag channel yet, always 0)
+ *   Byte 5:   gpio_level_mask (bit0 FL..bit3 RR, bit4 STEER=0)
+ *   Byte 6:   active_fault_mask (bit0 FL..bit3 RR, bit4 STEER=0)
+ *   Byte 7:   bit0 powertrain_engaged, bit1 manual_movement_detected,
+ *             bit2 wheel_fault_debouncing, bit3 wheel_fault_latched,
+ *             bits4-7 sequence counter (wraps 0-15)
+ *
+ * Diagnostic only — no control/safety path consumes this frame.  It reads the
+ * already-computed safety diagnostics and never mutates safety state.
+ */
+void CAN_SendWheelSensorDiag(void) {
+    static uint8_t seq = 0U;
+    uint8_t data[8] = {0};
+
+    uint8_t gpio_mask   = 0U;
+    uint8_t manual_seen = 0U;
+    uint8_t debouncing  = 0U;
+    for (uint8_t i = 0; i < NUM_WHEELS && i < 4U; i++) {
+        WheelDiag_t d = Safety_GetWheelDiag(i);
+        data[i] = Safety_WheelDiagToCanReason(d);
+        if (Wheel_GetGpioLevel(i) == 1U) {
+            gpio_mask |= (uint8_t)(1U << i);
+        }
+        if (d == WHEEL_DIAG_MANUAL_MOVEMENT) manual_seen = 1U;
+        /* A reason of MISMATCH means "under load, silent, debounce armed but
+         * not yet latched" — i.e. the fault is currently debouncing.        */
+        if (d == WHEEL_DIAG_MISMATCH)        debouncing = 1U;
+    }
+    /* Byte 4 (STEER/CENTER) has no dedicated wheel-diag channel yet: leave the
+     * reason at 0 (OK) and its gpio/fault bits clear.  Reserved for a future
+     * steering-center sensor diagnostic without changing the frame layout.   */
+    data[4] = WHEEL_DIAG_OK;
+
+    data[5] = gpio_mask;                       /* bit4 STEER stays 0 */
+    data[6] = Safety_GetWheelFaultMask();      /* bit4 STEER stays 0 */
+
+    uint8_t flags = 0U;
+    if (Safety_IsPowertrainEngaged())                       flags |= (1U << 0);
+    if (manual_seen)                                        flags |= (1U << 1);
+    if (debouncing)                                         flags |= (1U << 2);
+    if (Safety_GetFaultFlags() & FAULT_WHEEL_SENSOR)        flags |= (1U << 3);
+    flags |= (uint8_t)((seq & 0x0FU) << 4);
+    seq++;
+    data[7] = flags;
+
+    TransmitFrame(CAN_ID_DIAG_WHEEL_SENSOR, data, 8);
+}
+
+/**
  * @brief  I2C service-mode scan report (additive, on-demand, report-only).
  *
  * Triggered by SERVICE_CMD 0x110 byte0 = SERVICE_ACTION_I2C_SERVICE (0xF6).

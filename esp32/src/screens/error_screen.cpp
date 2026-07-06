@@ -72,6 +72,21 @@ const char* ErrorScreen::diagSubsystemName(uint8_t sub) {
     }
 }
 
+// ---- Wheel-diagnostic reason (0x313) → human-readable name ----
+static const char* wheelReasonName(uint8_t reason) {
+    switch (reason) {
+        case can::WHEEL_DIAG_REASON_OK:              return "OK";
+        case can::WHEEL_DIAG_REASON_NO_PULSE:        return "NO PULSE";
+        case can::WHEEL_DIAG_REASON_STUCK_HIGH:      return "STUCK HIGH";
+        case can::WHEEL_DIAG_REASON_STUCK_LOW:       return "STUCK LOW";
+        case can::WHEEL_DIAG_REASON_MISMATCH:        return "MISMATCH";
+        case can::WHEEL_DIAG_REASON_IMPOSSIBLE_RATE: return "BAD RATE";
+        case can::WHEEL_DIAG_REASON_MANUAL_MOVEMENT: return "MANUAL";
+        case can::WHEEL_DIAG_REASON_DISABLED_STATE:  return "DISABLED";
+        default:                                     return "UNKNOWN";
+    }
+}
+
 void ErrorScreen::onEnter() {
     RTRACE_BEGIN_SCREEN("error");
     needsRedraw_ = true;
@@ -141,6 +156,16 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     diagCode_      = data.diag().errorCode;
     diagSubsystem_ = data.diag().subsystem;
 
+    // Cache the per-wheel fault-reason diagnostic (0x313) for the WHEEL_SENSOR
+    // hint.  Treat a frame older than 2 s (or never seen) as no data.
+    {
+        const auto& wd = data.wheelSensorDiag();
+        wheelDiagValid_ = wd.valid &&
+                          ((frameTimeMs - wd.timestampMs) <= 2000UL);
+        for (uint8_t i = 0; i < 5; ++i) wheelReason_[i] = wd.reason[i];
+        wheelFaultMask_ = wd.faultMask;
+    }
+
     // ---- Compute tile hashes ----
     // Feed canLost_ into the fault/safety/diag hashes so the "(STALE)" marker
     // appears/clears correctly: on CAN loss these values are the last frame
@@ -154,6 +179,11 @@ void ErrorScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     {
         ui::TileHash fh = ui::tileHashVal(faultFlags_);
         fh = ui::tileHashFeed(fh, canLost_ ? 1u : 0u);
+        // Fold the wheel-diag hint into the fault tile so it refreshes when the
+        // failing wheel/reason changes even while faultFlags_ stays 0x10.
+        fh = ui::tileHashFeed(fh, wheelDiagValid_ ? 1u : 0u);
+        fh = ui::tileHashFeed(fh, wheelFaultMask_);
+        for (uint8_t i = 0; i < 5; ++i) fh = ui::tileHashFeed(fh, wheelReason_[i]);
         tiles_.updateHash(ETILE_FAULTS, fh);
     }
     {
@@ -317,6 +347,36 @@ void ErrorScreen::draw() {
                 tft.setTextColor(ui::COL_AMBER, ui::COL_RED);
                 tft.drawString("(STALE — last seen before CAN loss)", 20, 150);
             }
+        }
+
+        // ---- WHEEL_SENSOR (0x10) hint: name the failing wheel + reason ----
+        // Uses the 0x313 diagnostic to turn an unlabelled "SENSOR FAULT" into
+        // e.g. "Wheel: FR MISMATCH".  Falls back silently to the old behaviour
+        // when no 0x313 data is available (backward-compatible).
+        if ((faultFlags_ & 0x10U) && wheelDiagValid_) {
+            static const char* const kWheel[5] = { "FL", "FR", "RL", "RR", "ST" };
+            int8_t pick = -1;
+            // Prefer a channel with a latched fault bit; else the first channel
+            // reporting an escalating fault reason (NO_PULSE..IMPOSSIBLE_RATE).
+            for (uint8_t i = 0; i < 4 && pick < 0; ++i) {
+                if (wheelFaultMask_ & (1U << i)) pick = (int8_t)i;
+            }
+            for (uint8_t i = 0; i < 5 && pick < 0; ++i) {
+                const uint8_t r = wheelReason_[i];
+                if (r >= can::WHEEL_DIAG_REASON_NO_PULSE &&
+                    r <= can::WHEEL_DIAG_REASON_IMPOSSIBLE_RATE) pick = (int8_t)i;
+            }
+            char hbuf[40];
+            if (pick >= 0) {
+                snprintf(hbuf, sizeof(hbuf), "Wheel: %s %s",
+                         kWheel[pick], wheelReasonName(wheelReason_[pick]));
+            } else {
+                // 0x10 latched but every current reason is non-fault (e.g. a
+                // historic DTC): tell the operator it is clearable, not live.
+                snprintf(hbuf, sizeof(hbuf), "Wheel: clear DTC / reboot");
+            }
+            tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
+            tft.drawString(hbuf, 250, 150);
         }
         tiles_.markClean(ETILE_FAULTS);
     }

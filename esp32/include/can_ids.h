@@ -431,6 +431,37 @@ inline constexpr uint8_t RESET_CAUSE_WWDG      = (1U << 3);
 inline constexpr uint8_t RESET_CAUSE_BROWNOUT  = (1U << 4);
 inline constexpr uint8_t RESET_CAUSE_PIN       = (1U << 5);
 
+// -------------------------------------------------------------------------
+// Per-wheel Speed-Sensor Fault-Reason Diagnostic (0x313) — STM32→ESP32, 1 Hz, DLC 8
+//   Byte 0-3: reason FL/FR/RL/RR (WHEEL_DIAG_REASON_* code, 0-8)
+//   Byte 4:   reason STEER/CENTER (reserved, currently 0 = OK)
+//   Byte 5:   gpio_level_mask  (bit0 FL, bit1 FR, bit2 RL, bit3 RR, bit4 STEER)
+//   Byte 6:   active_fault_mask (bit0 FL, bit1 FR, bit2 RL, bit3 RR, bit4 STEER)
+//   Byte 7:   flags/sequence (bit0 powertrain_engaged, bit1 manual_movement,
+//             bit2 wheel_fault_debouncing, bit3 wheel_fault_latched,
+//             bits4-7 sequence counter)
+// Mirrors Core/Src/can_handler.c CAN_SendWheelSensorDiag() / WheelDiag_t.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_WHEEL_SENSOR = 0x313;  // STM32→ESP32, DLC 8, 1000 ms — per-wheel fault reason
+
+// Wheel-diagnostic reason codes (0x313 bytes 0-4) — MUST mirror WheelDiag_t
+// in Core/Inc/safety_system.h (0-7) plus the UNKNOWN wire code (8).
+inline constexpr uint8_t WHEEL_DIAG_REASON_OK              = 0;
+inline constexpr uint8_t WHEEL_DIAG_REASON_NO_PULSE       = 1;
+inline constexpr uint8_t WHEEL_DIAG_REASON_STUCK_HIGH     = 2;
+inline constexpr uint8_t WHEEL_DIAG_REASON_STUCK_LOW      = 3;
+inline constexpr uint8_t WHEEL_DIAG_REASON_MISMATCH       = 4;
+inline constexpr uint8_t WHEEL_DIAG_REASON_IMPOSSIBLE_RATE = 5;
+inline constexpr uint8_t WHEEL_DIAG_REASON_MANUAL_MOVEMENT = 6;
+inline constexpr uint8_t WHEEL_DIAG_REASON_DISABLED_STATE  = 7;
+inline constexpr uint8_t WHEEL_DIAG_REASON_UNKNOWN         = 8;
+
+// Flag bits (0x313 byte 7 low nibble).
+inline constexpr uint8_t WHEEL_DIAG_FLAG_POWERTRAIN   = (1U << 0);
+inline constexpr uint8_t WHEEL_DIAG_FLAG_MANUAL       = (1U << 1);
+inline constexpr uint8_t WHEEL_DIAG_FLAG_DEBOUNCING   = (1U << 2);
+inline constexpr uint8_t WHEEL_DIAG_FLAG_LATCHED      = (1U << 3);
+
 } // namespace can
 
 #endif // CAN_IDS_H

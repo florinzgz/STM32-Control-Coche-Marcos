@@ -35,6 +35,15 @@ float Wheel_GetRPM_FL(void);
  * vehicle stopped.                                                     */
 bool  Wheel_IsStale(uint8_t idx);
 
+/* ---- Per-wheel diagnostics (report-only) ----
+ * Expose raw sensing state so the operator can distinguish a genuine
+ * sensor fault from expected behaviour when a wheel is turned by hand
+ * (e.g. a sensor parked directly over a bolt reads a constant level and
+ * emits no edges).  Diagnostic only — must NOT gate any control path.  */
+uint32_t Wheel_GetPulseCount(uint8_t idx);      /* accepted EXTI pulses, 0 if idx invalid   */
+uint32_t Wheel_GetLastEdgeAgeMs(uint8_t idx);   /* ms since last accepted edge (UINT32_MAX invalid) */
+uint8_t  Wheel_GetGpioLevel(uint8_t idx);       /* current pin level 0/1, 0xFF if idx invalid */
+
 /* ---- Steering center inductive sensor (EXTI) ---- */
 void SteeringCenter_IRQHandler(void);
 bool SteeringCenter_Detected(void);

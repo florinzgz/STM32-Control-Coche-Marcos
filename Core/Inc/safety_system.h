@@ -180,6 +180,44 @@ typedef enum {
     DEGRADED_L3         = 3    /* Persistent anomaly — most restrictive  */
 } DegradedLevel_t;
 
+/* ---- Per-wheel speed-sensor diagnostic reason codes ----
+ * Surface WHY a wheel channel is (or is not) flagged, so the operator can
+ * tell a genuine sensor fault apart from expected behaviour when a wheel is
+ * turned by hand.  Only MISMATCH / IMPOSSIBLE_RATE / STUCK_* / NO_PULSE are
+ * escalating (they increment the plausibility fault_count); MANUAL_MOVEMENT
+ * and DISABLED_STATE are diagnostic-only and never raise WHEEL_SENSOR.      */
+typedef enum {
+    WHEEL_DIAG_OK              = 0,  /* Nominal — pulses coherent / vehicle stopped */
+    WHEEL_DIAG_NO_PULSE        = 1,  /* Under power + others moving, this one silent */
+    WHEEL_DIAG_STUCK_HIGH      = 2,  /* Silent under power, pin parked HIGH (on bolt) */
+    WHEEL_DIAG_STUCK_LOW       = 3,  /* Silent under power, pin parked LOW (in gap)   */
+    WHEEL_DIAG_MISMATCH        = 4,  /* Under power, wheel deviates from the others   */
+    WHEEL_DIAG_IMPOSSIBLE_RATE = 5,  /* NaN/Inf/out-of-range speed value              */
+    WHEEL_DIAG_MANUAL_MOVEMENT = 6,  /* Incoherent pulses but NOT under traction      */
+    WHEEL_DIAG_DISABLED_STATE  = 7   /* Channel disabled in service mode              */
+} WheelDiag_t;
+
+/* Stable wire code for an unmapped/out-of-range WheelDiag_t value.  The 0-7
+ * WheelDiag_t codes are transmitted verbatim in the 0x313 DIAG_WHEEL_SENSOR
+ * frame; anything the STM32 cannot classify is sent as UNKNOWN so the HMI can
+ * render it distinctly instead of silently mapping it to OK.                 */
+#define WHEEL_DIAG_CAN_UNKNOWN       8U
+
+/* Time a wheel mismatch must PERSIST while under traction before it is
+ * latched as a WHEEL_SENSOR fault.  Prevents a single hand-spin or a
+ * momentary difference while turning a wheel from forcing DEGRADED.        */
+#define WHEEL_FAULT_DEBOUNCE_MS      1000U
+
+/* Minimum |traction demand| (%) that counts as "vehicle under power".
+ * Below this, ABS/TCS interventions and wheel-mismatch faults are
+ * suppressed because any wheel motion is manual, not commanded.
+ *
+ * Kept at 3% deliberately: raising it (e.g. 5–10%) would suppress more
+ * detection at low pedal and could delay catching real faults under light
+ * load.  Pending empirical adjustment on hardware if noise on the demand
+ * signal produces false positives near this floor.                        */
+#define WHEEL_INTERVENTION_MIN_DEMAND_PCT  3.0f
+
 /* Reason for entering a degraded level (diagnostic / telemetry) */
 typedef enum {
     DEGRADED_REASON_NONE            = 0,
@@ -289,6 +327,24 @@ bool          Safety_IsMotionAllowed(void);
 bool          Safety_IsDegraded(void);
 bool          Safety_IsLimpHome(void);
 uint8_t       Safety_GetFaultFlags(void);
+
+/* Per-wheel speed-sensor diagnostic reason (idx 0-3 = FL,FR,RL,RR).
+ * Returns WHEEL_DIAG_OK for out-of-range idx.  Report-only.            */
+WheelDiag_t   Safety_GetWheelDiag(uint8_t idx);
+
+/* Map a WheelDiag_t to the stable 0x313 wire code (0-8).  Out-of-range
+ * enum values collapse to WHEEL_DIAG_CAN_UNKNOWN (8).  Report-only.    */
+uint8_t       Safety_WheelDiagToCanReason(WheelDiag_t diag);
+
+/* True when the vehicle is in a drive-capable state AND actually commanding
+ * traction above WHEEL_INTERVENTION_MIN_DEMAND_PCT.  Public wrapper used by
+ * the 0x313 diagnostic so the HMI can tell manual movement apart from a
+ * fault under load.  Report-only — does not alter any control path.    */
+bool          Safety_IsPowertrainEngaged(void);
+
+/* Bitmask of wheel channels (bit0=FL..bit3=RR) whose MODULE_WHEEL_SPEED_*
+ * service-mode fault is currently latched (WARNING or ERROR).  Report-only. */
+uint8_t       Safety_GetWheelFaultMask(void);
 
 /* Degraded-mode throttle limit (returns multiplier 0.0–1.0) */
 float         Safety_GetPowerLimitFactor(void);

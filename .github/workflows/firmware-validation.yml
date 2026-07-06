@@ -121,6 +121,22 @@ jobs:
               -o /tmp/test_wheel_speed
           /tmp/test_wheel_speed
 
+      - name: Run test_wheel_fault_gate
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_wheel_fault_gate.c \
+              -o /tmp/test_wheel_fault_gate
+          /tmp/test_wheel_fault_gate
+
+      - name: Run test_wheel_diag_can
+        run: |
+          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
+              Core/Src/test_wheel_diag_can.c \
+              -o /tmp/test_wheel_diag_can
+          /tmp/test_wheel_diag_can
+
       - name: Run test_gear_limits
         run: |
           gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \

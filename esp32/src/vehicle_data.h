@@ -316,6 +316,22 @@ struct BootResetData {
 };
 
 // -------------------------------------------------------------------------
+// Per-wheel speed-sensor fault-reason diagnostic (0x313) — report-only, 1 Hz.
+// reason[0..3] = FL,FR,RL,RR; reason[4] = STEER/CENTER (reserved).  Each is a
+// WHEEL_DIAG_REASON_* code (0-8).  gpioMask/faultMask are per-channel bitmasks
+// (bit0 FL..bit3 RR, bit4 STEER).  flags: bit0 powertrain_engaged,
+// bit1 manual_movement, bit2 wheel_fault_debouncing, bit3 wheel_fault_latched.
+// -------------------------------------------------------------------------
+struct WheelSensorDiagData {
+    uint8_t reason[5] = {0, 0, 0, 0, 0};  // FL,FR,RL,RR,STEER
+    uint8_t gpioMask  = 0;
+    uint8_t faultMask = 0;
+    uint8_t flags     = 0;
+    bool    valid     = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -513,6 +529,7 @@ public:
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
     void setBootReset(const BootResetData& d)       { bootReset_ = d; }
+    void setWheelSensorDiag(const WheelSensorDiagData& d) { wheelSensorDiag_ = d; }
     void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
@@ -549,6 +566,7 @@ public:
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
     const CanMetaData&      canMeta()      const { return canMeta_; }
     const BootResetData&    bootReset()    const { return bootReset_; }
+    const WheelSensorDiagData& wheelSensorDiag() const { return wheelSensorDiag_; }
     const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
@@ -581,6 +599,7 @@ private:
     I2cDiagData      i2cDiag_;
     CanMetaData      canMeta_;
     BootResetData    bootReset_;
+    WheelSensorDiagData wheelSensorDiag_;
     Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;

@@ -354,6 +354,35 @@ static void decodeBootReset(const CanFrame& f, vehicle::VehicleData& data) {
     data.setBootReset(br);
 }
 
+// 0x313 DIAG_WHEEL_SENSOR — per-wheel speed-sensor fault-reason diagnostic.
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendWheelSensorDiag().
+// Accepts DLC >= 7 (reasons + gpio + fault mask) and DLC 8 (adds flags byte).
+// Short frames are counted and dropped so a truncated payload never renders
+// stale/garbage reasons.
+static uint32_t s_rx0x313Count    = 0;  // total 0x313 frames seen (any DLC)
+static uint32_t s_dropped0x313Dlc = 0;  // 0x313 frames rejected for DLC < 7
+static uint8_t  s_last0x313Dlc    = 0;  // DLC of the most recent 0x313 frame
+
+static void decodeWheelSensorDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    ++s_rx0x313Count;
+    s_last0x313Dlc = f.data_length_code;
+    if (f.data_length_code < 7) { ++s_dropped0x313Dlc; return; }
+
+    vehicle::WheelSensorDiagData wd;
+    for (uint8_t i = 0; i < 5; ++i) {
+        wd.reason[i] = f.data[i];           // FL,FR,RL,RR,STEER reason codes
+    }
+    wd.gpioMask  = f.data[5];
+    wd.faultMask = f.data[6];
+    // byte 7 (flags/sequence) is present only on DLC-8 frames; leave 0 otherwise.
+    if (f.data_length_code >= 8) {
+        wd.flags = f.data[7];
+    }
+    wd.valid      = true;
+    wd.timestampMs = millis();
+    data.setWheelSensorDiag(wd);
+}
+
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
 static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
@@ -629,6 +658,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
             case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
+            case can::DIAG_WHEEL_SENSOR:    decodeWheelSensorDiag(frame, data);   break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
@@ -668,5 +698,9 @@ uint32_t rx0x103Count()       { return s_rx0x103Count; }
 uint32_t rx0x207Count()       { return s_rx0x207Count; }
 uint32_t dropped0x207Dlc()    { return s_dropped0x207Dlc; }
 uint8_t  last0x207Dlc()       { return s_last0x207Dlc; }
+
+uint32_t rx0x313Count()       { return s_rx0x313Count; }
+uint32_t dropped0x313Dlc()    { return s_dropped0x313Dlc; }
+uint8_t  last0x313Dlc()       { return s_last0x313Dlc; }
 
 } // namespace can_rx

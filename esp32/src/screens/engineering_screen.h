@@ -95,6 +95,7 @@ private:
     void drawRelayControl();
     void drawInaLiveDiag();
     void drawDebounceDiag();
+    void drawWheelDiagBlock();       // per-wheel 0x313 reason labels (right column of DEBOUNCE_DIAG)
     void drawMcpLiveDiag();
     void drawGearLimits();
     void drawBrightness();
@@ -155,6 +156,13 @@ private:
     uint8_t       pedalStabHead_    = 0;
     // Helper: send a SERVICE_CMD (0x110) with byte0=0xF5 (PEDAL_CAL) + sub-opcode.
     void sendPedalCalOp(uint8_t op);
+
+    // Cached wheel-diag hint line ("WD: ...") shown under "Safety gate" on the
+    // Pedal Calibration screen.  Redraw only when text/colour changes → no
+    // flicker (partial redraw, no fillScreen).  Informational only; the safety
+    // gate itself is enforced server-side and is never relaxed here.
+    char        pedalWheelText_[48]  = {0};
+    uint16_t    pedalWheelColor_     = 0;
 
     // Cached data for encoder calibration (live steering)
     int16_t     steeringAngle_   = 0;      // 0.1° units
@@ -285,6 +293,13 @@ private:
     unsigned long bootResetLastTs_  = 0;   // last 0x312 timestamp consumed
     uint32_t      stm32RestartCount_ = 0;  // local counter: detected uptime resets
     uint32_t      bootResetPrevUptime_ = 0; // previous uptime_ms for restart detection
+
+    // Per-wheel speed-sensor fault-reason diagnostic cache (0x313 — 1 Hz).
+    // reason[]/gpioMask/faultMask/flags surface WHICH wheel fails and WHY on
+    // the DEBOUNCE / CAN DIAG page.  Read-only display.
+    vehicle::WheelSensorDiagData wheelSensorDiag_{};
+    unsigned long wheelDiagLastTs_ = 0;    // last 0x313 timestamp consumed
+    uint32_t      rx0x313Count_    = 0;    // total 0x313 frames received
 
     // 0x207 battery diagnostic counters cache (INA226_LIVE_DIAG submenu).
     vehicle::Batt207DiagData batt207Diag_{};
