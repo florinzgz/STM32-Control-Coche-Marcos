@@ -281,17 +281,41 @@ static void Wheel_ComputeSpeed(uint8_t idx)
 
     } else if (delta == 1U) {
         /* Period-based: use interval between last two accepted pulses.
-         * More precise than "1 pulse / 10 ms" at low speeds.           */
+         * More precise than "1 pulse / 10 ms" at low speeds.
+         *
+         * A valid period needs TWO consecutive real pulses: prev_pt must be
+         * a genuine earlier pulse (non-zero) and the gap must be shorter than
+         * the stale window.  A single isolated pulse from standstill (prev_pt
+         * still 0 after boot, or a prev pulse older than the stale window
+         * because the wheel was stopped) carries NO reliable speed: the wheel
+         * moved one bolt-pitch, but over an unknown, possibly very long time.
+         * The previous code fell back to dt (the ~10 ms compute-cycle period),
+         * fabricating a large phantom speed (up to the 40 km/h clamp) on the
+         * first pulse of a slow hand-push.  Instead, treat the isolated pulse
+         * like the delta==0 case: bound the estimate by the time since the
+         * pulse and never exceed the previous reading, so a slow push decays
+         * toward zero and a real speed only registers once a second pulse
+         * establishes a true inter-pulse interval.                        */
         uint32_t period_ms = last_pt - prev_pt;
-        if (period_ms > 0U && period_ms < WHEEL_STALE_TIMEOUT_MS) {
+        if (prev_pt != 0U && period_ms > 0U && period_ms < WHEEL_STALE_TIMEOUT_MS) {
             float speed_ms = dist_per_pulse * 1000.0f / (float)period_ms;
             speed_kmh = speed_ms * 3.6f;
             rpm       = 60000.0f / ((float)period_ms * (float)WHEEL_PULSES_REV);
         } else {
-            /* First pulse ever or period unreliable — fall back to count */
-            float speed_ms = dist_per_pulse * 1000.0f / (float)dt;
-            speed_kmh = speed_ms * 3.6f;
-            rpm       = 60000.0f / ((float)dt * (float)WHEEL_PULSES_REV);
+            /* Isolated first pulse — upper-bound estimate, monotonic decay. */
+            uint32_t since_last = now - last_pt;
+            if (since_last > 0U) {
+                float speed_ms = dist_per_pulse * 1000.0f / (float)since_last;
+                speed_kmh = speed_ms * 3.6f;
+                rpm       = 60000.0f / ((float)since_last * (float)WHEEL_PULSES_REV);
+                if (speed_kmh > wheel_speed_kmh[idx])
+                    speed_kmh = wheel_speed_kmh[idx];
+                if (rpm > wheel_rpm[idx])
+                    rpm = wheel_rpm[idx];
+            } else {
+                speed_kmh = wheel_speed_kmh[idx];
+                rpm       = wheel_rpm[idx];
+            }
         }
 
     } else {
