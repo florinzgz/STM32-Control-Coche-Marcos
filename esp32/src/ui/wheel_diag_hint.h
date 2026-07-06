@@ -107,18 +107,29 @@ inline WheelHintKind buildWheelBlockText(
     }
 
     // 3. One or more channels report an active fault — name each of them.
+    //    Append each " CH REASON" segment with a bounded snprintf that writes
+    //    at out+used with the exact remaining space (n-used).  snprintf always
+    //    NUL-terminates and never writes past the buffer, so this stays safe
+    //    even if n is smaller than the composed line (silent truncation only,
+    //    never overflow).  We stop as soon as the buffer is full.
     if (faultMask != 0) {
         static const char* const kLbl[5] = { "FL", "FR", "RL", "RR", "ST" };
-        snprintf(out, n, "WD:");
-        size_t used = strlen(out);
+        size_t used = 0;
+        int w = snprintf(out, n, "WD:");
+        if (w > 0) {
+            used = (static_cast<size_t>(w) < n) ? static_cast<size_t>(w) : (n - 1);
+        }
         for (uint8_t i = 0; i < 5; ++i) {
             if ((faultMask & (1U << i)) == 0) continue;
-            char seg[12];
-            snprintf(seg, sizeof(seg), " %s %s", kLbl[i], wheelReasonShort(reason[i]));
-            if (used + 1 < n) {
-                strncat(out, seg, n - 1 - used);
-                used = strlen(out);
+            if (used + 1 >= n) break;  // no room left (keep the NUL)
+            int m = snprintf(out + used, n - used, " %s %s",
+                             kLbl[i], wheelReasonShort(reason[i]));
+            if (m < 0) break;
+            if (static_cast<size_t>(m) >= n - used) {
+                used = n - 1;  // truncated: buffer is now full → stop
+                break;
             }
+            used += static_cast<size_t>(m);
         }
         return WheelHintKind::FAULT;
     }

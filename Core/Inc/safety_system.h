@@ -210,7 +210,12 @@ typedef enum {
 
 /* Minimum |traction demand| (%) that counts as "vehicle under power".
  * Below this, ABS/TCS interventions and wheel-mismatch faults are
- * suppressed because any wheel motion is manual, not commanded.           */
+ * suppressed because any wheel motion is manual, not commanded.
+ *
+ * Kept at 3% deliberately: raising it (e.g. 5–10%) would suppress more
+ * detection at low pedal and could delay catching real faults under light
+ * load.  Pending empirical adjustment on hardware if noise on the demand
+ * signal produces false positives near this floor.                        */
 #define WHEEL_INTERVENTION_MIN_DEMAND_PCT  3.0f
 
 /* Reason for entering a degraded level (diagnostic / telemetry) */

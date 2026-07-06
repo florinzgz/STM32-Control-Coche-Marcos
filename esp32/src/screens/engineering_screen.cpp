@@ -1453,7 +1453,9 @@ void EngineeringScreen::draw() {
         }
     }
 
-
+    // Partial redraw for encoder calibration (live steering angle gauge + Z diagnostic)
+    if (currentMenu_ == SubMenu::ENCODER_CAL &&
+        (encoderDataChanged_ || steerZDataChanged_)) {
         encoderDataChanged_ = false;
         steerZDataChanged_ = false;
 

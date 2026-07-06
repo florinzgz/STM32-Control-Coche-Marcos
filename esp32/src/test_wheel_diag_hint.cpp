@@ -145,6 +145,24 @@ int main() {
         CHECK(k == WheelHintKind::FAULT, "faultMask beats manual -> FAULT");
     }
 
+    // 9b. Small buffer that fits the prefix + one full segment but truncates the
+    //     second: output must be a clean, NUL-terminated prefix (no overflow,
+    //     no garbage past the NUL) — exercises the snprintf pointer/remain path.
+    {
+        uint8_t reason[5] = {can::WHEEL_DIAG_REASON_MISMATCH,
+                             can::WHEEL_DIAG_REASON_NO_PULSE, 0, 0, 0};
+        char b[12];                 // "WD: FL MIS" (10) + NUL fits; " FR NP" won't
+        std::memset(b, 0x7F, sizeof(b));
+        WheelHintKind k = buildWheelBlockText(reason, 0x03, true, 0, false, b, sizeof(b));
+        bool terminated = false;
+        size_t nulAt = sizeof(b);
+        for (size_t i = 0; i < sizeof(b); ++i) { if (b[i] == '\0') { terminated = true; nulAt = i; break; } }
+        CHECK(terminated, "small buffer stays NUL-terminated");
+        CHECK(nulAt < sizeof(b), "NUL is within bounds");
+        CHECK(contains(b, "WD: FL MIS"), "small buffer keeps clean prefix 'WD: FL MIS'");
+        CHECK(k == WheelHintKind::FAULT, "small buffer still classified FAULT");
+    }
+
     // 10. Short-reason mnemonic table matches the spec.
     {
         CHECK(std::strcmp(wheelReasonShort(can::WHEEL_DIAG_REASON_OK), "OK") == 0, "short OK");
