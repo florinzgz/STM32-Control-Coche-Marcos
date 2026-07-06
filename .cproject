@@ -77,7 +77,7 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
-						<entry excluding="Src/test_eps_params.c|Src/test_error_log.c|Src/test_math_safety.c|Src/test_motor_control.c|Src/test_sensor_calibration.c|Src/test_service_mode.c|Src/test_steering_cal_store.c|Src/test_wheel_speed.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
+						<entry excluding="Src/test_*.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 					</sourceEntries>
 				</configuration>
@@ -156,7 +156,7 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
-						<entry excluding="Src/test_eps_params.c|Src/test_error_log.c|Src/test_math_safety.c|Src/test_motor_control.c|Src/test_sensor_calibration.c|Src/test_service_mode.c|Src/test_steering_cal_store.c|Src/test_wheel_speed.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
+						<entry excluding="Src/test_*.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 					</sourceEntries>
 				</configuration>
