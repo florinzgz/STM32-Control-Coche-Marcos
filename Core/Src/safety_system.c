@@ -288,6 +288,14 @@ static uint32_t last_error_tick         = 0;
 static WheelDiag_t wheel_diag[NUM_WHEELS]         = {WHEEL_DIAG_OK};
 static uint32_t    wheel_mismatch_since[NUM_WHEELS] = {0};
 
+/* Reason captured at the instant a channel's service-mode fault was latched.
+ * The live wheel_diag[i] self-heals back to OK as soon as the wheel produces
+ * coherent pulses again, but the service-mode fault stays latched — so without
+ * this the HMI showed "all OK" next to a red LATCH flag with no way to tell
+ * WHICH channel aborted.  wheel_latched_reason[i] keeps the culprit reason for
+ * as long as the fault is latched, cleared when the fault clears.            */
+static WheelDiag_t wheel_latched_reason[NUM_WHEELS] = {WHEEL_DIAG_OK};
+
 /* ---- Non-blocking relay sequencer state machine ----
  *
  * The 24 V battery has only ONE relay (traction, PC11).  The 12 V
@@ -1277,6 +1285,34 @@ WheelDiag_t Safety_GetWheelDiag(uint8_t idx)
     return wheel_diag[idx];
 }
 
+WheelDiag_t Safety_GetWheelLatchedReason(uint8_t idx)
+{
+    if (idx >= NUM_WHEELS) return WHEEL_DIAG_OK;
+    /* While a service-mode fault is latched on this channel, report the reason
+     * captured at latch time so the culprit stays identifiable even after the
+     * live wheel_diag[idx] self-heals back to OK.  When no fault is latched the
+     * live reason is returned (may be OK / MANUAL_MOVEMENT / DISABLED_STATE).  */
+    if (ServiceMode_GetFault((ModuleID_t)(MODULE_WHEEL_SPEED_FL + idx))
+            != MODULE_FAULT_NONE &&
+        wheel_latched_reason[idx] != WHEEL_DIAG_OK) {
+        return wheel_latched_reason[idx];
+    }
+    return wheel_diag[idx];
+}
+
+/* Diagnostic reason for the STEER/CENTER channel (0x313 byte 4).  Report-only:
+ * surfaces the steering encoder as DISABLED_STATE when its service module is
+ * turned off (e.g. the E6B2-CWZ6C encoder is not yet wired) so the HMI shows
+ * a clear "DESHAB." instead of a misleading OK/fault.  Genuine encoder faults
+ * are reported through the existing FAULT_ENCODER_ERROR path, not here.       */
+uint8_t Safety_GetSteerDiagReason(void)
+{
+    if (!ServiceMode_IsEnabled(MODULE_STEER_ENCODER)) {
+        return (uint8_t)WHEEL_DIAG_DISABLED_STATE;
+    }
+    return (uint8_t)WHEEL_DIAG_OK;
+}
+
 uint8_t Safety_WheelDiagToCanReason(WheelDiag_t diag)
 {
     /* WheelDiag_t codes 0-7 are transmitted verbatim; any value outside the
@@ -1967,6 +2003,12 @@ void Safety_CheckSensors(void)
     spd[3] = Wheel_GetSpeed_RR();
     for (uint8_t i = 0; i < 4; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+        /* Clear the persisted latch culprit once the service-mode fault has
+         * cleared (e.g. after a service-screen restore).  Kept in sync so a
+         * stale culprit reason never survives past its fault.               */
+        if (ServiceMode_GetFault(mod) == MODULE_FAULT_NONE) {
+            wheel_latched_reason[i] = WHEEL_DIAG_OK;
+        }
         if (!ServiceMode_IsEnabled(mod)) {
             wheel_diag[i]          = WHEEL_DIAG_DISABLED_STATE;
             wheel_mismatch_since[i] = 0;
@@ -1979,6 +2021,7 @@ void Safety_CheckSensors(void)
             ServiceMode_SetFault(mod, MODULE_FAULT_ERROR);
             fault_count++;
             wheel_diag[i]          = WHEEL_DIAG_IMPOSSIBLE_RATE;
+            wheel_latched_reason[i] = WHEEL_DIAG_IMPOSSIBLE_RATE;
             wheel_mismatch_since[i] = 0;
             continue;
         }
@@ -2029,6 +2072,9 @@ void Safety_CheckSensors(void)
                     if      (lvl == 1U) wheel_diag[i] = WHEEL_DIAG_STUCK_HIGH;
                     else if (lvl == 0U) wheel_diag[i] = WHEEL_DIAG_STUCK_LOW;
                     else                wheel_diag[i] = WHEEL_DIAG_NO_PULSE;
+                    /* Persist the classified reason so the culprit channel
+                     * stays identifiable on the HMI after it self-heals.   */
+                    wheel_latched_reason[i] = wheel_diag[i];
                 } else {
                     /* Persisting but not yet latched — diagnostic only.  */
                     wheel_diag[i] = WHEEL_DIAG_MISMATCH;
@@ -2099,6 +2145,11 @@ void Safety_CheckSensors(void)
                      * by the loop above.  WARNING is strictly less.     */
                     if (ServiceMode_GetFault(mod) != MODULE_FAULT_ERROR) {
                         ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                    }
+                    /* Record the culprit reason for the HMI if nothing more
+                     * specific was latched on this channel already.        */
+                    if (wheel_latched_reason[i] == WHEEL_DIAG_OK) {
+                        wheel_latched_reason[i] = WHEEL_DIAG_MISMATCH;
                     }
                     /* fault_count NOT incremented — diagnostic only.    */
                 }

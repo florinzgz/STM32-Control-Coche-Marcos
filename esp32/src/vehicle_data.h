@@ -174,6 +174,10 @@ struct LightsData {
 // -------------------------------------------------------------------------
 struct PedalData {
     uint8_t percent         = 0;       // 0..100 Hall pedal travel
+    bool    plausible       = true;    // 0x20B b1 bit0 — false = fault latched
+    bool    contradictory   = false;   // 0x20B b1 bit1 — dual ADC samples disagree
+    uint16_t rawAdc         = 0;       // 0x20B b2-3 — raw ADC counts (fault value)
+    bool    extended        = false;   // true when b1-3 were present (DLC >= 4)
     unsigned long timestampMs = 0;
 };
 

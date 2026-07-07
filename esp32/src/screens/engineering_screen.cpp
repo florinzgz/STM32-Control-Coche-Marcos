@@ -1018,6 +1018,16 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
                 canDiagChanged_  = true;
             }
         }
+        /* Cache pedal telemetry (0x20B) — repaint on change so the pedal
+         * fault line on the diag page stays current.                       */
+        {
+            const auto& pdp = data.pedal();
+            if (pdp.timestampMs != pedalDiagLastTs_) {
+                pedalDiagLastTs_ = pdp.timestampMs;
+                pedalDiag_       = pdp;
+                canDiagChanged_  = true;
+            }
+        }
         // Always keep heartbeat age fresh so L5 shows current data.
         if (data.heartbeat().timestampMs != 0 &&
             data.heartbeat().timestampMs != hbLastRxMs_) {
@@ -4833,11 +4843,31 @@ void EngineeringScreen::drawDebounceDiag() {
 }
 
 // -------------------------------------------------------------------------
+// wheelDiagReasonEs — readable Spanish label for a WHEEL_DIAG_REASON_* code.
+// Kept short enough to fit the narrow right column at text size 1.
+// -------------------------------------------------------------------------
+static const char* wheelDiagReasonEs(uint8_t r) {
+    switch (r) {
+        case can::WHEEL_DIAG_REASON_OK:              return "OK";
+        case can::WHEEL_DIAG_REASON_NO_PULSE:        return "SIN PULSO";
+        case can::WHEEL_DIAG_REASON_STUCK_HIGH:      return "PEG.ALTO";
+        case can::WHEEL_DIAG_REASON_STUCK_LOW:       return "PEG.BAJO";
+        case can::WHEEL_DIAG_REASON_MISMATCH:        return "DISCREPA";
+        case can::WHEEL_DIAG_REASON_IMPOSSIBLE_RATE: return "IMPOSIBLE";
+        case can::WHEEL_DIAG_REASON_MANUAL_MOVEMENT: return "MANUAL";
+        case can::WHEEL_DIAG_REASON_DISABLED_STATE:  return "DESHAB.";
+        default:                                     return "?";
+    }
+}
+
+// -------------------------------------------------------------------------
 // drawWheelDiagBlock — per-wheel 0x313 fault-reason labels (right column).
 //
-// Renders one compact row per channel (FL,FR,RL,RR,ST) showing the decoded
-// reason label + raw GPIO level, plus a summary flags line.  Colour rules
-// (per the HMI interpretation spec):
+// Renders one row per channel (FL,FR,RL,RR,ST) with a readable Spanish reason
+// + raw GPIO level, a translated flags line, and — when a fault is latched —
+// an "ABORTO: <canal> <razon>" line naming the culprit channel so the operator
+// knows exactly where it aborted.  A pedal status line tells a pedal fault
+// (0x20B) apart from a wheel-sensor fault.  Colour rules:
 //   OK                         -> green
 //   MANUAL_MOVEMENT / DISABLED -> cyan  (expected, never a red alarm)
 //   channel fault active       -> red
@@ -4846,15 +4876,11 @@ void EngineeringScreen::drawDebounceDiag() {
 // -------------------------------------------------------------------------
 void EngineeringScreen::drawWheelDiagBlock() {
     static const char* const kLbl[5] = { "FL", "FR", "RL", "RR", "ST" };
-    // Short reason mnemonics indexed by WHEEL_DIAG_REASON_* (0-8).
-    static const char* const kReason[9] = {
-        "OK", "NOPLS", "STKHI", "STKLO", "MISM",
-        "RATE", "MAN", "DIS", "UNK"
-    };
 
     const int16_t x  = 335;
     const int16_t y0 = 62;
     const int16_t lh = 14;
+    const int16_t w  = ui::SCREEN_W - x - 6;
 
     tft.setTextSize(1);
     tft.setTextDatum(TL_DATUM);
@@ -4865,12 +4891,12 @@ void EngineeringScreen::drawWheelDiagBlock() {
 
     for (uint8_t i = 0; i < 5; ++i) {
         const int16_t y = y0 + i * lh;
-        tft.fillRect(x, y, ui::SCREEN_W - x - 6, lh, ui::COL_BG);
+        tft.fillRect(x, y, w, lh, ui::COL_BG);
 
         if (stale) {
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
             char buf[24];
-            snprintf(buf, sizeof(buf), "%-2s STALE", kLbl[i]);
+            snprintf(buf, sizeof(buf), "%-2s SIN DATOS", kLbl[i]);
             tft.drawString(buf, x, y);
             continue;
         }
@@ -4893,32 +4919,93 @@ void EngineeringScreen::drawWheelDiagBlock() {
         }
 
         char buf[28];
-        snprintf(buf, sizeof(buf), "%-2s %-5s G=%u",
-                 kLbl[i], kReason[r], (unsigned)(gpioHi ? 1 : 0));
+        snprintf(buf, sizeof(buf), "%-2s %-9s G=%u",
+                 kLbl[i], wheelDiagReasonEs(r), (unsigned)(gpioHi ? 1 : 0));
         tft.setTextColor(col, ui::COL_BG);
         tft.drawString(buf, x, y);
     }
 
-    // Summary flags line under the rows.
+    // ---- Translated flags line under the rows (per-token colour) ----
     const int16_t sy = y0 + 5 * lh;
-    tft.fillRect(x, sy, ui::SCREEN_W - x - 6, lh, ui::COL_BG);
+    tft.fillRect(x, sy, w, lh, ui::COL_BG);
     if (stale) {
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("PWR- MAN- DEB- LAT-", x, sy);
+        tft.drawString("MOT- MAN- REB- LAT-", x, sy);
     } else {
         const uint8_t fl = wd.flags;
-        char buf[36];
-        snprintf(buf, sizeof(buf), "PWR%u MAN%u DEB%u LAT%u",
-                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_POWERTRAIN) ? 1 : 0),
-                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_MANUAL)     ? 1 : 0),
-                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_DEBOUNCING) ? 1 : 0),
-                 (unsigned)((fl & can::WHEEL_DIAG_FLAG_LATCHED)    ? 1 : 0));
-        // Latched fault dominates the summary colour; otherwise reflect activity.
-        const uint16_t col = (fl & can::WHEEL_DIAG_FLAG_LATCHED)    ? ui::COL_RED
-                           : (fl & can::WHEEL_DIAG_FLAG_DEBOUNCING) ? ui::COL_AMBER
-                           : ui::COL_GRAY;
+        // Each token lights only when its condition is active: MOT(or)=powertrain
+        // engaged, MAN=manual movement, REB=rebote/debouncing, LAT=latched fault.
+        struct { const char* txt; bool on; uint16_t onCol; } tok[4] = {
+            { "MOT", (fl & can::WHEEL_DIAG_FLAG_POWERTRAIN) != 0, ui::COL_CYAN  },
+            { "MAN", (fl & can::WHEEL_DIAG_FLAG_MANUAL)     != 0, ui::COL_CYAN  },
+            { "REB", (fl & can::WHEEL_DIAG_FLAG_DEBOUNCING) != 0, ui::COL_AMBER },
+            { "LAT", (fl & can::WHEEL_DIAG_FLAG_LATCHED)    != 0, ui::COL_RED   },
+        };
+        int16_t tx = x;
+        for (uint8_t t = 0; t < 4; ++t) {
+            tft.setTextColor(tok[t].on ? tok[t].onCol : ui::COL_GRAY, ui::COL_BG);
+            char b[8];
+            snprintf(b, sizeof(b), "%s%c", tok[t].txt, tok[t].on ? '*' : '-');
+            tft.drawString(b, tx, sy);
+            tx += 34;
+        }
+    }
+
+    // ---- "ABORTO: <canal> <razon>" culprit line ----
+    const int16_t ay = sy + lh;
+    tft.fillRect(x, ay, w, lh, ui::COL_BG);
+    if (!stale) {
+        int8_t culprit = -1;
+        for (uint8_t i = 0; i < 5; ++i) {
+            if (wd.faultMask & (1U << i)) { culprit = (int8_t)i; break; }
+        }
+        if (culprit >= 0) {
+            const uint8_t r = (wd.reason[culprit] < 9)
+                                  ? wd.reason[culprit]
+                                  : can::WHEEL_DIAG_REASON_UNKNOWN;
+            char buf[32];
+            snprintf(buf, sizeof(buf), "ABORTO: %s %s",
+                     kLbl[culprit], wheelDiagReasonEs(r));
+            tft.setTextColor(ui::COL_RED, ui::COL_BG);
+            tft.drawString(buf, x, ay);
+        } else if (wd.flags & can::WHEEL_DIAG_FLAG_LATCHED) {
+            tft.setTextColor(ui::COL_RED, ui::COL_BG);
+            tft.drawString("ABORTO: LATCH ACTIVO", x, ay);
+        } else {
+            tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
+            tft.drawString("SIN ABORTOS", x, ay);
+        }
+    }
+
+    // ---- Pedal status line (0x20B) — tells a pedal fault from a wheel fault ----
+    const int16_t py = ay + lh;
+    tft.fillRect(x, py, w, lh, ui::COL_BG);
+    {
+        const auto& pd = pedalDiag_;
+        const bool pStale = (pd.timestampMs == 0UL) ||
+                            ((millis() - pd.timestampMs) > 2000UL);
+        char buf[32];
+        uint16_t col;
+        if (pStale) {
+            col = ui::COL_GRAY;
+            snprintf(buf, sizeof(buf), "PEDAL SIN DATOS");
+        } else if (!pd.extended) {
+            // Legacy single-byte frame: only position is known.
+            col = ui::COL_GRAY;
+            snprintf(buf, sizeof(buf), "PEDAL %u%%", (unsigned)pd.percent);
+        } else if (pd.contradictory) {
+            col = ui::COL_RED;
+            snprintf(buf, sizeof(buf), "PEDAL CONTRAD r=%u", (unsigned)pd.rawAdc);
+        } else if (!pd.plausible) {
+            col = ui::COL_RED;
+            snprintf(buf, sizeof(buf), "PEDAL FALLO r=%u", (unsigned)pd.rawAdc);
+        } else {
+            col = ui::COL_GREEN;
+            snprintf(buf, sizeof(buf), "PEDAL OK %u%% r=%u",
+                     (unsigned)pd.percent, (unsigned)pd.rawAdc);
+        }
         tft.setTextColor(col, ui::COL_BG);
-        tft.drawString(buf, x, sy);
+        tft.drawString(buf, x, py);
     }
 }
 // (SERVICE_ACTION_PEDAL_CAL) and byte1 = sub-opcode.  The STM32 replies

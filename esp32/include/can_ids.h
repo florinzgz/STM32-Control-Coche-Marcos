@@ -70,7 +70,7 @@ inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 4, 100 ms o
 // STM32 → ESP32  LED / Lights Status (Audit Step 6)
 // -------------------------------------------------------------------------
 inline constexpr uint32_t STATUS_LIGHTS          = 0x20A;    // DLC 2, 1000 ms  byte0=front relay, byte1=rear relay
-inline constexpr uint32_t STATUS_PEDAL           = 0x20B;    // DLC 1, 100 ms   byte0=Hall pedal position % (telemetry only)
+inline constexpr uint32_t STATUS_PEDAL           = 0x20B;    // DLC 4, 100 ms   b0=Hall pedal % ; b1=fault flags(bit0 plausible,bit1 contradictory) ; b2-3=raw ADC LE (telemetry only)
 // -------------------------------------------------------------------------
 // ESP32 → STM32  LED relay command (§3.1)
 //   Byte 0: front relay (0=OFF, 1=ON)
@@ -433,8 +433,11 @@ inline constexpr uint8_t RESET_CAUSE_PIN       = (1U << 5);
 
 // -------------------------------------------------------------------------
 // Per-wheel Speed-Sensor Fault-Reason Diagnostic (0x313) — STM32→ESP32, 1 Hz, DLC 8
-//   Byte 0-3: reason FL/FR/RL/RR (WHEEL_DIAG_REASON_* code, 0-8)
-//   Byte 4:   reason STEER/CENTER (reserved, currently 0 = OK)
+//   Byte 0-3: reason FL/FR/RL/RR (WHEEL_DIAG_REASON_* code, 0-8).  While a
+//             channel fault is latched this carries the reason captured at
+//             latch time (the culprit), not the self-healed live reason.
+//   Byte 4:   reason STEER/CENTER — WHEEL_DIAG_REASON_DISABLED_STATE when the
+//             steering-encoder module is off (encoder unwired), else OK
 //   Byte 5:   gpio_level_mask  (bit0 FL, bit1 FR, bit2 RL, bit3 RR, bit4 STEER)
 //   Byte 6:   active_fault_mask (bit0 FL, bit1 FR, bit2 RL, bit3 RR, bit4 STEER)
 //   Byte 7:   flags/sequence (bit0 powertrain_engaged, bit1 manual_movement,

@@ -47,11 +47,16 @@ public:
     /// tractionValid / tempValid: when false the corresponding telemetry is
     /// stale or never received — the capsule shows "--" / "N/A" instead of a
     /// misleading default (e.g. 100% torque or 0 C).
+    /// tractionActive: false when the powertrain is not engaged (no torque
+    /// commanded — e.g. the car is being pushed by hand).  The 0x205 scale is
+    /// then "available power" (typically 100%) rather than applied torque, so
+    /// the capsule dims the value to grey to avoid a misleading red "100%".
     static void drawWheels(TFT_eSPI& tft,
                            const vehicle::TractionData& traction,
                            const vehicle::TempMapData& tempMap,
                            bool tractionValid = true,
-                           bool tempValid = true);
+                           bool tempValid = true,
+                           bool tractionActive = true);
 
     /// Draw the single rotating steering wheel + dual angle read-out.
     /// Only repaints if the angle changed.
@@ -75,7 +80,8 @@ private:
                                  bool leftSide,
                                  bool isMaxLoad,
                                  bool tractionValid,
-                                 bool tempValid);
+                                 bool tempValid,
+                                 bool tractionActive = true);
 
     /// Draw the rotating 3-spoke wheel + read-out for a given raw angle.
     static void drawSteeringWheelDynamic(TFT_eSPI& tft, int16_t angleRaw);

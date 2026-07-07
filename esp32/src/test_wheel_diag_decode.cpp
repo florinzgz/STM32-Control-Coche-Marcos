@@ -72,12 +72,19 @@ static bool decodeWheelSensorDiag(const CanFrame& f, WheelSensorDiagData& out) {
     return true;
 }
 
-// ---- Replica of drawWheelDiagBlock() label lookup ----
+// ---- Replica of drawWheelDiagBlock() label lookup (wheelDiagReasonEs) ----
 static const char* reasonLabel(uint8_t r) {
-    static const char* const kReason[9] = {
-        "OK", "NOPLS", "STKHI", "STKLO", "MISM", "RATE", "MAN", "DIS", "UNK"
-    };
-    return kReason[(r < 9) ? r : can::WHEEL_DIAG_REASON_UNKNOWN];
+    switch (r) {
+        case can::WHEEL_DIAG_REASON_OK:              return "OK";
+        case can::WHEEL_DIAG_REASON_NO_PULSE:        return "SIN PULSO";
+        case can::WHEEL_DIAG_REASON_STUCK_HIGH:      return "PEG.ALTO";
+        case can::WHEEL_DIAG_REASON_STUCK_LOW:       return "PEG.BAJO";
+        case can::WHEEL_DIAG_REASON_MISMATCH:        return "DISCREPA";
+        case can::WHEEL_DIAG_REASON_IMPOSSIBLE_RATE: return "IMPOSIBLE";
+        case can::WHEEL_DIAG_REASON_MANUAL_MOVEMENT: return "MANUAL";
+        case can::WHEEL_DIAG_REASON_DISABLED_STATE:  return "DESHAB.";
+        default:                                     return "?";
+    }
 }
 
 // ---- Test framework ----
@@ -144,13 +151,15 @@ int main() {
         CHECK(s_last0x313Dlc == 4, "shortDLC: last DLC recorded");
     }
 
-    // 4. Reason labels map correctly, out-of-range -> UNK.
+    // 4. Reason labels map correctly to readable Spanish, out-of-range -> "?".
     {
         CHECK(std::strcmp(reasonLabel(0), "OK")==0, "label OK");
-        CHECK(std::strcmp(reasonLabel(6), "MAN")==0, "label MANUAL_MOVEMENT=MAN");
-        CHECK(std::strcmp(reasonLabel(4), "MISM")==0, "label MISMATCH=MISM");
-        CHECK(std::strcmp(reasonLabel(8), "UNK")==0, "label UNKNOWN=UNK");
-        CHECK(std::strcmp(reasonLabel(200), "UNK")==0, "label out-of-range clamps to UNK");
+        CHECK(std::strcmp(reasonLabel(1), "SIN PULSO")==0, "label NO_PULSE=SIN PULSO");
+        CHECK(std::strcmp(reasonLabel(6), "MANUAL")==0, "label MANUAL_MOVEMENT=MANUAL");
+        CHECK(std::strcmp(reasonLabel(4), "DISCREPA")==0, "label MISMATCH=DISCREPA");
+        CHECK(std::strcmp(reasonLabel(7), "DESHAB.")==0, "label DISABLED_STATE=DESHAB.");
+        CHECK(std::strcmp(reasonLabel(8), "?")==0, "label UNKNOWN=?");
+        CHECK(std::strcmp(reasonLabel(200), "?")==0, "label out-of-range clamps to ?");
     }
 
     std::printf("=== %d run, %d failed ===\n", tests_run, tests_failed);

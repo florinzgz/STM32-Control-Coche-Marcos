@@ -392,6 +392,75 @@ static void test_decay_estimate(void)
 }
 
 /* =====================================================================
+ *  11. First pulse from standstill must NOT fabricate speed
+ *
+ *  Regression for the "push the car a few cm slowly → 15 km/h" phantom.
+ *  Replicates the fixed delta==1 branch of Wheel_ComputeSpeed(): a single
+ *  isolated pulse (prev_pt == 0 after boot, or a prev pulse older than the
+ *  stale window because the wheel was stopped) must fall back to the
+ *  time-since-pulse upper bound capped by the previous reading — never to
+ *  the ~10 ms compute-cycle dt, which produced the phantom.
+ * ===================================================================== */
+
+/* Pure model of the corrected delta==1 speed branch. */
+static float model_delta1_speed(uint32_t now, uint32_t dt,
+                                uint32_t last_pt, uint32_t prev_pt,
+                                float prev_speed_kmh)
+{
+    const float dist_per_pulse = WHEEL_CIRCUMF_M_TEST / (float)WHEEL_PULSES_REV;
+    (void)dt;  /* Corrected code must NOT use dt on the isolated-pulse path. */
+    uint32_t period_ms = last_pt - prev_pt;
+    float speed_kmh;
+    if (prev_pt != 0U && period_ms > 0U && period_ms < WHEEL_STALE_TIMEOUT_MS) {
+        speed_kmh = dist_per_pulse * 1000.0f / (float)period_ms * 3.6f;
+    } else {
+        uint32_t since_last = now - last_pt;
+        if (since_last > 0U) {
+            speed_kmh = dist_per_pulse * 1000.0f / (float)since_last * 3.6f;
+            if (speed_kmh > prev_speed_kmh) speed_kmh = prev_speed_kmh;
+        } else {
+            speed_kmh = prev_speed_kmh;
+        }
+    }
+    return speed_kmh;
+}
+
+static void test_first_pulse_from_standstill(void)
+{
+    /* Boot case: prev_pt == 0, first ever pulse just arrived.
+     * dt (compute interval) = 10 ms would have given ~66 km/h phantom.
+     * Corrected: capped by previous reading (0) → 0 km/h.               */
+    float s = model_delta1_speed(/*now*/5005, /*dt*/10,
+                                 /*last_pt*/5000, /*prev_pt*/0,
+                                 /*prev_speed*/0.0f);
+    ASSERT_NEAR(s, 0.0f, 0.001f,
+                "First pulse from boot (prev_pt=0) must be 0 km/h, not a phantom");
+
+    /* Push-after-stop case: prev pulse was 3 s ago (wheel had stopped),
+     * new pulse just arrived.  period_ms = 3000 >= stale window → isolated
+     * pulse path → capped by previous reading (0) → 0 km/h.             */
+    s = model_delta1_speed(/*now*/8007, /*dt*/7,
+                           /*last_pt*/8000, /*prev_pt*/5000,
+                           /*prev_speed*/0.0f);
+    ASSERT_NEAR(s, 0.0f, 0.001f,
+                "First pulse after a stop (stale prev) must be 0 km/h, not a phantom");
+
+    /* Sanity: the OLD (buggy) fallback would have produced a large value. */
+    float dist_per_pulse = WHEEL_CIRCUMF_M_TEST / (float)WHEEL_PULSES_REV;
+    float buggy = dist_per_pulse * 1000.0f / 10.0f * 3.6f;  /* dt = 10 ms */
+    ASSERT_TRUE(buggy > 60.0f,
+                "Old dt-based fallback would have fabricated >60 km/h (clamped to 40)");
+
+    /* Genuine low-speed motion: a real 200 ms interval between two
+     * consecutive pulses still yields the correct 3.3 km/h.            */
+    s = model_delta1_speed(/*now*/8205, /*dt*/5,
+                           /*last_pt*/8200, /*prev_pt*/8000,
+                           /*prev_speed*/3.3f);
+    ASSERT_NEAR(s, 3.3f, 0.1f,
+                "Valid 200 ms inter-pulse interval → 3.3 km/h (period-based)");
+}
+
+/* =====================================================================
  *  main
  * ===================================================================== */
 
@@ -411,6 +480,7 @@ int main(void)
     test_speed_clamp();
     test_period_based_speed();
     test_decay_estimate();
+    test_first_pulse_from_standstill();
 
     printf("\n--- wheel_speed tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

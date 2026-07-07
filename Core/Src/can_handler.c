@@ -698,12 +698,31 @@ void CAN_SendStatusTraction(void) {
  * control, PID, safety or pedal-logic path on either node.
  *
  *   Byte 0: pedal position %  (0 = released, 100 = full travel)
+ *   Byte 1: pedal fault flags  (bit0 plausible, bit1 dual-sample contradiction)
+ *   Byte 2-3: raw ADC counts (u16 LE) — lets the HMI show the actual value
+ *             behind an out-of-range/implausible pedal fault
  *
- * CAN ID: 0x20B   DLC: 1   Rate: 100 ms (10 Hz)
+ * Bytes 1-3 are additive: legacy receivers that only read byte 0 are
+ * unaffected.  This frame remains strictly informational — it does NOT feed
+ * any control, PID, safety or pedal-logic path on either node.
+ *
+ * CAN ID: 0x20B   DLC: 4   Rate: 100 ms (10 Hz)
  */
 void CAN_SendStatusPedal(uint8_t pedal_pct) {
     if (pedal_pct > 100) pedal_pct = 100;
-    TransmitFrame(CAN_ID_STATUS_PEDAL, &pedal_pct, 1);
+    uint8_t data[4];
+    data[0] = pedal_pct;
+
+    uint8_t flags = 0U;
+    if (Pedal_IsPlausible())     flags |= 0x01U;
+    if (Pedal_IsContradictory()) flags |= 0x02U;
+    data[1] = flags;
+
+    uint16_t raw = Pedal_GetRawADC();
+    data[2] = (uint8_t)(raw & 0xFFU);
+    data[3] = (uint8_t)((raw >> 8) & 0xFFU);
+
+    TransmitFrame(CAN_ID_STATUS_PEDAL, data, 4);
 }
 
 /**
@@ -1324,20 +1343,22 @@ void CAN_SendWheelSensorDiag(void) {
     uint8_t manual_seen = 0U;
     uint8_t debouncing  = 0U;
     for (uint8_t i = 0; i < NUM_WHEELS && i < 4U; i++) {
-        WheelDiag_t d = Safety_GetWheelDiag(i);
-        data[i] = Safety_WheelDiagToCanReason(d);
+        WheelDiag_t d_live = Safety_GetWheelDiag(i);
+        /* Report the latched culprit reason so a channel that aborted stays
+         * identifiable even after its live reason self-heals to OK.        */
+        data[i] = Safety_WheelDiagToCanReason(Safety_GetWheelLatchedReason(i));
         if (Wheel_GetGpioLevel(i) == 1U) {
             gpio_mask |= (uint8_t)(1U << i);
         }
-        if (d == WHEEL_DIAG_MANUAL_MOVEMENT) manual_seen = 1U;
+        if (d_live == WHEEL_DIAG_MANUAL_MOVEMENT) manual_seen = 1U;
         /* A reason of MISMATCH means "under load, silent, debounce armed but
          * not yet latched" — i.e. the fault is currently debouncing.        */
-        if (d == WHEEL_DIAG_MISMATCH)        debouncing = 1U;
+        if (d_live == WHEEL_DIAG_MISMATCH)        debouncing = 1U;
     }
-    /* Byte 4 (STEER/CENTER) has no dedicated wheel-diag channel yet: leave the
-     * reason at 0 (OK) and its gpio/fault bits clear.  Reserved for a future
-     * steering-center sensor diagnostic without changing the frame layout.   */
-    data[4] = WHEEL_DIAG_OK;
+    /* Byte 4 (STEER/CENTER): reflects the steering-encoder service module so a
+     * disabled/unwired encoder (E6B2-CWZ6C) renders as DESHAB. instead of a
+     * misleading OK.  Genuine encoder faults surface via FAULT_ENCODER_ERROR. */
+    data[4] = Safety_GetSteerDiagReason();
 
     data[5] = gpio_mask;                       /* bit4 STEER stays 0 */
     data[6] = Safety_GetWheelFaultMask();      /* bit4 STEER stays 0 */

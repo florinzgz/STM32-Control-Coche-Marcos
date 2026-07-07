@@ -301,6 +301,12 @@ private:
     unsigned long wheelDiagLastTs_ = 0;    // last 0x313 timestamp consumed
     uint32_t      rx0x313Count_    = 0;    // total 0x313 frames received
 
+    // Pedal telemetry cache (0x20B) — surfaces pedal plausibility + raw ADC on
+    // the DEBOUNCE / CAN DIAG page so a pedal fault is told apart from a wheel
+    // sensor fault.  Read-only display.
+    vehicle::PedalData pedalDiag_{};
+    unsigned long pedalDiagLastTs_ = 0;    // last 0x20B timestamp consumed
+
     // 0x207 battery diagnostic counters cache (INA226_LIVE_DIAG submenu).
     vehicle::Batt207DiagData batt207Diag_{};
     unsigned long bat207LastTs_   = 0;     // millis() of last 0x207 frame (from battery())
