@@ -248,8 +248,10 @@ private:
 
     // Debounce DWT EMI counters cache (DEBOUNCE_DIAG submenu)
     uint16_t      debounceWheelFiltered_[4] = {};
+    uint16_t      debounceWheelValid_[4]    = {};      // VALID (accepted) pulses (0x314)
     uint32_t      debounceSteerFiltered_    = 0;
     unsigned long debounceLastTs_           = 0;       // last timestamp consumed
+    unsigned long debounceValidTs_          = 0;       // last 0x314 timestamp consumed
     bool          debounceDataChanged_      = false;
 
     // INA226 live diagnostic cache (INA226_LIVE_DIAG submenu)

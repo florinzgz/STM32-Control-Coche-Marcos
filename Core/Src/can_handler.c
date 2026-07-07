@@ -1154,14 +1154,21 @@ void CAN_SendServiceStatus(void) {
 /**
  * @brief  Send DWT-debounce EMI diagnostic counters to ESP32.
  *
- * Two aditive frames (1000 ms cadence, low priority):
- *   0x306 — DLC 8: FL/FR/RL/RR filtered counts, uint16 LE saturated to 0xFFFF
- *   0x307 — DLC 4: steering-center filtered count, uint32 LE
+ * Three aditive frames (1000 ms cadence, low priority):
+ *   0x306 — DLC 8: FL/FR/RL/RR REJECTED (filtered) counts, uint16 LE sat 0xFFFF
+ *   0x307 — DLC 4: steering-center REJECTED (filtered) count, uint32 LE
+ *   0x314 — DLC 8: FL/FR/RL/RR VALID (accepted) pulse counts, uint16 LE sat 0xFFFF
  *
- * The internal counters in sensor_manager.c are 32-bit saturated; this frame
- * truncates the 4 wheel counters to 16 bits for compactness.  Truncation is
+ * The internal counters in sensor_manager.c are 32-bit saturated; these frames
+ * truncate the 4 wheel counters to 16 bits for compactness.  Truncation is
  * acceptable because the values are diagnostic only and "saturated" is a
  * meaningful UI state.
+ *
+ * REJECTED (0x306) are edges dropped by the DWT 200 us pre-filter (bounce/EMI)
+ * and do NOT correspond to distance/speed.  VALID (0x314) are the accepted
+ * edges (Wheel_GetPulseCount) that DO map to real wheel rotation, so the HMI
+ * can display "VALID PULSES | REJECTED PULSES" side by side and confirm the
+ * wheels count equally (~6 valid pulses per revolution).
  *
  * Diagnostic only — no control / safety path consumes these.
  */
@@ -1170,7 +1177,7 @@ void CAN_SendDebounceDiag(void) {
     uint8_t  data4[4];
     uint32_t v;
 
-    /* 0x306 — wheel filtered counts (FL, FR, RL, RR) */
+    /* 0x306 — wheel REJECTED (filtered) counts (FL, FR, RL, RR) */
     for (uint8_t i = 0; i < 4; i++) {
         v = Sensor_GetFilteredCount(i);
         uint16_t v16 = (v > 0xFFFFU) ? 0xFFFFU : (uint16_t)v;
@@ -1186,6 +1193,19 @@ void CAN_SendDebounceDiag(void) {
     data4[2] = (uint8_t)((v >> 16) & 0xFF);
     data4[3] = (uint8_t)((v >> 24) & 0xFF);
     TransmitFrame(CAN_ID_DIAG_DEBOUNCE_STEER, data4, 4);
+
+    /* 0x314 — wheel VALID (accepted) pulse counts (FL, FR, RL, RR).
+     * These are the real edges that passed the DWT pre-filter and drive the
+     * speed/distance estimate, so the operator can compare per-wheel counts
+     * (a full wheel turn ≈ 6 valid pulses) independently of the REJECTED
+     * (bounce/EMI) counts above.  Diagnostic only.                         */
+    for (uint8_t i = 0; i < 4; i++) {
+        v = Wheel_GetPulseCount(i);
+        uint16_t v16 = (v > 0xFFFFU) ? 0xFFFFU : (uint16_t)v;
+        data8[2 * i]     = (uint8_t)(v16 & 0xFF);
+        data8[2 * i + 1] = (uint8_t)((v16 >> 8) & 0xFF);
+    }
+    TransmitFrame(CAN_ID_DIAG_WHEEL_PULSES, data8, 8);
 }
 
 /**

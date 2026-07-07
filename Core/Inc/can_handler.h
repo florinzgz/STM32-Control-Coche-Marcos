@@ -90,6 +90,14 @@ extern "C" {
                                          //           bits4-7 sequence counter (wraps 0-15)
                                          //   Reason codes: 0=OK 1=NO_PULSE 2=STUCK_HIGH 3=STUCK_LOW 4=MISMATCH
                                          //                 5=IMPOSSIBLE_RATE 6=MANUAL_MOVEMENT 7=DISABLED_STATE 8=UNKNOWN
+#define CAN_ID_DIAG_WHEEL_PULSES  0x314  // STM32 → ESP32 (1000ms) per-wheel VALID (accepted) pulse counts
+                                         //   Byte 0-1: FL valid pulses (uint16 LE, saturated 0xFFFF)
+                                         //   Byte 2-3: FR valid pulses (uint16 LE, saturated 0xFFFF)
+                                         //   Byte 4-5: RL valid pulses (uint16 LE, saturated 0xFFFF)
+                                         //   Byte 6-7: RR valid pulses (uint16 LE, saturated 0xFFFF)
+                                         //   Valid = accepted EXTI edges that PASSED the DWT 200us pre-filter
+                                         //   (i.e. real wheel pulses used for speed/distance), NOT the REJECTED
+                                         //   (bounce/EMI) counts reported by 0x306. Diagnostic only.
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment

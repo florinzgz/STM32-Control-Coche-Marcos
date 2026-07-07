@@ -942,7 +942,7 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveDataChanged_ = changed;
     }
 
-    // Cache debounce DWT EMI counters (1 Hz update via 0x306/0x307)
+    // Cache debounce DWT EMI counters (1 Hz update via 0x306/0x307/0x314)
     if (currentMenu_ == SubMenu::DEBOUNCE_DIAG) {
         const auto& dd = data.debounceDiag();
         if (dd.timestampMs != debounceLastTs_) {
@@ -952,6 +952,14 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             }
             debounceSteerFiltered_ = dd.steerFiltered;
             debounceDataChanged_   = true;
+        }
+        // VALID (accepted) pulse counts arrive in a separate 0x314 frame.
+        if (dd.validTimestampMs != debounceValidTs_) {
+            debounceValidTs_ = dd.validTimestampMs;
+            for (uint8_t i = 0; i < 4; ++i) {
+                debounceWheelValid_[i] = dd.wheelValid[i];
+            }
+            debounceDataChanged_ = true;
         }
 
         // Cache CAN/0x309 delivery meta (0x30A, 1 Hz), latest I2C scan (0x30B)
@@ -1800,17 +1808,34 @@ void EngineeringScreen::draw() {
         debounceDataChanged_ = false;
 
         char buf[ui::FMT_BUF_LARGE];
-        const int16_t valX = 320;
+        const int16_t validX = 200;   // VALID PULSES column (right-aligned)
+        const int16_t rejX   = 320;   // REJECTED PULSES column (right-aligned)
         const int16_t rowY0 = 62;
         const int16_t rowH  = 22;
 
         RTRACE_SET_LAYER(2);
         tft.setTextSize(2);
-        tft.setTextDatum(TR_DATUM);
 
         static const char* const labels[5] = { "FL", "FR", "RL", "RR", "STEER" };
         for (uint8_t i = 0; i < 5; ++i) {
             const int16_t y = rowY0 + i * rowH;
+
+            // ---- VALID PULSES (wheels only; STEER has no valid counter) ----
+            tft.setTextDatum(TR_DATUM);
+            tft.fillRect(validX - 90, y, 90, 22, ui::COL_BG);
+            if (i < 4) {
+                uint32_t vv = (uint32_t)debounceWheelValid_[i];
+                bool vSat = (vv == 0xFFFFU);
+                uint16_t vcol = (vv == 0) ? ui::COL_GRAY
+                              : (vSat ? ui::COL_RED : ui::COL_GREEN);
+                tft.setTextColor(vcol, ui::COL_BG);
+                if (vSat) snprintf(buf, sizeof(buf), "65535+");
+                else      snprintf(buf, sizeof(buf), "%lu", (unsigned long)vv);
+                tft.drawString(buf, validX, y);
+                RTRACE_TEXT(validX, y, buf, vcol, ui::COL_BG, 2, TR_DATUM);
+            }
+
+            // ---- REJECTED PULSES (all 5 channels) ----
             uint32_t v = (i < 4) ? (uint32_t)debounceWheelFiltered_[i]
                                  : debounceSteerFiltered_;
 
@@ -1818,8 +1843,9 @@ void EngineeringScreen::draw() {
             // Steer (full u32) shown as decimal up to 9 digits.
             bool wheelSaturated = (i < 4) && (v == 0xFFFFU);
 
-            // Clear value cell
-            tft.fillRect(valX - 140, y, 140, 22, ui::COL_BG);
+            // Clear value cell (wide enough for a 9-digit steer u32, but kept
+            // right of the VALID column at x=200 so it never clobbers it).
+            tft.fillRect(rejX - 110, y, 110, 22, ui::COL_BG);
 
             uint16_t color = ui::COL_GREEN;
             if (v == 0) {
@@ -1836,16 +1862,15 @@ void EngineeringScreen::draw() {
             } else {
                 snprintf(buf, sizeof(buf), "%lu", (unsigned long)v);
             }
-            tft.drawString(buf, valX, y);
-            RTRACE_TEXT(valX, y, buf, color, ui::COL_BG, 2, TR_DATUM);
+            tft.drawString(buf, rejX, y);
+            RTRACE_TEXT(rejX, y, buf, color, ui::COL_BG, 2, TR_DATUM);
 
             // Label (drawn once is fine but repaint cheap; helps detect first frame)
             tft.setTextDatum(TL_DATUM);
             tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
-            tft.fillRect(40, y, 100, 22, ui::COL_BG);
+            tft.fillRect(40, y, 70, 22, ui::COL_BG);
             tft.drawString(labels[i], 40, y);
             RTRACE_TEXT(40, y, labels[i], ui::COL_WHITE, ui::COL_BG, 2, TL_DATUM);
-            tft.setTextDatum(TR_DATUM);
         }
 
         tft.setTextDatum(TL_DATUM);
@@ -4754,18 +4779,22 @@ void EngineeringScreen::drawDebounceDiag() {
     RTRACE_TEXT(ui::SCREEN_W / 2, 16, "DEBOUNCE / CAN DIAG",
                 ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
 
-    // Sub-header — make explicit these are REJECTED (bounce/EMI) pulses, not
-    // valid wheel pulses, so the counts are never mistaken for distance/speed.
+    // Sub-header — make explicit VALID (accepted) vs REJECTED (bounce/EMI).
+    // VALID pulses map to real wheel rotation (~6 per turn); REJECTED are the
+    // DWT 200 us pre-filter drops and do NOT represent distance/speed.
     tft.setTextSize(1);
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("DWT 200us pre-filter: REJECTED pulses (not valid)",
+    tft.drawString("VALID = accepted pulses (~6/turn) | REJECTED = DWT 200us drops",
                    ui::SCREEN_W / 2, 36);
 
-    // Column titles (CHANNEL — COUNT)
+    // Column titles (CHANNEL — VALID — REJECTED)
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
     tft.drawString("CHANNEL", 40, 48);
     tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(ui::COL_GREEN, ui::COL_BG);
+    tft.drawString("VALID PULSES", 200, 48);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
     tft.drawString("REJECTED PULSES", 320, 48);
     tft.setTextDatum(TL_DATUM);
 
@@ -4782,7 +4811,10 @@ void EngineeringScreen::drawDebounceDiag() {
         tft.drawString(labels[i], 40, y);
         tft.setTextDatum(TR_DATUM);
         tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("---", 320, y);
+        if (i < 4) {
+            tft.drawString("---", 200, y);   // VALID placeholder (wheels only)
+        }
+        tft.drawString("---", 320, y);       // REJECTED placeholder
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.setTextDatum(TL_DATUM);
     }
