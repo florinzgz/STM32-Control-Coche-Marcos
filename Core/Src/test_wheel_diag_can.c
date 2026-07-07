@@ -84,6 +84,26 @@ static void pack_wheel_diag(const WheelDiag_t diag[4], const uint8_t gpio[4],
     out[7] = flags;
 }
 
+/* ---- Replica of Safety_GetWheelLatchedReason() ----
+ * While the channel's service-mode fault is latched AND a culprit reason was
+ * captured, return the captured culprit; otherwise return the live reason.
+ * This models the persistence that keeps the aborting channel identifiable
+ * after wheel_diag[i] self-heals back to OK. */
+static WheelDiag_t latched_reason(WheelDiag_t live, WheelDiag_t latched,
+                                  bool fault_latched)
+{
+    if (fault_latched && latched != WHEEL_DIAG_OK) return latched;
+    return live;
+}
+
+/* ---- Replica of Safety_GetSteerDiagReason() ----
+ * DISABLED_STATE when the steering-encoder module is off, else OK. */
+static uint8_t steer_reason(bool steer_module_enabled)
+{
+    return steer_module_enabled ? (uint8_t)WHEEL_DIAG_OK
+                                : (uint8_t)WHEEL_DIAG_DISABLED_STATE;
+}
+
 /* ---- Test framework ---- */
 static int tests_run = 0, tests_failed = 0;
 #define CHECK(cond, msg) do {                                     \
@@ -205,6 +225,30 @@ int main(void)
         uint8_t g[4] = { 0, 0, 0, 0 };
         pack_wheel_diag(d, g, 0x00, false, false, 0x1F, f);
         CHECK(((f[7]>>4)&0x0F)==0x0F, "sequence masked to 4 bits");
+    }
+
+    /* Case 9: latched culprit persists after the live reason self-heals.
+     * RL aborted with NO_PULSE, then wheel_diag[RL] healed back to OK while the
+     * service-mode fault stays latched -> byte2 must still report NO_PULSE (1),
+     * not OK, so the HMI can name the aborting channel. */
+    {
+        CHECK(latched_reason(WHEEL_DIAG_NO_PULSE, WHEEL_DIAG_NO_PULSE, true)
+                  == WHEEL_DIAG_NO_PULSE, "latch: culprit captured at latch");
+        CHECK(latched_reason(WHEEL_DIAG_OK, WHEEL_DIAG_NO_PULSE, true)
+                  == WHEEL_DIAG_NO_PULSE, "latch: culprit persists after heal");
+        CHECK(latched_reason(WHEEL_DIAG_OK, WHEEL_DIAG_NO_PULSE, false)
+                  == WHEEL_DIAG_OK, "latch: cleared latch reports live OK");
+        CHECK(latched_reason(WHEEL_DIAG_MANUAL_MOVEMENT, WHEEL_DIAG_OK, false)
+                  == WHEEL_DIAG_MANUAL_MOVEMENT,
+              "latch: no fault reports live reason verbatim");
+    }
+
+    /* Case 10: STEER/CENTER byte4 reflects the steering-encoder module state. */
+    {
+        CHECK(steer_reason(false) == (uint8_t)WHEEL_DIAG_DISABLED_STATE,
+              "steer: module off -> DISABLED_STATE");
+        CHECK(steer_reason(true) == (uint8_t)WHEEL_DIAG_OK,
+              "steer: module on -> OK");
     }
 
     printf("=== %d run, %d failed ===\n", tests_run, tests_failed);

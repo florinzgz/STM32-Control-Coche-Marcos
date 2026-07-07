@@ -200,6 +200,16 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         unsigned long mts = data.tempMap().timestampMs;
         curTempStale_ = (mts == 0) ||
                         ((frameTimeMs - mts) > can::CAN_LOSS_TIMEOUT_MS);
+
+        // Powertrain engaged: read the 0x313 diagnostic flag when the frame is
+        // fresh.  When the wheel-diag frame is missing/stale we default to
+        // "not active" so an idle 100% scale is shown dimmed rather than as a
+        // red alarm.
+        const auto& wsd = data.wheelSensorDiag();
+        const bool wsdFresh = wsd.valid &&
+                              ((frameTimeMs - wsd.timestampMs) <= can::CAN_LOSS_TIMEOUT_MS);
+        curPowertrainActive_ = wsdFresh &&
+                               ((wsd.flags & can::WHEEL_DIAG_FLAG_POWERTRAIN) != 0);
     }
 
     // Steering angle
@@ -379,6 +389,7 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
         }
         wh = ui::tileHashFeed(wh, curTractionStale_ ? 1u : 0u);
         wh = ui::tileHashFeed(wh, curTempStale_ ? 1u : 0u);
+        wh = ui::tileHashFeed(wh, curPowertrainActive_ ? 1u : 0u);
         tiles_.updateHash(DTILE_WHEELS, wh);
     }
 
@@ -599,7 +610,7 @@ void DriveScreen::draw() {
             {drawTraction_[0], drawTraction_[1], drawTraction_[2], drawTraction_[3]}, 0},
             vehicle::TempMapData{
             {drawTemp_[0], drawTemp_[1], drawTemp_[2], drawTemp_[3], 0}, 0},
-            !curTractionStale_, !curTempStale_);
+            !curTractionStale_, !curTempStale_, curPowertrainActive_);
 
         // Update prev to what was actually drawn (not raw CAN values)
         memcpy(prevTraction_, drawTraction_, sizeof(prevTraction_));

@@ -111,26 +111,30 @@ void CarRenderer::drawWheels(TFT_eSPI& tft,
                              const vehicle::TractionData& traction,
                              const vehicle::TempMapData& tempMap,
                              bool tractionValid,
-                             bool tempValid) {
+                             bool tempValid,
+                             bool tractionActive) {
     static constexpr int16_t cx[4]   = { WCAP_L_X, WCAP_R_X, WCAP_L_X, WCAP_R_X };
     static constexpr int16_t cy[4]   = { WCAP_TOP_Y, WCAP_TOP_Y, WCAP_BOT_Y, WCAP_BOT_Y };
     static constexpr bool    left[4] = { true, false, true, false };
     static const char*       lbl[4]  = { "FL", "FR", "RL", "RR" };
 
     // Hardest-working wheel: the max torque across valid wheels.  Ties all
-    // highlight; if all read 0 (or stale) nothing is highlighted.
+    // highlight; if all read 0 (or stale) nothing is highlighted.  When the
+    // powertrain is idle the scale is "available power" (all ~100%), so the
+    // MAX marker is meaningless and suppressed.
     uint8_t maxLoad = 0;
-    if (tractionValid) {
+    if (tractionValid && tractionActive) {
         for (uint8_t i = 0; i < 4; ++i)
             if (traction.scale[i] > maxLoad) maxLoad = traction.scale[i];
     }
 
     for (uint8_t i = 0; i < 4; ++i) {
-        bool isMax = tractionValid && maxLoad > 0 &&
+        bool isMax = tractionValid && tractionActive && maxLoad > 0 &&
                      traction.scale[i] == maxLoad;
         drawWheelCapsule(tft, cx[i], cy[i], lbl[i],
                          traction.scale[i], tempMap.temps[i],
-                         left[i], isMax, tractionValid, tempValid);
+                         left[i], isMax, tractionValid, tempValid,
+                         tractionActive);
     }
 }
 
@@ -144,12 +148,20 @@ void CarRenderer::drawWheelCapsule(TFT_eSPI& tft,
                                    bool leftSide,
                                    bool isMaxLoad,
                                    bool tractionValid,
-                                   bool tempValid) {
+                                   bool tempValid,
+                                   bool tractionActive) {
     // Clear the capsule region.
     tft.fillRect(x, y, WCAP_W, WCAP_H, COL_BG);
     RTRACE_FILL_RECT(x, y, WCAP_W, WCAP_H, COL_BG);
 
-    uint16_t loadCol = tractionValid ? torqueColor(torquePct) : COL_GRAY;
+    // Load colour.  When the powertrain is NOT engaged (car pushed by hand /
+    // pedal released), the 0x205 value is "available power" (idle, usually
+    // 100%), not applied torque — so it is dimmed to grey instead of the
+    // torque heat scale, avoiding a misleading red "100%" that reads as an
+    // alarm.  When engaged, the normal green/yellow/red torque scale applies.
+    uint16_t loadCol = !tractionValid ? COL_GRAY
+                     : !tractionActive ? COL_GRAY
+                     : torqueColor(torquePct);
     uint16_t tempCol = tempValid    ? tempColorFull(tempC)    : COL_GRAY;
 
     // ---- Tyre graphic (inner side of the capsule, toward the vehicle) ----

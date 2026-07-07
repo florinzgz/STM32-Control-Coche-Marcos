@@ -332,6 +332,18 @@ uint8_t       Safety_GetFaultFlags(void);
  * Returns WHEEL_DIAG_OK for out-of-range idx.  Report-only.            */
 WheelDiag_t   Safety_GetWheelDiag(uint8_t idx);
 
+/* Latched culprit reason for wheel channel idx (0-3).  While a service-mode
+ * fault is latched on the channel this returns the reason captured at latch
+ * time (so the aborting channel stays identifiable even after the live
+ * reason self-heals to OK); otherwise it returns the live reason.  The 0x313
+ * frame transmits this so the HMI can pinpoint which sensor aborted.    */
+WheelDiag_t   Safety_GetWheelLatchedReason(uint8_t idx);
+
+/* Diagnostic reason for the STEER/CENTER channel (0x313 byte 4).  Returns
+ * WHEEL_DIAG_DISABLED_STATE when the steering-encoder service module is off
+ * (encoder not wired) and WHEEL_DIAG_OK otherwise.  Report-only.        */
+uint8_t       Safety_GetSteerDiagReason(void);
+
 /* Map a WheelDiag_t to the stable 0x313 wire code (0-8).  Out-of-range
  * enum values collapse to WHEEL_DIAG_CAN_UNKNOWN (8).  Report-only.    */
 uint8_t       Safety_WheelDiagToCanReason(WheelDiag_t diag);

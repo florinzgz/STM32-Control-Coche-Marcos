@@ -121,6 +121,12 @@ private:
     bool     curTractionStale_   = false;
     bool     curTempStale_       = false;
 
+    // Powertrain engagement (0x313 flag bit0): false when no torque is
+    // commanded (car pushed by hand / pedal released).  The 0x205 scale is
+    // then "available power" (idle ~100%), so the WHEELS tile dims the value
+    // to grey to avoid a misleading red "100%".
+    bool     curPowertrainActive_ = false;
+
     bool     needsFullRedraw_    = true;
 
     // Precomputed wheel draw values (threshold-filtered in update phase)

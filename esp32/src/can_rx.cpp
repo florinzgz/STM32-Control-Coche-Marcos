@@ -219,6 +219,14 @@ static void decodePedal(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code < 1) return;
     vehicle::PedalData pd;
     pd.percent     = (f.data[0] <= 100) ? f.data[0] : 100;
+    // Extended layout (DLC >= 4, additive): fault flags + raw ADC.  Legacy
+    // single-byte frames leave plausible=true/contradictory=false defaults.
+    if (f.data_length_code >= 4) {
+        pd.plausible     = (f.data[1] & 0x01u) != 0;
+        pd.contradictory = (f.data[1] & 0x02u) != 0;
+        pd.rawAdc        = static_cast<uint16_t>(f.data[2] | (f.data[3] << 8));
+        pd.extended      = true;
+    }
     pd.timestampMs = millis();
     data.setPedal(pd);
 }
