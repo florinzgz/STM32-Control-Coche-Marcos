@@ -4754,10 +4754,11 @@ void EngineeringScreen::drawDebounceDiag() {
     RTRACE_TEXT(ui::SCREEN_W / 2, 16, "DEBOUNCE / CAN DIAG",
                 ui::COL_AMBER, ui::COL_BG, 2, MC_DATUM);
 
-    // Sub-header
+    // Sub-header — make explicit these are REJECTED (bounce/EMI) pulses, not
+    // valid wheel pulses, so the counts are never mistaken for distance/speed.
     tft.setTextSize(1);
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("DWT 200us pre-filter rejected pulses",
+    tft.drawString("DWT 200us pre-filter: REJECTED pulses (not valid)",
                    ui::SCREEN_W / 2, 36);
 
     // Column titles (CHANNEL — COUNT)
@@ -4765,7 +4766,7 @@ void EngineeringScreen::drawDebounceDiag() {
     tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
     tft.drawString("CHANNEL", 40, 48);
     tft.setTextDatum(TR_DATUM);
-    tft.drawString("FILTERED COUNT", 320, 48);
+    tft.drawString("REJECTED PULSES", 320, 48);
     tft.setTextDatum(TL_DATUM);
 
     // Row baseline.  Real values are painted by the partial-redraw branch

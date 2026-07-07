@@ -176,9 +176,11 @@ inline constexpr uint8_t BATT_COLOR_MID     = 50;  // ≤ this → yellow, else 
 // =========================================================================
 // RPM Display (DriveScreen — alongside speed)
 //
-// Wheel RPM derived from average speed and wheel circumference (1.1 m).
-// Formula: RPM = raw_0_1kmh * 100 / 66  (integer-only, no float)
-// Capped at RPM_DISPLAY_MAX for the display (matches vehicle design max).
+// Wheel RPM derived from average speed and wheel circumference (1.110 m).
+// Formula: RPM = raw_0_1kmh * 100 / 66  (integer-only, no float).
+// The 100/66 factor is a display-only approximation (based on ~1.1 m); the
+// authoritative speed/distance uses WHEEL_CIRCUM_MM = 1110 on the STM32, so
+// the ~0.9% RPM rounding here is cosmetic and capped at RPM_DISPLAY_MAX.
 // =========================================================================
 
 // Maximum RPM shown on display (clamp)

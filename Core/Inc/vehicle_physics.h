@@ -9,7 +9,9 @@
 #define VEHICLE_PHYSICS_H
 
 /* ---- Wheel physical data ---- */
-#define WHEEL_CIRCUM_MM         1100.0f                       /* Wheel circumference (mm) */
+/* Measured circumference = 1110 mm (111 cm).  With WHEEL_PULSES_REV = 6
+ * bolts this gives 1110 / 6 = 185 mm of travel per accepted pulse.        */
+#define WHEEL_CIRCUM_MM         1110.0f                       /* Wheel circumference (mm) */
 #define WHEEL_CIRCUMF_M         (WHEEL_CIRCUM_MM / 1000.0f)  /* Wheel circumference (m)  */
 
 /* ---- Vehicle geometry ---- */
