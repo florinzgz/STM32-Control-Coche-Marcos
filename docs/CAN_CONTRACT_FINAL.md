@@ -1,7 +1,7 @@
 # CAN Bus Contract — FINAL
 
-**Revision:** 1.14
-**Status:** ACTIVE — Diagnostic clarity: latched wheel culprit, steer-disabled state, extended pedal telemetry (additive)
+**Revision:** 1.15
+**Status:** ACTIVE — Added per-wheel VALID (accepted) pulse-count diagnostic 0x314 (additive)
 **Date:** 2026-07-07
 **Scope:** CAN communication between STM32G474RE (safety authority) and ESP32-S3 (HMI)
 
@@ -22,7 +22,8 @@ Any change to this contract requires a new numbered revision and a corresponding
 - **1.11** (2026-06-11): Added runtime-tunable **drive tuning** and **battery limits** stores. New `SERVICE_CMD` actions `0xFA` (`SERVICE_ACTION_DRIVE_TUNING`) and `0xFB` (`SERVICE_ACTION_BATTERY_LIMITS`), each with `SET`/`SAVE`/`RESET`/`QUERY` sub-ops (STANDBY-gated except QUERY). New field-stream telemetry `DIAG_DRIVE_TUNING` (0x310, DLC 8) and `DIAG_BATTERY_LIMITS` (0x311, DLC 8), emitted as on-demand bursts after QUERY (one frame per field). Defaults reproduce the original firmware behaviour exactly; flash pages 121 (`DTN1`) and 120 (`BAT1`). Purely additive, bidirectional config/diagnostic — see §4.20/§4.21 (backward-compatible).
 - **1.12** (2026-07-05): Heartbeat / boot-reset / delivery observability (PR #410). New telemetry `DIAG_BOOT_RESET` (0x312, DLC 8, 1000 ms): bytes0-3 STM32 `HAL_GetTick()` uptime u32 LE, byte4 RCC reset-cause bitmask (POWERON/SOFTWARE/IWDG/WWDG/BROWNOUT/PIN), byte5 CAN software TX-queue depth (now), byte6 TX-queue depth high-water, byte7 reserved — lets the HMI tell an IWDG/brownout reset apart from a lost heartbeat and prove the heartbeat is never sitting behind a TX backlog. `DIAG_I2C` (0x309) extended to **DLC 8** with byte6 = `i2c_last_read_ms` (duration of the last `Current_ReadAll()` in ms, saturated at 255 = "255+") and byte7 reserved. `DIAG_CAN_META` (0x30A) byte7 now packs `bit0 = fdcan_init_ok` and `bits 7:1 = hb_tx_err` (heartbeat TX failure count, saturated at 127). ESP32 `decodeBootReset()` accepts DLC ≥ 5 (uptime/reset) and DLC ≥ 7 (txQ), dropping DLC < 5; `decodeI2cDiag()` reads byte6 only when DLC ≥ 7. The STM32 enqueues the 0x001 heartbeat first each loop so diagnostics never delay it. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes these values; short-DLC legacy frames stay backward-compatible.
 - **1.13** (2026-07-05): Added per-wheel speed-sensor fault-reason diagnostic `DIAG_WHEEL_SENSOR` (0x313, DLC 8, 1000 ms). Bytes 0-3 carry the `WheelDiag_t` reason code (0-8) for FL/FR/RL/RR, byte4 a reserved STEER/CENTER reason (currently 0), byte5 a per-channel GPIO-level mask, byte6 the latched service-mode fault mask, byte7 a flags nibble (powertrain_engaged / manual_movement / wheel_fault_debouncing / wheel_fault_latched) + a 4-bit sequence counter. Lets the HMI name **which** wheel is silent and **why** (NO_PULSE / STUCK_HIGH / STUCK_LOW / MISMATCH / IMPOSSIBLE_RATE vs. the non-fault MANUAL_MOVEMENT / DISABLED_STATE / OK), so a `SENSOR_FAULT` (0x10) is no longer an unlabelled event and an expected hand-spin is visibly distinct from a real fault under traction. ESP32 `decodeWheelSensorDiag()` accepts DLC ≥ 7 (reasons + masks) and reads byte7 only when DLC 8; DLC < 7 is counted and dropped. The wheel-diagnostic reason codes MUST mirror `WheelDiag_t` (Core/Inc/safety_system.h) + the UNKNOWN wire code (8). Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes it; the wheel-fault safety logic itself is unchanged (backward-compatible).
-- **1.14** (2026-07-07): Diagnostic clarity improvements (no frame-size or bit-layout changes). (a) `DIAG_WHEEL_SENSOR` (0x313) bytes 0-3 now report the **latched culprit reason** while a channel's service-mode fault is latched: the STM32 records the reason at latch time (`Safety_GetWheelLatchedReason()`) so a channel that aborted stays identifiable even after its live reason self-heals to OK (previously the HMI showed all-OK next to a red LATCH flag with no culprit). Byte4 (STEER/CENTER) now reports `DISABLED_STATE` (7) when the steering-encoder service module is off (encoder unwired) instead of always 0, so an unconnected E6B2-CWZ6C encoder renders as "DESHAB." rather than a misleading OK. (b) `STATUS_PEDAL` (0x20B) extended from **DLC 1 → DLC 4** (additive): byte0 pedal % (unchanged), byte1 pedal fault flags (bit0 plausible, bit1 dual-sample contradiction), bytes2-3 raw ADC counts (u16 LE). Lets the HMI tell a pedal fault (with the actual ADC value) apart from a wheel-sensor fault. ESP32 `decodePedal()` reads bytes1-3 only at DLC ≥ 4; legacy single-byte frames keep working (plausible defaults true). Reason-code semantics unchanged. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes the new fields (backward-compatible).
+- **1.15** (2026-07-07): Added per-wheel **VALID (accepted) pulse-count** diagnostic `DIAG_WHEEL_PULSES` (0x314, DLC 8, 1000 ms). Bytes 0-1/2-3/4-5/6-7 carry the FL/FR/RL/RR accepted-edge counts (uint16 LE, saturated 0xFFFF) from `Wheel_GetPulseCount()` — the edges that PASSED the DWT 200 µs pre-filter and drive the speed/distance estimate, as opposed to the REJECTED (bounce/EMI) counts already reported by 0x306. Sent from the same `CAN_SendDebounceDiag()` 1 Hz cadence. The ESP32 `DEBOUNCE / CAN DIAG` submenu now shows both columns side by side (`VALID PULSES | REJECTED PULSES`) so the operator can confirm each wheel counts equally (a full wheel turn ≈ 6 valid pulses). ESP32 `decodeWheelPulses()` accepts DLC ≥ 8. Purely additive, STM32 → ESP32, diagnostic-only — no control / safety path consumes it (backward-compatible).
+
 
 ---
 
@@ -122,6 +123,7 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x311 | DIAG_BATTERY_LIMITS | 8 | on-demand | Battery voltage-limit field-stream (burst after SERVICE 0xFB QUERY). One frame per field; a QUERY emits 10 sweeps × all 5 fields at 10 Hz. byte0=flags(bit0 stored-valid,bit1 pending-differs,bit2 safety-ok/STANDBY,bit3 pending-valid), byte1=field id (1=Warning,2=Limit/derate,3=Cutoff,4=Recovery,5=Filter), byte2-3=active value u16 LE, byte4-5=pending value u16 LE, byte6=system_state, byte7=field count (5). Units: thresholds centivolts (V×100), Filter ms. Diagnostic/config only — never alters the safety state machine. | `can_handler.c`, `safety_system.c`, `battery_limits_store.c` |
 | 0x312 | DIAG_BOOT_RESET | 8 | 1000 ms | Boot/reset + TX-backlog diag: byte0-3=STM32 uptime_ms u32 LE (HAL_GetTick, wraps ~49.7 days), byte4=reset_cause bitmask (bit0=POWERON/POR, bit1=SOFTWARE/SW, bit2=IWDG, bit3=WWDG, bit4=BROWNOUT/BOR, bit5=PIN), byte5=tx_queue_depth (software TX ring occupancy now, 0..31), byte6=tx_queue_depth_max (high-water mark, 0..31), byte7=reserved. ESP32 accepts DLC≥5 (uptime/reset) and DLC≥7 (txQ); DLC<5 dropped. Diagnostic-only — no control/safety path consumes it. | `can_handler.c`, `main.c` |
 | 0x313 | DIAG_WHEEL_SENSOR | 8 | 1000 ms | Per-wheel speed-sensor fault-reason diag: byte0-3=reason FL/FR/RL/RR (WheelDiag_t code 0-8; while a channel fault is latched this is the **latched culprit reason**, not the self-healed live reason), byte4=reason STEER/CENTER (DISABLED_STATE=7 when steering-encoder module off, else 0=OK), byte5=gpio_level_mask (bit0 FL..bit3 RR, bit4 STEER), byte6=active_fault_mask (bit0 FL..bit3 RR, bit4 STEER), byte7=flags/seq (bit0 powertrain_engaged, bit1 manual_movement, bit2 wheel_fault_debouncing, bit3 wheel_fault_latched, bits4-7 sequence). Reason codes: 0=OK 1=NO_PULSE 2=STUCK_HIGH 3=STUCK_LOW 4=MISMATCH 5=IMPOSSIBLE_RATE 6=MANUAL_MOVEMENT 7=DISABLED_STATE 8=UNKNOWN. ESP32 accepts DLC≥7 (byte7 read only at DLC 8); DLC<7 dropped. Diagnostic-only — no control/safety path consumes it; wheel-fault safety logic unchanged. | `can_handler.c`, `safety_system.c`, `main.c` |
+| 0x314 | DIAG_WHEEL_PULSES | 8 | 1000 ms | Per-wheel **VALID (accepted)** pulse counts: 4× wheel u16 LE (FL,FR,RL,RR) saturated to 0xFFFF. Pulses that PASSED the DWT 200 µs pre-filter (real wheel rotation, ~6/turn) — complements the REJECTED counts in 0x306. Diagnostic-only. | `can_handler.c`, `sensor_manager.c` |
 
 ### 3.4 Obstacle Data (ESP32 → STM32)
 
@@ -360,6 +362,23 @@ DWT-debounce EMI diagnostic counter for the steering-center inductive sensor (PB
 **Diagnostic only** — same constraints as 0x306.
 
 Source: `CAN_SendDebounceDiag()` in `can_handler.c` calling `Sensor_GetSteerFilteredCount()` from `sensor_manager.c`.
+
+### 4.14c DIAG_WHEEL_PULSES (0x314) — STM32 → ESP32 (rev 1.15, additive)
+
+Per-wheel **VALID (accepted)** pulse counts for the four wheel-speed channels. Unlike 0x306 (which counts pulses *rejected* by the DWT 200 µs pre-filter), this frame reports the pulses that *passed* the filter and are used for the speed/distance estimate (`Wheel_GetPulseCount()` → internal `wheel_pulse[]`). Internal counters are 32-bit; this frame truncates to uint16 with saturation to `0xFFFF`. Counters reset to 0 on every reboot (`Sensor_Init`).
+
+| Byte | Field | Type | Description |
+|------|-------|------|-------------|
+| 0–1 | valid_FL | uint16 LE | Wheel 0 (FL) accepted-pulse count, saturated to 0xFFFF |
+| 2–3 | valid_FR | uint16 LE | Wheel 1 (FR) accepted-pulse count, saturated to 0xFFFF |
+| 4–5 | valid_RL | uint16 LE | Wheel 2 (RL) accepted-pulse count, saturated to 0xFFFF |
+| 6–7 | valid_RR | uint16 LE | Wheel 3 (RR) accepted-pulse count, saturated to 0xFFFF |
+
+Reference counts (6 pulses per wheel revolution): 1 turn ≈ 6 valid pulses, 3 m straight ≈ 16 valid pulses/wheel, 6 m out-and-back ≈ 32 valid pulses/wheel. REJECTED counts (0x306) may differ per wheel, but VALID counts should be similar across wheels for the same movement.
+
+**Diagnostic only** — must NOT gate any control or safety path. Shown next to the REJECTED column on the ESP32 `DEBOUNCE / CAN DIAG` submenu as `VALID PULSES | REJECTED PULSES`. ESP32 `decodeWheelPulses()` accepts DLC ≥ 8; shorter frames are ignored. Additive — firmware without the field ignores the new ID.
+
+Source: `CAN_SendDebounceDiag()` in `can_handler.c` calling `Wheel_GetPulseCount()` from `sensor_manager.c`.
 
 ### 4.15 OBSTACLE_DISTANCE (0x208) — ESP32 → STM32
 

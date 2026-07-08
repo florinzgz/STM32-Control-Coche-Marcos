@@ -465,6 +465,13 @@ inline constexpr uint8_t WHEEL_DIAG_FLAG_MANUAL       = (1U << 1);
 inline constexpr uint8_t WHEEL_DIAG_FLAG_DEBOUNCING   = (1U << 2);
 inline constexpr uint8_t WHEEL_DIAG_FLAG_LATCHED      = (1U << 3);
 
+// Per-wheel VALID (accepted) pulse-count diagnostic (0x314) — STM32→ESP32, 1 Hz, DLC 8.
+// Bytes 0-1/2-3/4-5/6-7 = FL/FR/RL/RR accepted-edge counts (uint16 LE, saturated
+// 0xFFFF).  VALID = edges that PASSED the DWT 200 us pre-filter and drive the
+// speed/distance estimate, as opposed to the REJECTED (bounce/EMI) counts in
+// 0x306 (DIAG_DEBOUNCE).  A full wheel revolution ≈ 6 valid pulses. Report-only.
+inline constexpr uint32_t DIAG_WHEEL_PULSES = 0x314;  // STM32→ESP32, DLC 8, 1000 ms — per-wheel valid pulse counts
+
 } // namespace can
 
 #endif // CAN_IDS_H

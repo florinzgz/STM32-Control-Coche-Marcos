@@ -228,9 +228,9 @@ Instalar lo más cerca posible del módulo BTS7960 de dirección (bus 12V):
 
 **Especificaciones:**
 - 6 pulsos por vuelta (6 pernos/imanes por rueda)
-- Circunferencia de rueda: 1.1 m
+- Circunferencia de rueda: 1.110 m (111 cm, medida real) → 185 mm por pulso
 - Debounce: 1 ms en firmware
-- Cálculo: velocidad = (pulsos / 6) × 1.1 × 3.6 km/h
+- Cálculo: velocidad = (pulsos / 6) × 1.110 × 3.6 km/h
 
 > ⚠️ Mismo aviso que el sensor de centrado: verificar que la señal de salida no supere 3.3V. Los sensores LJ12A3 de alimentación 5V suelen tener salida NPN (open-collector), que es compatible con el pull-up interno del STM32 a 3.3V.
 

@@ -250,6 +250,17 @@ static void decodeDebounceDiagSteer(const CanFrame& f, vehicle::VehicleData& dat
     data.setDebounceDiag(dd);
 }
 
+static void decodeWheelPulses(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::DebounceDiagData dd = data.debounceDiag();   // preserve rejected counts
+    dd.wheelValid[0] = readU16LE(&f.data[0]);   // FL
+    dd.wheelValid[1] = readU16LE(&f.data[2]);   // FR
+    dd.wheelValid[2] = readU16LE(&f.data[4]);   // RL
+    dd.wheelValid[3] = readU16LE(&f.data[6]);   // RR
+    dd.validTimestampMs = millis();
+    data.setDebounceDiag(dd);
+}
+
 // 0x308 DIAG_PEDAL_CAL — pedal calibration telemetry (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c pedalcal_send_status().
 // Bit 6 of flags selects whether bytes 3-6 carry the STORED or PENDING
@@ -662,6 +673,7 @@ void poll(vehicle::VehicleData& data) {
             case can::SERVICE_DISABLED: decodeServiceDisabled(frame, data);break;
             case can::DIAG_DEBOUNCE:        decodeDebounceDiag(frame, data);      break;
             case can::DIAG_DEBOUNCE_STEER:  decodeDebounceDiagSteer(frame, data); break;
+            case can::DIAG_WHEEL_PULSES:    decodeWheelPulses(frame, data);       break;
             case can::DIAG_PEDAL_CAL:       decodePedalCal(frame, data);          break;
             case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;

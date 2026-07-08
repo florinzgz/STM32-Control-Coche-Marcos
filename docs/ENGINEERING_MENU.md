@@ -36,7 +36,7 @@ maintenance.
 | 9 | MAINTENANCE | `MAINTENANCE` | Maintenance counter status / acknowledge / reset |
 | 10 | RELAY CONTROL (DEBUG) | `RELAY_CONTROL` | Manual relay override for engineering diagnostics |
 | 11 | INA226 LIVE DIAG | `INA226_LIVE_DIAG` | Live INA226 diagnostics: CH0-3 amps, CH4 battery amps/volts, CH4 INA OK/expected, masks, mux, fail/recovery, 0x309 stale/no-data |
-| 12 | DEBOUNCE DEBUG | `DEBOUNCE_DIAG` | DWT-debounce EMI filtered counters viewer |
+| 12 | DEBOUNCE DEBUG | `DEBOUNCE_DIAG` | Wheel pulse viewer: `VALID PULSES` (0x314, accepted, ~6/turn) \| `REJECTED PULSES` (0x306, DWT-debounce EMI drops) + CAN/I2C diag |
 | 13 | TOUCH CALIBRATION | _wizard_ | Launch the persistent touch-calibration wizard. See [`TOUCH_CALIBRATION_SYSTEM.md`](TOUCH_CALIBRATION_SYSTEM.md). |
 | 14 | RESET TOUCH CAL | _action_ | Erase persisted touch calibration in NVS and re-arm the first-boot wizard for the next reboot. |
 | 15 | MCP23017 LIVE (SHIFTER) | `MCP23017_LIVE` | ESP32-local MCP23017 shifter I2C live diagnostic (cached, no bus access from render path) |

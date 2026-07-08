@@ -28,8 +28,15 @@ TIM_HandleTypeDef  htim1, htim2, htim3, htim8;
 IWDG_HandleTypeDef hiwdg;
 #endif
 
-/* ---- Replicate firmware constants for validation ---- */
-#define WHEEL_CIRCUM_MM           1100.0f
+/* ---- Firmware geometry constant ----
+ * WHEEL_CIRCUM_MM is provided by vehicle_physics.h (via main.h → project_config.h).
+ * It is the single source of truth — the real measured circumference is
+ * 1110 mm (111 cm), i.e. 1110 / 6 = 185 mm of travel per accepted pulse.
+ * Deriving WHEEL_CIRCUMF_M_TEST from it keeps the tests in lock-step with the
+ * firmware and prevents a stale duplicate (e.g. a leftover 1100). */
+#ifndef WHEEL_CIRCUM_MM
+#error "WHEEL_CIRCUM_MM not defined — include path is missing vehicle_physics.h (via main.h). Fix the build rather than silently using a wrong circumference."
+#endif
 #define WHEEL_CIRCUMF_M_TEST     (WHEEL_CIRCUM_MM / 1000.0f)
 
 /* ---- Test framework ---- */
@@ -151,7 +158,7 @@ static void test_stale_timeout(void)
 
 static void test_speed_calculation(void)
 {
-    /* Simulate: 6 pulses in 100 ms → 1 revolution → 1.1 m in 0.1 s = 11 m/s = 39.6 km/h */
+    /* Simulate: 6 pulses in 100 ms → 1 revolution → 1.11 m in 0.1 s = 11.1 m/s = 39.96 km/h */
     uint32_t delta = 6;
     uint32_t dt_ms = 100;
     float revolutions = (float)delta / (float)WHEEL_PULSES_REV;
@@ -159,17 +166,17 @@ static void test_speed_calculation(void)
     float speed_ms    = dist_m * 1000.0f / (float)dt_ms;
     float speed_kmh   = speed_ms * 3.6f;
 
-    ASSERT_NEAR(speed_kmh, 39.6f, 0.1f,
-                "6 pulses in 100 ms = 39.6 km/h");
+    ASSERT_NEAR(speed_kmh, 39.96f, 0.1f,
+                "6 pulses in 100 ms = 39.96 km/h");
 
-    /* 1 pulse in 50 ms → 0.167 rev → 0.183 m in 0.05 s = 3.67 m/s = 13.2 km/h */
+    /* 1 pulse in 50 ms → 0.167 rev → 0.185 m in 0.05 s = 3.7 m/s = 13.32 km/h */
     delta = 1; dt_ms = 50;
     revolutions = (float)delta / (float)WHEEL_PULSES_REV;
     dist_m = revolutions * WHEEL_CIRCUMF_M_TEST;
     speed_ms = dist_m * 1000.0f / (float)dt_ms;
     speed_kmh = speed_ms * 3.6f;
-    ASSERT_NEAR(speed_kmh, 13.2f, 0.1f,
-                "1 pulse in 50 ms = 13.2 km/h");
+    ASSERT_NEAR(speed_kmh, 13.32f, 0.1f,
+                "1 pulse in 50 ms = 13.32 km/h");
 
     /* 0 pulses → 0 km/h */
     delta = 0; dt_ms = 100;
@@ -213,9 +220,9 @@ static void test_constant_consistency(void)
     /* WHEEL_PULSES_REV must be 6 (6 bolts) */
     ASSERT_EQ_U32(WHEEL_PULSES_REV, 6, "WHEEL_PULSES_REV must be 6");
 
-    /* WHEEL_CIRCUMF_M must be 1.1 m */
-    ASSERT_NEAR(WHEEL_CIRCUMF_M_TEST, 1.1f, 0.01f,
-                "Wheel circumference must be 1.1 m");
+    /* WHEEL_CIRCUMF_M must be 1.11 m (measured 1110 mm circumference) */
+    ASSERT_NEAR(WHEEL_CIRCUMF_M_TEST, 1.11f, 0.005f,
+                "Wheel circumference must be 1.11 m (1110 mm)");
 
     /* Debounce interval must be strictly less than flood window */
     ASSERT_TRUE(WHEEL_MIN_PULSE_INTERVAL_MS < 1000U / WHEEL_MAX_FREQ_HZ,
@@ -374,10 +381,10 @@ static void test_decay_estimate(void)
      * dist_per_pulse / since_last gives decreasing upper bound.         */
     float dist_per_pulse = WHEEL_CIRCUMF_M_TEST / (float)WHEEL_PULSES_REV;
 
-    /* 50 ms since last pulse → upper bound = 0.183 / 0.05 * 3.6 = 13.2 km/h */
+    /* 50 ms since last pulse → upper bound = 0.185 / 0.05 * 3.6 = 13.32 km/h */
     uint32_t since_last = 50;
     float ub = dist_per_pulse * 1000.0f / (float)since_last * 3.6f;
-    ASSERT_NEAR(ub, 13.2f, 0.1f, "Upper bound at 50 ms since last pulse");
+    ASSERT_NEAR(ub, 13.32f, 0.1f, "Upper bound at 50 ms since last pulse");
 
     /* 200 ms since last → upper bound = 3.3 km/h */
     since_last = 200;
@@ -461,6 +468,44 @@ static void test_first_pulse_from_standstill(void)
 }
 
 /* =====================================================================
+ *  14. Wheel geometry — measured 1110 mm circumference, 185 mm/pulse
+ *
+ *  Guards the 1100 → 1110 mm update.  6 bolts per revolution, so each
+ *  accepted pulse represents 1110 / 6 = 185 mm of travel.
+ * ===================================================================== */
+
+static void test_wheel_geometry_1110(void)
+{
+    /* Circumference constant must be the measured 1110 mm. */
+    ASSERT_NEAR(WHEEL_CIRCUM_MM, 1110.0f, 0.001f,
+                "WHEEL_CIRCUM_MM must be 1110 mm (measured)");
+
+    /* Distance per accepted pulse = 1110 / 6 = 185 mm = 0.185 m. */
+    float dist_per_pulse_m = WHEEL_CIRCUMF_M_TEST / (float)WHEEL_PULSES_REV;
+    ASSERT_NEAR(dist_per_pulse_m, 0.185f, 0.0005f,
+                "Distance per pulse must be 185 mm");
+
+    /* One full revolution (6 pulses) = 1.110 m. */
+    float rev_dist_m = (float)WHEEL_PULSES_REV * dist_per_pulse_m;
+    ASSERT_NEAR(rev_dist_m, 1.110f, 0.001f,
+                "6 pulses (1 rev) = 1.110 m");
+
+    /* Expectation model for the hand-push validation:
+     *   3 m one-way  → 3000 / 185 ≈ 16.2 accepted pulses per wheel
+     *   6 m round    → 6000 / 185 ≈ 32.4 accepted pulses per wheel      */
+    float pulses_3m = 3000.0f / (dist_per_pulse_m * 1000.0f);
+    float pulses_6m = 6000.0f / (dist_per_pulse_m * 1000.0f);
+    ASSERT_NEAR(pulses_3m, 16.2f, 0.2f, "3 m ≈ 16 accepted pulses/wheel");
+    ASSERT_NEAR(pulses_6m, 32.4f, 0.3f, "6 m ≈ 32 accepted pulses/wheel");
+
+    /* dt = 1000 ms between two consecutive pulses → 0.185 m/s = 0.666 km/h. */
+    float speed_ms  = dist_per_pulse_m * 1000.0f / 1000.0f;   /* 1000 ms period */
+    float speed_kmh = speed_ms * 3.6f;
+    ASSERT_NEAR(speed_ms,  0.185f, 0.001f, "1 pulse/1000 ms = 0.185 m/s");
+    ASSERT_NEAR(speed_kmh, 0.666f, 0.005f, "1 pulse/1000 ms = 0.666 km/h");
+}
+
+/* =====================================================================
  *  main
  * ===================================================================== */
 
@@ -481,6 +526,7 @@ int main(void)
     test_period_based_speed();
     test_decay_estimate();
     test_first_pulse_from_standstill();
+    test_wheel_geometry_1110();
 
     printf("\n--- wheel_speed tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

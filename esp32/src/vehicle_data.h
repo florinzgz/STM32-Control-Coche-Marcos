@@ -258,13 +258,16 @@ struct SteeringZData {
     uint8_t  zTolerance   = 0;   // window used (counts)
     unsigned long timestampMs = 0;
 };
-// Counters of edge pulses rejected by the STM32 DWT 200 µs pre-filter.
+// Counters of edge pulses rejected by the STM32 DWT 200 µs pre-filter, plus
+// the VALID (accepted) per-wheel pulse counts that drive speed/distance.
 // Wheel counters arrive truncated/saturated to uint16; steering is full uint32.
 // -------------------------------------------------------------------------
 struct DebounceDiagData {
-    std::array<uint16_t, NUM_WHEELS> wheelFiltered{};   // FL, FR, RL, RR (saturated u16)
+    std::array<uint16_t, NUM_WHEELS> wheelFiltered{};   // FL, FR, RL, RR REJECTED (saturated u16)
+    std::array<uint16_t, NUM_WHEELS> wheelValid{};      // FL, FR, RL, RR VALID/accepted (saturated u16)
     uint32_t      steerFiltered = 0;
     unsigned long timestampMs   = 0;
+    unsigned long validTimestampMs = 0;   // last 0x314 (valid pulse) frame time
 };
 
 // -------------------------------------------------------------------------
