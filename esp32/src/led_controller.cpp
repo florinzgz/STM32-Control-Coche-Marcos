@@ -45,6 +45,13 @@ static FrontMode  currentFrontMode  = FrontMode::OFF;
 static RearMode   currentRearMode   = RearMode::OFF;
 static TurnSignal currentTurnSignal = TurnSignal::OFF;
 
+// ---- DEMO turn-signal override ----
+// While DecorMode::DEMO_SHOW cycles through its indicator/hazard steps, it
+// requests a turn signal here so the amber overlays can be verified visually.
+// The REAL turn signal (from steering / SAFE-mode hazard) always keeps
+// priority: this override is only applied when currentTurnSignal is OFF.
+static TurnSignal demoTurnOverride = TurnSignal::OFF;
+
 // ---- Animation counters ----
 static uint32_t lastUpdateMs   = 0;
 static uint16_t animationStep  = 0;
@@ -100,6 +107,15 @@ static constexpr CRGB AMBER = LED_COLOR_AMBER;
 
 static DecorMode currentDecorMode = DecorMode::NORMAL;
 
+// Returns the turn signal that the overlays should render.  The real turn
+// signal (steering / SAFE-mode hazard) always wins; the DEMO override is only
+// honoured while DEMO_SHOW is active AND no real turn signal is requested.
+static TurnSignal effectiveTurnSignal() {
+    if (currentTurnSignal != TurnSignal::OFF) return currentTurnSignal;
+    if (currentDecorMode == DecorMode::DEMO_SHOW) return demoTurnOverride;
+    return TurnSignal::OFF;
+}
+
 // Shared phase counter for all decorative patterns (non-blocking timing)
 static uint32_t decorLastMs   = 0;
 static uint8_t  decorPhase    = 0;    // generic phase index within pattern
@@ -133,6 +149,15 @@ static constexpr uint8_t  DECOR_AMBU_PHASES  = 8;    // total phases in cycle
 
 // DEMO_SHOW: rainbow speed (advance hue by 1 per step)
 static constexpr uint16_t DECOR_DEMO_STEP_MS = 60;
+
+// DEMO_SHOW real cycle: rotate through every pattern (KITT, KNIGHT_RIDER,
+// POLICE_US, AMBULANCE, WARNING_AMBER, HAZARD_RED, solid test colours) and
+// then the amber indicator overlays (left, right, hazard) so an operator can
+// visually confirm the turn signals work on top of every decorative mode.
+static constexpr uint16_t DECOR_DEMO_SUBSTEP_MS = 3000;  // time per demo step
+static constexpr uint8_t  DECOR_DEMO_STEP_COUNT = 10;    // number of demo steps
+static uint8_t  demoStep    = 0;
+static uint32_t demoStepMs  = 0;
 
 // CUSTOM_TEST: cycle through 9 segments every 2 s
 static constexpr uint16_t DECOR_TEST_STEP_MS = 2000;
@@ -290,11 +315,11 @@ static void renderKnightRider(CRGB* leds, int count, uint16_t step) {
 // No delay() anywhere in this section.
 // =====================================================================
 
-static void updateDecorativeFront() {
+static void updateDecorativeFront(DecorMode mode) {
     const uint8_t br = LED_BRIGHTNESS_EMERGENCY;
     const uint8_t brDemo = LED_BRIGHTNESS_DEMO;
 
-    switch (currentDecorMode) {
+    switch (mode) {
         case DecorMode::OFF:
             fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
             break;
@@ -400,11 +425,11 @@ static void updateDecorativeFront() {
     }
 }
 
-static void updateDecorativeRear() {
+static void updateDecorativeRear(DecorMode mode) {
     const uint8_t br = LED_BRIGHTNESS_EMERGENCY;
     const uint8_t brDemo = LED_BRIGHTNESS_DEMO;
 
-    switch (currentDecorMode) {
+    switch (mode) {
         case DecorMode::OFF:
             fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
             break;
@@ -515,11 +540,11 @@ static void updateDecorativeRear() {
 
 // Advance the shared decorative phase counter.
 // Each mode has its own step period and wrap count.
-static void advanceDecorPhase(uint32_t now) {
+static void advanceDecorPhase(uint32_t now, DecorMode mode) {
     uint16_t stepMs  = DECOR_POLICE_STEP_MS;
     uint8_t  wrapAt  = DECOR_POLICE_PHASES;
 
-    switch (currentDecorMode) {
+    switch (mode) {
         case DecorMode::POLICE_US:
             stepMs = DECOR_POLICE_STEP_MS;
             wrapAt = DECOR_POLICE_PHASES;
@@ -552,6 +577,69 @@ static void advanceDecorPhase(uint32_t now) {
         decorLastMs = now;
         decorPhase  = (decorPhase + 1) % wrapAt;
     }
+}
+
+// =====================================================================
+// DEMO_SHOW — full pattern walkthrough
+//
+// Instead of a single rainbow sweep, DEMO_SHOW rotates through every
+// decorative pattern and then exercises the amber indicator overlays so
+// the turn signals can be verified on top of a live decorative base.
+//
+// Steps (DECOR_DEMO_SUBSTEP_MS each):
+//   0 NORMAL / KITT red   1 KNIGHT_RIDER      2 POLICE_US
+//   3 AMBULANCE           4 WARNING_AMBER     5 HAZARD_RED
+//   6 CUSTOM_TEST (solid colours)
+//   7 left indicator      8 right indicator   9 hazard
+//
+// For the indicator steps a KNIGHT_RIDER base is rendered and the amber
+// overlay is requested via demoTurnOverride; effectiveTurnSignal() then
+// drives the same overlay path used in normal operation.  The real turn
+// signal always keeps priority (see effectiveTurnSignal()).
+//
+// No delay(); timing via millis()/now only.
+// =====================================================================
+static void updateDemoShow(uint32_t now) {
+    // Advance to the next demo step on the sub-step timer, resetting the
+    // per-pattern phase so each pattern starts cleanly (no stale phase).
+    if (now - demoStepMs >= DECOR_DEMO_SUBSTEP_MS) {
+        demoStepMs = now;
+        demoStep   = (demoStep + 1) % DECOR_DEMO_STEP_COUNT;
+        decorPhase = 0;
+        decorLastMs = now;
+    }
+
+    // Default: no forced indicator this step.
+    demoTurnOverride = TurnSignal::OFF;
+
+    // Step 0 shows the NORMAL base: KITT red scanner front, dim red rear —
+    // exactly what the driver sees in day-to-day NORMAL mode.
+    if (demoStep == 0) {
+        renderKnightRider(ledsFront, NUM_LEDS_FRONT, animationStep);
+        const CRGB tail = scaledBrightness(LED_COLOR_RED_EMERGENCY, BRIGHTNESS_POSITION);
+        fill_solid(ledsRear, NUM_LEDS_REAR, tail);
+        return;
+    }
+
+    // Map the remaining steps to an effective decorative pattern plus an
+    // optional forced indicator overlay.
+    DecorMode eff = DecorMode::KNIGHT_RIDER;
+    switch (demoStep) {
+        case 1: eff = DecorMode::KNIGHT_RIDER;  break;
+        case 2: eff = DecorMode::POLICE_US;     break;
+        case 3: eff = DecorMode::AMBULANCE;     break;
+        case 4: eff = DecorMode::WARNING_AMBER; break;
+        case 5: eff = DecorMode::HAZARD_RED;    break;
+        case 6: eff = DecorMode::CUSTOM_TEST;   break;
+        case 7: eff = DecorMode::KNIGHT_RIDER;  demoTurnOverride = TurnSignal::LEFT;   break;
+        case 8: eff = DecorMode::KNIGHT_RIDER;  demoTurnOverride = TurnSignal::RIGHT;  break;
+        case 9: eff = DecorMode::KNIGHT_RIDER;  demoTurnOverride = TurnSignal::HAZARD; break;
+        default: eff = DecorMode::KNIGHT_RIDER; break;
+    }
+
+    advanceDecorPhase(now, eff);
+    updateDecorativeFront(eff);
+    updateDecorativeRear(eff);
 }
 
 // =====================================================================
@@ -678,9 +766,9 @@ static void updateFrontTurnSignals() {
     // When TurnSignal::HAZARD is set (SAFE/ERROR state from main.cpp),
     // both sides are forced ON regardless of steering angle input.
     // This is independent of the steering hysteresis — it's an absolute override.
-    const bool hazardOverride = (currentTurnSignal == TurnSignal::HAZARD);
-    turnLeftActive  = hazardOverride || (currentTurnSignal == TurnSignal::LEFT);
-    turnRightActive = hazardOverride || (currentTurnSignal == TurnSignal::RIGHT);
+    const bool hazardOverride = (effectiveTurnSignal() == TurnSignal::HAZARD);
+    turnLeftActive  = hazardOverride || (effectiveTurnSignal() == TurnSignal::LEFT);
+    turnRightActive = hazardOverride || (effectiveTurnSignal() == TurnSignal::RIGHT);
 
     // No turn signals active — KITT / base effect fills the full strip unmodified
     if (!turnLeftActive && !turnRightActive) return;
@@ -741,8 +829,9 @@ static void sweepFill(int zoneStart, int zoneCount, uint8_t step, CRGB color) {
 }
 
 static void updateRearTurnSignals() {
-    bool leftOn  = (currentTurnSignal == TurnSignal::LEFT  || currentTurnSignal == TurnSignal::HAZARD);
-    bool rightOn = (currentTurnSignal == TurnSignal::RIGHT || currentTurnSignal == TurnSignal::HAZARD);
+    const TurnSignal ts = effectiveTurnSignal();
+    bool leftOn  = (ts == TurnSignal::LEFT  || ts == TurnSignal::HAZARD);
+    bool rightOn = (ts == TurnSignal::RIGHT || ts == TurnSignal::HAZARD);
 
     // No turn signals active — base effect fills the full strip unmodified
     if (!leftOn && !rightOn) return;
@@ -850,10 +939,17 @@ void update() {
     if (currentDecorMode == DecorMode::NORMAL) {
         updateFrontLEDs();
         updateRearBase();
+    } else if (currentDecorMode == DecorMode::DEMO_SHOW) {
+        // DEMO walks through every pattern + indicator overlay (real demo).
+        updateDemoShow(now);
+        // Overlay safety-critical rear states — priority beats the demo too
+        if (isRearFunctionalOverlay(currentRearMode)) {
+            updateRearBase();
+        }
     } else {
-        advanceDecorPhase(now);
-        updateDecorativeFront();
-        updateDecorativeRear();
+        advanceDecorPhase(now, currentDecorMode);
+        updateDecorativeFront(currentDecorMode);
+        updateDecorativeRear(currentDecorMode);
         // Overlay safety-critical rear states — priority beats ALL decor modes
         if (isRearFunctionalOverlay(currentRearMode)) {
             updateRearBase();
@@ -875,6 +971,9 @@ void setFrontMode(FrontMode mode) {
         animationStep    = 0;
         scannerPos       = 0;
         scannerDirection = 1;
+        // Clear the front buffer so the KITT/chase fade renderers never drag
+        // stale pixels (old rainbow/alert colours) from the previous mode.
+        if (initialized) fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
     }
 }
 
@@ -927,6 +1026,16 @@ void setDecorMode(DecorMode mode) {
         currentDecorMode = mode;
         decorPhase   = 0;
         decorLastMs  = millis();
+        demoStep     = 0;
+        demoStepMs   = millis();
+        demoTurnOverride = TurnSignal::OFF;
+        // Wipe both strips on every mode change so no stale rainbow/demo/alert
+        // pixels linger under the new pattern (fade-based renderers otherwise
+        // drag old colours for several frames).
+        if (initialized) {
+            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
+            fill_solid(ledsRear,  NUM_LEDS_REAR,  CRGB::Black);
+        }
         Serial.printf("[LED] DecorMode set to %u\n", static_cast<uint8_t>(mode));
     }
 }
