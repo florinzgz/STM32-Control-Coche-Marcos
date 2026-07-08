@@ -1154,7 +1154,7 @@ void CAN_SendServiceStatus(void) {
 /**
  * @brief  Send DWT-debounce EMI diagnostic counters to ESP32.
  *
- * Three aditive frames (1000 ms cadence, low priority):
+ * Three additive frames (1000 ms cadence, low priority):
  *   0x306 — DLC 8: FL/FR/RL/RR REJECTED (filtered) counts, uint16 LE sat 0xFFFF
  *   0x307 — DLC 4: steering-center REJECTED (filtered) count, uint32 LE
  *   0x314 — DLC 8: FL/FR/RL/RR VALID (accepted) pulse counts, uint16 LE sat 0xFFFF

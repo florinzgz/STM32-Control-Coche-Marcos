@@ -178,9 +178,11 @@ inline constexpr uint8_t BATT_COLOR_MID     = 50;  // ≤ this → yellow, else 
 //
 // Wheel RPM derived from average speed and wheel circumference (1.110 m).
 // Formula: RPM = raw_0_1kmh * 100 / 66  (integer-only, no float).
-// The 100/66 factor is a display-only approximation (based on ~1.1 m); the
-// authoritative speed/distance uses WHEEL_CIRCUM_MM = 1110 on the STM32, so
-// the ~0.9% RPM rounding here is cosmetic and capped at RPM_DISPLAY_MAX.
+// The 100/66 factor is a display-only integer approximation: the exact factor
+// for a 1.110 m circumference is 60 / (1.110 * 3.6) ~= 15.015, whereas
+// 100/66 ~= 15.152 (< 1% error). The authoritative speed/distance uses
+// WHEEL_CIRCUM_MM = 1110 on the STM32, so this rounding is cosmetic only and
+// is capped at RPM_DISPLAY_MAX.
 // =========================================================================
 
 // Maximum RPM shown on display (clamp)

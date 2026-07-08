@@ -34,6 +34,9 @@ IWDG_HandleTypeDef hiwdg;
  * 1110 mm (111 cm), i.e. 1110 / 6 = 185 mm of travel per accepted pulse.
  * Deriving WHEEL_CIRCUMF_M_TEST from it keeps the tests in lock-step with the
  * firmware and prevents a stale duplicate (e.g. a leftover 1100). */
+#ifndef WHEEL_CIRCUM_MM
+#error "WHEEL_CIRCUM_MM not defined — include path is missing vehicle_physics.h (via main.h). Fix the build rather than silently using a wrong circumference."
+#endif
 #define WHEEL_CIRCUMF_M_TEST     (WHEEL_CIRCUM_MM / 1000.0f)
 
 /* ---- Test framework ---- */
