@@ -3283,12 +3283,27 @@ void CAN_ProcessMessages(void) {
                     }
 
                     /* --- Atomic commit (all-or-nothing) ---------------- */
+                    /* Exception: shifting into a SAFE gear (NEUTRAL or PARK)
+                     * must always succeed once the range is valid, even if
+                     * the mode-change speed gate rejected the 4x4/tank-turn
+                     * portion.  Otherwise a self-induced turn (tank turn)
+                     * would keep the wheels spinning >1 km/h and trap the
+                     * driver in the current driving gear — braking/coasting
+                     * is always safe, so the path to N/P is never blocked. */
+                    bool safe_gear_req = gear_present && gear_ok &&
+                                         (requested_gear == GEAR_NEUTRAL ||
+                                          requested_gear == GEAR_PARK);
                     if (mode_ok && gear_ok) {
                         Traction_SetMode4x4(enable_4x4);
                         Traction_SetAxisRotation(tank_turn);
                         if (gear_present) {
                             Traction_SetGear(requested_gear);
                         }
+                        CAN_SendCommandAck(0x02, ACK_OK);
+                    } else if (safe_gear_req) {
+                        /* Apply only the gear (to N/P); leave the mode
+                         * unchanged because its speed gate was not met.   */
+                        Traction_SetGear(requested_gear);
                         CAN_SendCommandAck(0x02, ACK_OK);
                     } else if (!gear_range_ok) {
                         CAN_SendCommandAck(0x02, ACK_INVALID);
