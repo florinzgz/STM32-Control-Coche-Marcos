@@ -1292,60 +1292,30 @@ void Traction_Update(void)
     }
 
     /* --- Gear P: Park Hold ---
-     * Apply controlled active brake via H-bridge to simulate a parking
-     * lock.  No throttle demand is accepted.  Current and temperature
-     * are monitored to prevent overheating during long-duration hold.
-     * Park hold is released in SAFE/ERROR states (safety override).    */
+     * Apply a PASSIVE electromagnetic brake via the H-bridge to simulate a
+     * parking lock: both PWM channels at 0 with EN asserted causes the
+     * BTS7960 to short the motor terminals (MOTOR_MODE_BRAKE).  This holds
+     * the vehicle against rolling WITHOUT injecting any driving torque, so
+     * the wheels are never actively driven while in Park.  No throttle
+     * demand is accepted.  Because no drive current is forced through the
+     * motor at standstill, the current/temperature derating that a forward
+     * active-hold required is unnecessary here.
+     * Park hold is released (coast) in SAFE/ERROR states (safety override). */
     if (current_gear == GEAR_PARK) {
         SystemState_t st = Safety_GetState();
         if (st == SYS_STATE_SAFE || st == SYS_STATE_ERROR) {
-            /* Safety override — release park hold */
-            Motor_SetSigned(&motor_fl, 0);
-            Motor_SetSigned(&motor_fr, 0);
-            Motor_SetSigned(&motor_rl, 0);
-            Motor_SetSigned(&motor_rr, 0);
+            /* Safety override — release park hold (free coast) */
+            Motor_SetMode(&motor_fl, MOTOR_MODE_COAST, 0);
+            Motor_SetMode(&motor_fr, MOTOR_MODE_COAST, 0);
+            Motor_SetMode(&motor_rl, MOTOR_MODE_COAST, 0);
+            Motor_SetMode(&motor_rr, MOTOR_MODE_COAST, 0);
         } else {
-            /* Compute park hold PWM with current/temp derating */
-            float hold_pct = PARK_HOLD_PWM_PCT;
-
-            /* Check per-motor current and temperature; use worst case */
-            float max_current = 0.0f;
-            float max_temp    = 0.0f;
-            for (uint8_t i = 0; i < 4; i++) {
-                float a = Current_GetAmps(i);
-                float t = Temperature_Get(i);
-                if (a > max_current) max_current = a;
-                if (t > max_temp)    max_temp    = t;
-            }
-
-            /* Current derating */
-            if (max_current > PARK_HOLD_CURRENT_MAX_A) {
-                hold_pct = 0.0f;   /* Disable braking entirely */
-            } else if (max_current > PARK_HOLD_CURRENT_WARN_A) {
-                float ratio = (PARK_HOLD_CURRENT_MAX_A - max_current)
-                            / (PARK_HOLD_CURRENT_MAX_A - PARK_HOLD_CURRENT_WARN_A);
-                hold_pct *= ratio;
-            }
-
-            /* Temperature derating */
-            if (max_temp > PARK_HOLD_TEMP_CRIT_C) {
-                hold_pct = 0.0f;   /* Disable braking entirely */
-            } else if (max_temp > PARK_HOLD_TEMP_WARN_C) {
-                float ratio = (PARK_HOLD_TEMP_CRIT_C - max_temp)
-                            / (PARK_HOLD_TEMP_CRIT_C - PARK_HOLD_TEMP_WARN_C);
-                hold_pct *= ratio;
-            }
-
-            uint16_t hold_pwm = (uint16_t)(hold_pct * PWM_PERIOD / 100.0f);
-
-            /* Apply hold brake to all four motors.
-             * Positive (forward) torque holds the vehicle against rolling.
-             * Zero hold_pwm disables holding entirely (thermal derating).
-             * RPWM = hold_pwm, LPWM = 0 → forward hold torque.           */
-            Motor_SetSigned(&motor_fl, (int16_t)hold_pwm);
-            Motor_SetSigned(&motor_fr, (int16_t)hold_pwm);
-            Motor_SetSigned(&motor_rl, (int16_t)hold_pwm);
-            Motor_SetSigned(&motor_rr, (int16_t)hold_pwm);
+            /* Passive brake: short the motor terminals (RPWM=LPWM=0,
+             * EN=HIGH).  No forward/active torque is applied.            */
+            Motor_SetMode(&motor_fl, MOTOR_MODE_BRAKE, 0);
+            Motor_SetMode(&motor_fr, MOTOR_MODE_BRAKE, 0);
+            Motor_SetMode(&motor_rl, MOTOR_MODE_BRAKE, 0);
+            Motor_SetMode(&motor_rr, MOTOR_MODE_BRAKE, 0);
         }
 
         /* Update sensor readings even in park */

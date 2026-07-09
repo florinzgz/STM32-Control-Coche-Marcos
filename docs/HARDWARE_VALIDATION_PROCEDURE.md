@@ -452,7 +452,7 @@ Execute this procedure strictly in this order:
 
 ### Test 5.3 — Brake and Neutral Behavior
 
-**Background:** In gear N (neutral), motor PWM = 0, wheels coast freely. In gear P (park), active hold brake is applied at 30 % PWM with current/temperature derating.
+**Background:** In gear N (neutral), motor PWM = 0, wheels coast freely. In gear P (park), a **passive** electromagnetic brake is applied (both PWM channels = 0, EN asserted → BTS7960 shorts the motor terminals). No driving torque is injected, so the wheels are never actively driven; braking current only flows while the terminals are shorted and the wheel is being turned.
 
 **Procedure:**
 
@@ -460,13 +460,13 @@ Execute this procedure strictly in this order:
 2. Set gear to N via ESP32.
 3. Verify all motor PWM = 0 and wheels spin freely when pushed by hand.
 4. Set gear to P via ESP32.
-5. Verify wheels resist rotation (active brake hold applied).
-6. Monitor CAN 0x201 (motor currents) — expect non-zero current in P (park hold), zero in N.
+5. Verify wheels resist rotation (passive short-circuit brake) and are NOT driven (no self-motion).
+6. Monitor CAN 0x201 (motor currents) — expect ~zero current in P at standstill (passive brake draws no drive current), zero in N.
 
 | Condition | Observable Evidence | PASS/FAIL |
 |-----------|-------------------|-----------|
 | Gear N: coast | Motor PWM = 0, wheels spin freely when pushed | ☐ |
-| Gear P: park hold | Wheels resist rotation, CAN 0x201 shows holding current | ☐ |
+| Gear P: park hold | Wheels resist rotation (passive brake), no self-motion | ☐ |
 
 ### Test 5.4 — Safe Reaction to Invalid Inputs
 
