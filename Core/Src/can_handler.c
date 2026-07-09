@@ -3239,15 +3239,21 @@ void CAN_ProcessMessages(void) {
                     /* --- Validate gear change (low-speed + D↔R safety) - */
                     bool gear_ok = gear_range_ok;
                     if (gear_present && gear_ok) {
-                        /* Shifting into NEUTRAL or PARK is ALWAYS permitted,
-                         * regardless of speed.  Coasting (N) and braking (P)
-                         * are inherently safe, and a self-induced turn (tank
-                         * turn / axis rotation) spins the wheels, which would
-                         * otherwise trap the driver in the current gear by
-                         * tripping the ≤1 km/h speed gate.  Never block the
-                         * path back to a safe gear.                          */
-                        bool req_is_safe_gear = (requested_gear == GEAR_NEUTRAL ||
-                                                 requested_gear == GEAR_PARK);
+                        /* Shifting into NEUTRAL is ALWAYS permitted,
+                         * regardless of speed.  Coasting (N) is inherently
+                         * safe, and a self-induced turn (tank turn / axis
+                         * rotation) spins the wheels, which would otherwise
+                         * trap the driver in the current gear by tripping the
+                         * ≤1 km/h speed gate.  NEUTRAL alone guarantees an
+                         * escape path, so it is never blocked.
+                         *
+                         * PARK is deliberately EXCLUDED from this escape
+                         * hatch: GEAR_PARK engages MOTOR_MODE_BRAKE (shorted
+                         * motor terminals) in Traction_Update, so allowing
+                         * PARK at arbitrary wheel speed would cause abrupt
+                         * dynamic braking and a large current spike.  PARK
+                         * therefore remains subject to the ≤1 km/h gate.     */
+                        bool req_is_safe_gear = (requested_gear == GEAR_NEUTRAL);
                         if (!req_is_safe_gear) {
                             float avg_spd = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
                                              Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
@@ -3283,16 +3289,20 @@ void CAN_ProcessMessages(void) {
                     }
 
                     /* --- Atomic commit (all-or-nothing) ---------------- */
-                    /* Exception: shifting into a SAFE gear (NEUTRAL or PARK)
-                     * must always succeed once the range is valid, even if
-                     * the mode-change speed gate rejected the 4x4/tank-turn
-                     * portion.  Otherwise a self-induced turn (tank turn)
-                     * would keep the wheels spinning >1 km/h and trap the
-                     * driver in the current driving gear — braking/coasting
-                     * is always safe, so the path to N/P is never blocked. */
+                    /* Exception: shifting into NEUTRAL must always succeed
+                     * once the range is valid, even if the mode-change speed
+                     * gate rejected the 4x4/tank-turn portion.  Otherwise a
+                     * self-induced turn (tank turn) would keep the wheels
+                     * spinning >1 km/h and trap the driver in the current
+                     * driving gear — coasting is always safe, so the path to
+                     * NEUTRAL is never blocked.
+                     *
+                     * PARK is excluded on purpose: it maps to MOTOR_MODE_BRAKE
+                     * (dynamic braking), so applying it while the wheels spin
+                     * would brake abruptly.  NEUTRAL alone provides the escape
+                     * path; PARK stays subject to the ≤1 km/h gate above.     */
                     bool safe_gear_req = gear_present && gear_ok &&
-                                         (requested_gear == GEAR_NEUTRAL ||
-                                          requested_gear == GEAR_PARK);
+                                         (requested_gear == GEAR_NEUTRAL);
                     if (mode_ok && gear_ok) {
                         Traction_SetMode4x4(enable_4x4);
                         Traction_SetAxisRotation(tank_turn);
@@ -3301,7 +3311,7 @@ void CAN_ProcessMessages(void) {
                         }
                         CAN_SendCommandAck(0x02, ACK_OK);
                     } else if (safe_gear_req) {
-                        /* Apply only the gear (to N/P); leave the mode
+                        /* Apply only the gear (to NEUTRAL); leave the mode
                          * unchanged because its speed gate was not met.   */
                         Traction_SetGear(requested_gear);
                         CAN_SendCommandAck(0x02, ACK_OK);
