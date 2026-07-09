@@ -180,7 +180,7 @@ enum class DecorMode : uint8_t {
     AMBULANCE     = 3,  // Red/white alternating
     WARNING_AMBER = 4,  // Amber blink (precaution / slow)
     HAZARD_RED    = 5,  // Rear red double-flash
-    DEMO_SHOW     = 6,  // Rainbow sweep
+    DEMO_SHOW     = 6,  // Full walkthrough: cycles every pattern + indicators
     CUSTOM_TEST   = 7,  // Segment diagnostic (cycles through zones)
     KNIGHT_RIDER  = 8   // "Coche fantástico" — red scanner bounce with tail
 };

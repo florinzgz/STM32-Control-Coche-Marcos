@@ -139,6 +139,13 @@ static unsigned long lastRtMonMs      = 0;
 // ---- LED relay state tracking ----
 static bool     frontLedLocalState = false;  // front LED relay desired state
 static bool     rearLedLocalState  = false;  // rear LED relay desired state
+// One-shot NVS relay restore after boot (retries until the STM32 echoes the
+// desired relay state, so a dropped CMD_LED frame can't leave the strips off).
+static bool          ledBootRestoreDone     = false;
+static uint8_t       ledBootRestoreAttempts = 0;
+static unsigned long ledBootRestoreLastMs   = 0;
+static constexpr uint8_t       LED_BOOT_RESTORE_MAX_ATTEMPTS = 10;
+static constexpr unsigned long LED_BOOT_RESTORE_RETRY_MS     = 500;
 
 // ---- Shifter gear tracking ----
 static uint8_t  lastSentGear      = 0xFF;    // last gear value sent to STM32
@@ -907,6 +914,36 @@ void loop() {
             if (!startupInhibitNow) {
                 stm32StartupSeen = false;  // inhibit cleared, ready for next detection
             }
+
+            // ---- One-shot LED relay restore from NVS after boot ----
+            // If the front/rear LED strips were saved as ENABLED, power them
+            // up automatically once the STM32 is alive and out of BOOT — the
+            // user should NOT have to press the button after boot.  An explicit
+            // OFF state (both false) is respected: nothing is sent.  Only the
+            // LED relays are touched (CMD_LED); traction/steering relays are
+            // never affected here.  Retries (rate-limited, bounded) until the
+            // STM32 echoes the desired relay state so a dropped CAN frame can't
+            // silently leave the strips off.
+            if (!ledBootRestoreDone && stm32IsAlive &&
+                (hb.systemState == can::SystemState::STANDBY ||
+                 hb.systemState == can::SystemState::ACTIVE)) {
+                if (!frontLedLocalState && !rearLedLocalState) {
+                    ledBootRestoreDone = true;  // OFF saved — respect it, nothing to do
+                } else if (vehicleData.lights().frontRelayOn == frontLedLocalState &&
+                           vehicleData.lights().rearRelayOn  == rearLedLocalState) {
+                    ledBootRestoreDone = true;  // STM32 already reflects saved state
+                } else if (ledBootRestoreAttempts >= LED_BOOT_RESTORE_MAX_ATTEMPTS) {
+                    ledBootRestoreDone = true;  // give up after bounded retries
+                } else if ((now - ledBootRestoreLastMs) >= LED_BOOT_RESTORE_RETRY_MS) {
+                    sendLedCommand(frontLedLocalState, rearLedLocalState);
+                    ledBootRestoreLastMs = now;
+                    ledBootRestoreAttempts++;
+                    Serial.printf("[LED] Boot restore from NVS (try %u) → front=%s rear=%s\n",
+                                  ledBootRestoreAttempts,
+                                  frontLedLocalState ? "ON" : "OFF",
+                                  rearLedLocalState ? "ON" : "OFF");
+                }
+            }
         }
     }
 
@@ -1403,9 +1440,15 @@ void loop() {
         auto st = vehicleData.heartbeat().systemState;
         bool frontEnabled = vehicleData.lights().frontRelayOn;
 
-        // Enable/disable LED system based on front relay and system state
-        // (front relay controls the WS2812B power for decorative effects)
-        if (!frontEnabled || st == can::SystemState::BOOT || st == can::SystemState::STANDBY) {
+        // Enable/disable LED system based on front relay and system state.
+        // The front relay controls WS2812B power; when it is OFF (or the user
+        // disabled the strips via NVS, reflected in frontRelayOn) the strips
+        // stay dark.  BOOT keeps the strips off while the STM32 initialises.
+        // STANDBY is intentionally NOT a disable condition: with the front
+        // relay ON the driver must see the KITT scanner as soon as the strips
+        // are powered, even before the system leaves STANDBY into ACTIVE.
+        // (Traction/steering relays and safety are untouched by this.)
+        if (!frontEnabled || st == can::SystemState::BOOT) {
             led_ctrl::setEnabled(false);
         } else {
             led_ctrl::setEnabled(true);
@@ -1433,14 +1476,12 @@ void loop() {
         // than full braking, triggers blue-pulse regen indicator on rear.
         bool braking = false;
         bool regen   = false;
-        float throttlePct;
         {
             uint32_t trSum = 0;
             for (uint8_t i = 0; i < 4; ++i) {
                 trSum += vehicleData.traction().scale[i];
             }
             uint8_t trAvg = static_cast<uint8_t>(trSum / 4);
-            throttlePct = static_cast<float>(trAvg);
 
             uint32_t spSum = 0;
             for (uint8_t i = 0; i < 4; ++i) {
@@ -1465,8 +1506,11 @@ void loop() {
         } else if (reverse) {
             led_ctrl::setFrontMode(led_ctrl::FrontMode::REVERSE);
         } else {
-            // Throttle-reactive front patterns
-            led_ctrl::setFrontFromThrottle(throttlePct);
+            // NORMAL base: the front strip must ALWAYS show the red KITT /
+            // "coche fantástico" scanner.  It must NEVER turn into a
+            // rainbow/green pattern from throttle (traction scale) — only the
+            // safety states above (ABS/TCS/REVERSE) may override it.
+            led_ctrl::setFrontMode(led_ctrl::FrontMode::KITT_IDLE);
         }
 
         // ---- Rear LED mode from driving state ----
