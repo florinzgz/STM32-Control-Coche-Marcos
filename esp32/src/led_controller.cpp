@@ -80,9 +80,11 @@ static bool     emergencyPhase     = false;
 // =========================================================================
 // Explicit decorative / signal colour palette (documented)
 //
-// The WS2812B strips are configured GRB in init() (see FastLED.addLeds<>),
-// which is the native byte order for genuine WS2812B, so these logical RGB
-// values map correctly on hardware: red=red, green=green, blue=blue.
+// The rear WS2812B strip is configured GRB in init() and the front strip is
+// configured RGB (see FastLED.addLeds<> — the front controllers use RGB byte
+// order on this hardware). FastLED translates these logical RGB values to the
+// correct per-strip byte order, so on hardware red=red, green=green, blue=blue
+// on BOTH strips.
 // Define every decorative colour explicitly here — no ambiguous inline
 // colours in the pattern renderers.
 // =========================================================================
@@ -864,7 +866,12 @@ static void updateRearTurnSignals() {
 // =====================================================================
 
 void init() {
-    FastLED.addLeds<WS2812B, LED_FRONT_PIN, GRB>(ledsFront, NUM_LEDS_FRONT);
+    // NOTE: the two strips use DIFFERENT byte orders on this hardware.
+    // The rear strip is genuine WS2812B (GRB). The front strip's controllers
+    // expect RGB order — configuring it as GRB swapped its red/green channels,
+    // so the red KITT scan and POLICE_US red flashes appeared GREEN. Sending
+    // RGB to the front makes logical red=red, green=green, blue=blue.
+    FastLED.addLeds<WS2812B, LED_FRONT_PIN, RGB>(ledsFront, NUM_LEDS_FRONT);
     FastLED.addLeds<WS2812B, LED_REAR_PIN,  GRB>(ledsRear,  NUM_LEDS_REAR);
     FastLED.setBrightness(200);
     FastLED.clear(true);
