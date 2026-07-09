@@ -406,9 +406,9 @@ static void updateDecorativeFront(DecorMode mode) {
                 case 5: // All front — amber
                     fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(AMBER, br));
                     break;
-                case 6: // Front centre only — green
-                    fill_solid(&ledsFront[FRONT_CENTRE_START], FRONT_CENTRE_COUNT,
-                               scaledBrightness(CRGB::Green, br));
+                case 6: // All front — green (full-strip, for colour-order /
+                        // first-LED / dead-pixel diagnosis on every LED)
+                    fill_solid(ledsFront, NUM_LEDS_FRONT, scaledBrightness(CRGB::Green, br));
                     break;
                 case 7: // All front — rainbow stripe
                     fill_rainbow(ledsFront, NUM_LEDS_FRONT, 0, 10);
@@ -519,9 +519,9 @@ static void updateDecorativeRear(DecorMode mode) {
                 case 5: // All rear — amber
                     fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(AMBER, br));
                     break;
-                case 6: // Rear centre only — green
-                    fill_solid(&ledsRear[REAR_CENTRE_START], REAR_CENTRE_COUNT,
-                               scaledBrightness(CRGB::Green, br));
+                case 6: // All rear — green (full-strip, for colour-order /
+                        // first-LED / dead-pixel diagnosis on every LED)
+                    fill_solid(ledsRear, NUM_LEDS_REAR, scaledBrightness(CRGB::Green, br));
                     break;
                 case 7: // All rear — rainbow stripe
                     fill_rainbow(ledsRear, NUM_LEDS_REAR, 128, 10);

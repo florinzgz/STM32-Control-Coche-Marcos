@@ -1440,9 +1440,15 @@ void loop() {
         auto st = vehicleData.heartbeat().systemState;
         bool frontEnabled = vehicleData.lights().frontRelayOn;
 
-        // Enable/disable LED system based on front relay and system state
-        // (front relay controls the WS2812B power for decorative effects)
-        if (!frontEnabled || st == can::SystemState::BOOT || st == can::SystemState::STANDBY) {
+        // Enable/disable LED system based on front relay and system state.
+        // The front relay controls WS2812B power; when it is OFF (or the user
+        // disabled the strips via NVS, reflected in frontRelayOn) the strips
+        // stay dark.  BOOT keeps the strips off while the STM32 initialises.
+        // STANDBY is intentionally NOT a disable condition: with the front
+        // relay ON the driver must see the KITT scanner as soon as the strips
+        // are powered, even before the system leaves STANDBY into ACTIVE.
+        // (Traction/steering relays and safety are untouched by this.)
+        if (!frontEnabled || st == can::SystemState::BOOT) {
             led_ctrl::setEnabled(false);
         } else {
             led_ctrl::setEnabled(true);
