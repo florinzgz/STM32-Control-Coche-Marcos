@@ -556,7 +556,7 @@ void SafeScreen::draw() {
             // Distance text + state
             char distBuf[ui::FMT_BUF_MED];
             snprintf(distBuf, sizeof(distBuf), "%u.%02um %s",
-                     obstacleCm_ / 100, obstacleCm_ % 100, stateText);
+                     (unsigned)(obstacleCm_ / 100), (unsigned)(obstacleCm_ % 100), stateText);
             tft.setTextColor(barCol, ui::COL_BG);
             tft.setTextPadding(ui::cfg::PAD_SAFE_OBSTACLE_TEXT);
             tft.drawString(distBuf, STILE_OBS_BAR_X + STILE_OBS_BAR_W + 10, STILE_OBSTACLE_Y);

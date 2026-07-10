@@ -1365,18 +1365,31 @@ void ABS_Update(void)
     }
 
     /* Implicit dependency: ABS requires wheel speed sensors.
-     * If wheel speed modules are disabled (ServiceMode), GetSpeed returns 0.0,
-     * causing avg < 10.0 → ABS self-deactivates gracefully.
-     * The speed gate in CAN_ID_SERVICE_CMD (can_handler.c) prevents disabling
-     * wheel speed sensors while the vehicle is in motion (avg_spd > 0.5),
-     * so ABS is always available when it matters.                            */
+     * Reference average is computed from HEALTHY wheels only (enabled and
+     * fault-free).  A disabled or faulted sensor reporting 0 km/h would
+     * otherwise corrupt the average and trigger false ABS intervention on
+     * the dead wheel AND false TCS throttling on every healthy wheel.
+     * The speed gate in CAN_ID_SERVICE_CMD (can_handler.c) prevents
+     * disabling wheel speed sensors while the vehicle is in motion
+     * (avg_spd > 0.5), so ABS is always available when it matters.       */
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
     spd[2] = Wheel_GetSpeed_RL();
     spd[3] = Wheel_GetSpeed_RR();
 
-    float avg = (spd[0] + spd[1] + spd[2] + spd[3]) / 4.0f;
+    /* Compute average from healthy (enabled + fault-free) sensors only. */
+    float    sum_spd   = 0.0f;
+    uint8_t  n_healthy = 0U;
+    for (uint8_t i = 0; i < 4; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
+        if (ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) continue;
+        sum_spd += spd[i];
+        n_healthy++;
+    }
+    float avg = (n_healthy > 0U) ? (sum_spd / (float)n_healthy) : 0.0f;
+
     if (avg < 10.0f) {         /* abs_system.cpp: minSpeedKmh = 10.0f */
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0;
@@ -1392,6 +1405,17 @@ void ABS_Update(void)
 
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 4; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+        /* Skip disabled or faulted wheel sensors — do not trigger ABS on
+         * a dead sensor, and do not reduce its wheel_scale artificially. */
+        if (!ServiceMode_IsEnabled(mod) ||
+            ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) {
+            safety_status.wheel_scale[i] = 1.0f;
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
+            continue;
+        }
+
         float slip = ((avg - spd[i]) * 100.0f) / avg;
         if (slip > (float)ABS_SLIP_THRESHOLD) {
             mask |= (1U << i);
@@ -1433,10 +1457,19 @@ void ABS_Update(void)
         safety_status.abs_active = true;
         safety_status.abs_wheel_mask = mask;
         sat_inc_u32(&safety_status.abs_activation_count);
-        /* Global fallback: if ALL wheels lock, apply global throttle
+        /* Global fallback: if ALL healthy wheels lock, apply global throttle
          * cut as a last-resort safety measure (vehicle is on ice or
-         * sensors are unreliable).                                    */
-        if (mask == 0x0F) {
+         * sensors are unreliable).  Compare against healthy-wheel mask only
+         * so a dead sensor never forces a global cut by itself.           */
+        uint8_t healthy_mask = 0U;
+        for (uint8_t i = 0; i < 4; i++) {
+            ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+            if (ServiceMode_IsEnabled(mod) &&
+                ServiceMode_GetFault(mod) == MODULE_FAULT_NONE) {
+                healthy_mask |= (1U << i);
+            }
+        }
+        if (healthy_mask != 0U && (mask & healthy_mask) == healthy_mask) {
             Traction_SetDemand(0);
         }
         /* Otherwise: per-wheel scale is applied in Traction_Update(). */
@@ -1499,18 +1532,31 @@ void TCS_Update(void)
     }
 
     /* Implicit dependency: TCS requires wheel speed sensors.
-     * If wheel speed modules are disabled (ServiceMode), GetSpeed returns 0.0,
-     * causing avg < 3.0 → TCS self-deactivates gracefully.
-     * The speed gate in CAN_ID_SERVICE_CMD (can_handler.c) prevents disabling
-     * wheel speed sensors while the vehicle is in motion (avg_spd > 0.5),
-     * so TCS is always available when it matters.                            */
+     * Reference average is computed from HEALTHY wheels only (enabled and
+     * fault-free).  A disabled or faulted sensor reporting 0 km/h would
+     * otherwise corrupt the average and trigger false TCS throttling on
+     * every healthy wheel (and false ABS on the dead wheel via ABS_Update).
+     * The speed gate in CAN_ID_SERVICE_CMD (can_handler.c) prevents
+     * disabling wheel speed sensors while the vehicle is in motion
+     * (avg_spd > 0.5), so TCS is always available when it matters.       */
     float spd[4];
     spd[0] = Wheel_GetSpeed_FL();
     spd[1] = Wheel_GetSpeed_FR();
     spd[2] = Wheel_GetSpeed_RL();
     spd[3] = Wheel_GetSpeed_RR();
 
-    float avg = (spd[0] + spd[1] + spd[2] + spd[3]) / 4.0f;
+    /* Compute average from healthy (enabled + fault-free) sensors only. */
+    float    sum_spd   = 0.0f;
+    uint8_t  n_healthy = 0U;
+    for (uint8_t i = 0; i < 4; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+        if (!ServiceMode_IsEnabled(mod)) continue;
+        if (ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) continue;
+        sum_spd += spd[i];
+        n_healthy++;
+    }
+    float avg = (n_healthy > 0U) ? (sum_spd / (float)n_healthy) : 0.0f;
+
     if (avg < 3.0f) {          /* tcs_system.cpp: minSpeedKmh = 3.0f */
         safety_status.tcs_active = false;
         safety_status.tcs_wheel_mask = 0;
@@ -1527,6 +1573,19 @@ void TCS_Update(void)
 
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 4; i++) {
+        ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+        /* Skip disabled or faulted wheel sensors — a dead sensor must not
+         * trigger TCS on itself, and must not corrupt the average used to
+         * evaluate healthy wheels.  Clear any residual reduction so the
+         * motor on this channel runs without artificial TCS restriction. */
+        if (!ServiceMode_IsEnabled(mod) ||
+            ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) {
+            tcs_reduction[i] = 0.0f;
+            /* Do NOT touch wheel_scale here: ABS_Update has priority and
+             * runs first; leave its result for Traction_Update.          */
+            continue;
+        }
+
         float slip = ((spd[i] - avg) * 100.0f) / avg;
         if (slip > (float)TCS_SLIP_THRESHOLD) {
             mask |= (1U << i);
@@ -1565,9 +1624,18 @@ void TCS_Update(void)
         safety_status.tcs_active = true;
         safety_status.tcs_wheel_mask = mask;
         sat_inc_u32(&safety_status.tcs_activation_count);
-        /* Global fallback: if ALL wheels spin, apply global limit as
-         * last-resort safety (all traction lost).                     */
-        if (mask == 0x0F) {
+        /* Global fallback: if ALL healthy wheels spin, apply global limit
+         * as last-resort safety (all traction lost).  Compare against the
+         * healthy-wheel mask so a dead sensor never forces a global cut.  */
+        uint8_t healthy_mask = 0U;
+        for (uint8_t i = 0; i < 4; i++) {
+            ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
+            if (ServiceMode_IsEnabled(mod) &&
+                ServiceMode_GetFault(mod) == MODULE_FAULT_NONE) {
+                healthy_mask |= (1U << i);
+            }
+        }
+        if (healthy_mask != 0U && (mask & healthy_mask) == healthy_mask) {
             Traction_SetDemand(Pedal_GetPercent() * (1.0f - TCS_MAX_REDUCTION));
         }
         /* Otherwise: per-wheel scale is applied in Traction_Update(). */

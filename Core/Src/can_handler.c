@@ -255,7 +255,7 @@ void CAN_TxPump(void) {
  * when the frame was accepted for transmission (queued) and HAL_BUSY only on a
  * genuine software-queue overflow, which is then counted in tx_fifo_full_drops.
  */
-static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, uint8_t *payload, uint32_t len) {
+static HAL_StatusTypeDef TransmitFrame(uint32_t msg_id, const uint8_t *payload, uint32_t len) {
     uint8_t l = (len > 8U) ? 8U : (uint8_t)len;
     uint8_t next = (uint8_t)((can_txq_head + 1U) & (CAN_TXQ_SIZE - 1U));
 
