@@ -194,7 +194,11 @@ struct PedalData {
 //   flags bit 4: safety gates satisfied (STANDBY + inhibited + pedal<3% + …)
 //   flags bit 5: pedal currently plausible
 //   flags bit 6: 0 = bytes 3-6 are PENDING; 1 = bytes 3-6 are STORED
-//   rawAdc:      live 12-bit ADC reading (post EMA)
+//   flags bit 7: 0 = pair frame, 1 = extended diagnostic frame
+//   rawAdc:      live ADC sample #1 (pair frame)
+//   rawAdc2:     live ADC sample #2 (extended diagnostic frame)
+//   diffRaw:     abs(rawAdc - rawAdc2)
+//   rejectReason: current/latched SAVE/CAPTURE blockers
 //   storedMin/Max:  endpoints currently held in STM32 flash
 //   pendingMin/Max: STM32 RAM-only pending endpoints (0 when not set)
 //   pedalPercent:   0..100 saturating
@@ -202,6 +206,9 @@ struct PedalData {
 struct PedalCalData {
     uint8_t  flags        = 0;
     uint16_t rawAdc       = 0;
+    uint16_t rawAdc2      = 0;
+    uint16_t diffRaw      = 0;
+    uint16_t rejectReason = 0;
     uint16_t storedMin    = 0;
     uint16_t storedMax    = 0;
     uint16_t pendingMin   = 0;

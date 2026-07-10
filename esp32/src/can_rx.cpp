@@ -263,22 +263,29 @@ static void decodeWheelPulses(const CanFrame& f, vehicle::VehicleData& data) {
 
 // 0x308 DIAG_PEDAL_CAL — pedal calibration telemetry (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c pedalcal_send_status().
-// Bit 6 of flags selects whether bytes 3-6 carry the STORED or PENDING
-// endpoint pair; the decoder preserves the other pair across frames so
-// the UI always has the most recent value for both.
+// Bit 7 distinguishes pair frames from extended diagnostic frames.
+// Bit 6 selects STORED vs PENDING only on pair frames.  The decoder
+// preserves untouched fields across burst variants so the UI always has
+// the latest pair values plus the latest raw2/diff/reject diagnostic.
 static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code < 8) return;
     vehicle::PedalCalData pc = data.pedalCal();   // preserve untouched pair
     pc.flags        = f.data[0];
-    pc.rawAdc       = readU16LE(&f.data[1]);
-    uint16_t mn     = readU16LE(&f.data[3]);
-    uint16_t mx     = readU16LE(&f.data[5]);
-    if (pc.flags & 0x40U) {
-        pc.storedMin = mn;
-        pc.storedMax = mx;
+    if (pc.flags & 0x80U) {
+        pc.rawAdc2      = readU16LE(&f.data[1]);
+        pc.diffRaw      = readU16LE(&f.data[3]);
+        pc.rejectReason = readU16LE(&f.data[5]);
     } else {
-        pc.pendingMin = mn;
-        pc.pendingMax = mx;
+        pc.rawAdc   = readU16LE(&f.data[1]);
+        uint16_t mn = readU16LE(&f.data[3]);
+        uint16_t mx = readU16LE(&f.data[5]);
+        if (pc.flags & 0x40U) {
+            pc.storedMin = mn;
+            pc.storedMax = mx;
+        } else {
+            pc.pendingMin = mn;
+            pc.pendingMax = mx;
+        }
     }
     pc.pedalPercent = f.data[7];
     pc.timestampMs  = millis();

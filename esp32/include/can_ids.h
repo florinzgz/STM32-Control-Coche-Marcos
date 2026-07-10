@@ -101,6 +101,21 @@ inline constexpr uint32_t DIAG_STEERING_Z        = 0x30E;   // STM32→ESP32, DL
 inline constexpr uint32_t SERVICE_CMD            = 0x110;   // ESP32→STM32, DLC 2, on-demand
 inline constexpr uint32_t CMD_SENSOR_MAP_TEMP    = 0x112;   // ESP32→STM32, DLC 5, on-demand  DS18B20 physIdx→role mapping
 
+inline constexpr uint16_t PEDCAL_REJECT_NOT_STANDBY           = 0x0001u;
+inline constexpr uint16_t PEDCAL_REJECT_STARTUP_NOT_INHIBITED = 0x0002u;
+inline constexpr uint16_t PEDCAL_REJECT_PEDAL_NOT_RELEASED    = 0x0004u;
+inline constexpr uint16_t PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE   = 0x0008u;
+inline constexpr uint16_t PEDCAL_REJECT_WHEELS_MOVING         = 0x0010u;
+inline constexpr uint16_t PEDCAL_REJECT_PENDING_INCOMPLETE    = 0x0020u;
+inline constexpr uint16_t PEDCAL_REJECT_MIN_GT_MAX            = 0x0040u;
+inline constexpr uint16_t PEDCAL_REJECT_RANGE_TOO_SMALL       = 0x0080u;
+inline constexpr uint16_t PEDCAL_REJECT_MAX_TOO_HIGH          = 0x0100u;
+inline constexpr uint16_t PEDCAL_REJECT_RANGE_INVALID         = 0x0200u;
+inline constexpr uint16_t PEDCAL_REJECT_FLASH_ERROR           = 0x0400u;
+inline constexpr uint16_t PEDCAL_REJECT_SAMPLE_UNSTABLE       = 0x0800u;
+inline constexpr uint16_t PEDCAL_REJECT_CAPTURE_TIMEOUT       = 0x1000u;
+inline constexpr uint16_t PEDCAL_REJECT_CAPTURE_BUSY          = 0x2000u;
+
 // -------------------------------------------------------------------------
 // System States — HEARTBEAT_STM32 byte 1 (§6)
 // -------------------------------------------------------------------------

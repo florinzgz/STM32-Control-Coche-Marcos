@@ -69,10 +69,13 @@ float Pedal_GetRawPercent(void);    /* Unfiltered instantaneous 0–100%   */
  * Pedal_RawToPercent().  The caller MUST range-validate the inputs
  * (see PedalCal_Validate()).  This function does not touch EMA,
  * plausibility, fault thresholds, or any other safety gate.
- * Pedal_GetRawADC() returns the most recent raw ADC reading
- * (12-bit) — used by the calibration UI to capture endpoints.       */
+ * Pedal_GetRawADC() / Pedal_GetRawADC2() expose the most recent two
+ * raw ADC samples captured by Pedal_Update(); Pedal_GetRawADCDiff()
+ * returns their absolute difference for diagnostics.                 */
 void     Pedal_ApplyCalibration(uint16_t adc_min, uint16_t adc_max);
 uint16_t Pedal_GetRawADC(void);
+uint16_t Pedal_GetRawADC2(void);
+uint16_t Pedal_GetRawADCDiff(void);
 
 /* ---- Fresh-conversion sampler for calibration stability check ----
  * Triggers a brand-new ADC conversion and returns the raw 12-bit count.

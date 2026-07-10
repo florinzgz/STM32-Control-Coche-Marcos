@@ -44,9 +44,11 @@ extern "C" {
 #include <stdint.h>
 
 /* ---- Hard validation limits (mirror sensor_manager defaults) ----
- * adc_min must be at or above PEDAL_CAL_MIN_LIMIT so the calibrated
- * released endpoint is a defined positive count (the rest deadband of
- * PEDAL_CAL_DEFAULT_MIN sits above it).  adc_max must be at or below
+ * adc_min must be at or above PEDAL_CAL_MIN_LIMIT.  The real hardware
+ * rest position may legitimately sit at exactly 0 counts (≈0 V), so
+ * zero is accepted as a valid released endpoint.  The compile-time
+ * deadband of PEDAL_CAL_DEFAULT_MIN still sits above that rest point.
+ * adc_max must be at or below
  * PEDAL_CAL_MAX_LIMIT to stay clear of the FAULT_HI short-circuit
  * detector.  (adc_max - adc_min) must be >= PEDAL_CAL_RANGE_MIN so
  * the pedal % mapping has enough span to be useful.
@@ -57,7 +59,7 @@ extern "C" {
  *   released ≈ 0 V   → ≈ 0 counts (measured ≈0.4 mV at rest)
  *   full     ≈ 3.28 V → ≈ 4070 counts (4095 reserved for FAULT_HI; adc_max must be <= 4094)
  * The limits below are widened accordingly.                          */
-#define PEDAL_CAL_MIN_LIMIT    1U      /* adc_min >= 1    (defined released endpoint) */
+#define PEDAL_CAL_MIN_LIMIT    0U      /* adc_min >= 0    (0-count released endpoint is valid) */
 #define PEDAL_CAL_MAX_LIMIT    4094U   /* adc_max <= 4094 (4095 reserved for rail-short fault) */
 #define PEDAL_CAL_RANGE_MIN    800U    /* (adc_max - adc_min) >= 800  */
 
