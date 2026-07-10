@@ -140,6 +140,9 @@ private:
     // Pedal endpoint calibration state (mirrors latest 0x308 frame).
     uint8_t       pedalCalFlags_      = 0;
     uint16_t      pedalCalRawAdc_     = 0;
+    uint16_t      pedalCalRawAdc2_    = 0;
+    uint16_t      pedalCalDiffRaw_    = 0;
+    uint16_t      pedalCalRejectReason_ = 0;
     uint16_t      pedalCalStoredMin_  = 0;
     uint16_t      pedalCalStoredMax_  = 0;
     uint16_t      pedalCalPendingMin_ = 0;

@@ -1595,18 +1595,70 @@ static uint16_t  pedalcal_pending_max   = 0;
 /* ---- 0x308 telemetry burst state ---- */
 static uint8_t   pedalcal_burst_left    = 0;
 static uint32_t  pedalcal_next_tx_ms    = 0;
+static uint8_t   pedalcal_burst_seq     = 0;
+static uint16_t  pedalcal_reject_latched = 0U;
+
+static void pedalcal_start_burst(void)
+{
+    pedalcal_burst_left = PEDALCAL_BURST_FRAMES;
+    pedalcal_next_tx_ms = HAL_GetTick();
+    pedalcal_burst_seq  = 0U;
+}
+
+static uint16_t pedalcal_reject_live_safety(void)
+{
+    uint16_t bits = 0U;
+    if (Safety_GetState() != SYS_STATE_STANDBY) bits |= PEDCAL_REJECT_NOT_STANDBY;
+    if (!Startup_IsInhibited())                 bits |= PEDCAL_REJECT_STARTUP_NOT_INHIBITED;
+    if (Pedal_GetPercent() >= 3.0f)             bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
+    if (!Pedal_IsPlausible())                   bits |= PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE;
+    if (Wheel_GetSpeed_FL() >= 0.3f ||
+        Wheel_GetSpeed_FR() >= 0.3f ||
+        Wheel_GetSpeed_RL() >= 0.3f ||
+        Wheel_GetSpeed_RR() >= 0.3f) {
+        bits |= PEDCAL_REJECT_WHEELS_MOVING;
+    }
+    return bits;
+}
+
+static uint16_t pedalcal_reject_live_pair(void)
+{
+    uint16_t bits = 0U;
+
+    if (!pedalcal_have_min || !pedalcal_have_max) {
+        bits |= PEDCAL_REJECT_PENDING_INCOMPLETE;
+        return bits;
+    }
+
+    if (pedalcal_pending_max <= pedalcal_pending_min) {
+        bits |= PEDCAL_REJECT_MIN_GT_MAX;
+        bits |= PEDCAL_REJECT_RANGE_INVALID;
+    }
+    if ((pedalcal_pending_max > pedalcal_pending_min) &&
+        ((uint32_t)(pedalcal_pending_max - pedalcal_pending_min) < PEDAL_CAL_RANGE_MIN)) {
+        bits |= PEDCAL_REJECT_RANGE_TOO_SMALL;
+        bits |= PEDCAL_REJECT_RANGE_INVALID;
+    }
+    if (pedalcal_pending_max > PEDAL_CAL_MAX_LIMIT) {
+        bits |= PEDCAL_REJECT_MAX_TOO_HIGH;
+        bits |= PEDCAL_REJECT_RANGE_INVALID;
+    }
+    if (!PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max)) {
+        bits |= PEDCAL_REJECT_RANGE_INVALID;
+    }
+    return bits;
+}
+
+static uint16_t pedalcal_get_reject_reason(void)
+{
+    return (uint16_t)(pedalcal_reject_live_safety() |
+                      pedalcal_reject_live_pair()   |
+                      pedalcal_reject_latched);
+}
 
 static inline bool pedalcal_safety_ok(void)
 {
-    if (Safety_GetState() != SYS_STATE_STANDBY) return false;
-    if (!Startup_IsInhibited())                 return false;
-    if (Pedal_GetPercent() >= 3.0f)             return false;
-    if (!Pedal_IsPlausible())                   return false;
-    if (Wheel_GetSpeed_FL() >= 0.3f)            return false;
-    if (Wheel_GetSpeed_FR() >= 0.3f)            return false;
-    if (Wheel_GetSpeed_RL() >= 0.3f)            return false;
-    if (Wheel_GetSpeed_RR() >= 0.3f)            return false;
-    return true;
+    return (pedalcal_reject_live_safety() == 0U);
 }
 
 /* ------------------------------------------------------------------
@@ -1710,20 +1762,24 @@ static bool pedalcal_fsm_finalize(uint16_t *out_adc)
  *              bit 3: stored slot valid (PedalCal_IsValid())
  *              bit 4: safety gates satisfied
  *              bit 5: pedal plausible
- *              bit 6: 0 = bytes 3-6 carry PENDING pair
- *                     1 = bytes 3-6 carry STORED pair
- *              bit 7: reserved (0)
- *   bytes 1-2: raw ADC live (u16 LE)
- *   bytes 3-4: MIN (pending or stored — see bit 6) (u16 LE)
- *   bytes 5-6: MAX (pending or stored — see bit 6) (u16 LE)
- *   byte 7   : pedal percent (0..100 saturating)                    */
+ *              bit 6: pair-frame selector (0 = PENDING, 1 = STORED)
+ *                     ignored when bit7=1
+ *              bit 7: 0 = pair frame, 1 = extended diagnostic frame
+ *   pair frame (bit7=0):
+ *     bytes 1-2: raw ADC live (sample 1, u16 LE)
+ *     bytes 3-4: MIN (pending or stored — see bit 6) (u16 LE)
+ *     bytes 5-6: MAX (pending or stored — see bit 6) (u16 LE)
+ *     byte 7   : pedal percent (0..100 saturating)
+ *   diag frame (bit7=1):
+ *     bytes 1-2: raw ADC second sample (u16 LE)
+ *     bytes 3-4: abs(raw1 - raw2) (u16 LE)
+ *     bytes 5-6: reject_reason bitmask (u16 LE)
+ *     byte 7   : pedal percent (0..100 saturating)                    */
 static void pedalcal_send_status(void)
 {
-    /* Alternate variant on each transmission so the ESP32 sees both
-     * stored and pending pairs at ~5 Hz each.  At burst start
-     * pedalcal_burst_left == PEDALCAL_BURST_FRAMES (10) — the first
-     * frame goes out as PENDING (bit 6 == 0).                       */
-    bool send_stored = ((pedalcal_burst_left & 0x01U) == 0U);
+    uint8_t phase = (uint8_t)(pedalcal_burst_seq % 3U);
+    bool send_diag   = (phase == 1U);
+    bool send_stored = (phase == 2U);
 
     uint16_t stored_min = 0, stored_max = 0;
     PedalCal_GetStored(&stored_min, &stored_max);
@@ -1738,8 +1794,12 @@ static void pedalcal_send_status(void)
     if (pedalcal_safety_ok()) flags |= 0x10U;
     if (Pedal_IsPlausible())  flags |= 0x20U;
     if (send_stored)          flags |= 0x40U;
+    if (send_diag)            flags |= 0x80U;
 
-    uint16_t raw_adc = Pedal_GetRawADC();
+    uint16_t raw_adc  = Pedal_GetRawADC();
+    uint16_t raw_adc2 = Pedal_GetRawADC2();
+    uint16_t diff_raw = Pedal_GetRawADCDiff();
+    uint16_t reject_reason = pedalcal_get_reject_reason();
     float    pct_f   = Pedal_GetPercent();
     if (pct_f < 0.0f)   pct_f = 0.0f;
     if (pct_f > 100.0f) pct_f = 100.0f;
@@ -1749,12 +1809,21 @@ static void pedalcal_send_status(void)
 
     uint8_t payload[8];
     payload[0] = flags;
-    payload[1] = (uint8_t)(raw_adc & 0xFFU);
-    payload[2] = (uint8_t)((raw_adc >> 8) & 0xFFU);
-    payload[3] = (uint8_t)(mn & 0xFFU);
-    payload[4] = (uint8_t)((mn >> 8) & 0xFFU);
-    payload[5] = (uint8_t)(mx & 0xFFU);
-    payload[6] = (uint8_t)((mx >> 8) & 0xFFU);
+    if (send_diag) {
+        payload[1] = (uint8_t)(raw_adc2 & 0xFFU);
+        payload[2] = (uint8_t)((raw_adc2 >> 8) & 0xFFU);
+        payload[3] = (uint8_t)(diff_raw & 0xFFU);
+        payload[4] = (uint8_t)((diff_raw >> 8) & 0xFFU);
+        payload[5] = (uint8_t)(reject_reason & 0xFFU);
+        payload[6] = (uint8_t)((reject_reason >> 8) & 0xFFU);
+    } else {
+        payload[1] = (uint8_t)(raw_adc & 0xFFU);
+        payload[2] = (uint8_t)((raw_adc >> 8) & 0xFFU);
+        payload[3] = (uint8_t)(mn & 0xFFU);
+        payload[4] = (uint8_t)((mn >> 8) & 0xFFU);
+        payload[5] = (uint8_t)(mx & 0xFFU);
+        payload[6] = (uint8_t)((mx >> 8) & 0xFFU);
+    }
     payload[7] = (uint8_t)pct_f;
 
     (void)TransmitFrame(CAN_ID_DIAG_PEDAL_CAL, payload, sizeof(payload));
@@ -1770,6 +1839,7 @@ void CAN_PedalCalBurstUpdate(void)
     if ((int32_t)(now - pedalcal_next_tx_ms) < 0) return;
     pedalcal_send_status();
     pedalcal_burst_left--;
+    pedalcal_burst_seq++;
     pedalcal_next_tx_ms = now + PEDALCAL_BURST_PERIOD_MS;
 }
 
@@ -1787,14 +1857,15 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     /* QUERY is the only sub-opcode that does NOT need safety gates —
      * it just requests a 1 s telemetry burst.                        */
     if (op == PEDAL_CAL_OP_QUERY) {
-        pedalcal_burst_left = PEDALCAL_BURST_FRAMES;
-        pedalcal_next_tx_ms = HAL_GetTick();   /* emit immediately on next tick */
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
 
     /* All other sub-opcodes require the full safety gate. */
     if (!pedalcal_safety_ok()) {
+        pedalcal_reject_latched = pedalcal_reject_live_safety();
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;
     }
@@ -1808,6 +1879,8 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
          * CAN_ProcessMessages() was held inside HAL_Delay for ~350 ms;
          * with the FSM the contract becomes explicit.                 */
         if (pedalcal_fsm_state != PCAL_FSM_IDLE) {
+            pedalcal_reject_latched = PEDCAL_REJECT_CAPTURE_BUSY;
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -1823,6 +1896,8 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
     case PEDAL_CAL_OP_CAPTURE_MAX: {
         if (pedalcal_fsm_state != PCAL_FSM_IDLE) {
+            pedalcal_reject_latched = PEDCAL_REJECT_CAPTURE_BUSY;
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -1834,14 +1909,18 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
     case PEDAL_CAL_OP_SAVE: {
         if (!pedalcal_have_min || !pedalcal_have_max) {
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
         if (!PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max)) {
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_INVALID);
             return;
         }
         if (!PedalCal_Save(pedalcal_pending_min, pedalcal_pending_max)) {
+            pedalcal_reject_latched = PEDCAL_REJECT_FLASH_ERROR;
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -1851,6 +1930,8 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         Pedal_ApplyCalibration(pedalcal_pending_min, pedalcal_pending_max);
         pedalcal_have_min = false;
         pedalcal_have_max = false;
+        pedalcal_reject_latched = 0U;
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
@@ -1860,16 +1941,21 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
          * from pedal_cal_store.h (PEDAL_CAL_DEFAULT_MIN/MAX) to keep a
          * single source of truth shared with sensor_manager.c.        */
         if (!PedalCal_Save(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX)) {
+            pedalcal_reject_latched = PEDCAL_REJECT_FLASH_ERROR;
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
         Pedal_ApplyCalibration(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX);
         pedalcal_have_min = false;
         pedalcal_have_max = false;
+        pedalcal_reject_latched = 0U;
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
     }
     default:
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_INVALID);
         return;
     }
@@ -1912,6 +1998,8 @@ void CAN_PedalCalCaptureTick(void)
      * released) abort cleanly and report the safety-gate cause.  */
     if (!pedalcal_safety_ok()) {
         pedalcal_fsm_reset();
+        pedalcal_reject_latched = pedalcal_reject_live_safety();
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;
     }
@@ -1923,6 +2011,8 @@ void CAN_PedalCalCaptureTick(void)
     if ((uint32_t)(HAL_GetTick() - pedalcal_fsm_start_ms)
             > PEDALCAL_FSM_TIMEOUT_MS) {
         pedalcal_fsm_reset();
+        pedalcal_reject_latched = PEDCAL_REJECT_CAPTURE_TIMEOUT;
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_REJECTED);
         return;
     }
@@ -1939,6 +2029,8 @@ void CAN_PedalCalCaptureTick(void)
         pedalcal_fsm_state_t finished_state = pedalcal_fsm_state;
         pedalcal_fsm_reset();
         if (!ok) {
+            pedalcal_reject_latched = PEDCAL_REJECT_SAMPLE_UNSTABLE;
+            pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
@@ -1949,6 +2041,8 @@ void CAN_PedalCalCaptureTick(void)
             pedalcal_pending_max = v;
             pedalcal_have_max    = true;
         }
+        pedalcal_reject_latched = 0U;
+        pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_OK);
     }
 }

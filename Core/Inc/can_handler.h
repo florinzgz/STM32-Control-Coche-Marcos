@@ -143,6 +143,22 @@ extern "C" {
 #define PEDAL_CAL_OP_RESET_DEFAULTS 0x04U
 #define PEDAL_CAL_OP_QUERY          0x05U
 
+/* ---- Pedal-calibration reject-reason bitmask (0x308 diagnostic frame) ---- */
+#define PEDCAL_REJECT_NOT_STANDBY            0x0001U
+#define PEDCAL_REJECT_STARTUP_NOT_INHIBITED  0x0002U
+#define PEDCAL_REJECT_PEDAL_NOT_RELEASED     0x0004U
+#define PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE    0x0008U
+#define PEDCAL_REJECT_WHEELS_MOVING          0x0010U
+#define PEDCAL_REJECT_PENDING_INCOMPLETE     0x0020U
+#define PEDCAL_REJECT_MIN_GT_MAX             0x0040U
+#define PEDCAL_REJECT_RANGE_TOO_SMALL        0x0080U
+#define PEDCAL_REJECT_MAX_TOO_HIGH           0x0100U
+#define PEDCAL_REJECT_RANGE_INVALID          0x0200U
+#define PEDCAL_REJECT_FLASH_ERROR            0x0400U
+#define PEDCAL_REJECT_SAMPLE_UNSTABLE        0x0800U
+#define PEDCAL_REJECT_CAPTURE_TIMEOUT        0x1000U
+#define PEDCAL_REJECT_CAPTURE_BUSY           0x2000U
+
 /* ---- Gear power-limit + accel-response sub-opcodes (byte1 when byte0 == 0xF7) ----
  * For SET_* sub-opcodes byte2 carries the new percentage (0..100); the
  * value updates a RAM-only "pending" set and is NOT applied or persisted

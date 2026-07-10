@@ -656,6 +656,18 @@ uint16_t Pedal_GetRawADC(void)
     return pedal_raw_adc;
 }
 
+uint16_t Pedal_GetRawADC2(void)
+{
+    return pedal_raw_adc2;
+}
+
+uint16_t Pedal_GetRawADCDiff(void)
+{
+    return (pedal_raw_adc >= pedal_raw_adc2)
+         ? (uint16_t)(pedal_raw_adc - pedal_raw_adc2)
+         : (uint16_t)(pedal_raw_adc2 - pedal_raw_adc);
+}
+
 /* ---- Fresh-conversion sampler ------------------------------------
  * Forces a hardware ADC conversion and returns the raw 12-bit count
  * WITHOUT mutating any pedal pipeline state.

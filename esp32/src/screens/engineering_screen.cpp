@@ -521,6 +521,9 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             pedalCalLastTs_ = pc.timestampMs;
             if (pedalCalFlags_      != pc.flags)        changed = true;
             if (pedalCalRawAdc_     != pc.rawAdc)       changed = true;
+            if (pedalCalRawAdc2_    != pc.rawAdc2)      changed = true;
+            if (pedalCalDiffRaw_    != pc.diffRaw)      changed = true;
+            if (pedalCalRejectReason_ != pc.rejectReason) changed = true;
             if (pedalCalStoredMin_  != pc.storedMin)    changed = true;
             if (pedalCalStoredMax_  != pc.storedMax)    changed = true;
             if (pedalCalPendingMin_ != pc.pendingMin)   changed = true;
@@ -528,6 +531,9 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             if (pedalCalPercent_    != pc.pedalPercent) changed = true;
             pedalCalFlags_      = pc.flags;
             pedalCalRawAdc_     = pc.rawAdc;
+            pedalCalRawAdc2_    = pc.rawAdc2;
+            pedalCalDiffRaw_    = pc.diffRaw;
+            pedalCalRejectReason_ = pc.rejectReason;
             pedalCalStoredMin_  = pc.storedMin;
             pedalCalStoredMax_  = pc.storedMax;
             pedalCalPendingMin_ = pc.pendingMin;
@@ -1329,11 +1335,44 @@ void EngineeringScreen::draw() {
         const bool valid_pair  = (pedalCalFlags_ & 0x04U) != 0;
         const bool have_min    = (pedalCalFlags_ & 0x01U) != 0;
         const bool have_max    = (pedalCalFlags_ & 0x02U) != 0;
+        const bool save_enabled = valid_pair && safety_ok;
+        uint16_t pending_range = 0;
+        if (have_min && have_max && pedalCalPendingMax_ >= pedalCalPendingMin_) {
+            pending_range = (uint16_t)(pedalCalPendingMax_ - pedalCalPendingMin_);
+        }
+        auto appendReject = [](char* dst, size_t len, bool& first, const char* txt) {
+            size_t used = strlen(dst);
+            if (!txt || used >= (len - 1U)) return;
+            int n = snprintf(dst + used, len - used, "%s%s", first ? "" : " ", txt);
+            if (n > 0) first = false;
+        };
+        char rejectDetail[128];
+        rejectDetail[0] = '\0';
+        bool firstReject = true;
+        if (pedalCalRejectReason_ == 0U) {
+            snprintf(rejectDetail, sizeof(rejectDetail), "none");
+        } else {
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_NOT_STANDBY)           appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "STBY");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_STARTUP_NOT_INHIBITED) appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "STARTUP");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_PEDAL_NOT_RELEASED)    appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "PEDAL>3");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE)   appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "PLAUS");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_WHEELS_MOVING)         appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "WHEELS");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_PENDING_INCOMPLETE)    appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "CAPTURE");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_MIN_GT_MAX)            appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "MIN>MAX");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_RANGE_TOO_SMALL)       appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "RANGE");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_MAX_TOO_HIGH)          appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "MAXHI");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_FLASH_ERROR)           appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "FLASH");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_SAMPLE_UNSTABLE)       appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "UNSTABLE");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_CAPTURE_TIMEOUT)       appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "TIMEOUT");
+            if (pedalCalRejectReason_ & can::PEDCAL_REJECT_CAPTURE_BUSY)          appendReject(rejectDetail, sizeof(rejectDetail), firstReject, "BUSY");
+            if (rejectDetail[0] == '\0') snprintf(rejectDetail, sizeof(rejectDetail), "0x%04X", pedalCalRejectReason_);
+        }
 
         // ---- Left column (live) ----
-        // Raw ADC
+        // Raw ADC pair
         tft.fillRect(110, 55, 130, 16, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "%u", (unsigned)pedalCalRawAdc_);
+        snprintf(buf, sizeof(buf), "%u/%u",
+                 (unsigned)pedalCalRawAdc_, (unsigned)pedalCalRawAdc2_);
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.drawString(buf, 110, 55);
 
@@ -1343,10 +1382,12 @@ void EngineeringScreen::draw() {
         tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
         tft.drawString(buf, 110, 80);
 
-        // Stable yes/no
+        // Stable yes/no + raw diff
         tft.fillRect(110, 105, 130, 16, ui::COL_BG);
         tft.setTextColor(stable ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
-        tft.drawString(stable ? "YES" : "no", 110, 105);
+        snprintf(buf, sizeof(buf), "%s d=%u",
+                 stable ? "YES" : "no", (unsigned)pedalCalDiffRaw_);
+        tft.drawString(buf, 110, 105);
 
         // Plausible
         tft.fillRect(110, 130, 130, 16, ui::COL_BG);
@@ -1420,8 +1461,22 @@ void EngineeringScreen::draw() {
         tft.setTextColor(v_col, ui::COL_BG);
         tft.drawString(v_text, 360, 155);
 
+        // Range / save summary
+        tft.fillRect(110, 195, ui::SCREEN_W - 120, 16, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "%u / %s",
+                 (unsigned)pending_range, save_enabled ? "YES" : "NO");
+        tft.setTextColor(save_enabled ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
+        tft.drawString(buf, 110, 195);
+
+        // Reject reason
+        tft.fillRect(110, 212, ui::SCREEN_W - 120, 16, ui::COL_BG);
+        snprintf(buf, sizeof(buf), "0x%04X %s",
+                 (unsigned)pedalCalRejectReason_, rejectDetail);
+        tft.setTextColor((pedalCalRejectReason_ == 0U) ? ui::COL_GREEN : ui::COL_RED,
+                         ui::COL_BG);
+        tft.drawString(buf, 110, 212);
+
         // ---- SAVE button colour reflects validation + safety gate ----
-        const bool save_enabled = valid_pair && safety_ok;
         uint16_t   save_fill    = save_enabled ? ui::COL_GREEN : ui::COL_DARK_GRAY;
         tft.fillRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, save_fill);
         tft.drawRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, ui::COL_GRAY);
@@ -2301,6 +2356,15 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             pedalCalLastTs_      = 0;
                             pedalCalLastQueryMs_ = 0;
                             pedalCalFlags_       = 0;
+                            pedalCalRawAdc_      = 0;
+                            pedalCalRawAdc2_     = 0;
+                            pedalCalDiffRaw_     = 0;
+                            pedalCalRejectReason_ = 0;
+                            pedalCalStoredMin_   = 0;
+                            pedalCalStoredMax_   = 0;
+                            pedalCalPendingMin_  = 0;
+                            pedalCalPendingMax_  = 0;
+                            pedalCalPercent_     = 0;
                             pedalStabCount_      = 0;
                             pedalStabHead_       = 0;
                             currentMenu_ = SubMenu::PEDAL_CAL;
@@ -3864,22 +3928,19 @@ void EngineeringScreen::drawPedalCalibration() {
 
     // Static labels — left column (live), right column (stored / pending)
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Raw ADC:",    20, 55);
+    tft.drawString("Raw ADC1/2:", 20, 55);
     tft.drawString("Pedal %:",    20, 80);
-    tft.drawString("Stable:",     20, 105);
+    tft.drawString("Stable/diff:",20, 105);
     tft.drawString("Plausible:",  20, 130);
     tft.drawString("Safety gate:",20, 155);
+    tft.drawString("Range / Save:",20, 195);
+    tft.drawString("Reject:",     20, 212);
 
     tft.drawString("Stored MIN:", 260, 55);
     tft.drawString("Stored MAX:", 260, 80);
     tft.drawString("Pending MIN:",260, 105);
     tft.drawString("Pending MAX:",260, 130);
     tft.drawString("Validation:", 260, 155);
-
-    // Hint line
-    tft.setTextColor(ui::COL_DARK_GRAY, ui::COL_BG);
-    tft.drawString("Release pedal → CAPTURE MIN. Press fully → CAPTURE MAX. Then SAVE.",
-                   10, 195);
 
     // Force initial partial redraw of value cells
     pedalDataChanged_ = true;
