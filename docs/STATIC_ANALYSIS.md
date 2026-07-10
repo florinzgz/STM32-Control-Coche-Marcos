@@ -152,7 +152,7 @@ gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2
 gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm Core/Src/test_steering_cal_store.c -o /tmp/test_steering_cal_store && /tmp/test_steering_cal_store
 gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm Core/Src/test_steering_z.c Core/Src/steering_z.c -o /tmp/test_steering_z && /tmp/test_steering_z
 gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm Core/Src/test_pedal_cal_limits.c -o /tmp/test_pedal_cal_limits && /tmp/test_pedal_cal_limits
-gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm Core/Src/test_loop_diag.c -o /tmp/test_loop_diag && /tmp/test_loop_diag
+gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm Core/Src/test_loop_diag.c Core/Src/loop_diag.c -o /tmp/test_loop_diag && /tmp/test_loop_diag
 ```
 
 ### ESP32 host tests

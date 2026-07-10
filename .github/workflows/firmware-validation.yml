@@ -87,6 +87,7 @@ jobs:
                 Core/Src/test_error_log.c) extra="Core/Src/error_log.c" ;;
                 Core/Src/test_service_mode.c) extra="Core/Src/service_mode.c" ;;
                 Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
+                Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
               esac
               echo "-- $(basename "$src")"
