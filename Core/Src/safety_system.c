@@ -1378,13 +1378,20 @@ void ABS_Update(void)
     spd[2] = Wheel_GetSpeed_RL();
     spd[3] = Wheel_GetSpeed_RR();
 
-    /* Compute average from healthy (enabled + fault-free) sensors only. */
+    /* Compute average from healthy (enabled + fault-free) sensors only.
+     * In 4x2 mode exclude rear drag wheels: their braked state means
+     * spd[2/3] ≈ 0 even when the front axle is moving, which would halve
+     * the reference and cause false lock-up detection on the rear AND
+     * mask real front-wheel lock-up by making front wheels appear fast. */
+    bool abs_rear_driven = Traction_GetState()->mode4x4 ||
+                           Traction_GetState()->axisRotation;
     float    sum_spd   = 0.0f;
     uint8_t  n_healthy = 0U;
     for (uint8_t i = 0; i < 4; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         if (ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) continue;
+        if (!abs_rear_driven && i >= 2U) continue;  /* Skip drag wheels */
         sum_spd += spd[i];
         n_healthy++;
     }
@@ -1410,6 +1417,14 @@ void ABS_Update(void)
          * a dead sensor, and do not reduce its wheel_scale artificially. */
         if (!ServiceMode_IsEnabled(mod) ||
             ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) {
+            safety_status.wheel_scale[i] = 1.0f;
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
+            continue;
+        }
+        /* Skip ABS intervention on non-driven rear drag wheels in 4x2.
+         * Their braked state is intentional; not wheel lock-up.        */
+        if (!abs_rear_driven && i >= 2U) {
             safety_status.wheel_scale[i] = 1.0f;
             abs_pulse_timer[i] = now;
             abs_pulse_phase[i] = 0U;
@@ -1545,13 +1560,20 @@ void TCS_Update(void)
     spd[2] = Wheel_GetSpeed_RL();
     spd[3] = Wheel_GetSpeed_RR();
 
-    /* Compute average from healthy (enabled + fault-free) sensors only. */
+    /* Compute average from healthy (enabled + fault-free) sensors only.
+     * In 4x2 mode exclude rear drag wheels: their braked state means
+     * spd[2/3] ≈ 0 while the front axle is moving, which would halve
+     * the reference and cause false TCS throttle cuts on the front
+     * driven wheels (they would appear to be "spinning" vs. the low avg). */
+    bool tcs_rear_driven = Traction_GetState()->mode4x4 ||
+                           Traction_GetState()->axisRotation;
     float    sum_spd   = 0.0f;
     uint8_t  n_healthy = 0U;
     for (uint8_t i = 0; i < 4; i++) {
         ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
         if (!ServiceMode_IsEnabled(mod)) continue;
         if (ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) continue;
+        if (!tcs_rear_driven && i >= 2U) continue;  /* Skip drag wheels */
         sum_spd += spd[i];
         n_healthy++;
     }
@@ -1583,6 +1605,12 @@ void TCS_Update(void)
             tcs_reduction[i] = 0.0f;
             /* Do NOT touch wheel_scale here: ABS_Update has priority and
              * runs first; leave its result for Traction_Update.          */
+            continue;
+        }
+        /* Skip TCS intervention on non-driven rear drag wheels in 4x2.
+         * Their braked state is intentional; not wheelspin.             */
+        if (!tcs_rear_driven && i >= 2U) {
+            tcs_reduction[i] = 0.0f;
             continue;
         }
 
@@ -2122,30 +2150,42 @@ void Safety_CheckSensors(void)
                 wheel_diag[i]          = WHEEL_DIAG_MANUAL_MOVEMENT;
                 wheel_mismatch_since[i] = 0;
             } else {
-                /* Under load and this wheel is silent → candidate fault.
-                 * Require persistence before latching so a momentary
-                 * difference (e.g. a wheel just starting to turn) does
-                 * not force DEGRADED.                                     */
-                uint32_t now = HAL_GetTick();
-                if (wheel_mismatch_since[i] == 0) {
-                    wheel_mismatch_since[i] = now;
-                }
-                if ((now - wheel_mismatch_since[i]) >= WHEEL_FAULT_DEBOUNCE_MS) {
-                    ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
-                    fault_count++;
-                    /* Classify the silent channel using the raw pin level
-                     * so the operator can tell a stuck sensor apart from a
-                     * disconnected one.                                   */
-                    uint8_t lvl = Wheel_GetGpioLevel(i);
-                    if      (lvl == 1U) wheel_diag[i] = WHEEL_DIAG_STUCK_HIGH;
-                    else if (lvl == 0U) wheel_diag[i] = WHEEL_DIAG_STUCK_LOW;
-                    else                wheel_diag[i] = WHEEL_DIAG_NO_PULSE;
-                    /* Persist the classified reason so the culprit channel
-                     * stays identifiable on the HMI after it self-heals.   */
-                    wheel_latched_reason[i] = wheel_diag[i];
+                /* In 4x2 mode the rear wheels (RL=index 2, RR=index 3)
+                 * are braked drag wheels — they are NOT expected to
+                 * produce speed pulses matching the driven front axle.
+                 * Treat a silent rear drag wheel as normal: not a fault. */
+                const TractionState_t *ts = Traction_GetState();
+                bool rear_drag = (i >= 2U) &&
+                                 !(ts->mode4x4 || ts->axisRotation);
+                if (rear_drag) {
+                    wheel_diag[i]           = WHEEL_DIAG_OK;
+                    wheel_mismatch_since[i] = 0;
                 } else {
-                    /* Persisting but not yet latched — diagnostic only.  */
-                    wheel_diag[i] = WHEEL_DIAG_MISMATCH;
+                    /* Under load and this wheel is silent → candidate fault.
+                     * Require persistence before latching so a momentary
+                     * difference (e.g. a wheel just starting to turn) does
+                     * not force DEGRADED.                                   */
+                    uint32_t now = HAL_GetTick();
+                    if (wheel_mismatch_since[i] == 0) {
+                        wheel_mismatch_since[i] = now;
+                    }
+                    if ((now - wheel_mismatch_since[i]) >= WHEEL_FAULT_DEBOUNCE_MS) {
+                        ServiceMode_SetFault(mod, MODULE_FAULT_WARNING);
+                        fault_count++;
+                        /* Classify the silent channel using the raw pin level
+                         * so the operator can tell a stuck sensor apart from
+                         * a disconnected one.                               */
+                        uint8_t lvl = Wheel_GetGpioLevel(i);
+                        if      (lvl == 1U) wheel_diag[i] = WHEEL_DIAG_STUCK_HIGH;
+                        else if (lvl == 0U) wheel_diag[i] = WHEEL_DIAG_STUCK_LOW;
+                        else                wheel_diag[i] = WHEEL_DIAG_NO_PULSE;
+                        /* Persist the classified reason so the culprit channel
+                         * stays identifiable on the HMI after it self-heals. */
+                        wheel_latched_reason[i] = wheel_diag[i];
+                    } else {
+                        /* Persisting but not yet latched — diagnostic only.  */
+                        wheel_diag[i] = WHEEL_DIAG_MISMATCH;
+                    }
                 }
             }
         } else {
@@ -3346,10 +3386,24 @@ void Obstacle_Update(void)
     if (!obstacle_plausible)           sensor_fault = 1; /* Implausible    */
 
     if (sensor_fault) {
-        /* Conservative fallback: vehicle remains mobile at reduced power.
-         * No immobilization.  LIMP_HOME speed cap is additional net.    */
-        safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
-        obstacle_forward_blocked = 0;
+        /* Mirror the CAN-timeout policy: when an obstacle was being
+         * tracked (ACTIVE or CONFIRMING), hold the last scale and
+         * preserve obstacle_forward_blocked.  This ensures that an
+         * obstacle in the emergency zone (<500 mm) that causes the
+         * sensor to return invalid readings (too close for TF-Mini
+         * minimum range) does NOT silently open the forward path.
+         * Reverse escape remains available via Obstacle_IsForwardBlocked()
+         * when scale < 0.01 (emergency zone scale = 0.0 is preserved). */
+        if (obstacle_state == OBS_STATE_ACTIVE ||
+            obstacle_state == OBS_STATE_CONFIRMING) {
+            if (safety_status.obstacle_scale > OBSTACLE_FAULT_SCALE) {
+                safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
+            }
+            /* Keep forward_blocked if it was already set */
+        } else {
+            safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
+            obstacle_forward_blocked = 0;
+        }
         obstacle_state = OBS_STATE_SENSOR_FAULT;
         ServiceMode_SetFault(MODULE_OBSTACLE_DETECT, MODULE_FAULT_WARNING);
         return;
