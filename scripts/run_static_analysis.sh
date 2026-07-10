@@ -87,15 +87,8 @@ if command -v scan-build >/dev/null 2>&1; then
           ! -name "syscalls.c" \
           ! -name "sysmem.c" \
           ! -name "test_*.c" | sort)
-        while IFS= read -r f; do
-          clang++ -std=gnu++17 -fsyntax-only \
-            -DREMOTE_CONTROL_ENABLED=1 \
-            -Iesp32/include \
-            -Iesp32/src \
-            -Iesp32/src/ui \
-            "$f"
-        done < <(find esp32/src -type f -name "*.cpp" ! -name "test_*.cpp" | sort)
       '
+    echo "SKIP: ESP32 scan-build pass is deferred until a PlatformIO-backed compile context is available." 
   } > "${SCAN_BUILD_LOG}" 2>&1 || true
 else
   echo "SKIP: scan-build is not installed." > "${SCAN_BUILD_LOG}"

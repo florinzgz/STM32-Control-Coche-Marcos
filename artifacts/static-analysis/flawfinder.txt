@@ -198,7 +198,7 @@ esp32/src/screens/error_screen.cpp:408:  [4] (format) snprintf:
 ANALYSIS SUMMARY:
 
 Hits = 3
-Lines analyzed = 59620 in approximately 0.54 seconds (111187 lines/second)
+Lines analyzed = 59620 in approximately 0.54 seconds (110301 lines/second)
 Physical Source Lines of Code (SLOC) = 34487
 Hits@level = [0] 474 [1]  16 [2] 127 [3]   0 [4]   3 [5]   0
 Hits@level+ = [0+] 620 [1+] 146 [2+] 130 [3+]   3 [4+]   3 [5+]   0
