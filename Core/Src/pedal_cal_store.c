@@ -119,7 +119,9 @@ static bool pcal_slot_integrity_ok(const pcal_flash_slot_t *slot)
 
 bool PedalCal_Validate(uint16_t adc_min, uint16_t adc_max)
 {
+#if PEDAL_CAL_MIN_LIMIT > 0U
     if (adc_min < PEDAL_CAL_MIN_LIMIT) return false;
+#endif
     if (adc_max > PEDAL_CAL_MAX_LIMIT) return false;
     if (adc_max <= adc_min)            return false;
     if ((uint32_t)(adc_max - adc_min) < PEDAL_CAL_RANGE_MIN) return false;
