@@ -124,6 +124,19 @@ static uint32_t startup_pedal_rest_since  = 0;
 
 bool Startup_IsInhibited(void) { return startup_inhibit; }
 
+/* Re-arm the startup inhibit latch.
+ * Called by Safety_CheckSensors() when a LIMP_HOME that was entered
+ * from STANDBY (sole cause: pedal sensor fault) has recovered.
+ * Re-arming returns the calibration gate to a satisfiable state:
+ * STANDBY + startup_inhibit == true.  The inhibit will clear again
+ * automatically after the pedal is held below STARTUP_PEDAL_REST_PCT
+ * for STARTUP_PEDAL_CLEAR_MS, exactly as at power-on.              */
+void Startup_Rearm(void)
+{
+    startup_inhibit          = true;
+    startup_pedal_rest_since = 0;
+}
+
 /* ---- Peripheral init status flags ---- */
 bool fdcan_init_ok = false;
 bool i2c_init_ok   = false;

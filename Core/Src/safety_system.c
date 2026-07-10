@@ -358,6 +358,14 @@ static uint8_t  recovery_pending        = 0;  /* 1 = waiting for debounce */
 static uint32_t limphome_recovery_since = 0;
 static uint8_t  limphome_recovery_pending = 0;
 
+/* Reason-tracking flag for LIMP_HOME entry.
+ * Set to true when LIMP_HOME is entered from STANDBY via a sensor fault
+ * (pedal implausibility), not from ACTIVE/DEGRADED via CAN loss.
+ * Used to route the recovery back to STANDBY (not ACTIVE) once the
+ * sensor fault clears, allowing the calibration gate conditions to be
+ * satisfied again (STANDBY + startup_inhibit).                           */
+static bool limp_entered_from_standby = false;
+
 /* Battery critical-UV recovery debounce (SAFE → STANDBY).
  *
  * A critically depleted pack that is RECHARGED or RECONNECTED (the pack
@@ -538,8 +546,9 @@ void Safety_SetState(SystemState_t state)
     }
 
     /* Only allow forward transitions and recovery transitions:
-     *   DEGRADED→ACTIVE, LIMP_HOME→ACTIVE, and the
-     *   fault-cleared SAFE→STANDBY recovery (see SYS_STATE_STANDBY case).
+     *   DEGRADED→ACTIVE, LIMP_HOME→ACTIVE, LIMP_HOME→STANDBY (sensor-fault
+     *   recovery from a STANDBY-origin fault), and the fault-cleared
+     *   SAFE→STANDBY recovery (see SYS_STATE_STANDBY case).
      * SAFE→ACTIVE direct transition is explicitly blocked: recovery from SAFE
      * MUST go through STANDBY first (SAFE→STANDBY→ACTIVE).               */
     switch (state) {
@@ -555,6 +564,21 @@ void Safety_SetState(SystemState_t state)
              * every precondition.                                       */
             else if (system_state == SYS_STATE_SAFE &&
                      safety_error == SAFETY_ERROR_NONE) {
+                system_state    = SYS_STATE_STANDBY;
+                degraded_level  = DEGRADED_LEVEL_NONE;
+                degraded_reason = DEGRADED_REASON_NONE;
+            }
+            /* Sensor-fault recovery: LIMP_HOME → STANDBY.
+             * Only allowed when the system entered LIMP_HOME from STANDBY
+             * (tracked by limp_entered_from_standby) AND no active fault
+             * remains.  Relays stay in their current state (PowerUp was
+             * called on STANDBY→LIMP_HOME; we go back to STANDBY which
+             * gates traction demand independently).  Motion stays
+             * disabled until normal STANDBY→ACTIVE promotion.           */
+            else if (system_state == SYS_STATE_LIMP_HOME &&
+                     limp_entered_from_standby &&
+                     safety_error == SAFETY_ERROR_NONE) {
+                limp_entered_from_standby = false;
                 system_state    = SYS_STATE_STANDBY;
                 degraded_level  = DEGRADED_LEVEL_NONE;
                 degraded_reason = DEGRADED_REASON_NONE;
@@ -624,6 +648,11 @@ void Safety_SetState(SystemState_t state)
                 system_state = SYS_STATE_LIMP_HOME;
                 degraded_level  = DEGRADED_LEVEL_NONE;
                 degraded_reason = DEGRADED_REASON_NONE;
+                /* Track the entry source so Safety_CheckSensors() can
+                 * route recovery back to STANDBY (not ACTIVE) when the
+                 * sensor fault was the sole reason for LIMP_HOME and the
+                 * vehicle had not yet entered ACTIVE operation.          */
+                limp_entered_from_standby = (prev_limp == SYS_STATE_STANDBY);
                 /* Keep relays on — vehicle must remain drivable */
                 Relay_PowerUp();
                 /* Boot-without-CAN path: gear is still at the NEUTRAL
@@ -1873,12 +1902,18 @@ void Safety_CheckCANTimeout(void)
     } else {
         ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
         /* ESP32 alive – if we were in STANDBY, transition to ACTIVE
-         * only when steering centering has completed successfully
-         * AND the boot validation checklist has passed.                 */
+         * only when steering centering has completed successfully,
+         * the boot validation checklist has passed, AND the startup
+         * inhibit latch has cleared (pedal held at rest).
+         *
+         * Requiring startup_inhibit == false keeps the system in
+         * STANDBY while the driver confirms pedal release, giving a
+         * practical calibration window at every (re-)arm cycle.     */
         if (system_state == SYS_STATE_STANDBY &&
             safety_error == SAFETY_ERROR_NONE &&
             Steering_IsCalibrated() &&
-            BootValidation_IsPassed()) {
+            BootValidation_IsPassed() &&
+            !Startup_IsInhibited()) {
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* CAN restored from LIMP_HOME → attempt ACTIVE.
@@ -2324,8 +2359,9 @@ void Safety_CheckSensors(void)
     /* All sensor checks passed (including pedal plausibility) —
      * clear sensor fault to allow recovery.
      * DEGRADED: CAN timeout handler can recover to ACTIVE.
-     * LIMP_HOME: pedal plausibility restored → allow ACTIVE recovery
-     * via Safety_CheckCANTimeout() when CAN is alive.
+     * LIMP_HOME from ACTIVE/DEGRADED: CAN timeout handler recovers to ACTIVE.
+     * LIMP_HOME from STANDBY: sensor fault was the sole cause → recover to
+     *   STANDBY so calibration conditions can be re-established.
      *
      * Patch B (audit BUG-2): also allow clearing from SAFE.  Previously
      * SAFETY_ERROR_SENSOR_FAULT was only cleared in DEGRADED/LIMP_HOME, so
@@ -2340,8 +2376,20 @@ void Safety_CheckSensors(void)
      * promotion re-validates every precondition.  The historical DTC stays
      * in the error log (only the active fault is cleared).                */
     if (safety_error == SAFETY_ERROR_SENSOR_FAULT &&
-        (system_state == SYS_STATE_DEGRADED ||
-         system_state == SYS_STATE_LIMP_HOME)) {
+        system_state == SYS_STATE_LIMP_HOME) {
+        Safety_ClearError(SAFETY_ERROR_SENSOR_FAULT);
+        /* If the LIMP_HOME entry was from STANDBY (pedal fault before the
+         * vehicle entered ACTIVE operation), recover back to STANDBY and
+         * re-arm the startup inhibit latch so the calibration gate
+         * conditions (STANDBY + startup_inhibit) can be satisfied again.
+         * Safety_SetState() guards the transition with its own
+         * limp_entered_from_standby check so no stale flag is consumed.  */
+        if (limp_entered_from_standby && safety_error == SAFETY_ERROR_NONE) {
+            Startup_Rearm();
+            Safety_SetState(SYS_STATE_STANDBY);
+        }
+    } else if (safety_error == SAFETY_ERROR_SENSOR_FAULT &&
+               system_state == SYS_STATE_DEGRADED) {
         Safety_ClearError(SAFETY_ERROR_SENSOR_FAULT);
     } else if (safety_error == SAFETY_ERROR_SENSOR_FAULT &&
                system_state == SYS_STATE_SAFE) {

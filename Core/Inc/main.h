@@ -46,6 +46,7 @@ void Error_Handler(void);
 void SystemClock_Config(void);
 uint8_t Boot_GetResetCause(void);
 bool    Startup_IsInhibited(void);
+void    Startup_Rearm(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
