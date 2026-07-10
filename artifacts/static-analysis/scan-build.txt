@@ -1,9 +1,0 @@
-=== scan-build ===
-scan-build: Using '/usr/lib/llvm-18/bin/clang' for static analysis
-esp32/src/audio_manager.cpp:18:10: fatal error: 'Arduino.h' file not found
-   18 | #include <Arduino.h>
-      |          ^~~~~~~~~~~
-1 error generated.
-scan-build: Analysis run complete.
-scan-build: Removing directory '/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/scan-build-html/2026-07-10-060137-7421-1' because it contains no reports.
-scan-build: No bugs found.

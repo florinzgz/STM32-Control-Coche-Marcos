@@ -1,2 +1,0 @@
-=== cppcheck ===
-Cppcheck report written to /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/cppcheck.txt

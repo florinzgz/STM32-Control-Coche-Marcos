@@ -80,6 +80,7 @@ Release/
 *.gcda
 *.gcno
 *.gcov
+artifacts/static-analysis/
 cov-int/
 *.sarif
 *.plist
@@ -152,4 +153,3 @@ test_wheel_speed
 # Firmware snapshots (binarios) — ver tools/backup/
 # ===========================
 backups/
-

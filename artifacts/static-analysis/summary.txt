@@ -1,8 +1,0 @@
-Static analysis summary
-=======================
-cppcheck:    /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/cppcheck.txt
-flawfinder:  /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/flawfinder.txt
-lizard:      /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/lizard.txt
-clang-tidy:  /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/clang-tidy.txt
-scan-build:  /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/scan-build.txt
-semgrep:     /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/artifacts/static-analysis/semgrep.txt
