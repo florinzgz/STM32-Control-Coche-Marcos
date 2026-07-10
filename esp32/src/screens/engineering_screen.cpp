@@ -4448,7 +4448,7 @@ void EngineeringScreen::drawDtcLogViewer() {
             char buf[80];
 
             // Entry number
-            snprintf(buf, sizeof(buf), "%u", idx + 1);
+            snprintf(buf, sizeof(buf), "%u", (unsigned)(idx + 1U));
             tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
             tft.drawString(buf, 10, rowY);
 

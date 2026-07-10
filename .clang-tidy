@@ -1,0 +1,18 @@
+---
+# Conservative report-only profile for firmware review.
+# Focus on likely bugs and analyzer findings; avoid style churn and autofixes.
+Checks: >-
+  -*,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  bugprone-branch-clone,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memory-comparison,
+  bugprone-suspicious-memset-usage,
+  bugprone-undefined-memory-manipulation,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-suspicious-call-argument
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(Core/(Inc|Src)|esp32/(include|src))/'
+FormatStyle: none

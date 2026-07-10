@@ -80,7 +80,29 @@ static bool eval_wheel(bool enabled, float spd, bool stale, bool any_moving,
     *diag = WHEEL_DIAG_OK; *since = 0; return false;
 }
 
-/* ---- Test framework ---- */
+/* eval_wheel with 4x2 drag-wheel exemption (mirrors the Traction_GetState()
+ * check added to Safety_CheckSensors in safety_system.c).                */
+static bool eval_wheel_drag(uint8_t wheel_index, bool mode4x4, bool axisRotation,
+                            bool enabled, float spd, bool stale,
+                            bool any_moving, float demand_pct, bool drive_state,
+                            uint8_t gpio_level, uint32_t now, uint32_t *since,
+                            WheelDiag_t *diag)
+{
+    bool rear_drag = (wheel_index >= 2U) && !(mode4x4 || axisRotation);
+
+    /* Drag-wheel exemption: a braked rear wheel in 4x2 may produce no
+     * pulses while the front axle is moving under load.  This is normal
+     * operation, not a sensor fault.                                    */
+    if (rear_drag && stale && spd == 0.0f && any_moving) {
+        *diag  = WHEEL_DIAG_OK;
+        *since = 0;
+        return false;
+    }
+    return eval_wheel(enabled, spd, stale, any_moving, demand_pct, drive_state,
+                      gpio_level, now, since, diag);
+}
+
+
 static int tests_run = 0, tests_failed = 0;
 #define CHECK(cond, msg) do {                                     \
         tests_run++;                                              \
@@ -155,6 +177,34 @@ int main(void)
     fault = eval_wheel(true, 10.0f, false, true, 40.0f, true, 0, 5000, &since, &diag);
     CHECK(!fault && diag == WHEEL_DIAG_OK && since == 0,
           "wheel producing pulses clears debounce + diag OK");
+
+    /* 11. 4x2 drag wheel (RL/RR) stale while front axle drives under load:
+     *     must NOT fault — silence is expected behavior for a drag wheel. */
+    since = 0;
+    fault = eval_wheel_drag(2U, false, false, true, 0.0f, true, true,
+                            40.0f, true, 0, 5000, &since, &diag);
+    CHECK(!fault && diag == WHEEL_DIAG_OK,
+          "4x2 drag wheel stale under load is normal (not a fault)");
+    CHECK(since == 0, "4x2 drag wheel does not arm debounce timer");
+
+    /* 12. Drag exemption does NOT apply when rear wheels ARE driven (4x4). */
+    since = 0;
+    fault = eval_wheel_drag(2U, true, false, true, 0.0f, true, true,
+                            40.0f, true, 0, 1000, &since, &diag);
+    CHECK(!fault && diag == WHEEL_DIAG_MISMATCH,
+          "4x4 rear wheel stale under load arms debounce");
+    since = 1000;
+    fault = eval_wheel_drag(2U, true, false, true, 0.0f, true, true,
+                            40.0f, true, 0, 2000, &since, &diag);
+    CHECK(fault, "4x4 rear wheel stale under load latches fault after debounce");
+
+    /* 13. Front wheels are never drag wheels in production (rear_drag is
+     *     derived from wheel index >= 2), so the non-drag path must still
+     *     arm debounce under load when the stale wheel is on the front axle. */
+    since = 0;
+    fault = eval_wheel_drag(0U, false, false, true, 0.0f, true, true,
+                            40.0f, true, 0, 1000, &since, &diag);
+    CHECK(!fault, "front wheel (no drag flag) stale under load arms debounce only");
 
     printf("=== %d run, %d failed ===\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;

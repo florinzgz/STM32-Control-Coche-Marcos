@@ -386,7 +386,7 @@ void ErrorScreen::draw() {
         prevErrorCode_ = errorCode_;
 
         char buf[64];
-        snprintf(buf, sizeof(buf), canLost_ ? "Code %u: %s (STALE)" : "Code %u: %s",
+        snprintf(buf, sizeof(buf), canLost_ ? "Code %u: %s (STALE)" : "Code %u: %s", // flawfinder: ignore
                  errorCode_, safetyErrorName(errorCode_));
 
         tft.setTextColor(ui::COL_WHITE, ui::COL_RED);
@@ -405,7 +405,7 @@ void ErrorScreen::draw() {
         prevDiagSubsystem_ = diagSubsystem_;
 
         char buf[64];
-        snprintf(buf, sizeof(buf), canLost_ ? "Error %u  Subsystem: %s (STALE)"
+        snprintf(buf, sizeof(buf), canLost_ ? "Error %u  Subsystem: %s (STALE)" // flawfinder: ignore
                                              : "Error %u  Subsystem: %s",
                  diagCode_, diagSubsystemName(diagSubsystem_));
 

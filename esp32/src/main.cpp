@@ -1007,7 +1007,7 @@ void loop() {
                 case shifter::Gear::FORWARD:    audio::play(audio::Sound::GEAR_D1,      audio::Priority::LO); break;
                 case shifter::Gear::FORWARD_D2: audio::play(audio::Sound::GEAR_D2,      audio::Priority::LO); break;
             }
-            Serial.printf(remoteMotionAuthorityActive
+            Serial.printf(remoteMotionAuthorityActive // flawfinder: ignore
                               ? "[REMOTE] Gear(CH7) → %u\n"
                               : "[SHIFTER] Gear → %u\n",
                           gear);
