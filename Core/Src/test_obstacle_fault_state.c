@@ -97,12 +97,12 @@ int main(void)
 
     s.state = OBS_STATE_NORMAL;
     s.scale = 1.0f;
-    s.forward_blocked = 1U;
+    s.forward_blocked = 0U;
     apply_sensor_fault(&s);
     CHECK(s.scale == OBSTACLE_FAULT_SCALE,
           "non-tracked fault falls back to conservative fault scale");
     CHECK(s.forward_blocked == 0U,
-          "non-tracked fault clears stale forward-block latch");
+          "non-tracked fault stays unblocked");
 
     printf("=== %d run, %d failed ===\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;

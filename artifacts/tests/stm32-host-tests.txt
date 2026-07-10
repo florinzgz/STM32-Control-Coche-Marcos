@@ -47,7 +47,27 @@
   ok:   NaN speed faults
   ok:   disabled channel does not fault
   ok:   wheel producing pulses clears debounce + diag OK
-=== 18 run, 0 failed ===
+  ok:   4x2 drag wheel stale under load is normal (not a fault)
+  ok:   4x2 drag wheel does not arm debounce timer
+  ok:   4x4 rear wheel stale under load arms debounce
+  ok:   4x4 rear wheel stale under load latches fault after debounce
+  ok:   front wheel (no drag flag) stale under load arms debounce only
+=== 23 run, 0 failed ===
+-- test_obstacle_fault_state.c
+=== test_obstacle_fault_state ===
+  ok:   first fault cycle enters SENSOR_FAULT state
+  ok:   emergency-zone scale stays latched at zero on first fault cycle
+  ok:   first fault cycle preserves forward-block latch
+  ok:   repeated fault cycle stays in SENSOR_FAULT state
+  ok:   repeated fault cycle keeps zero-scale emergency latch
+  ok:   repeated fault cycle keeps forward blocked
+  ok:   non-emergency active obstacle is capped at fault scale
+  ok:   non-emergency active obstacle does not invent forward block
+  ok:   repeated non-emergency fault stays capped at fault scale
+  ok:   repeated non-emergency fault stays unblocked
+  ok:   non-tracked fault falls back to conservative fault scale
+  ok:   non-tracked fault stays unblocked
+=== 12 run, 0 failed ===
 -- test_wheel_diag_can.c
 === test_wheel_diag_can ===
   ok:   reason OK=0
