@@ -72,6 +72,7 @@ jobs:
               Core/Src/test_sensor_calibration.c \
               Core/Src/test_wheel_speed.c \
               Core/Src/test_wheel_fault_gate.c \
+              Core/Src/test_obstacle_fault_state.c \
               Core/Src/test_wheel_diag_can.c \
               Core/Src/test_gear_limits.c \
               Core/Src/test_drive_tuning.c \

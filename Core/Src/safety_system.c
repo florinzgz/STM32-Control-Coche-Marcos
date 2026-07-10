@@ -1479,10 +1479,10 @@ void ABS_Update(void)
         uint8_t healthy_mask = 0U;
         for (uint8_t i = 0; i < 4; i++) {
             ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
-            if (ServiceMode_IsEnabled(mod) &&
-                ServiceMode_GetFault(mod) == MODULE_FAULT_NONE) {
-                healthy_mask |= (1U << i);
-            }
+            if (!ServiceMode_IsEnabled(mod)) continue;
+            if (ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) continue;
+            if (!abs_rear_driven && i >= 2U) continue;  /* Skip drag wheels */
+            healthy_mask |= (1U << i);
         }
         if (healthy_mask != 0U && (mask & healthy_mask) == healthy_mask) {
             Traction_SetDemand(0);
@@ -1658,10 +1658,10 @@ void TCS_Update(void)
         uint8_t healthy_mask = 0U;
         for (uint8_t i = 0; i < 4; i++) {
             ModuleID_t mod = (ModuleID_t)(MODULE_WHEEL_SPEED_FL + i);
-            if (ServiceMode_IsEnabled(mod) &&
-                ServiceMode_GetFault(mod) == MODULE_FAULT_NONE) {
-                healthy_mask |= (1U << i);
-            }
+            if (!ServiceMode_IsEnabled(mod)) continue;
+            if (ServiceMode_GetFault(mod) != MODULE_FAULT_NONE) continue;
+            if (!tcs_rear_driven && i >= 2U) continue;  /* Skip drag wheels */
+            healthy_mask |= (1U << i);
         }
         if (healthy_mask != 0U && (mask & healthy_mask) == healthy_mask) {
             Traction_SetDemand(Pedal_GetPercent() * (1.0f - TCS_MAX_REDUCTION));
@@ -3387,15 +3387,17 @@ void Obstacle_Update(void)
 
     if (sensor_fault) {
         /* Mirror the CAN-timeout policy: when an obstacle was being
-         * tracked (ACTIVE or CONFIRMING), hold the last scale and
-         * preserve obstacle_forward_blocked.  This ensures that an
-         * obstacle in the emergency zone (<500 mm) that causes the
-         * sensor to return invalid readings (too close for TF-Mini
-         * minimum range) does NOT silently open the forward path.
-         * Reverse escape remains available via Obstacle_IsForwardBlocked()
-         * when scale < 0.01 (emergency zone scale = 0.0 is preserved). */
+         * tracked (ACTIVE or CONFIRMING), preserve obstacle_forward_blocked
+         * and retain the last obstacle_scale, capped at
+         * OBSTACLE_FAULT_SCALE.  Keep that forward-block latch for the
+         * full sensor-fault duration so an emergency-zone obstacle that
+         * triggers invalid readings does NOT silently reopen forward
+         * motion after one cycle.  Reverse escape remains available via
+         * Obstacle_IsForwardBlocked() when scale < 0.01 (emergency zone
+         * scale = 0.0 is preserved).                                   */
         if (obstacle_state == OBS_STATE_ACTIVE ||
-            obstacle_state == OBS_STATE_CONFIRMING) {
+            obstacle_state == OBS_STATE_CONFIRMING ||
+            obstacle_forward_blocked != 0U) {
             if (safety_status.obstacle_scale > OBSTACLE_FAULT_SCALE) {
                 safety_status.obstacle_scale = OBSTACLE_FAULT_SCALE;
             }
