@@ -1346,7 +1346,7 @@ void EngineeringScreen::draw() {
             int n = snprintf(dst + used, len - used, "%s%s", first ? "" : " ", txt);
             if (n > 0) first = false;
         };
-        char rejectDetail[64];
+        char rejectDetail[128];
         rejectDetail[0] = '\0';
         bool firstReject = true;
         if (pedalCalRejectReason_ == 0U) {

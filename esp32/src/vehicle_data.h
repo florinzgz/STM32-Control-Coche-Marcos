@@ -200,7 +200,7 @@ struct PedalData {
 //   diffRaw:     abs(rawAdc - rawAdc2)
 //   rejectReason: current/latched SAVE/CAPTURE blockers
 //   storedMin/Max:  endpoints currently held in STM32 flash
-//   pendingMin/Max: STM32 RAM-only pending endpoints (0 when not set)
+//   pendingMin/Max: STM32 RAM-only pending endpoints; use flags bit0/1 to know whether each endpoint is captured (pendingMin may be 0)
 //   pedalPercent:   0..100 saturating
 // -------------------------------------------------------------------------
 struct PedalCalData {

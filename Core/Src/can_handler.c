@@ -1864,6 +1864,7 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
 
     /* All other sub-opcodes require the full safety gate. */
     if (!pedalcal_safety_ok()) {
+        pedalcal_reject_latched = pedalcal_reject_live_safety();
         pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;
@@ -1997,6 +1998,7 @@ void CAN_PedalCalCaptureTick(void)
      * released) abort cleanly and report the safety-gate cause.  */
     if (!pedalcal_safety_ok()) {
         pedalcal_fsm_reset();
+        pedalcal_reject_latched = pedalcal_reject_live_safety();
         pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;
