@@ -49,7 +49,7 @@ if command -v lizard >/dev/null 2>&1; then
   run_and_capture \
     "lizard" \
     "${LIZARD_LOG}" \
-    lizard Core/Src Core/Inc esp32/src esp32/include -l c -l cpp -T cyclomatic_complexity=15 -w || true
+    bash -lc 'lizard Core/Src Core/Inc esp32/src esp32/include -l c -l cpp -T cyclomatic_complexity=15 -w || true'
 else
   echo "SKIP: lizard is not installed." > "${LIZARD_LOG}"
 fi
@@ -69,10 +69,10 @@ if command -v scan-build >/dev/null 2>&1; then
           clang -std=gnu11 -fsyntax-only \
             -DUSE_HAL_DRIVER -DSTM32G474xx \
             -ICore/Inc \
-            -IDrivers/STM32G4xx_HAL_Driver/Inc \
-            -IDrivers/STM32G4xx_HAL_Driver/Inc/Legacy \
-            -IDrivers/CMSIS/Device/ST/STM32G4xx/Include \
-            -IDrivers/CMSIS/Include \
+            -isystem Drivers/STM32G4xx_HAL_Driver/Inc \
+            -isystem Drivers/STM32G4xx_HAL_Driver/Inc/Legacy \
+            -isystem Drivers/CMSIS/Device/ST/STM32G4xx/Include \
+            -isystem Drivers/CMSIS/Include \
             "$f"
         done < <(find Core/Src -maxdepth 1 -type f -name "*.c" \
           ! -name "adc.c" \

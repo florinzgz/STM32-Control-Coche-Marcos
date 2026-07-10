@@ -1,0 +1,216 @@
+=== flawfinder ===
+Flawfinder version 2.0.19, (C) 2001-2019 David A. Wheeler.
+Number of rules (primarily dangerous function names) in C/C++ ruleset: 222
+Examining Core/Src/drive_tuning_store.c
+Examining Core/Src/gear_limits_store.c
+Examining Core/Src/system_stm32g4xx.c
+Examining Core/Src/steering_z.c
+Examining Core/Src/syscalls.c
+Examining Core/Src/eps_params.c
+Examining Core/Src/sensor_map_store.c
+Examining Core/Src/adc.c
+Examining Core/Src/i2c.c
+Examining Core/Src/stm32g4xx_it.c
+Examining Core/Src/battery_limits_store.c
+Examining Core/Src/test_sensor_calibration.c
+Examining Core/Src/gpio.c
+Examining Core/Src/math_safety.c
+Examining Core/Src/test_steering_z.c
+Examining Core/Src/test_wheel_speed.c
+Examining Core/Src/service_mode.c
+Examining Core/Src/test_drive_tuning.c
+Examining Core/Src/stm32g4xx_hal_msp.c
+Examining Core/Src/test_battery_limits.c
+Examining Core/Src/test_wheel_diag_can.c
+Examining Core/Src/test_wheel_fault_gate.c
+Examining Core/Src/test_service_mode.c
+Examining Core/Src/motor_control.c
+Examining Core/Src/tim.c
+Examining Core/Src/test_math_safety.c
+Examining Core/Src/fdcan.c
+Examining Core/Src/test_loop_diag.c
+Examining Core/Src/steering_centering.c
+Examining Core/Src/test_gear_limits.c
+Examining Core/Src/test_motor_control.c
+Examining Core/Src/pedal_cal_store.c
+Examining Core/Src/iwdg.c
+Examining Core/Src/ackermann.c
+Examining Core/Src/test_error_log.c
+Examining Core/Src/test_eps_params.c
+Examining Core/Src/test_steering_cal_store.c
+Examining Core/Src/main.c
+Examining Core/Src/sensor_manager.c
+Examining Core/Src/encoder_reader.c
+Examining Core/Src/error_log.c
+Examining Core/Src/safety_system.c
+Examining Core/Src/rc_arbiter.c
+Examining Core/Src/boot_validation.c
+Examining Core/Src/can_handler.c
+Examining Core/Src/test_pedal_cal_limits.c
+Examining Core/Src/steering_cal_store.c
+Examining Core/Src/sysmem.c
+Examining Core/Src/loop_diag.c
+Examining Core/Inc/steering_centering.h
+Examining Core/Inc/service_mode.h
+Examining Core/Inc/error_log.h
+Examining Core/Inc/sensor_manager.h
+Examining Core/Inc/sensor_map_store.h
+Examining Core/Inc/pedal_cal_store.h
+Examining Core/Inc/math_safety.h
+Examining Core/Inc/rc_arbiter.h
+Examining Core/Inc/drive_tuning_store.h
+Examining Core/Inc/tim.h
+Examining Core/Inc/stm32g4xx_hal_conf.h
+Examining Core/Inc/ackermann.h
+Examining Core/Inc/i2c.h
+Examining Core/Inc/can_handler.h
+Examining Core/Inc/boot_validation.h
+Examining Core/Inc/can_init_diag.h
+Examining Core/Inc/loop_diag.h
+Examining Core/Inc/vehicle_physics.h
+Examining Core/Inc/eps_params.h
+Examining Core/Inc/steering_z.h
+Examining Core/Inc/battery_limits_store.h
+Examining Core/Inc/motor_control.h
+Examining Core/Inc/main.h
+Examining Core/Inc/project_config.h
+Examining Core/Inc/gear_limits_store.h
+Examining Core/Inc/build_sanity_checks.h
+Examining Core/Inc/gpio.h
+Examining Core/Inc/safety_system.h
+Examining Core/Inc/fdcan.h
+Examining Core/Inc/iwdg.h
+Examining Core/Inc/steering_cal_store.h
+Examining Core/Inc/adc.h
+Examining Core/Inc/stm32g4xx_it.h
+Examining Core/Inc/encoder_reader.h
+Examining esp32/src/test_remote_control.cpp
+Examining esp32/src/test_wheel_diag_hint.cpp
+Examining esp32/src/screens/touch_calibration_screen.cpp
+Examining esp32/src/screens/pin_screen.cpp
+Examining esp32/src/screens/standby_screen.h
+Examining esp32/src/screens/screen.h
+Examining esp32/src/screens/drive_screen.cpp
+Examining esp32/src/screens/touch_calibration_screen.h
+Examining esp32/src/screens/safe_screen.h
+Examining esp32/src/screens/error_screen.h
+Examining esp32/src/screens/engineering_screen.cpp
+Examining esp32/src/screens/engineering_screen.h
+Examining esp32/src/screens/boot_screen.cpp
+Examining esp32/src/screens/standby_screen.cpp
+Examining esp32/src/screens/safe_screen.cpp
+Examining esp32/src/screens/pin_screen.h
+Examining esp32/src/screens/drive_screen.h
+Examining esp32/src/screens/error_screen.cpp
+Examining esp32/src/screens/boot_screen.h
+Examining esp32/src/touch_handler.cpp
+Examining esp32/src/can_rx.h
+Examining esp32/src/shifter_input.cpp
+Examining esp32/src/audio_manager.h
+Examining esp32/src/config_store.h
+Examining esp32/src/test_pedal_decode.cpp
+Examining esp32/src/vehicle_data.cpp
+Examining esp32/src/led_controller.cpp
+Examining esp32/src/relay_audio.h
+Examining esp32/src/test_pedal_cal_decode.cpp
+Examining esp32/src/power_manager.cpp
+Examining esp32/src/touch_handler.h
+Examining esp32/src/display_backlight.h
+Examining esp32/src/can/can_obstacle.cpp
+Examining esp32/src/can/can_obstacle.h
+Examining esp32/src/ui/led_toggle.h
+Examining esp32/src/ui/battery_indicator.cpp
+Examining esp32/src/ui/car_renderer.h
+Examining esp32/src/ui/gear_display.cpp
+Examining esp32/src/ui/ui_common.h
+Examining esp32/src/ui/mode_icons.cpp
+Examining esp32/src/ui/steering_display.h
+Examining esp32/src/ui/dial_gauge.cpp
+Examining esp32/src/ui/ui_config.h
+Examining esp32/src/ui/wheel_diag_hint.h
+Examining esp32/src/ui/runtime_monitor.h
+Examining esp32/src/ui/tile_engine.h
+Examining esp32/src/ui/obstacle_sensor.cpp
+Examining esp32/src/ui/render_trace.h
+Examining esp32/src/ui/relay_indicator.h
+Examining esp32/src/ui/car_renderer.cpp
+Examining esp32/src/ui/led_toggle.cpp
+Examining esp32/src/ui/frame_limiter.h
+Examining esp32/src/ui/battery_indicator.h
+Examining esp32/src/ui/obstacle_sensor.h
+Examining esp32/src/ui/gear_display.h
+Examining esp32/src/ui/debug_overlay.h
+Examining esp32/src/ui/render_trace.cpp
+Examining esp32/src/ui/debug_overlay.cpp
+Examining esp32/src/ui/mode_icons.h
+Examining esp32/src/ui/dial_gauge.h
+Examining esp32/src/ui/runtime_monitor.cpp
+Examining esp32/src/ui/pedal_bar.cpp
+Examining esp32/src/ui/pedal_bar.h
+Examining esp32/src/ui/steering_display.cpp
+Examining esp32/src/touch_calibration.cpp
+Examining esp32/src/traction_switch.h
+Examining esp32/src/test_relay_audio.cpp
+Examining esp32/src/test_knight_rider.cpp
+Examining esp32/src/can_rx.cpp
+Examining esp32/src/relay_audio.cpp
+Examining esp32/src/screen_manager.h
+Examining esp32/src/touch_calibration.h
+Examining esp32/src/remote_control.h
+Examining esp32/src/config_store.cpp
+Examining esp32/src/test_shifter_input.cpp
+Examining esp32/src/remote_control.cpp
+Examining esp32/src/test_decor_modes.cpp
+Examining esp32/src/screen_manager.cpp
+Examining esp32/src/test_obstacle_sensor.cpp
+Examining esp32/src/traction_switch.cpp
+Examining esp32/src/shifter_input.h
+Examining esp32/src/test_traction_switch.cpp
+Examining esp32/src/test_wheel_diag_decode.cpp
+Examining esp32/src/led_controller.h
+Examining esp32/src/audio_manager.cpp
+Examining esp32/src/hmi/obstacle_indicator.cpp
+Examining esp32/src/hmi/obstacle_indicator.h
+Examining esp32/src/power_manager.h
+Examining esp32/src/vehicle_data.h
+Examining esp32/src/main.cpp
+Examining esp32/src/display_backlight.cpp
+Examining esp32/src/sensors/distance_sensor.h
+Examining esp32/src/sensors/obstacle_sensor.cpp
+Examining esp32/src/sensors/obstacle_sensor.h
+Examining esp32/include/can_ids.h
+Examining esp32/include/User_Setup.h
+
+FINAL RESULTS:
+
+esp32/src/main.cpp:1010:  [4] (format) printf:
+  If format strings can be influenced by an attacker, they can be exploited
+  (CWE-134). Use a constant for the format specification.
+esp32/src/screens/error_screen.cpp:389:  [4] (format) snprintf:
+  If format strings can be influenced by an attacker, they can be exploited,
+  and note that sprintf variations do not always \0-terminate (CWE-134). Use
+  a constant for the format specification.
+esp32/src/screens/error_screen.cpp:408:  [4] (format) snprintf:
+  If format strings can be influenced by an attacker, they can be exploited,
+  and note that sprintf variations do not always \0-terminate (CWE-134). Use
+  a constant for the format specification.
+
+ANALYSIS SUMMARY:
+
+Hits = 3
+Lines analyzed = 59620 in approximately 0.54 seconds (111187 lines/second)
+Physical Source Lines of Code (SLOC) = 34487
+Hits@level = [0] 474 [1]  16 [2] 127 [3]   0 [4]   3 [5]   0
+Hits@level+ = [0+] 620 [1+] 146 [2+] 130 [3+]   3 [4+]   3 [5+]   0
+Hits/KSLOC@level+ = [0+] 17.9778 [1+] 4.23348 [2+] 3.76954 [3+] 0.0869893 [4+] 0.0869893 [5+]   0
+Minimum risk level = 3
+
+Not every hit is necessarily a security vulnerability.
+You can inhibit a report by adding a comment in this form:
+// flawfinder: ignore
+Make *sure* it's a false positive!
+You can use the option --neverignore to show these.
+
+There may be other security vulnerabilities; review your code!
+See 'Secure Programming HOWTO'
+(https://dwheeler.com/secure-programs) for more information.

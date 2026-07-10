@@ -1,0 +1,4 @@
+SKIP: Semgrep is intentionally not enabled in this repository yet.
+Reason: the current goal is a low-noise C/C++ report-only stack, and the existing
+tools already cover syntax, bug-prone patterns, analyzer findings, security smoke
+tests, and complexity without introducing another high-noise dependency.

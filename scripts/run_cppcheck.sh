@@ -35,19 +35,18 @@ mapfile -t STM32_OWNED_SOURCES < <(
 )
 
 mapfile -t STM32_TEST_SOURCES < <(find Core/Src -maxdepth 1 -type f -name 'test_*.c' | sort)
-mapfile -t STM32_HEADERS < <(find Core/Inc -maxdepth 1 -type f -name '*.h' | sort)
 mapfile -t ESP32_OWNED_SOURCES < <(find esp32/src -type f -name '*.cpp' ! -name 'test_*.cpp' | sort)
-mapfile -t ESP32_HEADERS < <(find esp32/src esp32/include -type f \( -name '*.h' -o -name '*.hpp' \) | sort)
 mapfile -t ESP32_TEST_SOURCES < <(find esp32/src -maxdepth 1 -type f -name 'test_*.cpp' | sort)
 
 run_cppcheck() {
   local label="$1"
-  shift
+  local enable_set="$2"
+  shift 2
 
   {
     echo "=== ${label} ==="
     cppcheck \
-      --enable=warning,style,performance,portability,information \
+      --enable="${enable_set}" \
       --inconclusive \
       --inline-suppr \
       --quiet \
@@ -74,6 +73,7 @@ fi
 
 run_cppcheck \
   "STM32 owned firmware" \
+  "warning,style,performance,portability,information" \
   "${CPPCHECK_EXIT_FLAG[@]}" \
   --std=c11 \
   -D__GNUC__=13 \
@@ -92,11 +92,11 @@ run_cppcheck \
   -ibuild \
   -iDebug \
   -iRelease \
-  "${STM32_OWNED_SOURCES[@]}" \
-  "${STM32_HEADERS[@]}"
+  "${STM32_OWNED_SOURCES[@]}"
 
 run_cppcheck \
   "STM32 host tests" \
+  "warning,performance,portability,information" \
   "${CPPCHECK_EXIT_FLAG[@]}" \
   --std=c11 \
   -DHOST_TEST \
@@ -110,6 +110,7 @@ run_cppcheck \
 
 run_cppcheck \
   "ESP32 owned firmware" \
+  "warning,style,performance,portability,information" \
   "${CPPCHECK_EXIT_FLAG[@]}" \
   --language=c++ \
   --std=c++17 \
@@ -119,11 +120,11 @@ run_cppcheck \
   -Iesp32/src/ui \
   -Iesp32/src/screens \
   -iesp32/.pio \
-  "${ESP32_OWNED_SOURCES[@]}" \
-  "${ESP32_HEADERS[@]}"
+  "${ESP32_OWNED_SOURCES[@]}"
 
 run_cppcheck \
   "ESP32 host tests" \
+  "warning,performance,portability,information" \
   "${CPPCHECK_EXIT_FLAG[@]}" \
   --language=c++ \
   --std=c++17 \

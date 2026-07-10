@@ -1,0 +1,531 @@
+clang-tidy Ubuntu LLVM version 18.1.3
+
+=== STM32 owned firmware ===
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[1/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/ackermann.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[2/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/battery_limits_store.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+50 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[3/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/boot_validation.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+98 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[4/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/can_handler.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+152 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[5/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/drive_tuning_store.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+202 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[6/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/encoder_reader.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+250 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[7/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/eps_params.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+311 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[8/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/error_log.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+364 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[9/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/gear_limits_store.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+413 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[10/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/loop_diag.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+413 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[11/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/main.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+461 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[12/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/math_safety.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+461 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[13/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/motor_control.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+509 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[14/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/pedal_cal_store.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+558 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[15/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/rc_arbiter.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+559 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[16/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/safety_system.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+607 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[17/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/sensor_manager.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+656 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[18/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/sensor_map_store.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+708 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[19/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/service_mode.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+708 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[20/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/steering_cal_store.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+757 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[21/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/steering_centering.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+805 warnings generated.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+[22/22] Processing file /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/Core/Src/steering_z.c.
+/home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy:15:1: error: unknown key 'AnalyzeTemporaryDtors'
+AnalyzeTemporaryDtors: false
+^~~~~~~~~~~~~~~~~~~~~
+Error parsing /home/runner/work/STM32-Control-Coche-Marcos/STM32-Control-Coche-Marcos/.clang-tidy: Invalid argument
+805 warnings generated.
+Core/Src/battery_limits_store.c:134:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  134 |     memset(&batt_stored, 0, sizeof(batt_stored));
+      |     ^~~~~~
+Core/Src/battery_limits_store.c:134:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  134 |     memset(&batt_stored, 0, sizeof(batt_stored));
+      |     ^~~~~~
+Core/Src/battery_limits_store.c:196:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  196 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/battery_limits_store.c:196:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  196 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/can_handler.c:279:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  279 |     memcpy(can_txq[can_txq_head].data, payload, l);
+      |     ^~~~~~
+Core/Src/can_handler.c:279:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  279 |     memcpy(can_txq[can_txq_head].data, payload, l);
+      |     ^~~~~~
+Core/Src/can_handler.c:844:9: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  844 |         memset(last_good_valid,  0, sizeof(last_good_valid));
+      |         ^~~~~~
+Core/Src/can_handler.c:844:9: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  844 |         memset(last_good_valid,  0, sizeof(last_good_valid));
+      |         ^~~~~~
+Core/Src/can_handler.c:845:9: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  845 |         memset(bootstrap_count,  0, sizeof(bootstrap_count));
+      |         ^~~~~~
+Core/Src/can_handler.c:845:9: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  845 |         memset(bootstrap_count,  0, sizeof(bootstrap_count));
+      |         ^~~~~~
+Core/Src/can_handler.c:846:9: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  846 |         memset(bootstrap_ref,    0, sizeof(bootstrap_ref));
+      |         ^~~~~~
+Core/Src/can_handler.c:846:9: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  846 |         memset(bootstrap_ref,    0, sizeof(bootstrap_ref));
+      |         ^~~~~~
+Core/Src/can_handler.c:847:9: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  847 |         memset(last_good_temp_f, 0, sizeof(last_good_temp_f));
+      |         ^~~~~~
+Core/Src/can_handler.c:847:9: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  847 |         memset(last_good_temp_f, 0, sizeof(last_good_temp_f));
+      |         ^~~~~~
+Core/Src/can_handler.c:3074:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 3074 |         __builtin_memcpy(&value, fb, sizeof(float));
+      |         ^~~~~~~~~~~~~~~~
+Core/Src/can_handler.c:3074:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+ 3074 |         __builtin_memcpy(&value, fb, sizeof(float));
+      |         ^~~~~~~~~~~~~~~~
+Core/Src/drive_tuning_store.c:140:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  140 |     memset(&dtun_stored, 0, sizeof(dtun_stored));
+      |     ^~~~~~
+Core/Src/drive_tuning_store.c:140:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  140 |     memset(&dtun_stored, 0, sizeof(dtun_stored));
+      |     ^~~~~~
+Core/Src/drive_tuning_store.c:208:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  208 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/drive_tuning_store.c:208:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  208 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/eps_params.c:130:13: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  130 |             memcpy(&eps_active, &slotB->params, sizeof(eps_params_t));
+      |             ^~~~~~
+Core/Src/eps_params.c:130:13: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  130 |             memcpy(&eps_active, &slotB->params, sizeof(eps_params_t));
+      |             ^~~~~~
+Core/Src/eps_params.c:133:13: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  133 |             memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
+      |             ^~~~~~
+Core/Src/eps_params.c:133:13: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  133 |             memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
+      |             ^~~~~~
+Core/Src/eps_params.c:136:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  136 |         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:136:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  136 |         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:139:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  139 |         memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:139:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  139 |         memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:141:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  141 |         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:141:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  141 |         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:144:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  144 |         memcpy(&eps_active, &slotB->params, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:144:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  144 |         memcpy(&eps_active, &slotB->params, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:146:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  146 |         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:146:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  146 |         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:150:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  150 |         memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:150:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  150 |         memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:198:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  198 |     memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
+      |     ^~~~~~
+Core/Src/eps_params.c:198:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  198 |     memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
+      |     ^~~~~~
+Core/Src/eps_params.c:278:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  278 |         memcpy(&prev_slot, prev_flash, sizeof(eps_flash_slot_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:278:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  278 |         memcpy(&prev_slot, prev_flash, sizeof(eps_flash_slot_t));
+      |         ^~~~~~
+Core/Src/eps_params.c:286:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  286 |     memcpy(&slot.params, &eps_active, sizeof(eps_params_t));
+      |     ^~~~~~
+Core/Src/eps_params.c:286:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  286 |     memcpy(&slot.params, &eps_active, sizeof(eps_params_t));
+      |     ^~~~~~
+Core/Src/eps_params.c:315:18: warning: 3rd function call argument is an uninitialized value [clang-analyzer-core.CallAndMessage]
+  315 |         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+      |                  ^
+  316 |                                    target_addr + (i * 8U), src[i]);
+      |                                                            ~~~~~~
+Core/Src/eps_params.c:226:9: note: Assuming the condition is false
+  226 |     if (Safety_GetState() != SYS_STATE_STANDBY)
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:226:5: note: Taking false branch
+  226 |     if (Safety_GetState() != SYS_STATE_STANDBY)
+      |     ^
+Core/Src/eps_params.c:237:9: note: Assuming 'eps_persisted_valid' is false
+  237 |     if (eps_persisted_valid &&
+      |         ^~~~~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:237:29: note: Left side of '&&' is false
+  237 |     if (eps_persisted_valid &&
+      |                             ^
+Core/Src/eps_params.c:252:13: note: Assuming 'eps_has_written_once' is false
+  252 |         if (eps_has_written_once &&
+      |             ^~~~~~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:252:34: note: Left side of '&&' is false
+  252 |         if (eps_has_written_once &&
+      |                                  ^
+Core/Src/eps_params.c:269:29: note: Assuming the condition is false
+  269 |     uint32_t target_addr = (eps_sequence & 1U) ? EPS_SLOT_A_ADDR
+      |                             ^~~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:269:28: note: '?' condition is false
+  269 |     uint32_t target_addr = (eps_sequence & 1U) ? EPS_SLOT_A_ADDR
+      |                            ^
+Core/Src/eps_params.c:271:17: note: '?' condition is false
+  271 |     prev_addr = (eps_sequence & 1U) ? EPS_SLOT_B_ADDR
+      |                 ^
+Core/Src/eps_params.c:277:5: note: Taking false branch
+  277 |     if (eps_slot_valid(prev_flash)) {
+      |     ^
+Core/Src/eps_params.c:291:9: note: Assuming 'status' is equal to HAL_OK
+  291 |     if (status != HAL_OK) { eps_sequence--; return false; }
+      |         ^~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:291:5: note: Taking false branch
+  291 |     if (status != HAL_OK) { eps_sequence--; return false; }
+      |     ^
+Core/Src/eps_params.c:302:9: note: Assuming 'status' is equal to HAL_OK
+  302 |     if (status != HAL_OK || page_err != 0xFFFFFFFFU) {
+      |         ^~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:302:9: note: Left side of '||' is false
+Core/Src/eps_params.c:302:29: note: Assuming 'page_err' is equal to -1
+  302 |     if (status != HAL_OK || page_err != 0xFFFFFFFFU) {
+      |                             ^~~~~~~~~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:302:5: note: Taking false branch
+  302 |     if (status != HAL_OK || page_err != 0xFFFFFFFFU) {
+      |     ^
+Core/Src/eps_params.c:314:5: note: Loop condition is true.  Entering loop body
+  314 |     for (uint32_t i = 0; i < dword_count; i++) {
+      |     ^
+Core/Src/eps_params.c:317:13: note: Assuming 'status' is equal to HAL_OK
+  317 |         if (status != HAL_OK) {
+      |             ^~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:317:9: note: Taking false branch
+  317 |         if (status != HAL_OK) {
+      |         ^
+Core/Src/eps_params.c:314:5: note: Loop condition is true.  Entering loop body
+  314 |     for (uint32_t i = 0; i < dword_count; i++) {
+      |     ^
+Core/Src/eps_params.c:317:13: note: Assuming 'status' is equal to HAL_OK
+  317 |         if (status != HAL_OK) {
+      |             ^~~~~~~~~~~~~~~~
+Core/Src/eps_params.c:317:9: note: Taking false branch
+  317 |         if (status != HAL_OK) {
+      |         ^
+Core/Src/eps_params.c:314:43: note: The value 2 is assigned to 'i'
+  314 |     for (uint32_t i = 0; i < dword_count; i++) {
+      |                                           ^~~
+Core/Src/eps_params.c:314:5: note: Loop condition is true.  Entering loop body
+  314 |     for (uint32_t i = 0; i < dword_count; i++) {
+      |     ^
+Core/Src/eps_params.c:315:18: note: 3rd function call argument is an uninitialized value
+  315 |         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+      |                  ^
+  316 |                                    target_addr + (i * 8U), src[i]);
+      |                                                            ~~~~~~
+Core/Src/eps_params.c:343:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  343 |     memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |     ^~~~~~
+Core/Src/eps_params.c:343:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  343 |     memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
+      |     ^~~~~~
+Core/Src/error_log.c:201:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  201 |         memcpy(&log_header, flash_hdr, sizeof(errlog_flash_header_t));
+      |         ^~~~~~
+Core/Src/error_log.c:201:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  201 |         memcpy(&log_header, flash_hdr, sizeof(errlog_flash_header_t));
+      |         ^~~~~~
+Core/Src/error_log.c:210:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  210 |         memcpy(log_entries, flash_entries, copy_bytes);
+      |         ^~~~~~
+Core/Src/error_log.c:210:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  210 |         memcpy(log_entries, flash_entries, copy_bytes);
+      |         ^~~~~~
+Core/Src/error_log.c:213:9: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  213 |         memset(&log_header, 0, sizeof(log_header));
+      |         ^~~~~~
+Core/Src/error_log.c:213:9: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  213 |         memset(&log_header, 0, sizeof(log_header));
+      |         ^~~~~~
+Core/Src/error_log.c:218:9: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  218 |         memset(log_entries, 0, sizeof(log_entries));
+      |         ^~~~~~
+Core/Src/error_log.c:218:9: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  218 |         memset(log_entries, 0, sizeof(log_entries));
+      |         ^~~~~~
+Core/Src/error_log.c:342:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  342 |     memset(log_entries, 0, sizeof(log_entries));
+      |     ^~~~~~
+Core/Src/error_log.c:342:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  342 |     memset(log_entries, 0, sizeof(log_entries));
+      |     ^~~~~~
+Core/Src/gear_limits_store.c:273:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  273 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/gear_limits_store.c:273:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  273 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/pedal_cal_store.c:231:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  231 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/pedal_cal_store.c:231:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  231 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/rc_arbiter.c:48:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+   48 |     memset(&s_rc, 0, sizeof(s_rc));
+      |     ^~~~~~
+Core/Src/rc_arbiter.c:48:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+   48 |     memset(&s_rc, 0, sizeof(s_rc));
+      |     ^~~~~~
+Core/Src/sensor_manager.c:1595:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1595 |     memcpy(ds18b20_rom_prev, ds18b20_rom, sizeof(ds18b20_rom));
+      |     ^~~~~~
+Core/Src/sensor_manager.c:1595:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+ 1595 |     memcpy(ds18b20_rom_prev, ds18b20_rom, sizeof(ds18b20_rom));
+      |     ^~~~~~
+Core/Src/sensor_map_store.c:101:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  101 |         memcpy(smap_active, slot->tempMap, SMAP_NUM_SENSORS);
+      |         ^~~~~~
+Core/Src/sensor_map_store.c:101:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  101 |         memcpy(smap_active, slot->tempMap, SMAP_NUM_SENSORS);
+      |         ^~~~~~
+Core/Src/sensor_map_store.c:171:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  171 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/sensor_map_store.c:171:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  171 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/sensor_map_store.c:174:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  174 |     memcpy(slot.tempMap, map, SMAP_NUM_SENSORS);
+      |     ^~~~~~
+Core/Src/sensor_map_store.c:174:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  174 |     memcpy(slot.tempMap, map, SMAP_NUM_SENSORS);
+      |     ^~~~~~
+Core/Src/sensor_map_store.c:215:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  215 |     memcpy(smap_active, map, SMAP_NUM_SENSORS);
+      |     ^~~~~~
+Core/Src/sensor_map_store.c:215:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  215 |     memcpy(smap_active, map, SMAP_NUM_SENSORS);
+      |     ^~~~~~
+Core/Src/steering_cal_store.c:286:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  286 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Core/Src/steering_cal_store.c:286:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+  286 |     memset(&slot, 0, sizeof(slot));
+      |     ^~~~~~
+Suppressed 768 warnings (768 in non-user code).
+Use -header-filter=.* to display errors from all non-system headers. Use -system-headers to display errors from system headers as well.
+
+=== ESP32 owned firmware ===
+SKIP: PlatformIO is not installed; ESP32 clang-tidy pass not run.

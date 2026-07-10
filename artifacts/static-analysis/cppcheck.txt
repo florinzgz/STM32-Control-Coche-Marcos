@@ -1,0 +1,318 @@
+Cppcheck Cppcheck 2.13.0
+
+=== STM32 owned firmware ===
+cppcheck: '--enable=information' will no longer implicitly enable 'missingInclude' starting with 2.16. Please enable it explicitly if you require it.
+[style] Core/Src/can_handler.c:258 (constParameterPointer) Parameter 'payload' can be declared as pointer to const
+[style] Core/Src/sensor_manager.c:1835 (funcArgNamesDifferent) Function 'Temperature_IsValid' argument 1 names different: declaration 'idx' definition 'index'.
+[error] Core/Inc/build_sanity_checks.h:22 (preprocessorErrorDirective) #error "BUILD CHECK: PIN_ONEWIRE is not defined — DS18B20 OneWire bus will not work"
+[information] nofile:0 (checkersReport) Active checkers: There was critical errors (use --checkers-report=<filename> to see details)
+
+=== STM32 host tests ===
+cppcheck: '--enable=information' will no longer implicitly enable 'missingInclude' starting with 2.16. Please enable it explicitly if you require it.
+[style] Core/Src/test_motor_control.c:246 (knownConditionTrueFalse) Condition '!desired_en' is always true
+[style] Core/Src/test_motor_control.c:267 (knownConditionTrueFalse) Condition '!en1' is always false
+[style] Core/Src/test_motor_control.c:268 (knownConditionTrueFalse) Condition 'pwm1==0' is always false
+[style] Core/Src/test_motor_control.c:274 (knownConditionTrueFalse) Condition '!en2' is always false
+[style] Core/Src/test_motor_control.c:289 (knownConditionTrueFalse) Condition '!en1' is always false
+[style] Core/Src/test_motor_control.c:290 (knownConditionTrueFalse) Condition 'pwm1==0' is always false
+[style] Core/Src/test_motor_control.c:296 (knownConditionTrueFalse) Condition '!en2' is always true
+[style] Core/Src/test_motor_control.c:311 (knownConditionTrueFalse) Condition '!en1' is always false
+[style] Core/Src/test_motor_control.c:318 (knownConditionTrueFalse) Condition '!en2' is always false
+[style] Core/Src/test_motor_control.c:319 (knownConditionTrueFalse) Condition 'pwm2==0' is always false
+[style] Core/Src/test_motor_control.c:373 (knownConditionTrueFalse) Condition '!en' is always false
+[style] Core/Src/test_motor_control.c:546 (knownConditionTrueFalse) Condition '!en' is always false
+[style] Core/Src/test_motor_control.c:547 (knownConditionTrueFalse) Condition 'pwm==0' is always false
+[style] Core/Src/test_motor_control.c:553 (knownConditionTrueFalse) Condition '!en' is always false
+[style] Core/Src/test_motor_control.c:554 (knownConditionTrueFalse) Condition 'pwm==0' is always true
+[style] Core/Src/test_motor_control.c:561 (knownConditionTrueFalse) Condition '!en' is always false
+[style] Core/Src/test_motor_control.c:562 (knownConditionTrueFalse) Condition 'pwm==0' is always false
+[style] Core/Src/test_motor_control.c:695 (knownConditionTrueFalse) Condition '!en' is always false
+[style] Core/Src/test_motor_control.c:702 (knownConditionTrueFalse) Condition '!en' is always true
+[style] Core/Src/test_motor_control.c:743 (knownConditionTrueFalse) Condition 'duty!=0U' is always false
+[style] Core/Src/test_motor_control.c:877 (knownConditionTrueFalse) Condition 'pwm1>0' is always true
+[style] Core/Src/test_motor_control.c:884 (knownConditionTrueFalse) Condition 'pwm2>0' is always false
+[style] Core/Src/test_motor_control.c:884 (knownConditionTrueFalse) Condition 'pwm2<0' is always true
+[style] Core/Src/test_motor_control.c:891 (knownConditionTrueFalse) Condition 'pwm3>0' is always false
+[style] Core/Src/test_motor_control.c:891 (knownConditionTrueFalse) Condition 'pwm3<0' is always true
+[style] Core/Src/test_motor_control.c:1190 (knownConditionTrueFalse) Condition '!fwd_en' is always false
+[style] Core/Src/test_motor_control.c:1191 (knownConditionTrueFalse) Condition 'fwd_pwm==0' is always false
+[style] Core/Src/test_motor_control.c:1199 (knownConditionTrueFalse) Condition '!brk_en' is always false
+[style] Core/Src/test_motor_control.c:1210 (knownConditionTrueFalse) Condition '!rev_en' is always false
+[style] Core/Src/test_motor_control.c:1211 (knownConditionTrueFalse) Condition 'rev_pwm==0' is always false
+[style] Core/Src/test_motor_control.c:1221 (knownConditionTrueFalse) Condition '!cst_en' is always true
+[style] Core/Src/test_motor_control.c:1222 (knownConditionTrueFalse) Condition 'cst_pwm==0' is always false
+[style] Core/Src/test_motor_control.c:1319 (knownConditionTrueFalse) Condition 'rpwm>0' is always true
+[style] Core/Src/test_motor_control.c:1319 (knownConditionTrueFalse) Condition 'lpwm>0' is always true
+[style] Core/Src/test_motor_control.c:1412 (knownConditionTrueFalse) Condition 'unsafe_us>max_us' is always true
+[style] Core/Src/test_motor_control.c:437 (redundantAssignment) Variable 'current' is reassigned a value before the old one has been used.
+[style] Core/Src/test_motor_control.c:275 (knownConditionTrueFalse) The comparison 'pwm2 == 0' is always true.
+[style] Core/Src/test_motor_control.c:297 (knownConditionTrueFalse) The comparison 'pwm2 == 0' is always true.
+[style] Core/Src/test_motor_control.c:312 (knownConditionTrueFalse) The comparison 'pwm1 == 0' is always true.
+[style] Core/Src/test_motor_control.c:374 (knownConditionTrueFalse) The comparison 'pwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:499 (knownConditionTrueFalse) The comparison '_got != _exp' is always false because '_got' and '_exp' represent the same value.
+[style] Core/Src/test_motor_control.c:644 (knownConditionTrueFalse) The comparison '_got != _exp' is always false because '_got' and '_exp' represent the same value.
+[style] Core/Src/test_motor_control.c:680 (knownConditionTrueFalse) The comparison 'current == target' is always true because 'current' and 'target' represent the same value.
+[style] Core/Src/test_motor_control.c:696 (knownConditionTrueFalse) The comparison 'pwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:742 (knownConditionTrueFalse) The comparison 'speed >= 0' is always true.
+[style] Core/Src/test_motor_control.c:755 (knownConditionTrueFalse) The comparison 'park_hold_in_safe >= 0' is always true.
+[style] Core/Src/test_motor_control.c:1200 (knownConditionTrueFalse) The comparison 'brk_pwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1285 (knownConditionTrueFalse) The comparison 'en == 0' is always true.
+[style] Core/Src/test_motor_control.c:1285 (knownConditionTrueFalse) Same expression on both sides of '&&' because 'en==0' and 'rpwm==0' represent the same value.
+[style] Core/Src/test_motor_control.c:1285 (knownConditionTrueFalse) The comparison 'rpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1285 (knownConditionTrueFalse) Same expression on both sides of '&&' because 'lpwm==0' and 'rpwm==0' represent the same value.
+[style] Core/Src/test_motor_control.c:1285 (knownConditionTrueFalse) The comparison 'lpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1291 (knownConditionTrueFalse) The comparison 'en == 1' is always true.
+[style] Core/Src/test_motor_control.c:1291 (knownConditionTrueFalse) The comparison 'rpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1291 (knownConditionTrueFalse) Same expression on both sides of '&&' because 'lpwm==0' and 'rpwm==0' represent the same value.
+[style] Core/Src/test_motor_control.c:1291 (knownConditionTrueFalse) The comparison 'lpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1299 (knownConditionTrueFalse) The comparison 'en == 1' is always true.
+[style] Core/Src/test_motor_control.c:1299 (knownConditionTrueFalse) The comparison 'rpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1307 (knownConditionTrueFalse) The comparison 'en == 1' is always true.
+[style] Core/Src/test_motor_control.c:1307 (knownConditionTrueFalse) The comparison 'lpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1313 (knownConditionTrueFalse) The comparison 'en == 1' is always true.
+[style] Core/Src/test_motor_control.c:1313 (knownConditionTrueFalse) The comparison 'rpwm == 0' is always true.
+[style] Core/Src/test_motor_control.c:1319 (knownConditionTrueFalse) Same expression on both sides of '&&' because 'rpwm>0' and 'lpwm>0' represent the same value.
+[style] Core/Src/test_motor_control.c:774 (unusedStructMember) struct member 'Anonymous2::dir' is never used.
+[style] Core/Src/test_steering_cal_store.c:227 (knownConditionTrueFalse) Condition 'diff<0' is always false
+[style] Core/Src/test_steering_cal_store.c:233 (knownConditionTrueFalse) Condition 'diff<0' is always false
+[style] Core/Src/test_steering_cal_store.c:239 (knownConditionTrueFalse) Condition 'diff<0' is always true
+[style] Core/Src/test_steering_cal_store.c:245 (knownConditionTrueFalse) Condition 'diff<0' is always true
+[style] Core/Src/test_steering_cal_store.c:251 (knownConditionTrueFalse) Condition 'diff<0' is always false
+[style] Core/Src/test_wheel_diag_can.c:68 (knownConditionTrueFalse) Condition 'i<4U' is always true
+[information] nofile:0 (checkersReport) Active checkers: 113/592 (use --checkers-report=<filename> to see details)
+
+=== ESP32 owned firmware ===
+cppcheck: '--enable=information' will no longer implicitly enable 'missingInclude' starting with 2.16. Please enable it explicitly if you require it.
+[style] esp32/src/config_store.cpp:380 (knownConditionTrueFalse) Condition 'actual>=FAULT_LOG_MAX_ENTRIES' is always false
+[style] esp32/src/config_store.cpp:111 (variableScope) The scope of the variable 'inaDefault' can be reduced.
+[style] esp32/src/config_store.cpp:118 (variableScope) The scope of the variable 'tmpDefault' can be reduced.
+[style] esp32/src/config_store.cpp:111 (constVariable) Variable 'inaDefault' can be declared as const array
+[style] esp32/src/config_store.cpp:118 (constVariable) Variable 'tmpDefault' can be declared as const array
+[information] esp32/src/main.cpp:798 (checkLevelNormal) Limiting ValueFlow analysis in function 'loop' since it is too complex. Please specify --check-level=exhaustive to perform full analysis.
+[style] esp32/src/main.cpp:1137 (duplicateCondition) The if condition is the same as the previous if condition
+[style] esp32/src/main.cpp:63 (cstyleCast) C-style pointer casting
+[style] esp32/src/screens/drive_screen.h:186 (unusedPrivateFunction) Unused private function: 'DriveScreen::drawAmgBar'
+[style] esp32/src/screens/drive_screen.h:182 (functionConst) Technically the member function 'DriveScreen::drawSpeedDial' can be const.
+[style] esp32/src/screens/drive_screen.h:183 (functionConst) Technically the member function 'DriveScreen::drawRpmDial' can be const.
+[style] esp32/src/screens/drive_screen.h:184 (functionConst) Technically the member function 'DriveScreen::drawCanStatus' can be const.
+[style] esp32/src/screens/drive_screen.h:185 (functionConst) Technically the member function 'DriveScreen::drawAmbientTemp' can be const.
+[performance] esp32/src/screens/drive_screen.h:186 (functionStatic) Technically the member function 'DriveScreen::drawAmgBar' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/screens/drive_screen.h:187 (functionConst) Technically the member function 'DriveScreen::drawAckIndicator' can be const.
+[style] esp32/src/screens/drive_screen.h:188 (functionConst) Technically the member function 'DriveScreen::drawDegradedOverlay' can be const.
+[style] esp32/src/screens/drive_screen.h:189 (functionConst) Technically the member function 'DriveScreen::drawFaultOverlays' can be const.
+[style] esp32/src/screens/drive_screen.h:190 (functionConst) Technically the member function 'DriveScreen::drawTankConfirmBar' can be const.
+[information] esp32/src/screens/engineering_screen.cpp:401 (checkLevelNormal) Limiting ValueFlow analysis in function 'update' since it is too complex. Please specify --check-level=exhaustive to perform full analysis.
+[information] esp32/src/screens/engineering_screen.cpp:2229 (checkLevelNormal) Limiting ValueFlow analysis in function 'handleTouch' since it is too complex. Please specify --check-level=exhaustive to perform full analysis.
+[performance] esp32/src/screens/engineering_screen.h:84 (functionStatic) Technically the member function 'EngineeringScreen::drawTileIcon' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/screens/engineering_screen.h:86 (functionConst) Technically the member function 'EngineeringScreen::drawModuleControl' can be const.
+[performance] esp32/src/screens/engineering_screen.h:89 (functionStatic) Technically the member function 'EngineeringScreen::drawEncoderGaugeTicks' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/screens/engineering_screen.h:90 (functionConst) Technically the member function 'EngineeringScreen::drawSensorMapIna' can be const.
+[style] esp32/src/screens/engineering_screen.h:92 (functionConst) Technically the member function 'EngineeringScreen::drawFactoryDefaults' can be const.
+[performance] esp32/src/screens/engineering_screen.h:94 (functionStatic) Technically the member function 'EngineeringScreen::drawMaintenance' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/screens/engineering_screen.h:98 (functionConst) Technically the member function 'EngineeringScreen::drawWheelDiagBlock' can be const.
+[performance] esp32/src/screens/engineering_screen.h:161 (functionStatic) Technically the member function 'EngineeringScreen::sendPedalCalOp' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/src/screens/engineering_screen.h:180 (functionStatic) Technically the member function 'EngineeringScreen::sendSteerZOp' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/src/screens/engineering_screen.h:422 (functionStatic) Technically the member function 'EngineeringScreen::sendGearLimitOp' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/src/screens/engineering_screen.h:456 (functionStatic) Technically the member function 'EngineeringScreen::sendEpsParamOp' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/src/screens/engineering_screen.h:494 (functionStatic) Technically the member function 'EngineeringScreen::sendDriveTuneOp' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/src/screens/engineering_screen.h:526 (functionStatic) Technically the member function 'EngineeringScreen::sendBattLimitOp' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/screens/engineering_screen.cpp:1067 (duplicateConditionalAssign) The statement 'if (scanArmReply_) scanArmReply_=false' is logically equivalent to 'scanArmReply_=false'.
+[warning] esp32/src/screens/engineering_screen.cpp:4451 (invalidPrintfArgType_uint) %u in format string (no. 1) requires 'unsigned int' but the argument type is 'signed int'.
+[style] esp32/src/screens/engineering_screen.cpp:1351 (variableScope) The scope of the variable 'firstReject' can be reduced.
+[style] esp32/src/screens/engineering_screen.cpp:5739 (unusedStructMember) struct member 'Row::lo' is never used.
+[style] esp32/src/screens/engineering_screen.cpp:5739 (unusedStructMember) struct member 'Row::hi' is never used.
+[style] esp32/src/screens/engineering_screen.cpp:6068 (unusedStructMember) struct member 'EpsRow::step' is never used.
+[style] esp32/src/screens/engineering_screen.cpp:6069 (unusedStructMember) struct member 'EpsRow::vmin' is never used.
+[style] esp32/src/screens/engineering_screen.cpp:6070 (unusedStructMember) struct member 'EpsRow::vmax' is never used.
+[style] esp32/src/ui/wheel_diag_hint.h:129 (unreadVariable) Variable 'used' is assigned a value that is never used.
+[style] esp32/src/screens/pin_screen.h:71 (functionConst) Technically the member function 'PinScreen::drawDots' can be const.
+[warning] esp32/src/screens/safe_screen.cpp:558 (invalidPrintfArgType_uint) %u in format string (no. 1) requires 'unsigned int' but the argument type is 'signed int'.
+[warning] esp32/src/screens/safe_screen.cpp:558 (invalidPrintfArgType_uint) %u in format string (no. 2) requires 'unsigned int' but the argument type is 'signed int'.
+[style] esp32/src/screens/touch_calibration_screen.h:83 (functionConst) Technically the member function 'TouchCalibrationScreen::drawIntro' can be const.
+[style] esp32/src/screens/touch_calibration_screen.h:85 (functionConst) Technically the member function 'TouchCalibrationScreen::drawFailed' can be const.
+[style] esp32/src/config_store.h:38 (unusedStructMember) struct member 'FaultLogEntry::uptimeMs' is never used.
+[style] esp32/src/config_store.h:39 (unusedStructMember) struct member 'FaultLogEntry::errorCode' is never used.
+[style] esp32/src/config_store.h:40 (unusedStructMember) struct member 'FaultLogEntry::faultFlags' is never used.
+[style] esp32/src/config_store.h:41 (unusedStructMember) struct member 'FaultLogEntry::subsystem' is never used.
+[style] esp32/src/config_store.h:42 (unusedStructMember) struct member 'FaultLogEntry::systemState' is never used.
+[style] esp32/src/config_store.h:67 (unusedStructMember) struct member 'Config::ina226Map' is never used.
+[style] esp32/src/config_store.h:69 (unusedStructMember) struct member 'Config::tempSensorMap' is never used.
+[style] esp32/src/screen_manager.h:120 (unusedStructMember) class member 'ScreenManager::engineeringScreen_' is never used.
+[style] esp32/src/screen_manager.h:121 (unusedStructMember) class member 'ScreenManager::pinScreen_' is never used.
+[style] esp32/src/screen_manager.h:122 (unusedStructMember) class member 'ScreenManager::touchCalScreen_' is never used.
+[style] esp32/src/screen_manager.h:124 (unusedStructMember) class member 'ScreenManager::currentScreen_' is never used.
+[style] esp32/src/screen_manager.h:125 (unusedStructMember) class member 'ScreenManager::currentState_' is never used.
+[style] esp32/src/screen_manager.h:126 (unusedStructMember) class member 'ScreenManager::frameLimiter_' is never used.
+[style] esp32/src/screens/boot_screen.h:74 (unusedStructMember) class member 'BootScreen::diagLineText_' is never used.
+[style] esp32/src/screens/boot_screen.h:75 (unusedStructMember) class member 'BootScreen::diagLineColor_' is never used.
+[style] esp32/src/screens/drive_screen.h:85 (unusedStructMember) class member 'DriveScreen::prevTraction_' is never used.
+[style] esp32/src/screens/drive_screen.h:86 (unusedStructMember) class member 'DriveScreen::prevTemp_' is never used.
+[style] esp32/src/screens/drive_screen.h:99 (unusedStructMember) class member 'DriveScreen::curTraction_' is never used.
+[style] esp32/src/screens/drive_screen.h:100 (unusedStructMember) class member 'DriveScreen::curTemp_' is never used.
+[style] esp32/src/screens/drive_screen.h:133 (unusedStructMember) class member 'DriveScreen::drawTraction_' is never used.
+[style] esp32/src/screens/drive_screen.h:134 (unusedStructMember) class member 'DriveScreen::drawTemp_' is never used.
+[style] esp32/src/screens/engineering_screen.h:131 (unusedStructMember) class member 'EngineeringScreen::wheelSpeed_' is never used.
+[style] esp32/src/screens/engineering_screen.h:132 (unusedStructMember) class member 'EngineeringScreen::motorCurrent_' is never used.
+[style] esp32/src/screens/engineering_screen.h:133 (unusedStructMember) class member 'EngineeringScreen::tractionScale_' is never used.
+[style] esp32/src/screens/engineering_screen.h:157 (unusedStructMember) class member 'EngineeringScreen::pedalStabRing_' is never used.
+[style] esp32/src/screens/engineering_screen.h:167 (unusedStructMember) class member 'EngineeringScreen::pedalWheelText_' is never used.
+[style] esp32/src/screens/engineering_screen.h:174 (unusedStructMember) class member 'EngineeringScreen::steeringZ_' is never used.
+[style] esp32/src/screens/engineering_screen.h:179 (unusedStructMember) class member 'EngineeringScreen::STEER_Z_CLEAR_CONFIRM_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:184 (unusedStructMember) class member 'EngineeringScreen::MODULE_CTRL_PAGES' is never used.
+[style] esp32/src/screens/engineering_screen.h:202 (unusedStructMember) class member 'EngineeringScreen::MODULE_CONFIRM_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:209 (unusedStructMember) class member 'EngineeringScreen::inaMap_' is never used.
+[style] esp32/src/screens/engineering_screen.h:210 (unusedStructMember) class member 'EngineeringScreen::tempMap_' is never used.
+[style] esp32/src/screens/engineering_screen.h:214 (unusedStructMember) class member 'EngineeringScreen::rawTempC_' is never used.
+[style] esp32/src/screens/engineering_screen.h:229 (unusedStructMember) class member 'EngineeringScreen::FACTORY_CONFIRM_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:250 (unusedStructMember) class member 'EngineeringScreen::RELAY_STANDBY_MSG_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:253 (unusedStructMember) class member 'EngineeringScreen::debounceWheelFiltered_' is never used.
+[style] esp32/src/screens/engineering_screen.h:254 (unusedStructMember) class member 'EngineeringScreen::debounceWheelValid_' is never used.
+[style] esp32/src/screens/engineering_screen.h:261 (unusedStructMember) class member 'EngineeringScreen::inaLiveMotorCurrentRaw_' is never used.
+[style] esp32/src/screens/engineering_screen.h:280 (unusedStructMember) class member 'EngineeringScreen::canMeta_' is never used.
+[style] esp32/src/screens/engineering_screen.h:281 (unusedStructMember) class member 'EngineeringScreen::i2cScan_' is never used.
+[style] esp32/src/screens/engineering_screen.h:282 (unusedStructMember) class member 'EngineeringScreen::fdcanDiag_' is never used.
+[style] esp32/src/screens/engineering_screen.h:297 (unusedStructMember) class member 'EngineeringScreen::bootReset_' is never used.
+[style] esp32/src/screens/engineering_screen.h:305 (unusedStructMember) class member 'EngineeringScreen::wheelSensorDiag_' is never used.
+[style] esp32/src/screens/engineering_screen.h:312 (unusedStructMember) class member 'EngineeringScreen::pedalDiag_' is never used.
+[style] esp32/src/screens/engineering_screen.h:316 (unusedStructMember) class member 'EngineeringScreen::batt207Diag_' is never used.
+[style] esp32/src/screens/engineering_screen.h:363 (unusedStructMember) class member 'EngineeringScreen::SCAN_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:364 (unusedStructMember) class member 'EngineeringScreen::SCAN_FB_CLEAR_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:375 (unusedStructMember) class member 'EngineeringScreen::mcpDiag_' is never used.
+[style] esp32/src/screens/engineering_screen.h:418 (unusedStructMember) class member 'EngineeringScreen::GEAR_SAVE_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:419 (unusedStructMember) class member 'EngineeringScreen::GEAR_ACK_CLEAR_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:420 (unusedStructMember) class member 'EngineeringScreen::GEAR_RESTORE_CONFIRM_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:434 (unusedStructMember) class member 'EngineeringScreen::EPS_PAGES' is never used.
+[style] esp32/src/screens/engineering_screen.h:446 (unusedStructMember) class member 'EngineeringScreen::EPS_SAVE_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:447 (unusedStructMember) class member 'EngineeringScreen::EPS_ACK_CLEAR_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:448 (unusedStructMember) class member 'EngineeringScreen::EPS_RESTORE_CONFIRM_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:449 (unusedStructMember) class member 'EngineeringScreen::EPS_QUERY_INTERVAL_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:451 (unusedStructMember) class member 'EngineeringScreen::epsEdit_' is never used.
+[style] esp32/src/screens/engineering_screen.h:471 (unusedStructMember) class member 'EngineeringScreen::drvActive_' is never used.
+[style] esp32/src/screens/engineering_screen.h:475 (unusedStructMember) class member 'EngineeringScreen::drvEdit_' is never used.
+[style] esp32/src/screens/engineering_screen.h:489 (unusedStructMember) class member 'EngineeringScreen::DRV_SAVE_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:490 (unusedStructMember) class member 'EngineeringScreen::DRV_ACK_CLEAR_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:491 (unusedStructMember) class member 'EngineeringScreen::DRV_RESTORE_CONFIRM_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:492 (unusedStructMember) class member 'EngineeringScreen::DRV_QUERY_INTERVAL_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:500 (unusedStructMember) class member 'EngineeringScreen::batActive_' is never used.
+[style] esp32/src/screens/engineering_screen.h:504 (unusedStructMember) class member 'EngineeringScreen::batEdit_' is never used.
+[style] esp32/src/screens/engineering_screen.h:519 (unusedStructMember) class member 'EngineeringScreen::BAT_SAVE_TIMEOUT_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:520 (unusedStructMember) class member 'EngineeringScreen::BAT_ACK_CLEAR_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:521 (unusedStructMember) class member 'EngineeringScreen::BAT_RESTORE_CONFIRM_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:522 (unusedStructMember) class member 'EngineeringScreen::BAT_QUERY_INTERVAL_MS' is never used.
+[style] esp32/src/screens/engineering_screen.h:557 (unusedStructMember) class member 'EngineeringScreen::LED_TEST_DURATION_MS' is never used.
+[style] esp32/src/screens/error_screen.h:61 (unusedStructMember) class member 'ErrorScreen::wheelReason_' is never used.
+[style] esp32/src/screens/pin_screen.h:47 (unusedStructMember) class member 'PinScreen::CORRECT_PIN' is never used.
+[style] esp32/src/screens/pin_screen.h:50 (unusedStructMember) class member 'PinScreen::KEY_DELETE' is never used.
+[style] esp32/src/screens/pin_screen.h:51 (unusedStructMember) class member 'PinScreen::KEY_CANCEL' is never used.
+[style] esp32/src/screens/pin_screen.h:55 (unusedStructMember) class member 'PinScreen::digits_' is never used.
+[style] esp32/src/screens/pin_screen.h:64 (unusedStructMember) class member 'PinScreen::WRONG_CODE_DISPLAY_MS' is never used.
+[style] esp32/src/screens/standby_screen.h:41 (unusedStructMember) class member 'StandbyScreen::temps_' is never used.
+[style] esp32/src/screens/standby_screen.h:42 (unusedStructMember) class member 'StandbyScreen::prevTemps_' is never used.
+[style] esp32/src/ui/debug_overlay.h:52 (unusedStructMember) class member 'DebugOverlay::OVL_X' is never used.
+[style] esp32/src/ui/debug_overlay.h:53 (unusedStructMember) class member 'DebugOverlay::OVL_Y' is never used.
+[style] esp32/src/ui/debug_overlay.h:54 (unusedStructMember) class member 'DebugOverlay::OVL_W' is never used.
+[style] esp32/src/ui/debug_overlay.h:55 (unusedStructMember) class member 'DebugOverlay::OVL_H' is never used.
+[style] esp32/src/ui/debug_overlay.h:56 (unusedStructMember) class member 'DebugOverlay::LINE_H' is never used.
+[style] esp32/src/ui/debug_overlay.h:57 (unusedStructMember) class member 'DebugOverlay::MARGIN' is never used.
+[style] esp32/src/ui/debug_overlay.h:59 (unusedStructMember) class member 'DebugOverlay::visible_' is never used.
+[style] esp32/src/ui/debug_overlay.h:60 (unusedStructMember) class member 'DebugOverlay::lastUpdateMs_' is never used.
+[style] esp32/src/ui/debug_overlay.h:62 (unusedStructMember) class member 'DebugOverlay::REFRESH_MS' is never used.
+[style] esp32/src/ui/debug_overlay.h:63 (unusedStructMember) class member 'DebugOverlay::FULL_REDRAW_WARN' is never used.
+[style] esp32/src/ui/gear_display.h:39 (unusedStructMember) class member 'GearDisplay::GEAR_LABELS' is never used.
+[style] esp32/src/ui/render_trace.h:83 (unusedStructMember) struct member 'DrawEntry::type' is never used.
+[style] esp32/src/ui/render_trace.h:84 (unusedStructMember) struct member 'DrawEntry::x' is never used.
+[style] esp32/src/ui/render_trace.h:84 (unusedStructMember) struct member 'DrawEntry::y' is never used.
+[style] esp32/src/ui/render_trace.h:85 (unusedStructMember) struct member 'DrawEntry::w' is never used.
+[style] esp32/src/ui/render_trace.h:85 (unusedStructMember) struct member 'DrawEntry::h' is never used.
+[style] esp32/src/ui/render_trace.h:86 (unusedStructMember) struct member 'DrawEntry::color' is never used.
+[style] esp32/src/ui/render_trace.h:87 (unusedStructMember) struct member 'DrawEntry::bg_color' is never used.
+[style] esp32/src/ui/render_trace.h:88 (unusedStructMember) struct member 'DrawEntry::font' is never used.
+[style] esp32/src/ui/render_trace.h:89 (unusedStructMember) struct member 'DrawEntry::alignment' is never used.
+[style] esp32/src/ui/render_trace.h:90 (unusedStructMember) struct member 'DrawEntry::layer' is never used.
+[style] esp32/src/ui/render_trace.h:91 (unusedStructMember) struct member 'DrawEntry::is_dynamic' is never used.
+[style] esp32/src/ui/render_trace.h:92 (unusedStructMember) struct member 'DrawEntry::refresh_rate_ms' is never used.
+[style] esp32/src/ui/render_trace.h:93 (unusedStructMember) struct member 'DrawEntry::screen_name' is never used.
+[style] esp32/src/ui/render_trace.h:94 (unusedStructMember) struct member 'DrawEntry::text' is never used.
+[style] esp32/src/ui/render_trace.h:156 (unusedStructMember) class member 'RenderTrace::buf_' is never used.
+[style] esp32/src/ui/render_trace.h:157 (unusedStructMember) class member 'RenderTrace::cnt_' is never used.
+[style] esp32/src/ui/render_trace.h:158 (unusedStructMember) class member 'RenderTrace::layer_' is never used.
+[style] esp32/src/ui/render_trace.h:159 (unusedStructMember) class member 'RenderTrace::dumpPending_' is never used.
+[style] esp32/src/ui/render_trace.h:160 (unusedStructMember) class member 'RenderTrace::screen_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:74 (unusedStructMember) struct member 'RuntimeStats::frameTimeUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:75 (unusedStructMember) struct member 'RuntimeStats::maxFrameUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:76 (unusedStructMember) struct member 'RuntimeStats::minFrameUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:77 (unusedStructMember) struct member 'RuntimeStats::avgFrameUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:78 (unusedStructMember) struct member 'RuntimeStats::fps' is never used.
+[style] esp32/src/ui/runtime_monitor.h:81 (unusedStructMember) struct member 'RuntimeStats::zoneRedraws' is never used.
+[style] esp32/src/ui/runtime_monitor.h:82 (unusedStructMember) struct member 'RuntimeStats::fullRedraws' is never used.
+[style] esp32/src/ui/runtime_monitor.h:85 (unusedStructMember) struct member 'RuntimeStats::canMaxUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:86 (unusedStructMember) struct member 'RuntimeStats::uiUpdateMaxUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:87 (unusedStructMember) struct member 'RuntimeStats::renderMaxUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:88 (unusedStructMember) struct member 'RuntimeStats::loopMaxUs' is never used.
+[style] esp32/src/ui/runtime_monitor.h:91 (unusedStructMember) struct member 'RuntimeStats::canBlocking' is never used.
+[style] esp32/src/ui/runtime_monitor.h:92 (unusedStructMember) struct member 'RuntimeStats::uiBlocking' is never used.
+[style] esp32/src/ui/runtime_monitor.h:93 (unusedStructMember) struct member 'RuntimeStats::renderBlocking' is never used.
+[style] esp32/src/ui/runtime_monitor.h:94 (unusedStructMember) struct member 'RuntimeStats::loopBlocking' is never used.
+[style] esp32/src/ui/runtime_monitor.h:150 (unusedStructMember) class member 'RuntimeMonitor::ringBuf_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:151 (unusedStructMember) class member 'RuntimeMonitor::ringIdx_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:152 (unusedStructMember) class member 'RuntimeMonitor::ringCount_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:155 (unusedStructMember) class member 'RuntimeMonitor::frameStartUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:156 (unusedStructMember) class member 'RuntimeMonitor::lastFrameUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:157 (unusedStructMember) class member 'RuntimeMonitor::maxFrameUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:158 (unusedStructMember) class member 'RuntimeMonitor::minFrameUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:161 (unusedStructMember) class member 'RuntimeMonitor::canStartUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:162 (unusedStructMember) class member 'RuntimeMonitor::canMaxUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:163 (unusedStructMember) class member 'RuntimeMonitor::canBlocking_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:165 (unusedStructMember) class member 'RuntimeMonitor::uiStartUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:166 (unusedStructMember) class member 'RuntimeMonitor::uiMaxUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:167 (unusedStructMember) class member 'RuntimeMonitor::uiBlocking_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:169 (unusedStructMember) class member 'RuntimeMonitor::renderStartUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:170 (unusedStructMember) class member 'RuntimeMonitor::renderMaxUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:171 (unusedStructMember) class member 'RuntimeMonitor::renderBlocking_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:173 (unusedStructMember) class member 'RuntimeMonitor::loopStartUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:174 (unusedStructMember) class member 'RuntimeMonitor::loopMaxUs_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:175 (unusedStructMember) class member 'RuntimeMonitor::loopBlocking_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:178 (unusedStructMember) class member 'RuntimeMonitor::zoneCounts_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:179 (unusedStructMember) class member 'RuntimeMonitor::fullRedrawCount_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:182 (unusedStructMember) class member 'RuntimeMonitor::fpsCounterStart_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:183 (unusedStructMember) class member 'RuntimeMonitor::fpsFrameCount_' is never used.
+[style] esp32/src/ui/runtime_monitor.h:184 (unusedStructMember) class member 'RuntimeMonitor::fpsCurrent_' is never used.
+[style] esp32/src/vehicle_data.h:52 (unusedStructMember) struct member 'SpeedData::raw' is never used.
+[style] esp32/src/vehicle_data.h:60 (unusedStructMember) struct member 'CurrentData::raw' is never used.
+[style] esp32/src/vehicle_data.h:68 (unusedStructMember) struct member 'TempData::temps' is never used.
+[style] esp32/src/vehicle_data.h:96 (unusedStructMember) struct member 'TractionData::scale' is never used.
+[style] esp32/src/vehicle_data.h:104 (unusedStructMember) struct member 'TempMapData::temps' is never used.
+[style] esp32/src/vehicle_data.h:273 (unusedStructMember) struct member 'DebounceDiagData::wheelFiltered' is never used.
+[style] esp32/src/vehicle_data.h:274 (unusedStructMember) struct member 'DebounceDiagData::wheelValid' is never used.
+[style] esp32/src/vehicle_data.h:340 (unusedStructMember) struct member 'WheelSensorDiagData::reason' is never used.
+[information] nofile:0 (checkersReport) Active checkers: 172/592 (use --checkers-report=<filename> to see details)
+
+=== ESP32 host tests ===
+cppcheck: '--enable=information' will no longer implicitly enable 'missingInclude' starting with 2.16. Please enable it explicitly if you require it.
+[style] esp32/src/test_decor_modes.cpp:115 (useStlAlgorithm) Consider using std::count_if algorithm instead of a raw loop.
+[style] esp32/src/test_decor_modes.cpp:120 (useStlAlgorithm) Consider using std::any_of algorithm instead of a raw loop.
+[style] esp32/src/test_decor_modes.cpp:125 (useStlAlgorithm) Consider using std::any_of algorithm instead of a raw loop.
+[performance] esp32/test_stubs/Arduino.h:51 (functionStatic) Technically the member function 'FakeSerial_::begin' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:52 (functionStatic) Technically the member function 'FakeSerial_::println' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:53 (functionStatic) Technically the member function 'FakeSerial_::println' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:54 (functionStatic) Technically the member function 'FakeSerial_::println' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:55 (functionStatic) Technically the member function 'FakeSerial_::printf' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:88 (functionStatic) Technically the member function 'HardwareSerial::begin' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:89 (functionStatic) Technically the member function 'HardwareSerial::setRxBufferSize' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:90 (functionStatic) Technically the member function 'HardwareSerial::write' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:96 (functionStatic) Technically the member function 'HardwareSerial::available' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Arduino.h:97 (functionStatic) Technically the member function 'HardwareSerial::read' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/test_obstacle_sensor.cpp:175 (knownConditionTrueFalse) The comparison 'MP_FRAME_LEN != 400' is always false.
+[performance] esp32/test_stubs/Wire.h:24 (functionStatic) Technically the member function 'TwoWire::begin' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:25 (functionStatic) Technically the member function 'TwoWire::end' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:26 (functionStatic) Technically the member function 'TwoWire::setClock' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:27 (functionStatic) Technically the member function 'TwoWire::setTimeOut' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:28 (functionStatic) Technically the member function 'TwoWire::beginTransmission' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:29 (functionStatic) Technically the member function 'TwoWire::write' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:30 (functionStatic) Technically the member function 'TwoWire::endTransmission' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:31 (functionStatic) Technically the member function 'TwoWire::requestFrom' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:32 (functionStatic) Technically the member function 'TwoWire::available' can be static (but you may consider moving to unnamed namespace).
+[performance] esp32/test_stubs/Wire.h:33 (functionStatic) Technically the member function 'TwoWire::read' can be static (but you may consider moving to unnamed namespace).
+[style] esp32/src/ui/wheel_diag_hint.h:129 (unreadVariable) Variable 'used' is assigned a value that is never used.
+[information] nofile:0 (checkersReport) Active checkers: 172/592 (use --checkers-report=<filename> to see details)
+

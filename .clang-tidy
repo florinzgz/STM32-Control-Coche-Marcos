@@ -12,4 +12,3 @@ Checks: >-
 WarningsAsErrors: ''
 HeaderFilterRegex: '^(Core/(Inc|Src)|esp32/(include|src))/'
 FormatStyle: none
-AnalyzeTemporaryDtors: false

@@ -51,10 +51,10 @@ base = [
     "-DUSE_HAL_DRIVER",
     "-DSTM32G474xx",
     "-ICore/Inc",
-    "-IDrivers/STM32G4xx_HAL_Driver/Inc",
-    "-IDrivers/STM32G4xx_HAL_Driver/Inc/Legacy",
-    "-IDrivers/CMSIS/Device/ST/STM32G4xx/Include",
-    "-IDrivers/CMSIS/Include",
+    "-isystem", "Drivers/STM32G4xx_HAL_Driver/Inc",
+    "-isystem", "Drivers/STM32G4xx_HAL_Driver/Inc/Legacy",
+    "-isystem", "Drivers/CMSIS/Device/ST/STM32G4xx/Include",
+    "-isystem", "Drivers/CMSIS/Include",
 ]
 entries = []
 for file_path in files:
