@@ -1,0 +1,15 @@
+---
+# Conservative report-only profile for firmware review.
+# Focus on likely bugs and analyzer findings; avoid style churn and autofixes.
+Checks: >-
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-suspicious-call-argument
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(Core/(Inc|Src)|esp32/(include|src))/'
+FormatStyle: none
+AnalyzeTemporaryDtors: false

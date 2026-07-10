@@ -6,178 +6,30 @@ on:
     paths:
       - 'Core/**'
       - 'Drivers/**'
+      - 'esp32/**'
       - 'Makefile'
       - 'scripts/**'
+      - 'docs/**'
+      - '.clang-tidy'
+      - '.cppcheck-suppressions.txt'
       - '.github/workflows/firmware-validation.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'Core/**'
       - 'Drivers/**'
+      - 'esp32/**'
       - 'Makefile'
       - 'scripts/**'
+      - 'docs/**'
+      - '.clang-tidy'
+      - '.cppcheck-suppressions.txt'
       - '.github/workflows/firmware-validation.yml'
 
 permissions:
   contents: read
 
 jobs:
-  # ── Build with strict warnings ──────────────────────────────────────
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install ARM GCC toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
-
-      - name: Syntax-check all firmware sources (-Wall -Wextra -Werror)
-        run: |
-          PASS=0; FAIL=0
-          for f in Core/Src/main.c Core/Src/motor_control.c \
-                   Core/Src/can_handler.c Core/Src/safety_system.c \
-                   Core/Src/sensor_manager.c Core/Src/service_mode.c \
-                   Core/Src/ackermann.c Core/Src/steering_centering.c \
-                   Core/Src/boot_validation.c Core/Src/encoder_reader.c \
-                   Core/Src/eps_params.c Core/Src/error_log.c \
-                   Core/Src/steering_cal_store.c Core/Src/steering_z.c \
-                   Core/Src/drive_tuning_store.c Core/Src/battery_limits_store.c \
-                   Core/Src/math_safety.c \
-                   Core/Src/stm32g4xx_it.c Core/Src/stm32g4xx_hal_msp.c \
-                   Core/Src/system_stm32g4xx.c Core/Src/syscalls.c \
-                   Core/Src/sysmem.c \
-                   Core/Src/i2c.c Core/Src/adc.c Core/Src/fdcan.c \
-                   Core/Src/gpio.c Core/Src/iwdg.c Core/Src/tim.c; do
-            if arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard \
-                -mfpu=fpv4-sp-d16 -std=gnu11 -DUSE_HAL_DRIVER -DSTM32G474xx \
-                -Ianalysis_artifacts/stubs -ICore/Inc \
-                -Wall -Wextra -Werror -fsyntax-only "$f" 2>&1; then
-              PASS=$((PASS + 1))
-            else
-              FAIL=$((FAIL + 1))
-            fi
-          done
-          echo "Results: $PASS passed, $FAIL failed"
-          [ "$FAIL" -eq 0 ] || exit 1
-
-  # ── Unit tests ──────────────────────────────────────────────────────
-  tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run test_motor_control
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_motor_control.c -o /tmp/test_motor_control
-          /tmp/test_motor_control
-
-      - name: Run test_math_safety
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_math_safety.c Core/Src/math_safety.c \
-              -o /tmp/test_math_safety
-          /tmp/test_math_safety
-
-      - name: Run test_error_log
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_error_log.c Core/Src/error_log.c \
-              -o /tmp/test_error_log
-          /tmp/test_error_log
-
-      - name: Run test_service_mode
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_service_mode.c Core/Src/service_mode.c \
-              -o /tmp/test_service_mode
-          /tmp/test_service_mode
-
-      - name: Run test_eps_params
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_eps_params.c Core/Src/eps_params.c \
-              -o /tmp/test_eps_params
-          /tmp/test_eps_params
-
-      - name: Run test_sensor_calibration
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_sensor_calibration.c \
-              -o /tmp/test_sensor_calibration
-          /tmp/test_sensor_calibration
-
-      - name: Run test_wheel_speed
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_wheel_speed.c \
-              -o /tmp/test_wheel_speed
-          /tmp/test_wheel_speed
-
-      - name: Run test_wheel_fault_gate
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_wheel_fault_gate.c \
-              -o /tmp/test_wheel_fault_gate
-          /tmp/test_wheel_fault_gate
-
-      - name: Run test_wheel_diag_can
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_wheel_diag_can.c \
-              -o /tmp/test_wheel_diag_can
-          /tmp/test_wheel_diag_can
-
-      - name: Run test_gear_limits
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_gear_limits.c \
-              -o /tmp/test_gear_limits
-          /tmp/test_gear_limits
-
-      - name: Run test_drive_tuning
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_drive_tuning.c \
-              -o /tmp/test_drive_tuning
-          /tmp/test_drive_tuning
-
-      - name: Run test_battery_limits
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_battery_limits.c \
-              -o /tmp/test_battery_limits
-          /tmp/test_battery_limits
-
-      - name: Run test_steering_cal_store
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_steering_cal_store.c \
-              -o /tmp/test_steering_cal_store
-          /tmp/test_steering_cal_store
-
-      - name: Run test_steering_z
-        run: |
-          gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-              -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-              Core/Src/test_steering_z.c Core/Src/steering_z.c \
-              -o /tmp/test_steering_z
-          /tmp/test_steering_z
-
-  # ── Static analysis ─────────────────────────────────────────────────
   static-analysis:
     runs-on: ubuntu-latest
     steps:
@@ -186,45 +38,163 @@ jobs:
       - name: Install analysis tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cppcheck
-          pip install flawfinder==2.0.19 lizard==1.17.10
+          sudo apt-get install -y cppcheck flawfinder clang-tools
+          python3 -m pip install --user lizard==1.17.10
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: cppcheck (error + warning level)
+      - name: Run static analysis
         run: |
-          # Suppressions: false positives from HAL stubs and auto-generated code.
-          #   unusedFunction        — ISRs called via vector table, not C code
-          #   knownConditionTrueFalse — HAL stubs return HAL_OK; defensive checks are valid in production
-          #   constParameterPointer — HAL callback signatures defined by ST HAL library
-          #   funcArgNamesDifferent — STM32CubeMX MSP generators use different param names
-          #   redundantAssignment   — intentional test patterns
-          #   unusedStructMember    — test structs mirror production layout
-          cppcheck --enable=all --inconclusive --force --inline-suppr \
-            --suppress=missingIncludeSystem --suppress=missingInclude \
-            --suppress=unmatchedSuppression \
-            --suppress=unusedFunction \
-            --suppress=knownConditionTrueFalse \
-            --suppress=constParameterPointer \
-            --suppress=funcArgNamesDifferent \
-            --suppress=redundantAssignment \
-            --suppress=unusedStructMember \
-            -DHOST_TEST -DUSE_HAL_DRIVER -DSTM32G474xx \
-            -ICore/Inc -Ianalysis_artifacts/stubs \
-            --error-exitcode=2 \
-            Core/Src/*.c Core/Inc/*.h 2>&1
+          chmod +x scripts/run_cppcheck.sh scripts/run_clang_tidy.sh scripts/run_static_analysis.sh
+          ./scripts/run_static_analysis.sh
 
-      - name: flawfinder (level ≥ 3 = fail)
-        run: |
-          flawfinder --minlevel=3 --error-level=3 Core/Src/ Core/Inc/
+      - name: Upload static-analysis artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis
+          path: artifacts/static-analysis/
 
-      - name: lizard complexity (threshold 15)
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run STM32 host tests
         run: |
-          lizard Core/Src/ Core/Inc/ -l c -T cyclomatic_complexity=15 \
-            -w || true  # Report but don't fail on complexity
+          mkdir -p artifacts/tests
+          {
+            for src in \
+              Core/Src/test_motor_control.c \
+              Core/Src/test_math_safety.c \
+              Core/Src/test_error_log.c \
+              Core/Src/test_service_mode.c \
+              Core/Src/test_eps_params.c \
+              Core/Src/test_sensor_calibration.c \
+              Core/Src/test_wheel_speed.c \
+              Core/Src/test_wheel_fault_gate.c \
+              Core/Src/test_wheel_diag_can.c \
+              Core/Src/test_gear_limits.c \
+              Core/Src/test_drive_tuning.c \
+              Core/Src/test_battery_limits.c \
+              Core/Src/test_steering_cal_store.c \
+              Core/Src/test_steering_z.c \
+              Core/Src/test_pedal_cal_limits.c \
+              Core/Src/test_loop_diag.c; do
+              exe="/tmp/$(basename "$src" .c)"
+              extra=""
+              case "$src" in
+                Core/Src/test_math_safety.c) extra="Core/Src/math_safety.c" ;;
+                Core/Src/test_error_log.c) extra="Core/Src/error_log.c" ;;
+                Core/Src/test_service_mode.c) extra="Core/Src/service_mode.c" ;;
+                Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
+                Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
+              esac
+              echo "-- $(basename "$src")"
+              gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+                -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+                "$src" $extra -lm -o "$exe"
+              "$exe"
+            done
+          } | tee artifacts/tests/stm32-host-tests.txt
+
+      - name: Run ESP32 host tests
+        run: |
+          mkdir -p artifacts/tests
+          {
+            echo "-- test_relay_audio.cpp"
+            g++ -std=c++17 esp32/src/relay_audio.cpp esp32/src/test_relay_audio.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_relay_audio
+            /tmp/test_relay_audio
+
+            echo "-- test_traction_switch.cpp"
+            g++ -std=c++17 esp32/src/traction_switch.cpp esp32/src/test_traction_switch.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_traction_switch
+            /tmp/test_traction_switch
+
+            echo "-- test_remote_control.cpp"
+            g++ -std=c++17 -DREMOTE_CONTROL_ENABLED=1 -DREMOTE_CONTROL_TEST_HOOKS \
+              esp32/src/remote_control.cpp esp32/src/test_remote_control.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_remote_control
+            /tmp/test_remote_control
+
+            echo "-- test_shifter_input.cpp"
+            g++ -std=c++17 esp32/src/shifter_input.cpp esp32/src/test_shifter_input.cpp \
+              -Iesp32/src -Iesp32/test_stubs \
+              -o /tmp/test_shifter_input
+            /tmp/test_shifter_input
+
+            echo "-- test_pedal_cal_decode.cpp"
+            g++ -std=c++17 -DHOST_TEST esp32/src/test_pedal_cal_decode.cpp \
+              -o /tmp/test_pedal_cal_decode
+            /tmp/test_pedal_cal_decode
+
+            echo "-- test_pedal_decode.cpp"
+            g++ -std=c++17 -DHOST_TEST esp32/src/test_pedal_decode.cpp \
+              -o /tmp/test_pedal_decode
+            /tmp/test_pedal_decode
+
+            echo "-- test_wheel_diag_decode.cpp"
+            g++ -std=c++17 -DHOST_TEST esp32/src/test_wheel_diag_decode.cpp \
+              -o /tmp/test_wheel_diag_decode
+            /tmp/test_wheel_diag_decode
+
+            echo "-- test_wheel_diag_hint.cpp"
+            g++ -std=c++17 -DHOST_TEST -Iesp32/include -Iesp32/src/ui \
+              esp32/src/test_wheel_diag_hint.cpp \
+              -o /tmp/test_wheel_diag_hint
+            /tmp/test_wheel_diag_hint
+          } | tee artifacts/tests/esp32-host-tests.txt
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-tests
+          path: artifacts/tests/
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install ARM GCC toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Build STM32 firmware
+        run: |
+          mkdir -p artifacts/build
+          make clean
+          make -j2 2>&1 | tee artifacts/build/stm32-make.txt
+
+      - name: Optional ESP32 PlatformIO build
+        run: |
+          mkdir -p artifacts/build
+          if python3 -m pip install --user platformio; then
+            export PATH="$HOME/.local/bin:$PATH"
+            (
+              cd esp32
+              pio run -e esp32s3
+            ) 2>&1 | tee artifacts/build/esp32-platformio.txt || true
+          else
+            echo "SKIP: PlatformIO installation failed." | tee artifacts/build/esp32-platformio.txt
+          fi
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: artifacts/build/
 
   # ── Repository integrity checks ────────────────────────────────────
   integrity-check:
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [tests, build]
     env:
       EXPECTED_HAL_VERSION: "V1.2.2"
     steps:
@@ -232,33 +202,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: "Check 1: Drivers/ has not changed vs main"
-        run: |
-          git fetch origin main
-          CHANGED=$(git diff --name-only origin/main...HEAD -- Drivers/ || true)
-          if [ -n "$CHANGED" ]; then
-            echo "FAIL: Drivers/ has modifications:"
-            echo "$CHANGED"
-            exit 1
-          fi
-          echo "Drivers/ unchanged — OK"
+      - name: Run integrity checks
+        run: ./scripts/check_integrity.sh
 
-      - name: "Check 2: No forbidden template .c files"
-        run: |
-          TEMPLATES=$(find . -type f -name "*template*.c" -not -path "./.git/*" || true)
-          if [ -n "$TEMPLATES" ]; then
-            echo "FAIL: Forbidden template .c files found:"
-            echo "$TEMPLATES"
-            exit 1
-          fi
-          echo "No template .c files — OK"
+  optional-codeql:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: "Check 3: HAL version is exactly ${{ env.EXPECTED_HAL_VERSION }}"
+      - name: Install ARM GCC toolchain
         run: |
-          HAL_FILE="Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.c"
-          if ! grep -q "STM32G4xx HAL Driver version number $EXPECTED_HAL_VERSION" "$HAL_FILE"; then
-            echo "FAIL: HAL version mismatch (expected $EXPECTED_HAL_VERSION)"
-            grep "HAL Driver version number" "$HAL_FILE" || true
-            exit 1
-          fi
-          echo "HAL version $EXPECTED_HAL_VERSION — OK"
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: cpp
+          build-mode: manual
+
+      - name: Build STM32 firmware for CodeQL
+        run: |
+          make clean
+          make -j2
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4

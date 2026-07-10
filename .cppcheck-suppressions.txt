@@ -1,0 +1,12 @@
+# External STM32 HAL/CMSIS headers are intentionally out of scope.
+comparePointers:Drivers/CMSIS/Include/cmsis_gcc.h
+constParameterPointer:Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_adc.h
+
+# Intentional defensive reads / bounded loops in owned firmware.
+knownConditionTrueFalse:Core/Src/can_handler.c:450
+knownConditionTrueFalse:Core/Src/can_handler.c:1365
+knownConditionTrueFalse:Core/Src/sensor_manager.c:1925
+
+# Intentional compatibility / padding fields retained by design.
+unusedStructMember:Core/Src/motor_control.c:360
+unusedStructMember:Core/Src/steering_cal_store.c:66
