@@ -182,17 +182,25 @@ enum class DecorMode : uint8_t {
     HAZARD_RED    = 5,  // Rear red double-flash
     DEMO_SHOW     = 6,  // Full walkthrough: cycles every pattern + indicators
     CUSTOM_TEST   = 7,  // Segment diagnostic (cycles through zones)
-    KNIGHT_RIDER  = 8   // "Coche fantástico" — red scanner bounce with tail
+    KNIGHT_RIDER  = 8,  // "Coche fantástico" — red scanner bounce with tail
+    RGB_DIAG      = 9   // Independent R/G/B-per-strip colour-order diagnostic
 };
 
 /// Number of valid DecorMode values
-inline constexpr uint8_t DECOR_MODE_COUNT = 9;
+inline constexpr uint8_t DECOR_MODE_COUNT = 10;
 
 /// Set the decorative LED mode.  Takes effect on next update() call.
 void setDecorMode(DecorMode mode);
 
 /// Get the currently active decorative LED mode.
 DecorMode getDecorMode();
+
+/// Human-readable label of the primary/strip currently commanded by the
+/// RGB_DIAG mode (e.g. "FRONT RED", "REAR BLUE").  Lets the HMI display the
+/// COMMANDED colour so it can be compared against what the strip physically
+/// shows — the only reliable way to confirm the WS2812B byte order per strip.
+/// Returns an empty string ("") when RGB_DIAG is not the active mode.
+const char* getRgbDiagLabel();
 
 } // namespace led_ctrl
 

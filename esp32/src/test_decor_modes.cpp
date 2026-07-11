@@ -103,6 +103,31 @@ static void renderHazardRear(RGB* leds, int count, uint8_t phase) {
 // --- Mirror of OFF ---
 static void renderOff(RGB* leds, int count) { fillSolid(leds, count, C_BLACK); }
 
+// --- Mirror of RGB_DIAG (independent R/G/B per-strip colour-order test) ---
+// Front lit only in phases 0-2 (R/G/B); rear lit only in phases 3-5 (R/G/B).
+// Pure primaries at FULL brightness — no scaling — so a byte-order fault shows
+// up as an obvious wrong colour on physical validation.
+static void renderRgbDiagFront(RGB* leds, int count, uint8_t phase) {
+    RGB col = C_BLACK;
+    switch (phase % 6) {
+        case 0: col = RGB{255, 0, 0}; break;  // FRONT red
+        case 1: col = RGB{0, 255, 0}; break;  // FRONT green
+        case 2: col = RGB{0, 0, 255}; break;  // FRONT blue
+        default: col = C_BLACK; break;        // rear under test
+    }
+    fillSolid(leds, count, col);
+}
+static void renderRgbDiagRear(RGB* leds, int count, uint8_t phase) {
+    RGB col = C_BLACK;
+    switch (phase % 6) {
+        case 3: col = RGB{255, 0, 0}; break;  // REAR red
+        case 4: col = RGB{0, 255, 0}; break;  // REAR green
+        case 5: col = RGB{0, 0, 255}; break;  // REAR blue
+        default: col = C_BLACK; break;        // front under test
+    }
+    fillSolid(leds, count, col);
+}
+
 static int g_failures = 0;
 #define CHECK(cond, msg)                                             \
     do {                                                            \
@@ -201,6 +226,45 @@ int main() {
         CHECK(litCount(leds) == 0, "HAZARD_RED between-flash is off");
 
         printf("  count=%d: OFF/POLICE/AMBULANCE/WARNING/HAZARD OK\n", count);
+    }
+
+    // ---- RGB_DIAG: independent R/G/B per-strip colour-order diagnostic ----
+    // Contract: exactly one strip lit at a time, in exactly one PURE primary,
+    // never both strips simultaneously, and colours are full-scale (255) so a
+    // wrong byte order is unmistakable on physical validation.
+    for (int count : counts) {
+        std::vector<RGB> front(count), rear(count);
+        // Expected pure primary per phase for the strip under test.
+        const RGB expect[6] = {
+            {255, 0, 0}, {0, 255, 0}, {0, 0, 255},   // front R/G/B
+            {255, 0, 0}, {0, 255, 0}, {0, 0, 255},   // rear  R/G/B
+        };
+        for (uint8_t phase = 0; phase < 6; ++phase) {
+            renderRgbDiagFront(front.data(), count, phase);
+            renderRgbDiagRear(rear.data(),  count, phase);
+
+            const bool frontPhase = (phase < 3);
+            const auto& lit  = frontPhase ? front : rear;
+            const auto& dark = frontPhase ? rear  : front;
+
+            // Exactly one strip is energised.
+            CHECK(litCount(lit)  == count, "RGB_DIAG lights the whole strip under test");
+            CHECK(litCount(dark) == 0,     "RGB_DIAG keeps the other strip dark (isolation)");
+
+            // The lit strip shows exactly the expected pure primary everywhere.
+            for (const auto& p : lit)
+                CHECK(p.r == expect[phase].r && p.g == expect[phase].g &&
+                      p.b == expect[phase].b,
+                      "RGB_DIAG lit strip is the exact pure primary");
+
+            // Pure primary => exactly one channel non-zero, at full scale.
+            const RGB& e = expect[phase];
+            const int nz = (e.r != 0) + (e.g != 0) + (e.b != 0);
+            CHECK(nz == 1, "RGB_DIAG uses a single-channel pure primary");
+            CHECK(e.r == 255 || e.g == 255 || e.b == 255,
+                  "RGB_DIAG primary is full-scale (255)");
+        }
+        printf("  count=%d: RGB_DIAG per-strip R/G/B isolation OK\n", count);
     }
 
     // ---- Functional rear overlay predicate keeps priority over decor ----

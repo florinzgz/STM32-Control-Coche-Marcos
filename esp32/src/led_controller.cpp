@@ -165,6 +165,16 @@ static uint32_t demoStepMs  = 0;
 static constexpr uint16_t DECOR_TEST_STEP_MS = 2000;
 static constexpr uint8_t  DECOR_TEST_PHASES  = 9;
 
+// RGB_DIAG: independent R/G/B-per-strip colour-order diagnostic.
+// Isolates exactly ONE strip in exactly ONE pure primary at a time so the
+// installer can physically confirm that a commanded RED renders RED (and not
+// green/blue) on EACH strip separately — the definitive per-strip byte-order
+// check.  6 phases, 2.5 s each:
+//   0 FRONT red   1 FRONT green   2 FRONT blue
+//   3 REAR  red   4 REAR  green   5 REAR  blue
+static constexpr uint16_t DECOR_RGB_DIAG_STEP_MS = 2500;
+static constexpr uint8_t  DECOR_RGB_DIAG_PHASES  = 6;
+
 // Scaled brightness helpers (apply scale factor to a CRGB without FastLED API)
 static inline CRGB scaledBrightness(CRGB c, uint8_t scale) {
     return CRGB(
@@ -421,6 +431,22 @@ static void updateDecorativeFront(DecorMode mode) {
             break;
         }
 
+        case DecorMode::RGB_DIAG: {
+            // Front strip is lit ONLY during its own phases (0-2); it stays
+            // black while the rear strip is under test (phases 3-5) so the two
+            // strips are never energised together and can be judged in
+            // isolation.  Pure primaries at full brightness — no scaling, no
+            // blending — so any deviation is a genuine byte-order/wiring fault.
+            fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
+            switch (decorPhase % DECOR_RGB_DIAG_PHASES) {
+                case 0: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(255, 0, 0)); break; // FRONT red
+                case 1: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(0, 255, 0)); break; // FRONT green
+                case 2: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(0, 0, 255)); break; // FRONT blue
+                default: break;  // phases 3-5: rear under test, front dark
+            }
+            break;
+        }
+
         default:
             fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
             break;
@@ -534,12 +560,25 @@ static void updateDecorativeRear(DecorMode mode) {
             break;
         }
 
+        case DecorMode::RGB_DIAG: {
+            // Rear strip is lit ONLY during its own phases (3-5); it stays
+            // black while the front strip is under test (phases 0-2).  Pure
+            // primaries at full brightness — no scaling, no blending.
+            fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
+            switch (decorPhase % DECOR_RGB_DIAG_PHASES) {
+                case 3: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(255, 0, 0)); break; // REAR red
+                case 4: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(0, 255, 0)); break; // REAR green
+                case 5: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(0, 0, 255)); break; // REAR blue
+                default: break;  // phases 0-2: front under test, rear dark
+            }
+            break;
+        }
+
         default:
             fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
             break;
     }
 }
-
 // Advance the shared decorative phase counter.
 // Each mode has its own step period and wrap count.
 static void advanceDecorPhase(uint32_t now, DecorMode mode) {
@@ -570,6 +609,10 @@ static void advanceDecorPhase(uint32_t now, DecorMode mode) {
         case DecorMode::CUSTOM_TEST:
             stepMs = DECOR_TEST_STEP_MS;
             wrapAt = DECOR_TEST_PHASES;
+            break;
+        case DecorMode::RGB_DIAG:
+            stepMs = DECOR_RGB_DIAG_STEP_MS;
+            wrapAt = DECOR_RGB_DIAG_PHASES;
             break;
         default:
             return;  // NORMAL / OFF: no phase counter needed
@@ -1049,6 +1092,19 @@ void setDecorMode(DecorMode mode) {
 
 DecorMode getDecorMode() {
     return currentDecorMode;
+}
+
+const char* getRgbDiagLabel() {
+    if (currentDecorMode != DecorMode::RGB_DIAG) return "";
+    switch (decorPhase % DECOR_RGB_DIAG_PHASES) {
+        case 0: return "FRONT RED";
+        case 1: return "FRONT GREEN";
+        case 2: return "FRONT BLUE";
+        case 3: return "REAR RED";
+        case 4: return "REAR GREEN";
+        case 5: return "REAR BLUE";
+        default: return "";
+    }
 }
 
 } // namespace led_ctrl

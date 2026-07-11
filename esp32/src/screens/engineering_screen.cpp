@@ -5398,7 +5398,8 @@ void EngineeringScreen::drawLedMode() {
         "HAZARD RED",   // 5
         "DEMO SHOW",    // 6
         "CUSTOM TEST",  // 7
-        "KNIGHT RIDER"  // 8 — "coche fantástico" red scanner
+        "KNIGHT RIDER", // 8 — "coche fantástico" red scanner
+        "RGB DIAG"      // 9 — independent R/G/B per-strip colour-order test
     };
 
     tft.fillScreen(ui::COL_BG);
@@ -5446,6 +5447,20 @@ void EngineeringScreen::drawLedMode() {
         tft.setTextSize(1);
         tft.setTextColor(ui::COL_AMBER, ui::COL_BG);
         tft.drawString(testBuf, ui::SCREEN_W / 2, 165);
+
+        // RGB DIAG: show the COMMANDED strip+colour so the installer can
+        // compare it against what the strip physically shows.  If they differ
+        // (e.g. commanded "FRONT RED" looks green) the strip's byte order is
+        // wrong.  Left subject to physical validation — the firmware cannot
+        // sense the emitted colour.
+        const char* diag = led_ctrl::getRgbDiagLabel();
+        if (diag != nullptr && diag[0] != '\0') {
+            char diagBuf[40];
+            snprintf(diagBuf, sizeof(diagBuf), "COMMANDED: %s", diag);
+            tft.setTextSize(2);
+            tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
+            tft.drawString(diagBuf, ui::SCREEN_W / 2, 215);
+        }
     }
 
     // Disclaimer

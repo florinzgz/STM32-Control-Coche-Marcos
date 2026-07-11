@@ -18,6 +18,23 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
 
 ### Added
 
+- **[DIAGNOSTIC] Front/rear LED independent R/G/B per-strip colour-order test**
+  - New `DecorMode::RGB_DIAG` (LED MODE selector entry "RGB DIAG",
+    `DECOR_MODE_COUNT` 9 → 10). Isolates exactly ONE strip at a time in exactly
+    ONE pure, full-scale primary — front R→G→B, then rear R→G→B — so the WS2812B
+    byte order can be confirmed **per strip**. The two strips are never lit
+    together, removing ambiguity.
+  - Engineering LED MODE screen shows the **COMMANDED** strip+colour
+    (`led_ctrl::getRgbDiagLabel()`, e.g. "FRONT RED") so the installer can
+    compare it against what the strip physically emits. The firmware cannot
+    sense the emitted colour, so this closes the loop only via physical
+    validation.
+  - Host test coverage in `esp32/src/test_decor_modes.cpp`: single-strip
+    isolation, exact pure-primary output, single-channel full-scale primaries.
+  - **NOTE:** the front-strip "green when red is requested" report is NOT
+    considered resolved by code inspection (front=RGB / rear=GRB). It stays
+    **open pending physical validation** using this diagnostic.
+
 - **[FEATURE] EPS Steering Assist tuning system (FASE 1-8, CAN contract v1.11)**
   - STM32: `eps_params_t` extended with 4 runtime-configurable mechanical fields:
     `deadband_deg` (1.8 °), `max_pwm_pct` (60 %), `slew_rate_pct` (5.883 %),
