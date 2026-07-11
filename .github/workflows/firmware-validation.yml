@@ -177,6 +177,12 @@ jobs:
               -o /tmp/test_motion_inhibit_decode
             /tmp/test_motion_inhibit_decode
 
+            echo "-- test_motion_inhibit_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src -Iesp32/include \
+              esp32/src/test_motion_inhibit_view.cpp \
+              -o /tmp/test_motion_inhibit_view
+            /tmp/test_motion_inhibit_view
+
             echo "-- test_boot_diag.cpp"
             g++ -std=c++17 -Wall -Wextra -Iesp32/src \
               esp32/src/test_boot_diag.cpp \

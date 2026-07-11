@@ -18,6 +18,7 @@
 #include "ui/debug_overlay.h"
 #include "led_controller.h"
 #include "eps_limits.h"
+#include "motion_inhibit_view.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
@@ -40,7 +41,7 @@ static constexpr int16_t MENU_SPACING = 17;
 
 // Number of main-menu functions.  Full canonical names are kept in tileLabel*
 // (abbreviated, two-line) below.
-static constexpr int     NUM_MAIN_ITEMS = 23;  // +1 for LED MODE (item 22)
+static constexpr int     NUM_MAIN_ITEMS = 24;  // +1 for MOTION INHIBIT DIAG (item 23)
 
 // ---- FASE 2 — Professional tile layout for the main menu --------------------
 // Functions are presented as large touch tiles across two pages
@@ -68,14 +69,14 @@ static const char* const tileLabel1[NUM_MAIN_ITEMS] = {
     "TEMP", "FACTORY", "DTC", "MAINT.",
     "RELAY", "INA226", "CAN", "TOUCH", "RESET", "MCP23017", "GEAR", "BRIGHT",
     "EPS", "STEER", "DRIVE", "BATTERY", "DRV/BAT",
-    "LED"
+    "LED", "MOTION"
 };
 static const char* const tileLabel2[NUM_MAIN_ITEMS] = {
     "VIEWER", "EN/DIS", "CAL", "CAL", "MAP",
     "MAP", "DEFAULT", "LOG", "",
     "CTRL", "LIVE", "DIAG", "CAL", "TOUCH CAL", "SHIFTER", "LIMITS", "DISPLAY",
     "TUNING", "DIAG", "TUNING", "LIMITS", "DIAG",
-    "MODE"
+    "MODE", "INHIBIT"
 };
 
 // Category accent colour per function (FASE 2 colour coding):
@@ -106,7 +107,8 @@ static const uint16_t tileColor[NUM_MAIN_ITEMS] = {
     ui::COL_BLUE,    // 19 Drive Tuning        — configuration
     ui::COL_BLUE,    // 20 Battery Limits      — configuration
     ui::COL_CYAN,    // 21 Drive/Battery Diag  — diagnostic
-    ui::COL_CYAN     // 22 LED Mode selector   — configuration
+    ui::COL_CYAN,    // 22 LED Mode selector   — configuration
+    ui::COL_CYAN     // 23 Motion Inhibit Diag — diagnostic
 };
 
 // Bottom navigation bar for the main menu (FASE 2): PAGE 1 / PAGE 2 / EXIT.
@@ -1205,6 +1207,7 @@ void EngineeringScreen::draw() {
             case SubMenu::BATTERY_LIMITS:   drawBatteryLimits();       break;
             case SubMenu::DRIVE_BATT_DIAG:  drawDriveBattDiag();       break;
             case SubMenu::LED_MODE:         drawLedMode();             break;
+            case SubMenu::MOTION_INHIBIT_DIAG: drawMotionInhibitDiag(); break;
             default:
                 // Unknown/unexpected submenu: fall back to the Engineering
                 // main menu instead of leaving the screen blank.
@@ -2226,6 +2229,14 @@ void EngineeringScreen::draw() {
         tft.drawString(buf, x, y0 + 9 * lh);
     }
 
+    // Partial redraw for MOTION INHIBIT DIAG (0x315) — repaint only the value
+    // zones whose decoded field changed (or age/freshness rolled over).  Runs
+    // every draw() frame (≤20 FPS via the frame limiter) with no fillScreen.
+    if (currentMenu_ == SubMenu::MOTION_INHIBIT_DIAG) {
+        refreshMotionInhibitDiag(miForcePaint_);
+        miForcePaint_ = false;
+    }
+
     RTRACE_DUMP_IF_PENDING();
 }
 // -------------------------------------------------------------------------
@@ -2552,6 +2563,25 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
                             ledModeSaved_       = true;
                             ledModeTestActive_  = false;
                             currentMenu_ = SubMenu::LED_MODE;
+                            break;
+                        case 23:
+                            // Open MOTION INHIBIT DIAG (0x315, read-only).
+                            // No query needed: 0x315 streams at 10 Hz.  Prime
+                            // the caches so the first frame paints every value.
+                            miForcePaint_   = true;
+                            miPrevReason_   = 0xFFFFu;
+                            miPrevState_    = 0xFFu;
+                            miPrevGear_     = 0xFFu;
+                            miPrevDemand_   = 0x7FFF;
+                            miPrevEff_      = 0x7FFF;
+                            miPrevPwm_      = 0xFFFFu;
+                            miPrevFlags_    = 0xFFu;
+                            miPrevRelay_    = 0xFFu;
+                            miPrevDegraded_ = 0xFFu;
+                            miPrevFresh_    = 0xFFu;
+                            miPrevAgeMs_    = 0xFFFFFFFFu;
+                            miPrevValid_    = false;
+                            currentMenu_ = SubMenu::MOTION_INHIBIT_DIAG;
                             break;
                         default:
                             break;
@@ -5977,6 +6007,263 @@ void EngineeringScreen::drawDriveBattDiag() {
     tft.setTextDatum(TL_DATUM);
 
     driveBattDiagChanged_ = false;
+}
+
+// =========================================================================
+// MOTION INHIBIT DIAG (0x315) read-only viewer (MOTION_INHIBIT_DIAG submenu)
+//
+// Visualises the MOTION_INHIBIT telemetry already decoded into
+// MotionInhibitData (0x315, streamed at 10 Hz).  All bitmask/relay/age
+// conversions come from the host-tested esp32/src/motion_inhibit_view.h, so
+// the exact display logic is unit-tested off-target.
+//
+// Nothing is estimated: when no frame has ever been received the value fields
+// read "---" and the state shows "NEVER RECEIVED"; the relay-sequence phase
+// reflects the COMMANDED sequencer state only (no physical contact feedback).
+//
+// Rendering strategy (docs/HMI_RENDERING_STRATEGY.md):
+//   * static labels + BACK button drawn once (drawMotionInhibitDiag, invoked
+//     from the needsRedraw_ path);
+//   * value zones repainted in place with an opaque background and fixed-width
+//     (space-padded) formatting so only changed fields are touched, with no
+//     flicker and no fillScreen (refreshMotionInhibitDiag);
+//   * capped at 20 FPS by the frame limiter; fixed stack buffers + bounded
+//     snprintf, no dynamic allocation.
+// =========================================================================
+namespace {
+constexpr int16_t MI_LX       = 8;    // telemetry label x
+constexpr int16_t MI_VX       = 132;  // telemetry value x
+constexpr int16_t MI_ROW0_Y   = 74;   // first telemetry row y
+constexpr int16_t MI_RH       = 18;   // telemetry row pitch
+constexpr int16_t MI_STAT_VX  = 64;   // freshness value x  ("STATE:" label)
+constexpr int16_t MI_STAT_Y   = 36;   // freshness/state line y
+constexpr int16_t MI_AGE_VX   = 48;   // age value x        ("AGE:" label)
+constexpr int16_t MI_MASK_LX  = 250;  // mask label x
+constexpr int16_t MI_MASK_VX  = 312;  // mask value x
+constexpr int16_t MI_META_Y   = 52;   // age + mask line y
+constexpr int16_t MI_RSN_X    = 250;  // reasons column x
+constexpr int16_t MI_RSN_HDR_Y= 74;   // "ACTIVE REASONS" header y
+constexpr int16_t MI_RSN0_Y   = 92;   // first reason line y
+constexpr int16_t MI_RSN_LH   = 16;   // reason line pitch
+constexpr uint8_t MI_RSN_MAX  = 10;   // max reason lines rendered
+
+// Telemetry row labels, in fixed order (index == row).
+const char* const MI_ROW_LABELS[] = {
+    "SYS STATE", "MOTION", "GEAR", "OP DEMAND", "EFF DEMAND",
+    "FINAL PWM", "POWER RDY", "OBSTACLE", "DEGRADED", "RELAY SEQ"
+};
+constexpr uint8_t MI_ROW_COUNT = sizeof(MI_ROW_LABELS) / sizeof(MI_ROW_LABELS[0]);
+} // namespace
+
+void EngineeringScreen::drawMotionInhibitDiag() {
+    tft.setTextDatum(TL_DATUM);
+
+    // Header band
+    tft.fillRect(0, 0, ui::SCREEN_W, 30, ui::COL_DARK_GRAY);
+    tft.setTextColor(ui::COL_CYAN, ui::COL_DARK_GRAY);
+    tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("MOTION INHIBIT DIAG", ui::SCREEN_W / 2, 14);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+
+    // Static meta labels (values painted by refreshMotionInhibitDiag()).
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    tft.drawString("STATE:", MI_LX, MI_STAT_Y);
+    tft.drawString("AGE:",   MI_LX, MI_META_Y);
+    tft.drawString("MASK:",  MI_MASK_LX, MI_META_Y);
+
+    // Divider under the meta rows.
+    tft.drawFastHLine(0, 68, ui::SCREEN_W, ui::COL_DARK_GRAY);
+
+    // Static telemetry row labels (left column).
+    tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+    for (uint8_t i = 0; i < MI_ROW_COUNT; ++i) {
+        tft.drawString(MI_ROW_LABELS[i], MI_LX, MI_ROW0_Y + i * MI_RH);
+    }
+
+    // Static reasons header (right column).
+    tft.setTextColor(ui::COL_CYAN, ui::COL_BG);
+    tft.drawString("ACTIVE REASONS", MI_RSN_X, MI_RSN_HDR_Y);
+
+    // BACK button (handled by the generic BACK hit-test in handleTouch()).
+    tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);
+    tft.drawRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_GRAY);
+    tft.setTextColor(ui::COL_WHITE, ui::COL_DARK_GRAY);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("BACK", BACK_X + BACK_W / 2, BACK_Y + BACK_H / 2);
+    tft.setTextDatum(TL_DATUM);
+
+    // Force a full value repaint on the same frame.
+    miForcePaint_ = true;
+}
+
+void EngineeringScreen::refreshMotionInhibitDiag(bool force) {
+    namespace miv = motion_inhibit_view;
+    if (data_ == nullptr) {
+        return;
+    }
+
+    const vehicle::MotionInhibitData& mi = data_->motionInhibit();
+    const uint32_t now   = (uint32_t)lastFrameTimeMs_;
+    const uint32_t stamp = (uint32_t)mi.timestampMs;
+    const miv::Freshness fresh = miv::freshness(mi.valid, now, stamp);
+    const uint32_t age   = mi.valid ? miv::ageMs(now, stamp) : 0U;
+    const bool have      = mi.valid;   // false == never received
+
+    // A validity transition repaints every field (dashes <-> real values).
+    if (mi.valid != miPrevValid_) {
+        force = true;
+    }
+
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+    char b[24];
+
+    auto putVal = [&](int16_t x, int16_t y, const char* s, uint16_t col) {
+        tft.setTextColor(col, ui::COL_BG);   // opaque bg overwrites in place
+        tft.drawString(s, x, y);
+    };
+
+    // ---- Freshness / STATE ----
+    if (force || (uint8_t)fresh != miPrevFresh_) {
+        uint16_t c = (fresh == miv::Freshness::VALID) ? ui::COL_GREEN
+                   : (fresh == miv::Freshness::STALE) ? ui::COL_AMBER
+                                                      : ui::COL_RED;
+        snprintf(b, sizeof(b), "%-14s", miv::freshnessText(fresh));
+        putVal(MI_STAT_VX, MI_STAT_Y, b, c);
+        miPrevFresh_ = (uint8_t)fresh;
+    }
+
+    // ---- Age ----
+    if (force || age != miPrevAgeMs_) {
+        if (!have) {
+            snprintf(b, sizeof(b), "%-9s", "---");
+        } else if (age > 999999UL) {
+            // Bound the field width (opaque overwrite has no fillRect): a very
+            // long outage is already flagged STALE, so cap the numeric display.
+            snprintf(b, sizeof(b), "%-9s", ">999 s");
+        } else {
+            snprintf(b, sizeof(b), "%6lu ms", (unsigned long)age);
+        }
+        putVal(MI_AGE_VX, MI_META_Y, b,
+               (fresh == miv::Freshness::VALID) ? ui::COL_WHITE : ui::COL_AMBER);
+        miPrevAgeMs_ = age;
+    }
+
+    // ---- Reason mask (hex, 4 digits) ----
+    if (force || mi.reason != miPrevReason_) {
+        if (have) {
+            snprintf(b, sizeof(b), "0x%04X", (unsigned)mi.reason);
+        } else {
+            snprintf(b, sizeof(b), "%-6s", "----");
+        }
+        putVal(MI_MASK_VX, MI_META_Y, b, ui::COL_WHITE);
+        // Reasons list shares the mask signal; repaint the whole reasons block.
+        tft.fillRect(MI_RSN_X, MI_RSN0_Y, ui::SCREEN_W - MI_RSN_X - 4,
+                     MI_RSN_MAX * MI_RSN_LH, ui::COL_BG);
+        if (!have) {
+            putVal(MI_RSN_X, MI_RSN0_Y, "---", ui::COL_GRAY);
+        } else {
+            const char* labels[miv::REASON_MAX];
+            uint8_t n = miv::reasonLabels(mi.reason, labels, miv::REASON_MAX);
+            if (n == 0) {
+                putVal(MI_RSN_X, MI_RSN0_Y, "NONE", ui::COL_GREEN);
+            } else {
+                uint8_t shown = (n > MI_RSN_MAX) ? (uint8_t)(MI_RSN_MAX - 1) : n;
+                for (uint8_t i = 0; i < shown; ++i) {
+                    putVal(MI_RSN_X, MI_RSN0_Y + i * MI_RSN_LH,
+                           labels[i], ui::COL_AMBER);
+                }
+                if (n > MI_RSN_MAX) {
+                    snprintf(b, sizeof(b), "+%u more", (unsigned)(n - shown));
+                    putVal(MI_RSN_X, MI_RSN0_Y + shown * MI_RSN_LH,
+                           b, ui::COL_AMBER);
+                }
+            }
+        }
+        miPrevReason_ = mi.reason;
+    }
+
+    // ---- Telemetry rows ----
+    const int16_t r0 = MI_ROW0_Y;
+
+    // SYS STATE
+    if (force || mi.systemState != miPrevState_) {
+        snprintf(b, sizeof(b), "%-10s", have ? miv::systemStateText(mi.systemState) : "---");
+        putVal(MI_VX, r0 + 0 * MI_RH, b, ui::COL_WHITE);
+        // MOTION (derived): NO MOTION when the state does not permit traction.
+        const bool moves = have && miv::stateAllowsMotion(mi.systemState);
+        snprintf(b, sizeof(b), "%-10s", !have ? "---" : (moves ? "ENABLED" : "NO MOTION"));
+        putVal(MI_VX, r0 + 1 * MI_RH, b,
+               !have ? ui::COL_GRAY : (moves ? ui::COL_GREEN : ui::COL_AMBER));
+        miPrevState_ = mi.systemState;
+    }
+
+    // GEAR
+    if (force || mi.gear != miPrevGear_) {
+        snprintf(b, sizeof(b), "%-10s", have ? miv::gearText(mi.gear) : "---");
+        putVal(MI_VX, r0 + 2 * MI_RH, b, ui::COL_WHITE);
+        miPrevGear_ = mi.gear;
+    }
+
+    // OP DEMAND %
+    if (force || (int16_t)mi.demandPct != miPrevDemand_) {
+        if (have) snprintf(b, sizeof(b), "%4d %%", (int)mi.demandPct);
+        else      snprintf(b, sizeof(b), "%-6s", "---");
+        putVal(MI_VX, r0 + 3 * MI_RH, b, ui::COL_WHITE);
+        miPrevDemand_ = (int16_t)mi.demandPct;
+    }
+
+    // EFF DEMAND %
+    if (force || (int16_t)mi.effectivePct != miPrevEff_) {
+        if (have) snprintf(b, sizeof(b), "%4d %%", (int)mi.effectivePct);
+        else      snprintf(b, sizeof(b), "%-6s", "---");
+        putVal(MI_VX, r0 + 4 * MI_RH, b, ui::COL_WHITE);
+        miPrevEff_ = (int16_t)mi.effectivePct;
+    }
+
+    // FINAL PWM %
+    if (force || (uint16_t)mi.finalPwmPct != miPrevPwm_) {
+        if (have) snprintf(b, sizeof(b), "%3u %%", (unsigned)mi.finalPwmPct);
+        else      snprintf(b, sizeof(b), "%-5s", "---");
+        putVal(MI_VX, r0 + 5 * MI_RH, b,
+               (have && mi.finalPwmPct == 0) ? ui::COL_AMBER : ui::COL_WHITE);
+        miPrevPwm_ = (uint16_t)mi.finalPwmPct;
+    }
+
+    // POWER RDY + OBSTACLE share byte7; cache both in miPrevFlags_.
+    const uint8_t flags = (uint8_t)((mi.powerReady ? 0x01U : 0U) |
+                                    (mi.obstacleFwdBlk ? 0x02U : 0U));
+    if (force || flags != miPrevFlags_) {
+        // POWER RDY
+        snprintf(b, sizeof(b), "%-3s", !have ? "---" : (mi.powerReady ? "YES" : "NO"));
+        putVal(MI_VX, r0 + 6 * MI_RH, b,
+               !have ? ui::COL_GRAY : (mi.powerReady ? ui::COL_GREEN : ui::COL_AMBER));
+        // OBSTACLE
+        snprintf(b, sizeof(b), "%-3s", !have ? "---" : (mi.obstacleFwdBlk ? "YES" : "NO"));
+        putVal(MI_VX, r0 + 7 * MI_RH, b,
+               !have ? ui::COL_GRAY : (mi.obstacleFwdBlk ? ui::COL_RED : ui::COL_GREEN));
+        miPrevFlags_ = flags;
+    }
+
+    // DEGRADED level
+    if (force || mi.degradedLevel != miPrevDegraded_) {
+        if (have) snprintf(b, sizeof(b), "%-3u", (unsigned)mi.degradedLevel);
+        else      snprintf(b, sizeof(b), "%-3s", "---");
+        putVal(MI_VX, r0 + 8 * MI_RH, b,
+               (have && mi.degradedLevel != 0) ? ui::COL_AMBER : ui::COL_WHITE);
+        miPrevDegraded_ = mi.degradedLevel;
+    }
+
+    // RELAY SEQ phase (commanded state only)
+    if (force || mi.relaySeqPhase != miPrevRelay_) {
+        snprintf(b, sizeof(b), "%-11s", have ? miv::relayPhaseText(mi.relaySeqPhase) : "---");
+        putVal(MI_VX, r0 + 9 * MI_RH, b, ui::COL_CYAN);
+        miPrevRelay_ = mi.relaySeqPhase;
+    }
+
+    miPrevValid_ = mi.valid;
 }
 
 // =========================================================================
