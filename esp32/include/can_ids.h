@@ -492,6 +492,8 @@ inline constexpr uint32_t DIAG_WHEEL_PULSES = 0x314;  // STM32→ESP32, DLC 8, 1
 // producing torque.  Bytes: 0-1 reason bitfield (uint16 LE), 2 system state,
 // 3 gear, 4 operator demand % (int8), 5 effective demand % (int8), 6 max final
 // PWM duty % (uint8), 7 flags (bit0 power_ready, bit1 obstacle_forward_blocked,
+// bits2-3 relay-seq phase [0 idle,1 in-progress,2 complete] — commanded
+// GPIO/sequencer state only, NO physical relay-contact feedback,
 // bits4-7 degraded level).
 inline constexpr uint32_t DIAG_MOTION_INHIBIT = 0x315;  // STM32→ESP32, DLC 8, 100 ms — motion-inhibit reason
 
@@ -507,6 +509,17 @@ inline constexpr uint16_t MOTION_INHIBIT_DEMAND_ZEROED   = 0x0040;
 inline constexpr uint16_t MOTION_INHIBIT_OBSTACLE_BLOCK  = 0x0080;
 inline constexpr uint16_t MOTION_INHIBIT_PWM_ZERO        = 0x0100;
 inline constexpr uint16_t MOTION_INHIBIT_TORQUE_LIMITED  = 0x0200;
+inline constexpr uint16_t MOTION_INHIBIT_STARTUP_INHIBIT = 0x0400;
+inline constexpr uint16_t MOTION_INHIBIT_PEDAL_FAULT     = 0x0800;
+inline constexpr uint16_t MOTION_INHIBIT_SAFETY_SCALE_ZERO = 0x1000;
+inline constexpr uint16_t MOTION_INHIBIT_BATTERY_CUTOFF  = 0x2000;
+inline constexpr uint16_t MOTION_INHIBIT_THERMAL_OVERCURRENT = 0x4000;
+inline constexpr uint16_t MOTION_INHIBIT_SERVICE_DISABLED = 0x8000;
+
+// Relay-sequence phase (0x315 byte 7 bits 2-3) — commanded state only.
+inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_IDLE        = 0;
+inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS = 1;
+inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_COMPLETE    = 2;
 
 } // namespace can
 

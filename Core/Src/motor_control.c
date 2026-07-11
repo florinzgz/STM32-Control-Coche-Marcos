@@ -1302,6 +1302,27 @@ static void Traction_UpdateMotionInhibit(float effective_demand_pct,
     mi.degraded_level       = (st == SYS_STATE_DEGRADED)
                                 ? (uint8_t)Safety_GetDegradedLevel() : 0U;
 
+    /* ---- Additional observability signals (read-only, no policy) --------
+     * All are pre-computed elsewhere; we only classify a snapshot.  The
+     * per-wheel "safety scale zero" is derived from the safety_status the
+     * pipeline already applied — a value of ~0 on every wheel means the
+     * ABS/TCS/driver-enable/safety scaling collapsed traction to zero.     */
+    mi.startup_inhibit   = Startup_IsInhibited();
+    mi.pedal_fault       = !Pedal_IsPlausible();
+    bool all_scale_zero = true;
+    for (uint8_t i = 0; i < 4; i++) {
+        if (safety_status.wheel_scale[i] > 0.001f) { all_scale_zero = false; break; }
+    }
+    mi.safety_scale_zero = all_scale_zero;
+    Safety_Error_t err   = Safety_GetError();
+    mi.battery_cutoff    = (err == SAFETY_ERROR_BATTERY_UV_WARNING  ||
+                            err == SAFETY_ERROR_BATTERY_UV_CRITICAL ||
+                            err == SAFETY_ERROR_BATTERY_OV_WARNING  ||
+                            err == SAFETY_ERROR_BATTERY_OV_CRITICAL);
+    mi.thermal_overcurrent = (err == SAFETY_ERROR_OVERTEMP ||
+                              err == SAFETY_ERROR_OVERCURRENT);
+    mi.service_disabled  = !ServiceMode_IsEnabled(MODULE_RELAY_TRAC);
+
     motion_inhibit_reason   = MotionInhibit_Evaluate(&mi);
     motion_effective_demand = effective_demand_pct;
     motion_final_pwm_pct    = (uint8_t)((final_pwm_max_ticks * 100U) / PWM_PERIOD);

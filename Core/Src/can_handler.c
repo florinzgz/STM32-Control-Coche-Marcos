@@ -721,6 +721,12 @@ void CAN_SendMotionInhibit(void) {
     uint8_t flags = 0;
     if (Safety_IsPowerReady())        flags |= 0x01;
     if (Obstacle_IsForwardBlocked())  flags |= 0x02;
+    /* Relay-sequence phase (bits 2-3): commanded GPIO/sequencer state only —
+     * the firmware has NO physical relay-contact feedback.                  */
+    uint8_t relay_seq = MOTION_INHIBIT_RELAY_SEQ_IDLE;
+    if (Safety_IsPowerReady())               relay_seq = MOTION_INHIBIT_RELAY_SEQ_COMPLETE;
+    else if (Relay_IsSequenceInProgress())   relay_seq = MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS;
+    flags |= (uint8_t)((relay_seq & 0x03U) << 2);
     if (Safety_GetState() == SYS_STATE_DEGRADED) {
         flags |= (uint8_t)(((uint8_t)Safety_GetDegradedLevel() & 0x0F) << 4);
     }

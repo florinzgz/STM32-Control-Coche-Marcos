@@ -422,6 +422,7 @@ static void decodeMotionInhibit(const CanFrame& f, vehicle::VehicleData& data) {
     mi.finalPwmPct    = f.data[6];
     mi.powerReady     = (f.data[7] & 0x01U) != 0;
     mi.obstacleFwdBlk = (f.data[7] & 0x02U) != 0;
+    mi.relaySeqPhase  = (uint8_t)((f.data[7] >> 2) & 0x03U);
     mi.degradedLevel  = (uint8_t)((f.data[7] >> 4) & 0x0FU);
     mi.valid          = true;
     mi.timestampMs    = millis();

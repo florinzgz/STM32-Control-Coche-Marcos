@@ -359,6 +359,7 @@ struct MotionInhibitData {
     uint8_t  finalPwmPct   = 0;   // max final PWM duty (0..100)
     bool     powerReady    = false;
     bool     obstacleFwdBlk = false;
+    uint8_t  relaySeqPhase = 0;   // 0=idle,1=in-progress,2=complete (commanded only)
     uint8_t  degradedLevel = 0;   // 0=none, 1..3
     bool     valid         = false;
     unsigned long timestampMs = 0;

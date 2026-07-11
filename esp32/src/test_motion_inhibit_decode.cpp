@@ -34,6 +34,15 @@ constexpr uint16_t MOTION_INHIBIT_DEMAND_ZEROED   = 0x0040;
 constexpr uint16_t MOTION_INHIBIT_OBSTACLE_BLOCK  = 0x0080;
 constexpr uint16_t MOTION_INHIBIT_PWM_ZERO        = 0x0100;
 constexpr uint16_t MOTION_INHIBIT_TORQUE_LIMITED  = 0x0200;
+constexpr uint16_t MOTION_INHIBIT_STARTUP_INHIBIT = 0x0400;
+constexpr uint16_t MOTION_INHIBIT_PEDAL_FAULT     = 0x0800;
+constexpr uint16_t MOTION_INHIBIT_SAFETY_SCALE_ZERO = 0x1000;
+constexpr uint16_t MOTION_INHIBIT_BATTERY_CUTOFF  = 0x2000;
+constexpr uint16_t MOTION_INHIBIT_THERMAL_OVERCURRENT = 0x4000;
+constexpr uint16_t MOTION_INHIBIT_SERVICE_DISABLED = 0x8000;
+constexpr uint8_t  MOTION_INHIBIT_RELAY_SEQ_IDLE        = 0;
+constexpr uint8_t  MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS = 1;
+constexpr uint8_t  MOTION_INHIBIT_RELAY_SEQ_COMPLETE    = 2;
 }
 
 // ---- Decoded store (mirror MotionInhibitData) ----
@@ -46,6 +55,7 @@ struct MotionInhibitData {
     uint8_t  finalPwmPct   = 0;
     bool     powerReady    = false;
     bool     obstacleFwdBlk = false;
+    uint8_t  relaySeqPhase = 0;
     uint8_t  degradedLevel = 0;
     bool     valid         = false;
     unsigned long timestampMs = 0;
@@ -67,6 +77,7 @@ static bool decodeMotionInhibit(const CanFrame& f, MotionInhibitData& out) {
     mi.finalPwmPct    = f.data[6];
     mi.powerReady     = (f.data[7] & 0x01U) != 0;
     mi.obstacleFwdBlk = (f.data[7] & 0x02U) != 0;
+    mi.relaySeqPhase  = (uint8_t)((f.data[7] >> 2) & 0x03U);
     mi.degradedLevel  = (uint8_t)((f.data[7] >> 4) & 0x0FU);
     mi.valid          = true;
     mi.timestampMs    = 1234;
@@ -139,6 +150,49 @@ int main() {
         MotionInhibitData mi;
         const bool ok = decodeMotionInhibit(f, mi);
         CHECK(!ok && !mi.valid, "shortDLC: not decoded");
+    }
+
+    // 4. Relay-sequence phase (byte7 bits2-3) decodes independently of the
+    //    power_ready / obstacle / degraded fields sharing the same byte.
+    {
+        CanFrame f;
+        f.data_length_code = 8;
+        // in-progress (1) + power_ready + degraded level 2
+        f.data[7] = 0x01 | (uint8_t)(can::MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS << 2)
+                         | (uint8_t)(2 << 4);
+        MotionInhibitData mi;
+        CHECK(decodeMotionInhibit(f, mi), "relaySeq: decoded");
+        CHECK(mi.relaySeqPhase == can::MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS,
+              "relaySeq: in-progress decoded");
+        CHECK(mi.powerReady, "relaySeq: power_ready still decoded");
+        CHECK(mi.degradedLevel == 2, "relaySeq: degraded level still decoded");
+
+        f.data[7] = (uint8_t)(can::MOTION_INHIBIT_RELAY_SEQ_COMPLETE << 2);
+        CHECK(decodeMotionInhibit(f, mi), "relaySeq: complete decoded");
+        CHECK(mi.relaySeqPhase == can::MOTION_INHIBIT_RELAY_SEQ_COMPLETE,
+              "relaySeq: complete value");
+
+        f.data[7] = 0x00;  // idle
+        CHECK(decodeMotionInhibit(f, mi), "relaySeq: idle decoded");
+        CHECK(mi.relaySeqPhase == can::MOTION_INHIBIT_RELAY_SEQ_IDLE,
+              "relaySeq: idle value");
+    }
+
+    // 5. Extended reason bits (Item 5) round-trip through bytes 0-1.
+    {
+        CanFrame f;
+        f.data_length_code = 8;
+        uint16_t reason = can::MOTION_INHIBIT_STARTUP_INHIBIT
+                        | can::MOTION_INHIBIT_BATTERY_CUTOFF
+                        | can::MOTION_INHIBIT_SERVICE_DISABLED;
+        f.data[0] = (uint8_t)(reason & 0xFF);
+        f.data[1] = (uint8_t)((reason >> 8) & 0xFF);
+        f.data[7] = 0x00;
+        MotionInhibitData mi;
+        CHECK(decodeMotionInhibit(f, mi), "extReason: decoded");
+        CHECK(mi.reason & can::MOTION_INHIBIT_STARTUP_INHIBIT, "extReason: startup bit");
+        CHECK(mi.reason & can::MOTION_INHIBIT_BATTERY_CUTOFF,  "extReason: battery bit");
+        CHECK(mi.reason & can::MOTION_INHIBIT_SERVICE_DISABLED,"extReason: service bit");
     }
 
     std::printf("=== %d run, %d failed ===\n", tests_run, tests_failed);

@@ -107,6 +107,8 @@ extern "C" {
                                          //   Byte 5:   effective demand %   (int8, signed, after scaling)
                                          //   Byte 6:   max final PWM duty %  (uint8, 0..100)
                                          //   Byte 7:   flags bit0 power_ready, bit1 obstacle_forward_blocked,
+                                         //             bits2-3 relay-seq phase (0 idle,1 in-progress,2 complete;
+                                         //             commanded GPIO/sequencer state only, no contact feedback),
                                          //             bits4-7 degraded level (0=none,1..3)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)

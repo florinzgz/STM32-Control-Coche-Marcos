@@ -50,6 +50,19 @@ extern "C" {
 #define MOTION_INHIBIT_OBSTACLE_BLOCK 0x0080U /* Forward motion blocked by obstacle sensor  */
 #define MOTION_INHIBIT_PWM_ZERO       0x0100U /* Demand survived but final PWM duty is zero */
 #define MOTION_INHIBIT_TORQUE_LIMITED 0x0200U /* DEGRADED/LIMP torque cap active (moving OK)*/
+#define MOTION_INHIBIT_STARTUP_INHIBIT 0x0400U /* startup_inhibit still latched (pre-arm)    */
+#define MOTION_INHIBIT_PEDAL_FAULT    0x0800U /* Pedal implausible/contradictory — demand 0 */
+#define MOTION_INHIBIT_SAFETY_SCALE_ZERO 0x1000U /* Per-wheel safety/ABS/TCS scale collapsed to 0 */
+#define MOTION_INHIBIT_BATTERY_CUTOFF 0x2000U /* Battery under/over-voltage limit or cutoff  */
+#define MOTION_INHIBIT_THERMAL_OVERCURRENT 0x4000U /* Over-temperature or over-current cutoff */
+#define MOTION_INHIBIT_SERVICE_DISABLED 0x8000U /* Traction relay module disabled via service */
+
+/* Relay-sequence phase (NOT a reason bit — carried separately in 0x315 byte 7
+ * bits 2-3).  Reflects the COMMANDED GPIO/sequencer state only; the firmware
+ * has NO physical relay-contact feedback.                                    */
+#define MOTION_INHIBIT_RELAY_SEQ_IDLE      0U /* No power-up sequence in progress          */
+#define MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS 1U /* Traction relay energised, settling      */
+#define MOTION_INHIBIT_RELAY_SEQ_COMPLETE  2U /* Sequence finished, power-ready            */
 
 /* Demand (percent of full scale) at/below which the operator is considered
  * to be requesting no motion.  Matches the powertrain-engaged threshold
@@ -75,6 +88,14 @@ typedef struct {
     float    effective_demand_pct;     /* Demand after all scaling (signed %)        */
     uint16_t final_pwm_max;            /* Max final PWM duty (ticks) across wheels   */
     uint8_t  degraded_level;           /* 0 = none; >0 = DEGRADED level (torque cap) */
+    /* ---- Additional observability inputs (each a pre-computed boolean read
+     * straight from the pipeline; the classifier only folds them into bits) -- */
+    bool     startup_inhibit;          /* Startup_IsInhibited()                      */
+    bool     pedal_fault;              /* !Pedal_IsPlausible() (implausible/contra.) */
+    bool     safety_scale_zero;        /* All per-wheel safety scales collapsed to 0 */
+    bool     battery_cutoff;           /* Battery UV/OV limit or cutoff active        */
+    bool     thermal_overcurrent;      /* Over-temperature or over-current cutoff     */
+    bool     service_disabled;         /* Traction relay module disabled via service */
 } MotionInhibitInputs;
 
 /**

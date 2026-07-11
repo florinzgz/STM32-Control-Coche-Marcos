@@ -81,5 +81,27 @@ uint16_t MotionInhibit_Evaluate(const MotionInhibitInputs *in)
         reason |= MOTION_INHIBIT_TORQUE_LIMITED;
     }
 
+    /* ---- Additional contributory reasons (folded in verbatim) ----------
+     * Each is a boolean the pipeline already computed; this module never
+     * recomputes the underlying safety/thermal/battery decision.          */
+    if (in->startup_inhibit) {
+        reason |= MOTION_INHIBIT_STARTUP_INHIBIT;
+    }
+    if (in->pedal_fault) {
+        reason |= MOTION_INHIBIT_PEDAL_FAULT;
+    }
+    if (in->safety_scale_zero) {
+        reason |= MOTION_INHIBIT_SAFETY_SCALE_ZERO;
+    }
+    if (in->battery_cutoff) {
+        reason |= MOTION_INHIBIT_BATTERY_CUTOFF;
+    }
+    if (in->thermal_overcurrent) {
+        reason |= MOTION_INHIBIT_THERMAL_OVERCURRENT;
+    }
+    if (in->service_disabled) {
+        reason |= MOTION_INHIBIT_SERVICE_DISABLED;
+    }
+
     return reason;
 }

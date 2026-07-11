@@ -68,6 +68,12 @@ static MotionInhibitInputs base_driving(void)
     in.effective_demand_pct     = 40.0f;
     in.final_pwm_max            = 1200;
     in.degraded_level           = 0;
+    in.startup_inhibit          = false;
+    in.pedal_fault              = false;
+    in.safety_scale_zero        = false;
+    in.battery_cutoff           = false;
+    in.thermal_overcurrent      = false;
+    in.service_disabled         = false;
     return in;
 }
 
@@ -199,6 +205,82 @@ static void test_nan_demand_safe(void)
     ASSERT_TRUE(r & MOTION_INHIBIT_NO_DEMAND);
 }
 
+/* ---- Additional observability inputs (Item 5) ------------------------- */
+
+/* Each extra boolean folds into its own bit and does not disturb the others. */
+static void test_startup_inhibit_bit(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.startup_inhibit = true;
+    uint16_t r = MotionInhibit_Evaluate(&in);
+    ASSERT_TRUE(r & MOTION_INHIBIT_STARTUP_INHIBIT);
+    /* Baseline was otherwise healthy — only the startup bit should set. */
+    ASSERT_TRUE(r == MOTION_INHIBIT_STARTUP_INHIBIT);
+}
+
+static void test_pedal_fault_bit(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.pedal_fault = true;
+    ASSERT_TRUE(MotionInhibit_Evaluate(&in) == MOTION_INHIBIT_PEDAL_FAULT);
+}
+
+static void test_safety_scale_zero_bit(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.safety_scale_zero = true;
+    ASSERT_TRUE(MotionInhibit_Evaluate(&in) == MOTION_INHIBIT_SAFETY_SCALE_ZERO);
+}
+
+static void test_battery_cutoff_bit(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.battery_cutoff = true;
+    ASSERT_TRUE(MotionInhibit_Evaluate(&in) == MOTION_INHIBIT_BATTERY_CUTOFF);
+}
+
+static void test_thermal_overcurrent_bit(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.thermal_overcurrent = true;
+    ASSERT_TRUE(MotionInhibit_Evaluate(&in) == MOTION_INHIBIT_THERMAL_OVERCURRENT);
+}
+
+static void test_service_disabled_bit(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.service_disabled = true;
+    ASSERT_TRUE(MotionInhibit_Evaluate(&in) == MOTION_INHIBIT_SERVICE_DISABLED);
+}
+
+/* Multiple contributory reasons stack together with the demand/PWM chain. */
+static void test_multiple_reasons_stack(void)
+{
+    MotionInhibitInputs in = base_driving();
+    in.demand_pct           = 0.0f;   /* not asking → NO_DEMAND */
+    in.effective_demand_pct = 0.0f;
+    in.final_pwm_max        = 0;
+    in.startup_inhibit      = true;
+    in.pedal_fault          = true;
+    in.service_disabled     = true;
+    uint16_t r = MotionInhibit_Evaluate(&in);
+    ASSERT_TRUE(r & MOTION_INHIBIT_NO_DEMAND);
+    ASSERT_TRUE(r & MOTION_INHIBIT_STARTUP_INHIBIT);
+    ASSERT_TRUE(r & MOTION_INHIBIT_PEDAL_FAULT);
+    ASSERT_TRUE(r & MOTION_INHIBIT_SERVICE_DISABLED);
+}
+
+/* The new bits occupy the high 6 bits and never collide with existing ones. */
+static void test_new_bits_are_distinct(void)
+{
+    ASSERT_TRUE(MOTION_INHIBIT_STARTUP_INHIBIT     == 0x0400U);
+    ASSERT_TRUE(MOTION_INHIBIT_PEDAL_FAULT         == 0x0800U);
+    ASSERT_TRUE(MOTION_INHIBIT_SAFETY_SCALE_ZERO   == 0x1000U);
+    ASSERT_TRUE(MOTION_INHIBIT_BATTERY_CUTOFF      == 0x2000U);
+    ASSERT_TRUE(MOTION_INHIBIT_THERMAL_OVERCURRENT == 0x4000U);
+    ASSERT_TRUE(MOTION_INHIBIT_SERVICE_DISABLED    == 0x8000U);
+}
+
 int main(void)
 {
     test_null_is_none();
@@ -213,6 +295,14 @@ int main(void)
     test_degraded_demand_survives_pwm_zero();
     test_degraded_moving_only_torque_limited();
     test_nan_demand_safe();
+    test_startup_inhibit_bit();
+    test_pedal_fault_bit();
+    test_safety_scale_zero_bit();
+    test_battery_cutoff_bit();
+    test_thermal_overcurrent_bit();
+    test_service_disabled_bit();
+    test_multiple_reasons_stack();
+    test_new_bits_are_distinct();
 
     printf("--- motion_inhibit tests: %d run, %d failed ---\n",
            tests_run, tests_failed);
