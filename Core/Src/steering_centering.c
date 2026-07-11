@@ -321,6 +321,35 @@ CenteringState_t SteeringCentering_GetState(void)
     return centering_state;
 }
 
+SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
+                                                   bool in_homing_state)
+{
+    /* Centering is the exclusive writer of the steering motor only while
+     * it is actively homing AND the system is still in a homing-capable
+     * state.  In DONE/FAULT — or once the system has left BOOT/STANDBY
+     * (e.g. SAFE/ERROR) — the EPS loop owns the motor and neutralises it
+     * as needed.  Keeping this decision here (and consuming it BEFORE
+     * SteeringCentering_Step() runs) guarantees the two subsystems never
+     * both write the motor in the same cycle.                            */
+    if (!in_homing_state) {
+        return STEER_OWNER_EPS;
+    }
+
+    switch (state) {
+    case CENTERING_IDLE:
+    case CENTERING_WAIT_RAIL:
+    case CENTERING_SWEEP_LEFT:
+    case CENTERING_SWEEP_RIGHT:
+        return STEER_OWNER_CENTERING;
+
+    case CENTERING_DONE:
+    case CENTERING_FAULT:
+    default:
+        return STEER_OWNER_EPS;
+    }
+}
+
+
 void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
 {
     /* Apply the stored center value: set the TIM2 counter so that

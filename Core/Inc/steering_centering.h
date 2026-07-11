@@ -46,6 +46,24 @@ typedef enum {
     CENTERING_WAIT_RAIL       /* DIR relay energised, waiting settle    */
 } CenteringState_t;
 
+/* ---- Steering motor ownership ----
+ *
+ * Exactly one subsystem may write the steering motor (PC4 EN_STEER,
+ * PA6 TIM3_CH1, PA7 TIM3_CH2) in a given control cycle:
+ *
+ *   - STEER_OWNER_CENTERING: the homing FSM (SteeringCentering_Step)
+ *     is the sole writer while it actively drives the sweep.
+ *   - STEER_OWNER_EPS: the EPS torque-assist loop (Steering_ControlLoop)
+ *     owns the motor once homing has released it, and is responsible for
+ *     neutralising it while uncalibrated or in SAFE/ERROR.
+ *
+ * The two never run in the same cycle — this prevents the centering PWM
+ * from being neutralised by the EPS loop before it can take effect.      */
+typedef enum {
+    STEER_OWNER_CENTERING = 0,  /* SteeringCentering_Step drives the motor */
+    STEER_OWNER_EPS             /* Steering_ControlLoop drives the motor   */
+} SteeringMotorOwner_t;
+
 /* ---- Public API ---- */
 
 /**
@@ -78,6 +96,26 @@ bool SteeringCentering_HasFault(void);
  * @brief  Returns the current centering state (for CAN diagnostics).
  */
 CenteringState_t SteeringCentering_GetState(void);
+
+/**
+ * @brief  Decide which subsystem owns the steering motor this cycle.
+ *
+ *         Pure function (no side effects) so the mutual-exclusion policy
+ *         can be unit-tested on the host.  Centering owns the motor only
+ *         while it is actively homing (IDLE / WAIT_RAIL / SWEEP_LEFT /
+ *         SWEEP_RIGHT) AND the system is still in a homing-capable state
+ *         (BOOT or STANDBY).  In every other case — CENTERING_DONE,
+ *         CENTERING_FAULT, or a system state such as SAFE/ERROR — the EPS
+ *         control loop owns the motor (and neutralises it when required).
+ *
+ * @param  state           Current centering FSM state.
+ * @param  in_homing_state true if the system state permits homing
+ *                         (SYS_STATE_BOOT or SYS_STATE_STANDBY).
+ * @retval STEER_OWNER_CENTERING or STEER_OWNER_EPS.
+ */
+SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
+                                                   bool in_homing_state);
+
 
 /**
  * @brief  Mark centering as complete using a stored flash calibration.
