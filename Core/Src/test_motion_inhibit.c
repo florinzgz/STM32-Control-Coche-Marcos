@@ -37,14 +37,35 @@ static int tests_failed = 0;
 
 #define ASSERT_FALSE(expr) ASSERT_TRUE(!(expr))
 
-/* Enum stand-ins matching the real firmware values passed in the snapshot.
- * The classifier compares against the values carried in the struct, so the
- * test just has to be self-consistent.                                     */
-#define ST_ACTIVE     3
-#define ST_DEGRADED   4
-#define ST_SAFE       5
-#define ST_ERROR      2
+/* Enum stand-ins mirroring the real firmware SystemState_t values
+ * (Core/Inc/safety_system.h).  That header pulls in main.h / the HAL, so
+ * it cannot be included in a host build; the values are duplicated here and
+ * pinned with _Static_assert contract checks so any future renumbering of
+ * the production enum breaks this test loudly instead of silently.
+ *
+ *   SYS_STATE_BOOT      = 0
+ *   SYS_STATE_STANDBY   = 1
+ *   SYS_STATE_ACTIVE    = 2
+ *   SYS_STATE_DEGRADED  = 3
+ *   SYS_STATE_SAFE      = 4
+ *   SYS_STATE_ERROR     = 5
+ *   SYS_STATE_LIMP_HOME = 6                                              */
+#define ST_BOOT       0
+#define ST_STANDBY    1
+#define ST_ACTIVE     2
+#define ST_DEGRADED   3
+#define ST_SAFE       4
+#define ST_ERROR      5
 #define ST_LIMP       6
+
+/* Contract: keep these in lockstep with SystemState_t in safety_system.h. */
+_Static_assert(ST_BOOT    == 0, "SYS_STATE_BOOT must be 0");
+_Static_assert(ST_STANDBY == 1, "SYS_STATE_STANDBY must be 1");
+_Static_assert(ST_ACTIVE  == 2, "SYS_STATE_ACTIVE must be 2");
+_Static_assert(ST_DEGRADED== 3, "SYS_STATE_DEGRADED must be 3");
+_Static_assert(ST_SAFE    == 4, "SYS_STATE_SAFE must be 4");
+_Static_assert(ST_ERROR   == 5, "SYS_STATE_ERROR must be 5");
+_Static_assert(ST_LIMP    == 6, "SYS_STATE_LIMP_HOME must be 6");
 
 #define G_PARK        0
 #define G_NEUTRAL     1

@@ -241,12 +241,15 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
      * values.  Values outside the range are rejected here; the CAN
      * handler relays the rejection to the HMI as ACK_INVALID.
      *
-     *   - assist/center/damping/friction gains  : [0, 1]
-     *   - coast_band_pct / min_drive_pct        : [0, 100] %
-     *   - assist_vs_speed / return_vs_speed     : (0, 200]  (divisors)
-     *   - deadband_deg                          : (0, 30] °
-     *   - max_pwm_pct / slew_rate_pct           : (0, 100] %
-     *   - center_offset_deg                     : [-10, +10] °         */
+     *   - assist / center / damping             : [0, 1]
+     *   - friction_comp                         : [0, 0.5]
+     *   - coast_band_pct                        : [0, 20] %
+     *   - min_drive_pct                         : [1, 50] %
+     *   - assist_vs_speed / return_vs_speed     : [EPS_MIN_POS, 100]
+     *   - deadband_deg                          : [0.1, 10] °
+     *   - max_pwm_pct                           : [5, 100] %
+     *   - slew_rate_pct                         : [0.1, 20] %
+     *   - center_offset_deg                     : [-10, 10] °          */
     if (value < eps_limits[id].min || value > eps_limits[id].max) {
         return false;
     }
