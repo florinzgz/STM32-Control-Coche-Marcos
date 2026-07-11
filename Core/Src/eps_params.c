@@ -75,11 +75,17 @@ _Static_assert(EPS_SLOT_DWORDS * 8U <= 256U,
  * limits: every parameter is range-checked server-side (here) before it
  * can influence the EPS control loop / steering-motor torque.
  *
- * Each entry is an inclusive [min, max] range.  Divisor and mechanical
- * parameters that must be strictly > 0 use a tiny positive minimum
- * (EPS_MIN_POS) so that exactly 0.0 is rejected while any real positive
- * value is accepted — this preserves the previous strict ">0" behaviour
- * without a separate flag.
+ * These bounds are the AUTHORITATIVE EPS limit contract and MUST hold the
+ * identical [min, max] as the HMI editor ranges in esp32/src/eps_limits.h
+ * (eps::LIMITS).  A raw CAN frame must never be able to set a value wider
+ * than the HMI-safe range.  The equality is verified per parameter by the
+ * host test test_eps_params.c (and by the HMI-side
+ * test_eps_limits_contract.cpp), which mirror the same numeric contract.
+ *
+ * Each entry is an inclusive [min, max] range.  The two speed divisors keep
+ * a tiny positive minimum (EPS_MIN_POS) so that exactly 0.0 is rejected
+ * (a zero divisor is a control hazard) while any real positive value is
+ * accepted.
  *
  * The order MUST match eps_param_id_t in eps_params.h.                 */
 #define EPS_MIN_POS  1e-6f
@@ -93,14 +99,14 @@ static const eps_param_limit_t eps_limits[EPS_PARAM_COUNT] = {
     [EPS_PARAM_ASSIST_STRENGTH]   = { 0.0f,        1.0f   },
     [EPS_PARAM_CENTER_STRENGTH]   = { 0.0f,        1.0f   },
     [EPS_PARAM_DAMPING]           = { 0.0f,        1.0f   },
-    [EPS_PARAM_FRICTION_COMP]     = { 0.0f,        1.0f   },
-    [EPS_PARAM_COAST_BAND_PCT]    = { 0.0f,      100.0f   },
-    [EPS_PARAM_MIN_DRIVE_PCT]     = { 0.0f,      100.0f   },
-    [EPS_PARAM_ASSIST_VS_SPEED]   = { EPS_MIN_POS, 200.0f },  /* divisor >0 */
-    [EPS_PARAM_RETURN_VS_SPEED]   = { EPS_MIN_POS, 200.0f },  /* divisor >0 */
-    [EPS_PARAM_DEADBAND_DEG]      = { EPS_MIN_POS,  30.0f },  /* >0 */
-    [EPS_PARAM_MAX_PWM_PCT]       = { EPS_MIN_POS, 100.0f },  /* 0<x<=100 */
-    [EPS_PARAM_SLEW_RATE_PCT]     = { EPS_MIN_POS, 100.0f },  /* >0 */
+    [EPS_PARAM_FRICTION_COMP]     = { 0.0f,        0.5f   },
+    [EPS_PARAM_COAST_BAND_PCT]    = { 0.0f,       20.0f   },
+    [EPS_PARAM_MIN_DRIVE_PCT]     = { 1.0f,       50.0f   },
+    [EPS_PARAM_ASSIST_VS_SPEED]   = { EPS_MIN_POS, 100.0f },  /* divisor >0 */
+    [EPS_PARAM_RETURN_VS_SPEED]   = { EPS_MIN_POS, 100.0f },  /* divisor >0 */
+    [EPS_PARAM_DEADBAND_DEG]      = { 0.1f,        10.0f },   /* >0 */
+    [EPS_PARAM_MAX_PWM_PCT]       = { 5.0f,       100.0f },   /* 0<x<=100 */
+    [EPS_PARAM_SLEW_RATE_PCT]     = { 0.1f,        20.0f },   /* >0 */
     [EPS_PARAM_CENTER_OFFSET_DEG] = { -10.0f,      10.0f },
 };
 
@@ -206,6 +212,14 @@ void EPS_Params_Init(void)
 const eps_params_t *EPS_Params_Get(void)
 {
     return &eps_active;
+}
+
+bool EPS_Params_GetLimit(eps_param_id_t id, float *out_min, float *out_max)
+{
+    if (id >= EPS_PARAM_COUNT) return false;
+    if (out_min) *out_min = eps_limits[id].min;
+    if (out_max) *out_max = eps_limits[id].max;
+    return true;
 }
 
 bool EPS_Params_Set(eps_param_id_t id, float value)

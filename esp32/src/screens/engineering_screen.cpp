@@ -17,6 +17,7 @@
 #include "touch_calibration.h"
 #include "ui/debug_overlay.h"
 #include "led_controller.h"
+#include "eps_limits.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
@@ -6082,7 +6083,10 @@ void EngineeringScreen::drawEpsTuning() {
     static constexpr int16_t PLUS_X  = ui::SCREEN_W - BTN_W - 6;
     static constexpr int16_t MINUS_X = PLUS_X - BTN_W - 4;
 
-    // Parameter metadata: label, edit-array index, step, min, max, unit
+    // Parameter metadata: label, edit-array index, step, unit.  The editable
+    // [min, max] range is the AUTHORITATIVE contract in eps_limits.h
+    // (eps::LIMITS), which the STM32 server-side validator mirrors exactly —
+    // the HMI can never offer a value a raw CAN frame could not also set.
     struct EpsRow {
         const char* label;
         uint8_t     idx;
@@ -6094,24 +6098,24 @@ void EngineeringScreen::drawEpsTuning() {
     static constexpr EpsRow kRows[EPS_PAGES][4] = {
         // Page 0 — gain parameters
         {
-            { "ASSIST STR",   0, 0.05f,  0.0f,   2.0f,  "" },
-            { "CENTER STR",   1, 0.05f,  0.0f,   2.0f,  "" },
-            { "DAMPING",      2, 0.01f,  0.0f,   1.0f,  "" },
-            { "FRICTION",     3, 0.01f,  0.0f,   0.5f,  "" },
+            { "ASSIST STR",   0, 0.05f, eps::LIMITS[0].min,  eps::LIMITS[0].max,  "" },
+            { "CENTER STR",   1, 0.05f, eps::LIMITS[1].min,  eps::LIMITS[1].max,  "" },
+            { "DAMPING",      2, 0.01f, eps::LIMITS[2].min,  eps::LIMITS[2].max,  "" },
+            { "FRICTION",     3, 0.01f, eps::LIMITS[3].min,  eps::LIMITS[3].max,  "" },
         },
         // Page 1 — speed / coast shaping
         {
-            { "COAST BAND %", 4, 0.5f,   0.0f,  20.0f, "%" },
-            { "MIN DRIVE %",  5, 1.0f,   1.0f,  50.0f, "%" },
-            { "ASSISTvSPD",   6, 1.0f,   0.0f, 100.0f, "" },
-            { "RETURNvSPD",   7, 1.0f,   0.0f, 100.0f, "" },
+            { "COAST BAND %", 4, 0.5f,  eps::LIMITS[4].min,  eps::LIMITS[4].max,  "%" },
+            { "MIN DRIVE %",  5, 1.0f,  eps::LIMITS[5].min,  eps::LIMITS[5].max,  "%" },
+            { "ASSISTvSPD",   6, 1.0f,  eps::LIMITS[6].min,  eps::LIMITS[6].max,  "" },
+            { "RETURNvSPD",   7, 1.0f,  eps::LIMITS[7].min,  eps::LIMITS[7].max,  "" },
         },
         // Page 2 — mechanical limits
         {
-            { "DEADBAND",     8, 0.1f,   0.1f,  10.0f, "d" },
-            { "MAX PWM %",    9, 1.0f,   5.0f, 100.0f, "%" },
-            { "SLEW RATE %", 10, 0.1f,   0.1f,  20.0f, "%" },
-            { "CTR OFFSET",  11, 0.1f, -10.0f,  10.0f, "d" },
+            { "DEADBAND",     8, 0.1f,  eps::LIMITS[8].min,  eps::LIMITS[8].max,  "d" },
+            { "MAX PWM %",    9, 1.0f,  eps::LIMITS[9].min,  eps::LIMITS[9].max,  "%" },
+            { "SLEW RATE %", 10, 0.1f,  eps::LIMITS[10].min, eps::LIMITS[10].max, "%" },
+            { "CTR OFFSET",  11, 0.1f,  eps::LIMITS[11].min, eps::LIMITS[11].max, "d" },
         },
     };
 

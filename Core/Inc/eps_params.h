@@ -159,6 +159,18 @@ const eps_params_t *EPS_Params_GetDefaults(void);
  */
 bool EPS_Params_IsFlashValid(void);
 
+/**
+ * @brief  Read the authoritative server-side [min, max] limit for a
+ *         parameter.  Exposes the eps_limits[] contract so the HMI editor
+ *         ranges (esp32/src/eps_limits.h) can be cross-checked against the
+ *         values a raw CAN EPS_PARAM_OP_SET_PARAM frame is validated with.
+ * @param  id        Parameter index (< EPS_PARAM_COUNT).
+ * @param  out_min   Receives the inclusive lower bound (may be NULL).
+ * @param  out_max   Receives the inclusive upper bound (may be NULL).
+ * @retval true on success, false if id is out of range.
+ */
+bool EPS_Params_GetLimit(eps_param_id_t id, float *out_min, float *out_max);
+
 #ifdef __cplusplus
 }
 #endif

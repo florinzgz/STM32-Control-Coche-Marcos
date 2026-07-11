@@ -115,23 +115,24 @@ static void test_reject_zero_deadband(void)
 
 static void test_reject_invalid_max_pwm(void)
 {
-    /* max_pwm_pct must be > 0 and <= 100 */
+    /* max_pwm_pct is bounded to [5, 100] (authoritative contract). */
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 0.0f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, -5.0f));
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 1.0f));   /* below 5 % min */
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 100.1f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 200.0f));
     /* Valid boundary values must be accepted */
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 5.0f));
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 60.0f));
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 100.0f));
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MAX_PWM_PCT, 1.0f));
 }
 
 static void test_reject_zero_slew(void)
 {
-    /* slew_rate_pct <= 0 must be rejected (would freeze slew) */
+    /* slew_rate_pct < 0.1 must be rejected (would freeze slew) */
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 0.0f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, -0.1f));
-    /* Positive slew accepted */
+    /* Positive slew within [0.1, 20] accepted */
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 5.883f));
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 0.1f));
 }
@@ -170,43 +171,46 @@ static void test_reject_gain_over_limit(void)
 
 static void test_reject_pct_over_limit(void)
 {
-    /* Percent-band parameters are bounded to [0, 100]. */
-    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 100.1f));
-    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 1000.0f));
+    /* coast_band_pct is bounded to [0, 20]; min_drive_pct to [1, 50]. */
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 20.1f));
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 100.0f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, -1.0f));
-    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  100.1f));
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  50.1f));
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  0.0f));   /* below 1 % min */
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  -5.0f));
     /* Boundaries accepted. */
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 0.0f));
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 100.0f));
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  100.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_COAST_BAND_PCT, 20.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  1.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_MIN_DRIVE_PCT,  50.0f));
 }
 
 static void test_reject_divisor_over_limit(void)
 {
-    /* Divisors are bounded above at 200 to reject absurd HMI inputs. */
-    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_ASSIST_VS_SPEED, 200.1f));
+    /* Divisors are bounded above at 100 to match the HMI-safe range. */
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_ASSIST_VS_SPEED, 100.1f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_ASSIST_VS_SPEED, 1e6f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_RETURN_VS_SPEED, 500.0f));
     /* Upper boundary accepted. */
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_ASSIST_VS_SPEED, 200.0f));
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_RETURN_VS_SPEED, 200.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_ASSIST_VS_SPEED, 100.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_RETURN_VS_SPEED, 100.0f));
 }
 
 static void test_reject_deadband_over_limit(void)
 {
-    /* deadband_deg is bounded to (0, 30]. */
-    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 30.1f));
+    /* deadband_deg is bounded to [0.1, 10]. */
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 10.1f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 1000.0f));
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 30.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_DEADBAND_DEG, 10.0f));
 }
 
 static void test_reject_slew_over_limit(void)
 {
-    /* slew_rate_pct is bounded to (0, 100]. */
-    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 100.1f));
+    /* slew_rate_pct is bounded to [0.1, 20]. */
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 20.1f));
+    ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 100.0f));
     ASSERT_FALSE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 5000.0f));
-    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 100.0f));
+    ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_SLEW_RATE_PCT, 20.0f));
 }
 
 static void test_center_offset_range(void)
@@ -219,6 +223,49 @@ static void test_center_offset_range(void)
     /* Boundaries accepted. */
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_CENTER_OFFSET_DEG,  10.0f));
     ASSERT_TRUE(EPS_Params_Set(EPS_PARAM_CENTER_OFFSET_DEG, -10.0f));
+}
+
+/* ---- Item 6: EPS limit cross-contract (STM32 server vs. HMI editor) ----
+ * The STM32 server-side eps_limits[] MUST hold the identical [min, max] as
+ * the authoritative HMI editor contract in esp32/src/eps_limits.h
+ * (eps::LIMITS).  This guarantees a raw CAN EPS_PARAM_OP_SET_PARAM frame can
+ * never set a value wider than the HMI-safe range.  The values below MIRROR
+ * eps::LIMITS — keep the two in lock-step (the HMI side is separately checked
+ * by esp32/src/test_eps_limits_contract.cpp).                              */
+#define CONTRACT_MIN_POS 1e-6f  /* mirrors EPS_MIN_POS / eps::MIN_POS */
+
+static void test_limits_match_hmi_contract(void)
+{
+    struct { float min; float max; } contract[EPS_PARAM_COUNT] = {
+        [EPS_PARAM_ASSIST_STRENGTH]   = { 0.0f,           1.0f   },
+        [EPS_PARAM_CENTER_STRENGTH]   = { 0.0f,           1.0f   },
+        [EPS_PARAM_DAMPING]           = { 0.0f,           1.0f   },
+        [EPS_PARAM_FRICTION_COMP]     = { 0.0f,           0.5f   },
+        [EPS_PARAM_COAST_BAND_PCT]    = { 0.0f,          20.0f   },
+        [EPS_PARAM_MIN_DRIVE_PCT]     = { 1.0f,          50.0f   },
+        [EPS_PARAM_ASSIST_VS_SPEED]   = { CONTRACT_MIN_POS, 100.0f },
+        [EPS_PARAM_RETURN_VS_SPEED]   = { CONTRACT_MIN_POS, 100.0f },
+        [EPS_PARAM_DEADBAND_DEG]      = { 0.1f,          10.0f   },
+        [EPS_PARAM_MAX_PWM_PCT]       = { 5.0f,         100.0f   },
+        [EPS_PARAM_SLEW_RATE_PCT]     = { 0.1f,          20.0f   },
+        [EPS_PARAM_CENTER_OFFSET_DEG] = { -10.0f,        10.0f   },
+    };
+
+    for (int i = 0; i < EPS_PARAM_COUNT; ++i) {
+        float lo = 0.0f, hi = 0.0f;
+        ASSERT_TRUE(EPS_Params_GetLimit((eps_param_id_t)i, &lo, &hi));
+        /* Server limit must EQUAL the authoritative HMI contract. */
+        ASSERT_TRUE(lo == contract[i].min);
+        ASSERT_TRUE(hi == contract[i].max);
+        /* And, redundantly, the server range must never be WIDER than the
+         * HMI range (no raw-CAN frame outside the HMI-safe band).          */
+        ASSERT_TRUE(lo >= contract[i].min);
+        ASSERT_TRUE(hi <= contract[i].max);
+    }
+
+    /* Out-of-range id is rejected by the accessor. */
+    float lo = 0.0f, hi = 0.0f;
+    ASSERT_FALSE(EPS_Params_GetLimit(EPS_PARAM_COUNT, &lo, &hi));
 }
 
 /* ---- main ---- */
@@ -323,6 +370,7 @@ int main(void)
     test_reject_deadband_over_limit();
     test_reject_slew_over_limit();
     test_center_offset_range();
+    test_limits_match_hmi_contract();
 
     test_setparam_gate_allows_safe_state();
     test_setparam_gate_requires_standby();

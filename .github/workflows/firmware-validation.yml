@@ -194,6 +194,12 @@ jobs:
               esp32/src/test_twai_recovery.cpp \
               -o /tmp/test_twai_recovery
             /tmp/test_twai_recovery
+
+            echo "-- test_eps_limits_contract.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_eps_limits_contract.cpp \
+              -o /tmp/test_eps_limits_contract
+            /tmp/test_eps_limits_contract
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
