@@ -158,6 +158,112 @@ static void test_heartbeat_loss_rearms() {
     ASSERT_EQ(ms.sendMode(), 0x01);
 }
 
+// ---- Remote-confirmation validity (STM32 restart / lost ACK) ----------------
+
+// Cold boot with the selector already at 4x4: desired 4x4 differs from the
+// power-on default (4x2) confirmation, so CMD_MODE(4x4) is transmitted.
+static void test_cold_boot_selector_4x4() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x01);                         // selector reads 4x4 at boot
+    ASSERT(ms.update(0, /*hb=*/true) == Action::SEND);
+    ASSERT_EQ(ms.sendMode(), 0x01);
+    ASSERT(!ms.inSync());
+}
+
+// The CMD_ACK for our CMD_MODE(4x4) is lost, but the STM32 heartbeat echoes
+// 4x4 — that echo alone must confirm the mode and stop retransmission.
+static void test_ack_lost_heartbeat_echo_confirms() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x01);
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ASSERT(ms.pending());
+    // No onAck() — the ACK never arrives.  The STM32 applies and echoes 4x4.
+    ms.onHeartbeatModeEcho(0x01);
+    ASSERT(ms.inSync());
+    ASSERT(!ms.pending());
+    ASSERT_EQ(ms.confirmed(), 0x01);
+    ASSERT(ms.update(10 * ACK_TIMEOUT_MS, true) == Action::NONE);   // no resend
+}
+
+// 4x4 is confirmed; the STM32 restarts (startup_inhibit rising edge triggers
+// invalidateConfirmed()).  Even though desired_ == confirmed_ numerically, the
+// selector mode must be re-sent because the confirmation is no longer valid.
+static void test_confirmed_then_stm32_restart_resends() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x01);
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ms.onAck(AckRes::OK);
+    ASSERT(ms.inSync());
+
+    // STM32 restarts — link is still alive but its confirmation is stale.
+    ms.invalidateConfirmed();
+    ASSERT(!ms.inSync());
+    ASSERT(!ms.confirmedValid());
+    ASSERT(ms.update(1000, true) == Action::SEND);           // CMD_MODE resent
+    ASSERT_EQ(ms.sendMode(), 0x01);
+    // The restarted STM32 applies and echoes 4x4 → back in sync.
+    ms.onHeartbeatModeEcho(0x01);
+    ASSERT(ms.inSync());
+}
+
+// The ESP32 itself restarts while the physical selector still reads 4x4: a
+// fresh ModeSync must (re)transmit the selector mode on the first live tick.
+static void test_esp32_restart_selector_4x4() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);    // fresh boot state
+    ms.setDesired(0x01);                         // selector still at 4x4
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ASSERT_EQ(ms.sendMode(), 0x01);
+    ms.onHeartbeatModeEcho(0x01);
+    ASSERT(ms.inSync());
+}
+
+// Losing the heartbeat during a pending attempt drops the in-flight send,
+// invalidates any confirmation, and re-arms for the link's return.
+static void test_heartbeat_loss_during_pending() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x01);
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ASSERT(ms.pending());
+    ASSERT(ms.update(50, /*hb=*/false) == Action::NONE);     // link drops
+    ASSERT(!ms.pending());
+    ASSERT(!ms.confirmedValid());
+    ASSERT(ms.update(100, true) == Action::SEND);            // resync on return
+    ASSERT_EQ(ms.sendMode(), 0x01);
+}
+
+// A heartbeat loss AFTER a successful ACK invalidates the confirmation, so the
+// selector mode is resent when the link returns (the STM32 may have restarted
+// during the outage).  A matching echo then re-confirms it.
+static void test_heartbeat_loss_after_ack() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x01);
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ms.onAck(AckRes::OK);
+    ASSERT(ms.inSync());
+
+    ASSERT(ms.update(500, /*hb=*/false) == Action::NONE);    // heartbeat lost
+    ASSERT(!ms.confirmedValid());
+    ASSERT(!ms.inSync());
+    ASSERT(ms.update(1000, true) == Action::SEND);           // resent on return
+    ASSERT_EQ(ms.sendMode(), 0x01);
+    ms.onHeartbeatModeEcho(0x01);
+    ASSERT(ms.inSync());
+}
+
+// Wrap-safe ACK/echo timestamp comparison across the 32-bit millis() rollover.
+static void test_wrap_safe_ack_timestamp() {
+    // Normal ordering.
+    ASSERT(ModeSync::ackIsAtOrAfterSend(1000, 1000));        // equal
+    ASSERT(ModeSync::ackIsAtOrAfterSend(1050, 1000));        // after
+    ASSERT(!ModeSync::ackIsAtOrAfterSend(999, 1000));        // before
+
+    // Send just before the wrap, ACK just after: still "after".
+    const uint32_t nearMax = 0xFFFFFFF0u;
+    ASSERT(ModeSync::ackIsAtOrAfterSend(nearMax + 20, nearMax));   // wrapped +20
+    // Send just after the wrap, a pre-wrap timestamp is genuinely "before".
+    ASSERT(!ModeSync::ackIsAtOrAfterSend(nearMax, nearMax + 20));
+}
+
 // ---- Integration: debounced selector → ModeSync -----------------------------
 
 static constexpr int SWITCH_PIN = 15;
@@ -225,6 +331,13 @@ int main() {
     test_reject_latches_failed();
     test_new_desired_rearms_after_fail();
     test_heartbeat_loss_rearms();
+    test_cold_boot_selector_4x4();
+    test_ack_lost_heartbeat_echo_confirms();
+    test_confirmed_then_stm32_restart_resends();
+    test_esp32_restart_selector_4x4();
+    test_heartbeat_loss_during_pending();
+    test_heartbeat_loss_after_ack();
+    test_wrap_safe_ack_timestamp();
     test_debounce_drives_sync();
     test_glitch_produces_no_send();
 

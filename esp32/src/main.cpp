@@ -174,6 +174,7 @@ static constexpr uint8_t MODE_SYNC_MAX_RETRIES = 3;
 static ModeSync      g_modeSync(can::ACK_TIMEOUT_MS, MODE_SYNC_MAX_RETRIES);
 static unsigned long g_modeSendMs   = 0;     // millis() of last FSM-driven send
 static unsigned long g_lastModeAckTs = 0;    // last CMD_MODE ACK consumed by FSM
+static unsigned long g_lastModeEchoTs = 0;   // last heartbeat frame fed as mode echo
 
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
@@ -934,6 +935,12 @@ void loop() {
                 stm32StartupSeen    = true;
                 gearResyncPending   = true;
                 tempMapResyncPending = true;
+                // The STM32 restarted → whatever drive mode it last confirmed
+                // is stale.  Invalidate the ModeSync confirmation so the
+                // physical selector's mode is RE-TRANSMITTED even if it equals
+                // the previously-confirmed value (root cause of a confirmed
+                // 4x4 never being resent after an STM32 restart).
+                g_modeSync.invalidateConfirmed();
                 Serial.println("[SAFETY][INFO] STM32 restart detected — gear + temp-map resync pending");
             }
             if (gearResyncPending && !startupInhibitNow &&
@@ -963,6 +970,23 @@ void loop() {
             }
             if (!startupInhibitNow) {
                 stm32StartupSeen = false;  // inhibit cleared, ready for next detection
+            }
+
+            // ---- Drive-mode confirmation from the heartbeat echo ----
+            // The STM32 heartbeat echoes its applied drive mode (statusFlags
+            // bit1 = 4x4, bit2 = tank turn).  Feed it into ModeSync as remote
+            // confirmation so a selected mode still confirms even when the
+            // CMD_ACK for our CMD_MODE was lost, and so a silent STM32 mode
+            // revert is re-synchronised.  Processed once per NEW heartbeat
+            // frame (tracked via hb.timestampMs) and only while the link is
+            // proven alive.  Map STM32 statusFlags bits → CMD_MODE flag bits.
+            if (stm32IsAlive &&
+                (uint32_t)hb.timestampMs != (uint32_t)g_lastModeEchoTs) {
+                g_lastModeEchoTs = (unsigned long)hb.timestampMs;
+                uint8_t echoFlags = 0;
+                if (hb.statusFlags & 0x02u) echoFlags |= can::MODE_FLAG_4X4;
+                if (hb.statusFlags & 0x04u) echoFlags |= can::MODE_FLAG_TANK_TURN;
+                g_modeSync.onHeartbeatModeEcho(echoFlags);
             }
 
             // ---- One-shot LED relay restore from NVS after boot ----
@@ -1127,7 +1151,8 @@ void loop() {
             const auto& ad = vehicleData.ack();
             if (g_modeSync.pending()
                 && ad.cmdIdLow == (can::CMD_MODE & 0xFF)
-                && ad.timestampMs >= g_modeSendMs
+                && ModeSync::ackIsAtOrAfterSend((uint32_t)ad.timestampMs,
+                                                (uint32_t)g_modeSendMs)
                 && ad.timestampMs != g_lastModeAckTs) {
                 g_lastModeAckTs = ad.timestampMs;
                 bool ackOk = (ad.result == can::AckResult::OK);
