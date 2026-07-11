@@ -27,9 +27,10 @@
 #include <stdint.h>
 #include <math.h>
 #include "pedal_cal_store.h"   /* DEFAULT_MIN/MAX, RANGE_MIN */
+#include "pedal_logic.h"       /* REAL production pipeline under test */
 
 /* =========================================================================
- * Mirror constants — must stay in sync with sensor_manager.c
+ * Mirror constants — must stay in sync with the REAL pipeline (pedal_logic.h)
  * ========================================================================= */
 
 #define T_PEDAL_SAMPLE_TOLERANCE  30U
@@ -49,10 +50,21 @@ _Static_assert(T_PEDAL_ADC_MAX == PEDAL_CAL_DEFAULT_MAX,
                "T_PEDAL_ADC_MAX drifted from PEDAL_CAL_DEFAULT_MAX");
 _Static_assert(T_PEDAL_ADC_FAULT_HI == PEDAL_CAL_MAX_LIMIT,
                "T_PEDAL_ADC_FAULT_HI drifted from PEDAL_CAL_MAX_LIMIT");
+/* The mirror constants MUST equal the real pipeline constants. */
+_Static_assert(T_PEDAL_SAMPLE_TOLERANCE == PEDAL_SAMPLE_TOLERANCE, "tol drift");
+_Static_assert(T_PEDAL_MAX_RATE_PCT     == PEDAL_MAX_RATE_PCT,     "rate drift");
+_Static_assert(T_PEDAL_EMA_ALPHA        == PEDAL_EMA_ALPHA,        "ema drift");
+_Static_assert(T_PEDAL_ADC_FAULT_HI     == PEDAL_ADC_FAULT_HI,     "faulthi drift");
+_Static_assert(T_PEDAL_RELEASE_ZONE_PCT == PEDAL_RELEASE_ZONE_PCT, "zone drift");
+_Static_assert(T_PEDAL_RECOVERY_CYCLES  == PEDAL_RECOVERY_CYCLES,  "recov drift");
 
 /* =========================================================================
- * Simulation state — mirrors the static variables in sensor_manager.c
+ * Test harness state — the REAL production pipeline state (pedal_logic.h)
+ * is driven directly; the s_* mirrors are copied out after each cycle so the
+ * existing assertions keep working WITHOUT re-implementing the algorithm.
  * ========================================================================= */
+
+static PedalState g_st;
 
 static float    s_pct        = 0.0f;
 static float    s_pct_raw    = 0.0f;
@@ -64,130 +76,36 @@ static bool     s_ema_primed = false;
 static bool     s_rate_fault = false;
 static uint8_t  s_rec_count  = 0;
 
-static void sim_reset(void)
+static void sync_from_state(void)
 {
-    s_pct        = 0.0f;
-    s_pct_raw    = 0.0f;
-    s_pct_prev   = 0.0f;
-    s_ema        = 0.0f;
-    s_plausible  = true;
-    s_contradict = false;
-    s_ema_primed = false;
-    s_rate_fault = false;
-    s_rec_count  = 0;
+    s_pct        = g_st.pct;
+    s_pct_raw    = g_st.pct_raw;
+    s_pct_prev   = g_st.pct_prev;
+    s_ema        = g_st.ema;
+    s_plausible  = g_st.plausible;
+    s_contradict = g_st.contradict;
+    s_ema_primed = g_st.ema_primed;
+    s_rate_fault = g_st.rate_fault;
+    s_rec_count  = g_st.recovery_count;
 }
 
-static float raw_to_pct(uint16_t raw)
+static void sim_reset(void)
 {
-    if (raw <= T_PEDAL_ADC_MIN) return 0.0f;
-    if (raw >= T_PEDAL_ADC_MAX) return 100.0f;
-    return (float)(raw - T_PEDAL_ADC_MIN) * 100.0f
-         / (float)(T_PEDAL_ADC_MAX - T_PEDAL_ADC_MIN);
+    Pedal_StateInit(&g_st, T_PEDAL_ADC_MIN, T_PEDAL_ADC_MAX);
+    sync_from_state();
 }
 
 /*
- * Exact reimplementation of Pedal_Update() from sensor_manager.c.
- * Must stay byte-for-byte equivalent to the firmware function.
+ * Drive ONE cycle of the REAL production pipeline (Pedal_ProcessSamples from
+ * pedal_logic.c) and copy the resulting state into the s_* mirrors.  There is
+ * NO re-implementation of the algorithm here.
  */
 static void sim_update(uint16_t adc1, uint16_t adc2)
 {
-    uint16_t diff = (adc1 >= adc2) ? (uint16_t)(adc1 - adc2)
-                                   : (uint16_t)(adc2 - adc1);
-
-    /* Step 2: dual-sample check */
-    if (diff > T_PEDAL_SAMPLE_TOLERANCE) {
-        s_contradict = true;
-        s_plausible  = false;
-        s_pct        = 0.0f;
-        s_rec_count  = 0;
-        return;
-    }
-    s_contradict = false;
-
-    uint16_t avg = (uint16_t)(((uint32_t)adc1 + adc2) / 2U);
-
-    /* Step 4: range check (FAULT_LO == 0 → only high side) */
-#if T_PEDAL_ADC_FAULT_LO > 0U
-    if (avg < T_PEDAL_ADC_FAULT_LO || avg > T_PEDAL_ADC_FAULT_HI) {
-#else
-    if (avg > T_PEDAL_ADC_FAULT_HI) {
-#endif
-        s_plausible  = false;
-        s_pct        = 0.0f;
-        s_pct_prev   = 0.0f;
-        s_ema        = 0.0f;
-        s_ema_primed = false;
-        s_rate_fault = false;
-        s_rec_count  = 0;
-        return;
-    }
-
-    /* Step 5: convert */
-    s_pct_raw = raw_to_pct(avg);
-
-    /* Step 6: rate-fault recovery state machine */
-    if (s_rate_fault) {
-        if (s_pct_raw <= T_PEDAL_RELEASE_ZONE_PCT) {
-            s_rec_count++;
-            if (s_rec_count >= T_PEDAL_RECOVERY_CYCLES) {
-                s_rate_fault = false;
-                s_rec_count  = 0;
-                s_plausible  = true;
-                s_pct        = 0.0f;
-                s_pct_prev   = 0.0f;
-                s_ema        = 0.0f;
-                s_ema_primed = false;
-                return;
-            }
-        } else {
-            s_rec_count = 0;
-        }
-        s_plausible = false;
-        s_pct       = 0.0f;
-        return;
-    }
-
-    /* Step 7: direction-aware rate check */
-    float delta = s_pct_raw - s_pct_prev;
-
-    if (delta < -(T_PEDAL_MAX_RATE_PCT)) {
-        /* Rapid release */
-        s_pct        = 0.0f;
-        s_pct_prev   = 0.0f;
-        s_ema        = 0.0f;
-        s_ema_primed = false;
-        s_plausible  = true;
-        s_rate_fault = false;
-        s_rec_count  = 0;
-        return;
-    }
-
-    if (delta > T_PEDAL_MAX_RATE_PCT) {
-        /* Rapid application */
-        s_plausible  = false;
-        s_rate_fault = true;
-        s_pct        = 0.0f;
-        s_pct_prev   = s_pct_raw;   /* break lockout */
-        s_ema        = 0.0f;
-        s_ema_primed = false;
-        s_rec_count  = 0;
-        return;
-    }
-
-    /* Step 8: EMA (only when rate check passed) */
-    if (!s_ema_primed) {
-        s_ema        = s_pct_raw;
-        s_ema_primed = true;
-    } else {
-        s_ema = T_PEDAL_EMA_ALPHA * s_pct_raw
-              + (1.0f - T_PEDAL_EMA_ALPHA) * s_ema;
-    }
-
-    /* Step 9: commit */
-    s_plausible = true;
-    s_pct       = s_ema;
-    s_pct_prev  = s_pct_raw;
+    Pedal_ProcessSamples(&g_st, adc1, adc2);
+    sync_from_state();
 }
+
 
 /* =========================================================================
  * Test framework
@@ -635,6 +553,93 @@ static void tc17_range_boundary(void)
 }
 
 /* =========================================================================
+ * Test Case 18 — §5 fast PARTIAL release that settles ABOVE the rest zone
+ *   Reproduces the remaining defect: 100 %→60 % rapid release must NOT be
+ *   treated as a fault, must NOT force history to 0 (which caused a FALSE
+ *   +60 % rising rate-fault on the next cycle), and the demand must reduce
+ *   to ~60 % (never exceed the physical pedal).
+ * ========================================================================= */
+static void tc18_fast_partial_release_100_to_60(void)
+{
+    printf("TC18: fast partial release 100 -> 60 and hold 60\n");
+    sim_reset();
+    /* Ramp to 100 % (<35 %/cycle steps). */
+    float ramp[] = {20.0f, 40.0f, 60.0f, 80.0f, 100.0f};
+    for (int i = 0; i < 5; i++)
+        sim_update(adc_for_pct(ramp[i]), adc_for_pct(ramp[i]));
+    ASSERT_TRUE(s_plausible, "TC18: plausible at 100 %");
+
+    /* Rapid release to 60 % in ONE cycle: delta = -40 % < -35 %. */
+    sim_update(adc_for_pct(60.0f), adc_for_pct(60.0f));
+    ASSERT_TRUE(s_plausible,        "TC18: 100->60 is a safe reduction, not a fault");
+    ASSERT_FALSE(s_rate_fault,      "TC18: no rate_fault on partial release");
+    ASSERT_NEAR(s_pct, 60.0f, 1.0f, "TC18: output tracks reduced pedal (~60 %)");
+    ASSERT_TRUE(s_pct <= 60.5f,     "TC18: output never exceeds physical pedal");
+    ASSERT_NEAR(s_pct_prev, 60.0f, 1.0f, "TC18: baseline re-anchored to 60 %");
+
+    /* Hold at 60 %: the NEXT cycle must NOT fire a false +rising fault. */
+    for (int i = 0; i < 5; i++) {
+        sim_update(adc_for_pct(60.0f), adc_for_pct(60.0f));
+        ASSERT_TRUE(s_plausible,   "TC18: still plausible holding 60 %");
+        ASSERT_FALSE(s_rate_fault, "TC18: no false rising fault holding 60 %");
+    }
+    ASSERT_NEAR(s_pct, 60.0f, 1.0f, "TC18: settled at ~60 %");
+}
+
+/* =========================================================================
+ * Test Case 19 — §5 partial releases 80->40 and 60->20 (above rest zone)
+ * ========================================================================= */
+static void tc19_partial_releases_above_zone(void)
+{
+    printf("TC19: partial releases 80->40 and 60->20\n");
+
+    /* 80 -> 40 */
+    sim_reset();
+    float r1[] = {20.0f, 40.0f, 60.0f, 80.0f};
+    for (int i = 0; i < 4; i++)
+        sim_update(adc_for_pct(r1[i]), adc_for_pct(r1[i]));
+    sim_update(adc_for_pct(40.0f), adc_for_pct(40.0f));   /* delta -40 */
+    ASSERT_TRUE(s_plausible,        "TC19: 80->40 not a fault");
+    ASSERT_FALSE(s_rate_fault,      "TC19: 80->40 no rate_fault");
+    ASSERT_NEAR(s_pct, 40.0f, 1.0f, "TC19: output ~40 %");
+    sim_update(adc_for_pct(40.0f), adc_for_pct(40.0f));   /* hold */
+    ASSERT_TRUE(s_plausible,        "TC19: 80->40 hold plausible");
+    ASSERT_FALSE(s_rate_fault,      "TC19: 80->40 hold no false fault");
+
+    /* 60 -> 20 */
+    sim_reset();
+    float r2[] = {20.0f, 40.0f, 60.0f};
+    for (int i = 0; i < 3; i++)
+        sim_update(adc_for_pct(r2[i]), adc_for_pct(r2[i]));
+    sim_update(adc_for_pct(20.0f), adc_for_pct(20.0f));   /* delta -40 */
+    ASSERT_TRUE(s_plausible,        "TC19: 60->20 not a fault");
+    ASSERT_FALSE(s_rate_fault,      "TC19: 60->20 no rate_fault");
+    ASSERT_NEAR(s_pct, 20.0f, 1.0f, "TC19: output ~20 %");
+    sim_update(adc_for_pct(20.0f), adc_for_pct(20.0f));   /* hold */
+    ASSERT_TRUE(s_plausible,        "TC19: 60->20 hold plausible");
+    ASSERT_FALSE(s_rate_fault,      "TC19: 60->20 hold no false fault");
+}
+
+/* =========================================================================
+ * Test Case 20 — §5 fast release 40->2 that DOES enter the rest zone → 0 %
+ * ========================================================================= */
+static void tc20_fast_release_into_rest_zone(void)
+{
+    printf("TC20: fast release 40 -> 2 (into rest zone) -> clean 0\n");
+    sim_reset();
+    float ramp[] = {20.0f, 40.0f};
+    for (int i = 0; i < 2; i++)
+        sim_update(adc_for_pct(ramp[i]), adc_for_pct(ramp[i]));
+    /* 40 -> 2 %: delta -38 < -35, and 2 % <= release zone (3 %). */
+    sim_update(adc_for_pct(2.0f), adc_for_pct(2.0f));
+    ASSERT_TRUE(s_plausible,           "TC20: plausible");
+    ASSERT_FALSE(s_rate_fault,         "TC20: no rate_fault");
+    ASSERT_NEAR(s_pct, 0.0f, 0.5f,     "TC20: clean 0 % when settling in rest zone");
+    ASSERT_NEAR(s_pct_prev, 0.0f, 0.5f, "TC20: prev reset to 0");
+    ASSERT_NEAR(s_ema, 0.0f, 0.5f,     "TC20: EMA reset to 0");
+}
+
+/* =========================================================================
  * main
  * ========================================================================= */
 int main(void)
@@ -656,6 +661,9 @@ int main(void)
     tc15_small_rate_transitions();
     tc16_no_permanent_lockout();
     tc17_range_boundary();
+    tc18_fast_partial_release_100_to_60();
+    tc19_partial_releases_above_zone();
+    tc20_fast_release_into_rest_zone();
 
     printf("=== test_pedal_plausibility: %d run, %d failed ===\n",
            tests_run, tests_failed);

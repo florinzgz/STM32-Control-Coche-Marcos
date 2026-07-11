@@ -61,6 +61,7 @@ jobs:
 
       - name: Run STM32 host tests
         run: |
+          set -euo pipefail
           mkdir -p artifacts/tests
           {
             for src in \
@@ -80,6 +81,7 @@ jobs:
               Core/Src/test_steering_cal_store.c \
               Core/Src/test_steering_z.c \
               Core/Src/test_pedal_cal_limits.c \
+              Core/Src/test_pedal_plausibility.c \
               Core/Src/test_loop_diag.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
@@ -90,6 +92,7 @@ jobs:
                 Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
                 Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
+                Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -101,6 +104,7 @@ jobs:
 
       - name: Run ESP32 host tests
         run: |
+          set -euo pipefail
           mkdir -p artifacts/tests
           {
             echo "-- test_relay_audio.cpp"
@@ -148,6 +152,12 @@ jobs:
               esp32/src/test_wheel_diag_hint.cpp \
               -o /tmp/test_wheel_diag_hint
             /tmp/test_wheel_diag_hint
+
+            echo "-- test_stm32_liveness.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_stm32_liveness.cpp \
+              -o /tmp/test_stm32_liveness
+            /tmp/test_stm32_liveness
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
@@ -169,12 +179,14 @@ jobs:
 
       - name: Build STM32 firmware
         run: |
+          set -euo pipefail
           mkdir -p artifacts/build
           make clean
           make -j2 2>&1 | tee artifacts/build/stm32-make.txt
 
       - name: Build ESP32 firmware (PlatformIO)
         run: |
+          set -euo pipefail
           mkdir -p artifacts/build
           python3 -m pip install --upgrade pip
           python3 -m pip install --user platformio

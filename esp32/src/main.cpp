@@ -38,6 +38,7 @@
 #include "config_store.h"
 #include "traction_switch.h"
 #include "display_backlight.h"
+#include "stm32_liveness.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -268,8 +269,14 @@ static constexpr uint32_t STM32_HB_FREEZE_TIME_MS =
     (uint32_t)STM32_HB_FREEZE_COUNT * can::HEARTBEAT_INTERVAL_MS;
 static_assert(STM32_HB_FREEZE_TIME_MS < can::CAN_LOSS_TIMEOUT_MS,
               "STM32 freeze detection must trigger before CAN-loss timeout");
-static uint8_t  stm32HbLastCounter   = 0xFFU;           // Init to impossible value
-static uint8_t  stm32HbSameCount     = 0;
+// Absence timeout: if no NEW heartbeat frame arrives within this window the
+// STM32 is treated as not-alive independently of the counter value.  Kept
+// below CAN_LOSS_TIMEOUT_MS so the dedicated CAN-loss error screen still wins.
+static constexpr uint32_t STM32_HB_ABSENCE_TIMEOUT_MS = STM32_HB_FREEZE_TIME_MS;
+static Stm32Liveness stm32Liveness(STM32_HB_FREEZE_COUNT, STM32_HB_ABSENCE_TIMEOUT_MS);
+// Rate-limit the "frozen" warning so a stuck STM32 cannot spam Serial.
+static unsigned long stm32FrozenWarnLastMs = 0;
+static constexpr unsigned long STM32_FROZEN_WARN_INTERVAL_MS = 1000;
 static bool     stm32IsAlive         = false;
 
 // ---- Gear re-sync after STM32 restart (SAFETY FIX) ----
@@ -858,19 +865,18 @@ void loop() {
     {
         const auto& hb = vehicleData.heartbeat();
         if (hb.timestampMs > 0) {
-            uint8_t counter = hb.aliveCounter;
-            if (counter != stm32HbLastCounter) {
-                stm32HbLastCounter = counter;
-                stm32HbSameCount   = 0;
-                stm32IsAlive       = true;
-            } else {
-                if (stm32HbSameCount < STM32_HB_FREEZE_COUNT) {
-                    stm32HbSameCount++;
-                }
-                stm32IsAlive = (stm32HbSameCount < STM32_HB_FREEZE_COUNT);
-                if (!stm32IsAlive) {
-                    Serial.println("[SAFETY][WARN] STM32 heartbeat counter frozen — inhibiting commands");
-                }
+            // Evaluate the alive counter only when a NEW heartbeat frame has
+            // been decoded (tracked via hb.timestampMs).  This prevents the
+            // same sample from being counted repeatedly while loop() spins far
+            // faster than the ~100 ms heartbeat period (root cause of the
+            // FALSE "STM32 frozen" detection).  A time-based absence timeout
+            // covers the "no new heartbeat at all" case.
+            stm32Liveness.update((uint32_t)hb.timestampMs, hb.aliveCounter, (uint32_t)now);
+            stm32IsAlive = stm32Liveness.isAlive();
+            if (stm32Liveness.consumeFrozenEdge() &&
+                (now - stm32FrozenWarnLastMs) >= STM32_FROZEN_WARN_INTERVAL_MS) {
+                stm32FrozenWarnLastMs = now;
+                Serial.println("[SAFETY][WARN] STM32 heartbeat counter frozen — inhibiting commands");
             }
 
             // ---- Gear re-sync after STM32 restart (SAFETY FIX) ----
