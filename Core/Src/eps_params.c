@@ -55,6 +55,20 @@ typedef struct {
     uint32_t     checksum;    /* CRC32 of magic + sequence + params  */
 } eps_flash_slot_t;
 
+/* STM32G4 flash is programmed in 64-bit double-words.  The number of
+ * double-words needed to hold one slot, rounded up.  A dedicated aligned,
+ * zero-padded buffer of this many uint64_t words is used for programming so
+ * that (a) the 64-bit accesses are naturally aligned and (b) no bytes beyond
+ * the struct are ever read (the previous code cast &slot to uint64_t* and
+ * read one extra partially-out-of-bounds double-word when the slot size was
+ * not a multiple of 8).                                                     */
+#define EPS_SLOT_DWORDS  ((sizeof(eps_flash_slot_t) + 7U) / 8U)
+_Static_assert(EPS_SLOT_DWORDS >= 1U, "EPS slot must be at least one dword");
+_Static_assert(sizeof(eps_flash_slot_t) <= EPS_SLOT_DWORDS * 8U,
+               "EPS slot dword count too small for slot size");
+_Static_assert(EPS_SLOT_DWORDS * 8U <= 256U,
+               "EPS slot unexpectedly large — check struct layout");
+
 /* ---- Compiled defaults ---- */
 static const eps_params_t eps_defaults = {
     .assist_strength  = 0.45f,
@@ -306,14 +320,20 @@ bool EPS_Params_Save(void)
     }
 
     /* Write the new slot (double-word aligned writes).
-     * STM32G4 flash requires 64-bit (double-word) writes.          */
-    uint32_t slot_size    = sizeof(eps_flash_slot_t);
-    uint32_t dword_count  = (slot_size + 7U) / 8U;
-    const uint64_t *src   = (const uint64_t *)&slot;
+     * STM32G4 flash requires 64-bit (double-word) writes.
+     *
+     * Program from a dedicated aligned buffer that is zero-initialised and
+     * then filled with exactly sizeof(slot) bytes.  This guarantees natural
+     * 8-byte alignment for the 64-bit reads and prevents the previous
+     * out-of-bounds read of trailing bytes when sizeof(slot) is not a
+     * multiple of 8 (any padding double-word is deterministically zero).   */
+    uint64_t words[EPS_SLOT_DWORDS];
+    memset(words, 0, sizeof(words));
+    memcpy(words, &slot, sizeof(slot));
 
-    for (uint32_t i = 0; i < dword_count; i++) {
+    for (uint32_t i = 0; i < EPS_SLOT_DWORDS; i++) {
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                   target_addr + (i * 8U), src[i]);
+                                   target_addr + (i * 8U), words[i]);
         if (status != HAL_OK) {
             HAL_FLASH_Lock();
             return false;
@@ -324,10 +344,12 @@ bool EPS_Params_Save(void)
      * page erase.  If a power loss occurs between the erase and
      * this write, the backup is lost but the new slot is valid.    */
     if (has_prev) {
-        const uint64_t *prev_src = (const uint64_t *)&prev_slot;
-        for (uint32_t i = 0; i < dword_count; i++) {
+        uint64_t prev_words[EPS_SLOT_DWORDS];
+        memset(prev_words, 0, sizeof(prev_words));
+        memcpy(prev_words, &prev_slot, sizeof(prev_slot));
+        for (uint32_t i = 0; i < EPS_SLOT_DWORDS; i++) {
             status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                       prev_addr + (i * 8U), prev_src[i]);
+                                       prev_addr + (i * 8U), prev_words[i]);
             if (status != HAL_OK) {
                 /* Backup write failed — new slot is still valid */
                 break;
