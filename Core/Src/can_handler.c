@@ -2971,8 +2971,9 @@ static void steerz_handle_service_cmd(const uint8_t *payload, uint8_t len)
  *  EPS runtime parameter tuning (0xF9 + 0x30F telemetry)
  *
  *  Provides Engineering Menu access to all eps_params_t fields.
- *  SET_PARAM takes effect immediately (no state gate) to support
- *  real-time tuning from the Engineering Menu.
+ *  SET_PARAM applies live but is gated by EPS_Params_SetAllowed()
+ *  (Item A): STANDBY + PARK/NEUTRAL + stationary + ~zero traction
+ *  demand + no dangerous fault.  Blocked SETs reply ACK_BLOCKED_BY_SAFETY.
  *  SAVE and RESET require SYS_STATE_STANDBY for flash safety.
  *
  *  0x30F frame layout (DLC 8):
@@ -3110,12 +3111,42 @@ static void eps_handle_service_cmd(const uint8_t *payload, uint8_t len)
         return;
     }
 
-    /* SET_PARAM: immediate, no state gate — supports real-time tuning */
+    /* SET_PARAM: apply live, but only when the SET_PARAM safety gate
+     * (Item A) confirms the vehicle is safe & stationary.  A live SET
+     * alters steering-assist torque on the next control cycle, so the
+     * numeric range check in EPS_Params_Set() alone is not sufficient. */
     if (op == EPS_PARAM_OP_SET_PARAM) {
         if (len < 7) {
             CAN_SendCommandAck(0x10, ACK_INVALID);
             return;
         }
+
+        /* Assemble the live safety/motion snapshot and gate the SET. */
+        float ws_fl = fabsf(Wheel_GetSpeed_FL());
+        float ws_fr = fabsf(Wheel_GetSpeed_FR());
+        float ws_rl = fabsf(Wheel_GetSpeed_RL());
+        float ws_rr = fabsf(Wheel_GetSpeed_RR());
+        float ws_max = ws_fl;
+        if (ws_fr > ws_max) ws_max = ws_fr;
+        if (ws_rl > ws_max) ws_max = ws_rl;
+        if (ws_rr > ws_max) ws_max = ws_rr;
+
+        const TractionState_t *ts = Traction_GetState();
+        eps_setparam_gate_t gate = {
+            .state               = (uint8_t)Safety_GetState(),
+            .state_standby       = (uint8_t)SYS_STATE_STANDBY,
+            .gear                = (uint8_t)Traction_GetGear(),
+            .gear_park           = (uint8_t)GEAR_PARK,
+            .gear_neutral        = (uint8_t)GEAR_NEUTRAL,
+            .max_wheel_speed_kmh = ws_max,
+            .demand_pct          = ts ? ts->demandPct : 0.0f,
+            .dangerous_fault     = Safety_IsError(),
+        };
+        if (!EPS_Params_SetAllowed(&gate)) {
+            CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+            return;
+        }
+
         uint8_t param_id = payload[2];
         /* Deserialise float from bytes 3-6 (little-endian IEEE 754) */
         float value;
@@ -3611,9 +3642,10 @@ void CAN_ProcessMessages(void) {
                         steerz_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == SERVICE_ACTION_EPS_PARAMS) {
                         /* ---- EPS RUNTIME PARAMETER TUNING ----
-                         * Byte 1 = sub-opcode.  SET_PARAM takes effect
-                         * immediately to support real-time Engineering Menu
-                         * tuning; SAVE/RESET are STANDBY-gated.  Replies on
+                         * Byte 1 = sub-opcode.  SET_PARAM applies live but
+                         * is gated to STANDBY + PARK/NEUTRAL + stationary +
+                         * ~zero demand + no dangerous fault (Item A);
+                         * SAVE/RESET are STANDBY-gated.  Replies on
                          * CMD_ACK (0x103); telemetry on 0x30F.            */
                         eps_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == SERVICE_ACTION_DRIVE_TUNING) {

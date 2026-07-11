@@ -66,6 +66,37 @@ typedef enum {
     EPS_PARAM_COUNT
 } eps_param_id_t;
 
+/* ---- SET_PARAM safety gate (Item A) ----------------------------------
+ * A live EPS_Params_Set() reached over CAN (EPS_PARAM_OP_SET_PARAM) alters
+ * steering-assist torque on the very next control-loop cycle.  Numeric
+ * range validation in EPS_Params_Set() alone is NOT sufficient: an
+ * in-range value can still be dangerous if applied while the vehicle is
+ * moving or being driven.  EPS_Params_SetAllowed() gates the SET operation
+ * on the vehicle being in a demonstrably safe, stationary state.
+ *
+ * ALL five conditions must hold for a SET to be accepted:
+ *   1. system state == STANDBY,
+ *   2. gear is PARK or NEUTRAL (no drive/reverse engaged),
+ *   3. every wheel-speed magnitude <= EPS_SETPARAM_MAX_WHEEL_SPEED_KMH,
+ *   4. traction demand magnitude  <  EPS_SETPARAM_MAX_DEMAND_PCT (≈zero),
+ *   5. no dangerous active fault is latched.
+ *
+ * The predicate is PURE (no HAL / Safety dependency) so it links directly
+ * into the host unit test; the CAN handler assembles the live snapshot. */
+#define EPS_SETPARAM_MAX_WHEEL_SPEED_KMH  1.0f
+#define EPS_SETPARAM_MAX_DEMAND_PCT       3.0f
+
+typedef struct {
+    uint8_t state;               /* SystemState_t value                     */
+    uint8_t state_standby;       /* SYS_STATE_STANDBY enum value            */
+    uint8_t gear;                /* GearPosition_t value                    */
+    uint8_t gear_park;           /* GEAR_PARK enum value                    */
+    uint8_t gear_neutral;        /* GEAR_NEUTRAL enum value                 */
+    float   max_wheel_speed_kmh; /* max |wheel speed| across all wheels     */
+    float   demand_pct;          /* traction demand (signed %)              */
+    bool    dangerous_fault;     /* true if a dangerous active fault is set */
+} eps_setparam_gate_t;
+
 /* ---- Public API ---- */
 
 /**
@@ -90,6 +121,18 @@ const eps_params_t *EPS_Params_Get(void);
  * @retval true if accepted, false if id is out of range.
  */
 bool EPS_Params_Set(eps_param_id_t id, float value);
+
+/**
+ * @brief  SET_PARAM safety gate (Item A).
+ *         Returns true only when a live parameter change is safe to apply,
+ *         i.e. the vehicle is in STANDBY, in PARK or NEUTRAL, stationary,
+ *         with ~zero traction demand and no dangerous active fault.
+ *         Pure function — no side effects, no globals; callers pass a
+ *         snapshot of the current safety/motion state.
+ * @param  g  Snapshot of the gating conditions (must not be NULL).
+ * @retval true if a SET_PARAM may be applied, false otherwise.
+ */
+bool EPS_Params_SetAllowed(const eps_setparam_gate_t *g);
 
 /**
  * @brief  Persist the current RAM parameter copy to flash.

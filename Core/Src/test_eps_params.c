@@ -223,6 +223,88 @@ static void test_center_offset_range(void)
 
 /* ---- main ---- */
 
+/* ---- Item A: SET_PARAM safety gate ---- */
+
+static eps_setparam_gate_t safe_gate(void)
+{
+    /* A gate snapshot that satisfies all five conditions.  The reference
+     * enum values are supplied by the snapshot itself (pure predicate),
+     * so the test needs no firmware enums. */
+    eps_setparam_gate_t g;
+    g.state               = 1;   /* == state_standby below (STANDBY)      */
+    g.state_standby       = 1;
+    g.gear                = 0;   /* == gear_park below (PARK)             */
+    g.gear_park           = 0;
+    g.gear_neutral        = 2;
+    g.max_wheel_speed_kmh = 0.0f;
+    g.demand_pct          = 0.0f;
+    g.dangerous_fault     = false;
+    return g;
+}
+
+static void test_setparam_gate_allows_safe_state(void)
+{
+    eps_setparam_gate_t g = safe_gate();
+    ASSERT_TRUE(EPS_Params_SetAllowed(&g));   /* PARK, stationary, no fault */
+    g.gear = g.gear_neutral;                  /* NEUTRAL is also allowed    */
+    ASSERT_TRUE(EPS_Params_SetAllowed(&g));
+}
+
+static void test_setparam_gate_requires_standby(void)
+{
+    eps_setparam_gate_t g = safe_gate();
+    g.state = 0; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* BOOT     */
+    g.state = 2; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* ACTIVE   */
+    g.state = 3; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* DEGRADED */
+    g.state = 4; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* SAFE     */
+    g.state = 6; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* LIMP     */
+}
+
+static void test_setparam_gate_requires_park_or_neutral(void)
+{
+    eps_setparam_gate_t g = safe_gate();
+    g.gear = 1; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* REVERSE */
+    g.gear = 3; ASSERT_FALSE(EPS_Params_SetAllowed(&g)); /* DRIVE   */
+}
+
+static void test_setparam_gate_requires_stationary(void)
+{
+    eps_setparam_gate_t g = safe_gate();
+    g.max_wheel_speed_kmh = EPS_SETPARAM_MAX_WHEEL_SPEED_KMH + 0.5f;
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));
+    g.max_wheel_speed_kmh = -(EPS_SETPARAM_MAX_WHEEL_SPEED_KMH + 0.5f);
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));   /* magnitude, sign ignored */
+    g.max_wheel_speed_kmh = EPS_SETPARAM_MAX_WHEEL_SPEED_KMH;  /* boundary */
+    ASSERT_TRUE(EPS_Params_SetAllowed(&g));
+    g.max_wheel_speed_kmh = NAN;               /* unknown motion -> unsafe */
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));
+}
+
+static void test_setparam_gate_requires_zero_demand(void)
+{
+    eps_setparam_gate_t g = safe_gate();
+    g.demand_pct = EPS_SETPARAM_MAX_DEMAND_PCT;      /* at threshold -> no */
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));
+    g.demand_pct = -40.0f;                           /* reverse demand    */
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));
+    g.demand_pct = NAN;
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));
+    g.demand_pct = 2.0f;                             /* below threshold OK */
+    ASSERT_TRUE(EPS_Params_SetAllowed(&g));
+}
+
+static void test_setparam_gate_requires_no_fault(void)
+{
+    eps_setparam_gate_t g = safe_gate();
+    g.dangerous_fault = true;
+    ASSERT_FALSE(EPS_Params_SetAllowed(&g));
+}
+
+static void test_setparam_gate_null(void)
+{
+    ASSERT_FALSE(EPS_Params_SetAllowed(NULL));
+}
+
 int main(void)
 {
     test_reject_nan();
@@ -241,6 +323,14 @@ int main(void)
     test_reject_deadband_over_limit();
     test_reject_slew_over_limit();
     test_center_offset_range();
+
+    test_setparam_gate_allows_safe_state();
+    test_setparam_gate_requires_standby();
+    test_setparam_gate_requires_park_or_neutral();
+    test_setparam_gate_requires_stationary();
+    test_setparam_gate_requires_zero_demand();
+    test_setparam_gate_requires_no_fault();
+    test_setparam_gate_null();
 
     printf("\n--- eps_params tests: %d run, %d failed ---\n",
            tests_run, tests_failed);

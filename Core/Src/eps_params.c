@@ -242,6 +242,35 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
     return true;
 }
 
+bool EPS_Params_SetAllowed(const eps_setparam_gate_t *g)
+{
+    if (g == NULL) return false;
+
+    /* 1. System must be in STANDBY — never BOOT/ACTIVE/DEGRADED/SAFE/
+     *    ERROR/LIMP_HOME.  This is the same precondition SAVE/RESET use,
+     *    now extended to the live SET path. */
+    if (g->state != g->state_standby) return false;
+
+    /* 2. Gear must be PARK or NEUTRAL: no drive or reverse engaged. */
+    if (g->gear != g->gear_park && g->gear != g->gear_neutral) return false;
+
+    /* 3. Vehicle must be essentially stationary.  A NaN wheel speed is
+     *    treated as unsafe (unknown motion state). */
+    if (isnan(g->max_wheel_speed_kmh)) return false;
+    if (fabsf(g->max_wheel_speed_kmh) > EPS_SETPARAM_MAX_WHEEL_SPEED_KMH)
+        return false;
+
+    /* 4. Operator traction demand must be below the motion threshold
+     *    (treated as zero).  A NaN demand is unsafe. */
+    if (isnan(g->demand_pct)) return false;
+    if (fabsf(g->demand_pct) >= EPS_SETPARAM_MAX_DEMAND_PCT) return false;
+
+    /* 5. No dangerous active fault latched. */
+    if (g->dangerous_fault) return false;
+
+    return true;
+}
+
 void EPS_Params_ResetDefaults(void)
 {
     memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));

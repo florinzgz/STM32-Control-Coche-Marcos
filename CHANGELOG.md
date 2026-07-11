@@ -43,7 +43,9 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
     hardcoded constants remain in the control loop.  Backward-compatible by design.
   - New public getters: `Steering_GetMotorEffortPct()`, `Steering_GetEncoderRaw()`.
   - CAN `0xF9` SERVICE_ACTION + `0x30F` DIAG_EPS_PARAMS (5 frame kinds, 10 Hz burst):
-    real-time SET_PARAM (no safety gate), SAVE/RESET require STANDBY.
+    SET_PARAM applies live but is safety-gated (STANDBY + PARK/NEUTRAL + stationary
+    + ~zero traction demand + no dangerous fault, `EPS_Params_SetAllowed()`);
+    SAVE/RESET require STANDBY.
   - ESP32 HMI: `EpsParamsData` struct in `vehicle_data.h`; `0x30F` decoder in
     `can_rx.cpp`; `EPS_TUNING` and `STEER_DIAG` tiles added to Engineering Menu
     (NUM_MAIN_ITEMS 17→19); `drawEpsTuning()` 3-page editor with real-time +/-

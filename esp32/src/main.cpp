@@ -1124,14 +1124,27 @@ void loop() {
                 && ad.timestampMs >= g_modeSendMs
                 && ad.timestampMs != g_lastModeAckTs) {
                 g_lastModeAckTs = ad.timestampMs;
-                g_modeSync.onAck(ad.result == can::AckResult::OK
-                                     ? ModeSync::AckResult::OK
+                bool ackOk = (ad.result == can::AckResult::OK);
+                g_modeSync.onAck(ackOk ? ModeSync::AckResult::OK
                                      : ModeSync::AckResult::REJECTED);
+                // [MODESYNC] diagnostic — last ACK + requested/confirmed/retry.
+                Serial.printf(
+                    "[MODESYNC] ack=%s req=0x%02X conf=0x%02X retries=%u%s\n",
+                    ackOk ? "OK" : "REJECT",
+                    g_modeSync.desired(), g_modeSync.confirmed(),
+                    (unsigned)g_modeSync.retries(),
+                    g_modeSync.failed() ? " -> FAILED" : "");
             }
             if (g_modeSync.update(millis(), stm32IsAlive)
                     == ModeSync::Action::SEND) {
                 g_modeSendMs = millis();
                 sendModeCommand(g_modeSync.sendMode());
+                // [MODESYNC] diagnostic — each (re)transmission attempt.
+                Serial.printf(
+                    "[MODESYNC] send req=0x%02X conf=0x%02X attempt=%u/%u\n",
+                    g_modeSync.desired(), g_modeSync.confirmed(),
+                    (unsigned)g_modeSync.retries() + 1u,
+                    (unsigned)MODE_SYNC_MAX_RETRIES + 1u);
             }
         }
     }
