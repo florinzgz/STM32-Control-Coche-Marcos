@@ -19,6 +19,7 @@
 #include "led_controller.h"
 #include "eps_limits.h"
 #include "motion_inhibit_view.h"
+#include "wheel_traction.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
@@ -1724,10 +1725,16 @@ void EngineeringScreen::draw() {
         tft.fillRect(0, y0, ui::SCREEN_W, BACK_Y - y0 - 4, ui::COL_BG);
 
         static const char* const chNames[4] = {"CH0 FL", "CH1 FR", "CH2 RL", "CH3 RR"};
+        // Per-wheel traction share (%) — relative to the hardest-pulling wheel
+        // (max current = 100%).  Lets the operator compare how hard each wheel
+        // pulls during a turn (a quick Ackermann / traction calibration check).
+        uint8_t tractionPct[4] = {0};
+        traction::computeShare(inaLiveMotorCurrentRaw_, tractionPct);
         for (uint8_t i = 0; i < 4; ++i) {
             char aBuf[20];
             fmtA(aBuf, sizeof(aBuf), inaLiveMotorCurrentRaw_[i]);
-            snprintf(buf, sizeof(buf), "%s: %s", chNames[i], aBuf);
+            snprintf(buf, sizeof(buf), "%s: %-7s  TRAC %3u%%",
+                     chNames[i], aBuf, (unsigned)tractionPct[i]);
             tft.setTextColor(ui::COL_WHITE, ui::COL_BG);
             tft.drawString(buf, x, y0 + i * lh);
         }
@@ -4836,7 +4843,7 @@ void EngineeringScreen::drawInaLiveDiag() {
 
     tft.setTextSize(1);
     tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-    tft.drawString("Read-only: 0x201 + 0x207 + 0x309 telemetry", ui::SCREEN_W / 2, 34);
+    tft.drawString("Read-only  TRAC%=per-wheel share (max wheel=100%)", ui::SCREEN_W / 2, 34);
     tft.setTextDatum(TL_DATUM);
 
     // Dynamic lines are repainted by the partial-redraw branch in draw().
