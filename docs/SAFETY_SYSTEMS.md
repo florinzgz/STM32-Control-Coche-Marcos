@@ -1065,7 +1065,9 @@ When the FDCAN hardware enters bus-off state:
 
 1. **Immediate actions:**
    - `SAFETY_ERROR_CAN_BUSOFF` is set
-   - System transitions to `SYS_STATE_SAFE` (traction stopped, steering centered)
+   - System transitions to `SYS_STATE_LIMP_HOME` (CAN bus-off is a
+     communication failure, not a hardware danger — the vehicle stays mobile at
+     walking speed rather than being immobilised in SAFE/ERROR)
    - `busoff_count` in CAN statistics is incremented
 
 2. **Recovery sequence (non-blocking):**
@@ -1075,16 +1077,24 @@ When the FDCAN hardware enters bus-off state:
    - Each attempt executes: `HAL_FDCAN_Stop()` → `HAL_FDCAN_DeInit()` → `HAL_FDCAN_Init()` → `CAN_ConfigureFilters()` → `HAL_FDCAN_ActivateNotification()` → `HAL_FDCAN_Start()`
    - If any step fails, the attempt is abandoned and retried at the next interval
 
-3. **After successful recovery:**
-   - Bus-off flag is cleared
-   - `SAFETY_ERROR_CAN_BUSOFF` is cleared
-   - System remains in SAFE state until ESP32 heartbeat resumes
-   - `Safety_CheckCANTimeout()` handles SAFE → ACTIVE transition when heartbeat arrives
+3. **Recovery confirmation (sustained-heartbeat window):**
+   - After a re-init the peripheral being RUNNING is **not** sufficient to
+     declare recovery — it enters PROBATION (`busoff_recovery.c/.h`)
+   - The fault is cleared only after valid ESP32 heartbeats are present
+     **continuously** for `CAN_BUSOFF_RECOVERY_WINDOW_MS` (1000 ms); a heartbeat
+     gap or a fresh bus-off restarts the window
+   - A fresh bus-off during probation does **not** reset the retry counter, so a
+     persistent physical fault keeps counting toward `CAN_BUSOFF_MAX_RETRIES`
+   - When confirmed: `SAFETY_ERROR_CAN_BUSOFF` is cleared and the retry counter
+     resets; `Safety_CheckCANTimeout()` handles the LIMP_HOME → ACTIVE
+     transition once the link is stable
 
 4. **If recovery fails after 10 attempts:**
-   - System remains in SAFE state permanently
-   - No further recovery attempts (prevents infinite restart loops)
-   - Operator intervention required (power cycle)
+   - The code **stops issuing re-init attempts** — it does **not** escalate to
+     `SYS_STATE_ERROR` (which would cut the relays)
+   - The system remains in `SYS_STATE_LIMP_HOME` with `SAFETY_ERROR_CAN_BUSOFF`
+     latched (prevents infinite restart loops)
+   - Operator intervention (power cycle / bus repair) is required to clear it
 
 5. **Watchdog safety:**
    - The main loop continues running during all recovery attempts

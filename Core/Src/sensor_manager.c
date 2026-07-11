@@ -19,6 +19,7 @@
 
 #include "sensor_manager.h"
 #include "pedal_cal_store.h"  /* PEDAL_CAL_DEFAULT_MIN / MAX — single source of truth for compile-time endpoints */
+#include "pedal_logic.h"      /* shared pedal plausibility pipeline (production + host tests) */
 #include "safety_system.h"
 #include "service_mode.h"  /* per-module fault tagging (1.5 / 2.3)    */
 #include "main.h"
@@ -454,23 +455,8 @@ uint8_t Wheel_GetGpioLevel(uint8_t idx)
  *   - Simpler hardware (no external ADC component)
  * ========================================================================= */
 
-static uint16_t pedal_raw_adc   = 0;     /* Primary ADC raw (12-bit)          */
-static uint16_t pedal_raw_adc2  = 0;     /* Second sample for consistency     */
-static float    pedal_pct       = 0.0f;  /* Control output: 0–100% (EMA)     */
-static float    pedal_pct_raw   = 0.0f;  /* Instantaneous 0–100% (pre-EMA)   */
-static float    pedal_pct_prev  = 0.0f;  /* Previous cycle % for rate check   */
-static float    pedal_ema       = 0.0f;  /* EMA filtered percentage           */
-static bool     pedal_plausible = true;  /* Software plausibility result      */
-static bool     pedal_channels_contradict = false; /* Dual samples disagree   */
-static bool     pedal_ema_primed = false; /* EMA initialized after first read */
-/* Rate-fault recovery state machine.
- * pedal_rate_fault is set when an upward rate-of-change violation is
- * detected (rapid APPLICATION — potentially dangerous).  It clears only
- * after PEDAL_RECOVERY_CYCLES consecutive cycles with the pedal inside
- * the safe release zone (≤ PEDAL_RELEASE_ZONE_PCT).
- * pedal_recovery_count tracks consecutive qualifying cycles.           */
-static bool     pedal_rate_fault     = false; /* Upward rate fault active    */
-static uint8_t  pedal_recovery_count = 0;     /* Consecutive safe-zone cycles */
+static PedalState pedal_state;           /* Shared plausibility pipeline state */
+static bool       pedal_state_inited = false;
 
 extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c1;
@@ -481,74 +467,16 @@ extern I2C_HandleTypeDef hi2c1;
  *   Pedal pressed  ≈ 3.28 V → 3.28/3.3 × 4095 ≈ 4070 counts
  *
  * Runtime calibration:
- *   The active endpoints used by Pedal_RawToPercent() are kept in
- *   `pedal_adc_min` / `pedal_adc_max` (file-scope statics).  At boot
- *   they start at the compile-time defaults below and may be
- *   replaced via Pedal_ApplyCalibration() with values loaded from
- *   flash (Core/Src/pedal_cal_store.c).  All other pedal-pipeline
- *   thresholds (FAULT_LO/HI, sample tolerance, rate limit, EMA α,
- *   plausibility window) remain compile-time constants and are NOT
- *   affected by runtime calibration.                                  */
+ *   The active endpoints used by the pipeline are kept in
+ *   pedal_state.adc_min / pedal_state.adc_max.  At boot they start at
+ *   the compile-time defaults below and may be replaced via
+ *   Pedal_ApplyCalibration() with values loaded from flash
+ *   (Core/Src/pedal_cal_store.c).  All other pedal-pipeline thresholds
+ *   (FAULT_LO/HI, sample tolerance, rate limit, EMA α, release zone)
+ *   are compile-time constants in pedal_logic.h and are NOT affected by
+ *   runtime calibration.                                                */
 #define PEDAL_ADC_MIN_DEFAULT   PEDAL_CAL_DEFAULT_MIN   /* ≈0 V (pedal released) */
 #define PEDAL_ADC_MAX_DEFAULT   PEDAL_CAL_DEFAULT_MAX   /* ≈3.28 V (pedal fully pressed) */
-
-static uint16_t pedal_adc_min = PEDAL_ADC_MIN_DEFAULT;
-static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
-
-/* Fault detection thresholds — values outside this band indicate
- * open/short circuit.  With the pedal wired directly to 3.3 V the
- * usable signal spans almost the full 12-bit range.
- *
- * Measured behaviour (multimeter, pedal released): the rest voltage is
- * ≈ 0.4 mV, i.e. ≈ 0 ADC counts.  A released pedal therefore legitimately
- * reads 0, so 0 counts must NOT be treated as an open-wire fault — doing
- * so produced spurious "implausible pedal" faults at idle.  Because a
- * broken signal wire on a direct-to-ADC input floats unpredictably
- * (often noisy, not a clean 0), a low threshold cannot reliably tell
- * "rest ≈ 0 V" apart from "open wire" anyway; gross faults are caught by
- * the dual-sample consistency and rate-of-change checks instead.  Hence
- * FAULT_LO = 0 (no low-side fault) and only the high-side rail short is
- * flagged:
- *   full press is ≈ 3.28 V (≈4070 counts), so only a rail short that
- *   pins the ADC at 4095 is treated as a short fault — FAULT_HI = 4094.
- * (FAULT_HI stays strictly inside 0..4095 so the unsigned upper-range
- *  comparison below is never trivially true/false under -Werror.  The
- *  lower-range comparison is compiled out when FAULT_LO == 0 to avoid a
- *  tautological unsigned "< 0" test.)                                  */
-#define PEDAL_ADC_FAULT_LO   0U       /* rest ≈ 0 V (≈0 counts) — 0 is a valid released reading */
-#define PEDAL_ADC_FAULT_HI   4094U    /* full ≈ 3.28 V — only 4095 counts faults */
-
-/* Dual-sample consistency tolerance (ADC counts).
- * Two consecutive reads of the same DC signal should agree within
- * a few LSBs.  12-bit ADC noise is typically ±2 LSB; allow ±30
- * counts (~24 mV) to handle minor noise without false alarms.        */
-#define PEDAL_SAMPLE_TOLERANCE  30U
-
-/* Rate-of-change limit: maximum % change per 50 ms update cycle.
- * Physical pedal travel time (0–100%) is ~200 ms minimum → max
- * rate ≈ 25 %/50ms.  Set threshold at 35 %/50ms for margin.         */
-#define PEDAL_MAX_RATE_PCT  35.0f
-
-/* EMA filter coefficient (0 < α ≤ 1).
- * α = 0.3 gives ~3 cycle settling time (150 ms at 20 Hz).
- * Good balance between noise rejection and pedal responsiveness.     */
-#define PEDAL_EMA_ALPHA  0.3f
-
-/* Upward rate-fault recovery parameters.
- * After an upward rate violation (pedal_rate_fault = true) the
- * recovery state machine requires PEDAL_RECOVERY_CYCLES consecutive
- * Pedal_Update() cycles with the pedal inside the safe release zone
- * (≤ PEDAL_RELEASE_ZONE_PCT) before plausibility is restored and
- * the output is re-enabled from 0 %.
- *
- * PEDAL_RELEASE_ZONE_PCT is deliberately tight (3 %) — it matches
- * STARTUP_PEDAL_REST_PCT and the calibration "pedal released" check
- * so that "released" means the same thing throughout the firmware.
- *
- * PEDAL_RECOVERY_CYCLES = 3 → 150 ms at 50 ms/cycle.  Short enough
- * not to feel sluggish, long enough to reject a single glitch.       */
-#define PEDAL_RELEASE_ZONE_PCT   3.0f
-#define PEDAL_RECOVERY_CYCLES    3U
 
 /* Cross-validation tolerance: 5% of full pedal range
  * (kept for API compatibility with safety_system.c checks)           */
@@ -556,211 +484,58 @@ static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
 
 /**
  * @brief  Read pedal via internal ADC, two consecutive samples (~2 µs total).
+ * @param  adc1 out first sample; adc2 out second sample.
  */
-static void Pedal_ReadDualSample(void)
+static void Pedal_ReadDualSample(uint16_t *adc1, uint16_t *adc2)
 {
+    uint16_t s1 = *adc1;
+    uint16_t s2 = *adc2;
+
     /* First sample */
     HAL_ADC_Start(&hadc1);
     if (HAL_ADC_PollForConversion(&hadc1, 2) == HAL_OK) {
-        pedal_raw_adc = (uint16_t)HAL_ADC_GetValue(&hadc1);
+        s1 = (uint16_t)HAL_ADC_GetValue(&hadc1);
     }
     HAL_ADC_Stop(&hadc1);
 
     /* Second sample (immediate re-read for consistency check) */
     HAL_ADC_Start(&hadc1);
     if (HAL_ADC_PollForConversion(&hadc1, 2) == HAL_OK) {
-        pedal_raw_adc2 = (uint16_t)HAL_ADC_GetValue(&hadc1);
+        s2 = (uint16_t)HAL_ADC_GetValue(&hadc1);
     }
     HAL_ADC_Stop(&hadc1);
-}
 
-/**
- * @brief  Map raw ADC count to 0–100% using calibrated range.
- */
-static float Pedal_RawToPercent(uint16_t raw)
-{
-    if (raw <= pedal_adc_min) return 0.0f;
-    if (raw >= pedal_adc_max) return 100.0f;
-    return (float)(raw - pedal_adc_min) * 100.0f
-         / (float)(pedal_adc_max - pedal_adc_min);
+    *adc1 = s1;
+    *adc2 = s2;
 }
 
 void Pedal_Update(void)
 {
+    if (!pedal_state_inited) {
+        Pedal_StateInit(&pedal_state, PEDAL_ADC_MIN_DEFAULT, PEDAL_ADC_MAX_DEFAULT);
+        pedal_state_inited = true;
+    }
+
     /* 1. Read ADC twice (~2 µs total — no blocking delay) */
-    Pedal_ReadDualSample();
+    uint16_t adc1 = pedal_state.raw_adc;
+    uint16_t adc2 = pedal_state.raw_adc2;
+    Pedal_ReadDualSample(&adc1, &adc2);
 
-    /* 2. Dual-sample consistency check */
-    uint16_t diff_raw;
-    if (pedal_raw_adc >= pedal_raw_adc2)
-        diff_raw = pedal_raw_adc - pedal_raw_adc2;
-    else
-        diff_raw = pedal_raw_adc2 - pedal_raw_adc;
-
-    if (diff_raw > PEDAL_SAMPLE_TOLERANCE) {
-        /* Consecutive samples disagree — noise or transient fault.
-         * Zero safe output; if a rate-fault recovery was in progress
-         * reset the consecutive counter (samples are unreliable).
-         * pedal_rate_fault is intentionally NOT cleared here — the
-         * contradiction is a separate fault type that supersedes it but
-         * recovery must still restart from zero.                       */
-        pedal_channels_contradict = true;
-        pedal_plausible           = false;
-        pedal_pct                 = 0.0f;
-        pedal_recovery_count      = 0;
-        return;
-    }
-    pedal_channels_contradict = false;
-
-    /* 3. Use average of both samples for best accuracy */
-    uint16_t avg_raw = (uint16_t)(((uint32_t)pedal_raw_adc + pedal_raw_adc2) / 2U);
-
-    /* 4. Range validation — detect open/short circuit.
-     *    Rest reads ≈0 counts, so 0 is valid: only the high-side rail
-     *    short is flagged.  The low comparison is compiled in only when
-     *    FAULT_LO > 0 to avoid a tautological unsigned "< 0" test.      */
-#if PEDAL_ADC_FAULT_LO > 0U
-    if (avg_raw < PEDAL_ADC_FAULT_LO || avg_raw > PEDAL_ADC_FAULT_HI) {
-#else
-    if (avg_raw > PEDAL_ADC_FAULT_HI) {
-#endif
-        /* Rail fault: zero all accumulated state so recovery starts
-         * from a clean baseline when the fault clears.                */
-        pedal_plausible      = false;
-        pedal_pct            = 0.0f;
-        pedal_pct_prev       = 0.0f;
-        pedal_ema            = 0.0f;
-        pedal_ema_primed     = false;
-        pedal_rate_fault     = false;
-        pedal_recovery_count = 0;
-        return;
-    }
-
-    /* 5. Convert to percentage */
-    pedal_pct_raw = Pedal_RawToPercent(avg_raw);
-
-    /* 6. Rate-fault recovery state machine.
-     *
-     * When an upward rate violation was previously detected the pedal
-     * must spend PEDAL_RECOVERY_CYCLES consecutive cycles inside the
-     * release zone (≤ PEDAL_RELEASE_ZONE_PCT) before plausibility is
-     * restored.  During recovery the output is held at 0 %.
-     *
-     * This block runs BEFORE the rate check so that a downward
-     * transition from any high value during recovery does NOT re-fire
-     * the rapid-release path — recovery ends cleanly from 0 %.        */
-    if (pedal_rate_fault) {
-        if (pedal_pct_raw <= PEDAL_RELEASE_ZONE_PCT) {
-            pedal_recovery_count++;
-            if (pedal_recovery_count >= PEDAL_RECOVERY_CYCLES) {
-                /* Recovery complete.  Restore plausibility and reset all
-                 * accumulated state to 0 % so the output ramps up
-                 * smoothly from a clean baseline on the next cycle.    */
-                pedal_rate_fault     = false;
-                pedal_recovery_count = 0;
-                pedal_plausible      = true;
-                pedal_pct            = 0.0f;
-                pedal_pct_prev       = 0.0f;
-                pedal_ema            = 0.0f;
-                pedal_ema_primed     = false;
-                return; /* Next cycle processes normally from 0 % */
-            }
-        } else {
-            /* Pedal moved above release zone — reset recovery counter */
-            pedal_recovery_count = 0;
-        }
-        pedal_plausible = false;
-        pedal_pct       = 0.0f;
-        return;
-    }
-
-    /* 7. Rate-of-change check — direction aware.
-     *
-     * ROOT-CAUSE FIX: the original code used fabs(delta) which treated
-     * a rapid RELEASE identically to a rapid APPLICATION.  When the
-     * pedal dropped from e.g. 53 % to 0 % in a single 50 ms cycle the
-     * fault fired, pedal_pct_prev was never updated (still 53 %), and
-     * every subsequent cycle repeated the same comparison → permanent
-     * lockout with pedal_pct frozen at 53 % while the physical pedal
-     * was at 0 %.  Safety_CheckSensors() saw !Pedal_IsPlausible() and
-     * forced LIMP_HOME; the HMI displayed the stale 53 % via CAN 0x20B.
-     *
-     * Corrected behaviour:
-     *
-     * A. Rapid RELEASE (delta < −PEDAL_MAX_RATE_PCT):
-     *    A fast drop toward zero is always the safe direction for
-     *    traction control.  Accept it immediately: zero the output,
-     *    reset all accumulated state, mark plausible.
-     *
-     * B. Rapid APPLICATION (delta > +PEDAL_MAX_RATE_PCT):
-     *    A sudden large upward jump is physically improbable in one
-     *    50 ms cycle and may indicate noise, EMI, or a wiring fault.
-     *    Enter recovery mode: zero the output, reset pedal_pct_prev
-     *    to the current raw reading to BREAK THE LOCKOUT (the permanent
-     *    lockout was caused by never updating pedal_pct_prev on fault),
-     *    require PEDAL_RECOVERY_CYCLES consecutive released cycles.    */
-    float delta = pedal_pct_raw - pedal_pct_prev;
-
-    if (delta < -(PEDAL_MAX_RATE_PCT)) {
-        /* Rapid RELEASE — safe downward transition.
-         * Zero output immediately and reset all accumulated state so
-         * the next cycle starts from a clean 0 % baseline.            */
-        pedal_pct            = 0.0f;
-        pedal_pct_prev       = 0.0f;
-        pedal_ema            = 0.0f;
-        pedal_ema_primed     = false;
-        pedal_plausible      = true;
-        pedal_rate_fault     = false;
-        pedal_recovery_count = 0;
-        return;
-    }
-
-    if (delta > PEDAL_MAX_RATE_PCT) {
-        /* Rapid APPLICATION — fault.
-         * Zero safe output and reset pedal_pct_prev to the current
-         * raw reading.  This is critical: if pedal_pct_prev is left
-         * at the old baseline every future cycle will compare against
-         * it and permanently fail, freezing the output at the old
-         * value.  Resetting to current raw means the next cycle's
-         * rate check is relative to the actual signal level.          */
-        pedal_plausible      = false;
-        pedal_rate_fault     = true;
-        pedal_pct            = 0.0f;
-        pedal_pct_prev       = pedal_pct_raw; /* break permanent lockout */
-        pedal_ema            = 0.0f;
-        pedal_ema_primed     = false;
-        pedal_recovery_count = 0;
-        return;
-    }
-
-    /* 8. EMA filter — only updated when rate check has passed.
-     *    Moving this after the rate check prevents EMA contamination:
-     *    in the original code EMA was updated before the rate check so
-     *    a faulted cycle injected the bad raw reading into the filter
-     *    even though pedal_pct never received the updated EMA.         */
-    if (!pedal_ema_primed) {
-        pedal_ema        = pedal_pct_raw;
-        pedal_ema_primed = true;
-    } else {
-        pedal_ema = PEDAL_EMA_ALPHA * pedal_pct_raw
-                  + (1.0f - PEDAL_EMA_ALPHA) * pedal_ema;
-    }
-
-    /* 9. All checks passed — publish output and update history */
-    pedal_plausible = true;
-    pedal_pct       = pedal_ema;
-    pedal_pct_prev  = pedal_pct_raw;
+    /* 2–9. Run the shared plausibility pipeline (pedal_logic.c).  This is the
+     *      SAME code path exercised by the host unit tests, so there is no
+     *      duplicated logic to drift out of sync.                            */
+    Pedal_ProcessSamples(&pedal_state, adc1, adc2);
 }
 
-float Pedal_GetValue(void)          { return (float)pedal_raw_adc; }
-float Pedal_GetPercent(void)        { return pedal_pct; }
-bool  Pedal_IsPlausible(void)       { return pedal_plausible; }
-bool  Pedal_IsContradictory(void)   { return pedal_channels_contradict; }
-float Pedal_GetRawPercent(void)    { return pedal_pct_raw; }
+float Pedal_GetValue(void)          { return (float)pedal_state.raw_adc; }
+float Pedal_GetPercent(void)        { return pedal_state.pct; }
+bool  Pedal_IsPlausible(void)       { return pedal_state.plausible; }
+bool  Pedal_IsContradictory(void)   { return pedal_state.contradict; }
+float Pedal_GetRawPercent(void)    { return pedal_state.pct_raw; }
 
 /* ---- Runtime calibration accessors ----
- * Pedal_ApplyCalibration() replaces the raw→% endpoints used by
- * Pedal_RawToPercent().  The caller is responsible for range-
+ * Pedal_ApplyCalibration() replaces the raw→% endpoints used by the
+ * plausibility pipeline.  The caller is responsible for range-
  * validating (adc_min, adc_max) before invoking this function —
  * pedal_cal_store.c does that via PedalCal_Validate().
  *
@@ -774,25 +549,30 @@ float Pedal_GetRawPercent(void)    { return pedal_pct_raw; }
  * Safety_ValidateThrottle().                                       */
 void Pedal_ApplyCalibration(uint16_t adc_min, uint16_t adc_max)
 {
-    pedal_adc_min = adc_min;
-    pedal_adc_max = adc_max;
+    if (!pedal_state_inited) {
+        Pedal_StateInit(&pedal_state, adc_min, adc_max);
+        pedal_state_inited = true;
+    } else {
+        pedal_state.adc_min = adc_min;
+        pedal_state.adc_max = adc_max;
+    }
 }
 
 uint16_t Pedal_GetRawADC(void)
 {
-    return pedal_raw_adc;
+    return pedal_state.raw_adc;
 }
 
 uint16_t Pedal_GetRawADC2(void)
 {
-    return pedal_raw_adc2;
+    return pedal_state.raw_adc2;
 }
 
 uint16_t Pedal_GetRawADCDiff(void)
 {
-    return (pedal_raw_adc >= pedal_raw_adc2)
-         ? (uint16_t)(pedal_raw_adc - pedal_raw_adc2)
-         : (uint16_t)(pedal_raw_adc2 - pedal_raw_adc);
+    return (pedal_state.raw_adc >= pedal_state.raw_adc2)
+         ? (uint16_t)(pedal_state.raw_adc - pedal_state.raw_adc2)
+         : (uint16_t)(pedal_state.raw_adc2 - pedal_state.raw_adc);
 }
 
 /* ---- Fresh-conversion sampler ------------------------------------
@@ -2127,17 +1907,15 @@ void Sensor_Init(void)
         wheel_flood_window_start[i] = 0;
     }
 
-    pedal_raw_adc  = 0;
-    pedal_raw_adc2 = 0;
-    pedal_pct      = 0.0f;
-    pedal_pct_raw  = 0.0f;
-    pedal_pct_prev = 0.0f;
-    pedal_ema      = 0.0f;
-    pedal_plausible        = true;
-    pedal_channels_contradict = false;
-    pedal_ema_primed       = false;
-    pedal_rate_fault       = false;
-    pedal_recovery_count   = 0;
+    /* Reset the pedal pipeline to a clean released baseline, but PRESERVE
+     * any runtime calibration endpoints already applied (original behaviour:
+     * Sensor_Init did not touch pedal_adc_min/max).                        */
+    {
+        uint16_t cal_min = pedal_state_inited ? pedal_state.adc_min : PEDAL_ADC_MIN_DEFAULT;
+        uint16_t cal_max = pedal_state_inited ? pedal_state.adc_max : PEDAL_ADC_MAX_DEFAULT;
+        Pedal_StateInit(&pedal_state, cal_min, cal_max);
+        pedal_state_inited = true;
+    }
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         current_amps[i]     = 0.0f;

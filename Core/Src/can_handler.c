@@ -13,11 +13,13 @@
 #include "can_handler.h"
 #include "main.h"
 #include "motor_control.h"
+#include "motion_inhibit.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
 #include "service_mode.h"
 #include "math_safety.h"
 #include "error_log.h"
+#include "busoff_recovery.h"
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
 #include "gear_limits_store.h"
@@ -113,9 +115,14 @@ static uint8_t  esp32_hb_last_counter    = 0xFFU; /* Init to impossible value */
 static uint8_t  esp32_hb_same_count      = 0;     /* Consecutive same-counter */
 
 /* Bus-off recovery state (non-blocking, timestamp-based) */
-static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in progress */
+static uint8_t  busoff_active       = 0;    /* 1 = bus-off episode active (recovering or awaiting confirmation) */
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
 static uint8_t  busoff_retry_count  = 0;    /* Number of recovery attempts since bus-off  */
+/* Heartbeat-confirmation window: recovery is only declared once valid
+ * ESP32 heartbeats are sustained over CAN_BUSOFF_RECOVERY_WINDOW_MS
+ * (see busoff_recovery.h).  During this "probation" phase busoff_active
+ * stays 1 (fault still latched) but no further re-init is attempted.    */
+static BusOffRecoveryWindow_t busoff_window = { false, false, 0U };
 
 /* SAFETY FIX: Global CAN watchdog — track last received CAN message (any ID).
  * Unlike last_can_rx_time (heartbeat only), this tracks ANY received frame.
@@ -373,6 +380,7 @@ void CAN_Init(void) {
     busoff_active       = 0;
     busoff_last_attempt = 0;
     busoff_retry_count  = 0;
+    BusOffRecoveryWindow_Reset(&busoff_window);
     last_any_rx_tick    = HAL_GetTick();  /* Global CAN watchdog init */
 
     /* SAFETY FIX: Reset ESP32 heartbeat counter tracking state */
@@ -686,6 +694,54 @@ void CAN_SendStatusTraction(void) {
     }
 
     TransmitFrame(CAN_ID_STATUS_TRACTION, data, 4);
+}
+
+/**
+ * @brief  Send MOTION_INHIBIT_REASON instrumentation frame (0x315).
+ *
+ * Emits the bitfield computed by the traction pipeline explaining why the
+ * vehicle is (or is not) producing torque, plus the demand/PWM context
+ * needed to interpret it.  Instrumentation only — see motion_inhibit.h.
+ *
+ * CAN ID: 0x315   DLC: 8   Rate: 100 ms (10 Hz)
+ */
+void CAN_SendMotionInhibit(void) {
+    uint8_t data[8];
+
+    uint16_t reason = Traction_GetMotionInhibit();
+
+    /* Clamp signed demands to the int8 range for transport. */
+    const TractionState_t *ts = Traction_GetState();
+    float demand_f = sanitize_float(ts ? ts->demandPct : 0.0f, 0.0f);
+    float eff_f    = sanitize_float(Traction_GetEffectiveDemandPct(), 0.0f);
+    if (demand_f >  100.0f) demand_f =  100.0f;
+    if (demand_f < -100.0f) demand_f = -100.0f;
+    if (eff_f    >  100.0f) eff_f    =  100.0f;
+    if (eff_f    < -100.0f) eff_f    = -100.0f;
+
+    uint8_t flags = 0;
+    if (Safety_IsPowerReady())        flags |= 0x01;
+    if (Obstacle_IsForwardBlocked())  flags |= 0x02;
+    /* Relay-sequence phase (bits 2-3): commanded GPIO/sequencer state only —
+     * the firmware has NO physical relay-contact feedback.                  */
+    uint8_t relay_seq = MOTION_INHIBIT_RELAY_SEQ_IDLE;
+    if (Safety_IsPowerReady())               relay_seq = MOTION_INHIBIT_RELAY_SEQ_COMPLETE;
+    else if (Relay_IsSequenceInProgress())   relay_seq = MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS;
+    flags |= (uint8_t)((relay_seq & 0x03U) << 2);
+    if (Safety_GetState() == SYS_STATE_DEGRADED) {
+        flags |= (uint8_t)(((uint8_t)Safety_GetDegradedLevel() & 0x0F) << 4);
+    }
+
+    data[0] = (uint8_t)(reason & 0xFF);
+    data[1] = (uint8_t)((reason >> 8) & 0xFF);
+    data[2] = (uint8_t)Safety_GetState();
+    data[3] = (uint8_t)Traction_GetGear();
+    data[4] = (uint8_t)(int8_t)demand_f;
+    data[5] = (uint8_t)(int8_t)eff_f;
+    data[6] = Traction_GetFinalPwmPct();
+    data[7] = flags;
+
+    TransmitFrame(CAN_ID_DIAG_MOTION_INHIBIT, data, 8);
 }
 
 /**
@@ -2922,8 +2978,9 @@ static void steerz_handle_service_cmd(const uint8_t *payload, uint8_t len)
  *  EPS runtime parameter tuning (0xF9 + 0x30F telemetry)
  *
  *  Provides Engineering Menu access to all eps_params_t fields.
- *  SET_PARAM takes effect immediately (no state gate) to support
- *  real-time tuning from the Engineering Menu.
+ *  SET_PARAM applies live but is gated by EPS_Params_SetAllowed()
+ *  (Item A): STANDBY + PARK/NEUTRAL + stationary + ~zero traction
+ *  demand + no dangerous fault.  Blocked SETs reply ACK_BLOCKED_BY_SAFETY.
  *  SAVE and RESET require SYS_STATE_STANDBY for flash safety.
  *
  *  0x30F frame layout (DLC 8):
@@ -3061,12 +3118,42 @@ static void eps_handle_service_cmd(const uint8_t *payload, uint8_t len)
         return;
     }
 
-    /* SET_PARAM: immediate, no state gate — supports real-time tuning */
+    /* SET_PARAM: apply live, but only when the SET_PARAM safety gate
+     * (Item A) confirms the vehicle is safe & stationary.  A live SET
+     * alters steering-assist torque on the next control cycle, so the
+     * numeric range check in EPS_Params_Set() alone is not sufficient. */
     if (op == EPS_PARAM_OP_SET_PARAM) {
         if (len < 7) {
             CAN_SendCommandAck(0x10, ACK_INVALID);
             return;
         }
+
+        /* Assemble the live safety/motion snapshot and gate the SET. */
+        float ws_fl = fabsf(Wheel_GetSpeed_FL());
+        float ws_fr = fabsf(Wheel_GetSpeed_FR());
+        float ws_rl = fabsf(Wheel_GetSpeed_RL());
+        float ws_rr = fabsf(Wheel_GetSpeed_RR());
+        float ws_max = ws_fl;
+        if (ws_fr > ws_max) ws_max = ws_fr;
+        if (ws_rl > ws_max) ws_max = ws_rl;
+        if (ws_rr > ws_max) ws_max = ws_rr;
+
+        const TractionState_t *ts = Traction_GetState();
+        eps_setparam_gate_t gate = {
+            .state               = (uint8_t)Safety_GetState(),
+            .state_standby       = (uint8_t)SYS_STATE_STANDBY,
+            .gear                = (uint8_t)Traction_GetGear(),
+            .gear_park           = (uint8_t)GEAR_PARK,
+            .gear_neutral        = (uint8_t)GEAR_NEUTRAL,
+            .max_wheel_speed_kmh = ws_max,
+            .demand_pct          = ts ? ts->demandPct : 0.0f,
+            .dangerous_fault     = Safety_IsError(),
+        };
+        if (!EPS_Params_SetAllowed(&gate)) {
+            CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+            return;
+        }
+
         uint8_t param_id = payload[2];
         /* Deserialise float from bytes 3-6 (little-endian IEEE 754) */
         float value;
@@ -3562,9 +3649,10 @@ void CAN_ProcessMessages(void) {
                         steerz_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == SERVICE_ACTION_EPS_PARAMS) {
                         /* ---- EPS RUNTIME PARAMETER TUNING ----
-                         * Byte 1 = sub-opcode.  SET_PARAM takes effect
-                         * immediately to support real-time Engineering Menu
-                         * tuning; SAVE/RESET are STANDBY-gated.  Replies on
+                         * Byte 1 = sub-opcode.  SET_PARAM applies live but
+                         * is gated to STANDBY + PARK/NEUTRAL + stationary +
+                         * ~zero demand + no dangerous fault (Item A);
+                         * SAVE/RESET are STANDBY-gated.  Replies on
                          * CMD_ACK (0x103); telemetry on 0x30F.            */
                         eps_handle_service_cmd(rx_payload, msg_len);
                     } else if (cmd == SERVICE_ACTION_DRIVE_TUNING) {
@@ -3857,15 +3945,45 @@ void CAN_CheckBusOff(void)
 {
     FDCAN_ProtocolStatusTypeDef psr;
     FDCAN_ErrorCountersTypeDef  ecr;
+    uint32_t now = HAL_GetTick();
 
-    /* If a recovery attempt is in progress, enforce retry interval */
     if (busoff_active) {
-        uint32_t now = HAL_GetTick();
+        /* ---- Phase 2: PROBATION — peripheral re-initialised, awaiting
+         * sustained heartbeats before declaring recovery. -------------- */
+        if (BusOffRecoveryWindow_InProbation(&busoff_window)) {
+            /* Watch for a fresh bus-off during probation.  If the bus goes
+             * off again the retry counter is deliberately NOT reset, so a
+             * persistent fault keeps counting toward CAN_BUSOFF_MAX_RETRIES
+             * instead of looping forever. */
+            if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr) == HAL_OK) {
+                can_diag.bus_off = psr.BusOff ? 1U : 0U;
+                if (psr.BusOff) {
+                    BusOffRecoveryWindow_Reset(&busoff_window);
+                    busoff_last_attempt = now;  /* re-enter retry interval */
+                    sat_inc_u32(&can_stats.busoff_count);
+                    return;
+                }
+            }
+
+            /* Require valid heartbeats sustained over the confirmation
+             * window before clearing the fault.  Being RUNNING is not
+             * sufficient. */
+            if (BusOffRecoveryWindow_Update(&busoff_window, now,
+                                            CAN_IsESP32Alive(),
+                                            CAN_BUSOFF_RECOVERY_WINDOW_MS)) {
+                busoff_active      = 0;
+                busoff_retry_count = 0;
+                Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
+            }
+            return;
+        }
+
+        /* ---- Phase 1: RECOVERING — attempt peripheral re-init. -------- */
         if ((now - busoff_last_attempt) < CAN_BUSOFF_RETRY_INTERVAL_MS) {
             return;  /* Not yet time for next attempt */
         }
 
-        /* Too many retries — stop attempting, system stays in SAFE */
+        /* Too many retries — stop attempting, system stays in LIMP/SAFE */
         if (busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES) {
             return;
         }
@@ -3894,16 +4012,15 @@ void CAN_CheckBusOff(void)
             return;  /* Start failed — retry next interval */
         }
 
-        /* Recovery successful — clear bus-off state.
-         * The safety system will recover from SAFE via
-         * Safety_CheckCANTimeout() when heartbeats resume. */
-        busoff_active     = 0;
-        busoff_retry_count = 0;
-        Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
+        /* Peripheral is RUNNING again, but recovery is NOT yet declared:
+         * begin the heartbeat-confirmation probation window.  The fault
+         * and retry counter are intentionally left in place until valid
+         * heartbeats are sustained (see busoff_recovery.h). */
+        BusOffRecoveryWindow_Begin(&busoff_window, now);
         return;
     }
 
-    /* Normal operation: poll FDCAN protocol status for bus-off */
+    /* ---- Phase 0: HEALTHY — poll FDCAN protocol status for bus-off ---- */
     if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr) != HAL_OK) {
         return;  /* Cannot read status — skip this cycle */
     }
@@ -3922,12 +4039,13 @@ void CAN_CheckBusOff(void)
     }
 
     if (psr.BusOff) {
-        /* Bus-off detected — raise fault and enter LIMP_HOME.
+        /* Fresh bus-off — raise fault and enter LIMP_HOME.
          * CAN bus-off is a communication failure, not a hardware
          * danger.  Vehicle remains mobile at walking speed.            */
         busoff_active       = 1;
-        busoff_last_attempt = HAL_GetTick();
+        busoff_last_attempt = now;
         busoff_retry_count  = 0;
+        BusOffRecoveryWindow_Reset(&busoff_window);
         sat_inc_u32(&can_stats.busoff_count);
         Safety_SetError(SAFETY_ERROR_CAN_BUSOFF);
         Safety_SetState(SYS_STATE_LIMP_HOME);

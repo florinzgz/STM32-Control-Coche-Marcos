@@ -346,6 +346,26 @@ struct WheelSensorDiagData {
 };
 
 // -------------------------------------------------------------------------
+// 0x315 DIAG_MOTION_INHIBIT — MOTION_INHIBIT_REASON instrumentation.
+// Explains why the traction chain is (or is not) producing torque.  See
+// esp32/include/can_ids.h MOTION_INHIBIT_* bits and Core/Inc/motion_inhibit.h.
+// -------------------------------------------------------------------------
+struct MotionInhibitData {
+    uint16_t reason        = 0;   // MOTION_INHIBIT_* bitfield
+    uint8_t  systemState   = 0;   // SYS_STATE_*
+    uint8_t  gear          = 0;   // GearPosition_t
+    int8_t   demandPct     = 0;   // operator demand (signed %)
+    int8_t   effectivePct  = 0;   // demand after scaling (signed %)
+    uint8_t  finalPwmPct   = 0;   // max final PWM duty (0..100)
+    bool     powerReady    = false;
+    bool     obstacleFwdBlk = false;
+    uint8_t  relaySeqPhase = 0;   // 0=idle,1=in-progress,2=complete (commanded only)
+    uint8_t  degradedLevel = 0;   // 0=none, 1..3
+    bool     valid         = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -544,6 +564,7 @@ public:
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
     void setBootReset(const BootResetData& d)       { bootReset_ = d; }
     void setWheelSensorDiag(const WheelSensorDiagData& d) { wheelSensorDiag_ = d; }
+    void setMotionInhibit(const MotionInhibitData& d) { motionInhibit_ = d; }
     void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
@@ -581,6 +602,7 @@ public:
     const CanMetaData&      canMeta()      const { return canMeta_; }
     const BootResetData&    bootReset()    const { return bootReset_; }
     const WheelSensorDiagData& wheelSensorDiag() const { return wheelSensorDiag_; }
+    const MotionInhibitData& motionInhibit() const { return motionInhibit_; }
     const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
@@ -614,6 +636,7 @@ private:
     CanMetaData      canMeta_;
     BootResetData    bootReset_;
     WheelSensorDiagData wheelSensorDiag_;
+    MotionInhibitData   motionInhibit_;
     Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;

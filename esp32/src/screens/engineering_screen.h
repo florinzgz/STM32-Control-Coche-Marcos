@@ -75,7 +75,8 @@ private:
         DRIVE_TUNING,      // Drive tuning: accel/brake/reverse ramp + creep (0xFA/0x310)
         BATTERY_LIMITS,    // Battery voltage thresholds: warn/limit/cutoff/recovery/filter (0xFB/0x311)
         DRIVE_BATT_DIAG,   // Read-only drive/battery live diagnostic (N/A where not transmitted)
-        LED_MODE           // Decorative LED mode selector (private/demo use only)
+        LED_MODE,          // Decorative LED mode selector (private/demo use only)
+        MOTION_INHIBIT_DIAG // Read-only 0x315 MOTION_INHIBIT telemetry viewer
     };
 
     void drawMainMenu();
@@ -105,6 +106,11 @@ private:
     void drawBatteryLimits();
     void drawDriveBattDiag();
     void drawLedMode();
+    // 0x315 MOTION_INHIBIT read-only viewer.  drawMotionInhibitDiag() paints
+    // the static chrome + labels once; refreshMotionInhibitDiag() repaints only
+    // the value zones that changed (called every frame from draw()).
+    void drawMotionInhibitDiag();
+    void refreshMotionInhibitDiag(bool force);
 
     bool        needsRedraw_ = true;
     bool        exitRequested_ = false;
@@ -546,15 +552,36 @@ private:
     // Modes are for private/demo use only — no real emergency use.
     // ledModeEdit_: current mode shown in the editor (may differ from saved).
     // ledModeSaved_: true if ledModeEdit_ matches the value persisted in NVS.
-    // ledModeTestActive_: set when TEST 10s button is pressed.
+    // ledModeTestActive_: set when the TEST button is pressed.
     // ledModeTestStartMs_: millis() when TEST was pressed (reset by PREV/NEXT during test).
     // ledModeTestPrevMode_: mode active before the test (restored on timeout/BACK).
+    // Auto-restore duration is per-mode via led_ctrl::decorTestDurationMs():
+    // normal decor tests run 10 s; RGB_DIAG runs its full 25 s colour sequence.
     uint8_t       ledModeEdit_         = 0;
     bool          ledModeSaved_        = true;
     bool          ledModeTestActive_   = false;
     unsigned long ledModeTestStartMs_  = 0;
     uint8_t       ledModeTestPrevMode_ = 0;
-    static constexpr unsigned long LED_TEST_DURATION_MS = 10000;  // 10 s test
+
+    // ---- MOTION INHIBIT DIAG (0x315) read-only viewer (MOTION_INHIBIT_DIAG) ----
+    // No query is emitted: 0x315 is streamed unconditionally at 10 Hz.  The
+    // page paints static labels once, then repaints only the value zones whose
+    // decoded field changed.  Previous displayed values are cached below;
+    // 0xFF / sentinel initial values force a first paint.  miForcePaint_ is set
+    // on page entry to repaint every field regardless of the caches.
+    bool          miForcePaint_    = false;
+    uint16_t      miPrevReason_    = 0xFFFFu;
+    uint8_t       miPrevState_     = 0xFFu;
+    uint8_t       miPrevGear_      = 0xFFu;
+    int16_t       miPrevDemand_    = 0x7FFF;
+    int16_t       miPrevEff_       = 0x7FFF;
+    uint16_t      miPrevPwm_       = 0xFFFFu;
+    uint8_t       miPrevFlags_     = 0xFFu;   // bit0 powerReady, bit1 obstacle
+    uint8_t       miPrevRelay_     = 0xFFu;
+    uint8_t       miPrevDegraded_  = 0xFFu;
+    uint8_t       miPrevFresh_     = 0xFFu;   // motion_inhibit_view::Freshness
+    uint32_t      miPrevAgeMs_     = 0xFFFFFFFFu;
+    bool          miPrevValid_     = false;
 };
 
 #endif // ENGINEERING_SCREEN_H

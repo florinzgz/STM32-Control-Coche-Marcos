@@ -18,6 +18,24 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
 
 ### Added
 
+- **[DIAGNOSTIC] Front/rear LED per-strip RED/GREEN/BLUE/WHITE/OFF colour test**
+  - `DecorMode::RGB_DIAG` (LED MODE selector entry "RGB DIAG",
+    `DECOR_MODE_COUNT` 9 → 10). Isolates exactly ONE strip at a time and steps
+    it through **RED → GREEN → BLUE → WHITE → OFF** — front first, then rear —
+    so the WS2812B byte order (R/G/B primaries), a dead/stuck-off channel
+    (WHITE) and a stuck-on channel (OFF) can all be confirmed **per strip**.
+    The two strips are never lit together, removing ambiguity.
+  - Engineering LED MODE screen shows the **COMMANDED** strip+colour
+    (`led_ctrl::getRgbDiagLabel()`, e.g. "FRONT RED") so the installer can
+    compare it against what the strip physically emits. The firmware cannot
+    sense the emitted colour, so this closes the loop only via physical
+    validation.
+  - Host test coverage in `esp32/src/test_decor_modes.cpp`: single-strip
+    isolation, exact pure-primary output, single-channel full-scale primaries.
+  - **NOTE:** the front-strip "green when red is requested" report is NOT
+    considered resolved by code inspection (front=RGB / rear=GRB). It stays
+    **open pending physical validation** using this diagnostic.
+
 - **[FEATURE] EPS Steering Assist tuning system (FASE 1-8, CAN contract v1.11)**
   - STM32: `eps_params_t` extended with 4 runtime-configurable mechanical fields:
     `deadband_deg` (1.8 °), `max_pwm_pct` (60 %), `slew_rate_pct` (5.883 %),
@@ -26,7 +44,9 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
     hardcoded constants remain in the control loop.  Backward-compatible by design.
   - New public getters: `Steering_GetMotorEffortPct()`, `Steering_GetEncoderRaw()`.
   - CAN `0xF9` SERVICE_ACTION + `0x30F` DIAG_EPS_PARAMS (5 frame kinds, 10 Hz burst):
-    real-time SET_PARAM (no safety gate), SAVE/RESET require STANDBY.
+    SET_PARAM applies live but is safety-gated (STANDBY + PARK/NEUTRAL + stationary
+    + ~zero traction demand + no dangerous fault, `EPS_Params_SetAllowed()`);
+    SAVE/RESET require STANDBY.
   - ESP32 HMI: `EpsParamsData` struct in `vehicle_data.h`; `0x30F` decoder in
     `can_rx.cpp`; `EPS_TUNING` and `STEER_DIAG` tiles added to Engineering Menu
     (NUM_MAIN_ITEMS 17→19); `drawEpsTuning()` 3-page editor with real-time +/-

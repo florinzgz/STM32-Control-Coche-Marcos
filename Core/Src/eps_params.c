@@ -55,6 +55,61 @@ typedef struct {
     uint32_t     checksum;    /* CRC32 of magic + sequence + params  */
 } eps_flash_slot_t;
 
+/* STM32G4 flash is programmed in 64-bit double-words.  The number of
+ * double-words needed to hold one slot, rounded up.  A dedicated aligned,
+ * zero-padded buffer of this many uint64_t words is used for programming so
+ * that (a) the 64-bit accesses are naturally aligned and (b) no bytes beyond
+ * the struct are ever read (the previous code cast &slot to uint64_t* and
+ * read one extra partially-out-of-bounds double-word when the slot size was
+ * not a multiple of 8).                                                     */
+#define EPS_SLOT_DWORDS  ((sizeof(eps_flash_slot_t) + 7U) / 8U)
+_Static_assert(EPS_SLOT_DWORDS >= 1U, "EPS slot must be at least one dword");
+_Static_assert(sizeof(eps_flash_slot_t) <= EPS_SLOT_DWORDS * 8U,
+               "EPS slot dword count too small for slot size");
+_Static_assert(EPS_SLOT_DWORDS * 8U <= 256U,
+               "EPS slot unexpectedly large — check struct layout");
+
+/* ---- Server-side hard limits (Fase 5 hardening) --------------------
+ * EPS_Params_Set() is reachable from the HMI over CAN
+ * (EPS_PARAM_OP_SET_PARAM).  The HMI is NOT trusted to enforce its own
+ * limits: every parameter is range-checked server-side (here) before it
+ * can influence the EPS control loop / steering-motor torque.
+ *
+ * These bounds are the AUTHORITATIVE EPS limit contract and MUST hold the
+ * identical [min, max] as the HMI editor ranges in esp32/src/eps_limits.h
+ * (eps::LIMITS).  A raw CAN frame must never be able to set a value wider
+ * than the HMI-safe range.  The equality is verified per parameter by the
+ * host test test_eps_params.c (and by the HMI-side
+ * test_eps_limits_contract.cpp), which mirror the same numeric contract.
+ *
+ * Each entry is an inclusive [min, max] range.  The two speed divisors keep
+ * a tiny positive minimum (EPS_MIN_POS) so that exactly 0.0 is rejected
+ * (a zero divisor is a control hazard) while any real positive value is
+ * accepted.
+ *
+ * The order MUST match eps_param_id_t in eps_params.h.                 */
+#define EPS_MIN_POS  1e-6f
+
+typedef struct {
+    float min;   /* inclusive lower bound */
+    float max;   /* inclusive upper bound */
+} eps_param_limit_t;
+
+static const eps_param_limit_t eps_limits[EPS_PARAM_COUNT] = {
+    [EPS_PARAM_ASSIST_STRENGTH]   = { 0.0f,        1.0f   },
+    [EPS_PARAM_CENTER_STRENGTH]   = { 0.0f,        1.0f   },
+    [EPS_PARAM_DAMPING]           = { 0.0f,        1.0f   },
+    [EPS_PARAM_FRICTION_COMP]     = { 0.0f,        0.5f   },
+    [EPS_PARAM_COAST_BAND_PCT]    = { 0.0f,       20.0f   },
+    [EPS_PARAM_MIN_DRIVE_PCT]     = { 1.0f,       50.0f   },
+    [EPS_PARAM_ASSIST_VS_SPEED]   = { EPS_MIN_POS, 100.0f },  /* divisor >0 */
+    [EPS_PARAM_RETURN_VS_SPEED]   = { EPS_MIN_POS, 100.0f },  /* divisor >0 */
+    [EPS_PARAM_DEADBAND_DEG]      = { 0.1f,        10.0f },   /* >0 */
+    [EPS_PARAM_MAX_PWM_PCT]       = { 5.0f,       100.0f },   /* 0<x<=100 */
+    [EPS_PARAM_SLEW_RATE_PCT]     = { 0.1f,        20.0f },   /* >0 */
+    [EPS_PARAM_CENTER_OFFSET_DEG] = { -10.0f,      10.0f },
+};
+
 /* ---- Compiled defaults ---- */
 static const eps_params_t eps_defaults = {
     .assist_strength  = 0.45f,
@@ -159,6 +214,14 @@ const eps_params_t *EPS_Params_Get(void)
     return &eps_active;
 }
 
+bool EPS_Params_GetLimit(eps_param_id_t id, float *out_min, float *out_max)
+{
+    if (id >= EPS_PARAM_COUNT) return false;
+    if (out_min) *out_min = eps_limits[id].min;
+    if (out_max) *out_max = eps_limits[id].max;
+    return true;
+}
+
 bool EPS_Params_Set(eps_param_id_t id, float value)
 {
     if (id >= EPS_PARAM_COUNT) return false;
@@ -167,29 +230,61 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
      * propagate through the EPS control loop into motor torque.     */
     if (isnan(value) || isinf(value)) return false;
 
-    /* Reject zero or negative values for parameters used as divisors
-     * in the EPS control loop (motor_control.c Steering_ControlLoop).
-     * assist_vs_speed and return_vs_speed appear in denominators:
-     *   g(v) = 1 / (1 + v / assist_vs_speed)
-     *   h(v) = 0.3 + v / return_vs_speed                            */
-    if ((id == EPS_PARAM_ASSIST_VS_SPEED || id == EPS_PARAM_RETURN_VS_SPEED)
-        && value <= 0.0f) {
+    /* Server-side range enforcement (Fase 5).
+     *
+     * The HMI is NOT trusted to clamp its own inputs: every parameter
+     * is validated against the authoritative [min, max] range defined
+     * in eps_limits[] before it can influence steering-motor torque.
+     * This centralises what used to be a handful of ad-hoc guards and
+     * additionally bounds the assist/center/damping gains and the
+     * center offset, which previously accepted arbitrarily large
+     * values.  Values outside the range are rejected here; the CAN
+     * handler relays the rejection to the HMI as ACK_INVALID.
+     *
+     *   - assist / center / damping             : [0, 1]
+     *   - friction_comp                         : [0, 0.5]
+     *   - coast_band_pct                        : [0, 20] %
+     *   - min_drive_pct                         : [1, 50] %
+     *   - assist_vs_speed / return_vs_speed     : [EPS_MIN_POS, 100]
+     *   - deadband_deg                          : [0.1, 10] °
+     *   - max_pwm_pct                           : [5, 100] %
+     *   - slew_rate_pct                         : [0.1, 20] %
+     *   - center_offset_deg                     : [-10, 10] °          */
+    if (value < eps_limits[id].min || value > eps_limits[id].max) {
         return false;
     }
 
-    /* Mechanical parameter range guards.
-     * deadband_deg: must be > 0 (zero deadband causes hunting)
-     * max_pwm_pct:  must be in (0, 100] (0 would disable steering; >100 meaningless)
-     * slew_rate_pct: must be > 0 (zero slew would freeze PWM output)
-     * center_offset_deg: any finite value is accepted; extremely large offsets
-     *   are not explicitly blocked here but will be clamped in the control loop
-     *   by the ±MAX_STEER_DEG encoder guard.                         */
-    if (id == EPS_PARAM_DEADBAND_DEG && value <= 0.0f)  return false;
-    if (id == EPS_PARAM_MAX_PWM_PCT  && (value <= 0.0f || value > 100.0f)) return false;
-    if (id == EPS_PARAM_SLEW_RATE_PCT && value <= 0.0f) return false;
-
     float *fields = (float *)&eps_active;
     fields[id] = value;
+    return true;
+}
+
+bool EPS_Params_SetAllowed(const eps_setparam_gate_t *g)
+{
+    if (g == NULL) return false;
+
+    /* 1. System must be in STANDBY — never BOOT/ACTIVE/DEGRADED/SAFE/
+     *    ERROR/LIMP_HOME.  This is the same precondition SAVE/RESET use,
+     *    now extended to the live SET path. */
+    if (g->state != g->state_standby) return false;
+
+    /* 2. Gear must be PARK or NEUTRAL: no drive or reverse engaged. */
+    if (g->gear != g->gear_park && g->gear != g->gear_neutral) return false;
+
+    /* 3. Vehicle must be essentially stationary.  A NaN wheel speed is
+     *    treated as unsafe (unknown motion state). */
+    if (isnan(g->max_wheel_speed_kmh)) return false;
+    if (fabsf(g->max_wheel_speed_kmh) > EPS_SETPARAM_MAX_WHEEL_SPEED_KMH)
+        return false;
+
+    /* 4. Operator traction demand must be below the motion threshold
+     *    (treated as zero).  A NaN demand is unsafe. */
+    if (isnan(g->demand_pct)) return false;
+    if (fabsf(g->demand_pct) >= EPS_SETPARAM_MAX_DEMAND_PCT) return false;
+
+    /* 5. No dangerous active fault latched. */
+    if (g->dangerous_fault) return false;
+
     return true;
 }
 
@@ -306,14 +401,20 @@ bool EPS_Params_Save(void)
     }
 
     /* Write the new slot (double-word aligned writes).
-     * STM32G4 flash requires 64-bit (double-word) writes.          */
-    uint32_t slot_size    = sizeof(eps_flash_slot_t);
-    uint32_t dword_count  = (slot_size + 7U) / 8U;
-    const uint64_t *src   = (const uint64_t *)&slot;
+     * STM32G4 flash requires 64-bit (double-word) writes.
+     *
+     * Program from a dedicated aligned buffer that is zero-initialised and
+     * then filled with exactly sizeof(slot) bytes.  This guarantees natural
+     * 8-byte alignment for the 64-bit reads and prevents the previous
+     * out-of-bounds read of trailing bytes when sizeof(slot) is not a
+     * multiple of 8 (any padding double-word is deterministically zero).   */
+    uint64_t words[EPS_SLOT_DWORDS];
+    memset(words, 0, sizeof(words));
+    memcpy(words, &slot, sizeof(slot));
 
-    for (uint32_t i = 0; i < dword_count; i++) {
+    for (uint32_t i = 0; i < EPS_SLOT_DWORDS; i++) {
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                   target_addr + (i * 8U), src[i]);
+                                   target_addr + (i * 8U), words[i]);
         if (status != HAL_OK) {
             HAL_FLASH_Lock();
             return false;
@@ -324,10 +425,12 @@ bool EPS_Params_Save(void)
      * page erase.  If a power loss occurs between the erase and
      * this write, the backup is lost but the new slot is valid.    */
     if (has_prev) {
-        const uint64_t *prev_src = (const uint64_t *)&prev_slot;
-        for (uint32_t i = 0; i < dword_count; i++) {
+        uint64_t prev_words[EPS_SLOT_DWORDS];
+        memset(prev_words, 0, sizeof(prev_words));
+        memcpy(prev_words, &prev_slot, sizeof(prev_slot));
+        for (uint32_t i = 0; i < EPS_SLOT_DWORDS; i++) {
             status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
-                                       prev_addr + (i * 8U), prev_src[i]);
+                                       prev_addr + (i * 8U), prev_words[i]);
             if (status != HAL_OK) {
                 /* Backup write failed — new slot is still valid */
                 break;

@@ -96,6 +96,15 @@ bool Traction_SetDriveTuning(const DriveTuning_t *t);
 void Traction_GetDriveTuning(DriveTuning_t *out);
 void Traction_Update(void);
 void Traction_EmergencyStop(void);
+
+/* ---- MOTION_INHIBIT_REASON instrumentation (0x315) ----
+ * Returns the latest MOTION_INHIBIT_REASON bitfield (MOTION_INHIBIT_*),
+ * recomputed every Traction_Update() cycle.  Instrumentation only: it
+ * observes why the traction chain is (or is not) producing torque and does
+ * NOT alter any control or safety behaviour.  See motion_inhibit.h.       */
+uint16_t Traction_GetMotionInhibit(void);
+float    Traction_GetEffectiveDemandPct(void);
+uint8_t  Traction_GetFinalPwmPct(void);
 const TractionState_t* Traction_GetState(void);
 
 /* Steering Functions */

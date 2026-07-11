@@ -98,6 +98,18 @@ extern "C" {
                                          //   Valid = accepted EXTI edges that PASSED the DWT 200us pre-filter
                                          //   (i.e. real wheel pulses used for speed/distance), NOT the REJECTED
                                          //   (bounce/EMI) counts reported by 0x306. Diagnostic only.
+#define CAN_ID_DIAG_MOTION_INHIBIT 0x315 // STM32 → ESP32 (100ms) MOTION_INHIBIT_REASON — why the traction
+                                         //   chain is (or is not) producing torque.  Instrumentation only.
+                                         //   Byte 0-1: reason bitfield (uint16 LE, MOTION_INHIBIT_* bits)
+                                         //   Byte 2:   system state (SYS_STATE_*)
+                                         //   Byte 3:   current gear (GearPosition_t)
+                                         //   Byte 4:   operator demand %   (int8, signed, -100..100)
+                                         //   Byte 5:   effective demand %   (int8, signed, after scaling)
+                                         //   Byte 6:   max final PWM duty %  (uint8, 0..100)
+                                         //   Byte 7:   flags bit0 power_ready, bit1 obstacle_forward_blocked,
+                                         //             bits2-3 relay-seq phase (0 idle,1 in-progress,2 complete;
+                                         //             commanded GPIO/sequencer state only, no contact feedback),
+                                         //             bits4-7 degraded level (0=none,1..3)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -292,7 +304,17 @@ typedef enum {
 
 /* CAN bus-off recovery configuration */
 #define CAN_BUSOFF_RETRY_INTERVAL_MS  500   /* Non-blocking retry interval      */
-#define CAN_BUSOFF_MAX_RETRIES        10    /* Max recovery attempts before ERROR */
+#define CAN_BUSOFF_MAX_RETRIES        10    /* Max FDCAN re-init attempts before giving up; system stays in LIMP_HOME (NOT ERROR) */
+
+/* Sustained heartbeat window required to CONFIRM bus-off recovery.
+ * After the FDCAN peripheral is re-initialised (RUNNING again) the bus is
+ * NOT yet declared recovered: valid ESP32 heartbeats must be present
+ * continuously for this long before the fault is cleared and the retry
+ * counter is reset.  Merely observing RUNNING is insufficient — a
+ * persistent physical fault would otherwise loop forever without ever
+ * reaching CAN_BUSOFF_MAX_RETRIES.  Chosen as several heartbeat periods
+ * (heartbeat rate 100 ms, liveness timeout CAN_TIMEOUT_HEARTBEAT_MS).   */
+#define CAN_BUSOFF_RECOVERY_WINDOW_MS 1000U
 
 /* FIFO overflow escalation threshold.
  * After this many cumulative message-lost events, CAN_ProcessMessages()
@@ -382,6 +404,7 @@ void CAN_SendI2CDiag(void);         /* 1 Hz I2C topology diagnostic (0x309): mux
 void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (0x30A) */
 void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
 void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason diagnostic (0x313) */
+void CAN_SendMotionInhibit(void);   /* 10 Hz MOTION_INHIBIT_REASON instrumentation (0x315) */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);

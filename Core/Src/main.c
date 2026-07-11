@@ -690,6 +690,7 @@ int main(void)
                 (int16_t)(Steering_GetCurrentAngle() * 10),
                 Steering_IsCalibrated());
             CAN_SendStatusTraction();
+            CAN_SendMotionInhibit();
             CAN_SendStatusBattery();
 
             /* Pedal position telemetry (0x20B) — real Hall pedal travel for

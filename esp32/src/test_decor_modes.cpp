@@ -103,6 +103,36 @@ static void renderHazardRear(RGB* leds, int count, uint8_t phase) {
 // --- Mirror of OFF ---
 static void renderOff(RGB* leds, int count) { fillSolid(leds, count, C_BLACK); }
 
+// --- Mirror of RGB_DIAG (per-strip RED/GREEN/BLUE/WHITE/OFF diagnostic) ---
+// Front lit in phases 0-3 (R/G/B/W); rear lit in phases 5-8 (R/G/B/W).
+// Phase 4 = front OFF, phase 9 = rear OFF; the two strips are never lit
+// together.  Full scale — no brightness scaling — so a byte-order fault
+// (wrong primary) or a dead/stuck channel (white/off) is obvious on physical
+// validation.
+static constexpr uint8_t RGB_DIAG_PHASES = 10;
+static void renderRgbDiagFront(RGB* leds, int count, uint8_t phase) {
+    RGB col = C_BLACK;
+    switch (phase % RGB_DIAG_PHASES) {
+        case 0: col = RGB{255, 0, 0};   break;  // FRONT red
+        case 1: col = RGB{0, 255, 0};   break;  // FRONT green
+        case 2: col = RGB{0, 0, 255};   break;  // FRONT blue
+        case 3: col = RGB{255, 255, 255}; break; // FRONT white
+        default: col = C_BLACK; break;          // phase 4 off / rear under test
+    }
+    fillSolid(leds, count, col);
+}
+static void renderRgbDiagRear(RGB* leds, int count, uint8_t phase) {
+    RGB col = C_BLACK;
+    switch (phase % RGB_DIAG_PHASES) {
+        case 5: col = RGB{255, 0, 0};   break;  // REAR red
+        case 6: col = RGB{0, 255, 0};   break;  // REAR green
+        case 7: col = RGB{0, 0, 255};   break;  // REAR blue
+        case 8: col = RGB{255, 255, 255}; break; // REAR white
+        default: col = C_BLACK; break;          // front under test / phase 9 off
+    }
+    fillSolid(leds, count, col);
+}
+
 static int g_failures = 0;
 #define CHECK(cond, msg)                                             \
     do {                                                            \
@@ -201,6 +231,53 @@ int main() {
         CHECK(litCount(leds) == 0, "HAZARD_RED between-flash is off");
 
         printf("  count=%d: OFF/POLICE/AMBULANCE/WARNING/HAZARD OK\n", count);
+    }
+
+    // ---- RGB_DIAG: per-strip RED/GREEN/BLUE/WHITE/OFF colour diagnostic ----
+    // Contract: at most one strip lit at a time; a lit strip shows exactly the
+    // commanded colour everywhere; the two strips are never lit together; and
+    // the sequence exercises each strip through RED→GREEN→BLUE→WHITE→OFF.
+    for (int count : counts) {
+        std::vector<RGB> front(count), rear(count);
+        // Expected colour per phase for whichever strip is under test.
+        // Phase 4 (front off) and 9 (rear off) light NOTHING.
+        const RGB expect[RGB_DIAG_PHASES] = {
+            {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 255}, {0, 0, 0}, // front R/G/B/W/off
+            {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 255}, {0, 0, 0}, // rear  R/G/B/W/off
+        };
+        int frontLitPhases = 0, rearLitPhases = 0;
+        for (uint8_t phase = 0; phase < RGB_DIAG_PHASES; ++phase) {
+            renderRgbDiagFront(front.data(), count, phase);
+            renderRgbDiagRear(rear.data(),  count, phase);
+
+            const bool frontUnderTest = (phase < 5);   // phases 0-4 belong to front
+            const bool isOffPhase     = (phase == 4 || phase == 9);
+            const auto& active = frontUnderTest ? front : rear;
+            const auto& other  = frontUnderTest ? rear  : front;
+
+            // The two strips are NEVER lit at the same time.
+            CHECK(litCount(front) == 0 || litCount(rear) == 0,
+                  "RGB_DIAG never lights both strips together");
+            // The strip NOT under test is always dark.
+            CHECK(litCount(other) == 0, "RGB_DIAG keeps the idle strip dark");
+
+            if (isOffPhase) {
+                // OFF phase: the strip under test is fully blanked.
+                CHECK(litCount(active) == 0, "RGB_DIAG OFF phase blanks the strip");
+            } else {
+                // Lit phase: whole strip shows exactly the expected colour.
+                CHECK(litCount(active) == count, "RGB_DIAG lights the whole strip under test");
+                for (const auto& p : active)
+                    CHECK(p.r == expect[phase].r && p.g == expect[phase].g &&
+                          p.b == expect[phase].b,
+                          "RGB_DIAG lit strip is the exact commanded colour");
+                if (frontUnderTest) ++frontLitPhases; else ++rearLitPhases;
+            }
+        }
+        // Each strip has exactly 4 lit phases (R/G/B/W) and one OFF phase.
+        CHECK(frontLitPhases == 4, "RGB_DIAG front has R/G/B/W lit phases");
+        CHECK(rearLitPhases  == 4, "RGB_DIAG rear has R/G/B/W lit phases");
+        printf("  count=%d: RGB_DIAG per-strip R/G/B/W/OFF isolation OK\n", count);
     }
 
     // ---- Functional rear overlay predicate keeps priority over decor ----

@@ -37,7 +37,11 @@
 #include "touch_calibration.h"
 #include "config_store.h"
 #include "traction_switch.h"
+#include "mode_sync.h"
 #include "display_backlight.h"
+#include "stm32_liveness.h"
+#include "twai_recovery.h"
+#include "boot_diag.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -114,7 +118,12 @@ static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
 static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
 static unsigned long lastBusOffCheckMs = 0;  // TWAI bus-off recovery check
-static uint8_t       busOffRecoveryCount = 0;
+// TWAI BUS_OFF recovery — stable-heartbeat policy (pure, host-tested module).
+// Recovery is confirmed ONLY after sustained advancing STM32 heartbeats; the
+// controller merely reporting RUNNING is treated as probation, never as
+// healthy.  Preserves the lifetime BUS_OFF count and retries fast-then-slow so
+// the node always recovers after a physical reconnection.
+static twai_recovery::TwaiBusOffRecovery g_twaiRecovery;
 
 /* Error-passive recovery state.
  * When TEC reaches 128 the TWAI controller enters error-passive but keeps
@@ -155,6 +164,17 @@ static constexpr uint8_t GEAR_REVERSE = 1;   // shifter raw value for Reverse
 
 // ---- Mode state tracking ----
 static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, bit 1=tank)
+
+// ---- Drive-mode sync FSM (physical 4x4 selector = source of truth) ----
+// The debounced selector latches its state into g_modeSync.setDesired(); the
+// FSM defers the actual CMD_MODE transmission until the STM32 heartbeat is
+// confirmed and (re)transmits until an ACK arrives or a bounded retry budget
+// is exhausted.  Logic lives in the pure, host-tested mode_sync.h.
+static constexpr uint8_t MODE_SYNC_MAX_RETRIES = 3;
+static ModeSync      g_modeSync(can::ACK_TIMEOUT_MS, MODE_SYNC_MAX_RETRIES);
+static unsigned long g_modeSendMs   = 0;     // millis() of last FSM-driven send
+static unsigned long g_lastModeAckTs = 0;    // last CMD_MODE ACK consumed by FSM
+static unsigned long g_lastModeEchoTs = 0;   // last heartbeat frame fed as mode echo
 
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
@@ -268,8 +288,14 @@ static constexpr uint32_t STM32_HB_FREEZE_TIME_MS =
     (uint32_t)STM32_HB_FREEZE_COUNT * can::HEARTBEAT_INTERVAL_MS;
 static_assert(STM32_HB_FREEZE_TIME_MS < can::CAN_LOSS_TIMEOUT_MS,
               "STM32 freeze detection must trigger before CAN-loss timeout");
-static uint8_t  stm32HbLastCounter   = 0xFFU;           // Init to impossible value
-static uint8_t  stm32HbSameCount     = 0;
+// Absence timeout: if no NEW heartbeat frame arrives within this window the
+// STM32 is treated as not-alive independently of the counter value.  Kept
+// below CAN_LOSS_TIMEOUT_MS so the dedicated CAN-loss error screen still wins.
+static constexpr uint32_t STM32_HB_ABSENCE_TIMEOUT_MS = STM32_HB_FREEZE_TIME_MS;
+static Stm32Liveness stm32Liveness(STM32_HB_FREEZE_COUNT, STM32_HB_ABSENCE_TIMEOUT_MS);
+// Rate-limit the "frozen" warning so a stuck STM32 cannot spam Serial.
+static unsigned long stm32FrozenWarnLastMs = 0;
+static constexpr unsigned long STM32_FROZEN_WARN_INTERVAL_MS = 1000;
 static bool     stm32IsAlive         = false;
 
 // ---- Gear re-sync after STM32 restart (SAFETY FIX) ----
@@ -608,17 +634,21 @@ void setup() {
 
     // Reset cause reporting
     esp_reset_reason_t reason = esp_reset_reason();
-    Serial.printf("[BOOT][INFO] Reset reason: %s\n",
-        reason == ESP_RST_POWERON  ? "PowerOn" :
-        reason == ESP_RST_SW       ? "Software" :
-        reason == ESP_RST_PANIC    ? "Panic" :
-        reason == ESP_RST_INT_WDT  ? "Watchdog(INT)" :
-        reason == ESP_RST_TASK_WDT ? "Watchdog(TASK)" :
-        reason == ESP_RST_WDT      ? "Watchdog(OTHER)" :
-        reason == ESP_RST_BROWNOUT ? "Brownout" :
-        reason == ESP_RST_SDIO     ? "SDIO" :
-        reason == ESP_RST_DEEPSLEEP ? "DeepSleep" :
-                                      "Unknown");
+    boot_diag::ResetClass bootRc =
+        reason == ESP_RST_POWERON   ? boot_diag::ResetClass::POWER_ON  :
+        reason == ESP_RST_SW        ? boot_diag::ResetClass::SOFTWARE  :
+        reason == ESP_RST_PANIC     ? boot_diag::ResetClass::PANIC     :
+        reason == ESP_RST_INT_WDT   ? boot_diag::ResetClass::WATCHDOG  :
+        reason == ESP_RST_TASK_WDT  ? boot_diag::ResetClass::WATCHDOG  :
+        reason == ESP_RST_WDT       ? boot_diag::ResetClass::WATCHDOG  :
+        reason == ESP_RST_BROWNOUT  ? boot_diag::ResetClass::BROWNOUT  :
+        reason == ESP_RST_DEEPSLEEP ? boot_diag::ResetClass::DEEPSLEEP :
+        reason == ESP_RST_SDIO      ? boot_diag::ResetClass::EXTERNAL_PIN :
+        reason == ESP_RST_EXT       ? boot_diag::ResetClass::EXTERNAL_PIN :
+                                      boot_diag::ResetClass::UNKNOWN;
+    Serial.printf("[BOOT][INFO] Reset reason: %s%s\n",
+                  boot_diag::name(bootRc),
+                  boot_diag::isAbnormal(bootRc) ? " (ABNORMAL)" : "");
 
     Serial.println("[BOOT][INFO] ESP32 HMI CAN bring-up booted");
 
@@ -790,6 +820,28 @@ void setup() {
             Serial.println("[BOOT][INFO] Render task started on Core 0");
         }
     }
+
+    // Boot-diagnostics telemetry — single machine-parseable line emitted once
+    // per boot on the serial channel (the ESP32 HMI is CAN receive-only, so it
+    // has no diagnostic-frame TX path).  Captures the reset cause plus the heap
+    // low-water mark and both task stack high-watermarks so brownouts, panics,
+    // watchdog resets, heap exhaustion and stack pressure are all observable
+    // from the boot log.  Formatting/classification lives in the host-tested
+    // boot_diag module; this is pure instrumentation.
+    {
+        boot_diag::HeapStats hs;
+        hs.freeNow      = (uint32_t)esp_get_free_heap_size();
+        hs.minFreeEver  = (uint32_t)esp_get_minimum_free_heap_size();
+        hs.totalSize    = (uint32_t)ESP.getHeapSize();
+        hs.largestBlock = (uint32_t)ESP.getMaxAllocHeap();
+        uint32_t loopHwm   = (uint32_t)uxTaskGetStackHighWaterMark(nullptr);
+        uint32_t renderHwm = (renderTaskHandle != nullptr)
+                           ? (uint32_t)uxTaskGetStackHighWaterMark(renderTaskHandle)
+                           : 0u;
+        char bootLine[192];
+        boot_diag::format(bootLine, sizeof(bootLine), bootRc, hs, loopHwm, renderHwm);
+        Serial.println(bootLine);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -858,19 +910,18 @@ void loop() {
     {
         const auto& hb = vehicleData.heartbeat();
         if (hb.timestampMs > 0) {
-            uint8_t counter = hb.aliveCounter;
-            if (counter != stm32HbLastCounter) {
-                stm32HbLastCounter = counter;
-                stm32HbSameCount   = 0;
-                stm32IsAlive       = true;
-            } else {
-                if (stm32HbSameCount < STM32_HB_FREEZE_COUNT) {
-                    stm32HbSameCount++;
-                }
-                stm32IsAlive = (stm32HbSameCount < STM32_HB_FREEZE_COUNT);
-                if (!stm32IsAlive) {
-                    Serial.println("[SAFETY][WARN] STM32 heartbeat counter frozen — inhibiting commands");
-                }
+            // Evaluate the alive counter only when a NEW heartbeat frame has
+            // been decoded (tracked via hb.timestampMs).  This prevents the
+            // same sample from being counted repeatedly while loop() spins far
+            // faster than the ~100 ms heartbeat period (root cause of the
+            // FALSE "STM32 frozen" detection).  A time-based absence timeout
+            // covers the "no new heartbeat at all" case.
+            stm32Liveness.update((uint32_t)hb.timestampMs, hb.aliveCounter, (uint32_t)now);
+            stm32IsAlive = stm32Liveness.isAlive();
+            if (stm32Liveness.consumeFrozenEdge() &&
+                (now - stm32FrozenWarnLastMs) >= STM32_FROZEN_WARN_INTERVAL_MS) {
+                stm32FrozenWarnLastMs = now;
+                Serial.println("[SAFETY][WARN] STM32 heartbeat counter frozen — inhibiting commands");
             }
 
             // ---- Gear re-sync after STM32 restart (SAFETY FIX) ----
@@ -884,6 +935,12 @@ void loop() {
                 stm32StartupSeen    = true;
                 gearResyncPending   = true;
                 tempMapResyncPending = true;
+                // The STM32 restarted → whatever drive mode it last confirmed
+                // is stale.  Invalidate the ModeSync confirmation so the
+                // physical selector's mode is RE-TRANSMITTED even if it equals
+                // the previously-confirmed value (root cause of a confirmed
+                // 4x4 never being resent after an STM32 restart).
+                g_modeSync.invalidateConfirmed();
                 Serial.println("[SAFETY][INFO] STM32 restart detected — gear + temp-map resync pending");
             }
             if (gearResyncPending && !startupInhibitNow &&
@@ -913,6 +970,23 @@ void loop() {
             }
             if (!startupInhibitNow) {
                 stm32StartupSeen = false;  // inhibit cleared, ready for next detection
+            }
+
+            // ---- Drive-mode confirmation from the heartbeat echo ----
+            // The STM32 heartbeat echoes its applied drive mode (statusFlags
+            // bit1 = 4x4, bit2 = tank turn).  Feed it into ModeSync as remote
+            // confirmation so a selected mode still confirms even when the
+            // CMD_ACK for our CMD_MODE was lost, and so a silent STM32 mode
+            // revert is re-synchronised.  Processed once per NEW heartbeat
+            // frame (tracked via hb.timestampMs) and only while the link is
+            // proven alive.  Map STM32 statusFlags bits → CMD_MODE flag bits.
+            if (stm32IsAlive &&
+                (uint32_t)hb.timestampMs != (uint32_t)g_lastModeEchoTs) {
+                g_lastModeEchoTs = (unsigned long)hb.timestampMs;
+                uint8_t echoFlags = 0;
+                if (hb.statusFlags & 0x02u) echoFlags |= can::MODE_FLAG_4X4;
+                if (hb.statusFlags & 0x04u) echoFlags |= can::MODE_FLAG_TANK_TURN;
+                g_modeSync.onHeartbeatModeEcho(echoFlags);
             }
 
             // ---- One-shot LED relay restore from NVS after boot ----
@@ -1040,11 +1114,14 @@ void loop() {
                 Serial.printf("[REMOTE] Mode(CH6) → flags=0x%02X\n", currentModeFlags);
             }
         } else if (traction_sw::hasChanged() && stm32IsAlive) {
-            // Update mode flags: preserve tank turn bit, set 4x4 from switch
+            // Physical 4x4 selector is the SOURCE OF TRUTH.  Latch the
+            // debounced selection into the sync FSM; the actual CMD_MODE
+            // transmission (heartbeat-gated, ACK + bounded retry) is driven
+            // by g_modeSync below instead of a single fire-and-forget send.
             uint8_t tractionBit = traction_sw::getModeFlag();
             currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
                              | tractionBit;
-            sendModeCommand(currentModeFlags);
+            g_modeSync.setDesired(currentModeFlags);
             // NVS persist deferred to heartbeat sync (§1) — only confirmed
             // state is persisted to avoid stale data on power loss.
             {
@@ -1063,6 +1140,43 @@ void loop() {
                           traction_sw::is4WD() ? "4WD" : "2WD",
                           currentModeFlags);
             traction_sw::clearChanged();
+        }
+
+        // ---- Drive-mode sync FSM tick (physical selector path only) ----
+        // Feeds observed CMD_MODE ACKs into the FSM, then advances it: the FSM
+        // (re)transmits the selected mode until the STM32 confirms it or the
+        // bounded retry budget is exhausted.  Skipped while the remote holds
+        // motion authority so the two paths never fight over CMD_MODE.
+        if (!remoteMotionAuthorityActive) {
+            const auto& ad = vehicleData.ack();
+            if (g_modeSync.pending()
+                && ad.cmdIdLow == (can::CMD_MODE & 0xFF)
+                && ModeSync::ackIsAtOrAfterSend((uint32_t)ad.timestampMs,
+                                                (uint32_t)g_modeSendMs)
+                && ad.timestampMs != g_lastModeAckTs) {
+                g_lastModeAckTs = ad.timestampMs;
+                bool ackOk = (ad.result == can::AckResult::OK);
+                g_modeSync.onAck(ackOk ? ModeSync::AckResult::OK
+                                     : ModeSync::AckResult::REJECTED);
+                // [MODESYNC] diagnostic — last ACK + requested/confirmed/retry.
+                Serial.printf(
+                    "[MODESYNC] ack=%s req=0x%02X conf=0x%02X retries=%u%s\n",
+                    ackOk ? "OK" : "REJECT",
+                    g_modeSync.desired(), g_modeSync.confirmed(),
+                    (unsigned)g_modeSync.retries(),
+                    g_modeSync.failed() ? " -> FAILED" : "");
+            }
+            if (g_modeSync.update(millis(), stm32IsAlive)
+                    == ModeSync::Action::SEND) {
+                g_modeSendMs = millis();
+                sendModeCommand(g_modeSync.sendMode());
+                // [MODESYNC] diagnostic — each (re)transmission attempt.
+                Serial.printf(
+                    "[MODESYNC] send req=0x%02X conf=0x%02X attempt=%u/%u\n",
+                    g_modeSync.desired(), g_modeSync.confirmed(),
+                    (unsigned)g_modeSync.retries() + 1u,
+                    (unsigned)MODE_SYNC_MAX_RETRIES + 1u);
+            }
         }
     }
 
@@ -1724,7 +1838,16 @@ void loop() {
      * Recovery sequence (per ESP-IDF TWAI API):
      *   BUS_OFF → twai_initiate_recovery() → RECOVERING
      *   RECOVERING → (128×11 recessive bits) → STOPPED
-     *   STOPPED → twai_start() → RUNNING
+     *   STOPPED → twai_start() → RUNNING (probation)
+     *   RUNNING → sustained advancing STM32 heartbeats → recovery CONFIRMED
+     *
+     * The bus-off recovery decision is delegated to the pure, host-tested
+     * twai_recovery::TwaiBusOffRecovery FSM (esp32/src/twai_recovery.h): the
+     * controller merely reporting RUNNING is treated as PROBATION, not health,
+     * so the photographed BUS_OFF↔RUNNING oscillation cannot falsely reset the
+     * counters.  Retries are fast-then-slow (unbounded) so the node always
+     * recovers after a physical reconnection, and the lifetime BUS_OFF count is
+     * preserved.
      *
      * Error-passive recovery (two-phase):
      *   When TEC saturates at 128 (error-passive) the TWAI state remains
@@ -1734,29 +1857,51 @@ void loop() {
      *   Phase 1: first 10 attempts at 3 s intervals (fast).
      *   Phase 2: unlimited attempts at 30 s intervals (slow periodic).
      *
-     * Check every 250 ms; bus-off limited to 10 attempts. */
+     * Check every 250 ms. */
     if (now - lastBusOffCheckMs >= 250) {
         lastBusOffCheckMs = now;
         twai_status_info_t sts;
         if (twai_get_status_info(&sts) == ESP_OK) {
-            if (sts.state == TWAI_STATE_BUS_OFF) {
-                if (busOffRecoveryCount < 10) {
-                    Serial.printf("[CAN][ERR] BUS_OFF detected — recovery attempt %u/10\n",
-                                  busOffRecoveryCount + 1);
-                    twai_initiate_recovery();
-                    busOffRecoveryCount++;
-                }
-                errorPassiveSince = 0;  // not error-passive while bus-off
-            } else if (sts.state == TWAI_STATE_STOPPED) {
-                /* Recovery completed — restart the driver */
-                if (twai_start() == ESP_OK) {
-                    Serial.println("[CAN][INFO] Recovery complete — TWAI restarted");
-                    busOffRecoveryCount = 0;
-                }
-                errorPassiveSince = 0;
-            } else if (sts.state == TWAI_STATE_RUNNING) {
-                busOffRecoveryCount = 0;
+            // Map the ESP-IDF controller state to the pure-logic enum.
+            twai_recovery::TwaiState st;
+            switch (sts.state) {
+                case TWAI_STATE_BUS_OFF:    st = twai_recovery::TwaiState::BUS_OFF;    break;
+                case TWAI_STATE_RECOVERING: st = twai_recovery::TwaiState::RECOVERING; break;
+                case TWAI_STATE_STOPPED:    st = twai_recovery::TwaiState::STOPPED;    break;
+                default:                    st = twai_recovery::TwaiState::RUNNING;    break;
+            }
 
+            // Stable-heartbeat recovery FSM: RUNNING alone never confirms and
+            // never resets counters — only sustained advancing STM32 heartbeats
+            // (stm32IsAlive) confirm recovery.
+            twai_recovery::TwaiAction act = g_twaiRecovery.update(now, st, stm32IsAlive);
+            switch (act) {
+                case twai_recovery::TwaiAction::INITIATE_RECOVERY:
+                    Serial.printf("[CAN][ERR] BUS_OFF — recovery attempt %u "
+                                  "(lifetime bus-off #%lu)\n",
+                                  g_twaiRecovery.attempts(),
+                                  (unsigned long)g_twaiRecovery.lifetimeBusOffCount());
+                    twai_initiate_recovery();
+                    break;
+                case twai_recovery::TwaiAction::START:
+                    if (twai_start() == ESP_OK) {
+                        Serial.println("[CAN][INFO] Driver restarted — awaiting "
+                                       "sustained STM32 heartbeats to confirm recovery");
+                    }
+                    break;
+                case twai_recovery::TwaiAction::CONFIRMED:
+                    Serial.printf("[CAN][INFO] BUS_OFF recovery CONFIRMED — "
+                                  "stable heartbeat window sustained (recoveries=%lu)\n",
+                                  (unsigned long)g_twaiRecovery.confirmedRecoveries());
+                    break;
+                case twai_recovery::TwaiAction::NONE:
+                default:
+                    break;
+            }
+
+            if (sts.state != TWAI_STATE_RUNNING) {
+                errorPassiveSince = 0;  // not error-passive unless RUNNING
+            } else {
                 /* ---- Error-passive detection (two-phase) ----
                  * TEC ≥ 128 means the controller is error-passive.  It can
                  * still receive but transmissions are degraded.  If this
