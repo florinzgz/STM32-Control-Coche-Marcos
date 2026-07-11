@@ -174,6 +174,12 @@ jobs:
               esp32/src/test_motion_inhibit_decode.cpp \
               -o /tmp/test_motion_inhibit_decode
             /tmp/test_motion_inhibit_decode
+
+            echo "-- test_boot_diag.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_boot_diag.cpp \
+              -o /tmp/test_boot_diag
+            /tmp/test_boot_diag
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

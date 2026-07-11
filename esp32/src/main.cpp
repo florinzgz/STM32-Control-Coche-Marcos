@@ -40,6 +40,7 @@
 #include "mode_sync.h"
 #include "display_backlight.h"
 #include "stm32_liveness.h"
+#include "boot_diag.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -626,17 +627,21 @@ void setup() {
 
     // Reset cause reporting
     esp_reset_reason_t reason = esp_reset_reason();
-    Serial.printf("[BOOT][INFO] Reset reason: %s\n",
-        reason == ESP_RST_POWERON  ? "PowerOn" :
-        reason == ESP_RST_SW       ? "Software" :
-        reason == ESP_RST_PANIC    ? "Panic" :
-        reason == ESP_RST_INT_WDT  ? "Watchdog(INT)" :
-        reason == ESP_RST_TASK_WDT ? "Watchdog(TASK)" :
-        reason == ESP_RST_WDT      ? "Watchdog(OTHER)" :
-        reason == ESP_RST_BROWNOUT ? "Brownout" :
-        reason == ESP_RST_SDIO     ? "SDIO" :
-        reason == ESP_RST_DEEPSLEEP ? "DeepSleep" :
-                                      "Unknown");
+    boot_diag::ResetClass bootRc =
+        reason == ESP_RST_POWERON   ? boot_diag::ResetClass::POWER_ON  :
+        reason == ESP_RST_SW        ? boot_diag::ResetClass::SOFTWARE  :
+        reason == ESP_RST_PANIC     ? boot_diag::ResetClass::PANIC     :
+        reason == ESP_RST_INT_WDT   ? boot_diag::ResetClass::WATCHDOG  :
+        reason == ESP_RST_TASK_WDT  ? boot_diag::ResetClass::WATCHDOG  :
+        reason == ESP_RST_WDT       ? boot_diag::ResetClass::WATCHDOG  :
+        reason == ESP_RST_BROWNOUT  ? boot_diag::ResetClass::BROWNOUT  :
+        reason == ESP_RST_DEEPSLEEP ? boot_diag::ResetClass::DEEPSLEEP :
+        reason == ESP_RST_SDIO      ? boot_diag::ResetClass::EXTERNAL  :
+        reason == ESP_RST_EXT       ? boot_diag::ResetClass::EXTERNAL  :
+                                      boot_diag::ResetClass::UNKNOWN;
+    Serial.printf("[BOOT][INFO] Reset reason: %s%s\n",
+                  boot_diag::name(bootRc),
+                  boot_diag::isAbnormal(bootRc) ? " (ABNORMAL)" : "");
 
     Serial.println("[BOOT][INFO] ESP32 HMI CAN bring-up booted");
 
@@ -807,6 +812,28 @@ void setup() {
         } else {
             Serial.println("[BOOT][INFO] Render task started on Core 0");
         }
+    }
+
+    // Boot-diagnostics telemetry — single machine-parseable line emitted once
+    // per boot on the serial channel (the ESP32 HMI is CAN receive-only, so it
+    // has no diagnostic-frame TX path).  Captures the reset cause plus the heap
+    // low-water mark and both task stack high-watermarks so brownouts, panics,
+    // watchdog resets, heap exhaustion and stack pressure are all observable
+    // from the boot log.  Formatting/classification lives in the host-tested
+    // boot_diag module; this is pure instrumentation.
+    {
+        boot_diag::HeapStats hs;
+        hs.freeNow      = (uint32_t)esp_get_free_heap_size();
+        hs.minFreeEver  = (uint32_t)esp_get_minimum_free_heap_size();
+        hs.totalSize    = (uint32_t)ESP.getHeapSize();
+        hs.largestBlock = (uint32_t)ESP.getMaxAllocHeap();
+        uint32_t loopHwm   = (uint32_t)uxTaskGetStackHighWaterMark(nullptr);
+        uint32_t renderHwm = (renderTaskHandle != nullptr)
+                           ? (uint32_t)uxTaskGetStackHighWaterMark(renderTaskHandle)
+                           : 0u;
+        char bootLine[192];
+        boot_diag::format(bootLine, sizeof(bootLine), bootRc, hs, loopHwm, renderHwm);
+        Serial.println(bootLine);
     }
 }
 
