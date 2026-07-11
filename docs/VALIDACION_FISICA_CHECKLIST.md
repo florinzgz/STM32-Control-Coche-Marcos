@@ -69,15 +69,8 @@ Resultado: ☐ Pasa ☐ Falla — Nº de reintentos observados: ____  Notas: ___
 
 ## 4. Rojo frontal se ve rojo (no verde)
 
-Referencia: ambas tiras (frontal GPIO47 y trasera GPIO48) usan orden **GRB**
-(`esp32/src/led_controller.cpp`). Con la frontal en RGB el rojo (255,0,0) se
-transmite R,G,B y una WS2812B GRB lo lee como verde; por eso el KITT/policía rojo
-se veía verde. Igualar la frontal a la trasera (GRB) corrige el color.
-
-> Nota: el orden de bytes SOLO cambia el color, nunca puede causar los
-> "destellos incontrolables". Ese parpadeo es un problema de integridad de señal
-> (longitud/ruido en la línea de datos, falta de masa común, adaptador de nivel,
-> o una tira frontal de otro chipset) y debe resolverse en el hardware.
+Referencia (memoria verificada): tira frontal GPIO47 en orden **RGB**, trasera GPIO48 en **GRB**
+(`esp32/src/led_controller.cpp`). El KITT/policía rojo se veía verde cuando la frontal usaba GRB.
 
 - [ ] Activa un modo decorativo rojo (KNIGHT_RIDER = 8, o policía).
 - [ ] La **tira frontal** muestra **rojo** (no verde).
