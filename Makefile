@@ -20,6 +20,7 @@ C_SOURCES = \
   $(CORE_SRC)/motor_control.c \
   $(CORE_SRC)/can_handler.c \
   $(CORE_SRC)/busoff_recovery.c \
+  $(CORE_SRC)/motion_inhibit.c \
   $(CORE_SRC)/rc_arbiter.c \
   $(CORE_SRC)/sensor_manager.c \
   $(CORE_SRC)/pedal_logic.c \

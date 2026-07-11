@@ -696,6 +696,48 @@ void CAN_SendStatusTraction(void) {
 }
 
 /**
+ * @brief  Send MOTION_INHIBIT_REASON instrumentation frame (0x315).
+ *
+ * Emits the bitfield computed by the traction pipeline explaining why the
+ * vehicle is (or is not) producing torque, plus the demand/PWM context
+ * needed to interpret it.  Instrumentation only — see motion_inhibit.h.
+ *
+ * CAN ID: 0x315   DLC: 8   Rate: 100 ms (10 Hz)
+ */
+void CAN_SendMotionInhibit(void) {
+    uint8_t data[8];
+
+    uint16_t reason = Traction_GetMotionInhibit();
+
+    /* Clamp signed demands to the int8 range for transport. */
+    const TractionState_t *ts = Traction_GetState();
+    float demand_f = sanitize_float(ts ? ts->demandPct : 0.0f, 0.0f);
+    float eff_f    = sanitize_float(Traction_GetEffectiveDemandPct(), 0.0f);
+    if (demand_f >  100.0f) demand_f =  100.0f;
+    if (demand_f < -100.0f) demand_f = -100.0f;
+    if (eff_f    >  100.0f) eff_f    =  100.0f;
+    if (eff_f    < -100.0f) eff_f    = -100.0f;
+
+    uint8_t flags = 0;
+    if (Safety_IsPowerReady())        flags |= 0x01;
+    if (Obstacle_IsForwardBlocked())  flags |= 0x02;
+    if (Safety_GetState() == SYS_STATE_DEGRADED) {
+        flags |= (uint8_t)(((uint8_t)Safety_GetDegradedLevel() & 0x0F) << 4);
+    }
+
+    data[0] = (uint8_t)(reason & 0xFF);
+    data[1] = (uint8_t)((reason >> 8) & 0xFF);
+    data[2] = (uint8_t)Safety_GetState();
+    data[3] = (uint8_t)Traction_GetGear();
+    data[4] = (uint8_t)(int8_t)demand_f;
+    data[5] = (uint8_t)(int8_t)eff_f;
+    data[6] = Traction_GetFinalPwmPct();
+    data[7] = flags;
+
+    TransmitFrame(CAN_ID_DIAG_MOTION_INHIBIT, data, 8);
+}
+
+/**
  * @brief  Send live Hall pedal position to ESP32 (telemetry only).
  *
  * Publishes the real pedal travel reported by Pedal_GetPercent() so the HMI

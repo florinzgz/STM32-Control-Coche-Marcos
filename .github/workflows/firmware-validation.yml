@@ -83,6 +83,7 @@ jobs:
               Core/Src/test_pedal_cal_limits.c \
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
+              Core/Src/test_motion_inhibit.c \
               Core/Src/test_loop_diag.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
@@ -95,6 +96,7 @@ jobs:
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
+                Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -166,6 +168,12 @@ jobs:
               esp32/src/traction_switch.cpp esp32/src/test_mode_sync.cpp \
               -o /tmp/test_mode_sync
             /tmp/test_mode_sync
+
+            echo "-- test_motion_inhibit_decode.cpp"
+            g++ -std=c++17 -Wall -Wextra -DHOST_TEST \
+              esp32/src/test_motion_inhibit_decode.cpp \
+              -o /tmp/test_motion_inhibit_decode
+            /tmp/test_motion_inhibit_decode
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

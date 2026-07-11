@@ -14,6 +14,7 @@
 #include "safety_system.h"
 #include "sensor_manager.h"
 #include "service_mode.h"
+#include "motion_inhibit.h"
 #include <math.h>
 #include <stdbool.h>
 
@@ -421,6 +422,14 @@ typedef enum {
 
 static TractionPhase_t trac_phase        = TRAC_PHASE_BRAKE;
 static uint32_t        coast_start_tick  = 0;     /* When coast phase began */
+
+/* ---- MOTION_INHIBIT_REASON instrumentation state ----
+ * Latest bitfield + the effective demand / final PWM snapshot behind it.
+ * Updated once per Traction_Update() at every exit path so telemetry
+ * always reflects the current cycle.  Instrumentation only.              */
+static uint16_t motion_inhibit_reason   = MOTION_INHIBIT_NONE;
+static float    motion_effective_demand = 0.0f;
+static uint8_t  motion_final_pwm_pct    = 0;
 static uint16_t        prev_output_pwm[4] = {0};  /* Previous PWM per motor
                                                     * for jerk limiting      */
 static float           brake_release_pct = 0.0f;  /* Ramp during brake→drive */
@@ -1266,6 +1275,53 @@ static void compute_ackermann_differential(float steer_deg, float diff_out[4])
     }
 }
 
+/* ---- MOTION_INHIBIT_REASON snapshot helper (instrumentation only) ----
+ * Builds a MotionInhibitInputs snapshot from the values the traction/safety
+ * pipeline has already computed and stores the resulting bitfield.  Called
+ * at every exit path of Traction_Update() so 0x315 telemetry reflects the
+ * current cycle.  Never alters control state.                             */
+static void Traction_UpdateMotionInhibit(float effective_demand_pct,
+                                         uint16_t final_pwm_max_ticks)
+{
+    SystemState_t st = Safety_GetState();
+
+    MotionInhibitInputs mi;
+    mi.state        = (uint8_t)st;
+    mi.power_ready  = Safety_IsPowerReady();
+    mi.gear         = (uint8_t)current_gear;
+    mi.gear_park    = (uint8_t)GEAR_PARK;
+    mi.gear_neutral = (uint8_t)GEAR_NEUTRAL;
+    mi.state_safe   = (uint8_t)SYS_STATE_SAFE;
+    mi.state_error  = (uint8_t)SYS_STATE_ERROR;
+    mi.obstacle_forward_blocked = Obstacle_IsForwardBlocked();
+    mi.forward_gear = (current_gear == GEAR_FORWARD ||
+                       current_gear == GEAR_FORWARD_D2);
+    mi.demand_pct           = traction_state.demandPct;
+    mi.effective_demand_pct = effective_demand_pct;
+    mi.final_pwm_max        = final_pwm_max_ticks;
+    mi.degraded_level       = (st == SYS_STATE_DEGRADED)
+                                ? (uint8_t)Safety_GetDegradedLevel() : 0U;
+
+    motion_inhibit_reason   = MotionInhibit_Evaluate(&mi);
+    motion_effective_demand = effective_demand_pct;
+    motion_final_pwm_pct    = (uint8_t)((final_pwm_max_ticks * 100U) / PWM_PERIOD);
+}
+
+uint16_t Traction_GetMotionInhibit(void)
+{
+    return motion_inhibit_reason;
+}
+
+float Traction_GetEffectiveDemandPct(void)
+{
+    return motion_effective_demand;
+}
+
+uint8_t Traction_GetFinalPwmPct(void)
+{
+    return motion_final_pwm_pct;
+}
+
 void Traction_Update(void)
 {
     /* --- Power-ready gate ---
@@ -1287,6 +1343,7 @@ void Traction_Update(void)
         SystemState_t st = Safety_GetState();
         if (st != SYS_STATE_SAFE && st != SYS_STATE_ERROR &&
             !Safety_IsPowerReady()) {
+            Traction_UpdateMotionInhibit(0.0f, 0);  /* instrumentation */
             return;  /* Relays not yet settled — suppress all motor output */
         }
     }
@@ -1327,6 +1384,7 @@ void Traction_Update(void)
             traction_state.wheels[i].currentA = Current_GetAmps(i);
             traction_state.wheels[i].tempC    = Temperature_Get(i);
         }
+        Traction_UpdateMotionInhibit(0.0f, 0);  /* Park — no drive */
         return;
     }
 
@@ -1407,6 +1465,7 @@ void Traction_Update(void)
             traction_state.wheels[i].pwm      = 0;
             traction_state.wheels[i].reverse  = false;
         }
+        Traction_UpdateMotionInhibit(0.0f, 0);  /* Neutral — coast */
         return;
     }
 
@@ -1997,6 +2056,21 @@ void Traction_Update(void)
         uint16_t per_wheel_base = traction_state.mode4x4 ? (base_pwm / 2) : base_pwm;
         traction_state.wheels[i].pwm      = (uint16_t)(per_wheel_base * acker_diff[i] * safety_status.wheel_scale[i]);
         traction_state.wheels[i].reverse  = (dir < 0);
+    }
+
+    /* ---- MOTION_INHIBIT_REASON instrumentation (normal drive path) ----
+     * Capture the effective demand and the maximum final PWM duty actually
+     * written to the BTS7960 drivers (EN asserted), so the classifier can
+     * distinguish "demand zeroed before PWM" from "demand survived but PWM
+     * is zero".  Instrumentation only — no control effect.               */
+    {
+        uint16_t final_pwm_max = 0;
+        for (uint8_t i = 0; i < 4; i++) {
+            if (desired_en[i] && desired_pwm[i] > final_pwm_max) {
+                final_pwm_max = desired_pwm[i];
+            }
+        }
+        Traction_UpdateMotionInhibit(effective_demand, final_pwm_max);
     }
 }
 

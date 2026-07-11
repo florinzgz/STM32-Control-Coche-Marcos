@@ -487,6 +487,27 @@ inline constexpr uint8_t WHEEL_DIAG_FLAG_LATCHED      = (1U << 3);
 // 0x306 (DIAG_DEBOUNCE).  A full wheel revolution ≈ 6 valid pulses. Report-only.
 inline constexpr uint32_t DIAG_WHEEL_PULSES = 0x314;  // STM32→ESP32, DLC 8, 1000 ms — per-wheel valid pulse counts
 
+// MOTION_INHIBIT_REASON diagnostic (0x315) — STM32→ESP32, 10 Hz, DLC 8.
+// Instrumentation only: explains why the traction chain is (or is not)
+// producing torque.  Bytes: 0-1 reason bitfield (uint16 LE), 2 system state,
+// 3 gear, 4 operator demand % (int8), 5 effective demand % (int8), 6 max final
+// PWM duty % (uint8), 7 flags (bit0 power_ready, bit1 obstacle_forward_blocked,
+// bits4-7 degraded level).
+inline constexpr uint32_t DIAG_MOTION_INHIBIT = 0x315;  // STM32→ESP32, DLC 8, 100 ms — motion-inhibit reason
+
+// MOTION_INHIBIT_REASON bits (0x315 bytes 0-1) — mirror of Core/Inc/motion_inhibit.h
+inline constexpr uint16_t MOTION_INHIBIT_NONE            = 0x0000;
+inline constexpr uint16_t MOTION_INHIBIT_STATE_SAFE      = 0x0001;
+inline constexpr uint16_t MOTION_INHIBIT_STATE_ERROR     = 0x0002;
+inline constexpr uint16_t MOTION_INHIBIT_POWER_NOT_READY = 0x0004;
+inline constexpr uint16_t MOTION_INHIBIT_GEAR_PARK       = 0x0008;
+inline constexpr uint16_t MOTION_INHIBIT_GEAR_NEUTRAL    = 0x0010;
+inline constexpr uint16_t MOTION_INHIBIT_NO_DEMAND       = 0x0020;
+inline constexpr uint16_t MOTION_INHIBIT_DEMAND_ZEROED   = 0x0040;
+inline constexpr uint16_t MOTION_INHIBIT_OBSTACLE_BLOCK  = 0x0080;
+inline constexpr uint16_t MOTION_INHIBIT_PWM_ZERO        = 0x0100;
+inline constexpr uint16_t MOTION_INHIBIT_TORQUE_LIMITED  = 0x0200;
+
 } // namespace can
 
 #endif // CAN_IDS_H

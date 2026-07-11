@@ -409,6 +409,25 @@ static void decodeWheelSensorDiag(const CanFrame& f, vehicle::VehicleData& data)
     data.setWheelSensorDiag(wd);
 }
 
+// 0x315 DIAG_MOTION_INHIBIT — MOTION_INHIBIT_REASON instrumentation (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c CAN_SendMotionInhibit().
+static void decodeMotionInhibit(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::MotionInhibitData mi;
+    mi.reason         = readU16LE(&f.data[0]);
+    mi.systemState    = f.data[2];
+    mi.gear           = f.data[3];
+    mi.demandPct      = (int8_t)f.data[4];
+    mi.effectivePct   = (int8_t)f.data[5];
+    mi.finalPwmPct    = f.data[6];
+    mi.powerReady     = (f.data[7] & 0x01U) != 0;
+    mi.obstacleFwdBlk = (f.data[7] & 0x02U) != 0;
+    mi.degradedLevel  = (uint8_t)((f.data[7] >> 4) & 0x0FU);
+    mi.valid          = true;
+    mi.timestampMs    = millis();
+    data.setMotionInhibit(mi);
+}
+
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
 static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
@@ -686,6 +705,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
             case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
             case can::DIAG_WHEEL_SENSOR:    decodeWheelSensorDiag(frame, data);   break;
+            case can::DIAG_MOTION_INHIBIT:  decodeMotionInhibit(frame, data);     break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
