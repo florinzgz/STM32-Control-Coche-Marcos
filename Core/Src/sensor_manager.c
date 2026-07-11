@@ -463,6 +463,14 @@ static float    pedal_ema       = 0.0f;  /* EMA filtered percentage           */
 static bool     pedal_plausible = true;  /* Software plausibility result      */
 static bool     pedal_channels_contradict = false; /* Dual samples disagree   */
 static bool     pedal_ema_primed = false; /* EMA initialized after first read */
+/* Rate-fault recovery state machine.
+ * pedal_rate_fault is set when an upward rate-of-change violation is
+ * detected (rapid APPLICATION — potentially dangerous).  It clears only
+ * after PEDAL_RECOVERY_CYCLES consecutive cycles with the pedal inside
+ * the safe release zone (≤ PEDAL_RELEASE_ZONE_PCT).
+ * pedal_recovery_count tracks consecutive qualifying cycles.           */
+static bool     pedal_rate_fault     = false; /* Upward rate fault active    */
+static uint8_t  pedal_recovery_count = 0;     /* Consecutive safe-zone cycles */
 
 extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c1;
@@ -526,6 +534,22 @@ static uint16_t pedal_adc_max = PEDAL_ADC_MAX_DEFAULT;
  * Good balance between noise rejection and pedal responsiveness.     */
 #define PEDAL_EMA_ALPHA  0.3f
 
+/* Upward rate-fault recovery parameters.
+ * After an upward rate violation (pedal_rate_fault = true) the
+ * recovery state machine requires PEDAL_RECOVERY_CYCLES consecutive
+ * Pedal_Update() cycles with the pedal inside the safe release zone
+ * (≤ PEDAL_RELEASE_ZONE_PCT) before plausibility is restored and
+ * the output is re-enabled from 0 %.
+ *
+ * PEDAL_RELEASE_ZONE_PCT is deliberately tight (3 %) — it matches
+ * STARTUP_PEDAL_REST_PCT and the calibration "pedal released" check
+ * so that "released" means the same thing throughout the firmware.
+ *
+ * PEDAL_RECOVERY_CYCLES = 3 → 150 ms at 50 ms/cycle.  Short enough
+ * not to feel sluggish, long enough to reject a single glitch.       */
+#define PEDAL_RELEASE_ZONE_PCT   3.0f
+#define PEDAL_RECOVERY_CYCLES    3U
+
 /* Cross-validation tolerance: 5% of full pedal range
  * (kept for API compatibility with safety_system.c checks)           */
 #define PEDAL_PLAUSIBILITY_PCT  5.0f
@@ -574,10 +598,17 @@ void Pedal_Update(void)
         diff_raw = pedal_raw_adc2 - pedal_raw_adc;
 
     if (diff_raw > PEDAL_SAMPLE_TOLERANCE) {
-        /* Consecutive samples disagree — noise or transient fault */
+        /* Consecutive samples disagree — noise or transient fault.
+         * Zero safe output; if a rate-fault recovery was in progress
+         * reset the consecutive counter (samples are unreliable).
+         * pedal_rate_fault is intentionally NOT cleared here — the
+         * contradiction is a separate fault type that supersedes it but
+         * recovery must still restart from zero.                       */
         pedal_channels_contradict = true;
-        pedal_plausible = false;
-        return;  /* Skip update — keep previous valid values */
+        pedal_plausible           = false;
+        pedal_pct                 = 0.0f;
+        pedal_recovery_count      = 0;
+        return;
     }
     pedal_channels_contradict = false;
 
@@ -593,36 +624,132 @@ void Pedal_Update(void)
 #else
     if (avg_raw > PEDAL_ADC_FAULT_HI) {
 #endif
-        pedal_plausible = false;
+        /* Rail fault: zero all accumulated state so recovery starts
+         * from a clean baseline when the fault clears.                */
+        pedal_plausible      = false;
+        pedal_pct            = 0.0f;
+        pedal_pct_prev       = 0.0f;
+        pedal_ema            = 0.0f;
+        pedal_ema_primed     = false;
+        pedal_rate_fault     = false;
+        pedal_recovery_count = 0;
         return;
     }
 
     /* 5. Convert to percentage */
     pedal_pct_raw = Pedal_RawToPercent(avg_raw);
 
-    /* 6. EMA filter */
+    /* 6. Rate-fault recovery state machine.
+     *
+     * When an upward rate violation was previously detected the pedal
+     * must spend PEDAL_RECOVERY_CYCLES consecutive cycles inside the
+     * release zone (≤ PEDAL_RELEASE_ZONE_PCT) before plausibility is
+     * restored.  During recovery the output is held at 0 %.
+     *
+     * This block runs BEFORE the rate check so that a downward
+     * transition from any high value during recovery does NOT re-fire
+     * the rapid-release path — recovery ends cleanly from 0 %.        */
+    if (pedal_rate_fault) {
+        if (pedal_pct_raw <= PEDAL_RELEASE_ZONE_PCT) {
+            pedal_recovery_count++;
+            if (pedal_recovery_count >= PEDAL_RECOVERY_CYCLES) {
+                /* Recovery complete.  Restore plausibility and reset all
+                 * accumulated state to 0 % so the output ramps up
+                 * smoothly from a clean baseline on the next cycle.    */
+                pedal_rate_fault     = false;
+                pedal_recovery_count = 0;
+                pedal_plausible      = true;
+                pedal_pct            = 0.0f;
+                pedal_pct_prev       = 0.0f;
+                pedal_ema            = 0.0f;
+                pedal_ema_primed     = false;
+                return; /* Next cycle processes normally from 0 % */
+            }
+        } else {
+            /* Pedal moved above release zone — reset recovery counter */
+            pedal_recovery_count = 0;
+        }
+        pedal_plausible = false;
+        pedal_pct       = 0.0f;
+        return;
+    }
+
+    /* 7. Rate-of-change check — direction aware.
+     *
+     * ROOT-CAUSE FIX: the original code used fabs(delta) which treated
+     * a rapid RELEASE identically to a rapid APPLICATION.  When the
+     * pedal dropped from e.g. 53 % to 0 % in a single 50 ms cycle the
+     * fault fired, pedal_pct_prev was never updated (still 53 %), and
+     * every subsequent cycle repeated the same comparison → permanent
+     * lockout with pedal_pct frozen at 53 % while the physical pedal
+     * was at 0 %.  Safety_CheckSensors() saw !Pedal_IsPlausible() and
+     * forced LIMP_HOME; the HMI displayed the stale 53 % via CAN 0x20B.
+     *
+     * Corrected behaviour:
+     *
+     * A. Rapid RELEASE (delta < −PEDAL_MAX_RATE_PCT):
+     *    A fast drop toward zero is always the safe direction for
+     *    traction control.  Accept it immediately: zero the output,
+     *    reset all accumulated state, mark plausible.
+     *
+     * B. Rapid APPLICATION (delta > +PEDAL_MAX_RATE_PCT):
+     *    A sudden large upward jump is physically improbable in one
+     *    50 ms cycle and may indicate noise, EMI, or a wiring fault.
+     *    Enter recovery mode: zero the output, reset pedal_pct_prev
+     *    to the current raw reading to BREAK THE LOCKOUT (the permanent
+     *    lockout was caused by never updating pedal_pct_prev on fault),
+     *    require PEDAL_RECOVERY_CYCLES consecutive released cycles.    */
+    float delta = pedal_pct_raw - pedal_pct_prev;
+
+    if (delta < -(PEDAL_MAX_RATE_PCT)) {
+        /* Rapid RELEASE — safe downward transition.
+         * Zero output immediately and reset all accumulated state so
+         * the next cycle starts from a clean 0 % baseline.            */
+        pedal_pct            = 0.0f;
+        pedal_pct_prev       = 0.0f;
+        pedal_ema            = 0.0f;
+        pedal_ema_primed     = false;
+        pedal_plausible      = true;
+        pedal_rate_fault     = false;
+        pedal_recovery_count = 0;
+        return;
+    }
+
+    if (delta > PEDAL_MAX_RATE_PCT) {
+        /* Rapid APPLICATION — fault.
+         * Zero safe output and reset pedal_pct_prev to the current
+         * raw reading.  This is critical: if pedal_pct_prev is left
+         * at the old baseline every future cycle will compare against
+         * it and permanently fail, freezing the output at the old
+         * value.  Resetting to current raw means the next cycle's
+         * rate check is relative to the actual signal level.          */
+        pedal_plausible      = false;
+        pedal_rate_fault     = true;
+        pedal_pct            = 0.0f;
+        pedal_pct_prev       = pedal_pct_raw; /* break permanent lockout */
+        pedal_ema            = 0.0f;
+        pedal_ema_primed     = false;
+        pedal_recovery_count = 0;
+        return;
+    }
+
+    /* 8. EMA filter — only updated when rate check has passed.
+     *    Moving this after the rate check prevents EMA contamination:
+     *    in the original code EMA was updated before the rate check so
+     *    a faulted cycle injected the bad raw reading into the filter
+     *    even though pedal_pct never received the updated EMA.         */
     if (!pedal_ema_primed) {
-        pedal_ema = pedal_pct_raw;
+        pedal_ema        = pedal_pct_raw;
         pedal_ema_primed = true;
     } else {
         pedal_ema = PEDAL_EMA_ALPHA * pedal_pct_raw
                   + (1.0f - PEDAL_EMA_ALPHA) * pedal_ema;
     }
 
-    /* 7. Rate-of-change check (after EMA to catch raw jumps too) */
-    float rate = pedal_pct_raw - pedal_pct_prev;
-    if (rate < 0.0f) rate = -rate;
-
-    if (rate > PEDAL_MAX_RATE_PCT) {
-        pedal_plausible = false;
-        /* Don't update output or history — keep last safe baseline */
-        return;
-    }
-
-    /* 8. All checks passed — update output and history */
+    /* 9. All checks passed — publish output and update history */
     pedal_plausible = true;
-    pedal_pct = pedal_ema;
-    pedal_pct_prev = pedal_pct_raw;
+    pedal_pct       = pedal_ema;
+    pedal_pct_prev  = pedal_pct_raw;
 }
 
 float Pedal_GetValue(void)          { return (float)pedal_raw_adc; }
@@ -2009,6 +2136,8 @@ void Sensor_Init(void)
     pedal_plausible        = true;
     pedal_channels_contradict = false;
     pedal_ema_primed       = false;
+    pedal_rate_fault       = false;
+    pedal_recovery_count   = 0;
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
         current_amps[i]     = 0.0f;

@@ -173,18 +173,16 @@ jobs:
           make clean
           make -j2 2>&1 | tee artifacts/build/stm32-make.txt
 
-      - name: Optional ESP32 PlatformIO build
+      - name: Build ESP32 firmware (PlatformIO)
         run: |
           mkdir -p artifacts/build
-          if python3 -m pip install --user platformio; then
-            export PATH="$HOME/.local/bin:$PATH"
-            (
-              cd esp32
-              pio run -e esp32s3
-            ) 2>&1 | tee artifacts/build/esp32-platformio.txt || true
-          else
-            echo "SKIP: PlatformIO installation failed." | tee artifacts/build/esp32-platformio.txt
-          fi
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --user platformio
+          export PATH="$HOME/.local/bin:$PATH"
+          (
+            cd esp32
+            pio run -e esp32s3
+          ) 2>&1 | tee artifacts/build/esp32-platformio.txt
 
       - name: Upload build artifacts
         if: always()
