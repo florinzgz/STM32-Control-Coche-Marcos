@@ -13,6 +13,7 @@
 #include "can_handler.h"
 #include "main.h"
 #include "motor_control.h"
+#include "motion_inhibit.h"
 #include "safety_system.h"
 #include "sensor_manager.h"
 #include "service_mode.h"
