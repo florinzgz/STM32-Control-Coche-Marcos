@@ -155,7 +155,7 @@ Order of operations in `Traction_Update()`:
 
 **CAN timeout**: `last_can_rx_time` is updated in the FDCAN RxFifo0 ISR callback via `Safety_UpdateCANRxTime()`. Timeout = 250 ms.
 
-**Bus-off recovery**: Non-blocking, 500 ms retry interval, max 10 retries. If retries exhausted → DEGRADED (not ERROR, which would cut relays).
+**Bus-off recovery**: Non-blocking, 500 ms retry interval, max 10 retries, and recovery is confirmed only after ESP32 heartbeats are sustained for `CAN_BUSOFF_RECOVERY_WINDOW_MS` (1000 ms). On bus-off the system enters LIMP_HOME; if retries are exhausted it stops retrying and stays in LIMP_HOME (it does **not** escalate to ERROR, which would cut relays).
 
 #### 1.1.10 Boot Validation
 
@@ -361,7 +361,7 @@ Validation passes when ALL 6 checks pass simultaneously. If validation fails, th
 | Aspect | ORIGINAL behavior | CURRENT behavior | Status |
 |--------|------------------|-----------------|--------|
 | Protocol | None (monolithic) | 20+ CAN IDs, bidirectional heartbeat, hardware filters | NEW |
-| Bus-off handling | None | Non-blocking, 10 retries at 500 ms → DEGRADED | NEW |
+| Bus-off handling | None | Non-blocking, 10 retries at 500 ms + sustained-heartbeat confirm → LIMP_HOME | NEW |
 | Command ACK | None | 0x103 ACK with result code | NEW |
 | CAN loss = immobilization | N/A | Explicitly prevented: LIMP_HOME keeps vehicle moving | IMPROVED |
 | 0x209 decode body | N/A | Filter configured, decode body empty | MISSING (non-critical) |

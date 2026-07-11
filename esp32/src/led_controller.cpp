@@ -177,8 +177,7 @@ static constexpr uint8_t  DECOR_TEST_PHASES  = 9;
 // The two strips are never energised together.  10 phases, 2.5 s each:
 //   0 FRONT red  1 FRONT green  2 FRONT blue  3 FRONT white  4 FRONT off
 //   5 REAR  red  6 REAR  green  7 REAR  blue  8 REAR  white  9 REAR  off
-static constexpr uint16_t DECOR_RGB_DIAG_STEP_MS = 2500;
-static constexpr uint8_t  DECOR_RGB_DIAG_PHASES  = 10;
+// Timing constants are the shared, host-testable values from led_controller.h.
 
 // Scaled brightness helpers (apply scale factor to a CRGB without FastLED API)
 static inline CRGB scaledBrightness(CRGB c, uint8_t scale) {
@@ -437,11 +436,12 @@ static void updateDecorativeFront(DecorMode mode) {
         }
 
         case DecorMode::RGB_DIAG: {
-            // Front strip is lit ONLY during its own phases (0-2); it stays
-            // black while the rear strip is under test (phases 3-5) so the two
-            // strips are never energised together and can be judged in
-            // isolation.  Pure primaries at full brightness — no scaling, no
-            // blending — so any deviation is a genuine byte-order/wiring fault.
+            // Front strip is lit ONLY during its own phases (0-3: red, green,
+            // blue, white); it stays black during phase 4 (front OFF) and while
+            // the rear strip is under test (phases 5-9) so the two strips are
+            // never energised together and can be judged in isolation.  Pure
+            // primaries at full brightness — no scaling, no blending — so any
+            // deviation is a genuine byte-order/wiring fault.
             fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
             switch (decorPhase % DECOR_RGB_DIAG_PHASES) {
                 case 0: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(255, 0, 0));   break; // FRONT red

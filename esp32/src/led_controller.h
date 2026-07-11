@@ -189,6 +189,34 @@ enum class DecorMode : uint8_t {
 /// Number of valid DecorMode values
 inline constexpr uint8_t DECOR_MODE_COUNT = 10;
 
+// ---- RGB_DIAG colour-order diagnostic timing --------------------------------
+// Mirror of the render-side constants in led_controller.cpp.  RGB_DIAG walks a
+// per-strip RED → GREEN → BLUE → WHITE → OFF sequence: 10 phases at 2.5 s each
+// (front phases 0-4, rear phases 5-9).  The full sequence therefore lasts
+// 10 × 2500 ms = 25 000 ms and EVERY phase (both strips, including the OFF
+// phases 4 and 9) must be reachable before the Engineering TEST auto-restores.
+inline constexpr uint16_t DECOR_RGB_DIAG_STEP_MS = 2500;
+inline constexpr uint8_t  DECOR_RGB_DIAG_PHASES  = 10;
+inline constexpr uint32_t DECOR_RGB_DIAG_SEQUENCE_MS =
+    static_cast<uint32_t>(DECOR_RGB_DIAG_STEP_MS) * DECOR_RGB_DIAG_PHASES;
+
+// ---- Engineering LED-mode TEST auto-restore duration ------------------------
+// The Engineering screen runs a decorative mode for a bounded window then
+// auto-restores the previous mode.  A normal decor test only needs ~10 s, but
+// RGB_DIAG must run its COMPLETE 25 s colour-order sequence (otherwise the rear
+// strip and the OFF phases are never diagnosed), so it gets a longer window
+// with margin.  Pure/host-testable — no hardware access.
+inline constexpr uint32_t DECOR_TEST_DEFAULT_MS  = 10000;  // normal decor test
+inline constexpr uint32_t DECOR_TEST_RGB_DIAG_MS = 30000;  // ≥ 25 s + margin
+
+/// Auto-restore duration (ms) for the Engineering LED-mode TEST of @p mode.
+/// RGB_DIAG returns a window long enough to render its full colour sequence;
+/// every other mode returns the default 10 s window.
+constexpr uint32_t decorTestDurationMs(DecorMode mode) {
+    return (mode == DecorMode::RGB_DIAG) ? DECOR_TEST_RGB_DIAG_MS
+                                         : DECOR_TEST_DEFAULT_MS;
+}
+
 /// Set the decorative LED mode.  Takes effect on next update() call.
 void setDecorMode(DecorMode mode);
 

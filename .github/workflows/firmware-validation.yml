@@ -180,6 +180,18 @@ jobs:
               esp32/src/test_boot_diag.cpp \
               -o /tmp/test_boot_diag
             /tmp/test_boot_diag
+
+            echo "-- test_rgb_diag_timing.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src -Iesp32/include \
+              esp32/src/test_rgb_diag_timing.cpp \
+              -o /tmp/test_rgb_diag_timing
+            /tmp/test_rgb_diag_timing
+
+            echo "-- test_twai_recovery.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_twai_recovery.cpp \
+              -o /tmp/test_twai_recovery
+            /tmp/test_twai_recovery
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

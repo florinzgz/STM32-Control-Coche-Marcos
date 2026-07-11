@@ -546,15 +546,16 @@ private:
     // Modes are for private/demo use only — no real emergency use.
     // ledModeEdit_: current mode shown in the editor (may differ from saved).
     // ledModeSaved_: true if ledModeEdit_ matches the value persisted in NVS.
-    // ledModeTestActive_: set when TEST 10s button is pressed.
+    // ledModeTestActive_: set when the TEST button is pressed.
     // ledModeTestStartMs_: millis() when TEST was pressed (reset by PREV/NEXT during test).
     // ledModeTestPrevMode_: mode active before the test (restored on timeout/BACK).
+    // Auto-restore duration is per-mode via led_ctrl::decorTestDurationMs():
+    // normal decor tests run 10 s; RGB_DIAG runs its full 25 s colour sequence.
     uint8_t       ledModeEdit_         = 0;
     bool          ledModeSaved_        = true;
     bool          ledModeTestActive_   = false;
     unsigned long ledModeTestStartMs_  = 0;
     uint8_t       ledModeTestPrevMode_ = 0;
-    static constexpr unsigned long LED_TEST_DURATION_MS = 10000;  // 10 s test
 };
 
 #endif // ENGINEERING_SCREEN_H

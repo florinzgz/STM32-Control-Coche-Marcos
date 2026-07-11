@@ -40,6 +40,7 @@
 #include "mode_sync.h"
 #include "display_backlight.h"
 #include "stm32_liveness.h"
+#include "twai_recovery.h"
 #include "boot_diag.h"
 
 // =============================================================================
@@ -117,7 +118,12 @@ static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
 static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
 static unsigned long lastBusOffCheckMs = 0;  // TWAI bus-off recovery check
-static uint8_t       busOffRecoveryCount = 0;
+// TWAI BUS_OFF recovery — stable-heartbeat policy (pure, host-tested module).
+// Recovery is confirmed ONLY after sustained advancing STM32 heartbeats; the
+// controller merely reporting RUNNING is treated as probation, never as
+// healthy.  Preserves the lifetime BUS_OFF count and retries fast-then-slow so
+// the node always recovers after a physical reconnection.
+static twai_recovery::TwaiBusOffRecovery g_twaiRecovery;
 
 /* Error-passive recovery state.
  * When TEC reaches 128 the TWAI controller enters error-passive but keeps
@@ -1807,7 +1813,16 @@ void loop() {
      * Recovery sequence (per ESP-IDF TWAI API):
      *   BUS_OFF → twai_initiate_recovery() → RECOVERING
      *   RECOVERING → (128×11 recessive bits) → STOPPED
-     *   STOPPED → twai_start() → RUNNING
+     *   STOPPED → twai_start() → RUNNING (probation)
+     *   RUNNING → sustained advancing STM32 heartbeats → recovery CONFIRMED
+     *
+     * The bus-off recovery decision is delegated to the pure, host-tested
+     * twai_recovery::TwaiBusOffRecovery FSM (esp32/src/twai_recovery.h): the
+     * controller merely reporting RUNNING is treated as PROBATION, not health,
+     * so the photographed BUS_OFF↔RUNNING oscillation cannot falsely reset the
+     * counters.  Retries are fast-then-slow (unbounded) so the node always
+     * recovers after a physical reconnection, and the lifetime BUS_OFF count is
+     * preserved.
      *
      * Error-passive recovery (two-phase):
      *   When TEC saturates at 128 (error-passive) the TWAI state remains
@@ -1817,29 +1832,51 @@ void loop() {
      *   Phase 1: first 10 attempts at 3 s intervals (fast).
      *   Phase 2: unlimited attempts at 30 s intervals (slow periodic).
      *
-     * Check every 250 ms; bus-off limited to 10 attempts. */
+     * Check every 250 ms. */
     if (now - lastBusOffCheckMs >= 250) {
         lastBusOffCheckMs = now;
         twai_status_info_t sts;
         if (twai_get_status_info(&sts) == ESP_OK) {
-            if (sts.state == TWAI_STATE_BUS_OFF) {
-                if (busOffRecoveryCount < 10) {
-                    Serial.printf("[CAN][ERR] BUS_OFF detected — recovery attempt %u/10\n",
-                                  busOffRecoveryCount + 1);
-                    twai_initiate_recovery();
-                    busOffRecoveryCount++;
-                }
-                errorPassiveSince = 0;  // not error-passive while bus-off
-            } else if (sts.state == TWAI_STATE_STOPPED) {
-                /* Recovery completed — restart the driver */
-                if (twai_start() == ESP_OK) {
-                    Serial.println("[CAN][INFO] Recovery complete — TWAI restarted");
-                    busOffRecoveryCount = 0;
-                }
-                errorPassiveSince = 0;
-            } else if (sts.state == TWAI_STATE_RUNNING) {
-                busOffRecoveryCount = 0;
+            // Map the ESP-IDF controller state to the pure-logic enum.
+            twai_recovery::TwaiState st;
+            switch (sts.state) {
+                case TWAI_STATE_BUS_OFF:    st = twai_recovery::TwaiState::BUS_OFF;    break;
+                case TWAI_STATE_RECOVERING: st = twai_recovery::TwaiState::RECOVERING; break;
+                case TWAI_STATE_STOPPED:    st = twai_recovery::TwaiState::STOPPED;    break;
+                default:                    st = twai_recovery::TwaiState::RUNNING;    break;
+            }
 
+            // Stable-heartbeat recovery FSM: RUNNING alone never confirms and
+            // never resets counters — only sustained advancing STM32 heartbeats
+            // (stm32IsAlive) confirm recovery.
+            twai_recovery::TwaiAction act = g_twaiRecovery.update(now, st, stm32IsAlive);
+            switch (act) {
+                case twai_recovery::TwaiAction::INITIATE_RECOVERY:
+                    Serial.printf("[CAN][ERR] BUS_OFF — recovery attempt %u "
+                                  "(lifetime bus-off #%lu)\n",
+                                  g_twaiRecovery.attempts(),
+                                  (unsigned long)g_twaiRecovery.lifetimeBusOffCount());
+                    twai_initiate_recovery();
+                    break;
+                case twai_recovery::TwaiAction::START:
+                    if (twai_start() == ESP_OK) {
+                        Serial.println("[CAN][INFO] Driver restarted — awaiting "
+                                       "sustained STM32 heartbeats to confirm recovery");
+                    }
+                    break;
+                case twai_recovery::TwaiAction::CONFIRMED:
+                    Serial.printf("[CAN][INFO] BUS_OFF recovery CONFIRMED — "
+                                  "stable heartbeat window sustained (recoveries=%lu)\n",
+                                  (unsigned long)g_twaiRecovery.confirmedRecoveries());
+                    break;
+                case twai_recovery::TwaiAction::NONE:
+                default:
+                    break;
+            }
+
+            if (sts.state != TWAI_STATE_RUNNING) {
+                errorPassiveSince = 0;  // not error-passive unless RUNNING
+            } else {
                 /* ---- Error-passive detection (two-phase) ----
                  * TEC ≥ 128 means the controller is error-passive.  It can
                  * still receive but transmissions are degraded.  If this

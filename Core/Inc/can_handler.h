@@ -302,7 +302,7 @@ typedef enum {
 
 /* CAN bus-off recovery configuration */
 #define CAN_BUSOFF_RETRY_INTERVAL_MS  500   /* Non-blocking retry interval      */
-#define CAN_BUSOFF_MAX_RETRIES        10    /* Max recovery attempts before ERROR */
+#define CAN_BUSOFF_MAX_RETRIES        10    /* Max FDCAN re-init attempts before giving up; system stays in LIMP_HOME (NOT ERROR) */
 
 /* Sustained heartbeat window required to CONFIRM bus-off recovery.
  * After the FDCAN peripheral is re-initialised (RUNNING again) the bus is

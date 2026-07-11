@@ -500,12 +500,16 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         }
     }
 
-    // LED MODE: 10 s test timeout — auto-restore previous mode when elapsed.
-    // Uses millis() directly (frameTimeMs is a relative render-loop timer,
-    // not suitable for a 10 s absolute interval in this context).
+    // LED MODE: mode-specific test timeout — auto-restore previous mode when
+    // elapsed.  Normal decor tests run 10 s; RGB_DIAG needs its full 25 s
+    // colour-order sequence (both strips + OFF phases) so it gets a longer
+    // window (see led_ctrl::decorTestDurationMs).  Uses millis() directly
+    // (frameTimeMs is a relative render-loop timer, not an absolute interval).
     if (currentMenu_ == SubMenu::LED_MODE && ledModeTestActive_) {
         uint32_t now_ms = static_cast<uint32_t>(millis());
-        if ((now_ms - static_cast<uint32_t>(ledModeTestStartMs_)) >= LED_TEST_DURATION_MS) {
+        uint32_t testDurationMs = led_ctrl::decorTestDurationMs(
+            static_cast<led_ctrl::DecorMode>(ledModeEdit_));
+        if ((now_ms - static_cast<uint32_t>(ledModeTestStartMs_)) >= testDurationMs) {
             led_ctrl::setDecorMode(
                 static_cast<led_ctrl::DecorMode>(ledModeTestPrevMode_));
             ledModeTestActive_ = false;
@@ -5438,8 +5442,10 @@ void EngineeringScreen::drawLedMode() {
     if (ledModeTestActive_) {
         uint32_t elapsed = static_cast<uint32_t>(millis())
                          - static_cast<uint32_t>(ledModeTestStartMs_);
-        uint32_t remaining = (elapsed < LED_TEST_DURATION_MS)
-                             ? (LED_TEST_DURATION_MS - elapsed) / 1000 + 1
+        uint32_t testDurationMs = led_ctrl::decorTestDurationMs(
+            static_cast<led_ctrl::DecorMode>(ledModeEdit_));
+        uint32_t remaining = (elapsed < testDurationMs)
+                             ? (testDurationMs - elapsed) / 1000 + 1
                              : 0;
         char testBuf[32];
         snprintf(testBuf, sizeof(testBuf), "TEST: %lus remaining",
