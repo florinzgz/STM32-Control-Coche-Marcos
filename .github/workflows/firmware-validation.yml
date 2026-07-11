@@ -84,6 +84,7 @@ jobs:
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
               Core/Src/test_motion_inhibit.c \
+              Core/Src/test_relay_degraded.c \
               Core/Src/test_loop_diag.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
@@ -97,6 +98,7 @@ jobs:
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
                 Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
+                Core/Src/test_relay_degraded.c) extra="Core/Src/motion_inhibit.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
