@@ -5399,7 +5399,7 @@ void EngineeringScreen::drawLedMode() {
         "DEMO SHOW",    // 6
         "CUSTOM TEST",  // 7
         "KNIGHT RIDER", // 8 — "coche fantástico" red scanner
-        "RGB DIAG"      // 9 — independent R/G/B per-strip colour-order test
+        "RGB DIAG"      // 9 — per-strip RED/GREEN/BLUE/WHITE/OFF colour test
     };
 
     tft.fillScreen(ui::COL_BG);

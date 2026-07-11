@@ -18,12 +18,13 @@ CAN contract v1.3 preserved — no CAN ID, DLC, byte layout, or timing change.
 
 ### Added
 
-- **[DIAGNOSTIC] Front/rear LED independent R/G/B per-strip colour-order test**
-  - New `DecorMode::RGB_DIAG` (LED MODE selector entry "RGB DIAG",
-    `DECOR_MODE_COUNT` 9 → 10). Isolates exactly ONE strip at a time in exactly
-    ONE pure, full-scale primary — front R→G→B, then rear R→G→B — so the WS2812B
-    byte order can be confirmed **per strip**. The two strips are never lit
-    together, removing ambiguity.
+- **[DIAGNOSTIC] Front/rear LED per-strip RED/GREEN/BLUE/WHITE/OFF colour test**
+  - `DecorMode::RGB_DIAG` (LED MODE selector entry "RGB DIAG",
+    `DECOR_MODE_COUNT` 9 → 10). Isolates exactly ONE strip at a time and steps
+    it through **RED → GREEN → BLUE → WHITE → OFF** — front first, then rear —
+    so the WS2812B byte order (R/G/B primaries), a dead/stuck-off channel
+    (WHITE) and a stuck-on channel (OFF) can all be confirmed **per strip**.
+    The two strips are never lit together, removing ambiguity.
   - Engineering LED MODE screen shows the **COMMANDED** strip+colour
     (`led_ctrl::getRgbDiagLabel()`, e.g. "FRONT RED") so the installer can
     compare it against what the strip physically emits. The firmware cannot

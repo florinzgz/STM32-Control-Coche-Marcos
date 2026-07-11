@@ -1,5 +1,14 @@
 # STM32 Boot Time vs. IWDG Window
 
+> **STATUS: PENDING PHYSICAL MEASUREMENT.** The IWDG window below is derived from the
+> firmware configuration (real, traced to source). The **boot-time budget and margin are an
+> ENGINEERING ESTIMATE, not a measured value** — the "Boot time (IWDG-start → first refresh)"
+> figures in §4 MUST be captured on real hardware before any IWDG-margin claim is treated as
+> confirmed. Already-emitted boot instrumentation: `0x312 DIAG_BOOT_RESET` (uptime + RCC
+> reset-cause bitmask, 1 Hz) and the `boot_phase` stage markers (`main.c`, SWD-readable). The
+> boot-to-first-refresh **duration** itself is captured on the bench via the Method A / B
+> procedure in §4 and is **not** yet a firmware-emitted telemetry value.
+
 **Scope:** Item 6 of the instrumentation-first PR. Documents the real, firmware-derived
 independent-watchdog (IWDG) window and the boot-time budget that must fit inside it, plus a
 hardware measurement procedure. **No firmware behaviour is changed by this document** — it records

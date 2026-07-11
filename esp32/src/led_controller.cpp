@@ -165,15 +165,20 @@ static uint32_t demoStepMs  = 0;
 static constexpr uint16_t DECOR_TEST_STEP_MS = 2000;
 static constexpr uint8_t  DECOR_TEST_PHASES  = 9;
 
-// RGB_DIAG: independent R/G/B-per-strip colour-order diagnostic.
-// Isolates exactly ONE strip in exactly ONE pure primary at a time so the
-// installer can physically confirm that a commanded RED renders RED (and not
-// green/blue) on EACH strip separately — the definitive per-strip byte-order
-// check.  6 phases, 2.5 s each:
-//   0 FRONT red   1 FRONT green   2 FRONT blue
-//   3 REAR  red   4 REAR  green   5 REAR  blue
+// RGB_DIAG: independent per-strip colour diagnostic (Engineering / STANDBY).
+// Isolates exactly ONE strip at a time and steps it through the full
+// RED → GREEN → BLUE → WHITE → OFF sequence so the installer can physically
+// confirm, per strip, that every channel is alive and correctly ordered:
+//   - RED/GREEN/BLUE are pure single-channel primaries → reveal any byte-order
+//     (RGB vs GRB) fault (a commanded RED that renders GREEN, etc.).
+//   - WHITE lights all three channels at full scale → confirms no channel is
+//     dead/stuck-off (a fault that pure primaries alone can miss).
+//   - OFF blanks the strip → confirms no channel is stuck-on.
+// The two strips are never energised together.  10 phases, 2.5 s each:
+//   0 FRONT red  1 FRONT green  2 FRONT blue  3 FRONT white  4 FRONT off
+//   5 REAR  red  6 REAR  green  7 REAR  blue  8 REAR  white  9 REAR  off
 static constexpr uint16_t DECOR_RGB_DIAG_STEP_MS = 2500;
-static constexpr uint8_t  DECOR_RGB_DIAG_PHASES  = 6;
+static constexpr uint8_t  DECOR_RGB_DIAG_PHASES  = 10;
 
 // Scaled brightness helpers (apply scale factor to a CRGB without FastLED API)
 static inline CRGB scaledBrightness(CRGB c, uint8_t scale) {
@@ -439,10 +444,11 @@ static void updateDecorativeFront(DecorMode mode) {
             // blending — so any deviation is a genuine byte-order/wiring fault.
             fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB::Black);
             switch (decorPhase % DECOR_RGB_DIAG_PHASES) {
-                case 0: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(255, 0, 0)); break; // FRONT red
-                case 1: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(0, 255, 0)); break; // FRONT green
-                case 2: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(0, 0, 255)); break; // FRONT blue
-                default: break;  // phases 3-5: rear under test, front dark
+                case 0: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(255, 0, 0));   break; // FRONT red
+                case 1: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(0, 255, 0));   break; // FRONT green
+                case 2: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(0, 0, 255));   break; // FRONT blue
+                case 3: fill_solid(ledsFront, NUM_LEDS_FRONT, CRGB(255, 255, 255)); break; // FRONT white
+                default: break;  // phase 4 (front off) + phases 5-9: rear under test, front dark
             }
             break;
         }
@@ -561,15 +567,16 @@ static void updateDecorativeRear(DecorMode mode) {
         }
 
         case DecorMode::RGB_DIAG: {
-            // Rear strip is lit ONLY during its own phases (3-5); it stays
-            // black while the front strip is under test (phases 0-2).  Pure
-            // primaries at full brightness — no scaling, no blending.
+            // Rear strip is lit ONLY during its own phases (5-8); it stays
+            // black while the front strip is under test (phases 0-4) and during
+            // its own OFF phase (9).  Pure primaries + white at full brightness.
             fill_solid(ledsRear, NUM_LEDS_REAR, CRGB::Black);
             switch (decorPhase % DECOR_RGB_DIAG_PHASES) {
-                case 3: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(255, 0, 0)); break; // REAR red
-                case 4: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(0, 255, 0)); break; // REAR green
-                case 5: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(0, 0, 255)); break; // REAR blue
-                default: break;  // phases 0-2: front under test, rear dark
+                case 5: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(255, 0, 0));   break; // REAR red
+                case 6: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(0, 255, 0));   break; // REAR green
+                case 7: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(0, 0, 255));   break; // REAR blue
+                case 8: fill_solid(ledsRear, NUM_LEDS_REAR, CRGB(255, 255, 255)); break; // REAR white
+                default: break;  // phases 0-4: front under test; phase 9: rear off
             }
             break;
         }
@@ -1100,9 +1107,13 @@ const char* getRgbDiagLabel() {
         case 0: return "FRONT RED";
         case 1: return "FRONT GREEN";
         case 2: return "FRONT BLUE";
-        case 3: return "REAR RED";
-        case 4: return "REAR GREEN";
-        case 5: return "REAR BLUE";
+        case 3: return "FRONT WHITE";
+        case 4: return "FRONT OFF";
+        case 5: return "REAR RED";
+        case 6: return "REAR GREEN";
+        case 7: return "REAR BLUE";
+        case 8: return "REAR WHITE";
+        case 9: return "REAR OFF";
         default: return "";
     }
 }

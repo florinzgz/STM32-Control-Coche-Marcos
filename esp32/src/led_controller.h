@@ -183,7 +183,7 @@ enum class DecorMode : uint8_t {
     DEMO_SHOW     = 6,  // Full walkthrough: cycles every pattern + indicators
     CUSTOM_TEST   = 7,  // Segment diagnostic (cycles through zones)
     KNIGHT_RIDER  = 8,  // "Coche fantástico" — red scanner bounce with tail
-    RGB_DIAG      = 9   // Independent R/G/B-per-strip colour-order diagnostic
+    RGB_DIAG      = 9   // Per-strip RED/GREEN/BLUE/WHITE/OFF colour diagnostic
 };
 
 /// Number of valid DecorMode values
