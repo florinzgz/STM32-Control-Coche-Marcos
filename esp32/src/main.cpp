@@ -643,8 +643,8 @@ void setup() {
         reason == ESP_RST_WDT       ? boot_diag::ResetClass::WATCHDOG  :
         reason == ESP_RST_BROWNOUT  ? boot_diag::ResetClass::BROWNOUT  :
         reason == ESP_RST_DEEPSLEEP ? boot_diag::ResetClass::DEEPSLEEP :
-        reason == ESP_RST_SDIO      ? boot_diag::ResetClass::EXTERNAL  :
-        reason == ESP_RST_EXT       ? boot_diag::ResetClass::EXTERNAL  :
+        reason == ESP_RST_SDIO      ? boot_diag::ResetClass::EXTERNAL_PIN :
+        reason == ESP_RST_EXT       ? boot_diag::ResetClass::EXTERNAL_PIN :
                                       boot_diag::ResetClass::UNKNOWN;
     Serial.printf("[BOOT][INFO] Reset reason: %s%s\n",
                   boot_diag::name(bootRc),

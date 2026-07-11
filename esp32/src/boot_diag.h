@@ -27,7 +27,7 @@ enum class ResetClass : uint8_t {
     WATCHDOG  = 3,   // INT/TASK/other watchdog (ESP_RST_*_WDT)
     BROWNOUT  = 4,   // supply sag (ESP_RST_BROWNOUT)
     DEEPSLEEP = 5,   // wake from deep sleep (ESP_RST_DEEPSLEEP)
-    EXTERNAL  = 6,   // external pin / SDIO (ESP_RST_EXT / ESP_RST_SDIO)
+    EXTERNAL_PIN = 6, // external pin / SDIO (ESP_RST_EXT / ESP_RST_SDIO)
     UNKNOWN   = 7,   // ESP_RST_UNKNOWN or anything unmapped
 };
 
@@ -48,7 +48,7 @@ inline const char* name(ResetClass rc) {
         case ResetClass::WATCHDOG:  return "Watchdog";
         case ResetClass::BROWNOUT:  return "Brownout";
         case ResetClass::DEEPSLEEP: return "DeepSleep";
-        case ResetClass::EXTERNAL:  return "External";
+        case ResetClass::EXTERNAL_PIN: return "External";
         case ResetClass::UNKNOWN:   default: return "Unknown";
     }
 }

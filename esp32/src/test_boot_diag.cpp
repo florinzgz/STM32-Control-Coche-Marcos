@@ -34,14 +34,14 @@ int main() {
     CHECK(std::strcmp(boot_diag::name(ResetClass::WATCHDOG), "Watchdog") == 0, "name Watchdog");
     CHECK(std::strcmp(boot_diag::name(ResetClass::BROWNOUT), "Brownout") == 0, "name Brownout");
     CHECK(std::strcmp(boot_diag::name(ResetClass::DEEPSLEEP), "DeepSleep") == 0, "name DeepSleep");
-    CHECK(std::strcmp(boot_diag::name(ResetClass::EXTERNAL), "External") == 0, "name External");
+    CHECK(std::strcmp(boot_diag::name(ResetClass::EXTERNAL_PIN), "External") == 0, "name External");
     CHECK(std::strcmp(boot_diag::name(ResetClass::UNKNOWN), "Unknown") == 0, "name Unknown");
 
     // --- isAbnormal(): only panic/watchdog/brownout are abnormal --------
     CHECK(!boot_diag::isAbnormal(ResetClass::POWER_ON),  "PowerOn is normal");
     CHECK(!boot_diag::isAbnormal(ResetClass::SOFTWARE),  "Software is normal");
     CHECK(!boot_diag::isAbnormal(ResetClass::DEEPSLEEP), "DeepSleep is normal");
-    CHECK(!boot_diag::isAbnormal(ResetClass::EXTERNAL),  "External is normal");
+    CHECK(!boot_diag::isAbnormal(ResetClass::EXTERNAL_PIN),  "External is normal");
     CHECK(!boot_diag::isAbnormal(ResetClass::UNKNOWN),   "Unknown is normal");
     CHECK(boot_diag::isAbnormal(ResetClass::PANIC),    "Panic is abnormal");
     CHECK(boot_diag::isAbnormal(ResetClass::WATCHDOG), "Watchdog is abnormal");
