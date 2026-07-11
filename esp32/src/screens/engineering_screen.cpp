@@ -1476,13 +1476,14 @@ void EngineeringScreen::draw() {
         tft.setTextColor(save_enabled ? ui::COL_GREEN : ui::COL_AMBER, ui::COL_BG);
         tft.drawString(buf, 110, 195);
 
-        // Reject reason
+        // Reject reason (needs room for "0x%04X " prefix + full rejectDetail)
+        char reject_buf[7 + sizeof(rejectDetail)];
         tft.fillRect(110, 212, ui::SCREEN_W - 120, 16, ui::COL_BG);
-        snprintf(buf, sizeof(buf), "0x%04X %s",
+        snprintf(reject_buf, sizeof(reject_buf), "0x%04X %s",
                  (unsigned)pedalCalRejectReason_, rejectDetail);
         tft.setTextColor((pedalCalRejectReason_ == 0U) ? ui::COL_GREEN : ui::COL_RED,
                          ui::COL_BG);
-        tft.drawString(buf, 110, 212);
+        tft.drawString(reject_buf, 110, 212);
 
         // ---- SAVE button colour reflects validation + safety gate ----
         uint16_t   save_fill    = save_enabled ? ui::COL_GREEN : ui::COL_DARK_GRAY;
