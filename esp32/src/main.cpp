@@ -37,6 +37,7 @@
 #include "touch_calibration.h"
 #include "config_store.h"
 #include "traction_switch.h"
+#include "mode_sync.h"
 #include "display_backlight.h"
 #include "stm32_liveness.h"
 
@@ -156,6 +157,16 @@ static constexpr uint8_t GEAR_REVERSE = 1;   // shifter raw value for Reverse
 
 // ---- Mode state tracking ----
 static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, bit 1=tank)
+
+// ---- Drive-mode sync FSM (physical 4x4 selector = source of truth) ----
+// The debounced selector latches its state into g_modeSync.setDesired(); the
+// FSM defers the actual CMD_MODE transmission until the STM32 heartbeat is
+// confirmed and (re)transmits until an ACK arrives or a bounded retry budget
+// is exhausted.  Logic lives in the pure, host-tested mode_sync.h.
+static constexpr uint8_t MODE_SYNC_MAX_RETRIES = 3;
+static ModeSync      g_modeSync(can::ACK_TIMEOUT_MS, MODE_SYNC_MAX_RETRIES);
+static unsigned long g_modeSendMs   = 0;     // millis() of last FSM-driven send
+static unsigned long g_lastModeAckTs = 0;    // last CMD_MODE ACK consumed by FSM
 
 // ---- Power/Audio state tracking ----
 static bool     welcomePlayed     = false;
@@ -1046,11 +1057,14 @@ void loop() {
                 Serial.printf("[REMOTE] Mode(CH6) → flags=0x%02X\n", currentModeFlags);
             }
         } else if (traction_sw::hasChanged() && stm32IsAlive) {
-            // Update mode flags: preserve tank turn bit, set 4x4 from switch
+            // Physical 4x4 selector is the SOURCE OF TRUTH.  Latch the
+            // debounced selection into the sync FSM; the actual CMD_MODE
+            // transmission (heartbeat-gated, ACK + bounded retry) is driven
+            // by g_modeSync below instead of a single fire-and-forget send.
             uint8_t tractionBit = traction_sw::getModeFlag();
             currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
                              | tractionBit;
-            sendModeCommand(currentModeFlags);
+            g_modeSync.setDesired(currentModeFlags);
             // NVS persist deferred to heartbeat sync (§1) — only confirmed
             // state is persisted to avoid stale data on power loss.
             {
@@ -1069,6 +1083,29 @@ void loop() {
                           traction_sw::is4WD() ? "4WD" : "2WD",
                           currentModeFlags);
             traction_sw::clearChanged();
+        }
+
+        // ---- Drive-mode sync FSM tick (physical selector path only) ----
+        // Feeds observed CMD_MODE ACKs into the FSM, then advances it: the FSM
+        // (re)transmits the selected mode until the STM32 confirms it or the
+        // bounded retry budget is exhausted.  Skipped while the remote holds
+        // motion authority so the two paths never fight over CMD_MODE.
+        if (!remoteMotionAuthorityActive) {
+            const auto& ad = vehicleData.ack();
+            if (g_modeSync.pending()
+                && ad.cmdIdLow == (can::CMD_MODE & 0xFF)
+                && ad.timestampMs >= g_modeSendMs
+                && ad.timestampMs != g_lastModeAckTs) {
+                g_lastModeAckTs = ad.timestampMs;
+                g_modeSync.onAck(ad.result == can::AckResult::OK
+                                     ? ModeSync::AckResult::OK
+                                     : ModeSync::AckResult::REJECTED);
+            }
+            if (g_modeSync.update(millis(), stm32IsAlive)
+                    == ModeSync::Action::SEND) {
+                g_modeSendMs = millis();
+                sendModeCommand(g_modeSync.sendMode());
+            }
         }
     }
 

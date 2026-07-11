@@ -160,6 +160,12 @@ jobs:
               esp32/src/test_stm32_liveness.cpp \
               -o /tmp/test_stm32_liveness
             /tmp/test_stm32_liveness
+
+            echo "-- test_mode_sync.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src -Iesp32/test_stubs \
+              esp32/src/traction_switch.cpp esp32/src/test_mode_sync.cpp \
+              -o /tmp/test_mode_sync
+            /tmp/test_mode_sync
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
