@@ -69,6 +69,41 @@ _Static_assert(sizeof(eps_flash_slot_t) <= EPS_SLOT_DWORDS * 8U,
 _Static_assert(EPS_SLOT_DWORDS * 8U <= 256U,
                "EPS slot unexpectedly large — check struct layout");
 
+/* ---- Server-side hard limits (Fase 5 hardening) --------------------
+ * EPS_Params_Set() is reachable from the HMI over CAN
+ * (EPS_PARAM_OP_SET_PARAM).  The HMI is NOT trusted to enforce its own
+ * limits: every parameter is range-checked server-side (here) before it
+ * can influence the EPS control loop / steering-motor torque.
+ *
+ * Each entry is an inclusive [min, max] range.  Divisor and mechanical
+ * parameters that must be strictly > 0 use a tiny positive minimum
+ * (EPS_MIN_POS) so that exactly 0.0 is rejected while any real positive
+ * value is accepted — this preserves the previous strict ">0" behaviour
+ * without a separate flag.
+ *
+ * The order MUST match eps_param_id_t in eps_params.h.                 */
+#define EPS_MIN_POS  1e-6f
+
+typedef struct {
+    float min;   /* inclusive lower bound */
+    float max;   /* inclusive upper bound */
+} eps_param_limit_t;
+
+static const eps_param_limit_t eps_limits[EPS_PARAM_COUNT] = {
+    [EPS_PARAM_ASSIST_STRENGTH]   = { 0.0f,        1.0f   },
+    [EPS_PARAM_CENTER_STRENGTH]   = { 0.0f,        1.0f   },
+    [EPS_PARAM_DAMPING]           = { 0.0f,        1.0f   },
+    [EPS_PARAM_FRICTION_COMP]     = { 0.0f,        1.0f   },
+    [EPS_PARAM_COAST_BAND_PCT]    = { 0.0f,      100.0f   },
+    [EPS_PARAM_MIN_DRIVE_PCT]     = { 0.0f,      100.0f   },
+    [EPS_PARAM_ASSIST_VS_SPEED]   = { EPS_MIN_POS, 200.0f },  /* divisor >0 */
+    [EPS_PARAM_RETURN_VS_SPEED]   = { EPS_MIN_POS, 200.0f },  /* divisor >0 */
+    [EPS_PARAM_DEADBAND_DEG]      = { EPS_MIN_POS,  30.0f },  /* >0 */
+    [EPS_PARAM_MAX_PWM_PCT]       = { EPS_MIN_POS, 100.0f },  /* 0<x<=100 */
+    [EPS_PARAM_SLEW_RATE_PCT]     = { EPS_MIN_POS, 100.0f },  /* >0 */
+    [EPS_PARAM_CENTER_OFFSET_DEG] = { -10.0f,      10.0f },
+};
+
 /* ---- Compiled defaults ---- */
 static const eps_params_t eps_defaults = {
     .assist_strength  = 0.45f,
@@ -181,26 +216,26 @@ bool EPS_Params_Set(eps_param_id_t id, float value)
      * propagate through the EPS control loop into motor torque.     */
     if (isnan(value) || isinf(value)) return false;
 
-    /* Reject zero or negative values for parameters used as divisors
-     * in the EPS control loop (motor_control.c Steering_ControlLoop).
-     * assist_vs_speed and return_vs_speed appear in denominators:
-     *   g(v) = 1 / (1 + v / assist_vs_speed)
-     *   h(v) = 0.3 + v / return_vs_speed                            */
-    if ((id == EPS_PARAM_ASSIST_VS_SPEED || id == EPS_PARAM_RETURN_VS_SPEED)
-        && value <= 0.0f) {
+    /* Server-side range enforcement (Fase 5).
+     *
+     * The HMI is NOT trusted to clamp its own inputs: every parameter
+     * is validated against the authoritative [min, max] range defined
+     * in eps_limits[] before it can influence steering-motor torque.
+     * This centralises what used to be a handful of ad-hoc guards and
+     * additionally bounds the assist/center/damping gains and the
+     * center offset, which previously accepted arbitrarily large
+     * values.  Values outside the range are rejected here; the CAN
+     * handler relays the rejection to the HMI as ACK_INVALID.
+     *
+     *   - assist/center/damping/friction gains  : [0, 1]
+     *   - coast_band_pct / min_drive_pct        : [0, 100] %
+     *   - assist_vs_speed / return_vs_speed     : (0, 200]  (divisors)
+     *   - deadband_deg                          : (0, 30] °
+     *   - max_pwm_pct / slew_rate_pct           : (0, 100] %
+     *   - center_offset_deg                     : [-10, +10] °         */
+    if (value < eps_limits[id].min || value > eps_limits[id].max) {
         return false;
     }
-
-    /* Mechanical parameter range guards.
-     * deadband_deg: must be > 0 (zero deadband causes hunting)
-     * max_pwm_pct:  must be in (0, 100] (0 would disable steering; >100 meaningless)
-     * slew_rate_pct: must be > 0 (zero slew would freeze PWM output)
-     * center_offset_deg: any finite value is accepted; extremely large offsets
-     *   are not explicitly blocked here but will be clamped in the control loop
-     *   by the ±MAX_STEER_DEG encoder guard.                         */
-    if (id == EPS_PARAM_DEADBAND_DEG && value <= 0.0f)  return false;
-    if (id == EPS_PARAM_MAX_PWM_PCT  && (value <= 0.0f || value > 100.0f)) return false;
-    if (id == EPS_PARAM_SLEW_RATE_PCT && value <= 0.0f) return false;
 
     float *fields = (float *)&eps_active;
     fields[id] = value;

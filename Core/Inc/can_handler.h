@@ -294,6 +294,16 @@ typedef enum {
 #define CAN_BUSOFF_RETRY_INTERVAL_MS  500   /* Non-blocking retry interval      */
 #define CAN_BUSOFF_MAX_RETRIES        10    /* Max recovery attempts before ERROR */
 
+/* Sustained heartbeat window required to CONFIRM bus-off recovery.
+ * After the FDCAN peripheral is re-initialised (RUNNING again) the bus is
+ * NOT yet declared recovered: valid ESP32 heartbeats must be present
+ * continuously for this long before the fault is cleared and the retry
+ * counter is reset.  Merely observing RUNNING is insufficient — a
+ * persistent physical fault would otherwise loop forever without ever
+ * reaching CAN_BUSOFF_MAX_RETRIES.  Chosen as several heartbeat periods
+ * (heartbeat rate 100 ms, liveness timeout CAN_TIMEOUT_HEARTBEAT_MS).   */
+#define CAN_BUSOFF_RECOVERY_WINDOW_MS 1000U
+
 /* FIFO overflow escalation threshold.
  * After this many cumulative message-lost events, CAN_ProcessMessages()
  * escalates to DEGRADED_L1.  A single overflow is a transient; sustained

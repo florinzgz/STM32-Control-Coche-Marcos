@@ -18,6 +18,7 @@
 #include "service_mode.h"
 #include "math_safety.h"
 #include "error_log.h"
+#include "busoff_recovery.h"
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
 #include "gear_limits_store.h"
@@ -113,9 +114,14 @@ static uint8_t  esp32_hb_last_counter    = 0xFFU; /* Init to impossible value */
 static uint8_t  esp32_hb_same_count      = 0;     /* Consecutive same-counter */
 
 /* Bus-off recovery state (non-blocking, timestamp-based) */
-static uint8_t  busoff_active       = 0;    /* 1 = bus-off detected, recovery in progress */
+static uint8_t  busoff_active       = 0;    /* 1 = bus-off episode active (recovering or awaiting confirmation) */
 static uint32_t busoff_last_attempt = 0;    /* Timestamp of last recovery attempt         */
 static uint8_t  busoff_retry_count  = 0;    /* Number of recovery attempts since bus-off  */
+/* Heartbeat-confirmation window: recovery is only declared once valid
+ * ESP32 heartbeats are sustained over CAN_BUSOFF_RECOVERY_WINDOW_MS
+ * (see busoff_recovery.h).  During this "probation" phase busoff_active
+ * stays 1 (fault still latched) but no further re-init is attempted.    */
+static BusOffRecoveryWindow_t busoff_window = { false, false, 0U };
 
 /* SAFETY FIX: Global CAN watchdog — track last received CAN message (any ID).
  * Unlike last_can_rx_time (heartbeat only), this tracks ANY received frame.
@@ -373,6 +379,7 @@ void CAN_Init(void) {
     busoff_active       = 0;
     busoff_last_attempt = 0;
     busoff_retry_count  = 0;
+    BusOffRecoveryWindow_Reset(&busoff_window);
     last_any_rx_tick    = HAL_GetTick();  /* Global CAN watchdog init */
 
     /* SAFETY FIX: Reset ESP32 heartbeat counter tracking state */
@@ -3857,15 +3864,45 @@ void CAN_CheckBusOff(void)
 {
     FDCAN_ProtocolStatusTypeDef psr;
     FDCAN_ErrorCountersTypeDef  ecr;
+    uint32_t now = HAL_GetTick();
 
-    /* If a recovery attempt is in progress, enforce retry interval */
     if (busoff_active) {
-        uint32_t now = HAL_GetTick();
+        /* ---- Phase 2: PROBATION — peripheral re-initialised, awaiting
+         * sustained heartbeats before declaring recovery. -------------- */
+        if (BusOffRecoveryWindow_InProbation(&busoff_window)) {
+            /* Watch for a fresh bus-off during probation.  If the bus goes
+             * off again the retry counter is deliberately NOT reset, so a
+             * persistent fault keeps counting toward CAN_BUSOFF_MAX_RETRIES
+             * instead of looping forever. */
+            if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr) == HAL_OK) {
+                can_diag.bus_off = psr.BusOff ? 1U : 0U;
+                if (psr.BusOff) {
+                    BusOffRecoveryWindow_Reset(&busoff_window);
+                    busoff_last_attempt = now;  /* re-enter retry interval */
+                    sat_inc_u32(&can_stats.busoff_count);
+                    return;
+                }
+            }
+
+            /* Require valid heartbeats sustained over the confirmation
+             * window before clearing the fault.  Being RUNNING is not
+             * sufficient. */
+            if (BusOffRecoveryWindow_Update(&busoff_window, now,
+                                            CAN_IsESP32Alive(),
+                                            CAN_BUSOFF_RECOVERY_WINDOW_MS)) {
+                busoff_active      = 0;
+                busoff_retry_count = 0;
+                Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
+            }
+            return;
+        }
+
+        /* ---- Phase 1: RECOVERING — attempt peripheral re-init. -------- */
         if ((now - busoff_last_attempt) < CAN_BUSOFF_RETRY_INTERVAL_MS) {
             return;  /* Not yet time for next attempt */
         }
 
-        /* Too many retries — stop attempting, system stays in SAFE */
+        /* Too many retries — stop attempting, system stays in LIMP/SAFE */
         if (busoff_retry_count >= CAN_BUSOFF_MAX_RETRIES) {
             return;
         }
@@ -3894,16 +3931,15 @@ void CAN_CheckBusOff(void)
             return;  /* Start failed — retry next interval */
         }
 
-        /* Recovery successful — clear bus-off state.
-         * The safety system will recover from SAFE via
-         * Safety_CheckCANTimeout() when heartbeats resume. */
-        busoff_active     = 0;
-        busoff_retry_count = 0;
-        Safety_ClearError(SAFETY_ERROR_CAN_BUSOFF);
+        /* Peripheral is RUNNING again, but recovery is NOT yet declared:
+         * begin the heartbeat-confirmation probation window.  The fault
+         * and retry counter are intentionally left in place until valid
+         * heartbeats are sustained (see busoff_recovery.h). */
+        BusOffRecoveryWindow_Begin(&busoff_window, now);
         return;
     }
 
-    /* Normal operation: poll FDCAN protocol status for bus-off */
+    /* ---- Phase 0: HEALTHY — poll FDCAN protocol status for bus-off ---- */
     if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &psr) != HAL_OK) {
         return;  /* Cannot read status — skip this cycle */
     }
@@ -3922,12 +3958,13 @@ void CAN_CheckBusOff(void)
     }
 
     if (psr.BusOff) {
-        /* Bus-off detected — raise fault and enter LIMP_HOME.
+        /* Fresh bus-off — raise fault and enter LIMP_HOME.
          * CAN bus-off is a communication failure, not a hardware
          * danger.  Vehicle remains mobile at walking speed.            */
         busoff_active       = 1;
-        busoff_last_attempt = HAL_GetTick();
+        busoff_last_attempt = now;
         busoff_retry_count  = 0;
+        BusOffRecoveryWindow_Reset(&busoff_window);
         sat_inc_u32(&can_stats.busoff_count);
         Safety_SetError(SAFETY_ERROR_CAN_BUSOFF);
         Safety_SetState(SYS_STATE_LIMP_HOME);
