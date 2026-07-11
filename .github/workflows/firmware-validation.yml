@@ -80,6 +80,7 @@ jobs:
               Core/Src/test_battery_limits.c \
               Core/Src/test_steering_cal_store.c \
               Core/Src/test_steering_z.c \
+              Core/Src/test_steering_centering.c \
               Core/Src/test_pedal_cal_limits.c \
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
@@ -95,6 +96,7 @@ jobs:
                 Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
                 Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
+                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c" ;;
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
                 Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
