@@ -493,17 +493,35 @@ int main(void)
              * disables on any violation.                                */
             Safety_RelayOverrideUpdate();
 
-            /* Run automatic centering during BOOT / STANDBY.
-             * Once complete, Steering_ControlLoop() takes over. */
-            if (!SteeringCentering_IsComplete() &&
-                !SteeringCentering_HasFault()) {
-                SystemState_t st = Safety_GetState();
-                if (st == SYS_STATE_BOOT || st == SYS_STATE_STANDBY) {
+            /* Steering motor ownership arbitration.
+             *
+             * Exactly ONE subsystem may write the steering motor (PC4
+             * EN_STEER / PA6 / PA7) per cycle.  We decide the owner from
+             * the state captured at the START of this cycle, BEFORE
+             * stepping the centering FSM.  This prevents Steering_ControlLoop()
+             * from neutralising the centering PWM in the same 10 ms cycle
+             * (the root cause of the Error 8 / FAULT_CENTERING regression),
+             * and guarantees centering and the EPS loop never both drive
+             * the motor simultaneously.
+             *
+             * While homing owns the motor, SteeringCentering_Step() is the
+             * sole writer.  Once centering reaches DONE/FAULT — or the
+             * system leaves BOOT/STANDBY (SAFE/ERROR) — the EPS loop takes
+             * over and neutralises the motor when uncalibrated. */
+            {
+                SystemState_t steer_state = Safety_GetState();
+                bool in_homing = (steer_state == SYS_STATE_BOOT ||
+                                  steer_state == SYS_STATE_STANDBY);
+                SteeringMotorOwner_t owner =
+                    SteeringCentering_DecideOwner(SteeringCentering_GetState(),
+                                                  in_homing);
+
+                if (owner == STEER_OWNER_CENTERING) {
                     SteeringCentering_Step();
+                } else {
+                    Steering_ControlLoop();
                 }
             }
-
-            Steering_ControlLoop();
             Traction_Update();
 
             /* Loop-time diagnostic — record duration of this 100 Hz

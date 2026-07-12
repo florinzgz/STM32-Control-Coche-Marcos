@@ -80,11 +80,9 @@ static bool     emergencyPhase     = false;
 // =========================================================================
 // Explicit decorative / signal colour palette (documented)
 //
-// The rear WS2812B strip is configured GRB in init() and the front strip is
-// configured RGB (see FastLED.addLeds<> — the front controllers use RGB byte
-// order on this hardware). FastLED translates these logical RGB values to the
-// correct per-strip byte order, so on hardware red=red, green=green, blue=blue
-// on BOTH strips.
+// Both the front and rear WS2812B strips are configured GRB in init().
+// FastLED translates these logical RGB values to the correct GRB byte order,
+// so on hardware red=red, green=green, blue=blue on BOTH strips.
 // Define every decorative colour explicitly here — no ambiguous inline
 // colours in the pattern renderers.
 // =========================================================================
@@ -916,12 +914,17 @@ static void updateRearTurnSignals() {
 // =====================================================================
 
 void init() {
-    // NOTE: the two strips use DIFFERENT byte orders on this hardware.
-    // The rear strip is genuine WS2812B (GRB). The front strip's controllers
-    // expect RGB order — configuring it as GRB swapped its red/green channels,
-    // so the red KITT scan and POLICE_US red flashes appeared GREEN. Sending
-    // RGB to the front makes logical red=red, green=green, blue=blue.
-    FastLED.addLeds<WS2812B, LED_FRONT_PIN, RGB>(ledsFront, NUM_LEDS_FRONT);
+    // Both strips are genuine WS2812B and use GRB byte order.
+    // The rear strip (GRB) renders colours correctly.  A previous attempt to
+    // drive the FRONT strip as RGB made logical red CRGB(255,0,0) transmit
+    // R,G,B on the wire; a GRB WS2812B reads the first byte as GREEN, so red
+    // rendered GREEN on the front strip (KITT scan, POLICE_US red).  Matching
+    // the front to the rear (GRB) makes red=red, green=green, blue=blue on
+    // BOTH strips.  NOTE: byte order only remaps colours — it cannot cause the
+    // uncontrolled flicker seen on the front strip; that is a signal-integrity
+    // issue (data-line length/noise, missing common ground, level shifter, or
+    // a different-chipset front strip) and must be fixed in hardware.
+    FastLED.addLeds<WS2812B, LED_FRONT_PIN, GRB>(ledsFront, NUM_LEDS_FRONT);
     FastLED.addLeds<WS2812B, LED_REAR_PIN,  GRB>(ledsRear,  NUM_LEDS_REAR);
     FastLED.setBrightness(200);
     FastLED.clear(true);

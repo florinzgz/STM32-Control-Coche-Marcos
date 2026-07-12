@@ -80,6 +80,7 @@ jobs:
               Core/Src/test_battery_limits.c \
               Core/Src/test_steering_cal_store.c \
               Core/Src/test_steering_z.c \
+              Core/Src/test_steering_centering.c \
               Core/Src/test_pedal_cal_limits.c \
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
@@ -95,6 +96,7 @@ jobs:
                 Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
                 Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
+                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c" ;;
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
                 Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
@@ -206,6 +208,12 @@ jobs:
               esp32/src/test_eps_limits_contract.cpp \
               -o /tmp/test_eps_limits_contract
             /tmp/test_eps_limits_contract
+
+            echo "-- test_wheel_traction.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_wheel_traction.cpp \
+              -o /tmp/test_wheel_traction
+            /tmp/test_wheel_traction
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
