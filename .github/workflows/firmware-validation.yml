@@ -208,6 +208,12 @@ jobs:
               esp32/src/test_eps_limits_contract.cpp \
               -o /tmp/test_eps_limits_contract
             /tmp/test_eps_limits_contract
+
+            echo "-- test_wheel_traction.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_wheel_traction.cpp \
+              -o /tmp/test_wheel_traction
+            /tmp/test_wheel_traction
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
