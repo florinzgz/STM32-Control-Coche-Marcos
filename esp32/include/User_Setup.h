@@ -80,6 +80,17 @@
 #define TFT_BACKLIGHT_ON  HIGH
 
 // --- SPI frequencies ---
+// Audit note (Problem 2, §2.5): the white-screen fault is being investigated
+// as possible SPI signal-integrity loss.  The recommended SAFE initial value
+// is 20 MHz, BUT per the audit policy this value is NOT lowered here until the
+// failure is demonstrated with real telemetry (display_supervisor.h captures
+// render/status/heap evidence, and the recovery banner reports SPI_TIMEOUT vs
+// TFT_STATUS_LOST vs TFT_RESET_PROBABLE).  To bench 20 MHz vs 40 MHz, change
+// only the line below and compare display_recovery_count over a run:
+//   #define SPI_FREQUENCY  20000000   // 20 MHz — safe fallback candidate
+// Physical mitigations (do NOT rely on software): ~10 kΩ pull-up on TFT_RST,
+// 100 nF at VCC/GND, 10–47 µF near the TFT, short SPI/RST leads, firm ground,
+// and separation from motor/PWM/relay/BTS7960 noise sources.
 #define SPI_FREQUENCY       40000000   // 40 MHz (display writes)
 #define SPI_READ_FREQUENCY  20000000   // 20 MHz (display reads)
 #define SPI_TOUCH_FREQUENCY  2500000   //  2.5 MHz (XPT2046 touch)

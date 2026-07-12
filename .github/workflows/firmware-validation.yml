@@ -220,6 +220,12 @@ jobs:
               esp32/src/test_wheel_traction.cpp \
               -o /tmp/test_wheel_traction
             /tmp/test_wheel_traction
+
+            echo "-- test_display_supervisor.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_display_supervisor.cpp \
+              -o /tmp/test_display_supervisor
+            /tmp/test_display_supervisor
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
