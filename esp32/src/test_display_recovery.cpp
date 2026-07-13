@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "display_recovery.h"
 
@@ -217,6 +218,116 @@ static void test_request_mailbox(void) {
     CHECK(mb.pending());
 }
 
+// ---- Recovery runner (audit §4 order via mocks + §6 retries/final failure) --
+// A recorder captures the exact order of hardware calls; the verify mock is
+// scripted so we can drive success, retry-then-succeed, and exhausted-failure.
+namespace {
+struct RunnerMock {
+    std::vector<RecoveryStep> steps;   // order of onStep callbacks
+    std::vector<RecoveryStep> hw;      // order of REAL op invocations
+    int  verifyCalls   = 0;
+    int  verifySucceedOn = 1;          // 1 = first attempt succeeds
+    bool tftInitBeforeIsolated = false;
+    bool sawResetBeforeInit    = false;
+    bool csHighBeforeReset     = false;
+    bool resumed = false;
+};
+}  // namespace
+
+static RunnerMock* g_rm = nullptr;
+static void mrec(void* v, RecoveryStep s) { (void)v; g_rm->steps.push_back(s); }
+static void mstop(void*)   { g_rm->hw.push_back(RecoveryStep::STOP_RENDER_TOUCH); }
+static void mblock(void*)  { g_rm->hw.push_back(RecoveryStep::BLOCK_TFT_ACCESS); }
+static void mtcs(void*)    { g_rm->hw.push_back(RecoveryStep::TFT_CS_HIGH); }
+static void mtouch(void*)  { g_rm->hw.push_back(RecoveryStep::TOUCH_CS_HIGH); }
+static void mspi(void*)    { g_rm->hw.push_back(RecoveryStep::CLOSE_SPI); }
+static void mpulse(void*)  { g_rm->hw.push_back(RecoveryStep::PULSE_GPIO38); }
+static void minit(void*)   { g_rm->hw.push_back(RecoveryStep::TFT_INIT); }
+static void mrot(void*)    { g_rm->hw.push_back(RecoveryStep::SET_ROTATION_1); }
+static void mcal(void*)    { g_rm->hw.push_back(RecoveryStep::RESTORE_TOUCH_CAL); }
+static void mbl(void*)     { g_rm->hw.push_back(RecoveryStep::RESTORE_BACKLIGHT); }
+static void minv(void*)    { g_rm->hw.push_back(RecoveryStep::INVALIDATE_CACHES); }
+static void mredraw(void*) { g_rm->hw.push_back(RecoveryStep::FORCE_FULL_REDRAW); }
+static bool mverify(void*) { g_rm->hw.push_back(RecoveryStep::VERIFY);
+                             return (++g_rm->verifyCalls) >= g_rm->verifySucceedOn; }
+static void mresume(void*) { g_rm->hw.push_back(RecoveryStep::RESUME); g_rm->resumed = true; }
+
+static RecoveryOps makeMockOps() {
+    RecoveryOps ops{};
+    ops.stopRenderTouch=mstop; ops.blockBus=mblock; ops.tftCsHigh=mtcs;
+    ops.touchCsHigh=mtouch; ops.closeSpi=mspi; ops.pulseReset=mpulse;
+    ops.tftInit=minit; ops.setRotation=mrot; ops.restoreTouchCal=mcal;
+    ops.restoreBacklight=mbl; ops.invalidateCaches=minv; ops.forceFullRedraw=mredraw;
+    ops.verify=mverify; ops.resumeRenderTouch=mresume; ops.onStep=mrec;
+    return ops;
+}
+
+// Full happy path: one attempt, verified, exact hardware order, resumed.
+static void test_runner_order_and_success(void) {
+    RunnerMock rm; g_rm = &rm; rm.verifySucceedOn = 1;
+    RecoveryOps ops = makeMockOps();
+    RecoveryOutcome oc = runRecovery(ops, nullptr, /*maxAttempts=*/3);
+
+    CHECK(oc.verified == true);
+    CHECK(oc.exhausted == false);
+    CHECK(oc.attempts == 1);
+    CHECK(rm.resumed == true);
+
+    // The onStep recorder and the real op order must be identical and equal to
+    // the canonical single-attempt sequence.
+    CHECK(rm.steps.size() == (size_t)kRecoveryStepCount);
+    CHECK(rm.hw.size()    == (size_t)kRecoveryStepCount);
+    const RecoveryStep* seq = recoverySequence();
+    bool same = (rm.hw.size() == (size_t)kRecoveryStepCount);
+    for (size_t i = 0; same && i < rm.hw.size(); ++i) same = (rm.hw[i] == seq[i]);
+    CHECK(same);
+
+    // Ordering invariants: both CS HIGH + SPI closed BEFORE the reset pulse,
+    // reset pulse BEFORE tft.init(), invalidate BEFORE full redraw.
+    auto idx = [&](RecoveryStep s){ for (size_t i=0;i<rm.hw.size();++i) if (rm.hw[i]==s) return (int)i; return -1; };
+    CHECK(idx(RecoveryStep::TFT_CS_HIGH)   < idx(RecoveryStep::PULSE_GPIO38));
+    CHECK(idx(RecoveryStep::TOUCH_CS_HIGH) < idx(RecoveryStep::PULSE_GPIO38));
+    CHECK(idx(RecoveryStep::CLOSE_SPI)     < idx(RecoveryStep::PULSE_GPIO38));
+    CHECK(idx(RecoveryStep::PULSE_GPIO38)  < idx(RecoveryStep::TFT_INIT));
+    CHECK(idx(RecoveryStep::INVALIDATE_CACHES) < idx(RecoveryStep::FORCE_FULL_REDRAW));
+    CHECK(idx(RecoveryStep::VERIFY)        < idx(RecoveryStep::RESUME));
+}
+
+// Retry: verify fails once then succeeds → 2 attempts, reset/init repeated,
+// isolation + resume happen exactly once, and it ends verified.
+static void test_runner_retry_then_success(void) {
+    RunnerMock rm; g_rm = &rm; rm.verifySucceedOn = 2;
+    RecoveryOps ops = makeMockOps();
+    RecoveryOutcome oc = runRecovery(ops, nullptr, /*maxAttempts=*/3);
+
+    CHECK(oc.verified == true);
+    CHECK(oc.exhausted == false);
+    CHECK(oc.attempts == 2);
+
+    auto count = [&](RecoveryStep s){ int n=0; for (auto x: rm.hw) if (x==s) ++n; return n; };
+    CHECK(count(RecoveryStep::PULSE_GPIO38) == 2);   // reset pulsed each attempt
+    CHECK(count(RecoveryStep::TFT_INIT)     == 2);
+    CHECK(count(RecoveryStep::VERIFY)       == 2);
+    CHECK(count(RecoveryStep::STOP_RENDER_TOUCH) == 1);  // isolation only once
+    CHECK(count(RecoveryStep::CLOSE_SPI)    == 1);
+    CHECK(count(RecoveryStep::RESUME)       == 1);       // resumed once at the end
+    CHECK(rm.resumed == true);
+}
+
+// Final failure: verify never succeeds → attempts == maxAttempts, exhausted,
+// NOT verified, yet render/touch is still resumed (degraded but alive).
+static void test_runner_final_failure(void) {
+    RunnerMock rm; g_rm = &rm; rm.verifySucceedOn = 99;  // never succeeds
+    RecoveryOps ops = makeMockOps();
+    RecoveryOutcome oc = runRecovery(ops, nullptr, /*maxAttempts=*/3);
+
+    CHECK(oc.verified == false);
+    CHECK(oc.exhausted == true);
+    CHECK(oc.attempts == 3);
+    CHECK(rm.verifyCalls == 3);
+    CHECK(rm.resumed == true);   // still resumes after exhausting retries
+}
+
 int main() {
     test_sequence_order();
     test_banner_fields();
@@ -225,6 +336,9 @@ int main() {
     test_action_per_cause();
     test_trigger_classification();
     test_request_mailbox();
+    test_runner_order_and_success();
+    test_runner_retry_then_success();
+    test_runner_final_failure();
     printf("display_recovery: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }

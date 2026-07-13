@@ -221,6 +221,26 @@ struct PedalCalData {
 };
 
 // -------------------------------------------------------------------------
+// Pedal calibration SESSION status (0x319) — guided PedalCalSession FSM
+// state published by the STM32 (audit P5).  Emitted on every state change
+// and, while a session is active, at ~10 Hz.  Layout mirrors
+// can_handler.c pedalcal_send_session_status():
+//   state:  PedalCalState enum (0 IDLE .. 10 ABORTED)
+//   flags bit0: session active   bit1: MIN captured   bit2: MAX captured
+//         bit3: completed         bit4: aborted        bit5: entry guards OK now
+//   reason: PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* / FAIL_* bitmask
+//   adcMin/adcMax: captured endpoints (RAM until SAVE)
+// -------------------------------------------------------------------------
+struct PedalCalSessionData {
+    uint8_t  state        = 0;
+    uint8_t  flags        = 0;
+    uint16_t reason       = 0;
+    uint16_t adcMin       = 0;
+    uint16_t adcMax       = 0;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Gear power-limit telemetry (0x30D) — on-demand (10 Hz × 1 s after QUERY)
 // Active = limits currently applied by the STM32 motor controller.
 // Pending = unsaved edit staged on the STM32 (mirrors the UI edit state).
@@ -599,6 +619,7 @@ public:
     void setMode(const ModeData& d)            { mode_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
+    void setPedalCalSession(const PedalCalSessionData& d) { pedalCalSession_ = d; }
     void setGearLimits(const GearLimitsData& d)     { gearLimits_ = d; }
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
@@ -640,6 +661,7 @@ public:
     const ModeData&      mode()      const { return mode_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
+    const PedalCalSessionData& pedalCalSession() const { return pedalCalSession_; }
     const GearLimitsData&   gearLimits()   const { return gearLimits_; }
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
     const CanMetaData&      canMeta()      const { return canMeta_; }
@@ -677,6 +699,7 @@ private:
     ModeData      mode_;
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
+    PedalCalSessionData pedalCalSession_;
     GearLimitsData   gearLimits_;
     I2cDiagData      i2cDiag_;
     CanMetaData      canMeta_;

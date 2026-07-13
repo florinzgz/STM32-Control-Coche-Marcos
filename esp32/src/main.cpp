@@ -503,88 +503,97 @@ static display::StatusRead readTftStatus() {
 // "PANTALLA RECUPERADA" banner.  Returns the verified result (best-effort: when
 // readback is UNSUPPORTED the panel cannot be truly verified, which the banner
 // reports honestly).
+// ---------------------------------------------------------------------------
+// Recovery hardware ops (Core 0 only).  These are the REAL implementations of
+// the injected display::RecoveryOps callbacks; display::runRecovery() drives
+// them in the canonical order with the retry/final-failure policy that
+// test_display_recovery.cpp verifies with mocks.
+namespace {
+struct RecoveryCtx {
+    int  tftCs          = 10;
+    int  touchCs        = 21;
+    int  tftRst         = 38;
+    bool status_invalid = false;  // reliable readback (future) reported INVALID
+    bool observable     = false;  // whiteScreenObservable() at last verify
+};
+
+void rec_stopRenderTouch(void*) { /* we are the sole SPI owner on Core 0 */ }
+void rec_blockBus(void*)        { /* bus exclusion is inherent on Core 0 */ }
+void rec_tftCsHigh(void* v)     { auto* c = static_cast<RecoveryCtx*>(v);
+                                  pinMode(c->tftCs, OUTPUT);  digitalWrite(c->tftCs, HIGH); }
+void rec_touchCsHigh(void* v)   { auto* c = static_cast<RecoveryCtx*>(v);
+                                  pinMode(c->touchCs, OUTPUT); digitalWrite(c->touchCs, HIGH); }
+void rec_closeSpi(void*)        { tft.endWrite(); }
+void rec_pulseReset(void* v)    { auto* c = static_cast<RecoveryCtx*>(v);
+                                  pinMode(c->tftRst, OUTPUT);
+                                  digitalWrite(c->tftRst, HIGH); delay(5);
+                                  digitalWrite(c->tftRst, LOW);  delay(20);
+                                  digitalWrite(c->tftRst, HIGH); delay(150);
+                                  g_tftResetSignalLatched = false; }
+void rec_tftInit(void*)         { tft.init(); }
+void rec_setRotation(void*)     { tft.setRotation(1); }
+void rec_restoreTouchCal(void*) { uint16_t calData[5] = TOUCH_CALIBRATION;
+                                  (void)touch_calibration::loadValid(calData);
+                                  tft.setTouch(calData); }
+void rec_restoreBacklight(void*){ const auto& cfg = config_store::get();
+                                  display_backlight::apply(cfg.brightness); }
+void rec_invalidateCaches(void*){ tft.fillScreen(0x2104); }
+void rec_forceFullRedraw(void*) { screenManager.forceFullRedraw(); }
+bool rec_verify(void* v)        { auto* c = static_cast<RecoveryCtx*>(v);
+                                  const display::StatusRead st = readTftStatus();
+                                  c->status_invalid = (st == display::StatusRead::INVALID);
+                                  c->observable = display::whiteScreenObservable(
+                                      st != display::StatusRead::UNSUPPORTED,
+                                      /*reset_latch_available=*/false);
+                                  // Best-effort: only a reliable INVALID fails verify.
+                                  return st != display::StatusRead::INVALID; }
+void rec_resumeRenderTouch(void*) { /* control returns to render loop */ }
+}  // namespace
+
 static bool executeDisplayRecovery(display::RecoveryTrigger trigger) {
     const uint32_t t0 = millis();
     Serial.printf("[DISPLAY][RECOVERY] start — trigger: %s\n",
                   display::recoveryTriggerText(trigger));
 
-    // STOP_RENDER_TOUCH / BLOCK_TFT_ACCESS: we are already the sole owner of the
-    // SPI bus here; entering this function suspends the normal render+touch of
-    // this iteration.  Make it explicit by ending any in-flight bus batch.
+    RecoveryCtx ctx;
 #if defined(TFT_CS)
-    const int kTftCsPin = TFT_CS;
-#else
-    const int kTftCsPin = 10;
+    ctx.tftCs = TFT_CS;
 #endif
 #if defined(TOUCH_CS)
-    const int kTouchCsPin = TOUCH_CS;
-#else
-    const int kTouchCsPin = 21;
+    ctx.touchCs = TOUCH_CS;
 #endif
 #if defined(TFT_RST)
-    const int kTftRstPin = TFT_RST;
-#else
-    const int kTftRstPin = 38;
+    ctx.tftRst = TFT_RST;
 #endif
 
-    // TFT_CS HIGH + TOUCH_CS HIGH: deselect both slaves so neither can be left
-    // mid-transaction while we drive the reset line.
-    pinMode(kTftCsPin, OUTPUT);
-    digitalWrite(kTftCsPin, HIGH);
-    pinMode(kTouchCsPin, OUTPUT);
-    digitalWrite(kTouchCsPin, HIGH);
+    display::RecoveryOps ops{};
+    ops.stopRenderTouch   = rec_stopRenderTouch;
+    ops.blockBus          = rec_blockBus;
+    ops.tftCsHigh         = rec_tftCsHigh;
+    ops.touchCsHigh       = rec_touchCsHigh;
+    ops.closeSpi          = rec_closeSpi;
+    ops.pulseReset        = rec_pulseReset;
+    ops.tftInit           = rec_tftInit;
+    ops.setRotation       = rec_setRotation;
+    ops.restoreTouchCal   = rec_restoreTouchCal;
+    ops.restoreBacklight  = rec_restoreBacklight;
+    ops.invalidateCaches  = rec_invalidateCaches;
+    ops.forceFullRedraw   = rec_forceFullRedraw;
+    ops.verify            = rec_verify;
+    ops.resumeRenderTouch = rec_resumeRenderTouch;
+    ops.onStep            = nullptr;
 
-    // CLOSE_SPI: terminate any transaction TFT_eSPI may hold.
-    tft.endWrite();
+    // Up to 3 reset→init→redraw→verify cycles; with UNSUPPORTED readback the
+    // first verify() already returns best-effort OK (1 attempt), while a future
+    // reliable readback that keeps reporting INVALID drives the honest
+    // "reintentos y fallo final" path.
+    const display::RecoveryOutcome oc = display::runRecovery(ops, &ctx, /*maxAttempts=*/3);
 
-    // PULSE_GPIO38: hardware reset pulse on TFT_RST with the ST7796's timing
-    // (>=10 µs low, >=120 ms after reset before commands).
-    pinMode(kTftRstPin, OUTPUT);
-    digitalWrite(kTftRstPin, HIGH);
-    delay(5);
-    digitalWrite(kTftRstPin, LOW);
-    delay(20);                 // reset asserted (datasheet min 10 µs; ample)
-    digitalWrite(kTftRstPin, HIGH);
-    delay(150);                // wait out the controller reset (>120 ms)
-    g_tftResetSignalLatched = false;  // consume any latched reset evidence
-
-    // TFT_INIT + SET_ROTATION_1.
-    tft.init();
-    tft.setRotation(1);
-
-    // RESTORE_TOUCH_CAL.
-    {
-        uint16_t calData[5] = TOUCH_CALIBRATION;
-        (void)touch_calibration::loadValid(calData);
-        tft.setTouch(calData);
-    }
-
-    // RESTORE_BACKLIGHT (re-apply the persisted brightness).
-    {
-        const auto& cfg = config_store::get();
-        display_backlight::apply(cfg.brightness);
-    }
-
-    // INVALIDATE_CACHES + FORCE_FULL_REDRAW: clear every tile hash / previous
-    // value and repaint the whole active screen so no stale hash suppresses a
-    // blank panel.
-    tft.fillScreen(0x2104);        // dark gray, matches boot background
-    screenManager.forceFullRedraw();
-
-    // VERIFY (as far as the hardware allows).
-    const display::StatusRead status = readTftStatus();
-    const bool observable =
-        display::whiteScreenObservable(status != display::StatusRead::UNSUPPORTED,
-                                       /*reset_latch_available=*/false);
-    // With no reliable readback we cannot truly confirm the panel; treat the
-    // choreography as completed (best-effort) but report honestly in the banner.
-    const bool verified_ok = (status != display::StatusRead::INVALID);
-
-    // Draw the "PANTALLA RECUPERADA" banner.
+    // Draw the "PANTALLA RECUPERADA" banner on top of the fresh full redraw.
     display::RecoveryBannerInfo info{};
     info.cause            = display::recoveryTriggerToFault(trigger);
     info.duration_ms      = millis() - t0;
-    info.attempts         = 0;
+    info.attempts         = oc.attempts;
     info.render_continued = true;   // Core 1 never stalled during recovery
     info.esp32_rebooted   = false;
     info.free_heap        = (uint32_t)ESP.getFreeHeap();
@@ -596,17 +605,16 @@ static bool executeDisplayRecovery(display::RecoveryTrigger trigger) {
     tft.setTextDatum(TL_DATUM);
     tft.setTextFont(2);
     tft.drawString("PANTALLA RECUPERADA", 8, 6);
-    // Honest observability note next to the banner.
-    tft.drawString(observable ? "verificacion: HW"
-                              : "verificacion: NO OBSERVABLE (visual)",
+    tft.drawString(ctx.observable ? "verificacion: HW"
+                                  : "verificacion: NO OBSERVABLE (visual)",
                    8, 26);
-    Serial.printf("[DISPLAY][RECOVERY] done — %s | verificado=%s | %lu ms\n%s\n",
-                  observable ? "observable" : "no observable",
-                  verified_ok ? "si" : "no",
+    Serial.printf("[DISPLAY][RECOVERY] done — %s | verificado=%s | intentos=%u | %lu ms\n%s\n",
+                  ctx.observable ? "observable" : "no observable",
+                  oc.verified ? "si" : "no",
+                  (unsigned)oc.attempts,
                   (unsigned long)info.duration_ms, banner);
 
-    // RESUME happens implicitly: control returns to the render loop.
-    return verified_ok;
+    return oc.verified;
 }
 
 // ---------------------------------------------------------------------------

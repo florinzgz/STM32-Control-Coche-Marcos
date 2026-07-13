@@ -21,6 +21,7 @@
 #include "motion_inhibit_view.h"
 #include "steering_diag_view.h"
 #include "wheel_traction.h"
+#include "../pedal_cal_session_view.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
@@ -552,6 +553,21 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             pedalStabRing_[pedalStabHead_] = pc.rawAdc;
             pedalStabHead_ = (pedalStabHead_ + 1U) % PEDAL_STAB_N;
             if (pedalStabCount_ < PEDAL_STAB_N) pedalStabCount_++;
+        }
+        // Cache guided PedalCalSession status (0x319).
+        const vehicle::PedalCalSessionData& ps = data.pedalCalSession();
+        if (ps.timestampMs != 0 && ps.timestampMs != pedalSessLastTs_) {
+            pedalSessLastTs_ = ps.timestampMs;
+            if (pedalSessState_  != ps.state)  changed = true;
+            if (pedalSessFlags_  != ps.flags)  changed = true;
+            if (pedalSessReason_ != ps.reason) changed = true;
+            if (pedalSessMin_    != ps.adcMin) changed = true;
+            if (pedalSessMax_    != ps.adcMax) changed = true;
+            pedalSessState_  = ps.state;
+            pedalSessFlags_  = ps.flags;
+            pedalSessReason_ = ps.reason;
+            pedalSessMin_    = ps.adcMin;
+            pedalSessMax_    = ps.adcMax;
         }
         // Periodic QUERY (every ~500 ms) so the STM32 keeps emitting the
         // 1 s burst while the operator stays on the calibration screen.
@@ -1349,6 +1365,35 @@ void EngineeringScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
+        // ---- Guided session status line (0x319) --------------------------
+        // Shows the PedalCalSession FSM state + highest-priority reason so the
+        // operator sees exactly which phase the guided calibration is in and
+        // why it is blocked/aborted.  STALE when the STM32 stops emitting.
+        {
+            const bool sess_fresh =
+                pedalcal::sessionFreshness(pedalSessLastTs_, (unsigned long)millis())
+                    == pedalcal::Freshness::FRESH;
+            const bool sess_active = pedalcal::sessionActive(pedalSessState_);
+            char sbuf[64];
+            if (!sess_fresh && pedalSessLastTs_ == 0UL) {
+                snprintf(sbuf, sizeof(sbuf), "Session: --");
+            } else {
+                snprintf(sbuf, sizeof(sbuf), "Session: %s (%s)",
+                         pedalcal::sessionStateText(pedalSessState_),
+                         pedalcal::sessionReasonText(pedalSessReason_));
+            }
+            uint16_t s_col = ui::COL_GRAY;
+            if (sess_fresh) {
+                if (pedalSessState_ == can::PEDCAL_SESS_COMPLETED)      s_col = ui::COL_GREEN;
+                else if (pedalSessState_ == can::PEDCAL_SESS_ABORTED)   s_col = ui::COL_RED;
+                else if (pedalSessState_ == can::PEDCAL_SESS_READY_TO_SAVE) s_col = ui::COL_CYAN;
+                else if (sess_active)                                  s_col = ui::COL_AMBER;
+            }
+            tft.fillRect(20, 34, ui::SCREEN_W - 40, 16, ui::COL_BG);
+            tft.setTextColor(s_col, ui::COL_BG);
+            tft.drawString(sbuf, 20, 34);
+        }
+
         // Local stability check — last PEDAL_STAB_N rawAdc samples within
         // PEDAL_STAB_LOCAL_TOL counts of each other.  This is a UI hint
         // only; the actual stability gate runs server-side on STM32
@@ -1512,8 +1557,9 @@ void EngineeringScreen::draw() {
                          ui::COL_BG);
         tft.drawString(reject_buf, 110, 212);
 
-        // ---- SAVE button colour reflects validation + safety gate ----
-        uint16_t   save_fill    = save_enabled ? ui::COL_GREEN : ui::COL_DARK_GRAY;
+        // ---- SAVE button colour reflects the guided session readiness ----
+        const bool save_ready = (pedalSessState_ == can::PEDCAL_SESS_READY_TO_SAVE);
+        uint16_t   save_fill    = save_ready ? ui::COL_GREEN : ui::COL_DARK_GRAY;
         tft.fillRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, save_fill);
         tft.drawRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, ui::COL_GRAY);
         tft.setTextColor(ui::COL_WHITE, save_fill);
@@ -2742,31 +2788,28 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
     // Pedal calibration submenu: 4 action buttons + back (back handled above).
     if (currentMenu_ == SubMenu::PEDAL_CAL) {
         if (y >= PED_BTN_Y && y <= PED_BTN_Y + PED_BTN_H) {
-            // CAPTURE MIN
+            // BEGIN the guided session
             if (x >= PED_BTN_CAPMIN_X && x <= PED_BTN_CAPMIN_X + PED_BTN_W) {
                 sendPedalCalOp(can::PEDAL_CAL_OP_CAPTURE_MIN);
-                Serial.println("[ENG] Pedal CAPTURE MIN");
+                Serial.println("[ENG] Pedal BEGIN session");
                 return true;
             }
-            // CAPTURE MAX
+            // ABORT the running session
             if (x >= PED_BTN_CAPMAX_X && x <= PED_BTN_CAPMAX_X + PED_BTN_W) {
-                sendPedalCalOp(can::PEDAL_CAL_OP_CAPTURE_MAX);
-                Serial.println("[ENG] Pedal CAPTURE MAX");
+                sendPedalCalOp(can::PEDAL_CAL_OP_ABORT);
+                Serial.println("[ENG] Pedal ABORT session");
                 return true;
             }
-            // SAVE — only forward when the local view believes validation
-            // passes (the STM32 re-validates anyway, but blocking the wire
-            // when we know it would be rejected reduces user-visible
-            // ACK_REJECTED churn).  When the local view shows invalid the
-            // tap is silently ignored.
+            // SAVE — only forward when the guided session is READY_TO_SAVE
+            // (the STM32 re-validates anyway, but blocking the wire when we
+            // know it would be rejected reduces user-visible ACK_REJECTED
+            // churn).  When the session is not ready the tap is ignored.
             if (x >= PED_BTN_SAVE_X && x <= PED_BTN_SAVE_X + PED_BTN_W) {
-                const bool valid_pair = (pedalCalFlags_ & 0x04U) != 0;
-                const bool safety_ok  = (pedalCalFlags_ & 0x10U) != 0;
-                if (valid_pair && safety_ok) {
+                if (pedalSessState_ == can::PEDCAL_SESS_READY_TO_SAVE) {
                     sendPedalCalOp(can::PEDAL_CAL_OP_SAVE);
                     Serial.println("[ENG] Pedal SAVE");
                 } else {
-                    Serial.println("[ENG] Pedal SAVE blocked (local validation)");
+                    Serial.println("[ENG] Pedal SAVE blocked (session not ready)");
                 }
                 return true;
             }
@@ -4082,8 +4125,8 @@ void EngineeringScreen::drawPedalCalibration() {
                     ui::COL_WHITE, fill, 1, MC_DATUM);
         tft.setTextDatum(TL_DATUM);
     };
-    drawBtn(PED_BTN_CAPMIN_X, "CAPTURE MIN", ui::COL_DARK_GRAY);
-    drawBtn(PED_BTN_CAPMAX_X, "CAPTURE MAX", ui::COL_DARK_GRAY);
+    drawBtn(PED_BTN_CAPMIN_X, "BEGIN",       ui::COL_DARK_GRAY);
+    drawBtn(PED_BTN_CAPMAX_X, "ABORT",       ui::COL_DARK_GRAY);
     // SAVE button colour reflects validation status on partial-redraw pass.
     drawBtn(PED_BTN_SAVE_X,   "SAVE",        ui::COL_DARK_GRAY);
     drawBtn(PED_BTN_RESET_X,  "RESET DEF.",  ui::COL_DARK_GRAY);

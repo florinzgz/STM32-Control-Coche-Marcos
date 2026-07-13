@@ -219,6 +219,81 @@ inline const RecoveryStep* recoverySequence() {
     return seq;
 }
 
+// ---- Pure recovery runner (audit §4 order + §6 retries/final failure) -----
+// Executes the canonical recoverySequence() through an injected set of hardware
+// callbacks so the exact ORDER of hardware calls, the retry policy and the
+// final-failure outcome are all host-testable with mocks (test_display_recovery
+// .cpp), while the firmware (main.cpp) runs the very same logic with the real
+// TFT/GPIO ops.  Non-capturing function pointers (+ void* ctx) keep it
+// header-only and Arduino-friendly.  No hardware access, no delays here.
+struct RecoveryOps {
+    void (*stopRenderTouch)(void*);
+    void (*blockBus)(void*);
+    void (*tftCsHigh)(void*);
+    void (*touchCsHigh)(void*);
+    void (*closeSpi)(void*);
+    void (*pulseReset)(void*);
+    void (*tftInit)(void*);
+    void (*setRotation)(void*);
+    void (*restoreTouchCal)(void*);
+    void (*restoreBacklight)(void*);
+    void (*invalidateCaches)(void*);
+    void (*forceFullRedraw)(void*);
+    bool (*verify)(void*);            // true => panel verified (or best-effort OK)
+    void (*resumeRenderTouch)(void*);
+    void (*onStep)(void*, RecoveryStep);  // optional recorder; may be nullptr
+};
+
+struct RecoveryOutcome {
+    bool    verified  = false;  // final verify() result
+    uint8_t attempts  = 0;      // reset→verify cycles actually performed
+    bool    exhausted = false;  // true when every attempt failed verify()
+};
+
+namespace detail {
+inline void recStep(const RecoveryOps& ops, void* ctx,
+                    void (*fn)(void*), RecoveryStep s) {
+    if (ops.onStep) ops.onStep(ctx, s);
+    if (fn)         fn(ctx);
+}
+}  // namespace detail
+
+// Run the full choreography.  The one-time teardown (stop render/touch, claim
+// the bus, deselect both CS, close SPI) runs once; the reset→init→redraw→verify
+// cycle repeats up to @p maxAttempts until verify() succeeds; render/touch is
+// ALWAYS resumed at the end, even after a final failure (degraded but alive).
+inline RecoveryOutcome runRecovery(const RecoveryOps& ops, void* ctx,
+                                   uint8_t maxAttempts) {
+    if (maxAttempts == 0) maxAttempts = 1;
+    RecoveryOutcome out;
+
+    detail::recStep(ops, ctx, ops.stopRenderTouch, RecoveryStep::STOP_RENDER_TOUCH);
+    detail::recStep(ops, ctx, ops.blockBus,        RecoveryStep::BLOCK_TFT_ACCESS);
+    detail::recStep(ops, ctx, ops.tftCsHigh,       RecoveryStep::TFT_CS_HIGH);
+    detail::recStep(ops, ctx, ops.touchCsHigh,     RecoveryStep::TOUCH_CS_HIGH);
+    detail::recStep(ops, ctx, ops.closeSpi,        RecoveryStep::CLOSE_SPI);
+
+    bool verified = false;
+    for (uint8_t a = 0; a < maxAttempts; ++a) {
+        out.attempts = static_cast<uint8_t>(a + 1);
+        detail::recStep(ops, ctx, ops.pulseReset,       RecoveryStep::PULSE_GPIO38);
+        detail::recStep(ops, ctx, ops.tftInit,          RecoveryStep::TFT_INIT);
+        detail::recStep(ops, ctx, ops.setRotation,      RecoveryStep::SET_ROTATION_1);
+        detail::recStep(ops, ctx, ops.restoreTouchCal,  RecoveryStep::RESTORE_TOUCH_CAL);
+        detail::recStep(ops, ctx, ops.restoreBacklight, RecoveryStep::RESTORE_BACKLIGHT);
+        detail::recStep(ops, ctx, ops.invalidateCaches, RecoveryStep::INVALIDATE_CACHES);
+        detail::recStep(ops, ctx, ops.forceFullRedraw,  RecoveryStep::FORCE_FULL_REDRAW);
+        if (ops.onStep) ops.onStep(ctx, RecoveryStep::VERIFY);
+        verified = ops.verify ? ops.verify(ctx) : true;
+        if (verified) break;
+    }
+    out.verified  = verified;
+    out.exhausted = !verified;
+
+    detail::recStep(ops, ctx, ops.resumeRenderTouch, RecoveryStep::RESUME);
+    return out;
+}
+
 // ---- Post-recovery banner (audit §6) -------------------------------------
 struct RecoveryBannerInfo {
     Fault    cause;               // causa

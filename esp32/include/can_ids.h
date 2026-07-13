@@ -237,16 +237,20 @@ inline constexpr uint8_t I2C_SCAN_PHASE_TCA_MISSING = 0x02;  // bus OK but TCA95
 inline constexpr uint8_t I2C_SCAN_PHASE_TCA_ACK     = 0x03;  // TCA9548A ACKed (mux present)
 
 // Pedal-calibration sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_PEDAL_CAL
-//   0x01 CAPTURE_MIN    Capture pedal-released ADC into pending MIN
-//   0x02 CAPTURE_MAX    Capture pedal-pressed  ADC into pending MAX
-//   0x03 SAVE           Validate pending pair + persist to STM32 flash
+// The productive calibration is a single guided PedalCalSession FSM; HMI
+// buttons map onto Begin / RequestSave / Abort (audit P5):
+//   0x01 CAPTURE_MIN    BEGIN the guided session (auto-captures MIN/MAX)
+//   0x02 CAPTURE_MAX    Advisory only — MAX auto-captures on a pressed pedal
+//   0x03 SAVE           RequestSave: validate + persist + apply + readback verify
 //   0x04 RESET_DEFAULTS Restore compile-time defaults (50 / 4000)   pedal direct 0–3.3 V, no divider
-//   0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz
+//   0x05 QUERY          Request a 1 s burst of 0x308/0x319 telemetry at 10 Hz
+//   0x06 ABORT          Cancel the running session (operator abort)
 inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MIN    = 0x01;
 inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MAX    = 0x02;
 inline constexpr uint8_t PEDAL_CAL_OP_SAVE           = 0x03;
 inline constexpr uint8_t PEDAL_CAL_OP_RESET_DEFAULTS = 0x04;
 inline constexpr uint8_t PEDAL_CAL_OP_QUERY          = 0x05;
+inline constexpr uint8_t PEDAL_CAL_OP_ABORT          = 0x06;
 
 // Gear power-limit + accel-response sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_GEAR_LIMITS
 //   For SET_* sub-opcodes byte 2 carries the new percentage (0..100); the
@@ -611,6 +615,45 @@ inline constexpr uint8_t RELAY_DIAG_FLAG_POLARITY_REV  = 1 << 7;
 // Reason codes mirror Ina226DiagReason_t in Core/Inc/ina226_channel_diag.h.
 // -------------------------------------------------------------------------
 inline constexpr uint32_t DIAG_INA_CH5 = 0x318;  // STM32→ESP32, DLC 8, 1000 ms
+
+// 0x319 DIAG_PEDAL_CAL_SESSION — guided PedalCalSession status (audit P5).
+// STM32→ESP32, DLC 8, on state change + ~10 Hz while active.  Mirrors
+// Core/Src/can_handler.c pedalcal_send_session_status().
+//   b0 state (PedalCalState), b1 flags (bit0 active, bit1 have_min,
+//   bit2 have_max, bit3 completed, bit4 aborted, bit5 entry-ok),
+//   b2-3 reason mask (LE), b4-5 adc_min (LE), b6-7 adc_max (LE).
+inline constexpr uint32_t DIAG_PEDAL_CAL_SESSION = 0x319;
+
+// PedalCalSession state enum (mirror of Core/Inc/pedal_cal_session.h PedalCalState).
+inline constexpr uint8_t PEDCAL_SESS_IDLE                 = 0;
+inline constexpr uint8_t PEDCAL_SESS_ENTERING             = 1;
+inline constexpr uint8_t PEDCAL_SESS_WAIT_RELEASED        = 2;
+inline constexpr uint8_t PEDCAL_SESS_CAPTURING_MIN        = 3;
+inline constexpr uint8_t PEDCAL_SESS_WAIT_FULL_PRESS      = 4;
+inline constexpr uint8_t PEDCAL_SESS_CAPTURING_MAX        = 5;
+inline constexpr uint8_t PEDCAL_SESS_WAIT_RELEASE_FOR_SAVE= 6;
+inline constexpr uint8_t PEDCAL_SESS_READY_TO_SAVE        = 7;
+inline constexpr uint8_t PEDCAL_SESS_SAVING              = 8;
+inline constexpr uint8_t PEDCAL_SESS_COMPLETED           = 9;
+inline constexpr uint8_t PEDCAL_SESS_ABORTED             = 10;
+
+// PedalCalSession reason bitmask (mirror of pedal_cal_session.h).
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_NOT_STANDBY       = 0x0001u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_GEAR             = 0x0002u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_WHEELS_MOVING    = 0x0004u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_PEDAL_IMPLAUSIBLE= 0x0008u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_CRITICAL_ERROR   = 0x0010u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_TRACTION_LIVE    = 0x0020u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_SAFE            = 0x0040u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_ERROR           = 0x0080u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_EMERGENCY       = 0x0100u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_MOVEMENT        = 0x0200u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_CAN_LOSS        = 0x0400u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_TIMEOUT         = 0x0800u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_MIN_GE_MAX       = 0x1000u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_RANGE_SMALL      = 0x2000u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_UNSTABLE         = 0x4000u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_READBACK         = 0x8000u;
 
 inline constexpr uint8_t INA_CH5_OK                = 0;
 inline constexpr uint8_t INA_CH5_PRESENT_NO_SHUNT  = 1;

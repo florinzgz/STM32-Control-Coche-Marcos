@@ -292,6 +292,20 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
     data.setPedalCal(pc);
 }
 
+// 0x319 DIAG_PEDAL_CAL_SESSION — guided PedalCalSession status (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c pedalcal_send_session_status().
+static void decodePedalCalSession(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::PedalCalSessionData s;
+    s.state       = f.data[0];
+    s.flags       = f.data[1];
+    s.reason      = readU16LE(&f.data[2]);
+    s.adcMin      = readU16LE(&f.data[4]);
+    s.adcMax      = readU16LE(&f.data[6]);
+    s.timestampMs = millis();
+    data.setPedalCalSession(s);
+}
+
 // 0x309 DIAG_I2C — I2C topology diagnostic (DLC 8; legacy DLC 5/6 accepted).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CDiag().
 //   byte0=mux_present, byte1=ina_ok_mask, byte2=fail_count,
@@ -743,6 +757,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_DEBOUNCE_STEER:  decodeDebounceDiagSteer(frame, data); break;
             case can::DIAG_WHEEL_PULSES:    decodeWheelPulses(frame, data);       break;
             case can::DIAG_PEDAL_CAL:       decodePedalCal(frame, data);          break;
+            case can::DIAG_PEDAL_CAL_SESSION: decodePedalCalSession(frame, data);  break;
             case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
             case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
