@@ -259,6 +259,12 @@ jobs:
               esp32/src/test_frame_parity_cross.cpp \
               -o /tmp/test_frame_parity_cross
             /tmp/test_frame_parity_cross
+
+            echo "-- test_display_recovery.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_display_recovery.cpp \
+              -o /tmp/test_display_recovery
+            /tmp/test_display_recovery
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

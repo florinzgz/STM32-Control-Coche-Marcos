@@ -42,6 +42,8 @@
 #include "stm32_liveness.h"
 #include "twai_recovery.h"
 #include "boot_diag.h"
+#include "display_supervisor.h"
+#include "display_recovery.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -198,6 +200,17 @@ static constexpr unsigned long WELCOME_COOLDOWN_MS = 5000;  // 5 s minimum gap
 // ---- Runtime overlay state ----
 static bool     showOverlay       = true;    // overlay visible on initial screen only
 static uint32_t lastFrameStart    = 0;
+
+// ---- Render heartbeat (audit P2) ----
+// Monotonic millis() timestamp published by renderTask at the END of every
+// fully completed frame, i.e. AFTER screenManager.update(), all TFT drawing,
+// the centralized touch read, and the implicit release of the shared SPI bus.
+// Core-1 (loop) reads this to feed the DisplaySupervisor; the heartbeat only
+// advances when a frame truly finished, so a hung render/SPI transaction is
+// observable as a stalled timestamp.  volatile: written on Core 0, read on
+// Core 1 (a single aligned 32-bit word — atomic on the ESP32-S3).
+static volatile uint32_t renderHeartbeatMs = 0;
+static volatile uint32_t renderFrameCounter = 0;
 
 // ---- Audio event tracking ----
 static uint8_t  lastAudioSystemState = 0;     // detect state transitions for error alert
@@ -555,6 +568,14 @@ static void renderTask(void* /*param*/) {
 #endif
         }
 
+        // 5. Publish render heartbeat (audit P2).  Reaching this point means
+        // the whole frame completed: screenManager.update(), TFT drawing, the
+        // touch read and the implicit SPI transaction release all finished
+        // without blocking.  A stalled timestamp therefore signals a hung
+        // render/SPI path to the Core-1 supervisor.
+        renderFrameCounter = renderFrameCounter + 1;
+        renderHeartbeatMs  = millis();
+
         vTaskDelay(1);  // yield to other Core 0 tasks (WiFi, BT, etc.)
     }
 }
@@ -866,6 +887,51 @@ void loop() {
                                   : 0;
             Serial.printf("[STACK] loop_hwm=%u render_hwm=%u\n",
                           (unsigned)loopHwm, (unsigned)renderHwm);
+        }
+    }
+
+    // ---- Display supervisor (audit P2) — Core-1 detection only ----
+    // Evaluate the pure DisplaySupervisor at ~10 Hz using the render
+    // heartbeat published by the Core-0 render task.  Readback is reported as
+    // UNSUPPORTED because the ST7796 panel cannot be read back reliably with
+    // the current wiring, so a stalled render heartbeat is treated as a
+    // *probable* fault — never asserted as "pantalla blanca confirmada".
+    //
+    // NOTE: this wires DETECTION and differentiated diagnosis only.  The
+    // actual hardware recovery choreography (display_recovery.h: TFT_CS/
+    // TOUCH_CS high, SPI close, GPIO38 pulse, tft.init(), redraw, verify) must
+    // run with exclusive bus ownership from the Core-0 render task and is
+    // pending on-hardware validation — it is intentionally NOT fired blindly
+    // here.  The recovery sequence and the "PANTALLA RECUPERADA" banner are
+    // proven at host level (test_display_recovery.cpp).
+    {
+        static display::Supervisor s_dispSup;
+        static uint32_t s_lastDispEvalMs = 0;
+        static display::State s_lastDispState = display::State::OK;
+        if ((now - s_lastDispEvalMs) >= 100UL) {
+            s_lastDispEvalMs = now;
+            display::State st = s_dispSup.update(
+                (uint32_t)now,
+                (uint32_t)renderHeartbeatMs,
+                display::StatusRead::UNSUPPORTED,
+                (uint32_t)ESP.getFreeHeap());
+            if (st != s_lastDispState) {
+                if (st == display::State::CONFIRMED_LOST) {
+                    display::Fault f = s_dispSup.lastFault();
+                    display::RecoveryBannerInfo info{};
+                    info.cause            = f;
+                    info.duration_ms      = 0;
+                    info.attempts         = s_dispSup.attempts();
+                    info.render_continued = false;
+                    info.esp32_rebooted   = false;
+                    info.free_heap        = (uint32_t)ESP.getFreeHeap();
+                    info.total_recoveries = s_dispSup.recoveryCount();
+                    Serial.printf("[DISPLAY] fault suspected: %s | %s\n",
+                                  display::faultText(f),
+                                  display::recoveryActionText(info));
+                }
+                s_lastDispState = st;
+            }
         }
     }
 

@@ -51,7 +51,41 @@ enum class Fault : uint8_t {
     TFT_RESET_PROBABLE,  // Inferred controller reset (readback unavailable)
     LOW_MEMORY,          // Heap exhaustion suspected
     ESP32_RESET,         // Whole-chip reset (brownout/watchdog/panic)
+    READBACK_UNSUPPORTED,// Panel cannot be read back — "white" is NOT confirmable
 };
+
+// Human-readable label for a captured fault (banner "causa:" field).  Kept
+// header-only and allocation-free so it is usable from the render/Core-1
+// path and from host tests alike.
+inline const char* faultText(Fault f) {
+    switch (f) {
+    case Fault::NONE:                 return "SIN FALLO";
+    case Fault::RENDER_TIMEOUT:       return "RENDER TIMEOUT";
+    case Fault::SPI_TIMEOUT:          return "SPI TIMEOUT";
+    case Fault::TFT_STATUS_LOST:      return "TFT STATUS PERDIDO";
+    case Fault::TFT_RESET_PROBABLE:   return "TFT RESET PROBABLE";
+    case Fault::LOW_MEMORY:           return "MEMORIA BAJA";
+    case Fault::ESP32_RESET:          return "RESET ESP32";
+    case Fault::READBACK_UNSUPPORTED: return "READBACK NO FIABLE";
+    default:                          return "?";
+    }
+}
+
+// Human-readable label for the recovery FSM state (diagnostics / HMI).
+inline const char* stateText(State st) {
+    switch (st) {
+    case State::OK:                 return "OK";
+    case State::SUSPECT:            return "SOSPECHA";
+    case State::CONFIRMED_LOST:     return "PERDIDA CONFIRMADA";
+    case State::RECOVERY_REQUESTED: return "RECUPERACION SOLICITADA";
+    case State::RESETTING:          return "RESETEANDO";
+    case State::REINITIALIZING:     return "REINICIALIZANDO";
+    case State::REDRAWING:          return "REDIBUJANDO";
+    case State::RECOVERED:          return "RECUPERADA";
+    case State::RECOVERY_FAILED:    return "RECUPERACION FALLIDA";
+    default:                        return "?";
+    }
+}
 
 // ---- Result of the periodic status-register readback (audit §2.2 layer B) ----
 enum class StatusRead : uint8_t {
