@@ -19,6 +19,7 @@
 #include "led_controller.h"
 #include "eps_limits.h"
 #include "motion_inhibit_view.h"
+#include "steering_diag_view.h"
 #include "wheel_traction.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
@@ -801,6 +802,15 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             epsDataChanged_ = true;
             steerDiagChanged_ = true;
             needsRedraw_    = true;
+        }
+        // 0x316 homing telemetry updates at 1 Hz independently of 0x30F —
+        // repaint the STEER DIAG page when a fresh homing snapshot arrives so
+        // the "DIRECCIÓN NO SE MUEVE" block stays live.
+        const auto& sc = data.steeringCenteringDiag();
+        if (sc.valid && sc.timestampMs != scDiagLastTs_) {
+            scDiagLastTs_     = sc.timestampMs;
+            steerDiagChanged_ = true;
+            needsRedraw_      = true;
         }
         if ((frameTimeMs - epsLastQueryMs_) >= EPS_QUERY_INTERVAL_MS) {
             sendEpsQuery();
@@ -6585,6 +6595,64 @@ void EngineeringScreen::drawSteerDiag() {
 
     tft.setTextColor(eps.valid ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
     tft.drawString(eps.valid ? "LIVE" : "NO DATA", LX, y + 4);
+
+    // ---- HOMING (0x316) — "DIRECCIÓN NO SE MUEVE" block ----
+    // Right column: the real cause of a stuck automatic centering sweep,
+    // classified on the STM32 and transported by 0x316.  Read-only.
+    {
+        const auto& sc = data_->steeringCenteringDiag();
+        namespace sv = steering_diag_view;
+        const sv::SteeringDiagView& v = sc.view;
+        sv::Freshness fresh = sv::freshness(sc.valid, (uint32_t)millis(),
+                                            (uint32_t)sc.timestampMs);
+
+        static constexpr int16_t HX  = 250;   // homing label column
+        static constexpr int16_t HVX = 372;   // homing value column
+        int16_t hy = 42;
+
+        auto hrow = [&](const char* label, const char* valStr, uint16_t col) {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            tft.drawString(label, HX, hy);
+            tft.setTextColor(col, ui::COL_BG);
+            tft.drawString(valStr, HVX, hy);
+            hy += RH;
+        };
+
+        // Title: only claim "NO SE MUEVE" when the reason warrants it.
+        bool stuck = sc.valid && (fresh != sv::Freshness::STALE) &&
+                     sv::isStuck(v.reason);
+        tft.setTextColor(stuck ? ui::COL_RED : ui::COL_CYAN, ui::COL_BG);
+        tft.drawString(stuck ? "DIRECCION NO SE MUEVE" : "HOMING (0x316)",
+                       HX, hy);
+        hy += RH + 2;
+
+        if (!sc.valid || fresh == sv::Freshness::NEVER_RECEIVED) {
+            hrow("ESTADO", "SIN DATOS", ui::COL_GRAY);
+        } else {
+            char hb[24];
+            hrow("FSM",         sv::fsmText(v.fsmState),          ui::COL_WHITE);
+            hrow("OWNER",       sv::ownerText(v.motorOwner),      ui::COL_WHITE);
+            hrow("PC12",        v.relayPc12 ? "ON" : "OFF",
+                 v.relayPc12 ? ui::COL_GREEN : ui::COL_RED);
+            hrow("POWER READY", v.powerReady ? "SI" : "NO",
+                 v.powerReady ? ui::COL_GREEN : ui::COL_RED);
+            hrow("PC4",         v.enPc4 ? "ON" : "OFF",
+                 v.enPc4 ? ui::COL_GREEN : ui::COL_RED);
+            snprintf(hb, sizeof(hb), "%u", (unsigned)(v.pwmRequested ? 425U : 0U));
+            hrow("PWM REQ",     hb, ui::COL_WHITE);
+            snprintf(hb, sizeof(hb), "%u", (unsigned)v.pwmReal);
+            hrow("PWM REAL",    hb,
+                 (v.pwmRequested && v.pwmReal == 0) ? ui::COL_RED : ui::COL_WHITE);
+            snprintf(hb, sizeof(hb), "%d", (int)v.encoderDelta);
+            hrow("ENCODER DELTA", hb, ui::COL_WHITE);
+            hrow("MOTIVO",      sv::reasonText(v.reason),
+                 stuck ? ui::COL_RED : ui::COL_AMBER);
+            hrow("ACCION",      sv::actionText(v.reason), ui::COL_CYAN);
+            if (fresh == sv::Freshness::STALE) {
+                hrow("LINK",    "STALE", ui::COL_RED);
+            }
+        }
+    }
 
     // BACK button
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);

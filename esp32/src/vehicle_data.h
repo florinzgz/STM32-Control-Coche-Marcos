@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <array>
 #include "can_ids.h"
+#include "steering_diag_view.h"
 
 namespace vehicle {
 
@@ -366,6 +367,18 @@ struct MotionInhibitData {
 };
 
 // -------------------------------------------------------------------------
+// 0x316 DIAG_STEERING_CENTERING — steering homing telemetry.
+// Explains WHY the automatic centering sweep did/did not progress so the HMI
+// can render "DIRECCIÓN NO SE MUEVE" with the real cause instead of "Error 8".
+// See esp32/src/steering_diag_view.h and Core/Inc/steering_centering_frame.h.
+// -------------------------------------------------------------------------
+struct SteeringCenteringDiagData {
+    steering_diag_view::SteeringDiagView view{};
+    bool          valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -565,6 +578,7 @@ public:
     void setBootReset(const BootResetData& d)       { bootReset_ = d; }
     void setWheelSensorDiag(const WheelSensorDiagData& d) { wheelSensorDiag_ = d; }
     void setMotionInhibit(const MotionInhibitData& d) { motionInhibit_ = d; }
+    void setSteeringCenteringDiag(const SteeringCenteringDiagData& d) { steeringCenteringDiag_ = d; }
     void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
@@ -603,6 +617,7 @@ public:
     const BootResetData&    bootReset()    const { return bootReset_; }
     const WheelSensorDiagData& wheelSensorDiag() const { return wheelSensorDiag_; }
     const MotionInhibitData& motionInhibit() const { return motionInhibit_; }
+    const SteeringCenteringDiagData& steeringCenteringDiag() const { return steeringCenteringDiag_; }
     const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
@@ -637,6 +652,7 @@ private:
     BootResetData    bootReset_;
     WheelSensorDiagData wheelSensorDiag_;
     MotionInhibitData   motionInhibit_;
+    SteeringCenteringDiagData steeringCenteringDiag_;
     Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;

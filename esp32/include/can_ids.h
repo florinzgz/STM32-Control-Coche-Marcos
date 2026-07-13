@@ -521,6 +521,57 @@ inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_IDLE        = 0;
 inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS = 1;
 inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_COMPLETE    = 2;
 
+// =====================================================================
+// Steering-homing (centering) diagnostic (0x316) — STM32→ESP32, 1 Hz, DLC 8.
+// Mirrors Core/Inc/steering_centering_frame.h.  Instrumentation only: it
+// explains WHY the automatic centering sweep did/did not progress so the HMI
+// can render "DIRECCIÓN NO SE MUEVE" with the real cause instead of "Error 8".
+//   Byte 0   diag reason (STEER_DIAG_* below, 0..15)
+//   Byte 1   FSM state (low nibble) | motor owner (high nibble)
+//   Byte 2   flags: b0 PB5 raw, b1 PB5 debounced, b2 PB5 already-active,
+//            b3 PC12 relay commanded, b4 power ready, b5 PC4 EN commanded,
+//            b6 encoder fault, b7 restored-from-flash
+//   Byte 3   system state (low nibble) | b4 module disabled | b5 fault
+//            latched | b6 pwm requested (>0)
+//   Byte 4-5 PWM real (max CCR PA6/PA7, uint16 LE)
+//   Byte 6-7 encoder delta from sweep origin (int16 LE)
+// =====================================================================
+inline constexpr uint32_t DIAG_STEERING_CENTERING = 0x316;  // STM32→ESP32, DLC 8, 1000 ms
+
+// Steering diagnostic reason codes (0x316 byte 0) — mirror SteerDiagReason_t.
+inline constexpr uint8_t STEER_DIAG_OK                        = 0;
+inline constexpr uint8_t STEER_DIAG_RESTORED_FROM_FLASH       = 1;
+inline constexpr uint8_t STEER_DIAG_WAITING_POWER             = 2;
+inline constexpr uint8_t STEER_DIAG_CENTER_SENSOR_ACTIVE      = 3;
+inline constexpr uint8_t STEER_DIAG_SWEEP_LEFT                = 4;
+inline constexpr uint8_t STEER_DIAG_SWEEP_RIGHT               = 5;
+inline constexpr uint8_t STEER_DIAG_NO_ENCODER_MOVEMENT       = 6;
+inline constexpr uint8_t STEER_DIAG_ENCODER_FAULT             = 7;
+inline constexpr uint8_t STEER_DIAG_RANGE_EXCEEDED            = 8;
+inline constexpr uint8_t STEER_DIAG_TOTAL_TIMEOUT             = 9;
+inline constexpr uint8_t STEER_DIAG_LOST_HOMING_STATE         = 10;
+inline constexpr uint8_t STEER_DIAG_RELAY_NOT_READY           = 11;
+inline constexpr uint8_t STEER_DIAG_MODULE_DISABLED           = 12;
+inline constexpr uint8_t STEER_DIAG_ABORTED_SAFE             = 13;
+inline constexpr uint8_t STEER_DIAG_ABORTED_ERROR            = 14;
+inline constexpr uint8_t STEER_DIAG_UNKNOWN                   = 15;
+
+// Flag bits (0x316 byte 2).
+inline constexpr uint8_t STEER_DIAG_FLAG_PB5_RAW        = 1 << 0;
+inline constexpr uint8_t STEER_DIAG_FLAG_PB5_DEBOUNCED  = 1 << 1;
+inline constexpr uint8_t STEER_DIAG_FLAG_PB5_ACTIVE     = 1 << 2;
+inline constexpr uint8_t STEER_DIAG_FLAG_RELAY_PC12     = 1 << 3;
+inline constexpr uint8_t STEER_DIAG_FLAG_POWER_READY    = 1 << 4;
+inline constexpr uint8_t STEER_DIAG_FLAG_EN_PC4         = 1 << 5;
+inline constexpr uint8_t STEER_DIAG_FLAG_ENCODER_FAULT  = 1 << 6;
+inline constexpr uint8_t STEER_DIAG_FLAG_RESTORED_FLASH = 1 << 7;
+
+// System-state / status bits (0x316 byte 3).
+inline constexpr uint8_t STEER_DIAG_STATE_MASK          = 0x0F;
+inline constexpr uint8_t STEER_DIAG_STATUS_MODULE_DISABLED = 1 << 4;
+inline constexpr uint8_t STEER_DIAG_STATUS_FAULT_LATCHED   = 1 << 5;
+inline constexpr uint8_t STEER_DIAG_STATUS_PWM_REQUESTED   = 1 << 6;
+
 } // namespace can
 
 #endif // CAN_IDS_H

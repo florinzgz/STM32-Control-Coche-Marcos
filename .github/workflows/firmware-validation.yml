@@ -82,6 +82,7 @@ jobs:
               Core/Src/test_steering_z.c \
               Core/Src/test_steering_centering.c \
               Core/Src/test_steering_centering_diag.c \
+              Core/Src/test_steering_centering_frame.c \
               Core/Src/test_pedal_cal_limits.c \
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
@@ -101,6 +102,7 @@ jobs:
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
                 Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c" ;;
                 Core/Src/test_steering_centering_diag.c) extra="Core/Src/steering_centering_diag.c" ;;
+                Core/Src/test_steering_centering_frame.c) extra="Core/Src/steering_centering_diag.c" ;;
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
                 Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
@@ -226,6 +228,12 @@ jobs:
               esp32/src/test_display_supervisor.cpp \
               -o /tmp/test_display_supervisor
             /tmp/test_display_supervisor
+
+            echo "-- test_steering_diag_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_steering_diag_view.cpp \
+              -o /tmp/test_steering_diag_view
+            /tmp/test_steering_diag_view
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

@@ -429,6 +429,19 @@ static void decodeMotionInhibit(const CanFrame& f, vehicle::VehicleData& data) {
     data.setMotionInhibit(mi);
 }
 
+// 0x316 DIAG_STEERING_CENTERING — steering homing telemetry (DLC 8).
+// Frame layout mirrors Core/Inc/steering_centering_frame.h; decoded by the
+// shared pure helper so the HMI and host test share one deserialiser.
+static void decodeSteeringCenteringDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::SteeringCenteringDiagData sc;
+    if (!steering_diag_view::decode(f.data, f.data_length_code, sc.view)) {
+        return;
+    }
+    sc.valid       = true;
+    sc.timestampMs = millis();
+    data.setSteeringCenteringDiag(sc);
+}
+
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
 static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
@@ -707,6 +720,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
             case can::DIAG_WHEEL_SENSOR:    decodeWheelSensorDiag(frame, data);   break;
             case can::DIAG_MOTION_INHIBIT:  decodeMotionInhibit(frame, data);     break;
+            case can::DIAG_STEERING_CENTERING: decodeSteeringCenteringDiag(frame, data); break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;

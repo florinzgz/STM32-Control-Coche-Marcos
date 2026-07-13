@@ -1471,6 +1471,9 @@ void CAN_SendSteeringCenteringDiag(void) {
 
     TransmitFrame(CAN_ID_DIAG_STEERING_CENTERING, data, 8);
 }
+
+/**
+ * @brief  I2C service-mode scan report (additive, on-demand, report-only).
  *
  * Triggered by SERVICE_CMD 0x110 byte0 = SERVICE_ACTION_I2C_SERVICE (0xF6).
  * Runs an active I2C probe (Sensor_RunI2CServiceScan) and reports the result
