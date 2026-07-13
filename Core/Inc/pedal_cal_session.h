@@ -109,6 +109,13 @@ typedef enum {
  * lost movement lock apart from an ordinary movement abort.                 */
 #define PEDAL_CAL_ABORT_OPERATOR          0x00010000U  /* operator pressed ABORT */
 #define PEDAL_CAL_ABORT_LOCK_LOST         0x00020000U  /* traction lock no longer safe */
+/* audit P5 final — the real movement lock (Traction_CalibrationLock: demand 0,
+ * PWM 0, traction enables LOW) plus the traction relay OFF must be CONFIRMED
+ * BEFORE the session begins, not merely once it is active.  When entry is
+ * blocked because that lock is not confirmed, this explicit reason is reported
+ * so the operator can tell it apart from a plain "traction relays live"
+ * (PEDAL_CAL_BLOCK_TRACTION_LIVE) precondition.                              */
+#define PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED 0x00040000U  /* movement lock not confirmed */
 
 /* ---- Per-tick condition snapshot (all facts the FSM needs) ---------------
  * The caller fills this from the live safety / sensor state; the module

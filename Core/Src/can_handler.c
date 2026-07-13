@@ -1689,12 +1689,17 @@ static uint8_t ExtractDLC(uint32_t dlc_code) {
 #define PEDALCAL_BURST_PERIOD_MS  100U
 
 /* ---- Pedal-percent thresholds for the guided session (audit P5) ----
- * released   : pedal percent strictly below this counts as "released".
- * full press : pedal percent at/above this is the OBJECTIVE "sufficiently
- *              pressed" condition CAPTURE MAX requires — it is NOT enough to
- *              press the CAPTURE MAX button; the pedal itself must be pressed. */
+ * released : pedal percent strictly below this counts as "released".
+ *
+ * LEGACY (audit P5 final): PEDALCAL_FULL_PRESS_PCT / pedal_pressed_full are NO
+ * LONGER used.  CAPTURE MAX is latched purely from the RAW ADC (8 stable
+ * samples, raw > MIN, span >= PEDAL_CAL_RANGE_MIN) so it can never depend on a
+ * percent derived from a possibly-wrong old calibration.  The field is kept
+ * only for ABI/telemetry compatibility and is populated as a constant false. */
 #define PEDALCAL_RELEASED_PCT     3.0f
-#define PEDALCAL_FULL_PRESS_PCT   80.0f
+/* Deprecated legacy threshold retained for documentation only — must NOT be
+ * reintroduced as a CAPTURE MAX dependency. */
+#define PEDALCAL_FULL_PRESS_PCT_LEGACY 80.0f
 
 /* ---- 0x319 session-status cadence ---- */
 #define PEDALCAL_SESS_PERIOD_MS   100U
@@ -1801,7 +1806,10 @@ static void pedalcal_build_conds(PedalCalConds *c)
                                Wheel_GetSpeed_RR() >= 0.3f);
     c->pedal_plausible      = Pedal_IsPlausible();
     c->pedal_released       = (pct <  PEDALCAL_RELEASED_PCT);
-    c->pedal_pressed_full   = (pct >= PEDALCAL_FULL_PRESS_PCT);
+    /* LEGACY (audit P5 final): pedal_pressed_full is no longer consulted by the
+     * session — CAPTURE MAX is raw-ADC based.  Kept false to guarantee no
+     * dependency on the calibrated percent. */
+    c->pedal_pressed_full   = false;
     c->pedal_raw            = Pedal_SampleRawNow();
     c->critical_error       = (st == SYS_STATE_ERROR);
     c->safe_state           = (st == SYS_STATE_SAFE);
@@ -1827,8 +1835,15 @@ static bool pedalcal_entry_ok(void)
 {
     PedalCalConds c;
     pedalcal_build_conds(&c);
+    /* audit P5 final — the movement lock must be confirmed for entry.  Enforce
+     * it here too (Traction_CalibrationLock) and require the relay OFF so the
+     * 0x319 "entry OK" flag never advertises a start that Begin would refuse. */
+    bool en_pwm_locked = Traction_CalibrationLock();
+    bool relay_off     = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
+    c.traction_locked  = en_pwm_locked && relay_off;
     return c.in_standby && c.gear_park_or_neutral && !c.wheels_moving &&
-           c.pedal_plausible && !c.critical_error && c.traction_inhibited;
+           c.pedal_plausible && !c.critical_error && c.traction_inhibited &&
+           c.traction_locked;
 }
 
 /* ---- 0x308 live reject-reason (PEDCAL_REJECT_* form, unchanged contract) ----
@@ -2040,6 +2055,15 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     case PEDAL_CAL_OP_CAPTURE_MIN: {   /* BEGIN the guided session */
         PedalCalConds c;
         pedalcal_build_conds(&c);
+        /* audit P5 final — ENFORCE the real movement lock BEFORE beginning the
+         * session, not only once it is active.  Traction_CalibrationLock()
+         * actively drives demand 0 / traction PWM 0 / traction enables LOW and
+         * returns whether that holds; the traction relay must also be OFF.
+         * Populate traction_locked from BOTH conditions so PedalCalSession_Begin
+         * refuses to start unless the lock is confirmed. */
+        bool en_pwm_locked = Traction_CalibrationLock();
+        bool relay_off     = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
+        c.traction_locked  = en_pwm_locked && relay_off;
         bool ok = PedalCalSession_Begin(&pedalcal_session, &c);
         pedalcal_start_burst();
         pedalcal_send_session_status();
@@ -2050,7 +2074,8 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
             const uint32_t safety_bits =
                 (PEDAL_CAL_BLOCK_NOT_STANDBY | PEDAL_CAL_BLOCK_GEAR |
                  PEDAL_CAL_BLOCK_WHEELS_MOVING | PEDAL_CAL_BLOCK_TRACTION_LIVE |
-                 PEDAL_CAL_BLOCK_CRITICAL_ERROR | PEDAL_CAL_BLOCK_PEDAL_IMPLAUSIBLE);
+                 PEDAL_CAL_BLOCK_CRITICAL_ERROR | PEDAL_CAL_BLOCK_PEDAL_IMPLAUSIBLE |
+                 PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED);
             CAN_SendCommandAck(0x10, (r & safety_bits) ? ACK_BLOCKED_BY_SAFETY
                                                        : ACK_REJECTED);
         }

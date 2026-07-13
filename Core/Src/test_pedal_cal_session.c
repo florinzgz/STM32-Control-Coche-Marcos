@@ -286,6 +286,59 @@ static void test_entry_blocks(void)
     c = base_conds(0); c.traction_inhibited = false;
     CHECK(!PedalCalSession_Begin(&s, &c));
     CHECK(s.reason & PEDAL_CAL_BLOCK_TRACTION_LIVE);
+
+    /* audit P5 final — movement lock NOT confirmed (relay ON, EN active or
+     * traction PWM != 0 all collapse into traction_locked == false).  Begin
+     * must refuse with the explicit LOCK_NOT_CONFIRMED reason. */
+    c = base_conds(0); c.traction_locked = false;
+    CHECK(!PedalCalSession_Begin(&s, &c));
+    CHECK(s.reason & PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED);
+    CHECK(s.state == PEDAL_CAL_IDLE);
+}
+
+/* audit P5 final — Begin must be REJECTED whenever the real movement lock is
+ * not confirmed (traction_locked == false), which the caller derives from
+ * traction PWM != 0, an active EN, or the relay still ON.  Begin is ACCEPTED
+ * only when demand/PWM/EN are safe AND the relay is OFF (traction_locked). */
+static void test_begin_requires_lock_confirmed(void)
+{
+    PedalCalSession s;
+
+    /* traction_locked == false stands in for PWM != 0 / EN active / relay ON —
+     * the firmware collapses all three into that single confirmed-lock bool. */
+    PedalCalSession_Init(&s, NULL, NULL);
+    PedalCalConds c = base_conds(0);
+    c.traction_locked = false;
+    CHECK(!PedalCalSession_Begin(&s, &c));
+    CHECK(s.reason & PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED);
+    CHECK(s.state == PEDAL_CAL_IDLE);
+
+    /* Only with the lock confirmed (safe demand/PWM/EN + relay OFF) does Begin
+     * succeed. */
+    PedalCalSession_Init(&s, NULL, NULL);
+    c = base_conds(0);
+    c.traction_locked = true;
+    CHECK(PedalCalSession_Begin(&s, &c));
+    CHECK(s.state == PEDAL_CAL_ENTERING);
+    CHECK(!(s.reason & PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED));
+}
+
+/* audit P5 final — losing the lock AFTER a confirmed Begin aborts with
+ * ABORT_LOCK_LOST (distinct from LOCK_NOT_CONFIRMED at entry). */
+static void test_begin_then_lock_loss_aborts(void)
+{
+    PedalCalSession s;
+    PedalCalSession_Init(&s, NULL, NULL);
+    PedalCalConds c = base_conds(0);
+    CHECK(PedalCalSession_Begin(&s, &c));
+    PedalCalSession_Update(&s, &c); c.now_ms += 50;   /* -> WAIT_RELEASED */
+    CHECK(s.state == PEDAL_CAL_WAIT_RELEASED);
+
+    /* Lock lost mid-session (relay re-energised / EN HIGH / PWM != 0). */
+    c.traction_locked = false;
+    PedalCalSession_Update(&s, &c);
+    CHECK(s.state == PEDAL_CAL_ABORTED);
+    CHECK(s.reason & PEDAL_CAL_ABORT_LOCK_LOST);
 }
 
 /* Every mid-session abort cause maps to its own bit and lands in ABORTED. */
@@ -413,6 +466,8 @@ static void test_reason_text(void)
                  "CANCELADO POR OPERADOR") == 0);
     CHECK(strcmp(PedalCalSession_ReasonText(PEDAL_CAL_ABORT_LOCK_LOST),
                  "BLOQUEO PERDIDO") == 0);
+    CHECK(strcmp(PedalCalSession_ReasonText(PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED),
+                 "BLOQUEO NO CONFIRMADO") == 0);
     CHECK(strcmp(PedalCalSession_StateText(PEDAL_CAL_CAPTURING_MAX), "CAPTURANDO MAX") == 0);
 }
 
@@ -424,6 +479,8 @@ int main(void)
     test_operator_abort_not_emergency();
     test_lock_lost_abort();
     test_entry_blocks();
+    test_begin_requires_lock_confirmed();
+    test_begin_then_lock_loss_aborts();
     test_runtime_aborts();
     test_timeout_abort();
     test_unstable_capture();

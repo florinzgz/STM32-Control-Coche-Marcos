@@ -386,6 +386,122 @@ static void test_runner_unverified_is_terminal(void) {
     CHECK(rm.resumed == true);
 }
 
+// ---- Persisted render-blocked reboot banner (audit P2 final) --------------
+// The banner must be shown on the HMI exactly once after a controlled reboot,
+// preserving the historical counter and the persisted cause/uptime.  A tiny NVS
+// model mirrors the firmware's persist/boot/clear contract so the once-only
+// behaviour is proven at host level.
+namespace {
+struct NvsModel {
+    uint8_t  rb_cause   = 0;
+    uint32_t rb_uptime  = 0;
+    uint32_t rb_count   = 0;
+    bool     rb_pending = false;
+};
+
+// Mirror of persistRenderBlockedAndReboot(): set pending, bump the historical
+// counter, keep cause + uptime.
+void modelPersistReboot(NvsModel& n, RecoveryTrigger cause, uint32_t uptime) {
+    n.rb_cause   = (uint8_t)cause;
+    n.rb_uptime  = uptime;
+    n.rb_count  += 1U;
+    n.rb_pending = true;
+}
+
+// Mirror of the boot path: return whether the banner is shown, and if so
+// clear ONLY rb_pending (keeping the rest).  Fills @p shown with the info.
+bool modelBoot(NvsModel& n, RebootRecoveryInfo& shown) {
+    if (!shouldShowRebootBanner(n.rb_pending, n.rb_count)) return false;
+    shown.trigger   = (RecoveryTrigger)n.rb_cause;
+    shown.uptime_ms = n.rb_uptime;
+    shown.count     = n.rb_count;
+    n.rb_pending    = false;    // clear ONLY pending; keep count/cause/uptime
+    return true;
+}
+}  // namespace
+
+static void test_reboot_banner_fields(void) {
+    RebootRecoveryInfo b{};
+    b.trigger   = RecoveryTrigger::RENDER_STALLED;
+    b.uptime_ms = 45678;
+    b.count     = 3;
+
+    char buf[320];
+    int written = formatRebootRecoveryBanner(buf, sizeof(buf), b);
+    CHECK(written > 0);
+    CHECK(written < (int)sizeof(buf));       // no truncation
+
+    CHECK(strstr(buf, "PANTALLA RECUPERADA TRAS REINICIO") != nullptr);
+    CHECK(strstr(buf, "Causa: RENDER BLOQUEADO") != nullptr);
+    CHECK(strstr(buf, "Trigger: RENDER DETENIDO") != nullptr);
+    CHECK(strstr(buf, "Reinicio: CONTROLADO") != nullptr);
+    CHECK(strstr(buf, "Momento del fallo: 45678 ms") != nullptr);
+    CHECK(strstr(buf, "Reincidencias: 3") != nullptr);
+    CHECK(strstr(buf, "Verificacion: REINICIO COMPLETO") != nullptr);
+    CHECK(strstr(buf, "revisar TFT_RST, alimentacion, SPI y tarea Render") != nullptr);
+
+    // Truncation is safely bounded and NUL-terminated.
+    char small[16];
+    int need = formatRebootRecoveryBanner(small, sizeof(small), b);
+    CHECK(need >= (int)sizeof(small));
+    CHECK(small[sizeof(small) - 1] == '\0');
+}
+
+static void test_reboot_banner_shown_once(void) {
+    NvsModel n;
+
+    // A pristine device (never rebooted) shows nothing.
+    RebootRecoveryInfo shown{};
+    CHECK(!modelBoot(n, shown));
+
+    // Render block persists a controlled reboot.
+    modelPersistReboot(n, RecoveryTrigger::RENDER_STALLED, 12345);
+    CHECK(n.rb_pending == true);
+    CHECK(n.rb_count == 1);
+
+    // First boot after the fault: the banner is shown ONCE, preserving the
+    // cause and uptime, and pending is cleared afterwards.
+    CHECK(modelBoot(n, shown));
+    CHECK(shown.trigger   == RecoveryTrigger::RENDER_STALLED);
+    CHECK(shown.uptime_ms == 12345);
+    CHECK(shown.count     == 1);
+    CHECK(n.rb_pending == false);       // pending cleared
+    CHECK(n.rb_count   == 1);           // historical counter kept
+    CHECK(n.rb_cause   == (uint8_t)RecoveryTrigger::RENDER_STALLED);  // preserved
+    CHECK(n.rb_uptime  == 12345);       // preserved
+
+    // Every subsequent normal boot shows nothing (not repeated), but the
+    // historical counter is still intact.
+    CHECK(!modelBoot(n, shown));
+    CHECK(!modelBoot(n, shown));
+    CHECK(n.rb_count == 1);
+}
+
+static void test_reboot_banner_new_fault_rearms(void) {
+    NvsModel n;
+
+    // First fault, shown and cleared.
+    modelPersistReboot(n, RecoveryTrigger::TFT_CONTROLLER_STATUS_LOST, 1000);
+    RebootRecoveryInfo shown{};
+    CHECK(modelBoot(n, shown));
+    CHECK(n.rb_pending == false);
+    CHECK(n.rb_count == 1);
+
+    // A brand-new render-blocked reboot re-arms pending and bumps the counter.
+    modelPersistReboot(n, RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED, 2000);
+    CHECK(n.rb_pending == true);
+    CHECK(n.rb_count == 2);
+
+    // The new fault is shown once with the NEW cause/uptime and the CUMULATIVE
+    // reincidence count.
+    CHECK(modelBoot(n, shown));
+    CHECK(shown.trigger   == RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED);
+    CHECK(shown.uptime_ms == 2000);
+    CHECK(shown.count     == 2);
+    CHECK(n.rb_pending == false);
+    CHECK(n.rb_count == 2);             // historical counter accumulates
+}
+
 int main() {
     test_sequence_order();
     test_banner_fields();
@@ -399,6 +515,9 @@ int main() {
     test_runner_retry_then_success();
     test_runner_final_failure();
     test_runner_unverified_is_terminal();
+    test_reboot_banner_fields();
+    test_reboot_banner_shown_once();
+    test_reboot_banner_new_fault_rearms();
     printf("display_recovery: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }

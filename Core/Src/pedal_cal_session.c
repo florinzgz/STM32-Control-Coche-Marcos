@@ -55,6 +55,11 @@ static uint32_t entry_block_mask(const PedalCalConds *c)
     if (!c->pedal_plausible)      bits |= PEDAL_CAL_BLOCK_PEDAL_IMPLAUSIBLE;
     if (c->critical_error)        bits |= PEDAL_CAL_BLOCK_CRITICAL_ERROR;
     if (!c->traction_inhibited)   bits |= PEDAL_CAL_BLOCK_TRACTION_LIVE;
+    /* audit P5 final — require the real movement lock (demand 0 / PWM 0 / EN
+     * LOW / relay OFF) to be CONFIRMED before the session may start.  The
+     * caller enforces Traction_CalibrationLock() and checks the relay OFF, then
+     * reports the combined result via traction_locked. */
+    if (!c->traction_locked)      bits |= PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED;
     return bits;
 }
 
@@ -381,6 +386,7 @@ const char *PedalCalSession_ReasonText(uint32_t reason_mask)
     if (reason_mask & PEDAL_CAL_ABORT_SAFE)             return "MODO SEGURO";
     if (reason_mask & PEDAL_CAL_ABORT_ERROR)            return "ERROR CRITICO";
     if (reason_mask & PEDAL_CAL_ABORT_LOCK_LOST)        return "BLOQUEO PERDIDO";
+    if (reason_mask & PEDAL_CAL_BLOCK_LOCK_NOT_CONFIRMED) return "BLOQUEO NO CONFIRMADO";
     if (reason_mask & PEDAL_CAL_ABORT_MOVEMENT)         return "VEHICULO EN MOVIMIENTO";
     if (reason_mask & PEDAL_CAL_ABORT_CAN_LOSS)         return "SIN CAN";
     if (reason_mask & PEDAL_CAL_ABORT_TIMEOUT)          return "TIEMPO AGOTADO";

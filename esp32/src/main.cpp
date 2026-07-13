@@ -276,6 +276,26 @@ static bool takeRecoveryBanner(char* out, size_t n) {
     return have;
 }
 
+// Audit P2 final — persisted render-blocked reboot surfaced ON THE HMI once.
+// setup() (Core 1) reads the persisted cause and, if a reboot is still pending,
+// latches it here BEFORE the render task exists.  The render task (Core 0) then
+// publishes it as a ScreenManager overlay on its first frames and clears ONLY
+// rb_pending, keeping rb_count as the historical counter.  Written once by
+// Core 1 before task creation (happens-before), then owned by Core 0.
+static volatile bool             s_rebootBannerPending = false;
+static display::RebootRecoveryInfo s_rebootBannerInfo   = {};
+
+// Clear ONLY the rb_pending flag after the banner has been published, keeping
+// rb_cause / rb_uptime / rb_count intact as the historical record so later
+// normal boots do NOT repeat the banner.
+static void clearRenderBlockedPending(void) {
+    Preferences p;
+    if (p.begin("disp_fault", /*readOnly=*/false)) {
+        p.putBool("rb_pending", false);
+        p.end();
+    }
+}
+
 // Audit P2.1 — last resort when the render task is genuinely blocked and never
 // consumes/finishes the recovery request.  Core 1 persists the cause to NVS and
 // performs a controlled ESP32 restart.  Core 1 NEVER touches the TFT/SPI here.
@@ -285,6 +305,9 @@ static void persistRenderBlockedAndReboot(display::RecoveryTrigger trigger) {
         p.putUChar("rb_cause",  (uint8_t)trigger);
         p.putUInt ("rb_uptime", (uint32_t)millis());
         p.putUInt ("rb_count",  p.getUInt("rb_count", 0) + 1U);
+        // audit P2 final — mark the fault pending so the NEXT boot surfaces it
+        // on the HMI (not only on the serial log) exactly once.
+        p.putBool ("rb_pending", true);
         p.end();
     }
     Serial.printf("[DISPLAY][RECOVERY] RENDER BLOCKED — persisted cause '%s'; "
@@ -732,6 +755,21 @@ static void renderTask(void* /*param*/) {
             }
         }
 
+        // 0c. Surface a persisted render-blocked reboot on the HMI (audit P2
+        // final).  setup() latched the persisted cause here (Core 1) before
+        // this task existed; publish it once as a ScreenManager overlay now
+        // that the render path/ScreenManager are alive, then clear ONLY
+        // rb_pending (keeping rb_count as the historical counter) so later
+        // normal boots do not repeat the banner.
+        if (s_rebootBannerPending) {
+            char banner[320];
+            display::formatRebootRecoveryBanner(banner, sizeof(banner),
+                                                s_rebootBannerInfo);
+            screenManager.showRecoveryBanner(banner, millis());
+            s_rebootBannerPending = false;
+            clearRenderBlockedPending();
+        }
+
         // 1. Copy latest vehicle data from main loop
         if (xSemaphoreTake(vdMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             localVD = renderVD;
@@ -953,11 +991,22 @@ void setup() {
             if (rbCount > 0) {
                 const uint8_t  cause  = p.getUChar("rb_cause", 0);
                 const uint32_t uptime = p.getUInt("rb_uptime", 0);
+                const bool     pending = p.getBool("rb_pending", false);
                 Serial.printf("[BOOT][DISPLAY] previous render-blocked restart — "
-                              "cause=%s, at %lu ms uptime, total=%lu\n",
+                              "cause=%s, at %lu ms uptime, total=%lu, pending=%s\n",
                               display::recoveryTriggerText(
                                   (display::RecoveryTrigger)cause),
-                              (unsigned long)uptime, (unsigned long)rbCount);
+                              (unsigned long)uptime, (unsigned long)rbCount,
+                              pending ? "si" : "no");
+                // audit P2 final — latch the banner for the render task to show
+                // once (only when still pending).  We do NOT draw here: the TFT
+                // and ScreenManager are not initialised yet at this point.
+                if (display::shouldShowRebootBanner(pending, rbCount)) {
+                    s_rebootBannerInfo.trigger   = (display::RecoveryTrigger)cause;
+                    s_rebootBannerInfo.uptime_ms = uptime;
+                    s_rebootBannerInfo.count     = rbCount;
+                    s_rebootBannerPending        = true;
+                }
             }
             p.end();
         }

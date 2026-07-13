@@ -406,6 +406,56 @@ inline int formatRecoveryBanner(char* out, size_t n, const RecoveryBannerInfo& b
         recoveryActionText(b));
 }
 
+// ---- Persisted render-blocked reboot banner (audit P2 final) -------------
+// When the render task is genuinely blocked, Core 1 persists the cause to NVS
+// and performs a CONTROLLED ESP32 restart (persistRenderBlockedAndReboot).
+// The NEXT boot must surface that fact ON THE HMI exactly once — not only on
+// the serial log — so the operator sees why the display restarted.  The
+// firmware persists:
+//   rb_cause   : the RecoveryTrigger that led to the reboot
+//   rb_uptime  : millis() at the moment of the failure
+//   rb_count   : historical counter of render-blocked reboots (never cleared)
+//   rb_pending : true while a persisted reboot still needs to be shown
+// After the banner is published the firmware clears ONLY rb_pending, keeping
+// rb_count as the historical counter, so later normal boots do NOT repeat it.
+struct RebootRecoveryInfo {
+    RecoveryTrigger trigger;    // rb_cause  — what triggered the render block
+    uint32_t        uptime_ms;  // rb_uptime — moment of the failure
+    uint32_t        count;      // rb_count  — historical reincidences
+};
+
+// The persisted reboot banner must be shown exactly once: only when the pending
+// flag is set AND at least one reboot has been recorded.  A normal boot
+// (rb_pending == false) shows nothing; a boot right after the fault
+// (rb_pending == true) shows it once and then the firmware clears rb_pending.
+inline bool shouldShowRebootBanner(bool rb_pending, uint32_t rb_count) {
+    return rb_pending && (rb_count > 0U);
+}
+
+// Format the "PANTALLA RECUPERADA TRAS REINICIO" banner into @p out (size @p n)
+// using snprintf, so the buffer bound is explicit and testable (audit P6).
+// Returns the number of characters that WOULD have been written (snprintf
+// semantics) so a caller can detect truncation with (ret >= n).
+inline int formatRebootRecoveryBanner(char* out, size_t n,
+                                      const RebootRecoveryInfo& b) {
+    if (out == nullptr || n == 0) return 0;
+    return snprintf(
+        out, n,
+        "PANTALLA RECUPERADA TRAS REINICIO\n"
+        "\n"
+        "Causa: RENDER BLOQUEADO\n"
+        "Trigger: %s\n"
+        "Reinicio: CONTROLADO\n"
+        "Momento del fallo: %lu ms\n"
+        "Reincidencias: %lu\n"
+        "Verificacion: REINICIO COMPLETO\n"
+        "Accion:\n"
+        "revisar TFT_RST, alimentacion, SPI y tarea Render",
+        recoveryTriggerText(b.trigger),
+        (unsigned long)b.uptime_ms,
+        (unsigned long)b.count);
+}
+
 }  // namespace display
 
 #endif  // DISPLAY_RECOVERY_H
