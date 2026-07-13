@@ -620,9 +620,22 @@ inline constexpr uint32_t DIAG_INA_CH5 = 0x318;  // STM32→ESP32, DLC 8, 1000 m
 // STM32→ESP32, DLC 8, on state change + ~10 Hz while active.  Mirrors
 // Core/Src/can_handler.c pedalcal_send_session_status().
 //   b0 state (PedalCalState), b1 flags (bit0 active, bit1 have_min,
-//   bit2 have_max, bit3 completed, bit4 aborted, bit5 entry-ok),
-//   b2-3 reason mask (LE), b4-5 adc_min (LE), b6-7 adc_max (LE).
+//   bit2 have_max, bit3 completed, bit4 aborted, bit5 entry-ok,
+//   bit6 operator-cancel abort, bit7 movement-lock-lost abort),
+//   b2-3 reason mask (LE, low 16 bits), b4-5 adc_min (LE), b6-7 adc_max (LE).
+// The extended OPERATOR / LOCK_LOST abort causes live above bit 15 in the
+// firmware reason word and are surfaced ONLY via flag bits 6/7.
 inline constexpr uint32_t DIAG_PEDAL_CAL_SESSION = 0x319;
+
+// 0x319 byte-1 flag bits.
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ACTIVE        = 0x01u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_HAVE_MIN      = 0x02u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_HAVE_MAX      = 0x04u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_COMPLETED     = 0x08u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ABORTED       = 0x10u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ENTRY_OK      = 0x20u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ABORT_OPERATOR  = 0x40u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ABORT_LOCK_LOST = 0x80u;
 
 // PedalCalSession state enum (mirror of Core/Inc/pedal_cal_session.h PedalCalState).
 inline constexpr uint8_t PEDCAL_SESS_IDLE                 = 0;

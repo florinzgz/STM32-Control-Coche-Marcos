@@ -97,6 +97,12 @@ void Traction_GetDriveTuning(DriveTuning_t *out);
 void Traction_Update(void);
 void Traction_EmergencyStop(void);
 
+/* Calibration movement lock (audit P5.4): enforce demand 0 + traction
+ * H-bridges COAST (EN LOW / PWM 0) and return true only if the enables read
+ * LOW and the resolved PWM is 0.  Called periodically while a pedal-cal
+ * session runs so the loss of the lock aborts the session immediately. */
+bool Traction_CalibrationLock(void);
+
 /* ---- MOTION_INHIBIT_REASON instrumentation (0x315) ----
  * Returns the latest MOTION_INHIBIT_REASON bitfield (MOTION_INHIBIT_*),
  * recomputed every Traction_Update() cycle.  Instrumentation only: it

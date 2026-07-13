@@ -112,10 +112,44 @@ static void test_decode_frame(void) {
     CHECK(decode(shortF).ok == false);
 }
 
+// Extended reason text: operator-cancel and lock-lost come from flag bits 6/7
+// (they live above bit 15 in the firmware reason word), with the correct
+// priority relative to the hard safety aborts.
+static void test_reason_text_ex(void) {
+    using namespace pedalcal;
+    // Operator cancel: benign, only when no higher-priority cause is set.
+    CHECK(strcmp(sessionReasonTextEx(0x0000u, kFlagAbortOperator),
+                 "OPERATOR CANCEL") == 0);
+    // Lock lost is safety-relevant and outranks a co-set operator bit.
+    CHECK(strcmp(sessionReasonTextEx(0x0000u,
+                 (uint8_t)(kFlagAbortLockLost | kFlagAbortOperator)),
+                 "LOCK LOST") == 0);
+    // Emergency still dominates over lock-lost.
+    CHECK(strcmp(sessionReasonTextEx(0x0100u, kFlagAbortLockLost),
+                 "EMERGENCY STOP") == 0);
+    // No bits at all -> OK.
+    CHECK(strcmp(sessionReasonTextEx(0x0000u, 0x00u), "OK") == 0);
+    // Falls back to the low-16 reason text when no flag bit is set.
+    CHECK(strcmp(sessionReasonTextEx(0x2000u, 0x00u), "RANGE TOO SMALL") == 0);
+}
+
+// The pedal is expected pressed only in PRESS FULLY / CAPTURING MAX, so the
+// 0x308 "pedal not released" gate must not read as BLOCKED there (audit P5.5).
+static void test_pedal_expected_pressed(void) {
+    using namespace pedalcal;
+    CHECK(pedalExpectedPressed(can::PEDCAL_SESS_WAIT_FULL_PRESS) == true);
+    CHECK(pedalExpectedPressed(can::PEDCAL_SESS_CAPTURING_MAX)   == true);
+    CHECK(pedalExpectedPressed(can::PEDCAL_SESS_CAPTURING_MIN)   == false);
+    CHECK(pedalExpectedPressed(can::PEDCAL_SESS_READY_TO_SAVE)   == false);
+    CHECK(pedalExpectedPressed(can::PEDCAL_SESS_IDLE)            == false);
+}
+
 int main() {
     test_state_text();
     test_active();
     test_reason_text();
+    test_reason_text_ex();
+    test_pedal_expected_pressed();
     test_freshness();
     test_decode_frame();
     printf("pedal_cal_session_view: %d run, %d failed\n", tests_run, tests_failed);

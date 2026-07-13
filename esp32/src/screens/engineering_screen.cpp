@@ -1380,7 +1380,7 @@ void EngineeringScreen::draw() {
             } else {
                 snprintf(sbuf, sizeof(sbuf), "Session: %s (%s)",
                          pedalcal::sessionStateText(pedalSessState_),
-                         pedalcal::sessionReasonText(pedalSessReason_));
+                         pedalcal::sessionReasonTextEx(pedalSessReason_, pedalSessFlags_));
             }
             uint16_t s_col = ui::COL_GRAY;
             if (sess_fresh) {
@@ -1410,11 +1410,28 @@ void EngineeringScreen::draw() {
         }
 
         const bool plausible   = (pedalCalFlags_ & 0x20U) != 0;
-        const bool safety_ok   = (pedalCalFlags_ & 0x10U) != 0;
+        bool       safety_ok   = (pedalCalFlags_ & 0x10U) != 0;
         const bool stored_ok   = (pedalCalFlags_ & 0x08U) != 0;
         const bool valid_pair  = (pedalCalFlags_ & 0x04U) != 0;
         const bool have_min    = (pedalCalFlags_ & 0x01U) != 0;
         const bool have_max    = (pedalCalFlags_ & 0x02U) != 0;
+        // audit P5.5: when the guided-session frame (0x319) is fresh it is the
+        // PRIMARY source of truth.  During the PRESS FULLY / CAPTURING MAX
+        // phases a pressed pedal is REQUIRED, so the legacy 0x308 "pedal not
+        // released" reject must not paint the Safety gate as BLOCKED — the
+        // STM32 already masks that reject there, but the HMI overrides too so
+        // a slightly stale 0x308 cannot flash a false BLOCKED.
+        {
+            const bool sess_fresh_gate =
+                pedalcal::sessionFreshness(pedalSessLastTs_, (unsigned long)millis())
+                    == pedalcal::Freshness::FRESH;
+            if (sess_fresh_gate && pedalcal::pedalExpectedPressed(pedalSessState_)) {
+                const uint16_t non_pedal_rejects =
+                    (uint16_t)(pedalCalRejectReason_ &
+                               ~((uint16_t)can::PEDCAL_REJECT_PEDAL_NOT_RELEASED));
+                safety_ok = (non_pedal_rejects == 0);
+            }
+        }
         const bool save_enabled = valid_pair && safety_ok;
         uint16_t pending_range = 0;
         if (have_min && have_max && pedalCalPendingMax_ >= pedalCalPendingMin_) {

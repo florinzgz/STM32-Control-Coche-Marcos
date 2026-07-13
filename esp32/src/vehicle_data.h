@@ -228,7 +228,9 @@ struct PedalCalData {
 //   state:  PedalCalState enum (0 IDLE .. 10 ABORTED)
 //   flags bit0: session active   bit1: MIN captured   bit2: MAX captured
 //         bit3: completed         bit4: aborted        bit5: entry guards OK now
-//   reason: PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* / FAIL_* bitmask
+//         bit6: operator-cancel abort   bit7: movement-lock-lost abort
+//   reason: PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* / FAIL_* bitmask (low 16 bits;
+//           OPERATOR / LOCK_LOST causes are carried in flags bit6 / bit7)
 //   adcMin/adcMax: captured endpoints (RAM until SAVE)
 // -------------------------------------------------------------------------
 struct PedalCalSessionData {
@@ -238,6 +240,16 @@ struct PedalCalSessionData {
     uint16_t adcMin       = 0;
     uint16_t adcMax       = 0;
     unsigned long timestampMs = 0;
+
+    // Convenience accessors for the byte-1 flag bits (audit P5).
+    bool active()        const { return (flags & 0x01u) != 0; }
+    bool haveMin()       const { return (flags & 0x02u) != 0; }
+    bool haveMax()       const { return (flags & 0x04u) != 0; }
+    bool completed()     const { return (flags & 0x08u) != 0; }
+    bool aborted()       const { return (flags & 0x10u) != 0; }
+    bool entryOk()       const { return (flags & 0x20u) != 0; }
+    bool abortOperator() const { return (flags & 0x40u) != 0; }
+    bool abortLockLost() const { return (flags & 0x80u) != 0; }
 };
 
 // -------------------------------------------------------------------------

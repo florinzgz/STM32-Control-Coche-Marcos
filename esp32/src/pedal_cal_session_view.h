@@ -71,6 +71,36 @@ inline bool sessionActive(uint8_t state) {
     return state != 0 /*IDLE*/ && state != 9 /*COMPLETED*/ && state != 10 /*ABORTED*/;
 }
 
+// True in the phases where the operator is EXPECTED to press the pedal
+// (PRESS FULLY / CAPTURING MAX).  During these phases a pressed pedal is
+// normal, so the 0x308 "pedal not released" reject must NOT be rendered as a
+// blocked safety gate (audit P5.5): the HMI should prefer the fresh 0x319
+// session state as its primary source.
+inline bool pedalExpectedPressed(uint8_t state) {
+    return state == 4 /*WAIT_FULL_PRESS*/ || state == 5 /*CAPTURING_MAX*/;
+}
+
+// Reason text that also accounts for the byte-1 flag bits carrying the
+// extended abort causes (operator cancel / movement-lock lost) which live
+// above bit 15 in the firmware reason word.  Priority mirrors the STM32
+// PedalCalSession_ReasonText(): the safety-relevant lock-lost outranks the
+// benign operator cancel, and both sit below the hard safety aborts.
+inline constexpr uint8_t kFlagAbortOperator = 0x40u;
+inline constexpr uint8_t kFlagAbortLockLost = 0x80u;
+
+inline const char* sessionReasonTextEx(uint16_t reason, uint8_t flags) {
+    if (reason & 0x0100u)          return "EMERGENCY STOP";     // ABORT_EMERGENCY
+    if (reason & 0x0040u)          return "SAFE MODE";          // ABORT_SAFE
+    if (reason & 0x0080u)          return "CRITICAL ERROR";     // ABORT_ERROR
+    if (flags  & kFlagAbortLockLost) return "LOCK LOST";        // ABORT_LOCK_LOST
+    if (reason & 0x0200u)          return "VEHICLE MOVING";     // ABORT_MOVEMENT
+    if (reason & 0x0400u)          return "CAN LOSS";           // ABORT_CAN_LOSS
+    if (reason & 0x0800u)          return "TIMEOUT";            // ABORT_TIMEOUT
+    if (flags  & kFlagAbortOperator) return "OPERATOR CANCEL";  // ABORT_OPERATOR
+    if (reason == 0x0000u)         return "OK";
+    return sessionReasonText(reason);
+}
+
 }  // namespace pedalcal
 
 #endif  // PEDAL_CAL_SESSION_VIEW_H

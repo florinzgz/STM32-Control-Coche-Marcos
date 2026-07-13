@@ -1709,14 +1709,17 @@ static uint8_t ExtractDLC(uint32_t dlc_code) {
  *  buttons map onto Begin / (advisory) / RequestSave / Abort.
  *
  *  Persistence, apply and readback are the real flash-store + pedal
- *  pipeline hooks.  CAPTURE MAX is captured automatically only when the
- *  pedal is objectively pressed (>= PEDALCAL_FULL_PRESS_PCT); SAVE requires
- *  a final release and verifies the value read back from flash.
+ *  pipeline hooks.  CAPTURE MAX is armed by the CAPTURE MAX button
+ *  (PedalCalSession_ArmCaptureMax) and then locked purely from the RAW ADC
+ *  (8 stable samples, raw > MIN, span >= PEDAL_CAL_RANGE_MIN) — never from a
+ *  percent threshold derived from the old calibration; SAVE requires a final
+ *  release and verifies the value read back from flash.
  *
- *  While a session is active the caller (CAN_PedalCalCaptureTick) forces
- *  Traction_SetDemand(0) every tick so PWM stays at zero and the traction
- *  relay is never energised; the session self-aborts on movement, SAFE,
- *  ERROR, emergency or CAN loss.
+ *  While a session is active the caller (CAN_PedalCalCaptureTick) enforces
+ *  the real movement lock every tick (Traction_CalibrationLock: demand 0,
+ *  traction PWM 0, traction enables LOW) and requires the traction relay
+ *  OFF, so the motors physically cannot move; the session self-aborts on
+ *  movement, SAFE, ERROR, emergency, CAN loss, or loss of that lock.
  *
  *  Telemetry:
  *    0x308 : legacy pedal-cal diagnostic burst (unchanged wire format),
@@ -1810,6 +1813,13 @@ static void pedalcal_build_conds(PedalCalConds *c)
      * inhibited precondition (motion-inhibit is only populated once ACTIVE). */
     c->traction_inhibited   = (Traction_GetMotionInhibit() != 0U) ||
                               (st == SYS_STATE_STANDBY);
+    /* audit P5.4: live, read-only verification that the real movement lock is
+     * still holding — traction relay de-energised (0x… status bit1 = 0) and
+     * the resolved traction PWM at 0.  CAN_PedalCalCaptureTick actively
+     * ENFORCES the lock (Traction_CalibrationLock) before each Update; this
+     * flag lets the session abort with LOCK_LOST the instant it is lost. */
+    c->traction_locked      = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U) &&
+                              (Traction_GetFinalPwmPct() == 0U);
 }
 
 /* True when the current live entry guards would permit a session to start. */
@@ -1829,8 +1839,19 @@ static uint16_t pedalcal_reject_live_safety(void)
 {
     uint16_t bits = 0U;
     if (Safety_GetState() != SYS_STATE_STANDBY)   bits |= PEDCAL_REJECT_NOT_STANDBY;
-    if (Pedal_GetPercent() >= PEDALCAL_RELEASED_PCT)
-                                                  bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
+    /* audit P5.5: PEDAL-NOT-RELEASED is a legitimate gate ONLY while the
+     * session expects a released pedal (MIN capture / release-for-save).  In
+     * the WAIT_FULL_PRESS / CAPTURING_MAX phases the operator MUST press the
+     * pedal, so a pressed pedal there is normal — reporting it as a blocked
+     * "Safety gate" on 0x308 would be wrong. */
+    {
+        const PedalCalState pst = pedalcal_session.state;
+        const bool max_phase = (pst == PEDAL_CAL_WAIT_FULL_PRESS) ||
+                               (pst == PEDAL_CAL_CAPTURING_MAX);
+        if (!max_phase && (Pedal_GetPercent() >= PEDALCAL_RELEASED_PCT)) {
+            bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
+        }
+    }
     if (!Pedal_IsPlausible())                     bits |= PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE;
     if (Wheel_GetSpeed_FL() >= 0.3f ||
         Wheel_GetSpeed_FR() >= 0.3f ||
@@ -1945,8 +1966,11 @@ static void pedalcal_send_status(void)
 /* 0x319 PedalCalSession status (DLC 8, little-endian):
  *   byte 0    : session state (PedalCalState, CAN-stable enum)
  *   byte 1    : flags — bit0 active, bit1 have_min, bit2 have_max,
- *               bit3 completed, bit4 aborted, bit5 entry guards OK now
- *   bytes 2-3 : reason bitmask (PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* / FAIL_*)
+ *               bit3 completed, bit4 aborted, bit5 entry guards OK now,
+ *               bit6 operator-cancel abort, bit7 movement-lock-lost abort
+ *   bytes 2-3 : reason bitmask low 16 (PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* /
+ *               FAIL_*); the extended OPERATOR/LOCK_LOST causes live above
+ *               bit 15 and are surfaced via flag bits 6/7 above
  *   bytes 4-5 : captured MIN adc (u16 LE)
  *   bytes 6-7 : captured MAX adc (u16 LE)                                    */
 static void pedalcal_send_session_status(void)
@@ -1959,6 +1983,8 @@ static void pedalcal_send_session_status(void)
     if (s->state == PEDAL_CAL_COMPLETED)      flags |= 0x08U;
     if (s->state == PEDAL_CAL_ABORTED)        flags |= 0x10U;
     if (pedalcal_entry_ok())                  flags |= 0x20U;
+    if (s->reason & PEDAL_CAL_ABORT_OPERATOR)  flags |= 0x40U;
+    if (s->reason & PEDAL_CAL_ABORT_LOCK_LOST) flags |= 0x80U;
 
     uint8_t payload[8];
     payload[0] = (uint8_t)s->state;
@@ -1989,7 +2015,7 @@ void CAN_PedalCalBurstUpdate(void)
 /* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_PEDAL_CAL.
  * Buttons map onto the single PedalCalSession:
  *   0x01 CAPTURE_MIN    -> Begin the guided session
- *   0x02 CAPTURE_MAX    -> advisory (MAX auto-captures); request a burst
+ *   0x02 CAPTURE_MAX    -> arm the raw-based MAX capture; request a burst
  *   0x03 SAVE           -> RequestSave (validate + persist + apply + verify)
  *   0x04 RESET_DEFAULTS -> restore 50 / 4000 and reset the session
  *   0x05 QUERY          -> request a 1 s telemetry burst
@@ -2020,8 +2046,8 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         if (ok) {
             CAN_SendCommandAck(0x10, ACK_OK);
         } else {
-            uint16_t r = PedalCalSession_Reason(&pedalcal_session);
-            const uint16_t safety_bits =
+            uint32_t r = PedalCalSession_Reason(&pedalcal_session);
+            const uint32_t safety_bits =
                 (PEDAL_CAL_BLOCK_NOT_STANDBY | PEDAL_CAL_BLOCK_GEAR |
                  PEDAL_CAL_BLOCK_WHEELS_MOVING | PEDAL_CAL_BLOCK_TRACTION_LIVE |
                  PEDAL_CAL_BLOCK_CRITICAL_ERROR | PEDAL_CAL_BLOCK_PEDAL_IMPLAUSIBLE);
@@ -2031,7 +2057,8 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         return;
     }
 
-    case PEDAL_CAL_OP_CAPTURE_MAX:     /* advisory — MAX is captured automatically */
+    case PEDAL_CAL_OP_CAPTURE_MAX:     /* ARM the raw-based MAX capture (audit P5) */
+        PedalCalSession_ArmCaptureMax(&pedalcal_session);
         pedalcal_start_burst();
         pedalcal_send_session_status();
         CAN_SendCommandAck(0x10, ACK_OK);
@@ -2047,7 +2074,7 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         if (st == PEDAL_CAL_COMPLETED) {
             CAN_SendCommandAck(0x10, ACK_OK);
         } else if (st == PEDAL_CAL_ABORTED) {
-            uint16_t r = PedalCalSession_Reason(&pedalcal_session);
+            uint32_t r = PedalCalSession_Reason(&pedalcal_session);
             CAN_SendCommandAck(0x10, (r & PEDAL_CAL_FAIL_READBACK)
                                          ? ACK_REJECTED : ACK_INVALID);
         } else {
@@ -2058,7 +2085,9 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 
     case PEDAL_CAL_OP_ABORT:
-        PedalCalSession_Abort(&pedalcal_session, PEDAL_CAL_ABORT_EMERGENCY);
+        /* audit P5.3: the ABORT button is a normal operator cancellation, NOT
+         * an emergency — classify it as PEDAL_CAL_ABORT_OPERATOR. */
+        PedalCalSession_Abort(&pedalcal_session, PEDAL_CAL_ABORT_OPERATOR);
         pedalcal_start_burst();
         pedalcal_send_session_status();
         CAN_SendCommandAck(0x10, ACK_OK);
@@ -2091,10 +2120,12 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
 /* Productive PedalCalSession driver (audit P5).  Called from the main loop's
  * 50 ms branch immediately after Pedal_Update().  No-op while the session is
  * IDLE / terminal.  While active it:
- *   1. Forces Traction_SetDemand(0) so PWM/relay stay safe the whole session.
+ *   1. Enforces the real movement lock (Traction_CalibrationLock: demand 0,
+ *      traction PWM 0, traction enables LOW) + requires the traction relay
+ *      OFF, verified every tick, so the motors physically cannot move.
  *   2. Builds the live PedalCalConds and advances PedalCalSession_Update()
- *      (which self-captures MIN/MAX and self-aborts on movement/SAFE/ERROR/
- *      emergency/CAN loss/timeout).
+ *      (which self-captures MIN, MAX only once armed, and self-aborts on
+ *      movement/SAFE/ERROR/emergency/CAN loss/timeout/lock loss).
  *   3. Publishes 0x319 on every state change (and a 1 s 0x308+0x319 burst),
  *      otherwise rate-limited to ~100 ms.                              */
 void CAN_PedalCalCaptureTick(void)
@@ -2102,11 +2133,16 @@ void CAN_PedalCalCaptureTick(void)
     pedalcal_session_lazy_init();
     if (!PedalCalSession_Active(&pedalcal_session)) return;
 
-    /* Impose safe outputs for the WHOLE session. */
-    Traction_SetDemand(0.0f);
+    /* Enforce the REAL movement lock for the WHOLE session (audit P5.4):
+     * demand 0, traction PWM 0, traction enables LOW — verified every tick.
+     * The traction relay is also required OFF; combine both into the live
+     * traction_locked condition so any loss aborts the session (LOCK_LOST). */
+    bool en_pwm_locked = Traction_CalibrationLock();
+    bool relay_off     = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
 
     PedalCalConds c;
     pedalcal_build_conds(&c);
+    c.traction_locked = en_pwm_locked && relay_off;
     PedalCalState prev = pedalcal_session.state;
     PedalCalState st   = PedalCalSession_Update(&pedalcal_session, &c);
 
