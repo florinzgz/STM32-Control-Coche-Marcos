@@ -115,9 +115,23 @@ public:
     /// re-initialised, so no stale hash suppresses the redraw of a blank panel.
     void forceFullRedraw();
 
+    /// Audit P2.4/P2.5 — show the post-recovery diagnostic banner as an OVERLAY
+    /// managed by the ScreenManager (NOT drawn directly by the recovery code,
+    /// which would be erased by the next full redraw).  The overlay is repainted
+    /// on top of every frame for ~9 s (8–10 s window) so it survives the
+    /// forceFullRedraw() performed at the end of the recovery choreography, then
+    /// it deactivates and forces one clean full redraw to erase itself.
+    /// @param text  Pre-formatted multi-line banner (see formatRecoveryBanner).
+    /// @param nowMs Injected wall-clock time (millis()).
+    void showRecoveryBanner(const char* text, unsigned long nowMs);
+
+    /// True while the post-recovery banner overlay is being shown.
+    bool isRecoveryBannerActive() const { return recoveryBannerActive_; }
+
 private:
     Screen* screenForState(can::SystemState state);
     void    activatePinScreen();
+    void    drawRecoveryBanner();
 
     BootScreen         bootScreen_;
     StandbyScreen      standbyScreen_;
@@ -143,6 +157,12 @@ private:
 
     // Frame time monotonicity tracking (V10 contract)
     unsigned long prevFrameTimeMs_ = 0;
+
+    // Audit P2.4 — post-recovery banner overlay (managed here, redrawn on top
+    // of every frame so a full redraw underneath cannot erase it).
+    bool          recoveryBannerActive_  = false;
+    unsigned long recoveryBannerUntilMs_ = 0;
+    char          recoveryBannerText_[320] = {0};
 };
 
 #endif // SCREEN_MANAGER_H

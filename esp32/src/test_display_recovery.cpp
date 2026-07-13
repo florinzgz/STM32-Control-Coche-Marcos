@@ -78,14 +78,16 @@ static void test_sequence_order(void) {
 static void test_banner_fields(void) {
     RecoveryBannerInfo b{};
     b.cause            = Fault::RENDER_TIMEOUT;
+    b.trigger          = RecoveryTrigger::RENDER_STALLED;
     b.duration_ms      = 1234;
     b.attempts         = 2;
+    b.verify_result    = RecoveryResult::UNVERIFIED_READBACK_UNSUPPORTED;
     b.render_continued = true;
     b.esp32_rebooted   = false;
     b.free_heap        = 54321;
     b.total_recoveries = 7;
 
-    char buf[256];
+    char buf[320];
     int written = formatRecoveryBanner(buf, sizeof(buf), b);
     CHECK(written > 0);
     CHECK(written < (int)sizeof(buf));      // no truncation
@@ -93,8 +95,10 @@ static void test_banner_fields(void) {
     // All mandated fields must be present.
     CHECK(strstr(buf, "PANTALLA RECUPERADA") != nullptr);
     CHECK(strstr(buf, "causa: RENDER TIMEOUT") != nullptr);
+    CHECK(strstr(buf, "trigger: RENDER DETENIDO") != nullptr);
     CHECK(strstr(buf, "duracion: 1234 ms") != nullptr);
     CHECK(strstr(buf, "intentos: 2") != nullptr);
+    CHECK(strstr(buf, "verificacion: NO VERIFICADO (sin readback)") != nullptr);
     CHECK(strstr(buf, "render continuo: si") != nullptr);
     CHECK(strstr(buf, "reboot ESP32: no") != nullptr);
     CHECK(strstr(buf, "heap: 54321") != nullptr);
@@ -204,18 +208,44 @@ static void test_request_mailbox(void) {
     // No new requests accepted while a recovery is in flight.
     CHECK(!mb.request(RecoveryTrigger::RECOVERY_MANUAL_REQUEST));
 
-    // Core 0 reports completion; Core 1 consumes the result once.
-    mb.done(true, 4200);
-    bool ok = false; uint32_t dur = 0;
-    CHECK(mb.takeResult(ok, dur));
-    CHECK(ok == true);
+    // Core 0 reports completion; Core 1 consumes the tristate result once.
+    mb.done(RecoveryResult::VERIFIED, 4200);
+    RecoveryResult res = RecoveryResult::FAILED; uint32_t dur = 0;
+    CHECK(mb.takeResult(res, dur));
+    CHECK(res == RecoveryResult::VERIFIED);
     CHECK(dur == 4200);
-    CHECK(!mb.takeResult(ok, dur));   // consumed only once
+    CHECK(!mb.takeResult(res, dur));   // consumed only once
     CHECK(!mb.busy());
 
     // After completion, new requests are accepted again.
     CHECK(mb.request(RecoveryTrigger::RECOVERY_MANUAL_REQUEST));
     CHECK(mb.pending());
+}
+
+// Audit P2.1 — render task genuinely blocked: the request is posted but the
+// render task never take()s it (or takes it and never done()s it) within a
+// bounded timeout.  renderStalled() must arm the last-resort reboot path.
+static void test_mailbox_render_stalled(void) {
+    RecoveryRequestMailbox mb;
+    RecoveryTrigger out = RecoveryTrigger::NONE;
+
+    // Idle mailbox is never "stalled".
+    CHECK(!mb.renderStalled(/*now=*/100000, /*timeout=*/3000));
+
+    // Request posted at t=1000; render never consumes it.
+    CHECK(mb.request(RecoveryTrigger::RENDER_STALLED, /*now=*/1000));
+    CHECK(!mb.renderStalled(/*now=*/1000 + 2999, 3000));  // within timeout
+    CHECK(mb.renderStalled(/*now=*/1000 + 3000, 3000));   // pending too long
+    CHECK(mb.renderStalled(/*now=*/1000 + 9999, 3000));
+
+    // Render finally takes it at t=5000 but then hangs mid-recovery.
+    CHECK(mb.take(out, /*now=*/5000));
+    CHECK(!mb.renderStalled(/*now=*/5000 + 2999, 3000));  // busy, within timeout
+    CHECK(mb.renderStalled(/*now=*/5000 + 3000, 3000));   // busy too long -> hung
+
+    // Once done, no longer stalled.
+    mb.done(RecoveryResult::VERIFIED, 10);
+    CHECK(!mb.renderStalled(/*now=*/999999, 3000));
 }
 
 // ---- Recovery runner (audit §4 order via mocks + §6 retries/final failure) --
@@ -227,6 +257,7 @@ struct RunnerMock {
     std::vector<RecoveryStep> hw;      // order of REAL op invocations
     int  verifyCalls   = 0;
     int  verifySucceedOn = 1;          // 1 = first attempt succeeds
+    bool verifyUnverified = false;     // success is UNVERIFIED (no readback)
     bool tftInitBeforeIsolated = false;
     bool sawResetBeforeInit    = false;
     bool csHighBeforeReset     = false;
@@ -248,8 +279,16 @@ static void mcal(void*)    { g_rm->hw.push_back(RecoveryStep::RESTORE_TOUCH_CAL)
 static void mbl(void*)     { g_rm->hw.push_back(RecoveryStep::RESTORE_BACKLIGHT); }
 static void minv(void*)    { g_rm->hw.push_back(RecoveryStep::INVALIDATE_CACHES); }
 static void mredraw(void*) { g_rm->hw.push_back(RecoveryStep::FORCE_FULL_REDRAW); }
-static bool mverify(void*) { g_rm->hw.push_back(RecoveryStep::VERIFY);
-                             return (++g_rm->verifyCalls) >= g_rm->verifySucceedOn; }
+static RecoveryResult mverify(void*) {
+    g_rm->hw.push_back(RecoveryStep::VERIFY);
+    // Script: fail (FAILED) until the scheduled success attempt, then either a
+    // real VERIFIED or a terminal UNVERIFIED depending on the mock flag.
+    if ((++g_rm->verifyCalls) >= g_rm->verifySucceedOn) {
+        return g_rm->verifyUnverified ? RecoveryResult::UNVERIFIED_READBACK_UNSUPPORTED
+                                      : RecoveryResult::VERIFIED;
+    }
+    return RecoveryResult::FAILED;
+}
 static void mresume(void*) { g_rm->hw.push_back(RecoveryStep::RESUME); g_rm->resumed = true; }
 
 static RecoveryOps makeMockOps() {
@@ -271,6 +310,7 @@ static void test_runner_order_and_success(void) {
     CHECK(oc.verified == true);
     CHECK(oc.exhausted == false);
     CHECK(oc.attempts == 1);
+    CHECK(oc.result == RecoveryResult::VERIFIED);
     CHECK(rm.resumed == true);
 
     // The onStep recorder and the real op order must be identical and equal to
@@ -324,8 +364,26 @@ static void test_runner_final_failure(void) {
     CHECK(oc.verified == false);
     CHECK(oc.exhausted == true);
     CHECK(oc.attempts == 3);
+    CHECK(oc.result == RecoveryResult::FAILED);
     CHECK(rm.verifyCalls == 3);
     CHECK(rm.resumed == true);   // still resumes after exhausting retries
+}
+
+// Tristate: a first-attempt UNVERIFIED (no readback) is TERMINAL — it does not
+// retry (retrying a panel with no readback cannot change anything) and is NOT
+// counted as exhausted/failed, but it is also NOT a positive VERIFIED (audit
+// P2.3: never claim a white screen was fixed when it cannot be observed).
+static void test_runner_unverified_is_terminal(void) {
+    RunnerMock rm; g_rm = &rm; rm.verifySucceedOn = 1; rm.verifyUnverified = true;
+    RecoveryOps ops = makeMockOps();
+    RecoveryOutcome oc = runRecovery(ops, nullptr, /*maxAttempts=*/3);
+
+    CHECK(oc.result == RecoveryResult::UNVERIFIED_READBACK_UNSUPPORTED);
+    CHECK(oc.verified == false);
+    CHECK(oc.exhausted == false);
+    CHECK(oc.attempts == 1);          // did not retry
+    CHECK(rm.verifyCalls == 1);
+    CHECK(rm.resumed == true);
 }
 
 int main() {
@@ -336,9 +394,11 @@ int main() {
     test_action_per_cause();
     test_trigger_classification();
     test_request_mailbox();
+    test_mailbox_render_stalled();
     test_runner_order_and_success();
     test_runner_retry_then_success();
     test_runner_final_failure();
+    test_runner_unverified_is_terminal();
     printf("display_recovery: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }

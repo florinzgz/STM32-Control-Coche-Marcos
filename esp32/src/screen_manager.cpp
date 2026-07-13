@@ -208,8 +208,24 @@ void ScreenManager::update(const vehicle::VehicleData& data) {
         RTMON_FRAME_BEGIN();
         RTMON_RENDER_BEGIN();
         currentScreen_->draw();
+        // Audit P2.4 — repaint the recovery banner on TOP of the freshly drawn
+        // frame so a full redraw underneath never erases it.
+        if (recoveryBannerActive_) {
+            drawRecoveryBanner();
+        }
         RTMON_RENDER_END();
         RTMON_FRAME_END();
+    }
+
+    // Keep the banner overlay visible for its full window, then remove it with a
+    // single clean full redraw so no stale pixels remain.
+    if (recoveryBannerActive_) {
+        if ((long)(frameTimeMs - recoveryBannerUntilMs_) >= 0) {
+            recoveryBannerActive_ = false;
+            forceFullRedraw();
+        } else {
+            frameLimiter_.forceNextFrame();  // ensure it is redrawn each frame
+        }
     }
 }
 
@@ -322,6 +338,47 @@ void ScreenManager::forceFullRedraw() {
     // frame limiter so the repaint is not deferred.
     currentScreen_->onEnter();
     frameLimiter_.forceNextFrame();
+}
+
+void ScreenManager::showRecoveryBanner(const char* text, unsigned long nowMs) {
+    if (text == nullptr) return;
+    strncpy(recoveryBannerText_, text, sizeof(recoveryBannerText_) - 1);
+    recoveryBannerText_[sizeof(recoveryBannerText_) - 1] = '\0';
+    recoveryBannerActive_  = true;
+    recoveryBannerUntilMs_ = nowMs + 9000UL;   // 8–10 s window (centre 9 s)
+    frameLimiter_.forceNextFrame();
+    Serial.printf("[DISPLAY][RECOVERY] banner overlay armed (9 s)\n%s\n", text);
+}
+
+void ScreenManager::drawRecoveryBanner() {
+    // Semi-opaque panel across the top; multi-line text split on '\n'.
+    constexpr int kX = 4, kY = 4, kW = 472, kLineH = 15;
+    // Count lines to size the box.
+    int lines = 1;
+    for (const char* p = recoveryBannerText_; *p; ++p) {
+        if (*p == '\n') ++lines;
+    }
+    const int boxH = 8 + lines * kLineH;
+    tft.fillRect(kX, kY, kW, boxH, 0x0000);
+    tft.drawRect(kX, kY, kW, boxH, 0xFFE0);   // yellow border
+    tft.setTextColor(0xFFE0, 0x0000);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextFont(2);
+
+    int y = kY + 4;
+    char line[96];
+    const char* p = recoveryBannerText_;
+    while (*p) {
+        const char* nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        if (len >= sizeof(line)) len = sizeof(line) - 1;
+        memcpy(line, p, len);
+        line[len] = '\0';
+        tft.drawString(line, kX + 6, y);
+        y += kLineH;
+        if (!nl) break;
+        p = nl + 1;
+    }
 }
 
 Screen* ScreenManager::screenForState(can::SystemState state) {
