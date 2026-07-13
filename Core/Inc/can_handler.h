@@ -110,6 +110,22 @@ extern "C" {
                                          //             bits2-3 relay-seq phase (0 idle,1 in-progress,2 complete;
                                          //             commanded GPIO/sequencer state only, no contact feedback),
                                          //             bits4-7 degraded level (0=none,1..3)
+#define CAN_ID_DIAG_STEERING_CENTERING 0x316 // STM32 → ESP32 (1000ms) steering homing telemetry —
+                                         //   WHY the automatic centering sweep did/did not progress.
+                                         //   Instrumentation only (drives nothing).
+                                         //   Byte 0:   diag reason (SteerDiagReason_t, 0..15)
+                                         //   Byte 1:   FSM state (low nibble, CenteringState_t) |
+                                         //             motor owner (high nibble, SteeringMotorOwner_t)
+                                         //   Byte 2:   flags bit0 PB5 raw active, bit1 PB5 debounced,
+                                         //             bit2 PB5 already-active-at-sweep-start,
+                                         //             bit3 PC12 relay commanded, bit4 power ready,
+                                         //             bit5 PC4 EN_STEER commanded, bit6 encoder fault,
+                                         //             bit7 restored-from-flash
+                                         //   Byte 3:   system state (low nibble, STEER_DIAG_SS_*) |
+                                         //             bit4 module disabled | bit5 fault latched |
+                                         //             bit6 pwm requested (>0)
+                                         //   Byte 4-5: PWM real (max CCR PA6/PA7, uint16 LE)
+                                         //   Byte 6-7: encoder delta from sweep origin (int16 LE, clamped)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -405,6 +421,7 @@ void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (
 void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
 void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason diagnostic (0x313) */
 void CAN_SendMotionInhibit(void);   /* 10 Hz MOTION_INHIBIT_REASON instrumentation (0x315) */
+void CAN_SendSteeringCenteringDiag(void); /* 1 Hz steering homing telemetry (0x316) */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);

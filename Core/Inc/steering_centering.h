@@ -132,6 +132,24 @@ SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
  */
 void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center);
 
+/* ---- Homing diagnostics (Problem 1 integration) ----
+ *
+ * SteeringCentering_UpdateDiag() builds a full SteeringCenteringDiag
+ * telemetry snapshot from the LIVE hardware/FSM state, runs the pure
+ * classifier (SteeringCentering_ClassifyDiag) on it, and caches the result.
+ * It is pure instrumentation: it reads GPIO/timer/encoder state but never
+ * drives the motor, relay, PWM or FSM.  Call it once per control cycle
+ * (100 Hz) AFTER SteeringCentering_Step()/Steering_ControlLoop() so the
+ * captured PWM/CCR reflect what was actually emitted this cycle.
+ *
+ * The pointer returned by SteeringCentering_GetDiag() is stable and always
+ * valid; the struct is updated in place by SteeringCentering_UpdateDiag().
+ */
+struct SteeringCenteringDiag;   /* full definition in steering_centering_diag.h */
+
+void SteeringCentering_UpdateDiag(void);
+const struct SteeringCenteringDiag *SteeringCentering_GetDiag(void);
+
 #ifdef __cplusplus
 }
 #endif

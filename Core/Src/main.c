@@ -521,6 +521,11 @@ int main(void)
                 } else {
                     Steering_ControlLoop();
                 }
+
+                /* Capture homing telemetry AFTER the motor writer has run so
+                 * the recorded PWM/CCR reflect what was actually emitted this
+                 * cycle.  Pure instrumentation — drives nothing. */
+                SteeringCentering_UpdateDiag();
             }
             Traction_Update();
 
@@ -799,6 +804,11 @@ int main(void)
              * failing wheel and tell manual movement apart from a real fault.
              * Diagnostic only — does not gate any control or safety path.     */
             CAN_SendWheelSensorDiag();
+
+            /* Steering homing telemetry (0x316): classified reason + FSM/owner
+             * + PB5/PC12/PC4/power/PWM/encoder snapshot so the HMI can show the
+             * real cause of a stuck centering sweep.  Instrumentation only.   */
+            CAN_SendSteeringCenteringDiag();
 
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();

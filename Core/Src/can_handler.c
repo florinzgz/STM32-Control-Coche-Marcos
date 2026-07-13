@@ -27,6 +27,8 @@
 #include "battery_limits_store.h"
 #include "steering_cal_store.h"
 #include "steering_z.h"
+#include "steering_centering.h"
+#include "steering_centering_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include <math.h>
@@ -1452,7 +1454,23 @@ void CAN_SendWheelSensorDiag(void) {
 }
 
 /**
- * @brief  I2C service-mode scan report (additive, on-demand, report-only).
+ * @brief  Steering homing (centering) telemetry — 0x316 (1 Hz).
+ *
+ * Serialises the classified SteeringCenteringDiag snapshot maintained by
+ * steering_centering.c so the ESP32 can render the real cause of a stuck
+ * homing sweep ("DIRECCIÓN NO SE MUEVE") instead of a generic "Error 8".
+ * Instrumentation only — reads the cached snapshot, drives nothing.
+ */
+void CAN_SendSteeringCenteringDiag(void) {
+    const SteeringCenteringDiag *d = SteeringCentering_GetDiag();
+    uint8_t data[8] = {0};
+
+    /* Single source of truth for the 0x316 wire layout — shared with the
+     * ESP32 receiver and the host round-trip test. */
+    SteerCentering_PackFrame(d, data);
+
+    TransmitFrame(CAN_ID_DIAG_STEERING_CENTERING, data, 8);
+}
  *
  * Triggered by SERVICE_CMD 0x110 byte0 = SERVICE_ACTION_I2C_SERVICE (0xF6).
  * Runs an active I2C probe (Sensor_RunI2CServiceScan) and reports the result

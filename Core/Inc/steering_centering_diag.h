@@ -91,7 +91,7 @@ typedef enum {
  * One instance describes a single control cycle of the homing FSM.  Every
  * field is captured from real hardware / module state by the caller; the
  * classifier reads them but never writes hardware.                        */
-typedef struct {
+typedef struct SteeringCenteringDiag {
     CenteringState_t     fsm_state;             /* SteeringCentering_GetState  */
     SteeringMotorOwner_t motor_owner;           /* DecideOwner result          */
     uint8_t              system_state;          /* STEER_DIAG_SS_*             */
