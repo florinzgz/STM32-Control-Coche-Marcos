@@ -135,12 +135,96 @@ static void test_action_per_cause(void) {
     CHECK(strstr(recoveryActionText(b), "cableado") != nullptr);
 }
 
+// The trigger classification must honour the strict audit priority and must
+// NEVER promote a plain stale render (no readback, no reset latch) to a
+// confirmed white screen.
+static void test_trigger_classification(void) {
+    // Manual request wins over everything else.
+    CHECK(classifyRecoveryTrigger(true, true, StatusRead::INVALID, true)
+          == RecoveryTrigger::RECOVERY_MANUAL_REQUEST);
+    // Reset latch beats status/render.
+    CHECK(classifyRecoveryTrigger(false, true, StatusRead::INVALID, true)
+          == RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED);
+    // Invalid status beats a stale render.
+    CHECK(classifyRecoveryTrigger(false, false, StatusRead::INVALID, true)
+          == RecoveryTrigger::TFT_CONTROLLER_STATUS_LOST);
+    // Stale render with unsupported readback -> RENDER_STALLED, NOT white.
+    CHECK(classifyRecoveryTrigger(false, false, StatusRead::UNSUPPORTED, true)
+          == RecoveryTrigger::RENDER_STALLED);
+    // No observable signal at all.
+    CHECK(classifyRecoveryTrigger(false, false, StatusRead::UNSUPPORTED, false)
+          == RecoveryTrigger::WHITE_SCREEN_NOT_OBSERVABLE);
+
+    // Observability honesty: with no readback and no reset latch, white is
+    // NOT observable.
+    CHECK(whiteScreenObservable(false, false) == false);
+    CHECK(whiteScreenObservable(true, false)  == true);
+    CHECK(whiteScreenObservable(false, true)  == true);
+
+    // Fault mapping never fabricates a confirmed white.
+    CHECK(recoveryTriggerToFault(RecoveryTrigger::RENDER_STALLED) == Fault::RENDER_TIMEOUT);
+    CHECK(recoveryTriggerToFault(RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED)
+          == Fault::TFT_RESET_PROBABLE);
+    CHECK(recoveryTriggerToFault(RecoveryTrigger::RECOVERY_MANUAL_REQUEST)
+          == Fault::TFT_RESET_PROBABLE);
+
+    for (uint8_t i = 0; i <= (uint8_t)RecoveryTrigger::WHITE_SCREEN_NOT_OBSERVABLE; i++) {
+        CHECK(recoveryTriggerText((RecoveryTrigger)i) != nullptr);
+    }
+}
+
+// Cross-core handshake: Core 1 posts a request, only Core 0 can take it, no
+// stacking while busy, and the result is delivered back exactly once.
+static void test_request_mailbox(void) {
+    RecoveryRequestMailbox mb;
+    RecoveryTrigger out = RecoveryTrigger::NONE;
+
+    // Nothing pending initially.
+    CHECK(!mb.pending());
+    CHECK(!mb.busy());
+    CHECK(!mb.take(out));
+
+    // NONE is never a valid request.
+    CHECK(!mb.request(RecoveryTrigger::NONE));
+
+    // Core 1 posts a request.
+    CHECK(mb.request(RecoveryTrigger::RENDER_STALLED));
+    CHECK(mb.pending());
+    // A second request while one is pending is rejected (no stacking).
+    CHECK(!mb.request(RecoveryTrigger::TFT_CONTROLLER_STATUS_LOST));
+
+    // Core 0 takes it exactly once; now busy, nothing pending.
+    CHECK(mb.take(out));
+    CHECK(out == RecoveryTrigger::RENDER_STALLED);
+    CHECK(!mb.pending());
+    CHECK(mb.busy());
+    CHECK(!mb.take(out));
+
+    // No new requests accepted while a recovery is in flight.
+    CHECK(!mb.request(RecoveryTrigger::RECOVERY_MANUAL_REQUEST));
+
+    // Core 0 reports completion; Core 1 consumes the result once.
+    mb.done(true, 4200);
+    bool ok = false; uint32_t dur = 0;
+    CHECK(mb.takeResult(ok, dur));
+    CHECK(ok == true);
+    CHECK(dur == 4200);
+    CHECK(!mb.takeResult(ok, dur));   // consumed only once
+    CHECK(!mb.busy());
+
+    // After completion, new requests are accepted again.
+    CHECK(mb.request(RecoveryTrigger::RECOVERY_MANUAL_REQUEST));
+    CHECK(mb.pending());
+}
+
 int main() {
     test_sequence_order();
     test_banner_fields();
     test_banner_no_false_white_claim();
     test_banner_truncation();
     test_action_per_cause();
+    test_trigger_classification();
+    test_request_mailbox();
     printf("display_recovery: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }

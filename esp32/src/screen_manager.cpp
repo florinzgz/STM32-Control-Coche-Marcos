@@ -315,6 +315,15 @@ uint8_t ScreenManager::handleTankConfirmTouch(int16_t x, int16_t y) {
     return driveScreen_.handleTankConfirmTouch(x, y);
 }
 
+void ScreenManager::forceFullRedraw() {
+    // onEnter() re-runs the active screen's static layout and invalidates every
+    // tile hash / previous value, so the next draw() repaints the whole screen
+    // rather than skipping "unchanged" tiles.  forceNextFrame() defeats the
+    // frame limiter so the repaint is not deferred.
+    currentScreen_->onEnter();
+    frameLimiter_.forceNextFrame();
+}
+
 Screen* ScreenManager::screenForState(can::SystemState state) {
     switch (state) {
         case can::SystemState::BOOT:      return &bootScreen_;

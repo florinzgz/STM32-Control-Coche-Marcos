@@ -70,6 +70,130 @@ inline const char* recoveryStepText(RecoveryStep s) {
     }
 }
 
+// ---- Differentiated recovery trigger (audit §4 "PROBLEMA DE DETECCIÓN") ---
+// The supervisor must NEVER label a plain render timeout as a confirmed white
+// screen.  These five categories are transported honestly so the log/banner
+// distinguishes an automatically-observable cause from an inferred one.
+enum class RecoveryTrigger : uint8_t {
+    NONE = 0,
+    RENDER_STALLED,               // Core-1 saw the render heartbeat stop
+                                  // (reliable) — does NOT by itself prove the
+                                  // panel went white.
+    TFT_CONTROLLER_STATUS_LOST,   // status/ID readback INVALID (reliable only
+                                  // when the panel supports readback).
+    TFT_RESET_SIGNAL_DETECTED,    // GPIO38 / TFT_RST latched low unexpectedly
+                                  // (reliable only with the hardware latch).
+    RECOVERY_MANUAL_REQUEST,      // explicit bench/manual request (the panel
+                                  // went white but is not auto-observable).
+    WHITE_SCREEN_NOT_OBSERVABLE,  // no automatic signal available with the
+                                  // current hardware — white cannot be proven.
+};
+
+inline const char* recoveryTriggerText(RecoveryTrigger t) {
+    switch (t) {
+    case RecoveryTrigger::NONE:                       return "SIN SOLICITUD";
+    case RecoveryTrigger::RENDER_STALLED:             return "RENDER DETENIDO";
+    case RecoveryTrigger::TFT_CONTROLLER_STATUS_LOST: return "ESTADO TFT PERDIDO";
+    case RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED:  return "SENAL RESET TFT";
+    case RecoveryTrigger::RECOVERY_MANUAL_REQUEST:    return "SOLICITUD MANUAL";
+    case RecoveryTrigger::WHITE_SCREEN_NOT_OBSERVABLE:return "BLANCO NO OBSERVABLE";
+    default:                                          return "?";
+    }
+}
+
+// True only when the "white screen" condition can be observed automatically —
+// i.e. the panel supports status readback OR a hardware reset-signal latch
+// exists.  When both are false, a stale render is the ONLY evidence and white
+// must NOT be asserted automatically (audit §4.4).
+inline bool whiteScreenObservable(bool readback_supported,
+                                  bool reset_latch_available) {
+    return readback_supported || reset_latch_available;
+}
+
+// Pure classification of the recovery trigger from the raw observations, in the
+// strict priority order the audit mandates.  A stale render with no reliable
+// readback and no reset latch is reported as RENDER_STALLED (an honest,
+// automatically-observable fact) — never as a confirmed white screen.
+inline RecoveryTrigger classifyRecoveryTrigger(bool manual_request,
+                                               bool reset_signal_latched,
+                                               StatusRead status,
+                                               bool render_stale) {
+    if (manual_request)                    return RecoveryTrigger::RECOVERY_MANUAL_REQUEST;
+    if (reset_signal_latched)              return RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED;
+    if (status == StatusRead::INVALID)     return RecoveryTrigger::TFT_CONTROLLER_STATUS_LOST;
+    if (render_stale)                      return RecoveryTrigger::RENDER_STALLED;
+    return RecoveryTrigger::WHITE_SCREEN_NOT_OBSERVABLE;
+}
+
+// Map a trigger onto the banner Fault cause (kept consistent with the honest
+// "no auto white" policy: a manual request or a stale render maps to
+// TFT_RESET_PROBABLE / RENDER_TIMEOUT, never a fabricated confirmed white).
+inline Fault recoveryTriggerToFault(RecoveryTrigger t) {
+    switch (t) {
+    case RecoveryTrigger::RENDER_STALLED:             return Fault::RENDER_TIMEOUT;
+    case RecoveryTrigger::TFT_CONTROLLER_STATUS_LOST: return Fault::TFT_STATUS_LOST;
+    case RecoveryTrigger::TFT_RESET_SIGNAL_DETECTED:  return Fault::TFT_RESET_PROBABLE;
+    case RecoveryTrigger::RECOVERY_MANUAL_REQUEST:    return Fault::TFT_RESET_PROBABLE;
+    case RecoveryTrigger::WHITE_SCREEN_NOT_OBSERVABLE:return Fault::READBACK_UNSUPPORTED;
+    case RecoveryTrigger::NONE:
+    default:                                          return Fault::NONE;
+    }
+}
+
+// ---- Cross-core recovery request mailbox (audit §4) ----------------------
+// Core 1 (loop/supervisor) is the only producer; Core 0 (render task) is the
+// only consumer.  This is the PURE handshake state; the firmware wraps
+// request()/take()/done() in a portMUX critical section so the two cores never
+// race.  Core 1 NEVER touches TFT_eSPI — it only posts a request here.
+class RecoveryRequestMailbox {
+public:
+    // Core 1 posts a request.  Rejected (returns false) when one is already
+    // pending or a recovery is in flight, so requests never stack up.
+    bool request(RecoveryTrigger t) {
+        if (t == RecoveryTrigger::NONE) return false;
+        if (pending_ != RecoveryTrigger::NONE || busy_) return false;
+        pending_ = t;
+        return true;
+    }
+
+    // Core 0 takes the pending request (clears it and marks a recovery busy).
+    bool take(RecoveryTrigger& out) {
+        if (pending_ == RecoveryTrigger::NONE) return false;
+        out      = pending_;
+        pending_ = RecoveryTrigger::NONE;
+        busy_    = true;
+        return true;
+    }
+
+    // Core 0 reports the hardware recovery finished (verified or not).  The
+    // result is latched for Core 1 to finalise the supervisor FSM.
+    void done(bool verified_ok, uint32_t duration_ms) {
+        busy_          = false;
+        result_ready_  = true;
+        verified_ok_   = verified_ok;
+        duration_ms_   = duration_ms;
+    }
+
+    // Core 1 consumes the result exactly once.
+    bool takeResult(bool& verified_ok, uint32_t& duration_ms) {
+        if (!result_ready_) return false;
+        result_ready_ = false;
+        verified_ok   = verified_ok_;
+        duration_ms   = duration_ms_;
+        return true;
+    }
+
+    bool pending() const { return pending_ != RecoveryTrigger::NONE; }
+    bool busy()    const { return busy_; }
+
+private:
+    RecoveryTrigger pending_      = RecoveryTrigger::NONE;
+    bool            busy_         = false;
+    bool            result_ready_ = false;
+    bool            verified_ok_  = false;
+    uint32_t        duration_ms_  = 0;
+};
+
 // Number of steps in the ordered recovery sequence.
 inline constexpr uint8_t kRecoveryStepCount = 14;
 

@@ -108,6 +108,13 @@ public:
     /// Returns: 0=not consumed, 1=YES (confirmed), 2=NO (cancelled).
     uint8_t handleTankConfirmTouch(int16_t x, int16_t y);
 
+    /// Invalidate every tile hash / cached previous value on the active screen
+    /// and force a complete repaint on the next draw().  Used by the Core-0
+    /// TFT recovery choreography (audit P2, display_recovery.h step
+    /// INVALIDATE_CACHES / FORCE_FULL_REDRAW) after the panel has been
+    /// re-initialised, so no stale hash suppresses the redraw of a blank panel.
+    void forceFullRedraw();
+
 private:
     Screen* screenForState(can::SystemState state);
     void    activatePinScreen();
