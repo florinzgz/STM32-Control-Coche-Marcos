@@ -148,6 +148,13 @@ extern "C" {
                                          //   Byte 2-3: raw shunt register (int16 LE, signed two's complement)
                                          //   Byte 4-5: bus voltage mV (uint16 LE)
                                          //   Byte 6-7: sample age ms (uint16 LE, 0xFFFF = never)
+#define CAN_ID_DIAG_PEDAL_CAL_SESSION 0x319 // STM32 → ESP32 (on-demand/while active) PedalCalSession state+reason
+                                         //   Byte 0:   session state (PedalCalState 0..10)
+                                         //   Byte 1:   flags bit0 active, bit1 have_min, bit2 have_max,
+                                         //             bit3 completed, bit4 aborted, bit5 entry-guards-ok
+                                         //   Byte 2-3: reason bitmask (PEDAL_CAL_SESS_* u16 LE)
+                                         //   Byte 4-5: captured adc_min (u16 LE)
+                                         //   Byte 6-7: captured adc_max (u16 LE)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -182,16 +189,23 @@ extern "C" {
 #define I2C_SCAN_PHASE_TCA_ACK      0x03  /* TCA9548A ACKed (mux present)           */
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
- * 0x01 CAPTURE_MIN    Capture current ADC as released endpoint (pending)
- * 0x02 CAPTURE_MAX    Capture current ADC as pressed  endpoint (pending)
- * 0x03 SAVE           Validate pending pair + persist to flash + apply
+ * The productive calibration is a single guided PedalCalSession FSM
+ * (pedal_cal_session.c).  HMI buttons map onto Begin / RequestSave / Abort:
+ * 0x01 CAPTURE_MIN    BEGIN the guided session (it then captures MIN once the
+ *                     pedal is released, prompts a full press, captures MAX,
+ *                     and waits released before SAVE).
+ * 0x02 CAPTURE_MAX    Advisory only — MAX is captured automatically when the
+ *                     pedal is objectively pressed; requests a status burst.
+ * 0x03 SAVE           RequestSave: validate + persist + apply + readback-verify
  * 0x04 RESET_DEFAULTS Erase flash slot + restore 50 / 4000
- * 0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz   */
+ * 0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz
+ * 0x06 ABORT          Cancel the running session (operator abort)            */
 #define PEDAL_CAL_OP_CAPTURE_MIN    0x01U
 #define PEDAL_CAL_OP_CAPTURE_MAX    0x02U
 #define PEDAL_CAL_OP_SAVE           0x03U
 #define PEDAL_CAL_OP_RESET_DEFAULTS 0x04U
 #define PEDAL_CAL_OP_QUERY          0x05U
+#define PEDAL_CAL_OP_ABORT          0x06U
 
 /* ---- Pedal-calibration reject-reason bitmask (0x308 diagnostic frame) ---- */
 #define PEDCAL_REJECT_NOT_STANDBY            0x0001U
@@ -465,13 +479,11 @@ void CAN_UpdateFrameRate(void);     /* Call every ~1 s to compute rx FPS  */
  * has zero impact on backward-compatible nodes that ignore 0x308. */
 void CAN_PedalCalBurstUpdate(void);
 
-/* Drives the cooperative non-blocking pedalcal capture FSM (R-1).
- * Call once per 50 ms main-loop tick, immediately after Pedal_Update().
- * No-op while the FSM is idle; while a CAPTURE_MIN/MAX is in flight
- * it takes one sample per tick (8 samples total), re-validates
- * safety, enforces a hard 450 ms timeout, and emits the deferred
- * ACK on completion.  Replaces the previous blocking HAL_Delay-based
- * sampler that starved CAN heartbeat TX and Safety_CheckCANTimeout(). */
+/* Drives the guided PedalCalSession FSM (audit P5).  Call once per 50 ms
+ * main-loop tick, immediately after Pedal_Update().  It builds the live
+ * PedalCalConds from safety/sensor state, advances PedalCalSession_Update(),
+ * enforces safe outputs (Traction_SetDemand(0)) while a session is active, and
+ * publishes the 0x319 session-status frame.  No-op while the session is IDLE. */
 void CAN_PedalCalCaptureTick(void);
 
 /* Drives the on-demand 0x30D gear power-limit telemetry burst.

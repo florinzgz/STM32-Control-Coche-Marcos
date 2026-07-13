@@ -22,6 +22,7 @@
 #include "busoff_recovery.h"
 #include "sensor_map_store.h"
 #include "pedal_cal_store.h"
+#include "pedal_cal_session.h"
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
 #include "battery_limits_store.h"
@@ -1671,54 +1672,68 @@ static uint8_t ExtractDLC(uint32_t dlc_code) {
 }
 
 /* ==================================================================
- *  Pedal calibration state (0xF5 sub-protocol + 0x308 telemetry)
+ *  Pedal calibration (0xF5 sub-protocol + 0x308 / 0x319 telemetry)
  *
- *  Persistent endpoint calibration for the accelerator pedal.  All
- *  state changes live entirely in this CAN module; the underlying
- *  pedal pipeline (sensor_manager) is touched only via the public
- *  Pedal_ApplyCalibration() / Pedal_GetRawADC() helpers and the
+ *  The productive calibration is a single guided PedalCalSession FSM
+ *  (pedal_cal_session.c) — see the block comment just below.  This CAN
+ *  module owns exactly ONE session instance, populates its per-tick
+ *  condition snapshot from the live safety / sensor state, drives it,
+ *  enforces safe outputs while it runs, and transports its state on CAN.
+ *  The underlying pedal pipeline (sensor_manager) is touched only via the
+ *  public Pedal_ApplyCalibration() / Pedal_GetRawADC() helpers and the
  *  flash store (pedal_cal_store.c).
- *
- *  Safety invariants (enforced by pedalcal_safety_ok()):
- *    - Safety_GetState() == SYS_STATE_STANDBY
- *    - Pedal_GetPercent() < 3.0f  (pedal released — MIN / SAVE phases only;
- *      CAPTURE_MAX is exempt because it needs a pressed pedal, audit P5)
- *    - Pedal_IsPlausible() == true
- *    - All four wheel speeds < 0.3 km/h
- *    Calibration does NOT depend on Startup_IsInhibited() / the 400 ms boot
- *    window (audit Problem 5).
- *
- *  Stability check (CAPTURE_MIN / CAPTURE_MAX):
- *    8 samples over 400 ms (50 ms cadence — caller is the 100 Hz
- *    loop reaching the 50 ms branch).  All eight raw ADC samples
- *    must lie within PEDALCAL_STABLE_TOL counts of each other.
- *
- *  0x308 telemetry burst (DLC 8):
- *    Emitted only on demand: after a QUERY sub-opcode, 10 frames
- *    spaced 100 ms apart (1 second total), then silence.  No
- *    continuous flooding — backward-compatible for nodes that ignore
- *    0x308 entirely.
  * ================================================================== */
 
-/* ---- Stability ---- */
-#define PEDALCAL_STABLE_SAMPLES   8U
-#define PEDALCAL_STABLE_TOL       8U     /* max spread (counts) for "stable" */
-
-/* ---- 0x308 burst ---- */
+/* ---- 0x308 telemetry burst cadence ---- */
 #define PEDALCAL_BURST_FRAMES     10U    /* 10 × 100 ms = 1 s             */
 #define PEDALCAL_BURST_PERIOD_MS  100U
 
-/* ---- Pending endpoints (RAM-only until SAVE) ---- */
-static bool      pedalcal_have_min      = false;
-static bool      pedalcal_have_max      = false;
-static uint16_t  pedalcal_pending_min   = 0;
-static uint16_t  pedalcal_pending_max   = 0;
+/* ---- Pedal-percent thresholds for the guided session (audit P5) ----
+ * released   : pedal percent strictly below this counts as "released".
+ * full press : pedal percent at/above this is the OBJECTIVE "sufficiently
+ *              pressed" condition CAPTURE MAX requires — it is NOT enough to
+ *              press the CAPTURE MAX button; the pedal itself must be pressed. */
+#define PEDALCAL_RELEASED_PCT     3.0f
+#define PEDALCAL_FULL_PRESS_PCT   80.0f
+
+/* ---- 0x319 session-status cadence ---- */
+#define PEDALCAL_SESS_PERIOD_MS   100U
+
+/* ======================================================================
+ *  Single productive calibration session (audit P5)
+ *
+ *  Exactly ONE PedalCalSession instance (pedal_cal_session.c) owns the
+ *  whole accelerator calibration.  No second FSM exists — the historical
+ *  PCAL_FSM_* capture machine and the pedalcal_pending_* RAM endpoints
+ *  have been removed.  The HMI CAPTURE MIN / CAPTURE MAX / SAVE / ABORT
+ *  buttons map onto Begin / (advisory) / RequestSave / Abort.
+ *
+ *  Persistence, apply and readback are the real flash-store + pedal
+ *  pipeline hooks.  CAPTURE MAX is captured automatically only when the
+ *  pedal is objectively pressed (>= PEDALCAL_FULL_PRESS_PCT); SAVE requires
+ *  a final release and verifies the value read back from flash.
+ *
+ *  While a session is active the caller (CAN_PedalCalCaptureTick) forces
+ *  Traction_SetDemand(0) every tick so PWM stays at zero and the traction
+ *  relay is never energised; the session self-aborts on movement, SAFE,
+ *  ERROR, emergency or CAN loss.
+ *
+ *  Telemetry:
+ *    0x308 : legacy pedal-cal diagnostic burst (unchanged wire format),
+ *            now sourced from the session's captured endpoints.
+ *    0x319 : new session state + reason + endpoints (CAN_ID_DIAG_PEDAL_CAL_SESSION).
+ * ====================================================================== */
+
+static PedalCalSession pedalcal_session;
+static bool            pedalcal_session_ready = false;
 
 /* ---- 0x308 telemetry burst state ---- */
 static uint8_t   pedalcal_burst_left    = 0;
 static uint32_t  pedalcal_next_tx_ms    = 0;
 static uint8_t   pedalcal_burst_seq     = 0;
-static uint16_t  pedalcal_reject_latched = 0U;
+
+/* ---- 0x319 session-status cadence state ---- */
+static uint32_t  pedalcal_sess_next_tx_ms = 0;
 
 static void pedalcal_start_burst(void)
 {
@@ -1727,24 +1742,96 @@ static void pedalcal_start_burst(void)
     pedalcal_burst_seq  = 0U;
 }
 
-/* Audit Problem 5 — resolve the CAPTURE MIN/MAX contradiction:
- *   - The "pedal released" (< 3 %) requirement is PHASE-DEPENDENT.  It must
- *     hold for CAPTURE_MIN and for SAVE, but MUST NOT be enforced for
- *     CAPTURE_MAX, which by definition requires a fully PRESSED pedal.  The
- *     previous single gate made CAPTURE_MAX impossible to complete.
- *   - Calibration no longer depends on Startup_IsInhibited() (the transient
- *     ~400 ms boot window).  STANDBY + parked + wheels stopped + plausible is
- *     the safety basis; the startup latch is unrelated.  The
- *     PEDCAL_REJECT_STARTUP_NOT_INHIBITED bit is retained in the contract for
- *     backward compatibility but is never set anymore.
- */
-static uint16_t pedalcal_reject_live_safety_ex(bool require_released)
+/* ---- PedalCalSession hooks (real flash store + pedal pipeline) ---- */
+static bool pedalcal_hook_validate(uint16_t adc_min, uint16_t adc_max)
+{
+    return PedalCal_Validate(adc_min, adc_max);
+}
+static bool pedalcal_hook_persist(uint16_t adc_min, uint16_t adc_max)
+{
+    return PedalCal_Save(adc_min, adc_max);
+}
+static void pedalcal_hook_apply(uint16_t adc_min, uint16_t adc_max)
+{
+    Pedal_ApplyCalibration(adc_min, adc_max);
+}
+static bool pedalcal_hook_readback(uint16_t *adc_min, uint16_t *adc_max)
+{
+    if (!PedalCal_IsValid()) return false;
+    PedalCal_GetStored(adc_min, adc_max);
+    return true;
+}
+
+/* (Re)initialise the single session with fresh hooks. */
+static void pedalcal_session_configure(void)
+{
+    PedalCalSessionHooks hooks;
+    hooks.validate = pedalcal_hook_validate;
+    hooks.persist  = pedalcal_hook_persist;
+    hooks.apply    = pedalcal_hook_apply;
+    hooks.readback = pedalcal_hook_readback;
+    PedalCalSession_Init(&pedalcal_session, NULL, &hooks);
+}
+
+static void pedalcal_session_lazy_init(void)
+{
+    if (pedalcal_session_ready) return;
+    pedalcal_session_configure();
+    pedalcal_session_ready = true;
+}
+
+/* Populate the per-tick condition snapshot from live safety / sensor state. */
+static void pedalcal_build_conds(PedalCalConds *c)
+{
+    const SystemState_t  st   = Safety_GetState();
+    const GearPosition_t gear = Traction_GetGear();
+    float pct = Pedal_GetPercent();
+    if (pct < 0.0f)   pct = 0.0f;
+    if (pct > 100.0f) pct = 100.0f;
+
+    c->now_ms               = HAL_GetTick();
+    c->in_standby           = (st == SYS_STATE_STANDBY);
+    c->gear_park_or_neutral = (gear == GEAR_PARK || gear == GEAR_NEUTRAL);
+    c->wheels_moving        = (Wheel_GetSpeed_FL() >= 0.3f ||
+                               Wheel_GetSpeed_FR() >= 0.3f ||
+                               Wheel_GetSpeed_RL() >= 0.3f ||
+                               Wheel_GetSpeed_RR() >= 0.3f);
+    c->pedal_plausible      = Pedal_IsPlausible();
+    c->pedal_released       = (pct <  PEDALCAL_RELEASED_PCT);
+    c->pedal_pressed_full   = (pct >= PEDALCAL_FULL_PRESS_PCT);
+    c->pedal_raw            = Pedal_SampleRawNow();
+    c->critical_error       = (st == SYS_STATE_ERROR);
+    c->safe_state           = (st == SYS_STATE_SAFE);
+    c->emergency            = (Safety_GetError() == SAFETY_ERROR_EMERGENCY_STOP);
+    c->can_loss             = ((Safety_GetFaultFlags() & FAULT_CAN_TIMEOUT) != 0U) ||
+                              (st == SYS_STATE_LIMP_HOME);
+    /* The pedal calibration must run with traction inhibited.  During STANDBY
+     * the traction path is already de-energised, so treat STANDBY as the
+     * inhibited precondition (motion-inhibit is only populated once ACTIVE). */
+    c->traction_inhibited   = (Traction_GetMotionInhibit() != 0U) ||
+                              (st == SYS_STATE_STANDBY);
+}
+
+/* True when the current live entry guards would permit a session to start. */
+static bool pedalcal_entry_ok(void)
+{
+    PedalCalConds c;
+    pedalcal_build_conds(&c);
+    return c.in_standby && c.gear_park_or_neutral && !c.wheels_moving &&
+           c.pedal_plausible && !c.critical_error && c.traction_inhibited;
+}
+
+/* ---- 0x308 live reject-reason (PEDCAL_REJECT_* form, unchanged contract) ----
+ * These populate the 0x308 diagnostic frame's reject bitmask so the existing
+ * ESP32 0x308 view keeps working.  The SESSION's own reason (PEDAL_CAL_SESS_*)
+ * is transported separately on 0x319.                                        */
+static uint16_t pedalcal_reject_live_safety(void)
 {
     uint16_t bits = 0U;
-    if (Safety_GetState() != SYS_STATE_STANDBY) bits |= PEDCAL_REJECT_NOT_STANDBY;
-    if (require_released && Pedal_GetPercent() >= 3.0f)
-                                                bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
-    if (!Pedal_IsPlausible())                   bits |= PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE;
+    if (Safety_GetState() != SYS_STATE_STANDBY)   bits |= PEDCAL_REJECT_NOT_STANDBY;
+    if (Pedal_GetPercent() >= PEDALCAL_RELEASED_PCT)
+                                                  bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
+    if (!Pedal_IsPlausible())                     bits |= PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE;
     if (Wheel_GetSpeed_FL() >= 0.3f ||
         Wheel_GetSpeed_FR() >= 0.3f ||
         Wheel_GetSpeed_RL() >= 0.3f ||
@@ -1753,173 +1840,50 @@ static uint16_t pedalcal_reject_live_safety_ex(bool require_released)
     }
     return bits;
 }
-
-static uint16_t pedalcal_reject_live_safety(void)
-{
-    /* Default (telemetry / MIN / SAVE) view requires a released pedal. */
-    return pedalcal_reject_live_safety_ex(true);
-}
-
 static uint16_t pedalcal_reject_live_pair(void)
 {
     uint16_t bits = 0U;
-
-    if (!pedalcal_have_min || !pedalcal_have_max) {
+    if (!pedalcal_session.have_min || !pedalcal_session.have_max) {
         bits |= PEDCAL_REJECT_PENDING_INCOMPLETE;
         return bits;
     }
-
-    if (pedalcal_pending_max <= pedalcal_pending_min) {
+    const uint16_t mn = pedalcal_session.adc_min;
+    const uint16_t mx = pedalcal_session.adc_max;
+    if (mx <= mn) {
         bits |= PEDCAL_REJECT_MIN_GT_MAX;
         bits |= PEDCAL_REJECT_RANGE_INVALID;
     }
-    if ((pedalcal_pending_max > pedalcal_pending_min) &&
-        ((uint32_t)(pedalcal_pending_max - pedalcal_pending_min) < PEDAL_CAL_RANGE_MIN)) {
+    if ((mx > mn) && ((uint32_t)(mx - mn) < PEDAL_CAL_RANGE_MIN)) {
         bits |= PEDCAL_REJECT_RANGE_TOO_SMALL;
         bits |= PEDCAL_REJECT_RANGE_INVALID;
     }
-    if (pedalcal_pending_max > PEDAL_CAL_MAX_LIMIT) {
+    if (mx > PEDAL_CAL_MAX_LIMIT) {
         bits |= PEDCAL_REJECT_MAX_TOO_HIGH;
         bits |= PEDCAL_REJECT_RANGE_INVALID;
     }
-    if (!PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max)) {
+    if (!PedalCal_Validate(mn, mx)) {
         bits |= PEDCAL_REJECT_RANGE_INVALID;
     }
     return bits;
 }
-
 static uint16_t pedalcal_get_reject_reason(void)
 {
-    return (uint16_t)(pedalcal_reject_live_safety() |
-                      pedalcal_reject_live_pair()   |
-                      pedalcal_reject_latched);
+    return (uint16_t)(pedalcal_reject_live_safety() | pedalcal_reject_live_pair());
 }
-
 static inline bool pedalcal_safety_ok(void)
 {
-    return (pedalcal_reject_live_safety_ex(true) == 0U);
+    return (pedalcal_reject_live_safety() == 0U);
 }
 
-/* Phase-aware gate: CAPTURE_MAX passes with a pressed pedal. */
-static inline bool pedalcal_safety_ok_phase(bool require_released)
-{
-    return (pedalcal_reject_live_safety_ex(require_released) == 0U);
-}
-
-/* ------------------------------------------------------------------
- *  Cooperative pedalcal capture FSM (R-1 hardening)
- *
- *  Replaces the previous blocking pedalcal_sample_stable() which held
- *  the main loop for ~350 ms via HAL_Delay(50) × 7.  That blackout
- *  starved CAN heartbeat TX, Safety_CheckCANTimeout() and the IWDG
- *  refresh path; the ESP32 250 ms heartbeat watchdog could fire.
- *
- *  Design — strictly non-blocking, no new RTOS / timers / DMA:
- *    - One sample per 50 ms tick of the main loop (driven from
- *      main.c after Pedal_Update()).
- *    - 8 samples total → ~350 ms total window, identical to the
- *      original.  Sample[0] is taken synchronously when the FSM
- *      arms (in the command handler) so the elapsed time of the
- *      window is preserved exactly (7 intervals × 50 ms).
- *    - PEDALCAL_STABLE_SAMPLES and PEDALCAL_STABLE_TOL unchanged.
- *    - Same sampling primitive: Pedal_SampleRawNow() (fresh ADC,
- *      no pipeline side-effects).  Now safe because the 50 ms
- *      Pedal_Update() branch still runs between ticks.
- *
- *  ACK semantics:
- *    - Original: synchronous ACK after 350 ms blocking sample.
- *    - New     : synchronous-with-result, deferred to FSM end.
- *                Worst-case ACK latency ≈ 450 ms (hard timeout).
- *                ESP32 ACK_FEEDBACK_TIMEOUT_MS = 2000 ms — tolerates.
- *    - A second CAPTURE_MIN/MAX while busy → ACK_REJECTED immediate.
- *    - Safety gate re-validated every tick → if it fails mid-window,
- *      abort and emit ACK_BLOCKED_BY_SAFETY (matches project
- *      convention: safety-state gates use ACK_BLOCKED_BY_SAFETY).
- *    - Hard watchdog: if FSM hasn't completed within
- *      PEDALCAL_FSM_TIMEOUT_MS (450 ms) → ACK_REJECTED, reset.
- *      Protects against any future tick desynchronisation.
- * ------------------------------------------------------------------ */
-
-typedef enum {
-    PCAL_FSM_IDLE = 0,
-    PCAL_FSM_CAPTURING_MIN,
-    PCAL_FSM_CAPTURING_MAX,
-} pedalcal_fsm_state_t;
-
-/* Hard watchdog for the capture window.
- * Expected duration is ~350 ms (7 intervals × 50 ms); 450 ms gives
- * one full tick of slack against jitter in the 50 ms branch.        */
-#define PEDALCAL_FSM_TIMEOUT_MS  450U
-
-_Static_assert(PEDALCAL_STABLE_SAMPLES == 8U,
-               "FSM design assumes 8 samples (~350 ms window)");
-_Static_assert(PEDALCAL_FSM_TIMEOUT_MS >= 400U,
-               "FSM hard timeout must exceed nominal capture window");
-
-static pedalcal_fsm_state_t pedalcal_fsm_state    = PCAL_FSM_IDLE;
-static uint16_t             pedalcal_fsm_samples[PEDALCAL_STABLE_SAMPLES];
-static uint8_t              pedalcal_fsm_count    = 0U;
-static uint32_t             pedalcal_fsm_start_ms = 0U;
-
-/* Forward declaration so the command handler can arm the FSM. */
-static void pedalcal_fsm_reset(void);
-static bool pedalcal_fsm_finalize(uint16_t *out_adc);
-
-static void pedalcal_fsm_reset(void)
-{
-    pedalcal_fsm_state    = PCAL_FSM_IDLE;
-    pedalcal_fsm_count    = 0U;
-    pedalcal_fsm_start_ms = 0U;
-}
-
-/* Compute spread and mean over the 8 captured samples.
- * Returns true and writes mean into *out_adc on success; false if
- * the spread exceeds PEDALCAL_STABLE_TOL (caller maps to ACK_REJECTED).
- * Identical math to the original pedalcal_sample_stable().            */
-static bool pedalcal_fsm_finalize(uint16_t *out_adc)
-{
-    uint16_t mn = pedalcal_fsm_samples[0];
-    uint16_t mx = pedalcal_fsm_samples[0];
-    uint32_t sum = pedalcal_fsm_samples[0];
-    for (uint8_t i = 1U; i < PEDALCAL_STABLE_SAMPLES; i++) {
-        uint16_t v = pedalcal_fsm_samples[i];
-        if (v < mn) mn = v;
-        if (v > mx) mx = v;
-        sum += v;
-    }
-    if ((uint32_t)(mx - mn) > PEDALCAL_STABLE_TOL)
-        return false;
-    *out_adc = (uint16_t)((sum + (PEDALCAL_STABLE_SAMPLES / 2U))
-                          / PEDALCAL_STABLE_SAMPLES);
-    return true;
-}
-
-/* Emit one 0x308 frame.
- *
- * Layout (DLC 8, little-endian).  To fit both stored AND pending
- * endpoints in 8 bytes the STM32 alternates two frame variants
- * within the 10-frame burst (5 of each variant per burst):
- *
- *   byte 0   : flags
- *              bit 0: pending MIN captured
- *              bit 1: pending MAX captured
- *              bit 2: pending pair validates OK
- *              bit 3: stored slot valid (PedalCal_IsValid())
- *              bit 4: safety gates satisfied
- *              bit 5: pedal plausible
- *              bit 6: pair-frame selector (0 = PENDING, 1 = STORED)
- *                     ignored when bit7=1
- *              bit 7: 0 = pair frame, 1 = extended diagnostic frame
- *   pair frame (bit7=0):
- *     bytes 1-2: raw ADC live (sample 1, u16 LE)
- *     bytes 3-4: MIN (pending or stored — see bit 6) (u16 LE)
- *     bytes 5-6: MAX (pending or stored — see bit 6) (u16 LE)
- *     byte 7   : pedal percent (0..100 saturating)
- *   diag frame (bit7=1):
- *     bytes 1-2: raw ADC second sample (u16 LE)
- *     bytes 3-4: abs(raw1 - raw2) (u16 LE)
- *     bytes 5-6: reject_reason bitmask (u16 LE)
- *     byte 7   : pedal percent (0..100 saturating)                    */
+/* 0x308 pedal-cal diagnostic burst (DLC 8, little-endian).  Wire format is
+ * unchanged from the historical contract; the pending endpoints are now the
+ * session's captured MIN/MAX.  See the ESP32 decodePedalCal() for the layout:
+ *   byte 0   : flags (bit0 pending MIN, bit1 pending MAX, bit2 pair valid,
+ *              bit3 stored slot valid, bit4 safety gates satisfied,
+ *              bit5 pedal plausible, bit6 pair selector 0=PENDING/1=STORED,
+ *              bit7 0=pair frame / 1=diag frame)
+ *   pair frame : b1-2 raw ADC, b3-4 MIN, b5-6 MAX, b7 percent
+ *   diag frame : b1-2 raw ADC2, b3-4 |raw1-raw2|, b5-6 reject_reason, b7 pct */
 static void pedalcal_send_status(void)
 {
     uint8_t phase = (uint8_t)(pedalcal_burst_seq % 3U);
@@ -1929,11 +1893,15 @@ static void pedalcal_send_status(void)
     uint16_t stored_min = 0, stored_max = 0;
     PedalCal_GetStored(&stored_min, &stored_max);
 
+    const bool     have_min  = pedalcal_session.have_min;
+    const bool     have_max  = pedalcal_session.have_max;
+    const uint16_t pend_min  = pedalcal_session.adc_min;
+    const uint16_t pend_max  = pedalcal_session.adc_max;
+
     uint8_t  flags = 0;
-    if (pedalcal_have_min)  flags |= 0x01U;
-    if (pedalcal_have_max)  flags |= 0x02U;
-    if (pedalcal_have_min && pedalcal_have_max &&
-        PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max))
+    if (have_min)  flags |= 0x01U;
+    if (have_max)  flags |= 0x02U;
+    if (have_min && have_max && PedalCal_Validate(pend_min, pend_max))
         flags |= 0x04U;
     if (PedalCal_IsValid())   flags |= 0x08U;
     if (pedalcal_safety_ok()) flags |= 0x10U;
@@ -1949,8 +1917,8 @@ static void pedalcal_send_status(void)
     if (pct_f < 0.0f)   pct_f = 0.0f;
     if (pct_f > 100.0f) pct_f = 100.0f;
 
-    uint16_t mn = send_stored ? stored_min : pedalcal_pending_min;
-    uint16_t mx = send_stored ? stored_max : pedalcal_pending_max;
+    uint16_t mn = send_stored ? stored_min : pend_min;
+    uint16_t mx = send_stored ? stored_max : pend_max;
 
     uint8_t payload[8];
     payload[0] = flags;
@@ -1974,8 +1942,37 @@ static void pedalcal_send_status(void)
     (void)TransmitFrame(CAN_ID_DIAG_PEDAL_CAL, payload, sizeof(payload));
 }
 
-/* Public: drive the 0x308 burst from the 100 Hz main-loop tick.
- * Must be called whenever main.c emits its 100 ms status batch.
+/* 0x319 PedalCalSession status (DLC 8, little-endian):
+ *   byte 0    : session state (PedalCalState, CAN-stable enum)
+ *   byte 1    : flags — bit0 active, bit1 have_min, bit2 have_max,
+ *               bit3 completed, bit4 aborted, bit5 entry guards OK now
+ *   bytes 2-3 : reason bitmask (PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* / FAIL_*)
+ *   bytes 4-5 : captured MIN adc (u16 LE)
+ *   bytes 6-7 : captured MAX adc (u16 LE)                                    */
+static void pedalcal_send_session_status(void)
+{
+    const PedalCalSession *s = &pedalcal_session;
+    uint8_t flags = 0U;
+    if (PedalCalSession_Active(s))            flags |= 0x01U;
+    if (s->have_min)                          flags |= 0x02U;
+    if (s->have_max)                          flags |= 0x04U;
+    if (s->state == PEDAL_CAL_COMPLETED)      flags |= 0x08U;
+    if (s->state == PEDAL_CAL_ABORTED)        flags |= 0x10U;
+    if (pedalcal_entry_ok())                  flags |= 0x20U;
+
+    uint8_t payload[8];
+    payload[0] = (uint8_t)s->state;
+    payload[1] = flags;
+    payload[2] = (uint8_t)(s->reason & 0xFFU);
+    payload[3] = (uint8_t)((s->reason >> 8) & 0xFFU);
+    payload[4] = (uint8_t)(s->adc_min & 0xFFU);
+    payload[5] = (uint8_t)((s->adc_min >> 8) & 0xFFU);
+    payload[6] = (uint8_t)(s->adc_max & 0xFFU);
+    payload[7] = (uint8_t)((s->adc_max >> 8) & 0xFFU);
+    (void)TransmitFrame(CAN_ID_DIAG_PEDAL_CAL_SESSION, payload, sizeof(payload));
+}
+
+/* Public: drive the 0x308 + 0x319 burst from the 100 Hz main-loop tick.
  * No effect when no burst is in progress.                            */
 void CAN_PedalCalBurstUpdate(void)
 {
@@ -1983,125 +1980,107 @@ void CAN_PedalCalBurstUpdate(void)
     uint32_t now = HAL_GetTick();
     if ((int32_t)(now - pedalcal_next_tx_ms) < 0) return;
     pedalcal_send_status();
+    pedalcal_send_session_status();
     pedalcal_burst_left--;
     pedalcal_burst_seq++;
     pedalcal_next_tx_ms = now + PEDALCAL_BURST_PERIOD_MS;
 }
 
 /* Handle a SERVICE_CMD frame with byte 0 == SERVICE_ACTION_PEDAL_CAL.
- * Always replies with one CAN_SendCommandAck(0x10, ...) — DLC 3 of
- * CMD_ACK is preserved, no contract change.                          */
+ * Buttons map onto the single PedalCalSession:
+ *   0x01 CAPTURE_MIN    -> Begin the guided session
+ *   0x02 CAPTURE_MAX    -> advisory (MAX auto-captures); request a burst
+ *   0x03 SAVE           -> RequestSave (validate + persist + apply + verify)
+ *   0x04 RESET_DEFAULTS -> restore 50 / 4000 and reset the session
+ *   0x05 QUERY          -> request a 1 s telemetry burst
+ *   0x06 ABORT          -> operator abort
+ * Always replies with one CAN_SendCommandAck(0x10, ...).             */
 static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
 {
     if (len < 2) {
         CAN_SendCommandAck(0x10, ACK_INVALID);
         return;
     }
+    pedalcal_session_lazy_init();
     uint8_t op = payload[1];
 
-    /* QUERY is the only sub-opcode that does NOT need safety gates —
-     * it just requests a 1 s telemetry burst.                        */
-    if (op == PEDAL_CAL_OP_QUERY) {
-        pedalcal_start_burst();
-        CAN_SendCommandAck(0x10, ACK_OK);
-        return;
-    }
-
-    /* All other sub-opcodes require the safety gate.  CAPTURE_MAX is the
-     * one phase that legitimately runs with a PRESSED pedal, so it is
-     * exempt from the "pedal released" sub-check (audit Problem 5). */
-    const bool require_released = (op != PEDAL_CAL_OP_CAPTURE_MAX);
-    if (!pedalcal_safety_ok_phase(require_released)) {
-        pedalcal_reject_latched = pedalcal_reject_live_safety_ex(require_released);
-        pedalcal_start_burst();
-        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
-        return;
-    }
-
     switch (op) {
-    case PEDAL_CAL_OP_CAPTURE_MIN: {
-        /* R-1: non-blocking capture.  If a previous capture is still
-         * in progress we cannot start a second one without losing
-         * the in-flight samples, so reject immediately.  The previous
-         * blocking implementation could not see this condition because
-         * CAN_ProcessMessages() was held inside HAL_Delay for ~350 ms;
-         * with the FSM the contract becomes explicit.                 */
-        if (pedalcal_fsm_state != PCAL_FSM_IDLE) {
-            pedalcal_reject_latched = PEDCAL_REJECT_CAPTURE_BUSY;
-            pedalcal_start_burst();
-            CAN_SendCommandAck(0x10, ACK_REJECTED);
-            return;
-        }
-        /* Arm the FSM and capture sample[0] now, mirroring the
-         * original timing (sample[0] at t=0, then 7 ticks × 50 ms). */
-        pedalcal_fsm_state    = PCAL_FSM_CAPTURING_MIN;
-        pedalcal_fsm_samples[0] = Pedal_SampleRawNow();
-        pedalcal_fsm_count    = 1U;
-        pedalcal_fsm_start_ms = HAL_GetTick();
-        /* ACK deferred — emitted by CAN_PedalCalCaptureTick() when
-         * the 8-sample window completes (~350 ms later).             */
-        return;
-    }
-    case PEDAL_CAL_OP_CAPTURE_MAX: {
-        if (pedalcal_fsm_state != PCAL_FSM_IDLE) {
-            pedalcal_reject_latched = PEDCAL_REJECT_CAPTURE_BUSY;
-            pedalcal_start_burst();
-            CAN_SendCommandAck(0x10, ACK_REJECTED);
-            return;
-        }
-        pedalcal_fsm_state    = PCAL_FSM_CAPTURING_MAX;
-        pedalcal_fsm_samples[0] = Pedal_SampleRawNow();
-        pedalcal_fsm_count    = 1U;
-        pedalcal_fsm_start_ms = HAL_GetTick();
-        return;
-    }
-    case PEDAL_CAL_OP_SAVE: {
-        if (!pedalcal_have_min || !pedalcal_have_max) {
-            pedalcal_start_burst();
-            CAN_SendCommandAck(0x10, ACK_REJECTED);
-            return;
-        }
-        if (!PedalCal_Validate(pedalcal_pending_min, pedalcal_pending_max)) {
-            pedalcal_start_burst();
-            CAN_SendCommandAck(0x10, ACK_INVALID);
-            return;
-        }
-        if (!PedalCal_Save(pedalcal_pending_min, pedalcal_pending_max)) {
-            pedalcal_reject_latched = PEDCAL_REJECT_FLASH_ERROR;
-            pedalcal_start_burst();
-            CAN_SendCommandAck(0x10, ACK_REJECTED);
-            return;
-        }
-        /* Apply immediately so the next Pedal_Update() cycle uses the
-         * new endpoints.  Safety: rate-limit inside Pedal_Update()
-         * still bounds the percent output across the change.         */
-        Pedal_ApplyCalibration(pedalcal_pending_min, pedalcal_pending_max);
-        pedalcal_have_min = false;
-        pedalcal_have_max = false;
-        pedalcal_reject_latched = 0U;
+    case PEDAL_CAL_OP_QUERY:
         pedalcal_start_burst();
+        pedalcal_send_session_status();
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
+
+    case PEDAL_CAL_OP_CAPTURE_MIN: {   /* BEGIN the guided session */
+        PedalCalConds c;
+        pedalcal_build_conds(&c);
+        bool ok = PedalCalSession_Begin(&pedalcal_session, &c);
+        pedalcal_start_burst();
+        pedalcal_send_session_status();
+        if (ok) {
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else {
+            uint16_t r = PedalCalSession_Reason(&pedalcal_session);
+            const uint16_t safety_bits =
+                (PEDAL_CAL_BLOCK_NOT_STANDBY | PEDAL_CAL_BLOCK_GEAR |
+                 PEDAL_CAL_BLOCK_WHEELS_MOVING | PEDAL_CAL_BLOCK_TRACTION_LIVE |
+                 PEDAL_CAL_BLOCK_CRITICAL_ERROR | PEDAL_CAL_BLOCK_PEDAL_IMPLAUSIBLE);
+            CAN_SendCommandAck(0x10, (r & safety_bits) ? ACK_BLOCKED_BY_SAFETY
+                                                       : ACK_REJECTED);
+        }
+        return;
     }
-    case PEDAL_CAL_OP_RESET_DEFAULTS: {
-        /* Persist the compile-time defaults so the slot stays consistent
-         * with applied endpoints across reboots.  Defaults are sourced
-         * from pedal_cal_store.h (PEDAL_CAL_DEFAULT_MIN/MAX) to keep a
-         * single source of truth shared with sensor_manager.c.        */
+
+    case PEDAL_CAL_OP_CAPTURE_MAX:     /* advisory — MAX is captured automatically */
+        pedalcal_start_burst();
+        pedalcal_send_session_status();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+
+    case PEDAL_CAL_OP_SAVE: {
+        PedalCalConds c;
+        pedalcal_build_conds(&c);
+        PedalCalSession_RequestSave(&pedalcal_session, &c);
+        pedalcal_start_burst();
+        pedalcal_send_session_status();
+        PedalCalState st = PedalCalSession_State(&pedalcal_session);
+        if (st == PEDAL_CAL_COMPLETED) {
+            CAN_SendCommandAck(0x10, ACK_OK);
+        } else if (st == PEDAL_CAL_ABORTED) {
+            uint16_t r = PedalCalSession_Reason(&pedalcal_session);
+            CAN_SendCommandAck(0x10, (r & PEDAL_CAL_FAIL_READBACK)
+                                         ? ACK_REJECTED : ACK_INVALID);
+        } else {
+            /* Not in READY_TO_SAVE (e.g. pedal not released yet). */
+            CAN_SendCommandAck(0x10, ACK_REJECTED);
+        }
+        return;
+    }
+
+    case PEDAL_CAL_OP_ABORT:
+        PedalCalSession_Abort(&pedalcal_session, PEDAL_CAL_ABORT_EMERGENCY);
+        pedalcal_start_burst();
+        pedalcal_send_session_status();
+        CAN_SendCommandAck(0x10, ACK_OK);
+        return;
+
+    case PEDAL_CAL_OP_RESET_DEFAULTS:
+        if (Safety_GetState() != SYS_STATE_STANDBY) {
+            CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
+            return;
+        }
         if (!PedalCal_Save(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX)) {
-            pedalcal_reject_latched = PEDCAL_REJECT_FLASH_ERROR;
             pedalcal_start_burst();
             CAN_SendCommandAck(0x10, ACK_REJECTED);
             return;
         }
         Pedal_ApplyCalibration(PEDAL_CAL_DEFAULT_MIN, PEDAL_CAL_DEFAULT_MAX);
-        pedalcal_have_min = false;
-        pedalcal_have_max = false;
-        pedalcal_reject_latched = 0U;
+        pedalcal_session_configure();   /* clear any captured pending pair */
         pedalcal_start_burst();
+        pedalcal_send_session_status();
         CAN_SendCommandAck(0x10, ACK_OK);
         return;
-    }
+
     default:
         pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_INVALID);
@@ -2109,94 +2088,39 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
     }
 }
 
-/* R-1: 50 ms-cadence driver for the cooperative pedalcal capture FSM.
- *
- * Called from the main loop's 50 ms branch (main.c) immediately after
- * Pedal_Update().  This function is a no-op while the FSM is IDLE,
- * so it is safe to call unconditionally and adds zero runtime cost
- * to nodes that never request a calibration.
- *
- * Per tick (only while CAPTURING_MIN or CAPTURING_MAX):
- *   1. Re-validate pedalcal_safety_ok().  If any gate has dropped
- *      since arming → abort with ACK_BLOCKED_BY_SAFETY.
- *   2. Enforce hard timeout PEDALCAL_FSM_TIMEOUT_MS → ACK_REJECTED.
- *   3. Take one sample via Pedal_SampleRawNow() (fresh ADC; no
- *      pipeline side-effects).
- *   4. When 8 samples are collected, validate spread ≤ tolerance:
- *        - OK   → commit to pending_min / pending_max, ACK_OK.
- *        - FAIL → ACK_REJECTED.
- *      Reset FSM to IDLE either way.
- *
- * Invariants preserved:
- *   - PEDALCAL_STABLE_SAMPLES = 8.
- *   - 50 ms inter-sample cadence.
- *   - Total window ≈ 350 ms (sample[0] taken at arm, then 7 ticks).
- *   - PEDALCAL_STABLE_TOL unchanged.
- *   - One ACK per command (synchronous-with-result), DLC 3 of
- *     CMD_ACK unchanged.
- *   - CAN heartbeat TX, Safety_CheckCANTimeout(), IWDG refresh and
- *     the rest of the main loop run normally between ticks.
- */
+/* Productive PedalCalSession driver (audit P5).  Called from the main loop's
+ * 50 ms branch immediately after Pedal_Update().  No-op while the session is
+ * IDLE / terminal.  While active it:
+ *   1. Forces Traction_SetDemand(0) so PWM/relay stay safe the whole session.
+ *   2. Builds the live PedalCalConds and advances PedalCalSession_Update()
+ *      (which self-captures MIN/MAX and self-aborts on movement/SAFE/ERROR/
+ *      emergency/CAN loss/timeout).
+ *   3. Publishes 0x319 on every state change (and a 1 s 0x308+0x319 burst),
+ *      otherwise rate-limited to ~100 ms.                              */
 void CAN_PedalCalCaptureTick(void)
 {
-    if (pedalcal_fsm_state == PCAL_FSM_IDLE) return;
+    pedalcal_session_lazy_init();
+    if (!PedalCalSession_Active(&pedalcal_session)) return;
 
-    /* Re-validate safety on every tick — if any gate dropped (e.g.
-     * system left STANDBY, wheels rolling, pedal implausible) abort
-     * cleanly and report the safety-gate cause.  During CAPTURING_MAX the
-     * pedal is legitimately pressed, so the "released" sub-check is skipped
-     * for that phase only (audit Problem 5).                          */
-    const bool require_released = (pedalcal_fsm_state != PCAL_FSM_CAPTURING_MAX);
-    if (!pedalcal_safety_ok_phase(require_released)) {
-        pedalcal_fsm_reset();
-        pedalcal_reject_latched = pedalcal_reject_live_safety_ex(require_released);
-        pedalcal_start_burst();
-        CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
-        return;
-    }
+    /* Impose safe outputs for the WHOLE session. */
+    Traction_SetDemand(0.0f);
 
-    /* Hard watchdog — guards against any future desync of the 50 ms
-     * branch.  Nominal completion is ~350 ms; 450 ms gives one tick
-     * of slack while still ensuring the ACK lands well below the
-     * 2 s ACK_FEEDBACK_TIMEOUT_MS on the ESP32 UI side.            */
-    if ((uint32_t)(HAL_GetTick() - pedalcal_fsm_start_ms)
-            > PEDALCAL_FSM_TIMEOUT_MS) {
-        pedalcal_fsm_reset();
-        pedalcal_reject_latched = PEDCAL_REJECT_CAPTURE_TIMEOUT;
-        pedalcal_start_burst();
-        CAN_SendCommandAck(0x10, ACK_REJECTED);
-        return;
-    }
+    PedalCalConds c;
+    pedalcal_build_conds(&c);
+    PedalCalState prev = pedalcal_session.state;
+    PedalCalState st   = PedalCalSession_Update(&pedalcal_session, &c);
 
-    /* Take one sample this tick. */
-    if (pedalcal_fsm_count < PEDALCAL_STABLE_SAMPLES) {
-        pedalcal_fsm_samples[pedalcal_fsm_count++] = Pedal_SampleRawNow();
-    }
-
-    /* 8 samples collected → finalize and ACK. */
-    if (pedalcal_fsm_count >= PEDALCAL_STABLE_SAMPLES) {
-        uint16_t v = 0;
-        bool ok = pedalcal_fsm_finalize(&v);
-        pedalcal_fsm_state_t finished_state = pedalcal_fsm_state;
-        pedalcal_fsm_reset();
-        if (!ok) {
-            pedalcal_reject_latched = PEDCAL_REJECT_SAMPLE_UNSTABLE;
-            pedalcal_start_burst();
-            CAN_SendCommandAck(0x10, ACK_REJECTED);
-            return;
-        }
-        if (finished_state == PCAL_FSM_CAPTURING_MIN) {
-            pedalcal_pending_min = v;
-            pedalcal_have_min    = true;
-        } else { /* PCAL_FSM_CAPTURING_MAX */
-            pedalcal_pending_max = v;
-            pedalcal_have_max    = true;
-        }
-        pedalcal_reject_latched = 0U;
-        pedalcal_start_burst();
-        CAN_SendCommandAck(0x10, ACK_OK);
+    uint32_t now = HAL_GetTick();
+    if (st != prev) {
+        pedalcal_start_burst();          /* 1 s of 0x308+0x319 on any change */
+        pedalcal_send_session_status();
+        pedalcal_sess_next_tx_ms = now + PEDALCAL_SESS_PERIOD_MS;
+    } else if ((int32_t)(now - pedalcal_sess_next_tx_ms) >= 0) {
+        pedalcal_send_session_status();
+        pedalcal_sess_next_tx_ms = now + PEDALCAL_SESS_PERIOD_MS;
     }
 }
+
 
 /* ==================================================================
  *  Gear power-limit configuration (0xF7 sub-protocol + 0x30D telemetry)
