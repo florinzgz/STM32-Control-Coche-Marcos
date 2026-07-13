@@ -815,6 +815,11 @@ int main(void)
              * INVALID vs RELAY OPEN SUSPECTED.  Instrumentation only.          */
             CAN_SendRelayHealthDiag();
 
+            /* Steering INA226 (CH5) channel diagnostic (0x318): explicit
+             * MISSING vs CONFIG FAIL vs PRESENT-NO-SHUNT vs POLARITY vs STALE,
+             * with a signed shunt/current that is never zeroed.               */
+            CAN_SendIna226Ch5Diag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

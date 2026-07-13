@@ -26,6 +26,7 @@
 #include "can_ids.h"
 #include "steering_diag_view.h"
 #include "relay_health_view.h"
+#include "ina226_ch5_view.h"
 
 namespace vehicle {
 
@@ -392,6 +393,19 @@ struct RelayHealthDiagData {
 };
 
 // -------------------------------------------------------------------------
+// 0x318 DIAG_INA_CH5 — steering INA226 (CH5) channel diagnostic (Problem 4).
+// Separates a genuinely MISSING chip (no ACK) from a transport gap ("n/d" =
+// !valid, no frame ever received), and keeps a SIGNED steering current that
+// is never zeroed.  See esp32/src/ina226_ch5_view.h and
+// Core/Inc/ina226_ch5_frame.h.
+// -------------------------------------------------------------------------
+struct Ina226Ch5DiagData {
+    ina226_ch5_view::Ina226Ch5View view{};
+    bool          valid       = false;   // false => "n/d" (no CAN contract)
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -593,6 +607,7 @@ public:
     void setMotionInhibit(const MotionInhibitData& d) { motionInhibit_ = d; }
     void setSteeringCenteringDiag(const SteeringCenteringDiagData& d) { steeringCenteringDiag_ = d; }
     void setRelayHealthDiag(const RelayHealthDiagData& d) { relayHealthDiag_ = d; }
+    void setIna226Ch5Diag(const Ina226Ch5DiagData& d) { ina226Ch5Diag_ = d; }
     void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
@@ -633,6 +648,7 @@ public:
     const MotionInhibitData& motionInhibit() const { return motionInhibit_; }
     const SteeringCenteringDiagData& steeringCenteringDiag() const { return steeringCenteringDiag_; }
     const RelayHealthDiagData& relayHealthDiag() const { return relayHealthDiag_; }
+    const Ina226Ch5DiagData& ina226Ch5Diag() const { return ina226Ch5Diag_; }
     const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
@@ -669,6 +685,7 @@ private:
     MotionInhibitData   motionInhibit_;
     SteeringCenteringDiagData steeringCenteringDiag_;
     RelayHealthDiagData relayHealthDiag_;
+    Ina226Ch5DiagData   ina226Ch5Diag_;
     Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;

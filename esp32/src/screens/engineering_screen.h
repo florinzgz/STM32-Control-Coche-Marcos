@@ -468,6 +468,7 @@ private:
     unsigned long steerDiagQueryMs_   = 0;
     unsigned long scDiagLastTs_       = 0;   // last consumed 0x316 homing ts
     unsigned long relayHealthLastTs_  = 0;   // last consumed 0x317 relay-health ts
+    unsigned long ina226Ch5LastTs_    = 0;   // last consumed 0x318 CH5 diag ts
 
     // ---- DRIVE TUNING editor (DRIVE_TUNING submenu, 0xFA cmd / 0x310 tlm) ----
     // Six editable fields (accel/brake/reverse ramp, creep enable/power/delay).

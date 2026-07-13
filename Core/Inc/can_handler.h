@@ -138,6 +138,16 @@ extern "C" {
                                          //   Byte 4:   throttle % (0..100)
                                          //   Byte 5:   final PWM/traction demand % (0..100)
                                          //   Byte 6-7: current sample age ms (uint16 LE)
+#define CAN_ID_DIAG_INA_CH5       0x318 // STM32 → ESP32 (1000ms) steering INA226 (CH5) channel diagnostic.
+                                         //   Separates MISSING (no ACK) from n/d (no contract) and keeps a
+                                         //   SIGNED shunt so a reversed current is never zeroed.
+                                         //   Byte 0:   fault reason (Ina226DiagReason_t, 0..9)
+                                         //   Byte 1:   flags bit0 mux select ok, bit1 i2c ack,
+                                         //             bit2 identity ok, bit3 config ok, bit4 shunt read ok,
+                                         //             bit5 bus read ok, bit6 channel powered, bit7 stale
+                                         //   Byte 2-3: raw shunt register (int16 LE, signed two's complement)
+                                         //   Byte 4-5: bus voltage mV (uint16 LE)
+                                         //   Byte 6-7: sample age ms (uint16 LE, 0xFFFF = never)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -435,6 +445,7 @@ void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason 
 void CAN_SendMotionInhibit(void);   /* 10 Hz MOTION_INHIBIT_REASON instrumentation (0x315) */
 void CAN_SendSteeringCenteringDiag(void); /* 1 Hz steering homing telemetry (0x316) */
 void CAN_SendRelayHealthDiag(void);       /* 1 Hz relay/current-sense health (0x317) */
+void CAN_SendIna226Ch5Diag(void);         /* 1 Hz steering INA226 CH5 diagnostic (0x318) */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);

@@ -91,6 +91,7 @@ jobs:
               Core/Src/test_relay_health_diag.c \
               Core/Src/test_relay_health_frame.c \
               Core/Src/test_ina226_channel_diag.c \
+              Core/Src/test_ina226_ch5_frame.c \
               Core/Src/test_loop_diag.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
@@ -111,6 +112,7 @@ jobs:
                 Core/Src/test_relay_health_diag.c) extra="Core/Src/relay_health_diag.c" ;;
                 Core/Src/test_relay_health_frame.c) extra="Core/Src/relay_health_diag.c" ;;
                 Core/Src/test_ina226_channel_diag.c) extra="Core/Src/ina226_channel_diag.c" ;;
+                Core/Src/test_ina226_ch5_frame.c) extra="Core/Src/ina226_channel_diag.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -242,6 +244,12 @@ jobs:
               esp32/src/test_relay_health_view.cpp Core/Src/relay_health_diag.c \
               -o /tmp/test_relay_health_view
             /tmp/test_relay_health_view
+
+            echo "-- test_ina226_ch5_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include -ICore/Inc \
+              esp32/src/test_ina226_ch5_view.cpp Core/Src/ina226_channel_diag.c \
+              -o /tmp/test_ina226_ch5_view
+            /tmp/test_ina226_ch5_view
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

@@ -455,6 +455,21 @@ static void decodeRelayHealthDiag(const CanFrame& f, vehicle::VehicleData& data)
     data.setRelayHealthDiag(rh);
 }
 
+// 0x318 DIAG_INA_CH5 — steering INA226 (CH5) channel diagnostic (DLC 8).
+// Frame layout mirrors Core/Inc/ina226_ch5_frame.h; decoded by the shared pure
+// helper so the HMI and host test share one deserialiser.  The mere reception
+// of this frame (valid=true) is what distinguishes MISSING (no ACK) from the
+// "n/d" transport gap (valid stays false when no frame ever arrives).
+static void decodeIna226Ch5Diag(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::Ina226Ch5DiagData ch5;
+    if (!ina226_ch5_view::decode(f.data, f.data_length_code, ch5.view)) {
+        return;
+    }
+    ch5.valid       = true;
+    ch5.timestampMs = millis();
+    data.setIna226Ch5Diag(ch5);
+}
+
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
 static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
@@ -735,6 +750,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_MOTION_INHIBIT:  decodeMotionInhibit(frame, data);     break;
             case can::DIAG_STEERING_CENTERING: decodeSteeringCenteringDiag(frame, data); break;
             case can::DIAG_RELAY_HEALTH: decodeRelayHealthDiag(frame, data); break;
+            case can::DIAG_INA_CH5: decodeIna226Ch5Diag(frame, data); break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;

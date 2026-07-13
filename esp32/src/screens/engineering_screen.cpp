@@ -971,6 +971,14 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             changed = true;
         }
 
+        // 0x318 steering INA (CH5) diagnostic arrives at 1 Hz; repaint the page
+        // when a fresh CH5 verdict lands so the CH5 ST line stays live.
+        const auto& ch5 = data.ina226Ch5Diag();
+        if (ch5.timestampMs != ina226Ch5LastTs_) {
+            ina226Ch5LastTs_ = ch5.timestampMs;
+            changed = true;
+        }
+
         inaLiveDataChanged_ = changed;
     }
 
@@ -1784,10 +1792,27 @@ void EngineeringScreen::draw() {
         snprintf(btLineBuf, sizeof(btLineBuf), "CH4 BT: %s   %s", btABuf, btVBuf);
         tft.drawString(btLineBuf, x, y0 + 4 * lh);
 
-        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("CH5 ST: --.- A (n/d)", x, y0 + 5 * lh);
-        // CH5 steering current is not present on CAN today (0x201/0x207/0x309 only).
-        // Could be added in the future by extending 0x201 or adding a new ID.
+        // CH5 steering INA226: live 0x318 diagnostic (Problem 4).  Distinguishes
+        // a genuinely MISSING chip (no ACK) from "n/d" (no 0x318 ever received),
+        // and shows a SIGNED steering current that is never flattened to zero.
+        {
+            char ch5Buf[64];
+            const bool haveCh5 = (data_ != nullptr) && data_->ina226Ch5Diag().valid;
+            if (!haveCh5) {
+                // No 0x318 frame ever arrived => transport gap, NOT a dead chip.
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                snprintf(ch5Buf, sizeof(ch5Buf), "CH5 ST: %s",
+                         ina226_ch5_view::notAvailableText());
+            } else {
+                const auto& v = data_->ina226Ch5Diag().view;
+                const bool fault = ina226_ch5_view::isFault(v.reason);
+                tft.setTextColor(fault ? ui::COL_AMBER : ui::COL_GREEN, ui::COL_BG);
+                snprintf(ch5Buf, sizeof(ch5Buf), "CH5 ST: %s  %+.2fA",
+                         ina226_ch5_view::statusText(v.reason),
+                         ina226_ch5_view::currentAmps(v));
+            }
+            tft.drawString(ch5Buf, x, y0 + 5 * lh);
+        }
 
         const int16_t bx = 10;
         const int16_t by = y0 + 6 * lh + 4;

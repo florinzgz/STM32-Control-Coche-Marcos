@@ -602,6 +602,37 @@ inline constexpr uint8_t RELAY_DIAG_FLAG_CURRENT_STALE = 1 << 5;
 inline constexpr uint8_t RELAY_DIAG_FLAG_INA_MISSING   = 1 << 6;
 inline constexpr uint8_t RELAY_DIAG_FLAG_POLARITY_REV  = 1 << 7;
 
+// -------------------------------------------------------------------------
+// 0x318 DIAG_INA_CH5 — steering INA226 (CH5) channel diagnostic (Problem 4)
+// STM32→ESP32, DLC 8, 1000 ms.  Separates a genuinely MISSING chip (no ACK)
+// from a transport gap ("n/d" = ABSENCE of this frame), a lost config, an
+// open/bypassed shunt, or a reversed-polarity wiring fault — and carries a
+// SIGNED shunt register so a negative current is never flattened to zero.
+// Reason codes mirror Ina226DiagReason_t in Core/Inc/ina226_channel_diag.h.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_INA_CH5 = 0x318;  // STM32→ESP32, DLC 8, 1000 ms
+
+inline constexpr uint8_t INA_CH5_OK                = 0;
+inline constexpr uint8_t INA_CH5_PRESENT_NO_SHUNT  = 1;
+inline constexpr uint8_t INA_CH5_POLARITY_REVERSED = 2;
+inline constexpr uint8_t INA_CH5_STALE             = 3;
+inline constexpr uint8_t INA_CH5_MUX_SELECT_FAIL   = 4;
+inline constexpr uint8_t INA_CH5_MISSING           = 5;
+inline constexpr uint8_t INA_CH5_WRONG_ID          = 6;
+inline constexpr uint8_t INA_CH5_CONFIG_LOST       = 7;
+inline constexpr uint8_t INA_CH5_READ_FAIL         = 8;
+inline constexpr uint8_t INA_CH5_UNKNOWN           = 9;
+
+// Byte 1 flag bits (mirror INA226_CH5_FLAG_* in Core/Inc/ina226_ch5_frame.h).
+inline constexpr uint8_t INA_CH5_FLAG_MUX_OK      = 1 << 0;
+inline constexpr uint8_t INA_CH5_FLAG_I2C_ACK     = 1 << 1;
+inline constexpr uint8_t INA_CH5_FLAG_IDENTITY_OK = 1 << 2;
+inline constexpr uint8_t INA_CH5_FLAG_CONFIG_OK   = 1 << 3;
+inline constexpr uint8_t INA_CH5_FLAG_SHUNT_OK    = 1 << 4;
+inline constexpr uint8_t INA_CH5_FLAG_BUS_OK      = 1 << 5;
+inline constexpr uint8_t INA_CH5_FLAG_POWERED     = 1 << 6;
+inline constexpr uint8_t INA_CH5_FLAG_STALE       = 1 << 7;
+
 } // namespace can
 
 #endif // CAN_IDS_H

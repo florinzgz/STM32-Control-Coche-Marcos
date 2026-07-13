@@ -30,6 +30,7 @@
 #include "steering_centering.h"
 #include "steering_centering_frame.h"
 #include "relay_health_frame.h"
+#include "ina226_ch5_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include <math.h>
@@ -1490,6 +1491,28 @@ void CAN_SendRelayHealthDiag(void) {
     RelayHealth_PackFrame(d, data);
 
     TransmitFrame(CAN_ID_DIAG_RELAY_HEALTH, data, 8);
+}
+
+/**
+ * @brief  Steering-INA (CH5) channel diagnostic frame (additive, report-only).
+ *
+ * Serialises the classified Ina226ChannelDiag snapshot maintained by
+ * sensor_manager.c (Sensor_GetChannel5Diag) so the ESP32 can distinguish the
+ * real steering-INA state (MISSING / WRONG ADDRESS / CONFIG FAIL / PRESENT NO
+ * SHUNT / POLARITY REVERSED / STALE / OK) and show the signed shunt/current
+ * behind it — never flattening a reversed (negative) current to zero.  The
+ * presence of this frame is what lets the HMI separate "n/d" (no CAN contract)
+ * from a genuine MISSING (chip did not ACK).  Instrumentation only.
+ */
+void CAN_SendIna226Ch5Diag(void) {
+    const Ina226ChannelDiag *d = Sensor_GetChannel5Diag();
+    uint8_t data[8] = {0};
+
+    /* Single source of truth for the 0x318 wire layout — shared with the
+     * ESP32 receiver and the host round-trip test. */
+    Ina226Ch5_PackFrame(d, data);
+
+    TransmitFrame(CAN_ID_DIAG_INA_CH5, data, 8);
 }
 
 /**
