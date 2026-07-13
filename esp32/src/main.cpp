@@ -13,6 +13,7 @@
 
 #include <esp_system.h>
 #include <esp_idf_version.h>
+#include <Preferences.h>
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
 #include <ESP32-TWAI-CAN.hpp>
@@ -42,6 +43,8 @@
 #include "stm32_liveness.h"
 #include "twai_recovery.h"
 #include "boot_diag.h"
+#include "display_supervisor.h"
+#include "display_recovery.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -198,6 +201,122 @@ static constexpr unsigned long WELCOME_COOLDOWN_MS = 5000;  // 5 s minimum gap
 // ---- Runtime overlay state ----
 static bool     showOverlay       = true;    // overlay visible on initial screen only
 static uint32_t lastFrameStart    = 0;
+
+// ---- Render heartbeat (audit P2) ----
+// Monotonic millis() timestamp published by renderTask at the END of every
+// fully completed frame, i.e. AFTER screenManager.update(), all TFT drawing,
+// the centralized touch read, and the implicit release of the shared SPI bus.
+// Core-1 (loop) reads this to feed the DisplaySupervisor; the heartbeat only
+// advances when a frame truly finished, so a hung render/SPI transaction is
+// observable as a stalled timestamp.  volatile: written on Core 0, read on
+// Core 1 (a single aligned 32-bit word — atomic on the ESP32-S3).
+static volatile uint32_t renderHeartbeatMs = 0;
+static volatile uint32_t renderFrameCounter = 0;
+
+// ---- Core-1 → Core-0 TFT recovery request (audit P2 §4) ----
+// The white-screen fault must be recovered with EXCLUSIVE bus ownership from
+// the Core-0 render task; Core 1 must NEVER call TFT_eSPI.  Core 1 (loop /
+// supervisor) only posts a request into this mailbox, and Core 0 executes the
+// hardware choreography (display_recovery.h) and reports the result back.  The
+// pure handshake logic lives in display::RecoveryRequestMailbox (host-tested in
+// test_display_recovery.cpp); the portMUX below makes the two-core access safe.
+static display::RecoveryRequestMailbox g_recoveryMailbox;
+static portMUX_TYPE g_recoveryMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Bench/manual "the panel went white" request (audit §4.2).  Because the white
+// screen is NOT automatically observable with the current wiring (no reliable
+// readback, no reset-signal latch), an operator/bench path can explicitly
+// request a recovery.  Set from Core 1 (serial command / future HMI button).
+static volatile bool g_manualRecoveryRequest = false;
+
+// Optional latched TFT reset-signal evidence (audit §4.3).  Remains false
+// unless a real hardware latch on TFT_RST/GPIO38 is wired and sets it; the
+// firmware never fabricates this signal, so white is never asserted from it
+// unless the hardware truly observed a reset.
+static volatile bool g_tftResetSignalLatched = false;
+
+// Core-1 entry point to request a recovery.  Thread-safe; posts into the
+// mailbox only if none is pending / in flight.  Returns true if accepted.  The
+// current time is latched so Core 1 can later detect a render task that never
+// consumes the request (audit P2.1).
+static bool requestDisplayRecovery(display::RecoveryTrigger trigger) {
+    bool accepted;
+    taskENTER_CRITICAL(&g_recoveryMux);
+    accepted = g_recoveryMailbox.request(trigger, (uint32_t)millis());
+    taskEXIT_CRITICAL(&g_recoveryMux);
+    return accepted;
+}
+
+// ---- Core-1 → Core-0 post-recovery banner text mailbox (audit P2.4) ----
+// Core 1 assembles the banner (with REAL supervisor counters) and posts the
+// formatted text here; Core 0 (render task) shows it as a ScreenManager overlay
+// so a subsequent full redraw cannot erase it.
+static portMUX_TYPE g_bannerMux = portMUX_INITIALIZER_UNLOCKED;
+static char          g_bannerText[320] = {0};
+static volatile bool g_bannerReady = false;
+
+static void postRecoveryBanner(const char* text) {
+    taskENTER_CRITICAL(&g_bannerMux);
+    strncpy(g_bannerText, text, sizeof(g_bannerText) - 1);
+    g_bannerText[sizeof(g_bannerText) - 1] = '\0';
+    g_bannerReady = true;
+    taskEXIT_CRITICAL(&g_bannerMux);
+}
+
+static bool takeRecoveryBanner(char* out, size_t n) {
+    bool have = false;
+    taskENTER_CRITICAL(&g_bannerMux);
+    if (g_bannerReady) {
+        strncpy(out, g_bannerText, n - 1);
+        out[n - 1] = '\0';
+        g_bannerReady = false;
+        have = true;
+    }
+    taskEXIT_CRITICAL(&g_bannerMux);
+    return have;
+}
+
+// Audit P2 final — persisted render-blocked reboot surfaced ON THE HMI once.
+// setup() (Core 1) reads the persisted cause and, if a reboot is still pending,
+// latches it here BEFORE the render task exists.  The render task (Core 0) then
+// publishes it as a ScreenManager overlay on its first frames and clears ONLY
+// rb_pending, keeping rb_count as the historical counter.  Written once by
+// Core 1 before task creation (happens-before), then owned by Core 0.
+static volatile bool             s_rebootBannerPending = false;
+static display::RebootRecoveryInfo s_rebootBannerInfo   = {};
+
+// Clear ONLY the rb_pending flag after the banner has been published, keeping
+// rb_cause / rb_uptime / rb_count intact as the historical record so later
+// normal boots do NOT repeat the banner.
+static void clearRenderBlockedPending(void) {
+    Preferences p;
+    if (p.begin("disp_fault", /*readOnly=*/false)) {
+        p.putBool("rb_pending", false);
+        p.end();
+    }
+}
+
+// Audit P2.1 — last resort when the render task is genuinely blocked and never
+// consumes/finishes the recovery request.  Core 1 persists the cause to NVS and
+// performs a controlled ESP32 restart.  Core 1 NEVER touches the TFT/SPI here.
+static void persistRenderBlockedAndReboot(display::RecoveryTrigger trigger) {
+    Preferences p;
+    if (p.begin("disp_fault", /*readOnly=*/false)) {
+        p.putUChar("rb_cause",  (uint8_t)trigger);
+        p.putUInt ("rb_uptime", (uint32_t)millis());
+        p.putUInt ("rb_count",  p.getUInt("rb_count", 0) + 1U);
+        // audit P2 final — mark the fault pending so the NEXT boot surfaces it
+        // on the HMI (not only on the serial log) exactly once.
+        p.putBool ("rb_pending", true);
+        p.end();
+    }
+    Serial.printf("[DISPLAY][RECOVERY] RENDER BLOCKED — persisted cause '%s'; "
+                  "controlled ESP32 restart\n",
+                  display::recoveryTriggerText(trigger));
+    Serial.flush();
+    delay(50);
+    esp_restart();
+}
 
 // ---- Audio event tracking ----
 static uint8_t  lastAudioSystemState = 0;     // detect state transitions for error alert
@@ -424,6 +543,152 @@ static void sendModeCommand(uint8_t modeFlags) {
 }
 
 // ---------------------------------------------------------------------------
+// readTftStatus() — attempt an ST7796 status/ID readback (audit §4.1).
+//
+// Runs on Core 0 only (owns the SPI bus).  Reads the panel ID (RDDID 0x04) at
+// SPI_READ_FREQUENCY via TFT_eSPI.  The ST7796 wiring here is documented as
+// having unreliable MISO readback, so this is treated conservatively:
+//   - an all-zero / all-ones / clearly implausible response  -> UNSUPPORTED
+//     (we refuse to assert a controller state we cannot trust), and
+//   - a stable, plausible ID                                  -> VALID.
+// It NEVER returns INVALID from a single dubious read, so a flaky MISO can not
+// fabricate a "controller lost" event.  If a future panel proves reliable
+// readback, INVALID can be returned here to drive TFT_STATUS_LOST.
+static display::StatusRead readTftStatus() {
+    // RDDID returns 3 ID bytes (manufacturer / version / driver).  index 1..3.
+    uint8_t id1 = tft.readcommand8(0x04, 1);
+    uint8_t id2 = tft.readcommand8(0x04, 2);
+    uint8_t id3 = tft.readcommand8(0x04, 3);
+    const uint32_t id = ((uint32_t)id1 << 16) | ((uint32_t)id2 << 8) | id3;
+    // 0x000000 and 0xFFFFFF are the classic "bus floating / no MISO" patterns.
+    if (id == 0x000000UL || id == 0xFFFFFFUL) {
+        return display::StatusRead::UNSUPPORTED;
+    }
+    return display::StatusRead::VALID;
+}
+
+// ---------------------------------------------------------------------------
+// executeDisplayRecovery() — the REAL Core-0 TFT recovery choreography.
+//
+// Runs exclusively inside the render task (Core 0), which is the ONLY task that
+// touches the TFT SPI bus, so bus exclusion is inherent — no other task can
+// interleave a transaction.  Executes the exact ordered steps proven by
+// display_recovery.h / test_display_recovery.cpp.  Returns the TRISTATE result
+// (VERIFIED / UNVERIFIED_READBACK_UNSUPPORTED / FAILED); it does NOT draw the
+// banner — Core 1 assembles it with real counters and shows it as a
+// ScreenManager overlay (audit P2.3/P2.4).
+// ---------------------------------------------------------------------------
+// Recovery hardware ops (Core 0 only).  These are the REAL implementations of
+// the injected display::RecoveryOps callbacks; display::runRecovery() drives
+// them in the canonical order with the retry/final-failure policy that
+// test_display_recovery.cpp verifies with mocks.
+namespace {
+struct RecoveryCtx {
+    int  tftCs          = 10;
+    int  touchCs        = 21;
+    int  tftRst         = 38;
+    bool status_invalid = false;  // reliable readback (future) reported INVALID
+    bool observable     = false;  // whiteScreenObservable() at last verify
+};
+
+void rec_stopRenderTouch(void*) { /* we are the sole SPI owner on Core 0 */ }
+void rec_blockBus(void*)        { /* bus exclusion is inherent on Core 0 */ }
+void rec_tftCsHigh(void* v)     { auto* c = static_cast<RecoveryCtx*>(v);
+                                  pinMode(c->tftCs, OUTPUT);  digitalWrite(c->tftCs, HIGH); }
+void rec_touchCsHigh(void* v)   { auto* c = static_cast<RecoveryCtx*>(v);
+                                  pinMode(c->touchCs, OUTPUT); digitalWrite(c->touchCs, HIGH); }
+void rec_closeSpi(void*)        { tft.endWrite(); }
+void rec_pulseReset(void* v)    { auto* c = static_cast<RecoveryCtx*>(v);
+                                  pinMode(c->tftRst, OUTPUT);
+                                  digitalWrite(c->tftRst, HIGH); delay(5);
+                                  digitalWrite(c->tftRst, LOW);  delay(20);
+                                  digitalWrite(c->tftRst, HIGH); delay(150);
+                                  g_tftResetSignalLatched = false; }
+void rec_tftInit(void*)         { tft.init(); }
+void rec_setRotation(void*)     { tft.setRotation(1); }
+void rec_restoreTouchCal(void*) { uint16_t calData[5] = TOUCH_CALIBRATION;
+                                  (void)touch_calibration::loadValid(calData);
+                                  tft.setTouch(calData); }
+void rec_restoreBacklight(void*){ const auto& cfg = config_store::get();
+                                  display_backlight::apply(cfg.brightness); }
+void rec_invalidateCaches(void*){ tft.fillScreen(0x2104); }
+void rec_forceFullRedraw(void*) { screenManager.forceFullRedraw(); }
+display::RecoveryResult rec_verify(void* v)  { auto* c = static_cast<RecoveryCtx*>(v);
+                                  const display::StatusRead st = readTftStatus();
+                                  c->status_invalid = (st == display::StatusRead::INVALID);
+                                  c->observable = display::whiteScreenObservable(
+                                      st != display::StatusRead::UNSUPPORTED,
+                                      /*reset_latch_available=*/false);
+                                  // Tristate (audit P2.3): a reliable INVALID is a
+                                  // real FAILED; a genuine VALID readback is VERIFIED;
+                                  // with no readback support we CANNOT claim success,
+                                  // so the honest result is UNVERIFIED (never a
+                                  // fabricated "pantalla blanca confirmada").
+                                  if (st == display::StatusRead::INVALID)
+                                      return display::RecoveryResult::FAILED;
+                                  if (st == display::StatusRead::VALID)
+                                      return display::RecoveryResult::VERIFIED;
+                                  return display::RecoveryResult::UNVERIFIED_READBACK_UNSUPPORTED; }
+void rec_resumeRenderTouch(void*) { /* control returns to render loop */ }
+}  // namespace
+
+// Runs the choreography and returns the tristate verification result plus the
+// measured duration.  It does NOT draw the banner directly (audit P2.4): the
+// banner is assembled on Core 1 with the real supervisor counters and shown as
+// a ScreenManager overlay so the next full redraw cannot erase it.
+static display::RecoveryResult executeDisplayRecovery(display::RecoveryTrigger trigger,
+                                                      uint32_t& duration_ms_out,
+                                                      uint8_t&  attempts_out) {
+    const uint32_t t0 = millis();
+    Serial.printf("[DISPLAY][RECOVERY] start — trigger: %s\n",
+                  display::recoveryTriggerText(trigger));
+
+    RecoveryCtx ctx;
+#if defined(TFT_CS)
+    ctx.tftCs = TFT_CS;
+#endif
+#if defined(TOUCH_CS)
+    ctx.touchCs = TOUCH_CS;
+#endif
+#if defined(TFT_RST)
+    ctx.tftRst = TFT_RST;
+#endif
+
+    display::RecoveryOps ops{};
+    ops.stopRenderTouch   = rec_stopRenderTouch;
+    ops.blockBus          = rec_blockBus;
+    ops.tftCsHigh         = rec_tftCsHigh;
+    ops.touchCsHigh       = rec_touchCsHigh;
+    ops.closeSpi          = rec_closeSpi;
+    ops.pulseReset        = rec_pulseReset;
+    ops.tftInit           = rec_tftInit;
+    ops.setRotation       = rec_setRotation;
+    ops.restoreTouchCal   = rec_restoreTouchCal;
+    ops.restoreBacklight  = rec_restoreBacklight;
+    ops.invalidateCaches  = rec_invalidateCaches;
+    ops.forceFullRedraw   = rec_forceFullRedraw;
+    ops.verify            = rec_verify;
+    ops.resumeRenderTouch = rec_resumeRenderTouch;
+    ops.onStep            = nullptr;
+
+    // Up to 3 reset→init→redraw→verify cycles.  With UNSUPPORTED readback the
+    // first verify() returns the terminal UNVERIFIED result (1 attempt); a
+    // future reliable readback that keeps reporting INVALID drives the honest
+    // "reintentos y fallo final" path.
+    const display::RecoveryOutcome oc = display::runRecovery(ops, &ctx, /*maxAttempts=*/3);
+
+    duration_ms_out = millis() - t0;
+    attempts_out    = oc.attempts;
+    Serial.printf("[DISPLAY][RECOVERY] done — %s | resultado=%s | intentos=%u | %lu ms\n",
+                  ctx.observable ? "observable" : "no observable",
+                  display::recoveryResultText(oc.result),
+                  (unsigned)oc.attempts,
+                  (unsigned long)duration_ms_out);
+
+    return oc.result;
+}
+
+// ---------------------------------------------------------------------------
 // renderTask() — FreeRTOS task pinned to Core 0
 //
 // Handles all TFT display and touch operations, keeping the main loop()
@@ -452,6 +717,59 @@ static void renderTask(void* /*param*/) {
     bool firstBootCheckPending = !touch_calibration::firstBootDone();
 
     for (;;) {
+        // 0. Core-1 recovery request check (audit P2 §4).  Runs BEFORE any
+        // rendering so the choreography owns the SPI bus exclusively this
+        // iteration.  Only Core 0 ever touches the TFT, so taking the request
+        // here guarantees no interleaved transaction.
+        {
+            display::RecoveryTrigger trig = display::RecoveryTrigger::NONE;
+            bool have = false;
+            const uint32_t tnow = millis();
+            taskENTER_CRITICAL(&g_recoveryMux);
+            have = g_recoveryMailbox.take(trig, tnow);
+            taskEXIT_CRITICAL(&g_recoveryMux);
+            if (have) {
+                uint32_t dur = 0; uint8_t attempts = 0;
+                const display::RecoveryResult res =
+                    executeDisplayRecovery(trig, dur, attempts);
+                taskENTER_CRITICAL(&g_recoveryMux);
+                g_recoveryMailbox.done(res, dur);
+                taskEXIT_CRITICAL(&g_recoveryMux);
+                // Publish a fresh heartbeat so the supervisor sees the render
+                // path alive again immediately after recovery.
+                renderFrameCounter = renderFrameCounter + 1;
+                renderHeartbeatMs  = millis();
+                vTaskDelay(1);
+                continue;
+            }
+        }
+
+        // 0b. Consume a post-recovery banner posted by Core 1 (audit P2.4) and
+        // show it as a ScreenManager overlay (redrawn on top of every frame for
+        // ~9 s, surviving the recovery's full redraw).  Only Core 0 touches the
+        // TFT, so drawing here is safe.
+        {
+            char banner[320];
+            if (takeRecoveryBanner(banner, sizeof(banner))) {
+                screenManager.showRecoveryBanner(banner, millis());
+            }
+        }
+
+        // 0c. Surface a persisted render-blocked reboot on the HMI (audit P2
+        // final).  setup() latched the persisted cause here (Core 1) before
+        // this task existed; publish it once as a ScreenManager overlay now
+        // that the render path/ScreenManager are alive, then clear ONLY
+        // rb_pending (keeping rb_count as the historical counter) so later
+        // normal boots do not repeat the banner.
+        if (s_rebootBannerPending) {
+            char banner[320];
+            display::formatRebootRecoveryBanner(banner, sizeof(banner),
+                                                s_rebootBannerInfo);
+            screenManager.showRecoveryBanner(banner, millis());
+            s_rebootBannerPending = false;
+            clearRenderBlockedPending();
+        }
+
         // 1. Copy latest vehicle data from main loop
         if (xSemaphoreTake(vdMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             localVD = renderVD;
@@ -555,6 +873,14 @@ static void renderTask(void* /*param*/) {
 #endif
         }
 
+        // 5. Publish render heartbeat (audit P2).  Reaching this point means
+        // the whole frame completed: screenManager.update(), TFT drawing, the
+        // touch read and the implicit SPI transaction release all finished
+        // without blocking.  A stalled timestamp therefore signals a hung
+        // render/SPI path to the Core-1 supervisor.
+        renderFrameCounter = renderFrameCounter + 1;
+        renderHeartbeatMs  = millis();
+
         vTaskDelay(1);  // yield to other Core 0 tasks (WiFi, BT, etc.)
     }
 }
@@ -654,6 +980,37 @@ void setup() {
 
     // Initialize NVS config store
     config_store::init();
+
+    // Audit P2.1 — if the previous session ended with a controlled restart due
+    // to a genuinely blocked render task, surface the persisted cause on boot
+    // so the fault is not silently lost.
+    {
+        Preferences p;
+        if (p.begin("disp_fault", /*readOnly=*/true)) {
+            const uint32_t rbCount = p.getUInt("rb_count", 0);
+            if (rbCount > 0) {
+                const uint8_t  cause  = p.getUChar("rb_cause", 0);
+                const uint32_t uptime = p.getUInt("rb_uptime", 0);
+                const bool     pending = p.getBool("rb_pending", false);
+                Serial.printf("[BOOT][DISPLAY] previous render-blocked restart — "
+                              "cause=%s, at %lu ms uptime, total=%lu, pending=%s\n",
+                              display::recoveryTriggerText(
+                                  (display::RecoveryTrigger)cause),
+                              (unsigned long)uptime, (unsigned long)rbCount,
+                              pending ? "si" : "no");
+                // audit P2 final — latch the banner for the render task to show
+                // once (only when still pending).  We do NOT draw here: the TFT
+                // and ScreenManager are not initialised yet at this point.
+                if (display::shouldShowRebootBanner(pending, rbCount)) {
+                    s_rebootBannerInfo.trigger   = (display::RecoveryTrigger)cause;
+                    s_rebootBannerInfo.uptime_ms = uptime;
+                    s_rebootBannerInfo.count     = rbCount;
+                    s_rebootBannerPending        = true;
+                }
+            }
+            p.end();
+        }
+    }
 
     // Initialize persistent touch-calibration NVS namespace.  Must be done
     // BEFORE tft.setTouch() so the loaded calibration (if valid) takes
@@ -866,6 +1223,168 @@ void loop() {
                                   : 0;
             Serial.printf("[STACK] loop_hwm=%u render_hwm=%u\n",
                           (unsigned)loopHwm, (unsigned)renderHwm);
+        }
+    }
+
+    // ---- Bench/manual TFT recovery request (audit P2 §4.2) ----
+    // The white screen is NOT automatically observable with the current wiring
+    // (no reliable readback, no reset-signal latch), so an operator on the
+    // bench can explicitly request a recovery by sending 'R' (or 'r') over the
+    // USB serial console.  This sets a flag consumed by the supervisor block
+    // below, which forces a confirmed loss and drives the Core-0 choreography.
+    while (Serial.available() > 0) {
+        int c = Serial.read();
+        if (c == 'R' || c == 'r') {
+            g_manualRecoveryRequest = true;
+            Serial.println("[DISPLAY][RECOVERY] manual/bench request received");
+        }
+    }
+
+    // ---- Display supervisor + recovery orchestration (audit P2) ----
+    // Core-1 does DETECTION only and, when a recovery is warranted, REQUESTS it
+    // from the Core-0 render task (which owns the SPI bus).  Core 1 NEVER calls
+    // TFT_eSPI.  Readback is reported as UNSUPPORTED here because the ST7796
+    // panel cannot be read back reliably with the current wiring, so a stalled
+    // render heartbeat is honestly classified as RENDER_STALLED (an observable
+    // fact) — never asserted as "pantalla blanca confirmada".  A bench/manual
+    // request (g_manualRecoveryRequest) exists precisely because the white
+    // screen is NOT automatically observable with this hardware.
+    {
+        static display::Supervisor s_dispSup;
+        static uint32_t s_lastDispEvalMs = 0;
+        static display::State s_lastDispState = display::State::OK;
+        static bool s_recoveryPosted = false;
+        static display::RecoveryTrigger s_lastTrigger = display::RecoveryTrigger::NONE;
+        const uint32_t kRenderStaleMs = 500;  // mirrors Config::render_stale_ms
+        // Bounded wait for the render task to consume+finish a recovery request
+        // before we treat it as genuinely blocked (audit P2.1).
+        const uint32_t kRenderBlockedMs = 3000;
+
+        // First, finalise any recovery the render task has already completed so
+        // the supervisor's counters / backoff stay consistent.
+        {
+            display::RecoveryResult res = display::RecoveryResult::FAILED;
+            uint32_t dur = 0;
+            bool haveResult;
+            taskENTER_CRITICAL(&g_recoveryMux);
+            haveResult = g_recoveryMailbox.takeResult(res, dur);
+            taskEXIT_CRITICAL(&g_recoveryMux);
+            if (haveResult) {
+                // VERIFIED and UNVERIFIED both map to a non-failed completion:
+                // the choreography ran; only a reliable INVALID readback is a
+                // real FAILED (audit P2.3 tristate).
+                const bool ok = (res != display::RecoveryResult::FAILED);
+                const uint8_t attemptsDone = s_dispSup.attempts();
+                // Walk the pure FSM through its hardware stages, then complete.
+                s_dispSup.advanceRecovery((uint32_t)now);   // -> RESETTING
+                s_dispSup.advanceRecovery((uint32_t)now);   // -> REINITIALIZING
+                s_dispSup.advanceRecovery((uint32_t)now);   // -> REDRAWING
+                s_dispSup.completeRecovery((uint32_t)now, ok);
+                s_recoveryPosted = false;
+
+                // Assemble the banner with the REAL supervisor counters (audit
+                // P2.4/P2.5 — no hardcoded total_recoveries / render_continued)
+                // and post it to Core 0 to be shown as a managed overlay.
+                display::RecoveryBannerInfo info{};
+                info.cause            = display::recoveryTriggerToFault(s_lastTrigger);
+                info.trigger          = s_lastTrigger;
+                info.duration_ms      = dur;
+                info.attempts         = attemptsDone;
+                info.verify_result    = res;
+                info.render_continued = true;   // render consumed+finished (no reboot)
+                info.esp32_rebooted   = false;
+                info.free_heap        = (uint32_t)ESP.getFreeHeap();
+                info.total_recoveries = s_dispSup.recoveryCount();
+                char banner[320];
+                display::formatRecoveryBanner(banner, sizeof(banner), info);
+                postRecoveryBanner(banner);
+
+                Serial.printf("[DISPLAY][RECOVERY] finalised — %s (%lu ms) | "
+                              "estado=%s recuperaciones=%lu fallidas=%lu\n",
+                              display::recoveryResultText(res), (unsigned long)dur,
+                              display::stateText(s_dispSup.state()),
+                              (unsigned long)s_dispSup.recoveryCount(),
+                              (unsigned long)s_dispSup.recoveryFailCount());
+            }
+        }
+
+        // Audit P2.1 — if a recovery was posted but the render task never
+        // consumed/finished it within the bounded window, the render path is
+        // genuinely blocked.  Persist the cause and perform a controlled ESP32
+        // restart as a last resort.  Core 1 must NOT touch the TFT/SPI here.
+        if (s_recoveryPosted) {
+            bool stalled;
+            taskENTER_CRITICAL(&g_recoveryMux);
+            stalled = g_recoveryMailbox.renderStalled((uint32_t)now, kRenderBlockedMs);
+            taskEXIT_CRITICAL(&g_recoveryMux);
+            if (stalled) {
+                persistRenderBlockedAndReboot(s_lastTrigger);  // does not return
+            }
+        }
+
+        if ((now - s_lastDispEvalMs) >= 100UL) {
+            s_lastDispEvalMs = now;
+
+            const bool manual = g_manualRecoveryRequest;
+            const bool reset_latched = g_tftResetSignalLatched;
+
+            // A manual/bench request forces a confirmed loss so the FSM opens a
+            // recovery attempt (the white screen is otherwise not observable).
+            if (manual && !s_dispSup.recovering() &&
+                s_dispSup.state() != display::State::RECOVERY_FAILED) {
+                s_dispSup.forceFault(
+                    (uint32_t)now,
+                    display::recoveryTriggerToFault(
+                        display::RecoveryTrigger::RECOVERY_MANUAL_REQUEST));
+            }
+            g_manualRecoveryRequest = false;
+
+            display::State st = s_dispSup.update(
+                (uint32_t)now,
+                (uint32_t)renderHeartbeatMs,
+                display::StatusRead::UNSUPPORTED,
+                (uint32_t)ESP.getFreeHeap());
+
+            // When the FSM asks for a recovery, classify the trigger honestly
+            // and post the request to Core 0 (once per attempt).
+            if (st == display::State::RECOVERY_REQUESTED && !s_recoveryPosted) {
+                const bool render_stale =
+                    (uint32_t)(now - renderHeartbeatMs) >= kRenderStaleMs;
+                display::RecoveryTrigger trig = display::classifyRecoveryTrigger(
+                    manual, reset_latched,
+                    display::StatusRead::UNSUPPORTED, render_stale);
+                if (requestDisplayRecovery(trig)) {
+                    s_recoveryPosted = true;
+                    s_lastTrigger    = trig;
+                    Serial.printf("[DISPLAY][RECOVERY] requested from Core 1 — "
+                                  "trigger: %s | observable=%s\n",
+                                  display::recoveryTriggerText(trig),
+                                  display::whiteScreenObservable(false, reset_latched)
+                                      ? "si" : "no");
+                }
+            }
+
+            if (st != s_lastDispState) {
+                if (st == display::State::CONFIRMED_LOST) {
+                    display::Fault f = s_dispSup.lastFault();
+                    display::RecoveryBannerInfo info{};
+                    info.cause            = f;
+                    info.duration_ms      = 0;
+                    info.attempts         = s_dispSup.attempts();
+                    info.render_continued = false;
+                    info.esp32_rebooted   = false;
+                    info.free_heap        = (uint32_t)ESP.getFreeHeap();
+                    info.total_recoveries = s_dispSup.recoveryCount();
+                    Serial.printf("[DISPLAY] fault suspected: %s | %s\n",
+                                  display::faultText(f),
+                                  display::recoveryActionText(info));
+                } else if (st == display::State::RECOVERY_FAILED) {
+                    Serial.printf("[DISPLAY][RECOVERY] FAILED after %u attempts — "
+                                  "manual intervention required\n",
+                                  (unsigned)s_dispSup.attempts());
+                }
+                s_lastDispState = st;
+            }
         }
     }
 

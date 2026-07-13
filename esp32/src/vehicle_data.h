@@ -24,6 +24,9 @@
 #include <cstdint>
 #include <array>
 #include "can_ids.h"
+#include "steering_diag_view.h"
+#include "relay_health_view.h"
+#include "ina226_ch5_view.h"
 
 namespace vehicle {
 
@@ -218,6 +221,38 @@ struct PedalCalData {
 };
 
 // -------------------------------------------------------------------------
+// Pedal calibration SESSION status (0x319) — guided PedalCalSession FSM
+// state published by the STM32 (audit P5).  Emitted on every state change
+// and, while a session is active, at ~10 Hz.  Layout mirrors
+// can_handler.c pedalcal_send_session_status():
+//   state:  PedalCalState enum (0 IDLE .. 10 ABORTED)
+//   flags bit0: session active   bit1: MIN captured   bit2: MAX captured
+//         bit3: completed         bit4: aborted        bit5: entry guards OK now
+//         bit6: operator-cancel abort   bit7: movement-lock-lost abort
+//   reason: PEDAL_CAL_SESS_* / BLOCK_* / ABORT_* / FAIL_* bitmask (low 16 bits;
+//           OPERATOR / LOCK_LOST causes are carried in flags bit6 / bit7)
+//   adcMin/adcMax: captured endpoints (RAM until SAVE)
+// -------------------------------------------------------------------------
+struct PedalCalSessionData {
+    uint8_t  state        = 0;
+    uint8_t  flags        = 0;
+    uint16_t reason       = 0;
+    uint16_t adcMin       = 0;
+    uint16_t adcMax       = 0;
+    unsigned long timestampMs = 0;
+
+    // Convenience accessors for the byte-1 flag bits (audit P5).
+    bool active()        const { return (flags & 0x01u) != 0; }
+    bool haveMin()       const { return (flags & 0x02u) != 0; }
+    bool haveMax()       const { return (flags & 0x04u) != 0; }
+    bool completed()     const { return (flags & 0x08u) != 0; }
+    bool aborted()       const { return (flags & 0x10u) != 0; }
+    bool entryOk()       const { return (flags & 0x20u) != 0; }
+    bool abortOperator() const { return (flags & 0x40u) != 0; }
+    bool abortLockLost() const { return (flags & 0x80u) != 0; }
+};
+
+// -------------------------------------------------------------------------
 // Gear power-limit telemetry (0x30D) — on-demand (10 Hz × 1 s after QUERY)
 // Active = limits currently applied by the STM32 motor controller.
 // Pending = unsaved edit staged on the STM32 (mirrors the UI edit state).
@@ -362,6 +397,43 @@ struct MotionInhibitData {
     uint8_t  relaySeqPhase = 0;   // 0=idle,1=in-progress,2=complete (commanded only)
     uint8_t  degradedLevel = 0;   // 0=none, 1..3
     bool     valid         = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x316 DIAG_STEERING_CENTERING — steering homing telemetry.
+// Explains WHY the automatic centering sweep did/did not progress so the HMI
+// can render "DIRECCIÓN NO SE MUEVE" with the real cause instead of "Error 8".
+// See esp32/src/steering_diag_view.h and Core/Inc/steering_centering_frame.h.
+// -------------------------------------------------------------------------
+struct SteeringCenteringDiagData {
+    steering_diag_view::SteeringDiagView view{};
+    bool          valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health.
+// Explains WHY a relay fault is (or is not) suspected so the HMI can show
+// CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED with the numbers behind it.
+// See esp32/src/relay_health_view.h and Core/Inc/relay_health_frame.h.
+// -------------------------------------------------------------------------
+struct RelayHealthDiagData {
+    relay_health_view::RelayHealthView view{};
+    bool          valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
+// 0x318 DIAG_INA_CH5 — steering INA226 (CH5) channel diagnostic (Problem 4).
+// Separates a genuinely MISSING chip (no ACK) from a transport gap ("n/d" =
+// !valid, no frame ever received), and keeps a SIGNED steering current that
+// is never zeroed.  See esp32/src/ina226_ch5_view.h and
+// Core/Inc/ina226_ch5_frame.h.
+// -------------------------------------------------------------------------
+struct Ina226Ch5DiagData {
+    ina226_ch5_view::Ina226Ch5View view{};
+    bool          valid       = false;   // false => "n/d" (no CAN contract)
     unsigned long timestampMs = 0;
 };
 
@@ -559,12 +631,16 @@ public:
     void setMode(const ModeData& d)            { mode_ = d; }
     void setDebounceDiag(const DebounceDiagData& d) { debounceDiag_ = d; }
     void setPedalCal(const PedalCalData& d)         { pedalCal_ = d; }
+    void setPedalCalSession(const PedalCalSessionData& d) { pedalCalSession_ = d; }
     void setGearLimits(const GearLimitsData& d)     { gearLimits_ = d; }
     void setI2cDiag(const I2cDiagData& d)           { i2cDiag_ = d; }
     void setCanMeta(const CanMetaData& d)           { canMeta_ = d; }
     void setBootReset(const BootResetData& d)       { bootReset_ = d; }
     void setWheelSensorDiag(const WheelSensorDiagData& d) { wheelSensorDiag_ = d; }
     void setMotionInhibit(const MotionInhibitData& d) { motionInhibit_ = d; }
+    void setSteeringCenteringDiag(const SteeringCenteringDiagData& d) { steeringCenteringDiag_ = d; }
+    void setRelayHealthDiag(const RelayHealthDiagData& d) { relayHealthDiag_ = d; }
+    void setIna226Ch5Diag(const Ina226Ch5DiagData& d) { ina226Ch5Diag_ = d; }
     void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
@@ -597,12 +673,16 @@ public:
     const ModeData&      mode()      const { return mode_; }
     const DebounceDiagData& debounceDiag() const { return debounceDiag_; }
     const PedalCalData&     pedalCal()     const { return pedalCal_; }
+    const PedalCalSessionData& pedalCalSession() const { return pedalCalSession_; }
     const GearLimitsData&   gearLimits()   const { return gearLimits_; }
     const I2cDiagData&      i2cDiag()      const { return i2cDiag_; }
     const CanMetaData&      canMeta()      const { return canMeta_; }
     const BootResetData&    bootReset()    const { return bootReset_; }
     const WheelSensorDiagData& wheelSensorDiag() const { return wheelSensorDiag_; }
     const MotionInhibitData& motionInhibit() const { return motionInhibit_; }
+    const SteeringCenteringDiagData& steeringCenteringDiag() const { return steeringCenteringDiag_; }
+    const RelayHealthDiagData& relayHealthDiag() const { return relayHealthDiag_; }
+    const Ina226Ch5DiagData& ina226Ch5Diag() const { return ina226Ch5Diag_; }
     const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
@@ -631,12 +711,16 @@ private:
     ModeData      mode_;
     DebounceDiagData debounceDiag_;
     PedalCalData     pedalCal_;
+    PedalCalSessionData pedalCalSession_;
     GearLimitsData   gearLimits_;
     I2cDiagData      i2cDiag_;
     CanMetaData      canMeta_;
     BootResetData    bootReset_;
     WheelSensorDiagData wheelSensorDiag_;
     MotionInhibitData   motionInhibit_;
+    SteeringCenteringDiagData steeringCenteringDiag_;
+    RelayHealthDiagData relayHealthDiag_;
+    Ina226Ch5DiagData   ina226Ch5Diag_;
     Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;

@@ -19,7 +19,9 @@
 #include "led_controller.h"
 #include "eps_limits.h"
 #include "motion_inhibit_view.h"
+#include "steering_diag_view.h"
 #include "wheel_traction.h"
+#include "../pedal_cal_session_view.h"
 #include <TFT_eSPI.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include <driver/twai.h>
@@ -552,6 +554,21 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             pedalStabHead_ = (pedalStabHead_ + 1U) % PEDAL_STAB_N;
             if (pedalStabCount_ < PEDAL_STAB_N) pedalStabCount_++;
         }
+        // Cache guided PedalCalSession status (0x319).
+        const vehicle::PedalCalSessionData& ps = data.pedalCalSession();
+        if (ps.timestampMs != 0 && ps.timestampMs != pedalSessLastTs_) {
+            pedalSessLastTs_ = ps.timestampMs;
+            if (pedalSessState_  != ps.state)  changed = true;
+            if (pedalSessFlags_  != ps.flags)  changed = true;
+            if (pedalSessReason_ != ps.reason) changed = true;
+            if (pedalSessMin_    != ps.adcMin) changed = true;
+            if (pedalSessMax_    != ps.adcMax) changed = true;
+            pedalSessState_  = ps.state;
+            pedalSessFlags_  = ps.flags;
+            pedalSessReason_ = ps.reason;
+            pedalSessMin_    = ps.adcMin;
+            pedalSessMax_    = ps.adcMax;
+        }
         // Periodic QUERY (every ~500 ms) so the STM32 keeps emitting the
         // 1 s burst while the operator stays on the calibration screen.
         // Backward-compatibility: nodes that ignore 0x308 / 0xF5 are
@@ -802,6 +819,15 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
             steerDiagChanged_ = true;
             needsRedraw_    = true;
         }
+        // 0x316 homing telemetry updates at 1 Hz independently of 0x30F —
+        // repaint the STEER DIAG page when a fresh homing snapshot arrives so
+        // the "DIRECCIÓN NO SE MUEVE" block stays live.
+        const auto& sc = data.steeringCenteringDiag();
+        if (sc.valid && sc.timestampMs != scDiagLastTs_) {
+            scDiagLastTs_     = sc.timestampMs;
+            steerDiagChanged_ = true;
+            needsRedraw_      = true;
+        }
         if ((frameTimeMs - epsLastQueryMs_) >= EPS_QUERY_INTERVAL_MS) {
             sendEpsQuery();
             epsLastQueryMs_ = frameTimeMs;
@@ -952,6 +978,22 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveStale_         = stale;
         inaLiveAgeMs_         = ageMs;
         inaLiveLastAgeSec_    = ageSec;
+
+        // 0x317 relay/current-sense health arrives at 1 Hz; repaint the page
+        // when a fresh verdict lands so the RELAY HEALTH line stays live.
+        const auto& rh = data.relayHealthDiag();
+        if (rh.timestampMs != relayHealthLastTs_) {
+            relayHealthLastTs_ = rh.timestampMs;
+            changed = true;
+        }
+
+        // 0x318 steering INA (CH5) diagnostic arrives at 1 Hz; repaint the page
+        // when a fresh CH5 verdict lands so the CH5 ST line stays live.
+        const auto& ch5 = data.ina226Ch5Diag();
+        if (ch5.timestampMs != ina226Ch5LastTs_) {
+            ina226Ch5LastTs_ = ch5.timestampMs;
+            changed = true;
+        }
 
         inaLiveDataChanged_ = changed;
     }
@@ -1323,6 +1365,35 @@ void EngineeringScreen::draw() {
         tft.setTextSize(1);
         tft.setTextDatum(TL_DATUM);
 
+        // ---- Guided session status line (0x319) --------------------------
+        // Shows the PedalCalSession FSM state + highest-priority reason so the
+        // operator sees exactly which phase the guided calibration is in and
+        // why it is blocked/aborted.  STALE when the STM32 stops emitting.
+        {
+            const bool sess_fresh =
+                pedalcal::sessionFreshness(pedalSessLastTs_, (unsigned long)millis())
+                    == pedalcal::Freshness::FRESH;
+            const bool sess_active = pedalcal::sessionActive(pedalSessState_);
+            char sbuf[64];
+            if (!sess_fresh && pedalSessLastTs_ == 0UL) {
+                snprintf(sbuf, sizeof(sbuf), "Session: --");
+            } else {
+                snprintf(sbuf, sizeof(sbuf), "Session: %s (%s)",
+                         pedalcal::sessionStateText(pedalSessState_),
+                         pedalcal::sessionReasonTextEx(pedalSessReason_, pedalSessFlags_));
+            }
+            uint16_t s_col = ui::COL_GRAY;
+            if (sess_fresh) {
+                if (pedalSessState_ == can::PEDCAL_SESS_COMPLETED)      s_col = ui::COL_GREEN;
+                else if (pedalSessState_ == can::PEDCAL_SESS_ABORTED)   s_col = ui::COL_RED;
+                else if (pedalSessState_ == can::PEDCAL_SESS_READY_TO_SAVE) s_col = ui::COL_CYAN;
+                else if (sess_active)                                  s_col = ui::COL_AMBER;
+            }
+            tft.fillRect(20, 34, ui::SCREEN_W - 40, 16, ui::COL_BG);
+            tft.setTextColor(s_col, ui::COL_BG);
+            tft.drawString(sbuf, 20, 34);
+        }
+
         // Local stability check — last PEDAL_STAB_N rawAdc samples within
         // PEDAL_STAB_LOCAL_TOL counts of each other.  This is a UI hint
         // only; the actual stability gate runs server-side on STM32
@@ -1339,11 +1410,28 @@ void EngineeringScreen::draw() {
         }
 
         const bool plausible   = (pedalCalFlags_ & 0x20U) != 0;
-        const bool safety_ok   = (pedalCalFlags_ & 0x10U) != 0;
+        bool       safety_ok   = (pedalCalFlags_ & 0x10U) != 0;
         const bool stored_ok   = (pedalCalFlags_ & 0x08U) != 0;
         const bool valid_pair  = (pedalCalFlags_ & 0x04U) != 0;
         const bool have_min    = (pedalCalFlags_ & 0x01U) != 0;
         const bool have_max    = (pedalCalFlags_ & 0x02U) != 0;
+        // audit P5.5: when the guided-session frame (0x319) is fresh it is the
+        // PRIMARY source of truth.  During the PRESS FULLY / CAPTURING MAX
+        // phases a pressed pedal is REQUIRED, so the legacy 0x308 "pedal not
+        // released" reject must not paint the Safety gate as BLOCKED — the
+        // STM32 already masks that reject there, but the HMI overrides too so
+        // a slightly stale 0x308 cannot flash a false BLOCKED.
+        {
+            const bool sess_fresh_gate =
+                pedalcal::sessionFreshness(pedalSessLastTs_, (unsigned long)millis())
+                    == pedalcal::Freshness::FRESH;
+            if (sess_fresh_gate && pedalcal::pedalExpectedPressed(pedalSessState_)) {
+                const uint16_t non_pedal_rejects =
+                    (uint16_t)(pedalCalRejectReason_ &
+                               ~((uint16_t)can::PEDCAL_REJECT_PEDAL_NOT_RELEASED));
+                safety_ok = (non_pedal_rejects == 0);
+            }
+        }
         const bool save_enabled = valid_pair && safety_ok;
         uint16_t pending_range = 0;
         if (have_min && have_max && pedalCalPendingMax_ >= pedalCalPendingMin_) {
@@ -1486,8 +1574,9 @@ void EngineeringScreen::draw() {
                          ui::COL_BG);
         tft.drawString(reject_buf, 110, 212);
 
-        // ---- SAVE button colour reflects validation + safety gate ----
-        uint16_t   save_fill    = save_enabled ? ui::COL_GREEN : ui::COL_DARK_GRAY;
+        // ---- SAVE button colour reflects the guided session readiness ----
+        const bool save_ready = (pedalSessState_ == can::PEDCAL_SESS_READY_TO_SAVE);
+        uint16_t   save_fill    = save_ready ? ui::COL_GREEN : ui::COL_DARK_GRAY;
         tft.fillRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, save_fill);
         tft.drawRect(PED_BTN_SAVE_X, PED_BTN_Y, PED_BTN_W, PED_BTN_H, ui::COL_GRAY);
         tft.setTextColor(ui::COL_WHITE, save_fill);
@@ -1766,10 +1855,27 @@ void EngineeringScreen::draw() {
         snprintf(btLineBuf, sizeof(btLineBuf), "CH4 BT: %s   %s", btABuf, btVBuf);
         tft.drawString(btLineBuf, x, y0 + 4 * lh);
 
-        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("CH5 ST: --.- A (n/d)", x, y0 + 5 * lh);
-        // CH5 steering current is not present on CAN today (0x201/0x207/0x309 only).
-        // Could be added in the future by extending 0x201 or adding a new ID.
+        // CH5 steering INA226: live 0x318 diagnostic (Problem 4).  Distinguishes
+        // a genuinely MISSING chip (no ACK) from "n/d" (no 0x318 ever received),
+        // and shows a SIGNED steering current that is never flattened to zero.
+        {
+            char ch5Buf[64];
+            const bool haveCh5 = (data_ != nullptr) && data_->ina226Ch5Diag().valid;
+            if (!haveCh5) {
+                // No 0x318 frame ever arrived => transport gap, NOT a dead chip.
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                snprintf(ch5Buf, sizeof(ch5Buf), "CH5 ST: %s",
+                         ina226_ch5_view::notAvailableText());
+            } else {
+                const auto& v = data_->ina226Ch5Diag().view;
+                const bool fault = ina226_ch5_view::isFault(v.reason);
+                tft.setTextColor(fault ? ui::COL_AMBER : ui::COL_GREEN, ui::COL_BG);
+                snprintf(ch5Buf, sizeof(ch5Buf), "CH5 ST: %s  %+.2fA",
+                         ina226_ch5_view::statusText(v.reason),
+                         ina226_ch5_view::currentAmps(v));
+            }
+            tft.drawString(ch5Buf, x, y0 + 5 * lh);
+        }
 
         const int16_t bx = 10;
         const int16_t by = y0 + 6 * lh + 4;
@@ -1869,9 +1975,45 @@ void EngineeringScreen::draw() {
             tft.drawString(buf, gx, gy + 5 * lh);
         }
 
-        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("Legend: rest~0A OK | rest~100A suspect shunt/sense", 10, 260);
-        tft.drawString("Volts OK + amps wrong => current path/shunt issue", 10, 272);
+        // ---- RELAY / CURRENT-SENSE HEALTH (0x317) ----
+        // Shows the evidence-graded verdict and the numbers behind it so the
+        // operator sees CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED (and the
+        // recommended physical check) instead of a bare "RELAY OPEN".
+        if (data_ != nullptr) {
+            namespace rhv = relay_health_view;
+            const auto& rh = data_->relayHealthDiag();
+            const uint32_t nowMs = (uint32_t)millis();
+            const rhv::Freshness fr = rhv::freshness(
+                rh.valid, nowMs, (uint32_t)rh.timestampMs);
+            char rbuf[96];
+
+            if (fr == rhv::Freshness::NEVER_RECEIVED) {
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                tft.drawString("RELAY HEALTH 0x317: NO DATA", 10, 260);
+            } else {
+                const uint8_t reason = rh.view.reason;
+                const bool fault = rhv::isFault(reason);
+                const bool stale = (fr == rhv::Freshness::STALE);
+                const uint16_t col = stale ? ui::COL_GRAY
+                                   : (fault ? ui::COL_RED : ui::COL_GREEN);
+                tft.setTextColor(col, ui::COL_BG);
+                snprintf(rbuf, sizeof(rbuf), "RELAY: %s (%s)%s",
+                         rhv::reasonText(reason),
+                         rhv::confidenceText(reason),
+                         stale ? " STALE" : "");
+                tft.drawString(rbuf, 10, 260);
+
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                snprintf(rbuf, sizeof(rbuf),
+                         "I=%u.%02uA PWM=%u%% MOV=%s | SOL:%s",
+                         (unsigned)(rh.view.currentSumCa / 100U),
+                         (unsigned)(rh.view.currentSumCa % 100U),
+                         (unsigned)rh.view.finalPwmPct,
+                         rh.view.anyWheelMoving ? "SI" : "NO",
+                         rhv::solutionText(reason));
+                tft.drawString(rbuf, 10, 272);
+            }
+        }
     }
 
     // Partial redraw for debounce DWT EMI counters (1 Hz)
@@ -2663,31 +2805,28 @@ bool EngineeringScreen::handleTouch(int16_t x, int16_t y) {
     // Pedal calibration submenu: 4 action buttons + back (back handled above).
     if (currentMenu_ == SubMenu::PEDAL_CAL) {
         if (y >= PED_BTN_Y && y <= PED_BTN_Y + PED_BTN_H) {
-            // CAPTURE MIN
+            // BEGIN the guided session
             if (x >= PED_BTN_CAPMIN_X && x <= PED_BTN_CAPMIN_X + PED_BTN_W) {
                 sendPedalCalOp(can::PEDAL_CAL_OP_CAPTURE_MIN);
-                Serial.println("[ENG] Pedal CAPTURE MIN");
+                Serial.println("[ENG] Pedal BEGIN session");
                 return true;
             }
-            // CAPTURE MAX
+            // ABORT the running session
             if (x >= PED_BTN_CAPMAX_X && x <= PED_BTN_CAPMAX_X + PED_BTN_W) {
-                sendPedalCalOp(can::PEDAL_CAL_OP_CAPTURE_MAX);
-                Serial.println("[ENG] Pedal CAPTURE MAX");
+                sendPedalCalOp(can::PEDAL_CAL_OP_ABORT);
+                Serial.println("[ENG] Pedal ABORT session");
                 return true;
             }
-            // SAVE — only forward when the local view believes validation
-            // passes (the STM32 re-validates anyway, but blocking the wire
-            // when we know it would be rejected reduces user-visible
-            // ACK_REJECTED churn).  When the local view shows invalid the
-            // tap is silently ignored.
+            // SAVE — only forward when the guided session is READY_TO_SAVE
+            // (the STM32 re-validates anyway, but blocking the wire when we
+            // know it would be rejected reduces user-visible ACK_REJECTED
+            // churn).  When the session is not ready the tap is ignored.
             if (x >= PED_BTN_SAVE_X && x <= PED_BTN_SAVE_X + PED_BTN_W) {
-                const bool valid_pair = (pedalCalFlags_ & 0x04U) != 0;
-                const bool safety_ok  = (pedalCalFlags_ & 0x10U) != 0;
-                if (valid_pair && safety_ok) {
+                if (pedalSessState_ == can::PEDCAL_SESS_READY_TO_SAVE) {
                     sendPedalCalOp(can::PEDAL_CAL_OP_SAVE);
                     Serial.println("[ENG] Pedal SAVE");
                 } else {
-                    Serial.println("[ENG] Pedal SAVE blocked (local validation)");
+                    Serial.println("[ENG] Pedal SAVE blocked (session not ready)");
                 }
                 return true;
             }
@@ -4003,8 +4142,8 @@ void EngineeringScreen::drawPedalCalibration() {
                     ui::COL_WHITE, fill, 1, MC_DATUM);
         tft.setTextDatum(TL_DATUM);
     };
-    drawBtn(PED_BTN_CAPMIN_X, "CAPTURE MIN", ui::COL_DARK_GRAY);
-    drawBtn(PED_BTN_CAPMAX_X, "CAPTURE MAX", ui::COL_DARK_GRAY);
+    drawBtn(PED_BTN_CAPMIN_X, "BEGIN",       ui::COL_DARK_GRAY);
+    drawBtn(PED_BTN_CAPMAX_X, "ABORT",       ui::COL_DARK_GRAY);
     // SAVE button colour reflects validation status on partial-redraw pass.
     drawBtn(PED_BTN_SAVE_X,   "SAVE",        ui::COL_DARK_GRAY);
     drawBtn(PED_BTN_RESET_X,  "RESET DEF.",  ui::COL_DARK_GRAY);
@@ -6585,6 +6724,64 @@ void EngineeringScreen::drawSteerDiag() {
 
     tft.setTextColor(eps.valid ? ui::COL_GREEN : ui::COL_RED, ui::COL_BG);
     tft.drawString(eps.valid ? "LIVE" : "NO DATA", LX, y + 4);
+
+    // ---- HOMING (0x316) — "DIRECCIÓN NO SE MUEVE" block ----
+    // Right column: the real cause of a stuck automatic centering sweep,
+    // classified on the STM32 and transported by 0x316.  Read-only.
+    {
+        const auto& sc = data_->steeringCenteringDiag();
+        namespace sv = steering_diag_view;
+        const sv::SteeringDiagView& v = sc.view;
+        sv::Freshness fresh = sv::freshness(sc.valid, (uint32_t)millis(),
+                                            (uint32_t)sc.timestampMs);
+
+        static constexpr int16_t HX  = 250;   // homing label column
+        static constexpr int16_t HVX = 372;   // homing value column
+        int16_t hy = 42;
+
+        auto hrow = [&](const char* label, const char* valStr, uint16_t col) {
+            tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+            tft.drawString(label, HX, hy);
+            tft.setTextColor(col, ui::COL_BG);
+            tft.drawString(valStr, HVX, hy);
+            hy += RH;
+        };
+
+        // Title: only claim "NO SE MUEVE" when the reason warrants it.
+        bool stuck = sc.valid && (fresh != sv::Freshness::STALE) &&
+                     sv::isStuck(v.reason);
+        tft.setTextColor(stuck ? ui::COL_RED : ui::COL_CYAN, ui::COL_BG);
+        tft.drawString(stuck ? "DIRECCION NO SE MUEVE" : "HOMING (0x316)",
+                       HX, hy);
+        hy += RH + 2;
+
+        if (!sc.valid || fresh == sv::Freshness::NEVER_RECEIVED) {
+            hrow("ESTADO", "SIN DATOS", ui::COL_GRAY);
+        } else {
+            char hb[24];
+            hrow("FSM",         sv::fsmText(v.fsmState),          ui::COL_WHITE);
+            hrow("OWNER",       sv::ownerText(v.motorOwner),      ui::COL_WHITE);
+            hrow("PC12",        v.relayPc12 ? "ON" : "OFF",
+                 v.relayPc12 ? ui::COL_GREEN : ui::COL_RED);
+            hrow("POWER READY", v.powerReady ? "SI" : "NO",
+                 v.powerReady ? ui::COL_GREEN : ui::COL_RED);
+            hrow("PC4",         v.enPc4 ? "ON" : "OFF",
+                 v.enPc4 ? ui::COL_GREEN : ui::COL_RED);
+            snprintf(hb, sizeof(hb), "%u", (unsigned)(v.pwmRequested ? 425U : 0U));
+            hrow("PWM REQ",     hb, ui::COL_WHITE);
+            snprintf(hb, sizeof(hb), "%u", (unsigned)v.pwmReal);
+            hrow("PWM REAL",    hb,
+                 (v.pwmRequested && v.pwmReal == 0) ? ui::COL_RED : ui::COL_WHITE);
+            snprintf(hb, sizeof(hb), "%d", (int)v.encoderDelta);
+            hrow("ENCODER DELTA", hb, ui::COL_WHITE);
+            hrow("MOTIVO",      sv::reasonText(v.reason),
+                 stuck ? ui::COL_RED : ui::COL_AMBER);
+            hrow("ACCION",      sv::actionText(v.reason), ui::COL_CYAN);
+            if (fresh == sv::Freshness::STALE) {
+                hrow("LINK",    "STALE", ui::COL_RED);
+            }
+        }
+    }
 
     // BACK button
     tft.fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, ui::COL_DARK_GRAY);

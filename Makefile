@@ -21,6 +21,8 @@ C_SOURCES = \
   $(CORE_SRC)/can_handler.c \
   $(CORE_SRC)/busoff_recovery.c \
   $(CORE_SRC)/motion_inhibit.c \
+  $(CORE_SRC)/relay_health_diag.c \
+  $(CORE_SRC)/ina226_channel_diag.c \
   $(CORE_SRC)/rc_arbiter.c \
   $(CORE_SRC)/sensor_manager.c \
   $(CORE_SRC)/pedal_logic.c \
@@ -28,6 +30,7 @@ C_SOURCES = \
   $(CORE_SRC)/service_mode.c \
   $(CORE_SRC)/ackermann.c \
   $(CORE_SRC)/steering_centering.c \
+  $(CORE_SRC)/steering_centering_diag.c \
   $(CORE_SRC)/boot_validation.c \
   $(CORE_SRC)/encoder_reader.c \
   $(CORE_SRC)/eps_params.c \
@@ -36,6 +39,7 @@ C_SOURCES = \
   $(CORE_SRC)/steering_z.c \
   $(CORE_SRC)/sensor_map_store.c \
   $(CORE_SRC)/pedal_cal_store.c \
+  $(CORE_SRC)/pedal_cal_session.c \
   $(CORE_SRC)/gear_limits_store.c \
   $(CORE_SRC)/drive_tuning_store.c \
   $(CORE_SRC)/battery_limits_store.c \

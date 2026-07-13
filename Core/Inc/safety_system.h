@@ -306,6 +306,12 @@ bool Safety_SetBatteryLimits(const BatteryLimits_t *b);
 void Safety_GetBatteryLimits(BatteryLimits_t *out);
 
 void Safety_CheckRelayHealth(void);
+/* Problem 3: build + classify the relay/current-sense diagnosis snapshot
+ * (pure Relay_ClassifyHealth). Called every cycle from Safety_CheckRelayHealth;
+ * instrumentation only, never gates control.  Getter returns the latest. */
+struct RelayHealthDiag;  /* fwd decl — full type in relay_health_diag.h */
+void Safety_UpdateRelayHealthDiag(void);
+const struct RelayHealthDiag *Safety_GetRelayHealthDiag(void);
 void Safety_EmergencyStop(void);
 void Safety_FailSafe(void);
 void Safety_PowerDown(void);

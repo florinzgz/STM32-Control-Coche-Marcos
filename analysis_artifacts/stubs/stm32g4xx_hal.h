@@ -531,6 +531,12 @@ typedef struct {
         } \
     } while(0)
 
+#define __HAL_TIM_GET_COMPARE(__HANDLE__, __CHANNEL__) \
+    (((__CHANNEL__) == TIM_CHANNEL_1) ? (__HANDLE__)->Instance->CCR1 : \
+     ((__CHANNEL__) == TIM_CHANNEL_2) ? (__HANDLE__)->Instance->CCR2 : \
+     ((__CHANNEL__) == TIM_CHANNEL_3) ? (__HANDLE__)->Instance->CCR3 : \
+     ((__CHANNEL__) == TIM_CHANNEL_4) ? (__HANDLE__)->Instance->CCR4 : 0U)
+
 #define __HAL_TIM_MOE_ENABLE(__HANDLE__) \
     ((__HANDLE__)->Instance->BDTR |= TIM_BDTR_MOE)
 

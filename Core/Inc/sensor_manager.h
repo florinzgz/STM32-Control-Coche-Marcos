@@ -8,6 +8,7 @@ extern "C" {
 #include "main.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include "ina226_channel_diag.h"  /* P4: Ina226ChannelDiag for CH5 accessor */
 
 /* ---- Initialization ---- */
 void Sensor_Init(void);
@@ -134,6 +135,15 @@ bool    Sensor_GetI2cEverOk(void);            /* latched: any INA seen OK ever  
 /* Duration of the most recent Current_ReadAll() call (HAL_GetTick delta, ms).
  * Saturates at 255.  Visible on 0x309 byte 6 for field diagnostics.         */
 uint8_t Sensor_GetI2cLastReadMs(void);
+/* Age (ms) of the newest cycle in which any INA226 answered; UINT16_MAX when
+ * never sampled.  Lets the relay-health classifier separate fresh 0 A from a
+ * stale current reading.  Report-only.                                      */
+uint16_t Current_GetSampleAgeMs(void);
+
+/* P4: latest explicit steering-INA (CH5) per-channel diagnostic snapshot.
+ * Refreshed every Current_ReadAll() by a full identity/config/shunt/bus probe
+ * and classified by Ina226_ClassifyChannel().  Report-only; never NULL.     */
+const Ina226ChannelDiag *Sensor_GetChannel5Diag(void);
 
 /* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) ----
  * Active probe used by SERVICE_CMD 0xF6 → CAN 0x30B.  Reads SDA/SCL idle

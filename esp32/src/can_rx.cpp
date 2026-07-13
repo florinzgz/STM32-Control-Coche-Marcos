@@ -292,6 +292,20 @@ static void decodePedalCal(const CanFrame& f, vehicle::VehicleData& data) {
     data.setPedalCal(pc);
 }
 
+// 0x319 DIAG_PEDAL_CAL_SESSION — guided PedalCalSession status (DLC 8).
+// Frame layout mirrors Core/Src/can_handler.c pedalcal_send_session_status().
+static void decodePedalCalSession(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 8) return;
+    vehicle::PedalCalSessionData s;
+    s.state       = f.data[0];
+    s.flags       = f.data[1];
+    s.reason      = readU16LE(&f.data[2]);
+    s.adcMin      = readU16LE(&f.data[4]);
+    s.adcMax      = readU16LE(&f.data[6]);
+    s.timestampMs = millis();
+    data.setPedalCalSession(s);
+}
+
 // 0x309 DIAG_I2C — I2C topology diagnostic (DLC 8; legacy DLC 5/6 accepted).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CDiag().
 //   byte0=mux_present, byte1=ina_ok_mask, byte2=fail_count,
@@ -427,6 +441,47 @@ static void decodeMotionInhibit(const CanFrame& f, vehicle::VehicleData& data) {
     mi.valid          = true;
     mi.timestampMs    = millis();
     data.setMotionInhibit(mi);
+}
+
+// 0x316 DIAG_STEERING_CENTERING — steering homing telemetry (DLC 8).
+// Frame layout mirrors Core/Inc/steering_centering_frame.h; decoded by the
+// shared pure helper so the HMI and host test share one deserialiser.
+static void decodeSteeringCenteringDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::SteeringCenteringDiagData sc;
+    if (!steering_diag_view::decode(f.data, f.data_length_code, sc.view)) {
+        return;
+    }
+    sc.valid       = true;
+    sc.timestampMs = millis();
+    data.setSteeringCenteringDiag(sc);
+}
+
+// 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health (DLC 8).
+// Frame layout mirrors Core/Inc/relay_health_frame.h; decoded by the shared
+// pure helper so the HMI and host test share one deserialiser.
+static void decodeRelayHealthDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::RelayHealthDiagData rh;
+    if (!relay_health_view::decode(f.data, f.data_length_code, rh.view)) {
+        return;
+    }
+    rh.valid       = true;
+    rh.timestampMs = millis();
+    data.setRelayHealthDiag(rh);
+}
+
+// 0x318 DIAG_INA_CH5 — steering INA226 (CH5) channel diagnostic (DLC 8).
+// Frame layout mirrors Core/Inc/ina226_ch5_frame.h; decoded by the shared pure
+// helper so the HMI and host test share one deserialiser.  The mere reception
+// of this frame (valid=true) is what distinguishes MISSING (no ACK) from the
+// "n/d" transport gap (valid stays false when no frame ever arrives).
+static void decodeIna226Ch5Diag(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::Ina226Ch5DiagData ch5;
+    if (!ina226_ch5_view::decode(f.data, f.data_length_code, ch5.view)) {
+        return;
+    }
+    ch5.valid       = true;
+    ch5.timestampMs = millis();
+    data.setIna226Ch5Diag(ch5);
 }
 
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
@@ -702,11 +757,15 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_DEBOUNCE_STEER:  decodeDebounceDiagSteer(frame, data); break;
             case can::DIAG_WHEEL_PULSES:    decodeWheelPulses(frame, data);       break;
             case can::DIAG_PEDAL_CAL:       decodePedalCal(frame, data);          break;
+            case can::DIAG_PEDAL_CAL_SESSION: decodePedalCalSession(frame, data);  break;
             case can::DIAG_I2C:             decodeI2cDiag(frame, data);           break;
             case can::DIAG_CAN_META:        decodeCanMeta(frame, data);           break;
             case can::DIAG_BOOT_RESET:      decodeBootReset(frame, data);         break;
             case can::DIAG_WHEEL_SENSOR:    decodeWheelSensorDiag(frame, data);   break;
             case can::DIAG_MOTION_INHIBIT:  decodeMotionInhibit(frame, data);     break;
+            case can::DIAG_STEERING_CENTERING: decodeSteeringCenteringDiag(frame, data); break;
+            case can::DIAG_RELAY_HEALTH: decodeRelayHealthDiag(frame, data); break;
+            case can::DIAG_INA_CH5: decodeIna226Ch5Diag(frame, data); break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;

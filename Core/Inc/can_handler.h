@@ -110,6 +110,51 @@ extern "C" {
                                          //             bits2-3 relay-seq phase (0 idle,1 in-progress,2 complete;
                                          //             commanded GPIO/sequencer state only, no contact feedback),
                                          //             bits4-7 degraded level (0=none,1..3)
+#define CAN_ID_DIAG_STEERING_CENTERING 0x316 // STM32 → ESP32 (1000ms) steering homing telemetry —
+                                         //   WHY the automatic centering sweep did/did not progress.
+                                         //   Instrumentation only (drives nothing).
+                                         //   Byte 0:   diag reason (SteerDiagReason_t, 0..15)
+                                         //   Byte 1:   FSM state (low nibble, CenteringState_t) |
+                                         //             motor owner (high nibble, SteeringMotorOwner_t)
+                                         //   Byte 2:   flags bit0 PB5 raw active, bit1 PB5 debounced,
+                                         //             bit2 PB5 already-active-at-sweep-start,
+                                         //             bit3 PC12 relay commanded, bit4 power ready,
+                                         //             bit5 PC4 EN_STEER commanded, bit6 encoder fault,
+                                         //             bit7 restored-from-flash
+                                         //   Byte 3:   system state (low nibble, STEER_DIAG_SS_*) |
+                                         //             bit4 module disabled | bit5 fault latched |
+                                         //             bit6 pwm requested (>0)
+                                         //   Byte 4-5: PWM real (max CCR PA6/PA7, uint16 LE)
+                                         //   Byte 6-7: encoder delta from sweep origin (int16 LE, clamped)
+#define CAN_ID_DIAG_RELAY_HEALTH  0x317 // STM32 → ESP32 (1000ms) traction relay / current-sense health.
+                                         //   Evidence-graded cause so the HMI shows CURRENT SENSE INVALID
+                                         //   vs RELAY OPEN SUSPECTED instead of a bare "RELAY OPEN".
+                                         //   Byte 0:   diag reason (RelayDiagReason_t, 0..10)
+                                         //   Byte 1:   flags bit0 relay commanded, bit1 seq complete,
+                                         //             bit2 power ready, bit3 any wheel moving,
+                                         //             bit4 current valid, bit5 current stale,
+                                         //             bit6 expected wheel INA missing, bit7 polarity rev
+                                         //   Byte 2-3: sum |CH0..3| current in centi-amps (uint16 LE)
+                                         //   Byte 4:   throttle % (0..100)
+                                         //   Byte 5:   final PWM/traction demand % (0..100)
+                                         //   Byte 6-7: current sample age ms (uint16 LE)
+#define CAN_ID_DIAG_INA_CH5       0x318 // STM32 → ESP32 (1000ms) steering INA226 (CH5) channel diagnostic.
+                                         //   Separates MISSING (no ACK) from n/d (no contract) and keeps a
+                                         //   SIGNED shunt so a reversed current is never zeroed.
+                                         //   Byte 0:   fault reason (Ina226DiagReason_t, 0..9)
+                                         //   Byte 1:   flags bit0 mux select ok, bit1 i2c ack,
+                                         //             bit2 identity ok, bit3 config ok, bit4 shunt read ok,
+                                         //             bit5 bus read ok, bit6 channel powered, bit7 stale
+                                         //   Byte 2-3: raw shunt register (int16 LE, signed two's complement)
+                                         //   Byte 4-5: bus voltage mV (uint16 LE)
+                                         //   Byte 6-7: sample age ms (uint16 LE, 0xFFFF = never)
+#define CAN_ID_DIAG_PEDAL_CAL_SESSION 0x319 // STM32 → ESP32 (on-demand/while active) PedalCalSession state+reason
+                                         //   Byte 0:   session state (PedalCalState 0..10)
+                                         //   Byte 1:   flags bit0 active, bit1 have_min, bit2 have_max,
+                                         //             bit3 completed, bit4 aborted, bit5 entry-guards-ok
+                                         //   Byte 2-3: reason bitmask (PEDAL_CAL_SESS_* u16 LE)
+                                         //   Byte 4-5: captured adc_min (u16 LE)
+                                         //   Byte 6-7: captured adc_max (u16 LE)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -144,16 +189,23 @@ extern "C" {
 #define I2C_SCAN_PHASE_TCA_ACK      0x03  /* TCA9548A ACKed (mux present)           */
 
 /* ---- Pedal-calibration sub-opcodes (byte1 when byte0 == 0xF5) ----
- * 0x01 CAPTURE_MIN    Capture current ADC as released endpoint (pending)
- * 0x02 CAPTURE_MAX    Capture current ADC as pressed  endpoint (pending)
- * 0x03 SAVE           Validate pending pair + persist to flash + apply
+ * The productive calibration is a single guided PedalCalSession FSM
+ * (pedal_cal_session.c).  HMI buttons map onto Begin / RequestSave / Abort:
+ * 0x01 CAPTURE_MIN    BEGIN the guided session (it then captures MIN once the
+ *                     pedal is released, prompts a full press, captures MAX,
+ *                     and waits released before SAVE).
+ * 0x02 CAPTURE_MAX    Advisory only — MAX is captured automatically when the
+ *                     pedal is objectively pressed; requests a status burst.
+ * 0x03 SAVE           RequestSave: validate + persist + apply + readback-verify
  * 0x04 RESET_DEFAULTS Erase flash slot + restore 50 / 4000
- * 0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz   */
+ * 0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz
+ * 0x06 ABORT          Cancel the running session (operator abort)            */
 #define PEDAL_CAL_OP_CAPTURE_MIN    0x01U
 #define PEDAL_CAL_OP_CAPTURE_MAX    0x02U
 #define PEDAL_CAL_OP_SAVE           0x03U
 #define PEDAL_CAL_OP_RESET_DEFAULTS 0x04U
 #define PEDAL_CAL_OP_QUERY          0x05U
+#define PEDAL_CAL_OP_ABORT          0x06U
 
 /* ---- Pedal-calibration reject-reason bitmask (0x308 diagnostic frame) ---- */
 #define PEDCAL_REJECT_NOT_STANDBY            0x0001U
@@ -405,6 +457,9 @@ void CAN_SendCanMetaDiag(void);     /* 1 Hz CAN/0x309 delivery meta-diagnostic (
 void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptime_ms + RCC reset-cause */
 void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason diagnostic (0x313) */
 void CAN_SendMotionInhibit(void);   /* 10 Hz MOTION_INHIBIT_REASON instrumentation (0x315) */
+void CAN_SendSteeringCenteringDiag(void); /* 1 Hz steering homing telemetry (0x316) */
+void CAN_SendRelayHealthDiag(void);       /* 1 Hz relay/current-sense health (0x317) */
+void CAN_SendIna226Ch5Diag(void);         /* 1 Hz steering INA226 CH5 diagnostic (0x318) */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);
@@ -424,13 +479,11 @@ void CAN_UpdateFrameRate(void);     /* Call every ~1 s to compute rx FPS  */
  * has zero impact on backward-compatible nodes that ignore 0x308. */
 void CAN_PedalCalBurstUpdate(void);
 
-/* Drives the cooperative non-blocking pedalcal capture FSM (R-1).
- * Call once per 50 ms main-loop tick, immediately after Pedal_Update().
- * No-op while the FSM is idle; while a CAPTURE_MIN/MAX is in flight
- * it takes one sample per tick (8 samples total), re-validates
- * safety, enforces a hard 450 ms timeout, and emits the deferred
- * ACK on completion.  Replaces the previous blocking HAL_Delay-based
- * sampler that starved CAN heartbeat TX and Safety_CheckCANTimeout(). */
+/* Drives the guided PedalCalSession FSM (audit P5).  Call once per 50 ms
+ * main-loop tick, immediately after Pedal_Update().  It builds the live
+ * PedalCalConds from safety/sensor state, advances PedalCalSession_Update(),
+ * enforces safe outputs (Traction_SetDemand(0)) while a session is active, and
+ * publishes the 0x319 session-status frame.  No-op while the session is IDLE. */
 void CAN_PedalCalCaptureTick(void);
 
 /* Drives the on-demand 0x30D gear power-limit telemetry burst.

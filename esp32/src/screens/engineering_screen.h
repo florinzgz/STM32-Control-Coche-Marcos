@@ -156,6 +156,13 @@ private:
     uint8_t       pedalCalPercent_    = 0;
     unsigned long pedalCalLastTs_     = 0;       // last accepted 0x308 timestamp
     unsigned long pedalCalLastQueryMs_ = 0;      // last QUERY tx (ms)
+    // Guided PedalCalSession status (mirrors latest 0x319 frame, audit P5).
+    uint8_t       pedalSessState_     = 0;        // PedalCalState
+    uint8_t       pedalSessFlags_     = 0;
+    uint16_t      pedalSessReason_    = 0;
+    uint16_t      pedalSessMin_       = 0;
+    uint16_t      pedalSessMax_       = 0;
+    unsigned long pedalSessLastTs_    = 0;        // last accepted 0x319 timestamp
     // Local stability ring: last 8 rawAdc samples; UI shows "stable" when
     // (max-min) within tolerance.  Independent from the STM32-side stability
     // check that runs synchronously during CAPTURE.
@@ -466,6 +473,9 @@ private:
     bool          steerDiagChanged_   = false;
     unsigned long steerDiagLastTs_    = 0;
     unsigned long steerDiagQueryMs_   = 0;
+    unsigned long scDiagLastTs_       = 0;   // last consumed 0x316 homing ts
+    unsigned long relayHealthLastTs_  = 0;   // last consumed 0x317 relay-health ts
+    unsigned long ina226Ch5LastTs_    = 0;   // last consumed 0x318 CH5 diag ts
 
     // ---- DRIVE TUNING editor (DRIVE_TUNING submenu, 0xFA cmd / 0x310 tlm) ----
     // Six editable fields (accel/brake/reverse ramp, creep enable/power/delay).

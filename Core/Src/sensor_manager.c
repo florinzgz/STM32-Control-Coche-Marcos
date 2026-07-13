@@ -22,6 +22,7 @@
 #include "pedal_logic.h"      /* shared pedal plausibility pipeline (production + host tests) */
 #include "safety_system.h"
 #include "service_mode.h"  /* per-module fault tagging (1.5 / 2.3)    */
+#include "ina226_channel_diag.h" /* P4: explicit per-channel CH5 classifier  */
 #include "main.h"
 #include <string.h>    /* memcmp / memcpy — topology change detection */
 #include <math.h>      /* fabsf — stale detection epsilon              */
@@ -662,6 +663,11 @@ static uint8_t ina_ok_mask  = 0;       /* bit i = INA226 on channel i acked */
 static uint8_t ina_bus_ok_mask = 0;    /* bit i = bus-voltage read OK       */
 static bool    i2c_ever_ok  = false;   /* latched: at least one INA seen OK */
 static bool    ina_last_read_ok = false; /* status of last INA226_ReadReg() */
+/* Tick of the most recent cycle in which at least one INA226 answered, used
+ * by the relay-health classifier to tell "fresh 0 A" from a stale reading.
+ * Additive diagnostic only; never gates control.                          */
+static uint32_t ina_last_ok_tick = 0;
+static bool     ina_ever_sampled = false;
 
 /* ---- Phase-based INA226 power expectation (additive, no new safety path) ----
  * Motor INA226s (ch0..3) are wired AFTER the traction relay and the steering
@@ -675,6 +681,20 @@ static bool    ina_last_read_ok = false; /* status of last INA226_ReadReg() */
  *                         so a freshly-energised branch is (re)configured.       */
 static uint8_t ina_expected_mask   = INA226_MASK_BATTERY;
 static uint8_t ina_configured_mask = 0;
+
+/* ---- P4: explicit steering-INA (CH5) per-channel diagnostic ------------
+ * The steering INA226 (logical/mux channel 5, address 0x40) is probed each
+ * cycle with a full identity/config/shunt/bus sequence and classified by the
+ * pure Ina226_ClassifyChannel().  This separates a genuinely MISSING chip
+ * (no ACK) from a transport gap, a lost config, a bypassed/open shunt, or a
+ * reversed-polarity wiring fault, and preserves the SIGNED current (never
+ * zeroed).  Fully report-only: the probe's own I2C failures are rolled back
+ * so it never perturbs the bus-fault / Error-Code-11 recovery accounting. */
+static Ina226ChannelDiag ch5_diag = { .channel = INA226_CHANNEL_STEER,
+                                      .fault_reason = INA226_CH_UNKNOWN };
+static uint32_t ch5_last_ok_tick        = 0;
+static bool     ch5_ever_ok             = false;
+static uint32_t ch5_consecutive_failures = 0;
 
 /**
  * @brief  I2C bus recovery via manual SCL clock cycling.
@@ -746,6 +766,8 @@ static void I2C_BusRecovery(void)
 #define INA226_REG_CONFIG          0x00
 #define INA226_REG_SHUNT_VOLTAGE   0x01
 #define INA226_REG_BUS_VOLTAGE     0x02
+#define INA226_REG_MANUFACTURER_ID 0xFE   /* P4: identity probe (0x5449) */
+#define INA226_REG_DIE_ID          0xFF   /* P4: identity probe (0x2260) */
 #define INA226_SHUNT_LSB_UV        2.5f   /* 2.5 µV per LSB */
 #define INA226_BUS_LSB_MV          1.25f  /* 1.25 mV per LSB */
 
@@ -870,6 +892,9 @@ static void INA226_ConfigureAll(void)
     }
 }
 
+/* P4: forward decl — steering-INA (CH5) diagnostic probe (defined below). */
+static void Sensor_UpdateChannel5Diag(void);
+
 void Current_ReadAll(void)
 {
     /* Measure wall-clock duration for field diagnostics (0x309 byte 6). */
@@ -987,6 +1012,8 @@ void Current_ReadAll(void)
     ina_bus_ok_mask = new_bus_ok_mask;
     if (new_ina_mask != 0) {
         i2c_ever_ok = true;
+        ina_last_ok_tick = HAL_GetTick();
+        ina_ever_sampled = true;
     }
 
     /* I2C failure detection and recovery */
@@ -1004,11 +1031,110 @@ void Current_ReadAll(void)
         i2c_recovery_attempts = 0;
     }
 
+    /* P4: refresh the explicit steering-INA (CH5) diagnostic snapshot. */
+    Sensor_UpdateChannel5Diag();
+
     /* Record cycle duration (saturated at 255 ms) for field diagnostics. */
     {
         uint32_t delta = HAL_GetTick() - t_start;
         i2c_last_read_ms = (delta > 255U) ? 255U : (uint8_t)delta;
     }
+}
+
+/* ---- P4: steering INA226 (CH5) explicit per-channel probe ----------------
+ * Builds a full Ina226ChannelDiag for logical/mux channel 5 (steering, 0x40)
+ * and classifies it with the pure Ina226_ClassifyChannel().  Steps mirror the
+ * datasheet: MUX select → ACK probe → identity IDs (0xFE/0xFF) → config
+ * write/readback → signed shunt → bus.  The signed current is preserved
+ * (never clamped to zero) so a reversed shunt reads as a negative current and
+ * an open/bypassed shunt reads as ~0 µV.  Report-only: the probe snapshots and
+ * restores i2c_fail_count so its own reads cannot trip the bus-fault recovery
+ * (the main Current_ReadAll() loop remains the single owner of that path).   */
+static void Sensor_UpdateChannel5Diag(void)
+{
+    /* Snapshot the fault counter so this diagnostic probe is side-effect free
+     * on the Error-Code-11 recovery accounting. */
+    uint8_t saved_fail_count = i2c_fail_count;
+
+    Ina226ChannelDiag d;
+    memset(&d, 0, sizeof(d));
+    d.channel          = INA226_CHANNEL_STEER;
+    d.mux_channel      = INA226_CHANNEL_STEER;
+    d.expected_address = I2C_ADDR_INA226;
+    d.channel_powered  = (ina_expected_mask & INA226_MASK_STEER) != 0U;
+
+    /* Step 1: select the steering channel on the TCA9548A. */
+    d.mux_select_ok = (TCA9548A_SelectChannel(INA226_CHANNEL_STEER) == HAL_OK);
+
+    if (d.mux_select_ok) {
+        /* Step 2: probe the INA226 ACK at the expected address. */
+        d.i2c_ack = (HAL_I2C_IsDeviceReady(&hi2c1, (I2C_ADDR_INA226 << 1),
+                                           2, INA226_I2C_TIMEOUT_MS) == HAL_OK);
+        d.detected_address = d.i2c_ack ? I2C_ADDR_INA226 : 0U;
+
+        if (d.i2c_ack) {
+            /* Step 3: datasheet identity registers. */
+            uint16_t mfg = (uint16_t)INA226_ReadReg(INA226_REG_MANUFACTURER_ID);
+            bool     mfg_read_ok = ina_last_read_ok;
+            uint16_t die = (uint16_t)INA226_ReadReg(INA226_REG_DIE_ID);
+            bool     die_read_ok = ina_last_read_ok;
+            d.manufacturer_id_ok = mfg_read_ok && (mfg == INA226_MANUFACTURER_ID);
+            d.die_id_ok          = die_read_ok && (die == INA226_DIE_ID);
+
+            /* Step 4: config write/readback.  Rewrite only if it drifted. */
+            uint16_t cfg = (uint16_t)INA226_ReadReg(INA226_REG_CONFIG);
+            bool     cfg_read_ok = ina_last_read_ok;
+            if (cfg_read_ok && cfg != INA226_CONFIG_VALUE) {
+                d.config_write_ok = (INA226_WriteReg(INA226_REG_CONFIG,
+                                                     INA226_CONFIG_VALUE) == HAL_OK);
+                d.config_readback_ok = false;   /* had drifted this cycle */
+            } else {
+                d.config_write_ok    = cfg_read_ok;
+                d.config_readback_ok = cfg_read_ok && (cfg == INA226_CONFIG_VALUE);
+            }
+
+            /* Step 5: signed shunt voltage → signed current (never zeroed). */
+            int16_t shunt_raw = INA226_ReadReg(INA226_REG_SHUNT_VOLTAGE);
+            d.shunt_read_ok = ina_last_read_ok;
+            d.raw_shunt = shunt_raw;
+            d.shunt_uv  = (int32_t)lroundf((float)shunt_raw * INA226_SHUNT_LSB_UV);
+            /* I[mA] = V_shunt[µV] / R_shunt[mΩ] (steering uses the 1.5 mΩ motor
+             * shunt).  Signed: a reversed VIN+/VIN− wiring yields a negative mA. */
+            d.signed_current_ma =
+                (int32_t)lroundf((float)d.shunt_uv / (float)INA226_SHUNT_MOHM_MOTOR);
+
+            /* Step 6: bus voltage. */
+            int16_t bus_raw = INA226_ReadReg(INA226_REG_BUS_VOLTAGE);
+            d.bus_read_ok = ina_last_read_ok;
+            d.bus_mv = (int32_t)lroundf((float)bus_raw * INA226_BUS_LSB_MV);
+        }
+    }
+
+    /* Freshness + consecutive-failure bookkeeping.  A cycle counts as "OK" only
+     * when the chip acked AND both measurement registers read back. */
+    bool cycle_ok = d.i2c_ack && d.shunt_read_ok && d.bus_read_ok;
+    if (cycle_ok) {
+        ch5_last_ok_tick = HAL_GetTick();
+        ch5_ever_ok = true;
+        ch5_consecutive_failures = 0;
+    } else if (ch5_consecutive_failures < 0xFFFFFFFFU) {
+        ch5_consecutive_failures++;
+    }
+    d.sample_age_ms = ch5_ever_ok ? (HAL_GetTick() - ch5_last_ok_tick)
+                                  : 0xFFFFFFFFU;
+    d.consecutive_failures = ch5_consecutive_failures;
+    d.recovery_count       = i2c_recovery_attempts;
+
+    /* Classify with the pure per-channel classifier. */
+    d.fault_reason = Ina226_ClassifyChannel(&d);
+    ch5_diag = d;
+
+    /* Roll back any I2C failures this probe caused: it is report-only. */
+    i2c_fail_count = saved_fail_count;
+}
+
+const Ina226ChannelDiag *Sensor_GetChannel5Diag(void) {
+    return &ch5_diag;
 }
 
 float Current_GetAmps(uint8_t index) {
@@ -1060,6 +1186,15 @@ bool Sensor_GetI2cEverOk(void) {
 
 uint8_t Sensor_GetI2cLastReadMs(void) {
     return i2c_last_read_ms;
+}
+
+/* Age (ms) of the newest cycle in which any INA226 answered.  Saturates at
+ * UINT16_MAX and returns UINT16_MAX when no sample has ever been taken, so a
+ * never-sampled bus reads as unambiguously stale.  Report-only.            */
+uint16_t Current_GetSampleAgeMs(void) {
+    if (!ina_ever_sampled) return UINT16_MAX;
+    uint32_t age = HAL_GetTick() - ina_last_ok_tick;
+    return (age > (uint32_t)UINT16_MAX) ? UINT16_MAX : (uint16_t)age;
 }
 
 /* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) --------------
@@ -1933,6 +2068,8 @@ void Sensor_Init(void)
     ina_bus_ok_mask = 0;
     i2c_ever_ok  = false;
     ina_last_read_ok = false;
+    ina_last_ok_tick = 0;
+    ina_ever_sampled = false;
     ina_expected_mask   = INA226_MASK_BATTERY;  /* only BAT powered pre-relay */
     ina_configured_mask = 0;
 

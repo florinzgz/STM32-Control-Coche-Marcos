@@ -2155,6 +2155,63 @@ const TractionState_t* Traction_GetState(void)
     return &traction_state;
 }
 
+/* Calibration movement lock (audit P5.4).
+ *
+ * Enforces — every call — the real "cannot move" state required while a
+ * pedal-calibration session runs, then VERIFIES it and returns the result:
+ *   - traction demand forced to 0;
+ *   - the four traction H-bridges driven to COAST (PWM = 0, EN = LOW);
+ *   - readback confirms every traction EN pin is physically LOW and the
+ *     resolved final PWM duty is 0.
+ *
+ * The traction relay is owned by safety_system.c; the caller additionally
+ * verifies the relay is de-energised.  Returns true only when the enable
+ * lines and PWM are confirmed safe, so the session can abort (LOCK_LOST) the
+ * instant the lock is lost instead of assuming STANDBY implies inhibition. */
+bool Traction_CalibrationLock(void)
+{
+    /* 1. Force zero demand and kill the smooth-drive state so nothing can
+     *    ramp the motors back up on the next Traction_Update(). */
+    traction_state.demandPct = 0.0f;
+    pedal_ema         = 0.0f;
+    pedal_ramped      = 0.0f;
+    pedal_filter_init = 0;
+
+    /* 2. De-energise the four traction H-bridges (EN LOW, PWM 0). */
+    Motor_SetMode(&motor_fl, MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_fr, MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_rl, MOTOR_MODE_COAST, 0);
+    Motor_SetMode(&motor_rr, MOTOR_MODE_COAST, 0);
+
+    /* 3. Verify the enables really read LOW and the resolved duty is 0. */
+    bool en_low = (HAL_GPIO_ReadPin(motor_fl.en_port, motor_fl.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_fr.en_port, motor_fr.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_rl.en_port, motor_rl.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_rr.en_port, motor_rr.en_pin) == GPIO_PIN_RESET);
+    return en_low && (Traction_GetFinalPwmPct() == 0U);
+}
+
+/* Read-only confirmation of the calibration movement lock (audit fix).
+ *
+ * Unlike Traction_CalibrationLock(), this NEVER modifies any output: it only
+ * READS the effective traction demand, the resolved final PWM duty, the four
+ * traction enable lines and the traction relay state, and reports whether the
+ * "cannot move" condition currently holds.  This is the ONLY check that may be
+ * used from telemetry / diagnostic / QUERY paths (e.g. the 0x319 "entry OK"
+ * bit), so that simply reading calibration status can never force demand 0,
+ * PWM 0 or the traction enables LOW outside an actual calibration session. */
+bool Traction_IsCalibrationLockConfirmed(void)
+{
+    bool demand_zero = (fabsf(traction_state.demandPct) < 0.01f);
+    bool en_low = (HAL_GPIO_ReadPin(motor_fl.en_port, motor_fl.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_fr.en_port, motor_fr.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_rl.en_port, motor_rl.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_rr.en_port, motor_rr.en_pin) == GPIO_PIN_RESET);
+    bool pwm_zero  = (Traction_GetFinalPwmPct() == 0U);
+    bool relay_off = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
+    return demand_zero && en_low && pwm_zero && relay_off;
+}
+
 /* ==================================================================
  *  Steering Control — EPS Torque-Assist
  *

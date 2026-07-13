@@ -138,6 +138,87 @@ Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
 
 ---
 
+## 8. Pantalla blanca — detección, recuperación y causa (Problema 2)
+
+Referencia: `esp32/src/display_supervisor.h` (`display::Supervisor`),
+`esp32/src/test_display_supervisor.cpp`, `esp32/include/User_Setup.h`.
+
+- [ ] Provocar el fallo (pantalla en blanco).
+- [ ] Confirmar que los **LED WS2812B siguen animándose** (Core 1 vivo).
+- [ ] Confirmar **heartbeat CAN** activo durante el fallo.
+- [ ] Confirmar si el **táctil responde o no** responde.
+- [ ] Registrar nivel de **TFT_RST GPIO38** y **5 V TFT**.
+- [ ] Probar **SPI 40 MHz vs 20 MHz** (cambiar solo `SPI_FREQUENCY`) y comparar
+      `display_recovery_count`; anotar 40 MHz falla / 20 MHz estable / ambas fallan.
+- [ ] Confirmar **recuperación automática** (banner `PANTALLA RECUPERADA`) y la
+      **causa** mostrada: RENDER TIMEOUT / TFT STATUS LOST / SPI TIMEOUT /
+      TFT RESET PROBABLE / LOW MEMORY / ESP32 RESET.
+- [ ] Anotar si el readback de estado es **fiable o no** (STATUS_UNSUPPORTED).
+
+Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
+
+---
+
+## 9. Volante — por qué no inicia el barrido (Problema 1)
+
+Referencia: `Core/Inc/steering_centering_diag.h`,
+`Core/Src/steering_centering_diag.c`, `Core/Src/test_steering_centering_diag.c`.
+
+- [ ] Relé **PC12** (comando ON y contacto).
+- [ ] **Power ready** (`Safety_IsPowerReady`).
+- [ ] Enable **PC4** EN_STEER.
+- [ ] PWM **PA6** / **PA7** (CCR TIM3 CH1/CH2 reales).
+- [ ] Encoder **TIM2** (cuenta y delta).
+- [ ] Sensor de centro **PB5** raw y debounced.
+- [ ] Estado de la **FSM** de centrado.
+- [ ] **Propietario** del motor (CENTERING vs EPS).
+- [ ] **Motivo de aborto** explícito (`STEER_DIAG_*`), no “Error 8”.
+
+Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
+
+---
+
+## 10. Tracción — RELAY OPEN vs corriente inválida (Problema 3)
+
+Referencia: `Core/Inc/relay_health_diag.h`, `Core/Src/relay_health_diag.c`,
+`Core/Src/test_relay_health_diag.c`. **Ruedas elevadas, vehículo inmovilizado.**
+
+- [ ] Ruedas **elevadas**; nadie cerca.
+- [ ] Pedal **moderado**.
+- [ ] **PWM final** aplicado.
+- [ ] **Velocidades** por rueda.
+- [ ] **Corriente con pinza** en el cable de motor.
+- [ ] **mV en cada shunt** externo.
+- [ ] **mV en los pads R002**.
+- [ ] Clasificación correcta: movimiento + PWM>0 + 0 A ⇒ **CURRENT SENSE
+      INVALID** (no RELAY OPEN); RELAY OPEN solo CONFIRMADO con evidencia.
+
+Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
+
+---
+
+## 11. INA226 CH5 dirección (Problema 4)
+
+Referencia: `Core/Inc/ina226_channel_diag.h`, `Core/Src/ina226_channel_diag.c`,
+`Core/Src/test_ina226_channel_diag.c`.
+
+- [ ] **3.3 V** en VCC del INA CH5.
+- [ ] **Masa** común.
+- [ ] **SC5/SD5** (SCL/SDA del canal 5 del TCA9548A).
+- [ ] **Dirección** A0/A1 (0x40 esperado).
+- [ ] **Intercambio de módulo** (probar un INA conocido en CH5).
+- [ ] **Scan de mux** (dónde se detecta cada INA).
+- [ ] **Bus voltage**, **raw shunt**, **current signed**.
+- [ ] Distinguir: `n/d` (sin telemetría CAN) vs **MISSING** (sin ACK I²C) vs
+      **PRESENT NO SHUNT** (chip presente, 0 A por R002/shunt).
+
+Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
+
+> **Seguridad:** todas las pruebas de motores con vehículo inmovilizado, ruedas
+> elevadas, nadie cerca de dirección o ruedas y parada de emergencia accesible.
+
+---
+
 ## Resumen
 
 | Nº | Prueba | Resultado |
@@ -149,6 +230,10 @@ Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
 | 5 | CAN desconectado/reconectado se recupera | ☐ |
 | 6 | Sin pantalla blanca ni reset inesperado | ☐ |
 | 7 | Límites EPS server-side | ☐ |
+| 8 | Pantalla blanca: detección + recuperación + causa | ☐ |
+| 9 | Volante: motivo de aborto explícito (no Error 8) | ☐ |
+| 10 | Tracción: CURRENT SENSE INVALID vs RELAY OPEN | ☐ |
+| 11 | INA CH5: n/d vs MISSING vs PRESENT NO SHUNT | ☐ |
 
 **Referencias:** `docs/FAULT_STATE_TORQUE_MATRIX.md`, `docs/STM32_BOOT_TIME_VS_IWDG.md`,
 `docs/CAN_CONTRACT_FINAL.md` (0x315), `esp32/src/mode_sync.h`, `esp32/src/boot_diag.h`,

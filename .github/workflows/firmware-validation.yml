@@ -81,11 +81,20 @@ jobs:
               Core/Src/test_steering_cal_store.c \
               Core/Src/test_steering_z.c \
               Core/Src/test_steering_centering.c \
+              Core/Src/test_steering_centering_diag.c \
+              Core/Src/test_steering_centering_frame.c \
               Core/Src/test_pedal_cal_limits.c \
+              Core/Src/test_pedal_cal_session.c \
+              Core/Src/test_pedalcal_can_frame.c \
+              Core/Src/test_pedalcal_query_readonly.c \
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
               Core/Src/test_motion_inhibit.c \
               Core/Src/test_relay_degraded.c \
+              Core/Src/test_relay_health_diag.c \
+              Core/Src/test_relay_health_frame.c \
+              Core/Src/test_ina226_channel_diag.c \
+              Core/Src/test_ina226_ch5_frame.c \
               Core/Src/test_loop_diag.c; do
               exe="/tmp/$(basename "$src" .c)"
               extra=""
@@ -96,11 +105,20 @@ jobs:
                 Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
                 Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
-                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c" ;;
+                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c Core/Src/steering_centering_diag.c" ;;
+                Core/Src/test_steering_centering_diag.c) extra="Core/Src/steering_centering_diag.c" ;;
+                Core/Src/test_steering_centering_frame.c) extra="Core/Src/steering_centering_diag.c" ;;
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
+                Core/Src/test_pedal_cal_session.c) extra="Core/Src/pedal_cal_session.c" ;;
+                Core/Src/test_pedalcal_can_frame.c) extra="Core/Src/pedal_cal_session.c" ;;
+                Core/Src/test_pedalcal_query_readonly.c) extra="Core/Src/pedal_cal_session.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
                 Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
                 Core/Src/test_relay_degraded.c) extra="Core/Src/motion_inhibit.c" ;;
+                Core/Src/test_relay_health_diag.c) extra="Core/Src/relay_health_diag.c" ;;
+                Core/Src/test_relay_health_frame.c) extra="Core/Src/relay_health_diag.c" ;;
+                Core/Src/test_ina226_channel_diag.c) extra="Core/Src/ina226_channel_diag.c" ;;
+                Core/Src/test_ina226_ch5_frame.c) extra="Core/Src/ina226_channel_diag.c" ;;
               esac
               echo "-- $(basename "$src")"
               gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
@@ -144,6 +162,12 @@ jobs:
             g++ -std=c++17 -DHOST_TEST esp32/src/test_pedal_cal_decode.cpp \
               -o /tmp/test_pedal_cal_decode
             /tmp/test_pedal_cal_decode
+
+            echo "-- test_pedal_cal_session_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_pedal_cal_session_view.cpp \
+              -o /tmp/test_pedal_cal_session_view
+            /tmp/test_pedal_cal_session_view
 
             echo "-- test_pedal_decode.cpp"
             g++ -std=c++17 -DHOST_TEST esp32/src/test_pedal_decode.cpp \
@@ -214,6 +238,43 @@ jobs:
               esp32/src/test_wheel_traction.cpp \
               -o /tmp/test_wheel_traction
             /tmp/test_wheel_traction
+
+            echo "-- test_display_supervisor.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_display_supervisor.cpp \
+              -o /tmp/test_display_supervisor
+            /tmp/test_display_supervisor
+
+            echo "-- test_steering_diag_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_steering_diag_view.cpp \
+              -o /tmp/test_steering_diag_view
+            /tmp/test_steering_diag_view
+
+            echo "-- test_relay_health_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include -ICore/Inc \
+              esp32/src/test_relay_health_view.cpp Core/Src/relay_health_diag.c \
+              -o /tmp/test_relay_health_view
+            /tmp/test_relay_health_view
+
+            echo "-- test_ina226_ch5_view.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include -ICore/Inc \
+              esp32/src/test_ina226_ch5_view.cpp Core/Src/ina226_channel_diag.c \
+              -o /tmp/test_ina226_ch5_view
+            /tmp/test_ina226_ch5_view
+
+            echo "-- test_frame_parity_cross.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -DHOST_TEST \
+              -ICore/Inc -Iesp32/src -Iesp32/include \
+              esp32/src/test_frame_parity_cross.cpp \
+              -o /tmp/test_frame_parity_cross
+            /tmp/test_frame_parity_cross
+
+            echo "-- test_display_recovery.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src \
+              esp32/src/test_display_recovery.cpp \
+              -o /tmp/test_display_recovery
+            /tmp/test_display_recovery
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts

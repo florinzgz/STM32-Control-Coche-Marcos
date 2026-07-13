@@ -35,6 +35,7 @@
 
 #include "steering_centering.h"
 #include "safety_system.h"
+#include "service_mode.h"
 #include "stm32g4xx_hal.h"
 
 static int tests_run = 0, tests_failed = 0;
@@ -55,6 +56,11 @@ static int tests_run = 0, tests_failed = 0;
  * reads through __HAL_TIM_GET_COUNTER / __HAL_TIM_SET_COUNTER.          */
 static TIM_TypeDef       fake_tim2_regs;
 TIM_HandleTypeDef        htim2;
+
+/* TIM3 steering PWM timer.  SteeringCentering_UpdateDiag() reads the
+ * applied compare values through __HAL_TIM_GET_COMPARE(&htim3, ...).    */
+static TIM_TypeDef       fake_tim3_regs;
+TIM_HandleTypeDef        htim3;
 
 /* ---- Steering motor "hardware" model ----
  * We model the three motor lines the problem statement calls out:
@@ -107,12 +113,15 @@ void Steering_SetCalibrated(void) { calibrated = true; }
 /* ---- Safety stubs ---- */
 static Safety_Error_t    s_error = SAFETY_ERROR_NONE;
 static SystemState_t     s_state = SYS_STATE_BOOT;
+static bool              s_power_ready = false;
 static DegradedLevel_t   s_deg_level = DEGRADED_LEVEL_NONE;
 static DegradedReason_t  s_deg_reason;
 
 void Safety_SetError(Safety_Error_t error) { s_error = error; }
 Safety_Error_t Safety_GetError(void)       { return s_error; }
 void Safety_SetState(SystemState_t state)  { s_state = state; }
+SystemState_t Safety_GetState(void)        { return s_state; }
+bool Safety_IsPowerReady(void)             { return s_power_ready; }
 void Safety_SetDegradedLevel(DegradedLevel_t level, DegradedReason_t reason)
 {
     s_deg_level  = level;
@@ -123,6 +132,10 @@ void Safety_SetDegradedLevel(DegradedLevel_t level, DegradedReason_t reason)
 static bool center_detected = false;
 bool SteeringCenter_Detected(void) { return center_detected; }
 void SteeringCenter_ClearFlag(void) { center_detected = false; }
+
+/* ---- Service-mode stub ---- */
+static bool s_module_enabled = true;
+bool ServiceMode_IsEnabled(ModuleID_t id) { (void)id; return s_module_enabled; }
 
 /* ---- Encoder stubs ---- */
 static bool     encoder_fault   = false;
@@ -185,11 +198,15 @@ static SteeringMotorOwner_t run_cycle(void)
 static void reset_all(void)
 {
     htim2.Instance = &fake_tim2_regs;
+    htim3.Instance = &fake_tim3_regs;
     set_encoder(0);
+    fake_tim3_regs.CCR1 = 0; fake_tim3_regs.CCR2 = 0;
     motor.driven = false; motor.pwm = 0; motor.reverse = false;
     calibrated = false;
     s_error = SAFETY_ERROR_NONE;
     s_state = SYS_STATE_BOOT;
+    s_power_ready = false;
+    s_module_enabled = true;
     center_detected = false;
     encoder_fault = false;
     z_pulse_count = 0;

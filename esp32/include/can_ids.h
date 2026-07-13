@@ -237,16 +237,20 @@ inline constexpr uint8_t I2C_SCAN_PHASE_TCA_MISSING = 0x02;  // bus OK but TCA95
 inline constexpr uint8_t I2C_SCAN_PHASE_TCA_ACK     = 0x03;  // TCA9548A ACKed (mux present)
 
 // Pedal-calibration sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_PEDAL_CAL
-//   0x01 CAPTURE_MIN    Capture pedal-released ADC into pending MIN
-//   0x02 CAPTURE_MAX    Capture pedal-pressed  ADC into pending MAX
-//   0x03 SAVE           Validate pending pair + persist to STM32 flash
+// The productive calibration is a single guided PedalCalSession FSM; HMI
+// buttons map onto Begin / RequestSave / Abort (audit P5):
+//   0x01 CAPTURE_MIN    BEGIN the guided session (auto-captures MIN/MAX)
+//   0x02 CAPTURE_MAX    Advisory only — MAX auto-captures on a pressed pedal
+//   0x03 SAVE           RequestSave: validate + persist + apply + readback verify
 //   0x04 RESET_DEFAULTS Restore compile-time defaults (50 / 4000)   pedal direct 0–3.3 V, no divider
-//   0x05 QUERY          Request a 1 s burst of 0x308 telemetry at 10 Hz
+//   0x05 QUERY          Request a 1 s burst of 0x308/0x319 telemetry at 10 Hz
+//   0x06 ABORT          Cancel the running session (operator abort)
 inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MIN    = 0x01;
 inline constexpr uint8_t PEDAL_CAL_OP_CAPTURE_MAX    = 0x02;
 inline constexpr uint8_t PEDAL_CAL_OP_SAVE           = 0x03;
 inline constexpr uint8_t PEDAL_CAL_OP_RESET_DEFAULTS = 0x04;
 inline constexpr uint8_t PEDAL_CAL_OP_QUERY          = 0x05;
+inline constexpr uint8_t PEDAL_CAL_OP_ABORT          = 0x06;
 
 // Gear power-limit + accel-response sub-opcodes — byte 1 when byte 0 == SERVICE_ACTION_GEAR_LIMITS
 //   For SET_* sub-opcodes byte 2 carries the new percentage (0..100); the
@@ -520,6 +524,170 @@ inline constexpr uint16_t MOTION_INHIBIT_SERVICE_DISABLED = 0x8000;
 inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_IDLE        = 0;
 inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_IN_PROGRESS = 1;
 inline constexpr uint8_t MOTION_INHIBIT_RELAY_SEQ_COMPLETE    = 2;
+
+// =====================================================================
+// Steering-homing (centering) diagnostic (0x316) — STM32→ESP32, 1 Hz, DLC 8.
+// Mirrors Core/Inc/steering_centering_frame.h.  Instrumentation only: it
+// explains WHY the automatic centering sweep did/did not progress so the HMI
+// can render "DIRECCIÓN NO SE MUEVE" with the real cause instead of "Error 8".
+//   Byte 0   diag reason (STEER_DIAG_* below, 0..15)
+//   Byte 1   FSM state (low nibble) | motor owner (high nibble)
+//   Byte 2   flags: b0 PB5 raw, b1 PB5 debounced, b2 PB5 already-active,
+//            b3 PC12 relay commanded, b4 power ready, b5 PC4 EN commanded,
+//            b6 encoder fault, b7 restored-from-flash
+//   Byte 3   system state (low nibble) | b4 module disabled | b5 fault
+//            latched | b6 pwm requested (>0)
+//   Byte 4-5 PWM real (max CCR PA6/PA7, uint16 LE)
+//   Byte 6-7 encoder delta from sweep origin (int16 LE)
+// =====================================================================
+inline constexpr uint32_t DIAG_STEERING_CENTERING = 0x316;  // STM32→ESP32, DLC 8, 1000 ms
+
+// Steering diagnostic reason codes (0x316 byte 0) — mirror SteerDiagReason_t.
+inline constexpr uint8_t STEER_DIAG_OK                        = 0;
+inline constexpr uint8_t STEER_DIAG_RESTORED_FROM_FLASH       = 1;
+inline constexpr uint8_t STEER_DIAG_WAITING_POWER             = 2;
+inline constexpr uint8_t STEER_DIAG_CENTER_SENSOR_ACTIVE      = 3;
+inline constexpr uint8_t STEER_DIAG_SWEEP_LEFT                = 4;
+inline constexpr uint8_t STEER_DIAG_SWEEP_RIGHT               = 5;
+inline constexpr uint8_t STEER_DIAG_NO_ENCODER_MOVEMENT       = 6;
+inline constexpr uint8_t STEER_DIAG_ENCODER_FAULT             = 7;
+inline constexpr uint8_t STEER_DIAG_RANGE_EXCEEDED            = 8;
+inline constexpr uint8_t STEER_DIAG_TOTAL_TIMEOUT             = 9;
+inline constexpr uint8_t STEER_DIAG_LOST_HOMING_STATE         = 10;
+inline constexpr uint8_t STEER_DIAG_RELAY_NOT_READY           = 11;
+inline constexpr uint8_t STEER_DIAG_MODULE_DISABLED           = 12;
+inline constexpr uint8_t STEER_DIAG_ABORTED_SAFE             = 13;
+inline constexpr uint8_t STEER_DIAG_ABORTED_ERROR            = 14;
+inline constexpr uint8_t STEER_DIAG_UNKNOWN                   = 15;
+
+// Flag bits (0x316 byte 2).
+inline constexpr uint8_t STEER_DIAG_FLAG_PB5_RAW        = 1 << 0;
+inline constexpr uint8_t STEER_DIAG_FLAG_PB5_DEBOUNCED  = 1 << 1;
+inline constexpr uint8_t STEER_DIAG_FLAG_PB5_ACTIVE     = 1 << 2;
+inline constexpr uint8_t STEER_DIAG_FLAG_RELAY_PC12     = 1 << 3;
+inline constexpr uint8_t STEER_DIAG_FLAG_POWER_READY    = 1 << 4;
+inline constexpr uint8_t STEER_DIAG_FLAG_EN_PC4         = 1 << 5;
+inline constexpr uint8_t STEER_DIAG_FLAG_ENCODER_FAULT  = 1 << 6;
+inline constexpr uint8_t STEER_DIAG_FLAG_RESTORED_FLASH = 1 << 7;
+
+// System-state / status bits (0x316 byte 3).
+inline constexpr uint8_t STEER_DIAG_STATE_MASK          = 0x0F;
+inline constexpr uint8_t STEER_DIAG_STATUS_MODULE_DISABLED = 1 << 4;
+inline constexpr uint8_t STEER_DIAG_STATUS_FAULT_LATCHED   = 1 << 5;
+inline constexpr uint8_t STEER_DIAG_STATUS_PWM_REQUESTED   = 1 << 6;
+
+// -------------------------------------------------------------------------
+// 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health (Problem 3)
+// STM32→ESP32, DLC 8, 1000 ms.  Evidence-graded cause so the HMI shows
+// CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED instead of a bare RELAY OPEN.
+// Reason codes mirror RelayDiagReason_t in Core/Inc/relay_health_diag.h.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_RELAY_HEALTH = 0x317;  // STM32→ESP32, DLC 8, 1000 ms
+
+inline constexpr uint8_t RELAY_DIAG_OK                  = 0;
+inline constexpr uint8_t RELAY_DIAG_OPEN_CONFIRMED      = 1;
+inline constexpr uint8_t RELAY_DIAG_OPEN_SUSPECTED      = 2;
+inline constexpr uint8_t RELAY_DIAG_CURRENT_SENSE_INVALID = 3;
+inline constexpr uint8_t RELAY_DIAG_SHUNT_OPEN          = 4;
+inline constexpr uint8_t RELAY_DIAG_SHUNT_BYPASSED      = 5;
+inline constexpr uint8_t RELAY_DIAG_POLARITY_REVERSED   = 6;
+inline constexpr uint8_t RELAY_DIAG_DATA_STALE          = 7;
+inline constexpr uint8_t RELAY_DIAG_INA_MISSING         = 8;
+inline constexpr uint8_t RELAY_DIAG_SCALE_INVALID       = 9;
+inline constexpr uint8_t RELAY_DIAG_INCONCLUSIVE        = 10;
+
+// Byte 1 flag bits (mirror RELAY_FRAME_FLAG_* in Core/Inc/relay_health_frame.h).
+inline constexpr uint8_t RELAY_DIAG_FLAG_RELAY_CMD     = 1 << 0;
+inline constexpr uint8_t RELAY_DIAG_FLAG_SEQ_COMPLETE  = 1 << 1;
+inline constexpr uint8_t RELAY_DIAG_FLAG_POWER_READY   = 1 << 2;
+inline constexpr uint8_t RELAY_DIAG_FLAG_WHEEL_MOVING  = 1 << 3;
+inline constexpr uint8_t RELAY_DIAG_FLAG_CURRENT_VALID = 1 << 4;
+inline constexpr uint8_t RELAY_DIAG_FLAG_CURRENT_STALE = 1 << 5;
+inline constexpr uint8_t RELAY_DIAG_FLAG_INA_MISSING   = 1 << 6;
+inline constexpr uint8_t RELAY_DIAG_FLAG_POLARITY_REV  = 1 << 7;
+
+// -------------------------------------------------------------------------
+// 0x318 DIAG_INA_CH5 — steering INA226 (CH5) channel diagnostic (Problem 4)
+// STM32→ESP32, DLC 8, 1000 ms.  Separates a genuinely MISSING chip (no ACK)
+// from a transport gap ("n/d" = ABSENCE of this frame), a lost config, an
+// open/bypassed shunt, or a reversed-polarity wiring fault — and carries a
+// SIGNED shunt register so a negative current is never flattened to zero.
+// Reason codes mirror Ina226DiagReason_t in Core/Inc/ina226_channel_diag.h.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_INA_CH5 = 0x318;  // STM32→ESP32, DLC 8, 1000 ms
+
+// 0x319 DIAG_PEDAL_CAL_SESSION — guided PedalCalSession status (audit P5).
+// STM32→ESP32, DLC 8, on state change + ~10 Hz while active.  Mirrors
+// Core/Src/can_handler.c pedalcal_send_session_status().
+//   b0 state (PedalCalState), b1 flags (bit0 active, bit1 have_min,
+//   bit2 have_max, bit3 completed, bit4 aborted, bit5 entry-ok,
+//   bit6 operator-cancel abort, bit7 movement-lock-lost abort),
+//   b2-3 reason mask (LE, low 16 bits), b4-5 adc_min (LE), b6-7 adc_max (LE).
+// The extended OPERATOR / LOCK_LOST abort causes live above bit 15 in the
+// firmware reason word and are surfaced ONLY via flag bits 6/7.
+inline constexpr uint32_t DIAG_PEDAL_CAL_SESSION = 0x319;
+
+// 0x319 byte-1 flag bits.
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ACTIVE        = 0x01u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_HAVE_MIN      = 0x02u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_HAVE_MAX      = 0x04u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_COMPLETED     = 0x08u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ABORTED       = 0x10u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ENTRY_OK      = 0x20u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ABORT_OPERATOR  = 0x40u;
+inline constexpr uint8_t PEDCAL_SESS_FLAG_ABORT_LOCK_LOST = 0x80u;
+
+// PedalCalSession state enum (mirror of Core/Inc/pedal_cal_session.h PedalCalState).
+inline constexpr uint8_t PEDCAL_SESS_IDLE                 = 0;
+inline constexpr uint8_t PEDCAL_SESS_ENTERING             = 1;
+inline constexpr uint8_t PEDCAL_SESS_WAIT_RELEASED        = 2;
+inline constexpr uint8_t PEDCAL_SESS_CAPTURING_MIN        = 3;
+inline constexpr uint8_t PEDCAL_SESS_WAIT_FULL_PRESS      = 4;
+inline constexpr uint8_t PEDCAL_SESS_CAPTURING_MAX        = 5;
+inline constexpr uint8_t PEDCAL_SESS_WAIT_RELEASE_FOR_SAVE= 6;
+inline constexpr uint8_t PEDCAL_SESS_READY_TO_SAVE        = 7;
+inline constexpr uint8_t PEDCAL_SESS_SAVING              = 8;
+inline constexpr uint8_t PEDCAL_SESS_COMPLETED           = 9;
+inline constexpr uint8_t PEDCAL_SESS_ABORTED             = 10;
+
+// PedalCalSession reason bitmask (mirror of pedal_cal_session.h).
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_NOT_STANDBY       = 0x0001u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_GEAR             = 0x0002u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_WHEELS_MOVING    = 0x0004u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_PEDAL_IMPLAUSIBLE= 0x0008u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_CRITICAL_ERROR   = 0x0010u;
+inline constexpr uint16_t PEDCAL_SESS_BLOCK_TRACTION_LIVE    = 0x0020u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_SAFE            = 0x0040u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_ERROR           = 0x0080u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_EMERGENCY       = 0x0100u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_MOVEMENT        = 0x0200u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_CAN_LOSS        = 0x0400u;
+inline constexpr uint16_t PEDCAL_SESS_ABORT_TIMEOUT         = 0x0800u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_MIN_GE_MAX       = 0x1000u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_RANGE_SMALL      = 0x2000u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_UNSTABLE         = 0x4000u;
+inline constexpr uint16_t PEDCAL_SESS_FAIL_READBACK         = 0x8000u;
+
+inline constexpr uint8_t INA_CH5_OK                = 0;
+inline constexpr uint8_t INA_CH5_PRESENT_NO_SHUNT  = 1;
+inline constexpr uint8_t INA_CH5_POLARITY_REVERSED = 2;
+inline constexpr uint8_t INA_CH5_STALE             = 3;
+inline constexpr uint8_t INA_CH5_MUX_SELECT_FAIL   = 4;
+inline constexpr uint8_t INA_CH5_MISSING           = 5;
+inline constexpr uint8_t INA_CH5_WRONG_ID          = 6;
+inline constexpr uint8_t INA_CH5_CONFIG_LOST       = 7;
+inline constexpr uint8_t INA_CH5_READ_FAIL         = 8;
+inline constexpr uint8_t INA_CH5_UNKNOWN           = 9;
+
+// Byte 1 flag bits (mirror INA226_CH5_FLAG_* in Core/Inc/ina226_ch5_frame.h).
+inline constexpr uint8_t INA_CH5_FLAG_MUX_OK      = 1 << 0;
+inline constexpr uint8_t INA_CH5_FLAG_I2C_ACK     = 1 << 1;
+inline constexpr uint8_t INA_CH5_FLAG_IDENTITY_OK = 1 << 2;
+inline constexpr uint8_t INA_CH5_FLAG_CONFIG_OK   = 1 << 3;
+inline constexpr uint8_t INA_CH5_FLAG_SHUNT_OK    = 1 << 4;
+inline constexpr uint8_t INA_CH5_FLAG_BUS_OK      = 1 << 5;
+inline constexpr uint8_t INA_CH5_FLAG_POWERED     = 1 << 6;
+inline constexpr uint8_t INA_CH5_FLAG_STALE       = 1 << 7;
 
 } // namespace can
 

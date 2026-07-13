@@ -40,9 +40,11 @@
   */
 
 #include "steering_centering.h"
+#include "steering_centering_diag.h"
 #include "motor_control.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
+#include "service_mode.h"
 #include "steering_cal_store.h"
 #include "steering_z.h"
 #include "encoder_reader.h"
@@ -87,7 +89,13 @@ static uint32_t stall_last_change_tick  = 0;   /* Tick when encoder last moved*/
 static int32_t  sweep_origin_count      = 0;   /* Encoder at sweep start      */
 static uint32_t rail_settle_tick        = 0;   /* Tick when DIR relay energised*/
 
+/* ---- Diagnostics state (Problem 1 instrumentation, read-only) ---- */
+static SteeringCenteringDiag s_diag = { 0 };   /* Latest classified snapshot  */
+static bool s_center_already_active = false;   /* PB5 active when sweep began */
+static bool s_restored_from_flash   = false;   /* Homing skipped via flash    */
+
 extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim3;
 
 /* ---- Private helpers ---- */
 
@@ -186,6 +194,8 @@ static bool Centering_RangeExceeded(void)
 void SteeringCentering_Init(void)
 {
     centering_state = CENTERING_IDLE;
+    s_center_already_active = false;
+    s_restored_from_flash   = false;
     SteeringZ_Init();
     SteeringCenter_ClearFlag();
 }
@@ -238,6 +248,15 @@ void SteeringCentering_Step(void)
             stall_prev_count       = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
             stall_last_change_tick = now;
             sweep_origin_count     = stall_prev_count;
+
+            /* Latch whether PB5 is already asserted at the instant the sweep
+             * begins.  The inductive centre sensor is active-LOW (falling
+             * edge → screw in front of the LJ12A3), so a LOW level here means
+             * the rack is reported "at centre" before we have moved — a
+             * suspicious physical condition surfaced by the classifier as
+             * STEER_DIAG_CENTER_SENSOR_ALREADY_ACTIVE.  Read-only. */
+            s_center_already_active =
+                (HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) == GPIO_PIN_RESET);
 
             /* Begin sweeping LEFT (direction = reverse = true → negative) */
             Motor_SetPWM_Steering(CENTERING_PWM, true);
@@ -367,4 +386,87 @@ void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
     SteeringZ_LoadFromFlash(SteeringCal_GetStoredZOffset(),
                             SteeringCal_IsStoredZValid());
     centering_state = CENTERING_DONE;
+    s_restored_from_flash = true;
+}
+
+/* ==================================================================
+ *  Homing diagnostics (Problem 1 integration) — read-only
+ * ================================================================== */
+
+/**
+ * @brief  Map the safety SystemState_t onto the classifier's frozen
+ *         STEER_DIAG_SS_* numeric codes (kept independent so the pure
+ *         classifier never pulls in HAL/safety types).
+ */
+static uint8_t Diag_MapSystemState(SystemState_t ss)
+{
+    switch (ss) {
+    case SYS_STATE_BOOT:      return STEER_DIAG_SS_BOOT;
+    case SYS_STATE_STANDBY:   return STEER_DIAG_SS_STANDBY;
+    case SYS_STATE_ACTIVE:    return STEER_DIAG_SS_ACTIVE;
+    case SYS_STATE_DEGRADED:  return STEER_DIAG_SS_DEGRADED;
+    case SYS_STATE_SAFE:      return STEER_DIAG_SS_SAFE;
+    case SYS_STATE_ERROR:     return STEER_DIAG_SS_ERROR;
+    case SYS_STATE_LIMP_HOME: return STEER_DIAG_SS_LIMP_HOME;
+    default:                  return STEER_DIAG_SS_BOOT;
+    }
+}
+
+void SteeringCentering_UpdateDiag(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    SystemState_t sys = Safety_GetState();
+    bool in_homing = (sys == SYS_STATE_BOOT) || (sys == SYS_STATE_STANDBY);
+    bool sweeping = (centering_state == CENTERING_SWEEP_LEFT) ||
+                    (centering_state == CENTERING_SWEEP_RIGHT);
+
+    int32_t enc = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+
+    s_diag.fsm_state    = centering_state;
+    s_diag.motor_owner  = SteeringCentering_DecideOwner(centering_state,
+                                                        in_homing);
+    s_diag.system_state = Diag_MapSystemState(sys);
+
+    /* PB5 is active-LOW; raw level LOW ⇒ centre screw detected. */
+    s_diag.center_sensor_raw =
+        (HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) == GPIO_PIN_RESET);
+    s_diag.center_sensor_debounced      = SteeringCenter_Detected();
+    s_diag.center_sensor_already_active = s_center_already_active;
+
+    s_diag.encoder_count = enc;
+    s_diag.encoder_delta = enc - sweep_origin_count;
+
+    /* PC12 steering-rail relay and PC4 EN_STEER are GPIO outputs; reading
+     * the pin returns the commanded (ODR) level. */
+    s_diag.relay_steer_commanded =
+        (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) == GPIO_PIN_SET);
+    s_diag.power_ready        = Safety_IsPowerReady();
+    s_diag.enable_commanded   =
+        (HAL_GPIO_ReadPin(GPIOC, PIN_EN_STEER) == GPIO_PIN_SET);
+
+    s_diag.pwm_requested   = sweeping ? CENTERING_PWM : 0U;
+    s_diag.pwm_applied_ch1 =
+        (uint16_t)__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+    s_diag.pwm_applied_ch2 =
+        (uint16_t)__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+
+    s_diag.elapsed_ms =
+        (centering_start_tick != 0U) ? (now - centering_start_tick) : 0U;
+    s_diag.last_encoder_change_ms = now - stall_last_change_tick;
+
+    s_diag.encoder_fault      = Encoder_HasFault();
+    s_diag.restored_from_flash = s_restored_from_flash;
+    s_diag.module_disabled     = !ServiceMode_IsEnabled(MODULE_STEER_CENTER);
+    s_diag.fault_latched       =
+        (Safety_GetError() == SAFETY_ERROR_CENTERING) ||
+        (centering_state == CENTERING_FAULT);
+
+    /* Never invent the cause — derive it from the captured numbers only. */
+    s_diag.abort_reason = SteeringCentering_ClassifyDiag(&s_diag);
+}
+
+const SteeringCenteringDiag *SteeringCentering_GetDiag(void)
+{
+    return &s_diag;
 }
