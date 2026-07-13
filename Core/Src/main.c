@@ -810,6 +810,11 @@ int main(void)
              * real cause of a stuck centering sweep.  Instrumentation only.   */
             CAN_SendSteeringCenteringDiag();
 
+            /* Relay / current-sense health telemetry (0x317): evidence-graded
+             * cause + the numbers behind it so the HMI can show CURRENT SENSE
+             * INVALID vs RELAY OPEN SUSPECTED.  Instrumentation only.          */
+            CAN_SendRelayHealthDiag();
+
             /* Error log header: send entry count to ESP32 engineering menu */
             CAN_SendErrorLogHeader();
 

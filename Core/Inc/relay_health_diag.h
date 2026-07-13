@@ -52,7 +52,7 @@ typedef enum {
 } RelayDiagReason_t;
 
 /* ---- Full relay/current telemetry snapshot ---- */
-typedef struct {
+typedef struct RelayHealthDiag {
     /* Relay & power path */
     bool     relay_commanded;         /* Traction relay commanded ON          */
     bool     relay_sequence_complete; /* RELAY_SEQ_COMPLETE                    */

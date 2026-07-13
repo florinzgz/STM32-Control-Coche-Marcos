@@ -29,6 +29,7 @@
 #include "steering_z.h"
 #include "steering_centering.h"
 #include "steering_centering_frame.h"
+#include "relay_health_frame.h"
 #include "encoder_reader.h"
 #include "rc_arbiter.h"
 #include <math.h>
@@ -1470,6 +1471,25 @@ void CAN_SendSteeringCenteringDiag(void) {
     SteerCentering_PackFrame(d, data);
 
     TransmitFrame(CAN_ID_DIAG_STEERING_CENTERING, data, 8);
+}
+
+/**
+ * @brief  Relay / current-sense health telemetry — 0x317 (1 Hz).
+ *
+ * Serialises the evidence-graded RelayHealthDiag snapshot classified by
+ * safety_system.c so the ESP32 can show the REAL cause (CURRENT SENSE INVALID
+ * vs RELAY OPEN SUSPECTED) and the numbers behind it, instead of a bare
+ * "RELAY OPEN".  Instrumentation only — reads the cached snapshot.
+ */
+void CAN_SendRelayHealthDiag(void) {
+    const RelayHealthDiag *d = Safety_GetRelayHealthDiag();
+    uint8_t data[8] = {0};
+
+    /* Single source of truth for the 0x317 wire layout — shared with the
+     * ESP32 receiver and the host round-trip test. */
+    RelayHealth_PackFrame(d, data);
+
+    TransmitFrame(CAN_ID_DIAG_RELAY_HEALTH, data, 8);
 }
 
 /**

@@ -21,6 +21,7 @@
 #include "error_log.h"
 #include "can_handler.h"
 #include "math_safety.h"
+#include "relay_health_diag.h"    /* Problem 3: evidence-graded relay/current diagnosis */
 #include <math.h>       /* isnan(), isinf() — NaN/Inf hardening */
 
 /* ---- Thresholds (from base firmware) ---- */
@@ -2783,8 +2784,109 @@ void Safety_CheckBatteryOvervoltage(void)
  * O(1) per call.  No division.  No blocking.  No CAN changes.
  * Called from the 10 ms safety loop (same tier as Safety_CheckCurrent). */
 
+/* ---- Problem 3: evidence-graded relay / current-sense diagnosis ----------
+ * Snapshot classified by the pure Relay_ClassifyHealth() every cycle and
+ * exposed to the CAN/HMI path.  Instrumentation only: it never sets a fault
+ * or gates control — the legacy latch in Safety_CheckRelayHealth() is left
+ * exactly as-is.  It exists so the operator sees the REAL cause (and the
+ * numbers behind it) instead of a bare "RELAY OPEN" when the motors clearly
+ * turn but the shunt reads 0 A.                                             */
+static RelayHealthDiag s_relay_diag = { .diagnostic_reason = RELAY_DIAG_INCONCLUSIVE };
+
+void Safety_UpdateRelayHealthDiag(void)
+{
+    RelayHealthDiag d = (RelayHealthDiag){0};
+
+    /* Relay / power path. */
+    d.relay_commanded         = (relay_seq_state != RELAY_SEQ_IDLE);
+    d.relay_sequence_complete = (relay_seq_state == RELAY_SEQ_COMPLETE);
+    d.power_ready             = Safety_IsPowerReady();
+
+    /* Demand chain. */
+    d.throttle_pct = Pedal_GetPercent();
+    const TractionState_t *ts = Traction_GetState();
+    float traction_demand = (ts != (void *)0) ? ts->demandPct : 0.0f;
+    d.traction_demand_pct = traction_demand;
+    d.effective_demand_pct = traction_demand;
+    d.final_pwm_pct        = traction_demand;   /* actually-commanded output */
+
+    /* Motion. */
+    d.wheel_speed[0] = Wheel_GetSpeed_FL();
+    d.wheel_speed[1] = Wheel_GetSpeed_FR();
+    d.wheel_speed[2] = Wheel_GetSpeed_RL();
+    d.wheel_speed[3] = Wheel_GetSpeed_RR();
+    d.average_speed  = (d.wheel_speed[0] + d.wheel_speed[1] +
+                        d.wheel_speed[2] + d.wheel_speed[3]) * 0.25f;
+    d.any_wheel_moving = (d.wheel_speed[0] > RELAY_CHK_STALL_SPEED_KMH) ||
+                         (d.wheel_speed[1] > RELAY_CHK_STALL_SPEED_KMH) ||
+                         (d.wheel_speed[2] > RELAY_CHK_STALL_SPEED_KMH) ||
+                         (d.wheel_speed[3] > RELAY_CHK_STALL_SPEED_KMH);
+
+    /* Current sense (INA226 CH0..3). */
+    d.ina_ok_mask        = Sensor_GetInaOkMask();
+    d.ina_expected_mask  = Sensor_GetInaExpectedMask();
+    d.current_sample_age_ms = Current_GetSampleAgeMs();
+
+    uint8_t valid_mask = 0;
+    float   sum_abs = 0.0f, signed_sum = 0.0f;
+    for (uint8_t i = 0; i < NUM_WHEELS; i++) {
+        float amps = Current_GetAmps(i);
+        d.current_ch[i] = amps;
+        bool finite = !isnan(amps) && !isinf(amps);
+        float mag = (amps < 0.0f) ? -amps : amps;
+        if (finite && mag <= SENSOR_CURRENT_MAX_A) {
+            valid_mask |= (uint8_t)(1U << i);
+            sum_abs    += mag;
+            signed_sum += amps;
+        }
+    }
+    d.ina_valid_mask     = valid_mask;
+    d.current_sum_abs    = sum_abs;
+    d.current_signed_sum = signed_sum;
+
+    /* Same adaptive detection threshold the legacy latch uses, so the
+     * classifier's "effectively zero" test matches the real trip point. */
+    float thr = RELAY_CHK_CURRENT_BASE_A + RELAY_CHK_CURRENT_K * d.throttle_pct;
+    if (thr < RELAY_CHK_CURRENT_BASE_A)      thr = RELAY_CHK_CURRENT_BASE_A;
+    else if (thr > RELAY_CHK_CURRENT_MAX_A)  thr = RELAY_CHK_CURRENT_MAX_A;
+    d.current_threshold = thr;
+
+    d.battery_voltage = Voltage_GetBus(INA226_CHANNEL_BATTERY);
+
+    /* Independent confirming evidence (rule C).  This platform has NO
+     * post-relay voltage / contact-feedback sensor (the battery INA sits
+     * BEFORE the traction relay, see project_config.h), so we cannot supply
+     * the independent evidence the audit requires for RELAY_OPEN_CONFIRMED.
+     * Leave both false (unknown) and downgrade any CONFIRMED verdict to
+     * SUSPECTED below — never claim confirmation without real evidence.    */
+    d.post_relay_voltage_present = false;
+    d.battery_consumption_rising = false;
+    d.scale_invalid    = false;
+    d.polarity_reversed = false;
+
+    RelayDiagReason_t reason = Relay_ClassifyHealth(&d);
+    if (reason == RELAY_OPEN_CONFIRMED) {
+        /* No independent tension/contact evidence available on this HW. */
+        reason = RELAY_OPEN_SUSPECTED;
+    }
+    d.diagnostic_reason = reason;
+
+    s_relay_diag = d;
+}
+
+const RelayHealthDiag *Safety_GetRelayHealthDiag(void)
+{
+    return &s_relay_diag;
+}
+
 void Safety_CheckRelayHealth(void)
 {
+    /* Build the evidence-graded relay/current-sense diagnosis first, every
+     * cycle, so the HMI/CAN can show the real cause (and the numbers behind
+     * it) independently of the legacy pass/fail latch below.  Read-only. */
+    Safety_UpdateRelayHealthDiag();
+
+
     /* ---- Relay Failure Detection — Design Constraints ----
      *
      * ⚠ IMPORTANT: Relay fault detection REQUIRES active motor demand.

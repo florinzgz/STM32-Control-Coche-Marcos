@@ -25,6 +25,7 @@
 #include <array>
 #include "can_ids.h"
 #include "steering_diag_view.h"
+#include "relay_health_view.h"
 
 namespace vehicle {
 
@@ -379,6 +380,18 @@ struct SteeringCenteringDiagData {
 };
 
 // -------------------------------------------------------------------------
+// 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health.
+// Explains WHY a relay fault is (or is not) suspected so the HMI can show
+// CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED with the numbers behind it.
+// See esp32/src/relay_health_view.h and Core/Inc/relay_health_frame.h.
+// -------------------------------------------------------------------------
+struct RelayHealthDiagData {
+    relay_health_view::RelayHealthView view{};
+    bool          valid       = false;
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // 0x207 STATUS_BATTERY reception counters — tracked in can_rx.cpp
 // Lets the HMI diagnose a silent 0x207 gap (stale frame) vs. dropped DLC.
 // -------------------------------------------------------------------------
@@ -579,6 +592,7 @@ public:
     void setWheelSensorDiag(const WheelSensorDiagData& d) { wheelSensorDiag_ = d; }
     void setMotionInhibit(const MotionInhibitData& d) { motionInhibit_ = d; }
     void setSteeringCenteringDiag(const SteeringCenteringDiagData& d) { steeringCenteringDiag_ = d; }
+    void setRelayHealthDiag(const RelayHealthDiagData& d) { relayHealthDiag_ = d; }
     void setBatt207Diag(const Batt207DiagData& d)   { batt207Diag_ = d; }
     void setI2cScan(const I2cScanData& d)           { i2cScan_ = d; }
     void setFdcanDiag(const FdcanDiagData& d)       { fdcanDiag_ = d; }
@@ -618,6 +632,7 @@ public:
     const WheelSensorDiagData& wheelSensorDiag() const { return wheelSensorDiag_; }
     const MotionInhibitData& motionInhibit() const { return motionInhibit_; }
     const SteeringCenteringDiagData& steeringCenteringDiag() const { return steeringCenteringDiag_; }
+    const RelayHealthDiagData& relayHealthDiag() const { return relayHealthDiag_; }
     const Batt207DiagData&  batt207Diag()  const { return batt207Diag_; }
     const I2cScanData&      i2cScan()      const { return i2cScan_; }
     const FdcanDiagData&    fdcanDiag()    const { return fdcanDiag_; }
@@ -653,6 +668,7 @@ private:
     WheelSensorDiagData wheelSensorDiag_;
     MotionInhibitData   motionInhibit_;
     SteeringCenteringDiagData steeringCenteringDiag_;
+    RelayHealthDiagData relayHealthDiag_;
     Batt207DiagData  batt207Diag_;
     I2cScanData      i2cScan_;
     FdcanDiagData    fdcanDiag_;

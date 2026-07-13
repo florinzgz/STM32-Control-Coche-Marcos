@@ -662,6 +662,11 @@ static uint8_t ina_ok_mask  = 0;       /* bit i = INA226 on channel i acked */
 static uint8_t ina_bus_ok_mask = 0;    /* bit i = bus-voltage read OK       */
 static bool    i2c_ever_ok  = false;   /* latched: at least one INA seen OK */
 static bool    ina_last_read_ok = false; /* status of last INA226_ReadReg() */
+/* Tick of the most recent cycle in which at least one INA226 answered, used
+ * by the relay-health classifier to tell "fresh 0 A" from a stale reading.
+ * Additive diagnostic only; never gates control.                          */
+static uint32_t ina_last_ok_tick = 0;
+static bool     ina_ever_sampled = false;
 
 /* ---- Phase-based INA226 power expectation (additive, no new safety path) ----
  * Motor INA226s (ch0..3) are wired AFTER the traction relay and the steering
@@ -987,6 +992,8 @@ void Current_ReadAll(void)
     ina_bus_ok_mask = new_bus_ok_mask;
     if (new_ina_mask != 0) {
         i2c_ever_ok = true;
+        ina_last_ok_tick = HAL_GetTick();
+        ina_ever_sampled = true;
     }
 
     /* I2C failure detection and recovery */
@@ -1060,6 +1067,15 @@ bool Sensor_GetI2cEverOk(void) {
 
 uint8_t Sensor_GetI2cLastReadMs(void) {
     return i2c_last_read_ms;
+}
+
+/* Age (ms) of the newest cycle in which any INA226 answered.  Saturates at
+ * UINT16_MAX and returns UINT16_MAX when no sample has ever been taken, so a
+ * never-sampled bus reads as unambiguously stale.  Report-only.            */
+uint16_t Current_GetSampleAgeMs(void) {
+    if (!ina_ever_sampled) return UINT16_MAX;
+    uint32_t age = HAL_GetTick() - ina_last_ok_tick;
+    return (age > (uint32_t)UINT16_MAX) ? UINT16_MAX : (uint16_t)age;
 }
 
 /* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) --------------
@@ -1933,6 +1949,8 @@ void Sensor_Init(void)
     ina_bus_ok_mask = 0;
     i2c_ever_ok  = false;
     ina_last_read_ok = false;
+    ina_last_ok_tick = 0;
+    ina_ever_sampled = false;
     ina_expected_mask   = INA226_MASK_BATTERY;  /* only BAT powered pre-relay */
     ina_configured_mask = 0;
 

@@ -126,6 +126,18 @@ extern "C" {
                                          //             bit6 pwm requested (>0)
                                          //   Byte 4-5: PWM real (max CCR PA6/PA7, uint16 LE)
                                          //   Byte 6-7: encoder delta from sweep origin (int16 LE, clamped)
+#define CAN_ID_DIAG_RELAY_HEALTH  0x317 // STM32 → ESP32 (1000ms) traction relay / current-sense health.
+                                         //   Evidence-graded cause so the HMI shows CURRENT SENSE INVALID
+                                         //   vs RELAY OPEN SUSPECTED instead of a bare "RELAY OPEN".
+                                         //   Byte 0:   diag reason (RelayDiagReason_t, 0..10)
+                                         //   Byte 1:   flags bit0 relay commanded, bit1 seq complete,
+                                         //             bit2 power ready, bit3 any wheel moving,
+                                         //             bit4 current valid, bit5 current stale,
+                                         //             bit6 expected wheel INA missing, bit7 polarity rev
+                                         //   Byte 2-3: sum |CH0..3| current in centi-amps (uint16 LE)
+                                         //   Byte 4:   throttle % (0..100)
+                                         //   Byte 5:   final PWM/traction demand % (0..100)
+                                         //   Byte 6-7: current sample age ms (uint16 LE)
 #define CAN_ID_SERVICE_CMD              0x110  // ESP32 → STM32 (on-demand) module control
 #define CAN_ID_CMD_SENSOR_MAP_TEMP      0x112  // ESP32 → STM32 (on-demand) DS18B20 physIdx→role map (DLC 5)
 #define CAN_ID_CMD_ACK                  0x103  // STM32 → ESP32 (on-demand) command acknowledgment
@@ -422,6 +434,7 @@ void CAN_SendBootResetDiag(void);   /* 1 Hz boot/reset diagnostic (0x312): uptim
 void CAN_SendWheelSensorDiag(void); /* 1 Hz per-wheel speed-sensor fault-reason diagnostic (0x313) */
 void CAN_SendMotionInhibit(void);   /* 10 Hz MOTION_INHIBIT_REASON instrumentation (0x315) */
 void CAN_SendSteeringCenteringDiag(void); /* 1 Hz steering homing telemetry (0x316) */
+void CAN_SendRelayHealthDiag(void);       /* 1 Hz relay/current-sense health (0x317) */
 void CAN_SendI2CScanReport(void);   /* On-demand I2C service-mode scan report (0x30B) */
 void CAN_SendFdcanDiag(void);       /* On-demand FDCAN error-counter dump (0x30C) */
 void CAN_ProcessMessages(void);

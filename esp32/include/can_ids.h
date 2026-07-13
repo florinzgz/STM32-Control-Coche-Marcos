@@ -572,6 +572,36 @@ inline constexpr uint8_t STEER_DIAG_STATUS_MODULE_DISABLED = 1 << 4;
 inline constexpr uint8_t STEER_DIAG_STATUS_FAULT_LATCHED   = 1 << 5;
 inline constexpr uint8_t STEER_DIAG_STATUS_PWM_REQUESTED   = 1 << 6;
 
+// -------------------------------------------------------------------------
+// 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health (Problem 3)
+// STM32→ESP32, DLC 8, 1000 ms.  Evidence-graded cause so the HMI shows
+// CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED instead of a bare RELAY OPEN.
+// Reason codes mirror RelayDiagReason_t in Core/Inc/relay_health_diag.h.
+// -------------------------------------------------------------------------
+inline constexpr uint32_t DIAG_RELAY_HEALTH = 0x317;  // STM32→ESP32, DLC 8, 1000 ms
+
+inline constexpr uint8_t RELAY_DIAG_OK                  = 0;
+inline constexpr uint8_t RELAY_DIAG_OPEN_CONFIRMED      = 1;
+inline constexpr uint8_t RELAY_DIAG_OPEN_SUSPECTED      = 2;
+inline constexpr uint8_t RELAY_DIAG_CURRENT_SENSE_INVALID = 3;
+inline constexpr uint8_t RELAY_DIAG_SHUNT_OPEN          = 4;
+inline constexpr uint8_t RELAY_DIAG_SHUNT_BYPASSED      = 5;
+inline constexpr uint8_t RELAY_DIAG_POLARITY_REVERSED   = 6;
+inline constexpr uint8_t RELAY_DIAG_DATA_STALE          = 7;
+inline constexpr uint8_t RELAY_DIAG_INA_MISSING         = 8;
+inline constexpr uint8_t RELAY_DIAG_SCALE_INVALID       = 9;
+inline constexpr uint8_t RELAY_DIAG_INCONCLUSIVE        = 10;
+
+// Byte 1 flag bits (mirror RELAY_FRAME_FLAG_* in Core/Inc/relay_health_frame.h).
+inline constexpr uint8_t RELAY_DIAG_FLAG_RELAY_CMD     = 1 << 0;
+inline constexpr uint8_t RELAY_DIAG_FLAG_SEQ_COMPLETE  = 1 << 1;
+inline constexpr uint8_t RELAY_DIAG_FLAG_POWER_READY   = 1 << 2;
+inline constexpr uint8_t RELAY_DIAG_FLAG_WHEEL_MOVING  = 1 << 3;
+inline constexpr uint8_t RELAY_DIAG_FLAG_CURRENT_VALID = 1 << 4;
+inline constexpr uint8_t RELAY_DIAG_FLAG_CURRENT_STALE = 1 << 5;
+inline constexpr uint8_t RELAY_DIAG_FLAG_INA_MISSING   = 1 << 6;
+inline constexpr uint8_t RELAY_DIAG_FLAG_POLARITY_REV  = 1 << 7;
+
 } // namespace can
 
 #endif // CAN_IDS_H

@@ -134,7 +134,10 @@ bool    Sensor_GetI2cEverOk(void);            /* latched: any INA seen OK ever  
 /* Duration of the most recent Current_ReadAll() call (HAL_GetTick delta, ms).
  * Saturates at 255.  Visible on 0x309 byte 6 for field diagnostics.         */
 uint8_t Sensor_GetI2cLastReadMs(void);
-
+/* Age (ms) of the newest cycle in which any INA226 answered; UINT16_MAX when
+ * never sampled.  Lets the relay-health classifier separate fresh 0 A from a
+ * stale current reading.  Report-only.                                      */
+uint16_t Current_GetSampleAgeMs(void);
 /* ---- I2C service-mode scan (Level 3 diagnostic, on-demand) ----
  * Active probe used by SERVICE_CMD 0xF6 → CAN 0x30B.  Reads SDA/SCL idle
  * levels, probes the TCA9548A (0x70) and each INA226 (0x40) behind the mux

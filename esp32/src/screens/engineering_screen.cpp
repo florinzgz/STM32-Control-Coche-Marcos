@@ -963,6 +963,14 @@ void EngineeringScreen::update(const vehicle::VehicleData& data, unsigned long f
         inaLiveAgeMs_         = ageMs;
         inaLiveLastAgeSec_    = ageSec;
 
+        // 0x317 relay/current-sense health arrives at 1 Hz; repaint the page
+        // when a fresh verdict lands so the RELAY HEALTH line stays live.
+        const auto& rh = data.relayHealthDiag();
+        if (rh.timestampMs != relayHealthLastTs_) {
+            relayHealthLastTs_ = rh.timestampMs;
+            changed = true;
+        }
+
         inaLiveDataChanged_ = changed;
     }
 
@@ -1879,9 +1887,45 @@ void EngineeringScreen::draw() {
             tft.drawString(buf, gx, gy + 5 * lh);
         }
 
-        tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
-        tft.drawString("Legend: rest~0A OK | rest~100A suspect shunt/sense", 10, 260);
-        tft.drawString("Volts OK + amps wrong => current path/shunt issue", 10, 272);
+        // ---- RELAY / CURRENT-SENSE HEALTH (0x317) ----
+        // Shows the evidence-graded verdict and the numbers behind it so the
+        // operator sees CURRENT SENSE INVALID vs RELAY OPEN SUSPECTED (and the
+        // recommended physical check) instead of a bare "RELAY OPEN".
+        if (data_ != nullptr) {
+            namespace rhv = relay_health_view;
+            const auto& rh = data_->relayHealthDiag();
+            const uint32_t nowMs = (uint32_t)millis();
+            const rhv::Freshness fr = rhv::freshness(
+                rh.valid, nowMs, (uint32_t)rh.timestampMs);
+            char rbuf[96];
+
+            if (fr == rhv::Freshness::NEVER_RECEIVED) {
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                tft.drawString("RELAY HEALTH 0x317: NO DATA", 10, 260);
+            } else {
+                const uint8_t reason = rh.view.reason;
+                const bool fault = rhv::isFault(reason);
+                const bool stale = (fr == rhv::Freshness::STALE);
+                const uint16_t col = stale ? ui::COL_GRAY
+                                   : (fault ? ui::COL_RED : ui::COL_GREEN);
+                tft.setTextColor(col, ui::COL_BG);
+                snprintf(rbuf, sizeof(rbuf), "RELAY: %s (%s)%s",
+                         rhv::reasonText(reason),
+                         rhv::confidenceText(reason),
+                         stale ? " STALE" : "");
+                tft.drawString(rbuf, 10, 260);
+
+                tft.setTextColor(ui::COL_GRAY, ui::COL_BG);
+                snprintf(rbuf, sizeof(rbuf),
+                         "I=%u.%02uA PWM=%u%% MOV=%s | SOL:%s",
+                         (unsigned)(rh.view.currentSumCa / 100U),
+                         (unsigned)(rh.view.currentSumCa % 100U),
+                         (unsigned)rh.view.finalPwmPct,
+                         rh.view.anyWheelMoving ? "SI" : "NO",
+                         rhv::solutionText(reason));
+                tft.drawString(rbuf, 10, 272);
+            }
+        }
     }
 
     // Partial redraw for debounce DWT EMI counters (1 Hz)

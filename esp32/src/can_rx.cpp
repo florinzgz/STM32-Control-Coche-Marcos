@@ -442,6 +442,19 @@ static void decodeSteeringCenteringDiag(const CanFrame& f, vehicle::VehicleData&
     data.setSteeringCenteringDiag(sc);
 }
 
+// 0x317 DIAG_RELAY_HEALTH — traction relay / current-sense health (DLC 8).
+// Frame layout mirrors Core/Inc/relay_health_frame.h; decoded by the shared
+// pure helper so the HMI and host test share one deserialiser.
+static void decodeRelayHealthDiag(const CanFrame& f, vehicle::VehicleData& data) {
+    vehicle::RelayHealthDiagData rh;
+    if (!relay_health_view::decode(f.data, f.data_length_code, rh.view)) {
+        return;
+    }
+    rh.valid       = true;
+    rh.timestampMs = millis();
+    data.setRelayHealthDiag(rh);
+}
+
 // 0x30B DIAG_I2C_SCAN — I2C service-mode scan report (DLC 8).
 // Frame layout mirrors Core/Src/can_handler.c CAN_SendI2CScanReport().
 static void decodeI2cScan(const CanFrame& f, vehicle::VehicleData& data) {
@@ -721,6 +734,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_WHEEL_SENSOR:    decodeWheelSensorDiag(frame, data);   break;
             case can::DIAG_MOTION_INHIBIT:  decodeMotionInhibit(frame, data);     break;
             case can::DIAG_STEERING_CENTERING: decodeSteeringCenteringDiag(frame, data); break;
+            case can::DIAG_RELAY_HEALTH: decodeRelayHealthDiag(frame, data); break;
             case can::DIAG_I2C_SCAN:        decodeI2cScan(frame, data);           break;
             case can::DIAG_FDCAN:           decodeFdcanDiag(frame, data);         break;
             case can::DIAG_GEAR_LIMITS:     decodeGearLimits(frame, data);        break;
