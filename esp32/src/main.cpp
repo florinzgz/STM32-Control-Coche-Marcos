@@ -613,7 +613,7 @@ void rec_restoreBacklight(void*){ const auto& cfg = config_store::get();
                                   display_backlight::apply(cfg.brightness); }
 void rec_invalidateCaches(void*){ tft.fillScreen(0x2104); }
 void rec_forceFullRedraw(void*) { screenManager.forceFullRedraw(); }
-RecoveryResult rec_verify(void* v)  { auto* c = static_cast<RecoveryCtx*>(v);
+display::RecoveryResult rec_verify(void* v)  { auto* c = static_cast<RecoveryCtx*>(v);
                                   const display::StatusRead st = readTftStatus();
                                   c->status_invalid = (st == display::StatusRead::INVALID);
                                   c->observable = display::whiteScreenObservable(
