@@ -86,6 +86,7 @@ jobs:
               Core/Src/test_pedal_cal_limits.c \
               Core/Src/test_pedal_cal_session.c \
               Core/Src/test_pedalcal_can_frame.c \
+              Core/Src/test_pedalcal_query_readonly.c \
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
               Core/Src/test_motion_inhibit.c \
@@ -110,6 +111,7 @@ jobs:
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
                 Core/Src/test_pedal_cal_session.c) extra="Core/Src/pedal_cal_session.c" ;;
                 Core/Src/test_pedalcal_can_frame.c) extra="Core/Src/pedal_cal_session.c" ;;
+                Core/Src/test_pedalcal_query_readonly.c) extra="Core/Src/pedal_cal_session.c" ;;
                 Core/Src/test_busoff_recovery.c) extra="Core/Src/busoff_recovery.c" ;;
                 Core/Src/test_motion_inhibit.c) extra="Core/Src/motion_inhibit.c" ;;
                 Core/Src/test_relay_degraded.c) extra="Core/Src/motion_inhibit.c" ;;
