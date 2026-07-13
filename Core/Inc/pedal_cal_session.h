@@ -17,8 +17,8 @@
   *      -> ENTERING              (entry guards satisfied)
   *      -> WAIT_RELEASED         (operator must release the pedal)
   *      -> CAPTURING_MIN         (8 stable samples, pedal released)
-  *      -> WAIT_FULL_PRESS       (operator must press the pedal fully)
-  *      -> CAPTURING_MAX         (8 stable samples, pedal PRESSED — no <3 % rule)
+  *      -> WAIT_FULL_PRESS       (operator arms CAPTURE MAX with the button)
+  *      -> CAPTURING_MAX         (8 stable RAW samples, raw>MIN, raw-MIN>=range)
   *      -> WAIT_RELEASE_FOR_SAVE (operator must release again before saving)
   *      -> READY_TO_SAVE         (MIN<MAX and range validated)
   *      -> SAVING                (persist + apply + readback verify)
@@ -36,8 +36,12 @@
   *
   * Phase capture rules (audit §5):
   *   CAPTURE MIN : pedal must be RELEASED, 8 stable samples.
-  *   CAPTURE MAX : pedal must be PRESSED (does NOT require pedal < 3 %),
-  *                 8 stable samples, then the max/range are checked at SAVE.
+  *   CAPTURE MAX : the operator ARMS the capture with the CAPTURE MAX button
+  *                 (PedalCalSession_ArmCaptureMax); MAX is then locked from the
+  *                 RAW ADC — 8 stable samples with raw > MIN and
+  *                 (raw - MIN) >= range_min.  It does NOT use a percent threshold
+  *                 (Pedal_GetPercent >= 80 %) that would depend on a possibly-
+  *                 wrong old calibration.
   *   SAVE        : pedal must be RELEASED again, MIN < MAX, range >= 800,
   *                 persist, apply, then read the value back and verify.
   *
@@ -98,6 +102,13 @@ typedef enum {
 #define PEDAL_CAL_FAIL_RANGE_SMALL        0x2000U
 #define PEDAL_CAL_FAIL_UNSTABLE           0x4000U
 #define PEDAL_CAL_FAIL_READBACK           0x8000U
+/* Extended causes (audit P5 final).  These sit ABOVE the 16-bit CAN reason
+ * mask so the 0x319 reason field (bytes 2-3) stays a stable 16-bit contract.
+ * They are surfaced instead through dedicated 0x319 byte-1 flag bits so the
+ * HMI can still tell an operator cancel apart from a real emergency, and a
+ * lost movement lock apart from an ordinary movement abort.                 */
+#define PEDAL_CAL_ABORT_OPERATOR          0x00010000U  /* operator pressed ABORT */
+#define PEDAL_CAL_ABORT_LOCK_LOST         0x00020000U  /* traction lock no longer safe */
 
 /* ---- Per-tick condition snapshot (all facts the FSM needs) ---------------
  * The caller fills this from the live safety / sensor state; the module
@@ -109,13 +120,22 @@ typedef struct {
     bool     wheels_moving;       /* any wheel speed >= 0.3 km/h             */
     bool     pedal_plausible;     /* Pedal_IsPlausible()                     */
     bool     pedal_released;      /* pedal percent < released_pct            */
-    bool     pedal_pressed_full;  /* pedal percent >= full_press_pct         */
+    bool     pedal_pressed_full;  /* DEPRECATED (audit P5): percent >= full_press_pct.
+                                   * No longer used to latch CAPTURE MAX — kept only
+                                   * for ABI/telemetry compatibility.  MAX is now
+                                   * decided from the raw ADC, not a percent derived
+                                   * from a possibly-wrong old calibration.        */
     uint16_t pedal_raw;           /* current raw ADC sample                  */
     bool     critical_error;      /* an ERROR-level fault is latched         */
     bool     safe_state;          /* system is in SAFE                       */
     bool     emergency;           /* emergency-stop asserted                 */
     bool     can_loss;            /* CAN heartbeat lost                      */
-    bool     traction_inhibited;  /* traction + power relays inhibited       */
+    bool     traction_inhibited;  /* traction + power relays inhibited (entry)*/
+    bool     traction_locked;     /* audit P5: live confirmation that the real
+                                   * movement lock is still safe THIS tick —
+                                   * demand 0, PWM 0, traction enables LOW and
+                                   * the traction relay OFF.  Losing it while a
+                                   * session runs aborts with ABORT_LOCK_LOST. */
 } PedalCalConds;
 
 /* ---- Injected persistence / apply / readback hooks -----------------------
@@ -143,13 +163,17 @@ typedef struct {
     PedalCalSessionCfg  cfg;
     PedalCalSessionHooks hooks;
     PedalCalState       state;
-    uint16_t            reason;        /* technical bitmask (latched)         */
+    uint32_t            reason;        /* technical bitmask (latched); 32-bit so
+                                        * the extended ABORT_OPERATOR / LOCK_LOST
+                                        * causes fit above the 16-bit CAN field.  */
 
     /* Captured endpoints (RAM only until SAVE). */
     uint16_t            adc_min;
     bool                have_min;
     uint16_t            adc_max;
     bool                have_max;
+    bool                max_armed;     /* audit P5: CAPTURE MAX button explicitly
+                                        * armed the pressed-pedal capture.        */
 
     /* Rolling capture window. */
     uint16_t            samples[16];   /* >= stable_samples                   */
@@ -183,12 +207,19 @@ PedalCalState PedalCalSession_Update(PedalCalSession *s, const PedalCalConds *c)
  * becomes COMPLETED, otherwise ABORTED with a FAIL_* reason.               */
 void PedalCalSession_RequestSave(PedalCalSession *s, const PedalCalConds *c);
 
+/* Operator request to ARM the CAPTURE MAX capture (audit P5).  Only meaningful
+ * in WAIT_FULL_PRESS: it lets the FSM proceed to CAPTURING_MAX so MAX is
+ * captured from a stable RAW ADC reading (raw > MIN and raw-MIN >= range_min),
+ * NOT from a percent threshold derived from a possibly-wrong old calibration.
+ * No-op in any other state.                                                 */
+void PedalCalSession_ArmCaptureMax(PedalCalSession *s);
+
 /* Operator/host abort at any time. */
-void PedalCalSession_Abort(PedalCalSession *s, uint16_t reason_bit);
+void PedalCalSession_Abort(PedalCalSession *s, uint32_t reason_bit);
 
 /* ---- Accessors ---------------------------------------------------------- */
 static inline PedalCalState PedalCalSession_State(const PedalCalSession *s) { return s->state; }
-static inline uint16_t      PedalCalSession_Reason(const PedalCalSession *s) { return s->reason; }
+static inline uint32_t      PedalCalSession_Reason(const PedalCalSession *s) { return s->reason; }
 static inline bool          PedalCalSession_Active(const PedalCalSession *s) {
     return s->state != PEDAL_CAL_IDLE &&
            s->state != PEDAL_CAL_COMPLETED &&
@@ -200,7 +231,7 @@ const char *PedalCalSession_StateText(PedalCalState st);
 
 /* Human-readable text for the highest-priority reason bit set (HMI).
  * Returns "OK" when the mask is zero.                                       */
-const char *PedalCalSession_ReasonText(uint16_t reason_mask);
+const char *PedalCalSession_ReasonText(uint32_t reason_mask);
 
 #ifdef __cplusplus
 }

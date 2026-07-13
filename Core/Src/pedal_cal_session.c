@@ -46,9 +46,9 @@ void PedalCalSession_Init(PedalCalSession *s,
 }
 
 /* ---- Entry guards (audit §5) ------------------------------------- */
-static uint16_t entry_block_mask(const PedalCalConds *c)
+static uint32_t entry_block_mask(const PedalCalConds *c)
 {
-    uint16_t bits = PEDAL_CAL_SESS_OK;
+    uint32_t bits = PEDAL_CAL_SESS_OK;
     if (!c->in_standby)           bits |= PEDAL_CAL_BLOCK_NOT_STANDBY;
     if (!c->gear_park_or_neutral) bits |= PEDAL_CAL_BLOCK_GEAR;
     if (c->wheels_moving)         bits |= PEDAL_CAL_BLOCK_WHEELS_MOVING;
@@ -59,22 +59,27 @@ static uint16_t entry_block_mask(const PedalCalConds *c)
 }
 
 /* ---- Always-on abort conditions (audit §5) ----------------------- */
-static uint16_t abort_mask(const PedalCalConds *c)
+static uint32_t abort_mask(const PedalCalConds *c)
 {
-    uint16_t bits = PEDAL_CAL_SESS_OK;
-    if (c->safe_state)     bits |= PEDAL_CAL_ABORT_SAFE;
-    if (c->critical_error) bits |= PEDAL_CAL_ABORT_ERROR;
-    if (c->emergency)      bits |= PEDAL_CAL_ABORT_EMERGENCY;
-    if (c->wheels_moving)  bits |= PEDAL_CAL_ABORT_MOVEMENT;
-    if (c->can_loss)       bits |= PEDAL_CAL_ABORT_CAN_LOSS;
+    uint32_t bits = PEDAL_CAL_SESS_OK;
+    if (c->safe_state)        bits |= PEDAL_CAL_ABORT_SAFE;
+    if (c->critical_error)    bits |= PEDAL_CAL_ABORT_ERROR;
+    if (c->emergency)         bits |= PEDAL_CAL_ABORT_EMERGENCY;
+    if (c->wheels_moving)     bits |= PEDAL_CAL_ABORT_MOVEMENT;
+    if (c->can_loss)          bits |= PEDAL_CAL_ABORT_CAN_LOSS;
+    /* audit P5: the real movement lock (demand 0 / PWM 0 / EN LOW / relay OFF)
+     * is verified by the caller every tick and reported via traction_locked.
+     * If it is ever lost while a session runs, abort immediately. */
+    if (!c->traction_locked)  bits |= PEDAL_CAL_ABORT_LOCK_LOST;
     return bits;
 }
 
-static void enter_aborted(PedalCalSession *s, uint16_t reason_bit)
+static void enter_aborted(PedalCalSession *s, uint32_t reason_bit)
 {
     s->state        = PEDAL_CAL_ABORTED;
     s->reason       = reason_bit;
     s->sample_count = 0U;
+    s->max_armed    = false;
 }
 
 static void reset_capture(PedalCalSession *s, uint32_t now_ms)
@@ -125,7 +130,7 @@ bool PedalCalSession_Begin(PedalCalSession *s, const PedalCalConds *c)
         s->state != PEDAL_CAL_ABORTED) {
         return false;  /* already running                                    */
     }
-    uint16_t block = entry_block_mask(c);
+    uint32_t block = entry_block_mask(c);
     if (block != PEDAL_CAL_SESS_OK) {
         s->state  = PEDAL_CAL_IDLE;
         s->reason = block;
@@ -135,6 +140,7 @@ bool PedalCalSession_Begin(PedalCalSession *s, const PedalCalConds *c)
     s->reason           = PEDAL_CAL_SESS_OK;
     s->have_min         = false;
     s->have_max         = false;
+    s->max_armed        = false;
     s->adc_min          = 0U;
     s->adc_max          = 0U;
     s->sample_count     = 0U;
@@ -143,13 +149,23 @@ bool PedalCalSession_Begin(PedalCalSession *s, const PedalCalConds *c)
     return true;
 }
 
-void PedalCalSession_Abort(PedalCalSession *s, uint16_t reason_bit)
+void PedalCalSession_ArmCaptureMax(PedalCalSession *s)
+{
+    if (s == NULL) return;
+    /* Only arming from WAIT_FULL_PRESS is meaningful; ignore otherwise so a
+     * stray button press cannot skip a phase or re-trigger a locked capture. */
+    if (s->state == PEDAL_CAL_WAIT_FULL_PRESS) {
+        s->max_armed = true;
+    }
+}
+
+void PedalCalSession_Abort(PedalCalSession *s, uint32_t reason_bit)
 {
     if (s == NULL) return;
     if (s->state == PEDAL_CAL_IDLE || s->state == PEDAL_CAL_COMPLETED) {
         return;
     }
-    enter_aborted(s, reason_bit == 0U ? PEDAL_CAL_ABORT_EMERGENCY : reason_bit);
+    enter_aborted(s, reason_bit == 0U ? PEDAL_CAL_ABORT_OPERATOR : reason_bit);
 }
 
 PedalCalState PedalCalSession_Update(PedalCalSession *s, const PedalCalConds *c)
@@ -162,7 +178,7 @@ PedalCalState PedalCalSession_Update(PedalCalSession *s, const PedalCalConds *c)
     }
 
     /* 1. Always-on aborts take priority (SAFE/ERROR/emergency/movement/CAN). */
-    uint16_t ab = abort_mask(c);
+    uint32_t ab = abort_mask(c);
     if (ab != PEDAL_CAL_SESS_OK) {
         enter_aborted(s, ab);
         return s->state;
@@ -213,32 +229,37 @@ PedalCalState PedalCalSession_Update(PedalCalSession *s, const PedalCalConds *c)
     }
 
     case PEDAL_CAL_WAIT_FULL_PRESS:
-        /* Auto-start MAX capture once the pedal is pressed.  Crucially this
-         * does NOT require pedal < 3 %: MAX needs a PRESSED pedal (audit §5). */
-        if (c->pedal_pressed_full) {
-            s->state = PEDAL_CAL_CAPTURING_MAX;
+        /* Wait for the operator to ARM the capture with the CAPTURE MAX button
+         * (audit P5).  The transition no longer depends on a percent threshold
+         * (Pedal_GetPercent >= 80 %) derived from a possibly-wrong old
+         * calibration; the pressed pedal is proven from the RAW ADC below. */
+        if (s->max_armed) {
+            s->state          = PEDAL_CAL_CAPTURING_MAX;
+            s->phase_start_ms = c->now_ms;
             reset_capture(s, c->now_ms);
         }
         break;
 
     case PEDAL_CAL_CAPTURING_MAX: {
-        /* MAX requires the pedal to stay pressed for the whole window. */
-        if (!c->pedal_pressed_full) {
-            s->state = PEDAL_CAL_WAIT_FULL_PRESS;  /* operator released — retry */
-            reset_capture(s, c->now_ms);
-            break;
-        }
-        if ((uint32_t)(c->now_ms - s->phase_start_ms) > s->cfg.capture_timeout_ms) {
-            enter_aborted(s, PEDAL_CAL_FAIL_UNSTABLE);
-            break;
-        }
+        /* MAX is captured purely from the RAW ADC (audit P5): 8 stable samples
+         * whose mean is above MIN by at least the required span.  We do NOT
+         * gate on pedal_pressed_full, so a wrong old calibration (whose 100 %
+         * the real pedal can never reach) cannot block a fresh calibration.
+         * The operator keeps pressing until the raw mean clears the threshold;
+         * a genuinely stuck / insufficient reading aborts on the phase timeout. */
         uint16_t mean = 0U;
         if (capture_feed(s, c->pedal_raw, &mean)) {
-            s->adc_max        = mean;
-            s->have_max       = true;
-            s->state          = PEDAL_CAL_WAIT_RELEASE_FOR_SAVE;
-            s->phase_start_ms = c->now_ms;
-            reset_capture(s, c->now_ms);
+            if (mean > s->adc_min &&
+                (uint32_t)(mean - s->adc_min) >= s->cfg.range_min) {
+                s->adc_max        = mean;
+                s->have_max       = true;
+                s->max_armed      = false;
+                s->state          = PEDAL_CAL_WAIT_RELEASE_FOR_SAVE;
+                s->phase_start_ms = c->now_ms;
+                reset_capture(s, c->now_ms);
+            }
+            /* else: stable but not pressed far enough yet — keep the rolling
+             * window sliding so a harder press re-locks at a higher value. */
         }
         break;
     }
@@ -287,7 +308,7 @@ void PedalCalSession_RequestSave(PedalCalSession *s, const PedalCalConds *c)
         return;  /* SAVE only valid once released and the pair is validated */
     }
     /* Re-guard: pedal released, no abort condition, pair still valid. */
-    uint16_t ab = abort_mask(c);
+    uint32_t ab = abort_mask(c);
     if (ab != PEDAL_CAL_SESS_OK) { enter_aborted(s, ab); return; }
     if (!c->pedal_released || !c->pedal_plausible) {
         s->state          = PEDAL_CAL_WAIT_RELEASE_FOR_SAVE;
@@ -352,16 +373,18 @@ const char *PedalCalSession_StateText(PedalCalState st)
     }
 }
 
-const char *PedalCalSession_ReasonText(uint16_t reason_mask)
+const char *PedalCalSession_ReasonText(uint32_t reason_mask)
 {
     /* Highest-priority (most safety-relevant) cause first. */
     if (reason_mask == PEDAL_CAL_SESS_OK)               return "OK";
     if (reason_mask & PEDAL_CAL_ABORT_EMERGENCY)        return "EMERGENCIA";
     if (reason_mask & PEDAL_CAL_ABORT_SAFE)             return "MODO SEGURO";
     if (reason_mask & PEDAL_CAL_ABORT_ERROR)            return "ERROR CRITICO";
+    if (reason_mask & PEDAL_CAL_ABORT_LOCK_LOST)        return "BLOQUEO PERDIDO";
     if (reason_mask & PEDAL_CAL_ABORT_MOVEMENT)         return "VEHICULO EN MOVIMIENTO";
     if (reason_mask & PEDAL_CAL_ABORT_CAN_LOSS)         return "SIN CAN";
     if (reason_mask & PEDAL_CAL_ABORT_TIMEOUT)          return "TIEMPO AGOTADO";
+    if (reason_mask & PEDAL_CAL_ABORT_OPERATOR)         return "CANCELADO POR OPERADOR";
     if (reason_mask & PEDAL_CAL_BLOCK_NOT_STANDBY)      return "NO EN STANDBY";
     if (reason_mask & PEDAL_CAL_BLOCK_GEAR)             return "PON P O N";
     if (reason_mask & PEDAL_CAL_BLOCK_WHEELS_MOVING)    return "RUEDAS EN MOVIMIENTO";

@@ -89,6 +89,7 @@ static PedalCalConds base_conds(uint32_t t)
     c.emergency            = false;
     c.can_loss             = false;
     c.traction_inhibited   = true;
+    c.traction_locked      = true;   /* real movement lock verified each tick */
     return c;
 }
 
@@ -102,6 +103,16 @@ static void run_ticks(PedalCalSession *s, PedalCalConds *c, int n,
         PedalCalSession_Update(s, c);
         c->now_ms += dt;
     }
+}
+
+/* Advance a fresh session to WAIT_FULL_PRESS with MIN captured at `min_raw`. */
+static void reach_wait_full_press(PedalCalSession *s, PedalCalConds *c,
+                                  uint16_t min_raw)
+{
+    CHECK(PedalCalSession_Begin(s, c));
+    PedalCalSession_Update(s, c); c->now_ms += 50;   /* ENTERING->WAIT_RELEASED */
+    PedalCalSession_Update(s, c); c->now_ms += 50;   /* ->CAPTURING_MIN         */
+    run_ticks(s, c, 8, min_raw, 50);                 /* 8 stable -> MIN latched */
 }
 
 /* ================================================================== */
@@ -130,9 +141,11 @@ static void test_happy_path(void)
     CHECK(PedalCalSession_State(&s) == PEDAL_CAL_WAIT_FULL_PRESS);
     CHECK(s.have_min && s.adc_min >= 40 && s.adc_min <= 44);
 
-    /* Press the pedal -> CAPTURING_MAX (proves MAX works while PRESSED). */
+    /* Arm the CAPTURE MAX button, then press the pedal -> CAPTURING_MAX
+     * (proves MAX works while PRESSED and is button-armed, not %-based). */
     c.pedal_released     = false;
-    c.pedal_pressed_full = true;
+    c.pedal_pressed_full = true;   /* deprecated field: no longer consulted */
+    PedalCalSession_ArmCaptureMax(&s);
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
     CHECK(PedalCalSession_State(&s) == PEDAL_CAL_CAPTURING_MAX);
     run_ticks(&s, &c, 8, 4000, 50);
@@ -153,28 +166,89 @@ static void test_happy_path(void)
     CHECK(PedalCalSession_Reason(&s) == PEDAL_CAL_SESS_OK);
 }
 
-/* Capture MAX must be reachable with the pedal pressed — the exact
- * contradiction the audit fixes. */
+/* Capture MAX must be reachable purely from RAW ADC while the pedal is
+ * pressed — the exact contradiction the audit fixes: the old (wrong)
+ * calibration may never report 80 %, yet a fresh MAX must still be captured. */
 static void test_capture_max_allows_pressed_pedal(void)
 {
     PedalCalSession s;
     PedalCalSessionHooks h = make_hooks();
     PedalCalSession_Init(&s, NULL, &h);
     PedalCalConds c = base_conds(0);
-    CHECK(PedalCalSession_Begin(&s, &c));
-    PedalCalSession_Update(&s, &c); c.now_ms += 50;   /* WAIT_RELEASED */
-    PedalCalSession_Update(&s, &c); c.now_ms += 50;   /* CAPTURING_MIN */
-    run_ticks(&s, &c, 8, 30, 50);                     /* MIN */
+    reach_wait_full_press(&s, &c, 30);
     CHECK(s.state == PEDAL_CAL_WAIT_FULL_PRESS);
 
-    /* Pedal fully pressed: pedal_released=false the whole time. */
+    /* Pedal pressed; pedal_pressed_full deliberately stays FALSE to emulate a
+     * pedal whose true 100 % never reaches 80 % under the old calibration. */
     c.pedal_released     = false;
-    c.pedal_pressed_full = true;
+    c.pedal_pressed_full = false;
+    PedalCalSession_ArmCaptureMax(&s);
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
     CHECK(s.state == PEDAL_CAL_CAPTURING_MAX);
     run_ticks(&s, &c, 8, 3900, 50);
     CHECK(s.state == PEDAL_CAL_WAIT_RELEASE_FOR_SAVE);
-    CHECK(s.have_max);   /* captured while pressed — no <3 % rejection */
+    CHECK(s.have_max);   /* captured from raw — no %-based rejection */
+}
+
+/* Without arming, a pressed pedal must NOT start MAX capture; arming the
+ * button is what advances the phase (button-armed capture). */
+static void test_capture_max_requires_arm(void)
+{
+    PedalCalSession s;
+    PedalCalSessionHooks h = make_hooks();
+    PedalCalSession_Init(&s, NULL, &h);
+    PedalCalConds c = base_conds(0);
+    reach_wait_full_press(&s, &c, 30);
+    CHECK(s.state == PEDAL_CAL_WAIT_FULL_PRESS);
+
+    /* Press hard but do NOT arm: must stay in WAIT_FULL_PRESS. */
+    c.pedal_released     = false;
+    c.pedal_pressed_full = true;
+    run_ticks(&s, &c, 10, 3900, 50);
+    CHECK(s.state == PEDAL_CAL_WAIT_FULL_PRESS);
+    CHECK(!s.have_max);
+
+    /* Now arm: capture proceeds. */
+    PedalCalSession_ArmCaptureMax(&s);
+    PedalCalSession_Update(&s, &c); c.now_ms += 50;
+    CHECK(s.state == PEDAL_CAL_CAPTURING_MAX);
+    run_ticks(&s, &c, 8, 3900, 50);
+    CHECK(s.state == PEDAL_CAL_WAIT_RELEASE_FOR_SAVE);
+    CHECK(s.have_max);
+}
+
+/* Operator ABORT is a normal cancellation, NOT an emergency. */
+static void test_operator_abort_not_emergency(void)
+{
+    PedalCalSession s;
+    PedalCalSession_Init(&s, NULL, NULL);
+    PedalCalConds c = base_conds(0);
+    reach_wait_full_press(&s, &c, 30);
+    CHECK(s.state == PEDAL_CAL_WAIT_FULL_PRESS);
+
+    PedalCalSession_Abort(&s, PEDAL_CAL_ABORT_OPERATOR);
+    CHECK(s.state == PEDAL_CAL_ABORTED);
+    CHECK(s.reason & PEDAL_CAL_ABORT_OPERATOR);
+    CHECK(!(s.reason & PEDAL_CAL_ABORT_EMERGENCY));
+    CHECK(strcmp(PedalCalSession_ReasonText(s.reason),
+                 "CANCELADO POR OPERADOR") == 0);
+}
+
+/* Losing the real relay/EN movement lock mid-session aborts (LOCK_LOST). */
+static void test_lock_lost_abort(void)
+{
+    PedalCalSession s;
+    PedalCalSession_Init(&s, NULL, NULL);
+    PedalCalConds c = base_conds(0);
+    reach_wait_full_press(&s, &c, 30);
+    CHECK(s.state == PEDAL_CAL_WAIT_FULL_PRESS);
+
+    /* Relay re-energised / enable went HIGH -> lock no longer confirmed. */
+    c.traction_locked = false;
+    PedalCalSession_Update(&s, &c);
+    CHECK(s.state == PEDAL_CAL_ABORTED);
+    CHECK(s.reason & PEDAL_CAL_ABORT_LOCK_LOST);
+    CHECK(!(s.reason & PEDAL_CAL_ABORT_EMERGENCY));
 }
 
 static void test_entry_blocks(void)
@@ -217,7 +291,7 @@ static void test_entry_blocks(void)
 /* Every mid-session abort cause maps to its own bit and lands in ABORTED. */
 static void test_runtime_aborts(void)
 {
-    struct { const char *name; void (*mut)(PedalCalConds*); uint16_t bit; } cases[] = {
+    struct { const char *name; void (*mut)(PedalCalConds*); uint32_t bit; } cases[] = {
         { "safe",      NULL, PEDAL_CAL_ABORT_SAFE },
         { "error",     NULL, PEDAL_CAL_ABORT_ERROR },
         { "emergency", NULL, PEDAL_CAL_ABORT_EMERGENCY },
@@ -284,25 +358,27 @@ static void test_unstable_capture(void)
     CHECK(s.reason & PEDAL_CAL_FAIL_UNSTABLE);
 }
 
+/* A too-small raw span must NOT latch MAX (capture-time range gating). The
+ * operator must press harder; only a sufficient span completes the capture. */
 static void test_range_too_small(void)
 {
     PedalCalSession s;
     PedalCalSessionHooks h = make_hooks();
     PedalCalSession_Init(&s, NULL, &h);
     PedalCalConds c = base_conds(0);
-    CHECK(PedalCalSession_Begin(&s, &c));
-    PedalCalSession_Update(&s, &c); c.now_ms += 50;
-    PedalCalSession_Update(&s, &c); c.now_ms += 50;
-    run_ticks(&s, &c, 8, 100, 50);                    /* MIN=100 */
+    reach_wait_full_press(&s, &c, 100);               /* MIN=100 */
     CHECK(s.state == PEDAL_CAL_WAIT_FULL_PRESS);
     c.pedal_released = false; c.pedal_pressed_full = true;
+    PedalCalSession_ArmCaptureMax(&s);
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
-    run_ticks(&s, &c, 8, 500, 50);                    /* MAX=500 -> range 400<800 */
-    CHECK(s.state == PEDAL_CAL_CAPTURING_MAX || s.state == PEDAL_CAL_WAIT_RELEASE_FOR_SAVE);
-    c.pedal_released = true; c.pedal_pressed_full = false;
-    PedalCalSession_Update(&s, &c);
-    CHECK(s.state == PEDAL_CAL_ABORTED);
-    CHECK(s.reason & PEDAL_CAL_FAIL_RANGE_SMALL);
+    /* Stable but only +400 counts over MIN (< 800) -> never latches. */
+    run_ticks(&s, &c, 8, 500, 50);
+    CHECK(s.state == PEDAL_CAL_CAPTURING_MAX);
+    CHECK(!s.have_max);
+    /* Press harder: span now >= 800 -> latches. */
+    run_ticks(&s, &c, 8, 3800, 50);
+    CHECK(s.state == PEDAL_CAL_WAIT_RELEASE_FOR_SAVE);
+    CHECK(s.have_max && s.adc_max >= 3796 && s.adc_max <= 3804);
 }
 
 static void test_readback_mismatch(void)
@@ -312,11 +388,9 @@ static void test_readback_mismatch(void)
     PedalCalSessionHooks h = make_hooks();
     PedalCalSession_Init(&s, NULL, &h);
     PedalCalConds c = base_conds(0);
-    CHECK(PedalCalSession_Begin(&s, &c));
-    PedalCalSession_Update(&s, &c); c.now_ms += 50;
-    PedalCalSession_Update(&s, &c); c.now_ms += 50;
-    run_ticks(&s, &c, 8, 50, 50);
+    reach_wait_full_press(&s, &c, 50);
     c.pedal_released = false; c.pedal_pressed_full = true;
+    PedalCalSession_ArmCaptureMax(&s);
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
     run_ticks(&s, &c, 8, 3800, 50);
     c.pedal_released = true; c.pedal_pressed_full = false;
@@ -332,8 +406,13 @@ static void test_reason_text(void)
 {
     CHECK(strcmp(PedalCalSession_ReasonText(PEDAL_CAL_SESS_OK), "OK") == 0);
     /* Emergency dominates when several bits are set. */
-    uint16_t m = PEDAL_CAL_ABORT_EMERGENCY | PEDAL_CAL_ABORT_MOVEMENT;
+    uint32_t m = PEDAL_CAL_ABORT_EMERGENCY | PEDAL_CAL_ABORT_MOVEMENT;
     CHECK(strcmp(PedalCalSession_ReasonText(m), "EMERGENCIA") == 0);
+    /* Operator cancel and lock-lost surface as their own text. */
+    CHECK(strcmp(PedalCalSession_ReasonText(PEDAL_CAL_ABORT_OPERATOR),
+                 "CANCELADO POR OPERADOR") == 0);
+    CHECK(strcmp(PedalCalSession_ReasonText(PEDAL_CAL_ABORT_LOCK_LOST),
+                 "BLOQUEO PERDIDO") == 0);
     CHECK(strcmp(PedalCalSession_StateText(PEDAL_CAL_CAPTURING_MAX), "CAPTURANDO MAX") == 0);
 }
 
@@ -341,6 +420,9 @@ int main(void)
 {
     test_happy_path();
     test_capture_max_allows_pressed_pedal();
+    test_capture_max_requires_arm();
+    test_operator_abort_not_emergency();
+    test_lock_lost_abort();
     test_entry_blocks();
     test_runtime_aborts();
     test_timeout_abort();

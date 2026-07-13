@@ -99,6 +99,7 @@ static PedalCalConds base_conds(uint32_t t)
     c.emergency            = false;
     c.can_loss             = false;
     c.traction_inhibited   = true;
+    c.traction_locked      = true;
     return c;
 }
 
@@ -124,6 +125,10 @@ static struct Frame319 encode_0x319(const PedalCalSession *s, bool entry_ok_now)
     if (s->state == PEDAL_CAL_COMPLETED) flags |= 0x08U;
     if (s->state == PEDAL_CAL_ABORTED)   flags |= 0x10U;
     if (entry_ok_now)                    flags |= 0x20U;
+    /* audit P5: OPERATOR cancel and LOCK_LOST live above the 16-bit reason
+     * word, so they are surfaced to the HMI via dedicated flag bits. */
+    if (s->reason & PEDAL_CAL_ABORT_OPERATOR)  flags |= 0x40U;
+    if (s->reason & PEDAL_CAL_ABORT_LOCK_LOST) flags |= 0x80U;
 
     f.d[0] = (uint8_t)s->state;
     f.d[1] = flags;
@@ -199,12 +204,13 @@ static void test_full_flow_frames(void)
     CHECK(s.have_min);
 
     /* CAPTURE MAX must NOT latch just because it was requested: the FSM stays
-     * in WAIT_FULL_PRESS until the pedal is objectively pressed. */
+     * in WAIT_FULL_PRESS until the operator ARMS the capture. */
     run_ticks(&s, &c, 4, 42, 50);
     CHECK(PedalCalSession_State(&s) == PEDAL_CAL_WAIT_FULL_PRESS);
 
-    /* Press pedal -> CAPTURING_MAX. */
+    /* Arm + press pedal -> CAPTURING_MAX (raw-based, button-armed). */
     c.pedal_released = false; c.pedal_pressed_full = true;
+    PedalCalSession_ArmCaptureMax(&s);
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
     CHECK(PedalCalSession_State(&s) == PEDAL_CAL_CAPTURING_MAX);
     run_ticks(&s, &c, 8, 4000, 50);
@@ -280,6 +286,7 @@ static void test_save_readback_fail_frame(void)
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
     run_ticks(&s, &c, 8, 42, 50);                 /* MIN */
     c.pedal_released = false; c.pedal_pressed_full = true;
+    PedalCalSession_ArmCaptureMax(&s);
     PedalCalSession_Update(&s, &c); c.now_ms += 50;
     run_ticks(&s, &c, 8, 4000, 50);               /* MAX */
     c.pedal_released = true; c.pedal_pressed_full = false;
@@ -297,12 +304,56 @@ static void test_save_readback_fail_frame(void)
     g_readback_ok = true;
 }
 
+/* Operator cancel and lock-loss ride on byte-1 flag bits 6/7, NOT as a
+ * 16-bit reason word (they live above bit 15) and NOT as an emergency. */
+static void test_operator_and_lock_flag_bits(void)
+{
+    /* Operator cancel from WAIT_FULL_PRESS. */
+    {
+        PedalCalSession s;
+        PedalCalSession_Init(&s, NULL, NULL);
+        PedalCalConds c = base_conds(1000);
+        CHECK(PedalCalSession_Begin(&s, &c) == true);
+        PedalCalSession_Update(&s, &c); c.now_ms += 50;
+        PedalCalSession_Update(&s, &c); c.now_ms += 50;
+        run_ticks(&s, &c, 8, 42, 50);
+        CHECK(PedalCalSession_State(&s) == PEDAL_CAL_WAIT_FULL_PRESS);
+        PedalCalSession_Abort(&s, PEDAL_CAL_ABORT_OPERATOR);
+
+        struct Frame319 f = encode_0x319(&s, false);
+        struct Decoded d = decode_0x319(&f);
+        CHECK(d.state == W_ABORTED);
+        CHECK((d.flags & 0x40U) != 0);          /* operator cancel bit  */
+        CHECK((d.flags & 0x80U) == 0);          /* not lock-lost        */
+        CHECK((d.reason & 0x0004U) == 0);       /* not EMERGENCY (bit 2) */
+    }
+
+    /* Lock lost mid-session. */
+    {
+        PedalCalSession s;
+        PedalCalSession_Init(&s, NULL, NULL);
+        PedalCalConds c = base_conds(1000);
+        CHECK(PedalCalSession_Begin(&s, &c) == true);
+        PedalCalSession_Update(&s, &c); c.now_ms += 50;
+        c.traction_locked = false;
+        PedalCalSession_Update(&s, &c);
+        CHECK(PedalCalSession_State(&s) == PEDAL_CAL_ABORTED);
+
+        struct Frame319 f = encode_0x319(&s, false);
+        struct Decoded d = decode_0x319(&f);
+        CHECK(d.state == W_ABORTED);
+        CHECK((d.flags & 0x80U) != 0);          /* lock-lost bit        */
+        CHECK((d.flags & 0x40U) == 0);          /* not operator cancel  */
+    }
+}
+
 int main(void)
 {
     test_enum_contract();
     test_full_flow_frames();
     test_movement_abort_frame();
     test_save_readback_fail_frame();
+    test_operator_and_lock_flag_bits();
     printf("pedalcal_can_frame: %d run, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }
