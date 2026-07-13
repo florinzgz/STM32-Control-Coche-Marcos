@@ -2191,6 +2191,27 @@ bool Traction_CalibrationLock(void)
     return en_low && (Traction_GetFinalPwmPct() == 0U);
 }
 
+/* Read-only confirmation of the calibration movement lock (audit fix).
+ *
+ * Unlike Traction_CalibrationLock(), this NEVER modifies any output: it only
+ * READS the effective traction demand, the resolved final PWM duty, the four
+ * traction enable lines and the traction relay state, and reports whether the
+ * "cannot move" condition currently holds.  This is the ONLY check that may be
+ * used from telemetry / diagnostic / QUERY paths (e.g. the 0x319 "entry OK"
+ * bit), so that simply reading calibration status can never force demand 0,
+ * PWM 0 or the traction enables LOW outside an actual calibration session. */
+bool Traction_IsCalibrationLockConfirmed(void)
+{
+    bool demand_zero = (fabsf(traction_state.demandPct) < 0.01f);
+    bool en_low = (HAL_GPIO_ReadPin(motor_fl.en_port, motor_fl.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_fr.en_port, motor_fr.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_rl.en_port, motor_rl.en_pin) == GPIO_PIN_RESET) &&
+                  (HAL_GPIO_ReadPin(motor_rr.en_port, motor_rr.en_pin) == GPIO_PIN_RESET);
+    bool pwm_zero  = (Traction_GetFinalPwmPct() == 0U);
+    bool relay_off = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
+    return demand_zero && en_low && pwm_zero && relay_off;
+}
+
 /* ==================================================================
  *  Steering Control — EPS Torque-Assist
  *

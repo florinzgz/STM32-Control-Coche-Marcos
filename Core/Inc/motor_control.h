@@ -103,6 +103,14 @@ void Traction_EmergencyStop(void);
  * session runs so the loss of the lock aborts the session immediately. */
 bool Traction_CalibrationLock(void);
 
+/* Read-only confirmation of the calibration movement lock (audit fix).
+ * Unlike Traction_CalibrationLock(), this NEVER modifies any output.  It only
+ * READS the effective traction demand, the resolved final PWM duty, the four
+ * traction enable lines and the traction relay state, and returns true when
+ * the "cannot move" condition currently holds.  Safe to call from telemetry,
+ * diagnostic and QUERY paths that must not disturb the traction outputs. */
+bool Traction_IsCalibrationLockConfirmed(void);
+
 /* ---- MOTION_INHIBIT_REASON instrumentation (0x315) ----
  * Returns the latest MOTION_INHIBIT_REASON bitfield (MOTION_INHIBIT_*),
  * recomputed every Traction_Update() cycle.  Instrumentation only: it

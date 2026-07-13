@@ -1830,17 +1830,21 @@ static void pedalcal_build_conds(PedalCalConds *c)
                               (Traction_GetFinalPwmPct() == 0U);
 }
 
-/* True when the current live entry guards would permit a session to start. */
+/* True when the current live entry guards would permit a session to start.
+ *
+ * audit fix — this MUST be strictly read-only: it feeds the informative 0x319
+ * "entry OK" bit and is reachable from QUERY / telemetry without starting a
+ * session.  It therefore uses Traction_IsCalibrationLockConfirmed() (a pure
+ * read) instead of Traction_CalibrationLock() (which forces demand 0 / PWM 0 /
+ * traction enables LOW).  The real lock is enforced ONLY from CAPTURE_MIN just
+ * before Begin and from CAN_PedalCalCaptureTick() during an active session. */
 static bool pedalcal_entry_ok(void)
 {
     PedalCalConds c;
     pedalcal_build_conds(&c);
-    /* audit P5 final — the movement lock must be confirmed for entry.  Enforce
-     * it here too (Traction_CalibrationLock) and require the relay OFF so the
-     * 0x319 "entry OK" flag never advertises a start that Begin would refuse. */
-    bool en_pwm_locked = Traction_CalibrationLock();
-    bool relay_off     = ((Safety_GetRelayStatusByte() & (1U << 1)) == 0U);
-    c.traction_locked  = en_pwm_locked && relay_off;
+    /* Read-only: never mutate demand / PWM / enables / relay from this path so
+     * a simple telemetry query can never inhibit traction outside a session. */
+    c.traction_locked = Traction_IsCalibrationLockConfirmed();
     return c.in_standby && c.gear_park_or_neutral && !c.wheels_moving &&
            c.pedal_plausible && !c.critical_error && c.traction_inhibited &&
            c.traction_locked;
