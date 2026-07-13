@@ -1681,10 +1681,12 @@ static uint8_t ExtractDLC(uint32_t dlc_code) {
  *
  *  Safety invariants (enforced by pedalcal_safety_ok()):
  *    - Safety_GetState() == SYS_STATE_STANDBY
- *    - Startup_IsInhibited() == true
- *    - Pedal_GetPercent() < 3.0f  (pedal released)
+ *    - Pedal_GetPercent() < 3.0f  (pedal released — MIN / SAVE phases only;
+ *      CAPTURE_MAX is exempt because it needs a pressed pedal, audit P5)
  *    - Pedal_IsPlausible() == true
  *    - All four wheel speeds < 0.3 km/h
+ *    Calibration does NOT depend on Startup_IsInhibited() / the 400 ms boot
+ *    window (audit Problem 5).
  *
  *  Stability check (CAPTURE_MIN / CAPTURE_MAX):
  *    8 samples over 400 ms (50 ms cadence — caller is the 100 Hz
@@ -1725,12 +1727,23 @@ static void pedalcal_start_burst(void)
     pedalcal_burst_seq  = 0U;
 }
 
-static uint16_t pedalcal_reject_live_safety(void)
+/* Audit Problem 5 — resolve the CAPTURE MIN/MAX contradiction:
+ *   - The "pedal released" (< 3 %) requirement is PHASE-DEPENDENT.  It must
+ *     hold for CAPTURE_MIN and for SAVE, but MUST NOT be enforced for
+ *     CAPTURE_MAX, which by definition requires a fully PRESSED pedal.  The
+ *     previous single gate made CAPTURE_MAX impossible to complete.
+ *   - Calibration no longer depends on Startup_IsInhibited() (the transient
+ *     ~400 ms boot window).  STANDBY + parked + wheels stopped + plausible is
+ *     the safety basis; the startup latch is unrelated.  The
+ *     PEDCAL_REJECT_STARTUP_NOT_INHIBITED bit is retained in the contract for
+ *     backward compatibility but is never set anymore.
+ */
+static uint16_t pedalcal_reject_live_safety_ex(bool require_released)
 {
     uint16_t bits = 0U;
     if (Safety_GetState() != SYS_STATE_STANDBY) bits |= PEDCAL_REJECT_NOT_STANDBY;
-    if (!Startup_IsInhibited())                 bits |= PEDCAL_REJECT_STARTUP_NOT_INHIBITED;
-    if (Pedal_GetPercent() >= 3.0f)             bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
+    if (require_released && Pedal_GetPercent() >= 3.0f)
+                                                bits |= PEDCAL_REJECT_PEDAL_NOT_RELEASED;
     if (!Pedal_IsPlausible())                   bits |= PEDCAL_REJECT_PEDAL_NOT_PLAUSIBLE;
     if (Wheel_GetSpeed_FL() >= 0.3f ||
         Wheel_GetSpeed_FR() >= 0.3f ||
@@ -1739,6 +1752,12 @@ static uint16_t pedalcal_reject_live_safety(void)
         bits |= PEDCAL_REJECT_WHEELS_MOVING;
     }
     return bits;
+}
+
+static uint16_t pedalcal_reject_live_safety(void)
+{
+    /* Default (telemetry / MIN / SAVE) view requires a released pedal. */
+    return pedalcal_reject_live_safety_ex(true);
 }
 
 static uint16_t pedalcal_reject_live_pair(void)
@@ -1778,7 +1797,13 @@ static uint16_t pedalcal_get_reject_reason(void)
 
 static inline bool pedalcal_safety_ok(void)
 {
-    return (pedalcal_reject_live_safety() == 0U);
+    return (pedalcal_reject_live_safety_ex(true) == 0U);
+}
+
+/* Phase-aware gate: CAPTURE_MAX passes with a pressed pedal. */
+static inline bool pedalcal_safety_ok_phase(bool require_released)
+{
+    return (pedalcal_reject_live_safety_ex(require_released) == 0U);
 }
 
 /* ------------------------------------------------------------------
@@ -1982,9 +2007,12 @@ static void pedalcal_handle_service_cmd(const uint8_t *payload, uint8_t len)
         return;
     }
 
-    /* All other sub-opcodes require the full safety gate. */
-    if (!pedalcal_safety_ok()) {
-        pedalcal_reject_latched = pedalcal_reject_live_safety();
+    /* All other sub-opcodes require the safety gate.  CAPTURE_MAX is the
+     * one phase that legitimately runs with a PRESSED pedal, so it is
+     * exempt from the "pedal released" sub-check (audit Problem 5). */
+    const bool require_released = (op != PEDAL_CAL_OP_CAPTURE_MAX);
+    if (!pedalcal_safety_ok_phase(require_released)) {
+        pedalcal_reject_latched = pedalcal_reject_live_safety_ex(require_released);
         pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;
@@ -2114,11 +2142,14 @@ void CAN_PedalCalCaptureTick(void)
     if (pedalcal_fsm_state == PCAL_FSM_IDLE) return;
 
     /* Re-validate safety on every tick — if any gate dropped (e.g.
-     * driver pressed pedal mid-capture, system left STANDBY, brake
-     * released) abort cleanly and report the safety-gate cause.  */
-    if (!pedalcal_safety_ok()) {
+     * system left STANDBY, wheels rolling, pedal implausible) abort
+     * cleanly and report the safety-gate cause.  During CAPTURING_MAX the
+     * pedal is legitimately pressed, so the "released" sub-check is skipped
+     * for that phase only (audit Problem 5).                          */
+    const bool require_released = (pedalcal_fsm_state != PCAL_FSM_CAPTURING_MAX);
+    if (!pedalcal_safety_ok_phase(require_released)) {
         pedalcal_fsm_reset();
-        pedalcal_reject_latched = pedalcal_reject_live_safety();
+        pedalcal_reject_latched = pedalcal_reject_live_safety_ex(require_released);
         pedalcal_start_burst();
         CAN_SendCommandAck(0x10, ACK_BLOCKED_BY_SAFETY);
         return;

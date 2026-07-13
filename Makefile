@@ -39,6 +39,7 @@ C_SOURCES = \
   $(CORE_SRC)/steering_z.c \
   $(CORE_SRC)/sensor_map_store.c \
   $(CORE_SRC)/pedal_cal_store.c \
+  $(CORE_SRC)/pedal_cal_session.c \
   $(CORE_SRC)/gear_limits_store.c \
   $(CORE_SRC)/drive_tuning_store.c \
   $(CORE_SRC)/battery_limits_store.c \
