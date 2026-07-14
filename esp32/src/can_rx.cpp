@@ -193,6 +193,9 @@ static void decodeBattery(const CanFrame& f, vehicle::VehicleData& data) {
     data.setBatt207Diag(diag);
 }
 
+static uint32_t s_ackFifoOverflowLogged = 0;  // bounded overflow-log counter
+static constexpr uint32_t ACK_FIFO_OVERFLOW_LOG_MAX = 10;  // bound the log spam
+
 static void decodeCommandAck(const CanFrame& f, vehicle::VehicleData& data) {
     ++s_rx0x103Count;
     if (f.data_length_code < 3) return;
@@ -201,7 +204,17 @@ static void decodeCommandAck(const CanFrame& f, vehicle::VehicleData& data) {
     ad.result      = static_cast<can::AckResult>(f.data[1]);
     ad.systemState = static_cast<can::SystemState>(f.data[2]);
     ad.timestampMs = millis();
-    data.setAck(ad);
+    data.setAck(ad);                 // keep most-recent ACK for HMI display
+    if (!data.pushAck(ad)) {
+        // FIFO full: the ACK was dropped rather than overwriting an unconsumed
+        // one.  Log the first few overflows only, to keep the console bounded.
+        if (s_ackFifoOverflowLogged < ACK_FIFO_OVERFLOW_LOG_MAX) {
+            ++s_ackFifoOverflowLogged;
+            Serial.printf("[ACK] FIFO overflow, dropped cmd 0x%02X (total=%lu)\n",
+                          ad.cmdIdLow,
+                          (unsigned long)data.ackFifoOverflowCount());
+        }
+    }
 }
 
 static void decodeLights(const CanFrame& f, vehicle::VehicleData& data) {

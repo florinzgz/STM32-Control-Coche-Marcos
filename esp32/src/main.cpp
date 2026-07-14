@@ -451,7 +451,6 @@ enum class TouchAction : uint8_t {
 // loops.  See ack_tracker.h / test_ack_tracker.cpp.
 
 static ack::Tracker<8> ackTracker(can::ACK_TIMEOUT_MS);
-static unsigned long   ackLastProcessedTs = 0;  // last consumed ACK timestamp
 
 /// Call before sending a command that expects ACK (CMD_MODE, CMD_LED,
 /// SERVICE_CMD, CMD_SENSOR_MAP_TEMP).  Registers an independent pending entry.
@@ -467,12 +466,15 @@ static void ackBeginWait(uint8_t cmdIdLow) {
 /// Call from loop() after can_rx::poll() to consume newly-arrived ACKs and
 /// expire any independently timed-out commands.
 static void ackCheck(vehicle::VehicleData& data) {
-    // Feed each newly-arrived ACK to the tracker exactly once (the shared
-    // ack_ slot is overwritten by can_rx on every ACK, so we key on its
-    // monotonically-advancing timestamp).
-    const auto& ad = data.ack();
-    if (ad.timestampMs != ackLastProcessedTs) {
-        ackLastProcessedTs = ad.timestampMs;
+    // Drain EVERY ACK queued during can_rx::poll() and feed each to the tracker
+    // exactly once.  can_rx::poll() can decode several CMD_ACK frames in a
+    // single call, so consuming only the last-seen ack_ slot would lose the
+    // rest and let their pending commands time out even though the ACK arrived.
+    // The FIFO is bounded and holds every received ACK in order (see
+    // VehicleData::pushAck / popAck).  No timestamp de-duplication is used, so
+    // the very first ACK (millis() == 0) is handled correctly too.
+    vehicle::AckData ad;
+    while (data.popAck(ad)) {
         if (ackTracker.onAck(ad.cmdIdLow) == ack::MatchResult::MATCHED) {
             if (ad.result != can::AckResult::OK) {
                 Serial.printf("[ACK] cmd 0x%02X result=%u state=%u\n",

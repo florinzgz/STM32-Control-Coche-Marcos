@@ -281,6 +281,12 @@ jobs:
               esp32/src/test_ack_tracker.cpp \
               -o /tmp/test_ack_tracker
             /tmp/test_ack_tracker
+
+            echo "-- test_ack_fifo.cpp"
+            g++ -std=c++17 -Wall -Wextra -Werror -Iesp32/src -Iesp32/include \
+              esp32/src/test_ack_fifo.cpp \
+              -o /tmp/test_ack_fifo
+            /tmp/test_ack_fifo
           } | tee artifacts/tests/esp32-host-tests.txt
 
       - name: Upload test artifacts
