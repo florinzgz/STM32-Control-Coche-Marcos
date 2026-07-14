@@ -93,6 +93,45 @@ int main(void)
         CHECK(classify(d) == RELAY_DIAG_INCONCLUSIVE);
     }
 
+    /* --- Phase-1 regression: request present but the real output is
+     * suppressed to zero (SAFE / ERROR / startup inhibit / ABS / TCS /
+     * LIMP_HOME / thermal / battery / obstacle / motion-inhibit).  With the
+     * demand still on the pedal but final PWM = 0 and no current, the relay
+     * MUST NOT be judged: result = INCONCLUSIVE (never RELAY OPEN nor CURRENT
+     * SENSE INVALID).                                                        */
+    {
+        RelayHealthDiag d = base_ok();
+        d.throttle_pct        = 42.0f;   /* driver still asking for traction */
+        d.traction_demand_pct = 29.0f;   /* requested demand > 0             */
+        d.effective_demand_pct = 0.0f;   /* limited to zero by a protection  */
+        d.final_pwm_pct       = 0.0f;    /* nothing actually emitted         */
+        d.current_sum_abs     = 0.0f;    /* correctly no current             */
+        d.current_signed_sum  = 0.0f;
+        d.any_wheel_moving    = false;
+        d.average_speed       = 0.0f;
+        memset(d.wheel_speed, 0, sizeof(d.wheel_speed));
+        d.post_relay_voltage_present = false;
+        d.battery_consumption_rising = false;
+        CHECK(classify(d) == RELAY_DIAG_INCONCLUSIVE);
+    }
+
+    /* --- Phase-1 regression: effective demand limited to zero must not be
+     * classified as RELAY OPEN even if wheels coast (inertia) with 0 A. --- */
+    {
+        RelayHealthDiag d = base_ok();
+        d.throttle_pct        = 55.0f;
+        d.traction_demand_pct = 40.0f;
+        d.effective_demand_pct = 0.0f;
+        d.final_pwm_pct       = 0.0f;
+        d.current_sum_abs     = 0.0f;
+        d.current_signed_sum  = 0.0f;
+        d.any_wheel_moving    = true;    /* coasting on inertia              */
+        CHECK(classify(d) != RELAY_OPEN_SUSPECTED);
+        CHECK(classify(d) != RELAY_OPEN_CONFIRMED);
+        CHECK(classify(d) != CURRENT_SENSE_INVALID);
+        CHECK(classify(d) == RELAY_DIAG_INCONCLUSIVE);
+    }
+
     /* --- Rule A: motors move + PWM>0 + 0 A → CURRENT_SENSE_INVALID --- */
     {
         RelayHealthDiag d = base_ok();
