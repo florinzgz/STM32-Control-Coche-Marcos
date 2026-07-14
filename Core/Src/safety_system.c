@@ -2802,13 +2802,18 @@ void Safety_UpdateRelayHealthDiag(void)
     d.relay_sequence_complete = (relay_seq_state == RELAY_SEQ_COMPLETE);
     d.power_ready             = Safety_IsPowerReady();
 
-    /* Demand chain. */
+    /* Demand chain.  The three demand signals MUST come from three distinct
+     * real sources, otherwise a request that is legitimately suppressed to
+     * zero (SAFE / ERROR / startup inhibit / relay-not-ready / ABS / TCS /
+     * LIMP_HOME / thermal / battery / obstacle / motion-inhibit / …) would be
+     * mis-read as "output present" and produce false RELAY OPEN / CURRENT
+     * SENSE INVALID verdicts.                                                */
     d.throttle_pct = Pedal_GetPercent();
     const TractionState_t *ts = Traction_GetState();
     float traction_demand = (ts != (void *)0) ? ts->demandPct : 0.0f;
-    d.traction_demand_pct = traction_demand;
-    d.effective_demand_pct = traction_demand;
-    d.final_pwm_pct        = traction_demand;   /* actually-commanded output */
+    d.traction_demand_pct  = traction_demand;                        /* requested demand      */
+    d.effective_demand_pct = Traction_GetEffectiveDemandPct();       /* after all limits      */
+    d.final_pwm_pct        = (float)Traction_GetFinalPwmPct();       /* PWM actually emitted  */
 
     /* Motion. */
     d.wheel_speed[0] = Wheel_GetSpeed_FL();

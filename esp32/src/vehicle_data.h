@@ -625,6 +625,47 @@ public:
     void setBattery(const BatteryData& d)      { battery_ = d; }
     void setAck(const AckData& d)              { ack_ = d; }
     void setAckTimeout(unsigned long ts)       { ackTimeoutMs_ = ts; }
+
+    // -----------------------------------------------------------------------
+    // Bounded, fixed-size circular ACK FIFO (no dynamic memory).
+    //
+    // can_rx::poll() decodes CAN frames in a while-loop, so several CMD_ACK
+    // (0x103) frames can arrive in a single poll() call.  The single ack_ slot
+    // above is overwritten on every ACK, so keying consumption on it loses all
+    // but the last ACK.  Every valid CMD_ACK is instead pushed here and later
+    // drained exactly once by ackCheck(), feeding ack::Tracker::onAck() per ACK.
+    // ack_ / ack() keep only the most recent ACK for HMI display.
+    //
+    // pushAck() NEVER overwrites an unconsumed entry: when the FIFO is full it
+    // drops the incoming ACK and increments a bounded overflow counter instead.
+    static constexpr uint8_t ACK_FIFO_CAPACITY = 8;
+
+    // Enqueue a received ACK.  Returns false (and bumps the overflow counter)
+    // when the FIFO is full, so the caller can surface the overflow.
+    bool pushAck(const AckData& d) {
+        if (ackFifoCount_ >= ACK_FIFO_CAPACITY) {
+            ++ackFifoOverflow_;
+            return false;  // never silently overwrite an unconsumed ACK
+        }
+        uint8_t tail = static_cast<uint8_t>((ackFifoHead_ + ackFifoCount_) %
+                                            ACK_FIFO_CAPACITY);
+        ackFifo_[tail] = d;
+        ++ackFifoCount_;
+        return true;
+    }
+
+    // Dequeue the oldest ACK.  Returns false when the FIFO is empty.
+    bool popAck(AckData& out) {
+        if (ackFifoCount_ == 0) return false;
+        out = ackFifo_[ackFifoHead_];
+        ackFifoHead_ = static_cast<uint8_t>((ackFifoHead_ + 1) %
+                                            ACK_FIFO_CAPACITY);
+        --ackFifoCount_;
+        return true;
+    }
+
+    uint8_t  ackFifoCount()         const { return ackFifoCount_; }
+    uint32_t ackFifoOverflowCount() const { return ackFifoOverflow_; }
     void setObstacle(const ObstacleData& d)    { obstacle_ = d; }
     void setLights(const LightsData& d)        { lights_ = d; }
     void setPedal(const PedalData& d)          { pedal_ = d; }
@@ -705,6 +746,11 @@ private:
     ServiceData   service_;
     AckData       ack_;
     unsigned long ackTimeoutMs_ = 0;
+    // Circular ACK FIFO backing store (see pushAck/popAck above).
+    AckData       ackFifo_[ACK_FIFO_CAPACITY];
+    uint8_t       ackFifoHead_     = 0;  // index of the oldest queued ACK
+    uint8_t       ackFifoCount_    = 0;  // number of queued ACKs
+    uint32_t      ackFifoOverflow_ = 0;  // ACKs dropped because the FIFO was full
     ObstacleData  obstacle_;
     LightsData    lights_;
     PedalData     pedal_;

@@ -238,3 +238,44 @@ Resultado: ☐ Pasa ☐ Falla — Notas: ____________________
 **Referencias:** `docs/FAULT_STATE_TORQUE_MATRIX.md`, `docs/STM32_BOOT_TIME_VS_IWDG.md`,
 `docs/CAN_CONTRACT_FINAL.md` (0x315), `esp32/src/mode_sync.h`, `esp32/src/boot_diag.h`,
 `Core/Src/busoff_recovery.c`, `Core/Src/eps_params.c`.
+
+---
+
+## Validación física final — congelación de firmware (release/final-functional-firmware)
+
+**Alcance:** checklist breve y única para la validación física final tras cerrar el firmware. Se
+ejecuta manualmente con el **vehículo inmovilizado, ruedas elevadas, nadie cerca de dirección ni
+ruedas, parada de emergencia accesible y limitación inicial de potencia**. No cambia el firmware; cada
+prueba es *observable* mediante la instrumentación ya existente (0x300 estado, **0x315
+MOTION_INHIBIT**, diagnósticos 0x30x, consola serie ESP32).
+
+- [ ] **1. Diez arranques consecutivos.** El sistema alcanza STANDBY/ACTIVE en los 10 ciclos sin
+      quedar atascado; `[BOOTDIAG]` y `[BOOT][INFO] Reset reason` coherentes cada vez.
+- [ ] **2. Liberación del bloqueo de pedal.** Pedal en reposo → 0x315 deja de mostrar
+      `STARTUP INHIBIT`; el vehículo pasa a permitir movimiento.
+- [ ] **3. Pedal 10 %, 25 %, 50 % y 75 %.** 0x315 muestra demanda solicitada = efectiva = PWM
+      proporcionales; sin `DEMAND ZEROED` ni `PWM ZERO` espurios.
+- [ ] **4. PWM proporcional en las cuatro ruedas.** Las 4 salidas siguen la demanda.
+- [ ] **5. Soltar el pedal deja PWM cero.** 0x315 `NO DEMAND`, PWM final = 0.
+- [ ] **6. PARK, REVERSE, NEUTRAL, D1 y D2.** Cada marcha aplica; marcha bloqueada muestra motivo
+      exacto (`GEAR PARK`/`GEAR NEUTRAL`/`INVALID GEAR`) y ACK correcto.
+- [ ] **7. Dirección izquierda, centro y derecha.** Orden aplicada; al perder comandos vuelve a
+      centro; abortos muestran motivo explícito (no "Error 8").
+- [ ] **8. Modo 4x4.** Activación/desactivación aplicada; se re-sincroniza tras reinicio del STM32.
+- [ ] **9. Desconexión y reconexión CAN.** BUS_OFF detectado, recuperación con heartbeat válido
+      continuo; no se limpia el fallo por volver sólo a RUNNING; reintentos acotados.
+- [ ] **10. Reinicio del STM32 y resincronización.** Marcha, 4x4, tank-turn y mapa de sensores se
+      re-sincronizan; no se envían órdenes de movimiento durante `STARTUP INHIBIT`; sin reintentos
+      infinitos; los ACK de comandos distintos se siguen de forma independiente (ver `ack_tracker.h`).
+- [ ] **11. Recuperación manual TFT.** La pantalla se recupera; el banner muestra el número real de
+      intentos (≤ 3 ciclos físicos); readback no soportado → `UNVERIFIED`, nunca `VERIFIED` falso;
+      la tarea de render ausente NO provoca ciclo de reinicios.
+- [ ] **12. Fallo no crítico muestra aviso sin bloquear.** INA de diagnóstico ausente, readback TFT
+      no soportado o diagnóstico de relé inconcluso → aviso, el vehículo sigue moviéndose.
+- [ ] **13. Fallo crítico bloquea y muestra causa exacta.** SAFE/ERROR/pedal inválido/sobrecorriente
+      crítica/batería crítica/temperatura crítica → PWM 0 con motivo visible en 0x315.
+- [ ] **14. Parada de emergencia corta movimiento.** E-stop → PWM 0 inmediato, EN LOW, relés OFF.
+
+> Pendiente de hardware: ajuste final del IWDG (usar la instrumentación de arranque→primer refresh y
+> máximo intervalo entre refresh); confirmación `RELAY_OPEN_CONFIRMED` (requiere evidencia física
+> independiente post-relé, no disponible por sensor en esta placa).

@@ -45,6 +45,7 @@
 #include "boot_diag.h"
 #include "display_supervisor.h"
 #include "display_recovery.h"
+#include "ack_tracker.h"
 
 // =============================================================================
 // PSRAM Diagnostic — Verifica que la PSRAM OPI de 8MB está activa y funcional
@@ -442,48 +443,55 @@ enum class TouchAction : uint8_t {
     TANK_MODE_TOGGLE,
 };
 
-// ---- Command ACK tracking (Phase 13) ----
-// Non-blocking: records when a command was sent and checks for ACK arrival.
-// UI state is only updated once ACK is received or timeout expires.
-// Design: no automatic retry — bounded timeout only, no infinite loops.
+// ---- Command ACK tracking (Phase 13, audit §Entrega 3-D) ----
+// Non-blocking, bounded, INDEPENDENT per-command tracking: several distinct
+// commands (CMD_MODE, CMD_LED, SERVICE_CMD, CMD_SENSOR_MAP_TEMP) can be in
+// flight at once without one overwriting another.  No automatic retry — each
+// entry has an independent bounded timeout only, so there are no infinite
+// loops.  See ack_tracker.h / test_ack_tracker.cpp.
 
-static bool     ackPending     = false;   // true while waiting for ACK
-static uint8_t  ackExpectedCmd = 0;       // low byte of the command CAN ID we sent
-static unsigned long ackSentMs = 0;       // timestamp when the command was sent
-static bool     ackTimedOut    = false;   // set true if ACK_TIMEOUT_MS elapsed
+static ack::Tracker<8> ackTracker(can::ACK_TIMEOUT_MS);
 
-/// Call before sending a command that expects ACK (CMD_MODE, SERVICE_CMD).
+/// Call before sending a command that expects ACK (CMD_MODE, CMD_LED,
+/// SERVICE_CMD, CMD_SENSOR_MAP_TEMP).  Registers an independent pending entry.
 __attribute__((unused))
 static void ackBeginWait(uint8_t cmdIdLow) {
-    ackPending     = true;
-    ackExpectedCmd = cmdIdLow;
-    ackSentMs      = millis();
-    ackTimedOut    = false;
+    if (!ackTracker.begin(cmdIdLow, millis())) {
+        // Table full — should never happen with only a handful of command
+        // classes, but surface it instead of silently dropping the wait.
+        Serial.printf("[ACK] table full, cannot track cmd 0x%02X\n", cmdIdLow);
+    }
 }
 
-/// Call from loop() after can_rx::poll() to check for ACK arrival or timeout.
+/// Call from loop() after can_rx::poll() to consume newly-arrived ACKs and
+/// expire any independently timed-out commands.
 static void ackCheck(vehicle::VehicleData& data) {
-    if (!ackPending) return;
-
-    // Check if matching ACK arrived
-    const auto& ad = data.ack();
-    if (ad.timestampMs >= ackSentMs && ad.cmdIdLow == ackExpectedCmd) {
-        ackPending  = false;
-        ackTimedOut = false;
-        if (ad.result != can::AckResult::OK) {
-            Serial.printf("[ACK] cmd 0x%02X result=%u state=%u\n",
-                          ad.cmdIdLow, static_cast<uint8_t>(ad.result),
-                          static_cast<uint8_t>(ad.systemState));
+    // Drain EVERY ACK queued during can_rx::poll() and feed each to the tracker
+    // exactly once.  can_rx::poll() can decode several CMD_ACK frames in a
+    // single call, so consuming only the last-seen ack_ slot would lose the
+    // rest and let their pending commands time out even though the ACK arrived.
+    // The FIFO is bounded and holds every received ACK in order (see
+    // VehicleData::pushAck / popAck).  No timestamp de-duplication is used, so
+    // the very first ACK (millis() == 0) is handled correctly too.
+    vehicle::AckData ad;
+    while (data.popAck(ad)) {
+        if (ackTracker.onAck(ad.cmdIdLow) == ack::MatchResult::MATCHED) {
+            if (ad.result != can::AckResult::OK) {
+                Serial.printf("[ACK] cmd 0x%02X result=%u state=%u\n",
+                              ad.cmdIdLow, static_cast<uint8_t>(ad.result),
+                              static_cast<uint8_t>(ad.systemState));
+            }
         }
-        return;
+        // Unexpected ACKs (no matching pending entry) are ignored.
     }
 
-    // Check timeout (bounded, no retry loop)
-    if (millis() - ackSentMs >= can::ACK_TIMEOUT_MS) {
-        ackPending  = false;
-        ackTimedOut = true;
-        data.setAckTimeout(millis());
-        Serial.printf("[ACK] TIMEOUT waiting for cmd 0x%02X\n", ackExpectedCmd);
+    // Expire any commands that never got acknowledged (bounded, no retry).
+    unsigned long now = millis();
+    for (;;) {
+        ack::TimeoutInfo to = ackTracker.drainTimeout(now);
+        if (!to.valid) break;
+        data.setAckTimeout(now);
+        Serial.printf("[ACK] TIMEOUT waiting for cmd 0x%02X\n", to.cmdIdLow);
     }
 }
 
