@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Local verification for PR #429 safety corrections.
 # Usage:
-#   ./scripts/validate_pr429_safety_local.sh            # full host + firmware builds
-#   ./scripts/validate_pr429_safety_local.sh --host-only
+#   bash scripts/validate_pr429_safety_local.sh
+#   bash scripts/validate_pr429_safety_local.sh --host-only
 
 set -euo pipefail
 
@@ -23,8 +23,9 @@ printf '\n[PR429] Checking production source selection...\n'
 grep -q 'sensor_manager_patched.c' Makefile
 grep -q 'safety_system_patched.c' Makefile
 grep -q 'steering_centering_patched.c' Makefile
-grep -q 'steering_centering_diag_patched.c' Makefile
-! grep -Eq '^  \$\(CORE_SRC\)/(sensor_manager|safety_system|steering_centering|steering_centering_diag)\.c' Makefile
+grep -q 'steering_centering_diag.c' Makefile
+! grep -Eq '^  \$\(CORE_SRC\)/(sensor_manager|safety_system|steering_centering)\.c' Makefile
+! grep -q 'steering_centering_diag_patched.c' Makefile
 
 printf '\n[PR429] INA226 CH5 classifier tests...\n'
 gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
