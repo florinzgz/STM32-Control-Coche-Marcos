@@ -15,77 +15,63 @@ int main() {
     GuardPolicy p;
     p.reset(1000U);
 
-    // Absolute 100 ms producer: independent from main-loop liveness.
-    CHECK(!p.shouldAttempt(1099U));
-    CHECK(p.shouldAttempt(1100U));
-    p.noteAttempt(1100U, true);
-    CHECK(p.stats().attempts == 1U);
-    CHECK(p.stats().successes == 1U);
-    CHECK(p.stats().failures == 0U);
-    CHECK(p.stats().lastSuccessMs == 1100U);
-    CHECK(p.stats().maxSuccessGapMs == 100U);
+    // Healthy loop: the backup stays completely silent.
+    p.notifyLoopAlive(1050U);
+    p.observeQueue(0U);
+    CHECK(!p.shouldAttempt(1100U));
+    CHECK(p.stats().backupAttempts == 0U);
+
+    // NVS/main-loop stall: failover becomes due before the STM32 250 ms timeout.
+    CHECK(p.shouldAttempt(1170U));  // 120 ms since last kick
+    CHECK(p.stats().loopStallEvents == 1U);
+    p.noteAttempt(1170U, true);
+    CHECK(p.stats().backupSuccess == 1U);
     CHECK(!p.retryPending());
 
-    // A blocked Arduino loop cannot suppress the dedicated producer.
-    CHECK(!p.shouldAttempt(1199U));
-    CHECK(p.shouldAttempt(1200U));
-    p.noteAttempt(1200U, true);
-    CHECK(p.stats().successes == 2U);
+    // While still stalled, failover heartbeats are rate-limited to 80 ms.
+    CHECK(!p.shouldAttempt(1200U));
+    CHECK(p.shouldAttempt(1250U));
+    p.noteAttempt(1250U, true);
 
-    // Loop kicks are instrumentation only.  The first kick also records the
-    // 201 ms elapsed since reset, then later kicks track their own smaller gap.
-    p.notifyLoopAlive(1201U);
+    // Once loop() resumes, the backup becomes silent again immediately.
     p.notifyLoopAlive(1260U);
-    CHECK(p.stats().maxObservedLoopGapMs == 201U);
-    CHECK(!p.shouldAttempt(1299U));
-    CHECK(p.shouldAttempt(1300U));
+    CHECK(!p.shouldAttempt(1340U));
 
-    // Queue-full/timeout: counter/time success must not advance; retry at 10 ms.
-    p.noteAttempt(1300U, false);
-    p.noteQueueFull();
-    CHECK(p.stats().failures == 1U);
-    CHECK(p.stats().queueFullObservations == 1U);
-    CHECK(p.stats().lastSuccessMs == 1200U);
+    // Full TX queue latches congestion; send once it drains.
+    p.reset(2000U);
+    p.notifyLoopAlive(2050U);
+    p.observeQueue(5U);
+    CHECK(p.congestionLatched());
+    CHECK(p.stats().congestionEvents == 1U);
+    p.observeQueue(2U);
+    CHECK(p.shouldAttempt(2130U));
+    p.noteAttempt(2130U, true);
+    CHECK(!p.congestionLatched());
+
+    // Explicit TX drop follows the same bounded recovery path.
+    p.reset(3000U);
+    p.notifyTxDrop();
+    p.observeQueue(0U);
+    CHECK(p.shouldAttempt(3080U));
+    p.noteAttempt(3080U, false);
     CHECK(p.retryPending());
-    CHECK(!p.shouldAttempt(1309U));
-    CHECK(p.shouldAttempt(1310U));
-    p.noteAttempt(1310U, true);
-    CHECK(!p.retryPending());
-    CHECK(p.stats().successes == 3U);
-    CHECK(p.stats().maxSuccessGapMs == 110U);
+    CHECK(!p.shouldAttempt(3089U));
+    CHECK(p.shouldAttempt(3090U));
+    p.noteAttempt(3090U, true);
+    CHECK(p.stats().backupFailures == 1U);
+    CHECK(p.stats().retries == 1U);
+    CHECK(p.stats().backupSuccess == 1U);
 
-    // Schedule remains absolute: successful retry does not drift cadence.
-    CHECK(!p.shouldAttempt(1399U));
-    CHECK(p.shouldAttempt(1400U));
-
-    // Long controller outage is observable and produces a warning gap.
-    p.noteAttempt(1400U, false);
+    // Controller-not-running is diagnostic only.
     p.noteSkippedNotRunning();
-    p.noteSkippedNotRunning();
-    CHECK(p.stats().skippedNotRunning == 2U);
-    CHECK(p.shouldAttempt(1410U));
-    p.noteAttempt(1410U, false);
-    CHECK(p.shouldAttempt(1420U));
-    p.noteAttempt(1600U, true);
-    CHECK(p.stats().warningGapEvents == 1U);
-    CHECK(p.stats().maxSuccessGapMs == 290U);
+    CHECK(p.stats().skippedNotRunning == 1U);
 
-    // Drops reported by other CAN producers are diagnostics only.
-    p.notifyTxDrop();
-    p.notifyTxDrop();
-    CHECK(p.stats().txDropNotifications == 2U);
-
-    // Current successful-heartbeat age is wrap-safe.
-    CHECK(p.currentSuccessGapMs(1650U) == 50U);
-
-    GuardPolicy wrap;
-    wrap.reset(0xFFFFFFF0U);
-    CHECK(!wrap.shouldAttempt(0x00000040U));  // 80 ms after reset
-    CHECK(wrap.shouldAttempt(0x00000054U));   // 100 ms after reset
-    wrap.noteAttempt(0x00000054U, true);
-    CHECK(wrap.stats().successes == 1U);
-    CHECK(wrap.stats().maxSuccessGapMs == 100U);
-    CHECK(wrap.currentSuccessGapMs(0x00000086U) == 50U);
+    // Unsigned subtraction keeps stall detection correct across millis wrap.
+    p.reset(0xFFFFFFF0U);
+    p.notifyLoopAlive(0xFFFFFFF5U);
+    p.observeQueue(0U);
+    CHECK(!p.shouldAttempt(0x00000040U));
+    CHECK(p.shouldAttempt(0x00000080U));
 
     std::printf("can_heartbeat_guard: %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
