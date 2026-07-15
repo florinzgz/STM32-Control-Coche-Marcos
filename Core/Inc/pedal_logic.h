@@ -9,9 +9,10 @@
  *
  *          The module is deliberately free of any HAL/hardware dependency:
  *          the caller supplies the two raw ADC samples and this pipeline
- *          performs dual-sample consistency, rail-fault, calibration,
- *          direction-aware rate limiting, recovery state machine and EMA
- *          filtering, operating entirely on an explicit PedalState struct.
+ *          performs dual-sample consistency (with persistence debounce),
+ *          rail-fault range validation, calibration, direction-aware output
+ *          limiting (safe upward ramp) and asymmetric EMA filtering,
+ *          operating entirely on an explicit PedalState struct.
  ****************************************************************************
  */
 #ifndef PEDAL_LOGIC_H

@@ -3,20 +3,22 @@
   * @file    test_pedal_plausibility.c
   * @brief   Deterministic host tests for the pedal plausibility pipeline.
   *
-  *          Covers the root-cause fix for the "frozen 53 % / LIMP HOME"
-  *          fault: direction-aware rate check + recovery state machine.
+  *          Covers the accelerator-pedal policy: a fast but electrically
+  *          coherent stab is VALID intent (safe upward ramp, never a fault);
+  *          release is immediate; a dual-sample contradiction must PERSIST
+  *          before it immobilises; rail/stuck ADC still zeroes torque.
   *
   *          Compile (from repository root):
   *            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
   *                -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-  *                Core/Src/test_pedal_plausibility.c \
+  *                Core/Src/test_pedal_plausibility.c Core/Src/pedal_logic.c \
   *                -o /tmp/test_pedal_plausibility
   *            /tmp/test_pedal_plausibility
   *
-  *          The simulation re-implements the pedal pipeline in the test
-  *          file using the same constants as sensor_manager.c.  A set of
-  *          _Static_assert checks guard against constant drift between
-  *          firmware and test.
+  *          The tests drive the REAL production pipeline (Pedal_ProcessSamples
+  *          from pedal_logic.c) directly — there is NO re-implementation of the
+  *          algorithm here.  _Static_assert checks guard against constant drift
+  *          between firmware and test.
   ****************************************************************************
   */
 
