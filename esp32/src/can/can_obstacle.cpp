@@ -16,6 +16,7 @@
 #include <ESP32-TWAI-CAN.hpp>
 #include "sensors/obstacle_sensor.h"
 #include "can_ids.h"
+#include "can_heartbeat_guard.h"
 
 namespace can_obstacle {
 
@@ -39,6 +40,14 @@ void init() {
     lastSafetyMs_ = 0;
     counter_      = 0;
     initialized_  = true;
+
+    // twaiInit() has already completed when this module is initialized from
+    // setup(). Start the high-priority failover guard here so CAN heartbeat
+    // protection does not depend on the large Core-1 loop reaching its legacy
+    // heartbeat block. The guard is silent while loop() is healthy and only
+    // injects 0x011 after a measured stall or TX-queue congestion event.
+    (void)can_heartbeat::init();
+
     Serial.println("[CAN_OBS] Obstacle TX initialized");
 }
 
@@ -46,10 +55,16 @@ void update() {
     if (!initialized_) return;
 
     unsigned long now = millis();
+
+    // Core-1 liveness kick for the heartbeat failover task. This is deliberately
+    // placed before any sensor early-return so sensor warm-up/unavailability can
+    // never be mistaken for a blocked CAN/main loop.
+    can_heartbeat::notifyLoopAlive(static_cast<uint32_t>(now));
+
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
 
     // Failsafe: do not send frames if sensor is in warmup or uninitialized.
-    // STM32 will naturally enter its 500 ms CAN timeout path.
+    // STM32 will naturally enter its 500 ms obstacle timeout path.
     if (rd.status == obstacle_sensor::SensorStatus::WAITING) {
         return;
     }
@@ -76,7 +91,11 @@ void update() {
         // Byte 4: rolling counter (0–255)
         frame.data[4] = counter_++;
 
-        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
+        if (!ESP32Can.writeFrame(frame, 0)) {
+            // The normal telemetry frame may be dropped, but a full TX queue is
+            // evidence that the safety heartbeat could also be displaced.
+            can_heartbeat::notifyTxDrop();
+        }
     }
 
     // ---- 0x209: Obstacle Safety State (100 ms) ----
@@ -100,7 +119,9 @@ void update() {
         // Byte 3: reserved
         frame.data[3] = 0;
 
-        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
+        if (!ESP32Can.writeFrame(frame, 0)) {
+            can_heartbeat::notifyTxDrop();
+        }
     }
 }
 
