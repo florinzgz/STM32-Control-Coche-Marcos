@@ -16,6 +16,7 @@
 #include <ESP32-TWAI-CAN.hpp>
 #include "sensors/obstacle_sensor.h"
 #include "can_ids.h"
+#include "can_heartbeat_guard.h"
 
 namespace can_obstacle {
 
@@ -39,6 +40,13 @@ void init() {
     lastSafetyMs_ = 0;
     counter_      = 0;
     initialized_  = true;
+
+    // twaiInit() has already completed when this module is initialized from
+    // setup().  Start the deterministic high-priority 0x011 producer here.
+    // It transmits every 100 ms from its own FreeRTOS task and never depends on
+    // obstacle data, Arduino loop(), TFT, audio, LEDs or NVS work.
+    (void)can_heartbeat::init();
+
     Serial.println("[CAN_OBS] Obstacle TX initialized");
 }
 
@@ -46,10 +54,15 @@ void update() {
     if (!initialized_) return;
 
     unsigned long now = millis();
+
+    // Report main-loop cadence for engineering diagnostics only.  Heartbeat
+    // transmission is unconditional and does not depend on this kick.
+    can_heartbeat::notifyLoopAlive(static_cast<uint32_t>(now));
+
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
 
     // Failsafe: do not send frames if sensor is in warmup or uninitialized.
-    // STM32 will naturally enter its 500 ms CAN timeout path.
+    // STM32 will naturally enter its 500 ms obstacle timeout path.
     if (rd.status == obstacle_sensor::SensorStatus::WAITING) {
         return;
     }
@@ -76,7 +89,12 @@ void update() {
         // Byte 4: rolling counter (0–255)
         frame.data[4] = counter_++;
 
-        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
+        if (!ESP32Can.writeFrame(frame, 0)) {
+            // Normal telemetry may be dropped.  Report it so heartbeat
+            // diagnostics can correlate queue pressure, while the dedicated
+            // producer continues to protect 0x011 independently.
+            can_heartbeat::notifyTxDrop();
+        }
     }
 
     // ---- 0x209: Obstacle Safety State (100 ms) ----
@@ -100,7 +118,9 @@ void update() {
         // Byte 3: reserved
         frame.data[3] = 0;
 
-        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
+        if (!ESP32Can.writeFrame(frame, 0)) {
+            can_heartbeat::notifyTxDrop();
+        }
     }
 }
 

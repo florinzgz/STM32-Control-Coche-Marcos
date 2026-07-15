@@ -1,0 +1,34 @@
+name: CAN Heartbeat Guard
+
+on:
+  push:
+    paths:
+      - 'esp32/src/can/can_heartbeat_guard*'
+      - 'esp32/src/can/can_obstacle.cpp'
+      - 'esp32/src/test_can_heartbeat_guard.cpp'
+      - '.github/workflows/can-heartbeat-guard.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'esp32/src/can/can_heartbeat_guard*'
+      - 'esp32/src/can/can_obstacle.cpp'
+      - 'esp32/src/test_can_heartbeat_guard.cpp'
+      - '.github/workflows/can-heartbeat-guard.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  host-policy-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compile heartbeat guard policy test
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Iesp32/src \
+            esp32/src/test_can_heartbeat_guard.cpp \
+            -o /tmp/test_can_heartbeat_guard
+      - name: Run heartbeat guard policy test
+        run: /tmp/test_can_heartbeat_guard
