@@ -81,12 +81,40 @@ static void loadFaultLog();
 // Public API
 // -------------------------------------------------------------------------
 
+// AUDIT C: transient diagnostic/demo/test DecorModes must NOT persist across
+// reboots.  A leftover RGB_DIAG / DEMO_SHOW / CUSTOM_TEST value (left in NVS
+// after a bench test) — or an out-of-range NVS byte — is coerced to NORMAL so
+// the car never boots into a self-activating diagnostic pattern.  Persistent
+// user selections (OFF, POLICE_US, AMBULANCE, WARNING_AMBER, HAZARD_RED,
+// KNIGHT_RIDER) are preserved.
+static uint8_t sanitizeBootLedMode(uint8_t mode) {
+    if (mode >= static_cast<uint8_t>(led_ctrl::DECOR_MODE_COUNT)) {
+        return static_cast<uint8_t>(led_ctrl::DecorMode::NORMAL);
+    }
+    switch (static_cast<led_ctrl::DecorMode>(mode)) {
+        case led_ctrl::DecorMode::DEMO_SHOW:
+        case led_ctrl::DecorMode::CUSTOM_TEST:
+        case led_ctrl::DecorMode::RGB_DIAG:
+            return static_cast<uint8_t>(led_ctrl::DecorMode::NORMAL);
+        default:
+            return mode;
+    }
+}
+
 void init() {
     initialized_ = true;
 
     Config loaded;
     if (load(loaded)) {
         currentCfg_ = loaded;
+        // AUDIT C: strip any transient test/diag ledMode before it is applied.
+        uint8_t saned = sanitizeBootLedMode(currentCfg_.ledMode);
+        if (saned != currentCfg_.ledMode) {
+            Serial.printf("[NVS] Transient ledMode %u sanitized to NORMAL on boot\n",
+                          currentCfg_.ledMode);
+            currentCfg_.ledMode = saned;
+            save(currentCfg_);  // persist the sanitized value
+        }
         Serial.println("[NVS] Config loaded successfully");
     } else {
         Serial.println("[NVS] No valid config — using defaults");

@@ -90,6 +90,7 @@ jobs:
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
               Core/Src/test_motion_inhibit.c \
+              Core/Src/test_wheel_effort.c \
               Core/Src/test_relay_degraded.c \
               Core/Src/test_relay_health_diag.c \
               Core/Src/test_relay_health_frame.c \

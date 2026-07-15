@@ -35,6 +35,29 @@ inline constexpr int LED_REAR_PIN    = 48;   // GPIO 48 — rear strip data
 inline constexpr int NUM_LEDS_FRONT  = 70;
 inline constexpr int NUM_LEDS_REAR   = 72;
 
+// ---- Per-strip FastLED colour order (AUDIT B) ----
+//
+// The wire byte order (RGB vs GRB) is a per-strip HARDWARE property and MUST
+// be determined PHYSICALLY with the RGB_DIAG DecorMode (per-strip
+// RED/GREEN/BLUE/WHITE/OFF sweep), NOT assumed from a code comment.  History
+// has flip-flopped between RGB and GRB for the front strip, so both orders are
+// now INDEPENDENTLY overridable at build time WITHOUT touching the other strip:
+//
+//   ; platformio.ini  build_flags
+//   -D FRONT_LED_COLOR_ORDER=RGB   ; only if RGB_DIAG proves FRONT RED→green with GRB
+//   -D REAR_LED_COLOR_ORDER=GRB
+//
+// Procedure: run RGB_DIAG, order "FRONT RED".  If the strip physically shows
+// GREEN, the configured order is wrong for that strip — flip ONLY that strip's
+// macro.  Defaults below match the current in-tree known-good build (both GRB);
+// change via build_flags only after a physical RGB_DIAG confirmation.
+#ifndef FRONT_LED_COLOR_ORDER
+#define FRONT_LED_COLOR_ORDER GRB
+#endif
+#ifndef REAR_LED_COLOR_ORDER
+#define REAR_LED_COLOR_ORDER GRB
+#endif
+
 // ---- Front and Rear installation direction ----
 //
 // ⚠️ PHYSICAL INSTALLATION CONTRACT (ACTUALIZADO MAY 2026):

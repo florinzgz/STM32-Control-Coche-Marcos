@@ -914,18 +914,21 @@ static void updateRearTurnSignals() {
 // =====================================================================
 
 void init() {
-    // Both strips are genuine WS2812B and use GRB byte order.
-    // The rear strip (GRB) renders colours correctly.  A previous attempt to
-    // drive the FRONT strip as RGB made logical red CRGB(255,0,0) transmit
-    // R,G,B on the wire; a GRB WS2812B reads the first byte as GREEN, so red
-    // rendered GREEN on the front strip (KITT scan, POLICE_US red).  Matching
-    // the front to the rear (GRB) makes red=red, green=green, blue=blue on
-    // BOTH strips.  NOTE: byte order only remaps colours — it cannot cause the
-    // uncontrolled flicker seen on the front strip; that is a signal-integrity
-    // issue (data-line length/noise, missing common ground, level shifter, or
-    // a different-chipset front strip) and must be fixed in hardware.
-    FastLED.addLeds<WS2812B, LED_FRONT_PIN, GRB>(ledsFront, NUM_LEDS_FRONT);
-    FastLED.addLeds<WS2812B, LED_REAR_PIN,  GRB>(ledsRear,  NUM_LEDS_REAR);
+    // Per-strip WS2812B colour order (AUDIT B).  The wire byte order is a
+    // HARDWARE property and MUST be verified physically with the RGB_DIAG
+    // DecorMode — do NOT trust code comments for the physical order.  Both
+    // strips are configured INDEPENDENTLY via FRONT_LED_COLOR_ORDER /
+    // REAR_LED_COLOR_ORDER (see led_controller.h); defaults are both GRB.
+    // If RGB_DIAG shows FRONT "RED" rendering GREEN, flip ONLY the front
+    // strip with -D FRONT_LED_COLOR_ORDER=RGB in platformio.ini.
+    //
+    // NOTE: byte order only remaps colours — it CANNOT cause the uncontrolled
+    // flicker/random pixels seen on the front strip; that is a signal-integrity
+    // issue (data-line length/noise, missing common ground, 3.3→5V level
+    // shifter, series resistor, or a different-chipset front strip) and must be
+    // diagnosed in hardware with the RGB_DIAG solid-colour 10-minute test.
+    FastLED.addLeds<WS2812B, LED_FRONT_PIN, FRONT_LED_COLOR_ORDER>(ledsFront, NUM_LEDS_FRONT);
+    FastLED.addLeds<WS2812B, LED_REAR_PIN,  REAR_LED_COLOR_ORDER>(ledsRear,  NUM_LEDS_REAR);
     FastLED.setBrightness(200);
     FastLED.clear(true);
     lastUpdateMs = millis();
