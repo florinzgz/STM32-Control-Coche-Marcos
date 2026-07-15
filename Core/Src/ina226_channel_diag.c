@@ -6,12 +6,11 @@
   * Turns a per-channel I2C probe snapshot into one explicit reason, in the
   * same order a real probe discovers faults:
   *   mux select → I2C ACK → identity (MFG/DIE) → config → register reads →
-  *   freshness → shunt drop → polarity → OK.
+  *   freshness → demand-qualified shunt/polarity checks → OK.
   *
-  * The ordering guarantees a genuinely missing INA (Problem 4B) is reported
-  * as MISSING with the exact address/mux that failed, while a present chip
-  * with no shunt drop (R002 removed / external shunt not wired) is reported
-  * as PRESENT_NO_SHUNT with 0 A — never collapsed into a single "dead".
+  * A healthy, powered but idle steering channel is expected to read 0 A and
+  * approximately 0 µV.  Shunt and polarity conclusions are therefore allowed
+  * only when the final steering PWM proves that current is genuinely expected.
   ****************************************************************************
   */
 
@@ -37,20 +36,17 @@ Ina226DiagReason_t Ina226_ClassifyChannel(const Ina226ChannelDiag *d)
         return INA226_CH_MUX_SELECT_FAIL;
     }
 
-    /* 2. No ACK at the expected address ⇒ genuinely missing (Problem 4B).
-     *    This is the "CH5 MISSING / address 0x40 no ACK" case. */
+    /* 2. No ACK at the expected address ⇒ genuinely missing. */
     if (!d->i2c_ack) {
         return INA226_CH_MISSING;
     }
 
-    /* 3. ACKs but is not an INA226 (or config corrupted so identity regs
-     *    read wrong) ⇒ WRONG_ID.  Verified against the datasheet values. */
+    /* 3. ACKs but is not an INA226 (or identity reads are corrupt). */
     if (!d->manufacturer_id_ok || !d->die_id_ok) {
         return INA226_CH_WRONG_ID;
     }
 
-    /* 4. Identity OK but configuration did not stick ⇒ CONFIG_LOST (bus
-     *    glitching / brownout on this branch). */
+    /* 4. Identity OK but configuration did not stick. */
     if (!d->config_write_ok || !d->config_readback_ok) {
         return INA226_CH_CONFIG_LOST;
     }
@@ -61,24 +57,24 @@ Ina226DiagReason_t Ina226_ClassifyChannel(const Ina226ChannelDiag *d)
     }
 
     /* 6. The chip is present and readable, but the sample is old ⇒ STALE,
-     *    NOT a valid 0 A. */
+     *    never a trustworthy 0 A. */
     if (d->sample_age_ms >= INA226_DIAG_STALE_MS) {
         return INA226_CH_STALE;
     }
 
-    /* 7. Present, fresh reading. Reversed installation shows a real,
-     *    sizeable negative current under forward demand ⇒ POLARITY_REVERSED. */
-    if (d->signed_current_ma <= -INA226_DIAG_REVERSED_MA) {
+    /* 7. Polarity and shunt-continuity diagnoses require real output demand.
+     *    At idle, 0 A / 0 µV are correct and must remain INA226_CH_OK. */
+    if (d->current_expected &&
+        d->signed_current_ma <= -INA226_DIAG_REVERSED_MA) {
         return INA226_CH_POLARITY_REVERSED;
     }
 
-    /* 8. Present, fresh, but essentially no shunt drop ⇒ the external shunt
-     *    / R002 pads are the problem (chip fine, no current path sensed). */
-    if (diag_abs32(d->shunt_uv) < INA226_DIAG_SHUNT_FLOOR_UV) {
+    if (d->current_expected &&
+        diag_abs32(d->shunt_uv) < INA226_DIAG_SHUNT_FLOOR_UV) {
         return INA226_CH_PRESENT_NO_SHUNT;
     }
 
-    /* 9. Everything checks out. */
+    /* 8. Everything observable checks out. */
     return INA226_CH_OK;
 }
 
