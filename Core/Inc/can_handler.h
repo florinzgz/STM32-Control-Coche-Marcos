@@ -44,13 +44,21 @@ extern "C" {
 #define CAN_ID_STATUS_TEMP        0x202  // STM32 → ESP32 (1000ms)
 #define CAN_ID_STATUS_SAFETY      0x203  // STM32 → ESP32 (100ms)
 #define CAN_ID_STATUS_STEERING    0x204  // STM32 → ESP32 (100ms)
-#define CAN_ID_STATUS_TRACTION    0x205  // STM32 → ESP32 (100ms) per-wheel traction scale
+#define CAN_ID_STATUS_TRACTION    0x205  // STM32 → ESP32 (100ms) per-wheel ABS/TCS LIMIT (traction PERMITTED, NOT applied torque)
 #define CAN_ID_STATUS_TEMP_MAP    0x206  // STM32 → ESP32 (1000ms) explicit temp sensor map
 #define CAN_ID_STATUS_BATTERY     0x207  // STM32 → ESP32 (100ms) battery 24V bus current + voltage
 #define CAN_ID_OBSTACLE_DISTANCE  0x208  // ESP32 → STM32 (66ms) obstacle distance + zone + health
 #define CAN_ID_OBSTACLE_SAFETY    0x209  // ESP32 → STM32 (100ms) obstacle safety state
 #define CAN_ID_STATUS_LIGHTS      0x20A  // STM32 → ESP32 (1000ms) LED relay + light state
 #define CAN_ID_STATUS_PEDAL       0x20B  // STM32 → ESP32 (100ms) Hall pedal position % (telemetry only)
+#define CAN_ID_STATUS_WHEEL_EFFORT 0x20C // STM32 → ESP32 (100ms) per-wheel FINAL PWM duty actually applied to each BTS7960
+                                         //   Byte 0: FL final PWM 0-100 %
+                                         //   Byte 1: FR final PWM 0-100 %
+                                         //   Byte 2: RL final PWM 0-100 %
+                                         //   Byte 3: RR final PWM 0-100 %
+                                         //   COAST/BRAKE/disabled motor → 0.  This is the REAL applied
+                                         //   effort (post pedal/ramp/gear/ABS/TCS/jerk/DRIVE-BRAKE-COAST),
+                                         //   NOT the ABS/TCS "permitted" scale of 0x205.
 #define CAN_ID_DIAG_ERROR         0x300  // Both directions (on-demand)
 #define CAN_ID_SERVICE_FAULTS     0x301  // STM32 → ESP32 (1000ms) fault bitmask
 #define CAN_ID_SERVICE_ENABLED    0x302  // STM32 → ESP32 (1000ms) enabled bitmask
@@ -442,6 +450,7 @@ void CAN_SendStatusSafety(bool abs, bool tcs, uint8_t error_code,
                           uint8_t loop_peak_100us);
 void CAN_SendStatusSteering(int16_t angle, bool calibrated);
 void CAN_SendStatusTraction(void);
+void CAN_SendStatusWheelEffort(void);
 void CAN_SendStatusTempMap(void);
 void CAN_SendStatusBattery(void);
 void CAN_SendStatusLights(void);

@@ -119,6 +119,7 @@ bool Traction_IsCalibrationLockConfirmed(void);
 uint16_t Traction_GetMotionInhibit(void);
 float    Traction_GetEffectiveDemandPct(void);
 uint8_t  Traction_GetFinalPwmPct(void);
+uint8_t  Traction_GetWheelFinalPwmPct(uint8_t wheel);
 const TractionState_t* Traction_GetState(void);
 
 /* Steering Functions */

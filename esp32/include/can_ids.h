@@ -71,6 +71,7 @@ inline constexpr uint32_t OBSTACLE_SAFETY         = 0x209;    // DLC 4, 100 ms o
 // -------------------------------------------------------------------------
 inline constexpr uint32_t STATUS_LIGHTS          = 0x20A;    // DLC 2, 1000 ms  byte0=front relay, byte1=rear relay
 inline constexpr uint32_t STATUS_PEDAL           = 0x20B;    // DLC 4, 100 ms   b0=Hall pedal % ; b1=fault flags(bit0 plausible,bit1 contradictory) ; b2-3=raw ADC LE (telemetry only)
+inline constexpr uint32_t STATUS_WHEEL_EFFORT    = 0x20C;    // DLC 4, 100 ms   per-wheel FINAL applied PWM % (b0=FL,b1=FR,b2=RL,b3=RR). Real applied effort, NOT the 0x205 ABS/TCS limit.
 // -------------------------------------------------------------------------
 // ESP32 → STM32  LED relay command (§3.1)
 //   Byte 0: front relay (0=OFF, 1=ON)

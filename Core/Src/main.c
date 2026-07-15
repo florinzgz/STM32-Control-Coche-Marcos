@@ -620,7 +620,7 @@ int main(void)
              * Three modes of operation:
              * 1. ACTIVE/DEGRADED: CAN commands accepted, pedal validated
              *    through Safety_ValidateThrottle() pipeline.
-             * 2. LIMP_HOME: Local pedal only, strong clamp (20% torque),
+             * 2. LIMP_HOME: Local pedal only, clamp (40% torque),
              *    CAN throttle commands ignored.  Vehicle remains mobile
              *    at walking speed without CAN/ESP32.
              * 3. All other states: throttle suppressed.
@@ -654,9 +654,12 @@ int main(void)
             } else if (Safety_IsLimpHome()) {
                 /* LIMP_HOME: local pedal drives traction directly.
                  * Ignore all CAN throttle commands.
-                 * Apply LIMP_HOME torque limit (20%) as hard clamp.
-                 * The traction pipeline applies additional speed cap
-                 * and ramp limiting via Safety_GetTractionCapFactor().
+                 * Apply the LIMP_HOME torque limit (40%) as a hard clamp.
+                 * This is the SINGLE point where the LIMP_HOME ceiling is
+                 * applied (AUDIT G): the traction pipeline no longer
+                 * re-scales it (Safety_GetTractionCapFactor()==1.0 in
+                 * LIMP_HOME).  The ramp rate and 5 km/h speed cap still
+                 * apply downstream, but they do not re-scale the ceiling.
                  *
                  * Safety invariant: contradictory pedal samples
                  * (dual ADC reads disagreeing) → zero demand.
@@ -674,8 +677,8 @@ int main(void)
                     Traction_SetDemand(0.0f);
                 } else {
                     float pedal = Pedal_GetPercent();
-                    /* Hard clamp: 20% max torque in LIMP_HOME.
-                     * pedal is 0–100%, factor is 0.20 → max demand = 20%. */
+                    /* Hard clamp: 40% max torque in LIMP_HOME.
+                     * pedal is 0–100%, factor is 0.40 → max demand = 40%. */
                     float clamped = pedal * LIMP_HOME_TORQUE_LIMIT_FACTOR;
                     if (clamped < 0.0f)  clamped = 0.0f;
                     if (clamped > 100.0f * LIMP_HOME_TORQUE_LIMIT_FACTOR)
@@ -713,6 +716,7 @@ int main(void)
                 (int16_t)(Steering_GetCurrentAngle() * 10),
                 Steering_IsCalibrated());
             CAN_SendStatusTraction();
+            CAN_SendStatusWheelEffort();   /* 0x20C — real applied per-wheel PWM */
             CAN_SendMotionInhibit();
             CAN_SendStatusBattery();
 

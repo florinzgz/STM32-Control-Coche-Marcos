@@ -705,7 +705,8 @@ bool Safety_IsLimpHome(void)
  * ACTIVE    → 1.0 (100 %)
  * DEGRADED  → per-level scaling (L1=70%, L2=50%, L3=40%)
  *             Falls back to DEGRADED_POWER_LIMIT_PCT if level not set.
- * LIMP_HOME → 0.20 (20 %) — strong clamp for walking-speed safety
+ * LIMP_HOME → 0.40 (40 %) — used to scale dynamic-brake target only;
+ *             traction demand is already clamped once in main.c
  * Others    → 0.0 (commands rejected upstream)                          */
 float Safety_GetPowerLimitFactor(void)
 {
@@ -745,12 +746,15 @@ float Safety_GetSteeringLimitFactor(void)
 /* Return traction-cap multiplier for the current state (Phase 12).
  * ACTIVE    → 1.0 (100 %)
  * DEGRADED  → per-level scaling (L1=80%, L2=60%, L3=50%)
- * LIMP_HOME → 0.20 (20 %) — matches power limit for walking speed
+ * LIMP_HOME → 1.0 — the 40 % LIMP_HOME ceiling is applied ONCE at the
+ *             pedal clamp in main.c (demand = pedal * LIMP_HOME_TORQUE_LIMIT_
+ *             FACTOR).  Returning the factor here again would double-scale
+ *             (0.40 * 0.40 = 16 %; previously 0.20 * 0.20 = 4 %).  AUDIT G.
  * Others    → 0.0                                                       */
 float Safety_GetTractionCapFactor(void)
 {
     if (system_state == SYS_STATE_ACTIVE)    return 1.0f;
-    if (system_state == SYS_STATE_LIMP_HOME) return LIMP_HOME_TORQUE_LIMIT_FACTOR;
+    if (system_state == SYS_STATE_LIMP_HOME) return 1.0f;
     if (system_state == SYS_STATE_DEGRADED) {
         switch (degraded_level) {
             case DEGRADED_L1: return DEGRADED_L1_TRACTION_PCT / 100.0f;

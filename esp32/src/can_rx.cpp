@@ -128,6 +128,16 @@ static void decodeTraction(const CanFrame& f, vehicle::VehicleData& data) {
     data.setTraction(td);
 }
 
+static void decodeWheelEffort(const CanFrame& f, vehicle::VehicleData& data) {
+    if (f.data_length_code < 4) return;
+    vehicle::WheelEffortData we;
+    for (uint8_t i = 0; i < vehicle::NUM_WHEELS; ++i) {
+        we.pwmPct[i] = (f.data[i] <= 100) ? f.data[i] : 100;
+    }
+    we.timestampMs = millis();
+    data.setWheelEffort(we);
+}
+
 static void decodeTempMap(const CanFrame& f, vehicle::VehicleData& data) {
     if (f.data_length_code < 5) return;
     vehicle::TempMapData tm;
@@ -763,6 +773,7 @@ void poll(vehicle::VehicleData& data) {
             case can::DIAG_ERROR:       decodeDiagError(frame, data);      break;
             case can::STATUS_LIGHTS:    decodeLights(frame, data);         break;
             case can::STATUS_PEDAL:     decodePedal(frame, data);          break;
+            case can::STATUS_WHEEL_EFFORT: decodeWheelEffort(frame, data); break;
             case can::SERVICE_FAULTS:   decodeServiceFaults(frame, data);  break;
             case can::SERVICE_ENABLED:  decodeServiceEnabled(frame, data); break;
             case can::SERVICE_DISABLED: decodeServiceDisabled(frame, data);break;

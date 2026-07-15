@@ -260,14 +260,21 @@ typedef enum {
  * at walking speed using the local pedal sensor.
  *
  * Safety is maintained by:
- *   - 20% torque limit (strong clamp on pedal input)
+ *   - 40% torque limit (single-point clamp on pedal input; see below)
  *   - 5 km/h speed cap (walking pace)
  *   - 10 %/s ramp rate (very slow acceleration)
  *   - No torque vectoring (Ackermann differential disabled)
  *   - Each motor operates independently
  *   - Limited regen braking
- *   - Obstacle scale still applied when CAN data is available        */
-#define LIMP_HOME_TORQUE_LIMIT_FACTOR  0.20f   /* 20% max torque       */
+ *   - Obstacle scale still applied when CAN data is available
+ *
+ * AUDIT G: the ceiling was raised from 20 % to 40 % because at 20 % a
+ * partially-discharged battery, load, slope or friction could leave the
+ * vehicle immobile.  The 40 % ceiling is applied EXACTLY ONCE, at the
+ * LIMP_HOME pedal clamp in main.c (demand = pedal * factor).  The traction
+ * pipeline no longer re-applies it (Safety_GetTractionCapFactor() returns
+ * 1.0 in LIMP_HOME) to avoid the previous double scaling (0.20*0.20 = 4 %). */
+#define LIMP_HOME_TORQUE_LIMIT_FACTOR  0.40f   /* 40% max torque (single-point) */
 #define LIMP_HOME_SPEED_LIMIT_KMH      5.0f    /* Walking speed cap    */
 #define LIMP_HOME_RAMP_RATE_PCT_PER_S  10.0f   /* Very slow accel ramp */
 

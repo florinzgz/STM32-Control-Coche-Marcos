@@ -1343,6 +1343,20 @@ uint8_t Traction_GetFinalPwmPct(void)
     return motion_final_pwm_pct;
 }
 
+/* AUDIT A: per-wheel FINAL PWM duty actually written to the BTS7960 this
+ * cycle, expressed 0..100 %.  Single source of truth is
+ * traction_state.wheels[i].pwm, which is set from the resolved
+ * desired_en[]/desired_pwm[] (post jerk limiter + DRIVE/BRAKE/COAST) in
+ * Traction_Update() and forced to 0 in Park/Neutral/coast paths.  Used by
+ * CAN 0x20C (STATUS_WHEEL_EFFORT).  Returns 0 for an out-of-range index. */
+uint8_t Traction_GetWheelFinalPwmPct(uint8_t wheel)
+{
+    if (wheel >= 4U) return 0U;
+    uint32_t pct = ((uint32_t)traction_state.wheels[wheel].pwm * 100U) / PWM_PERIOD;
+    if (pct > 100U) pct = 100U;
+    return (uint8_t)pct;
+}
+
 void Traction_Update(void)
 {
     /* --- Power-ready gate ---
@@ -1404,6 +1418,7 @@ void Traction_Update(void)
         for (uint8_t i = 0; i < 4; i++) {
             traction_state.wheels[i].currentA = Current_GetAmps(i);
             traction_state.wheels[i].tempC    = Temperature_Get(i);
+            traction_state.wheels[i].pwm      = 0U;  /* Park = BRAKE/COAST → 0 % push */
         }
         Traction_UpdateMotionInhibit(0.0f, 0);  /* Park — no drive */
         return;
@@ -2073,9 +2088,22 @@ void Traction_Update(void)
     for (uint8_t i = 0; i < 4; i++) {
         traction_state.wheels[i].currentA = Current_GetAmps(i);
         traction_state.wheels[i].tempC    = Temperature_Get(i);
-        /* In 4x4 mode, per-wheel PWM uses 50/50 axle split (base_pwm/2) */
-        uint16_t per_wheel_base = traction_state.mode4x4 ? (base_pwm / 2) : base_pwm;
-        traction_state.wheels[i].pwm      = (uint16_t)(per_wheel_base * acker_diff[i] * safety_status.wheel_scale[i]);
+        /* AUDIT A (empuje real por rueda): store the PWM value ACTUALLY
+         * written to the BTS7960 this cycle, not an intermediate stage.
+         * desired_pwm[i]/desired_en[i] are the FINAL hardware decision made
+         * above (after obstacle, traction cap, Ackermann, ABS/TCS wheel_scale,
+         * the jerk limiter and the DRIVE/BRAKE/COAST state machine):
+         *   COAST (EN low)        → 0  (free rolling, no push)
+         *   BRAKE (EN high, PWM0) → 0  (holding, no forward push)
+         *   DRIVE                 → desired_pwm[i] (the real duty applied)
+         * Never reconstruct it from base_pwm/acker_diff/wheel_scale — that is
+         * the ABS/TCS-permitted (0x205) view, which reads 100 % whenever the
+         * limiter is idle even if the real duty is far lower.               */
+        if (!desired_en[i] || desired_pwm[i] == 0U) {
+            traction_state.wheels[i].pwm = 0U;
+        } else {
+            traction_state.wheels[i].pwm = desired_pwm[i];
+        }
         traction_state.wheels[i].reverse  = (dir < 0);
     }
 

@@ -675,16 +675,22 @@ void CAN_SendStatusSteering(int16_t angle, bool calibrated) {
 }
 
 /**
- * @brief  Send per-wheel traction scale to ESP32.
+ * @brief  Send per-wheel ABS/TCS traction LIMIT to ESP32 (0x205).
  *
  * Exposes the ABS/TCS per-wheel scale factor already computed by the
  * safety system (safety_status.wheel_scale[0..3]).  Each value is
  * converted from float 0.0–1.0 to uint8 0–100 (percent).
  *
- *   Byte 0: FL traction %  (0 = fully inhibited, 100 = full power)
- *   Byte 1: FR traction %
- *   Byte 2: RL traction %
- *   Byte 3: RR traction %
+ * IMPORTANT (AUDIT A): this is the traction PERMITTED by ABS/TCS, NOT the
+ * torque/PWM actually applied.  100 = ABS/TCS not limiting that wheel;
+ * 0 = wheel fully inhibited.  It reads 100 even when the real duty is far
+ * lower.  For the REAL applied effort use 0x20C (CAN_SendStatusWheelEffort).
+ * Never present 0x205 as TORQUE, EMPUJE or applied-percentage.
+ *
+ *   Byte 0: FL ABS/TCS limit %  (0 = fully inhibited, 100 = full power allowed)
+ *   Byte 1: FR ABS/TCS limit %
+ *   Byte 2: RL ABS/TCS limit %
+ *   Byte 3: RR ABS/TCS limit %
  *
  * CAN ID: 0x205   DLC: 4   Rate: 100 ms (10 Hz)
  */
@@ -699,6 +705,37 @@ void CAN_SendStatusTraction(void) {
     }
 
     TransmitFrame(CAN_ID_STATUS_TRACTION, data, 4);
+}
+
+/**
+ * @brief  Send per-wheel FINAL applied PWM effort to ESP32 (0x20C).
+ *
+ * AUDIT A: additive frame carrying the REAL per-wheel PWM duty written to
+ * each BTS7960 this cycle (Traction_GetWheelFinalPwmPct), i.e. the value
+ * that survives pedal → filter → ramp → gear response → D1/D2/R → ACTIVE/
+ * DEGRADED/LIMP_HOME → speed/battery/temp/obstacle limits → Ackermann →
+ * 4x2/4x4 → ABS → TCS → jerk limiter → brake-release ramp → DRIVE/BRAKE/
+ * COAST → final EN state → CCR write.  COAST/BRAKE/disabled-motor → 0.
+ *
+ * This does NOT change or replace 0x205; it is a separate, additive contract.
+ *
+ *   Byte 0: FL final PWM 0-100 %
+ *   Byte 1: FR final PWM 0-100 %
+ *   Byte 2: RL final PWM 0-100 %
+ *   Byte 3: RR final PWM 0-100 %
+ *
+ * CAN ID: 0x20C   DLC: 4   Rate: 100 ms (10 Hz)
+ */
+void CAN_SendStatusWheelEffort(void) {
+    uint8_t data[4];
+
+    for (uint8_t i = 0; i < 4; i++) {
+        uint8_t p = Traction_GetWheelFinalPwmPct(i);
+        if (p > 100U) p = 100U;
+        data[i] = p;
+    }
+
+    TransmitFrame(CAN_ID_STATUS_WHEEL_EFFORT, data, 4);
 }
 
 /**

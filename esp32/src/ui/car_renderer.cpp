@@ -154,11 +154,12 @@ void CarRenderer::drawWheelCapsule(TFT_eSPI& tft,
     tft.fillRect(x, y, WCAP_W, WCAP_H, COL_BG);
     RTRACE_FILL_RECT(x, y, WCAP_W, WCAP_H, COL_BG);
 
-    // Load colour.  When the powertrain is NOT engaged (car pushed by hand /
-    // pedal released), the 0x205 value is "available power" (idle, usually
-    // 100%), not applied torque — so it is dimmed to grey instead of the
-    // torque heat scale, avoiding a misleading red "100%" that reads as an
-    // alarm.  When engaged, the normal green/yellow/red torque scale applies.
+    // Load colour.  The value shown is the FINAL applied PWM per wheel (0x20C),
+    // the real electrical order to each BTS7960 — NOT the ABS/TCS permitted
+    // limit (0x205) and NOT a calibrated torque.  When the powertrain is NOT
+    // engaged (car pushed by hand / pedal released) the wheels read 0 % and the
+    // capsule is dimmed to grey instead of the heat scale.  When engaged, the
+    // normal green/yellow/red PWM-load scale applies.
     uint16_t loadCol = !tractionValid ? COL_GRAY
                      : !tractionActive ? COL_GRAY
                      : torqueColor(torquePct);
