@@ -1,0 +1,29 @@
+name: Probe Actions
+
+on:
+  push:
+    branches:
+      - fix/can-heartbeat-deterministic
+    paths:
+      - '.github/workflows/probe-actions.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/probe-actions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write probe
+        run: |
+          printf 'actions runner reached\n' > probe.txt
+      - name: Upload probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: actions-probe
+          path: probe.txt
