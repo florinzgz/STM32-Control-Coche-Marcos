@@ -6,6 +6,11 @@ on:
       - fix/can-heartbeat-deterministic
     paths:
       - '.github/workflows/firmware-validation.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/firmware-validation.yml'
 
 permissions:
   contents: write
@@ -36,7 +41,7 @@ jobs:
           code = '\n'.join(line[10:] if line.startswith('          ') else line
                            for line in block.splitlines())
           # The original helper targeted the diagnostic assignment in the wrong
-          # translation unit.  Correct it before executing the audited patch.
+          # translation unit. Correct it before executing the audited patch.
           code = code.replace(
               "'Core/Src/steering_centering.c',\n    '    s_diag.power_ready",
               "'Core/Src/steering_centering_diag.c',\n    '    s_diag.power_ready",
