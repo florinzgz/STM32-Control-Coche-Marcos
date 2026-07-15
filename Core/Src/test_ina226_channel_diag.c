@@ -4,16 +4,9 @@
   * @brief   Host unit tests for the per-channel INA226 diagnostic classifier
   *          (Ina226_ClassifyChannel).
   *
-  *          Covers the audit's Problem-4 test matrix: CH5 present, CH5
-  *          missing, wrong address / mux, config-readback failure, shunt 0,
-  *          negative current, stale and read-fail vs full-bus recovery.
-  *
-  *          Compile (from repository root):
-  *            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
-  *                -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
-  *                Core/Src/test_ina226_channel_diag.c \
-  *                Core/Src/ina226_channel_diag.c -lm \
-  *                -o /tmp/test_ina226_channel_diag
+  *          Covers CH5 present, missing, wrong identity/config, stale/read
+  *          failure, demand-qualified open shunt, reversed polarity and the
+  *          critical powered-but-idle 0 A case.
   ****************************************************************************
   */
 
@@ -34,7 +27,7 @@ static int tests_run = 0, tests_failed = 0;
 } while (0)
 
 /* Healthy steering CH5 baseline: mux selects, chip ACKs, IDs match, config
- * sticks, fresh reading, real shunt drop and positive current.           */
+ * sticks, fresh reading and a real steering command expects current. */
 static Ina226ChannelDiag base_ok_ch5(void)
 {
     Ina226ChannelDiag d;
@@ -57,6 +50,7 @@ static Ina226ChannelDiag base_ok_ch5(void)
     d.signed_current_ma  = 2340;
     d.sample_age_ms      = 20;
     d.channel_powered    = true;
+    d.current_expected   = true;
     d.consecutive_failures = 0;
     d.recovery_count     = 0;
     return d;
@@ -69,11 +63,21 @@ static Ina226DiagReason_t classify(Ina226ChannelDiag d)
 
 int main(void)
 {
-    /* --- Case 5: OK --- */
+    /* --- OK under real demand --- */
     CHECK(classify(base_ok_ch5()) == INA226_CH_OK);
     CHECK(Ina226_DiagStatusWord(INA226_CH_OK)[0] == 'O');
 
-    /* --- Case 1: CH5 MISSING (no I2C ACK) --- */
+    /* --- Powered but idle: 0 A / 0 µV is normal, never NO_SHUNT. --- */
+    {
+        Ina226ChannelDiag d = base_ok_ch5();
+        d.current_expected = false;
+        d.raw_shunt = 0;
+        d.shunt_uv = 0;
+        d.signed_current_ma = 0;
+        CHECK(classify(d) == INA226_CH_OK);
+    }
+
+    /* --- CH5 MISSING (no I2C ACK) --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.i2c_ack = false;
@@ -87,7 +91,6 @@ int main(void)
         Ina226ChannelDiag d = base_ok_ch5();
         d.mux_select_ok = false;
         CHECK(classify(d) == INA226_CH_MUX_SELECT_FAIL);
-        /* mux select fail takes priority over a would-be ACK */
         d.i2c_ack = false;
         CHECK(classify(d) == INA226_CH_MUX_SELECT_FAIL);
     }
@@ -112,7 +115,7 @@ int main(void)
         CHECK(classify(d) == INA226_CH_CONFIG_LOST);
     }
 
-    /* --- Single transaction read failure (does not imply whole bus dead) --- */
+    /* --- Single transaction read failure --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.shunt_read_ok = false;
@@ -122,7 +125,7 @@ int main(void)
         CHECK(classify(d) == INA226_CH_READ_FAIL);
     }
 
-    /* --- Case 4: STALE telemetry --- */
+    /* --- STALE telemetry --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.sample_age_ms = INA226_DIAG_STALE_MS;
@@ -130,7 +133,7 @@ int main(void)
         CHECK(Ina226_DiagStatusWord(INA226_CH_STALE)[0] == 'S');
     }
 
-    /* --- Case 2: present but no shunt drop (R002 removed) → 0 A --- */
+    /* --- Present but no shunt drop while real PWM expects current. --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.raw_shunt = 0;
@@ -140,7 +143,7 @@ int main(void)
         CHECK(Ina226_DiagStatusWord(INA226_CH_PRESENT_NO_SHUNT)[0] == 'P');
     }
 
-    /* --- shunt just at the noise floor still counts as no-shunt --- */
+    /* --- Just below the floor still counts as no-shunt under demand. --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.shunt_uv = INA226_DIAG_SHUNT_FLOOR_UV - 1;
@@ -148,7 +151,7 @@ int main(void)
         CHECK(classify(d) == INA226_CH_PRESENT_NO_SHUNT);
     }
 
-    /* --- Case 3: reversed polarity (negative current, VIN swap) --- */
+    /* --- Reversed polarity under demand. --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.shunt_uv = -4500;
@@ -156,7 +159,16 @@ int main(void)
         CHECK(classify(d) == INA226_CH_POLARITY_REVERSED);
     }
 
-    /* --- Small negative current within noise is NOT reversed --- */
+    /* --- Negative idle/noise is not a polarity fault without PWM. --- */
+    {
+        Ina226ChannelDiag d = base_ok_ch5();
+        d.current_expected = false;
+        d.shunt_uv = -1000;
+        d.signed_current_ma = -667;
+        CHECK(classify(d) == INA226_CH_OK);
+    }
+
+    /* --- Small negative current within noise is not reversed. --- */
     {
         Ina226ChannelDiag d = base_ok_ch5();
         d.shunt_uv = 3510;
