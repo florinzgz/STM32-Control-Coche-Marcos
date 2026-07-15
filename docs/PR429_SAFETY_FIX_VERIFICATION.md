@@ -30,6 +30,18 @@ Ante fallo de búsqueda del centro:
 
 El homing se ejecuta en STANDBY y controla PC12 localmente. Su diagnóstico utiliza ahora PC12 más el estado real de barrido, no el estado del secuenciador global de tracción.
 
+## Preparación del registro DTC
+
+El registro de errores es persistente y sobrevive a reinicios. Por tanto, un DTC 16 creado por una versión anterior puede continuar apareciendo como **entrada histórica** aunque ya no sea el fallo activo.
+
+Antes de repetir la prueba:
+
+1. anotar o exportar el registro actual;
+2. borrar el historial mediante la función de diagnóstico existente que invoque `ErrorLog_Clear()`, cuando esté disponible en la interfaz de ingeniería;
+3. si no se borra, comparar el timestamp y distinguir claramente `DTC activo` de `DTC histórico`.
+
+El criterio de aceptación es que la nueva ejecución no cree otra entrada DTC 16 y que el error activo permanezca distinto de `SAFETY_ERROR_RELAY_OPEN` mientras las ruedas giren bajo PWM.
+
 ## Prueba A — Arranque sin detectar el tornillo central
 
 1. Elevar e inmovilizar el vehículo.
@@ -57,7 +69,7 @@ Si PC12, PC4, PA6 y PA7 están a cero pero el volante continúa frenado al conec
 Resultado obligatorio:
 
 - las ruedas pueden girar con corriente inferior al antiguo umbral de 1,5 A sin DTC 16;
-- nunca debe aparecer `RELAY OPEN` cuando existe movimiento bajo PWM;
+- nunca debe aparecer `RELAY OPEN` como error activo cuando existe movimiento bajo PWM;
 - si CH0–CH3 permanecen realmente en 0,00 A mientras las ruedas giran, el diagnóstico debe indicar `CURRENT SENSE INVALID` y la tracción no debe caer a DEGRADED L3 por ese dato;
 - no debe aparecer `MOTION_INHIBIT_POWER_NOT_READY` una vez acabados los 50 ms del secuenciador.
 
@@ -115,7 +127,7 @@ La PR puede salir de Draft únicamente cuando:
 - pasan todos los tests host de INA226, relé, centrado, heartbeat y paridad CAN;
 - pasan análisis estático e integridad;
 - las pruebas A–E se completan con ruedas elevadas;
-- no se reproduce DTC 16 con ruedas girando;
+- no se reproduce un nuevo DTC 16 con ruedas girando;
 - CH5 parado aparece OK;
 - después de un fallo de centrado, PC12, PC4, PA6 y PA7 quedan sin mando.
 
