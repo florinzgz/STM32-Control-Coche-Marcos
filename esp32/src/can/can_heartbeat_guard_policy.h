@@ -5,24 +5,31 @@
 
 namespace can_heartbeat {
 
+/*
+ * Pure scheduling policy for the dedicated ESP32 -> STM32 safety heartbeat.
+ *
+ * The producer is periodic and independent from Arduino loop().  Unsigned
+ * subtraction is used everywhere, so millis() rollover is handled naturally.
+ */
 struct GuardConfig {
-    uint32_t loopStallMs       = 120U;
-    uint32_t retryIntervalMs   = 10U;
-    uint32_t backupIntervalMs  = 80U;
-    uint8_t  queueHighWater    = 4U;
-    uint8_t  queueRecovered    = 2U;
+    uint32_t periodMs        = 100U;
+    uint32_t retryIntervalMs = 10U;
+    uint32_t warningGapMs    = 150U;
 };
 
 struct GuardStats {
-    uint32_t loopStallEvents       = 0U;
-    uint32_t congestionEvents      = 0U;
-    uint32_t backupAttempts        = 0U;
-    uint32_t backupSuccess         = 0U;
-    uint32_t backupFailures        = 0U;
+    uint32_t attempts              = 0U;
+    uint32_t successes             = 0U;
+    uint32_t failures              = 0U;
     uint32_t retries               = 0U;
+    uint32_t queueFullObservations = 0U;
+    uint32_t txDropNotifications   = 0U;
+    uint32_t skippedNotRunning     = 0U;
+    uint32_t warningGapEvents      = 0U;
+    uint32_t lastSuccessMs         = 0U;
+    uint32_t lastFailureMs         = 0U;
+    uint32_t maxSuccessGapMs       = 0U;
     uint32_t maxObservedLoopGapMs  = 0U;
-    uint32_t lastBackupSuccessMs   = 0U;
-    uint32_t lastBackupFailureMs   = 0U;
 };
 
 class GuardPolicy {
@@ -30,13 +37,13 @@ public:
     explicit GuardPolicy(const GuardConfig& cfg = GuardConfig{}) : cfg_(cfg) {}
 
     void reset(uint32_t nowMs) {
-        lastLoopKickMs_ = nowMs;
+        anchorMs_ = nowMs;
         lastAttemptMs_ = nowMs;
         lastSuccessMs_ = nowMs;
-        congestionLatched_ = false;
-        stallLatched_ = false;
+        lastLoopKickMs_ = nowMs;
         retryPending_ = false;
         stats_ = GuardStats{};
+        stats_.lastSuccessMs = nowMs;
     }
 
     void notifyLoopAlive(uint32_t nowMs) {
@@ -45,79 +52,65 @@ public:
             stats_.maxObservedLoopGapMs = gap;
         }
         lastLoopKickMs_ = nowMs;
-        stallLatched_ = false;
     }
 
-    void observeQueue(uint8_t depth) {
-        if (depth >= cfg_.queueHighWater && !congestionLatched_) {
-            congestionLatched_ = true;
-            ++stats_.congestionEvents;
-        }
-        queueDepth_ = depth;
-    }
+    void notifyTxDrop() { ++stats_.txDropNotifications; }
+    void noteQueueFull() { ++stats_.queueFullObservations; }
+    void noteSkippedNotRunning() { ++stats_.skippedNotRunning; }
 
-    void notifyTxDrop() {
-        if (!congestionLatched_) {
-            congestionLatched_ = true;
-            ++stats_.congestionEvents;
+    bool shouldAttempt(uint32_t nowMs) const {
+        if (retryPending_) {
+            return (nowMs - lastAttemptMs_) >= cfg_.retryIntervalMs;
         }
-    }
-
-    bool shouldAttempt(uint32_t nowMs) {
-        const uint32_t loopGap = nowMs - lastLoopKickMs_;
-        if (loopGap > stats_.maxObservedLoopGapMs) {
-            stats_.maxObservedLoopGapMs = loopGap;
-        }
-
-        const bool stalled = loopGap >= cfg_.loopStallMs;
-        if (stalled && !stallLatched_) {
-            stallLatched_ = true;
-            ++stats_.loopStallEvents;
-        }
-
-        const bool queueRecovered = congestionLatched_ && queueDepth_ <= cfg_.queueRecovered;
-        if (!stalled && !queueRecovered && !retryPending_) {
-            return false;
-        }
-
-        const uint32_t minGap = retryPending_ ? cfg_.retryIntervalMs
-                                               : cfg_.backupIntervalMs;
-        return (nowMs - lastAttemptMs_) >= minGap;
+        return (nowMs - anchorMs_) >= cfg_.periodMs;
     }
 
     void noteAttempt(uint32_t nowMs, bool success) {
         lastAttemptMs_ = nowMs;
-        ++stats_.backupAttempts;
+        ++stats_.attempts;
+
         if (success) {
-            ++stats_.backupSuccess;
-            stats_.lastBackupSuccessMs = nowMs;
+            const uint32_t gap = nowMs - lastSuccessMs_;
+            ++stats_.successes;
+            stats_.lastSuccessMs = nowMs;
+            if (gap > stats_.maxSuccessGapMs) {
+                stats_.maxSuccessGapMs = gap;
+            }
+            if (gap > cfg_.warningGapMs) {
+                ++stats_.warningGapEvents;
+            }
             lastSuccessMs_ = nowMs;
-            congestionLatched_ = false;
             retryPending_ = false;
+
+            /* Absolute cadence: advance the schedule by whole periods instead
+             * of setting anchor=now.  This prevents long-term drift while also
+             * collapsing missed periods after a temporary controller outage. */
+            do {
+                anchorMs_ += cfg_.periodMs;
+            } while ((nowMs - anchorMs_) >= cfg_.periodMs);
         } else {
-            ++stats_.backupFailures;
-            stats_.lastBackupFailureMs = nowMs;
+            ++stats_.failures;
+            stats_.lastFailureMs = nowMs;
+            if (!retryPending_) {
+                ++stats_.retries;
+            }
             retryPending_ = true;
         }
     }
 
-    void noteRetry() { ++stats_.retries; }
-
     const GuardStats& stats() const { return stats_; }
-    uint32_t loopAge(uint32_t nowMs) const { return nowMs - lastLoopKickMs_; }
-    uint32_t lastSuccessMs() const { return lastSuccessMs_; }
-    bool congestionLatched() const { return congestionLatched_; }
+    uint32_t currentSuccessGapMs(uint32_t nowMs) const {
+        return nowMs - lastSuccessMs_;
+    }
     bool retryPending() const { return retryPending_; }
 
 private:
     GuardConfig cfg_{};
     GuardStats stats_{};
-    uint32_t lastLoopKickMs_ = 0U;
+    uint32_t anchorMs_ = 0U;
     uint32_t lastAttemptMs_ = 0U;
     uint32_t lastSuccessMs_ = 0U;
-    uint8_t queueDepth_ = 0U;
-    bool congestionLatched_ = false;
-    bool stallLatched_ = false;
+    uint32_t lastLoopKickMs_ = 0U;
     bool retryPending_ = false;
 };
 
