@@ -14,6 +14,7 @@
 #include "sensor_manager.h"
 #include "ina226_channel_diag.h"
 #include "main.h"
+#include <stddef.h>
 
 extern TIM_HandleTypeDef htim3;
 
