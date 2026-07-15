@@ -42,10 +42,9 @@ void init() {
     initialized_  = true;
 
     // twaiInit() has already completed when this module is initialized from
-    // setup(). Start the high-priority failover guard here so CAN heartbeat
-    // protection does not depend on the large Core-1 loop reaching its legacy
-    // heartbeat block. The guard is silent while loop() is healthy and only
-    // injects 0x011 after a measured stall or TX-queue congestion event.
+    // setup().  Start the deterministic high-priority 0x011 producer here.
+    // It transmits every 100 ms from its own FreeRTOS task and never depends on
+    // obstacle data, Arduino loop(), TFT, audio, LEDs or NVS work.
     (void)can_heartbeat::init();
 
     Serial.println("[CAN_OBS] Obstacle TX initialized");
@@ -56,9 +55,8 @@ void update() {
 
     unsigned long now = millis();
 
-    // Core-1 liveness kick for the heartbeat failover task. This is deliberately
-    // placed before any sensor early-return so sensor warm-up/unavailability can
-    // never be mistaken for a blocked CAN/main loop.
+    // Report main-loop cadence for engineering diagnostics only.  Heartbeat
+    // transmission is unconditional and does not depend on this kick.
     can_heartbeat::notifyLoopAlive(static_cast<uint32_t>(now));
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
@@ -92,8 +90,9 @@ void update() {
         frame.data[4] = counter_++;
 
         if (!ESP32Can.writeFrame(frame, 0)) {
-            // The normal telemetry frame may be dropped, but a full TX queue is
-            // evidence that the safety heartbeat could also be displaced.
+            // Normal telemetry may be dropped.  Report it so heartbeat
+            // diagnostics can correlate queue pressure, while the dedicated
+            // producer continues to protect 0x011 independently.
             can_heartbeat::notifyTxDrop();
         }
     }
