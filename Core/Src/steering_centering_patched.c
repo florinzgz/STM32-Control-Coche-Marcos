@@ -1,18 +1,31 @@
 /**
   ****************************************************************************
   * @file    steering_centering_patched.c
-  * @brief   Safe steering-homing failure policy for PR #429.
+  * @brief   Safe steering-homing policy and diagnostics for PR #429.
   *
-  * The production centering FSM remains unchanged.  Its state transition calls
-  * are wrapped so a failed physical-centre search releases the 12 V steering
-  * bridge and enters the defined walking-speed LIMP_HOME mode instead of a
-  * generic DEGRADED state with ambiguous steering power ownership.
+  * The production centering FSM remains unchanged.  Its state transition and
+  * power-readiness calls are wrapped so a failed physical-centre search
+  * releases the 12 V steering bridge, enters walking-speed LIMP_HOME, and the
+  * homing diagnostic reports the locally controlled PC12 rail rather than the
+  * unrelated global traction sequencer.
   ****************************************************************************
   */
 
 #include "steering_centering.h"
 #include "safety_system.h"
 #include "main.h"
+
+static bool PR429_SteeringHomingPowerReady(void)
+{
+    const CenteringState_t state = SteeringCentering_GetState();
+    const bool sweeping = (state == CENTERING_SWEEP_LEFT) ||
+                          (state == CENTERING_SWEEP_RIGHT);
+
+    /* WAIT_RAIL intentionally remains not-ready.  Once the FSM enters an
+     * active sweep, PC12 being high is the real local power evidence. */
+    return sweeping &&
+        (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR) == GPIO_PIN_SET);
+}
 
 static void PR429_CenteringSetState(SystemState_t requested)
 {
@@ -39,8 +52,10 @@ static void PR429_CenteringSetDegradedLevel(DegradedLevel_t level,
     }
 }
 
+#define Safety_IsPowerReady      PR429_SteeringHomingPowerReady
 #define Safety_SetState          PR429_CenteringSetState
 #define Safety_SetDegradedLevel  PR429_CenteringSetDegradedLevel
 #include "steering_centering.c"
 #undef Safety_SetDegradedLevel
 #undef Safety_SetState
+#undef Safety_IsPowerReady
