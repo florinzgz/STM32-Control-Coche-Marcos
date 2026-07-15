@@ -32,10 +32,11 @@ int main() {
     p.noteAttempt(1200U, true);
     CHECK(p.stats().successes == 2U);
 
-    // Loop kicks are instrumentation only.
+    // Loop kicks are instrumentation only.  The first kick also records the
+    // 201 ms elapsed since reset, then later kicks track their own smaller gap.
     p.notifyLoopAlive(1201U);
     p.notifyLoopAlive(1260U);
-    CHECK(p.stats().maxObservedLoopGapMs == 59U);
+    CHECK(p.stats().maxObservedLoopGapMs == 201U);
     CHECK(!p.shouldAttempt(1299U));
     CHECK(p.shouldAttempt(1300U));
 
