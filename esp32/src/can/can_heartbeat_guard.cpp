@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <ESP32-TWAI-CAN.hpp>
+#include <driver/twai.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -21,6 +22,7 @@ static GuardPolicy g_policy;
 static portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t g_taskHandle = nullptr;
 static uint8_t g_backupCounter = 0x80U;
+static uint32_t g_lastTxFailedCount = 0U;
 
 static GuardStats snapshotLocked() {
     taskENTER_CRITICAL(&g_mux);
@@ -66,12 +68,34 @@ static void heartbeatGuardTask(void*) {
     for (;;) {
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(TASK_PERIOD_MS));
         const uint32_t nowMs = millis();
-        const uint32_t queued = ESP32Can.inTxQueue();
+
+        // Read the driver state once per guard tick.  When the controller is
+        // STOPPED/BUS_OFF/RECOVERING (or not installed yet), do not hammer
+        // twai_transmit(); the existing twai_recovery module remains the sole
+        // authority for controller recovery.  Pending policy evidence is kept
+        // and will be serviced as soon as TWAI returns to RUNNING.
+        twai_status_info_t twaiInfo{};
+        if (twai_get_status_info(&twaiInfo) != ESP_OK) {
+            continue;
+        }
 
         bool due = false;
         taskENTER_CRITICAL(&g_mux);
-        g_policy.observeQueue(static_cast<uint8_t>(queued > 255U ? 255U : queued));
-        due = g_policy.shouldAttempt(nowMs);
+        g_policy.observeQueue(static_cast<uint8_t>(
+            twaiInfo.msgs_to_tx > 255U ? 255U : twaiInfo.msgs_to_tx));
+
+        // Catch failures from every CAN producer, including the legacy 0x011
+        // sender whose writeFrame() result is not currently exposed.  A rising
+        // TWAI tx_failed_count latches congestion evidence for a priority
+        // heartbeat once the queue/controller is healthy again.
+        if (twaiInfo.tx_failed_count != g_lastTxFailedCount) {
+            g_lastTxFailedCount = twaiInfo.tx_failed_count;
+            g_policy.notifyTxDrop();
+        }
+
+        if (twaiInfo.state == TWAI_STATE_RUNNING) {
+            due = g_policy.shouldAttempt(nowMs);
+        }
         taskEXIT_CRITICAL(&g_mux);
 
         if (due) {
@@ -105,6 +129,7 @@ bool init() {
         return true;
     }
     g_policy.reset(millis());
+    g_lastTxFailedCount = 0U;
     taskEXIT_CRITICAL(&g_mux);
 
     const BaseType_t rc = xTaskCreatePinnedToCore(
