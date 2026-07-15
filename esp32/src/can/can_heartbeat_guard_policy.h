@@ -6,30 +6,36 @@
 namespace can_heartbeat {
 
 /*
- * Pure scheduling policy for the dedicated ESP32 -> STM32 safety heartbeat.
+ * Pure scheduling policy for the ESP32 -> STM32 safety-heartbeat backup.
  *
- * The producer is periodic and independent from Arduino loop().  Unsigned
- * subtraction is used everywhere, so millis() rollover is handled naturally.
+ * The legacy/main-loop producer remains the normal single producer.  This
+ * policy only permits a backup 0x011 when the main loop has stopped kicking
+ * for long enough, or after a TX-drop/congestion event.  That avoids two
+ * independent counters transmitting continuously while still protecting the
+ * STM32 250 ms watchdog from NVS/LED/audio/main-loop stalls.
+ *
+ * All time arithmetic uses unsigned subtraction, so millis() rollover is
+ * handled naturally.
  */
 struct GuardConfig {
-    uint32_t periodMs        = 100U;
-    uint32_t retryIntervalMs = 10U;
-    uint32_t warningGapMs    = 150U;
+    uint32_t loopStallMs       = 120U;
+    uint32_t retryIntervalMs   = 10U;
+    uint32_t backupIntervalMs  = 80U;
+    uint8_t  queueHighWater    = 4U;
+    uint8_t  queueRecovered    = 2U;
 };
 
 struct GuardStats {
-    uint32_t attempts              = 0U;
-    uint32_t successes             = 0U;
-    uint32_t failures              = 0U;
+    uint32_t loopStallEvents       = 0U;
+    uint32_t congestionEvents      = 0U;
+    uint32_t backupAttempts        = 0U;
+    uint32_t backupSuccess         = 0U;
+    uint32_t backupFailures        = 0U;
     uint32_t retries               = 0U;
-    uint32_t queueFullObservations = 0U;
-    uint32_t txDropNotifications   = 0U;
     uint32_t skippedNotRunning     = 0U;
-    uint32_t warningGapEvents      = 0U;
-    uint32_t lastSuccessMs         = 0U;
-    uint32_t lastFailureMs         = 0U;
-    uint32_t maxSuccessGapMs       = 0U;
     uint32_t maxObservedLoopGapMs  = 0U;
+    uint32_t lastBackupSuccessMs   = 0U;
+    uint32_t lastBackupFailureMs   = 0U;
 };
 
 class GuardPolicy {
@@ -37,13 +43,13 @@ public:
     explicit GuardPolicy(const GuardConfig& cfg = GuardConfig{}) : cfg_(cfg) {}
 
     void reset(uint32_t nowMs) {
-        anchorMs_ = nowMs;
-        lastAttemptMs_ = nowMs;
-        lastSuccessMs_ = nowMs;
         lastLoopKickMs_ = nowMs;
+        lastAttemptMs_ = nowMs;
+        queueDepth_ = 0U;
+        congestionLatched_ = false;
+        stallLatched_ = false;
         retryPending_ = false;
         stats_ = GuardStats{};
-        stats_.lastSuccessMs = nowMs;
     }
 
     void notifyLoopAlive(uint32_t nowMs) {
@@ -52,45 +58,61 @@ public:
             stats_.maxObservedLoopGapMs = gap;
         }
         lastLoopKickMs_ = nowMs;
+        stallLatched_ = false;
     }
 
-    void notifyTxDrop() { ++stats_.txDropNotifications; }
-    void noteQueueFull() { ++stats_.queueFullObservations; }
+    void observeQueue(uint8_t depth) {
+        queueDepth_ = depth;
+        if (depth >= cfg_.queueHighWater && !congestionLatched_) {
+            congestionLatched_ = true;
+            ++stats_.congestionEvents;
+        }
+    }
+
+    void notifyTxDrop() {
+        if (!congestionLatched_) {
+            congestionLatched_ = true;
+            ++stats_.congestionEvents;
+        }
+    }
+
     void noteSkippedNotRunning() { ++stats_.skippedNotRunning; }
 
-    bool shouldAttempt(uint32_t nowMs) const {
-        if (retryPending_) {
-            return (nowMs - lastAttemptMs_) >= cfg_.retryIntervalMs;
+    bool shouldAttempt(uint32_t nowMs) {
+        const uint32_t loopGap = nowMs - lastLoopKickMs_;
+        if (loopGap > stats_.maxObservedLoopGapMs) {
+            stats_.maxObservedLoopGapMs = loopGap;
         }
-        return (nowMs - anchorMs_) >= cfg_.periodMs;
+
+        const bool stalled = loopGap >= cfg_.loopStallMs;
+        if (stalled && !stallLatched_) {
+            stallLatched_ = true;
+            ++stats_.loopStallEvents;
+        }
+
+        const bool queueRecovered = congestionLatched_ &&
+                                    queueDepth_ <= cfg_.queueRecovered;
+        if (!stalled && !queueRecovered && !retryPending_) {
+            return false;
+        }
+
+        const uint32_t minGap = retryPending_ ? cfg_.retryIntervalMs
+                                               : cfg_.backupIntervalMs;
+        return (nowMs - lastAttemptMs_) >= minGap;
     }
 
     void noteAttempt(uint32_t nowMs, bool success) {
         lastAttemptMs_ = nowMs;
-        ++stats_.attempts;
+        ++stats_.backupAttempts;
 
         if (success) {
-            const uint32_t gap = nowMs - lastSuccessMs_;
-            ++stats_.successes;
-            stats_.lastSuccessMs = nowMs;
-            if (gap > stats_.maxSuccessGapMs) {
-                stats_.maxSuccessGapMs = gap;
-            }
-            if (gap > cfg_.warningGapMs) {
-                ++stats_.warningGapEvents;
-            }
-            lastSuccessMs_ = nowMs;
+            ++stats_.backupSuccess;
+            stats_.lastBackupSuccessMs = nowMs;
+            congestionLatched_ = false;
             retryPending_ = false;
-
-            /* Absolute cadence: advance the schedule by whole periods instead
-             * of setting anchor=now.  This prevents long-term drift while also
-             * collapsing missed periods after a temporary controller outage. */
-            do {
-                anchorMs_ += cfg_.periodMs;
-            } while ((nowMs - anchorMs_) >= cfg_.periodMs);
         } else {
-            ++stats_.failures;
-            stats_.lastFailureMs = nowMs;
+            ++stats_.backupFailures;
+            stats_.lastBackupFailureMs = nowMs;
             if (!retryPending_) {
                 ++stats_.retries;
             }
@@ -99,18 +121,18 @@ public:
     }
 
     const GuardStats& stats() const { return stats_; }
-    uint32_t currentSuccessGapMs(uint32_t nowMs) const {
-        return nowMs - lastSuccessMs_;
-    }
+    uint32_t loopAge(uint32_t nowMs) const { return nowMs - lastLoopKickMs_; }
+    bool congestionLatched() const { return congestionLatched_; }
     bool retryPending() const { return retryPending_; }
 
 private:
     GuardConfig cfg_{};
     GuardStats stats_{};
-    uint32_t anchorMs_ = 0U;
-    uint32_t lastAttemptMs_ = 0U;
-    uint32_t lastSuccessMs_ = 0U;
     uint32_t lastLoopKickMs_ = 0U;
+    uint32_t lastAttemptMs_ = 0U;
+    uint8_t queueDepth_ = 0U;
+    bool congestionLatched_ = false;
+    bool stallLatched_ = false;
     bool retryPending_ = false;
 };
 

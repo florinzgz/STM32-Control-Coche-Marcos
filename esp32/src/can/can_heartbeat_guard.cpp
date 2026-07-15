@@ -10,26 +10,22 @@
 namespace can_heartbeat {
 namespace {
 
-static constexpr uint32_t TASK_TICK_MS       = 5U;
-static constexpr uint32_t TX_WAIT_MS         = 5U;
-static constexpr uint32_t RETRY_INTERVAL_MS  = 10U;
-static constexpr uint32_t WARNING_GAP_MS     = 150U;
-static constexpr uint32_t TASK_STACK_BYTES   = 3072U;
-static constexpr UBaseType_t TASK_PRIORITY   = 5U;
-static constexpr BaseType_t TASK_CORE        = 1;
+static constexpr uint32_t TASK_TICK_MS      = 5U;
+static constexpr uint32_t TX_WAIT_MS        = 5U;
+static constexpr uint32_t TASK_STACK_BYTES  = 3072U;
+static constexpr UBaseType_t TASK_PRIORITY  = 5U;
+static constexpr BaseType_t TASK_CORE       = 1;
 
 static_assert(can::HEARTBEAT_INTERVAL_MS < can::HEARTBEAT_TIMEOUT_MS,
               "Heartbeat period must remain below the STM32 watchdog");
-static_assert(WARNING_GAP_MS < can::HEARTBEAT_TIMEOUT_MS,
-              "Warning gap must remain below the STM32 watchdog");
+static_assert(120U < can::HEARTBEAT_TIMEOUT_MS,
+              "Backup stall threshold must remain below the STM32 watchdog");
 
-static GuardPolicy g_policy(GuardConfig{
-    can::HEARTBEAT_INTERVAL_MS,
-    RETRY_INTERVAL_MS,
-    WARNING_GAP_MS
-});
+static GuardPolicy g_policy;
 static portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t g_taskHandle = nullptr;
+/* Deliberately separated from the normal loop producer's 0-based counter.
+ * It is used only during a measured loop stall/congestion event. */
 static uint8_t g_counter = 0x80U;
 static uint32_t g_lastTxFailedCount = 0U;
 
@@ -40,8 +36,8 @@ static GuardStats snapshotLocked() {
     return copy;
 }
 
-/* Transmit exactly one safety heartbeat.  The rolling counter is advanced only
- * when the ESP-IDF TWAI driver accepts the frame into its TX queue. */
+/* Transmit exactly one failover heartbeat.  The counter advances only when the
+ * ESP-IDF TWAI driver accepts the frame into its TX queue. */
 static bool transmitHeartbeat(uint32_t nowMs) {
     twai_message_t msg{};
     msg.identifier = can::HEARTBEAT_ESP32;
@@ -55,9 +51,6 @@ static bool transmitHeartbeat(uint32_t nowMs) {
 
     taskENTER_CRITICAL(&g_mux);
     g_policy.noteAttempt(nowMs, sent);
-    if (err == ESP_ERR_TIMEOUT) {
-        g_policy.noteQueueFull();
-    }
     taskEXIT_CRITICAL(&g_mux);
 
     if (sent) {
@@ -66,9 +59,9 @@ static bool transmitHeartbeat(uint32_t nowMs) {
     return sent;
 }
 
-/* Dedicated producer: this is deliberately independent from Arduino loop().
- * Slow NVS, LED, audio, sensor or UI work therefore cannot suppress 0x011.
- * vTaskDelayUntil() gives an absolute, drift-free scheduler tick. */
+/* Backup producer independent from Arduino loop().  It stays silent while the
+ * normal loop producer is alive.  NVS/LED/audio/main-loop stalls therefore get
+ * a bounded 0x011 failover without introducing a permanent second producer. */
 static void heartbeatTask(void*) {
     TickType_t wake = xTaskGetTickCount();
 
@@ -85,6 +78,7 @@ static void heartbeatTask(void*) {
         }
 
         taskENTER_CRITICAL(&g_mux);
+        g_policy.observeQueue(static_cast<uint8_t>(info.msgs_to_tx));
         if (info.tx_failed_count != g_lastTxFailedCount) {
             g_lastTxFailedCount = info.tx_failed_count;
             g_policy.notifyTxDrop();
@@ -104,8 +98,8 @@ static void heartbeatTask(void*) {
         }
 
         (void)transmitHeartbeat(nowMs);
-        /* A failed attempt is retried by the same absolute task 10 ms later.
-         * There is no unbounded loop and no long blocking wait in this task. */
+        /* Failed attempts are retried by the same absolute task after 10 ms.
+         * No unbounded loop and no long blocking wait are used here. */
     }
 }
 
@@ -127,7 +121,7 @@ bool init() {
 
     const BaseType_t rc = xTaskCreatePinnedToCore(
         heartbeatTask,
-        "CanHeartbeat",
+        "CanHbBackup",
         TASK_STACK_BYTES,
         nullptr,
         TASK_PRIORITY,
@@ -138,11 +132,11 @@ bool init() {
         taskENTER_CRITICAL(&g_mux);
         g_taskHandle = nullptr;
         taskEXIT_CRITICAL(&g_mux);
-        Serial.println("[CAN][ERR] Failed to create deterministic heartbeat task");
+        Serial.println("[CAN][ERR] Failed to create heartbeat failover task");
         return false;
     }
 
-    Serial.println("[CAN][INFO] Deterministic heartbeat active: 0x011 / 100 ms / Core 1 / priority 5");
+    Serial.println("[CAN][INFO] Heartbeat failover active: loop stall=120 ms, backup=80 ms");
     return true;
 }
 
@@ -160,13 +154,6 @@ void notifyTxDrop() {
 
 GuardStats stats() {
     return snapshotLocked();
-}
-
-uint32_t currentSuccessGapMs(uint32_t nowMs) {
-    taskENTER_CRITICAL(&g_mux);
-    const uint32_t gap = g_policy.currentSuccessGapMs(nowMs);
-    taskEXIT_CRITICAL(&g_mux);
-    return gap;
 }
 
 }  // namespace can_heartbeat

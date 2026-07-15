@@ -24,12 +24,12 @@ C_SOURCES = \
   $(CORE_SRC)/relay_health_diag.c \
   $(CORE_SRC)/ina226_channel_diag.c \
   $(CORE_SRC)/rc_arbiter.c \
-  $(CORE_SRC)/sensor_manager.c \
+  $(CORE_SRC)/sensor_manager_patched.c \
   $(CORE_SRC)/pedal_logic.c \
-  $(CORE_SRC)/safety_system.c \
+  $(CORE_SRC)/safety_system_patched.c \
   $(CORE_SRC)/service_mode.c \
   $(CORE_SRC)/ackermann.c \
-  $(CORE_SRC)/steering_centering.c \
+  $(CORE_SRC)/steering_centering_patched.c \
   $(CORE_SRC)/steering_centering_diag.c \
   $(CORE_SRC)/boot_validation.c \
   $(CORE_SRC)/encoder_reader.c \

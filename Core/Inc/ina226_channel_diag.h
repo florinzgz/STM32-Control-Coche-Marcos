@@ -42,17 +42,17 @@ extern "C" {
 /* Telemetry older than this is STALE (never reported as a valid 0 A). */
 #define INA226_DIAG_STALE_MS     500U
 
-/* A shunt drop below this (in µV) with the chip present means "no shunt
- * voltage" — the classic external-shunt / R002 wiring fault.             */
+/* A shunt drop below this (in µV) while current is genuinely expected means
+ * "no shunt voltage" — the classic external-shunt / R002 wiring fault.     */
 #define INA226_DIAG_SHUNT_FLOOR_UV   50   /* ~50 µV ≈ noise floor */
 
-/* A signed current more negative than this (mA) under a positive-demand
- * channel indicates reversed VIN+/VIN− wiring.                           */
+/* A signed current more negative than this (mA) while current is genuinely
+ * expected indicates reversed VIN+/VIN− wiring.                            */
 #define INA226_DIAG_REVERSED_MA      100
 
 /* ---- Explicit per-channel diagnosis (stable, CAN-transportable) ---- */
 typedef enum {
-    INA226_CH_OK = 0,                 /* Present, valid, current flowing     */
+    INA226_CH_OK = 0,                 /* Present, valid, no proven fault     */
     INA226_CH_PRESENT_NO_SHUNT,       /* Present but ~0 shunt drop           */
     INA226_CH_POLARITY_REVERSED,      /* Present, negative current (VIN swap) */
     INA226_CH_STALE,                  /* Telemetry not updated               */
@@ -60,7 +60,7 @@ typedef enum {
     INA226_CH_MISSING,                /* No I2C ACK at the expected address   */
     INA226_CH_WRONG_ID,               /* ACKs but MFG/DIE id mismatch         */
     INA226_CH_CONFIG_LOST,            /* Config write/readback mismatch       */
-    INA226_CH_READ_FAIL,             /* Shunt/bus register read failed       */
+    INA226_CH_READ_FAIL,              /* Shunt/bus register read failed       */
     INA226_CH_UNKNOWN                 /* Not classifiable                     */
 } Ina226DiagReason_t;
 
@@ -87,6 +87,7 @@ typedef struct {
 
     uint32_t sample_age_ms;           /* Age of newest sample                */
     bool     channel_powered;         /* Power branch expected energised     */
+    bool     current_expected;        /* Real steering PWM is being emitted  */
 
     uint32_t consecutive_failures;    /* Per-channel consecutive fails       */
     uint32_t recovery_count;          /* Bus recoveries attributed to ch     */

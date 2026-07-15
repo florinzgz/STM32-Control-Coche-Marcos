@@ -332,7 +332,6 @@ jobs:
           name: build-logs
           path: artifacts/build/
 
-  # ── Repository integrity checks ────────────────────────────────────
   integrity-check:
     runs-on: ubuntu-latest
     needs: [tests, build]
