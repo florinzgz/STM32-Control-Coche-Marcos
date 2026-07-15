@@ -2305,12 +2305,14 @@ void Safety_CheckSensors(void)
      * ACTIVE state requires fully valid pedal plausibility — any
      * plausibility failure exits ACTIVE immediately.
      *
-     * Two distinct failure modes:
-     *   1. Contradictory: dual ADC samples disagree.
-     *      → No torque allowed (ADC fault / noise risk).
+     * A plausibility failure now only occurs for GENUINELY indeterminate
+     * signals (a fast but coherent stab is valid intent and is rate-limited
+     * upstream, never faulted).  Two distinct failure modes remain:
+     *   1. Contradictory: dual ADC samples disagree PERSISTENTLY.
+     *      → No torque allowed (position indeterminate).
      *      → Demand forced to zero in ALL states.
-     *   2. Implausible: range or rate-of-change check failed.
-     *      → Cross-validation impossible, but ADC may be valid.
+     *   2. Implausible: rail/stuck-ADC range fault.
+     *      → Cross-validation impossible, but primary ADC may be usable.
      *      → LIMP_HOME allows limited throttle via primary ADC
      *        with 20 % torque cap and 5 km/h speed limit.
      *
