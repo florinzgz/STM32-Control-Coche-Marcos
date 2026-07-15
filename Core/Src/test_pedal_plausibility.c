@@ -3,20 +3,22 @@
   * @file    test_pedal_plausibility.c
   * @brief   Deterministic host tests for the pedal plausibility pipeline.
   *
-  *          Covers the root-cause fix for the "frozen 53 % / LIMP HOME"
-  *          fault: direction-aware rate check + recovery state machine.
+  *          Covers the accelerator-pedal policy: a fast but electrically
+  *          coherent stab is VALID intent (safe upward ramp, never a fault);
+  *          release is immediate; a dual-sample contradiction must PERSIST
+  *          before it immobilises; rail/stuck ADC still zeroes torque.
   *
   *          Compile (from repository root):
   *            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
   *                -Ianalysis_artifacts/stubs -ICore/Inc -O2 -lm \
-  *                Core/Src/test_pedal_plausibility.c \
+  *                Core/Src/test_pedal_plausibility.c Core/Src/pedal_logic.c \
   *                -o /tmp/test_pedal_plausibility
   *            /tmp/test_pedal_plausibility
   *
-  *          The simulation re-implements the pedal pipeline in the test
-  *          file using the same constants as sensor_manager.c.  A set of
-  *          _Static_assert checks guard against constant drift between
-  *          firmware and test.
+  *          The tests drive the REAL production pipeline (Pedal_ProcessSamples
+  *          from pedal_logic.c) directly — there is NO re-implementation of the
+  *          algorithm here.  _Static_assert checks guard against constant drift
+  *          between firmware and test.
   ****************************************************************************
   */
 
@@ -39,7 +41,7 @@
 #define T_PEDAL_ADC_FAULT_LO      0U
 #define T_PEDAL_ADC_FAULT_HI      4094U
 #define T_PEDAL_RELEASE_ZONE_PCT  3.0f
-#define T_PEDAL_RECOVERY_CYCLES   3U
+#define T_PEDAL_CONTRADICT_CYCLES 3U
 #define T_PEDAL_ADC_MIN           PEDAL_CAL_DEFAULT_MIN   /* 50 */
 #define T_PEDAL_ADC_MAX           PEDAL_CAL_DEFAULT_MAX   /* 4000 */
 
@@ -56,7 +58,8 @@ _Static_assert(T_PEDAL_MAX_RATE_PCT     == PEDAL_MAX_RATE_PCT,     "rate drift")
 _Static_assert(T_PEDAL_EMA_ALPHA        == PEDAL_EMA_ALPHA,        "ema drift");
 _Static_assert(T_PEDAL_ADC_FAULT_HI     == PEDAL_ADC_FAULT_HI,     "faulthi drift");
 _Static_assert(T_PEDAL_RELEASE_ZONE_PCT == PEDAL_RELEASE_ZONE_PCT, "zone drift");
-_Static_assert(T_PEDAL_RECOVERY_CYCLES  == PEDAL_RECOVERY_CYCLES,  "recov drift");
+_Static_assert(T_PEDAL_CONTRADICT_CYCLES == PEDAL_CONTRADICT_DEBOUNCE_CYCLES,
+               "contradict debounce drift");
 
 /* =========================================================================
  * Test harness state — the REAL production pipeline state (pedal_logic.h)
@@ -73,8 +76,8 @@ static float    s_ema        = 0.0f;
 static bool     s_plausible  = true;
 static bool     s_contradict = false;
 static bool     s_ema_primed = false;
-static bool     s_rate_fault = false;
-static uint8_t  s_rec_count  = 0;
+static bool     s_rate_limited = false;
+static uint8_t  s_contradict_count = 0;
 
 static void sync_from_state(void)
 {
@@ -85,8 +88,8 @@ static void sync_from_state(void)
     s_plausible  = g_st.plausible;
     s_contradict = g_st.contradict;
     s_ema_primed = g_st.ema_primed;
-    s_rate_fault = g_st.rate_fault;
-    s_rec_count  = g_st.recovery_count;
+    s_rate_limited = g_st.rate_limited;
+    s_contradict_count = g_st.contradict_count;
 }
 
 static void sim_reset(void)
@@ -221,8 +224,7 @@ static void tc03_rapid_release_from_53(void)
      * was never updated → permanent lockout every subsequent cycle.    */
     ASSERT_NEAR(s_pct,  0.0f, 0.5f, "TC03: output must be 0 % after rapid release");
     ASSERT_TRUE(s_plausible,         "TC03: rapid release is NOT a fault");
-    ASSERT_FALSE(s_rate_fault,       "TC03: no rate_fault after rapid release");
-    ASSERT_NEAR(s_pct_prev, 0.0f, 0.5f, "TC03: pct_prev reset to 0");
+    ASSERT_FALSE(s_rate_limited,     "TC03: release is not rate-limited");
     ASSERT_NEAR(s_ema,      0.0f, 0.5f, "TC03: EMA reset to 0");
 
     /* Subsequent cycles must not revert to 53 % */
@@ -250,17 +252,19 @@ static void tc04_rapid_release_from_100(void)
 
     ASSERT_NEAR(s_pct,  0.0f, 0.5f, "TC04: output 0 % after 100→0 release");
     ASSERT_TRUE(s_plausible,         "TC04: plausible after rapid release");
-    ASSERT_FALSE(s_rate_fault,       "TC04: no rate_fault");
-    ASSERT_NEAR(s_pct_prev, 0.0f, 0.5f, "TC04: prev reset");
+    ASSERT_FALSE(s_rate_limited,     "TC04: release is not rate-limited");
     ASSERT_NEAR(s_ema,      0.0f, 0.5f, "TC04: EMA reset");
 }
 
 /* =========================================================================
- * Test Case 5 — Upward rate fault: 0 → 60 % in one cycle
+ * Test Case 5 — Fast coherent application 0 → 60 % in one cycle
+ *   NEW POLICY (§A): a fast but electrically-coherent stab is VALID intent,
+ *   NOT a fault.  The demand must stay plausible and RISE (rate-limited),
+ *   never collapse to 0 % and never raise SENSOR_FAULT.
  * ========================================================================= */
-static void tc05_rapid_application(void)
+static void tc05_fast_application(void)
 {
-    printf("TC05: rapid application 0 → 60 %% in one cycle\n");
+    printf("TC05: fast coherent application 0 → 60 %% (valid intent, ramp)\n");
     sim_reset();
     sim_update(ADC_RELEASED, ADC_RELEASED);   /* stable at 0 */
     ASSERT_TRUE(s_plausible, "TC05: plausible at 0");
@@ -268,67 +272,87 @@ static void tc05_rapid_application(void)
     uint16_t a60 = adc_for_pct(60.0f);
     sim_update(a60, a60);
 
-    ASSERT_FALSE(s_plausible,        "TC05: implausible after rapid application");
-    ASSERT_TRUE(s_rate_fault,        "TC05: rate_fault set");
-    ASSERT_NEAR(s_pct, 0.0f, 0.5f,  "TC05: output must be 0 %");
-    ASSERT_NEAR(s_pct_prev, 60.0f, 1.0f, "TC05: pct_prev reset to current raw");
+    ASSERT_TRUE(s_plausible,        "TC05: fast stab stays PLAUSIBLE (not a fault)");
+    ASSERT_FALSE(s_contradict,      "TC05: no contradiction (coherent samples)");
+    ASSERT_TRUE(s_pct > 0.0f,       "TC05: demand rises immediately (non-zero)");
+    ASSERT_TRUE(s_pct <= 60.5f,     "TC05: demand never exceeds physical pedal");
+
+    /* Hold 60 %: demand must keep climbing toward 60 %, still plausible. */
+    float last = s_pct;
+    for (int i = 0; i < 12; i++) {
+        sim_update(a60, a60);
+        ASSERT_TRUE(s_plausible, "TC05: plausible while ramping to 60 %");
+        ASSERT_TRUE(s_pct >= last - 0.01f, "TC05: demand monotonically climbs");
+        last = s_pct;
+    }
+    ASSERT_NEAR(s_pct, 60.0f, 1.5f, "TC05: demand converges to ~60 %");
 }
 
 /* =========================================================================
- * Test Case 6 — Recovery from upward rate fault
+ * Test Case 6 — Fast application then immediate release
+ *   The fast stab is accepted (ramp) and a subsequent release drops the
+ *   demand at once with no lingering fault state.
  * ========================================================================= */
-static void tc06_recovery_after_rapid_application(void)
+static void tc06_fast_application_then_release(void)
 {
-    printf("TC06: recovery from rapid application — must re-enable from 0 %%\n");
+    printf("TC06: fast application then release — no lingering fault\n");
     sim_reset();
     sim_update(ADC_RELEASED, ADC_RELEASED);
 
     uint16_t a60 = adc_for_pct(60.0f);
     sim_update(a60, a60);
-    ASSERT_FALSE(s_plausible, "TC06: implausible after jump");
+    ASSERT_TRUE(s_plausible, "TC06: plausible after fast stab");
+    ASSERT_TRUE(s_pct > 0.0f, "TC06: demand non-zero after fast stab");
 
-    /* Hold pedal released for RECOVERY_CYCLES cycles */
-    for (uint8_t i = 0; i < T_PEDAL_RECOVERY_CYCLES - 1; i++) {
-        sim_update(ADC_RELEASED, ADC_RELEASED);
-        ASSERT_FALSE(s_plausible, "TC06: still implausible during recovery");
-        ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC06: output still 0 during recovery");
-    }
-
-    /* Final recovery cycle */
+    /* Release immediately — demand must drop to 0 in a single cycle. */
     sim_update(ADC_RELEASED, ADC_RELEASED);
-    ASSERT_TRUE(s_plausible,        "TC06: plausible restored after N cycles");
-    ASSERT_FALSE(s_rate_fault,      "TC06: rate_fault cleared");
-    ASSERT_NEAR(s_pct,      0.0f, 0.5f, "TC06: output starts at 0 after recovery");
-    ASSERT_NEAR(s_pct_prev, 0.0f, 0.5f, "TC06: prev baseline 0 after recovery");
+    ASSERT_TRUE(s_plausible,        "TC06: plausible after release");
+    ASSERT_FALSE(s_rate_limited,    "TC06: release not rate-limited");
+    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC06: demand 0 % immediately after release");
 
-    /* Must not apply the old 60 % value */
-    ASSERT_TRUE(s_pct < 5.0f, "TC06: old 60 %% not re-applied");
-
-    /* Gradual ramp after recovery works correctly */
+    /* Re-apply — must respond again (no reset / no lockout required). */
     sim_update(adc_for_pct(10.0f), adc_for_pct(10.0f));
-    ASSERT_TRUE(s_plausible, "TC06: plausible during post-recovery ramp");
-    ASSERT_TRUE(s_pct > 0.0f && s_pct <= 20.0f, "TC06: post-recovery output in range");
+    ASSERT_TRUE(s_plausible, "TC06: plausible on re-apply");
+    ASSERT_TRUE(s_pct > 0.0f, "TC06: responds again without restart");
 }
 
 /* =========================================================================
- * Test Case 7 — Contradictory dual samples
+ * Test Case 7 — Transient vs persistent dual-sample contradiction
+ *   §C: a single/short disagreement is transient noise — NOT an immediate
+ *   fault (last demand held, stays plausible).
+ *   §D: a PERSISTENT disagreement latches the contradiction fault → 0 torque.
  * ========================================================================= */
-static void tc07_contradictory_samples(void)
+static void tc07_contradiction_debounce(void)
 {
-    printf("TC07: ADC1/ADC2 difference > tolerance\n");
+    printf("TC07: transient vs persistent ADC1/ADC2 contradiction\n");
     sim_reset();
-    /* Difference of 31 counts — exceeds PEDAL_SAMPLE_TOLERANCE(30) */
-    uint16_t adc1 = 500U;
-    uint16_t adc2 = 531U;
-    sim_update(adc1, adc2);
 
-    ASSERT_FALSE(s_plausible,  "TC07: implausible on contradiction");
-    ASSERT_TRUE(s_contradict,  "TC07: contradict flag set");
-    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC07: output 0 on contradiction");
+    /* Build a stable ~30 % demand first. */
+    for (int i = 0; i < 8; i++)
+        sim_update(adc_for_pct(30.0f), adc_for_pct(30.0f));
+    ASSERT_TRUE(s_plausible, "TC07: plausible at stable 30 %");
+    float held = s_pct;
 
-    /* When samples agree again, system recovers */
-    uint16_t mid = (uint16_t)((adc1 + adc2) / 2);
-    sim_update(mid, mid);
+    /* Single transient contradiction (diff 31 > tol 30) — must NOT fault. */
+    sim_update(500U, 531U);
+    ASSERT_FALSE(s_contradict,  "TC07: single contradiction is NOT yet a fault");
+    ASSERT_TRUE(s_plausible,    "TC07: stays plausible on transient noise");
+    ASSERT_NEAR(s_pct, held, 0.5f, "TC07: last validated demand held");
+
+    /* Samples agree again — counter resets, no fault ever declared. */
+    sim_update(adc_for_pct(30.0f), adc_for_pct(30.0f));
+    ASSERT_FALSE(s_contradict, "TC07: recovered, no fault after transient");
+    ASSERT_TRUE(s_plausible,   "TC07: plausible after transient recovery");
+
+    /* Now PERSISTENT contradiction for the full debounce window → fault. */
+    for (uint8_t i = 0; i < T_PEDAL_CONTRADICT_CYCLES; i++)
+        sim_update(500U, 560U);
+    ASSERT_TRUE(s_contradict,  "TC07: persistent contradiction latches fault");
+    ASSERT_FALSE(s_plausible,  "TC07: implausible on persistent contradiction");
+    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC07: zero torque on persistent contradiction");
+
+    /* Recovery when samples agree again. */
+    sim_update(adc_for_pct(30.0f), adc_for_pct(30.0f));
     ASSERT_FALSE(s_contradict, "TC07: contradict cleared when samples agree");
     ASSERT_TRUE(s_plausible,   "TC07: plausible restored");
 }
@@ -345,7 +369,7 @@ static void tc08_rail_high(void)
     ASSERT_FALSE(s_plausible,       "TC08: implausible on rail");
     ASSERT_NEAR(s_pct,      0.0f, 0.5f, "TC08: output 0 on rail");
     ASSERT_NEAR(s_pct_prev, 0.0f, 0.5f, "TC08: prev reset");
-    ASSERT_FALSE(s_rate_fault,      "TC08: no rate_fault (different fault type)");
+    ASSERT_FALSE(s_rate_limited,    "TC08: rail fault clears rate_limited flag");
 
     /* Recovery when rail returns to valid value */
     sim_update(ADC_RELEASED, ADC_RELEASED);
@@ -394,70 +418,71 @@ static void tc10_reject_0x002F_decomposition(void)
 }
 
 /* =========================================================================
- * Test Case 11 — Recovery counter resets when pedal rises during recovery
+ * Test Case 11 — Contradiction debounce counter resets when samples agree
  * ========================================================================= */
-static void tc11_recovery_counter_resets_on_rise(void)
+static void tc11_contradiction_counter_resets(void)
 {
-    printf("TC11: recovery counter resets when pedal rises above zone\n");
+    printf("TC11: contradiction debounce counter resets when samples agree\n");
     sim_reset();
     sim_update(ADC_RELEASED, ADC_RELEASED);
 
-    /* Trigger rapid application */
-    sim_update(adc_for_pct(70.0f), adc_for_pct(70.0f));
-    ASSERT_TRUE(s_rate_fault, "TC11: rate_fault set");
+    /* Two contradictory cycles (below the 3-cycle threshold) → no fault yet. */
+    sim_update(500U, 560U);
+    ASSERT_EQ((int)s_contradict_count, 1, "TC11: counter = 1 after 1st contradiction");
+    ASSERT_FALSE(s_contradict, "TC11: not yet a fault after 1 cycle");
+    sim_update(500U, 560U);
+    ASSERT_EQ((int)s_contradict_count, 2, "TC11: counter = 2 after 2nd contradiction");
+    ASSERT_FALSE(s_contradict, "TC11: not yet a fault after 2 cycles");
 
-    /* One release cycle → counter = 1 */
-    sim_update(ADC_RELEASED, ADC_RELEASED);
-    ASSERT_EQ((int)s_rec_count, 1, "TC11: counter = 1 after first release cycle");
-
-    /* Signal rises — counter must reset */
-    sim_update(adc_for_pct(40.0f), adc_for_pct(40.0f));
-    ASSERT_EQ((int)s_rec_count, 0, "TC11: counter reset when pedal rises");
-    ASSERT_FALSE(s_plausible,       "TC11: still implausible");
-    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC11: output still 0");
+    /* Samples agree — counter must reset to 0. */
+    sim_update(adc_for_pct(20.0f), adc_for_pct(20.0f));
+    ASSERT_EQ((int)s_contradict_count, 0, "TC11: counter reset when samples agree");
+    ASSERT_TRUE(s_plausible,       "TC11: plausible after recovery");
 }
 
 /* =========================================================================
- * Test Case 12 — Upward fault does NOT accept high value spontaneously
+ * Test Case 12 — Fast application is progressively ACCEPTED (not zeroed)
+ *   Opposite of the old "must stay implausible" expectation: an 80 % stab is
+ *   valid intent and the demand must climb toward 80 %, never collapse to 0.
  * ========================================================================= */
-static void tc12_no_spontaneous_reactivation(void)
+static void tc12_fast_application_accepted(void)
 {
-    printf("TC12: upward fault must NOT auto-accept high value\n");
+    printf("TC12: fast application is progressively accepted (ramp to 80 %%)\n");
     sim_reset();
     sim_update(ADC_RELEASED, ADC_RELEASED);
 
     sim_update(adc_for_pct(80.0f), adc_for_pct(80.0f));
-    ASSERT_FALSE(s_plausible, "TC12: implausible");
+    ASSERT_TRUE(s_plausible, "TC12: plausible after 0→80 stab");
+    ASSERT_TRUE(s_pct > 0.0f, "TC12: demand non-zero after stab");
 
-    /* Stay at 80 % for many cycles — must NEVER become plausible */
-    for (int i = 0; i < 20; i++) {
+    /* Hold 80 % — demand climbs and stays plausible the whole time. */
+    for (int i = 0; i < 15; i++) {
         sim_update(adc_for_pct(80.0f), adc_for_pct(80.0f));
-        ASSERT_FALSE(s_plausible,       "TC12: must remain implausible at 80 %");
-        ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC12: output 0 at 80 %");
+        ASSERT_TRUE(s_plausible,   "TC12: remains plausible ramping to 80 %");
+        ASSERT_TRUE(s_pct <= 80.5f, "TC12: never exceeds physical pedal");
     }
+    ASSERT_NEAR(s_pct, 80.0f, 1.5f, "TC12: converged to ~80 %");
 }
 
 /* =========================================================================
- * Test Case 13 — EMA not contaminated by fault cycle
+ * Test Case 13 — EMA never exceeds the physical pedal on a fast stab
  * ========================================================================= */
-static void tc13_ema_not_contaminated(void)
+static void tc13_ema_bounded_on_fast_stab(void)
 {
-    printf("TC13: EMA must not be contaminated by rate-fault raw reading\n");
+    printf("TC13: EMA/demand never overshoots the physical pedal on a stab\n");
     sim_reset();
 
     /* Build stable 20 % */
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 8; i++)
         sim_update(adc_for_pct(20.0f), adc_for_pct(20.0f));
 
-    float ema_before = s_ema;
-
-    /* Rapid application */
-    sim_update(adc_for_pct(80.0f), adc_for_pct(80.0f));
-
-    /* EMA should have been reset to 0, not polluted with 80 */
-    ASSERT_NEAR(s_ema, 0.0f, 0.1f, "TC13: EMA reset to 0 on upward fault");
-    ASSERT_TRUE(s_ema < ema_before, "TC13: EMA decreased, not increased");
-    (void)ema_before;
+    /* Fast application to 80 % — the output must rise but never exceed 80 %. */
+    for (int i = 0; i < 15; i++) {
+        sim_update(adc_for_pct(80.0f), adc_for_pct(80.0f));
+        ASSERT_TRUE(s_pct <= 80.5f, "TC13: demand bounded by physical pedal");
+        ASSERT_TRUE(s_ema <= 80.5f, "TC13: EMA bounded by physical pedal");
+    }
+    ASSERT_TRUE(s_pct > 20.0f, "TC13: demand increased above the prior 20 %");
 }
 
 /* =========================================================================
@@ -468,17 +493,23 @@ static void tc14_dual_sample_tolerance_boundary(void)
     printf("TC14: dual-sample tolerance boundary at ±30 counts\n");
     sim_reset();
 
-    /* Exactly at tolerance — should pass */
+    /* Exactly at tolerance — should pass (no contradiction). */
     sim_update(500U, 500U + T_PEDAL_SAMPLE_TOLERANCE);
     ASSERT_FALSE(s_contradict, "TC14: diff==tolerance is still OK");
     ASSERT_TRUE(s_plausible,   "TC14: plausible at boundary");
 
     sim_reset();
-    /* One above tolerance — must fail */
+    /* One above tolerance for a SINGLE cycle — transient, not yet a fault. */
     sim_update(500U, 500U + T_PEDAL_SAMPLE_TOLERANCE + 1U);
-    ASSERT_TRUE(s_contradict,  "TC14: diff==tolerance+1 triggers contradiction");
-    ASSERT_FALSE(s_plausible,  "TC14: implausible at tolerance+1");
-    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC14: output 0 on contradiction");
+    ASSERT_FALSE(s_contradict, "TC14: diff==tolerance+1 single cycle is transient");
+    ASSERT_TRUE(s_plausible,   "TC14: still plausible on single transient");
+
+    /* Persist it for the debounce window → contradiction fault. */
+    for (uint8_t i = 0; i < T_PEDAL_CONTRADICT_CYCLES; i++)
+        sim_update(500U, 500U + T_PEDAL_SAMPLE_TOLERANCE + 1U);
+    ASSERT_TRUE(s_contradict,  "TC14: persistent diff>tol triggers contradiction");
+    ASSERT_FALSE(s_plausible,  "TC14: implausible when persistent");
+    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC14: output 0 on persistent contradiction");
 }
 
 /* =========================================================================
@@ -538,18 +569,16 @@ static void tc17_range_boundary(void)
     sim_reset();
     for (int i = 0; i < 5; i++)
         sim_update(T_PEDAL_ADC_FAULT_HI, T_PEDAL_ADC_FAULT_HI);
-    /* After warm-up at 4094 the range check passes; plausibility depends on
-     * whether rate converged.  Verify the range check is not the cause
-     * of any fault by checking rate_fault is the only possible trigger.   */
+    /* After warm-up at 4094 the range check passes and the signal is a valid
+     * (near-100 %) coherent reading, so it must be PLAUSIBLE (no fault).      */
     ASSERT_FALSE(s_contradict, "TC17: no contradiction at 4094");
-    /* The range gate must NOT be the reason for any fault */
-    /* (rate_fault may legitimately fire from the initial 0→100 jump) */
+    ASSERT_TRUE(s_plausible,   "TC17: 4094 is a valid in-range reading");
 
     /* ADC 4095 must always fault (rail short) regardless of history */
     sim_update(4095U, 4095U);
     ASSERT_FALSE(s_plausible,       "TC17: 4095 triggers fault");
     ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC17: output 0 on 4095");
-    ASSERT_FALSE(s_rate_fault,      "TC17: range fault clears rate_fault flag");
+    ASSERT_FALSE(s_rate_limited,    "TC17: rail fault clears rate_limited flag");
 }
 
 /* =========================================================================
@@ -572,7 +601,7 @@ static void tc18_fast_partial_release_100_to_60(void)
     /* Rapid release to 60 % in ONE cycle: delta = -40 % < -35 %. */
     sim_update(adc_for_pct(60.0f), adc_for_pct(60.0f));
     ASSERT_TRUE(s_plausible,        "TC18: 100->60 is a safe reduction, not a fault");
-    ASSERT_FALSE(s_rate_fault,      "TC18: no rate_fault on partial release");
+    ASSERT_FALSE(s_rate_limited,    "TC18: release is not rate-limited");
     ASSERT_NEAR(s_pct, 60.0f, 1.0f, "TC18: output tracks reduced pedal (~60 %)");
     ASSERT_TRUE(s_pct <= 60.5f,     "TC18: output never exceeds physical pedal");
     ASSERT_NEAR(s_pct_prev, 60.0f, 1.0f, "TC18: baseline re-anchored to 60 %");
@@ -581,7 +610,7 @@ static void tc18_fast_partial_release_100_to_60(void)
     for (int i = 0; i < 5; i++) {
         sim_update(adc_for_pct(60.0f), adc_for_pct(60.0f));
         ASSERT_TRUE(s_plausible,   "TC18: still plausible holding 60 %");
-        ASSERT_FALSE(s_rate_fault, "TC18: no false rising fault holding 60 %");
+        ASSERT_TRUE(s_plausible,   "TC18: no false rising fault holding 60 %");
     }
     ASSERT_NEAR(s_pct, 60.0f, 1.0f, "TC18: settled at ~60 %");
 }
@@ -600,11 +629,11 @@ static void tc19_partial_releases_above_zone(void)
         sim_update(adc_for_pct(r1[i]), adc_for_pct(r1[i]));
     sim_update(adc_for_pct(40.0f), adc_for_pct(40.0f));   /* delta -40 */
     ASSERT_TRUE(s_plausible,        "TC19: 80->40 not a fault");
-    ASSERT_FALSE(s_rate_fault,      "TC19: 80->40 no rate_fault");
+    ASSERT_FALSE(s_rate_limited,    "TC19: 80->40 release not rate-limited");
     ASSERT_NEAR(s_pct, 40.0f, 1.0f, "TC19: output ~40 %");
     sim_update(adc_for_pct(40.0f), adc_for_pct(40.0f));   /* hold */
     ASSERT_TRUE(s_plausible,        "TC19: 80->40 hold plausible");
-    ASSERT_FALSE(s_rate_fault,      "TC19: 80->40 hold no false fault");
+    ASSERT_TRUE(s_plausible,        "TC19: 80->40 hold no false fault");
 
     /* 60 -> 20 */
     sim_reset();
@@ -613,30 +642,167 @@ static void tc19_partial_releases_above_zone(void)
         sim_update(adc_for_pct(r2[i]), adc_for_pct(r2[i]));
     sim_update(adc_for_pct(20.0f), adc_for_pct(20.0f));   /* delta -40 */
     ASSERT_TRUE(s_plausible,        "TC19: 60->20 not a fault");
-    ASSERT_FALSE(s_rate_fault,      "TC19: 60->20 no rate_fault");
+    ASSERT_FALSE(s_rate_limited,    "TC19: 60->20 release not rate-limited");
     ASSERT_NEAR(s_pct, 20.0f, 1.0f, "TC19: output ~20 %");
     sim_update(adc_for_pct(20.0f), adc_for_pct(20.0f));   /* hold */
     ASSERT_TRUE(s_plausible,        "TC19: 60->20 hold plausible");
-    ASSERT_FALSE(s_rate_fault,      "TC19: 60->20 hold no false fault");
+    ASSERT_TRUE(s_plausible,        "TC19: 60->20 hold no false fault");
 }
 
 /* =========================================================================
- * Test Case 20 — §5 fast release 40->2 that DOES enter the rest zone → 0 %
+ * Test Case 20 — Fast release 40->2 %: demand tracks the real (near-rest)
+ *   pedal immediately.  2 % is below the powertrain-engage threshold so it is
+ *   effectively released, but the output stays physically accurate (not a
+ *   fabricated 0 and never a fault).
  * ========================================================================= */
 static void tc20_fast_release_into_rest_zone(void)
 {
-    printf("TC20: fast release 40 -> 2 (into rest zone) -> clean 0\n");
+    printf("TC20: fast release 40 -> 2 (near rest) tracks real pedal\n");
     sim_reset();
     float ramp[] = {20.0f, 40.0f};
     for (int i = 0; i < 2; i++)
         sim_update(adc_for_pct(ramp[i]), adc_for_pct(ramp[i]));
-    /* 40 -> 2 %: delta -38 < -35, and 2 % <= release zone (3 %). */
+    /* 40 -> 2 %: a fast release; output snaps down to the real ~2 %. */
     sim_update(adc_for_pct(2.0f), adc_for_pct(2.0f));
     ASSERT_TRUE(s_plausible,           "TC20: plausible");
-    ASSERT_FALSE(s_rate_fault,         "TC20: no rate_fault");
-    ASSERT_NEAR(s_pct, 0.0f, 0.5f,     "TC20: clean 0 % when settling in rest zone");
-    ASSERT_NEAR(s_pct_prev, 0.0f, 0.5f, "TC20: prev reset to 0");
-    ASSERT_NEAR(s_ema, 0.0f, 0.5f,     "TC20: EMA reset to 0");
+    ASSERT_FALSE(s_rate_limited,       "TC20: release is not rate-limited");
+    ASSERT_NEAR(s_pct, 2.0f, 0.7f,     "TC20: demand tracks the real ~2 % pedal");
+    ASSERT_TRUE(s_pct < T_PEDAL_RELEASE_ZONE_PCT,
+                "TC20: below powertrain-engage threshold (effectively released)");
+    ASSERT_NEAR(s_ema, 2.0f, 0.7f,     "TC20: EMA snapped down to ~2 %");
+}
+
+/* =========================================================================
+ * Test Case 21 — Fast stab 0 → 100 % (full press) is valid, never a fault
+ * ========================================================================= */
+static void tc21_fast_stab_0_to_100(void)
+{
+    printf("TC21: fast stab 0 -> 100 %% is valid intent (ramp, no fault)\n");
+    sim_reset();
+    sim_update(ADC_RELEASED, ADC_RELEASED);
+
+    uint16_t a100 = adc_for_pct(100.0f);
+    sim_update(a100, a100);
+    ASSERT_TRUE(s_plausible,  "TC21: plausible after 0->100 stab");
+    ASSERT_FALSE(s_contradict,"TC21: no contradiction");
+    ASSERT_TRUE(s_pct > 0.0f, "TC21: demand rises immediately (non-zero)");
+
+    float last = s_pct;
+    for (int i = 0; i < 20; i++) {
+        sim_update(a100, a100);
+        ASSERT_TRUE(s_plausible,  "TC21: plausible while ramping to 100 %");
+        ASSERT_TRUE(s_pct >= last - 0.01f, "TC21: demand climbs monotonically");
+        ASSERT_TRUE(s_pct <= 100.5f, "TC21: never exceeds 100 %");
+        last = s_pct;
+    }
+    ASSERT_NEAR(s_pct, 100.0f, 2.0f, "TC21: converges to ~100 %");
+}
+
+/* =========================================================================
+ * Test Case 22 — Stable hold at 20 / 50 / 100 % produces steady demand
+ * ========================================================================= */
+static void tc22_hold_stable_levels(void)
+{
+    printf("TC22: steady hold at 20 / 50 / 100 %%\n");
+    const float levels[] = {20.0f, 50.0f, 100.0f};
+    for (int l = 0; l < 3; l++) {
+        sim_reset();
+        uint16_t a = adc_for_pct(levels[l]);
+        for (int i = 0; i < 25; i++)
+            sim_update(a, a);
+        ASSERT_TRUE(s_plausible, "TC22: plausible holding level");
+        ASSERT_FALSE(s_rate_limited, "TC22: steady hold not rate-limited");
+        ASSERT_NEAR(s_pct, levels[l], 1.5f, "TC22: demand settles at held level");
+    }
+}
+
+/* =========================================================================
+ * Test Case 23 — Single-sample noise must NOT change global state
+ *   A one-cycle incoherent sample keeps the last demand and stays plausible;
+ *   the very next coherent cycle resumes normally (no DTC, no lockout).
+ * ========================================================================= */
+static void tc23_single_sample_noise_no_state_change(void)
+{
+    printf("TC23: single-sample noise keeps last demand, no state change\n");
+    sim_reset();
+    for (int i = 0; i < 10; i++)
+        sim_update(adc_for_pct(50.0f), adc_for_pct(50.0f));
+    ASSERT_NEAR(s_pct, 50.0f, 1.5f, "TC23: settled at 50 %");
+    float held = s_pct;
+
+    /* One incoherent cycle */
+    sim_update(adc_for_pct(50.0f), adc_for_pct(50.0f) + 200U);
+    ASSERT_TRUE(s_plausible,   "TC23: still plausible on 1-sample noise");
+    ASSERT_FALSE(s_contradict, "TC23: no contradiction fault on 1-sample noise");
+    ASSERT_NEAR(s_pct, held, 0.5f, "TC23: last validated demand held");
+
+    /* Next coherent cycle resumes normally */
+    sim_update(adc_for_pct(50.0f), adc_for_pct(50.0f));
+    ASSERT_TRUE(s_plausible,   "TC23: plausible resumes after noise");
+    ASSERT_NEAR(s_pct, 50.0f, 1.5f, "TC23: demand back at 50 %");
+}
+
+/* =========================================================================
+ * Test Case 24 — Valid saved calibration (50 / 4000) maps 0–100 % correctly
+ * ========================================================================= */
+static void tc24_calibration_endpoints(void)
+{
+    printf("TC24: calibration endpoints 50/4000 map 0 and 100 %%\n");
+    Pedal_StateInit(&g_st, 50U, 4000U);
+    sync_from_state();
+
+    sim_update(50U, 50U);              /* at min → 0 % */
+    ASSERT_TRUE(s_plausible,        "TC24: plausible at min");
+    ASSERT_NEAR(s_pct, 0.0f, 0.5f,  "TC24: 0 % at adc_min");
+
+    sim_reset();
+    Pedal_StateInit(&g_st, 50U, 4000U);
+    for (int i = 0; i < 20; i++)
+        sim_update(4000U, 4000U);      /* at max → 100 % */
+    ASSERT_TRUE(s_plausible,          "TC24: plausible at max");
+    ASSERT_NEAR(s_pct, 100.0f, 1.0f,  "TC24: 100 % at adc_max");
+}
+
+/* =========================================================================
+ * Test Case 25 — Corrupt/absent calibration → safe default endpoints usable
+ *   The pipeline never divides by zero and produces a bounded 0–100 % output
+ *   even when initialised with the compile-time safe defaults.
+ * ========================================================================= */
+static void tc25_corrupt_calibration_safe_defaults(void)
+{
+    printf("TC25: safe default calibration still yields bounded output\n");
+    /* Simulate "corrupt → fall back to defaults" by initialising with the
+     * compile-time defaults (what pedal_cal_store.c does on a bad CRC). */
+    Pedal_StateInit(&g_st, T_PEDAL_ADC_MIN, T_PEDAL_ADC_MAX);
+    sync_from_state();
+
+    for (int i = 0; i < 20; i++)
+        sim_update(adc_for_pct(50.0f), adc_for_pct(50.0f));
+    ASSERT_TRUE(s_plausible,           "TC25: plausible with default cal");
+    ASSERT_TRUE(s_pct >= 0.0f && s_pct <= 100.0f, "TC25: output bounded 0–100 %");
+    ASSERT_NEAR(s_pct, 50.0f, 2.0f,    "TC25: ~50 % with default cal");
+}
+
+/* =========================================================================
+ * Test Case 26 — 53 %→0 release: output must NOT freeze at 53 %/60 %
+ * ========================================================================= */
+static void tc26_release_53_to_0_not_frozen(void)
+{
+    printf("TC26: release 53 -> 0 output not frozen\n");
+    sim_reset();
+    for (int i = 0; i < 15; i++)
+        sim_update(adc_for_pct(53.0f), adc_for_pct(53.0f));
+    ASSERT_TRUE(s_pct > 45.0f, "TC26: converged above 45 % before release");
+
+    sim_update(ADC_RELEASED, ADC_RELEASED);
+    ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC26: not frozen — drops to 0 %");
+
+    /* Many subsequent released cycles must stay at 0 (no revival to 53/60). */
+    for (int i = 0; i < 10; i++) {
+        sim_update(ADC_RELEASED, ADC_RELEASED);
+        ASSERT_NEAR(s_pct, 0.0f, 0.5f, "TC26: stays 0 %, never revives");
+        ASSERT_TRUE(s_plausible, "TC26: plausible while released");
+    }
 }
 
 /* =========================================================================
@@ -648,15 +814,15 @@ int main(void)
     tc02_progressive_ramp();
     tc03_rapid_release_from_53();
     tc04_rapid_release_from_100();
-    tc05_rapid_application();
-    tc06_recovery_after_rapid_application();
-    tc07_contradictory_samples();
+    tc05_fast_application();
+    tc06_fast_application_then_release();
+    tc07_contradiction_debounce();
     tc08_rail_high();
     tc09_reject_0x0023_decomposition();
     tc10_reject_0x002F_decomposition();
-    tc11_recovery_counter_resets_on_rise();
-    tc12_no_spontaneous_reactivation();
-    tc13_ema_not_contaminated();
+    tc11_contradiction_counter_resets();
+    tc12_fast_application_accepted();
+    tc13_ema_bounded_on_fast_stab();
     tc14_dual_sample_tolerance_boundary();
     tc15_small_rate_transitions();
     tc16_no_permanent_lockout();
@@ -664,6 +830,12 @@ int main(void)
     tc18_fast_partial_release_100_to_60();
     tc19_partial_releases_above_zone();
     tc20_fast_release_into_rest_zone();
+    tc21_fast_stab_0_to_100();
+    tc22_hold_stable_levels();
+    tc23_single_sample_noise_no_state_change();
+    tc24_calibration_endpoints();
+    tc25_corrupt_calibration_safe_defaults();
+    tc26_release_53_to_0_not_frozen();
 
     printf("=== test_pedal_plausibility: %d run, %d failed ===\n",
            tests_run, tests_failed);

@@ -434,16 +434,18 @@ uint8_t Wheel_GetGpioLevel(uint8_t idx)
  *  software:
  *
  *  1. Dual-sample consistency: two consecutive ADC reads must agree
- *     within ±PEDAL_SAMPLE_TOLERANCE counts.  Disagreement indicates
- *     electrical noise or ADC transient fault.
+ *     within ±PEDAL_SAMPLE_TOLERANCE counts.  A brief disagreement is
+ *     treated as transient noise (last demand held); only a PERSISTENT
+ *     disagreement (PEDAL_CONTRADICT_DEBOUNCE_CYCLES) is a real fault.
  *
  *  2. Range validation: ADC value must stay within
  *     [PEDAL_ADC_FAULT_LO .. PEDAL_ADC_FAULT_HI].
  *     Values outside this band indicate an open/short circuit.
  *
- *  3. Rate-of-change limiting: pedal percentage cannot jump more than
- *     PEDAL_MAX_RATE_PCT per update cycle (50 ms).  Exceeding this
- *     indicates a sensor or wiring fault (not physically possible).
+ *  3. Direction-aware output limiting: an UPWARD change larger than
+ *     PEDAL_MAX_RATE_PCT per 50 ms cycle is clamped to that safe ramp
+ *     (a fast but coherent stab is valid intent, NOT a fault).  A
+ *     release passes through immediately so torque drops without lag.
  *
  *  4. EMA filter: Exponential Moving Average with α = 0.3 to smooth
  *     noise without adding significant lag (~2 cycles settling).
