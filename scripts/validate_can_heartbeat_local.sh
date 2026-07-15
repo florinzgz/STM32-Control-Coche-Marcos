@@ -40,6 +40,8 @@ enum twai_state_t {
 };
 struct twai_status_info_t {
     twai_state_t state = TWAI_STATE_RUNNING;
+    uint32_t msgs_to_tx = 0U;
+    uint32_t msgs_to_rx = 0U;
     uint32_t tx_failed_count = 0U;
 };
 struct twai_message_t {
