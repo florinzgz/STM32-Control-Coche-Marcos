@@ -106,20 +106,28 @@ bool SteeringCentering_HasFault(void);
 CenteringState_t SteeringCentering_GetState(void);
 
 /**
- * @brief  Decide which subsystem owns the steering motor this cycle.
+ * @brief  Decide which subsystem owns the steering motor this cycle AND
+ *         commit that decision to the single owner authority.
  *
- *         Pure function (no side effects) so the mutual-exclusion policy
- *         can be unit-tested on the host.  Centering owns the motor only
+ *         The mutual-exclusion policy is: centering owns the motor only
  *         while it is actively homing (IDLE / WAIT_RAIL / SWEEP_LEFT /
  *         SWEEP_RIGHT) AND the system is still in a homing-capable state
  *         (BOOT or STANDBY).  In every other case — CENTERING_DONE,
  *         CENTERING_FAULT, or a system state such as SAFE/ERROR — the EPS
  *         control loop owns the motor (and neutralises it when required).
+ *         A latched EPS isolation (MECHANICAL_ONLY / ELECTRICAL_HAZARD)
+ *         overrides everything and yields STEER_OWNER_NONE.
+ *
+ *         SINGLE AUTHORITY: the decision is written to the EPS authority
+ *         (steering_eps.c::s_owner) and the value it actually holds is
+ *         returned, so the main loop, the 0x316 diagnostic and the CAN
+ *         telemetry all observe one identical owner.  There is therefore no
+ *         second, independent owner variable to drift out of sync.
  *
  * @param  state           Current centering FSM state.
  * @param  in_homing_state true if the system state permits homing
  *                         (SYS_STATE_BOOT or SYS_STATE_STANDBY).
- * @retval STEER_OWNER_CENTERING or STEER_OWNER_EPS.
+ * @retval STEER_OWNER_CENTERING, STEER_OWNER_EPS or STEER_OWNER_NONE.
  */
 SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
                                                    bool in_homing_state);

@@ -355,35 +355,46 @@ CenteringState_t SteeringCentering_GetState(void)
 SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
                                                    bool in_homing_state)
 {
+    SteeringMotorOwner_t owner;
+
     /* An isolated assist fault takes absolute priority: nobody drives the
      * motor and steering is purely mechanical.                            */
     if (Steering_IsMechanicalOnly()) {
-        return STEER_OWNER_NONE;
+        owner = STEER_OWNER_NONE;
+    } else if (!in_homing_state) {
+        /* Centering is the exclusive writer of the steering motor only while
+         * it is actively homing AND the system is still in a homing-capable
+         * state.  In DONE/FAULT — or once the system has left BOOT/STANDBY
+         * (e.g. SAFE/ERROR) — the EPS loop owns the motor and neutralises it
+         * as needed.                                                        */
+        owner = STEER_OWNER_EPS;
+    } else {
+        switch (state) {
+        case CENTERING_IDLE:
+        case CENTERING_WAIT_RAIL:
+        case CENTERING_SWEEP_LEFT:
+        case CENTERING_SWEEP_RIGHT:
+            owner = STEER_OWNER_CENTERING;
+            break;
+
+        case CENTERING_DONE:
+        case CENTERING_FAULT:
+        default:
+            owner = STEER_OWNER_EPS;
+            break;
+        }
     }
 
-    /* Centering is the exclusive writer of the steering motor only while
-     * it is actively homing AND the system is still in a homing-capable
-     * state.  In DONE/FAULT — or once the system has left BOOT/STANDBY
-     * (e.g. SAFE/ERROR) — the EPS loop owns the motor and neutralises it
-     * as needed.  Keeping this decision here (and consuming it BEFORE
-     * SteeringCentering_Step() runs) guarantees the two subsystems never
-     * both write the motor in the same cycle.                            */
-    if (!in_homing_state) {
-        return STEER_OWNER_EPS;
-    }
-
-    switch (state) {
-    case CENTERING_IDLE:
-    case CENTERING_WAIT_RAIL:
-    case CENTERING_SWEEP_LEFT:
-    case CENTERING_SWEEP_RIGHT:
-        return STEER_OWNER_CENTERING;
-
-    case CENTERING_DONE:
-    case CENTERING_FAULT:
-    default:
-        return STEER_OWNER_EPS;
-    }
+    /* SINGLE OWNER AUTHORITY: commit the decision to the EPS authority
+     * (steering_eps.c::s_owner) — the one and only stored owner — and return
+     * exactly what it holds.  Keeping the decision here (and consuming it
+     * BEFORE SteeringCentering_Step() runs) still guarantees the two
+     * subsystems never both write the motor in the same cycle, while the main
+     * loop, the 0x316 diagnostic and the CAN telemetry now all read one
+     * identical owner.  While a MECHANICAL_ONLY / ELECTRICAL_HAZARD isolation
+     * is latched the authority forces STEER_OWNER_NONE.                     */
+    Steering_EpsSetOwner(owner);
+    return Steering_EpsGetOwner();
 }
 
 

@@ -398,6 +398,19 @@ void Relay_SequencerUpdate(void);
  */
 void Steering_SteerPowerOff(void);
 
+/**
+ * @brief  Single authority that decides whether the steering-motor isolation
+ *         relay (PC12, PIN_RELAY_STEER_PWR) may be energised (contact closed).
+ *
+ *         Returns true only when the steering is calibrated, the EPS is
+ *         available and NOT latched MECHANICAL_ONLY / ELECTRICAL_HAZARD.
+ *         Every relay/diagnostic path (the effective sequencer, the override
+ *         tick and Safety_GetRelayStatusByte) consults this one function so a
+ *         latched EPS isolation can never re-close PC12 for the rest of the
+ *         power cycle.  It NEVER affects the traction relay (PC11).
+ */
+bool Steering_MotorRelayAllowed(void);
+
 /* ---- Relay Override (Engineering / Diagnostic Mode) ----
  *
  * Allows manual relay GPIO control from the ESP32 engineering menu for

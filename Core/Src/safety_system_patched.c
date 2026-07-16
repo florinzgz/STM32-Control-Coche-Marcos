@@ -22,32 +22,9 @@
 #undef Relay_SequencerUpdate
 #undef Safety_CheckRelayHealth
 
-/**
- * @brief Single authority that decides whether the steering-motor isolation
- *        relay (PC12, PIN_RELAY_STEER_PWR) may be energised (contact closed).
- *
- * PHYSICAL TOPOLOGY (owner-confirmed):
- *
- *     12 V BATTERY → INA226 CH5 + SHUNT → STEER MOTOR RELAY (PC12) → BTS7960/MOTOR
- *
- * PC12 drives the relay in the final branch that CONNECTS the steering motor.
- * De-energising PC12 opens that contact and electrically isolates the motor;
- * it does NOT remove the INA226/shunt supply (those sit before the relay).
- *
- * This is the ONE authorisation gate demanded by the EPS isolation policy.
- * When it returns false the relay command MUST be OFF, and — because a
- * MECHANICAL_ONLY / ELECTRICAL_HAZARD state is latched for the whole power
- * cycle — no later sequencer or diagnostic path may re-close PC12.  It NEVER
- * touches the traction relay (PC11) or the traction power-ready sequencer, so
- * traction is fully preserved.
- */
-static bool Steering_MotorRelayAllowed(void)
-{
-    return Steering_IsCalibrated() &&
-           Steering_EpsIsAvailable() &&
-           !Steering_IsMechanicalOnly() &&
-           (Steering_GetEpsState() != EPS_STATE_ELECTRICAL_HAZARD);
-}
+/* Steering_MotorRelayAllowed() — the single PC12 authorisation gate — now
+ * lives in safety_system.c (declared in safety_system.h) so both the effective
+ * sequencer below and Safety_GetRelayStatusByte() consult the same authority. */
 
 /**
  * @brief Update evidence-grade diagnostics without creating false DTC 16.
@@ -134,17 +111,28 @@ void Relay_SequencerUpdate(void)
 }
 
 /**
- * @brief Engineering relay-override tick that can never re-close PC12 once the
- *        EPS assist has been isolated.
+ * @brief Engineering relay-override tick that can never produce even a
+ *        transient pulse on PC12 once the EPS assist has been isolated.
  *
  * The legacy override lets a maintainer toggle the relay GPIOs from the
- * engineering menu while in STANDBY.  After a latched EPS isolation the
- * steering motor must stay electrically disconnected for the whole power
- * cycle, so any override attempt to close PC12 is force-cleared here.  The
- * traction relay (PC11) handling is left entirely to the legacy path.
+ * engineering menu while in STANDBY.  The legacy path drives PC12 = SET
+ * whenever the stored override mask still holds bit 0x04, and only a later
+ * corrective write would clear it — that ordering allowed a one-cycle pulse
+ * on the steering-motor relay after a latched isolation.
+ *
+ * The fix removes bit 0x04 from the stored override mask BEFORE the legacy
+ * path runs, so the legacy tick itself writes PC12 = RESET (never SET).  A
+ * final atomic BSRR release is kept as defence-in-depth.  The traction relay
+ * (PC11) handling is left entirely to the legacy path.
  */
 void Safety_RelayOverrideUpdate(void)
 {
+    if (Steering_IsMechanicalOnly()) {
+        /* Strip the steering-motor relay bit up-front so the legacy path can
+         * only ever command PC12 = RESET this tick — no transient pulse. */
+        relay_override_mask &= (uint8_t)~0x04U;
+    }
+
     Safety_RelayOverrideUpdate_Legacy();
 
     if (Steering_IsMechanicalOnly()) {
