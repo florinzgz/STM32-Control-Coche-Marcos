@@ -164,9 +164,11 @@ jobs:
             # DETECTOR physically drives the real shared actuator registers to
             # their safe state (CCR PA6=0, CCR PA7=0, PC4 LOW, PC12 OFF).
             echo "-- test_steering_outputs.c"
-            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
               -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
               Core/Src/test_steering_outputs.c \
+              Core/Src/steering_output.c \
               Core/Src/safety_system_patched.c \
               Core/Src/steering_eps.c \
               Core/Src/math_safety.c \

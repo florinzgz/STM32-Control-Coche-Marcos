@@ -108,6 +108,15 @@ void Steering_Neutralize(void)
     motor_writes_this_cycle++;
 }
 
+/* Shared production physical shutdown (steering_output.c) — same coast effect
+ * the EPS isolation authority drives.  Modelled identically for the motor. */
+void Steering_PhysicalOff(void)
+{
+    motor.driven = false;
+    motor.pwm    = 0U;
+    motor_writes_this_cycle++;
+}
+
 /* Steering rail (PC12) release — used by the EPS isolation authority. */
 void Steering_SteerPowerOff(void) { }
 

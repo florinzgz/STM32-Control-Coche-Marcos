@@ -243,7 +243,7 @@ void SteeringCentering_Step(void)
          * holds for the whole power cycle, so homing must not re-energise the
          * motor branch even if it is somehow re-entered.  Steering stays
          * purely mechanical. */
-        if (Steering_IsMechanicalOnly()) {
+        if (Steering_IsAssistLatchedOff()) {
             Centering_Abort(EPS_FAULT_UNKNOWN);
             break;
         }
@@ -358,8 +358,8 @@ SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
     SteeringMotorOwner_t owner;
 
     /* An isolated assist fault takes absolute priority: nobody drives the
-     * motor and steering is purely mechanical.                            */
-    if (Steering_IsMechanicalOnly()) {
+     * motor and steering is purely mechanical (MECHANICAL_ONLY or hazard). */
+    if (Steering_IsAssistLatchedOff()) {
         owner = STEER_OWNER_NONE;
     } else if (!in_homing_state) {
         /* Centering is the exclusive writer of the steering motor only while
@@ -392,7 +392,20 @@ SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
      * subsystems never both write the motor in the same cycle, while the main
      * loop, the 0x316 diagnostic and the CAN telemetry now all read one
      * identical owner.  While a MECHANICAL_ONLY / ELECTRICAL_HAZARD isolation
-     * is latched the authority forces STEER_OWNER_NONE.                     */
+     * is latched the authority forces STEER_OWNER_NONE.
+     *
+     * CONTROLLED TRANSFER: never switch directly between the two active
+     * writers (CENTERING <-> EPS).  Release to STEER_OWNER_NONE first so the
+     * hand-off is explicit and Steering_EpsSetOwner() cannot mistake a
+     * legitimate hand-over for a genuine double-claim conflict.              */
+    {
+        SteeringMotorOwner_t current = Steering_EpsGetOwner();
+        if (owner != current &&
+            current != STEER_OWNER_NONE &&
+            owner   != STEER_OWNER_NONE) {
+            Steering_EpsSetOwner(STEER_OWNER_NONE);
+        }
+    }
     Steering_EpsSetOwner(owner);
     return Steering_EpsGetOwner();
 }

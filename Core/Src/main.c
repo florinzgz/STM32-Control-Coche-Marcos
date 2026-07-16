@@ -493,6 +493,12 @@ int main(void)
              * disables on any violation.                                */
             Safety_RelayOverrideUpdate();
 
+            /* Steering-motor relay (PC12) policy supervisor — independent,
+             * always-run guard.  If any path leaves PC12 commanded ON while
+             * the assist is isolated (policy forbids it), force PC12 OFF and
+             * surface the violation.  Never touches PC11 / traction.         */
+            Safety_SteerRelaySupervise();
+
             /* Steering motor ownership arbitration.
              *
              * Exactly ONE subsystem may write the steering motor (PC4

@@ -16,16 +16,19 @@
   *              Encoder_HasFault() → Safety_CheckEncoder() →
   *              Encoder_CheckHealth() → real isolation path.
   *
-  *          Steering_Neutralize() here is a shared-register wrapper that
-  *          writes the SAME TIM3 CCR1/CCR2 and PC4 GPIO the production
-  *          motor_control.c coast path writes, so the assertions observe
-  *          genuine actuator registers.  Steering_SteerPowerOff() and the
+  *          The isolation drives the REAL shared production shutdown function
+  *          Steering_PhysicalOff() (Core/Src/steering_output.c) — the exact
+  *          register writes motor_control.c and steering_eps.c use in the
+  *          firmware — so the assertions observe genuine production behaviour,
+  *          not a re-implemented wrapper.  Steering_SteerPowerOff() and the
   *          relay command byte come from the REAL safety translation unit.
   *
   *          Compile (from repository root):
   *            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
-  *                -D_GNU_SOURCE -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+  *                -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+  *                -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
   *                Core/Src/test_steering_outputs.c \
+  *                Core/Src/steering_output.c \
   *                Core/Src/safety_system_patched.c \
   *                Core/Src/steering_eps.c \
   *                Core/Src/math_safety.c \
@@ -49,6 +52,7 @@
 #include "error_log.h"
 #include "relay_health_diag.h"
 #include "steering_eps.h"
+#include "steering_output.h"
 #include "project_config.h"
 
 static int tests_run = 0, tests_failed = 0;
@@ -68,26 +72,41 @@ static bool s_encoder_fault = false;
 
 /* ---- Shared actuator registers for the steering assist ----
  * TIM3_CH1 = PA6 (RPWM), TIM3_CH2 = PA7 (LPWM), PC4 = EN_STEER.
- * htim3.Instance points at the stub TIM3 so __HAL_TIM_*_COMPARE act on the
- * same CCR1/CCR2 words this test inspects. */
-static TIM_HandleTypeDef htim3_local;
+ * `htim3` is the SAME non-static global the production steering_output.c
+ * externs, so __HAL_TIM_*_COMPARE in that real TU act on the CCR1/CCR2 this
+ * test inspects (Instance is a shared pointer). */
+TIM_HandleTypeDef htim3;
+
+/* ---- Cross-TU PC4 (EN_STEER) observer ----
+ * The real production Steering_PhysicalOff() lives in steering_output.c, a
+ * DIFFERENT translation unit with its own per-TU GPIO shadow, so its PC4 write
+ * is observed here through the write observer rather than a shared register. */
+static bool s_pc4_level = false;   /* true = PC4 HIGH */
+
+void HostGpioWriteObserver(void *port, uint16_t pin, int is_set)
+{
+    (void)port;
+    if (pin == PIN_EN_STEER) {
+        s_pc4_level = (is_set != 0);
+    }
+}
 
 /* ==================================================================
- *  Steering_Neutralize() — REAL shared-register wrapper.
- *  Mirrors the motor_control.c coast path for motor_steer:
- *  zero both PWM compares and drive EN_STEER (PC4) LOW.
+ *  Steering_Neutralize() — production coast wrapper.
+ *  Mirrors motor_control.c: delegates the physical actuator shutdown to the
+ *  REAL shared production function Steering_PhysicalOff() (steering_output.c),
+ *  which zeroes both TIM3 compares and drives EN_STEER (PC4) LOW.  No register
+ *  writes are re-implemented in the test.
  * ================================================================== */
 void Steering_Neutralize(void)
 {
-    __HAL_TIM_SET_COMPARE(&htim3_local, TIM_CHANNEL_1, 0U);   /* PA6 CCR = 0 */
-    __HAL_TIM_SET_COMPARE(&htim3_local, TIM_CHANNEL_2, 0U);   /* PA7 CCR = 0 */
-    HAL_GPIO_WritePin(GPIOC, PIN_EN_STEER, GPIO_PIN_RESET);   /* PC4  = LOW  */
+    Steering_PhysicalOff();
 }
 
-/* Register readers (this translation unit's registers). */
-static uint32_t ccr_pa6(void) { return __HAL_TIM_GET_COMPARE(&htim3_local, TIM_CHANNEL_1); }
-static uint32_t ccr_pa7(void) { return __HAL_TIM_GET_COMPARE(&htim3_local, TIM_CHANNEL_2); }
-static bool     pc4_high(void){ return HAL_GPIO_ReadPin(GPIOC, PIN_EN_STEER) == GPIO_PIN_SET; }
+/* Register readers (shared TIM3 via htim3.Instance; PC4 via the observer). */
+static uint32_t ccr_pa6(void) { return __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1); }
+static uint32_t ccr_pa7(void) { return __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2); }
+static bool     pc4_high(void){ return s_pc4_level; }
 
 /* PC12 relay command observed through the safety translation unit. */
 static bool pc12_on(void) { return (Safety_GetRelayStatusByte() & (1U << 2)) != 0U; }
@@ -157,9 +176,9 @@ void  ErrorLog_Record(uint8_t code, uint8_t subsystem, uint8_t st, uint8_t flags
  * subsequent isolation has something real to tear down. */
 static void arm_assist_outputs(void)
 {
-    htim3_local.Instance = TIM3;
-    __HAL_TIM_SET_COMPARE(&htim3_local, TIM_CHANNEL_1, 640U);  /* PA6 driving */
-    __HAL_TIM_SET_COMPARE(&htim3_local, TIM_CHANNEL_2, 480U);  /* PA7 driving */
+    htim3.Instance = TIM3;
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 640U);  /* PA6 driving */
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 480U);  /* PA7 driving */
     HAL_GPIO_WritePin(GPIOC, PIN_EN_STEER, GPIO_PIN_SET);      /* PC4 HIGH    */
 }
 

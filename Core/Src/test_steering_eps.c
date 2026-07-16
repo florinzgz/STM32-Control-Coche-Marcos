@@ -58,7 +58,7 @@ typedef struct {
 static SteerHw_t hw;
 
 /* Production steering_eps.c delegates PA6=PA7=0 + PC4 LOW here. */
-void Steering_Neutralize(void)
+void Steering_PhysicalOff(void)
 {
     hw.pa6 = 0U;
     hw.pa7 = 0U;
@@ -144,15 +144,18 @@ static void test_healthy_init(void)
     CHECK(Steering_IsMechanicalOnly() == false);
     CHECK(Steering_EpsIsAvailable() == true);
 
-    /* Healthy progression STARTING → CALIBRATING → ACTIVE. */
+    /* Healthy progression STARTING → CALIBRATING → ACTIVE with a CONTROLLED
+     * ownership hand-off (release to NONE before switching active writers). */
     Steering_EpsSetHealthyState(EPS_STATE_CALIBRATING);
     CHECK(Steering_GetEpsState() == EPS_STATE_CALIBRATING);
     Steering_EpsSetOwner(STEER_OWNER_CENTERING);
     CHECK(Steering_EpsGetOwner() == STEER_OWNER_CENTERING);
     Steering_EpsSetHealthyState(EPS_STATE_ACTIVE);
     CHECK(Steering_GetEpsState() == EPS_STATE_ACTIVE);
-    Steering_EpsSetOwner(STEER_OWNER_EPS);
+    Steering_EpsSetOwner(STEER_OWNER_NONE);          /* explicit release      */
+    Steering_EpsSetOwner(STEER_OWNER_EPS);           /* then acquire          */
     CHECK(Steering_EpsGetOwner() == STEER_OWNER_EPS);
+    CHECK(Steering_GetEpsFault() == EPS_FAULT_NONE); /* no conflict raised    */
 }
 
 /* Table-driven: every isolable cause must produce the same safe outcome,
@@ -288,10 +291,43 @@ static void test_overcurrent_persists_hazard(void)
     CHECK(hw.pc12_on == false);
     CHECK(Steering_EpsGetOwner() == STEER_OWNER_NONE);
     CHECK(Steering_GetEpsState() == EPS_STATE_ELECTRICAL_HAZARD);
-    CHECK(Steering_IsMechanicalOnly() == true);   /* assist still off */
+    CHECK(Steering_IsElectricalHazard() == true);
+    CHECK(Steering_IsMechanicalOnly() == false);  /* precise: hazard != mech  */
+    CHECK(Steering_IsAssistLatchedOff() == true); /* assist still off         */
     /* A later plain assist-fault call must NOT demote the hazard. */
     Steering_DisableAssistFault(EPS_FAULT_ENCODER_AB);
     CHECK(Steering_GetEpsState() == EPS_STATE_ELECTRICAL_HAZARD);
+}
+
+/* Item 5: a direct switch between two ACTIVE writers WITHOUT an intervening
+ * release to NONE is a real conflict — Steering_EpsSetOwner() must NOT silently
+ * overwrite; it isolates the assist and latches EPS_FAULT_OWNER_CONFLICT. */
+static void test_setowner_conflict_detected(void)
+{
+    reset_all();
+    hw_energise_for_active();
+    Steering_EpsSetHealthyState(EPS_STATE_ACTIVE);
+
+    Steering_EpsSetOwner(STEER_OWNER_EPS);          /* EPS acquires (from NONE) */
+    CHECK(Steering_EpsGetOwner() == STEER_OWNER_EPS);
+
+    /* Centering tries to grab the motor directly while EPS still holds it. */
+    Steering_EpsSetOwner(STEER_OWNER_CENTERING);
+
+    /* Not silently overwritten: the assist is isolated, owner forced NONE. */
+    check_isolated();
+    CHECK(Steering_GetEpsFault() == EPS_FAULT_OWNER_CONFLICT);
+    check_traction_untouched();
+
+    /* A controlled transfer (release to NONE first) is NOT a conflict. */
+    reset_all();
+    Steering_EpsSetHealthyState(EPS_STATE_ACTIVE);
+    Steering_EpsSetOwner(STEER_OWNER_CENTERING);
+    Steering_EpsSetOwner(STEER_OWNER_NONE);         /* explicit release        */
+    Steering_EpsSetOwner(STEER_OWNER_EPS);          /* then acquire            */
+    CHECK(Steering_EpsGetOwner() == STEER_OWNER_EPS);
+    CHECK(Steering_GetEpsFault() == EPS_FAULT_NONE);
+    CHECK(Steering_IsAssistLatchedOff() == false);
 }
 
 /* Fault injected while traction is actively driving: outcome is isolation
@@ -336,6 +372,7 @@ int main(void)
     test_idempotent_no_flapping();
     test_latched_no_auto_reconnect();
     test_owner_conflict();
+    test_setowner_conflict_detected();
     test_overcurrent_disappears();
     test_overcurrent_persists_hazard();
     test_fault_while_traction_running();

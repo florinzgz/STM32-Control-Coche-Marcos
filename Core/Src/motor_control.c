@@ -9,6 +9,7 @@
 #include "ackermann.h"
 #include "eps_params.h"
 #include "steering_eps.h"
+#include "steering_output.h"
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
 #include "main.h"
@@ -2280,7 +2281,7 @@ void Steering_ControlLoop(void)
      * A latched isolable EPS fault means the assist is permanently off for
      * this power cycle.  Coast the motor (PA6=PA7=0, PC4=LOW) every cycle;
      * PC12 stays OFF via the relay sequencer.  Never re-drive the motor.   */
-    if (Steering_IsMechanicalOnly()) {
+    if (Steering_IsAssistLatchedOff()) {
         Steering_Neutralize();
         return;
     }
@@ -2571,7 +2572,11 @@ bool Encoder_HasFault(void)
  */
 void Steering_Neutralize(void)
 {
-    Motor_SetSigned(&motor_steer, 0);
+    /* Physical coast (PA6=0, PA7=0, PC4 LOW) via the shared production path
+     * — the SAME registers the EPS isolation authority drives, so there is a
+     * single source of truth for the steering-actuator shutdown. */
+    Steering_PhysicalOff();
+    motor_steer.direction = 0;
     eps_omega_filt   = 0.0f;
     eps_prev_pwm_raw = 0;
     eps_motor_effort = 0.0f;

@@ -5,13 +5,16 @@
   *
   * See steering_eps.h for the rationale.  This translation unit is HAL-free
   * and host-testable: the two hardware side effects it needs are delegated
-  * to functions implemented by the pin-owning modules:
+  * to shared production functions implemented by the pin-owning modules:
   *
-  *   - Steering_Neutralize()   (motor_control.c) — PA6=0, PA7=0, PC4=LOW.
+  *   - Steering_PhysicalOff()   (steering_output.c) — PA6=0, PA7=0, PC4=LOW.
   *   - Steering_SteerPowerOff() (safety_system.c) — PC12 OFF, traction rail
   *                               and relay sequencer state untouched.
   *
   * Both are declared here as plain externs so no HAL header is pulled in.
+  * Steering_PhysicalOff() is the SAME physical steering-actuator shutdown the
+  * production coast path (motor_control.c Steering_Neutralize) executes, so
+  * host tests can link the real function and observe genuine registers.
   ****************************************************************************
   */
 
@@ -19,7 +22,7 @@
 
 /* Hardware side effects — provided by the pin-owning production modules
  * (or by stubs in host tests).  Kept as externs so this unit stays HAL-free. */
-extern void Steering_Neutralize(void);      /* PA6=0, PA7=0, PC4=LOW (coast) */
+extern void Steering_PhysicalOff(void);     /* PA6=0, PA7=0, PC4=LOW (coast) */
 extern void Steering_SteerPowerOff(void);   /* PC12 OFF, traction untouched  */
 
 /* ---- Module state (single source of truth) ---- */
@@ -57,7 +60,7 @@ void Steering_DisableAssistFault(EpsFaultReason_t reason)
     /* ---- Ordered, idempotent motor shutdown ----
      * Steps 1-3: cancel orders + zero PA6/PA7 CCR + PC4 LOW.  Writing zeros
      * is safe to repeat — no pulses are generated.                        */
-    Steering_Neutralize();
+    Steering_PhysicalOff();
 
     /* Step 4: remove the steering actuator rail (PC12).  This is a second,
      * independent release so a strapped/faulty BTS7960 cannot electrically
@@ -101,7 +104,22 @@ void Steering_EpsSetOwner(SteeringMotorOwner_t owner)
         s_owner = STEER_OWNER_NONE;   /* Forced — no owner may drive the motor */
         return;
     }
-    s_owner = owner;
+
+    /* Re-asserting the current owner, releasing to NONE, or acquiring from an
+     * unowned state are always legitimate. */
+    if (owner == s_owner ||
+        owner == STEER_OWNER_NONE ||
+        s_owner == STEER_OWNER_NONE) {
+        s_owner = owner;
+        return;
+    }
+
+    /* A different ACTIVE writer is requested while another active writer still
+     * holds the motor, WITHOUT an intervening release to STEER_OWNER_NONE.
+     * The centering FSM and the EPS assist loop must never both claim the
+     * steering motor: do NOT silently overwrite.  Treat it as a real ownership
+     * conflict and isolate the assist (idempotent, latches the cause).      */
+    Steering_DisableAssistFault(EPS_FAULT_OWNER_CONFLICT);
 }
 
 SteeringMotorOwner_t Steering_EpsGetOwner(void)
@@ -119,9 +137,19 @@ EpsFaultReason_t Steering_GetEpsFault(void)
     return s_fault;
 }
 
-bool Steering_IsMechanicalOnly(void)
+bool Steering_IsAssistLatchedOff(void)
 {
     return eps_is_latched();
+}
+
+bool Steering_IsMechanicalOnly(void)
+{
+    return (s_state == EPS_STATE_MECHANICAL_ONLY);
+}
+
+bool Steering_IsElectricalHazard(void)
+{
+    return (s_state == EPS_STATE_ELECTRICAL_HAZARD);
 }
 
 bool Steering_EpsIsAvailable(void)

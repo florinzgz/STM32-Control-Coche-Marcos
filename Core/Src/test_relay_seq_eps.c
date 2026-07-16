@@ -82,6 +82,7 @@ static bool pc11_on(void) { return (Safety_GetRelayStatusByte() & (1U << 1)) != 
  *  All are benign so no fault is ever raised by the safety loop itself.
  * ================================================================== */
 void  Steering_Neutralize(void)        { s_neutralize_calls++; }      /* PA6=PA7=0, PC4 LOW */
+void  Steering_PhysicalOff(void)       { s_neutralize_calls++; }      /* shared coast (steering_output.c) */
 bool  Steering_IsCalibrated(void)      { return s_calibrated; }
 float Steering_GetCurrentAngle(void)   { return 0.0f; }
 void  Steering_SetAngle(float a)       { (void)a; }

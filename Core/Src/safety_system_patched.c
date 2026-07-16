@@ -127,7 +127,7 @@ void Relay_SequencerUpdate(void)
  */
 void Safety_RelayOverrideUpdate(void)
 {
-    if (Steering_IsMechanicalOnly()) {
+    if (Steering_IsAssistLatchedOff()) {
         /* Strip the steering-motor relay bit up-front so the legacy path can
          * only ever command PC12 = RESET this tick — no transient pulse. */
         relay_override_mask &= (uint8_t)~0x04U;
@@ -135,7 +135,7 @@ void Safety_RelayOverrideUpdate(void)
 
     Safety_RelayOverrideUpdate_Legacy();
 
-    if (Steering_IsMechanicalOnly()) {
+    if (Steering_IsAssistLatchedOff()) {
         /* Atomic single-pin release of the steering-motor relay (PC12).
          * BSRR upper half clears the bit in one bus cycle; PC11 untouched. */
         GPIOC->BSRR = (uint32_t)PIN_RELAY_STEER_PWR << 16U;

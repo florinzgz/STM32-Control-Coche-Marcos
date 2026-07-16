@@ -411,6 +411,46 @@ void Steering_SteerPowerOff(void);
  */
 bool Steering_MotorRelayAllowed(void);
 
+/**
+ * @brief  Single authority deciding whether the steering state permits the
+ *         vehicle to enter (or return to) a drive-capable ACTIVE state.
+ *
+ *         true when the steering is calibrated OR the assist has been cleanly
+ *         isolated to EPS_STATE_MECHANICAL_ONLY.  An ELECTRICAL_HAZARD is
+ *         checked precisely and NEVER authorises ACTIVE.
+ */
+bool Steering_AllowsVehicleDrive(void);
+
+/* ---- Steering-motor relay (PC12) policy diagnostic + supervisor ---- */
+
+/**
+ * @brief  Evidence-grade PC12 relay diagnostic (see Safety_GetSteerRelayDiag).
+ *   pc12_commanded        : real GPIO command (RELAY CMD).
+ *   pc12_allowed          : computed authorisation policy (RELAY ALLOWED).
+ *   pc12_policy_violation  : CMD ON while NOT ALLOWED (never hidden).
+ * RELAY ACTUAL (physical contact) is UNKNOWN — no post-relay feedback exists.
+ */
+typedef struct {
+    bool pc12_commanded;
+    bool pc12_allowed;
+    bool pc12_policy_violation;
+} SteerRelayDiag_t;
+
+void Safety_GetSteerRelayDiag(SteerRelayDiag_t *out);
+
+/**
+ * @brief  Steering-motor relay (PC12) policy supervisor.  If PC12 is commanded
+ *         ON while the policy forbids it, asserts (Debug), forces PC12 OFF
+ *         (PC11/traction untouched) and returns true.  Run every safety tick.
+ */
+bool Safety_SteerRelaySupervise(void);
+
+#ifdef HOST_TEST
+/* Test-only: force the raw PC12 GPIO command ON from within the safety
+ * translation unit (per-TU GPIO model).  Compiled out of firmware builds. */
+void Safety_TestInjectSteerRelayOn(void);
+#endif
+
 /* ---- Relay Override (Engineering / Diagnostic Mode) ----
  *
  * Allows manual relay GPIO control from the ESP32 engineering menu for

@@ -98,7 +98,7 @@ void Steering_EpsInit(void);
  *
  *         It NEVER touches the traction demand, gear, traction relays or
  *         the pedal, and NEVER calls Safety_SetState(DEGRADED/LIMP_HOME/
- *         SAFE/ERROR).  Steps 2-4 are delegated to Steering_Neutralize()
+ *         SAFE/ERROR).  Steps 2-4 are delegated to Steering_PhysicalOff()
  *         and Steering_SteerPowerOff() so the hardware writes live in the
  *         modules that own those pins.
  *
@@ -133,8 +133,19 @@ void Steering_EpsSetHealthyState(EpsState_t s);
 
 /**
  * @brief  Set / query the steering-motor owner (single source of truth).
+ *
  *         While MECHANICAL_ONLY/ELECTRICAL_HAZARD is latched the owner is
  *         forced to STEER_OWNER_NONE and set requests are ignored.
+ *
+ *         CONTROLLED TRANSFER: a request to hand the motor from one ACTIVE
+ *         writer (STEER_OWNER_CENTERING or STEER_OWNER_EPS) directly to the
+ *         OTHER active writer without first releasing to STEER_OWNER_NONE is
+ *         a genuine ownership conflict — the centering FSM and the EPS assist
+ *         loop must never both claim the motor.  Such a request does NOT
+ *         silently overwrite the current owner; it isolates the assist with
+ *         EPS_FAULT_OWNER_CONFLICT (observable via Steering_GetEpsFault()).
+ *         Re-asserting the same owner, releasing to NONE, or acquiring from
+ *         NONE are always accepted.
  */
 void                 Steering_EpsSetOwner(SteeringMotorOwner_t owner);
 SteeringMotorOwner_t Steering_EpsGetOwner(void);
@@ -146,11 +157,31 @@ EpsState_t Steering_GetEpsState(void);
 EpsFaultReason_t Steering_GetEpsFault(void);
 
 /**
- * @brief  true when the assist is disconnected and steering is purely
- *         mechanical (MECHANICAL_ONLY or ELECTRICAL_HAZARD).  The EPS
- *         control loop and the steering power relay must honour this.
+ * @brief  true when the assist has been latched off and steering is purely
+ *         mechanical — EITHER a benign MECHANICAL_ONLY isolation OR an
+ *         ELECTRICAL_HAZARD.  The EPS control loop, the centering FSM and the
+ *         steering-motor relay gate must honour this so the motor is never
+ *         re-driven / re-energised for the rest of the power cycle.
+ */
+bool Steering_IsAssistLatchedOff(void);
+
+/**
+ * @brief  true ONLY for a clean, isolable MECHANICAL_ONLY isolation (assist
+ *         disconnected, no residual electrical danger).  Distinct from an
+ *         ELECTRICAL_HAZARD: only MECHANICAL_ONLY may authorise the vehicle to
+ *         drive without steering calibration.  Returns false during
+ *         ELECTRICAL_HAZARD — use Steering_IsAssistLatchedOff() when the intent
+ *         is "assist off for any reason".
  */
 bool Steering_IsMechanicalOnly(void);
+
+/**
+ * @brief  true ONLY when a non-isolable electrical hazard has been declared.
+ *         An ELECTRICAL_HAZARD must never authorise ACTIVE and must be handed
+ *         to the safety subsystem for SAFE/ERROR escalation when the danger is
+ *         not isolable.
+ */
+bool Steering_IsElectricalHazard(void);
 
 /** @brief  true when the assist may drive the motor (EPS available). */
 bool Steering_EpsIsAvailable(void);

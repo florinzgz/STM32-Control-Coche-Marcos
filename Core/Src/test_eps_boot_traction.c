@@ -100,6 +100,7 @@ static bool pc11_on(void) { return (Safety_GetRelayStatusByte() & (1U << 1)) != 
  *  values are chosen so the REAL boot validation checklist passes.
  * ================================================================== */
 void  Steering_Neutralize(void)       { }               /* PA6=PA7=0, PC4 LOW */
+void  Steering_PhysicalOff(void)      { }               /* shared coast (steering_output.c) */
 bool  Steering_IsCalibrated(void)     { return s_calibrated; }
 float Steering_GetCurrentAngle(void)  { return 0.0f; }
 void  Steering_SetAngle(float a)      { (void)a; }
@@ -300,6 +301,98 @@ int main(void)
     }
     CHECK(s_pc12_set_writes == 0);
     CHECK(!pc12_ever_on_after_latch);      /* still no flapping / no pulse  */
+
+    /* ============ Part 3: ELECTRICAL_HAZARD never authorises ACTIVE ====== */
+
+    /* 3a — STANDBY + ELECTRICAL_HAZARD + healthy CAN → NEVER ACTIVE. */
+    bring_up_standby_healthy();
+    CHECK(Safety_GetState() == SYS_STATE_STANDBY);
+    Steering_DeclareElectricalHazard(EPS_FAULT_OVERCURRENT);
+    CHECK(Steering_IsElectricalHazard());
+    CHECK(!Steering_IsMechanicalOnly());          /* hazard != mechanical-only */
+    CHECK(!Steering_AllowsVehicleDrive());        /* hazard vetoes drive        */
+    for (int i = 0; i < 50; i++) {
+        g_stub_hal_tick += 10U;
+        Safety_UpdateCANRxTime();                 /* CAN stays healthy          */
+        Safety_CheckCANTimeout();
+        CHECK(Safety_GetState() != SYS_STATE_ACTIVE);   /* never promotes       */
+    }
+
+    /* 3b — LIMP_HOME + ELECTRICAL_HAZARD + CAN recovered → NEVER ACTIVE. */
+    bring_up_standby_healthy();
+    Safety_SetState(SYS_STATE_LIMP_HOME);
+    CHECK(Safety_GetState() == SYS_STATE_LIMP_HOME);
+    Steering_DeclareElectricalHazard(EPS_FAULT_OVERCURRENT);
+    CHECK(Steering_IsElectricalHazard());
+    for (int i = 0; i < 200; i++) {               /* well past RECOVERY_HOLD_MS  */
+        g_stub_hal_tick += 10U;
+        Safety_UpdateCANRxTime();                 /* CAN fully recovered        */
+        Safety_CheckCANTimeout();
+        CHECK(Safety_GetState() != SYS_STATE_ACTIVE);   /* never recovers ACTIVE*/
+    }
+    CHECK(Safety_GetState() == SYS_STATE_LIMP_HOME);    /* still crawling only  */
+
+    /* 3c — MECHANICAL_ONLY (isolable, benign) + healthy CAN → ACTIVE allowed. */
+    bring_up_standby_healthy();
+    Steering_DisableAssistFault(EPS_FAULT_ENCODER_AB);
+    CHECK(Steering_IsMechanicalOnly());
+    CHECK(!Steering_IsElectricalHazard());
+    CHECK(Steering_AllowsVehicleDrive());
+    g_stub_hal_tick += 10U;
+    Safety_UpdateCANRxTime();
+    Safety_CheckCANTimeout();
+    CHECK(Safety_GetState() == SYS_STATE_ACTIVE);
+
+    /* 3d — Calibrated + healthy EPS → ACTIVE allowed. */
+    bring_up_standby_healthy();
+    CHECK(Steering_IsCalibrated());
+    CHECK(Steering_GetEpsState() == EPS_STATE_ACTIVE);
+    CHECK(Steering_AllowsVehicleDrive());
+    g_stub_hal_tick += 10U;
+    Safety_UpdateCANRxTime();
+    Safety_CheckCANTimeout();
+    CHECK(Safety_GetState() == SYS_STATE_ACTIVE);
+
+    /* ====== Part 4: rogue PC12 command is exposed, not masked, and the
+     *        supervisor forces it OFF without touching PC11 / traction. ==== */
+    bring_up_standby_healthy();
+
+    /* Latch the assist to MECHANICAL_ONLY: PC12 is NOT allowed from now on. */
+    Steering_DisableAssistFault(EPS_FAULT_ENCODER_AB);
+    CHECK(Steering_IsMechanicalOnly());
+    CHECK(!Steering_MotorRelayAllowed());
+
+    /* Bring traction (PC11) up so we can prove the supervisor leaves it be. */
+    g_stub_hal_tick += 10U;
+    Safety_UpdateCANRxTime();
+    Safety_CheckCANTimeout();
+    CHECK(Safety_GetState() == SYS_STATE_ACTIVE);
+    complete_power_sequence();
+    (void)Safety_GetRelayStatusByte();            /* flush pending BSRR         */
+    CHECK(pc11_on());                             /* traction relay ON          */
+
+    /* Artificially force the raw PC12 ODR ON (a rogue GPIO path). */
+    Safety_TestInjectSteerRelayOn();
+
+    /* The diagnostic must REVEAL the illegal command, not hide it. */
+    SteerRelayDiag_t diag;
+    Safety_GetSteerRelayDiag(&diag);
+    CHECK(diag.pc12_commanded);                   /* RELAY CMD = real ON        */
+    CHECK(!diag.pc12_allowed);                    /* policy: NOT allowed        */
+    CHECK(diag.pc12_policy_violation);            /* violation surfaced         */
+    CHECK(pc12_on());                             /* status byte shows real CMD */
+
+    /* Run the supervisor: it detects + corrects the violation. */
+    CHECK(Safety_SteerRelaySupervise());          /* returns true (corrected)   */
+    (void)Safety_GetRelayStatusByte();            /* flush the forced-OFF BSRR  */
+
+    /* PC12 is now OFF; PC11 and traction state are untouched. */
+    CHECK(!pc12_on());                            /* PC12 forced OFF            */
+    CHECK(pc11_on());                             /* PC11 unchanged             */
+    CHECK(Safety_GetState() == SYS_STATE_ACTIVE); /* traction unchanged         */
+    Safety_GetSteerRelayDiag(&diag);
+    CHECK(!diag.pc12_commanded);                  /* no longer commanded        */
+    CHECK(!diag.pc12_policy_violation);           /* violation cleared          */
 
     printf("==== test_eps_boot_traction: %d run, %d failed ====\n",
            tests_run, tests_failed);
