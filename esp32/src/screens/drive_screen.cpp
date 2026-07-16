@@ -176,9 +176,12 @@ void DriveScreen::onExit() {
 // update — read vehicle data into current-frame cache + compute tile hashes
 // -------------------------------------------------------------------------
 void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTimeMs) {
-    // Traction (torque per wheel)
+    // Per-wheel MAIN percentage = FINAL applied PWM duty (0x20C, real effort),
+    // NOT the ABS/TCS permitted limit (0x205).  AUDIT A: 0x205 read 100 %
+    // whenever ABS/TCS was not limiting even if the real duty was far lower,
+    // which made all four wheels show 100 % as soon as traction started.
     for (uint8_t i = 0; i < 4; ++i) {
-        curTraction_[i] = data.traction().scale[i];
+        curTraction_[i] = data.wheelEffort().pwmPct[i];
     }
 
     // Temperature per wheel (first 4 of tempMap)
@@ -190,11 +193,11 @@ void DriveScreen::update(const vehicle::VehicleData& data, unsigned long frameTi
     curAmbientTemp_ = data.tempMap().temps[4];
 
     // Wheel telemetry staleness: a never-received (timestampMs==0) or expired
-    // traction/temp frame must not be shown as a real reading.  When stale the
-    // WHEELS tile renders "--" / "N/A" instead of leftover defaults (the 0x205
-    // scale defaults to 100 and tempMap to 0 °C before any frame arrives).
+    // wheel-effort/temp frame must not be shown as a real reading.  When stale
+    // the WHEELS tile renders "--" / "N/A" instead of leftover defaults (the
+    // 0x20C effort defaults to 0 and tempMap to 0 °C before any frame arrives).
     {
-        unsigned long tts = data.traction().timestampMs;
+        unsigned long tts = data.wheelEffort().timestampMs;
         curTractionStale_ = (tts == 0) ||
                             ((frameTimeMs - tts) > can::CAN_LOSS_TIMEOUT_MS);
         unsigned long mts = data.tempMap().timestampMs;
@@ -949,9 +952,9 @@ void DriveScreen::drawDegradedOverlay() {
     } else if (curSystemState_ == can::SystemState::LIMP_HOME) {
         const char* reason = limpHomeReasonLabel(curLimpErrorCode_);
         if (reason != nullptr) {
-            snprintf(limpBuf, sizeof(limpBuf), "LIMP HOME  %s", reason);
+            snprintf(limpBuf, sizeof(limpBuf), "LIMP HOME 40%% MAX  %s", reason);
         } else {
-            snprintf(limpBuf, sizeof(limpBuf), "LIMP HOME");
+            snprintf(limpBuf, sizeof(limpBuf), "LIMP HOME 40%% MAX");
         }
         bannerText = limpBuf;
         bannerCol  = ui::COL_RED;

@@ -104,7 +104,8 @@ Source: `CAN_ConfigureFilters()` in `Core/Src/can_handler.c`
 | 0x202 | STATUS_TEMP | 5 | 1000 ms | Five temperature sensors | `can_handler.c`, `main.c` |
 | 0x203 | STATUS_SAFETY | 5 | 100 ms | ABS/TCS active flags, error code, system state, rx_errors | `can_handler.c`, `main.c` |
 | 0x204 | STATUS_STEERING | 3 | 100 ms | Actual steering angle and calibration flag | `can_handler.c`, `main.c` |
-| 0x205 | STATUS_TRACTION | 4 | 100 ms | Per-wheel traction scale (ABS/TCS) | `can_handler.c`, `main.c` |
+| 0x205 | STATUS_TRACTION | 4 | 100 ms | **ABS/TCS LIMIT** (power ALLOWED per wheel, `wheel_scale*100`). 100=not limited by ABS/TCS, 0=wheel inhibited. NOT torque/thrust/applied-PWM. Kept for compatibility; real applied effort now lives in 0x20C. | `can_handler.c`, `main.c` |
+| 0x20C | STATUS_WHEEL_EFFORT | 4 | 100 ms | **Final applied PWM %** per wheel after pedal/ramp/gear/ABS/TCS/jerk/DRIVE-BRAKE-COAST/EN: byte0=FL, byte1=FR, byte2=RL, byte3=RR (0–100). COAST/BRAKE/disabled wheel=0. This is what the HMI shows as the per-wheel %. | `can_handler.c`, `main.c` |
 | 0x206 | STATUS_TEMP_MAP | 5 | 1000 ms | Explicit temperature sensor mapping (FL/FR/RL/RR/AMB) | `can_handler.c`, `main.c` |
 | 0x207 | STATUS_BATTERY | 4 | 100 ms | Battery bus current and voltage (INA226, 24 V bus) | `can_handler.c`, `main.c` |
 | 0x20A | STATUS_LIGHTS | 2 | 1000 ms | LED relay state (byte0=front, byte1=rear) | `can_handler.c`, `main.c` |

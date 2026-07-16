@@ -101,6 +101,16 @@ struct TractionData {
 };
 
 // -------------------------------------------------------------------------
+// Wheel effort (0x20C) — per-wheel FINAL applied PWM %, 0–100 %
+// This is the REAL applied effort (post ramp/gear/ABS/TCS/jerk/DRIVE-BRAKE-
+// COAST), unlike TractionData (0x205) which is the ABS/TCS permitted limit.
+// -------------------------------------------------------------------------
+struct WheelEffortData {
+    std::array<uint8_t, NUM_WHEELS> pwmPct{};  // FL, FR, RL, RR (0–100 %)
+    unsigned long timestampMs = 0;
+};
+
+// -------------------------------------------------------------------------
 // Temperature map (0x206) — int8 °C, mapped: FL, FR, RL, RR, Ambient
 // -------------------------------------------------------------------------
 struct TempMapData {
@@ -620,6 +630,7 @@ public:
     void setSafety(const SafetyData& d)        { safety_ = d; }
     void setSteering(const SteeringData& d)    { steering_ = d; }
     void setTraction(const TractionData& d)    { traction_ = d; }
+    void setWheelEffort(const WheelEffortData& d) { wheelEffort_ = d; }
     void setTempMap(const TempMapData& d)      { tempMap_ = d; }
     void setDiag(const DiagData& d)            { diag_ = d; }
     void setBattery(const BatteryData& d)      { battery_ = d; }
@@ -702,6 +713,7 @@ public:
     const SafetyData&    safety()    const { return safety_; }
     const SteeringData&  steering()  const { return steering_; }
     const TractionData&  traction()  const { return traction_; }
+    const WheelEffortData& wheelEffort() const { return wheelEffort_; }
     const TempMapData&   tempMap()   const { return tempMap_; }
     const DiagData&      diag()      const { return diag_; }
     const BatteryData&   battery()   const { return battery_; }
@@ -740,6 +752,7 @@ private:
     SafetyData    safety_;
     SteeringData  steering_;
     TractionData  traction_;
+    WheelEffortData wheelEffort_;
     TempMapData   tempMap_;
     DiagData      diag_;
     BatteryData   battery_;
