@@ -160,6 +160,17 @@ const eps_params_t *EPS_Params_GetDefaults(void);
 bool EPS_Params_IsFlashValid(void);
 
 /**
+ * @brief  Returns true when a parameter slot is PRESENT in flash (its magic
+ *         word matches, proving it was written) but is structurally corrupt /
+ *         fails CRC, and no valid slot could be loaded.  This is the signal
+ *         that distinguishes a genuinely corrupt existing device from a fresh
+ *         one: a fresh device (erased flash) returns false here and silently
+ *         accepts defaults, whereas a corrupt one must isolate the EPS assist
+ *         with EPS_FAULT_PARAMETERS_INVALID instead of running on defaults.
+ */
+bool EPS_Params_IsFlashCorrupt(void);
+
+/**
  * @brief  Read the authoritative server-side [min, max] limit for a
  *         parameter.  Exposes the eps_limits[] contract so the HMI editor
  *         ranges (esp32/src/eps_limits.h) can be cross-checked against the

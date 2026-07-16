@@ -21,6 +21,7 @@
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "steering_centering.h"
+#include "steering_supervisor.h"
 #include "service_mode.h"
 #include "boot_validation.h"
 #include "encoder_reader.h"
@@ -536,6 +537,14 @@ int main(void)
                  * cycle.  Pure instrumentation — drives nothing. */
                 SteeringCentering_UpdateDiag();
             }
+
+            /* EPS assist supervisor — connects the real steering detectors
+             * (INA226 CH5 current sensor, EPS parameter store, calibration
+             * store, encoder Z) to the EPS isolation policy.  Any isolable
+             * fault disconnects the assist (mechanical-only) without touching
+             * traction; a proven persistent overcurrent escalates to SAFE.
+             * Runs AFTER the motor writer so it observes this cycle's PWM.  */
+            SteeringSupervisor_Service();
             Traction_Update();
 
             /* Loop-time diagnostic — record duration of this 100 Hz

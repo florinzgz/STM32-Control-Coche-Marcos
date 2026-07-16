@@ -193,6 +193,37 @@ jobs:
               Core/Src/math_safety.c \
               -lm -o /tmp/test_centering_boot_traction
             /tmp/test_centering_boot_traction
+
+            # Section-M EPS assist supervisor: faults are injected into the
+            # REAL detectors — the genuine Ina226_ClassifyChannel() plus the
+            # real parameter/calibration/Z policy inputs — and the supervisor
+            # is left to drive the real steering_eps.c isolation API (never
+            # calling Steering_DisableAssistFault directly).  Proves every
+            # isolable cause reaches EPS MECHANICAL_ONLY while a persistent
+            # overcurrent escalates to ELECTRICAL_HAZARD + SAFE.
+            echo "-- test_steering_supervisor.c"
+            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor
+            /tmp/test_steering_supervisor
+
+            # Encoder-Z MANDATORY policy: rebuild the supervisor with
+            # STEERING_Z_REQUIRED=1 so the same detector injection proves a
+            # missing/incoherent Z isolates the assist when Z is configured
+            # mandatory (the default optional build treats it as diagnostic).
+            echo "-- test_steering_supervisor.c (STEERING_Z_REQUIRED=1)"
+            gcc -std=c11 -DHOST_TEST -DSTEERING_Z_REQUIRED=1 -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_zreq
+            /tmp/test_steering_supervisor_zreq
           } | tee artifacts/tests/stm32-host-tests.txt
 
       - name: Run ESP32 host tests

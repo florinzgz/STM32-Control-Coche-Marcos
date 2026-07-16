@@ -82,6 +82,7 @@ typedef struct {
 
 /* ---- RAM state ---- */
 static bool    stcal_flash_valid   = false;   /* Flash slot passed CRC   */
+static bool    stcal_flash_corrupt = false;   /* Slot present but corrupt */
 static bool    stcal_boot_valid    = false;   /* Boot validation passed  */
 static int32_t stcal_stored_center = 0;
 static int32_t stcal_z_offset      = 0;       /* Z↔center offset (counts) */
@@ -132,6 +133,16 @@ static bool stcal_slot_valid_v2(const stcal_flash_slot_t *slot)
     return (crc == slot->checksum);
 }
 
+/* A calibration slot is PRESENT (written at least once) when its leading magic
+ * word matches either supported format.  Erased flash reads 0xFFFFFFFF, so a
+ * matching magic combined with a failed validity check marks real corruption
+ * of an existing device — distinct from a fresh, never-calibrated device. */
+static bool stcal_slot_present(const stcal_flash_slot_t *v2,
+                               const stcal_flash_slot_v1_t *v1)
+{
+    return (v2->magic == STCAL_MAGIC_V2) || (v1->magic == STCAL_MAGIC_V1);
+}
+
 /* ==================================================================
  *  Public API
  * ================================================================== */
@@ -139,6 +150,7 @@ static bool stcal_slot_valid_v2(const stcal_flash_slot_t *slot)
 void SteeringCal_Init(void)
 {
     stcal_flash_valid   = false;
+    stcal_flash_corrupt = false;
     stcal_boot_valid    = false;
     stcal_stored_center = 0;
     stcal_z_offset      = 0;
@@ -171,7 +183,14 @@ void SteeringCal_Init(void)
         stcal_z_offset      = 0;
         stcal_z_valid       = false;
         stcal_z_tolerance   = 0;
+        return;
     }
+
+    /* No valid slot.  If a slot magic is nonetheless present, the calibration
+     * page was written and is now corrupt (bad CRC / cleared validity flag)
+     * rather than fresh — surface it so the assist can be isolated with
+     * EPS_FAULT_CALIBRATION_INVALID instead of trusting an unknown centre. */
+    stcal_flash_corrupt = stcal_slot_present(v2, v1);
 }
 
 bool SteeringCal_ValidateAtBoot(void)
@@ -218,6 +237,11 @@ bool SteeringCal_ValidateAtBoot(void)
 bool SteeringCal_IsRestoredValid(void)
 {
     return stcal_boot_valid;
+}
+
+bool SteeringCal_IsFlashCorrupt(void)
+{
+    return stcal_flash_corrupt;
 }
 
 int32_t SteeringCal_GetStoredCenter(void)

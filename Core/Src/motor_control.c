@@ -9,6 +9,7 @@
 #include "ackermann.h"
 #include "eps_params.h"
 #include "steering_eps.h"
+#include "steering_supervisor.h"
 #include "steering_output.h"
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
@@ -912,6 +913,11 @@ void Steering_Init(void)
 
     /* Initialise the EPS local state authority (STARTING, owner NONE). */
     Steering_EpsInit();
+
+    /* Initialise the EPS assist supervisor (overcurrent FSM + latches).
+     * It connects the real INA226 CH5 / parameter / calibration / Z
+     * detectors to the EPS isolation policy each control cycle.        */
+    SteeringSupervisor_Init();
 }
 
 /* ==================================================================

@@ -143,6 +143,13 @@ static bool         eps_persisted_valid    = false;
 static bool         eps_has_written_once   = false;
 static uint32_t     eps_last_write_tick    = 0U;
 
+/* True when a slot is PRESENT in flash (its magic matches) but is structurally
+ * corrupt / fails CRC, and no valid slot could be loaded.  This distinguishes
+ * a genuinely corrupt existing device from a fresh one (erased flash reads
+ * 0xFFFFFFFF, so the magic never matches).  A fresh device silently accepts
+ * defaults; a corrupt one must isolate the EPS assist. */
+static bool         eps_flash_corrupt      = false;
+
 /* ---- CRC32 (software, no HW CRC unit dependency) ---- */
 static uint32_t eps_crc32(const void *data, uint32_t len)
 {
@@ -169,6 +176,14 @@ static bool eps_slot_valid(const eps_flash_slot_t *slot)
     return (crc == slot->checksum);
 }
 
+/* ---- Slot present (written at least once) but not necessarily valid ---- *
+ * Erased STM32 flash reads back all-ones, so a matching magic proves the slot
+ * was actually written; combined with !eps_slot_valid() it marks corruption. */
+static bool eps_slot_present(const eps_flash_slot_t *slot)
+{
+    return (slot->magic == EPS_MAGIC);
+}
+
 /* ---- Public API ---- */
 
 void EPS_Params_Init(void)
@@ -190,22 +205,29 @@ void EPS_Params_Init(void)
         }
         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
         eps_persisted_valid = true;
+        eps_flash_corrupt   = false;
     } else if (a_ok) {
         memcpy(&eps_active, &slotA->params, sizeof(eps_params_t));
         eps_sequence = slotA->sequence;
         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
         eps_persisted_valid = true;
+        eps_flash_corrupt   = false;
     } else if (b_ok) {
         memcpy(&eps_active, &slotB->params, sizeof(eps_params_t));
         eps_sequence = slotB->sequence;
         memcpy(&eps_persisted, &eps_active, sizeof(eps_params_t));
         eps_persisted_valid = true;
+        eps_flash_corrupt   = false;
     } else {
         /* No valid data — use compiled defaults */
         memcpy(&eps_active, &eps_defaults, sizeof(eps_params_t));
         eps_sequence = 0;
         /* No persisted slot — Save() must not elide; leave invalid. */
         eps_persisted_valid = false;
+        /* Distinguish a fresh device (erased flash, magic never matches) from
+         * an EXISTING but corrupt one (a slot was written — magic matches —
+         * but its CRC/structure is bad).  Only the latter isolates the assist. */
+        eps_flash_corrupt = eps_slot_present(slotA) || eps_slot_present(slotB);
     }
 }
 
@@ -301,6 +323,11 @@ const eps_params_t *EPS_Params_GetDefaults(void)
 bool EPS_Params_IsFlashValid(void)
 {
     return eps_persisted_valid;
+}
+
+bool EPS_Params_IsFlashCorrupt(void)
+{
+    return eps_flash_corrupt;
 }
 
 bool EPS_Params_Save(void)
