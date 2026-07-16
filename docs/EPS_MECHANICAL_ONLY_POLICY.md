@@ -151,6 +151,66 @@ to `SAFE`/`ERROR`/global power cut, via `Steering_DeclareElectricalHazard()`.
 **Always isolate first and verify** before escalating. A zero/stale/absent CH5
 reading alone is an isolable fault, never a hazard.
 
+### 5.1 Active detector supervisor (`steering_supervisor.{c,h}`)
+
+Sections 4–5 describe *how* the assist is isolated; the **supervisor** is the
+module that actually *connects the real detectors to that policy* every control
+cycle. It runs at 100 Hz from `main.c` (after the steering motor writer, before
+`Traction_Update()`), is initialised in `Steering_Init()`, and drives the
+idempotent `steering_eps.c` API — it never calls `Safety_SetState` for an
+isolable fault and never touches traction, gear, relays or the pedal.
+
+The decision logic lives in pure, host-tested helpers; the thin production glue
+that reads the real globals/HAL is `steering_supervisor_io.c`
+(`SteeringSupervisor_Service()`).
+
+| Detector (real source) | Condition | EPS action |
+|------------------------|-----------|------------|
+| `Sensor_GetChannel5Diag()->fault_reason` (`Ina226_ClassifyChannel`) | `MISSING` / `MUX_SELECT_FAIL` / `READ_FAIL` | `DisableAssistFault(CH5_MISSING)` |
+| " | `STALE` | `DisableAssistFault(CH5_STALE)` |
+| " | `CONFIG_LOST` / `WRONG_ID` | `DisableAssistFault(CH5_CONFIG)` |
+| " | `POLARITY_REVERSED` | `DisableAssistFault(DIRECTION_POLARITY)` |
+| INA226 CH5 signed current | `|I|` > `STEERING_OC_LIMIT_MA` (calibrated) | overcurrent FSM (below) |
+| `EPS_Params_IsFlashCorrupt()` | slot present but bad CRC/structure | `DisableAssistFault(PARAMETERS_INVALID)` |
+| `SteeringCal_IsFlashCorrupt()` / centering finished unrecovered | corrupt cal, or homing done without a valid centre | `DisableAssistFault(CALIBRATION_INVALID)` |
+| `SteeringZ_GetStatus()` with `STEERING_Z_REQUIRED=1` | centre known but Z `NOT_SEEN` / `OUT_OF_WINDOW` / `MECH_OFFSET` | `DisableAssistFault(ENCODER_Z)` |
+
+CH5 isolable faults are **debounced** (`STEERING_CH5_FAULT_DEBOUNCE`
+consecutive cycles) so a single transient I2C hiccup never isolates the assist.
+
+**Fresh vs corrupt store (audit item 4/5).** `EPS_Params_IsFlashCorrupt()` and
+`SteeringCal_IsFlashCorrupt()` return true only when a slot is *present* (its
+magic word matches, proving the page was written) **but** fails CRC/validity.
+An erased/fresh device (magic never matches) returns false and silently accepts
+compiled defaults; a genuinely corrupt existing device isolates the assist with
+`PARAMETERS_INVALID` / `CALIBRATION_INVALID` instead of running on defaults.
+
+**Encoder-Z policy (audit item 3).** `STEERING_Z_REQUIRED` (default `0`) selects
+the policy: **optional** → an absent/incoherent Z is diagnostic only; **mandatory
+(`1`)** → once PB5 confirms the centre, an absent/incoherent Z isolates the
+assist with `EPS_FAULT_ENCODER_Z`. Both configurations are covered by
+`test_steering_supervisor.c`.
+
+**Overcurrent state machine (audit item 2).** A CH5 current above the calibrated
+ceiling drives a **non-blocking** FSM:
+
+1. `NORMAL` → over limit on a valid sample → **isolate** (`DisableAssistFault(
+   OVERCURRENT)`: PA6/PA7 = 0, PC4 LOW, PC12 OFF) and enter `CONFIRM`.
+2. `CONFIRM` → wait (without blocking) for a genuinely **new** valid CH5 sample:
+   - current fell → `MECHANICAL_ONLY` retained, **no** hazard (isolable);
+   - current persists, or no fresh sample within `STEERING_OC_CONFIRM_MS` →
+     `Steering_DeclareElectricalHazard(OVERCURRENT)` and latch a SAFE/ERROR
+     escalation request.
+3. The glue sees `SteeringSupervisor_WantsSafe()` and calls
+   `Safety_SetError(OVERCURRENT)` + `Safety_SetState(SAFE)` — the single point
+   where a *proven, non-isolable* steering hazard reaches the global safety
+   state.
+
+Fault injection tests exercise the **real** detectors: `test_steering_supervisor.c`
+builds `Ina226ChannelDiag` snapshots, classifies them with the genuine
+`Ina226_ClassifyChannel()`, and lets the supervisor drive the real
+`steering_eps.c` — it never calls `Steering_DisableAssistFault()` directly.
+
 ## 6. Single motor owner
 
 `SteeringMotorOwner_t`: `STEER_OWNER_CENTERING (0)`, `STEER_OWNER_EPS (1)`,
