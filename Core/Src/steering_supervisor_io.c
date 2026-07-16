@@ -26,6 +26,7 @@
 #include "safety_system.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "stm32g4xx_hal.h"
 

@@ -39,6 +39,8 @@ C_SOURCES = \
   $(CORE_SRC)/error_log.c \
   $(CORE_SRC)/steering_cal_store.c \
   $(CORE_SRC)/steering_z.c \
+  $(CORE_SRC)/steering_supervisor.c \
+  $(CORE_SRC)/steering_supervisor_io.c \
   $(CORE_SRC)/sensor_map_store.c \
   $(CORE_SRC)/pedal_cal_store.c \
   $(CORE_SRC)/pedal_cal_session.c \
