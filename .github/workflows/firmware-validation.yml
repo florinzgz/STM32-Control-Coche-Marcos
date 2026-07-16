@@ -224,6 +224,39 @@ jobs:
               Core/Src/ina226_channel_diag.c \
               -lm -o /tmp/test_steering_supervisor_zreq
             /tmp/test_steering_supervisor_zreq
+
+            # Production glue integration: exercise the REAL data-gathering path
+            # steering_supervisor_io.c:SteeringSupervisor_Service() through a
+            # controllable Sensor_GetChannel5Diag() seam.  Proves the real
+            # acquisition sequence is transported (100 Hz never reprocesses one
+            # 20 Hz sample), CH5 is pre-relay/always-powered, isolable CH5
+            # faults reach MECHANICAL_ONLY without a global SAFE, and a missing
+            # post-isolation sample stays ISOLATION UNCONFIRMED (never a false
+            # ELECTRICAL_HAZARD).  HOST_TEST_GPIO_MODEL gives a deterministic tick.
+            echo "-- test_steering_supervisor_io.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor_io.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_io
+            /tmp/test_steering_supervisor_io
+
+            # Same glue rebuilt with the isolation threshold CALIBRATED so the
+            # end-to-end ELECTRICAL_HAZARD + SAFE escalation path is covered too.
+            echo "-- test_steering_supervisor_io.c (CALIBRATED)"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DSTEERING_ISOLATION_THRESHOLD_CALIBRATED=1 -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor_io.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_io_cal
+            /tmp/test_steering_supervisor_io_cal
           } | tee artifacts/tests/stm32-host-tests.txt
 
       - name: Run ESP32 host tests

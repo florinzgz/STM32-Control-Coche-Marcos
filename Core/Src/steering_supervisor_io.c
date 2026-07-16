@@ -51,11 +51,13 @@ void SteeringSupervisor_Service(void)
     if (ch5 != NULL) {
         in.ch5_reason       = ch5->fault_reason;
         in.ch5_current_ma   = ch5->signed_current_ma;
-        /* A monotonic id that changes whenever a NEW valid sample lands:
-         * the tick of the newest good sample = now - age.  While the sensor
-         * keeps reading it advances every cycle; if it stalls it freezes,
-         * which is exactly what the overcurrent confirm step waits on.     */
-        in.ch5_sample_id    = now - ch5->sample_age_ms;
+        /* Real acquisition identity: the sensor layer increments
+         * sample_sequence EXACTLY ONCE per new, valid CH5 acquisition (20 Hz),
+         * so the 100 Hz supervisor sees the SAME value across the 5 cycles that
+         * re-read one sample and only observes a change when a genuinely new
+         * sample lands.  This is what the overcurrent confirm step waits on —
+         * NOT a value derived from the supervisor's own tick.               */
+        in.ch5_sample_id    = ch5->sample_sequence;
         in.ch5_sample_valid = ch5->i2c_ack && ch5->shunt_read_ok &&
                               ch5->bus_read_ok;
     } else {

@@ -113,14 +113,46 @@ EpsFaultReason_t SteeringSupervisor_ZPolicy(bool z_required,
  *  Overcurrent state machine
  * ====================================================================== */
 
-void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t limit_ma, uint32_t confirm_ms)
+void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t active_limit_ma,
+                               int32_t isolation_limit_ma,
+                               bool isolation_calibrated, uint32_t confirm_ms)
 {
     if (f == NULL) return;
-    f->state             = OC_STATE_NORMAL;
-    f->limit_ma          = limit_ma;
-    f->confirm_ms        = confirm_ms;
-    f->isolate_sample_id = 0U;
-    f->isolate_tick_ms   = 0U;
+    f->state                = OC_STATE_NORMAL;
+    f->active_limit_ma      = active_limit_ma;
+    f->isolation_limit_ma   = isolation_limit_ma;
+    f->isolation_calibrated = isolation_calibrated;
+    f->confirm_ms           = confirm_ms;
+    f->isolate_sample_id    = 0U;
+    f->isolate_tick_ms      = 0U;
+}
+
+/* Evaluate a FRESH, VALID post-isolation sample and pick the terminal (or
+ * unconfirmed) outcome.  This is the ONLY place a hazard can be declared, and
+ * only when the residual threshold is genuinely calibrated.                  */
+static OcAction_t oc_eval_post_isolation(OcFsm_t *f, int32_t current_ma)
+{
+    const bool residual_ok =
+        (labs((long)current_ma) <= (long)f->isolation_limit_ma);
+
+    if (residual_ok) {
+        /* Current fell below the residual ceiling — the isolation cleared it. */
+        f->state = OC_STATE_MECHANICAL_CONFIRMED;
+        return OC_ACTION_KEEP_MECHANICAL;
+    }
+
+    /* Current still above the residual ceiling. */
+    if (f->isolation_calibrated) {
+        /* Proven, calibrated, non-isolable electrical hazard. */
+        f->state = OC_STATE_HAZARD;
+        return OC_ACTION_ESCALATE_HAZARD;
+    }
+
+    /* Residual ceiling is NOT calibrated: the "still high" reading cannot be
+     * trusted to prove a hazard.  Never auto-SAFE — keep the motor isolated
+     * and report the isolation as unconfirmed (THRESHOLD UNCALIBRATED).      */
+    f->state = OC_STATE_ISOLATED_UNCONFIRMED;
+    return OC_ACTION_ISOLATION_UNCONFIRMED;
 }
 
 OcAction_t SteeringSupervisor_OcStep(OcFsm_t *f, int32_t current_ma,
@@ -129,43 +161,49 @@ OcAction_t SteeringSupervisor_OcStep(OcFsm_t *f, int32_t current_ma,
 {
     if (f == NULL) return OC_ACTION_NONE;
 
-    const bool over = (labs((long)current_ma) > (long)f->limit_ma);
+    /* Active overcurrent is judged against the working-motor ceiling. */
+    const bool over_active =
+        (labs((long)current_ma) > (long)f->active_limit_ma);
 
     switch (f->state) {
         case OC_STATE_NORMAL:
-            /* Only a VALID sample above the ceiling triggers isolation. */
-            if (sample_valid && over) {
-                f->state             = OC_STATE_CONFIRM;
+            /* Only a VALID sample above the active ceiling triggers isolation. */
+            if (sample_valid && over_active) {
+                f->state             = OC_STATE_CONFIRM_WAIT;
                 f->isolate_sample_id = sample_id;
                 f->isolate_tick_ms   = now_ms;
                 return OC_ACTION_ISOLATE;
             }
             return OC_ACTION_NONE;
 
-        case OC_STATE_CONFIRM: {
+        case OC_STATE_CONFIRM_WAIT: {
             /* Non-blocking wait for a genuinely NEW valid CH5 sample. */
             const bool fresh = sample_valid && (sample_id != f->isolate_sample_id);
             if (fresh) {
-                if (over) {
-                    /* Current did not disappear once the motor was isolated:
-                     * this is a non-isolable electrical hazard.             */
-                    f->state = OC_STATE_HAZARD;
-                    return OC_ACTION_ESCALATE_HAZARD;
-                }
-                /* Current fell — the isolation cleared it; stay mechanical. */
-                f->state = OC_STATE_MECHANICAL;
-                return OC_ACTION_KEEP_MECHANICAL;
+                return oc_eval_post_isolation(f, current_ma);
             }
-            /* No fresh confirmation within the window → conservatively treat
-             * the danger as unconfirmed-cleared, i.e. a hazard.            */
+            /* No fresh confirmation within the window.  Missing information is
+             * NOT proof that a dangerous current persists: DO NOT declare a
+             * hazard and DO NOT enter SAFE.  Keep the motor isolated and wait
+             * for a future valid sample (ISOLATION UNCONFIRMED).             */
             if ((uint32_t)(now_ms - f->isolate_tick_ms) >= f->confirm_ms) {
-                f->state = OC_STATE_HAZARD;
-                return OC_ACTION_ESCALATE_HAZARD;
+                f->state = OC_STATE_ISOLATED_UNCONFIRMED;
+                return OC_ACTION_ISOLATION_UNCONFIRMED;
             }
             return OC_ACTION_NONE;
         }
 
-        case OC_STATE_MECHANICAL:
+        case OC_STATE_ISOLATED_UNCONFIRMED: {
+            /* Still isolated, still no SAFE.  Keep waiting; a future fresh,
+             * valid sample can finally confirm the outcome.                  */
+            const bool fresh = sample_valid && (sample_id != f->isolate_sample_id);
+            if (fresh) {
+                return oc_eval_post_isolation(f, current_ma);
+            }
+            return OC_ACTION_NONE;
+        }
+
+        case OC_STATE_MECHANICAL_CONFIRMED:
         case OC_STATE_HAZARD:
         default:
             return OC_ACTION_NONE;   /* terminal — latched */
@@ -183,7 +221,10 @@ static uint8_t          s_ch5_debounce;
 
 void SteeringSupervisor_Init(void)
 {
-    SteeringSupervisor_OcInit(&s_oc, STEERING_OC_LIMIT_MA, STEERING_OC_CONFIRM_MS);
+    SteeringSupervisor_OcInit(&s_oc, STEERING_ACTIVE_OVERCURRENT_MA,
+                              STEERING_ISOLATION_CURRENT_MAX_MA,
+                              (STEERING_ISOLATION_THRESHOLD_CALIBRATED != 0),
+                              STEERING_OC_CONFIRM_MS);
     s_want_safe    = false;
     s_last_cause   = EPS_FAULT_NONE;
     s_ch5_debounce = 0U;
@@ -253,6 +294,12 @@ void SteeringSupervisor_Apply(const SteeringSupervisorInputs *in)
             case OC_ACTION_KEEP_MECHANICAL:
                 /* Current disappeared once isolated — remain mechanical-only.
                  * The assist is already latched off; nothing more to do.    */
+                break;
+            case OC_ACTION_ISOLATION_UNCONFIRMED:
+                /* No fresh valid CH5 sample yet (or residual threshold not
+                 * calibrated).  The motor stays isolated (MECHANICAL_ONLY) and
+                 * we explicitly do NOT request SAFE — missing/uncalibrated
+                 * information is not proof of a persistent hazard.          */
                 break;
             case OC_ACTION_ESCALATE_HAZARD:
                 /* Danger persists after isolation: non-isolable hazard. */

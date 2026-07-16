@@ -697,6 +697,12 @@ static Ina226ChannelDiag ch5_diag = { .channel = INA226_CHANNEL_STEER,
 static uint32_t ch5_last_ok_tick        = 0;
 static bool     ch5_ever_ok             = false;
 static uint32_t ch5_consecutive_failures = 0;
+/* Real CH5 acquisition sequence: incremented EXACTLY ONCE each time a new,
+ * valid steering-current sample is acquired (full ACK + shunt + bus read).
+ * This is the authoritative freshness identity the EPS supervisor uses; it is
+ * NOT derived from any consumer's HAL_GetTick().  Wraps at 2^32 (documented in
+ * Ina226ChannelDiag) — consumers compare for inequality, never magnitude.   */
+static uint32_t ch5_sample_sequence     = 0;
 
 /**
  * @brief  I2C bus recovery via manual SCL clock cycling.
@@ -908,16 +914,19 @@ void Current_ReadAll(void)
     /* ---- Phase gate: which INA226 branches should be powered right now? ----
      * Read the relay command state (GPIO-backed, no I2C) and build the set of
      * channels that are expected to ACK.  Battery (ch4) is always expected.
-     * Motor channels (ch0..3) require the traction relay; steering (ch5)
-     * requires the steering power relay.  Timeouts from channels NOT in this
+     * Motor channels (ch0..3) require the traction relay (PC11).
+     *
+     * STEERING (ch5) is ALWAYS expected: the INA226/shunt for CH5 sit BEFORE
+     * the PC12 isolation relay (12V BATTERY -> INA226 CH5 + SHUNT -> RELAY
+     * PC12 -> MOTOR), so CH5 is fed from the pre-relay 12 V bus and keeps
+     * reading (~12 V, ~0 A) even with PC12 OFF.  CH5 must therefore NOT be
+     * gated on PC12 — doing so would falsely blank the steering current sensor
+     * whenever the assist is isolated.  Timeouts from channels NOT in this
      * mask are normal (branch unpowered) and must NOT count as bus faults.   */
-    uint8_t expected = INA226_MASK_BATTERY;
+    uint8_t expected = INA226_MASK_BATTERY | INA226_MASK_STEER;
     uint8_t relay    = Safety_GetRelayStatusByte();
     if (relay & (1U << 1)) {            /* bit1 = traction relay energised   */
         expected |= INA226_MASK_MOTORS;
-    }
-    if (relay & (1U << 2)) {            /* bit2 = steering power relay on     */
-        expected |= INA226_MASK_STEER;
     }
     ina_expected_mask = expected;
     /* Drop "configured" bits for any branch that is no longer powered so it is
@@ -930,6 +939,16 @@ void Current_ReadAll(void)
     bool    mux_seen     = false;
 
     for (uint8_t i = 0; i < NUM_INA226; i++) {
+        /* CH5 (steering) is acquired EXCLUSIVELY by the dedicated, failure-safe
+         * Sensor_UpdateChannel5Diag() probe below: it reads the same signed
+         * shunt/bus registers but rolls back i2c_fail_count so a genuinely
+         * MISSING steering INA can never trip the bus-fault recovery / Error
+         * Code 11 and force a global SAFE.  Skipping it here (WITHOUT zeroing
+         * its current/voltage — the probe fills them from a real read) keeps
+         * CH5 fully EPS-owned while still always measured.                    */
+        if (i == INA226_CHANNEL_STEER) {
+            continue;
+        }
         if (TCA9548A_SelectChannel(i) != HAL_OK) {
             /* Mux did not ACK the channel-select write: either the mux is
              * absent or the bus is stuck.  Leave this channel's INA bit at 0. */
@@ -1052,6 +1071,30 @@ void Current_ReadAll(void)
  * an open/bypassed shunt reads as ~0 µV.  Report-only: the probe snapshots and
  * restores i2c_fail_count so its own reads cannot trip the bus-fault recovery
  * (the main Current_ReadAll() loop remains the single owner of that path).   */
+/* ---- P4: is the steering assist motor genuinely being driven right now? ----
+ * The INA226 CH5 shunt sits BEFORE the PC12 isolation relay, so CH5 is always
+ * powered from the 12 V bus and reads even with PC12 OFF (≈12 V, ~0 A).  A
+ * shunt/polarity conclusion is only meaningful when current is genuinely
+ * EXPECTED, i.e. ALL of:
+ *   - PC12 (steering-motor isolation relay) is commanded ON, AND
+ *   - the single PC12 authority Steering_MotorRelayAllowed() agrees, AND
+ *   - PC4 (EN_STEER) is HIGH (H-bridge enabled), AND
+ *   - a non-zero PWM is being emitted on PA6 (TIM3_CH1) or PA7 (TIM3_CH2).
+ * PC12 ON alone is NOT sufficient — a released/idle bridge draws ~0 A. */
+static bool Sensor_Ch5CurrentExpected(void)
+{
+    const bool relay_cmd_on =
+        (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_MOTOR) == GPIO_PIN_SET);
+    const bool relay_allowed = Steering_MotorRelayAllowed();
+    const bool en_steer_high =
+        (HAL_GPIO_ReadPin(GPIOC, PIN_EN_STEER) == GPIO_PIN_SET);
+    const uint32_t ccr1 = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+    const uint32_t ccr2 = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+    const bool pwm_active = (ccr1 != 0U) || (ccr2 != 0U);
+
+    return relay_cmd_on && relay_allowed && en_steer_high && pwm_active;
+}
+
 static void Sensor_UpdateChannel5Diag(void)
 {
     /* Snapshot the fault counter so this diagnostic probe is side-effect free
@@ -1063,7 +1106,10 @@ static void Sensor_UpdateChannel5Diag(void)
     d.channel          = INA226_CHANNEL_STEER;
     d.mux_channel      = INA226_CHANNEL_STEER;
     d.expected_address = I2C_ADDR_INA226;
-    d.channel_powered  = (ina_expected_mask & INA226_MASK_STEER) != 0U;
+    /* CH5 is fed from the pre-relay 12 V bus, so it is ALWAYS powered and must
+     * always respond — independent of the PC12 isolation relay command.      */
+    d.channel_powered  = true;
+    d.current_expected = Sensor_Ch5CurrentExpected();
 
     /* Step 1: select the steering channel on the TCA9548A. */
     d.mux_select_ok = (TCA9548A_SelectChannel(INA226_CHANNEL_STEER) == HAL_OK);
@@ -1119,17 +1165,38 @@ static void Sensor_UpdateChannel5Diag(void)
         ch5_last_ok_tick = HAL_GetTick();
         ch5_ever_ok = true;
         ch5_consecutive_failures = 0;
+        /* A genuinely new, valid acquisition landed — advance the real
+         * acquisition identity EXACTLY ONCE.  Never advanced on an invalid
+         * read, and never derived from a consumer's tick.  Free-running
+         * uint32_t wrap is intentional and safe (consumers test inequality). */
+        ch5_sample_sequence++;
     } else if (ch5_consecutive_failures < 0xFFFFFFFFU) {
         ch5_consecutive_failures++;
     }
     d.sample_age_ms = ch5_ever_ok ? (HAL_GetTick() - ch5_last_ok_tick)
                                   : 0xFFFFFFFFU;
+    d.sample_sequence    = ch5_sample_sequence;
+    d.last_valid_tick_ms = ch5_ever_ok ? ch5_last_ok_tick : 0U;
     d.consecutive_failures = ch5_consecutive_failures;
     d.recovery_count       = i2c_recovery_attempts;
 
     /* Classify with the pure per-channel classifier. */
     d.fault_reason = Ina226_ClassifyChannel(&d);
     ch5_diag = d;
+
+    /* Publish CH5 into the shared measurement arrays from THIS real read (the
+     * main Current_ReadAll() loop deliberately skips CH5).  Only update on a
+     * good register read so a transient miss leaves the last valid value in
+     * place — CH5 is never artificially forced to 0 A / 0 V just because PC12
+     * is OFF or a single read failed (staleness is signalled via sample_age /
+     * sample_sequence instead).  Signed current is preserved for polarity.    */
+    if (d.shunt_read_ok) {
+        current_amps_raw[INA226_CHANNEL_STEER] = (float)d.signed_current_ma / 1000.0f;
+        current_amps[INA226_CHANNEL_STEER]     = (float)d.signed_current_ma / 1000.0f;
+    }
+    if (d.bus_read_ok) {
+        voltage_bus[INA226_CHANNEL_STEER]      = (float)d.bus_mv / 1000.0f;
+    }
 
     /* Roll back any I2C failures this probe caused: it is report-only. */
     i2c_fail_count = saved_fail_count;

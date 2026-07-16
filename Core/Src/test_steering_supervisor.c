@@ -184,17 +184,17 @@ static void test_z_policy(void)
 static void test_oc_fsm_clears(void)
 {
     OcFsm_t f;
-    SteeringSupervisor_OcInit(&f, 25000, 200U);
-    /* Below limit: nothing. */
+    SteeringSupervisor_OcInit(&f, 25000, 1000, true, 200U);
+    /* Below active limit: nothing. */
     CHECK(SteeringSupervisor_OcStep(&f, 5000, 1, true, 0)   == OC_ACTION_NONE);
-    /* Above limit: isolate. */
+    /* Above active limit: isolate. */
     CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 10) == OC_ACTION_ISOLATE);
-    CHECK(f.state == OC_STATE_CONFIRM);
+    CHECK(f.state == OC_STATE_CONFIRM_WAIT);
     /* Same sample id → no confirmation yet. */
     CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 15) == OC_ACTION_NONE);
-    /* Fresh sample, current fell → keep mechanical (isolable). */
-    CHECK(SteeringSupervisor_OcStep(&f, 1000, 3, true, 20)  == OC_ACTION_KEEP_MECHANICAL);
-    CHECK(f.state == OC_STATE_MECHANICAL);
+    /* Fresh sample, current below residual → keep mechanical (isolable). */
+    CHECK(SteeringSupervisor_OcStep(&f, 500, 3, true, 20)   == OC_ACTION_KEEP_MECHANICAL);
+    CHECK(f.state == OC_STATE_MECHANICAL_CONFIRMED);
     /* Terminal — latched. */
     CHECK(SteeringSupervisor_OcStep(&f, 40000, 4, true, 30) == OC_ACTION_NONE);
 }
@@ -202,9 +202,10 @@ static void test_oc_fsm_clears(void)
 static void test_oc_fsm_persists(void)
 {
     OcFsm_t f;
-    SteeringSupervisor_OcInit(&f, 25000, 200U);
+    /* Calibrated residual ceiling → a persistent fresh over-current escalates. */
+    SteeringSupervisor_OcInit(&f, 25000, 1000, true, 200U);
     CHECK(SteeringSupervisor_OcStep(&f, -40000, 2, true, 10) == OC_ACTION_ISOLATE); /* signed */
-    /* Fresh sample still over limit → hazard escalation. */
+    /* Fresh sample still over residual (calibrated) → hazard escalation. */
     CHECK(SteeringSupervisor_OcStep(&f, 40000, 3, true, 20) == OC_ACTION_ESCALATE_HAZARD);
     CHECK(f.state == OC_STATE_HAZARD);
 }
@@ -212,12 +213,68 @@ static void test_oc_fsm_persists(void)
 static void test_oc_fsm_timeout(void)
 {
     OcFsm_t f;
-    SteeringSupervisor_OcInit(&f, 25000, 200U);
+    SteeringSupervisor_OcInit(&f, 25000, 1000, true, 200U);
     CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 10) == OC_ACTION_ISOLATE);
-    /* No fresh valid sample arrives within the window → hazard. */
+    /* Within the window, no fresh sample yet → nothing. */
     CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 100) == OC_ACTION_NONE);
-    CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 210) == OC_ACTION_ESCALATE_HAZARD);
+    /* Window elapses WITHOUT a fresh valid sample: missing information is NOT
+     * proof of a persistent hazard → ISOLATION UNCONFIRMED, never HAZARD/SAFE. */
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 210) == OC_ACTION_ISOLATION_UNCONFIRMED);
+    CHECK(f.state == OC_STATE_ISOLATED_UNCONFIRMED);
+    /* Still unconfirmed, still no fresh sample → stays isolated, no SAFE. */
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 400) == OC_ACTION_NONE);
+    CHECK(f.state == OC_STATE_ISOLATED_UNCONFIRMED);
+    /* A future FRESH valid sample below residual finally confirms mechanical. */
+    CHECK(SteeringSupervisor_OcStep(&f, 200, 3, true, 500) == OC_ACTION_KEEP_MECHANICAL);
+    CHECK(f.state == OC_STATE_MECHANICAL_CONFIRMED);
+}
+
+/* Uncalibrated residual ceiling: a persistent fresh over-current must NEVER
+ * auto-escalate to SAFE — it stays isolated + unconfirmed instead. */
+static void test_oc_fsm_uncalibrated_never_safe(void)
+{
+    OcFsm_t f;
+    SteeringSupervisor_OcInit(&f, 25000, 1000, false, 200U);
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 2, true, 10) == OC_ACTION_ISOLATE);
+    /* Fresh sample STILL over residual, but threshold uncalibrated → no hazard. */
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 3, true, 20) == OC_ACTION_ISOLATION_UNCONFIRMED);
+    CHECK(f.state == OC_STATE_ISOLATED_UNCONFIRMED);
+    /* Even repeated fresh over-residual samples never escalate while uncal. */
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 4, true, 30) == OC_ACTION_ISOLATION_UNCONFIRMED);
+    /* But a genuine drop below residual still confirms mechanical isolation. */
+    CHECK(SteeringSupervisor_OcStep(&f, 100, 5, true, 40) == OC_ACTION_KEEP_MECHANICAL);
+    CHECK(f.state == OC_STATE_MECHANICAL_CONFIRMED);
+}
+
+/* The confirm step must ignore a stale re-read (same sample id) and only act on
+ * a genuinely new acquisition sequence — the 100 Hz / 20 Hz freshness contract. */
+static void test_oc_fsm_sequence_freshness(void)
+{
+    OcFsm_t f;
+    SteeringSupervisor_OcInit(&f, 25000, 1000, true, 10000U);
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 7, true, 1000) == OC_ACTION_ISOLATE);
+    /* Four intermediate 100 Hz cycles re-read the SAME 20 Hz sample (id 7):
+     * none may confirm anything even though current still looks high. */
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 7, true, 1010) == OC_ACTION_NONE);
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 7, true, 1020) == OC_ACTION_NONE);
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 7, true, 1030) == OC_ACTION_NONE);
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 7, true, 1040) == OC_ACTION_NONE);
+    CHECK(f.state == OC_STATE_CONFIRM_WAIT);
+    /* Only the next real acquisition (id 8) may be evaluated. */
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 8, true, 1050) == OC_ACTION_ESCALATE_HAZARD);
     CHECK(f.state == OC_STATE_HAZARD);
+}
+
+/* A uint32_t sample-sequence wrap (0xFFFFFFFF → 0) is still "fresh" because the
+ * FSM compares for inequality, never magnitude. */
+static void test_oc_fsm_sequence_wrap(void)
+{
+    OcFsm_t f;
+    SteeringSupervisor_OcInit(&f, 25000, 1000, true, 200U);
+    CHECK(SteeringSupervisor_OcStep(&f, 40000, 0xFFFFFFFFU, true, 10) == OC_ACTION_ISOLATE);
+    /* Sequence wraps to 0: different id → treated as a fresh sample. */
+    CHECK(SteeringSupervisor_OcStep(&f, 500, 0U, true, 20) == OC_ACTION_KEEP_MECHANICAL);
+    CHECK(f.state == OC_STATE_MECHANICAL_CONFIRMED);
 }
 
 /* ---- Integration: real classifier → real EPS isolation --------------- */
@@ -382,35 +439,42 @@ static void test_supervisor_overcurrent_clears(void)
     in.ch5_sample_id    = 1000;
     SteeringSupervisor_Apply(&in);                 /* isolate */
     CHECK(Steering_IsMechanicalOnly());
-    CHECK(SteeringSupervisor_OcState() == OC_STATE_CONFIRM);
-    /* Fresh sample, current fell → stay mechanical, NO hazard. */
+    CHECK(SteeringSupervisor_OcState() == OC_STATE_CONFIRM_WAIT);
+    /* Fresh sample, current fell below residual → stay mechanical, NO hazard. */
     in.now_ms         = 1010;
     in.ch5_sample_id  = 1010;
-    in.ch5_current_ma = 1000;
+    in.ch5_current_ma = 200;
     SteeringSupervisor_Apply(&in);
-    CHECK(SteeringSupervisor_OcState() == OC_STATE_MECHANICAL);
+    CHECK(SteeringSupervisor_OcState() == OC_STATE_MECHANICAL_CONFIRMED);
     CHECK(!Steering_IsElectricalHazard());
     CHECK(!SteeringSupervisor_WantsSafe());
 }
 
-static void test_supervisor_overcurrent_hazard(void)
+/* Production default: the post-isolation residual threshold is UNCALIBRATED
+ * (STEERING_ISOLATION_THRESHOLD_CALIBRATED == 0).  A fresh sample that still
+ * looks over-current must therefore NEVER auto-escalate to ELECTRICAL_HAZARD /
+ * SAFE — the assist stays isolated (MECHANICAL_ONLY) and reports the isolation
+ * as unconfirmed.  Only a calibrated build may declare a hazard.            */
+static void test_supervisor_overcurrent_uncalibrated_no_safe(void)
 {
+    /* This end-to-end guard only holds while the shipped build is uncalibrated. */
+#if (STEERING_ISOLATION_THRESHOLD_CALIBRATED == 0)
     reset_all();
     SteeringSupervisorInputs in = healthy_inputs(1000);
     in.ch5_current_ma = STEERING_OC_LIMIT_MA + 5000;
     in.ch5_sample_id  = 1000;
     SteeringSupervisor_Apply(&in);                 /* isolate */
     CHECK(Steering_IsMechanicalOnly());
-    /* Fresh sample still over limit → hazard + SAFE escalation request. */
+    /* Fresh sample STILL over current, but threshold uncalibrated. */
     in.now_ms         = 1010;
     in.ch5_sample_id  = 1010;
     in.ch5_current_ma = STEERING_OC_LIMIT_MA + 8000;
     SteeringSupervisor_Apply(&in);
-    CHECK(SteeringSupervisor_OcState() == OC_STATE_HAZARD);
-    CHECK(Steering_IsElectricalHazard());
-    CHECK(!Steering_IsMechanicalOnly());           /* hazard, not benign */
-    CHECK(SteeringSupervisor_WantsSafe());
-    CHECK(Steering_GetEpsFault() == EPS_FAULT_OVERCURRENT);
+    CHECK(SteeringSupervisor_OcState() == OC_STATE_ISOLATED_UNCONFIRMED);
+    CHECK(!Steering_IsElectricalHazard());         /* NOT a hazard */
+    CHECK(Steering_IsMechanicalOnly());            /* still isolated only */
+    CHECK(!SteeringSupervisor_WantsSafe());        /* never auto-SAFE */
+#endif
 }
 
 int main(void)
@@ -422,6 +486,9 @@ int main(void)
     test_oc_fsm_clears();
     test_oc_fsm_persists();
     test_oc_fsm_timeout();
+    test_oc_fsm_uncalibrated_never_safe();
+    test_oc_fsm_sequence_freshness();
+    test_oc_fsm_sequence_wrap();
 
     test_ch5_missing_isolates();
     test_ch5_mux_isolates();
@@ -438,7 +505,7 @@ int main(void)
     test_z_optional_no_fault();
 
     test_supervisor_overcurrent_clears();
-    test_supervisor_overcurrent_hazard();
+    test_supervisor_overcurrent_uncalibrated_no_safe();
 
     printf("==== test_steering_supervisor: %d run, %d failed ====\n",
            tests_run, tests_failed);

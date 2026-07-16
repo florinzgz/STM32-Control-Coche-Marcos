@@ -1868,6 +1868,14 @@ void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wh
 void Safety_CheckCurrent(void)
 {
     for (uint8_t i = 0; i < NUM_INA226; i++) {
+        /* Steering (CH5) is EPS-owned: its overcurrent is handled exclusively
+         * by the steering supervisor's dedicated FSM (isolate the assist relay
+         * PC12, stay MECHANICAL_ONLY, keep the vehicle ACTIVE with full
+         * traction; only a proven persistent hazard escalates).  Routing CH5
+         * through this GLOBAL check would wrongly force DEGRADED/SAFE on an
+         * isolable steering fault, so skip it here.                          */
+        if (i == INA226_CHANNEL_STEER) continue;
+
         /* Skip disabled current sensors (service mode).
          * Traced to base firmware car_sensors.cpp:
          *   if (!cfg.currentSensorsEnabled) { return 0.0f; }         */

@@ -44,13 +44,49 @@ extern "C" {
 #include "steering_eps.h"
 #include "ina226_channel_diag.h"
 
-/* ---- Overcurrent tuning (calibrated) ---------------------------------- *
+/* ---- Overcurrent tuning ---------------------------------------------- *
  * The steering assist motor is monitored through INA226 CH5 (1.5 mΩ shunt).
- * STEERING_OC_LIMIT_MA mirrors the documented 25 A per-motor ceiling
- * (safety_system.c MAX_CURRENT_A) expressed in mA so the supervisor and the
- * legacy per-channel overcurrent check share one calibrated threshold.      */
+ *
+ * TWO physically distinct thresholds are required (audit section 6):
+ *
+ *  - STEERING_ACTIVE_OVERCURRENT_MA: the ceiling for the motor while it is
+ *    genuinely working.  Mirrors the documented 25 A per-motor limit
+ *    (safety_system.c MAX_CURRENT_A) expressed in mA.  Crossing it while a
+ *    valid CH5 sample is present starts the isolation sequence.
+ *
+ *  - STEERING_ISOLATION_CURRENT_MAX_MA: the MAXIMUM current that may still
+ *    flow through CH5 AFTER the PC12 relay has been commanded open and still
+ *    be considered "isolated / harmless".  It must budget the INA226 offset,
+ *    normal residual/quiescent draw, the pre-relay electronics (incl. the
+ *    BTS7960 if it sits before the relay), shunt tolerance and noise.  There
+ *    is NO physical measurement of this residual in the repository yet, so the
+ *    value below is a PLACEHOLDER and MUST NOT be treated as calibrated.
+ *
+ *    STEERING_ISOLATION_THRESHOLD_CALIBRATED gates its use:
+ *      0 (default, UNCALIBRATED): a post-isolation current above the residual
+ *        placeholder NEVER escalates to ELECTRICAL_HAZARD / SAFE.  The assist
+ *        stays MECHANICAL_ONLY and the diagnostic reports THRESHOLD
+ *        UNCALIBRATED.  (Calibration procedure: see docs/EPS_MECHANICAL_ONLY_POLICY.md.)
+ *      1 (CALIBRATED): a fresh valid post-isolation sample still above
+ *        STEERING_ISOLATION_CURRENT_MAX_MA proves a non-isolable hazard and
+ *        the FSM may escalate to ELECTRICAL_HAZARD / SAFE.
+ */
 #ifndef STEERING_OC_LIMIT_MA
 #define STEERING_OC_LIMIT_MA          25000
+#endif
+
+#ifndef STEERING_ACTIVE_OVERCURRENT_MA
+#define STEERING_ACTIVE_OVERCURRENT_MA   STEERING_OC_LIMIT_MA
+#endif
+
+#ifndef STEERING_ISOLATION_CURRENT_MAX_MA
+/* PLACEHOLDER residual ceiling — NOT physically calibrated.  Only consulted
+ * once STEERING_ISOLATION_THRESHOLD_CALIBRATED becomes 1.                    */
+#define STEERING_ISOLATION_CURRENT_MAX_MA   1000
+#endif
+
+#ifndef STEERING_ISOLATION_THRESHOLD_CALIBRATED
+#define STEERING_ISOLATION_THRESHOLD_CALIBRATED   0
 #endif
 
 /* How long the FSM waits (non-blocking) for a genuinely NEW valid CH5 sample
@@ -147,30 +183,40 @@ EpsFaultReason_t SteeringSupervisor_ZPolicy(bool z_required,
  * ====================================================================== */
 
 typedef enum {
-    OC_STATE_NORMAL = 0,       /* No overcurrent seen                        */
-    OC_STATE_CONFIRM,          /* Isolated, waiting for a fresh CH5 sample   */
-    OC_STATE_MECHANICAL,       /* Terminal: current fell, isolable, done     */
-    OC_STATE_HAZARD            /* Terminal: current persisted → hazard       */
+    OC_STATE_NORMAL = 0,          /* No overcurrent seen                      */
+    OC_STATE_CONFIRM_WAIT,        /* Isolated, waiting for a fresh CH5 sample  */
+    OC_STATE_ISOLATED_UNCONFIRMED,/* Isolated, no fresh sample yet (no SAFE)   */
+    OC_STATE_MECHANICAL_CONFIRMED,/* Terminal: current fell, isolable, done    */
+    OC_STATE_HAZARD               /* Terminal: current persisted → hazard      */
 } OcState_t;
 
 typedef enum {
-    OC_ACTION_NONE = 0,        /* Nothing to do this cycle                   */
-    OC_ACTION_ISOLATE,         /* Isolate the motor (DisableAssistFault OC)  */
-    OC_ACTION_KEEP_MECHANICAL, /* Current fell — stay MECHANICAL_ONLY        */
-    OC_ACTION_ESCALATE_HAZARD  /* Persisted — DeclareElectricalHazard+SAFE   */
+    OC_ACTION_NONE = 0,            /* Nothing to do this cycle                 */
+    OC_ACTION_ISOLATE,             /* Isolate the motor (DisableAssistFault OC) */
+    OC_ACTION_KEEP_MECHANICAL,     /* Current fell — stay MECHANICAL_ONLY      */
+    OC_ACTION_ISOLATION_UNCONFIRMED,/* No fresh sample — stay isolated, no SAFE */
+    OC_ACTION_ESCALATE_HAZARD      /* Persisted — DeclareElectricalHazard+SAFE */
 } OcAction_t;
 
 typedef struct {
     OcState_t state;
-    int32_t   limit_ma;        /* Calibrated overcurrent ceiling (mA)        */
-    uint32_t  confirm_ms;      /* Non-blocking confirm window (ms)           */
-    uint32_t  isolate_sample_id;/* CH5 sample id captured at isolation       */
-    uint32_t  isolate_tick_ms; /* Tick at isolation (for the timeout)        */
+    int32_t   active_limit_ma;    /* Working-motor overcurrent ceiling (mA)    */
+    int32_t   isolation_limit_ma; /* Post-isolation residual ceiling (mA)      */
+    bool      isolation_calibrated;/* Residual ceiling is physically calibrated */
+    uint32_t  confirm_ms;         /* Non-blocking confirm window (ms)          */
+    uint32_t  isolate_sample_id;  /* CH5 sample id captured at isolation       */
+    uint32_t  isolate_tick_ms;    /* Tick at isolation (for the timeout)       */
 } OcFsm_t;
 
-/** @brief  Reset the overcurrent FSM.  @p limit_ma / @p confirm_ms are the
- *          calibrated threshold and non-blocking confirm window.            */
-void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t limit_ma, uint32_t confirm_ms);
+/** @brief  Reset the overcurrent FSM.
+ *  @param  f                    FSM state.
+ *  @param  active_limit_ma      working-motor overcurrent ceiling (mA).
+ *  @param  isolation_limit_ma   post-isolation residual ceiling (mA).
+ *  @param  isolation_calibrated residual ceiling is physically calibrated.
+ *  @param  confirm_ms           non-blocking confirm window (ms).            */
+void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t active_limit_ma,
+                               int32_t isolation_limit_ma,
+                               bool isolation_calibrated, uint32_t confirm_ms);
 
 /**
  * @brief  Advance the overcurrent FSM one cycle (non-blocking).
@@ -178,7 +224,8 @@ void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t limit_ma, uint32_t confirm_ms
  * @param  f            FSM state.
  * @param  current_ma   Signed CH5 current this cycle (mA).
  * @param  sample_id    Monotonic id that CHANGES on every new valid CH5
- *                      sample (production passes now_ms - sample_age_ms).
+ *                      sample (production passes the real acquisition
+ *                      sequence Ina226ChannelDiag::sample_sequence).
  * @param  sample_valid the CH5 read this cycle is valid.
  * @param  now_ms       Current tick (HAL_GetTick equivalent).
  * @retval The action the caller must perform on the real hardware.
@@ -196,7 +243,7 @@ typedef struct {
     /* INA226 CH5 (steering current sensor). */
     Ina226DiagReason_t ch5_reason;   /* Sensor_GetChannel5Diag()->fault_reason */
     int32_t            ch5_current_ma;/* signed_current_ma                     */
-    uint32_t           ch5_sample_id; /* now_ms - sample_age_ms (changes on new)*/
+    uint32_t           ch5_sample_id; /* real acquisition sequence (changes on new)*/
     bool               ch5_sample_valid;/* shunt+bus+ack read ok this sample    */
 
     /* EPS parameter store. */
