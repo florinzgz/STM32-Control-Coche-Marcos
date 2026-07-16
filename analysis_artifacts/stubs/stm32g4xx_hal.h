@@ -1402,6 +1402,15 @@ static inline void HAL_GPIO_DeInit(GPIO_TypeDef *GPIOx, uint32_t GPIO_Pin)
 static inline void HAL_GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
 {
 #ifdef HOST_TEST_GPIO_MODEL
+#ifdef HOST_TEST_GPIO_WRITE_OBSERVER
+    /* Opt-in write observer: lets a host test record EVERY commanded pin write
+     * (including a transient SET later cleared in the same tick) so it can
+     * prove, e.g., zero GPIO_PIN_SET writes ever reach PC12 after isolation.
+     * The test TU provides HostGpioWriteObserver(); enabled only when the
+     * HOST_TEST_GPIO_WRITE_OBSERVER macro is defined for the whole link. */
+    extern void HostGpioWriteObserver(void *port, uint16_t pin, int is_set);
+    HostGpioWriteObserver((void *)GPIOx, GPIO_Pin, (PinState != GPIO_PIN_RESET) ? 1 : 0);
+#endif
     /* Opt-in functional model: reflect the commanded level in ODR so host
      * integration tests can observe pin state.  Off by default so every
      * other host test keeps the historical no-op behaviour. */

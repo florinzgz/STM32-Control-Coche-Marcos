@@ -143,6 +143,35 @@ jobs:
               Core/Src/math_safety.c \
               -lm -o /tmp/test_relay_seq_eps
             /tmp/test_relay_seq_eps
+
+            # Section-M integration test: an isolable EPS fault at boot must
+            # NEVER immobilise the vehicle (STANDBY -> ACTIVE, PC11 ON, PC12
+            # OFF, power_ready) and the engineering relay override can never
+            # pulse the steering-motor relay (PC12).  Needs the write observer.
+            echo "-- test_eps_boot_traction.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_eps_boot_traction.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/boot_validation.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_eps_boot_traction
+            /tmp/test_eps_boot_traction
+
+            # Section-M output-production test: an EPS fault injected in the
+            # DETECTOR physically drives the real shared actuator registers to
+            # their safe state (CCR PA6=0, CCR PA7=0, PC4 LOW, PC12 OFF).
+            echo "-- test_steering_outputs.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_outputs.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_steering_outputs
+            /tmp/test_steering_outputs
           } | tee artifacts/tests/stm32-host-tests.txt
 
       - name: Run ESP32 host tests
