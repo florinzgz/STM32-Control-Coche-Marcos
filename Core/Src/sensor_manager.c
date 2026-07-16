@@ -1198,6 +1198,21 @@ static void Sensor_UpdateChannel5Diag(void)
         voltage_bus[INA226_CHANNEL_STEER]      = (float)d.bus_mv / 1000.0f;
     }
 
+    /* Reflect CH5's true presence in the shared telemetry masks (the main loop
+     * skips CH5, so it never sets these bits).  Keeps the "INA OK / EXPECTED"
+     * banner honest: bit5 tracks the real steering-INA ACK, independent of the
+     * PC12 relay command.                                                     */
+    if (d.shunt_read_ok) {
+        ina_ok_mask |= (uint8_t)(1U << INA226_CHANNEL_STEER);
+    } else {
+        ina_ok_mask &= (uint8_t)~(1U << INA226_CHANNEL_STEER);
+    }
+    if (d.bus_read_ok) {
+        ina_bus_ok_mask |= (uint8_t)(1U << INA226_CHANNEL_STEER);
+    } else {
+        ina_bus_ok_mask &= (uint8_t)~(1U << INA226_CHANNEL_STEER);
+    }
+
     /* Roll back any I2C failures this probe caused: it is report-only. */
     i2c_fail_count = saved_fail_count;
 }
