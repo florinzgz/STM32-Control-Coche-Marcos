@@ -129,6 +129,20 @@ jobs:
                 "$src" $extra -lm -o "$exe"
               "$exe"
             done
+
+            # Section-L integration test: compiles the EFFECTIVE (patched)
+            # relay sequencer + real EPS authority and proves PC12 stays OFF
+            # after an EPS isolation while traction is preserved.  Needs the
+            # opt-in functional GPIO model (HOST_TEST_GPIO_MODEL).
+            echo "-- test_relay_seq_eps.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_relay_seq_eps.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_relay_seq_eps
+            /tmp/test_relay_seq_eps
           } | tee artifacts/tests/stm32-host-tests.txt
 
       - name: Run ESP32 host tests

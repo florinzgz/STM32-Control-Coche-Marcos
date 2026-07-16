@@ -238,6 +238,15 @@ void SteeringCentering_Step(void)
      * in safety_system.c forces this relay back OFF, so steering can
      * never remain energised in SAFE/ERROR.                            */
     case CENTERING_IDLE:
+        /* Never re-close the steering-motor relay (PC12) once the EPS assist
+         * has been isolated (MECHANICAL_ONLY / ELECTRICAL_HAZARD).  The latch
+         * holds for the whole power cycle, so homing must not re-energise the
+         * motor branch even if it is somehow re-entered.  Steering stays
+         * purely mechanical. */
+        if (Steering_IsMechanicalOnly()) {
+            Centering_Abort(EPS_FAULT_UNKNOWN);
+            break;
+        }
         SteeringCenter_ClearFlag();
         HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
         rail_settle_tick = now;
