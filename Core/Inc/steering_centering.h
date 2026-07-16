@@ -58,10 +58,18 @@ typedef enum {
  *     neutralising it while uncalibrated or in SAFE/ERROR.
  *
  * The two never run in the same cycle — this prevents the centering PWM
- * from being neutralised by the EPS loop before it can take effect.      */
+ * from being neutralised by the EPS loop before it can take effect.
+ *
+ *   - STEER_OWNER_NONE: nobody drives the motor.  Reported once the EPS
+ *     assist has been isolated (EPS_STATE_MECHANICAL_ONLY): PA6=PA7=0,
+ *     PC4=LOW, PC12=OFF and steering is purely mechanical.
+ *
+ * The numeric values are stable (CENTERING=0, EPS=1 kept as published on
+ * CAN; NONE appended as 2) so existing telemetry consumers are unaffected. */
 typedef enum {
     STEER_OWNER_CENTERING = 0,  /* SteeringCentering_Step drives the motor */
-    STEER_OWNER_EPS             /* Steering_ControlLoop drives the motor   */
+    STEER_OWNER_EPS,            /* Steering_ControlLoop drives the motor   */
+    STEER_OWNER_NONE            /* Assist isolated — motor unowned/mech.   */
 } SteeringMotorOwner_t;
 
 /* ---- Public API ---- */

@@ -41,6 +41,7 @@
 
 #include "steering_centering.h"
 #include "steering_centering_diag.h"
+#include "steering_eps.h"
 #include "motor_control.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
@@ -100,21 +101,23 @@ extern TIM_HandleTypeDef htim3;
 /* ---- Private helpers ---- */
 
 /**
- * @brief  Abort centering: stop motor, latch fault, enter DEGRADED.
+ * @brief  Abort centering: isolate the steering assist, leave mechanical
+ *         steering.  Does NOT degrade the global vehicle state.
  *
- * Centering failure enters DEGRADED (not SAFE) to preserve the base
- * firmware's "drive-home" philosophy.  The vehicle can still operate
- * at reduced power with steering neutralised.  Traced to
- * limp_mode.cpp: !steeringCentered → LimpState::LIMP.
+ * A failed centre search is an ISOLABLE ASSIST fault: centering is only
+ * required to enable the electric assist, never to move the car with
+ * mechanical steering.  We therefore disconnect the motor (PA6=PA7=0,
+ * PC4=LOW, PC12=OFF, owner=NONE, EPS mechanical-only) via the EPS authority
+ * and latch CENTERING_FAULT so the sweep never restarts.  The vehicle stays
+ * ACTIVE with full traction; the failure is reported locally (0x316 / HMI),
+ * NOT as DEGRADED / LIMP_HOME / SAFE / ERROR.
+ *
+ * @param  reason  EPS isolation cause for this abort.
  */
-static void Centering_Abort(void)
+static void Centering_Abort(EpsFaultReason_t reason)
 {
-    Steering_Neutralize();
     centering_state = CENTERING_FAULT;
-    Safety_SetError(SAFETY_ERROR_CENTERING);
-    Safety_SetState(SYS_STATE_DEGRADED);
-    Safety_SetDegradedLevel(DEGRADED_L1,
-                            DEGRADED_REASON_CENTERING_FAIL);
+    Steering_DisableAssistFault(reason);
 }
 
 /**
@@ -210,7 +213,7 @@ void SteeringCentering_Step(void)
 
     /* If the encoder is already faulted, abort immediately. */
     if (Encoder_HasFault()) {
-        Centering_Abort();
+        Centering_Abort(EPS_FAULT_ENCODER_AB);
         return;
     }
 
@@ -274,13 +277,13 @@ void SteeringCentering_Step(void)
 
         /* 2. Total timeout? */
         if ((now - centering_start_tick) >= TOTAL_TIMEOUT_MS) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
         /* 3. Range exceeded? */
         if (Centering_RangeExceeded()) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
@@ -304,19 +307,19 @@ void SteeringCentering_Step(void)
 
         /* 2. Total timeout? */
         if ((now - centering_start_tick) >= TOTAL_TIMEOUT_MS) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
         /* 3. Range exceeded? */
         if (Centering_RangeExceeded()) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
         /* 4. End-of-travel stall? → center was never found */
         if (Centering_IsStalled()) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
         }
         break;
 
@@ -343,6 +346,12 @@ CenteringState_t SteeringCentering_GetState(void)
 SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
                                                    bool in_homing_state)
 {
+    /* An isolated assist fault takes absolute priority: nobody drives the
+     * motor and steering is purely mechanical.                            */
+    if (Steering_IsMechanicalOnly()) {
+        return STEER_OWNER_NONE;
+    }
+
     /* Centering is the exclusive writer of the steering motor only while
      * it is actively homing AND the system is still in a homing-capable
      * state.  In DONE/FAULT — or once the system has left BOOT/STANDBY

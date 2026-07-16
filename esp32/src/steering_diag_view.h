@@ -139,11 +139,14 @@ inline const char* fsmText(uint8_t s) {
     }
 }
 
-// Motor owner (SteeringMotorOwner_t: CENTERING=0, EPS=1).
+// Motor owner (SteeringMotorOwner_t: CENTERING=0, EPS=1, NONE=2).
+// NONE is reported once the assist has been isolated (EPS OFF): the motor is
+// unowned and steering is purely mechanical.
 inline const char* ownerText(uint8_t o) {
     switch (o) {
         case 0: return "CENTERING";
         case 1: return "EPS";
+        case 2: return "EPS OFF (MECANICA)";
         default: return "UNKNOWN";
     }
 }

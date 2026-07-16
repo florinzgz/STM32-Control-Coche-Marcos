@@ -519,6 +519,9 @@ int main(void)
                 if (owner == STEER_OWNER_CENTERING) {
                     SteeringCentering_Step();
                 } else {
+                    /* STEER_OWNER_EPS or STEER_OWNER_NONE.  Steering_ControlLoop()
+                     * self-guards: when the assist is isolated (mechanical-only)
+                     * it simply coasts the motor and never re-drives it. */
                     Steering_ControlLoop();
                 }
 

@@ -22,6 +22,7 @@
 #include "can_handler.h"
 #include "math_safety.h"
 #include "relay_health_diag.h"    /* Problem 3: evidence-graded relay/current diagnosis */
+#include "steering_eps.h"         /* EPS local isolation authority (mechanical-only) */
 #include <math.h>       /* isnan(), isinf() — NaN/Inf hardening */
 
 /* ---- Thresholds (from base firmware) ---- */
@@ -879,7 +880,14 @@ void Relay_SequencerUpdate(void)
     switch (relay_seq_state) {
         case RELAY_SEQ_TRACTION_ON:
             if ((now - relay_seq_timestamp) >= RELAY_TRACTION_SETTLE_MS) {
-                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
+                /* Honour a latched EPS isolation: keep the steering rail
+                 * (PC12) OFF so an isolated assist fault never auto-
+                 * reconnects the motor.  Traction still completes normally
+                 * (relay_seq_state → COMPLETE, PC11 already ON), so
+                 * Safety_IsPowerReady() stays valid for traction.          */
+                if (!Steering_IsMechanicalOnly()) {
+                    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
+                }
                 relay_seq_state = RELAY_SEQ_COMPLETE;
             }
             break;
@@ -889,6 +897,15 @@ void Relay_SequencerUpdate(void)
         default:
             break;
     }
+}
+
+void Steering_SteerPowerOff(void)
+{
+    /* Atomic single-pin release of the steering actuator rail (PC12).
+     * BSRR upper half clears the bit in one bus cycle.  The traction relay
+     * (PC11) and relay_seq_state are intentionally NOT touched, so traction
+     * power readiness is preserved.  Repeated calls are harmless.          */
+    GPIOC->BSRR = (uint32_t)PIN_RELAY_STEER_PWR << 16U;
 }
 
 void Relay_PowerDown(void)
@@ -2417,13 +2434,12 @@ void Safety_CheckSensors(void)
  *
  * Delegates the actual detection to Encoder_CheckHealth() in
  * motor_control.c (which monitors range, jumps and frozen values).
- * If a fault is detected, raise SAFETY_ERROR_SENSOR_FAULT and
- * transition to DEGRADED state.  Steering is neutralised (no PID
- * without encoder feedback), but traction remains operational at
- * reduced power so the vehicle can "drive home".
- *
- * Traced to base firmware limp_mode.cpp: steering not centered →
- * LimpState::LIMP (40 % power, 50 % speed).
+ * A steering-encoder fault is an ISOLABLE ASSIST fault: the encoder is
+ * only needed for the electric assist, not for the mechanical steering.
+ * On fault the assist is disconnected via Steering_DisableAssistFault()
+ * (motor isolated, steering purely mechanical) while the GLOBAL vehicle
+ * state stays ACTIVE and traction is fully preserved.  No DEGRADED, no
+ * LIMP_HOME, no traction reduction.
  */
 void Safety_CheckEncoder(void)
 {
@@ -2436,17 +2452,15 @@ void Safety_CheckEncoder(void)
 
     if (Encoder_HasFault()) {
         ServiceMode_SetFault(MODULE_STEER_ENCODER, MODULE_FAULT_ERROR);
-        /* Only set the error once to avoid overwriting a different
-         * existing fault code.                                      */
-        if (safety_error == SAFETY_ERROR_NONE) {
-            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-        }
-        /* Neutralise steering (no PID without encoder) but keep
-         * traction alive in DEGRADED mode for "drive home".         */
-        Steering_Neutralize();
-        Safety_SetState(SYS_STATE_DEGRADED);
-        Safety_SetDegradedLevel(DEGRADED_L1,
-                                DEGRADED_REASON_ENCODER_FAULT);
+
+        /* Isolable assist fault: the steering encoder is required only for
+         * the ELECTRIC ASSIST, never for the mechanical steering itself.
+         * Disconnect the assist (PA6=PA7=0, PC4=LOW, PC12=OFF, owner=NONE)
+         * and leave purely mechanical steering.  The global vehicle state
+         * stays ACTIVE and traction is fully preserved — no DEGRADED, no
+         * SENSOR_FAULT, no reduced power.  The fault is reported locally via
+         * the EPS state / centering diagnostic (0x316) and the HMI.        */
+        Steering_DisableAssistFault(EPS_FAULT_ENCODER_AB);
     } else {
         ServiceMode_ClearFault(MODULE_STEER_ENCODER);
     }

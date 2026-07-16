@@ -388,6 +388,16 @@ void Relay_PowerUp(void);
 void Relay_PowerDown(void);
 void Relay_SequencerUpdate(void);
 
+/**
+ * @brief  De-energise ONLY the steering actuator rail (PC12) for EPS
+ *         isolation.  Leaves the traction relay (PC11) and the relay
+ *         sequencer state (relay_seq_state) untouched, so traction power
+ *         readiness — Safety_IsPowerReady() — remains valid.  Once the EPS
+ *         is latched MECHANICAL_ONLY the relay sequencer keeps PC12 OFF, so
+ *         this write does not flap.  Idempotent.
+ */
+void Steering_SteerPowerOff(void);
+
 /* ---- Relay Override (Engineering / Diagnostic Mode) ----
  *
  * Allows manual relay GPIO control from the ESP32 engineering menu for
