@@ -912,8 +912,12 @@ void Steering_SteerPowerOff(void)
  * @brief  Single authorisation gate for the steering-motor isolation relay
  *         (PC12).  See the header for the full rationale and topology.
  *
- * PHYSICAL TOPOLOGY (owner-confirmed):
- *   12 V BATTERY → INA226 CH5 + SHUNT → STEER MOTOR RELAY (PC12) → BTS7960/MOTOR
+ * PHYSICAL TOPOLOGY (owner-confirmed, authoritative):
+ *   12 V BATTERY → INA226 CH5 + SHUNT → [BTS7960 if in this tranche]
+ *                → STEER MOTOR RELAY (PC12) → STEERING MOTOR
+ *   The INA226/shunt (CH5) sit BEFORE the relay, so CH5 stays powered and keeps
+ *   measuring (~12 V, ~0 A) even with PC12 OFF.  PC12 is only a RELAY COMMAND;
+ *   with no independent contact feedback the RELAY ACTUAL state is UNKNOWN.
  *
  * PC12 may be closed only when the steering is calibrated, the EPS is
  * available and NOT latched MECHANICAL_ONLY / ELECTRICAL_HAZARD.  Returning

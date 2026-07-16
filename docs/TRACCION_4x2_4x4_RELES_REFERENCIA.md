@@ -59,10 +59,18 @@ GPIOC->BSRR = (uint32_t)(PIN_RELAY_TRAC | PIN_RELAY_STEER_PWR) << 16U;
 | CH2            | Motor RL | DESPUÉS del relé de tracción   | Relé TRAC (PC11) cerrado         |
 | CH3            | Motor RR | DESPUÉS del relé de tracción   | Relé TRAC (PC11) cerrado         |
 | CH4            | Batería  | ANTES del relé (en paralelo)   | **Siempre**, incluso con relé abierto |
-| CH5            | Dirección| DESPUÉS del relé de dirección  | Relé STEER_PWR (PC12) cerrado    |
+| CH5            | Dirección| **ANTES** del relé de dirección | **Siempre**, incluso con PC12 (STEER_PWR) abierto |
 
 El firmware usa una máscara `ina_expected_mask` para no marcar error I2C (Code 11) en los
 INA que están sin alimentación porque su relé está abierto.
+
+> **CH5 (dirección) está ANTES del relé PC12** (topología autoritativa:
+> `12 V BATERÍA → INA226 CH5 + SHUNT → [BTS7960] → RELÉ PC12 → MOTOR`), por lo que
+> se alimenta del bus de 12 V previo al relé y **sigue midiendo (~12 V, ~0 A)
+> aunque PC12 esté OFF**. Por eso `INA226_MASK_STEER` está SIEMPRE en `expected`
+> y CH5 nunca depende del bit PC12. PC12 es solo un *RELAY COMMAND*: sin
+> realimentación de contacto, el *RELAY ACTUAL* permanece UNKNOWN (CH5 por sí
+> solo no confirma si el contacto está abierto o cerrado).
 
 ---
 

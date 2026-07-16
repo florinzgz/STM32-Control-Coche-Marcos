@@ -218,15 +218,18 @@
 #define PIN_RELAY_TRAC          GPIO_PIN_11  /* PC11 — 24V traction relay (BTS7960 x4) */
 /* PC12 — command for the 12 V STEERING-MOTOR ISOLATION RELAY.
  *
- * Owner-confirmed branch topology:
- *     12V BATTERY -> INA226 CH5 + SHUNT -> RELAY (PC12) -> BTS7960 / STEERING MOTOR
+ * Owner-confirmed branch topology (authoritative):
+ *     12V BATTERY -> INA226 CH5 + SHUNT -> [BTS7960 if in this tranche]
+ *                 -> RELAY PC12 -> STEERING MOTOR
  *
  * The INA226/shunt (CH5) sit BEFORE this relay, so PC12 does NOT gate the CH5
  * measurement supply; it opens/closes the final leg that connects the steering
  * motor.  Driving PC12 OFF electrically isolates the steering actuator while
- * CH5 keeps reading the pre-relay 12 V bus.  This relay does NOT control the
- * direction of motion (that is Traction_SetGear() + PWM sign, see
- * motor_control.c).
+ * CH5 keeps reading the pre-relay 12 V bus (~12 V, ~0 A is NORMAL with PC12
+ * OFF).  PC12 is only a RELAY COMMAND: with no independent contact feedback the
+ * RELAY ACTUAL state stays UNKNOWN (CH5 alone cannot confirm the contact).
+ * This relay does NOT control the direction of motion (that is
+ * Traction_SetGear() + PWM sign, see motor_control.c).
  *
  * The exact position of the BTS7960 within this leg (relay feeding the BTS7960
  * supply vs. relay between BTS7960 and motor) is pending physical confirmation;

@@ -191,25 +191,82 @@ the policy: **optional** → an absent/incoherent Z is diagnostic only; **mandat
 assist with `EPS_FAULT_ENCODER_Z`. Both configurations are covered by
 `test_steering_supervisor.c`.
 
-**Overcurrent state machine (audit item 2).** A CH5 current above the calibrated
-ceiling drives a **non-blocking** FSM:
+**Overcurrent state machine (audit items 2, 5 & 6).** CH5 current drives a
+**non-blocking** FSM with two physically distinct thresholds:
 
-1. `NORMAL` → over limit on a valid sample → **isolate** (`DisableAssistFault(
-   OVERCURRENT)`: PA6/PA7 = 0, PC4 LOW, PC12 OFF) and enter `CONFIRM`.
-2. `CONFIRM` → wait (without blocking) for a genuinely **new** valid CH5 sample:
-   - current fell → `MECHANICAL_ONLY` retained, **no** hazard (isolable);
-   - current persists, or no fresh sample within `STEERING_OC_CONFIRM_MS` →
-     `Steering_DeclareElectricalHazard(OVERCURRENT)` and latch a SAFE/ERROR
-     escalation request.
-3. The glue sees `SteeringSupervisor_WantsSafe()` and calls
-   `Safety_SetError(OVERCURRENT)` + `Safety_SetState(SAFE)` — the single point
-   where a *proven, non-isolable* steering hazard reaches the global safety
-   state.
+- `STEERING_ACTIVE_OVERCURRENT_MA` — the working-motor ceiling (mirrors the
+  documented 25 A per-motor limit). Crossing it on a **valid** sample starts
+  isolation.
+- `STEERING_ISOLATION_CURRENT_MAX_MA` — the maximum residual current that may
+  still flow through CH5 **after** the relay is commanded open and still be
+  considered harmless (budgets INA226 offset, pre-relay electronics, shunt
+  tolerance and noise). It is only consulted once
+  `STEERING_ISOLATION_THRESHOLD_CALIBRATED == 1`.
 
-Fault injection tests exercise the **real** detectors: `test_steering_supervisor.c`
-builds `Ina226ChannelDiag` snapshots, classifies them with the genuine
-`Ina226_ClassifyChannel()`, and lets the supervisor drive the real
-`steering_eps.c` — it never calls `Steering_DisableAssistFault()` directly.
+States and transitions (`OcState_t`):
+
+1. `OC_STATE_NORMAL` → over the **active** ceiling on a valid sample →
+   **isolate** (`DisableAssistFault(OVERCURRENT)`: PA6/PA7 = 0, PC4 LOW,
+   PC12 OFF, owner NONE, MECHANICAL_ONLY), capture the current CH5
+   `sample_sequence` + isolation tick, and enter `OC_STATE_CONFIRM_WAIT`.
+2. `OC_STATE_CONFIRM_WAIT` → wait (without blocking) for a genuinely **new**
+   valid CH5 sample (`sample_sequence != captured`):
+   - current below the residual ceiling → `OC_STATE_MECHANICAL_CONFIRMED`,
+     `MECHANICAL_ONLY` retained, **no** hazard (isolable);
+   - current still above the residual ceiling **and** the threshold is
+     calibrated → `OC_STATE_HAZARD` (`Steering_DeclareElectricalHazard`);
+   - current still above the residual ceiling but the threshold is **not**
+     calibrated → `OC_STATE_ISOLATED_UNCONFIRMED` (stay isolated, **never**
+     auto-SAFE; report `THRESHOLD UNCALIBRATED`).
+3. `OC_STATE_CONFIRM_WAIT` timeout (`STEERING_OC_CONFIRM_MS` elapses **without**
+   a fresh valid sample) → `OC_STATE_ISOLATED_UNCONFIRMED`. **Missing
+   information is NOT proof of a persistent hazard**: the motor stays isolated,
+   the diagnostic reports `ISOLATION UNCONFIRMED`, and the FSM keeps waiting for
+   a future valid sample — it **never** escalates to HAZARD/SAFE on a timeout.
+4. `OC_STATE_ISOLATED_UNCONFIRMED` → a later fresh valid sample is evaluated as
+   in step 2 (below residual → `MECHANICAL_CONFIRMED`; above + calibrated →
+   `HAZARD`).
+
+Only a sample that is **new + valid + taken after isolation + still dangerous
++ with a calibrated residual threshold** can reach `OC_STATE_HAZARD`. In that
+case the glue sees `SteeringSupervisor_WantsSafe()` and calls
+`Safety_SetError(OVERCURRENT)` + `Safety_SetState(SAFE)` — the single point
+where a *proven, non-isolable* steering hazard reaches the global safety state.
+
+**Real acquisition identity (audit item 3).** The supervisor runs at 100 Hz but
+INA226 CH5 is acquired at 20 Hz. `Ina226ChannelDiag::sample_sequence` increments
+**exactly once** per new valid CH5 acquisition (never derived from the reader's
+tick, never on an invalid read), so the 100 Hz service sees the **same** value
+across the ~5 cycles that re-read one sample and only observes a change when a
+genuinely new sample lands. The FSM compares `sample_sequence` for **inequality**
+(the free-running `uint32_t` wrap after 2³² samples — >6 years at 20 Hz — is
+intentional and safe). The production glue transports this real sequence
+(`steering_supervisor_io.c`), so the confirm step can never re-process one
+sample as if it were fresh.
+
+**Residual-threshold calibration procedure.** `STEERING_ISOLATION_CURRENT_MAX_MA`
+has **no physical measurement** yet, so `STEERING_ISOLATION_THRESHOLD_CALIBRATED`
+ships at `0`. While uncalibrated, a post-isolation residual current can **never**
+escalate to SAFE — the assist stays `MECHANICAL_ONLY` and the HMI shows
+`THRESHOLD UNCALIBRATED`. To calibrate on the real vehicle:
+1. Command PC12 OFF with the ignition/battery live and the steering motor at
+   rest.
+2. Log CH5 signed current for ≥60 s across the operating temperature range,
+   capturing the worst-case residual (offset + pre-relay electronics + noise).
+3. Set `STEERING_ISOLATION_CURRENT_MAX_MA` to that worst case plus an
+   engineering margin.
+4. Set `STEERING_ISOLATION_THRESHOLD_CALIBRATED` to `1`. Only then may the FSM
+   declare `ELECTRICAL_HAZARD` from a persistent post-isolation current.
+
+Fault injection tests exercise the **real** detectors and the **real production
+glue**: `test_steering_supervisor.c` builds `Ina226ChannelDiag` snapshots,
+classifies them with the genuine `Ina226_ClassifyChannel()`, and lets the
+supervisor drive the real `steering_eps.c` (never calling
+`Steering_DisableAssistFault()` directly). `test_steering_supervisor_io.c`
+additionally drives `SteeringSupervisor_Service()` through a controllable
+`Sensor_GetChannel5Diag()` seam, proving the real `sample_sequence` transport,
+the 100 Hz/20 Hz freshness contract, CH5-always-powered, and that a missing
+post-isolation sample stays `ISOLATION UNCONFIRMED` (never a false hazard).
 
 ## 6. Single motor owner
 
