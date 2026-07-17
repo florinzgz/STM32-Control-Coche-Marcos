@@ -117,8 +117,6 @@ TFT_eSPI tft = TFT_eSPI();
 static vehicle::VehicleData vehicleData;
 static ScreenManager screenManager;
 
-static uint8_t  heartbeatCounter = 0;
-static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
 static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
 static unsigned long lastBusOffCheckMs = 0;  // TWAI bus-off recovery check
@@ -2254,19 +2252,6 @@ void loop() {
 
         // Single update call drives all animation + FastLED.show()
         led_ctrl::update();
-    }
-
-    // Send heartbeat 0x011 every 100 ms
-    if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
-        lastHeartbeatMs = now;
-
-        CanFrame frame = {};
-        frame.identifier       = can::HEARTBEAT_ESP32;
-        frame.extd             = 0;
-        frame.data_length_code = 1;
-        frame.data[0]          = heartbeatCounter++;
-
-        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     }
 
 #if REMOTE_CONTROL_ENABLED
