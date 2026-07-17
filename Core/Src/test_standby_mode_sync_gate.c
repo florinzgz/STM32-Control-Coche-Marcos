@@ -1,25 +1,18 @@
 /**
   ****************************************************************************
   * @file    test_standby_mode_sync_gate.c
-  * @brief   Unit tests for the §3 (Option A) STANDBY logical-mode-sync gate
-  *          (Safety_IsStandbyModeSyncAllowed) and the CMD_MODE handler branch
-  *          that uses it to close the "boot in the wrong mode" window.
+  * @brief   Tests for the STANDBY logical-mode-sync gate.
   *
-  *          The gate lets a CMD_MODE update ONLY the in-RAM 4x4 / tank-turn
-  *          flags while the vehicle is still in STANDBY, so the STM32 mode can
-  *          track the physical selector BEFORE traction is ever energised.  It
-  *          must NOT grant motion or a gear change, and every safety
-  *          precondition (state == STANDBY, pedal released, zero PWM, safe
-  *          speed) must hold.
-  *
-  *          This is a self-contained logic replica (same style as
-  *          test_wheel_fault_gate.c) that mirrors the decision table in
-  *          safety_system.c / can_handler.c, so it runs on host GCC without the
-  *          full HAL.  KEEP IN SYNC with the firmware if the gate changes.
+  *          Tests the PRODUCTIVE policy function StandbyModeSync_Evaluate()
+  *          from standby_mode_sync_policy.c directly — NOT a hand-rolled
+  *          replica.  Safety_IsStandbyModeSyncAllowed() in safety_system.c
+  *          calls the same function, so the tests exercise exactly the code
+  *          that runs in the firmware.
   *
   *          Compile with host GCC (from repository root):
   *            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE -ICore/Inc -O2 -lm \
-  *                Core/Src/test_standby_mode_sync_gate.c \
+  *                Core/Src/standby_mode_sync_policy.c               \
+  *                Core/Src/test_standby_mode_sync_gate.c             \
   *                -o /tmp/test_standby_mode_sync_gate
   ****************************************************************************
   */
@@ -29,59 +22,68 @@
 #include <stdbool.h>
 #include <math.h>
 
-/* ---- Constants mirrored from safety_system.c ---- */
-#define MODE_CHANGE_MAX_SPEED_KMH        1.0f
-#define STANDBY_MODE_SYNC_MAX_PEDAL_PCT  3.0f
+/* Link the REAL productive policy — not a replica. */
+#include "standby_mode_sync_policy.h"
 
-/* System states (subset, mirrors SystemState_t). */
-typedef enum {
-    S_BOOT = 0, S_STANDBY, S_ACTIVE, S_DEGRADED, S_SAFE, S_ERROR, S_LIMP_HOME
-} State_t;
+/* ---- Convenience aliases ---- */
+#define ST_BOOT      0u
+#define ST_STANDBY   STANDBY_SYNC_STATE_STANDBY  /* 1 */
+#define ST_ACTIVE    2u
+#define ST_DEGRADED  3u
+#define ST_SAFE      4u
+#define ST_ERROR     5u
+#define ST_LIMP_HOME 6u
 
-/* ACK codes (mirror can::AckResult / STM32 ACK_*). */
+/* ---- ACK codes (mirrors STM32 can_handler / ESP32 can::AckResult) ---- */
 typedef enum { A_OK = 0, A_REJECTED = 1, A_INVALID = 2, A_BLOCKED = 3 } Ack_t;
 
-/* sanitize_float replica: NaN/Inf → fallback (mirrors safety_system.c). */
-static float sanitize_float(float v, float fallback) {
-    if (isnan(v) || isinf(v)) return fallback;
-    return v;
+/* ---- Safe-input builder ---- */
+static StandbySyncInput_t make_input(uint8_t state,
+                                     float pedal,
+                                     float demand,
+                                     float eff_demand,
+                                     uint8_t pwm,
+                                     float speed,
+                                     bool hazard)
+{
+    StandbySyncInput_t in;
+    in.state               = state;
+    in.pedalPct            = pedal;
+    in.demandPct           = demand;
+    in.effectiveDemandPct  = eff_demand;
+    in.finalPwmPct         = pwm;
+    in.avgSpeedKmh         = speed;
+    in.errorOrHazardActive = hazard;
+    return in;
 }
 
-/* Replica of Safety_IsCommandAllowed(). */
-static bool command_allowed(State_t s) {
-    return s == S_ACTIVE || s == S_DEGRADED;
+/* A fully-safe STANDBY input (all conditions met). */
+static StandbySyncInput_t safe_standby(void) {
+    return make_input(ST_STANDBY, 0.0f, 0.0f, 0.0f, 0, 0.0f, false);
 }
 
-/* Replica of Safety_IsStandbyModeSyncAllowed(). */
-static bool standby_mode_sync_allowed(State_t s, float pedal_pct,
-                                       uint8_t final_pwm_pct, float avg_speed) {
-    if (s != S_STANDBY) return false;
-    if (sanitize_float(pedal_pct, 100.0f) > STANDBY_MODE_SYNC_MAX_PEDAL_PCT) return false;
-    if (final_pwm_pct != 0U) return false;
-    if (sanitize_float(avg_speed, MODE_CHANGE_MAX_SPEED_KMH + 1.0f) > MODE_CHANGE_MAX_SPEED_KMH) return false;
-    return true;
-}
-
-/* Model of the CMD_MODE handler's first gate (the part changed in §3).  It
- * writes the applied mode flags ONLY when a command is applied, and reports
- * whether any gear change was permitted (must stay false on the STANDBY path).
- * Returns the ACK the ESP32 would observe. */
-static Ack_t cmd_mode_gate(State_t s, float pedal_pct, uint8_t final_pwm_pct,
-                           float avg_speed, uint8_t req_flags,
-                           uint8_t *applied_flags_io, bool *gear_allowed_out) {
+/* ---- Model of the CMD_MODE handler's STANDBY branch ---- */
+/* Returns the ACK the ESP32 would observe and updates applied_flags_io when
+ * the gate opens.  Gear change is NEVER permitted in the STANDBY branch.    */
+static Ack_t cmd_mode_handler_standby(const StandbySyncInput_t *in,
+                                       uint8_t req_flags,
+                                       uint8_t *applied_flags_io,
+                                       bool    *gear_allowed_out)
+{
     *gear_allowed_out = false;
-    if (!command_allowed(s)) {
-        if (standby_mode_sync_allowed(s, pedal_pct, final_pwm_pct, avg_speed)) {
-            *applied_flags_io = (uint8_t)(req_flags & 0x03u); /* logical only */
-            return A_OK;                                      /* no gear/motion */
-        }
-        return A_BLOCKED;
+    /* ACTIVE/DEGRADED: full path (not tested here). */
+    if (in->state == ST_ACTIVE || in->state == ST_DEGRADED) {
+        if (in->avgSpeedKmh > STANDBY_MODE_SYNC_MAX_SPEED_KMH) return A_REJECTED;
+        *applied_flags_io = (uint8_t)(req_flags & 0x03u);
+        *gear_allowed_out = true;
+        return A_OK;
     }
-    /* ACTIVE/DEGRADED full path modelled minimally (speed gate). */
-    if (avg_speed > MODE_CHANGE_MAX_SPEED_KMH) return A_REJECTED;
-    *applied_flags_io = (uint8_t)(req_flags & 0x03u);
-    *gear_allowed_out = true;   /* gear may also be applied on the ACTIVE path */
-    return A_OK;
+    /* Non-ACTIVE gate: STANDBY policy decides. */
+    if (StandbyModeSync_Evaluate(in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY) {
+        *applied_flags_io = (uint8_t)(req_flags & 0x03u); /* logical only */
+        return A_OK;                                       /* no gear/motion */
+    }
+    return A_BLOCKED;
 }
 
 /* ---- Test harness ---- */
@@ -89,92 +91,250 @@ static int g_run = 0, g_fail = 0;
 #define CHECK(cond) do { g_run++; if (!(cond)) {                              \
     printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); g_fail++; } } while (0)
 
-/* The gate is CLOSED unless the state is exactly STANDBY. */
-static void test_state_must_be_standby(void) {
-    CHECK(!standby_mode_sync_allowed(S_BOOT,     0.0f, 0, 0.0f));
-    CHECK( standby_mode_sync_allowed(S_STANDBY,  0.0f, 0, 0.0f));
-    CHECK(!standby_mode_sync_allowed(S_ACTIVE,   0.0f, 0, 0.0f));
-    CHECK(!standby_mode_sync_allowed(S_DEGRADED, 0.0f, 0, 0.0f));
-    CHECK(!standby_mode_sync_allowed(S_SAFE,     0.0f, 0, 0.0f));
-    CHECK(!standby_mode_sync_allowed(S_ERROR,    0.0f, 0, 0.0f));
-    CHECK(!standby_mode_sync_allowed(S_LIMP_HOME,0.0f, 0, 0.0f));
+/* ---- §1 State gate ---- */
+
+static void test_state_must_be_standby(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+
+    uint8_t states[] = { ST_BOOT, ST_ACTIVE, ST_DEGRADED,
+                         ST_SAFE, ST_ERROR, ST_LIMP_HOME };
+    for (size_t i = 0; i < sizeof states / sizeof states[0]; ++i) {
+        in.state = states[i];
+        CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    }
 }
 
-/* A pressed pedal, non-zero PWM, or unsafe speed each closes the gate. */
-static void test_preconditions_block_gate(void) {
-    CHECK(!standby_mode_sync_allowed(S_STANDBY, 3.1f, 0, 0.0f));   /* pedal */
-    CHECK( standby_mode_sync_allowed(S_STANDBY, 3.0f, 0, 0.0f));   /* at limit ok */
-    CHECK(!standby_mode_sync_allowed(S_STANDBY, 0.0f, 1, 0.0f));   /* PWM */
-    CHECK(!standby_mode_sync_allowed(S_STANDBY, 0.0f, 0, 1.1f));   /* speed */
-    CHECK( standby_mode_sync_allowed(S_STANDBY, 0.0f, 0, 1.0f));   /* at limit ok */
-    /* NaN sensor readings are treated as unsafe. */
-    CHECK(!standby_mode_sync_allowed(S_STANDBY, NAN, 0, 0.0f));
-    CHECK(!standby_mode_sync_allowed(S_STANDBY, 0.0f, 0, NAN));
+/* ---- §1 Pedal gate ---- */
+
+static void test_pedal_blocks_gate(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    in.pedalPct = STANDBY_MODE_SYNC_MAX_PEDAL_PCT;       /* at limit → OK */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+    in.pedalPct = STANDBY_MODE_SYNC_MAX_PEDAL_PCT + 0.1f; /* just over → BLOCKED */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    in.pedalPct = 100.0f;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    in.pedalPct = NAN;   /* NaN → fail-safe BLOCKED */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
 }
 
-/* STANDBY + safe: CMD_MODE(4x4) applies the LOGICAL mode and ACKs OK, but
- * NEVER permits a gear change (no motion). */
-static void test_standby_applies_logical_mode_only(void) {
-    uint8_t applied = 0x00;   /* power-on 4x2 */
-    bool gear_ok = true;
-    Ack_t a = cmd_mode_gate(S_STANDBY, 0.0f, 0, 0.0f, 0x01, &applied, &gear_ok);
+/* ---- §1 Internal demand gate (NEW) ---- */
+
+static void test_internal_demand_blocks_gate(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    /* At epsilon → still OK. */
+    in.demandPct = STANDBY_MODE_SYNC_DEMAND_EPSILON;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+    /* Just above epsilon → BLOCKED. */
+    in.demandPct = STANDBY_MODE_SYNC_DEMAND_EPSILON + 0.1f;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    /* Large demand → BLOCKED. */
+    in.demandPct = 50.0f;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    /* NaN → fail-safe BLOCKED. */
+    in.demandPct = NAN;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- §1 Effective demand gate (NEW) ---- */
+
+static void test_effective_demand_blocks_gate(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    /* At epsilon → still OK. */
+    in.effectiveDemandPct = STANDBY_MODE_SYNC_DEMAND_EPSILON;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+    /* Just above epsilon → BLOCKED. */
+    in.effectiveDemandPct = STANDBY_MODE_SYNC_DEMAND_EPSILON + 0.1f;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    /* NaN → fail-safe BLOCKED. */
+    in.effectiveDemandPct = NAN;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- §1 PWM zero gate ---- */
+
+static void test_pwm_zero_blocks_gate(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    in.finalPwmPct = 0;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+    in.finalPwmPct = 1;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    in.finalPwmPct = 100;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- §1 Speed gate ---- */
+
+static void test_speed_blocks_gate(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    in.avgSpeedKmh = STANDBY_MODE_SYNC_MAX_SPEED_KMH;       /* at limit → OK */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+    in.avgSpeedKmh = STANDBY_MODE_SYNC_MAX_SPEED_KMH + 0.1f; /* over → BLOCKED */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+    in.avgSpeedKmh = NAN;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- §1 Hazard gate ---- */
+
+static void test_hazard_blocks_gate(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    in.errorOrHazardActive = false;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+    in.errorOrHazardActive = true;
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- NEW: PWM=0 but internal demand >0 must be BLOCKED ---- */
+
+static void test_pwm_zero_but_internal_demand_nonzero_blocked(void)
+{
+    /* Scenario: inhibition logic has zeroed PWM but demandPct is still > 0.
+     * A PWM of zero alone does not prove there is no stored demand. */
+    StandbySyncInput_t in = safe_standby();
+    in.finalPwmPct = 0;        /* PWM is zero */
+    in.demandPct   = 10.0f;    /* but internal demand is non-zero */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- NEW: pedal=0 but creep/effective demand >0 must be BLOCKED ---- */
+
+static void test_pedal_zero_but_effective_demand_nonzero_blocked(void)
+{
+    /* Scenario: pedal is released but creep or effective demand still flows. */
+    StandbySyncInput_t in = safe_standby();
+    in.pedalPct           = 0.0f;  /* pedal fully released */
+    in.effectiveDemandPct = 2.0f;  /* but effective demand > epsilon */
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_BLOCKED);
+}
+
+/* ---- NEW: demand AND PWM truly zero → ACK_OK ---- */
+
+static void test_demand_and_pwm_truly_zero_allows(void)
+{
+    /* All conditions genuinely met: pedal=0, demand=0, effDemand=0, PWM=0,
+     * speed=0, no hazard — gate MUST open and return ALLOW_LOGICAL_ONLY. */
+    StandbySyncInput_t in = safe_standby();
+    CHECK(StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+}
+
+/* ---- Handler integration: STANDBY applies logical mode only ---- */
+
+static void test_handler_standby_applies_logical_mode_only(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    uint8_t applied   = 0x00;   /* STM32 power-on default 4x2 */
+    bool    gear_ok   = true;
+    Ack_t a = cmd_mode_handler_standby(&in, 0x01, &applied, &gear_ok);
     CHECK(a == A_OK);
     CHECK(applied == 0x01);   /* 4x4 applied logically */
-    CHECK(gear_ok == false);  /* gear/motion NOT granted in STANDBY */
+    CHECK(gear_ok == false);  /* gear/motion NEVER granted in STANDBY */
 }
 
-/* STANDBY + unsafe (pedal pressed): CMD_MODE is BLOCKED and the mode is left
- * unchanged (no partial application). */
-static void test_standby_unsafe_blocks(void) {
+/* ---- Handler integration: unsafe STANDBY → BLOCKED, mode unchanged ---- */
+
+static void test_handler_standby_unsafe_blocks(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    in.pedalPct = 50.0f;
     uint8_t applied = 0x00;
-    bool gear_ok = false;
-    Ack_t a = cmd_mode_gate(S_STANDBY, 50.0f, 0, 0.0f, 0x01, &applied, &gear_ok);
+    bool    gear_ok = false;
+    Ack_t a = cmd_mode_handler_standby(&in, 0x01, &applied, &gear_ok);
     CHECK(a == A_BLOCKED);
     CHECK(applied == 0x00);   /* unchanged */
-    CHECK(gear_ok == false);
+    CHECK(gear_ok == false);  /* no gear change */
 }
 
-/* Tank-turn bit is carried through the logical apply as well. */
-static void test_standby_applies_tank_bit(void) {
+/* ---- Handler integration: tank-turn bit carried through ---- */
+
+static void test_handler_standby_applies_tank_bit(void)
+{
+    StandbySyncInput_t in = safe_standby();
     uint8_t applied = 0x00;
-    bool gear_ok = false;
-    Ack_t a = cmd_mode_gate(S_STANDBY, 0.0f, 0, 0.0f, 0x03, &applied, &gear_ok);
+    bool    gear_ok = false;
+    Ack_t a = cmd_mode_handler_standby(&in, 0x03, &applied, &gear_ok);
     CHECK(a == A_OK);
     CHECK(applied == 0x03);   /* 4x4 + tank turn */
 }
 
-/* SAFE/ERROR never sync the mode (they are not STANDBY). */
-static void test_safe_state_blocks(void) {
+/* ---- Handler integration: SAFE state blocked ---- */
+
+static void test_handler_safe_state_blocks(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    in.state = ST_SAFE;
     uint8_t applied = 0x00;
-    bool gear_ok = false;
-    Ack_t a = cmd_mode_gate(S_SAFE, 0.0f, 0, 0.0f, 0x01, &applied, &gear_ok);
+    bool    gear_ok = false;
+    Ack_t a = cmd_mode_handler_standby(&in, 0x01, &applied, &gear_ok);
     CHECK(a == A_BLOCKED);
     CHECK(applied == 0x00);
 }
 
-/* The boot scenario end-to-end: selector 4x4, STANDBY, safe → the STM32 mode
- * becomes 4x4 BEFORE it ever transitions to ACTIVE (so the vehicle cannot start
- * moving in the default 4x2). */
-static void test_boot_window_closed(void) {
-    uint8_t applied = 0x00;   /* STM32 power-on default 4x2 */
-    bool gear_ok = false;
-    /* ESP32 keeps retransmitting CMD_MODE(4x4) while in STANDBY. */
-    Ack_t a = cmd_mode_gate(S_STANDBY, 0.0f, 0, 0.0f, 0x01, &applied, &gear_ok);
+/* ---- Handler integration: no relay, no PWM, no gear in STANDBY ---- */
+
+static void test_handler_standby_no_motion(void)
+{
+    /* In STANDBY the handler applies ONLY the logical mode bits (0x03 mask).
+     * Gear (byte 1 of 0x102) is ignored; no relay energised; no PWM. */
+    StandbySyncInput_t in = safe_standby();
+    uint8_t applied = 0x00;
+    bool    gear_ok = false;
+
+    /* Try 4x4 request with a gear byte — gear must stay blocked. */
+    Ack_t a = cmd_mode_handler_standby(&in, 0x01, &applied, &gear_ok);
     CHECK(a == A_OK);
-    CHECK(applied == 0x01);
-    /* Only now does the driver press the pedal → ACTIVE, already in 4x4. */
-    a = cmd_mode_gate(S_ACTIVE, 80.0f, 0, 0.0f, 0x01, &applied, &gear_ok);
-    CHECK(a == A_OK);
-    CHECK(applied == 0x01);   /* still 4x4 — never a wrong-mode moment */
+    CHECK((applied & 0x01u) != 0u);  /* 4x4 bit set */
+    CHECK(gear_ok == false);         /* gear NEVER applied in STANDBY */
 }
 
-int main(void) {
+/* ---- Handler integration: boot window closed end-to-end ---- */
+
+static void test_boot_window_closed(void)
+{
+    StandbySyncInput_t in = safe_standby();
+    uint8_t applied = 0x00;   /* STM32 power-on default 4x2 */
+    bool    gear_ok = false;
+
+    /* ESP32 retransmits CMD_MODE(4x4) while in STANDBY. */
+    Ack_t a = cmd_mode_handler_standby(&in, 0x01, &applied, &gear_ok);
+    CHECK(a == A_OK);
+    CHECK(applied == 0x01);   /* 4x4 now set */
+    CHECK(gear_ok == false);
+
+    /* Driver presses pedal → ACTIVE; mode is ALREADY 4x4. */
+    in.state    = ST_ACTIVE;
+    in.pedalPct = 80.0f;
+    a = cmd_mode_handler_standby(&in, 0x01, &applied, &gear_ok);
+    CHECK(a == A_OK);
+    CHECK(applied == 0x01);   /* still 4x4 — no wrong-mode moment */
+    CHECK(gear_ok == true);   /* gear IS allowed once ACTIVE */
+}
+
+int main(void)
+{
     test_state_must_be_standby();
-    test_preconditions_block_gate();
-    test_standby_applies_logical_mode_only();
-    test_standby_unsafe_blocks();
-    test_standby_applies_tank_bit();
-    test_safe_state_blocks();
+    test_pedal_blocks_gate();
+    test_internal_demand_blocks_gate();
+    test_effective_demand_blocks_gate();
+    test_pwm_zero_blocks_gate();
+    test_speed_blocks_gate();
+    test_hazard_blocks_gate();
+    test_pwm_zero_but_internal_demand_nonzero_blocked();
+    test_pedal_zero_but_effective_demand_nonzero_blocked();
+    test_demand_and_pwm_truly_zero_allows();
+    test_handler_standby_applies_logical_mode_only();
+    test_handler_standby_unsafe_blocks();
+    test_handler_standby_applies_tank_bit();
+    test_handler_safe_state_blocks();
+    test_handler_standby_no_motion();
     test_boot_window_closed();
 
     printf("\n--- standby_mode_sync_gate tests: %d run, %d failed ---\n",

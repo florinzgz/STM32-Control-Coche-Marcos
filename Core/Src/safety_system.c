@@ -12,6 +12,7 @@
   */
 
 #include "safety_system.h"
+#include "standby_mode_sync_policy.h"
 #include "main.h"
 #include "battery_limits_store.h"
 #include "sensor_manager.h"
@@ -114,9 +115,6 @@ static inline float batt_cv_to_v(uint16_t cv) { return (float)cv * 0.01f; }
 #define STEERING_RATE_MAX_DEG_PER_S  200.0f  /* max steering rate          */
 #define STEERING_RATE_MIN_DT_S       0.001f /* ignore dt below 1 ms       */
 #define MODE_CHANGE_MAX_SPEED_KMH 1.0f       /* speed below which mode OK  */
-/* §3A pedal-release threshold for the STANDBY logical-mode-sync gate (% full).
- * Mirrors CMD_MODE_PEDAL_REST_PCT / STARTUP_PEDAL_REST_PCT (3 %).            */
-#define STANDBY_MODE_SYNC_MAX_PEDAL_PCT 3.0f
 
 /* Steering command timeout — if no new steering command (0x101) is received
  * for this duration while CAN is otherwise alive, gradually return steering
@@ -1391,25 +1389,28 @@ bool Safety_ValidateModeChange(bool enable_4x4, bool tank_turn)
  * is (correctly) still forbidden.                                             */
 bool Safety_IsStandbyModeSyncAllowed(void)
 {
-    /* State must be exactly STANDBY — this excludes SAFE / ERROR (electrical
-     * hazard, overcurrent, overtemp latch the system out of STANDBY), plus
-     * ACTIVE / DEGRADED / LIMP_HOME where the normal command gate applies. */
-    if (system_state != SYS_STATE_STANDBY) return false;
+    /* Gather all inputs and delegate the decision to the HAL-free policy
+     * (standby_mode_sync_policy.c).  This is the ONLY place that calls
+     * StandbyModeSync_Evaluate() in the firmware.                        */
 
-    /* Pedal released — no demand may be present when we touch the mode. */
-    float pedal = sanitize_float(Pedal_GetPercent(), 100.0f);
-    if (pedal > STANDBY_MODE_SYNC_MAX_PEDAL_PCT) return false;
-
-    /* Zero applied traction PWM — motors must be idle. */
-    if (Traction_GetFinalPwmPct() != 0U) return false;
-
-    /* Vehicle at safe (near-zero) speed — reuse the mode-change speed gate. */
+    /* Wheel speeds → average km/h. */
     float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
                        Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
-    avg_speed = sanitize_float(avg_speed, MODE_CHANGE_MAX_SPEED_KMH + 1.0f);
-    if (avg_speed > MODE_CHANGE_MAX_SPEED_KMH) return false;
 
-    return true;
+    /* Internal demand from the traction state. */
+    const TractionState_t *ts = Traction_GetState();
+    float demand_pct = (ts != NULL) ? ts->demandPct : 100.0f;
+
+    StandbySyncInput_t in;
+    in.state               = (uint8_t)system_state;
+    in.pedalPct            = sanitize_float(Pedal_GetPercent(), 100.0f);
+    in.demandPct           = sanitize_float(demand_pct, 100.0f);
+    in.effectiveDemandPct  = sanitize_float(Traction_GetEffectiveDemandPct(), 100.0f);
+    in.finalPwmPct         = Traction_GetFinalPwmPct();
+    in.avgSpeedKmh         = sanitize_float(avg_speed, MODE_CHANGE_MAX_SPEED_KMH + 1.0f);
+    in.errorOrHazardActive = false;   /* existing gate: state check covers this */
+
+    return (StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
 }
 
 void Safety_Init(void)

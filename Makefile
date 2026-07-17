@@ -49,6 +49,7 @@ C_SOURCES = \
   $(CORE_SRC)/battery_limits_store.c \
   $(CORE_SRC)/loop_diag.c \
   $(CORE_SRC)/math_safety.c \
+  $(CORE_SRC)/standby_mode_sync_policy.c \
   $(CORE_SRC)/stm32g4xx_it.c \
   $(CORE_SRC)/stm32g4xx_hal_msp.c \
   $(CORE_SRC)/system_stm32g4xx.c \

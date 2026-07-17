@@ -1662,16 +1662,17 @@ void loop() {
 
         // ---- §2 Single desired-mode arbitration → ModeSync ----------------
         // Selector, remote and tank-turn all converge here.  arbitrate() picks
-        // the authoritative source (REMOTE when it holds motion authority, else
-        // the LOCAL selector 4x4 bit + local tank-turn toggle).  A LOCAL↔REMOTE
-        // switch simply re-evaluates this, so the desired mode is recomputed and
-        // ModeSync resynchronises automatically.  setDesired() re-arms the FSM
-        // only on a genuine change, so calling it every tick is cheap.  There is
-        // NO direct sendModeCommand() from the selector, remote or tank paths —
-        // the FSM below is the single CMD_MODE (mode-change) owner.
+        // the authoritative source.
+        //
+        // Mode authority is controlled by remoteAuthorityActive (who OWNS the
+        // mode).  The kill switch (isKillSwitchActive) inhibits motion/demand
+        // only — it must NOT transfer mode ownership to LOCAL, because that
+        // would silently flip desired from REMOTE 4x4 to LOCAL 4x2 every time
+        // the kill switch is pressed, creating an unexpected mode oscillation
+        // when it is released.
         {
             // LOCAL selector edge → audio + log feedback only (no CAN here).
-            if (!remoteMotionAuthorityActive) {
+            if (!remoteAuthorityActive) {
                 if (traction_sw::hasChanged()) {
                     if (traction_sw::is4WD()) {
                         audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
@@ -1689,7 +1690,7 @@ void loop() {
             }
 
             desiredModeFlags = mode_authority::arbitrate(
-                remoteMotionAuthorityActive,
+                remoteAuthorityActive,          // mode authority (kill switch does NOT change this)
                 remote_control::getDriveMode(),
                 traction_sw::is4WD(),
                 localTankTurn);

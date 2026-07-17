@@ -382,6 +382,116 @@ static void test_single_owner_no_spam_when_in_sync() {
     ASSERT_EQ(esp.sendCount, sends);   // no extra frames
 }
 
+// ---- §2 kill-switch: inhibits motion but does NOT change mode authority -----
+
+// When the kill switch is active, remoteMotionAuthorityActive = remoteActive &&
+// !killActive = false.  The mode authority must stay REMOTE so desiredModeFlags
+// keeps the REMOTE value (e.g. 4x4).  Only motion/demand/gear are inhibited.
+
+struct SimEsp32WithKill {
+    ModeSync ms{ACK_TIMEOUT_MS, MAX_RETRIES, BACKOFF_MS};
+    uint8_t desired       = 0;
+    uint8_t appliedHmi    = 0;
+    bool    localSel4x4   = false;
+    bool    localTank     = false;
+    bool    remoteActive  = false;  // who OWNS the mode
+    bool    killActive    = false;  // inhibits motion only, NOT mode authority
+    uint8_t remoteMode    = 0;
+    int     sendCount     = 0;
+    AckRes  lastAckSent   = AckRes::OK;
+
+    void tick(uint32_t now, SimStm32& stm, bool hbAlive) {
+        if (hbAlive) {
+            appliedHmi = stm.heartbeatEcho();
+            ms.onHeartbeatModeEcho(appliedHmi);
+        }
+        // Mode authority = remoteActive (kill switch does NOT affect this).
+        desired = mode_authority::arbitrate(remoteActive, remoteMode,
+                                            localSel4x4, localTank);
+        ms.setDesired(desired);
+        // Motion authority = remoteActive && !killActive (inhibits gear/demand).
+        // (Not modelled in this test: gear / demand are separate concerns.)
+        if (ms.update(now, hbAlive) == Action::SEND) {
+            AckRes r = stm.onCmdMode(ms.sendMode());
+            ++sendCount;
+            lastAckSent = r;
+            ms.onAck(r);
+        }
+    }
+
+    uint32_t run(uint32_t t0, uint32_t dt, int n, SimStm32& stm, bool hbAlive) {
+        uint32_t t = t0;
+        for (int i = 0; i < n; ++i) { tick(t, stm, hbAlive); t += dt; }
+        return t;
+    }
+};
+
+// REMOTE 4x4 + kill switch activated → desired stays 4x4 (mode unchanged).
+static void test_kill_active_desired_stays_remote_mode() {
+    SimStm32 stm; stm.state = SimStm32::ACTIVE;
+    SimEsp32WithKill esp;
+    esp.remoteActive = true;
+    esp.remoteMode   = F_4X4;
+
+    // Settle in 4x4 under REMOTE authority.
+    esp.run(0, 10, 5, stm, true);
+    ASSERT_EQ(esp.desired, F_4X4);
+    ASSERT_EQ(stm.applied, F_4X4);
+    ASSERT(esp.ms.inSync());
+
+    int sendsBefore = esp.sendCount;
+    // Activate kill switch — motion/demand is inhibited, but mode authority
+    // remains REMOTE.  Desired must still be 4x4.
+    esp.killActive = true;
+    esp.run(200, 10, 10, stm, true);
+    ASSERT_EQ(esp.desired, F_4X4);       // mode intent unchanged
+    ASSERT_EQ(stm.applied, F_4X4);       // STM32 mode unchanged
+    ASSERT(esp.ms.inSync());             // no unnecessary resync
+    ASSERT_EQ(esp.sendCount, sendsBefore); // no extra CMD_MODE frames
+}
+
+// Releasing the kill switch while REMOTE authority holds → no new mode
+// oscillation, desired remains 4x4.
+static void test_kill_released_no_mode_oscillation() {
+    SimStm32 stm; stm.state = SimStm32::ACTIVE;
+    SimEsp32WithKill esp;
+    esp.remoteActive = true;
+    esp.remoteMode   = F_4X4;
+    esp.run(0, 10, 5, stm, true);
+    ASSERT(esp.ms.inSync());
+
+    esp.killActive = true;
+    esp.run(200, 10, 5, stm, true);
+    ASSERT_EQ(esp.desired, F_4X4);
+
+    // Release kill — desired is still 4x4, still in sync (no oscillation).
+    esp.killActive = false;
+    esp.run(400, 10, 5, stm, true);
+    ASSERT_EQ(esp.desired, F_4X4);
+    ASSERT_EQ(stm.applied, F_4X4);
+    ASSERT(esp.ms.inSync());
+}
+
+// Abandoning REMOTE authority (selector CH10 moves out of REMOTE) → desired
+// is recomputed from LOCAL selector.  A kill is irrelevant here.
+static void test_abandon_remote_adopts_local_selector() {
+    SimStm32 stm; stm.state = SimStm32::ACTIVE;
+    SimEsp32WithKill esp;
+    esp.remoteActive  = true;
+    esp.remoteMode    = F_4X4;
+    esp.localSel4x4   = false; // selector at 4x2
+
+    esp.run(0, 10, 5, stm, true);
+    ASSERT_EQ(esp.desired, F_4X4); // remote authority wins
+
+    // CH10 leaves REMOTE → remoteActive becomes false.
+    esp.remoteActive = false;
+    esp.run(200, 10, 5, stm, true);
+    ASSERT_EQ(esp.desired, 0);   // LOCAL selector 4x2 adopted
+    ASSERT_EQ(stm.applied, 0);
+    ASSERT(esp.ms.inSync());
+}
+
 int main() {
     test_arbitrate_local_selector();
     test_arbitrate_remote_authority();
@@ -396,6 +506,10 @@ int main() {
     test_lost_ack_confirmed_by_heartbeat();
     test_hmi_shows_applied_not_desired();
     test_single_owner_no_spam_when_in_sync();
+    // Kill-switch / authority isolation tests.
+    test_kill_active_desired_stays_remote_mode();
+    test_kill_released_no_mode_oscillation();
+    test_abandon_remote_adopts_local_selector();
 
     std::printf("\n--- mode_authority tests: %d run, %d failed ---\n",
                 g_tests_run, g_tests_failed);
