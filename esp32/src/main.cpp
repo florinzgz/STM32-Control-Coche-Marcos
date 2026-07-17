@@ -1164,6 +1164,14 @@ void setup() {
         md.modeFlags   = currentModeFlags;
         md.timestampMs = millis();
         vehicleData.setMode(md);
+
+        // Seed the drive-mode sync FSM with the PHYSICAL selector position
+        // read at boot (§B).  This makes the desired mode explicit from the
+        // real GPIO15 position immediately — the FSM starts with
+        // confirmedValid_=false, so the selected mode (even 4x2) is
+        // transmitted and kept pending until the STM32 really confirms it,
+        // instead of assuming a 4x2 default.
+        g_modeSync.setDesired(currentModeFlags);
     }
 
     // Create render task on Core 0 — offloads all TFT and touch operations
@@ -1680,15 +1688,32 @@ void loop() {
                                                 (uint32_t)g_modeSendMs)
                 && ad.timestampMs != g_lastModeAckTs) {
                 g_lastModeAckTs = ad.timestampMs;
-                bool ackOk = (ad.result == can::AckResult::OK);
-                g_modeSync.onAck(ackOk ? ModeSync::AckResult::OK
-                                     : ModeSync::AckResult::REJECTED);
+                // Map the four CAN-level CMD_ACK codes to ModeSync semantics.
+                // Only INVALID is a hard failure; REJECTED (speed/condition)
+                // and BLOCKED_BY_SAFETY (STM32 still in BOOT/STANDBY) are
+                // TEMPORARY — the request is kept pending and retried until the
+                // STM32 accepts it, so a mode selected before the vehicle is
+                // ACTIVE applies automatically without moving the selector.
+                ModeSync::AckResult msRes;
+                switch (ad.result) {
+                    case can::AckResult::OK:
+                        msRes = ModeSync::AckResult::OK; break;
+                    case can::AckResult::INVALID:
+                        msRes = ModeSync::AckResult::INVALID; break;
+                    case can::AckResult::BLOCKED_BY_SAFETY:
+                        msRes = ModeSync::AckResult::BLOCKED; break;
+                    case can::AckResult::REJECTED:
+                    default:
+                        msRes = ModeSync::AckResult::REJECTED; break;
+                }
+                g_modeSync.onAck(msRes);
                 // [MODESYNC] diagnostic — last ACK + requested/confirmed/retry.
                 Serial.printf(
-                    "[MODESYNC] ack=%s req=0x%02X conf=0x%02X retries=%u%s\n",
-                    ackOk ? "OK" : "REJECT",
+                    "[MODESYNC] ack=%u req=0x%02X conf=0x%02X retries=%u%s%s\n",
+                    (unsigned)ad.result,
                     g_modeSync.desired(), g_modeSync.confirmed(),
                     (unsigned)g_modeSync.retries(),
+                    g_modeSync.blocked() ? " (blocked/retry)" : "",
                     g_modeSync.failed() ? " -> FAILED" : "");
             }
             if (g_modeSync.update(millis(), stm32IsAlive)

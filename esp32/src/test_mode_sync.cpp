@@ -111,13 +111,15 @@ static void test_late_ack_confirms() {
     ASSERT(ms.update(10 * ACK_TIMEOUT_MS, true) == Action::NONE);
 }
 
-// A hard rejection latches FAILED without retrying (retry cannot help).
-static void test_reject_latches_failed() {
+// A HARD INVALID ACK (malformed payload) latches FAILED without retrying —
+// a retry cannot fix a bad payload.
+static void test_invalid_latches_failed() {
     ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
     ms.setDesired(0x01);
     ASSERT(ms.update(0, true) == Action::SEND);
-    ms.onAck(AckRes::REJECTED);
+    ms.onAck(AckRes::INVALID);
     ASSERT(ms.failed());
+    ASSERT(!ms.blocked());
     ASSERT(!ms.pending());
     ASSERT(ms.update(ACK_TIMEOUT_MS, true) == Action::NONE);   // no retry
     // A NEW selection (distinct from the confirmed mode) re-arms the FSM.
@@ -125,6 +127,60 @@ static void test_reject_latches_failed() {
     ASSERT(!ms.failed());
     ASSERT(ms.update(2 * ACK_TIMEOUT_MS, true) == Action::SEND);
     ASSERT_EQ(ms.sendMode(), 0x03);
+}
+
+// A BLOCKED_BY_SAFETY ACK (STM32 in BOOT/STANDBY at power-on) is TEMPORARY:
+// it must NOT latch FAILED.  The request stays pending and is retransmitted
+// after the cooldown, again and again, until the STM32 becomes ACTIVE and
+// finally accepts it — with NO physical selector toggle.  This is the exact
+// reproduced boot 4x2/4x4 desync.
+static void test_blocked_retries_until_active() {
+    const uint32_t BACKOFF = 1000;
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES, BACKOFF);
+    ms.setDesired(0x01);                              // selector at 4x4
+
+    // Boot: STM32 in STANDBY → first CMD_MODE is BLOCKED_BY_SAFETY.
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ms.onAck(AckRes::BLOCKED);
+    ASSERT(!ms.failed());                             // NOT a hard failure
+    ASSERT(ms.blocked());
+    ASSERT(!ms.inSync());
+
+    // Within the cooldown → no bus traffic (no flooding).
+    ASSERT(ms.update(1, true) == Action::NONE);       // arms the cooldown timer
+    ASSERT(ms.update(BACKOFF - 1, true) == Action::NONE);
+
+    // Cooldown elapsed → retransmit; still BLOCKED (vehicle still STANDBY).
+    ASSERT(ms.update(BACKOFF + 1, true) == Action::SEND);
+    ASSERT_EQ(ms.sendMode(), 0x01);
+    ms.onAck(AckRes::BLOCKED);
+    ASSERT(!ms.failed());
+
+    // Many cycles later the vehicle is finally ACTIVE → the retransmit is
+    // accepted with OK and the mode applies, no selector toggle required.
+    uint32_t t = 2 * BACKOFF + 2;
+    ASSERT(ms.update(t, true) == Action::NONE);       // re-arm cooldown
+    ASSERT(ms.update(t + BACKOFF + 1, true) == Action::SEND);
+    ms.onAck(AckRes::OK);
+    ASSERT(ms.inSync());
+    ASSERT_EQ(ms.confirmed(), 0x01);
+    ASSERT(!ms.failed());
+    ASSERT(!ms.blocked());
+}
+
+// A REJECTED ACK (temporary speed/condition gate) behaves like BLOCKED: kept
+// pending and retried after the cooldown, never latching FAILED.
+static void test_rejected_is_temporary() {
+    const uint32_t BACKOFF = 1000;
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES, BACKOFF);
+    ms.setDesired(0x01);
+    ASSERT(ms.update(0, true) == Action::SEND);
+    ms.onAck(AckRes::REJECTED);
+    ASSERT(!ms.failed());
+    ASSERT(ms.blocked());
+    ASSERT(ms.update(1, true) == Action::NONE);
+    ASSERT(ms.update(BACKOFF + 2, true) == Action::SEND);   // retried
+    ASSERT_EQ(ms.sendMode(), 0x01);
 }
 
 // Selecting a new mode after giving up re-arms the state machine.
@@ -305,11 +361,20 @@ static void test_debounce_drives_sync() {
     ASSERT_EQ(ms.confirmed(), 0x01);
 }
 
-// A contact glitch that does not survive debounce must NOT produce any send.
+// At cold boot the physical selector position (2WD here) is transmitted once
+// and confirmed.  A contact glitch that does not survive debounce must NOT
+// produce any FURTHER send.
 static void test_glitch_produces_no_send() {
     selector_reset(HIGH);                        // 2WD
     ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
     traction_sw::clearChanged();
+
+    // Cold-boot sync of the real 2WD position (confirmedValid_ starts false).
+    ms.setDesired(traction_sw::getModeFlag());   // 2WD (0x00)
+    ASSERT(ms.update(5, true) == Action::SEND);
+    ASSERT_EQ(ms.sendMode(), 0x00);
+    ms.onAck(AckRes::OK);
+    ASSERT(ms.inSync());
 
     // Brief glitch to LOW then back to HIGH — shorter than the debounce.
     selector_tick(10, LOW);
@@ -317,9 +382,23 @@ static void test_glitch_produces_no_send() {
     selector_tick(30, HIGH);
     ASSERT(!traction_sw::hasChanged());          // debounce rejected the glitch
 
-    // Nothing new to sync; no transmission even with a live heartbeat.
+    // Nothing new to sync; no further transmission with a live heartbeat.
     ms.setDesired(traction_sw::getModeFlag());   // still 2WD (0x00)
     ASSERT(ms.update(40, true) == Action::NONE);
+    ASSERT(ms.inSync());
+}
+
+// Cold boot with the selector at 2WD: confirmedValid_ starts FALSE, so the
+// real 2WD position is transmitted (not assumed) and stays pending until the
+// STM32 confirms it — no silent 4x2-default assumption.
+static void test_cold_boot_selector_2wd_transmits() {
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES);
+    ms.setDesired(0x00);                          // selector reads 2WD at boot
+    ASSERT(!ms.confirmedValid());
+    ASSERT(!ms.inSync());
+    ASSERT(ms.update(0, true) == Action::SEND);   // 2WD is actively synced
+    ASSERT_EQ(ms.sendMode(), 0x00);
+    ms.onAck(AckRes::OK);
     ASSERT(ms.inSync());
 }
 
@@ -328,10 +407,13 @@ int main() {
     test_ack_confirms_and_stops();
     test_bounded_retry_then_fail();
     test_late_ack_confirms();
-    test_reject_latches_failed();
+    test_invalid_latches_failed();
+    test_blocked_retries_until_active();
+    test_rejected_is_temporary();
     test_new_desired_rearms_after_fail();
     test_heartbeat_loss_rearms();
     test_cold_boot_selector_4x4();
+    test_cold_boot_selector_2wd_transmits();
     test_ack_lost_heartbeat_echo_confirms();
     test_confirmed_then_stm32_restart_resends();
     test_esp32_restart_selector_4x4();
