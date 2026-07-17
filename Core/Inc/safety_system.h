@@ -527,6 +527,17 @@ float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);
 bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
 
+/* §3 (Option A) — dedicated SAFE gate for a LOGICAL-ONLY drive-mode sync while
+ * the vehicle is still in STANDBY.  Returns true only when it is safe to update
+ * the in-RAM 4x4 / tank-turn flags (NOT gear, NOT motion) so the STM32 mode can
+ * track the physical selector BEFORE traction is ever energised — closing the
+ * "boot in the wrong mode" window.  It does NOT widen Safety_IsCommandAllowed():
+ * it grants no motion and no gear change.  Every precondition must hold:
+ *   - state is exactly STANDBY (never SAFE/ERROR/DEGRADED/LIMP/ACTIVE),
+ *   - pedal released and zero applied traction PWM (no demand),
+ *   - vehicle at safe (near-zero) speed.                                     */
+bool    Safety_IsStandbyModeSyncAllowed(void);
+
 /* ---- Local obstacle state machine (STM32 is primary safety authority) ----
  * CAN obstacle frames from ESP32 are advisory only — never mandatory
  * for motion.  The STM32 runs a full autonomous obstacle safety module

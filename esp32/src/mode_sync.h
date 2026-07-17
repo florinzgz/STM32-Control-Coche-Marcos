@@ -105,6 +105,7 @@ public:
             desired_ = modeFlags;
             failed_  = false;   // new intent — allow a fresh sync attempt
             blocked_ = false;   // and retry immediately, not after the cooldown
+            episodeArmed_ = false;  // §4: a new intent starts a fresh age timer
         }
     }
 
@@ -140,6 +141,7 @@ public:
             pending_      = false;
             blocked_      = false;
             blockedArmed_ = false;
+            episodeArmed_ = false;   // §4: in sync — next miss restarts the timer
             return Action::NONE;
         }
 
@@ -203,6 +205,8 @@ public:
     void onAck(AckResult result) {
         if (!pending_) return;
         pending_ = false;
+        lastAck_    = result;   // §4 diagnostics — record every observed ACK
+        hasLastAck_ = true;
         switch (result) {
             case AckResult::OK:
                 confirmed_      = pendingMode_;
@@ -221,9 +225,15 @@ public:
             default:
                 // Temporary — keep the request pending and retry after a
                 // bounded cooldown (armed in update()); never latch FAILED.
+                // §4: a permanent temporary-block never latches FAILED (the
+                // boot fix depends on that), but it IS made visible through the
+                // block counter / reason / request age below, so an operator
+                // can tell a stuck REJECTED apart from a healthy in-sync mode.
                 blocked_      = true;
                 blockedArmed_ = false;
                 failed_       = false;
+                blockReason_  = result;
+                if (blockCount_ != 0xFFFFu) ++blockCount_;
                 break;
         }
     }
@@ -285,12 +295,38 @@ public:
     bool    blocked()        const { return blocked_; }
     uint8_t retries()        const { return retries_; }
 
+    // ---- §4 diagnostics: a temporary block stays pending forever (by design,
+    // so a mode selected before ACTIVE is applied automatically), but it must
+    // NEVER be silent.  These expose enough to tell a healthy pending sync from
+    // a stuck one without flooding the bus (the retry cadence is already paced
+    // by blockedBackoffMs_).
+    /** Number of temporary (REJECTED/BLOCKED) ACKs seen this episode-run. */
+    uint16_t  blockCount()   const { return blockCount_; }
+    /** Whether any ACK has been observed yet (lastAck() valid only if true). */
+    bool      hasLastAck()   const { return hasLastAck_; }
+    /** The most recently observed ACK result. */
+    AckResult lastAck()      const { return lastAck_; }
+    /** Cause of the current temporary block (REJECTED vs BLOCKED). */
+    AckResult blockReason()  const { return blockReason_; }
+    /** How long (ms) the current mode has been unconfirmed (0 when in sync). */
+    uint32_t  requestAgeMs(uint32_t nowMs) const {
+        if (!episodeArmed_) return 0;
+        return (uint32_t)(nowMs - episodeStartMs_);
+    }
+
 private:
     void beginAttempt(uint32_t nowMs, bool firstAttempt) {
         pending_     = true;
         pendingMode_ = desired_;
         sentMs_      = nowMs;
         retries_     = firstAttempt ? 0 : (uint8_t)(retries_ + 1);
+        if (firstAttempt && !episodeArmed_) {
+            // §4: timestamp the start of the current synchronisation episode so
+            // requestAgeMs() can report how long a mode has been unconfirmed
+            // (a long-pending temporary block is thus visible in diagnostics).
+            episodeStartMs_ = nowMs;
+            episodeArmed_   = true;
+        }
     }
 
     const uint32_t ackTimeoutMs_;
@@ -315,6 +351,14 @@ private:
     // it is 4x2, so the STM32 and HMI are synchronised from the physical
     // position rather than an assumed default.
     bool     confirmedValid_ = false;
+
+    // ---- §4 diagnostics state (does not affect the FSM decisions) ----
+    uint16_t  blockCount_     = 0;      ///< Temporary blocks observed this run.
+    bool      hasLastAck_     = false;  ///< An ACK has been observed.
+    AckResult lastAck_        = AckResult::OK;   ///< Last observed ACK result.
+    AckResult blockReason_    = AckResult::OK;   ///< Cause of the current block.
+    uint32_t  episodeStartMs_ = 0;      ///< Start of the current sync episode.
+    bool      episodeArmed_   = false;  ///< episodeStartMs_ has been captured.
 };
 
 #endif  // MODE_SYNC_H

@@ -91,6 +91,7 @@ jobs:
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
               Core/Src/test_motion_inhibit.c \
+              Core/Src/test_standby_mode_sync_gate.c \
               Core/Src/test_wheel_effort.c \
               Core/Src/test_relay_degraded.c \
               Core/Src/test_relay_health_diag.c \
@@ -353,6 +354,12 @@ jobs:
               esp32/src/traction_switch.cpp esp32/src/test_mode_sync.cpp \
               -o /tmp/test_mode_sync
             /tmp/test_mode_sync
+
+            echo "-- test_mode_authority.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_mode_authority.cpp \
+              -o /tmp/test_mode_authority
+            /tmp/test_mode_authority
 
             echo "-- test_motion_inhibit_decode.cpp"
             g++ -std=c++17 -Wall -Wextra -DHOST_TEST \

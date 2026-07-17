@@ -402,6 +402,44 @@ static void test_cold_boot_selector_2wd_transmits() {
     ASSERT(ms.inSync());
 }
 
+// §4 diagnostics: a temporary block never latches FAILED but is fully visible —
+// block counter increments per temporary ACK, lastAck/blockReason record the
+// cause, and requestAgeMs grows while unconfirmed and resets once in sync.
+static void test_block_diagnostics() {
+    const uint32_t BACKOFF = 1000;
+    ModeSync ms(ACK_TIMEOUT_MS, MAX_RETRIES, BACKOFF);
+    ms.setDesired(0x01);
+    ASSERT_EQ(ms.blockCount(), 0);
+    ASSERT(!ms.hasLastAck());
+
+    ASSERT(ms.update(100, true) == Action::SEND);   // episode starts at t=100
+    ms.onAck(AckRes::BLOCKED);
+    ASSERT(ms.hasLastAck());
+    ASSERT(ms.lastAck() == AckRes::BLOCKED);
+    ASSERT(ms.blockReason() == AckRes::BLOCKED);
+    ASSERT_EQ(ms.blockCount(), 1);
+    ASSERT(!ms.failed());
+    ASSERT(ms.requestAgeMs(600) == 500);            // 600 - 100
+
+    // Cooldown, retransmit, blocked again → counter keeps climbing.
+    ASSERT(ms.update(200, true) == Action::NONE);   // arm cooldown
+    ASSERT(ms.update(BACKOFF + 300, true) == Action::SEND);
+    ms.onAck(AckRes::REJECTED);
+    ASSERT(ms.lastAck() == AckRes::REJECTED);
+    ASSERT_EQ(ms.blockCount(), 2);
+    ASSERT(!ms.failed());
+
+    // Vehicle finally accepts it → in sync, age resets to 0.
+    uint32_t t = 3 * BACKOFF;
+    ASSERT(ms.update(t, true) == Action::NONE);
+    ASSERT(ms.update(t + BACKOFF + 1, true) == Action::SEND);
+    ms.onAck(AckRes::OK);
+    ASSERT(ms.inSync());
+    ASSERT(ms.lastAck() == AckRes::OK);
+    ASSERT(ms.update(t + 2 * BACKOFF, true) == Action::NONE);
+    ASSERT(ms.requestAgeMs(t + 3 * BACKOFF) == 0);  // no episode in flight
+}
+
 int main() {
     test_no_send_without_heartbeat();
     test_ack_confirms_and_stops();
@@ -410,6 +448,7 @@ int main() {
     test_invalid_latches_failed();
     test_blocked_retries_until_active();
     test_rejected_is_temporary();
+    test_block_diagnostics();
     test_new_desired_rearms_after_fail();
     test_heartbeat_loss_rearms();
     test_cold_boot_selector_4x4();
