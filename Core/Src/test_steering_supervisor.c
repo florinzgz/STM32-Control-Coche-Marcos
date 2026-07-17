@@ -100,6 +100,7 @@ static SteeringSupervisorInputs healthy_inputs(uint32_t now)
     in.ch5_reason         = INA226_CH_OK;
     in.ch5_current_ma     = 2340;
     in.ch5_sample_id      = now;
+    in.ch5_probe_id       = now;
     in.ch5_sample_valid   = true;
     in.params_flash_present = true;
     in.params_flash_valid   = true;
@@ -116,14 +117,17 @@ static SteeringSupervisorInputs healthy_inputs(uint32_t now)
 }
 
 /* Drive the CH5 debounce past its threshold with a snapshot classified by the
- * REAL Ina226_ClassifyChannel(), returning the classified reason. */
+ * REAL Ina226_ClassifyChannel(), returning the classified reason.  Each loop
+ * pass is a genuinely NEW real acquisition (ch5_probe_id changes), which is
+ * what the per-acquisition debounce requires to advance. */
 static Ina226DiagReason_t run_ch5_fault(Ina226ChannelDiag d, uint32_t now)
 {
     Ina226DiagReason_t reason = Ina226_ClassifyChannel(&d);
     SteeringSupervisorInputs in = healthy_inputs(now);
     in.ch5_reason = reason;
     for (unsigned i = 0; i < STEERING_CH5_FAULT_DEBOUNCE; i++) {
-        in.now_ms = now + i;
+        in.now_ms       = now + i;
+        in.ch5_probe_id = now + i;   /* new real acquisition each pass */
         SteeringSupervisor_Apply(&in);
     }
     return reason;
@@ -346,20 +350,79 @@ static void test_ch5_debounce(void)
     Ina226DiagReason_t r = Ina226_ClassifyChannel(&d);
     SteeringSupervisorInputs in = healthy_inputs(1000);
     in.ch5_reason = r;
-    /* One transient cycle must NOT isolate (debounce = 3). */
+    in.ch5_probe_id = 1;
+    /* One transient acquisition must NOT isolate (debounce = 3). */
     SteeringSupervisor_Apply(&in);
     CHECK(!Steering_IsMechanicalOnly());
-    /* A healthy cycle resets the debounce. */
+    /* A healthy acquisition resets the debounce. */
     in.ch5_reason = INA226_CH_OK;
+    in.ch5_probe_id = 2;
     SteeringSupervisor_Apply(&in);
-    /* Two consecutive faults still short of the threshold: no isolation. */
+    /* Two consecutive faulty acquisitions still short of the threshold. */
     in.ch5_reason = r;
+    in.ch5_probe_id = 3;
     SteeringSupervisor_Apply(&in);
+    in.ch5_probe_id = 4;
     SteeringSupervisor_Apply(&in);
     CHECK(!Steering_IsMechanicalOnly());
-    /* Third consecutive fault → isolate. */
+    /* Third consecutive faulty acquisition → isolate. */
+    in.ch5_probe_id = 5;
     SteeringSupervisor_Apply(&in);
     CHECK(Steering_IsMechanicalOnly());
+}
+
+/* MANDATORY (audit): the 100 Hz supervisor must debounce CH5 faults by REAL
+ * acquisition, not by service call.  A single failed 20 Hz acquisition seen
+ * across five 100 Hz cycles (ch5_probe_id frozen) must count as ONE failure;
+ * a subsequent healthy acquisition resets; only THREE consecutive failed
+ * acquisitions isolate the assist. */
+static void test_ch5_debounce_by_acquisition(void)
+{
+    reset_all();
+    Ina226ChannelDiag d = base_ok_ch5();
+    d.i2c_ack = false; d.detected_address = 0;
+    d.shunt_read_ok = false; d.bus_read_ok = false;
+    Ina226DiagReason_t r = Ina226_ClassifyChannel(&d);
+    CHECK(r == INA226_CH_MISSING);
+
+    /* ---- One failed acquisition, re-read by five 100 Hz service cycles ---- */
+    SteeringSupervisorInputs in = healthy_inputs(1000);
+    in.ch5_reason       = r;
+    in.ch5_sample_valid = false;
+    in.ch5_probe_id     = 100;     /* one real (failed) acquisition */
+    for (unsigned i = 0; i < 5; i++) {
+        in.now_ms = 1000 + i;      /* five 100 Hz cycles, SAME probe */
+        SteeringSupervisor_Apply(&in);
+    }
+    /* Only ONE failure counted → nowhere near the debounce of 3. */
+    CHECK(!Steering_IsMechanicalOnly());
+
+    /* ---- A healthy acquisition resets the debounce ---- */
+    in.ch5_reason       = INA226_CH_OK;
+    in.ch5_sample_valid = true;
+    in.ch5_probe_id     = 101;
+    in.now_ms           = 1010;
+    SteeringSupervisor_Apply(&in);
+    CHECK(!Steering_IsMechanicalOnly());
+
+    /* ---- Only three consecutive FAILED acquisitions isolate ---- */
+    in.ch5_reason       = r;
+    in.ch5_sample_valid = false;
+    /* First failed acquisition (again re-read five times → still one count). */
+    in.ch5_probe_id = 102;
+    for (unsigned i = 0; i < 5; i++) { in.now_ms = 1020 + i; SteeringSupervisor_Apply(&in); }
+    CHECK(!Steering_IsMechanicalOnly());
+    /* Second failed acquisition. */
+    in.ch5_probe_id = 103;
+    for (unsigned i = 0; i < 5; i++) { in.now_ms = 1030 + i; SteeringSupervisor_Apply(&in); }
+    CHECK(!Steering_IsMechanicalOnly());
+    /* Third consecutive failed acquisition → isolate now. */
+    in.ch5_probe_id = 104;
+    in.now_ms = 1040;
+    SteeringSupervisor_Apply(&in);
+    CHECK(Steering_IsMechanicalOnly());
+    CHECK(!Steering_IsElectricalHazard());
+    CHECK(!SteeringSupervisor_WantsSafe());
 }
 
 static void test_params_corrupt_isolates(void)
@@ -496,6 +559,7 @@ int main(void)
     test_ch5_config_isolates();
     test_ch5_polarity_isolates();
     test_ch5_debounce();
+    test_ch5_debounce_by_acquisition();
 
     test_params_corrupt_isolates();
     test_params_fresh_ok();

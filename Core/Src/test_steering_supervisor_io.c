@@ -121,6 +121,7 @@ static Ina226ChannelDiag healthy_ch5(void)
     d.signed_current_ma  = 1820;
     d.sample_age_ms      = 10;
     d.sample_sequence    = 1;
+    d.probe_sequence     = 1;
     d.last_valid_tick_ms = 0;
     d.channel_powered    = true;   /* pre-relay: always powered            */
     d.current_expected   = true;
@@ -147,6 +148,16 @@ static void reset_all(void)
 /* Advance the deterministic tick and run one 100 Hz supervisor cycle. */
 static void service_at(uint32_t tick)
 {
+    g_stub_hal_tick = tick;
+    SteeringSupervisor_Service();
+}
+
+/* Model one genuinely NEW real CH5 acquisition (probe_sequence advances) then
+ * run one 100 Hz supervisor cycle.  Used by the per-acquisition debounce
+ * scenarios so each isolating step is a distinct real probe, not a re-read. */
+static void service_new_acq(uint32_t tick)
+{
+    g_ch5.probe_sequence++;
     g_stub_hal_tick = tick;
     SteeringSupervisor_Service();
 }
@@ -216,12 +227,12 @@ static void test_io_ch5_missing_isolates(void)
     g_ch5.shunt_read_ok = false; g_ch5.bus_read_ok = false;
     g_ch5.fault_reason = Ina226_ClassifyChannel(&g_ch5);
     CHECK(g_ch5.fault_reason == INA226_CH_MISSING);
-    /* Debounce = 3: first two cycles must NOT isolate. */
-    service_at(1000);
-    service_at(1010);
+    /* Debounce = 3 REAL acquisitions: first two must NOT isolate. */
+    service_new_acq(1000);
+    service_new_acq(1010);
     CHECK(!Steering_IsMechanicalOnly());
-    /* Third consecutive fault isolates. */
-    service_at(1020);
+    /* Third consecutive faulty acquisition isolates. */
+    service_new_acq(1020);
     CHECK(Steering_IsMechanicalOnly());
     CHECK(!Steering_IsElectricalHazard());
     CHECK(phys_off_calls > 0 && power_off_calls > 0);
@@ -235,10 +246,10 @@ static void test_io_single_transient_no_isolate(void)
     Ina226ChannelDiag miss = healthy_ch5();
     miss.i2c_ack = false; miss.shunt_read_ok = false; miss.bus_read_ok = false;
     miss.fault_reason = Ina226_ClassifyChannel(&miss);
-    g_ch5 = miss;  service_at(1000);         /* one transient fault          */
-    g_ch5 = healthy_ch5(); g_ch5.sample_sequence = 2; service_at(1010);
-    g_ch5 = healthy_ch5(); g_ch5.sample_sequence = 3; service_at(1020);
-    g_ch5 = healthy_ch5(); g_ch5.sample_sequence = 4; service_at(1030);
+    g_ch5 = miss;  g_ch5.probe_sequence = 1; service_at(1000);  /* one transient fault */
+    g_ch5 = healthy_ch5(); g_ch5.sample_sequence = 2; g_ch5.probe_sequence = 2; service_at(1010);
+    g_ch5 = healthy_ch5(); g_ch5.sample_sequence = 3; g_ch5.probe_sequence = 3; service_at(1020);
+    g_ch5 = healthy_ch5(); g_ch5.sample_sequence = 4; g_ch5.probe_sequence = 4; service_at(1030);
     CHECK(!Steering_IsMechanicalOnly());
     CHECK(safe_state_calls == 0);
 }
@@ -251,7 +262,7 @@ static void test_io_ch5_stale_isolates(void)
     g_ch5.sample_age_ms = INA226_DIAG_STALE_MS + 50;
     g_ch5.fault_reason = Ina226_ClassifyChannel(&g_ch5);
     CHECK(g_ch5.fault_reason == INA226_CH_STALE);
-    service_at(1000); service_at(1010); service_at(1020);
+    service_new_acq(1000); service_new_acq(1010); service_new_acq(1020);
     CHECK(Steering_IsMechanicalOnly());
     CHECK(!Steering_IsElectricalHazard());
     CHECK(safe_state_calls == 0);
@@ -265,7 +276,7 @@ static void test_io_ch5_config_isolates(void)
     g_ch5.config_readback_ok = false;
     g_ch5.fault_reason = Ina226_ClassifyChannel(&g_ch5);
     CHECK(g_ch5.fault_reason == INA226_CH_CONFIG_LOST);
-    service_at(1000); service_at(1010); service_at(1020);
+    service_new_acq(1000); service_new_acq(1010); service_new_acq(1020);
     CHECK(Steering_IsMechanicalOnly());
     CHECK(safe_state_calls == 0);
 }
@@ -280,7 +291,7 @@ static void test_io_ch5_polarity_isolates(void)
     g_ch5.shunt_uv          = -2000;
     g_ch5.fault_reason = Ina226_ClassifyChannel(&g_ch5);
     CHECK(g_ch5.fault_reason == INA226_CH_POLARITY_REVERSED);
-    service_at(1000); service_at(1010); service_at(1020);
+    service_new_acq(1000); service_new_acq(1010); service_new_acq(1020);
     CHECK(Steering_IsMechanicalOnly());
     CHECK(safe_state_calls == 0);
 }
@@ -346,6 +357,44 @@ static void test_io_overcurrent_persist_hazard(void)
 }
 #endif
 
+/* MANDATORY (audit): the 100 Hz Service must debounce CH5 faults by REAL
+ * acquisition (probe_sequence), never by service call.  One failed 20 Hz
+ * acquisition re-read across five 100 Hz cycles counts ONCE; a healthy
+ * acquisition resets; only three consecutive failed acquisitions isolate. */
+static void test_io_debounce_by_acquisition(void)
+{
+    reset_all();
+    Ina226ChannelDiag miss = healthy_ch5();
+    miss.i2c_ack = false; miss.shunt_read_ok = false; miss.bus_read_ok = false;
+    miss.fault_reason = Ina226_ClassifyChannel(&miss);
+    CHECK(miss.fault_reason == INA226_CH_MISSING);
+
+    /* ---- One failed acquisition, five 100 Hz services (probe frozen) ---- */
+    g_ch5 = miss; g_ch5.probe_sequence = 50;
+    for (unsigned i = 0; i < 5; i++) service_at(1000 + i);
+    CHECK(!Steering_IsMechanicalOnly());     /* only ONE failure counted     */
+    CHECK(safe_state_calls == 0);
+
+    /* ---- A healthy acquisition resets the debounce ---- */
+    g_ch5 = healthy_ch5(); g_ch5.probe_sequence = 51;
+    service_at(1010);
+    CHECK(!Steering_IsMechanicalOnly());
+
+    /* ---- Only three consecutive failed acquisitions isolate ---- */
+    g_ch5 = miss; g_ch5.probe_sequence = 52;       /* acquisition #1 */
+    for (unsigned i = 0; i < 5; i++) service_at(1020 + i);
+    CHECK(!Steering_IsMechanicalOnly());
+    g_ch5.probe_sequence = 53;                     /* acquisition #2 */
+    for (unsigned i = 0; i < 5; i++) service_at(1030 + i);
+    CHECK(!Steering_IsMechanicalOnly());
+    g_ch5.probe_sequence = 54;                     /* acquisition #3 → isolate */
+    service_at(1040);
+    CHECK(Steering_IsMechanicalOnly());
+    CHECK(!Steering_IsElectricalHazard());
+    CHECK(!SteeringSupervisor_WantsSafe());
+    CHECK(safe_state_calls == 0);
+}
+
 int main(void)
 {
     test_io_healthy();
@@ -353,6 +402,7 @@ int main(void)
     test_io_sequence_freshness();
     test_io_ch5_missing_isolates();
     test_io_single_transient_no_isolate();
+    test_io_debounce_by_acquisition();
     test_io_ch5_stale_isolates();
     test_io_ch5_config_isolates();
     test_io_ch5_polarity_isolates();

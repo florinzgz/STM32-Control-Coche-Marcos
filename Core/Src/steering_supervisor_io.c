@@ -58,6 +58,12 @@ void SteeringSupervisor_Service(void)
          * sample lands.  This is what the overcurrent confirm step waits on —
          * NOT a value derived from the supervisor's own tick.               */
         in.ch5_sample_id    = ch5->sample_sequence;
+        /* Real acquisition-ATTEMPT identity: the sensor layer increments
+         * probe_sequence EXACTLY ONCE per real CH5 probe (valid OR invalid),
+         * so the 100 Hz supervisor advances the isolable-fault debounce only
+         * once per genuine 20 Hz acquisition, never five times for the same
+         * re-read snapshot.                                                    */
+        in.ch5_probe_id     = ch5->probe_sequence;
         in.ch5_sample_valid = ch5->i2c_ack && ch5->shunt_read_ok &&
                               ch5->bus_read_ok;
     } else {

@@ -98,6 +98,17 @@ typedef struct {
     uint32_t sample_sequence;         /* ++ once per new valid acquisition   */
     uint32_t last_valid_tick_ms;      /* Tick of the newest valid acquisition */
 
+    /* Real acquisition ATTEMPT identity.  probe_sequence increments EXACTLY
+     * ONCE per real execution of the channel probe (Sensor_UpdateChannel5Diag)
+     * — for BOTH a valid AND an invalid read — whereas sample_sequence only
+     * advances on a valid one.  A consumer polling faster than the acquisition
+     * rate (e.g. the 100 Hz EPS supervisor over a 20 Hz INA226 read) uses this
+     * to debounce faults per REAL acquisition: one failed acquisition seen
+     * across five 100 Hz cycles must count as ONE failure, never five.  The
+     * uint32_t wrap is intentional; consumers MUST compare for inequality
+     * (probe != captured), never magnitude.                                   */
+    uint32_t probe_sequence;          /* ++ once per real probe (valid/invalid) */
+
     bool     channel_powered;         /* Power branch expected energised     */
     bool     current_expected;        /* Real steering PWM is being emitted  */
 

@@ -402,8 +402,14 @@ void Steering_SteerPowerOff(void);
  * @brief  Single authority that decides whether the steering-motor isolation
  *         relay (PC12, PIN_RELAY_STEER_PWR) may be energised (contact closed).
  *
- *         Returns true only when the steering is calibrated, the EPS is
- *         available and NOT latched MECHANICAL_ONLY / ELECTRICAL_HAZARD.
+ *         Owner-aware policy (mutually exclusive):
+ *           - EPS assist (owner EPS): true only when the steering is CALIBRATED,
+ *             the EPS is available and NOT latched.
+ *           - Centering / homing (owner CENTERING): true in BOOT/STANDBY while
+ *             the EPS is available and NOT latched — homing NEEDS PC12 BEFORE it
+ *             can calibrate, so calibration is deliberately NOT required here.
+ *           - Any latched isolation (MECHANICAL_ONLY / ELECTRICAL_HAZARD) or no
+ *             owner: always false.
  *         Every relay/diagnostic path (the effective sequencer, the override
  *         tick and Safety_GetRelayStatusByte) consults this one function so a
  *         latched EPS isolation can never re-close PC12 for the rest of the
@@ -449,6 +455,10 @@ bool Safety_SteerRelaySupervise(void);
 /* Test-only: force the raw PC12 GPIO command ON from within the safety
  * translation unit (per-TU GPIO model).  Compiled out of firmware builds. */
 void Safety_TestInjectSteerRelayOn(void);
+/* Test-only companion: force the raw PC12 GPIO command OFF from within the
+ * safety translation unit.  Lets an integration test mirror the centering
+ * FSM's PC12 command into this TU.  Compiled out of firmware builds. */
+void Safety_TestInjectSteerRelayOff(void);
 #endif
 
 /* ---- Relay Override (Engineering / Diagnostic Mode) ----

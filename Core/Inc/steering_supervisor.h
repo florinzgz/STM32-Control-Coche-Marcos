@@ -90,15 +90,20 @@ extern "C" {
 #endif
 
 /* How long the FSM waits (non-blocking) for a genuinely NEW valid CH5 sample
- * to arrive after isolating the motor.  If the current does not disappear —
- * or cannot be confirmed within this window — the danger is treated as
- * non-isolable and escalated.                                               */
+ * to arrive after isolating the motor.  If no fresh valid sample confirms the
+ * outcome within this window the danger is NOT assumed: the assist stays
+ * isolated (MECHANICAL_ONLY) and the isolation is reported as unconfirmed
+ * (ISOLATED_UNCONFIRMED).  A confirm timeout NEVER auto-escalates to
+ * ELECTRICAL_HAZARD / SAFE — missing information is not proof of a hazard.   */
 #ifndef STEERING_OC_CONFIRM_MS
 #define STEERING_OC_CONFIRM_MS        200U
 #endif
 
-/* A CH5 isolable fault must persist this many supervisor cycles before it
- * isolates the assist, so a single transient I2C hiccup never trips it.     */
+/* A CH5 isolable fault must persist this many REAL CH5 acquisitions before it
+ * isolates the assist, so a single transient I2C hiccup never trips it.  The
+ * debounce advances per real acquisition (probe_sequence), NOT per 100 Hz
+ * supervisor cycle, so one failed 20 Hz probe re-read across five 100 Hz
+ * cycles counts as ONE failure, never five.                                  */
 #ifndef STEERING_CH5_FAULT_DEBOUNCE
 #define STEERING_CH5_FAULT_DEBOUNCE   3U
 #endif
@@ -245,6 +250,12 @@ typedef struct {
     int32_t            ch5_current_ma;/* signed_current_ma                     */
     uint32_t           ch5_sample_id; /* real acquisition sequence (changes on new)*/
     bool               ch5_sample_valid;/* shunt+bus+ack read ok this sample    */
+    uint32_t           ch5_probe_id;  /* real acquisition ATTEMPT sequence:
+                                       * ++ once per Sensor_UpdateChannel5Diag
+                                       * (valid OR invalid).  The CH5 isolable-
+                                       * fault debounce advances only when this
+                                       * changes, so one failed 20 Hz probe seen
+                                       * across five 100 Hz cycles counts ONCE. */
 
     /* EPS parameter store. */
     bool params_flash_present;

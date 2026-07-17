@@ -672,11 +672,12 @@ static uint32_t ina_last_ok_tick = 0;
 static bool     ina_ever_sampled = false;
 
 /* ---- Phase-based INA226 power expectation (additive, no new safety path) ----
- * Motor INA226s (ch0..3) are wired AFTER the traction relay and the steering
- * INA226 (ch5) AFTER the steering power relay, so they cannot ACK on I2C until
- * their branch is energised.  Only INAs whose branch SHOULD be powered for the
- * current phase are allowed to count an I2C timeout toward the bus-fault /
- * recovery / Error-Code-11 logic.  The battery INA (ch4) is always expected.
+ * Motor INA226s (ch0..3) are wired AFTER the traction relay, so they cannot
+ * ACK on I2C until their branch is energised.  Only INAs whose branch SHOULD
+ * be powered for the current phase are allowed to count an I2C timeout toward
+ * the bus-fault / recovery / Error-Code-11 logic.  The battery INA (ch4) and
+ * the steering INA (ch5) both sit BEFORE their relay (pre-relay measurement
+ * point) and are therefore always expected regardless of relay state.
  *   ina_expected_mask  — channels expected to be powered this cycle (report).
  *   ina_configured_mask — channels already configured since their last power-up;
  *                         cleared when a channel drops out of the expected mask
@@ -703,6 +704,13 @@ static uint32_t ch5_consecutive_failures = 0;
  * NOT derived from any consumer's HAL_GetTick().  Wraps at 2^32 (documented in
  * Ina226ChannelDiag) — consumers compare for inequality, never magnitude.   */
 static uint32_t ch5_sample_sequence     = 0;
+/* Real CH5 acquisition-ATTEMPT sequence: incremented EXACTLY ONCE every time
+ * Sensor_UpdateChannel5Diag() runs a probe, whether the read is valid OR
+ * invalid.  Unlike ch5_sample_sequence (valid reads only), this lets the EPS
+ * supervisor debounce faults per real acquisition — a single failed 20 Hz
+ * acquisition observed across five 100 Hz supervisor cycles counts ONCE, not
+ * five times.  Wraps at 2^32 — consumers compare for inequality.            */
+static uint32_t ch5_probe_sequence      = 0;
 
 /**
  * @brief  I2C bus recovery via manual SCL clock cycling.
@@ -1161,6 +1169,10 @@ static void Sensor_UpdateChannel5Diag(void)
     /* Freshness + consecutive-failure bookkeeping.  A cycle counts as "OK" only
      * when the chip acked AND both measurement registers read back. */
     bool cycle_ok = d.i2c_ack && d.shunt_read_ok && d.bus_read_ok;
+    /* Every real probe advances the acquisition-attempt sequence EXACTLY ONCE,
+     * regardless of the outcome, so a consumer polling faster than the 20 Hz
+     * acquisition sees the SAME probe id until a genuinely new probe runs.    */
+    ch5_probe_sequence++;
     if (cycle_ok) {
         ch5_last_ok_tick = HAL_GetTick();
         ch5_ever_ok = true;
@@ -1176,6 +1188,7 @@ static void Sensor_UpdateChannel5Diag(void)
     d.sample_age_ms = ch5_ever_ok ? (HAL_GetTick() - ch5_last_ok_tick)
                                   : 0xFFFFFFFFU;
     d.sample_sequence    = ch5_sample_sequence;
+    d.probe_sequence     = ch5_probe_sequence;
     d.last_valid_tick_ms = ch5_ever_ok ? ch5_last_ok_tick : 0U;
     d.consecutive_failures = ch5_consecutive_failures;
     d.recovery_count       = i2c_recovery_attempts;

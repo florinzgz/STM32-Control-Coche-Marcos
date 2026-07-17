@@ -919,19 +919,48 @@ void Steering_SteerPowerOff(void)
  *   measuring (~12 V, ~0 A) even with PC12 OFF.  PC12 is only a RELAY COMMAND;
  *   with no independent contact feedback the RELAY ACTUAL state is UNKNOWN.
  *
- * PC12 may be closed only when the steering is calibrated, the EPS is
- * available and NOT latched MECHANICAL_ONLY / ELECTRICAL_HAZARD.  Returning
- * false forces PC12 OFF everywhere (sequencer, override, telemetry) and never
- * touches the traction relay (PC11), so traction is fully preserved.
+ * PC12 may be closed in exactly two mutually-exclusive situations, and never
+ * while the assist is latched isolated:
+ *   - EPS assist owns the motor (STEER_OWNER_EPS): only once the steering is
+ *     CALIBRATED, the EPS is available and NOT latched.
+ *   - Centering owns the motor (STEER_OWNER_CENTERING): during BOOT/STANDBY
+ *     homing, the EPS available and NOT latched.  Homing must energise PC12
+ *     BEFORE it can find centre and calibrate, so calibration is deliberately
+ *     NOT required in this branch — this is what lets Safety_SteerRelaySupervise
+ *     (which runs BEFORE SteeringCentering_Step) keep PC12 ON during
+ *     CENTERING_WAIT_RAIL instead of tearing the rail down every cycle.
+ *   - MECHANICAL_ONLY / ELECTRICAL_HAZARD (latched) or no owner: always OFF.
+ * Returning false forces PC12 OFF everywhere (sequencer, override, telemetry)
+ * and never touches the traction relay (PC11), so traction is fully preserved.
  */
 bool Steering_MotorRelayAllowed(void)
 {
-    /* Steering_EpsIsAvailable() is false for BOTH latched isolation states
-     * (MECHANICAL_ONLY and ELECTRICAL_HAZARD), so a single check covers every
-     * case in which the steering-motor relay must stay OFF. */
-    return Steering_IsCalibrated() &&
-           Steering_EpsIsAvailable() &&
-           !Steering_IsAssistLatchedOff();
+    /* A latched isolation (MECHANICAL_ONLY or ELECTRICAL_HAZARD) forces PC12
+     * OFF regardless of the owner — steering stays purely mechanical for the
+     * rest of the power cycle. */
+    if (!Steering_EpsIsAvailable() || Steering_IsAssistLatchedOff()) {
+        return false;
+    }
+
+    /* Owner-aware authorisation.  Steering_EpsGetOwner() already collapses to
+     * STEER_OWNER_NONE while latched (handled above), so here it reflects the
+     * live writer decided by SteeringCentering_DecideOwner(). */
+    switch (Steering_EpsGetOwner()) {
+        case STEER_OWNER_EPS:
+            /* Normal assist: the motor may only be energised once calibrated. */
+            return Steering_IsCalibrated();
+
+        case STEER_OWNER_CENTERING: {
+            /* Homing needs the rail BEFORE calibration, but only while the
+             * system is in a homing-capable state (BOOT or STANDBY). */
+            const SystemState_t st = Safety_GetState();
+            return (st == SYS_STATE_BOOT) || (st == SYS_STATE_STANDBY);
+        }
+
+        case STEER_OWNER_NONE:
+        default:
+            return false;
+    }
 }
 
 void Relay_PowerDown(void)
@@ -1120,6 +1149,19 @@ bool Safety_SteerRelaySupervise(void)
 void Safety_TestInjectSteerRelayOn(void)
 {
     HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
+}
+
+/**
+ * @brief  Test-only companion to Safety_TestInjectSteerRelayOn(): drive the
+ *         raw PC12 GPIO command OFF from WITHIN this translation unit.  With
+ *         the per-TU host GPIO model this lets an integration test mirror the
+ *         steering-centering FSM's PC12 command (raised in its OWN TU) into
+ *         the safety TU, so Safety_SteerRelaySupervise() reads back the SAME
+ *         PC12 state the homing FSM commanded.  Compiled out of firmware.
+ */
+void Safety_TestInjectSteerRelayOff(void)
+{
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_RESET);
 }
 #endif
 

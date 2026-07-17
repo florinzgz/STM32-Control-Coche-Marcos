@@ -218,6 +218,10 @@ static OcFsm_t          s_oc;
 static bool             s_want_safe;
 static EpsFaultReason_t s_last_cause;
 static uint8_t          s_ch5_debounce;
+/* Last real CH5 acquisition-attempt id the debounce already accounted for, so
+ * the 100 Hz supervisor never counts the same 20 Hz probe more than once. */
+static uint32_t         s_ch5_last_probe_id;
+static bool             s_ch5_probe_seen;
 
 void SteeringSupervisor_Init(void)
 {
@@ -228,6 +232,8 @@ void SteeringSupervisor_Init(void)
     s_want_safe    = false;
     s_last_cause   = EPS_FAULT_NONE;
     s_ch5_debounce = 0U;
+    s_ch5_last_probe_id = 0U;
+    s_ch5_probe_seen    = false;
 }
 
 /* Isolate on the first non-NONE cause; keep the first cause latched by
@@ -263,17 +269,29 @@ void SteeringSupervisor_Apply(const SteeringSupervisorInputs *in)
                                                   in->z_status));
 
     /* --- (1) INA226 CH5 diagnosis --------------------------------------- *
-     * Debounced so a single transient I2C hiccup never isolates the assist. */
+     * Debounced PER REAL ACQUISITION so a single transient I2C hiccup never
+     * isolates the assist.  SteeringSupervisor_Apply() runs at 100 Hz while
+     * CH5 is acquired at 20 Hz, so the SAME probe snapshot is presented across
+     * five cycles.  The debounce advances ONLY when the real acquisition-
+     * attempt identity (ch5_probe_id) changes — one failed acquisition counts
+     * as ONE, never five — while a healthy real acquisition resets it.  On the
+     * 100 Hz cycles that merely re-read one probe the counter is untouched.   */
     {
         EpsFaultReason_t ch5_cause =
             SteeringSupervisor_Ch5ToEpsFault(in->ch5_reason);
-        if (ch5_cause != EPS_FAULT_NONE) {
-            if (s_ch5_debounce < 0xFFU) s_ch5_debounce++;
-            if (s_ch5_debounce >= STEERING_CH5_FAULT_DEBOUNCE) {
-                supervisor_isolate(ch5_cause);
+        const bool new_probe = (!s_ch5_probe_seen) ||
+                               (in->ch5_probe_id != s_ch5_last_probe_id);
+        if (new_probe) {
+            s_ch5_probe_seen    = true;
+            s_ch5_last_probe_id = in->ch5_probe_id;
+            if (ch5_cause != EPS_FAULT_NONE) {
+                if (s_ch5_debounce < 0xFFU) s_ch5_debounce++;
+                if (s_ch5_debounce >= STEERING_CH5_FAULT_DEBOUNCE) {
+                    supervisor_isolate(ch5_cause);
+                }
+            } else {
+                s_ch5_debounce = 0U;
             }
-        } else {
-            s_ch5_debounce = 0U;
         }
     }
 

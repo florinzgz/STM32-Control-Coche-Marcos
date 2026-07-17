@@ -427,7 +427,8 @@
  *   - Battery INA (ch4) is wired BEFORE the main relay → always powered.
  *   - Motor INAs (ch0..3 = FL,FR,RL,RR) sit AFTER the traction relay →
  *     only powered once the traction relay is energised.
- *   - Steering INA (ch5) sits AFTER the steering power relay.            */
+ *   - Steering INA (ch5) sits BEFORE the steering power relay (pre-relay
+ *     measurement point) → always powered, like the battery INA.        */
 #define INA226_MASK_BATTERY        (1U << INA226_CHANNEL_BATTERY)
 #define INA226_MASK_MOTORS         ((1U << 0) | (1U << 1) | (1U << 2) | (1U << 3))
 #define INA226_MASK_STEER          (1U << INA226_CHANNEL_STEER)

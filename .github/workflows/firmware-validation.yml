@@ -194,6 +194,32 @@ jobs:
               -lm -o /tmp/test_centering_boot_traction
             /tmp/test_centering_boot_traction
 
+            # Owner-aware PC12 gate: the REAL centering homing FSM is driven
+            # through the EXACT main-loop order (Relay_SequencerUpdate ->
+            # Safety_RelayOverrideUpdate -> Safety_SteerRelaySupervise ->
+            # SteeringCentering_DecideOwner -> SteeringCentering_Step ->
+            # SteeringSupervisor_Service).  Proves PC12 stays ON during homing
+            # (supervise no longer tears the rail down before calibration), the
+            # sweep PWM begins with PC12 ON, a healthy run completes, and any
+            # latched fault forces PC12 OFF with no reconnection.
+            echo "-- test_centering_pc12_gate.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_centering_pc12_gate.c \
+              Core/Src/steering_centering.c \
+              Core/Src/steering_centering_diag.c \
+              Core/Src/steering_eps.c \
+              Core/Src/steering_output.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/boot_validation.c \
+              Core/Src/ina226_channel_diag.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_centering_pc12_gate
+            /tmp/test_centering_pc12_gate
+
             # Section-M EPS assist supervisor: faults are injected into the
             # REAL detectors — the genuine Ina226_ClassifyChannel() plus the
             # real parameter/calibration/Z policy inputs — and the supervisor

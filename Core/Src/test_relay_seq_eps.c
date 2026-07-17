@@ -152,6 +152,11 @@ static void bring_up_active_powered(void)
     Steering_EpsInit();
     /* Advance EPS through a clean self-check so it reports ACTIVE. */
     Steering_EpsSetHealthyState(EPS_STATE_ACTIVE);
+    /* Model the main loop's ownership arbitration: once out of homing the EPS
+     * assist loop owns the steering motor (SteeringCentering_DecideOwner →
+     * STEER_OWNER_EPS).  The PC12 gate is owner-aware, so this must be set for
+     * the assist branch to authorise the relay. */
+    Steering_EpsSetOwner(STEER_OWNER_EPS);
 
     Safety_SetState(SYS_STATE_STANDBY);
     Safety_SetState(SYS_STATE_ACTIVE);      /* calls Relay_PowerUp() → TRACTION_ON */
