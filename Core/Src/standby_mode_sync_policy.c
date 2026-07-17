@@ -21,6 +21,12 @@ static float sp_sanitize(float v, float fallback)
 
 StandbySyncResult_t StandbyModeSync_Evaluate(const StandbySyncInput_t *in)
 {
+    /* A missing input bundle is always unsafe.  Keeping this check inside the
+     * productive policy also prevents a future caller or host seam from turning
+     * a diagnostic/configuration error into an unintended mode change. */
+    if (in == 0)
+        return STANDBY_SYNC_BLOCKED;
+
     /* 1 — State must be exactly STANDBY. */
     if (in->state != STANDBY_SYNC_STATE_STANDBY)
         return STANDBY_SYNC_BLOCKED;
