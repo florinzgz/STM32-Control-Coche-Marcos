@@ -10,6 +10,17 @@
   ****************************************************************************
   */
 
+/*
+ * Host integration tests compile safety_system_patched.c as a self-contained
+ * translation unit.  The productive safety_system.c now calls the pure
+ * StandbyModeSync_Evaluate() policy, so bring that productive implementation
+ * into the HOST_TEST unit as well.  Firmware builds do not define HOST_TEST and
+ * continue to compile standby_mode_sync_policy.c exactly once via the Makefile.
+ */
+#ifdef HOST_TEST
+#include "standby_mode_sync_policy.c"
+#endif
+
 /* Rename the legacy public entry points while the production source is
  * included.  Every other function and all module-static state remain in this
  * same translation unit and are therefore available to the corrected entry
@@ -49,9 +60,9 @@ void Safety_CheckRelayHealth(void)
      * A genuine hardware danger is still covered by overcurrent, battery,
      * watchdog, I2C and driver protections; only the unsupported DTC16 latch
      * is removed. */
-    relay_chk_active        = 0U;
-    relay_chk_debounce      = 0U;
-    relay_chk_recovery_tick = 0U;
+    relay_chk_active         = 0U;
+    relay_chk_debounce       = 0U;
+    relay_chk_recovery_tick  = 0U;
     relay_chk_fault_set_tick = 0U;
 }
 
