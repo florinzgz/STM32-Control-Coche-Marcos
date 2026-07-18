@@ -13,11 +13,15 @@
 //   – STM32 restart (reset()) clears all state.
 //   – Gear queue preserved across mode REJECTED/BLOCKED; cleared on INVALID.
 //
-// Compile (from repo root):
-//   g++ -std=c++17 -Wall -Wextra -Iesp32/src \
-//       esp32/src/test_cmd_mode_transaction.cpp \
-//       -o /tmp/test_cmd_mode_transaction
-//   /tmp/test_cmd_mode_transaction
+/* Compile from repository root:
+ *
+ *   g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+ *       esp32/src/test_cmd_mode_transaction.cpp \
+ *       -o /tmp/test_cmd_mode_transaction
+ *   /tmp/test_cmd_mode_transaction
+ *
+ * A block comment is intentional here: a trailing backslash in consecutive
+ * // comments is processed as a line splice and triggers -Wcomment. */
 // =============================================================================
 
 #include "cmd_mode_transaction.h"
@@ -43,6 +47,7 @@ static int g_run = 0, g_fail = 0;
     if (_va != _vb) {                                                       \
         std::printf("FAIL %s:%d  %s == %s (got %ld vs %ld)\n",             \
                     __FILE__, __LINE__, #a, #b, _va, _vb);                 \
+        g_fail++;                                                           \
     }                                                                       \
 } while (0)
 
