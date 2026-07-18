@@ -51,7 +51,7 @@ inline constexpr uint16_t COL_BODY_LIGHT  = 0x4A8B;  // Vehicle body upper band 
 inline constexpr uint16_t COL_BODY_EDGE   = 0x6B6D;  // Body top reflective edge
 
 // Premium OEM cluster accent palette (RGB565) — used by the analog dials,
-// the gear selector and the AMG accent bar.  Pure presentation, no extra RAM.
+// the gear selector and the AMG accent bar.  Pure presentation — no extra RAM.
 inline constexpr uint16_t COL_DIAL_FACE   = 0x18E3;  // Dial interior (slightly darker than BG)
 inline constexpr uint16_t COL_DIAL_TICK   = 0x6B4D;  // Inactive tick / bezel marks
 inline constexpr uint16_t COL_DIAL_RING   = 0x4A69;  // Bezel ring
@@ -282,7 +282,7 @@ inline constexpr int16_t CAN_IND_H       = 24;
 // -------------------------------------------------------------------------
 inline constexpr int FMT_BUF_SMALL  = 16;   // "100%"
 inline constexpr int FMT_BUF_MED    = 24;   // "25.5 km/h"
-inline constexpr int FMT_BUF_LARGE  = 32;   // Longer labels
+inline constexpr int FMT_BUF_LARGE  = 48;   // Long diagnostic rows; avoids snprintf truncation
 
 // -------------------------------------------------------------------------
 // Helper: torque percentage to color
