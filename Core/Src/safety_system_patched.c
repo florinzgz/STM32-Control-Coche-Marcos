@@ -3,8 +3,7 @@
   * @file    safety_system_patched.c
   * @brief   Field-validated safety-policy corrections layered over production.
   *
-  * The production safety_system.c is included once and only audited entry
-  * points are replaced.  Reproduced corrections:
+  * Corrections kept in this narrow wrapper:
   *  - drain FDCAN RX before the 250 ms watchdog decision;
   *  - keep wheel-sensor availability local (never global SENSOR_FAULT);
   *  - treat valid wheel-speed divergence as slip/TCS, not sensor failure;
@@ -56,7 +55,18 @@ extern float    Wheel_GetSpeed_RL(void);
 extern float    Wheel_GetSpeed_RR(void);
 extern bool     Wheel_IsStale(uint8_t idx);
 extern uint8_t  Wheel_GetGpioLevel(uint8_t idx);
+#ifndef HOST_TEST
 extern uint32_t Wheel_GetPulseCount(uint8_t idx);
+#else
+/* Safety integration tests stub the historic wheel API but do not need the new
+ * pulse-recovery evidence.  A weak zero source keeps those tests linkable;
+ * any test that supplies a real/strong Wheel_GetPulseCount overrides it. */
+__attribute__((weak)) uint32_t Wheel_GetPulseCount(uint8_t idx)
+{
+    (void)idx;
+    return 0U;
+}
+#endif
 
 float PR_Wheel_GetSpeed_FL(void)
 {
@@ -216,9 +226,8 @@ static void PR_UpdateWheelDiagnostics(void)
 
 void Safety_CheckSensors(void)
 {
-    /* Preserve all production temperature/current/pedal checks.  Mask wheel
-     * values only inside the legacy aggregate so they cannot increment its
-     * global fault_count or create a SENSOR_FAULT DTC. */
+    /* Preserve production temperature/current/pedal checks.  Mask wheel values
+     * only inside the legacy aggregate so they cannot create a global DTC. */
     pr_mask_wheel_inputs = true;
     Safety_CheckSensors_Legacy();
     pr_mask_wheel_inputs = false;
