@@ -5,6 +5,8 @@
   *
   * Corrections kept in this narrow wrapper:
   *  - drain FDCAN RX before the 250 ms watchdog decision;
+  *  - keep an already-moving vehicle in its current drive state while CAN
+  *    recovers, preserving the local pedal, applied gear, relay and PWM ramp;
   *  - keep wheel-sensor availability local (never global SENSOR_FAULT);
   *  - treat valid wheel-speed divergence as slip/TCS, not sensor failure;
   *  - reduce torque per slipping wheel, never all wheels globally.
@@ -27,6 +29,11 @@ static bool pr_mask_wheel_inputs = false;
 #define Wheel_IsStale            PR_Wheel_IsStale
 #define Wheel_GetGpioLevel       PR_Wheel_GetGpioLevel
 
+/* Rename only the productive entry points replaced below.  Internal safety
+ * calls keep their legacy names inside this translation unit; external calls
+ * (notably CAN_CheckBusOff()) are routed through the wrappers defined later. */
+#define Safety_SetError            Safety_SetError_Legacy
+#define Safety_SetState            Safety_SetState_Legacy
 #define Safety_CheckRelayHealth    Safety_CheckRelayHealth_Legacy
 #define Relay_SequencerUpdate      Relay_SequencerUpdate_Legacy
 #define Safety_RelayOverrideUpdate Safety_RelayOverrideUpdate_Legacy
@@ -40,6 +47,8 @@ static bool pr_mask_wheel_inputs = false;
 #undef Safety_RelayOverrideUpdate
 #undef Relay_SequencerUpdate
 #undef Safety_CheckRelayHealth
+#undef Safety_SetState
+#undef Safety_SetError
 
 #undef Wheel_GetGpioLevel
 #undef Wheel_IsStale
@@ -98,14 +107,148 @@ uint8_t PR_Wheel_GetGpioLevel(uint8_t idx)
     return pr_mask_wheel_inputs ? 1U : Wheel_GetGpioLevel(idx);
 }
 
+/* -------------------------------------------------------------------------
+ * Seamless CAN holdover
+ * -------------------------------------------------------------------------
+ * The STM32 owns the physical pedal, traction control, gear already applied,
+ * wheel/current/temperature protection and the traction relay.  Therefore a
+ * temporary loss of the ESP32/HMI link is not, by itself, a reason to make a
+ * running vehicle jump from >40 % demand to the old 40 % LIMP_HOME ceiling.
+ *
+ * Policy while already ACTIVE/DEGRADED:
+ *   - remain in the same state and preserve the current pedal/PWM ramp;
+ *   - RC override expires independently after 200 ms and control falls back to
+ *     the physical STM32 pedal;
+ *   - freeze the already-applied gear/mode (no new CAN command can arrive);
+ *   - report MODULE_CAN_TIMEOUT as a diagnostic warning;
+ *   - continue FDCAN bus-off recovery in the background;
+ *   - clear the warning only after 500 ms of stable heartbeat and no bus-off.
+ *
+ * Real hardware hazards (overcurrent, battery, temperature, pedal
+ * contradiction, obstacle emergency, EPS electrical hazard, emergency stop)
+ * retain all of their existing state transitions.  Only CAN-only requests to
+ * enter LIMP_HOME are suppressed for a vehicle that was already drive-capable.
+ */
+#define PR_CAN_RECOVERY_STABLE_MS 500U
+
+static bool          pr_can_holdover_active          = false;
+static bool          pr_can_limp_transition_pending  = false;
+static uint32_t      pr_can_recovery_since           = 0U;
+static SystemState_t pr_can_holdover_origin          = SYS_STATE_ACTIVE;
+
+static bool PR_IsDriveState(SystemState_t state)
+{
+    return state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED;
+}
+
+static bool PR_IsCanOnlyError(Safety_Error_t error)
+{
+    return error == SAFETY_ERROR_CAN_TIMEOUT ||
+           error == SAFETY_ERROR_CAN_BUSOFF;
+}
+
+static bool PR_IsBusOffNow(void)
+{
+#ifndef HOST_TEST
+    return CAN_IsBusOff();
+#else
+    return false;
+#endif
+}
+
+static void PR_EnterCanHoldover(void)
+{
+    if (!pr_can_holdover_active) {
+        pr_can_holdover_origin = system_state;
+    }
+    pr_can_holdover_active = true;
+    pr_can_recovery_since = 0U;
+    ServiceMode_SetFault(MODULE_CAN_TIMEOUT, MODULE_FAULT_WARNING);
+}
+
+/* External CAN paths call Safety_SetError() before requesting LIMP_HOME.  Keep
+ * CAN loss diagnostic-only while the vehicle is already moving, but delegate
+ * every non-CAN fault unchanged to the productive safety implementation. */
+void Safety_SetError(Safety_Error_t error)
+{
+    if (PR_IsCanOnlyError(error) && PR_IsDriveState(system_state)) {
+        PR_EnterCanHoldover();
+        pr_can_limp_transition_pending = true;
+        return;
+    }
+
+    pr_can_limp_transition_pending = false;
+    Safety_SetError_Legacy(error);
+}
+
+/* Consume only the LIMP_HOME transition paired with the CAN-only error above.
+ * This precise one-shot guard cannot hide a pedal/sensor/electrical transition
+ * that happens during the same holdover: any non-CAN Safety_SetError() clears
+ * the pending flag and the legacy state transition proceeds normally. */
+void Safety_SetState(SystemState_t new_state)
+{
+    if (new_state == SYS_STATE_LIMP_HOME &&
+        pr_can_limp_transition_pending &&
+        PR_IsDriveState(system_state)) {
+        pr_can_limp_transition_pending = false;
+        PR_EnterCanHoldover();
+        return;
+    }
+
+    pr_can_limp_transition_pending = false;
+    Safety_SetState_Legacy(new_state);
+}
+
 /* Consume any heartbeat already waiting in FIFO0 before evaluating its age.
- * A truly silent or bus-off link still reaches the unchanged legacy policy. */
+ * During a running CAN-only outage, never change state, gear, demand or relay.
+ * STANDBY/SAFE/LIMP_HOME and all non-CAN recovery behaviour remain delegated to
+ * the productive implementation. */
 void Safety_CheckCANTimeout(void)
 {
 #ifndef HOST_TEST
     CAN_ProcessMessages();
     CAN_TxPump();
 #endif
+
+    const uint32_t now = HAL_GetTick();
+    const bool heartbeat_stale = (now - last_can_rx_time) > CAN_TIMEOUT_MS;
+    const bool bus_off = PR_IsBusOffNow();
+
+    if (PR_IsDriveState(system_state) || pr_can_holdover_active) {
+        if (heartbeat_stale || bus_off) {
+            PR_EnterCanHoldover();
+            return;
+        }
+
+        /* Link is physically back.  Keep the current state and torque while
+         * confirming stability; no NEUTRAL injection and no ramp reset. */
+        if (pr_can_holdover_active) {
+            if (pr_can_recovery_since == 0U) {
+                pr_can_recovery_since = now;
+            } else if ((now - pr_can_recovery_since) >=
+                       PR_CAN_RECOVERY_STABLE_MS) {
+                pr_can_holdover_active = false;
+                pr_can_limp_transition_pending = false;
+                pr_can_recovery_since = 0U;
+                ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
+
+                /* Defensive cleanup for a CAN error left by an older path or
+                 * an earlier firmware image; non-CAN errors are untouched. */
+                if (PR_IsCanOnlyError(safety_error)) {
+                    Safety_ClearError(safety_error);
+                }
+            }
+        } else {
+            ServiceMode_ClearFault(MODULE_CAN_TIMEOUT);
+            if (PR_IsCanOnlyError(safety_error)) {
+                Safety_ClearError(safety_error);
+            }
+        }
+        return;
+    }
+
+    /* Not an already-running vehicle: preserve the established boot, STANDBY,
+     * SAFE and genuine LIMP_HOME policies exactly. */
     Safety_CheckCANTimeout_Legacy();
 }
 
