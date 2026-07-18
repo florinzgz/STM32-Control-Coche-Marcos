@@ -8,6 +8,7 @@
   *  - keep an already-moving vehicle in its current drive state while CAN
   *    recovers, preserving the local pedal, applied gear, relay and PWM ramp;
   *  - keep wheel-sensor availability local (never global SENSOR_FAULT);
+  *  - use the productive rear-drive layout as the single source for ABS/TCS;
   *  - treat valid wheel-speed divergence as slip/TCS, not sensor failure;
   *  - reduce torque per slipping wheel, never all wheels globally.
   ****************************************************************************
@@ -39,9 +40,11 @@ static bool pr_mask_wheel_inputs = false;
 #define Safety_RelayOverrideUpdate Safety_RelayOverrideUpdate_Legacy
 #define Safety_CheckCANTimeout     Safety_CheckCANTimeout_Legacy
 #define Safety_CheckSensors        Safety_CheckSensors_Legacy
+#define ABS_Update                 ABS_Update_Legacy
 #define TCS_Update                 TCS_Update_Legacy
 #include "safety_system.c"
 #undef TCS_Update
+#undef ABS_Update
 #undef Safety_CheckSensors
 #undef Safety_CheckCANTimeout
 #undef Safety_RelayOverrideUpdate
@@ -74,6 +77,17 @@ __attribute__((weak)) uint32_t Wheel_GetPulseCount(uint8_t idx)
 {
     (void)idx;
     return 0U;
+}
+
+/* Most safety integration tests do not link motor_control_patched.c.  Keep the
+ * exact rear-drive policy available as a weak host seam; the productive strong
+ * implementation overrides it in the real firmware. */
+__attribute__((weak)) bool Traction_IsWheelDriven(uint8_t wheel)
+{
+    const TractionState_t *ts = Traction_GetState();
+    if (wheel >= NUM_WHEELS || ts == NULL) return false;
+    if (ts->mode4x4 || ts->axisRotation) return true;
+    return wheel == MOTOR_RL || wheel == MOTOR_RR;
 }
 #endif
 
@@ -268,13 +282,7 @@ static float PR_WheelSpeed(uint8_t idx)
 
 static bool PR_WheelIsDriven(uint8_t idx)
 {
-    const TractionState_t *ts = Traction_GetState();
-    if (ts == NULL || idx >= NUM_WHEELS) return false;
-    if (ts->mode4x4 || ts->axisRotation) return true;
-
-    /* Follow the mode actually implemented today.  The separate 4x2 rear-drive
-     * conversion must change motor_control and this helper in the same commit. */
-    return idx < 2U;
+    return Traction_IsWheelDriven(idx);
 }
 
 static bool PR_IsWheelReason(WheelDiag_t reason)
@@ -410,6 +418,79 @@ static float PR_RobustReference(const float spd[NUM_WHEELS], uint8_t candidate)
     }
 
     return (n == 2U) ? v[0] : v[n / 2U];
+}
+
+/* Rear-drive-aware ABS.  Only physically driven, healthy wheels participate in
+ * the reference or receive modulation.  In 4x2 this means RL/RR; FL/FR remain
+ * coasted and can never be mistaken for locked driven wheels. */
+void ABS_Update(void)
+{
+    const uint32_t now = HAL_GetTick();
+
+    if (!ServiceMode_IsEnabled(MODULE_ABS) || !Safety_PowertrainEngaged()) {
+        safety_status.abs_active = false;
+        safety_status.abs_wheel_mask = 0U;
+        for (uint8_t i = 0U; i < NUM_WHEELS; ++i) {
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
+        }
+        return;
+    }
+
+    const float spd[NUM_WHEELS] = {
+        Wheel_GetSpeed_FL(), Wheel_GetSpeed_FR(),
+        Wheel_GetSpeed_RL(), Wheel_GetSpeed_RR()
+    };
+
+    const uint32_t on_duration =
+        (uint32_t)((float)ABS_PULSE_PERIOD_MS * ABS_PULSE_ON_RATIO);
+    const uint32_t off_duration = ABS_PULSE_PERIOD_MS - on_duration;
+    uint8_t mask = 0U;
+
+    for (uint8_t i = 0U; i < NUM_WHEELS; ++i) {
+        if (!PR_WheelHealthyDriven(i) || !isfinite(spd[i]) || spd[i] < 0.0f) {
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
+            continue;
+        }
+
+        const float reference = PR_RobustReference(spd, i);
+        if (reference < 10.0f) {
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
+            continue;
+        }
+
+        const float slip_pct = ((reference - spd[i]) * 100.0f) / reference;
+        if (slip_pct <= (float)ABS_SLIP_THRESHOLD) {
+            abs_pulse_timer[i] = now;
+            abs_pulse_phase[i] = 0U;
+            continue;
+        }
+
+        mask |= (uint8_t)(1U << i);
+        const uint32_t elapsed = now - abs_pulse_timer[i];
+        if (abs_pulse_phase[i]) {
+            if (elapsed >= on_duration) {
+                abs_pulse_phase[i] = 0U;
+                abs_pulse_timer[i] = now;
+            }
+        } else if (elapsed >= off_duration) {
+            abs_pulse_phase[i] = 1U;
+            abs_pulse_timer[i] = now;
+        }
+
+        if (abs_pulse_phase[i]) {
+            const float abs_scale = 1.0f - ABS_BASE_REDUCTION;
+            if (abs_scale < safety_status.wheel_scale[i]) {
+                safety_status.wheel_scale[i] = abs_scale;
+            }
+        }
+    }
+
+    safety_status.abs_active = mask != 0U;
+    safety_status.abs_wheel_mask = mask;
+    if (mask != 0U) sat_inc_u32(&safety_status.abs_activation_count);
 }
 
 void TCS_Update(void)
