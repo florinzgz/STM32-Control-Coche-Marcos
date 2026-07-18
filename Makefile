@@ -17,7 +17,7 @@ C_SOURCES = \
   $(CORE_SRC)/i2c.c \
   $(CORE_SRC)/iwdg.c \
   $(CORE_SRC)/tim.c \
-  $(CORE_SRC)/motor_control.c \
+  $(CORE_SRC)/motor_control_patched.c \
   $(CORE_SRC)/can_handler.c \
   $(CORE_SRC)/busoff_recovery.c \
   $(CORE_SRC)/motion_inhibit.c \
