@@ -1,34 +1,46 @@
 /**
   ****************************************************************************
   * @file    motor_control_patched.c
-  * @brief   Rear-wheel-drive 4x2 policy layered over motor_control.c.
+  * @brief   Rear-wheel-drive 4x2 and installed-hardware tank-turn policy.
   *
   * 4x2 policy:
   *   - RL/RR are the only driven wheels.
   *   - FL/FR remain in COAST while traction or dynamic braking is applied.
   *   - COAST releases all four wheels.
   *   - PARK / low-speed hold BRAKE remains symmetric on all four wheels.
-  *   - 4x4 and tank-turn behaviour remain byte-for-byte in the production
-  *     implementation included below.
   *
-  * The production traction pipeline is still the single source for pedal
+  * Tank-turn policy:
+  *   - The base traction pipeline still calculates every limit, ramp, ABS/TCS
+  *     scale and final PWM.
+  *   - Its output is first evaluated on RAM-backed shadow hardware so an
+  *     incorrect transient direction can never reach a real BTS7960.
+  *   - The installed rear motor/driver polarity is inverted only for tank turn,
+  *     producing the required vehicle-level pattern: both wheels on one side
+  *     travel together and the opposite side travels the other way.
+  *   - 360 mode is momentary: selection at zero pedal is allowed, but after the
+  *     pedal has been pressed, releasing it cancels tank turn, coasts all four
+  *     motors and clears residual ramp/dynamic-brake demand.
+  *   - After automatic release, repeated stale CAN requests cannot re-arm it;
+  *     an explicit MODE_TANK=0 command is required before a new activation.
+  *
+  * The production traction pipeline remains the single source for pedal
   * filtering, ramps, obstacle limiting, Ackermann, current/temperature limits,
-  * ABS/TCS wheel scales and telemetry.  During 4x2 only, it is evaluated in a
-  * shadow 4x4 pass so the rear-wheel safety inputs are used; no shadow write can
-  * reach the real timer/GPIO registers.  The resolved rear commands are then
-  * applied to RL/RR at full 4x2 authority, while FL/FR are explicitly coasted.
+  * ABS/TCS wheel scales and telemetry.
   ****************************************************************************
   */
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "tank_turn_policy.h"
 
-/* Keep the complete productive implementation and rename only its public
- * update entry point.  All module-static state and helpers remain visible in
- * this translation unit to the rear-drive adapter below. */
-#define Traction_Update Traction_Update_Base
+/* Keep the complete productive implementation and rename only the public entry
+ * points wrapped below.  All module-static state and helpers remain visible in
+ * this translation unit to the physical-policy adapter. */
+#define Traction_Update          Traction_Update_Base
+#define Traction_SetAxisRotation Traction_SetAxisRotation_Base
 #include "motor_control.c"
+#undef Traction_SetAxisRotation
 #undef Traction_Update
 
 /* Single source of truth used by traction, wheel diagnostics, ABS and TCS. */
@@ -51,6 +63,7 @@ static RearDriveShadowHw_t pr_shadow_hw[4];
 static bool                 pr_shadow_ready = false;
 static uint16_t             pr_rear_actual_pwm[2] = {0U, 0U};
 static bool                 pr_rear_drive_active = false;
+static TankTurnReleaseState_t pr_tank_release = { false, false };
 
 static void PR_InitShadowHardware(void)
 {
@@ -134,8 +147,168 @@ static void PR_ZeroTractionTelemetry(void)
     Traction_UpdateMotionInhibit(motion_effective_demand, 0U);
 }
 
+/* Public mode setter with a release lockout.  Automatic pedal release calls
+ * Traction_SetAxisRotation_Base(false) directly and leaves release_latched set.
+ * Only an explicit MODE_TANK=0 command reaches this wrapper with enable=false
+ * and clears that latch; repeated stale MODE_TANK=1 frames are ignored. */
+void Traction_SetAxisRotation(bool enable)
+{
+    if (!enable) {
+        Traction_SetAxisRotation_Base(false);
+        TankTurnRelease_Reset(&pr_tank_release);
+        return;
+    }
+
+    if (pr_tank_release.release_latched) {
+        return;
+    }
+
+    if (!traction_state.axisRotation) {
+        pr_tank_release.pedal_seen = false;
+    }
+    Traction_SetAxisRotation_Base(true);
+}
+
+/* Remove every residual source of torque when the pedal-release edge ends a
+ * tank-turn session.  Without this reset, the normal 4x2 path could inherit the
+ * previous pedal ramp for a few cycles and produce an unwanted straight lurch. */
+static void PR_ClearTankTurnMotionState(void)
+{
+    pedal_ema                 = 0.0f;
+    pedal_ramped              = 0.0f;
+    traction_state.demandPct  = 0.0f;
+    prev_demand_pct           = 0.0f;
+    dynbrake_pct              = 0.0f;
+    brake_release_pct         = 0.0f;
+    creep_smooth_pct          = 0.0f;
+    creep_smooth_init         = 0U;
+    creep_demand_active       = false;
+    creep_demand_start_tick   = 0U;
+    neutral_ramp_pct          = 0.0f;
+    neutral_ramp_active       = 0U;
+
+    for (uint8_t i = 0U; i < 4U; ++i) {
+        prev_output_pwm[i] = 0U;
+    }
+
+    trac_phase = TRAC_PHASE_COAST;
+    PR_CoastAllPhysical();
+    PR_ZeroTractionTelemetry();
+}
+
+static bool PR_AutoReleaseTankTurn(void)
+{
+    if (!traction_state.axisRotation) {
+        pr_tank_release.pedal_seen = false;
+        return false;
+    }
+
+    float pedal_pct = sanitize_float(Pedal_GetPercent(), 0.0f);
+    if (!TankTurnRelease_Update(&pr_tank_release, true, pedal_pct)) {
+        return false;
+    }
+
+    /* Internal release: preserve release_latched so a stale/retried CAN frame
+     * carrying MODE_TANK=1 cannot re-enable the motors. */
+    Traction_SetAxisRotation_Base(false);
+    PR_ClearTankTurnMotionState();
+    return true;
+}
+
+static void PR_ApplyTankMotor(Motor_t *motor, uint8_t wheel,
+                              motor_mode_t mode, uint16_t pwm,
+                              int8_t logical_direction)
+{
+    if (mode == MOTOR_MODE_COAST || pwm == 0U) {
+        if (mode == MOTOR_MODE_BRAKE) {
+            Motor_SetMode(motor, MOTOR_MODE_BRAKE, 0);
+        } else {
+            Motor_SetMode(motor, MOTOR_MODE_COAST, 0);
+        }
+        traction_state.wheels[wheel].pwm = 0U;
+        traction_state.wheels[wheel].reverse = false;
+        return;
+    }
+
+    int8_t hw_direction = TankTurn_ResolveHardwareDirection(wheel,
+                                                             logical_direction);
+    int16_t signed_pwm = (hw_direction < 0) ? -(int16_t)pwm : (int16_t)pwm;
+    Motor_SetMode(motor, MOTOR_MODE_DRIVE, signed_pwm);
+    traction_state.wheels[wheel].pwm = pwm;
+    traction_state.wheels[wheel].reverse = (hw_direction < 0);
+}
+
+/* Run the complete productive tank-turn calculation against shadow registers,
+ * then copy only the final, safety-limited result to the real hardware with the
+ * installed rear-polarity correction. */
+static void PR_RunTankTurnPhysical(void)
+{
+    PR_InitShadowHardware();
+
+    Motor_t real_fl = motor_fl;
+    Motor_t real_fr = motor_fr;
+    Motor_t real_rl = motor_rl;
+    Motor_t real_rr = motor_rr;
+
+    motor_fl = PR_MakeShadowMotor(&real_fl, MOTOR_FL);
+    motor_fr = PR_MakeShadowMotor(&real_fr, MOTOR_FR);
+    motor_rl = PR_MakeShadowMotor(&real_rl, MOTOR_RL);
+    motor_rr = PR_MakeShadowMotor(&real_rr, MOTOR_RR);
+
+    Traction_Update_Base();
+
+    const motor_mode_t mode[4] = {
+        motor_fl.current_mode, motor_fr.current_mode,
+        motor_rl.current_mode, motor_rr.current_mode
+    };
+    const int8_t logical_direction[4] = {
+        motor_fl.direction, motor_fr.direction,
+        motor_rl.direction, motor_rr.direction
+    };
+    const uint16_t final_pwm[4] = {
+        traction_state.wheels[MOTOR_FL].pwm,
+        traction_state.wheels[MOTOR_FR].pwm,
+        traction_state.wheels[MOTOR_RL].pwm,
+        traction_state.wheels[MOTOR_RR].pwm
+    };
+
+    motor_fl = real_fl;
+    motor_fr = real_fr;
+    motor_rl = real_rl;
+    motor_rr = real_rr;
+
+    /* A safety transition that occurred during the shadow calculation wins. */
+    if (!PR_IsDriveCapableState(Safety_GetState()) || !Safety_IsPowerReady() ||
+        !traction_state.axisRotation) {
+        PR_CoastAllPhysical();
+        PR_ZeroTractionTelemetry();
+        return;
+    }
+
+    PR_ApplyTankMotor(&motor_fl, MOTOR_FL, mode[MOTOR_FL],
+                      final_pwm[MOTOR_FL], logical_direction[MOTOR_FL]);
+    PR_ApplyTankMotor(&motor_fr, MOTOR_FR, mode[MOTOR_FR],
+                      final_pwm[MOTOR_FR], logical_direction[MOTOR_FR]);
+    PR_ApplyTankMotor(&motor_rl, MOTOR_RL, mode[MOTOR_RL],
+                      final_pwm[MOTOR_RL], logical_direction[MOTOR_RL]);
+    PR_ApplyTankMotor(&motor_rr, MOTOR_RR, mode[MOTOR_RR],
+                      final_pwm[MOTOR_RR], logical_direction[MOTOR_RR]);
+}
+
 void Traction_Update(void)
 {
+    if (PR_AutoReleaseTankTurn()) {
+        return;
+    }
+
+    if (traction_state.axisRotation) {
+        pr_rear_drive_active = false;
+        pr_rear_actual_pwm[0] = 0U;
+        pr_rear_actual_pwm[1] = 0U;
+        PR_RunTankTurnPhysical();
+        return;
+    }
+
     if (!PR_ShouldRunRearDrive4x2()) {
         pr_rear_drive_active = false;
         pr_rear_actual_pwm[0] = 0U;
