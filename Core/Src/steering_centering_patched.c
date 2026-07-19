@@ -14,6 +14,10 @@
   *     300 ms encoder-stall timer advances, giving an effective ~1.2 s start
   *     window per direction instead of interpreting a slow start as an
   *     immediate end stop;
+  *   - PB5 is accepted both as the normal debounced falling-edge event and as
+  *     a stable active-LOW level for three 100 Hz cycles.  This prevents a unit
+  *     already over the centre metal—or an edge missed during boot—from first
+  *     sweeping away and travelling almost the whole steering range;
   *   - PB5 not seeing metal starts/continues the search and does NOT itself
   *     disconnect PC12.  PC12 stays authorised while CENTERING owns the motor;
   *   - genuine encoder faults, range/total timeout, both-direction failure,
@@ -35,19 +39,23 @@
 #include <stdint.h>
 
 /* TIM3 is configured with ARR=4249.  60 % rounds to 2550 timer counts. */
-#define PR434_HOMING_PWM_PERCENT       60U
-#define PR434_HOMING_PWM_COUNTS        2550U
-#define PR434_GEARBOX_TAKEUP_GRACE_MS  900U
+#define PR434_HOMING_PWM_PERCENT          60U
+#define PR434_HOMING_PWM_COUNTS           2550U
+#define PR434_GEARBOX_TAKEUP_GRACE_MS     900U
+#define PR434_CENTER_RAW_CONFIRM_CYCLES   3U
 
 _Static_assert(PR434_HOMING_PWM_PERCENT == 60U,
                "RS390 homing profile must remain at the requested 60 percent");
 _Static_assert(PR434_HOMING_PWM_COUNTS < 4250U,
                "Steering homing PWM must fit the TIM3 period");
+_Static_assert(PR434_CENTER_RAW_CONFIRM_CYCLES >= 2U,
+               "PB5 level fallback must reject a one-cycle EMI transient");
 
 /* Prototypes consumed by the included production FSM after macro routing. */
 static uint32_t PR434_HomingTick(void);
 static void PR434_HomingMotorSetPwm(uint16_t requested_pwm, bool reverse);
 void PR434_SteeringCentering_Init_Base(void);
+void PR434_SteeringCentering_Step_Base(void);
 void PR434_SteeringCentering_UpdateDiag_Base(void);
 
 static bool PR434_SteeringHomingPowerReady(void)
@@ -67,9 +75,11 @@ static bool PR434_SteeringHomingPowerReady(void)
 #define Motor_SetPWM_Steering          PR434_HomingMotorSetPwm
 #define HAL_GetTick                    PR434_HomingTick
 #define SteeringCentering_Init         PR434_SteeringCentering_Init_Base
+#define SteeringCentering_Step         PR434_SteeringCentering_Step_Base
 #define SteeringCentering_UpdateDiag   PR434_SteeringCentering_UpdateDiag_Base
 #include "steering_centering.c"
 #undef SteeringCentering_UpdateDiag
+#undef SteeringCentering_Step
 #undef SteeringCentering_Init
 #undef HAL_GetTick
 #undef Motor_SetPWM_Steering
@@ -105,6 +115,7 @@ typedef struct {
 } PR434_HomingClock_t;
 
 static PR434_HomingClock_t s_pr434_homing_clock;
+static uint8_t s_pr434_center_raw_cycles;
 
 static bool PR434_IsSweep(CenteringState_t state)
 {
@@ -159,12 +170,54 @@ static uint32_t PR434_HomingTick(void)
            active_grace_ms;
 }
 
-/* Public init wrapper: reset the private timing adaptation on every new
- * centering session, then run the unchanged production initialisation. */
+/* Stable level fallback for an active-LOW LJ12A3 center sensor.  The normal
+ * EXTI/debounced event remains authoritative and is still checked inside the
+ * base FSM.  This second path only closes the boot race where PB5 was already
+ * LOW before the falling-edge interrupt was armed or its flag was cleared. */
+static bool PR434_CenterRawStable(void)
+{
+    const bool active = ServiceMode_IsEnabled(MODULE_STEER_CENTER) &&
+        (HAL_GPIO_ReadPin(GPIOB, PIN_STEER_CENTER) == GPIO_PIN_RESET);
+
+    if (!active) {
+        s_pr434_center_raw_cycles = 0U;
+        return false;
+    }
+
+    if (s_pr434_center_raw_cycles < PR434_CENTER_RAW_CONFIRM_CYCLES) {
+        s_pr434_center_raw_cycles++;
+    }
+    return s_pr434_center_raw_cycles >= PR434_CENTER_RAW_CONFIRM_CYCLES;
+}
+
+/* Public init wrapper: reset the private timing and PB5 level adaptation on
+ * every new centering session, then run the unchanged production init. */
 void SteeringCentering_Init(void)
 {
     PR434_ResetHomingClock();
+    s_pr434_center_raw_cycles = 0U;
     PR434_SteeringCentering_Init_Base();
+}
+
+/* Public step wrapper: complete immediately after a stable PB5 active level,
+ * even when no new falling edge can occur because the sensor was already over
+ * metal at startup.  Otherwise delegate the full two-direction base FSM. */
+void SteeringCentering_Step(void)
+{
+    if (centering_state != CENTERING_DONE &&
+        centering_state != CENTERING_FAULT &&
+        PR434_CenterRawStable()) {
+        Centering_Complete();
+        s_pr434_center_raw_cycles = 0U;
+        return;
+    }
+
+    PR434_SteeringCentering_Step_Base();
+
+    if (centering_state == CENTERING_DONE ||
+        centering_state == CENTERING_FAULT) {
+        s_pr434_center_raw_cycles = 0U;
+    }
 }
 
 /* Public diagnostic wrapper: publish the command that reaches TIM3. */
