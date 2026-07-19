@@ -11,6 +11,7 @@
 
 #include "steering_supervisor.h"
 #include "steering_z.h"   /* SteeringZStatus_t values only */
+#include <stddef.h>        /* NULL */
 
 /* ======================================================================
  *  Pure decision helpers
