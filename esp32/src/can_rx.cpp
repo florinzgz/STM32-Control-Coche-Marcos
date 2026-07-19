@@ -13,6 +13,7 @@
 #include <Arduino.h>
 #include <ESP32-TWAI-CAN.hpp>
 #include "can_ids.h"
+#include "mode_authority.h"
 
 namespace can_rx {
 
@@ -252,6 +253,11 @@ static void decodePedal(const CanFrame& f, vehicle::VehicleData& data) {
     }
     pd.timestampMs = millis();
     data.setPedal(pd);
+
+    /* The STM32 pedal is the authority for ending a momentary 360 session.
+     * This observation is read-only and runs on the same Core-1 loop as the
+     * mode arbitration, so no mutex or duplicate ADC interpretation is needed. */
+    mode_authority::observePedal(pd.percent, pd.plausible, pd.contradictory);
 }
 
 static void decodeDebounceDiag(const CanFrame& f, vehicle::VehicleData& data) {
