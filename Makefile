@@ -98,6 +98,7 @@ AS = $(PREFIX)gcc -x assembler-with-cpp
 LD = $(PREFIX)gcc
 OBJCOPY = $(PREFIX)objcopy
 SZ = $(PREFIX)size
+PYTHON ?= python3
 
 # CPU flags
 CPU = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
@@ -123,8 +124,11 @@ vpath %.c $(sort $(dir $(C_SOURCES) $(HAL_SOURCES)))
 vpath %.s $(sort $(dir $(ASM_SOURCES)))
 
 # Build targets
-all: $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
+all: check-cubeide-sources $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
 	$(SZ) $(BUILD_DIR)/$(PROJECT).elf
+
+check-cubeide-sources:
+	$(PYTHON) scripts/check_cubeide_source_exclusions.py
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -149,4 +153,4 @@ clean:
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean
+.PHONY: all check-cubeide-sources clean
