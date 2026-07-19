@@ -62,12 +62,20 @@ void SteeringSupervisor_Service(void)
          * probe_sequence EXACTLY ONCE per real CH5 probe (valid OR invalid),
          * so the 100 Hz supervisor advances the isolable-fault debounce only
          * once per genuine 20 Hz acquisition, never five times for the same
-         * re-read snapshot.                                                    */
+         * re-read snapshot.                                                  */
         in.ch5_probe_id     = ch5->probe_sequence;
         in.ch5_sample_valid = ch5->i2c_ack && ch5->shunt_read_ok &&
                               ch5->bus_read_ok;
     } else {
-        in.ch5_reason       = INA226_CH_UNKNOWN;
+        /* Sensor_GetChannel5Diag() normally returns a permanent static object.
+         * NULL therefore means the diagnostic source itself is unavailable,
+         * not a single transient I2C acquisition.  There is no probe_sequence
+         * that could advance the normal three-acquisition debounce; treating
+         * this as UNKNOWN would count one fault and then remain fail-open
+         * forever.  Isolate the assistance immediately through the shared,
+         * idempotent path.  Mechanical steering and traction remain available. */
+        Steering_DisableAssistFault(EPS_FAULT_CH5_MISSING);
+        in.ch5_reason       = INA226_CH_MISSING;
         in.ch5_sample_valid = false;
     }
 
