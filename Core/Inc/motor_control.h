@@ -43,7 +43,7 @@ typedef struct {
 // Traction system state
 typedef struct {
     WheelState_t wheels[4];  // FL, FR, RL, RR
-    bool mode4x4;            // true = 4x4, false = 4x2 (front only)
+    bool mode4x4;            // true = 4x4, false = 4x2 rear-wheel drive
     float demandPct;         // Global throttle demand 0-100%
     bool axisRotation;       // Tank turn mode
 } TractionState_t;
@@ -121,6 +121,10 @@ float    Traction_GetEffectiveDemandPct(void);
 uint8_t  Traction_GetFinalPwmPct(void);
 uint8_t  Traction_GetWheelFinalPwmPct(uint8_t wheel);
 const TractionState_t* Traction_GetState(void);
+
+/* Single source of truth for the physical driven-wheel layout.
+ * 4x2: RL/RR driven, FL/FR coast.  4x4 or tank turn: all four driven. */
+bool Traction_IsWheelDriven(uint8_t wheel);
 
 /* Steering Functions */
 void Steering_Init(void);

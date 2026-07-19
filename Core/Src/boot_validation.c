@@ -17,6 +17,7 @@
 #include "motor_control.h"
 #include "can_handler.h"
 #include "service_mode.h"
+#include "steering_eps.h"
 #include "main.h"
 #include <math.h>
 
@@ -95,6 +96,23 @@ static bool check_current_plausible(void)
 static bool check_encoder_healthy(void)
 {
     return !Encoder_HasFault();
+}
+
+/**
+ * @brief  True when a steering-encoder fault has been cleanly isolated to a
+ *         purely MECHANICAL_ONLY EPS with no residual electrical hazard.
+ *
+ * The steering is mechanical; the encoder is required only for the electric
+ * ASSIST.  When the assist is latched MECHANICAL_ONLY (motor neutralised —
+ * PA6=0, PA7=0, PC4=LOW, PC12=OFF, owner NONE) and no electrical hazard is
+ * declared, a lone encoder/centering fault must NOT block the global boot
+ * validation (and therefore the STANDBY → ACTIVE traction gate).  The fault
+ * is still reported as a diagnostic (checks_failed bit + ServiceMode fault).
+ */
+static bool encoder_fault_isolated_to_mechanical(void)
+{
+    return Steering_IsMechanicalOnly() &&
+           (Steering_GetEpsState() != EPS_STATE_ELECTRICAL_HAZARD);
 }
 
 /**
@@ -266,9 +284,21 @@ void BootValidation_Run(void)
     else
         boot_status.checks_failed |= BOOT_CHECK_PERIPH_READY;
 
-    /* Overall result */
+    /* Overall result.
+     *
+     * A steering-encoder fault that has been cleanly isolated to a purely
+     * mechanical EPS (MECHANICAL_ONLY, no electrical hazard) must NOT block
+     * global validation: the vehicle keeps full traction while the assist is
+     * off.  We exclude ENCODER_HEALTHY from the pass/fail GATE in that case,
+     * but leave it in checks_failed so it still surfaces as a diagnostic. */
+    uint16_t gate_mask = BOOT_CHECK_ALL_MASK;
+    if ((boot_status.checks_failed & BOOT_CHECK_ENCODER_HEALTHY) &&
+        encoder_fault_isolated_to_mechanical()) {
+        gate_mask &= (uint16_t)~BOOT_CHECK_ENCODER_HEALTHY;
+    }
+
     boot_status.validated =
-        (boot_status.checks_passed == BOOT_CHECK_ALL_MASK);
+        ((boot_status.checks_passed & gate_mask) == gate_mask);
 
     /* Log failed checks via ServiceMode if validation fails.
      * This does NOT force SAFE — the system stays in STANDBY

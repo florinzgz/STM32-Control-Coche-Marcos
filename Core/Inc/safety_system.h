@@ -388,6 +388,79 @@ void Relay_PowerUp(void);
 void Relay_PowerDown(void);
 void Relay_SequencerUpdate(void);
 
+/**
+ * @brief  De-energise ONLY the steering actuator rail (PC12) for EPS
+ *         isolation.  Leaves the traction relay (PC11) and the relay
+ *         sequencer state (relay_seq_state) untouched, so traction power
+ *         readiness — Safety_IsPowerReady() — remains valid.  Once the EPS
+ *         is latched MECHANICAL_ONLY the relay sequencer keeps PC12 OFF, so
+ *         this write does not flap.  Idempotent.
+ */
+void Steering_SteerPowerOff(void);
+
+/**
+ * @brief  Single authority that decides whether the steering-motor isolation
+ *         relay (PC12, PIN_RELAY_STEER_PWR) may be energised (contact closed).
+ *
+ *         Owner-aware policy (mutually exclusive):
+ *           - EPS assist (owner EPS): true only when the steering is CALIBRATED,
+ *             the EPS is available and NOT latched.
+ *           - Centering / homing (owner CENTERING): true in BOOT/STANDBY while
+ *             the EPS is available and NOT latched — homing NEEDS PC12 BEFORE it
+ *             can calibrate, so calibration is deliberately NOT required here.
+ *           - Any latched isolation (MECHANICAL_ONLY / ELECTRICAL_HAZARD) or no
+ *             owner: always false.
+ *         Every relay/diagnostic path (the effective sequencer, the override
+ *         tick and Safety_GetRelayStatusByte) consults this one function so a
+ *         latched EPS isolation can never re-close PC12 for the rest of the
+ *         power cycle.  It NEVER affects the traction relay (PC11).
+ */
+bool Steering_MotorRelayAllowed(void);
+
+/**
+ * @brief  Single authority deciding whether the steering state permits the
+ *         vehicle to enter (or return to) a drive-capable ACTIVE state.
+ *
+ *         true when the steering is calibrated OR the assist has been cleanly
+ *         isolated to EPS_STATE_MECHANICAL_ONLY.  An ELECTRICAL_HAZARD is
+ *         checked precisely and NEVER authorises ACTIVE.
+ */
+bool Steering_AllowsVehicleDrive(void);
+
+/* ---- Steering-motor relay (PC12) policy diagnostic + supervisor ---- */
+
+/**
+ * @brief  Evidence-grade PC12 relay diagnostic (see Safety_GetSteerRelayDiag).
+ *   pc12_commanded        : real GPIO command (RELAY CMD).
+ *   pc12_allowed          : computed authorisation policy (RELAY ALLOWED).
+ *   pc12_policy_violation  : CMD ON while NOT ALLOWED (never hidden).
+ * RELAY ACTUAL (physical contact) is UNKNOWN — no post-relay feedback exists.
+ */
+typedef struct {
+    bool pc12_commanded;
+    bool pc12_allowed;
+    bool pc12_policy_violation;
+} SteerRelayDiag_t;
+
+void Safety_GetSteerRelayDiag(SteerRelayDiag_t *out);
+
+/**
+ * @brief  Steering-motor relay (PC12) policy supervisor.  If PC12 is commanded
+ *         ON while the policy forbids it, asserts (Debug), forces PC12 OFF
+ *         (PC11/traction untouched) and returns true.  Run every safety tick.
+ */
+bool Safety_SteerRelaySupervise(void);
+
+#ifdef HOST_TEST
+/* Test-only: force the raw PC12 GPIO command ON from within the safety
+ * translation unit (per-TU GPIO model).  Compiled out of firmware builds. */
+void Safety_TestInjectSteerRelayOn(void);
+/* Test-only companion: force the raw PC12 GPIO command OFF from within the
+ * safety translation unit.  Lets an integration test mirror the centering
+ * FSM's PC12 command into this TU.  Compiled out of firmware builds. */
+void Safety_TestInjectSteerRelayOff(void);
+#endif
+
 /* ---- Relay Override (Engineering / Diagnostic Mode) ----
  *
  * Allows manual relay GPIO control from the ESP32 engineering menu for
@@ -453,6 +526,17 @@ uint8_t Safety_GetRelayStatusByte(void);
 float   Safety_ValidateThrottle(float requested_pct);
 float   Safety_ValidateSteering(float requested_deg);
 bool    Safety_ValidateModeChange(bool enable_4x4, bool tank_turn);
+
+/* §3 (Option A) — dedicated SAFE gate for a LOGICAL-ONLY drive-mode sync while
+ * the vehicle is still in STANDBY.  Returns true only when it is safe to update
+ * the in-RAM 4x4 / tank-turn flags (NOT gear, NOT motion) so the STM32 mode can
+ * track the physical selector BEFORE traction is ever energised — closing the
+ * "boot in the wrong mode" window.  It does NOT widen Safety_IsCommandAllowed():
+ * it grants no motion and no gear change.  Every precondition must hold:
+ *   - state is exactly STANDBY (never SAFE/ERROR/DEGRADED/LIMP/ACTIVE),
+ *   - pedal released and zero applied traction PWM (no demand),
+ *   - vehicle at safe (near-zero) speed.                                     */
+bool    Safety_IsStandbyModeSyncAllowed(void);
 
 /* ---- Local obstacle state machine (STM32 is primary safety authority) ----
  * CAN obstacle frames from ESP32 are advisory only — never mandatory

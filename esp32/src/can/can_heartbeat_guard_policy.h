@@ -6,134 +6,130 @@
 namespace can_heartbeat {
 
 /*
- * Pure scheduling policy for the ESP32 -> STM32 safety-heartbeat backup.
+ * Pure scheduling + bookkeeping for the single ESP32 -> STM32 safety heartbeat
+ * (0x011) producer.
  *
- * The legacy/main-loop producer remains the normal single producer.  This
- * policy only permits a backup 0x011 when the main loop has stopped kicking
- * for long enough, or after a TX-drop/congestion event.  That avoids two
- * independent counters transmitting continuously while still protecting the
- * STM32 250 ms watchdog from NVS/LED/audio/main-loop stalls.
+ * There is exactly ONE producer: the dedicated FreeRTOS task.  It transmits
+ * 0x011 unconditionally every 100 ms (anchored on absolute time with
+ * vTaskDelayUntil) and, when the TWAI driver rejects a frame, performs one
+ * bounded 10 ms retry.  The legacy Arduino loop() producer has been removed,
+ * so this policy owns the single rolling counter as well.
+ *
+ * The class is HAL-free (no FreeRTOS/TWAI), so the exact cadence, counter and
+ * diagnostic accounting can be verified by host tests.
  *
  * All time arithmetic uses unsigned subtraction, so millis() rollover is
  * handled naturally.
  */
-struct GuardConfig {
-    uint32_t loopStallMs       = 120U;
-    uint32_t retryIntervalMs   = 10U;
-    uint32_t backupIntervalMs  = 80U;
-    uint8_t  queueHighWater    = 4U;
-    uint8_t  queueRecovered    = 2U;
+struct HeartbeatConfig {
+    uint32_t periodMs = 100U;   // unconditional transmit cadence
+    uint32_t retryMs  = 10U;    // bounded retry delay after a rejected frame
 };
 
-struct GuardStats {
-    uint32_t loopStallEvents       = 0U;
-    uint32_t congestionEvents      = 0U;
-    uint32_t backupAttempts        = 0U;
-    uint32_t backupSuccess         = 0U;
-    uint32_t backupFailures        = 0U;
-    uint32_t retries               = 0U;
-    uint32_t skippedNotRunning     = 0U;
-    uint32_t maxObservedLoopGapMs  = 0U;
-    uint32_t lastBackupSuccessMs   = 0U;
-    uint32_t lastBackupFailureMs   = 0U;
+/* Coherent diagnostic snapshot for serial/engineering telemetry. */
+struct HeartbeatDiag {
+    bool     everAccepted    = false;   // at least one frame accepted
+    uint32_t lastAcceptedMs  = 0U;      // millis() of last accepted transmit
+    uint32_t currentGapMs    = 0U;      // now - lastAcceptedMs
+    uint32_t maxGapMs        = 0U;      // worst accepted-to-accepted gap
+    uint32_t txAcceptedCount = 0U;      // frames the driver queued (ESP_OK)
+    uint32_t txRejectedCount = 0U;      // twai_transmit rejections (software)
+    uint32_t retryCount      = 0U;      // bounded retries triggered
+    uint32_t hwTxFailedCount = 0U;      // twai_status_info_t.tx_failed_count
+    uint8_t  queueDepth      = 0U;      // twai_status_info_t.msgs_to_tx
+    uint8_t  twaiState       = 0U;      // twai_state_t
+    bool     busOff          = false;   // controller BUS_OFF
+    bool     errorPassive    = false;   // TEC/REC >= 128 (error-passive)
+    uint32_t resetReason     = 0U;      // esp_reset_reason()
+    uint8_t  counter         = 0U;      // next rolling-counter value to send
 };
 
-class GuardPolicy {
+class HeartbeatProducer {
 public:
-    explicit GuardPolicy(const GuardConfig& cfg = GuardConfig{}) : cfg_(cfg) {}
+    explicit HeartbeatProducer(const HeartbeatConfig& cfg = HeartbeatConfig{})
+        : cfg_(cfg) {}
 
     void reset(uint32_t nowMs) {
-        lastLoopKickMs_ = nowMs;
-        lastAttemptMs_ = nowMs;
-        queueDepth_ = 0U;
-        congestionLatched_ = false;
-        stallLatched_ = false;
-        retryPending_ = false;
-        stats_ = GuardStats{};
+        counter_        = 0U;
+        lastAcceptedMs_ = nowMs;
+        lastAttemptMs_  = nowMs;
+        retryPending_   = false;
+        everAccepted_   = false;
+        diag_           = HeartbeatDiag{};
     }
 
-    void notifyLoopAlive(uint32_t nowMs) {
-        const uint32_t gap = nowMs - lastLoopKickMs_;
-        if (gap > stats_.maxObservedLoopGapMs) {
-            stats_.maxObservedLoopGapMs = gap;
-        }
-        lastLoopKickMs_ = nowMs;
-        stallLatched_ = false;
-    }
+    /* Value that must be placed on the wire for the next attempt.  It only
+     * advances after the driver accepts the frame, so a retry re-sends the
+     * same counter value (no sequence gaps for the STM32). */
+    uint8_t counter() const { return counter_; }
 
-    void observeQueue(uint8_t depth) {
-        queueDepth_ = depth;
-        if (depth >= cfg_.queueHighWater && !congestionLatched_) {
-            congestionLatched_ = true;
-            ++stats_.congestionEvents;
-        }
-    }
-
-    void notifyTxDrop() {
-        if (!congestionLatched_) {
-            congestionLatched_ = true;
-            ++stats_.congestionEvents;
-        }
-    }
-
-    void noteSkippedNotRunning() { ++stats_.skippedNotRunning; }
-
-    bool shouldAttempt(uint32_t nowMs) {
-        const uint32_t loopGap = nowMs - lastLoopKickMs_;
-        if (loopGap > stats_.maxObservedLoopGapMs) {
-            stats_.maxObservedLoopGapMs = loopGap;
-        }
-
-        const bool stalled = loopGap >= cfg_.loopStallMs;
-        if (stalled && !stallLatched_) {
-            stallLatched_ = true;
-            ++stats_.loopStallEvents;
-        }
-
-        const bool queueRecovered = congestionLatched_ &&
-                                    queueDepth_ <= cfg_.queueRecovered;
-        if (!stalled && !queueRecovered && !retryPending_) {
-            return false;
-        }
-
-        const uint32_t minGap = retryPending_ ? cfg_.retryIntervalMs
-                                               : cfg_.backupIntervalMs;
+    /* Is a transmit attempt due at nowMs?  Unconditional 100 ms cadence, or a
+     * 10 ms bounded retry when the previous frame was rejected. */
+    bool due(uint32_t nowMs) const {
+        const uint32_t minGap = retryPending_ ? cfg_.retryMs : cfg_.periodMs;
         return (nowMs - lastAttemptMs_) >= minGap;
     }
 
-    void noteAttempt(uint32_t nowMs, bool success) {
-        lastAttemptMs_ = nowMs;
-        ++stats_.backupAttempts;
+    bool retryPending() const { return retryPending_; }
 
-        if (success) {
-            ++stats_.backupSuccess;
-            stats_.lastBackupSuccessMs = nowMs;
-            congestionLatched_ = false;
-            retryPending_ = false;
-        } else {
-            ++stats_.backupFailures;
-            stats_.lastBackupFailureMs = nowMs;
-            if (!retryPending_) {
-                ++stats_.retries;
+    /* Record the result of a single twai_transmit attempt.  The rolling
+     * counter advances ONLY when the frame was accepted. */
+    void onResult(uint32_t nowMs, bool accepted) {
+        lastAttemptMs_ = nowMs;
+        if (accepted) {
+            if (everAccepted_) {
+                const uint32_t gap = nowMs - lastAcceptedMs_;
+                if (gap > diag_.maxGapMs) diag_.maxGapMs = gap;
             }
+            lastAcceptedMs_ = nowMs;
+            everAccepted_   = true;
+            retryPending_   = false;
+            ++counter_;                 // uint8_t wraps 255 -> 0 naturally
+            ++diag_.txAcceptedCount;
+        } else {
+            ++diag_.txRejectedCount;
+            if (!retryPending_) ++diag_.retryCount;
             retryPending_ = true;
         }
     }
 
-    const GuardStats& stats() const { return stats_; }
-    uint32_t loopAge(uint32_t nowMs) const { return nowMs - lastLoopKickMs_; }
-    bool congestionLatched() const { return congestionLatched_; }
-    bool retryPending() const { return retryPending_; }
+    /* Fold in the latest TWAI controller snapshot for diagnostics. */
+    void observe(uint8_t queueDepth, uint8_t twaiState, bool busOff,
+                 bool errorPassive, uint32_t hwTxFailed) {
+        diag_.queueDepth      = queueDepth;
+        diag_.twaiState       = twaiState;
+        diag_.busOff          = busOff;
+        diag_.errorPassive    = errorPassive;
+        diag_.hwTxFailedCount = hwTxFailed;
+    }
+
+    void setResetReason(uint32_t reason) { diag_.resetReason = reason; }
+
+    /* Coherent snapshot including the live current gap at nowMs. */
+    HeartbeatDiag snapshot(uint32_t nowMs) const {
+        HeartbeatDiag d = diag_;
+        d.everAccepted   = everAccepted_;
+        d.lastAcceptedMs = lastAcceptedMs_;
+        d.currentGapMs   = everAccepted_ ? (nowMs - lastAcceptedMs_) : 0U;
+        d.counter        = counter_;
+        return d;
+    }
+
+    /* Live gap since the last accepted frame (0 before the first one). */
+    uint32_t currentGap(uint32_t nowMs) const {
+        return everAccepted_ ? (nowMs - lastAcceptedMs_) : 0U;
+    }
+
+    uint32_t maxGap() const { return diag_.maxGapMs; }
 
 private:
-    GuardConfig cfg_{};
-    GuardStats stats_{};
-    uint32_t lastLoopKickMs_ = 0U;
-    uint32_t lastAttemptMs_ = 0U;
-    uint8_t queueDepth_ = 0U;
-    bool congestionLatched_ = false;
-    bool stallLatched_ = false;
-    bool retryPending_ = false;
+    HeartbeatConfig cfg_{};
+    HeartbeatDiag   diag_{};
+    uint8_t  counter_        = 0U;
+    uint32_t lastAcceptedMs_ = 0U;
+    uint32_t lastAttemptMs_  = 0U;
+    bool     retryPending_   = false;
+    bool     everAccepted_   = false;
 };
 
 }  // namespace can_heartbeat

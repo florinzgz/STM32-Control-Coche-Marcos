@@ -39,6 +39,7 @@
 #include "config_store.h"
 #include "traction_switch.h"
 #include "mode_sync.h"
+#include "mode_authority.h"
 #include "display_backlight.h"
 #include "stm32_liveness.h"
 #include "twai_recovery.h"
@@ -117,8 +118,6 @@ TFT_eSPI tft = TFT_eSPI();
 static vehicle::VehicleData vehicleData;
 static ScreenManager screenManager;
 
-static uint8_t  heartbeatCounter = 0;
-static unsigned long lastHeartbeatMs  = 0;
 static unsigned long lastSerialMs     = 0;
 static unsigned long lastCanDiagMs    = 0;   // TWAI bus diagnostic interval
 static unsigned long lastBusOffCheckMs = 0;  // TWAI bus-off recovery check
@@ -167,7 +166,19 @@ static constexpr unsigned long GEAR_SEND_DEBOUNCE_MS = 100;
 static constexpr uint8_t GEAR_REVERSE = 1;   // shifter raw value for Reverse
 
 // ---- Mode state tracking ----
-static uint8_t  currentModeFlags  = 0;       // Current mode flags (bit 0=4x4, bit 1=tank)
+// §1 Separación global real: the driver's INTENT and the STM32-CONFIRMED state
+// are kept strictly apart (they used to share one ambiguous currentModeFlags).
+//   - desiredModeFlags : current driver intent, arbitrated from the physical
+//                        selector, remote or tank-turn toggle.  Fed into the
+//                        sync FSM via g_modeSync.setDesired() ONLY.
+//   - appliedModeFlags : mode CONFIRMED exclusively by the STM32 heartbeat echo
+//                        (the SOLE writer is the heartbeat-sync block).  The HMI
+//                        icon shows this, never the mere request.
+//   - localTankTurn    : the local (HMI) tank-turn toggle state, an input to the
+//                        LOCAL branch of the authority arbitration.
+static uint8_t  desiredModeFlags  = 0;       // Driver intent (bit0=4x4, bit1=tank)
+static uint8_t  appliedModeFlags  = 0;       // STM32-confirmed mode (heartbeat)
+static bool     localTankTurn     = false;   // Local tank-turn toggle (desired)
 
 // ---- Drive-mode sync FSM (physical 4x4 selector = source of truth) ----
 // The debounced selector latches its state into g_modeSync.setDesired(); the
@@ -531,7 +542,9 @@ static void sendGearCommand(uint8_t gear) {
     frame.identifier       = can::CMD_MODE;
     frame.extd             = 0;
     frame.data_length_code = 2;
-    frame.data[0]          = currentModeFlags;  // Include current mode flags
+    frame.data[0]          = appliedModeFlags; // STM32-confirmed mode (never
+                                               // drives a mode change from the
+                                               // gear path — the FSM owns that)
     frame.data[1]          = gear;
     ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     ackBeginWait(can::CMD_MODE & 0xFF);  // Low byte of 0x102 = 0x02
@@ -1148,9 +1161,6 @@ void setup() {
     // Apply saved configuration
     {
         const auto& cfg = config_store::get();
-        // Traction mode is now read from physical switch, not NVS
-        currentModeFlags   = traction_sw::getModeFlag()
-                           | (cfg.driveMode & can::MODE_FLAG_TANK_TURN);
         frontLedLocalState = cfg.frontLedEnabled;
         rearLedLocalState  = cfg.rearLedEnabled;
 
@@ -1161,11 +1171,30 @@ void setup() {
         // Restore saved LED decorative mode
         led_ctrl::setDecorMode(static_cast<led_ctrl::DecorMode>(cfg.ledMode));
 
-        // Populate vehicleData with initial mode flags
+        // §1/§2: DESIRED = driver intent from the physical selector position +
+        // the saved tank-turn toggle.  APPLIED stays UNKNOWN (0) until the STM32
+        // heartbeat confirms a real mode, so the HMI icon can never claim 4x4
+        // before the STM32 actually applied it.
+        localTankTurn    = (cfg.driveMode & can::MODE_FLAG_TANK_TURN) != 0;
+        desiredModeFlags = mode_authority::arbitrate(
+            /*remoteActive=*/false, /*remoteModeFlags=*/0,
+            traction_sw::is4WD(), localTankTurn);
+        appliedModeFlags = 0;
+        traction_sw::clearChanged();  // ignore the init-time "changed" latch
+
+        // Populate vehicleData with the APPLIED (confirmed) mode — 0 at boot.
         vehicle::ModeData md;
-        md.modeFlags   = currentModeFlags;
+        md.modeFlags   = appliedModeFlags;
         md.timestampMs = millis();
         vehicleData.setMode(md);
+
+        // Seed the drive-mode sync FSM with the PHYSICAL selector position
+        // read at boot (§B).  This makes the desired mode explicit from the
+        // real GPIO15 position immediately — the FSM starts with
+        // confirmedValid_=false, so the selected mode (even 4x2) is
+        // transmitted and kept pending until the STM32 really confirms it,
+        // instead of assuming a 4x2 default.
+        g_modeSync.setDesired(desiredModeFlags);
     }
 
     // Create render task on Core 0 — offloads all TFT and touch operations
@@ -1404,27 +1433,29 @@ void loop() {
     // Check for pending ACK (non-blocking)
     ackCheck(vehicleData);
 
-    // ---- Sync mode flags from STM32 heartbeat echo ----
+    // ---- Sync APPLIED mode flags from STM32 heartbeat echo ----
     // The STM32 echoes the active mode flags in the heartbeat status_flags
-    // (bits 1-2).  This allows the ESP32 to confirm the STM32 actually
-    // applied the requested mode, even if the ACK was lost.
-    // §1 CAN state validation: this is the SOLE source of truth for UI mode
-    // state.  Tank turn and traction toggles only send CAN commands — the UI
-    // updates here after the STM32 confirms via heartbeat echo.
+    // (bits 1-2).  This is the SOLE writer of appliedModeFlags — the heartbeat
+    // is the only authority for the CONFIRMED (applied) mode.  The desired mode
+    // (selector/remote/tank) is NEVER written here, so an applied value can
+    // never overwrite the driver's intent.
+    // §1 CAN state validation: this is the SOLE source of truth for the UI mode
+    // icon.  Tank turn and traction toggles only change desiredModeFlags — the
+    // UI updates here after the STM32 confirms via heartbeat echo.
     // Guard: only sync after first valid heartbeat has been received
     // (timestampMs is 0 until the first CAN heartbeat is decoded).
     {
         const auto& hb = vehicleData.heartbeat();
         if (hb.timestampMs > 0) {
             uint8_t confirmedFlags = (hb.statusFlags >> 1) & 0x03;
-            if (confirmedFlags != currentModeFlags) {
-                currentModeFlags = confirmedFlags;
+            if (confirmedFlags != appliedModeFlags) {
+                appliedModeFlags = confirmedFlags;
                 vehicle::ModeData md;
-                md.modeFlags   = currentModeFlags;
+                md.modeFlags   = appliedModeFlags;
                 md.timestampMs = millis();
                 vehicleData.setMode(md);
                 // Persist confirmed tank turn state to NVS
-                config_store::setDriveMode(currentModeFlags & can::MODE_FLAG_TANK_TURN);
+                config_store::setDriveMode(appliedModeFlags & can::MODE_FLAG_TANK_TURN);
             }
         }
     }
@@ -1629,52 +1660,52 @@ void loop() {
 
         traction_sw::update(swSpeedKmh);
 
-        if (remoteMotionAuthorityActive) {
-            uint8_t remoteModeFlags = remote_control::getDriveMode();
-            if (remoteModeFlags != currentModeFlags && stm32IsAlive) {
-                currentModeFlags = remoteModeFlags;
-                sendModeCommand(currentModeFlags);
-                vehicle::ModeData md;
-                md.modeFlags   = currentModeFlags;
-                md.timestampMs = millis();
-                vehicleData.setMode(md);
-                Serial.printf("[REMOTE] Mode(CH6) → flags=0x%02X\n", currentModeFlags);
-            }
-        } else if (traction_sw::hasChanged() && stm32IsAlive) {
-            // Physical 4x4 selector is the SOURCE OF TRUTH.  Latch the
-            // debounced selection into the sync FSM; the actual CMD_MODE
-            // transmission (heartbeat-gated, ACK + bounded retry) is driven
-            // by g_modeSync below instead of a single fire-and-forget send.
-            uint8_t tractionBit = traction_sw::getModeFlag();
-            currentModeFlags = (currentModeFlags & can::MODE_FLAG_TANK_TURN)
-                             | tractionBit;
-            g_modeSync.setDesired(currentModeFlags);
-            // NVS persist deferred to heartbeat sync (§1) — only confirmed
-            // state is persisted to avoid stale data on power loss.
-            {
-                vehicle::ModeData md;
-                md.modeFlags   = currentModeFlags;
-                md.timestampMs = millis();
-                vehicleData.setMode(md);
-            }
-            // Play traction audio feedback
-            if (traction_sw::is4WD()) {
-                audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
+        // ---- §2 Single desired-mode arbitration → ModeSync ----------------
+        // Selector, remote and tank-turn all converge here.  arbitrate() picks
+        // the authoritative source.
+        //
+        // Mode authority is controlled by remoteAuthorityActive (who OWNS the
+        // mode).  The kill switch (isKillSwitchActive) inhibits motion/demand
+        // only — it must NOT transfer mode ownership to LOCAL, because that
+        // would silently flip desired from REMOTE 4x4 to LOCAL 4x2 every time
+        // the kill switch is pressed, creating an unexpected mode oscillation
+        // when it is released.
+        {
+            // LOCAL selector edge → audio + log feedback only (no CAN here).
+            if (!remoteAuthorityActive) {
+                if (traction_sw::hasChanged()) {
+                    if (traction_sw::is4WD()) {
+                        audio::play(audio::Sound::TRACTION_4X4, audio::Priority::LO);
+                    } else {
+                        audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
+                    }
+                    Serial.printf("[TRACTION] Switch → %s\n",
+                                  traction_sw::is4WD() ? "4WD" : "2WD");
+                    traction_sw::clearChanged();
+                }
             } else {
-                audio::play(audio::Sound::TRACTION_4X2, audio::Priority::LO);
+                // Under remote authority the physical selector is ignored; drop
+                // any latched edge so it does not fire stale audio on return.
+                traction_sw::clearChanged();
             }
-            Serial.printf("[TRACTION] Switch → %s, flags=0x%02X\n",
-                          traction_sw::is4WD() ? "4WD" : "2WD",
-                          currentModeFlags);
-            traction_sw::clearChanged();
+
+            desiredModeFlags = mode_authority::arbitrate(
+                remoteAuthorityActive,          // mode authority (kill switch does NOT change this)
+                remote_control::getDriveMode(),
+                traction_sw::is4WD(),
+                localTankTurn);
+            g_modeSync.setDesired(desiredModeFlags);
         }
 
-        // ---- Drive-mode sync FSM tick (physical selector path only) ----
-        // Feeds observed CMD_MODE ACKs into the FSM, then advances it: the FSM
-        // (re)transmits the selected mode until the STM32 confirms it or the
-        // bounded retry budget is exhausted.  Skipped while the remote holds
-        // motion authority so the two paths never fight over CMD_MODE.
-        if (!remoteMotionAuthorityActive) {
+        // ---- Drive-mode sync FSM tick (SINGLE CMD_MODE owner) --------------
+        // Runs in BOTH authorities so the remote and the local selector share
+        // one ModeSync (the desired source was arbitrated above).  Feeds
+        // observed CMD_MODE ACKs into the FSM, then advances it: the FSM
+        // (re)transmits the desired mode until the STM32 confirms it (ACK or
+        // heartbeat echo), retrying a lost frame a bounded number of times and
+        // keeping a TEMPORARY block (REJECTED / BLOCKED_BY_SAFETY) pending
+        // without flooding the bus.
+        {
             const auto& ad = vehicleData.ack();
             if (g_modeSync.pending()
                 && ad.cmdIdLow == (can::CMD_MODE & 0xFF)
@@ -1682,15 +1713,37 @@ void loop() {
                                                 (uint32_t)g_modeSendMs)
                 && ad.timestampMs != g_lastModeAckTs) {
                 g_lastModeAckTs = ad.timestampMs;
-                bool ackOk = (ad.result == can::AckResult::OK);
-                g_modeSync.onAck(ackOk ? ModeSync::AckResult::OK
-                                     : ModeSync::AckResult::REJECTED);
-                // [MODESYNC] diagnostic — last ACK + requested/confirmed/retry.
+                // Map the four CAN-level CMD_ACK codes to ModeSync semantics.
+                // Only INVALID is a hard failure; REJECTED (speed/condition)
+                // and BLOCKED_BY_SAFETY (STM32 still in BOOT/STANDBY) are
+                // TEMPORARY — the request is kept pending and retried until the
+                // STM32 accepts it, so a mode selected before the vehicle is
+                // ACTIVE applies automatically without moving the selector.
+                ModeSync::AckResult msRes;
+                switch (ad.result) {
+                    case can::AckResult::OK:
+                        msRes = ModeSync::AckResult::OK; break;
+                    case can::AckResult::INVALID:
+                        msRes = ModeSync::AckResult::INVALID; break;
+                    case can::AckResult::BLOCKED_BY_SAFETY:
+                        msRes = ModeSync::AckResult::BLOCKED; break;
+                    case can::AckResult::REJECTED:
+                    default:
+                        msRes = ModeSync::AckResult::REJECTED; break;
+                }
+                g_modeSync.onAck(msRes);
+                // [MODESYNC] diagnostic (§4) — last ACK + requested/confirmed,
+                // retry count, block counter, block cause and request age so a
+                // stuck temporary block is always visible in the log.
                 Serial.printf(
-                    "[MODESYNC] ack=%s req=0x%02X conf=0x%02X retries=%u%s\n",
-                    ackOk ? "OK" : "REJECT",
-                    g_modeSync.desired(), g_modeSync.confirmed(),
+                    "[MODESYNC] ack=%u req=0x%02X app=0x%02X conf=0x%02X "
+                    "retries=%u blocks=%u ageMs=%lu%s%s\n",
+                    (unsigned)ad.result,
+                    g_modeSync.desired(), appliedModeFlags, g_modeSync.confirmed(),
                     (unsigned)g_modeSync.retries(),
+                    (unsigned)g_modeSync.blockCount(),
+                    (unsigned long)g_modeSync.requestAgeMs(millis()),
+                    g_modeSync.blocked() ? " (blocked/retry)" : "",
                     g_modeSync.failed() ? " -> FAILED" : "");
             }
             if (g_modeSync.update(millis(), stm32IsAlive)
@@ -1699,8 +1752,8 @@ void loop() {
                 sendModeCommand(g_modeSync.sendMode());
                 // [MODESYNC] diagnostic — each (re)transmission attempt.
                 Serial.printf(
-                    "[MODESYNC] send req=0x%02X conf=0x%02X attempt=%u/%u\n",
-                    g_modeSync.desired(), g_modeSync.confirmed(),
+                    "[MODESYNC] send req=0x%02X app=0x%02X conf=0x%02X attempt=%u/%u\n",
+                    g_modeSync.desired(), appliedModeFlags, g_modeSync.confirmed(),
                     (unsigned)g_modeSync.retries() + 1u,
                     (unsigned)MODE_SYNC_MAX_RETRIES + 1u);
             }
@@ -1739,16 +1792,16 @@ void loop() {
                     break;
 
                 case TouchAction::TANK_MODE_TOGGLE:
-                    if (stm32IsAlive && !remoteAuthorityActive) {
-                        currentModeFlags ^= can::MODE_FLAG_TANK_TURN;
+                    if (!remoteAuthorityActive) {
+                        // §2: tank turn only changes the DESIRED mode; it goes
+                        // through the same ModeSync path (arbitrated + sent by
+                        // the FSM above), never a direct CMD_MODE send.  The HMI
+                        // icon updates only after the STM32 confirms via the
+                        // heartbeat echo (appliedModeFlags).
+                        localTankTurn = !localTankTurn;
                         audio::play(audio::Sound::BEEP, audio::Priority::LO);
-                        sendModeCommand(currentModeFlags);
-                        // §1 CAN state validation: do NOT update vehicleData here.
-                        // The heartbeat sync (lines 693-700) updates UI state
-                        // ONLY after the STM32 confirms via statusFlags echo.
-                        // NVS persistence also deferred to heartbeat confirmation.
-                        Serial.printf("[MODE] Tank toggle requested → 0x%02X\n",
-                                      currentModeFlags);
+                        Serial.printf("[MODE] Tank toggle requested → tank=%u\n",
+                                      localTankTurn ? 1u : 0u);
                     }
                     break;
             }
@@ -2254,19 +2307,6 @@ void loop() {
 
         // Single update call drives all animation + FastLED.show()
         led_ctrl::update();
-    }
-
-    // Send heartbeat 0x011 every 100 ms
-    if (now - lastHeartbeatMs >= can::HEARTBEAT_INTERVAL_MS) {
-        lastHeartbeatMs = now;
-
-        CanFrame frame = {};
-        frame.identifier       = can::HEARTBEAT_ESP32;
-        frame.extd             = 0;
-        frame.data_length_code = 1;
-        frame.data[0]          = heartbeatCounter++;
-
-        ESP32Can.writeFrame(frame, 0);  // Non-blocking: drop if TX queue full
     }
 
 #if REMOTE_CONTROL_ENABLED

@@ -21,6 +21,7 @@
 #include "sensor_manager.h"
 #include "safety_system.h"
 #include "steering_centering.h"
+#include "steering_supervisor.h"
 #include "service_mode.h"
 #include "boot_validation.h"
 #include "encoder_reader.h"
@@ -493,6 +494,12 @@ int main(void)
              * disables on any violation.                                */
             Safety_RelayOverrideUpdate();
 
+            /* Steering-motor relay (PC12) policy supervisor — independent,
+             * always-run guard.  If any path leaves PC12 commanded ON while
+             * the assist is isolated (policy forbids it), force PC12 OFF and
+             * surface the violation.  Never touches PC11 / traction.         */
+            Safety_SteerRelaySupervise();
+
             /* Steering motor ownership arbitration.
              *
              * Exactly ONE subsystem may write the steering motor (PC4
@@ -519,6 +526,9 @@ int main(void)
                 if (owner == STEER_OWNER_CENTERING) {
                     SteeringCentering_Step();
                 } else {
+                    /* STEER_OWNER_EPS or STEER_OWNER_NONE.  Steering_ControlLoop()
+                     * self-guards: when the assist is isolated (mechanical-only)
+                     * it simply coasts the motor and never re-drives it. */
                     Steering_ControlLoop();
                 }
 
@@ -527,6 +537,14 @@ int main(void)
                  * cycle.  Pure instrumentation — drives nothing. */
                 SteeringCentering_UpdateDiag();
             }
+
+            /* EPS assist supervisor — connects the real steering detectors
+             * (INA226 CH5 current sensor, EPS parameter store, calibration
+             * store, encoder Z) to the EPS isolation policy.  Any isolable
+             * fault disconnects the assist (mechanical-only) without touching
+             * traction; a proven persistent overcurrent escalates to SAFE.
+             * Runs AFTER the motor writer so it observes this cycle's PWM.  */
+            SteeringSupervisor_Service();
             Traction_Update();
 
             /* Loop-time diagnostic — record duration of this 100 Hz

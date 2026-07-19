@@ -108,6 +108,16 @@ bool SteeringCal_ValidateAtBoot(void);
 bool SteeringCal_IsRestoredValid(void);
 
 /**
+ * @brief  Returns true when a calibration slot is PRESENT in flash (its magic
+ *         word matches a supported format, proving the page was written) but
+ *         is structurally corrupt / fails CRC, and no valid slot could be
+ *         loaded.  Distinguishes a corrupt existing calibration from a fresh,
+ *         never-calibrated device: only the former isolates the EPS assist
+ *         with EPS_FAULT_CALIBRATION_INVALID.
+ */
+bool SteeringCal_IsFlashCorrupt(void);
+
+/**
  * @brief  Get the stored encoder center value.
  *         Only meaningful when SteeringCal_IsRestoredValid() == true.
  */

@@ -41,9 +41,21 @@ bool  Wheel_IsStale(uint8_t idx);
  * sensor fault from expected behaviour when a wheel is turned by hand
  * (e.g. a sensor parked directly over a bolt reads a constant level and
  * emits no edges).  Diagnostic only — must NOT gate any control path.  */
-uint32_t Wheel_GetPulseCount(uint8_t idx);      /* accepted EXTI pulses, 0 if idx invalid   */
-uint32_t Wheel_GetLastEdgeAgeMs(uint8_t idx);   /* ms since last accepted edge (UINT32_MAX invalid) */
+uint32_t Wheel_GetPulseCount(uint8_t idx);      /* completed metal/no-metal cycles (6/rev), 0 invalid */
+uint32_t Wheel_GetLastEdgeAgeMs(uint8_t idx);   /* ms since last completed pulse (UINT32_MAX invalid) */
 uint8_t  Wheel_GetGpioLevel(uint8_t idx);       /* current pin level 0/1, 0xFF if idx invalid */
+
+/* Raw-transition diagnostics added after physical testing showed VALID=0 and
+ * REJECTED=0 for a complete hand rotation.  Wheel inputs are now captured on
+ * BOTH edges and two accepted transitions form one physical target pulse, so
+ * polarity/inversion through an optocoupler cannot hide a complete revolution.
+ * These counters expose the electrical truth before pulse pairing:
+ *   raw transitions > 0, pulses = 0  -> incomplete/noisy transitions;
+ *   raw transitions = 0              -> nothing reached the STM32 pin/EXTI;
+ *   filtered > 0                      -> EMI shorter than SENSOR_DEBOUNCE_US.
+ * Report-only; no safety/control decision may depend on them directly.        */
+uint32_t Wheel_GetRawTransitionCount(uint8_t idx);
+uint32_t Wheel_GetLastRawTransitionAgeMs(uint8_t idx);
 
 /* ---- Steering center inductive sensor (EXTI) ---- */
 void SteeringCenter_IRQHandler(void);

@@ -1326,8 +1326,15 @@ static inline HAL_StatusTypeDef HAL_Init(void) { return HAL_OK; }
 
 static inline uint32_t HAL_GetTick(void)
 {
+#ifdef HOST_TEST_GPIO_MODEL
+    /* Opt-in deterministic tick controlled by the host test (declared by the
+     * test TU) so relay-sequencer timing can be stepped precisely. */
+    extern uint32_t g_stub_hal_tick;
+    return g_stub_hal_tick;
+#else
     static volatile uint32_t tick = 0;
     return tick++;
+#endif
 }
 
 static inline void HAL_IncTick(void)    { }
@@ -1394,13 +1401,42 @@ static inline void HAL_GPIO_DeInit(GPIO_TypeDef *GPIOx, uint32_t GPIO_Pin)
 
 static inline void HAL_GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
 {
+#ifdef HOST_TEST_GPIO_MODEL
+#ifdef HOST_TEST_GPIO_WRITE_OBSERVER
+    /* Opt-in write observer: lets a host test record EVERY commanded pin write
+     * (including a transient SET later cleared in the same tick) so it can
+     * prove, e.g., zero GPIO_PIN_SET writes ever reach PC12 after isolation.
+     * The test TU provides HostGpioWriteObserver(); enabled only when the
+     * HOST_TEST_GPIO_WRITE_OBSERVER macro is defined for the whole link. */
+    extern void HostGpioWriteObserver(void *port, uint16_t pin, int is_set);
+    HostGpioWriteObserver((void *)GPIOx, GPIO_Pin, (PinState != GPIO_PIN_RESET) ? 1 : 0);
+#endif
+    /* Opt-in functional model: reflect the commanded level in ODR so host
+     * integration tests can observe pin state.  Off by default so every
+     * other host test keeps the historical no-op behaviour. */
+    if (PinState != GPIO_PIN_RESET) {
+        GPIOx->ODR |= (uint32_t)GPIO_Pin;
+    } else {
+        GPIOx->ODR &= ~(uint32_t)GPIO_Pin;
+    }
+#else
     (void)GPIOx; (void)GPIO_Pin; (void)PinState;
+#endif
 }
 
 static inline GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 {
+#ifdef HOST_TEST_GPIO_MODEL
+    /* Fold any pending atomic BSRR writes (reset-half only, as used by the
+     * production relay/steer power-off paths) into ODR before reporting. */
+    GPIOx->ODR |=  (GPIOx->BSRR & 0x0000FFFFu);
+    GPIOx->ODR &= ~((GPIOx->BSRR >> 16) & 0x0000FFFFu);
+    GPIOx->BSRR = 0U;
+    return (GPIOx->ODR & (uint32_t)GPIO_Pin) ? GPIO_PIN_SET : GPIO_PIN_RESET;
+#else
     (void)GPIOx; (void)GPIO_Pin;
     return GPIO_PIN_RESET;
+#endif
 }
 
 static inline void HAL_GPIO_TogglePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)

@@ -12,6 +12,7 @@
   */
 
 #include "safety_system.h"
+#include "standby_mode_sync_policy.h"
 #include "main.h"
 #include "battery_limits_store.h"
 #include "sensor_manager.h"
@@ -22,6 +23,7 @@
 #include "can_handler.h"
 #include "math_safety.h"
 #include "relay_health_diag.h"    /* Problem 3: evidence-graded relay/current diagnosis */
+#include "steering_eps.h"         /* EPS local isolation authority (mechanical-only) */
 #include <math.h>       /* isnan(), isinf() — NaN/Inf hardening */
 
 /* ---- Thresholds (from base firmware) ---- */
@@ -879,7 +881,14 @@ void Relay_SequencerUpdate(void)
     switch (relay_seq_state) {
         case RELAY_SEQ_TRACTION_ON:
             if ((now - relay_seq_timestamp) >= RELAY_TRACTION_SETTLE_MS) {
-                HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
+                /* Honour a latched EPS isolation: keep the steering rail
+                 * (PC12) OFF so an isolated assist fault never auto-
+                 * reconnects the motor.  Traction still completes normally
+                 * (relay_seq_state → COMPLETE, PC11 already ON), so
+                 * Safety_IsPowerReady() stays valid for traction.          */
+                if (!Steering_IsAssistLatchedOff()) {
+                    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
+                }
                 relay_seq_state = RELAY_SEQ_COMPLETE;
             }
             break;
@@ -888,6 +897,70 @@ void Relay_SequencerUpdate(void)
         case RELAY_SEQ_COMPLETE:
         default:
             break;
+    }
+}
+
+void Steering_SteerPowerOff(void)
+{
+    /* Atomic single-pin release of the steering actuator rail (PC12).
+     * BSRR upper half clears the bit in one bus cycle.  The traction relay
+     * (PC11) and relay_seq_state are intentionally NOT touched, so traction
+     * power readiness is preserved.  Repeated calls are harmless.          */
+    GPIOC->BSRR = (uint32_t)PIN_RELAY_STEER_PWR << 16U;
+}
+
+/**
+ * @brief  Single authorisation gate for the steering-motor isolation relay
+ *         (PC12).  See the header for the full rationale and topology.
+ *
+ * PHYSICAL TOPOLOGY (owner-confirmed, authoritative):
+ *   12 V BATTERY → INA226 CH5 + SHUNT → [BTS7960 if in this tranche]
+ *                → STEER MOTOR RELAY (PC12) → STEERING MOTOR
+ *   The INA226/shunt (CH5) sit BEFORE the relay, so CH5 stays powered and keeps
+ *   measuring (~12 V, ~0 A) even with PC12 OFF.  PC12 is only a RELAY COMMAND;
+ *   with no independent contact feedback the RELAY ACTUAL state is UNKNOWN.
+ *
+ * PC12 may be closed in exactly two mutually-exclusive situations, and never
+ * while the assist is latched isolated:
+ *   - EPS assist owns the motor (STEER_OWNER_EPS): only once the steering is
+ *     CALIBRATED, the EPS is available and NOT latched.
+ *   - Centering owns the motor (STEER_OWNER_CENTERING): during BOOT/STANDBY
+ *     homing, the EPS available and NOT latched.  Homing must energise PC12
+ *     BEFORE it can find centre and calibrate, so calibration is deliberately
+ *     NOT required in this branch — this is what lets Safety_SteerRelaySupervise
+ *     (which runs BEFORE SteeringCentering_Step) keep PC12 ON during
+ *     CENTERING_WAIT_RAIL instead of tearing the rail down every cycle.
+ *   - MECHANICAL_ONLY / ELECTRICAL_HAZARD (latched) or no owner: always OFF.
+ * Returning false forces PC12 OFF everywhere (sequencer, override, telemetry)
+ * and never touches the traction relay (PC11), so traction is fully preserved.
+ */
+bool Steering_MotorRelayAllowed(void)
+{
+    /* A latched isolation (MECHANICAL_ONLY or ELECTRICAL_HAZARD) forces PC12
+     * OFF regardless of the owner — steering stays purely mechanical for the
+     * rest of the power cycle. */
+    if (!Steering_EpsIsAvailable() || Steering_IsAssistLatchedOff()) {
+        return false;
+    }
+
+    /* Owner-aware authorisation.  Steering_EpsGetOwner() already collapses to
+     * STEER_OWNER_NONE while latched (handled above), so here it reflects the
+     * live writer decided by SteeringCentering_DecideOwner(). */
+    switch (Steering_EpsGetOwner()) {
+        case STEER_OWNER_EPS:
+            /* Normal assist: the motor may only be energised once calibrated. */
+            return Steering_IsCalibrated();
+
+        case STEER_OWNER_CENTERING: {
+            /* Homing needs the rail BEFORE calibration, but only while the
+             * system is in a homing-capable state (BOOT or STANDBY). */
+            const SystemState_t st = Safety_GetState();
+            return (st == SYS_STATE_BOOT) || (st == SYS_STATE_STANDBY);
+        }
+
+        case STEER_OWNER_NONE:
+        default:
+            return false;
     }
 }
 
@@ -967,23 +1040,131 @@ uint8_t Safety_GetRelayStatusByte(void)
      * ESP32 consumers that decode bit 1 = TRAC and bit 2 = DIR continue
      * to work unchanged.                                                 */
     if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) status |= (1U << 1);
-    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR))  status |= (1U << 2);
 
-    /* Sequence complete flag */
-    if (relay_seq_state == RELAY_SEQ_COMPLETE) status |= (1U << 7);
+    /* PC12 (steering-motor isolation relay) — bit 2 reports the REAL GPIO
+     * command (ODR) unconditionally.  It is deliberately NOT masked by the
+     * authorisation policy: masking would hide a policy-violating GPIO order
+     * (PC12 commanded ON while the assist is isolated) from telemetry, CAN and
+     * the HMI.  A commanded-but-not-allowed state is surfaced separately as a
+     * policy violation (Safety_GetSteerRelayDiag / Safety_SteerRelaySupervise)
+     * and forced OFF by the supervisor, but it is never concealed here. */
+    if (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR)) {
+        status |= (1U << 2);
+    }
+
+    /* Sequence complete flag — RELAY_SEQ_COMPLETE requires the traction relay
+     * (PC11) to actually be ON.  Reporting COMPLETE without PC11 energised
+     * would be incoherent, so gate bit 7 on the PC11 command state.          */
+    if (relay_seq_state == RELAY_SEQ_COMPLETE &&
+        HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_TRAC)) {
+        status |= (1U << 7);
+    }
 
 #ifdef DEBUG
-    /* Consistency assertion: COMPLETE implies both relays ON.
-     * Checks bits 1 and 2 (0b0110 = 0x06).  If this fires, the relay
-     * sequencer or power-down has a bug.  No runtime side-effect.       */
-    if ((relay_seq_state == RELAY_SEQ_COMPLETE) && ((status & 0x06U) != 0x06U)) {
-        /* Breakpoint trap for SWD debugger — NOP in release builds */
-        __NOP();
+    /* Consistency assertion: COMPLETE implies the traction relay (PC11, bit 1)
+     * is ON.  Independently, a PC12 command that is NOT authorised by
+     * Steering_MotorRelayAllowed() is a policy violation and must trap so it is
+     * caught in Debug rather than silently masked.  "PC11 ON, PC12 OFF" is a
+     * coherent mechanical-only state and must NOT trip the assertion.        */
+    {
+        bool pc12_commanded = (status & (1U << 2)) != 0U;
+        bool pc12_violation = pc12_commanded && !Steering_MotorRelayAllowed();
+        bool complete_ok    = (relay_seq_state != RELAY_SEQ_COMPLETE) ||
+                              ((status & (1U << 1)) != 0U);
+        if (!complete_ok || pc12_violation) {
+            /* Breakpoint trap for SWD debugger — NOP in release builds */
+            __NOP();
+        }
     }
 #endif
 
     return status;
 }
+
+/**
+ * @brief  Evidence-grade steering-motor relay (PC12) diagnostic.
+ *
+ * Reports the three distinct quantities without conflating them:
+ *   - RELAY CMD     : the REAL GPIO command (ODR) driving PC12.
+ *   - RELAY ALLOWED : the computed authorisation policy
+ *                     (Steering_MotorRelayAllowed()).
+ *   - POLICY VIOL.  : CMD ON while NOT ALLOWED — a real order that violates
+ *                     the isolation policy.  Never hidden.
+ *
+ * RELAY ACTUAL (contact closed / open) is deliberately absent: the installed
+ * hardware has no post-relay feedback, so the physical contact state is
+ * UNKNOWN and must not be fabricated from the command.
+ */
+void Safety_GetSteerRelayDiag(SteerRelayDiag_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    out->pc12_commanded        = (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR)
+                                    == GPIO_PIN_SET);
+    out->pc12_allowed          = Steering_MotorRelayAllowed();
+    out->pc12_policy_violation = out->pc12_commanded && !out->pc12_allowed;
+}
+
+/**
+ * @brief  Steering-motor relay (PC12) policy supervisor.
+ *
+ * Independent, always-run guard: if PC12 is physically commanded ON while the
+ * authorisation policy forbids it (isolated assist), that is a policy
+ * violation.  The violation:
+ *   - is asserted (Debug breakpoint trap);
+ *   - forces PC12 OFF via a single atomic BSRR write (PC11/traction and the
+ *     relay sequencer state are untouched);
+ *   - remains fully visible through Safety_GetSteerRelayDiag() and the relay
+ *     status byte (it is never masked).
+ *
+ * @return true if a policy violation was detected (and corrected) this call.
+ */
+bool Safety_SteerRelaySupervise(void)
+{
+    bool commanded = (HAL_GPIO_ReadPin(GPIOC, PIN_RELAY_STEER_PWR)
+                        == GPIO_PIN_SET);
+    bool violation = commanded && !Steering_MotorRelayAllowed();
+
+    if (violation) {
+#ifdef DEBUG
+        /* Breakpoint trap for SWD debugger — NOP in release builds. */
+        __NOP();
+#endif
+        /* Force PC12 OFF atomically; PC11 (traction) is never touched. */
+        GPIOC->BSRR = (uint32_t)PIN_RELAY_STEER_PWR << 16U;
+    }
+
+    return violation;
+}
+
+#ifdef HOST_TEST
+/**
+ * @brief  Test-only fault injection: drive the raw PC12 GPIO command ON from
+ *         WITHIN this translation unit.  Host tests use per-TU GPIO models, so
+ *         a policy-violating hardware state (PC12 commanded ON while the assist
+ *         is isolated) — which production paths never create — can only be
+ *         reproduced from inside the safety translation unit.  Compiled out of
+ *         firmware builds.
+ */
+void Safety_TestInjectSteerRelayOn(void)
+{
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
+}
+
+/**
+ * @brief  Test-only companion to Safety_TestInjectSteerRelayOn(): drive the
+ *         raw PC12 GPIO command OFF from WITHIN this translation unit.  With
+ *         the per-TU host GPIO model this lets an integration test mirror the
+ *         steering-centering FSM's PC12 command (raised in its OWN TU) into
+ *         the safety TU, so Safety_SteerRelaySupervise() reads back the SAME
+ *         PC12 state the homing FSM commanded.  Compiled out of firmware.
+ */
+void Safety_TestInjectSteerRelayOff(void)
+{
+    HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_RESET);
+}
+#endif
 
 /* ================================================================== */
 /*  Relay Override (Engineering Diagnostic Mode)                        */
@@ -1028,6 +1209,15 @@ void Safety_SetRelayOverride(bool enabled, uint8_t mask)
         }
         relay_override_enabled = true;
         relay_override_mask    = mask & 0x06U;  /* Only bits 1-2 valid (bit 0 reserved) */
+
+        /* EPS isolation guard: never store the steering-motor relay bit
+         * (0x04 / PC12) when the assist is latched MECHANICAL_ONLY or
+         * ELECTRICAL_HAZARD.  A new engineering override must not be able
+         * to re-close the steering-motor relay after isolation — not even
+         * for a single tick.  Traction (bit 1 / PC11) is unaffected.       */
+        if (Steering_IsAssistLatchedOff()) {
+            relay_override_mask &= (uint8_t)~0x04U;
+        }
     } else {
         /* Disable override — turn off all relay GPIOs that were set by override */
         if (relay_override_enabled) {
@@ -1192,9 +1382,36 @@ bool Safety_ValidateModeChange(bool enable_4x4, bool tank_turn)
     return true;
 }
 
-/* ================================================================== */
-/*  Initialization                                                     */
-/* ================================================================== */
+/* §3 (Option A) — see header for the full rationale.  Applies ONLY to the
+ * logical mode flags; the caller must NOT change gear or energise motion when
+ * this returns true.  Deliberately does NOT call Safety_IsCommandAllowed(): its
+ * whole purpose is to permit a mode-flag sync in STANDBY, where command motion
+ * is (correctly) still forbidden.                                             */
+bool Safety_IsStandbyModeSyncAllowed(void)
+{
+    /* Gather all inputs and delegate the decision to the HAL-free policy
+     * (standby_mode_sync_policy.c).  This is the ONLY place that calls
+     * StandbyModeSync_Evaluate() in the firmware.                        */
+
+    /* Wheel speeds → average km/h. */
+    float avg_speed = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                       Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) / 4.0f;
+
+    /* Internal demand from the traction state. */
+    const TractionState_t *ts = Traction_GetState();
+    float demand_pct = (ts != NULL) ? ts->demandPct : 100.0f;
+
+    StandbySyncInput_t in;
+    in.state               = (uint8_t)system_state;
+    in.pedalPct            = sanitize_float(Pedal_GetPercent(), 100.0f);
+    in.demandPct           = sanitize_float(demand_pct, 100.0f);
+    in.effectiveDemandPct  = sanitize_float(Traction_GetEffectiveDemandPct(), 100.0f);
+    in.finalPwmPct         = Traction_GetFinalPwmPct();
+    in.avgSpeedKmh         = sanitize_float(avg_speed, MODE_CHANGE_MAX_SPEED_KMH + 1.0f);
+    in.errorOrHazardActive = false;   /* existing gate: state check covers this */
+
+    return (StandbyModeSync_Evaluate(&in) == STANDBY_SYNC_ALLOW_LOGICAL_ONLY);
+}
 
 void Safety_Init(void)
 {
@@ -1725,6 +1942,14 @@ void TCS_Reset(void)    { safety_status.tcs_active = false; safety_status.tcs_wh
 void Safety_CheckCurrent(void)
 {
     for (uint8_t i = 0; i < NUM_INA226; i++) {
+        /* Steering (CH5) is EPS-owned: its overcurrent is handled exclusively
+         * by the steering supervisor's dedicated FSM (isolate the assist relay
+         * PC12, stay MECHANICAL_ONLY, keep the vehicle ACTIVE with full
+         * traction; only a proven persistent hazard escalates).  Routing CH5
+         * through this GLOBAL check would wrongly force DEGRADED/SAFE on an
+         * isolable steering fault, so skip it here.                          */
+        if (i == INA226_CHANNEL_STEER) continue;
+
         /* Skip disabled current sensors (service mode).
          * Traced to base firmware car_sensors.cpp:
          *   if (!cfg.currentSensorsEnabled) { return 0.0f; }         */
@@ -1860,6 +2085,37 @@ void Safety_CheckTemperature(void)
 
 /* ---- CAN Heartbeat Timeout --------------------------------------- */
 
+/**
+ * @brief  Single authority deciding whether the steering state permits the
+ *         vehicle to enter (or return to) a drive-capable ACTIVE state.
+ *
+ * The steering is MECHANICAL; the EPS motor only assists.  A centering or
+ * encoder fault during boot latches the EPS to MECHANICAL_ONLY, but the
+ * vehicle must still gain traction — an isolated assist loss must never
+ * immobilise the car in STANDBY/LIMP_HOME.  ACTIVE is therefore permitted
+ * when the assist is calibrated OR when it has been cleanly isolated to
+ * purely mechanical steering (EPS_STATE_MECHANICAL_ONLY).
+ *
+ * An ELECTRICAL_HAZARD must NEVER authorise ACTIVE.  It is guarded two ways:
+ * an explicit Steering_IsElectricalHazard() veto (so it can never promote even
+ * if the steering happens to still read "calibrated"), and — for the benign,
+ * isolable case — a precise check against EPS_STATE_MECHANICAL_ONLY only.  The
+ * hazard is handed to the safety subsystem for SAFE/ERROR escalation elsewhere;
+ * meanwhile the vehicle may still crawl in LIMP_HOME but never enters ACTIVE.
+ */
+bool Steering_AllowsVehicleDrive(void)
+{
+    /* A genuine electrical danger vetoes ACTIVE unconditionally. */
+    if (Steering_IsElectricalHazard()) {
+        return false;
+    }
+
+    EpsState_t eps = Steering_GetEpsState();
+
+    return Steering_IsCalibrated() ||
+           (eps == EPS_STATE_MECHANICAL_ONLY);
+}
+
 void Safety_CheckCANTimeout(void)
 {
     /* SAFETY FIX: Global CAN watchdog — detect total bus silence.
@@ -1916,15 +2172,18 @@ void Safety_CheckCANTimeout(void)
          * practical calibration window at every (re-)arm cycle.     */
         if (system_state == SYS_STATE_STANDBY &&
             safety_error == SAFETY_ERROR_NONE &&
-            Steering_IsCalibrated() &&
+            Steering_AllowsVehicleDrive() &&
             BootValidation_IsPassed() &&
             !Startup_IsInhibited()) {
             Safety_SetState(SYS_STATE_ACTIVE);
         }
         /* CAN restored from LIMP_HOME → attempt ACTIVE.
          * Heartbeat has appeared and system is healthy.
-         * ACTIVE still requires steering calibration — if centering
-         * never completed, the vehicle stays in LIMP_HOME.
+         * ACTIVE requires the steering to permit driving — either the
+         * assist is calibrated, or it has been cleanly isolated to
+         * MECHANICAL_ONLY (an isolable EPS fault must never pin the
+         * vehicle in LIMP_HOME).  If steering neither calibrated nor
+         * mechanical-only, the vehicle stays in LIMP_HOME.
          * Clear both CAN_TIMEOUT and CAN_BUSOFF: if the bus recovered
          * on its own (auto-recovery) without CAN_CheckBusOff() completing
          * its reinit sequence, the residual BUSOFF error would otherwise
@@ -1935,7 +2194,7 @@ void Safety_CheckCANTimeout(void)
          * prevents premature reactivation from a single heartbeat on a
          * flapping CAN bus (e.g. intermittent short, bad termination).  */
         if (system_state == SYS_STATE_LIMP_HOME &&
-            Steering_IsCalibrated()) {
+            Steering_AllowsVehicleDrive()) {
             if (!limphome_recovery_pending) {
                 limphome_recovery_pending = 1;
                 limphome_recovery_since   = HAL_GetTick();
@@ -2417,13 +2676,12 @@ void Safety_CheckSensors(void)
  *
  * Delegates the actual detection to Encoder_CheckHealth() in
  * motor_control.c (which monitors range, jumps and frozen values).
- * If a fault is detected, raise SAFETY_ERROR_SENSOR_FAULT and
- * transition to DEGRADED state.  Steering is neutralised (no PID
- * without encoder feedback), but traction remains operational at
- * reduced power so the vehicle can "drive home".
- *
- * Traced to base firmware limp_mode.cpp: steering not centered →
- * LimpState::LIMP (40 % power, 50 % speed).
+ * A steering-encoder fault is an ISOLABLE ASSIST fault: the encoder is
+ * only needed for the electric assist, not for the mechanical steering.
+ * On fault the assist is disconnected via Steering_DisableAssistFault()
+ * (motor isolated, steering purely mechanical) while the GLOBAL vehicle
+ * state stays ACTIVE and traction is fully preserved.  No DEGRADED, no
+ * LIMP_HOME, no traction reduction.
  */
 void Safety_CheckEncoder(void)
 {
@@ -2436,17 +2694,15 @@ void Safety_CheckEncoder(void)
 
     if (Encoder_HasFault()) {
         ServiceMode_SetFault(MODULE_STEER_ENCODER, MODULE_FAULT_ERROR);
-        /* Only set the error once to avoid overwriting a different
-         * existing fault code.                                      */
-        if (safety_error == SAFETY_ERROR_NONE) {
-            Safety_SetError(SAFETY_ERROR_SENSOR_FAULT);
-        }
-        /* Neutralise steering (no PID without encoder) but keep
-         * traction alive in DEGRADED mode for "drive home".         */
-        Steering_Neutralize();
-        Safety_SetState(SYS_STATE_DEGRADED);
-        Safety_SetDegradedLevel(DEGRADED_L1,
-                                DEGRADED_REASON_ENCODER_FAULT);
+
+        /* Isolable assist fault: the steering encoder is required only for
+         * the ELECTRIC ASSIST, never for the mechanical steering itself.
+         * Disconnect the assist (PA6=PA7=0, PC4=LOW, PC12=OFF, owner=NONE)
+         * and leave purely mechanical steering.  The global vehicle state
+         * stays ACTIVE and traction is fully preserved — no DEGRADED, no
+         * SENSOR_FAULT, no reduced power.  The fault is reported locally via
+         * the EPS state / centering diagnostic (0x316) and the HMI.        */
+        Steering_DisableAssistFault(EPS_FAULT_ENCODER_AB);
     } else {
         ServiceMode_ClearFault(MODULE_STEER_ENCODER);
     }

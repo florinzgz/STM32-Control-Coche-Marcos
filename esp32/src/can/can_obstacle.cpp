@@ -42,9 +42,10 @@ void init() {
     initialized_  = true;
 
     // twaiInit() has already completed when this module is initialized from
-    // setup().  Start the deterministic high-priority 0x011 producer here.
-    // It transmits every 100 ms from its own FreeRTOS task and never depends on
-    // obstacle data, Arduino loop(), TFT, audio, LEDs or NVS work.
+    // setup().  Start the single, deterministic 0x011 producer here.  It
+    // transmits unconditionally every 100 ms from its own FreeRTOS task and
+    // never depends on obstacle data, Arduino loop(), TFT, audio, LEDs or NVS
+    // work.
     (void)can_heartbeat::init();
 
     Serial.println("[CAN_OBS] Obstacle TX initialized");
@@ -54,10 +55,6 @@ void update() {
     if (!initialized_) return;
 
     unsigned long now = millis();
-
-    // Report main-loop cadence for engineering diagnostics only.  Heartbeat
-    // transmission is unconditional and does not depend on this kick.
-    can_heartbeat::notifyLoopAlive(static_cast<uint32_t>(now));
 
     obstacle_sensor::Reading rd = obstacle_sensor::getReading();
 
@@ -90,10 +87,8 @@ void update() {
         frame.data[4] = counter_++;
 
         if (!ESP32Can.writeFrame(frame, 0)) {
-            // Normal telemetry may be dropped.  Report it so heartbeat
-            // diagnostics can correlate queue pressure, while the dedicated
-            // producer continues to protect 0x011 independently.
-            can_heartbeat::notifyTxDrop();
+            // Normal telemetry may be dropped under queue pressure; the
+            // dedicated 0x011 producer protects the heartbeat independently.
         }
     }
 
@@ -119,7 +114,7 @@ void update() {
         frame.data[3] = 0;
 
         if (!ESP32Can.writeFrame(frame, 0)) {
-            can_heartbeat::notifyTxDrop();
+            // Obstacle safety telemetry may be dropped under queue pressure.
         }
     }
 }

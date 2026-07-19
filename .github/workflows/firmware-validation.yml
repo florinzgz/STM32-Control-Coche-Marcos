@@ -80,6 +80,7 @@ jobs:
               Core/Src/test_battery_limits.c \
               Core/Src/test_steering_cal_store.c \
               Core/Src/test_steering_z.c \
+              Core/Src/test_steering_eps.c \
               Core/Src/test_steering_centering.c \
               Core/Src/test_steering_centering_diag.c \
               Core/Src/test_steering_centering_frame.c \
@@ -90,6 +91,7 @@ jobs:
               Core/Src/test_pedal_plausibility.c \
               Core/Src/test_busoff_recovery.c \
               Core/Src/test_motion_inhibit.c \
+              Core/Src/test_standby_mode_sync_gate.c \
               Core/Src/test_wheel_effort.c \
               Core/Src/test_relay_degraded.c \
               Core/Src/test_relay_health_diag.c \
@@ -106,7 +108,8 @@ jobs:
                 Core/Src/test_eps_params.c) extra="Core/Src/eps_params.c" ;;
                 Core/Src/test_loop_diag.c) extra="Core/Src/loop_diag.c" ;;
                 Core/Src/test_steering_z.c) extra="Core/Src/steering_z.c" ;;
-                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c Core/Src/steering_centering_diag.c" ;;
+                Core/Src/test_steering_eps.c) extra="Core/Src/steering_eps.c" ;;
+                Core/Src/test_steering_centering.c) extra="Core/Src/steering_centering.c Core/Src/steering_centering_diag.c Core/Src/steering_eps.c" ;;
                 Core/Src/test_steering_centering_diag.c) extra="Core/Src/steering_centering_diag.c" ;;
                 Core/Src/test_steering_centering_frame.c) extra="Core/Src/steering_centering_diag.c" ;;
                 Core/Src/test_pedal_plausibility.c) extra="Core/Src/pedal_logic.c" ;;
@@ -127,6 +130,160 @@ jobs:
                 "$src" $extra -lm -o "$exe"
               "$exe"
             done
+
+            # Section-L integration test: compiles the EFFECTIVE (patched)
+            # relay sequencer + real EPS authority and proves PC12 stays OFF
+            # after an EPS isolation while traction is preserved.  Needs the
+            # opt-in functional GPIO model (HOST_TEST_GPIO_MODEL).
+            echo "-- test_relay_seq_eps.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_relay_seq_eps.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_relay_seq_eps
+            /tmp/test_relay_seq_eps
+
+            # Section-M integration test: an isolable EPS fault at boot must
+            # NEVER immobilise the vehicle (STANDBY -> ACTIVE, PC11 ON, PC12
+            # OFF, power_ready) and the engineering relay override can never
+            # pulse the steering-motor relay (PC12).  Needs the write observer.
+            echo "-- test_eps_boot_traction.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_eps_boot_traction.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/boot_validation.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_eps_boot_traction
+            /tmp/test_eps_boot_traction
+
+            # Section-M output-production test: an EPS fault injected in the
+            # DETECTOR physically drives the real shared actuator registers to
+            # their safe state (CCR PA6=0, CCR PA7=0, PC4 LOW, PC12 OFF).
+            echo "-- test_steering_outputs.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_outputs.c \
+              Core/Src/steering_output.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/steering_eps.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_steering_outputs
+            /tmp/test_steering_outputs
+            # Section-M centering-boot test: the REAL homing FSM
+            # (SteeringCentering_Step) is driven to each of its four abort
+            # causes (timeout / range / stall / encoder fault) and must
+            # isolate the assist to MECHANICAL_ONLY while keeping traction
+            # (STANDBY -> ACTIVE, PC11 ON, PC12 OFF & never re-armed).
+            echo "-- test_centering_boot_traction.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_centering_boot_traction.c \
+              Core/Src/steering_centering.c \
+              Core/Src/steering_centering_diag.c \
+              Core/Src/steering_eps.c \
+              Core/Src/steering_output.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/boot_validation.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_centering_boot_traction
+            /tmp/test_centering_boot_traction
+
+            # Owner-aware PC12 gate: the REAL centering homing FSM is driven
+            # through the EXACT main-loop order (Relay_SequencerUpdate ->
+            # Safety_RelayOverrideUpdate -> Safety_SteerRelaySupervise ->
+            # SteeringCentering_DecideOwner -> SteeringCentering_Step ->
+            # SteeringSupervisor_Service).  Proves PC12 stays ON during homing
+            # (supervise no longer tears the rail down before calibration), the
+            # sweep PWM begins with PC12 ON, a healthy run completes, and any
+            # latched fault forces PC12 OFF with no reconnection.
+            echo "-- test_centering_pc12_gate.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_centering_pc12_gate.c \
+              Core/Src/steering_centering.c \
+              Core/Src/steering_centering_diag.c \
+              Core/Src/steering_eps.c \
+              Core/Src/steering_output.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/safety_system_patched.c \
+              Core/Src/boot_validation.c \
+              Core/Src/ina226_channel_diag.c \
+              Core/Src/math_safety.c \
+              -lm -o /tmp/test_centering_pc12_gate
+            /tmp/test_centering_pc12_gate
+
+            # Section-M EPS assist supervisor: faults are injected into the
+            # REAL detectors — the genuine Ina226_ClassifyChannel() plus the
+            # real parameter/calibration/Z policy inputs — and the supervisor
+            # is left to drive the real steering_eps.c isolation API (never
+            # calling Steering_DisableAssistFault directly).  Proves every
+            # isolable cause reaches EPS MECHANICAL_ONLY while a persistent
+            # overcurrent escalates to ELECTRICAL_HAZARD + SAFE.
+            echo "-- test_steering_supervisor.c"
+            gcc -std=c11 -DHOST_TEST -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor
+            /tmp/test_steering_supervisor
+
+            # Encoder-Z MANDATORY policy: rebuild the supervisor with
+            # STEERING_Z_REQUIRED=1 so the same detector injection proves a
+            # missing/incoherent Z isolates the assist when Z is configured
+            # mandatory (the default optional build treats it as diagnostic).
+            echo "-- test_steering_supervisor.c (STEERING_Z_REQUIRED=1)"
+            gcc -std=c11 -DHOST_TEST -DSTEERING_Z_REQUIRED=1 -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_zreq
+            /tmp/test_steering_supervisor_zreq
+
+            # Production glue integration: exercise the REAL data-gathering path
+            # steering_supervisor_io.c:SteeringSupervisor_Service() through a
+            # controllable Sensor_GetChannel5Diag() seam.  Proves the real
+            # acquisition sequence is transported (100 Hz never reprocesses one
+            # 20 Hz sample), CH5 is pre-relay/always-powered, isolable CH5
+            # faults reach MECHANICAL_ONLY without a global SAFE, and a missing
+            # post-isolation sample stays ISOLATION UNCONFIRMED (never a false
+            # ELECTRICAL_HAZARD).  HOST_TEST_GPIO_MODEL gives a deterministic tick.
+            echo "-- test_steering_supervisor_io.c"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor_io.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_io
+            /tmp/test_steering_supervisor_io
+
+            # Same glue rebuilt with the isolation threshold CALIBRATED so the
+            # end-to-end ELECTRICAL_HAZARD + SAFE escalation path is covered too.
+            echo "-- test_steering_supervisor_io.c (CALIBRATED)"
+            gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+              -DSTEERING_ISOLATION_THRESHOLD_CALIBRATED=1 -D_GNU_SOURCE \
+              -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+              Core/Src/test_steering_supervisor_io.c \
+              Core/Src/steering_supervisor_io.c \
+              Core/Src/steering_supervisor.c \
+              Core/Src/steering_eps.c \
+              Core/Src/ina226_channel_diag.c \
+              -lm -o /tmp/test_steering_supervisor_io_cal
+            /tmp/test_steering_supervisor_io_cal
           } | tee artifacts/tests/stm32-host-tests.txt
 
       - name: Run ESP32 host tests
@@ -197,6 +354,12 @@ jobs:
               esp32/src/traction_switch.cpp esp32/src/test_mode_sync.cpp \
               -o /tmp/test_mode_sync
             /tmp/test_mode_sync
+
+            echo "-- test_mode_authority.cpp"
+            g++ -std=c++17 -Wall -Wextra -Iesp32/src \
+              esp32/src/test_mode_authority.cpp \
+              -o /tmp/test_mode_authority
+            /tmp/test_mode_authority
 
             echo "-- test_motion_inhibit_decode.cpp"
             g++ -std=c++17 -Wall -Wextra -DHOST_TEST \

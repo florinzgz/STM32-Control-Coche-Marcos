@@ -17,7 +17,7 @@ C_SOURCES = \
   $(CORE_SRC)/i2c.c \
   $(CORE_SRC)/iwdg.c \
   $(CORE_SRC)/tim.c \
-  $(CORE_SRC)/motor_control.c \
+  $(CORE_SRC)/motor_control_patched.c \
   $(CORE_SRC)/can_handler.c \
   $(CORE_SRC)/busoff_recovery.c \
   $(CORE_SRC)/motion_inhibit.c \
@@ -31,12 +31,16 @@ C_SOURCES = \
   $(CORE_SRC)/ackermann.c \
   $(CORE_SRC)/steering_centering_patched.c \
   $(CORE_SRC)/steering_centering_diag.c \
+  $(CORE_SRC)/steering_eps.c \
+  $(CORE_SRC)/steering_output.c \
   $(CORE_SRC)/boot_validation.c \
   $(CORE_SRC)/encoder_reader.c \
   $(CORE_SRC)/eps_params.c \
   $(CORE_SRC)/error_log.c \
   $(CORE_SRC)/steering_cal_store.c \
   $(CORE_SRC)/steering_z.c \
+  $(CORE_SRC)/steering_supervisor.c \
+  $(CORE_SRC)/steering_supervisor_io.c \
   $(CORE_SRC)/sensor_map_store.c \
   $(CORE_SRC)/pedal_cal_store.c \
   $(CORE_SRC)/pedal_cal_session.c \
@@ -45,6 +49,7 @@ C_SOURCES = \
   $(CORE_SRC)/battery_limits_store.c \
   $(CORE_SRC)/loop_diag.c \
   $(CORE_SRC)/math_safety.c \
+  $(CORE_SRC)/standby_mode_sync_policy.c \
   $(CORE_SRC)/stm32g4xx_it.c \
   $(CORE_SRC)/stm32g4xx_hal_msp.c \
   $(CORE_SRC)/system_stm32g4xx.c \
@@ -93,6 +98,7 @@ AS = $(PREFIX)gcc -x assembler-with-cpp
 LD = $(PREFIX)gcc
 OBJCOPY = $(PREFIX)objcopy
 SZ = $(PREFIX)size
+PYTHON ?= python3
 
 # CPU flags
 CPU = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
@@ -118,8 +124,11 @@ vpath %.c $(sort $(dir $(C_SOURCES) $(HAL_SOURCES)))
 vpath %.s $(sort $(dir $(ASM_SOURCES)))
 
 # Build targets
-all: $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
+all: check-cubeide-sources $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).hex $(BUILD_DIR)/$(PROJECT).bin
 	$(SZ) $(BUILD_DIR)/$(PROJECT).elf
+
+check-cubeide-sources:
+	$(PYTHON) scripts/check_cubeide_source_exclusions.py
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -144,4 +153,4 @@ clean:
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean
+.PHONY: all check-cubeide-sources clean

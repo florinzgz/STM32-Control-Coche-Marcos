@@ -86,6 +86,29 @@ typedef struct {
     int32_t  signed_current_ma;       /* Signed current (mA)                 */
 
     uint32_t sample_age_ms;           /* Age of newest sample                */
+
+    /* Real acquisition identity (NOT derived from the reader's current tick).
+     * sample_sequence increments EXACTLY ONCE per new, valid acquisition of
+     * this channel (a full ACK + shunt + bus read).  A consumer polling faster
+     * than the acquisition rate (e.g. the 100 Hz supervisor over a 20 Hz
+     * INA226 read) sees the SAME value until a genuinely new sample lands, so
+     * it can tell a fresh reading from a re-read of the previous one.  The
+     * uint32_t wraps after 2^32 valid samples (>6 years at 20 Hz); consumers
+     * MUST compare for inequality (seq != captured), never magnitude.        */
+    uint32_t sample_sequence;         /* ++ once per new valid acquisition   */
+    uint32_t last_valid_tick_ms;      /* Tick of the newest valid acquisition */
+
+    /* Real acquisition ATTEMPT identity.  probe_sequence increments EXACTLY
+     * ONCE per real execution of the channel probe (Sensor_UpdateChannel5Diag)
+     * — for BOTH a valid AND an invalid read — whereas sample_sequence only
+     * advances on a valid one.  A consumer polling faster than the acquisition
+     * rate (e.g. the 100 Hz EPS supervisor over a 20 Hz INA226 read) uses this
+     * to debounce faults per REAL acquisition: one failed acquisition seen
+     * across five 100 Hz cycles must count as ONE failure, never five.  The
+     * uint32_t wrap is intentional; consumers MUST compare for inequality
+     * (probe != captured), never magnitude.                                   */
+    uint32_t probe_sequence;          /* ++ once per real probe (valid/invalid) */
+
     bool     channel_powered;         /* Power branch expected energised     */
     bool     current_expected;        /* Real steering PWM is being emitted  */
 

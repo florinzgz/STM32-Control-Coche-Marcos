@@ -216,13 +216,29 @@
  * input, no leakage current, no spurious EXTI activity).
  * No firmware logic references PC10.                                   */
 #define PIN_RELAY_TRAC          GPIO_PIN_11  /* PC11 — 24V traction relay (BTS7960 x4) */
-/* PC12 — 12V relay that supplies POWER to the steering BTS7960 H-bridge.
- * Renamed from the legacy "PIN_RELAY_DIR" to remove the ambiguity with
- * drive direction (FORWARD/REVERSE).  This relay does NOT control the
- * direction of motion; it only gates the 12 V power rail of the steering
- * actuator.  Drive direction is selected in software by Traction_SetGear()
- * and applied via motor PWM sign — see motor_control.c.                 */
-#define PIN_RELAY_STEER_PWR     GPIO_PIN_12  /* PC12 — 12V steering actuator power relay */
+/* PC12 — command for the 12 V STEERING-MOTOR ISOLATION RELAY.
+ *
+ * Owner-confirmed branch topology (authoritative):
+ *     12V BATTERY -> INA226 CH5 + SHUNT -> [BTS7960 if in this tranche]
+ *                 -> RELAY PC12 -> STEERING MOTOR
+ *
+ * The INA226/shunt (CH5) sit BEFORE this relay, so PC12 does NOT gate the CH5
+ * measurement supply; it opens/closes the final leg that connects the steering
+ * motor.  Driving PC12 OFF electrically isolates the steering actuator while
+ * CH5 keeps reading the pre-relay 12 V bus (~12 V, ~0 A is NORMAL with PC12
+ * OFF).  PC12 is only a RELAY COMMAND: with no independent contact feedback the
+ * RELAY ACTUAL state stays UNKNOWN (CH5 alone cannot confirm the contact).
+ * This relay does NOT control the direction of motion (that is
+ * Traction_SetGear() + PWM sign, see motor_control.c).
+ *
+ * The exact position of the BTS7960 within this leg (relay feeding the BTS7960
+ * supply vs. relay between BTS7960 and motor) is pending physical confirmation;
+ * the firmware semantics ("OFF => motor branch isolated") hold either way.
+ *
+ * The legacy macro name PIN_RELAY_STEER_PWR is kept for source/CAN stability;
+ * PIN_RELAY_STEER_MOTOR is the semantically accurate alias.  Both are PC12. */
+#define PIN_RELAY_STEER_PWR     GPIO_PIN_12  /* PC12 — steering-motor isolation relay command */
+#define PIN_RELAY_STEER_MOTOR   PIN_RELAY_STEER_PWR  /* semantic alias (see note above) */
 
 /* ========================================================================== */
 /*                       LED POWER RELAYS (GPIOB)                             */
@@ -411,7 +427,8 @@
  *   - Battery INA (ch4) is wired BEFORE the main relay → always powered.
  *   - Motor INAs (ch0..3 = FL,FR,RL,RR) sit AFTER the traction relay →
  *     only powered once the traction relay is energised.
- *   - Steering INA (ch5) sits AFTER the steering power relay.            */
+ *   - Steering INA (ch5) sits BEFORE the steering power relay (pre-relay
+ *     measurement point) → always powered, like the battery INA.        */
 #define INA226_MASK_BATTERY        (1U << INA226_CHANNEL_BATTERY)
 #define INA226_MASK_MOTORS         ((1U << 0) | (1U << 1) | (1U << 2) | (1U << 3))
 #define INA226_MASK_STEER          (1U << INA226_CHANNEL_STEER)

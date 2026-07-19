@@ -11,7 +11,7 @@
 --- service_mode tests: 195 run, 0 failed ---
 -- test_eps_params.c
 
---- eps_params tests: 72 run, 0 failed ---
+--- eps_params tests: 190 run, 0 failed ---
 -- test_sensor_calibration.c
 === INA226 Sensor Calibration Tests ===
 
@@ -126,7 +126,93 @@ test_battery_limits: 23 run, 0 failed
 -- test_steering_z.c
 
 37 tests run, 0 failed
+-- test_steering_eps.c
+
+==== test_steering_eps: 416 run, 0 failed ====
+-- test_steering_centering.c
+
+==== test_steering_centering: 1620 run, 0 failed ====
+-- test_steering_centering_diag.c
+steering_centering_diag: 44 run, 0 failed
+-- test_steering_centering_frame.c
+steering_centering_frame: 136 run, 0 failed
 -- test_pedal_cal_limits.c
 === pedal_cal_limits: 6 run, 0 failed ===
+-- test_pedal_cal_session.c
+pedal_cal_session: 102 run, 0 failed
+-- test_pedalcal_can_frame.c
+pedalcal_can_frame: 59 run, 0 failed
+-- test_pedalcal_query_readonly.c
+pedalcal_query_readonly: 35 run, 0 failed
+-- test_pedal_plausibility.c
+TC01: boot with pedal released
+TC02: progressive ramp 0→10→20→30→40→53 %
+TC03: rapid release 53 % → 0 % (root-cause case)
+TC04: rapid release 100 % → 0 %
+TC05: fast coherent application 0 → 60 % (valid intent, ramp)
+TC06: fast application then release — no lingering fault
+TC07: transient vs persistent ADC1/ADC2 contradiction
+TC08: ADC at rail 4095/4095 — short-circuit fault
+TC09: 0x0023 = NOT_STANDBY | STARTUP_NOT_INHIBITED | PENDING_INCOMPLETE
+TC10: 0x002F = STBY | STARTUP | PEDAL>3 | PLAUS | CAPTURE
+TC11: contradiction debounce counter resets when samples agree
+TC12: fast application is progressively accepted (ramp to 80 %)
+TC13: EMA/demand never overshoots the physical pedal on a stab
+TC14: dual-sample tolerance boundary at ±30 counts
+TC15: small rate transitions (< 35 % per cycle) stay plausible
+TC16: no permanent lockout — prev must not stay at old value
+TC17: range boundary — 4094 OK (range check), 4095 faults
+TC18: fast partial release 100 -> 60 and hold 60
+TC19: partial releases 80->40 and 60->20
+TC20: fast release 40 -> 2 (near rest) tracks real pedal
+TC21: fast stab 0 -> 100 % is valid intent (ramp, no fault)
+TC22: steady hold at 20 / 50 / 100 %
+TC23: single-sample noise keeps last demand, no state change
+TC24: calibration endpoints 50/4000 map 0 and 100 %
+TC25: safe default calibration still yields bounded output
+TC26: release 53 -> 0 output not frozen
+=== test_pedal_plausibility: 330 run, 0 failed ===
+-- test_busoff_recovery.c
+
+--- busoff_recovery tests: 174 run, 0 failed ---
+-- test_motion_inhibit.c
+--- motion_inhibit tests: 43 run, 0 failed ---
+-- test_wheel_effort.c
+wheel_effort: 145 run, 0 failed
+-- test_relay_degraded.c
+relay_degraded: 14 run, 0 failed
+-- test_relay_health_diag.c
+relay_health_diag: 36 run, 0 failed
+-- test_relay_health_frame.c
+=== test_relay_health_frame ===
+Scenario: classification rules
+Scenario: 0x317 pack/unpack round-trip
+Checks: 27, Failures: 0
+RESULT: PASS
+-- test_ina226_channel_diag.c
+ina226_channel_diag: 42 run, 0 failed
+-- test_ina226_ch5_frame.c
+test_classifier_scenarios
+test_frame_roundtrip
+ina226_ch5_frame: 28 run, 0 failed
+RESULT: PASS
 -- test_loop_diag.c
 --- loop_diag tests: 18 run, 0 failed ---
+-- test_relay_seq_eps.c
+==== test_relay_seq_eps: 1317 run, 0 failed ====
+-- test_eps_boot_traction.c
+==== test_eps_boot_traction: 315 run, 0 failed ====
+-- test_steering_outputs.c
+==== test_steering_outputs: 14 run, 0 failed ====
+-- test_centering_boot_traction.c
+==== test_centering_boot_traction: 94 run, 0 failed ====
+-- test_centering_pc12_gate.c
+==== test_centering_pc12_gate: 90 run, 0 failed ====
+-- test_steering_supervisor.c
+==== test_steering_supervisor: 178 run, 0 failed ====
+-- test_steering_supervisor.c (STEERING_Z_REQUIRED=1)
+==== test_steering_supervisor: 178 run, 0 failed ====
+-- test_steering_supervisor_io.c
+==== test_steering_supervisor_io: 52 run, 0 failed ====
+-- test_steering_supervisor_io.c (CALIBRATED)
+==== test_steering_supervisor_io: 57 run, 0 failed ====

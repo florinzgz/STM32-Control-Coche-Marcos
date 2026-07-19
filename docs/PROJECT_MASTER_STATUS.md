@@ -79,7 +79,7 @@ The ESP32 is the **HMI controller**. It receives telemetry from the STM32 over C
 | Frame limiter (20 FPS rendering cap) | `FrameLimiter` | `esp32/src/ui/frame_limiter.h` |
 | Runtime monitor (optional, frame timing + zone tracking) | `RuntimeMonitor` | `esp32/src/ui/runtime_monitor.cpp` |
 | Debug overlay (long-press toggle, semi-transparent stats) | `DebugOverlay` | `esp32/src/ui/debug_overlay.cpp` |
-| ESP32 heartbeat transmission (0x011 every 100 ms) | Logic in `loop()` | `esp32/src/main.cpp` |
+| ESP32 heartbeat transmission (0x011 every 100 ms) | Dedicated `CanHeartbeat` FreeRTOS task (single producer) | `esp32/src/can/can_heartbeat_guard.cpp` |
 | Command ACK tracking (non-blocking, 200 ms timeout) | `ackBeginWait()`, `ackCheck()` | `esp32/src/main.cpp` |
 | Obstacle sensor driver (TF-Mini Plus active, OBSTACLE_SENSOR_ENABLED=1, GPIO 18 UART1 RX, 115200 bps, 5-zone mapping, uint16 overflow guard) | `obstacle_sensor` namespace | `esp32/src/sensors/obstacle_sensor.cpp` |
 | Obstacle CAN TX (0x208 at 66 ms, DLC 5 with rolling counter) | `can_obstacle` namespace | `esp32/src/can/can_obstacle.cpp` |

@@ -41,6 +41,7 @@
 
 #include "steering_centering.h"
 #include "steering_centering_diag.h"
+#include "steering_eps.h"
 #include "motor_control.h"
 #include "sensor_manager.h"
 #include "safety_system.h"
@@ -100,21 +101,23 @@ extern TIM_HandleTypeDef htim3;
 /* ---- Private helpers ---- */
 
 /**
- * @brief  Abort centering: stop motor, latch fault, enter DEGRADED.
+ * @brief  Abort centering: isolate the steering assist, leave mechanical
+ *         steering.  Does NOT degrade the global vehicle state.
  *
- * Centering failure enters DEGRADED (not SAFE) to preserve the base
- * firmware's "drive-home" philosophy.  The vehicle can still operate
- * at reduced power with steering neutralised.  Traced to
- * limp_mode.cpp: !steeringCentered → LimpState::LIMP.
+ * A failed centre search is an ISOLABLE ASSIST fault: centering is only
+ * required to enable the electric assist, never to move the car with
+ * mechanical steering.  We therefore disconnect the motor (PA6=PA7=0,
+ * PC4=LOW, PC12=OFF, owner=NONE, EPS mechanical-only) via the EPS authority
+ * and latch CENTERING_FAULT so the sweep never restarts.  The vehicle stays
+ * ACTIVE with full traction; the failure is reported locally (0x316 / HMI),
+ * NOT as DEGRADED / LIMP_HOME / SAFE / ERROR.
+ *
+ * @param  reason  EPS isolation cause for this abort.
  */
-static void Centering_Abort(void)
+static void Centering_Abort(EpsFaultReason_t reason)
 {
-    Steering_Neutralize();
     centering_state = CENTERING_FAULT;
-    Safety_SetError(SAFETY_ERROR_CENTERING);
-    Safety_SetState(SYS_STATE_DEGRADED);
-    Safety_SetDegradedLevel(DEGRADED_L1,
-                            DEGRADED_REASON_CENTERING_FAIL);
+    Steering_DisableAssistFault(reason);
 }
 
 /**
@@ -210,7 +213,7 @@ void SteeringCentering_Step(void)
 
     /* If the encoder is already faulted, abort immediately. */
     if (Encoder_HasFault()) {
-        Centering_Abort();
+        Centering_Abort(EPS_FAULT_ENCODER_AB);
         return;
     }
 
@@ -235,6 +238,15 @@ void SteeringCentering_Step(void)
      * in safety_system.c forces this relay back OFF, so steering can
      * never remain energised in SAFE/ERROR.                            */
     case CENTERING_IDLE:
+        /* Never re-close the steering-motor relay (PC12) once the EPS assist
+         * has been isolated (MECHANICAL_ONLY / ELECTRICAL_HAZARD).  The latch
+         * holds for the whole power cycle, so homing must not re-energise the
+         * motor branch even if it is somehow re-entered.  Steering stays
+         * purely mechanical. */
+        if (Steering_IsAssistLatchedOff()) {
+            Centering_Abort(EPS_FAULT_UNKNOWN);
+            break;
+        }
         SteeringCenter_ClearFlag();
         HAL_GPIO_WritePin(GPIOC, PIN_RELAY_STEER_PWR, GPIO_PIN_SET);
         rail_settle_tick = now;
@@ -274,13 +286,13 @@ void SteeringCentering_Step(void)
 
         /* 2. Total timeout? */
         if ((now - centering_start_tick) >= TOTAL_TIMEOUT_MS) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
         /* 3. Range exceeded? */
         if (Centering_RangeExceeded()) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
@@ -304,19 +316,19 @@ void SteeringCentering_Step(void)
 
         /* 2. Total timeout? */
         if ((now - centering_start_tick) >= TOTAL_TIMEOUT_MS) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
         /* 3. Range exceeded? */
         if (Centering_RangeExceeded()) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
             return;
         }
 
         /* 4. End-of-travel stall? → center was never found */
         if (Centering_IsStalled()) {
-            Centering_Abort();
+            Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
         }
         break;
 
@@ -343,29 +355,59 @@ CenteringState_t SteeringCentering_GetState(void)
 SteeringMotorOwner_t SteeringCentering_DecideOwner(CenteringState_t state,
                                                    bool in_homing_state)
 {
-    /* Centering is the exclusive writer of the steering motor only while
-     * it is actively homing AND the system is still in a homing-capable
-     * state.  In DONE/FAULT — or once the system has left BOOT/STANDBY
-     * (e.g. SAFE/ERROR) — the EPS loop owns the motor and neutralises it
-     * as needed.  Keeping this decision here (and consuming it BEFORE
-     * SteeringCentering_Step() runs) guarantees the two subsystems never
-     * both write the motor in the same cycle.                            */
-    if (!in_homing_state) {
-        return STEER_OWNER_EPS;
+    SteeringMotorOwner_t owner;
+
+    /* An isolated assist fault takes absolute priority: nobody drives the
+     * motor and steering is purely mechanical (MECHANICAL_ONLY or hazard). */
+    if (Steering_IsAssistLatchedOff()) {
+        owner = STEER_OWNER_NONE;
+    } else if (!in_homing_state) {
+        /* Centering is the exclusive writer of the steering motor only while
+         * it is actively homing AND the system is still in a homing-capable
+         * state.  In DONE/FAULT — or once the system has left BOOT/STANDBY
+         * (e.g. SAFE/ERROR) — the EPS loop owns the motor and neutralises it
+         * as needed.                                                        */
+        owner = STEER_OWNER_EPS;
+    } else {
+        switch (state) {
+        case CENTERING_IDLE:
+        case CENTERING_WAIT_RAIL:
+        case CENTERING_SWEEP_LEFT:
+        case CENTERING_SWEEP_RIGHT:
+            owner = STEER_OWNER_CENTERING;
+            break;
+
+        case CENTERING_DONE:
+        case CENTERING_FAULT:
+        default:
+            owner = STEER_OWNER_EPS;
+            break;
+        }
     }
 
-    switch (state) {
-    case CENTERING_IDLE:
-    case CENTERING_WAIT_RAIL:
-    case CENTERING_SWEEP_LEFT:
-    case CENTERING_SWEEP_RIGHT:
-        return STEER_OWNER_CENTERING;
-
-    case CENTERING_DONE:
-    case CENTERING_FAULT:
-    default:
-        return STEER_OWNER_EPS;
+    /* SINGLE OWNER AUTHORITY: commit the decision to the EPS authority
+     * (steering_eps.c::s_owner) — the one and only stored owner — and return
+     * exactly what it holds.  Keeping the decision here (and consuming it
+     * BEFORE SteeringCentering_Step() runs) still guarantees the two
+     * subsystems never both write the motor in the same cycle, while the main
+     * loop, the 0x316 diagnostic and the CAN telemetry now all read one
+     * identical owner.  While a MECHANICAL_ONLY / ELECTRICAL_HAZARD isolation
+     * is latched the authority forces STEER_OWNER_NONE.
+     *
+     * CONTROLLED TRANSFER: never switch directly between the two active
+     * writers (CENTERING <-> EPS).  Release to STEER_OWNER_NONE first so the
+     * hand-off is explicit and Steering_EpsSetOwner() cannot mistake a
+     * legitimate hand-over for a genuine double-claim conflict.              */
+    {
+        SteeringMotorOwner_t current = Steering_EpsGetOwner();
+        if (owner != current &&
+            current != STEER_OWNER_NONE &&
+            owner   != STEER_OWNER_NONE) {
+            Steering_EpsSetOwner(STEER_OWNER_NONE);
+        }
     }
+    Steering_EpsSetOwner(owner);
+    return Steering_EpsGetOwner();
 }
 
 

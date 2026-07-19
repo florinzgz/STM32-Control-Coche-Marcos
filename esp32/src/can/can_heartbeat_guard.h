@@ -7,24 +7,18 @@
 namespace can_heartbeat {
 
 /*
- * Start the ESP32 -> STM32 heartbeat failover task.
+ * Start the single ESP32 -> STM32 heartbeat (0x011) producer task.
  *
- * The existing main-loop heartbeat remains the normal producer.  This task is
- * pinned to Core 1 and stays silent while loop() is healthy; it only injects a
- * backup 0x011 after a measured loop stall or TX congestion/drop event.
- * Safe to call repeatedly; only the first successful call creates the task.
+ * The task is pinned to Core 1 and transmits 0x011 unconditionally every
+ * 100 ms using vTaskDelayUntil() — it does NOT depend on Arduino loop(),
+ * obstacle data, TFT, audio, LEDs or NVS work.  It owns the single rolling
+ * counter and performs one bounded 10 ms retry when the driver rejects a
+ * frame.  Safe to call repeatedly; only the first call creates the task.
  */
 bool init();
 
-/* Main-loop liveness kick.  Call once per normal loop iteration before any
- * potentially slow NVS/LED/audio work. */
-void notifyLoopAlive(uint32_t nowMs);
-
-/* Report a TX drop observed by another CAN producer. */
-void notifyTxDrop();
-
 /* Coherent diagnostic snapshot for serial/engineering telemetry. */
-GuardStats stats();
+HeartbeatDiag diag();
 
 }  // namespace can_heartbeat
 

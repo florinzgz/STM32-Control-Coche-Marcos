@@ -8,6 +8,9 @@
 #include "motor_control.h"
 #include "ackermann.h"
 #include "eps_params.h"
+#include "steering_eps.h"
+#include "steering_supervisor.h"
+#include "steering_output.h"
 #include "gear_limits_store.h"
 #include "drive_tuning_store.h"
 #include "main.h"
@@ -907,6 +910,14 @@ void Steering_Init(void)
     enc_prev_count       = 0;
     enc_last_change_tick = HAL_GetTick();
     enc_fault            = 0;
+
+    /* Initialise the EPS local state authority (STARTING, owner NONE). */
+    Steering_EpsInit();
+
+    /* Initialise the EPS assist supervisor (overcurrent FSM + latches).
+     * It connects the real INA226 CH5 / parameter / calibration / Z
+     * detectors to the EPS isolation policy each control cycle.        */
+    SteeringSupervisor_Init();
 }
 
 /* ==================================================================
@@ -2272,6 +2283,15 @@ void Steering_SetAngle(float angle_deg)
 
 void Steering_ControlLoop(void)
 {
+    /* ---- Guard: assist isolated → keep motor disconnected (mechanical) ----
+     * A latched isolable EPS fault means the assist is permanently off for
+     * this power cycle.  Coast the motor (PA6=PA7=0, PC4=LOW) every cycle;
+     * PC12 stays OFF via the relay sequencer.  Never re-drive the motor.   */
+    if (Steering_IsAssistLatchedOff()) {
+        Steering_Neutralize();
+        return;
+    }
+
     /* ---- Guard: not calibrated → coast ---- */
     if (!steering_calibrated) {
         Steering_Neutralize();
@@ -2471,6 +2491,10 @@ bool Steering_IsCalibrated(void)
 void Steering_SetCalibrated(void)
 {
     steering_calibrated = 1;
+    /* Homing succeeded → the assist may become active (unless a fault has
+     * already latched the EPS to mechanical-only, in which case this is a
+     * no-op inside the EPS authority).                                     */
+    Steering_EpsSetHealthyState(EPS_STATE_ACTIVE);
 }
 
 void Steering_GetWheelAngles(float *out_fl_deg, float *out_fr_deg)
@@ -2554,7 +2578,11 @@ bool Encoder_HasFault(void)
  */
 void Steering_Neutralize(void)
 {
-    Motor_SetSigned(&motor_steer, 0);
+    /* Physical coast (PA6=0, PA7=0, PC4 LOW) via the shared production path
+     * — the SAME registers the EPS isolation authority drives, so there is a
+     * single source of truth for the steering-actuator shutdown. */
+    Steering_PhysicalOff();
+    motor_steer.direction = 0;
     eps_omega_filt   = 0.0f;
     eps_prev_pwm_raw = 0;
     eps_motor_effort = 0.0f;

@@ -3485,7 +3485,25 @@ void CAN_ProcessMessages(void) {
                     break;
                 }
                 if (!Safety_IsCommandAllowed()) {
-                    CAN_SendCommandAck(0x02, ACK_BLOCKED_BY_SAFETY);
+                    /* §3 (Option A) — close the "boot in the wrong mode" window.
+                     * When the command gate is closed only because the vehicle
+                     * is still in STANDBY, a dedicated SAFE gate lets a CMD_MODE
+                     * update ONLY the LOGICAL 4x4 / tank-turn flags so the STM32
+                     * mode tracks the physical selector BEFORE traction is ever
+                     * energised.  It applies NO gear and NO motion (the flags
+                     * have no effect until the pedal/demand path runs in ACTIVE)
+                     * and requires pedal released, zero PWM and safe speed.  Any
+                     * other blocked case (SAFE/ERROR/etc.) still replies
+                     * BLOCKED_BY_SAFETY. */
+                    if (Safety_IsStandbyModeSyncAllowed()) {
+                        uint8_t mode_flags = rx_payload[0];
+                        Traction_SetMode4x4((mode_flags & 0x01) != 0);
+                        Traction_SetAxisRotation((mode_flags & 0x02) != 0);
+                        /* Logical mode applied; gear/motion remain blocked. */
+                        CAN_SendCommandAck(0x02, ACK_OK);
+                    } else {
+                        CAN_SendCommandAck(0x02, ACK_BLOCKED_BY_SAFETY);
+                    }
                     break;
                 }
                 {

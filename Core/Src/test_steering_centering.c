@@ -34,6 +34,7 @@
 #include <stdint.h>
 
 #include "steering_centering.h"
+#include "steering_eps.h"
 #include "safety_system.h"
 #include "service_mode.h"
 #include "stm32g4xx_hal.h"
@@ -106,6 +107,18 @@ void Steering_Neutralize(void)
     motor.pwm    = 0U;
     motor_writes_this_cycle++;
 }
+
+/* Shared production physical shutdown (steering_output.c) — same coast effect
+ * the EPS isolation authority drives.  Modelled identically for the motor. */
+void Steering_PhysicalOff(void)
+{
+    motor.driven = false;
+    motor.pwm    = 0U;
+    motor_writes_this_cycle++;
+}
+
+/* Steering rail (PC12) release — used by the EPS isolation authority. */
+void Steering_SteerPowerOff(void) { }
 
 static bool calibrated = false;
 void Steering_SetCalibrated(void) { calibrated = true; }
@@ -211,6 +224,7 @@ static void reset_all(void)
     encoder_fault = false;
     z_pulse_count = 0;
     SteeringCentering_Init();
+    Steering_EpsInit();     /* clear any latched EPS mechanical-only state */
 }
 
 /* Advance the FSM out of IDLE/WAIT_RAIL into an active sweep by pumping
@@ -322,7 +336,8 @@ static void test_center_detection_transfers_to_eps(void)
     CHECK(!centering_ran_this_cycle);
 }
 
-/* ---- 5. Encoder pre-fault aborts with motor at a safe (zero) state. ---- */
+/* ---- 5. Encoder pre-fault isolates the ASSIST (mechanical-only), leaving
+ *          the motor at a safe zero state WITHOUT degrading the vehicle. ---- */
 static void test_encoder_prefault_aborts_safe(void)
 {
     reset_all();
@@ -332,29 +347,39 @@ static void test_encoder_prefault_aborts_safe(void)
     encoder_fault = true;               /* encoder health fault */
     SteeringMotorOwner_t owner = run_cycle();
 
-    CHECK(owner == STEER_OWNER_CENTERING);
+    CHECK(owner == STEER_OWNER_CENTERING);          /* owner decided pre-fault */
     CHECK(SteeringCentering_GetState() == CENTERING_FAULT);
     CHECK(SteeringCentering_HasFault());
-    CHECK(!motor.driven);               /* PWM/EN forced to zero */
-    CHECK(s_error == SAFETY_ERROR_CENTERING);
+    CHECK(!motor.driven);                           /* PWM/EN forced to zero   */
+    /* New policy: an isolable centering/encoder fault must NOT raise a global
+     * safety error — it isolates the assist and keeps mechanical steering.   */
+    CHECK(s_error == SAFETY_ERROR_NONE);
+    CHECK(Steering_IsMechanicalOnly());
+    CHECK(Steering_GetEpsState() == EPS_STATE_MECHANICAL_ONLY);
+    CHECK(Steering_EpsGetOwner() == STEER_OWNER_NONE);
+    /* The next cycle reports NONE (nobody drives the motor). */
+    owner = run_cycle();
+    CHECK(owner == STEER_OWNER_NONE);
+    CHECK(!motor.driven);
 }
 
-/* ---- 6. FAULT / SAFE / ERROR leave the motor in a safe state, driven
- *          only by the EPS neutralise path. ---- */
+/* ---- 6. After isolation, and in SAFE/ERROR, the motor stays neutral and
+ *          no subsystem co-drives it. ---- */
 static void test_fault_safe_error_states_safe(void)
 {
-    /* (a) After a centering fault (system degraded), EPS owns and keeps
-     *     the motor neutralised. */
+    /* (a) After an isolable centering fault the EPS is mechanical-only and
+     *     nobody (owner NONE) drives the motor; the global state is NOT
+     *     degraded by this fault. */
     reset_all();
     CHECK(drive_to_sweep_left(200));
     encoder_fault = true;
-    run_cycle();                                   /* → FAULT + degraded */
+    run_cycle();                                   /* → FAULT + isolated */
     CHECK(SteeringCentering_GetState() == CENTERING_FAULT);
+    CHECK(Steering_IsMechanicalOnly());
 
-    s_state = SYS_STATE_DEGRADED;                  /* Centering_Abort set it */
     encoder_fault = false;
     SteeringMotorOwner_t owner = run_cycle();
-    CHECK(owner == STEER_OWNER_EPS);
+    CHECK(owner == STEER_OWNER_NONE);              /* mechanical-only latched */
     CHECK(!motor.driven);
     CHECK(!centering_ran_this_cycle);
 
