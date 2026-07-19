@@ -5,8 +5,8 @@ Several productive ``*_patched.c`` files include their base ``.c`` implementatio
 inside one translation unit.  The base file must therefore remain available as
 source code, but it must never be compiled as a second object alongside its
 wrapper.  This guard validates STM32CubeIDE metadata, the repository Makefile,
-the wrapper include contracts and any generated Debug/Release manifests that
-happen to exist in the workspace.
+the wrapper include contracts, required implementation anchors, and any
+generated Debug/Release manifests that happen to exist in the workspace.
 """
 
 from __future__ import annotations
@@ -26,6 +26,16 @@ WRAPPER_PAIRS = {
     "safety_system.c": "safety_system_patched.c",
     "sensor_manager.c": "sensor_manager_patched.c",
     "steering_centering.c": "steering_centering_patched.c",
+}
+# These anchors prove that the base file still contains its productive
+# implementation.  A non-empty tombstone/dispatcher must not satisfy the guard.
+BASE_IMPLEMENTATION_ANCHORS = {
+    "motor_control.c": ("void Motor_Init(", "void Traction_Update(",
+                        "void Steering_ControlLoop("),
+    "safety_system.c": ("void Safety_Init(", "void Safety_CheckEncoder("),
+    "sensor_manager.c": ("void Sensor_Init(", "void Current_ReadAll("),
+    "steering_centering.c": ("void SteeringCentering_Init(",
+                              "void SteeringCentering_Step("),
 }
 REQUIRED_EXCLUSIONS = {f"Src/{base}" for base in WRAPPER_PAIRS}
 REQUIRED_CONFIGS = {"Debug", "Release"}
@@ -98,8 +108,19 @@ def validate_wrapper_contracts() -> None:
             fail(f"missing base implementation Core/Src/{base_name}")
         if not wrapper_path.is_file():
             fail(f"missing productive wrapper Core/Src/{wrapper_name}")
-        if base_path.stat().st_size == 0:
+
+        base_text = read_text(base_path)
+        if not base_text.strip():
             fail(f"base implementation Core/Src/{base_name} is empty")
+        missing_anchors = [
+            anchor for anchor in BASE_IMPLEMENTATION_ANCHORS[base_name]
+            if anchor not in base_text
+        ]
+        if missing_anchors:
+            fail(
+                f"Core/Src/{base_name} is missing productive implementation "
+                f"anchors: {', '.join(missing_anchors)}"
+            )
 
         wrapper_text = read_text(wrapper_path)
         include_token = f'#include "{base_name}"'
@@ -150,9 +171,9 @@ def main() -> None:
     validate_wrapper_contracts()
     validate_generated_manifests()
     print(
-        "CubeIDE source check OK: base implementations are intact, wrappers "
-        "include them exactly once, Makefile selects only wrappers, and no "
-        "present Debug/Release manifest contains duplicate objects."
+        "CubeIDE source check OK: base implementations and required entry points "
+        "are intact, wrappers include them exactly once, Makefile selects only "
+        "wrappers, and no present Debug/Release manifest contains duplicates."
     )
 
 
