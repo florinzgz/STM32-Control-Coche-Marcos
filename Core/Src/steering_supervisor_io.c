@@ -64,7 +64,7 @@ void SteeringSupervisor_Service(void)
                                       ch5->bus_read_ok;
         const bool eps_drive_active = steering_output_is_actively_driven(ch5);
         const bool homing_active = steering_homing_is_active(centering);
-        Ina226ChannelFaultReason reason = ch5->fault_reason;
+        Ina226DiagReason_t reason = ch5->fault_reason;
 
         /* Reversed polarity is meaningful only while current is intentionally
          * commanded.  Do not let a retained direction classification from the
