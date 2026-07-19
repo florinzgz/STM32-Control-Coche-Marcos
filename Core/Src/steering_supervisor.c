@@ -12,8 +12,6 @@
 #include "steering_supervisor.h"
 #include "steering_z.h"   /* SteeringZStatus_t values only */
 
-#include <stdlib.h>       /* labs */
-
 /* ======================================================================
  *  Pure decision helpers
  * ====================================================================== */
@@ -113,14 +111,26 @@ EpsFaultReason_t SteeringSupervisor_ZPolicy(bool z_required,
  *  Overcurrent state machine
  * ====================================================================== */
 
+/* Return |current_ma| without invoking signed overflow for INT32_MIN.
+ * On Cortex-M, long is 32-bit, so labs((long)INT32_MIN) is undefined.  Promote
+ * to int64_t before negation and keep the comparison in an unsigned domain. */
+static uint32_t current_magnitude_ma(int32_t current_ma)
+{
+    return (current_ma < 0)
+        ? (uint32_t)(-(int64_t)current_ma)
+        : (uint32_t)current_ma;
+}
+
 void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t active_limit_ma,
                                int32_t isolation_limit_ma,
                                bool isolation_calibrated, uint32_t confirm_ms)
 {
     if (f == NULL) return;
     f->state                = OC_STATE_NORMAL;
-    f->active_limit_ma      = active_limit_ma;
-    f->isolation_limit_ma   = isolation_limit_ma;
+    /* Invalid negative limits fail safe: zero means any non-zero measured
+     * current starts/maintains isolation rather than disabling protection. */
+    f->active_limit_ma      = (active_limit_ma > 0) ? active_limit_ma : 0;
+    f->isolation_limit_ma   = (isolation_limit_ma > 0) ? isolation_limit_ma : 0;
     f->isolation_calibrated = isolation_calibrated;
     f->confirm_ms           = confirm_ms;
     f->isolate_sample_id    = 0U;
@@ -132,8 +142,8 @@ void SteeringSupervisor_OcInit(OcFsm_t *f, int32_t active_limit_ma,
  * only when the residual threshold is genuinely calibrated.                  */
 static OcAction_t oc_eval_post_isolation(OcFsm_t *f, int32_t current_ma)
 {
-    const bool residual_ok =
-        (labs((long)current_ma) <= (long)f->isolation_limit_ma);
+    const bool residual_ok = current_magnitude_ma(current_ma) <=
+                             (uint32_t)f->isolation_limit_ma;
 
     if (residual_ok) {
         /* Current fell below the residual ceiling — the isolation cleared it. */
@@ -162,8 +172,8 @@ OcAction_t SteeringSupervisor_OcStep(OcFsm_t *f, int32_t current_ma,
     if (f == NULL) return OC_ACTION_NONE;
 
     /* Active overcurrent is judged against the working-motor ceiling. */
-    const bool over_active =
-        (labs((long)current_ma) > (long)f->active_limit_ma);
+    const bool over_active = current_magnitude_ma(current_ma) >
+                             (uint32_t)f->active_limit_ma;
 
     switch (f->state) {
         case OC_STATE_NORMAL:
