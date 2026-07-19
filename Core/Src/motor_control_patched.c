@@ -17,6 +17,9 @@
   *     no longer originate from the software command path.
   *   - tank turn keeps the installed rear-polarity correction and momentary
   *     pedal-release behaviour.
+  *   - the encoder health monitor is rebaselined exactly once when physical
+  *     PB5 homing enters DONE, so TIM2 being intentionally zeroed is not
+  *     misclassified as an impossible encoder jump.
   ****************************************************************************
   */
 
@@ -25,12 +28,40 @@
 #include <string.h>
 #include <math.h>
 #include "tank_turn_policy.h"
+#include "steering_centering.h"
 
 #define Traction_Update          Traction_Update_Base
 #define Traction_SetAxisRotation Traction_SetAxisRotation_Base
+#define Encoder_CheckHealth      Encoder_CheckHealth_Base
 #include "motor_control.c"
+#undef Encoder_CheckHealth
 #undef Traction_SetAxisRotation
 #undef Traction_Update
+
+/* The base health monitor intentionally latches real faults, but its previous
+ * count lives outside the centering module.  Centering_Complete() deliberately
+ * writes TIM2=0 at PB5.  Without this one-shot state-aware rebaseline, the next
+ * health cycle compares zero with the pre-zero center count and can latch a
+ * false ENC_MAX_JUMP fault, immediately isolating EPS/PC12 despite a healthy
+ * encoder.  No existing fault is cleared here. */
+static CenteringState_t s_encoder_health_centering_state = CENTERING_IDLE;
+
+void Encoder_CheckHealth(void)
+{
+    const CenteringState_t state = SteeringCentering_GetState();
+
+    if (state == CENTERING_DONE &&
+        s_encoder_health_centering_state != CENTERING_DONE &&
+        !Encoder_HasFault()) {
+        enc_prev_count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+        enc_last_change_tick = HAL_GetTick();
+        s_encoder_health_centering_state = state;
+        return;
+    }
+
+    s_encoder_health_centering_state = state;
+    Encoder_CheckHealth_Base();
+}
 
 bool Traction_IsWheelDriven(uint8_t wheel)
 {
