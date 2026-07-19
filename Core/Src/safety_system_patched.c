@@ -581,8 +581,12 @@ void ABS_Update(void)
     const uint32_t now = HAL_GetTick();
     PR_ResetWheelInterventionScales();
 
+    /* Dynamic braking usually occurs after the physical pedal has returned to
+     * zero, so Safety_PowertrainEngaged() (which keys from pedal demand) is not
+     * an appropriate ABS gate.  Motion state + negative effective demand are
+     * the real evidence that braking modulation is both meaningful and allowed. */
     if (!ServiceMode_IsEnabled(MODULE_ABS) ||
-        !Safety_PowertrainEngaged() ||
+        !Safety_IsMotionAllowed() ||
         !PR_IsBrakingDemand()) {
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0U;
