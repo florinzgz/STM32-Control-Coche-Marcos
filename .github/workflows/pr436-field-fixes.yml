@@ -1,0 +1,71 @@
+name: PR436 Field Fixes
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Core/Src/steering_centering_patched.c'
+      - 'Core/Src/steering_supervisor_io.c'
+      - 'Core/Src/motor_control_patched.c'
+      - 'Core/Src/battery_limits_store.c'
+      - 'Core/Inc/battery_limits_store.h'
+      - 'esp32/src/ui/ui_config.h'
+      - '.github/workflows/pr436-field-fixes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  effective-homing-wrapper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compile and run PC12 gate against effective wrapper
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -DHOST_TEST -DHOST_TEST_GPIO_MODEL \
+            -DHOST_TEST_GPIO_WRITE_OBSERVER -D_GNU_SOURCE \
+            -Ianalysis_artifacts/stubs -ICore/Inc -O2 \
+            Core/Src/test_centering_pc12_gate.c \
+            Core/Src/steering_centering_patched.c \
+            Core/Src/steering_centering_diag.c \
+            Core/Src/steering_eps.c \
+            Core/Src/steering_output.c \
+            Core/Src/steering_supervisor_io.c \
+            Core/Src/steering_supervisor.c \
+            Core/Src/safety_system_patched.c \
+            Core/Src/boot_validation.c \
+            Core/Src/ina226_channel_diag.c \
+            Core/Src/math_safety.c \
+            -lm -o /tmp/test_centering_pc12_gate_effective
+          /tmp/test_centering_pc12_gate_effective
+
+  field-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify steering, traction and battery contracts
+        run: |
+          set -euo pipefail
+
+          grep -Eq '^#define HOMING_PWM_COUNTS[[:space:]]+4249U$' Core/Src/steering_centering_patched.c
+          grep -Eq '^#define REVERSE_DEADTIME_MS[[:space:]]+100U$' Core/Src/steering_centering_patched.c
+          grep -q 'begin_right_reverse' Core/Src/steering_centering_patched.c
+          grep -q 'Steering_EpsSetOwner(STEER_OWNER_EPS)' Core/Src/steering_centering_patched.c
+
+          grep -q 'straight_line_unlimited' Core/Src/motor_control_patched.c
+          test "$(grep -c 'apply_motor(&motor_.*MOTOR_MODE_DRIVE, equal_pwm, equal_dir)' Core/Src/motor_control_patched.c)" -eq 4
+
+          grep -Eq '^#define BATT_WARNING_DEFAULT_CV[[:space:]]+1800U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_LIMIT_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_CUTOFF_DEFAULT_CV[[:space:]]+1600U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_RECOVERY_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
+          grep -Eq '^#define BATT_FILTER_DEFAULT_MS[[:space:]]+500U$' Core/Inc/battery_limits_store.h
+
+          grep -Eq 'BATT_VOLTAGE_MIN_RAW = 1600;' esp32/src/ui/ui_config.h
+          grep -Eq 'BATT_VOLTAGE_MAX_RAW = 2850;' esp32/src/ui/ui_config.h
+          grep -Eq 'BATT_UV_WARN_RAW = 1800;' esp32/src/ui/ui_config.h
+          grep -Eq 'BATT_UV_CRIT_RAW = 1600;' esp32/src/ui/ui_config.h
