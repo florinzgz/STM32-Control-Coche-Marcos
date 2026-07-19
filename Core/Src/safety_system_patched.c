@@ -7,9 +7,13 @@
   *  - drain FDCAN RX before the 250 ms watchdog decision;
   *  - keep an already-moving vehicle in its current drive state while CAN
   *    recovers, preserving the local pedal, applied gear, relay and PWM ramp;
+  *  - reject the legacy false "frozen pedal" DTC when the real dual-sample
+  *    pedal remains plausible and a steady driver command merely accelerates;
   *  - keep wheel-sensor availability local (never global SENSOR_FAULT);
   *  - use the productive rear-drive layout as the single source for ABS/TCS;
   *  - treat valid wheel-speed divergence as slip/TCS, not sensor failure;
+  *  - rebuild wheel_scale[] every control cycle so an old ABS/TCS reduction
+  *    cannot remain latched and leave only a diagonal pair producing torque;
   *  - reduce torque per slipping wheel, never all wheels globally.
   ****************************************************************************
   */
@@ -35,6 +39,7 @@ static bool pr_mask_wheel_inputs = false;
  * (notably CAN_CheckBusOff()) are routed through the wrappers defined later. */
 #define Safety_SetError            Safety_SetError_Legacy
 #define Safety_SetState            Safety_SetState_Legacy
+#define Safety_SetDegradedLevel    Safety_SetDegradedLevel_Legacy
 #define Safety_CheckRelayHealth    Safety_CheckRelayHealth_Legacy
 #define Relay_SequencerUpdate      Relay_SequencerUpdate_Legacy
 #define Safety_RelayOverrideUpdate Safety_RelayOverrideUpdate_Legacy
@@ -50,6 +55,7 @@ static bool pr_mask_wheel_inputs = false;
 #undef Safety_RelayOverrideUpdate
 #undef Relay_SequencerUpdate
 #undef Safety_CheckRelayHealth
+#undef Safety_SetDegradedLevel
 #undef Safety_SetState
 #undef Safety_SetError
 
@@ -150,9 +156,94 @@ static bool          pr_can_limp_transition_pending  = false;
 static uint32_t      pr_can_recovery_since           = 0U;
 static SystemState_t pr_can_holdover_origin          = SYS_STATE_ACTIVE;
 
+/* -------------------------------------------------------------------------
+ * False frozen-pedal anomaly discriminator
+ * -------------------------------------------------------------------------
+ * motor_control.c historically equated "pedal unchanged for 5 s while speed
+ * changes" with a frozen ADC.  That is also the exact signature of a normal
+ * driver holding a steady pedal while the vehicle accelerates.  The real pedal
+ * health authority is Pedal_IsPlausible()/Pedal_IsContradictory(), backed by
+ * fresh dual ADC conversions.  Track the same timing/speed evidence here and
+ * suppress only that precise external SENSOR_FAULT→DEGRADED sequence; all
+ * internal temperature/current/wheel/pedal faults in safety_system.c continue
+ * through the renamed legacy functions and are never masked. */
+#define PR_PEDAL_STEADY_TOLERANCE_PCT  0.5f
+#define PR_PEDAL_STEADY_TIMEOUT_MS     5000U
+#define PR_PEDAL_SPEED_DELTA_KMH       3.0f
+#define PR_ANOMALY_SEQUENCE_WINDOW_MS  100U
+
+static bool     pr_pedal_track_initialized;
+static float    pr_pedal_reference_pct;
+static float    pr_pedal_reference_speed;
+static uint32_t pr_pedal_reference_tick;
+static bool     pr_suppress_demand_anomaly_sequence;
+static uint32_t pr_suppress_demand_anomaly_tick;
+
 static bool PR_IsDriveState(SystemState_t state)
 {
     return state == SYS_STATE_ACTIVE || state == SYS_STATE_DEGRADED;
+}
+
+static float PR_AverageWheelSpeed(void)
+{
+    float avg = (Wheel_GetSpeed_FL() + Wheel_GetSpeed_FR() +
+                 Wheel_GetSpeed_RL() + Wheel_GetSpeed_RR()) * 0.25f;
+    return isfinite(avg) ? avg : 0.0f;
+}
+
+static void PR_UpdatePedalSteadyEvidence(void)
+{
+    const uint32_t now = HAL_GetTick();
+    const float pedal = Pedal_GetPercent();
+    const float speed = PR_AverageWheelSpeed();
+
+    if (!pr_pedal_track_initialized || !isfinite(pedal)) {
+        pr_pedal_track_initialized = true;
+        pr_pedal_reference_pct = isfinite(pedal) ? pedal : 0.0f;
+        pr_pedal_reference_speed = speed;
+        pr_pedal_reference_tick = now;
+        return;
+    }
+
+    if (fabsf(pedal - pr_pedal_reference_pct) >
+        PR_PEDAL_STEADY_TOLERANCE_PCT) {
+        pr_pedal_reference_pct = pedal;
+        pr_pedal_reference_speed = speed;
+        pr_pedal_reference_tick = now;
+    }
+
+    if (pr_suppress_demand_anomaly_sequence &&
+        (now - pr_suppress_demand_anomaly_tick) >
+            PR_ANOMALY_SEQUENCE_WINDOW_MS) {
+        pr_suppress_demand_anomaly_sequence = false;
+    }
+}
+
+static bool PR_IsFalseFrozenPedalAnomaly(void)
+{
+    if (!pr_pedal_track_initialized || !PR_IsDriveState(system_state)) {
+        return false;
+    }
+    if (!Pedal_IsPlausible() || Pedal_IsContradictory()) {
+        return false;
+    }
+
+    const uint32_t now = HAL_GetTick();
+    if ((now - pr_pedal_reference_tick) <= PR_PEDAL_STEADY_TIMEOUT_MS) {
+        return false;
+    }
+
+    const float speed = PR_AverageWheelSpeed();
+    if (fabsf(speed - pr_pedal_reference_speed) <= PR_PEDAL_SPEED_DELTA_KMH) {
+        return false;
+    }
+
+    /* Align our reference with motor_control.c, which restarts its frozen-pedal
+     * timer after raising the anomaly. */
+    pr_pedal_reference_pct = Pedal_GetPercent();
+    pr_pedal_reference_speed = speed;
+    pr_pedal_reference_tick = now;
+    return true;
 }
 
 static bool PR_IsCanOnlyError(Safety_Error_t error)
@@ -181,24 +272,32 @@ static void PR_EnterCanHoldover(void)
 }
 
 /* External CAN paths call Safety_SetError() before requesting LIMP_HOME.  Keep
- * CAN loss diagnostic-only while the vehicle is already moving, but delegate
- * every non-CAN fault unchanged to the productive safety implementation. */
+ * CAN loss diagnostic-only while the vehicle is already moving.  Also reject
+ * only the proven false steady-pedal anomaly; every other error delegates. */
 void Safety_SetError(Safety_Error_t error)
 {
     if (PR_IsCanOnlyError(error) && PR_IsDriveState(system_state)) {
         PR_EnterCanHoldover();
         pr_can_limp_transition_pending = true;
+        pr_suppress_demand_anomaly_sequence = false;
+        return;
+    }
+
+    if (error == SAFETY_ERROR_SENSOR_FAULT &&
+        PR_IsFalseFrozenPedalAnomaly()) {
+        pr_can_limp_transition_pending = false;
+        pr_suppress_demand_anomaly_sequence = true;
+        pr_suppress_demand_anomaly_tick = HAL_GetTick();
         return;
     }
 
     pr_can_limp_transition_pending = false;
+    pr_suppress_demand_anomaly_sequence = false;
     Safety_SetError_Legacy(error);
 }
 
-/* Consume only the LIMP_HOME transition paired with the CAN-only error above.
- * This precise one-shot guard cannot hide a pedal/sensor/electrical transition
- * that happens during the same holdover: any non-CAN Safety_SetError() clears
- * the pending flag and the legacy state transition proceeds normally. */
+/* Consume only the LIMP_HOME transition paired with CAN-only loss, or the
+ * immediate DEGRADED transition paired with the false frozen-pedal event. */
 void Safety_SetState(SystemState_t new_state)
 {
     if (new_state == SYS_STATE_LIMP_HOME &&
@@ -209,14 +308,38 @@ void Safety_SetState(SystemState_t new_state)
         return;
     }
 
+    if (new_state == SYS_STATE_DEGRADED &&
+        pr_suppress_demand_anomaly_sequence &&
+        (HAL_GetTick() - pr_suppress_demand_anomaly_tick) <=
+            PR_ANOMALY_SEQUENCE_WINDOW_MS &&
+        PR_IsDriveState(system_state)) {
+        return;
+    }
+
     pr_can_limp_transition_pending = false;
+    pr_suppress_demand_anomaly_sequence = false;
     Safety_SetState_Legacy(new_state);
+}
+
+/* motor_control.c sets the demand-anomaly level immediately after requesting
+ * DEGRADED.  Consume that final part of the same false sequence as well. */
+void Safety_SetDegradedLevel(DegradedLevel_t level, DegradedReason_t reason)
+{
+    if (pr_suppress_demand_anomaly_sequence &&
+        reason == DEGRADED_REASON_DEMAND_ANOMALY &&
+        (HAL_GetTick() - pr_suppress_demand_anomaly_tick) <=
+            PR_ANOMALY_SEQUENCE_WINDOW_MS) {
+        pr_suppress_demand_anomaly_sequence = false;
+        return;
+    }
+
+    pr_suppress_demand_anomaly_sequence = false;
+    Safety_SetDegradedLevel_Legacy(level, reason);
 }
 
 /* Consume any heartbeat already waiting in FIFO0 before evaluating its age.
  * During a running CAN-only outage, never change state, gear, demand or relay.
- * STANDBY/SAFE/LIMP_HOME and all non-CAN recovery behaviour remain delegated to
- * the productive implementation. */
+ * STANDBY/SAFE/LIMP_HOME and all non-CAN recovery behaviour remain delegated. */
 void Safety_CheckCANTimeout(void)
 {
 #ifndef HOST_TEST
@@ -377,6 +500,8 @@ static void PR_UpdateWheelDiagnostics(void)
 
 void Safety_CheckSensors(void)
 {
+    PR_UpdatePedalSteadyEvidence();
+
     /* Preserve production temperature/current/pedal checks.  Mask wheel values
      * only inside the legacy aggregate so they cannot create a global DTC. */
     pr_mask_wheel_inputs = true;
@@ -420,12 +545,25 @@ static float PR_RobustReference(const float spd[NUM_WHEELS], uint8_t candidate)
     return (n == 2U) ? v[0] : v[n / 2U];
 }
 
+/* ABS owns the start-of-cycle baseline because main.c always calls ABS_Update()
+ * immediately before TCS_Update().  Rebuild all four permissions from 1.0 every
+ * 10 ms, then let ABS and TCS apply only their CURRENT reductions.  The motor
+ * controller reapplies independent temperature/current cutoffs later in the
+ * same cycle, so no real hardware protection is weakened. */
+static void PR_ResetWheelInterventionScales(void)
+{
+    for (uint8_t i = 0U; i < NUM_WHEELS; ++i) {
+        safety_status.wheel_scale[i] = 1.0f;
+    }
+}
+
 /* Rear-drive-aware ABS.  Only physically driven, healthy wheels participate in
  * the reference or receive modulation.  In 4x2 this means RL/RR; FL/FR remain
  * coasted and can never be mistaken for locked driven wheels. */
 void ABS_Update(void)
 {
     const uint32_t now = HAL_GetTick();
+    PR_ResetWheelInterventionScales();
 
     if (!ServiceMode_IsEnabled(MODULE_ABS) || !Safety_PowertrainEngaged()) {
         safety_status.abs_active = false;
@@ -481,10 +619,7 @@ void ABS_Update(void)
         }
 
         if (abs_pulse_phase[i]) {
-            const float abs_scale = 1.0f - ABS_BASE_REDUCTION;
-            if (abs_scale < safety_status.wheel_scale[i]) {
-                safety_status.wheel_scale[i] = abs_scale;
-            }
+            safety_status.wheel_scale[i] = 1.0f - ABS_BASE_REDUCTION;
         }
     }
 
