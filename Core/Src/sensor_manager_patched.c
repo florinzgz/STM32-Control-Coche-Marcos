@@ -4,15 +4,17 @@
   * @brief   Demand-aware CH5 diagnosis + polarity-independent wheel edges.
   *
   * The productive sensor_manager.c remains the single implementation of ADC,
-  * I2C, temperature and wheel-speed calculation.  This wrapper corrects two
+  * I2C, temperature and wheel-speed calculation.  This wrapper corrects three
   * hardware-integration details without duplicating that large module:
   *
   *  1. CH5 INA226 classification is qualified by real steering PWM demand.
-  *  2. LJ12A3 wheel inputs are captured on BOTH electrical edges.  Two valid
+  *  2. CH5 current sign is normalised against the commanded steering direction,
+  *     so reverse/left homing current is not mistaken for reversed VIN+/VIN-.
+  *  3. LJ12A3 wheel inputs are captured on BOTH electrical edges.  Two valid
   *     transitions (metal-entry + metal-exit, regardless of optocoupler
   *     inversion) form one physical target pulse, preserving 6 pulses/rev.
   *
-  * Physical finding that motivated (2): a complete hand rotation showed
+  * Physical finding that motivated (3): a complete hand rotation showed
   * VALID=0 and REJECTED=0.  Rising-only EXTI cannot diagnose an inverted or
   * polarity-mismatched interface.  Both-edge acquisition makes the firmware
   * polarity independent and exposes raw-transition counters so “no signal at
@@ -27,6 +29,24 @@
 
 extern TIM_HandleTypeDef htim3;
 
+/* Convert measured CH5 current into the sign expected by the classifier:
+ * positive means current follows the commanded motor direction; negative means
+ * current flows against it and may indicate VIN+/VIN- reversal.  The physical
+ * shunt sign naturally changes between TIM3 CH1 and CH2, so treating every
+ * negative sample as a wiring fault incorrectly isolated EPS during the
+ * deterministic left/reverse homing sweep. */
+static int32_t PR429_NormalizeSteeringCurrent(int32_t measured_ma,
+                                              bool reverse_command)
+{
+    if (!reverse_command) return measured_ma;
+
+    /* Negating INT32_MIN in a signed 32-bit domain is undefined.  Saturate to
+     * the largest positive value; the overcurrent supervisor will still treat
+     * this impossible magnitude conservatively. */
+    if (measured_ma == INT32_MIN) return INT32_MAX;
+    return -measured_ma;
+}
+
 static Ina226DiagReason_t PR429_ClassifyInaWithDemand(
     const Ina226ChannelDiag *snapshot)
 {
@@ -35,9 +55,22 @@ static Ina226DiagReason_t PR429_ClassifyInaWithDemand(
     }
 
     Ina226ChannelDiag qualified = *snapshot;
-    qualified.current_expected = qualified.channel_powered &&
-        ((__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1) > 0U) ||
-         (__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2) > 0U));
+    const bool rpwm_active =
+        (__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1) > 0U);
+    const bool lpwm_active =
+        (__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2) > 0U);
+
+    /* Exactly one PWM channel must be active for a valid DRIVE command.  At
+     * idle—or in the impossible/ambiguous both-active case—do not make a shunt
+     * polarity conclusion from current sign. */
+    const bool direction_known = (rpwm_active != lpwm_active);
+    qualified.current_expected = qualified.channel_powered && direction_known;
+
+    if (qualified.current_expected) {
+        qualified.signed_current_ma =
+            PR429_NormalizeSteeringCurrent(qualified.signed_current_ma,
+                                            lpwm_active);
+    }
 
     return Ina226_ClassifyChannel(&qualified);
 }
