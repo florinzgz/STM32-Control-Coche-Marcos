@@ -20,6 +20,10 @@
   *     sweeping away and travelling almost the whole steering range;
   *   - PB5 not seeing metal starts/continues the search and does NOT itself
   *     disconnect PC12.  PC12 stays authorised while CENTERING owns the motor;
+  *   - completion transfers ownership to EPS immediately after the centering
+  *     writer has neutralised the motor.  This closes the one-cycle
+  *     STANDBY->ACTIVE hand-off window in which the relay supervisor could see
+  *     the stale CENTERING owner and momentarily open PC12;
   *   - genuine encoder faults, range/total timeout, both-direction failure,
   *     CH5 faults and overcurrent still isolate the EPS exactly as before;
   *   - the diagnostic reports the effective requested PWM (2550), not the
@@ -32,6 +36,7 @@
   */
 
 #include "steering_centering.h"
+#include "steering_eps.h"
 #include "safety_system.h"
 #include "motor_control.h"
 #include "main.h"
@@ -190,6 +195,24 @@ static bool PR434_CenterRawStable(void)
     return s_pr434_center_raw_cycles >= PR434_CENTER_RAW_CONFIRM_CYCLES;
 }
 
+/* The main loop decides the writer before stepping the FSM.  On the cycle that
+ * finds PB5, that local decision is still CENTERING even though
+ * Centering_Complete() has already stopped the motor and made the calibration
+ * valid.  Transfer the stored authority immediately and explicitly through
+ * NONE so the following cycle's relay supervisor sees EPS+calibrated and never
+ * tears PC12 down during the STANDBY->ACTIVE transition. */
+static void PR434_TransferCompletedHomingToEps(void)
+{
+    if (centering_state != CENTERING_DONE ||
+        !Steering_IsCalibrated() ||
+        Steering_IsAssistLatchedOff()) {
+        return;
+    }
+
+    Steering_EpsSetOwner(STEER_OWNER_NONE);
+    Steering_EpsSetOwner(STEER_OWNER_EPS);
+}
+
 /* Public init wrapper: reset the private timing and PB5 level adaptation on
  * every new centering session, then run the unchanged production init. */
 void SteeringCentering_Init(void)
@@ -208,11 +231,17 @@ void SteeringCentering_Step(void)
         centering_state != CENTERING_FAULT &&
         PR434_CenterRawStable()) {
         Centering_Complete();
+        PR434_TransferCompletedHomingToEps();
         s_pr434_center_raw_cycles = 0U;
         return;
     }
 
+    const CenteringState_t before = centering_state;
     PR434_SteeringCentering_Step_Base();
+
+    if (before != CENTERING_DONE && centering_state == CENTERING_DONE) {
+        PR434_TransferCompletedHomingToEps();
+    }
 
     if (centering_state == CENTERING_DONE ||
         centering_state == CENTERING_FAULT) {
