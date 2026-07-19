@@ -10,10 +10,15 @@
   *
   *   - a non-zero homing command is applied at 60 % PWM (2550 / 4249) so the
   *     RS390 and 1:50 reduction can overcome static friction and backlash;
-  *   - each sweep receives a 900 ms gearbox take-up grace before the original
-  *     300 ms encoder-stall timer advances, giving an effective ~1.2 s start
-  *     window per direction instead of interpreting a slow start as an
-  *     immediate end stop;
+  *   - each sweep receives a limited 300 ms gearbox take-up grace before the
+  *     original 300 ms encoder-stall timer advances.  The maximum blind push
+  *     against an undetected end stop is therefore 600 ms, not 1.2 s;
+  *   - a faster end-stop detector combines no encoder motion with two fresh
+  *     high-current CH5 samples.  It stops PWM immediately, waits 100 ms, then
+  *     reverses LEFT->RIGHT; a second end stop on RIGHT ends the search safely;
+  *   - flash is never treated as an absolute steering position after power-off.
+  *     Every boot requires a fresh physical PB5 confirmation.  If PB5 is already
+  *     over the centre metal, three stable samples complete without moving;
   *   - PB5 is accepted both as the normal debounced falling-edge event and as
   *     a stable active-LOW level for three 100 Hz cycles.  This prevents a unit
   *     already over the centre metal—or an edge missed during boot—from first
@@ -37,6 +42,8 @@
 
 #include "steering_centering.h"
 #include "steering_eps.h"
+#include "steering_supervisor.h"
+#include "sensor_manager.h"
 #include "safety_system.h"
 #include "motor_control.h"
 #include "main.h"
@@ -44,10 +51,21 @@
 #include <stdint.h>
 
 /* TIM3 is configured with ARR=4249.  60 % rounds to 2550 timer counts. */
-#define PR434_HOMING_PWM_PERCENT          60U
-#define PR434_HOMING_PWM_COUNTS           2550U
-#define PR434_GEARBOX_TAKEUP_GRACE_MS     900U
-#define PR434_CENTER_RAW_CONFIRM_CYCLES   3U
+#define PR434_HOMING_PWM_PERCENT            60U
+#define PR434_HOMING_PWM_COUNTS             2550U
+#define PR434_GEARBOX_TAKEUP_GRACE_MS       300U
+#define PR434_CENTER_RAW_CONFIRM_CYCLES     3U
+
+/* End-stop pressure detector.  It never relies on current alone: the encoder
+ * must also remain stationary.  Half the proven 25 A active overcurrent ceiling
+ * is high enough to reject normal no-load motion while detecting a hard stop
+ * before the global overcurrent protection has to isolate the EPS. */
+#define PR434_ENDSTOP_CURRENT_MA            (STEERING_ACTIVE_OVERCURRENT_MA / 2)
+#define PR434_ENDSTOP_CONFIRM_SAMPLES       2U
+#define PR434_ENDSTOP_NO_MOTION_MS          100U
+#define PR434_ENDSTOP_SAMPLE_MAX_AGE_MS     250U
+#define PR434_ENDSTOP_ENCODER_DELTA_COUNTS  2
+#define PR434_REVERSE_DEADTIME_MS           100U
 
 _Static_assert(PR434_HOMING_PWM_PERCENT == 60U,
                "RS390 homing profile must remain at the requested 60 percent");
@@ -55,6 +73,10 @@ _Static_assert(PR434_HOMING_PWM_COUNTS < 4250U,
                "Steering homing PWM must fit the TIM3 period");
 _Static_assert(PR434_CENTER_RAW_CONFIRM_CYCLES >= 2U,
                "PB5 level fallback must reject a one-cycle EMI transient");
+_Static_assert(PR434_ENDSTOP_CURRENT_MA > 0,
+               "End-stop current threshold must be positive");
+_Static_assert(PR434_ENDSTOP_CONFIRM_SAMPLES >= 2U,
+               "A single CH5 sample must never declare an end stop");
 
 /* Prototypes consumed by the included production FSM after macro routing. */
 static uint32_t PR434_HomingTick(void);
@@ -62,6 +84,7 @@ static void PR434_HomingMotorSetPwm(uint16_t requested_pwm, bool reverse);
 void PR434_SteeringCentering_Init_Base(void);
 void PR434_SteeringCentering_Step_Base(void);
 void PR434_SteeringCentering_UpdateDiag_Base(void);
+void PR434_SteeringCentering_MarkRestoredFromFlash_Base(int32_t stored_center);
 
 static bool PR434_SteeringHomingPowerReady(void)
 {
@@ -76,13 +99,15 @@ static bool PR434_SteeringHomingPowerReady(void)
 }
 
 /* Route only this translation unit through the installed-actuator policy. */
-#define Safety_IsPowerReady            PR434_SteeringHomingPowerReady
-#define Motor_SetPWM_Steering          PR434_HomingMotorSetPwm
-#define HAL_GetTick                    PR434_HomingTick
-#define SteeringCentering_Init         PR434_SteeringCentering_Init_Base
-#define SteeringCentering_Step         PR434_SteeringCentering_Step_Base
-#define SteeringCentering_UpdateDiag   PR434_SteeringCentering_UpdateDiag_Base
+#define Safety_IsPowerReady                         PR434_SteeringHomingPowerReady
+#define Motor_SetPWM_Steering                       PR434_HomingMotorSetPwm
+#define HAL_GetTick                                 PR434_HomingTick
+#define SteeringCentering_Init                      PR434_SteeringCentering_Init_Base
+#define SteeringCentering_Step                      PR434_SteeringCentering_Step_Base
+#define SteeringCentering_UpdateDiag                PR434_SteeringCentering_UpdateDiag_Base
+#define SteeringCentering_MarkRestoredFromFlash     PR434_SteeringCentering_MarkRestoredFromFlash_Base
 #include "steering_centering.c"
+#undef SteeringCentering_MarkRestoredFromFlash
 #undef SteeringCentering_UpdateDiag
 #undef SteeringCentering_Step
 #undef SteeringCentering_Init
@@ -105,12 +130,10 @@ static void PR434_HomingMotorSetPwm(uint16_t requested_pwm, bool reverse)
 /* -------------------------------------------------------------------------
  * Gearbox take-up clock
  * -------------------------------------------------------------------------
- * The base FSM has a proven 300 ms no-encoder-change stall detector.  Rather
- * than removing or globally enlarging it, freeze only the centering FSM's
- * private time for the first 900 real milliseconds of each LEFT/RIGHT sweep.
- * The result is an effective 1.2 s start window per direction.  Rail settle
- * remains 50 real ms; the absolute search deadline is extended by at most
- * 1.8 s total.  All other firmware continues using the real HAL tick.
+ * The base FSM has a 300 ms no-encoder-change stall detector.  Freeze only the
+ * centering FSM's private time for the first 300 real milliseconds of each
+ * sweep, allowing backlash take-up without permitting a 1.2 s blind push.
+ * Rail settle remains 50 real ms.  All other firmware uses the real HAL tick.
  */
 typedef struct {
     bool             initialized;
@@ -177,8 +200,8 @@ static uint32_t PR434_HomingTick(void)
 
 /* Stable level fallback for an active-LOW LJ12A3 center sensor.  The normal
  * EXTI/debounced event remains authoritative and is still checked inside the
- * base FSM.  This second path only closes the boot race where PB5 was already
- * LOW before the falling-edge interrupt was armed or its flag was cleared. */
+ * base FSM.  This second path closes the boot race where PB5 was already LOW
+ * before the falling-edge interrupt was armed or its flag was cleared. */
 static bool PR434_CenterRawStable(void)
 {
     const bool active = ServiceMode_IsEnabled(MODULE_STEER_CENTER) &&
@@ -193,6 +216,167 @@ static bool PR434_CenterRawStable(void)
         s_pr434_center_raw_cycles++;
     }
     return s_pr434_center_raw_cycles >= PR434_CENTER_RAW_CONFIRM_CYCLES;
+}
+
+/* -------------------------------------------------------------------------
+ * End-stop pressure detector
+ * ------------------------------------------------------------------------- */
+typedef struct {
+    bool             initialized;
+    CenteringState_t observed_state;
+    int32_t          motion_reference_count;
+    uint32_t         last_motion_ms;
+    uint32_t         last_sample_sequence;
+    uint8_t          high_current_samples;
+    bool             reverse_pending;
+    uint32_t         reverse_started_ms;
+} PR434_EndstopGuard_t;
+
+static PR434_EndstopGuard_t s_pr434_endstop;
+
+static uint32_t PR434_CurrentMagnitudeMa(int32_t current_ma)
+{
+    return (current_ma < 0)
+        ? (uint32_t)(-(int64_t)current_ma)
+        : (uint32_t)current_ma;
+}
+
+static int32_t PR434_AbsDeltaCounts(int32_t a, int32_t b)
+{
+    const int64_t d = (int64_t)a - (int64_t)b;
+    return (int32_t)((d < 0) ? -d : d);
+}
+
+static void PR434_ResetEndstopObservation(CenteringState_t state)
+{
+    s_pr434_endstop.initialized = true;
+    s_pr434_endstop.observed_state = state;
+    s_pr434_endstop.motion_reference_count =
+        (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+    s_pr434_endstop.last_motion_ms = HAL_GetTick();
+    s_pr434_endstop.last_sample_sequence = 0U;
+    s_pr434_endstop.high_current_samples = 0U;
+}
+
+static void PR434_ResetEndstopGuard(void)
+{
+    s_pr434_endstop.initialized = false;
+    s_pr434_endstop.observed_state = CENTERING_IDLE;
+    s_pr434_endstop.motion_reference_count = 0;
+    s_pr434_endstop.last_motion_ms = 0U;
+    s_pr434_endstop.last_sample_sequence = 0U;
+    s_pr434_endstop.high_current_samples = 0U;
+    s_pr434_endstop.reverse_pending = false;
+    s_pr434_endstop.reverse_started_ms = 0U;
+}
+
+static bool PR434_EndstopPressureDetected(void)
+{
+    const CenteringState_t state = centering_state;
+    if (!PR434_IsSweep(state)) {
+        s_pr434_endstop.initialized = false;
+        s_pr434_endstop.high_current_samples = 0U;
+        return false;
+    }
+
+    const uint32_t now = HAL_GetTick();
+    const int32_t count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+
+    if (!s_pr434_endstop.initialized ||
+        s_pr434_endstop.observed_state != state) {
+        PR434_ResetEndstopObservation(state);
+        return false;
+    }
+
+    if (PR434_AbsDeltaCounts(count,
+            s_pr434_endstop.motion_reference_count) >=
+            PR434_ENDSTOP_ENCODER_DELTA_COUNTS) {
+        s_pr434_endstop.motion_reference_count = count;
+        s_pr434_endstop.last_motion_ms = now;
+        s_pr434_endstop.high_current_samples = 0U;
+        return false;
+    }
+
+    const Ina226ChannelDiag *diag = Sensor_GetChannel5Diag();
+    if (diag == NULL ||
+        !diag->i2c_ack ||
+        !diag->shunt_read_ok ||
+        diag->sample_age_ms > PR434_ENDSTOP_SAMPLE_MAX_AGE_MS) {
+        /* Missing or stale current evidence cannot prove an end stop.  The base
+         * encoder stall/range/timeout protections remain as the fallback. */
+        s_pr434_endstop.high_current_samples = 0U;
+        return false;
+    }
+
+    if (diag->sample_sequence == s_pr434_endstop.last_sample_sequence) {
+        return false;  /* Count each real 20 Hz acquisition only once. */
+    }
+    s_pr434_endstop.last_sample_sequence = diag->sample_sequence;
+
+    const bool no_motion_long_enough =
+        (uint32_t)(now - s_pr434_endstop.last_motion_ms) >=
+        PR434_ENDSTOP_NO_MOTION_MS;
+    const bool high_current =
+        PR434_CurrentMagnitudeMa(diag->signed_current_ma) >=
+        (uint32_t)PR434_ENDSTOP_CURRENT_MA;
+
+    if (no_motion_long_enough && high_current) {
+        if (s_pr434_endstop.high_current_samples < UINT8_MAX) {
+            s_pr434_endstop.high_current_samples++;
+        }
+    } else {
+        s_pr434_endstop.high_current_samples = 0U;
+    }
+
+    return s_pr434_endstop.high_current_samples >=
+           PR434_ENDSTOP_CONFIRM_SAMPLES;
+}
+
+static bool PR434_ServiceReverseDeadtime(void)
+{
+    if (!s_pr434_endstop.reverse_pending) {
+        return false;
+    }
+
+    /* Keep both PWM channels at zero throughout the direction-change deadtime. */
+    PR434_HomingMotorSetPwm(0U, false);
+
+    if ((uint32_t)(HAL_GetTick() - s_pr434_endstop.reverse_started_ms) <
+        PR434_REVERSE_DEADTIME_MS) {
+        return true;
+    }
+
+    const int32_t count = (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+    sweep_origin_count = count;
+    stall_prev_count = count;
+    stall_last_change_tick = PR434_HomingTick();
+    centering_state = CENTERING_SWEEP_RIGHT;
+    s_pr434_endstop.reverse_pending = false;
+    PR434_ResetEndstopObservation(CENTERING_SWEEP_RIGHT);
+    PR434_HomingMotorSetPwm(CENTERING_PWM, false);
+    return true;
+}
+
+static bool PR434_HandleEndstopPressure(void)
+{
+    if (!PR434_EndstopPressureDetected()) {
+        return false;
+    }
+
+    /* Remove torque before changing state or direction. */
+    PR434_HomingMotorSetPwm(0U, false);
+
+    if (centering_state == CENTERING_SWEEP_LEFT) {
+        s_pr434_endstop.reverse_pending = true;
+        s_pr434_endstop.reverse_started_ms = HAL_GetTick();
+        s_pr434_endstop.high_current_samples = 0U;
+        return true;
+    }
+
+    /* The right-hand stop was also reached without PB5: centre cannot be found.
+     * Use the existing isolable-assist abort path; traction remains available. */
+    Centering_Abort(EPS_FAULT_CENTER_NOT_FOUND);
+    return true;
 }
 
 /* The main loop decides the writer before stepping the FSM.  On the cycle that
@@ -213,18 +397,32 @@ static void PR434_TransferCompletedHomingToEps(void)
     Steering_EpsSetOwner(STEER_OWNER_EPS);
 }
 
-/* Public init wrapper: reset the private timing and PB5 level adaptation on
- * every new centering session, then run the unchanged production init. */
+/* Public init wrapper: reset every private adaptation on a new centering
+ * session, then run the unchanged production init. */
 void SteeringCentering_Init(void)
 {
     PR434_ResetHomingClock();
+    PR434_ResetEndstopGuard();
     s_pr434_center_raw_cycles = 0U;
     PR434_SteeringCentering_Init_Base();
 }
 
+/* Persistent flash is useful for integrity/history and the optional Z offset,
+ * but an incremental encoder has no knowledge of movement while powered off.
+ * Therefore a flash restore must NEVER mark the steering calibrated or skip the
+ * physical PB5 search.  Keeping the FSM in IDLE makes the next Step either:
+ *   - accept three stable PB5-active samples without moving, or
+ *   - energise PC12 and perform the guarded LEFT->RIGHT physical search. */
+void SteeringCentering_MarkRestoredFromFlash(int32_t stored_center)
+{
+    (void)stored_center;
+    /* Deliberately do not call PR434_SteeringCentering_MarkRestoredFromFlash_Base. */
+}
+
 /* Public step wrapper: complete immediately after a stable PB5 active level,
  * even when no new falling edge can occur because the sensor was already over
- * metal at startup.  Otherwise delegate the full two-direction base FSM. */
+ * metal at startup.  Otherwise apply end-stop protection and delegate the full
+ * two-direction base FSM. */
 void SteeringCentering_Step(void)
 {
     if (centering_state != CENTERING_DONE &&
@@ -232,7 +430,16 @@ void SteeringCentering_Step(void)
         PR434_CenterRawStable()) {
         Centering_Complete();
         PR434_TransferCompletedHomingToEps();
+        PR434_ResetEndstopGuard();
         s_pr434_center_raw_cycles = 0U;
+        return;
+    }
+
+    if (PR434_ServiceReverseDeadtime()) {
+        return;
+    }
+
+    if (PR434_HandleEndstopPressure()) {
         return;
     }
 
@@ -245,6 +452,7 @@ void SteeringCentering_Step(void)
 
     if (centering_state == CENTERING_DONE ||
         centering_state == CENTERING_FAULT) {
+        PR434_ResetEndstopGuard();
         s_pr434_center_raw_cycles = 0U;
     }
 }
