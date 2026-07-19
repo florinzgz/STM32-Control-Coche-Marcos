@@ -11,6 +11,8 @@
   *    pedal remains plausible and a steady driver command merely accelerates;
   *  - keep wheel-sensor availability local (never global SENSOR_FAULT);
   *  - use the productive rear-drive layout as the single source for ABS/TCS;
+  *  - run ABS only for real braking demand, never while positive traction is
+  *    accelerating the vehicle; TCS remains the acceleration-slip authority;
   *  - treat valid wheel-speed divergence as slip/TCS, not sensor failure;
   *  - rebuild wheel_scale[] every control cycle so an old ABS/TCS reduction
   *    cannot remain latched and leave only a diagonal pair producing torque;
@@ -557,6 +559,20 @@ static void PR_ResetWheelInterventionScales(void)
     }
 }
 
+/* ABS is a braking controller, not an acceleration controller.  The previous
+ * implementation ran it for any non-zero traction demand, so a slow wheel
+ * under positive throttle was labelled "locked" and received even less torque.
+ * With two slow diagonal wheels this was a positive-feedback loop.  Use the
+ * effective-demand snapshot from the previous 10 ms traction cycle: only a
+ * negative demand means dynamic braking is actually being requested. */
+#define PR_ABS_BRAKING_DEMAND_MIN_PCT 0.5f
+static bool PR_IsBrakingDemand(void)
+{
+    const float effective = Traction_GetEffectiveDemandPct();
+    return isfinite(effective) &&
+           effective < -PR_ABS_BRAKING_DEMAND_MIN_PCT;
+}
+
 /* Rear-drive-aware ABS.  Only physically driven, healthy wheels participate in
  * the reference or receive modulation.  In 4x2 this means RL/RR; FL/FR remain
  * coasted and can never be mistaken for locked driven wheels. */
@@ -565,7 +581,9 @@ void ABS_Update(void)
     const uint32_t now = HAL_GetTick();
     PR_ResetWheelInterventionScales();
 
-    if (!ServiceMode_IsEnabled(MODULE_ABS) || !Safety_PowertrainEngaged()) {
+    if (!ServiceMode_IsEnabled(MODULE_ABS) ||
+        !Safety_PowertrainEngaged() ||
+        !PR_IsBrakingDemand()) {
         safety_status.abs_active = false;
         safety_status.abs_wheel_mask = 0U;
         for (uint8_t i = 0U; i < NUM_WHEELS; ++i) {
