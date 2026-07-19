@@ -130,6 +130,11 @@ inline constexpr int16_t WHL_RR_Y       = 180;
 // -------------------------------------------------------------------------
 inline constexpr int16_t STEER_MAX_WHEEL_DEG = 54;    // firmware MAX_STEER_DEG (road wheel)
 inline constexpr int16_t STEER_RATIO_X100    = 648;   // STEERING_GEAR_RATIO 6.48 ×100
+// Installed encoder/CAN polarity is opposite to the screen-space convention
+// (positive screen rotation is clockwise/right).  Keep this correction strictly
+// in the presentation layer: STM32 EPS, Ackermann and safety continue to use the
+// untouched physical sign from CAN 0x204.
+inline constexpr int8_t  STEER_DISPLAY_SIGN  = -1;
 
 // Big steering wheel "driver pod" (the visual hero), centre-front of the body.
 inline constexpr int16_t SWHEEL_CX    = 240;
@@ -361,21 +366,23 @@ inline uint16_t throttleGradColor(uint8_t posPct) {
     }
 }
 
-/// Clamp a raw road-wheel angle (0.1° units, CAN 0x204) to the firmware
-/// steering envelope (±STEER_MAX_WHEEL_DEG).  Presentation only — keeps the
-/// drive screen and the engineering calibration gauge consistent.
-///   wheelTenthDeg : road-wheel angle in 0.1° units
-///   returns         : the same value clamped to ±STEER_MAX_WHEEL_DEG×10
+/// Convert the signed CAN 0x204 road-wheel angle to the installed HMI visual
+/// convention, then clamp it to the firmware steering envelope.  This is the
+/// only polarity correction: control/safety data in VehicleData remain raw.
+///   wheelTenthDeg : physical road-wheel angle in 0.1° units from STM32
+///   returns         : display angle, right-positive, clamped to ±540
 inline int16_t clampRoadWheelTenths(int16_t wheelTenthDeg) {
-    constexpr int16_t lim = STEER_MAX_WHEEL_DEG * 10;   // ±540 (0.1°)
-    if (wheelTenthDeg >  lim) return  lim;
-    if (wheelTenthDeg < -lim) return -lim;
-    return wheelTenthDeg;
+    constexpr int32_t lim = STEER_MAX_WHEEL_DEG * 10;   // ±540 (0.1°)
+    const int32_t display = static_cast<int32_t>(wheelTenthDeg) *
+                            static_cast<int32_t>(STEER_DISPLAY_SIGN);
+    if (display >  lim) return static_cast<int16_t>(lim);
+    if (display < -lim) return static_cast<int16_t>(-lim);
+    return static_cast<int16_t>(display);
 }
 
 /// Reconstruct the visual steering-wheel (column) angle from the real
 /// road-wheel angle.  Presentation only — never affects CAN/control.
-///   wheelTenthDeg : road-wheel angle in 0.1° units (CAN 0x204)
+///   wheelTenthDeg : display road-wheel angle in 0.1° units
 ///   returns         : steering-wheel angle in whole degrees (≈ ±350)
 inline int16_t steeringWheelDeg(int16_t wheelTenthDeg) {
     return static_cast<int16_t>(
