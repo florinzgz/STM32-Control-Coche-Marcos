@@ -76,10 +76,17 @@ int main(void)
     b = defaults(); b.recovery_cv = b.cutoff_cv;      ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
     b = defaults(); b.recovery_cv = b.cutoff_cv - 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
 
+    /* Coherent ordering: Cutoff < Limit <= Warning and Recovery >= Limit. */
+    b = defaults(); b.warning_cv = b.limit_cv - 1U;   ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.warning_cv = b.limit_cv;        ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.recovery_cv = b.limit_cv - 1U;  ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.recovery_cv = b.limit_cv;       ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+
     ASSERT_TRUE(BATT_OV_WARNING_CV == 3000U);
     b = defaults(); b.warning_cv = BATT_OV_WARNING_CV;      ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
     b = defaults(); b.warning_cv = BATT_OV_WARNING_CV + 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
-    b = defaults(); b.limit_cv = BATT_OV_WARNING_CV;        ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
+    b = defaults(); b.limit_cv = BATT_OV_WARNING_CV; b.warning_cv = BATT_OV_WARNING_CV;
+    ASSERT_TRUE(BatteryLimits_ValidateValues(&b));
     b = defaults(); b.limit_cv = BATT_OV_WARNING_CV + 1U;   ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
 
     b = defaults(); b.cutoff_cv = BATT_CUTOFF_MIN_CV - 1U; ASSERT_FALSE(BatteryLimits_ValidateValues(&b));
