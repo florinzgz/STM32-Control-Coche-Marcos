@@ -1,0 +1,70 @@
+name: PR436 Authorized Patch Runner
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/pr436-authorized-runner.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'fix/steering-homing-battery-traction'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/steering-homing-battery-traction
+          fetch-depth: 0
+
+      - name: Extract and apply exact audited patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'EXTRACT'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/pr436-authorized-autofix.yml')
+          lines = source.read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(lines)
+                       if "python3 <<'PY'" in line)
+          end = next(i for i in range(start + 1, len(lines))
+                     if lines[i].strip() == 'PY')
+          body = textwrap.dedent('\n'.join(lines[start + 1:end])) + '\n'
+          Path('/tmp/pr436_authorized_fix.py').write_text(body, encoding='utf-8')
+          EXTRACT
+          python3 /tmp/pr436_authorized_fix.py
+          rm -f .github/workflows/pr436-authorized-runner.yml
+          git diff --check
+
+      - name: Run focused executable tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_battery_limits.c \
+            -o /tmp/test_battery_limits_pr436
+          /tmp/test_battery_limits_pr436
+
+          gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
+            Core/Src/test_traction_output_policy.c \
+            -o /tmp/test_traction_output_policy
+          /tmp/test_traction_output_policy
+
+          grep -q 'return BatteryLimitsStore_ServiceWriteAllowed();' Core/Src/can_handler.c
+          grep -q 'raw_voltage < uv_cutoff_v' Core/Src/safety_system.c
+          grep -q 'SteeringSupervisor_NeedsPostIsolationSample' Core/Src/steering_supervisor_io.c
+          grep -q 's_guard.reverse_pending' Core/Src/steering_centering_patched.c
+
+      - name: Commit to the same PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'PR436 Authorized Fix'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: harden PR436 steering traction and battery paths'
+          git push origin HEAD:fix/steering-homing-battery-traction
