@@ -19,6 +19,7 @@ on:
       - 'Core/Src/test_traction_output_policy.c'
       - 'Core/Src/battery_limits_store.c'
       - 'Core/Inc/battery_limits_store.h'
+      - 'Core/Inc/battery_service_policy.h'
       - 'Core/Src/test_battery_limits.c'
       - 'Core/Src/safety_system.c'
       - 'Core/Src/safety_system_patched.c'
@@ -91,10 +92,12 @@ jobs:
 
           gcc -std=c11 -DHOST_TEST -ICore/Inc -O2 \
             Core/Src/test_battery_limits.c \
-            -o /tmp/test_battery_limits_pr436
+            -lm -o /tmp/test_battery_limits_pr436
           /tmp/test_battery_limits_pr436
 
           grep -q 'return BatteryLimitsStore_ServiceWriteAllowed();' Core/Src/can_handler.c
+          grep -q 'BatteryServiceWrite_Evaluate' Core/Src/battery_limits_store.c
+          grep -q 'Motor_GetBrakeActiveOverride' Core/Src/battery_limits_store.c
           grep -q 'raw_voltage < uv_cutoff_v' Core/Src/safety_system.c
           grep -Eq '^#define BATT_WARNING_DEFAULT_CV[[:space:]]+1800U$' Core/Inc/battery_limits_store.h
           grep -Eq '^#define BATT_LIMIT_DEFAULT_CV[[:space:]]+1700U$' Core/Inc/battery_limits_store.h
